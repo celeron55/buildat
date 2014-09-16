@@ -6,10 +6,30 @@ Client
 ------
 Built using Polycode C++.
 
+Module code is transfered from the server and run in a safe Lua sandbox.
+
 Server
 ------
 Built using C++ with most functionality in RCC++.
 
-Design issues:
-- Interfaces between C++ code must be predefined
+C++ modules can interface with each other by using Cereal.
+
+Modules cannot be unloaded at runtime. Module unload and reload can be simulated
+by restarting the server and clients automatically while keeping connections
+open.
+
+Module structure
+----------------
+module
+|-- client
+|   `-- init.lua
+|-- server
+|   `-- init.cpp
+`-- data
+    `-- media.png
+
+Module behavior
+---------------
+All client scripts are automatically sent to the client. Everything else is
+handled by the module implementation.
 

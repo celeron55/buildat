@@ -28,7 +28,6 @@ SET(CMAKE_MODULE_PATH
 )
 INCLUDE(${POLYCODE_CMAKE_DIR}/PolycodeDependencies.cmake)
 
-#include_directories("../polycode/Core/Contents/Include")
 include_directories("../polycode/Bindings/Contents/LUA/Include")
 
 #
