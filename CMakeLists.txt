@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 2.6)
 project(buildat)
 
 #
+# Libraries
+#
+
+add_subdirectory("3rdparty/cereal")
+
+#
 # Polycode
 #
 

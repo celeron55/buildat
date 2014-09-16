@@ -1,5 +1,6 @@
 *.sw*
 *~
 *.old
+*.tar.gz
 
 /build
