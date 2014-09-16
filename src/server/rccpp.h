@@ -3,7 +3,7 @@
 
 // This is what you get when the RCCPP is not enabled
 #if !defined(RCCPP_ENABLED) && !defined(RCCPP)
-#define RUNTIME_EXPORT_CLASS(C)
+#define RUNTIME_EXPORT_MODULE(C)
 #define RUNTIME_VIRTUAL
 #endif
 
@@ -33,7 +33,7 @@ struct RCCPP_Interface {
 #if defined(RCCPP) && !defined(RCCPP_ENABLED)
 #include <new>
 #define EXPORT __attribute__ ((visibility ("default")))
-#define RUNTIME_EXPORT_CLASS(C) \
+#define RUNTIME_EXPORT_MODULE(C) \
 extern "C" { \
 	static void *rccpp_constructor() { return new C(); } \
 	static void rccpp_destructor(void *c) { delete reinterpret_cast<C*>(c); } \
@@ -59,7 +59,7 @@ extern "C" { \
 #define RCCPP_MOVE "rccpp_move" 
 #define RCCPP_CLASSNAME "rccpp_classname" 
 
-#define RUNTIME_EXPORT_CLASS(C)
+#define RUNTIME_EXPORT_MODULE(C)
 #define RUNTIME_VIRTUAL virtual
 
 #include <vector>
@@ -76,9 +76,8 @@ struct RCCPP_Info {
 	RCCPP_Destructor destructor;
 	RCCPP_PlacementNew placement_new;
 	size_t size;
+	std::string classname;
 };
-
-class RuntimeClassBase;
 
 class RCCPP_Compiler {
 public:
@@ -86,7 +85,6 @@ public:
 
     void build(const std::string &in_path, const std::string &out_path);
 	
-	template<typename T> T *construct() { return (T*)construct(T::NAME); }
 	void *construct(const char *name);
 	
 #if defined(RCCPP_USE_SINGLETON_NEWING)

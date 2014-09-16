@@ -64,61 +64,62 @@ void RCCPP_Compiler::build(const std::string &in_path, const std::string &out_pa
 	std::string out_dir = c55fs::stripFilename(out_path);
 	c55fs::CreateAllDirs(out_dir);
 
-	if(compile(in_path, out_path)) {
-		std::cout << "Success!" << std::endl;
-
-		void *new_module = library_load(out_path.c_str());
-		if(new_module == NULL){
-			std::cout<<"Failed to load compiled library: "<<dlerror()<<std::endl;
-		}
-		
-		RCCPP_GetInterface GetInterface = (RCCPP_GetInterface)library_get_address(new_module, "rccpp_GetInterface");
-		if(GetInterface == nullptr) {
-			std::cout << "GetInterface is missing from the library" << std::endl;
-			return;
-		}
-		
-		RCCPP_Interface *interface = GetInterface();
-		assert(interface && "Interface is null");
-		RCCPP_Constructor fun_constructor = interface->constructor;
-		RCCPP_Destructor fun_destructor = interface->destructor;
-		RCCPP_PlacementNew fun_placementnew = interface->placementnew;
-		
-		if(!(fun_constructor && fun_constructor && fun_placementnew)) {
-			printf("Something failed with the function pointers in the module\n");
-			printf("   constructor: %p (%s)\n", fun_constructor, (fun_constructor != nullptr ? "ok" : "fail"));
-			printf("    destructor: %p (%s)\n", fun_destructor, (fun_destructor != nullptr ? "ok" : "fail"));
-			printf(" placement new: %p (%s)\n", fun_placementnew, (fun_placementnew != nullptr ? "ok" : "fail"));
-			fflush(stdout);
-			return;
-		}
-		
-		std::string classname = interface->classname;
-
-		auto it = component_info_.find(classname);
-		if(it != component_info_.end()) {
-			RCCPP_Info &funcs = it->second;
-			funcs.constructor = fun_constructor;
-			funcs.destructor = fun_destructor;
-			funcs.placement_new = fun_placementnew;
-			if(funcs.module_prev) library_unload(funcs.module_prev);
-			funcs.module_prev = funcs.module;
-			funcs.module = new_module;
-		} else {
-			RCCPP_Info funcs;
-			funcs.constructor = fun_constructor;
-			funcs.destructor = fun_destructor;
-			funcs.placement_new = fun_placementnew;
-			funcs.module_prev = nullptr;
-			funcs.module = new_module;
-			funcs.size = interface->original_size;
-			component_info_.emplace(classname, std::move(funcs));
-		}
-		
-		changed_classes_.push_back(classname);
-	} else {
+	if(!compile(in_path, out_path)) {
 		std::cout << "Failed!" << std::endl;
+		return;
 	}
+	std::cout << "Success!" << std::endl;
+
+	void *new_module = library_load(out_path.c_str());
+	if(new_module == NULL){
+		std::cout<<"Failed to load compiled library: "<<dlerror()<<std::endl;
+		return;
+	}
+	
+	RCCPP_GetInterface GetInterface = (RCCPP_GetInterface)library_get_address(new_module, "rccpp_GetInterface");
+	if(GetInterface == nullptr) {
+		std::cout << "GetInterface is missing from the library" << std::endl;
+		return;
+	}
+	
+	RCCPP_Interface *interface = GetInterface();
+	assert(interface && "Interface is null");
+	RCCPP_Constructor fun_constructor = interface->constructor;
+	RCCPP_Destructor fun_destructor = interface->destructor;
+	RCCPP_PlacementNew fun_placementnew = interface->placementnew;
+	
+	if(!(fun_constructor && fun_constructor && fun_placementnew)) {
+		printf("Something failed with the function pointers in the module\n");
+		printf("   constructor: %p (%s)\n", fun_constructor, (fun_constructor != nullptr ? "ok" : "fail"));
+		printf("    destructor: %p (%s)\n", fun_destructor, (fun_destructor != nullptr ? "ok" : "fail"));
+		printf(" placement new: %p (%s)\n", fun_placementnew, (fun_placementnew != nullptr ? "ok" : "fail"));
+		fflush(stdout);
+		return;
+	}
+	
+	std::string classname = interface->classname;
+
+	auto it = component_info_.find(classname);
+	if(it != component_info_.end()) {
+		RCCPP_Info &funcs = it->second;
+		funcs.constructor = fun_constructor;
+		funcs.destructor = fun_destructor;
+		funcs.placement_new = fun_placementnew;
+		if(funcs.module_prev) library_unload(funcs.module_prev);
+		funcs.module_prev = funcs.module;
+		funcs.module = new_module;
+	} else {
+		RCCPP_Info funcs;
+		funcs.constructor = fun_constructor;
+		funcs.destructor = fun_destructor;
+		funcs.placement_new = fun_placementnew;
+		funcs.module_prev = nullptr;
+		funcs.module = new_module;
+		funcs.size = interface->original_size;
+		component_info_.emplace(classname, std::move(funcs));
+	}
+	
+	changed_classes_.push_back(classname);
 }
 
 void *RCCPP_Compiler::construct(const char *name) {
