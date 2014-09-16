@@ -8,6 +8,7 @@ namespace interface
 		enum class Type {
 			START,
 		} type;
+		std::stringstream data;
 	};
 }
 

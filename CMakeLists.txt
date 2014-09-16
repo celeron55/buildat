@@ -45,8 +45,9 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 # Security / crash protection
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstack-protector-all")
 
-include_directories(src)
-include_directories(3rdparty/c55lib)
+include_directories("src")
+include_directories("3rdparty/c55lib")
+include_directories("3rdparty/cereal/include")
 
 # Client
 set(CLIENT_EXE_NAME buildat_client)

@@ -22,6 +22,8 @@ struct CState: public State, public interface::Server
 				g_server_config.interface_path);
 		m_compiler->include_directories.push_back(
 				g_server_config.interface_path+"/..");
+		m_compiler->include_directories.push_back(
+				g_server_config.interface_path+"/../../3rdparty/cereal/include");
 	}
 
 	void load_module(const ss_ &module_name, const ss_ &path)

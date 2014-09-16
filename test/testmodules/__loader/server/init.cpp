@@ -2,6 +2,7 @@
 #include "interface/server.h"
 #include "interface/fs.h"
 #include "interface/event.h"
+#include <cereal/archives/binary.hpp>
 #include <iostream>
 
 using interface::Event;
