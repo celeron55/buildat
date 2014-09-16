@@ -1,0 +1,8 @@
+Buildat
+=======
+A Minecraft clone with vast extendability.
+
+Client is built using Polycode.
+
+Server is built using C++ with most functionality in RCC++.
+
