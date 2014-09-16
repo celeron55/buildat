@@ -63,9 +63,13 @@ TARGET_LINK_LIBRARIES(${CLIENT_EXE_NAME}
 set(SERVER_EXE_NAME buildat_server)
 set(SERVER_SRCS
 	src/server/main.cpp
+	src/server/state.cpp
+	src/server/rccpp.cpp
 )
 add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
 TARGET_LINK_LIBRARIES(${SERVER_EXE_NAME}
 	c55lib
+	dl
 )
+add_definitions(-DRCCPP_ENABLED=1)
 

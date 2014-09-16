@@ -1,11 +1,12 @@
-#include <string>
+#pragma once
+#include "core/types.h"
 
 namespace client
 {
 	struct Config
 	{
-		std::string server_address;
-		std::string polycode_path = "/home/celeron55/softat/polycode/";
-		std::string share_path = "../share";
+		ss_ server_address;
+		ss_ polycode_path = "/home/celeron55/softat/polycode/";
+		ss_ share_path = "../share";
 	};
 }

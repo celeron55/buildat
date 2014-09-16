@@ -2,6 +2,8 @@ Buildat
 =======
 A Minecraft clone with vast extendability.
 
+License: MIT
+
 Client
 ------
 Built using Polycode C++.

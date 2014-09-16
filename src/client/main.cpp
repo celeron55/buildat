@@ -1,3 +1,4 @@
+#include "core/types.h"
 #include "client/config.h"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wsign-compare"
@@ -13,24 +14,24 @@ using Polycode::SDLCore;
 using Polycode::Logger;
 using Polycode::String;
 
-client::Config g_config;
+client::Config g_client_config;
 
 int MyLoader(lua_State* pState)
 {
 	// TODO: Security
-	std::string module = lua_tostring(pState, 1);
+	ss_ module = lua_tostring(pState, 1);
 
 	module += ".lua";
 	//Logger::log("Loading custom class: %s\n", module.c_str());
 
-	std::vector<std::string> defaultPaths = {
-		g_config.polycode_path+"/Bindings/Contents/LUA/API/",
-		g_config.polycode_path+"/Modules/Bindings/2DPhysics/API/",
-		g_config.polycode_path+"/Modules/Bindings/3DPhysics/API/",
-		g_config.polycode_path+"/Modules/Bindings/UI/API/",
+	std::vector<ss_> defaultPaths = {
+		g_client_config.polycode_path+"/Bindings/Contents/LUA/API/",
+		g_client_config.polycode_path+"/Modules/Bindings/2DPhysics/API/",
+		g_client_config.polycode_path+"/Modules/Bindings/3DPhysics/API/",
+		g_client_config.polycode_path+"/Modules/Bindings/UI/API/",
 	};
 
-	for(std::string defaultPath : defaultPaths){
+	for(ss_ defaultPath : defaultPaths){
 		defaultPath.append(module);
 
 		const char* fullPath = module.c_str();		
@@ -54,7 +55,7 @@ int MyLoader(lua_State* pState)
 			return 1;
 		}
 	}
-	std::string err = "\n\tError - Could could not find ";
+	ss_ err = "\n\tError - Could could not find ";
 	err += module;
 	err += ".";			
 	lua_pushstring(pState, err.c_str());			
@@ -191,7 +192,7 @@ HelloPolycodeApp::HelloPolycodeApp(Polycode::PolycodeView *view):
 	// SDLCore for Linux
 	core = new POLYCODE_CORE(view, 640,480,false,false,0,0,90, 1, true);
 
-	Polycode::CoreServices::getInstance()->getResourceManager()->addArchive(g_config.share_path+"/default.pak");
+	Polycode::CoreServices::getInstance()->getResourceManager()->addArchive(g_client_config.share_path+"/default.pak");
 	Polycode::CoreServices::getInstance()->getResourceManager()->addDirResource("default", false);
 
 	scene = new Polycode::Scene(Polycode::Scene::SCENE_2D);
@@ -263,7 +264,7 @@ HelloPolycodeApp::HelloPolycodeApp(Polycode::PolycodeView *view):
 	//luaopen_Physics3D(L);
 	//luaopen_UI(L);
 
-	int error = luaL_dofile(L, (g_config.share_path+"/init.lua").c_str());
+	int error = luaL_dofile(L, (g_client_config.share_path+"/init.lua").c_str());
 	if(error){
 		Logger::log("luaL_dofile: An error occurred: %s\n", lua_tostring(L, -1));
 		lua_pop(L, 1);
@@ -283,7 +284,7 @@ bool HelloPolycodeApp::Update() {
 
 int main(int argc, char *argv[])
 {
-	client::Config &config = g_config;
+	client::Config &config = g_client_config;
 
 	const char opts[100] = "hs:p:P:";
 	const char usagefmt[1000] =
