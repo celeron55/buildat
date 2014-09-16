@@ -2,6 +2,7 @@
 *~
 *.old
 *.tar.gz
+session.vim
 
 /build
 /cache

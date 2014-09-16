@@ -1,7 +1,10 @@
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/fs.h"
+#include "interface/event.h"
 #include <iostream>
+
+using interface::Event;
 
 struct Module: public interface::Module
 {
@@ -18,6 +21,20 @@ struct Module: public interface::Module
 		std::cout<<"__loader destruct"<<std::endl;
 	}
 
+	void event(const interface::Event &event)
+	{
+		switch(event.type){
+		case Event::Type::START:
+			start();
+			break;
+		}
+	}
+
+	int test_add(int a, int b)
+	{
+		return a + b;
+	}
+
 	void start()
 	{
 		auto list = interface::getGlobalFilesystem()->list_directory(m_server->get_modules_path());
@@ -26,11 +43,6 @@ struct Module: public interface::Module
 				continue;
 			m_server->load_module(n.name, m_server->get_modules_path()+"/"+n.name);
 		}
-	}
-
-	int test_add(int a, int b)
-	{
-		return a + b;
 	}
 };
 

@@ -1,6 +1,9 @@
 #include "interface/module.h"
 #include "interface/server.h"
+#include "interface/event.h"
 #include <iostream>
+
+using interface::Event;
 
 struct Module: public interface::Module
 {
@@ -14,13 +17,22 @@ struct Module: public interface::Module
 		std::cout<<"test1 destruct"<<std::endl;
 	}
 
-	void start()
+	void event(const interface::Event &event)
 	{
+		switch(event.type){
+		case Event::Type::START:
+			start();
+			break;
+		}
 	}
 
 	int test_add(int a, int b)
 	{
 		return a + b;
+	}
+
+	void start()
+	{
 	}
 };
 

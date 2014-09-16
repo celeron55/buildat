@@ -3,6 +3,7 @@
 #include "config.h"
 #include "interface/module.h"
 #include "interface/server.h"
+#include "interface/event.h"
 #include <iostream>
 
 extern server::Config g_server_config;
@@ -34,7 +35,9 @@ struct CState: public State, public interface::Server
 				m_compiler->construct(module_name.c_str(), this));
 		//int a = m->test_add(1, 2);
 		//std::cout<<"a = "<<a<<std::endl;
-		m->start();
+		interface::Event event;
+		event.type = interface::Event::Type::START;
+		m->event(event);
 	}
 
 	void load_modules(const ss_ &path)

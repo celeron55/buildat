@@ -5,10 +5,13 @@
 
 namespace interface
 {
+	struct Event;
+
 	struct Module
 	{
 		virtual ~Module(){};
-		virtual void start() = 0;
+		virtual void event(const interface::Event &event) = 0;
+
 		virtual int test_add(int a, int b) = 0;
 	};
 }
