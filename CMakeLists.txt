@@ -41,6 +41,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 include_directories(src)
 
+# Client
 set(CLIENT_EXE_NAME buildat_client)
 set(CLIENT_SRCS
 	src/client/main.cpp
@@ -49,4 +50,11 @@ add_executable(${CLIENT_EXE_NAME} ${CLIENT_SRCS})
 TARGET_LINK_LIBRARIES(${CLIENT_EXE_NAME}
 	${POLYCODE_DEPENDENCY_LIBS}
 )
+
+# Server
+set(SERVER_EXE_NAME buildat_server)
+set(SERVER_SRCS
+	src/server/main.cpp
+)
+add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
 
