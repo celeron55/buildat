@@ -68,6 +68,9 @@ void RCCPP_Compiler::build(const std::string &in_path, const std::string &out_pa
 		std::cout << "Success!" << std::endl;
 
 		void *new_module = library_load(out_path.c_str());
+		if(new_module == NULL){
+			std::cout<<"Failed to load compiled library: "<<dlerror()<<std::endl;
+		}
 		
 		RCCPP_GetInterface GetInterface = (RCCPP_GetInterface)library_get_address(new_module, "rccpp_GetInterface");
 		if(GetInterface == nullptr) {
