@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
-#include <map>
+#include <unordered_map>
 #include <set>
 #include <exception>
 #include <cstdint>
@@ -14,7 +14,7 @@ typedef unsigned char uchar;
 typedef std::string ss_;
 template<typename T> using sv_ = std::vector<T>;
 template<typename T> using set_ = std::set<T>;
-template<typename T1, typename T2> using sm_ = std::map<T1, T2>;
+template<typename T1, typename T2> using sm_ = std::unordered_map<T1, T2>;
 typedef const char cc_;
 static inline cc_* cs(const ss_ &s){ return s.c_str(); }
 template<typename T> using up_ = std::unique_ptr<T>;

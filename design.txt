@@ -23,6 +23,8 @@ module
 |   `-- init.lua
 |-- server
 |   `-- init.cpp
+|-- include
+|   `-- public.h
 `-- data
     `-- media.png
 

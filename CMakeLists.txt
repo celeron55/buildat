@@ -67,6 +67,7 @@ set(SERVER_SRCS
 	src/server/state.cpp
 	src/server/rccpp.cpp
 	src/impl/fs.cpp
+	src/impl/event.cpp
 )
 add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
 TARGET_LINK_LIBRARIES(${SERVER_EXE_NAME}
