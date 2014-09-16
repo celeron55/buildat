@@ -6,6 +6,7 @@ project(buildat)
 #
 
 add_subdirectory("3rdparty/cereal")
+add_subdirectory("3rdparty/c55lib")
 
 #
 # Polycode
@@ -45,6 +46,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstack-protector-all")
 
 include_directories(src)
+include_directories(3rdparty/c55lib)
 
 # Client
 set(CLIENT_EXE_NAME buildat_client)
@@ -54,6 +56,7 @@ set(CLIENT_SRCS
 add_executable(${CLIENT_EXE_NAME} ${CLIENT_SRCS})
 TARGET_LINK_LIBRARIES(${CLIENT_EXE_NAME}
 	${POLYCODE_DEPENDENCY_LIBS}
+	c55lib
 )
 
 # Server
@@ -62,4 +65,7 @@ set(SERVER_SRCS
 	src/server/main.cpp
 )
 add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
+TARGET_LINK_LIBRARIES(${SERVER_EXE_NAME}
+	c55lib
+)
 

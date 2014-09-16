@@ -1,15 +1,19 @@
+#include "client/config.h"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wsign-compare"
-#include <Polycode.h>
-#include <PolycodeView.h>
-#include <PolycodeLUA.h>
-#include <OSBasics.h>
+	#include <Polycode.h>
+	#include <PolycodeView.h>
+	#include <PolycodeLUA.h>
+	#include <OSBasics.h>
 #pragma GCC diagnostic pop
+#include <c55_getopt.h>
 
 using Polycode::PolycodeView;
 using Polycode::SDLCore;
 using Polycode::Logger;
 using Polycode::String;
+
+client::Config g_config;
 
 int MyLoader(lua_State* pState)
 {
@@ -17,13 +21,13 @@ int MyLoader(lua_State* pState)
 	std::string module = lua_tostring(pState, 1);
 
 	module += ".lua";
-	Logger::log("Loading custom class: %s\n", module.c_str());
+	//Logger::log("Loading custom class: %s\n", module.c_str());
 
 	std::vector<std::string> defaultPaths = {
-		"/home/celeron55/softat/polycode/Bindings/Contents/LUA/API/",
-		"/home/celeron55/softat/polycode/Modules/Bindings/2DPhysics/API/",
-		"/home/celeron55/softat/polycode/Modules/Bindings/3DPhysics/API/",
-		"/home/celeron55/softat/polycode/Modules/Bindings/UI/API/",
+		g_config.polycode_path+"/Bindings/Contents/LUA/API/",
+		g_config.polycode_path+"/Modules/Bindings/2DPhysics/API/",
+		g_config.polycode_path+"/Modules/Bindings/3DPhysics/API/",
+		g_config.polycode_path+"/Modules/Bindings/UI/API/",
 	};
 
 	for(std::string defaultPath : defaultPaths){
@@ -187,7 +191,7 @@ HelloPolycodeApp::HelloPolycodeApp(Polycode::PolycodeView *view):
 	// SDLCore for Linux
 	core = new POLYCODE_CORE(view, 640,480,false,false,0,0,90, 1, true);
 
-	Polycode::CoreServices::getInstance()->getResourceManager()->addArchive("../share/default.pak");
+	Polycode::CoreServices::getInstance()->getResourceManager()->addArchive(g_config.share_path+"/default.pak");
 	Polycode::CoreServices::getInstance()->getResourceManager()->addDirResource("default", false);
 
 	scene = new Polycode::Scene(Polycode::Scene::SCENE_2D);
@@ -259,7 +263,7 @@ HelloPolycodeApp::HelloPolycodeApp(Polycode::PolycodeView *view):
 	//luaopen_Physics3D(L);
 	//luaopen_UI(L);
 
-	int error = luaL_dofile(L, "../share/init.lua");
+	int error = luaL_dofile(L, (g_config.share_path+"/init.lua").c_str());
 	if(error){
 		Logger::log("luaL_dofile: An error occurred: %s\n", lua_tostring(L, -1));
 		lua_pop(L, 1);
@@ -279,6 +283,44 @@ bool HelloPolycodeApp::Update() {
 
 int main(int argc, char *argv[])
 {
+	client::Config &config = g_config;
+
+	const char opts[100] = "hs:p:P:";
+	const char usagefmt[1000] =
+	"Usage: %s [OPTION]...\n"
+	"  -h                   Show this help\n"
+	"  -s [address]         Specify server address\n"
+	"  -p [polycode_path]   Specify polycode path\n"
+	"  -P [share_path]      Specify share/ path\n"
+	;
+
+	int c;
+	while((c = c55_getopt(argc, argv, opts)) != -1)
+	{  
+		switch(c)
+		{
+		case 'h':
+			printf(usagefmt, argv[0]);
+			return 1;
+		case 's':
+			fprintf(stderr, "INFO: config.server_address: %s\n", c55_optarg);
+			config.server_address = c55_optarg;
+			break;
+		case 'p':
+			fprintf(stderr, "INFO: config.polycode_path: %s\n", c55_optarg);
+			config.polycode_path = c55_optarg;
+			break;
+		case 'P':
+			fprintf(stderr, "INFO: config.share_path: %s\n", c55_optarg);
+			config.share_path = c55_optarg;
+			break;
+		default:
+			fprintf(stderr, "ERROR: Invalid command-line argument\n");
+			fprintf(stderr, usagefmt, argv[0]);
+			return 1;
+		}
+	}
+
 	PolycodeView *view = new PolycodeView("Hello Polycode!");
 	HelloPolycodeApp *app = new HelloPolycodeApp(view);
 	while(app->Update());

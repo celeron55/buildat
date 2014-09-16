@@ -14,10 +14,6 @@ Built using C++ with most functionality in RCC++.
 
 C++ modules can interface with each other by using Cereal.
 
-Modules cannot be unloaded at runtime. Module unload and reload can be simulated
-by restarting the server and clients automatically while keeping connections
-open.
-
 Module structure
 ----------------
 module
@@ -32,4 +28,8 @@ Module behavior
 ---------------
 All client scripts are automatically sent to the client. Everything else is
 handled by the module implementation.
+
+Modules cannot be unloaded at runtime. Module unload and reload can be simulated
+by restarting the server and clients automatically while keeping connections
+open. This requires POLYCODE_CORE to be recreated.
 
