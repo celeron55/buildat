@@ -20,13 +20,13 @@ Module structure
 ----------------
 module
 |-- client
-|   `-- init.lua
+|   `-- init.lua  << Client-side code
 |-- server
-|   `-- init.cpp
+|   `-- init.cpp  << Server-side code
 |-- include
-|   `-- public.h
+|   `-- api.h     << Structures for interfacing between modules
 `-- data
-    `-- media.png
+    `-- media.png << Data files
 
 Module behavior
 ---------------
