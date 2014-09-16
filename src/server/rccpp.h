@@ -83,7 +83,8 @@ class RCCPP_Compiler {
 public:
     RCCPP_Compiler();
 
-    void build(const std::string &in_path, const std::string &out_path);
+    void build(const std::string &module_name,
+			const std::string &in_path, const std::string &out_path);
 	
 	void *construct(const char *name);
 	

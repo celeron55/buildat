@@ -35,3 +35,5 @@ Modules cannot be unloaded at runtime. Module unload and reload can be simulated
 by restarting the server and clients automatically while keeping connections
 open. This requires POLYCODE_CORE to be recreated.
 
+The first module to be loaded is called __loader. It loads all other modules.
+

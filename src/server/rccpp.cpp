@@ -2,7 +2,7 @@
 #include "rccpp.h"
 
 // Module interface
-#include "interface/core.h"
+#include "interface/module.h"
 
 #include <c55_filesys.h>
 
@@ -57,9 +57,11 @@ bool RCCPP_Compiler::compile(const std::string &in_path, const std::string &out_
 	return exit_status == 0;
 }
 
-void RCCPP_Compiler::build(const std::string &in_path, const std::string &out_path)
+void RCCPP_Compiler::build(const std::string &module_name,
+		const std::string &in_path, const std::string &out_path)
 {
-	std::cout << "Building " << in_path << " -> " << out_path << "... ";
+	std::cout << "Building " << module_name << ": "
+			<< in_path << " -> " << out_path << "... ";
 
 	std::string out_dir = c55fs::stripFilename(out_path);
 	c55fs::CreateAllDirs(out_dir);
@@ -97,7 +99,8 @@ void RCCPP_Compiler::build(const std::string &in_path, const std::string &out_pa
 		return;
 	}
 	
-	std::string classname = interface->classname;
+	//std::string classname = interface->classname;
+	std::string classname = module_name;
 
 	auto it = component_info_.find(classname);
 	if(it != component_info_.end()) {

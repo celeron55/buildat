@@ -16,7 +16,7 @@ int main(int argc, char *argv[])
 	const char usagefmt[1000] =
 	"Usage: %s [OPTION]...\n"
 	"  -h                   Show this help\n"
-	"  -m [module_path]     Specify module path (for testing a single module)\n"
+	"  -m [module_path]     Specify module path\n"
 	"  -r [rccpp_build_path]Specify runtime compiled C++ build path\n"
 	"  -i [interface_path]  Specify path to interface headers\n"
 	;
@@ -50,8 +50,13 @@ int main(int argc, char *argv[])
 
 	std::cerr<<"Buildat server"<<std::endl;
 
+	if(module_path.empty()){
+		std::cerr<<"Module path (-m) is empty"<<std::endl;
+		return 1;
+	}
+
 	up_<server::State> state(server::createState());
-	state->load_module(module_path);
+	state->load_modules(module_path);
 
 	return 0;
 }

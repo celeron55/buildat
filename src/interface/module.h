@@ -8,4 +8,5 @@ public:
 	~Module();
 	RUNTIME_VIRTUAL int test_add(int a, int b);
 };
+RUNTIME_EXPORT_MODULE(Module)
 
