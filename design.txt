@@ -37,3 +37,6 @@ open. This requires POLYCODE_CORE to be recreated.
 
 The first module to be loaded is called __loader. It loads all other modules.
 
+C++ modules can use the core/ and interface/ headers. Everything else is
+considered unstable.
+

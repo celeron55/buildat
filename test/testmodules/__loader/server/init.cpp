@@ -1,5 +1,6 @@
 #include "interface/module.h"
 #include "interface/server.h"
+#include "interface/fs.h"
 #include <iostream>
 
 struct Module: public interface::Module
@@ -19,7 +20,12 @@ struct Module: public interface::Module
 
 	void start()
 	{
-		m_server->load_module("test1", m_server->get_modules_path()+"/test1");
+		auto list = interface::getGlobalFilesystem()->list_directory(m_server->get_modules_path());
+		for(const interface::Filesystem::Node &n : list){
+			if(n.name == "__loader")
+				continue;
+			m_server->load_module(n.name, m_server->get_modules_path()+"/"+n.name);
+		}
 	}
 
 	int test_add(int a, int b)

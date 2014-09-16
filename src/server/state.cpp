@@ -3,7 +3,6 @@
 #include "config.h"
 #include "interface/module.h"
 #include "interface/server.h"
-#include <c55_filesys.h>
 #include <iostream>
 
 extern server::Config g_server_config;
