@@ -1,8 +1,4 @@
-#if defined(RCCPP_ENABLED)
 #include "rccpp.h"
-
-// Module interface
-#include "interface/module.h"
 
 #include <c55_filesys.h>
 
@@ -14,10 +10,47 @@
 #include <sys/wait.h>
 #include <dlfcn.h>
 
+#define RUNTIME_VIRTUAL virtual
+#define CLASS_INTERNALS(C) public: constexpr static const char *NAME = #C;
+#include <cstddef>
+
+#include <vector>
+#include <cassert>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <algorithm>
+
+namespace rccpp {
+
+typedef void *(*RCCPP_Constructor)();
+
+struct RCCPP_Info {
+	void *module;
+	RCCPP_Constructor constructor;
+};
+
+struct CCompiler: public Compiler
+{
+	CCompiler();
+
+	void build(const std::string &module_name,
+			const std::string &in_path, const std::string &out_path);
+	
+	void *construct(const char *name);
+
+private:
+	std::unordered_map<std::string, RCCPP_Info> component_info_;
+	std::unordered_map<std::string, std::vector<void*>> constructed_objects;
+
+	std::vector<std::string> changed_classes_;
+	bool compile(const std::string &in_path, const std::string &out_path);
+};
+
 // linux
 #if 1
 static void *library_load(const char *filename) { return dlopen(filename, RTLD_NOW); }
-static void library_unload(void *module) { dlclose(module); }
+//static void library_unload(void *module) { dlclose(module); }
 static void *library_get_address(void *module, const char *name) { return dlsym(module, name); }
 #elif 0
 static void *library_load(const char *filename) { return LoadLibrary(filename); }
@@ -25,11 +58,11 @@ static void library_unload(void *module) { FreeLibrary(module); }
 static void *library_get_address(void *module, const char *name) { return GetProcAddress(module, name); }
 #endif
 
-RCCPP_Compiler::RCCPP_Compiler()
+CCompiler::CCompiler()
 { 
 }
 
-bool RCCPP_Compiler::compile(const std::string &in_path, const std::string &out_path)
+bool CCompiler::compile(const std::string &in_path, const std::string &out_path)
 {
 	//std::string command = "g++ -g -O0 -fPIC -fvisibility=hidden -shared";
 	std::string command = "g++ -DRCCPP -g -fPIC -fvisibility=hidden -shared";
@@ -57,7 +90,7 @@ bool RCCPP_Compiler::compile(const std::string &in_path, const std::string &out_
 	return exit_status == 0;
 }
 
-void RCCPP_Compiler::build(const std::string &module_name,
+void CCompiler::build(const std::string &module_name,
 		const std::string &in_path, const std::string &out_path)
 {
 	std::cout << "Building " << module_name << ": "
@@ -78,24 +111,9 @@ void RCCPP_Compiler::build(const std::string &module_name,
 		return;
 	}
 	
-	RCCPP_GetInterface GetInterface = (RCCPP_GetInterface)library_get_address(new_module, "rccpp_GetInterface");
-	if(GetInterface == nullptr) {
-		std::cout << "GetInterface is missing from the library" << std::endl;
-		return;
-	}
-	
-	RCCPP_Interface *interface = GetInterface();
-	assert(interface && "Interface is null");
-	RCCPP_Constructor fun_constructor = interface->constructor;
-	RCCPP_Destructor fun_destructor = interface->destructor;
-	RCCPP_PlacementNew fun_placementnew = interface->placementnew;
-	
-	if(!(fun_constructor && fun_constructor && fun_placementnew)) {
-		printf("Something failed with the function pointers in the module\n");
-		printf("   constructor: %p (%s)\n", fun_constructor, (fun_constructor != nullptr ? "ok" : "fail"));
-		printf("    destructor: %p (%s)\n", fun_destructor, (fun_destructor != nullptr ? "ok" : "fail"));
-		printf(" placement new: %p (%s)\n", fun_placementnew, (fun_placementnew != nullptr ? "ok" : "fail"));
-		fflush(stdout);
+	RCCPP_Constructor constructor = (RCCPP_Constructor)library_get_address(new_module, "createModule");
+	if(constructor == nullptr) {
+		std::cout << "createModule() is missing from the library" << std::endl;
 		return;
 	}
 	
@@ -105,27 +123,19 @@ void RCCPP_Compiler::build(const std::string &module_name,
 	auto it = component_info_.find(classname);
 	if(it != component_info_.end()) {
 		RCCPP_Info &funcs = it->second;
-		funcs.constructor = fun_constructor;
-		funcs.destructor = fun_destructor;
-		funcs.placement_new = fun_placementnew;
-		if(funcs.module_prev) library_unload(funcs.module_prev);
-		funcs.module_prev = funcs.module;
+		funcs.constructor = constructor;
 		funcs.module = new_module;
 	} else {
 		RCCPP_Info funcs;
-		funcs.constructor = fun_constructor;
-		funcs.destructor = fun_destructor;
-		funcs.placement_new = fun_placementnew;
-		funcs.module_prev = nullptr;
+		funcs.constructor = constructor;
 		funcs.module = new_module;
-		funcs.size = interface->original_size;
 		component_info_.emplace(classname, std::move(funcs));
 	}
 	
 	changed_classes_.push_back(classname);
 }
 
-void *RCCPP_Compiler::construct(const char *name) {
+void *CCompiler::construct(const char *name) {
 	auto component_info_it = component_info_.find(name);
 	if(component_info_it == component_info_.end()) {
 		assert(nullptr && "Failed to get class info");
@@ -145,5 +155,9 @@ void *RCCPP_Compiler::construct(const char *name) {
 	return result;
 }
 
-#endif
+Compiler* createCompiler()
+{
+	return new CCompiler();
+}
 
+} // rccpp

@@ -12,13 +12,14 @@ namespace server {
 
 struct CState: public State, public interface::Server
 {
-	RCCPP_Compiler m_compiler;
+	up_<rccpp::Compiler> m_compiler;
 
-	CState()
+	CState():
+		m_compiler(rccpp::createCompiler())
 	{
-		m_compiler.include_directories.push_back(
+		m_compiler->include_directories.push_back(
 				g_server_config.interface_path);
-		m_compiler.include_directories.push_back(
+		m_compiler->include_directories.push_back(
 				g_server_config.interface_path+"/..");
 	}
 
@@ -28,9 +29,10 @@ struct CState: public State, public interface::Server
 	{
 		std::cerr<<"Loading module "<<module_name<<" from "<<path<<std::endl;
 		ss_ build_dst = g_server_config.rccpp_build_path + "/module.so";
-		m_compiler.build(module_name, path+"/server/main.cpp", build_dst);
+		m_compiler->build(module_name, path+"/server/main.cpp", build_dst);
 
-		Module *m = static_cast<Module*>(m_compiler.construct(module_name.c_str()));
+		interface::Module *m = static_cast<interface::Module*>(
+				m_compiler->construct(module_name.c_str()));
 		int a = m->test_add(1, 2);
 		std::cout<<"a = "<<a<<std::endl;
 	}

@@ -1,12 +1,13 @@
 #pragma once
-#include "server/rccpp.h"
+#include "core/types.h"
 
-class Module : public RuntimeClass<Module> {
-	CLASS_INTERNALS(Module)
-public:
-	Module();
-	~Module();
-	RUNTIME_VIRTUAL int test_add(int a, int b);
-};
-RUNTIME_EXPORT_MODULE(Module)
+#define EXPORT __attribute__ ((visibility ("default")))
 
+namespace interface
+{
+	struct Module
+	{
+		virtual ~Module(){};
+		virtual int test_add(int a, int b) = 0;
+	};
+}

@@ -71,5 +71,5 @@ TARGET_LINK_LIBRARIES(${SERVER_EXE_NAME}
 	c55lib
 	dl
 )
-add_definitions(-DRCCPP_ENABLED=1)
+add_definitions()
 
