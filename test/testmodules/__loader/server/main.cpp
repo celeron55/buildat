@@ -3,12 +3,20 @@
 
 struct Module: public interface::Module
 {
-	Module()
+	interface::Server *m_server;
+
+	Module(interface::Server *server):
+		m_server(server)
 	{
 	}
 
 	~Module()
 	{
+	}
+
+	void start()
+	{
+		m_server->load_module("foo", "bar");
 	}
 
 	int test_add(int a, int b)
@@ -20,6 +28,6 @@ struct Module: public interface::Module
 extern "C" {
 EXPORT void* createModule(interface::Server *server)
 {
-	return (void*)(new Module());
+	return (void*)(new Module(server));
 }
 }

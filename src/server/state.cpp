@@ -32,9 +32,10 @@ struct CState: public State, public interface::Server
 		m_compiler->build(module_name, path+"/server/main.cpp", build_dst);
 
 		interface::Module *m = static_cast<interface::Module*>(
-				m_compiler->construct(module_name.c_str()));
-		int a = m->test_add(1, 2);
-		std::cout<<"a = "<<a<<std::endl;
+				m_compiler->construct(module_name.c_str(), this));
+		//int a = m->test_add(1, 2);
+		//std::cout<<"a = "<<a<<std::endl;
+		m->start();
 	}
 
 	void load_modules(const ss_ &path)

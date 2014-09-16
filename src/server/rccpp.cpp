@@ -1,4 +1,5 @@
 #include "rccpp.h"
+#include "interface/server.h"
 
 #include <c55_filesys.h>
 
@@ -23,7 +24,7 @@
 
 namespace rccpp {
 
-typedef void *(*RCCPP_Constructor)();
+typedef void *(*RCCPP_Constructor)(interface::Server *server);
 
 struct RCCPP_Info {
 	void *module;
@@ -34,10 +35,10 @@ struct CCompiler: public Compiler
 {
 	CCompiler();
 
-	void build(const std::string &module_name,
+	bool build(const std::string &module_name,
 			const std::string &in_path, const std::string &out_path);
 	
-	void *construct(const char *name);
+	void* construct(const char *name, interface::Server *server);
 
 private:
 	std::unordered_map<std::string, RCCPP_Info> component_info_;
@@ -90,7 +91,7 @@ bool CCompiler::compile(const std::string &in_path, const std::string &out_path)
 	return exit_status == 0;
 }
 
-void CCompiler::build(const std::string &module_name,
+bool CCompiler::build(const std::string &module_name,
 		const std::string &in_path, const std::string &out_path)
 {
 	std::cout << "Building " << module_name << ": "
@@ -101,23 +102,22 @@ void CCompiler::build(const std::string &module_name,
 
 	if(!compile(in_path, out_path)) {
 		std::cout << "Failed!" << std::endl;
-		return;
+		return false;
 	}
 	std::cout << "Success!" << std::endl;
 
 	void *new_module = library_load(out_path.c_str());
 	if(new_module == NULL){
 		std::cout<<"Failed to load compiled library: "<<dlerror()<<std::endl;
-		return;
+		return false;
 	}
 	
 	RCCPP_Constructor constructor = (RCCPP_Constructor)library_get_address(new_module, "createModule");
 	if(constructor == nullptr) {
 		std::cout << "createModule() is missing from the library" << std::endl;
-		return;
+		return false;
 	}
 	
-	//std::string classname = interface->classname;
 	std::string classname = module_name;
 
 	auto it = component_info_.find(classname);
@@ -133,9 +133,10 @@ void CCompiler::build(const std::string &module_name,
 	}
 	
 	changed_classes_.push_back(classname);
+	return true;
 }
 
-void *CCompiler::construct(const char *name) {
+void *CCompiler::construct(const char *name, interface::Server *server) {
 	auto component_info_it = component_info_.find(name);
 	if(component_info_it == component_info_.end()) {
 		assert(nullptr && "Failed to get class info");
@@ -145,7 +146,7 @@ void *CCompiler::construct(const char *name) {
 	RCCPP_Info &info = component_info_it->second;
 	RCCPP_Constructor constructor = info.constructor;
 	
-	void *result = constructor();
+	void *result = constructor(server);
 	
 	auto it = constructed_objects.find(std::string(name));
 	

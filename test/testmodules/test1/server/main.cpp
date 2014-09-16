@@ -11,6 +11,10 @@ struct Module: public interface::Module
 	{
 	}
 
+	void start()
+	{
+	}
+
 	int test_add(int a, int b)
 	{
 		return a + b;
