@@ -32,11 +32,6 @@ struct Module: public interface::Module
 		}
 	}
 
-	int test_add(int a, int b)
-	{
-		return a + b;
-	}
-
 	void thing(const Thing *thing)
 	{
 		std::cout<<"test1.thing: some_data="<<thing->some_data<<std::endl;

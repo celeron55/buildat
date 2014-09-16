@@ -40,9 +40,6 @@ struct CState: public State, public interface::Server
 				m_compiler->construct(module_name.c_str(), this));
 		m_modules[module_name] = m;
 
-		//int a = m->test_add(1, 2);
-		//std::cout<<"a = "<<a<<std::endl;
-
 		m->event(interface::Event("core:load_modules"));
 
 		m->event(interface::Event("core:start"));

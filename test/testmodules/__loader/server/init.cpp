@@ -33,11 +33,6 @@ struct Module: public interface::Module
 		}
 	}
 
-	int test_add(int a, int b)
-	{
-		return a + b;
-	}
-
 	void load_modules()
 	{
 		sv_<ss_> load_list = {"test1", "test2"};

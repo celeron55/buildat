@@ -33,11 +33,6 @@ struct Module: public interface::Module
 		}
 	}
 
-	int test_add(int a, int b)
-	{
-		return a + b;
-	}
-
 	void start()
 	{
 		interface::Module *m = m_server->get_module("test1");
