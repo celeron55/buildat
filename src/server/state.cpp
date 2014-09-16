@@ -13,6 +13,7 @@ namespace server {
 struct CState: public State, public interface::Server
 {
 	up_<rccpp::Compiler> m_compiler;
+	ss_ m_modules_path;
 
 	CState():
 		m_compiler(rccpp::createCompiler())
@@ -23,12 +24,11 @@ struct CState: public State, public interface::Server
 				g_server_config.interface_path+"/..");
 	}
 
-	// State
-
 	void load_module(const ss_ &module_name, const ss_ &path)
 	{
 		std::cerr<<"Loading module "<<module_name<<" from "<<path<<std::endl;
-		ss_ build_dst = g_server_config.rccpp_build_path + "/module.so";
+		ss_ build_dst = g_server_config.rccpp_build_path +
+				"/" + module_name + ".so";
 		m_compiler->build(module_name, path+"/server/init.cpp", build_dst);
 
 		interface::Module *m = static_cast<interface::Module*>(
@@ -40,15 +40,17 @@ struct CState: public State, public interface::Server
 
 	void load_modules(const ss_ &path)
 	{
+		m_modules_path = path;
 		ss_ first_module_path = path+"/__loader";
 		load_module("__loader", first_module_path);
 		/*ss_ first_module_path2 = path+"/test1";
 		load_module("test1", first_module_path2);*/
 	}
 
-	// interface::Server
-
-
+	ss_ get_modules_path()
+	{
+		return m_modules_path;
+	}
 };
 
 State* createState()

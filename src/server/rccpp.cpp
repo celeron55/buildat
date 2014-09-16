@@ -44,7 +44,6 @@ private:
 	std::unordered_map<std::string, RCCPP_Info> component_info_;
 	std::unordered_map<std::string, std::vector<void*>> constructed_objects;
 
-	std::vector<std::string> changed_classes_;
 	bool compile(const std::string &in_path, const std::string &out_path);
 };
 
@@ -111,16 +110,16 @@ bool CCompiler::build(const std::string &module_name,
 		std::cout<<"Failed to load compiled library: "<<dlerror()<<std::endl;
 		return false;
 	}
-	
-	RCCPP_Constructor constructor = (RCCPP_Constructor)library_get_address(new_module, "createModule");
+
+	ss_ constructor_name = ss_()+"createModule_"+module_name;
+	RCCPP_Constructor constructor = (RCCPP_Constructor)library_get_address(
+			new_module, constructor_name.c_str());
 	if(constructor == nullptr) {
-		std::cout << "createModule() is missing from the library" << std::endl;
+		std::cout<<constructor_name<<" is missing from the library"<<std::endl;
 		return false;
 	}
 	
-	std::string classname = module_name;
-
-	auto it = component_info_.find(classname);
+	auto it = component_info_.find(module_name);
 	if(it != component_info_.end()) {
 		RCCPP_Info &funcs = it->second;
 		funcs.constructor = constructor;
@@ -129,10 +128,8 @@ bool CCompiler::build(const std::string &module_name,
 		RCCPP_Info funcs;
 		funcs.constructor = constructor;
 		funcs.module = new_module;
-		component_info_.emplace(classname, std::move(funcs));
+		component_info_.emplace(module_name, std::move(funcs));
 	}
-	
-	changed_classes_.push_back(classname);
 	return true;
 }
 
