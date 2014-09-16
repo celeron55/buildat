@@ -11,8 +11,6 @@
 #include <sys/wait.h>
 #include <dlfcn.h>
 
-#define RUNTIME_VIRTUAL virtual
-#define CLASS_INTERNALS(C) public: constexpr static const char *NAME = #C;
 #include <cstddef>
 
 #include <vector>
