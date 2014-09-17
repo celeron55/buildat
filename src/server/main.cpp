@@ -149,7 +149,7 @@ int main(int argc, char *argv[])
 			}
 			interface::Event event("core:tick");
 			event.p.reset(new interface::TickEvent(1e6 / t_per_tick));
-			state->emit_event(event);
+			state->emit_event(std::move(event));
 		}
 
 		state->handle_events();

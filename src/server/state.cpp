@@ -168,11 +168,11 @@ struct CState: public State, public interface::Server
 		sublist.push_back(mwm0);
 	}
 
-	void emit_event(const Event &event)
+	void emit_event(Event event)
 	{
 		log_d("state", "emit_event(): type=%zu", event.type);
 		interface::MutexScope ms(m_event_queue_mutex);
-		m_event_queue.push_back(event);
+		m_event_queue.push_back(std::move(event));
 	}
 
 	void handle_events()
@@ -262,7 +262,7 @@ struct CState: public State, public interface::Server
 		// Create and emit event
 		interface::Event event(s.event_type);
 		event.p.reset(new interface::SocketEvent(fd));
-		emit_event(event);
+		emit_event(std::move(event));
 	}
 };
 

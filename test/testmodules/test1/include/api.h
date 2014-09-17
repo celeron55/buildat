@@ -13,6 +13,6 @@ namespace test1
 	{
 		interface::Event event("test1:thing");
 		event.p.reset(new test1::Thing(some_data));
-		server->emit_event(event);
+		server->emit_event(std::move(event));
 	}
 }

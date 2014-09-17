@@ -23,7 +23,7 @@ namespace network
 	{
 		interface::Event event("network:send");
 		event.p.reset(new network::Packet(type, data));
-		server->emit_event(event);
+		server->emit_event(std::move(event));
 	}
 }
 

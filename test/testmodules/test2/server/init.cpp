@@ -45,7 +45,7 @@ struct Module: public interface::Module
 		// Basic way
 		Event event("test1:thing");
 		event.p.reset(new test1::Thing("Nakki"));
-		m_server->emit_event(event);
+		m_server->emit_event(std::move(event));
 
 		// Simplified by inline wrapper
 		test1::do_thing(m_server, "Kebab");

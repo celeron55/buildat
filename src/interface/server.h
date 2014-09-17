@@ -26,7 +26,7 @@ namespace interface
 		virtual bool has_module(const ss_ &module_name) = 0;
 
 		virtual void sub_event(struct Module *module, const Event::Type &type) = 0;
-		virtual void emit_event(const Event &event) = 0;
+		virtual void emit_event(Event event) = 0;
 
 		virtual void add_socket_event(int fd, const Event::Type &event_type) = 0;
 		virtual void remove_socket_event(int fd) = 0;

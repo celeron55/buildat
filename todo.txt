@@ -7,4 +7,3 @@ Buildat TODO
 - There should be some kind of an easy synchronous calling mechanism between
   modules.
 - Modules should be run in threads.
-- Event::Private has to be stored in an unique pointer.
