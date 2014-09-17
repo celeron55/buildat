@@ -6,6 +6,18 @@ Look at the code. It is perfect and will be kept perfect. Requests to fix coding
 style are not to be taken personally by the one requesting, nor the one being
 requested to fix his style.
 
+The script (requires an unix shell and astyle):
+Always run util/codestyle.sh before committing. It handles most whitespace
+issues.
+
+Identifiers:
+- Class and struct names are CamelCase,
+- All function names are lowercase_with_underscores,
+- All variable names are lowercase_with_underscores,
+- All member variables start with m_.
+
+Never use "class", always use "struct".
+
 Non-exception throwing and exception-throwing methods
 -----------------------------------------------------
 - get_x: Returns NULL or equivalent if not found
@@ -14,7 +26,7 @@ Non-exception throwing and exception-throwing methods
 Commit messages
 ---------------
 In present tense. Prepend a location to the message where possible. When adding
-something, the "add" verb should be left out. Examples:
+something, the "add" verb should be left out. Fine enough examples:
 - interface::Server::check_module
 - doc: conventions.txt, todo.txt
 - Bind a socket but don't listen to it yet
