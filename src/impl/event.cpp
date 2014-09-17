@@ -3,7 +3,7 @@
 namespace interface {
 
 Event::Event(const ss_ &name, const sp_<Private> &p):
-		type(getGlobalEventRegistry()->type(name)), p(p)
+	type(getGlobalEventRegistry()->type(name)), p(p)
 {}
 
 struct CEventRegistry: public EventRegistry

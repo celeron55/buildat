@@ -20,24 +20,24 @@ struct CState: public State, public interface::Server
 		m_compiler(rccpp::createCompiler())
 	{
 		m_compiler->include_directories.push_back(
-				g_server_config.interface_path);
+		    g_server_config.interface_path);
 		m_compiler->include_directories.push_back(
-				g_server_config.interface_path+"/..");
+		    g_server_config.interface_path+"/..");
 		m_compiler->include_directories.push_back(
-				g_server_config.interface_path+"/../../3rdparty/cereal/include");
+		    g_server_config.interface_path+"/../../3rdparty/cereal/include");
 	}
 
 	void load_module(const ss_ &module_name, const ss_ &path)
 	{
 		std::cerr<<"Loading module "<<module_name<<" from "<<path<<std::endl;
 		ss_ build_dst = g_server_config.rccpp_build_path +
-				"/" + module_name + ".so";
+		                "/"+module_name+".so";
 		m_compiler->include_directories.push_back(m_modules_path);
 		m_compiler->build(module_name, path+"/server/init.cpp", build_dst);
 		m_compiler->include_directories.pop_back();
 
 		interface::Module *m = static_cast<interface::Module*>(
-				m_compiler->construct(module_name.c_str(), this));
+		                           m_compiler->construct(module_name.c_str(), this));
 		m_modules[module_name] = m;
 
 		m->event(interface::Event("core:load_modules"));

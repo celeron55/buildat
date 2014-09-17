@@ -6,7 +6,7 @@ namespace interface
 	struct Filesystem
 	{
 		virtual ~Filesystem(){}
-		
+
 		struct Node {
 			ss_ name;
 			bool is_directory;

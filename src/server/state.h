@@ -10,7 +10,7 @@ namespace server
 {
 	struct ModuleNotFoundException: public Exception {
 		ss_ msg;
-		ModuleNotFoundException(const ss_ &msg): Exception(msg) {}
+		ModuleNotFoundException(const ss_ &msg): Exception(msg){}
 	};
 
 	struct State

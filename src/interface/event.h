@@ -12,10 +12,10 @@ namespace interface
 		Type type;
 		sp_<Private> p;
 
-		Event(): type(0) {}
-		Event(const Type &type): type(type) {}
-		Event(const Type &type, const sp_<Private> &p): type(type), p(p) {}
-		Event(const ss_ &name, const sp_<Private> &p=NULL);
+		Event(): type(0){}
+		Event(const Type &type): type(type){}
+		Event(const Type &type, const sp_<Private> &p): type(type), p(p){}
+		Event(const ss_ &name, const sp_<Private> &p = NULL);
 	};
 
 	struct EventRegistry

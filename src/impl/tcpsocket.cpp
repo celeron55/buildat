@@ -13,19 +13,20 @@
 namespace interface {
 
 const unsigned char prefix[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0xFF, 0xFF};
+                                0x00, 0x00, 0x00, 0xFF, 0xFF
+                               };
 
-bool sockaddr_to_bytes(const sockaddr_storage* ptr, sv_<uchar>& to)
+bool sockaddr_to_bytes(const sockaddr_storage *ptr, sv_<uchar> &to)
 {
 	if(ptr->ss_family == AF_INET)
 	{
-		uchar* u = (uchar*)&((struct sockaddr_in*)ptr)->sin_addr.s_addr;
+		uchar *u = (uchar*) & ((struct sockaddr_in*)ptr)->sin_addr.s_addr;
 		to.assign(u, u + 4);
 		return true;
 	}
 	else if(ptr->ss_family == AF_INET6)
 	{
-		uchar* u = (uchar*)&((struct sockaddr_in6*)ptr)->sin6_addr.s6_addr;
+		uchar *u = (uchar*) & ((struct sockaddr_in6*)ptr)->sin6_addr.s6_addr;
 		if(memcmp(prefix, u, sizeof(prefix)) == 0){
 			to.assign(u + 12, u + 16);
 			return true;
@@ -40,20 +41,20 @@ bool sockaddr_to_bytes(const sockaddr_storage* ptr, sv_<uchar>& to)
 std::string address_bytes_to_string(const sv_<uchar> &ip)
 {
 	std::ostringstream os;
-	for(size_t i=0; i<ip.size(); i++){
+	for(size_t i = 0; i < ip.size(); i++){
 		if(ip.size() == 4){
 			os<<std::dec<<std::setfill('0')<<std::setw(0)
-					<<((uint32_t)ip[i]&0xff);
-			if(i < ip.size()-1)
+			  <<((uint32_t)ip[i] & 0xff);
+			if(i < ip.size() - 1)
 				os<<".";
 		} else {
 			os<<std::hex<<std::setfill('0')<<std::setw(2)
-					<<((uint32_t)ip[i]&0xff);
+			  <<((uint32_t)ip[i] & 0xff);
 			i++;
 			if(i < ip.size())
 				os<<std::hex<<std::setfill('0')<<std::setw(2)
-						<<((uint32_t)ip[i]&0xff);
-			if(i < ip.size()-1)
+				  <<((uint32_t)ip[i] & 0xff);
+			if(i < ip.size() - 1)
 				os<<":";
 		}
 	}
@@ -115,7 +116,7 @@ struct CTCPSocket: public TCPSocket
 
 		// Try to use one of the results
 		int fd = -1;
-		int i=0;
+		int i = 0;
 		for(struct addrinfo *res = res0; res != NULL; res = res->ai_next, i++)
 		{
 			std::cerr<<"Trying addrinfo #"<<i<<std::endl;
@@ -188,7 +189,7 @@ struct CTCPSocket: public TCPSocket
 
 		// Try to use one of the results
 		int fd = -1;
-		int i=0;
+		int i = 0;
 		for(struct addrinfo *res = res0; res != NULL; res = res->ai_next, i++)
 		{
 			//std::cerr<<"Trying addrinfo #"<<i<<std::endl;
@@ -227,7 +228,7 @@ struct CTCPSocket: public TCPSocket
 
 		m_fd = fd;
 		return true;
-	}	
+	}
 	bool accept_fd(const TCPSocket &listener)
 	{
 		close_fd();
@@ -237,7 +238,7 @@ struct CTCPSocket: public TCPSocket
 
 		struct sockaddr_storage pin;
 		socklen_t pin_len = sizeof(pin);
-		int fd_client = accept(listener.fd(), (struct sockaddr *)  &pin, &pin_len);
+		int fd_client = accept(listener.fd(), (struct sockaddr*)  &pin, &pin_len);
 		if(fd_client == -1){
 			std::cerr<<"accept: "<<strerror(errno)<<std::endl;
 			return false;

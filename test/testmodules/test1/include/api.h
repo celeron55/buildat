@@ -6,6 +6,6 @@ namespace test1
 	{
 		ss_ some_data;
 
-		Thing(const ss_ &some_data="default value"): some_data(some_data) {}
+		Thing(const ss_ &some_data = "default value"): some_data(some_data){}
 	};
 }
