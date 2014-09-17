@@ -25,6 +25,8 @@ namespace server
 				const interface::Event::Type &type) = 0;
 		virtual void emit_event(const interface::Event &event) = 0;
 		virtual void handle_events() = 0;
+		virtual sv_<int> get_sockets() = 0;
+		virtual void emit_socket_event(int fd) = 0;
 	};
 
 	State* createState();

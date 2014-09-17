@@ -234,7 +234,31 @@ struct CState: public State, public interface::Server
 
 	void remove_socket_event(int fd)
 	{
+		interface::MutexScope ms(m_sockets_mutex);
 		// TODO
+	}
+
+	sv_<int> get_sockets()
+	{
+		interface::MutexScope ms(m_sockets_mutex);
+		sv_<int> result;
+		for(auto &pair : m_sockets)
+			result.push_back(pair.second.fd);
+		return result;
+	}
+
+	void emit_socket_event(int fd)
+	{
+		interface::MutexScope ms(m_sockets_mutex);
+		auto it = m_sockets.find(fd);
+		if(it == m_sockets.end()){
+			// This can be valid if the socket has been removed while waiting
+			// for it elsewhere
+			log_w("state", "emit_socket_event(): fd=%i not found", fd);
+			return;
+		}
+		SocketState &s = it->second;
+		emit_event(Event(s.event_type));
 	}
 };
 
