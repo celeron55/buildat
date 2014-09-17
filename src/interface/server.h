@@ -6,8 +6,12 @@ namespace interface
 {
 	struct Module;
 
-	struct SocketEvent: public interface::Event::Private
-	{
+	struct TickEvent: public interface::Event::Private {
+		float dtime;
+		TickEvent(float dtime): dtime(dtime){}
+	};
+
+	struct SocketEvent: public interface::Event::Private {
 		int fd;
 		SocketEvent(int fd): fd(fd){}
 	};

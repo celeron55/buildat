@@ -1,6 +1,7 @@
 #include "core/types.h"
 #include "server/config.h"
 #include "server/state.h"
+#include "interface/server.h"
 #include <c55/getopt.h>
 #include <c55/os.h>
 #include <c55/log.h>
@@ -146,7 +147,9 @@ int main(int argc, char *argv[])
 				log_w("main", "Skipping %zuus", current_us - next_tick_us);
 				next_tick_us = current_us;
 			}
-			state->emit_event(interface::Event("core:tick"));
+			interface::Event event("core:tick");
+			event.p.reset(new interface::TickEvent(1e6 / t_per_tick));
+			state->emit_event(event);
 		}
 
 		state->handle_events();

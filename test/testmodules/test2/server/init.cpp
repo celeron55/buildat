@@ -47,7 +47,7 @@ struct Module: public interface::Module
 		event.p.reset(new test1::Thing("Nakki"));
 		m_server->emit_event(event);
 
-		// Simplified by inlining
+		// Simplified by inline wrapper
 		test1::do_thing(m_server, "Kebab");
 	}
 };
