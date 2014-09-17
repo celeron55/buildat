@@ -64,9 +64,9 @@ struct CState: public State, public interface::Server
 
 		send_event_u(m,
 
-		             m->event(interface::Event("core:load_modules"));
+		m->event(interface::Event("core:load_modules"));
 
-		             m->event(interface::Event("core:start"));
+		m->event(interface::Event("core:start"));
 	}
 
 	void load_modules(const ss_ &path)
