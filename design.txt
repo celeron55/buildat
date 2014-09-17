@@ -48,6 +48,11 @@ C++ modules can provide direct library functionality inlined in their include/
 files. They cannot export any internally defined functions directly, but they
 can provide convenience wrappers for event-based interfaces.
 
+Startup sequence and what the module should do:
+- constructor        : Initialize everything you can here
+- init()             : Subscribe to events
+- "core:start" event : Start doing whatever the module wants to actively do
+
 Network protocol
 ----------------
 (Type, length, data) tuples on TCP. In the future TLS can be taken into use. A

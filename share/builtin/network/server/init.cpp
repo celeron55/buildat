@@ -24,7 +24,23 @@ struct Module: public interface::Module
 	void init()
 	{
 		std::cout<<"network init"<<std::endl;
+		m_server->sub_event(this, interface::Event::t("core:start"));
+	}
 
+	~Module()
+	{
+		std::cout<<"network destruct"<<std::endl;
+	}
+
+	void event(const interface::Event &event)
+	{
+		if(event.type == interface::Event::t("core:start")){
+			start();
+		}
+	}
+
+	void start()
+	{
 		ss_ address = "any4";
 		ss_ port = "20000";
 
@@ -35,15 +51,6 @@ struct Module: public interface::Module
 			std::cerr<<"Listening at "<<address<<":"<<port<<std::endl;
 		}
 		//m_server->add_socket(m_socket);
-	}
-
-	~Module()
-	{
-		std::cout<<"network destruct"<<std::endl;
-	}
-
-	void event(const interface::Event &event)
-	{
 	}
 };
 
