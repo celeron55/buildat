@@ -35,6 +35,7 @@ struct CState: public State, public interface::Server
 	ss_ m_modules_path;
 
 	sm_<ss_, ModuleContainer> m_modules;
+	set_<ss_> m_unloads_requested;
 	interface::Mutex m_modules_mutex;
 
 	sv_<Event> m_event_queue;
@@ -101,6 +102,15 @@ struct CState: public State, public interface::Server
 		// Now that everyone is listening, we can fire the start event
 		emit_event(Event("core:start"));
 		handle_events();
+	}
+
+	void unload_module(const ss_ &module_name)
+	{
+		interface::MutexScope ms(m_modules_mutex);
+		auto it = m_modules.find(module_name);
+		if(it == m_modules.end())
+			return;
+		m_unloads_requested.insert(module_name);
 	}
 
 	ss_ get_modules_path()
@@ -224,6 +234,12 @@ struct CState: public State, public interface::Server
 					mc->module->event(event.type, event.p.get());
 				}
 			}
+			interface::MutexScope ms(m_modules_mutex);
+			for(const ss_ &module_name : m_unloads_requested){
+				log_w("state", "Unloading %s: not implemented", cs(module_name));
+				// TODO: Unload
+			}
+			m_unloads_requested.clear();
 		}
 	}
 
