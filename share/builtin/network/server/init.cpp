@@ -90,7 +90,7 @@ struct Module: public interface::Module
 		PeerInfo pinfo;
 		pinfo.id = peer_id;
 		pinfo.address = socket->get_remote_address();
-		m_server->emit_event("network:client_connected", new ClientConnected(pinfo));
+		m_server->emit_event("network:new_client", new NewClient(pinfo));
 	}
 };
 

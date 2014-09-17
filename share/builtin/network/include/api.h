@@ -14,17 +14,19 @@ namespace network
 	{
 		typedef size_t Type;
 
+		PeerInfo::Id recipient;
 		Type type;
 		ss_ data;
 
-		Packet(const Type &type, const ss_ &data): type(type), data(data){}
+		Packet(PeerInfo::Id recipient, const Type &type, const ss_ &data):
+			recipient(recipient), type(type), data(data){}
 	};
 
-	struct ClientConnected: public interface::Event::Private
+	struct NewClient: public interface::Event::Private
 	{
 		PeerInfo info;
 
-		ClientConnected(const PeerInfo &info): info(info){}
+		NewClient(const PeerInfo &info): info(info){}
 	};
 }
 

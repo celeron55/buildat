@@ -2,6 +2,7 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "test1/include/api.h"
+#include "network/include/api.h"
 #include <iostream>
 
 using interface::Event;
@@ -24,6 +25,7 @@ struct Module: public interface::Module
 	{
 		std::cout<<"test1 init"<<std::endl;
 		m_server->sub_event(this, m_EventType_test1_thing);
+		m_server->sub_event(this, Event::t("network:new_client"));
 	}
 
 	~Module()
@@ -34,11 +36,20 @@ struct Module: public interface::Module
 	void event(const Event::Type &type, const Event::Private *p)
 	{
 		EVENT_TYPE(m_EventType_test1_thing, on_thing, Thing)
+		EVENT_TYPEN("network:new_client", on_new_client, network::NewClient)
 	}
 
 	void on_thing(const Thing &thing)
 	{
 		std::cout<<"test1.thing: some_data="<<thing.some_data<<std::endl;
+	}
+
+	void on_new_client(const network::NewClient &new_client)
+	{
+		std::cout<<"test1::on_new_client: id="<<new_client.info.id<<std::endl;
+
+		m_server->emit_event("network:send",
+				new network::Packet(new_client.info.id, 1337, "dummy data"));
 	}
 };
 
