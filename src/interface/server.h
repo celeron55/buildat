@@ -27,6 +27,10 @@ namespace interface
 
 		virtual void sub_event(struct Module *module, const Event::Type &type) = 0;
 		virtual void emit_event(Event event) = 0;
+		template<typename PrivateT>
+		void emit_event(const ss_ &name, PrivateT *p){
+			emit_event(std::move(Event(name, up_<Event::Private>(p))));
+		}
 
 		virtual void add_socket_event(int fd, const Event::Type &event_type) = 0;
 		virtual void remove_socket_event(int fd) = 0;

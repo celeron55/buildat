@@ -2,14 +2,6 @@
 
 namespace interface {
 
-Event::Event(const Type &type, up_<Private> p):
-	type(type), p(std::move(p))
-{}
-
-Event::Event(const ss_ &name, up_<Private> p):
-	type(getGlobalEventRegistry()->type(name)), p(std::move(p))
-{}
-
 Event::Type Event::t(const ss_ &name)
 {
 	return getGlobalEventRegistry()->type(name);

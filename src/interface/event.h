@@ -1,6 +1,25 @@
 #pragma once
 #include "core/types.h"
 
+#define EVENT_DISPATCH_VOID(event_type, handler) \
+	if(type == event_type){ handler(); }
+#define EVENT_DISPATCH_TYPE(event_type, handler, param_type) \
+	if(type == event_type){ \
+		auto p0 = dynamic_cast<const param_type*>(p); \
+		if(p0) handler(*p0); \
+		else if(p == nullptr) Exception(ss_()+"Missing parameter to "+ \
+				__PRETTY_FUNCTION__ + "::" #handler " (parameter type: " \
+				#param_type ")"); \
+		else throw Exception(ss_()+"Invalid parameter to "+__PRETTY_FUNCTION__+ \
+				"::" #handler " (expected " #param_type ")"); \
+	}
+#define EVENT_VOID EVENT_DISPATCH_VOID
+#define EVENT_TYPE EVENT_DISPATCH_TYPE
+#define EVENT_VOIDN(name, handler) \
+	EVENT_DISPATCH_VOID(interface::Event::t(name), handler)
+#define EVENT_TYPEN(name, handler, param_type) \
+	EVENT_DISPATCH_TYPE(interface::Event::t(name), handler, param_type)
+
 namespace interface
 {
 	struct Event
@@ -12,11 +31,20 @@ namespace interface
 		Type type;
 		up_<Private> p;
 
-		Event(): type(0){}
-		Event(const Type &type): type(type){}
-		Event(const Type &type, up_<Private> p);
-		Event(const ss_ &name): type(t(name)){}
-		Event(const ss_ &name, up_<Private> p);
+		Event():
+			type(0){}
+		Event(const Type &type):
+			type(type){}
+		Event(const Type &type, up_<Private> p):
+			type(type), p(std::move(p)){}
+		Event(const ss_ &name):
+			type(t(name)){}
+		Event(const ss_ &name, up_<Private> p):
+			type(t(name)), p(std::move(p)){}
+		template<typename PrivateT>
+		Event(const ss_ &name, PrivateT *p):
+			type(t(name)), p(up_<Private>(p))
+		{}
 
 		static Type t(const ss_ &name); // Shorthand function
 	};

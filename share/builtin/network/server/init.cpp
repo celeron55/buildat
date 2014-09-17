@@ -50,15 +50,9 @@ struct Module: public interface::Module
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
-		if(type == Event::t("core:start")){
-			on_start();
-		}
-		if(type == Event::t("network:send")){
-			on_send_packet(*static_cast<const Packet*>(p));
-		}
-		if(type == Event::t("network:listen_event")){
-			on_listen_event(*static_cast<const interface::SocketEvent*>(p));
-		}
+		EVENT_VOIDN("core:start",           on_start)
+		EVENT_TYPEN("network:send",         on_send_packet,  Packet)
+		EVENT_TYPEN("network:listen_event", on_listen_event, interface::SocketEvent)
 	}
 
 	void on_start()
@@ -85,10 +79,18 @@ struct Module: public interface::Module
 	void on_listen_event(const interface::SocketEvent &event)
 	{
 		std::cerr<<"network: on_listen_event(): fd="<<event.fd<<std::endl;
+		// Create socket
 		sp_<interface::TCPSocket> socket(interface::createTCPSocket());
+		// Accept connection
 		socket->accept_fd(*m_listening_socket.get());
+		// Store socket
 		Peer::Id peer_id = m_next_peer_id++;
 		m_peers[peer_id] = Peer(peer_id, socket);
+		// Emit event
+		PeerInfo pinfo;
+		pinfo.id = peer_id;
+		pinfo.address = socket->get_remote_address();
+		m_server->emit_event("network:client_connected", new ClientConnected(pinfo));
 	}
 };
 

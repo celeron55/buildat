@@ -33,9 +33,7 @@ struct Module: public interface::Module
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
-		if(type == m_EventType_test1_thing){
-			on_thing(*static_cast<const Thing*>(p));
-		}
+		EVENT_TYPE(m_EventType_test1_thing, on_thing, Thing)
 	}
 
 	void on_thing(const Thing &thing)
