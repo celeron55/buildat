@@ -32,7 +32,7 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("network:get_packet_type_resp"));
 
 		m_server->emit_event("network:get_packet_type",
-				new network::Req_get_packet_type("test1:dummy_packet"));
+		                     new network::Req_get_packet_type("test1:dummy_packet"));
 	}
 
 	~Module()
@@ -44,7 +44,8 @@ struct Module: public interface::Module
 	{
 		EVENT_TYPE(m_EventType_test1_thing, on_thing, Thing)
 		EVENT_TYPEN("network:new_client", on_new_client, network::NewClient)
-		EVENT_TYPEN("network:get_packet_type_resp", on_get_packet_type_resp, network::Resp_get_packet_type)
+		EVENT_TYPEN("network:get_packet_type_resp", on_get_packet_type_resp,
+		            network::Resp_get_packet_type)
 	}
 
 	void on_thing(const Thing &thing)
@@ -57,8 +58,8 @@ struct Module: public interface::Module
 		std::cout<<"test1::on_new_client: id="<<new_client.info.id<<std::endl;
 
 		m_server->emit_event("network:send",
-				new network::Packet(new_client.info.id,
-						m_NetworkPacketType_dummy_packet, "dummy data"));
+		                     new network::Packet(new_client.info.id,
+		                             m_NetworkPacketType_dummy_packet, "dummy data"));
 	}
 
 	void on_get_packet_type_resp(const network::Resp_get_packet_type &event)

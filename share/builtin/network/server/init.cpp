@@ -100,7 +100,7 @@ struct Module: public interface::Module
 		std::cerr<<"network::on_get_packet_type(): name="<<event.name<<std::endl;
 		Packet::Type type = 42;
 		m_server->emit_event("network:get_packet_type_resp",
-				new Resp_get_packet_type(type));
+		                     new Resp_get_packet_type(type));
 	}
 };
 
