@@ -16,8 +16,8 @@ echo "cpp_files: $cpp_files"
 
 # Fix all that astyle is capable of
 # Note: Astyle's character limit doesn't count tabs as multiple spaces.
-astyle -z2 -W3 -k3 -p -w -Y -K -N -t4 -m1 -xC80 $header_files
-astyle -z2 -W3 -k3 -p -w -Y -K -t4 -m1 -xC80 $cpp_files
+astyle -n -z2 -W3 -k3 -p -w -Y -K -N -t4 -m1 -xC80 $header_files
+astyle -n -z2 -W3 -k3 -p -w -Y -K -t4 -m1 -xC80 $cpp_files
 
 # Remove spaces before semicolons
 sed -i -e 's/ *;/;/g' $header_files $cpp_files
