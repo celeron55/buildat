@@ -67,14 +67,14 @@ struct Module: public interface::Module
 		ss_ port = "20000";
 
 		if(!m_listening_socket->bind_fd(address, port) ||
-				!m_listening_socket->listen_fd()){
+		    !m_listening_socket->listen_fd()){
 			std::cerr<<"Failed to bind to "<<address<<":"<<port<<std::endl;
 		} else {
 			std::cerr<<"Listening at "<<address<<":"<<port<<std::endl;
 		}
 
 		m_server->add_socket_event(m_listening_socket->fd(),
-				Event::t("network:listen_event"));
+		                           Event::t("network:listen_event"));
 	}
 
 	void on_send_packet(const Packet &packet)

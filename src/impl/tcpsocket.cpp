@@ -66,7 +66,7 @@ struct CTCPSocket: public TCPSocket
 {
 	int m_fd = -1;
 
-	CTCPSocket(int fd=-1):
+	CTCPSocket(int fd = -1):
 		m_fd(fd)
 	{}
 	~CTCPSocket()

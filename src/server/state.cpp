@@ -22,7 +22,7 @@ struct CState: public State, public interface::Server
 		interface::Mutex mutex;
 		interface::Module *module;
 
-		ModuleWithMutex(interface::Module *module=NULL): module(module){}
+		ModuleWithMutex(interface::Module *module = NULL): module(module){}
 	};
 
 	struct SocketState {
@@ -136,7 +136,7 @@ struct CState: public State, public interface::Server
 	}
 
 	void sub_event(struct interface::Module *module,
-			const Event::Type &type)
+	               const Event::Type &type)
 	{
 		// Lock modules so that the subscribing one isn't removed asynchronously
 		interface::MutexScope ms(m_modules_mutex);
@@ -156,14 +156,15 @@ struct CState: public State, public interface::Server
 			return;
 		}
 		interface::MutexScope ms2(m_event_subs_mutex);
-		if(m_event_subs.size() <= type+1)
-			m_event_subs.resize(type+1);
+		if(m_event_subs.size() <= type + 1)
+			m_event_subs.resize(type + 1);
 		sv_<ModuleWithMutex*> &sublist = m_event_subs[type];
 		if(std::find(sublist.begin(), sublist.end(), mwm0) != sublist.end()){
 			std::cerr<<"sub_event(): Already on list: "<<module_name<<std::endl;
 			return;
 		}
-		std::cerr<<"sub_event(): "<<module_name<<" subscribed to "<<type<<std::endl;
+		std::cerr<<"sub_event(): "<<module_name<<" subscribed to "<<type <<
+		          std::endl;
 		sublist.push_back(mwm0);
 	}
 
@@ -176,7 +177,7 @@ struct CState: public State, public interface::Server
 
 	void handle_events()
 	{
-		for(size_t loop_i=0; ; loop_i++){
+		for(size_t loop_i = 0;; loop_i++){
 			sv_<Event> event_queue_snapshot;
 			sv_<sv_<ModuleWithMutex*>> event_subs_snapshot;
 			{
@@ -203,7 +204,7 @@ struct CState: public State, public interface::Server
 					continue;
 				}
 				log_d("state", "handle_events(): %zu: Handling (%zu handlers)",
-						event.type, sublist.size());
+				      event.type, sublist.size());
 				for(ModuleWithMutex *mwm : sublist){
 					interface::MutexScope mwm_ms(mwm->mutex);
 					mwm->module->event(event);
@@ -227,7 +228,7 @@ struct CState: public State, public interface::Server
 		const SocketState &s = it->second;
 		if(s.event_type != event_type){
 			throw Exception("Socket events already requested with different"
-					" event type");
+			                " event type");
 		}
 		// Nothing to do; already set.
 	}

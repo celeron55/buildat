@@ -19,7 +19,7 @@ namespace network
 	};
 
 	inline void send(interface::Server *server,
-			const Packet::Type &type, const ss_ &data)
+	                 const Packet::Type &type, const ss_ &data)
 	{
 		interface::Event event("network:send");
 		event.p.reset(new network::Packet(type, data));

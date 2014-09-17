@@ -18,7 +18,7 @@ void sigint_handler(int sig)
 		fprintf(stdout, "\n"); // Newline after "^C"
 		log_i("process", "SIGINT");
 		g_sigint_received = true;
-	} else{
+	} else {
 		(void)signal(SIGINT, SIG_DFL);
 	}
 }
@@ -104,7 +104,7 @@ int main(int argc, char *argv[])
 
 	// Main loop
 	uint64_t next_tick_us = get_timeofday_us();
-	uint64_t t_per_tick = 1000*100;
+	uint64_t t_per_tick = 1000 * 100;
 	while(!g_sigint_received){
 		struct timeval tv;
 		tv.tv_sec = 0;
@@ -120,12 +120,12 @@ int main(int argc, char *argv[])
 				fd_max = fd;
 		}
 
-		int r = select(fd_max+1, &rfds, NULL, NULL, &tv);
+		int r = select(fd_max + 1, &rfds, NULL, NULL, &tv);
 		if(r == -1){
 			// Error
 			log_w("main", "select() returned -1: %s", strerror(errno));
 			// Don't consume 100% CPU and flood logs
-			usleep(1000*100);
+			usleep(1000 * 100);
 			return 1; // Temporary return
 		} else if(r == 0){
 			// Nothing happened
@@ -142,7 +142,7 @@ int main(int argc, char *argv[])
 		uint64_t current_us = get_timeofday_us();
 		if(current_us >= next_tick_us){
 			next_tick_us += t_per_tick;
-			if(next_tick_us < current_us - 1000*1000){
+			if(next_tick_us < current_us - 1000 * 1000){
 				log_w("main", "Skipping %zuus", current_us - next_tick_us);
 				next_tick_us = current_us;
 			}
