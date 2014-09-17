@@ -60,6 +60,7 @@ name->type registry is used for determining numeric packet types.
 
 Data is freeform. Types 0...99 are reserved for initialization.
 
-Core uses cereal's portable binary serialization.
+Core uses cereal's portable binary serialization, except for low-level packet
+streaming.
 
 
