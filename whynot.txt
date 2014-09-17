@@ -1,0 +1,5 @@
+Reasons for not doing certain things
+====================================
+Why not use protobuf?
+- It would suck for modules because it has many moving parts
+
