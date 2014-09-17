@@ -15,7 +15,8 @@ struct Module: public interface::Module
 
 	Module(interface::Server *server):
 		m_server(server),
-		m_EventType_core_load_modules(interface::getGlobalEventRegistry()->type("core:load_modules"))
+		m_EventType_core_load_modules(
+		    interface::getGlobalEventRegistry()->type("core:load_modules"))
 	{
 		std::cout<<"__loader construct"<<std::endl;
 	}
@@ -34,7 +35,8 @@ struct Module: public interface::Module
 
 	void load_modules()
 	{
-		m_server->load_module("network", m_server->get_builtin_modules_path()+"/network");
+		m_server->load_module("network",
+		                      m_server->get_builtin_modules_path()+"/network");
 
 		sv_<ss_> load_list = {"test1", "test2"};
 		for(const ss_ &name : load_list){

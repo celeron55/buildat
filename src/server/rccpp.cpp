@@ -155,7 +155,8 @@ void* CCompiler::construct(const char *name, interface::Server *server){
 
 	auto it = constructed_objects.find(std::string(name));
 
-	if(it == constructed_objects.end()) constructed_objects.insert(std::make_pair(name, std::vector<void*> {result}));
+	if(it == constructed_objects.end()) constructed_objects.insert(std::make_pair(
+		            name, std::vector<void*> {result}));
 	else it->second.push_back(result);
 
 	return result;

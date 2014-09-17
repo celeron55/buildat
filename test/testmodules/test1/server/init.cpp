@@ -15,7 +15,8 @@ struct Module: public interface::Module
 
 	Module(interface::Server *server):
 		m_server(server),
-		m_EventType_test1_thing(interface::getGlobalEventRegistry()->type("test1:thing"))
+		m_EventType_test1_thing(
+		    interface::getGlobalEventRegistry()->type("test1:thing"))
 	{
 		std::cout<<"test1 construct"<<std::endl;
 	}

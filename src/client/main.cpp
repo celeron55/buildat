@@ -142,7 +142,8 @@ static int customError(lua_State *L){
 	printf("---------------------\n");
 	printf("Backtrace\n");
 	for(size_t i = 0; i < backTrace.size(); i++){
-		printf("* %s on line %d", backTrace[i].fileName.c_str(), backTrace[i].lineNumber);
+		printf("* %s on line %d", backTrace[i].fileName.c_str(),
+		       backTrace[i].lineNumber);
 	}
 	printf("\n---------------------\n");
 
@@ -192,8 +193,10 @@ HelloPolycodeApp::HelloPolycodeApp(Polycode::PolycodeView *view):
 	// SDLCore for Linux
 	core = new POLYCODE_CORE(view, 640, 480, false, false, 0, 0, 90, 1, true);
 
-	Polycode::CoreServices::getInstance()->getResourceManager()->addArchive(g_client_config.share_path+"/default.pak");
-	Polycode::CoreServices::getInstance()->getResourceManager()->addDirResource("default", false);
+	Polycode::CoreServices::getInstance()->getResourceManager()->addArchive(
+	    g_client_config.share_path+"/default.pak");
+	Polycode::CoreServices::getInstance()->getResourceManager()->addDirResource("default",
+	        false);
 
 	scene = new Polycode::Scene(Polycode::Scene::SCENE_2D);
 	scene->getActiveCamera()->setOrthoSize(640, 480);
