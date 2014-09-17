@@ -1,4 +1,5 @@
 #include "interface/event.h"
+#include <functional>
 
 namespace network
 {
@@ -38,10 +39,12 @@ namespace network
 				const ss_ &data) = 0;
 	};
 
-	inline struct Interface *get_interface(interface::Server *server)
+	inline bool access(interface::Server *server,
+			std::function<void(network::Interface*)> cb)
 	{
-		interface::Module *module = server->check_module("network");
-		return (network::Interface*)module->check_interface();
+		return server->access_module("network", [&](interface::Module * module){
+			cb((network::Interface*)module->check_interface());
+		});
 	}
 }
 

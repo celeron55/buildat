@@ -136,6 +136,20 @@ struct CState: public State, public interface::Server
 		return (it != m_modules.end());
 	}
 
+	bool access_module(const ss_ &module_name,
+			std::function<void(interface::Module*)> cb)
+	{
+		// This prevents module from being deleted while it is being called
+		interface::MutexScope ms(m_modules_mutex);
+		interface::Module *m = get_module(module_name);
+		if(!m){
+			return false;
+		} else {
+			cb(m);
+			return true;
+		}
+	}
+
 	void sub_event(struct interface::Module *module,
 			const Event::Type &type)
 	{

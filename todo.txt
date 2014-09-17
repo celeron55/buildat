@@ -7,3 +7,5 @@ Buildat TODO
 - There should be some kind of an easy synchronous calling mechanism between
   modules.
 - Modules should be run in threads.
+- Remove mutexes from modules and handle them externally by utilizing
+  callback-based access control?

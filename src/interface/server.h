@@ -1,6 +1,7 @@
 #pragma once
 #include "core/types.h"
 #include "interface/event.h"
+#include <functional>
 
 namespace interface
 {
@@ -24,9 +25,8 @@ namespace interface
 		virtual ss_ get_modules_path() = 0;
 		virtual ss_ get_builtin_modules_path() = 0;
 		virtual bool has_module(const ss_ &module_name) = 0;
-
-		virtual interface::Module* get_module(const ss_ &module_name) = 0;
-		virtual interface::Module* check_module(const ss_ &module_name) = 0;
+		virtual bool access_module(const ss_ &module_name,
+				std::function<void(interface::Module*)> cb) = 0;
 
 		virtual void sub_event(struct Module *module, const Event::Type &type) = 0;
 		virtual void emit_event(Event event) = 0;

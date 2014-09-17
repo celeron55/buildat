@@ -64,8 +64,9 @@ struct Module: public interface::Module
 	{
 		log_i(MODULE, "test1::on_new_client: id=%zu", new_client.info.id);
 
-		network::Interface *inetwork = network::get_interface(m_server);
-		inetwork->send(new_client.info.id, "test1:dummy", "dummy data");
+		network::access(m_server, [&](network::Interface * inetwork){
+			inetwork->send(new_client.info.id, "test1:dummy", "dummy data");
+		});
 	}
 
 	void on_packet_received(const network::Packet &packet)
