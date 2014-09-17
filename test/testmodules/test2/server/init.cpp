@@ -40,9 +40,15 @@ struct Module: public interface::Module
 
 	void start()
 	{
+		std::cout<<"test2 start(): Calling test1"<<std::endl;
+
+		// Basic way
 		interface::Event event("test1:thing");
 		event.p.reset(new test1::Thing("Nakki"));
 		m_server->emit_event(event);
+
+		// Simplified by inlining
+		test1::do_thing(m_server, "Kebab");
 	}
 };
 

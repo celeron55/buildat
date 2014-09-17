@@ -8,4 +8,11 @@ namespace test1
 
 		Thing(const ss_ &some_data = "default value"): some_data(some_data){}
 	};
+
+	inline void do_thing(interface::Server *server, const ss_ &some_data)
+	{
+		interface::Event event("test1:thing");
+		event.p.reset(new test1::Thing(some_data));
+		server->emit_event(event);
+	}
 }
