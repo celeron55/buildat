@@ -33,6 +33,11 @@ Function naming:
 Do not use assert(); throw anonymous exceptions instead:
 - if(fail) throw Exception("Thing failed");
 
+Naming:
+- "type": Numeric id representing a type
+- "name": A string; generally works as an identifier but not necessarily
+- "id":   Numeric id of an instance of something that is not a type
+
 Non-exception throwing and exception-throwing methods
 -----------------------------------------------------
 - get_x: Returns NULL or equivalent if not found

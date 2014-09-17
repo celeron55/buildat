@@ -41,6 +41,7 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("network:send"));
 		m_server->sub_event(this, Event::t("network:listen_event"));
+		m_server->sub_event(this, Event::t("network:get_packet_type"));
 	}
 
 	~Module()
@@ -53,6 +54,7 @@ struct Module: public interface::Module
 		EVENT_VOIDN("core:start",           on_start)
 		EVENT_TYPEN("network:send",         on_send_packet,  Packet)
 		EVENT_TYPEN("network:listen_event", on_listen_event, interface::SocketEvent)
+		EVENT_TYPEN("network:get_packet_type", on_get_packet_type, Req_get_packet_type)
 	}
 
 	void on_start()
@@ -91,6 +93,14 @@ struct Module: public interface::Module
 		pinfo.id = peer_id;
 		pinfo.address = socket->get_remote_address();
 		m_server->emit_event("network:new_client", new NewClient(pinfo));
+	}
+
+	void on_get_packet_type(const Req_get_packet_type &event)
+	{
+		std::cerr<<"network::on_get_packet_type(): name="<<event.name<<std::endl;
+		Packet::Type type = 42;
+		m_server->emit_event("network:get_packet_type_resp",
+				new Resp_get_packet_type(type));
 	}
 };
 
