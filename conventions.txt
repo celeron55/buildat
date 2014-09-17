@@ -11,3 +11,14 @@ Non-exception throwing and exception-throwing methods
 - get_x: Returns NULL or equivalent if not found
 - check_x: Throws exception if not found
 
+Commit messages
+---------------
+In present tense. Prepend a location to the message where possible. When adding
+something, the "add" verb should be left out. Examples:
+- interface::Server::check_module
+- doc: conventions.txt, todo.txt
+- Bind a socket but don't listen to it yet
+- Remove Module::test_add
+- client, 3rdparty/c55lib: Command-line parameters
+- 3rdparty/cereal
+
