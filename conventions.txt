@@ -30,6 +30,9 @@ Use std::unique_ptr and std::shared_ptr. (core/types.h: up_<> and sp_<>)
 Function naming:
 - Suffix _u: Unsafe, not included in public interface
 
+Do not use assert(); throw anonymous exceptions instead:
+- if(fail) throw Exception("Thing failed");
+
 Non-exception throwing and exception-throwing methods
 -----------------------------------------------------
 - get_x: Returns NULL or equivalent if not found
