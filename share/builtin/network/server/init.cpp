@@ -19,20 +19,21 @@ struct Module: public interface::Module
 		m_socket(interface::createTCPSocket())
 	{
 		std::cout<<"network construct"<<std::endl;
-
-		ss_ address = "any4";
-		ss_ port = "20000";
-
-		if(!m_socket->bind_fd(address, port)){
-			std::cerr<<"Failed to bind to "<<address<<":"<<port<<std::endl;
-		} else {
-			std::cerr<<"Listening at "<<address<<":"<<port<<std::endl;
-		}
 	}
 
 	void init()
 	{
 		std::cout<<"network init"<<std::endl;
+
+		ss_ address = "any4";
+		ss_ port = "20000";
+
+		if(!m_socket->bind_fd(address, port) ||
+				!m_socket->listen_fd()){
+			std::cerr<<"Failed to bind to "<<address<<":"<<port<<std::endl;
+		} else {
+			std::cerr<<"Listening at "<<address<<":"<<port<<std::endl;
+		}
 		//m_server->add_socket(m_socket);
 	}
 
