@@ -69,6 +69,13 @@ struct CState: public State, public interface::Server
 			return NULL;
 		return it->second;
 	}
+
+	interface::Module* check_module(const ss_ &module_name)
+	{
+		interface::Module *m = get_module(module_name);
+		if(m) return m;
+		throw ModuleNotFoundException(ss_()+"Module not found: "+module_name);
+	}
 };
 
 State* createState()

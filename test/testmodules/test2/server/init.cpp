@@ -3,7 +3,6 @@
 #include "interface/event.h"
 #include "test1/include/api.h"
 #include <iostream>
-#include <assert.h>
 
 using interface::Event;
 
@@ -35,8 +34,7 @@ struct Module: public interface::Module
 
 	void start()
 	{
-		interface::Module *m = m_server->get_module("test1");
-		assert(m);
+		interface::Module *m = m_server->check_module("test1");
 		interface::Event event("test1:thing");
 		event.p.reset(new test1::Thing("Nakki"));
 		m->event(event);
