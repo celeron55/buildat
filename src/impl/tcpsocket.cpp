@@ -66,6 +66,8 @@ struct CTCPSocket: public TCPSocket
 {
 	int m_fd = 0;
 
+	CTCPSocket(int fd=0): m_fd(fd)
+	{}
 	int fd() const
 	{
 		return m_fd;
@@ -288,9 +290,9 @@ struct CTCPSocket: public TCPSocket
 	}
 };
 
-TCPSocket* createTCPSocket()
+TCPSocket* createTCPSocket(int fd)
 {
-	return new CTCPSocket();
+	return new CTCPSocket(fd);
 }
 
 }

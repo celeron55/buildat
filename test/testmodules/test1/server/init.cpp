@@ -15,7 +15,7 @@ struct Module: public interface::Module
 
 	Module(interface::Server *server):
 		m_server(server),
-		m_EventType_test1_thing(interface::Event::t("test1:thing"))
+		m_EventType_test1_thing(Event::t("test1:thing"))
 	{
 		std::cout<<"test1 construct"<<std::endl;
 	}
@@ -31,16 +31,16 @@ struct Module: public interface::Module
 		std::cout<<"test1 destruct"<<std::endl;
 	}
 
-	void event(const interface::Event &event)
+	void event(const Event &event)
 	{
 		if(event.type == m_EventType_test1_thing){
-			thing(static_cast<Thing*>(event.p.get()));
+			on_thing(*static_cast<Thing*>(event.p.get()));
 		}
 	}
 
-	void thing(const Thing *thing)
+	void on_thing(const Thing &thing)
 	{
-		std::cout<<"test1.thing: some_data="<<thing->some_data<<std::endl;
+		std::cout<<"test1.thing: some_data="<<thing.some_data<<std::endl;
 	}
 };
 

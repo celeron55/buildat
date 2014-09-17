@@ -19,6 +19,6 @@ namespace interface
 		virtual ss_ get_remote_address() const = 0;
 	};
 
-	TCPSocket* createTCPSocket();
+	TCPSocket* createTCPSocket(int fd=0);
 }
 

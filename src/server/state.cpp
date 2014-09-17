@@ -10,6 +10,8 @@
 #include <iostream>
 #include <algorithm>
 
+using interface::Event;
+
 extern server::Config g_server_config;
 
 namespace server {
@@ -23,17 +25,25 @@ struct CState: public State, public interface::Server
 		ModuleWithMutex(interface::Module *module=NULL): module(module){}
 	};
 
+	struct SocketState {
+		int fd = 0;
+		Event::Type event_type;
+	};
+
 	up_<rccpp::Compiler> m_compiler;
 	ss_ m_modules_path;
 
 	sm_<ss_, ModuleWithMutex> m_modules;
 	interface::Mutex m_modules_mutex;
 
-	sv_<interface::Event> m_event_queue;
+	sv_<Event> m_event_queue;
 	interface::Mutex m_event_queue_mutex;
 
 	sv_<sv_<ModuleWithMutex*>> m_event_subs;
 	interface::Mutex m_event_subs_mutex;
+
+	sm_<int, SocketState> m_sockets;
+	interface::Mutex m_sockets_mutex;
 
 	CState():
 		m_compiler(rccpp::createCompiler())
@@ -44,6 +54,8 @@ struct CState: public State, public interface::Server
 		    g_server_config.interface_path+"/..");
 		m_compiler->include_directories.push_back(
 		    g_server_config.interface_path+"/../../3rdparty/cereal/include");
+		m_compiler->include_directories.push_back(
+		    g_server_config.share_path+"/builtin");
 	}
 	~CState()
 	{
@@ -83,10 +95,10 @@ struct CState: public State, public interface::Server
 		ss_ first_module_path = path+"/__loader";
 		load_module("__loader", first_module_path);
 		// Allow loader load other modules
-		emit_event(interface::Event("core:load_modules"));
+		emit_event(Event("core:load_modules"));
 		handle_events();
 		// Now that everyone is listening, we can fire the start event
-		emit_event(interface::Event("core:start"));
+		emit_event(Event("core:start"));
 		handle_events();
 	}
 
@@ -124,7 +136,7 @@ struct CState: public State, public interface::Server
 	}
 
 	void sub_event(struct interface::Module *module,
-			const interface::Event::Type &type)
+			const Event::Type &type)
 	{
 		// Lock modules so that the subscribing one isn't removed asynchronously
 		interface::MutexScope ms(m_modules_mutex);
@@ -155,7 +167,7 @@ struct CState: public State, public interface::Server
 		sublist.push_back(mwm0);
 	}
 
-	void emit_event(const interface::Event &event)
+	void emit_event(const Event &event)
 	{
 		log_v("state", "emit_event(): type=%zu", event.type);
 		interface::MutexScope ms(m_event_queue_mutex);
@@ -167,7 +179,7 @@ struct CState: public State, public interface::Server
 		log_d("state", "handle_events()");
 		for(;;){
 			log_d("state", "m_event_subs.size()=%zu", m_event_subs.size());
-			sv_<interface::Event> event_queue_snapshot;
+			sv_<Event> event_queue_snapshot;
 			sv_<sv_<ModuleWithMutex*>> event_subs_snapshot;
 			{
 				interface::MutexScope ms2(m_event_queue_mutex);
@@ -180,7 +192,7 @@ struct CState: public State, public interface::Server
 			if(event_queue_snapshot.empty()){
 				break;
 			}
-			for(const interface::Event &event : event_queue_snapshot){
+			for(const Event &event : event_queue_snapshot){
 				if(event.type >= event_subs_snapshot.size()){
 					log_d("state", "handle_events(): %zu: No subs "
 							"(event_subs_snapshot.size()=%zu)",
@@ -199,6 +211,30 @@ struct CState: public State, public interface::Server
 				}
 			}
 		}
+	}
+
+	void add_socket_event(int fd, const Event::Type &event_type)
+	{
+		interface::MutexScope ms(m_sockets_mutex);
+		auto it = m_sockets.find(fd);
+		if(it == m_sockets.end()){
+			SocketState s;
+			s.fd = fd;
+			s.event_type = event_type;
+			m_sockets[fd] = s;
+			return;
+		}
+		const SocketState &s = it->second;
+		if(s.event_type != event_type){
+			throw Exception("Socket events already requested with different"
+					" event type");
+		}
+		// Nothing to do; already set.
+	}
+
+	void remove_socket_event(int fd)
+	{
+		// TODO
 	}
 };
 

@@ -11,11 +11,9 @@ namespace __loader {
 struct Module: public interface::Module
 {
 	interface::Server *m_server;
-	Event::Type m_EventType_core_load_modules;
 
 	Module(interface::Server *server):
 		m_server(server),
-		m_EventType_core_load_modules(interface::Event::t("core:load_modules"))
 	{
 		std::cout<<"__loader construct"<<std::endl;
 	}
@@ -23,7 +21,7 @@ struct Module: public interface::Module
 	void init()
 	{
 		std::cout<<"__loader init"<<std::endl;
-		m_server->sub_event(this, m_EventType_core_load_modules);
+		m_server->sub_event(this, Event::t("core:load_modules"));
 	}
 
 	~Module()
@@ -31,14 +29,14 @@ struct Module: public interface::Module
 		std::cout<<"__loader destruct"<<std::endl;
 	}
 
-	void event(const interface::Event &event)
+	void event(const Event &event)
 	{
-		if(event.type == m_EventType_core_load_modules){
-			load_modules();
+		if(event.type == Event::t("core:load_modules")){
+			on_load_modules();
 		}
 	}
 
-	void load_modules()
+	void on_load_modules()
 	{
 		m_server->load_module("network",
 		                      m_server->get_builtin_modules_path()+"/network");

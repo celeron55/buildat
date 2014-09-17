@@ -15,7 +15,7 @@ struct Module: public interface::Module
 
 	Module(interface::Server *server):
 		m_server(server),
-		m_EventType_core_start(interface::Event::t("core:start"))
+		m_EventType_core_start(Event::t("core:start"))
 	{
 		std::cout<<"test2 construct"<<std::endl;
 	}
@@ -31,19 +31,19 @@ struct Module: public interface::Module
 		std::cout<<"test2 destruct"<<std::endl;
 	}
 
-	void event(const interface::Event &event)
+	void event(const Event &event)
 	{
 		if(event.type == m_EventType_core_start){
-			start();
+			on_start();
 		}
 	}
 
-	void start()
+	void on_start()
 	{
 		std::cout<<"test2 start(): Calling test1"<<std::endl;
 
 		// Basic way
-		interface::Event event("test1:thing");
+		Event event("test1:thing");
 		event.p.reset(new test1::Thing("Nakki"));
 		m_server->emit_event(event);
 
