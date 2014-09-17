@@ -25,6 +25,11 @@ struct Module: public interface::Module
 		log_v(MODULE, "test1 construct");
 	}
 
+	~Module()
+	{
+		log_v(MODULE, "test1 destruct");
+	}
+
 	void init()
 	{
 		interface::MutexScope ms(m_interface_mutex);
@@ -34,11 +39,6 @@ struct Module: public interface::Module
 		m_server->sub_event(this, m_EventType_test1_thing);
 		m_server->sub_event(this, Event::t("network:new_client"));
 		m_server->sub_event(this, Event::t("network:packet_received"));
-	}
-
-	~Module()
-	{
-		log_v(MODULE, "test1 destruct");
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)

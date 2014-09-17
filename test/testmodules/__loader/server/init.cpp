@@ -19,15 +19,15 @@ struct Module: public interface::Module
 		log_v(MODULE, "__loader construct");
 	}
 
+	~Module()
+	{
+		log_v(MODULE, "__loader destruct");
+	}
+
 	void init()
 	{
 		log_v(MODULE, "__loader init");
 		m_server->sub_event(this, Event::t("core:load_modules"));
-	}
-
-	~Module()
-	{
-		log_v(MODULE, "__loader destruct");
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)

@@ -23,17 +23,17 @@ struct Module: public interface::Module
 		log_v(MODULE, "test2 construct");
 	}
 
+	~Module()
+	{
+		log_v(MODULE, "test2 destruct");
+	}
+
 	void init()
 	{
 		interface::MutexScope ms(m_interface_mutex);
 
 		log_v(MODULE, "test2 init");
 		m_server->sub_event(this, m_EventType_core_start);
-	}
-
-	~Module()
-	{
-		log_v(MODULE, "test2 destruct");
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)

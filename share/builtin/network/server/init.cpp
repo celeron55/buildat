@@ -70,6 +70,11 @@ struct Module: public interface::Module, public network::Interface
 		log_v(MODULE, "network construct");
 	}
 
+	~Module()
+	{
+		log_v(MODULE, "network destruct");
+	}
+
 	void init()
 	{
 		interface::MutexScope ms(m_interface_mutex);
@@ -78,11 +83,6 @@ struct Module: public interface::Module, public network::Interface
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("network:listen_event"));
 		m_server->sub_event(this, Event::t("network:incoming_data"));
-	}
-
-	~Module()
-	{
-		log_v(MODULE, "network destruct");
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
