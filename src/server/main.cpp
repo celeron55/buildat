@@ -45,7 +45,7 @@ int main(int argc, char *argv[])
 
 	std::string module_path;
 
-	const char opts[100] = "hm:r:i:S:";
+	const char opts[100] = "hm:r:i:S:l:";
 	const char usagefmt[1000] =
 	    "Usage: %s [OPTION]...\n"
 	    "  -h                   Show this help\n"
@@ -53,6 +53,7 @@ int main(int argc, char *argv[])
 	    "  -r [rccpp_build_path]Specify runtime compiled C++ build path\n"
 	    "  -i [interface_path]  Specify path to interface headers\n"
 	    "  -S [share_path]      Specify path to share/\n"
+	    "  -l [integer]         Set maximum log level (0...5)\n"
 	;
 
 	int c;
@@ -78,6 +79,9 @@ int main(int argc, char *argv[])
 		case 'S':
 			fprintf(stderr, "INFO: config.share_path: %s\n", c55_optarg);
 			config.share_path = c55_optarg;
+			break;
+		case 'l':
+			log_set_max_level(atoi(c55_optarg));
 			break;
 		default:
 			fprintf(stderr, "ERROR: Invalid command-line argument\n");
