@@ -1,5 +1,7 @@
 #pragma once
 #include <functional>
+#include <cstring> // memset()
+#include <unistd.h> // usleep()
 #include "os.h" // get_timeofday_us()
 #include "log.h"
 

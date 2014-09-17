@@ -15,10 +15,15 @@ struct Module: public interface::Module
 
 	Module(interface::Server *server):
 		m_server(server),
-		m_EventType_core_load_modules(
-		    interface::getGlobalEventRegistry()->type("core:load_modules"))
+		m_EventType_core_load_modules(interface::Event::t("core:load_modules"))
 	{
 		std::cout<<"__loader construct"<<std::endl;
+	}
+
+	void init()
+	{
+		std::cout<<"__loader init"<<std::endl;
+		m_server->sub_event(this, m_EventType_core_load_modules);
 	}
 
 	~Module()

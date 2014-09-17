@@ -28,8 +28,12 @@ struct Module: public interface::Module
 		} else {
 			std::cerr<<"Listening at "<<address<<":"<<port<<std::endl;
 		}
+	}
 
-		m_server->add_socket(m_socket);
+	void init()
+	{
+		std::cout<<"network init"<<std::endl;
+		//m_server->add_socket(m_socket);
 	}
 
 	~Module()

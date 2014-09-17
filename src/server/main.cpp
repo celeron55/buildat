@@ -1,14 +1,46 @@
 #include "core/types.h"
 #include "server/config.h"
 #include "server/state.h"
-#include <iostream>
 #include <c55/getopt.h>
 #include <c55/interval_loop.h>
+#include <iostream>
+#include <unistd.h>
+#include <signal.h>
 
 server::Config g_server_config;
 
+bool g_sigint_received = false;
+void sigint_handler(int sig)
+{
+	if(!g_sigint_received){
+		fprintf(stdout, "\n"); // Newline after "^C"
+		log_i("process", "SIGINT");
+		g_sigint_received = true;
+	} else{
+		(void)signal(SIGINT, SIG_DFL);
+	}
+}
+
+void signal_handler_init()
+{
+	(void)signal(SIGINT, sigint_handler);
+}
+
+void basic_init()
+{
+	signal_handler_init();
+
+	// Force '.' as decimal point
+	std::locale::global(std::locale(std::locale(""), "C", std::locale::numeric));
+	setlocale(LC_NUMERIC, "C");
+
+	log_set_max_level(LOG_VERBOSE);
+}
+
 int main(int argc, char *argv[])
 {
+	basic_init();
+
 	server::Config &config = g_server_config;
 
 	std::string module_path;
@@ -64,11 +96,12 @@ int main(int argc, char *argv[])
 	up_<server::State> state(server::createState());
 	state->load_modules(module_path);
 
-	/*// Main loop
+	// Main loop
 	uint64_t master_t_per_tick = 100000L; // 10Hz
 	interval_loop(master_t_per_tick, [&](float load_avg){
+		state->handle_events();
 		return !g_sigint_received;
-	});*/
+	});
 
 	return 0;
 }

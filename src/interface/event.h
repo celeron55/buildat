@@ -10,12 +10,14 @@ namespace interface
 			virtual ~Private(){}
 		};
 		Type type;
-		sp_<Private> p;
+		sp_<Private> p; // TODO: up_<>
 
 		Event(): type(0){}
 		Event(const Type &type): type(type){}
 		Event(const Type &type, const sp_<Private> &p): type(type), p(p){}
 		Event(const ss_ &name, const sp_<Private> &p = NULL);
+
+		static Type t(const ss_ &name); // Shorthand function
 	};
 
 	struct EventRegistry

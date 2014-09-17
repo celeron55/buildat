@@ -15,9 +15,15 @@ struct Module: public interface::Module
 
 	Module(interface::Server *server):
 		m_server(server),
-		m_EventType_core_start(interface::getGlobalEventRegistry()->type("core:start"))
+		m_EventType_core_start(interface::Event::t("core:start"))
 	{
 		std::cout<<"test2 construct"<<std::endl;
+	}
+
+	void init()
+	{
+		std::cout<<"test2 init"<<std::endl;
+		m_server->sub_event(this, m_EventType_core_start);
 	}
 
 	~Module()
@@ -34,10 +40,9 @@ struct Module: public interface::Module
 
 	void start()
 	{
-		interface::Module *m = m_server->check_module("test1");
 		interface::Event event("test1:thing");
 		event.p.reset(new test1::Thing("Nakki"));
-		m->event(event);
+		m_server->emit_event(event);
 	}
 };
 
