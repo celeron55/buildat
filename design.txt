@@ -42,3 +42,10 @@ The first module to be loaded is called __loader. It loads all other modules.
 C++ modules can use the core/ and interface/ headers. Everything else is
 considered unstable.
 
+Network protocol
+----------------
+(Type, length, data) tuples on TCP. In the future TLS can be taken into use. A
+name->type registry is used for determining numeric packet types.
+
+Data is freeform. Types 0...100 are reserved for initialization.
+
