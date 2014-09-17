@@ -4,7 +4,8 @@ Coding style
 ------------
 Look at the code. It is perfect and will be kept perfect. Requests to fix coding
 style are not to be taken personally by the one requesting, nor the one being
-requested to fix his style.
+requested to fix his style. If something is found to be missing from this
+document, such additions shall be made.
 
 The script (requires an unix shell and astyle):
 Always run util/codestyle.sh before committing. It handles most whitespace
@@ -17,6 +18,13 @@ Identifiers:
 - All member variables start with m_.
 
 Never use "class", always use "struct".
+
+Prefer lightweight interfaces with a creation function for the default
+implementation, like "struct State" and "State* createState()". The default
+implementation can be called "CState" in this case, if an obviously better name
+does not exist.
+
+Use std::unique_ptr and std::shared_ptr. (core/types.h: up_<> and sp_<>)
 
 Non-exception throwing and exception-throwing methods
 -----------------------------------------------------
