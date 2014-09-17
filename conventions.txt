@@ -15,7 +15,8 @@ Identifiers:
 - Class and struct names are CamelCase,
 - All function names are lowercase_with_underscores,
 - All variable names are lowercase_with_underscores,
-- All member variables start with m_.
+- All member variables start with m_. If the struct in question is a stupid data
+  container, this does not need to be followed.
 
 Never use "class", always use "struct".
 
@@ -25,6 +26,9 @@ implementation can be called "CState" in this case, if an obviously better name
 does not exist.
 
 Use std::unique_ptr and std::shared_ptr. (core/types.h: up_<> and sp_<>)
+
+Function naming:
+- Suffix _u: Unsafe, not included in public interface
 
 Non-exception throwing and exception-throwing methods
 -----------------------------------------------------

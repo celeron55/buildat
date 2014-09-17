@@ -53,6 +53,8 @@ include_directories("3rdparty/cereal/include")
 set(CLIENT_EXE_NAME buildat_client)
 set(CLIENT_SRCS
 	src/client/main.cpp
+	src/client/state.cpp
+	src/impl/tcpsocket.cpp
 )
 add_executable(${CLIENT_EXE_NAME} ${CLIENT_SRCS})
 TARGET_LINK_LIBRARIES(${CLIENT_EXE_NAME}

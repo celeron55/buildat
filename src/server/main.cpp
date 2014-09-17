@@ -2,7 +2,8 @@
 #include "server/config.h"
 #include "server/state.h"
 #include <iostream>
-#include <c55_getopt.h>
+#include <c55/getopt.h>
+#include <c55/interval_loop.h>
 
 server::Config g_server_config;
 
@@ -62,6 +63,12 @@ int main(int argc, char *argv[])
 
 	up_<server::State> state(server::createState());
 	state->load_modules(module_path);
+
+	/*// Main loop
+	uint64_t master_t_per_tick = 100000L; // 10Hz
+	interval_loop(master_t_per_tick, [&](float load_avg){
+		return !g_sigint_received;
+	});*/
 
 	return 0;
 }

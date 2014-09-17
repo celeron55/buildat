@@ -1,5 +1,10 @@
 Buildat TODO
 ============
-- A place for network to store its sockets while it is being reloaded
 - Cache a hash of each compiled module in order not to rebuild them
   unnecessarily
+- Modules should be unloadable if possible. Figure out if so, and how to handle
+  references to modules when unloading them.
+- There should be some kind of an easy synchronous calling mechanism between
+  modules.
+- Modules should be run in threads.
+- Event::Private has to be stored in an unique pointer.

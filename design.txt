@@ -30,17 +30,23 @@ module
 
 Module behavior
 ---------------
-All client scripts are automatically sent to the client. Everything else is
-handled by the module implementation.
+No script or data transfer to the client is initiated by the core. The
+module/client/init.lua file is a convention followed by the built-in modules.
 
-Modules cannot be unloaded at runtime. Module unload and reload can be simulated
-by restarting the server and clients automatically while keeping connections
-open. This requires POLYCODE_CORE to be recreated.
+Modules can be unloaded at runtime. Handling of client-side state is left up to
+the C++ modules themselves.
 
 The first module to be loaded is called __loader. It loads all other modules.
 
 C++ modules can use the core/ and interface/ headers. Everything else is
 considered unstable.
+
+C++ modules are run in threads, and everything they can officially access is
+thread-safe.
+
+C++ modules can provide direct library functionality inlined in their include/
+files. They cannot export any internally defined functions directly, but they
+can provide convenience wrappers for event-based interfaces.
 
 Network protocol
 ----------------

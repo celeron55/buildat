@@ -20,7 +20,7 @@ struct Module: public interface::Module
 	{
 		std::cout<<"network construct"<<std::endl;
 
-		ss_ address = "any";
+		ss_ address = "any4";
 		ss_ port = "20000";
 
 		if(!m_socket->bind_fd(address, port)){
@@ -28,6 +28,8 @@ struct Module: public interface::Module
 		} else {
 			std::cerr<<"Listening at "<<address<<":"<<port<<std::endl;
 		}
+
+		m_server->add_socket(m_socket);
 	}
 
 	~Module()

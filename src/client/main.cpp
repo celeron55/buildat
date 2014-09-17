@@ -1,5 +1,6 @@
 #include "core/types.h"
 #include "client/config.h"
+#include "client/state.h"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #include <Polycode.h>
@@ -7,7 +8,7 @@
 #include <PolycodeLUA.h>
 #include <OSBasics.h>
 #pragma GCC diagnostic pop
-#include <c55_getopt.h>
+#include <c55/getopt.h>
 
 using Polycode::PolycodeView;
 using Polycode::SDLCore;
@@ -324,6 +325,11 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 	}
+
+	up_<client::State> state(client::createState());
+
+	if(!state->connect(config.server_address, "20000"))
+		return 1;
 
 	PolycodeView *view = new PolycodeView("Hello Polycode!");
 	HelloPolycodeApp *app = new HelloPolycodeApp(view);
