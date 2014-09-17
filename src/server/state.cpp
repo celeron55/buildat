@@ -236,7 +236,7 @@ struct CState: public State, public interface::Server
 	void remove_socket_event(int fd)
 	{
 		interface::MutexScope ms(m_sockets_mutex);
-		// TODO
+		m_sockets.erase(fd);
 	}
 
 	sv_<int> get_sockets()

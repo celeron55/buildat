@@ -3,7 +3,6 @@
 #include "interface/tcpsocket.h"
 //#include <cereal/archives/binary.hpp>
 //#include <cereal/types/string.hpp>
-#include <iostream>
 #include <cstring>
 #include <deque>
 #include <sys/socket.h>

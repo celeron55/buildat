@@ -125,9 +125,13 @@ int main(int argc, char *argv[])
 		if(r == -1){
 			// Error
 			log_w("main", "select() returned -1: %s", strerror(errno));
-			// Don't consume 100% CPU and flood logs
-			usleep(1000 * 100);
-			return 1; // Temporary return
+			if(errno == EBADF || errno == EINTR){
+				// These are temporary errors
+			} else {
+				// Don't consume 100% CPU and flood logs
+				usleep(1000 * 100);
+				return 1;
+			}
 		} else if(r == 0){
 			// Nothing happened
 		} else {

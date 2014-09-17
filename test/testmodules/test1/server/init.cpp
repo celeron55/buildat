@@ -33,6 +33,7 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, m_EventType_test1_thing);
 		m_server->sub_event(this, Event::t("network:new_client"));
+		m_server->sub_event(this, Event::t("network:packet_received"));
 	}
 
 	~Module()
@@ -47,6 +48,7 @@ struct Module: public interface::Module
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_TYPE(m_EventType_test1_thing, on_thing, Thing)
 		EVENT_TYPEN("network:new_client", on_new_client, network::NewClient)
+		EVENT_TYPEN("network:packet_received", on_packet_received, network::Packet)
 	}
 
 	void on_start()
@@ -64,6 +66,12 @@ struct Module: public interface::Module
 
 		network::Interface *inetwork = network::get_interface(m_server);
 		inetwork->send(new_client.info.id, "test1:dummy", "dummy data");
+	}
+
+	void on_packet_received(const network::Packet &packet)
+	{
+		log_i(MODULE, "test1::on_packet_received: type=%zu, size=%zu",
+				packet.type, packet.data.size());
 	}
 };
 
