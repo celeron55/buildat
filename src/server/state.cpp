@@ -82,10 +82,12 @@ struct CState: public State, public interface::Server
 		m_modules_path = path;
 		ss_ first_module_path = path+"/__loader";
 		load_module("__loader", first_module_path);
-		log_v("state", "asd");
+		// Allow loader load other modules
 		emit_event(interface::Event("core:load_modules"));
+		handle_events();
+		// Now that everyone is listening, we can fire the start event
 		emit_event(interface::Event("core:start"));
-		log_v("state", "asd2");
+		handle_events();
 	}
 
 	ss_ get_modules_path()
@@ -142,7 +144,7 @@ struct CState: public State, public interface::Server
 			return;
 		}
 		interface::MutexScope ms2(m_event_subs_mutex);
-		if(m_event_subs.size() <= type)
+		if(m_event_subs.size() <= type+1)
 			m_event_subs.resize(type+1);
 		sv_<ModuleWithMutex*> &sublist = m_event_subs[type];
 		if(std::find(sublist.begin(), sublist.end(), mwm0) != sublist.end()){
@@ -163,24 +165,36 @@ struct CState: public State, public interface::Server
 	void handle_events()
 	{
 		log_d("state", "handle_events()");
-		interface::MutexScope ms(m_modules_mutex);
 		for(;;){
+			log_d("state", "m_event_subs.size()=%zu", m_event_subs.size());
 			sv_<interface::Event> event_queue_snapshot;
 			sv_<sv_<ModuleWithMutex*>> event_subs_snapshot;
 			{
 				interface::MutexScope ms2(m_event_queue_mutex);
 				interface::MutexScope ms3(m_event_subs_mutex);
+				// Swap to clear queue
 				m_event_queue.swap(event_queue_snapshot);
-				m_event_subs.swap(event_subs_snapshot);
+				// Copy to leave subscriptions active
+				event_subs_snapshot = m_event_subs;
 			}
 			if(event_queue_snapshot.empty()){
 				break;
 			}
 			for(const interface::Event &event : event_queue_snapshot){
-				if(event_subs_snapshot.size() <= event.type)
+				if(event.type >= event_subs_snapshot.size()){
+					log_d("state", "handle_events(): %zu: No subs "
+							"(event_subs_snapshot.size()=%zu)",
+							event.type, event_subs_snapshot.size());
 					continue;
+				}
 				sv_<ModuleWithMutex*> &sublist = event_subs_snapshot[event.type];
+				if(sublist.empty()){
+					log_d("state", "handle_events(): %zu: No subs", event.type);
+					continue;
+				}
+				log_d("state", "handle_events(): %zu: Handling", event.type);
 				for(ModuleWithMutex *mwm : sublist){
+					interface::MutexScope mwm_ms(mwm->mutex);
 					mwm->module->event(event);
 				}
 			}
