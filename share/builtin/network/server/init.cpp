@@ -40,6 +40,7 @@ struct Module: public interface::Module
 		std::cout<<"network init"<<std::endl;
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("network:send"));
+		m_server->sub_event(this, Event::t("network:listen_event"));
 	}
 
 	~Module()
@@ -55,8 +56,8 @@ struct Module: public interface::Module
 		if(event.type == Event::t("network:send")){
 			on_send_packet(*static_cast<Packet*>(event.p.get()));
 		}
-		if(event.type == Event::t("network:listen")){
-			on_listen_event();
+		if(event.type == Event::t("network:listen_event")){
+			on_listen_event(*static_cast<interface::SocketEvent*>(event.p.get()));
 		}
 	}
 
@@ -74,9 +75,6 @@ struct Module: public interface::Module
 
 		m_server->add_socket_event(m_listening_socket->fd(),
 				Event::t("network:listen_event"));
-
-		/*Peer::Id peer_id = m_next_peer_id++;
-		m_peers[peer_id] = Peer(peer_id, socket);*/
 	}
 
 	void on_send_packet(const Packet &packet)
@@ -84,9 +82,13 @@ struct Module: public interface::Module
 		// TODO
 	}
 
-	void on_listen_event()
+	void on_listen_event(const interface::SocketEvent &event)
 	{
-		std::cerr<<"network: on_listen_event()"<<std::endl;
+		std::cerr<<"network: on_listen_event(): fd="<<event.fd<<std::endl;
+		sp_<interface::TCPSocket> socket(interface::createTCPSocket());
+		socket->accept_fd(*m_listening_socket.get());
+		Peer::Id peer_id = m_next_peer_id++;
+		m_peers[peer_id] = Peer(peer_id, socket);
 	}
 };
 

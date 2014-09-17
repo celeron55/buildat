@@ -169,16 +169,14 @@ struct CState: public State, public interface::Server
 
 	void emit_event(const Event &event)
 	{
-		log_v("state", "emit_event(): type=%zu", event.type);
+		log_d("state", "emit_event(): type=%zu", event.type);
 		interface::MutexScope ms(m_event_queue_mutex);
 		m_event_queue.push_back(event);
 	}
 
 	void handle_events()
 	{
-		log_d("state", "handle_events()");
-		for(;;){
-			log_d("state", "m_event_subs.size()=%zu", m_event_subs.size());
+		for(size_t loop_i=0; ; loop_i++){
 			sv_<Event> event_queue_snapshot;
 			sv_<sv_<ModuleWithMutex*>> event_subs_snapshot;
 			{
@@ -190,13 +188,13 @@ struct CState: public State, public interface::Server
 				event_subs_snapshot = m_event_subs;
 			}
 			if(event_queue_snapshot.empty()){
+				if(loop_i == 0)
+					log_d("state", "handle_events(); Nothing to do");
 				break;
 			}
 			for(const Event &event : event_queue_snapshot){
 				if(event.type >= event_subs_snapshot.size()){
-					log_d("state", "handle_events(): %zu: No subs "
-							"(event_subs_snapshot.size()=%zu)",
-							event.type, event_subs_snapshot.size());
+					log_d("state", "handle_events(): %zu: No subs", event.type);
 					continue;
 				}
 				sv_<ModuleWithMutex*> &sublist = event_subs_snapshot[event.type];
@@ -204,7 +202,8 @@ struct CState: public State, public interface::Server
 					log_d("state", "handle_events(): %zu: No subs", event.type);
 					continue;
 				}
-				log_d("state", "handle_events(): %zu: Handling", event.type);
+				log_d("state", "handle_events(): %zu: Handling (%zu handlers)",
+						event.type, sublist.size());
 				for(ModuleWithMutex *mwm : sublist){
 					interface::MutexScope mwm_ms(mwm->mutex);
 					mwm->module->event(event);
@@ -215,6 +214,7 @@ struct CState: public State, public interface::Server
 
 	void add_socket_event(int fd, const Event::Type &event_type)
 	{
+		log_d("state", "add_socket_event(): fd=%i", fd);
 		interface::MutexScope ms(m_sockets_mutex);
 		auto it = m_sockets.find(fd);
 		if(it == m_sockets.end()){
@@ -258,7 +258,10 @@ struct CState: public State, public interface::Server
 			return;
 		}
 		SocketState &s = it->second;
-		emit_event(Event(s.event_type));
+		// Create and emit event
+		interface::Event event(s.event_type);
+		event.p.reset(new interface::SocketEvent(fd));
+		emit_event(event);
 	}
 };
 

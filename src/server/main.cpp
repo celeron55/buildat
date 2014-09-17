@@ -2,10 +2,12 @@
 #include "server/config.h"
 #include "server/state.h"
 #include <c55/getopt.h>
-#include <c55/interval_loop.h>
+#include <c55/os.h>
+#include <c55/log.h>
 #include <iostream>
 #include <unistd.h>
 #include <signal.h>
+#include <string.h> // strerror()
 
 server::Config g_server_config;
 
@@ -101,11 +103,54 @@ int main(int argc, char *argv[])
 	state->load_modules(module_path);
 
 	// Main loop
-	uint64_t master_t_per_tick = 100000L; // 10Hz
-	interval_loop(master_t_per_tick, [&](float load_avg){
+	uint64_t next_tick_us = get_timeofday_us();
+	uint64_t t_per_tick = 1000*100;
+	while(!g_sigint_received){
+		struct timeval tv;
+		tv.tv_sec = 0;
+		tv.tv_usec = t_per_tick;
+
+		fd_set rfds;
+		FD_ZERO(&rfds);
+		sv_<int> sockets = state->get_sockets();
+		int fd_max = 0;
+		for(int fd : sockets){
+			FD_SET(fd, &rfds);
+			if(fd > fd_max)
+				fd_max = fd;
+		}
+
+		int r = select(fd_max+1, &rfds, NULL, NULL, &tv);
+		if(r == -1){
+			// Error
+			log_w("main", "select() returned -1: %s", strerror(errno));
+			// Don't consume 100% CPU and flood logs
+			usleep(1000*100);
+			return 1; // Temporary return
+		} else if(r == 0){
+			// Nothing happened
+		} else {
+			// Something happened
+			for(int fd : sockets){
+				if(FD_ISSET(fd, &rfds)){
+					log_d("main", "FD_ISSET: %i", fd);
+					state->emit_socket_event(fd);
+				}
+			}
+		}
+
+		uint64_t current_us = get_timeofday_us();
+		if(current_us >= next_tick_us){
+			next_tick_us += t_per_tick;
+			if(next_tick_us < current_us - 1000*1000){
+				log_w("main", "Skipping %zuus", current_us - next_tick_us);
+				next_tick_us = current_us;
+			}
+			state->emit_event(interface::Event("core:tick"));
+		}
+
 		state->handle_events();
-		return !g_sigint_received;
-	});
+	}
 
 	return 0;
 }

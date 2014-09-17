@@ -6,6 +6,12 @@ namespace interface
 {
 	struct Module;
 
+	struct SocketEvent: public interface::Event::Private
+	{
+		int fd;
+		SocketEvent(int fd): fd(fd){}
+	};
+
 	struct Server
 	{
 		virtual ~Server(){}

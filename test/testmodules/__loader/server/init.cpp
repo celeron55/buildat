@@ -13,7 +13,7 @@ struct Module: public interface::Module
 	interface::Server *m_server;
 
 	Module(interface::Server *server):
-		m_server(server),
+		m_server(server)
 	{
 		std::cout<<"__loader construct"<<std::endl;
 	}

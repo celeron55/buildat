@@ -23,6 +23,11 @@ struct CState: public State
 			         <<address<<":"<<port<<")"<<std::endl;
 		return ok;
 	}
+
+	bool send(const ss_ &data)
+	{
+		return m_socket->send_fd(data);
+	}
 };
 
 State* createState()

@@ -64,10 +64,15 @@ std::string address_bytes_to_string(const sv_<uchar> &ip)
 
 struct CTCPSocket: public TCPSocket
 {
-	int m_fd = 0;
+	int m_fd = -1;
 
-	CTCPSocket(int fd=0): m_fd(fd)
+	CTCPSocket(int fd=-1):
+		m_fd(fd)
 	{}
+	~CTCPSocket()
+	{
+		close_fd();
+	}
 	int fd() const
 	{
 		return m_fd;
