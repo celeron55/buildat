@@ -3,7 +3,7 @@
 #include "interface/event.h"
 #include "interface/mutex.h"
 #include "test1/include/api.h"
-#include <iostream>
+#include "core/log.h"
 
 using interface::Event;
 
@@ -20,20 +20,20 @@ struct Module: public interface::Module
 		m_server(server),
 		m_EventType_core_start(Event::t("core:start"))
 	{
-		std::cout<<"test2 construct"<<std::endl;
+		log_v(MODULE, "test2 construct");
 	}
 
 	void init()
 	{
 		interface::MutexScope ms(m_interface_mutex);
 
-		std::cout<<"test2 init"<<std::endl;
+		log_v(MODULE, "test2 init");
 		m_server->sub_event(this, m_EventType_core_start);
 	}
 
 	~Module()
 	{
-		std::cout<<"test2 destruct"<<std::endl;
+		log_v(MODULE, "test2 destruct");
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -47,7 +47,7 @@ struct Module: public interface::Module
 
 	void on_start()
 	{
-		std::cout<<"test2 start(): Calling test1"<<std::endl;
+		log_i(MODULE, "test2 start(): Calling test1");
 
 		{	// Raw
 			Event::Type type = Event::t("test1:thing");

@@ -4,8 +4,7 @@
 #include "interface/mutex.h"
 #include "test1/include/api.h"
 #include "network/include/api.h"
-#include <iostream>
-//#include <dlfcn.h>
+#include "core/log.h"
 
 using interface::Event;
 
@@ -23,14 +22,14 @@ struct Module: public interface::Module
 		m_server(server),
 		m_EventType_test1_thing(Event::t("test1:thing"))
 	{
-		std::cout<<"test1 construct"<<std::endl;
+		log_v(MODULE, "test1 construct");
 	}
 
 	void init()
 	{
 		interface::MutexScope ms(m_interface_mutex);
 
-		std::cout<<"test1 init"<<std::endl;
+		log_v(MODULE, "test1 init");
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, m_EventType_test1_thing);
 		m_server->sub_event(this, Event::t("network:new_client"));
@@ -38,7 +37,7 @@ struct Module: public interface::Module
 
 	~Module()
 	{
-		std::cout<<"test1 destruct"<<std::endl;
+		log_v(MODULE, "test1 destruct");
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -56,12 +55,12 @@ struct Module: public interface::Module
 
 	void on_thing(const Thing &thing)
 	{
-		std::cout<<"test1.thing: some_data="<<thing.some_data<<std::endl;
+		log_i(MODULE, "test1.thing: some_data=%s", cs(thing.some_data));
 	}
 
 	void on_new_client(const network::NewClient &new_client)
 	{
-		std::cout<<"test1::on_new_client: id="<<new_client.info.id<<std::endl;
+		log_i(MODULE, "test1::on_new_client: id=%zu", new_client.info.id);
 
 		network::Interface *inetwork = network::get_interface(m_server);
 		inetwork->send(new_client.info.id, "test1:dummy", "dummy data");

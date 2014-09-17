@@ -8,8 +8,8 @@ namespace interface
 {
 	struct Module
 	{
-		const char *NAME = "(unknown module)";
-		Module(const char *name): NAME(name){}
+		const char *MODULE = "(unknown module)";
+		Module(const char *name): MODULE(name){}
 		virtual ~Module(){};
 		virtual void init() = 0;
 		virtual void event(const Event::Type &type, const Event::Private *p) = 0;

@@ -1,10 +1,10 @@
 #include "core/types.h"
+#include "core/log.h"
 #include "server/config.h"
 #include "server/state.h"
 #include "interface/server.h"
 #include <c55/getopt.h>
 #include <c55/os.h>
-#include <c55/log.h>
 #include <iostream>
 #include <unistd.h>
 #include <signal.h>

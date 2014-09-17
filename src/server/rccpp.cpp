@@ -1,24 +1,21 @@
 #include "rccpp.h"
 #include "interface/server.h"
-
+#include "core/log.h"
 #include <c55/filesys.h>
-
 #include <vector>
 #include <string>
 #include <iostream>
-
 #include <unistd.h>
 #include <sys/wait.h>
 #include <dlfcn.h>
-
 #include <cstddef>
-
 #include <vector>
 #include <cassert>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <algorithm>
+#define MODULE "__rccpp"
 
 namespace rccpp {
 
@@ -83,7 +80,7 @@ bool CCompiler::compile(const std::string &in_path, const std::string &out_path)
 	command += " -o"+out_path;
 	command += " "+in_path;
 
-	//std::cout<<">>> "<< command<<std::endl;
+	//log_i(MODULE, ">>> %s", cs(command));
 
 	// Fork for compilation.
 	int f = fork();
@@ -101,21 +98,20 @@ bool CCompiler::compile(const std::string &in_path, const std::string &out_path)
 bool CCompiler::build(const std::string &module_name,
                       const std::string &in_path, const std::string &out_path)
 {
-	std::cout<<"Building "<<module_name<<": "
-			<<in_path<<" -> "<<out_path<<"... ";
+	log_ni(MODULE, "Building %s: %s -> %s... ", cs(module_name), cs(in_path), cs(out_path));
 
 	std::string out_dir = c55fs::stripFilename(out_path);
 	c55fs::CreateAllDirs(out_dir);
 
 	if(!compile(in_path, out_path)){
-		std::cout<<"Failed!"<<std::endl;
+		log_i(MODULE, "Failed!");
 		return false;
 	}
-	std::cout<<"Success!"<<std::endl;
+	log_i(MODULE, "Success!");
 
 	void *new_module = library_load(out_path.c_str());
 	if(new_module == NULL){
-		std::cout<<"Failed to load compiled library: "<<dlerror()<<std::endl;
+		log_i(MODULE, "Failed to load compiled library: %s", dlerror());
 		return false;
 	}
 
@@ -123,7 +119,7 @@ bool CCompiler::build(const std::string &module_name,
 	RCCPP_Constructor constructor = (RCCPP_Constructor)library_get_address(
 			new_module, constructor_name.c_str());
 	if(constructor == nullptr){
-		std::cout<<constructor_name<<" is missing from the library"<<std::endl;
+		log_i(MODULE, "%s is missing from the library", cs(constructor_name));
 		return false;
 	}
 

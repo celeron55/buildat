@@ -2,7 +2,7 @@
 #include "interface/server.h"
 #include "interface/fs.h"
 #include "interface/event.h"
-#include <iostream>
+#include "core/log.h"
 
 using interface::Event;
 
@@ -16,18 +16,18 @@ struct Module: public interface::Module
 		interface::Module("__loader"),
 		m_server(server)
 	{
-		std::cout<<"__loader construct"<<std::endl;
+		log_v(MODULE, "__loader construct");
 	}
 
 	void init()
 	{
-		std::cout<<"__loader init"<<std::endl;
+		log_v(MODULE, "__loader init");
 		m_server->sub_event(this, Event::t("core:load_modules"));
 	}
 
 	~Module()
 	{
-		std::cout<<"__loader destruct"<<std::endl;
+		log_v(MODULE, "__loader destruct");
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)

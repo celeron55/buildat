@@ -68,6 +68,7 @@ set(SERVER_SRCS
 	src/server/main.cpp
 	src/server/state.cpp
 	src/server/rccpp.cpp
+	src/core/log.cpp
 	src/impl/fs.cpp
 	src/impl/event.cpp
 	src/impl/tcpsocket.cpp

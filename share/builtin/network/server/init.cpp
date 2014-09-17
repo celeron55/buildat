@@ -4,6 +4,7 @@
 #include "interface/tcpsocket.h"
 #include "interface/mutex.h"
 #include "network/include/api.h"
+#include "core/log.h"
 #include <iostream>
 
 using interface::Event;
@@ -51,21 +52,21 @@ struct Module: public interface::Module, public network::Interface
 		m_server(server),
 		m_listening_socket(interface::createTCPSocket())
 	{
-		std::cout<<"network construct"<<std::endl;
+		log_v(MODULE, "network construct");
 	}
 
 	void init()
 	{
 		interface::MutexScope ms(m_interface_mutex);
 
-		std::cout<<"network init"<<std::endl;
+		log_v(MODULE, "network init");
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("network:listen_event"));
 	}
 
 	~Module()
 	{
-		std::cout<<"network destruct"<<std::endl;
+		log_v(MODULE, "network destruct");
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -88,9 +89,9 @@ struct Module: public interface::Module, public network::Interface
 
 		if(!m_listening_socket->bind_fd(address, port) ||
 				!m_listening_socket->listen_fd()){
-			std::cerr<<"Failed to bind to "<<address<<":"<<port<<std::endl;
+			log_i(MODULE, "Failed to bind to %s:%s", cs(address), cs(port));
 		} else {
-			std::cerr<<"Listening at "<<address<<":"<<port<<std::endl;
+			log_i(MODULE, "Listening at %s:%s", cs(address), cs(port));
 		}
 
 		m_server->add_socket_event(m_listening_socket->fd(),
@@ -99,7 +100,7 @@ struct Module: public interface::Module, public network::Interface
 
 	void on_listen_event(const interface::SocketEvent &event)
 	{
-		std::cerr<<"network: on_listen_event(): fd="<<event.fd<<std::endl;
+		log_i(MODULE, "network: on_listen_event(): fd=%i", event.fd);
 		// Create socket
 		sp_<interface::TCPSocket> socket(interface::createTCPSocket());
 		// Accept connection
@@ -125,7 +126,7 @@ struct Module: public interface::Module, public network::Interface
 
 	void send(PeerInfo::Id recipient, const Packet::Type &type, const ss_ &data)
 	{
-		std::cerr<<"network::send()"<<std::endl;
+		log_i(MODULE, "network::send()");
 		interface::MutexScope ms(m_interface_mutex);
 
 		auto it = m_peers.find(recipient);

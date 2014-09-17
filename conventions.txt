@@ -38,6 +38,10 @@ Naming:
 - "name": A string; generally works as an identifier but not necessarily
 - "id":   Numeric id of an instance of something that is not a type
 
+Logging:
+- Use core/log.h. Only use stdout directly in case of an interactive command
+  line interface (like printing errors in command line arguments).
+
 Non-exception throwing and exception-throwing methods
 -----------------------------------------------------
 - get_x: Returns NULL or equivalent if not found

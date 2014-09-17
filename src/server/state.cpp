@@ -1,14 +1,15 @@
 #include "state.h"
 #include "rccpp.h"
 #include "config.h"
+#include "core/log.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
 //#include "interface/thread.h"
 #include "interface/mutex.h"
-#include <c55/log.h>
 #include <iostream>
 #include <algorithm>
+#define MODULE "__state"
 
 using interface::Event;
 
@@ -71,7 +72,7 @@ struct CState: public State, public interface::Server
 	{
 		interface::MutexScope ms(m_modules_mutex);
 
-		std::cerr<<"Loading module "<<module_name<<" from "<<path<<std::endl;
+		log_i(MODULE, "Loading module %s from %s", cs(module_name), cs(path));
 		ss_ build_dst = g_server_config.rccpp_build_path +
 				"/"+module_name+".so";
 		m_compiler->include_directories.push_back(m_modules_path);
@@ -152,7 +153,7 @@ struct CState: public State, public interface::Server
 			}
 		}
 		if(mc0 == nullptr){
-			std::cerr<<"sub_event(): Not a known module"<<std::endl;
+			log_w(MODULE, "sub_event(): Not a known module");
 			return;
 		}
 		interface::MutexScope ms2(m_event_subs_mutex);
@@ -160,11 +161,10 @@ struct CState: public State, public interface::Server
 			m_event_subs.resize(type + 1);
 		sv_<ModuleContainer*> &sublist = m_event_subs[type];
 		if(std::find(sublist.begin(), sublist.end(), mc0) != sublist.end()){
-			std::cerr<<"sub_event(): Already on list: "<<module_name<<std::endl;
+			log_w(MODULE, "sub_event(): Already on list: %s", cs(module_name));
 			return;
 		}
-		std::cerr<<"sub_event(): "<<module_name<<" subscribed to "<<type <<
-				std::endl;
+		log_v(MODULE, "sub_event(): %s subscribed to %zu", cs(module_name), type);
 		sublist.push_back(mc0);
 	}
 
