@@ -29,9 +29,9 @@ struct Module: public interface::Module
 		std::cout<<"__loader destruct"<<std::endl;
 	}
 
-	void event(const Event &event)
+	void event(const Event::Type &type, const Event::Private *p)
 	{
-		if(event.type == Event::t("core:load_modules")){
+		if(type == Event::t("core:load_modules")){
 			on_load_modules();
 		}
 	}

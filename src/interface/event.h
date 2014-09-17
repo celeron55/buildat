@@ -10,7 +10,7 @@ namespace interface
 			virtual ~Private(){}
 		};
 		Type type;
-		sp_<Private> p; // TODO: up_<>
+		sp_<Private> p;
 
 		Event(): type(0){}
 		Event(const Type &type): type(type){}

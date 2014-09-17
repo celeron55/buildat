@@ -48,16 +48,16 @@ struct Module: public interface::Module
 		std::cout<<"network destruct"<<std::endl;
 	}
 
-	void event(const Event &event)
+	void event(const Event::Type &type, const Event::Private *p)
 	{
-		if(event.type == Event::t("core:start")){
+		if(type == Event::t("core:start")){
 			on_start();
 		}
-		if(event.type == Event::t("network:send")){
-			on_send_packet(*static_cast<Packet*>(event.p.get()));
+		if(type == Event::t("network:send")){
+			on_send_packet(*static_cast<const Packet*>(p));
 		}
-		if(event.type == Event::t("network:listen_event")){
-			on_listen_event(*static_cast<interface::SocketEvent*>(event.p.get()));
+		if(type == Event::t("network:listen_event")){
+			on_listen_event(*static_cast<const interface::SocketEvent*>(p));
 		}
 	}
 

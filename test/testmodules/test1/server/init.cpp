@@ -31,10 +31,10 @@ struct Module: public interface::Module
 		std::cout<<"test1 destruct"<<std::endl;
 	}
 
-	void event(const Event &event)
+	void event(const Event::Type &type, const Event::Private *p)
 	{
-		if(event.type == m_EventType_test1_thing){
-			on_thing(*static_cast<Thing*>(event.p.get()));
+		if(type == m_EventType_test1_thing){
+			on_thing(*static_cast<const Thing*>(p));
 		}
 	}
 

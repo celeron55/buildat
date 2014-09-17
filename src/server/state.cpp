@@ -207,7 +207,7 @@ struct CState: public State, public interface::Server
 				      event.type, sublist.size());
 				for(ModuleWithMutex *mwm : sublist){
 					interface::MutexScope mwm_ms(mwm->mutex);
-					mwm->module->event(event);
+					mwm->module->event(event.type, event.p.get());
 				}
 			}
 		}

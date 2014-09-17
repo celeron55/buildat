@@ -31,9 +31,9 @@ struct Module: public interface::Module
 		std::cout<<"test2 destruct"<<std::endl;
 	}
 
-	void event(const Event &event)
+	void event(const Event::Type &type, const Event::Private *p)
 	{
-		if(event.type == m_EventType_core_start){
+		if(type == m_EventType_core_start){
 			on_start();
 		}
 	}
