@@ -5,6 +5,8 @@
 #include "interface/mutex.h"
 #include "network/include/api.h"
 #include "core/log.h"
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/string.hpp>
 #include <iostream>
 
 using interface::Event;
@@ -129,14 +131,23 @@ struct Module: public interface::Module, public network::Interface
 		log_i(MODULE, "network::send()");
 		interface::MutexScope ms(m_interface_mutex);
 
+		// Grab socket
 		auto it = m_peers.find(recipient);
 		if(it == m_peers.end()){
 			throw Exception(ss_()+"network::send(): Peer "+itos(recipient) +
 					" doesn't exist");
 		}
 		Peer &peer = it->second;
-		// TODO: Create actual packet including type and length
-		peer.socket->send_fd(data);
+
+		// Create actual packet including type and length
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::BinaryOutputArchive ar(os);
+			ar(type, data);
+		}
+
+		// Send packet
+		peer.socket->send_fd(os.str());
 	}
 
 	void send(PeerInfo::Id recipient, const ss_ &name, const ss_ &data)

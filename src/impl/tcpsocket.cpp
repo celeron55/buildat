@@ -1,4 +1,5 @@
 #include "interface/tcpsocket.h"
+#include "core/log.h"
 #include <iostream>
 #include <unistd.h>
 #include <sys/types.h>
@@ -266,6 +267,34 @@ struct CTCPSocket: public TCPSocket
 			return false;
 		}
 		return true;
+	}
+	bool wait_data(int timeout_us)
+	{
+		struct timeval tv;
+		tv.tv_sec = 0;
+		tv.tv_usec = timeout_us;
+
+		fd_set rfds;
+		FD_ZERO(&rfds);
+		int fd_max = m_fd;
+		FD_SET(m_fd, &rfds);
+
+		int r = select(fd_max + 1, &rfds, NULL, NULL, &tv);
+		if(r == -1){
+			// Error
+			log_w("tcpsocket", "select() returned -1: %s", strerror(errno));
+			return false;
+		} else if(r == 0){
+			// Nothing happened
+			return false;
+		} else {
+			// Something happened
+			if(FD_ISSET(m_fd, &rfds)){
+				log_d("tcpsocket", "FD_ISSET: %i", m_fd);
+				return true;
+			}
+		}
+		return false;
 	}
 	ss_ get_local_address() const
 	{

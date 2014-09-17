@@ -9,6 +9,9 @@
 #include <OSBasics.h>
 #pragma GCC diagnostic pop
 #include <c55/getopt.h>
+#include <core/log.h>
+#include <signal.h>
+#define MODULE "__main"
 
 using Polycode::PolycodeView;
 using Polycode::SDLCore;
@@ -178,6 +181,9 @@ public:
 	HelloPolycodeApp(Polycode::PolycodeView *view);
 	~HelloPolycodeApp();
 	bool Update();
+	void Shutdown(){
+		core->Shutdown();
+	}
 
 private:
 	Polycode::Core *core;
@@ -286,8 +292,38 @@ bool HelloPolycodeApp::Update(){
 	return core->updateAndRender();
 }
 
+bool g_sigint_received = false;
+void sigint_handler(int sig)
+{
+	if(!g_sigint_received){
+		fprintf(stdout, "\n"); // Newline after "^C"
+		log_i("process", "SIGINT");
+		g_sigint_received = true;
+	} else {
+		(void)signal(SIGINT, SIG_DFL);
+	}
+}
+
+void signal_handler_init()
+{
+	(void)signal(SIGINT, sigint_handler);
+}
+
+void basic_init()
+{
+	signal_handler_init();
+
+	// Force '.' as decimal point
+	std::locale::global(std::locale(std::locale(""), "C", std::locale::numeric));
+	setlocale(LC_NUMERIC, "C");
+
+	log_set_max_level(LOG_VERBOSE);
+}
+
 int main(int argc, char *argv[])
 {
+	basic_init();
+
 	client::Config &config = g_client_config;
 
 	const char opts[100] = "hs:p:P:";
@@ -334,6 +370,10 @@ int main(int argc, char *argv[])
 
 	PolycodeView *view = new PolycodeView("Hello Polycode!");
 	HelloPolycodeApp *app = new HelloPolycodeApp(view);
-	while(app->Update());
+	while(app->Update()){
+		state->update();
+		if(g_sigint_received)
+			app->Shutdown();
+	}
 	return 0;
 }

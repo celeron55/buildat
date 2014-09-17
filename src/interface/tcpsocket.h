@@ -15,6 +15,7 @@ namespace interface
 		virtual bool bind_fd(const ss_ &address, const ss_ &port) = 0;
 		virtual bool accept_fd(const TCPSocket &listener) = 0;
 		virtual bool send_fd(const ss_ &data) = 0;
+		virtual bool wait_data(int timeout_us) = 0;
 		virtual ss_ get_local_address() const = 0;
 		virtual ss_ get_remote_address() const = 0;
 	};

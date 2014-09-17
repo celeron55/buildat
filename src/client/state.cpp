@@ -1,6 +1,8 @@
 #include "client/state.h"
 #include "interface/tcpsocket.h"
 #include <iostream>
+#include <cstring>
+#include <sys/socket.h>
 
 namespace client {
 
@@ -27,6 +29,27 @@ struct CState: public State
 	bool send(const ss_ &data)
 	{
 		return m_socket->send_fd(data);
+	}
+
+	void update()
+	{
+		if(m_socket->wait_data(0)){
+			read_socket();
+		}
+	}
+
+	void read_socket()
+	{
+		int fd = m_socket->fd();
+		char buf[1000];
+		ssize_t r = recv(fd, buf, 1000, 0);
+		if(r == -1)
+			throw Exception(ss_()+"Receive failed: "+strerror(errno));
+		if(r == 0){
+			std::cerr<<"Peer disconnected"<<std::endl;
+			return;
+		}
+		std::cerr<<"Received "<<r<<" bytes"<<std::endl;
 	}
 };
 
