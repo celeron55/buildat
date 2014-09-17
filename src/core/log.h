@@ -14,7 +14,7 @@ void log_nl();
 #define LOG_DEBUG 5
 #define LOG_TRACE 6
 void log_(int level, const char *sys, const char *fmt, ...)
-		__attribute__((format(printf, 3, 4)));
+__attribute__((format(printf, 3, 4)));
 #define log_f(sys, fmt, ...) log_(LOG_FATAL, sys, fmt, ##__VA_ARGS__)
 #define log_e(sys, fmt, ...) log_(LOG_ERROR, sys, fmt, ##__VA_ARGS__)
 #define log_w(sys, fmt, ...) log_(LOG_WARNING, sys, fmt, ##__VA_ARGS__)
@@ -23,7 +23,7 @@ void log_(int level, const char *sys, const char *fmt, ...)
 #define log_d(sys, fmt, ...) log_(LOG_DEBUG, sys, fmt, ##__VA_ARGS__)
 #define log_t(sys, fmt, ...) log_(LOG_TRACE, sys, fmt, ##__VA_ARGS__)
 void log_no_nl(int level, const char *sys, const char *fmt, ...)
-		__attribute__((format(printf, 3, 4)));
+__attribute__((format(printf, 3, 4)));
 #define log_nf(sys, fmt, ...) log_no_nl(LOG_FATAL, sys, fmt, ##__VA_ARGS__)
 #define log_ne(sys, fmt, ...) log_no_nl(LOG_ERROR, sys, fmt, ##__VA_ARGS__)
 #define log_nw(sys, fmt, ...) log_no_nl(LOG_WARNING, sys, fmt, ##__VA_ARGS__)

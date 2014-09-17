@@ -98,7 +98,8 @@ bool CCompiler::compile(const std::string &in_path, const std::string &out_path)
 bool CCompiler::build(const std::string &module_name,
                       const std::string &in_path, const std::string &out_path)
 {
-	log_ni(MODULE, "Building %s: %s -> %s... ", cs(module_name), cs(in_path), cs(out_path));
+	log_ni(MODULE, "Building %s: %s -> %s... ", cs(module_name), cs(in_path),
+			cs(out_path));
 
 	std::string out_dir = c55fs::stripFilename(out_path);
 	c55fs::CreateAllDirs(out_dir);

@@ -57,7 +57,7 @@ void log_nl_nolock()
 		if(file){
 			fprintf(file, "\n");
 			fflush(file);
-		} else{
+		} else {
 			fprintf(stderr, "\n");
 			fprintf(stderr, "\033[0m");
 		}
@@ -88,7 +88,7 @@ static void print(int level, const char *sys, const char *fmt, va_list va_args)
 		else if(level == LOG_DEBUG)
 			fprintf(stderr, "\033[0m\033[1;30m"); // bright black fg, black bg
 		else if(level == LOG_TRACE)
-			fprintf(stderr, "\033[0m\033[0;35m"); // 
+			fprintf(stderr, "\033[0m\033[0;35m"); //
 		else
 			fprintf(stderr, "\033[0m"); // reset
 	}
@@ -102,9 +102,9 @@ static void print(int level, const char *sys, const char *fmt, va_list va_args)
 				"%b %d %H:%M:%S", localtime(&now));
 		if(timestr_len == 0)
 			timestr[0] = '\0';
-		int ms = (get_timeofday_us() % 1000000)/1000;
-		timestr_len += snprintf(timestr+timestr_len,
-				sizeof(timestr)-timestr_len, ".%03i", ms);
+		int ms = (get_timeofday_us() % 1000000) / 1000;
+		timestr_len += snprintf(timestr + timestr_len,
+				sizeof(timestr) - timestr_len, ".%03i", ms);
 		char sysstr[9];
 		snprintf(sysstr, 9, "%s        ", sys);
 		const char *levelcs = "FEWIVDT";
