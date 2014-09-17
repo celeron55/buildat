@@ -13,6 +13,7 @@ struct Module: public interface::Module
 	interface::Server *m_server;
 
 	Module(interface::Server *server):
+		interface::Module("__loader"),
 		m_server(server)
 	{
 		std::cout<<"__loader construct"<<std::endl;

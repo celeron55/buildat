@@ -8,9 +8,14 @@ namespace interface
 {
 	struct Module
 	{
+		const char *NAME = "(unknown module)";
+		Module(const char *name): NAME(name){}
 		virtual ~Module(){};
 		virtual void init() = 0;
-		// Never call directly; this is not thread-safe
 		virtual void event(const Event::Type &type, const Event::Private *p) = 0;
+		virtual void* get_interface(){
+			return NULL;
+		}
+		void* check_interface();
 	};
 }

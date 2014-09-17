@@ -25,6 +25,9 @@ namespace interface
 		virtual ss_ get_builtin_modules_path() = 0;
 		virtual bool has_module(const ss_ &module_name) = 0;
 
+		virtual interface::Module* get_module(const ss_ &module_name) = 0;
+		virtual interface::Module* check_module(const ss_ &module_name) = 0;
+
 		virtual void sub_event(struct Module *module, const Event::Type &type) = 0;
 		virtual void emit_event(Event event) = 0;
 		template<typename PrivateT>

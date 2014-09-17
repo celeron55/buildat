@@ -42,5 +42,13 @@ namespace network
 
 		Resp_get_packet_type(const Packet::Type &type): type(type){}
 	};
+
+	struct Direct
+	{
+		virtual ~Direct(){}
+		virtual Packet::Type packet_type(const ss_ &name) = 0;
+		virtual void send(PeerInfo::Id recipient, const Packet::Type &type,
+		                  const ss_ &data) = 0;
+	};
 }
 

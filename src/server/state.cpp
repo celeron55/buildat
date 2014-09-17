@@ -18,11 +18,11 @@ namespace server {
 
 struct CState: public State, public interface::Server
 {
-	struct ModuleWithMutex {
-		interface::Mutex mutex;
+	struct ModuleContainer {
+		//interface::Mutex mutex;
 		interface::Module *module;
 
-		ModuleWithMutex(interface::Module *module = NULL): module(module){}
+		ModuleContainer(interface::Module *module = NULL): module(module){}
 	};
 
 	struct SocketState {
@@ -33,13 +33,13 @@ struct CState: public State, public interface::Server
 	up_<rccpp::Compiler> m_compiler;
 	ss_ m_modules_path;
 
-	sm_<ss_, ModuleWithMutex> m_modules;
+	sm_<ss_, ModuleContainer> m_modules;
 	interface::Mutex m_modules_mutex;
 
 	sv_<Event> m_event_queue;
 	interface::Mutex m_event_queue_mutex;
 
-	sv_<sv_<ModuleWithMutex*>> m_event_subs;
+	sv_<sv_<ModuleContainer*>> m_event_subs;
 	interface::Mutex m_event_subs_mutex;
 
 	sm_<int, SocketState> m_sockets;
@@ -61,9 +61,9 @@ struct CState: public State, public interface::Server
 	{
 		interface::MutexScope ms(m_modules_mutex);
 		for(auto &pair : m_modules){
-			ModuleWithMutex &mwm = pair.second;
+			ModuleContainer &mc = pair.second;
 			// Don't lock; it would only cause deadlocks
-			delete mwm.module;
+			delete mc.module;
 		}
 	}
 
@@ -80,12 +80,12 @@ struct CState: public State, public interface::Server
 
 		interface::Module *m = static_cast<interface::Module*>(
 		                           m_compiler->construct(module_name.c_str(), this));
-		m_modules[module_name] = ModuleWithMutex(m);
+		m_modules[module_name] = ModuleContainer(m);
 
 		{
-			ModuleWithMutex &mwm = m_modules[module_name];
-			interface::MutexScope ms2(mwm.mutex);
-			mwm.module->init();
+			ModuleContainer &mc = m_modules[module_name];
+			//interface::MutexScope ms2(mc.mutex);
+			mc.module->init();
 		}
 	}
 
@@ -112,21 +112,21 @@ struct CState: public State, public interface::Server
 		return g_server_config.share_path+"/builtin";
 	}
 
-	/*interface::Module* get_module_u(const ss_ &module_name)
+	interface::Module* get_module(const ss_ &module_name)
 	{
 		interface::MutexScope ms(m_modules_mutex);
 		auto it = m_modules.find(module_name);
 		if(it == m_modules.end())
 			return NULL;
-		return it->second;
+		return it->second.module;
 	}
 
-	interface::Module* check_module_u(const ss_ &module_name)
+	interface::Module* check_module(const ss_ &module_name)
 	{
 		interface::Module *m = get_module(module_name);
 		if(m) return m;
 		throw ModuleNotFoundException(ss_()+"Module not found: "+module_name);
-	}*/
+	}
 
 	bool has_module(const ss_ &module_name)
 	{
@@ -141,31 +141,31 @@ struct CState: public State, public interface::Server
 		// Lock modules so that the subscribing one isn't removed asynchronously
 		interface::MutexScope ms(m_modules_mutex);
 		// Make sure module is a known instance
-		ModuleWithMutex *mwm0 = NULL;
+		ModuleContainer *mc0 = NULL;
 		ss_ module_name = "(unknown)";
 		for(auto &pair : m_modules){
-			ModuleWithMutex &mwm = pair.second;
-			if(mwm.module == module){
-				mwm0 = &mwm;
+			ModuleContainer &mc = pair.second;
+			if(mc.module == module){
+				mc0 = &mc;
 				module_name = pair.first;
 				break;
 			}
 		}
-		if(mwm0 == nullptr){
+		if(mc0 == nullptr){
 			std::cerr<<"sub_event(): Not a known module"<<std::endl;
 			return;
 		}
 		interface::MutexScope ms2(m_event_subs_mutex);
 		if(m_event_subs.size() <= type + 1)
 			m_event_subs.resize(type + 1);
-		sv_<ModuleWithMutex*> &sublist = m_event_subs[type];
-		if(std::find(sublist.begin(), sublist.end(), mwm0) != sublist.end()){
+		sv_<ModuleContainer*> &sublist = m_event_subs[type];
+		if(std::find(sublist.begin(), sublist.end(), mc0) != sublist.end()){
 			std::cerr<<"sub_event(): Already on list: "<<module_name<<std::endl;
 			return;
 		}
 		std::cerr<<"sub_event(): "<<module_name<<" subscribed to "<<type <<
 		          std::endl;
-		sublist.push_back(mwm0);
+		sublist.push_back(mc0);
 	}
 
 	void emit_event(Event event)
@@ -179,7 +179,7 @@ struct CState: public State, public interface::Server
 	{
 		for(size_t loop_i = 0;; loop_i++){
 			sv_<Event> event_queue_snapshot;
-			sv_<sv_<ModuleWithMutex*>> event_subs_snapshot;
+			sv_<sv_<ModuleContainer*>> event_subs_snapshot;
 			{
 				interface::MutexScope ms2(m_event_queue_mutex);
 				interface::MutexScope ms3(m_event_subs_mutex);
@@ -198,16 +198,16 @@ struct CState: public State, public interface::Server
 					log_d("state", "handle_events(): %zu: No subs", event.type);
 					continue;
 				}
-				sv_<ModuleWithMutex*> &sublist = event_subs_snapshot[event.type];
+				sv_<ModuleContainer*> &sublist = event_subs_snapshot[event.type];
 				if(sublist.empty()){
 					log_d("state", "handle_events(): %zu: No subs", event.type);
 					continue;
 				}
 				log_d("state", "handle_events(): %zu: Handling (%zu handlers)",
 				      event.type, sublist.size());
-				for(ModuleWithMutex *mwm : sublist){
-					interface::MutexScope mwm_ms(mwm->mutex);
-					mwm->module->event(event.type, event.p.get());
+				for(ModuleContainer *mc : sublist){
+					//interface::MutexScope mc_ms(mc->mutex);
+					mc->module->event(event.type, event.p.get());
 				}
 			}
 		}

@@ -71,6 +71,7 @@ set(SERVER_SRCS
 	src/impl/fs.cpp
 	src/impl/event.cpp
 	src/impl/tcpsocket.cpp
+	src/impl/module.cpp
 )
 add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
 TARGET_LINK_LIBRARIES(${SERVER_EXE_NAME}

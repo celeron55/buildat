@@ -19,8 +19,8 @@ namespace server
 		virtual ~State(){}
 		virtual void load_module(const ss_ &module_name, const ss_ &path) = 0;
 		virtual void load_modules(const ss_ &path) = 0;
-		//virtual interface::Module* get_module_u(const ss_ &module_name) = 0;
-		//virtual interface::Module* check_module_u(const ss_ &module_name) = 0;
+		virtual interface::Module* get_module(const ss_ &module_name) = 0;
+		virtual interface::Module* check_module(const ss_ &module_name) = 0;
 		virtual void sub_event(struct interface::Module *module,
 		                       const interface::Event::Type &type) = 0;
 		virtual void emit_event(interface::Event event) = 0;
