@@ -2,7 +2,6 @@
 #include "interface/server.h"
 #include "interface/fs.h"
 #include "interface/event.h"
-//#include <cereal/archives/binary.hpp>
 #include <iostream>
 
 using interface::Event;
@@ -35,10 +34,13 @@ struct Module: public interface::Module
 
 	void load_modules()
 	{
+		m_server->load_module("network", m_server->get_builtin_modules_path()+"/network");
+
 		sv_<ss_> load_list = {"test1", "test2"};
 		for(const ss_ &name : load_list){
 			m_server->load_module(name, m_server->get_modules_path()+"/"+name);
 		}
+
 		/*// TODO: Dependencies
 		auto list = interface::getGlobalFilesystem()->list_directory(m_server->get_modules_path());
 		for(const interface::Filesystem::Node &n : list){

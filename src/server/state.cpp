@@ -57,6 +57,11 @@ struct CState: public State, public interface::Server
 		return m_modules_path;
 	}
 
+	ss_ get_builtin_modules_path()
+	{
+		return g_server_config.share_path+"/builtin";
+	}
+
 	interface::Module* get_module(const ss_ &module_name)
 	{
 		auto it = m_modules.find(module_name);

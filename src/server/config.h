@@ -7,6 +7,7 @@ namespace server
 	{
 		ss_ rccpp_build_path = "../cache/rccpp_build";
 		ss_ interface_path = "../src/interface";
+		ss_ share_path = "../share";
 	};
 }
 
