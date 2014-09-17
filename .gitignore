@@ -3,6 +3,7 @@
 *.old
 *.tar.gz
 session.vim
+*.orig
 
 /build
 /cache
