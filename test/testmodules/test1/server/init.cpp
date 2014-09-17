@@ -39,16 +39,7 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("network:get_packet_type_resp"));
 
 		m_server->emit_event("network:get_packet_type",
-		                     new network::Req_get_packet_type("test1:dummy_packet"));
-		/*MAGIC("network:get_packet_type",
-		      new network::Req_get_packet_type("test1:dummy_packet"),
-		[&](const network::Resp_get_packet_type &result){
-
-		});*/
-		//network::cfoo();
-
-		/*void *m = dlopen("/home/celeron55/softat/buildat/cache/rccpp_build/network.so", RTLD_NOW);
-		std::cout<<"m="<<m<<std::endl;*/
+				new network::Req_get_packet_type("test1:dummy_packet"));
 	}
 
 	~Module()
@@ -64,14 +55,14 @@ struct Module: public interface::Module
 		EVENT_TYPE(m_EventType_test1_thing, on_thing, Thing)
 		EVENT_TYPEN("network:new_client", on_new_client, network::NewClient)
 		EVENT_TYPEN("network:get_packet_type_resp", on_get_packet_type_resp,
-		            network::Resp_get_packet_type)
+				network::Resp_get_packet_type)
 	}
 
 	void on_start()
 	{
 		interface::Module *network_module = m_server->check_module("network");
 		network::Direct *network_direct =
-		    (network::Direct*)network_module->check_interface();
+				(network::Direct*)network_module->check_interface();
 		std::cout<<"Calling network_direct::foo()"<<std::endl;
 		network_direct->foo();
 	}
@@ -86,7 +77,7 @@ struct Module: public interface::Module
 		std::cout<<"test1::on_new_client: id="<<new_client.info.id<<std::endl;
 
 		auto packet = new network::Packet(new_client.info.id,
-		                                  m_NetworkPacketType_dummy_packet, "dummy data");
+				m_NetworkPacketType_dummy_packet, "dummy data");
 		m_server->emit_event("network:send", packet);
 	}
 

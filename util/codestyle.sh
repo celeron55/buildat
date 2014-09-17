@@ -38,5 +38,5 @@ sed -i -e 's/ &>/&>/g' $header_files $cpp_files
 sed -i -e 's/\*\s\+>/\*>/g' $header_files $cpp_files
 sed -i -e 's/ + "/+"/g' $header_files $cpp_files
 sed -i -e 's/" + /"+/g' $header_files $cpp_files
-
+sed -i -e 's/^\(\t\+\)   \+/\1\t\t/g' $header_files $cpp_files
 

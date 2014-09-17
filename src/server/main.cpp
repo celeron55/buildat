@@ -50,13 +50,13 @@ int main(int argc, char *argv[])
 
 	const char opts[100] = "hm:r:i:S:l:";
 	const char usagefmt[1000] =
-	    "Usage: %s [OPTION]...\n"
-	    "  -h                   Show this help\n"
-	    "  -m [module_path]     Specify module path\n"
-	    "  -r [rccpp_build_path]Specify runtime compiled C++ build path\n"
-	    "  -i [interface_path]  Specify path to interface headers\n"
-	    "  -S [share_path]      Specify path to share/\n"
-	    "  -l [integer]         Set maximum log level (0...5)\n"
+			"Usage: %s [OPTION]...\n"
+			"  -h                   Show this help\n"
+			"  -m [module_path]     Specify module path\n"
+			"  -r [rccpp_build_path]Specify runtime compiled C++ build path\n"
+			"  -i [interface_path]  Specify path to interface headers\n"
+			"  -S [share_path]      Specify path to share/\n"
+			"  -l [integer]         Set maximum log level (0...5)\n"
 	;
 
 	int c;

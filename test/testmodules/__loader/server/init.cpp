@@ -40,7 +40,7 @@ struct Module: public interface::Module
 	void on_load_modules()
 	{
 		m_server->load_module("network",
-		                      m_server->get_builtin_modules_path()+"/network");
+				m_server->get_builtin_modules_path()+"/network");
 
 		sv_<ss_> load_list = {"test1", "test2"};
 		for(const ss_ &name : load_list){

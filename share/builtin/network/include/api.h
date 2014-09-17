@@ -48,7 +48,7 @@ namespace network
 		virtual ~Direct(){}
 		virtual Packet::Type packet_type(const ss_ &name) = 0;
 		virtual void send(PeerInfo::Id recipient, const Packet::Type &type,
-		                  const ss_ &data) = 0;
+				const ss_ &data) = 0;
 	};
 }
 

@@ -17,10 +17,10 @@ struct CState: public State
 		bool ok = m_socket->connect_fd(address, port);
 		if(ok)
 			std::cerr<<"client::State: Connect succeeded ("
-			         <<address<<":"<<port<<")"<<std::endl;
+					<<address<<":"<<port<<")"<<std::endl;
 		else
 			std::cerr<<"client::State: Connect failed ("
-			         <<address<<":"<<port<<")"<<std::endl;
+					<<address<<":"<<port<<")"<<std::endl;
 		return ok;
 	}
 

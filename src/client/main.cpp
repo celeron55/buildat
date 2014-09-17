@@ -144,7 +144,7 @@ static int customError(lua_State *L){
 	printf("Backtrace\n");
 	for(size_t i = 0; i < backTrace.size(); i++){
 		printf("* %s on line %d", backTrace[i].fileName.c_str(),
-		       backTrace[i].lineNumber);
+				backTrace[i].lineNumber);
 	}
 	printf("\n---------------------\n");
 
@@ -195,9 +195,9 @@ HelloPolycodeApp::HelloPolycodeApp(Polycode::PolycodeView *view):
 	core = new POLYCODE_CORE(view, 640, 480, false, false, 0, 0, 90, 1, true);
 
 	Polycode::CoreServices::getInstance()->getResourceManager()->addArchive(
-	    g_client_config.share_path+"/default.pak");
+			g_client_config.share_path+"/default.pak");
 	Polycode::CoreServices::getInstance()->getResourceManager()->addDirResource("default",
-	        false);
+			false);
 
 	scene = new Polycode::Scene(Polycode::Scene::SCENE_2D);
 	scene->getActiveCamera()->setOrthoSize(640, 480);
@@ -292,11 +292,11 @@ int main(int argc, char *argv[])
 
 	const char opts[100] = "hs:p:P:";
 	const char usagefmt[1000] =
-	    "Usage: %s [OPTION]...\n"
-	    "  -h                   Show this help\n"
-	    "  -s [address]         Specify server address\n"
-	    "  -p [polycode_path]   Specify polycode path\n"
-	    "  -P [share_path]      Specify share/ path\n"
+			"Usage: %s [OPTION]...\n"
+			"  -h                   Show this help\n"
+			"  -s [address]         Specify server address\n"
+			"  -p [polycode_path]   Specify polycode path\n"
+			"  -P [share_path]      Specify share/ path\n"
 	;
 
 	int c;

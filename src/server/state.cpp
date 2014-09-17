@@ -49,13 +49,13 @@ struct CState: public State, public interface::Server
 		m_compiler(rccpp::createCompiler())
 	{
 		m_compiler->include_directories.push_back(
-		    g_server_config.interface_path);
+				g_server_config.interface_path);
 		m_compiler->include_directories.push_back(
-		    g_server_config.interface_path+"/..");
+				g_server_config.interface_path+"/..");
 		m_compiler->include_directories.push_back(
-		    g_server_config.interface_path+"/../../3rdparty/cereal/include");
+				g_server_config.interface_path+"/../../3rdparty/cereal/include");
 		m_compiler->include_directories.push_back(
-		    g_server_config.share_path+"/builtin");
+				g_server_config.share_path+"/builtin");
 	}
 	~CState()
 	{
@@ -73,13 +73,13 @@ struct CState: public State, public interface::Server
 
 		std::cerr<<"Loading module "<<module_name<<" from "<<path<<std::endl;
 		ss_ build_dst = g_server_config.rccpp_build_path +
-		                "/"+module_name+".so";
+				"/"+module_name+".so";
 		m_compiler->include_directories.push_back(m_modules_path);
 		m_compiler->build(module_name, path+"/server/init.cpp", build_dst);
 		m_compiler->include_directories.pop_back();
 
 		interface::Module *m = static_cast<interface::Module*>(
-		                           m_compiler->construct(module_name.c_str(), this));
+				m_compiler->construct(module_name.c_str(), this));
 		m_modules[module_name] = ModuleContainer(m);
 
 		{
@@ -136,7 +136,7 @@ struct CState: public State, public interface::Server
 	}
 
 	void sub_event(struct interface::Module *module,
-	               const Event::Type &type)
+			const Event::Type &type)
 	{
 		// Lock modules so that the subscribing one isn't removed asynchronously
 		interface::MutexScope ms(m_modules_mutex);
@@ -164,7 +164,7 @@ struct CState: public State, public interface::Server
 			return;
 		}
 		std::cerr<<"sub_event(): "<<module_name<<" subscribed to "<<type <<
-		          std::endl;
+				std::endl;
 		sublist.push_back(mc0);
 	}
 
@@ -204,7 +204,7 @@ struct CState: public State, public interface::Server
 					continue;
 				}
 				log_d("state", "handle_events(): %zu: Handling (%zu handlers)",
-				      event.type, sublist.size());
+						event.type, sublist.size());
 				for(ModuleContainer *mc : sublist){
 					//interface::MutexScope mc_ms(mc->mutex);
 					mc->module->event(event.type, event.p.get());
@@ -228,7 +228,7 @@ struct CState: public State, public interface::Server
 		const SocketState &s = it->second;
 		if(s.event_type != event_type){
 			throw Exception("Socket events already requested with different"
-			                " event type");
+					" event type");
 		}
 		// Nothing to do; already set.
 	}

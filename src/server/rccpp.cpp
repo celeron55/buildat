@@ -34,7 +34,7 @@ struct CCompiler: public Compiler
 	CCompiler();
 
 	bool build(const std::string &module_name,
-	           const std::string &in_path, const std::string &out_path);
+			const std::string &in_path, const std::string &out_path);
 
 	void* construct(const char *name, interface::Server *server);
 
@@ -102,7 +102,7 @@ bool CCompiler::build(const std::string &module_name,
                       const std::string &in_path, const std::string &out_path)
 {
 	std::cout<<"Building "<<module_name<<": "
-	         <<in_path<<" -> "<<out_path<<"... ";
+			<<in_path<<" -> "<<out_path<<"... ";
 
 	std::string out_dir = c55fs::stripFilename(out_path);
 	c55fs::CreateAllDirs(out_dir);
@@ -121,7 +121,7 @@ bool CCompiler::build(const std::string &module_name,
 
 	ss_ constructor_name = ss_()+"createModule_"+module_name;
 	RCCPP_Constructor constructor = (RCCPP_Constructor)library_get_address(
-	                                    new_module, constructor_name.c_str());
+			new_module, constructor_name.c_str());
 	if(constructor == nullptr){
 		std::cout<<constructor_name<<" is missing from the library"<<std::endl;
 		return false;
@@ -156,7 +156,7 @@ void* CCompiler::construct(const char *name, interface::Server *server){
 	auto it = constructed_objects.find(std::string(name));
 
 	if(it == constructed_objects.end()) constructed_objects.insert(std::make_pair(
-		            name, std::vector<void*> {result}));
+				name, std::vector<void*> {result}));
 	else it->second.push_back(result);
 
 	return result;

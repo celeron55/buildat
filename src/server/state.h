@@ -22,7 +22,7 @@ namespace server
 		virtual interface::Module* get_module(const ss_ &module_name) = 0;
 		virtual interface::Module* check_module(const ss_ &module_name) = 0;
 		virtual void sub_event(struct interface::Module *module,
-		                       const interface::Event::Type &type) = 0;
+				const interface::Event::Type &type) = 0;
 		virtual void emit_event(interface::Event event) = 0;
 		virtual void handle_events() = 0;
 		virtual sv_<int> get_sockets() = 0;
