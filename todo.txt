@@ -1,3 +1,5 @@
 Buildat TODO
 ============
 - A place for network to store its sockets while it is being reloaded
+- Cache a hash of each compiled module in order not to rebuild them
+  unnecessarily
