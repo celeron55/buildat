@@ -23,6 +23,22 @@ Non-exception throwing and exception-throwing methods
 - get_x: Returns NULL or equivalent if not found
 - check_x: Throws exception if not found
 
+Directory structure
+-------------------
+├── 3rdparty    << Bundled 3rd-party libraries
+├── build       << Build files; always mkdir build; cmake .. to keep things clean
+├── cache       << Runtime directory used by Buildat
+├── share       << Static files; installable in /usr/share/buildat
+│   └── builtin << Built-in modules
+├── src
+│   ├── client  << Client-specific code
+│   ├── core    << Core code (must be kept minimal but sufficient)
+│   ├── impl    << Interface implementations
+│   ├── interface << Interface available to modules
+│   └── server  << Server-specific code
+├── test        << All kinds of stuff for testing
+└── util        << Miscellaneous development utilities
+
 Commit messages
 ---------------
 In present tense. Prepend a location to the message where possible. When adding
