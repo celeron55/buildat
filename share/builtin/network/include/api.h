@@ -15,7 +15,7 @@ namespace network
 		typedef size_t Type;
 
 		PeerInfo::Id recipient;
-		Type type; // TODO: Allow supplying a name directly here alternatively
+		Type type;
 		ss_ data;
 
 		Packet(PeerInfo::Id recipient, const Type &type, const ss_ &data):
@@ -29,26 +29,19 @@ namespace network
 		NewClient(const PeerInfo &info): info(info){}
 	};
 
-	struct Req_get_packet_type: public interface::Event::Private
+	struct Interface
 	{
-		ss_ name;
-
-		Req_get_packet_type(const ss_ &name): name(name){}
-	};
-
-	struct Resp_get_packet_type: public interface::Event::Private
-	{
-		Packet::Type type;
-
-		Resp_get_packet_type(const Packet::Type &type): type(type){}
-	};
-
-	struct Direct
-	{
-		virtual ~Direct(){}
 		virtual Packet::Type packet_type(const ss_ &name) = 0;
 		virtual void send(PeerInfo::Id recipient, const Packet::Type &type,
 				const ss_ &data) = 0;
+		virtual void send(PeerInfo::Id recipient, const ss_ &name,
+				const ss_ &data) = 0;
 	};
+
+	inline struct Interface *get_interface(interface::Server *server)
+	{
+		interface::Module *module = server->check_module("network");
+		return (network::Interface*)module->check_interface();
+	}
 }
 

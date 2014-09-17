@@ -22,13 +22,29 @@ struct Peer
 		id(id), socket(socket){}
 };
 
-struct Module: public interface::Module, public network::Direct
+struct PacketTypeRegistry
+{
+	sm_<ss_, Packet::Type> m_types;
+	Packet::Type m_next_type = 100;
+
+	Packet::Type get(const ss_ &name){
+		auto it = m_types.find(name);
+		if(it != m_types.end())
+			return it->second;
+		Packet::Type type = m_next_type++;
+		m_types[name] = type;
+		return type;
+	}
+};
+
+struct Module: public interface::Module, public network::Interface
 {
 	interface::Mutex m_interface_mutex;
 	interface::Server *m_server;
 	sp_<interface::TCPSocket> m_listening_socket;
 	sm_<Peer::Id, Peer> m_peers;
 	size_t m_next_peer_id = 1;
+	PacketTypeRegistry m_packet_types;
 
 	Module(interface::Server *server):
 		interface::Module("network"),
@@ -44,9 +60,7 @@ struct Module: public interface::Module, public network::Direct
 
 		std::cout<<"network init"<<std::endl;
 		m_server->sub_event(this, Event::t("core:start"));
-		m_server->sub_event(this, Event::t("network:send"));
 		m_server->sub_event(this, Event::t("network:listen_event"));
-		m_server->sub_event(this, Event::t("network:get_packet_type"));
 	}
 
 	~Module()
@@ -59,14 +73,12 @@ struct Module: public interface::Module, public network::Direct
 		interface::MutexScope ms(m_interface_mutex);
 
 		EVENT_VOIDN("core:start",           on_start)
-		EVENT_TYPEN("network:send",         on_send_packet,  Packet)
 		EVENT_TYPEN("network:listen_event", on_listen_event, interface::SocketEvent)
-		EVENT_TYPEN("network:get_packet_type", on_get_packet_type, Req_get_packet_type)
 	}
 
 	void* get_interface()
 	{
-		return dynamic_cast<Direct*>(this);
+		return dynamic_cast<Interface*>(this);
 	}
 
 	void on_start()
@@ -83,11 +95,6 @@ struct Module: public interface::Module, public network::Direct
 
 		m_server->add_socket_event(m_listening_socket->fd(),
 				Event::t("network:listen_event"));
-	}
-
-	void on_send_packet(const Packet &packet)
-	{
-		// TODO
 	}
 
 	void on_listen_event(const interface::SocketEvent &event)
@@ -107,26 +114,33 @@ struct Module: public interface::Module, public network::Direct
 		m_server->emit_event("network:new_client", new NewClient(pinfo));
 	}
 
-	void on_get_packet_type(const Req_get_packet_type &event)
-	{
-		std::cerr<<"network::on_get_packet_type(): name="<<event.name<<std::endl;
-		Packet::Type type = 42;
-		m_server->emit_event("network:get_packet_type_resp",
-				new Resp_get_packet_type(type));
-	}
-
-	// Direct interface
+	// Interface
 
 	Packet::Type packet_type(const ss_ &name)
 	{
 		interface::MutexScope ms(m_interface_mutex);
+
+		return m_packet_types.get(name);
 	}
 
 	void send(PeerInfo::Id recipient, const Packet::Type &type, const ss_ &data)
 	{
+		std::cerr<<"network::send()"<<std::endl;
 		interface::MutexScope ms(m_interface_mutex);
 
-		// TODO
+		auto it = m_peers.find(recipient);
+		if(it == m_peers.end()){
+			throw Exception(ss_()+"network::send(): Peer "+itos(recipient) +
+					" doesn't exist");
+		}
+		Peer &peer = it->second;
+		// TODO: Create actual packet including type and length
+		peer.socket->send_fd(data);
+	}
+
+	void send(PeerInfo::Id recipient, const ss_ &name, const ss_ &data)
+	{
+		send(recipient, m_packet_types.get(name), data);
 	}
 };
 
