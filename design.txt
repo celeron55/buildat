@@ -19,14 +19,13 @@ C++ modules can interface with each other by using Cereal.
 Module structure
 ----------------
 module
-|-- server
-|   `-- <module>.cpp << Server-side code
+|-- <module>.cpp  << Server-side code
 |-- include
 |   `-- api.h     << Structures for interfacing between modules
 |-- client_lua
-|   `-- init.lua  << Client-side code
+|   `-- init.lua  << Client-side code (by convention)
 `-- client_data
-    `-- media.png << Data files
+    `-- media.png << Data files (by convention)
 
 Module behavior
 ---------------
