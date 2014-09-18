@@ -84,11 +84,16 @@ struct CState: public State, public interface::Server
 		m_compiler->build(module_name, init_cpp_path, build_dst);
 		m_compiler->include_directories.pop_back();
 
-		m_module_file_watches[module_name] = sp_<interface::FileWatch>(
-				interface::createFileWatch({init_cpp_path}, [this, module_name]()
-		{
-			log_i(MODULE, "Module modified: %s", cs(module_name));
-		}));
+		if(m_module_file_watches.count(module_name) == 0){
+			m_module_file_watches[module_name] = sp_<interface::FileWatch>(
+					interface::createFileWatch({init_cpp_path},
+					[this, module_name, path]()
+			{
+				log_i(MODULE, "Module modified: %s; reloading", cs(module_name));
+				unload_module_u(module_name);
+				load_module(module_name, path);
+			}));
+		}
 
 		interface::Module *m = static_cast<interface::Module*>(
 				m_compiler->construct(module_name.c_str(), this));
@@ -114,6 +119,7 @@ struct CState: public State, public interface::Server
 		handle_events();
 	}
 
+	// interface::Server version; doesn't directly unload
 	void unload_module(const ss_ &module_name)
 	{
 		interface::MutexScope ms(m_modules_mutex);
@@ -121,6 +127,40 @@ struct CState: public State, public interface::Server
 		if(it == m_modules.end())
 			return;
 		m_unloads_requested.insert(module_name);
+	}
+
+	// Direct version; internal and unsafe
+	void unload_module_u(const ss_ &module_name)
+	{
+		log_i(MODULE, "unload_module_u(): module_name=%s", cs(module_name));
+		interface::MutexScope ms(m_modules_mutex);
+		// Get and lock module
+		auto it = m_modules.find(module_name);
+		if(it == m_modules.end())
+			throw Exception(ss_()+"unload_module_u: Module not found: "+module_name);
+		ModuleContainer *mc = &it->second;
+		interface::MutexScope mc_ms(mc->mutex);
+		// Clear unload request
+		m_unloads_requested.erase(module_name);
+		// Delete subscriptions
+		{
+			interface::MutexScope ms(m_event_subs_mutex);
+			for(Event::Type type = 0; type < m_event_subs.size(); type++){
+				sv_<ModuleContainer*> &sublist = m_event_subs[type];
+				sv_<ModuleContainer*> new_sublist;
+				for(ModuleContainer *mc1 : sublist){
+					if(mc1 != mc)
+						new_sublist.push_back(mc1);
+					else
+						log_v(MODULE, "Removing %s subscription to event %zu",
+								cs(module_name), type);
+				}
+				sublist = new_sublist;
+			}
+		}
+		// Delete module
+		delete mc->module;
+		m_modules.erase(module_name);
 	}
 
 	ss_ get_modules_path()
@@ -161,13 +201,12 @@ struct CState: public State, public interface::Server
 	{
 		// This prevents module from being deleted while it is being called
 		interface::MutexScope ms(m_modules_mutex);
-		interface::Module *m = get_module(module_name);
 		auto it = m_modules.find(module_name);
 		if(it == m_modules.end())
 			return false;
 		ModuleContainer *mc = &it->second;
 		interface::MutexScope mc_ms(mc->mutex);
-		cb(m);
+		cb(mc->module);
 		return true;
 	}
 
