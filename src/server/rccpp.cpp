@@ -141,11 +141,12 @@ bool CCompiler::build(const std::string &module_name,
 	return true;
 }
 
-void* CCompiler::construct(const char *name, interface::Server *server){
+void* CCompiler::construct(const char *name, interface::Server *server)
+{
 	auto it = m_module_info.find(name);
 	if(it == m_module_info.end()){
-		assert(nullptr && "Failed to get class info");
-		return nullptr;
+		log_w(MODULE, "CCompiler::construct(%s): Module is not loaded", name);
+		return NULL;
 	}
 
 	RCCPP_Info &info = it->second;

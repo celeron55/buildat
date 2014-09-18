@@ -76,13 +76,12 @@ struct CState: public State, public interface::Server
 		interface::MutexScope ms(m_modules_mutex);
 
 		log_i(MODULE, "Loading module %s from %s", cs(module_name), cs(path));
+
 		ss_ build_dst = g_server_config.rccpp_build_path +
 				"/"+module_name+".so";
 		ss_ init_cpp_path = path+"/server/init.cpp";
 
-		m_compiler->include_directories.push_back(m_modules_path);
-		m_compiler->build(module_name, init_cpp_path, build_dst);
-		m_compiler->include_directories.pop_back();
+		// Set up file watch
 
 		if(m_module_file_watches.count(module_name) == 0){
 			m_module_file_watches[module_name] = sp_<interface::FileWatch>(
@@ -95,9 +94,29 @@ struct CState: public State, public interface::Server
 			}));
 		}
 
+		// Build
+
+		m_compiler->include_directories.push_back(m_modules_path);
+		bool build_ok = m_compiler->build(module_name, init_cpp_path, build_dst);
+		m_compiler->include_directories.pop_back();
+
+		if(!build_ok){
+			log_w(MODULE, "Failed to build module %s", cs(module_name));
+			return;
+		}
+
+		// Construct instance
+
 		interface::Module *m = static_cast<interface::Module*>(
 				m_compiler->construct(module_name.c_str(), this));
+		if(m == nullptr){
+			log_w(MODULE, "Failed to construct module %s instance",
+					cs(module_name));
+			return;
+		}
 		m_modules[module_name] = ModuleContainer(m);
+
+		// Call init()
 
 		{
 			ModuleContainer &mc = m_modules[module_name];
@@ -136,8 +155,10 @@ struct CState: public State, public interface::Server
 		interface::MutexScope ms(m_modules_mutex);
 		// Get and lock module
 		auto it = m_modules.find(module_name);
-		if(it == m_modules.end())
-			throw Exception(ss_()+"unload_module_u: Module not found: "+module_name);
+		if(it == m_modules.end()){
+			log_w(MODULE, "unload_module_u: Module not found: %s", cs(module_name));
+			return;
+		}
 		ModuleContainer *mc = &it->second;
 		interface::MutexScope mc_ms(mc->mutex);
 		// Clear unload request
