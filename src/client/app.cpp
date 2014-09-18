@@ -269,7 +269,7 @@ struct CApp: public Polycode::EventHandler, public App
 
 		int error = luaL_dofile(L, (g_client_config.share_path+"/init.lua").c_str());
 		if(error){
-			log_v(MODULE, "luaL_dofile: An error occurred: %s\n",
+			log_w(MODULE, "luaL_dofile: An error occurred: %s\n",
 					lua_tostring(L, -1));
 			lua_pop(L, 1);
 		}
@@ -300,7 +300,7 @@ struct CApp: public Polycode::EventHandler, public App
 
 		int error = luaL_dostring(L, script.c_str());
 		if(error){
-			log_v(MODULE, "luaL_dostring: An error occurred: %s\n",
+			log_w(MODULE, "luaL_dostring: An error occurred: %s\n",
 					lua_tostring(L, -1));
 			lua_pop(L, 1);
 		}
