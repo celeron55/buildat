@@ -111,9 +111,14 @@ int main(int argc, char *argv[])
 	set_<int> bad_fds;
 	size_t num_consequent_valid_selects = 0;
 	while(!g_sigint_received){
+		uint64_t current_us = get_timeofday_us();
+		int64_t delay_us = next_tick_us - current_us;
+		if(delay_us < 0)
+			delay_us = 0;
+
 		struct timeval tv;
 		tv.tv_sec = 0;
-		tv.tv_usec = t_per_tick;
+		tv.tv_usec = delay_us;
 
 		fd_set rfds;
 		FD_ZERO(&rfds);
@@ -179,7 +184,6 @@ int main(int argc, char *argv[])
 			attempt_bad_fds.clear();
 		}
 
-		uint64_t current_us = get_timeofday_us();
 		if(current_us >= next_tick_us){
 			next_tick_us += t_per_tick;
 			if(next_tick_us < current_us - 1000 * 1000){
