@@ -187,8 +187,9 @@ struct Module: public interface::Module, public network::Interface
 	{
 		// Send new packet types if needed
 		if(m_packet_types.m_next_type > peer.highest_known_type + 1){
+			Packet::Type highest_known_type_was = peer.highest_known_type;
 			peer.highest_known_type = m_packet_types.m_next_type - 1;
-			for(Packet::Type t1 = peer.highest_known_type;
+			for(Packet::Type t1 = highest_known_type_was;
 					t1 < m_packet_types.m_next_type; t1++){
 				std::ostringstream os(std::ios::binary);
 				os<<(char)((t1>>0) & 0xff);
