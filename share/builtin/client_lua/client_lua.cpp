@@ -93,58 +93,6 @@ struct Module: public interface::Module
 
 	void on_new_client(const network::NewClient &new_client)
 	{
-		log_i(MODULE, "client_lua::on_new_client: id=%zu", new_client.info.id);
-
-		ss_ module_path = m_server->get_module_path(MODULE);
-
-#if 0
-		// Not sure what this is useful for
-		std::ifstream f(module_path+"/boot.lua");
-		std::string script_content((std::istreambuf_iterator<char>(f)),
-				std::istreambuf_iterator<char>());
-
-		network::access(m_server, [&](network::Interface * inetwork){
-			inetwork->send(new_client.info.id, "core:run_script", script_content);
-		});
-#endif
-#if 0
-		sv_<ss_> module_names = m_server->get_loaded_modules();
-
-		for(const ss_ &module_name : module_names){
-			ss_ module_path = m_server->get_module_path(module_name);
-			ss_ client_lua_path = module_path+"/client_lua";
-			auto list = interface::getGlobalFilesystem()
-					->list_directory(client_lua_path);
-
-			sv_<ss_> log_list;
-			for(const interface::Filesystem::Node &n : list){
-				if(n.is_directory)
-					continue;
-				log_list.push_back(n.name);
-			}
-			log_i(MODULE, "client_lua: %s: %s", cs(module_name), cs(dump(log_list)));
-
-			for(const interface::Filesystem::Node &n : list){
-				if(n.is_directory)
-					continue;
-				std::ifstream f(client_lua_path+"/"+n.name);
-				std::string file_content((std::istreambuf_iterator<char>(f)),
-						std::istreambuf_iterator<char>());
-
-				std::ostringstream os(std::ios::binary);
-				{
-					cereal::BinaryOutputArchive ar(os);
-					ar(n.name);
-					ar(file_content);
-				}
-				network::access(m_server, [&](network::Interface * inetwork){
-					inetwork->send(new_client.info.id, "core:cache_file", os.str());
-				});
-			}
-			m_server->emit_event(ss_()+"client_lua:files_sent:"+module_name,
-					new FilesSent(new_client.info.id));
-		}
-#endif
 	}
 };
 
