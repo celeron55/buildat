@@ -54,6 +54,7 @@ set(CLIENT_EXE_NAME buildat_client)
 set(CLIENT_SRCS
 	src/client/main.cpp
 	src/client/state.cpp
+	src/client/app.cpp
 	src/core/log.cpp
 	src/impl/tcpsocket.cpp
 )
