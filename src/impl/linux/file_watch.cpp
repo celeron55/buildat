@@ -28,6 +28,7 @@ struct CFileWatch: FileWatch
 				throw Exception(ss_()+"inotify_add_watch() failed: "+
 						strerror(errno));
 			}
+			log_v(MODULE, "Watching path \"%s\" (inotify fd=%i)", cs(path), m_fd);
 			m_watch_paths[r] = path;
 		}
 	}
@@ -91,8 +92,8 @@ struct CFileWatch: FileWatch
 							"to re-watch ignored path \"%s\")",
 							strerror(errno), cs(path));
 				} else {
-					log_v(MODULE, "Re-watching auto-ignored path \"%s\"",
-							cs(path));
+					log_v(MODULE, "Re-watching auto-ignored path \"%s\" (inotify fd=%i)",
+							cs(path), m_fd);
 					m_watch_paths[r] = path;
 				}
 			}
