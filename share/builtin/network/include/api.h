@@ -1,3 +1,4 @@
+#pragma once
 #include "interface/event.h"
 #include <functional>
 

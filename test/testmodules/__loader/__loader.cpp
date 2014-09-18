@@ -42,8 +42,12 @@ struct Module: public interface::Module
 	{
 		ss_ builtin = m_server->get_builtin_modules_path();
 		m_server->load_module("network", builtin+"/network");
+		m_server->load_module("client_lua", builtin+"/client_lua");
 
-		sv_<ss_> load_list = {"test1", "test2"};
+		sv_<ss_> load_list = {
+			"test1",
+			"test2",
+		};
 		for(const ss_ &name : load_list){
 			m_server->load_module(name, m_server->get_modules_path()+"/"+name);
 		}
@@ -59,7 +63,9 @@ struct Module: public interface::Module
 
 	void on_module_modified(const interface::ModuleModifiedEvent &event)
 	{
-		log_v(MODULE, "__loader::on_module_modified()");
+		log_v(MODULE, "__loader::on_module_modified(): %s", cs(event.name));
+		if(event.name == "__loader")
+			return;
 		m_server->reload_module(event.name, event.path);
 	}
 };

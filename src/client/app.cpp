@@ -267,7 +267,8 @@ struct CApp: public Polycode::EventHandler, public App
 		//luaopen_Physics3D(L);
 		//luaopen_UI(L);
 
-		int error = luaL_dofile(L, (g_client_config.share_path+"/init.lua").c_str());
+		ss_ init_lua_path = g_client_config.share_path+"/client/init.lua";
+		int error = luaL_dofile(L, init_lua_path.c_str());
 		if(error){
 			log_w(MODULE, "luaL_dofile: An error occurred: %s\n",
 					lua_tostring(L, -1));

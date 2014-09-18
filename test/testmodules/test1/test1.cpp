@@ -2,6 +2,7 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "test1/include/api.h"
+#include "client_lua/include/api.h"
 #include "network/include/api.h"
 #include "core/log.h"
 
@@ -34,6 +35,7 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, m_EventType_test1_thing);
 		m_server->sub_event(this, Event::t("network:new_client"));
+		m_server->sub_event(this, Event::t("client_lua:files_sent:test1"));
 		m_server->sub_event(this, Event::t("network:packet_received"));
 	}
 
@@ -42,6 +44,8 @@ struct Module: public interface::Module
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_TYPE(m_EventType_test1_thing, on_thing, Thing)
 		EVENT_TYPEN("network:new_client", on_new_client, network::NewClient)
+		EVENT_TYPEN("client_lua:files_sent:test1", on_lua_files_sent,
+				client_lua::FilesSent)
 		EVENT_TYPEN("network:packet_received", on_packet_received, network::Packet)
 	}
 
@@ -60,7 +64,7 @@ struct Module: public interface::Module
 
 		network::access(m_server, [&](network::Interface * inetwork){
 			inetwork->send(new_client.info.id, "test1:dummy", "dummy data");
-			inetwork->send(new_client.info.id, "core:run_script",
+			/*inetwork->send(new_client.info.id, "core:run_script",
 					"print(\"Remote script is running\")\n"
 					"require \"Polycode/Core\"\n"
 					"scene = Scene(Scene.SCENE_2D)\n"
@@ -68,7 +72,15 @@ struct Module: public interface::Module
 					"label = SceneLabel(\"Hello from remote module!\", 32)\n"
 					"label:setPosition(0, -100, 0)\n"
 					"scene:addChild(label)\n"
-					);
+					);*/
+		});
+	}
+
+	void on_lua_files_sent(const client_lua::FilesSent &event)
+	{
+		network::access(m_server, [&](network::Interface * inetwork){
+			inetwork->send(event.recipient, "core:run_script",
+					"print(\"TODO: Run init.lua\")");
 		});
 	}
 
