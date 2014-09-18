@@ -33,7 +33,9 @@ namespace interface
 		virtual void reload_module(const ss_ &module_name, const ss_ &path) = 0;
 		virtual ss_ get_modules_path() = 0;
 		virtual ss_ get_builtin_modules_path() = 0;
+		virtual ss_ get_module_path(const ss_ &module_name) = 0;
 		virtual bool has_module(const ss_ &module_name) = 0;
+		virtual sv_<ss_> get_loaded_modules() = 0;
 		virtual bool access_module(const ss_ &module_name,
 				std::function<void(interface::Module*)> cb) = 0;
 

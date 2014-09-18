@@ -23,6 +23,7 @@ struct CState: public State, public interface::Server
 	struct ModuleContainer {
 		interface::Mutex mutex;
 		interface::Module *module;
+		ss_ path;
 
 		ModuleContainer(interface::Module *module = NULL): module(module){}
 	};
@@ -117,6 +118,7 @@ struct CState: public State, public interface::Server
 			return;
 		}
 		m_modules[module_name] = ModuleContainer(m);
+		m_modules[module_name].path = path;
 
 		// Call init()
 
@@ -217,6 +219,16 @@ struct CState: public State, public interface::Server
 		return g_server_config.share_path+"/builtin";
 	}
 
+	ss_ get_module_path(const ss_ &module_name)
+	{
+		interface::MutexScope ms(m_modules_mutex);
+		auto it = m_modules.find(module_name);
+		if(it == m_modules.end())
+			throw ModuleNotFoundException(ss_()+"Module not found: "+module_name);
+		ModuleContainer *mc = &it->second;
+		return mc->path;
+	}
+
 	interface::Module* get_module(const ss_ &module_name)
 	{
 		interface::MutexScope ms(m_modules_mutex);
@@ -238,6 +250,16 @@ struct CState: public State, public interface::Server
 		interface::MutexScope ms(m_modules_mutex);
 		auto it = m_modules.find(module_name);
 		return (it != m_modules.end());
+	}
+
+	sv_<ss_> get_loaded_modules()
+	{
+		interface::MutexScope ms(m_modules_mutex);
+		sv_<ss_> result;
+		for(auto &pair : m_modules){
+			result.push_back(pair.first);
+		}
+		return result;
 	}
 
 	bool access_module(const ss_ &module_name,
