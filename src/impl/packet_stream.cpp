@@ -41,11 +41,12 @@ void PacketStream::input(std::deque<char> &socket_buffer,
 			if(data.size() < 6 + name1_size)
 				continue;
 			ss_ name1(&data.c_str()[6], name1_size);
-			log_i(MODULE, "Packet definition: %zu = %s", type1, cs(name1));
+			log_v(MODULE, "<< core:define_packet_type %zu %s", type1, cs(name1));
 			m_incoming_types.set(type1, name1);
 			continue;
 		}
 
+		log_v(MODULE, "<< %s", cs(name));
 		cb(name, data);
 	}
 }
