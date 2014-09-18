@@ -141,8 +141,8 @@ struct Module: public interface::Module, public network::Interface
 		peer.packet_stream.input(peer.socket_buffer,
 		[&](const ss_ & name, const ss_ & data){
 			// Emit event
-			m_server->emit_event(ss_()+"network:packet_received:"+name,
-					new Packet(name, data));
+			m_server->emit_event(ss_()+"network:packet_received/"+name,
+					new Packet(peer.id, name, data));
 		});
 	}
 

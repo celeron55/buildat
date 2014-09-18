@@ -13,6 +13,8 @@ namespace interface
 		};
 
 		virtual sv_<Node> list_directory(const ss_ &path) = 0;
+
+		virtual bool create_directories(const ss_ &path) = 0;
 	};
 
 	Filesystem* getGlobalFilesystem();

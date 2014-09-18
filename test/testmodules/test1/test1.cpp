@@ -82,9 +82,7 @@ struct Module: public interface::Module
 		log_v(MODULE, "on_files_sent(): recipient=%zu", event.recipient);
 		network::access(m_server, [&](network::Interface * inetwork){
 			inetwork->send(event.recipient, "core:run_script",
-					"print(\"TODO: Run init.lua\")");
-			inetwork->send(event.recipient, "core:run_script",
-					"buildat:send_packet(\"foo\", \"bar\")");
+					"__buildat_run_script_file(\"test1/init.lua\")");
 		});
 	}
 

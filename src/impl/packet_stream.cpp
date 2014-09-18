@@ -11,13 +11,13 @@ void PacketStream::input(std::deque<char> &socket_buffer,
 		if(socket_buffer.size() < 6)
 			return;
 		size_t type =
-				socket_buffer[0]<<0 |
-				socket_buffer[1]<<8;
+				(socket_buffer[0] & 0xff)<<0 |
+				(socket_buffer[1] & 0xff)<<8;
 		size_t size =
-				socket_buffer[2]<<0 |
-				socket_buffer[3]<<8 |
-				socket_buffer[4]<<16 |
-				socket_buffer[5]<<24;
+				(socket_buffer[2] & 0xff)<<0 |
+				(socket_buffer[3] & 0xff)<<8 |
+				(socket_buffer[4] & 0xff)<<16 |
+				(socket_buffer[5] & 0xff)<<24;
 		log_d(MODULE, "size=%zu", size);
 		if(socket_buffer.size() < 6 + size)
 			return;

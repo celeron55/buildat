@@ -58,6 +58,7 @@ set(CLIENT_SRCS
 	src/client/state.cpp
 	src/client/app.cpp
 	src/core/log.cpp
+	src/impl/fs.cpp
 	src/impl/tcpsocket.cpp
 	src/impl/sha1.cpp
 	src/impl/packet_stream.cpp

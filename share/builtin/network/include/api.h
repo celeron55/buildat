@@ -15,9 +15,11 @@ namespace network
 	struct Packet: public interface::Event::Private
 	{
 		typedef size_t Type;
+		PeerInfo::Id sender = 0;
 		ss_ name;
 		ss_ data;
-		Packet(const ss_ &name, const ss_ &data): name(name), data(data){}
+		Packet(PeerInfo::Id sender, const ss_ &name, const ss_ &data):
+			sender(sender), name(name), data(data){}
 	};
 
 	struct NewClient: public interface::Event::Private

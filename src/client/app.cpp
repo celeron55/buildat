@@ -272,11 +272,12 @@ struct CApp: public Polycode::EventHandler, public App
 		lua_pushlightuserdata(L, (void*)this);
 		lua_setfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 
-#define DEF_BUILDAT_FUNC(name) {\
+#define DEF_BUILDAT_FUNC(name){\
 	lua_pushcfunction(L, l_##name);\
 	lua_setglobal(L, "__buildat_" #name);\
 }
 		DEF_BUILDAT_FUNC(send_packet);
+		DEF_BUILDAT_FUNC(get_file_content)
 
 		ss_ init_lua_path = g_client_config.share_path+"/client/init.lua";
 		int error = luaL_dofile(L, init_lua_path.c_str());
@@ -342,6 +343,22 @@ struct CApp: public Polycode::EventHandler, public App
 		self->m_state->send_packet(name, data);
 
 		return 0;
+	}
+
+	// get_file_content(name: string)
+	static int l_get_file_content(lua_State *L)
+	{
+		size_t name_len = 0;
+		const char *name_c = lua_tolstring(L, 1, &name_len);
+		ss_ name(name_c, name_len);
+
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+
+		ss_ content = self->m_state->get_file_content(name);
+		lua_pushlstring(L, content.c_str(), content.size());
+		return 1;
 	}
 };
 

@@ -17,6 +17,10 @@ struct CFilesystem : public Filesystem
 		}
 		return result;
 	}
+	bool create_directories(const ss_ &path)
+	{
+		return c55fs::CreateAllDirs(path);
+	}
 };
 
 Filesystem* getGlobalFilesystem()

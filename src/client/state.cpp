@@ -4,6 +4,8 @@
 #include "client/config.h"
 #include "interface/tcpsocket.h"
 #include "interface/packet_stream.h"
+#include "interface/sha1.h"
+#include "interface/fs.h"
 #include <cereal/archives/binary.hpp>
 #include <cereal/types/string.hpp>
 #include <cstring>
@@ -22,11 +24,25 @@ struct CState: public State
 	std::deque<char> m_socket_buffer;
 	interface::PacketStream m_packet_stream;
 	sp_<app::App> m_app;
+	ss_ m_cache_path;
 
 	CState(sp_<app::App> app):
 		m_socket(interface::createTCPSocket()),
-		m_app(app)
-	{}
+		m_app(app),
+		m_cache_path(g_client_config.cache_path+"/remote")
+	{
+		// Create directory for cached files
+		auto *fs = interface::getGlobalFilesystem();
+		fs->create_directories(m_cache_path);
+	}
+
+	void update()
+	{
+		if(m_socket->wait_data(0)){
+			read_socket();
+			handle_socket_buffer();
+		}
+	}
 
 	bool connect(const ss_ &address, const ss_ &port)
 	{
@@ -47,12 +63,10 @@ struct CState: public State
 		});
 	}
 
-	void update()
+	ss_ get_file_content(const ss_ &name)
 	{
-		if(m_socket->wait_data(0)){
-			read_socket();
-			handle_socket_buffer();
-		}
+		// TODO
+		return "Rullatortilla";
 	}
 
 	void read_socket()
@@ -99,30 +113,53 @@ struct CState: public State
 				ar(file_name);
 				ar(file_hash);
 			}
-			// TODO: Check if we already have this file
-			ss_ path = g_client_config.cache_path+"/remote/"+file_hash;
+			ss_ file_hash_hex = interface::sha1::hex(file_hash);
+			// Check if we already have this file
+			ss_ path = m_cache_path+"/"+file_hash_hex;
 			std::ifstream ifs(path, std::ios::binary);
 			if(ifs.good()){
 				// We have it; no need to ask this file
+				log_i(MODULE, "%s %s: cached",
+						cs(file_hash_hex), cs(file_name));
 			} else {
 				// We don't have it; request this file
+				log_i(MODULE, "%s %s: requesting",
+						cs(file_hash_hex), cs(file_name));
+				std::ostringstream os(std::ios::binary);
+				{
+					cereal::BinaryOutputArchive ar(os);
+					ar(file_name);
+					ar(file_hash);
+				}
+				send_packet("core:request_file", os.str());
 			}
+			return;
 		}
-		if(packet_name == "core:transfer_file"){
+		if(packet_name == "core:file_content"){
 			ss_ file_name;
+			ss_ file_hash;
 			ss_ file_content;
 			std::istringstream is(data, std::ios::binary);
 			{
 				cereal::BinaryInputArchive ar(is);
 				ar(file_name);
+				ar(file_hash);
 				ar(file_content);
 			}
-			// TODO: Check filename for malicious characters "/.\"\\"
-			// TODO: Never use a filename in the filesystem that was supplied by
-			//       server
-			ss_ path = g_client_config.cache_path+"/remote/"+file_name;
+			ss_ file_hash2 = interface::sha1::calculate(file_content);
+			if(file_hash != file_hash2){
+				log_w(MODULE, "Requested file differs in hash: \"%s\": "
+						"requested %s, actual %s", cs(file_name),
+						cs(interface::sha1::hex(file_hash)),
+						cs(interface::sha1::hex(file_hash2)));
+				return;
+			}
+			ss_ file_hash_hex = interface::sha1::hex(file_hash);
+			ss_ path = g_client_config.cache_path+"/remote/"+file_hash_hex;
+			log_i(MODULE, "Saving %s to %s", cs(file_name), cs(path));
 			std::ofstream of(path, std::ios::binary);
 			of<<file_content;
+			return;
 		}
 	}
 };
