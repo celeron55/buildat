@@ -28,13 +28,14 @@ struct Module: public interface::Module
 	{
 		log_v(MODULE, "__loader init");
 		m_server->sub_event(this, Event::t("core:load_modules"));
+		m_server->sub_event(this, Event::t("core:module_modified"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
-		if(type == Event::t("core:load_modules")){
-			on_load_modules();
-		}
+		EVENT_VOIDN("core:load_modules", on_load_modules)
+		EVENT_TYPEN("core:module_modified", on_module_modified,
+				interface::ModuleModifiedEvent)
 	}
 
 	void on_load_modules()
@@ -54,6 +55,12 @@ struct Module: public interface::Module
 				continue;
 			m_server->load_module(n.name, m_server->get_modules_path()+"/"+n.name);
 		}*/
+	}
+
+	void on_module_modified(const interface::ModuleModifiedEvent &event)
+	{
+		log_v(MODULE, "__loader::on_module_modified()");
+		m_server->reload_module(event.name, event.path);
 	}
 };
 

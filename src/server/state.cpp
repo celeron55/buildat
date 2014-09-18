@@ -88,9 +88,11 @@ struct CState: public State, public interface::Server
 					interface::createFileWatch({init_cpp_path},
 					[this, module_name, path]()
 			{
-				log_i(MODULE, "Module modified: %s; reloading", cs(module_name));
-				unload_module_u(module_name);
-				load_module(module_name, path);
+				log_i(MODULE, "Module modified: %s: %s",
+						cs(module_name), cs(path));
+				emit_event(Event("core:module_modified",
+						new interface::ModuleModifiedEvent(module_name, path)));
+				handle_events();
 			}));
 		}
 
@@ -130,7 +132,7 @@ struct CState: public State, public interface::Server
 		m_modules_path = path;
 		ss_ first_module_path = path+"/__loader";
 		load_module("__loader", first_module_path);
-		// Allow loader load other modules
+		// Allow loader to load other modules
 		emit_event(Event("core:load_modules"));
 		handle_events();
 		// Now that everyone is listening, we can fire the start event
@@ -146,6 +148,26 @@ struct CState: public State, public interface::Server
 		if(it == m_modules.end())
 			return;
 		m_unloads_requested.insert(module_name);
+	}
+
+	void reload_module(const ss_ &module_name, const ss_ &path)
+	{
+		log_i(MODULE, "reload_module(%s)", cs(module_name));
+		unload_module_u(module_name);
+		load_module(module_name, path);
+		// Send core::continue directly to module
+		{
+			interface::MutexScope ms(m_modules_mutex);
+			auto it = m_modules.find(module_name);
+			if(it == m_modules.end()){
+				log_w(MODULE, "reload_module: Module not found: %s",
+						cs(module_name));
+				return;
+			}
+			ModuleContainer *mc = &it->second;
+			interface::MutexScope mc_ms(mc->mutex);
+			mc->module->event(Event::t("core:continue"), nullptr);
+		}
 	}
 
 	// Direct version; internal and unsafe

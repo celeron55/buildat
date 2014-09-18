@@ -17,12 +17,20 @@ namespace interface
 		SocketEvent(int fd): fd(fd){}
 	};
 
+	struct ModuleModifiedEvent: public interface::Event::Private {
+		ss_ name;
+		ss_ path;
+		ModuleModifiedEvent(const ss_ &name, const ss_ &path):
+			name(name), path(path){}
+	};
+
 	struct Server
 	{
 		virtual ~Server(){}
 
 		virtual void load_module(const ss_ &module_name, const ss_ &path) = 0;
 		virtual void unload_module(const ss_ &module_name) = 0;
+		virtual void reload_module(const ss_ &module_name, const ss_ &path) = 0;
 		virtual ss_ get_modules_path() = 0;
 		virtual ss_ get_builtin_modules_path() = 0;
 		virtual bool has_module(const ss_ &module_name) = 0;

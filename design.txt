@@ -49,9 +49,10 @@ files. They cannot export any internally defined functions directly, but they
 can provide convenience wrappers for event-based interfaces.
 
 Startup sequence and what the module should do:
-- constructor        : Initialize everything you can here
-- init()             : Subscribe to events
-- "core:start" event : Start doing whatever the module wants to actively do
+- constructor     : Don't access other modules. Throw on fatal errors.
+- init()          : Subscribe to events; access other external things.
+- "core:start"    : Start doing whatever the module wants to actively do.
+- "core:continue" : Continue doing stuff after a reload.
 
 Network protocol
 ----------------
