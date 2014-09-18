@@ -7,6 +7,12 @@ project(buildat)
 
 add_subdirectory("3rdparty/cereal")
 add_subdirectory("3rdparty/c55lib")
+add_subdirectory("3rdparty/smallsha1")
+
+include_directories("src")
+include_directories("3rdparty/cereal/include")
+include_directories("3rdparty/c55lib")
+include_directories("3rdparty/smallsha1")
 
 #
 # Polycode
@@ -45,10 +51,6 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 # Security / crash protection
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstack-protector-all")
 
-include_directories("src")
-include_directories("3rdparty/c55lib")
-include_directories("3rdparty/cereal/include")
-
 # Client
 set(CLIENT_EXE_NAME buildat_client)
 set(CLIENT_SRCS
@@ -57,11 +59,13 @@ set(CLIENT_SRCS
 	src/client/app.cpp
 	src/core/log.cpp
 	src/impl/tcpsocket.cpp
+	src/impl/sha1.cpp
 )
 add_executable(${CLIENT_EXE_NAME} ${CLIENT_SRCS})
 TARGET_LINK_LIBRARIES(${CLIENT_EXE_NAME}
 	${POLYCODE_DEPENDENCY_LIBS}
 	c55lib
+	smallsha1
 )
 
 # Server
@@ -76,10 +80,12 @@ set(SERVER_SRCS
 	src/impl/tcpsocket.cpp
 	src/impl/module.cpp
 	src/impl/linux/file_watch.cpp
+	src/impl/sha1.cpp
 )
 add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
 TARGET_LINK_LIBRARIES(${SERVER_EXE_NAME}
 	c55lib
+	smallsha1
 	dl
 )
 add_definitions()

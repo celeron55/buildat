@@ -47,13 +47,14 @@ int main(int argc, char *argv[])
 
 	client::Config &config = g_client_config;
 
-	const char opts[100] = "hs:p:P:";
+	const char opts[100] = "hs:p:P:C:";
 	const char usagefmt[1000] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
 			"  -s [address]         Specify server address\n"
 			"  -p [polycode_path]   Specify polycode path\n"
 			"  -P [share_path]      Specify share/ path\n"
+			"  -C [cache_path]      Specify cache/ path\n"
 	;
 
 	int c;
@@ -75,6 +76,10 @@ int main(int argc, char *argv[])
 		case 'P':
 			fprintf(stderr, "INFO: config.share_path: %s\n", c55_optarg);
 			config.share_path = c55_optarg;
+			break;
+		case 'C':
+			fprintf(stderr, "INFO: config.cache_path: %s\n", c55_optarg);
+			config.cache_path = c55_optarg;
 			break;
 		default:
 			fprintf(stderr, "ERROR: Invalid command-line argument\n");

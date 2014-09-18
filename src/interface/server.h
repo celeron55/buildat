@@ -24,6 +24,16 @@ namespace interface
 			name(name), path(path){}
 	};
 
+	struct ModuleLoadedEvent: public interface::Event::Private {
+		ss_ name;
+		ModuleLoadedEvent(const ss_ &name): name(name){}
+	};
+
+	struct ModuleUnloadedEvent: public interface::Event::Private {
+		ss_ name;
+		ModuleUnloadedEvent(const ss_ &name): name(name){}
+	};
+
 	struct Server
 	{
 		virtual ~Server(){}

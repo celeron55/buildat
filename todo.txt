@@ -9,3 +9,8 @@ Buildat TODO
 - Modules should be run in threads.
 - Network should leave socket fds in m_server when destructing, and pick them up
   on core:continue.
+- Move module/include/api.h to module/api.h
+
+Buildat TODO later
+==================
+- Watch dependencies of module source and client_lua/*.lua in addition to main file

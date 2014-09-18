@@ -127,6 +127,9 @@ struct CState: public State, public interface::Server
 			interface::MutexScope ms2(mc.mutex);
 			mc.module->init();
 		}
+
+		emit_event(Event("core:module_loaded",
+				new interface::ModuleLoadedEvent(module_name)));
 	}
 
 	void load_modules(const ss_ &path)
@@ -207,6 +210,9 @@ struct CState: public State, public interface::Server
 		delete mc->module;
 		m_modules.erase(module_name);
 		m_compiler->unload(module_name);
+
+		emit_event(Event("core:module_unloaded",
+				new interface::ModuleUnloadedEvent(module_name)));
 	}
 
 	ss_ get_modules_path()

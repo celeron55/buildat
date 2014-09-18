@@ -1,13 +1,17 @@
 #include "core/log.h"
 #include "client/state.h"
 #include "client/app.h"
+#include "client/config.h"
 #include "interface/tcpsocket.h"
-//#include <cereal/archives/binary.hpp>
-//#include <cereal/types/string.hpp>
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/string.hpp>
 #include <cstring>
 #include <deque>
+#include <fstream>
 #include <sys/socket.h>
 #define MODULE "__state"
+
+extern client::Config g_client_config;
 
 namespace client {
 
@@ -79,10 +83,10 @@ struct CState: public State
 		if(r == -1)
 			throw Exception(ss_()+"Receive failed: "+strerror(errno));
 		if(r == 0){
-			log_i(MODULE, "Peer disconnected");
+			log_w(MODULE, "Peer disconnected");
 			return;
 		}
-		log_i(MODULE, "Received %zu bytes", r);
+		log_d(MODULE, "Received %zu bytes", r);
 		m_socket_buffer.insert(m_socket_buffer.end(), buf, buf + r);
 	}
 
@@ -99,10 +103,10 @@ struct CState: public State
 					(m_socket_buffer[3] & 0xff)<<8 |
 					(m_socket_buffer[4] & 0xff)<<16 |
 					(m_socket_buffer[5] & 0xff)<<24;
-			log_i(MODULE, "size=%zu", size);
+			log_d(MODULE, "size=%zu", size);
 			if(m_socket_buffer.size() < 6 + size)
 				return;
-			log_i(MODULE, "Received full packet; type=%zu, length=6+%zu",
+			log_v(MODULE, "Received full packet; type=%zu, length=6+%zu",
 					type, size);
 			ss_ data(m_socket_buffer.begin() + 6, m_socket_buffer.begin() + 6 + size);
 			m_socket_buffer.erase(m_socket_buffer.begin(),
@@ -144,6 +148,38 @@ struct CState: public State
 			if(m_app)
 				m_app->run_script(data);
 			return;
+		}
+		if(packet_name == "core:announce_file"){
+			ss_ file_name;
+			ss_ file_hash;
+			std::istringstream is(data, std::ios::binary);
+			{
+				cereal::BinaryInputArchive ar(is);
+				ar(file_name);
+				ar(file_hash);
+			}
+			// TODO: Check if we already have this file
+			ss_ path = g_client_config.cache_path+"/remote/"+file_hash;
+			std::ifstream is(path, std::ios::binary);
+			if(is.good()){
+				// We have it; no need to ask this file
+			} else {
+				// We don't have it; request this file
+			}
+		}
+		if(packet_name == "core:transfer_file"){
+			ss_ file_name;
+			ss_ file_content;
+			std::istringstream is(data, std::ios::binary);
+			{
+				cereal::BinaryInputArchive ar(is);
+				ar(file_name);
+				ar(file_content);
+			}
+			// TODO: Check filename for malicious characters "/.\"\\"
+			ss_ path = g_client_config.cache_path+"/remote/"+file_name;
+			std::ofstream of(path, std::ios::binary);
+			of<<file_content;
 		}
 	}
 };

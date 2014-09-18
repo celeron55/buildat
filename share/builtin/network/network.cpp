@@ -95,11 +95,6 @@ struct Module: public interface::Module, public network::Interface
 		EVENT_TYPEN("network:incoming_data", on_incoming_data, interface::SocketEvent)
 	}
 
-	void* get_interface()
-	{
-		return dynamic_cast<Interface*>(this);
-	}
-
 	void on_start()
 	{
 		ss_ address = "any4";
@@ -256,6 +251,11 @@ struct Module: public interface::Module, public network::Interface
 	void send(PeerInfo::Id recipient, const ss_ &name, const ss_ &data)
 	{
 		send(recipient, m_packet_types.get(name), data);
+	}
+
+	void* get_interface()
+	{
+		return dynamic_cast<Interface*>(this);
 	}
 };
 
