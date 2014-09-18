@@ -89,13 +89,13 @@ struct CState: public State
 			if(m_socket_buffer.size() < 6)
 				return;
 			size_t type =
-					(m_socket_buffer[0]&0xff)<<0 |
-					(m_socket_buffer[1]&0xff)<<8;
+					(m_socket_buffer[0] & 0xff)<<0 |
+					(m_socket_buffer[1] & 0xff)<<8;
 			size_t size =
-					(m_socket_buffer[2]&0xff)<<0 |
-					(m_socket_buffer[3]&0xff)<<8 |
-					(m_socket_buffer[4]&0xff)<<16 |
-					(m_socket_buffer[5]&0xff)<<24;
+					(m_socket_buffer[2] & 0xff)<<0 |
+					(m_socket_buffer[3] & 0xff)<<8 |
+					(m_socket_buffer[4] & 0xff)<<16 |
+					(m_socket_buffer[5] & 0xff)<<24;
 			log_i(MODULE, "size=%zu", size);
 			if(m_socket_buffer.size() < 6 + size)
 				return;
