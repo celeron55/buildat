@@ -1,7 +1,6 @@
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
-#include "interface/mutex.h"
 #include "test1/include/api.h"
 #include "network/include/api.h"
 #include "core/log.h"
@@ -12,7 +11,6 @@ namespace test1 {
 
 struct Module: public interface::Module
 {
-	interface::Mutex m_interface_mutex;
 	interface::Server *m_server;
 
 	Event::Type m_EventType_test1_thing;
@@ -32,8 +30,6 @@ struct Module: public interface::Module
 
 	void init()
 	{
-		interface::MutexScope ms(m_interface_mutex);
-
 		log_v(MODULE, "test1 init");
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, m_EventType_test1_thing);
@@ -43,8 +39,6 @@ struct Module: public interface::Module
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
-		interface::MutexScope ms(m_interface_mutex);
-
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_TYPE(m_EventType_test1_thing, on_thing, Thing)
 		EVENT_TYPEN("network:new_client", on_new_client, network::NewClient)

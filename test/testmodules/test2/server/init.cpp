@@ -1,7 +1,6 @@
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
-#include "interface/mutex.h"
 #include "test1/include/api.h"
 #include "core/log.h"
 
@@ -11,7 +10,6 @@ namespace test2 {
 
 struct Module: public interface::Module
 {
-	interface::Mutex m_interface_mutex;
 	interface::Server *m_server;
 	Event::Type m_EventType_core_start;
 
@@ -30,16 +28,12 @@ struct Module: public interface::Module
 
 	void init()
 	{
-		interface::MutexScope ms(m_interface_mutex);
-
 		log_v(MODULE, "test2 init");
 		m_server->sub_event(this, m_EventType_core_start);
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
-		interface::MutexScope ms(m_interface_mutex);
-
 		if(type == m_EventType_core_start){
 			on_start();
 		}

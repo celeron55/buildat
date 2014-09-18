@@ -2,7 +2,6 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/tcpsocket.h"
-#include "interface/mutex.h"
 #include "network/include/api.h"
 #include "core/log.h"
 //#include <cereal/archives/binary.hpp>
@@ -54,7 +53,6 @@ struct PacketTypeRegistry
 
 struct Module: public interface::Module, public network::Interface
 {
-	interface::Mutex m_interface_mutex;
 	interface::Server *m_server;
 	sp_<interface::TCPSocket> m_listening_socket;
 	sm_<Peer::Id, Peer> m_peers;
@@ -77,8 +75,6 @@ struct Module: public interface::Module, public network::Interface
 
 	void init()
 	{
-		interface::MutexScope ms(m_interface_mutex);
-
 		log_v(MODULE, "network init");
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("network:listen_event"));
@@ -87,8 +83,6 @@ struct Module: public interface::Module, public network::Interface
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
-		interface::MutexScope ms(m_interface_mutex);
-
 		EVENT_VOIDN("core:start",           on_start)
 		EVENT_TYPEN("network:listen_event", on_listen_event, interface::SocketEvent)
 		EVENT_TYPEN("network:incoming_data", on_incoming_data, interface::SocketEvent)
@@ -240,16 +234,12 @@ struct Module: public interface::Module, public network::Interface
 
 	Packet::Type packet_type(const ss_ &name)
 	{
-		interface::MutexScope ms(m_interface_mutex);
-
 		return m_packet_types.get(name);
 	}
 
 	void send(PeerInfo::Id recipient, const Packet::Type &type, const ss_ &data)
 	{
 		log_i(MODULE, "network::send()");
-		interface::MutexScope ms(m_interface_mutex);
-
 		send_u(recipient, type, data);
 	}
 

@@ -20,7 +20,7 @@ namespace server {
 struct CState: public State, public interface::Server
 {
 	struct ModuleContainer {
-		//interface::Mutex mutex;
+		interface::Mutex mutex;
 		interface::Module *module;
 
 		ModuleContainer(interface::Module *module = NULL): module(module){}
@@ -86,7 +86,7 @@ struct CState: public State, public interface::Server
 
 		{
 			ModuleContainer &mc = m_modules[module_name];
-			//interface::MutexScope ms2(mc.mutex);
+			interface::MutexScope ms2(mc.mutex);
 			mc.module->init();
 		}
 	}
@@ -152,12 +152,13 @@ struct CState: public State, public interface::Server
 		// This prevents module from being deleted while it is being called
 		interface::MutexScope ms(m_modules_mutex);
 		interface::Module *m = get_module(module_name);
-		if(!m){
+		auto it = m_modules.find(module_name);
+		if(it == m_modules.end())
 			return false;
-		} else {
-			cb(m);
-			return true;
-		}
+		ModuleContainer *mc = &it->second;
+		interface::MutexScope mc_ms(mc->mutex);
+		cb(m);
+		return true;
 	}
 
 	void sub_event(struct interface::Module *module,
@@ -230,7 +231,7 @@ struct CState: public State, public interface::Server
 				log_d("state", "handle_events(): %zu: Handling (%zu handlers)",
 						event.type, sublist.size());
 				for(ModuleContainer *mc : sublist){
-					//interface::MutexScope mc_ms(mc->mutex);
+					interface::MutexScope mc_ms(mc->mutex);
 					mc->module->event(event.type, event.p.get());
 				}
 			}
