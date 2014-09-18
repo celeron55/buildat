@@ -2,7 +2,7 @@ Buildat
 =======
 A Minecraft clone with vast extendability.
 
-License: MIT
+License: Apache 2.0
 
 Client
 ------
