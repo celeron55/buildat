@@ -1,5 +1,6 @@
-#include "client/state.h"
 #include "core/log.h"
+#include "client/state.h"
+#include "client/app.h"
 #include "interface/tcpsocket.h"
 //#include <cereal/archives/binary.hpp>
 //#include <cereal/types/string.hpp>
@@ -38,9 +39,11 @@ struct CState: public State
 	sp_<interface::TCPSocket> m_socket;
 	std::deque<char> m_socket_buffer;
 	ClientPacketTypeRegistry m_packet_types;
+	sp_<app::App> m_app;
 
-	CState():
-		m_socket(interface::createTCPSocket())
+	CState(sp_<app::App> app):
+		m_socket(interface::createTCPSocket()),
+		m_app(app)
 	{}
 
 	bool connect(const ss_ &address, const ss_ &port)
@@ -138,13 +141,15 @@ struct CState: public State
 
 		if(packet_name == "core:run_script"){
 			log_i(MODULE, "Asked to run script:\n----\n%s\n----", cs(data));
+			if(m_app)
+				m_app->run_script(data);
 			return;
 		}
 	}
 };
 
-State* createState()
+State* createState(sp_<app::App> app)
 {
-	return new CState();
+	return new CState(app);
 }
 }

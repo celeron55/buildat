@@ -83,14 +83,15 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	up_<client::State> state(client::createState());
+	Polycode::PolycodeView *view = new Polycode::PolycodeView("Hello Polycode!");
+	sp_<app::App> app0(app::createApp(view));
+
+	up_<client::State> state(client::createState(app0));
 
 	if(!state->connect(config.server_address, "20000"))
 		return 1;
 	state->send("foo");
 
-	Polycode::PolycodeView *view = new Polycode::PolycodeView("Hello Polycode!");
-	sp_<app::App> app0(app::createApp(view));
 	while(app0->update()){
 		state->update();
 		if(g_sigint_received)

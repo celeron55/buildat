@@ -65,8 +65,8 @@ struct Module: public interface::Module
 					"require \"Polycode/Core\"\n"
 					"scene = Scene(Scene.SCENE_2D)\n"
 					"scene:getActiveCamera():setOrthoSize(640, 480)\n"
-					"label = SceneLabel(\"Hello from Lua!\", 32)\n"
-					"label:setPosition(-50, -50, 0)\n"
+					"label = SceneLabel(\"Hello from remote module!\", 32)\n"
+					"label:setPosition(0, -100, 0)\n"
 					"scene:addChild(label)\n"
 					);
 		});

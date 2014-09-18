@@ -1,9 +1,11 @@
 #pragma once
 #include "core/types.h"
 
-namespace interface
-{
+namespace interface {
 	struct TCPSocket;
+}
+namespace app {
+	struct App;
 }
 
 namespace client
@@ -18,6 +20,6 @@ namespace client
 		virtual void update() = 0;
 	};
 
-	State* createState();
+	State* createState(sp_<app::App> app);
 }
 

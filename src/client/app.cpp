@@ -1,4 +1,5 @@
 #include "app.h"
+#include "core/log.h"
 #include "client/config.h"
 #include "client/state.h"
 #pragma GCC diagnostic push
@@ -199,7 +200,7 @@ struct CApp: public Polycode::EventHandler, public App
 
 		scene = new Polycode::Scene(Polycode::Scene::SCENE_2D);
 		scene->getActiveCamera()->setOrthoSize(640, 480);
-		label = new Polycode::SceneLabel("Hello, Polycode!", 32);
+		label = new Polycode::SceneLabel("Hello from Polycode C++!", 32);
 		scene->addChild(label);
 
 		L = lua_open();
@@ -268,7 +269,8 @@ struct CApp: public Polycode::EventHandler, public App
 
 		int error = luaL_dofile(L, (g_client_config.share_path+"/init.lua").c_str());
 		if(error){
-			Logger::log("luaL_dofile: An error occurred: %s\n", lua_tostring(L, -1));
+			log_v(MODULE, "luaL_dofile: An error occurred: %s\n",
+					lua_tostring(L, -1));
 			lua_pop(L, 1);
 		}
 	}
@@ -294,6 +296,14 @@ struct CApp: public Polycode::EventHandler, public App
 	void run_script(const ss_ &script)
 	{
 		// TODO
+		log_v(MODULE, "run_script(): script.size()=%zu", script.size());
+
+		int error = luaL_dostring(L, script.c_str());
+		if(error){
+			log_v(MODULE, "luaL_dostring: An error occurred: %s\n",
+					lua_tostring(L, -1));
+			lua_pop(L, 1);
+		}
 	}
 };
 
