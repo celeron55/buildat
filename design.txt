@@ -20,7 +20,7 @@ Module structure
 ----------------
 module
 |-- server
-|   `-- init.cpp  << Server-side code
+|   `-- <module>.cpp << Server-side code
 |-- include
 |   `-- api.h     << Structures for interfacing between modules
 |-- client_lua
