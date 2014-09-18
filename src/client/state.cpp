@@ -104,7 +104,7 @@ struct CState: public State
 				return;
 			log_i(MODULE, "Received full packet; type=%zu, length=6+%zu",
 					type, size);
-			ss_ data(&m_socket_buffer[6], size);
+			ss_ data(m_socket_buffer.begin() + 6, m_socket_buffer.begin() + 6 + size);
 			m_socket_buffer.erase(m_socket_buffer.begin(),
 					m_socket_buffer.begin() + 6 + size);
 			try {
