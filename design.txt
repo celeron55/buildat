@@ -19,19 +19,21 @@ C++ modules can interface with each other by using Cereal.
 Module structure
 ----------------
 module
-|-- client
-|   `-- init.lua  << Client-side code
 |-- server
 |   `-- init.cpp  << Server-side code
 |-- include
 |   `-- api.h     << Structures for interfacing between modules
-`-- data
+|-- client_lua
+|   `-- init.lua  << Client-side code
+`-- client_data
     `-- media.png << Data files
 
 Module behavior
 ---------------
-No script or data transfer to the client is initiated by the core. The
-module/client/init.lua file is a convention followed by the built-in modules.
+No script or data transfer to the client is initiated by the core. Conventions
+followed by builtin modules:
+- module/client_lua/{init,*}.lua - builtin/client_lua
+- module/client_data/*           - builtin/client_data
 
 Modules can be unloaded at runtime. Handling of client-side state is left up to
 the C++ modules themselves.
@@ -45,8 +47,7 @@ C++ modules are run in threads, and everything they can officially access is
 thread-safe.
 
 C++ modules can provide direct library functionality inlined in their include/
-files. They cannot export any internally defined functions directly, but they
-can provide convenience wrappers for event-based interfaces.
+files. See builtin/network as an example.
 
 Startup sequence and what the module should do:
 - constructor     : Don't access other modules. Throw on fatal errors.

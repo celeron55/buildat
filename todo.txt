@@ -7,3 +7,5 @@ Buildat TODO
 - There should be some kind of an easy synchronous calling mechanism between
   modules.
 - Modules should be run in threads.
+- Network should leave socket fds in m_server when destructing, and pick them up
+  on core:continue.
