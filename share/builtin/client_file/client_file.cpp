@@ -46,6 +46,8 @@ struct Module: public interface::Module, public client_file::Interface
 		m_server->sub_event(this, Event::t("network:new_client"));
 		m_server->sub_event(this,
 				Event::t("network:packet_received/core:request_file"));
+		m_server->sub_event(this,
+				Event::t("network:packet_received/core:all_files_transferred"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -54,6 +56,8 @@ struct Module: public interface::Module, public client_file::Interface
 		EVENT_TYPEN("network:new_client", on_new_client, network::NewClient)
 		EVENT_TYPEN("network:packet_received/core:request_file", on_request_file,
 				network::Packet)
+		EVENT_TYPEN("network:packet_received/core:all_files_transferred",
+				on_all_files_transferred, network::Packet)
 	}
 
 	void on_start()
@@ -77,8 +81,10 @@ struct Module: public interface::Module, public client_file::Interface
 				inetwork->send(new_client.info.id, "core:announce_file", os.str());
 			});
 		}
-		m_server->emit_event(ss_()+"client_file:files_sent",
-				new FilesSent(new_client.info.id));
+		network::access(m_server, [&](network::Interface * inetwork){
+			inetwork->send(new_client.info.id,
+					"core:tell_after_all_files_transferred", "");
+		});
 	}
 
 	void on_request_file(const network::Packet &packet)
@@ -116,6 +122,12 @@ struct Module: public interface::Module, public client_file::Interface
 		network::access(m_server, [&](network::Interface * inetwork){
 			inetwork->send(packet.sender, "core:file_content", os.str());
 		});
+	}
+
+	void on_all_files_transferred(const network::Packet &packet)
+	{
+		m_server->emit_event(ss_()+"client_file:files_transmitted",
+				new FilesTransmitted(packet.sender));
 	}
 
 	// Interface

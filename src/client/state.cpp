@@ -26,6 +26,8 @@ struct CState: public State
 	sp_<app::App> m_app;
 	ss_ m_cache_path;
 	sm_<ss_, ss_> m_file_hashes; // name -> hash
+	set_<ss_> m_waiting_files; // name
+	bool m_tell_after_all_files_transferred_requested = false;
 
 	CState(sp_<app::App> app):
 		m_socket(interface::createTCPSocket()),
@@ -152,6 +154,15 @@ struct CState: public State
 					ar(file_hash);
 				}
 				send_packet("core:request_file", os.str());
+				m_waiting_files.insert(file_name);
+			}
+			return;
+		}
+		if(packet_name == "core:tell_after_all_files_transferred"){
+			if(m_waiting_files.empty()){
+				send_packet("core:all_files_transferred", "");
+			} else {
+				m_tell_after_all_files_transferred_requested = true;
 			}
 			return;
 		}
@@ -166,6 +177,12 @@ struct CState: public State
 				ar(file_hash);
 				ar(file_content);
 			}
+			if(m_waiting_files.count(file_name) == 0){
+				log_w(MODULE, "Received file was not requested: %s %s",
+						cs(interface::sha1::hex(file_hash)), cs(file_name));
+				return;
+			}
+			m_waiting_files.erase(file_name);
 			ss_ file_hash2 = interface::sha1::calculate(file_content);
 			if(file_hash != file_hash2){
 				log_w(MODULE, "Requested file differs in hash: \"%s\": "
@@ -179,6 +196,12 @@ struct CState: public State
 			log_i(MODULE, "Saving %s to %s", cs(file_name), cs(path));
 			std::ofstream of(path, std::ios::binary);
 			of<<file_content;
+			if(m_tell_after_all_files_transferred_requested){
+				if(m_waiting_files.empty()){
+					send_packet("core:all_files_transferred", "");
+					m_tell_after_all_files_transferred_requested = false;
+				}
+			}
 			return;
 		}
 	}

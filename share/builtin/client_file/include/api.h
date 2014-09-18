@@ -4,11 +4,12 @@
 
 namespace client_file
 {
-	struct FilesSent: public interface::Event::Private
+	struct FilesTransmitted: public interface::Event::Private
 	{
 		network::PeerInfo::Id recipient;
 
-		FilesSent(const network::PeerInfo::Id &recipient): recipient(recipient){}
+		FilesTransmitted(const network::PeerInfo::Id &recipient): recipient(
+					recipient){}
 	};
 
 	struct Interface
