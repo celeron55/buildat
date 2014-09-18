@@ -15,6 +15,8 @@ namespace rccpp
 
 		virtual void* construct(const char *name, interface::Server *server) = 0;
 
+		virtual void unload(const std::string &module_name) = 0;
+
 		std::vector<std::string> include_directories;
 		std::vector<std::string> library_directories;
 	};

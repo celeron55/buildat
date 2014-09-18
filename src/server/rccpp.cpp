@@ -35,9 +35,10 @@ struct CCompiler: public Compiler
 
 	void* construct(const char *name, interface::Server *server);
 
+	void unload(const std::string &module_name);
+
 private:
-	std::unordered_map<std::string, RCCPP_Info> component_info_;
-	std::unordered_map<std::string, std::vector<void*>> constructed_objects;
+	std::unordered_map<std::string, RCCPP_Info> m_module_info;
 
 	bool compile(const std::string &in_path, const std::string &out_path);
 };
@@ -47,7 +48,9 @@ private:
 static void *library_load(const char *filename){
 	return dlopen(filename, RTLD_NOW);
 }
-//static void library_unload(void *module){ dlclose(module); }
+static void library_unload(void *module){
+	dlclose(module);
+}
 static void *library_get_address(void *module, const char *name){
 	return dlsym(module, name);
 }
@@ -124,8 +127,8 @@ bool CCompiler::build(const std::string &module_name,
 		return false;
 	}
 
-	auto it = component_info_.find(module_name);
-	if(it != component_info_.end()){
+	auto it = m_module_info.find(module_name);
+	if(it != m_module_info.end()){
 		RCCPP_Info &funcs = it->second;
 		funcs.constructor = constructor;
 		funcs.module = new_module;
@@ -133,30 +136,34 @@ bool CCompiler::build(const std::string &module_name,
 		RCCPP_Info funcs;
 		funcs.constructor = constructor;
 		funcs.module = new_module;
-		component_info_.emplace(module_name, std::move(funcs));
+		m_module_info.emplace(module_name, std::move(funcs));
 	}
 	return true;
 }
 
 void* CCompiler::construct(const char *name, interface::Server *server){
-	auto component_info_it = component_info_.find(name);
-	if(component_info_it == component_info_.end()){
+	auto it = m_module_info.find(name);
+	if(it == m_module_info.end()){
 		assert(nullptr && "Failed to get class info");
 		return nullptr;
 	}
 
-	RCCPP_Info &info = component_info_it->second;
+	RCCPP_Info &info = it->second;
 	RCCPP_Constructor constructor = info.constructor;
 
-	void *result = constructor(server);
+	return constructor(server);
+}
 
-	auto it = constructed_objects.find(std::string(name));
-
-	if(it == constructed_objects.end()) constructed_objects.insert(std::make_pair(
-				name, std::vector<void*> {result}));
-	else it->second.push_back(result);
-
-	return result;
+void CCompiler::unload(const std::string &module_name)
+{
+	auto it = m_module_info.find(module_name);
+	if(it == m_module_info.end()){
+		assert(nullptr && "Failed to get class info");
+		return;
+	}
+	void *module = it->second.module;
+	library_unload(module);
+	m_module_info.erase(module_name);
 }
 
 Compiler* createCompiler()

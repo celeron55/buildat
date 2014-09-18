@@ -161,6 +161,7 @@ struct CState: public State, public interface::Server
 		// Delete module
 		delete mc->module;
 		m_modules.erase(module_name);
+		m_compiler->unload(module_name);
 	}
 
 	ss_ get_modules_path()
