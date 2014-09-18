@@ -26,7 +26,7 @@ struct CFileWatch: FileWatch
 					IN_MODIFY | IN_ATTRIB);
 			if(r == -1){
 				throw Exception(ss_()+"inotify_add_watch() failed: "+
-						strerror(errno));
+						strerror(errno)+" (path="+path+")");
 			}
 			log_v(MODULE, "Watching path \"%s\" (inotify fd=%i)", cs(path), m_fd);
 			m_watch_paths[r] = path;
