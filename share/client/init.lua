@@ -12,7 +12,6 @@ local log = buildat:Logger("__client")
 
 log:info("init.lua loaded")
 
-print("")
 require "Polycode/Core"
 scene = Scene(Scene.SCENE_2D)
 scene:getActiveCamera():setOrthoSize(640, 480)
@@ -20,8 +19,20 @@ label = SceneLabel("Hello from Lua!", 32)
 label:setPosition(-50, -50, 0)
 scene:addChild(label)
 
+buildat.packet_subs = {}
+
 function buildat:sub_packet(name, cb)
+	buildat.packet_subs[name] = cb
 end
 function buildat:unsub_packet(cb)
+	for name, cb1 in pairs(buildat.packet_subs) do
+		if cb1 == cb then
+			buildat.packet_subs[cb] = nil
+		end
+	end
+end
+
+function buildat:send_packet(name, data)
+	__buildat_send_packet(name, data)
 end
 

@@ -264,9 +264,19 @@ struct CApp: public Polycode::EventHandler, public App
 		lua_pushstring(L, "defaults");
 		lua_call(L, 1, 0);
 
+		// TODO
 		//luaopen_Physics2D(L);
 		//luaopen_Physics3D(L);
 		//luaopen_UI(L);
+
+		lua_pushlightuserdata(L, (void*)this);
+		lua_setfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+
+#define DEF_BUILDAT_FUNC(name) {\
+	lua_pushcfunction(L, l_##name);\
+	lua_setglobal(L, "__buildat_" #name);\
+}
+		DEF_BUILDAT_FUNC(send_packet);
 
 		ss_ init_lua_path = g_client_config.share_path+"/client/init.lua";
 		int error = luaL_dofile(L, init_lua_path.c_str());
@@ -311,6 +321,27 @@ struct CApp: public Polycode::EventHandler, public App
 					lua_tostring(L, -1));
 			lua_pop(L, 1);
 		}
+	}
+
+	// Non-public methods
+
+	// send_packet(name: string, data: string)
+	static int l_send_packet(lua_State *L)
+	{
+		size_t name_len = 0;
+		const char *name_c = lua_tolstring(L, 1, &name_len);
+		ss_ name(name_c, name_len);
+		size_t data_len = 0;
+		const char *data_c = lua_tolstring(L, 2, &data_len);
+		ss_ data(data_c, data_len);
+
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+
+		self->m_state->send_packet(name, data);
+
+		return 0;
 	}
 };
 

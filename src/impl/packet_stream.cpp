@@ -81,6 +81,8 @@ void PacketStream::output(const ss_ &name, const ss_ &data,
 		}
 	}
 
+	log_v(MODULE, ">> %s", cs(name));
+
 	// Create actual packet including type and length
 	std::ostringstream os(std::ios::binary);
 	os<<(char)((type>>0) & 0xff);

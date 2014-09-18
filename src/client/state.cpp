@@ -40,9 +40,11 @@ struct CState: public State
 		return ok;
 	}
 
-	bool send(const ss_ &data)
+	void send_packet(const ss_ &name, const ss_ &data)
 	{
-		return m_socket->send_fd(data);
+		m_packet_stream.output(name, data, [&](const ss_ & packet_data){
+			m_socket->send_fd(packet_data);
+		});
 	}
 
 	void update()
@@ -116,6 +118,8 @@ struct CState: public State
 				ar(file_content);
 			}
 			// TODO: Check filename for malicious characters "/.\"\\"
+			// TODO: Never use a filename in the filesystem that was supplied by
+			//       server
 			ss_ path = g_client_config.cache_path+"/remote/"+file_name;
 			std::ofstream of(path, std::ios::binary);
 			of<<file_content;

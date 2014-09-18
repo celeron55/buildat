@@ -100,7 +100,6 @@ int main(int argc, char *argv[])
 
 	if(!state->connect(config.server_address, "20000"))
 		return 1;
-	state->send("foo");
 
 	while(app0->update()){
 		state->update();
