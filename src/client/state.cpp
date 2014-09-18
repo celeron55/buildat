@@ -25,6 +25,7 @@ struct CState: public State
 	interface::PacketStream m_packet_stream;
 	sp_<app::App> m_app;
 	ss_ m_cache_path;
+	sm_<ss_, ss_> m_file_hashes; // name -> hash
 
 	CState(sp_<app::App> app):
 		m_socket(interface::createTCPSocket()),
@@ -65,8 +66,26 @@ struct CState: public State
 
 	ss_ get_file_content(const ss_ &name)
 	{
-		// TODO
-		return "Rullatortilla";
+		auto it = m_file_hashes.find(name);
+		if(it == m_file_hashes.end())
+			throw Exception(ss_()+"hash of file not found: \""+name+"\"");
+		const ss_ &file_hash = it->second;
+		ss_ file_hash_hex = interface::sha1::hex(file_hash);
+		ss_ path = m_cache_path+"/"+file_hash_hex;
+		std::ifstream f(path);
+		if(!f.good())
+			throw Exception(ss_()+"Could not open file: "+path);
+		std::string file_content((std::istreambuf_iterator<char>(f)),
+				std::istreambuf_iterator<char>());
+		ss_ file_hash2 = interface::sha1::calculate(file_content);
+		if(file_hash != file_hash2){
+			log_e(MODULE, "Opened file differs in hash: \"%s\": "
+					"requested %s, actual %s", cs(name),
+					cs(interface::sha1::hex(file_hash)),
+					cs(interface::sha1::hex(file_hash2)));
+			throw Exception(ss_()+"Invalid file content: "+path);
+		}
+		return file_content;
 	}
 
 	void read_socket()
@@ -113,6 +132,7 @@ struct CState: public State
 				ar(file_name);
 				ar(file_hash);
 			}
+			m_file_hashes[file_name] = file_hash;
 			ss_ file_hash_hex = interface::sha1::hex(file_hash);
 			// Check if we already have this file
 			ss_ path = m_cache_path+"/"+file_hash_hex;

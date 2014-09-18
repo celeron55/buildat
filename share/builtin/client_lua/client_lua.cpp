@@ -79,8 +79,9 @@ struct Module: public interface::Module
 			std::string file_content((std::istreambuf_iterator<char>(f)),
 					std::istreambuf_iterator<char>());
 
+			const ss_ &public_file_name = module_name+"/"+n.name;
 			client_file::access(m_server, [&](client_file::Interface * i){
-				i->add_file_content(file_name, file_content);
+				i->add_file_content(public_file_name, file_content);
 			});
 		}
 	}

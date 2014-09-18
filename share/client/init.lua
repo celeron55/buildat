@@ -36,3 +36,17 @@ function buildat:send_packet(name, data)
 	__buildat_send_packet(name, data)
 end
 
+function buildat:run_script_file(name)
+	local content = __buildat_get_file_content(name)
+	if not content then
+		return false
+	end
+	log:info("buildat:run_script_file("..name.."): #content="..#content)
+	local script, err = loadstring(content)
+	if not script then
+		log:error("Failed to load script: "+err)
+		return false
+	end
+	script()
+end
+

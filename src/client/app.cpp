@@ -340,9 +340,13 @@ struct CApp: public Polycode::EventHandler, public App
 		CApp *self = (CApp*)lua_touserdata(L, -1);
 		lua_pop(L, 1);
 
-		self->m_state->send_packet(name, data);
-
-		return 0;
+		try{
+			self->m_state->send_packet(name, data);
+			return 0;
+		} catch(std::exception &e){
+			log_w(MODULE, "Exception in send_packet: %s", e.what());
+			return 0;
+		}
 	}
 
 	// get_file_content(name: string)
@@ -356,9 +360,14 @@ struct CApp: public Polycode::EventHandler, public App
 		CApp *self = (CApp*)lua_touserdata(L, -1);
 		lua_pop(L, 1);
 
-		ss_ content = self->m_state->get_file_content(name);
-		lua_pushlstring(L, content.c_str(), content.size());
-		return 1;
+		try{
+			ss_ content = self->m_state->get_file_content(name);
+			lua_pushlstring(L, content.c_str(), content.size());
+			return 1;
+		} catch(std::exception &e){
+			log_w(MODULE, "Exception in get_file_content: %s", e.what());
+			return 0;
+		}
 	}
 };
 
