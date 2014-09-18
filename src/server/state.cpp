@@ -79,7 +79,7 @@ struct CState: public State, public interface::Server
 
 		ss_ build_dst = g_server_config.rccpp_build_path +
 				"/"+module_name+".so";
-		ss_ init_cpp_path = path+"/server/"+module_name+".cpp";
+		ss_ init_cpp_path = path+"/"+module_name+".cpp";
 
 		// Set up file watch
 
