@@ -47,7 +47,7 @@ int main(int argc, char *argv[])
 
 	client::Config &config = g_client_config;
 
-	const char opts[100] = "hs:p:P:C:";
+	const char opts[100] = "hs:p:P:C:l:";
 	const char usagefmt[1000] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
@@ -55,6 +55,7 @@ int main(int argc, char *argv[])
 			"  -p [polycode_path]   Specify polycode path\n"
 			"  -P [share_path]      Specify share/ path\n"
 			"  -C [cache_path]      Specify cache/ path\n"
+			"  -l [integer]         Set maximum log level (0...5)\n"
 	;
 
 	int c;
@@ -81,6 +82,9 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "INFO: config.cache_path: %s\n", c55_optarg);
 			config.cache_path = c55_optarg;
 			break;
+		case 'l':
+			log_set_max_level(atoi(c55_optarg));
+			break;
 		default:
 			fprintf(stderr, "ERROR: Invalid command-line argument\n");
 			fprintf(stderr, usagefmt, argv[0]);
@@ -91,7 +95,8 @@ int main(int argc, char *argv[])
 	Polycode::PolycodeView *view = new Polycode::PolycodeView("Hello Polycode!");
 	sp_<app::App> app0(app::createApp(view));
 
-	up_<client::State> state(client::createState(app0));
+	sp_<client::State> state(client::createState(app0));
+	app0->set_state(state);
 
 	if(!state->connect(config.server_address, "20000"))
 		return 1;

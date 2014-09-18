@@ -2,6 +2,7 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/tcpsocket.h"
+#include "interface/packet_stream.h"
 #include "network/include/api.h"
 #include "core/log.h"
 //#include <cereal/archives/binary.hpp>
@@ -20,35 +21,12 @@ struct Peer
 
 	Id id = 0;
 	sp_<interface::TCPSocket> socket;
-	Packet::Type highest_known_type = 99;
 	std::deque<char> socket_buffer;
+	interface::PacketStream packet_stream;
 
 	Peer(){}
 	Peer(Id id, sp_<interface::TCPSocket> socket):
 		id(id), socket(socket){}
-};
-
-struct PacketTypeRegistry
-{
-	sm_<ss_, Packet::Type> m_types;
-	sm_<Packet::Type, ss_> m_names;
-	Packet::Type m_next_type = 100;
-
-	Packet::Type get(const ss_ &name){
-		auto it = m_types.find(name);
-		if(it != m_types.end())
-			return it->second;
-		Packet::Type type = m_next_type++;
-		m_types[name] = type;
-		m_names[type] = name;
-		return type;
-	}
-	ss_ get_name(Packet::Type type){
-		auto it = m_names.find(type);
-		if(it != m_names.end())
-			return it->second;
-		return "";
-	}
 };
 
 struct Module: public interface::Module, public network::Interface
@@ -58,7 +36,6 @@ struct Module: public interface::Module, public network::Interface
 	sm_<Peer::Id, Peer> m_peers;
 	sm_<int, Peer*> m_peers_by_socket;
 	size_t m_next_peer_id = 1;
-	PacketTypeRegistry m_packet_types;
 
 	Module(interface::Server *server):
 		interface::Module("network"),
@@ -161,68 +138,22 @@ struct Module: public interface::Module, public network::Interface
 		log_i(MODULE, "Received %zu bytes", r);
 		peer.socket_buffer.insert(peer.socket_buffer.end(), buf, buf + r);
 
-		for(;;){
-			if(peer.socket_buffer.size() < 6)
-				return;
-			size_t type =
-					peer.socket_buffer[0]<<0 |
-					peer.socket_buffer[1]<<8;
-			size_t size =
-					peer.socket_buffer[2]<<0 |
-					peer.socket_buffer[3]<<8 |
-					peer.socket_buffer[4]<<16 |
-					peer.socket_buffer[5]<<24;
-			log_i(MODULE, "size=%zu", size);
-			if(peer.socket_buffer.size() < 6 + size)
-				return;
-			log_i(MODULE, "Received full packet; type=%zu, length=6+%zu",
-					type, size);
-			ss_ data(&peer.socket_buffer[6], size);
-			peer.socket_buffer.erase(peer.socket_buffer.begin(),
-					peer.socket_buffer.begin() + 6 + size);
-
+		peer.packet_stream.input(peer.socket_buffer,
+		[&](const ss_ & name, const ss_ & data){
 			// Emit event
-			m_server->emit_event("network:packet_received",
-					new Packet(0, type, data));
-		}
+			m_server->emit_event(ss_()+"network:packet_received:"+name,
+					new Packet(name, data));
+		});
 	}
 
-	void send_u(Peer &peer, const Packet::Type &type, const ss_ &data)
+	void send_u(Peer &peer, const ss_ &name, const ss_ &data)
 	{
-		// Send new packet types if needed
-		if(m_packet_types.m_next_type > peer.highest_known_type + 1){
-			Packet::Type highest_known_type_was = peer.highest_known_type;
-			peer.highest_known_type = m_packet_types.m_next_type - 1;
-			for(Packet::Type t1 = highest_known_type_was;
-					t1 < m_packet_types.m_next_type; t1++){
-				std::ostringstream os(std::ios::binary);
-				os<<(char)((t1>>0) & 0xff);
-				os<<(char)((t1>>8) & 0xff);
-				ss_ name = m_packet_types.get_name(t1);
-				os<<(char)((name.size()>>0) & 0xff);
-				os<<(char)((name.size()>>8) & 0xff);
-				os<<(char)((name.size()>>16) & 0xff);
-				os<<(char)((name.size()>>24) & 0xff);
-				os<<name;
-				send_u(peer, 0, os.str());
-			}
-		}
-
-		// Create actual packet including type and length
-		std::ostringstream os(std::ios::binary);
-		os<<(char)((type>>0) & 0xff);
-		os<<(char)((type>>8) & 0xff);
-		os<<(char)((data.size()>>0) & 0xff);
-		os<<(char)((data.size()>>8) & 0xff);
-		os<<(char)((data.size()>>16) & 0xff);
-		os<<(char)((data.size()>>24) & 0xff);
-		os<<data;
-
-		// Send packet
-		peer.socket->send_fd(os.str());
+		peer.packet_stream.output(name, data, [&](const ss_ & packet_data){
+			peer.socket->send_fd(packet_data);
+		});
 	}
 
-	void send_u(PeerInfo::Id recipient, const Packet::Type &type, const ss_ &data)
+	void send_u(PeerInfo::Id recipient, const ss_ &name, const ss_ &data)
 	{
 		// Grab Peer (which contains socket)
 		auto it = m_peers.find(recipient);
@@ -232,25 +163,15 @@ struct Module: public interface::Module, public network::Interface
 		}
 		Peer &peer = it->second;
 
-		send_u(peer, type, data);
+		send_u(peer, name, data);
 	}
 
 	// Interface
 
-	Packet::Type packet_type(const ss_ &name)
-	{
-		return m_packet_types.get(name);
-	}
-
-	void send(PeerInfo::Id recipient, const Packet::Type &type, const ss_ &data)
-	{
-		log_i(MODULE, "network::send()");
-		send_u(recipient, type, data);
-	}
-
 	void send(PeerInfo::Id recipient, const ss_ &name, const ss_ &data)
 	{
-		send(recipient, m_packet_types.get(name), data);
+		log_i(MODULE, "network::send()");
+		send_u(recipient, name, data);
 	}
 
 	void* get_interface()

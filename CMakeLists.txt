@@ -60,6 +60,7 @@ set(CLIENT_SRCS
 	src/core/log.cpp
 	src/impl/tcpsocket.cpp
 	src/impl/sha1.cpp
+	src/impl/packet_stream.cpp
 )
 add_executable(${CLIENT_EXE_NAME} ${CLIENT_SRCS})
 TARGET_LINK_LIBRARIES(${CLIENT_EXE_NAME}
@@ -81,6 +82,7 @@ set(SERVER_SRCS
 	src/impl/module.cpp
 	src/impl/linux/file_watch.cpp
 	src/impl/sha1.cpp
+	src/impl/packet_stream.cpp
 )
 add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
 TARGET_LINK_LIBRARIES(${SERVER_EXE_NAME}

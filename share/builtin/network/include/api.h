@@ -15,13 +15,9 @@ namespace network
 	struct Packet: public interface::Event::Private
 	{
 		typedef size_t Type;
-
-		PeerInfo::Id recipient;
-		Type type;
+		ss_ name;
 		ss_ data;
-
-		Packet(PeerInfo::Id recipient, const Type &type, const ss_ &data):
-			recipient(recipient), type(type), data(data){}
+		Packet(const ss_ &name, const ss_ &data): name(name), data(data){}
 	};
 
 	struct NewClient: public interface::Event::Private
@@ -33,9 +29,6 @@ namespace network
 
 	struct Interface
 	{
-		virtual Packet::Type packet_type(const ss_ &name) = 0;
-		virtual void send(PeerInfo::Id recipient, const Packet::Type &type,
-				const ss_ &data) = 0;
 		virtual void send(PeerInfo::Id recipient, const ss_ &name,
 				const ss_ &data) = 0;
 	};

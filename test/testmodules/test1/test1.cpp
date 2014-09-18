@@ -88,8 +88,8 @@ struct Module: public interface::Module
 
 	void on_packet_received(const network::Packet &packet)
 	{
-		log_i(MODULE, "test1::on_packet_received: type=%zu, size=%zu",
-				packet.type, packet.data.size());
+		log_i(MODULE, "test1::on_packet_received: name=%zu, size=%zu",
+				cs(packet.name), packet.data.size());
 	}
 };
 

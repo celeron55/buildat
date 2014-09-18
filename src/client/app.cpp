@@ -184,6 +184,7 @@ struct CApp: public Polycode::EventHandler, public App
 	Polycode::Scene *scene;
 	Polycode::SceneLabel *label;
 	lua_State *L;
+	sp_<client::State> m_state;
 
 	CApp(Polycode::PolycodeView *view):
 		Polycode::EventHandler(), core(NULL), scene(NULL), label(NULL), L(NULL)
@@ -284,6 +285,11 @@ struct CApp: public Polycode::EventHandler, public App
 		lua_close(L);
 	}
 
+	void set_state(sp_<client::State> state)
+	{
+		m_state = state;
+	}
+
 	bool update()
 	{
 		return core->updateAndRender();
@@ -296,9 +302,9 @@ struct CApp: public Polycode::EventHandler, public App
 
 	void run_script(const ss_ &script)
 	{
-		// TODO
 		log_v(MODULE, "run_script(): script.size()=%zu", script.size());
 
+		// TODO: Security
 		int error = luaL_dostring(L, script.c_str());
 		if(error){
 			log_w(MODULE, "luaL_dostring: An error occurred: %s\n",
