@@ -10,10 +10,34 @@
 
 namespace client {
 
+struct ClientPacketTypeRegistry
+{
+	sm_<ss_, PacketType> m_types;
+	sm_<PacketType, ss_> m_names;
+
+	void set(PacketType type, const ss_ &name){
+		m_types[name] = type;
+		m_names[type] = name;
+	}
+	PacketType get_type(const ss_ &name){
+		auto it = m_types.find(name);
+		if(it != m_types.end())
+			return it->second;
+		throw Exception(ss_()+"Packet not known: "+name);
+	}
+	ss_ get_name(PacketType type){
+		auto it = m_names.find(type);
+		if(it != m_names.end())
+			return it->second;
+		throw Exception(ss_()+"Packet not known: "+itos(type));
+	}
+};
+
 struct CState: public State
 {
 	sp_<interface::TCPSocket> m_socket;
 	std::deque<char> m_socket_buffer;
+	ClientPacketTypeRegistry m_packet_types;
 
 	CState():
 		m_socket(interface::createTCPSocket())
@@ -80,12 +104,40 @@ struct CState: public State
 			ss_ data(&m_socket_buffer[6], size);
 			m_socket_buffer.erase(m_socket_buffer.begin(),
 					m_socket_buffer.begin() + 6 + size);
-			handle_packet(type, data);
+			try {
+				handle_packet(type, data);
+			} catch(std::exception &e){
+				log_w(MODULE, "Exception on handling packet: %s",
+						e.what());
+			}
 		}
 	}
 
 	void handle_packet(size_t type, const ss_ &data)
 	{
+		// Type 0 is packet definition packet
+		if(type == 0){
+			PacketType type1 =
+					data[0]<<0 |
+					data[1]<<8;
+			size_t name1_size =
+					data[2]<<0 |
+					data[3]<<8 |
+					data[4]<<16 |
+					data[5]<<24;
+			if(data.size() < 6 + name1_size)
+				return;
+			ss_ name1(&data.c_str()[6], name1_size);
+			log_i(MODULE, "Packet definition: %zu = %s", type1, cs(name1));
+			m_packet_types.set(type1, name1);
+			return;
+		}
+
+		ss_ packet_name = m_packet_types.get_name(type);
+		log_i(MODULE, "Received packet name: %s", cs(packet_name));
+
+		if(packet_name == "core:run_script"){
+		}
 	}
 };
 

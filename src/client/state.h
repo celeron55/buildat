@@ -8,6 +8,8 @@ namespace interface
 
 namespace client
 {
+	typedef size_t PacketType;
+
 	struct State
 	{
 		virtual ~State(){}
