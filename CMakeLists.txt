@@ -75,6 +75,7 @@ set(SERVER_SRCS
 	src/impl/event.cpp
 	src/impl/tcpsocket.cpp
 	src/impl/module.cpp
+	src/impl/linux/file_watch.cpp
 )
 add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
 TARGET_LINK_LIBRARIES(${SERVER_EXE_NAME}

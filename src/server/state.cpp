@@ -5,6 +5,7 @@
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
+#include "interface/file_watch.h"
 //#include "interface/thread.h"
 #include "interface/mutex.h"
 #include <iostream>
@@ -36,6 +37,7 @@ struct CState: public State, public interface::Server
 
 	sm_<ss_, ModuleContainer> m_modules;
 	set_<ss_> m_unloads_requested;
+	sm_<ss_, sp_<interface::FileWatch>> m_module_file_watches;
 	interface::Mutex m_modules_mutex;
 
 	sv_<Event> m_event_queue;
@@ -76,9 +78,17 @@ struct CState: public State, public interface::Server
 		log_i(MODULE, "Loading module %s from %s", cs(module_name), cs(path));
 		ss_ build_dst = g_server_config.rccpp_build_path +
 				"/"+module_name+".so";
+		ss_ init_cpp_path = path+"/server/init.cpp";
+
 		m_compiler->include_directories.push_back(m_modules_path);
-		m_compiler->build(module_name, path+"/server/init.cpp", build_dst);
+		m_compiler->build(module_name, init_cpp_path, build_dst);
 		m_compiler->include_directories.pop_back();
+
+		m_module_file_watches[module_name] = sp_<interface::FileWatch>(
+				interface::createFileWatch({init_cpp_path}, [this, module_name]()
+		{
+			log_i(MODULE, "Module modified: %s", cs(module_name));
+		}));
 
 		interface::Module *m = static_cast<interface::Module*>(
 				m_compiler->construct(module_name.c_str(), this));
@@ -202,6 +212,9 @@ struct CState: public State, public interface::Server
 
 	void handle_events()
 	{
+		// Note: Locking m_modules_mutex here is not needed because no modules
+		// can be deleted while this is running, because modules are deleted
+		// only by this same thread.
 		for(size_t loop_i = 0;; loop_i++){
 			sv_<Event> event_queue_snapshot;
 			sv_<sv_<ModuleContainer*>> event_subs_snapshot;
@@ -272,28 +285,48 @@ struct CState: public State, public interface::Server
 
 	sv_<int> get_sockets()
 	{
-		interface::MutexScope ms(m_sockets_mutex);
 		sv_<int> result;
-		for(auto &pair : m_sockets)
-			result.push_back(pair.second.fd);
+		{
+			interface::MutexScope ms(m_sockets_mutex);
+			for(auto &pair : m_sockets)
+				result.push_back(pair.second.fd);
+		}
+		{
+			interface::MutexScope ms(m_modules_mutex);
+			for(auto &pair : m_module_file_watches){
+				auto fds = pair.second->get_fds();
+				result.insert(result.end(), fds.begin(), fds.end());
+			}
+		}
 		return result;
 	}
 
 	void emit_socket_event(int fd)
 	{
-		interface::MutexScope ms(m_sockets_mutex);
-		auto it = m_sockets.find(fd);
-		if(it == m_sockets.end()){
-			// This can be valid if the socket has been removed while waiting
-			// for it elsewhere
-			log_w("state", "emit_socket_event(): fd=%i not found", fd);
+		log_d(MODULE, "emit_socket_event(): fd=%i", fd);
+		// Break if not found; return if found and handled.
+		do {
+			interface::MutexScope ms(m_modules_mutex);
+			for(auto &pair : m_module_file_watches){
+				sv_<int> fds = pair.second->get_fds();
+				if(std::find(fds.begin(), fds.end(), fd) != fds.end()){
+					pair.second->report_fd(fd);
+					return;
+				}
+			}
+		} while(0);
+		do {
+			interface::MutexScope ms(m_sockets_mutex);
+			auto it = m_sockets.find(fd);
+			if(it == m_sockets.end())
+				break;
+			SocketState &s = it->second;
+			// Create and emit event
+			interface::Event event(s.event_type);
+			event.p.reset(new interface::SocketEvent(fd));
+			emit_event(std::move(event));
 			return;
-		}
-		SocketState &s = it->second;
-		// Create and emit event
-		interface::Event event(s.event_type);
-		event.p.reset(new interface::SocketEvent(fd));
-		emit_event(std::move(event));
+		} while(0);
 	}
 };
 
