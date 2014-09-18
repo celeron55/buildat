@@ -73,6 +73,11 @@ struct Module: public interface::Module, public network::Interface
 		log_v(MODULE, "network destruct");
 		if(m_listening_socket->good())
 			m_server->remove_socket_event(m_listening_socket->fd());
+		for(auto pair : m_peers){
+			const Peer &peer = pair.second;
+			if(peer.socket->good())
+				m_server->remove_socket_event(peer.socket->fd());
+		}
 	}
 
 	void init()
