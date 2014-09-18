@@ -60,6 +60,15 @@ struct Module: public interface::Module
 
 		network::access(m_server, [&](network::Interface * inetwork){
 			inetwork->send(new_client.info.id, "test1:dummy", "dummy data");
+			inetwork->send(new_client.info.id, "core:run_script",
+					"print(\"Remote script is running\")\n"
+					"require \"Polycode/Core\"\n"
+					"scene = Scene(Scene.SCENE_2D)\n"
+					"scene:getActiveCamera():setOrthoSize(640, 480)\n"
+					"label = SceneLabel(\"Hello from Lua!\", 32)\n"
+					"label:setPosition(-50, -50, 0)\n"
+					"scene:addChild(label)\n"
+					);
 		});
 	}
 
