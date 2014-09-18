@@ -71,6 +71,8 @@ struct Module: public interface::Module, public network::Interface
 	~Module()
 	{
 		log_v(MODULE, "network destruct");
+		if(m_listening_socket->good())
+			m_server->remove_socket_event(m_listening_socket->fd());
 	}
 
 	void init()
@@ -100,9 +102,11 @@ struct Module: public interface::Module, public network::Interface
 
 		if(!m_listening_socket->bind_fd(address, port) ||
 				!m_listening_socket->listen_fd()){
-			log_i(MODULE, "Failed to bind to %s:%s", cs(address), cs(port));
+			log_i(MODULE, "Failed to bind to %s:%s, fd=%i", cs(address), cs(port),
+					m_listening_socket->fd());
 		} else {
-			log_i(MODULE, "Listening at %s:%s", cs(address), cs(port));
+			log_i(MODULE, "Listening at %s:%s, fd=%i", cs(address), cs(port),
+					m_listening_socket->fd());
 		}
 
 		m_server->add_socket_event(m_listening_socket->fd(),
