@@ -106,6 +106,10 @@ int main(int argc, char *argv[])
 	// Main loop
 	uint64_t next_tick_us = get_timeofday_us();
 	uint64_t t_per_tick = 1000 * 100;
+	set_<int> attempt_bad_fds;
+	int last_added_attempt_bad_fd = -42;
+	set_<int> bad_fds;
+	size_t num_consequent_valid_selects = 0;
 	while(!g_sigint_received){
 		struct timeval tv;
 		tv.tv_sec = 0;
@@ -115,7 +119,14 @@ int main(int argc, char *argv[])
 		FD_ZERO(&rfds);
 		sv_<int> sockets = state->get_sockets();
 		int fd_max = 0;
+		if(!attempt_bad_fds.empty() || !bad_fds.empty()){
+			log_w("main", "Ignoring fds %s and %s out of all %s",
+					cs(dump(attempt_bad_fds)), cs(dump(bad_fds)),
+					cs(dump(sockets)));
+		}
 		for(int fd : sockets){
+			if(attempt_bad_fds.count(fd) || bad_fds.count(fd))
+				continue;
 			FD_SET(fd, &rfds);
 			if(fd > fd_max)
 				fd_max = fd;
@@ -124,9 +135,25 @@ int main(int argc, char *argv[])
 		int r = select(fd_max + 1, &rfds, NULL, NULL, &tv);
 		if(r == -1){
 			// Error
-			log_w("main", "select() returned -1: %s", strerror(errno));
+			num_consequent_valid_selects = 0;
+			log_w("main", "select() returned -1: %s (fds: %s)",
+					strerror(errno), cs(dump(sockets)));
 			if(errno == EBADF || errno == EINTR){
 				// These are temporary errors
+				// Try to find out which socket is doing this
+				if(attempt_bad_fds.size() == sockets.size()){
+					throw Exception("All fds are bad");
+				} else {
+					for(;;){
+						int fd = sockets[rand() % sockets.size()];
+						if(attempt_bad_fds.count(fd) == 0){
+							log_w("main", "Trying to ignore fd=%i", fd);
+							attempt_bad_fds.insert(fd);
+							last_added_attempt_bad_fd = fd;
+							break;
+						}
+					}
+				}
 			} else {
 				// Don't consume 100% CPU and flood logs
 				usleep(1000 * 100);
@@ -134,14 +161,22 @@ int main(int argc, char *argv[])
 			}
 		} else if(r == 0){
 			// Nothing happened
+			num_consequent_valid_selects++;
 		} else {
 			// Something happened
+			num_consequent_valid_selects++;
 			for(int fd : sockets){
 				if(FD_ISSET(fd, &rfds)){
 					log_d("main", "FD_ISSET: %i", fd);
 					state->emit_socket_event(fd);
 				}
 			}
+		}
+
+		if(!attempt_bad_fds.empty() && num_consequent_valid_selects > 5){
+			log_w("main", "Found bad fd: %d", last_added_attempt_bad_fd);
+			bad_fds.insert(last_added_attempt_bad_fd);
+			attempt_bad_fds.clear();
 		}
 
 		uint64_t current_us = get_timeofday_us();
