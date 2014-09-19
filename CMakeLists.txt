@@ -18,7 +18,7 @@ include_directories("3rdparty/smallsha1")
 # Polycode
 #
 
-SET(POLYCODE_ROOT_DIR "${buildat_SOURCE_DIR}/../polycode")
+SET(POLYCODE_ROOT_DIR "${buildat_SOURCE_DIR}/../polycode" CACHE PATH "Path to Polycode source")
 SET(POLYCODE_RELEASE_DIR ${POLYCODE_ROOT_DIR}/Release/${CMAKE_SYSTEM_NAME})
 SET(POLYCODE_CMAKE_DIR ${POLYCODE_ROOT_DIR}/CMake)
 SET(CMAKE_INSTALL_PREFIX ${POLYCODE_RELEASE_DIR}/Standalone/)
@@ -35,7 +35,7 @@ SET(CMAKE_MODULE_PATH
 )
 INCLUDE(${POLYCODE_CMAKE_DIR}/PolycodeDependencies.cmake)
 
-include_directories("../polycode/Bindings/Contents/LUA/Include")
+include_directories("${POLYCODE_ROOT_DIR}/Bindings/Contents/LUA/Include")
 
 #
 # Buildat
