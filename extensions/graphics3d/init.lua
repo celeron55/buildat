@@ -29,6 +29,7 @@ M.safe.Scene = polybox.wrap_class("Scene", {
 
 M.safe.ScenePrimitive = polybox.wrap_class("ScenePrimitive", {
 	constructor = function(type, v1, v2, v3, v4, v5)
+		polybox.check_enum(type, {ScenePrimitive.TYPE_BOX, ScenePrimitive.TYPE_PLANE})
 		polybox.check_type(v1, {"number", "nil"})
 		polybox.check_type(v2, {"number", "nil"})
 		polybox.check_type(v3, {"number", "nil"})
@@ -44,7 +45,8 @@ M.safe.ScenePrimitive = polybox.wrap_class("ScenePrimitive", {
 		loadTexture = function(safe, texture_name)
 			unsafe = polybox.check_type(safe, "ScenePrimitive")
 			         polybox.check_type(texture_name, "string")
-			unsafe:loadTexture("foo")
+			local path = __buildat_get_file_path(texture_name)
+			unsafe:loadTexture(path)
 		end,
 		setPosition = function(safe, x, y, z)
 			unsafe = polybox.check_type(safe, "ScenePrimitive")

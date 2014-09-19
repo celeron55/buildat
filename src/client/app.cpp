@@ -278,6 +278,7 @@ struct CApp: public Polycode::EventHandler, public App
 }
 		DEF_BUILDAT_FUNC(send_packet);
 		DEF_BUILDAT_FUNC(get_file_content)
+		DEF_BUILDAT_FUNC(get_file_path)
 		DEF_BUILDAT_FUNC(get_path)
 		DEF_BUILDAT_FUNC(pcall)
 
@@ -350,6 +351,29 @@ struct CApp: public Polycode::EventHandler, public App
 			return 0;
 		} catch(std::exception &e){
 			log_w(MODULE, "Exception in send_packet: %s", e.what());
+			return 0;
+		}
+	}
+
+	// get_file_path(name: string) -> path, hash
+	static int l_get_file_path(lua_State *L)
+	{
+		size_t name_len = 0;
+		const char *name_c = lua_tolstring(L, 1, &name_len);
+		ss_ name(name_c, name_len);
+
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+
+		try {
+			ss_ hash;
+			ss_ path = self->m_state->get_file_path(name, &hash);
+			lua_pushlstring(L, path.c_str(), path.size());
+			lua_pushlstring(L, hash.c_str(), hash.size());
+			return 1;
+		} catch(std::exception &e){
+			log_w(MODULE, "Exception in get_file_path: %s", e.what());
 			return 0;
 		}
 	}

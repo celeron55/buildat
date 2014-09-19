@@ -66,7 +66,7 @@ struct CState: public State
 		});
 	}
 
-	ss_ get_file_content(const ss_ &name)
+	ss_ get_file_path(const ss_ &name, ss_ *dst_file_hash)
 	{
 		auto it = m_file_hashes.find(name);
 		if(it == m_file_hashes.end())
@@ -74,6 +74,15 @@ struct CState: public State
 		const ss_ &file_hash = it->second;
 		ss_ file_hash_hex = interface::sha1::hex(file_hash);
 		ss_ path = m_cache_path+"/"+file_hash_hex;
+		if(dst_file_hash != nullptr)
+			*dst_file_hash = file_hash;
+		return path;
+	}
+
+	ss_ get_file_content(const ss_ &name)
+	{
+		ss_ file_hash;
+		ss_ path = get_file_path(name, &file_hash);
 		std::ifstream f(path);
 		if(!f.good())
 			throw Exception(ss_()+"Could not open file: "+path);
