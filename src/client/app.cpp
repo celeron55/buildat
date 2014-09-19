@@ -278,6 +278,7 @@ struct CApp: public Polycode::EventHandler, public App
 }
 		DEF_BUILDAT_FUNC(send_packet);
 		DEF_BUILDAT_FUNC(get_file_content)
+		DEF_BUILDAT_FUNC(get_path)
 
 		ss_ init_lua_path = g_client_config.share_path+"/client/init.lua";
 		int error = luaL_dofile(L, init_lua_path.c_str());
@@ -368,6 +369,22 @@ struct CApp: public Polycode::EventHandler, public App
 			log_w(MODULE, "Exception in get_file_content: %s", e.what());
 			return 0;
 		}
+	}
+
+	// get_path(name: string)
+	static int l_get_path(lua_State *L)
+	{
+		size_t name_len = 0;
+		const char *name_c = lua_tolstring(L, 1, &name_len);
+		ss_ name(name_c, name_len);
+
+		if(name == "share"){
+			ss_ path = g_client_config.share_path;
+			lua_pushlstring(L, path.c_str(), path.size());
+			return 1;
+		}
+		log_w(MODULE, "Unknown named path: \"%s\"", cs(name));
+		return 0;
 	}
 };
 
