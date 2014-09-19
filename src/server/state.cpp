@@ -50,6 +50,9 @@ struct CState: public State, public interface::Server
 	sm_<int, SocketState> m_sockets;
 	interface::Mutex m_sockets_mutex;
 
+	sm_<ss_, ss_> m_tmp_data;
+	interface::Mutex m_tmp_data_mutex;
+
 	CState():
 		m_compiler(rccpp::createCompiler())
 	{
@@ -188,6 +191,8 @@ struct CState: public State, public interface::Server
 		}
 		ModuleContainer *mc = &it->second;
 		interface::MutexScope mc_ms(mc->mutex);
+		// Send core::unload directly to module
+		mc->module->event(Event::t("core:unload"), nullptr);
 		// Clear unload request
 		m_unloads_requested.erase(module_name);
 		// Delete subscriptions
@@ -438,6 +443,20 @@ struct CState: public State, public interface::Server
 			emit_event(std::move(event));
 			return;
 		} while(0);
+	}
+
+	void tmp_store_data(const ss_ &name, const ss_ &data)
+	{
+		interface::MutexScope ms(m_tmp_data_mutex);
+		m_tmp_data[name] = data;
+	}
+
+	ss_ tmp_restore_data(const ss_ &name)
+	{
+		interface::MutexScope ms(m_tmp_data_mutex);
+		ss_ data = m_tmp_data[name];
+		m_tmp_data.erase(name);
+		return data;
 	}
 };
 

@@ -58,5 +58,8 @@ namespace interface
 
 		virtual void add_socket_event(int fd, const Event::Type &event_type) = 0;
 		virtual void remove_socket_event(int fd) = 0;
+
+		virtual void tmp_store_data(const ss_ &name, const ss_ &data) = 0;
+		virtual ss_ tmp_restore_data(const ss_ &name) = 0;
 	};
 }

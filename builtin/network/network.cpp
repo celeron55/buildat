@@ -61,6 +61,8 @@ struct Module: public interface::Module, public network::Interface
 	{
 		log_v(MODULE, "network init");
 		m_server->sub_event(this, Event::t("core:start"));
+		m_server->sub_event(this, Event::t("core:unload"));
+		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("network:listen_event"));
 		m_server->sub_event(this, Event::t("network:incoming_data"));
 	}
@@ -68,6 +70,8 @@ struct Module: public interface::Module, public network::Interface
 	void event(const Event::Type &type, const Event::Private *p)
 	{
 		EVENT_VOIDN("core:start",           on_start)
+		EVENT_VOIDN("core:unload", on_unload)
+		EVENT_VOIDN("core:continue", on_continue)
 		EVENT_TYPEN("network:listen_event", on_listen_event, interface::SocketEvent)
 		EVENT_TYPEN("network:incoming_data", on_incoming_data, interface::SocketEvent)
 	}
@@ -88,6 +92,16 @@ struct Module: public interface::Module, public network::Interface
 
 		m_server->add_socket_event(m_listening_socket->fd(),
 				Event::t("network:listen_event"));
+	}
+
+	void on_unload()
+	{
+		log_v(MODULE, "on_unload");
+	}
+
+	void on_continue()
+	{
+		log_v(MODULE, "on_continue");
 	}
 
 	void on_listen_event(const interface::SocketEvent &event)

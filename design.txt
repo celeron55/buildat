@@ -54,6 +54,7 @@ Startup sequence and what the module should do:
 - constructor     : Don't access other modules. Throw on fatal errors.
 - init()          : Subscribe to events; access other external things.
 - "core:start"    : Start doing whatever the module wants to actively do.
+- "core:unload"   : Module will be unloaded immediately after event handler.
 - "core:continue" : Continue doing stuff after a reload.
 
 Dependencies: deps.txt
