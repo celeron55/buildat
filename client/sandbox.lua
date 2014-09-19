@@ -1,6 +1,7 @@
 local log = buildat:Logger("__client/sandbox")
 
 local buildat_safe_list = {
+	"dump",
 	"Logger",
 }
 
