@@ -19,6 +19,7 @@ namespace app
 		virtual bool update() = 0;
 		virtual void shutdown() = 0;
 		virtual void run_script(const ss_ &script) = 0;
+		virtual void handle_packet(const ss_ &name, const ss_ &data) = 0;
 	};
 
 	App* createApp(Polycode::PolycodeView *view);

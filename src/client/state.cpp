@@ -133,6 +133,11 @@ struct CState: public State
 
 	void handle_packet(const ss_ &packet_name, const ss_ &data)
 	{
+		if(packet_name.substr(0,5) != "core:"){
+			m_app->handle_packet(packet_name, data);
+			return;
+		}
+
 		if(packet_name == "core:run_script"){
 			log_i(MODULE, "Asked to run script:\n----\n%s\n----", cs(data));
 			if(m_app)

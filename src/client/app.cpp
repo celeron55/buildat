@@ -12,6 +12,8 @@
 #include <OSBasics.h>
 #pragma GCC diagnostic pop
 #include <c55/getopt.h>
+#include <cereal/archives/portable_binary.hpp>
+#include <cereal/types/string.hpp>
 #include <core/log.h>
 #include <signal.h>
 #define MODULE "__main"
@@ -283,6 +285,7 @@ struct CApp: public Polycode::EventHandler, public App
 		DEF_BUILDAT_FUNC(get_file_path)
 		DEF_BUILDAT_FUNC(get_path)
 		DEF_BUILDAT_FUNC(pcall)
+		DEF_BUILDAT_FUNC(cereal_binary_input)
 
 		ss_ init_lua_path = g_client_config.share_path+"/client/init.lua";
 		int error = luaL_dofile(L, init_lua_path.c_str());
@@ -330,6 +333,16 @@ struct CApp: public Polycode::EventHandler, public App
 		} else {
 			log_v(MODULE, "run_script(): succeeded");
 		}
+	}
+
+	void handle_packet(const ss_ &name, const ss_ &data)
+	{
+		log_v(MODULE, "handle_packet(): %s", cs(name));
+
+		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_handle_packet");
+		lua_pushlstring(L, name.c_str(), name.size());
+		lua_pushlstring(L, data.c_str(), data.size());
+		lua_call(L, 2, 0);
 	}
 
 	// Non-public methods
@@ -473,6 +486,66 @@ struct CApp: public Polycode::EventHandler, public App
 		lua_pushboolean(L, false);
 		lua_pushvalue(L, error_stack_i);
 		return 2;
+	}
+
+	// cereal_binary_input(data: string, types: table of strings)
+	// -> table of values
+	static int l_cereal_binary_input(lua_State *L)
+	{
+		size_t data_len = 0;
+		const char *data_c = lua_tolstring(L, 1, &data_len);
+		ss_ data(data_c, data_len);
+
+		int types_table_L = 2;
+
+		lua_newtable(L);
+		int result_table_L = lua_gettop(L);
+
+		std::istringstream is(data, std::ios::binary);
+		{
+			cereal::PortableBinaryInputArchive ar(is);
+
+			int output_index = 1;
+			lua_pushnil(L);
+			while(lua_next(L, types_table_L) != 0)
+			{
+				ss_ type = lua_tostring(L, -1);
+				lua_pop(L, 1);
+				log_t(MODULE, "type=%s", cs(type));
+				if(type == "byte"){
+					uchar b;
+					ar(b);
+					lua_pushinteger(L, b);
+					lua_rawseti(L, result_table_L, output_index++);
+					continue;
+				}
+				if(type == "int32"){
+					int32_t i;
+					ar(i);
+					lua_pushinteger(L, i);
+					lua_rawseti(L, result_table_L, output_index++);
+					continue;
+				}
+				if(type == "double"){
+					double d;
+					ar(d);
+					lua_pushnumber(L, d);
+					lua_rawseti(L, result_table_L, output_index++);
+					continue;
+				}
+				if(type == "string"){
+					ss_ s;
+					ar(s);
+					lua_pushlstring(L, s.c_str(), s.size());
+					lua_rawseti(L, result_table_L, output_index++);
+					continue;
+				}
+				throw Exception(ss_()+"Unknown type \""+type+"\""
+						"; known types are byte, int32, double, string");
+			}
+		}
+		// Result table is on top of stack
+		return 1;
 	}
 };
 

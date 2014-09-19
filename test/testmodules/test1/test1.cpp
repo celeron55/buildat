@@ -2,10 +2,10 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "test1/api.h"
-//#include "client_lua/api.h"
 #include "client_file/api.h"
 #include "network/api.h"
 #include "core/log.h"
+#include <cereal/archives/portable_binary.hpp>
 
 using interface::Event;
 
@@ -71,9 +71,20 @@ struct Module: public interface::Module
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
 		log_v(MODULE, "on_files_transmitted(): recipient=%zu", event.recipient);
+
 		network::access(m_server, [&](network::Interface * inetwork){
 			inetwork->send(event.recipient, "core:run_script",
 					"buildat:run_script_file(\"test1/init.lua\")");
+		});
+
+		network::access(m_server, [&](network::Interface * inetwork){
+			std::ostringstream os(std::ios::binary);
+			{
+				cereal::PortableBinaryOutputArchive ar(os);
+				ar(1.0, 1.0, 1.0);
+				ar(0.0, 0.5, 0.0);
+			}
+			inetwork->send(event.recipient, "test1:add_box", os.str());
 		});
 	}
 
