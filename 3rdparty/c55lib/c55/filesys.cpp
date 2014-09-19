@@ -15,11 +15,11 @@ bool checkFileExtension(const char *path, const char *ext)
 	if(extlen > pathlen - 1)
 		return false;
 	int i;
-	for(i=0; i<extlen; i++){
-		if(path[pathlen-1-i] != ext[extlen-1-i])
+	for(i = 0; i < extlen; i++){
+		if(path[pathlen - 1 - i] != ext[extlen - 1 - i])
 			return false;
 	}
-	if(path[pathlen-1-i] != '.')
+	if(path[pathlen - 1 - i] != '.')
 		return false;
 	return true;
 }
@@ -28,7 +28,7 @@ std::string stripFileExtension(const std::string &path)
 {
 	int pathlen = path.size();
 	int i;
-	for(i=pathlen-1; i>=0; i--){
+	for(i = pathlen - 1; i >= 0; i--){
 		if(path[i] == '.')
 			return path.substr(0, i);
 	}
@@ -39,7 +39,7 @@ std::string stripFilename(const std::string &path)
 {
 	int pathlen = path.size();
 	int i;
-	for(i=pathlen-1; i>=0; i--){
+	for(i = pathlen - 1; i >= 0; i--){
 		if(path[i] == '/' || path[i] == '\\')
 			return path.substr(0, i);
 	}
@@ -52,8 +52,8 @@ std::string stripFilename(const std::string &path)
 #include <windows.h>
 #include <stdio.h>
 #include <malloc.h>
-#include <tchar.h> 
-#include <wchar.h> 
+#include <tchar.h>
+#include <wchar.h>
 #include <stdio.h>
 
 #define BUFSIZE MAX_PATH
@@ -72,33 +72,33 @@ std::vector<DirListNode> GetDirListing(std::string pathstring)
 
 	if( DirSpec == NULL )
 	{
-	  printf( "Insufficient memory available\n" );
-	  retval = 1;
-	  goto Cleanup;
+		printf( "Insufficient memory available\n" );
+		retval = 1;
+		goto Cleanup;
 	}
 
 	// Check that the input is not larger than allowed.
-	if (pathstring.size() > (BUFSIZE - 2))
+	if(pathstring.size() > (BUFSIZE - 2))
 	{
-	  _tprintf(TEXT("Input directory is too large.\n"));
-	  retval = 3;
-	  goto Cleanup;
+		_tprintf(TEXT("Input directory is too large.\n"));
+		retval = 3;
+		goto Cleanup;
 	}
 
 	//_tprintf (TEXT("Target directory is %s.\n"), pathstring.c_str());
 
-	sprintf(DirSpec, "%s", (pathstring + "\\*").c_str());
+	sprintf(DirSpec, "%s", (pathstring+"\\*").c_str());
 
 	// Find the first file in the directory.
 	hFind = FindFirstFile(DirSpec, &FindFileData);
 
-	if (hFind == INVALID_HANDLE_VALUE) 
+	if(hFind == INVALID_HANDLE_VALUE)
 	{
-	  _tprintf (TEXT("Invalid file handle. Error is %u.\n"), 
+		_tprintf (TEXT("Invalid file handle. Error is %u.\n"),
 				GetLastError());
-	  retval = (-1);
-	} 
-	else 
+		retval = (-1);
+	}
+	else
 	{
 		// NOTE:
 		// Be very sure to not include '..' in the results, it will
@@ -111,7 +111,7 @@ std::vector<DirListNode> GetDirListing(std::string pathstring)
 			listing.push_back(node);
 
 		// List all the other files in the directory.
-		while (FindNextFile(hFind, &FindFileData) != 0) 
+		while(FindNextFile(hFind, &FindFileData) != 0)
 		{
 			DirListNode node;
 			node.name = FindFileData.cFileName;
@@ -122,12 +122,12 @@ std::vector<DirListNode> GetDirListing(std::string pathstring)
 
 		dwError = GetLastError();
 		FindClose(hFind);
-		if (dwError != ERROR_NO_MORE_FILES) 
+		if(dwError != ERROR_NO_MORE_FILES)
 		{
-		 _tprintf (TEXT("FindNextFile error. Error is %u.\n"), 
-				   dwError);
-		retval = (-1);
-		goto Cleanup;
+			_tprintf (TEXT("FindNextFile error. Error is %u.\n"),
+					dwError);
+			retval = (-1);
+			goto Cleanup;
 		}
 	}
 	retval  = 0;
@@ -140,7 +140,7 @@ Cleanup:
 	//for(unsigned int i=0; i<listing.size(); i++){
 	//	std::cout<<listing[i].name<<(listing[i].dir?" (dir)":" (file)")<<std::endl;
 	//}
-	
+
 	return listing;
 }
 
@@ -164,7 +164,7 @@ bool RecursiveDelete(std::string path)
 	std::cerr<<"Removing \""<<path<<"\""<<std::endl;
 
 	//return false;
-	
+
 	// This silly function needs a double-null terminated string...
 	// Well, we'll just make sure it has at least two, then.
 	path += "\0\0";
@@ -175,7 +175,7 @@ bool RecursiveDelete(std::string path)
 	sfo.pFrom = path.c_str();
 	sfo.pTo = NULL;
 	sfo.fFlags = FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOCONFIRMMKDIR;
-	
+
 	int r = SHFileOperation(&sfo);
 
 	if(r != 0)
@@ -198,18 +198,18 @@ std::vector<DirListNode> GetDirListing(std::string pathstring)
 {
 	std::vector<DirListNode> listing;
 
-    DIR *dp;
-    struct dirent *dirp;
-    if((dp  = opendir(pathstring.c_str())) == NULL) {
+	DIR *dp;
+	struct dirent *dirp;
+	if((dp  = opendir(pathstring.c_str())) == NULL){
 		//std::cout<<"Error("<<errno<<") opening "<<pathstring<<std::endl;
-        return listing;
-    }
+		return listing;
+	}
 
-    while ((dirp = readdir(dp)) != NULL) {
+	while((dirp = readdir(dp)) != NULL){
 		// NOTE:
 		// Be very sure to not include '..' in the results, it will
 		// result in an epic failure when deleting stuff.
-		if(dirp->d_name[0]!='.'){
+		if(dirp->d_name[0] != '.'){
 			DirListNode node;
 			node.name = dirp->d_name;
 			if(dirp->d_type == DT_DIR) node.dir = true;
@@ -217,8 +217,8 @@ std::vector<DirListNode> GetDirListing(std::string pathstring)
 			if(node.name != "." && node.name != "..")
 				listing.push_back(node);
 		}
-    }
-    closedir(dp);
+	}
+	closedir(dp);
 
 	return listing;
 }
@@ -242,7 +242,7 @@ bool CreateDir(std::string path)
 bool PathExists(std::string path)
 {
 	struct stat st;
-	return (stat(path.c_str(),&st) == 0);
+	return (stat(path.c_str(), &st) == 0);
 }
 
 bool RecursiveDelete(std::string path)
@@ -250,11 +250,11 @@ bool RecursiveDelete(std::string path)
 	/*
 		Execute the 'rm' command directly, by fork() and execve()
 	*/
-	
+
 	std::cerr<<"Removing \""<<path<<"\""<<std::endl;
 
 	//return false;
-	
+
 	pid_t child_pid = fork();
 
 	if(child_pid == 0)
@@ -272,9 +272,9 @@ bool RecursiveDelete(std::string path)
 
 		std::cerr<<"Executing '"<<argv[0]<<"' '"<<argv[1]<<"' '"
 				<<argv[2]<<"'"<<std::endl;
-		
+
 		execv(argv[0], argv);
-		
+
 		// Execv shouldn't return. Failed.
 		_exit(1);
 	}
@@ -283,21 +283,22 @@ bool RecursiveDelete(std::string path)
 		// Parent
 		int child_status;
 		pid_t tpid;
-		do{
+		do {
 			tpid = wait(&child_status);
 			//if(tpid != child_pid) process_terminated(tpid);
-		}while(tpid != child_pid);
+		} while(tpid != child_pid);
 		return (child_status == 0);
 	}
 }
 
 #endif
 
-inline std::string trim(std::string str, const std::string &whitespace=" \t\n\r")
+inline std::string trim(std::string str,
+                        const std::string &whitespace = " \t\n\r")
 {
 	size_t endpos = str.find_last_not_of(whitespace);
 	if(std::string::npos != endpos)
-		str = str.substr(0, endpos+1);
+		str = str.substr(0, endpos + 1);
 	size_t startpos = str.find_first_not_of(whitespace);
 	if(std::string::npos != startpos)
 		str = str.substr(startpos);
@@ -308,7 +309,7 @@ bool RecursiveDeleteContent(std::string path)
 {
 	std::cerr<<"Removing content of \""<<path<<"\""<<std::endl;
 	std::vector<DirListNode> list = GetDirListing(path);
-	for(unsigned int i=0; i<list.size(); i++)
+	for(unsigned int i = 0; i < list.size(); i++)
 	{
 		if(trim(list[i].name) == "." || trim(list[i].name) == "..")
 			continue;
@@ -335,9 +336,9 @@ bool CreateAllDirs(std::string path)
 		pos = basepath.rfind(DIR_DELIM_C);
 		if(pos == std::string::npos)
 			return false;
-		basepath = basepath.substr(0,pos);
+		basepath = basepath.substr(0, pos);
 	}
-	for(int i=tocreate.size()-1;i>=0;i--)
+	for(int i = tocreate.size() - 1; i >= 0; i--)
 		CreateDir(tocreate[i]);
 	return true;
 }

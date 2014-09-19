@@ -17,33 +17,33 @@
 namespace c55fs
 {
 
-/* "image.png", "png" -> true */
-bool checkFileExtension(const char *path, const char *ext);
-std::string stripFileExtension(const std::string &path);
-std::string stripFilename(const std::string &path);
+	/* "image.png", "png" -> true */
+	bool checkFileExtension(const char *path, const char *ext);
+	std::string stripFileExtension(const std::string &path);
+	std::string stripFilename(const std::string &path);
 
-struct DirListNode
-{
-	std::string name;
-	bool dir;
-};
+	struct DirListNode
+	{
+		std::string name;
+		bool dir;
+	};
 
-std::vector<DirListNode> GetDirListing(std::string path);
+	std::vector<DirListNode> GetDirListing(std::string path);
 
-// Returns true if already exists
-bool CreateDir(std::string path);
+	// Returns true if already exists
+	bool CreateDir(std::string path);
 
-// Create all directories on the given path that don't already exist.
-bool CreateAllDirs(std::string path);
+	// Create all directories on the given path that don't already exist.
+	bool CreateAllDirs(std::string path);
 
-bool PathExists(std::string path);
+	bool PathExists(std::string path);
 
-// Only pass full paths to this one. True on success.
-// NOTE: The WIN32 version returns always true.
-bool RecursiveDelete(std::string path);
+	// Only pass full paths to this one. True on success.
+	// NOTE: The WIN32 version returns always true.
+	bool RecursiveDelete(std::string path);
 
-// Only pass full paths to this one. True on success.
-bool RecursiveDeleteContent(std::string path);
+	// Only pass full paths to this one. True on success.
+	bool RecursiveDeleteContent(std::string path);
 
 }//fs
 

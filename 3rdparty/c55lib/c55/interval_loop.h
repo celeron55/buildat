@@ -14,10 +14,10 @@ void interval_loop(int interval_us, std::function<bool(float load_avg)> f)
 	t_scheduled_tick_start /= interval_us; // Align to round numbers
 	t_scheduled_tick_start *= interval_us;
 	float load_sum = 0;
-	const int load_avg_length = interval_us<500000 ? 5000000/interval_us : 1;
+	const int load_avg_length = interval_us < 500000 ? 5000000 / interval_us : 1;
 	float *load_log = new float[load_avg_length];
 	memset(load_log, 0, sizeof(float) * load_avg_length);
-	int load_log_i = load_avg_length-1;
+	int load_log_i = load_avg_length - 1;
 	float last_load_avg = 0;
 	for(;;){
 		int64_t t_now = get_timeofday_us();
@@ -25,8 +25,8 @@ void interval_loop(int interval_us, std::function<bool(float load_avg)> f)
 		int64_t t_until_next_tick = t_scheduled_tick_start - t_now;
 		if(t_until_next_tick < 0 || t_until_next_tick > interval_us){
 			log_w("loop", "interval_loop(): Delayed by %" PRId64 "ms"
-					" (%+.0f%% interval)", -t_until_next_tick/1000,
-					-100.0*t_until_next_tick/interval_us);
+					" (%+.0f%% interval)", -t_until_next_tick / 1000,
+					-100.0 * t_until_next_tick / interval_us);
 			// Give up if off by too much (100ms)
 			if(t_scheduled_tick_start < t_now - 100000){
 				t_scheduled_tick_start = t_now;
@@ -42,7 +42,8 @@ void interval_loop(int interval_us, std::function<bool(float load_avg)> f)
 			break;
 
 		int64_t t_tick_end = get_timeofday_us();
-		int64_t t_tick_length = t_tick_end > t_tick_start ? t_tick_end - t_tick_start : 0;
+		int64_t t_tick_length = t_tick_end > t_tick_start ? t_tick_end - t_tick_start :
+				0;
 		float load_ratio = (float)t_tick_length / interval_us;
 		//log_i("loop", "load_ratio=%f", load_ratio);
 		load_log[load_log_i] = load_ratio;
