@@ -23,7 +23,7 @@ void PacketStream::input(std::deque<char> &socket_buffer,
 			return;
 		log_d(MODULE, "Received full packet; type=%zu, "
 				"length=6+%zu", type, size);
-		ss_ data(&socket_buffer[6], size);
+		ss_ data(socket_buffer.begin()+6, socket_buffer.begin()+6+size);
 		socket_buffer.erase(socket_buffer.begin(),
 				socket_buffer.begin() + 6 + size);
 
