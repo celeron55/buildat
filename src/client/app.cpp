@@ -276,6 +276,15 @@ struct CApp: public Polycode::EventHandler, public App
 
 	// Polycode::EventHandler
 
+	void log_if_error()
+	{
+		if(lua_toboolean(L, -2)){
+			const char *error = lua_tostring(L, -1);
+			log_w(MODULE, "%s", error);
+			lua_pop(L, 2);
+		}
+	}
+
 	void handleEvent(Event *event)
 	{
 		if(event->getDispatcher() == core->getInput()){
@@ -287,7 +296,8 @@ struct CApp: public Polycode::EventHandler, public App
 					int errH = lua_gettop(L);
 					lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_key_down");
 					lua_pushinteger(L, inputEvent->keyCode());
-					lua_pcall(L, 1, 0, errH);
+					lua_pcall(L, 1, 2, errH);
+					log_if_error();
 					lua_settop(L, 0);
 				}
 				break;
@@ -297,7 +307,8 @@ struct CApp: public Polycode::EventHandler, public App
 					int errH = lua_gettop(L);
 					lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_key_up");
 					lua_pushinteger(L, inputEvent->keyCode());
-					lua_pcall(L, 1, 0, errH);
+					lua_pcall(L, 1, 2, errH);
+					log_if_error();
 					lua_settop(L, 0);
 				}
 				break;
@@ -309,7 +320,8 @@ struct CApp: public Polycode::EventHandler, public App
 					lua_pushinteger(L, inputEvent->mouseButton);
 					lua_pushnumber(L, inputEvent->mousePosition.x);
 					lua_pushnumber(L, inputEvent->mousePosition.y);
-					lua_pcall(L, 3, 0, errH);
+					lua_pcall(L, 3, 2, errH);
+					log_if_error();
 					lua_settop(L, 0);
 				}
 				break;
@@ -321,7 +333,8 @@ struct CApp: public Polycode::EventHandler, public App
 					lua_pushinteger(L, inputEvent->mouseButton);
 					lua_pushnumber(L, inputEvent->mousePosition.x);
 					lua_pushnumber(L, inputEvent->mousePosition.y);
-					lua_pcall(L, 3, 0, errH);
+					lua_pcall(L, 3, 2, errH);
+					log_if_error();
 					lua_settop(L, 0);
 				}
 				break;
@@ -332,7 +345,8 @@ struct CApp: public Polycode::EventHandler, public App
 					lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_mouse_move");
 					lua_pushnumber(L, inputEvent->mousePosition.x);
 					lua_pushnumber(L, inputEvent->mousePosition.y);
-					lua_pcall(L, 2, 0, errH);
+					lua_pcall(L, 2, 2, errH);
+					log_if_error();
 					lua_settop(L, 0);
 				}
 				break;
@@ -344,7 +358,8 @@ struct CApp: public Polycode::EventHandler, public App
 							"__buildat_joystick_button_down");
 					lua_pushnumber(L, inputEvent->joystickIndex);
 					lua_pushnumber(L, inputEvent->joystickButton);
-					lua_pcall(L, 2, 0, errH);
+					lua_pcall(L, 2, 2, errH);
+					log_if_error();
 					lua_settop(L, 0);
 				}
 				break;
@@ -356,7 +371,8 @@ struct CApp: public Polycode::EventHandler, public App
 							"__buildat_joystick_button_up");
 					lua_pushnumber(L, inputEvent->joystickIndex);
 					lua_pushnumber(L, inputEvent->joystickButton);
-					lua_pcall(L, 2, 0, errH);
+					lua_pcall(L, 2, 2, errH);
+					log_if_error();
 					lua_settop(L, 0);
 				}
 				break;
@@ -369,7 +385,8 @@ struct CApp: public Polycode::EventHandler, public App
 					lua_pushnumber(L, inputEvent->joystickIndex);
 					lua_pushnumber(L, inputEvent->joystickAxis);
 					lua_pushnumber(L, inputEvent->joystickAxisValue);
-					lua_pcall(L, 3, 0, errH);
+					lua_pcall(L, 3, 2, errH);
+					log_if_error();
 					lua_settop(L, 0);
 				}
 				break;
