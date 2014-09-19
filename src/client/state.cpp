@@ -24,7 +24,8 @@ struct CState: public State
 	std::deque<char> m_socket_buffer;
 	interface::PacketStream m_packet_stream;
 	sp_<app::App> m_app;
-	ss_ m_cache_path;
+	ss_ m_remote_cache_path;
+	ss_ m_tmp_path;
 	sm_<ss_, ss_> m_file_hashes; // name -> hash
 	set_<ss_> m_waiting_files; // name
 	bool m_tell_after_all_files_transferred_requested = false;
@@ -32,11 +33,13 @@ struct CState: public State
 	CState(sp_<app::App> app):
 		m_socket(interface::createTCPSocket()),
 		m_app(app),
-		m_cache_path(g_client_config.cache_path+"/remote")
+		m_remote_cache_path(g_client_config.cache_path+"/remote"),
+		m_tmp_path(g_client_config.cache_path+"/tmp")
 	{
 		// Create directory for cached files
 		auto *fs = interface::getGlobalFilesystem();
-		fs->create_directories(m_cache_path);
+		fs->create_directories(m_remote_cache_path);
+		fs->create_directories(m_tmp_path);
 	}
 
 	void update()
@@ -73,7 +76,7 @@ struct CState: public State
 			throw Exception(ss_()+"hash of file not found: \""+name+"\"");
 		const ss_ &file_hash = it->second;
 		ss_ file_hash_hex = interface::sha1::hex(file_hash);
-		ss_ path = m_cache_path+"/"+file_hash_hex;
+		ss_ path = m_remote_cache_path+"/"+file_hash_hex;
 		if(dst_file_hash != nullptr)
 			*dst_file_hash = file_hash;
 		return path;
@@ -146,7 +149,7 @@ struct CState: public State
 			m_file_hashes[file_name] = file_hash;
 			ss_ file_hash_hex = interface::sha1::hex(file_hash);
 			// Check if we already have this file
-			ss_ path = m_cache_path+"/"+file_hash_hex;
+			ss_ path = m_remote_cache_path+"/"+file_hash_hex;
 			std::ifstream ifs(path, std::ios::binary);
 			if(ifs.good()){
 				// We have it; no need to ask this file

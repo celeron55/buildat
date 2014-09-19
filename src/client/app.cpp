@@ -371,7 +371,7 @@ struct CApp: public Polycode::EventHandler, public App
 			ss_ path = self->m_state->get_file_path(name, &hash);
 			lua_pushlstring(L, path.c_str(), path.size());
 			lua_pushlstring(L, hash.c_str(), hash.size());
-			return 1;
+			return 2;
 		} catch(std::exception &e){
 			log_w(MODULE, "Exception in get_file_path: %s", e.what());
 			return 0;
@@ -408,6 +408,16 @@ struct CApp: public Polycode::EventHandler, public App
 
 		if(name == "share"){
 			ss_ path = g_client_config.share_path;
+			lua_pushlstring(L, path.c_str(), path.size());
+			return 1;
+		}
+		if(name == "cache"){
+			ss_ path = g_client_config.cache_path;
+			lua_pushlstring(L, path.c_str(), path.size());
+			return 1;
+		}
+		if(name == "tmp"){
+			ss_ path = g_client_config.cache_path+"/tmp";
 			lua_pushlstring(L, path.c_str(), path.size());
 			return 1;
 		}
