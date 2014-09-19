@@ -90,6 +90,8 @@ implement table "safe", which contains the safe interface.
 
 Extensions and modules use require "buildat/extension/<name>" to use extensions.
 
+The __menu extension is specially loaded automatically at client startup.
+
 Network protocol
 ----------------
 (Type, length, data) tuples on TCP. In the future TLS can be taken into use. A

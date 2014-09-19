@@ -86,7 +86,7 @@ struct Module: public interface::Module
 	void on_module_unloaded(const interface::ModuleUnloadedEvent &event)
 	{
 		log_v(MODULE, "on_module_unloaded(): %s", cs(event.name));
-		// TODO
+		// TODO: Tell client_file to remove files
 	}
 
 	void on_new_client(const network::NewClient &new_client)

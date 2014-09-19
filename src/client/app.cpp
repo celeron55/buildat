@@ -28,7 +28,6 @@ namespace app {
 
 int MyLoader(lua_State *pState)
 {
-	// TODO: Security
 	ss_ module = lua_tostring(pState, 1);
 
 	module += ".lua";

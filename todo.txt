@@ -3,6 +3,5 @@ Buildat TODO
 - Cache a hash of each compiled module in order not to rebuild them
   unnecessarily
 - Modules should be run in threads.
-- Implement buildat:sub_packet
 - Implement module depencencies in test/testmodules/__loader
 - There should probably be a builtin/loader that __loader usually wants to call
