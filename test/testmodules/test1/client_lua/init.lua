@@ -60,6 +60,18 @@ keyinput.sub(function(key, state)
 	end
 end)
 
+local mouseinput = require("buildat/extension/mouseinput")
+
+mouseinput.sub_move(function(x, y)
+	--log:info("mouse move: "..x..", "..y..")")
+end)
+mouseinput.sub_down(function(button, x, y)
+	--log:info("mouse down: "..button..", "..x..", "..y..")")
+end)
+mouseinput.sub_up(function(button, x, y)
+	--log:info("mouse up: "..button..", "..x..", "..y..")")
+end)
+
 --[[
 -- Temporary test
 require "Polycode/Core"

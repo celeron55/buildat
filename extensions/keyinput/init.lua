@@ -5,14 +5,14 @@ local M = {safe = {}}
 local subs = {}
 
 function __buildat_key_down(key)
-	log:info("__buildat_key_down("..key..")")
+	--log:info("__buildat_key_down("..key..")")
 	for _, cb in ipairs(subs) do
 		cb(key, "down")
 	end
 end
 
 function __buildat_key_up(key)
-	log:info("__buildat_key_up("..key..")")
+	--log:info("__buildat_key_up("..key..")")
 	for _, cb in ipairs(subs) do
 		cb(key, "up")
 	end
