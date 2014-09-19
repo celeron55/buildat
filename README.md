@@ -5,6 +5,9 @@ Buildat doesn't actually even implement a minecraftlike by default. It just
 provides a lot of useful machinery for doing just that, with immense modding
 capabilities.
 
+It wraps a safe subset of Polycode's Lua API in a whitelisting Lua sandbox on
+the client side and runs runtime-compiled C++ modules on the server side.
+
 Go ahead and write some modules and extensions, maybe the minecraftlike will
 exist in the near future!
 
