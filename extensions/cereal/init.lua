@@ -27,4 +27,3 @@ function M.safe.binary_output(values, types)
 end
 
 return M
-

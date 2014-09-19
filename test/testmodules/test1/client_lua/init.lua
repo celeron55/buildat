@@ -21,6 +21,8 @@ scene:getDefaultCamera():lookAt(g3d.Vector3(0,0,0), g3d.Vector3(0,1,0))
 
 local cereal = require("buildat/extension/cereal")
 
+local the_box = nil
+
 buildat.sub_packet("test1:add_box", function(data)
 	values = cereal.binary_input(data, {
 		"double", "double", "double",
@@ -37,12 +39,25 @@ buildat.sub_packet("test1:add_box", function(data)
 	box:loadTexture("test1/pink_texture.png")
 	box:setPosition(x, y, z)
 	scene:addEntity(box)
+	the_box = box
 
 	data = cereal.binary_output(
 		{1,      "Foo"},
 		{"byte", "string"}
 	)
 	buildat.send_packet("test1:box_added", data)
+end)
+
+local keyinput = require("buildat/extension/keyinput")
+
+keyinput.sub(function(key, state)
+	log:info("key: "..key.." "..state)
+	if key == keyinput.KEY_SPACE then
+		if state == "down" then
+			the_box:setPosition(0.0, 1.0, 0.0)
+			scene:addEntity(box)
+		end
+	end
 end)
 
 --[[

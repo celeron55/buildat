@@ -21,6 +21,8 @@
 using Polycode::SDLCore;
 using Polycode::Logger;
 using Polycode::String;
+using Polycode::Event;
+using Polycode::InputEvent;
 
 extern client::Config g_client_config;
 
@@ -76,88 +78,6 @@ public:
 	String fileName;
 	unsigned int lineNumber;
 };
-
-static int customError(lua_State *L){
-
-	//PolycodePlayer *player = (PolycodePlayer*)CoreServices::getInstance()->getCore()->getUserPointer();
-	//player->crashed = true;
-
-	std::vector<BackTraceEntry> backTrace;
-	lua_Debug entry;
-	int depth = 0;
-	while(lua_getstack(L, depth, &entry)){
-		lua_getinfo(L, "Sln", &entry);
-		std::vector<String> bits = String(entry.short_src).split("\"");
-		if(bits.size() > 1){
-			String fileName = bits[1];
-			if(fileName != "class.lua"){
-
-				BackTraceEntry trace;
-				trace.lineNumber = entry.currentline;
-				trace.fileName = fileName;
-				backTrace.push_back(trace);
-
-				//printf(">>>> In file: %s on line %d\n", fileName.c_str(), trace.lineNumber);
-				//backTrace += "In file: "+fileName+" on line "+String::IntToString(entry.currentline)+"\n";
-			}
-		}
-		depth++;
-	}
-
-	// horrible hack to determine the filenames of things
-	bool stringThatIsTheMainFileSet = false;
-	String stringThatIsTheMainFile;
-
-	if(backTrace.size() == 0){
-
-		BackTraceEntry trace;
-		trace.lineNumber = 0;
-		//trace.fileName = player->fullPath;
-		backTrace.push_back(trace);
-
-	} else {
-		stringThatIsTheMainFileSet = true;
-		stringThatIsTheMainFile = backTrace[backTrace.size() - 1].fileName;
-		//backTrace[backTrace.size()-1].fileName = player->fullPath;
-	}
-
-	if(stringThatIsTheMainFileSet){
-		for(size_t i = 0; i < backTrace.size(); i++){
-			if(backTrace[i].fileName == stringThatIsTheMainFile){
-				//backTrace[i].fileName = player->fullPath;
-			}
-		}
-	}
-
-	const char *msg = lua_tostring(L, -1);
-	if(msg == NULL) msg = "(error with no message)";
-	lua_pop(L, 1);
-
-	printf("\n%s\n", msg);
-
-	String errorString;
-	std::vector<String> info = String(msg).split(":");
-
-	if(info.size() > 2){
-		errorString = info[2];
-	} else {
-		errorString = msg;
-	}
-
-	printf("\n---------------------\n");
-	printf("Error: %s\n", errorString.c_str());
-	printf("In file: %s\n", backTrace[0].fileName.c_str());
-	printf("On line: %d\n", backTrace[0].lineNumber);
-	printf("---------------------\n");
-	printf("Backtrace\n");
-	for(size_t i = 0; i < backTrace.size(); i++){
-		printf("* %s on line %d", backTrace[i].fileName.c_str(),
-				backTrace[i].lineNumber);
-	}
-	printf("\n---------------------\n");
-
-	return 0;
-}
 
 static int areSameCClass(lua_State *L){
 	luaL_checktype(L, 1, LUA_TUSERDATA);
@@ -235,7 +155,7 @@ struct CApp: public Polycode::EventHandler, public App
 		lua_pop(L, 1);
 
 		lua_register(L, "debugPrint", debugPrint);
-		lua_register(L, "__customError", customError);
+		lua_register(L, "__customError", handle_error);
 
 		lua_register(L, "__are_same_c_class", areSameCClass);
 
@@ -294,6 +214,15 @@ struct CApp: public Polycode::EventHandler, public App
 					lua_tostring(L, -1));
 			lua_pop(L, 1);
 		}
+
+		core->getInput()->addEventListener(this, InputEvent::EVENT_KEYDOWN);
+		core->getInput()->addEventListener(this, InputEvent::EVENT_KEYUP);
+		core->getInput()->addEventListener(this, InputEvent::EVENT_MOUSEDOWN);
+		core->getInput()->addEventListener(this, InputEvent::EVENT_MOUSEMOVE);
+		core->getInput()->addEventListener(this, InputEvent::EVENT_MOUSEUP);
+		core->getInput()->addEventListener(this, InputEvent::EVENT_JOYBUTTON_DOWN);
+		core->getInput()->addEventListener(this, InputEvent::EVENT_JOYBUTTON_UP);
+		core->getInput()->addEventListener(this, InputEvent::EVENT_JOYAXIS_MOVED);
 	}
 
 	~CApp()
@@ -343,6 +272,109 @@ struct CApp: public Polycode::EventHandler, public App
 		lua_pushlstring(L, name.c_str(), name.size());
 		lua_pushlstring(L, data.c_str(), data.size());
 		lua_call(L, 2, 0);
+	}
+
+	// Polycode::EventHandler
+
+	void handleEvent(Event *event)
+	{
+		if(event->getDispatcher() == core->getInput()){
+			InputEvent *inputEvent = (InputEvent*) event;
+			switch(event->getEventCode()){
+			case InputEvent::EVENT_KEYDOWN:
+				if(L){
+					lua_getfield (L, LUA_GLOBALSINDEX, "__customError");
+					int errH = lua_gettop(L);
+					lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_key_down");
+					lua_pushinteger(L, inputEvent->keyCode());
+					lua_pcall(L, 1, 0, errH);
+					lua_settop(L, 0);
+				}
+				break;
+			case InputEvent::EVENT_KEYUP:
+				if(L){
+					lua_getfield (L, LUA_GLOBALSINDEX, "__customError");
+					int errH = lua_gettop(L);
+					lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_key_up");
+					lua_pushinteger(L, inputEvent->keyCode());
+					lua_pcall(L, 1, 0, errH);
+					lua_settop(L, 0);
+				}
+				break;
+			case InputEvent::EVENT_MOUSEDOWN:
+				if(L){
+					lua_getfield (L, LUA_GLOBALSINDEX, "__customError");
+					int errH = lua_gettop(L);
+					lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_mouse_down");
+					lua_pushinteger(L, inputEvent->mouseButton);
+					lua_pushnumber(L, inputEvent->mousePosition.x);
+					lua_pushnumber(L, inputEvent->mousePosition.y);
+					lua_pcall(L, 3, 0, errH);
+					lua_settop(L, 0);
+				}
+				break;
+			case InputEvent::EVENT_MOUSEUP:
+				if(L){
+					lua_getfield (L, LUA_GLOBALSINDEX, "__customError");
+					int errH = lua_gettop(L);
+					lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_mouse_up");
+					lua_pushinteger(L, inputEvent->mouseButton);
+					lua_pushnumber(L, inputEvent->mousePosition.x);
+					lua_pushnumber(L, inputEvent->mousePosition.y);
+					lua_pcall(L, 3, 0, errH);
+					lua_settop(L, 0);
+				}
+				break;
+			case InputEvent::EVENT_MOUSEMOVE:
+				if(L){
+					lua_getfield (L, LUA_GLOBALSINDEX, "__customError");
+					int errH = lua_gettop(L);
+					lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_mouse_move");
+					lua_pushnumber(L, inputEvent->mousePosition.x);
+					lua_pushnumber(L, inputEvent->mousePosition.y);
+					lua_pcall(L, 2, 0, errH);
+					lua_settop(L, 0);
+				}
+				break;
+			case InputEvent::EVENT_JOYBUTTON_DOWN:
+				if(L){
+					lua_getfield (L, LUA_GLOBALSINDEX, "__customError");
+					int errH = lua_gettop(L);
+					lua_getfield(L, LUA_GLOBALSINDEX,
+							"__buildat_joystick_button_down");
+					lua_pushnumber(L, inputEvent->joystickIndex);
+					lua_pushnumber(L, inputEvent->joystickButton);
+					lua_pcall(L, 2, 0, errH);
+					lua_settop(L, 0);
+				}
+				break;
+			case InputEvent::EVENT_JOYBUTTON_UP:
+				if(L){
+					lua_getfield (L, LUA_GLOBALSINDEX, "__customError");
+					int errH = lua_gettop(L);
+					lua_getfield(L, LUA_GLOBALSINDEX,
+							"__buildat_joystick_button_up");
+					lua_pushnumber(L, inputEvent->joystickIndex);
+					lua_pushnumber(L, inputEvent->joystickButton);
+					lua_pcall(L, 2, 0, errH);
+					lua_settop(L, 0);
+				}
+				break;
+			case InputEvent::EVENT_JOYAXIS_MOVED:
+				if(L){
+					lua_getfield (L, LUA_GLOBALSINDEX, "__customError");
+					int errH = lua_gettop(L);
+					lua_getfield(L, LUA_GLOBALSINDEX,
+							"__buildat_joystick_axis_move");
+					lua_pushnumber(L, inputEvent->joystickIndex);
+					lua_pushnumber(L, inputEvent->joystickAxis);
+					lua_pushnumber(L, inputEvent->joystickAxisValue);
+					lua_pcall(L, 3, 0, errH);
+					lua_settop(L, 0);
+				}
+				break;
+			}
+		}
 	}
 
 	// Non-public methods
