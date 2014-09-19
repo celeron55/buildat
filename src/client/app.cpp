@@ -279,6 +279,7 @@ struct CApp: public Polycode::EventHandler, public App
 		DEF_BUILDAT_FUNC(send_packet);
 		DEF_BUILDAT_FUNC(get_file_content)
 		DEF_BUILDAT_FUNC(get_path)
+		DEF_BUILDAT_FUNC(pcall)
 
 		ss_ init_lua_path = g_client_config.share_path+"/client/init.lua";
 		int error = luaL_dofile(L, init_lua_path.c_str());
@@ -385,6 +386,54 @@ struct CApp: public Polycode::EventHandler, public App
 		}
 		log_w(MODULE, "Unknown named path: \"%s\"", cs(name));
 		return 0;
+	}
+
+	static int handle_error(lua_State *L)
+	{
+		log_v(MODULE, "handle_error()");
+		lua_getglobal(L, "debug");
+		if(!lua_istable(L, -1)){
+			log_w(MODULE, "handle_error(): debug is nil");
+			lua_pop(L, 1);
+			return 1;
+		}
+		lua_getfield(L, -1, "traceback");
+		if(!lua_isfunction(L, -1)){
+			log_w(MODULE, "handle_error(): debug.traceback is nil");
+			lua_pop(L, 2);
+			return 1;
+		}
+		lua_pushvalue(L, 1);
+		lua_pushinteger(L, 2);
+		lua_call(L, 2, 1);
+		return 1;
+	}
+
+	// Like lua_pcall, but returns a full traceback on error
+	// pcall(untrusted_function) -> status, error
+	static int l_pcall(lua_State *L)
+	{
+		log_v(MODULE, "l_pcall()");
+		lua_pushcfunction(L, handle_error);
+		int handle_error_stack_i = lua_gettop(L);
+
+		lua_pushvalue(L, 1);
+		int r = lua_pcall(L, 0, 0, handle_error_stack_i);
+		int error_stack_i = lua_gettop(L);
+		if(r == 0){
+			log_v(MODULE, "l_pcall() returned 0 (no error)");
+			lua_pushboolean(L, true);
+			return 1;
+		}
+		if(r == LUA_ERRRUN)
+			log_w(MODULE, "pcall(): Runtime error");
+		if(r == LUA_ERRMEM)
+			log_w(MODULE, "pcall(): Out of memory");
+		if(r == LUA_ERRERR)
+			log_w(MODULE, "pcall(): Error handler  failed");
+		lua_pushboolean(L, false);
+		lua_pushvalue(L, error_stack_i);
+		return 2;
 	}
 };
 

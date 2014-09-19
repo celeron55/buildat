@@ -47,7 +47,7 @@ local function run_in_sandbox(untrusted_code, sandbox)
 	local untrusted_function, message = loadstring(untrusted_code)
 	if not untrusted_function then return nil, message end
 	setfenv(untrusted_function, sandbox)
-	return pcall(untrusted_function)
+	return __buildat_pcall(untrusted_function)
 end
 
 function buildat:run_script_file(name)
@@ -61,7 +61,7 @@ function buildat:run_script_file(name)
 	--local status, err = run_in_sandbox(
 	--		[[buildat:Logger("foo"):info("Pihvi")]], sandbox)
 	if status == false then
-		log:error("Failed to run script: "..err)
+		log:error("Failed to run script:\n"..err)
 		return false
 	end
 	return true
