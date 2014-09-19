@@ -97,6 +97,10 @@ int main(int argc, char *argv[])
 
 	std::cerr<<"Buildat server"<<std::endl;
 
+	if(!config.check_paths()){
+		return 1;
+	}
+
 	if(module_path.empty()){
 		std::cerr<<"Module path (-m) is empty"<<std::endl;
 		return 1;

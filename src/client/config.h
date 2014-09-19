@@ -8,8 +8,10 @@ namespace client
 	struct Config
 	{
 		ss_ server_address;
-		ss_ polycode_path = "/home/celeron55/softat/polycode/";
+		ss_ polycode_path = "../../polycode";
 		ss_ share_path = "..";
 		ss_ cache_path = "../cache";
+
+		bool check_paths();
 	};
 }

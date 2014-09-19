@@ -57,6 +57,7 @@ set(CLIENT_SRCS
 	src/client/main.cpp
 	src/client/state.cpp
 	src/client/app.cpp
+	src/client/config.cpp
 	src/core/log.cpp
 	src/impl/fs.cpp
 	src/impl/tcpsocket.cpp
@@ -76,6 +77,7 @@ set(SERVER_SRCS
 	src/server/main.cpp
 	src/server/state.cpp
 	src/server/rccpp.cpp
+	src/server/config.cpp
 	src/core/log.cpp
 	src/impl/fs.cpp
 	src/impl/event.cpp

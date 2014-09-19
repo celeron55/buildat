@@ -94,6 +94,10 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	if(!config.check_paths()){
+		return 1;
+	}
+
 	Polycode::PolycodeView *view = new Polycode::PolycodeView("Hello Polycode!");
 	sp_<app::App> app0(app::createApp(view));
 
