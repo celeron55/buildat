@@ -8,8 +8,11 @@
 #include "interface/file_watch.h"
 //#include "interface/thread.h"
 #include "interface/mutex.h"
+#include <c55/string_util.h>
+#include <c55/filesys.h>
 #include <iostream>
 #include <algorithm>
+#include <fstream>
 #define MODULE "__state"
 
 using interface::Event;
@@ -17,6 +20,45 @@ using interface::Event;
 extern server::Config g_server_config;
 
 namespace server {
+
+static sv_<ss_> list_includes(const ss_ &path, const sv_<ss_> &include_dirs)
+{
+	ss_ base_dir = c55fs::stripFilename(path);
+	std::ifstream ifs(path);
+	sv_<ss_> result;
+	ss_ line;
+	while(std::getline(ifs, line)){
+		c55::Strfnd f(line);
+		f.next("#");
+		if(f.atend())
+			continue;
+		f.next("include");
+		f.while_any(" ");
+		ss_ quote = f.while_any("<\"");
+		ss_ include = f.next(quote == "<" ? ">" : "\"");
+		bool found = false;
+		sv_<ss_> include_dirs_now = include_dirs;
+		if(quote == "\"")
+			include_dirs_now.insert(include_dirs_now.begin(), base_dir);
+		else
+			include_dirs_now.push_back(base_dir);
+		for(const ss_ &dir : include_dirs){
+			ss_ include_path = dir+"/"+include;
+			//log_v(MODULE, "Trying %s", cs(include_path));
+			std::ifstream ifs2(include_path);
+			if(ifs2.good()){
+				result.push_back(include_path);
+				found = true;
+				break;
+			}
+		}
+		if(!found){
+			// Not a huge problem, just log at verbose
+			log_v(MODULE, "Include file not found: %s", cs(include));
+		}
+	}
+	return result;
+}
 
 struct CState: public State, public interface::Server
 {
@@ -87,9 +129,15 @@ struct CState: public State, public interface::Server
 
 		// Set up file watch
 
+		sv_<ss_> files_to_watch = {init_cpp_path};
+		sv_<ss_> include_dirs = m_compiler->include_directories;
+		include_dirs.push_back(m_modules_path);
+		sv_<ss_> includes = list_includes(init_cpp_path, include_dirs);
+		log_i(MODULE, "Includes: %s", cs(dump(includes)));
+		files_to_watch.insert(files_to_watch.end(), includes.begin(), includes.end());
 		if(m_module_file_watches.count(module_name) == 0){
 			m_module_file_watches[module_name] = sp_<interface::FileWatch>(
-					interface::createFileWatch({init_cpp_path},
+					interface::createFileWatch(files_to_watch,
 					[this, module_name, path]()
 			{
 				log_i(MODULE, "Module modified: %s: %s",

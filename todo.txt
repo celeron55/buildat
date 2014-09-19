@@ -3,7 +3,3 @@ Buildat TODO
 - Cache a hash of each compiled module in order not to rebuild them
   unnecessarily
 - Modules should be run in threads.
-
-Buildat TODO later
-==================
-- Watch dependencies of module source and client_lua/*.lua in addition to main file
