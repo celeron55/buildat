@@ -201,17 +201,23 @@ struct CState: public State, public interface::Server
 	// interface::Server version; doesn't directly unload
 	void unload_module(const ss_ &module_name)
 	{
+		log_v(MODULE, "unload_module(%s)", cs(module_name));
 		interface::MutexScope ms(m_modules_mutex);
 		auto it = m_modules.find(module_name);
-		if(it == m_modules.end())
+		if(it == m_modules.end()){
+			log_w(MODULE, "unload_module(%s): Not loaded", cs(module_name));
 			return;
+		}
 		m_unloads_requested.insert(module_name);
 	}
 
 	void reload_module(const ss_ &module_name, const ss_ &path)
 	{
 		log_i(MODULE, "reload_module(%s)", cs(module_name));
-		unload_module_u(module_name);
+		{
+			interface::MutexScope ms(m_modules_mutex);
+			unload_module_u(module_name);
+		}
 		load_module(module_name, path);
 		// Send core::continue directly to module
 		{
@@ -229,10 +235,10 @@ struct CState: public State, public interface::Server
 	}
 
 	// Direct version; internal and unsafe
+	// Call with m_modules_mutex locked.
 	void unload_module_u(const ss_ &module_name)
 	{
 		log_i(MODULE, "unload_module_u(): module_name=%s", cs(module_name));
-		interface::MutexScope ms(m_modules_mutex);
 		// Get and lock module
 		auto it = m_modules.find(module_name);
 		if(it == m_modules.end()){
@@ -415,9 +421,12 @@ struct CState: public State, public interface::Server
 				}
 			}
 			interface::MutexScope ms(m_modules_mutex);
-			for(const ss_ &module_name : m_unloads_requested){
-				log_w("state", "Unloading %s: not implemented", cs(module_name));
-				// TODO: Unload
+			for(auto it = m_unloads_requested.begin();
+					it != m_unloads_requested.end();){
+				ss_ module_name = *it; // Copy
+				it++; // Increment before unload_module_u; it erases this
+				log_i("state", "Unloading %s as requested", cs(module_name));
+				unload_module_u(module_name);
 			}
 			m_unloads_requested.clear();
 		}
