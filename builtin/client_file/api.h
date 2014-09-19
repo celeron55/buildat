@@ -1,6 +1,6 @@
 #pragma once
 #include "interface/event.h"
-#include "network/include/api.h"
+#include "network/api.h"
 
 namespace client_file
 {

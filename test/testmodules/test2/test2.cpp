@@ -1,7 +1,7 @@
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
-#include "test1/include/api.h"
+#include "test1/api.h"
 #include "core/log.h"
 
 using interface::Event;

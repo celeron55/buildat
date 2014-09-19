@@ -23,8 +23,7 @@ Module structure
 module
 |-- deps.txt      << Module and extension dependencies
 |-- <module>.cpp  << Server-side code
-|-- include
-|   `-- api.h     << Structures for interfacing between modules
+|-- api.h         << Structures for interfacing between modules
 |-- client_lua
 |   `-- init.lua  << Client-side code (by convention)
 `-- client_data

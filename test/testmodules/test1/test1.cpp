@@ -1,10 +1,10 @@
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
-#include "test1/include/api.h"
-//#include "client_lua/include/api.h"
-#include "client_file/include/api.h"
-#include "network/include/api.h"
+#include "test1/api.h"
+//#include "client_lua/api.h"
+#include "client_file/api.h"
+#include "network/api.h"
 #include "core/log.h"
 
 using interface::Event;

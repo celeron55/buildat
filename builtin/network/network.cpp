@@ -3,7 +3,7 @@
 #include "interface/event.h"
 #include "interface/tcpsocket.h"
 #include "interface/packet_stream.h"
-#include "network/include/api.h"
+#include "network/api.h"
 #include "core/log.h"
 //#include <cereal/archives/binary.hpp>
 //#include <cereal/types/string.hpp>

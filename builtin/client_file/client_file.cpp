@@ -3,8 +3,8 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/sha1.h"
-#include "client_file/include/api.h"
-#include "network/include/api.h"
+#include "client_file/api.h"
+#include "network/api.h"
 #include <cereal/archives/binary.hpp>
 #include <cereal/types/string.hpp>
 #include <fstream>
