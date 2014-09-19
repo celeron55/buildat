@@ -10,6 +10,8 @@ Built using Polycode C++.
 
 Module code is transfered from the server and run in a safe Lua sandbox.
 
+Extensions are non-sandboxed code installed separately on each client.
+
 Server
 ------
 Built using C++ with most functionality in RCC++.
@@ -19,6 +21,7 @@ C++ modules can interface with each other by using Cereal.
 Module structure
 ----------------
 module
+|-- deps.txt      << Module and extension dependencies
 |-- <module>.cpp  << Server-side code
 |-- include
 |   `-- api.h     << Structures for interfacing between modules
@@ -53,6 +56,25 @@ Startup sequence and what the module should do:
 - init()          : Subscribe to events; access other external things.
 - "core:start"    : Start doing whatever the module wants to actively do.
 - "core:continue" : Continue doing stuff after a reload.
+
+Dependencies: deps.txt
+----------------------
+File format: One entry per line. Indentation for presentational purposes only.
+
+Module entry:
+  <module_name> <options>
+Extension entry:
+  extension:<extension_name> <options>
+
+Options:
+? - Optional dependency
+r - Reverse dependency; load before the specified module (not for extensions)
+
+Example:
+  network
+  plants ?
+  stuff ?r
+  extension:ecs2
 
 Network protocol
 ----------------
