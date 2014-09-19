@@ -11,6 +11,9 @@ cpp_files+=" ""$script_dir"/../test/testmodules/*/*.cpp
 header_files+=" "$(find "$script_dir"/../builtin -name '*.h')
 cpp_files+=" "$(find "$script_dir"/../builtin -name '*.cpp')
 
+header_files+=" "$(find "$script_dir"/../3rdparty/c55lib -name '*.h')
+cpp_files+=" "$(find "$script_dir"/../3rdparty/c55lib -name '*.cpp')
+
 echo "header_files: $header_files"
 echo "cpp_files: $cpp_files"
 
