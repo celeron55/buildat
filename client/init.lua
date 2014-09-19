@@ -17,5 +17,8 @@ log:info("init.lua loaded")
 
 dofile(__buildat_get_path("share").."/client/test.lua")
 dofile(__buildat_get_path("share").."/client/packet.lua")
+dofile(__buildat_get_path("share").."/client/extensions.lua")
 dofile(__buildat_get_path("share").."/client/sandbox.lua")
 
+local test = require("buildat/extension/test")
+test.f()

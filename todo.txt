@@ -10,6 +10,8 @@ Buildat TODO
 - Network should leave socket fds in m_server when destructing, and pick them up
   on core:continue.
 - Move module/include/api.h to module/api.h
+- Implement file modification tracking in client_lua or client_file, or somehow
+  otherwise make newly connected clients get new file contents
 
 Buildat TODO later
 ==================

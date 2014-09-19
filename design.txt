@@ -86,7 +86,7 @@ Extension behavior
 Extensions use the new Lua 5.1/5.2 module interface.
 
 If an extension wish to provide an interface to sandboxed code, it should
-implement function unsafe(), which returns the safe interface.
+implement table "safe", which contains the safe interface.
 
 Extensions and modules use require "buildat/extension/<name>" to use extensions.
 

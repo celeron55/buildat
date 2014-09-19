@@ -12,3 +12,7 @@ label:setPosition(0, -100, 0)
 scene:addChild(label)
 --]]
 
+local test = require("buildat/extension/test")
+
+test.f()
+
