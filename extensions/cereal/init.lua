@@ -20,9 +20,6 @@ function M.safe.binary_output(values, types)
 	if type(types) ~= 'table' then
 		error("types not table")
 	end
-	if #values ~= #types then
-		error("values and types must have the same length")
-	end
 	return __buildat_cereal_binary_output(values, types)
 end
 

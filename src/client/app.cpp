@@ -558,35 +558,54 @@ struct CApp: public Polycode::EventHandler, public App
 			lua_pushnil(L);
 			while(lua_next(L, types_table_L) != 0)
 			{
-				ss_ type = lua_tostring(L, -1);
+				ss_ type;
+				int repeat = 1;
+				if(lua_istable(L, -1)){
+					lua_rawgeti(L, -1, 1);
+					type = lua_tostring(L, -1);
+					lua_pop(L, 1);
+					lua_rawgeti(L, -1, 2);
+					repeat = lua_tointeger(L, -1);
+					lua_pop(L, 1);
+				} else {
+					type = lua_tostring(L, -1);
+				}
 				lua_pop(L, 1);
 				log_t(MODULE, "type=%s", cs(type));
 				if(type == "byte"){
-					uchar b;
-					ar(b);
-					lua_pushinteger(L, b);
-					lua_rawseti(L, result_table_L, output_index++);
+					for(int i = 0; i < repeat; i++){
+						uchar b;
+						ar(b);
+						lua_pushinteger(L, b);
+						lua_rawseti(L, result_table_L, output_index++);
+					}
 					continue;
 				}
 				if(type == "int32"){
-					int32_t i;
-					ar(i);
-					lua_pushinteger(L, i);
-					lua_rawseti(L, result_table_L, output_index++);
+					for(int i = 0; i < repeat; i++){
+						int32_t d;
+						ar(d);
+						lua_pushinteger(L, d);
+						lua_rawseti(L, result_table_L, output_index++);
+					}
 					continue;
 				}
 				if(type == "double"){
-					double d;
-					ar(d);
-					lua_pushnumber(L, d);
-					lua_rawseti(L, result_table_L, output_index++);
+					for(int i = 0; i < repeat; i++){
+						double d;
+						ar(d);
+						lua_pushnumber(L, d);
+						lua_rawseti(L, result_table_L, output_index++);
+					}
 					continue;
 				}
 				if(type == "string"){
-					ss_ s;
-					ar(s);
-					lua_pushlstring(L, s.c_str(), s.size());
-					lua_rawseti(L, result_table_L, output_index++);
+					for(int i = 0; i < repeat; i++){
+						ss_ s;
+						ar(s);
+						lua_pushlstring(L, s.c_str(), s.size());
+						lua_rawseti(L, result_table_L, output_index++);
+					}
 					continue;
 				}
 				throw Exception(ss_()+"Unknown type \""+type+"\""
@@ -613,37 +632,56 @@ struct CApp: public Polycode::EventHandler, public App
 			lua_pushnil(L);
 			while(lua_next(L, types_table_L) != 0)
 			{
-				ss_ type = lua_tostring(L, -1);
+				ss_ type;
+				int repeat = 1;
+				if(lua_istable(L, -1)){
+					lua_rawgeti(L, -1, 1);
+					type = lua_tostring(L, -1);
+					lua_pop(L, 1);
+					lua_rawgeti(L, -1, 2);
+					repeat = lua_tointeger(L, -1);
+					lua_pop(L, 1);
+				} else {
+					type = lua_tostring(L, -1);
+				}
 				lua_pop(L, 1);
 				log_t(MODULE, "type=%s", cs(type));
 				if(type == "byte"){
-					lua_rawgeti(L, values_table_L, value_index++);
-					uchar b = lua_tointeger(L, -1);
-					lua_pop(L, 1);
-					ar(b);
+					for(int i = 0; i < repeat; i++){
+						lua_rawgeti(L, values_table_L, value_index++);
+						uchar b = lua_tointeger(L, -1);
+						lua_pop(L, 1);
+						ar(b);
+					}
 					continue;
 				}
 				if(type == "int32"){
-					lua_rawgeti(L, values_table_L, value_index++);
-					int32_t i = lua_tointeger(L, -1);
-					lua_pop(L, 1);
-					ar(i);
+					for(int i = 0; i < repeat; i++){
+						lua_rawgeti(L, values_table_L, value_index++);
+						int32_t d = lua_tointeger(L, -1);
+						lua_pop(L, 1);
+						ar(d);
+					}
 					continue;
 				}
 				if(type == "double"){
-					lua_rawgeti(L, values_table_L, value_index++);
-					double d = lua_tonumber(L, -1);
-					lua_pop(L, 1);
-					ar(d);
+					for(int i = 0; i < repeat; i++){
+						lua_rawgeti(L, values_table_L, value_index++);
+						double d = lua_tonumber(L, -1);
+						lua_pop(L, 1);
+						ar(d);
+					}
 					continue;
 				}
 				if(type == "string"){
-					lua_rawgeti(L, values_table_L, value_index++);
-					size_t cs_len = 0;
-					const char *cs = lua_tolstring(L, -1, &cs_len);
-					lua_pop(L, 1);
-					ss_ s(cs, cs_len);
-					ar(s);
+					for(int i = 0; i < repeat; i++){
+						lua_rawgeti(L, values_table_L, value_index++);
+						size_t cs_len = 0;
+						const char *cs = lua_tolstring(L, -1, &cs_len);
+						lua_pop(L, 1);
+						ss_ s(cs, cs_len);
+						ar(s);
+					}
 					continue;
 				}
 				throw Exception(ss_()+"Unknown type \""+type+"\""

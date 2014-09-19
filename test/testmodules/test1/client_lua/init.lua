@@ -42,8 +42,8 @@ buildat.sub_packet("test1:add_box", function(data)
 	the_box = box
 
 	data = cereal.binary_output(
-		{1,      "Foo"},
-		{"byte", "string"}
+		{1,      "Foo", "Bar"},
+		{"byte", {"string", 2}}
 	)
 	buildat.send_packet("test1:box_added", data)
 end)
@@ -70,6 +70,18 @@ mouseinput.sub_down(function(button, x, y)
 end)
 mouseinput.sub_up(function(button, x, y)
 	--log:info("mouse up: "..button..", "..x..", "..y..")")
+end)
+
+buildat.sub_packet("test1:array", function(data)
+	values = cereal.binary_input(data, {"int32"})
+	values = cereal.binary_input(data, {"int32", {"int32", values[1]}})
+	log:info("test1:array: "..dump(values))
+
+	data = cereal.binary_output(
+		values,
+		{"int32", {"int32", values[1]}}
+	)
+	buildat.send_packet("test1:array_response", data)
 end)
 
 --[[

@@ -86,6 +86,15 @@ struct Module: public interface::Module
 			}
 			inetwork->send(event.recipient, "test1:add_box", os.str());
 		});
+
+		network::access(m_server, [&](network::Interface * inetwork){
+			std::ostringstream os(std::ios::binary);
+			{
+				cereal::PortableBinaryOutputArchive ar(os);
+				ar((int32_t)5, (int32_t)1, (int32_t)4, (int32_t)6, (int32_t)8, (int32_t)10);
+			}
+			inetwork->send(event.recipient, "test1:array", os.str());
+		});
 	}
 
 	void on_packet_received(const network::Packet &packet)
