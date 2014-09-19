@@ -62,19 +62,24 @@ Dependencies: deps.txt
 File format: One entry per line. Indentation for presentational purposes only.
 
 Module entry:
-  <module_name> <options>
+  module:<module_name> <options>
 Extension entry:
   extension:<extension_name> <options>
+Extra CXXFLAGS:
+  cxxflags:<flags>
+Extra LDFLAGS:
+  ldflags:<flags>
 
 Options:
 ? - Optional dependency
 r - Reverse dependency; load before the specified module (not for extensions)
 
 Example:
-  network
-  plants ?
-  stuff ?r
+  module:network
+  module:plants ?
+  module:stuff ?r
   extension:ecs2
+  ldflags:-lsasl2
 
 Extension structure
 -------------------
