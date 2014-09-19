@@ -14,7 +14,9 @@ namespace client_file
 
 	struct Interface
 	{
+		virtual void update_file_content(const ss_ &name, const ss_ &content) = 0;
 		virtual void add_file_content(const ss_ &name, const ss_ &content) = 0;
+		virtual void add_file_path(const ss_ &name, const ss_ &path) = 0;
 	};
 
 	inline bool access(interface::Server *server,

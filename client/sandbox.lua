@@ -66,6 +66,6 @@ function buildat:run_script_file(name)
 		log:error("Failed to load script file: "+name)
 		return false
 	end
-	log:info("buildat:run_script_file("..name.."): #code="..#code)
+	log:info("buildat:run_script_file("..name.."): code length: "..#code)
 	return __buildat_run_in_sandbox(code)
 end

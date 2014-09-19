@@ -3,6 +3,7 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/sha1.h"
+#include "interface/file_watch.h"
 #include "client_file/api.h"
 #include "network/api.h"
 #include <cereal/archives/binary.hpp>
@@ -26,10 +27,12 @@ struct Module: public interface::Module, public client_file::Interface
 {
 	interface::Server *m_server;
 	sm_<ss_, sp_<FileInfo>> m_files;
+	sp_<interface::MultiFileWatch> m_watch;
 
 	Module(interface::Server *server):
+		interface::Module("client_file"),
 		m_server(server),
-		interface::Module("client_file")
+		m_watch(interface::createMultiFileWatch())
 	{
 		log_v(MODULE, "client_file construct");
 	}
@@ -37,6 +40,8 @@ struct Module: public interface::Module, public client_file::Interface
 	~Module()
 	{
 		log_v(MODULE, "client_file destruct");
+		for(int fd : m_watch->get_fds())
+			m_server->remove_socket_event(fd);
 	}
 
 	void init()
@@ -48,6 +53,10 @@ struct Module: public interface::Module, public client_file::Interface
 				Event::t("network:packet_received/core:request_file"));
 		m_server->sub_event(this,
 				Event::t("network:packet_received/core:all_files_transferred"));
+		m_server->sub_event(this, Event::t("watch_file:watch_fd_event"));
+
+		for(int fd : m_watch->get_fds())
+			m_server->add_socket_event(fd, Event::t("watch_file:watch_fd_event"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -58,6 +67,8 @@ struct Module: public interface::Module, public client_file::Interface
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/core:all_files_transferred",
 				on_all_files_transferred, network::Packet)
+		EVENT_TYPEN("watch_file:watch_fd_event", on_watch_fd_event,
+				interface::SocketEvent);
 	}
 
 	void on_start()
@@ -130,14 +141,57 @@ struct Module: public interface::Module, public client_file::Interface
 				new FilesTransmitted(packet.sender));
 	}
 
+	void on_watch_fd_event(const interface::SocketEvent &event)
+	{
+		log_v(MODULE, "on_watch_fd_event()");
+		m_watch->report_fd(event.fd);
+	}
+
 	// Interface
+
+	void update_file_content(const ss_ &name, const ss_ &content)
+	{
+		ss_ hash = interface::sha1::calculate(content);
+
+		auto it = m_files.find(name);
+		if(it != m_files.end()){
+			// File already added; ignore if content wasn't modified
+			sp_<FileInfo> old_info = it->second;
+			if(old_info->hash == hash){
+				log_v(MODULE, "File stayed the same: %s: %s", cs(name),
+						cs(interface::sha1::hex(hash)));
+				return;
+			}
+		}
+
+		log_v(MODULE, "File updated: %s: %s", cs(name),
+				cs(interface::sha1::hex(hash)));
+		m_files[name] = sp_<FileInfo>(new FileInfo(name, content, hash));
+
+		// Note: Clients have to reconnect to see the new file content
+	}
 
 	void add_file_content(const ss_ &name, const ss_ &content)
 	{
+		update_file_content(name, content);
+	}
+
+	void add_file_path(const ss_ &name, const ss_ &path)
+	{
+		std::ifstream f(path);
+		std::string content((std::istreambuf_iterator<char>(f)),
+				std::istreambuf_iterator<char>());
 		ss_ hash = interface::sha1::calculate(content);
-		log_v(MODULE, "File: %s: %s", cs(name),
-				cs(interface::sha1::hex(hash)));
-		m_files[name] = up_<FileInfo>(new FileInfo(name, content, hash));
+		log_v(MODULE, "File added: %s: %s (%s)", cs(name),
+				cs(interface::sha1::hex(hash)), cs(path));
+		m_files[name] = sp_<FileInfo>(new FileInfo(name, content, hash));
+		m_watch->add(path, [this, name, path](const ss_ & path_){
+			log_v(MODULE, "File modified: %s (%s)", cs(name), cs(path));
+			std::ifstream f(path);
+			std::string content((std::istreambuf_iterator<char>(f)),
+					std::istreambuf_iterator<char>());
+			update_file_content(name, content);
+		});
 	}
 
 	void* get_interface()
