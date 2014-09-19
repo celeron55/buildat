@@ -44,6 +44,7 @@ struct Module: public interface::Module
 		m_server->load_module("network", builtin+"/network");
 		m_server->load_module("client_file", builtin+"/client_file");
 		m_server->load_module("client_lua", builtin+"/client_lua");
+		m_server->load_module("client_data", builtin+"/client_data");
 
 		sv_<ss_> load_list = {
 			"test1",

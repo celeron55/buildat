@@ -12,7 +12,7 @@
 
 using interface::Event;
 
-namespace client_lua {
+namespace client_data {
 
 struct Module: public interface::Module
 {
@@ -20,19 +20,19 @@ struct Module: public interface::Module
 
 	Module(interface::Server *server):
 		m_server(server),
-		interface::Module("client_lua")
+		interface::Module("client_data")
 	{
-		log_v(MODULE, "client_lua construct");
+		log_v(MODULE, "client_data construct");
 	}
 
 	~Module()
 	{
-		log_v(MODULE, "client_lua destruct");
+		log_v(MODULE, "client_data destruct");
 	}
 
 	void init()
 	{
-		log_v(MODULE, "client_lua init");
+		log_v(MODULE, "client_data init");
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:module_loaded"));
 		m_server->sub_event(this, Event::t("core:module_unloaded"));
@@ -58,9 +58,9 @@ struct Module: public interface::Module
 		log_v(MODULE, "on_module_loaded(): %s", cs(event.name));
 		ss_ module_name = event.name;
 		ss_ module_path = m_server->get_module_path(module_name);
-		ss_ client_lua_path = module_path+"/client_lua";
+		ss_ client_data_path = module_path+"/client_data";
 		auto list = interface::getGlobalFilesystem()
-				->list_directory(client_lua_path);
+				->list_directory(client_data_path);
 
 		sv_<ss_> log_list;
 		for(const interface::Filesystem::Node &n : list){
@@ -68,13 +68,13 @@ struct Module: public interface::Module
 				continue;
 			log_list.push_back(n.name);
 		}
-		log_i(MODULE, "client_lua: %s: %s", cs(module_name), cs(dump(log_list)));
+		log_i(MODULE, "client_data: %s: %s", cs(module_name), cs(dump(log_list)));
 
 		for(const interface::Filesystem::Node &n : list){
 			if(n.is_directory)
 				continue;
 			const ss_ &file_name = n.name;
-			std::ifstream f(client_lua_path+"/"+file_name);
+			std::ifstream f(client_data_path+"/"+file_name);
 			std::string file_content((std::istreambuf_iterator<char>(f)),
 					std::istreambuf_iterator<char>());
 
@@ -97,7 +97,7 @@ struct Module: public interface::Module
 };
 
 extern "C" {
-	EXPORT void* createModule_client_lua(interface::Server *server){
+	EXPORT void* createModule_client_data(interface::Server *server){
 		return (void*)(new Module(server));
 	}
 }
