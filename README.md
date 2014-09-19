@@ -59,7 +59,7 @@ Modify something and see stuff happen
 Edit something and then restart the client (CTRL+C in terminal 2):
 
     $ cd $wherever_buildat_is
-    $ vim test/testmodules/test1/client_lua/init.lua
-    $ vim test/testmodules/test1/test1.cppp
+    $ vim test/testmodules/minigame/client_lua/init.lua
+    $ vim test/testmodules/minigame/minigame.cppp
     $ vim builtin/network/network.cpp
 
