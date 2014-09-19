@@ -1,5 +1,5 @@
 -- Buildat: extension/test/init.lua
-local log = buildat:Logger("extension/test")
+local log = buildat.Logger("extension/test")
 
 local M = {}
 

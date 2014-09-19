@@ -1,4 +1,4 @@
-local log = buildat:Logger("__client/test")
+local log = buildat.Logger("__client/test")
 
 --[[
 require "Polycode/Core"

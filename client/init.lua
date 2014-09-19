@@ -23,7 +23,7 @@ function buildat.dump(thing)
 	end
 	return "(?)"
 end
-function buildat:Logger(module)
+function buildat.Logger(module)
 	local logger = {}
 	function fix_text(text)
 		if type(text) == 'string' then
@@ -42,7 +42,7 @@ function buildat:Logger(module)
 	return logger
 end
 
-local log = buildat:Logger("__client/init")
+local log = buildat.Logger("__client/init")
 
 log:info("init.lua loaded")
 

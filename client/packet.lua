@@ -1,4 +1,4 @@
-local log = buildat:Logger("__client/packet")
+local log = buildat.Logger("__client/packet")
 
 __buildat_packet_subs = {}
 

@@ -1,5 +1,5 @@
 -- Buildat: extension/polycode_sandbox/init.lua
-local log = buildat:Logger("extension/polycode_sandbox")
+local log = buildat.Logger("extension/polycode_sandbox")
 local dump = buildat.dump
 local M = {safe = nil}
 

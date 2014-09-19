@@ -1,4 +1,4 @@
-local log = buildat:Logger("__client/extensions")
+local log = buildat.Logger("__client/extensions")
 
 function __buildat_load_extension(name)
 	log:info("__buildat_load_extension(\""..name.."\")")

@@ -1,5 +1,5 @@
 -- Buildat: test1/client_lua/init.lua
-local log = buildat:Logger("test1")
+local log = buildat.Logger("test1")
 log:info("test1/init.lua loaded")
 
 --[[

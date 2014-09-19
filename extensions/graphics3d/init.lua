@@ -1,6 +1,6 @@
 -- Buildat: extension/graphics3d/init.lua
 local polybox = require("buildat/extension/polycode_sandbox")
-local log = buildat:Logger("extension/graphics3d")
+local log = buildat.Logger("extension/graphics3d")
 local dump = buildat.dump
 local M = {safe = {}}
 
