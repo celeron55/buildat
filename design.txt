@@ -1,6 +1,6 @@
 Buildat
 =======
-A Minecraft clone with vast extendability.
+A minecraftlike with vast extendability.
 
 License: Apache 2.0
 
