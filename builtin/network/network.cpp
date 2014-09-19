@@ -5,8 +5,9 @@
 #include "interface/packet_stream.h"
 #include "network/api.h"
 #include "core/log.h"
-//#include <cereal/archives/binary.hpp>
-//#include <cereal/types/string.hpp>
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/vector.hpp>
+#include <cereal/types/tuple.hpp>
 #include <deque>
 #include <sys/socket.h>
 #include <cstring> // strerror()
@@ -36,6 +37,7 @@ struct Module: public interface::Module, public network::Interface
 	sm_<Peer::Id, Peer> m_peers;
 	sm_<int, Peer*> m_peers_by_socket;
 	size_t m_next_peer_id = 1;
+	bool m_will_restore_after_unload = false;
 
 	Module(interface::Server *server):
 		interface::Module("network"),
@@ -48,12 +50,18 @@ struct Module: public interface::Module, public network::Interface
 	~Module()
 	{
 		log_v(MODULE, "network destruct");
-		if(m_listening_socket->good())
+		if(m_listening_socket->good()){
 			m_server->remove_socket_event(m_listening_socket->fd());
+			if(m_will_restore_after_unload)
+				m_listening_socket->release_fd();
+		}
 		for(auto pair : m_peers){
 			const Peer &peer = pair.second;
-			if(peer.socket->good())
+			if(peer.socket->good()){
 				m_server->remove_socket_event(peer.socket->fd());
+				if(m_will_restore_after_unload)
+					peer.socket->release_fd();
+			}
 		}
 	}
 
@@ -97,11 +105,51 @@ struct Module: public interface::Module, public network::Interface
 	void on_unload()
 	{
 		log_v(MODULE, "on_unload");
+		m_will_restore_after_unload = true;
+
+		int listening_fd = m_listening_socket->fd();
+		sv_<std::tuple<Peer::Id, int>> peer_restore_info;
+		for(auto &pair : m_peers){
+			Peer &peer = pair.second;
+			peer_restore_info.push_back(std::tuple<Peer::Id, int>(
+					peer.id, peer.socket->fd()));
+		}
+
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::BinaryOutputArchive ar(os);
+			ar(listening_fd);
+			ar(peer_restore_info);
+		}
+		m_server->tmp_store_data("network:restore_info", os.str());
 	}
 
 	void on_continue()
 	{
 		log_v(MODULE, "on_continue");
+		ss_ data = m_server->tmp_restore_data("network:restore_info");
+		// name, content, path
+		int listening_fd;
+		sv_<std::tuple<Peer::Id, int>> peer_restore_info;
+		std::istringstream is(data, std::ios::binary);
+		{
+			cereal::BinaryInputArchive ar(is);
+			ar(listening_fd);
+			ar(peer_restore_info);
+		}
+
+		m_listening_socket.reset(interface::createTCPSocket(listening_fd));
+
+		for(auto &tuple : peer_restore_info){
+			Peer::Id peer_id = std::get<0>(tuple);
+			int fd = std::get<1>(tuple);
+			log_i(MODULE, "Restoring peer %i: fd=%i", peer_id, fd);
+			sp_<interface::TCPSocket> socket(interface::createTCPSocket(fd));
+			m_peers[peer_id] = Peer(peer_id, socket);
+			m_peers_by_socket[socket->fd()] = &m_peers[peer_id];
+			m_server->add_socket_event(socket->fd(),
+					Event::t("network:incoming_data"));
+		}
 	}
 
 	void on_listen_event(const interface::SocketEvent &event)

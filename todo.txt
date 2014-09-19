@@ -3,9 +3,7 @@ Buildat TODO
 - Cache a hash of each compiled module in order not to rebuild them
   unnecessarily
 - Modules should be run in threads.
-- Network should leave socket fds in m_server when destructing, and pick them up
-  on core:continue.
-- builtin/client_file should somehow not forget its file list at reload
+- Use portable binary archives for networked data
 
 Buildat TODO later
 ==================

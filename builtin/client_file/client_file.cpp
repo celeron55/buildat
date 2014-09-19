@@ -8,6 +8,8 @@
 #include "network/api.h"
 #include <cereal/archives/binary.hpp>
 #include <cereal/types/string.hpp>
+#include <cereal/types/vector.hpp>
+#include <cereal/types/tuple.hpp>
 #include <fstream>
 #include <streambuf>
 
@@ -17,8 +19,9 @@ struct FileInfo {
 	ss_ name;
 	ss_ content;
 	ss_ hash;
-	FileInfo(const ss_ &name, const ss_ &content, const ss_ &hash):
-		name(name), content(content), hash(hash){}
+	ss_ path; // Empty if not a physical file
+	FileInfo(const ss_ &name, const ss_ &content, const ss_ &hash, const ss_ &path):
+		name(name), content(content), hash(hash), path(path){}
 };
 
 namespace client_file {
@@ -82,11 +85,50 @@ struct Module: public interface::Module, public client_file::Interface
 	void on_unload()
 	{
 		log_v(MODULE, "on_unload");
+
+		// name, content, path
+		sv_<std::tuple<ss_, ss_, ss_>> file_restore_info;
+		for(auto &pair : m_files){
+			const FileInfo &info = *pair.second.get();
+			if(info.path != ""){
+				file_restore_info.push_back(std::tuple<ss_, ss_, ss_>(
+						info.name, "", info.path));
+			} else {
+				file_restore_info.push_back(std::tuple<ss_, ss_, ss_>(
+						info.name, info.content, ""));
+			}
+		}
+
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::BinaryOutputArchive ar(os);
+			ar(file_restore_info);
+		}
+		m_server->tmp_store_data("client_file:restore_info", os.str());
 	}
 
 	void on_continue()
 	{
 		log_v(MODULE, "on_continue");
+		ss_ data = m_server->tmp_restore_data("client_file:restore_info");
+		// name, content, path
+		sv_<std::tuple<ss_, ss_, ss_>> file_restore_info;
+		std::istringstream is(data, std::ios::binary);
+		{
+			cereal::BinaryInputArchive ar(is);
+			ar(file_restore_info);
+		}
+		for(auto &tuple : file_restore_info){
+			const ss_ &name    = std::get<0>(tuple);
+			const ss_ &content = std::get<1>(tuple);
+			const ss_ &path    = std::get<2>(tuple);
+			log_i(MODULE, "Restoring: %s", cs(name));
+			if(path != ""){
+				add_file_path(name, path);
+			} else {
+				add_file_content(name, content);
+			}
+		}
 	}
 
 	void on_new_client(const network::NewClient &new_client)
@@ -180,7 +222,7 @@ struct Module: public interface::Module, public client_file::Interface
 
 		log_v(MODULE, "File updated: %s: %s", cs(name),
 				cs(interface::sha1::hex(hash)));
-		m_files[name] = sp_<FileInfo>(new FileInfo(name, content, hash));
+		m_files[name] = sp_<FileInfo>(new FileInfo(name, content, hash, ""));
 
 		// Note: Clients have to reconnect to see the new file content
 	}
@@ -198,7 +240,7 @@ struct Module: public interface::Module, public client_file::Interface
 		ss_ hash = interface::sha1::calculate(content);
 		log_v(MODULE, "File added: %s: %s (%s)", cs(name),
 				cs(interface::sha1::hex(hash)), cs(path));
-		m_files[name] = sp_<FileInfo>(new FileInfo(name, content, hash));
+		m_files[name] = sp_<FileInfo>(new FileInfo(name, content, hash, path));
 		m_watch->add(path, [this, name, path](const ss_ & path_){
 			log_v(MODULE, "File modified: %s (%s)", cs(name), cs(path));
 			std::ifstream f(path);

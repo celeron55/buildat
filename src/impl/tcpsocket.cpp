@@ -82,6 +82,10 @@ struct CTCPSocket: public TCPSocket
 	{
 		return (m_fd != -1);
 	}
+	void release_fd()
+	{
+		m_fd = -1;
+	}
 	void close_fd()
 	{
 		if(m_fd != -1)

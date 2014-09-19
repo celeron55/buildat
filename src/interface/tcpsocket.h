@@ -8,6 +8,7 @@ namespace interface
 		virtual ~TCPSocket(){}
 		virtual int fd() const = 0;
 		virtual bool good() const = 0;
+		virtual void release_fd() = 0;
 		virtual void close_fd() = 0;
 		virtual bool listen_fd() = 0;
 		virtual bool connect_fd(const ss_ &address, const ss_ &port) = 0;
