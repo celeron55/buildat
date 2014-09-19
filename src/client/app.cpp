@@ -195,7 +195,7 @@ struct CApp: public Polycode::EventHandler, public App
 		core = new POLYCODE_CORE(view, 640, 480, false, false, 0, 0, 90, 1, true);
 
 		Polycode::CoreServices::getInstance()->getResourceManager()->addArchive(
-				g_client_config.share_path+"/default.pak");
+				g_client_config.share_path+"/client/default.pak");
 		Polycode::CoreServices::getInstance()->getResourceManager()->addDirResource("default",
 				false);
 

@@ -52,8 +52,9 @@ Directory structure
 ├── 3rdparty    << Bundled 3rd-party libraries
 ├── build       << Build files; always mkdir build; cmake .. to keep things clean
 ├── cache       << Runtime directory used by Buildat
-├── share       << Static files; installable in /usr/share/buildat
-│   └── builtin << Built-in modules
+├── builtin     << Built-in modules
+├── client      << Built-in client files
+├── extensions  << Built-in client extensions
 ├── src
 │   ├── client  << Client-specific code
 │   ├── core    << Core code (must be kept minimal but sufficient)
