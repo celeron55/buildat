@@ -8,8 +8,8 @@ cpp_files="$script_dir"/../src/*/*.cpp
 header_files+=" ""$script_dir"/../test/testmodules/*/*/*.h
 cpp_files+=" ""$script_dir"/../test/testmodules/*/*.cpp
 
-header_files+=" "$(find "$script_dir"/../share/builtin -name '*.h')
-cpp_files+=" "$(find "$script_dir"/../share/builtin -name '*.cpp')
+header_files+=" "$(find "$script_dir"/../builtin -name '*.h')
+cpp_files+=" "$(find "$script_dir"/../builtin -name '*.cpp')
 
 echo "header_files: $header_files"
 echo "cpp_files: $cpp_files"
