@@ -315,14 +315,17 @@ struct CApp: public Polycode::EventHandler, public App
 
 	void run_script(const ss_ &script)
 	{
-		log_v(MODULE, "run_script(): script.size()=%zu", script.size());
+		log_v(MODULE, "run_script(): %s", cs(script));
 
-		// TODO: Security
-		int error = luaL_dostring(L, script.c_str());
-		if(error){
-			log_w(MODULE, "luaL_dostring: An error occurred: %s\n",
-					lua_tostring(L, -1));
-			lua_pop(L, 1);
+		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_run_in_sandbox");
+		lua_pushlstring(L, script.c_str(), script.size());
+		lua_call(L, 1, 1);
+		bool status = lua_toboolean(L, -1);
+		lua_pop(L, 1);
+		if(status == false){
+			log_w(MODULE, "run_script(): failed");
+		} else {
+			log_v(MODULE, "run_script(): succeeded");
 		}
 	}
 

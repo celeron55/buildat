@@ -43,11 +43,20 @@ sandbox.require = function(name)
 end
 
 local function run_in_sandbox(untrusted_code, sandbox)
-	if untrusted_code:byte(1) == 27 then return nil, "binary bytecode prohibited" end
+	if untrusted_code:byte(1) == 27 then return false, "binary bytecode prohibited" end
 	local untrusted_function, message = loadstring(untrusted_code)
-	if not untrusted_function then return nil, message end
+	if not untrusted_function then return false, message end
 	setfenv(untrusted_function, sandbox)
 	return __buildat_pcall(untrusted_function)
+end
+
+function __buildat_run_in_sandbox(untrusted_code)
+	local status, err = run_in_sandbox(untrusted_code, sandbox)
+	if status == false then
+		log:error("Failed to run script:\n"..err)
+		return false
+	end
+	return true
 end
 
 function buildat:run_script_file(name)
@@ -57,12 +66,5 @@ function buildat:run_script_file(name)
 		return false
 	end
 	log:info("buildat:run_script_file("..name.."): #code="..#code)
-	local status, err = run_in_sandbox(code, sandbox)
-	--local status, err = run_in_sandbox(
-	--		[[buildat:Logger("foo"):info("Pihvi")]], sandbox)
-	if status == false then
-		log:error("Failed to run script:\n"..err)
-		return false
-	end
-	return true
+	return __buildat_run_in_sandbox(code)
 end
