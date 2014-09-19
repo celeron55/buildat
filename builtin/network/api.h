@@ -31,6 +31,13 @@ namespace network
 		NewClient(const PeerInfo &info): info(info){}
 	};
 
+	struct OldClient: public interface::Event::Private
+	{
+		PeerInfo info;
+
+		OldClient(const PeerInfo &info): info(info){}
+	};
+
 	struct Interface
 	{
 		virtual void send(PeerInfo::Id recipient, const ss_ &name,

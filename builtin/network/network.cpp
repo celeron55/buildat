@@ -194,6 +194,12 @@ struct Module: public interface::Module, public network::Interface
 			throw Exception(ss_()+"Receive failed: "+strerror(errno));
 		if(r == 0){
 			log_i(MODULE, "Peer %zu disconnected", peer.id);
+
+			PeerInfo pinfo;
+			pinfo.id = peer.id;
+			pinfo.address = peer.socket->get_remote_address();
+			m_server->emit_event("network:client_disconnected", new OldClient(pinfo));
+
 			m_server->remove_socket_event(peer.socket->fd());
 			m_peers_by_socket.erase(peer.socket->fd());
 			m_peers.erase(peer.id);
