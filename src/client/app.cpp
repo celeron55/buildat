@@ -285,6 +285,7 @@ struct CApp: public Polycode::EventHandler, public App
 		DEF_BUILDAT_FUNC(get_path)
 		DEF_BUILDAT_FUNC(pcall)
 		DEF_BUILDAT_FUNC(cereal_binary_input)
+		DEF_BUILDAT_FUNC(cereal_binary_output)
 
 		ss_ init_lua_path = g_client_config.share_path+"/client/init.lua";
 		int error = luaL_dofile(L, init_lua_path.c_str());
@@ -544,6 +545,64 @@ struct CApp: public Polycode::EventHandler, public App
 			}
 		}
 		// Result table is on top of stack
+		return 1;
+	}
+
+	// cereal_binary_output(values: table of values, types: table of strings)
+	// -> data
+	static int l_cereal_binary_output(lua_State *L)
+	{
+		int values_table_L = 1;
+
+		int types_table_L = 2;
+
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+
+			int value_index = 1;
+			lua_pushnil(L);
+			while(lua_next(L, types_table_L) != 0)
+			{
+				ss_ type = lua_tostring(L, -1);
+				lua_pop(L, 1);
+				log_t(MODULE, "type=%s", cs(type));
+				if(type == "byte"){
+					lua_rawgeti(L, values_table_L, value_index++);
+					uchar b = lua_tointeger(L, -1);
+					lua_pop(L, 1);
+					ar(b);
+					continue;
+				}
+				if(type == "int32"){
+					lua_rawgeti(L, values_table_L, value_index++);
+					int32_t i = lua_tointeger(L, -1);
+					lua_pop(L, 1);
+					ar(i);
+					continue;
+				}
+				if(type == "double"){
+					lua_rawgeti(L, values_table_L, value_index++);
+					double d = lua_tonumber(L, -1);
+					lua_pop(L, 1);
+					ar(d);
+					continue;
+				}
+				if(type == "string"){
+					lua_rawgeti(L, values_table_L, value_index++);
+					size_t cs_len = 0;
+					const char *cs = lua_tolstring(L, -1, &cs_len);
+					lua_pop(L, 1);
+					ss_ s(cs, cs_len);
+					ar(s);
+					continue;
+				}
+				throw Exception(ss_()+"Unknown type \""+type+"\""
+						"; known types are byte, int32, double, string");
+			}
+		}
+		ss_ data = os.str();
+		lua_pushlstring(L, data.c_str(), data.size());
 		return 1;
 	}
 };

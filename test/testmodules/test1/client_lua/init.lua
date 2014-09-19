@@ -37,6 +37,12 @@ buildat.sub_packet("test1:add_box", function(data)
 	box:loadTexture("test1/pink_texture.png")
 	box:setPosition(x, y, z)
 	scene:addEntity(box)
+
+	data = cereal.binary_output(
+		{1,      "Foo"},
+		{"byte", "string"}
+	)
+	buildat.send_packet("test1:box_added", data)
 end)
 
 --[[

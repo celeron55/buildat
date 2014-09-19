@@ -66,6 +66,7 @@ struct CState: public State
 
 	void send_packet(const ss_ &name, const ss_ &data)
 	{
+		log_v(MODULE, "send_packet(): name=%s", cs(name));
 		m_packet_stream.output(name, data, [&](const ss_ & packet_data){
 			m_socket->send_fd(packet_data);
 		});
@@ -133,7 +134,7 @@ struct CState: public State
 
 	void handle_packet(const ss_ &packet_name, const ss_ &data)
 	{
-		if(packet_name.substr(0,5) != "core:"){
+		if(packet_name.substr(0, 5) != "core:"){
 			m_app->handle_packet(packet_name, data);
 			return;
 		}
