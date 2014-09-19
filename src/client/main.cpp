@@ -98,7 +98,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	Polycode::PolycodeView *view = new Polycode::PolycodeView("Hello Polycode!");
+	Polycode::PolycodeView *view = new Polycode::PolycodeView("Buildat Client", true);
 	sp_<app::App> app0(app::createApp(view));
 
 	sp_<client::State> state(client::createState(app0));

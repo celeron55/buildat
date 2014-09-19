@@ -104,13 +104,11 @@ static int debugPrint(lua_State *L)
 struct CApp: public Polycode::EventHandler, public App
 {
 	Polycode::Core *core;
-	Polycode::Scene *scene;
-	Polycode::SceneLabel *label;
 	lua_State *L;
 	sp_<client::State> m_state;
 
 	CApp(Polycode::PolycodeView *view):
-		Polycode::EventHandler(), core(NULL), scene(NULL), label(NULL), L(NULL)
+		Polycode::EventHandler(), core(NULL), L(NULL)
 	{
 		// Win32Core for Windows
 		// CocoaCore for Mac
@@ -121,11 +119,6 @@ struct CApp: public Polycode::EventHandler, public App
 				g_client_config.share_path+"/client/default.pak");
 		Polycode::CoreServices::getInstance()->getResourceManager()->addDirResource("default",
 				false);
-
-		scene = new Polycode::Scene(Polycode::Scene::SCENE_2D);
-		scene->getActiveCamera()->setOrthoSize(640, 480);
-		label = new Polycode::SceneLabel("Hello from Polycode C++!", 32);
-		scene->addChild(label);
 
 		L = lua_open();
 		luaL_openlibs(L);
@@ -227,8 +220,6 @@ struct CApp: public Polycode::EventHandler, public App
 
 	~CApp()
 	{
-		delete scene;
-		delete label;
 		delete core;
 		lua_close(L);
 	}
