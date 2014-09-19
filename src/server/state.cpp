@@ -1,3 +1,5 @@
+// http://www.apache.org/licenses/LICENSE-2.0
+// Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "state.h"
 #include "rccpp.h"
 #include "config.h"

@@ -1,3 +1,5 @@
+// http://www.apache.org/licenses/LICENSE-2.0
+// Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "rccpp.h"
 #include "interface/server.h"
 #include "core/log.h"

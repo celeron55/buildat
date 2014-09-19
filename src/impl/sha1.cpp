@@ -1,3 +1,5 @@
+// http://www.apache.org/licenses/LICENSE-2.0
+// Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "core/types.h"
 #include <smallsha1.h>
 

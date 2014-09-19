@@ -1,3 +1,5 @@
+// http://www.apache.org/licenses/LICENSE-2.0
+// Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/packet_stream.h"
 #include "core/log.h"
 #define MODULE "__packet_stream"
