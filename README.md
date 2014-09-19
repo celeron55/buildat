@@ -37,7 +37,7 @@ Build Buildat
     $ cd $wherever_buildat_is  # Preferably ../buildat from Polycode
     $ mkdir Build  # Capital B is a good idea so it stays out of the way in tabcomplete
     $ cd Build
-    $ cmake .. -DPOLYCODE_ROOT_DIR=../../Polycode
+    $ cmake .. -DCMAKE_BUILD_TYPE=Debug -DPOLYCODE_ROOT_DIR=../../Polycode
     $ make -j4
 
 Run Buildat
