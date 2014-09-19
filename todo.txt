@@ -3,7 +3,6 @@ Buildat TODO
 - Cache a hash of each compiled module in order not to rebuild them
   unnecessarily
 - Modules should be run in threads.
-- Use portable binary archives for networked data
 
 Buildat TODO later
 ==================

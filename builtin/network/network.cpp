@@ -5,7 +5,7 @@
 #include "interface/packet_stream.h"
 #include "network/api.h"
 #include "core/log.h"
-#include <cereal/archives/binary.hpp>
+#include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/vector.hpp>
 #include <cereal/types/tuple.hpp>
 #include <deque>
@@ -117,7 +117,7 @@ struct Module: public interface::Module, public network::Interface
 
 		std::ostringstream os(std::ios::binary);
 		{
-			cereal::BinaryOutputArchive ar(os);
+			cereal::PortableBinaryOutputArchive ar(os);
 			ar(listening_fd);
 			ar(peer_restore_info);
 		}
@@ -133,7 +133,7 @@ struct Module: public interface::Module, public network::Interface
 		sv_<std::tuple<Peer::Id, int>> peer_restore_info;
 		std::istringstream is(data, std::ios::binary);
 		{
-			cereal::BinaryInputArchive ar(is);
+			cereal::PortableBinaryInputArchive ar(is);
 			ar(listening_fd);
 			ar(peer_restore_info);
 		}

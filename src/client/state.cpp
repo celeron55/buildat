@@ -6,7 +6,7 @@
 #include "interface/packet_stream.h"
 #include "interface/sha1.h"
 #include "interface/fs.h"
-#include <cereal/archives/binary.hpp>
+#include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
 #include <cstring>
 #include <fstream>
@@ -142,7 +142,7 @@ struct CState: public State
 			ss_ file_hash;
 			std::istringstream is(data, std::ios::binary);
 			{
-				cereal::BinaryInputArchive ar(is);
+				cereal::PortableBinaryInputArchive ar(is);
 				ar(file_name);
 				ar(file_hash);
 			}
@@ -161,7 +161,7 @@ struct CState: public State
 						cs(file_hash_hex), cs(file_name));
 				std::ostringstream os(std::ios::binary);
 				{
-					cereal::BinaryOutputArchive ar(os);
+					cereal::PortableBinaryOutputArchive ar(os);
 					ar(file_name);
 					ar(file_hash);
 				}
@@ -184,7 +184,7 @@ struct CState: public State
 			ss_ file_content;
 			std::istringstream is(data, std::ios::binary);
 			{
-				cereal::BinaryInputArchive ar(is);
+				cereal::PortableBinaryInputArchive ar(is);
 				ar(file_name);
 				ar(file_hash);
 				ar(file_content);

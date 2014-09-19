@@ -6,7 +6,7 @@
 #include "interface/file_watch.h"
 #include "client_file/api.h"
 #include "network/api.h"
-#include <cereal/archives/binary.hpp>
+#include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
 #include <cereal/types/vector.hpp>
 #include <cereal/types/tuple.hpp>
@@ -101,7 +101,7 @@ struct Module: public interface::Module, public client_file::Interface
 
 		std::ostringstream os(std::ios::binary);
 		{
-			cereal::BinaryOutputArchive ar(os);
+			cereal::PortableBinaryOutputArchive ar(os);
 			ar(file_restore_info);
 		}
 		m_server->tmp_store_data("client_file:restore_info", os.str());
@@ -115,7 +115,7 @@ struct Module: public interface::Module, public client_file::Interface
 		sv_<std::tuple<ss_, ss_, ss_>> file_restore_info;
 		std::istringstream is(data, std::ios::binary);
 		{
-			cereal::BinaryInputArchive ar(is);
+			cereal::PortableBinaryInputArchive ar(is);
 			ar(file_restore_info);
 		}
 		for(auto &tuple : file_restore_info){
@@ -140,7 +140,7 @@ struct Module: public interface::Module, public client_file::Interface
 			const FileInfo &info = *pair.second.get();
 			std::ostringstream os(std::ios::binary);
 			{
-				cereal::BinaryOutputArchive ar(os);
+				cereal::PortableBinaryOutputArchive ar(os);
 				ar(info.name);
 				ar(info.hash);
 			}
@@ -160,7 +160,7 @@ struct Module: public interface::Module, public client_file::Interface
 		ss_ file_hash;
 		std::istringstream is(packet.data, std::ios::binary);
 		{
-			cereal::BinaryInputArchive ar(is);
+			cereal::PortableBinaryInputArchive ar(is);
 			ar(file_name);
 			ar(file_hash);
 		}
@@ -181,7 +181,7 @@ struct Module: public interface::Module, public client_file::Interface
 		}
 		std::ostringstream os(std::ios::binary);
 		{
-			cereal::BinaryOutputArchive ar(os);
+			cereal::PortableBinaryOutputArchive ar(os);
 			ar(info.name);
 			ar(info.hash);
 			ar(info.content);
