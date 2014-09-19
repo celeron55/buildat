@@ -62,6 +62,33 @@ static sv_<ss_> list_includes(const ss_ &path, const sv_<ss_> &include_dirs)
 	return result;
 }
 
+struct DepLine {
+	ss_ type;
+	ss_ value;
+	ss_ options;
+};
+static sv_<DepLine> get_deps(const ss_ &depfile_path)
+{
+	sv_<DepLine> result;
+	std::ifstream ifs(depfile_path);
+	if(!ifs.good())
+		return result;
+	ss_ line;
+	while(std::getline(ifs, line)){
+		c55::Strfnd f(line);
+		DepLine dep;
+		dep.type = f.next(":");
+		if(dep.type == "module"){
+			dep.value = f.next(" ");
+			dep.options = f.next("");
+		} else {
+			dep.value = f.next("");
+		}
+		result.push_back(dep);
+	}
+	return result;
+}
+
 struct CState: public State, public interface::Server
 {
 	struct ModuleContainer {
@@ -137,6 +164,7 @@ struct CState: public State, public interface::Server
 		sv_<ss_> includes = list_includes(init_cpp_path, include_dirs);
 		log_i(MODULE, "Includes: %s", cs(dump(includes)));
 		files_to_watch.insert(files_to_watch.end(), includes.begin(), includes.end());
+
 		if(m_module_file_watches.count(module_name) == 0){
 			m_module_file_watches[module_name] = sp_<interface::FileWatch>(
 					interface::createFileWatch(files_to_watch,
@@ -152,8 +180,21 @@ struct CState: public State, public interface::Server
 
 		// Build
 
+		sv_<DepLine> deps = get_deps(path+"/deps.txt");
+		ss_ extra_cxxflags;
+		ss_ extra_ldflags;
+		for(const DepLine &dep : deps){
+			if(dep.type == "cxxflags")
+				extra_cxxflags += dep.value+" ";
+			if(dep.type == "ldflags")
+				extra_ldflags += dep.value+" ";
+		}
+		log_i(MODULE, "extra_cxxflags: %s", cs(extra_cxxflags));
+		log_i(MODULE, "extra_ldflags: %s", cs(extra_ldflags));
+
 		m_compiler->include_directories.push_back(m_modules_path);
-		bool build_ok = m_compiler->build(module_name, init_cpp_path, build_dst);
+		bool build_ok = m_compiler->build(module_name, init_cpp_path, build_dst,
+				extra_cxxflags, extra_ldflags);
 		m_compiler->include_directories.pop_back();
 
 		if(!build_ok){

@@ -33,7 +33,8 @@ struct CCompiler: public Compiler
 	CCompiler();
 
 	bool build(const std::string &module_name,
-			const std::string &in_path, const std::string &out_path);
+			const std::string &in_path, const std::string &out_path,
+			const ss_ &extra_cxxflags="", const ss_ &extra_ldflags="");
 
 	void* construct(const char *name, interface::Server *server);
 
@@ -42,7 +43,8 @@ struct CCompiler: public Compiler
 private:
 	std::unordered_map<std::string, RCCPP_Info> m_module_info;
 
-	bool compile(const std::string &in_path, const std::string &out_path);
+	bool compile(const std::string &in_path, const std::string &out_path,
+			const ss_ &extra_cxxflags="", const ss_ &extra_ldflags="");
 };
 
 // linux
@@ -72,12 +74,17 @@ CCompiler::CCompiler()
 {
 }
 
-bool CCompiler::compile(const std::string &in_path, const std::string &out_path)
+bool CCompiler::compile(const std::string &in_path, const std::string &out_path,
+		const ss_ &extra_cxxflags, const ss_ &extra_ldflags)
 {
 	//std::string command = "g++ -g -O0 -fPIC -fvisibility=hidden -shared";
 	std::string command = "g++ -DRCCPP -g -fPIC -fvisibility=hidden -shared";
 
 	command += " -std=c++11";
+	if(extra_cxxflags != "")
+		command += ss_()+" "+extra_cxxflags;
+	if(extra_ldflags != "")
+		command += ss_()+" "+extra_ldflags;
 
 	for(const std::string &dir : include_directories) command += " -I"+dir;
 	for(const std::string &dir : library_directories) command += " -L"+dir;
@@ -101,7 +108,8 @@ bool CCompiler::compile(const std::string &in_path, const std::string &out_path)
 }
 
 bool CCompiler::build(const std::string &module_name,
-                      const std::string &in_path, const std::string &out_path)
+		const std::string &in_path, const std::string &out_path,
+		const ss_ &extra_cxxflags, const ss_ &extra_ldflags)
 {
 	log_ni(MODULE, "Building %s: %s -> %s... ", cs(module_name), cs(in_path),
 			cs(out_path));
@@ -109,7 +117,7 @@ bool CCompiler::build(const std::string &module_name,
 	std::string out_dir = c55fs::stripFilename(out_path);
 	c55fs::CreateAllDirs(out_dir);
 
-	if(!compile(in_path, out_path)){
+	if(!compile(in_path, out_path, extra_cxxflags, extra_ldflags)){
 		log_i(MODULE, "Failed!");
 		return false;
 	}

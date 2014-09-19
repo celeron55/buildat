@@ -63,8 +63,6 @@ File format: One entry per line. Indentation for presentational purposes only.
 
 Module entry:
   module:<module_name> <options>
-Extension entry:
-  extension:<extension_name> <options>
 Extra CXXFLAGS:
   cxxflags:<flags>
 Extra LDFLAGS:
@@ -72,13 +70,12 @@ Extra LDFLAGS:
 
 Options:
 ? - Optional dependency
-r - Reverse dependency; load before the specified module (not for extensions)
+r - Reverse dependency; load before the specified module
 
 Example:
   module:network
   module:plants ?
   module:stuff ?r
-  extension:ecs2
   ldflags:-lsasl2
 
 Extension structure

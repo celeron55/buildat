@@ -5,4 +5,3 @@ Buildat TODO
 - Modules should be run in threads.
 - Implement module depencencies in test/testmodules/__loader
 - There should probably be a builtin/loader that __loader usually wants to call
-- Implement deps.txt cxxflags and ldflags
