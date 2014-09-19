@@ -4,6 +4,8 @@ local log = buildat.Logger("extension/graphics3d")
 local dump = buildat.dump
 local M = {safe = {}}
 
+local hack_resaved_textures = {}
+
 M.safe.Scene = polybox.wrap_class("Scene", {
 	constructor = function(sceneType, virtualScene)
 		polybox.check_enum(sceneType, {Scene.SCENE_3D, Scene.SCENE_2D})
@@ -23,6 +25,11 @@ M.safe.Scene = polybox.wrap_class("Scene", {
 		getDefaultCamera = function(safe)
 			unsafe = polybox.check_type(safe, "Scene")
 			return getmetatable(M.safe.Camera).wrap(unsafe:getDefaultCamera())
+		end,
+		removeEntity = function(safe, entity_safe)
+			unsafe = polybox.check_type(safe, "Scene")
+			entity_unsafe = polybox.check_type(entity_safe, "ScenePrimitive")
+			unsafe:removeEntity(entity_unsafe)
 		end,
 	},
 })
@@ -46,22 +53,26 @@ M.safe.ScenePrimitive = polybox.wrap_class("ScenePrimitive", {
 			unsafe = polybox.check_type(safe, "ScenePrimitive")
 			         polybox.check_type(texture_name, "string")
 			local path = __buildat_get_file_path(texture_name)
-			-- HACK: Create temporary file with the original file extension to
-			--       make Polycode load it directly
-			local hash_hex = string.match(path, '/([a-zA-Z0-9]+)$')
-			local ext = string.match(texture_name, '\.([a-zA-Z0-9]+)$')
-			log:info("File hash_hex="..dump(hash_hex).." extension"..dump(ext))
-			local path2 = __buildat_get_path("tmp").."/"..hash_hex.."."..ext
-			log:info("Temporary path: "..path2)
-			local src = io.open(path, "rb")
-			local dst = io.open(path2, "wb")
-			while true do
-				local buf = src:read(100000)
-				if buf == nil then break end
-				dst:write(buf)
+			local path2 = hack_resaved_textures[path]
+			if path2 == nil then
+				-- HACK: Create temporary file with the original file extension to
+				--       make Polycode load it directly
+				local hash_hex = string.match(path, '/([a-zA-Z0-9]+)$')
+				local ext = string.match(texture_name, '\.([a-zA-Z0-9]+)$')
+				log:info("File hash_hex="..dump(hash_hex).." extension"..dump(ext))
+				path2 = __buildat_get_path("tmp").."/"..hash_hex.."."..ext
+				log:info("Temporary path: "..path2)
+				local src = io.open(path, "rb")
+				local dst = io.open(path2, "wb")
+				while true do
+					local buf = src:read(100000)
+					if buf == nil then break end
+					dst:write(buf)
+				end
+				src:close()
+				dst:close()
+				hack_resaved_textures[path] = path2
 			end
-			src:close()
-			dst:close()
 			unsafe:loadTexture(path2)
 		end,
 		setPosition = function(safe, x, y, z)
