@@ -6,6 +6,7 @@
 #include "network/api.h"
 #include "core/log.h"
 #include <cereal/archives/portable_binary.hpp>
+#include <cereal/types/vector.hpp>
 
 using interface::Event;
 
@@ -91,7 +92,8 @@ struct Module: public interface::Module
 			std::ostringstream os(std::ios::binary);
 			{
 				cereal::PortableBinaryOutputArchive ar(os);
-				ar((int32_t)5, (int32_t)1, (int32_t)4, (int32_t)6, (int32_t)8, (int32_t)10);
+				sv_<int32_t> array = {1, 2, 3, 4, 5};
+				ar(array);
 			}
 			inetwork->send(event.recipient, "test1:array", os.str());
 		});
