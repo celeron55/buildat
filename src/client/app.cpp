@@ -528,7 +528,147 @@ struct CApp: public Polycode::EventHandler, public App
 		return 2;
 	}
 
-	// cereal_binary_input(data: string, types: table of strings)
+	static sv_<ss_> dump_stack(lua_State *L)
+	{
+		sv_<ss_> result;
+		int top = lua_gettop(L);
+		for(int i = 1; i <= top; i++){
+			int type = lua_type(L, i);
+			if(type == LUA_TSTRING)
+				result.push_back(ss_()+"\""+lua_tostring(L, i)+"\"");
+			else if(type == LUA_TBOOLEAN)
+				result.push_back(lua_toboolean(L, i) ? "true" : "false");
+			else if(type == LUA_TNUMBER)
+				result.push_back(cs(lua_tonumber(L, i)));
+			else
+				result.push_back(lua_typename(L, i));
+		}
+		return result;
+	}
+
+	static ss_ lua_tocppstring(lua_State *L, int index)
+	{
+		if(!lua_isstring(L, index))
+			throw Exception(ss_()+"lua_tocppstring: Expected string, got "+
+					lua_typename(L, index));
+		size_t length;
+		const char *s = lua_tolstring(L, index, &length);
+		return ss_(s, length);
+	}
+
+	/* Type format:
+	{"object",
+		{"peer", "int32_t"},
+		{"players", {"unordered_map",
+			"int32_t",
+			{"object",
+				{"peer", "int32_t"},
+				{"x", "int32_t"},
+				{"y", "int32_t"},
+			},
+		}},
+		{"playfield", {"object",
+			{"w", "int32_t"},
+			{"h", "int32_t"},
+			{"tiles", {"array", "int32_t"}},
+		}},
+	}) */
+
+	// Places result value on top of stack
+	static void binary_input_read_value(lua_State *L, int type_L,
+			cereal::PortableBinaryInputArchive &ar)
+	{
+		if(type_L < 0) type_L = lua_gettop(L) + type_L + 1;
+
+		// Read value definition
+		bool has_table = false;
+		ss_ outfield_type;
+		if(lua_istable(L, type_L)){
+			has_table = true;
+			lua_rawgeti(L, type_L, 1);
+			outfield_type = lua_tocppstring(L, -1);
+			lua_pop(L, 1);
+		} else if(lua_isstring(L, type_L)){
+			outfield_type = lua_tocppstring(L, type_L);
+		} else {
+			throw Exception("Value definition table or string expected");
+		}
+
+		log_d(MODULE, "binary_input_read_value(): type=%s", cs(outfield_type));
+
+		if(outfield_type == "int32_t"){
+			int32_t value;
+			ar(value);
+			log_d(MODULE, "int32_t value=%i", value);
+			lua_pushinteger(L, value);
+			// value is left on stack
+		} else if(outfield_type == "array"){
+			if(!has_table)
+				throw Exception("array requires parameter table");
+			lua_newtable(L);
+			int value_result_table_L = lua_gettop(L);
+			lua_rawgeti(L, type_L, 2);
+			int array_type_L = lua_gettop(L);
+			// ENGAGE MANUAL MODE
+			uint64_t num_entries;
+			ar(num_entries);
+			for(uint64_t i = 0; i < num_entries; i++){
+				log_d(MODULE, "array[%s]", cs(i));
+				binary_input_read_value(L, array_type_L, ar);
+				lua_rawseti(L, value_result_table_L, i + 1);
+			}
+			lua_pop(L, 1); // array_type_L
+			// value_result_table_L is left on stack
+		} else if(outfield_type == "unordered_map"){
+			if(!has_table)
+				throw Exception("unordered_map requires parameter table");
+			lua_newtable(L);
+			int value_result_table_L = lua_gettop(L);
+			lua_rawgeti(L, type_L, 2);
+			int map_key_type_L = lua_gettop(L);
+			lua_rawgeti(L, type_L, 3);
+			int map_value_type_L = lua_gettop(L);
+			// ENGAGE MANUAL MODE
+			uint64_t num_entries;
+			ar(num_entries);
+			for(uint64_t i = 0; i < num_entries; i++){
+				log_d(MODULE, "unordered_map[%s]", cs(i));
+				binary_input_read_value(L, map_key_type_L, ar);
+				binary_input_read_value(L, map_value_type_L, ar);
+				lua_rawset(L, value_result_table_L);
+			}
+			lua_pop(L, 1); // map_value_type_L
+			lua_pop(L, 1); // map_key_type_L
+			// value_result_table_L is left on stack
+		} else if(outfield_type == "object"){
+			if(!has_table)
+				throw Exception("object requires parameter table");
+			lua_newtable(L);
+			int value_result_table_L = lua_gettop(L);
+			// Loop through object fields
+			size_t field_i = 0;
+			lua_pushnil(L);
+			while(lua_next(L, type_L) != 0){
+				log_d(MODULE, "object field %zu", field_i);
+				if(field_i != 0){
+					int field_def_L = lua_gettop(L);
+					lua_rawgeti(L, field_def_L, 1); // name
+					lua_rawgeti(L, field_def_L, 2); // type
+					binary_input_read_value(L, -1, ar); // Uses type, pushes value
+					lua_remove(L, -2); // Remove type
+					lua_rawset(L, value_result_table_L); // Set t[#-2] = #-1
+				}
+				lua_pop(L, 1); // Continue iterating by popping table value
+				field_i++;
+			}
+			// value_result_table_L is left on stack
+		} else {
+			throw Exception(ss_()+"Unknown type \""+outfield_type+"\""
+					"; known types are byte, int32_t, double, string");
+		}
+	}
+
+	// cereal_binary_input(data: string, types: table)
 	// -> table of values
 	static int l_cereal_binary_input(lua_State *L)
 	{
@@ -536,78 +676,17 @@ struct CApp: public Polycode::EventHandler, public App
 		const char *data_c = lua_tolstring(L, 1, &data_len);
 		ss_ data(data_c, data_len);
 
-		int types_table_L = 2;
-
-		lua_newtable(L);
-		int result_table_L = lua_gettop(L);
+		int type_L = 2;
 
 		std::istringstream is(data, std::ios::binary);
-		{
-			cereal::PortableBinaryInputArchive ar(is);
+		cereal::PortableBinaryInputArchive ar(is);
 
-			int output_index = 1;
-			lua_pushnil(L);
-			while(lua_next(L, types_table_L) != 0)
-			{
-				ss_ type;
-				int repeat = 1;
-				if(lua_istable(L, -1)){
-					lua_rawgeti(L, -1, 1);
-					type = lua_tostring(L, -1);
-					lua_pop(L, 1);
-					lua_rawgeti(L, -1, 2);
-					repeat = lua_tointeger(L, -1);
-					lua_pop(L, 1);
-				} else {
-					type = lua_tostring(L, -1);
-				}
-				lua_pop(L, 1);
-				log_t(MODULE, "type=%s", cs(type));
-				if(type == "byte"){
-					for(int i = 0; i < repeat; i++){
-						uchar b;
-						ar(b);
-						lua_pushinteger(L, b);
-						lua_rawseti(L, result_table_L, output_index++);
-					}
-					continue;
-				}
-				if(type == "int32"){
-					for(int i = 0; i < repeat; i++){
-						int32_t d;
-						ar(d);
-						lua_pushinteger(L, d);
-						lua_rawseti(L, result_table_L, output_index++);
-					}
-					continue;
-				}
-				if(type == "double"){
-					for(int i = 0; i < repeat; i++){
-						double d;
-						ar(d);
-						lua_pushnumber(L, d);
-						lua_rawseti(L, result_table_L, output_index++);
-					}
-					continue;
-				}
-				if(type == "string"){
-					for(int i = 0; i < repeat; i++){
-						ss_ s;
-						ar(s);
-						lua_pushlstring(L, s.c_str(), s.size());
-						lua_rawseti(L, result_table_L, output_index++);
-					}
-					continue;
-				}
-				throw Exception(ss_()+"Unknown type \""+type+"\""
-						"; known types are byte, int32, double, string");
-			}
-		}
-		// Result table is on top of stack
+		binary_input_read_value(L, type_L, ar);
+
 		return 1;
 	}
 
-	// cereal_binary_output(values: table of values, types: table of strings)
+	// cereal_binary_output(values: table, types: table)
 	// -> data
 	static int l_cereal_binary_output(lua_State *L)
 	{
@@ -627,13 +706,13 @@ struct CApp: public Polycode::EventHandler, public App
 				int repeat = 1;
 				if(lua_istable(L, -1)){
 					lua_rawgeti(L, -1, 1);
-					type = lua_tostring(L, -1);
+					type = lua_tocppstring(L, -1);
 					lua_pop(L, 1);
 					lua_rawgeti(L, -1, 2);
 					repeat = lua_tointeger(L, -1);
 					lua_pop(L, 1);
 				} else {
-					type = lua_tostring(L, -1);
+					type = lua_tocppstring(L, -1);
 				}
 				lua_pop(L, 1);
 				log_t(MODULE, "type=%s", cs(type));
