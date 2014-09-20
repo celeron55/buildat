@@ -11,14 +11,16 @@ the client side and runs runtime-compiled C++ modules on the server side.
 Go ahead and write some modules and extensions, maybe the minecraftlike will
 exist in the near future!
 
+Further reading: design.txt, conventions.txt
+
 Buildat Linux How-To
 ====================
 
 Install dependencies for Polycode (replace with however your package manager works)
 -------------------------------------------------------------------------------------
 
-    $ sudo yum install python-ply
-    $ sudo apt-get install python-ply libsdl-dev freeglut3-dev
+    $ sudo yum install python-ply boost-devel
+    $ sudo apt-get install python-ply libsdl-dev freeglut3-dev libboost-dev
 
 Get and build Polycode
 ------------------------

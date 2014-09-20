@@ -5,3 +5,7 @@ Buildat TODO
 - Modules should be run in threads.
 - Implement module depencencies in test/testmodules/__loader
 - There should probably be a builtin/loader that __loader usually wants to call
+- A good Lua interface for (de)serializing objects to/from cereal binary
+  archives
+- CMakeLists.txt: Add a way of building only the server, without polycode
+  dependency

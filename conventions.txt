@@ -1,13 +1,13 @@
 Buildat conventions
 ===================
-Coding style
-------------
+C++ Coding style
+----------------
 Look at the code. It is perfect and will be kept perfect. Requests to fix coding
 style are not to be taken personally by the one requesting, nor the one being
 requested to fix his style. If something is found to be missing from this
 document, such additions shall be made.
 
-The script (requires an unix shell and astyle):
+util/codestyle.sh:
 Always run util/codestyle.sh before committing. It handles most whitespace
 issues.
 
