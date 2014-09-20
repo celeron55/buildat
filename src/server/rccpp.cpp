@@ -1,14 +1,13 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "rccpp.h"
-#include "interface/server.h"
 #include "core/log.h"
+#include "interface/server.h"
+#include "interface/process.h"
 #include <c55/filesys.h>
 #include <vector>
 #include <string>
 #include <iostream>
-#include <unistd.h>
-#include <sys/wait.h>
 #include <dlfcn.h>
 #include <cstddef>
 #include <vector>
@@ -65,9 +64,7 @@ struct CCompiler: public Compiler
 			const ss_ &extra_cxxflags, const ss_ &extra_ldflags)
 	{
 		ss_ command = m_compiler_command;
-		// command += " -g -O0 -fPIC -fvisibility=hidden -shared";
 		command += " -DRCCPP -g -fPIC -fvisibility=hidden -shared";
-
 		command += " -std=c++11";
 		if(extra_cxxflags != "")
 			command += ss_()+" "+extra_cxxflags;
@@ -80,17 +77,7 @@ struct CCompiler: public Compiler
 		command += " -o"+out_path;
 		command += " "+in_path;
 
-		//log_i(MODULE, ">>> %s", cs(command));
-
-		// Fork for compilation.
-		int f = fork();
-		if(f == 0){
-			execl("/bin/sh", "sh", "-c", command.c_str(), (const char*)nullptr);
-		}
-
-		// Wait for the forked process to exit.
-		int exit_status;
-		while(wait(&exit_status) > 0);
+		int exit_status = interface::process::shell_exec(command);
 
 		return exit_status == 0;
 	}
