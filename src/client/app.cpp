@@ -742,7 +742,7 @@ struct CApp: public Polycode::EventHandler, public App
 			}
 			ar(num_entries);
 			lua_pushnil(L);
-			int i=1;
+			int i = 1;
 			while(lua_next(L, value_L) != 0){
 				log_d(MODULE, "array[%i]", i);
 				binary_output_write_value(L, -1, array_type_L, ar);
