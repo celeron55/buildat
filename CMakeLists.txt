@@ -84,6 +84,7 @@ set(SERVER_SRCS
 	src/impl/tcpsocket.cpp
 	src/impl/module.cpp
 	src/impl/linux/file_watch.cpp
+	src/impl/linux/process.cpp
 	src/impl/sha1.cpp
 	src/impl/packet_stream.cpp
 )
