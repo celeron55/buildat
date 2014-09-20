@@ -38,13 +38,21 @@ function buildat.Logger(module)
 		end
 		return buildat.dump(text)
 	end
-	function logger:info(text)
-		text = fix_text(text)
-		print(os.date("%b %d %H:%M:%S "..module..": "..text))
-	end
 	function logger:error(text)
 		text = fix_text(text)
-		print(os.date("%b %d %H:%M:%S "..module.." ERROR: "..text))
+		__buildat_print_log("error", module, text)
+	end
+	function logger:warning(text)
+		text = fix_text(text)
+		__buildat_print_log("warning", module, text)
+	end
+	function logger:info(text)
+		text = fix_text(text)
+		__buildat_print_log("info", module, text)
+	end
+	function logger:verbose(text)
+		text = fix_text(text)
+		__buildat_print_log("verbose", module, text)
 	end
 	return logger
 end

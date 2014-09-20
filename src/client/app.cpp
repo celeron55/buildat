@@ -93,11 +93,11 @@ static int areSameCClass(lua_State *L){
 	return 1;
 }
 
+// Polycode redirects print() to this
 static int debugPrint(lua_State *L)
 {
 	const char *msg = lua_tostring(L, 1);
-
-	Logger::log(">> %s\n", msg);
+	log_i("polycode", "%s", msg);
 	return 0;
 }
 
@@ -147,38 +147,42 @@ struct CApp: public Polycode::EventHandler, public App
 		// Table is still on the stack.  Get rid of it now.
 		lua_pop(L, 1);
 
+		// Polycode redirects print() to this global
 		lua_register(L, "debugPrint", debugPrint);
-		lua_register(L, "__customError", handle_error);
 
+		// Looks like this global isn't required
+		//lua_register(L, "__customError", handle_error);
+
+		// This global is used by Polycode's class implementation
 		lua_register(L, "__are_same_c_class", areSameCClass);
 
 		lua_getfield(L, LUA_GLOBALSINDEX, "require");
 		lua_pushstring(L, "class");
-		lua_call(L, 1, 0);
+		error_logging_pcall(L, 1, 0);
 
 		lua_getfield(L, LUA_GLOBALSINDEX, "require");
 		lua_pushstring(L, "Polycode");
-		lua_call(L, 1, 0);
+		error_logging_pcall(L, 1, 0);
 
 		lua_getfield(L, LUA_GLOBALSINDEX, "require");
 		lua_pushstring(L, "Physics2D");
-		lua_call(L, 1, 0);
+		error_logging_pcall(L, 1, 0);
 
 		lua_getfield(L, LUA_GLOBALSINDEX, "require");
 		lua_pushstring(L, "Physics3D");
-		lua_call(L, 1, 0);
+		error_logging_pcall(L, 1, 0);
 
 		lua_getfield(L, LUA_GLOBALSINDEX, "require");
 		lua_pushstring(L, "UI");
-		lua_call(L, 1, 0);
+		error_logging_pcall(L, 1, 0);
 
 		lua_getfield(L, LUA_GLOBALSINDEX, "require");
 		lua_pushstring(L, "tweens");
-		lua_call(L, 1, 0);
+		error_logging_pcall(L, 1, 0);
 
 		lua_getfield(L, LUA_GLOBALSINDEX, "require");
 		lua_pushstring(L, "defaults");
-		lua_call(L, 1, 0);
+		error_logging_pcall(L, 1, 0);
 
 		// TODO
 		//luaopen_Physics2D(L);
@@ -192,6 +196,7 @@ struct CApp: public Polycode::EventHandler, public App
 	lua_pushcfunction(L, l_##name);\
 	lua_setglobal(L, "__buildat_" #name);\
 }
+		DEF_BUILDAT_FUNC(print_log);
 		DEF_BUILDAT_FUNC(send_packet);
 		DEF_BUILDAT_FUNC(get_file_content)
 		DEF_BUILDAT_FUNC(get_file_path)
@@ -231,6 +236,8 @@ struct CApp: public Polycode::EventHandler, public App
 
 	bool update()
 	{
+		script_tick();
+
 		return core->updateAndRender();
 	}
 
@@ -245,7 +252,7 @@ struct CApp: public Polycode::EventHandler, public App
 
 		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_run_in_sandbox");
 		lua_pushlstring(L, script.c_str(), script.size());
-		lua_call(L, 1, 1);
+		error_logging_pcall(L, 1, 1);
 		bool status = lua_toboolean(L, -1);
 		lua_pop(L, 1);
 		if(status == false){
@@ -262,7 +269,7 @@ struct CApp: public Polycode::EventHandler, public App
 		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_handle_packet");
 		lua_pushlstring(L, name.c_str(), name.size());
 		lua_pushlstring(L, data.c_str(), data.size());
-		lua_call(L, 2, 0);
+		error_logging_pcall(L, 2, 0);
 	}
 
 	// Polycode::EventHandler
@@ -282,104 +289,45 @@ struct CApp: public Polycode::EventHandler, public App
 			InputEvent *inputEvent = (InputEvent*) event;
 			switch(event->getEventCode()){
 			case InputEvent::EVENT_KEYDOWN:
-				if(L){
-					lua_getfield (L, LUA_GLOBALSINDEX, "__customError");
-					int errH = lua_gettop(L);
-					lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_key_down");
-					lua_pushinteger(L, inputEvent->keyCode());
-					lua_pcall(L, 1, 2, errH);
-					log_if_error();
-					lua_settop(L, 0);
-				}
+				lua_pushinteger(L, inputEvent->keyCode());
+				call_global_if_exists(L, "__buildat_key_down", 1, 0);
 				break;
 			case InputEvent::EVENT_KEYUP:
-				if(L){
-					lua_getfield (L, LUA_GLOBALSINDEX, "__customError");
-					int errH = lua_gettop(L);
-					lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_key_up");
-					lua_pushinteger(L, inputEvent->keyCode());
-					lua_pcall(L, 1, 2, errH);
-					log_if_error();
-					lua_settop(L, 0);
-				}
+				lua_pushinteger(L, inputEvent->keyCode());
+				call_global_if_exists(L, "__buildat_key_up", 1, 0);
 				break;
 			case InputEvent::EVENT_MOUSEDOWN:
-				if(L){
-					lua_getfield (L, LUA_GLOBALSINDEX, "__customError");
-					int errH = lua_gettop(L);
-					lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_mouse_down");
-					lua_pushinteger(L, inputEvent->mouseButton);
-					lua_pushnumber(L, inputEvent->mousePosition.x);
-					lua_pushnumber(L, inputEvent->mousePosition.y);
-					lua_pcall(L, 3, 2, errH);
-					log_if_error();
-					lua_settop(L, 0);
-				}
+				lua_pushinteger(L, inputEvent->mouseButton);
+				lua_pushnumber(L, inputEvent->mousePosition.x);
+				lua_pushnumber(L, inputEvent->mousePosition.y);
+				call_global_if_exists(L, "__buildat_mouse_down", 3, 0);
 				break;
 			case InputEvent::EVENT_MOUSEUP:
-				if(L){
-					lua_getfield (L, LUA_GLOBALSINDEX, "__customError");
-					int errH = lua_gettop(L);
-					lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_mouse_up");
-					lua_pushinteger(L, inputEvent->mouseButton);
-					lua_pushnumber(L, inputEvent->mousePosition.x);
-					lua_pushnumber(L, inputEvent->mousePosition.y);
-					lua_pcall(L, 3, 2, errH);
-					log_if_error();
-					lua_settop(L, 0);
-				}
+				lua_pushinteger(L, inputEvent->mouseButton);
+				lua_pushnumber(L, inputEvent->mousePosition.x);
+				lua_pushnumber(L, inputEvent->mousePosition.y);
+				call_global_if_exists(L, "__buildat_mouse_up", 3, 0);
 				break;
 			case InputEvent::EVENT_MOUSEMOVE:
-				if(L){
-					lua_getfield (L, LUA_GLOBALSINDEX, "__customError");
-					int errH = lua_gettop(L);
-					lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_mouse_move");
-					lua_pushnumber(L, inputEvent->mousePosition.x);
-					lua_pushnumber(L, inputEvent->mousePosition.y);
-					lua_pcall(L, 2, 2, errH);
-					log_if_error();
-					lua_settop(L, 0);
-				}
+				lua_pushnumber(L, inputEvent->mousePosition.x);
+				lua_pushnumber(L, inputEvent->mousePosition.y);
+				call_global_if_exists(L, "__buildat_mouse_move", 2, 0);
 				break;
 			case InputEvent::EVENT_JOYBUTTON_DOWN:
-				if(L){
-					lua_getfield (L, LUA_GLOBALSINDEX, "__customError");
-					int errH = lua_gettop(L);
-					lua_getfield(L, LUA_GLOBALSINDEX,
-							"__buildat_joystick_button_down");
-					lua_pushnumber(L, inputEvent->joystickIndex);
-					lua_pushnumber(L, inputEvent->joystickButton);
-					lua_pcall(L, 2, 2, errH);
-					log_if_error();
-					lua_settop(L, 0);
-				}
+				lua_pushnumber(L, inputEvent->joystickIndex);
+				lua_pushnumber(L, inputEvent->joystickButton);
+				call_global_if_exists(L, "__buildat_joystick_button_down", 2, 0);
 				break;
 			case InputEvent::EVENT_JOYBUTTON_UP:
-				if(L){
-					lua_getfield (L, LUA_GLOBALSINDEX, "__customError");
-					int errH = lua_gettop(L);
-					lua_getfield(L, LUA_GLOBALSINDEX,
-							"__buildat_joystick_button_up");
-					lua_pushnumber(L, inputEvent->joystickIndex);
-					lua_pushnumber(L, inputEvent->joystickButton);
-					lua_pcall(L, 2, 2, errH);
-					log_if_error();
-					lua_settop(L, 0);
-				}
+				lua_pushnumber(L, inputEvent->joystickIndex);
+				lua_pushnumber(L, inputEvent->joystickButton);
+				call_global_if_exists(L, "__buildat_joystick_button_up", 2, 0);
 				break;
 			case InputEvent::EVENT_JOYAXIS_MOVED:
-				if(L){
-					lua_getfield (L, LUA_GLOBALSINDEX, "__customError");
-					int errH = lua_gettop(L);
-					lua_getfield(L, LUA_GLOBALSINDEX,
-							"__buildat_joystick_axis_move");
-					lua_pushnumber(L, inputEvent->joystickIndex);
-					lua_pushnumber(L, inputEvent->joystickAxis);
-					lua_pushnumber(L, inputEvent->joystickAxisValue);
-					lua_pcall(L, 3, 2, errH);
-					log_if_error();
-					lua_settop(L, 0);
-				}
+				lua_pushnumber(L, inputEvent->joystickIndex);
+				lua_pushnumber(L, inputEvent->joystickAxis);
+				lua_pushnumber(L, inputEvent->joystickAxisValue);
+				call_global_if_exists(L, "__buildat_joystick_axis_move", 3, 0);
 				break;
 			}
 		}
@@ -387,15 +335,44 @@ struct CApp: public Polycode::EventHandler, public App
 
 	// Non-public methods
 
+	void script_tick()
+	{
+		log_t(MODULE, "script_tick()");
+
+		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_tick");
+		if(lua_isnil(L, -1)){
+			lua_pop(L, 1);
+			return;
+		}
+		error_logging_pcall(L, 0, 0);
+	}
+
+	// print_log(level, module, text)
+	static int l_print_log(lua_State *L)
+	{
+		ss_ level = lua_tocppstring(L, 1);
+		const char *module_c = lua_tostring(L, 2);
+		const char *text_c = lua_tostring(L, 3);
+		int loglevel = LOG_INFO;
+		if(level == "debug")
+			loglevel = LOG_DEBUG;
+		else if(level == "verbose")
+			loglevel = LOG_VERBOSE;
+		else if(level == "info")
+			loglevel = LOG_INFO;
+		else if(level == "warning")
+			loglevel = LOG_WARNING;
+		else if(level == "error")
+			loglevel = LOG_ERROR;
+		log_(loglevel, module_c, "%s", text_c);
+		return 0;
+	}
+
 	// send_packet(name: string, data: string)
 	static int l_send_packet(lua_State *L)
 	{
-		size_t name_len = 0;
-		const char *name_c = lua_tolstring(L, 1, &name_len);
-		ss_ name(name_c, name_len);
-		size_t data_len = 0;
-		const char *data_c = lua_tolstring(L, 2, &data_len);
-		ss_ data(data_c, data_len);
+		ss_ name = lua_tocppstring(L, 1);
+		ss_ data = lua_tocppstring(L, 2);
 
 		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 		CApp *self = (CApp*)lua_touserdata(L, -1);
@@ -413,9 +390,7 @@ struct CApp: public Polycode::EventHandler, public App
 	// get_file_path(name: string) -> path, hash
 	static int l_get_file_path(lua_State *L)
 	{
-		size_t name_len = 0;
-		const char *name_c = lua_tolstring(L, 1, &name_len);
-		ss_ name(name_c, name_len);
+		ss_ name = lua_tocppstring(L, 1);
 
 		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 		CApp *self = (CApp*)lua_touserdata(L, -1);
@@ -436,9 +411,7 @@ struct CApp: public Polycode::EventHandler, public App
 	// get_file_content(name: string)
 	static int l_get_file_content(lua_State *L)
 	{
-		size_t name_len = 0;
-		const char *name_c = lua_tolstring(L, 1, &name_len);
-		ss_ name(name_c, name_len);
+		ss_ name = lua_tocppstring(L, 1);
 
 		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 		CApp *self = (CApp*)lua_touserdata(L, -1);
@@ -457,9 +430,7 @@ struct CApp: public Polycode::EventHandler, public App
 	// get_path(name: string)
 	static int l_get_path(lua_State *L)
 	{
-		size_t name_len = 0;
-		const char *name_c = lua_tolstring(L, 1, &name_len);
-		ss_ name(name_c, name_len);
+		ss_ name = lua_tocppstring(L, 1);
 
 		if(name == "share"){
 			ss_ path = g_client_config.share_path;
@@ -482,7 +453,6 @@ struct CApp: public Polycode::EventHandler, public App
 
 	static int handle_error(lua_State *L)
 	{
-		log_v(MODULE, "handle_error()");
 		lua_getglobal(L, "debug");
 		if(!lua_istable(L, -1)){
 			log_w(MODULE, "handle_error(): debug is nil");
@@ -499,6 +469,49 @@ struct CApp: public Polycode::EventHandler, public App
 		lua_pushinteger(L, 2);
 		lua_call(L, 2, 1);
 		return 1;
+	}
+
+	// When calling Lua from C++, this is universally good
+	static void error_logging_pcall(lua_State *L, int nargs, int nresults)
+	{
+		log_t(MODULE, "error_logging_pcall(): nargs=%i, nresults=%i",
+				nargs, nresults);
+		//log_d(MODULE, "stack 1: %s", cs(dump_stack(L)));
+		int start_L = lua_gettop(L);
+		lua_pushcfunction(L, handle_error);
+		lua_insert(L, start_L - nargs);
+		int handle_error_L = start_L - nargs;
+		//log_d(MODULE, "stack 2: %s", cs(dump_stack(L)));
+		int r = lua_pcall(L, nargs, nresults, handle_error_L);
+		lua_remove(L, handle_error_L);
+		//log_d(MODULE, "stack 3: %s", cs(dump_stack(L)));
+		if(r != 0){
+			ss_ traceback = lua_tocppstring(L, -1);
+			lua_pop(L, 1);
+			const char *msg =
+					r == LUA_ERRRUN ? "runtime error" :
+					r == LUA_ERRMEM ? "ran out of memory" :
+					r == LUA_ERRERR ? "error handler failed" : "unknown error";
+			//log_e(MODULE, "Lua %s: %s", msg, cs(traceback));
+			throw Exception(ss_()+"Lua "+msg+": "+traceback);
+		}
+		//log_d(MODULE, "stack 4: %s", cs(dump_stack(L)));
+	}
+
+	static void call_global_if_exists(lua_State *L,
+			const char *global_name, int nargs, int nresults)
+	{
+		log_t(MODULE, "call_global_if_exists(): \"%s\"", global_name);
+		//log_d(MODULE, "stack 1: %s", cs(dump_stack(L)));
+		int start_L = lua_gettop(L);
+		lua_getfield(L, LUA_GLOBALSINDEX, global_name);
+		if(lua_isnil(L, -1)){
+			lua_pop(L, 1 + nargs);
+			return;
+		}
+		lua_insert(L, start_L - nargs + 1);
+		error_logging_pcall(L, nargs, nresults);
+		//log_d(MODULE, "stack 2: %s", cs(dump_stack(L)));
 	}
 
 	// Like lua_pcall, but returns a full traceback on error
@@ -536,12 +549,14 @@ struct CApp: public Polycode::EventHandler, public App
 			int type = lua_type(L, i);
 			if(type == LUA_TSTRING)
 				result.push_back(ss_()+"\""+lua_tostring(L, i)+"\"");
+			else if(type == LUA_TSTRING)
+				result.push_back(ss_()+"\""+lua_tostring(L, i)+"\"");
 			else if(type == LUA_TBOOLEAN)
 				result.push_back(lua_toboolean(L, i) ? "true" : "false");
 			else if(type == LUA_TNUMBER)
 				result.push_back(cs(lua_tonumber(L, i)));
 			else
-				result.push_back(lua_typename(L, i));
+				result.push_back(lua_typename(L, type));
 		}
 		return result;
 	}
@@ -597,30 +612,30 @@ struct CApp: public Polycode::EventHandler, public App
 			throw Exception("Value definition table or string expected");
 		}
 
-		log_d(MODULE, "binary_input_read_value(): type=%s", cs(outfield_type));
+		log_t(MODULE, "binary_input_read_value(): type=%s", cs(outfield_type));
 
 		if(outfield_type == "byte"){
 			uchar value;
 			ar(value);
-			log_d(MODULE, "byte value=%i", (int)value);
+			log_t(MODULE, "byte value=%i", (int)value);
 			lua_pushinteger(L, value);
 			// value is left on stack
 		} else if(outfield_type == "int32_t"){
 			int32_t value;
 			ar(value);
-			log_d(MODULE, "int32_t value=%i", value);
+			log_t(MODULE, "int32_t value=%i", value);
 			lua_pushinteger(L, value);
 			// value is left on stack
 		} else if(outfield_type == "double"){
 			double value;
 			ar(value);
-			log_d(MODULE, "double value=%f", value);
+			log_t(MODULE, "double value=%f", value);
 			lua_pushnumber(L, value);
 			// value is left on stack
 		} else if(outfield_type == "string"){
 			ss_ value;
 			ar(value);
-			log_d(MODULE, "string value=%s", cs(value));
+			log_t(MODULE, "string value=%s", cs(value));
 			lua_pushlstring(L, value.c_str(), value.size());
 			// value is left on stack
 		} else if(outfield_type == "array"){
@@ -634,7 +649,7 @@ struct CApp: public Polycode::EventHandler, public App
 			uint64_t num_entries;
 			ar(num_entries);
 			for(uint64_t i = 0; i < num_entries; i++){
-				log_d(MODULE, "array[%s]", cs(i));
+				log_t(MODULE, "array[%s]", cs(i));
 				binary_input_read_value(L, array_type_L, ar);
 				lua_rawseti(L, value_result_table_L, i + 1);
 			}
@@ -653,7 +668,7 @@ struct CApp: public Polycode::EventHandler, public App
 			uint64_t num_entries;
 			ar(num_entries);
 			for(uint64_t i = 0; i < num_entries; i++){
-				log_d(MODULE, "unordered_map[%s]", cs(i));
+				log_t(MODULE, "unordered_map[%s]", cs(i));
 				binary_input_read_value(L, map_key_type_L, ar);
 				binary_input_read_value(L, map_value_type_L, ar);
 				lua_rawset(L, value_result_table_L);
@@ -671,11 +686,11 @@ struct CApp: public Polycode::EventHandler, public App
 			lua_pushnil(L);
 			while(lua_next(L, type_L) != 0){
 				if(field_i != 0){
-					log_d(MODULE, "object field %zu", field_i);
+					log_t(MODULE, "object field %zu", field_i);
 					int field_def_L = lua_gettop(L);
 					lua_rawgeti(L, field_def_L, 1); // name
 					lua_rawgeti(L, field_def_L, 2); // type
-					log_d(MODULE, " = object[\"%s\"]", lua_tostring(L, -2));
+					log_t(MODULE, " = object[\"%s\"]", lua_tostring(L, -2));
 					binary_input_read_value(L, -1, ar); // Uses type, pushes value
 					lua_remove(L, -2); // Remove type
 					lua_rawset(L, value_result_table_L); // Set t[#-2] = #-1
@@ -710,23 +725,23 @@ struct CApp: public Polycode::EventHandler, public App
 			throw Exception("Value definition table or string expected");
 		}
 
-		log_d(MODULE, "binary_output_write_value(): type=%s", cs(outfield_type));
+		log_t(MODULE, "binary_output_write_value(): type=%s", cs(outfield_type));
 
 		if(outfield_type == "byte"){
 			uchar value = lua_tointeger(L, value_L);
-			log_d(MODULE, "byte value=%i", (int)value);
+			log_t(MODULE, "byte value=%i", (int)value);
 			ar(value);
 		} else if(outfield_type == "int32_t"){
 			int32_t value = lua_tointeger(L, value_L);
-			log_d(MODULE, "int32_t value=%i", value);
+			log_t(MODULE, "int32_t value=%i", value);
 			ar(value);
 		} else if(outfield_type == "double"){
 			double value = lua_tonumber(L, value_L);
-			log_d(MODULE, "double value=%f", value);
+			log_t(MODULE, "double value=%f", value);
 			ar(value);
 		} else if(outfield_type == "string"){
 			ss_ value = lua_tocppstring(L, value_L);
-			log_d(MODULE, "string value=%s", cs(value));
+			log_t(MODULE, "string value=%s", cs(value));
 			ar(value);
 		} else if(outfield_type == "array"){
 			if(!has_table)
@@ -744,7 +759,7 @@ struct CApp: public Polycode::EventHandler, public App
 			lua_pushnil(L);
 			int i = 1;
 			while(lua_next(L, value_L) != 0){
-				log_d(MODULE, "array[%i]", i);
+				log_t(MODULE, "array[%i]", i);
 				binary_output_write_value(L, -1, array_type_L, ar);
 				lua_pop(L, 1); // Continue iterating by popping table value
 				i++;
@@ -770,7 +785,7 @@ struct CApp: public Polycode::EventHandler, public App
 			while(lua_next(L, value_L) != 0){
 				int key_L = lua_gettop(L) - 1;
 				int value_L = lua_gettop(L);
-				log_d(MODULE, "unordered_map[%s]", lua_tostring(L, key_L));
+				log_t(MODULE, "unordered_map[%s]", lua_tostring(L, key_L));
 				binary_output_write_value(L, key_L, map_key_type_L, ar);
 				binary_output_write_value(L, value_L, map_value_type_L, ar);
 				lua_pop(L, 1); // Continue iterating by popping table value
@@ -786,12 +801,11 @@ struct CApp: public Polycode::EventHandler, public App
 			lua_pushnil(L);
 			while(lua_next(L, type_L) != 0){
 				if(field_i != 0){
-					log_d(MODULE, "object field %zu", field_i);
-					//log_d(MODULE, "stack: %s", cs(dump_stack(L)));
+					log_t(MODULE, "object field %zu", field_i);
 					int field_def_L = lua_gettop(L);
 					lua_rawgeti(L, field_def_L, 2); // type
 					lua_rawgeti(L, field_def_L, 1); // name
-					log_d(MODULE, " = object[\"%s\"]", lua_tostring(L, -1));
+					log_t(MODULE, " = object[\"%s\"]", lua_tostring(L, -1));
 					// Get value_L[name]; name is replaced by value
 					lua_rawget(L, value_L);
 					// Recurse into this value
