@@ -100,6 +100,8 @@ buildat.sub_packet("minigame:update", function(data)
 end)
 
 local keyinput = require("buildat/extension/keyinput")
+local mouseinput = require("buildat/extension/mouseinput")
+local mouse_grabbed = false
 
 keyinput.sub(function(key, state)
 	if key == keyinput.KEY_LEFT then
@@ -126,6 +128,31 @@ keyinput.sub(function(key, state)
 		if state == "down" then
 			buildat.send_packet("minigame:move", "place")
 		end
+	end
+	if key == keyinput.KEY_ESCAPE then
+		if state == "down" then
+			if mouse_grabbed then
+				mouseinput.show_cursor(true)
+				mouse_grabbed = false
+			end
+		end
+	end
+end)
+
+mouseinput.sub_down(function(button, x, y)
+	log:info("mouse down: "..button..", "..x..", "..y)
+	if not mouse_grabbed then
+		mouse_grabbed = true
+		mouseinput.show_cursor(false)
+	end
+end)
+
+mouseinput.sub_move(function(x, y)
+	if mouse_grabbed then
+		log:info("mouse delta: "..(x-100)..", "..(y-100))
+		mouseinput.warp_cursor(100, 100)
+	else
+		log:info("mouse move: "..x..", "..y)
 	end
 end)
 
