@@ -1,5 +1,6 @@
 -- Buildat: extension/mouseinput/init.lua
 local log = buildat.Logger("extension/mouseinput")
+local core = CoreServices.getInstance():getCore()
 local M = {safe = {}}
 
 local subs_move = {}
@@ -14,7 +15,7 @@ function __buildat_mouse_move(x, y)
 end
 
 function __buildat_mouse_down(button, x, y)
-	--log:info("__buildat_mouse_down("..button..", "..x..", "..y..")")
+	log:info("__buildat_mouse_down("..button..", "..x..", "..y..")")
 	for _, cb in ipairs(subs_down) do
 		cb(button, x, y)
 	end
@@ -58,6 +59,14 @@ function M.safe.unsub_up(cb)
 			table.remove(subs_up, i)
 		end
 	end
+end
+
+function M.safe.warp_cursor(x, y)
+	core:warpCursor(x, y)
+end
+
+function M.safe.show_cursor(show)
+	core:enableMouse(show)
 end
 
 return M
