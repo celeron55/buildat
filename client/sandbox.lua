@@ -13,6 +13,7 @@ for _, name in ipairs(buildat_safe_list) do
 end
 
 local sandbox = {
+	assert = assert, -- Safe according to http://lua-users.org/wiki/SandBoxes
 	-- Base sandbox from
 	-- http://stackoverflow.com/questions/1224708/how-can-i-create-a-secure-lua-sandbox/6982080#6982080
 	ipairs = ipairs,
