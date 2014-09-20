@@ -84,7 +84,7 @@ static inline ss_ ftos(float f){
 
 static inline ss_ dump(const id_ &id){
 	char buf[23];
-	snprintf(buf, 23, "@%" PRId64, id.value);
+	snprintf(buf, 23, "%" PRId64, id.value);
 	return buf;
 }
 
