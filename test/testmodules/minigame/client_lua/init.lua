@@ -101,6 +101,7 @@ end)
 
 local keyinput = require("buildat/extension/keyinput")
 local mouseinput = require("buildat/extension/mouseinput")
+local joyinput = require("buildat/extension/joyinput")
 local mouse_grabbed = false
 
 keyinput.sub(function(key, state)
@@ -153,6 +154,34 @@ mouseinput.sub_move(function(x, y)
 		mouseinput.warp_cursor(100, 100)
 	else
 		log:info("mouse move: "..x..", "..y)
+	end
+end)
+
+joyinput.sub_move(function(joystick, axis, value)
+    -- Works well with D-pad, using stick in the current state is unrecommended
+	if axis == 0 then
+		if value > 0.5 then
+			buildat.send_packet("minigame:move","right")
+		end
+		if value < -0.5 then
+			buildat.send_packet("minigame:move","left")
+		end
+	end
+	if axis == 1 then
+		if value > 0.5 then
+			buildat.send_packet("minigame:move","down")
+		end
+		if value < -0.5 then
+			buildat.send_packet("minigame:move","up")
+		end
+	end
+end)
+
+joyinput.sub(function(joystick, button, state)
+	if button == 0 then
+		if state == "down" then
+			buildat.send_packet("minigame:move", "place")
+		end
 	end
 end)
 
