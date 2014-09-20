@@ -1,3 +1,6 @@
+-- Buildat: client/packet.lua
+-- http://www.apache.org/licenses/LICENSE-2.0
+-- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("__client/packet")
 
 local packet_subs = {}

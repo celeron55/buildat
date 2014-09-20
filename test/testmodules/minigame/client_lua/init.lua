@@ -1,4 +1,6 @@
 -- Buildat: minigame/client_lua/init.lua
+-- http://www.apache.org/licenses/LICENSE-2.0
+-- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("minigame")
 local dump = buildat.dump
 log:info("minigame/init.lua loaded")

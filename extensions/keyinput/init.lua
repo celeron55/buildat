@@ -1,4 +1,6 @@
 -- Buildat: extension/keyinput/init.lua
+-- http://www.apache.org/licenses/LICENSE-2.0
+-- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("extension/keyinput")
 local M = {safe = {}}
 

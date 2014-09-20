@@ -1,4 +1,6 @@
 -- Buildat: test1/client_lua/init.lua
+-- http://www.apache.org/licenses/LICENSE-2.0
+-- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("test1")
 local dump = buildat.dump
 log:info("test1/init.lua loaded")

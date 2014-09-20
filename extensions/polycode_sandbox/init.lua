@@ -1,4 +1,6 @@
 -- Buildat: extension/polycode_sandbox/init.lua
+-- http://www.apache.org/licenses/LICENSE-2.0
+-- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("extension/polycode_sandbox")
 local dump = buildat.dump
 local M = {safe = nil}

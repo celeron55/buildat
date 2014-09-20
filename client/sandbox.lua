@@ -1,3 +1,6 @@
+-- Buildat: client/sandbox.lua
+-- http://www.apache.org/licenses/LICENSE-2.0
+-- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("__client/sandbox")
 
 local buildat_safe_list = {
