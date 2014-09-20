@@ -5,6 +5,8 @@
 #include "network/api.h"
 #include "core/log.h"
 #include <cereal/archives/portable_binary.hpp>
+#include <cereal/types/unordered_map.hpp>
+#include <cereal/types/vector.hpp>
 #include <cstdlib>
 
 using interface::Event;
@@ -31,6 +33,12 @@ struct Playfield
 			return;
 		tiles[i] = v;
 	}
+
+	template<class Archive>
+	void serialize(Archive &archive){
+		archive((int32_t)w, (int32_t)h);
+		archive(tiles);
+	}
 };
 
 struct Player
@@ -38,7 +46,13 @@ struct Player
 	int peer = 0;
 	int x = 0;
 	int y = 0;
+
 	Player(int peer = 0, int x = 0, int y = 0): peer(peer), x(x), y(y){}
+
+	template<class Archive>
+	void serialize(Archive &archive){
+		archive((int32_t)peer, (int32_t)x, (int32_t)y);
+	}
 };
 
 struct Module: public interface::Module
@@ -92,17 +106,8 @@ struct Module: public interface::Module
 		{
 			cereal::PortableBinaryOutputArchive ar(os);
 			ar((int32_t)peer);
-			ar((int32_t)m_players.size());
-			ar((int32_t)m_playfield.w, (int32_t)m_playfield.h);
-			// TODO: A way for Lua to read vectors directly
-			for(int t : m_playfield.tiles)
-				ar(t);
-			for(auto &pair : m_players){
-				auto &player = pair.second;
-				ar((int32_t)player.peer);
-				ar((int32_t)player.x);
-				ar((int32_t)player.y);
-			}
+			ar(m_players);
+			ar(m_playfield);
 		}
 		network::access(m_server, [&](network::Interface * inetwork){
 			inetwork->send(peer, "minigame:update", os.str());

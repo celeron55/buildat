@@ -20,32 +20,35 @@ local player_boxes = {}
 local field_boxes = {}
 
 buildat.sub_packet("minigame:update", function(data)
-	values = cereal.binary_input(data, {
-		"int32", "int32", "int32", "int32"
-	})
-	local peer = values[1]
-	local num_players = values[2]
-	local field_w = values[3]
-	local field_h = values[4]
-	values = cereal.binary_input(data, {
-		"int32", "int32", "int32", "int32",
-		{"int32", field_w*field_h}, {"int32", num_players*3}
+	log:info("data="..buildat.dump(buildat.bytes(data)))
+	values = cereal.binary_input(data, {"object",
+		{"peer", "int32_t"},
+		{"players", {"unordered_map",
+			"int32_t",
+			{"object",
+				{"peer", "int32_t"},
+				{"x", "int32_t"},
+				{"y", "int32_t"},
+			},
+		}},
+		{"playfield", {"object",
+			{"w", "int32_t"},
+			{"h", "int32_t"},
+			{"tiles", {"array", "int32_t"}},
+		}},
 	})
 	--log:info("values="..dump(values))
-	local new_field = {}
-	for i=1,field_w*field_h do
-		table.insert(new_field, values[4+i])
-	end
-	field = new_field
+
+	field = values.playfield
 	log:info("field="..dump(field))
 
 	for _, box in ipairs(field_boxes) do
 		scene:removeEntity(box)
 	end
 	field_boxes = {}
-	for y=1,field_h do
-		for x=1,field_w do
-			local v = field[(y-1)*field_w + (x-1) + 1]
+	for y=1,field.h do
+		for x=1,field.w do
+			local v = field.tiles[(y-1)*field.w + (x-1) + 1]
 			if v ~= 0 then
 				box = g3d.ScenePrimitive(g3d.ScenePrimitive.TYPE_BOX, 1,0.5*v,1)
 				box:loadTexture("minigame/green_texture.png")
@@ -56,18 +59,12 @@ buildat.sub_packet("minigame:update", function(data)
 		end
 	end
 
-	local new_players = {}
-	local players_start = 5+field_w*field_h
-	for i=1,num_players do
-		local player = {
-			peer = values[players_start+(i-1)*3+0],
-			x = values[players_start+(i-1)*3+1],
-			y = values[players_start+(i-1)*3+2],
-		}
-		table.insert(new_players, player)
-	end
+	local player_map = values.players
 	local old_players = players
-	players = new_players
+	players = {}
+	for k, player in pairs(player_map) do
+		table.insert(players, player)
+	end
 	log:info("players="..dump(players))
 
 	for _, player in ipairs(players) do
@@ -85,7 +82,7 @@ buildat.sub_packet("minigame:update", function(data)
 			scene:addEntity(box)
 			player_boxes[player.peer] = box
 		end
-		local v = field[(player.y)*field_w + (player.x) + 1] or 0
+		local v = field.tiles[(player.y)*field.w + (player.x) + 1] or 0
 		player_boxes[player.peer]:setPosition(player.x-5, 0.5+v*0.5, player.y-5)
 	end
 	for _, old_player in ipairs(old_players) do
