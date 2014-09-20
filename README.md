@@ -69,3 +69,6 @@ Buildat Windows How-To
 Umm... well, you need to first port some stuff. Try building it and see what
 happens. Then fix it and make a pull request.
 
+You probably want to use MinGW or Clang in order to bundle the compiler with the
+end result.
+

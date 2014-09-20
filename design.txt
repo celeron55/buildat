@@ -82,6 +82,7 @@ Extension structure
 -------------------
 extension
 `-- init.lua  << Loaded when the module is required
+`-- init.cpp  << Compiled as a Lua module and loaded if init.lua doesn't exist
 
 Extension behavior
 ------------------
