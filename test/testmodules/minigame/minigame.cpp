@@ -17,16 +17,16 @@ struct Playfield
 	size_t h = 0;
 	sv_<int> tiles;
 	Playfield(size_t w, size_t h): w(w), h(h){
-		tiles.resize(w*h);
+		tiles.resize(w * h);
 	}
 	int get(int x, int y){
-		size_t i = y*w + x;
+		size_t i = y * w + x;
 		if(i > tiles.size())
 			return 0;
 		return tiles[i];
 	}
 	void set(int x, int y, int v){
-		size_t i = y*w + x;
+		size_t i = y * w + x;
 		if(i > tiles.size())
 			return;
 		tiles[i] = v;
@@ -38,7 +38,7 @@ struct Player
 	int peer = 0;
 	int x = 0;
 	int y = 0;
-	Player(int peer=0, int x=0, int y=0): peer(peer), x(x), y(y){}
+	Player(int peer = 0, int x = 0, int y = 0): peer(peer), x(x), y(y){}
 };
 
 struct Module: public interface::Module
@@ -115,7 +115,7 @@ struct Module: public interface::Module
 
 		int peer = new_client.info.id;
 
-		m_players[peer] = Player(peer, rand()%10, rand()%10);
+		m_players[peer] = Player(peer, rand() % 10, rand() % 10);
 
 		for(auto &pair : m_players)
 			send_update(pair.second.peer);
@@ -164,7 +164,7 @@ struct Module: public interface::Module
 		if(packet.data == "down")
 			player.y += 1;
 		if(packet.data == "place"){
-			m_playfield.set(player.x, player.y, 
+			m_playfield.set(player.x, player.y,
 					m_playfield.get(player.x, player.y) + 1);
 		}
 
