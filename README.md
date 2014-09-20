@@ -63,3 +63,9 @@ Edit something and then restart the client (CTRL+C in terminal 2):
     $ vim test/testmodules/minigame/minigame.cppp
     $ vim builtin/network/network.cpp
 
+Buildat Windows How-To
+======================
+
+Umm... well, you need to first port some stuff. Try building it and see what
+happens. Then fix it and make a pull request.
+
