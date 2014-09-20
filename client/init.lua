@@ -1,5 +1,12 @@
 -- Buildat: client/init.lua
 buildat = {}
+function buildat.bytes(data)
+	local result = {}
+	for i=1,#data do
+		table.insert(result, string.byte(data, i))
+	end
+	return result
+end
 function buildat.dump(thing)
 	if type(thing) == 'string' then
 		return '"'..thing..'"'
