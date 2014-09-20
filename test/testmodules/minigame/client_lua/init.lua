@@ -1,6 +1,7 @@
 -- Buildat: minigame/client_lua/init.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
+-- Copyright 2014 Břetislav Štec <valsiterb@gmail.com>
 local log = buildat.Logger("minigame")
 local dump = buildat.dump
 log:info("minigame/init.lua loaded")
@@ -21,10 +22,6 @@ local field = {}
 local players = {}
 local player_boxes = {}
 local field_boxes = {}
-
-experimental.sub_tick(function(dtime)
-	--log:info("tick: "..dtime.."s")
-end)
 
 buildat.sub_packet("minigame:update", function(data)
 	log:info("data="..buildat.dump(buildat.bytes(data)))
@@ -108,6 +105,7 @@ end)
 
 local keyinput = require("buildat/extension/keyinput")
 local mouseinput = require("buildat/extension/mouseinput")
+local joyinput = require("buildat/extension/joyinput")
 local mouse_grabbed = false
 
 keyinput.sub(function(key, state)
@@ -160,6 +158,41 @@ mouseinput.sub_move(function(x, y)
 		mouseinput.warp_cursor(100, 100)
 	else
 		log:info("mouse move: "..x..", "..y)
+	end
+end)
+
+local joystick_axes = {}
+
+joyinput.sub_move(function(joystick, axis, value)
+	joystick_axes[axis] = value
+end)
+
+local counter = 0
+experimental.sub_tick(function(dtime)
+	--log:info("tick: "..dtime.."s")
+	counter = counter + dtime
+	if counter > 0.2 then
+		counter = counter - 0.2
+		if joystick_axes[0] ~= nil and joystick_axes[0] > 0.5 then
+			buildat.send_packet("minigame:move","right")
+		end
+		if joystick_axes[0] ~= nil and joystick_axes[0] < -0.5 then
+			buildat.send_packet("minigame:move","left")
+		end
+		if joystick_axes[1] ~= nil and joystick_axes[1] > 0.5 then
+			buildat.send_packet("minigame:move","down")
+		end
+		if joystick_axes[1] ~= nil and joystick_axes[1] < -0.5 then
+			buildat.send_packet("minigame:move","up")
+		end
+	end
+end)
+
+joyinput.sub(function(joystick, button, state)
+	if button == 0 then
+		if state == "down" then
+			buildat.send_packet("minigame:move", "place")
+		end
 	end
 end)
 
