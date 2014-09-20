@@ -125,7 +125,7 @@ struct CState: public State, public interface::Server
 	interface::Mutex m_tmp_data_mutex;
 
 	CState():
-		m_compiler(rccpp::createCompiler())
+		m_compiler(rccpp::createCompiler(g_server_config.compiler_command))
 	{
 		m_compiler->include_directories.push_back(
 				g_server_config.interface_path);
