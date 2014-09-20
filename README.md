@@ -31,6 +31,11 @@ At the moment (2014-09-19) BuildLinux.sh is so outdated that it is unusable:
 
     $ sh BuildLinuxFixed.sh -j4  # -j<n> selects number of threads for compilation
 
+To make sure Polycode was built and is fully working, try running the Polycode IDE:
+
+    $ cd IDE/Build/Linux/Build
+    $ ./Polycode
+
 Build Buildat
 ---------------
 
