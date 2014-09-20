@@ -5,6 +5,7 @@ log:info("minigame/init.lua loaded")
 
 local cereal = require("buildat/extension/cereal")
 local g3d = require("buildat/extension/graphics3d")
+local experimental = require("buildat/extension/experimental")
 
 scene = g3d.Scene(g3d.Scene.SCENE_3D)
 ground = g3d.ScenePrimitive(g3d.ScenePrimitive.TYPE_PLANE, 10,10)
@@ -18,6 +19,10 @@ local field = {}
 local players = {}
 local player_boxes = {}
 local field_boxes = {}
+
+experimental.sub_tick(function(dtime)
+	--log:info("tick: "..dtime.."s")
+end)
 
 buildat.sub_packet("minigame:update", function(data)
 	log:info("data="..buildat.dump(buildat.bytes(data)))

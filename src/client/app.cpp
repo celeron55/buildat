@@ -12,6 +12,7 @@
 #include <OSBasics.h>
 #pragma GCC diagnostic pop
 #include <c55/getopt.h>
+#include "c55/os.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
 #include <core/log.h>
@@ -106,9 +107,11 @@ struct CApp: public Polycode::EventHandler, public App
 	Polycode::Core *core;
 	lua_State *L;
 	sp_<client::State> m_state;
+	int64_t m_last_script_tick_us;
 
 	CApp(Polycode::PolycodeView *view):
-		Polycode::EventHandler(), core(NULL), L(NULL)
+		Polycode::EventHandler(), core(NULL), L(NULL),
+		m_last_script_tick_us(get_timeofday_us())
 	{
 		// Win32Core for Windows
 		// CocoaCore for Mac
@@ -339,12 +342,20 @@ struct CApp: public Polycode::EventHandler, public App
 	{
 		log_t(MODULE, "script_tick()");
 
+		int64_t current_us = get_timeofday_us();
+		int64_t d_us = current_us - m_last_script_tick_us;
+		if(d_us < 0)
+			d_us = 0;
+		m_last_script_tick_us = current_us;
+		double dtime = d_us / 1000000.0;
+
 		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_tick");
 		if(lua_isnil(L, -1)){
 			lua_pop(L, 1);
 			return;
 		}
-		error_logging_pcall(L, 0, 0);
+		lua_pushnumber(L, dtime);
+		error_logging_pcall(L, 1, 0);
 	}
 
 	// print_log(level, module, text)
