@@ -93,7 +93,10 @@ implement table "safe", which contains the safe interface.
 
 Extensions and modules use require "buildat/extension/<name>" to use extensions.
 
-The __menu extension is specially loaded automatically at client startup.
+The __menu extension is specially loaded automatically at client startup if no
+server address is provided on the command line. __menu can then connect to a
+server. When disconnecting from a server, the whole client window is closed and
+reopened.
 
 Network protocol
 ----------------
