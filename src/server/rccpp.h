@@ -24,5 +24,5 @@ namespace rccpp
 		std::vector<std::string> library_directories;
 	};
 
-	Compiler* createCompiler();
+	Compiler* createCompiler(const ss_ &compiler_command="c++");
 };
