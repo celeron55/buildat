@@ -44,6 +44,14 @@ Logging:
 - Use core/log.h. Only use stdout directly in case of an interactive command
   line interface (like printing errors for command line arguments).
 
+Ordering of #include directives:
+1) The interface that the current file implements, ""
+2) Internal interfaces, from core-ish to utility-ish, ""
+3) Bundled libraries, <>
+4) Installed libraries, <>
+5) STL headers, <>
+6) System headers, <>
+
 Non-exception throwing and exception-throwing methods
 -----------------------------------------------------
 - get_x: Returns NULL or equivalent if not found
