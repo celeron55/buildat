@@ -18,6 +18,7 @@ Install dependencies for Polycode (replace with however your package manager wor
 -------------------------------------------------------------------------------------
 
     $ sudo yum install python-ply
+    $ sudo apt-get install python-ply libsdl-dev freeglut3-dev
 
 Get and build Polycode
 ------------------------

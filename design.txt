@@ -14,9 +14,7 @@ Extensions are non-sandboxed code installed separately on each client.
 
 Server
 ------
-Built using C++ with most functionality in RCC++.
-
-C++ modules can interface with each other by using Cereal.
+Built using C++ with most functionality in runtime-compiled C++ modules.
 
 Module structure
 ----------------
