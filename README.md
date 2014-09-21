@@ -48,6 +48,10 @@ Build Buildat
     $ cmake .. -DCMAKE_BUILD_TYPE=Debug -DPOLYCODE_ROOT_DIR=../../Polycode
     $ make -j4
 
+You can use -DBUILD_SERVER=false or -DBUILD_CLIENT=false if you don't need the
+server or the client, respectively. Not building the client is useful on servers
+because it causes Buildat to not require Polycode at all.
+
 Run Buildat
 -------------
 

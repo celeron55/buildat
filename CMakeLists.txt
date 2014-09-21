@@ -15,32 +15,41 @@ include_directories("3rdparty/c55lib")
 include_directories("3rdparty/smallsha1")
 
 #
-# Polycode
+# Global options
 #
 
-SET(POLYCODE_ROOT_DIR "${buildat_SOURCE_DIR}/../polycode" CACHE PATH "Path to Polycode source")
-SET(POLYCODE_RELEASE_DIR ${POLYCODE_ROOT_DIR}/Release/${CMAKE_SYSTEM_NAME})
-SET(POLYCODE_CMAKE_DIR ${POLYCODE_ROOT_DIR}/CMake)
-SET(CMAKE_INSTALL_PREFIX ${POLYCODE_RELEASE_DIR}/Standalone/)
-SET(CMAKE_PREFIX_PATH
-    ${POLYCODE_RELEASE_DIR}/Framework/Core/Dependencies
-    ${POLYCODE_RELEASE_DIR}/Framework/Modules/Dependencies
-    ${POLYCODE_RELEASE_DIR}/Framework/Tools/Dependencies
-)
+SET(BUILD_SERVER TRUE CACHE BOOL "Build server")
+SET(BUILD_CLIENT TRUE CACHE BOOL "Build client")
 
-SET(CMAKE_DEBUG_POSTFIX "_d")
-SET(CMAKE_MODULE_PATH
-	${CMAKE_MODULE_PATH}
-	${POLYCODE_CMAKE_DIR}
-)
-INCLUDE(${POLYCODE_CMAKE_DIR}/PolycodeDependencies.cmake)
+IF(BUILD_CLIENT)
+	#
+	# Polycode
+	#
 
-include_directories("${POLYCODE_ROOT_DIR}/Bindings/Contents/LUA/Include")
-#include_directories("${POLYCODE_ROOT_DIR}/Dependencies/Build/Release/box2d/src/box2d/Box2D")
-#include_directories("${POLYCODE_ROOT_DIR}/Dependencies/Build/Release/bullet/src/bullet/src")
-#include_directories("${POLYCODE_ROOT_DIR}/Modules/Bindings/2DPhysics/Include")
-#include_directories("${POLYCODE_ROOT_DIR}/Modules/Bindings/3DPhysics/Include")
-include_directories("${POLYCODE_ROOT_DIR}/Modules/Bindings/UI/Include")
+	SET(POLYCODE_ROOT_DIR "${buildat_SOURCE_DIR}/../polycode" CACHE PATH "Path to Polycode source")
+	SET(POLYCODE_RELEASE_DIR ${POLYCODE_ROOT_DIR}/Release/${CMAKE_SYSTEM_NAME})
+	SET(POLYCODE_CMAKE_DIR ${POLYCODE_ROOT_DIR}/CMake)
+	SET(CMAKE_INSTALL_PREFIX ${POLYCODE_RELEASE_DIR}/Standalone/)
+	SET(CMAKE_PREFIX_PATH
+		${POLYCODE_RELEASE_DIR}/Framework/Core/Dependencies
+		${POLYCODE_RELEASE_DIR}/Framework/Modules/Dependencies
+		${POLYCODE_RELEASE_DIR}/Framework/Tools/Dependencies
+	)
+
+	SET(CMAKE_DEBUG_POSTFIX "_d")
+	SET(CMAKE_MODULE_PATH
+		${CMAKE_MODULE_PATH}
+		${POLYCODE_CMAKE_DIR}
+	)
+	INCLUDE(${POLYCODE_CMAKE_DIR}/PolycodeDependencies.cmake)
+
+	include_directories("${POLYCODE_ROOT_DIR}/Bindings/Contents/LUA/Include")
+	#include_directories("${POLYCODE_ROOT_DIR}/Dependencies/Build/Release/box2d/src/box2d/Box2D")
+	#include_directories("${POLYCODE_ROOT_DIR}/Dependencies/Build/Release/bullet/src/bullet/src")
+	#include_directories("${POLYCODE_ROOT_DIR}/Modules/Bindings/2DPhysics/Include")
+	#include_directories("${POLYCODE_ROOT_DIR}/Modules/Bindings/3DPhysics/Include")
+	include_directories("${POLYCODE_ROOT_DIR}/Modules/Bindings/UI/Include")
+ENDIF(BUILD_CLIENT)
 
 #
 # Buildat
@@ -56,55 +65,57 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 # Security / crash protection
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstack-protector-all")
 
-# Client
-set(CLIENT_EXE_NAME buildat_client)
-set(CLIENT_SRCS
-	src/client/main.cpp
-	src/client/state.cpp
-	src/client/app.cpp
-	src/client/config.cpp
-	src/core/log.cpp
-	src/impl/fs.cpp
-	src/impl/tcpsocket.cpp
-	src/impl/sha1.cpp
-	src/impl/packet_stream.cpp
-)
-add_executable(${CLIENT_EXE_NAME} ${CLIENT_SRCS})
-TARGET_LINK_LIBRARIES(${CLIENT_EXE_NAME}
-	${POLYCODE_DEPENDENCY_LIBS}
-	c55lib
-	smallsha1
-	# Polycode stuff
-	#${POLYCODE_ROOT_DIR}/Build/Release/Modules/Bindings/2DPhysics/Physics2DLua.a
-	#${POLYCODE_ROOT_DIR}/Build/Release/Modules/Bindings/3DPhysics/Physics3DLua.a
-	#Polycode2DPhysics
-	#Polycode3DPhysics
-	${POLYCODE_ROOT_DIR}/Build/Release/Modules/Bindings/UI/UILua.a
-	PolycodeUI
-)
+IF(BUILD_CLIENT)
+	# Client
+	set(CLIENT_EXE_NAME buildat_client)
+	set(CLIENT_SRCS
+		src/client/main.cpp
+		src/client/state.cpp
+		src/client/app.cpp
+		src/client/config.cpp
+		src/core/log.cpp
+		src/impl/fs.cpp
+		src/impl/tcpsocket.cpp
+		src/impl/sha1.cpp
+		src/impl/packet_stream.cpp
+	)
+	add_executable(${CLIENT_EXE_NAME} ${CLIENT_SRCS})
+	TARGET_LINK_LIBRARIES(${CLIENT_EXE_NAME}
+		${POLYCODE_DEPENDENCY_LIBS}
+		c55lib
+		smallsha1
+		# Polycode stuff
+		#${POLYCODE_ROOT_DIR}/Build/Release/Modules/Bindings/2DPhysics/Physics2DLua.a
+		#${POLYCODE_ROOT_DIR}/Build/Release/Modules/Bindings/3DPhysics/Physics3DLua.a
+		#Polycode2DPhysics
+		#Polycode3DPhysics
+		${POLYCODE_ROOT_DIR}/Build/Release/Modules/Bindings/UI/UILua.a
+		PolycodeUI
+	)
+ENDIF(BUILD_CLIENT)
 
-# Server
-set(SERVER_EXE_NAME buildat_server)
-set(SERVER_SRCS
-	src/server/main.cpp
-	src/server/state.cpp
-	src/server/rccpp.cpp
-	src/server/config.cpp
-	src/core/log.cpp
-	src/impl/fs.cpp
-	src/impl/event.cpp
-	src/impl/tcpsocket.cpp
-	src/impl/module.cpp
-	src/impl/linux/file_watch.cpp
-	src/impl/linux/process.cpp
-	src/impl/sha1.cpp
-	src/impl/packet_stream.cpp
-)
-add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
-TARGET_LINK_LIBRARIES(${SERVER_EXE_NAME}
-	c55lib
-	smallsha1
-	dl
-)
-add_definitions()
-
+IF(BUILD_SERVER)
+	# Server
+	set(SERVER_EXE_NAME buildat_server)
+	set(SERVER_SRCS
+		src/server/main.cpp
+		src/server/state.cpp
+		src/server/rccpp.cpp
+		src/server/config.cpp
+		src/core/log.cpp
+		src/impl/fs.cpp
+		src/impl/event.cpp
+		src/impl/tcpsocket.cpp
+		src/impl/module.cpp
+		src/impl/linux/file_watch.cpp
+		src/impl/linux/process.cpp
+		src/impl/sha1.cpp
+		src/impl/packet_stream.cpp
+	)
+	add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
+	TARGET_LINK_LIBRARIES(${SERVER_EXE_NAME}
+		c55lib
+		smallsha1
+		dl
+	)
+ENDIF(BUILD_SERVER)
