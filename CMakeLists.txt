@@ -36,6 +36,11 @@ SET(CMAKE_MODULE_PATH
 INCLUDE(${POLYCODE_CMAKE_DIR}/PolycodeDependencies.cmake)
 
 include_directories("${POLYCODE_ROOT_DIR}/Bindings/Contents/LUA/Include")
+#include_directories("${POLYCODE_ROOT_DIR}/Dependencies/Build/Release/box2d/src/box2d/Box2D")
+#include_directories("${POLYCODE_ROOT_DIR}/Dependencies/Build/Release/bullet/src/bullet/src")
+#include_directories("${POLYCODE_ROOT_DIR}/Modules/Bindings/2DPhysics/Include")
+#include_directories("${POLYCODE_ROOT_DIR}/Modules/Bindings/3DPhysics/Include")
+include_directories("${POLYCODE_ROOT_DIR}/Modules/Bindings/UI/Include")
 
 #
 # Buildat
@@ -69,6 +74,13 @@ TARGET_LINK_LIBRARIES(${CLIENT_EXE_NAME}
 	${POLYCODE_DEPENDENCY_LIBS}
 	c55lib
 	smallsha1
+	# Polycode stuff
+	#${POLYCODE_ROOT_DIR}/Build/Release/Modules/Bindings/2DPhysics/Physics2DLua.a
+	#${POLYCODE_ROOT_DIR}/Build/Release/Modules/Bindings/3DPhysics/Physics3DLua.a
+	#Polycode2DPhysics
+	#Polycode3DPhysics
+	${POLYCODE_ROOT_DIR}/Build/Release/Modules/Bindings/UI/UILua.a
+	PolycodeUI
 )
 
 # Server

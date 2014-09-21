@@ -9,6 +9,9 @@
 #include <Polycode.h>
 #include <PolycodeView.h>
 #include <PolycodeLUA.h>
+//#include "Physics2DLUA.h"
+//#include "Physics3DLUA.h"
+#include <UILUA.h>
 #include <OSBasics.h>
 #pragma GCC diagnostic pop
 #include <c55/getopt.h>
@@ -190,7 +193,7 @@ struct CApp: public Polycode::EventHandler, public App
 		// TODO
 		//luaopen_Physics2D(L);
 		//luaopen_Physics3D(L);
-		//luaopen_UI(L);
+		luaopen_UI(L);
 
 		lua_pushlightuserdata(L, (void*)this);
 		lua_setfield(L, LUA_REGISTRYINDEX, "__buildat_app");
