@@ -151,19 +151,26 @@ function M.check_type(thing, valid_types)
 			end
 		end
 		-- Check if thing is inherited safely from a valid type
-		local super = meta.inherited_from_in_sandbox or
-				meta.inherited_from_by_wrapper
-		--print("super="..dump(super)..", valid_types="..dump(valid_types))
-		if super then
-			local super_meta = getmetatable(super)
+		local unsafe_instance = meta.unsafe
+		while true do
+			local tried_super_types = {} -- For error message
+			local super = meta.inherited_from_in_sandbox or
+					meta.inherited_from_by_wrapper
+			--print("super="..dump(super)..", valid_types="..dump(valid_types))
+			if super == nil then
+				break
+			end
+			meta = getmetatable(super)
 			for _, valid_type in ipairs(valid_types) do
-				--print("super_meta="..dump(super_meta))
-				if valid_type == super_meta.type_name then
-					return meta.unsafe
+				--print("meta="..dump(meta))
+				if valid_type == meta.type_name then
+					return unsafe_instance
 				end
+				table.insert(tried_super_types, meta.type_name)
 			end
 		end
-		error("Disallowed type: "..dump(meta.type_name))
+		error("Disallowed type: "..dump(meta.type_name)..", super types "
+				..dump(tried_super_types))
 	else
 		local type_of_thing = type(thing)
 		for _, valid_type in ipairs(valid_types) do

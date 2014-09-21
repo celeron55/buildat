@@ -66,8 +66,7 @@ M.safe.Scene = polybox.wrap_class("Scene", {
 	instance = {
 		addEntity = function(safe, entity_safe)
 			local unsafe = polybox.check_type(safe, "Scene")
-			entity_unsafe = polybox.check_type(entity_safe,
-					{"ScenePrimitive", "UIElement"})
+			entity_unsafe = polybox.check_type(entity_safe, "Entity")
 			unsafe:addEntity(entity_unsafe)
 			scene_entity_added(entity_unsafe)
 		end,
@@ -105,8 +104,20 @@ M.safe.Entity = polybox.wrap_class("Entity", {
 			local unsafe = polybox.check_type(safe, "Entity")
 			               polybox.check_type(x, "number")
 			               polybox.check_type(y, "number")
-			               polybox.check_type(z, "number")
+			               polybox.check_type(z, {"number", "__nil"})
 			unsafe:setPosition(x, y, z)
+		end,
+		addChild = function(safe, child_safe)
+			local unsafe = polybox.check_type(safe, "Entity")
+			child_unsafe = polybox.check_type(child_safe, "UIElement")
+			unsafe:addChild(child_unsafe)
+			--entity_child_added(child_unsafe) -- TODO: Needed?
+		end,
+		setAnchorPoint = function(safe, safe_anchorPoint)
+			-- This doesn't seem to work; why? There are no errors.
+			local unsafe = polybox.check_type(safe, "Entity")
+			local unsafe_anchorPoint = polybox.check_type(safe_anchorPoint, "Vector3")
+			unsafe:setAnchorPoint(unsafe_anchorPoint)
 		end,
 	},
 	properties = {

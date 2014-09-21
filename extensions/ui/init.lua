@@ -8,6 +8,7 @@ local dump = buildat.dump
 local M = {safe = {}}
 
 M.safe.UIElement = polybox.wrap_class("UIElement", {
+	inherited_from_by_wrapper = graphics.safe.Entity,
 	constructor = function()
 		return UIElement()
 	end,
@@ -19,6 +20,7 @@ M.safe.UIElement = polybox.wrap_class("UIElement", {
 		end,
 	},
 	instance = {
+		-- TODO: Remove
 		setPosition = function(safe, x, y, z)
 			local unsafe = polybox.check_type(safe, "UIElement")
 			               polybox.check_type(x, "number")
@@ -31,12 +33,14 @@ M.safe.UIElement = polybox.wrap_class("UIElement", {
 			               polybox.check_type(h, "number")
 			unsafe:Resize(w, h)
 		end,
+		-- TODO: Remove
 		addChild = function(safe, child_safe)
 			local unsafe = polybox.check_type(safe, "UIElement")
 			child_unsafe = polybox.check_type(child_safe, "UIElement")
 			unsafe:addChild(child_unsafe)
 			--element_child_added(child_unsafe) -- TODO: Needed?
 		end,
+		-- TODO: Remove
 		setAnchorPoint = function(safe, safe_anchorPoint)
 			-- This doesn't seem to work; why? There are no errors.
 			local unsafe = polybox.check_type(safe, "UILabel")
