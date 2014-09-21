@@ -42,6 +42,16 @@ M.safe.UIElement = polybox.wrap_class("UIElement", {
 			unsafe:Resize(w, h)
 		end,
 	},
+	properties = {
+		hasFocus = {
+			get = function(current_value)
+				return polybox.check_type(current_value, {"boolean"})
+			end,
+			set = function(new_value)
+				return polybox.check_type(new_value, {"boolean"})
+			end,
+		},
+	},
 })
 
 M.safe.UILabel = polybox.wrap_class("UILabel", {
