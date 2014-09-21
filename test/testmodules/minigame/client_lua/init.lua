@@ -8,15 +8,27 @@ log:info("minigame/init.lua loaded")
 
 local cereal = require("buildat/extension/cereal")
 local g3d = require("buildat/extension/graphics3d")
+local ui = require("buildat/extension/ui")
 local experimental = require("buildat/extension/experimental")
 
-scene = g3d.Scene(g3d.Scene.SCENE_3D)
+local scene = g3d.Scene(g3d.Scene.SCENE_3D)
 ground = g3d.ScenePrimitive(g3d.ScenePrimitive.TYPE_PLANE, 10,10)
 ground:loadTexture("minigame/green_texture.png")
 scene:addEntity(ground)
 
 scene:getDefaultCamera():setPosition(7,7,7)
 scene:getDefaultCamera():lookAt(g3d.Vector3(0,0,0), g3d.Vector3(0,1,0))
+
+local scene2d = g3d.Scene(g3d.Scene.SCENE_2D)
+scene2d:getActiveCamera():setOrthoSize(640, 480)
+local label = ui.UILabel("testmodules/minigame", 32)
+label:setPosition(-210, 180)
+scene2d:addEntity(label)
+
+local image = ui.UIImage("minigame/pink_texture.png")
+image:Resize(50, 50)
+image:setPosition(-280, 165);
+scene2d:addEntity(image)
 
 local field = {}
 local players = {}

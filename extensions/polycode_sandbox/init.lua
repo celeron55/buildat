@@ -52,6 +52,9 @@ function M.check_type(thing, valid_types)
 			if valid_type == type_of_thing then
 				return thing
 			end
+			if valid_type == '__nil' and thing == nil then
+				return thing
+			end
 		end
 		error("Disallowed type: "..dump(type_of_thing))
 	end
