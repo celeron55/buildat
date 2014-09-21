@@ -53,24 +53,23 @@ function SomeUI:SomeUI()
 	self.button_grab_mouse:setPosition(0, 0)
 	self:addChild(self.button_grab_mouse)
 
-	self.button_foo = ui.UIButton("Foo", 100, 30)
-	self.button_foo:setPosition(0, 30)
-	self:addChild(self.button_foo)
+	self.button_clear_field = ui.UIButton("Clear", 100, 30)
+	self.button_clear_field:setPosition(0, 30)
+	self:addChild(self.button_clear_field)
 
 	self.button_grab_mouse:addEventListener(self, function(self, e)
 		log:info("SomeUI:on_button_grab_mouse()")
+		self.button_grab_mouse.hasFocus = false
 		if not mouse_grabbed then
 			mouse_grabbed = true
 			mouseinput.show_cursor(false)
 		end
 	end, ui.UIEvent.CLICK_EVENT)
 
-	self.button_foo:addEventListener(self, function(self, e)
-		log:info("SomeUI:on_button_foo()")
-		if not mouse_grabbed then
-			mouse_grabbed = true
-			mouseinput.show_cursor(false)
-		end
+	self.button_clear_field:addEventListener(self, function(self, e)
+		log:info("SomeUI:on_button_clear_field()")
+		self.button_clear_field.hasFocus = false
+		buildat.send_packet("minigame:clear_field", "")
 	end, ui.UIEvent.CLICK_EVENT)
 end
 
@@ -208,10 +207,10 @@ end)
 
 mouseinput.sub_move(function(x, y)
 	if mouse_grabbed then
-		log:info("mouse delta: "..(x-100)..", "..(y-100))
+		--log:info("mouse delta: "..(x-100)..", "..(y-100))
 		mouseinput.warp_cursor(100, 100)
 	else
-		log:info("mouse move: "..x..", "..y)
+		--log:info("mouse move: "..x..", "..y)
 	end
 end)
 
