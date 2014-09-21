@@ -1,8 +1,8 @@
--- Buildat: extension/graphics3d/init.lua
+-- Buildat: extension/graphics/init.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local polybox = require("buildat/extension/polycode_sandbox")
-local log = buildat.Logger("extension/graphics3d")
+local log = buildat.Logger("extension/graphics")
 local dump = buildat.dump
 local M = {safe = {}}
 

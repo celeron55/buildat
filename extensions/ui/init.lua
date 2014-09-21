@@ -2,7 +2,7 @@
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local polybox = require("buildat/extension/polycode_sandbox")
-local g3d = require("buildat/extension/graphics3d")
+local graphics = require("buildat/extension/graphics")
 local log = buildat.Logger("extension/ui")
 local dump = buildat.dump
 local M = {safe = {}}
@@ -36,7 +36,7 @@ M.safe.UILabel = polybox.wrap_class("UILabel", {
 M.safe.UIImage = polybox.wrap_class("UIImage", {
 	constructor = function(texture_name)
 		polybox.check_type(texture_name, "string")
-		local path2 = g3d.resave_texture_for_polycode(texture_name)
+		local path2 = graphics.resave_texture_for_polycode(texture_name)
 		return UIImage(path2)
 	end,
 	class = {

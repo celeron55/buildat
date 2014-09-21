@@ -11,15 +11,15 @@ local test = require("buildat/extension/test")
 test.f()
 
 -- Test some 3D things
-local g3d = require("buildat/extension/graphics3d")
+local graphics = require("buildat/extension/graphics")
 
-scene = g3d.Scene(g3d.Scene.SCENE_3D)
-ground = g3d.ScenePrimitive(g3d.ScenePrimitive.TYPE_PLANE, 5,5)
+scene = graphics.Scene(graphics.Scene.SCENE_3D)
+ground = graphics.ScenePrimitive(graphics.ScenePrimitive.TYPE_PLANE, 5,5)
 ground:loadTexture("test1/green_texture.png")
 scene:addEntity(ground)
 
 scene:getDefaultCamera():setPosition(7,7,7)
-scene:getDefaultCamera():lookAt(g3d.Vector3(0,0,0), g3d.Vector3(0,1,0))
+scene:getDefaultCamera():lookAt(graphics.Vector3(0,0,0), graphics.Vector3(0,1,0))
 
 local cereal = require("buildat/extension/cereal")
 
@@ -41,7 +41,7 @@ buildat.sub_packet("test1:add_box", function(data)
 	local y = values.y
 	local z = values.z
 	log:info("values="..dump(values))
-	box = g3d.ScenePrimitive(g3d.ScenePrimitive.TYPE_BOX, w,h,d)
+	box = graphics.ScenePrimitive(graphics.ScenePrimitive.TYPE_BOX, w,h,d)
 	box:loadTexture("test1/pink_texture.png")
 	box:setPosition(x, y, z)
 	scene:addEntity(box)

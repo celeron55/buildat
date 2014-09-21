@@ -7,19 +7,19 @@ local dump = buildat.dump
 log:info("minigame/init.lua loaded")
 
 local cereal = require("buildat/extension/cereal")
-local g3d = require("buildat/extension/graphics3d")
+local graphics = require("buildat/extension/graphics")
 local ui = require("buildat/extension/ui")
 local experimental = require("buildat/extension/experimental")
 
-local scene = g3d.Scene(g3d.Scene.SCENE_3D)
-ground = g3d.ScenePrimitive(g3d.ScenePrimitive.TYPE_PLANE, 10,10)
+local scene = graphics.Scene(graphics.Scene.SCENE_3D)
+ground = graphics.ScenePrimitive(graphics.ScenePrimitive.TYPE_PLANE, 10,10)
 ground:loadTexture("minigame/green_texture.png")
 scene:addEntity(ground)
 
 scene:getDefaultCamera():setPosition(7,7,7)
-scene:getDefaultCamera():lookAt(g3d.Vector3(0,0,0), g3d.Vector3(0,1,0))
+scene:getDefaultCamera():lookAt(graphics.Vector3(0,0,0), graphics.Vector3(0,1,0))
 
-local scene2d = g3d.Scene(g3d.Scene.SCENE_2D)
+local scene2d = graphics.Scene(graphics.Scene.SCENE_2D)
 scene2d:getActiveCamera():setOrthoSize(640, 480)
 local label = ui.UILabel("testmodules/minigame", 32)
 label:setPosition(-210, 180)
@@ -66,7 +66,7 @@ buildat.sub_packet("minigame:update", function(data)
 		for x=1,field.w do
 			local v = field.tiles[(y-1)*field.w + (x-1) + 1]
 			if v ~= 0 then
-				box = g3d.ScenePrimitive(g3d.ScenePrimitive.TYPE_BOX, 1,0.5*v,1)
+				box = graphics.ScenePrimitive(graphics.ScenePrimitive.TYPE_BOX, 1,0.5*v,1)
 				box:loadTexture("minigame/green_texture.png")
 				box:setPosition(x-6, 0.25*v, y-6)
 				scene:addEntity(box)
@@ -92,7 +92,7 @@ buildat.sub_packet("minigame:update", function(data)
 			end
 		end
 		if is_new then
-			box = g3d.ScenePrimitive(g3d.ScenePrimitive.TYPE_BOX, 0.9,0.9,0.9)
+			box = graphics.ScenePrimitive(graphics.ScenePrimitive.TYPE_BOX, 0.9,0.9,0.9)
 			box:loadTexture("minigame/pink_texture.png")
 			box:setPosition(player.x-5, 0.5, player.y-5)
 			scene:addEntity(box)
