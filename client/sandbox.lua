@@ -65,7 +65,7 @@ sandbox.require = function(name)
 	if m then
 		local unsafe = __buildat_load_extension(m)
 		if unsafe == nil then
-			error("require: Extension not found: \""..m.."\"")
+			error("require: Cannot load extension: \""..m.."\"")
 		end
 		package.loaded[name] = unsafe
 		if type(unsafe.safe) ~= 'table' then

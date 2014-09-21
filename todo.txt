@@ -7,5 +7,3 @@ Buildat TODO
 - There should probably be a builtin/loader that __loader usually wants to call
 - CMakeLists.txt: Add a way of building only the server, without polycode
   dependency
-- Fix bad error message when module returns nil:
-	../client/sandbox.lua:64: require: Extension not found: "joyinput"

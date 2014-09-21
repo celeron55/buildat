@@ -5,7 +5,18 @@ local log = buildat.Logger("__client/extensions")
 
 function __buildat_load_extension(name)
 	log:info("__buildat_load_extension(\""..name.."\")")
-	return dofile(__buildat_get_path("share").."/extensions/"..name.."/init.lua")
+	local path = __buildat_get_path("share").."/extensions/"..name.."/init.lua"
+	local script = loadfile(path)
+	if script == nil then
+		log:warning("Extension could not be opened: "..name.." at "..path)
+		return nil
+	end
+	local interface = script()
+	if interface == nil then
+		log:warning("Extension returned nil: "..name.." at "..path)
+		return nil
+	end
+	return interface
 end
 
 table.insert(package.loaders, function(name)
