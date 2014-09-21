@@ -20,32 +20,11 @@ M.safe.UIElement = polybox.wrap_class("UIElement", {
 		end,
 	},
 	instance = {
-		-- TODO: Remove
-		setPosition = function(safe, x, y, z)
-			local unsafe = polybox.check_type(safe, "UIElement")
-			               polybox.check_type(x, "number")
-			               polybox.check_type(y, "number")
-			unsafe:setPosition(x, y, z)
-		end,
 		Resize = function(safe, w, h)
 			local unsafe = polybox.check_type(safe, "UIElement")
 			               polybox.check_type(w, "number")
 			               polybox.check_type(h, "number")
 			unsafe:Resize(w, h)
-		end,
-		-- TODO: Remove
-		addChild = function(safe, child_safe)
-			local unsafe = polybox.check_type(safe, "UIElement")
-			child_unsafe = polybox.check_type(child_safe, "UIElement")
-			unsafe:addChild(child_unsafe)
-			--element_child_added(child_unsafe) -- TODO: Needed?
-		end,
-		-- TODO: Remove
-		setAnchorPoint = function(safe, safe_anchorPoint)
-			-- This doesn't seem to work; why? There are no errors.
-			local unsafe = polybox.check_type(safe, "UILabel")
-			local unsafe_anchorPoint = polybox.check_type(safe_anchorPoint, "Vector3")
-			unsafe:setAnchorPoint(unsafe_anchorPoint)
 		end,
 	},
 })

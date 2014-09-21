@@ -26,28 +26,33 @@ function M.wrap_class(type_name, def)
 			if def.custom_index then
 				return def.custom_index(safe, key)
 			end
-			local sandboxed_superclass_meta = getmetatable(
-					def.inherited_from_in_sandbox or
-					def.inherited_from_by_wrapper)
-			if def.inherited_from_in_sandbox or def.inherited_from_by_wrapper then
-				-- Wrap fields which:
-				-- Are found exposed into sandbox from superclass
-				local super_def = sandboxed_superclass_meta.def
-				if super_def.instance and super_def.instance[key] then
-					return super_def.instance[key]
-				end
-				if super_def.properties and super_def.properties[key] then
-					local property_def = super_def.properties[key]
-					if property_def.get then
-						local unsafe_instance = sandboxed_superclass_meta.unsafe
-						local current_value = unsafe_instance[key]
-						return property_def.get(current_value)
+			local class_meta0 = class_meta
+			while true do
+				if class_meta0.inherited_from_in_sandbox or
+				   class_meta0.inherited_from_by_wrapper then
+					local sandboxed_superclass_meta = getmetatable(
+							class_meta0.inherited_from_in_sandbox or
+							class_meta0.inherited_from_by_wrapper)
+					-- Wrap superclass instance and property fields
+					local super_def = sandboxed_superclass_meta.def
+					if super_def.instance and super_def.instance[key] then
+						return super_def.instance[key]
 					end
-					error("Property \""..key.."\" of "..type_name.."'s superclass "..
-							super_type_name.." cannot be read")
+					if super_def.properties and super_def.properties[key] then
+						local property_def = super_def.properties[key]
+						if property_def.get then
+							local current_value = unsafe[key]
+							return property_def.get(current_value)
+						end
+						error("Property \""..key.."\" of "..type_name.."'s superclass "..
+								super_type_name.." cannot be read")
+					end
+					class_meta0 = sandboxed_superclass_meta
+				else
+					break
 				end
 			end
-			if def.inherited_from_in_sandbox then
+			if class_meta.inherited_from_in_sandbox then
 				-- Have been added to this class in the sandbox environment
 				local safe_class = __buildat_sandbox_environment[type_name]
 				return safe_class[key]
@@ -75,28 +80,31 @@ function M.wrap_class(type_name, def)
 			if def.custom_newindex then
 				return def.custom_newindex(safe, key, value)
 			end
-			local sandboxed_superclass_meta = getmetatable(
-					def.inherited_from_in_sandbox or
-					def.inherited_from_by_wrapper)
-			if def.inherited_from_in_sandbox or def.inherited_from_by_wrapper then
-				local sandboxed_superclass_meta =
-						getmetatable(def.inherited_from_in_sandbox)
-				-- Wrap fields which:
-				-- Are found exposed into sandbox from superclass
-				local super_def = sandboxed_superclass_meta.def
-				if super_def.properties and super_def.properties[key] then
-					local property_def = super_def.properties[key]
-					if property_def.set then
-						local unsafe_instance = sandboxed_superclass_meta.unsafe
-						local new_value = property_def.set(value)
-						unsafe_instance[key] = new_value
-						return
+			local class_meta0 = class_meta
+			while true do
+				if class_meta0.inherited_from_in_sandbox or
+				   class_meta0.inherited_from_by_wrapper then
+					local sandboxed_superclass_meta = getmetatable(
+							class_meta0.inherited_from_in_sandbox or
+							class_meta0.inherited_from_by_wrapper)
+					-- Wrap superclass instance and property fields
+					local super_def = sandboxed_superclass_meta.def
+					if super_def.properties and super_def.properties[key] then
+						local property_def = super_def.properties[key]
+						if property_def.set then
+							local new_value = property_def.set(value)
+							unsafe[key] = new_value
+							return
+						end
+						error("Property \""..key.."\" of "..type_name.."'s superclass "..
+								super_type_name.." cannot be written")
 					end
-					error("Property \""..key.."\" of "..type_name.."'s superclass "..
-							super_type_name.." cannot be written")
+					class_meta0 = sandboxed_superclass_meta
+				else
+					break
 				end
 			end
-			if def.inherited_from_in_sandbox then
+			if class_meta.inherited_from_in_sandbox then
 				-- Have been defined to this class in the sandbox environment
 				local safe_class = __buildat_sandbox_environment[type_name]
 				safe_class[key] = value
