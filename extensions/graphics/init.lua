@@ -67,7 +67,7 @@ M.safe.Scene = polybox.wrap_class("Scene", {
 		addEntity = function(safe, entity_safe)
 			local unsafe = polybox.check_type(safe, "Scene")
 			entity_unsafe = polybox.check_type(entity_safe,
-					{"ScenePrimitive", "UILabel", "UIImage", "UIElement"})
+					{"ScenePrimitive", "UIElement"})
 			unsafe:addEntity(entity_unsafe)
 			scene_entity_added(entity_unsafe)
 		end,
@@ -94,7 +94,35 @@ M.safe.Scene = polybox.wrap_class("Scene", {
 	},
 })
 
+M.safe.Entity = polybox.wrap_class("Entity", {
+	constructor = function()
+		return Entity()
+	end,
+	class = {
+	},
+	instance = {
+		setPosition = function(safe, x, y, z)
+			local unsafe = polybox.check_type(safe, "Entity")
+			               polybox.check_type(x, "number")
+			               polybox.check_type(y, "number")
+			               polybox.check_type(z, "number")
+			unsafe:setPosition(x, y, z)
+		end,
+	},
+	properties = {
+		processInputEvents = {
+			get = function(current_value)
+				return polybox.check_type(current_value, {"boolean"})
+			end,
+			set = function(new_value)
+				return polybox.check_type(new_value, {"boolean"})
+			end,
+		},
+	},
+})
+
 M.safe.ScenePrimitive = polybox.wrap_class("ScenePrimitive", {
+	inherited_from_by_wrapper = M.safe.Entity, -- Actually SceneMesh
 	constructor = function(type, v1, v2, v3, v4, v5)
 		polybox.check_enum(type, {ScenePrimitive.TYPE_BOX, ScenePrimitive.TYPE_PLANE})
 		polybox.check_type(v1, {"number", "nil"})
@@ -115,30 +143,17 @@ M.safe.ScenePrimitive = polybox.wrap_class("ScenePrimitive", {
 			local path2 = M.resave_texture_for_polycode(texture_name)
 			unsafe:loadTexture(path2)
 		end,
-		setPosition = function(safe, x, y, z)
-			local unsafe = polybox.check_type(safe, "ScenePrimitive")
-			               polybox.check_type(x, "number")
-			               polybox.check_type(y, "number")
-			               polybox.check_type(z, "number")
-			unsafe:setPosition(x, y, z)
-		end,
 	},
 })
 
 M.safe.Camera = polybox.wrap_class("Camera", {
+	inherited_from_by_wrapper = M.safe.Entity,
 	constructor = function()
 		return Camera()
 	end,
 	class = {
 	},
 	instance = {
-		setPosition = function(safe, x, y, z)
-			local unsafe = polybox.check_type(safe, "Camera")
-			               polybox.check_type(x, "number")
-			               polybox.check_type(y, "number")
-			               polybox.check_type(z, "number")
-			unsafe:setPosition(x, y, z)
-		end,
 		lookAt = function(safe, v1, v2)
 			local unsafe = polybox.check_type(safe, "Camera")
 			local unsafe_v1 = polybox.check_type(v1, "Vector3")
@@ -164,26 +179,6 @@ M.safe.Vector3 = polybox.wrap_class("Vector3", {
 	class = {
 	},
 	instance = {
-	},
-})
-
-M.safe.Entity = polybox.wrap_class("Entity", {
-	constructor = function()
-		return Entity()
-	end,
-	class = {
-	},
-	instance = {
-	},
-	properties = {
-		processInputEvents = {
-			get = function(current_value)
-				return polybox.check_type(current_value, {"boolean"})
-			end,
-			set = function(new_value)
-				return polybox.check_type(new_value, {"boolean"})
-			end,
-		},
 	},
 })
 

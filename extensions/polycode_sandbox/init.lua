@@ -5,13 +5,15 @@ local log = buildat.Logger("extension/polycode_sandbox")
 local dump = buildat.dump
 local M = {safe = {}}
 
+-- The resulting value from this function should be placed directly in the
+-- sandbox environment's global environment as _G[type_name]
 function M.wrap_class(type_name, def)
 	local class = {}
 	local class_meta = {}
 	class_meta.def = def
 	class_meta.type_name = type_name
-	class_meta.inherited_from_safely = def.inherited_from_safely
-	class_meta.inherited_from_unsafely = def.inherited_from_unsafely
+	class_meta.inherited_from_in_sandbox = def.inherited_from_in_sandbox
+	class_meta.inherited_from_by_wrapper = def.inherited_from_by_wrapper
 	class_meta.wrap = function(unsafe)
 		local safe = {}
 		local meta = {
@@ -23,6 +25,32 @@ function M.wrap_class(type_name, def)
 		meta.__index = function(table, key)
 			if def.custom_index then
 				return def.custom_index(safe, key)
+			end
+			local sandboxed_superclass_meta = getmetatable(
+					def.inherited_from_in_sandbox or
+					def.inherited_from_by_wrapper)
+			if def.inherited_from_in_sandbox or def.inherited_from_by_wrapper then
+				-- Wrap fields which:
+				-- Are found exposed into sandbox from superclass
+				local super_def = sandboxed_superclass_meta.def
+				if super_def.instance and super_def.instance[key] then
+					return super_def.instance[key]
+				end
+				if super_def.properties and super_def.properties[key] then
+					local property_def = super_def.properties[key]
+					if property_def.get then
+						local unsafe_instance = sandboxed_superclass_meta.unsafe
+						local current_value = unsafe_instance[key]
+						return property_def.get(current_value)
+					end
+					error("Property \""..key.."\" of "..type_name.."'s superclass "..
+							super_type_name.." cannot be read")
+				end
+			end
+			if def.inherited_from_in_sandbox then
+				-- Have been added to this class in the sandbox environment
+				local safe_class = __buildat_sandbox_environment[type_name]
+				return safe_class[key]
 			end
 			-- Properties and fields (methods) can be read
 			if def.properties then
@@ -46,6 +74,33 @@ function M.wrap_class(type_name, def)
 		meta.__newindex = function(table, key, value)
 			if def.custom_newindex then
 				return def.custom_newindex(safe, key, value)
+			end
+			local sandboxed_superclass_meta = getmetatable(
+					def.inherited_from_in_sandbox or
+					def.inherited_from_by_wrapper)
+			if def.inherited_from_in_sandbox or def.inherited_from_by_wrapper then
+				local sandboxed_superclass_meta =
+						getmetatable(def.inherited_from_in_sandbox)
+				-- Wrap fields which:
+				-- Are found exposed into sandbox from superclass
+				local super_def = sandboxed_superclass_meta.def
+				if super_def.properties and super_def.properties[key] then
+					local property_def = super_def.properties[key]
+					if property_def.set then
+						local unsafe_instance = sandboxed_superclass_meta.unsafe
+						local new_value = property_def.set(value)
+						unsafe_instance[key] = new_value
+						return
+					end
+					error("Property \""..key.."\" of "..type_name.."'s superclass "..
+							super_type_name.." cannot be written")
+				end
+			end
+			if def.inherited_from_in_sandbox then
+				-- Have been defined to this class in the sandbox environment
+				local safe_class = __buildat_sandbox_environment[type_name]
+				safe_class[key] = value
+				return
 			end
 			-- Only propreties can be set
 			if def.properties then
@@ -96,7 +151,8 @@ function M.check_type(thing, valid_types)
 			end
 		end
 		-- Check if thing is inherited safely from a valid type
-		local super = meta.inherited_from_safely
+		local super = meta.inherited_from_in_sandbox or
+				meta.inherited_from_by_wrapper
 		--print("super="..dump(super)..", valid_types="..dump(valid_types))
 		if super then
 			local super_meta = getmetatable(super)
@@ -165,7 +221,7 @@ function M.safe.class(name)
 
 		-- Now safety-wrap the end result
 		local sandboxed_class = M.wrap_class(name, {
-			inherited_from_safely = sandboxed_superclass,
+			inherited_from_in_sandbox = sandboxed_superclass,
 			constructor = function(...)
 				-- Ignore arguments to this unsafe constructor
 				local unsafe_instance = _G[name]()
@@ -180,49 +236,6 @@ function M.safe.class(name)
 					-- Allow arguments to this safe constructor
 					user_constructor(safe_instance, unpack(arg))
 				end
-			end,
-			-- Wrap fields which:
-			-- 1) Are found exposed into sandbox from superclass
-			-- 2) Have been defined to this class in the sandbox environment
-			custom_index = function(safe_instance, key)
-				--print("custom_index(): key="..key)
-				-- Are found exposed into sandbox from superclass
-				local super_def = sandboxed_superclass_meta.def
-				if super_def.instance and super_def.instance[key] then
-					return super_def.instance[key]
-				end
-				if super_def.properties and super_def.properties[key] then
-					local property_def = super_def.properties[key]
-					if property_def.get then
-						local unsafe_instance = sandboxed_superclass_meta.unsafe
-						local current_value = unsafe_instance[key]
-						return property_def.get(current_value)
-					end
-					error("Property \""..key.."\" of "..name.."'s superclass "..
-							super_type_name.." cannot be read")
-				end
-				-- Have been defined to this class in the sandbox environment
-				local safe_class = __buildat_sandbox_environment[name]
-				return safe_class[key]
-			end,
-			custom_newindex = function(safe_instance, key, value)
-				--print("custom_newindex(): key="..key)
-				-- Are found exposed into sandbox from superclass
-				local super_def = sandboxed_superclass_meta.def
-				if super_def.properties and super_def.properties[key] then
-					local property_def = super_def.properties[key]
-					if property_def.set then
-						local unsafe_instance = sandboxed_superclass_meta.unsafe
-						local new_value = property_def.set(value)
-						unsafe_instance[key] = new_value
-						return
-					end
-					error("Property \""..key.."\" of "..name.."'s superclass "..
-							super_type_name.." cannot be written")
-				end
-				-- Have been defined to this class in the sandbox environment
-				local safe_class = __buildat_sandbox_environment[name]
-				safe_class[key] = value
 			end,
 		})
 		__buildat_sandbox_environment[name] = sandboxed_class
