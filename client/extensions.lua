@@ -6,14 +6,14 @@ local log = buildat.Logger("__client/extensions")
 function __buildat_load_extension(name)
 	log:info("__buildat_load_extension(\""..name.."\")")
 	local path = __buildat_get_path("share").."/extensions/"..name.."/init.lua"
-	local script = loadfile(path)
+	local script, err = loadfile(path)
 	if script == nil then
-		log:warning("Extension could not be opened: "..name.." at "..path)
+		log:error("Extension could not be opened: "..name.." at "..path..": "..err)
 		return nil
 	end
 	local interface = script()
 	if interface == nil then
-		log:warning("Extension returned nil: "..name.." at "..path)
+		log:error("Extension returned nil: "..name.." at "..path)
 		return nil
 	end
 	return interface
