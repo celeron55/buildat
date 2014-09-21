@@ -19,16 +19,47 @@ scene:addEntity(ground)
 scene:getDefaultCamera():setPosition(7,7,7)
 scene:getDefaultCamera():lookAt(graphics.Vector3(0,0,0), graphics.Vector3(0,1,0))
 
-local scene2d = graphics.Scene(graphics.Scene.SCENE_2D)
+local scene2d = graphics.Scene(graphics.Scene.SCENE_2D_TOPLEFT)
 scene2d:getActiveCamera():setOrthoSize(640, 480)
 local label = ui.UILabel("testmodules/minigame", 32)
-label:setPosition(-210, 180)
+label:setPosition(120, 25)
 scene2d:addEntity(label)
 
 local image = ui.UIImage("minigame/pink_texture.png")
 image:Resize(50, 50)
-image:setPosition(-280, 165);
+label:setAnchorPoint(graphics.Vector3(0,0,0))
+image:setPosition(40, 25);
 scene2d:addEntity(image)
+
+--experimental.do_stuff(scene2d)
+
+--- UI ---
+
+local polybox = require("buildat/extension/polycode_sandbox")
+
+polybox.class "SomeUI" (ui.UIElement)
+function SomeUI:SomeUI()
+	log:info("SomeUI:SomeUI()")
+	ui.UIElement.UIElement(self)
+	self:Resize(100, 60)
+	self:setPosition(640-100, 0)
+	self.button_grab_mouse = ui.UIButton("Mouse", 100, 30)
+	self.button_grab_mouse:setPosition(0, 0)
+	self:addChild(self.button_grab_mouse)
+	self.button_foo = ui.UIButton("Foo", 100, 30)
+	self.button_foo:setPosition(0, 30)
+	self:addChild(self.button_foo)
+end
+
+function SomeUI:on_button(e)
+end
+
+scene2d.rootEntity.processInputEvents = true
+local some_ui = SomeUI()
+log:info("some_ui="..dump(some_ui))
+scene2d:addEntity(some_ui)
+
+----------
 
 local field = {}
 local players = {}

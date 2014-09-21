@@ -53,34 +53,44 @@ end
 
 M.safe.Scene = polybox.wrap_class("Scene", {
 	constructor = function(sceneType, virtualScene)
-		polybox.check_enum(sceneType, {Scene.SCENE_3D, Scene.SCENE_2D})
+		polybox.check_enum(sceneType,
+				{Scene.SCENE_3D, Scene.SCENE_2D, Scene.SCENE_2D_TOPLEFT})
 		polybox.check_enum(virtualScene, {true, false, "__nil"})
 		return Scene(sceneType, virtualScene)
 	end,
 	class = {
 		SCENE_3D = Scene.SCENE_3D,
 		SCENE_2D = Scene.SCENE_2D,
+		SCENE_2D_TOPLEFT = Scene.SCENE_2D_TOPLEFT,
 	},
 	instance = {
 		addEntity = function(safe, entity_safe)
-			unsafe = polybox.check_type(safe, "Scene")
-			entity_unsafe = polybox.check_type(entity_safe, {"ScenePrimitive", "UILabel", "UIImage"})
+			local unsafe = polybox.check_type(safe, "Scene")
+			entity_unsafe = polybox.check_type(entity_safe,
+					{"ScenePrimitive", "UILabel", "UIImage", "UIElement"})
 			unsafe:addEntity(entity_unsafe)
 			scene_entity_added(entity_unsafe)
 		end,
 		getDefaultCamera = function(safe)
-			unsafe = polybox.check_type(safe, "Scene")
+			local unsafe = polybox.check_type(safe, "Scene")
 			return getmetatable(M.safe.Camera).wrap(unsafe:getDefaultCamera())
 		end,
 		getActiveCamera = function(safe)
-			unsafe = polybox.check_type(safe, "Scene")
+			local unsafe = polybox.check_type(safe, "Scene")
 			return getmetatable(M.safe.Camera).wrap(unsafe:getActiveCamera())
 		end,
 		removeEntity = function(safe, entity_safe)
-			unsafe = polybox.check_type(safe, "Scene")
+			local unsafe = polybox.check_type(safe, "Scene")
 			entity_unsafe = polybox.check_type(entity_safe, "ScenePrimitive")
 			unsafe:removeEntity(entity_unsafe)
 		end,
+	},
+	properties = {
+		rootEntity = {
+			get = function(current_value)
+				return getmetatable(M.safe.Entity).wrap(current_value)
+			end,
+		},
 	},
 })
 
@@ -100,16 +110,16 @@ M.safe.ScenePrimitive = polybox.wrap_class("ScenePrimitive", {
 	},
 	instance = {
 		loadTexture = function(safe, texture_name)
-			unsafe = polybox.check_type(safe, "ScenePrimitive")
-			         polybox.check_type(texture_name, "string")
+			local unsafe = polybox.check_type(safe, "ScenePrimitive")
+			               polybox.check_type(texture_name, "string")
 			local path2 = M.resave_texture_for_polycode(texture_name)
 			unsafe:loadTexture(path2)
 		end,
 		setPosition = function(safe, x, y, z)
-			unsafe = polybox.check_type(safe, "ScenePrimitive")
-			         polybox.check_type(x, "number")
-			         polybox.check_type(y, "number")
-			         polybox.check_type(z, "number")
+			local unsafe = polybox.check_type(safe, "ScenePrimitive")
+			               polybox.check_type(x, "number")
+			               polybox.check_type(y, "number")
+			               polybox.check_type(z, "number")
 			unsafe:setPosition(x, y, z)
 		end,
 	},
@@ -123,22 +133,22 @@ M.safe.Camera = polybox.wrap_class("Camera", {
 	},
 	instance = {
 		setPosition = function(safe, x, y, z)
-			unsafe = polybox.check_type(safe, "Camera")
-			         polybox.check_type(x, "number")
-			         polybox.check_type(y, "number")
-			         polybox.check_type(z, "number")
+			local unsafe = polybox.check_type(safe, "Camera")
+			               polybox.check_type(x, "number")
+			               polybox.check_type(y, "number")
+			               polybox.check_type(z, "number")
 			unsafe:setPosition(x, y, z)
 		end,
 		lookAt = function(safe, v1, v2)
-			unsafe = polybox.check_type(safe, "Camera")
-			unsafe_v1 = polybox.check_type(v1, "Vector3")
-			unsafe_v2 = polybox.check_type(v2, "Vector3")
+			local unsafe = polybox.check_type(safe, "Camera")
+			local unsafe_v1 = polybox.check_type(v1, "Vector3")
+			local unsafe_v2 = polybox.check_type(v2, "Vector3")
 			unsafe:lookAt(unsafe_v1, unsafe_v2)
 		end,
 		setOrthoSize = function(safe, x, y)
-			unsafe = polybox.check_type(safe, "Camera")
-			         polybox.check_type(x, "number")
-			         polybox.check_type(y, "number")
+			local unsafe = polybox.check_type(safe, "Camera")
+			               polybox.check_type(x, "number")
+			               polybox.check_type(y, "number")
 			unsafe:setOrthoSize(x, y)
 		end,
 	},
@@ -154,6 +164,26 @@ M.safe.Vector3 = polybox.wrap_class("Vector3", {
 	class = {
 	},
 	instance = {
+	},
+})
+
+M.safe.Entity = polybox.wrap_class("Entity", {
+	constructor = function()
+		return Entity()
+	end,
+	class = {
+	},
+	instance = {
+	},
+	properties = {
+		processInputEvents = {
+			get = function(current_value)
+				return polybox.check_type(current_value, {"boolean"})
+			end,
+			set = function(new_value)
+				return polybox.check_type(new_value, {"boolean"})
+			end,
+		},
 	},
 })
 

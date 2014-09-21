@@ -15,7 +15,7 @@ for _, name in ipairs(buildat_safe_list) do
 	buildat_safe[name] = buildat[name]
 end
 
-local sandbox = {
+__buildat_sandbox_environment = {
 	assert = assert, -- Safe according to http://lua-users.org/wiki/SandBoxes
 	-- Base sandbox from
 	-- http://stackoverflow.com/questions/1224708/how-can-i-create-a-secure-lua-sandbox/6982080#6982080
@@ -48,9 +48,9 @@ local sandbox = {
 	os = { clock = os.clock, difftime = os.difftime, time = os.time },
 }
 
-sandbox.buildat = buildat
+__buildat_sandbox_environment.buildat = buildat
 
-sandbox.require = function(name)
+__buildat_sandbox_environment.require = function(name)
 	log:info("require(\""..name.."\")")
 	-- Check loaded modules
 	if package.loaded[name] then
@@ -87,7 +87,7 @@ local function run_in_sandbox(untrusted_code, sandbox)
 end
 
 function __buildat_run_in_sandbox(untrusted_code)
-	local status, err = run_in_sandbox(untrusted_code, sandbox)
+	local status, err = run_in_sandbox(untrusted_code, __buildat_sandbox_environment)
 	if status == false then
 		log:error("Failed to run script:\n"..err)
 		return false
