@@ -7,6 +7,21 @@ local log = buildat.Logger("extension/ui")
 local dump = buildat.dump
 local M = {safe = {}}
 
+M.safe.UIEvent = polybox.wrap_class("UIEvent", {
+	constructor = function()
+		return UIEvent()
+	end,
+	class = {
+		CLICK_EVENT = UIEvent.CLICK_EVENT,
+		CLOSE_EVENT = UIEvent.CLOSE_EVENT,
+		OK_EVENT = UIEvent.OK_EVENT,
+		CANCEL_EVENT = UIEvent.CANCEL_EVENT,
+		CHANGE_EVENT = UIEvent.CHANGE_EVENT,
+		YES_EVENT = UIEvent.YES_EVENT,
+		NO_EVENT = UIEvent.NO_EVENT,
+	},
+})
+
 M.safe.UIElement = polybox.wrap_class("UIElement", {
 	inherited_from_by_wrapper = graphics.safe.Entity,
 	constructor = function()

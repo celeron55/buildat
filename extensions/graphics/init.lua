@@ -51,7 +51,36 @@ local function scene_entity_removed(scene, entity)
 	-- TODO
 end
 
+M.safe.EventHandler = polybox.wrap_class("EventHandler", {
+	constructor = function()
+		return EventHandler()
+	end,
+})
+
+M.safe.EventDispatcher = polybox.wrap_class("EventDispatcher", {
+	inherited_from_by_wrapper = M.safe.EventHandler,
+	constructor = function()
+		return EventDispatcher()
+	end,
+	instance = {
+		addEventListener = function(safe, listener_safe, callback, eventCode)
+			local unsafe = polybox.check_type(safe, "EventDispatcher")
+			local listener_unsafe = polybox.check_type(listener_safe, "EventHandler")
+			polybox.check_type(callback, "function")
+			polybox.check_type(eventCode, "number")
+			local function callback_wrapper(listener_unsafe, event_unsafe)
+				-- Ignore listener_unsafe and just pass listener_safe
+				-- TODO: Security: event probably isn't safe
+				log:verbose("EventDispatcher: event="..dump(event))
+				callback(listener_safe, event)
+			end
+			unsafe:addEventListener(listener_unsafe, callback_wrapper, eventCode)
+		end,
+	},
+})
+
 M.safe.Scene = polybox.wrap_class("Scene", {
+	inherited_from_by_wrapper = M.safe.EventDispatcher,
 	constructor = function(sceneType, virtualScene)
 		polybox.check_enum(sceneType,
 				{Scene.SCENE_3D, Scene.SCENE_2D, Scene.SCENE_2D_TOPLEFT})
@@ -94,6 +123,7 @@ M.safe.Scene = polybox.wrap_class("Scene", {
 })
 
 M.safe.Entity = polybox.wrap_class("Entity", {
+	inherited_from_by_wrapper = M.safe.EventDispatcher,
 	constructor = function()
 		return Entity()
 	end,

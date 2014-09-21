@@ -6,10 +6,15 @@ local log = buildat.Logger("minigame")
 local dump = buildat.dump
 log:info("minigame/init.lua loaded")
 
+local mouse_grabbed = false
+
 local cereal = require("buildat/extension/cereal")
 local graphics = require("buildat/extension/graphics")
 local ui = require("buildat/extension/ui")
 local experimental = require("buildat/extension/experimental")
+local keyinput = require("buildat/extension/keyinput")
+local mouseinput = require("buildat/extension/mouseinput")
+local joyinput = require("buildat/extension/joyinput")
 
 local scene = graphics.Scene(graphics.Scene.SCENE_3D)
 ground = graphics.ScenePrimitive(graphics.ScenePrimitive.TYPE_PLANE, 10,10)
@@ -43,15 +48,30 @@ function SomeUI:SomeUI()
 	ui.UIElement.UIElement(self)
 	self:Resize(100, 60)
 	self:setPosition(640-100, 0)
+
 	self.button_grab_mouse = ui.UIButton("Mouse", 100, 30)
 	self.button_grab_mouse:setPosition(0, 0)
 	self:addChild(self.button_grab_mouse)
+
 	self.button_foo = ui.UIButton("Foo", 100, 30)
 	self.button_foo:setPosition(0, 30)
 	self:addChild(self.button_foo)
-end
 
-function SomeUI:on_button(e)
+	self.button_grab_mouse:addEventListener(self, function(self, e)
+		log:info("SomeUI:on_button_grab_mouse()")
+		if not mouse_grabbed then
+			mouse_grabbed = true
+			mouseinput.show_cursor(false)
+		end
+	end, ui.UIEvent.CLICK_EVENT)
+
+	self.button_foo:addEventListener(self, function(self, e)
+		log:info("SomeUI:on_button_foo()")
+		if not mouse_grabbed then
+			mouse_grabbed = true
+			mouseinput.show_cursor(false)
+		end
+	end, ui.UIEvent.CLICK_EVENT)
 end
 
 scene2d.rootEntity.processInputEvents = true
@@ -146,11 +166,6 @@ buildat.sub_packet("minigame:update", function(data)
 	end
 end)
 
-local keyinput = require("buildat/extension/keyinput")
-local mouseinput = require("buildat/extension/mouseinput")
-local joyinput = require("buildat/extension/joyinput")
-local mouse_grabbed = false
-
 keyinput.sub(function(key, state)
 	if key == keyinput.KEY_LEFT then
 		if state == "down" then
@@ -189,10 +204,6 @@ end)
 
 mouseinput.sub_down(function(button, x, y)
 	log:info("mouse down: "..button..", "..x..", "..y)
-	if not mouse_grabbed then
-		mouse_grabbed = true
-		mouseinput.show_cursor(false)
-	end
 end)
 
 mouseinput.sub_move(function(x, y)
