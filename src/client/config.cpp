@@ -30,12 +30,6 @@ bool Config::check_paths()
 {
 	bool fail = false;
 
-	if(!check_file_readable(polycode_path+"/Core/Contents/Include/Polycode.h")){
-		log_e(MODULE, "Polycode doesn't seem to exist in polycode_path=\"%s\"",
-				cs(polycode_path));
-		fail = true;
-	}
-
 	if(!check_file_readable(share_path+"/extensions/test/init.lua")){
 		log_e(MODULE, "Static files don't seem to exist in share_path=\"%s\"",
 				cs(share_path));

@@ -240,11 +240,6 @@ struct CApp: public App, public u3d::Application
 			lua_pushlstring(L, path.c_str(), path.size());
 			return 1;
 		}
-		if(name == "polycode"){
-			ss_ path = g_client_config.polycode_path;
-			lua_pushlstring(L, path.c_str(), path.size());
-			return 1;
-		}
 		log_w(MODULE, "Unknown named path: \"%s\"", cs(name));
 		return 0;
 	}

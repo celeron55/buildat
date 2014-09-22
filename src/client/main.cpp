@@ -50,12 +50,11 @@ int main(int argc, char *argv[])
 
 	client::Config &config = g_client_config;
 
-	const char opts[100] = "hs:p:P:C:l:";
+	const char opts[100] = "hs:P:C:l:";
 	const char usagefmt[1000] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
 			"  -s [address]         Specify server address\n"
-			"  -p [polycode_path]   Specify polycode path\n"
 			"  -P [share_path]      Specify share/ path\n"
 			"  -C [cache_path]      Specify cache/ path\n"
 			"  -l [integer]         Set maximum log level (0...5)\n"
@@ -72,10 +71,6 @@ int main(int argc, char *argv[])
 		case 's':
 			fprintf(stderr, "INFO: config.server_address: %s\n", c55_optarg);
 			config.server_address = c55_optarg;
-			break;
-		case 'p':
-			fprintf(stderr, "INFO: config.polycode_path: %s\n", c55_optarg);
-			config.polycode_path = c55_optarg;
 			break;
 		case 'P':
 			fprintf(stderr, "INFO: config.share_path: %s\n", c55_optarg);
