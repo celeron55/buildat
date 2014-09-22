@@ -6,7 +6,7 @@ License: Apache 2.0
 
 Client
 ------
-Built using Polycode C++.
+Built using Urho3D.
 
 Module code is transfered from the server and run in a safe Lua sandbox.
 
@@ -14,7 +14,8 @@ Extensions are non-sandboxed code installed separately on each client.
 
 Server
 ------
-Built using C++ with most functionality in runtime-compiled C++ modules.
+Built using C++, with suitable parts from Urho3D, with most functionality in
+runtime-compiled C++ modules.
 
 Module structure
 ----------------
