@@ -47,9 +47,9 @@ struct Module: public interface::Module
 		m_server->load_module("client_data", builtin+"/client_data");
 
 		sv_<ss_> load_list = {
-			//"test1",
+			"test1",
 			//"test2",
-			"minigame",
+			//"minigame",
 		};
 		for(const ss_ &name : load_list){
 			m_server->load_module(name, m_server->get_modules_path()+"/"+name);

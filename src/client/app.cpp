@@ -31,7 +31,7 @@ namespace app {
 struct CApp: public App, public u3d::Application
 {
 	sp_<client::State> m_state;
-	up_<u3d::LuaScript> m_script;
+	u3d::LuaScript *m_script;
 	lua_State *L;
 	int64_t m_last_script_tick_us;
 
@@ -41,10 +41,78 @@ struct CApp: public App, public u3d::Application
 		L(nullptr),
 		m_last_script_tick_us(get_timeofday_us())
 	{
+		engineParameters_["WindowTitle"]   = "Buildat Client";
+		engineParameters_["LogName"]       = "client_Urho3D.log";
+		engineParameters_["FullScreen"]    = false;
+		engineParameters_["Headless"]      = false;
+		// TODO: Proper paths
+		engineParameters_["ResourcePaths"] =
+				"/home/celeron55/softat/Urho3D/Bin/CoreData;"
+				"/home/celeron55/softat/Urho3D/Bin/Data";
+		engineParameters_["AutoloadPaths"] = "";
+
+		// Set up on_update event (this runs every frame)
+		SubscribeToEvent(u3d::E_UPDATE, HANDLER(CApp, on_update));
+
+		// TODO: Set up input events (Call stuff like
+		//       call_global_if_exists(L, "__buildat_key_down", 1, 0);)
+		//       ...or don't? They should be available in Urho3D API.
+	}
+
+	~CApp()
+	{
+	}
+
+	void set_state(sp_<client::State> state)
+	{
+		m_state = state;
+	}
+
+	int run()
+	{
+		return u3d::Application::Run();
+	}
+
+	void shutdown()
+	{
+		u3d::Engine *engine = GetSubsystem<u3d::Engine>();
+		engine->Exit();
+	}
+
+	void run_script(const ss_ &script)
+	{
+		log_v(MODULE, "run_script(): %s", cs(script));
+
+		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_run_code_in_sandbox");
+		lua_pushlstring(L, script.c_str(), script.size());
+		error_logging_pcall(L, 1, 1);
+		bool status = lua_toboolean(L, -1);
+		lua_pop(L, 1);
+		if(status == false){
+			log_w(MODULE, "run_script(): failed");
+		} else {
+			log_v(MODULE, "run_script(): succeeded");
+		}
+	}
+
+	void handle_packet(const ss_ &name, const ss_ &data)
+	{
+		log_v(MODULE, "handle_packet(): %s", cs(name));
+
+		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_handle_packet");
+		lua_pushlstring(L, name.c_str(), name.size());
+		lua_pushlstring(L, data.c_str(), data.size());
+		error_logging_pcall(L, 2, 0);
+	}
+
+	// Non-public methods
+
+	void Start()
+	{
 		// Instantiate and register the Lua script subsystem so that we can use the LuaScriptInstance component
 		context_->RegisterSubsystem(new u3d::LuaScript(context_));
 
-		m_script.reset(new u3d::LuaScript(context_));
+		m_script = context_->GetSubsystem<u3d::LuaScript>();
 		L = m_script->GetState();
 		if(L == nullptr)
 			throw Exception("m_script.GetState() returned null");
@@ -72,71 +140,8 @@ struct CApp: public App, public u3d::Application
 					lua_tostring(L, -1));
 			lua_pop(L, 1);
 		}
-
-		engineParameters_["WindowTitle"]   = "Buildat Client";
-		engineParameters_["LogName"]       = "client_Urho3D.log";
-		engineParameters_["FullScreen"]    = false;
-		engineParameters_["Headless"]      = false;
-		// TODO
-		engineParameters_["ResourcePaths"] =
-				"/home/celeron55/softat/Urho3D/Bin/CoreData";
-		engineParameters_["ResourcePackages"] = "";
-		engineParameters_["AutoloadPaths"] = "../../../Urho3D/Bin/Data";
-
-		// TODO: Set up update() event
-		SubscribeToEvent(u3d::E_UPDATE, HANDLER(CApp, on_update));
-
-		// TODO: Set up input events (Call stuff like
-		//       call_global_if_exists(L, "__buildat_key_down", 1, 0);)
+		//m_script->ExecuteFile(u3d::String(init_lua_path.c_str()));
 	}
-
-	~CApp()
-	{
-	}
-
-	void set_state(sp_<client::State> state)
-	{
-		m_state = state;
-	}
-
-	int run()
-	{
-		return u3d::Application::Run();
-	}
-
-	void shutdown()
-	{
-		u3d::Engine *engine = GetSubsystem<u3d::Engine>();
-		engine->Exit();
-	}
-
-	void run_script(const ss_ &script)
-	{
-		log_v(MODULE, "run_script(): %s", cs(script));
-
-		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_run_in_sandbox");
-		lua_pushlstring(L, script.c_str(), script.size());
-		error_logging_pcall(L, 1, 1);
-		bool status = lua_toboolean(L, -1);
-		lua_pop(L, 1);
-		if(status == false){
-			log_w(MODULE, "run_script(): failed");
-		} else {
-			log_v(MODULE, "run_script(): succeeded");
-		}
-	}
-
-	void handle_packet(const ss_ &name, const ss_ &data)
-	{
-		log_v(MODULE, "handle_packet(): %s", cs(name));
-
-		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_handle_packet");
-		lua_pushlstring(L, name.c_str(), name.size());
-		lua_pushlstring(L, data.c_str(), data.size());
-		error_logging_pcall(L, 2, 0);
-	}
-
-	// Non-public methods
 
 	void on_update(u3d::StringHash eventType, u3d::VariantMap &eventData)
 	{
@@ -338,7 +343,7 @@ struct CApp: public App, public u3d::Application
 	// pcall(untrusted_function) -> status, error
 	static int l_pcall(lua_State *L)
 	{
-		log_v(MODULE, "l_pcall()");
+		log_d(MODULE, "l_pcall()");
 		lua_pushcfunction(L, handle_error);
 		int handle_error_stack_i = lua_gettop(L);
 
@@ -346,7 +351,7 @@ struct CApp: public App, public u3d::Application
 		int r = lua_pcall(L, 0, 0, handle_error_stack_i);
 		int error_stack_i = lua_gettop(L);
 		if(r == 0){
-			log_v(MODULE, "l_pcall() returned 0 (no error)");
+			log_d(MODULE, "l_pcall() returned 0 (no error)");
 			lua_pushboolean(L, true);
 			return 1;
 		}

@@ -78,16 +78,29 @@ __buildat_sandbox_environment.require = function(name)
 	error("require: \""..name.."\" not found in sandbox")
 end
 
-local function run_in_sandbox(untrusted_code, sandbox)
-	if untrusted_code:byte(1) == 27 then return false, "binary bytecode prohibited" end
-	local untrusted_function, message = loadstring(untrusted_code)
-	if not untrusted_function then return false, message end
+local function run_function_in_sandbox(untrusted_function, sandbox)
 	setfenv(untrusted_function, sandbox)
 	return __buildat_pcall(untrusted_function)
 end
 
-function __buildat_run_in_sandbox(untrusted_code)
-	local status, err = run_in_sandbox(untrusted_code, __buildat_sandbox_environment)
+function __buildat_run_function_in_sandbox(untrusted_function)
+	local status, err = run_function_in_sandbox(untrusted_function, __buildat_sandbox_environment)
+	if status == false then
+		log:error("Failed to run function:\n"..err)
+		return false
+	end
+	return true
+end
+
+local function run_code_in_sandbox(untrusted_code, sandbox)
+	if untrusted_code:byte(1) == 27 then return false, "binary bytecode prohibited" end
+	local untrusted_function, message = loadstring(untrusted_code)
+	if not untrusted_function then return false, message end
+	return run_function_in_sandbox(untrusted_function, sandbox)
+end
+
+function __buildat_run_code_in_sandbox(untrusted_code)
+	local status, err = run_code_in_sandbox(untrusted_code, __buildat_sandbox_environment)
 	if status == false then
 		log:error("Failed to run script:\n"..err)
 		return false
@@ -102,5 +115,7 @@ function buildat:run_script_file(name)
 		return false
 	end
 	log:info("buildat:run_script_file("..name.."): code length: "..#code)
-	return __buildat_run_in_sandbox(code)
+	return __buildat_run_code_in_sandbox(code)
 end
+
+log:info("sandbox.lua loaded")
