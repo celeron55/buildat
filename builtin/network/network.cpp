@@ -190,8 +190,13 @@ struct Module: public interface::Module, public network::Interface
 			throw Exception("on_incoming_data: fds don't match");
 		char buf[100000];
 		ssize_t r = recv(fd, buf, 100000, 0);
-		if(r == -1)
+		if(r == -1){
+			if(errno == ECONNRESET){
+				log_w(MODULE, "Peer %zu: Connection reset by peer", peer.id);
+				return;
+			}
 			throw Exception(ss_()+"Receive failed: "+strerror(errno));
+		}
 		if(r == 0){
 			log_i(MODULE, "Peer %zu disconnected", peer.id);
 
