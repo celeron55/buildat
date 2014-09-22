@@ -5,13 +5,14 @@
 #include "client/config.h"
 #include "client/state.h"
 #include "client/app.h"
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wsign-compare"
-#include <PolycodeView.h>
-#pragma GCC diagnostic pop
 #include <c55/getopt.h>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstrict-aliasing"
+#include <Context.h>
+#pragma GCC diagnostic pop
 #include <signal.h>
 #define MODULE "__main"
+namespace u3d = Urho3D;
 
 client::Config g_client_config;
 
@@ -98,20 +99,13 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	Polycode::PolycodeView *view = new Polycode::PolycodeView("Buildat Client",
-			true);
-	sp_<app::App> app0(app::createApp(view));
-
+	u3d::Context context;
+	sp_<app::App> app0(app::createApp(&context));
 	sp_<client::State> state(client::createState(app0));
 	app0->set_state(state);
 
 	if(!state->connect(config.server_address, "20000"))
 		return 1;
 
-	while(app0->update()){
-		state->update();
-		if(g_sigint_received)
-			app0->shutdown();
-	}
-	return 0;
+	return app0->run();
 }

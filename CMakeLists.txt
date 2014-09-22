@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.6)
 project(buildat)
 
 #
-# Libraries
+# Bundled libraries
 #
 
 add_subdirectory("3rdparty/cereal")
@@ -36,6 +36,13 @@ include(Urho3D-CMake-common)
 find_package(Urho3D REQUIRED)
 include_directories(${URHO3D_INCLUDE_DIRS})
 
+# Urho3D's Lua
+include_directories(${URHO3D_HOME}/Source/ThirdParty/Lua/src)
+
+# Run some automagic from Urho3D.
+# This appends to at least ${ABSOLUTE_PATH_LIBS} and {LINK_LIBS_ONLY}
+define_dependency_libs("Urho3D")
+
 #
 # Buildat
 #
@@ -64,12 +71,14 @@ IF(BUILD_CLIENT)
 		src/impl/sha1.cpp
 		src/impl/packet_stream.cpp
 	)
+
 	add_executable(${CLIENT_EXE_NAME} ${CLIENT_SRCS})
+
 	TARGET_LINK_LIBRARIES(${CLIENT_EXE_NAME}
-		${POLYCODE_DEPENDENCY_LIBS}
 		c55lib
 		smallsha1
-		# TODO: Urho3D libraries
+		${ABSOLUTE_PATH_LIBS}
+		${LINK_LIBS_ONLY}
 	)
 ENDIF(BUILD_CLIENT)
 
@@ -92,10 +101,12 @@ IF(BUILD_SERVER)
 		src/impl/packet_stream.cpp
 	)
 	add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
+
 	TARGET_LINK_LIBRARIES(${SERVER_EXE_NAME}
 		c55lib
 		smallsha1
 		dl
-		# TODO: Urho3D libraries
+		${ABSOLUTE_PATH_LIBS}
+		${LINK_LIBS_ONLY}
 	)
 ENDIF(BUILD_SERVER)

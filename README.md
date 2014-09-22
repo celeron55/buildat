@@ -24,7 +24,14 @@ TODO
 Get and build Urho3D
 ----------------------
 
-TODO
+$ git clone https://github.com/urho3d/Urho3D.git
+$ cd Urho3D
+$ ./cmake_gcc.h  # Add -DURHO3D_64BIT=true on 64-bit systems
+$ cd Build
+$ make -j4
+
+Take note whether you build a 32 or a 64 bit version and use the same option in
+Buildat's CMake configuration.
 
 Build Buildat
 ---------------
@@ -33,7 +40,7 @@ Build Buildat
     $ cd $wherever_buildat_is
     $ mkdir Build  # Capital B is a good idea so it stays out of the way in tabcomplete
     $ cd Build
-    $ cmake .. -DCMAKE_BUILD_TYPE=Debug
+    $ cmake .. -DCMAKE_BUILD_TYPE=Debug  # Add -DURHO3D_64BIT=true on 64-bit systems
     $ make -j4
 
 You can use -DBUILD_SERVER=false or -DBUILD_CLIENT=false if you don't need the

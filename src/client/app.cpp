@@ -4,197 +4,41 @@
 #include "core/log.h"
 #include "client/config.h"
 #include "client/state.h"
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wsign-compare"
-#include <Polycode.h>
-#include <PolycodeView.h>
-#include <PolycodeLUA.h>
-//#include "Physics2DLUA.h"
-//#include "Physics3DLUA.h"
-#include <UILUA.h>
-#include <OSBasics.h>
-#pragma GCC diagnostic pop
 #include <c55/getopt.h>
-#include "c55/os.h"
+#include <c55/os.h>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstrict-aliasing"
+#include <Application.h>
+#include <Engine.h>
+#include <LuaScript.h>
+#pragma GCC diagnostic pop
+extern "C" {
+#include <lua.h>
+#include <lauxlib.h>
+}
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
-#include <core/log.h>
 #include <signal.h>
 #define MODULE "__main"
-
-using Polycode::SDLCore;
-using Polycode::Logger;
-using Polycode::String;
-using Polycode::Event;
-using Polycode::InputEvent;
+namespace u3d = Urho3D;
 
 extern client::Config g_client_config;
 
 namespace app {
 
-int MyLoader(lua_State *pState)
+struct CApp: public App, public u3d::Application
 {
-	ss_ module = lua_tostring(pState, 1);
-
-	module += ".lua";
-	//Logger::log("Loading custom class: %s\n", module.c_str());
-
-	std::vector<ss_> defaultPaths = {
-		g_client_config.polycode_path+"/Bindings/Contents/LUA/API/",
-		g_client_config.polycode_path+"/Modules/Bindings/2DPhysics/API/",
-		g_client_config.polycode_path+"/Modules/Bindings/3DPhysics/API/",
-		g_client_config.polycode_path+"/Modules/Bindings/UI/API/",
-	};
-
-	for(ss_ defaultPath : defaultPaths){
-		defaultPath.append(module);
-
-		const char *fullPath = module.c_str();
-
-		OSFILE *inFile = OSBasics::open(module, "r");
-
-		if(!inFile){
-			inFile =  OSBasics::open(defaultPath, "r");
-		}
-
-		if(inFile){
-			OSBasics::seek(inFile, 0, SEEK_END);
-			long progsize = OSBasics::tell(inFile);
-			OSBasics::seek(inFile, 0, SEEK_SET);
-			char *buffer = (char*)malloc(progsize + 1);
-			memset(buffer, 0, progsize + 1);
-			OSBasics::read(buffer, progsize, 1, inFile);
-			luaL_loadbuffer(pState, (const char*)buffer, progsize, fullPath);
-			free(buffer);
-			OSBasics::close(inFile);
-			return 1;
-		}
-	}
-	ss_ err = "\n\tError - Could could not find ";
-	err += module;
-	err += ".";
-	lua_pushstring(pState, err.c_str());
-	return 1;
-}
-
-class BackTraceEntry {
-public:
-	String fileName;
-	unsigned int lineNumber;
-};
-
-static int areSameCClass(lua_State *L){
-	luaL_checktype(L, 1, LUA_TUSERDATA);
-	PolyBase *classOne = *((PolyBase **)lua_touserdata(L, 1));
-	luaL_checktype(L, 2, LUA_TUSERDATA);
-	PolyBase *classTwo = *((PolyBase **)lua_touserdata(L, 2));
-
-	if(classOne == classTwo){
-		lua_pushboolean(L, true);
-	} else {
-		lua_pushboolean(L, false);
-	}
-	return 1;
-}
-
-// Polycode redirects print() to this
-static int debugPrint(lua_State *L)
-{
-	const char *msg = lua_tostring(L, 1);
-	log_i("polycode", "%s", msg);
-	return 0;
-}
-
-struct CApp: public Polycode::EventHandler, public App
-{
-	Polycode::Core *core;
-	lua_State *L;
 	sp_<client::State> m_state;
+	u3d::LuaScript m_script;
+	lua_State *L;
 	int64_t m_last_script_tick_us;
 
-	CApp(Polycode::PolycodeView *view):
-		Polycode::EventHandler(), core(NULL), L(NULL),
+	CApp(u3d::Context *context):
+		u3d::Application(context),
+		m_script(context),
+		L(m_script.GetState()),
 		m_last_script_tick_us(get_timeofday_us())
 	{
-		// Win32Core for Windows
-		// CocoaCore for Mac
-		// SDLCore for Linux
-		core = new POLYCODE_CORE(view, 640, 480, false, false, 0, 0, 90, 1, true);
-
-		Polycode::CoreServices::getInstance()->getResourceManager()->addArchive(
-				g_client_config.share_path+"/client/default.pak");
-		Polycode::CoreServices::getInstance()->getResourceManager()->addDirResource("default",
-				false);
-
-		L = lua_open();
-		luaL_openlibs(L);
-		luaopen_debug(L);
-		luaopen_Polycode(L);
-
-		lua_getfield(L, LUA_GLOBALSINDEX, "package");	// push "package"
-		lua_getfield(L, -1, "loaders");					// push "package.loaders"
-		lua_remove(L, -2);								// remove "package"
-
-		// Count the number of entries in package.loaders.
-		// Table is now at index -2, since 'nil' is right on top of it.
-		// lua_next pushes a key and a value onto the stack.
-		int numLoaders = 0;
-		lua_pushnil(L);
-		while(lua_next(L, -2) != 0)
-		{
-			lua_pop(L, 1);
-			numLoaders++;
-		}
-
-		lua_pushinteger(L, numLoaders + 1);
-		lua_pushcfunction(L, MyLoader);
-		lua_rawset(L, -3);
-
-		// Table is still on the stack.  Get rid of it now.
-		lua_pop(L, 1);
-
-		// Polycode redirects print() to this global
-		lua_register(L, "debugPrint", debugPrint);
-
-		// Looks like this global isn't required
-		//lua_register(L, "__customError", handle_error);
-
-		// This global is used by Polycode's class implementation
-		lua_register(L, "__are_same_c_class", areSameCClass);
-
-		lua_getfield(L, LUA_GLOBALSINDEX, "require");
-		lua_pushstring(L, "class");
-		error_logging_pcall(L, 1, 0);
-
-		lua_getfield(L, LUA_GLOBALSINDEX, "require");
-		lua_pushstring(L, "Polycode");
-		error_logging_pcall(L, 1, 0);
-
-		lua_getfield(L, LUA_GLOBALSINDEX, "require");
-		lua_pushstring(L, "Physics2D");
-		error_logging_pcall(L, 1, 0);
-
-		lua_getfield(L, LUA_GLOBALSINDEX, "require");
-		lua_pushstring(L, "Physics3D");
-		error_logging_pcall(L, 1, 0);
-
-		lua_getfield(L, LUA_GLOBALSINDEX, "require");
-		lua_pushstring(L, "UI");
-		error_logging_pcall(L, 1, 0);
-
-		lua_getfield(L, LUA_GLOBALSINDEX, "require");
-		lua_pushstring(L, "tweens");
-		error_logging_pcall(L, 1, 0);
-
-		lua_getfield(L, LUA_GLOBALSINDEX, "require");
-		lua_pushstring(L, "defaults");
-		error_logging_pcall(L, 1, 0);
-
-		// TODO
-		//luaopen_Physics2D(L);
-		//luaopen_Physics3D(L);
-		luaopen_UI(L);
-
 		lua_pushlightuserdata(L, (void*)this);
 		lua_setfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 
@@ -219,20 +63,13 @@ struct CApp: public Polycode::EventHandler, public App
 			lua_pop(L, 1);
 		}
 
-		core->getInput()->addEventListener(this, InputEvent::EVENT_KEYDOWN);
-		core->getInput()->addEventListener(this, InputEvent::EVENT_KEYUP);
-		core->getInput()->addEventListener(this, InputEvent::EVENT_MOUSEDOWN);
-		core->getInput()->addEventListener(this, InputEvent::EVENT_MOUSEMOVE);
-		core->getInput()->addEventListener(this, InputEvent::EVENT_MOUSEUP);
-		core->getInput()->addEventListener(this, InputEvent::EVENT_JOYBUTTON_DOWN);
-		core->getInput()->addEventListener(this, InputEvent::EVENT_JOYBUTTON_UP);
-		core->getInput()->addEventListener(this, InputEvent::EVENT_JOYAXIS_MOVED);
+		// TODO: Set up update() event
+		// TODO: Set up input events (Call stuff like
+		//       call_global_if_exists(L, "__buildat_key_down", 1, 0);)
 	}
 
 	~CApp()
 	{
-		delete core;
-		lua_close(L);
 	}
 
 	void set_state(sp_<client::State> state)
@@ -240,16 +77,14 @@ struct CApp: public Polycode::EventHandler, public App
 		m_state = state;
 	}
 
-	bool update()
+	int run()
 	{
-		script_tick();
-
-		return core->updateAndRender();
+		return u3d::Application::Run();
 	}
 
 	void shutdown()
 	{
-		core->Shutdown();
+		// TODO
 	}
 
 	void run_script(const ss_ &script)
@@ -278,68 +113,12 @@ struct CApp: public Polycode::EventHandler, public App
 		error_logging_pcall(L, 2, 0);
 	}
 
-	// Polycode::EventHandler
-
-	void log_if_error()
-	{
-		if(lua_toboolean(L, -2)){
-			const char *error = lua_tostring(L, -1);
-			log_w(MODULE, "%s", error);
-			lua_pop(L, 2);
-		}
-	}
-
-	void handleEvent(Event *event)
-	{
-		if(event->getDispatcher() == core->getInput()){
-			InputEvent *inputEvent = (InputEvent*) event;
-			switch(event->getEventCode()){
-			case InputEvent::EVENT_KEYDOWN:
-				lua_pushinteger(L, inputEvent->keyCode());
-				call_global_if_exists(L, "__buildat_key_down", 1, 0);
-				break;
-			case InputEvent::EVENT_KEYUP:
-				lua_pushinteger(L, inputEvent->keyCode());
-				call_global_if_exists(L, "__buildat_key_up", 1, 0);
-				break;
-			case InputEvent::EVENT_MOUSEDOWN:
-				lua_pushinteger(L, inputEvent->mouseButton);
-				lua_pushnumber(L, inputEvent->mousePosition.x);
-				lua_pushnumber(L, inputEvent->mousePosition.y);
-				call_global_if_exists(L, "__buildat_mouse_down", 3, 0);
-				break;
-			case InputEvent::EVENT_MOUSEUP:
-				lua_pushinteger(L, inputEvent->mouseButton);
-				lua_pushnumber(L, inputEvent->mousePosition.x);
-				lua_pushnumber(L, inputEvent->mousePosition.y);
-				call_global_if_exists(L, "__buildat_mouse_up", 3, 0);
-				break;
-			case InputEvent::EVENT_MOUSEMOVE:
-				lua_pushnumber(L, inputEvent->mousePosition.x);
-				lua_pushnumber(L, inputEvent->mousePosition.y);
-				call_global_if_exists(L, "__buildat_mouse_move", 2, 0);
-				break;
-			case InputEvent::EVENT_JOYBUTTON_DOWN:
-				lua_pushnumber(L, inputEvent->joystickIndex);
-				lua_pushnumber(L, inputEvent->joystickButton);
-				call_global_if_exists(L, "__buildat_joystick_button_down", 2, 0);
-				break;
-			case InputEvent::EVENT_JOYBUTTON_UP:
-				lua_pushnumber(L, inputEvent->joystickIndex);
-				lua_pushnumber(L, inputEvent->joystickButton);
-				call_global_if_exists(L, "__buildat_joystick_button_up", 2, 0);
-				break;
-			case InputEvent::EVENT_JOYAXIS_MOVED:
-				lua_pushnumber(L, inputEvent->joystickIndex);
-				lua_pushnumber(L, inputEvent->joystickAxis);
-				lua_pushnumber(L, inputEvent->joystickAxisValue);
-				call_global_if_exists(L, "__buildat_joystick_axis_move", 3, 0);
-				break;
-			}
-		}
-	}
-
 	// Non-public methods
+
+	void update()
+	{
+		script_tick();
+	}
 
 	void script_tick()
 	{
@@ -877,9 +656,9 @@ struct CApp: public Polycode::EventHandler, public App
 	}
 };
 
-App* createApp(Polycode::PolycodeView *view)
+App* createApp(u3d::Context *context)
 {
-	return new CApp(view);
+	return new CApp(context);
 }
 
 }
