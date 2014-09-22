@@ -21,35 +21,20 @@ include_directories("3rdparty/smallsha1")
 SET(BUILD_SERVER TRUE CACHE BOOL "Build server")
 SET(BUILD_CLIENT TRUE CACHE BOOL "Build client")
 
-IF(BUILD_CLIENT)
-	#
-	# Polycode
-	#
+#
+# Urho3D dependency
+#
 
-	SET(POLYCODE_ROOT_DIR "${buildat_SOURCE_DIR}/../polycode" CACHE PATH "Path to Polycode source")
-	SET(POLYCODE_RELEASE_DIR ${POLYCODE_ROOT_DIR}/Release/${CMAKE_SYSTEM_NAME})
-	SET(POLYCODE_CMAKE_DIR ${POLYCODE_ROOT_DIR}/CMake)
-	SET(CMAKE_INSTALL_PREFIX ${POLYCODE_RELEASE_DIR}/Standalone/)
-	SET(CMAKE_PREFIX_PATH
-		${POLYCODE_RELEASE_DIR}/Framework/Core/Dependencies
-		${POLYCODE_RELEASE_DIR}/Framework/Modules/Dependencies
-		${POLYCODE_RELEASE_DIR}/Framework/Tools/Dependencies
-	)
+set(URHO3D_HOME $ENV{URHO3D_HOME})
+message(STATUS "URHO3D_HOME=\"${URHO3D_HOME}\"")
+if("${URHO3D_HOME}" STREQUAL "")
+	message(FATAL_ERROR "You need to set the URHO3D_HOME environment variable.")
+endif()
 
-	SET(CMAKE_DEBUG_POSTFIX "_d")
-	SET(CMAKE_MODULE_PATH
-		${CMAKE_MODULE_PATH}
-		${POLYCODE_CMAKE_DIR}
-	)
-	INCLUDE(${POLYCODE_CMAKE_DIR}/PolycodeDependencies.cmake)
-
-	include_directories("${POLYCODE_ROOT_DIR}/Bindings/Contents/LUA/Include")
-	#include_directories("${POLYCODE_ROOT_DIR}/Dependencies/Build/Release/box2d/src/box2d/Box2D")
-	#include_directories("${POLYCODE_ROOT_DIR}/Dependencies/Build/Release/bullet/src/bullet/src")
-	#include_directories("${POLYCODE_ROOT_DIR}/Modules/Bindings/2DPhysics/Include")
-	#include_directories("${POLYCODE_ROOT_DIR}/Modules/Bindings/3DPhysics/Include")
-	include_directories("${POLYCODE_ROOT_DIR}/Modules/Bindings/UI/Include")
-ENDIF(BUILD_CLIENT)
+set(CMAKE_MODULE_PATH ${URHO3D_HOME}/Source/CMake/Modules CACHE PATH "Path to Urho3D-specific CMake modules")
+include(Urho3D-CMake-common)
+find_package(Urho3D REQUIRED)
+include_directories(${URHO3D_INCLUDE_DIRS})
 
 #
 # Buildat
@@ -84,13 +69,7 @@ IF(BUILD_CLIENT)
 		${POLYCODE_DEPENDENCY_LIBS}
 		c55lib
 		smallsha1
-		# Polycode stuff
-		#${POLYCODE_ROOT_DIR}/Build/Release/Modules/Bindings/2DPhysics/Physics2DLua.a
-		#${POLYCODE_ROOT_DIR}/Build/Release/Modules/Bindings/3DPhysics/Physics3DLua.a
-		#Polycode2DPhysics
-		#Polycode3DPhysics
-		${POLYCODE_ROOT_DIR}/Build/Release/Modules/Bindings/UI/UILua.a
-		PolycodeUI
+		# TODO: Urho3D libraries
 	)
 ENDIF(BUILD_CLIENT)
 
@@ -117,5 +96,6 @@ IF(BUILD_SERVER)
 		c55lib
 		smallsha1
 		dl
+		# TODO: Urho3D libraries
 	)
 ENDIF(BUILD_SERVER)
