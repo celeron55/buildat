@@ -82,7 +82,8 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t("network:packet_received/minigame:move"));
-		m_server->sub_event(this, Event::t("network:packet_received/minigame:clear_field"));
+		m_server->sub_event(this,
+				Event::t("network:packet_received/minigame:clear_field"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -185,9 +186,9 @@ struct Module: public interface::Module
 		log_i(MODULE, "minigame::on_packet_clear_field: name=%zu, size=%zu",
 				cs(packet.name), packet.data.size());
 
-		for(size_t y=0; y<m_playfield.h; y++)
-		for(size_t x=0; x<m_playfield.w; x++)
-			m_playfield.set(x, y, 0);
+		for(size_t y = 0; y < m_playfield.h; y++)
+			for(size_t x = 0; x < m_playfield.w; x++)
+				m_playfield.set(x, y, 0);
 
 		for(auto &pair : m_players)
 			send_update(pair.second.peer);

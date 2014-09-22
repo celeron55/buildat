@@ -11,6 +11,7 @@
 #include <Application.h>
 #include <Engine.h>
 #include <LuaScript.h>
+#include <CoreEvents.h>
 #pragma GCC diagnostic pop
 extern "C" {
 #include <lua.h>
@@ -23,22 +24,31 @@ extern "C" {
 namespace u3d = Urho3D;
 
 extern client::Config g_client_config;
+extern bool g_sigint_received;
 
 namespace app {
 
 struct CApp: public App, public u3d::Application
 {
 	sp_<client::State> m_state;
-	u3d::LuaScript m_script;
+	up_<u3d::LuaScript> m_script;
 	lua_State *L;
 	int64_t m_last_script_tick_us;
 
 	CApp(u3d::Context *context):
 		u3d::Application(context),
-		m_script(context),
-		L(m_script.GetState()),
+		m_script(nullptr),
+		L(nullptr),
 		m_last_script_tick_us(get_timeofday_us())
 	{
+		// Instantiate and register the Lua script subsystem so that we can use the LuaScriptInstance component
+		context_->RegisterSubsystem(new u3d::LuaScript(context_));
+
+		m_script.reset(new u3d::LuaScript(context_));
+		L = m_script->GetState();
+		if(L == nullptr)
+			throw Exception("m_script.GetState() returned null");
+
 		lua_pushlightuserdata(L, (void*)this);
 		lua_setfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 
@@ -63,7 +73,19 @@ struct CApp: public App, public u3d::Application
 			lua_pop(L, 1);
 		}
 
+		engineParameters_["WindowTitle"]   = "Buildat Client";
+		engineParameters_["LogName"]       = "client_Urho3D.log";
+		engineParameters_["FullScreen"]    = false;
+		engineParameters_["Headless"]      = false;
+		// TODO
+		engineParameters_["ResourcePaths"] =
+				"/home/celeron55/softat/Urho3D/Bin/CoreData";
+		engineParameters_["ResourcePackages"] = "";
+		engineParameters_["AutoloadPaths"] = "../../../Urho3D/Bin/Data";
+
 		// TODO: Set up update() event
+		SubscribeToEvent(u3d::E_UPDATE, HANDLER(CApp, on_update));
+
 		// TODO: Set up input events (Call stuff like
 		//       call_global_if_exists(L, "__buildat_key_down", 1, 0);)
 	}
@@ -84,7 +106,8 @@ struct CApp: public App, public u3d::Application
 
 	void shutdown()
 	{
-		// TODO
+		u3d::Engine *engine = GetSubsystem<u3d::Engine>();
+		engine->Exit();
 	}
 
 	void run_script(const ss_ &script)
@@ -115,8 +138,12 @@ struct CApp: public App, public u3d::Application
 
 	// Non-public methods
 
-	void update()
+	void on_update(u3d::StringHash eventType, u3d::VariantMap &eventData)
 	{
+		if(g_sigint_received)
+			shutdown();
+		if(m_state)
+			m_state->update();
 		script_tick();
 	}
 

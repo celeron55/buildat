@@ -63,13 +63,6 @@ local log = buildat.Logger("__client/init")
 
 log:info("init.lua loaded")
 
-local polycode_path = __buildat_get_path("polycode")
-CoreServices.getInstance():getConfig():loadConfig("Polycode", polycode_path.."/Assets/UIThemes/dark/theme.xml")
-CoreServices.getInstance():getConfig():loadConfig("Polycode", polycode_path.."/Assets/UIThemes/dark/theme.xml")
-CoreServices.getInstance():getResourceManager():addArchive(polycode_path.."/Assets");
-
-CoreServices.getInstance():getConfig():setNumericValue("Polycode", "uiButtonFontSize", 20)
-
 dofile(__buildat_get_path("share").."/client/test.lua")
 dofile(__buildat_get_path("share").."/client/packet.lua")
 dofile(__buildat_get_path("share").."/client/extensions.lua")
