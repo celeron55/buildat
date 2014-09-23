@@ -28,7 +28,7 @@ Get and build Urho3D
 
     $ git clone https://github.com/urho3d/Urho3D.git
     $ cd Urho3D
-    $ ./cmake_gcc.h -DURHO3D_LUA=true -DURHO3D_SAFE_LUA=true # Add -DURHO3D_64BIT=true on 64-bit systems
+    $ ./cmake_gcc.sh -DURHO3D_LUA=true -DURHO3D_SAFE_LUA=true # Add -DURHO3D_64BIT=true on 64-bit systems
     $ cd Build
     $ make -j4
 
