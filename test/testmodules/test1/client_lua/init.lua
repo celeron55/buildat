@@ -3,43 +3,44 @@
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("test1")
 local dump = buildat.dump
+local u3d = require("buildat/extension/urho3d")
 log:info("test1/init.lua loaded")
 
 -- 3D things
 
 -- NOTE: Create global variable so that it doesn't get automatically deleted
-scene_ = Scene()
+scene_ = u3d.Scene()
 scene_:CreateComponent("Octree")
 
 -- Note that naming the scene nodes is optional
 local plane_node = scene_:CreateChild("Plane")
-plane_node.scale = Vector3(10.0, 1.0, 10.0)
+plane_node.scale = u3d.Vector3(10.0, 1.0, 10.0)
 local plane_object = plane_node:CreateComponent("StaticModel")
-plane_object.model = cache:GetResource("Model", "Models/Plane.mdl")
-plane_object.material = cache:GetResource("Material", "Materials/StoneTiled.xml")
+plane_object.model = u3d.cache:GetResource("Model", "Models/Plane.mdl")
+plane_object.material = u3d.cache:GetResource("Material", "Materials/StoneTiled.xml")
 
 local light_node = scene_:CreateChild("DirectionalLight")
-light_node.direction = Vector3(0.6, -1.0, 0.8) -- The direction vector does not need to be normalized
+light_node.direction = u3d.Vector3(0.6, -1.0, 0.8) -- The direction vector does not need to be normalized
 local light = light_node:CreateComponent("Light")
-light.lightType = LIGHT_DIRECTIONAL
+light.lightType = u3d.LIGHT_DIRECTIONAL
 
 -- Add a camera so we can look at the scene
 camera_node = scene_:CreateChild("Camera")
 camera_node:CreateComponent("Camera")
-camera_node.position = Vector3(7.0, 7.0, 7.0)
+camera_node.position = u3d.Vector3(7.0, 7.0, 7.0)
 --camera_node.rotation = Quaternion(0, 0, 0.0)
-camera_node:LookAt(Vector3(0, 1, 0))
+camera_node:LookAt(u3d.Vector3(0, 1, 0))
 -- And this thing so the camera is shown on the screen
-local viewport = Viewport:new(scene_, camera_node:GetComponent("Camera"))
-renderer:SetViewport(0, viewport)
+local viewport = u3d.Viewport:new(scene_, camera_node:GetComponent("Camera"))
+u3d.renderer:SetViewport(0, viewport)
 
 -- Add some text
-local title_text = ui.root:CreateChild("Text")
+local title_text = u3d.ui.root:CreateChild("Text")
 title_text:SetText("test1/init.lua")
-title_text:SetFont(cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
-title_text.horizontalAlignment = HA_CENTER
-title_text.verticalAlignment = VA_CENTER
-title_text:SetPosition(0, ui.root.height*(-0.33))
+title_text:SetFont(u3d.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
+title_text.horizontalAlignment = u3d.HA_CENTER
+title_text.verticalAlignment = u3d.VA_CENTER
+title_text:SetPosition(0, u3d.ui.root.height*(-0.33))
 
 local cereal = require("buildat/extension/cereal")
 
@@ -69,31 +70,31 @@ buildat.sub_packet("test1:add_box", function(data)
 	-- 1) Make the entity in the scene
 	local node = scene_:CreateChild("THE GLORIOUS BOX")
 	the_box = node
-	node.scale = Vector3(w, h, d)
-	node.position = Vector3(x, y, z)
+	node.scale = u3d.Vector3(w, h, d)
+	node.position = u3d.Vector3(x, y, z)
 
 	-- 2) Create a StaticModel which kind of is what we need
 	local object = node:CreateComponent("StaticModel")
 
 	-- 3) First it needs a model. We could just load this binaray blob:
-	object.model = cache:GetResource("Model", "Models/Box.mdl")
+	object.model = u3d.cache:GetResource("Model", "Models/Box.mdl")
 	-- TODO: let's not. Let's generate some geometry!
-	--[[local cc = CustomGeometry()
+	--[[local cc = u3d.CustomGeometry()
 	cc.SetNumGeometries(1)
-	cc.BeginGeometry(0, TRIANGLE_STRIP)
+	cc.BeginGeometry(0, u3d.TRIANGLE_STRIP)
 	cc.DefineVertex(]]
 
 	-- 4) Create a material. Again we could just load it from a file:
-	--object.material = cache:GetResource("Material", "Materials/Stone.xml"):Clone()
+	--object.material = u3d.cache:GetResource("Material", "Materials/Stone.xml")
 	-- ...but let's create a material ourselves:
-	g_m = Material() -- It has to be global because deletion causes a crash
+	g_m = u3d.Material() -- It has to be global because deletion causes a crash
 	object.material = g_m
 	-- We use this Diff.xml file to define that we want diffuse rendering. It
 	-- doesn't make much sense to define it ourselves as it consists of quite many
 	-- parameters:
-	object.material:SetTechnique(0, cache:GetResource("Technique", "Techniques/Diff.xml"))
+	object.material:SetTechnique(0, u3d.cache:GetResource("Technique", "Techniques/Diff.xml"))
 	-- And load the texture from a file:
-	object.material:SetTexture(TU_DIFFUSE, cache:GetResource("Texture2D", "Textures/LogoLarge.png"))
+	object.material:SetTexture(u3d.TU_DIFFUSE, u3d.cache:GetResource("Texture2D", "Textures/LogoLarge.png"))
 
 	--
 	-- Make a non-useful but nice reply packet and send it to the server
@@ -136,7 +137,7 @@ end)
 
 function move_box_by_user_input(dt)
     -- Do not move if the UI has a focused element (the console)
-    if ui.focusElement ~= nil then
+    if u3d.ui.focusElement ~= nil then
         return
     end
 
@@ -145,21 +146,21 @@ function move_box_by_user_input(dt)
 
 	if the_box then
 		local p = the_box.position
-		p.y = Clamp(p.y - input.mouseMove.y * MOUSE_SENSITIVITY, 0, 5)
+		p.y = u3d.Clamp(p.y - u3d.input.mouseMove.y * MOUSE_SENSITIVITY, 0, 5)
 		the_box.position = p -- Needed?
 	end
 
-    if input:GetKeyDown(KEY_W) then
-        the_box:Translate(Vector3(-1.0, 0.0, 0.0) * MOVE_SPEED * dt)
+    if u3d.input:GetKeyDown(u3d.KEY_W) then
+        the_box:Translate(u3d.Vector3(-1.0, 0.0, 0.0) * MOVE_SPEED * dt)
     end
-    if input:GetKeyDown(KEY_S) then
-        the_box:Translate(Vector3(1.0, 0.0, 0.0) * MOVE_SPEED * dt)
+    if u3d.input:GetKeyDown(u3d.KEY_S) then
+        the_box:Translate(u3d.Vector3(1.0, 0.0, 0.0) * MOVE_SPEED * dt)
     end
-    if input:GetKeyDown(KEY_A) then
-        the_box:Translate(Vector3(0.0, 0.0, -1.0) * MOVE_SPEED * dt)
+    if u3d.input:GetKeyDown(u3d.KEY_A) then
+        the_box:Translate(u3d.Vector3(0.0, 0.0, -1.0) * MOVE_SPEED * dt)
     end
-    if input:GetKeyDown(KEY_D) then
-        the_box:Translate(Vector3(0.0, 0.0, 1.0) * MOVE_SPEED * dt)
+    if u3d.input:GetKeyDown(u3d.KEY_D) then
+        the_box:Translate(u3d.Vector3(0.0, 0.0, 1.0) * MOVE_SPEED * dt)
     end
 end
 
@@ -169,5 +170,5 @@ function handle_update(eventType, eventData)
 	--node:Rotate(Quaternion(50, 80*dt, 0, 0))
 	move_box_by_user_input(dt)
 end
-SubscribeToEvent("Update", "handle_update")
+u3d.SubscribeToEvent("Update", "handle_update")
 

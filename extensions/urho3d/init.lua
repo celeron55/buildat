@@ -1,16 +1,16 @@
--- Buildat: client/urho3d.lua
+-- Buildat: extension/urho3d
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
-local log = buildat.Logger("client/urho3d")
-
-local sandbox = __buildat_sandbox_environment
+local log = buildat.Logger("extension/urho3d")
+local dump = buildat.dump
+local M = {safe = {}}
 
 -- Set every plain value in global environment to the sandbox
 -- ...it's maybe safe enough...
 for k, v in pairs(_G) do
 	if type(v) == 'number' or type(v) == 'string' then
 		--log:info("Setting sandbox["..k.."] = "..buildat.dump(v))
-		sandbox[k] = _G[k]
+		M.safe[k] = _G[k]
 	end
 end
 
@@ -44,15 +44,15 @@ local safe_globals = {
 }
 
 for _, v in ipairs(safe_globals) do
-	sandbox[v] = _G[v]
+	M.safe[v] = _G[v]
 end
 
 local sandbox_function_name_to_global_function_name = {}
 local next_global_function_i = 1
 
-function sandbox.SubscribeToEvent(event_name, function_name)
-	if type(sandbox[function_name]) ~= 'function' then
-		error("sandbox.SubscribeToEvent(): '"..function_name..
+function M.safe.SubscribeToEvent(event_name, function_name)
+	if type(__buildat_sandbox_environment[function_name]) ~= 'function' then
+		error("SubscribeToEvent(): '"..function_name..
 				"' is not a global function in sandbox environment")
 	end
 	local global_function_i = next_global_function_i
@@ -60,10 +60,13 @@ function sandbox.SubscribeToEvent(event_name, function_name)
 	local global_function_name = "__buildat_sandbox_callback_"..global_function_i
 	sandbox_function_name_to_global_function_name[function_name] = global_function_name
 	_G[global_function_name] = function(eventType, eventData)
+		local callback = __buildat_sandbox_environment[function_name]
 		local f = function()
-			sandbox[function_name](eventType, eventData)
+			callback(eventType, eventData)
 		end
 		__buildat_run_function_in_sandbox(f)
 	end
 	SubscribeToEvent(event_name, global_function_name)
 end
+
+return M
