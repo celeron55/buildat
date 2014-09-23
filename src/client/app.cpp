@@ -47,12 +47,13 @@ struct CApp: public App, public u3d::Application
 		engineParameters_["FullScreen"]    = false;
 		engineParameters_["Headless"]      = false;
 
-		// TODO: Proper paths
+		ss_ urho3d_path = interface::getGlobalFilesystem()->get_absolute_path(
+				g_client_config.urho3d_path);
 		ss_ tmp_path = interface::getGlobalFilesystem()->get_absolute_path(
 				g_client_config.cache_path+"/tmp");
 		engineParameters_["ResourcePaths"] = u3d::String()+
-				"/home/celeron55/softat/Urho3D/Bin/CoreData;"+
-				"/home/celeron55/softat/Urho3D/Bin/Data;"+
+				urho3d_path.c_str()+"/Bin/CoreData;"+
+				urho3d_path.c_str()+"/Bin/Data;"+
 				tmp_path.c_str();
 		engineParameters_["AutoloadPaths"] = "";
 

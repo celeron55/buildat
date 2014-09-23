@@ -50,13 +50,14 @@ int main(int argc, char *argv[])
 
 	client::Config &config = g_client_config;
 
-	const char opts[100] = "hs:P:C:l:";
+	const char opts[100] = "hs:P:C:U:l:";
 	const char usagefmt[1000] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
 			"  -s [address]         Specify server address\n"
 			"  -P [share_path]      Specify share/ path\n"
 			"  -C [cache_path]      Specify cache/ path\n"
+			"  -U [urho3d_path]     Specify Urho3D path\n"
 			"  -l [integer]         Set maximum log level (0...5)\n"
 	;
 
@@ -79,6 +80,10 @@ int main(int argc, char *argv[])
 		case 'C':
 			fprintf(stderr, "INFO: config.cache_path: %s\n", c55_optarg);
 			config.cache_path = c55_optarg;
+			break;
+		case 'U':
+			fprintf(stderr, "INFO: config.urho3d_path: %s\n", c55_optarg);
+			config.urho3d_path = c55_optarg;
 			break;
 		case 'l':
 			log_set_max_level(atoi(c55_optarg));

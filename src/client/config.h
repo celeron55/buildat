@@ -10,6 +10,7 @@ namespace client
 		ss_ server_address;
 		ss_ share_path = "..";
 		ss_ cache_path = "../cache";
+		ss_ urho3d_path = "../../Urho3D";
 
 		bool check_paths();
 	};
