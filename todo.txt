@@ -12,12 +12,7 @@ Buildat TODO
 - Implement easy Lua scripting on the server (Luabind or not? The purpose is to
   allow recycling the same Lua code on the client and the server, which means
   that Lua will dictate the function/object design)
-- Creating globals in Lua should cause an error unless done with a special
-  interface
 - Move self-contained library-like Lua functions from client/app.cpp to a
   reusable location so that they can be used from server-side Lua in the future
 - util/codestyle.sh: Add some CMakeLists.txt formatting (case, whitespace)
-- Make two extensions for urho3d, one that loads into a table, and one that
-  uses the table one and puts it in the global namespace. Then add engine
-  support for automatically clearing them from the glboal namespace - some kind
-  of a global namespace wrapper table?
+- Proper whitelisting sandbox for Urho3D's Lua API

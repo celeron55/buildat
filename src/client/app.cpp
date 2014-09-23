@@ -4,6 +4,7 @@
 #include "core/log.h"
 #include "client/config.h"
 #include "client/state.h"
+#include "interface/fs.h"
 #include <c55/getopt.h>
 #include <c55/os.h>
 #pragma GCC diagnostic push
@@ -45,18 +46,18 @@ struct CApp: public App, public u3d::Application
 		engineParameters_["LogName"]       = "client_Urho3D.log";
 		engineParameters_["FullScreen"]    = false;
 		engineParameters_["Headless"]      = false;
+
 		// TODO: Proper paths
-		engineParameters_["ResourcePaths"] =
-				"/home/celeron55/softat/Urho3D/Bin/CoreData;"
-				"/home/celeron55/softat/Urho3D/Bin/Data";
+		ss_ tmp_path = interface::getGlobalFilesystem()->get_absolute_path(
+				g_client_config.cache_path+"/tmp");
+		engineParameters_["ResourcePaths"] = u3d::String()+
+				"/home/celeron55/softat/Urho3D/Bin/CoreData;"+
+				"/home/celeron55/softat/Urho3D/Bin/Data;"+
+				tmp_path.c_str();
 		engineParameters_["AutoloadPaths"] = "";
 
 		// Set up on_update event (this runs every frame)
 		SubscribeToEvent(u3d::E_UPDATE, HANDLER(CApp, on_update));
-
-		// TODO: Set up input events (Call stuff like
-		//       call_global_if_exists(L, "__buildat_key_down", 1, 0);)
-		//       ...or don't? They should be available in Urho3D API.
 	}
 
 	~CApp()
@@ -129,6 +130,7 @@ struct CApp: public App, public u3d::Application
 		DEF_BUILDAT_FUNC(get_file_content)
 		DEF_BUILDAT_FUNC(get_file_path)
 		DEF_BUILDAT_FUNC(get_path)
+		DEF_BUILDAT_FUNC(mkdir)
 		DEF_BUILDAT_FUNC(pcall)
 		DEF_BUILDAT_FUNC(cereal_binary_input)
 		DEF_BUILDAT_FUNC(cereal_binary_output)
@@ -140,7 +142,6 @@ struct CApp: public App, public u3d::Application
 					lua_tostring(L, -1));
 			lua_pop(L, 1);
 		}
-		//m_script->ExecuteFile(u3d::String(init_lua_path.c_str()));
 	}
 
 	void on_update(u3d::StringHash eventType, u3d::VariantMap &eventData)
@@ -274,6 +275,19 @@ struct CApp: public App, public u3d::Application
 		}
 		log_w(MODULE, "Unknown named path: \"%s\"", cs(name));
 		return 0;
+	}
+
+	// mkdir(path: string)
+	static int l_mkdir(lua_State *L)
+	{
+		ss_ path = lua_tocppstring(L, 1);
+		bool ok = interface::getGlobalFilesystem()->create_directories(path);
+		if(!ok)
+			log_w(MODULE, "Failed to create directory: \"%s\"", cs(path));
+		else
+			log_v(MODULE, "Created directory: \"%s\"", cs(path));
+		lua_pushboolean(L, ok);
+		return 1;
 	}
 
 	static int handle_error(lua_State *L)

@@ -16,6 +16,9 @@ function buildat.dump(thing)
 	if type(thing) == 'number' then
 		return ''..thing
 	end
+	if type(thing) == 'boolean' then
+		if thing then return "true" else return "false" end
+	end
 	if thing == nil then
 		return "nil"
 	end
@@ -30,7 +33,7 @@ function buildat.dump(thing)
 		s = s.."}"
 		return s
 	end
-	return "(?)"
+	return type(thing)
 end
 function buildat.Logger(module)
 	local logger = {}

@@ -77,6 +77,7 @@ buildat.sub_packet("test1:add_box", function(data)
 
 	-- 3) First it needs a model. We could just load this binaray blob:
 	object.model = u3d.cache:GetResource("Model", "Models/Box.mdl")
+	assert(object.model)
 	-- TODO: let's not. Let's generate some geometry!
 	--[[local cc = CustomGeometry()
 	cc.SetNumGeometries(1)
@@ -91,9 +92,11 @@ buildat.sub_packet("test1:add_box", function(data)
 	-- We use this Diff.xml file to define that we want diffuse rendering. It
 	-- doesn't make much sense to define it ourselves as it consists of quite many
 	-- parameters:
-	object.material:SetTechnique(0, u3d.cache:GetResource("Technique", "Techniques/Diff.xml"))
+	object.material:SetTechnique(0,
+			u3d.cache:GetResource("Technique", "Techniques/Diff.xml"))
 	-- And load the texture from a file:
-	object.material:SetTexture(u3d.TU_DIFFUSE, u3d.cache:GetResource("Texture2D", "Textures/LogoLarge.png"))
+	object.material:SetTexture(u3d.TU_DIFFUSE,
+			u3d.cache:GetResource("Texture2D", "test1/pink_texture.png"))
 
 	--
 	-- Make a non-useful but nice reply packet and send it to the server
