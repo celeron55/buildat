@@ -18,10 +18,12 @@ local plane_node = scene:CreateChild("Plane")
 plane_node.scale = u3d.Vector3(10.0, 1.0, 10.0)
 local plane_object = plane_node:CreateComponent("StaticModel")
 plane_object.model = u3d.cache:GetResource("Model", "Models/Plane.mdl")
-plane_object.material = u3d.cache:GetResource("Material", "Materials/StoneTiled.xml")
+plane_object.material = u3d.cache:GetResource("Material", "Materials/Stone.xml")
+plane_object.material:SetTexture(u3d.TU_DIFFUSE,
+		u3d.cache:GetResource("Texture2D", "test1/green_texture.png"))
 
 local light_node = scene:CreateChild("DirectionalLight")
-light_node.direction = u3d.Vector3(0.6, -1.0, 0.8) -- The direction vector does not need to be normalized
+light_node.direction = u3d.Vector3(-0.6, -1.0, 0.8) -- The direction vector does not need to be normalized
 local light = light_node:CreateComponent("Light")
 light.lightType = u3d.LIGHT_DIRECTIONAL
 
@@ -144,26 +146,26 @@ function move_box_by_user_input(dt)
     end
 
     local MOVE_SPEED = 6.0
-    local MOUSE_SENSITIVITY = 0.01
+    local MOUSE_SENSITIVITY = 0.005
 
 	if the_box then
-		local p = the_box.position
-		p.y = u3d.Clamp(p.y - u3d.input.mouseMove.y * MOUSE_SENSITIVITY, 0, 5)
-		the_box.position = p -- Needed?
-	end
+		--local p = the_box.position
+		--p.y = u3d.Clamp(p.y - u3d.input.mouseMove.y * MOUSE_SENSITIVITY, 0.5, 6)
+		--the_box.position = p -- Needed?
 
-    if u3d.input:GetKeyDown(u3d.KEY_W) then
-        the_box:Translate(u3d.Vector3(-1.0, 0.0, 0.0) * MOVE_SPEED * dt)
-    end
-    if u3d.input:GetKeyDown(u3d.KEY_S) then
-        the_box:Translate(u3d.Vector3(1.0, 0.0, 0.0) * MOVE_SPEED * dt)
-    end
-    if u3d.input:GetKeyDown(u3d.KEY_A) then
-        the_box:Translate(u3d.Vector3(0.0, 0.0, -1.0) * MOVE_SPEED * dt)
-    end
-    if u3d.input:GetKeyDown(u3d.KEY_D) then
-        the_box:Translate(u3d.Vector3(0.0, 0.0, 1.0) * MOVE_SPEED * dt)
-    end
+		if u3d.input:GetKeyDown(u3d.KEY_UP) then
+			the_box:Translate(u3d.Vector3(-1.0, 0.0, 0.0) * MOVE_SPEED * dt)
+		end
+		if u3d.input:GetKeyDown(u3d.KEY_DOWN) then
+			the_box:Translate(u3d.Vector3(1.0, 0.0, 0.0) * MOVE_SPEED * dt)
+		end
+		if u3d.input:GetKeyDown(u3d.KEY_LEFT) then
+			the_box:Translate(u3d.Vector3(0.0, 0.0, -1.0) * MOVE_SPEED * dt)
+		end
+		if u3d.input:GetKeyDown(u3d.KEY_RIGHT) then
+			the_box:Translate(u3d.Vector3(0.0, 0.0, 1.0) * MOVE_SPEED * dt)
+		end
+	end
 end
 
 function handle_update(eventType, eventData)

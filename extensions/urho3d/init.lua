@@ -37,6 +37,10 @@ local safe_globals = {
 	"Random",
 	"Clamp",
 	-- WTF properties
+	"KEY_UP",
+	"KEY_DOWN",
+	"KEY_LEFT",
+	"KEY_RIGHT",
 	"KEY_W",
 	"KEY_S",
 	"KEY_A",
