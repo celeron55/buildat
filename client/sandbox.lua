@@ -2,18 +2,11 @@
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("__client/sandbox")
+local dump = buildat.dump
 
-local buildat_safe_list = {
-	"bytes",
-	"dump",
-	"Logger",
-}
-
-local buildat_safe = {}
-
-for _, name in ipairs(buildat_safe_list) do
-	buildat_safe[name] = buildat[name]
-end
+--
+-- Base sandbox environment
+--
 
 __buildat_sandbox_environment = {
 	assert = assert, -- Safe according to http://lua-users.org/wiki/SandBoxes
@@ -48,7 +41,9 @@ __buildat_sandbox_environment = {
 	os = { clock = os.clock, difftime = os.difftime, time = os.time },
 }
 
-__buildat_sandbox_environment.buildat = buildat
+--
+-- Sandbox require
+--
 
 __buildat_sandbox_environment.require = function(name)
 	log:info("require(\""..name.."\")")
@@ -78,7 +73,45 @@ __buildat_sandbox_environment.require = function(name)
 	error("require: \""..name.."\" not found in sandbox")
 end
 
+--
+-- Running code in sandbox
+--
+
+local function wrap_globals(base_sandbox)
+	local sandbox = {}
+	local sandbox_declared_globals = {}
+	setmetatable(sandbox, {
+		__index = function(t, k)
+			local v = rawget(sandbox, k)
+			if v ~= nil then return v end
+			return base_sandbox[k]
+		end,
+		__newindex = function(t, k, v)
+			if not sandbox_declared_globals[k] then
+				local info = debug.getinfo(2, "Sl")
+				log:info("sandbox["..dump(k).."] set by what="..dump(info.what)..
+						", name="..dump(info.name))
+				if info.what == "Lua" then
+					error("Assignment to undeclared global \""..k.."\"\n     in "..
+							info.short_src.." line "..info.currentline)
+				end
+			end
+			sandbox_declared_globals[k] = true
+			rawset(sandbox, k, v)
+		end
+	})
+	function sandbox.buildat.make_global(t)
+		for k, v in pairs(t) do
+			if sandbox[k] == nil then
+				rawset(sandbox, k, v)
+			end
+		end
+	end
+	return sandbox
+end
+
 local function run_function_in_sandbox(untrusted_function, sandbox)
+	sandbox = wrap_globals(sandbox)
 	setfenv(untrusted_function, sandbox)
 	return __buildat_pcall(untrusted_function)
 end
@@ -108,6 +141,7 @@ function __buildat_run_code_in_sandbox(untrusted_code)
 	return true
 end
 
+-- TODO: : -> .
 function buildat:run_script_file(name)
 	local code = __buildat_get_file_content(name)
 	if not code then
@@ -116,6 +150,24 @@ function buildat:run_script_file(name)
 	end
 	log:info("buildat:run_script_file("..name.."): code length: "..#code)
 	return __buildat_run_code_in_sandbox(code)
+end
+
+--
+-- buildat namespace whitelist
+--
+
+-- Whitelist the buildat namespace into the sandbox
+local buildat_safe_list = {
+	"bytes",
+	"dump",
+	"Logger",
+	"run_script_file",
+	"sub_packet",
+	"send_packet",
+}
+__buildat_sandbox_environment.buildat = {}
+for _, name in ipairs(buildat_safe_list) do
+	__buildat_sandbox_environment.buildat[name] = buildat[name]
 end
 
 log:info("sandbox.lua loaded")

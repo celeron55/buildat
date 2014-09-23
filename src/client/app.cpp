@@ -318,7 +318,7 @@ struct CApp: public App, public u3d::Application
 					r == LUA_ERRMEM ? "ran out of memory" :
 					r == LUA_ERRERR ? "error handler failed" : "unknown error";
 			//log_e(MODULE, "Lua %s: %s", msg, cs(traceback));
-			throw Exception(ss_()+"Lua "+msg+": "+traceback);
+			throw Exception(ss_()+"Lua "+msg+":\n"+traceback);
 		}
 		//log_d(MODULE, "stack 4: %s", cs(dump_stack(L)));
 	}

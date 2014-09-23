@@ -51,16 +51,17 @@ local sandbox_function_name_to_global_function_name = {}
 local next_global_function_i = 1
 
 function M.safe.SubscribeToEvent(event_name, function_name)
-	if type(__buildat_sandbox_environment[function_name]) ~= 'function' then
+	local caller_environment = getfenv(2)
+	local callback = caller_environment[function_name]
+	if type(callback) ~= 'function' then
 		error("SubscribeToEvent(): '"..function_name..
-				"' is not a global function in sandbox environment")
+				"' is not a global function in current sandbox environment")
 	end
 	local global_function_i = next_global_function_i
 	next_global_function_i = next_global_function_i + 1
 	local global_function_name = "__buildat_sandbox_callback_"..global_function_i
 	sandbox_function_name_to_global_function_name[function_name] = global_function_name
 	_G[global_function_name] = function(eventType, eventData)
-		local callback = __buildat_sandbox_environment[function_name]
 		local f = function()
 			callback(eventType, eventData)
 		end
