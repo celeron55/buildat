@@ -1,0 +1,97 @@
+Buildat Client API
+==================
+
+Lua code is run in two subtly different environments.
+
+Interface common to both environments
+=====================================
+
+buildat.bytes(data) -> table<int>
+
+buildat.dump(value) -> string
+
+buildat.Logger(module_name) -> object
+	:error(message)
+	:warning(message)
+	:info(message)
+	:verbose(message)
+
+buildat.send_packet(name, data)
+
+buildat.sub_packet(name, function)
+
+buildat.unsub_packet(function)
+
+The extension environment
+=========================
+
+Extensions and the client boot-up code is run in the extension environment. It
+is a raw Lua environment with no sandboxing or other rules.
+
+Some of the sandbox-specific functions are not available or do not work normally
+in the extension environment.
+
+Extensions use the new Lua 5.1/5.2 module interface.
+
+If an extension wish to provide an interface to sandboxed code, it should
+implement table "safe", which contains the safe interface. When sandboxed code
+requires the module, it only gets the plain safe interface.
+
+Extensions and modules use require("buildat/extension/<name>") to use extensions.
+
+The sandbox environment
+=======================
+
+All code sent by the server to the client is run in the sandbox environment.
+
+buildat.make_global(table)
+- Copies contents table into the current global sandbox environemnt. It will
+  still not leak into the scope of other files running in the sandbox. Useful if
+  you want to remove the "namespace table" of an extension.
+
+Safe interfaces of built-in extensions
+======================================
+
+Use extensions in this way:
+  cereal = require("buildat/extension/cereal")
+  cereal.binary_output(...)
+
+You can use buildat.make_global like this:
+  buildat.make_global(require("buildat/extension/urho3d"))
+  local scene = Scene()
+
+cereal
+------
+cereal.binary_input(data: string, type: object) -> value: <ny>
+
+cereal.binary_output(value: <any>, type: object) -> data: string
+
+Example usage (by using an object as the base structure for value):
+	type = {"object",
+		{"a", "byte"},
+		{"b", "int32_t"},
+		{"c", "double"},
+		{"d", "string"},
+		{"e", {"array", "string"}},
+		{"f", {"object", {"x", "int32_t"}, {"y", "int32_t"}}}
+	}
+	input_value = {
+		a = 128,
+		b = 1000,
+		c = 3.14,
+		d = "Foo",
+		e = {"Bar1", "Bar2"},
+		f = {x=1, y=2},
+	}
+	data = cereal.binary_output(input_value, type)
+
+	-- Data can be now sent over network or be saved on disk
+
+	output_values = cereal.binary_input(data, type)
+
+urho3d
+------
+Whitelist-based wrapper for the Urho3D Lua API.
+
+File paths and other things are converted automatically.
+
