@@ -19,16 +19,18 @@ Buildat Linux How-To
 Install dependencies
 ----------------------
 
-TODO
+	$ # Dependencies for Urho3D
+	$ sudo apt-get install libx11-dev libxrandr-dev libasound2-dev
+	$ sudo yum install libX11-devel libXrandr-devel alsa-lib-devel
 
 Get and build Urho3D
 ----------------------
 
-$ git clone https://github.com/urho3d/Urho3D.git
-$ cd Urho3D
-$ ./cmake_gcc.h  # Add -DURHO3D_64BIT=true on 64-bit systems
-$ cd Build
-$ make -j4
+    $ git clone https://github.com/urho3d/Urho3D.git
+    $ cd Urho3D
+    $ ./cmake_gcc.h  # Add -DURHO3D_64BIT=true on 64-bit systems
+    $ cd Build
+    $ make -j4
 
 Take note whether you build a 32 or a 64 bit version and use the same option in
 Buildat's CMake configuration.
