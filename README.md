@@ -57,7 +57,7 @@ Terminal 1:
 Terminal 2:
 
     $ $wherever_buildat_is/Build
-    $ bin/buildat_client -s localhost
+    $ bin/buildat_client -s localhost -U $URHO3D_HOME
 
 Modify something and see stuff happen
 ---------------------------------------
