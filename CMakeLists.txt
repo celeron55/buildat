@@ -110,3 +110,4 @@ if(BUILD_SERVER)
 		${LINK_LIBS_ONLY}
 	)
 endif(BUILD_SERVER)
+# vim: set noet ts=4 sw=4:

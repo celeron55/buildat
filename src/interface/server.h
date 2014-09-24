@@ -67,3 +67,4 @@ namespace interface
 		virtual ss_ tmp_restore_data(const ss_ &name) = 0;
 	};
 }
+// vim: set noet ts=4 sw=4:

@@ -16,3 +16,4 @@ function M.safe.f()
 end
 
 return M
+# vim: set noet ts=4 sw=4:

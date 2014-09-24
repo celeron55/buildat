@@ -60,3 +60,4 @@ int c55_getopt(int argc, char *argv[], const char *argspec)
 }
 
 
+// vim: set noet ts=4 sw=4:

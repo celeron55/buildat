@@ -26,3 +26,4 @@ namespace app
 
 	App* createApp(Urho3D::Context *context);
 }
+// vim: set noet ts=4 sw=4:

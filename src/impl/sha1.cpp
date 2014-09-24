@@ -24,3 +24,4 @@ ss_ hex(const ss_ &raw)
 
 }
 }
+// vim: set noet ts=4 sw=4:

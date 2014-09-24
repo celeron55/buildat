@@ -40,3 +40,4 @@ namespace interface
 	// cb is called at either report_fd() or update().
 	MultiFileWatch* createMultiFileWatch();
 }
+// vim: set noet ts=4 sw=4:

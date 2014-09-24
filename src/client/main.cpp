@@ -109,3 +109,4 @@ int main(int argc, char *argv[])
 
 	return app0->run();
 }
+// vim: set noet ts=4 sw=4:

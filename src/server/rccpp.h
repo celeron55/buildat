@@ -26,3 +26,4 @@ namespace rccpp
 
 	Compiler* createCompiler(const ss_ &compiler_command);
 };
+// vim: set noet ts=4 sw=4:

@@ -116,3 +116,4 @@ namespace c55
 		return true;
 	}
 }
+// vim: set noet ts=4 sw=4:

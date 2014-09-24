@@ -221,3 +221,4 @@ int main(int argc, char *argv[])
 	return exit_status;
 }
 
+// vim: set noet ts=4 sw=4:

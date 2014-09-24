@@ -142,3 +142,4 @@ void log_no_nl(int level, const char *sys, const char *fmt, ...)
 	va_end(va_args);
 	pthread_mutex_unlock(&log_mutex);
 }
+// vim: set noet ts=4 sw=4:

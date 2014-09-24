@@ -79,3 +79,4 @@ bool Config::check_paths()
 
 }
 
+// vim: set noet ts=4 sw=4:

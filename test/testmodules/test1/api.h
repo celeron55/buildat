@@ -16,3 +16,4 @@ namespace test1
 		server->emit_event(std::move(event));
 	}
 }
+// vim: set noet ts=4 sw=4:

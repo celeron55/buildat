@@ -29,3 +29,4 @@ table.insert(package.loaders, function(name)
 	end
 	return nil
 end)
+# vim: set noet ts=4 sw=4:

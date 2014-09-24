@@ -77,3 +77,4 @@ dofile(__buildat_get_path("share").."/client/sandbox.lua")
 
 local test = require("buildat/extension/test")
 test.f()
+# vim: set noet ts=4 sw=4:

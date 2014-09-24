@@ -8,3 +8,4 @@ namespace interface
 		int shell_exec(const ss_ &command);
 	};
 }
+// vim: set noet ts=4 sw=4:

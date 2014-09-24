@@ -12,3 +12,4 @@ label:setPosition(-50, -50, 0)
 scene:addChild(label)
 ]]
 
+# vim: set noet ts=4 sw=4:

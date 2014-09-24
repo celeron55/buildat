@@ -34,3 +34,4 @@ __attribute__((format(printf, 3, 4)));
 #define log_nd(sys, fmt, ...) log_no_nl(LOG_DEBUG, sys, fmt, ##__VA_ARGS__)
 #define log_nt(sys, fmt, ...) log_no_nl(LOG_TRACE, sys, fmt, ##__VA_ARGS__)
 
+// vim: set noet ts=4 sw=4:

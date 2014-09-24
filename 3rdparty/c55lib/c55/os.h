@@ -5,3 +5,4 @@
 
 int64_t get_timeofday_us();
 
+// vim: set noet ts=4 sw=4:

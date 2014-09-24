@@ -57,3 +57,4 @@ void interval_loop(int interval_us, std::function<bool(float load_avg)> f)
 	delete[] load_log;
 }
 
+// vim: set noet ts=4 sw=4:

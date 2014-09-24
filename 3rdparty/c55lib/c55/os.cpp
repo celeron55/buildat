@@ -10,3 +10,4 @@ int64_t get_timeofday_us()
 	return (int64_t)tv.tv_sec * 1000000 + (int64_t)tv.tv_usec;
 }
 
+// vim: set noet ts=4 sw=4:

@@ -24,3 +24,4 @@ function M.safe.unsub_tick(cb)
 end
 
 return M
+# vim: set noet ts=4 sw=4:

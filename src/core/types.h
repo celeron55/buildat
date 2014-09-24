@@ -122,3 +122,4 @@ template<typename T>
 static inline cc_ *cs(const T &v){
 	return dump(v).c_str();
 }
+// vim: set noet ts=4 sw=4:

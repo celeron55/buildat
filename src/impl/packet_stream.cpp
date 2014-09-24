@@ -98,3 +98,4 @@ void PacketStream::output(const ss_ &name, const ss_ &data,
 }
 
 }
+// vim: set noet ts=4 sw=4:

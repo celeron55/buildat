@@ -176,3 +176,4 @@ function handle_update(eventType, eventData)
 end
 u3d.SubscribeToEvent("Update", "handle_update")
 
+# vim: set noet ts=4 sw=4:

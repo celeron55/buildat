@@ -254,3 +254,4 @@ State* createState(sp_<app::App> app)
 	return new CState(app);
 }
 }
+// vim: set noet ts=4 sw=4:

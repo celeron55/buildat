@@ -27,3 +27,4 @@ namespace client
 	State* createState(sp_<app::App> app);
 }
 
+// vim: set noet ts=4 sw=4:

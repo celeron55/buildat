@@ -77,3 +77,4 @@ namespace interface
 				std::function<void(const ss_ &packet_data)> cb);
 	};
 }
+// vim: set noet ts=4 sw=4:
