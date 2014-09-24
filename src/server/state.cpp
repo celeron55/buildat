@@ -20,6 +20,7 @@
 using interface::Event;
 
 extern server::Config g_server_config;
+extern bool g_sigint_received;
 
 namespace server {
 
@@ -104,6 +105,9 @@ struct CState: public State, public interface::Server
 		Event::Type event_type;
 	};
 
+	bool m_shutdown_requested = false;
+	int  m_shutdown_exit_status = 0;
+
 	up_<rccpp::Compiler> m_compiler;
 	ss_ m_modules_path;
 
@@ -146,7 +150,25 @@ struct CState: public State, public interface::Server
 		}
 	}
 
-	void load_module(const ss_ &module_name, const ss_ &path)
+	void shutdown(int exit_status)
+	{
+		if(m_shutdown_requested && exit_status == 0){
+			// Only reset these values for exit values indicating failure
+			return;
+		}
+		log_i(MODULE, "Server shutdown requested; exit_status=%i", exit_status);
+		m_shutdown_requested = true;
+		m_shutdown_exit_status = exit_status;
+	}
+
+	bool is_shutdown_requested(int *exit_status=nullptr)
+	{
+		if(m_shutdown_requested && exit_status)
+			*exit_status = m_shutdown_exit_status;
+		return m_shutdown_requested;
+	}
+
+	bool load_module(const ss_ &module_name, const ss_ &path)
 	{
 		interface::MutexScope ms(m_modules_mutex);
 
@@ -162,7 +184,7 @@ struct CState: public State, public interface::Server
 		sv_<ss_> include_dirs = m_compiler->include_directories;
 		include_dirs.push_back(m_modules_path);
 		sv_<ss_> includes = list_includes(init_cpp_path, include_dirs);
-		log_i(MODULE, "Includes: %s", cs(dump(includes)));
+		log_v(MODULE, "Includes: %s", cs(dump(includes)));
 		files_to_watch.insert(files_to_watch.end(), includes.begin(), includes.end());
 
 		if(m_module_file_watches.count(module_name) == 0){
@@ -189,8 +211,8 @@ struct CState: public State, public interface::Server
 			if(dep.type == "ldflags")
 				extra_ldflags += dep.value+" ";
 		}
-		log_i(MODULE, "extra_cxxflags: %s", cs(extra_cxxflags));
-		log_i(MODULE, "extra_ldflags: %s", cs(extra_ldflags));
+		log_v(MODULE, "extra_cxxflags: %s", cs(extra_cxxflags));
+		log_v(MODULE, "extra_ldflags: %s", cs(extra_ldflags));
 
 		m_compiler->include_directories.push_back(m_modules_path);
 		bool build_ok = m_compiler->build(module_name, init_cpp_path, build_dst,
@@ -199,7 +221,7 @@ struct CState: public State, public interface::Server
 
 		if(!build_ok){
 			log_w(MODULE, "Failed to build module %s", cs(module_name));
-			return;
+			return false;
 		}
 
 		// Construct instance
@@ -209,7 +231,7 @@ struct CState: public State, public interface::Server
 		if(m == nullptr){
 			log_w(MODULE, "Failed to construct module %s instance",
 					cs(module_name));
-			return;
+			return false;
 		}
 		m_modules[module_name] = ModuleContainer(m);
 		m_modules[module_name].path = path;
@@ -224,6 +246,7 @@ struct CState: public State, public interface::Server
 
 		emit_event(Event("core:module_loaded",
 				new interface::ModuleLoadedEvent(module_name)));
+		return true;
 	}
 
 	void load_modules(const ss_ &path)
@@ -429,6 +452,10 @@ struct CState: public State, public interface::Server
 		// can be deleted while this is running, because modules are deleted
 		// only by this same thread.
 		for(size_t loop_i = 0;; loop_i++){
+			if(g_sigint_received){
+				// Get out fast
+				throw ServerShutdownRequest("Server shutdown requested via SIGINT");
+			}
 			sv_<Event> event_queue_snapshot;
 			sv_<sv_<ModuleContainer*>> event_subs_snapshot;
 			{

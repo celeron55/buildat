@@ -41,18 +41,25 @@ struct Module: public interface::Module
 	void on_load_modules()
 	{
 		ss_ builtin = m_server->get_builtin_modules_path();
-		m_server->load_module("network", builtin+"/network");
-		m_server->load_module("client_file", builtin+"/client_file");
-		m_server->load_module("client_lua", builtin+"/client_lua");
-		m_server->load_module("client_data", builtin+"/client_data");
+		ss_ current = m_server->get_modules_path();
 
-		sv_<ss_> load_list = {
-			"test1",
-			//"test2",
-			//"minigame",
+		sv_<std::pair<ss_, ss_>> load_list = {
+			{builtin, "network"},
+			{builtin, "client_file"},
+			{builtin, "client_lua"},
+			{builtin, "client_data"},
+			{current, "test1"},
+			//{current, "test2"},
+			//{current, "minigame"},
 		};
-		for(const ss_ &name : load_list){
-			m_server->load_module(name, m_server->get_modules_path()+"/"+name);
+		for(auto &pair : load_list){
+			const ss_ &name = pair.second;
+			const ss_ &path = pair.first+"/"+pair.second;
+			bool ok = m_server->load_module(name, path);
+			if(!ok){
+				m_server->shutdown(1);
+				break;
+			}
 		}
 
 		/*// TODO: Dependencies

@@ -11,6 +11,11 @@ namespace interface
 
 namespace server
 {
+	struct ServerShutdownRequest: public Exception {
+		ss_ msg;
+		ServerShutdownRequest(const ss_ &msg): Exception(msg){}
+	};
+
 	struct ModuleNotFoundException: public Exception {
 		ss_ msg;
 		ModuleNotFoundException(const ss_ &msg): Exception(msg){}
@@ -19,7 +24,9 @@ namespace server
 	struct State
 	{
 		virtual ~State(){}
-		virtual void load_module(const ss_ &module_name, const ss_ &path) = 0;
+		virtual void shutdown(int exit_status=0) = 0;
+		virtual bool is_shutdown_requested(int *exit_status=nullptr) = 0;
+		virtual bool load_module(const ss_ &module_name, const ss_ &path) = 0;
 		virtual void load_modules(const ss_ &path) = 0;
 		virtual interface::Module* get_module(const ss_ &module_name) = 0;
 		virtual interface::Module* check_module(const ss_ &module_name) = 0;

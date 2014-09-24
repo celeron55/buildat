@@ -112,9 +112,11 @@ int main(int argc, char *argv[])
 	}
 
 	up_<server::State> state(server::createState());
+
 	state->load_modules(module_path);
 
 	// Main loop
+	int exit_status = 0;
 	uint64_t next_tick_us = get_timeofday_us();
 	uint64_t t_per_tick = 1000 * 100;
 	set_<int> attempt_bad_fds;
@@ -150,6 +152,10 @@ int main(int argc, char *argv[])
 
 		int r = select(fd_max + 1, &rfds, NULL, NULL, &tv);
 		if(r == -1){
+			if(errno == EINTR && g_sigint_received){
+				// Fine, we're quitting
+				break;
+			}
 			// Error
 			num_consequent_valid_selects = 0;
 			log_w("main", "select() returned -1: %s (fds: %s)",
@@ -207,8 +213,11 @@ int main(int argc, char *argv[])
 		}
 
 		state->handle_events();
+
+		if(state->is_shutdown_requested(&exit_status))
+			break;
 	}
 
-	return 0;
+	return exit_status;
 }
 
