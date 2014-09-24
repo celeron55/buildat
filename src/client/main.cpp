@@ -12,7 +12,7 @@
 #pragma GCC diagnostic pop
 #include <signal.h>
 #define MODULE "__main"
-namespace u3d = Urho3D;
+namespace magic = Urho3D;
 
 client::Config g_client_config;
 
@@ -99,7 +99,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	u3d::Context context;
+	magic::Context context;
 	sp_<app::App> app0(app::createApp(&context));
 	sp_<client::State> state(client::createState(app0));
 	app0->set_state(state);

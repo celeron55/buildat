@@ -24,22 +24,22 @@ extern "C" {
 #include <cereal/types/string.hpp>
 #include <signal.h>
 #define MODULE "__main"
-namespace u3d = Urho3D;
+namespace magic = Urho3D;
 
 extern client::Config g_client_config;
 extern bool g_sigint_received;
 
 namespace app {
 
-struct CApp: public App, public u3d::Application
+struct CApp: public App, public magic::Application
 {
 	sp_<client::State> m_state;
-	u3d::LuaScript *m_script;
+	magic::LuaScript *m_script;
 	lua_State *L;
 	int64_t m_last_script_tick_us;
 
-	CApp(u3d::Context *context):
-		u3d::Application(context),
+	CApp(magic::Context *context):
+		magic::Application(context),
 		m_script(nullptr),
 		L(nullptr),
 		m_last_script_tick_us(get_timeofday_us())
@@ -53,23 +53,23 @@ struct CApp: public App, public u3d::Application
 				g_client_config.urho3d_path);
 		ss_ tmp_path = interface::getGlobalFilesystem()->get_absolute_path(
 				g_client_config.cache_path+"/tmp");
-		engineParameters_["ResourcePaths"] = u3d::String() +
+		engineParameters_["ResourcePaths"] = magic::String() +
 				urho3d_path.c_str()+"/Bin/CoreData;"+
 				urho3d_path.c_str()+"/Bin/Data;"+
 				tmp_path.c_str();
 		engineParameters_["AutoloadPaths"] = "";
 
 		// Set up on_update event (this runs every frame)
-		SubscribeToEvent(u3d::E_UPDATE, HANDLER(CApp, on_update));
+		SubscribeToEvent(magic::E_UPDATE, HANDLER(CApp, on_update));
 
 		// Default to not grabbing the mouse
-		u3d::Input *u3d_input = GetSubsystem<u3d::Input>();
-		u3d_input->SetMouseGrabbed(false);
-		u3d_input->SetMouseVisible(true);
+		magic::Input *magic_input = GetSubsystem<magic::Input>();
+		magic_input->SetMouseGrabbed(false);
+		magic_input->SetMouseVisible(true);
 
 		// Default to auto-loading resources as they are modified
-		u3d::ResourceCache *u3d_cache = GetSubsystem<u3d::ResourceCache>();
-		u3d_cache->SetAutoReloadResources(true);
+		magic::ResourceCache *magic_cache = GetSubsystem<magic::ResourceCache>();
+		magic_cache->SetAutoReloadResources(true);
 	}
 
 	~CApp()
@@ -83,12 +83,12 @@ struct CApp: public App, public u3d::Application
 
 	int run()
 	{
-		return u3d::Application::Run();
+		return magic::Application::Run();
 	}
 
 	void shutdown()
 	{
-		u3d::Engine *engine = GetSubsystem<u3d::Engine>();
+		magic::Engine *engine = GetSubsystem<magic::Engine>();
 		engine->Exit();
 	}
 
@@ -135,9 +135,9 @@ struct CApp: public App, public u3d::Application
 	void Start()
 	{
 		// Instantiate and register the Lua script subsystem so that we can use the LuaScriptInstance component
-		context_->RegisterSubsystem(new u3d::LuaScript(context_));
+		context_->RegisterSubsystem(new magic::LuaScript(context_));
 
-		m_script = context_->GetSubsystem<u3d::LuaScript>();
+		m_script = context_->GetSubsystem<magic::LuaScript>();
 		L = m_script->GetState();
 		if(L == nullptr)
 			throw Exception("m_script.GetState() returned null");
@@ -168,7 +168,7 @@ struct CApp: public App, public u3d::Application
 		}
 	}
 
-	void on_update(u3d::StringHash eventType, u3d::VariantMap &eventData)
+	void on_update(magic::StringHash eventType, magic::VariantMap &eventData)
 	{
 		if(g_sigint_received)
 			shutdown();
@@ -721,7 +721,7 @@ struct CApp: public App, public u3d::Application
 	}
 };
 
-App* createApp(u3d::Context *context)
+App* createApp(magic::Context *context)
 {
 	return new CApp(context);
 }

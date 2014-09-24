@@ -85,3 +85,7 @@ something, the "add" verb should be left out. Fine enough examples:
 - client, 3rdparty/c55lib: Command-line parameters
 - 3rdparty/cereal
 
+Urho3D
+------
+Urho3D's namespace should generally be aliased to be "magic".
+
