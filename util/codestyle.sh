@@ -44,3 +44,9 @@ sed -i -e 's/" + /"+/g' $header_files $cpp_files
 sed -i -e 's/" *+$/"+/g' $header_files $cpp_files
 sed -i -e 's/^\(\t\+\)   \+/\1\t\t/g' $header_files $cpp_files
 
+# Format CMake too
+cmake_files="$script_dir"/../CMakeLists.txt
+sed -i -e 's/\(^[ \t]*\)\([A-Za-z_]\+\)[ \t]*(/\1\L\2(/' $cmake_files
+sed -i -e 's/([\t ]\+\([A-Za-z_${)]\)/(\1/g' $cmake_files
+sed -i -e 's/\([A-Za-z_}(]\)[\t ]\+)/\1)/g' $cmake_files
+

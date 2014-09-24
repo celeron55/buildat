@@ -18,8 +18,8 @@ include_directories("3rdparty/smallsha1")
 # Global options
 #
 
-SET(BUILD_SERVER TRUE CACHE BOOL "Build server")
-SET(BUILD_CLIENT TRUE CACHE BOOL "Build client")
+set(BUILD_SERVER TRUE CACHE BOOL "Build server")
+set(BUILD_CLIENT TRUE CACHE BOOL "Build client")
 
 #
 # Urho3D dependency
@@ -57,7 +57,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 # Security / crash protection
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstack-protector-all")
 
-IF(BUILD_CLIENT)
+if(BUILD_CLIENT)
 	# Client
 	set(CLIENT_EXE_NAME buildat_client)
 	set(CLIENT_SRCS
@@ -74,15 +74,15 @@ IF(BUILD_CLIENT)
 
 	add_executable(${CLIENT_EXE_NAME} ${CLIENT_SRCS})
 
-	TARGET_LINK_LIBRARIES(${CLIENT_EXE_NAME}
+	target_link_libraries(${CLIENT_EXE_NAME}
 		c55lib
 		smallsha1
 		${ABSOLUTE_PATH_LIBS}
 		${LINK_LIBS_ONLY}
 	)
-ENDIF(BUILD_CLIENT)
+endif(BUILD_CLIENT)
 
-IF(BUILD_SERVER)
+if(BUILD_SERVER)
 	# Server
 	set(SERVER_EXE_NAME buildat_server)
 	set(SERVER_SRCS
@@ -102,11 +102,11 @@ IF(BUILD_SERVER)
 	)
 	add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
 
-	TARGET_LINK_LIBRARIES(${SERVER_EXE_NAME}
+	target_link_libraries(${SERVER_EXE_NAME}
 		c55lib
 		smallsha1
 		dl
 		${ABSOLUTE_PATH_LIBS}
 		${LINK_LIBS_ONLY}
 	)
-ENDIF(BUILD_SERVER)
+endif(BUILD_SERVER)
