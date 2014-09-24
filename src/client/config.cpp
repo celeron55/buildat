@@ -41,7 +41,8 @@ bool Config::check_paths()
 		fail = true;
 	}
 
-	if(!check_file_readable(urho3d_path+"/Bin/CoreData/Shaders/GLSL/Basic.glsl")){
+	if(!check_file_readable(urho3d_path +
+			"/Bin/CoreData/Shaders/GLSL/Basic.glsl")){
 		log_e(MODULE, "Urho3D doesn't seem to exist in urho3d_path=\"%s\"",
 				cs(urho3d_path));
 		fail = true;

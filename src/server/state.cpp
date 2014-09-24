@@ -161,7 +161,7 @@ struct CState: public State, public interface::Server
 		m_shutdown_exit_status = exit_status;
 	}
 
-	bool is_shutdown_requested(int *exit_status=nullptr)
+	bool is_shutdown_requested(int *exit_status = nullptr)
 	{
 		if(m_shutdown_requested && exit_status)
 			*exit_status = m_shutdown_exit_status;

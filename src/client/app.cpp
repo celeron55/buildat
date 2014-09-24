@@ -53,7 +53,7 @@ struct CApp: public App, public u3d::Application
 				g_client_config.urho3d_path);
 		ss_ tmp_path = interface::getGlobalFilesystem()->get_absolute_path(
 				g_client_config.cache_path+"/tmp");
-		engineParameters_["ResourcePaths"] = u3d::String()+
+		engineParameters_["ResourcePaths"] = u3d::String() +
 				urho3d_path.c_str()+"/Bin/CoreData;"+
 				urho3d_path.c_str()+"/Bin/Data;"+
 				tmp_path.c_str();
