@@ -249,6 +249,16 @@ struct Module: public interface::Module, public network::Interface
 		send_u(recipient, name, data);
 	}
 
+	sv_<PeerInfo::Id> list_peers()
+	{
+		sv_<PeerInfo::Id> result;
+		for(auto &pair : m_peers){
+			Peer &peer = pair.second;
+			result.push_back(peer.id);
+		}
+		return result;
+	}
+
 	void* get_interface()
 	{
 		return dynamic_cast<Interface*>(this);

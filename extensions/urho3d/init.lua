@@ -55,21 +55,20 @@ end
 
 -- Checks that this is not an absolute file path or anything funny
 local allowed_name_pattern = '^[a-zA-Z0-9][a-zA-Z0-9/._ ]*$'
-function M.check_safe_resource_name(orig_name)
-	local name = orig_name
+function M.check_safe_resource_name(name)
 	if type(name) ~= "string" then
-		error("Unsafe resource name: "..dump(orig_name).." (not string)")
+		error("Unsafe resource name: "..dump(name).." (not string)")
 	end
 	if string.match(name, '^/.*$') then
-		error("Unsafe resource name: "..dump(orig_name).." (absolute path)")
+		error("Unsafe resource name: "..dump(name).." (absolute path)")
 	end
 	if not string.match(name, allowed_name_pattern) then
-		error("Unsafe resource name: "..dump(orig_name).." (unneeded chars)")
+		error("Unsafe resource name: "..dump(name).." (unneeded chars)")
 	end
 	if string.match(name, '[.][.]') then
-		error("Unsafe resource name: "..dump(orig_name).." (contains ..)")
+		error("Unsafe resource name: "..dump(name).." (contains ..)")
 	end
-	log:verbose("Safe resource name: "..orig_name.." -> "..name)
+	log:verbose("Safe resource name: "..name)
 	return name
 end
 
@@ -102,17 +101,17 @@ assert(pcall(function()
 	M.check_safe_resource_name("abc$de")
 end) == false)
 
-local hack_resaved_files = {}
+local hack_resaved_files = {}  -- name -> temporary target file
 
 -- Create temporary file with wanted file name to make Urho3D load it correctly
 function M.resave_file(resource_name)
 	M.check_safe_resource_name(resource_name)
-	local path = __buildat_get_file_path(resource_name)
-	if path == nil then
-		return nil
-	end
-	local path2 = hack_resaved_files[path]
+	local path2 = hack_resaved_files[resource_name]
 	if path2 == nil then
+		local path = __buildat_get_file_path(resource_name)
+		if path == nil then
+			return nil
+		end
 		path2 = __buildat_get_path("tmp").."/"..resource_name
 		dir2 = string.match(path2, '^(.*)/.+$')
 		if dir2 then
@@ -130,9 +129,20 @@ function M.resave_file(resource_name)
 		end
 		src:close()
 		dst:close()
-		hack_resaved_files[path] = path2
+		hack_resaved_files[resource_name] = path2
 	end
 	return path2
+end
+
+-- Callback from core
+function __buildat_file_updated_in_cache(name, hash, cached_path)
+	log:debug("__buildat_file_updated_in_cache(): name="..dump(name)..
+			", cached_path="..dump(cached_path))
+	if hack_resaved_files[name] then
+		log:verbose("__buildat_file_updated_in_cache(): Re-saving: "..dump(name))
+		hack_resaved_files[name] = nil -- Force re-copy
+		M.resave_file(name)
+	end
 end
 
 M.safe.cache = {

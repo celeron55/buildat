@@ -15,6 +15,7 @@ buildat.Logger(module_name) -> object
 	:warning(message)
 	:info(message)
 	:verbose(message)
+	:debug(message)
 
 buildat.send_packet(name, data)
 

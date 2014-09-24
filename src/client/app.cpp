@@ -14,6 +14,7 @@
 #include <LuaScript.h>
 #include <CoreEvents.h>
 #include <Input.h>
+#include <ResourceCache.h>
 #pragma GCC diagnostic pop
 extern "C" {
 #include <lua.h>
@@ -65,6 +66,10 @@ struct CApp: public App, public u3d::Application
 		u3d::Input *u3d_input = GetSubsystem<u3d::Input>();
 		u3d_input->SetMouseGrabbed(false);
 		u3d_input->SetMouseVisible(true);
+
+		// Default to auto-loading resources as they are modified
+		u3d::ResourceCache *u3d_cache = GetSubsystem<u3d::ResourceCache>();
+		u3d_cache->SetAutoReloadResources(true);
 	}
 
 	~CApp()
@@ -111,6 +116,18 @@ struct CApp: public App, public u3d::Application
 		lua_pushlstring(L, name.c_str(), name.size());
 		lua_pushlstring(L, data.c_str(), data.size());
 		error_logging_pcall(L, 2, 0);
+	}
+
+	void file_updated_in_cache(const ss_ &file_name,
+			const ss_ &file_hash, const ss_ &cached_path)
+	{
+		log_v(MODULE, "file_updated_in_cache(): %s", cs(file_name));
+
+		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_file_updated_in_cache");
+		lua_pushlstring(L, file_name.c_str(), file_name.size());
+		lua_pushlstring(L, file_hash.c_str(), file_hash.size());
+		lua_pushlstring(L, cached_path.c_str(), cached_path.size());
+		error_logging_pcall(L, 3, 0);
 	}
 
 	// Non-public methods

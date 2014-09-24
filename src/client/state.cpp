@@ -156,13 +156,32 @@ struct CState: public State
 			}
 			m_file_hashes[file_name] = file_hash;
 			ss_ file_hash_hex = interface::sha1::hex(file_hash);
+			log_v(MODULE, "Server announces file: %s %s",
+					cs(file_hash_hex), cs(file_name));
 			// Check if we already have this file
 			ss_ path = m_remote_cache_path+"/"+file_hash_hex;
 			std::ifstream ifs(path, std::ios::binary);
+			bool cached_is_ok = false;
 			if(ifs.good()){
-				// We have it; no need to ask this file
-				log_i(MODULE, "%s %s: cached",
-						cs(file_hash_hex), cs(file_name));
+				std::string content((std::istreambuf_iterator<char>(ifs)),
+						std::istreambuf_iterator<char>());
+				ss_ content_hash = interface::sha1::calculate(content);
+				if(content_hash == file_hash){
+					// We have it; no need to ask this file
+					log_i(MODULE, "%s %s: cached",
+							cs(file_hash_hex), cs(file_name));
+					cached_is_ok = true;
+				} else {
+					// Our copy is broken, re-request it
+					log_i(MODULE, "%s %s: Our copy is broken (has hash %s)",
+							cs(file_hash_hex), cs(file_name),
+							cs(interface::sha1::hex(content_hash)));
+				}
+			}
+			if(cached_is_ok){
+				// Let Lua resource wrapper know that this happened so it can update
+				// the copy made for Urho3D's resource cache
+				m_app->file_updated_in_cache(file_name, file_hash, path);
 			} else {
 				// We don't have it; request this file
 				log_i(MODULE, "%s %s: requesting",
@@ -222,6 +241,9 @@ struct CState: public State
 					m_tell_after_all_files_transferred_requested = false;
 				}
 			}
+			// Let Lua resource wrapper know that this happened so it can update
+			// the copy made for Urho3D's resource cache
+			m_app->file_updated_in_cache(file_name, file_hash, path);
 			return;
 		}
 	}

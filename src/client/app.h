@@ -20,6 +20,8 @@ namespace app
 		virtual void shutdown() = 0;
 		virtual void run_script(const ss_ &script) = 0;
 		virtual void handle_packet(const ss_ &name, const ss_ &data) = 0;
+		virtual void file_updated_in_cache(const ss_ &file_name,
+				const ss_ &file_hash, const ss_ &cached_path) = 0;
 	};
 
 	App* createApp(Urho3D::Context *context);

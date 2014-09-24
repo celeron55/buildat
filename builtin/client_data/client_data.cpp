@@ -75,14 +75,10 @@ struct Module: public interface::Module
 		for(const interface::Filesystem::Node &n : list){
 			if(n.is_directory)
 				continue;
-			const ss_ &file_name = n.name;
-			std::ifstream f(client_data_path+"/"+file_name);
-			std::string file_content((std::istreambuf_iterator<char>(f)),
-					std::istreambuf_iterator<char>());
-
+			const ss_ &file_path = client_data_path+"/"+n.name;
 			const ss_ &public_file_name = module_name+"/"+n.name;
 			client_file::access(m_server, [&](client_file::Interface * i){
-				i->add_file_content(public_file_name, file_content);
+				i->add_file_path(public_file_name, file_path);
 			});
 		}
 	}

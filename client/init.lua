@@ -59,6 +59,10 @@ function buildat.Logger(module)
 		text = fix_text(text)
 		__buildat_print_log("verbose", module, text)
 	end
+	function logger:debug(text)
+		text = fix_text(text)
+		__buildat_print_log("debug", module, text)
+	end
 	return logger
 end
 

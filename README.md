@@ -32,6 +32,8 @@ Get and build Urho3D
     $ cd Build
     $ make -j4
 
+`-DURHO3D_SAFE_LUA=true` helps debugging issues in Lua.
+
 Take note whether you build a 32 or a 64 bit version and use the same option in
 Buildat's CMake configuration.
 

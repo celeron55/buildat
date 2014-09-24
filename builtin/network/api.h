@@ -42,6 +42,7 @@ namespace network
 	{
 		virtual void send(PeerInfo::Id recipient, const ss_ &name,
 				const ss_ &data) = 0;
+		virtual sv_<PeerInfo::Id> list_peers() = 0;
 	};
 
 	inline bool access(interface::Server *server,

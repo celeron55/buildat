@@ -201,7 +201,7 @@ struct Module: public interface::Module, public client_file::Interface
 
 	void on_watch_fd_event(const interface::SocketEvent &event)
 	{
-		log_v(MODULE, "on_watch_fd_event()");
+		log_d(MODULE, "on_watch_fd_event()");
 		m_watch->report_fd(event.fd);
 	}
 
@@ -216,7 +216,7 @@ struct Module: public interface::Module, public client_file::Interface
 			// File already added; ignore if content wasn't modified
 			sp_<FileInfo> old_info = it->second;
 			if(old_info->hash == hash){
-				log_v(MODULE, "File stayed the same: %s: %s", cs(name),
+				log_d(MODULE, "File stayed the same: %s: %s", cs(name),
 						cs(interface::sha1::hex(hash)));
 				return;
 			}
@@ -226,7 +226,19 @@ struct Module: public interface::Module, public client_file::Interface
 				cs(interface::sha1::hex(hash)));
 		m_files[name] = sp_<FileInfo>(new FileInfo(name, content, hash, ""));
 
-		// Note: Clients have to reconnect to see the new file content
+		// Notify clients of modified file
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(name);
+			ar(hash);
+		}
+		network::access(m_server, [&](network::Interface * inetwork){
+			sv_<network::PeerInfo::Id> peers = inetwork->list_peers();
+			for(const network::PeerInfo::Id &peer : peers){
+				inetwork->send(peer, "core:announce_file", os.str());
+			}
+		});
 	}
 
 	void add_file_content(const ss_ &name, const ss_ &content)
@@ -237,6 +249,9 @@ struct Module: public interface::Module, public client_file::Interface
 	void add_file_path(const ss_ &name, const ss_ &path)
 	{
 		std::ifstream f(path);
+		if(!f.good())
+			throw Exception("client_file::add_file_path(): Couldn't open \""+
+					name+"\" from \""+path+"\"");
 		std::string content((std::istreambuf_iterator<char>(f)),
 				std::istreambuf_iterator<char>());
 		ss_ hash = interface::sha1::calculate(content);
@@ -244,8 +259,13 @@ struct Module: public interface::Module, public client_file::Interface
 				cs(interface::sha1::hex(hash)), cs(path));
 		m_files[name] = sp_<FileInfo>(new FileInfo(name, content, hash, path));
 		m_watch->add(path, [this, name, path](const ss_ & path_){
-			log_v(MODULE, "File modified: %s (%s)", cs(name), cs(path));
+			log_d(MODULE, "File watch callback: %s (%s)", cs(name), cs(path));
 			std::ifstream f(path);
+			if(!f.good()){
+				log_v(MODULE, "client_file: Couldn't open updated file "
+						"\"%s\" from \"%s\"", cs(name), cs(path));
+				return;
+			}
 			std::string content((std::istreambuf_iterator<char>(f)),
 					std::istreambuf_iterator<char>());
 			update_file_content(name, content);
