@@ -13,6 +13,7 @@
 #include <Engine.h>
 #include <LuaScript.h>
 #include <CoreEvents.h>
+#include <Input.h>
 #pragma GCC diagnostic pop
 extern "C" {
 #include <lua.h>
@@ -59,6 +60,11 @@ struct CApp: public App, public u3d::Application
 
 		// Set up on_update event (this runs every frame)
 		SubscribeToEvent(u3d::E_UPDATE, HANDLER(CApp, on_update));
+
+		// Default to not grabbing the mouse
+		u3d::Input *u3d_input = GetSubsystem<u3d::Input>();
+		u3d_input->SetMouseGrabbed(false);
+		u3d_input->SetMouseVisible(true);
 	}
 
 	~CApp()
