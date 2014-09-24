@@ -170,4 +170,4 @@ for _, name in ipairs(buildat_safe_list) do
 end
 
 log:info("sandbox.lua loaded")
-# vim: set noet ts=4 sw=4:
+-- vim: set noet ts=4 sw=4:

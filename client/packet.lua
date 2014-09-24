@@ -26,4 +26,4 @@ end
 function buildat.send_packet(name, data)
 	__buildat_send_packet(name, data)
 end
-# vim: set noet ts=4 sw=4:
+-- vim: set noet ts=4 sw=4:

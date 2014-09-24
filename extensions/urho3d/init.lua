@@ -180,4 +180,4 @@ function M.safe.SubscribeToEvent(event_name, function_name)
 end
 
 return M
-# vim: set noet ts=4 sw=4:
+-- vim: set noet ts=4 sw=4:

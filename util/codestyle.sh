@@ -57,8 +57,12 @@ sed -i '/^\/\/ vim: set /d' $header_files $cpp_files
 for f in $header_files $cpp_files; do
 	echo '// vim: set noet ts=4 sw=4:' >> $f
 done
-sed -i '/^# vim: set /d' $lua_files $cmake_files
-for f in $lua_files $cmake_files; do
+sed -i '/^-- vim: set /d' $lua_files
+for f in $lua_files; do
+	echo '-- vim: set noet ts=4 sw=4:' >> $f
+done
+sed -i '/^# vim: set /d' $cmake_files
+for f in $cmake_files; do
 	echo '# vim: set noet ts=4 sw=4:' >> $f
 done
 
