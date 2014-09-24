@@ -141,14 +141,13 @@ function __buildat_run_code_in_sandbox(untrusted_code)
 	return true
 end
 
--- TODO: : -> .
-function buildat:run_script_file(name)
+function buildat.run_script_file(name)
 	local code = __buildat_get_file_content(name)
 	if not code then
 		log:error("Failed to load script file: "+name)
 		return false
 	end
-	log:info("buildat:run_script_file("..name.."): code length: "..#code)
+	log:info("buildat.run_script_file("..name.."): code length: "..#code)
 	return __buildat_run_code_in_sandbox(code)
 end
 

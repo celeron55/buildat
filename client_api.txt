@@ -23,6 +23,9 @@ buildat.sub_packet(name, function)
 
 buildat.unsub_packet(function)
 
+buildat.run_script_file(name)
+- Run script file gotten from server in sandbox environment
+
 The extension environment
 =========================
 

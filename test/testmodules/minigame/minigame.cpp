@@ -148,7 +148,7 @@ struct Module: public interface::Module
 
 		network::access(m_server, [&](network::Interface * inetwork){
 			inetwork->send(event.recipient, "core:run_script",
-					"buildat:run_script_file(\"minigame/init.lua\")");
+					"buildat.run_script_file(\"minigame/init.lua\")");
 		});
 
 		send_update(event.recipient);
