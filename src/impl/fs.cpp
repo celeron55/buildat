@@ -12,6 +12,21 @@
 
 namespace interface {
 
+bool Filesystem::check_file_extension(const char *path, const char *ext)
+{
+	return c55fs::checkFileExtension(path, ext);
+}
+
+ss_ Filesystem::strip_file_extension(const ss_ &path)
+{
+	return c55fs::stripFileExtension(path);
+}
+
+ss_ Filesystem::strip_file_name(const ss_ &path)
+{
+	return c55fs::stripFilename(path);
+}
+
 struct CFilesystem : public Filesystem
 {
 	sv_<Node> list_directory(const ss_ &path)

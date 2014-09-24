@@ -5,6 +5,7 @@
 
 namespace interface
 {
+	// TODO: Get some sanity into this; what's up with the virtual methods?
 	struct Filesystem
 	{
 		virtual ~Filesystem(){}
@@ -21,6 +22,11 @@ namespace interface
 		virtual ss_ get_cwd() = 0;
 
 		virtual ss_ get_absolute_path(const ss_ &path) = 0;
+
+		// "image.png", "png" -> true
+		static bool check_file_extension(const char *path, const char *ext);
+		static ss_ strip_file_extension(const ss_ &path);
+		static ss_ strip_file_name(const ss_ &path);
 	};
 
 	Filesystem* getGlobalFilesystem();
