@@ -64,7 +64,6 @@ struct CApp: public App, public magic::Application
 
 		// Default to not grabbing the mouse
 		magic::Input *magic_input = GetSubsystem<magic::Input>();
-		magic_input->SetMouseGrabbed(false);
 		magic_input->SetMouseVisible(true);
 
 		// Default to auto-loading resources as they are modified
