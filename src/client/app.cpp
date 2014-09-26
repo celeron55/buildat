@@ -45,19 +45,25 @@ struct CApp: public App, public magic::Application
 		L(nullptr),
 		m_last_script_tick_us(get_timeofday_us())
 	{
+		sv_<ss_> resource_paths = {
+			g_client_config.cache_path+"/tmp",
+			g_client_config.share_path+"/extensions", // Could be unsafe
+			g_client_config.urho3d_path+"/Bin/CoreData",
+			g_client_config.urho3d_path+"/Bin/Data",
+		};
+		auto *fs = interface::getGlobalFilesystem();
+		ss_ resource_paths_s;
+		for(const ss_ &path : resource_paths){
+			if(!resource_paths_s.empty())
+				resource_paths_s += ";";
+			resource_paths_s += fs->get_absolute_path(path);
+		}
+
 		engineParameters_["WindowTitle"]   = "Buildat Client";
 		engineParameters_["LogName"]       = "client_Urho3D.log";
 		engineParameters_["FullScreen"]    = false;
 		engineParameters_["Headless"]      = false;
-
-		ss_ urho3d_path = interface::getGlobalFilesystem()->get_absolute_path(
-				g_client_config.urho3d_path);
-		ss_ tmp_path = interface::getGlobalFilesystem()->get_absolute_path(
-				g_client_config.cache_path+"/tmp");
-		engineParameters_["ResourcePaths"] = magic::String() +
-				urho3d_path.c_str()+"/Bin/CoreData;"+
-				urho3d_path.c_str()+"/Bin/Data;"+
-				tmp_path.c_str();
+		engineParameters_["ResourcePaths"] = resource_paths_s.c_str();
 		engineParameters_["AutoloadPaths"] = "";
 
 		// Set up on_update event (this runs every frame)
