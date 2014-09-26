@@ -129,3 +129,4 @@ function M.UIStack(root)
 end
 
 return M
+-- vim: set noet ts=4 sw=4:
