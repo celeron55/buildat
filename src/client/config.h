@@ -11,6 +11,7 @@ namespace client
 		ss_ share_path = "..";
 		ss_ cache_path = "../cache";
 		ss_ urho3d_path = "../../Urho3D";
+		bool boot_to_menu = false;
 
 		bool check_paths();
 	};

@@ -94,7 +94,7 @@ struct CApp: public App, public magic::Application
 
 	void run_script(const ss_ &script)
 	{
-		log_v(MODULE, "run_script(): %s", cs(script));
+		log_v(MODULE, "run_script():\n%s", cs(script));
 
 		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_run_code_in_sandbox");
 		lua_pushlstring(L, script.c_str(), script.size());
@@ -106,6 +106,20 @@ struct CApp: public App, public magic::Application
 		} else {
 			log_v(MODULE, "run_script(): succeeded");
 		}
+	}
+
+	bool run_script_no_sandbox(const ss_ &script)
+	{
+		log_v(MODULE, "run_script_no_sandbox():\n%s", cs(script));
+
+		if(luaL_loadstring(L, script.c_str())){
+			ss_ error = lua_tocppstring(L, -1);
+			log_e("%s", cs(error));
+			lua_pop(L, 1);
+			return false;
+		}
+		error_logging_pcall(L, 0, 0);
+		return true;
 	}
 
 	void handle_packet(const ss_ &name, const ss_ &data)
@@ -178,6 +192,19 @@ struct CApp: public App, public magic::Application
 			log_w(MODULE, "luaL_dofile: An error occurred: %s\n",
 					lua_tostring(L, -1));
 			lua_pop(L, 1);
+			throw AppStartupError("Could not initialize Lua environment");
+		}
+
+		if(g_client_config.boot_to_menu){
+			ss_ script =
+					"local m = require('buildat/extension/__menu')\n"
+					"if type(m) ~= 'table' then\n"
+					"    error('Failed to load extension __menu')\n"
+					"end\n"
+					"m.boot()\n";
+			if(!run_script_no_sandbox(script)){
+				throw AppStartupError("Failed to load and run extension __menu");
+			}
 		}
 	}
 

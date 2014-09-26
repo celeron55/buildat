@@ -104,8 +104,12 @@ int main(int argc, char *argv[])
 	sp_<client::State> state(client::createState(app0));
 	app0->set_state(state);
 
-	if(!state->connect(config.server_address, "20000"))
-		return 1;
+	if(config.server_address != ""){
+		if(!state->connect(config.server_address, "20000"))
+			return 1;
+	} else {
+		config.boot_to_menu = true;
+	}
 
 	return app0->run();
 }
