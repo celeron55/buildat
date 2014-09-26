@@ -15,6 +15,7 @@
 #include <CoreEvents.h>
 #include <Input.h>
 #include <ResourceCache.h>
+#include <Graphics.h>
 #pragma GCC diagnostic pop
 extern "C" {
 #include <lua.h>
@@ -133,6 +134,19 @@ struct CApp: public App, public magic::Application
 
 	void Start()
 	{
+		// Set graphics mode
+		magic::Graphics *magic_graphics = GetSubsystem<magic::Graphics>();
+		int w = 1024;
+		int h = 768;
+		bool fullscreen = false;
+		bool borderless = false;
+		bool resizable = true;
+		bool vsync = true;
+		bool triple_buffer = false;
+		int multisampling = 1; // 2 looks much better but is much heavier(?)
+		magic_graphics->SetMode(w, h, fullscreen, borderless, resizable,
+				vsync, triple_buffer, multisampling);
+
 		// Instantiate and register the Lua script subsystem so that we can use the LuaScriptInstance component
 		context_->RegisterSubsystem(new magic::LuaScript(context_));
 
