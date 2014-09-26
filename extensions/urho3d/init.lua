@@ -186,9 +186,9 @@ function M.safe.SubscribeToEvent(x, y, z)
 	end
 	local global_function_i = next_sandbox_global_function_i
 	next_sandbox_global_function_i = next_sandbox_global_function_i + 1
-	local global_callback = "__buildat_sandbox_callback_"..global_function_i
-	sandbox_callback_to_global_function_name[callback] = global_callback
-	_G[global_callback] = function(eventType, eventData)
+	local global_callback_name = "__buildat_sandbox_callback_"..global_function_i
+	sandbox_callback_to_global_function_name[callback] = global_callback_name
+	_G[global_callback_name] = function(eventType, eventData)
 		local f = function()
 			if object then
 				callback(object, eventType, eventData)
@@ -199,10 +199,11 @@ function M.safe.SubscribeToEvent(x, y, z)
 		__buildat_run_function_in_sandbox(f)
 	end
 	if object then
-		SubscribeToEvent(object, event_name, global_callback)
+		SubscribeToEvent(object, event_name, global_callback_name)
 	else
-		SubscribeToEvent(event_name, global_callback)
+		SubscribeToEvent(event_name, global_callback_name)
 	end
+	return global_callback_name
 end
 
 --
@@ -256,9 +257,9 @@ function M.SubscribeToEvent(x, y, z)
 	end
 	local global_function_i = next_unsafe_global_function_i
 	next_unsafe_global_function_i = next_unsafe_global_function_i + 1
-	local global_callback = "__buildat_unsafe_callback_"..global_function_i
-	unsafe_callback_to_global_function_name[callback] = global_callback
-	_G[global_callback] = function(eventType, eventData)
+	local global_callback_name = "__buildat_unsafe_callback_"..global_function_i
+	unsafe_callback_to_global_function_name[callback] = global_callback_name
+	_G[global_callback_name] = function(eventType, eventData)
 		if object then
 			callback(object, eventType, eventData)
 		else
@@ -266,10 +267,11 @@ function M.SubscribeToEvent(x, y, z)
 		end
 	end
 	if object then
-		SubscribeToEvent(object, event_name, global_callback)
+		SubscribeToEvent(object, event_name, global_callback_name)
 	else
-		SubscribeToEvent(event_name, global_callback)
+		SubscribeToEvent(event_name, global_callback_name)
 	end
+	return global_callback_name
 end
 
 return M
