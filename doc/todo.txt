@@ -29,6 +29,8 @@ Buildat TODO
 - Voxel world with arbitrary chunk size and offset, with pluggable loader
   modules. Main world has worldspace_id=1. Try Polyvox.
 - Support Cereal's shared pointer serialization in Lua
+- An extension that provides configuration options that both the main menu and
+  games can open
 
 - Proper whitelisting sandbox for Urho3D's Lua API
 	* Should all Urho3D callbacks be run in the sandbox even in the extension

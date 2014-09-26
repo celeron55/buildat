@@ -18,15 +18,16 @@ function M.UIStack(root)
 	self.element_name_i = 1
 	self.stack = {}
 	local current_ui_stack_object = self
-	function self:push(description)
+	function self:push(options)
+		options = options or {}
 		if #self.stack >= 1 then
 			local top = self.stack[#self.stack]
 			top:SetVisible(false)
 		end
 		local element_name =
 				self.stack_name.."_"..#self.stack.."."..self.element_name_i
-		if description then
-			element_name = element_name..": "..description
+		if options.description then
+			element_name = element_name..": "..options.description
 		end
 		log:verbose("UIStack:push(): "..dump(element_name))
 		local element = self.root:CreateChild("UIElement")
