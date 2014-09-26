@@ -151,9 +151,10 @@ end
 
 M.safe.cache = {
 	GetResource = function(self, resource_type, resource_name)
-		local path = M.resave_file(resource_name)
-		-- Note: path is unused
+		-- TODO: If resource_type=XMLFile, we probably have to go through it and
+		--       resave all references to other files found in there
 		resource_name = M.check_safe_resource_name(resource_name)
+		M.resave_file(resource_name)
 		return cache:GetResource(resource_type, resource_name)
 	end,
 }
@@ -163,7 +164,15 @@ M.safe.cache = {
 local sandbox_callback_to_global_function_name = {}
 local next_sandbox_global_function_i = 1
 
-function M.safe.SubscribeToEvent(event_name, callback)
+function M.safe.SubscribeToEvent(x, y, z)
+	local object = x
+	local event_name = y
+	local callback = z
+	if callback == nil then
+		object = nil
+		event_name = x
+		callback = y
+	end
 	if type(callback) == 'string' then
 		-- Allow supplying callback function name like Urho3D does by default
 		local caller_environment = getfenv(2)
@@ -181,11 +190,19 @@ function M.safe.SubscribeToEvent(event_name, callback)
 	sandbox_callback_to_global_function_name[callback] = global_callback
 	_G[global_callback] = function(eventType, eventData)
 		local f = function()
-			callback(eventType, eventData)
+			if object then
+				callback(object, eventType, eventData)
+			else
+				callback(eventType, eventData)
+			end
 		end
 		__buildat_run_function_in_sandbox(f)
 	end
-	SubscribeToEvent(event_name, global_callback)
+	if object then
+		SubscribeToEvent(object, event_name, global_callback)
+	else
+		SubscribeToEvent(event_name, global_callback)
+	end
 end
 
 --
@@ -217,7 +234,15 @@ end]]
 local unsafe_callback_to_global_function_name = {}
 local next_unsafe_global_function_i = 1
 
-function M.SubscribeToEvent(event_name, callback)
+function M.SubscribeToEvent(x, y, z)
+	local object = x
+	local event_name = y
+	local callback = z
+	if callback == nil then
+		object = nil
+		event_name = x
+		callback = y
+	end
 	if type(callback) == 'string' then
 		-- Allow supplying callback function name like Urho3D does by default
 		local caller_environment = getfenv(2)
@@ -234,9 +259,17 @@ function M.SubscribeToEvent(event_name, callback)
 	local global_callback = "__buildat_unsafe_callback_"..global_function_i
 	unsafe_callback_to_global_function_name[callback] = global_callback
 	_G[global_callback] = function(eventType, eventData)
-		callback(eventType, eventData)
+		if object then
+			callback(object, eventType, eventData)
+		else
+			callback(eventType, eventData)
+		end
 	end
-	SubscribeToEvent(event_name, global_callback)
+	if object then
+		SubscribeToEvent(object, event_name, global_callback)
+	else
+		SubscribeToEvent(event_name, global_callback)
+	end
 end
 
 return M

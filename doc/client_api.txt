@@ -106,6 +106,9 @@ File paths and other things are converted automatically.
 Additions to regular Urho3D:
 
 SubscribeToEvent(event_name, callback)
+- callback: function(event_type: string, event_data: VariantMap)
+SubscribeToEvent(object, event_name, callback)
+- callback: function(object, event_type: string, event_data: VariantMap)
 - Callback can be a function, unlike in plain Urho3D where it must be a global
   function name.
 
@@ -124,6 +127,9 @@ environment, but this will not be supported in the future.
 Additions to regular Urho3D:
 
 SubscribeToEvent(event_name, callback)
+- callback: function(event_type: string, event_data: VariantMap)
+SubscribeToEvent(object, event_name, callback)
+- callback: function(object, event_type: string, event_data: VariantMap)
 - Callback can be a function, unlike in plain Urho3D where it must be a global
   function name.
 
