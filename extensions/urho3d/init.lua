@@ -5,6 +5,10 @@ local log = buildat.Logger("extension/urho3d")
 local dump = buildat.dump
 local M = {safe = {}}
 
+--
+-- Safe interface
+--
+
 -- Set every plain value in global environment to the sandbox
 -- ...it's maybe safe enough... TODO: Not safe
 for k, v in pairs(_G) do
@@ -156,27 +160,83 @@ M.safe.cache = {
 
 -- SubscribeToEvent
 
-local sandbox_function_name_to_global_function_name = {}
-local next_global_function_i = 1
+local sandbox_callback_to_global_function_name = {}
+local next_sandbox_global_function_i = 1
 
-function M.safe.SubscribeToEvent(event_name, function_name)
-	local caller_environment = getfenv(2)
-	local callback = caller_environment[function_name]
-	if type(callback) ~= 'function' then
-		error("SubscribeToEvent(): '"..function_name..
-				"' is not a global function in current sandbox environment")
+function M.safe.SubscribeToEvent(event_name, callback)
+	if type(callback) == 'string' then
+		-- Allow supplying callback function name like Urho3D does by default
+		local caller_environment = getfenv(2)
+		callback = caller_environment[callback]
+		if type(callback) ~= 'function' then
+			error("SubscribeToEvent(): '"..callback..
+					"' is not a global function in current sandbox environment")
+		end
+	else
+		-- Allow directly supplying callback function
 	end
-	local global_function_i = next_global_function_i
-	next_global_function_i = next_global_function_i + 1
-	local global_function_name = "__buildat_sandbox_callback_"..global_function_i
-	sandbox_function_name_to_global_function_name[function_name] = global_function_name
-	_G[global_function_name] = function(eventType, eventData)
+	local global_function_i = next_sandbox_global_function_i
+	next_sandbox_global_function_i = next_sandbox_global_function_i + 1
+	local global_callback = "__buildat_sandbox_callback_"..global_function_i
+	sandbox_callback_to_global_function_name[callback] = global_callback
+	_G[global_callback] = function(eventType, eventData)
 		local f = function()
 			callback(eventType, eventData)
 		end
 		__buildat_run_function_in_sandbox(f)
 	end
-	SubscribeToEvent(event_name, global_function_name)
+	SubscribeToEvent(event_name, global_callback)
+end
+
+--
+-- Unsafe interface
+--
+
+-- Just wrap everything to the global environment as we don't have a full list
+-- of Urho3D's API available.
+
+setmetatable(M, {
+	__index = function(t, k)
+		local v = rawget(t, k)
+		if v ~= nil then return v end
+		return _G[k]
+	end,
+})
+
+-- Add GetResource wrapper to ResourceCache instance
+
+--[[M.cache.GetResource = function(self, resource_type, resource_name)
+	local path = M.resave_file(resource_name)
+	-- Note: path is unused
+	resource_name = M.check_safe_resource_name(resource_name)
+	return M.cache:GetResource(resource_type, resource_name)
+end]]
+
+-- Unsafe SubscribeToEvent with function support
+
+local unsafe_callback_to_global_function_name = {}
+local next_unsafe_global_function_i = 1
+
+function M.SubscribeToEvent(event_name, callback)
+	if type(callback) == 'string' then
+		-- Allow supplying callback function name like Urho3D does by default
+		local caller_environment = getfenv(2)
+		callback = caller_environment[callback]
+		if type(callback) ~= 'function' then
+			error("SubscribeToEvent(): '"..callback..
+					"' is not a global function in current unsafe environment")
+		end
+	else
+		-- Allow directly supplying callback function
+	end
+	local global_function_i = next_unsafe_global_function_i
+	next_unsafe_global_function_i = next_unsafe_global_function_i + 1
+	local global_callback = "__buildat_unsafe_callback_"..global_function_i
+	unsafe_callback_to_global_function_name[callback] = global_callback
+	_G[global_callback] = function(eventType, eventData)
+		callback(eventType, eventData)
+	end
+	SubscribeToEvent(event_name, global_callback)
 end
 
 return M

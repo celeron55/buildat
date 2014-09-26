@@ -3,6 +3,7 @@ Buildat Client API
 
 Lua code is run in two subtly different environments.
 
+
 Interface common to both environments
 =====================================
 
@@ -26,6 +27,7 @@ buildat.unsub_packet(function)
 buildat.run_script_file(name)
 - Run script file gotten from server in sandbox environment
 
+
 The extension environment
 =========================
 
@@ -43,6 +45,7 @@ requires the module, it only gets the plain safe interface.
 
 Extensions and modules use require("buildat/extension/<name>") to use extensions.
 
+
 The sandbox environment
 =======================
 
@@ -52,6 +55,7 @@ buildat.make_global(table)
 - Copies contents table into the current global sandbox environemnt. It will
   still not leak into the scope of other files running in the sandbox. Useful if
   you want to remove the "namespace table" of an extension.
+
 
 Safe interfaces of built-in extensions
 ======================================
@@ -98,4 +102,28 @@ urho3d
 Whitelist-based wrapper for the Urho3D Lua API.
 
 File paths and other things are converted automatically.
+
+Additions to regular Urho3D:
+
+SubscribeToEvent(event_name, callback)
+- Callback can be a function, unlike in plain Urho3D where it must be a global
+  function name.
+
+
+Unsafe interfaces of built-in extensions
+========================================
+
+urho3d
+------
+The unsafe version of the urho3d extension actually just wraps to the global
+environment, except for the additions to the API documented here.
+
+Note that Urho3D's API is currently always globally defined in the extension
+environment, but this will not be supported in the future.
+
+Additions to regular Urho3D:
+
+SubscribeToEvent(event_name, callback)
+- Callback can be a function, unlike in plain Urho3D where it must be a global
+  function name.
 
