@@ -29,3 +29,4 @@ Buildat TODO
   CMake to RCC++
 - Voxel world with arbitrary chunk size and offset, with pluggable loader
   modules. Main world has worldspace_id=1. Try Polyvox.
+- Support Cereal's shared pointer serialization in Lua

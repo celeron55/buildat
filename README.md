@@ -11,7 +11,11 @@ the client side and runs runtime-compiled C++ modules on the server side.
 Go ahead and write some modules and extensions, maybe the minecraftlike will
 exist in the near future!
 
-Further reading: design.txt, conventions.txt
+Further reading:
+
+* doc/design.txt
+* doc/conventions.txt
+* doc/client_api.txt
 
 Buildat Linux How-To
 ====================
