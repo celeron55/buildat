@@ -16,7 +16,6 @@ Buildat TODO
   that Lua will dictate the function/object design)
 - Move self-contained library-like Lua functions from client/app.cpp to a
   reusable location so that they can be used from server-side Lua in the future
-- Proper whitelisting sandbox for Urho3D's Lua API
 - Update testmodules/minigame to urho3d
 - New things in deps.txt?
 	- disable_module
@@ -30,3 +29,8 @@ Buildat TODO
 - Voxel world with arbitrary chunk size and offset, with pluggable loader
   modules. Main world has worldspace_id=1. Try Polyvox.
 - Support Cereal's shared pointer serialization in Lua
+
+- Proper whitelisting sandbox for Urho3D's Lua API
+	* Should all Urho3D callbacks be run in the sandbox even in the extension
+	  environment to ease things? They can grab unsafe stuff from their outer
+	  scope anyway.

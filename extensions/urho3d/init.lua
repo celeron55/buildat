@@ -260,10 +260,16 @@ function M.SubscribeToEvent(x, y, z)
 	local global_callback_name = "__buildat_unsafe_callback_"..global_function_i
 	unsafe_callback_to_global_function_name[callback] = global_callback_name
 	_G[global_callback_name] = function(eventType, eventData)
-		if object then
-			callback(object, eventType, eventData)
-		else
-			callback(eventType, eventData)
+		local f = function()
+			if object then
+				callback(object, eventType, eventData)
+			else
+				callback(eventType, eventData)
+			end
+		end
+		local ok, err = __buildat_pcall(f)
+		if not ok then
+			__buildat_fatal_error("Error calling callback: "..err)
 		end
 	end
 	if object then

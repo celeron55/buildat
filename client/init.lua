@@ -71,6 +71,7 @@ local log = buildat.Logger("__client/init")
 log:info("init.lua loaded")
 
 dofile(__buildat_get_path("share").."/client/test.lua")
+dofile(__buildat_get_path("share").."/client/api.lua")
 dofile(__buildat_get_path("share").."/client/packet.lua")
 dofile(__buildat_get_path("share").."/client/extensions.lua")
 dofile(__buildat_get_path("share").."/client/sandbox.lua")

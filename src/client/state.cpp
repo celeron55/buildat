@@ -31,6 +31,11 @@ struct CState: public State
 	sm_<ss_, ss_> m_file_hashes; // name -> hash
 	set_<ss_> m_waiting_files; // name
 	bool m_tell_after_all_files_transferred_requested = false;
+	// Connecting is possible only once. After that has happened, the whole
+	// state has to be recreated for making a new connection.
+	// In actuality the whole client application has to be recreated because
+	// otherwise unwanted Lua state remains.
+	bool m_connected = false;
 
 	CState(sp_<app::App> app):
 		m_socket(interface::createTCPSocket()),
@@ -52,15 +57,26 @@ struct CState: public State
 		}
 	}
 
-	bool connect(const ss_ &address, const ss_ &port)
+	bool connect(const ss_ &address, const ss_ &port, ss_ *error)
 	{
+		if(m_connected){
+			log_i(MODULE, "client::State: Cannot re-use state for new connection");
+			if(error)
+				*error = "Cannot re-use state for new connection";
+			return false;
+		}
+
 		bool ok = m_socket->connect_fd(address, port);
-		if(ok)
+		if(ok){
 			log_i(MODULE, "client::State: Connect succeeded (%s:%s)",
 					cs(address), cs(port));
-		else
+			m_connected = true;
+		} else {
 			log_i(MODULE, "client::State: Connect failed (%s:%s)",
 					cs(address), cs(port));
+			if(error)
+				*error = "Connect failed";
+		}
 		return ok;
 	}
 

@@ -7,6 +7,7 @@
 #include "interface/fs.h"
 #include <c55/getopt.h>
 #include <c55/os.h>
+#include <c55/string_util.h>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Application.h>
@@ -191,6 +192,8 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(pcall)
 		DEF_BUILDAT_FUNC(cereal_binary_input)
 		DEF_BUILDAT_FUNC(cereal_binary_output)
+		DEF_BUILDAT_FUNC(connect_server)
+		DEF_BUILDAT_FUNC(fatal_error)
 
 		ss_ init_lua_path = g_client_config.share_path+"/client/init.lua";
 		int error = luaL_dofile(L, init_lua_path.c_str());
@@ -424,7 +427,7 @@ struct CApp: public App, public magic::Application
 	}
 
 	// Like lua_pcall, but returns a full traceback on error
-	// pcall(untrusted_function) -> status, error
+	// pcall(function) -> status, error
 	static int l_pcall(lua_State *L)
 	{
 		log_d(MODULE, "l_pcall()");
@@ -764,6 +767,60 @@ struct CApp: public App, public magic::Application
 		ss_ data = os.str();
 		lua_pushlstring(L, data.c_str(), data.size());
 		return 1;
+	}
+
+	// connect_server(address: string) -> status: bool, error: string or nil
+	static int l_connect_server(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+
+		ss_ address = lua_tocppstring(L, 1);
+		if(address.empty()){
+			log_w(MODULE, "connect_server(): Cannot connect to empty address");
+			lua_pushboolean(L, false);
+			return 2;
+		}
+		ss_ host;
+		ss_ port;
+		c55::Strfnd f(address);
+		if(address[0] == '['){
+			f.next("[");
+			host = f.next("]");
+			f.next(":");
+			port = f.next("");
+		} else {
+			host = f.next(":");
+			port = f.next("");
+		}
+
+		if(host == ""){
+			log_w(MODULE, "connect_server(): Cannot connect to empty host");
+			lua_pushboolean(L, false);
+			return 2;
+		}
+		if(port == ""){
+			port = "20000";
+		}
+
+		ss_ error;
+		bool ok = self->m_state->connect(host, port, &error);
+		lua_pushboolean(L, ok);
+		if(ok)
+			lua_pushnil(L);
+		else
+			lua_pushstring(L, error.c_str());
+		return 2;
+	}
+
+	// faatal_error(error: string)
+	static int l_fatal_error(lua_State *L)
+	{
+		ss_ error = lua_tocppstring(L, 1);
+		log_e(MODULE, "Fatal error: %s", cs(error));
+		throw Exception("Fatal error from Lua");
+		return 0;
 	}
 };
 
