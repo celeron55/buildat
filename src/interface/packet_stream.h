@@ -9,6 +9,11 @@ namespace interface
 {
 	typedef size_t PacketType;
 
+	struct UnknownPacketReceived: public Exception {
+		ss_ msg;
+		UnknownPacketReceived(const ss_ &msg): Exception(msg){}
+	};
+
 	struct OutgoingPacketTypeRegistry
 	{
 		sm_<ss_, PacketType> m_types;
@@ -32,7 +37,7 @@ namespace interface
 			auto it = m_names.find(type);
 			if(it != m_names.end())
 				return it->second;
-			throw Exception(ss_()+"Packet type not known: "+itos(type));
+			throw UnknownPacketReceived(ss_()+"Packet type not known: "+itos(type));
 		}
 	};
 
@@ -49,13 +54,13 @@ namespace interface
 			auto it = m_types.find(name);
 			if(it != m_types.end())
 				return it->second;
-			throw Exception(ss_()+"Packet not known: "+name);
+			throw UnknownPacketReceived(ss_()+"Packet not known: "+name);
 		}
 		ss_ get_name(PacketType type){
 			auto it = m_names.find(type);
 			if(it != m_names.end())
 				return it->second;
-			throw Exception(ss_()+"Packet not known: "+itos(type));
+			throw UnknownPacketReceived(ss_()+"Packet not known: "+itos(type));
 		}
 	};
 

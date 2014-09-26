@@ -213,12 +213,16 @@ struct Module: public interface::Module, public network::Interface
 		log_i(MODULE, "Received %zu bytes", r);
 		peer.socket_buffer.insert(peer.socket_buffer.end(), buf, buf + r);
 
-		peer.packet_stream.input(peer.socket_buffer,
-		[&](const ss_ & name, const ss_ & data){
-			// Emit event
-			m_server->emit_event(ss_()+"network:packet_received/"+name,
-					new Packet(peer.id, name, data));
-		});
+		try {
+			peer.packet_stream.input(peer.socket_buffer,
+			[&](const ss_ & name, const ss_ & data){
+				// Emit event
+				m_server->emit_event(ss_()+"network:packet_received/"+name,
+						new Packet(peer.id, name, data));
+			});
+		} catch(interface::UnknownPacketReceived &e){
+			log_w(MODULE, "%s", e.what());
+		}
 	}
 
 	void send_u(Peer &peer, const ss_ &name, const ss_ &data)
