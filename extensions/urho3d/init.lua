@@ -5,6 +5,7 @@ local log = buildat.Logger("extension/urho3d")
 local dump = buildat.dump
 local magic_sandbox = require("buildat/extension/magic_sandbox")
 local safe_globals = dofile(buildat.extension_path("urho3d").."/safe_globals.lua")
+local safe_events = dofile(buildat.extension_path("urho3d").."/safe_events.lua")
 local M = {safe = {}}
 
 --
@@ -180,6 +181,19 @@ for _, name in ipairs(safe_globals) do
 	end
 	M.safe[name] = v
 end
+
+wc("VariantMap", {
+	unsafe_constructor = wrap_function({},
+	function(x, y, z)
+		return wrap_instance("VariantMap", VariantMap())
+	end),
+	instance = {
+		SetFloat = self_function(
+				"SetFloat", {}, {"VariantMap", "string", "number"}),
+		GetFloat = self_function(
+				"GetFloat", {"number"}, {"VariantMap", "string"}),
+	}
+})
 
 wc("Vector3", {
 	unsafe_constructor = wrap_function({"number", "number", "number"},
@@ -402,12 +416,15 @@ local next_sandbox_global_function_i = 1
 
 function M.safe.SubscribeToEvent(x, y, z)
 	local object = x
-	local event_name = y
+	local sub_event_type = y
 	local callback = z
 	if callback == nil then
 		object = nil
-		event_name = x
+		sub_event_type = x
 		callback = y
+	end
+	if not safe_events[sub_event_type] then
+		error("Event type is not whitelisted: "..dump(sub_event_type))
 	end
 	if type(callback) == 'string' then
 		-- Allow supplying callback function name like Urho3D does by default
@@ -424,20 +441,41 @@ function M.safe.SubscribeToEvent(x, y, z)
 	next_sandbox_global_function_i = next_sandbox_global_function_i + 1
 	local global_callback_name = "__buildat_sandbox_callback_"..global_function_i
 	sandbox_callback_to_global_function_name[callback] = global_callback_name
-	_G[global_callback_name] = function(eventType, eventData)
+	_G[global_callback_name] = function(event_type_thing, unsafe_event_data)
+		-- How the hell does one get a string out of event_type_thing?
+		-- It is not a Variant, and none of the Lua examples try to do anything
+		-- with it.
+		-- Let's just assume it's the correct one...
+		local got_event_type = sub_event_type
+		-- Filter event_data (Urho3D::VariantMap)
+		local safe_fields = safe_events[got_event_type]
+		if not safe_fields then
+			log:warning("Received unsafe event: "..dump(got_event_type))
+		end
+		local safe_event_data = M.safe.VariantMap()
+		for field_name, field_def in pairs(safe_fields) do
+			local variant_type = field_def.variant
+			local safe_type = field_def.safe
+			local unsafe_value = unsafe_event_data["Get"..variant_type](
+					unsafe_event_data, field_name)
+			local safe_value = magic_sandbox.unsafe_to_safe(unsafe_value, safe_type)
+			safe_event_data["Set"..variant_type](
+					safe_event_data, field_name, safe_value)
+		end
+		-- Call callback
 		local f = function()
 			if object then
-				callback(object, eventType, eventData)
+				callback(object, got_event_type, safe_event_data)
 			else
-				callback(eventType, eventData)
+				callback(got_event_type, safe_event_data)
 			end
 		end
 		__buildat_run_function_in_sandbox(f)
 	end
 	if object then
-		SubscribeToEvent(object, event_name, global_callback_name)
+		SubscribeToEvent(object, sub_event_type, global_callback_name)
 	else
-		SubscribeToEvent(event_name, global_callback_name)
+		SubscribeToEvent(sub_event_type, global_callback_name)
 	end
 	return global_callback_name
 end
@@ -495,12 +533,12 @@ function M.SubscribeToEvent(x, y, z)
 	next_unsafe_global_function_i = next_unsafe_global_function_i + 1
 	local global_callback_name = "__buildat_unsafe_callback_"..global_function_i
 	unsafe_callback_to_global_function_name[callback] = global_callback_name
-	_G[global_callback_name] = function(eventType, eventData)
+	_G[global_callback_name] = function(event_type, event_data)
 		local f = function()
 			if object then
-				callback(object, eventType, eventData)
+				callback(object, event_type, event_data)
 			else
-				callback(eventType, eventData)
+				callback(event_type, event_data)
 			end
 		end
 		local ok, err = __buildat_pcall(f)
