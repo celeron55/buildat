@@ -11,6 +11,7 @@ namespace __loader {
 struct Module: public interface::Module
 {
 	interface::Server *m_server;
+	ss_ m_shutdown_reason;
 
 	Module(interface::Server *server):
 		interface::Module("__loader"),
@@ -22,6 +23,9 @@ struct Module: public interface::Module
 	~Module()
 	{
 		log_v(MODULE, "__loader destruct");
+		if(m_shutdown_reason != ""){
+			log_w(MODULE, "Shut down: %s", cs(m_shutdown_reason));
+		}
 	}
 
 	void init()
@@ -48,15 +52,17 @@ struct Module: public interface::Module
 			{builtin, "client_file"},
 			{builtin, "client_lua"},
 			{builtin, "client_data"},
-			{current, "test1"},
+			//{current, "test1"},
 			//{current, "test2"},
 			//{current, "minigame"},
+			{current, "uitest"},
 		};
 		for(auto &pair : load_list){
 			const ss_ &name = pair.second;
 			const ss_ &path = pair.first+"/"+pair.second;
 			bool ok = m_server->load_module(name, path);
 			if(!ok){
+				m_shutdown_reason = ss_()+"Error loading module "+name;
 				m_server->shutdown(1);
 				break;
 			}
