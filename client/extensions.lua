@@ -19,7 +19,7 @@ function __buildat_load_extension(name)
 	return interface
 end
 
-table.insert(package.loaders, function(name)
+table.insert(package.loaders, 1, function(name)
 	log:info("package.loader called with name=\""..name.."\"")
 	local m = string.match(name, '^buildat/extension/([a-zA-Z0-9_]+)$')
 	if m then
