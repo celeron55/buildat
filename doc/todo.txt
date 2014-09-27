@@ -25,6 +25,7 @@ Buildat TODO
   CMake to RCC++
 - Voxel world with arbitrary chunk size and offset, with pluggable loader
   modules. Main world has worldspace_id=1. Try Polyvox.
+- Entity system with automated network sync
 - Support Cereal's shared pointer serialization in Lua
 - Sandboxing of references from XML resources to other files
 - Get rid of exception trying to use a remote resource when accessing a local resource

@@ -3,3 +3,6 @@ Reasons for not doing certain things
 Why not use protobuf?
 - It would suck for modules because it has many moving parts
 
+Why not detect -DURHO3D_64BIT automatically in the build system?
+- It's not possible
+
