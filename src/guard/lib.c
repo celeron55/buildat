@@ -80,7 +80,7 @@ static int path_allowed(const char *path)
 		if(strstr(path + base_len, "..") != NULL)
 			continue;
 		// Path is ok
-		fprintf(stderr, "### guard: Path %s allowed within base %s\n", path, base);
+		//fprintf(stderr, "### guard: Path %s allowed within base %s\n", path, base);
 		return 1;
 	}
 	fprintf(stderr, "### guard: Path not allowed: %s\n", path);

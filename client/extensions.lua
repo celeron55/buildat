@@ -4,7 +4,7 @@
 local log = buildat.Logger("__client/extensions")
 
 function __buildat_load_extension(name)
-	log:info("__buildat_load_extension(\""..name.."\")")
+	log:debug("__buildat_load_extension(\""..name.."\")")
 	local path = __buildat_extension_path(name).."/init.lua"
 	local script, err = loadfile(path)
 	if script == nil then
@@ -20,7 +20,7 @@ function __buildat_load_extension(name)
 end
 
 table.insert(package.loaders, 1, function(name)
-	log:info("package.loader called with name=\""..name.."\"")
+	log:debug("package.loader called with name=\""..name.."\"")
 	local m = string.match(name, '^buildat/extension/([a-zA-Z0-9_]+)$')
 	if m then
 		return function()

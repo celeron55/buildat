@@ -46,7 +46,7 @@ __buildat_sandbox_environment = {
 --
 
 __buildat_sandbox_environment.require = function(name)
-	log:info("require(\""..name.."\")")
+	log:debug("require(\""..name.."\")")
 	-- Check loaded modules
 	if package.loaded[name] then
 		local unsafe = package.loaded[name]
@@ -66,7 +66,7 @@ __buildat_sandbox_environment.require = function(name)
 		if type(unsafe.safe) ~= 'table' then
 			error("require: \""..name.."\" didn't return safe interface")
 		end
-		log:info("Loaded extension \""..name.."\"")
+		log:verbose("Loaded extension \""..name.."\"")
 		return unsafe.safe
 	end
 	-- Disallow loading anything else
