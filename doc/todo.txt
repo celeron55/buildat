@@ -5,9 +5,6 @@ Buildat TODO
 - Modules should be run in threads.
 - Implement module depencencies in test/testmodules/__loader
 - There should probably be a builtin/loader that __loader usually wants to call
-- __menu extension support (load when no server address is provided)
-	- Add a parameter to the client for choosing a boot-up extension, which
-	  implements a boot() function that will be called
 - Ask hmmmm/kwolekr for permission to use MT's noise under the Apache 2.0
   license and if allowed, include it in interfaces
 - Design how to manage scenes in a future-proof way
@@ -29,5 +26,3 @@ Buildat TODO
 - Voxel world with arbitrary chunk size and offset, with pluggable loader
   modules. Main world has worldspace_id=1. Try Polyvox.
 - Support Cereal's shared pointer serialization in Lua
-- An extension that provides configuration options that both the main menu and
-  games can open

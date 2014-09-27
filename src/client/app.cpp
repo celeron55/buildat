@@ -253,14 +253,15 @@ struct CApp: public App, public magic::Application
 		}
 
 		if(g_client_config.boot_to_menu){
-			ss_ script =
-					"local m = require('buildat/extension/__menu')\n"
+			ss_ extname = g_client_config.menu_extension_name;
+			ss_ script = ss_()+
+					"local m = require('buildat/extension/"+extname+"')\n"
 					"if type(m) ~= 'table' then\n"
-					"    error('Failed to load extension __menu')\n"
+					"    error('Failed to load extension "+extname+"')\n"
 					"end\n"
 					"m.boot()\n";
 			if(!run_script_no_sandbox(script)){
-				throw AppStartupError("Failed to load and run extension __menu");
+				throw AppStartupError(ss_()+"Failed to load and run extension "+extname);
 			}
 		}
 	}

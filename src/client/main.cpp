@@ -50,7 +50,7 @@ int main(int argc, char *argv[])
 
 	client::Config &config = g_client_config;
 
-	const char opts[100] = "hs:P:C:U:l:";
+	const char opts[100] = "hs:P:C:U:l:m:";
 	const char usagefmt[1000] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
@@ -59,6 +59,7 @@ int main(int argc, char *argv[])
 			"  -C [cache_path]      Specify cache/ path\n"
 			"  -U [urho3d_path]     Specify Urho3D path\n"
 			"  -l [integer]         Set maximum log level (0...5)\n"
+			"  -m [name]            Choose menu extension name\n"
 	;
 
 	int c;
@@ -87,6 +88,10 @@ int main(int argc, char *argv[])
 			break;
 		case 'l':
 			log_set_max_level(atoi(c55_optarg));
+			break;
+		case 'm':
+			fprintf(stderr, "INFO: config.menu_extension_name: %s\n", c55_optarg);
+			config.menu_extension_name = c55_optarg;
 			break;
 		default:
 			fprintf(stderr, "ERROR: Invalid command-line argument\n");
