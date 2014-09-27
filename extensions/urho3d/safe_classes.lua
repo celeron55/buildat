@@ -1,6 +1,8 @@
 -- Buildat: extension/urho3d/safe_classes.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
+local dump = buildat.dump
+local log = buildat.Logger("safe_classes")
 local M = {}
 
 function M.define(dst, util)
@@ -39,6 +41,39 @@ function M.define(dst, util)
 			x = util.simple_property("number"),
 			y = util.simple_property("number"),
 			z = util.simple_property("number"),
+		},
+	})
+
+	util.wc("IntRect", {
+		unsafe_constructor = util.wrap_function({"number", "number", "number", "number"},
+		function(left, top, right, bottom)
+			return util.wrap_instance("IntRect", IntRect(left, top, right, bottom))
+		end),
+		properties = {
+			left = util.simple_property("number"),
+			top = util.simple_property("number"),
+			right = util.simple_property("number"),
+			bottom = util.simple_property("number"),
+		},
+	})
+
+	util.wc("Color", {
+		unsafe_constructor = util.wrap_function({"number", "number", "number",
+				{"number", "__nil"}},
+		function(r, g, b, a)
+			a = a or 1.0
+			return util.wrap_instance("Color", Color(r, g, b, a))
+		end),
+		instance_meta = {
+			__mul = util.wrap_function({"Color", "number"}, function(self, n)
+				return util.wrap_instance("Color", self * n)
+			end),
+		},
+		properties = {
+			r = util.simple_property("number"),
+			g = util.simple_property("number"),
+			b = util.simple_property("number"),
+			a = util.simple_property("number"),
 		},
 	})
 
@@ -125,6 +160,10 @@ function M.define(dst, util)
 		inherited_from_by_wrapper = dst.Resource,
 	})
 
+	util.wc("XMLFile", {
+		inherited_from_by_wrapper = dst.Resource,
+	})
+
 	util.wc("StaticModel", {
 		inherited_from_by_wrapper = dst.Octree,
 		properties = {
@@ -182,10 +221,13 @@ function M.define(dst, util)
 	util.wc("ResourceCache", {
 		instance = {
 			GetResource = util.wrap_function({"ResourceCache", "string", "string"},
-			function(self, resource_type, resource_name)
-				-- TODO: If resource_type=XMLFile, we probably have to go through it and
-				--       resave all references to other files found in there
-				resource_name = util.check_safe_resource_name(resource_name)
+			function(self, resource_type, unsafe_resource_name)
+				-- TODO: If resource_type=XMLFile, we probably have to go
+				-- through it and resave all references to other files found in
+				-- there
+				resource_name = util.check_safe_resource_name(unsafe_resource_name)
+				log:verbose("GetResource: "..dump(unsafe_resource_name)..
+						" -> "..dump(resource_name))
 				util.resave_file(resource_name)
 				local res = cache:GetResource(resource_type, resource_name)
 				return util.wrap_instance(resource_type, res)
@@ -217,24 +259,114 @@ function M.define(dst, util)
 	util.wc("UIElement", {
 		inherited_from_by_wrapper = dst.Animatable,
 		instance = {
-			CreateChild = util.wrap_function({"UIElement", "string", {"string", "__nil"}},
-			function(self, element_type, name)
-				return util.wrap_instance("UIElement", self:CreateChild(element_type, name))
-			end),
+			CreateChild = util.wrap_function({"UIElement", "string",
+					{"string", "__nil"}},
+				function(self, element_type, name)
+					return util.wrap_instance(element_type,
+							self:CreateChild(element_type, name))
+				end
+			),
+			GetChild = util.wrap_function({"UIElement", {"string", "number"}},
+				function(self, name_or_index)
+					return util.wrap_instance("UIElement",
+							self:GetChild(name_or_index))
+				end
+			),
+			GetNumChildren = util.self_function(
+					"GetNumChildren", {"number"}, {"UIElement"}),
+			RemoveChild = util.wrap_function({"UIElement", "UIElement"},
+				function(self, child)
+					self:RemoveChild(child)
+				end
+			),
+			SetName = util.self_function("SetName", {}, {"UIElement", "string"}),
 			SetText = util.self_function("SetText", {}, {"UIElement", "string"}),
 			SetFont = util.self_function("SetFont", {}, {"UIElement", "Font"}),
 			SetPosition = util.self_function(
 					"SetPosition", {}, {"UIElement", "number", "number"}),
+			SetStyleAuto = util.self_function("SetStyleAuto", {}, {"UIElement"}),
+			SetVisible = util.self_function("SetVisible", {},
+					{"UIElement", "boolean"}),
+			SetLayout = util.wrap_function({"UIElement", "number",
+					{"number", "__nil"}, {"IntRect", "__nil"}},
+				function(self, mode, spacing, border)
+					spacing = spacing or 0
+					border = border or dst.IntRect()
+					self:SetLayout(mode, spacing, border)
+				end
+			),
+			SetAlignment = util.self_function(
+					"SetAlignment", {}, {"UIElement", "number", "number"}),
+			SetFocusMode = util.self_function(
+					"SetFocusMode", {}, {"UIElement", "number"}),
+			SetFocus = util.self_function(
+					"SetFocus", {}, {"UIElement", "boolean"}),
+			HasFocus = util.self_function(
+					"HasFocus", {"boolean"}, {"UIElement"}),
+			GetName = util.self_function("GetName", {"string"}, {"UIElement"}),
+			GetText = util.self_function("GetText", {"string"}, {"UIElement"}),
 		},
 		properties = {
 			horizontalAlignment = util.simple_property("number"),
 			verticalAlignment = util.simple_property("number"),
 			height = util.simple_property("number"),
+			color = util.simple_property("Color"),
+			minHeight = util.simple_property("number"),
+			minWidth = util.simple_property("number"),
+			defaultStyle = util.simple_property("XMLFile"),
+		},
+	})
+
+	util.wc("Text", {
+		inherited_from_by_wrapper = dst.UIElement,
+		instance = {
+			SetTextAlignment = util.self_function(
+					"SetTextAlignment", {}, {"UIElement", "number"}),
+		},
+		properties = {
+			text = util.simple_property("string"),
+		},
+	})
+
+	util.wc("BorderImage", {
+		inherited_from_by_wrapper = dst.UIElement,
+	})
+
+	util.wc("Window", {
+		inherited_from_by_wrapper = dst.BorderImage,
+	})
+
+	util.wc("Button", {
+		inherited_from_by_wrapper = dst.BorderImage,
+	})
+
+	util.wc("LineEdit", {
+		inherited_from_by_wrapper = dst.BorderImage,
+		properties = {
+		},
+	})
+
+	util.wc("Sprite", {
+		inherited_from_by_wrapper = dst.UIElement,
+		instance = {
+			SetTexture = util.self_function(
+					"SetTexture", {}, {"Sprite", "Texture"}),
+			SetFixedSize = util.self_function(
+					"SetFixedSize", {}, {"Sprite", "number", "number"}),
 		},
 	})
 
 	util.wc("UI", {
 		instance = {
+			SetFocusElement = util.wrap_function({"UI", {"UIElement", "__nil"}},
+				function(self, element)
+					if element == nil then
+						self:SetFocusElement(nil)
+					else
+						self:SetFocusElement(element)
+					end
+				end
+			),
 		},
 		properties = {
 			root = util.simple_property(dst.UIElement),

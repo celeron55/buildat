@@ -105,10 +105,13 @@ function M.wrap_class(type_name, def)
 				end
 			end
 			if class_meta.inherited_from_in_sandbox then
-				-- Have been defined to this class in the sandbox environment
-				local safe_class = __buildat_sandbox_environment[type_name]
-				safe_class[key] = value
-				return
+				-- This class has been derived in the sandbox environment.
+				-- Allow using the extra field defined in the class.
+				local class = __buildat_sandbox_environment[type_name]
+				if class[key] ~= nil then
+					rawset(safe, key, value)
+					return
+				end
 			end
 			-- Only propreties can be set
 			if def.properties then
@@ -302,9 +305,11 @@ function M.safe.class(name)
 			error("A corresponding non-sandboxed class does not exist for "..
 					"super_type_name=\""..super_type_name.."\"")
 		end
+
 		-- Create the non-sandboxed version of the wanted class into the global
 		-- non-sandboxed namespace
-		class(name)(superclass)
+		-- NOTE: Polycode-specific; is anything similar needed?
+		--class(name)(superclass)
 
 		-- Now safety-wrap the end result
 		local sandboxed_class = M.wrap_class(name, {

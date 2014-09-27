@@ -2,16 +2,33 @@
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("extension/uistack")
-local magic = require("buildat/extension/urho3d")
+local magic_sandbox = require("buildat/extension/magic_sandbox")
+local unsafe_magic = require("buildat/extension/urho3d")
+local magic = unsafe_magic.safe
 local dump = buildat.dump
 local M = {safe = {}}
 log:info("extension/uistack/init.lua: Loading")
 
+-- Inherit a thing from UIElement to be used as roots in the stack. UIStack
+-- wants to add additional fields to each instance, and that can only be done to
+-- inherited classes in the sandbox.
+magic_sandbox.safe.class "UIStackElement" (magic.UIElement)
+local UIStackElement = __buildat_sandbox_environment.UIStackElement
+UIStackElement.HasRecursiveFocus = {}
+UIStackElement.event_subscriptions = {}
+UIStackElement.SubscribeToStackEvent = {}
+assert(UIStackElement)
+
 local ui_stack_name_i = 1  -- For generating a unique name for each stack
 local last_stack_with_pushed_element = nil
 
+-- Root can be a sandboxed or non-sandboxed element
 function M.UIStack(root)
+	if not getmetatable(root) or not getmetatable(root).unsafe then
+		error("UIStack can only be used with a sandboxed root")
+	end
 	local self = {}
+	self.is_ui_stack = true
 	self.root = root
 	self.stack_name = "ui_stack_"..ui_stack_name_i
 	ui_stack_name_i = ui_stack_name_i + 1
@@ -19,6 +36,12 @@ function M.UIStack(root)
 	self.stack = {}
 	local current_ui_stack_object = self
 	function self:push(options)
+		if type(self) ~= 'table' or not self.is_ui_stack then
+			error("self is not an instance of UIStack")
+		end
+
+		local is_in_sandbox = getfenv(2).buildat.is_in_sandbox
+
 		options = options or {}
 		if #self.stack >= 1 then
 			local top = self.stack[#self.stack]
@@ -30,12 +53,17 @@ function M.UIStack(root)
 			element_name = element_name..": "..options.description
 		end
 		log:verbose("UIStack:push(): "..dump(element_name))
+
+		-- Create element and cast it to UIStackElement with unsafe magic
 		local element = self.root:CreateChild("UIElement")
+		local unsafe_element = getmetatable(element).unsafe
+		element = getmetatable(UIStackElement).wrap(unsafe_element)
+
 		element:SetName(element_name)
 		element:SetStyleAuto()
-		element:SetLayout(LM_HORIZONTAL, 0, IntRect(0, 0, 0, 0))
-		element:SetAlignment(HA_CENTER, VA_CENTER)
-		element:SetFocusMode(FM_FOCUSABLE)
+		element:SetLayout(magic.LM_HORIZONTAL, 0, magic.IntRect(0, 0, 0, 0))
+		element:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		element:SetFocusMode(magic.FM_FOCUSABLE)
 		element:SetFocus(true)
 		self.element_name_i = self.element_name_i + 1
 
@@ -107,6 +135,9 @@ function M.UIStack(root)
 		return element
 	end
 	function self:pop(current_top_root)
+		if type(self) ~= 'table' or not self.is_ui_stack then
+			error("self is not an instance of UIStack")
+		end
 		-- This check should keep things better in sync
 		if self.stack[#self.stack] ~= current_top_root then
 			error("UIStack:pop(): Wrong current_top_root")
@@ -127,6 +158,8 @@ function M.UIStack(root)
 	end
 	return self
 end
+
+M.safe.UIStack = M.UIStack
 
 return M
 -- vim: set noet ts=4 sw=4:

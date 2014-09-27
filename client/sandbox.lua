@@ -161,5 +161,16 @@ for k, v in pairs(buildat.safe) do
 	__buildat_sandbox_environment.buildat[k] = v
 end
 
+-- With this you can do stuff like
+--   local is_in_sandbox = getfenv(2).buildat.is_in_sandbox
+-- in extensions.
+__buildat_sandbox_environment.buildat.is_in_sandbox = true
+
+setmetatable(__buildat_sandbox_environment.buildat, {
+	__newindex = function(t, k, v)
+		assert("Cannot add fields to buildat namespace in sandbox environment")
+	end,
+})
+
 log:info("sandbox.lua loaded")
 -- vim: set noet ts=4 sw=4:

@@ -7,15 +7,17 @@ local magic_sandbox = require("buildat/extension/magic_sandbox")
 local safe_globals = dofile(buildat.extension_path("urho3d").."/safe_globals.lua")
 local safe_events = dofile(buildat.extension_path("urho3d").."/safe_events.lua")
 local safe_classes = dofile(buildat.extension_path("urho3d").."/safe_classes.lua")
-local M = {safe = {}}
+
+local Safe = {}
+local Unsafe = {}
 
 --
 -- ResourceCache support code
 --
 
 -- Checks that this is not an absolute file path or anything funny
-local allowed_name_pattern = '^[a-zA-Z0-9][a-zA-Z0-9/._ ]*$'
-function M.check_safe_resource_name(name)
+local allowed_name_pattern = '^[a-zA-Z0-9_][a-zA-Z0-9/._ ]*$'
+function Unsafe.check_safe_resource_name(name)
 	if type(name) ~= "string" then
 		error("Unsafe resource name: "..dump(name).." (not string)")
 	end
@@ -28,44 +30,44 @@ function M.check_safe_resource_name(name)
 	if string.match(name, '[.][.]') then
 		error("Unsafe resource name: "..dump(name).." (contains ..)")
 	end
-	log:verbose("Safe resource name: "..name)
+	--log:verbose("Safe resource name: "..name)
 	return name
 end
 
 -- Basic tests
 assert(pcall(function()
-	M.check_safe_resource_name("/etc/passwd")
+	Unsafe.check_safe_resource_name("/etc/passwd")
 end) == false)
 assert(pcall(function()
-	M.check_safe_resource_name(" /etc/passwd")
+	Unsafe.check_safe_resource_name(" /etc/passwd")
 end) == false)
 assert(pcall(function()
-	M.check_safe_resource_name("\t /etc/passwd")
+	Unsafe.check_safe_resource_name("\t /etc/passwd")
 end) == false)
 assert(pcall(function()
-	M.check_safe_resource_name("Models/Box.mdl")
+	Unsafe.check_safe_resource_name("Safeodels/Box.mdl")
 end) == true)
 assert(pcall(function()
-	M.check_safe_resource_name("Fonts/Anonymous Pro.ttf")
+	Unsafe.check_safe_resource_name("Fonts/Anonymous Pro.ttf")
 end) == true)
 assert(pcall(function()
-	M.check_safe_resource_name("test1/pink_texture.png")
+	Unsafe.check_safe_resource_name("test1/pink_texture.png")
 end) == true)
 assert(pcall(function()
-	M.check_safe_resource_name(" Box.mdl ")
+	Unsafe.check_safe_resource_name(" Box.mdl ")
 end) == false)
 assert(pcall(function()
-	M.check_safe_resource_name("../../foo")
+	Unsafe.check_safe_resource_name("../../foo")
 end) == false)
 assert(pcall(function()
-	M.check_safe_resource_name("abc$de")
+	Unsafe.check_safe_resource_name("abc$de")
 end) == false)
 
 local hack_resaved_files = {}  -- name -> temporary target file
 
 -- Create temporary file with wanted file name to make Urho3D load it correctly
-function M.resave_file(resource_name)
-	M.check_safe_resource_name(resource_name)
+function Unsafe.resave_file(resource_name)
+	Unsafe.check_safe_resource_name(resource_name)
 	local path2 = hack_resaved_files[resource_name]
 	if path2 == nil then
 		local path = __buildat_get_file_path(resource_name)
@@ -101,7 +103,7 @@ function __buildat_file_updated_in_cache(name, hash, cached_path)
 	if hack_resaved_files[name] then
 		log:verbose("__buildat_file_updated_in_cache(): Re-saving: "..dump(name))
 		hack_resaved_files[name] = nil -- Force re-copy
-		M.resave_file(name)
+		Unsafe.resave_file(name)
 	end
 end
 
@@ -110,11 +112,11 @@ end
 --
 
 local function wc(name, def)
-	M.safe[name] = magic_sandbox.wrap_class(name, def)
+	Safe[name] = magic_sandbox.wrap_class(name, def)
 end
 
 local function wrap_instance(name, instance)
-	local class = M.safe[name]
+	local class = Safe[name]
 	local class_meta = getmetatable(class)
 	if not class_meta then error(dump(name).." is not a whitelisted class") end
 	return class_meta.wrap(instance)
@@ -180,24 +182,24 @@ for _, name in ipairs(safe_globals) do
 	if type(v) ~= 'number' and type(v) ~= 'string' then
 		error("Invalid safe global "..dump(name).." type: "..dump(type(v)))
 	end
-	M.safe[name] = v
+	Safe[name] = v
 end
 
-safe_classes.define(M.safe, {
+safe_classes.define(Safe, {
 	wc = wc,
 	wrap_instance = wrap_instance,
 	wrap_function = wrap_function,
 	self_function = self_function,
 	simple_property = simple_property,
-	check_safe_resource_name = M.check_safe_resource_name,
-	resave_file = M.resave_file,
+	check_safe_resource_name = Unsafe.check_safe_resource_name,
+	resave_file = Unsafe.resave_file,
 })
 
-setmetatable(M.safe, {
+setmetatable(Safe, {
 	__index = function(t, k)
 		local v = rawget(t, k)
 		if v ~= nil then return v end
-		error("extension/urho3d: "..dump(k).." not found in safe interface")
+		error("extension/urho3d: Class "..dump(k).." is not whitelisted")
 	end,
 })
 
@@ -206,7 +208,7 @@ setmetatable(M.safe, {
 local sandbox_callback_to_global_function_name = {}
 local next_sandbox_global_function_i = 1
 
-function M.safe.SubscribeToEvent(x, y, z)
+function Safe.SubscribeToEvent(x, y, z)
 	local object = x
 	local sub_event_type = y
 	local callback = z
@@ -214,6 +216,11 @@ function M.safe.SubscribeToEvent(x, y, z)
 		object = nil
 		sub_event_type = x
 		callback = y
+	end
+	if object then
+		if not getmetatable(object) or not getmetatable(object).unsafe then
+			error("SubscribeToEvent(): Object must be sandboxed")
+		end
 	end
 	if not safe_events[sub_event_type] then
 		error("Event type is not whitelisted: "..dump(sub_event_type))
@@ -245,7 +252,7 @@ function M.safe.SubscribeToEvent(x, y, z)
 			if not safe_fields then
 				log:warning("Received unsafe event: "..dump(got_event_type))
 			end
-			local safe_event_data = M.safe.VariantMap()
+			local safe_event_data = Safe.VariantMap()
 			for field_name, field_def in pairs(safe_fields) do
 				local variant_type = field_def.variant
 				local safe_type = field_def.safe
@@ -265,11 +272,33 @@ function M.safe.SubscribeToEvent(x, y, z)
 		__buildat_run_function_in_sandbox(f)
 	end
 	if object then
-		SubscribeToEvent(object, sub_event_type, global_callback_name)
+		local unsafe_object = getmetatable(object).unsafe
+		SubscribeToEvent(unsafe_object, sub_event_type, global_callback_name)
 	else
 		SubscribeToEvent(sub_event_type, global_callback_name)
 	end
 	return global_callback_name
+end
+
+function Safe.UnsubscribeFromEvent(x, y)
+	local object = x
+	local sub_event_type = y
+	if callback == nil then
+		object = nil
+		sub_event_type = x
+	end
+	if object then
+		if not getmetatable(object) or not getmetatable(object).unsafe then
+			error("SubscribeToEvent(): Object must be sandboxed")
+		end
+	end
+	if object then
+		local unsafe_object = getmetatable(object).unsafe
+		UnsubscribeFromEvent(unsafe_object, sub_event_type)
+	else
+		UnsubscribeFromEvent(sub_event_type)
+	end
+	-- TODO: Delete the generated global callback
 end
 
 --
@@ -279,7 +308,7 @@ end
 -- Just wrap everything to the global environment as we don't have a full list
 -- of Urho3D's API available.
 
-setmetatable(M, {
+setmetatable(Unsafe, {
 	__index = function(t, k)
 		local v = rawget(t, k)
 		if v ~= nil then return v end
@@ -287,21 +316,12 @@ setmetatable(M, {
 	end,
 })
 
--- Add GetResource wrapper to ResourceCache instance
-
---[[M.cache.GetResource = function(self, resource_type, resource_name)
-	local path = M.resave_file(resource_name)
-	-- Note: path is unused
-	resource_name = M.check_safe_resource_name(resource_name)
-	return M.cache:GetResource(resource_type, resource_name)
-end]]
-
 -- Unsafe SubscribeToEvent with function support
 
 local unsafe_callback_to_global_function_name = {}
 local next_unsafe_global_function_i = 1
 
-function M.SubscribeToEvent(x, y, z)
+function Unsafe.SubscribeToEvent(x, y, z)
 	local object = x
 	local event_name = y
 	local callback = z
@@ -345,6 +365,16 @@ function M.SubscribeToEvent(x, y, z)
 	end
 	return global_callback_name
 end
+
+--
+-- Create the final interface
+--
+
+local M = Safe
+
+M.safe = M
+
+M.unsafe = Unsafe
 
 return M
 -- vim: set noet ts=4 sw=4:

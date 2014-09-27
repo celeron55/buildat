@@ -8,18 +8,18 @@ local dump = buildat.dump
 local M = {safe = nil}
 log:info("extension/__menu/init.lua: Loading")
 
-local ui_stack = uistack.UIStack(ui.root)
+local ui_stack = uistack.UIStack(magic.ui.root)
 
 local function show_error(message)
 	local root = ui_stack:push({desc="show_error"})
 
-	local style = cache:GetResource("XMLFile", "__menu/res/main_style.xml")
+	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
 	root.defaultStyle = style
 
 	local window = root:CreateChild("Window")
 	window:SetStyleAuto()
 	window:SetName("show_error window")
-	window:SetLayout(LM_VERTICAL, 10, IntRect(10, 10, 10, 10))
+	window:SetLayout(LM_VERTICAL, 10, magic.IntRect(10, 10, 10, 10))
 	window:SetAlignment(HA_LEFT, VA_CENTER)
 
 	local message_text = window:CreateChild("Text")
@@ -31,7 +31,7 @@ local function show_error(message)
 	local ok_button = window:CreateChild("Button")
 	ok_button:SetStyleAuto()
 	ok_button:SetName("Button")
-	ok_button:SetLayout(LM_VERTICAL, 10, IntRect(0, 0, 0, 0))
+	ok_button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
 	ok_button.minHeight = 20
 	local ok_button_text = ok_button:CreateChild("Text")
 	ok_button_text:SetName("ButtonText")
@@ -58,13 +58,13 @@ end
 local function show_connect_to_server()
 	local root = ui_stack:push({desc="connect_to_server"})
 
-	local style = cache:GetResource("XMLFile", "__menu/res/main_style.xml")
+	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
 	root.defaultStyle = style
 
 	local window = root:CreateChild("Window")
 	window:SetStyleAuto()
 	window:SetName("connect_to_server window")
-	window:SetLayout(LM_VERTICAL, 10, IntRect(10, 10, 10, 10))
+	window:SetLayout(LM_VERTICAL, 10, magic.IntRect(10, 10, 10, 10))
 	window:SetAlignment(HA_LEFT, VA_CENTER)
 
 	local line_edit = window:CreateChild("LineEdit")
@@ -78,7 +78,7 @@ local function show_connect_to_server()
 	local connect_button = window:CreateChild("Button")
 	connect_button:SetStyleAuto()
 	connect_button:SetName("Button")
-	connect_button:SetLayout(LM_VERTICAL, 10, IntRect(0, 0, 0, 0))
+	connect_button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
 	connect_button.minHeight = 20
 	local connect_button_text = connect_button:CreateChild("Text")
 	connect_button_text:SetName("ButtonText")
@@ -122,42 +122,42 @@ end
 function M.boot()
 	local root = ui_stack:push("boot")
 
-	local style = cache:GetResource("XMLFile", "__menu/res/boot_style.xml")
+	local style = magic.cache:GetResource("XMLFile", "__menu/res/boot_style.xml")
 	root.defaultStyle = style
 
 	local layout = root:CreateChild("Window")
 	layout:SetStyleAuto()
 	layout:SetName("Layout")
-	layout:SetLayout(LM_HORIZONTAL, 20, IntRect(0, 0, 0, 0))
+	layout:SetLayout(LM_HORIZONTAL, 20, magic.IntRect(0, 0, 0, 0))
 	layout:SetAlignment(HA_CENTER, VA_CENTER)
 
 	local button = layout:CreateChild("Button")
 	button:SetStyleAuto()
 	button:SetName("Button")
-	button:SetLayout(LM_VERTICAL, 10, IntRect(0, 0, 0, 0))
+	button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
 	local button_image = button:CreateChild("Sprite")
 	button_image:SetName("ButtonImage")
 	button_image:SetTexture(
-			cache:GetResource("Texture2D", "__menu/res/icon_network.png"))
-	button_image.color = Color(.3, .3, .3)
+			magic.cache:GetResource("Texture2D", "__menu/res/icon_network.png"))
+	button_image.color = magic.Color(.3, .3, .3)
 	button_image:SetFixedSize(200, 200)
 	local button_text = button:CreateChild("Text")
 	button_text:SetName("ButtonText")
 	button_text:SetStyleAuto()
 	button_text.text = "Connect to server"
-	button_text.color = Color(.3, .3, .3)
+	button_text.color = magic.Color(.3, .3, .3)
 	button_text:SetAlignment(HA_CENTER, VA_CENTER)
 	button_text:SetTextAlignment(HA_CENTER)
 
 	magic.SubscribeToEvent(button, "HoverBegin",
 	function(self, event_type, event_data)
-		self:GetChild("ButtonImage").color = Color(1, 1, 1)
-		self:GetChild("ButtonText").color = Color(1, 1, 1)
+		self:GetChild("ButtonImage").color = magic.Color(1, 1, 1)
+		self:GetChild("ButtonText").color = magic.Color(1, 1, 1)
 	end)
 	magic.SubscribeToEvent(button, "HoverEnd",
 	function(self, event_type, event_data)
-		self:GetChild("ButtonImage").color = Color(.3, .3, .3)
-		self:GetChild("ButtonText").color = Color(.3, .3, .3)
+		self:GetChild("ButtonImage").color = magic.Color(.3, .3, .3)
+		self:GetChild("ButtonText").color = magic.Color(.3, .3, .3)
 	end)
 	magic.SubscribeToEvent(button, "Released",
 	function(self, event_type, event_data)

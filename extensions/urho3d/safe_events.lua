@@ -9,5 +9,13 @@ return {
 	KeyDown = {
 		Key = {variant = "Int", safe = "number"},
 	},
+	HoverBegin = {
+	},
+	HoverEnd = {
+	},
+	Released = {
+	},
+	TextFinished = {
+	},
 }
 -- vim: set noet ts=4 sw=4:

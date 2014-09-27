@@ -134,11 +134,27 @@ Unsafe interfaces of built-in extensions
 
 urho3d
 ------
+The default unsafe interface is the same as the safe interface. It is so to
+enforce interoperability between modules and extensions.
+
+If you get an error like this:
+  'Disallowed type: "userdata"; Allowed types: ...'
+You probably are giving a non-sandboxed object to an interface that requires
+sandboxed ones.
+
+An actual unsafe Urho3D interface is available in:
+  require("buildat/extension/urho3d").unsafe
+
+DO NOT USE the unsafe version of urho3d unless specifically needed. All
+interfacing with other extensions and module code has to be done using the
+sandboxed version in order to make interfacing possible between all of them.
+
 The unsafe version of the urho3d extension actually just wraps to the global
 environment, except for the additions to the API documented here.
 
-Note that Urho3D's API is currently always globally defined in the extension
-environment, but this will not be supported in the future.
+Note that due to technical reasons Urho3D's API is currently always globally
+defined in the extension environment, but this will not be supported in the
+future.
 
 Additions to regular Urho3D:
 
