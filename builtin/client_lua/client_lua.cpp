@@ -57,12 +57,14 @@ struct Module: public interface::Module
 
 	void on_module_loaded(const interface::ModuleLoadedEvent &event)
 	{
-		log_v(MODULE, "on_module_loaded(): %s", cs(event.name));
+		log_t(MODULE, "on_module_loaded(): %s", cs(event.name));
 		ss_ module_name = event.name;
 		ss_ module_path = m_server->get_module_path(module_name);
 		ss_ client_lua_path = module_path+"/client_lua";
 		auto list = interface::getGlobalFilesystem()
 				->list_directory(client_lua_path);
+		if(list.empty())
+			return;
 
 		sv_<ss_> log_list;
 		for(const interface::Filesystem::Node &n : list){
