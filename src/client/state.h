@@ -21,7 +21,9 @@ namespace client
 		virtual bool connect(const ss_ &address, const ss_ &port,
 				ss_ *error = nullptr) = 0;
 		virtual void send_packet(const ss_ &name, const ss_ &data) = 0;
+		// Returns "" if not found
 		virtual ss_ get_file_path(const ss_ &name, ss_ *dst_file_hash = NULL) = 0;
+		// Throws exception if not found
 		virtual ss_ get_file_content(const ss_ &name) = 0;
 	};
 

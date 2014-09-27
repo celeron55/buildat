@@ -418,16 +418,13 @@ struct CApp: public App, public magic::Application
 		CApp *self = (CApp*)lua_touserdata(L, -1);
 		lua_pop(L, 1);
 
-		try {
-			ss_ hash;
-			ss_ path = self->m_state->get_file_path(name, &hash);
-			lua_pushlstring(L, path.c_str(), path.size());
-			lua_pushlstring(L, hash.c_str(), hash.size());
-			return 2;
-		} catch(std::exception &e){
-			log_w(MODULE, "Exception in get_file_path: %s", e.what());
+		ss_ hash;
+		ss_ path = self->m_state->get_file_path(name, &hash);
+		if(path == "")
 			return 0;
-		}
+		lua_pushlstring(L, path.c_str(), path.size());
+		lua_pushlstring(L, hash.c_str(), hash.size());
+		return 2;
 	}
 
 	// get_file_content(name: string)

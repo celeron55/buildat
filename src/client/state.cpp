@@ -92,7 +92,7 @@ struct CState: public State
 	{
 		auto it = m_file_hashes.find(name);
 		if(it == m_file_hashes.end())
-			throw Exception(ss_()+"hash of file not found: \""+name+"\"");
+			return "";
 		const ss_ &file_hash = it->second;
 		ss_ file_hash_hex = interface::sha1::hex(file_hash);
 		ss_ path = m_remote_cache_path+"/"+file_hash_hex;

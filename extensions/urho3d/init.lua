@@ -72,6 +72,8 @@ function Unsafe.resave_file(resource_name)
 	if path2 == nil then
 		local path = __buildat_get_file_path(resource_name)
 		if path == nil then
+			-- Not found in data received by server.
+			-- Could be missing, or could be a local file.
 			return nil
 		end
 		path2 = __buildat_get_path("tmp").."/"..resource_name

@@ -222,13 +222,14 @@ function M.define(dst, util)
 		instance = {
 			GetResource = util.wrap_function({"ResourceCache", "string", "string"},
 			function(self, resource_type, unsafe_resource_name)
-				-- TODO: If resource_type=XMLFile, we probably have to go
-				-- through it and resave all references to other files found in
-				-- there
+				-- NOTE: resource_type=XMLFile can refer to other resources even
+				-- in absolute and arbitrary relative paths. Make sure file
+				-- access (fopen()) is sandboxed appropriately.
 				resource_name = util.check_safe_resource_name(unsafe_resource_name)
-				log:verbose("GetResource: "..dump(unsafe_resource_name)..
+				log:debug("GetResource: "..dump(unsafe_resource_name)..
 						" -> "..dump(resource_name))
-				util.resave_file(resource_name)
+				local saved_path = util.resave_file(resource_name)
+				-- Note: saved_path is ignored
 				local res = cache:GetResource(resource_type, resource_name)
 				return util.wrap_instance(resource_type, res)
 			end),
