@@ -19,6 +19,8 @@
 #include <ResourceCache.h>
 #include <Graphics.h>
 #include <GraphicsEvents.h> // E_SCREENMODE
+#include <IOEvents.h> // E_LOGMESSAGE
+#include <Log.h>
 #pragma GCC diagnostic pop
 extern "C" {
 #include <lua.h>
@@ -88,10 +90,11 @@ struct CApp: public App, public magic::Application
 
 		// Set Urho3D engine parameters
 		engineParameters_["WindowTitle"]   = "Buildat Client";
-		engineParameters_["LogName"]       = "client_Urho3D.log";
 		engineParameters_["Headless"]      = false;
 		engineParameters_["ResourcePaths"] = resource_paths_s.c_str();
 		engineParameters_["AutoloadPaths"] = "";
+		//engineParameters_["LogName"]       = "client_Urho3D.log";
+		engineParameters_["LogQuiet"]      = true; // Don't log to stdout
 
 		// Graphics options
 		engineParameters_["FullScreen"] = m_options.graphics.fullscreen;
@@ -107,10 +110,15 @@ struct CApp: public App, public magic::Application
 		engineParameters_["TripleBuffer"] = m_options.graphics.triple_buffer;
 		engineParameters_["Multisample"]  = m_options.graphics.multisampling;
 
+		magic::Log *magic_log = GetSubsystem<magic::Log>();
+		// Disable timestamps in log messages (also added to events)
+		magic_log->SetTimeStamp(false);
+
 		// Set up event handlers
 		SubscribeToEvent(magic::E_UPDATE, HANDLER(CApp, on_update));
 		SubscribeToEvent(magic::E_KEYDOWN, HANDLER(CApp, on_keydown));
 		SubscribeToEvent(magic::E_SCREENMODE, HANDLER(CApp, on_screenmode));
+		SubscribeToEvent(magic::E_LOGMESSAGE, HANDLER(CApp, on_logmessage));
 
 		// Default to not grabbing the mouse
 		magic::Input *magic_input = GetSubsystem<magic::Input>();
@@ -322,6 +330,23 @@ struct CApp: public App, public magic::Application
 			log_v(MODULE, "Window size in graphics options updated: %ix%i",
 					m_options.graphics.window_w, m_options.graphics.window_h);
 		}
+	}
+
+	void on_logmessage(magic::StringHash event_type, magic::VariantMap &event_data)
+	{
+		int magic_level = event_data["Level"].GetInt();
+		ss_ message = event_data["Message"].GetString().CString();
+		//log_v(MODULE, "on_logmessage(): %i, %s", magic_level, cs(message));
+		int c55_level = LOG_ERROR;
+		if(magic_level == magic::LOG_DEBUG)
+			c55_level = LOG_DEBUG;
+		else if(magic_level == magic::LOG_INFO)
+			c55_level = LOG_VERBOSE;
+		else if(magic_level == magic::LOG_WARNING)
+			c55_level = LOG_WARNING;
+		else if(magic_level == magic::LOG_ERROR)
+			c55_level = LOG_ERROR;
+		log_(c55_level, MODULE, "Urho3D %s", cs(message));
 	}
 
 	void script_tick()

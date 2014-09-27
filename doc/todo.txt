@@ -28,4 +28,5 @@ Buildat TODO
 - Entity system with automated network sync
 - Support Cereal's shared pointer serialization in Lua
 - Sandboxing of references from XML resources to other files
-- Get rid of exception trying to use a remote resource when accessing a local resource
+- Get rid of exception when trying to use a remote resource when accessing a
+  local resource
