@@ -180,12 +180,21 @@ function move_box_by_user_input(dt)
 	end
 end
 
-function handle_update(eventType, eventData)
+function handle_update(event_type, event_data)
 	--log:info("handle_update() in test1/init.lua")
-	local dt = eventData:GetFloat("TimeStep")
+	local dt = event_data:GetFloat("TimeStep")
 	--node:Rotate(Quaternion(50, 80*dt, 0, 0))
 	move_box_by_user_input(dt)
 end
 magic.SubscribeToEvent("Update", "handle_update")
+
+function handle_keydown(event_type, event_data)
+	local key = event_data:GetInt("Key")
+	if key == magic.KEY_ESC then
+		log:info("KEY_ESC pressed")
+		buildat.disconnect()
+	end
+end
+magic.SubscribeToEvent("KeyDown", "handle_keydown")
 
 -- vim: set noet ts=4 sw=4:

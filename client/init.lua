@@ -1,7 +1,8 @@
 -- Buildat: client/init.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
-buildat = {}
+buildat = {safe = {}}
+
 function buildat.bytes(data)
 	local result = {}
 	for i=1,#data do
@@ -9,6 +10,8 @@ function buildat.bytes(data)
 	end
 	return result
 end
+buildat.safe.bytes = buildat.bytes
+
 function buildat.dump(thing)
 	if type(thing) == 'string' then
 		return '"'..thing..'"'
@@ -35,6 +38,8 @@ function buildat.dump(thing)
 	end
 	return type(thing)
 end
+buildat.safe.dump = buildat.dump
+
 function buildat.Logger(module)
 	local logger = {}
 	function fix_text(text)
@@ -65,6 +70,7 @@ function buildat.Logger(module)
 	end
 	return logger
 end
+buildat.safe.Logger = buildat.Logger
 
 local log = buildat.Logger("__client/init")
 

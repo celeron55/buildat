@@ -15,6 +15,8 @@ end
 function buildat.sub_packet(name, cb)
 	packet_subs[name] = cb
 end
+buildat.safe.sub_packet = buildat.sub_packet
+
 function buildat.unsub_packet(cb)
 	for name, cb1 in pairs(buildat.packet_subs) do
 		if cb1 == cb then
@@ -22,8 +24,11 @@ function buildat.unsub_packet(cb)
 		end
 	end
 end
+buildat.safe.unsub_packet = buildat.unsub_packet
 
 function buildat.send_packet(name, data)
 	__buildat_send_packet(name, data)
 end
+buildat.safe.send_packet = buildat.send_packet
+
 -- vim: set noet ts=4 sw=4:

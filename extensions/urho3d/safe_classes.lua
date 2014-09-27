@@ -14,6 +14,14 @@ function M.define(dst, util)
 					"SetFloat", {}, {"VariantMap", "string", "number"}),
 			GetFloat = util.self_function(
 					"GetFloat", {"number"}, {"VariantMap", "string"}),
+			SetInt = util.self_function(
+					"SetInt", {}, {"VariantMap", "string", "number"}),
+			GetInt = util.self_function(
+					"GetInt", {"number"}, {"VariantMap", "string"}),
+			SetString = util.self_function(
+					"SetString", {}, {"VariantMap", "string", "string"}),
+			GetString = util.self_function(
+					"GetString", {"string"}, {"VariantMap", "string"}),
 		}
 	})
 

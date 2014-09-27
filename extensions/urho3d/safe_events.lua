@@ -6,5 +6,8 @@ return {
 	Update = {
 		TimeStep = {variant = "Float", safe = "number"},
 	},
+	KeyDown = {
+		Key = {variant = "Int", safe = "number"},
+	},
 }
 -- vim: set noet ts=4 sw=4:

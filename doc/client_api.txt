@@ -60,6 +60,10 @@ buildat.make_global(table)
   still not leak into the scope of other files running in the sandbox. Useful if
   you want to remove the "namespace table" of an extension.
 
+buildat.disconnect()
+- If connected from menu, quit to menu (client state is reset by restarting it)
+- If connected from command line, close the client
+
 
 Safe interfaces of built-in extensions
 ======================================

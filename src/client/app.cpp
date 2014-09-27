@@ -25,7 +25,7 @@ extern "C" {
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
 #include <signal.h>
-#define MODULE "__main"
+#define MODULE "__app"
 namespace magic = Urho3D;
 
 extern client::Config g_client_config;
@@ -39,6 +39,7 @@ struct CApp: public App, public magic::Application
 	magic::LuaScript *m_script;
 	lua_State *L;
 	int64_t m_last_script_tick_us;
+	bool m_reboot_requested = false;
 
 	CApp(magic::Context *context):
 		magic::Application(context),
@@ -46,6 +47,8 @@ struct CApp: public App, public magic::Application
 		L(nullptr),
 		m_last_script_tick_us(get_timeofday_us())
 	{
+		log_v(MODULE, "constructor()");
+
 		sv_<ss_> resource_paths = {
 			g_client_config.cache_path+"/tmp",
 			g_client_config.share_path+"/extensions", // Could be unsafe
@@ -95,8 +98,14 @@ struct CApp: public App, public magic::Application
 
 	void shutdown()
 	{
+		log_v(MODULE, "shutdown()");
 		magic::Engine *engine = GetSubsystem<magic::Engine>();
 		engine->Exit();
+	}
+
+	bool reboot_requested()
+	{
+		return m_reboot_requested;
 	}
 
 	void run_script(const ss_ &script)
@@ -155,6 +164,8 @@ struct CApp: public App, public magic::Application
 
 	void Start()
 	{
+		log_v(MODULE, "Start()");
+
 		// Set graphics mode
 		magic::Graphics *magic_graphics = GetSubsystem<magic::Graphics>();
 		int w = 1024;
@@ -195,6 +206,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(cereal_binary_output)
 		DEF_BUILDAT_FUNC(connect_server)
 		DEF_BUILDAT_FUNC(fatal_error)
+		DEF_BUILDAT_FUNC(disconnect)
 
 		ss_ init_lua_path = g_client_config.share_path+"/client/init.lua";
 		int error = luaL_dofile(L, init_lua_path.c_str());
@@ -832,6 +844,25 @@ struct CApp: public App, public magic::Application
 		ss_ error = lua_tocppstring(L, 1);
 		log_e(MODULE, "Fatal error: %s", cs(error));
 		throw Exception("Fatal error from Lua");
+		return 0;
+	}
+
+	// disconnect()
+	static int l_disconnect(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+
+		if(g_client_config.boot_to_menu){
+			// If menu, reboot client into menu
+			self->m_reboot_requested = true;
+			self->shutdown();
+		} else {
+			// If no menu, shutdown client
+			self->shutdown();
+		}
+
 		return 0;
 	}
 };

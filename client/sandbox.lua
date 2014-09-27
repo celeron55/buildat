@@ -150,23 +150,15 @@ function buildat.run_script_file(name)
 	log:info("buildat.run_script_file("..name.."): code length: "..#code)
 	return __buildat_run_code_in_sandbox(code)
 end
+buildat.safe.run_script_file = buildat.run_script_file
 
 --
--- buildat namespace whitelist
+-- Insert buildat.safe into sandbox as buildat
 --
 
--- Whitelist the buildat namespace into the sandbox
-local buildat_safe_list = {
-	"bytes",
-	"dump",
-	"Logger",
-	"run_script_file",
-	"sub_packet",
-	"send_packet",
-}
 __buildat_sandbox_environment.buildat = {}
-for _, name in ipairs(buildat_safe_list) do
-	__buildat_sandbox_environment.buildat[name] = buildat[name]
+for k, v in pairs(buildat.safe) do
+	__buildat_sandbox_environment.buildat[k] = v
 end
 
 log:info("sandbox.lua loaded")

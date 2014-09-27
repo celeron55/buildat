@@ -99,18 +99,25 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	magic::Context context;
-	sp_<app::App> app0(app::createApp(&context));
-	sp_<client::State> state(client::createState(app0));
-	app0->set_state(state);
+	int exit_status = 0;
+	while(exit_status == 0){
+		magic::Context context;
+		sp_<app::App> app0(app::createApp(&context));
+		sp_<client::State> state(client::createState(app0));
+		app0->set_state(state);
 
-	if(config.server_address != ""){
-		if(!state->connect(config.server_address, "20000"))
-			return 1;
-	} else {
-		config.boot_to_menu = true;
+		if(config.server_address != ""){
+			if(!state->connect(config.server_address, "20000"))
+				return 1;
+		} else {
+			config.boot_to_menu = true;
+		}
+
+		exit_status = app0->run();
+
+		if(!app0->reboot_requested())
+			break;
 	}
-
-	return app0->run();
+	return exit_status;
 }
 // vim: set noet ts=4 sw=4:
