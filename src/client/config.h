@@ -14,6 +14,7 @@ namespace client
 		bool boot_to_menu = false;
 		ss_ menu_extension_name = "__menu";
 
+		void make_paths_absolute();
 		bool check_paths();
 	};
 }

@@ -26,6 +26,14 @@ static bool check_file_writable(const ss_ &path)
 	return writable;
 }
 
+void Config::make_paths_absolute()
+{
+	auto *fs = interface::getGlobalFilesystem();
+	share_path = fs->get_absolute_path(share_path);
+	cache_path = fs->get_absolute_path(cache_path);
+	urho3d_path = fs->get_absolute_path(urho3d_path);
+}
+
 bool Config::check_paths()
 {
 	bool fail = false;

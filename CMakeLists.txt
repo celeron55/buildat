@@ -1,3 +1,6 @@
+# http://www.apache.org/licenses/LICENSE-2.0
+# Copyright 2014 Perttu Ahola <celeron55@gmail.com>
+
 cmake_minimum_required(VERSION 2.6)
 project(buildat)
 
@@ -18,6 +21,7 @@ include_directories("3rdparty/smallsha1")
 # Global options
 #
 
+set(BUILD_GUARD  TRUE CACHE BOOL "Build LD_PRELOAD guard (used for the client)")
 set(BUILD_SERVER TRUE CACHE BOOL "Build server")
 set(BUILD_CLIENT TRUE CACHE BOOL "Build client")
 
@@ -50,17 +54,49 @@ define_dependency_libs("Urho3D")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++0x -Wall")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Wno-unused-parameter")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -std=c++0x -g -O0 -Wall")
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin") # Executables
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib") # Shared libs
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib") # Static libs
 
 # Always output in color (useful when using head for build output)
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fdiagnostics-color=always")
 # Security / crash protection
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstack-protector-all")
 
+set(CLIENT_EXE_NAME buildat_client)
+set(SERVER_EXE_NAME buildat_server)
+
+if(BUILD_GUARD)
+	# LD_PRELOAD wrapper
+	set(PRELOAD_LIB_NAME buildat_guard)
+	set(PRELOAD_SRCS
+		src/guard/lib.c
+	)
+	add_library(${PRELOAD_LIB_NAME} SHARED ${PRELOAD_SRCS})
+
+	# Create wrapper script in place of client
+	set(GUARD_SCRIPT_NAME ${CLIENT_EXE_NAME})
+	set(GUARD_SCRIPT_PATH ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${GUARD_SCRIPT_NAME})
+	add_custom_command(
+		OUTPUT ${GUARD_SCRIPT_PATH}
+		COMMAND cp ${CMAKE_SOURCE_DIR}/src/guard/guard_launcher.sh
+				${GUARD_SCRIPT_PATH}
+		COMMAND chmod +x ${GUARD_SCRIPT_PATH}
+		DEPENDS ${CMAKE_SOURCE_DIR}/src/guard/guard_launcher.sh
+		VERBATIM
+	)
+	add_custom_target(generate_guard_script ALL
+		DEPENDS ${GUARD_SCRIPT_PATH}
+		DEPENDS ${CMAKE_SOURCE_DIR}/src/guard/guard_launcher.sh)
+
+	# Rename client to different name
+	set(CLIENT_EXE_NAME "${CLIENT_EXE_NAME}.bin")
+endif(BUILD_GUARD)
+
 if(BUILD_CLIENT)
 	# Client
-	set(CLIENT_EXE_NAME buildat_client)
 	set(CLIENT_SRCS
+		src/guard/buildat_guard_interface.cpp
 		src/client/main.cpp
 		src/client/state.cpp
 		src/client/app.cpp
@@ -84,7 +120,6 @@ endif(BUILD_CLIENT)
 
 if(BUILD_SERVER)
 	# Server
-	set(SERVER_EXE_NAME buildat_server)
 	set(SERVER_SRCS
 		src/server/main.cpp
 		src/server/state.cpp
@@ -110,4 +145,5 @@ if(BUILD_SERVER)
 		${LINK_LIBS_ONLY}
 	)
 endif(BUILD_SERVER)
+
 # vim: set noet ts=4 sw=4:

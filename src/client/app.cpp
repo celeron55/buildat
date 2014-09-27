@@ -5,6 +5,7 @@
 #include "client/config.h"
 #include "client/state.h"
 #include "interface/fs.h"
+#include "guard/buildat_guard_interface.h"
 #include <c55/getopt.h>
 #include <c55/os.h>
 #include <c55/string_util.h>
@@ -76,6 +77,16 @@ struct CApp: public App, public magic::Application
 			resource_paths_s += fs->get_absolute_path(path);
 		}
 
+		// Set allowed paths in buildat guard wrapper (ignored if not available)
+		buildat_guard_clear_paths();
+		for(const ss_ &path : resource_paths){
+			buildat_guard_add_valid_base_path(
+					fs->get_absolute_path(path).c_str());
+		}
+		buildat_guard_add_valid_base_path(
+				fs->get_absolute_path(g_client_config.cache_path).c_str());
+
+		// Set Urho3D engine parameters
 		engineParameters_["WindowTitle"]   = "Buildat Client";
 		engineParameters_["LogName"]       = "client_Urho3D.log";
 		engineParameters_["Headless"]      = false;
@@ -251,6 +262,10 @@ struct CApp: public App, public magic::Application
 			lua_pop(L, 1);
 			throw AppStartupError("Could not initialize Lua environment");
 		}
+
+		// Enable guard now. Everything from here should not access any weird
+		// files.
+		buildat_guard_enable(true);
 
 		if(g_client_config.boot_to_menu){
 			ss_ extname = g_client_config.menu_extension_name;
@@ -908,7 +923,7 @@ struct CApp: public App, public magic::Application
 		return 2;
 	}
 
-	// faatal_error(error: string)
+	// fatal_error(error: string)
 	static int l_fatal_error(lua_State *L)
 	{
 		ss_ error = lua_tocppstring(L, 1);
