@@ -148,6 +148,7 @@ int main(int argc, char *argv[])
 		// Re-creating app:App requires guard to be disabled
 		buildat_guard_enable(false);
 	}
+	log_v(MODULE, "Succesful shutdown");
 	return exit_status;
 }
 // vim: set noet ts=4 sw=4:
