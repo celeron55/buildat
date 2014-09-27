@@ -26,6 +26,16 @@ local light_node = scene:CreateChild("DirectionalLight")
 light_node.direction = magic.Vector3(-0.6, -1.0, 0.8) -- The direction vector does not need to be normalized
 local light = light_node:CreateComponent("Light")
 light.lightType = magic.LIGHT_DIRECTIONAL
+light.castShadows = true
+light.shadowBias = magic.BiasParameters(0.00025, 0.5)
+light.shadowCascade = magic.CascadeParameters(10.0, 50.0, 200.0, 0.0, 0.8)
+light.brightness = 0.8
+
+local light_node = scene:CreateChild("DirectionalLight")
+light_node.direction = magic.Vector3(0.6, -1.0, -0.8) -- The direction vector does not need to be normalized
+local light = light_node:CreateComponent("Light")
+light.lightType = magic.LIGHT_DIRECTIONAL
+light.brightness = 0.2
 
 -- Add a camera so we can look at the scene
 camera_node = scene:CreateChild("Camera")
@@ -99,6 +109,8 @@ buildat.sub_packet("test1:add_box", function(data)
 	-- And load the texture from a file:
 	object.material:SetTexture(magic.TU_DIFFUSE,
 			magic.cache:GetResource("Texture2D", "test1/pink_texture.png"))
+
+	object.castShadows = true
 
 	--
 	-- Make a non-useful but nice reply packet and send it to the server

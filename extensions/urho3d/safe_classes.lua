@@ -34,6 +34,23 @@ function M.define(dst, util)
 		},
 	})
 
+	util.wc("BiasParameters", {
+		unsafe_constructor = util.wrap_function({"number", "number"},
+		function(constant_bias, slope_scaled_bias)
+			return util.wrap_instance("BiasParameters",
+					BiasParameters(constant_bias, slope_scaled_bias))
+		end),
+	})
+
+	util.wc("CascadeParameters", {
+		unsafe_constructor = util.wrap_function({"number", "number", "number", "number", "number", {"number", "__nil"}},
+		function(split1, split2, split3, split4, fadeStart, biasAutoAdjust)
+			biasAutoAdjust = biasAutoAdjust or 1.0
+			return util.wrap_instance("CascadeParameters",
+					CascadeParameters(split1, split2, split3, split4, fadeStart, biasAutoAdjust))
+		end),
+	})
+
 	util.wc("Resource", {
 	})
 
@@ -52,6 +69,10 @@ function M.define(dst, util)
 		inherited_from_by_wrapper = dst.Drawable,
 		properties = {
 			lightType = util.simple_property("number"),
+			brightness = util.simple_property("number"),
+			castShadows = util.simple_property("boolean"),
+			shadowBias = util.simple_property("BiasParameters"),
+			shadowCascade = util.simple_property("CascadeParameters"),
 		},
 	})
 
@@ -101,6 +122,7 @@ function M.define(dst, util)
 		properties = {
 			model = util.simple_property(dst.Model),
 			material = util.simple_property(dst.Material),
+			castShadows = util.simple_property("boolean"),
 		},
 	})
 
