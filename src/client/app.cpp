@@ -93,7 +93,7 @@ struct CApp: public App, public magic::Application
 		engineParameters_["Headless"]      = false;
 		engineParameters_["ResourcePaths"] = resource_paths_s.c_str();
 		engineParameters_["AutoloadPaths"] = "";
-		//engineParameters_["LogName"]       = "client_Urho3D.log";
+		engineParameters_["LogName"]       = "";
 		engineParameters_["LogQuiet"]      = true; // Don't log to stdout
 
 		// Graphics options
