@@ -234,28 +234,28 @@ function M.safe.SubscribeToEvent(x, y, z)
 	local global_callback_name = "__buildat_sandbox_callback_"..global_function_i
 	sandbox_callback_to_global_function_name[callback] = global_callback_name
 	_G[global_callback_name] = function(event_type_thing, unsafe_event_data)
-		-- How the hell does one get a string out of event_type_thing?
-		-- It is not a Variant, and none of the Lua examples try to do anything
-		-- with it.
-		-- Let's just assume it's the correct one...
-		local got_event_type = sub_event_type
-		-- Filter event_data (Urho3D::VariantMap)
-		local safe_fields = safe_events[got_event_type]
-		if not safe_fields then
-			log:warning("Received unsafe event: "..dump(got_event_type))
-		end
-		local safe_event_data = M.safe.VariantMap()
-		for field_name, field_def in pairs(safe_fields) do
-			local variant_type = field_def.variant
-			local safe_type = field_def.safe
-			local unsafe_value = unsafe_event_data["Get"..variant_type](
-					unsafe_event_data, field_name)
-			local safe_value = magic_sandbox.unsafe_to_safe(unsafe_value, safe_type)
-			safe_event_data["Set"..variant_type](
-					safe_event_data, field_name, safe_value)
-		end
-		-- Call callback
 		local f = function()
+			-- How the hell does one get a string out of event_type_thing?
+			-- It is not a Variant, and none of the Lua examples try to do anything
+			-- with it.
+			-- Let's just assume it's the correct one...
+			local got_event_type = sub_event_type
+			-- Filter event_data (Urho3D::VariantMap)
+			local safe_fields = safe_events[got_event_type]
+			if not safe_fields then
+				log:warning("Received unsafe event: "..dump(got_event_type))
+			end
+			local safe_event_data = M.safe.VariantMap()
+			for field_name, field_def in pairs(safe_fields) do
+				local variant_type = field_def.variant
+				local safe_type = field_def.safe
+				local unsafe_value = unsafe_event_data["Get"..variant_type](
+						unsafe_event_data, field_name)
+				local safe_value = magic_sandbox.unsafe_to_safe(unsafe_value, safe_type)
+				safe_event_data["Set"..variant_type](
+						safe_event_data, field_name, safe_value)
+			end
+			-- Call callback
 			if object then
 				callback(object, got_event_type, safe_event_data)
 			else
