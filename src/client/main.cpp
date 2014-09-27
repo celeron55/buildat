@@ -144,6 +144,9 @@ int main(int argc, char *argv[])
 			break;
 
 		app_options = app0->get_current_options();
+
+		// Re-creating app:App requires guard to be disabled
+		buildat_guard_enable(false);
 	}
 	return exit_status;
 }
