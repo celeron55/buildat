@@ -31,7 +31,7 @@ if("${URHO3D_HOME}" STREQUAL "")
 	message(FATAL_ERROR "You need to set the URHO3D_HOME environment variable.")
 endif()
 
-set(CMAKE_MODULE_PATH ${URHO3D_HOME}/Source/CMake/Modules CACHE PATH "Path to Urho3D-specific CMake modules")
+set(CMAKE_MODULE_PATH ${URHO3D_HOME}/Source/CMake/Modules PATH "Path to Urho3D-specific CMake modules")
 include(Urho3D-CMake-common)
 find_package(Urho3D REQUIRED)
 include_directories(${URHO3D_INCLUDE_DIRS})
