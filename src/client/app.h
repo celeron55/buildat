@@ -5,6 +5,7 @@
 
 namespace Urho3D {
 	class Context;
+	class Graphics;
 }
 namespace client {
 	struct State;
@@ -17,6 +18,31 @@ namespace app
 		AppStartupError(const ss_ &msg): Exception(msg){}
 	};
 
+	struct GraphicsOptions
+	{
+		static const int UNDEFINED_INT = 2147483647;
+
+		int window_w = 1024;
+		int window_h = 768;
+		int full_w = 0;
+		int full_h = 0;
+		bool fullscreen = false;
+		bool borderless = false;
+		bool resizable = true;
+		bool vsync = true;
+		bool triple_buffer = false;
+		int multisampling = 1; // 2 looks much better but is much heavier(?)
+		int window_x = UNDEFINED_INT;
+		int window_y = UNDEFINED_INT;
+
+		void apply(Urho3D::Graphics *magic_graphics);
+	};
+
+	struct Options
+	{
+		GraphicsOptions graphics;
+	};
+
 	struct App
 	{
 		virtual ~App(){}
@@ -24,6 +50,7 @@ namespace app
 		virtual int run() = 0;
 		virtual void shutdown() = 0;
 		virtual bool reboot_requested() = 0;
+		virtual Options get_current_options() = 0;
 		virtual void run_script(const ss_ &script) = 0;
 		virtual bool run_script_no_sandbox(const ss_ &script) = 0;
 		virtual void handle_packet(const ss_ &name, const ss_ &data) = 0;
@@ -31,6 +58,6 @@ namespace app
 				const ss_ &file_hash, const ss_ &cached_path) = 0;
 	};
 
-	App* createApp(Urho3D::Context *context);
+	App* createApp(Urho3D::Context *context, const Options &options=Options());
 }
 // vim: set noet ts=4 sw=4:

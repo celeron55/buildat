@@ -17,6 +17,7 @@
 #include <Input.h>
 #include <ResourceCache.h>
 #include <Graphics.h>
+#include <GraphicsEvents.h> // E_SCREENMODE
 #pragma GCC diagnostic pop
 extern "C" {
 #include <lua.h>
@@ -33,6 +34,14 @@ extern bool g_sigint_received;
 
 namespace app {
 
+void GraphicsOptions::apply(magic::Graphics *magic_graphics)
+{
+	int w = fullscreen ? full_w : window_w;
+	int h = fullscreen ? full_h : window_h;
+	magic_graphics->SetMode(w, h, fullscreen, borderless, resizable,
+			vsync, triple_buffer, multisampling);
+}
+
 struct CApp: public App, public magic::Application
 {
 	sp_<client::State> m_state;
@@ -40,14 +49,18 @@ struct CApp: public App, public magic::Application
 	lua_State *L;
 	int64_t m_last_script_tick_us;
 	bool m_reboot_requested = false;
+	Options m_options;
 
-	CApp(magic::Context *context):
+	CApp(magic::Context *context, const Options &options):
 		magic::Application(context),
 		m_script(nullptr),
 		L(nullptr),
-		m_last_script_tick_us(get_timeofday_us())
+		m_last_script_tick_us(get_timeofday_us()),
+		m_options(options)
 	{
 		log_v(MODULE, "constructor()");
+		log_v(MODULE, "window size: %ix%i",
+				m_options.graphics.window_w, m_options.graphics.window_h);
 
 		sv_<ss_> resource_paths = {
 			g_client_config.cache_path+"/tmp",
@@ -65,13 +78,28 @@ struct CApp: public App, public magic::Application
 
 		engineParameters_["WindowTitle"]   = "Buildat Client";
 		engineParameters_["LogName"]       = "client_Urho3D.log";
-		engineParameters_["FullScreen"]    = false;
 		engineParameters_["Headless"]      = false;
 		engineParameters_["ResourcePaths"] = resource_paths_s.c_str();
 		engineParameters_["AutoloadPaths"] = "";
 
-		// Set up on_update event (this runs every frame)
+		// Graphics options
+		engineParameters_["FullScreen"] = m_options.graphics.fullscreen;
+		if(m_options.graphics.fullscreen){
+			engineParameters_["WindowWidth"]     = m_options.graphics.full_w;
+			engineParameters_["WindowHeight"]    = m_options.graphics.full_h;
+		} else {
+			engineParameters_["WindowWidth"]     = m_options.graphics.window_w;
+			engineParameters_["WindowHeight"]    = m_options.graphics.window_h;
+			engineParameters_["WindowResizable"] = m_options.graphics.resizable;
+		}
+		engineParameters_["VSync"]        = m_options.graphics.vsync;
+		engineParameters_["TripleBuffer"] = m_options.graphics.triple_buffer;
+		engineParameters_["Multisample"]  = m_options.graphics.multisampling;
+
+		// Set up event handlers
 		SubscribeToEvent(magic::E_UPDATE, HANDLER(CApp, on_update));
+		SubscribeToEvent(magic::E_KEYDOWN, HANDLER(CApp, on_keydown));
+		SubscribeToEvent(magic::E_SCREENMODE, HANDLER(CApp, on_screenmode));
 
 		// Default to not grabbing the mouse
 		magic::Input *magic_input = GetSubsystem<magic::Input>();
@@ -99,6 +127,13 @@ struct CApp: public App, public magic::Application
 	void shutdown()
 	{
 		log_v(MODULE, "shutdown()");
+
+		// Save window position
+		magic::Graphics *magic_graphics = GetSubsystem<magic::Graphics>();
+		magic::IntVector2 v = magic_graphics->GetWindowPosition();
+		m_options.graphics.window_x = v.x_;
+		m_options.graphics.window_y = v.y_;
+
 		magic::Engine *engine = GetSubsystem<magic::Engine>();
 		engine->Exit();
 	}
@@ -106,6 +141,11 @@ struct CApp: public App, public magic::Application
 	bool reboot_requested()
 	{
 		return m_reboot_requested;
+	}
+
+	Options get_current_options()
+	{
+		return m_options;
 	}
 
 	void run_script(const ss_ &script)
@@ -166,18 +206,13 @@ struct CApp: public App, public magic::Application
 	{
 		log_v(MODULE, "Start()");
 
-		// Set graphics mode
-		magic::Graphics *magic_graphics = GetSubsystem<magic::Graphics>();
-		int w = 1024;
-		int h = 768;
-		bool fullscreen = false;
-		bool borderless = false;
-		bool resizable = true;
-		bool vsync = true;
-		bool triple_buffer = false;
-		int multisampling = 1; // 2 looks much better but is much heavier(?)
-		magic_graphics->SetMode(w, h, fullscreen, borderless, resizable,
-				vsync, triple_buffer, multisampling);
+		// Restore window to previous position
+		if(m_options.graphics.window_x != GraphicsOptions::UNDEFINED_INT &&
+				m_options.graphics.window_y != GraphicsOptions::UNDEFINED_INT){
+			magic::Graphics *magic_graphics = GetSubsystem<magic::Graphics>();
+			magic_graphics->SetWindowPosition(
+					m_options.graphics.window_x, m_options.graphics.window_y);
+		}
 
 		// Instantiate and register the Lua script subsystem so that we can use the LuaScriptInstance component
 		context_->RegisterSubsystem(new magic::LuaScript(context_));
@@ -230,13 +265,47 @@ struct CApp: public App, public magic::Application
 		}
 	}
 
-	void on_update(magic::StringHash eventType, magic::VariantMap &eventData)
+	void on_update(magic::StringHash event_type, magic::VariantMap &event_data)
 	{
 		if(g_sigint_received)
 			shutdown();
 		if(m_state)
 			m_state->update();
 		script_tick();
+	}
+
+	void on_keydown(magic::StringHash event_type, magic::VariantMap &event_data)
+	{
+		int key = event_data["Key"].GetInt();
+		if(key == Urho3D::KEY_F11){
+			log_v(MODULE, "F11");
+			magic::Graphics *magic_graphics = GetSubsystem<magic::Graphics>();
+			if(magic_graphics->GetFullscreen()){
+				// Switch to windowed mode
+				magic::Graphics *magic_graphics = GetSubsystem<magic::Graphics>();
+				m_options.graphics.fullscreen = false;
+				m_options.graphics.resizable = true;
+				m_options.graphics.apply(magic_graphics);
+			} else {
+				// Switch to fullscreen mode
+				magic::Graphics *magic_graphics = GetSubsystem<magic::Graphics>();
+				m_options.graphics.fullscreen = true;
+				m_options.graphics.resizable = false;
+				m_options.graphics.apply(magic_graphics);
+			}
+		}
+	}
+
+	void on_screenmode(magic::StringHash event_type, magic::VariantMap &event_data)
+	{
+		// If in windowed mode, update resolution in options
+		magic::Graphics *magic_graphics = GetSubsystem<magic::Graphics>();
+		if(!magic_graphics->GetFullscreen()){
+			m_options.graphics.window_w = event_data["Width"].GetInt();
+			m_options.graphics.window_h = event_data["Height"].GetInt();
+			log_v(MODULE, "Window size in graphics options updated: %ix%i",
+					m_options.graphics.window_w, m_options.graphics.window_h);
+		}
 	}
 
 	void script_tick()
@@ -867,9 +936,9 @@ struct CApp: public App, public magic::Application
 	}
 };
 
-App* createApp(magic::Context *context)
+App* createApp(magic::Context *context, const Options &options)
 {
-	return new CApp(context);
+	return new CApp(context, options);
 }
 
 }

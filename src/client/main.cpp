@@ -99,10 +99,12 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
+	app::Options app_options;
+
 	int exit_status = 0;
 	while(exit_status == 0){
 		magic::Context context;
-		sp_<app::App> app0(app::createApp(&context));
+		sp_<app::App> app0(app::createApp(&context, app_options));
 		sp_<client::State> state(client::createState(app0));
 		app0->set_state(state);
 
@@ -117,6 +119,8 @@ int main(int argc, char *argv[])
 
 		if(!app0->reboot_requested())
 			break;
+
+		app_options = app0->get_current_options();
 	}
 	return exit_status;
 }
