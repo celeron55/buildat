@@ -3,8 +3,7 @@
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("__client/api")
 
-function buildat.connect_server(address)
-	return __buildat_connect_server(address)
-end
+buildat.connect_server    = __buildat_connect_server
+buildat.extension_path    = __buildat_extension_path
 
 -- vim: set noet ts=4 sw=4:

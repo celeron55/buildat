@@ -48,6 +48,8 @@ Extensions and modules use require("buildat/extension/<name>") to use extensions
 buildat.connect_server(address)
 - Address may include port in format "host:port" or "[host]:port"
 
+buildat.extension_path(name)
+
 The sandbox environment
 =======================
 

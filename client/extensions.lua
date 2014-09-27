@@ -5,7 +5,7 @@ local log = buildat.Logger("__client/extensions")
 
 function __buildat_load_extension(name)
 	log:info("__buildat_load_extension(\""..name.."\")")
-	local path = __buildat_get_path("share").."/extensions/"..name.."/init.lua"
+	local path = __buildat_extension_path(name).."/init.lua"
 	local script, err = loadfile(path)
 	if script == nil then
 		log:error("Extension could not be opened: "..name.." at "..path..": "..err)

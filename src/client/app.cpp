@@ -188,6 +188,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(get_file_content)
 		DEF_BUILDAT_FUNC(get_file_path)
 		DEF_BUILDAT_FUNC(get_path)
+		DEF_BUILDAT_FUNC(extension_path)
 		DEF_BUILDAT_FUNC(mkdir)
 		DEF_BUILDAT_FUNC(pcall)
 		DEF_BUILDAT_FUNC(cereal_binary_input)
@@ -348,6 +349,17 @@ struct CApp: public App, public magic::Application
 		}
 		log_w(MODULE, "Unknown named path: \"%s\"", cs(name));
 		return 0;
+	}
+
+	// extension_path(name: string)
+	static int l_extension_path(lua_State *L)
+	{
+		ss_ name = lua_tocppstring(L, 1);
+		ss_ path = g_client_config.share_path+"/extensions/"+name;
+		// TODO: Check if extension actually exists and do something suitable if
+		//       not
+		lua_pushlstring(L, path.c_str(), path.size());
+		return 1;
 	}
 
 	// mkdir(path: string)
