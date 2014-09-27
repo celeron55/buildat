@@ -4,7 +4,7 @@ Buildat TODO
   unnecessarily
 - Modules should be run in threads.
 - Implement module depencencies in test/testmodules/__loader
-- There should probably be a builtin/loader that __loader usually wants to call
+	- There should probably be a builtin/loader that __loader usually wants to call
 - Ask hmmmm/kwolekr for permission to use MT's noise under the Apache 2.0
   license and if allowed, include it in interfaces
 - Design how to manage scenes in a future-proof way
@@ -27,6 +27,4 @@ Buildat TODO
   modules. Main world has worldspace_id=1. Try Polyvox.
 - Entity system with automated network sync
 - Support Cereal's shared pointer serialization in Lua
-- Sandboxing of references from XML resources to other files
-- Get rid of exception when trying to use a remote resource when accessing a
-  local resource
+- Something in uistack's global nil focus handling has broken
