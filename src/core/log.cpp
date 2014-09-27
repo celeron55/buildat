@@ -11,6 +11,14 @@
 
 pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+const int LOG_FATAL = 0;
+const int LOG_ERROR = 1;
+const int LOG_WARNING = 2;
+const int LOG_INFO = 3;
+const int LOG_VERBOSE = 4;
+const int LOG_DEBUG = 5;
+const int LOG_TRACE = 6;
+
 bool line_begin = true;
 int current_level = 0;
 //int max_level = LOG_DEBUG;

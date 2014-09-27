@@ -2,19 +2,20 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #pragma once
 
+extern const int LOG_FATAL;
+extern const int LOG_ERROR;
+extern const int LOG_WARNING;
+extern const int LOG_INFO;
+extern const int LOG_VERBOSE;
+extern const int LOG_DEBUG;
+extern const int LOG_TRACE;
+
 void log_set_max_level(int level);
 int log_get_max_level();
 void log_set_file(const char *path);
 void log_close();
 
 void log_nl();
-#define LOG_FATAL 0
-#define LOG_ERROR 1
-#define LOG_WARNING 2
-#define LOG_INFO 3
-#define LOG_VERBOSE 4
-#define LOG_DEBUG 5
-#define LOG_TRACE 6
 void log_(int level, const char *sys, const char *fmt, ...)
 __attribute__((format(printf, 3, 4)));
 #define log_f(sys, fmt, ...) log_(LOG_FATAL, sys, fmt, ##__VA_ARGS__)
