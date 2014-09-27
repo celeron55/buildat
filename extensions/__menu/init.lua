@@ -129,7 +129,7 @@ function M.boot()
 	layout:SetStyleAuto()
 	layout:SetName("Layout")
 	layout:SetLayout(LM_HORIZONTAL, 20, magic.IntRect(0, 0, 0, 0))
-	layout:SetAlignment(HA_CENTER, VA_CENTER)
+	layout:SetAlignment(HA_LEFT, VA_CENTER)
 
 	local button = layout:CreateChild("Button")
 	button:SetStyleAuto()
@@ -146,7 +146,7 @@ function M.boot()
 	button_text:SetStyleAuto()
 	button_text.text = "Connect to server"
 	button_text.color = magic.Color(.3, .3, .3)
-	button_text:SetAlignment(HA_CENTER, VA_CENTER)
+	button_text:SetAlignment(HA_CENTER, VA_TOP)
 	button_text:SetTextAlignment(HA_CENTER)
 
 	magic.SubscribeToEvent(button, "HoverBegin",
