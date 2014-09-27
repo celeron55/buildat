@@ -52,10 +52,9 @@ struct Module: public interface::Module
 			{builtin, "client_file"},
 			{builtin, "client_lua"},
 			{builtin, "client_data"},
-			//{current, "test1"},
+			{current, "test1"},
 			//{current, "test2"},
 			//{current, "minigame"},
-			{current, "uitest"},
 		};
 		for(auto &pair : load_list){
 			const ss_ &name = pair.second;
