@@ -13,9 +13,10 @@ exist in the near future!
 
 Further reading:
 
-* doc/design.txt
-* doc/conventions.txt
-* doc/client_api.txt
+* [doc/design.txt](doc/design.txt)
+* [doc/conventions.txt](doc/conventions.txt)
+* [doc/client_api.txt](doc/client_api.txt)
+* [doc/todo.txt](doc/todo.txt)
 
 Buildat Linux How-To
 ====================
