@@ -8,7 +8,7 @@ local dump = buildat.dump
 local M = {safe = nil}
 log:info("extension/__menu/init.lua: Loading")
 
-local ui_stack = uistack.UIStack(magic.ui.root)
+local ui_stack = uistack.main
 
 local function show_error(message)
 	local root = ui_stack:push({desc="show_error"})

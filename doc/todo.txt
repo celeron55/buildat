@@ -26,5 +26,5 @@ Buildat TODO
 - Voxel world with arbitrary chunk size and offset, with pluggable loader
   modules. Main world has worldspace_id=1. Try Polyvox.
 - Support Cereal's shared pointer serialization in Lua
-- Check sandboxing of UIStack
 - Sandboxing of references from XML resources to other files
+- Get rid of exception trying to use a remote resource when accessing a local resource

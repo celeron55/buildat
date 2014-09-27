@@ -3,8 +3,7 @@
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("extension/uistack")
 local magic_sandbox = require("buildat/extension/magic_sandbox")
-local unsafe_magic = require("buildat/extension/urho3d")
-local magic = unsafe_magic.safe
+local magic = require("buildat/extension/urho3d")
 local dump = buildat.dump
 local M = {safe = {}}
 log:info("extension/uistack/init.lua: Loading")
@@ -160,6 +159,11 @@ function M.UIStack(root)
 end
 
 M.safe.UIStack = M.UIStack
+
+-- Main UIStack instance
+
+M.main = M.safe.UIStack(magic.ui.root)
+M.safe.main = M.main
 
 return M
 -- vim: set noet ts=4 sw=4:
