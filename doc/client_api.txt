@@ -105,6 +105,12 @@ urho3d
 ------
 Whitelist-based wrapper for the Urho3D Lua API.
 
+NOTE: The whitelist is grossly incomplete. Please extend it and submit a pull
+request. It is found in these files:
+* extensions/urho3d/safe_globals.lua
+* extensions/urho3d/safe_classes.lua
+* extensions/urho3d/safe_events.lua
+
 File paths and other things are converted automatically.
 
 Additions to regular Urho3D:
