@@ -55,7 +55,7 @@ The sandbox environment
 
 All code sent by the server to the client is run in the sandbox environment.
 
-buildat.make_global(table)
+sandbox.make_global(table)
 - Copies contents table into the current global sandbox environemnt. It will
   still not leak into the scope of other files running in the sandbox. Useful if
   you want to remove the "namespace table" of an extension.
@@ -72,8 +72,8 @@ Use extensions in this way:
   cereal = require("buildat/extension/cereal")
   cereal.binary_output(...)
 
-You can use buildat.make_global like this:
-  buildat.make_global(require("buildat/extension/urho3d"))
+You can use sandbox.make_global like this:
+  sandbox.make_global(require("buildat/extension/urho3d"))
   local scene = Scene()
 
 cereal

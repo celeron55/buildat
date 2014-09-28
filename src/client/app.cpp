@@ -187,6 +187,7 @@ struct CApp: public App, public magic::Application
 	{
 		log_v(MODULE, "run_script_no_sandbox():\n%s", cs(script));
 
+		// TODO: Use lua_load() so that chunkname can be set
 		if(luaL_loadstring(L, script.c_str())){
 			ss_ error = lua_tocppstring(L, -1);
 			log_e("%s", cs(error));
@@ -316,6 +317,18 @@ struct CApp: public App, public magic::Application
 				m_options.graphics.fullscreen = true;
 				m_options.graphics.resizable = false;
 				m_options.graphics.apply(magic_graphics);
+			}
+		}
+		if(key == Urho3D::KEY_F10){
+			ss_ extname = "sandbox_test";
+			ss_ script = ss_()+
+					"local m = require('buildat/extension/"+extname+"')\n"
+					"if type(m) ~= 'table' then\n"
+					"    error('Failed to load extension "+extname+"')\n"
+					"end\n"
+					"m.run()\n";
+			if(!run_script_no_sandbox(script)){
+				log_e(MODULE, "Failed to load and run extension %s", cs(extname));
 			}
 		}
 	}

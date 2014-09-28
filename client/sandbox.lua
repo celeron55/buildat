@@ -1,7 +1,7 @@
 -- Buildat: client/sandbox.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
-local log = buildat.Logger("__client/sandbox")
+local log = buildat.Logger("sandbox")
 local dump = buildat.dump
 
 --
@@ -74,12 +74,45 @@ __buildat_sandbox_environment.require = function(name)
 end
 
 --
+-- Sandbox environment debugging
+--
+
+-- For debugging purposes. Used by extensions/sandbox_test.
+__buildat_latest_sandbox_global_wrapper_number = 0 -- Incremented every time
+__buildat_latest_sandbox_global_wrapper = nil
+-- Save a number of old wrappers for debugging purposes
+__buildat_old_sandbox_global_wrappers = {}
+
+local function debug_new_wrapper(sandbox)
+	if __buildat_latest_sandbox_global_wrapper then
+		table.insert(__buildat_old_sandbox_global_wrappers, __buildat_latest_sandbox_global_wrapper)
+		-- Keep a number of old wrappers.
+		-- These wrappers are created at quite a fast pace due to Update events.
+		if #__buildat_old_sandbox_global_wrappers > 60*5 then
+			table.remove(__buildat_old_sandbox_global_wrappers, 1)
+		end
+	end
+	__buildat_latest_sandbox_global_wrapper_number = __buildat_latest_sandbox_global_wrapper_number + 1
+	__buildat_latest_sandbox_global_wrapper = sandbox
+end
+
+--
 -- Running code in sandbox
 --
 
 local function wrap_globals(base_sandbox)
 	local sandbox = {}
 	local sandbox_declared_globals = {}
+	-- Sandbox special functions
+	sandbox.sandbox = {}
+	function sandbox.sandbox.make_global(t)
+		for k, v in pairs(t) do
+			if sandbox[k] == nil then
+				rawset(sandbox, k, v)
+			end
+		end
+	end
+	-- Prevent setting sandbox globals from functions (only from the main chunk)
 	setmetatable(sandbox, {
 		__index = function(t, k)
 			local v = rawget(sandbox, k)
@@ -100,13 +133,7 @@ local function wrap_globals(base_sandbox)
 			rawset(sandbox, k, v)
 		end
 	})
-	function sandbox.buildat.make_global(t)
-		for k, v in pairs(t) do
-			if sandbox[k] == nil then
-				rawset(sandbox, k, v)
-			end
-		end
-	end
+	debug_new_wrapper(sandbox)
 	return sandbox
 end
 
@@ -125,15 +152,15 @@ function __buildat_run_function_in_sandbox(untrusted_function)
 	return true
 end
 
-local function run_code_in_sandbox(untrusted_code, sandbox)
+local function run_code_in_sandbox(untrusted_code, sandbox, chunkname)
 	if untrusted_code:byte(1) == 27 then return false, "binary bytecode prohibited" end
-	local untrusted_function, message = loadstring(untrusted_code)
+	local untrusted_function, message = loadstring(untrusted_code, chunkname)
 	if not untrusted_function then return false, message end
 	return run_function_in_sandbox(untrusted_function, sandbox)
 end
 
-function __buildat_run_code_in_sandbox(untrusted_code)
-	local status, err = run_code_in_sandbox(untrusted_code, __buildat_sandbox_environment)
+function __buildat_run_code_in_sandbox(untrusted_code, chunkname)
+	local status, err = run_code_in_sandbox(untrusted_code, __buildat_sandbox_environment, chunkname)
 	if status == false then
 		log:error("Failed to run script:\n"..err)
 		return false
@@ -148,7 +175,7 @@ function buildat.run_script_file(name)
 		return false
 	end
 	log:info("buildat.run_script_file("..name.."): code length: "..#code)
-	return __buildat_run_code_in_sandbox(code)
+	return __buildat_run_code_in_sandbox(code, name)
 end
 buildat.safe.run_script_file = buildat.run_script_file
 
