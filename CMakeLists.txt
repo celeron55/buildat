@@ -102,6 +102,7 @@ if(BUILD_CLIENT)
 		src/client/app.cpp
 		src/client/config.cpp
 		src/core/log.cpp
+		src/core/json.cpp
 		src/impl/fs.cpp
 		src/impl/tcpsocket.cpp
 		src/impl/sha1.cpp
@@ -126,6 +127,7 @@ if(BUILD_SERVER)
 		src/server/rccpp.cpp
 		src/server/config.cpp
 		src/core/log.cpp
+		src/core/json.cpp
 		src/impl/fs.cpp
 		src/impl/event.cpp
 		src/impl/tcpsocket.cpp
