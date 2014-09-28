@@ -249,7 +249,7 @@ struct Module: public interface::Module, public client_file::Interface
 
 	void add_file_path(const ss_ &name, const ss_ &path)
 	{
-		std::ifstream f(path);
+		std::ifstream f(path, std::ios::binary);
 		if(!f.good())
 			throw Exception("client_file::add_file_path(): Couldn't open \""+
 					name+"\" from \""+path+"\"");
@@ -267,7 +267,7 @@ struct Module: public interface::Module, public client_file::Interface
 				return;
 			}
 			log_d(MODULE, "File watch callback: %s (%s)", cs(name), cs(path_));
-			std::ifstream f(path);
+			std::ifstream f(path, std::ios::binary);
 			if(!f.good()){
 				log_w(MODULE, "client_file: Couldn't open updated file "
 						"\"%s\" from \"%s\"", cs(name), cs(path));
@@ -276,7 +276,7 @@ struct Module: public interface::Module, public client_file::Interface
 			std::string content((std::istreambuf_iterator<char>(f)),
 					std::istreambuf_iterator<char>());
 			if(content.empty()){
-				log_w(MODULE, "client_file: Updated file is emptyCouldn't open updated file "
+				log_w(MODULE, "client_file: Updated file is empty: "
 						"\"%s\" from \"%s\"", cs(name), cs(path));
 				return;
 			}
