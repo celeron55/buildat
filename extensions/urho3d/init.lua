@@ -372,10 +372,8 @@ end
 -- Create the final interface
 --
 
-local M = Safe
-
-M.safe = M
-
+local M = {}
+M.safe = Safe
 M.unsafe = Unsafe
 
 return M

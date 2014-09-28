@@ -2,7 +2,7 @@
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("extension/__menu")
-local magic = require("buildat/extension/urho3d")
+local magic = require("buildat/extension/urho3d").safe
 local uistack = require("buildat/extension/uistack")
 local dump = buildat.dump
 local M = {safe = nil}
