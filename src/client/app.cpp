@@ -21,6 +21,8 @@
 #include <GraphicsEvents.h> // E_SCREENMODE
 #include <IOEvents.h> // E_LOGMESSAGE
 #include <Log.h>
+#include <DebugHud.h>
+#include <XMLFile.h>
 #pragma GCC diagnostic pop
 extern "C" {
 #include <lua.h>
@@ -288,6 +290,12 @@ struct CApp: public App, public magic::Application
 				throw AppStartupError(ss_()+"Failed to load and run extension "+extname);
 			}
 		}
+
+		// Create debug HUD
+		magic::ResourceCache *magic_cache = GetSubsystem<magic::ResourceCache>();
+		magic::DebugHud *dhud = GetSubsystem<magic::Engine>()->CreateDebugHud();
+		dhud->SetDefaultStyle(magic_cache->GetResource<magic::XMLFile>(
+				"UI/DefaultStyle.xml"));
 	}
 
 	void on_update(magic::StringHash event_type, magic::VariantMap &event_data)
@@ -330,6 +338,10 @@ struct CApp: public App, public magic::Application
 			if(!run_script_no_sandbox(script)){
 				log_e(MODULE, "Failed to load and run extension %s", cs(extname));
 			}
+		}
+		if(key == Urho3D::KEY_F9){
+			magic::DebugHud *dhud = GetSubsystem<magic::Engine>()->CreateDebugHud();
+			dhud->ToggleAll();
 		}
 	}
 
