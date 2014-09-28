@@ -41,11 +41,11 @@ sed -i -e 's/}[\t ]*else[\t ]*{/} else {/g' $header_files $cpp_files
 sed -i -e 's/ << /<</g' $header_files $cpp_files
 sed -i -e 's/ >> />>/g' $header_files $cpp_files
 sed -i -e 's/^\(\s*\(EXPORT\|virtual\|\)\s*[a-zA-Z0-9_:,]*\) \*\([a-zA-Z0-9_:,]*(\)/\1* \3/g' $header_files $cpp_files
-sed -i -e 's/^\(\s*\(EXPORT\|virtual\|\)\s*[a-zA-Z0-9_:,]*\) &\([a-zA-Z0-9_:,]*(\)/\1& \3/g' $header_files $cpp_files
+sed -i -e 's/^\(\s*\(EXPORT\|virtual\|\)\s*[a-zA-Z0-9_:,]*\) &\([a-zA-Z0-9_:,]*(\)/\1\& \3/g' $header_files $cpp_files
 sed -i -e 's/ \*)/*)/g' $header_files $cpp_files
 sed -i -e 's/ \*>/*>/g' $header_files $cpp_files
-sed -i -e 's/ &)/&)/g' $header_files $cpp_files
-sed -i -e 's/ &>/&>/g' $header_files $cpp_files
+sed -i -e 's/ &)/\&)/g' $header_files $cpp_files
+sed -i -e 's/ &>/\&>/g' $header_files $cpp_files
 sed -i -e 's/\*\s\+>/\*>/g' $header_files $cpp_files
 sed -i -e 's/ + "/+"/g' $header_files $cpp_files
 sed -i -e 's/" + /"+/g' $header_files $cpp_files
