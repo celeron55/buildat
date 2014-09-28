@@ -58,5 +58,13 @@ function M.run()
 	log:info("sandbox_test(): Finished")
 end
 
+-- Enabled when this module is loaded.
+-- Normally that happens when KEY_F10 is pressed on the client.
+function M.check_value(value)
+	log:debug("sandbox_test.check_value()")
+	try_exploit.search_single_value(value)
+end
+__buildat_sandbox_debug_check_value_sub(M.check_value)
+
 return M
 -- vim: set noet ts=4 sw=4:

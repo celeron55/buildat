@@ -42,7 +42,9 @@ function M.wrap_class(type_name, def)
 						local property_def = super_def.properties[key]
 						if property_def.get then
 							local current_unsafe_value = unsafe[key]
-							return property_def.get(current_unsafe_value)
+							local safe_v = property_def.get(current_unsafe_value)
+							__buildat_sandbox_debug_check_value(safe_v)
+							return safe_v
 						end
 						error("Property \""..key.."\" of "..type_name.."'s superclass "..
 								super_type_name.." cannot be read")
@@ -65,7 +67,9 @@ function M.wrap_class(type_name, def)
 						error("Property \""..name.."\" of "..type_name.." cannot be read")
 					end
 					local current_unsafe_value = unsafe[key]
-					return property_def.get(current_unsafe_value)
+					local safe_v = property_def.get(current_unsafe_value)
+					__buildat_sandbox_debug_check_value(safe_v)
+					return safe_v
 				end
 			end
 			if def.instance then
@@ -147,6 +151,7 @@ function M.wrap_class(type_name, def)
 		if def.safe_constructor then
 			def.safe_constructor(safe_instance)
 		end
+		__buildat_sandbox_debug_check_value(safe_instance)
 		return safe_instance
 	end
 	class_meta.__call = function(_, ...)

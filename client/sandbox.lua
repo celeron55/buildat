@@ -77,6 +77,17 @@ end
 -- Sandbox environment debugging
 --
 
+-- Bindings for debug or safety checks (override function)
+local __buildat_sandbox_debug_check_value_subs = {}
+function __buildat_sandbox_debug_check_value_sub(f)
+	table.insert(__buildat_sandbox_debug_check_value_subs, f)
+end
+function __buildat_sandbox_debug_check_value(value)
+	for _, f in ipairs(__buildat_sandbox_debug_check_value_subs) do
+		f(value)
+	end
+end
+
 -- For debugging purposes. Used by extensions/sandbox_test.
 __buildat_latest_sandbox_global_wrapper_number = 0 -- Incremented every time
 __buildat_latest_sandbox_global_wrapper = nil
