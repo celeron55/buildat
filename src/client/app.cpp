@@ -280,7 +280,7 @@ struct CApp: public App, public magic::Application
 
 		if(g_client_config.boot_to_menu){
 			ss_ extname = g_client_config.menu_extension_name;
-			ss_ script = ss_()+
+			ss_ script = ss_() +
 					"local m = require('buildat/extension/"+extname+"')\n"
 					"if type(m) ~= 'table' then\n"
 					"    error('Failed to load extension "+extname+"')\n"
@@ -329,7 +329,7 @@ struct CApp: public App, public magic::Application
 		}
 		if(key == Urho3D::KEY_F10){
 			ss_ extname = "sandbox_test";
-			ss_ script = ss_()+
+			ss_ script = ss_() +
 					"local m = require('buildat/extension/"+extname+"')\n"
 					"if type(m) ~= 'table' then\n"
 					"    error('Failed to load extension "+extname+"')\n"

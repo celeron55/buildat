@@ -12,3 +12,4 @@ assert(global_foo == "bar")
 -- This too
 assert(buildat.is_in_sandbox)
 
+-- vim: set noet ts=4 sw=4:

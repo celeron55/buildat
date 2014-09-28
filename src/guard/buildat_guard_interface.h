@@ -13,3 +13,4 @@ extern "C" {
 	extern void buildat_guard_enable(int enable);
 	extern void buildat_guard_clear_paths(void);
 }
+// vim: set noet ts=4 sw=4:

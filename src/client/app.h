@@ -58,6 +58,6 @@ namespace app
 				const ss_ &file_hash, const ss_ &cached_path) = 0;
 	};
 
-	App* createApp(Urho3D::Context *context, const Options &options=Options());
+	App* createApp(Urho3D::Context *context, const Options &options = Options());
 }
 // vim: set noet ts=4 sw=4:
