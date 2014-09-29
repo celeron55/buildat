@@ -2,10 +2,11 @@ Buildat conventions
 ===================
 C++ Coding style
 ----------------
-Look at the code. It is perfect and will be kept perfect. Requests to fix coding
-style are not to be taken personally by the one requesting, nor the one being
-requested to fix his style. If something is found to be missing from this
-document, such additions shall be made.
+Using the correct coding style is important. If you are asked to fix your style
+to folow the one defined here in every detail, do it carefully.
+
+If something is found to be missing from this document, such additions shall be
+made.
 
 util/codestyle.sh:
 Always run util/codestyle.sh before committing. It handles most whitespace
@@ -71,19 +72,23 @@ Directory structure
 │   ├── impl    << Interface implementations
 │   ├── interface << Interface available to modules
 │   └── server  << Server-specific code
-├── test        << All kinds of stuff for testing
+├── games       << Games that can be run using buildat_server -m <path>
 └── util        << Miscellaneous development utilities
 
 Commit messages
 ---------------
+Commit messages must be formatted in the following way:
+
 In present tense. Prepend a location to the message where possible. When adding
 something, the "add" verb should be left out. Fine enough examples:
+- client/sandbox.lua: Fix string concatenation when creating an error message
 - interface::Server::check_module
 - doc: conventions.txt, todo.txt
-- Bind a socket but don't listen to it yet
 - Remove Module::test_add
 - client, 3rdparty/c55lib: Command-line parameters
 - 3rdparty/cereal
+- client: Disable Urho3D log file
+- extensions/__menu: Fix UI warnings
 
 Urho3D
 ------
