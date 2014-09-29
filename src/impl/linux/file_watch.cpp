@@ -34,7 +34,7 @@ struct CFileWatch: FileWatch
 				throw Exception(ss_()+"inotify_add_watch() failed: "+
 						strerror(errno)+" (path="+path+")");
 			}
-			log_v(MODULE, "Watching path \"%s\" (inotify fd=%i)", cs(path), m_fd);
+			log_d(MODULE, "Watching path \"%s\" (inotify fd=%i)", cs(path), m_fd);
 			m_watch_paths[r] = path;
 		}
 	}
@@ -159,7 +159,7 @@ struct CMultiFileWatch: MultiFileWatch
 		for(auto &pair : m_watch){
 			sp_<WatchThing> &watch = pair.second;
 			if(watch->path == path){
-				log_v(MODULE, "Adding callback to path \"%s\" (inotify fd=%i)",
+				log_d(MODULE, "Adding callback to path \"%s\" (inotify fd=%i)",
 						cs(path), pair.first);
 				watch->cbs.push_back(cb);
 				return;
@@ -172,7 +172,7 @@ struct CMultiFileWatch: MultiFileWatch
 			throw Exception(ss_()+"inotify_add_watch() failed: "+
 					strerror(errno)+" (path="+path+")");
 		}
-		log_v(MODULE, "Watching path \"%s\" (inotify fd=%i)", cs(path), m_fd);
+		log_d(MODULE, "Watching path \"%s\" (inotify fd=%i)", cs(path), m_fd);
 		m_watch[r] = sp_<WatchThing>(new WatchThing(path, {cb}));
 	}
 
