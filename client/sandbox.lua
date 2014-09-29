@@ -182,7 +182,7 @@ end
 function buildat.run_script_file(name)
 	local code = __buildat_get_file_content(name)
 	if not code then
-		log:error("Failed to load script file: "+name)
+		log:error("Failed to load script file: "..name)
 		return false
 	end
 	log:info("buildat.run_script_file("..name.."): code length: "..#code)
