@@ -63,6 +63,7 @@ static sv_<ss_> list_includes(const ss_ &path, const sv_<ss_> &include_dirs)
 	return result;
 }
 
+// TODO: Use JSON metadata
 struct DepLine {
 	ss_ type;
 	ss_ value;
@@ -209,6 +210,7 @@ struct CState: public State, public interface::Server
 
 		// Build
 
+		// TODO: Use JSON metadata
 		sv_<DepLine> deps = get_deps(path+"/deps.txt");
 		ss_ extra_cxxflags;
 		ss_ extra_ldflags;

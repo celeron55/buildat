@@ -1,0 +1,11 @@
+{
+	"dependencies": [
+		{"module": "network"},
+		{"module": "client_lua"},
+		{"module": "client_data"},
+		{"module": "foobar", "optional": true}
+	],
+	"reverse_dependencies": [
+		{"module": "foobar2", "optional": true}
+	]
+}

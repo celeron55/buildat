@@ -1,8 +1,9 @@
+#include "core/log.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/fs.h"
 #include "interface/event.h"
-#include "core/log.h"
+#include "loader/api.h"
 
 using interface::Event;
 
@@ -44,36 +45,16 @@ struct Module: public interface::Module
 
 	void on_load_modules()
 	{
-		ss_ builtin = m_server->get_builtin_modules_path();
-		ss_ current = m_server->get_modules_path();
-
-		sv_<std::pair<ss_, ss_>> load_list = {
-			{builtin, "network"},
-			{builtin, "client_file"},
-			{builtin, "client_lua"},
-			{builtin, "client_data"},
-			{current, "test1"},
-			//{current, "test2"},
-			//{current, "minigame"},
-		};
-		for(auto &pair : load_list){
-			const ss_ &name = pair.second;
-			const ss_ &path = pair.first+"/"+pair.second;
-			bool ok = m_server->load_module(name, path);
-			if(!ok){
-				m_shutdown_reason = ss_()+"Error loading module "+name;
-				m_server->shutdown(1);
-				break;
-			}
+		bool ok = m_server->load_module("loader", m_server->get_builtin_modules_path()+"/loader");
+		if(!ok){
+			m_shutdown_reason = ss_()+"Error loading builtin/loader";
+			m_server->shutdown(1);
+			return;
 		}
 
-		/*// TODO: Dependencies
-		auto list = interface::getGlobalFilesystem()->list_directory(m_server->get_modules_path());
-		for(const interface::Filesystem::Node &n : list){
-			if(n.name == "__loader")
-				continue;
-			m_server->load_module(n.name, m_server->get_modules_path()+"/"+n.name);
-		}*/
+		loader::access(m_server, [&](loader::Interface * i){
+			i->activate();
+		});
 	}
 
 	void on_module_modified(const interface::ModuleModifiedEvent &event)

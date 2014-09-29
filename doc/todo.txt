@@ -28,3 +28,5 @@ Buildat TODO
 - Entity system with automated network sync
 - Support Cereal's shared pointer serialization in Lua
 - Something in uistack's global nil focus handling has broken
+- Use JSON metadata in RCCPP calls (ldflags, cxxflags)
+- Add reason to interface::Server::shutdown()

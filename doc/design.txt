@@ -56,26 +56,22 @@ Startup sequence and what the module should do:
 - "core:unload"   : Module will be unloaded immediately after event handler.
 - "core:continue" : Continue doing stuff after a reload.
 
-Dependencies: deps.txt
-----------------------
-File format: One entry per line. Indentation for presentational purposes only.
-
-Module entry:
-  module:<module_name> <options>
-Extra CXXFLAGS:
-  cxxflags:<flags>
-Extra LDFLAGS:
-  ldflags:<flags>
-
-Options:
-? - Optional dependency
-r - Reverse dependency; load before the specified module
-
+Metainformation: meta.txt
+-------------------------
 Example:
-  module:network
-  module:plants ?
-  module:stuff ?r
-  ldflags:-lsasl2
+{
+	"cxxflags": "",
+	"ldflags": "-lsasl2",
+	"dependencies": [
+		{"module": "network"},
+		{"module": "plants", "optional": true},
+	],
+	"reverse_dependencies": [
+		{"module": "stuff", "optional": true},
+	],
+}
+
+Any fields can be left out. The minimum meta.txt content is an empty object {}.
 
 Extension structure
 -------------------

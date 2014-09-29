@@ -1,0 +1,5 @@
+{
+	"dependencies": [
+		{"module": "client_file"}
+	]
+}
