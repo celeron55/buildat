@@ -31,7 +31,17 @@ struct Playfield
 		size_t i = y * w + x;
 		if(i > tiles.size())
 			return;
+		if(!inside_field(x,y))
+			return;
 		tiles[i] = v;
+	}
+
+	bool inside_field(int x, int y){
+		if (x >= w || x < 0)
+			return false;
+		if (y >= h || y < 0)
+			return false;
+		return true;
 	}
 
 	template<class Archive>
@@ -164,13 +174,13 @@ struct Module: public interface::Module
 			return;
 		}
 		Player &player = it->second;
-		if(packet.data == "left")
-			player.x -= 1;
-		if(packet.data == "right")
-			player.x += 1;
 		if(packet.data == "up")
-			player.y -= 1;
+			player.x -= 1;
 		if(packet.data == "down")
+			player.x += 1;
+		if(packet.data == "left")
+			player.y -= 1;
+		if(packet.data == "right")
 			player.y += 1;
 		if(packet.data == "place"){
 			m_playfield.set(player.x, player.y,

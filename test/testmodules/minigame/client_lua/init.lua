@@ -4,90 +4,82 @@
 -- Copyright 2014 Břetislav Štec <valsiterb@gmail.com>
 local log = buildat.Logger("minigame")
 local dump = buildat.dump
+local cereal = require("buildat/extension/cereal")
+local magic = require("buildat/extension/urho3d")
 log:info("minigame/init.lua loaded")
 
-local mouse_grabbed = false
+-- 3D things
 
-local cereal = require("buildat/extension/cereal")
-local graphics = require("buildat/extension/graphics")
-local ui = require("buildat/extension/ui")
-local experimental = require("buildat/extension/experimental")
-local keyinput = require("buildat/extension/keyinput")
-local mouseinput = require("buildat/extension/mouseinput")
-local joyinput = require("buildat/extension/joyinput")
+-- NOTE: Create global variable so that it doesn't get automatically deleted
+scene = magic.Scene()
+scene:CreateComponent("Octree")
 
-local scene = graphics.Scene(graphics.Scene.SCENE_3D)
-ground = graphics.ScenePrimitive(graphics.ScenePrimitive.TYPE_PLANE, 10,10)
-ground:loadTexture("minigame/green_texture.png")
-scene:addEntity(ground)
+-- Note that naming the scene nodes is optional
+local plane_node = scene:CreateChild("Plane")
+plane_node.scale = magic.Vector3(10.0, 1.0, 10.0)
+local plane_object = plane_node:CreateComponent("StaticModel")
+plane_object.model = magic.cache:GetResource("Model", "Models/Plane.mdl")
+plane_object.material = magic.cache:GetResource("Material", "Materials/Stone.xml")
+plane_object.material:SetTexture(magic.TU_DIFFUSE,
+		magic.cache:GetResource("Texture2D", "minigame/green_texture.png"))
 
-scene:getDefaultCamera():setPosition(7,7,7)
-scene:getDefaultCamera():lookAt(graphics.Vector3(0,0,0), graphics.Vector3(0,1,0))
+local light_node = scene:CreateChild("DirectionalLight")
+light_node.direction = magic.Vector3(-0.6, -1.0, 0.8) -- The direction vector does not need to be normalized
+local light = light_node:CreateComponent("Light")
+light.lightType = magic.LIGHT_DIRECTIONAL
+light.castShadows = true
+light.shadowBias = magic.BiasParameters(0.00025, 0.5)
+light.shadowCascade = magic.CascadeParameters(10.0, 50.0, 200.0, 0.0, 0.8)
+light.brightness = 0.8
 
-local scene2d = graphics.Scene(graphics.Scene.SCENE_2D_TOPLEFT)
-scene2d:getActiveCamera():setOrthoSize(640, 480)
-local label = ui.UILabel("testmodules/minigame", 32)
-label:setPosition(120, 25)
-scene2d:addEntity(label)
+light_node = scene:CreateChild("DirectionalLight")
+light_node.direction = magic.Vector3(0.6, -1.0, -0.8) -- The direction vector does not need to be normalized
+light = light_node:CreateComponent("Light")
+light.lightType = magic.LIGHT_DIRECTIONAL
+light.brightness = 0.2
 
-local image = ui.UIImage("minigame/pink_texture.png")
-image:Resize(50, 50)
-label:setAnchorPoint(graphics.Vector3(0,0,0))
-image:setPosition(40, 25);
-scene2d:addEntity(image)
+-- Add a camera so we can look at the scene
+local camera_node = scene:CreateChild("Camera")
+camera_node:CreateComponent("Camera")
+camera_node.position = magic.Vector3(7.0, 7.0, 7.0)
+--camera_node.rotation = Quaternion(0, 0, 0.0)
+camera_node:LookAt(magic.Vector3(0, 1, 0))
+-- And this thing so the camera is shown on the screen
+local viewport = magic.Viewport:new(scene, camera_node:GetComponent("Camera"))
+magic.renderer:SetViewport(0, viewport)
 
---experimental.do_stuff(scene2d)
+-- Add some text
+local title_text = magic.ui.root:CreateChild("Text")
+title_text:SetText("minigame/init.lua")
+title_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
+title_text.horizontalAlignment = magic.HA_CENTER
+title_text.verticalAlignment = magic.VA_CENTER
+title_text:SetPosition(0, magic.ui.root.height*(-0.33))
 
---- UI ---
-
-local polybox = require("buildat/extension/polycode_sandbox")
-
-polybox.class "SomeUI" (ui.UIElement)
-function SomeUI:SomeUI()
-	log:info("SomeUI:SomeUI()")
-	ui.UIElement.UIElement(self)
-	self:Resize(100, 60)
-	self:setPosition(640-100, 0)
-
-	self.button_grab_mouse = ui.UIButton("Mouse", 100, 30)
-	self.button_grab_mouse:setPosition(0, 0)
-	self:addChild(self.button_grab_mouse)
-
-	self.button_clear_field = ui.UIButton("Clear", 100, 30)
-	self.button_clear_field:setPosition(0, 30)
-	self:addChild(self.button_clear_field)
-
-	self.button_grab_mouse:addEventListener(self, function(self, e)
-		log:info("SomeUI:on_button_grab_mouse()")
-		self.button_grab_mouse.hasFocus = false
-		if not mouse_grabbed then
-			mouse_grabbed = true
-			mouseinput.show_cursor(false)
-		end
-	end, ui.UIEvent.CLICK_EVENT)
-
-	self.button_clear_field:addEventListener(self, function(self, e)
-		log:info("SomeUI:on_button_clear_field()")
-		self.button_clear_field.hasFocus = false
-		buildat.send_packet("minigame:clear_field", "")
-	end, ui.UIEvent.CLICK_EVENT)
-end
-
-scene2d.rootEntity.processInputEvents = true
-local some_ui = SomeUI()
-log:info("some_ui="..dump(some_ui))
-scene2d:addEntity(some_ui)
-
-----------
+magic.ui:SetFocusElement(nil)
 
 local field = {}
 local players = {}
 local player_boxes = {}
 local field_boxes = {}
 
+-- Create some containers for objects
+local field_node = scene:CreateChild("Field")
+local players_node = scene:CreateChild("Players")
+
+function inside_field(x, y, w, h)
+	if x >= w or x < 0 then
+		return false
+	end
+	if y >= h or y < 0 then
+		return false
+	end
+	return true
+end
+
 buildat.sub_packet("minigame:update", function(data)
 	log:info("data="..buildat.dump(buildat.bytes(data)))
-	values = cereal.binary_input(data, {"object",
+	local values = cereal.binary_input(data, {"object",
 		{"peer", "int32_t"},
 		{"players", {"unordered_map",
 			"int32_t",
@@ -106,21 +98,38 @@ buildat.sub_packet("minigame:update", function(data)
 	--log:info("values="..dump(values))
 
 	field = values.playfield
-	log:info("field="..dump(field))
 
-	for _, box in ipairs(field_boxes) do
-		scene:removeEntity(box)
-	end
-	field_boxes = {}
 	for y=1,field.h do
 		for x=1,field.w do
-			local v = field.tiles[(y-1)*field.w + (x-1) + 1]
+			local pos = (y-1)*field.w + (x-1) + 1
+			local v = field.tiles[pos]
 			if v ~= 0 then
-				box = graphics.ScenePrimitive(graphics.ScenePrimitive.TYPE_BOX, 1,0.5*v,1)
-				box:loadTexture("minigame/green_texture.png")
-				box:setPosition(x-6, 0.25*v, y-6)
-				scene:addEntity(box)
-				table.insert(field_boxes, box)
+				if field_boxes[pos] == nil then
+					local box = field_node:CreateChild("")
+					local object = box:CreateComponent("StaticModel")
+
+					object.model = magic.cache:GetResource("Model",
+						"Models/Box.mdl")
+					assert(object.model)
+
+					object.material = magic.Material:new()
+
+					object.material:SetTechnique(0,
+					magic.cache:GetResource("Technique", "Techniques/Diff.xml"))
+
+					object.material:SetTexture(magic.TU_DIFFUSE,
+					magic.cache:GetResource("Texture2D", "minigame/green_texture.png"))
+					object.castShadows = true
+
+					field_boxes[pos] = box
+				end
+				field_boxes[pos].position = magic.Vector3(x-6, v*0.25, y-6)
+				field_boxes[pos].scale    = magic.Vector3(1.0, v*0.5, 1.0)
+			else
+				-- if v is 0, we have to remove the field box
+				if field_boxes[pos] then
+					field_boxes[pos] = nil
+				end
 			end
 		end
 	end
@@ -142,14 +151,39 @@ buildat.sub_packet("minigame:update", function(data)
 			end
 		end
 		if is_new then
-			box = graphics.ScenePrimitive(graphics.ScenePrimitive.TYPE_BOX, 0.9,0.9,0.9)
-			box:loadTexture("minigame/pink_texture.png")
-			box:setPosition(player.x-5, 0.5, player.y-5)
-			scene:addEntity(box)
+
+			-- New boxes for new players
+			local box = players_node:CreateChild("")
+
+			box.scale = magic.Vector3(0.9, 0.9, 0.9)
+
+			-- Let's make them their brand new and very original body
+			local object = box:CreateComponent("StaticModel")
+			object.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+			assert(object.model)
+
+			object.material = magic.Material:new()
+
+			-- We use this Diff.xml file to define that we want diffuse
+			-- rendering. It doesn't make much sense to define it ourselves
+			-- as it consists of quite many paremeters:
+			object.material:SetTechnique(0,
+			magic.cache:GetResource("Technique", "Techniques/Diff.xml"))
+
+			-- And load the texture from a file:
+			object.material:SetTexture(magic.TU_DIFFUSE,
+			magic.cache:GetResource("Texture2D", "minigame/pink_texture.png"))
+			object.castShadows = true
+
 			player_boxes[player.peer] = box
 		end
-		local v = field.tiles[(player.y)*field.w + (player.x) + 1] or 0
-		player_boxes[player.peer]:setPosition(player.x-5, 0.5+v*0.5, player.y-5)
+		local v = 0
+		-- Stand on top of boxes that are INISDE the playfield
+		if inside_field(player.x, player.y, field.w, field.h) then
+			v = field.tiles[(player.y)*field.w + (player.x) + 1]
+		end
+		player_boxes[player.peer].position = 
+			magic.Vector3(player.x-5, 0.45+v*0.5, player.y-5) or nil
 	end
 	for _, old_player in ipairs(old_players) do
 		local was_removed = true
@@ -160,93 +194,37 @@ buildat.sub_packet("minigame:update", function(data)
 			end
 		end
 		if was_removed then
-			scene:removeEntity(player_boxes[old_player.peer])
+			players_node:RemoveChild(player_boxes[old_player.peer])
 		end
 	end
 end)
 
-keyinput.sub(function(key, state)
-	if key == keyinput.KEY_LEFT then
-		if state == "down" then
-			buildat.send_packet("minigame:move", "left")
-		end
+function handle_keydown(event_type, event_data)
+	local key = event_data:GetInt("Key")
+	if key == magic.KEY_ESC then
+		log:info("KEY_ESC pressed")
+		buildat.disconnect()
 	end
-	if key == keyinput.KEY_RIGHT then
-		if state == "down" then
-			buildat.send_packet("minigame:move", "right")
-		end
-	end
-	if key == keyinput.KEY_UP then
-		if state == "down" then
-			buildat.send_packet("minigame:move", "up")
-		end
-	end
-	if key == keyinput.KEY_DOWN then
-		if state == "down" then
-			buildat.send_packet("minigame:move", "down")
-		end
-	end
-	if key == keyinput.KEY_SPACE then
-		if state == "down" then
-			buildat.send_packet("minigame:move", "place")
-		end
-	end
-	if key == keyinput.KEY_ESCAPE then
-		if state == "down" then
-			if mouse_grabbed then
-				mouseinput.show_cursor(true)
-				mouse_grabbed = false
-			end
-		end
-	end
-end)
 
-mouseinput.sub_down(function(button, x, y)
-	log:info("mouse down: "..button..", "..x..", "..y)
-end)
-
-mouseinput.sub_move(function(x, y)
-	if mouse_grabbed then
-		--log:info("mouse delta: "..(x-100)..", "..(y-100))
-		mouseinput.warp_cursor(100, 100)
-	else
-		--log:info("mouse move: "..x..", "..y)
+	if key == magic.KEY_UP then
+		buildat.send_packet("minigame:move", "up")
 	end
-end)
-
-local joystick_axes = {}
-
-joyinput.sub_move(function(joystick, axis, value)
-	joystick_axes[axis] = value
-end)
-
-local counter = 0
-experimental.sub_tick(function(dtime)
-	--log:info("tick: "..dtime.."s")
-	counter = counter + dtime
-	if counter > 0.2 then
-		counter = counter - 0.2
-		if joystick_axes[0] ~= nil and joystick_axes[0] > 0.5 then
-			buildat.send_packet("minigame:move","right")
-		end
-		if joystick_axes[0] ~= nil and joystick_axes[0] < -0.5 then
-			buildat.send_packet("minigame:move","left")
-		end
-		if joystick_axes[1] ~= nil and joystick_axes[1] > 0.5 then
-			buildat.send_packet("minigame:move","down")
-		end
-		if joystick_axes[1] ~= nil and joystick_axes[1] < -0.5 then
-			buildat.send_packet("minigame:move","up")
-		end
+	if key == magic.KEY_DOWN then
+		buildat.send_packet("minigame:move", "down")
 	end
-end)
-
-joyinput.sub(function(joystick, button, state)
-	if button == 0 then
-		if state == "down" then
-			buildat.send_packet("minigame:move", "place")
-		end
+	if key == magic.KEY_LEFT then
+		buildat.send_packet("minigame:move", "left")
 	end
-end)
+	if key == magic.KEY_RIGHT then
+		buildat.send_packet("minigame:move", "right")
+	end
+	if key == magic.KEY_SPACE then
+		buildat.send_packet("minigame:move", "place")
+	end
+	--if key == magic.GetScancodeFromName("c") then
+	--	buildat.send_packet("minigame:clear")
+	--end
+end
+magic.SubscribeToEvent("KeyDown", "handle_keydown")
 
 -- vim: set noet ts=4 sw=4:
