@@ -178,7 +178,15 @@ function M.define(dst, util)
 	})
 
 	util.wc("Node", {
+		class = {
+			new = function()
+				return util.wrap_instance("Node", Node:new())
+			end,
+		},
 		instance = {
+			CreateChild = util.wrap_function({"Node", "string"}, function(self, name)
+				return util.wrap_instance("Node", self:CreateChild(name))
+			end),
 			CreateComponent = util.wrap_function({"Node", "string"}, function(self, name)
 				local component = self:CreateComponent(name)
 				assert(component)
@@ -195,6 +203,9 @@ function M.define(dst, util)
 			Translate = util.wrap_function({"Node", "Vector3"}, function(self, v)
 				self:Translate(v)
 			end),
+			RemoveChild = util.wrap_function({"Node", "Node"}, function(self, v)
+				self:RemoveChild(v)
+			end),
 		},
 		properties = {
 			scale = util.simple_property(dst.Vector3),
@@ -207,15 +218,15 @@ function M.define(dst, util)
 	})
 
 	util.wc("Scene", {
+		class = {
+			new = function()
+				return util.wrap_instance("Scene", Scene:new())
+			end,
+		},
 		inherited_from_by_wrapper = dst.Node,
 		unsafe_constructor = util.wrap_function({}, function()
 			return util.wrap_instance("Scene", Scene())
 		end),
-		instance = {
-			CreateChild = util.wrap_function({"Scene", "string"}, function(self, name)
-				return util.wrap_instance("Node", self:CreateChild(name))
-			end)
-		},
 	})
 
 	util.wc("ResourceCache", {
