@@ -5,8 +5,8 @@ script_dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 header_files="$script_dir"/../src/*/*.h
 cpp_files="$script_dir"/../src/*/*.cpp
 
-header_files+=" "$(find "$script_dir"/../test/testmodules -name '*.h')
-cpp_files+=" "$(find "$script_dir"/../test/testmodules -name '*.cpp')
+header_files+=" "$(find "$script_dir"/../games -name '*.h')
+cpp_files+=" "$(find "$script_dir"/../games -name '*.cpp')
 
 header_files+=" "$(find "$script_dir"/../builtin -name '*.h')
 cpp_files+=" "$(find "$script_dir"/../builtin -name '*.cpp')
@@ -16,7 +16,7 @@ cpp_files+=" "$(find "$script_dir"/../3rdparty/c55lib -name '*.cpp')
 
 lua_files=""$(find "$script_dir"/../extensions -name '*.lua')
 lua_files+=" "$(find "$script_dir"/../client -name '*.lua')
-lua_files+=" "$(find "$script_dir"/../test/testmodules -name '*.lua')
+lua_files+=" "$(find "$script_dir"/../games -name '*.lua')
 
 cmake_files="$script_dir"/../CMakeLists.txt
 

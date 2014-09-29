@@ -158,7 +158,7 @@ struct Module: public interface::Module
 
 		network::access(m_server, [&](network::Interface * inetwork){
 			inetwork->send(event.recipient, "core:run_script",
-					"buildat.run_script_file(\"minigame/init.lua\")");
+					"buildat.run_script_file(\"main/init.lua\")");
 		});
 
 		send_update(event.recipient);
@@ -206,7 +206,7 @@ struct Module: public interface::Module
 };
 
 extern "C" {
-	EXPORT void* createModule_minigame(interface::Server *server){
+	EXPORT void* createModule_main(interface::Server *server){
 		return (void*)(new Module(server));
 	}
 }

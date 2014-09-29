@@ -61,7 +61,7 @@ Run Buildat
 Terminal 1:
 
     $ $wherever_buildat_is/Build
-    $ bin/buildat_server -m ../test/testmodules
+    $ bin/buildat_server -m ../games/minigame
 
 Terminal 2:
 
@@ -74,8 +74,8 @@ Modify something and see stuff happen
 Edit something and then restart the client (CTRL+C in terminal 2):
 
     $ cd $wherever_buildat_is
-    $ vim test/testmodules/minigame/client_lua/init.lua
-    $ vim test/testmodules/minigame/minigame.cppp
+    $ vim games/minigame/main/client_lua/init.lua
+    $ vim games/minigame/main/main.cpp
     $ vim builtin/network/network.cpp
 
 Buildat Windows How-To

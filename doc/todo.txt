@@ -3,8 +3,6 @@ Buildat TODO
 - Cache a hash of each compiled module in order not to rebuild them
   unnecessarily
 - Modules should be run in threads.
-- Implement module depencencies in test/testmodules/__loader
-	- There should probably be a builtin/loader that __loader usually wants to call
 - Ask hmmmm/kwolekr for permission to use MT's noise under the Apache 2.0
   license and if allowed, include it in interfaces
 - Design how to manage scenes in a future-proof way
@@ -14,7 +12,7 @@ Buildat TODO
 - Move self-contained library-like Lua functions from client/app.cpp to a
   reusable location so that they can be used from server-side Lua in the future
 - Update testmodules/minigame to urho3d
-- New things in deps.txt?
+- New things in meta.txt?
 	- disable_module
 	- override_module (in such a way that the module will be gotten from the
 	  server with it's original name, and with the name of the overridden
@@ -29,4 +27,3 @@ Buildat TODO
 - Support Cereal's shared pointer serialization in Lua
 - Something in uistack's global nil focus handling has broken
 - Use JSON metadata in RCCPP calls (ldflags, cxxflags)
-- Add reason to interface::Server::shutdown()

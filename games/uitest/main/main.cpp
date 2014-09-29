@@ -7,27 +7,27 @@
 
 using interface::Event;
 
-namespace uitest {
+namespace main {
 
 struct Module: public interface::Module
 {
 	interface::Server *m_server;
 
 	Module(interface::Server *server):
-		interface::Module("uitest"),
+		interface::Module("main"),
 		m_server(server)
 	{
-		log_v(MODULE, "uitest construct");
+		log_v(MODULE, "main construct");
 	}
 
 	~Module()
 	{
-		log_v(MODULE, "uitest destruct");
+		log_v(MODULE, "main destruct");
 	}
 
 	void init()
 	{
-		log_v(MODULE, "uitest init");
+		log_v(MODULE, "main init");
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("network:new_client"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
@@ -47,7 +47,7 @@ struct Module: public interface::Module
 
 	void on_new_client(const network::NewClient &new_client)
 	{
-		log_i(MODULE, "uitest::on_new_client: id=%zu", new_client.info.id);
+		log_i(MODULE, "main::on_new_client: id=%zu", new_client.info.id);
 	}
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
@@ -56,13 +56,13 @@ struct Module: public interface::Module
 
 		network::access(m_server, [&](network::Interface * inetwork){
 			inetwork->send(event.recipient, "core:run_script",
-					"buildat.run_script_file(\"uitest/init.lua\")");
+					"buildat.run_script_file(\"main/init.lua\")");
 		});
 	}
 };
 
 extern "C" {
-	EXPORT void* createModule_uitest(interface::Server *server){
+	EXPORT void* createModule_main(interface::Server *server){
 		return (void*)(new Module(server));
 	}
 }
