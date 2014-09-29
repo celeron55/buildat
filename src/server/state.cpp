@@ -107,6 +107,7 @@ struct CState: public State, public interface::Server
 
 	bool m_shutdown_requested = false;
 	int  m_shutdown_exit_status = 0;
+	ss_ m_shutdown_reason;
 
 	up_<rccpp::Compiler> m_compiler;
 	ss_ m_modules_path;
@@ -150,21 +151,27 @@ struct CState: public State, public interface::Server
 		}
 	}
 
-	void shutdown(int exit_status)
+	void shutdown(int exit_status, const ss_ &reason)
 	{
 		if(m_shutdown_requested && exit_status == 0){
 			// Only reset these values for exit values indicating failure
 			return;
 		}
-		log_i(MODULE, "Server shutdown requested; exit_status=%i", exit_status);
+		log_i(MODULE, "Server shutdown requested; exit_status=%i, reason=\"%s\"",
+				exit_status, cs(reason));
 		m_shutdown_requested = true;
 		m_shutdown_exit_status = exit_status;
+		m_shutdown_reason = reason;
 	}
 
-	bool is_shutdown_requested(int *exit_status = nullptr)
+	bool is_shutdown_requested(int *exit_status = nullptr, ss_ *reason = nullptr)
 	{
-		if(m_shutdown_requested && exit_status)
-			*exit_status = m_shutdown_exit_status;
+		if(m_shutdown_requested){
+			if(exit_status)
+				*exit_status = m_shutdown_exit_status;
+			if(reason)
+				*reason = m_shutdown_reason;
+		}
 		return m_shutdown_requested;
 	}
 

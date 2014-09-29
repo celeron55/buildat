@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <string.h> // strerror()
+#define MODULE "main"
 
 server::Config g_server_config;
 
@@ -117,6 +118,7 @@ int main(int argc, char *argv[])
 
 	// Main loop
 	int exit_status = 0;
+	ss_ shutdown_reason;
 	uint64_t next_tick_us = get_timeofday_us();
 	uint64_t t_per_tick = 1000 * 100;
 	set_<int> attempt_bad_fds;
@@ -214,8 +216,18 @@ int main(int argc, char *argv[])
 
 		state->handle_events();
 
-		if(state->is_shutdown_requested(&exit_status))
+		if(state->is_shutdown_requested(&exit_status, &shutdown_reason))
 			break;
+	}
+
+	// Destruct server state here
+	state.reset(nullptr);
+
+	if(shutdown_reason != ""){
+		if(exit_status != 0)
+			log_w(MODULE, "Shutdown: %s", cs(shutdown_reason));
+		else
+			log_v(MODULE, "Shutdown: %s", cs(shutdown_reason));
 	}
 
 	return exit_status;
