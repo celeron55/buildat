@@ -21,7 +21,7 @@ local plane_object = plane_node:CreateComponent("StaticModel")
 plane_object.model = magic.cache:GetResource("Model", "Models/Plane.mdl")
 plane_object.material = magic.cache:GetResource("Material", "Materials/Stone.xml")
 plane_object.material:SetTexture(magic.TU_DIFFUSE,
-		magic.cache:GetResource("Texture2D", "minigame/green_texture.png"))
+		magic.cache:GetResource("Texture2D", "main/green_texture.png"))
 
 local light_node = scene:CreateChild("DirectionalLight")
 light_node.direction = magic.Vector3(-0.6, -1.0, 0.8) -- The direction vector does not need to be normalized
@@ -118,7 +118,7 @@ buildat.sub_packet("minigame:update", function(data)
 					magic.cache:GetResource("Technique", "Techniques/Diff.xml"))
 
 					object.material:SetTexture(magic.TU_DIFFUSE,
-					magic.cache:GetResource("Texture2D", "minigame/green_texture.png"))
+					magic.cache:GetResource("Texture2D", "main/green_texture.png"))
 					object.castShadows = true
 
 					field_boxes[pos] = box
@@ -172,7 +172,7 @@ buildat.sub_packet("minigame:update", function(data)
 
 			-- And load the texture from a file:
 			object.material:SetTexture(magic.TU_DIFFUSE,
-			magic.cache:GetResource("Texture2D", "minigame/pink_texture.png"))
+			magic.cache:GetResource("Texture2D", "main/pink_texture.png"))
 			object.castShadows = true
 
 			player_boxes[player.peer] = box
