@@ -11,7 +11,6 @@ Buildat TODO
   that Lua will dictate the function/object design)
 - Move self-contained library-like Lua functions from client/app.cpp to a
   reusable location so that they can be used from server-side Lua in the future
-- Update testmodules/minigame to urho3d
 - New things in meta.txt?
 	- disable_module
 	- override_module (in such a way that the module will be gotten from the
