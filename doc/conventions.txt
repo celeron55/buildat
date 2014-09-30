@@ -3,7 +3,7 @@ Buildat conventions
 C++ Coding style
 ----------------
 Using the correct coding style is important. If you are asked to fix your style
-to folow the one defined here in every detail, do it carefully.
+to follow the one defined here in every detail, do it carefully.
 
 If something is found to be missing from this document, such additions shall be
 made.
