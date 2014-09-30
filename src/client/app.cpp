@@ -53,9 +53,41 @@ void GraphicsOptions::apply(magic::Graphics *magic_graphics)
 			vsync, triple_buffer, multisampling);
 }
 
+struct BuildatResourceRouter : public magic::ResourceRouter
+{
+	sp_<client::State> m_client;
+public:
+	BuildatResourceRouter(magic::Context *context):
+		magic::ResourceRouter(context)
+	{}
+	void set_client(sp_<client::State> client)
+	{
+		m_client = client;
+	}
+	magic::String Route(const magic::String &name)
+	{
+		if(!m_client){
+			log_w(MODULE, "Resource route access: %s (no routing)",
+					name.CString());
+			return name;
+		}
+		ss_ path = m_client->get_file_path(name.CString());
+		if(path == ""){
+			log_w(MODULE, "Resource route access: %s (assuming local file)",
+					name.CString());
+			// TODO: Check that it is in a safe path
+			return name;
+		}
+		log_w(MODULE, "Resource route access: %s -> %s",
+				name.CString(), cs(path));
+		return path.c_str();
+	}
+};
+
 struct CApp: public App, public magic::Application
 {
 	sp_<client::State> m_state;
+	magic::SharedPtr<BuildatResourceRouter> m_router;
 	magic::LuaScript *m_script;
 	lua_State *L;
 	int64_t m_last_script_tick_us;
@@ -138,6 +170,9 @@ struct CApp: public App, public magic::Application
 		// Default to auto-loading resources as they are modified
 		magic::ResourceCache *magic_cache = GetSubsystem<magic::ResourceCache>();
 		magic_cache->SetAutoReloadResources(true);
+		m_router = new BuildatResourceRouter(context_);
+		magic_cache->SetResourceRouter(
+				magic::SharedPtr<magic::ResourceRouter>(m_router));
 	}
 
 	~CApp()
@@ -147,6 +182,7 @@ struct CApp: public App, public magic::Application
 	void set_state(sp_<client::State> state)
 	{
 		m_state = state;
+		m_router->set_client(state);
 	}
 
 	int run()
@@ -224,7 +260,10 @@ struct CApp: public App, public magic::Application
 	{
 		log_v(MODULE, "file_updated_in_cache(): %s", cs(file_name));
 
-		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_file_updated_in_cache");
+		magic::ResourceCache *magic_cache = GetSubsystem<magic::ResourceCache>();
+		magic_cache->ReloadResourceWithDependencies(file_name.c_str());
+
+		/*lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_file_updated_in_cache");
 		if(lua_isnil(L, -1)){
 			lua_pop(L, 1);
 			return;
@@ -232,7 +271,7 @@ struct CApp: public App, public magic::Application
 		lua_pushlstring(L, file_name.c_str(), file_name.size());
 		lua_pushlstring(L, file_hash.c_str(), file_hash.size());
 		lua_pushlstring(L, cached_path.c_str(), cached_path.size());
-		error_logging_pcall(L, 3, 0);
+		error_logging_pcall(L, 3, 0);*/
 	}
 
 	magic::Scene* get_scene()

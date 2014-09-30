@@ -11,6 +11,7 @@ local safe_classes = dofile(buildat.extension_path("urho3d").."/safe_classes.lua
 local Safe = {}
 local Unsafe = {}
 
+--[[
 --
 -- ResourceCache support code
 --
@@ -108,6 +109,7 @@ function __buildat_file_updated_in_cache(name, hash, cached_path)
 		Unsafe.resave_file(name)
 	end
 end
+--]]
 
 --
 -- Safe interface
@@ -194,7 +196,7 @@ safe_classes.define(Safe, {
 	self_function = self_function,
 	simple_property = simple_property,
 	check_safe_resource_name = Unsafe.check_safe_resource_name,
-	resave_file = Unsafe.resave_file,
+	--resave_file = Unsafe.resave_file,
 })
 
 setmetatable(Safe, {
