@@ -7,33 +7,17 @@
 #include "interface/module.h"
 #include <functional>
 
+namespace interface
+{
+	struct ModuleInfo;
+};
+
 namespace loader
 {
-	struct ModuleDependency
-	{
-		ss_ module;
-		bool optional = false;
-	};
-
-	struct ModuleMeta
-	{
-		ss_ cxxflags;
-		ss_ ldflags;
-		sv_<ModuleDependency> dependencies;
-		sv_<ModuleDependency> reverse_dependencies;
-	};
-
-	struct ModuleInfo
-	{
-		ss_ name;
-		ss_ path;
-		ModuleMeta meta;
-	};
-
 	struct Interface
 	{
 		virtual void activate() = 0;
-		virtual ModuleInfo* get_module_info(const ss_ &name) = 0;
+		virtual interface::ModuleInfo* get_module_info(const ss_ &name) = 0;
 	};
 
 	inline bool access(interface::Server *server,

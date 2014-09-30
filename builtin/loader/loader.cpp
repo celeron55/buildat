@@ -7,34 +7,35 @@
 #include "interface/server.h"
 #include "interface/fs.h"
 #include "interface/event.h"
+#include "interface/module_info.h"
 #include <fstream>
 
 using interface::Event;
 
 namespace loader {
 
-static ModuleDependency load_module_dependency(const json::Value &v)
+static interface::ModuleDependency load_module_dependency(const json::Value &v)
 {
-	ModuleDependency r;
+	interface::ModuleDependency r;
 	r.module = v.get("module").as_string();
 	r.optional = v.get("optional").as_boolean();
 	return r;
 }
 
-static ModuleMeta load_module_meta(const json::Value &v)
+static interface::ModuleMeta load_module_meta(const json::Value &v)
 {
-	ModuleMeta r;
+	interface::ModuleMeta r;
 	r.cxxflags = v.get("cxxflags").as_string();
 	r.ldflags = v.get("ldflags").as_string();
 	const json::Value &deps_v = v.get("dependencies");
 	for(unsigned int i = 0; i < deps_v.size(); i++){
 		const json::Value &dep_v = deps_v.at(i);
-		ModuleDependency dep = load_module_dependency(deps_v.at(i));
+		interface::ModuleDependency dep = load_module_dependency(deps_v.at(i));
 		r.dependencies.push_back(dep);
 	}
 	const json::Value &rev_deps_v = v.get("reverse_dependencies");
 	for(unsigned int i = 0; i < rev_deps_v.size(); i++){
-		ModuleDependency dep = load_module_dependency(rev_deps_v.at(i));
+		interface::ModuleDependency dep = load_module_dependency(rev_deps_v.at(i));
 		r.reverse_dependencies.push_back(dep);
 	}
 	return r;
@@ -56,7 +57,7 @@ struct ResolveState
 	// The previous vector as a set
 	set_<ss_> m_promised_modules;
 	// Reverse dependencies to each module (listed in a forward way)
-	sm_<ss_, sv_<ModuleDependency>> m_reverse_dependencies;
+	sm_<ss_, sv_<interface::ModuleDependency>> m_reverse_dependencies;
 
 	ResolveState(Interface *loader):
 		m_loader(loader)
@@ -90,7 +91,7 @@ struct ResolveState
 			return true;
 		log_d(MODULE, "require_module(): New requirement: \"%s\"", cs(name));
 
-		ModuleInfo *info = m_loader->get_module_info(name);
+		interface::ModuleInfo *info = m_loader->get_module_info(name);
 		if(info == nullptr){
 			if(optional){
 				log_d(MODULE, "require_module(): "
@@ -126,7 +127,7 @@ struct ResolveState
 			}
 
 			// Store dependency information
-			ModuleDependency forward_dep;
+			interface::ModuleDependency forward_dep;
 			forward_dep = dep; // Base dependency on reverted one
 			forward_dep.module = name; // The other module depends now on this
 			// dep.module is the other module which should depeend on this one
@@ -158,14 +159,14 @@ struct ResolveState
 				follow_optdepends ? "true" : "false");
 		// Pick a required module that isn't already loaded and which has all
 		// dependencies promised
-		ModuleInfo *info_to_load = nullptr;
+		interface::ModuleInfo *info_to_load = nullptr;
 		bool all_promised = true;
 		for(const ss_ &name : m_required_modules){
 			if(m_promised_modules.count(name))
 				continue;
 			log_d(MODULE, "step(): Checking \"%s\"", cs(name));
 			all_promised = false;
-			ModuleInfo *info = m_loader->get_module_info(name);
+			interface::ModuleInfo *info = m_loader->get_module_info(name);
 			if(!info)
 				return set_error(ss_()+"Couldn't get module info for \""+name+"\"");
 			bool deps_promised = true;
@@ -227,7 +228,7 @@ struct ResolveState
 		for(const ss_ &name : m_required_modules){
 			if(m_promised_modules.count(name))
 				continue;
-			ModuleInfo *info = m_loader->get_module_info(name);
+			interface::ModuleInfo *info = m_loader->get_module_info(name);
 			if(!info)
 				return set_error(ss_()+"Couldn't get module info for \""+name+"\"");
 			set_<ss_> missing_deps;
@@ -288,9 +289,9 @@ struct Module: public interface::Module, public loader::Interface
 				interface::ModuleModifiedEvent)
 	}
 
-	sm_<ss_, ModuleInfo> m_module_info;
+	sm_<ss_, interface::ModuleInfo> m_module_info;
 
-	ModuleInfo* get_module_info(const ss_ &name)
+	interface::ModuleInfo* get_module_info(const ss_ &name)
 	{
 		auto it = m_module_info.find(name);
 		if(it != m_module_info.end()){
@@ -320,7 +321,7 @@ struct Module: public interface::Module, public loader::Interface
 				return nullptr;
 			}
 			// meta.txt is valid; read information
-			ModuleInfo &info = m_module_info[name];
+			interface::ModuleInfo &info = m_module_info[name];
 			info.name = name;
 			info.path = module_path;
 			info.meta = load_module_meta(meta_v);
@@ -365,7 +366,7 @@ struct Module: public interface::Module, public loader::Interface
 		log_i(MODULE, "Module load order: %s", cs(dump(resolve.m_module_load_order)));
 
 		for(const ss_ &name : resolve.m_module_load_order){
-			ModuleInfo *info = get_module_info(name);
+			interface::ModuleInfo *info = get_module_info(name);
 			if(!info)
 				throw Exception(ss_()+"Couldn't get module info for \""+name+"\"");
 			if(!m_server->load_module(name, info->path)){
