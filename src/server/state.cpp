@@ -5,6 +5,7 @@
 #include "config.h"
 #include "core/log.h"
 #include "interface/module.h"
+#include "interface/module_info.h"
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/file_watch.h"
@@ -56,37 +57,9 @@ static sv_<ss_> list_includes(const ss_ &path, const sv_<ss_> &include_dirs)
 			}
 		}
 		if(!found){
-			// Not a huge problem, just log at verbose
-			log_v(MODULE, "Include file not found: %s", cs(include));
+			// Not a huge problem, just log at debug
+			log_d(MODULE, "Include file not found for watching: %s", cs(include));
 		}
-	}
-	return result;
-}
-
-// TODO: Use JSON metadata
-struct DepLine {
-	ss_ type;
-	ss_ value;
-	ss_ options;
-};
-static sv_<DepLine> get_deps(const ss_ &depfile_path)
-{
-	sv_<DepLine> result;
-	std::ifstream ifs(depfile_path);
-	if(!ifs.good())
-		return result;
-	ss_ line;
-	while(std::getline(ifs, line)){
-		c55::Strfnd f(line);
-		DepLine dep;
-		dep.type = f.next(":");
-		if(dep.type == "module"){
-			dep.value = f.next(" ");
-			dep.options = f.next("");
-		} else {
-			dep.value = f.next("");
-		}
-		result.push_back(dep);
 	}
 	return result;
 }
@@ -96,9 +69,11 @@ struct CState: public State, public interface::Server
 	struct ModuleContainer {
 		interface::Mutex mutex;
 		interface::Module *module;
-		ss_ path;
+		interface::ModuleInfo info;
 
-		ModuleContainer(interface::Module *module = NULL): module(module){}
+		ModuleContainer(interface::Module *module = NULL,
+				const interface::ModuleInfo &info = interface::ModuleInfo()):
+			module(module), info(info){}
 	};
 
 	struct SocketState {
@@ -176,15 +151,15 @@ struct CState: public State, public interface::Server
 		return m_shutdown_requested;
 	}
 
-	bool load_module(const ss_ &module_name, const ss_ &path)
+	bool load_module(const interface::ModuleInfo &info)
 	{
 		interface::MutexScope ms(m_modules_mutex);
 
-		log_i(MODULE, "Loading module %s from %s", cs(module_name), cs(path));
+		log_i(MODULE, "Loading module %s from %s", cs(info.name), cs(info.path));
 
 		ss_ build_dst = g_server_config.rccpp_build_path +
-				"/"+module_name+".so";
-		ss_ init_cpp_path = path+"/"+module_name+".cpp";
+				"/"+info.name+".so";
+		ss_ init_cpp_path = info.path+"/"+info.name+".cpp";
 
 		// Set up file watch
 
@@ -195,77 +170,77 @@ struct CState: public State, public interface::Server
 		log_v(MODULE, "Includes: %s", cs(dump(includes)));
 		files_to_watch.insert(files_to_watch.end(), includes.begin(), includes.end());
 
-		if(m_module_file_watches.count(module_name) == 0){
-			m_module_file_watches[module_name] = sp_<interface::FileWatch>(
+		if(m_module_file_watches.count(info.name) == 0){
+			m_module_file_watches[info.name] = sp_<interface::FileWatch>(
 					interface::createFileWatch(files_to_watch,
-					[this, module_name, path]()
+					[this, info]()
 			{
 				log_i(MODULE, "Module modified: %s: %s",
-						cs(module_name), cs(path));
+						cs(info.name), cs(info.path));
 				emit_event(Event("core:module_modified",
-						new interface::ModuleModifiedEvent(module_name, path)));
+						new interface::ModuleModifiedEvent(info.name, info.path)));
 				handle_events();
 			}));
 		}
 
 		// Build
 
-		// TODO: Use JSON metadata
-		sv_<DepLine> deps = get_deps(path+"/deps.txt");
-		ss_ extra_cxxflags;
-		ss_ extra_ldflags;
-		for(const DepLine &dep : deps){
-			if(dep.type == "cxxflags")
-				extra_cxxflags += dep.value+" ";
-			if(dep.type == "ldflags")
-				extra_ldflags += dep.value+" ";
-		}
-		log_v(MODULE, "extra_cxxflags: %s", cs(extra_cxxflags));
-		log_v(MODULE, "extra_ldflags: %s", cs(extra_ldflags));
+		ss_ extra_cxxflags = info.meta.cxxflags;
+		ss_ extra_ldflags = info.meta.ldflags;
+		log_d(MODULE, "extra_cxxflags: %s", cs(extra_cxxflags));
+		log_d(MODULE, "extra_ldflags: %s", cs(extra_ldflags));
 
 		m_compiler->include_directories.push_back(m_modules_path);
-		bool build_ok = m_compiler->build(module_name, init_cpp_path, build_dst,
+		bool build_ok = m_compiler->build(info.name, init_cpp_path, build_dst,
 				extra_cxxflags, extra_ldflags);
 		m_compiler->include_directories.pop_back();
 
 		if(!build_ok){
-			log_w(MODULE, "Failed to build module %s", cs(module_name));
+			log_w(MODULE, "Failed to build module %s", cs(info.name));
 			return false;
 		}
 
 		// Construct instance
 
 		interface::Module *m = static_cast<interface::Module*>(
-				m_compiler->construct(module_name.c_str(), this));
+				m_compiler->construct(info.name.c_str(), this));
 		if(m == nullptr){
 			log_w(MODULE, "Failed to construct module %s instance",
-					cs(module_name));
+					cs(info.name));
 			return false;
 		}
-		m_modules[module_name] = ModuleContainer(m);
-		m_modules[module_name].path = path;
+		m_modules[info.name] = ModuleContainer(m, info);
 
 		// Call init()
 
 		{
-			ModuleContainer &mc = m_modules[module_name];
+			ModuleContainer &mc = m_modules[info.name];
 			interface::MutexScope ms2(mc.mutex);
 			mc.module->init();
 		}
 
 		emit_event(Event("core:module_loaded",
-				new interface::ModuleLoadedEvent(module_name)));
+				new interface::ModuleLoadedEvent(info.name)));
 		return true;
 	}
 
 	void load_modules(const ss_ &path)
 	{
 		m_modules_path = path;
-		ss_ first_module_path = path+"/__loader";
-		load_module("__loader", first_module_path);
+
+		interface::ModuleInfo info;
+		info.name = "__loader";
+		info.path = path+"/"+info.name;
+
+		if(!load_module(info)){
+			shutdown(1, "Failed to load __loader module");
+			return;
+		}
+
 		// Allow loader to load other modules
 		emit_event(Event("core:load_modules"));
 		handle_events();
+
 		// Now that everyone is listening, we can fire the start event
 		emit_event(Event("core:start"));
 		handle_events();
@@ -284,15 +259,32 @@ struct CState: public State, public interface::Server
 		m_unloads_requested.insert(module_name);
 	}
 
-	void reload_module(const ss_ &module_name, const ss_ &path)
+	void reload_module(const interface::ModuleInfo &info)
 	{
-		log_i(MODULE, "reload_module(%s)", cs(module_name));
+		log_i(MODULE, "reload_module(%s)", cs(info.name));
 		{
 			interface::MutexScope ms(m_modules_mutex);
-			unload_module_u(module_name);
+			unload_module_u(info.name);
 		}
-		load_module(module_name, path);
+		load_module(info);
 		// Send core::continue directly to module
+		{
+			interface::MutexScope ms(m_modules_mutex);
+			auto it = m_modules.find(info.name);
+			if(it == m_modules.end()){
+				log_w(MODULE, "reload_module: Module not found: %s",
+						cs(info.name));
+				return;
+			}
+			ModuleContainer *mc = &it->second;
+			interface::MutexScope mc_ms(mc->mutex);
+			mc->module->event(Event::t("core:continue"), nullptr);
+		}
+	}
+
+	void reload_module(const ss_ &module_name)
+	{
+		interface::ModuleInfo info;
 		{
 			interface::MutexScope ms(m_modules_mutex);
 			auto it = m_modules.find(module_name);
@@ -302,9 +294,9 @@ struct CState: public State, public interface::Server
 				return;
 			}
 			ModuleContainer *mc = &it->second;
-			interface::MutexScope mc_ms(mc->mutex);
-			mc->module->event(Event::t("core:continue"), nullptr);
+			info = mc->info;
 		}
+		reload_module(info);
 	}
 
 	// Direct version; internal and unsafe
@@ -366,7 +358,7 @@ struct CState: public State, public interface::Server
 		if(it == m_modules.end())
 			throw ModuleNotFoundException(ss_()+"Module not found: "+module_name);
 		ModuleContainer *mc = &it->second;
-		return mc->path;
+		return mc->info.path;
 	}
 
 	interface::Module* get_module(const ss_ &module_name)
@@ -444,7 +436,9 @@ struct CState: public State, public interface::Server
 			log_w(MODULE, "sub_event(): Already on list: %s", cs(module_name));
 			return;
 		}
-		log_v(MODULE, "sub_event(): %s subscribed to %zu", cs(module_name), type);
+		auto *evreg = interface::getGlobalEventRegistry();
+		log_v(MODULE, "sub_event(): %s subscribed to %s (%zu)",
+				cs(module_name), cs(evreg->name(type)), type);
 		sublist.push_back(mc0);
 	}
 

@@ -1,5 +1,6 @@
 #include "core/log.h"
 #include "interface/module.h"
+#include "interface/module_info.h"
 #include "interface/server.h"
 #include "interface/fs.h"
 #include "interface/event.h"
@@ -45,8 +46,11 @@ struct Module: public interface::Module
 
 	void on_load_modules()
 	{
-		bool ok = m_server->load_module("loader",
-				m_server->get_builtin_modules_path()+"/loader");
+		interface::ModuleInfo info;
+		info.name = "loader";
+		info.path = m_server->get_builtin_modules_path()+"/"+info.name;
+
+		bool ok = m_server->load_module(info);
 		if(!ok){
 			m_shutdown_reason = ss_()+"Error loading builtin/loader";
 			m_server->shutdown(1);
@@ -63,7 +67,7 @@ struct Module: public interface::Module
 		log_v(MODULE, "__loader::on_module_modified(): %s", cs(event.name));
 		if(event.name == "__loader")
 			return;
-		m_server->reload_module(event.name, event.path);
+		m_server->reload_module(event.name);
 	}
 };
 

@@ -53,7 +53,10 @@ namespace interface
 
 	struct EventRegistry
 	{
+		// Allocates new type if needed
 		virtual Event::Type type(const ss_ &name) = 0;
+		// Returns "" if type is not allocated to a name
+		virtual ss_ name(const Event::Type &type) = 0;
 	};
 
 	EventRegistry* getGlobalEventRegistry();

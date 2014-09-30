@@ -6,6 +6,7 @@
 
 namespace interface
 {
+	struct ModuleInfo;
 	struct Module;
 }
 
@@ -27,7 +28,7 @@ namespace server
 		virtual void shutdown(int exit_status = 0, const ss_ &reason = "") = 0;
 		virtual bool is_shutdown_requested(int *exit_status = nullptr,
 				ss_ *reason = nullptr) = 0;
-		virtual bool load_module(const ss_ &module_name, const ss_ &path) = 0;
+		virtual bool load_module(const interface::ModuleInfo &info) = 0;
 		virtual void load_modules(const ss_ &path) = 0;
 		virtual interface::Module* get_module(const ss_ &module_name) = 0;
 		virtual interface::Module* check_module(const ss_ &module_name) = 0;

@@ -7,6 +7,7 @@
 
 namespace interface
 {
+	struct ModuleInfo;
 	struct Module;
 
 	struct TickEvent: public interface::Event::Private {
@@ -42,9 +43,10 @@ namespace interface
 
 		virtual void shutdown(int exit_status = 0, const ss_ &reason = "") = 0;
 
-		virtual bool load_module(const ss_ &module_name, const ss_ &path) = 0;
+		virtual bool load_module(const interface::ModuleInfo &info) = 0;
 		virtual void unload_module(const ss_ &module_name) = 0;
-		virtual void reload_module(const ss_ &module_name, const ss_ &path) = 0;
+		virtual void reload_module(const interface::ModuleInfo &info) = 0;
+		virtual void reload_module(const ss_ &module_name) = 0;
 		virtual ss_ get_modules_path() = 0;
 		virtual ss_ get_builtin_modules_path() = 0;
 		virtual ss_ get_module_path(const ss_ &module_name) = 0;

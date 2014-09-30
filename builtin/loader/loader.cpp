@@ -369,7 +369,7 @@ struct Module: public interface::Module, public loader::Interface
 			interface::ModuleInfo *info = get_module_info(name);
 			if(!info)
 				throw Exception(ss_()+"Couldn't get module info for \""+name+"\"");
-			if(!m_server->load_module(name, info->path)){
+			if(!m_server->load_module(*info)){
 				m_server->shutdown(1, ss_()+"loader: Error loading module "+name);
 				return;
 			}
@@ -383,7 +383,7 @@ struct Module: public interface::Module, public loader::Interface
 		log_v(MODULE, "loader::on_module_modified(): %s", cs(event.name));
 		if(event.name == "loader")
 			return;
-		m_server->reload_module(event.name, event.path);
+		m_server->reload_module(event.name);
 	}
 
 	// Interface

@@ -22,6 +22,15 @@ struct CEventRegistry: public EventRegistry
 		m_types[name] = m_next_type++;
 		return m_next_type - 1;
 	}
+
+	ss_ name(const Event::Type &type)
+	{
+		for(auto &pair : m_types){
+			if(pair.second == type)
+				return pair.first;
+		}
+		return "";
+	}
 };
 
 EventRegistry* getGlobalEventRegistry()
