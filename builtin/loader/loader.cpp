@@ -27,13 +27,13 @@ static ModuleMeta load_module_meta(const json::Value &v)
 	r.cxxflags = v.get("cxxflags").as_string();
 	r.ldflags = v.get("ldflags").as_string();
 	const json::Value &deps_v = v.get("dependencies");
-	for(unsigned int i=0; i<deps_v.size(); i++){
+	for(unsigned int i = 0; i < deps_v.size(); i++){
 		const json::Value &dep_v = deps_v.at(i);
 		ModuleDependency dep = load_module_dependency(deps_v.at(i));
 		r.dependencies.push_back(dep);
 	}
 	const json::Value &rev_deps_v = v.get("reverse_dependencies");
-	for(unsigned int i=0; i<rev_deps_v.size(); i++){
+	for(unsigned int i = 0; i < rev_deps_v.size(); i++){
 		ModuleDependency dep = load_module_dependency(rev_deps_v.at(i));
 		r.reverse_dependencies.push_back(dep);
 	}
@@ -61,7 +61,7 @@ struct ResolveState
 	ResolveState(Interface *loader):
 		m_loader(loader)
 	{}
-	
+
 	bool set_error(const ss_ &message)
 	{
 		m_failed = true;
@@ -84,7 +84,7 @@ struct ResolveState
 
 	// On error sets m_failed, m_error_message and returns false
 	bool require_module(const ss_ &name, bool optional,
-			const ss_ &log_extra_info="")
+			const ss_ &log_extra_info = "")
 	{
 		if(m_required_modules.count(name))
 			return true;
@@ -347,14 +347,14 @@ struct Module: public interface::Module, public loader::Interface
 		}
 
 		ResolveState resolve(this);
-		
+
 		if(!resolve.require_modules(required_modules)){
 			log_w(MODULE, "Failed to resolve dependencies: %s",
 					cs(resolve.m_error_message));
 			m_server->shutdown(1, ss_()+"loader: "+resolve.m_error_message);
 			return;
 		}
-		
+
 		if(!resolve.step_through()){
 			log_w(MODULE, "Failed to resolve dependencies: %s",
 					cs(resolve.m_error_message));

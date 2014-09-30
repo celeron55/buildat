@@ -40,7 +40,7 @@ namespace interface
 	{
 		virtual ~Server(){}
 
-		virtual void shutdown(int exit_status = 0, const ss_ &reason="") = 0;
+		virtual void shutdown(int exit_status = 0, const ss_ &reason = "") = 0;
 
 		virtual bool load_module(const ss_ &module_name, const ss_ &path) = 0;
 		virtual void unload_module(const ss_ &module_name) = 0;

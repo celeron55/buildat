@@ -31,15 +31,15 @@ struct Playfield
 		size_t i = y * w + x;
 		if(i > tiles.size())
 			return;
-		if(!inside_field(x,y))
+		if(!inside_field(x, y))
 			return;
 		tiles[i] = v;
 	}
 
 	bool inside_field(int x, int y){
-		if (x >= w || x < 0)
+		if(x >= w || x < 0)
 			return false;
-		if (y >= h || y < 0)
+		if(y >= h || y < 0)
 			return false;
 		return true;
 	}

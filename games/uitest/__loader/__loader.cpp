@@ -45,7 +45,8 @@ struct Module: public interface::Module
 
 	void on_load_modules()
 	{
-		bool ok = m_server->load_module("loader", m_server->get_builtin_modules_path()+"/loader");
+		bool ok = m_server->load_module("loader",
+				m_server->get_builtin_modules_path()+"/loader");
 		if(!ok){
 			m_shutdown_reason = ss_()+"Error loading builtin/loader";
 			m_server->shutdown(1);
