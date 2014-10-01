@@ -167,7 +167,7 @@ struct CState: public State, public interface::Server
 		sv_<ss_> include_dirs = m_compiler->include_directories;
 		include_dirs.push_back(m_modules_path);
 		sv_<ss_> includes = list_includes(init_cpp_path, include_dirs);
-		log_v(MODULE, "Includes: %s", cs(dump(includes)));
+		log_d(MODULE, "Includes: %s", cs(dump(includes)));
 		files_to_watch.insert(files_to_watch.end(), includes.begin(), includes.end());
 
 		if(m_module_file_watches.count(info.name) == 0){
@@ -437,7 +437,7 @@ struct CState: public State, public interface::Server
 			return;
 		}
 		auto *evreg = interface::getGlobalEventRegistry();
-		log_v(MODULE, "sub_event(): %s subscribed to %s (%zu)",
+		log_d(MODULE, "sub_event(): %s subscribed to %s (%zu)",
 				cs(module_name), cs(evreg->name(type)), type);
 		sublist.push_back(mc0);
 	}

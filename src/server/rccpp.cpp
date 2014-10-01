@@ -86,17 +86,17 @@ struct CCompiler: public Compiler
 			const std::string &in_path, const std::string &out_path,
 			const ss_ &extra_cxxflags, const ss_ &extra_ldflags)
 	{
-		log_ni(MODULE, "Building %s: %s -> %s... ", cs(module_name), cs(in_path),
+		log_nd(MODULE, "Building %s: %s -> %s... ", cs(module_name), cs(in_path),
 				cs(out_path));
 
 		std::string out_dir = c55fs::stripFilename(out_path);
 		c55fs::CreateAllDirs(out_dir);
 
 		if(!compile(in_path, out_path, extra_cxxflags, extra_ldflags)){
-			log_i(MODULE, "Failed!");
+			log_d(MODULE, "Failed!");
 			return false;
 		}
-		log_i(MODULE, "Success!");
+		log_d(MODULE, "Success!");
 
 		void *new_module = library_load(out_path.c_str());
 		if(new_module == NULL){
