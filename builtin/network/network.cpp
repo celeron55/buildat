@@ -1,12 +1,12 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
+#include "network/api.h"
+#include "core/log.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/tcpsocket.h"
 #include "interface/packet_stream.h"
-#include "network/api.h"
-#include "core/log.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/vector.hpp>
 #include <cereal/types/tuple.hpp>

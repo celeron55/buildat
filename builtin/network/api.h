@@ -2,6 +2,8 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #pragma once
 #include "interface/event.h"
+#include "interface/server.h"
+#include "interface/module.h"
 #include <functional>
 
 namespace network
