@@ -125,123 +125,125 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	up_<server::State> state(server::createState());
-
-	state->load_modules(module_path);
-
-	// Main loop
 	int exit_status = 0;
 	ss_ shutdown_reason;
-	uint64_t next_tick_us = get_timeofday_us();
-	uint64_t t_per_tick = 1000 * 100;
-	set_<int> attempt_bad_fds;
-	int last_added_attempt_bad_fd = -42;
-	set_<int> bad_fds;
-	size_t num_consequent_valid_selects = 0;
-	while(!g_sigint_received){
-		uint64_t current_us = get_timeofday_us();
-		int64_t delay_us = next_tick_us - current_us;
-		if(delay_us < 0)
-			delay_us = 0;
 
-		struct timeval tv;
-		tv.tv_sec = 0;
-		tv.tv_usec = delay_us;
+	try {
+		up_<server::State> state(server::createState());
 
-		fd_set rfds;
-		FD_ZERO(&rfds);
-		sv_<int> sockets = state->get_sockets();
-		int fd_max = 0;
-		if(!attempt_bad_fds.empty() || !bad_fds.empty()){
-			log_w("main", "Ignoring fds %s and %s out of all %s",
-					cs(dump(attempt_bad_fds)), cs(dump(bad_fds)),
-					cs(dump(sockets)));
-		}
-		for(int fd : sockets){
-			if(attempt_bad_fds.count(fd) || bad_fds.count(fd))
-				continue;
-			FD_SET(fd, &rfds);
-			if(fd > fd_max)
-				fd_max = fd;
-		}
+		state->load_modules(module_path);
 
-		int r = select(fd_max + 1, &rfds, NULL, NULL, &tv);
-		if(r == -1){
-			if(errno == EINTR && g_sigint_received){
-				// Fine, we're quitting
-				break;
+		// Main loop
+		uint64_t next_tick_us = get_timeofday_us();
+		uint64_t t_per_tick = 1000 * 100;
+		set_<int> attempt_bad_fds;
+		int last_added_attempt_bad_fd = -42;
+		set_<int> bad_fds;
+		size_t num_consequent_valid_selects = 0;
+		while(!g_sigint_received){
+			uint64_t current_us = get_timeofday_us();
+			int64_t delay_us = next_tick_us - current_us;
+			if(delay_us < 0)
+				delay_us = 0;
+
+			struct timeval tv;
+			tv.tv_sec = 0;
+			tv.tv_usec = delay_us;
+
+			fd_set rfds;
+			FD_ZERO(&rfds);
+			sv_<int> sockets = state->get_sockets();
+			int fd_max = 0;
+			if(!attempt_bad_fds.empty() || !bad_fds.empty()){
+				log_w("main", "Ignoring fds %s and %s out of all %s",
+						cs(dump(attempt_bad_fds)), cs(dump(bad_fds)),
+						cs(dump(sockets)));
 			}
-			// Error
-			num_consequent_valid_selects = 0;
-			log_w("main", "select() returned -1: %s (fds: %s)",
-					strerror(errno), cs(dump(sockets)));
-			if(errno == EBADF || errno == EINTR){
-				// These are temporary errors
-				// Try to find out which socket is doing this
-				if(attempt_bad_fds.size() == sockets.size()){
-					throw Exception("All fds are bad");
-				} else {
-					for(;;){
-						int fd = sockets[rand() % sockets.size()];
-						if(attempt_bad_fds.count(fd) == 0){
-							log_w("main", "Trying to ignore fd=%i", fd);
-							attempt_bad_fds.insert(fd);
-							last_added_attempt_bad_fd = fd;
-							break;
+			for(int fd : sockets){
+				if(attempt_bad_fds.count(fd) || bad_fds.count(fd))
+					continue;
+				FD_SET(fd, &rfds);
+				if(fd > fd_max)
+					fd_max = fd;
+			}
+
+			int r = select(fd_max + 1, &rfds, NULL, NULL, &tv);
+			if(r == -1){
+				if(errno == EINTR && g_sigint_received){
+					// Fine, we're quitting
+					break;
+				}
+				// Error
+				num_consequent_valid_selects = 0;
+				log_w("main", "select() returned -1: %s (fds: %s)",
+						strerror(errno), cs(dump(sockets)));
+				if(errno == EBADF || errno == EINTR){
+					// These are temporary errors
+					// Try to find out which socket is doing this
+					if(attempt_bad_fds.size() == sockets.size()){
+						throw Exception("All fds are bad");
+					} else {
+						for(;;){
+							int fd = sockets[rand() % sockets.size()];
+							if(attempt_bad_fds.count(fd) == 0){
+								log_w("main", "Trying to ignore fd=%i", fd);
+								attempt_bad_fds.insert(fd);
+								last_added_attempt_bad_fd = fd;
+								break;
+							}
 						}
 					}
+				} else {
+					// Don't consume 100% CPU and flood logs
+					usleep(1000 * 100);
+					return 1;
 				}
+			} else if(r == 0){
+				// Nothing happened
+				num_consequent_valid_selects++;
 			} else {
-				// Don't consume 100% CPU and flood logs
-				usleep(1000 * 100);
-				return 1;
-			}
-		} else if(r == 0){
-			// Nothing happened
-			num_consequent_valid_selects++;
-		} else {
-			// Something happened
-			num_consequent_valid_selects++;
-			for(int fd : sockets){
-				if(FD_ISSET(fd, &rfds)){
-					log_d("main", "FD_ISSET: %i", fd);
-					state->emit_socket_event(fd);
+				// Something happened
+				num_consequent_valid_selects++;
+				for(int fd : sockets){
+					if(FD_ISSET(fd, &rfds)){
+						log_d("main", "FD_ISSET: %i", fd);
+						state->emit_socket_event(fd);
+					}
 				}
 			}
-		}
 
-		if(!attempt_bad_fds.empty() && num_consequent_valid_selects > 5){
-			log_w("main", "Found bad fd: %d", last_added_attempt_bad_fd);
-			bad_fds.insert(last_added_attempt_bad_fd);
-			attempt_bad_fds.clear();
-		}
-
-		if(current_us >= next_tick_us){
-			next_tick_us += t_per_tick;
-			if(next_tick_us < current_us - 1000 * 1000){
-				log_w("main", "Skipping %zuus", current_us - next_tick_us);
-				next_tick_us = current_us;
+			if(!attempt_bad_fds.empty() && num_consequent_valid_selects > 5){
+				log_w("main", "Found bad fd: %d", last_added_attempt_bad_fd);
+				bad_fds.insert(last_added_attempt_bad_fd);
+				attempt_bad_fds.clear();
 			}
-			interface::Event event("core:tick");
-			event.p.reset(new interface::TickEvent(1e6 / t_per_tick));
-			state->emit_event(std::move(event));
+
+			if(current_us >= next_tick_us){
+				next_tick_us += t_per_tick;
+				if(next_tick_us < current_us - 1000 * 1000){
+					log_w("main", "Skipping %zuus", current_us - next_tick_us);
+					next_tick_us = current_us;
+				}
+				interface::Event event("core:tick");
+				event.p.reset(new interface::TickEvent(1e6 / t_per_tick));
+				state->emit_event(std::move(event));
+			}
+
+			state->handle_events();
+
+			state->access_scene([&](magic::Scene *scene){
+				magic::Context *context = scene->GetContext();
+				magic::Engine *engine = context->GetSubsystem<magic::Engine>();
+				engine->SetNextTimeStep(1e6 / t_per_tick);
+				engine->RunFrame();
+			});
+
+			if(state->is_shutdown_requested(&exit_status, &shutdown_reason))
+				break;
 		}
-
-		state->handle_events();
-
-		state->access_scene([&](magic::Scene *scene){
-			magic::Context *context = scene->GetContext();
-			magic::Engine *engine = context->GetSubsystem<magic::Engine>();
-			engine->SetNextTimeStep(1e6 / t_per_tick);
-			engine->RunFrame();
-		});
-
-		if(state->is_shutdown_requested(&exit_status, &shutdown_reason))
-			break;
+	} catch(server::ServerShutdownRequest &e){
+		log_v(MODULE, "ServerShutdownRequest: %s", e.what());
 	}
-
-	// Destruct server state here
-	state.reset(nullptr);
 
 	if(shutdown_reason != ""){
 		if(exit_status != 0)
