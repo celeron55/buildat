@@ -181,8 +181,9 @@ struct CState: public State, public interface::Server
 		}
 		m_compiler->include_directories.push_back(
 				g_server_config.urho3d_path+"/Build/Engine"); // Urho3D.h
-		m_compiler->libraries.push_back(
-				g_server_config.urho3d_path+"/Lib/libUrho3D.a");
+		m_compiler->library_directories.push_back(
+				g_server_config.urho3d_path+"/Lib");
+		m_compiler->libraries.push_back("-lUrho3D");
 		m_compiler->include_directories.push_back(
 				g_server_config.urho3d_path+"/Source/ThirdParty/Bullet/src");
 
