@@ -50,6 +50,12 @@ struct Module: public interface::Module, public entitysync::Interface
 
 		m_server->sub_magic_event(this, magic::E_NODEADDED,
 				Event::t("entitysync:node_added"));
+		m_server->sub_magic_event(this, magic::E_NODEREMOVED,
+				Event::t("entitysync:node_removed"));
+		m_server->sub_magic_event(this, magic::E_COMPONENTADDED,
+				Event::t("entitysync:component_added"));
+		m_server->sub_magic_event(this, magic::E_COMPONENTREMOVED,
+				Event::t("entitysync:component_removed"));
 
 		m_server->access_scene([&](magic::Scene *scene)
 		{
@@ -71,7 +77,14 @@ struct Module: public interface::Module, public entitysync::Interface
 		EVENT_VOIDN("core:start",            on_start)
 		EVENT_VOIDN("core:unload",           on_unload)
 		EVENT_VOIDN("core:continue",         on_continue)
-		EVENT_TYPEN("entitysync:node_added", on_node_added, interface::MagicEvent)
+		EVENT_TYPEN("entitysync:node_added",
+				on_node_added, interface::MagicEvent)
+		EVENT_TYPEN("entitysync:node_removed",
+				on_node_removed, interface::MagicEvent)
+		EVENT_TYPEN("entitysync:component_added",
+				on_component_added, interface::MagicEvent)
+		EVENT_TYPEN("entitysync:component_removed",
+				on_component_removed, interface::MagicEvent)
 	}
 
 	void on_start()
@@ -88,10 +101,26 @@ struct Module: public interface::Module, public entitysync::Interface
 
 	void on_node_added(const interface::MagicEvent &event)
 	{
-		log_w(MODULE, "Node added");
-		/*m_server->access_scene([&](magic::Scene *scene)
-		{
-		});*/
+		magic::VariantMap event_data = event.magic_data;
+		log_w(MODULE, "Node added: %i", event_data["NodeID"].GetInt());
+	}
+
+	void on_node_removed(const interface::MagicEvent &event)
+	{
+		magic::VariantMap event_data = event.magic_data;
+		log_w(MODULE, "Node removed: %i", event_data["NodeID"].GetInt());
+	}
+
+	void on_component_added(const interface::MagicEvent &event)
+	{
+		magic::VariantMap event_data = event.magic_data;
+		log_w(MODULE, "Component added: %i", event_data["ComponentID"].GetInt());
+	}
+
+	void on_component_removed(const interface::MagicEvent &event)
+	{
+		magic::VariantMap event_data = event.magic_data;
+		log_w(MODULE, "Component removed: %i", event_data["ComponentID"].GetInt());
 	}
 
 	// Interface

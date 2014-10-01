@@ -16,10 +16,10 @@ namespace interface
 	namespace magic = Urho3D;
 
 	struct MagicEvent: public interface::Event::Private {
-		magic::StringHash event_type;
-		magic::VariantMap event_data;
-		MagicEvent(magic::StringHash event_type, const magic::VariantMap &event_data):
-			event_type(event_type), event_data(event_data){}
+		magic::StringHash magic_type;
+		magic::VariantMap magic_data;
+		MagicEvent(magic::StringHash magic_type, const magic::VariantMap &magic_data):
+			magic_type(magic_type), magic_data(magic_data){}
 	};
 }
 // vim: set noet ts=4 sw=4:

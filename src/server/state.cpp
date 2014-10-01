@@ -21,6 +21,8 @@
 #include <Context.h>
 #include <Engine.h>
 #include <Scene.h>
+#include <SceneEvents.h>
+#include <Component.h>
 #pragma GCC diagnostic pop
 #include <iostream>
 #include <algorithm>
@@ -97,6 +99,30 @@ struct MagicEventHandler: public magic::Object
 		if(log_get_max_level() >= LOG_DEBUG){
 			log_d(MODULE, "MagicEventHandler::on_event(): %s (%zu)",
 					cs(evreg->name(m_buildat_event_type)), m_buildat_event_type);
+		}
+		// Convert pointers to IDs because the event will be queued for later
+		// handling and pointers may become invalid
+		if(event_type == magic::E_NODEADDED ||
+				event_type == magic::E_NODEREMOVED){
+			magic::Node *parent = static_cast<magic::Node*>(
+					event_data["Parent"].Get<void*>());
+			event_data["ParentID"] = parent->GetID();
+			event_data.Erase("Parent");
+			magic::Node *node = static_cast<magic::Node*>(
+					event_data["Node"].Get<void*>());
+			event_data["NodeID"] = node->GetID();
+			event_data.Erase("Node");
+		}
+		if(event_type == magic::E_COMPONENTADDED ||
+				event_type == magic::E_COMPONENTREMOVED){
+			magic::Node *node = static_cast<magic::Node*>(
+					event_data["Node"].Get<void*>());
+			event_data["NodeID"] = node->GetID();
+			event_data.Erase("Node");
+			magic::Component *c = static_cast<magic::Component*>(
+					event_data["Component"].Get<void*>());
+			event_data["ComponentID"] = c->GetID();
+			event_data.Erase("Component");
 		}
 		m_server->emit_event(m_buildat_event_type, new interface::MagicEvent(
 				event_type, event_data));
@@ -571,7 +597,7 @@ struct CState: public State, public interface::Server
 	{
 		{
 			interface::MutexScope ms(m_magic_mutex);
-			m_magic_event_handlers[event_type] = new MagicEventHandler(
+			m_magic_event_handlers[buildat_event_type] = new MagicEventHandler(
 					m_magic_context, this, event_type, buildat_event_type);
 		}
 		sub_event(module, buildat_event_type);
