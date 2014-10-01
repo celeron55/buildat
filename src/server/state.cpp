@@ -116,6 +116,17 @@ struct CState: public State, public interface::Server
 				g_server_config.interface_path+"/../../3rdparty/cereal/include");
 		m_compiler->include_directories.push_back(
 				g_server_config.share_path+"/builtin");
+		sv_<ss_> urho3d_subdirs = {
+			"Audio", "Container", "Core", "Engine", "Graphics", "Input", "IO",
+			"LuaScript", "Math", "Navigation", "Network", "Physics", "Resource",
+			"Scene", "Script", "UI", "Urho2D",
+		};
+		for(const ss_ &subdir : urho3d_subdirs){
+			m_compiler->include_directories.push_back(
+					g_server_config.urho3d_path+"/Source/Engine/"+subdir);
+		}
+		m_compiler->include_directories.push_back(
+				g_server_config.urho3d_path+"/Build/Engine"); // Urho3D.h
 	}
 	~CState()
 	{

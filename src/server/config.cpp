@@ -59,6 +59,13 @@ bool Config::check_paths()
 		fail = true;
 	}
 
+	if(!check_file_readable(urho3d_path +
+			"/Bin/CoreData/Shaders/GLSL/Basic.glsl")){
+		log_e(MODULE, "Urho3D doesn't seem to exist in urho3d_path=\"%s\"",
+				cs(urho3d_path));
+		fail = true;
+	}
+
 	auto *fs = interface::getGlobalFilesystem();
 	fs->create_directories(rccpp_build_path);
 	if(!check_file_writable(rccpp_build_path+"/write.test")){
