@@ -101,6 +101,8 @@ struct CState: public State, public interface::Server
 	magic::SharedPtr<magic::Scene> m_magic_scene;
 	// NOTE: m_magic_mutex must be locked when constructing or destructing
 	//       modules. In every other case modules must use access_scene().
+	// NOTE: If not locked, creating or destructing Urho3D Objects can cause a
+	//       crash.
 	interface::Mutex m_magic_mutex;
 
 	sm_<ss_, ModuleContainer> m_modules;
