@@ -10,6 +10,7 @@
 #include "interface/event.h"
 #include "interface/file_watch.h"
 #include "interface/fs.h"
+#include "interface/magic_event.h"
 //#include "interface/thread.h"
 #include "interface/mutex.h"
 #include <c55/string_util.h>
@@ -71,6 +72,34 @@ static sv_<ss_> list_includes(const ss_ &path, const sv_<ss_> &include_dirs)
 	}
 	return result;
 }
+
+/*struct MagicEventHandler: public magic::Object
+{
+	OBJECT(MagicEventHandler);
+
+	interface::Server *m_server;
+	interface::Event::Type m_buildat_event_type;
+
+	MagicEventHandler(magic::Context *context,
+			interface::Server *server,
+			const magic::StringHash &eventType,
+			const interface::Event::Type &buildat_event_type):
+		magic::Object(context),
+		m_server(server),
+		m_buildat_event_type(buildat_event_type)
+	{
+		SubscribeToEvent(eventType, HANDLER(MagicEventHandler, on_event));
+	}
+
+	void on_event(magic::StringHash event_type, magic::VariantMap &event_data)
+	{
+		auto *evreg = interface::getGlobalEventRegistry();
+		log_w(MODULE, "MagicEventHandler::on_event(): %s (%zu)",
+				cs(evreg->name(m_buildat_event_type)), m_buildat_event_type);
+		m_server->emit_event(m_buildat_event_type, new interface::MagicEvent(
+				event_type, event_data));
+	}
+};*/
 
 struct CState: public State, public interface::Server
 {
@@ -526,6 +555,18 @@ struct CState: public State, public interface::Server
 		m_event_queue.push_back(std::move(event));
 	}
 
+	void access_scene(std::function<void(magic::Scene*)> cb)
+	{
+		interface::MutexScope ms(m_magic_mutex);
+		cb(m_magic_scene);
+	}
+
+	void sub_magic_event(struct interface::Module *module,
+			const magic::StringHash &eventType,
+			const Event::Type &buildat_event_type)
+	{
+	}
+
 	void handle_events()
 	{
 		// Note: Locking m_modules_mutex here is not needed because no modules
@@ -650,12 +691,6 @@ struct CState: public State, public interface::Server
 			emit_event(std::move(event));
 			return;
 		} while(0);
-	}
-
-	void access_scene(std::function<void(magic::Scene*)> cb)
-	{
-		interface::MutexScope ms(m_magic_mutex);
-		cb(m_magic_scene);
 	}
 
 	void tmp_store_data(const ss_ &name, const ss_ &data)

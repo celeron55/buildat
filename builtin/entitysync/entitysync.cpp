@@ -7,6 +7,7 @@
 #include "interface/event.h"
 #include "interface/tcpsocket.h"
 #include "interface/packet_stream.h"
+#include "interface/magic_event.h"
 #include <Object.h>
 #include <Context.h>
 #include <Engine.h>
@@ -24,33 +25,9 @@ namespace magic = Urho3D;
 
 namespace entitysync {
 
-struct MagicEventHandler: public magic::Object
-{
-	OBJECT(MagicEventHandler);
-
-	const char *MODULE = "entitysync";
-
-	MagicEventHandler(magic::Context *context):
-		magic::Object(context)
-	{
-		SubscribeToEvent(magic::E_UPDATE, HANDLER(MagicEventHandler, on_update));
-		SubscribeToEvent(magic::E_NODEADDED, HANDLER(MagicEventHandler, on_node_added));
-	}
-
-	void on_update(magic::StringHash event_type, magic::VariantMap &event_data)
-	{
-	}
-
-	void on_node_added(magic::StringHash event_type, magic::VariantMap &event_data)
-	{
-		log_w(MODULE, "Node added");
-	}
-};
-
 struct Module: public interface::Module, public entitysync::Interface
 {
 	interface::Server *m_server;
-	magic::SharedPtr<MagicEventHandler> m_magic_event_handler;
 
 	Module(interface::Server *server):
 		interface::Module("entitysync"),
@@ -71,11 +48,12 @@ struct Module: public interface::Module, public entitysync::Interface
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));
 
+		/*m_server->sub_magic_event(this, magic::E_NODEADDED,
+				Event::t("entitysync:node_added"));*/
+
 		m_server->access_scene([&](magic::Scene *scene)
 		{
 			magic::Context *context = scene->GetContext();
-
-			m_magic_event_handler = new MagicEventHandler(context);
 
 			/*magic::ResourceCache* cache =
 					m_context->GetSubsystem<magic::ResourceCache>();
@@ -90,9 +68,10 @@ struct Module: public interface::Module, public entitysync::Interface
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
-		EVENT_VOIDN("core:start",           on_start)
-		EVENT_VOIDN("core:unload", on_unload)
-		EVENT_VOIDN("core:continue", on_continue)
+		EVENT_VOIDN("core:start",            on_start)
+		EVENT_VOIDN("core:unload",           on_unload)
+		EVENT_VOIDN("core:continue",         on_continue)
+		EVENT_TYPEN("entitysync:node_added", on_node_added, interface::MagicEvent)
 	}
 
 	void on_start()
@@ -107,14 +86,7 @@ struct Module: public interface::Module, public entitysync::Interface
 	{
 	}
 
-	void on_update(magic::StringHash event_type, magic::VariantMap &event_data)
-	{
-		/*m_server->access_scene([&](magic::Scene *scene)
-		{
-		});*/
-	}
-
-	void on_node_added(magic::StringHash event_type, magic::VariantMap &event_data)
+	void on_node_added(const interface::MagicEvent &event)
 	{
 		log_w(MODULE, "Node added");
 		/*m_server->access_scene([&](magic::Scene *scene)
