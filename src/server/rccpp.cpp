@@ -77,6 +77,8 @@ struct CCompiler: public Compiler
 		command += " -o"+out_path;
 		command += " "+in_path;
 
+		for(const std::string &lib : libraries) command += " "+lib;
+
 		int exit_status = interface::process::shell_exec(command);
 
 		return exit_status == 0;
