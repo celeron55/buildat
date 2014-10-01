@@ -73,7 +73,7 @@ static sv_<ss_> list_includes(const ss_ &path, const sv_<ss_> &include_dirs)
 	return result;
 }
 
-/*struct MagicEventHandler: public magic::Object
+struct MagicEventHandler: public magic::Object
 {
 	OBJECT(MagicEventHandler);
 
@@ -82,24 +82,26 @@ static sv_<ss_> list_includes(const ss_ &path, const sv_<ss_> &include_dirs)
 
 	MagicEventHandler(magic::Context *context,
 			interface::Server *server,
-			const magic::StringHash &eventType,
+			const magic::StringHash &event_type,
 			const interface::Event::Type &buildat_event_type):
 		magic::Object(context),
 		m_server(server),
 		m_buildat_event_type(buildat_event_type)
 	{
-		SubscribeToEvent(eventType, HANDLER(MagicEventHandler, on_event));
+		SubscribeToEvent(event_type, HANDLER(MagicEventHandler, on_event));
 	}
 
 	void on_event(magic::StringHash event_type, magic::VariantMap &event_data)
 	{
 		auto *evreg = interface::getGlobalEventRegistry();
-		log_w(MODULE, "MagicEventHandler::on_event(): %s (%zu)",
-				cs(evreg->name(m_buildat_event_type)), m_buildat_event_type);
+		if(log_get_max_level() >= LOG_DEBUG){
+			log_d(MODULE, "MagicEventHandler::on_event(): %s (%zu)",
+					cs(evreg->name(m_buildat_event_type)), m_buildat_event_type);
+		}
 		m_server->emit_event(m_buildat_event_type, new interface::MagicEvent(
 				event_type, event_data));
 	}
-};*/
+};
 
 struct CState: public State, public interface::Server
 {
@@ -128,11 +130,12 @@ struct CState: public State, public interface::Server
 	magic::SharedPtr<magic::Context> m_magic_context;
 	magic::SharedPtr<magic::Engine> m_magic_engine;
 	magic::SharedPtr<magic::Scene> m_magic_scene;
+	sm_<Event::Type, magic::SharedPtr<MagicEventHandler>> m_magic_event_handlers;
 	// NOTE: m_magic_mutex must be locked when constructing or destructing
 	//       modules. In every other case modules must use access_scene().
 	// NOTE: If not locked, creating or destructing Urho3D Objects can cause a
 	//       crash.
-	interface::Mutex m_magic_mutex;
+	interface::Mutex m_magic_mutex; // Lock for all of Urho3D
 
 	sm_<ss_, ModuleContainer> m_modules;
 	set_<ss_> m_unloads_requested;
@@ -563,9 +566,15 @@ struct CState: public State, public interface::Server
 	}
 
 	void sub_magic_event(struct interface::Module *module,
-			const magic::StringHash &eventType,
+			const magic::StringHash &event_type,
 			const Event::Type &buildat_event_type)
 	{
+		{
+			interface::MutexScope ms(m_magic_mutex);
+			m_magic_event_handlers[event_type] = new MagicEventHandler(
+					m_magic_context, this, event_type, buildat_event_type);
+		}
+		sub_event(module, buildat_event_type);
 	}
 
 	void handle_events()

@@ -48,8 +48,8 @@ struct Module: public interface::Module, public entitysync::Interface
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));
 
-		/*m_server->sub_magic_event(this, magic::E_NODEADDED,
-				Event::t("entitysync:node_added"));*/
+		m_server->sub_magic_event(this, magic::E_NODEADDED,
+				Event::t("entitysync:node_added"));
 
 		m_server->access_scene([&](magic::Scene *scene)
 		{
