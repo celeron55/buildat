@@ -10,8 +10,15 @@ namespace interface
 	struct Module;
 }
 
+namespace Urho3D
+{
+	class Scene;
+};
+
 namespace server
 {
+	namespace magic = Urho3D;
+
 	struct ServerShutdownRequest: public Exception {
 		ss_ msg;
 		ServerShutdownRequest(const ss_ &msg): Exception(msg){}
@@ -38,6 +45,8 @@ namespace server
 		virtual void handle_events() = 0;
 		virtual sv_<int> get_sockets() = 0;
 		virtual void emit_socket_event(int fd) = 0;
+
+		virtual void access_scene(std::function<void(magic::Scene*)> cb) = 0;
 	};
 
 	State* createState();

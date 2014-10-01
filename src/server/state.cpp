@@ -9,10 +9,18 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/file_watch.h"
+#include "interface/fs.h"
 //#include "interface/thread.h"
 #include "interface/mutex.h"
 #include <c55/string_util.h>
 #include <c55/filesys.h>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstrict-aliasing"
+#include <Variant.h>
+#include <Context.h>
+#include <Engine.h>
+#include <Scene.h>
+#pragma GCC diagnostic pop
 #include <iostream>
 #include <algorithm>
 #include <fstream>
@@ -88,9 +96,19 @@ struct CState: public State, public interface::Server
 	up_<rccpp::Compiler> m_compiler;
 	ss_ m_modules_path;
 
+	magic::SharedPtr<magic::Context> m_magic_context;
+	magic::SharedPtr<magic::Engine> m_magic_engine;
+	magic::SharedPtr<magic::Scene> m_magic_scene;
+	// NOTE: m_magic_mutex must be locked when constructing or destructing
+	//       modules. In every other case modules must use access_scene().
+	interface::Mutex m_magic_mutex;
+
 	sm_<ss_, ModuleContainer> m_modules;
 	set_<ss_> m_unloads_requested;
 	sm_<ss_, sp_<interface::FileWatch>> m_module_file_watches;
+	// TODO: Handle properly in reloads (unload by popping from top, then reload
+	//       everything until top)
+	sv_<ss_> m_module_load_order;
 	interface::Mutex m_modules_mutex;
 
 	sv_<Event> m_event_queue;
@@ -108,6 +126,8 @@ struct CState: public State, public interface::Server
 	CState():
 		m_compiler(rccpp::createCompiler(g_server_config.compiler_command))
 	{
+		// Set basic RCC++ include directories
+
 		m_compiler->include_directories.push_back(
 				g_server_config.interface_path);
 		m_compiler->include_directories.push_back(
@@ -116,6 +136,9 @@ struct CState: public State, public interface::Server
 				g_server_config.interface_path+"/../../3rdparty/cereal/include");
 		m_compiler->include_directories.push_back(
 				g_server_config.share_path+"/builtin");
+
+		// Setup Urho3D in RCC++
+
 		sv_<ss_> urho3d_subdirs = {
 			"Audio", "Container", "Core", "Engine", "Graphics", "Input", "IO",
 			"LuaScript", "Math", "Navigation", "Network", "Physics", "Resource",
@@ -129,14 +152,48 @@ struct CState: public State, public interface::Server
 				g_server_config.urho3d_path+"/Build/Engine"); // Urho3D.h
 		m_compiler->libraries.push_back(
 				g_server_config.urho3d_path+"/Lib/libUrho3D.a");
+		m_compiler->include_directories.push_back(
+				g_server_config.urho3d_path+"/Source/ThirdParty/Bullet/src");
+
+		// Initialize Urho3D
+
+		m_magic_context = new magic::Context();
+		m_magic_engine = new magic::Engine(m_magic_context);
+
+		sv_<ss_> resource_paths = {
+			g_server_config.urho3d_path+"/Bin/CoreData",
+			g_server_config.urho3d_path+"/Bin/Data",
+		};
+		auto *fs = interface::getGlobalFilesystem();
+		ss_ resource_paths_s;
+		for(const ss_ &path : resource_paths){
+			if(!resource_paths_s.empty())
+				resource_paths_s += ";";
+			resource_paths_s += fs->get_absolute_path(path);
+		}
+
+		magic::VariantMap params;
+		params["ResourcePaths"] = resource_paths_s.c_str();
+		params["Headless"] = true;
+		if(!m_magic_engine->Initialize(params))
+			throw Exception("Urho3D engine initialization failed");
+		m_magic_scene = new magic::Scene(m_magic_context);
 	}
 	~CState()
 	{
 		interface::MutexScope ms(m_modules_mutex);
-		for(auto &pair : m_modules){
-			ModuleContainer &mc = pair.second;
+		interface::MutexScope ms_magic(m_magic_mutex);
+		// Unload modules in reverse load order to make things work more
+		// predictably
+		for(auto name_it = m_module_load_order.rbegin();
+				name_it != m_module_load_order.rend(); ++name_it){
+			auto it2 = m_modules.find(*name_it);
+			if(it2 == m_modules.end())
+				continue;
+			ModuleContainer &mc = it2->second;
 			// Don't lock; it would only cause deadlocks
 			delete mc.module;
+			mc.module = nullptr;
 		}
 	}
 
@@ -167,6 +224,7 @@ struct CState: public State, public interface::Server
 	bool load_module(const interface::ModuleInfo &info)
 	{
 		interface::MutexScope ms(m_modules_mutex);
+		interface::MutexScope ms_magic(m_magic_mutex);
 
 		log_i(MODULE, "Loading module %s from %s", cs(info.name), cs(info.path));
 
@@ -223,6 +281,7 @@ struct CState: public State, public interface::Server
 			return false;
 		}
 		m_modules[info.name] = ModuleContainer(m, info);
+		m_module_load_order.push_back(info.name);
 
 		// Call init()
 
@@ -346,7 +405,10 @@ struct CState: public State, public interface::Server
 			}
 		}
 		// Delete module
-		delete mc->module;
+		{
+			interface::MutexScope ms_magic(m_magic_mutex);
+			delete mc->module;
+		}
 		m_modules.erase(module_name);
 		m_compiler->unload(module_name);
 
@@ -586,6 +648,12 @@ struct CState: public State, public interface::Server
 			emit_event(std::move(event));
 			return;
 		} while(0);
+	}
+
+	void access_scene(std::function<void(magic::Scene*)> cb)
+	{
+		interface::MutexScope ms(m_magic_mutex);
+		cb(m_magic_scene);
 	}
 
 	void tmp_store_data(const ss_ &name, const ss_ &data)

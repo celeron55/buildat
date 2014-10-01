@@ -5,8 +5,15 @@
 #include "interface/event.h"
 #include <functional>
 
+namespace Urho3D
+{
+	class Scene;
+};
+
 namespace interface
 {
+	namespace magic = Urho3D;
+
 	struct ModuleInfo;
 	struct Module;
 
@@ -61,6 +68,8 @@ namespace interface
 		void emit_event(const ss_ &name, PrivateT *p){
 			emit_event(std::move(Event(name, up_<Event::Private>(p))));
 		}
+
+		virtual void access_scene(std::function<void(magic::Scene*)> cb) = 0;
 
 		virtual void add_socket_event(int fd, const Event::Type &event_type) = 0;
 		virtual void remove_socket_event(int fd) = 0;

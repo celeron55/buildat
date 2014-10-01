@@ -7,11 +7,19 @@
 #include "interface/server.h"
 #include <c55/getopt.h>
 #include <c55/os.h>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstrict-aliasing"
+#include <Context.h>
+#include <Engine.h>
+#include <Scene.h>
+#pragma GCC diagnostic pop
 #include <iostream>
 #include <unistd.h>
 #include <signal.h>
 #include <string.h> // strerror()
 #define MODULE "main"
+
+namespace magic = Urho3D;
 
 server::Config g_server_config;
 
@@ -220,6 +228,13 @@ int main(int argc, char *argv[])
 		}
 
 		state->handle_events();
+
+		state->access_scene([&](magic::Scene *scene){
+			magic::Context *context = scene->GetContext();
+			magic::Engine *engine = context->GetSubsystem<magic::Engine>();
+			engine->SetNextTimeStep(1e6 / t_per_tick);
+			engine->RunFrame();
+		});
 
 		if(state->is_shutdown_requested(&exit_status, &shutdown_reason))
 			break;
