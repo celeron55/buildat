@@ -16,6 +16,7 @@
 #include <ResourceCache.h>
 #include <CoreEvents.h>
 #include <SceneEvents.h>
+#include <ReplicationState.h>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/vector.hpp>
 #include <cereal/types/tuple.hpp>
@@ -47,6 +48,7 @@ struct Module: public interface::Module, public entitysync::Interface
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));
+		m_server->sub_event(this, Event::t("core:tick"));
 
 		m_server->sub_magic_event(this, magic::E_NODEADDED,
 				Event::t("entitysync:node_added"));
@@ -57,7 +59,8 @@ struct Module: public interface::Module, public entitysync::Interface
 		m_server->sub_magic_event(this, magic::E_COMPONENTREMOVED,
 				Event::t("entitysync:component_removed"));
 
-		m_server->access_scene([&](magic::Scene *scene)
+		m_server->access_scene([&](magic::Scene *scene,
+				magic::SceneReplicationState &scene_state)
 		{
 			magic::Context *context = scene->GetContext();
 
@@ -77,6 +80,7 @@ struct Module: public interface::Module, public entitysync::Interface
 		EVENT_VOIDN("core:start",            on_start)
 		EVENT_VOIDN("core:unload",           on_unload)
 		EVENT_VOIDN("core:continue",         on_continue)
+		EVENT_TYPEN("core:tick",             on_tick, interface::TickEvent)
 		EVENT_TYPEN("entitysync:node_added",
 				on_node_added, interface::MagicEvent)
 		EVENT_TYPEN("entitysync:node_removed",
@@ -99,28 +103,69 @@ struct Module: public interface::Module, public entitysync::Interface
 	{
 	}
 
+	void on_tick(const interface::TickEvent &event)
+	{
+		log_d(MODULE, "entitytest::on_tick");
+		m_server->access_scene([&](magic::Scene *scene,
+				magic::SceneReplicationState &scene_state)
+		{
+			scene->PrepareNetworkUpdate();
+			magic::VectorBuffer buf;
+			/*scene->WriteLatestDataUpdate(buf);
+			//scene->WriteInitialDeltaUpdate(buf);
+			//scene->Save(buf);
+			sv_<int> v(&buf.GetBuffer().Front(),
+					(&buf.GetBuffer().Front()) + buf.GetBuffer().Size());
+			log_i(MODULE, "enttytest::on_tick: Delta update size: %zu, data=%s",
+					buf.GetBuffer().Size(), cs(dump(v)));*/
+		});
+	}
+
 	void on_node_added(const interface::MagicEvent &event)
 	{
 		magic::VariantMap event_data = event.magic_data;
-		log_w(MODULE, "Node added: %i", event_data["NodeID"].GetInt());
+		int node_id = event_data["NodeID"].GetInt();
+		log_v(MODULE, "Node added: %i", node_id);
+		m_server->access_scene([&](magic::Scene *scene,
+				magic::SceneReplicationState &scene_state)
+		{
+			magic::Node *n = scene->GetNode(node_id);
+			if(!n) // TODO: Just warn or ignore
+				throw Exception("Added node not found");
+			magic::NodeReplicationState &node_state =
+					scene_state.nodeStates_[node_id];
+			//node_state.connection_ = nullptr;
+			node_state.sceneState_ = &scene_state;
+			node_state.node_ = n;
+			n->AddReplicationState(&node_state);
+			n->PrepareNetworkUpdate();
+
+			magic::VectorBuffer buf;
+			buf.WriteNetID(node_id);
+			n->WriteInitialDeltaUpdate(buf);
+			sv_<int> v(&buf.GetBuffer().Front(),
+					(&buf.GetBuffer().Front()) + buf.GetBuffer().Size());
+			log_i(MODULE, "enttytest::on_node_added: Delta update size: %zu, data=%s",
+					buf.GetBuffer().Size(), cs(dump(v)));
+		});
 	}
 
 	void on_node_removed(const interface::MagicEvent &event)
 	{
 		magic::VariantMap event_data = event.magic_data;
-		log_w(MODULE, "Node removed: %i", event_data["NodeID"].GetInt());
+		log_v(MODULE, "Node removed: %i", event_data["NodeID"].GetInt());
 	}
 
 	void on_component_added(const interface::MagicEvent &event)
 	{
 		magic::VariantMap event_data = event.magic_data;
-		log_w(MODULE, "Component added: %i", event_data["ComponentID"].GetInt());
+		log_v(MODULE, "Component added: %i", event_data["ComponentID"].GetInt());
 	}
 
 	void on_component_removed(const interface::MagicEvent &event)
 	{
 		magic::VariantMap event_data = event.magic_data;
-		log_w(MODULE, "Component removed: %i", event_data["ComponentID"].GetInt());
+		log_v(MODULE, "Component removed: %i", event_data["ComponentID"].GetInt());
 	}
 
 	// Interface

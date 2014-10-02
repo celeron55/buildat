@@ -9,6 +9,7 @@ namespace Urho3D
 {
 	class Scene;
 	class StringHash;
+	class SceneReplicationState;
 };
 
 namespace interface
@@ -70,7 +71,8 @@ namespace interface
 			emit_event(std::move(Event(type, up_<Event::Private>(p))));
 		}
 
-		virtual void access_scene(std::function<void(magic::Scene*)> cb) = 0;
+		virtual void access_scene(std::function<void(
+				magic::Scene*, magic::SceneReplicationState&)> cb) = 0;
 		virtual void sub_magic_event(struct interface::Module *module,
 				const magic::StringHash &event_type,
 				const Event::Type &buildat_event_type) = 0;

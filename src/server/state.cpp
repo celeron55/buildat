@@ -23,6 +23,7 @@
 #include <Scene.h>
 #include <SceneEvents.h>
 #include <Component.h>
+#include <ReplicationState.h>
 #pragma GCC diagnostic pop
 #include <iostream>
 #include <algorithm>
@@ -155,6 +156,8 @@ struct CState: public State, public interface::Server
 
 	magic::SharedPtr<magic::Context> m_magic_context;
 	magic::SharedPtr<magic::Engine> m_magic_engine;
+	// Must have a longer lifetime than the scene itself
+	magic::SceneReplicationState m_magic_replication_state;
 	magic::SharedPtr<magic::Scene> m_magic_scene;
 	sm_<Event::Type, magic::SharedPtr<MagicEventHandler>> m_magic_event_handlers;
 	// NOTE: m_magic_mutex must be locked when constructing or destructing
@@ -587,10 +590,11 @@ struct CState: public State, public interface::Server
 		m_event_queue.push_back(std::move(event));
 	}
 
-	void access_scene(std::function<void(magic::Scene*)> cb)
+	void access_scene(std::function<void(magic::Scene*,
+			magic::SceneReplicationState&)> cb)
 	{
 		interface::MutexScope ms(m_magic_mutex);
-		cb(m_magic_scene);
+		cb(m_magic_scene, m_magic_replication_state);
 	}
 
 	void sub_magic_event(struct interface::Module *module,

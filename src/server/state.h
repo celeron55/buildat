@@ -13,6 +13,7 @@ namespace interface
 namespace Urho3D
 {
 	class Scene;
+	class SceneReplicationState;
 };
 
 namespace server
@@ -45,7 +46,8 @@ namespace server
 		virtual void handle_events() = 0;
 		virtual sv_<int> get_sockets() = 0;
 		virtual void emit_socket_event(int fd) = 0;
-		virtual void access_scene(std::function<void(magic::Scene*)> cb) = 0;
+		virtual void access_scene(std::function<void(
+				magic::Scene*, magic::SceneReplicationState&)> cb) = 0;
 	};
 
 	State* createState();

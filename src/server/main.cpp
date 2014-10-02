@@ -236,7 +236,9 @@ int main(int argc, char *argv[])
 
 			state->handle_events();
 
-			state->access_scene([&](magic::Scene *scene){
+			state->access_scene([&](magic::Scene *scene,
+					magic::SceneReplicationState &scene_state)
+			{
 				magic::Context *context = scene->GetContext();
 				magic::Engine *engine = context->GetSubsystem<magic::Engine>();
 				engine->SetNextTimeStep(1e6 / t_per_tick);
