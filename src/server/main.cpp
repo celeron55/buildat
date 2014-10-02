@@ -38,6 +38,7 @@ void sigint_handler(int sig)
 void signal_handler_init()
 {
 	(void)signal(SIGINT, sigint_handler);
+	(void)signal(SIGPIPE, SIG_IGN);
 }
 
 void basic_init()
