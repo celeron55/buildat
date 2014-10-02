@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "entitysync/api.h"
 #include "core/log.h"
+#include "network/api.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
@@ -23,6 +24,8 @@
 
 using interface::Event;
 namespace magic = Urho3D;
+using magic::Node;
+using magic::Scene;
 
 namespace entitysync {
 
@@ -49,7 +52,7 @@ struct Module: public interface::Module, public entitysync::Interface
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("core:tick"));
-
+#if 0
 		m_server->sub_magic_event(this, magic::E_NODEADDED,
 				Event::t("entitysync:node_added"));
 		m_server->sub_magic_event(this, magic::E_NODEREMOVED,
@@ -58,7 +61,7 @@ struct Module: public interface::Module, public entitysync::Interface
 				Event::t("entitysync:component_added"));
 		m_server->sub_magic_event(this, magic::E_COMPONENTREMOVED,
 				Event::t("entitysync:component_removed"));
-
+#endif
 		m_server->access_scene([&](magic::Scene *scene,
 				magic::SceneReplicationState &scene_state)
 		{
@@ -81,6 +84,7 @@ struct Module: public interface::Module, public entitysync::Interface
 		EVENT_VOIDN("core:unload",           on_unload)
 		EVENT_VOIDN("core:continue",         on_continue)
 		EVENT_TYPEN("core:tick",             on_tick, interface::TickEvent)
+#if 0
 		EVENT_TYPEN("entitysync:node_added",
 				on_node_added, interface::MagicEvent)
 		EVENT_TYPEN("entitysync:node_removed",
@@ -89,6 +93,7 @@ struct Module: public interface::Module, public entitysync::Interface
 				on_component_added, interface::MagicEvent)
 		EVENT_TYPEN("entitysync:component_removed",
 				on_component_removed, interface::MagicEvent)
+#endif
 	}
 
 	void on_start()
@@ -106,25 +111,112 @@ struct Module: public interface::Module, public entitysync::Interface
 	void on_tick(const interface::TickEvent &event)
 	{
 		log_d(MODULE, "entitytest::on_tick");
+		magic::VectorBuffer buf;
+
 		m_server->access_scene([&](magic::Scene *scene,
 				magic::SceneReplicationState &scene_state)
 		{
-			scene->PrepareNetworkUpdate();
-			magic::VectorBuffer buf;
-			/*scene->WriteLatestDataUpdate(buf);
-			//scene->WriteInitialDeltaUpdate(buf);
-			//scene->Save(buf);
-			sv_<int> v(&buf.GetBuffer().Front(),
-					(&buf.GetBuffer().Front()) + buf.GetBuffer().Size());
-			log_i(MODULE, "enttytest::on_tick: Delta update size: %zu, data=%s",
-					buf.GetBuffer().Size(), cs(dump(v)));*/
+			magic::HashSet<uint> nodes_to_process;
+			uint scene_id = scene->GetID();
+			nodes_to_process.Insert(scene_id);
+			sync_node(buf, scene_id, nodes_to_process, scene, scene_state);
+
+			nodes_to_process.Insert(scene_state.dirtyNodes_);
+			nodes_to_process.Erase(scene_id);
+
+			while(!nodes_to_process.Empty()){
+				uint node_id = nodes_to_process.Front();
+				sync_node(buf, node_id, nodes_to_process, scene, scene_state);
+			}
+		});
+
+		sv_<int> v(&buf.GetBuffer().Front(),
+				(&buf.GetBuffer().Front()) + buf.GetBuffer().Size());
+		log_i(MODULE, "enttytest::on_tick: Update size: %zu, data=%s",
+				buf.GetBuffer().Size(), cs(dump(v)));
+	}
+
+	void sync_node(magic::VectorBuffer &buf,
+			uint node_id, magic::HashSet<uint> &nodes_to_process,
+			magic::Scene *scene, magic::SceneReplicationState &scene_state)
+	{
+		if(!nodes_to_process.Erase(node_id))
+			return;
+		log_v(MODULE, "sync_node(): node_id=%zu", node_id);
+		auto it = scene_state.nodeStates_.Find(node_id);
+		if(it != scene_state.nodeStates_.End()){
+			// Existing node
+			magic::NodeReplicationState &node_state = it->second_;
+			Node *n = node_state.node_;
+			if(!n){
+				// Deleted
+				throw Exception("Deleted node not implemented");
+			} else {
+				sync_existing_node(buf, n, node_state, nodes_to_process,
+						scene, scene_state);
+			}
+		} else {
+			// New node
+			Node *n = scene->GetNode(node_id);
+			if(n){
+				sync_new_node(buf, n, nodes_to_process, scene, scene_state);
+			} else {
+				// Was already deleted
+				scene_state.dirtyNodes_.Erase(node_id);
+			}
+		}
+	}
+
+	void sync_existing_node(magic::VectorBuffer &buf,
+			Node *node, magic::NodeReplicationState &node_state,
+			magic::HashSet<uint> &nodes_to_process,
+			Scene *scene, magic::SceneReplicationState &scene_state)
+	{
+		log_v(MODULE, "sync_existing_node(): %zu", node->GetID());
+	}
+
+	void sync_new_node(magic::VectorBuffer &buf, Node *node,
+			magic::HashSet<uint> &nodes_to_process,
+			Scene *scene, magic::SceneReplicationState &scene_state)
+	{
+		log_v(MODULE, "sync_new_node(): %zu", node->GetID());
+		auto &deps = node->GetDependencyNodes();
+		for(auto it = deps.Begin(); it != deps.End(); ++it){
+			uint node_id = (*it)->GetID();
+			if(scene_state.dirtyNodes_.Contains(node_id))
+				sync_node(buf, node_id, nodes_to_process, scene, scene_state);
+		}
+
+		node->PrepareNetworkUpdate();
+
+		// TODO: One replication state for each client(?)
+		magic::NodeReplicationState &node_state =
+				scene_state.nodeStates_[node->GetID()];
+		//node_state.connection_ = nullptr;
+		node_state.sceneState_ = &scene_state;
+		node_state.node_ = node;
+		node->AddReplicationState(&node_state);
+
+		// TODO: User variables (see Network/Connection.cpp)
+
+		// TODO: Components
+
+		buf.WriteNetID(node->GetID());
+		node->WriteInitialDeltaUpdate(buf);
+
+		ss_ data((const char*)&buf.GetBuffer().Front(), buf.GetBuffer().Size());
+		network::access(m_server, [&](network::Interface * inetwork){
+			auto peers = inetwork->list_peers();
+			for(auto &peer : peers)
+				inetwork->send(peer, "entitysync:new_node", data);
 		});
 	}
 
+#if 0
 	void on_node_added(const interface::MagicEvent &event)
 	{
 		magic::VariantMap event_data = event.magic_data;
-		int node_id = event_data["NodeID"].GetInt();
+		uint node_id = event_data["NodeID"].GetInt();
 		log_v(MODULE, "Node added: %i", node_id);
 		m_server->access_scene([&](magic::Scene *scene,
 				magic::SceneReplicationState &scene_state)
@@ -167,6 +259,7 @@ struct Module: public interface::Module, public entitysync::Interface
 		magic::VariantMap event_data = event.magic_data;
 		log_v(MODULE, "Component removed: %i", event_data["ComponentID"].GetInt());
 	}
+#endif
 
 	// Interface
 
