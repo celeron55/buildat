@@ -52,7 +52,6 @@ ss_ buf_to_string(const magic::VectorBuffer &buf)
 struct Module: public interface::Module, public entitysync::Interface
 {
 	interface::Server *m_server;
-	// TODO: Remove old peers from this
 	// NOTE: We use pointers to SceneReplicationStates as Connection pointers in
 	//       other replication states in order to scene->CleanupConnection()
 	//       without an actual Connection object (which we don't want to use)
@@ -84,16 +83,6 @@ struct Module: public interface::Module, public entitysync::Interface
 		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("network:new_client"));
 		m_server->sub_event(this, Event::t("core:tick"));
-#if 0
-		m_server->sub_magic_event(this, magic::E_NODEADDED,
-				Event::t("entitysync:node_added"));
-		m_server->sub_magic_event(this, magic::E_NODEREMOVED,
-				Event::t("entitysync:node_removed"));
-		m_server->sub_magic_event(this, magic::E_COMPONENTADDED,
-				Event::t("entitysync:component_added"));
-		m_server->sub_magic_event(this, magic::E_COMPONENTREMOVED,
-				Event::t("entitysync:component_removed"));
-#endif
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -103,16 +92,6 @@ struct Module: public interface::Module, public entitysync::Interface
         EVENT_VOIDN("core:continue",         on_continue)
         EVENT_TYPEN("network:new_client",    on_new_client, network::NewClient)
         EVENT_TYPEN("core:tick",             on_tick, interface::TickEvent)
-#if 0
-		EVENT_TYPEN("entitysync:node_added",
-				on_node_added, interface::MagicEvent)
-		EVENT_TYPEN("entitysync:node_removed",
-				on_node_removed, interface::MagicEvent)
-		EVENT_TYPEN("entitysync:component_added",
-				on_component_added, interface::MagicEvent)
-		EVENT_TYPEN("entitysync:component_removed",
-				on_component_removed, interface::MagicEvent)
-#endif
 	}
 
 	void on_start()
@@ -239,7 +218,6 @@ struct Module: public interface::Module, public entitysync::Interface
 				sync_node(peer, node_id, nodes_to_process, scene, scene_state);
 		}
 
-		// TODO: One replication state for each client(?)
 		magic::NodeReplicationState &node_state =
 				scene_state.nodeStates_[node->GetID()];
 		node_state.connection_ = (magic::Connection*)&scene_state;
@@ -464,55 +442,6 @@ struct Module: public interface::Module, public entitysync::Interface
 				inetwork->send(peer, name, data);
 		});
 	}*/
-
-#if 0
-	void on_node_added(const interface::MagicEvent &event)
-	{
-		magic::VariantMap event_data = event.magic_data;
-		uint node_id = event_data["NodeID"].GetInt();
-		log_v(MODULE, "Node added: %i", node_id);
-		m_server->access_scene([&](magic::Scene *scene,
-				magic::SceneReplicationState &scene_state)
-		{
-			magic::Node *n = scene->GetNode(node_id);
-			if(!n) // TODO: Just warn or ignore
-				throw Exception("Added node not found");
-			magic::NodeReplicationState &node_state =
-					scene_state.nodeStates_[node_id];
-			node_state.connection_ = (magic::Connection*)&scene_state;
-			node_state.sceneState_ = &scene_state;
-			node_state.node_ = n;
-			n->AddReplicationState(&node_state);
-			n->PrepareNetworkUpdate();
-
-			magic::VectorBuffer buf;
-			buf.WriteNetID(node_id);
-			n->WriteInitialDeltaUpdate(buf);
-			sv_<int> v(&buf.GetBuffer().Front(),
-					(&buf.GetBuffer().Front()) + buf.GetBuffer().Size());
-			log_i(MODULE, "enttytest::on_node_added: Delta update size: %zu, data=%s",
-					buf.GetBuffer().Size(), cs(dump(v)));
-		});
-	}
-
-	void on_node_removed(const interface::MagicEvent &event)
-	{
-		magic::VariantMap event_data = event.magic_data;
-		log_v(MODULE, "Node removed: %i", event_data["NodeID"].GetInt());
-	}
-
-	void on_component_added(const interface::MagicEvent &event)
-	{
-		magic::VariantMap event_data = event.magic_data;
-		log_v(MODULE, "Component added: %i", event_data["ComponentID"].GetInt());
-	}
-
-	void on_component_removed(const interface::MagicEvent &event)
-	{
-		magic::VariantMap event_data = event.magic_data;
-		log_v(MODULE, "Component removed: %i", event_data["ComponentID"].GetInt());
-	}
-#endif
 
 	// Interface
 
