@@ -3,12 +3,11 @@ Buildat TODO
 - Cache a hash of each compiled module in order not to rebuild them
   unnecessarily
 - Modules should be run in threads.
-- Ask hmmmm/kwolekr for permission to use MT's noise under the Apache 2.0
-  license and if allowed, include it in interfaces
+- Include hmmmm/kwolekr's MT noise under interfaces (Simplified BSD)
 - Design how to manage scenes in a future-proof way
-- Implement easy Lua scripting on the server (Luabind or not? The purpose is to
-  allow recycling the same Lua code on the client and the server, which means
-  that Lua will dictate the function/object design)
+- Implement easy Lua scripting on the server
+	- Allow creating Lua modules on the server, for those who don't like C++
+	- Allow recycling the same Lua code on the client and the server
 - Move self-contained library-like Lua functions from client/app.cpp to a
   reusable location so that they can be used from server-side Lua in the future
 - New things in meta.txt?
@@ -24,7 +23,6 @@ Buildat TODO
   modules. Main world has worldspace_id=1. Try Polyvox.
 	- Normal block size should be definable to be a multiple of the voxel size
 		- "Continuation voxels"
-- Entity system with automated network sync
 - Support Cereal's shared pointer serialization in Lua
 - Something in uistack's global nil focus handling has broken
 - Automatically fetch and build and patch Urho3D when building buildat
