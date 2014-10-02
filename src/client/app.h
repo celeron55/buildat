@@ -6,6 +6,7 @@
 namespace Urho3D {
 	class Context;
 	class Graphics;
+	class Scene;
 }
 namespace client {
 	struct State;
@@ -56,6 +57,7 @@ namespace app
 		virtual void handle_packet(const ss_ &name, const ss_ &data) = 0;
 		virtual void file_updated_in_cache(const ss_ &file_name,
 				const ss_ &file_hash, const ss_ &cached_path) = 0;
+		virtual Urho3D::Scene* get_scene() = 0;
 	};
 
 	App* createApp(Urho3D::Context *context, const Options &options = Options());

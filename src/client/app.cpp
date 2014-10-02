@@ -235,6 +235,11 @@ struct CApp: public App, public magic::Application
 		error_logging_pcall(L, 3, 0);
 	}
 
+	magic::Scene* get_scene()
+	{
+		return m_scene;
+	}
+
 	// Non-public methods
 
 	void Start()
