@@ -370,6 +370,34 @@ struct Module: public interface::Module, public entitysync::Interface
 			}
 		}
 
+		// Handle new components
+		if(component_states.Size() != node->GetNumNetworkComponents()){
+			const magic::Vector<magic::SharedPtr<Component>>
+					&components = node->GetComponents();
+			for(uint i=0; i<components.Size(); i++){
+				Component *component = components[i];
+				if(component->GetID() >= magic::FIRST_LOCAL_ID)
+					continue;
+				auto it = component_states.Find(component->GetID());
+				if(it != component_states.End())
+					continue;
+				magic::ComponentReplicationState &component_state =
+						component_states[component->GetID()];
+				//component_state.connection_ = nullptr;
+				component_state.nodeState_ = &node_state;
+				component_state.component_ = component;
+				component->AddReplicationState(&component_state);
+
+				magic::VectorBuffer buf;
+				buf.WriteNetID(component->GetID());
+				buf.WriteStringHash(component->GetType());
+				buf.WriteNetID(component->GetID());
+				component->WriteInitialDeltaUpdate(buf);
+
+				send_to_all("entitysync:create_component", buf);
+			}
+		}
+
 		node_state.markedDirty_ = false;
 		scene_state.dirtyNodes_.Erase(node->GetID());
 	}
