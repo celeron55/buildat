@@ -93,7 +93,23 @@ struct Module: public interface::Module
 				CollisionShape *shape = n->CreateComponent<CollisionShape>();
 				shape->SetBox(Vector3::ONE);
 				body->SetMass(1.0);
-                body->SetFriction(0.75f);
+				body->SetFriction(0.75f);
+				//body->SetUseGravity(true);
+				//body->SetGravityOverride(Vector3(0.0, -1.0, 0.0));
+				StaticModel *object = n->CreateComponent<StaticModel>();
+				object->SetModel(cache->GetResource<Model>("Models/Box.mdl"));
+				object->SetMaterial(
+						cache->GetResource<Material>("Materials/Stone.xml"));
+			}
+			{
+				Node *n = scene->CreateChild("Box2");
+				n->SetPosition(Vector3(-0.4f, 8.0f, 0.0f));
+				n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
+				RigidBody *body = n->CreateComponent<RigidBody>();
+				CollisionShape *shape = n->CreateComponent<CollisionShape>();
+				shape->SetBox(Vector3::ONE);
+				body->SetMass(1.0);
+				body->SetFriction(0.75f);
 				//body->SetUseGravity(true);
 				//body->SetGravityOverride(Vector3(0.0, -1.0, 0.0));
 				StaticModel *object = n->CreateComponent<StaticModel>();
@@ -113,6 +129,9 @@ struct Module: public interface::Module
 				Node *n = scene->GetChild("Box");
 				n->SetPosition(Vector3(0.0f, 6.0f, 0.0f));
 				n->SetRotation(Quaternion(30, 60, 90));
+				Node *n2 = scene->GetChild("Box2");
+				n2->SetPosition(Vector3(-0.4f, 8.0f, 0.0f));
+				n2->SetRotation(Quaternion(30, 60, 90));
 			});
 			return;
 		}
