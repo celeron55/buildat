@@ -31,6 +31,26 @@ using magic::Component;
 
 namespace entitysync {
 
+ss_ dump(const magic::VectorBuffer &buf)
+{
+	std::ostringstream os(std::ios::binary);
+	os<<"[";
+	bool first = true;
+	for(auto it = buf.GetBuffer().Begin(); it != buf.GetBuffer().End(); ++it){
+		if(!first)
+			os<<", ";
+		first = false;
+		os<<(*it);
+	}
+	os<<"]";
+	return os.str();
+}
+
+ss_ buf_to_string(const magic::VectorBuffer &buf)
+{
+	return ss_((const char*)&buf.GetBuffer().Front(), buf.GetBuffer().Size());
+}
+
 struct Module: public interface::Module, public entitysync::Interface
 {
 	interface::Server *m_server;
@@ -140,7 +160,16 @@ struct Module: public interface::Module, public entitysync::Interface
 			return;
 		log_d(MODULE, "sync_node(): node_id=%zu", node_id);
 		auto it = scene_state.nodeStates_.Find(node_id);
-		if(it != scene_state.nodeStates_.End()){
+		if(it == scene_state.nodeStates_.End()){
+			// New node
+			Node *n = scene->GetNode(node_id);
+			if(n){
+				sync_new_node(n, nodes_to_process, scene, scene_state);
+			} else {
+				// Was already deleted
+				scene_state.dirtyNodes_.Erase(node_id);
+			}
+		} else {
 			// Existing node
 			magic::NodeReplicationState &node_state = it->second_;
 			Node *n = node_state.node_;
@@ -151,24 +180,7 @@ struct Module: public interface::Module, public entitysync::Interface
 				sync_existing_node(n, node_state, nodes_to_process,
 						scene, scene_state);
 			}
-		} else {
-			// New node
-			Node *n = scene->GetNode(node_id);
-			if(n){
-				sync_new_node(n, nodes_to_process, scene, scene_state);
-			} else {
-				// Was already deleted
-				scene_state.dirtyNodes_.Erase(node_id);
-			}
 		}
-	}
-
-	void sync_existing_node(
-			Node *node, magic::NodeReplicationState &node_state,
-			magic::HashSet<uint> &nodes_to_process,
-			Scene *scene, magic::SceneReplicationState &scene_state)
-	{
-		log_v(MODULE, "sync_existing_node(): %zu", node->GetID());
 	}
 
 	void sync_new_node(Node *node,
@@ -218,20 +230,63 @@ struct Module: public interface::Module, public entitysync::Interface
 			component->WriteInitialDeltaUpdate(buf);
 		}
 
-		sv_<int> v(&buf.GetBuffer().Front(),
-				(&buf.GetBuffer().Front()) + buf.GetBuffer().Size());
-		log_i(MODULE, "enttytest::sync_new_node: Update size: %zu, data=%s",
-				buf.GetBuffer().Size(), cs(dump(v)));
-
-		ss_ data((const char*)&buf.GetBuffer().Front(), buf.GetBuffer().Size());
-		network::access(m_server, [&](network::Interface * inetwork){
-			auto peers = inetwork->list_peers();
-			for(auto &peer : peers)
-				inetwork->send(peer, "entitysync:new_node", data);
-		});
+		send_to_all("entitysync:new_node", buf);
 
 		node_state.markedDirty_ = false;
 		scene_state.dirtyNodes_.Erase(node->GetID());
+	}
+
+	void sync_existing_node(
+			Node *node, magic::NodeReplicationState &node_state,
+			magic::HashSet<uint> &nodes_to_process,
+			Scene *scene, magic::SceneReplicationState &scene_state)
+	{
+		log_v(MODULE, "sync_existing_node(): %zu", node->GetID());
+		auto &deps = node->GetDependencyNodes();
+		for(auto it = deps.Begin(); it != deps.End(); ++it){
+			uint node_id = (*it)->GetID();
+			if(scene_state.dirtyNodes_.Contains(node_id))
+				sync_node(node_id, nodes_to_process, scene, scene_state);
+		}
+
+		// Handle changed attributes
+		if(node_state.dirtyAttributes_.Count()){
+			const magic::Vector<magic::AttributeInfo> &attributes =
+					*node->GetNetworkAttributes();
+			uint num = attributes.Size();
+			bool has_latest_data = false;
+
+			// ?
+			for(uint i = 0; i < num; i++){
+				if(node_state.dirtyAttributes_.IsSet(i) &&
+						(attributes.At(i).mode_ & magic::AM_LATESTDATA)){
+					has_latest_data = true;
+					node_state.dirtyAttributes_.Clear(i);
+				}
+			}
+
+			// ?
+			if(has_latest_data){
+				magic::VectorBuffer buf;
+
+				buf.WriteNetID(node->GetID());
+				node->WriteLatestDataUpdate(buf);
+
+				send_to_all("entitysync:latest_node_data", buf);
+			}
+		}
+	}
+
+	void send_to_all(const ss_ &name, const magic::VectorBuffer &buf)
+	{
+		log_i(MODULE, "%s: Update size: %zu, data=%s",
+				cs(name), buf.GetBuffer().Size(), cs(dump(buf)));
+		ss_ data = buf_to_string(buf);
+		network::access(m_server, [&](network::Interface * inetwork){
+			auto peers = inetwork->list_peers();
+			for(auto &peer : peers)
+				inetwork->send(peer, name, data);
+		});
 	}
 
 #if 0
