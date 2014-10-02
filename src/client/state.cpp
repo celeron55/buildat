@@ -10,11 +10,17 @@
 #include "interface/fs.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstrict-aliasing"
+#include <Scene.h>
+#include <MemoryBuffer.h>
+#pragma GCC diagnostic pop
 #include <cstring>
 #include <fstream>
 #include <deque>
 #include <sys/socket.h>
 #define MODULE "__state"
+namespace magic = Urho3D;
 
 extern client::Config g_client_config;
 
@@ -36,6 +42,7 @@ struct CState: public State
 	// In actuality the whole client application has to be recreated because
 	// otherwise unwanted Lua state remains.
 	bool m_connected = false;
+	sm_<ss_, std::function<void(const ss_&, const ss_&)>> m_packet_handlers;
 
 	CState(sp_<app::App> app):
 		m_socket(interface::createTCPSocket()),
@@ -47,6 +54,8 @@ struct CState: public State
 		auto *fs = interface::getGlobalFilesystem();
 		fs->create_directories(m_remote_cache_path);
 		fs->create_directories(m_tmp_path);
+
+		setup_packet_handlers();
 	}
 
 	void update()
@@ -148,125 +157,151 @@ struct CState: public State
 		});
 	}
 
+	void setup_packet_handlers();
+
 	void handle_packet(const ss_ &packet_name, const ss_ &data)
 	{
-		if(packet_name.substr(0, 5) != "core:"){
+		auto it = m_packet_handlers.find(packet_name);
+		if(it == m_packet_handlers.end()){
+			// Pass forward
 			m_app->handle_packet(packet_name, data);
-			return;
-		}
-
-		if(packet_name == "core:run_script"){
-			log_i(MODULE, "Asked to run script:\n----\n%s\n----", cs(data));
-			if(m_app)
-				m_app->run_script(data);
-			return;
-		}
-		if(packet_name == "core:announce_file"){
-			ss_ file_name;
-			ss_ file_hash;
-			std::istringstream is(data, std::ios::binary);
-			{
-				cereal::PortableBinaryInputArchive ar(is);
-				ar(file_name);
-				ar(file_hash);
-			}
-			m_file_hashes[file_name] = file_hash;
-			ss_ file_hash_hex = interface::sha1::hex(file_hash);
-			log_v(MODULE, "Server announces file: %s %s",
-					cs(file_hash_hex), cs(file_name));
-			// Check if we already have this file
-			ss_ path = m_remote_cache_path+"/"+file_hash_hex;
-			std::ifstream ifs(path, std::ios::binary);
-			bool cached_is_ok = false;
-			if(ifs.good()){
-				std::string content((std::istreambuf_iterator<char>(ifs)),
-						std::istreambuf_iterator<char>());
-				ss_ content_hash = interface::sha1::calculate(content);
-				if(content_hash == file_hash){
-					// We have it; no need to ask this file
-					log_i(MODULE, "%s %s: cached",
-							cs(file_hash_hex), cs(file_name));
-					cached_is_ok = true;
-				} else {
-					// Our copy is broken, re-request it
-					log_i(MODULE, "%s %s: Our copy is broken (has hash %s)",
-							cs(file_hash_hex), cs(file_name),
-							cs(interface::sha1::hex(content_hash)));
-				}
-			}
-			if(cached_is_ok){
-				// Let Lua resource wrapper know that this happened so it can update
-				// the copy made for Urho3D's resource cache
-				m_app->file_updated_in_cache(file_name, file_hash, path);
-			} else {
-				// We don't have it; request this file
-				log_i(MODULE, "%s %s: requesting",
-						cs(file_hash_hex), cs(file_name));
-				std::ostringstream os(std::ios::binary);
-				{
-					cereal::PortableBinaryOutputArchive ar(os);
-					ar(file_name);
-					ar(file_hash);
-				}
-				send_packet("core:request_file", os.str());
-				m_waiting_files.insert(file_name);
-			}
-			return;
-		}
-		if(packet_name == "core:tell_after_all_files_transferred"){
-			if(m_waiting_files.empty()){
-				send_packet("core:all_files_transferred", "");
-			} else {
-				m_tell_after_all_files_transferred_requested = true;
-			}
-			return;
-		}
-		if(packet_name == "core:file_content"){
-			ss_ file_name;
-			ss_ file_hash;
-			ss_ file_content;
-			std::istringstream is(data, std::ios::binary);
-			{
-				cereal::PortableBinaryInputArchive ar(is);
-				ar(file_name);
-				ar(file_hash);
-				ar(file_content);
-			}
-			if(m_waiting_files.count(file_name) == 0){
-				log_w(MODULE, "Received file was not requested: %s %s",
-						cs(interface::sha1::hex(file_hash)), cs(file_name));
-				return;
-			}
-			m_waiting_files.erase(file_name);
-			ss_ file_hash2 = interface::sha1::calculate(file_content);
-			if(file_hash != file_hash2){
-				log_w(MODULE, "Requested file differs in hash: \"%s\": "
-						"requested %s, actual %s", cs(file_name),
-						cs(interface::sha1::hex(file_hash)),
-						cs(interface::sha1::hex(file_hash2)));
-				return;
-			}
-			ss_ file_hash_hex = interface::sha1::hex(file_hash);
-			ss_ path = g_client_config.cache_path+"/remote/"+file_hash_hex;
-			log_i(MODULE, "Saving %s to %s", cs(file_name), cs(path));
-			std::ofstream of(path, std::ios::binary);
-			of<<file_content;
-			if(m_tell_after_all_files_transferred_requested){
-				if(m_waiting_files.empty()){
-					send_packet("core:all_files_transferred", "");
-					m_tell_after_all_files_transferred_requested = false;
-				}
-			}
-			// Let Lua resource wrapper know that this happened so it can update
-			// the copy made for Urho3D's resource cache
-			m_app->file_updated_in_cache(file_name, file_hash, path);
-			return;
-		}
-		if(packet_name == "entitysync:new_node"){
-			// TODO
+		} else {
+			// Use handler
+			auto &handler = it->second;
+			handler(packet_name, data);
 		}
 	}
 };
+
+void CState::setup_packet_handlers()
+{
+	m_packet_handlers["core:run_script"] =
+			[this](const ss_ &packet_name, const ss_ &data)
+	{
+		log_i(MODULE, "Asked to run script:\n----\n%s\n----", cs(data));
+		if(m_app)
+			m_app->run_script(data);
+	};
+
+	m_packet_handlers["core:announce_file"] =
+			[this](const ss_ &packet_name, const ss_ &data)
+	{
+		ss_ file_name;
+		ss_ file_hash;
+		std::istringstream is(data, std::ios::binary);
+		{
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(file_name);
+			ar(file_hash);
+		}
+		m_file_hashes[file_name] = file_hash;
+		ss_ file_hash_hex = interface::sha1::hex(file_hash);
+		log_v(MODULE, "Server announces file: %s %s",
+				cs(file_hash_hex), cs(file_name));
+		// Check if we already have this file
+		ss_ path = m_remote_cache_path+"/"+file_hash_hex;
+		std::ifstream ifs(path, std::ios::binary);
+		bool cached_is_ok = false;
+		if(ifs.good()){
+			std::string content((std::istreambuf_iterator<char>(ifs)),
+					std::istreambuf_iterator<char>());
+			ss_ content_hash = interface::sha1::calculate(content);
+			if(content_hash == file_hash){
+				// We have it; no need to ask this file
+				log_i(MODULE, "%s %s: cached",
+						cs(file_hash_hex), cs(file_name));
+				cached_is_ok = true;
+			} else {
+				// Our copy is broken, re-request it
+				log_i(MODULE, "%s %s: Our copy is broken (has hash %s)",
+						cs(file_hash_hex), cs(file_name),
+						cs(interface::sha1::hex(content_hash)));
+			}
+		}
+		if(cached_is_ok){
+			// Let Lua resource wrapper know that this happened so it can update
+			// the copy made for Urho3D's resource cache
+			m_app->file_updated_in_cache(file_name, file_hash, path);
+		} else {
+			// We don't have it; request this file
+			log_i(MODULE, "%s %s: requesting",
+					cs(file_hash_hex), cs(file_name));
+			std::ostringstream os(std::ios::binary);
+			{
+				cereal::PortableBinaryOutputArchive ar(os);
+				ar(file_name);
+				ar(file_hash);
+			}
+			send_packet("core:request_file", os.str());
+			m_waiting_files.insert(file_name);
+		}
+	};
+
+	m_packet_handlers["core:tell_after_all_files_transferred"] =
+			[this](const ss_ &packet_name, const ss_ &data)
+	{
+		if(m_waiting_files.empty()){
+			send_packet("core:all_files_transferred", "");
+		} else {
+			m_tell_after_all_files_transferred_requested = true;
+		}
+	};
+
+	m_packet_handlers["core:file_content"] =
+			[this](const ss_ &packet_name, const ss_ &data)
+	{
+		ss_ file_name;
+		ss_ file_hash;
+		ss_ file_content;
+		std::istringstream is(data, std::ios::binary);
+		{
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(file_name);
+			ar(file_hash);
+			ar(file_content);
+		}
+		if(m_waiting_files.count(file_name) == 0){
+			log_w(MODULE, "Received file was not requested: %s %s",
+					cs(interface::sha1::hex(file_hash)), cs(file_name));
+			return;
+		}
+		m_waiting_files.erase(file_name);
+		ss_ file_hash2 = interface::sha1::calculate(file_content);
+		if(file_hash != file_hash2){
+			log_w(MODULE, "Requested file differs in hash: \"%s\": "
+					"requested %s, actual %s", cs(file_name),
+					cs(interface::sha1::hex(file_hash)),
+					cs(interface::sha1::hex(file_hash2)));
+			return;
+		}
+		ss_ file_hash_hex = interface::sha1::hex(file_hash);
+		ss_ path = g_client_config.cache_path+"/remote/"+file_hash_hex;
+		log_i(MODULE, "Saving %s to %s", cs(file_name), cs(path));
+		std::ofstream of(path, std::ios::binary);
+		of<<file_content;
+		if(m_tell_after_all_files_transferred_requested){
+			if(m_waiting_files.empty()){
+				send_packet("core:all_files_transferred", "");
+				m_tell_after_all_files_transferred_requested = false;
+			}
+		}
+		// Let Lua resource wrapper know that this happened so it can update
+		// the copy made for Urho3D's resource cache
+		m_app->file_updated_in_cache(file_name, file_hash, path);
+	};
+
+	m_packet_handlers["entitysync:new_node"] =
+			[this](const ss_ &packet_name, const ss_ &data)
+	{
+		// TODO
+		magic::Scene *scene = m_app->get_scene();
+	};
+
+	m_packet_handlers[""] =
+			[this](const ss_ &packet_name, const ss_ &data)
+	{
+	};
+}
 
 State* createState(sp_<app::App> app)
 {
