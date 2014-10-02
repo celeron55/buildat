@@ -111,7 +111,6 @@ struct Module: public interface::Module, public entitysync::Interface
 	void on_tick(const interface::TickEvent &event)
 	{
 		log_d(MODULE, "entitytest::on_tick");
-		magic::VectorBuffer buf;
 
 		m_server->access_scene([&](magic::Scene *scene,
 				magic::SceneReplicationState &scene_state)
@@ -119,30 +118,25 @@ struct Module: public interface::Module, public entitysync::Interface
 			magic::HashSet<uint> nodes_to_process;
 			uint scene_id = scene->GetID();
 			nodes_to_process.Insert(scene_id);
-			sync_node(buf, scene_id, nodes_to_process, scene, scene_state);
+			sync_node(scene_id, nodes_to_process, scene, scene_state);
 
 			nodes_to_process.Insert(scene_state.dirtyNodes_);
 			nodes_to_process.Erase(scene_id);
 
 			while(!nodes_to_process.Empty()){
 				uint node_id = nodes_to_process.Front();
-				sync_node(buf, node_id, nodes_to_process, scene, scene_state);
+				sync_node(node_id, nodes_to_process, scene, scene_state);
 			}
 		});
-
-		sv_<int> v(&buf.GetBuffer().Front(),
-				(&buf.GetBuffer().Front()) + buf.GetBuffer().Size());
-		log_i(MODULE, "enttytest::on_tick: Update size: %zu, data=%s",
-				buf.GetBuffer().Size(), cs(dump(v)));
 	}
 
-	void sync_node(magic::VectorBuffer &buf,
+	void sync_node(
 			uint node_id, magic::HashSet<uint> &nodes_to_process,
 			magic::Scene *scene, magic::SceneReplicationState &scene_state)
 	{
 		if(!nodes_to_process.Erase(node_id))
 			return;
-		log_v(MODULE, "sync_node(): node_id=%zu", node_id);
+		log_d(MODULE, "sync_node(): node_id=%zu", node_id);
 		auto it = scene_state.nodeStates_.Find(node_id);
 		if(it != scene_state.nodeStates_.End()){
 			// Existing node
@@ -152,14 +146,14 @@ struct Module: public interface::Module, public entitysync::Interface
 				// Deleted
 				throw Exception("Deleted node not implemented");
 			} else {
-				sync_existing_node(buf, n, node_state, nodes_to_process,
+				sync_existing_node(n, node_state, nodes_to_process,
 						scene, scene_state);
 			}
 		} else {
 			// New node
 			Node *n = scene->GetNode(node_id);
 			if(n){
-				sync_new_node(buf, n, nodes_to_process, scene, scene_state);
+				sync_new_node(n, nodes_to_process, scene, scene_state);
 			} else {
 				// Was already deleted
 				scene_state.dirtyNodes_.Erase(node_id);
@@ -167,7 +161,7 @@ struct Module: public interface::Module, public entitysync::Interface
 		}
 	}
 
-	void sync_existing_node(magic::VectorBuffer &buf,
+	void sync_existing_node(
 			Node *node, magic::NodeReplicationState &node_state,
 			magic::HashSet<uint> &nodes_to_process,
 			Scene *scene, magic::SceneReplicationState &scene_state)
@@ -175,7 +169,7 @@ struct Module: public interface::Module, public entitysync::Interface
 		log_v(MODULE, "sync_existing_node(): %zu", node->GetID());
 	}
 
-	void sync_new_node(magic::VectorBuffer &buf, Node *node,
+	void sync_new_node(Node *node,
 			magic::HashSet<uint> &nodes_to_process,
 			Scene *scene, magic::SceneReplicationState &scene_state)
 	{
@@ -184,7 +178,7 @@ struct Module: public interface::Module, public entitysync::Interface
 		for(auto it = deps.Begin(); it != deps.End(); ++it){
 			uint node_id = (*it)->GetID();
 			if(scene_state.dirtyNodes_.Contains(node_id))
-				sync_node(buf, node_id, nodes_to_process, scene, scene_state);
+				sync_node(node_id, nodes_to_process, scene, scene_state);
 		}
 
 		node->PrepareNetworkUpdate();
@@ -197,12 +191,18 @@ struct Module: public interface::Module, public entitysync::Interface
 		node_state.node_ = node;
 		node->AddReplicationState(&node_state);
 
+		magic::VectorBuffer buf;
+		buf.WriteNetID(node->GetID());
+		node->WriteInitialDeltaUpdate(buf);
+
 		// TODO: User variables (see Network/Connection.cpp)
 
 		// TODO: Components
 
-		buf.WriteNetID(node->GetID());
-		node->WriteInitialDeltaUpdate(buf);
+		sv_<int> v(&buf.GetBuffer().Front(),
+				(&buf.GetBuffer().Front()) + buf.GetBuffer().Size());
+		log_i(MODULE, "enttytest::sync_new_node: Update size: %zu, data=%s",
+				buf.GetBuffer().Size(), cs(dump(v)));
 
 		ss_ data((const char*)&buf.GetBuffer().Front(), buf.GetBuffer().Size());
 		network::access(m_server, [&](network::Interface * inetwork){
