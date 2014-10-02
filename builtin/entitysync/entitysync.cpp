@@ -52,6 +52,10 @@ ss_ buf_to_string(const magic::VectorBuffer &buf)
 struct Module: public interface::Module, public entitysync::Interface
 {
 	interface::Server *m_server;
+	// TODO: Remove old peers from this
+	// TODO: It requires using Scene::CleanupConnection() and supplying some
+	//       kind of Connection pointers to replication states
+	sm_<network::PeerInfo::Id, magic::SceneReplicationState> m_scene_states;
 
 	Module(interface::Server *server):
 		interface::Module("entitysync"),
@@ -71,6 +75,7 @@ struct Module: public interface::Module, public entitysync::Interface
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));
+		m_server->sub_event(this, Event::t("network:new_client"));
 		m_server->sub_event(this, Event::t("core:tick"));
 #if 0
 		m_server->sub_magic_event(this, magic::E_NODEADDED,
@@ -82,28 +87,15 @@ struct Module: public interface::Module, public entitysync::Interface
 		m_server->sub_magic_event(this, magic::E_COMPONENTREMOVED,
 				Event::t("entitysync:component_removed"));
 #endif
-		m_server->access_scene([&](magic::Scene *scene,
-				magic::SceneReplicationState &scene_state)
-		{
-			magic::Context *context = scene->GetContext();
-
-			/*magic::ResourceCache* cache =
-					m_context->GetSubsystem<magic::ResourceCache>();
-
-			Node* plane_node = m_scene->CreateChild("Plane");
-			plane_node->SetScale(Vector3(100.0f, 1.0f, 100.0f));
-			StaticModel* plane_object = plane_node->CreateComponent<StaticModel>();
-			plane_object->SetModel(cache->GetResource<Model>("Models/Plane.mdl"));
-			plane_object->SetMaterial(cache->GetResource<Material>("Materials/StoneTiled.xml"));*/
-		});
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
-		EVENT_VOIDN("core:start",			on_start)
-		EVENT_VOIDN("core:unload",		   on_unload)
-		EVENT_VOIDN("core:continue",		 on_continue)
-		EVENT_TYPEN("core:tick",			 on_tick, interface::TickEvent)
+        EVENT_VOIDN("core:start",            on_start)
+        EVENT_VOIDN("core:unload",           on_unload)
+        EVENT_VOIDN("core:continue",         on_continue)
+        EVENT_TYPEN("network:new_client",    on_new_client, network::NewClient)
+        EVENT_TYPEN("core:tick",             on_tick, interface::TickEvent)
 #if 0
 		EVENT_TYPEN("entitysync:node_added",
 				on_node_added, interface::MagicEvent)
@@ -128,29 +120,44 @@ struct Module: public interface::Module, public entitysync::Interface
 	{
 	}
 
+	void on_new_client(const network::NewClient &new_client)
+	{
+		log_i(MODULE, "entitysync::on_new_client: id=%zu", new_client.info.id);
+	}
+
 	void on_tick(const interface::TickEvent &event)
 	{
-		log_d(MODULE, "entitytest::on_tick");
+		log_d(MODULE, "entitysync::on_tick");
 
-		m_server->access_scene([&](magic::Scene *scene,
-				magic::SceneReplicationState &scene_state)
+		sync_changes();
+	}
+
+	void sync_changes()
+	{
+		sv_<network::PeerInfo::Id> peers;
+		network::access(m_server, [&](network::Interface * inetwork){
+			peers = inetwork->list_peers();
+		});
+		m_server->access_scene([&](magic::Scene *scene)
 		{
 			// For a reference implementation of this kind of network
 			// synchronization, see Urho3D's Network/Connection.cpp
-
 			scene->PrepareNetworkUpdate(); // ?
+			for(auto &peer : peers){
+				magic::SceneReplicationState &scene_state = m_scene_states[peer];
 
-			magic::HashSet<uint> nodes_to_process;
-			uint scene_id = scene->GetID();
-			nodes_to_process.Insert(scene_id);
-			sync_node(scene_id, nodes_to_process, scene, scene_state);
+				magic::HashSet<uint> nodes_to_process;
+				uint scene_id = scene->GetID();
+				nodes_to_process.Insert(scene_id);
+				sync_node(scene_id, nodes_to_process, scene, scene_state);
 
-			nodes_to_process.Insert(scene_state.dirtyNodes_);
-			nodes_to_process.Erase(scene_id);
+				nodes_to_process.Insert(scene_state.dirtyNodes_);
+				nodes_to_process.Erase(scene_id);
 
-			while(!nodes_to_process.Empty()){
-				uint node_id = nodes_to_process.Front();
-				sync_node(node_id, nodes_to_process, scene, scene_state);
+				while(!nodes_to_process.Empty()){
+					uint node_id = nodes_to_process.Front();
+					sync_node(node_id, nodes_to_process, scene, scene_state);
+				}
 			}
 		});
 	}
@@ -400,6 +407,17 @@ struct Module: public interface::Module, public entitysync::Interface
 
 		node_state.markedDirty_ = false;
 		scene_state.dirtyNodes_.Erase(node->GetID());
+	}
+
+	void send_to_peer(network::PeerInfo::Id peer,
+			const ss_ &name, const magic::VectorBuffer &buf)
+	{
+		log_i(MODULE, "%s: Update size: %zu, data=%s",
+				cs(name), buf.GetBuffer().Size(), cs(dump(buf)));
+		ss_ data = buf_to_string(buf);
+		network::access(m_server, [&](network::Interface * inetwork){
+			inetwork->send(peer, name, data);
+		});
 	}
 
 	void send_to_all(const ss_ &name, const magic::VectorBuffer &buf)

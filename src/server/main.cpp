@@ -236,8 +236,7 @@ int main(int argc, char *argv[])
 
 			state->handle_events();
 
-			state->access_scene([&](magic::Scene *scene,
-					magic::SceneReplicationState &scene_state)
+			state->access_scene([&](magic::Scene *scene)
 			{
 				magic::Context *context = scene->GetContext();
 				magic::Engine *engine = context->GetSubsystem<magic::Engine>();
