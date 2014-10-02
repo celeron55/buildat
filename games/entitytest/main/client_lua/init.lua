@@ -62,4 +62,18 @@ function handle_keydown(event_type, event_data)
 end
 magic.SubscribeToEvent("KeyDown", "handle_keydown")
 
+magic.sub_sync_node_added({}, function(node)
+	local name = node:GetName()
+	if name == "Box" then
+		local object = node:CreateComponent("StaticModel", magic.LOCAL)
+		object.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+		object.material = magic.Material:new()
+		object.material:SetTechnique(0,
+				magic.cache:GetResource("Technique", "Techniques/Diff.xml"))
+		object.material:SetTexture(magic.TU_DIFFUSE,
+				magic.cache:GetResource("Texture2D", "main/pink_texture.png"))
+		--object.castShadows = true
+	end
+end)
+
 -- vim: set noet ts=4 sw=4:

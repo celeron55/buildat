@@ -27,6 +27,7 @@ using namespace Urho3D;
 struct Module: public interface::Module
 {
 	interface::Server *m_server;
+	uint m_slow_count = 0;
 
 	Module(interface::Server *server):
 		interface::Module("entitytest"),
@@ -68,8 +69,11 @@ struct Module: public interface::Module
 			Context *context = scene->GetContext();
 			ResourceCache* cache = context->GetSubsystem<ResourceCache>();
 			auto *m = cache->GetResource<Material>("Materials/Stone.xml");
-			m->SetTexture(TU_DIFFUSE,
-					cache->GetResource<Texture2D>("main/green_texture.png"));
+			// NOTE: Modified or created materials will not be replicated to the
+			//       client. Make sure to always have a resource file or create
+			//       the material on the client.
+			/*m->SetTexture(TU_DIFFUSE,
+					cache->GetResource<Texture2D>("main/green_texture.png"));*/
 			/*Material *m = new Material(context);
 			m->SetTexture(TU_DIFFUSE,
 					cache->GetResource<Texture2D>("main/green_texture.png"));
@@ -105,9 +109,9 @@ struct Module: public interface::Module
 				body->SetFriction(0.75f);
 				//body->SetUseGravity(true);
 				//body->SetGravityOverride(Vector3(0.0, -1.0, 0.0));
-				StaticModel *object = n->CreateComponent<StaticModel>();
+				/*StaticModel *object = n->CreateComponent<StaticModel>();
 				object->SetModel(cache->GetResource<Model>("Models/Box.mdl"));
-				object->SetMaterial(m);
+				object->SetMaterial(m);*/
 			}
 			{
 				Node *n = scene->CreateChild("Box2");
@@ -139,6 +143,17 @@ struct Module: public interface::Module
 				Node *n2 = scene->GetChild("Box2");
 				n2->SetPosition(Vector3(-0.4f, 8.0f, 0.0f));
 				n2->SetRotation(Quaternion(30, 60, 90));
+				m_slow_count++;
+				if(m_slow_count == 2){
+					Node *n = scene->CreateChild("Box");
+					n->SetPosition(Vector3(0.0f, 10.0f, 0.0f));
+					n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
+					RigidBody *body = n->CreateComponent<RigidBody>();
+					CollisionShape *shape = n->CreateComponent<CollisionShape>();
+					shape->SetBox(Vector3::ONE);
+					body->SetMass(1.0);
+					body->SetFriction(0.75f);
+				}
 			});
 			return;
 		}
@@ -153,11 +168,6 @@ struct Module: public interface::Module
 	void on_new_client(const network::NewClient &new_client)
 	{
 		log_i(MODULE, "entitytest::on_new_client: id=%zu", new_client.info.id);
-
-		/*network::access(m_server, [&](network::Interface * inetwork){
-			inetwork->send(new_client.info.id, "core:run_script",
-					"require(\"buildat/extension/entitysync\")");
-		});*/
 	}
 
 	void on_client_disconnected(const network::OldClient &old_client)
