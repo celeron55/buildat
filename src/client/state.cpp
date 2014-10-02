@@ -352,6 +352,20 @@ void CState::setup_packet_handlers()
 		}
 	};
 
+	m_packet_handlers["entitysync:latest_node_data"] =
+			[this](const ss_ &packet_name, const ss_ &data)
+	{
+		magic::Scene *scene = m_app->get_scene();
+		magic::MemoryBuffer msg(data.c_str(), data.size());
+		uint node_id = msg.ReadNetID();
+		Node *node = scene->GetNode(node_id);
+		if(node){
+			node->ReadLatestDataUpdate(msg);
+		} else {
+			log_w(MODULE, "Out-of-order node data ignored for %i", node_id);
+		}
+	};
+
 	m_packet_handlers[""] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{

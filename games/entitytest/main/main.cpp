@@ -67,12 +67,19 @@ struct Module: public interface::Module
 			ResourceCache* cache = context->GetSubsystem<ResourceCache>();
 
 			{
+				Node* node = scene->CreateChild("DirectionalLight");
+				node->SetDirection(Vector3(-0.6f, -1.0f, 0.8f));
+				Light* light = node->CreateComponent<Light>();
+				light->SetLightType(LIGHT_DIRECTIONAL);
+			}
+			{
 				Node *n = scene->CreateChild("Plane");
 				n->SetPosition(Vector3(0.0f, -0.5f, 0.0f));
-				n->SetScale(Vector3(1000.0f, 1.0f, 1000.0f));
+				n->SetScale(Vector3(10.0f, 1.0f, 10.0f));
 				RigidBody *body = n->CreateComponent<RigidBody>();
 				CollisionShape *shape = n->CreateComponent<CollisionShape>();
 				shape->SetBox(Vector3::ONE);
+				body->SetFriction(0.75f);
 				StaticModel *object = n->CreateComponent<StaticModel>();
 				object->SetModel(cache->GetResource<Model>("Models/Box.mdl"));
 				object->SetMaterial(
@@ -80,7 +87,7 @@ struct Module: public interface::Module
 			}
 			{
 				Node *n = scene->CreateChild("Box");
-				n->SetPosition(Vector3(0.0f, 1000.0f, 0.0f));
+				n->SetPosition(Vector3(0.0f, 6.0f, 0.0f));
 				n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
 				RigidBody *body = n->CreateComponent<RigidBody>();
 				CollisionShape *shape = n->CreateComponent<CollisionShape>();
@@ -89,6 +96,10 @@ struct Module: public interface::Module
                 body->SetFriction(0.75f);
 				//body->SetUseGravity(true);
 				//body->SetGravityOverride(Vector3(0.0, -1.0, 0.0));
+				StaticModel *object = n->CreateComponent<StaticModel>();
+				object->SetModel(cache->GetResource<Model>("Models/Box.mdl"));
+				object->SetMaterial(
+						cache->GetResource<Material>("Materials/Stone.xml"));
 			}
 		});
 	}
@@ -96,11 +107,16 @@ struct Module: public interface::Module
 	void on_tick(const interface::TickEvent &event)
 	{
 		log_d(MODULE, "entitytest::on_tick");
-		/*static uint a = 0;
-		if((a++) % 2)
-			return;*/
-		m_server->access_scene([&](Scene *scene)
-		{
+		static uint a = 0;
+		if(((a++) % 25) == 0){
+			m_server->access_scene([&](Scene *scene){
+				Node *n = scene->GetChild("Box");
+				n->SetPosition(Vector3(0.0f, 6.0f, 0.0f));
+				n->SetRotation(Quaternion(30, 60, 90));
+			});
+			return;
+		}
+		m_server->access_scene([&](Scene *scene){
 			Node *n = scene->GetChild("Box");
 			//n->Translate(Vector3(0.1f, 0, 0));
 			Vector3 p = n->GetPosition();
