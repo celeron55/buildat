@@ -80,6 +80,9 @@ namespace interface
 
 		virtual void tmp_store_data(const ss_ &name, const ss_ &data) = 0;
 		virtual ss_ tmp_restore_data(const ss_ &name) = 0;
+
+		// Add resource file path (to make a mirror of the client)
+		virtual void add_file_path(const ss_ &name, const ss_ &path) = 0;
 	};
 }
 // vim: set noet ts=4 sw=4:

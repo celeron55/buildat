@@ -259,6 +259,10 @@ struct Module: public interface::Module, public client_file::Interface
 		log_v(MODULE, "File added: %s: %s (%s)", cs(name),
 				cs(interface::sha1::hex(hash)), cs(path));
 		m_files[name] = sp_<FileInfo>(new FileInfo(name, content, hash, path));
+
+		// Tell path to server so that it can be used in network-synced Scene
+		m_server->add_file_path(name, path);
+
 		ss_ dir_path = interface::Filesystem::strip_file_name(path);
 		m_watch->add(dir_path, [this, name, path](const ss_ & path_){
 			if(path_ != path){

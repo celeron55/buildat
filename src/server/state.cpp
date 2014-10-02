@@ -25,6 +25,8 @@
 #include <Component.h>
 #include <ReplicationState.h>
 #include <PhysicsWorld.h>
+#include <ResourceCache.h>
+#include <Octree.h>
 #pragma GCC diagnostic pop
 #include <iostream>
 #include <algorithm>
@@ -32,6 +34,7 @@
 #define MODULE "__state"
 
 using interface::Event;
+namespace magic = Urho3D;
 
 extern server::Config g_server_config;
 extern bool g_sigint_received;
@@ -76,6 +79,28 @@ static sv_<ss_> list_includes(const ss_ &path, const sv_<ss_> &include_dirs)
 	}
 	return result;
 }
+
+struct BuildatResourceRouter : public magic::ResourceRouter
+{
+	server::State *m_server;
+public:
+	BuildatResourceRouter(magic::Context *context, server::State *server):
+		magic::ResourceRouter(context),
+		m_server(server)
+	{}
+	magic::String Route(const magic::String &name)
+	{
+		ss_ path = m_server->get_file_path(name.CString());
+		if(path == ""){
+			log_v(MODULE, "Resource route access: %s (assuming local file)",
+					name.CString());
+			return name;
+		}
+		log_v(MODULE, "Resource route access: %s -> %s",
+				name.CString(), cs(path));
+		return path.c_str();
+	}
+};
 
 struct MagicEventHandler: public magic::Object
 {
@@ -157,6 +182,7 @@ struct CState: public State, public interface::Server
 
 	magic::SharedPtr<magic::Context> m_magic_context;
 	magic::SharedPtr<magic::Engine> m_magic_engine;
+	magic::SharedPtr<BuildatResourceRouter> m_router;
 	magic::SharedPtr<magic::Scene> m_magic_scene;
 	sm_<Event::Type, magic::SharedPtr<MagicEventHandler>> m_magic_event_handlers;
 	// NOTE: m_magic_mutex must be locked when constructing or destructing
@@ -184,6 +210,9 @@ struct CState: public State, public interface::Server
 
 	sm_<ss_, ss_> m_tmp_data;
 	interface::Mutex m_tmp_data_mutex;
+
+	sm_<ss_, ss_> m_file_paths;
+	interface::Mutex m_file_paths_mutex;
 
 	CState():
 		m_compiler(rccpp::createCompiler(g_server_config.compiler_command))
@@ -241,7 +270,17 @@ struct CState: public State, public interface::Server
 		if(!m_magic_engine->Initialize(params))
 			throw Exception("Urho3D engine initialization failed");
 		m_magic_scene = new magic::Scene(m_magic_context);
-		m_magic_scene->CreateComponent<magic::PhysicsWorld>();
+		m_magic_scene->CreateComponent<magic::PhysicsWorld>(magic::LOCAL);
+		// Useless but gets rid of warnings like
+		// "ERROR: No Octree component in scene, drawable will not render"
+		m_magic_scene->CreateComponent<magic::Octree>(magic::LOCAL);
+
+		magic::ResourceCache *magic_cache =
+				m_magic_context->GetSubsystem<magic::ResourceCache>();
+		//magic_cache->SetAutoReloadResources(true);
+		m_router = new BuildatResourceRouter(m_magic_context, this);
+		magic_cache->SetResourceRouter(
+				magic::SharedPtr<magic::ResourceRouter>(m_router));
 	}
 	~CState()
 	{
@@ -746,6 +785,24 @@ struct CState: public State, public interface::Server
 		ss_ data = m_tmp_data[name];
 		m_tmp_data.erase(name);
 		return data;
+	}
+
+	// Add resource file path (to make a mirror of the client)
+	void add_file_path(const ss_ &name, const ss_ &path)
+	{
+		log_d(MODULE, "add_file_path(): %s -> %s", cs(name), cs(path));
+		interface::MutexScope ms(m_file_paths_mutex);
+		m_file_paths[name] = path;
+	}
+
+	// Returns "" if not found
+	ss_ get_file_path(const ss_ &name)
+	{
+		interface::MutexScope ms(m_file_paths_mutex);
+		auto it = m_file_paths.find(name);
+		if(it == m_file_paths.end())
+			return "";
+		return it->second;
 	}
 };
 
