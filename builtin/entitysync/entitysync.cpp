@@ -135,6 +135,8 @@ struct Module: public interface::Module, public entitysync::Interface
 		m_server->access_scene([&](magic::Scene *scene,
 				magic::SceneReplicationState &scene_state)
 		{
+			scene->PrepareNetworkUpdate(); // ?
+
 			magic::HashSet<uint> nodes_to_process;
 			uint scene_id = scene->GetID();
 			nodes_to_process.Insert(scene_id);
@@ -165,6 +167,7 @@ struct Module: public interface::Module, public entitysync::Interface
 				sync_new_node(n, nodes_to_process, scene, scene_state);
 			} else {
 				// Was already deleted
+				log_w(MODULE, "New node was already deleted: %zu", node_id);
 				scene_state.dirtyNodes_.Erase(node_id);
 			}
 		} else {
@@ -193,8 +196,6 @@ struct Module: public interface::Module, public entitysync::Interface
 				sync_node(node_id, nodes_to_process, scene, scene_state);
 		}
 
-		node->PrepareNetworkUpdate(); // ?
-
 		// TODO: One replication state for each client(?)
 		magic::NodeReplicationState &node_state =
 				scene_state.nodeStates_[node->GetID()];
@@ -217,7 +218,6 @@ struct Module: public interface::Module, public entitysync::Interface
 			Component *component = components[i];
 			if(component->GetID() >= magic::FIRST_LOCAL_ID)
 				continue;
-			component->PrepareNetworkUpdate(); // ?
 			magic::ComponentReplicationState &component_state =
 					node_state.componentStates_[component->GetID()];
 			//component_state.connection_ = nullptr;
@@ -250,6 +250,8 @@ struct Module: public interface::Module, public entitysync::Interface
 
 		// Handle changed attributes
 		if(node_state.dirtyAttributes_.Count()){
+			log_v(MODULE, "sync_existing_node(): %zu: Changed attributes",
+					node->GetID());
 			const magic::Vector<magic::AttributeInfo> &attributes =
 					*node->GetNetworkAttributes();
 			uint num = attributes.Size();
@@ -274,18 +276,38 @@ struct Module: public interface::Module, public entitysync::Interface
 				send_to_all("entitysync:latest_node_data", buf);
 			}
 
+			// ?
 			if(node_state.dirtyAttributes_.Count() || node_state.dirtyVars_.Size()){
 				magic::VectorBuffer buf;
 
 				buf.WriteNetID(node->GetID());
 				node->WriteDeltaUpdate(buf, node_state.dirtyAttributes_);
 
-				// TODO: User variables
-				buf.WriteVLE(0);
+				// Variables (see Network/Connection.cpp)
+				buf.WriteVLE(node_state.dirtyVars_.Size());
+				const magic::VariantMap &vars = node->GetVars();
+				const magic::HashSet<magic::StringHash> &dirty_vars =
+						node_state.dirtyVars_;
+				for(auto it = dirty_vars.Begin(); it != dirty_vars.End(); ++it){
+					auto var_it = vars.Find(*it);
+					if(var_it != vars.End()){
+						buf.WriteStringHash(var_it->first_);
+						buf.WriteVariant(var_it->second_);
+					} else {
+						// Variable has been removed; send dummy data
+						buf.WriteStringHash(magic::StringHash());
+						buf.WriteVariant(magic::Variant::EMPTY);
+					}
+				}
 
 				send_to_all("entitysync:latest_node_data", buf);
 			}
+
+			node_state.dirtyAttributes_.ClearAll();
+			node_state.dirtyVars_.Clear();
 		}
+
+		// TODO: Handle changed or removed components
 	}
 
 	void send_to_all(const ss_ &name, const magic::VectorBuffer &buf)
