@@ -308,6 +308,9 @@ struct Module: public interface::Module, public entitysync::Interface
 		}
 
 		// TODO: Handle changed or removed components
+	
+		node_state.markedDirty_ = false;
+		scene_state.dirtyNodes_.Erase(node->GetID());
 	}
 
 	void send_to_all(const ss_ &name, const magic::VectorBuffer &buf)
