@@ -53,8 +53,9 @@ struct Module: public interface::Module, public entitysync::Interface
 {
 	interface::Server *m_server;
 	// TODO: Remove old peers from this
-	// TODO: It requires using Scene::CleanupConnection() and supplying some
-	//       kind of Connection pointers to replication states
+	// NOTE: We use pointers to SceneReplicationStates as Connection pointers in
+	//       other replication states in order to scene->CleanupConnection()
+	//       without an actual Connection object (which we don't want to use)
 	sm_<network::PeerInfo::Id, magic::SceneReplicationState> m_scene_states;
 
 	Module(interface::Server *server):
@@ -67,6 +68,12 @@ struct Module: public interface::Module, public entitysync::Interface
 	~Module()
 	{
 		log_v(MODULE, "entitysync destruct");
+		m_server->access_scene([&](magic::Scene *scene){
+			for(auto &pair : m_scene_states){
+				magic::SceneReplicationState &scene_state = pair.second;
+				scene->CleanupConnection((magic::Connection*)&scene_state);
+			}
+		});
 	}
 
 	void init()
@@ -125,6 +132,25 @@ struct Module: public interface::Module, public entitysync::Interface
 		log_i(MODULE, "entitysync::on_new_client: id=%zu", new_client.info.id);
 	}
 
+	void on_client_disconnected(const network::OldClient &old_client)
+	{
+		log_i(MODULE, "entitysync::on_client_disconnected: id=%zu",
+				old_client.info.id);
+		auto peer = old_client.info.id;
+		auto it = m_scene_states.find(peer);
+		if(it == m_scene_states.end())
+			return;
+		magic::SceneReplicationState &scene_state = it->second;
+		m_server->access_scene([&](magic::Scene *scene){
+			// NOTE: We use pointers to SceneReplicationStates as Connection
+			//       pointers in other replication states in order to
+			//       scene->CleanupConnection() without an actual Connection object
+			//       (which we don't want to use)
+			scene->CleanupConnection((magic::Connection*)&scene_state);
+			m_scene_states.erase(peer);
+		});
+	}
+
 	void on_tick(const interface::TickEvent &event)
 	{
 		log_d(MODULE, "entitysync::on_tick");
@@ -138,8 +164,7 @@ struct Module: public interface::Module, public entitysync::Interface
 		network::access(m_server, [&](network::Interface * inetwork){
 			peers = inetwork->list_peers();
 		});
-		m_server->access_scene([&](magic::Scene *scene)
-		{
+		m_server->access_scene([&](magic::Scene *scene){
 			// For a reference implementation of this kind of network
 			// synchronization, see Urho3D's Network/Connection.cpp
 			scene->PrepareNetworkUpdate(); // ?
@@ -209,7 +234,7 @@ struct Module: public interface::Module, public entitysync::Interface
 		// TODO: One replication state for each client(?)
 		magic::NodeReplicationState &node_state =
 				scene_state.nodeStates_[node->GetID()];
-		//node_state.connection_ = nullptr;
+		node_state.connection_ = (magic::Connection*)&scene_state;
 		node_state.sceneState_ = &scene_state;
 		node_state.node_ = node;
 		node->AddReplicationState(&node_state);
@@ -230,7 +255,7 @@ struct Module: public interface::Module, public entitysync::Interface
 				continue;
 			magic::ComponentReplicationState &component_state =
 					node_state.componentStates_[component->GetID()];
-			//component_state.connection_ = nullptr;
+			component_state.connection_ = (magic::Connection*)&scene_state;
 			component_state.nodeState_ = &node_state;
 			component_state.component_ = component;
 			component->AddReplicationState(&component_state);
@@ -390,7 +415,7 @@ struct Module: public interface::Module, public entitysync::Interface
 					continue;
 				magic::ComponentReplicationState &component_state =
 						component_states[component->GetID()];
-				//component_state.connection_ = nullptr;
+				component_state.connection_ = (magic::Connection*)&scene_state;
 				component_state.nodeState_ = &node_state;
 				component_state.component_ = component;
 				component->AddReplicationState(&component_state);
@@ -446,7 +471,7 @@ struct Module: public interface::Module, public entitysync::Interface
 				throw Exception("Added node not found");
 			magic::NodeReplicationState &node_state =
 					scene_state.nodeStates_[node_id];
-			//node_state.connection_ = nullptr;
+			node_state.connection_ = (magic::Connection*)&scene_state;
 			node_state.sceneState_ = &scene_state;
 			node_state.node_ = n;
 			n->AddReplicationState(&node_state);
