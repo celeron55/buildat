@@ -12,6 +12,7 @@ namespace server
 		ss_ share_path = "..";
 		ss_ urho3d_path = "../../Urho3D";
 		ss_ compiler_command = "c++";
+		set_<ss_> skip_compiling_modules;
 
 		bool check_paths();
 	};

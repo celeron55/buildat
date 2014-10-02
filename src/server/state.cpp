@@ -322,9 +322,11 @@ struct CState: public State, public interface::Server
 		log_d(MODULE, "extra_cxxflags: %s", cs(extra_cxxflags));
 		log_d(MODULE, "extra_ldflags: %s", cs(extra_ldflags));
 
+		bool skip_compile = g_server_config.skip_compiling_modules.count(info.name);
+
 		m_compiler->include_directories.push_back(m_modules_path);
 		bool build_ok = m_compiler->build(info.name, init_cpp_path, build_dst,
-				extra_cxxflags, extra_ldflags);
+				extra_cxxflags, extra_ldflags, skip_compile);
 		m_compiler->include_directories.pop_back();
 
 		if(!build_ok){
