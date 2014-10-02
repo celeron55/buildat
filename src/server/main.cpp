@@ -231,7 +231,7 @@ int main(int argc, char *argv[])
 					next_tick_us = current_us;
 				}
 				interface::Event event("core:tick");
-				event.p.reset(new interface::TickEvent(1e6 / t_per_tick));
+				event.p.reset(new interface::TickEvent(t_per_tick / 1e6));
 				state->emit_event(std::move(event));
 			}
 
@@ -241,7 +241,7 @@ int main(int argc, char *argv[])
 			{
 				magic::Context *context = scene->GetContext();
 				magic::Engine *engine = context->GetSubsystem<magic::Engine>();
-				engine->SetNextTimeStep(1e6 / t_per_tick);
+				engine->SetNextTimeStep(t_per_tick / 1e6);
 				engine->RunFrame();
 			});
 
