@@ -167,7 +167,13 @@ struct Module: public interface::Module, public entitysync::Interface
 		m_server->access_scene([&](magic::Scene *scene){
 			// For a reference implementation of this kind of network
 			// synchronization, see Urho3D's Network/Connection.cpp
-			scene->PrepareNetworkUpdate(); // ?
+
+			// Compare attributes and set replication states dirty as needed;
+			// this accesses every replication state for every node.
+			scene->PrepareNetworkUpdate();
+
+			// Send changes to each peer (each of which has its own replication
+			// state)
 			for(auto &peer : peers){
 				magic::SceneReplicationState &scene_state = m_scene_states[peer];
 
