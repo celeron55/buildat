@@ -135,6 +135,9 @@ struct Module: public interface::Module, public entitysync::Interface
 		m_server->access_scene([&](magic::Scene *scene,
 				magic::SceneReplicationState &scene_state)
 		{
+			// For a reference implementation of this kind of network
+			// synchronization, see Urho3D's Network/Connection.cpp
+
 			scene->PrepareNetworkUpdate(); // ?
 
 			magic::HashSet<uint> nodes_to_process;
@@ -283,7 +286,7 @@ struct Module: public interface::Module, public entitysync::Interface
 				buf.WriteNetID(node->GetID());
 				node->WriteDeltaUpdate(buf, node_state.dirtyAttributes_);
 
-				// Variables (see Network/Connection.cpp)
+				// Variables
 				buf.WriteVLE(node_state.dirtyVars_.Size());
 				const magic::VariantMap &vars = node->GetVars();
 				const magic::HashSet<magic::StringHash> &dirty_vars =
@@ -300,15 +303,73 @@ struct Module: public interface::Module, public entitysync::Interface
 					}
 				}
 
-				send_to_all("entitysync:latest_node_data", buf);
+				send_to_all("entitysync:node_delta_update", buf);
 			}
 
 			node_state.dirtyAttributes_.ClearAll();
 			node_state.dirtyVars_.Clear();
 		}
 
-		// TODO: Handle changed or removed components
-	
+		// Handle changed or removed components
+		magic::HashMap<unsigned, magic::ComponentReplicationState>
+				&component_states = node_state.componentStates_;
+		for(auto it = component_states.Begin(); it != component_states.End(); ){
+			auto current_it = it++;
+			uint component_id = current_it->first_;
+			auto &component_state = current_it->second_;
+			magic::Component *component = component_state.component_;
+			if(!component){
+				// Component was removed
+				magic::VectorBuffer buf;
+				buf.WriteNetID(component_id);
+				send_to_all("entitysync:remove_component", buf);
+				component_states.Erase(current_it);
+				continue;
+			}
+			// Existing component
+			// Handle changed attributes
+			if(component_state.dirtyAttributes_.Count()){
+				log_v(MODULE, "sync_existing_node(): %zu: Changed attributes"
+						" in component %zu", node->GetID(), component_id);
+				const magic::Vector<magic::AttributeInfo> &attributes =
+						*component->GetNetworkAttributes();
+				uint num = attributes.Size();
+				bool has_latest_data = false;
+
+				// ?
+				for(uint i = 0; i < num; i++){
+					if(component_state.dirtyAttributes_.IsSet(i) &&
+							(attributes.At(i).mode_ & magic::AM_LATESTDATA)){
+						has_latest_data = true;
+						component_state.dirtyAttributes_.Clear(i);
+					}
+				}
+
+				// ?
+				if(has_latest_data){
+					magic::VectorBuffer buf;
+
+					buf.WriteNetID(component->GetID());
+					component->WriteLatestDataUpdate(buf);
+
+					send_to_all("entitysync:latest_component_data", buf);
+				}
+
+				// ?
+				if(component_state.dirtyAttributes_.Count()){
+					magic::VectorBuffer buf;
+
+					buf.WriteNetID(component->GetID());
+					component->WriteDeltaUpdate(buf,
+							component_state.dirtyAttributes_);
+
+					send_to_all("entitysync:component_delta_update", buf);
+
+					component_state.dirtyAttributes_.ClearAll();
+				}
+			}
+		}
+
 		node_state.markedDirty_ = false;
 		scene_state.dirtyNodes_.Erase(node->GetID());
 	}
