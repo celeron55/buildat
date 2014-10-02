@@ -6,12 +6,14 @@ local log = buildat.Logger("minigame")
 local dump = buildat.dump
 local cereal = require("buildat/extension/cereal")
 local magic = require("buildat/extension/urho3d")
-log:info("minigame/init.lua loaded")
+local entitysync = require("buildat/extension/entitysync")
 
 -- 3D things
 
--- NOTE: Create global variable so that it doesn't get automatically deleted
-scene = magic.Scene()
+--scene = magic.Scene()
+local scene = entitysync.scene
+local plane_node = scene:CreateChild("Plane")
+--[[
 scene:CreateComponent("Octree")
 
 -- Note that naming the scene nodes is optional
@@ -198,7 +200,7 @@ buildat.sub_packet("minigame:update", function(data)
 		end
 	end
 end)
-
+--]]
 function handle_keydown(event_type, event_data)
 	local key = event_data:GetInt("Key")
 	if key == magic.KEY_ESC then

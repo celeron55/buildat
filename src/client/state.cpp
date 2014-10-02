@@ -262,6 +262,9 @@ struct CState: public State
 			m_app->file_updated_in_cache(file_name, file_hash, path);
 			return;
 		}
+		if(packet_name == "entitysync:new_node"){
+			// TODO
+		}
 	}
 };
 

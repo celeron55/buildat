@@ -23,6 +23,8 @@
 #include <Log.h>
 #include <DebugHud.h>
 #include <XMLFile.h>
+#include <Scene.h>
+#include <LuaFunction.h>
 #pragma GCC diagnostic pop
 extern "C" {
 #include <lua.h>
@@ -55,6 +57,8 @@ struct CApp: public App, public magic::Application
 	int64_t m_last_script_tick_us;
 	bool m_reboot_requested = false;
 	Options m_options;
+
+	magic::SharedPtr<magic::Scene> m_scene;
 
 	CApp(magic::Context *context, const Options &options):
 		magic::Application(context),
@@ -248,6 +252,7 @@ struct CApp: public App, public magic::Application
 		if(L == nullptr)
 			throw Exception("m_script.GetState() returned null");
 
+		// Store current CApp instance in registry
 		lua_pushlightuserdata(L, (void*)this);
 		lua_setfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 
@@ -282,6 +287,18 @@ struct CApp: public App, public magic::Application
 		// files.
 		buildat_guard_enable(true);
 
+		// Create a scene that will be synchronized from the server and set it
+		// as a global
+		m_scene = new magic::Scene(context_);
+		magic::WeakPtr<magic::LuaFunction> f =
+				m_script->GetFunction("__buildat_set_sync_scene");
+		if(!f)
+			throw Exception("__buildat_set_sync_scene not found");
+		f->BeginCall();
+		f->PushUserType(m_scene.Get(), "Scene");
+		f->EndCall();
+
+		// Launch menu if requested
 		if(g_client_config.boot_to_menu){
 			ss_ extname = g_client_config.menu_extension_name;
 			ss_ script = ss_() +
@@ -291,7 +308,8 @@ struct CApp: public App, public magic::Application
 					"end\n"
 					"m.boot()\n";
 			if(!run_script_no_sandbox(script)){
-				throw AppStartupError(ss_()+"Failed to load and run extension "+extname);
+				throw AppStartupError(ss_()+
+						"Failed to load and run extension "+extname);
 			}
 		}
 
