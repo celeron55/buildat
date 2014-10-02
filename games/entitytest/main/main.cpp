@@ -12,6 +12,7 @@
 #include <Context.h>
 #include <StaticModel.h>
 #include <Model.h>
+#include <Material.h>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/unordered_map.hpp>
 #include <cereal/types/vector.hpp>
@@ -72,6 +73,10 @@ struct Module: public interface::Module
 				RigidBody *body = n->CreateComponent<RigidBody>();
 				CollisionShape *shape = n->CreateComponent<CollisionShape>();
 				shape->SetBox(Vector3::ONE);
+				StaticModel *object = n->CreateComponent<StaticModel>();
+				object->SetModel(cache->GetResource<Model>("Models/Box.mdl"));
+				object->SetMaterial(
+						cache->GetResource<Material>("Materials/Stone.xml"));
 			}
 			{
 				Node *n = scene->CreateChild("Box");

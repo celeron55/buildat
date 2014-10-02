@@ -15,7 +15,9 @@ local magic = require("buildat/extension/urho3d")
 local viewport = magic.renderer:GetViewport(0)
 local scene = viewport:GetScene()
 local camera = viewport:GetCamera()
+scene:CreateComponent("Octree")
 
+--[[
 -- Note that naming the scene nodes is optional
 local plane_node = scene:CreateChild("Plane")
 plane_node.scale = magic.Vector3(10.0, 1.0, 10.0)
@@ -39,6 +41,7 @@ light_node.direction = magic.Vector3(0.6, -1.0, -0.8) -- The direction vector do
 light = light_node:CreateComponent("Light")
 light.lightType = magic.LIGHT_DIRECTIONAL
 light.brightness = 0.2
+--]]
 
 -- Add some text
 local title_text = magic.ui.root:CreateChild("Text")

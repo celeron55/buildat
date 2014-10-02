@@ -12,8 +12,10 @@
 #include <cereal/types/string.hpp>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
+#include <Node.h>
 #include <Scene.h>
 #include <MemoryBuffer.h>
+#include <SmoothedTransform.h>
 #pragma GCC diagnostic pop
 #include <cstring>
 #include <fstream>
@@ -21,6 +23,10 @@
 #include <sys/socket.h>
 #define MODULE "__state"
 namespace magic = Urho3D;
+
+using magic::Node;
+using magic::Component;
+using magic::SmoothedTransform;
 
 extern client::Config g_client_config;
 
@@ -293,8 +299,57 @@ void CState::setup_packet_handlers()
 	m_packet_handlers["entitysync:new_node"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
-		// TODO
+		// For a reference implementation of this kind of network
+		// synchronization, see Urho3D's Network/Connection.cpp
+
 		magic::Scene *scene = m_app->get_scene();
+		magic::MemoryBuffer msg(data.c_str(), data.size());
+		uint node_id = msg.ReadNetID();
+		Node *node = scene->GetNode(node_id);
+		if(!node){
+			log_v(MODULE, "Creating node %i", node_id);
+			// Add to the root level; it may be moved as we receive the parent
+			// attribute
+			node = scene->CreateChild(node_id, magic::REPLICATED);
+			node->CreateComponent<SmoothedTransform>(magic::LOCAL);
+		}
+		// Read initial attributes
+		node->ReadDeltaUpdate(msg);
+		// Skip transition to first position
+		SmoothedTransform *transform = node->GetComponent<SmoothedTransform>();
+		if(transform)
+			transform->Update(1.0f, 0.0f);
+
+		// Read initial user variables
+		uint num_vars = msg.ReadVLE();
+		while(num_vars){
+			auto key = msg.ReadStringHash();
+			node->SetVar(key, msg.ReadVariant());
+			num_vars--;
+		}
+
+		// Read components
+		uint num_c = msg.ReadVLE();
+		while(num_c){
+			num_c--;
+
+			auto type = msg.ReadStringHash();
+			uint c_id = msg.ReadNetID();
+
+			Component *c = scene->GetComponent(c_id);
+			if(!c || c->GetType() != type || c->GetNode() != node){
+				if(c)
+					c->Remove();
+				log_v(MODULE, "Creating component %i", c_id);
+				c = node->CreateComponent(type, magic::REPLICATED, c_id);
+				if(!c){
+					log_e(MODULE, "Could not create component %i", c_id);
+					return;
+				}
+			}
+			c->ReadDeltaUpdate(msg);
+			c->ApplyAttributes();
+		}
 	};
 
 	m_packet_handlers[""] =

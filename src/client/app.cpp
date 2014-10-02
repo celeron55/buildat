@@ -299,12 +299,13 @@ struct CApp: public App, public magic::Application
 
 		// Create a scene that will be synchronized from the server
 		m_scene = new magic::Scene(context_);
-		m_scene->CreateComponent<magic::Octree>();
+		m_scene->CreateComponent<magic::Octree>(magic::LOCAL);
 
 		// Create a camera and a viewport for the scene. The scene can then be
 		// accessed in Lua by magic.renderer:GetViewport(0):GetScene().
 		m_camera_node = m_scene->CreateChild("Camera", magic::LOCAL);
-		magic::Camera* camera = m_camera_node->CreateComponent<magic::Camera>();
+		magic::Camera* camera =
+				m_camera_node->CreateComponent<magic::Camera>(magic::LOCAL);
 		camera->SetFarClip(300.0f);
 		m_camera_node->SetPosition(magic::Vector3(7.0, 7.0, 7.0));
 		m_camera_node->LookAt(magic::Vector3(0, 1, 0));
