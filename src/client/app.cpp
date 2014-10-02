@@ -67,18 +67,18 @@ public:
 	magic::String Route(const magic::String &name)
 	{
 		if(!m_client){
-			log_w(MODULE, "Resource route access: %s (no routing)",
+			log_w(MODULE, "Resource route access: %s (no client)",
 					name.CString());
 			return name;
 		}
 		ss_ path = m_client->get_file_path(name.CString());
 		if(path == ""){
-			log_w(MODULE, "Resource route access: %s (assuming local file)",
+			log_v(MODULE, "Resource route access: %s (assuming local file)",
 					name.CString());
 			// TODO: Check that it is in a safe path
 			return name;
 		}
-		log_w(MODULE, "Resource route access: %s -> %s",
+		log_v(MODULE, "Resource route access: %s -> %s",
 				name.CString(), cs(path));
 		return path.c_str();
 	}

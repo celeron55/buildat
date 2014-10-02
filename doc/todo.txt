@@ -31,3 +31,4 @@ Buildat TODO
 - Handle module load order properly in reloads (unload by popping from top,
   then reload everything until top)
 - Remove client/default.pak
+- Move path safety checking from buildat_guard to BuildatResourceRouter

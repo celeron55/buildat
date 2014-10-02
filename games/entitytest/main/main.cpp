@@ -13,6 +13,8 @@
 #include <StaticModel.h>
 #include <Model.h>
 #include <Material.h>
+#include <Texture2D.h>
+#include <Technique.h>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/unordered_map.hpp>
 #include <cereal/types/vector.hpp>
@@ -65,6 +67,14 @@ struct Module: public interface::Module
 		{
 			Context *context = scene->GetContext();
 			ResourceCache* cache = context->GetSubsystem<ResourceCache>();
+			auto *m = cache->GetResource<Material>("Materials/Stone.xml");
+			m->SetTexture(TU_DIFFUSE,
+					cache->GetResource<Texture2D>("main/green_texture.png"));
+			/*Material *m = new Material(context);
+			m->SetTexture(TU_DIFFUSE,
+					cache->GetResource<Texture2D>("main/green_texture.png"));
+			m->SetTechnique(0, cache->GetResource<Technique>(
+					"Techniques/Diff.xml"));*/
 
 			{
 				Node* node = scene->CreateChild("DirectionalLight");
@@ -82,8 +92,7 @@ struct Module: public interface::Module
 				body->SetFriction(0.75f);
 				StaticModel *object = n->CreateComponent<StaticModel>();
 				object->SetModel(cache->GetResource<Model>("Models/Box.mdl"));
-				object->SetMaterial(
-						cache->GetResource<Material>("Materials/Stone.xml"));
+				object->SetMaterial(m);
 			}
 			{
 				Node *n = scene->CreateChild("Box");
@@ -98,8 +107,7 @@ struct Module: public interface::Module
 				//body->SetGravityOverride(Vector3(0.0, -1.0, 0.0));
 				StaticModel *object = n->CreateComponent<StaticModel>();
 				object->SetModel(cache->GetResource<Model>("Models/Box.mdl"));
-				object->SetMaterial(
-						cache->GetResource<Material>("Materials/Stone.xml"));
+				object->SetMaterial(m);
 			}
 			{
 				Node *n = scene->CreateChild("Box2");
@@ -114,8 +122,7 @@ struct Module: public interface::Module
 				//body->SetGravityOverride(Vector3(0.0, -1.0, 0.0));
 				StaticModel *object = n->CreateComponent<StaticModel>();
 				object->SetModel(cache->GetResource<Model>("Models/Box.mdl"));
-				object->SetMaterial(
-						cache->GetResource<Material>("Materials/Stone.xml"));
+				object->SetMaterial(m);
 			}
 		});
 	}

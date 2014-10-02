@@ -296,7 +296,7 @@ void CState::setup_packet_handlers()
 		m_app->file_updated_in_cache(file_name, file_hash, path);
 	};
 
-	m_packet_handlers["entitysync:new_node"] =
+	m_packet_handlers["entitysync:create_node"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
 		// For a reference implementation of this kind of network
@@ -352,6 +352,12 @@ void CState::setup_packet_handlers()
 		}
 	};
 
+	m_packet_handlers["entitysync:create_component"] =
+			[this](const ss_ &packet_name, const ss_ &data)
+	{
+		log_w("TODO: %s", cs(packet_name));
+	};
+
 	m_packet_handlers["entitysync:latest_node_data"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
@@ -360,10 +366,51 @@ void CState::setup_packet_handlers()
 		uint node_id = msg.ReadNetID();
 		Node *node = scene->GetNode(node_id);
 		if(node){
+			log_v(MODULE, "Updating node %i", node_id);
 			node->ReadLatestDataUpdate(msg);
 		} else {
 			log_w(MODULE, "Out-of-order node data ignored for %i", node_id);
 		}
+	};
+
+	m_packet_handlers["entitysync:latest_component_data"] =
+			[this](const ss_ &packet_name, const ss_ &data)
+	{
+		magic::Scene *scene = m_app->get_scene();
+		magic::MemoryBuffer msg(data.c_str(), data.size());
+		uint c_id = msg.ReadNetID();
+		Component *c = scene->GetComponent(c_id);
+		if(c){
+			log_v(MODULE, "Updating component %i", c_id);
+			c->ReadLatestDataUpdate(msg);
+			c->ApplyAttributes();
+		} else {
+			log_w(MODULE, "Out-of-order component data ignored for %i", c_id);
+		}
+	};
+
+	m_packet_handlers["entitysync:node_delta_update"] =
+			[this](const ss_ &packet_name, const ss_ &data)
+	{
+		log_w("TODO: %s", cs(packet_name));
+	};
+
+	m_packet_handlers["entitysync:component_delta_update"] =
+			[this](const ss_ &packet_name, const ss_ &data)
+	{
+		log_w("TODO: %s", cs(packet_name));
+	};
+
+	m_packet_handlers["entitysync:remove_node"] =
+			[this](const ss_ &packet_name, const ss_ &data)
+	{
+		log_w("TODO: %s", cs(packet_name));
+	};
+
+	m_packet_handlers["entitysync:remove_component"] =
+			[this](const ss_ &packet_name, const ss_ &data)
+	{
+		log_w("TODO: %s", cs(packet_name));
 	};
 
 	m_packet_handlers[""] =

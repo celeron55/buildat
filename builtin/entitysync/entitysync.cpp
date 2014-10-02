@@ -184,7 +184,7 @@ struct Module: public interface::Module, public entitysync::Interface
 			// New node
 			Node *n = scene->GetNode(node_id);
 			if(n){
-				sync_new_node(peer, n, nodes_to_process, scene, scene_state);
+				sync_create_node(peer, n, nodes_to_process, scene, scene_state);
 			} else {
 				// Was already deleted
 				log_w(MODULE, "New node was already deleted: %zu", node_id);
@@ -206,11 +206,11 @@ struct Module: public interface::Module, public entitysync::Interface
 		}
 	}
 
-	void sync_new_node(network::PeerInfo::Id peer, Node *node,
+	void sync_create_node(network::PeerInfo::Id peer, Node *node,
 			magic::HashSet<uint> &nodes_to_process,
 			Scene *scene, magic::SceneReplicationState &scene_state)
 	{
-		log_v(MODULE, "sync_new_node(): %zu", node->GetID());
+		log_v(MODULE, "sync_create_node(): %zu", node->GetID());
 		auto &deps = node->GetDependencyNodes();
 		for(auto it = deps.Begin(); it != deps.End(); ++it){
 			uint node_id = (*it)->GetID();
@@ -229,8 +229,13 @@ struct Module: public interface::Module, public entitysync::Interface
 		buf.WriteNetID(node->GetID());
 		node->WriteInitialDeltaUpdate(buf);
 
-		// TODO: User variables (see Network/Connection.cpp)
-		buf.WriteVLE(0);
+		// User variables
+		auto &vars = node->GetVars();
+		buf.WriteVLE(vars.Size());
+		for(auto it = vars.Begin(); it != vars.End(); ++it){
+			buf.WriteStringHash(it->first_);
+			buf.WriteVariant(it->second_);
+		};
 
 		// Components
 		buf.WriteVLE(node->GetNumNetworkComponents());
@@ -250,7 +255,7 @@ struct Module: public interface::Module, public entitysync::Interface
 			component->WriteInitialDeltaUpdate(buf);
 		}
 
-		send_to_peer(peer, "entitysync:new_node", buf);
+		send_to_peer(peer, "entitysync:create_node", buf);
 
 		node_state.markedDirty_ = false;
 		scene_state.dirtyNodes_.Erase(node->GetID());
