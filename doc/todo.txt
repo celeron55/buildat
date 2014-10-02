@@ -22,6 +22,8 @@ Buildat TODO
   CMake to RCC++
 - Voxel world with arbitrary chunk size and offset, with pluggable loader
   modules. Main world has worldspace_id=1. Try Polyvox.
+	- Normal block size should be definable to be a multiple of the voxel size
+		- "Continuation voxels"
 - Entity system with automated network sync
 - Support Cereal's shared pointer serialization in Lua
 - Something in uistack's global nil focus handling has broken
