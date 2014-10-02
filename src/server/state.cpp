@@ -24,6 +24,7 @@
 #include <SceneEvents.h>
 #include <Component.h>
 #include <ReplicationState.h>
+#include <PhysicsWorld.h>
 #pragma GCC diagnostic pop
 #include <iostream>
 #include <algorithm>
@@ -240,6 +241,7 @@ struct CState: public State, public interface::Server
 		if(!m_magic_engine->Initialize(params))
 			throw Exception("Urho3D engine initialization failed");
 		m_magic_scene = new magic::Scene(m_magic_context);
+		m_magic_scene->CreateComponent<magic::PhysicsWorld>();
 	}
 	~CState()
 	{
