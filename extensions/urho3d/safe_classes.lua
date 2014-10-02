@@ -24,6 +24,15 @@ function M.define(dst, util)
 					"SetString", {}, {"VariantMap", "string", "string"}),
 			GetString = util.self_function(
 					"GetString", {"string"}, {"VariantMap", "string"}),
+
+			SetPtr = util.self_function(
+					"SetPtr", {}, {"VariantMap", "string",
+						{"Node", "Component"}}),
+			GetPtr = util.wrap_function({"VariantMap", "string", "string"},
+				function(self, type, key)
+					return util.wrap_instance(type, self:GetPtr(type, key))
+				end
+			),
 		}
 	})
 
@@ -187,11 +196,19 @@ function M.define(dst, util)
 			CreateChild = util.wrap_function({"Node", "string"}, function(self, name)
 				return util.wrap_instance("Node", self:CreateChild(name))
 			end),
-			CreateComponent = util.wrap_function({"Node", "string"}, function(self, name)
-				local component = self:CreateComponent(name)
-				assert(component)
-				return util.wrap_instance(name, component)
-			end),
+			CreateComponent = util.wrap_function(
+					{"Node", "string", {"number", "__nil"}},
+				function(self, name, mode)
+					local component = nil
+					if mode ~= nil then
+						component = self:CreateComponent(name, mode)
+					else
+						component = self:CreateComponent(name)
+					end
+					assert(component)
+					return util.wrap_instance(name, component)
+				end
+			),
 			GetComponent = util.wrap_function({"Node", "string"}, function(self, name)
 				local component = self:GetComponent(name)
 				assert(component)
@@ -206,6 +223,16 @@ function M.define(dst, util)
 			RemoveChild = util.wrap_function({"Node", "Node"}, function(self, v)
 				self:RemoveChild(v)
 			end),
+			GetID = util.self_function("GetID", {"number"}, {"Node"}),
+			GetName = util.self_function("GetName", {"string"}, {"Node"}),
+			GetNumChildren = util.self_function(
+					"GetNumChildren", {"number"}, {"Node"}),
+			GetChild = util.wrap_function({"Node", {"string", "number"}},
+				function(self, name_or_index)
+					return util.wrap_instance("Node",
+							self:GetChild(name_or_index))
+				end
+			),
 		},
 		properties = {
 			scale = util.simple_property(dst.Vector3),
@@ -218,15 +245,15 @@ function M.define(dst, util)
 	})
 
 	util.wc("Scene", {
+		inherited_from_by_wrapper = dst.Node,
+		unsafe_constructor = util.wrap_function({}, function()
+			return util.wrap_instance("Scene", Scene())
+		end),
 		class = {
 			new = function()
 				return util.wrap_instance("Scene", Scene:new())
 			end,
 		},
-		inherited_from_by_wrapper = dst.Node,
-		unsafe_constructor = util.wrap_function({}, function()
-			return util.wrap_instance("Scene", Scene())
-		end),
 	})
 
 	util.wc("ResourceCache", {

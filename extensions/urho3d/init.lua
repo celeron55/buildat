@@ -260,9 +260,16 @@ function Safe.SubscribeToEvent(x, y, z)
 			for field_name, field_def in pairs(safe_fields) do
 				local variant_type = field_def.variant
 				local safe_type = field_def.safe
-				local unsafe_value = unsafe_event_data["Get"..variant_type](
-						unsafe_event_data, field_name)
-				local safe_value = magic_sandbox.unsafe_to_safe(unsafe_value, safe_type)
+				local safe_value = nil
+				if variant_type == "Ptr" then
+					local unsafe_value = unsafe_event_data:GetPtr(
+							safe_type, field_name)
+					safe_value = wrap_instance(safe_type, unsafe_value)
+				else
+					local unsafe_value = unsafe_event_data["Get"..variant_type](
+							unsafe_event_data, field_name)
+					safe_value = magic_sandbox.unsafe_to_safe(unsafe_value, safe_type)
+				end
 				safe_event_data["Set"..variant_type](
 						safe_event_data, field_name, safe_value)
 			end
@@ -304,6 +311,55 @@ function Safe.UnsubscribeFromEvent(x, y)
 	end
 	-- TODO: Delete the generated global callback
 end
+
+-- Network-synchronized (replicated) scene
+
+local sync_node_added_subs = {}
+
+-- Callback will be called for each node added to the scene, once they have a
+-- name. Callback is called immediately for all existing nodes.
+function Safe.sub_sync_node_added(opts, cb)
+	-- Add to subscriber table
+	table.insert(sync_node_added_subs, cb)
+	-- Handle existing nodes
+	local function handle_node(node)
+		local name = node:GetName()
+		log:info("node "..node:GetID()..", name="..name)
+		cb(node)
+		for i = 0, node:GetNumChildren()-1 do
+			handle_node(node:GetChild(i))
+		end
+	end
+	-- This hack gives us the replicated scene
+	local viewport = Safe.renderer:GetViewport(0)
+	local scene = viewport:GetScene()
+	handle_node(scene)
+end
+
+local nodes_waiting_for_name = {}
+
+Safe.SubscribeToEvent("NodeAdded", function(event_type, event_data)
+	local node = event_data:GetPtr("Node", "Node")
+	--log:info("NodeAdded: "..node:GetName())
+	if node:GetName() == "" then
+		nodes_waiting_for_name[node:GetID()] = true
+	else
+		for _, v in ipairs(sync_node_added_subs) do
+			v(node)
+		end
+	end
+end)
+
+Safe.SubscribeToEvent("NodeNameChanged", function(event_type, event_data)
+	local node = event_data:GetPtr("Node", "Node")
+	--log:info("NodeNameChanged: "..node:GetName())
+	if nodes_waiting_for_name[node:GetID()] then
+		nodes_waiting_for_name[node:GetID()] = nil
+		for _, v in ipairs(sync_node_added_subs) do
+			v(node)
+		end
+	end
+end)
 
 --
 -- Unsafe interface
