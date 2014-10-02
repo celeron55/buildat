@@ -324,7 +324,7 @@ function Safe.sub_sync_node_added(opts, cb)
 	-- Handle existing nodes
 	local function handle_node(node)
 		local name = node:GetName()
-		log:info("node "..node:GetID()..", name="..name)
+		--log:debug("sub_sync_node_added(): node "..node:GetID()..", name="..name)
 		cb(node)
 		for i = 0, node:GetNumChildren()-1 do
 			handle_node(node:GetChild(i))

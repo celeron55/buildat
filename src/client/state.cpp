@@ -366,7 +366,7 @@ void CState::setup_packet_handlers()
 		uint node_id = msg.ReadNetID();
 		Node *node = scene->GetNode(node_id);
 		if(node){
-			log_v(MODULE, "Updating node %i", node_id);
+			log_d(MODULE, "Updating node %i", node_id);
 			node->ReadLatestDataUpdate(msg);
 		} else {
 			log_w(MODULE, "Out-of-order node data ignored for %i", node_id);
@@ -381,7 +381,7 @@ void CState::setup_packet_handlers()
 		uint c_id = msg.ReadNetID();
 		Component *c = scene->GetComponent(c_id);
 		if(c){
-			log_v(MODULE, "Updating component %i", c_id);
+			log_d(MODULE, "Updating component %i", c_id);
 			c->ReadLatestDataUpdate(msg);
 			c->ApplyAttributes();
 		} else {
