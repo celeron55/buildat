@@ -85,6 +85,7 @@ struct Module: public interface::Module
 				node->SetDirection(Vector3(-0.6f, -1.0f, 0.8f));
 				Light* light = node->CreateComponent<Light>();
 				light->SetLightType(LIGHT_DIRECTIONAL);
+				light->SetCastShadows(true);
 			}
 			{
 				Node *n = scene->CreateChild("Plane");
@@ -97,6 +98,7 @@ struct Module: public interface::Module
 				StaticModel *object = n->CreateComponent<StaticModel>();
 				object->SetModel(cache->GetResource<Model>("Models/Box.mdl"));
 				object->SetMaterial(m);
+				object->SetCastShadows(true);
 			}
 			{
 				Node *n = scene->CreateChild("Box");
@@ -107,11 +109,7 @@ struct Module: public interface::Module
 				shape->SetBox(Vector3::ONE);
 				body->SetMass(1.0);
 				body->SetFriction(0.75f);
-				//body->SetUseGravity(true);
-				//body->SetGravityOverride(Vector3(0.0, -1.0, 0.0));
-				/*StaticModel *object = n->CreateComponent<StaticModel>();
-				object->SetModel(cache->GetResource<Model>("Models/Box.mdl"));
-				object->SetMaterial(m);*/
+				// Model and material is set on client
 			}
 			{
 				Node *n = scene->CreateChild("Box2");
@@ -127,6 +125,7 @@ struct Module: public interface::Module
 				StaticModel *object = n->CreateComponent<StaticModel>();
 				object->SetModel(cache->GetResource<Model>("Models/Box.mdl"));
 				object->SetMaterial(m);
+				object->SetCastShadows(true);
 			}
 		});
 	}
@@ -153,6 +152,7 @@ struct Module: public interface::Module
 					shape->SetBox(Vector3::ONE);
 					body->SetMass(1.0);
 					body->SetFriction(0.75f);
+					// Model and material is set on client
 				}
 			});
 			return;

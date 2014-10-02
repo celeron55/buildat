@@ -17,32 +17,6 @@ local scene = viewport:GetScene()
 local camera = viewport:GetCamera()
 scene:CreateComponent("Octree")
 
---[[
--- Note that naming the scene nodes is optional
-local plane_node = scene:CreateChild("Plane")
-plane_node.scale = magic.Vector3(10.0, 1.0, 10.0)
-local plane_object = plane_node:CreateComponent("StaticModel")
-plane_object.model = magic.cache:GetResource("Model", "Models/Plane.mdl")
-plane_object.material = magic.cache:GetResource("Material", "Materials/Stone.xml")
-plane_object.material:SetTexture(magic.TU_DIFFUSE,
-		magic.cache:GetResource("Texture2D", "main/green_texture.png"))
-
-local light_node = scene:CreateChild("DirectionalLight")
-light_node.direction = magic.Vector3(-0.6, -1.0, 0.8) -- The direction vector does not need to be normalized
-local light = light_node:CreateComponent("Light")
-light.lightType = magic.LIGHT_DIRECTIONAL
-light.castShadows = true
-light.shadowBias = magic.BiasParameters(0.00025, 0.5)
-light.shadowCascade = magic.CascadeParameters(10.0, 50.0, 200.0, 0.0, 0.8)
-light.brightness = 0.8
-
-light_node = scene:CreateChild("DirectionalLight")
-light_node.direction = magic.Vector3(0.6, -1.0, -0.8) -- The direction vector does not need to be normalized
-light = light_node:CreateComponent("Light")
-light.lightType = magic.LIGHT_DIRECTIONAL
-light.brightness = 0.2
---]]
-
 -- Add some text
 local title_text = magic.ui.root:CreateChild("Text")
 title_text:SetText("entitytest/init.lua")
@@ -65,6 +39,8 @@ magic.SubscribeToEvent("KeyDown", "handle_keydown")
 magic.sub_sync_node_added({}, function(node)
 	local name = node:GetName()
 	if name == "Box" then
+		-- Models and materials can be created dynamically on the client side
+		-- like this
 		local object = node:CreateComponent("StaticModel", magic.LOCAL)
 		object.model = magic.cache:GetResource("Model", "Models/Box.mdl")
 		object.material = magic.Material:new()
@@ -72,7 +48,7 @@ magic.sub_sync_node_added({}, function(node)
 				magic.cache:GetResource("Technique", "Techniques/Diff.xml"))
 		object.material:SetTexture(magic.TU_DIFFUSE,
 				magic.cache:GetResource("Texture2D", "main/pink_texture.png"))
-		--object.castShadows = true
+		object.castShadows = true
 	end
 end)
 
