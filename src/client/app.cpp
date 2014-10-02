@@ -216,6 +216,10 @@ struct CApp: public App, public magic::Application
 		log_v(MODULE, "file_updated_in_cache(): %s", cs(file_name));
 
 		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_file_updated_in_cache");
+		if(lua_isnil(L, -1)){
+			lua_pop(L, 1);
+			return;
+		}
 		lua_pushlstring(L, file_name.c_str(), file_name.size());
 		lua_pushlstring(L, file_hash.c_str(), file_hash.size());
 		lua_pushlstring(L, cached_path.c_str(), cached_path.size());
