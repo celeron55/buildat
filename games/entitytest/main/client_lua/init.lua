@@ -6,15 +6,15 @@ local log = buildat.Logger("minigame")
 local dump = buildat.dump
 local cereal = require("buildat/extension/cereal")
 local magic = require("buildat/extension/urho3d")
-local entitysync = require("buildat/extension/entitysync")
 
 -- 3D things
 
---scene = magic.Scene()
-local scene = entitysync.scene
-local plane_node = scene:CreateChild("Plane")
---[[
-scene:CreateComponent("Octree")
+-- Viewport 0 is created in C++. It is set to view the network-synchronized
+-- scene with one camera.
+-- NOTE: This won't work this way in the future.
+local viewport = magic.renderer:GetViewport(0)
+local scene = viewport:GetScene()
+local camera = viewport:GetCamera()
 
 -- Note that naming the scene nodes is optional
 local plane_node = scene:CreateChild("Plane")
@@ -39,16 +39,6 @@ light_node.direction = magic.Vector3(0.6, -1.0, -0.8) -- The direction vector do
 light = light_node:CreateComponent("Light")
 light.lightType = magic.LIGHT_DIRECTIONAL
 light.brightness = 0.2
-
--- Add a camera so we can look at the scene
-local camera_node = scene:CreateChild("Camera")
-camera_node:CreateComponent("Camera")
-camera_node.position = magic.Vector3(7.0, 7.0, 7.0)
---camera_node.rotation = Quaternion(0, 0, 0.0)
-camera_node:LookAt(magic.Vector3(0, 1, 0))
--- And this thing so the camera is shown on the screen
-local viewport = magic.Viewport:new(scene, camera_node:GetComponent("Camera"))
-magic.renderer:SetViewport(0, viewport)
 
 -- Add some text
 local title_text = magic.ui.root:CreateChild("Text")

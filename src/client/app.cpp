@@ -25,6 +25,10 @@
 #include <XMLFile.h>
 #include <Scene.h>
 #include <LuaFunction.h>
+#include <Viewport.h>
+#include <Camera.h>
+#include <Renderer.h>
+#include <Octree.h>
 #pragma GCC diagnostic pop
 extern "C" {
 #include <lua.h>
@@ -59,6 +63,7 @@ struct CApp: public App, public magic::Application
 	Options m_options;
 
 	magic::SharedPtr<magic::Scene> m_scene;
+	magic::SharedPtr<magic::Node> m_camera_node;
 
 	CApp(magic::Context *context, const Options &options):
 		magic::Application(context),
@@ -287,16 +292,31 @@ struct CApp: public App, public magic::Application
 		// files.
 		buildat_guard_enable(true);
 
-		// Create a scene that will be synchronized from the server and set it
-		// as a global
+		// Create a scene that will be synchronized from the server
 		m_scene = new magic::Scene(context_);
-		magic::WeakPtr<magic::LuaFunction> f =
+		m_scene->CreateComponent<magic::Octree>();
+
+		// Create a camera and a viewport for the scene. The scene can then be
+		// accessed in Lua by magic.renderer:GetViewport(0):GetScene().
+		m_camera_node = m_scene->CreateChild("Camera", magic::LOCAL);
+		magic::Camera* camera = m_camera_node->CreateComponent<magic::Camera>();
+		camera->SetFarClip(300.0f);
+		m_camera_node->SetPosition(magic::Vector3(7.0, 7.0, 7.0));
+		m_camera_node->LookAt(magic::Vector3(0, 1, 0));
+
+		magic::Renderer* renderer = GetSubsystem<magic::Renderer>();
+		magic::SharedPtr<magic::Viewport> viewport(new magic::Viewport(
+				context_, m_scene, m_camera_node->GetComponent<magic::Camera>()));
+		renderer->SetViewport(0, viewport);
+
+		// Won't work; accessing the resulting value in Lua segfaults.
+		/*magic::WeakPtr<magic::LuaFunction> f =
 				m_script->GetFunction("__buildat_set_sync_scene");
 		if(!f)
 			throw Exception("__buildat_set_sync_scene not found");
 		f->BeginCall();
 		f->PushUserType(m_scene.Get(), "Scene");
-		f->EndCall();
+		f->EndCall();*/
 
 		// Launch menu if requested
 		if(g_client_config.boot_to_menu){

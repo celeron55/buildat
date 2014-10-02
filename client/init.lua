@@ -81,7 +81,6 @@ dofile(__buildat_get_path("share").."/client/api.lua")
 dofile(__buildat_get_path("share").."/client/packet.lua")
 dofile(__buildat_get_path("share").."/client/extensions.lua")
 dofile(__buildat_get_path("share").."/client/sandbox.lua")
-dofile(__buildat_get_path("share").."/client/misc.lua")
 
 local test = require("buildat/extension/test")
 test.f()

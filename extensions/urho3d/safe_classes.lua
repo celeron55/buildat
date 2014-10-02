@@ -254,14 +254,32 @@ function M.define(dst, util)
 				return util.wrap_instance("Viewport", Viewport:new(scene, camera_component))
 			end),
 		},
+		instance = {
+			GetScene = util.wrap_function({"Viewport"},
+				function(self)
+					return util.wrap_instance("Scene", self:GetScene())
+				end
+			),
+			GetCamera = util.wrap_function({"Viewport"},
+				function(self)
+					return util.wrap_instance("Camera", self:GetCamera())
+				end
+			),
+		},
 	})
 
 	util.wc("Renderer", {
 		instance = {
 			SetViewport = util.wrap_function({"Renderer", "number", "Viewport"},
-			function(self, index, viewport)
-				self:SetViewport(index, viewport)
-			end),
+				function(self, index, viewport)
+					self:SetViewport(index, viewport)
+				end
+			),
+			GetViewport = util.wrap_function({"Renderer", "number"},
+				function(self, index)
+					return util.wrap_instance("Viewport", self:GetViewport(index))
+				end
+			),
 		},
 	})
 

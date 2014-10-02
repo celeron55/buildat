@@ -7,8 +7,9 @@ local magic = unsafe_magic.safe
 local dump = buildat.dump
 local M = {safe = {}}
 
+-- TODO
 --M.safe.scene = getmetatable(magic.Scene).wrap(__buildat_sync_scene)
-M.safe.scene = __buildat_sync_scene
+--M.safe.scene = __buildat_sync_scene
 --__buildat_sandbox_debug_check_value(M.safe.scene)
 
 return M
