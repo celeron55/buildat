@@ -180,20 +180,20 @@ struct Module: public interface::Module, public entitysync::Interface
 				magic::HashSet<uint> nodes_to_process;
 				uint scene_id = scene->GetID();
 				nodes_to_process.Insert(scene_id);
-				sync_node(scene_id, nodes_to_process, scene, scene_state);
+				sync_node(peer, scene_id, nodes_to_process, scene, scene_state);
 
 				nodes_to_process.Insert(scene_state.dirtyNodes_);
 				nodes_to_process.Erase(scene_id);
 
 				while(!nodes_to_process.Empty()){
 					uint node_id = nodes_to_process.Front();
-					sync_node(node_id, nodes_to_process, scene, scene_state);
+					sync_node(peer, node_id, nodes_to_process, scene, scene_state);
 				}
 			}
 		});
 	}
 
-	void sync_node(
+	void sync_node(network::PeerInfo::Id peer,
 			uint node_id, magic::HashSet<uint> &nodes_to_process,
 			magic::Scene *scene, magic::SceneReplicationState &scene_state)
 	{
@@ -205,7 +205,7 @@ struct Module: public interface::Module, public entitysync::Interface
 			// New node
 			Node *n = scene->GetNode(node_id);
 			if(n){
-				sync_new_node(n, nodes_to_process, scene, scene_state);
+				sync_new_node(peer, n, nodes_to_process, scene, scene_state);
 			} else {
 				// Was already deleted
 				log_w(MODULE, "New node was already deleted: %zu", node_id);
@@ -216,16 +216,18 @@ struct Module: public interface::Module, public entitysync::Interface
 			magic::NodeReplicationState &node_state = it->second_;
 			Node *n = node_state.node_;
 			if(!n){
-				// Deleted
-				throw Exception("Deleted node not implemented");
+				// Node was removed
+				magic::VectorBuffer buf;
+				buf.WriteNetID(node_id);
+				send_to_peer(peer, "entitysync:remove_node", buf);
 			} else {
-				sync_existing_node(n, node_state, nodes_to_process,
+				sync_existing_node(peer, n, node_state, nodes_to_process,
 						scene, scene_state);
 			}
 		}
 	}
 
-	void sync_new_node(Node *node,
+	void sync_new_node(network::PeerInfo::Id peer, Node *node,
 			magic::HashSet<uint> &nodes_to_process,
 			Scene *scene, magic::SceneReplicationState &scene_state)
 	{
@@ -234,7 +236,7 @@ struct Module: public interface::Module, public entitysync::Interface
 		for(auto it = deps.Begin(); it != deps.End(); ++it){
 			uint node_id = (*it)->GetID();
 			if(scene_state.dirtyNodes_.Contains(node_id))
-				sync_node(node_id, nodes_to_process, scene, scene_state);
+				sync_node(peer, node_id, nodes_to_process, scene, scene_state);
 		}
 
 		// TODO: One replication state for each client(?)
@@ -270,13 +272,13 @@ struct Module: public interface::Module, public entitysync::Interface
 			component->WriteInitialDeltaUpdate(buf);
 		}
 
-		send_to_all("entitysync:new_node", buf);
+		send_to_peer(peer, "entitysync:new_node", buf);
 
 		node_state.markedDirty_ = false;
 		scene_state.dirtyNodes_.Erase(node->GetID());
 	}
 
-	void sync_existing_node(
+	void sync_existing_node(network::PeerInfo::Id peer,
 			Node *node, magic::NodeReplicationState &node_state,
 			magic::HashSet<uint> &nodes_to_process,
 			Scene *scene, magic::SceneReplicationState &scene_state)
@@ -286,7 +288,7 @@ struct Module: public interface::Module, public entitysync::Interface
 		for(auto it = deps.Begin(); it != deps.End(); ++it){
 			uint node_id = (*it)->GetID();
 			if(scene_state.dirtyNodes_.Contains(node_id))
-				sync_node(node_id, nodes_to_process, scene, scene_state);
+				sync_node(peer, node_id, nodes_to_process, scene, scene_state);
 		}
 
 		// Handle changed attributes
@@ -314,7 +316,7 @@ struct Module: public interface::Module, public entitysync::Interface
 				buf.WriteNetID(node->GetID());
 				node->WriteLatestDataUpdate(buf);
 
-				send_to_all("entitysync:latest_node_data", buf);
+				send_to_peer(peer, "entitysync:latest_node_data", buf);
 			}
 
 			// ?
@@ -341,7 +343,7 @@ struct Module: public interface::Module, public entitysync::Interface
 					}
 				}
 
-				send_to_all("entitysync:node_delta_update", buf);
+				send_to_peer(peer, "entitysync:node_delta_update", buf);
 			}
 
 			node_state.dirtyAttributes_.ClearAll();
@@ -360,7 +362,7 @@ struct Module: public interface::Module, public entitysync::Interface
 				// Component was removed
 				magic::VectorBuffer buf;
 				buf.WriteNetID(component_id);
-				send_to_all("entitysync:remove_component", buf);
+				send_to_peer(peer, "entitysync:remove_component", buf);
 				component_states.Erase(current_it);
 				continue;
 			}
@@ -390,7 +392,7 @@ struct Module: public interface::Module, public entitysync::Interface
 					buf.WriteNetID(component->GetID());
 					component->WriteLatestDataUpdate(buf);
 
-					send_to_all("entitysync:latest_component_data", buf);
+					send_to_peer(peer, "entitysync:latest_component_data", buf);
 				}
 
 				// ?
@@ -401,7 +403,7 @@ struct Module: public interface::Module, public entitysync::Interface
 					component->WriteDeltaUpdate(buf,
 							component_state.dirtyAttributes_);
 
-					send_to_all("entitysync:component_delta_update", buf);
+					send_to_peer(peer, "entitysync:component_delta_update", buf);
 
 					component_state.dirtyAttributes_.ClearAll();
 				}
@@ -432,7 +434,7 @@ struct Module: public interface::Module, public entitysync::Interface
 				buf.WriteNetID(component->GetID());
 				component->WriteInitialDeltaUpdate(buf);
 
-				send_to_all("entitysync:create_component", buf);
+				send_to_peer(peer, "entitysync:create_component", buf);
 			}
 		}
 
@@ -451,7 +453,7 @@ struct Module: public interface::Module, public entitysync::Interface
 		});
 	}
 
-	void send_to_all(const ss_ &name, const magic::VectorBuffer &buf)
+	/*void send_to_all(const ss_ &name, const magic::VectorBuffer &buf)
 	{
 		log_i(MODULE, "%s: Update size: %zu, data=%s",
 				cs(name), buf.GetBuffer().Size(), cs(dump(buf)));
@@ -461,7 +463,7 @@ struct Module: public interface::Module, public entitysync::Interface
 			for(auto &peer : peers)
 				inetwork->send(peer, name, data);
 		});
-	}
+	}*/
 
 #if 0
 	void on_node_added(const interface::MagicEvent &event)
