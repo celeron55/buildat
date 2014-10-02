@@ -35,12 +35,10 @@ ss_ dump(const magic::VectorBuffer &buf)
 {
 	std::ostringstream os(std::ios::binary);
 	os<<"[";
-	bool first = true;
-	for(auto it = buf.GetBuffer().Begin(); it != buf.GetBuffer().End(); ++it){
-		if(!first)
+	for(size_t i = 0; i < buf.GetBuffer().Size(); i++){
+		if(i != 0)
 			os<<", ";
-		first = false;
-		os<<(*it);
+		os<<cs(buf.GetBuffer().At(i));
 	}
 	os<<"]";
 	return os.str();
@@ -102,10 +100,10 @@ struct Module: public interface::Module, public entitysync::Interface
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
-		EVENT_VOIDN("core:start",            on_start)
-		EVENT_VOIDN("core:unload",           on_unload)
-		EVENT_VOIDN("core:continue",         on_continue)
-		EVENT_TYPEN("core:tick",             on_tick, interface::TickEvent)
+		EVENT_VOIDN("core:start",			on_start)
+		EVENT_VOIDN("core:unload",		   on_unload)
+		EVENT_VOIDN("core:continue",		 on_continue)
+		EVENT_TYPEN("core:tick",			 on_tick, interface::TickEvent)
 #if 0
 		EVENT_TYPEN("entitysync:node_added",
 				on_node_added, interface::MagicEvent)
@@ -210,6 +208,7 @@ struct Module: public interface::Module, public entitysync::Interface
 		node->WriteInitialDeltaUpdate(buf);
 
 		// TODO: User variables (see Network/Connection.cpp)
+		buf.WriteVLE(0);
 
 		// Components
 		buf.WriteVLE(node->GetNumNetworkComponents());
@@ -271,6 +270,18 @@ struct Module: public interface::Module, public entitysync::Interface
 
 				buf.WriteNetID(node->GetID());
 				node->WriteLatestDataUpdate(buf);
+
+				send_to_all("entitysync:latest_node_data", buf);
+			}
+
+			if(node_state.dirtyAttributes_.Count() || node_state.dirtyVars_.Size()){
+				magic::VectorBuffer buf;
+
+				buf.WriteNetID(node->GetID());
+				node->WriteDeltaUpdate(buf, node_state.dirtyAttributes_);
+
+				// TODO: User variables
+				buf.WriteVLE(0);
 
 				send_to_all("entitysync:latest_node_data", buf);
 			}
