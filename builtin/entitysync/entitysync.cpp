@@ -18,6 +18,7 @@
 #include <CoreEvents.h>
 #include <SceneEvents.h>
 #include <ReplicationState.h>
+#include <Component.h>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/vector.hpp>
 #include <cereal/types/tuple.hpp>
@@ -26,6 +27,7 @@ using interface::Event;
 namespace magic = Urho3D;
 using magic::Node;
 using magic::Scene;
+using magic::Component;
 
 namespace entitysync {
 
@@ -181,7 +183,7 @@ struct Module: public interface::Module, public entitysync::Interface
 				sync_node(node_id, nodes_to_process, scene, scene_state);
 		}
 
-		node->PrepareNetworkUpdate();
+		node->PrepareNetworkUpdate(); // ?
 
 		// TODO: One replication state for each client(?)
 		magic::NodeReplicationState &node_state =
@@ -197,7 +199,24 @@ struct Module: public interface::Module, public entitysync::Interface
 
 		// TODO: User variables (see Network/Connection.cpp)
 
-		// TODO: Components
+		// Components
+		buf.WriteVLE(node->GetNumNetworkComponents());
+		auto &components = node->GetComponents();
+		for(uint i = 0; i<components.Size(); i++){
+			Component *component = components[i];
+			if(component->GetID() >= magic::FIRST_LOCAL_ID)
+				continue;
+			component->PrepareNetworkUpdate(); // ?
+			magic::ComponentReplicationState &component_state =
+					node_state.componentStates_[component->GetID()];
+			//component_state.connection_ = nullptr;
+			component_state.nodeState_ = &node_state;
+			component_state.component_ = component;
+			component->AddReplicationState(&component_state);
+			buf.WriteStringHash(component->GetType());
+			buf.WriteNetID(component->GetID());
+			component->WriteInitialDeltaUpdate(buf);
+		}
 
 		sv_<int> v(&buf.GetBuffer().Front(),
 				(&buf.GetBuffer().Front()) + buf.GetBuffer().Size());
@@ -210,6 +229,9 @@ struct Module: public interface::Module, public entitysync::Interface
 			for(auto &peer : peers)
 				inetwork->send(peer, "entitysync:new_node", data);
 		});
+
+		node_state.markedDirty_ = false;
+		scene_state.dirtyNodes_.Erase(node->GetID());
 	}
 
 #if 0
