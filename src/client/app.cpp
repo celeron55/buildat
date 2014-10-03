@@ -322,22 +322,19 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(fatal_error)
 		DEF_BUILDAT_FUNC(disconnect)
 
-		ss_ init_lua_path = g_client_config.share_path+"/client/init.lua";
-		int error = luaL_dofile(L, init_lua_path.c_str());
-		if(error){
-			log_w(MODULE, "luaL_dofile: An error occurred: %s\n",
-					lua_tostring(L, -1));
-			lua_pop(L, 1);
-			throw AppStartupError("Could not initialize Lua environment");
-		}
-
 		// Create a scene that will be synchronized from the server
 		m_scene = new magic::Scene(context_);
 		m_scene->CreateComponent<magic::Octree>(magic::LOCAL);
 
 		// Create a camera and a viewport for the scene. The scene can then be
 		// accessed in Lua by magic.renderer:GetViewport(0):GetScene().
-		m_camera_node = m_scene->CreateChild("Camera", magic::LOCAL);
+
+		// NOTE: These are accessed, stored and removed by
+		//       client/replication.lua, and extensions/replicate exposes the
+		//       scene as a clean API.
+
+		m_camera_node = m_scene->CreateChild(
+				"__buildat_replicated_scene_camera", magic::LOCAL);
 		magic::Camera* camera =
 				m_camera_node->CreateComponent<magic::Camera>(magic::LOCAL);
 		camera->SetFarClip(300.0f);
@@ -357,6 +354,16 @@ struct CApp: public App, public magic::Application
 		f->BeginCall();
 		f->PushUserType(m_scene.Get(), "Scene");
 		f->EndCall();*/
+
+		// Run initial client Lua scripts
+		ss_ init_lua_path = g_client_config.share_path+"/client/init.lua";
+		int error = luaL_dofile(L, init_lua_path.c_str());
+		if(error){
+			log_w(MODULE, "luaL_dofile: An error occurred: %s\n",
+					lua_tostring(L, -1));
+			lua_pop(L, 1);
+			throw AppStartupError("Could not initialize Lua environment");
+		}
 
 		// Launch menu if requested
 		if(g_client_config.boot_to_menu){

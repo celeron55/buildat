@@ -128,6 +128,18 @@ SubscribeToEvent(object, event_name, callback)
 - Return value: Name of the generated global callback which can be unusbscbribed
   from Urho3D via UnsubscribeFromEvent(event_name, callback_name).
 
+replicate
+---------
+Interface to server->client synchronized (replicated) scenes.
+
+replicate.main_scene
+- Main replicated scene instance. To show it on screen, add a camera and a
+  viewport. Add your local stuff to this as needed.
+- You don't have to use this if you wish to synchronize your scene in a custom
+  way.
+- Remember to specify magic.LOCAL to both CreateNode and CreateComponent,
+  otherwise they will end up in the synchronized ID space and will be overridden
+  by data coming from the server.
 
 Unsafe interfaces of built-in extensions
 ========================================

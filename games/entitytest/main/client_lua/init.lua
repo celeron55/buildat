@@ -6,16 +6,19 @@ local log = buildat.Logger("entitytest")
 local dump = buildat.dump
 local cereal = require("buildat/extension/cereal")
 local magic = require("buildat/extension/urho3d")
+local replicate = require("buildat/extension/replicate")
 
--- 3D things
+local scene = replicate.main_scene
 
--- Viewport 0 is created in C++. It is set to view the network-synchronized
--- scene with one camera.
--- NOTE: This won't work this way in the future.
-local viewport = magic.renderer:GetViewport(0)
-local scene = viewport:GetScene()
-local camera = viewport:GetCamera()
-scene:CreateComponent("Octree")
+-- Add a camera so we can look at the scene
+local camera_node = scene:CreateChild("Camera")
+camera_node:CreateComponent("Camera")
+camera_node.position = magic.Vector3(7.0, 7.0, 7.0)
+camera_node:LookAt(magic.Vector3(0, 1, 0))
+
+-- And this thing so the camera is shown on the screen
+local viewport = magic.Viewport:new(scene, camera_node:GetComponent("Camera"))
+magic.renderer:SetViewport(0, viewport)
 
 -- Add some text
 local title_text = magic.ui.root:CreateChild("Text")
