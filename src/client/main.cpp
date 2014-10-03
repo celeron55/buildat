@@ -115,8 +115,11 @@ int main(int argc, char *argv[])
 		app0->set_state(state);
 
 		if(config.server_address != ""){
-			if(!state->connect(config.server_address, "20000"))
+			ss_ error;
+			if(!state->connect(config.server_address, &error)){
+				log_e(MODULE, "Connect failed: %s", cs(error));
 				return 1;
+			}
 		} else {
 			config.boot_to_menu = true;
 		}

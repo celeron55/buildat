@@ -7,7 +7,6 @@
 #include "interface/fs.h"
 #include <c55/getopt.h>
 #include <c55/os.h>
-#include <c55/string_util.h>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Application.h>
@@ -1022,35 +1021,9 @@ struct CApp: public App, public magic::Application
 		lua_pop(L, 1);
 
 		ss_ address = lua_tocppstring(L, 1);
-		if(address.empty()){
-			log_w(MODULE, "connect_server(): Cannot connect to empty address");
-			lua_pushboolean(L, false);
-			return 2;
-		}
-		ss_ host;
-		ss_ port;
-		c55::Strfnd f(address);
-		if(address[0] == '['){
-			f.next("[");
-			host = f.next("]");
-			f.next(":");
-			port = f.next("");
-		} else {
-			host = f.next(":");
-			port = f.next("");
-		}
-
-		if(host == ""){
-			log_w(MODULE, "connect_server(): Cannot connect to empty host");
-			lua_pushboolean(L, false);
-			return 2;
-		}
-		if(port == ""){
-			port = "20000";
-		}
 
 		ss_ error;
-		bool ok = self->m_state->connect(host, port, &error);
+		bool ok = self->m_state->connect(address, &error);
 		lua_pushboolean(L, ok);
 		if(ok)
 			lua_pushnil(L);

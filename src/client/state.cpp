@@ -8,6 +8,7 @@
 #include "interface/packet_stream.h"
 #include "interface/sha1.h"
 #include "interface/fs.h"
+#include <c55/string_util.h>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
 #pragma GCC diagnostic push
@@ -72,7 +73,7 @@ struct CState: public State
 		}
 	}
 
-	bool connect(const ss_ &address, const ss_ &port, ss_ *error)
+	bool connect_host_port(const ss_ &address, const ss_ &port, ss_ *error)
 	{
 		if(m_connected){
 			log_i(MODULE, "client::State: Cannot re-use state for new connection");
@@ -93,6 +94,37 @@ struct CState: public State
 				*error = "Connect failed";
 		}
 		return ok;
+	}
+
+	bool connect(const ss_ &address, ss_ *error)
+	{
+		if(address.empty()){
+			if(error)
+				*error = "Cannot connect to empty address";
+			return false;
+		}
+		ss_ host;
+		ss_ port;
+		c55::Strfnd f(address);
+		if(address[0] == '['){
+			f.next("[");
+			host = f.next("]");
+			f.next(":");
+			port = f.next("");
+		} else {
+			host = f.next(":");
+			port = f.next("");
+		}
+
+		if(host == ""){
+			if(error)
+				*error = "Cannot connect to empty host";
+			return false;
+		}
+		if(port == ""){
+			port = "20000";
+		}
+		return connect_host_port(host, port, error);
 	}
 
 	void send_packet(const ss_ &name, const ss_ &data)
