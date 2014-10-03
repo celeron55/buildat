@@ -5,13 +5,13 @@ set(CMAKE_CXX_FLAGS "-std=c++11 -Wall -Werror -g -Wextra -Wshadow -pedantic ${CM
 
 include_directories(./include)
 
-add_subdirectory(sandbox)
-
-find_package(Boost COMPONENTS serialization unit_test_framework)
-if(Boost_FOUND)
-  enable_testing()
-  #add_subdirectory(unittests) # Disabled
-endif(Boost_FOUND)
+#add_subdirectory(sandbox)
+#
+#find_package(Boost COMPONENTS serialization unit_test_framework)
+#if(Boost_FOUND)
+#  enable_testing()
+#  add_subdirectory(unittests) # Disabled
+#endif(Boost_FOUND)
 
 find_package(Doxygen)
 if(DOXYGEN_FOUND)
