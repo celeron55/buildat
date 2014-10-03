@@ -1,7 +1,5 @@
 Buildat TODO
 ============
-- Cache a hash of each compiled module in order not to rebuild them
-  unnecessarily
 - Modules should be run in threads.
 - Include hmmmm/kwolekr's MT noise under interfaces (Simplified BSD)
 - Design how to manage scenes in a future-proof way

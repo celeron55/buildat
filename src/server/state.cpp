@@ -11,6 +11,7 @@
 #include "interface/file_watch.h"
 #include "interface/fs.h"
 #include "interface/magic_event.h"
+#include "interface/sha1.h"
 //#include "interface/thread.h"
 #include "interface/mutex.h"
 #include <c55/string_util.h>
@@ -78,6 +79,18 @@ static sv_<ss_> list_includes(const ss_ &path, const sv_<ss_> &include_dirs)
 		}
 	}
 	return result;
+}
+
+static ss_ hash_files(const sv_<ss_> &paths)
+{
+	std::ostringstream os(std::ios::binary);
+	for(const ss_ &path : paths){
+		std::ifstream f(path);
+		std::string content((std::istreambuf_iterator<char>(f)),
+				std::istreambuf_iterator<char>());
+		os<<content;
+	}
+	return interface::sha1::calculate(os.str());
 }
 
 struct BuildatResourceRouter : public magic::ResourceRouter
@@ -365,6 +378,28 @@ struct CState: public State, public interface::Server
 		log_d(MODULE, "extra_ldflags: %s", cs(extra_ldflags));
 
 		bool skip_compile = g_server_config.skip_compiling_modules.count(info.name);
+
+		if(!skip_compile){
+			sv_<ss_> files_to_hash = {init_cpp_path};
+			files_to_hash.insert(
+					files_to_hash.begin(), includes.begin(), includes.end());
+			ss_ hash = hash_files(files_to_hash);
+			log_d(MODULE, "Hash: %s", cs(interface::sha1::hex(hash)));
+			ss_ hashfile_path = build_dst+".hash";
+			ss_ previous_hash;
+			{
+				std::ifstream f(hashfile_path);
+				previous_hash = ss_((std::istreambuf_iterator<char>(f)),
+						std::istreambuf_iterator<char>());
+			}
+			if(previous_hash == hash){
+				log_v(MODULE, "No need to recompile %s", cs(info.name));
+				skip_compile = true;
+			} else {
+				std::ofstream f(hashfile_path);
+				f<<hash;
+			}
+		}
 
 		m_compiler->include_directories.push_back(m_modules_path);
 		bool build_ok = m_compiler->build(info.name, init_cpp_path, build_dst,
