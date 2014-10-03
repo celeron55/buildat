@@ -193,9 +193,16 @@ function M.define(dst, util)
 			end,
 		},
 		instance = {
-			CreateChild = util.wrap_function({"Node", "string"}, function(self, name)
-				return util.wrap_instance("Node", self:CreateChild(name))
-			end),
+			CreateChild = util.wrap_function({"Node", "string",
+					{"number", "__nil"}},
+				function(self, name, mode)
+					if mode ~= nil then
+						return util.wrap_instance("Node", self:CreateChild(name, mode))
+					else
+						return util.wrap_instance("Node", self:CreateChild(name))
+					end
+				end
+			),
 			CreateComponent = util.wrap_function(
 					{"Node", "string", {"number", "__nil"}},
 				function(self, name, mode)
