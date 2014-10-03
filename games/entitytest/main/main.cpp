@@ -1,7 +1,7 @@
 #include "core/log.h"
 #include "client_file/api.h"
 #include "network/api.h"
-#include "entitysync/api.h"
+#include "replicate/api.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"

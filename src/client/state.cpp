@@ -296,7 +296,7 @@ void CState::setup_packet_handlers()
 		m_app->file_updated_in_cache(file_name, file_hash, path);
 	};
 
-	m_packet_handlers["entitysync:create_node"] =
+	m_packet_handlers["replicate:create_node"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
 		// For a reference implementation of this kind of network
@@ -352,13 +352,13 @@ void CState::setup_packet_handlers()
 		}
 	};
 
-	m_packet_handlers["entitysync:create_component"] =
+	m_packet_handlers["replicate:create_component"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
 		log_w("TODO: %s", cs(packet_name));
 	};
 
-	m_packet_handlers["entitysync:latest_node_data"] =
+	m_packet_handlers["replicate:latest_node_data"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
 		magic::Scene *scene = m_app->get_scene();
@@ -373,7 +373,7 @@ void CState::setup_packet_handlers()
 		}
 	};
 
-	m_packet_handlers["entitysync:latest_component_data"] =
+	m_packet_handlers["replicate:latest_component_data"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
 		magic::Scene *scene = m_app->get_scene();
@@ -389,25 +389,25 @@ void CState::setup_packet_handlers()
 		}
 	};
 
-	m_packet_handlers["entitysync:node_delta_update"] =
+	m_packet_handlers["replicate:node_delta_update"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
 		log_w("TODO: %s", cs(packet_name));
 	};
 
-	m_packet_handlers["entitysync:component_delta_update"] =
+	m_packet_handlers["replicate:component_delta_update"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
 		log_w("TODO: %s", cs(packet_name));
 	};
 
-	m_packet_handlers["entitysync:remove_node"] =
+	m_packet_handlers["replicate:remove_node"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
 		log_w("TODO: %s", cs(packet_name));
 	};
 
-	m_packet_handlers["entitysync:remove_component"] =
+	m_packet_handlers["replicate:remove_component"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
 		log_w("TODO: %s", cs(packet_name));

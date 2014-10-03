@@ -12,7 +12,7 @@ namespace Urho3D
 	class Scene;
 };
 
-namespace entitysync
+namespace replicate
 {
 	namespace magic = Urho3D;
 
@@ -21,10 +21,10 @@ namespace entitysync
 	};
 
 	inline bool access(interface::Server *server,
-			std::function<void(entitysync::Interface*)> cb)
+			std::function<void(replicate::Interface*)> cb)
 	{
-		return server->access_module("entitysync", [&](interface::Module * module){
-			cb((entitysync::Interface*)module->check_interface());
+		return server->access_module("replicate", [&](interface::Module * module){
+			cb((replicate::Interface*)module->check_interface());
 		});
 	}
 }

@@ -1,7 +1,7 @@
--- Buildat: extension/entitysync/init.lua
+-- Buildat: extension/replicate/init.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
-local log = buildat.Logger("extension/entitysync")
+local log = buildat.Logger("extension/replicate")
 local unsafe_magic = require("buildat/extension/urho3d")
 local magic = unsafe_magic.safe
 local dump = buildat.dump

@@ -1,6 +1,6 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
-#include "entitysync/api.h"
+#include "replicate/api.h"
 #include "core/log.h"
 #include "network/api.h"
 #include "interface/module.h"
@@ -29,7 +29,7 @@ using magic::Node;
 using magic::Scene;
 using magic::Component;
 
-namespace entitysync {
+namespace replicate {
 
 ss_ dump(const magic::VectorBuffer &buf)
 {
@@ -49,7 +49,7 @@ ss_ buf_to_string(const magic::VectorBuffer &buf)
 	return ss_((const char*)&buf.GetBuffer().Front(), buf.GetBuffer().Size());
 }
 
-struct Module: public interface::Module, public entitysync::Interface
+struct Module: public interface::Module, public replicate::Interface
 {
 	interface::Server *m_server;
 	// NOTE: We use pointers to SceneReplicationStates as Connection pointers in
@@ -58,15 +58,15 @@ struct Module: public interface::Module, public entitysync::Interface
 	sm_<network::PeerInfo::Id, magic::SceneReplicationState> m_scene_states;
 
 	Module(interface::Server *server):
-		interface::Module("entitysync"),
+		interface::Module("replicate"),
 		m_server(server)
 	{
-		log_v(MODULE, "entitysync construct");
+		log_v(MODULE, "replicate construct");
 	}
 
 	~Module()
 	{
-		log_v(MODULE, "entitysync destruct");
+		log_v(MODULE, "replicate destruct");
 		m_server->access_scene([&](magic::Scene *scene){
 			for(auto &pair : m_scene_states){
 				magic::SceneReplicationState &scene_state = pair.second;
@@ -77,7 +77,7 @@ struct Module: public interface::Module, public entitysync::Interface
 
 	void init()
 	{
-		log_v(MODULE, "entitysync init");
+		log_v(MODULE, "replicate init");
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));
@@ -108,12 +108,12 @@ struct Module: public interface::Module, public entitysync::Interface
 
 	void on_new_client(const network::NewClient &new_client)
 	{
-		log_i(MODULE, "entitysync::on_new_client: id=%zu", new_client.info.id);
+		log_i(MODULE, "replicate::on_new_client: id=%zu", new_client.info.id);
 	}
 
 	void on_client_disconnected(const network::OldClient &old_client)
 	{
-		log_i(MODULE, "entitysync::on_client_disconnected: id=%zu",
+		log_i(MODULE, "replicate::on_client_disconnected: id=%zu",
 				old_client.info.id);
 		auto peer = old_client.info.id;
 		auto it = m_scene_states.find(peer);
@@ -132,7 +132,7 @@ struct Module: public interface::Module, public entitysync::Interface
 
 	void on_tick(const interface::TickEvent &event)
 	{
-		log_d(MODULE, "entitysync::on_tick");
+		log_d(MODULE, "replicate::on_tick");
 
 		sync_changes();
 	}
@@ -198,7 +198,7 @@ struct Module: public interface::Module, public entitysync::Interface
 				// Node was removed
 				magic::VectorBuffer buf;
 				buf.WriteNetID(node_id);
-				send_to_peer(peer, "entitysync:remove_node", buf);
+				send_to_peer(peer, "replicate:remove_node", buf);
 			} else {
 				sync_existing_node(peer, n, node_state, nodes_to_process,
 						scene, scene_state);
@@ -255,7 +255,7 @@ struct Module: public interface::Module, public entitysync::Interface
 			component->WriteInitialDeltaUpdate(buf);
 		}
 
-		send_to_peer(peer, "entitysync:create_node", buf);
+		send_to_peer(peer, "replicate:create_node", buf);
 
 		node_state.markedDirty_ = false;
 		scene_state.dirtyNodes_.Erase(node->GetID());
@@ -299,7 +299,7 @@ struct Module: public interface::Module, public entitysync::Interface
 				buf.WriteNetID(node->GetID());
 				node->WriteLatestDataUpdate(buf);
 
-				send_to_peer(peer, "entitysync:latest_node_data", buf);
+				send_to_peer(peer, "replicate:latest_node_data", buf);
 			}
 
 			// ?
@@ -326,7 +326,7 @@ struct Module: public interface::Module, public entitysync::Interface
 					}
 				}
 
-				send_to_peer(peer, "entitysync:node_delta_update", buf);
+				send_to_peer(peer, "replicate:node_delta_update", buf);
 			}
 
 			node_state.dirtyAttributes_.ClearAll();
@@ -345,7 +345,7 @@ struct Module: public interface::Module, public entitysync::Interface
 				// Component was removed
 				magic::VectorBuffer buf;
 				buf.WriteNetID(component_id);
-				send_to_peer(peer, "entitysync:remove_component", buf);
+				send_to_peer(peer, "replicate:remove_component", buf);
 				component_states.Erase(current_it);
 				continue;
 			}
@@ -375,7 +375,7 @@ struct Module: public interface::Module, public entitysync::Interface
 					buf.WriteNetID(component->GetID());
 					component->WriteLatestDataUpdate(buf);
 
-					send_to_peer(peer, "entitysync:latest_component_data", buf);
+					send_to_peer(peer, "replicate:latest_component_data", buf);
 				}
 
 				// ?
@@ -386,7 +386,7 @@ struct Module: public interface::Module, public entitysync::Interface
 					component->WriteDeltaUpdate(buf,
 							component_state.dirtyAttributes_);
 
-					send_to_peer(peer, "entitysync:component_delta_update", buf);
+					send_to_peer(peer, "replicate:component_delta_update", buf);
 
 					component_state.dirtyAttributes_.ClearAll();
 				}
@@ -417,7 +417,7 @@ struct Module: public interface::Module, public entitysync::Interface
 				buf.WriteNetID(component->GetID());
 				component->WriteInitialDeltaUpdate(buf);
 
-				send_to_peer(peer, "entitysync:create_component", buf);
+				send_to_peer(peer, "replicate:create_component", buf);
 			}
 		}
 
@@ -457,7 +457,7 @@ struct Module: public interface::Module, public entitysync::Interface
 };
 
 extern "C" {
-	EXPORT void* createModule_entitysync(interface::Server *server){
+	EXPORT void* createModule_replicate(interface::Server *server){
 		return (void*)(new Module(server));
 	}
 }
