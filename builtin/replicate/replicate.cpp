@@ -457,7 +457,7 @@ struct Module: public interface::Module, public replicate::Interface
 };
 
 extern "C" {
-	EXPORT void* createModule_replicate(interface::Server *server){
+	BUILDAT_EXPORT void* createModule_replicate(interface::Server *server){
 		return (void*)(new Module(server));
 	}
 }

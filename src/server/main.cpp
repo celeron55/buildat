@@ -13,10 +13,16 @@
 #include <Engine.h>
 #include <Scene.h>
 #pragma GCC diagnostic pop
+#ifdef _WIN32
+#	include "ports/windows_sockets.h"
+#	include "ports/windows_compat.h"
+#else
+#	include <unistd.h>
+#endif
 #include <iostream>
-#include <unistd.h>
 #include <signal.h>
 #include <string.h> // strerror()
+#include <time.h> // struct timeval
 #define MODULE "main"
 
 namespace magic = Urho3D;
@@ -38,7 +44,9 @@ void sigint_handler(int sig)
 void signal_handler_init()
 {
 	(void)signal(SIGINT, sigint_handler);
+#ifndef _WIN32
 	(void)signal(SIGPIPE, SIG_IGN);
+#endif
 }
 
 void basic_init()
@@ -46,9 +54,15 @@ void basic_init()
 	signal_handler_init();
 
 	// Force '.' as decimal point
-	std::locale::global(std::locale(std::locale(""), "C", std::locale::numeric));
+	try{
+		std::locale::global(std::locale(std::locale(""), "C", std::locale::numeric));
+	} catch(std::runtime_error &e){
+		// Can happen on Wine
+		fprintf(stderr, "Failed to set numeric C++ locale\n");
+	}
 	setlocale(LC_NUMERIC, "C");
 
+	log_init();
 	log_set_max_level(LOG_VERBOSE);
 }
 

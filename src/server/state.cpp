@@ -34,6 +34,12 @@
 #include <fstream>
 #define MODULE "__state"
 
+#ifdef _WIN32
+#	define MODULE_EXTENSION "dll"
+#else
+#	define MODULE_EXTENSION "so"
+#endif
+
 using interface::Event;
 namespace magic = Urho3D;
 
@@ -86,9 +92,15 @@ static ss_ hash_files(const sv_<ss_> &paths)
 	std::ostringstream os(std::ios::binary);
 	for(const ss_ &path : paths){
 		std::ifstream f(path);
-		std::string content((std::istreambuf_iterator<char>(f)),
-				std::istreambuf_iterator<char>());
-		os<<content;
+		try{
+			std::string content((std::istreambuf_iterator<char>(f)),
+					std::istreambuf_iterator<char>());
+			os<<content;
+		} catch(std::ios_base::failure &e){
+			// Just ignore errors
+			log_w(MODULE, "hash_files: failed to read file %s: %s",
+					cs(path), e.what());
+		}
 	}
 	return interface::sha1::calculate(os.str());
 }
@@ -145,22 +157,22 @@ struct MagicEventHandler: public magic::Object
 		if(event_type == magic::E_NODEADDED ||
 				event_type == magic::E_NODEREMOVED){
 			magic::Node *parent = static_cast<magic::Node*>(
-					event_data["Parent"].Get<void*>());
+					event_data["Parent"].GetVoidPtr());
 			event_data["ParentID"] = parent->GetID();
 			event_data.Erase("Parent");
 			magic::Node *node = static_cast<magic::Node*>(
-					event_data["Node"].Get<void*>());
+					event_data["Node"].GetVoidPtr());
 			event_data["NodeID"] = node->GetID();
 			event_data.Erase("Node");
 		}
 		if(event_type == magic::E_COMPONENTADDED ||
 				event_type == magic::E_COMPONENTREMOVED){
 			magic::Node *node = static_cast<magic::Node*>(
-					event_data["Node"].Get<void*>());
+					event_data["Node"].GetVoidPtr());
 			event_data["NodeID"] = node->GetID();
 			event_data.Erase("Node");
 			magic::Component *c = static_cast<magic::Component*>(
-					event_data["Component"].Get<void*>());
+					event_data["Component"].GetVoidPtr());
 			event_data["ComponentID"] = c->GetID();
 			event_data.Erase("Component");
 		}
@@ -345,7 +357,7 @@ struct CState: public State, public interface::Server
 		log_i(MODULE, "Loading module %s from %s", cs(info.name), cs(info.path));
 
 		ss_ build_dst = g_server_config.rccpp_build_path +
-				"/"+info.name+".so";
+				"/"+info.name+"."+MODULE_EXTENSION;
 		ss_ init_cpp_path = info.path+"/"+info.name+".cpp";
 
 		// Set up file watch
@@ -374,30 +386,45 @@ struct CState: public State, public interface::Server
 
 		ss_ extra_cxxflags = info.meta.cxxflags;
 		ss_ extra_ldflags = info.meta.ldflags;
+#ifdef _WIN32
+		extra_cxxflags += " "+info.meta.cxxflags_windows;
+		extra_ldflags += " "+info.meta.ldflags_windows;
+		// Always include these to make life easier
+		extra_ldflags += " -lwsock32 -lws2_32";
+#else
+		extra_cxxflags += " "+info.meta.cxxflags_linux;
+		extra_ldflags += " "+info.meta.ldflags_linux;
+#endif
 		log_d(MODULE, "extra_cxxflags: %s", cs(extra_cxxflags));
 		log_d(MODULE, "extra_ldflags: %s", cs(extra_ldflags));
 
 		bool skip_compile = g_server_config.skip_compiling_modules.count(info.name);
 
 		if(!skip_compile){
-			sv_<ss_> files_to_hash = {init_cpp_path};
-			files_to_hash.insert(
-					files_to_hash.begin(), includes.begin(), includes.end());
-			ss_ hash = hash_files(files_to_hash);
-			log_d(MODULE, "Hash: %s", cs(interface::sha1::hex(hash)));
-			ss_ hashfile_path = build_dst+".hash";
-			ss_ previous_hash;
-			{
-				std::ifstream f(hashfile_path);
-				previous_hash = ss_((std::istreambuf_iterator<char>(f)),
-						std::istreambuf_iterator<char>());
-			}
-			if(previous_hash == hash){
-				log_v(MODULE, "No need to recompile %s", cs(info.name));
-				skip_compile = true;
+			if(!std::ifstream(build_dst).good()){
+				// Result file does not exist at all
 			} else {
-				std::ofstream f(hashfile_path);
-				f<<hash;
+				sv_<ss_> files_to_hash = {init_cpp_path};
+				files_to_hash.insert(
+						files_to_hash.begin(), includes.begin(), includes.end());
+				ss_ hash = hash_files(files_to_hash);
+				log_d(MODULE, "Hash: %s", cs(interface::sha1::hex(hash)));
+				ss_ hashfile_path = build_dst+".hash";
+				ss_ previous_hash;
+				{
+					std::ifstream f(hashfile_path);
+					if(f.good()){
+						previous_hash = ss_((std::istreambuf_iterator<char>(f)),
+								std::istreambuf_iterator<char>());
+					}
+				}
+				if(previous_hash == hash){
+					log_v(MODULE, "No need to recompile %s", cs(info.name));
+					skip_compile = true;
+				} else {
+					std::ofstream f(hashfile_path);
+					f<<hash;
+				}
 			}
 		}
 

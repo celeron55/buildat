@@ -28,7 +28,8 @@ does not exist.
 
 Use std::unique_ptr and std::shared_ptr. (core/types.h: up_<> and sp_<>)
 
-Header files must have zero preprocessor conditionals.
+Header files must have zero preprocessor conditionals, with the exception of
+headers in src/ports/.
 
 Function naming:
 - Suffix _u: Unsafe, not included in public interface

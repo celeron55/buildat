@@ -10,6 +10,7 @@
 #include <cinttypes> // PRId64
 #include <sstream>
 #include <memory>
+#include <stdio.h> // snprintf
 
 typedef unsigned int uint;
 typedef unsigned char uchar;

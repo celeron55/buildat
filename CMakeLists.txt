@@ -35,7 +35,17 @@ if("${URHO3D_HOME}" STREQUAL "")
 endif()
 
 set(CMAKE_MODULE_PATH ${URHO3D_HOME}/Source/CMake/Modules PATH "Path to Urho3D-specific CMake modules")
-include(Urho3D-CMake-common)
+
+if(MINGW)
+	# Urho3D Does some stupid things when MinGW is set, messing up our
+	# precious core/exe linking stage
+	set(MINGW 0)
+	include(Urho3D-CMake-common)
+	set(MINGW 1)
+else()
+	include(Urho3D-CMake-common)
+endif()
+
 find_package(Urho3D REQUIRED)
 include_directories(${URHO3D_INCLUDE_DIRS})
 
@@ -64,6 +74,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib") # Static libs
 
 set(CLIENT_EXE_NAME buildat_client)
 set(SERVER_EXE_NAME buildat_server)
+set(SERVER_CORE_NAME buildat_server_core)
 
 if(BUILD_CLIENT)
 	# Client
@@ -88,35 +99,61 @@ if(BUILD_CLIENT)
 		${ABSOLUTE_PATH_LIBS}
 		${LINK_LIBS_ONLY}
 	)
+	if(WIN32)
+		target_link_libraries(${CLIENT_EXE_NAME}
+			${URHO3D_HOME}/Build/ThirdParty/Lua/libLua.a
+		)
+	endif()
 endif(BUILD_CLIENT)
 
 if(BUILD_SERVER)
-	# Server
-	set(SERVER_SRCS
-		src/server/main.cpp
-		src/server/state.cpp
-		src/server/rccpp.cpp
-		src/server/config.cpp
+	# Server core library - shared code between executable and modules
+	set(SERVER_CORE_SRCS
 		src/core/log.cpp
 		src/core/json.cpp
 		src/impl/fs.cpp
 		src/impl/event.cpp
 		src/impl/tcpsocket.cpp
 		src/impl/module.cpp
-		src/impl/linux/file_watch.cpp
-		src/impl/linux/process.cpp
 		src/impl/sha1.cpp
 		src/impl/packet_stream.cpp
+	)
+	if(WIN32)
+		set(SERVER_CORE_SRCS ${SERVER_CORE_SRCS} src/impl/windows/file_watch.cpp)
+		set(SERVER_CORE_SRCS ${SERVER_CORE_SRCS} src/impl/windows/process.cpp)
+	else()
+		set(SERVER_CORE_SRCS ${SERVER_CORE_SRCS} src/impl/linux/file_watch.cpp)
+		set(SERVER_CORE_SRCS ${SERVER_CORE_SRCS} src/impl/linux/process.cpp)
+	endif()
+	add_library(${SERVER_CORE_NAME} SHARED ${SERVER_CORE_SRCS})
+	target_link_libraries(${SERVER_CORE_NAME}
+		c55lib
+		smallsha1
+	)
+	if(WIN32)
+		target_link_libraries(${SERVER_CORE_NAME} wsock32 ws2_32)
+	endif()
+
+	# Server
+	set(SERVER_SRCS
+		src/server/main.cpp
+		src/server/state.cpp
+		src/server/rccpp.cpp
+		src/server/config.cpp
 	)
 	add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
 
 	target_link_libraries(${SERVER_EXE_NAME}
+		${SERVER_CORE_NAME}
 		c55lib
 		smallsha1
-		dl
 		${ABSOLUTE_PATH_LIBS}
 		${LINK_LIBS_ONLY}
 	)
+	if(WIN32)
+	else()
+		target_link_libraries(${SERVER_EXE_NAME} dl)
+	endif()
 endif(BUILD_SERVER)
 
 # vim: set noet ts=4 sw=4:

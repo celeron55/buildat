@@ -6,13 +6,17 @@
 #include <string>
 #include <vector>
 
-#ifdef _WIN32 // WINDOWS
+/*#ifdef _WIN32 // WINDOWS
 #define DIR_DELIM "\\"
 #define DIR_DELIM_C '\\'
 #else // POSIX
 #define DIR_DELIM "/"
 #define DIR_DELIM_C '/'
-#endif
+#endif*/
+
+// Always use /
+#define DIR_DELIM "/"
+#define DIR_DELIM_C '/'
 
 namespace c55fs
 {

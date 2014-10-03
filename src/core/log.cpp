@@ -7,9 +7,13 @@
 #include <ctime>
 #include <cstring>
 #include <cstdarg>
-#include <pthread.h>
+#ifdef _WIN32
+#	include "ports/windows_compat.h"
+#else
+#	include <pthread.h>
+#endif
 
-pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t log_mutex;
 
 const int LOG_FATAL = 0;
 const int LOG_ERROR = 1;
@@ -19,11 +23,22 @@ const int LOG_VERBOSE = 4;
 const int LOG_DEBUG = 5;
 const int LOG_TRACE = 6;
 
+#ifdef _WIN32
+const bool use_colors = false;
+#else
+const bool use_colors = true;
+#endif
+
 bool line_begin = true;
 int current_level = 0;
 //int max_level = LOG_DEBUG;
 int max_level = LOG_INFO;
 FILE *file = NULL;
+
+void log_init()
+{
+	pthread_mutex_init(&log_mutex, NULL);
+}
 
 void log_set_max_level(int level)
 {
@@ -69,7 +84,8 @@ void log_nl_nolock()
 			fflush(file);
 		} else {
 			fprintf(stderr, "\n");
-			fprintf(stderr, "\033[0m");
+			if(use_colors)
+				fprintf(stderr, "\033[0m");
 		}
 	}
 	line_begin = true;
@@ -84,7 +100,7 @@ void log_nl()
 
 static void print(int level, const char *sys, const char *fmt, va_list va_args)
 {
-	if(!file && (level != current_level || line_begin) && level <= max_level){
+	if(use_colors && !file && (level != current_level || line_begin) && level <= max_level){
 		if(level == LOG_FATAL)
 			fprintf(stderr, "\033[0m\033[0;1;41m"); // reset, bright red bg
 		else if(level == LOG_ERROR)

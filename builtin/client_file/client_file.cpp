@@ -295,7 +295,7 @@ struct Module: public interface::Module, public client_file::Interface
 };
 
 extern "C" {
-	EXPORT void* createModule_client_file(interface::Server *server){
+	BUILDAT_EXPORT void* createModule_client_file(interface::Server *server){
 		return (void*)(new Module(server));
 	}
 }

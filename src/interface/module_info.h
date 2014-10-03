@@ -15,6 +15,10 @@ namespace interface
 	{
 		ss_ cxxflags;
 		ss_ ldflags;
+		ss_ cxxflags_linux;
+		ss_ ldflags_linux;
+		ss_ cxxflags_windows;
+		ss_ ldflags_windows;
 		sv_<ModuleDependency> dependencies;
 		sv_<ModuleDependency> reverse_dependencies;
 	};

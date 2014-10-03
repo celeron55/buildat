@@ -87,7 +87,7 @@ std::vector<DirListNode> GetDirListing(std::string pathstring)
 
 	//_tprintf (TEXT("Target directory is %s.\n"), pathstring.c_str());
 
-	sprintf(DirSpec, "%s", (pathstring+"\\*").c_str());
+	sprintf(DirSpec, "%s", (pathstring+DIR_DELIM+"*").c_str());
 
 	// Find the first file in the directory.
 	hFind = FindFirstFile(DirSpec, &FindFileData);
@@ -149,8 +149,11 @@ bool CreateDir(std::string path)
 	bool r = CreateDirectory(path.c_str(), NULL);
 	if(r == true)
 		return true;
-	if(GetLastError() == ERROR_ALREADY_EXISTS)
+	if(GetLastError() == ERROR_ALREADY_EXISTS){
+		//std::cerr<<"c55fs::CreateDir(): Already exists: "<<path<<std::endl;
 		return true;
+	}
+	//std::cerr<<"c55fs::CreateDir(): Failed to create directory: "<<path<<std::endl;
 	return false;
 }
 
@@ -326,7 +329,7 @@ bool RecursiveDeleteContent(std::string path)
 
 bool CreateAllDirs(std::string path)
 {
-
+	//std::cerr<<"c55fs::CreateAllDirs(): "<<path<<std::endl;
 	size_t pos;
 	std::vector<std::string> tocreate;
 	std::string basepath = path;
@@ -338,8 +341,10 @@ bool CreateAllDirs(std::string path)
 			return false;
 		basepath = basepath.substr(0, pos);
 	}
-	for(int i = tocreate.size() - 1; i >= 0; i--)
-		CreateDir(tocreate[i]);
+	for(int i = tocreate.size() - 1; i >= 0; i--){
+		if(!CreateDir(tocreate[i]))
+			return false;
+	}
 	return true;
 }
 

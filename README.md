@@ -86,9 +86,22 @@ Edit something and then restart the client (CTRL+C in terminal 2):
 Buildat Windows How-To
 ======================
 
-Umm... well, you need to first port some stuff. Try building it and see what
-happens. Then fix it and make a pull request.
+Use Mingw-w64 in an MSYS environment.
 
-You probably want to use MinGW or Clang in order to bundle the compiler with the
-end result.
+    $ cd /path/to/Urho3D
+    $ mkdir Build
+    $ cd Build
+    $ cmake ../Source -G "MSYS Makefiles" -DURHO3D_LIB_TYPE=SHARED -DURHO3D_LUA=true -DURHO3D_SAFE_LUA=true
+    $ make -j4
+
+    $ cd /path/to/buildat
+    $ mkdir Build
+    $ cd Build
+	$ export URHO3D_HOME="/path/to/Urho3D"
+    $ cmake .. -G "MSYS Makefiles" -DCMAKE_BUILD_TYPE=Debug -DURHO3D_LIB_TYPE=SHARED
+    $ make -j4
+
+Running the server:
+
+    $ bin/buildat_server.exe -m ../games/minigame -c "c++ -Lbin -lbuildat_server_core"
 

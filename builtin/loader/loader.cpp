@@ -1,13 +1,13 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
-#include "loader/api.h"
 #include "core/log.h"
-#include "core/json.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/fs.h"
 #include "interface/event.h"
 #include "interface/module_info.h"
+#include "loader/api.h"
+#include "core/json.h"
 #include <fstream>
 
 using interface::Event;
@@ -27,6 +27,10 @@ static interface::ModuleMeta load_module_meta(const json::Value &v)
 	interface::ModuleMeta r;
 	r.cxxflags = v.get("cxxflags").as_string();
 	r.ldflags = v.get("ldflags").as_string();
+	r.cxxflags_windows = v.get("cxxflags_windows").as_string();
+	r.ldflags_windows = v.get("ldflags_windows").as_string();
+	r.cxxflags_linux = v.get("cxxflags_linux").as_string();
+	r.ldflags_linux = v.get("ldflags_linux").as_string();
 	const json::Value &deps_v = v.get("dependencies");
 	for(unsigned int i = 0; i < deps_v.size(); i++){
 		const json::Value &dep_v = deps_v.at(i);
@@ -403,7 +407,7 @@ struct Module: public interface::Module, public loader::Interface
 };
 
 extern "C" {
-	EXPORT void* createModule_loader(interface::Server *server){
+	BUILDAT_EXPORT void* createModule_loader(interface::Server *server){
 		return (void*)(new Module(server));
 	}
 }

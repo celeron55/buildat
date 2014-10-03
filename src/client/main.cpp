@@ -38,9 +38,15 @@ void basic_init()
 	signal_handler_init();
 
 	// Force '.' as decimal point
-	std::locale::global(std::locale(std::locale(""), "C", std::locale::numeric));
+	try{
+		std::locale::global(std::locale(std::locale(""), "C", std::locale::numeric));
+	} catch(std::runtime_error &e){
+		// Can happen on Wine
+		fprintf(stderr, "Failed to set numeric C++ locale\n");
+	}
 	setlocale(LC_NUMERIC, "C");
 
+	log_init();
 	log_set_max_level(LOG_VERBOSE);
 }
 

@@ -62,7 +62,7 @@ struct Module: public interface::Module
 };
 
 extern "C" {
-	EXPORT void* createModule_main(interface::Server *server){
+	BUILDAT_EXPORT void* createModule_main(interface::Server *server){
 		return (void*)(new Module(server));
 	}
 }

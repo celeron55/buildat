@@ -10,6 +10,8 @@ extern const int LOG_VERBOSE;
 extern const int LOG_DEBUG;
 extern const int LOG_TRACE;
 
+void log_init();
+
 void log_set_max_level(int level);
 int log_get_max_level();
 void log_set_file(const char *path);

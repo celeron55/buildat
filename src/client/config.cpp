@@ -57,7 +57,10 @@ bool Config::check_paths()
 	}
 
 	auto *fs = interface::getGlobalFilesystem();
-	fs->create_directories(cache_path);
+	if(!fs->create_directories(cache_path)){
+		log_e(MODULE, "Could not create directory \"%s\"", cs(cache_path));
+		fail = true;
+	}
 	if(!check_file_writable(cache_path+"/write.test")){
 		log_e(MODULE, "Cannot write into cache_path=\"%s\"", cs(cache_path));
 		fail = true;

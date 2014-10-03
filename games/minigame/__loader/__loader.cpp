@@ -56,7 +56,7 @@ struct Module: public interface::Module
 };
 
 extern "C" {
-	EXPORT void* createModule___loader(interface::Server *server){
+	BUILDAT_EXPORT void* createModule___loader(interface::Server *server){
 		return (void*)(new Module(server));
 	}
 }

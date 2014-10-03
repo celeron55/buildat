@@ -10,8 +10,12 @@
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/vector.hpp>
 #include <cereal/types/tuple.hpp>
+#ifdef _WIN32
+#	include "ports/windows_sockets.h"
+#else
+#	include <sys/socket.h>
+#endif
 #include <deque>
-#include <sys/socket.h>
 #include <cstring> // strerror()
 
 using interface::Event;
@@ -270,7 +274,7 @@ struct Module: public interface::Module, public network::Interface
 };
 
 extern "C" {
-	EXPORT void* createModule_network(interface::Server *server){
+	BUILDAT_EXPORT void* createModule_network(interface::Server *server){
 		return (void*)(new Module(server));
 	}
 }

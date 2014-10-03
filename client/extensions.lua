@@ -19,14 +19,17 @@ function __buildat_load_extension(name)
 	return interface
 end
 
-table.insert(package.loaders, 1, function(name)
-	log:debug("package.loader called with name=\""..name.."\"")
+-- Don't use package.loaders because for whatever reason it doesn't work in the
+-- Windows version at least in Wine
+local old_require = require
+
+function require(name)
+	log:debug("require called with name=\""..name.."\"")
 	local m = string.match(name, '^buildat/extension/([a-zA-Z0-9_]+)$')
 	if m then
-		return function()
-			return __buildat_load_extension(m)
-		end
+		return __buildat_load_extension(m)
 	end
-	return nil
-end)
+	return old_require(name)
+end
+
 -- vim: set noet ts=4 sw=4:

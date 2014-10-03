@@ -2,16 +2,22 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/tcpsocket.h"
 #include "core/log.h"
-#include <iostream>
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <errno.h>
-#include <fcntl.h>
+#ifdef _WIN32
+#	include "ports/windows_sockets.h"
+#else
+#	include <unistd.h>
+#	include <sys/types.h>
+#	include <sys/socket.h>
+#	include <errno.h>
+#	include <fcntl.h>
+#	include <netinet/in.h>
+#	include <netdb.h>
+#	define closesocket close
+//typedef int socket_t;
+#endif
 #include <string.h> // strerror()
-#include <netinet/in.h>
+#include <iostream>
 #include <iomanip>
-#include <netdb.h>
 
 namespace interface {
 
@@ -91,7 +97,7 @@ struct CTCPSocket: public TCPSocket
 	void close_fd()
 	{
 		if(m_fd != -1)
-			close(m_fd);
+			closesocket(m_fd);
 		m_fd = -1;
 	}
 	bool listen_fd()
@@ -141,7 +147,7 @@ struct CTCPSocket: public TCPSocket
 			}
 			if(connect(try_fd, res->ai_addr, res->ai_addrlen) == -1){
 				std::cerr<<"connect: "<<strerror(errno)<<std::endl;
-				close(try_fd);
+				closesocket(try_fd);
 				continue;
 			}
 			fd = try_fd;
@@ -155,14 +161,16 @@ struct CTCPSocket: public TCPSocket
 		}
 
 		int val = 1;
-		setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
+		setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&val, sizeof(val));
 
+#ifndef _WIN32
 		// Set this so that forked child processes don't prevent re-opening the
 		// same port after crash
 		if(fcntl(fd, F_SETFD, FD_CLOEXEC) != 0){
 			std::cerr<<"Failed to set socket FD_CLOEXEC"<<std::endl;
 			return false;
 		}
+#endif
 
 		m_fd = fd;
 		return true;
@@ -213,14 +221,14 @@ struct CTCPSocket: public TCPSocket
 				continue;
 			}
 			int val = 1;
-			setsockopt(try_fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
+			setsockopt(try_fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&val, sizeof(val));
 			if(res->ai_family == AF_INET6){
 				int val = 1;
-				setsockopt(try_fd, IPPROTO_IPV6, IPV6_V6ONLY, &val, sizeof(val));
+				setsockopt(try_fd, IPPROTO_IPV6, IPV6_V6ONLY, (const char*)&val, sizeof(val));
 			}
 			if(bind(try_fd, res->ai_addr, res->ai_addrlen) == -1){
 				//std::cerr<<"bind: "<<strerror(errno)<<std::endl;
-				close(try_fd);
+				closesocket(try_fd);
 				continue;
 			}
 			fd = try_fd;
@@ -233,12 +241,14 @@ struct CTCPSocket: public TCPSocket
 			return false;
 		}
 
+#ifndef _WIN32
 		// Set this so that forked child processes don't prevent re-opening the
 		// same port after crash
 		if(fcntl(fd, F_SETFD, FD_CLOEXEC) != 0){
 			std::cerr<<"Failed to set socket FD_CLOEXEC"<<std::endl;
 			return false;
 		}
+#endif
 
 		m_fd = fd;
 		return true;
@@ -259,7 +269,7 @@ struct CTCPSocket: public TCPSocket
 		}
 
 		int val = 1;
-		setsockopt(fd_client, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
+		setsockopt(fd_client, SOL_SOCKET, SO_REUSEADDR, (const char*)&val, sizeof(val));
 
 		m_fd = fd_client;
 		return true;

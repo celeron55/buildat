@@ -4,10 +4,9 @@
 #include <c55/filesys.h>
 #include <c55/string_util.h>
 #ifdef _WIN32
-#define _WIN32_WINNT 0x0501
-#include <windows.h>
+#	include "ports/windows_minimal.h"
 #else
-#include <unistd.h>
+#	include <unistd.h>
 #endif
 
 namespace interface {
@@ -43,13 +42,13 @@ struct CFilesystem : public Filesystem
 	}
 	bool create_directories(const ss_ &path)
 	{
-		return c55fs::CreateAllDirs(path);
+		return c55fs::CreateAllDirs(get_absolute_path(path));
 	}
 	ss_ get_cwd()
 	{
 		char path[10000];
 #ifdef _WIN32
-		GetCurrentDirectory(path, 10000);
+		GetCurrentDirectory(10000, path);
 #else
 		getcwd(path, 10000);
 #endif
@@ -60,9 +59,11 @@ struct CFilesystem : public Filesystem
 	{
 		ss_ path = c55::trim(path0);
 #ifdef _WIN32
+		if(path.size() >= 2 && path.substr(0, 2) == "\\\\")
+			return path;
 		if(path.size() >= 1 && (path[0] == '/' || path[0] == '\\'))
 			return path;
-		if(path.size() >= 2 && path[2] == ':')
+		if(path.size() >= 2 && path[1] == ':')
 			return path;
 		return get_cwd()+"/"+path;
 #else
@@ -99,6 +100,15 @@ struct CFilesystem : public Filesystem
 		for(const ss_ &part : path_parts){
 			path2 += "/" + part;
 		}
+#ifdef _WIN32
+		if(path.size() >= 2 && path.substr(0, 2) == "//"){
+			// Preserve network path
+			path2 = "\\\\"+path2.substr(1);
+		} else {
+			// Path will be in a silly format like "/Z:/home/"
+			path2 = path2.substr(1);
+		}
+#endif
 		return path2;
 	}
 };

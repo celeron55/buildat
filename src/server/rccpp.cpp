@@ -8,7 +8,18 @@
 #include <vector>
 #include <string>
 #include <iostream>
-#include <dlfcn.h>
+#ifdef _WIN32
+#	ifndef WIN32_LEAN_AND_MEAN
+#		define WIN32_LEAN_AND_MEAN
+#	endif
+	// Without this some of the network functions are not found on mingw
+#	ifndef _WIN32_WINNT
+#		define _WIN32_WINNT 0x0501
+#	endif
+#	include <windows.h>
+#else
+#	include <dlfcn.h>
+#endif
 #include <cstddef>
 #include <vector>
 #include <cassert>
@@ -20,8 +31,27 @@
 
 namespace rccpp {
 
-// linux
-#if 1
+#ifdef _WIN32
+static void *library_load(const char *filename){
+	return LoadLibrary(filename);
+}
+static void library_unload(void *module){
+	FreeLibrary((HMODULE)module);
+}
+static void *library_get_address(void *module, const char *name){
+	// FARPROC {aka int (__attribute__((__stdcall__)) *)()}
+	return (void*)GetProcAddress((HMODULE)module, name);
+}
+static const char *library_error(){
+	DWORD last_error = GetLastError();
+	if(!last_error)
+		return "No error";
+	static TCHAR buf[1000];
+	FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM, NULL, last_error,
+			MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), buf, 1000-1, NULL);
+	return buf;
+}
+#else
 static void *library_load(const char *filename){
 	return dlopen(filename, RTLD_NOW);
 }
@@ -31,15 +61,8 @@ static void library_unload(void *module){
 static void *library_get_address(void *module, const char *name){
 	return dlsym(module, name);
 }
-#elif 0
-static void *library_load(const char *filename){
-	return LoadLibrary(filename);
-}
-static void library_unload(void *module){
-	FreeLibrary(module);
-}
-static void *library_get_address(void *module, const char *name){
-	return GetProcAddress(module, name);
+static const char *library_error(){
+	return dlerror();
 }
 #endif
 
@@ -68,14 +91,15 @@ struct CCompiler: public Compiler
 		command += " -std=c++11";
 		if(extra_cxxflags != "")
 			command += ss_()+" "+extra_cxxflags;
-		if(extra_ldflags != "")
-			command += ss_()+" "+extra_ldflags;
 
 		for(const std::string &dir : include_directories) command += " -I"+dir;
 		for(const std::string &dir : library_directories) command += " -L"+dir;
 
 		command += " -o"+out_path;
 		command += " "+in_path;
+
+		if(extra_ldflags != "")
+			command += ss_()+" "+extra_ldflags;
 
 		for(const std::string &lib : libraries) command += " "+lib;
 
@@ -107,7 +131,8 @@ struct CCompiler: public Compiler
 
 		void *new_module = library_load(out_path.c_str());
 		if(new_module == NULL){
-			log_i(MODULE, "Failed to load compiled library: %s", dlerror());
+			log_i(MODULE, "Failed to load compiled library: %s (path: %s)",
+					library_error(), cs(out_path));
 			return false;
 		}
 

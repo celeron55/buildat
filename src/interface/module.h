@@ -4,7 +4,7 @@
 #include "core/types.h"
 #include "interface/event.h"
 
-#define EXPORT __attribute__ ((visibility ("default")))
+#define BUILDAT_EXPORT __attribute__ ((visibility ("default")))
 
 namespace interface
 {

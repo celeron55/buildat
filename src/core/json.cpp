@@ -449,9 +449,9 @@ std::string json::Value::stringify(int flags) const {
 	case T_FLOAT: {
 			// Silently convert NaN and infinity to valid JSON numbers
 			double f = value.f;
-			if(isnan(f))
+			if(std::isnan(f))
 				f = 0.0;
-			else if(isinf(f))
+			else if(std::isinf(f))
 				f = (f >= 0) ?  DBL_MAX : DBL_MIN;
 			// Convert to string
 			std::ostringstream os(std::ios::binary);
