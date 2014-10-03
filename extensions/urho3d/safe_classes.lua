@@ -199,7 +199,7 @@ function M.define(dst, util)
 					if mode ~= nil then
 						return util.wrap_instance("Node", self:CreateChild(name, mode))
 					else
-						return util.wrap_instance("Node", self:CreateChild(name))
+						return util.wrap_instance("Node", self:CreateChild(name, LOCAL))
 					end
 				end
 			),
@@ -210,7 +210,7 @@ function M.define(dst, util)
 					if mode ~= nil then
 						component = self:CreateComponent(name, mode)
 					else
-						component = self:CreateComponent(name)
+						component = self:CreateComponent(name, LOCAL)
 					end
 					assert(component)
 					return util.wrap_instance(name, component)

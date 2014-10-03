@@ -142,7 +142,9 @@ Note:
 	otherwise augment your nodes in such a way that you can generate or set
 	resources to each node that requires it.
 
-	Make sure to add the client-side components to the node using urho3d.LOCAL.
+	The sandbox wrapper adds the client-side components to the node using
+	urho3d.LOCAL by default, avoiding the problems of accidentally using
+	urho3d.REPLICATED on the client.
 
 	Make sure to not set anything to that resource of the node on the server
 	side, because then you will get unpredictable fighting between the one set
@@ -155,9 +157,9 @@ replicate.main_scene
   viewport. Add your local stuff to this as needed.
 - You don't have to use this if you wish to synchronize your scene in a custom
   way.
-- Remember to specify urho3d.LOCAL to both CreateNode and CreateComponent,
-  otherwise they will end up in the synchronized ID space and will be overridden
-  by data coming from the server.
+- CreateNode and CreateComponent uses urho3d.LOCAL by default unlike native
+  Urho3D. With urho3d.REPLICATED (native default) they will end up in the
+  synchronized ID space and will be overridden by data coming from the server.
 
 
 Unsafe interfaces of built-in extensions

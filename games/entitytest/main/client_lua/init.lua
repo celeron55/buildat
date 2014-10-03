@@ -11,8 +11,8 @@ local replicate = require("buildat/extension/replicate")
 local scene = replicate.main_scene
 
 -- Add a camera so we can look at the scene
-local camera_node = scene:CreateChild("Camera", magic.LOCAL)
-camera_node:CreateComponent("Camera", magic.LOCAL)
+local camera_node = scene:CreateChild("Camera")
+camera_node:CreateComponent("Camera")
 camera_node.position = magic.Vector3(7.0, 7.0, 7.0)
 camera_node:LookAt(magic.Vector3(0, 1, 0))
 
@@ -44,7 +44,7 @@ magic.sub_sync_node_added({}, function(node)
 	if name == "Box" then
 		-- Models and materials can be created dynamically on the client side
 		-- like this
-		local object = node:CreateComponent("StaticModel", magic.LOCAL)
+		local object = node:CreateComponent("StaticModel")
 		object.model = magic.cache:GetResource("Model", "Models/Box.mdl")
 		object.material = magic.Material:new()
 		object.material:SetTechnique(0,
