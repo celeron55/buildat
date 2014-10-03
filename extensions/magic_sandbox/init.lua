@@ -15,6 +15,9 @@ function M.wrap_class(type_name, def)
 	class_meta.inherited_from_in_sandbox = def.inherited_from_in_sandbox
 	class_meta.inherited_from_by_wrapper = def.inherited_from_by_wrapper
 	class_meta.wrap = function(unsafe)
+		if unsafe == nil then
+			error("magic_sandbox: class_meta.wrap(): Wrapping nil is not allowed")
+		end
 		local safe = {}
 		local meta = {
 			unsafe = unsafe,
