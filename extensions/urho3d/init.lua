@@ -216,7 +216,7 @@ function Safe.SubscribeToEvent(x, y, z)
 	local object = x
 	local sub_event_type = y
 	local callback = z
-	if callback == nil then
+	if z == nil then
 		object = nil
 		sub_event_type = x
 		callback = y
@@ -291,24 +291,8 @@ function Safe.SubscribeToEvent(x, y, z)
 	return global_callback_name
 end
 
-function Safe.UnsubscribeFromEvent(x, y)
-	local object = x
-	local sub_event_type = y
-	if callback == nil then
-		object = nil
-		sub_event_type = x
-	end
-	if object then
-		if not getmetatable(object) or not getmetatable(object).unsafe then
-			error("SubscribeToEvent(): Object must be sandboxed")
-		end
-	end
-	if object then
-		local unsafe_object = getmetatable(object).unsafe
-		UnsubscribeFromEvent(unsafe_object, sub_event_type)
-	else
-		UnsubscribeFromEvent(sub_event_type)
-	end
+function Safe.UnsubscribeFromEvent(sub_event_type, cb_name)
+	UnsubscribeFromEvent(sub_event_type, cb_name)
 	-- TODO: Delete the generated global callback
 end
 

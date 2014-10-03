@@ -24,7 +24,6 @@ Buildat TODO
 	- Normal block size should be definable to be a multiple of the voxel size
 		- "Continuation voxels"
 - Support Cereal's shared pointer serialization in Lua
-- Something in uistack's global nil focus handling has broken
 - Automatically fetch and build and patch Urho3D when building buildat
 - Handle module load order properly in reloads (unload by popping from top,
   then reload everything until top)
