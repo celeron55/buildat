@@ -55,7 +55,8 @@ struct CFilesystem : public Filesystem
 #endif
 		return path;
 	}
-	ss_ get_absolute_path(const ss_ &path0)
+	// Doesn't collapse .. and .
+	ss_ get_basic_absolute_path(const ss_ &path0)
 	{
 		ss_ path = c55::trim(path0);
 #ifdef _WIN32
@@ -69,6 +70,36 @@ struct CFilesystem : public Filesystem
 			return path;
 		return get_cwd()+"/"+path;
 #endif
+	}
+	// Collapses .. and .
+	ss_ get_absolute_path(const ss_ &path0)
+	{
+		ss_ path = get_basic_absolute_path(path0);
+		for(size_t i=0; i<path.size(); i++){
+			if(path[i] == '\\')
+				path[i] = '/';
+		}
+		sv_<ss_> path_parts;
+		c55::Strfnd f(path);
+		for(;;){
+			if(f.atend())
+				break;
+			ss_ part = f.next("/");
+			if(part == ""){
+				// Nop
+			} else if(part == "."){
+				// Nop
+			} else if(part == ".."){
+				path_parts.pop_back();
+			} else {
+				path_parts.push_back(part);
+			}
+		}
+		ss_ path2;
+		for(const ss_ &part : path_parts){
+			path2 += "/" + part;
+		}
+		return path2;
 	}
 };
 

@@ -5,7 +5,6 @@
 #include "client/config.h"
 #include "client/state.h"
 #include "interface/fs.h"
-#include "guard/buildat_guard_interface.h"
 #include <c55/getopt.h>
 #include <c55/os.h>
 #include <c55/string_util.h>
@@ -29,6 +28,7 @@
 #include <Camera.h>
 #include <Renderer.h>
 #include <Octree.h>
+#include <FileSystem.h>
 #pragma GCC diagnostic pop
 extern "C" {
 #include <lua.h>
@@ -122,13 +122,12 @@ struct CApp: public App, public magic::Application
 			resource_paths_s += fs->get_absolute_path(path);
 		}
 
-		// Set allowed paths in buildat guard wrapper (ignored if not available)
-		buildat_guard_clear_paths();
+		// Set allowed paths in urho3d filesystem (part of sandbox)
+		magic::FileSystem *magic_fs = GetSubsystem<magic::FileSystem>();
 		for(const ss_ &path : resource_paths){
-			buildat_guard_add_valid_base_path(
-					fs->get_absolute_path(path).c_str());
+			magic_fs->RegisterPath(fs->get_absolute_path(path).c_str());
 		}
-		buildat_guard_add_valid_base_path(
+		magic_fs->RegisterPath(
 				fs->get_absolute_path(g_client_config.cache_path).c_str());
 
 		// Set Urho3D engine parameters
@@ -331,10 +330,6 @@ struct CApp: public App, public magic::Application
 			lua_pop(L, 1);
 			throw AppStartupError("Could not initialize Lua environment");
 		}
-
-		// Enable guard now. Everything from here should not access any weird
-		// files.
-		buildat_guard_enable(true);
 
 		// Create a scene that will be synchronized from the server
 		m_scene = new magic::Scene(context_);

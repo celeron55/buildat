@@ -5,7 +5,6 @@
 #include "client/config.h"
 #include "client/state.h"
 #include "client/app.h"
-#include "guard/buildat_guard_interface.h"
 #include <c55/getopt.h>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
@@ -34,20 +33,6 @@ void signal_handler_init()
 	(void)signal(SIGINT, sigint_handler);
 }
 
-void guard_init()
-{
-	if(buildat_guard_init() != 0){
-		log_w(MODULE, "The buildat_guard interface could not be accessed."
-				" You should LD_PRELOAD it.");
-		return;
-	}
-
-	// Guard is used only when Urho3D::ResourceCache is accessed by unsafe code
-	buildat_guard_enable(false);
-
-	//buildat_guard_add_valid_base_path("/usr/share/");
-}
-
 void basic_init()
 {
 	signal_handler_init();
@@ -57,8 +42,6 @@ void basic_init()
 	setlocale(LC_NUMERIC, "C");
 
 	log_set_max_level(LOG_VERBOSE);
-
-	guard_init();
 }
 
 int main(int argc, char *argv[])
@@ -144,9 +127,6 @@ int main(int argc, char *argv[])
 			break;
 
 		app_options = app0->get_current_options();
-
-		// Re-creating app:App requires guard to be disabled
-		buildat_guard_enable(false);
 	}
 	log_v(MODULE, "Succesful shutdown");
 	return exit_status;
