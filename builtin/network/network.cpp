@@ -156,7 +156,7 @@ struct Module: public interface::Module, public network::Interface
 
 	void on_listen_event(const interface::SocketEvent &event)
 	{
-		log_i(MODULE, "network: on_listen_event(): fd=%i", event.fd);
+		log_v(MODULE, "network: on_listen_event(): fd=%i", event.fd);
 		// Create socket
 		sp_<interface::TCPSocket> socket(interface::createTCPSocket());
 		// Accept connection
@@ -176,7 +176,7 @@ struct Module: public interface::Module, public network::Interface
 
 	void on_incoming_data(const interface::SocketEvent &event)
 	{
-		log_i(MODULE, "network: on_incoming_data(): fd=%i", event.fd);
+		log_v(MODULE, "network: on_incoming_data(): fd=%i", event.fd);
 
 		auto it = m_peers_by_socket.find(event.fd);
 		if(it == m_peers_by_socket.end()){
@@ -198,7 +198,7 @@ struct Module: public interface::Module, public network::Interface
 			throw Exception(ss_()+"Receive failed: "+strerror(errno));
 		}
 		if(r == 0){
-			log_i(MODULE, "Peer %zu disconnected", peer.id);
+			log_v(MODULE, "Peer %zu disconnected", peer.id);
 
 			PeerInfo pinfo;
 			pinfo.id = peer.id;
@@ -210,7 +210,7 @@ struct Module: public interface::Module, public network::Interface
 			m_peers.erase(peer.id);
 			return;
 		}
-		log_i(MODULE, "Received %zu bytes", r);
+		log_v(MODULE, "Received %zu bytes", r);
 		peer.socket_buffer.insert(peer.socket_buffer.end(), buf, buf + r);
 
 		try {
@@ -249,7 +249,7 @@ struct Module: public interface::Module, public network::Interface
 
 	void send(PeerInfo::Id recipient, const ss_ &name, const ss_ &data)
 	{
-		log_i(MODULE, "network::send()");
+		log_d(MODULE, "network::send()");
 		send_u(recipient, name, data);
 	}
 

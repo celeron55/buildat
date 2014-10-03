@@ -108,12 +108,12 @@ struct Module: public interface::Module, public replicate::Interface
 
 	void on_new_client(const network::NewClient &new_client)
 	{
-		log_i(MODULE, "replicate::on_new_client: id=%zu", new_client.info.id);
+		log_v(MODULE, "replicate::on_new_client: id=%zu", new_client.info.id);
 	}
 
 	void on_client_disconnected(const network::OldClient &old_client)
 	{
-		log_i(MODULE, "replicate::on_client_disconnected: id=%zu",
+		log_v(MODULE, "replicate::on_client_disconnected: id=%zu",
 				old_client.info.id);
 		auto peer = old_client.info.id;
 		auto it = m_scene_states.find(peer);
@@ -210,7 +210,7 @@ struct Module: public interface::Module, public replicate::Interface
 			magic::HashSet<uint> &nodes_to_process,
 			Scene *scene, magic::SceneReplicationState &scene_state)
 	{
-		log_v(MODULE, "sync_create_node(): %zu", node->GetID());
+		log_d(MODULE, "sync_create_node(): %zu", node->GetID());
 		auto &deps = node->GetDependencyNodes();
 		for(auto it = deps.Begin(); it != deps.End(); ++it){
 			uint node_id = (*it)->GetID();
@@ -266,7 +266,7 @@ struct Module: public interface::Module, public replicate::Interface
 			magic::HashSet<uint> &nodes_to_process,
 			Scene *scene, magic::SceneReplicationState &scene_state)
 	{
-		log_v(MODULE, "sync_existing_node(): %zu", node->GetID());
+		log_d(MODULE, "sync_existing_node(): %zu", node->GetID());
 		auto &deps = node->GetDependencyNodes();
 		for(auto it = deps.Begin(); it != deps.End(); ++it){
 			uint node_id = (*it)->GetID();
@@ -276,7 +276,7 @@ struct Module: public interface::Module, public replicate::Interface
 
 		// Handle changed attributes
 		if(node_state.dirtyAttributes_.Count()){
-			log_v(MODULE, "sync_existing_node(): %zu: Changed attributes",
+			log_d(MODULE, "sync_existing_node(): %zu: Changed attributes",
 					node->GetID());
 			const magic::Vector<magic::AttributeInfo> &attributes =
 					*node->GetNetworkAttributes();
@@ -352,7 +352,7 @@ struct Module: public interface::Module, public replicate::Interface
 			// Existing component
 			// Handle changed attributes
 			if(component_state.dirtyAttributes_.Count()){
-				log_v(MODULE, "sync_existing_node(): %zu: Changed attributes"
+				log_d(MODULE, "sync_existing_node(): %zu: Changed attributes"
 						" in component %zu", node->GetID(), component_id);
 				const magic::Vector<magic::AttributeInfo> &attributes =
 						*component->GetNetworkAttributes();
@@ -428,7 +428,7 @@ struct Module: public interface::Module, public replicate::Interface
 	void send_to_peer(network::PeerInfo::Id peer,
 			const ss_ &name, const magic::VectorBuffer &buf)
 	{
-		log_i(MODULE, "%s: Update size: %zu, data=%s",
+		log_d(MODULE, "%s: Update size: %zu, data=%s",
 				cs(name), buf.GetBuffer().Size(), cs(dump(buf)));
 		ss_ data = buf_to_string(buf);
 		network::access(m_server, [&](network::Interface * inetwork){
