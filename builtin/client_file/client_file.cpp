@@ -33,12 +33,12 @@ struct Module: public interface::Module, public client_file::Interface
 {
 	interface::Server *m_server;
 	sm_<ss_, sp_<FileInfo>> m_files;
-	sp_<interface::MultiFileWatch> m_watch;
+	sp_<interface::FileWatch> m_watch;
 
 	Module(interface::Server *server):
 		interface::Module("client_file"),
 		m_server(server),
-		m_watch(interface::createMultiFileWatch())
+		m_watch(interface::createFileWatch())
 	{
 		log_v(MODULE, "client_file construct");
 	}

@@ -219,7 +219,7 @@ struct CState: public State, public interface::Server
 	sm_<ss_, interface::ModuleInfo> m_module_info; // Info of every seen module
 	sm_<ss_, ModuleContainer> m_modules; // Currently loaded modules
 	set_<ss_> m_unloads_requested;
-	sm_<ss_, sp_<interface::MultiFileWatch>> m_module_file_watches;
+	sm_<ss_, sp_<interface::FileWatch>> m_module_file_watches;
 	// Module modifications are accumulated here and core:module_modified events
 	// are fired every event loop based on this to lump multiple modifications
 	// into one (generally a modification causes many notifications)
@@ -377,7 +377,7 @@ struct CState: public State, public interface::Server
 		files_to_watch.insert(files_to_watch.end(), includes.begin(), includes.end());
 
 		if(m_module_file_watches.count(info.name) == 0){
-			sp_<interface::MultiFileWatch> w(interface::createMultiFileWatch());
+			sp_<interface::FileWatch> w(interface::createFileWatch());
 			for(const ss_ &watch_path : files_to_watch){
 				ss_ dir_path = interface::Filesystem::strip_file_name(watch_path);
 				w->add(dir_path,  [this, info, watch_path](const ss_ &modified_path){

@@ -13,7 +13,7 @@
 
 namespace interface {
 
-struct CMultiFileWatch: MultiFileWatch
+struct CFileWatch: FileWatch
 {
 	struct WatchThing {
 		ss_ path;
@@ -26,16 +26,16 @@ struct CMultiFileWatch: MultiFileWatch
 	int m_fd = -1;
 	sm_<int, sp_<WatchThing>> m_watch;
 
-	CMultiFileWatch()
+	CFileWatch()
 	{
 		m_fd = inotify_init1(IN_NONBLOCK);
-		log_d(MODULE, "CMultiFileWatch(): m_fd=%i", m_fd);
+		log_d(MODULE, "CFileWatch(): m_fd=%i", m_fd);
 		if(m_fd == -1){
 			throw Exception(ss_()+"inotify_init() failed: "+strerror(errno));
 		}
 	}
 
-	~CMultiFileWatch()
+	~CFileWatch()
 	{
 		close(m_fd);
 	}
@@ -79,12 +79,12 @@ struct CMultiFileWatch: MultiFileWatch
 			if(r == -1){
 				if(errno == EAGAIN)
 					break;
-				log_w(MODULE, "CMultiFileWatch::report_fd(): read() failed "
+				log_w(MODULE, "CFileWatch::report_fd(): read() failed "
 						"on fd=%i: %s", fd, strerror(errno));
 				break;
 			}
 			if(r < (int)INOTIFY_STRUCTSIZE){
-				throw Exception("CMultiFileWatch::report_fd(): read() -> "+itos(r));
+				throw Exception("CFileWatch::report_fd(): read() -> "+itos(r));
 			}
 			struct inotify_event *in_event = (struct inotify_event*)buf;
 			ss_ name;
@@ -150,9 +150,9 @@ struct CMultiFileWatch: MultiFileWatch
 	}
 };
 
-MultiFileWatch* createMultiFileWatch()
+FileWatch* createFileWatch()
 {
-	return new CMultiFileWatch();
+	return new CFileWatch();
 }
 
 }

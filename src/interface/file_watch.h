@@ -6,9 +6,9 @@
 
 namespace interface
 {
-	struct MultiFileWatch
+	struct FileWatch
 	{
-		virtual ~MultiFileWatch(){}
+		virtual ~FileWatch(){}
 
 		virtual void add(const ss_ &path,
 				std::function<void(const ss_ &path)> cb) = 0;
@@ -22,6 +22,6 @@ namespace interface
 	};
 
 	// cb is called at either report_fd() or update().
-	MultiFileWatch* createMultiFileWatch();
+	FileWatch* createFileWatch();
 }
 // vim: set noet ts=4 sw=4:

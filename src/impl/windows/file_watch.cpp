@@ -7,20 +7,20 @@
 
 namespace interface {
 
-struct CMultiFileWatch: MultiFileWatch
+struct CFileWatch: FileWatch
 {
-	CMultiFileWatch()
+	CFileWatch()
 	{
-		log_e(MODULE, "CMultiFileWatch not implemented");
+		log_e(MODULE, "CFileWatch not implemented");
 	}
 
-	~CMultiFileWatch()
+	~CFileWatch()
 	{
 	}
 
 	void add(const ss_ &path, std::function<void(const ss_ &path)> cb)
 	{
-		log_e(MODULE, "CMultiFileWatch::add() not implemented");
+		log_e(MODULE, "CFileWatch::add() not implemented");
 	}
 
 	// Used on Linux; no-op on Windows
@@ -35,13 +35,13 @@ struct CMultiFileWatch: MultiFileWatch
 	// Used on Windows; no-op on Linux
 	void update()
 	{
-		log_e(MODULE, "CMultiFileWatch::update() not implemented");
+		log_e(MODULE, "CFileWatch::update() not implemented");
 	}
 };
 
-MultiFileWatch* createMultiFileWatch()
+FileWatch* createFileWatch()
 {
-	return new CMultiFileWatch();
+	return new CFileWatch();
 }
 
 }
