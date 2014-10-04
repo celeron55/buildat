@@ -146,6 +146,7 @@ function M.wrap_class(type_name, def)
 		if def.unsafe_constructor == nil then
 			error("Sandbox definition of "..type_name.." has no unsafe_constructor")
 		end
+		local arg = {...}
 		--local unsafe_instance = def.unsafe_constructor(unpack(arg, 1, table.maxn(arg)))
 		--log:info("unsafe_instance="..dump(unsafe_instance))
 		--local safe_instance = class_meta.wrap(unsafe_instance)
@@ -158,6 +159,7 @@ function M.wrap_class(type_name, def)
 		return safe_instance
 	end
 	class_meta.__call = function(_, ...)
+		local arg = {...}
 		return class_meta.create_new(_, unpack(arg, 1, table.maxn(arg)))
 	end
 	class_meta.__index = function(t, k)
@@ -334,6 +336,7 @@ function M.safe.class(name)
 				local user_constructor = __buildat_sandbox_environment[name][name]
 				if user_constructor ~= nil then
 					-- Allow arguments to this safe constructor
+					local arg = {...}
 					user_constructor(safe_instance, unpack(arg, 1, table.maxn(arg)))
 				end
 			end,

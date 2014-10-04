@@ -91,14 +91,14 @@ Use Mingw-w64 in an MSYS environment.
     $ cd /path/to/Urho3D
     $ mkdir Build
     $ cd Build
-    $ cmake ../Source -G "MSYS Makefiles" -DURHO3D_LIB_TYPE=SHARED -DURHO3D_LUA=true -DURHO3D_SAFE_LUA=true
+    $ cmake ../Source -G "MSYS Makefiles" -DURHO3D_LIB_TYPE=SHARED -DURHO3D_LUAJIT=TRUE
     $ make -j4
 
     $ cd /path/to/buildat
     $ mkdir Build
     $ cd Build
 	$ export URHO3D_HOME="/path/to/Urho3D"
-    $ cmake .. -G "MSYS Makefiles" -DCMAKE_BUILD_TYPE=Debug -DURHO3D_LIB_TYPE=SHARED
+    $ cmake .. -G "MSYS Makefiles" -DCMAKE_BUILD_TYPE=Debug -DURHO3D_LIB_TYPE=SHARED -DURHO3D_LUAJIT=TRUE
     $ make -j4
 
 Running the server:

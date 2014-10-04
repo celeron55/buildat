@@ -134,6 +134,7 @@ local function wrap_function(return_types, param_types, f)
 		return_types = {"__safe"}
 	end
 	return function(...)
+		local arg = {...}
 		local checked_arg = {}
 		for i = 1, #param_types do
 			checked_arg[i] = magic_sandbox.safe_to_unsafe(arg[i], param_types[i])
@@ -152,6 +153,7 @@ local function self_function(function_name, return_types, param_types)
 		if #param_types < 1 then
 			error("At least one argument required (self)")
 		end
+		local arg = {...}
 		local checked_arg = {}
 		for i = 1, #param_types do
 			checked_arg[i] = magic_sandbox.safe_to_unsafe(arg[i], param_types[i])
