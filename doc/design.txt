@@ -56,7 +56,7 @@ Startup sequence and what the module should do:
 - "core:unload"   : Module will be unloaded immediately after event handler.
 - "core:continue" : Continue doing stuff after a reload.
 
-Metainformation: meta.txt
+Metainformation: meta.json
 -------------------------
 Example:
 {
@@ -71,7 +71,7 @@ Example:
 	],
 }
 
-Any fields can be left out. The minimum meta.txt content is an empty object {}.
+Any fields can be left out. The minimum meta.json content is an empty object {}.
 
 Extension structure
 -------------------

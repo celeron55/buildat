@@ -305,7 +305,7 @@ struct Module: public interface::Module, public loader::Interface
 		// Load module info
 		for(const ss_ &base_path : m_module_load_paths){
 			ss_ module_path = base_path+"/"+name;
-			ss_ meta_path = module_path+"/meta.txt";
+			ss_ meta_path = module_path+"/meta.json";
 			auto *fs = interface::getGlobalFilesystem();
 			if(!fs->path_exists(meta_path)){
 				log_t(MODULE, "%s: Doesn't exist", cs(meta_path));
@@ -329,12 +329,12 @@ struct Module: public interface::Module, public loader::Interface
 			if(meta_v.is_undefined()){
 				log_e(MODULE, "Invalid JSON: %s:%i: %s", cs(meta_path),
 						json_error.line, json_error.text);
-				ss_ reason = ss_()+"loader: Error in module "+name+" meta.txt:"+
+				ss_ reason = ss_()+"loader: Error in module "+name+" meta.json:"+
 						itos(json_error.line)+": "+json_error.text;
 				m_server->shutdown(1, reason);
 				return nullptr;
 			}
-			// meta.txt is valid; read information
+			// meta.json is valid; read information
 			interface::ModuleInfo &info = m_module_info[name];
 			info.name = name;
 			info.path = module_path;
