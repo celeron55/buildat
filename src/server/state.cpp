@@ -249,8 +249,8 @@ struct CState: public State, public interface::Server
 	{
 		// Set basic RCC++ include directories
 
-		m_compiler->include_directories.push_back(
-				g_server_config.interface_path);
+		// We don't want to directly add the interface path as it contains
+		// stuff like mutex.h which match on Windows to Urho3D's Mutex.h
 		m_compiler->include_directories.push_back(
 				g_server_config.interface_path+"/..");
 		m_compiler->include_directories.push_back(
