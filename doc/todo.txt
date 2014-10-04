@@ -25,3 +25,4 @@ Buildat TODO
 - Automatically fetch and build and patch Urho3D when building buildat
 - Handle module load order properly in reloads (unload by popping from top,
   then reload everything until top)
+- Try out dynamic geometry

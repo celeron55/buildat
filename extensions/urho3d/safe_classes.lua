@@ -6,9 +6,18 @@ local log = buildat.Logger("safe_classes")
 local M = {}
 
 function M.define(dst, util)
+	util.wc("Variant", {
+		unsafe_constructor = util.wrap_function({{"Color"}},
+		function(value)
+			return util.wrap_instance("Variant", Variant(value))
+		end),
+		instance = {
+		}
+	})
+
 	util.wc("VariantMap", {
 		unsafe_constructor = util.wrap_function({},
-		function(x, y, z)
+		function()
 			return util.wrap_instance("VariantMap", VariantMap())
 		end),
 		instance = {
@@ -149,6 +158,8 @@ function M.define(dst, util)
 			--	log:info("Material:SetTexture("..dump(index)..", "..dump(texture)..")")
 			--	self:SetTexture(index, texture)
 			--end),
+			SetShaderParameter = util.self_function(
+					"SetShaderParameter", {}, {"Material", "string", "Variant"}),
 			SetTexture = util.self_function(
 					"SetTexture", {}, {"Material", "number", "Texture"}),
 			SetTechnique = util.self_function(
