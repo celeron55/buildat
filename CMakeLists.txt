@@ -156,4 +156,60 @@ if(BUILD_SERVER)
 	endif()
 endif(BUILD_SERVER)
 
+#
+# Installation
+#
+
+if(WIN32)
+	set(DST_BIN "bin")
+	set(DST_SHARE ".")
+	set(DST_COMPILER "${DST_SHARE}/compiler")
+
+	if(BUILD_CLIENT)
+		install(TARGETS ${CLIENT_EXE_NAME} DESTINATION "${DST_BIN}")
+		install(DIRECTORY "${CMAKE_SOURCE_DIR}/client" DESTINATION "${DST_SHARE}")
+		install(DIRECTORY "${CMAKE_SOURCE_DIR}/extensions" DESTINATION "${DST_SHARE}")
+		install(FILES "${CMAKE_SOURCE_DIR}/util/windows/launch_client.bat" DESTINATION ".")
+	endif()
+
+	if(BUILD_SERVER)
+		install(TARGETS ${SERVER_EXE_NAME} DESTINATION "${DST_BIN}")
+		install(TARGETS ${SERVER_CORE_NAME} DESTINATION "${DST_BIN}")
+		install(DIRECTORY "${CMAKE_SOURCE_DIR}/builtin" DESTINATION "${DST_SHARE}")
+		install(DIRECTORY "${CMAKE_SOURCE_DIR}/games" DESTINATION "${DST_SHARE}")
+		install(DIRECTORY "${CMAKE_SOURCE_DIR}/src" DESTINATION "${DST_SHARE}")
+		install(DIRECTORY "${CMAKE_SOURCE_DIR}/3rdparty/cereal/include" DESTINATION "${DST_SHARE}/3rdparty/cereal")
+		install(FILES "${CMAKE_SOURCE_DIR}/util/windows/launch_server.bat" DESTINATION ".")
+
+		message(STATUS "CMAKE_CXX_COMPILER: ${CMAKE_CXX_COMPILER}")
+		get_filename_component(COMPILER_BIN_PATH "${CMAKE_CXX_COMPILER}" DIRECTORY)
+		message(STATUS "COMPILER_BIN_PATH: ${COMPILER_BIN_PATH}")
+		get_filename_component(COMPILER_USR_PATH "${COMPILER_BIN_PATH}" DIRECTORY)
+		message(STATUS "COMPILER_USR_PATH: ${COMPILER_USR_PATH}")
+
+		install(DIRECTORY "${COMPILER_USR_PATH}/bin" DESTINATION "${DST_COMPILER}")
+		install(DIRECTORY "${COMPILER_USR_PATH}/i686-w64-mingw32" DESTINATION "${DST_COMPILER}")
+		install(DIRECTORY "${COMPILER_USR_PATH}/include" DESTINATION "${DST_COMPILER}")
+		install(DIRECTORY "${COMPILER_USR_PATH}/lib" DESTINATION "${DST_COMPILER}")
+		install(DIRECTORY "${COMPILER_USR_PATH}/libexec" DESTINATION "${DST_COMPILER}")
+		install(DIRECTORY "${COMPILER_USR_PATH}/licenses" DESTINATION "${DST_COMPILER}")
+		install(FILES "${COMPILER_USR_PATH}/build-info.txt" DESTINATION "${DST_COMPILER}")
+	endif()
+
+	install(DIRECTORY "${URHO3D_HOME}/Bin/CoreData" DESTINATION "${DST_SHARE}/Urho3D/Bin")
+	install(DIRECTORY "${URHO3D_HOME}/Bin/Data" DESTINATION "${DST_SHARE}/Urho3D/Bin")
+	install(FILES "${URHO3D_HOME}/Bin/Urho3D.dll" DESTINATION "${DST_BIN}")
+
+	if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+		set(CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}-w64")
+	else()
+		set(CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}-w32")
+	endif()
+	set(CPACK_GENERATOR ZIP)
+	include(CPACK)
+
+	message(STATUS "CMAKE_INSTALL_PREFIX: ${CMAKE_INSTALL_PREFIX}")
+	message(STATUS "Run 'make install' to install, or 'make package' to create a package.")
+endif()
+
 # vim: set noet ts=4 sw=4:
