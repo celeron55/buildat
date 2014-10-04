@@ -26,3 +26,6 @@ Buildat TODO
 - Handle module load order properly in reloads (unload by popping from top,
   then reload everything until top)
 - Try out dynamic geometry
+- Automatic buildat root detection so that the server and the client can
+  generally be started with any working directory in either the in-source or
+  windows-installed configuration

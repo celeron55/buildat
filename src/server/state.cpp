@@ -296,7 +296,9 @@ struct CState: public State, public interface::Server
 
 		magic::VariantMap params;
 		params["ResourcePaths"] = resource_paths_s.c_str();
-		params["Headless"] = true;
+		params["Headless"]      = true;
+		params["LogName"]       = ""; // Don't log to file
+		//params["LogQuiet"]      = true; // Don't log to stdout
 		if(!m_magic_engine->Initialize(params))
 			throw Exception("Urho3D engine initialization failed");
 		m_magic_scene = new magic::Scene(m_magic_context);
