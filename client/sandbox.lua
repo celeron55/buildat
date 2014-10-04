@@ -58,7 +58,7 @@ __buildat_sandbox_environment.require = function(name)
 	-- Allow loading extensions
 	local m = string.match(name, '^buildat/extension/([a-zA-Z0-9_]+)$')
 	if m then
-		local unsafe = __buildat_load_extension(m)
+		local unsafe = __buildat_require_extension(m)
 		if unsafe == nil then
 			error("require: Cannot load extension: \""..m.."\"")
 		end

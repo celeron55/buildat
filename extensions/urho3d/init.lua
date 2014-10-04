@@ -213,8 +213,9 @@ setmetatable(Safe, {
 
 local sandbox_callback_to_global_function_name = {}
 local next_sandbox_global_function_i = 1
-
+log:error("FOO!")
 function Safe.SubscribeToEvent(x, y, z)
+	log:debug("Safe.SubscribeToEvent("..dump(x)..", "..dump(y)..", "..dump(z)..")")
 	local object = x
 	local sub_event_type = y
 	local callback = z
@@ -290,10 +291,12 @@ function Safe.SubscribeToEvent(x, y, z)
 	else
 		SubscribeToEvent(sub_event_type, global_callback_name)
 	end
+	log:debug("-> global_callback_name="..dump(global_callback_name))
 	return global_callback_name
 end
 
 function Safe.UnsubscribeFromEvent(sub_event_type, cb_name)
+	log:debug("Safe.UnsubscribeFromEvent("..dump(sub_event_type)..", "..dump(cb_name)..")")
 	UnsubscribeFromEvent(sub_event_type, cb_name)
 	-- TODO: Delete the generated global callback
 end
