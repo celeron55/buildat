@@ -111,6 +111,11 @@ struct CFilesystem : public Filesystem
 #endif
 		return path2;
 	}
+
+	bool path_exists(const ss_ &path)
+	{
+		return c55fs::PathExists(path);
+	}
 };
 
 Filesystem* getGlobalFilesystem()

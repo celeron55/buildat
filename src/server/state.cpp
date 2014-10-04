@@ -363,8 +363,6 @@ struct CState: public State, public interface::Server
 
 		m_module_info[info.name] = info;
 
-		ss_ build_dst = g_server_config.rccpp_build_path +
-				"/"+info.name+"."+MODULE_EXTENSION;
 		ss_ init_cpp_path = info.path+"/"+info.name+".cpp";
 
 		// Set up file watch
@@ -398,6 +396,8 @@ struct CState: public State, public interface::Server
 #ifdef _WIN32
 		extra_cxxflags += " "+info.meta.cxxflags_windows;
 		extra_ldflags += " "+info.meta.ldflags_windows;
+		// Needed for every module
+		extra_ldflags += " -lbuildat_server_core";
 		// Always include these to make life easier
 		extra_ldflags += " -lwsock32 -lws2_32";
 #else
@@ -409,15 +409,27 @@ struct CState: public State, public interface::Server
 
 		bool skip_compile = g_server_config.skip_compiling_modules.count(info.name);
 
+		sv_<ss_> files_to_hash = {init_cpp_path};
+		files_to_hash.insert(
+				files_to_hash.begin(), includes.begin(), includes.end());
+		ss_ content_hash = hash_files(files_to_hash);
+		log_d(MODULE, "Module hash: %s", cs(interface::sha1::hex(content_hash)));
+
+#ifdef _WIN32
+		// On Windows, we need a new name for each modification of the module
+		// because Windows caches DLLs by name
+		ss_ build_dst = g_server_config.rccpp_build_path +
+				"/"+info.name+"_"+interface::sha1::hex(content_hash)+"."+MODULE_EXTENSION;
+		// TODO: Delete old ones
+#else
+		ss_ build_dst = g_server_config.rccpp_build_path +
+				"/"+info.name+"."+MODULE_EXTENSION;
+#endif
+
 		if(!skip_compile){
 			if(!std::ifstream(build_dst).good()){
-				// Result file does not exist at all
+				// Result file does not exist at all, no need to check hashes
 			} else {
-				sv_<ss_> files_to_hash = {init_cpp_path};
-				files_to_hash.insert(
-						files_to_hash.begin(), includes.begin(), includes.end());
-				ss_ hash = hash_files(files_to_hash);
-				log_d(MODULE, "Hash: %s", cs(interface::sha1::hex(hash)));
 				ss_ hashfile_path = build_dst+".hash";
 				ss_ previous_hash;
 				{
@@ -427,12 +439,12 @@ struct CState: public State, public interface::Server
 								std::istreambuf_iterator<char>());
 					}
 				}
-				if(previous_hash == hash){
+				if(previous_hash == content_hash){
 					log_v(MODULE, "No need to recompile %s", cs(info.name));
 					skip_compile = true;
 				} else {
 					std::ofstream f(hashfile_path);
-					f<<hash;
+					f<<content_hash;
 				}
 			}
 		}

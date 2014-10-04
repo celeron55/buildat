@@ -23,6 +23,8 @@ namespace interface
 
 		virtual ss_ get_absolute_path(const ss_ &path) = 0;
 
+		virtual bool path_exists(const ss_ &path) = 0;
+
 		// "image.png", "png" -> true
 		static bool check_file_extension(const char *path, const char *ext);
 		static ss_ strip_file_extension(const ss_ &path);

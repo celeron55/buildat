@@ -297,6 +297,7 @@ struct Module: public interface::Module, public loader::Interface
 
 	interface::ModuleInfo* get_module_info(const ss_ &name)
 	{
+		log_t(MODULE, "get_module_info(): name=\"%s\"", cs(name));
 		auto it = m_module_info.find(name);
 		if(it != m_module_info.end()){
 			return &it->second;
@@ -305,15 +306,24 @@ struct Module: public interface::Module, public loader::Interface
 		for(const ss_ &base_path : m_module_load_paths){
 			ss_ module_path = base_path+"/"+name;
 			ss_ meta_path = module_path+"/meta.txt";
+			auto *fs = interface::getGlobalFilesystem();
+			if(!fs->path_exists(meta_path)){
+				log_t(MODULE, "%s: Doesn't exist", cs(meta_path));
+				continue;
+			} else {
+				log_t(MODULE, "%s: Exists", cs(meta_path));
+			}
 			std::ifstream f(meta_path, std::ios::binary);
 			if(!f.good()){
-				log_t(MODULE, "%s: Could not open", cs(meta_path));
-				continue;
+				log_w(MODULE, "%s: Could not open", cs(meta_path));
+				m_server->shutdown(1, ss_()+"Could not open "+meta_path);
+				return nullptr;
 			} else {
 				log_t(MODULE, "%s: Opened", cs(meta_path));
 			}
 			std::string meta_content((std::istreambuf_iterator<char>(f)),
 					std::istreambuf_iterator<char>());
+			log_t(MODULE, "%s: File length: %zu", cs(meta_path), meta_content.size());
 			json::json_error_t json_error;
 			json::Value meta_v = json::load_string(meta_content.c_str(), &json_error);
 			if(meta_v.is_undefined()){
