@@ -25,7 +25,7 @@ Install dependencies
 ----------------------
 
 	$ # Dependencies for Urho3D
-	$ sudo apt-get install libx11-dev libxrandr-dev libasound2-dev
+	$ sudo apt-get install libx11-dev libxrandr-dev libasound2-dev libgl1-mesa-dev
 	$ sudo yum install libX11-devel libXrandr-devel alsa-lib-devel
 
 Get and build Urho3D
