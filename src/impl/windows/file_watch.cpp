@@ -7,39 +7,6 @@
 
 namespace interface {
 
-struct CFileWatch: FileWatch
-{
-	CFileWatch(const sv_<ss_> &paths, std::function<void()> cb)
-	{
-		log_e(MODULE, "CFileWatch not implemented");
-	}
-
-	~CFileWatch()
-	{
-	}
-
-	// Used on Linux; no-op on Windows
-	sv_<int> get_fds()
-	{
-		return {};
-	}
-	void report_fd(int fd)
-	{
-	}
-
-	// Used on Windows; no-op on Linux
-	void update()
-	{
-		// TODO
-		log_e(MODULE, "CFileWatch::update() not implemented");
-	}
-};
-
-FileWatch* createFileWatch(const sv_<ss_> &paths, std::function<void()> cb)
-{
-	return new CFileWatch(paths, cb);
-}
-
 struct CMultiFileWatch: MultiFileWatch
 {
 	CMultiFileWatch()
