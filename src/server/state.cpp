@@ -216,9 +216,14 @@ struct CState: public State, public interface::Server
 	//       crash.
 	interface::Mutex m_magic_mutex; // Lock for all of Urho3D
 
-	sm_<ss_, ModuleContainer> m_modules;
+	sm_<ss_, interface::ModuleInfo> m_module_info; // Info of every seen module
+	sm_<ss_, ModuleContainer> m_modules; // Currently loaded modules
 	set_<ss_> m_unloads_requested;
-	sm_<ss_, sp_<interface::FileWatch>> m_module_file_watches;
+	sm_<ss_, sp_<interface::MultiFileWatch>> m_module_file_watches;
+	// Module modifications are accumulated here and core:module_modified events
+	// are fired every event loop based on this to lump multiple modifications
+	// into one (generally a modification causes many notifications)
+	set_<ss_> m_modified_modules; // Module names
 	// TODO: Handle properly in reloads (unload by popping from top, then reload
 	//       everything until top)
 	sv_<ss_> m_module_load_order;
@@ -356,6 +361,8 @@ struct CState: public State, public interface::Server
 
 		log_i(MODULE, "Loading module %s from %s", cs(info.name), cs(info.path));
 
+		m_module_info[info.name] = info;
+
 		ss_ build_dst = g_server_config.rccpp_build_path +
 				"/"+info.name+"."+MODULE_EXTENSION;
 		ss_ init_cpp_path = info.path+"/"+info.name+".cpp";
@@ -370,16 +377,18 @@ struct CState: public State, public interface::Server
 		files_to_watch.insert(files_to_watch.end(), includes.begin(), includes.end());
 
 		if(m_module_file_watches.count(info.name) == 0){
-			m_module_file_watches[info.name] = sp_<interface::FileWatch>(
-					interface::createFileWatch(files_to_watch,
-					[this, info]()
-			{
-				log_i(MODULE, "Module modified: %s: %s",
-						cs(info.name), cs(info.path));
-				emit_event(Event("core:module_modified",
-						new interface::ModuleModifiedEvent(info.name, info.path)));
-				handle_events();
-			}));
+			sp_<interface::MultiFileWatch> w(interface::createMultiFileWatch());
+			for(const ss_ &watch_path : files_to_watch){
+				ss_ dir_path = interface::Filesystem::strip_file_name(watch_path);
+				w->add(dir_path,  [this, info, watch_path](const ss_ &modified_path){
+					if(modified_path != watch_path)
+						return;
+					log_i(MODULE, "Module modified: %s: %s",
+							cs(info.name), cs(info.path));
+					m_modified_modules.insert(info.name);
+				});
+			}
+			m_module_file_watches[info.name] = w;
 		}
 
 		// Build
@@ -526,14 +535,13 @@ struct CState: public State, public interface::Server
 		interface::ModuleInfo info;
 		{
 			interface::MutexScope ms(m_modules_mutex);
-			auto it = m_modules.find(module_name);
-			if(it == m_modules.end()){
-				log_w(MODULE, "reload_module: Module not found: %s",
+			auto it = m_module_info.find(module_name);
+			if(it == m_module_info.end()){
+				log_w(MODULE, "reload_module: Module info not found: %s",
 						cs(module_name));
 				return;
 			}
-			ModuleContainer *mc = &it->second;
-			info = mc->info;
+			info = it->second;
 		}
 		reload_module(info);
 	}
@@ -711,6 +719,21 @@ struct CState: public State, public interface::Server
 
 	void handle_events()
 	{
+		// Get modified modules and push events to queue
+		{
+			interface::MutexScope ms(m_modules_mutex);
+			set_<ss_> modified_modules;
+			modified_modules.swap(m_modified_modules);
+			for(const ss_ &name : modified_modules){
+				auto it = m_module_info.find(name);
+				if(it == m_module_info.end())
+					throw Exception("Info of modified module not available");
+				interface::ModuleInfo &info = it->second;
+				emit_event(Event("core:module_modified",
+						new interface::ModuleModifiedEvent(
+								info.name, info.path)));
+			}
+		}
 		// Note: Locking m_modules_mutex here is not needed because no modules
 		// can be deleted while this is running, because modules are deleted
 		// only by this same thread.
