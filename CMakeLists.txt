@@ -191,9 +191,19 @@ if(WIN32)
 		install(DIRECTORY "${COMPILER_USR_PATH}/i686-w64-mingw32" DESTINATION "${DST_COMPILER}")
 		install(DIRECTORY "${COMPILER_USR_PATH}/include" DESTINATION "${DST_COMPILER}")
 		install(DIRECTORY "${COMPILER_USR_PATH}/lib" DESTINATION "${DST_COMPILER}")
-		install(DIRECTORY "${COMPILER_USR_PATH}/libexec" DESTINATION "${DST_COMPILER}")
 		install(DIRECTORY "${COMPILER_USR_PATH}/licenses" DESTINATION "${DST_COMPILER}")
 		install(FILES "${COMPILER_USR_PATH}/build-info.txt" DESTINATION "${DST_COMPILER}")
+		set(BIG_EXECUTABLES
+			cc1.exe
+			cc1plus.exe
+			liblto_plugin-0.dll
+			liblto_plugin.dll.a
+		)
+		set(BIG_EXECUTABLES_SUBDIR "libexec/gcc/i686-w64-mingw32/4.9.1/")
+		foreach(BIG_EXE ${BIG_EXECUTABLES})
+			install(FILES "${COMPILER_USR_PATH}/${BIG_EXECUTABLES_SUBDIR}/${BIG_EXE}"
+					DESTINATION "${DST_COMPILER}/${BIG_EXECUTABLES_SUBDIR}")
+		endforeach()
 	endif()
 
 	install(DIRECTORY "${URHO3D_HOME}/Bin/CoreData" DESTINATION "${DST_SHARE}/Urho3D/Bin")
