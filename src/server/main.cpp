@@ -155,7 +155,7 @@ int main(int argc, char *argv[])
 
 		// Main loop
 		uint64_t next_tick_us = get_timeofday_us();
-		uint64_t t_per_tick = 1000 * 100;
+		uint64_t t_per_tick = 1000 * 50;
 		set_<int> attempt_bad_fds;
 		int last_added_attempt_bad_fd = -42;
 		set_<int> bad_fds;
