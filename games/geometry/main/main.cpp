@@ -5,6 +5,7 @@
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
+#include "interface/voxel.h"
 #include <Scene.h>
 #include <RigidBody.h>
 #include <CollisionShape.h>
@@ -40,6 +41,7 @@ struct Module: public interface::Module
 	void init()
 	{
 		m_server->sub_event(this, Event::t("core:start"));
+		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 	}
@@ -47,6 +49,7 @@ struct Module: public interface::Module
 	void event(const Event::Type &type, const Event::Private *p)
 	{
 		EVENT_VOIDN("core:start",         on_start)
+		EVENT_VOIDN("core:continue",      on_continue)
 		EVENT_TYPEN("core:tick",          on_tick,   interface::TickEvent)
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
 				client_file::FilesTransmitted)
@@ -67,44 +70,108 @@ struct Module: public interface::Module
 				light->SetCastShadows(true);
 			}
 			{
-				Node *n = scene->CreateChild("Plane");
-				n->SetPosition(Vector3(0.0f, -0.5f, 0.0f));
-				n->SetScale(Vector3(10.0f, 1.0f, 10.0f));
-				RigidBody *body = n->CreateComponent<RigidBody>();
-				CollisionShape *shape = n->CreateComponent<CollisionShape>();
-				shape->SetBox(Vector3::ONE);
-				body->SetFriction(0.75f);
-				StaticModel *object = n->CreateComponent<StaticModel>();
-				object->SetModel(cache->GetResource<Model>("Models/Box.mdl"));
-				object->SetMaterial(
-						cache->GetResource<Material>("Materials/Stone.xml"));
-				object->SetCastShadows(true);
+				Node *n = scene->CreateChild("Base");
 			}
 			{
-				Node *n = scene->CreateChild("Box");
-				n->SetPosition(Vector3(0.0f, 1.5f, 0.0f));
+				Node *n = scene->CreateChild("Testbox");
+				n->SetPosition(Vector3(0.0f, 6.0f, 0.0f));
 				n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
 
-				//RigidBody *body = n->CreateComponent<RigidBody>();
-				//CollisionShape *shape = n->CreateComponent<CollisionShape>();
-				//shape->SetBox(Vector3::ONE);
-				//body->SetMass(1.0);
-				//body->SetFriction(0.75f);
+				/*int w = 1, h = 1, d = 1;
+				ss_ data = "1";*/
+				int w = 2, h = 2, d = 1;
+				ss_ data = "0111";
 
 				// Crude way of dynamically defining a voxel model
-				n->SetVar(StringHash("simple_voxel_data"), Variant("11101111"));
-				n->SetVar(StringHash("simple_voxel_w"), Variant(2));
-				n->SetVar(StringHash("simple_voxel_h"), Variant(2));
-				n->SetVar(StringHash("simple_voxel_d"), Variant(2));
+				n->SetVar(StringHash("simple_voxel_data"), Variant(data.c_str()));
+				n->SetVar(StringHash("simple_voxel_w"), Variant(w));
+				n->SetVar(StringHash("simple_voxel_h"), Variant(h));
+				n->SetVar(StringHash("simple_voxel_d"), Variant(d));
 
-				// TODO: Load the same model in here and give it to the physics
-				//       subsystem so that it can be collided to
+				// Load the same model in here and give it to the physics
+				// subsystem so that it can be collided to
+				SharedPtr<Model> model(interface::
+						create_simple_voxel_model(context, w, h, d, data.c_str()));
+
+				RigidBody *body = n->CreateComponent<RigidBody>();
+				body->SetFriction(0.75f);
+				body->SetMass(1.0);
+				CollisionShape *shape = n->CreateComponent<CollisionShape>();
+				shape->SetConvexHull(model, 0, Vector3::ONE);
+				//shape->SetTriangleMesh(model, 0, Vector3::ONE);
+				//shape->SetBox(Vector3::ONE);
+			}
+		});
+
+		update_scene();
+	}
+
+	void on_continue()
+	{
+		update_scene();
+	}
+
+	void update_scene()
+	{
+		m_server->access_scene([&](Scene *scene)
+		{
+			Context *context = scene->GetContext();
+			ResourceCache* cache = context->GetSubsystem<ResourceCache>();
+
+			{
+				Node *n = scene->GetChild("Base");
+				n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
+				//n->SetPosition(Vector3(0.0f, 0.5f, 0.0f));
+				n->SetPosition(Vector3(0.0f, 0.5f, 0.0f));
+				//n->SetRotation(Quaternion(0, 90, 0));
+
+				int w = 10, h = 3, d = 10;
+				ss_ data =
+					"111111111100100000100000000000"
+					"111111111100000000000000000000"
+					"111111111100000000000000000000"
+					"111111111100000000000000000000"
+					"111111111100011000000001000000"
+					"111111111100011000000001000000"
+					"111111111100000000000000000000"
+					"111111111100000000000000000000"
+					"111111111100000000000000000000"
+					"111111111100000000000000000000"
+				;
+
+				// Crude way of dynamically defining a voxel model
+				n->SetVar(StringHash("simple_voxel_data"), Variant(data.c_str()));
+				n->SetVar(StringHash("simple_voxel_w"), Variant(w));
+				n->SetVar(StringHash("simple_voxel_h"), Variant(h));
+				n->SetVar(StringHash("simple_voxel_d"), Variant(d));
+
+				// Load the same model in here and give it to the physics
+				// subsystem so that it can be collided to
+				SharedPtr<Model> model(interface::
+						create_simple_voxel_model(context, w, h, d, data.c_str()));
+
+				RigidBody *body = n->CreateComponent<RigidBody>();
+				body->SetFriction(0.75f);
+				CollisionShape *shape = n->CreateComponent<CollisionShape>();
+				shape->SetTriangleMesh(model, 0, Vector3::ONE);
 			}
 		});
 	}
 
 	void on_tick(const interface::TickEvent &event)
 	{
+		static uint a = 0;
+		if(((a++) % 50) == 0){
+			m_server->access_scene([&](Scene *scene){
+				Node *n = scene->GetChild("Testbox");
+				//n->SetPosition(Vector3(0.0f, 8.0f, 0.0f));
+				n->SetRotation(Quaternion(30, 60, 90));
+				//n->SetPosition(Vector3(0.0f, 6.0f, 0.0f));
+				//n->SetPosition(Vector3(0.0f, 4.0f, 0.0f));
+				n->SetPosition(Vector3(-0.5f, 8.0f, 0.0f));
+			});
+			return;
+		}
 	}
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)

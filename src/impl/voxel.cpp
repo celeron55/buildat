@@ -31,18 +31,15 @@ Model* create_simple_voxel_model(Context *context,
 		throw Exception("Negative dimension");
 	if(w * h * d != (int)source_data.size())
 		throw Exception("Mismatched data size");
-	int x_off = -w/2;
-	int y_off = -h/2;
-	int z_off = -d/2;
 	pv::SimpleVolume<uint8_t> volData(pv::Region(
-			pv::Vector3DInt32(x_off, y_off, z_off),
-			pv::Vector3DInt32(w + x_off, h + y_off, d + z_off)));
+			pv::Vector3DInt32(-1, -1, -1),
+			pv::Vector3DInt32(w, h, d)));
 	size_t i = 0;
 	for(int z = 0; z < d; z++)
 	for(int y = 0; y < h; y++)
 	for(int x = 0; x < w; x++){
 		char c = source_data[i++];
-		volData.setVoxelAt(x+x_off, y+y_off, z+z_off, c == '0' ? 0 : 255);
+		volData.setVoxelAt(x, y, z, c == '0' ? 0 : 255);
 	}
 
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
@@ -59,9 +56,9 @@ Model* create_simple_voxel_model(Context *context,
 	sv_<float> vertex_data;
 	vertex_data.resize(num_vertices * 6); // vertex + normal
 	for(size_t i = 0; i < num_vertices; i++){
-		vertex_data[i*6 + 0] = pv_vertices[i].position.getX();
-		vertex_data[i*6 + 1] = pv_vertices[i].position.getY();
-		vertex_data[i*6 + 2] = pv_vertices[i].position.getZ();
+		vertex_data[i*6 + 0] = pv_vertices[i].position.getX() - w/2.0f - 0.5f;
+		vertex_data[i*6 + 1] = pv_vertices[i].position.getY() - h/2.0f - 0.5f;
+		vertex_data[i*6 + 2] = pv_vertices[i].position.getZ() - d/2.0f - 0.5f;
 		vertex_data[i*6 + 3] = pv_vertices[i].normal.getX();
 		vertex_data[i*6 + 4] = pv_vertices[i].normal.getY();
 		vertex_data[i*6 + 5] = pv_vertices[i].normal.getZ();
@@ -70,6 +67,8 @@ Model* create_simple_voxel_model(Context *context,
 	sv_<short> index_data;
 	index_data.resize(num_indices);
 	for(size_t i = 0; i < num_indices; i++){
+		if(pv_indices[i] >= 0x10000)
+			throw Exception("Index too large");
 		index_data[i] = pv_indices[i];
 	}
 

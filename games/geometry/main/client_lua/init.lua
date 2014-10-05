@@ -52,7 +52,7 @@ function setup_simple_voxel_data(node)
 	local w = node:GetVar("simple_voxel_w"):GetInt()
 	local h = node:GetVar("simple_voxel_h"):GetInt()
 	local d = node:GetVar("simple_voxel_d"):GetInt()
-	log:info("simple_voxel_data: "..dump(data))
+	log:info("simple_voxel_data of "..dump(node:GetName())..": "..dump(data))
 	buildat.set_simple_voxel_model(node, w, h, d, data)
 	node:SetScale(magic.Vector3(1, 1, 1))
 
@@ -61,10 +61,20 @@ function setup_simple_voxel_data(node)
 end
 
 magic.sub_sync_node_added({}, function(node)
-	local name = node:GetName()
 	if not node:GetVar("simple_voxel_data"):IsEmpty() then
 		setup_simple_voxel_data(node)
 	end
+	local name = node:GetName()
+	--[[if name == "Testbox" then
+		local object = node:CreateComponent("StaticModel")
+		object.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+		object.material = magic.Material:new()
+		object.material:SetTechnique(0,
+				magic.cache:GetResource("Technique", "Techniques/Diff.xml"))
+		object.material:SetTexture(magic.TU_DIFFUSE,
+				magic.cache:GetResource("Texture2D", "main/pink_texture.png"))
+		object.castShadows = true
+	end]]
 end)
 
 -- vim: set noet ts=4 sw=4:
