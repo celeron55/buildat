@@ -6,6 +6,7 @@ local log = buildat.Logger("__client/extensions")
 -- Extension interfaces, indexed by extension name
 local loaded_extensions = {}
 
+-- Called by this file and client/sandbox.lua
 function __buildat_require_extension(name)
 	log:debug("__buildat_require_extension(\""..name.."\")")
 	if loaded_extensions[name] then
@@ -28,6 +29,8 @@ end
 
 -- Don't use package.loaders because for whatever reason it doesn't work in the
 -- Windows version at least in Wine
+-- TODO: Was that due to the table indexing bug which was fixed by using LuaJIT
+--       instead of Lua?
 local old_require = require
 
 function require(name)

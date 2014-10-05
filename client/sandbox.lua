@@ -69,6 +69,16 @@ __buildat_sandbox_environment.require = function(name)
 		log:verbose("Loaded extension \""..name.."\"")
 		return unsafe.safe
 	end
+	-- Allow loading the client-side parts of modules
+	local m = string.match(name, '^buildat/module/([a-zA-Z0-9_]+)$')
+	if m then
+		local interface = __buildat_require_module(m)
+		if interface == nil then
+			error("require: Cannot load module: \""..m.."\"")
+		end
+		log:verbose("Loaded module \""..name.."\"")
+		return interface
+	end
 	-- Disallow loading anything else
 	error("require: \""..name.."\" not found in sandbox")
 end
@@ -151,32 +161,40 @@ end
 local function run_function_in_sandbox(untrusted_function, sandbox)
 	sandbox = wrap_globals(sandbox)
 	setfenv(untrusted_function, sandbox)
-	return __buildat_pcall(untrusted_function)
+	local retval = nil
+	local status, err = __buildat_pcall(function()
+		retval = untrusted_function()
+	end)
+	return status, err, retval
 end
 
 function __buildat_run_function_in_sandbox(untrusted_function)
-	local status, err = run_function_in_sandbox(untrusted_function, __buildat_sandbox_environment)
+	local status, err, retval = run_function_in_sandbox(
+			untrusted_function, __buildat_sandbox_environment)
 	if status == false then
 		log:error("Failed to run function:\n"..err)
-		return false
 	end
-	return true
+	return status, err, retval
 end
 
 local function run_code_in_sandbox(untrusted_code, sandbox, chunkname)
-	if untrusted_code:byte(1) == 27 then return false, "binary bytecode prohibited" end
+	if untrusted_code:byte(1) == 27 then
+		return false, "binary bytecode prohibited", nil
+	end
 	local untrusted_function, message = loadstring(untrusted_code, chunkname)
-	if not untrusted_function then return false, message end
+	if not untrusted_function then
+		return false, message, nil
+	end
 	return run_function_in_sandbox(untrusted_function, sandbox)
 end
 
 function __buildat_run_code_in_sandbox(untrusted_code, chunkname)
-	local status, err = run_code_in_sandbox(untrusted_code, __buildat_sandbox_environment, chunkname)
+	local status, err, retval = run_code_in_sandbox(
+			untrusted_code, __buildat_sandbox_environment, chunkname)
 	if status == false then
 		log:error("Failed to run script:\n"..err)
-		return false
 	end
-	return true
+	return status, err, retval
 end
 
 function buildat.run_script_file(name)

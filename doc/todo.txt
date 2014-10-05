@@ -32,4 +32,4 @@ Buildat TODO
 - Precompiled mode
 - Singleplayer UI
 - Modules with no C++ code (eg. just a client-side library)
-- Show exceptions and errors on client using ui_utils.show_message_dialog
+- Show all exceptions and errors on client using ui_utils.show_message_dialog
