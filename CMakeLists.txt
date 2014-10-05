@@ -105,6 +105,7 @@ if(BUILD_CLIENT)
 		PolyVoxCore
 		${ABSOLUTE_PATH_LIBS}
 		${LINK_LIBS_ONLY}
+		${URHO3D_HOME}/Build/ThirdParty/toluapp/src/lib/libtoluapp.a
 	)
 	if(URHO3D_LUAJIT)
 		target_link_libraries(${CLIENT_EXE_NAME}
