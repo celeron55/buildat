@@ -1,0 +1,7 @@
+{
+	"disable_cpp": true,
+	"dependencies": [
+		{"module": "client_lua"},
+		{"module": "client_data"}
+	]
+}

@@ -5,7 +5,7 @@ local log = buildat.Logger("test1")
 local dump = buildat.dump
 local cereal = require("buildat/extension/cereal")
 local magic = require("buildat/extension/urho3d")
-log:info("test1/init.lua loaded")
+local client_lib_test = require("buildat/module/client_lib_test")
 
 -- 3D things
 
@@ -54,6 +54,10 @@ title_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 1
 title_text.horizontalAlignment = magic.HA_CENTER
 title_text.verticalAlignment = magic.VA_CENTER
 title_text:SetPosition(0, magic.ui.root.height*(-0.33))
+
+-- Call client_lib_test module
+-- This adds some text to the bottom right corner
+client_lib_test.f()
 
 the_box = nil
 

@@ -3,6 +3,7 @@
 		{"module": "network"},
 		{"module": "client_lua"},
 		{"module": "client_data"},
+		{"module": "client_lib_test"},
 		{"module": "foobar", "optional": true}
 	],
 	"reverse_dependencies": [
