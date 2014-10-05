@@ -186,6 +186,10 @@ function M.define(dst, util)
 
 	util.wc("StaticModel", {
 		inherited_from_by_wrapper = dst.Octree,
+		instance = {
+			SetModel = util.self_function(
+					"SetModel", {}, {"StaticModel", "Model"}),
+		},
 		properties = {
 			model = util.simple_property(dst.Model),
 			material = util.simple_property(dst.Material),
@@ -251,6 +255,7 @@ function M.define(dst, util)
 							self:GetChild(name_or_index))
 				end
 			),
+			SetScale = util.self_function("SetScale", {}, {"Node", "Vector3"}),
 		},
 		properties = {
 			scale = util.simple_property(dst.Vector3),

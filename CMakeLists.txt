@@ -89,6 +89,10 @@ if(BUILD_CLIENT)
 		src/impl/tcpsocket.cpp
 		src/impl/sha1.cpp
 		src/impl/packet_stream.cpp
+		src/lua_bindings/util.cpp
+		src/lua_bindings/init.cpp
+		src/lua_bindings/misc.cpp
+		src/lua_bindings/cereal.cpp
 	)
 
 	add_executable(${CLIENT_EXE_NAME} ${CLIENT_SRCS})
@@ -99,9 +103,13 @@ if(BUILD_CLIENT)
 		${ABSOLUTE_PATH_LIBS}
 		${LINK_LIBS_ONLY}
 	)
-	if(WIN32)
+	if(URHO3D_LUAJIT)
 		target_link_libraries(${CLIENT_EXE_NAME}
 			${URHO3D_HOME}/Build/ThirdParty/LuaJIT/libLuaJIT.a
+		)
+	else()
+		target_link_libraries(${CLIENT_EXE_NAME}
+			${URHO3D_HOME}/Build/ThirdParty/Lua/libLua.a
 		)
 	endif()
 endif(BUILD_CLIENT)

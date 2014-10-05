@@ -4,6 +4,8 @@
 #include "core/log.h"
 #include "client/config.h"
 #include "client/state.h"
+#include "lua_bindings/init.h"
+#include "lua_bindings/util.h"
 #include "interface/fs.h"
 #include <c55/getopt.h>
 #include <c55/os.h>
@@ -33,8 +35,6 @@ extern "C" {
 #include <lua.h>
 #include <lauxlib.h>
 }
-#include <cereal/archives/portable_binary.hpp>
-#include <cereal/types/string.hpp>
 #include <signal.h>
 #define MODULE "__app"
 namespace magic = Urho3D;
@@ -236,7 +236,7 @@ struct CApp: public App, public magic::Application
 
 		// TODO: Use lua_load() so that chunkname can be set
 		if(luaL_loadstring(L, script.c_str())){
-			ss_ error = lua_tocppstring(L, -1);
+			ss_ error = lua_bindings::lua_tocppstring(L, -1);
 			log_e("%s", cs(error));
 			lua_pop(L, 1);
 			return false;
@@ -305,23 +305,20 @@ struct CApp: public App, public magic::Application
 		lua_pushlightuserdata(L, (void*)this);
 		lua_setfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 
+		lua_bindings::init(L);
+
 #define DEF_BUILDAT_FUNC(name){\
 	lua_pushcfunction(L, l_##name);\
 	lua_setglobal(L, "__buildat_" #name);\
 }
-		DEF_BUILDAT_FUNC(print_log);
+
+		DEF_BUILDAT_FUNC(connect_server)
+		DEF_BUILDAT_FUNC(disconnect)
 		DEF_BUILDAT_FUNC(send_packet);
-		DEF_BUILDAT_FUNC(get_file_content)
 		DEF_BUILDAT_FUNC(get_file_path)
+		DEF_BUILDAT_FUNC(get_file_content)
 		DEF_BUILDAT_FUNC(get_path)
 		DEF_BUILDAT_FUNC(extension_path)
-		DEF_BUILDAT_FUNC(mkdir)
-		DEF_BUILDAT_FUNC(pcall)
-		DEF_BUILDAT_FUNC(cereal_binary_input)
-		DEF_BUILDAT_FUNC(cereal_binary_output)
-		DEF_BUILDAT_FUNC(connect_server)
-		DEF_BUILDAT_FUNC(fatal_error)
-		DEF_BUILDAT_FUNC(disconnect)
 
 		// Create a scene that will be synchronized from the server
 		m_scene = new magic::Scene(context_);
@@ -484,32 +481,51 @@ struct CApp: public App, public magic::Application
 		error_logging_pcall(L, 1, 0);
 	}
 
-	// print_log(level, module, text)
-	static int l_print_log(lua_State *L)
+	// Apps-specific lua functions
+
+	// connect_server(address: string) -> status: bool, error: string or nil
+	static int l_connect_server(lua_State *L)
 	{
-		ss_ level = lua_tocppstring(L, 1);
-		const char *module_c = lua_tostring(L, 2);
-		const char *text_c = lua_tostring(L, 3);
-		int loglevel = LOG_INFO;
-		if(level == "debug")
-			loglevel = LOG_DEBUG;
-		else if(level == "verbose")
-			loglevel = LOG_VERBOSE;
-		else if(level == "info")
-			loglevel = LOG_INFO;
-		else if(level == "warning")
-			loglevel = LOG_WARNING;
-		else if(level == "error")
-			loglevel = LOG_ERROR;
-		log_(loglevel, module_c, "%s", text_c);
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+
+		ss_ address = lua_bindings::lua_tocppstring(L, 1);
+
+		ss_ error;
+		bool ok = self->m_state->connect(address, &error);
+		lua_pushboolean(L, ok);
+		if(ok)
+			lua_pushnil(L);
+		else
+			lua_pushstring(L, error.c_str());
+		return 2;
+	}
+
+	// disconnect()
+	static int l_disconnect(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+
+		if(g_client_config.boot_to_menu){
+			// If menu, reboot client into menu
+			self->m_reboot_requested = true;
+			self->shutdown();
+		} else {
+			// If no menu, shutdown client
+			self->shutdown();
+		}
+
 		return 0;
 	}
 
 	// send_packet(name: string, data: string)
 	static int l_send_packet(lua_State *L)
 	{
-		ss_ name = lua_tocppstring(L, 1);
-		ss_ data = lua_tocppstring(L, 2);
+		ss_ name = lua_bindings::lua_tocppstring(L, 1);
+		ss_ data = lua_bindings::lua_tocppstring(L, 2);
 
 		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 		CApp *self = (CApp*)lua_touserdata(L, -1);
@@ -527,7 +543,7 @@ struct CApp: public App, public magic::Application
 	// get_file_path(name: string) -> path, hash
 	static int l_get_file_path(lua_State *L)
 	{
-		ss_ name = lua_tocppstring(L, 1);
+		ss_ name = lua_bindings::lua_tocppstring(L, 1);
 
 		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 		CApp *self = (CApp*)lua_touserdata(L, -1);
@@ -545,7 +561,7 @@ struct CApp: public App, public magic::Application
 	// get_file_content(name: string)
 	static int l_get_file_content(lua_State *L)
 	{
-		ss_ name = lua_tocppstring(L, 1);
+		ss_ name = lua_bindings::lua_tocppstring(L, 1);
 
 		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 		CApp *self = (CApp*)lua_touserdata(L, -1);
@@ -561,74 +577,6 @@ struct CApp: public App, public magic::Application
 		}
 	}
 
-	// get_path(name: string)
-	static int l_get_path(lua_State *L)
-	{
-		ss_ name = lua_tocppstring(L, 1);
-
-		if(name == "share"){
-			ss_ path = g_client_config.share_path;
-			lua_pushlstring(L, path.c_str(), path.size());
-			return 1;
-		}
-		if(name == "cache"){
-			ss_ path = g_client_config.cache_path;
-			lua_pushlstring(L, path.c_str(), path.size());
-			return 1;
-		}
-		if(name == "tmp"){
-			ss_ path = g_client_config.cache_path+"/tmp";
-			lua_pushlstring(L, path.c_str(), path.size());
-			return 1;
-		}
-		log_w(MODULE, "Unknown named path: \"%s\"", cs(name));
-		return 0;
-	}
-
-	// extension_path(name: string)
-	static int l_extension_path(lua_State *L)
-	{
-		ss_ name = lua_tocppstring(L, 1);
-		ss_ path = g_client_config.share_path+"/extensions/"+name;
-		// TODO: Check if extension actually exists and do something suitable if
-		//       not
-		lua_pushlstring(L, path.c_str(), path.size());
-		return 1;
-	}
-
-	// mkdir(path: string)
-	static int l_mkdir(lua_State *L)
-	{
-		ss_ path = lua_tocppstring(L, 1);
-		bool ok = interface::getGlobalFilesystem()->create_directories(path);
-		if(!ok)
-			log_w(MODULE, "Failed to create directory: \"%s\"", cs(path));
-		else
-			log_v(MODULE, "Created directory: \"%s\"", cs(path));
-		lua_pushboolean(L, ok);
-		return 1;
-	}
-
-	static int handle_error(lua_State *L)
-	{
-		lua_getglobal(L, "debug");
-		if(!lua_istable(L, -1)){
-			log_w(MODULE, "handle_error(): debug is nil");
-			lua_pop(L, 1);
-			return 1;
-		}
-		lua_getfield(L, -1, "traceback");
-		if(!lua_isfunction(L, -1)){
-			log_w(MODULE, "handle_error(): debug.traceback is nil");
-			lua_pop(L, 2);
-			return 1;
-		}
-		lua_pushvalue(L, 1);
-		lua_pushinteger(L, 2);
-		lua_call(L, 2, 1);
-		return 1;
-	}
-
 	// When calling Lua from C++, this is universally good
 	static void error_logging_pcall(lua_State *L, int nargs, int nresults)
 	{
@@ -636,7 +584,7 @@ struct CApp: public App, public magic::Application
 				nargs, nresults);
 		//log_d(MODULE, "stack 1: %s", cs(dump_stack(L)));
 		int start_L = lua_gettop(L);
-		lua_pushcfunction(L, handle_error);
+		lua_pushcfunction(L, lua_bindings::handle_error);
 		lua_insert(L, start_L - nargs);
 		int handle_error_L = start_L - nargs;
 		//log_d(MODULE, "stack 2: %s", cs(dump_stack(L)));
@@ -644,7 +592,7 @@ struct CApp: public App, public magic::Application
 		lua_remove(L, handle_error_L);
 		//log_d(MODULE, "stack 3: %s", cs(dump_stack(L)));
 		if(r != 0){
-			ss_ traceback = lua_tocppstring(L, -1);
+			ss_ traceback = lua_bindings::lua_tocppstring(L, -1);
 			lua_pop(L, 1);
 			const char *msg =
 					r == LUA_ERRRUN ? "runtime error" :
@@ -672,394 +620,39 @@ struct CApp: public App, public magic::Application
 		//log_d(MODULE, "stack 2: %s", cs(dump_stack(L)));
 	}
 
-	// Like lua_pcall, but returns a full traceback on error
-	// pcall(function) -> status, error
-	static int l_pcall(lua_State *L)
+	// get_path(name: string)
+	static int l_get_path(lua_State *L)
 	{
-		log_d(MODULE, "l_pcall()");
-		lua_pushcfunction(L, handle_error);
-		int handle_error_stack_i = lua_gettop(L);
+		ss_ name = lua_bindings::lua_tocppstring(L, 1);
 
-		lua_pushvalue(L, 1);
-		int r = lua_pcall(L, 0, 0, handle_error_stack_i);
-		int error_stack_i = lua_gettop(L);
-		if(r == 0){
-			log_d(MODULE, "l_pcall() returned 0 (no error)");
-			lua_pushboolean(L, true);
+		if(name == "share"){
+			ss_ path = g_client_config.share_path;
+			lua_pushlstring(L, path.c_str(), path.size());
 			return 1;
 		}
-		if(r == LUA_ERRRUN)
-			log_w(MODULE, "pcall(): Runtime error");
-		if(r == LUA_ERRMEM)
-			log_w(MODULE, "pcall(): Out of memory");
-		if(r == LUA_ERRERR)
-			log_w(MODULE, "pcall(): Error handler  failed");
-		lua_pushboolean(L, false);
-		lua_pushvalue(L, error_stack_i);
-		return 2;
-	}
-
-	static sv_<ss_> dump_stack(lua_State *L)
-	{
-		sv_<ss_> result;
-		int top = lua_gettop(L);
-		for(int i = 1; i <= top; i++){
-			int type = lua_type(L, i);
-			if(type == LUA_TSTRING)
-				result.push_back(ss_()+"\""+lua_tostring(L, i)+"\"");
-			else if(type == LUA_TSTRING)
-				result.push_back(ss_()+"\""+lua_tostring(L, i)+"\"");
-			else if(type == LUA_TBOOLEAN)
-				result.push_back(lua_toboolean(L, i) ? "true" : "false");
-			else if(type == LUA_TNUMBER)
-				result.push_back(cs(lua_tonumber(L, i)));
-			else
-				result.push_back(lua_typename(L, type));
+		if(name == "cache"){
+			ss_ path = g_client_config.cache_path;
+			lua_pushlstring(L, path.c_str(), path.size());
+			return 1;
 		}
-		return result;
-	}
-
-	static ss_ lua_tocppstring(lua_State *L, int index)
-	{
-		if(!lua_isstring(L, index))
-			throw Exception(ss_()+"lua_tocppstring: Expected string, got "+
-					lua_typename(L, index));
-		size_t length;
-		const char *s = lua_tolstring(L, index, &length);
-		return ss_(s, length);
-	}
-
-	/* Type format:
-	{"object",
-		{"peer", "int32_t"},
-		{"players", {"unordered_map",
-			"int32_t",
-			{"object",
-				{"peer", "int32_t"},
-				{"x", "int32_t"},
-				{"y", "int32_t"},
-			},
-		}},
-		{"playfield", {"object",
-			{"w", "int32_t"},
-			{"h", "int32_t"},
-			{"tiles", {"array", "int32_t"}},
-		}},
-	}) */
-
-	static constexpr auto known_types =
-			"byte, int32_t, double, array, unordered_map, object";
-
-	// Places result value on top of stack
-	static void binary_input_read_value(lua_State *L, int type_L,
-			cereal::PortableBinaryInputArchive &ar)
-	{
-		if(type_L < 0) type_L = lua_gettop(L) + type_L + 1;
-
-		// Read value definition
-		bool has_table = false;
-		ss_ outfield_type;
-		if(lua_istable(L, type_L)){
-			has_table = true;
-			lua_rawgeti(L, type_L, 1);
-			outfield_type = lua_tocppstring(L, -1);
-			lua_pop(L, 1);
-		} else if(lua_isstring(L, type_L)){
-			outfield_type = lua_tocppstring(L, type_L);
-		} else {
-			throw Exception("Value definition table or string expected");
+		if(name == "tmp"){
+			ss_ path = g_client_config.cache_path+"/tmp";
+			lua_pushlstring(L, path.c_str(), path.size());
+			return 1;
 		}
-
-		log_t(MODULE, "binary_input_read_value(): type=%s", cs(outfield_type));
-
-		if(outfield_type == "byte"){
-			uchar value;
-			ar(value);
-			log_t(MODULE, "byte value=%i", (int)value);
-			lua_pushinteger(L, value);
-			// value is left on stack
-		} else if(outfield_type == "int32_t"){
-			int32_t value;
-			ar(value);
-			log_t(MODULE, "int32_t value=%i", value);
-			lua_pushinteger(L, value);
-			// value is left on stack
-		} else if(outfield_type == "double"){
-			double value;
-			ar(value);
-			log_t(MODULE, "double value=%f", value);
-			lua_pushnumber(L, value);
-			// value is left on stack
-		} else if(outfield_type == "string"){
-			ss_ value;
-			ar(value);
-			log_t(MODULE, "string value=%s", cs(value));
-			lua_pushlstring(L, value.c_str(), value.size());
-			// value is left on stack
-		} else if(outfield_type == "array"){
-			if(!has_table)
-				throw Exception("array requires parameter table");
-			lua_newtable(L);
-			int value_result_table_L = lua_gettop(L);
-			lua_rawgeti(L, type_L, 2);
-			int array_type_L = lua_gettop(L);
-			// Loop through array items
-			uint64_t num_entries;
-			ar(num_entries);
-			for(uint64_t i = 0; i < num_entries; i++){
-				log_t(MODULE, "array[%s]", cs(i));
-				binary_input_read_value(L, array_type_L, ar);
-				lua_rawseti(L, value_result_table_L, i + 1);
-			}
-			lua_pop(L, 1); // array_type_L
-			// value_result_table_L is left on stack
-		} else if(outfield_type == "unordered_map"){
-			if(!has_table)
-				throw Exception("unordered_map requires parameter table");
-			lua_newtable(L);
-			int value_result_table_L = lua_gettop(L);
-			lua_rawgeti(L, type_L, 2);
-			int map_key_type_L = lua_gettop(L);
-			lua_rawgeti(L, type_L, 3);
-			int map_value_type_L = lua_gettop(L);
-			// Loop through map entries
-			uint64_t num_entries;
-			ar(num_entries);
-			for(uint64_t i = 0; i < num_entries; i++){
-				log_t(MODULE, "unordered_map[%s]", cs(i));
-				binary_input_read_value(L, map_key_type_L, ar);
-				binary_input_read_value(L, map_value_type_L, ar);
-				lua_rawset(L, value_result_table_L);
-			}
-			lua_pop(L, 1); // map_value_type_L
-			lua_pop(L, 1); // map_key_type_L
-			// value_result_table_L is left on stack
-		} else if(outfield_type == "object"){
-			if(!has_table)
-				throw Exception("object requires parameter table");
-			lua_newtable(L);
-			int value_result_table_L = lua_gettop(L);
-			// Loop through object fields
-			size_t field_i = 0;
-			lua_pushnil(L);
-			while(lua_next(L, type_L) != 0){
-				if(field_i != 0){
-					log_t(MODULE, "object field %zu", field_i);
-					int field_def_L = lua_gettop(L);
-					lua_rawgeti(L, field_def_L, 1); // name
-					lua_rawgeti(L, field_def_L, 2); // type
-					log_t(MODULE, " = object[\"%s\"]", lua_tostring(L, -2));
-					binary_input_read_value(L, -1, ar); // Uses type, pushes value
-					lua_remove(L, -2); // Remove type
-					lua_rawset(L, value_result_table_L); // Set t[#-2] = #-1
-				}
-				lua_pop(L, 1); // Continue iterating by popping table value
-				field_i++;
-			}
-			// value_result_table_L is left on stack
-		} else {
-			throw Exception(ss_()+"Unknown type \""+outfield_type+"\""
-					"; known types are "+known_types);
-		}
-	}
-
-	static void binary_output_write_value(lua_State *L, int value_L, int type_L,
-			cereal::PortableBinaryOutputArchive &ar)
-	{
-		if(value_L < 0) value_L = lua_gettop(L) + value_L + 1;
-		if(type_L < 0) type_L = lua_gettop(L) + type_L + 1;
-
-		// Read value definition
-		bool has_table = false;
-		ss_ outfield_type;
-		if(lua_istable(L, type_L)){
-			has_table = true;
-			lua_rawgeti(L, type_L, 1);
-			outfield_type = lua_tocppstring(L, -1);
-			lua_pop(L, 1);
-		} else if(lua_isstring(L, type_L)){
-			outfield_type = lua_tocppstring(L, type_L);
-		} else {
-			throw Exception("Value definition table or string expected");
-		}
-
-		log_t(MODULE, "binary_output_write_value(): type=%s", cs(outfield_type));
-
-		if(outfield_type == "byte"){
-			uchar value = lua_tointeger(L, value_L);
-			log_t(MODULE, "byte value=%i", (int)value);
-			ar(value);
-		} else if(outfield_type == "int32_t"){
-			int32_t value = lua_tointeger(L, value_L);
-			log_t(MODULE, "int32_t value=%i", value);
-			ar(value);
-		} else if(outfield_type == "double"){
-			double value = lua_tonumber(L, value_L);
-			log_t(MODULE, "double value=%f", value);
-			ar(value);
-		} else if(outfield_type == "string"){
-			ss_ value = lua_tocppstring(L, value_L);
-			log_t(MODULE, "string value=%s", cs(value));
-			ar(value);
-		} else if(outfield_type == "array"){
-			if(!has_table)
-				throw Exception("array requires parameter table");
-			lua_rawgeti(L, type_L, 2);
-			int array_type_L = lua_gettop(L);
-			// Loop through array items
-			uint64_t num_entries = 0;
-			lua_pushnil(L);
-			while(lua_next(L, value_L) != 0){
-				lua_pop(L, 1); // Continue iterating by popping table value
-				num_entries++;
-			}
-			ar(num_entries);
-			lua_pushnil(L);
-			int i = 1;
-			while(lua_next(L, value_L) != 0){
-				log_t(MODULE, "array[%i]", i);
-				binary_output_write_value(L, -1, array_type_L, ar);
-				lua_pop(L, 1); // Continue iterating by popping table value
-				i++;
-			}
-			lua_pop(L, 1); // array_type_L
-			// value_result_table_L is left on stack
-		} else if(outfield_type == "unordered_map"){
-			if(!has_table)
-				throw Exception("unordered_map requires parameter table");
-			lua_rawgeti(L, type_L, 2);
-			int map_key_type_L = lua_gettop(L);
-			lua_rawgeti(L, type_L, 3);
-			int map_value_type_L = lua_gettop(L);
-			// Loop through map entries
-			uint64_t num_entries = 0;
-			lua_pushnil(L);
-			while(lua_next(L, value_L) != 0){
-				lua_pop(L, 1); // Continue iterating by popping table value
-				num_entries++;
-			}
-			ar(num_entries);
-			lua_pushnil(L);
-			while(lua_next(L, value_L) != 0){
-				int key_L = lua_gettop(L) - 1;
-				int value_L = lua_gettop(L);
-				log_t(MODULE, "unordered_map[%s]", lua_tostring(L, key_L));
-				binary_output_write_value(L, key_L, map_key_type_L, ar);
-				binary_output_write_value(L, value_L, map_value_type_L, ar);
-				lua_pop(L, 1); // Continue iterating by popping table value
-			}
-			lua_pop(L, 1); // map_value_type_L
-			lua_pop(L, 1); // map_key_type_L
-			// value_result_table_L is left on stack
-		} else if(outfield_type == "object"){
-			if(!has_table)
-				throw Exception("object requires parameter table");
-			// Loop through object fields
-			size_t field_i = 0;
-			lua_pushnil(L);
-			while(lua_next(L, type_L) != 0){
-				if(field_i != 0){
-					log_t(MODULE, "object field %zu", field_i);
-					int field_def_L = lua_gettop(L);
-					lua_rawgeti(L, field_def_L, 2); // type
-					lua_rawgeti(L, field_def_L, 1); // name
-					log_t(MODULE, " = object[\"%s\"]", lua_tostring(L, -1));
-					// Get value_L[name]; name is replaced by value
-					lua_rawget(L, value_L);
-					// Recurse into this value
-					binary_output_write_value(L, -1, -2, ar);
-					lua_pop(L, 1); // Pop value
-					lua_pop(L, 1); // Pop type
-				}
-				lua_pop(L, 1); // Continue iterating by popping table value
-				field_i++;
-			}
-		} else {
-			throw Exception(ss_()+"Unknown type \""+outfield_type+"\""
-					"; known types are "+known_types);
-		}
-	}
-
-	// cereal_binary_input(data: string, types: table) -> table of values
-	static int l_cereal_binary_input(lua_State *L)
-	{
-		size_t data_len = 0;
-		const char *data_c = lua_tolstring(L, 1, &data_len);
-		ss_ data(data_c, data_len);
-
-		int type_L = 2;
-
-		std::istringstream is(data, std::ios::binary);
-		cereal::PortableBinaryInputArchive ar(is);
-
-		binary_input_read_value(L, type_L, ar);
-
-		return 1;
-	}
-
-	// cereal_binary_output(values: table, types: table) -> data
-	static int l_cereal_binary_output(lua_State *L)
-	{
-		int value_L = 1;
-
-		int type_L = 2;
-
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-
-			binary_output_write_value(L, value_L, type_L, ar);
-		}
-		ss_ data = os.str();
-		lua_pushlstring(L, data.c_str(), data.size());
-		return 1;
-	}
-
-	// connect_server(address: string) -> status: bool, error: string or nil
-	static int l_connect_server(lua_State *L)
-	{
-		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
-		CApp *self = (CApp*)lua_touserdata(L, -1);
-		lua_pop(L, 1);
-
-		ss_ address = lua_tocppstring(L, 1);
-
-		ss_ error;
-		bool ok = self->m_state->connect(address, &error);
-		lua_pushboolean(L, ok);
-		if(ok)
-			lua_pushnil(L);
-		else
-			lua_pushstring(L, error.c_str());
-		return 2;
-	}
-
-	// fatal_error(error: string)
-	static int l_fatal_error(lua_State *L)
-	{
-		ss_ error = lua_tocppstring(L, 1);
-		log_e(MODULE, "Fatal error: %s", cs(error));
-		throw Exception("Fatal error from Lua");
+		log_w(MODULE, "Unknown named path: \"%s\"", cs(name));
 		return 0;
 	}
 
-	// disconnect()
-	static int l_disconnect(lua_State *L)
+	// extension_path(name: string)
+	static int l_extension_path(lua_State *L)
 	{
-		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
-		CApp *self = (CApp*)lua_touserdata(L, -1);
-		lua_pop(L, 1);
-
-		if(g_client_config.boot_to_menu){
-			// If menu, reboot client into menu
-			self->m_reboot_requested = true;
-			self->shutdown();
-		} else {
-			// If no menu, shutdown client
-			self->shutdown();
-		}
-
-		return 0;
+		ss_ name = lua_bindings::lua_tocppstring(L, 1);
+		ss_ path = g_client_config.share_path+"/extensions/"+name;
+		// TODO: Check if extension actually exists and do something suitable if
+		//       not
+		lua_pushlstring(L, path.c_str(), path.size());
+		return 1;
 	}
 };
 
