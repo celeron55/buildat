@@ -6,12 +6,27 @@ local log = buildat.Logger("safe_classes")
 local M = {}
 
 function M.define(dst, util)
+	util.wc("StringHash", {
+		unsafe_constructor = util.wrap_function({{"string"}},
+		function(value)
+			return util.wrap_instance("StringHash", StringHash(value))
+		end),
+		instance = {
+		}
+	})
+
 	util.wc("Variant", {
 		unsafe_constructor = util.wrap_function({{"Color"}},
 		function(value)
 			return util.wrap_instance("Variant", Variant(value))
 		end),
 		instance = {
+			IsEmpty = util.self_function(
+					"IsEmpty", {"boolean"}, {"Variant"}),
+			GetString = util.self_function(
+					"GetString", {"string"}, {"Variant"}),
+			GetInt = util.self_function(
+					"GetInt", {"number"}, {"Variant"}),
 		}
 	})
 
@@ -256,6 +271,28 @@ function M.define(dst, util)
 				end
 			),
 			SetScale = util.self_function("SetScale", {}, {"Node", "Vector3"}),
+			GetVar = util.wrap_function({"Node", {"string", "StringHash"}},
+				function(self, name_or_stringhash)
+					if type(name_or_stringhash) == "string" then
+						return util.wrap_instance("Variant",
+								self:GetVar(StringHash(name_or_stringhash)))
+					else
+						return util.wrap_instance("Variant",
+								self:GetVar(name_or_stringhash))
+					end
+				end
+			),
+			SetVar = util.wrap_function({"Node", {"string", "StringHash"}, "Variant"},
+				function(self, name_or_stringhash, value)
+					if type(name_or_stringhash) == "string" then
+						self:SetVar(StringHash(name_or_stringhash), value)
+					else
+						self:SetVar(name_or_stringhash, value)
+					end
+				end
+			),
+			SetVar = util.self_function("SetVar", {},
+					{"Node", "StringHash", "Variant"}),
 		},
 		properties = {
 			scale = util.simple_property(dst.Vector3),
