@@ -52,7 +52,8 @@ find_package(Urho3D REQUIRED)
 include_directories(${URHO3D_INCLUDE_DIRS})
 
 # Urho3D's Lua
-include_directories(${URHO3D_HOME}/Source/ThirdParty/Lua/src)
+include_directories("${URHO3D_HOME}/Source/ThirdParty/Lua/src")
+include_directories("${URHO3D_HOME}/Source/ThirdParty/toluapp/include")
 
 # Run some automagic from Urho3D.
 # This appends to at least ${ABSOLUTE_PATH_LIBS} and {LINK_LIBS_ONLY}
@@ -95,6 +96,7 @@ if(BUILD_CLIENT)
 		src/lua_bindings/init.cpp
 		src/lua_bindings/misc.cpp
 		src/lua_bindings/cereal.cpp
+		src/lua_bindings/voxel.cpp
 	)
 
 	add_executable(${CLIENT_EXE_NAME} ${CLIENT_SRCS})

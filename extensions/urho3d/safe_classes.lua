@@ -248,7 +248,9 @@ function M.define(dst, util)
 			),
 			GetComponent = util.wrap_function({"Node", "string"}, function(self, name)
 				local component = self:GetComponent(name)
-				assert(component)
+				if not component then
+					return nil
+				end
 				return util.wrap_instance(name, component)
 			end),
 			LookAt = util.wrap_function({"Node", "Vector3"}, function(self, p)

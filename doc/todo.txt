@@ -33,3 +33,5 @@ Buildat TODO
 - Singleplayer UI
 - Modules with no C++ code (eg. just a client-side library)
 - Show all exceptions and errors on client using ui_utils.show_message_dialog
+- Pass the replicated scene properly to Lua
+- Allow creating and destroying arbitrary amounts of replicated scenes
