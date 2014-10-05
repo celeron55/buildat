@@ -38,7 +38,7 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:module_loaded"));
 		m_server->sub_event(this, Event::t("core:module_unloaded"));
-		m_server->sub_event(this, Event::t("network:new_client"));
+		m_server->sub_event(this, Event::t("network:client_connected"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -48,7 +48,7 @@ struct Module: public interface::Module
 				interface::ModuleLoadedEvent)
 		EVENT_TYPEN("core:module_unloaded", on_module_unloaded,
 				interface::ModuleUnloadedEvent)
-		EVENT_TYPEN("network:new_client", on_new_client, network::NewClient)
+		EVENT_TYPEN("network:client_connected", on_client_connected, network::NewClient)
 	}
 
 	void on_start()
@@ -91,7 +91,7 @@ struct Module: public interface::Module
 		// TODO: Tell client_file to remove files
 	}
 
-	void on_new_client(const network::NewClient &new_client)
+	void on_client_connected(const network::NewClient &client_connected)
 	{
 	}
 };

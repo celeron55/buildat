@@ -175,7 +175,7 @@ struct Module: public interface::Module, public network::Interface
 		PeerInfo pinfo;
 		pinfo.id = peer_id;
 		pinfo.address = socket->get_remote_address();
-		m_server->emit_event("network:new_client", new NewClient(pinfo));
+		m_server->emit_event("network:client_connected", new NewClient(pinfo));
 		m_server->add_socket_event(socket->fd(),
 				Event::t("network:incoming_data"));
 	}

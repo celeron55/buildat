@@ -56,7 +56,7 @@ struct Module: public interface::Module, public client_file::Interface
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));
-		m_server->sub_event(this, Event::t("network:new_client"));
+		m_server->sub_event(this, Event::t("network:client_connected"));
 		m_server->sub_event(this,
 				Event::t("network:packet_received/core:request_file"));
 		m_server->sub_event(this,
@@ -72,7 +72,7 @@ struct Module: public interface::Module, public client_file::Interface
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_VOIDN("core:unload", on_unload)
 		EVENT_VOIDN("core:continue", on_continue)
-		EVENT_TYPEN("network:new_client", on_new_client, network::NewClient)
+		EVENT_TYPEN("network:client_connected", on_client_connected, network::NewClient)
 		EVENT_TYPEN("network:packet_received/core:request_file", on_request_file,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/core:all_files_transferred",
@@ -134,9 +134,9 @@ struct Module: public interface::Module, public client_file::Interface
 		}
 	}
 
-	void on_new_client(const network::NewClient &new_client)
+	void on_client_connected(const network::NewClient &client_connected)
 	{
-		log_v(MODULE, "Sending file hashes to new client %zu", new_client.info.id);
+		log_v(MODULE, "Sending file hashes to new client %zu", client_connected.info.id);
 
 		// Tell file hashes to client
 		for(auto &pair : m_files){
@@ -148,11 +148,11 @@ struct Module: public interface::Module, public client_file::Interface
 				ar(info.hash);
 			}
 			network::access(m_server, [&](network::Interface * inetwork){
-				inetwork->send(new_client.info.id, "core:announce_file", os.str());
+				inetwork->send(client_connected.info.id, "core:announce_file", os.str());
 			});
 		}
 		network::access(m_server, [&](network::Interface * inetwork){
-			inetwork->send(new_client.info.id,
+			inetwork->send(client_connected.info.id,
 					"core:tell_after_all_files_transferred", "");
 		});
 	}

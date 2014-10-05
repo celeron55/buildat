@@ -81,7 +81,7 @@ struct Module: public interface::Module, public replicate::Interface
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));
-		m_server->sub_event(this, Event::t("network:new_client"));
+		m_server->sub_event(this, Event::t("network:client_connected"));
 		m_server->sub_event(this, Event::t("core:tick"));
 	}
 
@@ -90,7 +90,7 @@ struct Module: public interface::Module, public replicate::Interface
         EVENT_VOIDN("core:start",            on_start)
         EVENT_VOIDN("core:unload",           on_unload)
         EVENT_VOIDN("core:continue",         on_continue)
-        EVENT_TYPEN("network:new_client",    on_new_client, network::NewClient)
+        EVENT_TYPEN("network:client_connected",    on_client_connected, network::NewClient)
         EVENT_TYPEN("core:tick",             on_tick, interface::TickEvent)
 	}
 
@@ -106,9 +106,9 @@ struct Module: public interface::Module, public replicate::Interface
 	{
 	}
 
-	void on_new_client(const network::NewClient &new_client)
+	void on_client_connected(const network::NewClient &client_connected)
 	{
-		log_v(MODULE, "replicate::on_new_client: id=%zu", new_client.info.id);
+		log_v(MODULE, "replicate::on_client_connected: id=%zu", client_connected.info.id);
 	}
 
 	void on_client_disconnected(const network::OldClient &old_client)
