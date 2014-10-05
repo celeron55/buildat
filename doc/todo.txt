@@ -29,3 +29,8 @@ Buildat TODO
 - Automatic buildat root detection so that the server and the client can
   generally be started with any working directory in either the in-source or
   windows-installed configuration
+- Precompiled mode
+- Singleplayer UI
+- Modules with no C++ code (eg. just a client-side library)
+- ui_utils.message_dialog
+- Show exceptions and errors on client using dialog
