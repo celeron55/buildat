@@ -13,6 +13,7 @@ namespace interface
 
 	struct ModuleMeta
 	{
+		bool disable_cpp = false;
 		ss_ cxxflags;
 		ss_ ldflags;
 		ss_ cxxflags_linux;

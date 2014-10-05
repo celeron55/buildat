@@ -25,6 +25,7 @@ static interface::ModuleDependency load_module_dependency(const json::Value &v)
 static interface::ModuleMeta load_module_meta(const json::Value &v)
 {
 	interface::ModuleMeta r;
+	r.disable_cpp = v.get("disable_cpp").as_boolean();
 	r.cxxflags = v.get("cxxflags").as_string();
 	r.ldflags = v.get("ldflags").as_string();
 	r.cxxflags_windows = v.get("cxxflags_windows").as_string();

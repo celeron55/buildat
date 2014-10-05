@@ -356,15 +356,9 @@ struct CState: public State, public interface::Server
 		return m_shutdown_requested;
 	}
 
-	bool load_module(const interface::ModuleInfo &info)
+	// Call with m_modules_mutex and m_magic_mutex locked
+	interface::Module* build_module_u(const interface::ModuleInfo &info)
 	{
-		interface::MutexScope ms(m_modules_mutex);
-		interface::MutexScope ms_magic(m_magic_mutex);
-
-		log_i(MODULE, "Loading module %s from %s", cs(info.name), cs(info.path));
-
-		m_module_info[info.name] = info;
-
 		ss_ init_cpp_path = info.path+"/"+info.name+".cpp";
 
 		// Set up file watch
@@ -458,24 +452,41 @@ struct CState: public State, public interface::Server
 
 		if(!build_ok){
 			log_w(MODULE, "Failed to build module %s", cs(info.name));
-			return false;
+			return nullptr;
 		}
 
 		// Construct instance
 
 		interface::Module *m = static_cast<interface::Module*>(
 				m_compiler->construct(info.name.c_str(), this));
-		if(m == nullptr){
-			log_w(MODULE, "Failed to construct module %s instance",
-					cs(info.name));
-			return false;
+		return m;
+	}
+
+	bool load_module(const interface::ModuleInfo &info)
+	{
+		interface::MutexScope ms(m_modules_mutex);
+		interface::MutexScope ms_magic(m_magic_mutex);
+
+		log_i(MODULE, "Loading module %s from %s", cs(info.name), cs(info.path));
+
+		m_module_info[info.name] = info;
+
+		interface::Module *m = nullptr;
+		if(!info.meta.disable_cpp){
+			m = build_module_u(info);
+
+			if(m == nullptr){
+				log_w(MODULE, "Failed to construct module %s instance",
+						cs(info.name));
+				return false;
+			}
 		}
 		m_modules[info.name] = ModuleContainer(m, info);
 		m_module_load_order.push_back(info.name);
 
 		// Call init()
 
-		{
+		if(m){
 			ModuleContainer &mc = m_modules[info.name];
 			interface::MutexScope ms2(mc.mutex);
 			mc.module->init();
