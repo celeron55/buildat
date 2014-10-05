@@ -136,7 +136,7 @@ struct Module: public interface::Module, public client_file::Interface
 
 	void on_new_client(const network::NewClient &new_client)
 	{
-		log_i(MODULE, "client_file::on_new_client: id=%zu", new_client.info.id);
+		log_v(MODULE, "Sending file hashes to new client %zu", new_client.info.id);
 
 		// Tell file hashes to client
 		for(auto &pair : m_files){

@@ -47,7 +47,7 @@ struct Module: public interface::Module
 
 	void on_new_client(const network::NewClient &new_client)
 	{
-		log_i(MODULE, "main::on_new_client: id=%zu", new_client.info.id);
+		log_v(MODULE, "main::on_new_client: id=%zu", new_client.info.id);
 	}
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)

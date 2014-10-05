@@ -62,7 +62,7 @@ struct Module: public interface::Module
 
 	void on_new_client(const network::NewClient &new_client)
 	{
-		log_i(MODULE, "test1::on_new_client: id=%zu", new_client.info.id);
+		log_v(MODULE, "test1::on_new_client: id=%zu", new_client.info.id);
 
 		network::access(m_server, [&](network::Interface * inetwork){
 			inetwork->send(new_client.info.id, "test1:dummy", "dummy data");

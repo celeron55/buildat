@@ -169,6 +169,8 @@ struct Module: public interface::Module, public network::Interface
 		Peer::Id peer_id = m_next_peer_id++;
 		m_peers[peer_id] = Peer(peer_id, socket);
 		m_peers_by_socket[socket->fd()] = &m_peers[peer_id];
+		log_i(MODULE, "Client %zu from %s connected",
+				peer_id, cs(socket->get_remote_address()));
 		// Emit event
 		PeerInfo pinfo;
 		pinfo.id = peer_id;
@@ -196,13 +198,14 @@ struct Module: public interface::Module, public network::Interface
 		ssize_t r = recv(fd, buf, 100000, 0);
 		if(r == -1){
 			if(errno == ECONNRESET){
-				log_w(MODULE, "Peer %zu: Connection reset by peer", peer.id);
+				log_v(MODULE, "Peer %zu: Connection reset by peer", peer.id);
 				return;
 			}
 			throw Exception(ss_()+"Receive failed: "+strerror(errno));
 		}
 		if(r == 0){
-			log_v(MODULE, "Peer %zu disconnected", peer.id);
+			log_i(MODULE, "Client %zu from %s disconnected",
+					peer.id, cs(peer.socket->get_remote_address()));
 
 			PeerInfo pinfo;
 			pinfo.id = peer.id;

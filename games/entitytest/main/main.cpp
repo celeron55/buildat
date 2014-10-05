@@ -167,12 +167,12 @@ struct Module: public interface::Module
 
 	void on_new_client(const network::NewClient &new_client)
 	{
-		log_i(MODULE, "entitytest::on_new_client: id=%zu", new_client.info.id);
+		log_v(MODULE, "entitytest::on_new_client: id=%zu", new_client.info.id);
 	}
 
 	void on_client_disconnected(const network::OldClient &old_client)
 	{
-		log_i(MODULE, "entitytest::on_client_disconnected: id=%zu", old_client.info.id);
+		log_v(MODULE, "entitytest::on_client_disconnected: id=%zu", old_client.info.id);
 	}
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
