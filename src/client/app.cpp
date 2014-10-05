@@ -52,8 +52,10 @@ void GraphicsOptions::apply(magic::Graphics *magic_graphics)
 			vsync, triple_buffer, multisampling);
 }
 
-struct BuildatResourceRouter : public magic::ResourceRouter
+class BuildatResourceRouter : public magic::ResourceRouter
 {
+	OBJECT(BuildatResourceRouter);
+
 	sp_<client::State> m_client;
 public:
 	BuildatResourceRouter(magic::Context *context):
@@ -63,30 +65,31 @@ public:
 	{
 		m_client = client;
 	}
-	magic::String Route(const magic::String &name)
+
+	void Route(magic::String& name, magic::ResourceRequest requestType)
 	{
 		if(!m_client){
-			log_w(MODULE, "Resource route access: %s (no client)",
+			log_w(MODULE, "Resource route access: %s (client not initialized)",
 					name.CString());
-			return name;
+			return;
 		}
 		ss_ path = m_client->get_file_path(name.CString());
 		if(path == ""){
 			log_v(MODULE, "Resource route access: %s (assuming local file)",
 					name.CString());
 			// TODO: Check that it is in a safe path
-			return name;
+			return;
 		}
 		log_v(MODULE, "Resource route access: %s -> %s",
 				name.CString(), cs(path));
-		return path.c_str();
+		name = path.c_str();
 	}
 };
 
 struct CApp: public App, public magic::Application
 {
 	sp_<client::State> m_state;
-	magic::SharedPtr<BuildatResourceRouter> m_router;
+	BuildatResourceRouter *m_router;
 	magic::LuaScript *m_script;
 	lua_State *L;
 	int64_t m_last_script_tick_us;
@@ -169,8 +172,7 @@ struct CApp: public App, public magic::Application
 		magic::ResourceCache *magic_cache = GetSubsystem<magic::ResourceCache>();
 		magic_cache->SetAutoReloadResources(true);
 		m_router = new BuildatResourceRouter(context_);
-		magic_cache->SetResourceRouter(
-				magic::SharedPtr<magic::ResourceRouter>(m_router));
+		magic_cache->SetResourceRouter(m_router);
 	}
 
 	~CApp()

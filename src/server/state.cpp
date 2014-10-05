@@ -105,25 +105,27 @@ static ss_ hash_files(const sv_<ss_> &paths)
 	return interface::sha1::calculate(os.str());
 }
 
-struct BuildatResourceRouter : public magic::ResourceRouter
+class BuildatResourceRouter : public magic::ResourceRouter
 {
+	OBJECT(BuildatResourceRouter);
+
 	server::State *m_server;
 public:
 	BuildatResourceRouter(magic::Context *context, server::State *server):
 		magic::ResourceRouter(context),
 		m_server(server)
 	{}
-	magic::String Route(const magic::String &name)
+	void Route(magic::String& name, magic::ResourceRequest requestType)
 	{
 		ss_ path = m_server->get_file_path(name.CString());
 		if(path == ""){
 			log_v(MODULE, "Resource route access: %s (assuming local file)",
 					name.CString());
-			return name;
+			return;
 		}
 		log_v(MODULE, "Resource route access: %s -> %s",
 				name.CString(), cs(path));
-		return path.c_str();
+		name = path.c_str();
 	}
 };
 
@@ -207,7 +209,6 @@ struct CState: public State, public interface::Server
 
 	magic::SharedPtr<magic::Context> m_magic_context;
 	magic::SharedPtr<magic::Engine> m_magic_engine;
-	magic::SharedPtr<BuildatResourceRouter> m_router;
 	magic::SharedPtr<magic::Scene> m_magic_scene;
 	sm_<Event::Type, magic::SharedPtr<MagicEventHandler>> m_magic_event_handlers;
 	// NOTE: m_magic_mutex must be locked when constructing or destructing
@@ -310,9 +311,8 @@ struct CState: public State, public interface::Server
 		magic::ResourceCache *magic_cache =
 				m_magic_context->GetSubsystem<magic::ResourceCache>();
 		//magic_cache->SetAutoReloadResources(true);
-		m_router = new BuildatResourceRouter(m_magic_context, this);
 		magic_cache->SetResourceRouter(
-				magic::SharedPtr<magic::ResourceRouter>(m_router));
+				new BuildatResourceRouter(m_magic_context, this));
 	}
 	~CState()
 	{
