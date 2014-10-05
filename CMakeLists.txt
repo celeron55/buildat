@@ -11,11 +11,13 @@ project(buildat)
 add_subdirectory("3rdparty/cereal")
 add_subdirectory("3rdparty/c55lib")
 add_subdirectory("3rdparty/smallsha1")
+add_subdirectory("3rdparty/polyvox")
 
 include_directories("src")
 include_directories("3rdparty/cereal/include")
 include_directories("3rdparty/c55lib")
 include_directories("3rdparty/smallsha1")
+include_directories("3rdparty/polyvox/library/PolyVoxCore/include")
 
 #
 # Global options
@@ -100,6 +102,7 @@ if(BUILD_CLIENT)
 	target_link_libraries(${CLIENT_EXE_NAME}
 		c55lib
 		smallsha1
+		PolyVoxCore
 		${ABSOLUTE_PATH_LIBS}
 		${LINK_LIBS_ONLY}
 	)
@@ -125,6 +128,7 @@ if(BUILD_SERVER)
 		src/impl/module.cpp
 		src/impl/sha1.cpp
 		src/impl/packet_stream.cpp
+		src/impl/voxel.cpp
 	)
 	if(WIN32)
 		set(SERVER_CORE_SRCS ${SERVER_CORE_SRCS} src/impl/windows/file_watch.cpp)
@@ -137,6 +141,7 @@ if(BUILD_SERVER)
 	target_link_libraries(${SERVER_CORE_NAME}
 		c55lib
 		smallsha1
+		PolyVoxCore
 	)
 	if(WIN32)
 		target_link_libraries(${SERVER_CORE_NAME} wsock32 ws2_32)

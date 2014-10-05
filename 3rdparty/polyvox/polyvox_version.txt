@@ -1,0 +1,14 @@
+polyvox-0.2.1
+
+Stripped out:
+- examples
+- documentation
+- tests
+- library/bindings
+
+Stripped out the previous things from CMakeLists.txt
+
+Stripped out floody messages from CMakeLists.txt
+
+Various changes in CMakeLists.txt on various subdirectory levels.
+
