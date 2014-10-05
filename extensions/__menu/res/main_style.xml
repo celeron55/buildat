@@ -9,8 +9,6 @@
         <attribute name="Pressed Image Offset" value="16 0" />
         <attribute name="Hover Image Offset" value="0 16" />
         <attribute name="Pressed Child Offset" value="0 0" />
-		<attribute name="Font" value="Font;Fonts/Anonymous Pro.ttf" />
-		<attribute name="Font Size" value="16" />
     </element>
     <element type="CheckBox" style="BorderImage">
         <attribute name="Min Size" value="16 16" />

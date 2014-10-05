@@ -2,61 +2,18 @@
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("extension/__menu")
+local dump = buildat.dump
 local magic = require("buildat/extension/urho3d").safe
 local uistack = require("buildat/extension/uistack")
-local dump = buildat.dump
+local ui_utils = require("buildat/extension/ui_utils").safe
 local M = {safe = nil}
-log:info("extension/__menu/init.lua: Loading")
-
-local ui_stack = uistack.main
 
 local function show_error(message)
-	local root = ui_stack:push({desc="show_error"})
-
-	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
-	root.defaultStyle = style
-
-	local window = root:CreateChild("Window")
-	window:SetStyleAuto()
-	window:SetName("show_error window")
-	window:SetLayout(LM_VERTICAL, 10, magic.IntRect(10, 10, 10, 10))
-	window:SetAlignment(HA_LEFT, VA_CENTER)
-
-	local message_text = window:CreateChild("Text")
-	message_text:SetName("message_text")
-	message_text:SetStyleAuto()
-	message_text.text = message
-	message_text:SetTextAlignment(HA_CENTER)
-
-	local ok_button = window:CreateChild("Button")
-	ok_button:SetStyleAuto()
-	ok_button:SetName("Button")
-	ok_button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
-	ok_button.minHeight = 20
-	local ok_button_text = ok_button:CreateChild("Text")
-	ok_button_text:SetName("ButtonText")
-	ok_button_text:SetStyleAuto()
-	ok_button_text.text = "Ok"
-	ok_button_text:SetTextAlignment(HA_CENTER)
-	ok_button:SetFocus(true)
-
-	magic.SubscribeToEvent(ok_button, "Released",
-	function(self, event_type, event_data)
-		log:info("ok_button: Released")
-		ui_stack:pop(root)
-	end)
-
-	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
-		local key = event_data:GetInt("Key")
-		if key == KEY_ESC then
-			log:info("KEY_ESC pressed at show_error level")
-			ui_stack:pop(root)
-		end
-	end)
+	ui_utils.show_message_dialog(message)
 end
 
 local function show_connect_to_server()
-	local root = ui_stack:push({desc="connect_to_server"})
+	local root = uistack.main:push({desc="connect_to_server"})
 
 	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
 	root.defaultStyle = style
@@ -90,7 +47,7 @@ local function show_connect_to_server()
 		local ok, err = buildat.connect_server(line_edit:GetText())
 		if ok then
 			log:info("buildat.connect_server() returned true")
-			local root = ui_stack:push({desc="empty (game is running)"})
+			local root = uistack.main:push({desc="empty (game is running)"})
 			magic.ui:SetFocusElement(nil)
 		else
 			log:info("buildat.connect_server() returned false")
@@ -114,13 +71,13 @@ local function show_connect_to_server()
 		local key = event_data:GetInt("Key")
 		if key == KEY_ESC then
 			log:info("KEY_ESC pressed at connect_to_server level")
-			ui_stack:pop(root)
+			uistack.main:pop(root)
 		end
 	end)
 end
 
 function M.boot()
-	local root = ui_stack:push("boot")
+	local root = uistack.main:push("boot")
 
 	local style = magic.cache:GetResource("XMLFile", "__menu/res/boot_style.xml")
 	root.defaultStyle = style

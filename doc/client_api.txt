@@ -43,17 +43,30 @@ If an extension wish to provide an interface to sandboxed code, it should
 implement table "safe", which contains the safe interface. When sandboxed code
 requires the module, it only gets the plain safe interface.
 
-Extensions and modules use require("buildat/extension/<name>") to use extensions.
+Extensions and modules use require("buildat/extension/<name>") to get access to the interface of an extension.
+
+If an extension wants to purely use the safe interface of an extension, it is
+recommended to do this:
+  <name> = require("buildat/extension/<name>").safe
+
+API specific to the extension environment:
 
 buildat.connect_server(address)
 - Address may include port in format "host:port" or "[host]:port"
 
 buildat.extension_path(name)
 
+
 The sandbox environment
 =======================
 
 All code sent by the server to the client is run in the sandbox environment.
+
+Extensions are accessed by using require("buildat/extension/<name>"); this is
+the equivalent of using require("buildat/extension/<name>").safe in the
+extension environment.
+
+API specific to the sandbox environment:
 
 sandbox.make_global(table)
 - Copies contents table into the current global sandbox environemnt. It will
@@ -160,6 +173,12 @@ replicate.main_scene
 - CreateNode and CreateComponent uses urho3d.LOCAL by default unlike native
   Urho3D. With urho3d.REPLICATED (native default) they will end up in the
   synchronized ID space and will be overridden by data coming from the server.
+
+ui_utils
+--------
+UI utiltiies.
+
+show_message_dialog(message)
 
 
 Unsafe interfaces of built-in extensions
