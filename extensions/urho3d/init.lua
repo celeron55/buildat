@@ -213,7 +213,7 @@ setmetatable(Safe, {
 
 local sandbox_callback_to_global_function_name = {}
 local next_sandbox_global_function_i = 1
-log:error("FOO!")
+
 function Safe.SubscribeToEvent(x, y, z)
 	log:debug("Safe.SubscribeToEvent("..dump(x)..", "..dump(y)..", "..dump(z)..")")
 	local object = x
