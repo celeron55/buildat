@@ -9,8 +9,8 @@ If something is found to be missing from this document, such additions shall be
 made.
 
 util/codestyle.sh:
-Always run util/codestyle.sh before committing. It handles most whitespace
-issues.
+A code formatting script based on Uncrustify. (http://uncrustify.sourceforge.net/)
+Always run before committing. It handles most whitespace issues.
 
 Identifiers:
 - Class and struct names are CamelCase,

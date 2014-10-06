@@ -25,32 +25,18 @@ echo "cpp_files: $cpp_files"
 echo "lua_files: $lua_files"
 echo "cmake_files: $cmake_files"
 
-# Fix all that astyle is capable of
-# Note: Astyle's character limit doesn't count tabs as multiple spaces.
-basestyle="-n -z2 -W3 -k3 -p -Y -K -t4 -m1 -xC80"
-astyle $basestyle -N $header_files
-astyle $basestyle $cpp_files
+# Fix all that uncrustify is capable of
+uncrustify_base="$script_dir/../util/uncrustify.cfg"
+uncrustify_add_header="$script_dir/../util/uncrustify.header.cfg"
+uncrustify_add_cpp="$script_dir/../util/uncrustify.cpp.cfg"
 
-# Remove spaces before semicolons
-sed -i -e 's/ *;/;/g' $header_files $cpp_files
+uncrustify_header="/tmp/buildat.uncrustify.header.cfg"
+uncrustify_cpp="/tmp/buildat.uncrustify.cpp.cfg"
+cat "$uncrustify_base" "$uncrustify_add_header" > "$uncrustify_header"
+cat "$uncrustify_base" "$uncrustify_add_cpp" > "$uncrustify_cpp"
 
-# Fiddle around with spacing
-sed -i -e 's/\(for\|while\|if\) (/\1(/g' $header_files $cpp_files
-sed -i -e 's/) {/){/g' $header_files $cpp_files
-sed -i -e 's/}[\t ]*else[\t ]*{/} else {/g' $header_files $cpp_files
-sed -i -e 's/ << /<</g' $header_files $cpp_files
-sed -i -e 's/ >> />>/g' $header_files $cpp_files
-sed -i -e 's/^\(\s*\(EXPORT\|virtual\|\)\s*[a-zA-Z0-9_:,]*\) \*\([a-zA-Z0-9_:,]*(\)/\1* \3/g' $header_files $cpp_files
-sed -i -e 's/^\(\s*\(EXPORT\|virtual\|\)\s*[a-zA-Z0-9_:,]*\) &\([a-zA-Z0-9_:,]*(\)/\1\& \3/g' $header_files $cpp_files
-sed -i -e 's/ \*)/*)/g' $header_files $cpp_files
-sed -i -e 's/ \*>/*>/g' $header_files $cpp_files
-sed -i -e 's/ &)/\&)/g' $header_files $cpp_files
-sed -i -e 's/ &>/\&>/g' $header_files $cpp_files
-sed -i -e 's/\*\s\+>/\*>/g' $header_files $cpp_files
-sed -i -e 's/ + "/+"/g' $header_files $cpp_files
-sed -i -e 's/" + /"+/g' $header_files $cpp_files
-sed -i -e 's/" *+$/"+/g' $header_files $cpp_files
-sed -i -e 's/^\(\t\+\)   \+/\1\t\t/g' $header_files $cpp_files
+uncrustify -c "$uncrustify_header" --no-backup $header_files
+uncrustify -c "$uncrustify_cpp" --no-backup $cpp_files
 
 # Fix or add Vim modeline magic
 sed -i '/^\/\/ vim: set /d' $header_files $cpp_files
