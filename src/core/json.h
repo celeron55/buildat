@@ -12,7 +12,7 @@ namespace sajson {
 namespace json
 {
 	class MutableDoesNotExist: public std::exception {
-		virtual const char *what() const throw()
+		virtual const char* what() const throw()
 		{
 			return "MutableDoesNotExist";
 		}
@@ -58,7 +58,7 @@ namespace json
 		~Value();
 
 		// assignment operator
-		Value &operator=(const Value &value);
+		Value& operator=(const Value &value);
 
 		// check value type
 		bool is_undefined() const;
@@ -77,24 +77,24 @@ namespace json
 		unsigned int size() const;
 
 		// get value at array index
-		const Value &at(int index) const;
-		const Value &at(unsigned int index) const;
+		const Value& at(int index) const;
+		const Value& at(unsigned int index) const;
 
-		Value &operator[](int index);
-		Value &operator[](unsigned int index);
+		Value& operator[](int index);
+		Value& operator[](unsigned int index);
 
 		// get object property
-		const Value &get(const char *key) const;
-		const Value &get(const std::string &key) const;
+		const Value& get(const char *key) const;
+		const Value& get(const std::string &key) const;
 
-		Value &operator[](const char *key);
-		Value &operator[](const std::string &key);
+		Value& operator[](const char *key);
+		Value& operator[](const std::string &key);
 
 		// clear all array/object values
 		void clear();
 
 		// get value cast to specified type
-		const char *as_cstring() const;
+		const char* as_cstring() const;
 		std::string as_string(const std::string &default_value = std::string()) const;
 		int as_integer(int default_value = 0) const;
 		double as_real(double default_value = 0.0) const;
@@ -149,7 +149,7 @@ namespace json
 		// increment iterator
 		void next();
 
-		Iterator &operator++();
+		Iterator& operator++();
 
 		// test if iterator is still valid
 		bool valid() const;
@@ -157,20 +157,20 @@ namespace json
 		operator bool() const;
 
 		// get key
-		const char *ckey() const;
+		const char* ckey() const;
 
 		std::string key() const;
 
 		// get value
-		const Value &value() const;
+		const Value& value() const;
 
 		// dereference value
-		const Value &operator*() const;
+		const Value& operator*() const;
 
 	private:
 		// disallow copying
 		Iterator(const Iterator&);
-		Iterator &operator=(const Iterator&);
+		Iterator& operator=(const Iterator&);
 	};
 
 	// create a new empty object

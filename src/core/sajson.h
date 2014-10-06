@@ -37,11 +37,11 @@
 #include <string> // for error messages.  kill someday?
 
 #if defined(__GNUC__) || defined(__clang__)
-#define SAJSON_LIKELY(x) __builtin_expect(!!(x), 1)
-#define SAJSON_UNLIKELY(x) __builtin_expect(!!(x), 0)
+	#define SAJSON_LIKELY(x) __builtin_expect(!!(x), 1)
+	#define SAJSON_UNLIKELY(x) __builtin_expect(!!(x), 0)
 #else
-#define SAJSON_LIKELY(x) x
-#define SAJSON_UNLIKELY(x) x
+	#define SAJSON_LIKELY(x) x
+	#define SAJSON_UNLIKELY(x) x
 #endif
 
 namespace sajson {
@@ -56,8 +56,8 @@ namespace sajson {
 		TYPE_OBJECT = 7,
 	};
 
-	inline std::ostream &operator<<(std::ostream &os, type t){
-		switch (t){
+	inline std::ostream& operator<<(std::ostream &os, type t){
+		switch(t){
 		case TYPE_INTEGER:
 			return os<<"<integer>";
 		case TYPE_DOUBLE:
@@ -107,7 +107,7 @@ namespace sajson {
 			, _length(length)
 		{}
 
-		const char *data() const {
+		const char* data() const {
 			return text;
 		}
 
@@ -120,13 +120,13 @@ namespace sajson {
 		}
 
 	private:
-		const char *const text;
+		const char*const text;
 		const size_t _length;
 
 		string(); /*=delete*/
 	};
 
-	class literal : public string {
+	class literal: public string {
 	public:
 		explicit literal(const char *text)
 			: string(text, strlen(text))
@@ -163,7 +163,7 @@ namespace sajson {
 		}
 
 		bool operator()(const object_key_record &lhs, const
-				object_key_record &rhs)
+		        object_key_record &rhs)
 		{
 			const size_t lhs_length = lhs.key_end - lhs.key_start;
 			const size_t rhs_length = rhs.key_end - rhs.key_start;
@@ -173,7 +173,7 @@ namespace sajson {
 				return false;
 			}
 			return memcmp(data + lhs.key_start, data + rhs.key_start,
-					lhs_length) < 0;
+			               lhs_length) < 0;
 		}
 
 		const char *data;
@@ -204,7 +204,7 @@ namespace sajson {
 	private:
 		size_t *pn;
 
-		refcount &operator=(const refcount&);
+		refcount& operator=(const refcount&);
 	};
 
 	class mutable_string_view {
@@ -313,7 +313,7 @@ namespace sajson {
 		value get_array_element(size_t index) const {
 			size_t element = payload[1 + index];
 			return value(get_element_type(element), payload + get_element_value(element),
-					text);
+			               text);
 		}
 
 		// valid iff get_type() is TYPE_OBJECT
@@ -326,7 +326,7 @@ namespace sajson {
 		value get_object_value(size_t index) const {
 			size_t element = payload[3 + index * 3];
 			return value(get_element_type(element), payload + get_element_value(element),
-					text);
+			               text);
 		}
 
 
@@ -334,14 +334,14 @@ namespace sajson {
 		// return get_length() if there is no such key
 		size_t find_object_key(const string &key) const {
 			const object_key_record *start = reinterpret_cast<const object_key_record*>
-					(payload + 1);
+			        (payload + 1);
 			const object_key_record *end = start + get_length();
 			const object_key_record *i = std::lower_bound(start, end, key,
-					object_key_comparator(text));
+			                object_key_comparator(text));
 			return (i != end
-					&& (i->key_end - i->key_start) == key.length()
-					&& memcmp(key.data(), text + i->key_start,
-					key.length()) == 0) ? i - start : get_length();
+			       && (i->key_end - i->key_start) == key.length()
+			       && memcmp(key.data(), text + i->key_start,
+			       key.length()) == 0) ? i - start : get_length();
 		}
 
 		// valid iff get_type() is TYPE_INTEGER
@@ -377,16 +377,16 @@ namespace sajson {
 
 	private:
 		const type value_type;
-		const size_t *const payload;
-		const char *const text;
+		const size_t*const payload;
+		const char*const text;
 
 	};
 
 	class document {
 	public:
 		explicit document(mutable_string_view &input, const size_t *structure,
-				type root_type, const size_t *root, size_t error_line, size_t error_column,
-				const std::string &error_message)
+		        type root_type, const size_t *root, size_t error_line, size_t error_column,
+		        const std::string &error_message)
 			: input(input)
 			, structure(structure)
 			, root_type(root_type)
@@ -422,9 +422,9 @@ namespace sajson {
 
 	private:
 		mutable_string_view input;
-		const size_t *const structure;
+		const size_t*const structure;
 		const type root_type;
-		const size_t *const root;
+		const size_t*const root;
 		const size_t error_line;
 		const size_t error_column;
 		const std::string error_message;
@@ -450,7 +450,7 @@ namespace sajson {
 			} else {
 				delete[] structure;
 				return document(input, 0, TYPE_NULL, 0, error_line, error_column,
-						error_message);
+				               error_message);
 			}
 		}
 
@@ -489,7 +489,7 @@ namespace sajson {
 					// 0 is never legal as a structural character in json text so treat it as eof
 					return 0;
 				}
-				switch (*p){
+				switch(*p){
 				case 0x20:
 				case 0x09:
 				case 0x0A:
@@ -529,8 +529,8 @@ namespace sajson {
 			} else if(c == 't'){
 				current_structure_type = TYPE_TRUE;
 				/*} else if(c == 'u' && input.get_length() == 9 &&
-						strncmp(input.get_data(), "undefined", 9) == 0){
-					return true;*/
+				        strncmp(input.get_data(), "undefined", 9) == 0){
+				    return true;*/
 			} else {
 				return error("document root must be a json value");
 			}
@@ -608,7 +608,7 @@ namespace sajson {
 					temp += 2;
 				}
 
-				switch (peek_structure()){
+				switch(peek_structure()){
 					type next_type;
 					parse_result (parser::*structure_installer)(size_t *base);
 
@@ -831,7 +831,7 @@ done:
 
 			int i = 0;
 			double d =
-					0.0; // gcc complains that d might be used uninitialized which isn't true. appease the warning anyway.
+			        0.0; // gcc complains that d might be used uninitialized which isn't true. appease the warning anyway.
 			for(;;){
 				char c = *p;
 				if(c < '0' || c > '9'){
@@ -967,7 +967,7 @@ done:
 
 		parse_result install_array(size_t *array_base){
 			const size_t length = temp - array_base;
-			size_t *const new_base = out - length - 1;
+			size_t*const new_base = out - length - 1;
 			while(temp > array_base){
 				// I think this addition is legal because the tag bits are at the top?
 				*(--out) = *(--temp) + (array_base - new_base);
@@ -981,11 +981,11 @@ done:
 			const size_t length = (temp - object_base) / 3;
 			object_key_record *oir = reinterpret_cast<object_key_record*>(object_base);
 			std::sort(
-					oir,
-					oir + length,
-					object_key_comparator(input.get_data()));
+			    oir,
+			    oir + length,
+			    object_key_comparator(input.get_data()));
 
-			size_t *const new_base = out - length * 3 - 1;
+			size_t*const new_base = out - length * 3 - 1;
 			size_t i = length;
 			while(i--){
 				// I think this addition is legal because the tag bits are at the top?
@@ -1015,7 +1015,7 @@ done:
 					return error("illegal unprintable codepoint in string");
 				}
 
-				switch (*p){
+				switch(*p){
 				case '"':
 					tag[0] = start;
 					tag[1] = p - input.get_data();
@@ -1053,7 +1053,7 @@ done:
 			return TYPE_NULL; // ???
 		}
 
-		void write_utf8(unsigned codepoint, char *&end){
+		void write_utf8(unsigned codepoint, char* &end){
 			if(codepoint < 0x80){
 				*end++ = codepoint;
 			} else if(codepoint < 0x800){
@@ -1084,7 +1084,7 @@ done:
 					return error("illegal unprintable codepoint in string");
 				}
 
-				switch (*p){
+				switch(*p){
 				case '"':
 					tag[0] = start;
 					tag[1] = end - input.get_data();
@@ -1098,7 +1098,7 @@ done:
 					}
 
 					char replacement;
-					switch (*p){
+					switch(*p){
 					case '"':
 						replacement = '"';
 						goto replace;
@@ -1128,41 +1128,41 @@ replace:
 						++p;
 						break;
 					case 'u': {
-							++p;
-							if(SAJSON_UNLIKELY(!has_remaining_characters(4))){
-								return error("unexpected end of input h");
+						++p;
+						if(SAJSON_UNLIKELY(!has_remaining_characters(4))){
+							return error("unexpected end of input h");
+						}
+						unsigned u =
+						        0;     // gcc's complaining that this could be used uninitialized. wrong.
+						parse_result result = read_hex(u);
+						if(!result){
+							return result;
+						}
+						if(u >= 0xD800 && u <= 0xDBFF){
+							if(SAJSON_UNLIKELY(!has_remaining_characters(6))){
+								return error("unexpected end of input during UTF-16 surrogate pair");
 							}
-							unsigned u =
-									0; // gcc's complaining that this could be used uninitialized. wrong.
-							parse_result result = read_hex(u);
+							char p0 = p[0];
+							char p1 = p[1];
+							if(p0 != '\\' || p1 != 'u'){
+								return error("expected \\u");
+							}
+							p += 2;
+							unsigned v =
+							        0;     // gcc's complaining that this could be used uninitialized. wrong.
+							result = read_hex(v);
 							if(!result){
 								return result;
 							}
-							if(u >= 0xD800 && u <= 0xDBFF){
-								if(SAJSON_UNLIKELY(!has_remaining_characters(6))){
-									return error("unexpected end of input during UTF-16 surrogate pair");
-								}
-								char p0 = p[0];
-								char p1 = p[1];
-								if(p0 != '\\' || p1 != 'u'){
-									return error("expected \\u");
-								}
-								p += 2;
-								unsigned v =
-										0; // gcc's complaining that this could be used uninitialized. wrong.
-								result = read_hex(v);
-								if(!result){
-									return result;
-								}
 
-								if(v < 0xDC00 || v > 0xDFFF){
-									return error("invalid UTF-16 trail surrogate");
-								}
-								u = 0x10000 + (((u - 0xD800)<<10) | (v - 0xDC00));
+							if(v < 0xDC00 || v > 0xDFFF){
+								return error("invalid UTF-16 trail surrogate");
 							}
-							write_utf8(u, end);
-							break;
+							u = 0x10000 + (((u - 0xD800)<<10) | (v - 0xDC00));
 						}
+						write_utf8(u, end);
+						break;
+					}
 					default:
 						return error("unknown escape");
 					}
@@ -1176,8 +1176,8 @@ replace:
 		}
 
 		mutable_string_view input;
-		char *const input_end;
-		size_t *const structure;
+		char*const input_end;
+		size_t*const structure;
 
 		char *p;
 		size_t *temp;

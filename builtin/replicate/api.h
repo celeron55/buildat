@@ -10,7 +10,7 @@ namespace Urho3D
 {
 	class Context;
 	class Scene;
-};
+}
 
 namespace replicate
 {
@@ -21,11 +21,11 @@ namespace replicate
 	};
 
 	inline bool access(interface::Server *server,
-			std::function<void(replicate::Interface*)> cb)
+	        std::function<void(replicate::Interface*)> cb)
 	{
-		return server->access_module("replicate", [&](interface::Module * module){
-			cb((replicate::Interface*)module->check_interface());
-		});
+		return server->access_module("replicate", [&](interface::Module *module){
+		                   cb((replicate::Interface*)module->check_interface());
+					   });
 	}
 }
 

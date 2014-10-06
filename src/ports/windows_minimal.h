@@ -2,11 +2,11 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #pragma once
 #ifndef WIN32_LEAN_AND_MEAN
-#	define WIN32_LEAN_AND_MEAN
+	#define WIN32_LEAN_AND_MEAN
 #endif
 // Without this some of the network functions are not found on mingw
 #ifndef _WIN32_WINNT
-#	define _WIN32_WINNT 0x0501
+	#define _WIN32_WINNT 0x0501
 #endif
 #include <windows.h>
 // What the fuck, windows.h does #define interface struct

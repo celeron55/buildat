@@ -9,9 +9,9 @@ namespace interface
 	{
 		// TODO
 		void lock(){
-		};
+		}
 		void unlock(){
-		};
+		}
 	};
 
 	struct MutexScope

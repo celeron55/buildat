@@ -7,12 +7,12 @@
 #include <vector>
 
 /*#ifdef _WIN32 // WINDOWS
-#define DIR_DELIM "\\"
-#define DIR_DELIM_C '\\'
-#else // POSIX
-#define DIR_DELIM "/"
-#define DIR_DELIM_C '/'
-#endif*/
+   #define DIR_DELIM "\\"
+   #define DIR_DELIM_C '\\'
+   #else // POSIX
+   #define DIR_DELIM "/"
+   #define DIR_DELIM_C '/'
+ #endif*/
 
 // Always use /
 #define DIR_DELIM "/"
@@ -49,7 +49,7 @@ namespace c55fs
 	// Only pass full paths to this one. True on success.
 	bool RecursiveDeleteContent(std::string path);
 
-}//fs
+} //fs
 
 #endif
 

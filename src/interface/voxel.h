@@ -14,6 +14,6 @@ namespace interface
 	using namespace Urho3D;
 
 	Model* create_simple_voxel_model(Context *context, int w, int h, int d,
-			const ss_ &source_data);
+	        const ss_ &source_data);
 }
 // vim: set noet ts=4 sw=4:

@@ -71,7 +71,7 @@ namespace c55
 	};
 
 	inline std::string trim(std::string str,
-			const std::string &whitespace = " \t\n\r")
+	        const std::string &whitespace = " \t\n\r")
 	{
 		size_t endpos = str.find_last_not_of(whitespace);
 		if(std::string::npos != endpos)
@@ -83,7 +83,7 @@ namespace c55
 	}
 
 	inline std::string vector_join(const std::vector<std::string> &v,
-			const std::string &d = ", ")
+	        const std::string &d = ", ")
 	{
 		std::string result;
 		for(auto v1 : v)
@@ -92,7 +92,7 @@ namespace c55
 	}
 
 	inline std::string truncate_string(const std::string &str, size_t maxlen,
-			const std::string &end = "...")
+	        const std::string &end = "...")
 	{
 		if(str.size() < maxlen)
 			return str;
@@ -100,7 +100,7 @@ namespace c55
 	}
 
 	inline bool string_allowed(const std::string &s,
-			const std::string &allowed_chars)
+	        const std::string &allowed_chars)
 	{
 		for(size_t i = 0; i < s.size(); i++){
 			bool confirmed = false;

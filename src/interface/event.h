@@ -4,16 +4,16 @@
 #include "core/types.h"
 
 #define EVENT_DISPATCH_VOID(event_type, handler) \
-	if(type == event_type){ handler(); }
+	if(type == event_type){handler(); }
 #define EVENT_DISPATCH_TYPE(event_type, handler, param_type) \
 	if(type == event_type){ \
 		auto p0 = dynamic_cast<const param_type*>(p); \
 		if(p0) handler(*p0); \
 		else if(p == nullptr) Exception(ss_()+"Missing parameter to "+ \
-				__PRETTY_FUNCTION__+"::" #handler " (parameter type: " \
-				#param_type ")"); \
+			        __PRETTY_FUNCTION__+"::" #handler " (parameter type: " \
+			        #param_type ")"); \
 		else throw Exception(ss_()+"Invalid parameter to "+__PRETTY_FUNCTION__+ \
-				"::" #handler " (expected " #param_type ")"); \
+			              "::" #handler " (expected " #param_type ")"); \
 	}
 #define EVENT_VOID EVENT_DISPATCH_VOID
 #define EVENT_TYPE EVENT_DISPATCH_TYPE

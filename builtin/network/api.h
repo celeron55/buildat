@@ -43,16 +43,16 @@ namespace network
 	struct Interface
 	{
 		virtual void send(PeerInfo::Id recipient, const ss_ &name,
-				const ss_ &data) = 0;
+		        const ss_ &data) = 0;
 		virtual sv_<PeerInfo::Id> list_peers() = 0;
 	};
 
 	inline bool access(interface::Server *server,
-			std::function<void(network::Interface*)> cb)
+	        std::function<void(network::Interface*)> cb)
 	{
-		return server->access_module("network", [&](interface::Module * module){
-			cb((network::Interface*)module->check_interface());
-		});
+		return server->access_module("network", [&](interface::Module *module){
+		                   cb((network::Interface*)module->check_interface());
+					   });
 	}
 }
 

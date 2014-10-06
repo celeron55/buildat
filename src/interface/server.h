@@ -9,7 +9,7 @@ namespace Urho3D
 {
 	class Scene;
 	class StringHash;
-};
+}
 
 namespace interface
 {
@@ -61,7 +61,7 @@ namespace interface
 		virtual bool has_module(const ss_ &module_name) = 0;
 		virtual sv_<ss_> get_loaded_modules() = 0;
 		virtual bool access_module(const ss_ &module_name,
-				std::function<void(interface::Module*)> cb) = 0;
+		        std::function<void(interface::Module*)> cb) = 0;
 
 		virtual void sub_event(struct Module *module, const Event::Type &type) = 0;
 		virtual void emit_event(Event event) = 0;
@@ -72,8 +72,8 @@ namespace interface
 
 		virtual void access_scene(std::function<void(magic::Scene*)> cb) = 0;
 		virtual void sub_magic_event(struct interface::Module *module,
-				const magic::StringHash &event_type,
-				const Event::Type &buildat_event_type) = 0;
+		        const magic::StringHash &event_type,
+		        const Event::Type &buildat_event_type) = 0;
 
 		virtual void add_socket_event(int fd, const Event::Type &event_type) = 0;
 		virtual void remove_socket_event(int fd) = 0;

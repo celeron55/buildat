@@ -4,7 +4,7 @@
 #include "core/types.h"
 #include "interface/event.h"
 
-#define BUILDAT_EXPORT __attribute__ ((visibility ("default")))
+#define BUILDAT_EXPORT __attribute__((visibility("default")))
 
 namespace interface
 {
@@ -12,7 +12,7 @@ namespace interface
 	{
 		const char *MODULE = "(unknown module)";
 		Module(const char *name): MODULE(name){}
-		virtual ~Module(){};
+		virtual ~Module(){}
 		virtual void init() = 0;
 		virtual void event(const Event::Type &type, const Event::Private *p) = 0;
 		virtual void* get_interface(){
