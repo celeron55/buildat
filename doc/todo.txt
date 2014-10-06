@@ -25,13 +25,11 @@ Buildat TODO
 - Automatically fetch and build and patch Urho3D when building buildat
 - Handle module load order properly in reloads (unload by popping from top,
   then reload everything until top)
-- Try out dynamic geometry
 - Automatic buildat root detection so that the server and the client can
   generally be started with any working directory in either the in-source or
   windows-installed configuration
 - Precompiled mode
 - Singleplayer UI
-- Modules with no C++ code (eg. just a client-side library)
 - Show all exceptions and errors on client using ui_utils.show_message_dialog
 - Pass the replicated scene properly to Lua
 - Allow creating and destroying arbitrary amounts of replicated scenes
