@@ -422,11 +422,12 @@ struct CState: public State, public interface::Server
 				"/"+info.name+"."+MODULE_EXTENSION;
 #endif
 
+		ss_ hashfile_path = build_dst+".hash";
+
 		if(!skip_compile){
 			if(!std::ifstream(build_dst).good()){
 				// Result file does not exist at all, no need to check hashes
 			} else {
-				ss_ hashfile_path = build_dst+".hash";
 				ss_ previous_hash;
 				{
 					std::ifstream f(hashfile_path);
@@ -438,9 +439,6 @@ struct CState: public State, public interface::Server
 				if(previous_hash == content_hash){
 					log_v(MODULE, "No need to recompile %s", cs(info.name));
 					skip_compile = true;
-				} else {
-					std::ofstream f(hashfile_path);
-					f<<content_hash;
 				}
 			}
 		}
@@ -453,6 +451,12 @@ struct CState: public State, public interface::Server
 		if(!build_ok){
 			log_w(MODULE, "Failed to build module %s", cs(info.name));
 			return nullptr;
+		}
+
+		// Update hash file
+		if(!skip_compile){
+			std::ofstream f(hashfile_path);
+			f<<content_hash;
 		}
 
 		// Construct instance
