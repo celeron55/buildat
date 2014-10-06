@@ -153,6 +153,12 @@ A way to define voxel properties:
 	- interface::VoxelInstance
 - The voxel world is handled by builtin/voxelworld on the server, and is built
   in to the client. VoxelRegistry is part of builtin/voxelworld on the server.
+- How are voxel texture definitions stored?
+	- They are references to one of many texture atlases (many are needed in
+	  case of high-resolution textures)
+	- They are an index into a texture atlas id
+	- A texture atlas definition is a list of texture resource names
+	- One texture atlas contains textures of one resolution
 
 A way to define block properties:
 - interface::-based because the client has to support blocks directly:

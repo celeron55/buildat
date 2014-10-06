@@ -3,7 +3,7 @@
 #include "lua_bindings/util.h"
 #include "core/log.h"
 #include "client/app.h"
-#include "interface/voxel.h"
+#include "interface/mesh.h"
 #include <tolua++.h>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"

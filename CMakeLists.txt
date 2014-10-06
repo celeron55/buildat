@@ -92,7 +92,10 @@ if(BUILD_CLIENT)
 		src/impl/tcpsocket.cpp
 		src/impl/sha1.cpp
 		src/impl/packet_stream.cpp
+		src/impl/mesh.cpp
+		src/impl/atlas.cpp
 		src/impl/voxel.cpp
+		src/impl/block.cpp
 		src/lua_bindings/util.cpp
 		src/lua_bindings/init.cpp
 		src/lua_bindings/misc.cpp
@@ -132,7 +135,10 @@ if(BUILD_SERVER)
 		src/impl/module.cpp
 		src/impl/sha1.cpp
 		src/impl/packet_stream.cpp
+		src/impl/mesh.cpp
+		src/impl/atlas.cpp
 		src/impl/voxel.cpp
+		src/impl/block.cpp
 	)
 	if(WIN32)
 		set(SERVER_CORE_SRCS ${SERVER_CORE_SRCS} src/impl/windows/file_watch.cpp)
