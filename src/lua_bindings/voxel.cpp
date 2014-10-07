@@ -55,7 +55,7 @@ static int l_set_simple_voxel_model(lua_State *L)
 	SharedPtr<Model> fromScratchModel(
 			interface::create_simple_voxel_model(context, w, h, d, data));
 
-	StaticModel* object = node->CreateComponent<StaticModel>();
+	StaticModel *object = node->CreateComponent<StaticModel>();
 	object->SetModel(fromScratchModel);
 
 	return 0;
@@ -63,13 +63,13 @@ static int l_set_simple_voxel_model(lua_State *L)
 
 void init_voxel(lua_State *L)
 {
-#define DEF_BUILDAT_FUNC(name){\
-	lua_pushcfunction(L, l_##name);\
-	lua_setglobal(L, "__buildat_" #name);\
+#define DEF_BUILDAT_FUNC(name){ \
+		lua_pushcfunction(L, l_##name); \
+		lua_setglobal(L, "__buildat_" #name); \
 }
 	DEF_BUILDAT_FUNC(set_simple_voxel_model);
 }
 
-} // namespace lua_bindingss
-// vim: set noet ts=4 sw=4:
+}	// namespace lua_bindingss
 
+// vim: set noet ts=4 sw=4:

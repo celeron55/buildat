@@ -34,13 +34,13 @@ namespace server
 		virtual ~State(){}
 		virtual void shutdown(int exit_status = 0, const ss_ &reason = "") = 0;
 		virtual bool is_shutdown_requested(int *exit_status = nullptr,
-		        ss_ *reason = nullptr) = 0;
+				ss_ *reason = nullptr) = 0;
 		virtual bool load_module(const interface::ModuleInfo &info) = 0;
 		virtual void load_modules(const ss_ &path) = 0;
 		virtual interface::Module* get_module(const ss_ &module_name) = 0;
 		virtual interface::Module* check_module(const ss_ &module_name) = 0;
 		virtual void sub_event(struct interface::Module *module,
-		        const interface::Event::Type &type) = 0;
+				const interface::Event::Type &type) = 0;
 		virtual void emit_event(interface::Event event) = 0;
 		virtual void access_scene(std::function<void(magic::Scene*)> cb) = 0;
 

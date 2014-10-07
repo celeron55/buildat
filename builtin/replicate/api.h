@@ -21,11 +21,11 @@ namespace replicate
 	};
 
 	inline bool access(interface::Server *server,
-	        std::function<void(replicate::Interface*)> cb)
+			std::function<void(replicate::Interface*)> cb)
 	{
 		return server->access_module("replicate", [&](interface::Module *module){
-		                   cb((replicate::Interface*)module->check_interface());
-					   });
+			cb((replicate::Interface*)module->check_interface());
+		});
 	}
 }
 

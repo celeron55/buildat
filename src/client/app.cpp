@@ -18,8 +18,8 @@
 #include <Input.h>
 #include <ResourceCache.h>
 #include <Graphics.h>
-#include <GraphicsEvents.h> // E_SCREENMODE
-#include <IOEvents.h> // E_LOGMESSAGE
+#include <GraphicsEvents.h>	// E_SCREENMODE
+#include <IOEvents.h>	// E_LOGMESSAGE
 #include <Log.h>
 #include <DebugHud.h>
 #include <XMLFile.h>
@@ -52,7 +52,7 @@ void GraphicsOptions::apply(magic::Graphics *magic_graphics)
 			vsync, triple_buffer, multisampling);
 }
 
-class BuildatResourceRouter : public magic::ResourceRouter
+class BuildatResourceRouter: public magic::ResourceRouter
 {
 	OBJECT(BuildatResourceRouter);
 
@@ -66,7 +66,7 @@ public:
 		m_client = client;
 	}
 
-	void Route(magic::String& name, magic::ResourceRequest requestType)
+	void Route(magic::String &name, magic::ResourceRequest requestType)
 	{
 		if(!m_client){
 			log_w(MODULE, "Resource route access: %s (client not initialized)",
@@ -112,7 +112,7 @@ struct CApp: public App, public magic::Application
 
 		sv_<ss_> resource_paths = {
 			g_client_config.cache_path+"/tmp",
-			g_client_config.share_path+"/extensions", // Could be unsafe
+			g_client_config.share_path+"/extensions",	// Could be unsafe
 			g_client_config.urho3d_path+"/Bin/CoreData",
 			g_client_config.urho3d_path+"/Bin/Data",
 		};
@@ -133,26 +133,26 @@ struct CApp: public App, public magic::Application
 				fs->get_absolute_path(g_client_config.cache_path).c_str());
 
 		// Set Urho3D engine parameters
-		engineParameters_["WindowTitle"]   = "Buildat Client";
-		engineParameters_["Headless"]      = false;
+		engineParameters_["WindowTitle"] = "Buildat Client";
+		engineParameters_["Headless"] = false;
 		engineParameters_["ResourcePaths"] = resource_paths_s.c_str();
 		engineParameters_["AutoloadPaths"] = "";
-		engineParameters_["LogName"]       = "";
-		engineParameters_["LogQuiet"]      = true; // Don't log to stdout
+		engineParameters_["LogName"] = "";
+		engineParameters_["LogQuiet"] = true;	// Don't log to stdout
 
 		// Graphics options
 		engineParameters_["FullScreen"] = m_options.graphics.fullscreen;
 		if(m_options.graphics.fullscreen){
-			engineParameters_["WindowWidth"]     = m_options.graphics.full_w;
-			engineParameters_["WindowHeight"]    = m_options.graphics.full_h;
+			engineParameters_["WindowWidth"] = m_options.graphics.full_w;
+			engineParameters_["WindowHeight"] = m_options.graphics.full_h;
 		} else {
-			engineParameters_["WindowWidth"]     = m_options.graphics.window_w;
-			engineParameters_["WindowHeight"]    = m_options.graphics.window_h;
+			engineParameters_["WindowWidth"] = m_options.graphics.window_w;
+			engineParameters_["WindowHeight"] = m_options.graphics.window_h;
 			engineParameters_["WindowResizable"] = m_options.graphics.resizable;
 		}
-		engineParameters_["VSync"]        = m_options.graphics.vsync;
+		engineParameters_["VSync"] = m_options.graphics.vsync;
 		engineParameters_["TripleBuffer"] = m_options.graphics.triple_buffer;
-		engineParameters_["Multisample"]  = m_options.graphics.multisampling;
+		engineParameters_["Multisample"] = m_options.graphics.multisampling;
 
 		magic::Log *magic_log = GetSubsystem<magic::Log>();
 		// Disable timestamps in log messages (also added to events)
@@ -265,8 +265,8 @@ struct CApp: public App, public magic::Application
 
 		/*lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_file_updated_in_cache");
 		if(lua_isnil(L, -1)){
-			lua_pop(L, 1);
-			return;
+		    lua_pop(L, 1);
+		    return;
 		}
 		lua_pushlstring(L, file_name.c_str(), file_name.size());
 		lua_pushlstring(L, file_hash.c_str(), file_hash.size());
@@ -307,9 +307,9 @@ struct CApp: public App, public magic::Application
 
 		lua_bindings::init(L);
 
-#define DEF_BUILDAT_FUNC(name){\
-	lua_pushcfunction(L, l_##name);\
-	lua_setglobal(L, "__buildat_" #name);\
+#define DEF_BUILDAT_FUNC(name){ \
+		lua_pushcfunction(L, l_##name); \
+		lua_setglobal(L, "__buildat_" #name); \
 }
 
 		DEF_BUILDAT_FUNC(connect_server)
@@ -333,22 +333,22 @@ struct CApp: public App, public magic::Application
 
 		m_camera_node = m_scene->CreateChild(
 				"__buildat_replicated_scene_camera", magic::LOCAL);
-		magic::Camera* camera =
+		magic::Camera *camera =
 				m_camera_node->CreateComponent<magic::Camera>(magic::LOCAL);
 		camera->SetFarClip(300.0f);
 		m_camera_node->SetPosition(magic::Vector3(7.0, 7.0, 7.0));
 		m_camera_node->LookAt(magic::Vector3(0, 1, 0));
 
-		magic::Renderer* renderer = GetSubsystem<magic::Renderer>();
+		magic::Renderer *renderer = GetSubsystem<magic::Renderer>();
 		magic::SharedPtr<magic::Viewport> viewport(new magic::Viewport(
 				context_, m_scene, m_camera_node->GetComponent<magic::Camera>()));
 		renderer->SetViewport(0, viewport);
 
 		// Won't work; accessing the resulting value in Lua segfaults.
 		/*magic::WeakPtr<magic::LuaFunction> f =
-				m_script->GetFunction("__buildat_set_sync_scene");
+		        m_script->GetFunction("__buildat_set_sync_scene");
 		if(!f)
-			throw Exception("__buildat_set_sync_scene not found");
+		    throw Exception("__buildat_set_sync_scene not found");
 		f->BeginCall();
 		f->PushUserType(m_scene.Get(), "Scene");
 		f->EndCall();*/
@@ -367,14 +367,14 @@ struct CApp: public App, public magic::Application
 		if(g_client_config.boot_to_menu){
 			ss_ extname = g_client_config.menu_extension_name;
 			ss_ script = ss_() +
-					"local m = require('buildat/extension/"+extname+"')\n"
+				"local m = require('buildat/extension/"+extname+"')\n"
 					"if type(m) ~= 'table' then\n"
 					"    error('Failed to load extension "+extname+"')\n"
 					"end\n"
 					"m.boot()\n";
 			if(!run_script_no_sandbox(script)){
 				throw AppStartupError(ss_()+
-						"Failed to load and run extension "+extname);
+							  "Failed to load and run extension "+extname);
 			}
 		}
 
@@ -382,7 +382,7 @@ struct CApp: public App, public magic::Application
 		magic::ResourceCache *magic_cache = GetSubsystem<magic::ResourceCache>();
 		magic::DebugHud *dhud = GetSubsystem<magic::Engine>()->CreateDebugHud();
 		dhud->SetDefaultStyle(magic_cache->GetResource<magic::XMLFile>(
-				"UI/DefaultStyle.xml"));
+					"UI/DefaultStyle.xml"));
 	}
 
 	void on_update(magic::StringHash event_type, magic::VariantMap &event_data)
@@ -417,7 +417,7 @@ struct CApp: public App, public magic::Application
 		if(key == Urho3D::KEY_F10){
 			ss_ extname = "sandbox_test";
 			ss_ script = ss_() +
-					"local m = require('buildat/extension/"+extname+"')\n"
+				"local m = require('buildat/extension/"+extname+"')\n"
 					"if type(m) ~= 'table' then\n"
 					"    error('Failed to load extension "+extname+"')\n"
 					"end\n"

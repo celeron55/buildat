@@ -36,7 +36,8 @@ struct Module: public interface::Module
 	void event(const Event::Type &type, const Event::Private *p)
 	{
 		EVENT_VOIDN("core:start", on_start)
-		EVENT_TYPEN("network:client_connected", on_client_connected, network::NewClient)
+		EVENT_TYPEN("network:client_connected", on_client_connected,
+				network::NewClient)
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
 				client_file::FilesTransmitted)
 	}
@@ -54,7 +55,7 @@ struct Module: public interface::Module
 	{
 		log_v(MODULE, "on_files_transmitted(): recipient=%zu", event.recipient);
 
-		network::access(m_server, [&](network::Interface * inetwork){
+		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(event.recipient, "core:run_script",
 					"buildat.run_script_file(\"main/init.lua\")");
 		});

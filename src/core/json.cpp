@@ -8,9 +8,9 @@
 #include <iomanip>
 #include <fstream>
 #include <streambuf>
-#include <cinttypes> // PRId64
-#include <cmath> // isnan/isinf
-#include <cfloat> // DBL_MAX/DBL_MIN
+#include <cinttypes>// PRId64
+#include <cmath>// isnan/isinf
+#include <cfloat>	// DBL_MAX/DBL_MIN
 #include "sajson.h"
 
 using namespace json;
@@ -71,7 +71,7 @@ unclean:
 				}
 				else
 				{
-					unsigned long cnum = (unsigned long) (unsigned char) c;
+					unsigned long cnum = (unsigned long)(unsigned char)c;
 					os<<"\\u"<<std::hex<<std::setw(4)<<std::setfill('0')<<cnum;
 				}
 				break;
@@ -128,7 +128,7 @@ json::Value::~Value(){
 	p = NULL;
 }
 
-Value &json::Value::operator=(const Value &other)
+Value& json::Value::operator=(const Value &other)
 {
 	if(this == &other) return *this;
 	type = other.type;
@@ -158,17 +158,17 @@ Value &json::Value::operator=(const Value &other)
 		break;
 	case T_STRING:
 		if(!p) p = new ValuePrivate();
-		else  *p = ValuePrivate();
+		else *p = ValuePrivate();
 		p->s = other.p->s;
 		break;
 	case T_ARRAY:
 		if(!p) p = new ValuePrivate();
-		else  *p = ValuePrivate();
+		else *p = ValuePrivate();
 		p->a = other.p->a;
 		break;
 	case T_OBJECT:
 		if(!p) p = new ValuePrivate();
-		else  *p = ValuePrivate();
+		else *p = ValuePrivate();
 		p->o = other.p->o;
 		break;
 	}
@@ -220,14 +220,14 @@ unsigned int json::Value::size() const {
 	}
 }
 
-const Value &json::Value::at(int index) const {
+const Value& json::Value::at(int index) const {
 	static const Value dummy;
 	if(index < 0)
 		return dummy;
 	else
 		return at((unsigned int)index);
 }
-const Value &json::Value::at(unsigned int index) const {
+const Value& json::Value::at(unsigned int index) const {
 	static const Value dummy;
 	switch(type){
 	default:
@@ -239,10 +239,10 @@ const Value &json::Value::at(unsigned int index) const {
 	}
 }
 
-Value &json::Value::operator[](int index){
+Value& json::Value::operator[](int index){
 	return (*this)[(unsigned int)index];
 }
-Value &json::Value::operator[](unsigned int index){
+Value& json::Value::operator[](unsigned int index){
 	switch(type){
 	default:
 		throw MutableDoesNotExist();
@@ -253,10 +253,10 @@ Value &json::Value::operator[](unsigned int index){
 	}
 }
 
-const Value &json::Value::get(const char *key) const {
+const Value& json::Value::get(const char *key) const {
 	return get(std::string(key));
 }
-const Value &json::Value::get(const std::string &key) const {
+const Value& json::Value::get(const std::string &key) const {
 	static const Value dummy;
 	switch(type){
 	case T_OBJECT: {
@@ -266,15 +266,15 @@ const Value &json::Value::get(const std::string &key) const {
 			return it->second;
 		}
 		break;
-	default:
-		return dummy;
-	}
+		default:
+			return dummy;
+		}
 }
 
-Value &json::Value::operator[](const char *key){
+Value& json::Value::operator[](const char *key){
 	return (*this)[std::string(key)];
 }
-Value &json::Value::operator[](const std::string &key){
+Value& json::Value::operator[](const std::string &key){
 	switch(type){
 	case T_OBJECT: {
 			auto it = p->o.find(key);
@@ -283,9 +283,9 @@ Value &json::Value::operator[](const std::string &key){
 			return it->second;
 		}
 		break;
-	default:
-		throw MutableDoesNotExist();
-	}
+		default:
+			throw MutableDoesNotExist();
+		}
 }
 
 void json::Value::clear(){
@@ -299,7 +299,7 @@ void json::Value::clear(){
 	}
 }
 
-const char *json::Value::as_cstring() const {
+const char* json::Value::as_cstring() const {
 	switch(type){
 	default:
 		return NULL;
@@ -542,7 +542,7 @@ void json::Iterator::next(){
 	}
 }
 
-Iterator &json::Iterator::operator++(){
+Iterator& json::Iterator::operator++(){
 	next();
 	return *this;
 }
@@ -563,7 +563,7 @@ json::Iterator::operator bool() const {
 	return valid();
 }
 
-const char *json::Iterator::ckey() const {
+const char* json::Iterator::ckey() const {
 	switch(v.type){
 	case Value::T_OBJECT:
 		if(p->o == v.p->o.end())
@@ -585,7 +585,7 @@ std::string json::Iterator::key() const {
 	}
 }
 
-const Value &json::Iterator::value() const {
+const Value& json::Iterator::value() const {
 	static const Value dummy;
 	switch(v.type){
 	case Value::T_ARRAY:
@@ -597,7 +597,7 @@ const Value &json::Iterator::value() const {
 	}
 }
 
-const Value &json::Iterator::operator*() const {
+const Value& json::Iterator::operator*() const {
 	return value();
 }
 

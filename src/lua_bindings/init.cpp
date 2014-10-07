@@ -18,5 +18,5 @@ void init(lua_State *L)
 	init_voxel(L);
 }
 
-} // namespace lua_bindingss
+}	// namespace lua_bindingss
 // vim: set noet ts=4 sw=4:

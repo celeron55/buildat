@@ -21,11 +21,11 @@ namespace loader
 	};
 
 	inline bool access(interface::Server *server,
-	        std::function<void(loader::Interface*)> cb)
+			std::function<void(loader::Interface*)> cb)
 	{
 		return server->access_module("loader", [&](interface::Module *module){
-		                   cb((loader::Interface*)module->check_interface());
-					   });
+			cb((loader::Interface*)module->check_interface());
+		});
 	}
 }
 // vim: set noet ts=4 sw=4:

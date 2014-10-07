@@ -3,7 +3,7 @@
 #pragma once
 #include "core/types.h"
 extern "C" {
-#include <lua.h>
+	#include <lua.h>
 }
 
 namespace lua_bindings

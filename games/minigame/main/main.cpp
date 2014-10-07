@@ -99,7 +99,8 @@ struct Module: public interface::Module
 	void event(const Event::Type &type, const Event::Private *p)
 	{
 		EVENT_VOIDN("core:start", on_start)
-		EVENT_TYPEN("network:client_connected", on_client_connected, network::NewClient)
+		EVENT_TYPEN("network:client_connected", on_client_connected,
+				network::NewClient)
 		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
 				network::OldClient)
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
@@ -123,14 +124,15 @@ struct Module: public interface::Module
 			ar(m_players);
 			ar(m_playfield);
 		}
-		network::access(m_server, [&](network::Interface * inetwork){
+		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, "minigame:update", os.str());
 		});
 	}
 
 	void on_client_connected(const network::NewClient &client_connected)
 	{
-		log_v(MODULE, "minigame::on_client_connected: id=%zu", client_connected.info.id);
+		log_v(MODULE, "minigame::on_client_connected: id=%zu",
+				client_connected.info.id);
 
 		int peer = client_connected.info.id;
 
@@ -142,7 +144,8 @@ struct Module: public interface::Module
 
 	void on_client_disconnected(const network::OldClient &old_client)
 	{
-		log_v(MODULE, "minigame::on_client_disconnected: id=%zu", old_client.info.id);
+		log_v(MODULE, "minigame::on_client_disconnected: id=%zu",
+				old_client.info.id);
 
 		int peer = old_client.info.id;
 
@@ -156,7 +159,7 @@ struct Module: public interface::Module
 	{
 		log_v(MODULE, "on_files_transmitted(): recipient=%zu", event.recipient);
 
-		network::access(m_server, [&](network::Interface * inetwork){
+		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(event.recipient, "core:run_script",
 					"buildat.run_script_file(\"main/init.lua\")");
 		});

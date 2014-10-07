@@ -10,10 +10,10 @@
 		auto p0 = dynamic_cast<const param_type*>(p); \
 		if(p0) handler(*p0); \
 		else if(p == nullptr) Exception(ss_()+"Missing parameter to "+ \
-			        __PRETTY_FUNCTION__+"::" #handler " (parameter type: " \
-			        #param_type ")"); \
+				__PRETTY_FUNCTION__+"::" #handler " (parameter type: " \
+				#param_type ")"); \
 		else throw Exception(ss_()+"Invalid parameter to "+__PRETTY_FUNCTION__+ \
-			              "::" #handler " (expected " #param_type ")"); \
+					  "::" #handler " (expected " #param_type ")"); \
 	}
 #define EVENT_VOID EVENT_DISPATCH_VOID
 #define EVENT_TYPE EVENT_DISPATCH_TYPE
@@ -48,7 +48,7 @@ namespace interface
 			type(t(name)), p(up_<Private>(p))
 		{}
 
-		static Type t(const ss_ &name); // Shorthand function
+		static Type t(const ss_ &name);	// Shorthand function
 	};
 
 	struct EventRegistry

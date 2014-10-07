@@ -30,7 +30,7 @@ ss_ lua_tocppstring(lua_State *L, int index)
 {
 	if(!lua_isstring(L, index))
 		throw Exception(ss_()+"lua_tocppstring: Expected string, got "+
-				lua_typename(L, index));
+					  lua_typename(L, index));
 	size_t length;
 	const char *s = lua_tolstring(L, index, &length);
 	return ss_(s, length);
@@ -56,6 +56,6 @@ int handle_error(lua_State *L)
 	return 1;
 }
 
-} // namespace lua_bindingss
-// vim: set noet ts=4 sw=4:
+}	// namespace lua_bindingss
 
+// vim: set noet ts=4 sw=4:

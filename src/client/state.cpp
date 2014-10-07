@@ -23,22 +23,22 @@
 #include <deque>
 
 #ifdef _WIN32
-#	ifndef WIN32_LEAN_AND_MEAN
-#		define WIN32_LEAN_AND_MEAN
-#	endif
+	#ifndef WIN32_LEAN_AND_MEAN
+		#define WIN32_LEAN_AND_MEAN
+	#endif
 // Without this some of the network functions are not found on mingw
-#	ifndef _WIN32_WINNT
-#		define _WIN32_WINNT 0x0501
-#	endif
-#	include <windows.h>
-#	include <winsock2.h>
-#	include <ws2tcpip.h>
-#	ifdef _MSC_VER
-#		pragma comment(lib, "ws2_32.lib")
-#	endif
+	#ifndef _WIN32_WINNT
+		#define _WIN32_WINNT 0x0501
+	#endif
+	#include <windows.h>
+	#include <winsock2.h>
+	#include <ws2tcpip.h>
+	#ifdef _MSC_VER
+		#pragma comment(lib, "ws2_32.lib")
+	#endif
 typedef int socklen_t;
 #else
-#	include <sys/socket.h>
+	#include <sys/socket.h>
 #endif
 
 #define MODULE "__state"
@@ -60,15 +60,15 @@ struct CState: public State
 	sp_<app::App> m_app;
 	ss_ m_remote_cache_path;
 	ss_ m_tmp_path;
-	sm_<ss_, ss_> m_file_hashes; // name -> hash
-	set_<ss_> m_waiting_files; // name
+	sm_<ss_, ss_> m_file_hashes;// name -> hash
+	set_<ss_> m_waiting_files;	// name
 	bool m_tell_after_all_files_transferred_requested = false;
 	// Connecting is possible only once. After that has happened, the whole
 	// state has to be recreated for making a new connection.
 	// In actuality the whole client application has to be recreated because
 	// otherwise unwanted Lua state remains.
 	bool m_connected = false;
-	sm_<ss_, std::function<void(const ss_&, const ss_&)>> m_packet_handlers;
+	sm_<ss_, std::function<void(const ss_ &, const ss_ &)>> m_packet_handlers;
 
 	CState(sp_<app::App> app):
 		m_socket(interface::createTCPSocket()),
@@ -149,7 +149,7 @@ struct CState: public State
 	void send_packet(const ss_ &name, const ss_ &data)
 	{
 		log_v(MODULE, "send_packet(): name=%s", cs(name));
-		m_packet_stream.output(name, data, [&](const ss_ & packet_data){
+		m_packet_stream.output(name, data, [&](const ss_ &packet_data){
 			m_socket->send_fd(packet_data);
 		});
 	}
@@ -175,7 +175,7 @@ struct CState: public State
 		if(!f.good())
 			throw Exception(ss_()+"Could not open file: "+path);
 		std::string file_content((std::istreambuf_iterator<char>(f)),
-				std::istreambuf_iterator<char>());
+			std::istreambuf_iterator<char>());
 		ss_ file_hash2 = interface::sha1::calculate(file_content);
 		if(file_hash != file_hash2){
 			log_e(MODULE, "Opened file differs in hash: \"%s\": "
@@ -205,7 +205,7 @@ struct CState: public State
 	void handle_socket_buffer()
 	{
 		m_packet_stream.input(m_socket_buffer,
-		[&](const ss_ & name, const ss_ & data){
+		[&](const ss_ &name, const ss_ &data){
 			try {
 				handle_packet(name, data);
 			} catch(std::exception &e){
@@ -254,7 +254,7 @@ void CState::setup_packet_handlers()
 		m_file_hashes[file_name] = file_hash;
 		ss_ file_hash_hex = interface::sha1::hex(file_hash);
 		log_v(MODULE, "Server announces file: %s %s",
-				cs(file_hash_hex), cs(file_name));
+					cs(file_hash_hex), cs(file_name));
 		// Check if we already have this file
 		ss_ path = m_remote_cache_path+"/"+file_hash_hex;
 		std::ifstream ifs(path, std::ios::binary);
@@ -266,13 +266,13 @@ void CState::setup_packet_handlers()
 			if(content_hash == file_hash){
 				// We have it; no need to ask this file
 				log_i(MODULE, "%s %s: cached",
-						cs(file_hash_hex), cs(file_name));
+							cs(file_hash_hex), cs(file_name));
 				cached_is_ok = true;
 			} else {
 				// Our copy is broken, re-request it
 				log_i(MODULE, "%s %s: Our copy is broken (has hash %s)",
-						cs(file_hash_hex), cs(file_name),
-						cs(interface::sha1::hex(content_hash)));
+							cs(file_hash_hex), cs(file_name),
+							cs(interface::sha1::hex(content_hash)));
 			}
 		}
 		if(cached_is_ok){
@@ -282,7 +282,7 @@ void CState::setup_packet_handlers()
 		} else {
 			// We don't have it; request this file
 			log_i(MODULE, "%s %s: requesting",
-					cs(file_hash_hex), cs(file_name));
+						cs(file_hash_hex), cs(file_name));
 			std::ostringstream os(std::ios::binary);
 			{
 				cereal::PortableBinaryOutputArchive ar(os);
@@ -319,16 +319,16 @@ void CState::setup_packet_handlers()
 		}
 		if(m_waiting_files.count(file_name) == 0){
 			log_w(MODULE, "Received file was not requested: %s %s",
-					cs(interface::sha1::hex(file_hash)), cs(file_name));
+						cs(interface::sha1::hex(file_hash)), cs(file_name));
 			return;
 		}
 		m_waiting_files.erase(file_name);
 		ss_ file_hash2 = interface::sha1::calculate(file_content);
 		if(file_hash != file_hash2){
 			log_w(MODULE, "Requested file differs in hash: \"%s\": "
-					"requested %s, actual %s", cs(file_name),
-					cs(interface::sha1::hex(file_hash)),
-					cs(interface::sha1::hex(file_hash2)));
+						"requested %s, actual %s", cs(file_name),
+						cs(interface::sha1::hex(file_hash)),
+						cs(interface::sha1::hex(file_hash2)));
 			return;
 		}
 		ss_ file_hash_hex = interface::sha1::hex(file_hash);
@@ -467,7 +467,7 @@ void CState::setup_packet_handlers()
 	m_packet_handlers[""] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
-	};
+		};
 }
 
 State* createState(sp_<app::App> app)

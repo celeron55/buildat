@@ -17,18 +17,18 @@ namespace interface
 	{
 		BlockName name;
 		BlockTypeId id;
-		uint8_t num_rotations = 0; // Supported: 0, 4, 24
-		pv::Vector3DUint8 size = pv::Vector3DUint8(0,0,0); // Size in voxels
-		sv_<VoxelTypeId> segments; // Rotations*voxels
+		uint8_t num_rotations = 0;	// Supported: 0, 4, 24
+		pv::Vector3DUint8 size = pv::Vector3DUint8(0, 0, 0);// Size in voxels
+		sv_<VoxelTypeId> segments;	// Rotations*voxels
 	};
 
 	// Voxels and a BlockDefinition can be generated based on this
 	struct BlockSourceDefinition
 	{
 		BlockName name;
-		uint8_t num_rotations = 0; // Supported: 0, 4, 24
-		pv::Vector3DUint8 size = pv::Vector3DUint8(0,0,0); // Size in voxels
-		sv_<ss_> side_textures; // 6 resource names
+		uint8_t num_rotations = 0;	// Supported: 0, 4, 24
+		pv::Vector3DUint8 size = pv::Vector3DUint8(0, 0, 0);// Size in voxels
+		sv_<ss_> side_textures;	// 6 resource names
 	};
 
 	struct BlockRegistry
@@ -38,7 +38,7 @@ namespace interface
 		virtual BlockTypeId add_block_with_predefined_segments(
 				const BlockDefinition &def) = 0;
 		virtual BlockTypeId add_block_generate_segments(
-				const BlockSourceDefinition &def) =0;
+				const BlockSourceDefinition &def) = 0;
 
 		virtual const BlockDefinition* get(const BlockTypeId &id) = 0;
 		virtual const BlockDefinition* get(const BlockName &name) = 0;

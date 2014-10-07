@@ -11,12 +11,12 @@
 #include <cereal/types/vector.hpp>
 #include <cereal/types/tuple.hpp>
 #ifdef _WIN32
-#	include "ports/windows_sockets.h"
+	#include "ports/windows_sockets.h"
 #else
-#	include <sys/socket.h>
+	#include <sys/socket.h>
 #endif
 #include <deque>
-#include <cstring> // strerror()
+#include <cstring>	// strerror()
 
 using interface::Event;
 
@@ -83,11 +83,12 @@ struct Module: public interface::Module, public network::Interface
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
-		EVENT_VOIDN("core:start",           on_start)
+		EVENT_VOIDN("core:start", on_start)
 		EVENT_VOIDN("core:unload", on_unload)
 		EVENT_VOIDN("core:continue", on_continue)
 		EVENT_TYPEN("network:listen_event", on_listen_event, interface::SocketEvent)
-		EVENT_TYPEN("network:incoming_data", on_incoming_data, interface::SocketEvent)
+		EVENT_TYPEN("network:incoming_data", on_incoming_data,
+				interface::SocketEvent)
 	}
 
 	void on_start()
@@ -118,7 +119,7 @@ struct Module: public interface::Module, public network::Interface
 		for(auto &pair : m_peers){
 			Peer &peer = pair.second;
 			peer_restore_info.push_back(std::tuple<Peer::Id, int>(
-					peer.id, peer.socket->fd()));
+						peer.id, peer.socket->fd()));
 		}
 
 		std::ostringstream os(std::ios::binary);
@@ -210,7 +211,8 @@ struct Module: public interface::Module, public network::Interface
 			PeerInfo pinfo;
 			pinfo.id = peer.id;
 			pinfo.address = peer.socket->get_remote_address();
-			m_server->emit_event("network:client_disconnected", new OldClient(pinfo));
+			m_server->emit_event("network:client_disconnected",
+					new OldClient(pinfo));
 
 			m_server->remove_socket_event(peer.socket->fd());
 			m_peers_by_socket.erase(peer.socket->fd());
@@ -222,7 +224,7 @@ struct Module: public interface::Module, public network::Interface
 
 		try {
 			peer.packet_stream.input(peer.socket_buffer,
-			[&](const ss_ & name, const ss_ & data){
+			[&](const ss_ &name, const ss_ &data){
 				// Emit event
 				m_server->emit_event(ss_()+"network:packet_received/"+name,
 						new Packet(peer.id, name, data));
@@ -234,7 +236,7 @@ struct Module: public interface::Module, public network::Interface
 
 	void send_u(Peer &peer, const ss_ &name, const ss_ &data)
 	{
-		peer.packet_stream.output(name, data, [&](const ss_ & packet_data){
+		peer.packet_stream.output(name, data, [&](const ss_ &packet_data){
 			peer.socket->send_fd(packet_data);
 		});
 	}
@@ -245,7 +247,7 @@ struct Module: public interface::Module, public network::Interface
 		auto it = m_peers.find(recipient);
 		if(it == m_peers.end()){
 			throw Exception(ss_()+"network::send(): Peer "+itos(recipient) +
-					" doesn't exist");
+						  " doesn't exist");
 		}
 		Peer &peer = it->second;
 

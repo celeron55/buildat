@@ -104,7 +104,7 @@ struct ResolveState
 				return true;
 			}
 			return set_error(ss_()+"Couldn't get module info for \""+name+"\""+
-					(log_extra_info == "" ? "" : ss_()+" ("+log_extra_info+")"));
+						   (log_extra_info == "" ? "" : ss_()+" ("+log_extra_info+")"));
 		}
 
 		m_required_modules.insert(name);
@@ -128,13 +128,13 @@ struct ResolveState
 			if(m_promised_modules.count(dep.module)){
 				log_w(MODULE, "%s: Reverse dependency %s ignored (already "
 						"marked to be loaded)", cs(name), cs(dep.module));
-				continue; // Adding the dependency would have no effect
+				continue;	// Adding the dependency would have no effect
 			}
 
 			// Store dependency information
 			interface::ModuleDependency forward_dep;
-			forward_dep = dep; // Base dependency on reverted one
-			forward_dep.module = name; // The other module depends now on this
+			forward_dep = dep;	// Base dependency on reverted one
+			forward_dep.module = name;	// The other module depends now on this
 			// dep.module is the other module which should depeend on this one
 			m_reverse_dependencies[dep.module].push_back(forward_dep);
 
@@ -150,7 +150,7 @@ struct ResolveState
 	{
 		if(m_promised_modules.count(name)){
 			throw Exception(ss_()+"Logic error in ResolveState: "
-					"load_module(\""+name+"\"): already promised");
+						  "load_module(\""+name+"\"): already promised");
 		}
 		log_d(MODULE, "Marking \"%s\" to be loaded", cs(name));
 		m_module_load_order.push_back(name);
@@ -224,10 +224,10 @@ struct ResolveState
 	{
 		log_d(MODULE, "step_through()");
 
-		while(step(true));
+		while(step(true)) ;
 		if(m_failed) return false;
 
-		while(step(false));
+		while(step(false)) ;
 		if(m_failed) return false;
 
 		for(const ss_ &name : m_required_modules){
@@ -257,7 +257,7 @@ struct ResolveState
 				set_error("Missing dependencies");
 		}
 
-		return !m_failed; // Make sure to return any leftover failure as false
+		return !m_failed;	// Make sure to return any leftover failure as false
 	}
 };
 
@@ -265,7 +265,7 @@ struct Module: public interface::Module, public loader::Interface
 {
 	interface::Server *m_server;
 	bool m_activated = false;
-	sv_<ss_> m_module_load_paths; // In order of preference
+	sv_<ss_> m_module_load_paths;	// In order of preference
 
 	Module(interface::Server *server):
 		interface::Module("loader"),
@@ -323,10 +323,12 @@ struct Module: public interface::Module, public loader::Interface
 				log_t(MODULE, "%s: Opened", cs(meta_path));
 			}
 			std::string meta_content((std::istreambuf_iterator<char>(f)),
-					std::istreambuf_iterator<char>());
-			log_t(MODULE, "%s: File length: %zu", cs(meta_path), meta_content.size());
+				std::istreambuf_iterator<char>());
+			log_t(MODULE, "%s: File length: %zu", cs(meta_path),
+					meta_content.size());
 			json::json_error_t json_error;
-			json::Value meta_v = json::load_string(meta_content.c_str(), &json_error);
+			json::Value meta_v =
+					json::load_string(meta_content.c_str(), &json_error);
 			if(meta_v.is_undefined()){
 				log_e(MODULE, "Invalid JSON: %s:%i: %s", cs(meta_path),
 						json_error.line, json_error.text);
@@ -378,7 +380,8 @@ struct Module: public interface::Module, public loader::Interface
 			return;
 		}
 
-		log_i(MODULE, "Module load order: %s", cs(dump(resolve.m_module_load_order)));
+		log_i(MODULE, "Module load order: %s",
+				cs(dump(resolve.m_module_load_order)));
 
 		for(const ss_ &name : resolve.m_module_load_order){
 			interface::ModuleInfo *info = get_module_info(name);

@@ -11,7 +11,7 @@ namespace interface
 		virtual ~FileWatch(){}
 
 		virtual void add(const ss_ &path,
-		        std::function<void(const ss_&path)> cb) = 0;
+				std::function<void(const ss_&path)> cb) = 0;
 
 		// Used on Linux; no-op on Windows
 		virtual sv_<int> get_fds() = 0;

@@ -53,9 +53,10 @@ struct Module: public interface::Module
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
-		EVENT_VOIDN("core:start",         on_start)
-		EVENT_TYPEN("core:tick",          on_tick,     interface::TickEvent)
-		EVENT_TYPEN("network:client_connected", on_client_connected, network::NewClient)
+		EVENT_VOIDN("core:start", on_start)
+		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
+		EVENT_TYPEN("network:client_connected", on_client_connected,
+				network::NewClient)
 		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
 				network::OldClient)
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
@@ -67,23 +68,23 @@ struct Module: public interface::Module
 		m_server->access_scene([&](Scene *scene)
 		{
 			Context *context = scene->GetContext();
-			ResourceCache* cache = context->GetSubsystem<ResourceCache>();
+			ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 			auto *m = cache->GetResource<Material>("Materials/Stone.xml");
 			// NOTE: Modified or created materials will not be replicated to the
 			//       client. Make sure to always have a resource file or create
 			//       the material on the client.
 			/*m->SetTexture(TU_DIFFUSE,
-					cache->GetResource<Texture2D>("main/green_texture.png"));*/
+			        cache->GetResource<Texture2D>("main/green_texture.png"));*/
 			/*Material *m = new Material(context);
 			m->SetTexture(TU_DIFFUSE,
-					cache->GetResource<Texture2D>("main/green_texture.png"));
+			        cache->GetResource<Texture2D>("main/green_texture.png"));
 			m->SetTechnique(0, cache->GetResource<Technique>(
-					"Techniques/Diff.xml"));*/
+			        "Techniques/Diff.xml"));*/
 
 			{
-				Node* node = scene->CreateChild("DirectionalLight");
+				Node *node = scene->CreateChild("DirectionalLight");
 				node->SetDirection(Vector3(-0.6f, -1.0f, 0.8f));
-				Light* light = node->CreateComponent<Light>();
+				Light *light = node->CreateComponent<Light>();
 				light->SetLightType(LIGHT_DIRECTIONAL);
 				light->SetCastShadows(true);
 			}
@@ -167,19 +168,21 @@ struct Module: public interface::Module
 
 	void on_client_connected(const network::NewClient &client_connected)
 	{
-		log_v(MODULE, "entitytest::on_client_connected: id=%zu", client_connected.info.id);
+		log_v(MODULE, "entitytest::on_client_connected: id=%zu",
+				client_connected.info.id);
 	}
 
 	void on_client_disconnected(const network::OldClient &old_client)
 	{
-		log_v(MODULE, "entitytest::on_client_disconnected: id=%zu", old_client.info.id);
+		log_v(MODULE, "entitytest::on_client_disconnected: id=%zu",
+				old_client.info.id);
 	}
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
 		log_v(MODULE, "on_files_transmitted(): recipient=%zu", event.recipient);
 
-		network::access(m_server, [&](network::Interface * inetwork){
+		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(event.recipient, "core:run_script",
 					"buildat.run_script_file(\"main/init.lua\")");
 		});

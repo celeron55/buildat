@@ -13,9 +13,9 @@ namespace rccpp
 		virtual ~Compiler(){}
 
 		virtual bool build(const std::string &module_name,
-		        const std::string &in_path, const std::string &out_path,
-		        const ss_ &extra_cxxflags = "", const ss_ &extra_ldflags = "",
-		        bool skip_compile = false) = 0;
+				const std::string &in_path, const std::string &out_path,
+				const ss_ &extra_cxxflags = "", const ss_ &extra_ldflags = "",
+				bool skip_compile = false) = 0;
 
 		virtual void* construct(const char *name, interface::Server *server) = 0;
 

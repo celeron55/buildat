@@ -35,9 +35,9 @@
 #define MODULE "__state"
 
 #ifdef _WIN32
-#	define MODULE_EXTENSION "dll"
+	#define MODULE_EXTENSION "dll"
 #else
-#	define MODULE_EXTENSION "so"
+	#define MODULE_EXTENSION "so"
 #endif
 
 using interface::Event;
@@ -92,9 +92,9 @@ static ss_ hash_files(const sv_<ss_> &paths)
 	std::ostringstream os(std::ios::binary);
 	for(const ss_ &path : paths){
 		std::ifstream f(path);
-		try{
+		try {
 			std::string content((std::istreambuf_iterator<char>(f)),
-					std::istreambuf_iterator<char>());
+				std::istreambuf_iterator<char>());
 			os<<content;
 		} catch(std::ios_base::failure &e){
 			// Just ignore errors
@@ -105,7 +105,7 @@ static ss_ hash_files(const sv_<ss_> &paths)
 	return interface::sha1::calculate(os.str());
 }
 
-class BuildatResourceRouter : public magic::ResourceRouter
+class BuildatResourceRouter: public magic::ResourceRouter
 {
 	OBJECT(BuildatResourceRouter);
 
@@ -115,7 +115,7 @@ public:
 		magic::ResourceRouter(context),
 		m_server(server)
 	{}
-	void Route(magic::String& name, magic::ResourceRequest requestType)
+	void Route(magic::String &name, magic::ResourceRequest requestType)
 	{
 		ss_ path = m_server->get_file_path(name.CString());
 		if(path == ""){
@@ -179,7 +179,7 @@ struct MagicEventHandler: public magic::Object
 			event_data.Erase("Component");
 		}
 		m_server->emit_event(m_buildat_event_type, new interface::MagicEvent(
-				event_type, event_data));
+					event_type, event_data));
 	}
 };
 
@@ -201,7 +201,7 @@ struct CState: public State, public interface::Server
 	};
 
 	bool m_shutdown_requested = false;
-	int  m_shutdown_exit_status = 0;
+	int m_shutdown_exit_status = 0;
 	ss_ m_shutdown_reason;
 
 	up_<rccpp::Compiler> m_compiler;
@@ -215,16 +215,16 @@ struct CState: public State, public interface::Server
 	//       modules. In every other case modules must use access_scene().
 	// NOTE: If not locked, creating or destructing Urho3D Objects can cause a
 	//       crash.
-	interface::Mutex m_magic_mutex; // Lock for all of Urho3D
+	interface::Mutex m_magic_mutex;	// Lock for all of Urho3D
 
-	sm_<ss_, interface::ModuleInfo> m_module_info; // Info of every seen module
-	sm_<ss_, ModuleContainer> m_modules; // Currently loaded modules
+	sm_<ss_, interface::ModuleInfo> m_module_info;	// Info of every seen module
+	sm_<ss_, ModuleContainer> m_modules;// Currently loaded modules
 	set_<ss_> m_unloads_requested;
 	sm_<ss_, sp_<interface::FileWatch>> m_module_file_watches;
 	// Module modifications are accumulated here and core:module_modified events
 	// are fired every event loop based on this to lump multiple modifications
 	// into one (generally a modification causes many notifications)
-	set_<ss_> m_modified_modules; // Module names
+	set_<ss_> m_modified_modules;	// Module names
 	// TODO: Handle properly in reloads (unload by popping from top, then reload
 	//       everything until top)
 	sv_<ss_> m_module_load_order;
@@ -233,7 +233,7 @@ struct CState: public State, public interface::Server
 	sv_<Event> m_event_queue;
 	interface::Mutex m_event_queue_mutex;
 
-	sv_<sv_<ModuleContainer*>> m_event_subs;
+	sv_<sv_<ModuleContainer* >> m_event_subs;
 	interface::Mutex m_event_subs_mutex;
 
 	sm_<int, SocketState> m_sockets;
@@ -271,7 +271,7 @@ struct CState: public State, public interface::Server
 					g_server_config.urho3d_path+"/Source/Engine/"+subdir);
 		}
 		m_compiler->include_directories.push_back(
-				g_server_config.urho3d_path+"/Build/Engine"); // Urho3D.h
+				g_server_config.urho3d_path+"/Build/Engine");	// Urho3D.h
 		m_compiler->library_directories.push_back(
 				g_server_config.urho3d_path+"/Lib");
 		m_compiler->libraries.push_back("-lUrho3D");
@@ -297,8 +297,8 @@ struct CState: public State, public interface::Server
 
 		magic::VariantMap params;
 		params["ResourcePaths"] = resource_paths_s.c_str();
-		params["Headless"]      = true;
-		params["LogName"]       = ""; // Don't log to file
+		params["Headless"] = true;
+		params["LogName"] = "";	// Don't log to file
 		//params["LogQuiet"]      = true; // Don't log to stdout
 		if(!m_magic_engine->Initialize(params))
 			throw Exception("Urho3D engine initialization failed");
@@ -368,13 +368,14 @@ struct CState: public State, public interface::Server
 		include_dirs.push_back(m_modules_path);
 		sv_<ss_> includes = list_includes(init_cpp_path, include_dirs);
 		log_d(MODULE, "Includes: %s", cs(dump(includes)));
-		files_to_watch.insert(files_to_watch.end(), includes.begin(), includes.end());
+		files_to_watch.insert(files_to_watch.end(), includes.begin(),
+				includes.end());
 
 		if(m_module_file_watches.count(info.name) == 0){
 			sp_<interface::FileWatch> w(interface::createFileWatch());
 			for(const ss_ &watch_path : files_to_watch){
 				ss_ dir_path = interface::Filesystem::strip_file_name(watch_path);
-				w->add(dir_path,  [this, info, watch_path](const ss_ &modified_path){
+				w->add(dir_path, [this, info, watch_path](const ss_ &modified_path){
 					if(modified_path != watch_path)
 						return;
 					log_i(MODULE, "Module modified: %s: %s",
@@ -415,7 +416,8 @@ struct CState: public State, public interface::Server
 		// On Windows, we need a new name for each modification of the module
 		// because Windows caches DLLs by name
 		ss_ build_dst = g_server_config.rccpp_build_path +
-				"/"+info.name+"_"+interface::sha1::hex(content_hash)+"."+MODULE_EXTENSION;
+				"/"+info.name+"_"+interface::sha1::hex(content_hash)+"."+
+				MODULE_EXTENSION;
 		// TODO: Delete old ones
 #else
 		ss_ build_dst = g_server_config.rccpp_build_path +
@@ -433,7 +435,7 @@ struct CState: public State, public interface::Server
 					std::ifstream f(hashfile_path);
 					if(f.good()){
 						previous_hash = ss_((std::istreambuf_iterator<char>(f)),
-								std::istreambuf_iterator<char>());
+									std::istreambuf_iterator<char>());
 					}
 				}
 				if(previous_hash == content_hash){
@@ -445,7 +447,7 @@ struct CState: public State, public interface::Server
 
 		m_compiler->include_directories.push_back(m_modules_path);
 		bool build_ok = m_compiler->build(info.name, init_cpp_path, build_dst,
-				extra_cxxflags, extra_ldflags, skip_compile);
+					extra_cxxflags, extra_ldflags, skip_compile);
 		m_compiler->include_directories.pop_back();
 
 		if(!build_ok){
@@ -760,7 +762,7 @@ struct CState: public State, public interface::Server
 				interface::ModuleInfo &info = it->second;
 				emit_event(Event("core:module_modified",
 						new interface::ModuleModifiedEvent(
-								info.name, info.path)));
+							info.name, info.path)));
 			}
 		}
 		// Note: Locking m_modules_mutex here is not needed because no modules
@@ -772,7 +774,7 @@ struct CState: public State, public interface::Server
 				throw ServerShutdownRequest("Server shutdown requested via SIGINT");
 			}
 			sv_<Event> event_queue_snapshot;
-			sv_<sv_<ModuleContainer*>> event_subs_snapshot;
+			sv_<sv_<ModuleContainer* >> event_subs_snapshot;
 			{
 				interface::MutexScope ms2(m_event_queue_mutex);
 				interface::MutexScope ms3(m_event_subs_mutex);
@@ -806,8 +808,8 @@ struct CState: public State, public interface::Server
 			interface::MutexScope ms(m_modules_mutex);
 			for(auto it = m_unloads_requested.begin();
 					it != m_unloads_requested.end();){
-				ss_ module_name = *it; // Copy
-				it++; // Increment before unload_module_u; it erases this
+				ss_ module_name = *it;	// Copy
+				it++;	// Increment before unload_module_u; it erases this
 				log_i("state", "Unloading %s as requested", cs(module_name));
 				unload_module_u(module_name);
 			}
@@ -830,7 +832,7 @@ struct CState: public State, public interface::Server
 		const SocketState &s = it->second;
 		if(s.event_type != event_type){
 			throw Exception("Socket events already requested with different"
-					" event type");
+						  " event type");
 		}
 		// Nothing to do; already set.
 	}

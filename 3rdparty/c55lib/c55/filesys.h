@@ -49,7 +49,7 @@ namespace c55fs
 	// Only pass full paths to this one. True on success.
 	bool RecursiveDeleteContent(std::string path);
 
-} //fs
+}	//fs
 
 #endif
 

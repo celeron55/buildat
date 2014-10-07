@@ -95,7 +95,8 @@ namespace json
 
 		// get value cast to specified type
 		const char* as_cstring() const;
-		std::string as_string(const std::string &default_value = std::string()) const;
+		std::string as_string(const std::string &default_value =
+				std::string()) const;
 		int as_integer(int default_value = 0) const;
 		double as_real(double default_value = 0.0) const;
 		double as_number(double default_value = 0.0) const;
@@ -202,6 +203,6 @@ namespace json
 	};
 }
 
-#define JSON_INDENT(x) // Dummy for now
+#define JSON_INDENT(x)	// Dummy for now
 
 // vim: set noet ts=4 sw=4:

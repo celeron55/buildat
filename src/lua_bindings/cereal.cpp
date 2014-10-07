@@ -10,20 +10,20 @@ namespace lua_bindings {
 
 /* Type format:
 {"object",
-	{"peer", "int32_t"},
-	{"players", {"unordered_map",
-		"int32_t",
-		{"object",
-			{"peer", "int32_t"},
-			{"x", "int32_t"},
-			{"y", "int32_t"},
-		},
-	}},
-	{"playfield", {"object",
-		{"w", "int32_t"},
-		{"h", "int32_t"},
-		{"tiles", {"array", "int32_t"}},
-	}},
+    {"peer", "int32_t"},
+    {"players", {"unordered_map",
+        "int32_t",
+        {"object",
+            {"peer", "int32_t"},
+            {"x", "int32_t"},
+            {"y", "int32_t"},
+        },
+    }},
+    {"playfield", {"object",
+        {"w", "int32_t"},
+        {"h", "int32_t"},
+        {"tiles", {"array", "int32_t"}},
+    }},
 }) */
 
 static constexpr auto known_types =
@@ -90,7 +90,7 @@ static void binary_input_read_value(lua_State *L, int type_L,
 			binary_input_read_value(L, array_type_L, ar);
 			lua_rawseti(L, value_result_table_L, i + 1);
 		}
-		lua_pop(L, 1); // array_type_L
+		lua_pop(L, 1);	// array_type_L
 		// value_result_table_L is left on stack
 	} else if(outfield_type == "unordered_map"){
 		if(!has_table)
@@ -110,8 +110,8 @@ static void binary_input_read_value(lua_State *L, int type_L,
 			binary_input_read_value(L, map_value_type_L, ar);
 			lua_rawset(L, value_result_table_L);
 		}
-		lua_pop(L, 1); // map_value_type_L
-		lua_pop(L, 1); // map_key_type_L
+		lua_pop(L, 1);	// map_value_type_L
+		lua_pop(L, 1);	// map_key_type_L
 		// value_result_table_L is left on stack
 	} else if(outfield_type == "object"){
 		if(!has_table)
@@ -125,20 +125,20 @@ static void binary_input_read_value(lua_State *L, int type_L,
 			if(field_i != 0){
 				log_t(MODULE, "object field %zu", field_i);
 				int field_def_L = lua_gettop(L);
-				lua_rawgeti(L, field_def_L, 1); // name
-				lua_rawgeti(L, field_def_L, 2); // type
+				lua_rawgeti(L, field_def_L, 1);	// name
+				lua_rawgeti(L, field_def_L, 2);	// type
 				log_t(MODULE, " = object[\"%s\"]", lua_tostring(L, -2));
-				binary_input_read_value(L, -1, ar); // Uses type, pushes value
-				lua_remove(L, -2); // Remove type
-				lua_rawset(L, value_result_table_L); // Set t[#-2] = #-1
+				binary_input_read_value(L, -1, ar);	// Uses type, pushes value
+				lua_remove(L, -2);	// Remove type
+				lua_rawset(L, value_result_table_L);// Set t[#-2] = #-1
 			}
-			lua_pop(L, 1); // Continue iterating by popping table value
+			lua_pop(L, 1);	// Continue iterating by popping table value
 			field_i++;
 		}
 		// value_result_table_L is left on stack
 	} else {
 		throw Exception(ss_()+"Unknown type \""+outfield_type+"\""
-				"; known types are "+known_types);
+					  "; known types are "+known_types);
 	}
 }
 
@@ -189,7 +189,7 @@ static void binary_output_write_value(lua_State *L, int value_L, int type_L,
 		uint64_t num_entries = 0;
 		lua_pushnil(L);
 		while(lua_next(L, value_L) != 0){
-			lua_pop(L, 1); // Continue iterating by popping table value
+			lua_pop(L, 1);	// Continue iterating by popping table value
 			num_entries++;
 		}
 		ar(num_entries);
@@ -198,10 +198,10 @@ static void binary_output_write_value(lua_State *L, int value_L, int type_L,
 		while(lua_next(L, value_L) != 0){
 			log_t(MODULE, "array[%i]", i);
 			binary_output_write_value(L, -1, array_type_L, ar);
-			lua_pop(L, 1); // Continue iterating by popping table value
+			lua_pop(L, 1);	// Continue iterating by popping table value
 			i++;
 		}
-		lua_pop(L, 1); // array_type_L
+		lua_pop(L, 1);	// array_type_L
 		// value_result_table_L is left on stack
 	} else if(outfield_type == "unordered_map"){
 		if(!has_table)
@@ -214,7 +214,7 @@ static void binary_output_write_value(lua_State *L, int value_L, int type_L,
 		uint64_t num_entries = 0;
 		lua_pushnil(L);
 		while(lua_next(L, value_L) != 0){
-			lua_pop(L, 1); // Continue iterating by popping table value
+			lua_pop(L, 1);	// Continue iterating by popping table value
 			num_entries++;
 		}
 		ar(num_entries);
@@ -225,10 +225,10 @@ static void binary_output_write_value(lua_State *L, int value_L, int type_L,
 			log_t(MODULE, "unordered_map[%s]", lua_tostring(L, key_L));
 			binary_output_write_value(L, key_L, map_key_type_L, ar);
 			binary_output_write_value(L, value_L, map_value_type_L, ar);
-			lua_pop(L, 1); // Continue iterating by popping table value
+			lua_pop(L, 1);	// Continue iterating by popping table value
 		}
-		lua_pop(L, 1); // map_value_type_L
-		lua_pop(L, 1); // map_key_type_L
+		lua_pop(L, 1);	// map_value_type_L
+		lua_pop(L, 1);	// map_key_type_L
 		// value_result_table_L is left on stack
 	} else if(outfield_type == "object"){
 		if(!has_table)
@@ -240,22 +240,22 @@ static void binary_output_write_value(lua_State *L, int value_L, int type_L,
 			if(field_i != 0){
 				log_t(MODULE, "object field %zu", field_i);
 				int field_def_L = lua_gettop(L);
-				lua_rawgeti(L, field_def_L, 2); // type
-				lua_rawgeti(L, field_def_L, 1); // name
+				lua_rawgeti(L, field_def_L, 2);	// type
+				lua_rawgeti(L, field_def_L, 1);	// name
 				log_t(MODULE, " = object[\"%s\"]", lua_tostring(L, -1));
 				// Get value_L[name]; name is replaced by value
 				lua_rawget(L, value_L);
 				// Recurse into this value
 				binary_output_write_value(L, -1, -2, ar);
-				lua_pop(L, 1); // Pop value
-				lua_pop(L, 1); // Pop type
+				lua_pop(L, 1);	// Pop value
+				lua_pop(L, 1);	// Pop type
 			}
-			lua_pop(L, 1); // Continue iterating by popping table value
+			lua_pop(L, 1);	// Continue iterating by popping table value
 			field_i++;
 		}
 	} else {
 		throw Exception(ss_()+"Unknown type \""+outfield_type+"\""
-				"; known types are "+known_types);
+					  "; known types are "+known_types);
 	}
 }
 
@@ -296,14 +296,14 @@ static int l_cereal_binary_output(lua_State *L)
 
 void init_cereal(lua_State *L)
 {
-#define DEF_BUILDAT_FUNC(name){\
-	lua_pushcfunction(L, l_##name);\
-	lua_setglobal(L, "__buildat_" #name);\
+#define DEF_BUILDAT_FUNC(name){ \
+		lua_pushcfunction(L, l_##name); \
+		lua_setglobal(L, "__buildat_" #name); \
 }
 	DEF_BUILDAT_FUNC(cereal_binary_input)
 	DEF_BUILDAT_FUNC(cereal_binary_output)
 }
 
-} // namespace lua_bindingss
-// vim: set noet ts=4 sw=4:
+}	// namespace lua_bindingss
 
+// vim: set noet ts=4 sw=4:

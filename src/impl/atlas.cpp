@@ -37,7 +37,7 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 			if(def0.segment_resolution == seg_img_size){
 				size_t max = def0.total_segments.x_ * def0.total_segments.y_;
 				if(atlas_def->segments.size() >= max)
-					continue; // Full
+					continue;	// Full
 				atlas_def = &def0;
 				break;
 			}
@@ -75,10 +75,10 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 			const auto &id = atlas_def->id;
 			m_cache.resize(id+1);
 			TextureAtlasCache *cache = &m_cache[id];
-			cache->image              = atlas_img;
-			cache->texture            = atlas_tex;
+			cache->image = atlas_img;
+			cache->texture = atlas_tex;
 			cache->segment_resolution = atlas_def->segment_resolution;
-			cache->total_segments     = atlas_def->total_segments;
+			cache->total_segments = atlas_def->total_segments;
 		}
 		// Add this segment to the atlas definition
 		uint seg_id = atlas_def->segments.size();
@@ -142,13 +142,13 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 		// Draw segment into atlas image
 		magic::IntVector2 seg_img_size(seg_img->GetWidth(), seg_img->GetHeight());
 		magic::IntVector2 src_off(
-			seg_img_size.x_ / def.total_segments.x_ * def.select_segment.x_,
-			seg_img_size.y_ / def.total_segments.y_ * def.select_segment.y_
+				seg_img_size.x_ / def.total_segments.x_ * def.select_segment.x_,
+				seg_img_size.y_ / def.total_segments.y_ * def.select_segment.y_
 		);
-		for(int y=0; y<seg_size.y_; y++){
-			for(int x=0; x<seg_size.x_; x++){
+		for(int y = 0; y<seg_size.y_; y++){
+			for(int x = 0; x<seg_size.x_; x++){
 				magic::IntVector2 src_p = src_off + magic::IntVector2(x, y);
-				magic::IntVector2 dst_p = dst_p0 + magic::IntVector2(x ,y);
+				magic::IntVector2 dst_p = dst_p0 + magic::IntVector2(x, y);
 				magic::Color c = seg_img->GetPixel(src_p.x_, src_p.y_);
 				atlas.image->SetPixel(dst_p.x_, dst_p.y_, c);
 			}

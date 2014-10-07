@@ -79,9 +79,9 @@ static int l_fatal_error(lua_State *L)
 
 void init_misc(lua_State *L)
 {
-#define DEF_BUILDAT_FUNC(name){\
-	lua_pushcfunction(L, l_##name);\
-	lua_setglobal(L, "__buildat_" #name);\
+#define DEF_BUILDAT_FUNC(name){ \
+		lua_pushcfunction(L, l_##name); \
+		lua_setglobal(L, "__buildat_" #name); \
 }
 	DEF_BUILDAT_FUNC(print_log);
 	DEF_BUILDAT_FUNC(mkdir)
@@ -89,5 +89,5 @@ void init_misc(lua_State *L)
 	DEF_BUILDAT_FUNC(fatal_error)
 }
 
-} // namespace lua_bindingss
+}	// namespace lua_bindingss
 // vim: set noet ts=4 sw=4:

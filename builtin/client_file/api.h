@@ -11,7 +11,7 @@ namespace client_file
 		network::PeerInfo::Id recipient;
 
 		FilesTransmitted(const network::PeerInfo::Id &recipient): recipient(
-			    recipient){}
+					recipient){}
 	};
 
 	struct Interface
@@ -22,11 +22,11 @@ namespace client_file
 	};
 
 	inline bool access(interface::Server *server,
-	        std::function<void(client_file::Interface*)> cb)
+			std::function<void(client_file::Interface*)> cb)
 	{
 		return server->access_module("client_file", [&](interface::Module *module){
-		                   cb((client_file::Interface*)module->check_interface());
-					   });
+			cb((client_file::Interface*)module->check_interface());
+		});
 	}
 }
 // vim: set noet ts=4 sw=4:

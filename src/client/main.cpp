@@ -20,7 +20,7 @@ bool g_sigint_received = false;
 void sigint_handler(int sig)
 {
 	if(!g_sigint_received){
-		fprintf(stdout, "\n"); // Newline after "^C"
+		fprintf(stdout, "\n");	// Newline after "^C"
 		log_i("process", "SIGINT");
 		g_sigint_received = true;
 	} else {
@@ -38,7 +38,7 @@ void basic_init()
 	signal_handler_init();
 
 	// Force '.' as decimal point
-	try{
+	try {
 		std::locale::global(std::locale(std::locale(""), "C", std::locale::numeric));
 	} catch(std::runtime_error &e){
 		// Can happen on Wine

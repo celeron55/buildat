@@ -17,5 +17,5 @@ local camera_node = scene:GetChild("__buildat_replicated_scene_camera")
 scene:RemoveChild(camera_node)
 renderer:SetViewport(0, nil)
 
--- vim: set noet ts=4 sw=4:
 
+-- vim: set noet ts=4 sw=4:

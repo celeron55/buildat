@@ -48,7 +48,8 @@ struct Module: public interface::Module
 				interface::ModuleLoadedEvent)
 		EVENT_TYPEN("core:module_unloaded", on_module_unloaded,
 				interface::ModuleUnloadedEvent)
-		EVENT_TYPEN("network:client_connected", on_client_connected, network::NewClient)
+		EVENT_TYPEN("network:client_connected", on_client_connected,
+				network::NewClient)
 	}
 
 	void on_start()
@@ -79,7 +80,7 @@ struct Module: public interface::Module
 				continue;
 			const ss_ &file_path = client_data_path+"/"+n.name;
 			const ss_ &public_file_name = module_name+"/"+n.name;
-			client_file::access(m_server, [&](client_file::Interface * i){
+			client_file::access(m_server, [&](client_file::Interface *i){
 				i->add_file_path(public_file_name, file_path);
 			});
 		}

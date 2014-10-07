@@ -16,7 +16,7 @@ struct Module: public interface::Module
 {
 	interface::Server *m_server;
 
-	Event::Type m_EventType_test1_thing; // You can cache these for more speed
+	Event::Type m_EventType_test1_thing;// You can cache these for more speed
 
 	Module(interface::Server *server):
 		interface::Module("test1"),
@@ -45,7 +45,8 @@ struct Module: public interface::Module
 	{
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_TYPE(m_EventType_test1_thing, on_thing, Thing)
-		EVENT_TYPEN("network:client_connected", on_client_connected, network::NewClient)
+		EVENT_TYPEN("network:client_connected", on_client_connected,
+				network::NewClient)
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
 				client_file::FilesTransmitted)
 		EVENT_TYPEN("network:packet_received", on_packet_received, network::Packet)
@@ -62,10 +63,12 @@ struct Module: public interface::Module
 
 	void on_client_connected(const network::NewClient &client_connected)
 	{
-		log_v(MODULE, "test1::on_client_connected: id=%zu", client_connected.info.id);
+		log_v(MODULE, "test1::on_client_connected: id=%zu",
+				client_connected.info.id);
 
-		network::access(m_server, [&](network::Interface * inetwork){
-			inetwork->send(client_connected.info.id, "test1:dummy", "dummy data");
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(client_connected.info.id, "test1:dummy",
+					"dummy data");
 		});
 	}
 
@@ -73,12 +76,12 @@ struct Module: public interface::Module
 	{
 		log_v(MODULE, "on_files_transmitted(): recipient=%zu", event.recipient);
 
-		network::access(m_server, [&](network::Interface * inetwork){
+		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(event.recipient, "core:run_script",
 					"buildat.run_script_file(\"test1/init.lua\")");
 		});
 
-		network::access(m_server, [&](network::Interface * inetwork){
+		network::access(m_server, [&](network::Interface *inetwork){
 			std::ostringstream os(std::ios::binary);
 			{
 				cereal::PortableBinaryOutputArchive ar(os);
@@ -88,7 +91,7 @@ struct Module: public interface::Module
 			inetwork->send(event.recipient, "test1:add_box", os.str());
 		});
 
-		network::access(m_server, [&](network::Interface * inetwork){
+		network::access(m_server, [&](network::Interface *inetwork){
 			std::ostringstream os(std::ios::binary);
 			{
 				cereal::PortableBinaryOutputArchive ar(os);

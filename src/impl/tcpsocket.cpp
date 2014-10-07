@@ -3,39 +3,38 @@
 #include "interface/tcpsocket.h"
 #include "core/log.h"
 #ifdef _WIN32
-#	include "ports/windows_sockets.h"
+	#include "ports/windows_sockets.h"
 #else
-#	include <unistd.h>
-#	include <sys/types.h>
-#	include <sys/socket.h>
-#	include <errno.h>
-#	include <fcntl.h>
-#	include <netinet/in.h>
-#	include <netdb.h>
-#	define closesocket close
+	#include <unistd.h>
+	#include <sys/types.h>
+	#include <sys/socket.h>
+	#include <errno.h>
+	#include <fcntl.h>
+	#include <netinet/in.h>
+	#include <netdb.h>
+	#define closesocket close
 //typedef int socket_t;
 #endif
-#include <string.h> // strerror()
+#include <string.h>	// strerror()
 #include <iostream>
 #include <iomanip>
 
 namespace interface {
 
 const unsigned char prefix[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                0x00, 0x00, 0x00, 0xFF, 0xFF
-                               };
+									0x00, 0x00, 0x00, 0xFF, 0xFF};
 
 bool sockaddr_to_bytes(const sockaddr_storage *ptr, sv_<uchar> &to)
 {
 	if(ptr->ss_family == AF_INET)
 	{
-		uchar *u = (uchar*) & ((struct sockaddr_in*)ptr)->sin_addr.s_addr;
+		uchar *u = (uchar*)&((struct sockaddr_in*)ptr)->sin_addr.s_addr;
 		to.assign(u, u + 4);
 		return true;
 	}
 	else if(ptr->ss_family == AF_INET6)
 	{
-		uchar *u = (uchar*) & ((struct sockaddr_in6*)ptr)->sin6_addr.s6_addr;
+		uchar *u = (uchar*)&((struct sockaddr_in6*)ptr)->sin6_addr.s6_addr;
 		if(memcmp(prefix, u, sizeof(prefix)) == 0){
 			to.assign(u + 12, u + 16);
 			return true;
@@ -45,7 +44,7 @@ bool sockaddr_to_bytes(const sockaddr_storage *ptr, sv_<uchar> &to)
 	}
 
 	return false;
-};
+}
 
 std::string address_bytes_to_string(const sv_<uchar> &ip)
 {
@@ -121,7 +120,7 @@ struct CTCPSocket: public TCPSocket
 		hints.ai_socktype = SOCK_STREAM;
 		hints.ai_protocol = IPPROTO_TCP;
 		if(address == "any")
-			hints.ai_flags = AI_PASSIVE; // Wildcard address
+			hints.ai_flags = AI_PASSIVE;// Wildcard address
 		const char *address_c = (address == "any" ? NULL : address.c_str());
 		const char *port_c = (port == "any" ? NULL : port.c_str());
 		int err = getaddrinfo(address_c, port_c, &hints, &res0);
@@ -195,7 +194,7 @@ struct CTCPSocket: public TCPSocket
 			hints.ai_family = AF_INET6;
 		}
 		if(address1 == "any"){
-			hints.ai_flags = AI_PASSIVE; // Wildcard address
+			hints.ai_flags = AI_PASSIVE;// Wildcard address
 		}
 		const char *address_c = (address1 == "any" ? NULL : address1.c_str());
 		const char *port_c = (port == "any" ? NULL : port.c_str());
@@ -221,10 +220,12 @@ struct CTCPSocket: public TCPSocket
 				continue;
 			}
 			int val = 1;
-			setsockopt(try_fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&val, sizeof(val));
+			setsockopt(try_fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&val,
+					sizeof(val));
 			if(res->ai_family == AF_INET6){
 				int val = 1;
-				setsockopt(try_fd, IPPROTO_IPV6, IPV6_V6ONLY, (const char*)&val, sizeof(val));
+				setsockopt(try_fd, IPPROTO_IPV6, IPV6_V6ONLY, (const char*)&val,
+						sizeof(val));
 			}
 			if(bind(try_fd, res->ai_addr, res->ai_addrlen) == -1){
 				//std::cerr<<"bind: "<<strerror(errno)<<std::endl;
@@ -262,14 +263,15 @@ struct CTCPSocket: public TCPSocket
 
 		struct sockaddr_storage pin;
 		socklen_t pin_len = sizeof(pin);
-		int fd_client = accept(listener.fd(), (struct sockaddr*)  &pin, &pin_len);
+		int fd_client = accept(listener.fd(), (struct sockaddr*)&pin, &pin_len);
 		if(fd_client == -1){
 			std::cerr<<"accept: "<<strerror(errno)<<std::endl;
 			return false;
 		}
 
 		int val = 1;
-		setsockopt(fd_client, SOL_SOCKET, SO_REUSEADDR, (const char*)&val, sizeof(val));
+		setsockopt(fd_client, SOL_SOCKET, SO_REUSEADDR, (const char*)&val,
+				sizeof(val));
 
 		m_fd = fd_client;
 		return true;

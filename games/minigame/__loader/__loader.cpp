@@ -49,7 +49,7 @@ struct Module: public interface::Module
 			return;
 		}
 
-		loader::access(m_server, [&](loader::Interface * i){
+		loader::access(m_server, [&](loader::Interface *i){
 			i->activate();
 		});
 	}

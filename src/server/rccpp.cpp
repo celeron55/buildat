@@ -9,16 +9,16 @@
 #include <string>
 #include <iostream>
 #ifdef _WIN32
-#	ifndef WIN32_LEAN_AND_MEAN
-#		define WIN32_LEAN_AND_MEAN
-#	endif
-	// Without this some of the network functions are not found on mingw
-#	ifndef _WIN32_WINNT
-#		define _WIN32_WINNT 0x0501
-#	endif
-#	include <windows.h>
+	#ifndef WIN32_LEAN_AND_MEAN
+		#define WIN32_LEAN_AND_MEAN
+	#endif
+// Without this some of the network functions are not found on mingw
+	#ifndef _WIN32_WINNT
+		#define _WIN32_WINNT 0x0501
+	#endif
+	#include <windows.h>
 #else
-#	include <dlfcn.h>
+	#include <dlfcn.h>
 #endif
 #include <cstddef>
 #include <vector>
@@ -32,17 +32,17 @@
 namespace rccpp {
 
 #ifdef _WIN32
-static void *library_load(const char *filename){
+static void* library_load(const char *filename){
 	return LoadLibrary(filename);
 }
 static void library_unload(void *module){
 	FreeLibrary((HMODULE)module);
 }
-static void *library_get_address(void *module, const char *name){
+static void* library_get_address(void *module, const char *name){
 	// FARPROC {aka int (__attribute__((__stdcall__)) *)()}
 	return (void*)GetProcAddress((HMODULE)module, name);
 }
-static const char *library_error(){
+static const char* library_error(){
 	DWORD last_error = GetLastError();
 	if(!last_error)
 		return "No error";
@@ -52,21 +52,21 @@ static const char *library_error(){
 	return buf;
 }
 #else
-static void *library_load(const char *filename){
+static void* library_load(const char *filename){
 	return dlopen(filename, RTLD_NOW);
 }
 static void library_unload(void *module){
 	dlclose(module);
 }
-static void *library_get_address(void *module, const char *name){
+static void* library_get_address(void *module, const char *name){
 	return dlsym(module, name);
 }
-static const char *library_error(){
+static const char* library_error(){
 	return dlerror();
 }
 #endif
 
-typedef void *(*RCCPP_Constructor)(interface::Server *server);
+typedef void*(*RCCPP_Constructor)(interface::Server *server);
 
 struct RCCPP_Info {
 	void *module;
@@ -190,5 +190,5 @@ Compiler* createCompiler(const ss_ &compiler_command)
 	return new CCompiler(compiler_command);
 }
 
-} // rccpp
+}	// rccpp
 // vim: set noet ts=4 sw=4:

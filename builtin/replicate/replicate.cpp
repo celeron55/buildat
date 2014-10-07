@@ -68,7 +68,7 @@ struct Module: public interface::Module, public replicate::Interface
 	{
 		log_v(MODULE, "replicate destruct");
 		m_server->access_scene([&](magic::Scene *scene){
-			for(auto &pair : m_scene_states){
+			for(auto &pair: m_scene_states){
 				magic::SceneReplicationState &scene_state = pair.second;
 				scene->CleanupConnection((magic::Connection*)&scene_state);
 			}
@@ -87,11 +87,12 @@ struct Module: public interface::Module, public replicate::Interface
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
-        EVENT_VOIDN("core:start",            on_start)
-        EVENT_VOIDN("core:unload",           on_unload)
-        EVENT_VOIDN("core:continue",         on_continue)
-        EVENT_TYPEN("network:client_connected",    on_client_connected, network::NewClient)
-        EVENT_TYPEN("core:tick",             on_tick, interface::TickEvent)
+		EVENT_VOIDN("core:start", on_start)
+		EVENT_VOIDN("core:unload", on_unload)
+		EVENT_VOIDN("core:continue", on_continue)
+		EVENT_TYPEN("network:client_connected", on_client_connected,
+				network::NewClient)
+		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 	}
 
 	void on_start()
@@ -108,7 +109,8 @@ struct Module: public interface::Module, public replicate::Interface
 
 	void on_client_connected(const network::NewClient &client_connected)
 	{
-		log_v(MODULE, "replicate::on_client_connected: id=%zu", client_connected.info.id);
+		log_v(MODULE, "replicate::on_client_connected: id=%zu",
+				client_connected.info.id);
 	}
 
 	void on_client_disconnected(const network::OldClient &old_client)
@@ -140,7 +142,7 @@ struct Module: public interface::Module, public replicate::Interface
 	void sync_changes()
 	{
 		sv_<network::PeerInfo::Id> peers;
-		network::access(m_server, [&](network::Interface * inetwork){
+		network::access(m_server, [&](network::Interface *inetwork){
 			peers = inetwork->list_peers();
 		});
 		m_server->access_scene([&](magic::Scene *scene){
@@ -153,7 +155,7 @@ struct Module: public interface::Module, public replicate::Interface
 
 			// Send changes to each peer (each of which has its own replication
 			// state)
-			for(auto &peer : peers){
+			for(auto &peer: peers){
 				magic::SceneReplicationState &scene_state = m_scene_states[peer];
 
 				magic::HashSet<uint> nodes_to_process;
@@ -166,7 +168,8 @@ struct Module: public interface::Module, public replicate::Interface
 
 				while(!nodes_to_process.Empty()){
 					uint node_id = nodes_to_process.Front();
-					sync_node(peer, node_id, nodes_to_process, scene, scene_state);
+					sync_node(peer, node_id, nodes_to_process, scene,
+							scene_state);
 				}
 			}
 		});
@@ -235,7 +238,7 @@ struct Module: public interface::Module, public replicate::Interface
 		for(auto it = vars.Begin(); it != vars.End(); ++it){
 			buf.WriteStringHash(it->first_);
 			buf.WriteVariant(it->second_);
-		};
+		}
 
 		// Components
 		buf.WriteVLE(node->GetNumNetworkComponents());
@@ -335,8 +338,8 @@ struct Module: public interface::Module, public replicate::Interface
 
 		// Handle changed or removed components
 		magic::HashMap<unsigned, magic::ComponentReplicationState>
-				&component_states = node_state.componentStates_;
-		for(auto it = component_states.Begin(); it != component_states.End(); ){
+		&component_states = node_state.componentStates_;
+		for(auto it = component_states.Begin(); it != component_states.End();){
 			auto current_it = it++;
 			uint component_id = current_it->first_;
 			auto &component_state = current_it->second_;
@@ -396,8 +399,8 @@ struct Module: public interface::Module, public replicate::Interface
 		// Handle new components
 		if(component_states.Size() != node->GetNumNetworkComponents()){
 			const magic::Vector<magic::SharedPtr<Component>>
-					&components = node->GetComponents();
-			for(uint i=0; i<components.Size(); i++){
+			&components = node->GetComponents();
+			for(uint i = 0; i<components.Size(); i++){
 				Component *component = components[i];
 				if(component->GetID() >= magic::FIRST_LOCAL_ID)
 					continue;
@@ -431,21 +434,21 @@ struct Module: public interface::Module, public replicate::Interface
 		log_d(MODULE, "%s: Update size: %zu, data=%s",
 				cs(name), buf.GetBuffer().Size(), cs(dump(buf)));
 		ss_ data = buf_to_string(buf);
-		network::access(m_server, [&](network::Interface * inetwork){
+		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, name, data);
 		});
 	}
 
 	/*void send_to_all(const ss_ &name, const magic::VectorBuffer &buf)
 	{
-		log_i(MODULE, "%s: Update size: %zu, data=%s",
-				cs(name), buf.GetBuffer().Size(), cs(dump(buf)));
-		ss_ data = buf_to_string(buf);
-		network::access(m_server, [&](network::Interface * inetwork){
-			auto peers = inetwork->list_peers();
-			for(auto &peer : peers)
-				inetwork->send(peer, name, data);
-		});
+	    log_i(MODULE, "%s: Update size: %zu, data=%s",
+	            cs(name), buf.GetBuffer().Size(), cs(dump(buf)));
+	    ss_ data = buf_to_string(buf);
+	    network::access(m_server, [&](network::Interface * inetwork){
+	        auto peers = inetwork->list_peers();
+	        for(auto &peer : peers)
+	            inetwork->send(peer, name, data);
+	    });
 	}*/
 
 	// Interface

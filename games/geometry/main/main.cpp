@@ -48,9 +48,9 @@ struct Module: public interface::Module
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
-		EVENT_VOIDN("core:start",         on_start)
-		EVENT_VOIDN("core:continue",      on_continue)
-		EVENT_TYPEN("core:tick",          on_tick,   interface::TickEvent)
+		EVENT_VOIDN("core:start", on_start)
+		EVENT_VOIDN("core:continue", on_continue)
+		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
 				client_file::FilesTransmitted)
 	}
@@ -60,12 +60,12 @@ struct Module: public interface::Module
 		m_server->access_scene([&](Scene *scene)
 		{
 			Context *context = scene->GetContext();
-			ResourceCache* cache = context->GetSubsystem<ResourceCache>();
+			ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 
 			{
-				Node* node = scene->CreateChild("DirectionalLight");
+				Node *node = scene->CreateChild("DirectionalLight");
 				node->SetDirection(Vector3(-0.6f, -1.0f, 0.8f));
-				Light* light = node->CreateComponent<Light>();
+				Light *light = node->CreateComponent<Light>();
 				light->SetLightType(LIGHT_DIRECTIONAL);
 				light->SetCastShadows(true);
 			}
@@ -83,7 +83,8 @@ struct Module: public interface::Module
 				ss_ data = "0111";
 
 				// Crude way of dynamically defining a voxel model
-				n->SetVar(StringHash("simple_voxel_data"), Variant(data.c_str()));
+				n->SetVar(StringHash("simple_voxel_data"), Variant(
+							data.c_str()));
 				n->SetVar(StringHash("simple_voxel_w"), Variant(w));
 				n->SetVar(StringHash("simple_voxel_h"), Variant(h));
 				n->SetVar(StringHash("simple_voxel_d"), Variant(d));
@@ -116,7 +117,7 @@ struct Module: public interface::Module
 		m_server->access_scene([&](Scene *scene)
 		{
 			Context *context = scene->GetContext();
-			ResourceCache* cache = context->GetSubsystem<ResourceCache>();
+			ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 
 			{
 				Node *n = scene->GetChild("Base");
@@ -137,10 +138,11 @@ struct Module: public interface::Module
 					"111111111100000000000000000000"
 					"111111111100000000000000000000"
 					"111111111100000000000000000000"
-				;
+					;
 
 				// Crude way of dynamically defining a voxel model
-				n->SetVar(StringHash("simple_voxel_data"), Variant(data.c_str()));
+				n->SetVar(StringHash("simple_voxel_data"), Variant(
+							data.c_str()));
 				n->SetVar(StringHash("simple_voxel_w"), Variant(w));
 				n->SetVar(StringHash("simple_voxel_h"), Variant(h));
 				n->SetVar(StringHash("simple_voxel_d"), Variant(d));
@@ -176,7 +178,7 @@ struct Module: public interface::Module
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
-		network::access(m_server, [&](network::Interface * inetwork){
+		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(event.recipient, "core:run_script",
 					"buildat.run_script_file(\"main/init.lua\")");
 		});

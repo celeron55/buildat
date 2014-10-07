@@ -36,7 +36,7 @@ Model* create_simple_voxel_model(Context *context,
 			pv::Vector3DInt32(w, h, d)));
 	size_t i = 0;
 	for(int z = 0; z < d; z++)
-	for(int y = 0; y < h; y++)
+		for(int y = 0; y < h; y++)
 	for(int x = 0; x < w; x++){
 		char c = source_data[i++];
 		volData.setVoxelAt(x, y, z, c == '0' ? 0 : 255);
@@ -44,7 +44,7 @@ Model* create_simple_voxel_model(Context *context,
 
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
 	pv::CubicSurfaceExtractorWithNormals<pv::SimpleVolume<uint8_t>>
-			surfaceExtractor(&volData, volData.getEnclosingRegion(), &pv_mesh);
+	surfaceExtractor(&volData, volData.getEnclosingRegion(), &pv_mesh);
 	surfaceExtractor.execute();
 
 	const sv_<uint32_t> &pv_indices = pv_mesh.getIndices();
@@ -54,7 +54,7 @@ Model* create_simple_voxel_model(Context *context,
 	const size_t num_indices = pv_indices.size();
 
 	sv_<float> vertex_data;
-	vertex_data.resize(num_vertices * 6); // vertex + normal
+	vertex_data.resize(num_vertices * 6);	// vertex + normal
 	for(size_t i = 0; i < num_vertices; i++){
 		vertex_data[i*6 + 0] = pv_vertices[i].position.getX() - w/2.0f - 0.5f;
 		vertex_data[i*6 + 1] = pv_vertices[i].position.getY() - h/2.0f - 0.5f;
@@ -93,10 +93,10 @@ Model* create_simple_voxel_model(Context *context,
 	fromScratchModel->SetNumGeometries(1);
 	fromScratchModel->SetGeometry(0, 0, geom);
 	fromScratchModel->SetBoundingBox(BoundingBox(
-			Vector3(-0.5f*w, -0.5f*h, -0.5f*d), Vector3(0.5f*w, 0.5f*h, 0.5f*d)));
+				Vector3(-0.5f*w, -0.5f*h, -0.5f*d), Vector3(0.5f*w, 0.5f*h, 0.5f*d)));
 
 	return fromScratchModel;
 }
 
-} // namespace interface
+}	// namespace interface
 // vim: set noet ts=4 sw=4:

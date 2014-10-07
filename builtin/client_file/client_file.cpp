@@ -22,7 +22,7 @@ struct FileInfo {
 	ss_ name;
 	ss_ content;
 	ss_ hash;
-	ss_ path; // Empty if not a physical file
+	ss_ path;	// Empty if not a physical file
 	FileInfo(const ss_ &name, const ss_ &content, const ss_ &hash, const ss_ &path):
 		name(name), content(content), hash(hash), path(path){}
 };
@@ -72,7 +72,8 @@ struct Module: public interface::Module, public client_file::Interface
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_VOIDN("core:unload", on_unload)
 		EVENT_VOIDN("core:continue", on_continue)
-		EVENT_TYPEN("network:client_connected", on_client_connected, network::NewClient)
+		EVENT_TYPEN("network:client_connected", on_client_connected,
+				network::NewClient)
 		EVENT_TYPEN("network:packet_received/core:request_file", on_request_file,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/core:all_files_transferred",
@@ -95,10 +96,10 @@ struct Module: public interface::Module, public client_file::Interface
 			const FileInfo &info = *pair.second.get();
 			if(info.path != ""){
 				file_restore_info.push_back(std::tuple<ss_, ss_, ss_>(
-						info.name, "", info.path));
+							info.name, "", info.path));
 			} else {
 				file_restore_info.push_back(std::tuple<ss_, ss_, ss_>(
-						info.name, info.content, ""));
+							info.name, info.content, ""));
 			}
 		}
 
@@ -122,9 +123,9 @@ struct Module: public interface::Module, public client_file::Interface
 			ar(file_restore_info);
 		}
 		for(auto &tuple : file_restore_info){
-			const ss_ &name    = std::get<0>(tuple);
+			const ss_ &name = std::get<0>(tuple);
 			const ss_ &content = std::get<1>(tuple);
-			const ss_ &path    = std::get<2>(tuple);
+			const ss_ &path = std::get<2>(tuple);
 			log_i(MODULE, "Restoring: %s", cs(name));
 			if(path != ""){
 				add_file_path(name, path);
@@ -136,7 +137,8 @@ struct Module: public interface::Module, public client_file::Interface
 
 	void on_client_connected(const network::NewClient &client_connected)
 	{
-		log_v(MODULE, "Sending file hashes to new client %zu", client_connected.info.id);
+		log_v(MODULE, "Sending file hashes to new client %zu",
+				client_connected.info.id);
 
 		// Tell file hashes to client
 		for(auto &pair : m_files){
@@ -147,11 +149,12 @@ struct Module: public interface::Module, public client_file::Interface
 				ar(info.name);
 				ar(info.hash);
 			}
-			network::access(m_server, [&](network::Interface * inetwork){
-				inetwork->send(client_connected.info.id, "core:announce_file", os.str());
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(client_connected.info.id, "core:announce_file",
+						os.str());
 			});
 		}
-		network::access(m_server, [&](network::Interface * inetwork){
+		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(client_connected.info.id,
 					"core:tell_after_all_files_transferred", "");
 		});
@@ -189,7 +192,7 @@ struct Module: public interface::Module, public client_file::Interface
 			ar(info.hash);
 			ar(info.content);
 		}
-		network::access(m_server, [&](network::Interface * inetwork){
+		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(packet.sender, "core:file_content", os.str());
 		});
 	}
@@ -234,9 +237,9 @@ struct Module: public interface::Module, public client_file::Interface
 			ar(name);
 			ar(hash);
 		}
-		network::access(m_server, [&](network::Interface * inetwork){
+		network::access(m_server, [&](network::Interface *inetwork){
 			sv_<network::PeerInfo::Id> peers = inetwork->list_peers();
-			for(const network::PeerInfo::Id &peer : peers){
+			for(const network::PeerInfo::Id &peer: peers){
 				inetwork->send(peer, "core:announce_file", os.str());
 			}
 		});
@@ -252,9 +255,9 @@ struct Module: public interface::Module, public client_file::Interface
 		std::ifstream f(path, std::ios::binary);
 		if(!f.good())
 			throw Exception("client_file::add_file_path(): Couldn't open \""+
-					name+"\" from \""+path+"\"");
+						  name+"\" from \""+path+"\"");
 		std::string content((std::istreambuf_iterator<char>(f)),
-				std::istreambuf_iterator<char>());
+			std::istreambuf_iterator<char>());
 		ss_ hash = interface::sha1::calculate(content);
 		log_v(MODULE, "File added: %s: %s (%s)", cs(name),
 				cs(interface::sha1::hex(hash)), cs(path));
@@ -264,7 +267,7 @@ struct Module: public interface::Module, public client_file::Interface
 		m_server->add_file_path(name, path);
 
 		ss_ dir_path = interface::Filesystem::strip_file_name(path);
-		m_watch->add(dir_path, [this, name, path](const ss_ & path_){
+		m_watch->add(dir_path, [this, name, path](const ss_ &path_){
 			if(path_ != path){
 				//log_d(MODULE, "Ignoring file watch callback: %s (we want %s)",
 				//		cs(path_), cs(path));

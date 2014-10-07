@@ -7,10 +7,10 @@
 #include <set>
 #include <exception>
 #include <cstdint>
-#include <cinttypes> // PRId64
+#include <cinttypes>// PRId64
 #include <sstream>
 #include <memory>
-#include <stdio.h> // snprintf
+#include <stdio.h>	// snprintf
 
 typedef unsigned int uint;
 typedef unsigned char uchar;

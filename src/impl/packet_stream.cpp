@@ -7,7 +7,7 @@
 namespace interface {
 
 void PacketStream::input(std::deque<char> &socket_buffer,
-                         std::function<void(const ss_ &name, const ss_ &data)> cb)
+		std::function<void(const ss_&name, const ss_&data)> cb)
 {
 	for(;;){
 		if(socket_buffer.size() < 6)
@@ -54,7 +54,7 @@ void PacketStream::input(std::deque<char> &socket_buffer,
 }
 
 void PacketStream::output(const ss_ &name, const ss_ &data,
-                          std::function<void(const ss_ &packet_data)> cb)
+		std::function<void(const ss_&packet_data)> cb)
 {
 	PacketType type = m_outgoing_types.get(name);
 	log_d(MODULE, "output(): name=\"%s\", data.size()=%zu",

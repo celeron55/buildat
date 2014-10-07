@@ -32,7 +32,7 @@ namespace app
 		bool resizable = true;
 		bool vsync = true;
 		bool triple_buffer = false;
-		int multisampling = 1; // 2 looks much better but is much heavier(?)
+		int multisampling = 1;	// 2 looks much better but is much heavier(?)
 		int window_x = UNDEFINED_INT;
 		int window_y = UNDEFINED_INT;
 
@@ -56,7 +56,7 @@ namespace app
 		virtual bool run_script_no_sandbox(const ss_ &script) = 0;
 		virtual void handle_packet(const ss_ &name, const ss_ &data) = 0;
 		virtual void file_updated_in_cache(const ss_ &file_name,
-		        const ss_ &file_hash, const ss_ &cached_path) = 0;
+				const ss_ &file_hash, const ss_ &cached_path) = 0;
 		virtual Urho3D::Scene* get_scene() = 0;
 	};
 

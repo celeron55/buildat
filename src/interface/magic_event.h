@@ -18,7 +18,8 @@ namespace interface
 	struct MagicEvent: public interface::Event::Private {
 		magic::StringHash magic_type;
 		magic::VariantMap magic_data;
-		MagicEvent(magic::StringHash magic_type, const magic::VariantMap &magic_data):
+		MagicEvent(magic::StringHash magic_type,
+				const magic::VariantMap &magic_data):
 			magic_type(magic_type), magic_data(magic_data){}
 	};
 }

@@ -21,5 +21,5 @@ function __buildat_require_module(name)
 	return interface
 end
 
--- vim: set noet ts=4 sw=4:
 
+-- vim: set noet ts=4 sw=4:

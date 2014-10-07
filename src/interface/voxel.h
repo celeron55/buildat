@@ -12,15 +12,15 @@ namespace interface
 	typedef uint32_t VoxelTypeId;
 	static constexpr uint32_t VOXELTYPEID_MAX = 1398101-1;
 	static constexpr uint32_t VOXELTYPEID_UNDEFINED = 0;
-	
+
 	struct VoxelName
 	{
-		ss_ block_name; // Name of the block this was instanced from
-		uint segment_x = 0; // Which segment of the block this was instanced from
+		ss_ block_name;	// Name of the block this was instanced from
+		uint segment_x = 0;	// Which segment of the block this was instanced from
 		uint segment_y = 0;
 		uint segment_z = 0;
-		uint rotation_primary = 0; // 4 possible rotations when looking at a face
-		uint rotation_secondary = 0; // 6 possible directions for a face to point to
+		uint rotation_primary = 0;	// 4 possible rotations when looking at a face
+		uint rotation_secondary = 0;// 6 possible directions for a face to point to
 	};
 
 	struct VoxelDefinition
@@ -70,8 +70,8 @@ namespace interface
 	{
 		uint32_t data;
 
-		VoxelTypeId getId(){ return data & 0x001fffff; }
-		uint8_t getMSB(){ return (data>>24) & 0xff; }
+		VoxelTypeId getId(){return data & 0x001fffff; }
+		uint8_t getMSB(){return (data>>24) & 0xff; }
 	};
 }
 // vim: set noet ts=4 sw=4:

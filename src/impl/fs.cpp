@@ -4,9 +4,9 @@
 #include <c55/filesys.h>
 #include <c55/string_util.h>
 #ifdef _WIN32
-#	include "ports/windows_minimal.h"
+	#include "ports/windows_minimal.h"
 #else
-#	include <unistd.h>
+	#include <unistd.h>
 #endif
 
 namespace interface {
@@ -26,7 +26,7 @@ ss_ Filesystem::strip_file_name(const ss_ &path)
 	return c55fs::stripFilename(path);
 }
 
-struct CFilesystem : public Filesystem
+struct CFilesystem: public Filesystem
 {
 	sv_<Node> list_directory(const ss_ &path)
 	{
@@ -76,7 +76,7 @@ struct CFilesystem : public Filesystem
 	ss_ get_absolute_path(const ss_ &path0)
 	{
 		ss_ path = get_basic_absolute_path(path0);
-		for(size_t i=0; i<path.size(); i++){
+		for(size_t i = 0; i<path.size(); i++){
 			if(path[i] == '\\')
 				path[i] = '/';
 		}

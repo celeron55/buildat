@@ -59,14 +59,14 @@ namespace interface
 		virtual ~TextureAtlasRegistry(){}
 
 		virtual const AtlasSegmentReference add_segment(
-		    const AtlasSegmentDefinition &segment_def) = 0;
+				const AtlasSegmentDefinition &segment_def) = 0;
 
 		virtual const TextureAtlasDefinition* get_atlas_definition(
-		    uint atlas_id) = 0;
+				uint atlas_id) = 0;
 		virtual const AtlasSegmentDefinition* get_segment_definition(
-		    const AtlasSegmentReference &ref) = 0;
+				const AtlasSegmentReference &ref) = 0;
 		virtual const AtlasSegmentCache* get_texture(
-		    const AtlasSegmentReference &ref) = 0;
+				const AtlasSegmentReference &ref) = 0;
 	};
 
 	TextureAtlasRegistry* createTextureAtlasRegistry(magic::Context *context);
