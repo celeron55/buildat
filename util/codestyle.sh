@@ -38,6 +38,13 @@ cat "$uncrustify_base" "$uncrustify_add_cpp" > "$uncrustify_cpp"
 uncrustify -c "$uncrustify_header" --no-backup $header_files
 uncrustify -c "$uncrustify_cpp" --no-backup $cpp_files
 
+# Fix miscellaneous stuff that uncrustify isn't capable of doing
+python "$script_dir/extra_cpp_style.py" -i $header_files
+python "$script_dir/extra_cpp_style.py" -i -b $cpp_files
+
+# Remove trailing whitespace
+#sed -i -e 's/[\t ]*$//' $header_files $cpp_files $lua_files $cmake_files
+
 # Fix or add Vim modeline magic
 sed -i '/^\/\/ vim: set /d' $header_files $cpp_files
 for f in $header_files $cpp_files; do
