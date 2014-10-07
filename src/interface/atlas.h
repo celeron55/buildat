@@ -3,11 +3,13 @@
 #pragma once
 #include "core/types.h"
 #include <Vector2.h>
+#include <Ptr.h>
 
 namespace Urho3D
 {
 	class Context;
 	class Texture2D;
+	class Image;
 }
 
 namespace interface
@@ -30,8 +32,7 @@ namespace interface
 
 	struct AtlasSegmentCache
 	{
-		bool valid = false;
-		magic::Texture2D *texture = NULL;
+		magic::Texture2D *texture = nullptr;
 		magic::Vector2 coord0;
 		magic::Vector2 coord1;
 	};
@@ -46,8 +47,8 @@ namespace interface
 
 	struct TextureAtlasCache
 	{
-		bool valid = false;
-		magic::Texture2D *texture = NULL;
+		magic::SharedPtr<magic::Image> image;
+		magic::Texture2D *texture = nullptr;
 		magic::IntVector2 segment_resolution;
 		magic::IntVector2 total_segments;
 		sv_<AtlasSegmentCache> segments;
