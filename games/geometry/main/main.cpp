@@ -5,7 +5,7 @@
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
-#include "interface/voxel.h"
+#include "interface/mesh.h"
 #include <Scene.h>
 #include <RigidBody.h>
 #include <CollisionShape.h>

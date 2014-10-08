@@ -257,6 +257,9 @@ struct CState: public State, public interface::Server
 		m_compiler->include_directories.push_back(
 				g_server_config.interface_path+"/../../3rdparty/cereal/include");
 		m_compiler->include_directories.push_back(
+				g_server_config.interface_path+
+				"/../../3rdparty/polyvox/library/PolyVoxCore/include");
+		m_compiler->include_directories.push_back(
 				g_server_config.share_path+"/builtin");
 
 		// Setup Urho3D in RCC++
