@@ -16,15 +16,17 @@ namespace interface
 {
 	namespace magic = Urho3D;
 
+	static constexpr uint ATLAS_UNDEFINED = 0;
+
 	struct AtlasSegmentReference
 	{
-		uint atlas_id = 0;
+		uint atlas_id = ATLAS_UNDEFINED;// 0 = undefined atlas
 		uint segment_id = 0;
 	};
 
 	struct AtlasSegmentDefinition
 	{
-		ss_ resource_name;
+		ss_ resource_name;	// If "", segment won't be added
 		magic::IntVector2 total_segments;
 		magic::IntVector2 select_segment;
 		// TODO: Rotation
@@ -41,7 +43,7 @@ namespace interface
 
 	struct TextureAtlasDefinition
 	{
-		uint id;
+		uint id = ATLAS_UNDEFINED;
 		magic::IntVector2 segment_resolution;
 		magic::IntVector2 total_segments;
 		sv_<AtlasSegmentDefinition> segments;
@@ -50,7 +52,7 @@ namespace interface
 	struct TextureAtlasCache
 	{
 		magic::SharedPtr<magic::Image> image;
-		magic::Texture2D *texture = nullptr;
+		magic::SharedPtr<magic::Texture2D> texture;
 		magic::IntVector2 segment_resolution;
 		magic::IntVector2 total_segments;
 		sv_<AtlasSegmentCache> segments;
@@ -70,8 +72,12 @@ namespace interface
 		virtual const AtlasSegmentDefinition* get_segment_definition(
 				const AtlasSegmentReference &ref) = 0;
 
+		virtual const TextureAtlasCache* get_atlas_cache(uint atlas_id) = 0;
+
 		virtual const AtlasSegmentCache* get_texture(
 				const AtlasSegmentReference &ref) = 0;
+
+		virtual void update() = 0;
 	};
 
 	TextureAtlasRegistry* createTextureAtlasRegistry(magic::Context *context);

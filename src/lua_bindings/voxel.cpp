@@ -10,6 +10,7 @@
 #include <Scene.h>
 #include <StaticModel.h>
 #include <Model.h>
+#include <CustomGeometry.h>
 #pragma GCC diagnostic pop
 #define MODULE "lua_bindings"
 
@@ -61,6 +62,50 @@ static int l_set_simple_voxel_model(lua_State *L)
 	return 0;
 }
 
+// set_8bit_voxel_geometry(node, w, h, d, data: string)
+static int l_set_8bit_voxel_geometry(lua_State *L)
+{
+	int w = lua_tointeger(L, 2);
+	int h = lua_tointeger(L, 3);
+	int d = lua_tointeger(L, 4);
+	ss_ data = lua_tocppstring(L, 5);
+
+	if((int)data.size() != w * h * d){
+		log_e(MODULE, "set_8bit_voxel_geometry(): Data size does not match "
+				"with dimensions (%zu vs. %i)", data.size(), w*h*d);
+		return 0;
+	}
+
+	tolua_Error tolua_err;
+	//if(!tolua_isusertype(L, 1, "const Node", 0, &tolua_err)){
+	if(!tolua_isusertype(L, 1, "Node", 0, &tolua_err)){
+		tolua_error(L, "Error in set_8bit_voxel_geometry", &tolua_err);
+		return 0;
+	}
+	log_d(MODULE, "set_8bit_voxel_geometry(): Valid Node given");
+	//const Node *node = (const Node*)tolua_tousertype(L, 1, 0);
+	Node *node = (Node*)tolua_tousertype(L, 1, 0);
+	log_d(MODULE, "set_8bit_voxel_geometry(): node=%p", node);
+
+	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
+	lua_pop(L, 1);
+	Context *context = buildat_app->get_scene()->GetContext();
+	auto *voxel_reg = buildat_app->get_voxel_registry();
+
+	CustomGeometry *cg = node->CreateComponent<CustomGeometry>();
+
+	interface::set_8bit_voxel_geometry(cg, context, w, h, d, data, voxel_reg);
+
+	// Maybe appropriate
+	cg->SetOccluder(true);
+
+	// TODO: Don't do this here; allow the caller to do this
+	cg->SetCastShadows(true);
+
+	return 0;
+}
+
 void init_voxel(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
@@ -68,6 +113,7 @@ void init_voxel(lua_State *L)
 		lua_setglobal(L, "__buildat_" #name); \
 }
 	DEF_BUILDAT_FUNC(set_simple_voxel_model);
+	DEF_BUILDAT_FUNC(set_8bit_voxel_geometry);
 }
 
 }	// namespace lua_bindingss

@@ -7,6 +7,7 @@
 #include "lua_bindings/init.h"
 #include "lua_bindings/util.h"
 #include "interface/fs.h"
+#include "interface/voxel.h"
 #include <c55/getopt.h>
 #include <c55/os.h>
 #pragma GCC diagnostic push
@@ -75,8 +76,8 @@ public:
 		}
 		ss_ path = m_client->get_file_path(name.CString());
 		if(path == ""){
-			log_v(MODULE, "Resource route access: %s (assuming local file)",
-					name.CString());
+			log_v(MODULE, "Resource route access: %s (assuming local file; "
+					"NOTE: Security checks not implemented)", name.CString());
 			// TODO: Check that it is in a safe path
 			return;
 		}
@@ -98,6 +99,10 @@ struct CApp: public App, public magic::Application
 
 	magic::SharedPtr<magic::Scene> m_scene;
 	magic::SharedPtr<magic::Node> m_camera_node;
+
+	sp_<interface::TextureAtlasRegistry> m_atlas_reg;
+	sp_<interface::VoxelRegistry> m_voxel_reg;
+	//sp_<interface::BlockRegistry> m_block_reg;
 
 	CApp(magic::Context *context, const Options &options):
 		magic::Application(context),
@@ -131,6 +136,9 @@ struct CApp: public App, public magic::Application
 		}
 		magic_fs->RegisterPath(
 				fs->get_absolute_path(g_client_config.cache_path).c_str());
+
+		// Useful for saving stuff for inspection when debugging
+		magic_fs->RegisterPath("/tmp");
 
 		// Set Urho3D engine parameters
 		engineParameters_["WindowTitle"] = "Buildat Client";
@@ -173,6 +181,69 @@ struct CApp: public App, public magic::Application
 		magic_cache->SetAutoReloadResources(true);
 		m_router = new BuildatResourceRouter(context_);
 		magic_cache->SetResourceRouter(m_router);
+
+		// Create atlas and voxel registries
+		m_atlas_reg.reset(interface::createTextureAtlasRegistry(context));
+		m_voxel_reg.reset(interface::createVoxelRegistry(m_atlas_reg.get()));
+
+		// Add test voxels
+		// TOOD: Remove this from here
+		{
+			interface::VoxelDefinition vdef;
+			vdef.name.block_name = "air";
+			vdef.name.segment_x = 0;
+			vdef.name.segment_y = 0;
+			vdef.name.segment_z = 0;
+			vdef.name.rotation_primary = 0;
+			vdef.name.rotation_secondary = 0;
+			vdef.handler_module = "";
+			for(size_t i = 0; i < 6; i++){
+				interface::AtlasSegmentDefinition &seg = vdef.textures[i];
+				seg.resource_name = "";
+				seg.total_segments = magic::IntVector2(0, 0);
+				seg.select_segment = magic::IntVector2(0, 0);
+			}
+			vdef.edge_material_id = interface::EDGEMATERIALID_EMPTY;
+			m_voxel_reg->add_voxel(vdef);	// id 1
+		}
+		{
+			interface::VoxelDefinition vdef;
+			vdef.name.block_name = "ground";
+			vdef.name.segment_x = 0;
+			vdef.name.segment_y = 0;
+			vdef.name.segment_z = 0;
+			vdef.name.rotation_primary = 0;
+			vdef.name.rotation_secondary = 0;
+			vdef.handler_module = "";
+			for(size_t i = 0; i < 6; i++){
+				interface::AtlasSegmentDefinition &seg = vdef.textures[i];
+				seg.resource_name = "main/green_texture.png";
+				seg.total_segments = magic::IntVector2(1, 1);
+				seg.select_segment = magic::IntVector2(0, 0);
+			}
+			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
+			vdef.physically_solid = true;
+			m_voxel_reg->add_voxel(vdef);	// id 2
+		}
+		{
+			interface::VoxelDefinition vdef;
+			vdef.name.block_name = "testblock";
+			vdef.name.segment_x = 0;
+			vdef.name.segment_y = 0;
+			vdef.name.segment_z = 0;
+			vdef.name.rotation_primary = 0;
+			vdef.name.rotation_secondary = 0;
+			vdef.handler_module = "";
+			for(size_t i = 0; i < 6; i++){
+				interface::AtlasSegmentDefinition &seg = vdef.textures[i];
+				seg.resource_name = "main/pink_texture.png";
+				seg.total_segments = magic::IntVector2(1, 1);
+				seg.select_segment = magic::IntVector2(0, 0);
+			}
+			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
+			vdef.physically_solid = true;
+			m_voxel_reg->add_voxel(vdef);	// id 3
+		}
 	}
 
 	~CApp()
@@ -277,6 +348,11 @@ struct CApp: public App, public magic::Application
 	magic::Scene* get_scene()
 	{
 		return m_scene;
+	}
+
+	interface::VoxelRegistry* get_voxel_registry()
+	{
+		return m_voxel_reg.get();
 	}
 
 	// Non-public methods
@@ -387,6 +463,8 @@ struct CApp: public App, public magic::Application
 
 	void on_update(magic::StringHash event_type, magic::VariantMap &event_data)
 	{
+		m_atlas_reg->update();
+
 		if(g_sigint_received)
 			shutdown();
 		if(m_state)

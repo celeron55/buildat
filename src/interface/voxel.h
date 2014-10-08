@@ -10,8 +10,8 @@ namespace interface
 	namespace pv = PolyVox;
 
 	typedef uint32_t VoxelTypeId;
-	static constexpr uint32_t VOXELTYPEID_MAX = 1398101-1;
-	static constexpr uint32_t VOXELTYPEID_UNDEFINED = 0;
+	static constexpr VoxelTypeId VOXELTYPEID_MAX = 1398101-1;
+	static constexpr VoxelTypeId VOXELTYPEID_UNDEFINED = 0;
 
 	struct VoxelName
 	{
@@ -26,6 +26,17 @@ namespace interface
 		bool operator==(const VoxelName &other) const;
 	};
 
+	enum class FaceDrawType {
+		NEVER = 0,
+		ALWAYS = 1,
+		ON_EDGE = 2,
+	};
+
+	// A thing that allows distinguishing which voxel faces generate edges
+	typedef uint8_t EdgeMaterialId;
+	static constexpr EdgeMaterialId EDGEMATERIALID_EMPTY = 0;
+	static constexpr EdgeMaterialId EDGEMATERIALID_GROUND = 1;
+
 	struct VoxelDefinition
 	{
 		VoxelName name;
@@ -36,9 +47,11 @@ namespace interface
 		AtlasSegmentDefinition textures[6];
 		// Other properties
 		ss_ handler_module;
+		FaceDrawType face_draw_type = FaceDrawType::ON_EDGE;
+		EdgeMaterialId edge_material_id = EDGEMATERIALID_EMPTY;
+		bool physically_solid = false;
 		// TODO: Flag for whether all faces should be always drawn (in case the
 		//       textures contain holes)
-		// TODO: Flag for whether this voxel is physically solid
 		// TODO: Some kind of property for defining whether this is a thing for
 		//       which adjacent voxels of the same thing type don't have faces,
 		//       and what thing type that is in this case
@@ -50,13 +63,17 @@ namespace interface
 	struct CachedVoxelDefinition
 	{
 		bool valid = false;
-		const AtlasSegmentCache *textures[6] = {NULL};
+		AtlasSegmentReference textures[6];
 		ss_ handler_module;
+		FaceDrawType face_draw_type = FaceDrawType::ON_EDGE;
+		EdgeMaterialId edge_material_id = EDGEMATERIALID_EMPTY;
+		bool physically_solid = false;
 	};
 
 	struct VoxelRegistry
 	{
 		virtual ~VoxelRegistry(){}
+		virtual TextureAtlasRegistry* get_atlas() = 0;
 
 		virtual VoxelTypeId add_voxel(const VoxelDefinition &def) = 0;
 

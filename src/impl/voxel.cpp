@@ -56,13 +56,22 @@ struct CVoxelRegistry: public VoxelRegistry
 		m_defs.resize(1);	// Id 0 is VOXELTYPEID_UNDEFINEDD
 	}
 
+	TextureAtlasRegistry* get_atlas()
+	{
+		return m_atlas_reg;
+	}
+
 	VoxelTypeId add_voxel(const VoxelDefinition &def)
 	{
 		VoxelTypeId id = m_defs.size();
+		// NOTE: This invalidates all previous pointers to cache entries that
+		//       were given out
 		m_defs.resize(id + 1);
 		m_defs[id] = def;
 		m_defs[id].id = id;
 		m_name_to_id[def.name] = id;
+		log_v(MODULE, "CVoxelRegistyr::add_voxel(): Added id=%i name=%s",
+				id, cs(def.name.dump()));
 		return id;
 	}
 
@@ -95,6 +104,9 @@ struct CVoxelRegistry: public VoxelRegistry
 			log_w(MODULE, "CVoxelRegistry::get_cached(): id=%i not found", id);
 			return NULL;
 		}
+		if(m_cached_defs.size() < m_defs.size()){
+			m_cached_defs.resize(m_defs.size());
+		}
 		const VoxelDefinition &def = m_defs[id];
 		CachedVoxelDefinition &cache = m_cached_defs[id];
 		update_cache(cache, def);
@@ -104,15 +116,22 @@ struct CVoxelRegistry: public VoxelRegistry
 
 	void update_cache(CachedVoxelDefinition &cache, const VoxelDefinition &def)
 	{
-		cache.handler_module = def.handler_module;
+		log_d(MODULE, "CVoxelRegistry::update_cache(): id=%i", def.id);
 		for(size_t i = 0; i<6; i++){
 			const AtlasSegmentDefinition &seg_def = def.textures[i];
-			AtlasSegmentReference seg_ref =
-					m_atlas_reg->find_or_add_segment(seg_def);
-			const AtlasSegmentCache *seg_cache =
-					m_atlas_reg->get_texture(seg_ref);
-			cache.textures[i] = seg_cache;
+			if(seg_def.resource_name == ""){
+				AtlasSegmentReference seg_ref;	// Use default values
+				cache.textures[i] = seg_ref;
+			} else {
+				AtlasSegmentReference seg_ref =
+						m_atlas_reg->find_or_add_segment(seg_def);
+				cache.textures[i] = seg_ref;
+			}
 		}
+		cache.handler_module = def.handler_module;
+		cache.face_draw_type = def.face_draw_type;
+		cache.edge_material_id = def.edge_material_id;
+		cache.physically_solid = def.physically_solid;
 		// Caller sets cache.valid = true
 	}
 

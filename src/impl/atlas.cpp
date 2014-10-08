@@ -1,11 +1,13 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/atlas.h"
+#include "core/log.h"
 #include <Context.h>
 #include <ResourceCache.h>
 #include <Texture2D.h>
 #include <Graphics.h>
 #include <Image.h>
+#define MODULE "atlas"
 
 namespace interface {
 
@@ -26,7 +28,9 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 
 	CTextureAtlasRegistry(magic::Context *context):
 		m_context(context)
-	{}
+	{
+		m_defs.resize(1);	// id=0 is ATLAS_UNDEFINED
+	}
 
 	const AtlasSegmentReference add_segment(
 			const AtlasSegmentDefinition &segment_def)
@@ -37,15 +41,19 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 		magic::Image *seg_img = magic_cache->GetResource<magic::Image>(
 				segment_def.resource_name.c_str());
 		if(seg_img == nullptr)
-			throw Exception("Couldn't find image: "+segment_def.resource_name);
+			throw Exception("CTextureAtlasRegistry::add_segment(): Couldn't "
+						  "find image \""+segment_def.resource_name+"\" when adding "
+						  "segment");
 		// Get resolution of texture
 		magic::IntVector2 seg_img_size(seg_img->GetWidth(), seg_img->GetHeight());
 		// Try to find a texture atlas for this texture size
 		TextureAtlasDefinition *atlas_def = nullptr;
 		for(TextureAtlasDefinition &def0 : m_defs){
+			if(def0.id == ATLAS_UNDEFINED)
+				continue;
 			if(def0.segment_resolution == seg_img_size){
 				size_t max = def0.total_segments.x_ * def0.total_segments.y_;
-				if(atlas_def->segments.size() >= max)
+				if(def0.segments.size() >= max)
 					continue;	// Full
 				atlas_def = &def0;
 				break;
@@ -58,19 +66,20 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 			atlas_def = &m_defs[m_defs.size()-1];
 			atlas_def->id = m_defs.size()-1;
 			// Calculate segment resolution
-			atlas_def->segment_resolution = magic::IntVector2(
+			magic::IntVector2 seg_res(
 					seg_img_size.x_ / segment_def.total_segments.x_,
 					seg_img_size.y_ / segment_def.total_segments.y_
 			);
+			atlas_def->segment_resolution = seg_res;
 			// Calculate total segments based on segment resolution
 			const int max_res = 2048;
 			atlas_def->total_segments = magic::IntVector2(
-					max_res / atlas_def->segment_resolution.x_,
-					max_res / atlas_def->segment_resolution.y_
+					max_res / seg_res.x_ / 2,
+					max_res / seg_res.y_ / 2
 			);
 			magic::IntVector2 atlas_resolution(
-					atlas_def->total_segments.x_ * atlas_def->segment_resolution.x_,
-					atlas_def->total_segments.y_ * atlas_def->segment_resolution.y_
+					atlas_def->total_segments.x_ * seg_res.x_ * 2,
+					atlas_def->total_segments.y_ * seg_res.y_ * 2
 			);
 			// Create image for new atlas
 			magic::Image *atlas_img = new magic::Image(m_context);
@@ -126,6 +135,8 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 
 	const TextureAtlasDefinition* get_atlas_definition(uint atlas_id)
 	{
+		if(atlas_id == ATLAS_UNDEFINED)
+			return nullptr;
 		if(atlas_id >= m_defs.size())
 			return nullptr;
 		return &m_defs[atlas_id];
@@ -153,19 +164,24 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 		// Set segment texture
 		cache.texture = atlas.texture;
 		// Calculate segment's position in atlas texture
-		uint seg_iy = seg_id / atlas.total_segments.x_;
+		magic::IntVector2 total_segs = atlas.total_segments;
+		uint seg_iy = seg_id / total_segs.x_;
 		uint seg_ix = seg_id - seg_iy;
 		magic::IntVector2 seg_size = atlas.segment_resolution;
-		magic::IntVector2 dst_p0(seg_ix * seg_size.x_, seg_iy * seg_size.y_);
+		magic::IntVector2 dst_p00(
+				seg_ix * seg_size.x_ * 2,
+				seg_iy * seg_size.y_ * 2
+		);
+		magic::IntVector2 dst_p0 = dst_p00 + seg_size / 2;
 		magic::IntVector2 dst_p1 = dst_p0 + seg_size;
 		// Set coordinates in cache
 		cache.coord0 = magic::Vector2(
-				(float)dst_p0.x_ / (float)(atlas.total_segments.x_ * seg_size.x_),
-				(float)dst_p0.y_ / (float)(atlas.total_segments.y_ * seg_size.y_)
+				(float)dst_p0.x_ / (float)(total_segs.x_ * seg_size.x_ * 2),
+				(float)dst_p0.y_ / (float)(total_segs.y_ * seg_size.y_ * 2)
 		);
-		cache.coord0 = magic::Vector2(
-				(float)dst_p1.x_ / (float)(atlas.total_segments.x_ * seg_size.x_),
-				(float)dst_p1.y_ / (float)(atlas.total_segments.y_ * seg_size.y_)
+		cache.coord1 = magic::Vector2(
+				(float)dst_p1.x_ / (float)(total_segs.x_ * seg_size.x_ * 2),
+				(float)dst_p1.y_ / (float)(total_segs.y_ * seg_size.y_ * 2)
 		);
 		// Draw segment into atlas image
 		magic::IntVector2 seg_img_size(seg_img->GetWidth(), seg_img->GetHeight());
@@ -173,32 +189,65 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 				seg_img_size.x_ / def.total_segments.x_ * def.select_segment.x_,
 				seg_img_size.y_ / def.total_segments.y_ * def.select_segment.y_
 		);
-		for(int y = 0; y<seg_size.y_; y++){
-			for(int x = 0; x<seg_size.x_; x++){
-				magic::IntVector2 src_p = src_off + magic::IntVector2(x, y);
-				magic::IntVector2 dst_p = dst_p0 + magic::IntVector2(x, y);
+		// Draw main texture
+		for(int y = 0; y<seg_size.y_ * 2; y++){
+			for(int x = 0; x<seg_size.x_ * 2; x++){
+				magic::IntVector2 src_p = src_off + magic::IntVector2(
+						(x + seg_size.x_ / 2) % seg_size.x_,
+						(y + seg_size.y_ / 2) % seg_size.y_
+				);
+				magic::IntVector2 dst_p = dst_p00 + magic::IntVector2(x, y);
 				magic::Color c = seg_img->GetPixel(src_p.x_, src_p.y_);
 				atlas.image->SetPixel(dst_p.x_, dst_p.y_, c);
 			}
 		}
 		// Update atlas texture from atlas image
-		// TODO: Does this require something more?
 		atlas.texture->SetData(atlas.image);
+
+		// Debug: save atlas image to file
+		/*ss_ atlas_img_name = "/tmp/atlas_"+itos(seg_size.x_)+"x"+
+				itos(seg_size.y_)+".png";
+		magic::File f(m_context, atlas_img_name.c_str(), magic::FILE_WRITE);
+		atlas.image->Save(f);*/
+	}
+
+	const TextureAtlasCache* get_atlas_cache(uint atlas_id)
+	{
+		if(atlas_id == ATLAS_UNDEFINED)
+			return nullptr;
+		if(atlas_id >= m_cache.size()){
+			// Cache is always up-to-date
+			return nullptr;
+		}
+		return &m_cache[atlas_id];
 	}
 
 	const AtlasSegmentCache* get_texture(const AtlasSegmentReference &ref)
 	{
-		if(ref.atlas_id >= m_cache.size()){
+		const TextureAtlasCache *cache = get_atlas_cache(ref.atlas_id);
+		if(cache == nullptr)
+			return nullptr;
+		if(ref.segment_id >= cache->segments.size()){
 			// Cache is always up-to-date
 			return nullptr;
 		}
-		TextureAtlasCache &cache = m_cache[ref.atlas_id];
-		if(ref.segment_id >= cache.segments.size()){
-			// Cache is always up-to-date
-			return nullptr;
-		}
-		AtlasSegmentCache &seg_cache = cache.segments[ref.segment_id];
+		const AtlasSegmentCache &seg_cache = cache->segments[ref.segment_id];
 		return &seg_cache;
+	}
+
+	void update()
+	{
+		// Re-create textures if a device reset has destroyed them
+		for(uint atlas_id = ATLAS_UNDEFINED + 1;
+				atlas_id < m_cache.size(); atlas_id++){
+			TextureAtlasCache &cache = m_cache[atlas_id];
+			if(cache.texture->IsDataLost()){
+				log_v(MODULE, "Atlas %i texture data lost - re-creating",
+						atlas_id);
+				cache.texture->SetData(cache.image);
+				cache.texture->ClearDataLost();
+			}
+		}
 	}
 };
 
