@@ -16,7 +16,7 @@ namespace interface
 	struct BlockDefinition
 	{
 		BlockName name;
-		BlockTypeId id;
+		BlockTypeId id = BLOCKTYPEID_UNDEFINED;
 		uint8_t num_rotations = 0;	// Supported: 0, 4, 24
 		pv::Vector3DUint8 size = pv::Vector3DUint8(0, 0, 0);// Size in voxels
 		sv_<VoxelTypeId> segments;	// Rotations*voxels
@@ -28,15 +28,19 @@ namespace interface
 		BlockName name;
 		uint8_t num_rotations = 0;	// Supported: 0, 4, 24
 		pv::Vector3DUint8 size = pv::Vector3DUint8(0, 0, 0);// Size in voxels
+		// Definitions for creating voxels
 		sv_<ss_> side_textures;	// 6 resource names
+		ss_ handler_module;
 	};
 
 	struct BlockRegistry
 	{
 		virtual ~BlockRegistry(){}
 
+		// Add block for which voxels already exists
 		virtual BlockTypeId add_block_with_predefined_segments(
 				const BlockDefinition &def) = 0;
+		// Add block and generate voxels for it
 		virtual BlockTypeId add_block_generate_segments(
 				const BlockSourceDefinition &def) = 0;
 
