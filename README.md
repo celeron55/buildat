@@ -31,9 +31,10 @@ Install dependencies
 Get and build Urho3D
 ----------------------
 
-NOTE: You have to use celeron55's fork of Urho3D due to special features needed
-	  by Buildat. Don't worry, Urho3D isn't a distro-packageable library due to
-	  its various configuration options.
+NOTE: Occasionally you have to use celeron55's fork of Urho3D due to special
+	  features needed by Buildat that are missing in upstream Urho3D. Don't
+	  worry, Urho3D isn't a distro-packageable library due to its various
+	  configuration options.
 
     $ git clone https://github.com/celeron55/Urho3D.git
     $ cd Urho3D
