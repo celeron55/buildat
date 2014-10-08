@@ -9,6 +9,15 @@
 
 namespace interface {
 
+bool AtlasSegmentDefinition::operator==(const AtlasSegmentDefinition &other) const
+{
+	return (
+			resource_name == other.resource_name &&
+			total_segments == other.total_segments &&
+			select_segment == other.select_segment
+	);
+}
+
 struct CTextureAtlasRegistry: public TextureAtlasRegistry
 {
 	magic::Context *m_context;
@@ -94,6 +103,25 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 		ref.atlas_id = atlas_def->id;
 		ref.segment_id = seg_id;
 		return ref;
+	}
+
+	const AtlasSegmentReference find_or_add_segment(
+			const AtlasSegmentDefinition &segment_def)
+	{
+		// Find an atlas that contains this segment; return reference if found
+		for(auto &atlas_def : m_defs){
+			for(uint seg_id = 0; seg_id<atlas_def.segments.size(); seg_id++){
+				auto &segment_def0 = atlas_def.segments[seg_id];
+				if(segment_def0 == segment_def){
+					AtlasSegmentReference ref;
+					ref.atlas_id = atlas_def.id;
+					ref.segment_id = seg_id;
+					return ref;
+				}
+			}
+		}
+		// Segment was not found; add a new one
+		return add_segment(segment_def);
 	}
 
 	const TextureAtlasDefinition* get_atlas_definition(uint atlas_id)

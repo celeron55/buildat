@@ -21,6 +21,9 @@ namespace interface
 		uint segment_z = 0;
 		uint rotation_primary = 0;	// 4 possible rotations when looking at a face
 		uint rotation_secondary = 0;// 6 possible directions for a face to point to
+
+		ss_ dump() const;
+		bool operator==(const VoxelName &other) const;
 	};
 
 	struct VoxelDefinition
@@ -46,6 +49,7 @@ namespace interface
 	// (the absolute maximum number of these is VOXELTYPEID_MAX+1)
 	struct CachedVoxelDefinition
 	{
+		bool valid = false;
 		const AtlasSegmentCache *textures[6] = {NULL};
 		ss_ handler_module;
 	};
