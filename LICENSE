@@ -1,4 +1,23 @@
+License information
+======================
 
+Contents
+---------
+1. Buildat's licensing principles
+2. License of Buildat, except where otherwise noted
+3. Files distributed under other licenses
+
+1. Buildat's licensing principles
+-----------------------------------------------------------------------------
+All code written for Buildat by the buildat developers is released by each
+contributor under the Apache 2.0 License.
+
+Code taken from elsewhere may use various permissive licenses.
+(http://en.wikipedia.org/wiki/Permissive_free_software_licence)
+
+
+2. License of Buildat, except where otherwise noted
+-----------------------------------------------------------------------------
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -200,3 +219,18 @@
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+
+3. Files distributed under other licenses
+-----------------------------------------------------------------------------
+Simplified BSD License:
+- src/interface/noise.h
+- src/impl/noise.cpp
+
+BSD License:
+- 3rdparty/cereal
+- 3rdparty/smallsha1
+
+Zlib License:
+- 3rdparty/polyvox
+
