@@ -2,6 +2,19 @@
 set -euv
 script_dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
+error() {
+	local parent_lineno="$1"
+	local message="$2"
+	local code="${3:-1}"
+	if [[ -n "$message" ]] ; then
+		echo "Error on or near line ${parent_lineno}: ${message}; exiting with status ${code}"
+		else
+		echo "Error on or near line ${parent_lineno}; exiting with status ${code}"
+	fi
+	exit "${code}"
+}
+trap 'error ${LINENO} "" ""' ERR
+
 header_files="$script_dir"/../src/*/*.h
 cpp_files="$script_dir"/../src/*/*.cpp
 
@@ -19,6 +32,21 @@ lua_files+=" "$(find "$script_dir"/../client -name '*.lua')
 lua_files+=" "$(find "$script_dir"/../games -name '*.lua')
 
 cmake_files="$script_dir"/../CMakeLists.txt
+
+# Allow files to disable this script by the special directive
+# 'codestyle:disable'
+function filter_files() {
+	local files=$@
+	for f in $files; do
+		if ! grep -lq 'codestyle:disable' "$f"; then
+			echo "$f"
+		fi
+	done
+}
+header_files=$(filter_files $header_files)
+cpp_files=$(filter_files $cpp_files)
+lua_files=$(filter_files $lua_files)
+cmake_files=$(filter_files $cmake_files)
 
 echo "header_files: $header_files"
 echo "cpp_files: $cpp_files"

@@ -178,3 +178,5 @@ namespace interface
 				(float)z / np->spread.Z, s + np->seed, np->octaves, np->persist));
 	}
 }
+// codestyle:disable
+// vim: set noet ts=4 sw=4:
