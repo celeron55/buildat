@@ -11,16 +11,16 @@
 #include <Scene.h>
 #include <Node.h>
 #include <StaticModel.h>
-#include <Model.h> // Resource parameter of StaticModel
+#include <Model.h>	// Resource parameter of StaticModel
 #include <Geometry.h>
 #include <IndexBuffer.h>
 #include <VertexBuffer.h>
-#include <CustomGeometry.h> // A Drawable similarly as StaticModel
+#include <CustomGeometry.h>	// A Drawable similarly as StaticModel
 #include <Material.h>
 #include <Technique.h>
 #include <Context.h>
 #include <ResourceCache.h>
-#include <Texture2D.h> // Allows cast to Texture
+#include <Texture2D.h>	// Allows cast to Texture
 #pragma GCC diagnostic pop
 #define MODULE "mesh"
 
@@ -118,7 +118,7 @@ public:
 	IsQuadNeededByRegistryPhysics(interface::VoxelRegistry *voxel_reg):
 		m_voxel_reg(voxel_reg)
 	{}
-	IsQuadNeededByRegistryPhysics():	// PolyVox wants this
+	IsQuadNeededByRegistryPhysics():// PolyVox wants this
 		m_voxel_reg(nullptr)
 	{}
 	bool operator()(VoxelType back, VoxelType front, uint32_t &materialToUse)
@@ -132,7 +132,7 @@ public:
 		if(!back_def || !back_def->physically_solid)
 			return false;
 		if(!front_def || !front_def->physically_solid){
-			materialToUse = 1; // Doesn't matter
+			materialToUse = 1;	// Doesn't matter
 			return true;
 		}
 		return false;
@@ -191,7 +191,7 @@ Model* create_8bit_voxel_physics_model(Context *context,
 	index_data.resize(num_indices);
 	for(size_t i = 0; i < num_indices; i++){
 		/*if(pv_indices[i] >= 0x10000)
-			throw Exception("Index too large");*/
+		    throw Exception("Index too large");*/
 		index_data[i] = pv_indices[i];
 	}
 
@@ -277,8 +277,8 @@ public:
 struct TemporaryGeometry
 {
 	uint atlas_id = 0;
-	sv_<float> vertex_data; // vertex(3) + normal(3) + texcoord(2)
-	sv_<unsigned> index_data; // Urho3D eats unsigned as large indices
+	sv_<float> vertex_data;	// vertex(3) + normal(3) + texcoord(2)
+	sv_<unsigned> index_data;	// Urho3D eats unsigned as large indices
 };
 #else
 struct TemporaryGeometry
@@ -332,7 +332,7 @@ void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 				voxel_reg->get_cached(voxel_id0);
 		if(voxel_def0 == nullptr)
 			throw Exception("Unknown voxel in generated geometry: "+
-					itos(voxel_id0));
+						  itos(voxel_id0));
 		// Figure out which face this is
 		uint face_id = 0;
 		const pv::Vector3DFloat &n = pv_vertices[pv_vertex_i0].normal;
@@ -359,7 +359,7 @@ void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 				voxel_reg->get_atlas()->get_texture(seg_ref);
 		if(aseg == nullptr)
 			throw Exception("No atlas segment cache for voxel "+itos(voxel_id0)+
-					" face "+itos(face_id));
+						  " face "+itos(face_id));
 #if 0
 // TODO: Create a custom Drawable that can use an index buffer
 		// Get or create the appropriate temporary geometry for this atlas
@@ -422,7 +422,7 @@ void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 			size_t pv_vertex_i = pv_indices[pv_index_i];
 			if(pv_index_i1 == 0 && pv_vertex_i0 != pv_vertex_i)
 				throw Exception("First index of face does not point to first "
-						"vertex of face");
+							  "vertex of face");
 			const auto &pv_vert = pv_vertices[pv_vertex_i];
 			tg.vertex_data.Resize(tg.vertex_data.Size() + 1);
 			CustomGeometryVertex &tg_vert = tg.vertex_data.Back();
@@ -447,12 +447,12 @@ void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 				tg_vert.texCoord_.x_ = aseg->coord1.x_;
 				tg_vert.texCoord_.y_ = aseg->coord0.y_;
 			}
-		}	
+		}
 #endif
 	}
 
 	// Generate CustomGeometry from TemporaryGeometry
-	
+
 	ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 
 	cg->SetNumGeometries(temp_geoms.size());

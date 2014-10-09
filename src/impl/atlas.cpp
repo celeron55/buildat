@@ -206,7 +206,7 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 
 		// Debug: save atlas image to file
 		/*ss_ atlas_img_name = "/tmp/atlas_"+itos(seg_size.x_)+"x"+
-				itos(seg_size.y_)+".png";
+		        itos(seg_size.y_)+".png";
 		magic::File f(m_context, atlas_img_name.c_str(), magic::FILE_WRITE);
 		atlas.image->Save(f);*/
 	}
