@@ -35,7 +35,7 @@ namespace interface
 		float Y = 0;
 		float Z = 0;
 		v3f(float X = 0, float Y = 0, float Z = 0):
-			X(X), Y(Y), Z(Z) {}
+			X(X), Y(Y), Z(Z){}
 	};
 
 	class PseudoRandom
@@ -51,7 +51,7 @@ namespace interface
 		// Returns 0...32767
 		int next(){
 			m_next = m_next * 1103515245 + 12345;
-			return((unsigned)(m_next/65536) % 32768);
+			return ((unsigned)(m_next/65536) % 32768);
 		}
 		int range(int min, int max);
 
@@ -67,15 +67,15 @@ namespace interface
 		int octaves;
 		float persist;
 
-		NoiseParams() {}
+		NoiseParams(){}
 
 		NoiseParams(float offset_, float scale_, v3f spread_,
-			int seed_, int octaves_, float persist_)
+				int seed_, int octaves_, float persist_)
 		{
-			offset  = offset_;
-			scale   = scale_;
-			spread  = spread_;
-			seed    = seed_;
+			offset = offset_;
+			scale = scale_;
+			spread = spread_;
+			seed = seed_;
 			octaves = octaves_;
 			persist = persist_;
 		}
@@ -104,16 +104,16 @@ namespace interface
 		void resizeNoiseBuf(bool is3d);
 
 		void gradientMap2D(
-			float x, float y,
-			float step_x, float step_y,
-			int seed);
+				float x, float y,
+				float step_x, float step_y,
+				int seed);
 		void gradientMap3D(
-			float x, float y, float z,
-			float step_x, float step_y, float step_z,
-			int seed);
-		float *perlinMap2D(float x, float y);
-		float *perlinMap2DModulated(float x, float y, float *persist_map);
-		float *perlinMap3D(float x, float y, float z);
+				float x, float y, float z,
+				float step_x, float step_y, float step_z,
+				int seed);
+		float* perlinMap2D(float x, float y);
+		float* perlinMap2DModulated(float x, float y, float *persist_map);
+		float* perlinMap3D(float x, float y, float z);
 		void transformNoiseMap();
 	};
 
@@ -136,47 +136,51 @@ namespace interface
 	float noise3d_perlin_abs(float x, float y, float z, int seed,
 			int octaves, float persistence);
 
-	inline float easeCurve(float t) {
+	inline float easeCurve(float t){
 		return t * t * t * (t * (6.f * t - 15.f) + 10.f);
 	}
 
 	inline float NoisePerlin2D(const NoiseParams *np, float x, float y, float s)
 	{
 		return (np->offset + np->scale * noise2d_perlin(
-				(float)x / np->spread.X,
-				(float)y / np->spread.Y,
-				s + np->seed, np->octaves, np->persist));
+					   (float)x / np->spread.X,
+					   (float)y / np->spread.Y,
+					   s + np->seed, np->octaves, np->persist));
 	}
 
-	inline float NoisePerlin2DNoTxfm(const NoiseParams *np, float x, float y, float s)
+	inline float NoisePerlin2DNoTxfm(
+			const NoiseParams *np, float x, float y, float s)
 	{
 		return (noise2d_perlin(
-				(float)x / np->spread.X,
-				(float)y / np->spread.Y,
-				s + np->seed, np->octaves, np->persist));
+					   (float)x / np->spread.X,
+					   (float)y / np->spread.Y,
+					   s + np->seed, np->octaves, np->persist));
 	}
 
-	inline float NoisePerlin2DPosOffset(const NoiseParams *np, float x, float xoff, float y, float yoff, float s)
+	inline float NoisePerlin2DPosOffset(const NoiseParams *np, float x, float xoff,
+			float y, float yoff, float s)
 	{
 		return (np->offset + np->scale * noise2d_perlin(
-				(float)xoff + (float)x / np->spread.X,
-				(float)yoff + (float)y / np->spread.Y,
-				s + np->seed, np->octaves, np->persist));
+					   (float)xoff + (float)x / np->spread.X,
+					   (float)yoff + (float)y / np->spread.Y,
+					   s + np->seed, np->octaves, np->persist));
 	}
 
-	inline float NoisePerlin2DNoTxfmPosOffset(const NoiseParams *np, float x, float xoff, float y, float yoff, float s)
+	inline float NoisePerlin2DNoTxfmPosOffset(const NoiseParams *np, float x,
+			float xoff, float y, float yoff, float s)
 	{
 		return (noise2d_perlin(
-				(float)xoff + (float)x / np->spread.X,
-				(float)yoff + (float)y / np->spread.Y,
-				s + np->seed, np->octaves, np->persist));
+					   (float)xoff + (float)x / np->spread.X,
+					   (float)yoff + (float)y / np->spread.Y,
+					   s + np->seed, np->octaves, np->persist));
 	}
 
-	inline float NoisePerlin3D(const NoiseParams *np, float x, float y, float z, float s)
+	inline float NoisePerlin3D(
+			const NoiseParams *np, float x, float y, float z, float s)
 	{
-		return (np->offset + np->scale * noise3d_perlin((float)x / np->spread.X, (float)y / np->spread.Y,
-				(float)z / np->spread.Z, s + np->seed, np->octaves, np->persist));
+		return (np->offset + np->scale *
+				   noise3d_perlin((float)x / np->spread.X, (float)y / np->spread.Y,
+				   (float)z / np->spread.Z, s + np->seed, np->octaves, np->persist));
 	}
 }
-// codestyle:disable
 // vim: set noet ts=4 sw=4:
