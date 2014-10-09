@@ -33,3 +33,4 @@ Buildat TODO
 - Show all exceptions and errors on client using ui_utils.show_message_dialog
 - Pass the replicated scene properly to Lua
 - Allow creating and destroying arbitrary amounts of replicated scenes
+- Switch to using #define MODULE in modules, and rename Module::MODULE

@@ -76,9 +76,8 @@ public:
 		}
 		ss_ path = m_client->get_file_path(name.CString());
 		if(path == ""){
-			log_v(MODULE, "Resource route access: %s (assuming local file; "
-					"NOTE: Security checks not implemented)", name.CString());
-			// TODO: Check that it is in a safe path
+			log_v(MODULE, "Resource route access: %s (assuming local file)");
+			// NOTE: Path safety is checked by magic::FileSystem
 			return;
 		}
 		log_v(MODULE, "Resource route access: %s -> %s",

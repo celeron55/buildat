@@ -151,8 +151,6 @@ A way to define voxel properties:
 	- interface::VoxelDefinition
 	- interface::VoxelRegistry
 	- interface::VoxelInstance
-- The voxel world is handled by builtin/voxelworld on the server, and is built
-  in to the client. VoxelRegistry is part of builtin/voxelworld on the server.
 - How are voxel texture definitions stored?
 	- They are references to one of many texture atlases (many are needed in
 	  case of high-resolution textures)
@@ -177,10 +175,94 @@ A way to define block properties:
   as their non-rotated counterparts as some suitable block segment
 	- This can be done by resolving IDs from namespaced names:
 	  "dirt;s=0,1,1;r=2;R=5"
-	- Or just have a VoxelName type which consists of these partitions
-	  (block_name, segment.{x,y,z}, rotation_primary, rotation_secondary)
-	- block_name: Name of the block this was instanced from
-	- segment.{x,y,z}: Which segment of the block this was instanced from
-	- rotation_primary: 4 possible rotations when looking at a face
-	- rotation_secondary: 6 possible directions for a face to point to
+	- Or just have a VoxelName type which consists of these partitions:
+		- block_name: Name of the block this was instanced from
+		- segment.{x,y,z}: Which segment of the block this was instanced from
+		- rotation_primary: 4 possible rotations when looking at a face
+		- rotation_secondary: 6 possible directions for a face to point to
+
+The voxel world:
+- builtin/voxelworld handles most things on the server and the client
+- The client contains built-in helpers for resource-intensive tasks
+- VoxelRegistry: owned by builtin/voxelworld
+	- Yes, on the client too
+	- The main world registry is called "main"
+	- An identically named block registry also always exists
+	- For now, voxel registries are synced only when a new client connects
+	- If these registries are synchronized in the background, it probably is not
+	  feasible to allow making anonymous ones
+- Voxel data is always just a string in a user variable in each node
+	- Nodes also contain:
+		- the used voxel registry name
+		- the used data format
+		- data modification version
+	- The data can be raw or compresed, and it can be cached by node id and data
+	  modification version
+- The client is allowed to see all voxel data for each node that gets synced
+  over network. Hidden data is in local components on the server.
+- Stationary and non-stationary voxel nodes are stored like any node in the
+  world
+	- How can the world be sanely loaded when it only consists of arbitrarily
+	  positioned nodes?
+		- Maybe all nodes, including the chunk nodes, could be grouped in
+		  sections when saved on disk
+- Terminology:
+	- "static node": Stationary voxel-aligned node used for main world content
+	- "dynamic node": Freely positioned node (containing voxels)
+	- "static voxel": Voxel stored in a static node
+	- "dynamic voxel": Voxel stored in a dynamic node
+- Save format tables:
+	- section_size(w, h, d) <- only one row
+	- section(sx, sy, sz, save_enabled, generated)
+	- node(sx, sy, sz, data) <- (sx, sy, sz) are section coordinates
+- How to handle references from nodes to other nodes?
+	- Using each node id only once in a world's lifetime is not feasible: If
+	  60 nodes are created per second, the networked namespace lasts only
+	  for 2**24/60/3600/24 = 3.2 days (FIRST_LOCAL_ID = 0x01000000)
+	- The save format uses a 64-bit node id namespace, which is converted to and
+	  from the in-memory 24-bit id namespace.
+		- The only way to implement this is to integrate this into Urho3D's
+		  Node's Get/SetNetParentAttr() because it contains the node hierarchy
+		  serialization code.
+			- Basically add Node::Get/SetPersistentID() and Node::persistent_id_
+			- Also the external parts (reference implementation in Connection)
+			  need to be altered
+			- 64-bit ids will be used over the network too to simplify things
+	- What happens when loading a node, but not a node that it refers to?
+		- Nodes can be added to the scene without adding any components or
+		  setting any attributes
+		- A disk-to-memory id mapping can be maintained in memory so that nodes
+		  loaded at different times can be connected
+			- In practice, these are stored in Urho3D's Nodes as
+			  Node::persistent_id_
+- Section storage:
+	- By default, generated sections are save-disabled. If a game determines
+	  (eg. from player actions) that a section should be saved, it explicitly
+	  tells it to builtin/voxelworld, which then marks the section as
+	  save-enabled. This flag has multiple states: it is temporarily enabled if
+	  the section contains a node that has a save-enabled flag set. In this case
+	  the whole section is save-enabled during the time that the node is located
+	  inside the section.
+	- Overshooting trees and other pseudo objects have to be saved as extra
+	  static nodes if they cross the edges of the section
+	- Save-enabled sections in the memory are saved. Others are discraded.
+	- When saving a section:
+		- The section properties are saved
+		- All nodes in the section are saved
+	- When loading a section:
+		- The section properties are loaded
+		- All nodes in the section are loaded
+	- When generating a section:
+		- The "voxelworld:generation_request" event is emitted
+- Methods:
+	- set_voxel(p, v)
+		- Set a static voxel
+- World generation does not use any special interface because the same things
+  should be possible without being triggered by builtin/voxelworld
+	- Just send an event; "voxelworld:generation_request"
+	- A generation accelerator module can exist to speed up generation by using
+	  a single buffer (PolyVox::RawVolume<uint32_t>) and allowing direct
+	  registration of generation callbacks. It could also automate the creation
+	  of extra static nodes when needed by padding the buffer enough for common
+	  things.
 
