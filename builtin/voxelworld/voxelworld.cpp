@@ -105,9 +105,15 @@ struct Module: public interface::Module, public voxelworld::Interface
 	sp_<interface::BlockRegistry> m_block_reg;
 
 	// One node holds one chunk of voxels (eg. 32x32x32)
-	pv::Vector3DInt16 m_chunk_size_voxels = pv::Vector3DInt16(32, 32, 32);
+	pv::Vector3DInt16 m_chunk_size_voxels = pv::Vector3DInt16(16, 16, 16);
 	// The world is loaded and unloaded by sections (eg. 4x4x4)
-	pv::Vector3DInt16 m_section_size_chunks = pv::Vector3DInt16(4, 4, 4);
+	pv::Vector3DInt16 m_section_size_chunks = pv::Vector3DInt16(2, 2, 2);
+
+	// TODO: Use these when replication filtering works properly
+	// One node holds one chunk of voxels (eg. 32x32x32)
+	//pv::Vector3DInt16 m_chunk_size_voxels = pv::Vector3DInt16(32, 32, 32);
+	// The world is loaded and unloaded by sections (eg. 4x4x4)
+	//pv::Vector3DInt16 m_section_size_chunks = pv::Vector3DInt16(4, 4, 4);
 
 	// Sections (this(y,z)=sector, sector(x)=section)
 	sm_<pv::Vector<2, int16_t>, sm_<int16_t, Section>> m_sections;
@@ -412,7 +418,12 @@ struct Module: public interface::Module, public voxelworld::Interface
 		size_t data_len = w * h * d;
 		ss_ data(data_len, '\0');
 
-		data[data_len/2] = '\x02';
+		if(section_p.getX() == 0 && section_p.getY() == 0)
+			data[data_len/2] = '\x03';
+		else if(section_p.getY() != 0)
+			data[data_len/2] = '\x02';
+		else
+			data[data_len/2] = '\x01';
 
 		// Crude way of dynamically defining a voxel model
 		n->SetVar(StringHash("buildat_voxel_data"), Variant(
@@ -439,9 +450,9 @@ struct Module: public interface::Module, public voxelworld::Interface
 		{
 			auto lc = section.contained_chunks.getLowerCorner();
 			auto uc = section.contained_chunks.getUpperCorner();
-			for(int z = lc.getZ(); z <= uc.getZ(); z++){
-				for(int y = lc.getY(); y <= uc.getY(); y++){
-					for(int x = lc.getX(); x <= uc.getX(); x++){
+			for(int z = 0; z <= uc.getZ() - lc.getZ(); z++){
+				for(int y = 0; y <= uc.getY() - lc.getY(); y++){
+					for(int x = 0; x <= uc.getX() - lc.getX(); x++){
 						create_chunk_node(scene, section, x, y, z);
 					}
 				}
@@ -458,10 +469,13 @@ struct Module: public interface::Module, public voxelworld::Interface
 		section.loaded = true;
 		pv::Vector3DInt16 section_p = section.section_p;
 		log_v(MODULE, "Loading section " PV3I_FORMAT, PV3I_PARAMS(section_p));
+
 		// TODO: If found on disk, load nodes from there
 		// TODO: If not found on disk, create new static nodes
 		// Always create new nodes for now
 		create_section(section);
+
+		// TODO: Find static nodes and set them in section.node_ids
 	}
 
 	// Generate the section; requires static nodes to already exist
@@ -472,7 +486,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 		section.generated = true;
 		pv::Vector3DInt16 section_p = section.section_p;
 		log_v(MODULE, "Generating section " PV3I_FORMAT, PV3I_PARAMS(section_p));
-		// TODO
+		m_server->emit_event("voxelworld:generation_request",
+				new GenerationRequest(section_p));
 	}
 
 	// Interface
@@ -484,6 +499,29 @@ struct Module: public interface::Module, public voxelworld::Interface
 			load_section(section);
 		if(!section.generated)
 			generate_section(section);
+	}
+
+	void get_section_region(const pv::Vector3DInt16 &section_p,
+			pv::Vector3DInt32 &p0, pv::Vector3DInt32 &p1)
+	{
+		p0 = pv::Vector3DInt32(
+				section_p.getX() * m_section_size_chunks.getX() *
+						m_chunk_size_voxels.getX(),
+				section_p.getY() * m_section_size_chunks.getY() *
+						m_chunk_size_voxels.getY(),
+				section_p.getZ() * m_section_size_chunks.getZ() *
+						m_chunk_size_voxels.getZ()
+		);
+		p1 = p0 + pv::Vector3DInt32(
+				m_section_size_chunks.getX() * m_chunk_size_voxels.getX() - 1,
+				m_section_size_chunks.getY() * m_chunk_size_voxels.getY() - 1,
+				m_section_size_chunks.getZ() * m_chunk_size_voxels.getZ() - 1
+		);
+	}
+
+	void set_voxel(const pv::Vector3DInt32 &p, const interface::VoxelInstance &v)
+	{
+		// TODO
 	}
 
 	void* get_interface()

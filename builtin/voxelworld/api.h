@@ -4,6 +4,8 @@
 #include "interface/event.h"
 #include "interface/server.h"
 #include "interface/module.h"
+#include "interface/voxel.h"
+#include <PolyVoxCore/Vector.h>
 #include <functional>
 
 namespace Urho3D
@@ -15,9 +17,28 @@ namespace Urho3D
 namespace voxelworld
 {
 	namespace magic = Urho3D;
+	namespace pv = PolyVox;
+
+	struct GenerationRequest: public interface::Event::Private
+	{
+		pv::Vector3DInt16 section_p;
+
+		GenerationRequest(const pv::Vector3DInt16 &section_p):
+				section_p(section_p)
+		{}
+	};
 
 	struct Interface
 	{
+		virtual void load_or_generate_section(
+				const pv::Vector3DInt16 &section_p) = 0;
+
+		// Inclusive
+		virtual void get_section_region(const pv::Vector3DInt16 &section_p,
+				pv::Vector3DInt32 &p0, pv::Vector3DInt32 &p1) = 0;
+
+		virtual void set_voxel(const pv::Vector3DInt32 &p,
+				const interface::VoxelInstance &v) = 0;
 	};
 
 	inline bool access(interface::Server *server,
