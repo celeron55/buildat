@@ -12,6 +12,8 @@
 #include <StaticModel.h>
 #include <Model.h>
 #include <CustomGeometry.h>
+#include <CollisionShape.h>
+#include <RigidBody.h>
 #pragma GCC diagnostic pop
 #define MODULE "lua_bindings"
 
@@ -158,6 +160,20 @@ static int l_set_voxel_geometry(lua_State *L)
 
 	// TODO: Don't do this here; allow the caller to do this
 	cg->SetCastShadows(true);
+
+	// TODO: Don't do this here; allow caller to do this explicitly
+	SharedPtr<Model> model(interface::
+			create_voxel_physics_model(context, *volume, voxel_reg));
+	RigidBody *body = node->GetOrCreateComponent<RigidBody>(LOCAL);
+	body->SetFriction(0.7);
+	CollisionShape *shape = node->GetOrCreateComponent<CollisionShape>(LOCAL);
+	if(model){
+		shape->SetTriangleMesh(model, 0, Vector3::ONE);
+		//shape->SetConvexHull(model, 0, Vector3::ONE);
+		//log_w(MODULE, "CollisionShape disabled");
+	} else {
+		shape->ReleaseShape();
+	}
 
 	return 0;
 }

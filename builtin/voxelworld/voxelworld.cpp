@@ -197,11 +197,12 @@ struct Module: public interface::Module, public voxelworld::Interface
 	sp_<interface::BlockRegistry> m_block_reg;
 
 	// One node holds one chunk of voxels (eg. 32x32x32)
-	pv::Vector3DInt16 m_chunk_size_voxels = pv::Vector3DInt16(32, 32, 32);
+	//pv::Vector3DInt16 m_chunk_size_voxels = pv::Vector3DInt16(32, 32, 32);
 	// The world is loaded and unloaded by sections (eg. 2x2x2)
 	pv::Vector3DInt16 m_section_size_chunks = pv::Vector3DInt16(2, 2, 2);
 
 	// These are suitable for running under valgrind
+	pv::Vector3DInt16 m_chunk_size_voxels = pv::Vector3DInt16(16, 16, 16);
 	//pv::Vector3DInt16 m_chunk_size_voxels = pv::Vector3DInt16(8, 8, 8);
 	//pv::Vector3DInt16 m_section_size_chunks = pv::Vector3DInt16(2, 2, 2);
 
@@ -492,9 +493,9 @@ struct Module: public interface::Module, public voxelworld::Interface
 		int h = m_chunk_size_voxels.getY();
 		int d = m_chunk_size_voxels.getZ();
 
-		// NOTE: These volumes have one extra voxel at the positive axis in
-		//       order to make proper meshes without gaps
-		pv::Region region(0, 0, 0, w, h, d);
+		// NOTE: These volumes have one extra voxel at each edge in order to
+		//       make proper meshes without gaps
+		pv::Region region(-1, -1, -1, w, h, d);
 		pv::RawVolume<VoxelInstance> volume(region);
 
 		auto lc = region.getLowerCorner();
@@ -503,6 +504,12 @@ struct Module: public interface::Module, public voxelworld::Interface
 			for(int y = lc.getY(); y <= uc.getY(); y++){
 				for(int x = lc.getX(); x <= uc.getX(); x++){
 					volume.setVoxelAt(x, y, z, VoxelInstance(0));
+					/*if(x % 2 == 0){
+						if(z == lc.getZ() + 0)
+							volume.setVoxelAt(x, y, z, VoxelInstance(2));
+						if(z == uc.getZ() - 0)
+							volume.setVoxelAt(x, y, z, VoxelInstance(3));
+					}*/
 				}
 			}
 		}
@@ -523,9 +530,9 @@ struct Module: public interface::Module, public voxelworld::Interface
 				PODVector<uint8_t>((const uint8_t*)data.c_str(), data.size())));
 
 		// There is no collision shape initially, but add the components now
-		RigidBody *body = n->CreateComponent<RigidBody>();
+		RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
 		body->SetFriction(0.75f);
-		CollisionShape *shape = n->CreateComponent<CollisionShape>();
+		CollisionShape *shape = n->CreateComponent<CollisionShape>(LOCAL);
 	}
 
 	void create_section(Section &section)
@@ -641,10 +648,11 @@ struct Module: public interface::Module, public voxelworld::Interface
 			up_<pv::RawVolume<VoxelInstance>> volume =
 					interface::deserialize_volume(data);
 
+			// NOTE: +1 offset needed for mesh generation
 			pv::Vector3DInt32 voxel_p(
-					p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX(),
-					p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY(),
-					p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ()
+					p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX() + 1,
+					p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY() + 1,
+					p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ() + 1
 			);
 			log_t(MODULE, "set_voxel_direct() p=" PV3I_FORMAT ", v=%i: "
 					"Chunk " PV3I_FORMAT " in section " PV3I_FORMAT
@@ -724,10 +732,11 @@ struct Module: public interface::Module, public voxelworld::Interface
 			for(const JournalEntry &entry : write_journal){
 				const pv::Vector3DInt32 &p = entry.p;
 				const interface::VoxelInstance &v = entry.v;
+				// NOTE: +1 offset needed for mesh generation
 				pv::Vector3DInt32 voxel_p(
-						p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX(),
-						p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY(),
-						p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ()
+						p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX() + 1,
+						p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY() + 1,
+						p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ() + 1
 				);
 				volume->setVoxelAt(voxel_p, v);
 			}
@@ -740,6 +749,9 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 			// Update collision shape
 
+			// TODO: Create multiple box collision shapes insteade of one mesh;
+			//       vertical voxel sectors should work well enough maybe
+
 			SharedPtr<Model> model(interface::
 					create_voxel_physics_model(context, *volume,
 							m_voxel_reg.get()));
@@ -749,6 +761,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 				log_v(MODULE, "Chunk " PV3I_FORMAT " has collision shape",
 						PV3I_PARAMS(chunk_p));
 				shape->SetTriangleMesh(model, 0, Vector3::ONE);
+				//shape->SetConvexHull(model, 0, Vector3::ONE);
+				//log_w(MODULE, "CollisionShape disabled");
 			} else {
 				log_v(MODULE, "Chunk " PV3I_FORMAT " does not have collision shape",
 						PV3I_PARAMS(chunk_p));

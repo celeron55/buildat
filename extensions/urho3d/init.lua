@@ -248,6 +248,7 @@ function Safe.SubscribeToEvent(x, y, z)
 	local global_callback_name = "__buildat_sandbox_callback_"..global_function_i
 	sandbox_callback_to_global_function_name[callback] = global_callback_name
 	_G[global_callback_name] = function(event_type_thing, unsafe_event_data)
+		local error = error
 		local f = function()
 			-- How the hell does one get a string out of event_type_thing?
 			-- It is not a Variant, and none of the Lua examples try to do anything
@@ -265,16 +266,32 @@ function Safe.SubscribeToEvent(x, y, z)
 				local safe_type = field_def.safe
 				local safe_value = nil
 				if variant_type == "Ptr" then
+					local get_type = field_def.get_type or safe_type
 					local unsafe_value = unsafe_event_data:GetPtr(
-							safe_type, field_name)
+							get_type, field_name)
+					if unsafe_value == nil then
+						error("Value for field "..dump(field_name).." as "..
+								dump(safe_type).." in "..dump(got_event_type)..
+								" gotten as "..dump(get_type).." is nil")
+					end
 					safe_value = wrap_instance(safe_type, unsafe_value)
+					safe_event_data["SetPtr"](
+							safe_event_data, field_name, safe_value)
 				else
-					local unsafe_value = unsafe_event_data["Get"..variant_type](
+					local get_type = field_def.get_type or variant_type
+					local unsafe_value = unsafe_event_data["Get"..get_type](
 							unsafe_event_data, field_name)
-					safe_value = magic_sandbox.unsafe_to_safe(unsafe_value, safe_type)
+					if safe_type == 'number' or safe_type == 'string' or
+							safe_type == 'boolean' then
+						-- Regular type
+						safe_value = magic_sandbox.unsafe_to_safe(unsafe_value, safe_type)
+					else
+						-- Object wrapper
+						safe_value = wrap_instance(safe_type, unsafe_value)
+					end
+					safe_event_data["Set"..get_type](
+							safe_event_data, field_name, safe_value)
 				end
-				safe_event_data["Set"..variant_type](
-						safe_event_data, field_name, safe_value)
 			end
 			-- Call callback
 			if object then

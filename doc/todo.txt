@@ -38,3 +38,4 @@ Buildat TODO
 - Use tags for module dependencies (tags, require_tag, disallow_tag), and
   auto-tag each module at runtime with game_<current_game>
 - Threaded mesh generation
+- If an error occurs on the client in module initialization, show error and quit

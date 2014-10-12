@@ -11,6 +11,7 @@ local M = {}
 local camera_node = nil
 local update_counter = -1
 local camera_last_dir = magic.Vector3(0, 0, 0)
+local camera_last_p = magic.Vector3(0, 0, 0)
 
 M.chunk_size_voxels = nil
 M.section_size_chunks = nil
@@ -84,18 +85,23 @@ function M.init()
 			end
 		end
 		-- Handle geometry updates a few nodes per frame
-		if #node_geometry_update_queue > 0 then
-			local nodes_per_frame = 2
-			if camera_node.direction ~= camera_last_dir then
-				nodes_per_frame = 1 -- Limit when camera is turning
+		if camera_node then
+			local camera_dir = camera_node.direction
+			local camera_p = camera_node:GetWorldPosition()
+			if #node_geometry_update_queue > 0 then
+				local nodes_per_frame = 2
+				if camera_dir ~= camera_last_dir or camera_p ~= camera_last_p then
+					nodes_per_frame = 1 -- Limit when camera is turning
+				end
+				for i = 1, nodes_per_frame do
+					local node = get_next_geometry_update_node()
+					if not node then break end
+					setup_buildat_voxel_data(node)
+				end
 			end
-			for i = 1, nodes_per_frame do
-				local node = get_next_geometry_update_node()
-				if not node then break end
-				setup_buildat_voxel_data(node)
-			end
+			camera_last_dir = camera_dir
+			camera_last_p = camera_p
 		end
-		camera_last_dir = camera_node.direction
 	end)
 
 	replicate.sub_sync_node_added({}, function(node)

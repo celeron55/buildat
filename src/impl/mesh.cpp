@@ -111,6 +111,66 @@ Model* create_simple_voxel_model(Context *context,
 	return fromScratchModel;
 }
 
+// Create a model from 8-bit voxel data, using a voxel registry, without
+// textures or normals, based on the physically_solid flag.
+Model* create_8bit_voxel_physics_model(Context *context,
+		int w, int h, int d, const ss_ &source_data,
+		VoxelRegistry *voxel_reg)
+{
+	if(w < 0 || h < 0 || d < 0)
+		throw Exception("Negative dimension");
+	if(w * h * d != (int)source_data.size())
+		throw Exception("Mismatched data size");
+	pv::RawVolume<VoxelInstance> volume(pv::Region(
+			pv::Vector3DInt32(-1, -1, -1),
+			pv::Vector3DInt32(w, h, d)));
+	size_t i = 0;
+	for(int z = -1; z <= d; z++){
+		for(int y = -1; y <= h; y++){
+			for(int x = -1; x <= w; x++){
+				if(z == -1 || y == -1 || x == -1 ||
+						z == d || y == h || x == w){
+					volume.setVoxelAt(x, y, z, VoxelInstance(0));
+				} else {
+					char c = source_data[i++];
+					volume.setVoxelAt(x, y, z, VoxelInstance(c));
+				}
+			}
+		}
+	}
+	return create_voxel_physics_model(context, volume, voxel_reg);
+}
+
+// Set custom geometry from 8-bit voxel data, using a voxel registry
+void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
+		int w, int h, int d, const ss_ &source_data,
+		VoxelRegistry *voxel_reg)
+{
+	if(w < 0 || h < 0 || d < 0)
+		throw Exception("Negative dimension");
+	if(w * h * d != (int)source_data.size())
+		throw Exception("Mismatched data size");
+	pv::RawVolume<VoxelInstance> volume(pv::Region(
+			pv::Vector3DInt32(-1, -1, -1),
+			pv::Vector3DInt32(w, h, d)));
+	size_t i = 0;
+	for(int z = -1; z <= d; z++){
+		for(int y = -1; y <= h; y++){
+			for(int x = -1; x <= w; x++){
+				if(z == -1 || y == -1 || x == -1 ||
+						z == d || y == h || x == w){
+					volume.setVoxelAt(x, y, z, VoxelInstance(0));
+				} else {
+					char c = source_data[i++];
+					volume.setVoxelAt(x, y, z, VoxelInstance(c));
+				}
+			}
+		}
+	}
+
+	return set_voxel_geometry(cg, context, volume, voxel_reg);
+}
+
 template<typename VoxelType>
 class IsQuadNeededByRegistryPhysics
 {
@@ -141,29 +201,79 @@ public:
 	}
 };
 
-// Create a model from 8-bit voxel data, using a voxel registry, without
+// Create a model from voxel volume, using a voxel registry, without
 // textures or normals, based on the physically_solid flag.
-Model* create_8bit_voxel_physics_model(Context *context,
-		int w, int h, int d, const ss_ &source_data,
+// Volume should be padded by one voxel on each edge
+// Returns nullptr if there is no geometry
+Model* create_voxel_physics_model(Context *context,
+		pv::RawVolume<VoxelInstance> &volume,
 		VoxelRegistry *voxel_reg)
 {
-	if(w < 0 || h < 0 || d < 0)
-		throw Exception("Negative dimension");
-	if(w * h * d != (int)source_data.size())
-		throw Exception("Mismatched data size");
-	pv::RawVolume<VoxelInstance> volume(pv::Region(
-			pv::Vector3DInt32(-1, -1, -1),
-			pv::Vector3DInt32(w, h, d)));
-	size_t i = 0;
-	for(int z = 0; z < d; z++){
-		for(int y = 0; y < h; y++){
-			for(int x = 0; x < w; x++){
-				char c = source_data[i++];
-				volume.setVoxelAt(x, y, z, VoxelInstance(c));
-			}
-		}
+	IsQuadNeededByRegistryPhysics<VoxelInstance> iqn(voxel_reg);
+	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
+	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
+			IsQuadNeededByRegistryPhysics<VoxelInstance>>
+	surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh, iqn);
+	surfaceExtractor.execute();
+
+	const sv_<uint32_t> &pv_indices = pv_mesh.getIndices();
+	const sv_<pv::PositionMaterialNormal> &pv_vertices = pv_mesh.getVertices();
+
+	const size_t num_vertices = pv_vertices.size();
+	const size_t num_indices = pv_indices.size();
+
+	if(num_indices == 0)
+		return nullptr;
+
+	int w = volume.getWidth() - 2;
+	int h = volume.getHeight() - 2;
+	int d = volume.getDepth() - 2;
+	sv_<float> vertex_data;
+	vertex_data.resize(num_vertices * 6);	// vertex + normal
+	for(size_t i = 0; i < num_vertices; i++){
+		vertex_data[i*6 + 0] = pv_vertices[i].position.getX() - w/2.0f - 0.5f;
+		vertex_data[i*6 + 1] = pv_vertices[i].position.getY() - h/2.0f - 0.5f;
+		vertex_data[i*6 + 2] = pv_vertices[i].position.getZ() - d/2.0f - 0.5f;
+		vertex_data[i*6 + 3] = pv_vertices[i].normal.getX();
+		vertex_data[i*6 + 4] = pv_vertices[i].normal.getY();
+		vertex_data[i*6 + 5] = pv_vertices[i].normal.getZ();
 	}
-	return create_voxel_physics_model(context, volume, voxel_reg);
+
+	//sv_<short> index_data;
+	sv_<unsigned> index_data;
+	index_data.resize(num_indices);
+	for(size_t i = 0; i < num_indices; i++){
+		/*if(pv_indices[i] >= 0x10000)
+		    throw Exception("Index too large");*/
+		index_data[i] = pv_indices[i];
+	}
+
+	SharedPtr<VertexBuffer> vb(new VertexBuffer(context));
+	// Shadowed buffer needed for raycasts to work, and so that data can be
+	// automatically restored on device loss
+	vb->SetShadowed(true);
+	// TODO: Normals are probably unnecessary for a physics model
+	vb->SetSize(num_vertices, magic::MASK_POSITION | magic::MASK_NORMAL);
+	vb->SetData(&vertex_data[0]);
+
+	SharedPtr<IndexBuffer> ib(new IndexBuffer(context));
+	ib->SetShadowed(true);
+	//ib->SetSize(num_indices, false);
+	ib->SetSize(num_indices, true);
+	ib->SetData(&index_data[0]);
+
+	SharedPtr<Geometry> geom(new Geometry(context));
+	geom->SetVertexBuffer(0, vb);
+	geom->SetIndexBuffer(ib);
+	geom->SetDrawRange(TRIANGLE_LIST, 0, num_indices);
+
+	Model *fromScratchModel = new Model(context);
+	fromScratchModel->SetNumGeometries(1);
+	fromScratchModel->SetGeometry(0, 0, geom);
+	fromScratchModel->SetBoundingBox(BoundingBox(
+				Vector3(-0.5f*w, -0.5f*h, -0.5f*d), Vector3(0.5f*w, 0.5f*h, 0.5f*d)));
+
+	return fromScratchModel;
 }
 
 template<typename VoxelType>
@@ -233,106 +343,8 @@ struct TemporaryGeometry
 };
 #endif
 
-// Set custom geometry from 8-bit voxel data, using a voxel registry
-void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
-		int w, int h, int d, const ss_ &source_data,
-		VoxelRegistry *voxel_reg)
-{
-	if(w < 0 || h < 0 || d < 0)
-		throw Exception("Negative dimension");
-	if(w * h * d != (int)source_data.size())
-		throw Exception("Mismatched data size");
-	pv::RawVolume<VoxelInstance> volume(pv::Region(
-			pv::Vector3DInt32(-1, -1, -1),
-			pv::Vector3DInt32(w, h, d)));
-	size_t i = 0;
-	for(int z = 0; z < d; z++){
-		for(int y = 0; y < h; y++){
-			for(int x = 0; x < w; x++){
-				char c = source_data[i++];
-				volume.setVoxelAt(x, y, z, VoxelInstance(c));
-			}
-		}
-	}
-
-	return set_voxel_geometry(cg, context, volume, voxel_reg);
-}
-
-// Create a model from voxel volume, using a voxel registry, without
-// textures or normals, based on the physically_solid flag.
-// Returns nullptr if there is no geometry
-Model* create_voxel_physics_model(Context *context,
-		pv::RawVolume<VoxelInstance> &volume,
-		VoxelRegistry *voxel_reg)
-{
-	IsQuadNeededByRegistryPhysics<VoxelInstance> iqn(voxel_reg);
-	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
-	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
-			IsQuadNeededByRegistryPhysics<VoxelInstance>>
-	surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh, iqn);
-	surfaceExtractor.execute();
-
-	const sv_<uint32_t> &pv_indices = pv_mesh.getIndices();
-	const sv_<pv::PositionMaterialNormal> &pv_vertices = pv_mesh.getVertices();
-
-	const size_t num_vertices = pv_vertices.size();
-	const size_t num_indices = pv_indices.size();
-
-	if(num_indices == 0)
-		return nullptr;
-
-	int w = volume.getWidth() - 1;
-	int h = volume.getHeight() - 1;
-	int d = volume.getDepth() - 1;
-	sv_<float> vertex_data;
-	vertex_data.resize(num_vertices * 6);	// vertex + normal
-	for(size_t i = 0; i < num_vertices; i++){
-		vertex_data[i*6 + 0] = pv_vertices[i].position.getX() - w/2.0f - 0.5f;
-		vertex_data[i*6 + 1] = pv_vertices[i].position.getY() - h/2.0f - 0.5f;
-		vertex_data[i*6 + 2] = pv_vertices[i].position.getZ() - d/2.0f - 0.5f;
-		vertex_data[i*6 + 3] = pv_vertices[i].normal.getX();
-		vertex_data[i*6 + 4] = pv_vertices[i].normal.getY();
-		vertex_data[i*6 + 5] = pv_vertices[i].normal.getZ();
-	}
-
-	//sv_<short> index_data;
-	sv_<unsigned> index_data;
-	index_data.resize(num_indices);
-	for(size_t i = 0; i < num_indices; i++){
-		/*if(pv_indices[i] >= 0x10000)
-		    throw Exception("Index too large");*/
-		index_data[i] = pv_indices[i];
-	}
-
-	SharedPtr<VertexBuffer> vb(new VertexBuffer(context));
-	// Shadowed buffer needed for raycasts to work, and so that data can be
-	// automatically restored on device loss
-	vb->SetShadowed(true);
-	// TODO: Normals are probably unnecessary for a physics model
-	vb->SetSize(num_vertices, magic::MASK_POSITION | magic::MASK_NORMAL);
-	vb->SetData(&vertex_data[0]);
-
-	SharedPtr<IndexBuffer> ib(new IndexBuffer(context));
-	ib->SetShadowed(true);
-	//ib->SetSize(num_indices, false);
-	ib->SetSize(num_indices, true);
-	ib->SetData(&index_data[0]);
-
-	SharedPtr<Geometry> geom(new Geometry(context));
-	geom->SetVertexBuffer(0, vb);
-	geom->SetIndexBuffer(ib);
-	geom->SetDrawRange(TRIANGLE_LIST, 0, num_indices);
-
-	Model *fromScratchModel = new Model(context);
-	fromScratchModel->SetNumGeometries(1);
-	fromScratchModel->SetGeometry(0, 0, geom);
-	fromScratchModel->SetBoundingBox(BoundingBox(
-				Vector3(-0.5f*w, -0.5f*h, -0.5f*d), Vector3(0.5f*w, 0.5f*h, 0.5f*d)));
-
-	return fromScratchModel;
-}
-
 // Set custom geometry from voxel volume, using a voxel registry
+// Volume should be padded by one voxel on each edge
 void set_voxel_geometry(CustomGeometry *cg, Context *context,
 		pv::RawVolume<VoxelInstance> &volume,
 		VoxelRegistry *voxel_reg)
@@ -349,9 +361,9 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 
 	sm_<uint, TemporaryGeometry> temp_geoms;
 
-	int w = volume.getWidth() - 1;
-	int h = volume.getHeight() - 1;
-	int d = volume.getDepth() -1;
+	int w = volume.getWidth() - 2;
+	int h = volume.getHeight() - 2;
+	int d = volume.getDepth() - 2;
 
 	// Handle vertices face-by-face in order to copy indices at the same time
 	for(size_t pv_face_i = 0; pv_face_i < pv_vertices.size() / 4; pv_face_i++){

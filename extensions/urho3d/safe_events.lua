@@ -41,5 +41,12 @@ return {
 		Scene = {variant = "Ptr", safe = "Scene"},
 		Node = {variant = "Ptr", safe = "Node"},
 	},
+	PhysicsCollision = {
+		NodeA = {variant = "Ptr", safe = "Node"},
+		NodeB = {variant = "Ptr", safe = "Node"},
+		BodyA = {variant = "Ptr", safe = "RigidBody"},
+		BodyB = {variant = "Ptr", safe = "RigidBody"},
+		Contacts = {variant = "Buffer", safe = "VectorBuffer", get_type = "Buffer"},
+	},
 }
 -- vim: set noet ts=4 sw=4:

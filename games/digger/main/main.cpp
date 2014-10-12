@@ -126,10 +126,10 @@ struct Module: public interface::Module
 						create_8bit_voxel_physics_model(context, w, h, d, data,
 						voxel_reg));
 
-				RigidBody *body = n->CreateComponent<RigidBody>();
+				RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
 				body->SetFriction(0.75f);
 				body->SetMass(1.0);
-				CollisionShape *shape = n->CreateComponent<CollisionShape>();
+				CollisionShape *shape = n->CreateComponent<CollisionShape>(LOCAL);
 				shape->SetConvexHull(model, 0, Vector3::ONE);
 				//shape->SetTriangleMesh(model, 0, Vector3::ONE);
 				//shape->SetBox(Vector3::ONE);

@@ -19,9 +19,21 @@ function M.define(dst, util)
 		instance = {
 			GetSize = util.self_function(
 					"GetSize", {"number"}, {"VectorBuffer"}),
+			ReadString = util.self_function(
+					"ReadString", {"string"}, {"VectorBuffer"}),
+			ReadInt = util.self_function(
+					"ReadInt", {"number"}, {"VectorBuffer"}),
+			ReadFloat = util.self_function(
+					"ReadFloat", {"number"}, {"VectorBuffer"}),
+			ReadVector3 = util.wrap_function({"VectorBuffer"},
+				function(self)
+					return util.wrap_instance("Vector3", self:ReadVector3())
+				end
+			),
 		},
 		properties = {
 			size = util.simple_property("number"),
+			eof = util.simple_property("boolean"),
 		},
 	})
 
@@ -63,6 +75,10 @@ function M.define(dst, util)
 					"SetString", {}, {"VariantMap", "string", "string"}),
 			GetString = util.self_function(
 					"GetString", {"string"}, {"VariantMap", "string"}),
+			SetBuffer = util.self_function(
+					"SetBuffer", {}, {"VariantMap", "string", "VectorBuffer"}),
+			GetBuffer = util.self_function(
+					"GetBuffer", {dst.VectorBuffer}, {"VariantMap", "string"}),
 
 			SetPtr = util.self_function(
 					"SetPtr", {}, {"VariantMap", "string",
@@ -83,6 +99,16 @@ function M.define(dst, util)
 		instance = {
 			Length = util.self_function(
 					"Length", {"number"}, {"Vector3"}),
+			CrossProduct = util.wrap_function({"Vector3", "Vector3"},
+				function(self, other)
+					return util.wrap_instance("Vector3", self:CrossProduct(other))
+				end
+			),
+			Normalized = util.wrap_function({"Vector3"},
+				function(self)
+					return util.wrap_instance("Vector3", self:Normalized())
+				end
+			),
 		},
 		instance_meta = {
 			__mul = util.wrap_function({"Vector3", "number"}, function(self, n)
@@ -165,6 +191,17 @@ function M.define(dst, util)
 		},
 	})
 
+	util.wc("BoundingBox", {
+		unsafe_constructor = util.wrap_function({"number", "number"},
+		function(min, max) -- TOOD: Many alternative constructors
+			return util.wrap_instance("BoundingBox", BoundingBox(min, max))
+		end),
+		instance_meta = {
+		},
+		properties = {
+		},
+	})
+
 	util.wc("BiasParameters", {
 		unsafe_constructor = util.wrap_function({"number", "number"},
 		function(constant_bias, slope_scaled_bias)
@@ -218,9 +255,19 @@ function M.define(dst, util)
 
 	util.wc("RigidBody", {
 		inherited_from_by_wrapper = dst.Component,
+		instance = {
+			ApplyForce = util.self_function(
+					"ApplyForce", {}, {"RigidBody", "Vector3"}),
+			ApplyImpulse = util.self_function(
+					"ApplyImpulse", {}, {"RigidBody", "Vector3"}),
+		},
 		properties = {
 			mass = util.simple_property("number"),
+			gravityOverride = util.simple_property(dst.Vector3),
 			friction = util.simple_property("number"),
+			angularFactor = util.simple_property(dst.Vector3),
+			kinematic = util.simple_property("boolean"),
+			linearVelocity = util.simple_property(dst.Vector3),
 		},
 	})
 
@@ -229,6 +276,21 @@ function M.define(dst, util)
 		instance = {
 			SetBox = util.self_function(
 					"SetBox", {}, {"CollisionShape", "Vector3"}),
+			SetCapsule = util.self_function(
+					"SetCapsule", {}, {"CollisionShape", "number", "number"}),
+		},
+	})
+
+	util.wc("Zone", {
+		inherited_from_by_wrapper = dst.Component,
+		instance = {
+		},
+		properties = {
+			boundingBox = util.simple_property(dst.BoundingBox),
+			ambientColor = util.simple_property(dst.Color),
+			fogColor = util.simple_property(dst.Color),
+			fogStart = util.simple_property("number"),
+			fogEnd = util.simple_property("number"),
 		},
 	})
 
@@ -581,6 +643,7 @@ function M.define(dst, util)
 		instance = {
 			SetMouseVisible = util.self_function("SetMouseVisible", {}, {"Input", "boolean"}),
 			GetKeyDown = util.self_function("GetKeyDown", {"boolean"}, {"Input", "number"}),
+			GetKeyPress = util.self_function("GetKeyPress", {"boolean"}, {"Input", "number"}),
 			GetMouseMove = util.self_function("GetMouseMove", {dst.IntVector2}, {"Input"}),
 		},
 	})

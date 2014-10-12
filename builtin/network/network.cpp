@@ -100,6 +100,11 @@ struct Module: public interface::Module, public network::Interface
 				!m_listening_socket->listen_fd()){
 			log_i(MODULE, "Failed to bind to %s:%s, fd=%i", cs(address), cs(port),
 					m_listening_socket->fd());
+			// We don't want to be in this state for any amount of time; it will
+			// confuse the hell out of everybody otherwise
+			m_server->shutdown(1, "Failed to bind socket");
+			throw Exception("Failed to bind socket");
+			return;
 		} else {
 			log_i(MODULE, "Listening at %s:%s, fd=%i", cs(address), cs(port),
 					m_listening_socket->fd());
