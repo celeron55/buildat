@@ -11,6 +11,7 @@
 #include "interface/voxel.h"
 #include "interface/block.h"
 #include <PolyVoxCore/SimpleVolume.h>
+#include <cereal/archives/portable_binary.hpp>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Node.h>
@@ -25,12 +26,29 @@ namespace pv = PolyVox;
 using namespace Urho3D;
 
 namespace std {
-template<> struct hash<pv::Vector<2u, uint16_t>>{
-	std::size_t operator()(const pv::Vector<2u, uint16_t> &v) const {
-		return ((std::hash<uint16_t>() (v.getX()) << 0) ^
-				   (std::hash<uint16_t>() (v.getY()) << 1));
+
+template<> struct hash<pv::Vector<2u, int16_t>>{
+	std::size_t operator()(const pv::Vector<2u, int16_t> &v) const {
+		return ((std::hash<int16_t>() (v.getX()) << 0) ^
+				   (std::hash<int16_t>() (v.getY()) << 1));
 	}
 };
+
+}
+
+namespace cereal {
+
+template<class Archive>
+void save(Archive &archive, const pv::Vector3DInt16 &v){
+	archive((int32_t)v.getX(), (int32_t)v.getY(), (int32_t)v.getZ());
+}
+template<class Archive>
+void load(Archive &archive, pv::Vector3DInt16 &v){
+	int16_t x, y, z;
+	archive((int32_t)x, (int32_t)y, (int32_t)z);
+	v.setX(x); v.setY(y); v.setZ(z);
+}
+
 }
 
 namespace voxelworld {
@@ -38,8 +56,8 @@ namespace voxelworld {
 struct Section
 {
 	pv::Vector3DInt16 chunk_size;
-	pv::Region contained_chunks; // Position and size in chunks
-	pv::Vector3DInt16 section_p; // Position in sections
+	pv::Region contained_chunks;// Position and size in chunks
+	pv::Vector3DInt16 section_p;// Position in sections
 	// Static voxel nodes (each contains one chunk); Initialized to 0.
 	pv::SimpleVolume<int32_t> node_ids;
 
@@ -70,7 +88,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 	pv::Vector3DInt16 m_section_size_chunks = pv::Vector3DInt16(4, 4, 4);
 
 	// Sections (first (y,z), then x)
-	//sm_<pv::Vector<2, int16_t>, sm_<int16_t, Section>> m_sections;
+	sm_<pv::Vector<2, int16_t>, sm_<int16_t, Section>> m_sections;
 	// Cache of last used sections (add to end, remove from beginning)
 	//std::deque<Section*> m_last_used_sections;
 
@@ -92,6 +110,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 		m_server->sub_event(this, Event::t("network:client_connected"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
+		m_server->sub_event(this, Event::t(
+					"network:packet_received/voxelworld:camera_position"));
 
 		m_server->access_scene([&](Scene *scene)
 		{
@@ -189,6 +209,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
 				client_file::FilesTransmitted)
+		EVENT_TYPEN("network:packet_received/voxelworld:camera_position",
+				on_camera_position, network::Packet)
 	}
 
 	void on_start()
@@ -217,10 +239,32 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
+		int peer = event.recipient;
 		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(event.recipient, "core:run_script",
+			inetwork->send(peer, "core:run_script",
 					"require(\"buildat/module/voxelworld\").init()");
 		});
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(m_chunk_size_voxels);
+			ar(m_section_size_chunks);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "voxelworld:init", os.str());
+		});
+	}
+
+	void on_camera_position(const network::Packet &packet)
+	{
+		double px, py, pz;
+		{
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(px, py, pz);
+		}
+		log_v(MODULE, "Camera position of C%i: (%f, %f, %f)",
+				packet.sender, px, py, pz);
 	}
 
 	// Interface
@@ -237,5 +281,5 @@ extern "C" {
 	}
 }
 }
-// vim: set noet ts=4 sw=4:
 
+// vim: set noet ts=4 sw=4:

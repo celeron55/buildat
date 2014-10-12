@@ -7,6 +7,7 @@ local dump = buildat.dump
 local cereal = require("buildat/extension/cereal")
 local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
+local voxelworld = require("buildat/module/voxelworld")
 
 local scene = replicate.main_scene
 
@@ -20,13 +21,15 @@ camera_node:LookAt(magic.Vector3(0, 1, 0))
 local viewport = magic.Viewport:new(scene, camera_node:GetComponent("Camera"))
 magic.renderer:SetViewport(0, viewport)
 
+voxelworld.set_camera(camera_node)
+
 -- Add some text
 local title_text = magic.ui.root:CreateChild("Text")
 title_text:SetText("digger/init.lua")
 title_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
 title_text.horizontalAlignment = magic.HA_CENTER
 title_text.verticalAlignment = magic.VA_CENTER
-title_text:SetPosition(0, magic.ui.root.height*(-0.33))
+title_text:SetPosition(0, -magic.ui.root.height/2 + 20)
 
 magic.ui:SetFocusElement(nil)
 
