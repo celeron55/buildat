@@ -91,6 +91,9 @@ namespace interface
 	{
 		uint32_t data;
 
+		VoxelInstance(){}
+		VoxelInstance(VoxelTypeId id): data(id){}
+
 		VoxelTypeId getId(){return data & 0x001fffff; }
 		uint8_t getMSB(){return (data>>24) & 0xff; }
 	};
