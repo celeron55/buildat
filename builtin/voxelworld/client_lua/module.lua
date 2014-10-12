@@ -48,10 +48,25 @@ function M.init()
 
 	local node_geometry_update_queue = {}
 
+	local function get_next_geometry_update_node()
+		-- Find closest one
+		local camera_p = camera_node:GetWorldPosition()
+		local closest_d = nil
+		local closest_k = nil
+		for k, node in ipairs(node_geometry_update_queue) do
+			local d = (node:GetWorldPosition() - camera_p):Length()
+			if closest_d == nil or d < closest_d then
+				closest_d = d
+				closest_k = k
+			end
+		end
+		return table.remove(node_geometry_update_queue, closest_k)
+	end
+
 	magic.SubscribeToEvent("Update", function(event_type, event_data)
 		if camera_node and M.section_size_voxels then
 			-- TODO: How should this be sent to the server?
-			local p = camera_node.position
+			local p = camera_node:GetWorldPosition()
 			update_counter = update_counter + 1
 			if update_counter % 60 == 0 then
 				local section_p = buildat.IntVector3(p):div_components(
@@ -71,7 +86,7 @@ function M.init()
 		if #node_geometry_update_queue > 0 then
 			local nodes_per_frame = 2
 			for i = 1, nodes_per_frame do
-				local node = table.remove(node_geometry_update_queue)
+				local node = get_next_geometry_update_node()
 				setup_buildat_voxel_data(node)
 			end
 		end
