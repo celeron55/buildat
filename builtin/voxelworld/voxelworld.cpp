@@ -202,7 +202,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 	//pv::Vector3DInt16 m_chunk_size_voxels = pv::Vector3DInt16(8, 8, 8);
 	//pv::Vector3DInt16 m_section_size_chunks = pv::Vector3DInt16(2, 2, 2);
 
-	// TODO: Use these when replication filtering works properly
+	// TODO: Use these when replication filtering works properly (?)
+	// TODO: Or maybe section size should still be 2x2x2
 	// One node holds one chunk of voxels (eg. 32x32x32)
 	//pv::Vector3DInt16 m_chunk_size_voxels = pv::Vector3DInt16(32, 32, 32);
 	// The world is loaded and unloaded by sections (eg. 4x4x4)
@@ -517,8 +518,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		else
 			volume.setVoxelAt(w/2, h/2, d/2, VoxelInstance(1));*/
 
-		// TODO: Enable compression
-		ss_ data = interface::serialize_volume_simple(volume);
+		ss_ data = interface::serialize_volume_compressed(volume);
 
 		// TODO: Split data to multiple user variables if data doesn't compress
 		//       to less than 500 or so bytes so that modifying a single voxel
@@ -663,8 +663,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 					PV3I_PARAMS(section_p), PV3I_PARAMS(voxel_p));
 			volume->setVoxelAt(voxel_p, v);
 
-			// TODO: Enable compression
-			ss_ new_data = interface::serialize_volume_simple(*volume);
+			ss_ new_data = interface::serialize_volume_compressed(*volume);
 
 			n->SetVar(StringHash("buildat_voxel_data"), Variant(
 					PODVector<uint8_t>((const uint8_t*)new_data.c_str(),
@@ -741,8 +740,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 				volume->setVoxelAt(voxel_p, v);
 			}
 
-			// TODO: Enable compression
-			ss_ new_data = interface::serialize_volume_simple(*volume);
+			ss_ new_data = interface::serialize_volume_compressed(*volume);
 
 			n->SetVar(StringHash("buildat_voxel_data"), Variant(
 					PODVector<uint8_t>((const uint8_t*)new_data.c_str(),
