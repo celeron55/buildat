@@ -12,12 +12,14 @@ add_subdirectory("3rdparty/cereal")
 add_subdirectory("3rdparty/c55lib")
 add_subdirectory("3rdparty/smallsha1")
 add_subdirectory("3rdparty/polyvox")
+add_subdirectory("3rdparty/zlib")
 
 include_directories("src")
 include_directories("3rdparty/cereal/include")
 include_directories("3rdparty/c55lib")
 include_directories("3rdparty/smallsha1")
 include_directories("3rdparty/polyvox/library/PolyVoxCore/include")
+include_directories("3rdparty/zlib")
 
 #
 # Global options
@@ -112,6 +114,7 @@ if(BUILD_CLIENT)
 		c55lib
 		smallsha1
 		PolyVoxCore
+		zlib
 		${ABSOLUTE_PATH_LIBS}
 		${LINK_LIBS_ONLY}
 		${URHO3D_HOME}/Build/ThirdParty/toluapp/src/lib/libtoluapp.a
@@ -157,6 +160,7 @@ if(BUILD_SERVER)
 		c55lib
 		smallsha1
 		PolyVoxCore
+		zlib
 	)
 	if(WIN32)
 		target_link_libraries(${SERVER_CORE_NAME} wsock32 ws2_32)

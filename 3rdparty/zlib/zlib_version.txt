@@ -1,0 +1,4 @@
+zlib 1.2.8
+
+Unnecessary files stripped out.
+
