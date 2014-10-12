@@ -36,9 +36,6 @@ using namespace Urho3D;
 struct Module: public interface::Module
 {
 	interface::Server *m_server;
-	uint m_slow_count = 0;
-	sp_<interface::TextureAtlasRegistry> m_atlas_reg;
-	sp_<interface::VoxelRegistry> m_voxel_reg;
 
 	Module(interface::Server *server):
 		interface::Module("digger"),
@@ -94,6 +91,49 @@ struct Module: public interface::Module
 				light->SetBrightness(0.2);
 				light->SetColor(Color(0.7, 0.7, 1.0));
 			}
+			// Cheat
+			interface::VoxelRegistry *voxel_reg = nullptr;
+			voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld){
+				voxel_reg = ivoxelworld->get_voxel_reg();
+			});
+			{
+				Node *n = scene->CreateChild("Testbox");
+				n->SetPosition(Vector3(30.0f, 30.0f, 40.0f));
+				n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
+
+				/*int w = 1, h = 1, d = 1;
+				ss_ data = "1";*/
+				int w = 2, h = 2, d = 1;
+				ss_ data = "1333";
+
+				// Convert data to the actually usable voxel type id namespace
+				// starting from VOXELTYPEID_UNDEFINED=0
+				for(size_t i = 0; i < data.size(); i++){
+					data[i] = data[i] - '0';
+				}
+
+				n->SetVar(StringHash("simple_voxel_data"), Variant(
+						PODVector<uint8_t>((const uint8_t*)data.c_str(),
+								data.size())));
+				n->SetVar(StringHash("simple_voxel_w"), Variant(w));
+				n->SetVar(StringHash("simple_voxel_h"), Variant(h));
+				n->SetVar(StringHash("simple_voxel_d"), Variant(d));
+
+
+				// Load the same model in here and give it to the physics
+				// subsystem so that it can be collided to
+				SharedPtr<Model> model(interface::
+						create_8bit_voxel_physics_model(context, w, h, d, data,
+						voxel_reg));
+
+				RigidBody *body = n->CreateComponent<RigidBody>();
+				body->SetFriction(0.75f);
+				body->SetMass(1.0);
+				CollisionShape *shape = n->CreateComponent<CollisionShape>();
+				shape->SetConvexHull(model, 0, Vector3::ONE);
+				//shape->SetTriangleMesh(model, 0, Vector3::ONE);
+				//shape->SetBox(Vector3::ONE);
+			}
 		});
 	}
 
@@ -107,6 +147,19 @@ struct Module: public interface::Module
 
 	void on_tick(const interface::TickEvent &event)
 	{
+		/*m_server->access_scene([&](Scene *scene){
+			Node *n = scene->GetChild("Testbox");
+			auto p = n->GetPosition();
+			log_v(MODULE, "Testbox: (%f, %f, %f)", p.x_, p.y_, p.z_);
+		});*/
+		static uint a = 0;
+		if(((a++) % 50) == 0){
+			m_server->access_scene([&](Scene *scene){
+				Node *n = scene->GetChild("Testbox");
+				n->SetRotation(Quaternion(30, 60, 90));
+				n->SetPosition(Vector3(30.0f, 30.0f, 40.0f));
+			});
+		}
 	}
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)

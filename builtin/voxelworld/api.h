@@ -41,6 +41,8 @@ namespace voxelworld
 				const interface::VoxelInstance &v) = 0;
 
 		virtual void commit() = 0;
+
+		virtual interface::VoxelRegistry* get_voxel_reg() = 0;
 	};
 
 	inline bool access(interface::Server *server,

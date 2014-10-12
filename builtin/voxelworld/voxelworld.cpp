@@ -522,16 +522,10 @@ struct Module: public interface::Module, public voxelworld::Interface
 		n->SetVar(StringHash("buildat_voxel_data"), Variant(
 				PODVector<uint8_t>((const uint8_t*)data.c_str(), data.size())));
 
-		// Load the same model in here and give it to the physics
-		// subsystem so that it can be collided to
-		SharedPtr<Model> model(interface::
-				create_voxel_physics_model(context, volume, m_voxel_reg.get()));
-
+		// There is no collision shape initially, but add the components now
 		RigidBody *body = n->CreateComponent<RigidBody>();
 		body->SetFriction(0.75f);
 		CollisionShape *shape = n->CreateComponent<CollisionShape>();
-		if(model)
-			shape->SetTriangleMesh(model, 0, Vector3::ONE);
 	}
 
 	void create_section(Section &section)
@@ -713,6 +707,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 		m_server->access_scene([&](Scene *scene)
 		{
+			Context *context = scene->GetContext();
+
 			Node *n = scene->GetNode(node_id);
 			if(!n){
 				log_w(MODULE, "commit_chunk_journal(): Node %i not found",
@@ -741,6 +737,23 @@ struct Module: public interface::Module, public voxelworld::Interface
 			n->SetVar(StringHash("buildat_voxel_data"), Variant(
 					PODVector<uint8_t>((const uint8_t*)new_data.c_str(),
 							new_data.size())));
+
+			// Update collision shape
+
+			SharedPtr<Model> model(interface::
+					create_voxel_physics_model(context, *volume,
+							m_voxel_reg.get()));
+
+			CollisionShape *shape = n->GetComponent<CollisionShape>();
+			if(model){
+				log_v(MODULE, "Chunk " PV3I_FORMAT " has collision shape",
+						PV3I_PARAMS(chunk_p));
+				shape->SetTriangleMesh(model, 0, Vector3::ONE);
+			} else {
+				log_v(MODULE, "Chunk " PV3I_FORMAT " does not have collision shape",
+						PV3I_PARAMS(chunk_p));
+				shape->ReleaseShape();
+			}
 		});
 	}
 
@@ -761,6 +774,11 @@ struct Module: public interface::Module, public voxelworld::Interface
 		// TODO
 		// TODO: Check journal first
 		return VoxelInstance(0);
+	}
+
+	interface::VoxelRegistry* get_voxel_reg()
+	{
+		return m_voxel_reg.get();
 	}
 
 	void* get_interface()

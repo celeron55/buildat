@@ -31,6 +31,7 @@
 #include <Renderer.h>
 #include <Octree.h>
 #include <FileSystem.h>
+#include <PhysicsWorld.h>
 #pragma GCC diagnostic pop
 extern "C" {
 #include <lua.h>
@@ -418,6 +419,7 @@ struct CApp: public App, public magic::Application
 		// Create a scene that will be synchronized from the server
 		m_scene = new magic::Scene(context_);
 		m_scene->CreateComponent<magic::Octree>(magic::LOCAL);
+		m_scene->CreateComponent<magic::PhysicsWorld>(magic::LOCAL);
 
 		// Create a camera and a viewport for the scene. The scene can then be
 		// accessed in Lua by magic.renderer:GetViewport(0):GetScene().

@@ -281,9 +281,9 @@ Model* create_voxel_physics_model(Context *context,
 	if(num_indices == 0)
 		return nullptr;
 
-	int w = volume.getWidth();
-	int h = volume.getHeight();
-	int d = volume.getDepth();
+	int w = volume.getWidth() - 1;
+	int h = volume.getHeight() - 1;
+	int d = volume.getDepth() - 1;
 	sv_<float> vertex_data;
 	vertex_data.resize(num_vertices * 6);	// vertex + normal
 	for(size_t i = 0; i < num_vertices; i++){
@@ -349,9 +349,9 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 
 	sm_<uint, TemporaryGeometry> temp_geoms;
 
-	int w = volume.getWidth();
-	int h = volume.getHeight();
-	int d = volume.getDepth();
+	int w = volume.getWidth() - 1;
+	int h = volume.getHeight() - 1;
+	int d = volume.getDepth() -1;
 
 	// Handle vertices face-by-face in order to copy indices at the same time
 	for(size_t pv_face_i = 0; pv_face_i < pv_vertices.size() / 4; pv_face_i++){

@@ -94,11 +94,41 @@ function M.define(dst, util)
 			__sub = util.wrap_function({"Vector3", "Vector3"}, function(self, other)
 				return util.wrap_instance("Vector3", self - other)
 			end),
+			__eq = util.wrap_function({"Vector3", "Vector3"}, function(self, other)
+				return (self == other)
+			end),
 		},
 		properties = {
 			x = util.simple_property("number"),
 			y = util.simple_property("number"),
 			z = util.simple_property("number"),
+		},
+	})
+
+	util.wc("IntVector2", {
+		unsafe_constructor = util.wrap_function({"number", "number"},
+		function(x, y)
+			return util.wrap_instance("IntVector2", IntVector2(x, y))
+		end),
+		instance = {
+		},
+		instance_meta = {
+			__mul = util.wrap_function({"IntVector2", "number"}, function(self, n)
+				return util.wrap_instance("IntVector2", self * n)
+			end),
+			__add = util.wrap_function({"IntVector2", "IntVector2"}, function(self, other)
+				return util.wrap_instance("IntVector2", self + other)
+			end),
+			__sub = util.wrap_function({"IntVector2", "IntVector2"}, function(self, other)
+				return util.wrap_instance("IntVector2", self - other)
+			end),
+			__eq = util.wrap_function({"IntVector2", "IntVector2"}, function(self, other)
+				return (self == other)
+			end),
+		},
+		properties = {
+			x = util.simple_property("number"),
+			y = util.simple_property("number"),
 		},
 	})
 
@@ -183,6 +213,22 @@ function M.define(dst, util)
 			nearClip = util.simple_property("number"),
 			farClip = util.simple_property("number"),
 			fov = util.simple_property("number"),
+		},
+	})
+
+	util.wc("RigidBody", {
+		inherited_from_by_wrapper = dst.Component,
+		properties = {
+			mass = util.simple_property("number"),
+			friction = util.simple_property("number"),
+		},
+	})
+
+	util.wc("CollisionShape", {
+		inherited_from_by_wrapper = dst.Component,
+		instance = {
+			SetBox = util.self_function(
+					"SetBox", {}, {"CollisionShape", "Vector3"}),
 		},
 	})
 
@@ -326,6 +372,9 @@ function M.define(dst, util)
 			SetVar = util.self_function("SetVar", {},
 					{"Node", "StringHash", "Variant"}),
 			GetWorldPosition = util.self_function("GetWorldPosition", {dst.Vector3}, {"Node"}),
+			Pitch = util.self_function("Pitch", {}, {"Node", "number"}),
+			Yaw = util.self_function("Yaw", {}, {"Node", "number"}),
+			Roll = util.self_function("Roll", {}, {"Node", "number"}),
 		},
 		properties = {
 			scale = util.simple_property(dst.Vector3),
@@ -530,7 +579,9 @@ function M.define(dst, util)
 
 	util.wc("Input", {
 		instance = {
+			SetMouseVisible = util.self_function("SetMouseVisible", {}, {"Input", "boolean"}),
 			GetKeyDown = util.self_function("GetKeyDown", {"boolean"}, {"Input", "number"}),
+			GetMouseMove = util.self_function("GetMouseMove", {dst.IntVector2}, {"Input"}),
 		},
 	})
 
