@@ -38,6 +38,16 @@ function M.init()
 				M.chunk_size_voxels:mul_components(M.section_size_chunks)
 	end)
 
+	local function setup_buildat_voxel_data(node)
+		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
+		local registry_name = node:GetVar("buildat_voxel_registry_name"):GetBuffer()
+		log:info(dump(node:GetName()).." voxel data size: "..data:GetSize())
+		buildat.set_voxel_geometry(node, data, registry_name)
+		--node:SetScale(magic.Vector3(1, 1, 1))
+	end
+
+	local node_geometry_update_queue = {}
+
 	magic.SubscribeToEvent("Update", function(event_type, event_data)
 		if camera_node and M.section_size_voxels then
 			-- TODO: How should this be sent to the server?
@@ -57,19 +67,20 @@ function M.init()
 				send_get_section(section_p + buildat.IntVector3( 0, 0,-1))]]
 			end
 		end
+		-- Handle geometry updates a few nodes per frame
+		if #node_geometry_update_queue > 0 then
+			local nodes_per_frame = 2
+			for i = 1, nodes_per_frame do
+				local node = table.remove(node_geometry_update_queue)
+				setup_buildat_voxel_data(node)
+			end
+		end
 	end)
-
-	local function setup_buildat_voxel_data(node)
-		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
-		local registry_name = node:GetVar("buildat_voxel_registry_name"):GetBuffer()
-		log:info(dump(node:GetName()).." voxel data size: "..data:GetSize())
-		buildat.set_voxel_geometry(node, data, registry_name)
-		--node:SetScale(magic.Vector3(1, 1, 1))
-	end
 
 	replicate.sub_sync_node_added({}, function(node)
 		if not node:GetVar("buildat_voxel_data"):IsEmpty() then
-			setup_buildat_voxel_data(node)
+			--setup_buildat_voxel_data(node)
+			table.insert(node_geometry_update_queue, node)
 		end
 		local name = node:GetName()
 	end)
