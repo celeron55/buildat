@@ -34,3 +34,4 @@ Buildat TODO
 - Pass the replicated scene properly to Lua
 - Allow creating and destroying arbitrary amounts of replicated scenes
 - Switch to using #define MODULE in modules, and rename Module::MODULE
+- magic.sub_sync_node_added -> replicate.sub_sync_node_added
