@@ -97,6 +97,7 @@ if(BUILD_CLIENT)
 		src/impl/voxel.cpp
 		src/impl/block.cpp
 		src/impl/noise.cpp
+		src/impl/voxel_volume.cpp
 		src/lua_bindings/util.cpp
 		src/lua_bindings/init.cpp
 		src/lua_bindings/misc.cpp
@@ -141,6 +142,7 @@ if(BUILD_SERVER)
 		src/impl/voxel.cpp
 		src/impl/block.cpp
 		src/impl/noise.cpp
+		src/impl/voxel_volume.cpp
 	)
 	if(WIN32)
 		set(SERVER_CORE_SRCS ${SERVER_CORE_SRCS} src/impl/windows/file_watch.cpp)

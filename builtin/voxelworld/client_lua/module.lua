@@ -40,6 +40,7 @@ function M.init()
 
 	magic.SubscribeToEvent("Update", function(event_type, event_data)
 		if camera_node and M.section_size_voxels then
+			-- TODO: How should this be sent to the server?
 			local p = camera_node.position
 			update_counter = update_counter + 1
 			if update_counter % 60 == 0 then
@@ -60,12 +61,10 @@ function M.init()
 
 	local function setup_buildat_voxel_data(node)
 		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
-		local w = node:GetVar("buildat_voxel_w"):GetInt()
-		local h = node:GetVar("buildat_voxel_h"):GetInt()
-		local d = node:GetVar("buildat_voxel_d"):GetInt()
+		local registry_name = node:GetVar("buildat_voxel_registry_name"):GetBuffer()
 		log:info(dump(node:GetName()).." voxel data size: "..data:GetSize())
-		buildat.set_8bit_voxel_geometry(node, w, h, d, data)
-		node:SetScale(magic.Vector3(1, 1, 1))
+		buildat.set_voxel_geometry(node, data, registry_name)
+		--node:SetScale(magic.Vector3(1, 1, 1))
 	end
 
 	replicate.sub_sync_node_added({}, function(node)

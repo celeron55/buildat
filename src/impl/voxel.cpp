@@ -114,6 +114,11 @@ struct CVoxelRegistry: public VoxelRegistry
 		return &cache;
 	}
 
+	const CachedVoxelDefinition* get_cached(const VoxelInstance &v)
+	{
+		return get_cached(v.getId());
+	}
+
 	void update_cache(CachedVoxelDefinition &cache, const VoxelDefinition &def)
 	{
 		log_d(MODULE, "CVoxelRegistry::update_cache(): id=%i", def.id);

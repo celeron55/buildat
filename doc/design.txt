@@ -195,14 +195,16 @@ The voxel world:
 	- Nodes contain:
 		- the used voxel registry name ("buildat_voxel_registry_name")
 		- the data itself              ("buildat_voxel_data")
-		- the used data format         ("buildat_voxel_data_format")
+		- the used data format         ("buildat_voxel_data_format") (?)
 		- data modification version    ("buildat_voxel_mod_version")
 	- The data can be raw or compresed, and it can be cached by node id and data
 	  modification version
-	- Maybe the format could be included as the first byte in the data
 	- Data uses the PODVector<uint8_t> type in Urho3D::Variant because the
 	  String type fails to work with zeroes. It is visible to Lua as
 	  VectorBuffer.
+	- Maybe the format could be included as the first byte in the data
+	- Consider splitting data to multiple user variables if it does not compress
+	  very well (say, to less than 500 bytes)
 - The client is allowed to see all voxel data for each node that gets synced
   over network.
 	- Data can be hidden in local components or other storage on the server.

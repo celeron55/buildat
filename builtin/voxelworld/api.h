@@ -39,13 +39,17 @@ namespace voxelworld
 
 		virtual void set_voxel(const pv::Vector3DInt32 &p,
 				const interface::VoxelInstance &v) = 0;
+
+		virtual void commit() = 0;
 	};
 
 	inline bool access(interface::Server *server,
 			std::function<void(voxelworld::Interface*)> cb)
 	{
 		return server->access_module("voxelworld", [&](interface::Module *module){
-			cb((voxelworld::Interface*)module->check_interface());
+			auto *iface = (voxelworld::Interface*)module->check_interface();
+			cb(iface);
+			iface->commit();
 		});
 	}
 }

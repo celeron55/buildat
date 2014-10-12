@@ -10,7 +10,8 @@
 #include "interface/mesh.h"
 #include "interface/voxel.h"
 #include "interface/block.h"
-#include <PolyVoxCore/SimpleVolume.h>
+#include "interface/voxel_volume.h"
+#include <PolyVoxCore/RawVolume.h>
 #include <cereal/archives/portable_binary.hpp>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
@@ -29,6 +30,7 @@ using interface::Event;
 namespace magic = Urho3D;
 namespace pv = PolyVox;
 using namespace Urho3D;
+using interface::VoxelInstance;
 
 namespace std {
 
@@ -67,6 +69,36 @@ ss_ dump(const pv::Vector3DInt16 &v){
 #define PV3I_FORMAT "(%i, %i, %i)"
 #define PV3I_PARAMS(p) p.getX(), p.getY(), p.getZ()
 
+// TODO: Move to a header (core/numeric.h or something)
+static inline int container_coord(int x, int d)
+{
+	return (x>=0 ? x : x-d+1) / d;
+}
+static inline pv::Vector3DInt32 container_coord(
+		const pv::Vector3DInt32 &p, const pv::Vector3DInt32 &d)
+{
+	return pv::Vector3DInt32(
+			container_coord(p.getX(), d.getX()),
+			container_coord(p.getY(), d.getY()),
+			container_coord(p.getZ(), d.getZ()));
+}
+static inline pv::Vector3DInt32 container_coord(
+		const pv::Vector3DInt32 &p, const pv::Vector3DInt16 &d)
+{
+	return pv::Vector3DInt32(
+			container_coord(p.getX(), d.getX()),
+			container_coord(p.getY(), d.getY()),
+			container_coord(p.getZ(), d.getZ()));
+}
+static inline pv::Vector3DInt16 container_coord16(
+		const pv::Vector3DInt32 &p, const pv::Vector3DInt16 &d)
+{
+	return pv::Vector3DInt16(
+			container_coord(p.getX(), d.getX()),
+			container_coord(p.getY(), d.getY()),
+			container_coord(p.getZ(), d.getZ()));
+}
+
 namespace voxelworld {
 
 struct Section
@@ -75,7 +107,7 @@ struct Section
 	pv::Vector3DInt16 chunk_size;
 	pv::Region contained_chunks;// Position and size in chunks
 	// Static voxel nodes (each contains one chunk); Initialized to 0.
-	sp_<pv::SimpleVolume<int32_t>> node_ids;
+	sp_<pv::RawVolume<int32_t>> node_ids;
 
 	// TODO: Specify what exactly do these mean and how they are used
 	bool loaded = false;
@@ -91,7 +123,7 @@ struct Section
 		section_p(section_p),
 		chunk_size(chunk_size),
 		contained_chunks(contained_chunks),
-		node_ids(new pv::SimpleVolume<int32_t>(contained_chunks))
+		node_ids(new pv::RawVolume<int32_t>(contained_chunks))
 	{}
 };
 
@@ -364,7 +396,21 @@ struct Module: public interface::Module, public voxelworld::Interface
 				packet.sender, PV3I_PARAMS(section_p));
 	}
 
-	Section& get_section(const pv::Vector3DInt16 &section_p)
+	Section* get_section(const pv::Vector3DInt16 &section_p)
+	{
+		pv::Vector<2, int16_t> p_yz(section_p.getY(), section_p.getZ());
+		auto sector_it = m_sections.find(p_yz);
+		if(sector_it == m_sections.end())
+			return nullptr;
+		sm_<int16_t, Section> &sector = sector_it->second;
+		auto section_it = sector.find(section_p.getX());
+		if(section_it == sector.end())
+			return nullptr;
+		Section &section = section_it->second;
+		return &section;
+	}
+
+	Section& force_get_section(const pv::Vector3DInt16 &section_p)
 	{
 		pv::Vector<2, int16_t> p_yz(section_p.getY(), section_p.getZ());
 		sm_<int16_t, Section> &sector = m_sections[p_yz];
@@ -408,35 +454,51 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 		ss_ name = "static_"+dump(section_p)+")"+
 				"_("+itos(x)+","+itos(y)+","+itos(x)+")";
+
 		Node *n = scene->CreateChild(name.c_str());
+		if(n->GetID() == 0)
+			throw Exception("Can't handle static node id=0");
+		section.node_ids->setVoxelAt(chunk_p, n->GetID());
+
 		n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
 		n->SetPosition(node_p);
 
 		int w = m_chunk_size_voxels.getX();
 		int h = m_chunk_size_voxels.getY();
 		int d = m_chunk_size_voxels.getZ();
-		size_t data_len = w * h * d;
-		ss_ data(data_len, '\0');
+
+		pv::Region region(0, 0, 0, w-1, h-1, d-1);
+		pv::RawVolume<VoxelInstance> volume(region);
+
+		auto lc = region.getLowerCorner();
+		auto uc = region.getUpperCorner();
+		for(int z = lc.getZ(); z <= uc.getZ(); z++){
+			for(int y = lc.getY(); y <= uc.getY(); y++){
+				for(int x = lc.getX(); x <= uc.getX(); x++){
+					volume.setVoxelAt(x, y, z, VoxelInstance(0));
+				}
+			}
+		}
 
 		if(section_p.getX() == 0 && section_p.getY() == 0)
-			data[data_len/2] = '\x03';
+			volume.setVoxelAt(w/2, h/2, d/2, VoxelInstance(3));
 		else if(section_p.getY() != 0)
-			data[data_len/2] = '\x02';
+			volume.setVoxelAt(w/2, h/2, d/2, VoxelInstance(2));
 		else
-			data[data_len/2] = '\x01';
+			volume.setVoxelAt(w/2, h/2, d/2, VoxelInstance(1));
 
-		// Crude way of dynamically defining a voxel model
+		ss_ data = interface::serialize_volume_simple(volume);
+
+		// TODO: Split data to multiple user variables if data doesn't compress
+		//       to less than 500 or so bytes so that modifying a single voxel
+		//       is more efficient
 		n->SetVar(StringHash("buildat_voxel_data"), Variant(
 				PODVector<uint8_t>((const uint8_t*)data.c_str(), data.size())));
-		n->SetVar(StringHash("buildat_voxel_w"), Variant(w));
-		n->SetVar(StringHash("buildat_voxel_h"), Variant(h));
-		n->SetVar(StringHash("buildat_voxel_d"), Variant(d));
 
 		// Load the same model in here and give it to the physics
 		// subsystem so that it can be collided to
 		SharedPtr<Model> model(interface::
-				create_8bit_voxel_physics_model(context, w, h, d, data,
-				m_voxel_reg.get()));
+				create_voxel_physics_model(context, volume, m_voxel_reg.get()));
 
 		/*RigidBody *body = n->CreateComponent<RigidBody>();
 		body->SetFriction(0.75f);
@@ -474,8 +536,6 @@ struct Module: public interface::Module, public voxelworld::Interface
 		// TODO: If not found on disk, create new static nodes
 		// Always create new nodes for now
 		create_section(section);
-
-		// TODO: Find static nodes and set them in section.node_ids
 	}
 
 	// Generate the section; requires static nodes to already exist
@@ -494,7 +554,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 	void load_or_generate_section(const pv::Vector3DInt16 &section_p)
 	{
-		Section &section = get_section(section_p);
+		Section &section = force_get_section(section_p);
 		if(!section.loaded)
 			load_section(section);
 		if(!section.generated)
@@ -521,7 +581,33 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 	void set_voxel(const pv::Vector3DInt32 &p, const interface::VoxelInstance &v)
 	{
+		log_t(MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i",
+				PV3I_PARAMS(p), v.data);
+		pv::Vector3DInt32 chunk_p = container_coord(p, m_chunk_size_voxels);
+		pv::Vector3DInt16 section_p =
+				container_coord16(chunk_p, m_section_size_chunks);
+		Section *section = get_section(section_p);
+		if(section == nullptr){
+			log_w(MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i: No section "
+					" " PV3I_FORMAT " for chunk " PV3I_FORMAT,
+					PV3I_PARAMS(p), v.data, PV3I_PARAMS(section_p),
+					PV3I_PARAMS(chunk_p));
+			return;
+		}
+		int32_t node_id = section->node_ids->getVoxelAt(chunk_p);
+		if(node_id == 0){
+			log_w(MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i: No node for "
+					"chunk " PV3I_FORMAT " in section " PV3I_FORMAT,
+					PV3I_PARAMS(p), v.data, PV3I_PARAMS(chunk_p),
+					PV3I_PARAMS(section_p));
+			return;
+		}
 		// TODO
+	}
+
+	void commit()
+	{
+		// TODO:  modifications until this is called
 	}
 
 	void* get_interface()

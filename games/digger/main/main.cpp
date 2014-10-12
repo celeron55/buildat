@@ -2,6 +2,7 @@
 #include "client_file/api.h"
 #include "network/api.h"
 #include "replicate/api.h"
+#include "voxelworld/api.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
@@ -26,6 +27,7 @@ namespace digger {
 using interface::Event;
 using namespace Urho3D;
 namespace magic = Urho3D;
+namespace pv = PolyVox;
 
 struct Module: public interface::Module
 {
@@ -49,6 +51,7 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
+		m_server->sub_event(this, Event::t("voxelworld:generation_request"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -56,8 +59,10 @@ struct Module: public interface::Module
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_VOIDN("core:continue", on_continue)
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
-		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
-				client_file::FilesTransmitted)
+		EVENT_TYPEN("client_file:files_transmitted",
+				on_files_transmitted, client_file::FilesTransmitted)
+		EVENT_TYPEN("voxelworld:generation_request",
+				on_generation_request, voxelworld::GenerationRequest)
 	}
 
 	void on_start()
@@ -81,6 +86,18 @@ struct Module: public interface::Module
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(event.recipient, "core:run_script",
 					"buildat.run_script_file(\"main/init.lua\")");
+		});
+	}
+
+	void on_generation_request(const voxelworld::GenerationRequest &event)
+	{
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld){
+			const pv::Vector3DInt16 &section_p = event.section_p;
+			pv::Vector3DInt32 p0;
+			pv::Vector3DInt32 p1;
+			ivoxelworld->get_section_region(section_p, p0, p1);
+
+			ivoxelworld->set_voxel(p0, interface::VoxelInstance(3));
 		});
 	}
 };

@@ -70,6 +70,8 @@ namespace interface
 		bool physically_solid = false;
 	};
 
+	struct VoxelInstance;
+
 	struct VoxelRegistry
 	{
 		virtual ~VoxelRegistry(){}
@@ -80,6 +82,7 @@ namespace interface
 		virtual const VoxelDefinition* get(const VoxelTypeId &id) = 0;
 		virtual const VoxelDefinition* get(const VoxelName &name) = 0;
 		virtual const CachedVoxelDefinition* get_cached(const VoxelTypeId &id) = 0;
+		virtual const CachedVoxelDefinition* get_cached(const VoxelInstance &v) = 0;
 
 		// TODO: Network serialization
 		// TODO: Ability to track changes (just some kind of set_dirty()?)
@@ -94,8 +97,8 @@ namespace interface
 		VoxelInstance(){}
 		VoxelInstance(VoxelTypeId id): data(id){}
 
-		VoxelTypeId getId(){return data & 0x001fffff; }
-		uint8_t getMSB(){return (data>>24) & 0xff; }
+		VoxelTypeId getId() const { return data & 0x001fffff; }
+		uint8_t getMSB() const { return (data>>24) & 0xff; }
 	};
 }
 // vim: set noet ts=4 sw=4:

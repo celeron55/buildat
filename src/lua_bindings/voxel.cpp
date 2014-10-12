@@ -4,6 +4,7 @@
 #include "core/log.h"
 #include "client/app.h"
 #include "interface/mesh.h"
+#include "interface/voxel_volume.h"
 #include <tolua++.h>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
@@ -15,6 +16,9 @@
 #define MODULE "lua_bindings"
 
 namespace magic = Urho3D;
+namespace pv = PolyVox;
+
+using interface::VoxelInstance;
 
 // Just do this; Urho3D's stuff doesn't really clash with anything in buildat
 using namespace Urho3D;
@@ -120,6 +124,44 @@ static int l_set_8bit_voxel_geometry(lua_State *L)
 	return 0;
 }
 
+// set_voxel_geometry(node, buffer: VectorBuffer)
+static int l_set_voxel_geometry(lua_State *L)
+{
+	tolua_Error tolua_err;
+
+	GET_TOLUA_STUFF(node, 1, Node);
+	TRY_GET_TOLUA_STUFF(buf, 2, const VectorBuffer);
+
+	log_d(MODULE, "set_voxel_geometry(): node=%p", node);
+	log_d(MODULE, "set_voxel_geometry(): buf=%p", buf);
+
+	ss_ data;
+	if(buf == nullptr)
+		data = lua_tocppstring(L, 2);
+	else
+		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+
+	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
+	lua_pop(L, 1);
+	Context *context = buildat_app->get_scene()->GetContext();
+	auto *voxel_reg = buildat_app->get_voxel_registry();
+
+	CustomGeometry *cg = node->CreateComponent<CustomGeometry>();
+
+	up_<pv::RawVolume<VoxelInstance>> volume = interface::deserialize_volume(data);
+
+	interface::set_voxel_geometry(cg, context, *volume, voxel_reg);
+
+	// Maybe appropriate
+	cg->SetOccluder(true);
+
+	// TODO: Don't do this here; allow the caller to do this
+	cg->SetCastShadows(true);
+
+	return 0;
+}
+
 void init_voxel(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
@@ -128,6 +170,7 @@ void init_voxel(lua_State *L)
 }
 	DEF_BUILDAT_FUNC(set_simple_voxel_model);
 	DEF_BUILDAT_FUNC(set_8bit_voxel_geometry);
+	DEF_BUILDAT_FUNC(set_voxel_geometry);
 }
 
 }	// namespace lua_bindingss
