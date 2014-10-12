@@ -27,6 +27,11 @@ namespace lua_bindings {
 		return 0;\
 	}\
 	type *result_name = (type*)tolua_tousertype(L, index, 0);
+#define TRY_GET_TOLUA_STUFF(result_name, index, type)\
+	type *result_name = nullptr;\
+	if(tolua_isusertype(L, index, #type, 0, &tolua_err)){\
+		result_name = (type*)tolua_tousertype(L, index, 0);\
+	}
 
 // NOTE: This API is designed this way because otherwise ownership management of
 //       objects sucks
@@ -39,12 +44,16 @@ static int l_set_simple_voxel_model(lua_State *L)
 	int w = lua_tointeger(L, 2);
 	int h = lua_tointeger(L, 3);
 	int d = lua_tointeger(L, 4);
-	GET_TOLUA_STUFF(buf, 5, const VectorBuffer);
+	TRY_GET_TOLUA_STUFF(buf, 5, const VectorBuffer);
 
-	log_d(MODULE, "set_simple_voxel_model(): buf=%p", buf);
 	log_d(MODULE, "set_simple_voxel_model(): node=%p", node);
+	log_d(MODULE, "set_simple_voxel_model(): buf=%p", buf);
 
-	ss_ data((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+	ss_ data;
+	if(buf == nullptr)
+		data = lua_tocppstring(L, 5);
+	else
+		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
 
 	if((int)data.size() != w * h * d){
 		log_e(MODULE, "set_simple_voxel_model(): Data size does not match "
@@ -75,11 +84,16 @@ static int l_set_8bit_voxel_geometry(lua_State *L)
 	int w = lua_tointeger(L, 2);
 	int h = lua_tointeger(L, 3);
 	int d = lua_tointeger(L, 4);
-	GET_TOLUA_STUFF(buf, 5, const VectorBuffer);
-	log_d(MODULE, "set_simple_voxel_model(): buf=%p", buf);
-	log_d(MODULE, "set_8bit_voxel_geometry(): node=%p", node);
+	TRY_GET_TOLUA_STUFF(buf, 5, const VectorBuffer);
 
-	ss_ data((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+	log_d(MODULE, "set_8bit_voxel_geometry(): node=%p", node);
+	log_d(MODULE, "set_8bit_voxel_geometry(): buf=%p", buf);
+
+	ss_ data;
+	if(buf == nullptr)
+		data = lua_tocppstring(L, 5);
+	else
+		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
 
 	if((int)data.size() != w * h * d){
 		log_e(MODULE, "set_8bit_voxel_geometry(): Data size does not match "

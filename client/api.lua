@@ -13,12 +13,19 @@ function buildat.safe.set_simple_voxel_model(safe_node, w, h, d, safe_buffer)
 			getmetatable(safe_node).type_name ~= "Node" then
 		error("node is not a sandboxed Node instance")
 	end
-	if not getmetatable(safe_buffer) or
-			getmetatable(safe_buffer).type_name ~= "VectorBuffer" then
-		error("safe_buffer is not a sandboxed VectorBuffer instance")
-	end
 	node = getmetatable(safe_node).unsafe
-	buffer = getmetatable(safe_buffer).unsafe
+
+	buffer = nil
+	if type(safe_buffer) == 'string' then
+		buffer = safe_buffer
+	else
+		if not getmetatable(safe_buffer) or
+				getmetatable(safe_buffer).type_name ~= "VectorBuffer" then
+			error("safe_buffer is not a sandboxed VectorBuffer instance")
+		end
+		buffer = getmetatable(safe_buffer).unsafe
+	end
+
 	__buildat_set_simple_voxel_model(node, w, h, d, buffer)
 end
 
@@ -27,12 +34,18 @@ function buildat.safe.set_8bit_voxel_geometry(safe_node, w, h, d, safe_buffer)
 			getmetatable(safe_node).type_name ~= "Node" then
 		error("node is not a sandboxed Node instance")
 	end
-	if not getmetatable(safe_buffer) or
-			getmetatable(safe_buffer).type_name ~= "VectorBuffer" then
-		error("safe_buffer is not a sandboxed VectorBuffer instance")
-	end
 	node = getmetatable(safe_node).unsafe
-	buffer = getmetatable(safe_buffer).unsafe
+
+	buffer = nil
+	if type(safe_buffer) == 'string' then
+		buffer = safe_buffer
+	else
+		if not getmetatable(safe_buffer) or
+				getmetatable(safe_buffer).type_name ~= "VectorBuffer" then
+			error("safe_buffer is not a sandboxed VectorBuffer instance")
+		end
+		buffer = getmetatable(safe_buffer).unsafe
+	end
 	__buildat_set_8bit_voxel_geometry(node, w, h, d, buffer)
 end
 
