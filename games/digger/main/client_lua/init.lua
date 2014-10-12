@@ -17,8 +17,9 @@ local camera = camera_node:CreateComponent("Camera")
 camera.nearClip = 1.0
 camera.farClip = 500.0
 --camera_node.position = magic.Vector3(10.0, 10.0, 10.0)
-camera_node.position = magic.Vector3(100.0, 100.0, 100.0)
-camera_node:LookAt(magic.Vector3(0, 1, 0))
+--camera_node.position = magic.Vector3(60.0, 60.0, 60.0)
+camera_node.position = magic.Vector3(70.0, 50.0, 70.0)
+camera_node:LookAt(magic.Vector3(0, -5, 0))
 
 -- And this thing so the camera is shown on the screen
 local viewport = magic.Viewport:new(scene, camera_node:GetComponent("Camera"))

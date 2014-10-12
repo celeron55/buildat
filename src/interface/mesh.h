@@ -22,6 +22,7 @@ namespace interface
 			const ss_ &source_data);
 	// Create a model from 8-bit voxel data, using a voxel registry, without
 	// textures or normals, based on the physically_solid flag.
+	// Returns nullptr if there is no geometry
 	Model* create_8bit_voxel_physics_model(Context *context,
 			int w, int h, int d, const ss_ &source_data,
 			VoxelRegistry *voxel_reg);
@@ -32,6 +33,7 @@ namespace interface
 
 	// Create a model from voxel volume, using a voxel registry, without
 	// textures or normals, based on the physically_solid flag.
+	// Returns nullptr if there is no geometry
 	// NOTE: volume is non-const due to PolyVox deficiency
 	Model* create_voxel_physics_model(Context *context,
 			pv::RawVolume<VoxelInstance> &volume,

@@ -6,6 +6,7 @@
 #include "interface/module.h"
 #include "interface/voxel.h"
 #include <PolyVoxCore/Vector.h>
+#include <PolyVoxCore/Region.h>
 #include <functional>
 
 namespace Urho3D
@@ -33,9 +34,8 @@ namespace voxelworld
 		virtual void load_or_generate_section(
 				const pv::Vector3DInt16 &section_p) = 0;
 
-		// Inclusive
-		virtual void get_section_region(const pv::Vector3DInt16 &section_p,
-				pv::Vector3DInt32 &p0, pv::Vector3DInt32 &p1) = 0;
+		virtual pv::Region get_section_region(
+				const pv::Vector3DInt16 &section_p) = 0;
 
 		virtual void set_voxel(const pv::Vector3DInt32 &p,
 				const interface::VoxelInstance &v) = 0;

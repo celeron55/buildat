@@ -23,6 +23,7 @@
 #include <Context.h>
 #include <ResourceCache.h>
 #include <Light.h>
+#include <Geometry.h>
 #pragma GCC diagnostic pop
 #include <deque>
 
@@ -38,6 +39,14 @@ template<> struct hash<pv::Vector<2u, int16_t>>{
 	std::size_t operator()(const pv::Vector<2u, int16_t> &v) const {
 		return ((std::hash<int16_t>() (v.getX()) << 0) ^
 				   (std::hash<int16_t>() (v.getY()) << 1));
+	}
+};
+
+template<> struct hash<pv::Vector<3u, int16_t>>{
+	std::size_t operator()(const pv::Vector<3u, int16_t> &v) const {
+		return ((std::hash<int16_t>() (v.getX()) << 0) ^
+				   (std::hash<int16_t>() (v.getY()) << 1) ^
+				   (std::hash<int16_t>() (v.getZ()) << 2));
 	}
 };
 
@@ -62,6 +71,12 @@ void load(Archive &archive, pv::Vector3DInt16 &v){
 // TODO: Move to a header (core/types_polyvox.h or something)
 template<>
 ss_ dump(const pv::Vector3DInt16 &v){
+	std::ostringstream os(std::ios::binary);
+	os<<"("<<v.getX()<<", "<<v.getY()<<", "<<v.getZ()<<")";
+	return os.str();
+}
+template<>
+ss_ dump(const pv::Vector3DInt32 &v){
 	std::ostringstream os(std::ios::binary);
 	os<<"("<<v.getX()<<", "<<v.getY()<<", "<<v.getZ()<<")";
 	return os.str();
@@ -101,6 +116,14 @@ static inline pv::Vector3DInt16 container_coord16(
 
 namespace voxelworld {
 
+struct JournalEntry
+{
+	VoxelInstance v;
+	pv::Vector3DInt32 p; // Global position
+
+	JournalEntry(const VoxelInstance &v, const pv::Vector3DInt32 &p): v(v), p(p){}
+};
+
 struct Section
 {
 	pv::Vector3DInt16 section_p;// Position in sections
@@ -109,13 +132,16 @@ struct Section
 	// Static voxel nodes (each contains one chunk); Initialized to 0.
 	sp_<pv::RawVolume<int32_t>> node_ids;
 
+	// Chunk write journals (push_back(), pop_front()) (z*h*w + y*w + x)
+	sv_<std::deque<JournalEntry>> write_journals;
+
 	// TODO: Specify what exactly do these mean and how they are used
 	bool loaded = false;
 	bool save_enabled = false;
 	bool generated = false;
 
 	Section(): // Needed for containers
-		chunk_size(0, 0, 0)
+		chunk_size(0, 0, 0) // This is used to detect uninitialized instance
 	{}
 	Section(pv::Vector3DInt16 section_p,
 			pv::Vector3DInt16 chunk_size,
@@ -124,8 +150,39 @@ struct Section
 		chunk_size(chunk_size),
 		contained_chunks(contained_chunks),
 		node_ids(new pv::RawVolume<int32_t>(contained_chunks))
-	{}
+	{
+		size_t num_chunks = contained_chunks.getWidthInVoxels() *
+				contained_chunks.getHeightInVoxels() *
+				contained_chunks.getDepthInVoxels();
+		write_journals.resize(num_chunks);
+	}
+
+	size_t get_chunk_i(const pv::Vector3DInt32 &chunk_p); // global chunk_p
+	pv::Vector3DInt32 get_chunk_p(size_t chunk_p);
 };
+
+size_t Section::get_chunk_i(const pv::Vector3DInt32 &chunk_p) // global chunk_p
+{
+	if(!contained_chunks.containsPoint(chunk_p))
+		throw Exception(ss_()+"get_chunk_i: Section "+cs(section_p)+
+				" does not contain chunk"+cs(chunk_p));
+	auto lc = contained_chunks.getLowerCorner();
+	pv::Vector3DInt32 local_p = chunk_p - lc;
+	int32_t w = contained_chunks.getWidthInVoxels();
+	int32_t h = contained_chunks.getHeightInVoxels();
+	return (local_p.getZ() * h * w + local_p.getY() * w + local_p.getX());
+}
+
+pv::Vector3DInt32 Section::get_chunk_p(size_t chunk_i)
+{
+	int32_t w = contained_chunks.getWidthInVoxels();
+	int32_t h = contained_chunks.getHeightInVoxels();
+	pv::Vector3DInt32 p;
+	p.setZ(chunk_i / h / w);
+	p.setY(chunk_i / w - p.getZ() * h);
+	p.setX(chunk_i - p.getZ() * h * w - p.getY() * w);
+	return contained_chunks.getLowerCorner() + p;
+}
 
 struct Module: public interface::Module, public voxelworld::Interface
 {
@@ -151,6 +208,9 @@ struct Module: public interface::Module, public voxelworld::Interface
 	sm_<pv::Vector<2, int16_t>, sm_<int16_t, Section>> m_sections;
 	// Cache of last used sections (add to end, remove from beginning)
 	//std::deque<Section*> m_last_used_sections;
+
+	// Set of sections that have stuff in their journals
+	std::unordered_set<pv::Vector3DInt16> m_section_journals_dirty;
 
 	Module(interface::Server *server):
 		interface::Module("voxelworld"),
@@ -275,72 +335,23 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 	void on_start()
 	{
-		m_server->access_scene([&](Scene *scene)
-		{
-			Context *context = scene->GetContext();
-			ResourceCache *cache = context->GetSubsystem<ResourceCache>();
-
-			{
-				Node *node = scene->CreateChild("DirectionalLight");
-				node->SetDirection(Vector3(-0.6f, -1.0f, 0.8f));
-				Light *light = node->CreateComponent<Light>();
-				light->SetLightType(LIGHT_DIRECTIONAL);
-				light->SetCastShadows(true);
-			}
-#if 0
-			{
-				Node *n = scene->CreateChild("Base");
-				n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
-				n->SetPosition(Vector3(0.0f, 0.5f, 0.0f));
-
-				int w = 10, h = 4, d = 10;
-				ss_ data =
-					"1131111131111111111133333333333333333333"
-					"1111111111111111111122222222223333333333"
-					"1111111111111111111122222222223333333333"
-					"1111111111111111111122222222223333333333"
-					"1112211111111211111122222222223333333333"
-					"1112311111111211111122223322223333333333"
-					"1111111111111111111122223322223333333333"
-					"1111111111111111111122222222223333333333"
-					"1111111111111111111122222222223333333333"
-					"1111111111111111111122222222223333333333"
-					;
-
-				// Convert data to the actually usable voxel type id namespace
-				// starting from VOXELTYPEID_UNDEFINED=0
-				for(size_t i = 0; i < data.size(); i++){
-					data[i] = data[i] - '0';
-				}
-
-				// Crude way of dynamically defining a voxel model
-				n->SetVar(StringHash("buildat_voxel_data"), Variant(
-							magic::String(data.c_str(), data.size())));
-				n->SetVar(StringHash("buildat_voxel_w"), Variant(w));
-				n->SetVar(StringHash("buildat_voxel_h"), Variant(h));
-				n->SetVar(StringHash("buildat_voxel_d"), Variant(d));
-
-				// Load the same model in here and give it to the physics
-				// subsystem so that it can be collided to
-				SharedPtr<Model> model(interface::
-						create_8bit_voxel_physics_model(context, w, h, d, data,
-						m_voxel_reg.get()));
-
-				RigidBody *body = n->CreateComponent<RigidBody>();
-				body->SetFriction(0.75f);
-				CollisionShape *shape = n->CreateComponent<CollisionShape>();
-				shape->SetTriangleMesh(model, 0, Vector3::ONE);
-			}
-#endif
-		});
-
-		load_or_generate_section(pv::Vector3DInt16( 0, 0, 0));
+		/*load_or_generate_section(pv::Vector3DInt16( 0, 0, 0));
 		load_or_generate_section(pv::Vector3DInt16( 1, 0, 0));
 		load_or_generate_section(pv::Vector3DInt16(-1, 0, 0));
 		load_or_generate_section(pv::Vector3DInt16( 0, 1, 0));
 		load_or_generate_section(pv::Vector3DInt16( 0,-1, 0));
 		load_or_generate_section(pv::Vector3DInt16( 0, 0, 1));
-		load_or_generate_section(pv::Vector3DInt16( 0, 0,-1));
+		load_or_generate_section(pv::Vector3DInt16( 0, 0,-1));*/
+		pv::Region region(-1, 0, -1, 1, 1, 1);
+		auto lc = region.getLowerCorner();
+		auto uc = region.getUpperCorner();
+		for(int z = lc.getZ(); z <= uc.getZ(); z++){
+			for(int y = lc.getY(); y <= uc.getY(); y++){
+				for(int x = lc.getX(); x <= uc.getX(); x++){
+					load_or_generate_section(pv::Vector3DInt16(x, y, z));
+				}
+			}
+		}
 	}
 
 	void on_unload()
@@ -467,7 +478,9 @@ struct Module: public interface::Module, public voxelworld::Interface
 		int h = m_chunk_size_voxels.getY();
 		int d = m_chunk_size_voxels.getZ();
 
-		pv::Region region(0, 0, 0, w-1, h-1, d-1);
+		// NOTE: These volumes have one extra voxel at the positive axis in
+		//       order to make proper meshes without gaps
+		pv::Region region(0, 0, 0, w, h, d);
 		pv::RawVolume<VoxelInstance> volume(region);
 
 		auto lc = region.getLowerCorner();
@@ -480,13 +493,14 @@ struct Module: public interface::Module, public voxelworld::Interface
 			}
 		}
 
-		if(section_p.getX() == 0 && section_p.getY() == 0)
+		/*if(section_p.getX() == 0 && section_p.getY() == 0)
 			volume.setVoxelAt(w/2, h/2, d/2, VoxelInstance(3));
 		else if(section_p.getY() != 0)
 			volume.setVoxelAt(w/2, h/2, d/2, VoxelInstance(2));
 		else
-			volume.setVoxelAt(w/2, h/2, d/2, VoxelInstance(1));
+			volume.setVoxelAt(w/2, h/2, d/2, VoxelInstance(1));*/
 
+		// TODO: Enable compression
 		ss_ data = interface::serialize_volume_simple(volume);
 
 		// TODO: Split data to multiple user variables if data doesn't compress
@@ -500,10 +514,11 @@ struct Module: public interface::Module, public voxelworld::Interface
 		SharedPtr<Model> model(interface::
 				create_voxel_physics_model(context, volume, m_voxel_reg.get()));
 
-		/*RigidBody *body = n->CreateComponent<RigidBody>();
+		RigidBody *body = n->CreateComponent<RigidBody>();
 		body->SetFriction(0.75f);
 		CollisionShape *shape = n->CreateComponent<CollisionShape>();
-		shape->SetTriangleMesh(model, 0, Vector3::ONE);*/
+		if(model)
+			shape->SetTriangleMesh(model, 0, Vector3::ONE);
 	}
 
 	void create_section(Section &section)
@@ -561,10 +576,9 @@ struct Module: public interface::Module, public voxelworld::Interface
 			generate_section(section);
 	}
 
-	void get_section_region(const pv::Vector3DInt16 &section_p,
-			pv::Vector3DInt32 &p0, pv::Vector3DInt32 &p1)
+	pv::Region get_section_region(const pv::Vector3DInt16 &section_p)
 	{
-		p0 = pv::Vector3DInt32(
+		pv::Vector3DInt32 p0 = pv::Vector3DInt32(
 				section_p.getX() * m_section_size_chunks.getX() *
 						m_chunk_size_voxels.getX(),
 				section_p.getY() * m_section_size_chunks.getY() *
@@ -572,11 +586,73 @@ struct Module: public interface::Module, public voxelworld::Interface
 				section_p.getZ() * m_section_size_chunks.getZ() *
 						m_chunk_size_voxels.getZ()
 		);
-		p1 = p0 + pv::Vector3DInt32(
+		pv::Vector3DInt32 p1 = p0 + pv::Vector3DInt32(
 				m_section_size_chunks.getX() * m_chunk_size_voxels.getX() - 1,
 				m_section_size_chunks.getY() * m_chunk_size_voxels.getY() - 1,
 				m_section_size_chunks.getZ() * m_chunk_size_voxels.getZ() - 1
 		);
+		return pv::Region(p0, p1);
+	}
+
+	void set_voxel_direct(const pv::Vector3DInt32 &p,
+			const interface::VoxelInstance &v)
+	{
+		log_t(MODULE, "set_voxel_direct() p=" PV3I_FORMAT ", v=%i",
+				PV3I_PARAMS(p), v.data);
+		pv::Vector3DInt32 chunk_p = container_coord(p, m_chunk_size_voxels);
+		pv::Vector3DInt16 section_p =
+				container_coord16(chunk_p, m_section_size_chunks);
+		Section *section = get_section(section_p);
+		if(section == nullptr){
+			log_w(MODULE, "set_voxel_direct() p=" PV3I_FORMAT ", v=%i: No section "
+					" " PV3I_FORMAT " for chunk " PV3I_FORMAT,
+					PV3I_PARAMS(p), v.data, PV3I_PARAMS(section_p),
+					PV3I_PARAMS(chunk_p));
+			return;
+		}
+		int32_t node_id = section->node_ids->getVoxelAt(chunk_p);
+		if(node_id == 0){
+			log_w(MODULE, "set_voxel_direct() p=" PV3I_FORMAT ", v=%i: No node for "
+					"chunk " PV3I_FORMAT " in section " PV3I_FORMAT,
+					PV3I_PARAMS(p), v.data, PV3I_PARAMS(chunk_p),
+					PV3I_PARAMS(section_p));
+			return;
+		}
+
+		// Have to commit first so that this modification doesn't get
+		// overwritten by some older one
+		// TODO: Commit only the modifications that affect this voxel
+		commit();
+
+		// Lol this is extremely wasteful
+		m_server->access_scene([&](Scene *scene)
+		{
+			Node *n = scene->GetNode(node_id);
+			const Variant &var = n->GetVar(StringHash("buildat_voxel_data"));
+			const PODVector<unsigned char> &buf = var.GetBuffer();
+			ss_ data((const char*)&buf[0], buf.Size());
+			up_<pv::RawVolume<VoxelInstance>> volume =
+					interface::deserialize_volume(data);
+
+			pv::Vector3DInt32 voxel_p(
+					p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX(),
+					p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY(),
+					p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ()
+			);
+			log_t(MODULE, "set_voxel_direct() p=" PV3I_FORMAT ", v=%i: "
+					"Chunk " PV3I_FORMAT " in section " PV3I_FORMAT
+					"; internal position " PV3I_FORMAT,
+					PV3I_PARAMS(p), v.data, PV3I_PARAMS(chunk_p),
+					PV3I_PARAMS(section_p), PV3I_PARAMS(voxel_p));
+			volume->setVoxelAt(voxel_p, v);
+
+			// TODO: Enable compression
+			ss_ new_data = interface::serialize_volume_simple(*volume);
+
+			n->SetVar(StringHash("buildat_voxel_data"), Variant(
+					PODVector<uint8_t>((const uint8_t*)new_data.c_str(),
+							new_data.size())));
+		});
 	}
 
 	void set_voxel(const pv::Vector3DInt32 &p, const interface::VoxelInstance &v)
@@ -594,20 +670,86 @@ struct Module: public interface::Module, public voxelworld::Interface
 					PV3I_PARAMS(chunk_p));
 			return;
 		}
+
+		// Append to journal
+		size_t chunk_i = section->get_chunk_i(chunk_p);
+		section->write_journals[chunk_i].push_back(JournalEntry(v, p));
+		m_section_journals_dirty.insert(section_p);
+	}
+
+	void commit_chunk_journal(Section *section, size_t chunk_i)
+	{
+		pv::Vector3DInt32 chunk_p = section->get_chunk_p(chunk_i);
+
 		int32_t node_id = section->node_ids->getVoxelAt(chunk_p);
 		if(node_id == 0){
-			log_w(MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i: No node for "
-					"chunk " PV3I_FORMAT " in section " PV3I_FORMAT,
-					PV3I_PARAMS(p), v.data, PV3I_PARAMS(chunk_p),
-					PV3I_PARAMS(section_p));
+			log_w(MODULE, "commit_chunk_journal() chunk_i=%zu: "
+					"No node found for chunk " PV3I_FORMAT
+					" in section " PV3I_FORMAT,
+					chunk_i, PV3I_PARAMS(chunk_p),
+					PV3I_PARAMS(section->section_p));
 			return;
 		}
-		// TODO
+
+		auto &write_journal = section->write_journals[chunk_i];
+
+		m_server->access_scene([&](Scene *scene)
+		{
+			Node *n = scene->GetNode(node_id);
+			if(!n){
+				log_w(MODULE, "commit_chunk_journal(): Node %i not found",
+						node_id);
+				return;
+			}
+			const Variant &var = n->GetVar(StringHash("buildat_voxel_data"));
+			const PODVector<unsigned char> &buf = var.GetBuffer();
+			ss_ data((const char*)&buf[0], buf.Size());
+			up_<pv::RawVolume<VoxelInstance>> volume =
+					interface::deserialize_volume(data);
+
+			for(const JournalEntry &entry : write_journal){
+				const pv::Vector3DInt32 &p = entry.p;
+				const interface::VoxelInstance &v = entry.v;
+				pv::Vector3DInt32 voxel_p(
+						p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX(),
+						p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY(),
+						p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ()
+				);
+				volume->setVoxelAt(voxel_p, v);
+			}
+
+			// TODO: Enable compression
+			ss_ new_data = interface::serialize_volume_simple(*volume);
+
+			n->SetVar(StringHash("buildat_voxel_data"), Variant(
+					PODVector<uint8_t>((const uint8_t*)new_data.c_str(),
+							new_data.size())));
+		});
 	}
 
 	void commit()
 	{
-		// TODO:  modifications until this is called
+		log_v(MODULE, "commit(): %zu section journals dirty",
+				m_section_journals_dirty.size());
+		for(const pv::Vector3DInt16 &section_p : m_section_journals_dirty){
+			Section *section = get_section(section_p);
+			if(!section){
+				log_w(MODULE, "commit(): Section " PV3I_FORMAT " not found "
+						"for committing journal", PV3I_PARAMS(section_p));
+				continue;
+			}
+			for(size_t i = 0; i < section->write_journals.size(); i++){
+				commit_chunk_journal(section, i);
+			}
+		}
+		m_section_journals_dirty.clear();
+	}
+
+	VoxelInstance get_voxel(const pv::Vector3DInt32 &p)
+	{
+		// TODO
+		// TODO: Check journal first
+		return VoxelInstance(0);
 	}
 
 	void* get_interface()

@@ -190,6 +190,24 @@ struct CApp: public App, public magic::Application
 		// TOOD: Remove this from here
 		{
 			interface::VoxelDefinition vdef;
+			vdef.name.block_name = "air";
+			vdef.name.segment_x = 0;
+			vdef.name.segment_y = 0;
+			vdef.name.segment_z = 0;
+			vdef.name.rotation_primary = 0;
+			vdef.name.rotation_secondary = 0;
+			vdef.handler_module = "";
+			for(size_t i = 0; i < 6; i++){
+				interface::AtlasSegmentDefinition &seg = vdef.textures[i];
+				seg.resource_name = "";
+				seg.total_segments = magic::IntVector2(0, 0);
+				seg.select_segment = magic::IntVector2(0, 0);
+			}
+			vdef.edge_material_id = interface::EDGEMATERIALID_EMPTY;
+			m_voxel_reg->add_voxel(vdef);	// id 1
+		}
+		{
+			interface::VoxelDefinition vdef;
 			vdef.name.block_name = "rock";
 			vdef.name.segment_x = 0;
 			vdef.name.segment_y = 0;

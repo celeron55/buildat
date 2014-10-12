@@ -8,6 +8,7 @@
 #include "interface/event.h"
 #include "interface/mesh.h"
 #include "interface/voxel.h"
+#include "interface/noise.h"
 #include <Scene.h>
 #include <RigidBody.h>
 #include <CollisionShape.h>
@@ -24,10 +25,13 @@
 
 namespace digger {
 
-using interface::Event;
-using namespace Urho3D;
 namespace magic = Urho3D;
 namespace pv = PolyVox;
+
+using interface::Event;
+using interface::VoxelInstance;
+
+using namespace Urho3D;
 
 struct Module: public interface::Module
 {
@@ -67,6 +71,30 @@ struct Module: public interface::Module
 
 	void on_start()
 	{
+		m_server->access_scene([&](Scene *scene)
+		{
+			Context *context = scene->GetContext();
+			ResourceCache *cache = context->GetSubsystem<ResourceCache>();
+
+			{
+				Node *node = scene->CreateChild("DirectionalLight");
+				node->SetDirection(Vector3(-0.6f, -1.0f, 0.8f));
+				Light *light = node->CreateComponent<Light>();
+				light->SetLightType(LIGHT_DIRECTIONAL);
+				light->SetCastShadows(true);
+				light->SetBrightness(0.8);
+				light->SetColor(Color(1.0, 1.0, 0.95));
+			}
+			{
+				Node *node = scene->CreateChild("DirectionalLight");
+				node->SetDirection(Vector3(0.3f, -1.0f, -0.4f));
+				Light *light = node->CreateComponent<Light>();
+				light->SetLightType(LIGHT_DIRECTIONAL);
+				light->SetCastShadows(true);
+				light->SetBrightness(0.2);
+				light->SetColor(Color(0.7, 0.7, 1.0));
+			}
+		});
 	}
 
 	void on_continue()
@@ -91,13 +119,51 @@ struct Module: public interface::Module
 
 	void on_generation_request(const voxelworld::GenerationRequest &event)
 	{
-		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld){
+		log_v(MODULE, "on_generation_request(): section_p: (%i, %i, %i)",
+				event.section_p.getX(), event.section_p.getY(),
+				event.section_p.getZ());
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
+		{
 			const pv::Vector3DInt16 &section_p = event.section_p;
-			pv::Vector3DInt32 p0;
-			pv::Vector3DInt32 p1;
-			ivoxelworld->get_section_region(section_p, p0, p1);
+			pv::Region region = ivoxelworld->get_section_region(section_p);
 
-			ivoxelworld->set_voxel(p0, interface::VoxelInstance(3));
+			pv::Vector3DInt32 p0 = region.getLowerCorner();
+			pv::Vector3DInt32 p1 = region.getUpperCorner();
+
+			log_t(MODULE, "on_generation_request(): p0: (%i, %i, %i)",
+					p0.getX(), p0.getY(), p0.getZ());
+			log_t(MODULE, "on_generation_request(): p1: (%i, %i, %i)",
+					p1.getX(), p1.getY(), p1.getZ());
+
+			interface::NoiseParams np(0, 20, interface::v3f(40,40,40), 0, 4, 0.5);
+
+			auto lc = region.getLowerCorner();
+			auto uc = region.getUpperCorner();
+			for(int z = lc.getZ(); z <= uc.getZ(); z++){
+				for(int y = lc.getY(); y <= uc.getY(); y++){
+					for(int x = lc.getX(); x <= uc.getX(); x++){
+						pv::Vector3DInt32 p(x, y, z);
+						if(z > 37 && z < 50 && y > 20){
+							ivoxelworld->set_voxel(p, VoxelInstance(1));
+							continue;
+						}
+						if(x > 27 && x < 40 && y > 20){
+							ivoxelworld->set_voxel(p, VoxelInstance(1));
+							continue;
+						}
+						double a = interface::NoisePerlin2D(&np, x, z, 0);
+						if(y < a+5){
+							ivoxelworld->set_voxel(p, VoxelInstance(2));
+						} else if(y < a+10){
+							ivoxelworld->set_voxel(p, VoxelInstance(3));
+						} else if(y < a+11){
+							ivoxelworld->set_voxel(p, VoxelInstance(4));
+						} else {
+							ivoxelworld->set_voxel(p, VoxelInstance(1));
+						}
+					}
+				}
+			}
 		});
 	}
 };
