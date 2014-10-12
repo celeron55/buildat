@@ -26,6 +26,7 @@
 #include <Geometry.h>
 #pragma GCC diagnostic pop
 #include <deque>
+#include <algorithm>
 
 using interface::Event;
 namespace magic = Urho3D;
@@ -131,6 +132,7 @@ struct Section
 	pv::Region contained_chunks;// Position and size in chunks
 	// Static voxel nodes (each contains one chunk); Initialized to 0.
 	sp_<pv::RawVolume<int32_t>> node_ids;
+	size_t num_chunks = 0;
 
 	// Chunk write journals (push_back(), pop_front()) (z*h*w + y*w + x)
 	sv_<std::deque<JournalEntry>> write_journals;
@@ -149,11 +151,11 @@ struct Section
 		section_p(section_p),
 		chunk_size(chunk_size),
 		contained_chunks(contained_chunks),
-		node_ids(new pv::RawVolume<int32_t>(contained_chunks))
-	{
-		size_t num_chunks = contained_chunks.getWidthInVoxels() *
+		node_ids(new pv::RawVolume<int32_t>(contained_chunks)),
+		num_chunks(contained_chunks.getWidthInVoxels() *
 				contained_chunks.getHeightInVoxels() *
-				contained_chunks.getDepthInVoxels();
+				contained_chunks.getDepthInVoxels())
+	{
 		write_journals.resize(num_chunks);
 	}
 
@@ -163,14 +165,15 @@ struct Section
 
 size_t Section::get_chunk_i(const pv::Vector3DInt32 &chunk_p) // global chunk_p
 {
-	if(!contained_chunks.containsPoint(chunk_p))
-		throw Exception(ss_()+"get_chunk_i: Section "+cs(section_p)+
-				" does not contain chunk"+cs(chunk_p));
-	auto lc = contained_chunks.getLowerCorner();
+	auto &lc = contained_chunks.getLowerCorner();
 	pv::Vector3DInt32 local_p = chunk_p - lc;
 	int32_t w = contained_chunks.getWidthInVoxels();
 	int32_t h = contained_chunks.getHeightInVoxels();
-	return (local_p.getZ() * h * w + local_p.getY() * w + local_p.getX());
+	size_t i = local_p.getZ() * h * w + local_p.getY() * w + local_p.getX();
+	if(i >= num_chunks)
+		throw Exception(ss_()+"get_chunk_i: Section "+cs(section_p)+
+				" does not contain chunk"+cs(chunk_p));
+	return i;
 }
 
 pv::Vector3DInt32 Section::get_chunk_p(size_t chunk_i)
@@ -193,10 +196,11 @@ struct Module: public interface::Module, public voxelworld::Interface
 	sp_<interface::VoxelRegistry> m_voxel_reg;
 	sp_<interface::BlockRegistry> m_block_reg;
 
-	// One node holds one chunk of voxels (eg. 32x32x32)
 	pv::Vector3DInt16 m_chunk_size_voxels = pv::Vector3DInt16(16, 16, 16);
-	// The world is loaded and unloaded by sections (eg. 4x4x4)
 	pv::Vector3DInt16 m_section_size_chunks = pv::Vector3DInt16(2, 2, 2);
+	// These are suitable for running under valgrind
+	//pv::Vector3DInt16 m_chunk_size_voxels = pv::Vector3DInt16(8, 8, 8);
+	//pv::Vector3DInt16 m_section_size_chunks = pv::Vector3DInt16(2, 2, 2);
 
 	// TODO: Use these when replication filtering works properly
 	// One node holds one chunk of voxels (eg. 32x32x32)
@@ -207,10 +211,11 @@ struct Module: public interface::Module, public voxelworld::Interface
 	// Sections (this(y,z)=sector, sector(x)=section)
 	sm_<pv::Vector<2, int16_t>, sm_<int16_t, Section>> m_sections;
 	// Cache of last used sections (add to end, remove from beginning)
-	//std::deque<Section*> m_last_used_sections;
+	std::deque<Section*> m_last_used_sections;
 
 	// Set of sections that have stuff in their journals
-	std::unordered_set<pv::Vector3DInt16> m_section_journals_dirty;
+	// (as a sorted array in descending order)
+	std::vector<Section*> m_section_journals_dirty;
 
 	Module(interface::Server *server):
 		interface::Module("voxelworld"),
@@ -407,8 +412,15 @@ struct Module: public interface::Module, public voxelworld::Interface
 				packet.sender, PV3I_PARAMS(section_p));
 	}
 
+	// Get section if exists
 	Section* get_section(const pv::Vector3DInt16 &section_p)
 	{
+		// Check cache
+		for(Section *section : m_last_used_sections){
+			if(section->section_p == section_p)
+				return section;
+		}
+		// Not in cache
 		pv::Vector<2, int16_t> p_yz(section_p.getY(), section_p.getZ());
 		auto sector_it = m_sections.find(p_yz);
 		if(sector_it == m_sections.end())
@@ -418,9 +430,14 @@ struct Module: public interface::Module, public voxelworld::Interface
 		if(section_it == sector.end())
 			return nullptr;
 		Section &section = section_it->second;
+		// Add to cache and return
+		m_last_used_sections.push_back(&section);
+		if(m_last_used_sections.size() > 2) // 2 is maybe optimal-ish
+			m_last_used_sections.pop_front();
 		return &section;
 	}
 
+	// Get a section; allocate it if it doesn't exist yet
 	Section& force_get_section(const pv::Vector3DInt16 &section_p)
 	{
 		pv::Vector<2, int16_t> p_yz(section_p.getY(), section_p.getZ());
@@ -674,7 +691,13 @@ struct Module: public interface::Module, public voxelworld::Interface
 		// Append to journal
 		size_t chunk_i = section->get_chunk_i(chunk_p);
 		section->write_journals[chunk_i].push_back(JournalEntry(v, p));
-		m_section_journals_dirty.insert(section_p);
+
+		// Set journal dirty flag
+		auto dirty_it = std::lower_bound(m_section_journals_dirty.begin(),
+				m_section_journals_dirty.end(), section,
+				std::greater<Section*>()); // position in descending order
+		if(dirty_it == m_section_journals_dirty.end() || *dirty_it != section)
+			m_section_journals_dirty.insert(dirty_it, section);
 	}
 
 	void commit_chunk_journal(Section *section, size_t chunk_i)
@@ -731,13 +754,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 	{
 		log_v(MODULE, "commit(): %zu section journals dirty",
 				m_section_journals_dirty.size());
-		for(const pv::Vector3DInt16 &section_p : m_section_journals_dirty){
-			Section *section = get_section(section_p);
-			if(!section){
-				log_w(MODULE, "commit(): Section " PV3I_FORMAT " not found "
-						"for committing journal", PV3I_PARAMS(section_p));
-				continue;
-			}
+		for(Section *section : m_section_journals_dirty){
 			for(size_t i = 0; i < section->write_journals.size(); i++){
 				commit_chunk_journal(section, i);
 			}
