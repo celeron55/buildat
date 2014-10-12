@@ -60,7 +60,7 @@ function setup_simple_voxel_data(node)
 	--object.castShadows = true
 end
 
-magic.sub_sync_node_added({}, function(node)
+replicate.sub_sync_node_added({}, function(node)
 	if not node:GetVar("simple_voxel_data"):IsEmpty() then
 		setup_simple_voxel_data(node)
 	end
