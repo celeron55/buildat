@@ -15,6 +15,16 @@ function M.define(dst, util)
 		}
 	})
 
+	util.wc("VectorBuffer", {
+		instance = {
+			GetSize = util.self_function(
+					"GetSize", {"number"}, {"VectorBuffer"}),
+		},
+		properties = {
+			size = util.simple_property("number"),
+		},
+	})
+
 	util.wc("Variant", {
 		unsafe_constructor = util.wrap_function({{"Color"}},
 		function(value)
@@ -27,6 +37,11 @@ function M.define(dst, util)
 					"GetString", {"string"}, {"Variant"}),
 			GetInt = util.self_function(
 					"GetInt", {"number"}, {"Variant"}),
+			GetBuffer = util.wrap_function({"Variant"},
+				function(self)
+					return util.wrap_instance("VectorBuffer", self:GetBuffer())
+				end
+			),
 		}
 	})
 
@@ -154,6 +169,11 @@ function M.define(dst, util)
 
 	util.wc("Camera", {
 		inherited_from_by_wrapper = dst.Component,
+		properties = {
+			nearClip = util.simple_property("number"),
+			farClip = util.simple_property("number"),
+			fov = util.simple_property("number"),
+		},
 	})
 
 	util.wc("Model", {

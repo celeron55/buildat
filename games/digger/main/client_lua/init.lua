@@ -13,8 +13,11 @@ local scene = replicate.main_scene
 
 -- Add a camera so we can look at the scene
 local camera_node = scene:CreateChild("Camera")
-camera_node:CreateComponent("Camera")
-camera_node.position = magic.Vector3(7.0, 7.0, 7.0)
+local camera = camera_node:CreateComponent("Camera")
+camera.nearClip = 1.0
+camera.farClip = 500.0
+--camera_node.position = magic.Vector3(10.0, 10.0, 10.0)
+camera_node.position = magic.Vector3(100.0, 100.0, 100.0)
 camera_node:LookAt(magic.Vector3(0, 1, 0))
 
 -- And this thing so the camera is shown on the screen

@@ -35,3 +35,5 @@ Buildat TODO
 - Allow creating and destroying arbitrary amounts of replicated scenes
 - Switch to using #define MODULE in modules, and rename Module::MODULE
 - magic.sub_sync_node_added -> replicate.sub_sync_node_added
+- Use tags for module dependencies (tags, require_tag, disallow_tag), and
+  auto-tag each module at runtime with game_<current_game>

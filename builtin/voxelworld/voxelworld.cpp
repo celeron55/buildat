@@ -21,6 +21,7 @@
 #include <CollisionShape.h>
 #include <Context.h>
 #include <ResourceCache.h>
+#include <Light.h>
 #pragma GCC diagnostic pop
 #include <deque>
 
@@ -70,21 +71,27 @@ namespace voxelworld {
 
 struct Section
 {
+	pv::Vector3DInt16 section_p;// Position in sections
 	pv::Vector3DInt16 chunk_size;
 	pv::Region contained_chunks;// Position and size in chunks
-	pv::Vector3DInt16 section_p;// Position in sections
 	// Static voxel nodes (each contains one chunk); Initialized to 0.
-	pv::SimpleVolume<int32_t> node_ids;
+	sp_<pv::SimpleVolume<int32_t>> node_ids;
 
+	// TODO: Specify what exactly do these mean and how they are used
+	bool loaded = false;
 	bool save_enabled = false;
 	bool generated = false;
 
-	Section(pv::Vector3DInt16 chunk_size, pv::Region contained_chunks,
-			pv::Vector3DInt16 section_p):
+	Section(): // Needed for containers
+		chunk_size(0, 0, 0)
+	{}
+	Section(pv::Vector3DInt16 section_p,
+			pv::Vector3DInt16 chunk_size,
+			pv::Region contained_chunks):
+		section_p(section_p),
 		chunk_size(chunk_size),
 		contained_chunks(contained_chunks),
-		section_p(section_p),
-		node_ids(contained_chunks)
+		node_ids(new pv::SimpleVolume<int32_t>(contained_chunks))
 	{}
 };
 
@@ -102,7 +109,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 	// The world is loaded and unloaded by sections (eg. 4x4x4)
 	pv::Vector3DInt16 m_section_size_chunks = pv::Vector3DInt16(4, 4, 4);
 
-	// Sections (first (y,z), then x)
+	// Sections (this(y,z)=sector, sector(x)=section)
 	sm_<pv::Vector<2, int16_t>, sm_<int16_t, Section>> m_sections;
 	// Cache of last used sections (add to end, remove from beginning)
 	//std::deque<Section*> m_last_used_sections;
@@ -236,22 +243,30 @@ struct Module: public interface::Module, public voxelworld::Interface
 			ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 
 			{
+				Node *node = scene->CreateChild("DirectionalLight");
+				node->SetDirection(Vector3(-0.6f, -1.0f, 0.8f));
+				Light *light = node->CreateComponent<Light>();
+				light->SetLightType(LIGHT_DIRECTIONAL);
+				light->SetCastShadows(true);
+			}
+#if 0
+			{
 				Node *n = scene->CreateChild("Base");
 				n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
 				n->SetPosition(Vector3(0.0f, 0.5f, 0.0f));
 
-				int w = 10, h = 3, d = 10;
+				int w = 10, h = 4, d = 10;
 				ss_ data =
-					"222222222211211111211111111111"
-					"222222222211111111111111111111"
-					"222222222211111111111111111111"
-					"222222222211111111111111111111"
-					"222222222211122111111112111111"
-					"222233222211123111111112111111"
-					"222233222211111111111111111111"
-					"222222222211111111111111111111"
-					"222222222211111111111111111111"
-					"222222222211111111111111111111"
+					"1131111131111111111133333333333333333333"
+					"1111111111111111111122222222223333333333"
+					"1111111111111111111122222222223333333333"
+					"1111111111111111111122222222223333333333"
+					"1112211111111211111122222222223333333333"
+					"1112311111111211111122223322223333333333"
+					"1111111111111111111122223322223333333333"
+					"1111111111111111111122222222223333333333"
+					"1111111111111111111122222222223333333333"
+					"1111111111111111111122222222223333333333"
 					;
 
 				// Convert data to the actually usable voxel type id namespace
@@ -278,7 +293,16 @@ struct Module: public interface::Module, public voxelworld::Interface
 				CollisionShape *shape = n->CreateComponent<CollisionShape>();
 				shape->SetTriangleMesh(model, 0, Vector3::ONE);
 			}
+#endif
 		});
+
+		load_or_generate_section(pv::Vector3DInt16( 0, 0, 0));
+		load_or_generate_section(pv::Vector3DInt16( 1, 0, 0));
+		load_or_generate_section(pv::Vector3DInt16(-1, 0, 0));
+		load_or_generate_section(pv::Vector3DInt16( 0, 1, 0));
+		load_or_generate_section(pv::Vector3DInt16( 0,-1, 0));
+		load_or_generate_section(pv::Vector3DInt16( 0, 0, 1));
+		load_or_generate_section(pv::Vector3DInt16( 0, 0,-1));
 	}
 
 	void on_unload()
@@ -332,7 +356,133 @@ struct Module: public interface::Module, public voxelworld::Interface
 				packet.sender, PV3I_PARAMS(section_p));
 	}
 
+	Section& get_section(const pv::Vector3DInt16 &section_p)
+	{
+		pv::Vector<2, int16_t> p_yz(section_p.getY(), section_p.getZ());
+		sm_<int16_t, Section> &sector = m_sections[p_yz];
+		Section &section = sector[section_p.getX()];
+		if(section.chunk_size.getX() == 0){
+			// Initialize newly created section properly
+			pv::Region contained_chunks(
+					section_p.getX() * m_section_size_chunks.getX(),
+					section_p.getY() * m_section_size_chunks.getY(),
+					section_p.getZ() * m_section_size_chunks.getZ(),
+					(section_p.getX()+1) * m_section_size_chunks.getX() - 1,
+					(section_p.getY()+1) * m_section_size_chunks.getY() - 1,
+					(section_p.getZ()+1) * m_section_size_chunks.getZ() - 1
+			);
+			section = Section(section_p, m_chunk_size_voxels, contained_chunks);
+		}
+		return section;
+	}
+
+	void create_chunk_node(Scene *scene, Section &section, int x, int y, int z)
+	{
+		Context *context = scene->GetContext();
+
+		pv::Vector3DInt16 section_p = section.section_p;
+		pv::Vector3DInt32 chunk_p(
+				section_p.getX() * m_section_size_chunks.getX() + x,
+				section_p.getY() * m_section_size_chunks.getY() + y,
+				section_p.getZ() * m_section_size_chunks.getZ() + z
+		);
+
+		Vector3 node_p(
+				chunk_p.getX() * m_chunk_size_voxels.getX() +
+						m_chunk_size_voxels.getX() / 2.0f,
+				chunk_p.getY() * m_chunk_size_voxels.getY() +
+						m_chunk_size_voxels.getY() / 2.0f,
+				chunk_p.getZ() * m_chunk_size_voxels.getZ() +
+						m_chunk_size_voxels.getZ() / 2.0f
+		);
+		log_t(MODULE, "create_chunk_node(): node_p=(%f, %f, %f)",
+				node_p.x_, node_p.y_, node_p.z_);
+
+		ss_ name = "static_"+dump(section_p)+")"+
+				"_("+itos(x)+","+itos(y)+","+itos(x)+")";
+		Node *n = scene->CreateChild(name.c_str());
+		n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
+		n->SetPosition(node_p);
+
+		int w = m_chunk_size_voxels.getX();
+		int h = m_chunk_size_voxels.getY();
+		int d = m_chunk_size_voxels.getZ();
+		size_t data_len = w * h * d;
+		ss_ data(data_len, '\0');
+
+		data[data_len/2] = '\x02';
+
+		// Crude way of dynamically defining a voxel model
+		n->SetVar(StringHash("buildat_voxel_data"), Variant(
+				PODVector<uint8_t>((const uint8_t*)data.c_str(), data.size())));
+		n->SetVar(StringHash("buildat_voxel_w"), Variant(w));
+		n->SetVar(StringHash("buildat_voxel_h"), Variant(h));
+		n->SetVar(StringHash("buildat_voxel_d"), Variant(d));
+
+		// Load the same model in here and give it to the physics
+		// subsystem so that it can be collided to
+		SharedPtr<Model> model(interface::
+				create_8bit_voxel_physics_model(context, w, h, d, data,
+				m_voxel_reg.get()));
+
+		/*RigidBody *body = n->CreateComponent<RigidBody>();
+		body->SetFriction(0.75f);
+		CollisionShape *shape = n->CreateComponent<CollisionShape>();
+		shape->SetTriangleMesh(model, 0, Vector3::ONE);*/
+	}
+
+	void create_section(Section &section)
+	{
+		m_server->access_scene([&](Scene *scene)
+		{
+			auto lc = section.contained_chunks.getLowerCorner();
+			auto uc = section.contained_chunks.getUpperCorner();
+			for(int z = lc.getZ(); z <= uc.getZ(); z++){
+				for(int y = lc.getY(); y <= uc.getY(); y++){
+					for(int x = lc.getX(); x <= uc.getX(); x++){
+						create_chunk_node(scene, section, x, y, z);
+					}
+				}
+			}
+		});
+	}
+
+	// Somehow get the section's static nodes and possible other nodes, either
+	// by loading from disk or by creating new ones
+	void load_section(Section &section)
+	{
+		if(section.loaded)
+			return;
+		section.loaded = true;
+		pv::Vector3DInt16 section_p = section.section_p;
+		log_v(MODULE, "Loading section " PV3I_FORMAT, PV3I_PARAMS(section_p));
+		// TODO: If found on disk, load nodes from there
+		// TODO: If not found on disk, create new static nodes
+		// Always create new nodes for now
+		create_section(section);
+	}
+
+	// Generate the section; requires static nodes to already exist
+	void generate_section(Section &section)
+	{
+		if(section.generated)
+			return;
+		section.generated = true;
+		pv::Vector3DInt16 section_p = section.section_p;
+		log_v(MODULE, "Generating section " PV3I_FORMAT, PV3I_PARAMS(section_p));
+		// TODO
+	}
+
 	// Interface
+
+	void load_or_generate_section(const pv::Vector3DInt16 &section_p)
+	{
+		Section &section = get_section(section_p);
+		if(!section.loaded)
+			load_section(section);
+		if(!section.generated)
+			generate_section(section);
+	}
 
 	void* get_interface()
 	{

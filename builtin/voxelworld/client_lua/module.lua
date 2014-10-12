@@ -39,14 +39,14 @@ function M.init()
 	end)
 
 	magic.SubscribeToEvent("Update", function(event_type, event_data)
-		if camera_node then
+		if camera_node and M.section_size_voxels then
 			local p = camera_node.position
 			update_counter = update_counter + 1
 			if update_counter % 60 == 0 then
 				local section_p = buildat.IntVector3(p):div_components(
 						M.section_size_voxels):floor()
-				log:info("p: "..p.x..", "..p.y..", "..p.z.." -> section_p: "..
-						section_p.x..", "..section_p.y..", "..section_p.z)
+				--log:info("p: "..p.x..", "..p.y..", "..p.z.." -> section_p: "..
+				--		section_p.x..", "..section_p.y..", "..section_p.z)
 				--[[send_get_section(section_p + buildat.IntVector3( 0, 0, 0))
 				send_get_section(section_p + buildat.IntVector3(-1, 0, 0))
 				send_get_section(section_p + buildat.IntVector3( 1, 0, 0))
@@ -59,11 +59,11 @@ function M.init()
 	end)
 
 	local function setup_buildat_voxel_data(node)
-		local data = node:GetVar("buildat_voxel_data"):GetString()
+		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
 		local w = node:GetVar("buildat_voxel_w"):GetInt()
 		local h = node:GetVar("buildat_voxel_h"):GetInt()
 		local d = node:GetVar("buildat_voxel_d"):GetInt()
-		log:info(dump(node:GetName()).." voxel data size: "..#data)
+		log:info(dump(node:GetName()).." voxel data size: "..data:GetSize())
 		buildat.set_8bit_voxel_geometry(node, w, h, d, data)
 		node:SetScale(magic.Vector3(1, 1, 1))
 	end
