@@ -368,7 +368,9 @@ function M.define(dst, util)
 			),
 			GetViewport = util.wrap_function({"Renderer", "number"},
 				function(self, index)
-					return util.wrap_instance("Viewport", self:GetViewport(index))
+					local ret = self:GetViewport(index)
+					if ret == nil then return nil end
+					return util.wrap_instance("Viewport", ret)
 				end
 			),
 		},

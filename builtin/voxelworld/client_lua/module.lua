@@ -9,7 +9,11 @@ local dump = buildat.dump
 local M = {}
 
 local camera_node = nil
-local update_counter = 0
+local update_counter = -1
+
+M.chunk_size_voxels = nil
+M.section_size_chunks = nil
+M.section_size_voxels = nil
 
 function M.init()
 	log:info("voxelworld.init()")
@@ -28,35 +32,70 @@ function M.init()
 			}},
 		})
 		log:info(dump(values))
+		M.chunk_size_voxels = buildat.IntVector3(values.chunk_size_voxels)
+		M.section_size_chunks = buildat.IntVector3(values.section_size_chunks)
+		M.section_size_voxels =
+				M.chunk_size_voxels:mul_components(M.section_size_chunks)
 	end)
 
 	magic.SubscribeToEvent("Update", function(event_type, event_data)
 		if camera_node then
 			local p = camera_node.position
-			if update_counter % 60 == 0 then
-				--log:info("p: "..p.x..", "..p.y..", "..p.z)
-				local data = cereal.binary_output({
-					p = {
-						x = p.x,
-						y = p.y,
-						z = p.z,
-					},
-				}, {"object",
-					{"p", {"object",
-						{"x", "double"},
-						{"y", "double"},
-						{"z", "double"},
-					}},
-				})
-				buildat.send_packet("voxelworld:camera_position", data)
-			end
 			update_counter = update_counter + 1
+			if update_counter % 60 == 0 then
+				local section_p = buildat.IntVector3(p):div_components(
+						M.section_size_voxels):floor()
+				log:info("p: "..p.x..", "..p.y..", "..p.z.." -> section_p: "..
+						section_p.x..", "..section_p.y..", "..section_p.z)
+				--[[send_get_section(section_p + buildat.IntVector3( 0, 0, 0))
+				send_get_section(section_p + buildat.IntVector3(-1, 0, 0))
+				send_get_section(section_p + buildat.IntVector3( 1, 0, 0))
+				send_get_section(section_p + buildat.IntVector3( 0, 1, 0))
+				send_get_section(section_p + buildat.IntVector3( 0,-1, 0))
+				send_get_section(section_p + buildat.IntVector3( 0, 0, 1))
+				send_get_section(section_p + buildat.IntVector3( 0, 0,-1))]]
+			end
 		end
+	end)
+
+	local function setup_buildat_voxel_data(node)
+		local data = node:GetVar("buildat_voxel_data"):GetString()
+		local w = node:GetVar("buildat_voxel_w"):GetInt()
+		local h = node:GetVar("buildat_voxel_h"):GetInt()
+		local d = node:GetVar("buildat_voxel_d"):GetInt()
+		log:info(dump(node:GetName()).." voxel data size: "..#data)
+		buildat.set_8bit_voxel_geometry(node, w, h, d, data)
+		node:SetScale(magic.Vector3(1, 1, 1))
+	end
+
+	replicate.sub_sync_node_added({}, function(node)
+		if not node:GetVar("buildat_voxel_data"):IsEmpty() then
+			setup_buildat_voxel_data(node)
+		end
+		local name = node:GetName()
 	end)
 end
 
 function M.set_camera(new_camera_node)
 	camera_node = new_camera_node
+end
+
+function send_get_section(p)
+	local data = cereal.binary_output({
+		p = {
+			x = p.x,
+			y = p.y,
+			z = p.z,
+		},
+	}, {"object",
+		{"p", {"object",
+			{"x", "int32_t"},
+			{"y", "int32_t"},
+			{"z", "int32_t"},
+		}},
+	})
+	--log:info(dump(buildat.bytes(data)))
+	buildat.send_packet("voxelworld:get_section", data)
 end
 
 return M

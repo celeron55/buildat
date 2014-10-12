@@ -16,7 +16,11 @@
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Node.h>
 #include <Scene.h>
-//#include <MemoryBuffer.h>
+#include <Model.h>
+#include <RigidBody.h>
+#include <CollisionShape.h>
+#include <Context.h>
+#include <ResourceCache.h>
 #pragma GCC diagnostic pop
 #include <deque>
 
@@ -44,12 +48,23 @@ void save(Archive &archive, const pv::Vector3DInt16 &v){
 }
 template<class Archive>
 void load(Archive &archive, pv::Vector3DInt16 &v){
-	int16_t x, y, z;
-	archive((int32_t)x, (int32_t)y, (int32_t)z);
+	int32_t x, y, z;
+	archive(x, y, z);
 	v.setX(x); v.setY(y); v.setZ(z);
 }
 
 }
+
+// PolyVox logging helpers
+// TODO: Move to a header (core/types_polyvox.h or something)
+template<>
+ss_ dump(const pv::Vector3DInt16 &v){
+	std::ostringstream os(std::ios::binary);
+	os<<"("<<v.getX()<<", "<<v.getY()<<", "<<v.getZ()<<")";
+	return os.str();
+}
+#define PV3I_FORMAT "(%i, %i, %i)"
+#define PV3I_PARAMS(p) p.getX(), p.getY(), p.getZ()
 
 namespace voxelworld {
 
@@ -111,7 +126,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t(
-					"network:packet_received/voxelworld:camera_position"));
+					"network:packet_received/voxelworld:get_section"));
 
 		m_server->access_scene([&](Scene *scene)
 		{
@@ -209,12 +224,61 @@ struct Module: public interface::Module, public voxelworld::Interface
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
 				client_file::FilesTransmitted)
-		EVENT_TYPEN("network:packet_received/voxelworld:camera_position",
-				on_camera_position, network::Packet)
+		EVENT_TYPEN("network:packet_received/voxelworld:get_section",
+				on_get_section, network::Packet)
 	}
 
 	void on_start()
 	{
+		m_server->access_scene([&](Scene *scene)
+		{
+			Context *context = scene->GetContext();
+			ResourceCache *cache = context->GetSubsystem<ResourceCache>();
+
+			{
+				Node *n = scene->CreateChild("Base");
+				n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
+				n->SetPosition(Vector3(0.0f, 0.5f, 0.0f));
+
+				int w = 10, h = 3, d = 10;
+				ss_ data =
+					"222222222211211111211111111111"
+					"222222222211111111111111111111"
+					"222222222211111111111111111111"
+					"222222222211111111111111111111"
+					"222222222211122111111112111111"
+					"222233222211123111111112111111"
+					"222233222211111111111111111111"
+					"222222222211111111111111111111"
+					"222222222211111111111111111111"
+					"222222222211111111111111111111"
+					;
+
+				// Convert data to the actually usable voxel type id namespace
+				// starting from VOXELTYPEID_UNDEFINED=0
+				for(size_t i = 0; i < data.size(); i++){
+					data[i] = data[i] - '0';
+				}
+
+				// Crude way of dynamically defining a voxel model
+				n->SetVar(StringHash("buildat_voxel_data"), Variant(
+							magic::String(data.c_str(), data.size())));
+				n->SetVar(StringHash("buildat_voxel_w"), Variant(w));
+				n->SetVar(StringHash("buildat_voxel_h"), Variant(h));
+				n->SetVar(StringHash("buildat_voxel_d"), Variant(d));
+
+				// Load the same model in here and give it to the physics
+				// subsystem so that it can be collided to
+				SharedPtr<Model> model(interface::
+						create_8bit_voxel_physics_model(context, w, h, d, data,
+						m_voxel_reg.get()));
+
+				RigidBody *body = n->CreateComponent<RigidBody>();
+				body->SetFriction(0.75f);
+				CollisionShape *shape = n->CreateComponent<CollisionShape>();
+				shape->SetTriangleMesh(model, 0, Vector3::ONE);
+			}
+		});
 	}
 
 	void on_unload()
@@ -255,16 +319,17 @@ struct Module: public interface::Module, public voxelworld::Interface
 		});
 	}
 
-	void on_camera_position(const network::Packet &packet)
+	// TODO: How should nodes be filtered for replication?
+	void on_get_section(const network::Packet &packet)
 	{
-		double px, py, pz;
+		pv::Vector3DInt16 section_p;
 		{
 			std::istringstream is(packet.data, std::ios::binary);
 			cereal::PortableBinaryInputArchive ar(is);
-			ar(px, py, pz);
+			ar(section_p);
 		}
-		log_v(MODULE, "Camera position of C%i: (%f, %f, %f)",
-				packet.sender, px, py, pz);
+		log_v(MODULE, "C%i: on_get_section(): " PV3I_FORMAT,
+				packet.sender, PV3I_PARAMS(section_p));
 	}
 
 	// Interface

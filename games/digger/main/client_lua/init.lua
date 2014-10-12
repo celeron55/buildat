@@ -42,32 +42,4 @@ function handle_keydown(event_type, event_data)
 end
 magic.SubscribeToEvent("KeyDown", "handle_keydown")
 
-function setup_simple_voxel_data(node)
-	--buildat.set_simple_voxel_model(node, 3, 3, 3, "010111010111111111010111010")
-	--node:SetScale(magic.Vector3(0.5, 0.5, 0.5))
-	--buildat.set_simple_voxel_model(node, 2, 2, 2, "11101111")
-	--node:SetScale(magic.Vector3(1, 1, 1))
-	--buildat.set_simple_voxel_model(node, 1, 1, 1, "1")
-	--node:SetScale(magic.Vector3(2, 2, 2))
-
-	-- Should be something like "11101111"
-	local data = node:GetVar("simple_voxel_data"):GetString()
-	local w = node:GetVar("simple_voxel_w"):GetInt()
-	local h = node:GetVar("simple_voxel_h"):GetInt()
-	local d = node:GetVar("simple_voxel_d"):GetInt()
-	log:info(dump(node:GetName()).." voxel data size: "..#data)
-	buildat.set_8bit_voxel_geometry(node, w, h, d, data)
-	node:SetScale(magic.Vector3(1, 1, 1))
-
-	--local object = node:GetComponent("StaticModel")
-	--object.castShadows = true
-end
-
-magic.sub_sync_node_added({}, function(node)
-	if not node:GetVar("simple_voxel_data"):IsEmpty() then
-		setup_simple_voxel_data(node)
-	end
-	local name = node:GetName()
-end)
-
 -- vim: set noet ts=4 sw=4:
