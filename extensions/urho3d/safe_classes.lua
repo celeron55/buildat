@@ -80,9 +80,19 @@ function M.define(dst, util)
 		function(x, y, z)
 			return util.wrap_instance("Vector3", Vector3(x, y, z))
 		end),
+		instance = {
+			Length = util.self_function(
+					"Length", {"number"}, {"Vector3"}),
+		},
 		instance_meta = {
 			__mul = util.wrap_function({"Vector3", "number"}, function(self, n)
 				return util.wrap_instance("Vector3", self * n)
+			end),
+			__add = util.wrap_function({"Vector3", "Vector3"}, function(self, other)
+				return util.wrap_instance("Vector3", self + other)
+			end),
+			__sub = util.wrap_function({"Vector3", "Vector3"}, function(self, other)
+				return util.wrap_instance("Vector3", self - other)
 			end),
 		},
 		properties = {
@@ -315,6 +325,7 @@ function M.define(dst, util)
 			),
 			SetVar = util.self_function("SetVar", {},
 					{"Node", "StringHash", "Variant"}),
+			GetWorldPosition = util.self_function("GetWorldPosition", {dst.Vector3}, {"Node"}),
 		},
 		properties = {
 			scale = util.simple_property(dst.Vector3),
