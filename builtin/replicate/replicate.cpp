@@ -432,7 +432,7 @@ struct Module: public interface::Module, public replicate::Interface
 			const ss_ &name, const magic::VectorBuffer &buf)
 	{
 		log_d(MODULE, "%s: Update size: %zu, data=%s",
-				cs(name), buf.GetBuffer().Size(), cs(dump(buf)));
+				cs(name), buf.GetBuffer().Size());
 		ss_ data = buf_to_string(buf);
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, name, data);
