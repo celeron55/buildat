@@ -93,7 +93,24 @@ namespace PolyVox
 	template <typename VoxelType>
 	VoxelType RawVolume<VoxelType>::getVoxelAt(int32_t uXPos, int32_t uYPos, int32_t uZPos) const
 	{
-		if(this->m_regValidRegion.containsPoint(Vector3DInt32(uXPos, uYPos, uZPos)))
+		// NOTE: Crazy-optimized version; probably behaves wrongly in corner
+		//       cases which Buildat does not cause.
+		const Vector3DInt32& v3dLowerCorner = this->m_regValidRegion.getLowerCorner();
+		int32_t iLocalXPos = uXPos - v3dLowerCorner.getX();
+		int32_t iLocalYPos = uYPos - v3dLowerCorner.getY();
+		int32_t iLocalZPos = uZPos - v3dLowerCorner.getZ();
+		size_t i =
+				iLocalXPos +
+				iLocalYPos * this->getWidth() +
+				iLocalZPos * this->getWidth() * this->getHeight();
+
+		if(i >= m_dataSize)
+			return this->getBorderValue();
+		else
+			return m_pData[i];
+
+		// Original implementation
+		/*if(this->m_regValidRegion.containsPoint(Vector3DInt32(uXPos, uYPos, uZPos)))
 		{
 			const Vector3DInt32& v3dLowerCorner = this->m_regValidRegion.getLowerCorner();
 			int32_t iLocalXPos = uXPos - v3dLowerCorner.getX();
@@ -110,7 +127,7 @@ namespace PolyVox
 		else
 		{
 			return this->getBorderValue();
-		}
+		}*/
 	}
 
 	////////////////////////////////////////////////////////////////////////////////
@@ -142,7 +159,25 @@ namespace PolyVox
 	template <typename VoxelType>
 	bool RawVolume<VoxelType>::setVoxelAt(int32_t uXPos, int32_t uYPos, int32_t uZPos, VoxelType tValue)
 	{
-		if(this->m_regValidRegion.containsPoint(Vector3DInt32(uXPos, uYPos, uZPos)))
+		// NOTE: Crazy-optimized version; probably behaves wrongly in corner
+		//       cases which Buildat does not cause.
+		const Vector3DInt32& v3dLowerCorner = this->m_regValidRegion.getLowerCorner();
+		int32_t iLocalXPos = uXPos - v3dLowerCorner.getX();
+		int32_t iLocalYPos = uYPos - v3dLowerCorner.getY();
+		int32_t iLocalZPos = uZPos - v3dLowerCorner.getZ();
+		size_t i =
+				iLocalXPos +
+				iLocalYPos * this->getWidth() +
+				iLocalZPos * this->getWidth() * this->getHeight();
+
+		if(i >= m_dataSize)
+			return false;
+
+		m_pData[i] = tValue;
+		return true;
+
+		// Original implementation
+		/*if(this->m_regValidRegion.containsPoint(Vector3DInt32(uXPos, uYPos, uZPos)))
 		{
 			const Vector3DInt32& v3dLowerCorner = this->m_regValidRegion.getLowerCorner();
 			int32_t iLocalXPos = uXPos - v3dLowerCorner.getX();
@@ -162,7 +197,7 @@ namespace PolyVox
 		else
 		{
 			return false;
-		}
+		}*/
 	}
 
 	////////////////////////////////////////////////////////////////////////////////
@@ -191,6 +226,8 @@ namespace PolyVox
 
 		//Create the data
 		m_pData = new VoxelType[this->getWidth() * this->getHeight()* this->getDepth()];
+		// Store this so it doesn't need to be calculated again
+		m_dataSize = this->getWidth() * this->getHeight() * this->getDepth();
 
 		//Other properties we might find useful later
 		this->m_uLongestSideLength = (std::max)((std::max)(this->getWidth(),this->getHeight()),this->getDepth());
@@ -204,7 +241,7 @@ namespace PolyVox
 	template <typename VoxelType>
 	uint32_t RawVolume<VoxelType>::calculateSizeInBytes(void)
 	{
-		return this->getWidth() * this->getHeight() * this->getDepth() * sizeof(VoxelType);
+		return m_dataSize * sizeof(VoxelType);
 	}
 
 }

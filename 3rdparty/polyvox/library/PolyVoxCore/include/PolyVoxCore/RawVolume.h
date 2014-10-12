@@ -139,6 +139,11 @@ namespace PolyVox
 		/// Calculates approximatly how many bytes of memory the volume is currently using.
 		uint32_t calculateSizeInBytes(void);
 
+		//The block data
+		VoxelType* m_pData;
+
+		size_t m_dataSize;
+
 	protected:
 		/// Copy constructor
 		RawVolume(const RawVolume& rhs);
@@ -148,9 +153,6 @@ namespace PolyVox
 
 	private:
 		void initialise(const Region& regValidRegion);
-
-		//The block data
-		VoxelType* m_pData;
 
 		//The border value
 		VoxelType m_tBorderValue;

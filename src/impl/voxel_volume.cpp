@@ -19,12 +19,10 @@ ss_ serialize_volume_simple(const pv::RawVolume<VoxelInstance> &volume)
 		auto region = volume.getEnclosingRegion();
 		auto lc = region.getLowerCorner();
 		auto uc = region.getUpperCorner();
-		for(int z = lc.getZ(); z <= uc.getZ(); z++){
-			for(int y = lc.getY(); y <= uc.getY(); y++){
-				for(int x = lc.getX(); x <= uc.getX(); x++){
-					ar((uint32_t)volume.getVoxelAt(x, y, z).data);
-				}
-			}
+		size_t size = volume.getWidth() * volume.getHeight() * volume.getDepth();
+		for(size_t i=0; i<size; i++){
+			const VoxelInstance &v = volume.m_pData[i];
+			ar((uint32_t)v.data);
 		}
 	}
 	return os.str();
@@ -53,16 +51,11 @@ up_<pv::RawVolume<VoxelInstance>> deserialize_volume(const ss_ &data)
 		pv::Region region(0, 0, 0, w-1, h-1, d-1);
 		up_<pv::RawVolume<VoxelInstance>> volume(
 				new pv::RawVolume<VoxelInstance>(region));
-		auto lc = region.getLowerCorner();
-		auto uc = region.getUpperCorner();
-		for(int z = lc.getZ(); z <= uc.getZ(); z++){
-			for(int y = lc.getY(); y <= uc.getY(); y++){
-				for(int x = lc.getX(); x <= uc.getX(); x++){
-					uint32_t v;
-					ar(v);
-					volume->setVoxelAt(x, y, z, VoxelInstance(v));
-				}
-			}
+		size_t size = volume->getWidth() * volume->getHeight() * volume->getDepth();
+		for(size_t i=0; i<size; i++){
+			uint32_t v;
+			ar(v);
+			volume->m_pData[i].data = v;
 		}
 		return volume;
 	}

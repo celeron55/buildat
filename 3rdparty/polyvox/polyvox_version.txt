@@ -12,3 +12,9 @@ Stripped out floody messages from CMakeLists.txt
 
 Various changes in CMakeLists.txt on various subdirectory levels.
 
+Perforamnce tweaks:
+- public RawVolume::m_pData
+- add RawVolume::m_dataSize
+- optimize RawVolume::getVoxelAt() and RawVolume::setVoxelAt() in a way that
+  does not handle edge cases properly
+
