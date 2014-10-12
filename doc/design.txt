@@ -192,14 +192,16 @@ The voxel world:
 	- If these registries are synchronized in the background, it probably is not
 	  feasible to allow making anonymous ones
 - Voxel data is always just a string in a user variable in each node
-	- Nodes also contain:
-		- the used voxel registry name
-		- the used data format
-		- data modification version
+	- Nodes contain:
+		- the used voxel registry name ("buildat_voxel_registry_name")
+		- the data itself              ("buildat_voxel_data")
+		- the used data format         ("buildat_voxel_data_format")
+		- data modification version    ("buildat_voxel_mod_version")
 	- The data can be raw or compresed, and it can be cached by node id and data
 	  modification version
 - The client is allowed to see all voxel data for each node that gets synced
-  over network. Hidden data is in local components on the server.
+  over network.
+	- Data can be hidden in local components or other storage on the server.
 - Stationary and non-stationary voxel nodes are stored like any node in the
   world
 	- How can the world be sanely loaded when it only consists of arbitrarily
