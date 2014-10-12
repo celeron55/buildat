@@ -26,4 +26,48 @@ function buildat.safe.set_8bit_voxel_geometry(safe_node, w, h, d, data)
 	__buildat_set_8bit_voxel_geometry(node, w, h, d, data)
 end
 
+local IntVector3_prototype = {
+	x = 0,
+	y = 0,
+	z = 0,
+	mul_components = function(a, b)
+		return buildat.safe.IntVector3(
+				a.x * b.x, a.y * b.y, a.z * b.z)
+	end,
+	div_components = function(a, b)
+		return buildat.safe.IntVector3(
+				a.x / b.x, a.y / b.y, a.z / b.z)
+	end,
+	floor = function(a)
+		return buildat.safe.IntVector3(
+				math.floor(a.x), math.floor(a.y), math.floor(a.z))
+	end,
+	add = function(a, b)
+		return buildat.safe.IntVector3(
+				a.x + b.x, a.y + b.y, a.z + b.z)
+	end,
+	sub = function(a, b)
+		return buildat.safe.IntVector3(
+				a.x - b.x, a.y - b.y, a.z - b.z)
+	end,
+}
+function buildat.safe.IntVector3(x, y, z)
+	local self = {}
+	if x ~= nil and y == nil and z == nil then
+		self.x = x.x
+		self.y = x.y
+		self.z = x.z
+	else
+		self.x = x
+		self.y = y
+		self.z = z
+	end
+	setmetatable(self, {
+		__index = IntVector3_prototype,
+		__add = IntVector3_prototype.add,
+		__sub = IntVector3_prototype.sub,
+	})
+	return self
+end
+
 -- vim: set noet ts=4 sw=4:
