@@ -83,10 +83,22 @@ static inline ss_ ftos(float f){
 
 #define SLEN(x) (sizeof(x)/sizeof((x)[0]))
 
-static inline ss_ dump(const id_ &id){
-	char buf[23];
-	snprintf(buf, 23, "%" PRId64, id.value);
-	return buf;
+template<typename T>
+ss_ dump(const T &v);
+
+template<>
+inline ss_ dump(const double &v){
+	return ftos(v);
+}
+
+template<>
+inline ss_ dump(const uint32_t &v){
+	return itos(v);
+}
+
+template<>
+inline ss_ dump(const uint64_t &v){
+	return itos(v);
 }
 
 template<typename T>
