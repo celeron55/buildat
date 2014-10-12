@@ -95,7 +95,8 @@ namespace interface
 		uint32_t data;
 
 		VoxelInstance(){}
-		VoxelInstance(VoxelTypeId id): data(id){}
+		// Create voxel from raw data (MSBs are preserved)
+		VoxelInstance(uint32_t id): data(id){}
 
 		VoxelTypeId getId() const { return data & 0x001fffff; }
 		uint8_t getMSB() const { return (data>>24) & 0xff; }
