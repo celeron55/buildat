@@ -84,7 +84,7 @@ static inline ss_ ftos(float f){
 #define SLEN(x) (sizeof(x)/sizeof((x)[0]))
 
 template<typename T>
-ss_ dump(const T &v);
+static inline ss_ dump(const T &v);
 
 template<>
 inline ss_ dump(const double &v){
@@ -101,8 +101,13 @@ inline ss_ dump(const uint64_t &v){
 	return itos(v);
 }
 
+template<>
+inline ss_ dump(const uint8_t &v){
+	return itos(v);
+}
+
 template<typename T>
-ss_ dump(const sv_<T> &vs){
+static inline ss_ dump(const sv_<T> &vs){
 	std::ostringstream os(std::ios::binary);
 	os<<"[";
 	bool first = true;
@@ -117,7 +122,7 @@ ss_ dump(const sv_<T> &vs){
 }
 
 template<typename T>
-ss_ dump(const std::set<T> &vs){
+static inline ss_ dump(const std::set<T> &vs){
 	std::ostringstream os(std::ios::binary);
 	os<<"(";
 	bool first = true;
