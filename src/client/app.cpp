@@ -189,7 +189,7 @@ struct CApp: public App, public magic::Application
 		// TOOD: Remove this from here
 		{
 			interface::VoxelDefinition vdef;
-			vdef.name.block_name = "air";
+			vdef.name.block_name = "rock";
 			vdef.name.segment_x = 0;
 			vdef.name.segment_y = 0;
 			vdef.name.segment_z = 0;
@@ -198,25 +198,7 @@ struct CApp: public App, public magic::Application
 			vdef.handler_module = "";
 			for(size_t i = 0; i < 6; i++){
 				interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-				seg.resource_name = "";
-				seg.total_segments = magic::IntVector2(0, 0);
-				seg.select_segment = magic::IntVector2(0, 0);
-			}
-			vdef.edge_material_id = interface::EDGEMATERIALID_EMPTY;
-			m_voxel_reg->add_voxel(vdef);	// id 1
-		}
-		{
-			interface::VoxelDefinition vdef;
-			vdef.name.block_name = "ground";
-			vdef.name.segment_x = 0;
-			vdef.name.segment_y = 0;
-			vdef.name.segment_z = 0;
-			vdef.name.rotation_primary = 0;
-			vdef.name.rotation_secondary = 0;
-			vdef.handler_module = "";
-			for(size_t i = 0; i < 6; i++){
-				interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-				seg.resource_name = "main/green_texture.png";
+				seg.resource_name = "main/rock.png";
 				seg.total_segments = magic::IntVector2(1, 1);
 				seg.select_segment = magic::IntVector2(0, 0);
 			}
@@ -226,7 +208,7 @@ struct CApp: public App, public magic::Application
 		}
 		{
 			interface::VoxelDefinition vdef;
-			vdef.name.block_name = "testblock";
+			vdef.name.block_name = "dirt";
 			vdef.name.segment_x = 0;
 			vdef.name.segment_y = 0;
 			vdef.name.segment_z = 0;
@@ -235,13 +217,32 @@ struct CApp: public App, public magic::Application
 			vdef.handler_module = "";
 			for(size_t i = 0; i < 6; i++){
 				interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-				seg.resource_name = "main/pink_texture.png";
+				seg.resource_name = "main/dirt.png";
 				seg.total_segments = magic::IntVector2(1, 1);
 				seg.select_segment = magic::IntVector2(0, 0);
 			}
 			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
 			vdef.physically_solid = true;
 			m_voxel_reg->add_voxel(vdef);	// id 3
+		}
+		{
+			interface::VoxelDefinition vdef;
+			vdef.name.block_name = "grass";
+			vdef.name.segment_x = 0;
+			vdef.name.segment_y = 0;
+			vdef.name.segment_z = 0;
+			vdef.name.rotation_primary = 0;
+			vdef.name.rotation_secondary = 0;
+			vdef.handler_module = "";
+			for(size_t i = 0; i < 6; i++){
+				interface::AtlasSegmentDefinition &seg = vdef.textures[i];
+				seg.resource_name = "main/grass.png";
+				seg.total_segments = magic::IntVector2(1, 1);
+				seg.select_segment = magic::IntVector2(0, 0);
+			}
+			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
+			vdef.physically_solid = true;
+			m_voxel_reg->add_voxel(vdef);	// id 4
 		}
 	}
 
