@@ -344,6 +344,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 	}
 
 	// TODO: How should nodes be filtered for replication?
+	// TODO: Generally the client wants roughly one section, but isn't
+	//       positioned at the middle of a section
 	void on_get_section(const network::Packet &packet)
 	{
 		pv::Vector3DInt16 section_p;
