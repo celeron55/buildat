@@ -67,7 +67,7 @@ function M.init()
 
 	magic.SubscribeToEvent("Update", function(event_type, event_data)
 		if camera_node and M.section_size_voxels then
-			-- TODO: How should this be sent to the server?
+			-- TODO: How should position information be sent to the server?
 			local p = camera_node:GetWorldPosition()
 			update_counter = update_counter + 1
 			if update_counter % 60 == 0 then
@@ -89,10 +89,13 @@ function M.init()
 			local camera_dir = camera_node.direction
 			local camera_p = camera_node:GetWorldPosition()
 			if #node_geometry_update_queue > 0 then
-				local nodes_per_frame = 2
+				local nodes_per_frame = 1
+				--[[
+				-- Limit when camera is turning
 				if camera_dir ~= camera_last_dir or camera_p ~= camera_last_p then
-					nodes_per_frame = 1 -- Limit when camera is turning
+					nodes_per_frame = 1
 				end
+				--]]
 				for i = 1, nodes_per_frame do
 					local node = get_next_geometry_update_node()
 					if not node then break end
