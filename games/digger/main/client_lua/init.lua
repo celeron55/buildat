@@ -33,7 +33,7 @@ player_node.position = magic.Vector3(55, 30, 40)
 player_node.direction = magic.Vector3(-1, 0, 0.4)
 ---[[
 local body = player_node:CreateComponent("RigidBody")
-body.mass = 70.0
+--body.mass = 70.0
 body.friction = 0
 --body.linearVelocity = magic.Vector3(0, -10, 0)
 body.angularFactor = magic.Vector3(0, 0, 0)
@@ -138,6 +138,12 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		end
 		if magic.input:GetKeyDown(magic.KEY_SHIFT) then
 			wanted_v.y = wanted_v.y - MOVE_SPEED
+
+			-- Delay setting this to here so that it's possible to wait for the
+			-- world to load first
+			if body.mass == 0 then
+				body.mass = 70.0
+			end
 		end
 
 		local u = player_node.direction
