@@ -32,6 +32,7 @@
 #include <Octree.h>
 #include <FileSystem.h>
 #include <PhysicsWorld.h>
+#include <DebugRenderer.h>
 #pragma GCC diagnostic pop
 extern "C" {
 #include <lua.h>
@@ -97,6 +98,7 @@ struct CApp: public App, public magic::Application
 	int64_t m_last_script_tick_us;
 	bool m_reboot_requested = false;
 	Options m_options;
+	bool m_draw_debug_geometry = false;
 
 	magic::SharedPtr<magic::Scene> m_scene;
 	magic::SharedPtr<magic::Node> m_camera_node;
@@ -169,6 +171,8 @@ struct CApp: public App, public magic::Application
 
 		// Set up event handlers
 		SubscribeToEvent(magic::E_UPDATE, HANDLER(CApp, on_update));
+		SubscribeToEvent(magic::E_POSTRENDERUPDATE,
+				HANDLER(CApp, on_post_render_update));
 		SubscribeToEvent(magic::E_KEYDOWN, HANDLER(CApp, on_keydown));
 		SubscribeToEvent(magic::E_SCREENMODE, HANDLER(CApp, on_screenmode));
 		SubscribeToEvent(magic::E_LOGMESSAGE, HANDLER(CApp, on_logmessage));
@@ -420,6 +424,7 @@ struct CApp: public App, public magic::Application
 		m_scene = new magic::Scene(context_);
 		m_scene->CreateComponent<magic::Octree>(magic::LOCAL);
 		m_scene->CreateComponent<magic::PhysicsWorld>(magic::LOCAL);
+		m_scene->CreateComponent<magic::DebugRenderer>(magic::LOCAL);
 
 		// Create a camera and a viewport for the scene. The scene can then be
 		// accessed in Lua by magic.renderer:GetViewport(0):GetScene().
@@ -493,6 +498,13 @@ struct CApp: public App, public magic::Application
 		script_tick();
 	}
 
+	void on_post_render_update(
+			magic::StringHash event_type, magic::VariantMap &event_data)
+	{
+		if(m_draw_debug_geometry)
+			m_scene->GetComponent<magic::PhysicsWorld>()->DrawDebugGeometry(true);
+	}
+
 	void on_keydown(magic::StringHash event_type, magic::VariantMap &event_data)
 	{
 		int key = event_data["Key"].GetInt();
@@ -528,6 +540,9 @@ struct CApp: public App, public magic::Application
 		if(key == Urho3D::KEY_F9){
 			magic::DebugHud *dhud = GetSubsystem<magic::Engine>()->CreateDebugHud();
 			dhud->ToggleAll();
+		}
+		if(key == Urho3D::KEY_F8){
+			m_draw_debug_geometry = !m_draw_debug_geometry;
 		}
 	}
 
