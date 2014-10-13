@@ -337,14 +337,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 	void on_start()
 	{
-		/*load_or_generate_section(pv::Vector3DInt16( 0, 0, 0));
-		load_or_generate_section(pv::Vector3DInt16( 1, 0, 0));
-		load_or_generate_section(pv::Vector3DInt16(-1, 0, 0));
-		load_or_generate_section(pv::Vector3DInt16( 0, 1, 0));
-		load_or_generate_section(pv::Vector3DInt16( 0,-1, 0));
-		load_or_generate_section(pv::Vector3DInt16( 0, 0, 1));
-		load_or_generate_section(pv::Vector3DInt16( 0, 0,-1));*/
-		pv::Region region(-1, -1, -1, 1, 1, 1);
+		pv::Region region(-2, -1, -2, 2, 1, 2);
 		auto lc = region.getLowerCorner();
 		auto uc = region.getUpperCorner();
 		for(int z = lc.getZ(); z <= uc.getZ(); z++){
