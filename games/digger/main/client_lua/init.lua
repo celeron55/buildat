@@ -30,6 +30,7 @@ zone.fogEnd = 300
 local player_node = scene:CreateChild("Player")
 --player_node.position = magic.Vector3(0, 30, 0)
 player_node.position = magic.Vector3(55, 30, 40)
+player_node.direction = magic.Vector3(-1, 0, 0.4)
 ---[[
 local body = player_node:CreateComponent("RigidBody")
 body.mass = 70.0
