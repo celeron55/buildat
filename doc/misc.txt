@@ -1,0 +1,5 @@
+The client has masive amounts of stack bloat due to all the Lua bindings; to
+avoid seeing all that clumped into one mysterious <Cycle N>, use something like
+this:
+  valgrind --tool=callgrind --separate-threads=yes --separate-recs=10 --separate-callers=5 bin/buildat_client -s localhost
+
