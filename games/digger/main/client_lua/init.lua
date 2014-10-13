@@ -128,12 +128,12 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 
 		wanted_v = wanted_v:Normalized() * MOVE_SPEED
 
-		--if magic.input:GetKeyPress(magic.KEY_SPACE) then
-		if magic.input:GetKeyDown(magic.KEY_SPACE) then
-			--if player_touches_ground and
-			--		math.abs(body.linearVelocity.y) < JUMP_SPEED then
+		if magic.input:GetKeyDown(magic.KEY_SPACE) or
+				magic.input:GetKeyPress(magic.KEY_SPACE) then
+			if player_touches_ground and
+					math.abs(body.linearVelocity.y) < JUMP_SPEED then
 				wanted_v.y = wanted_v.y + JUMP_SPEED
-			--end
+			end
 		end
 		if magic.input:GetKeyDown(magic.KEY_SHIFT) then
 			wanted_v.y = wanted_v.y - MOVE_SPEED
@@ -173,7 +173,7 @@ magic.SubscribeToEvent("PhysicsCollision", function(event_type, event_data)
 			local distance = contacts:ReadFloat()
 			local impulse = contacts:ReadFloat()
 			--log:info("normal: ("..normal.x..", "..normal.y..", "..normal.z..")")
-			if normal.y > 0.5 then
+			if normal.y < 0.5 then
 				player_touches_ground = true
 			end
 		end
