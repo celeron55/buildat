@@ -204,6 +204,11 @@ struct Module: public interface::Module
 							ivoxelworld->set_voxel(p, VoxelInstance(1));
 							continue;
 						}
+						if(x > 18 && x < 25 && z >= 32 && z <= 37 &&
+								y > 20 && y < 25){
+							ivoxelworld->set_voxel(p, VoxelInstance(1));
+							continue;
+						}
 						double a = interface::NoisePerlin2D(&np, x, z, 0);
 						if(y < a+5){
 							ivoxelworld->set_voxel(p, VoxelInstance(2));

@@ -21,7 +21,9 @@
 #include <Context.h>
 #include <ResourceCache.h>
 #include <Texture2D.h>	// Allows cast to Texture
+#include <CollisionShape.h>
 #pragma GCC diagnostic pop
+#include <climits>
 #define MODULE "mesh"
 
 namespace magic = Urho3D;
@@ -522,6 +524,132 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 	}
 
 	cg->Commit();
+}
+
+void set_voxel_physics_boxes(Node *node, Context *context,
+		pv::RawVolume<VoxelInstance> &volume_orig,
+		VoxelRegistry *voxel_reg)
+{
+	PODVector<CollisionShape*> previous_shapes;
+	node->GetComponents<CollisionShape>(previous_shapes);
+	for(size_t i = 0; i < previous_shapes.Size(); i++){
+		node->RemoveComponent(previous_shapes[i]);
+	}
+
+	int w = volume_orig.getWidth() - 2;
+	int h = volume_orig.getHeight() - 2;
+	int d = volume_orig.getDepth() - 2;
+
+	auto region = volume_orig.getEnclosingRegion();
+	auto &lc = region.getLowerCorner();
+	auto &uc = region.getUpperCorner();
+
+	// Create a new volume which only holds the solidity of the voxels
+	pv::RawVolume<uint8_t> volume(region);
+	for(int x = lc.getX(); x <= uc.getX(); x++){
+		for(int y = lc.getY(); y <= uc.getY(); y++){
+			for(int z = lc.getZ(); z <= uc.getZ(); z++){
+				VoxelInstance v_orig = volume_orig.getVoxelAt(x, y, z);
+				const interface::CachedVoxelDefinition *def =
+						voxel_reg->get_cached(v_orig);
+				uint8_t v = (def && def->physically_solid);
+				volume.setVoxelAt(x, y, z, v);
+			}
+		}
+	}
+
+	// Create minimal number of boxes to fill the solid voxels. Boxes can
+	// overlap. When a box is added, its voxels are set to value 2 in the
+	// temporary volume.
+
+	for(int z0 = lc.getZ(); z0 <= uc.getZ(); z0++){
+		// Loop until this z0 plane is done, then handle the next one
+		for(;;){
+			// Find a solid non-covered voxel (v=1) on the z0 plane
+			int x0 = INT_MAX;
+			int y0 = INT_MAX;
+			for(int x = lc.getX(); x <= uc.getX(); x++){
+				for(int y = lc.getY(); y <= uc.getY(); y++){
+					uint8_t v = volume.getVoxelAt(x, y, z0);
+					if(v == 1){
+						x0 = x;
+						y0 = y;
+						goto found_non_covered_voxel;
+					}
+				}
+			}
+			break; // Done
+found_non_covered_voxel:
+			// Stretch this box first in x, then y and then z to be as large as
+			// possible without covering any non-solid voxels
+			int x1 = x0;
+			int y1 = y0;
+			int z1 = z0;
+			for(;;){
+				x1++;
+				for(int y = y0; y <= y1; y++){
+					for(int z = z0; z <= z1; z++){
+						uint8_t v = volume.getVoxelAt(x1, y, z);
+						if(v == 0)
+							goto x_plane_does_not_fit;
+					}
+				}
+				continue; // Fits
+x_plane_does_not_fit:
+				x1--;
+				break;
+			}
+			for(;;){
+				y1++;
+				for(int x = x0; x <= x1; x++){
+					for(int z = z0; z <= z1; z++){
+						uint8_t v = volume.getVoxelAt(x, y1, z);
+						if(v == 0)
+							goto y_plane_does_not_fit;
+					}
+				}
+				continue; // Fits
+y_plane_does_not_fit:
+				y1--;
+				break;
+			}
+			for(;;){
+				z1++;
+				for(int x = x0; x <= x1; x++){
+					for(int y = y0; y <= y1; y++){
+						uint8_t v = volume.getVoxelAt(x, y, z1);
+						if(v == 0)
+							goto z_plane_does_not_fit;
+					}
+				}
+				continue; // Fits
+z_plane_does_not_fit:
+				z1--;
+				break;
+			}
+			// Now we have a box; set the voxels to 2
+			for(int x = x0; x <= x1; x++){
+				for(int y = y0; y <= y1; y++){
+					for(int z = z0; z <= z1; z++){
+						volume.setVoxelAt(x, y, z, 2);
+					}
+				}
+			}
+			// Create the box
+			CollisionShape *shape =
+					node->CreateComponent<CollisionShape>();
+			shape->SetBox(Vector3(
+					x1 - x0 + 1,
+					y1 - y0 + 1,
+					z1 - z0 + 1
+			));
+			shape->SetPosition(Vector3(
+					(x0 + x1)/2.0f - w/2 - 0.5f,
+					(y0 + y1)/2.0f - h/2 - 0.5f,
+					(z0 + z1)/2.0f - d/2 - 0.5f
+			));
+		}
+	}
 }
 
 }	// namespace interface

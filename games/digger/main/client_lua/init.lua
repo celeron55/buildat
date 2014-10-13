@@ -28,6 +28,7 @@ zone.fogEnd = 300
 
 -- Add a node that the player can use to walk around with
 local player_node = scene:CreateChild("Player")
+--player_node.position = magic.Vector3(0, 30, 0)
 player_node.position = magic.Vector3(55, 30, 40)
 ---[[
 local body = player_node:CreateComponent("RigidBody")
@@ -129,10 +130,10 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 
 		--if magic.input:GetKeyPress(magic.KEY_SPACE) then
 		if magic.input:GetKeyDown(magic.KEY_SPACE) then
-			if player_touches_ground and
-					math.abs(body.linearVelocity.y) < JUMP_SPEED then
+			--if player_touches_ground and
+			--		math.abs(body.linearVelocity.y) < JUMP_SPEED then
 				wanted_v.y = wanted_v.y + JUMP_SPEED
-			end
+			--end
 		end
 		if magic.input:GetKeyDown(magic.KEY_SHIFT) then
 			wanted_v.y = wanted_v.y - MOVE_SPEED

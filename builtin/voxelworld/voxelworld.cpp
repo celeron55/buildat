@@ -529,10 +529,10 @@ struct Module: public interface::Module, public voxelworld::Interface
 		n->SetVar(StringHash("buildat_voxel_data"), Variant(
 				PODVector<uint8_t>((const uint8_t*)data.c_str(), data.size())));
 
-		// There is no collision shape initially, but add the components now
+		// There are no collision shapes initially, but add the rigid body now
 		RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
 		body->SetFriction(0.75f);
-		CollisionShape *shape = n->CreateComponent<CollisionShape>(LOCAL);
+		//CollisionShape *shape = n->CreateComponent<CollisionShape>(LOCAL);
 	}
 
 	void create_section(Section &section)
@@ -752,11 +752,14 @@ struct Module: public interface::Module, public voxelworld::Interface
 			// TODO: Create multiple box collision shapes insteade of one mesh;
 			//       vertical voxel sectors should work well enough maybe
 
-			SharedPtr<Model> model(interface::
-					create_voxel_physics_model(context, *volume,
-							m_voxel_reg.get()));
+			CollisionShape *shape = n->CreateComponent<CollisionShape>();
+			shape->SetBox(Vector3(10, 0, 10));
 
-			CollisionShape *shape = n->GetComponent<CollisionShape>();
+			/*SharedPtr<Model> model(interface::
+					create_voxel_physics_model(context, *volume,
+							m_voxel_reg.get()));*/
+
+			/*CollisionShape *shape = n->GetComponent<CollisionShape>();
 			if(model){
 				log_v(MODULE, "Chunk " PV3I_FORMAT " has collision shape",
 						PV3I_PARAMS(chunk_p));
@@ -767,7 +770,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 				log_v(MODULE, "Chunk " PV3I_FORMAT " does not have collision shape",
 						PV3I_PARAMS(chunk_p));
 				shape->ReleaseShape();
-			}
+			}*/
 		});
 	}
 
