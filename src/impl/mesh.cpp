@@ -300,30 +300,24 @@ public:
 		const interface::CachedVoxelDefinition *front_def =
 				m_voxel_reg->get_cached(front);
 		if(!back_def){
-			log_t(MODULE, "back=%i: Definition not found", back);
 			return false;
 		}
 		else if(back_def->face_draw_type == interface::FaceDrawType::NEVER){
-			log_t(MODULE, "back=%i: FaceDrawType::NEVER", back);
 			return false;
 		}
 		else if(back_def->face_draw_type == interface::FaceDrawType::ALWAYS){
-			log_t(MODULE, "back=%i: FaceDrawType::ALWAYS", back);
 			materialToUse = back;
 			return true;
 		}
 		// interface::FaceDrawType::ON_EDGE
 		if(!front_def){
-			log_t(MODULE, "back=%i: FaceDrawType::ON_EDGE; front undef", back);
 			materialToUse = back;
 			return true;
 		}
 		if(back_def->edge_material_id != front_def->edge_material_id){
-			log_t(MODULE, "back=%i: FaceDrawType::ON_EDGE; edge m. diff", back);
 			materialToUse = back;
 			return true;
 		}
-		log_t(MODULE, "back=%i: FaceDrawType::ON_EDGE; edge same m.", back);
 		return false;
 	}
 };
