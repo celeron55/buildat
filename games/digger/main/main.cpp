@@ -91,12 +91,11 @@ struct Module: public interface::Module
 				light->SetBrightness(0.2);
 				light->SetColor(Color(0.7, 0.7, 1.0));
 			}
-			// Cheat (TODO: Fix)
-			interface::VoxelRegistry *voxel_reg = nullptr;
-			voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld){
-				voxel_reg = ivoxelworld->get_voxel_reg();
-			});
+
+			voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 			{
+				interface::VoxelRegistry *voxel_reg = ivoxelworld->get_voxel_reg();
+
 				Node *n = scene->CreateChild("Testbox");
 				n->SetPosition(Vector3(30.0f, 30.0f, 40.0f));
 				n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
@@ -133,7 +132,7 @@ struct Module: public interface::Module
 				shape->SetConvexHull(model, 0, Vector3::ONE);
 				//shape->SetTriangleMesh(model, 0, Vector3::ONE);
 				//shape->SetBox(Vector3::ONE);
-			}
+			});
 		});
 	}
 
