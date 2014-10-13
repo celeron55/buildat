@@ -504,22 +504,9 @@ struct Module: public interface::Module, public voxelworld::Interface
 			for(int y = lc.getY(); y <= uc.getY(); y++){
 				for(int x = lc.getX(); x <= uc.getX(); x++){
 					volume.setVoxelAt(x, y, z, VoxelInstance(0));
-					/*if(x % 2 == 0){
-						if(z == lc.getZ() + 0)
-							volume.setVoxelAt(x, y, z, VoxelInstance(2));
-						if(z == uc.getZ() - 0)
-							volume.setVoxelAt(x, y, z, VoxelInstance(3));
-					}*/
 				}
 			}
 		}
-
-		/*if(section_p.getX() == 0 && section_p.getY() == 0)
-			volume.setVoxelAt(w/2, h/2, d/2, VoxelInstance(3));
-		else if(section_p.getY() != 0)
-			volume.setVoxelAt(w/2, h/2, d/2, VoxelInstance(2));
-		else
-			volume.setVoxelAt(w/2, h/2, d/2, VoxelInstance(1));*/
 
 		ss_ data = interface::serialize_volume_compressed(volume);
 
@@ -532,7 +519,6 @@ struct Module: public interface::Module, public voxelworld::Interface
 		// There are no collision shapes initially, but add the rigid body now
 		RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
 		body->SetFriction(0.75f);
-		//CollisionShape *shape = n->CreateComponent<CollisionShape>(LOCAL);
 	}
 
 	void create_section(Section &section)
@@ -749,28 +735,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 			// Update collision shape
 
-			// TODO: Create multiple box collision shapes insteade of one mesh;
-			//       vertical voxel sectors should work well enough maybe
-
-			CollisionShape *shape = n->CreateComponent<CollisionShape>();
-			shape->SetBox(Vector3(10, 0, 10));
-
-			/*SharedPtr<Model> model(interface::
-					create_voxel_physics_model(context, *volume,
-							m_voxel_reg.get()));*/
-
-			/*CollisionShape *shape = n->GetComponent<CollisionShape>();
-			if(model){
-				log_v(MODULE, "Chunk " PV3I_FORMAT " has collision shape",
-						PV3I_PARAMS(chunk_p));
-				shape->SetTriangleMesh(model, 0, Vector3::ONE);
-				//shape->SetConvexHull(model, 0, Vector3::ONE);
-				//log_w(MODULE, "CollisionShape disabled");
-			} else {
-				log_v(MODULE, "Chunk " PV3I_FORMAT " does not have collision shape",
-						PV3I_PARAMS(chunk_p));
-				shape->ReleaseShape();
-			}*/
+			interface::set_voxel_physics_boxes(n, context, *volume,
+					m_voxel_reg.get());
 		});
 	}
 

@@ -233,9 +233,9 @@ Model* create_voxel_physics_model(Context *context,
 	sv_<float> vertex_data;
 	vertex_data.resize(num_vertices * 6);	// vertex + normal
 	for(size_t i = 0; i < num_vertices; i++){
-		vertex_data[i*6 + 0] = pv_vertices[i].position.getX() - w/2.0f - 0.5f;
-		vertex_data[i*6 + 1] = pv_vertices[i].position.getY() - h/2.0f - 0.5f;
-		vertex_data[i*6 + 2] = pv_vertices[i].position.getZ() - d/2.0f - 0.5f;
+		vertex_data[i*6 + 0] = pv_vertices[i].position.getX() - w/2.0f - 1.0f;
+		vertex_data[i*6 + 1] = pv_vertices[i].position.getY() - h/2.0f - 1.0f;
+		vertex_data[i*6 + 2] = pv_vertices[i].position.getZ() - d/2.0f - 1.0f;
 		vertex_data[i*6 + 3] = pv_vertices[i].normal.getX();
 		vertex_data[i*6 + 4] = pv_vertices[i].normal.getY();
 		vertex_data[i*6 + 5] = pv_vertices[i].normal.getZ();
@@ -470,9 +470,9 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 			const auto &pv_vert = pv_vertices[pv_vertex_i];
 			tg.vertex_data.Resize(tg.vertex_data.Size() + 1);
 			CustomGeometryVertex &tg_vert = tg.vertex_data.Back();
-			tg_vert.position_.x_ = pv_vert.position.getX() - w/2.0f - 0.5f;
-			tg_vert.position_.y_ = pv_vert.position.getY() - h/2.0f - 0.5f;
-			tg_vert.position_.z_ = pv_vert.position.getZ() - d/2.0f - 0.5f;
+			tg_vert.position_.x_ = pv_vert.position.getX() - w/2.0f - 1.0f;
+			tg_vert.position_.y_ = pv_vert.position.getY() - h/2.0f - 1.0f;
+			tg_vert.position_.z_ = pv_vert.position.getZ() - d/2.0f - 1.0f;
 			tg_vert.normal_.x_ = pv_vert.normal.getX();
 			tg_vert.normal_.y_ = pv_vert.normal.getY();
 			tg_vert.normal_.z_ = pv_vert.normal.getZ();
@@ -644,9 +644,9 @@ z_plane_does_not_fit:
 					z1 - z0 + 1
 			));
 			shape->SetPosition(Vector3(
-					(x0 + x1)/2.0f - w/2 - 0.5f,
-					(y0 + y1)/2.0f - h/2 - 0.5f,
-					(z0 + z1)/2.0f - d/2 - 0.5f
+					(x0 + x1)/2.0f - w/2 - 1.0f,
+					(y0 + y1)/2.0f - h/2 - 1.0f,
+					(z0 + z1)/2.0f - d/2 - 1.0f
 			));
 		}
 	}
