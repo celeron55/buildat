@@ -22,6 +22,7 @@
 #include <ResourceCache.h>
 #include <Texture2D.h>	// Allows cast to Texture
 #include <CollisionShape.h>
+#include <RigidBody.h>
 #pragma GCC diagnostic pop
 #include <climits>
 #define MODULE "mesh"
@@ -526,9 +527,15 @@ void set_voxel_physics_boxes(Node *node, Context *context,
 {
 	PODVector<CollisionShape*> previous_shapes;
 	node->GetComponents<CollisionShape>(previous_shapes);
-	for(size_t i = 0; i < previous_shapes.Size(); i++){
-		node->RemoveComponent(previous_shapes[i]);
-	}
+	// Number of previous shapes reused
+	// (they are reused because deleting them is very expensive)
+	size_t num_shapes_reused = 0;
+
+	// Do this. Otherwise modifying CollisionShapes causes a massive CPU waste
+	// when they call RigidBody::UpdateMass().
+	RigidBody *body = node->GetComponent<RigidBody>();
+	if(body)
+		body->ReleaseBody();
 
 	int w = volume_orig.getWidth() - 2;
 	int h = volume_orig.getHeight() - 2;
@@ -629,9 +636,12 @@ z_plane_does_not_fit:
 					}
 				}
 			}
-			// Create the box
-			CollisionShape *shape =
-					node->CreateComponent<CollisionShape>();
+			// Create the box (reuse a previous shape if possible)
+			CollisionShape *shape = nullptr;
+			if(num_shapes_reused < previous_shapes.Size())
+				shape = previous_shapes[num_shapes_reused++];
+			else
+				shape = node->CreateComponent<CollisionShape>();
 			shape->SetBox(Vector3(
 					x1 - x0 + 1,
 					y1 - y0 + 1,
@@ -643,6 +653,17 @@ z_plane_does_not_fit:
 					(z0 + z1)/2.0f - d/2 - 1.0f
 			));
 		}
+	}
+
+	// Remove excess shapes
+	for(size_t i = num_shapes_reused; i < previous_shapes.Size(); i++){
+		node->RemoveComponent(previous_shapes[i]);
+	}
+
+	if(body){
+		// Call this to cause the private AddBodyToWorld() to be called, which
+		// re-creates the internal btRigidBody and also calls UpdateMass()
+		body->OnSetEnabled();
 	}
 }
 
