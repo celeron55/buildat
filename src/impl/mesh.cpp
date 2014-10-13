@@ -643,7 +643,7 @@ z_plane_does_not_fit:
 			if(num_shapes_reused < previous_shapes.Size())
 				shape = previous_shapes[num_shapes_reused++];
 			else
-				shape = node->CreateComponent<CollisionShape>();
+				shape = node->CreateComponent<CollisionShape>(LOCAL);
 			shape->SetBox(Vector3(
 					x1 - x0 + 1,
 					y1 - y0 + 1,
