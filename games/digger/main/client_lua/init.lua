@@ -21,7 +21,7 @@ magic.input:SetMouseVisible(false)
 local zone_node = scene:CreateChild("Zone")
 local zone = zone_node:CreateComponent("Zone")
 zone.boundingBox = magic.BoundingBox(-1000, 1000)
---zone.ambientColor = magic.Color(0.5, 0.7, 0.9)
+zone.ambientColor = magic.Color(0.1, 0.1, 0.1)
 zone.fogColor = magic.Color(0.6, 0.7, 0.8)
 zone.fogStart = 10
 zone.fogEnd = 300

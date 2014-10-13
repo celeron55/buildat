@@ -196,13 +196,12 @@ struct Module: public interface::Module, public voxelworld::Interface
 	sp_<interface::VoxelRegistry> m_voxel_reg;
 	sp_<interface::BlockRegistry> m_block_reg;
 
-	// One node holds one chunk of voxels (eg. 32x32x32)
-	//pv::Vector3DInt16 m_chunk_size_voxels = pv::Vector3DInt16(32, 32, 32);
+	// One node holds one chunk of voxels (eg. 24x24x24)
+	pv::Vector3DInt16 m_chunk_size_voxels = pv::Vector3DInt16(24, 24, 24);
 	// The world is loaded and unloaded by sections (eg. 2x2x2)
 	pv::Vector3DInt16 m_section_size_chunks = pv::Vector3DInt16(2, 2, 2);
 
 	// These are suitable for running under valgrind
-	pv::Vector3DInt16 m_chunk_size_voxels = pv::Vector3DInt16(16, 16, 16);
 	//pv::Vector3DInt16 m_chunk_size_voxels = pv::Vector3DInt16(8, 8, 8);
 	//pv::Vector3DInt16 m_section_size_chunks = pv::Vector3DInt16(2, 2, 2);
 
