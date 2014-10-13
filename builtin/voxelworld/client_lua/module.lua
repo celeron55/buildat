@@ -17,6 +17,134 @@ M.chunk_size_voxels = nil
 M.section_size_chunks = nil
 M.section_size_voxels = nil
 
+--[[
+	table.binsearch( table, value [, compval [, reversed] ] )
+
+	Searches the table through BinarySearch for the given value.
+	If the  value is found:
+		it returns a table holding all the mathing indices (e.g. { startindice,endindice } )
+		endindice may be the same as startindice if only one matching indice was found
+	If compval is given:
+		then it must be a function that takes one value and returns a second value2,
+		to be compared with the input value, e.g.:
+		compvalue = function( value ) return value[1] end
+	If reversed is set to true:
+		then the search assumes that the table is sorted in reverse order (largest value at position 1)
+		note when reversed is given compval must be given as well, it can be nil/_ in this case
+	Return value:
+		on success: a table holding matching indices (e.g. { startindice,endindice } )
+		on failure: nil
+]]--
+do
+	-- Avoid heap allocs for performance
+	local default_fcompval = function( value ) return value end
+	local fcompf = function( a,b ) return a < b end
+	local fcompr = function( a,b ) return a > b end
+	function table_binsearch( t,value,fcompval,reversed )
+		-- Initialise functions
+		local fcompval = fcompval or default_fcompval
+		local fcomp = reversed and fcompr or fcompf
+		--  Initialise numbers
+		local iStart,iEnd,iMid = 1,#t,0
+		-- Binary Search
+		while iStart <= iEnd do
+			-- calculate middle
+			iMid = math.floor( (iStart+iEnd)/2 )
+			-- get compare value
+			local value2 = fcompval( t[iMid] )
+			-- get all values that match
+			if value == value2 then
+				local tfound,num = { iMid,iMid },iMid - 1
+				while value == fcompval( t[num] ) do
+					tfound[1],num = num,num - 1
+				end
+				num = iMid + 1
+				while value == fcompval( t[num] ) do
+					tfound[2],num = num,num + 1
+				end
+				return tfound
+			-- keep searching
+			elseif fcomp( value,value2 ) then
+				iEnd = iMid - 1
+			else
+				iStart = iMid + 1
+			end
+		end
+	end
+end
+
+--[[
+	table.bininsert( table, value [, comp] )
+
+	Inserts a given value through BinaryInsert into the table sorted by [, comp].
+
+	If 'comp' is given, then it must be a function that receives
+	two table elements, and returns true when the first is less
+	than the second, e.g. comp = function(a, b) return a > b end,
+	will give a sorted table, with the biggest value on position 1.
+	[, comp] behaves as in table.sort(table, value [, comp])
+	returns the index where 'value' was inserted
+]]--
+do
+	-- Avoid heap allocs for performance
+	local fcomp_default = function( a,b ) return a < b end
+	function table_bininsert(t, value, fcomp)
+		-- Initialise compare function
+		local fcomp = fcomp or fcomp_default
+		--  Initialise numbers
+		local iStart,iEnd,iMid,iState = 1,#t,1,0
+		-- Get insert position
+		while iStart <= iEnd do
+			-- calculate middle
+			iMid = math.floor( (iStart+iEnd)/2 )
+			-- compare
+			if fcomp( value,t[iMid] ) then
+				iEnd,iState = iMid - 1,0
+			else
+				iStart,iState = iMid + 1,1
+			end
+		end
+		table.insert( t,(iMid+iState),value )
+		return (iMid+iState)
+	end
+end
+
+local function SpatialUpdateQueue()
+	local self = {
+		p = magic.Vector3(0, 0, 0),
+		queue = {},
+		queue_oldest_p = magic.Vector3(0, 0, 0),
+
+		set_p = function(self, p)
+			self.p = p
+			-- If went too far, sort queue again
+			if (p - self.queue_oldest_p):Length() > 16 then
+				local old_queue = self.queue
+				self.queue = {}
+				for _, item in ipairs(old_queue) do
+					self:put(item.p, item.value)
+				end
+				self.queue_oldest_p = p
+			end
+		end,
+		put = function(self, p, value)
+			local d = (p - self.p):Length()
+			local function fcomp(a, b)
+				return a.d > b.d
+			end
+			table_bininsert(self.queue, {p=p, d=d, value=value}, fcomp)
+			--table.insert(self.queue, {p=p, value=value})
+		end,
+		get = function(self, p)
+			-- TODO
+			local item = table.remove(self.queue)
+			if not item then return nil end
+			return item.value
+		end,
+	}
+	return self
+end
+
 function M.init()
 	log:info("voxelworld.init()")
 
@@ -54,23 +182,7 @@ function M.init()
 		buildat.set_voxel_physics_boxes(node, data, registry_name)
 	end
 
-	local node_geometry_update_queue = {}
-	local node_physics_update_queue = {}
-
-	local function get_closest_update(queue)
-		-- Find closest one
-		local camera_p = camera_node:GetWorldPosition()
-		local closest_d = nil
-		local closest_k = nil
-		for k, node in ipairs(queue) do
-			local d = (node:GetWorldPosition() - camera_p):Length()
-			if closest_d == nil or d < closest_d then
-				closest_d = d
-				closest_k = k
-			end
-		end
-		return table.remove(queue, closest_k)
-	end
+	local node_update_queue = SpatialUpdateQueue()
 
 	magic.SubscribeToEvent("Update", function(event_type, event_data)
 		update_counter = update_counter + 1
@@ -93,34 +205,27 @@ function M.init()
 			end
 		end
 
-		-- Handle geometry updates one node per frame
-		if update_counter % 2 == 0 then
-			if #node_geometry_update_queue > 0 then
-				local nodes_per_frame = 1
-				for i = 1, nodes_per_frame do
-					local node = get_closest_update(node_geometry_update_queue)
-					if not node then
-						break
-					end
-					update_voxel_geometry(node)
-				end
+		local camera_dir = magic.Vector3(0, 0, 0)
+		local camera_p = magic.Vector3(0, 0, 0)
+
+		if camera_node then
+			camera_dir = camera_node.direction
+			camera_p = camera_node:GetWorldPosition()
+		end
+
+		-- Handle one node update per frame
+		node_update_queue:set_p(camera_p)
+		local node_update = node_update_queue:get()
+		if node_update then
+			if node_update.type == "geometry" then
+				update_voxel_geometry(node_update.node)
 			end
-		else
-			if #node_physics_update_queue > 0 then
-				local nodes_per_frame = 1
-				for i = 1, nodes_per_frame do
-					local node = get_closest_update(node_physics_update_queue)
-					if not node then
-						break
-					end
-					update_voxel_physics(node)
-				end
+			if node_update.type == "physics" then
+				update_voxel_physics(node_update.node)
 			end
 		end
 
 		if camera_node then
-			local camera_dir = camera_node.direction
-			local camera_p = camera_node:GetWorldPosition()
 			camera_last_dir = camera_dir
 			camera_last_p = camera_p
 		end
@@ -128,8 +233,14 @@ function M.init()
 
 	replicate.sub_sync_node_added({}, function(node)
 		if not node:GetVar("buildat_voxel_data"):IsEmpty() then
-			table.insert(node_geometry_update_queue, node)
-			table.insert(node_physics_update_queue, node)
+			node_update_queue:put(node:GetWorldPosition(), {
+				type = "geometry",
+				node = node,
+			})
+			node_update_queue:put(node:GetWorldPosition(), {
+				type = "physics",
+				node = node,
+			})
 		end
 		local name = node:GetName()
 	end)
