@@ -161,9 +161,35 @@ static int l_set_voxel_geometry(lua_State *L)
 	// TODO: Don't do this here; allow the caller to do this
 	cg->SetCastShadows(true);
 
-	// TODO: Don't do this here; allow caller to do this explicitly
+	return 0;
+}
+
+// set_voxel_physics_boxes(node, buffer: VectorBuffer)
+static int l_set_voxel_physics_boxes(lua_State *L)
+{
+	tolua_Error tolua_err;
+
+	GET_TOLUA_STUFF(node, 1, Node);
+	TRY_GET_TOLUA_STUFF(buf, 2, const VectorBuffer);
+
+	log_d(MODULE, "set_voxel_physics_boxes(): node=%p", node);
+	log_d(MODULE, "set_voxel_physics_boxes(): buf=%p", buf);
+
+	ss_ data;
+	if(buf == nullptr)
+		data = lua_tocppstring(L, 2);
+	else
+		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+
+	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
+	lua_pop(L, 1);
+	Context *context = buildat_app->get_scene()->GetContext();
+	auto *voxel_reg = buildat_app->get_voxel_registry();
+
+	up_<pv::RawVolume<VoxelInstance>> volume = interface::deserialize_volume(data);
+
 	RigidBody *body = node->GetOrCreateComponent<RigidBody>(LOCAL);
-	body->SetFriction(0.7);
 	interface::set_voxel_physics_boxes(node, context, *volume, voxel_reg);
 
 	return 0;
@@ -178,6 +204,7 @@ void init_voxel(lua_State *L)
 	DEF_BUILDAT_FUNC(set_simple_voxel_model);
 	DEF_BUILDAT_FUNC(set_8bit_voxel_geometry);
 	DEF_BUILDAT_FUNC(set_voxel_geometry);
+	DEF_BUILDAT_FUNC(set_voxel_physics_boxes);
 }
 
 }	// namespace lua_bindingss

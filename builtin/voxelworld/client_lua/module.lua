@@ -40,36 +40,44 @@ function M.init()
 				M.chunk_size_voxels:mul_components(M.section_size_chunks)
 	end)
 
-	local function setup_buildat_voxel_data(node)
+	local function update_voxel_geometry(node)
 		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
-		local registry_name = node:GetVar("buildat_voxel_registry_name"):GetBuffer()
+		--local registry_name = node:GetVar("buildat_voxel_registry_name"):GetBuffer()
 		log:info(dump(node:GetName()).." voxel data size: "..data:GetSize())
 		buildat.set_voxel_geometry(node, data, registry_name)
-		--node:SetScale(magic.Vector3(1, 1, 1))
+	end
+
+	local function update_voxel_physics(node)
+		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
+		--local registry_name = node:GetVar("buildat_voxel_registry_name"):GetBuffer()
+		log:info(dump(node:GetName()).." voxel data size: "..data:GetSize())
+		buildat.set_voxel_physics_boxes(node, data, registry_name)
 	end
 
 	local node_geometry_update_queue = {}
+	local node_physics_update_queue = {}
 
-	local function get_next_geometry_update_node()
+	local function get_closest_update(queue)
 		-- Find closest one
 		local camera_p = camera_node:GetWorldPosition()
 		local closest_d = nil
 		local closest_k = nil
-		for k, node in ipairs(node_geometry_update_queue) do
+		for k, node in ipairs(queue) do
 			local d = (node:GetWorldPosition() - camera_p):Length()
 			if closest_d == nil or d < closest_d then
 				closest_d = d
 				closest_k = k
 			end
 		end
-		return table.remove(node_geometry_update_queue, closest_k)
+		return table.remove(queue, closest_k)
 	end
 
 	magic.SubscribeToEvent("Update", function(event_type, event_data)
+		update_counter = update_counter + 1
+
 		if camera_node and M.section_size_voxels then
 			-- TODO: How should position information be sent to the server?
 			local p = camera_node:GetWorldPosition()
-			update_counter = update_counter + 1
 			if update_counter % 60 == 0 then
 				local section_p = buildat.IntVector3(p):div_components(
 						M.section_size_voxels):floor()
@@ -84,24 +92,35 @@ function M.init()
 				send_get_section(section_p + buildat.IntVector3( 0, 0,-1))]]
 			end
 		end
-		-- Handle geometry updates a few nodes per frame
+
+		-- Handle geometry updates one node per frame
+		if update_counter % 2 == 0 then
+			if #node_geometry_update_queue > 0 then
+				local nodes_per_frame = 1
+				for i = 1, nodes_per_frame do
+					local node = get_closest_update(node_geometry_update_queue)
+					if not node then
+						break
+					end
+					update_voxel_geometry(node)
+				end
+			end
+		else
+			if #node_physics_update_queue > 0 then
+				local nodes_per_frame = 1
+				for i = 1, nodes_per_frame do
+					local node = get_closest_update(node_physics_update_queue)
+					if not node then
+						break
+					end
+					update_voxel_physics(node)
+				end
+			end
+		end
+
 		if camera_node then
 			local camera_dir = camera_node.direction
 			local camera_p = camera_node:GetWorldPosition()
-			if #node_geometry_update_queue > 0 then
-				local nodes_per_frame = 1
-				--[[
-				-- Limit when camera is turning
-				if camera_dir ~= camera_last_dir or camera_p ~= camera_last_p then
-					nodes_per_frame = 1
-				end
-				--]]
-				for i = 1, nodes_per_frame do
-					local node = get_next_geometry_update_node()
-					if not node then break end
-					setup_buildat_voxel_data(node)
-				end
-			end
 			camera_last_dir = camera_dir
 			camera_last_p = camera_p
 		end
@@ -109,8 +128,8 @@ function M.init()
 
 	replicate.sub_sync_node_added({}, function(node)
 		if not node:GetVar("buildat_voxel_data"):IsEmpty() then
-			--setup_buildat_voxel_data(node)
 			table.insert(node_geometry_update_queue, node)
+			table.insert(node_physics_update_queue, node)
 		end
 		local name = node:GetName()
 	end)
