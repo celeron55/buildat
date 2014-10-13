@@ -112,31 +112,43 @@ end
 local function SpatialUpdateQueue()
 	local self = {
 		p = magic.Vector3(0, 0, 0),
-		queue = {},
 		queue_oldest_p = magic.Vector3(0, 0, 0),
+		queue = {},
+		old_queue = nil,
 
+		update = function(self)
+			if self.old_queue then
+				-- Move stuff from old queue to new queue
+				for i = 1, 100 do
+					local item = table.remove(self.old_queue)
+					if not item then
+						self.old_queue = nil
+						break
+					end
+					item.d = (item.p - self.p):Length()
+					local function fcomp(a, b) return a.d > b.d end
+					table_bininsert(self.queue, item, fcomp)
+				end
+			end
+		end,
 		set_p = function(self, p)
 			self.p = p
-			-- If went too far, sort queue again
-			if (p - self.queue_oldest_p):Length() > 16 then
-				local old_queue = self.queue
+			if self.old_queue == nil and
+					(p - self.queue_oldest_p):Length() > 16 then
+				-- Move queue to old_queue and reset queue
+				self.old_queue = self.queue
 				self.queue = {}
-				for _, item in ipairs(old_queue) do
-					self:put(item.p, item.value)
-				end
-				self.queue_oldest_p = p
+				self.queue_oldest_p = self.p
 			end
 		end,
 		put = function(self, p, value)
+			self:update()
 			local d = (p - self.p):Length()
-			local function fcomp(a, b)
-				return a.d > b.d
-			end
+			local function fcomp(a, b) return a.d > b.d end
 			table_bininsert(self.queue, {p=p, d=d, value=value}, fcomp)
-			--table.insert(self.queue, {p=p, value=value})
 		end,
 		get = function(self, p)
-			-- TODO
+			self:update()
 			local item = table.remove(self.queue)
 			if not item then return nil end
 			return item.value
