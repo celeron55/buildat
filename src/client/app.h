@@ -13,6 +13,7 @@ namespace client {
 }
 namespace interface {
 	struct VoxelRegistry;
+	struct TextureAtlasRegistry;
 }
 
 namespace app
@@ -62,6 +63,7 @@ namespace app
 				const ss_ &file_hash, const ss_ &cached_path) = 0;
 		virtual Urho3D::Scene* get_scene() = 0;
 		virtual interface::VoxelRegistry* get_voxel_registry() = 0;
+		virtual interface::TextureAtlasRegistry* get_atlas_registry() = 0;
 	};
 
 	App* createApp(Urho3D::Context *context, const Options &options = Options());

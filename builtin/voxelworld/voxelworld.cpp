@@ -218,6 +218,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 		interface::Module("voxelworld"),
 		m_server(server)
 	{
+		m_voxel_reg.reset(interface::createVoxelRegistry());
+		m_block_reg.reset(interface::createBlockRegistry(m_voxel_reg.get()));
 	}
 
 	~Module()
@@ -238,9 +240,9 @@ struct Module: public interface::Module, public voxelworld::Interface
 		m_server->access_scene([&](Scene *scene)
 		{
 			Context *context = scene->GetContext();
+
 			m_atlas_reg.reset(interface::createTextureAtlasRegistry(context));
-			m_voxel_reg.reset(interface::createVoxelRegistry(m_atlas_reg.get()));
-			m_block_reg.reset(interface::createBlockRegistry(m_voxel_reg.get()));
+
 			// Add some test stuff
 			// TODO: Remove
 			{

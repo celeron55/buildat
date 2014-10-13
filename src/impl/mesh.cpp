@@ -147,7 +147,7 @@ Model* create_8bit_voxel_physics_model(Context *context,
 // Set custom geometry from 8-bit voxel data, using a voxel registry
 void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 		int w, int h, int d, const ss_ &source_data,
-		VoxelRegistry *voxel_reg)
+		VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg)
 {
 	if(w < 0 || h < 0 || d < 0)
 		throw Exception("Negative dimension");
@@ -171,7 +171,7 @@ void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 		}
 	}
 
-	return set_voxel_geometry(cg, context, volume, voxel_reg);
+	return set_voxel_geometry(cg, context, volume, voxel_reg, atlas_reg);
 }
 
 template<typename VoxelType>
@@ -283,13 +283,16 @@ template<typename VoxelType>
 class IsQuadNeededByRegistry
 {
 	interface::VoxelRegistry *m_voxel_reg;
+	interface::TextureAtlasRegistry *m_atlas_reg;
 	// NOTE: The voxel type id is used directly as PolyVox material value
 public:
-	IsQuadNeededByRegistry(interface::VoxelRegistry *voxel_reg):
-		m_voxel_reg(voxel_reg)
+	IsQuadNeededByRegistry(interface::VoxelRegistry *voxel_reg,
+			interface::TextureAtlasRegistry *atlas_reg):
+		m_voxel_reg(voxel_reg), m_atlas_reg(atlas_reg)
 	{}
 	IsQuadNeededByRegistry():	// PolyVox wants this
-		m_voxel_reg(nullptr)
+		m_voxel_reg(nullptr),
+		m_atlas_reg(nullptr)
 	{}
 	bool operator()(VoxelType backv, VoxelType front, uint32_t &materialToUse)
 	{
@@ -297,9 +300,9 @@ public:
 		if(m_voxel_reg == nullptr)
 			throw Exception("IsQuadNeededByRegistry not initialized");
 		const interface::CachedVoxelDefinition *back_def =
-				m_voxel_reg->get_cached(back);
+				m_voxel_reg->get_cached(back, m_atlas_reg);
 		const interface::CachedVoxelDefinition *front_def =
-				m_voxel_reg->get_cached(front);
+				m_voxel_reg->get_cached(front, m_atlas_reg);
 		if(!back_def){
 			return false;
 		}
@@ -344,9 +347,9 @@ struct TemporaryGeometry
 // Volume should be padded by one voxel on each edge
 void set_voxel_geometry(CustomGeometry *cg, Context *context,
 		pv::RawVolume<VoxelInstance> &volume,
-		VoxelRegistry *voxel_reg)
+		VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg)
 {
-	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg);
+	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg, atlas_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
 	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
 			IsQuadNeededByRegistry<VoxelInstance>>
@@ -394,8 +397,7 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 			log_t(MODULE, "Voxel %i face %i atlas undefined", voxel_id0, face_id);
 			continue;
 		}
-		const AtlasSegmentCache *aseg =
-				voxel_reg->get_atlas()->get_texture(seg_ref);
+		const AtlasSegmentCache *aseg = atlas_reg->get_texture(seg_ref);
 		if(aseg == nullptr)
 			throw Exception("No atlas segment cache for voxel "+itos(voxel_id0)+
 						  " face "+itos(face_id));
@@ -501,7 +503,7 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 	for(auto &pair : temp_geoms){
 		const TemporaryGeometry &tg = pair.second;
 		const TextureAtlasCache *atlas_cache =
-				voxel_reg->get_atlas()->get_atlas_cache(tg.atlas_id);
+				atlas_reg->get_atlas_cache(tg.atlas_id);
 		if(atlas_cache == nullptr)
 			throw Exception("atlas_cache == nullptr");
 		if(atlas_cache->texture == nullptr)

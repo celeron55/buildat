@@ -32,7 +32,7 @@ namespace interface
 	// Set custom geometry from 8-bit voxel data, using a voxel registry
 	void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 			int w, int h, int d, const ss_ &source_data,
-			VoxelRegistry *voxel_reg);
+			VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg);
 
 	// Create a model from voxel volume, using a voxel registry, without
 	// textures or normals, based on the physically_solid flag.
@@ -48,7 +48,7 @@ namespace interface
 	// NOTE: volume is non-const due to PolyVox deficiency
 	void set_voxel_geometry(CustomGeometry *cg, Context *context,
 			pv::RawVolume<VoxelInstance> &volume,
-			VoxelRegistry *voxel_reg);
+			VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg);
 
 	void set_voxel_physics_boxes(Node *node, Context *context,
 			pv::RawVolume<VoxelInstance> &volume,

@@ -189,7 +189,7 @@ struct CApp: public App, public magic::Application
 
 		// Create atlas and voxel registries
 		m_atlas_reg.reset(interface::createTextureAtlasRegistry(context));
-		m_voxel_reg.reset(interface::createVoxelRegistry(m_atlas_reg.get()));
+		m_voxel_reg.reset(interface::createVoxelRegistry());
 
 		// Add test voxels
 		// TOOD: Remove this from here
@@ -377,6 +377,11 @@ struct CApp: public App, public magic::Application
 	interface::VoxelRegistry* get_voxel_registry()
 	{
 		return m_voxel_reg.get();
+	}
+
+	interface::TextureAtlasRegistry* get_atlas_registry()
+	{
+		return m_atlas_reg.get();
 	}
 
 	// Non-public methods

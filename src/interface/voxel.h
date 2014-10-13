@@ -63,11 +63,13 @@ namespace interface
 	struct CachedVoxelDefinition
 	{
 		bool valid = false;
-		AtlasSegmentReference textures[6];
 		ss_ handler_module;
 		FaceDrawType face_draw_type = FaceDrawType::ON_EDGE;
 		EdgeMaterialId edge_material_id = EDGEMATERIALID_EMPTY;
 		bool physically_solid = false;
+
+		bool textures_valid = false;
+		AtlasSegmentReference textures[6];
 	};
 
 	struct VoxelInstance;
@@ -75,20 +77,21 @@ namespace interface
 	struct VoxelRegistry
 	{
 		virtual ~VoxelRegistry(){}
-		virtual TextureAtlasRegistry* get_atlas() = 0;
 
 		virtual VoxelTypeId add_voxel(const VoxelDefinition &def) = 0;
 
 		virtual const VoxelDefinition* get(const VoxelTypeId &id) = 0;
 		virtual const VoxelDefinition* get(const VoxelName &name) = 0;
-		virtual const CachedVoxelDefinition* get_cached(const VoxelTypeId &id) = 0;
-		virtual const CachedVoxelDefinition* get_cached(const VoxelInstance &v) = 0;
+		virtual const CachedVoxelDefinition* get_cached(const VoxelTypeId &id,
+				TextureAtlasRegistry *atlas_reg = nullptr) = 0;
+		virtual const CachedVoxelDefinition* get_cached(const VoxelInstance &v,
+				TextureAtlasRegistry *atlas_reg = nullptr) = 0;
 
 		// TODO: Network serialization
 		// TODO: Ability to track changes (just some kind of set_dirty()?)
 	};
 
-	VoxelRegistry* createVoxelRegistry(TextureAtlasRegistry *atlas_reg);
+	VoxelRegistry* createVoxelRegistry();
 
 	struct VoxelInstance
 	{

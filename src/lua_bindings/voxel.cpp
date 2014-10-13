@@ -112,10 +112,12 @@ static int l_set_8bit_voxel_geometry(lua_State *L)
 	lua_pop(L, 1);
 	Context *context = buildat_app->get_scene()->GetContext();
 	auto *voxel_reg = buildat_app->get_voxel_registry();
+	auto *atlas_reg = buildat_app->get_atlas_registry();
 
 	CustomGeometry *cg = node->CreateComponent<CustomGeometry>();
 
-	interface::set_8bit_voxel_geometry(cg, context, w, h, d, data, voxel_reg);
+	interface::set_8bit_voxel_geometry(cg, context, w, h, d, data,
+			voxel_reg, atlas_reg);
 
 	// Maybe appropriate
 	cg->SetOccluder(true);
@@ -148,12 +150,13 @@ static int l_set_voxel_geometry(lua_State *L)
 	lua_pop(L, 1);
 	Context *context = buildat_app->get_scene()->GetContext();
 	auto *voxel_reg = buildat_app->get_voxel_registry();
+	auto *atlas_reg = buildat_app->get_atlas_registry();
 
 	CustomGeometry *cg = node->CreateComponent<CustomGeometry>();
 
 	up_<pv::RawVolume<VoxelInstance>> volume = interface::deserialize_volume(data);
 
-	interface::set_voxel_geometry(cg, context, *volume, voxel_reg);
+	interface::set_voxel_geometry(cg, context, *volume, voxel_reg, atlas_reg);
 
 	// Maybe appropriate
 	cg->SetOccluder(true);

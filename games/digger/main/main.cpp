@@ -91,7 +91,7 @@ struct Module: public interface::Module
 				light->SetBrightness(0.2);
 				light->SetColor(Color(0.7, 0.7, 1.0));
 			}
-			// Cheat
+			// Cheat (TODO: Fix)
 			interface::VoxelRegistry *voxel_reg = nullptr;
 			voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld){
 				voxel_reg = ivoxelworld->get_voxel_reg();
