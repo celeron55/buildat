@@ -9,7 +9,7 @@ local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
 
-local RENDER_DISTANCE = 160
+local RENDER_DISTANCE = 320
 
 local PLAYER_HEIGHT = 1.7
 local PLAYER_WIDTH = 0.9

@@ -8,10 +8,19 @@ local cereal = require("buildat/extension/cereal")
 local dump = buildat.dump
 local M = {}
 
+local LOD_DISTANCE = 100
+--local LOD_DISTANCE = 140
+--local LOD_DISTANCE = 50
+local LOD_THRESHOLD = 0.2
+
 local camera_node = nil
 local update_counter = -1
-local camera_last_dir = magic.Vector3(0, 0, 0)
-local camera_last_p = magic.Vector3(0, 0, 0)
+
+local camera_p = magic.Vector3(0, 0, 0)
+local camera_dir = magic.Vector3(0, 0, 0)
+local camera_last_p = camera_p
+local camera_last_dir = camera_dir
+
 local end_of_update_processing_us = 0
 
 M.chunk_size_voxels = nil
@@ -111,7 +120,16 @@ do
 end
 
 local function SpatialUpdateQueue()
-	local function fcomp(a, b) return a.d > b.d end
+	local function fcomp(a, b)
+		-- Always maintain all f<=1.0 items at the end of the table
+		if a.f > 1.0 and b.f <= 1.0 then
+			return true
+		end
+		if a.f <= 1.0 and b.f > 1.0 then
+			return false
+		end
+		return a.fw > b.fw
+	end
 	local self = {
 		p = buildat.Vector3(0, 0, 0),
 		queue_oldest_p = buildat.Vector3(0, 0, 0),
@@ -131,8 +149,7 @@ local function SpatialUpdateQueue()
 						self.old_queue = nil
 						break
 					end
-					item.d = (item.p - self.p):length()
-					table_bininsert(self.queue, item, fcomp)
+					self:put_item(item)
 				end
 			end
 		end,
@@ -147,15 +164,82 @@ local function SpatialUpdateQueue()
 				self.queue_oldest_p = self.p
 			end
 		end,
-		put = function(self, p, value)
+		put_item = function(self, item)
+			local d = (item.p - self.p):length()
+			item.f = nil
+			item.fw = nil
+			if item.near_trigger_d then
+				local f_near = d / item.near_trigger_d
+				local fw_near = f_near / item.near_weight
+				if item.fw == nil or (fw_near < item.fw and
+						(item.f == nil or f_near < item.f)) then
+					item.f = f_near
+					item.fw = fw_near
+				end
+			end
+			if item.far_trigger_d then
+				local f_far = item.far_trigger_d / d
+				local fw_far = f_far / item.far_weight
+				if item.fw == nil or (fw_far < item.fw and
+						(item.f == nil or f_far < item.f)) then
+					item.f = f_far
+					item.fw = fw_far
+				end
+			end
+			assert(item.f)
+			assert(item.fw)
+			log:verbose("put_item"..
+					": d="..dump(d)..
+					", near_weight="..dump(item.near_weight)..
+					", near_trigger_d="..dump(item.near_trigger_d)..
+					", far_weight="..dump(item.far_weight)..
+					", far_trigger_d="..dump(item.far_trigger_d)..
+					" -> f="..item.f..", fw="..item.fw)
+			table_bininsert(self.queue, item, fcomp)
+		end,
+		-- Put something to be prioritized bidirectionally
+		put = function(self, p, near_weight, near_trigger_d,
+				far_weight, far_trigger_d, value)
+			if near_trigger_d and far_trigger_d then
+				assert(near_trigger_d < far_trigger_d)
+				assert(near_weight)
+				assert(far_weight)
+			else
+				assert((near_trigger_d and near_weight) or
+						(far_trigger_d and far_weight))
+			end
 			p = buildat.Vector3(p) -- Strip out the heavy Urho3D wrapper
-			local d = (p - self.p):length()
-			table_bininsert(self.queue, {p=p, d=d, value=value}, fcomp)
+			self:put_item({p=p, value=value,
+					near_weight=near_weight, near_trigger_d=near_trigger_d,
+					far_weight=far_weight, far_trigger_d=far_trigger_d})
+		end,
+		-- Put something to be prioritized more the closer it is
+		put_near_priority = function(self, p, trigger_d, weight, value)
+			self:put(p, weight, trigger_d, nil, nil, value)
+		end,
+		-- Put something to be prioritized more the farther it is
+		put_far_priority = function(self, p, trigger_d, weight, value)
+			self:put(p, nil, nil, weight, trigger_d, value)
 		end,
 		get = function(self)
 			local item = table.remove(self.queue)
 			if not item then return nil end
 			return item.value
+		end,
+		-- item.f is the trigger_d value normalized so that f<1.0 means the item
+		-- has passed its trigger_d.
+		peek_next_f = function(self)
+			local item = self.queue[#self.queue]
+			if not item then return nil end
+			return item.f
+		end,
+		-- item.fw is a comparison value; both near_priority and far_priority
+		-- items are normalized so that values that have fw=1 have equal
+		-- priority.
+		peek_next_fw = function(self)
+			local item = self.queue[#self.queue]
+			if not item then return nil end
+			return item.fw
 		end,
 	}
 	return self
@@ -184,30 +268,85 @@ function M.init()
 				M.chunk_size_voxels:mul_components(M.section_size_chunks)
 	end)
 
+	local node_update_queue = SpatialUpdateQueue()
+
 	local function update_voxel_geometry(node)
 		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
 		--local registry_name = node:GetVar("buildat_voxel_registry_name"):GetBuffer()
-		log:info(dump(node:GetName()).." voxel data size: "..data:GetSize())
-		buildat.set_voxel_geometry(node, data, registry_name)
+
+		-- TODO: node:GetWorldPosition() is not at center of node
+		local node_p = node:GetWorldPosition()
+		local d = (node_p - camera_p):Length()
+		local lod_fraction = d / LOD_DISTANCE
+		local lod = math.floor(1 + lod_fraction)
+		if lod > 3 then
+			lod = 3
+		end
+
+		log:verbose("update_voxel_geometry(): node="..dump(node:GetName())..
+				", #data="..data:GetSize()..", d="..d..", lod="..lod)
+
+		local near_trigger_d = nil
+		local near_weight = nil
+		local far_trigger_d = nil
+		local far_weight = nil
+
+		if lod == 1 then
+			buildat.set_voxel_geometry(node, data, registry_name)
+
+			-- 1 -> 2
+			far_trigger_d = LOD_DISTANCE * (1.0 + LOD_THRESHOLD)
+			far_weight = 0.4
+		else
+			buildat.set_voxel_lod_geometry(lod, node, data, registry_name)
+
+			if lod == 1 then
+				-- Shouldn't go here
+			elseif lod == 2 then
+				-- 2 -> 1
+				near_trigger_d = LOD_DISTANCE * (1.0 - LOD_THRESHOLD)
+				near_weight = 2.0
+				-- 2 -> 3
+				far_trigger_d = 2 * LOD_DISTANCE * (1.0 + LOD_THRESHOLD)
+				far_weight = 0.3
+			elseif lod == 3 then
+				-- 3 -> 2
+				near_trigger_d = 2 * LOD_DISTANCE * (1.0 - LOD_THRESHOLD)
+				near_weight = 0.5
+			end
+		end
+		node_update_queue:put(node_p,
+				near_weight, near_trigger_d,
+				far_weight, far_trigger_d, {
+			type = "geometry",
+			current_lod = lod,
+			node_id = node:GetID(),
+		})
 	end
 
 	local function update_voxel_physics(node)
 		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
 		--local registry_name = node:GetVar("buildat_voxel_registry_name"):GetBuffer()
-		log:info(dump(node:GetName()).." voxel data size: "..data:GetSize())
+
+		log:verbose("update_voxel_physics(): node="..dump(node:GetName())..
+				", #data="..data:GetSize())
+
 		buildat.set_voxel_physics_boxes(node, data, registry_name)
 	end
-
-	local node_update_queue = SpatialUpdateQueue()
 
 	magic.SubscribeToEvent("Update", function(event_type, event_data)
 		--local t0 = buildat.get_time_us()
 		--local dt = event_data:GetFloat("TimeStep")
 		update_counter = update_counter + 1
 
+		if camera_node then
+			camera_dir = camera_node.direction
+			camera_p = camera_node:GetWorldPosition()
+		end
+
 		if camera_node and M.section_size_voxels then
 			-- TODO: How should position information be sent to the server?
-			local p = camera_node:GetWorldPosition()
+			local p = camera_p
 			if update_counter % 60 == 0 then
 				local section_p = buildat.Vector3(p):div_components(
 						M.section_size_voxels):floor()
@@ -223,47 +362,46 @@ function M.init()
 			end
 		end
 
-		local camera_dir = magic.Vector3(0, 0, 0)
-		local camera_p = magic.Vector3(0, 0, 0)
-
-		if camera_node then
-			camera_dir = camera_node.direction
-			camera_p = camera_node:GetWorldPosition()
-		end
-
 		-- Node updates: Handle one or a few per frame
 		local current_us = buildat.get_time_us()
 		-- Spend time doing this proportionate to the rest of the update cycle
 		local max_handling_time_us = (current_us - end_of_update_processing_us) / 2
 		local stop_at_us = current_us + max_handling_time_us
 
-		-- Scale queue updates to the same pace as the rest of the processing
 		node_update_queue:set_p(camera_p)
+		-- Scale queue update operations according to the handling time of the
+		-- rest of the processing
 		node_update_queue:update(max_handling_time_us / 200 + 1)
 
 		for i = 1, 10 do -- Usually there is time only for a few
-			local node_update = node_update_queue:get()
-			if node_update then
-				--local d = (node_update.node:GetWorldPosition() - camera_p):Length()
-				--if d < 50 then
-				if true then
-					log:verbose("Handling node update #"..
-							#node_update_queue.queue)
-					local node = replicate.main_scene:GetNode(node_update.node_id)
-					if node_update.type == "geometry" then
-						update_voxel_geometry(node)
-					end
-					if node_update.type == "physics" then
-						update_voxel_physics(node)
-					end
-				else
-					log:verbose("Discarding node update #"..
-							#node_update_queue.queue)
+			local f = node_update_queue:peek_next_f()
+			local fw = node_update_queue:peek_next_fw()
+			local did_update = false
+			if f and f <= 1.0 then
+				local node_update = node_update_queue:get()
+				local node = replicate.main_scene:GetNode(node_update.node_id)
+				log:verbose("Node update #"..
+						#node_update_queue.queue..
+						" (f="..(math.floor(f*100)/100)..""..
+						", fw="..(math.floor(fw*100)/100)..")"..
+						": "..node:GetName())
+				if node_update.type == "geometry" then
+					update_voxel_geometry(node)
 				end
+				if node_update.type == "physics" then
+					update_voxel_physics(node)
+				end
+				did_update = true
+			else
+				log:verbose("Poked update #"..
+						#node_update_queue.queue..
+						" (f="..(math.floor((f or -1)*100)/100)..""..
+						", fw="..(math.floor((fw or -1)*100)/100)..")")
+				node_update_queue.queue = {}
 			end
 			-- Check this at the end of the loop so at least one is handled
-			if buildat.get_time_us() >= stop_at_us then
-				log:info("Handled "..i.." node updates")
+			if not did_update or buildat.get_time_us() >= stop_at_us then
+				log:debug("Handled "..i.." node updates")
 				break
 			end
 		end
@@ -278,11 +416,17 @@ function M.init()
 
 	replicate.sub_sync_node_added({}, function(node)
 		if not node:GetVar("buildat_voxel_data"):IsEmpty() then
-			node_update_queue:put(node:GetWorldPosition(), {
+			-- TODO: node:GetWorldPosition() is not at center of node
+			node_update_queue:put(node:GetWorldPosition(),
+					0.2, 1000.0, nil, nil, {
 				type = "geometry",
+				current_lod = 0,
 				node_id = node:GetID(),
 			})
-			node_update_queue:put(node:GetWorldPosition(), {
+			-- Create physics stuff when node comes closer than 100
+			-- TODO: node:GetWorldPosition() is not at center of node
+			node_update_queue:put(node:GetWorldPosition(),
+					1.0, 100.0, nil, nil, {
 				type = "physics",
 				node_id = node:GetID(),
 			})

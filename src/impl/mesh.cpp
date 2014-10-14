@@ -343,6 +343,84 @@ struct TemporaryGeometry
 };
 #endif
 
+void assign_txcoords(size_t pv_vertex_i1, const AtlasSegmentCache *aseg,
+		CustomGeometryVertex &tg_vert)
+{
+	if(tg_vert.normal_.z_ > 0){
+		if(pv_vertex_i1 == 3){
+			// Top left (n=Z+)
+			tg_vert.texCoord_.x_ = aseg->coord0.x_;
+			tg_vert.texCoord_.y_ = aseg->coord0.y_;
+		} else if(pv_vertex_i1 == 1){
+			// Top right (n=Z+)
+			tg_vert.texCoord_.x_ = aseg->coord1.x_;
+			tg_vert.texCoord_.y_ = aseg->coord0.y_;
+		} else if(pv_vertex_i1 == 0){
+			// Bottom right (n=Z+)
+			tg_vert.texCoord_.x_ = aseg->coord1.x_;
+			tg_vert.texCoord_.y_ = aseg->coord1.y_;
+		} else if(pv_vertex_i1 == 2){
+			// Bottom left (n=Z+)
+			tg_vert.texCoord_.x_ = aseg->coord0.x_;
+			tg_vert.texCoord_.y_ = aseg->coord1.y_;
+		}
+	} else if(tg_vert.normal_.x_ > 0){
+		if(pv_vertex_i1 == 3){
+			// Top right (n=X+)
+			tg_vert.texCoord_.x_ = aseg->coord1.x_;
+			tg_vert.texCoord_.y_ = aseg->coord0.y_;
+		} else if(pv_vertex_i1 == 1){
+			// Bottom right (n=X+)
+			tg_vert.texCoord_.x_ = aseg->coord1.x_;
+			tg_vert.texCoord_.y_ = aseg->coord1.y_;
+		} else if(pv_vertex_i1 == 0){
+			// Bottom left (n=X+)
+			tg_vert.texCoord_.x_ = aseg->coord0.x_;
+			tg_vert.texCoord_.y_ = aseg->coord1.y_;
+		} else if(pv_vertex_i1 == 2){
+			// Top left (n=X+)
+			tg_vert.texCoord_.x_ = aseg->coord0.x_;
+			tg_vert.texCoord_.y_ = aseg->coord0.y_;
+		}
+	} else if(tg_vert.normal_.x_ < 0){
+		if(pv_vertex_i1 == 1){
+			// Bottom left (n=X-)
+			tg_vert.texCoord_.x_ = aseg->coord0.x_;
+			tg_vert.texCoord_.y_ = aseg->coord1.y_;
+		} else if(pv_vertex_i1 == 3){
+			// Top left (n=X-)
+			tg_vert.texCoord_.x_ = aseg->coord0.x_;
+			tg_vert.texCoord_.y_ = aseg->coord0.y_;
+		} else if(pv_vertex_i1 == 2){
+			// Top right (n=X-)
+			tg_vert.texCoord_.x_ = aseg->coord1.x_;
+			tg_vert.texCoord_.y_ = aseg->coord0.y_;
+		} else if(pv_vertex_i1 == 0){
+			// Bottom right (n=X-)
+			tg_vert.texCoord_.x_ = aseg->coord1.x_;
+			tg_vert.texCoord_.y_ = aseg->coord1.y_;
+		}
+	} else {
+		if(pv_vertex_i1 == 1){
+			// Top left (n=Z-)
+			tg_vert.texCoord_.x_ = aseg->coord0.x_;
+			tg_vert.texCoord_.y_ = aseg->coord0.y_;
+		} else if(pv_vertex_i1 == 3){
+			// Top right (n=Z-)
+			tg_vert.texCoord_.x_ = aseg->coord1.x_;
+			tg_vert.texCoord_.y_ = aseg->coord0.y_;
+		} else if(pv_vertex_i1 == 2){
+			// Bottom right (n=Z-)
+			tg_vert.texCoord_.x_ = aseg->coord1.x_;
+			tg_vert.texCoord_.y_ = aseg->coord1.y_;
+		} else if(pv_vertex_i1 == 0){
+			// Bottom left (n=Z-)
+			tg_vert.texCoord_.x_ = aseg->coord0.x_;
+			tg_vert.texCoord_.y_ = aseg->coord1.y_;
+		}
+	}
+}
+
 // Set custom geometry from voxel volume, using a voxel registry
 // Volume should be padded by one voxel on each edge
 void set_voxel_geometry(CustomGeometry *cg, Context *context,
@@ -475,19 +553,7 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 			tg_vert.normal_.z_ = pv_vert.normal.getZ();
 			// Figure out texture coordinates
 			size_t pv_vertex_i1 = pv_vertex_i - pv_vertex_i0;
-			if(pv_vertex_i1 == 0){
-				tg_vert.texCoord_.x_ = aseg->coord0.x_;
-				tg_vert.texCoord_.y_ = aseg->coord1.y_;
-			} else if(pv_vertex_i1 == 1){
-				tg_vert.texCoord_.x_ = aseg->coord1.x_;
-				tg_vert.texCoord_.y_ = aseg->coord1.y_;
-			} else if(pv_vertex_i1 == 2){
-				tg_vert.texCoord_.x_ = aseg->coord0.x_;
-				tg_vert.texCoord_.y_ = aseg->coord0.y_;
-			} else if(pv_vertex_i1 == 3){
-				tg_vert.texCoord_.x_ = aseg->coord1.x_;
-				tg_vert.texCoord_.y_ = aseg->coord0.y_;
-			}
+			assign_txcoords(pv_vertex_i1, aseg, tg_vert);
 		}
 #endif
 	}
@@ -495,6 +561,191 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 	// Generate CustomGeometry from TemporaryGeometry
 
 	ResourceCache *cache = context->GetSubsystem<ResourceCache>();
+
+	cg->Clear();
+
+	cg->SetNumGeometries(temp_geoms.size());
+	Vector<PODVector<CustomGeometryVertex>> &cg_all_vertices = cg->GetVertices();
+
+	unsigned cg_i = 0;
+	for(auto &pair : temp_geoms){
+		const TemporaryGeometry &tg = pair.second;
+		const TextureAtlasCache *atlas_cache =
+				atlas_reg->get_atlas_cache(tg.atlas_id);
+		if(atlas_cache == nullptr)
+			throw Exception("atlas_cache == nullptr");
+		if(atlas_cache->texture == nullptr)
+			throw Exception("atlas_cache->texture == nullptr");
+		cg->DefineGeometry(cg_i, TRIANGLE_LIST, tg.vertex_data.Size(),
+				true, false, true, false);
+		PODVector<CustomGeometryVertex> &cg_vertices = cg_all_vertices[cg_i];
+		cg_vertices = tg.vertex_data;
+		Material *material = new Material(context);
+		material->SetTechnique(0,
+				cache->GetResource<Technique>("Techniques/Diff.xml"));
+		material->SetTexture(TU_DIFFUSE, atlas_cache->texture);
+		cg->SetMaterial(cg_i, material);
+		cg_i++;
+	}
+
+	cg->Commit();
+}
+
+// Set custom geometry from voxel volume, using a voxel registry
+// Volume should be padded by one voxel on each edge
+void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
+		pv::RawVolume<VoxelInstance> &volume_orig,
+		VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg)
+{
+	pv::Region region_orig = volume_orig.getEnclosingRegion();
+	auto &lc_orig = region_orig.getLowerCorner();
+	auto &uc_orig = region_orig.getUpperCorner();
+
+	pv::Region region(lc_orig / lod - pv::Vector3DInt32(1,1,1),
+			uc_orig / lod + pv::Vector3DInt32(1,1,1));
+	auto &lc = region.getLowerCorner();
+	auto &uc = region.getUpperCorner();
+
+	pv::RawVolume<VoxelInstance> volume(region);
+	for(int x = lc.getX(); x <= uc.getX(); x++){
+		for(int y = lc.getY(); y <= uc.getY(); y++){
+			for(int z = lc.getZ(); z <= uc.getZ(); z++){
+				VoxelInstance v_orig(interface::VOXELTYPEID_UNDEFINED);
+				for(int x1 = 0; x1 < lod; x1++){
+					for(int y1 = 0; y1 < lod; y1++){
+						for(int z1 = 0; z1 < lod; z1++){
+							pv::Vector3DInt32 p_orig(
+									x * lod + x1,
+									y * lod + y1,
+									z * lod + z1
+							);
+							if(!region_orig.containsPoint(p_orig))
+								continue;
+							VoxelInstance v1 = volume_orig.getVoxelAt(p_orig);
+							if(v1.getId() == interface::VOXELTYPEID_UNDEFINED)
+								continue;
+							// TODO: Prioritize voxel types better
+							// Higher is probably more interesting
+							if(v1.getId() > v_orig.getId())
+								v_orig = v1;
+						}
+					}
+				}
+				/*const interface::CachedVoxelDefinition *def =
+						voxel_reg->get_cached(v_orig);*/
+				volume.setVoxelAt(x, y, z, v_orig);
+			}
+		}
+	}
+
+	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg, atlas_reg);
+	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
+	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
+			IsQuadNeededByRegistry<VoxelInstance>>
+	surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh, iqn);
+	surfaceExtractor.execute();
+
+	const sv_<uint32_t> &pv_indices = pv_mesh.getIndices();
+	const sv_<pv::PositionMaterialNormal> &pv_vertices = pv_mesh.getVertices();
+
+	sm_<uint, TemporaryGeometry> temp_geoms;
+
+	int w = volume_orig.getWidth() - 2;
+	int h = volume_orig.getHeight() - 2;
+	int d = volume_orig.getDepth() - 2;
+
+	// Handle vertices face-by-face in order to copy indices at the same time
+	for(size_t pv_face_i = 0; pv_face_i < pv_vertices.size() / 4; pv_face_i++){
+		size_t pv_vertex_i0 = pv_face_i * 4;
+		VoxelTypeId voxel_id0 = (VoxelTypeId)pv_vertices[pv_vertex_i0].material;
+		// We need to get this definition only once per face
+		const interface::CachedVoxelDefinition *voxel_def0 =
+				voxel_reg->get_cached(voxel_id0);
+		if(voxel_def0 == nullptr)
+			throw Exception("Unknown voxel in generated geometry: "+
+						  itos(voxel_id0));
+		// Figure out which face this is
+		uint face_id = 0;
+		const pv::Vector3DFloat &n = pv_vertices[pv_vertex_i0].normal;
+		if(n.getY() > 0)
+			face_id = 0;
+		else if(n.getY() < 0)
+			face_id = 1;
+		else if(n.getX() > 0)
+			face_id = 2;
+		else if(n.getX() < 0)
+			face_id = 3;
+		else if(n.getZ() > 0)
+			face_id = 4;
+		else if(n.getZ() < 0)
+			face_id = 5;
+		// Get texture coordinates (contained in AtlasSegmentCache)
+		size_t lod_i = lod - 2;
+		if(lod_i >= interface::VOXELDEF_NUM_LOD)
+			lod_i = interface::VOXELDEF_NUM_LOD - 1;
+		AtlasSegmentReference seg_ref = voxel_def0->lod_textures[lod_i][face_id];
+		if(seg_ref.atlas_id == interface::ATLAS_UNDEFINED){
+			// This is usually intentional for invisible voxels
+			log_t(MODULE, "Voxel %i face %i atlas undefined", voxel_id0, face_id);
+			continue;
+		}
+		const AtlasSegmentCache *aseg = atlas_reg->get_texture(seg_ref);
+		if(aseg == nullptr)
+			throw Exception("No atlas segment cache for voxel "+itos(voxel_id0)+
+						  " face "+itos(face_id));
+		// Get or create the appropriate temporary geometry for this atlas
+		TemporaryGeometry &tg = temp_geoms[seg_ref.atlas_id];
+		if(tg.vertex_data.Empty()){
+			tg.atlas_id = seg_ref.atlas_id;
+			// It can't get larger than this and will only exist temporarily in
+			// memory, so let's do only one big memory allocation
+			tg.vertex_data.Reserve(pv_vertices.size() / 4 * 6);
+		}
+		// Go through indices of the face and mangle vertices according to them
+		// into the temporary vertex buffer
+		size_t pv_index_i0 = pv_face_i * 6;
+		for(size_t pv_index_i1 = 0; pv_index_i1 < 6; pv_index_i1++){
+			size_t pv_index_i = pv_index_i0 + pv_index_i1;
+			size_t pv_vertex_i = pv_indices[pv_index_i];
+			if(pv_index_i1 == 0 && pv_vertex_i0 != pv_vertex_i)
+				throw Exception("First index of face does not point to first "
+							  "vertex of face");
+			const auto &pv_vert = pv_vertices[pv_vertex_i];
+			tg.vertex_data.Resize(tg.vertex_data.Size() + 1);
+			CustomGeometryVertex &tg_vert = tg.vertex_data.Back();
+			tg_vert.position_.x_ = pv_vert.position.getX() * lod
+					- w/2.0f - 1.0f - lod/2.0f - 0.5f;
+			tg_vert.position_.y_ = pv_vert.position.getY() * lod
+					- h/2.0f - 1.0f - lod/2.0f - 0.5f;
+			tg_vert.position_.z_ = pv_vert.position.getZ() * lod
+					- d/2.0f - 1.0f - lod/2.0f - 0.5f;
+			// Set real normal temporarily for assign_txcoords().
+			tg_vert.normal_.x_ = pv_vert.normal.getX();
+			tg_vert.normal_.y_ = pv_vert.normal.getY();
+			tg_vert.normal_.z_ = pv_vert.normal.getZ();
+			// Figure out texture coordinates
+			size_t pv_vertex_i1 = pv_vertex_i - pv_vertex_i0;
+			assign_txcoords(pv_vertex_i1, aseg, tg_vert);
+			// Don't use the real normal.
+			// Constant bright shading is needed so that the look of multiple
+			// shaded faces can be emulated by using textures. This normal
+			// should give it to us.
+			// Note that this normal isn't actually exactly correct: It should
+			// be the normal that points to the main light source of the scene;
+			// however, it is close enough.
+			// We can't turn off lighting for this geometry, because then we
+			// don't get shadows, which we do want.
+			tg_vert.normal_.x_ = 0;
+			tg_vert.normal_.y_ = 1;
+			tg_vert.normal_.z_ = 0;
+		}
+	}
+
+	// Generate CustomGeometry from TemporaryGeometry
+
+	ResourceCache *cache = context->GetSubsystem<ResourceCache>();
+
+	cg->Clear();
 
 	cg->SetNumGeometries(temp_geoms.size());
 	Vector<PODVector<CustomGeometryVertex>> &cg_all_vertices = cg->GetVertices();

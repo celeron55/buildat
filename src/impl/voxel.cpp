@@ -138,10 +138,31 @@ struct CVoxelRegistry: public VoxelRegistry
 			if(seg_def.resource_name == ""){
 				AtlasSegmentReference seg_ref;	// Use default values
 				cache.textures[i] = seg_ref;
+				for(size_t j = 0; j < VOXELDEF_NUM_LOD; j++){
+					cache.lod_textures[j][i] = seg_ref;
+				}
 			} else {
-				AtlasSegmentReference seg_ref =
-						atlas_reg->find_or_add_segment(seg_def);
-				cache.textures[i] = seg_ref;
+				{
+					AtlasSegmentReference seg_ref =
+							atlas_reg->find_or_add_segment(seg_def);
+					cache.textures[i] = seg_ref;
+				}
+				for(size_t j = 0; j < VOXELDEF_NUM_LOD; j++){
+					int lod = 2 + j;
+					AtlasSegmentDefinition lod_seg_def = seg_def;
+					lod_seg_def.lod_simulation = lod;
+					if(i == 0){
+						lod_seg_def.lod_simulation |=
+								interface::ATLAS_LOD_TOP_FACE;
+					}
+					if(i == 2/*X+*/ || i == 5/*Z-*/){
+						lod_seg_def.lod_simulation |=
+								interface::ATLAS_LOD_HALFBRIGHT_FACE;
+					}
+					AtlasSegmentReference lod_seg_ref =
+							atlas_reg->find_or_add_segment(lod_seg_def);
+					cache.lod_textures[j][i] = lod_seg_ref;
+				}
 			}
 		}
 		// Caller sets cache.textures_valid = true

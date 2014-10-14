@@ -339,7 +339,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 	void on_start()
 	{
-		pv::Region region(-3, -1, -3, 3, 1, 3);
+		//pv::Region region(-3, -1, -3, 3, 1, 3);
+		pv::Region region(-5, -1, -5, 5, 1, 5);
 		//pv::Region region(-8, -1, -8, 8, 1, 8);
 		auto lc = region.getLowerCorner();
 		auto uc = region.getUpperCorner();

@@ -71,6 +71,26 @@ function buildat.safe.set_voxel_geometry(safe_node, safe_buffer)
 	__buildat_set_voxel_geometry(node, buffer)
 end
 
+function buildat.safe.set_voxel_lod_geometry(lod, safe_node, safe_buffer)
+	if not getmetatable(safe_node) or
+			getmetatable(safe_node).type_name ~= "Node" then
+		error("node is not a sandboxed Node instance")
+	end
+	node = getmetatable(safe_node).unsafe
+
+	buffer = nil
+	if type(safe_buffer) == 'string' then
+		buffer = safe_buffer
+	else
+		if not getmetatable(safe_buffer) or
+				getmetatable(safe_buffer).type_name ~= "VectorBuffer" then
+			error("safe_buffer is not a sandboxed VectorBuffer instance")
+		end
+		buffer = getmetatable(safe_buffer).unsafe
+	end
+	__buildat_set_voxel_lod_geometry(lod, node, buffer)
+end
+
 function buildat.safe.set_voxel_physics_boxes(safe_node, safe_buffer)
 	if not getmetatable(safe_node) or
 			getmetatable(safe_node).type_name ~= "Node" then

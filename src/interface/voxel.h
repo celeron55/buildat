@@ -57,6 +57,8 @@ namespace interface
 		//       and what thing type that is in this case
 	};
 
+	static constexpr size_t VOXELDEF_NUM_LOD = 2;
+
 	// This definition should be as small as practical so that large portions of
 	// the definition array can fit in CPU cache
 	// (the absolute maximum number of these is VOXELTYPEID_MAX+1)
@@ -70,6 +72,7 @@ namespace interface
 
 		bool textures_valid = false;
 		AtlasSegmentReference textures[6];
+		AtlasSegmentReference lod_textures[VOXELDEF_NUM_LOD][6];
 	};
 
 	struct VoxelInstance;

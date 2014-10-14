@@ -24,11 +24,16 @@ namespace interface
 		uint segment_id = 0;
 	};
 
+	const uint8_t ATLAS_LOD_TOP_FACE = 0x10;
+	const uint8_t ATLAS_LOD_HALFBRIGHT_FACE = 0x20;
+
 	struct AtlasSegmentDefinition
 	{
 		ss_ resource_name;	// If "", segment won't be added
 		magic::IntVector2 total_segments;
 		magic::IntVector2 select_segment;
+		// Mask 0x0f: LOD level, mask 0xf0: flags
+		uint8_t lod_simulation = 0;
 		// TODO: Rotation
 
 		bool operator==(const AtlasSegmentDefinition &other) const;

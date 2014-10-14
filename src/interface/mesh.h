@@ -49,6 +49,10 @@ namespace interface
 	void set_voxel_geometry(CustomGeometry *cg, Context *context,
 			pv::RawVolume<VoxelInstance> &volume,
 			VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg);
+	// lod=1 -> 1:1, lod=3 -> 1:3
+	void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
+			pv::RawVolume<VoxelInstance> &volume_orig,
+			VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg);
 
 	void set_voxel_physics_boxes(Node *node, Context *context,
 			pv::RawVolume<VoxelInstance> &volume,

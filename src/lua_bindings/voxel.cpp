@@ -75,7 +75,7 @@ static int l_set_simple_voxel_model(lua_State *L)
 	SharedPtr<Model> fromScratchModel(
 			interface::create_simple_voxel_model(context, w, h, d, data));
 
-	StaticModel *object = node->CreateComponent<StaticModel>();
+	StaticModel *object = node->GetOrCreateComponent<StaticModel>();
 	object->SetModel(fromScratchModel);
 
 	return 0;
@@ -114,7 +114,7 @@ static int l_set_8bit_voxel_geometry(lua_State *L)
 	auto *voxel_reg = buildat_app->get_voxel_registry();
 	auto *atlas_reg = buildat_app->get_atlas_registry();
 
-	CustomGeometry *cg = node->CreateComponent<CustomGeometry>();
+	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>();
 
 	interface::set_8bit_voxel_geometry(cg, context, w, h, d, data,
 			voxel_reg, atlas_reg);
@@ -152,11 +152,53 @@ static int l_set_voxel_geometry(lua_State *L)
 	auto *voxel_reg = buildat_app->get_voxel_registry();
 	auto *atlas_reg = buildat_app->get_atlas_registry();
 
-	CustomGeometry *cg = node->CreateComponent<CustomGeometry>();
+	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>();
 
 	up_<pv::RawVolume<VoxelInstance>> volume = interface::deserialize_volume(data);
 
 	interface::set_voxel_geometry(cg, context, *volume, voxel_reg, atlas_reg);
+
+	// Maybe appropriate
+	cg->SetOccluder(true);
+
+	// TODO: Don't do this here; allow the caller to do this
+	cg->SetCastShadows(true);
+
+	return 0;
+}
+
+// set_voxel_lod_geometry(lod: number, node: Node, buffer: VectorBuffer)
+static int l_set_voxel_lod_geometry(lua_State *L)
+{
+	tolua_Error tolua_err;
+
+	int lod = lua_tointeger(L, 1);
+	GET_TOLUA_STUFF(node, 2, Node);
+	TRY_GET_TOLUA_STUFF(buf, 3, const VectorBuffer);
+
+	log_d(MODULE, "set_voxel_lod_geometry(): lod=%i", lod);
+	log_d(MODULE, "set_voxel_lod_geometry(): node=%p", node);
+	log_d(MODULE, "set_voxel_lod_geometry(): buf=%p", buf);
+
+	ss_ data;
+	if(buf == nullptr)
+		data = lua_tocppstring(L, 2);
+	else
+		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+
+	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
+	lua_pop(L, 1);
+	Context *context = buildat_app->get_scene()->GetContext();
+	auto *voxel_reg = buildat_app->get_voxel_registry();
+	auto *atlas_reg = buildat_app->get_atlas_registry();
+
+	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>();
+
+	up_<pv::RawVolume<VoxelInstance>> volume = interface::deserialize_volume(data);
+
+	interface::set_voxel_lod_geometry(lod, cg, context, *volume,
+			voxel_reg, atlas_reg);
 
 	// Maybe appropriate
 	cg->SetOccluder(true);
@@ -192,7 +234,7 @@ static int l_set_voxel_physics_boxes(lua_State *L)
 
 	up_<pv::RawVolume<VoxelInstance>> volume = interface::deserialize_volume(data);
 
-	RigidBody *body = node->GetOrCreateComponent<RigidBody>(LOCAL);
+	node->GetOrCreateComponent<RigidBody>(LOCAL);
 	interface::set_voxel_physics_boxes(node, context, *volume, voxel_reg);
 
 	return 0;
@@ -207,6 +249,7 @@ void init_voxel(lua_State *L)
 	DEF_BUILDAT_FUNC(set_simple_voxel_model);
 	DEF_BUILDAT_FUNC(set_8bit_voxel_geometry);
 	DEF_BUILDAT_FUNC(set_voxel_geometry);
+	DEF_BUILDAT_FUNC(set_voxel_lod_geometry);
 	DEF_BUILDAT_FUNC(set_voxel_physics_boxes);
 }
 

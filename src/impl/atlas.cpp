@@ -16,7 +16,8 @@ bool AtlasSegmentDefinition::operator==(const AtlasSegmentDefinition &other) con
 	return (
 			resource_name == other.resource_name &&
 			total_segments == other.total_segments &&
-			select_segment == other.select_segment
+			select_segment == other.select_segment &&
+			lod_simulation == other.lod_simulation
 	);
 }
 
@@ -86,6 +87,8 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 			atlas_img->SetSize(atlas_resolution.x_, atlas_resolution.y_, 4);
 			// Create texture for new atlas
 			magic::Texture2D *atlas_tex = new magic::Texture2D(m_context);
+			// TODO: Make this configurable
+			atlas_tex->SetFilterMode(magic::FILTER_NEAREST);
 			// TODO: Use TEXTURE_STATIC or TEXTURE_DYNAMIC?
 			atlas_tex->SetSize(atlas_resolution.x_, atlas_resolution.y_,
 					magic::Graphics::GetRGBAFormat(), magic::TEXTURE_STATIC);
@@ -190,15 +193,76 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 				seg_img_size.y_ / def.total_segments.y_ * def.select_segment.y_
 		);
 		// Draw main texture
-		for(int y = 0; y<seg_size.y_ * 2; y++){
-			for(int x = 0; x<seg_size.x_ * 2; x++){
-				magic::IntVector2 src_p = src_off + magic::IntVector2(
-						(x + seg_size.x_ / 2) % seg_size.x_,
-						(y + seg_size.y_ / 2) % seg_size.y_
-				);
-				magic::IntVector2 dst_p = dst_p00 + magic::IntVector2(x, y);
-				magic::Color c = seg_img->GetPixel(src_p.x_, src_p.y_);
-				atlas.image->SetPixel(dst_p.x_, dst_p.y_, c);
+		if(def.lod_simulation == 0){
+			for(int y = 0; y<seg_size.y_ * 2; y++){
+				for(int x = 0; x<seg_size.x_ * 2; x++){
+					magic::IntVector2 src_p = src_off + magic::IntVector2(
+							(x + seg_size.x_ / 2) % seg_size.x_,
+							(y + seg_size.y_ / 2) % seg_size.y_
+					);
+					magic::IntVector2 dst_p = dst_p00 + magic::IntVector2(x, y);
+					magic::Color c = seg_img->GetPixel(src_p.x_, src_p.y_);
+					atlas.image->SetPixel(dst_p.x_, dst_p.y_, c);
+				}
+			}
+		} else {
+			int lod = def.lod_simulation & 0x0f;
+			uint8_t flags = def.lod_simulation & 0xf0;
+			for(int y = 0; y<seg_size.y_ * 2; y++){
+				for(int x = 0; x<seg_size.x_ * 2; x++){
+					if(flags & ATLAS_LOD_TOP_FACE){
+						// Preserve original colors
+						magic::IntVector2 src_p = src_off + magic::IntVector2(
+								((x + seg_size.x_ / 2) * lod) % seg_size.x_,
+								((y + seg_size.y_ / 2) * lod) % seg_size.y_
+						);
+						magic::IntVector2 dst_p = dst_p00 + magic::IntVector2(x, y);
+						magic::Color c = seg_img->GetPixel(src_p.x_, src_p.y_);
+						c.r_ *= 1.0f;
+						c.g_ *= 1.0f;
+						c.b_ *= 0.875f;
+						atlas.image->SetPixel(dst_p.x_, dst_p.y_, c);
+					} else {
+						// Simulate sides
+						magic::IntVector2 src_p = src_off + magic::IntVector2(
+								((x + seg_size.x_ / 2) * lod) % seg_size.x_,
+								((y + seg_size.y_ / 2) * lod) % seg_size.y_
+						);
+						magic::IntVector2 dst_p = dst_p00 + magic::IntVector2(x, y);
+						magic::Color c = seg_img->GetPixel(src_p.x_, src_p.y_);
+						/*c.r_ *= 1.0f;
+						c.g_ *= 1.0f;
+						c.b_ *= 1.0f;*/
+						// Leave horizontal edges look like they are bright
+						// topsides
+						// TODO: This should be variable according to the
+						// camera's height relative to the thing the atlas
+						// segment is representing
+						int edge_size = lod * seg_size.y_ / 16;
+						/*bool is_final_edge = (
+								y <= seg_size.y_/2 + edge_size / lod ||
+								y >= seg_size.y_*3/2 - edge_size / lod 
+						);*/
+						bool is_edge = (
+								src_p.y_ <= edge_size ||
+								src_p.y_ >= seg_size.y_ - edge_size
+						);
+						if(/*is_final_edge ||*/ !is_edge){
+							//if((x*lod/seg_size.x_ + y*lod/seg_size.y_) % 2 == 0){
+							if(flags & ATLAS_LOD_HALFBRIGHT_FACE){
+								c.r_ *= 0.70f;
+								c.g_ *= 0.70f;
+								c.b_ *= 0.65f;
+							} else {
+								c.r_ *= 0.5f;
+								c.g_ *= 0.5f;
+								c.b_ *= 0.5f;
+							}
+							//}
+						}
+						atlas.image->SetPixel(dst_p.x_, dst_p.y_, c);
+					}
+				}
 			}
 		}
 		// Update atlas texture from atlas image
