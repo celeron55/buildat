@@ -13,11 +13,17 @@ local LOD_DISTANCE = 100
 --local LOD_DISTANCE = 50
 local LOD_THRESHOLD = 0.2
 
+local PHYSICS_DISTANCE = 100
+
 local camera_node = nil
 local update_counter = -1
 
 local camera_p = magic.Vector3(0, 0, 0)
 local camera_dir = magic.Vector3(0, 0, 0)
+-- Start higher than any conceivable value because otherwise things will never
+-- be triggered to reflect this value
+local camera_far_clip = 1000
+
 local camera_last_p = camera_p
 local camera_last_dir = camera_dir
 
@@ -74,7 +80,14 @@ function M.init()
 		local far_trigger_d = nil
 		local far_weight = nil
 
-		if lod == 1 then
+		if d >= camera_far_clip * 1.4 then
+			log:verbose("Clearing voxel geometry outside camera far clip ("
+					..camera_far_clip..")")
+			buildat.clear_voxel_geometry(node)
+
+			near_trigger_d = 1.2 * camera_far_clip
+			near_weight = 0.3
+		elseif lod == 1 then
 			buildat.set_voxel_geometry(node, data, registry_name)
 
 			-- 1 -> 2
@@ -111,10 +124,36 @@ function M.init()
 		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
 		--local registry_name = node:GetVar("buildat_voxel_registry_name"):GetBuffer()
 
-		log:verbose("update_voxel_physics(): node="..dump(node:GetName())..
-				", #data="..data:GetSize())
+		local node_p = node:GetWorldPosition()
+		local d = (node_p - camera_p):Length()
 
-		buildat.set_voxel_physics_boxes(node, data, registry_name)
+		log:verbose("update_voxel_physics(): node="..dump(node:GetName())..
+				", #data="..data:GetSize()..", d="..d)
+
+		local near_trigger_d = nil
+		local near_weight = nil
+		local far_trigger_d = nil
+		local far_weight = nil
+
+		if d > PHYSICS_DISTANCE then
+			log:verbose("Clearing physics boxes outside physics distance ("..
+					PHYSICS_DISTANCE..")")
+			buildat.clear_voxel_physics_boxes(node)
+
+			near_trigger_d = PHYSICS_DISTANCE * 0.8
+			near_weight = 1.0
+		else
+			buildat.set_voxel_physics_boxes(node, data, registry_name)
+
+			far_trigger_d = PHYSICS_DISTANCE * 1.2
+			far_weight = 0.2
+		end
+		node_update_queue:put(node_p,
+				near_weight, near_trigger_d,
+				far_weight, far_trigger_d, {
+			type = "physics",
+			node_id = node:GetID(),
+		})
 	end
 
 	magic.SubscribeToEvent("Update", function(event_type, event_data)
@@ -125,6 +164,7 @@ function M.init()
 		if camera_node then
 			camera_dir = camera_node.direction
 			camera_p = camera_node:GetWorldPosition()
+			camera_far_clip = camera_node:GetComponent("Camera").farClip
 		end
 
 		if camera_node and M.section_size_voxels then
@@ -148,7 +188,7 @@ function M.init()
 		-- Node updates: Handle one or a few per frame
 		local current_us = buildat.get_time_us()
 		-- Spend time doing this proportionate to the rest of the update cycle
-		local max_handling_time_us = (current_us - end_of_update_processing_us) / 2
+		local max_handling_time_us = (current_us - end_of_update_processing_us) / 3
 		local stop_at_us = current_us + max_handling_time_us
 
 		node_update_queue:set_p(camera_p)
@@ -201,7 +241,7 @@ function M.init()
 		if not node:GetVar("buildat_voxel_data"):IsEmpty() then
 			-- TODO: node:GetWorldPosition() is not at center of node
 			node_update_queue:put(node:GetWorldPosition(),
-					0.2, 1000.0, nil, nil, {
+					0.2, camera_far_clip * 1.2, nil, nil, {
 				type = "geometry",
 				current_lod = 0,
 				node_id = node:GetID(),
@@ -209,7 +249,7 @@ function M.init()
 			-- Create physics stuff when node comes closer than 100
 			-- TODO: node:GetWorldPosition() is not at center of node
 			node_update_queue:put(node:GetWorldPosition(),
-					1.0, 100.0, nil, nil, {
+					1.0, PHYSICS_DISTANCE, nil, nil, {
 				type = "physics",
 				node_id = node:GetID(),
 			})

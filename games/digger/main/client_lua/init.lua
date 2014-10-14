@@ -9,7 +9,9 @@ local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
 
-local RENDER_DISTANCE = 320
+--local RENDER_DISTANCE = 320
+--local RENDER_DISTANCE = 240
+local RENDER_DISTANCE = 160
 
 local PLAYER_HEIGHT = 1.7
 local PLAYER_WIDTH = 0.9
@@ -26,7 +28,7 @@ zone.boundingBox = magic.BoundingBox(-1000, 1000)
 zone.ambientColor = magic.Color(0.1, 0.1, 0.1)
 zone.fogColor = magic.Color(0.6, 0.7, 0.8)
 zone.fogStart = 10
-zone.fogEnd = RENDER_DISTANCE
+zone.fogEnd = RENDER_DISTANCE * 1.0
 
 -- Add a node that the player can use to walk around with
 local player_node = scene:CreateChild("Player")
