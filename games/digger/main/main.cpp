@@ -195,6 +195,11 @@ struct Module: public interface::Module
 				for(int y = lc.getY(); y <= uc.getY(); y++){
 					for(int x = lc.getX(); x <= uc.getX(); x++){
 						pv::Vector3DInt32 p(x, y, z);
+						pv::Vector3DInt32 cp(-112, 20, 253);
+						if((p - cp).lengthSquared() < 30*30){
+							ivoxelworld->set_voxel(p, VoxelInstance(1));
+							continue;
+						}
 						if(z > 37 && z < 50 && y > 20){
 							ivoxelworld->set_voxel(p, VoxelInstance(1));
 							continue;
