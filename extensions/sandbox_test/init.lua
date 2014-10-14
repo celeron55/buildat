@@ -60,11 +60,26 @@ end
 
 -- Enabled when this module is loaded.
 -- Normally that happens when KEY_F10 is pressed on the client.
+local value_checker_enabled = true
 function M.check_value(value)
+	if not value_checker_enabled then return end
 	log:debug("sandbox_test.check_value()")
 	try_exploit.search_single_value(value)
 end
 __buildat_sandbox_debug_check_value_sub(M.check_value)
+
+local is_active = false
+
+function M.toggle() -- Called by client/app
+	if not is_active then
+		M.run()
+		value_checker_enabled = true
+		is_active = true
+	else
+		value_checker_enabled = false
+		is_active = false
+	end
+end
 
 return M
 -- vim: set noet ts=4 sw=4:

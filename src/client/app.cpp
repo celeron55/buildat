@@ -537,7 +537,7 @@ struct CApp: public App, public magic::Application
 					"if type(m) ~= 'table' then\n"
 					"    error('Failed to load extension "+extname+"')\n"
 					"end\n"
-					"m.run()\n";
+					"m.toggle()\n";
 			if(!run_script_no_sandbox(script)){
 				log_e(MODULE, "Failed to load and run extension %s", cs(extname));
 			}
