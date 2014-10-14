@@ -158,7 +158,7 @@ int main(int argc, char *argv[])
 
 		// Main loop
 		uint64_t next_tick_us = get_timeofday_us();
-		uint64_t t_per_tick = 1000 * 50;
+		uint64_t t_per_tick = 1000000 / 30; // Same as physics FPS
 
 		set_<int> attempt_bad_fds;
 		int last_added_attempt_bad_fd = -42;
@@ -244,6 +244,8 @@ int main(int argc, char *argv[])
 				attempt_bad_fds.clear();
 			}
 
+			state->handle_events();
+
 			if(current_us >= next_tick_us){
 				next_tick_us += t_per_tick;
 				if(next_tick_us < current_us - 1000 * 1000){
@@ -253,25 +255,23 @@ int main(int argc, char *argv[])
 				interface::Event event("core:tick");
 				event.p.reset(new interface::TickEvent(t_per_tick / 1e6));
 				state->emit_event(std::move(event));
+
+				state->access_scene([&](magic::Scene *scene)
+				{
+					magic::Context *context = scene->GetContext();
+					magic::Engine *engine = context->GetSubsystem<magic::Engine>();
+					engine->SetNextTimeStep(t_per_tick / 1e6);
+					engine->RunFrame();
+
+					magic::Profiler *p = context->GetSubsystem<magic::Profiler>();
+					if(p && profiler_last_print_us < current_us - 10000000){
+						profiler_last_print_us = current_us;
+						magic::String s = p->GetData(false, false, UINT_MAX);
+						p->BeginInterval();
+						log_v("main", "Urho3D profiler:\n%s", s.CString());
+					}
+				});
 			}
-
-			state->handle_events();
-
-			state->access_scene([&](magic::Scene *scene)
-			{
-				magic::Context *context = scene->GetContext();
-				magic::Engine *engine = context->GetSubsystem<magic::Engine>();
-				engine->SetNextTimeStep(t_per_tick / 1e6);
-				engine->RunFrame();
-
-				magic::Profiler *p = context->GetSubsystem<magic::Profiler>();
-				if(p && profiler_last_print_us < current_us - 10000000){
-					profiler_last_print_us = current_us;
-					magic::String s = p->GetData(false, false, UINT_MAX);
-					p->BeginInterval();
-					log_v("main", "Urho3D profiler:\n%s", s.CString());
-				}
-			});
 
 			if(state->is_shutdown_requested(&exit_status, &shutdown_reason))
 				break;
