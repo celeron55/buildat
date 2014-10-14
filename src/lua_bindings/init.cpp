@@ -10,12 +10,14 @@ namespace lua_bindings {
 extern void init_misc(lua_State *L);
 extern void init_cereal(lua_State *L);
 extern void init_voxel(lua_State *L);
+extern void init_spatial_update_queue(lua_State *L);
 
 void init(lua_State *L)
 {
 	init_misc(L);
 	init_cereal(L);
 	init_voxel(L);
+	init_spatial_update_queue(L);
 }
 
 }	// namespace lua_bindingss

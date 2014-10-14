@@ -6,9 +6,52 @@ local log = buildat.Logger("__client/api")
 buildat.connect_server    = __buildat_connect_server
 buildat.extension_path    = __buildat_extension_path
 buildat.get_time_us       = __buildat_get_time_us
+buildat.SpatialUpdateQueue = __buildat_SpatialUpdateQueue
 
 buildat.safe.disconnect    = __buildat_disconnect
 buildat.safe.get_time_us   = __buildat_get_time_us
+
+buildat.safe.SpatialUpdateQueue = function()
+	local internal = __buildat_SpatialUpdateQueue()
+	return {
+		update = function(self, ...)
+			return internal:update(...)
+		end,
+		set_p = function(self, ...)
+			return internal:set_p(...)
+		end,
+		put = function(self, safe_p, near_weight, near_trigger_d,
+				far_weight, far_trigger_d, value)
+			if not getmetatable(safe_p) or
+					getmetatable(safe_p).type_name ~= "Vector3" then
+				error("p is not a sandboxed Vector3 instance")
+			end
+			p = getmetatable(safe_p).unsafe
+			return internal:put(p, near_weight, near_trigger_d,
+					far_weight, far_trigger_d, value)
+		end,
+		get = function(self, ...)
+			return internal:get(...)
+		end,
+		peek_next_f = function(self, ...)
+			return internal:peek_next_f(...)
+		end,
+		peek_next_fw = function(self, ...)
+			return internal:peek_next_fw(...)
+		end,
+		get_length = function(self, ...)
+			return internal:get_length(...)
+		end,
+		set_p = function(self, safe_p)
+			if not getmetatable(safe_p) or
+					getmetatable(safe_p).type_name ~= "Vector3" then
+				error("p is not a sandboxed Vector3 instance")
+			end
+			p = getmetatable(safe_p).unsafe
+			internal:set_p(p)
+		end,
+	}
+end
 
 function buildat.safe.set_simple_voxel_model(safe_node, w, h, d, safe_buffer)
 	if not getmetatable(safe_node) or

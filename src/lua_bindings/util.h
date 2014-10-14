@@ -4,6 +4,7 @@
 #include "core/types.h"
 extern "C" {
 	#include <lua.h>
+	#include <lauxlib.h>
 }
 
 namespace lua_bindings

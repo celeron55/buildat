@@ -213,14 +213,6 @@ local function SpatialUpdateQueue()
 					near_weight=near_weight, near_trigger_d=near_trigger_d,
 					far_weight=far_weight, far_trigger_d=far_trigger_d})
 		end,
-		-- Put something to be prioritized more the closer it is
-		put_near_priority = function(self, p, trigger_d, weight, value)
-			self:put(p, weight, trigger_d, nil, nil, value)
-		end,
-		-- Put something to be prioritized more the farther it is
-		put_far_priority = function(self, p, trigger_d, weight, value)
-			self:put(p, nil, nil, weight, trigger_d, value)
-		end,
 		get = function(self)
 			local item = table.remove(self.queue)
 			if not item then return nil end
@@ -240,6 +232,9 @@ local function SpatialUpdateQueue()
 			local item = self.queue[#self.queue]
 			if not item then return nil end
 			return item.fw
+		end,
+		get_length = function(self)
+			return #self.queue
 		end,
 	}
 	return self
@@ -268,7 +263,8 @@ function M.init()
 				M.chunk_size_voxels:mul_components(M.section_size_chunks)
 	end)
 
-	local node_update_queue = SpatialUpdateQueue()
+	--local node_update_queue = SpatialUpdateQueue()
+	local node_update_queue = buildat.SpatialUpdateQueue()
 
 	local function update_voxel_geometry(node)
 		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
@@ -381,7 +377,7 @@ function M.init()
 				local node_update = node_update_queue:get()
 				local node = replicate.main_scene:GetNode(node_update.node_id)
 				log:verbose("Node update #"..
-						#node_update_queue.queue..
+						node_update_queue:get_length()..
 						" (f="..(math.floor(f*100)/100)..""..
 						", fw="..(math.floor(fw*100)/100)..")"..
 						": "..node:GetName())
@@ -394,10 +390,10 @@ function M.init()
 				did_update = true
 			else
 				log:verbose("Poked update #"..
-						#node_update_queue.queue..
+						node_update_queue:get_length()..
 						" (f="..(math.floor((f or -1)*100)/100)..""..
 						", fw="..(math.floor((fw or -1)*100)/100)..")")
-				node_update_queue.queue = {}
+				--node_update_queue.queue = {} -- For testing
 			end
 			-- Check this at the end of the loop so at least one is handled
 			if not did_update or buildat.get_time_us() >= stop_at_us then
