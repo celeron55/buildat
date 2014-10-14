@@ -91,6 +91,46 @@ function M.define(dst, util)
 		}
 	})
 
+	util.wc("Quaternion", {
+		unsafe_constructor = util.wrap_function({"number", "number", "number", "number"},
+		function(w, x, y, z)
+			return util.wrap_instance("Quaternion", Quaternion(w, x, y, z))
+		end),
+		instance = {
+			YawAngle = util.self_function(
+					"YawAngle", {"number"}, {"Quaternion"}),
+			PitchAngle = util.self_function(
+					"PitchAngle", {"number"}, {"Quaternion"}),
+			RollAngle = util.self_function(
+					"RollAngle", {"number"}, {"Quaternion"}),
+			EulerAngles = util.wrap_function({"Quaternion"},
+				function(self)
+					return util.wrap_instance("Vector3", self:EulerAngles())
+				end
+			),
+		},
+		instance_meta = {
+			__mul = util.wrap_function({"Quaternion", "number"}, function(self, n)
+				return util.wrap_instance("Quaternion", self * n)
+			end),
+			__add = util.wrap_function({"Quaternion", "Quaternion"}, function(self, other)
+				return util.wrap_instance("Quaternion", self + other)
+			end),
+			__sub = util.wrap_function({"Quaternion", "Quaternion"}, function(self, other)
+				return util.wrap_instance("Quaternion", self - other)
+			end),
+			__eq = util.wrap_function({"Quaternion", "Quaternion"}, function(self, other)
+				return (self == other)
+			end),
+		},
+		properties = {
+			w = util.simple_property("number"),
+			x = util.simple_property("number"),
+			y = util.simple_property("number"),
+			z = util.simple_property("number"),
+		},
+	})
+
 	util.wc("Vector3", {
 		unsafe_constructor = util.wrap_function({"number", "number", "number"},
 		function(x, y, z)
@@ -434,6 +474,7 @@ function M.define(dst, util)
 			SetVar = util.self_function("SetVar", {},
 					{"Node", "StringHash", "Variant"}),
 			GetWorldPosition = util.self_function("GetWorldPosition", {dst.Vector3}, {"Node"}),
+			GetRotation = util.self_function("GetRotation", {dst.Quaternion}, {"Node"}),
 			Pitch = util.self_function("Pitch", {}, {"Node", "number"}),
 			Yaw = util.self_function("Yaw", {}, {"Node", "number"}),
 			Roll = util.self_function("Roll", {}, {"Node", "number"}),
