@@ -164,7 +164,7 @@ int main(int argc, char *argv[])
 		int last_added_attempt_bad_fd = -42;
 		set_<int> bad_fds;
 		size_t num_consequent_valid_selects = 0;
-		float profiler_print_timer = 0;
+		uint64_t profiler_last_print_us = next_tick_us;
 
 		while(!g_sigint_received){
 			uint64_t current_us = get_timeofday_us();
@@ -264,19 +264,12 @@ int main(int argc, char *argv[])
 				engine->SetNextTimeStep(t_per_tick / 1e6);
 				engine->RunFrame();
 
-				profiler_print_timer += t_per_tick / 1e6;
-				if(profiler_print_timer >= 10.0f){
-					// Aim for long-time stability in profiler intervals
-					profiler_print_timer -= 10.0f;
-					// Avoid useless flooding in case of stuck server
-					if(profiler_print_timer > 5.0f)
-						profiler_print_timer = 0.0f;
-					magic::Profiler *p = context->GetSubsystem<magic::Profiler>();
-					if(p){
-						magic::String s = p->GetData(false, false, UINT_MAX);
-						p->BeginInterval();
-						log_v("main", "Urho3D Profiler:\n%s", s.CString());
-					}
+				magic::Profiler *p = context->GetSubsystem<magic::Profiler>();
+				if(p && profiler_last_print_us < current_us - 10000000){
+					profiler_last_print_us = current_us;
+					magic::String s = p->GetData(false, false, UINT_MAX);
+					p->BeginInterval();
+					log_v("main", "Urho3D profiler:\n%s", s.CString());
 				}
 			});
 
