@@ -305,8 +305,14 @@ struct CState: public State, public interface::Server
 		//params["LogQuiet"]      = true; // Don't log to stdout
 		if(!m_magic_engine->Initialize(params))
 			throw Exception("Urho3D engine initialization failed");
+
 		m_magic_scene = new magic::Scene(m_magic_context);
-		m_magic_scene->CreateComponent<magic::PhysicsWorld>(magic::LOCAL);
+
+		auto *physics = m_magic_scene->CreateComponent<magic::PhysicsWorld>(
+				magic::LOCAL);
+		physics->SetFps(30);
+		physics->SetInterpolation(false);
+
 		// Useless but gets rid of warnings like
 		// "ERROR: No Octree component in scene, drawable will not render"
 		m_magic_scene->CreateComponent<magic::Octree>(magic::LOCAL);
