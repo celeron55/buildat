@@ -91,32 +91,35 @@ function buildat.safe.set_voxel_physics_boxes(safe_node, safe_buffer)
 	__buildat_set_voxel_physics_boxes(node, buffer)
 end
 
-local IntVector3_prototype = {
+local Vector3_prototype = {
 	x = 0,
 	y = 0,
 	z = 0,
 	mul_components = function(a, b)
-		return buildat.safe.IntVector3(
+		return buildat.safe.Vector3(
 				a.x * b.x, a.y * b.y, a.z * b.z)
 	end,
 	div_components = function(a, b)
-		return buildat.safe.IntVector3(
+		return buildat.safe.Vector3(
 				a.x / b.x, a.y / b.y, a.z / b.z)
 	end,
 	floor = function(a)
-		return buildat.safe.IntVector3(
+		return buildat.safe.Vector3(
 				math.floor(a.x), math.floor(a.y), math.floor(a.z))
 	end,
 	add = function(a, b)
-		return buildat.safe.IntVector3(
+		return buildat.safe.Vector3(
 				a.x + b.x, a.y + b.y, a.z + b.z)
 	end,
 	sub = function(a, b)
-		return buildat.safe.IntVector3(
+		return buildat.safe.Vector3(
 				a.x - b.x, a.y - b.y, a.z - b.z)
 	end,
+	length = function(a)
+		return math.sqrt(a.x*a.x + a.y*a.y + a.z*a.z)
+	end,
 }
-function buildat.safe.IntVector3(x, y, z)
+function buildat.safe.Vector3(x, y, z)
 	local self = {}
 	if x ~= nil and y == nil and z == nil then
 		self.x = x.x
@@ -128,9 +131,9 @@ function buildat.safe.IntVector3(x, y, z)
 		self.z = z
 	end
 	setmetatable(self, {
-		__index = IntVector3_prototype,
-		__add = IntVector3_prototype.add,
-		__sub = IntVector3_prototype.sub,
+		__index = Vector3_prototype,
+		__add = Vector3_prototype.add,
+		__sub = Vector3_prototype.sub,
 	})
 	return self
 end
