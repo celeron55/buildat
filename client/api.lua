@@ -5,8 +5,10 @@ local log = buildat.Logger("__client/api")
 
 buildat.connect_server    = __buildat_connect_server
 buildat.extension_path    = __buildat_extension_path
+buildat.get_time_us       = __buildat_get_time_us
 
 buildat.safe.disconnect    = __buildat_disconnect
+buildat.safe.get_time_us   = __buildat_get_time_us
 
 function buildat.safe.set_simple_voxel_model(safe_node, w, h, d, safe_buffer)
 	if not getmetatable(safe_node) or

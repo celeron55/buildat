@@ -3,6 +3,7 @@
 #include "lua_bindings/util.h"
 #include "core/log.h"
 #include "interface/fs.h"
+#include <c55/os.h>
 #define MODULE "lua_bindings"
 
 namespace lua_bindings {
@@ -77,6 +78,13 @@ static int l_fatal_error(lua_State *L)
 	return 0;
 }
 
+// get_time_us()
+static int l_get_time_us(lua_State *L)
+{
+	lua_pushnumber(L, (double)get_timeofday_us());
+	return 1;
+}
+
 void init_misc(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
@@ -87,6 +95,7 @@ void init_misc(lua_State *L)
 	DEF_BUILDAT_FUNC(mkdir)
 	DEF_BUILDAT_FUNC(pcall)
 	DEF_BUILDAT_FUNC(fatal_error)
+	DEF_BUILDAT_FUNC(get_time_us)
 }
 
 }	// namespace lua_bindingss
