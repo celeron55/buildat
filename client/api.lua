@@ -134,6 +134,16 @@ function buildat.safe.set_voxel_lod_geometry(lod, safe_node, safe_buffer)
 	__buildat_set_voxel_lod_geometry(lod, node, buffer)
 end
 
+function buildat.safe.clear_voxel_geometry(safe_node)
+	if not getmetatable(safe_node) or
+			getmetatable(safe_node).type_name ~= "Node" then
+		error("node is not a sandboxed Node instance")
+	end
+	node = getmetatable(safe_node).unsafe
+
+	__buildat_clear_voxel_geometry(node)
+end
+
 function buildat.safe.set_voxel_physics_boxes(safe_node, safe_buffer)
 	if not getmetatable(safe_node) or
 			getmetatable(safe_node).type_name ~= "Node" then
@@ -152,6 +162,16 @@ function buildat.safe.set_voxel_physics_boxes(safe_node, safe_buffer)
 		buffer = getmetatable(safe_buffer).unsafe
 	end
 	__buildat_set_voxel_physics_boxes(node, buffer)
+end
+
+function buildat.safe.clear_voxel_physics_boxes(safe_node)
+	if not getmetatable(safe_node) or
+			getmetatable(safe_node).type_name ~= "Node" then
+		error("node is not a sandboxed Node instance")
+	end
+	node = getmetatable(safe_node).unsafe
+
+	__buildat_clear_voxel_physics_boxes(node)
 end
 
 local Vector3_prototype = {

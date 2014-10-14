@@ -209,6 +209,24 @@ static int l_set_voxel_lod_geometry(lua_State *L)
 	return 0;
 }
 
+// clear_voxel_geometry(node: Node)
+static int l_clear_voxel_geometry(lua_State *L)
+{
+	tolua_Error tolua_err;
+
+	GET_TOLUA_STUFF(node, 1, Node);
+
+	log_d(MODULE, "clear_voxel_geometry(): node=%p", node);
+
+	CustomGeometry *cg = node->GetComponent<CustomGeometry>();
+	if(cg)
+		node->RemoveComponent(cg);
+	//cg->Clear();
+	//cg->Commit();
+
+	return 0;
+}
+
 // set_voxel_physics_boxes(node, buffer: VectorBuffer)
 static int l_set_voxel_physics_boxes(lua_State *L)
 {
@@ -240,6 +258,27 @@ static int l_set_voxel_physics_boxes(lua_State *L)
 	return 0;
 }
 
+// clear_voxel_physics_boxes(node)
+static int l_clear_voxel_physics_boxes(lua_State *L)
+{
+	tolua_Error tolua_err;
+
+	GET_TOLUA_STUFF(node, 1, Node);
+
+	log_d(MODULE, "clear_voxel_physics_boxes(): node=%p", node);
+
+	RigidBody *body = node->GetComponent<RigidBody>();
+	if(body)
+		node->RemoveComponent(body);
+
+	PODVector<CollisionShape*> previous_shapes;
+	node->GetComponents<CollisionShape>(previous_shapes);
+	for(size_t i = 0; i < previous_shapes.Size(); i++)
+		node->RemoveComponent(previous_shapes[i]);
+
+	return 0;
+}
+
 void init_voxel(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
@@ -250,7 +289,9 @@ void init_voxel(lua_State *L)
 	DEF_BUILDAT_FUNC(set_8bit_voxel_geometry);
 	DEF_BUILDAT_FUNC(set_voxel_geometry);
 	DEF_BUILDAT_FUNC(set_voxel_lod_geometry);
+	DEF_BUILDAT_FUNC(clear_voxel_geometry);
 	DEF_BUILDAT_FUNC(set_voxel_physics_boxes);
+	DEF_BUILDAT_FUNC(clear_voxel_physics_boxes);
 }
 
 }	// namespace lua_bindingss
