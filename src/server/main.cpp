@@ -12,6 +12,7 @@
 #include <Context.h>
 #include <Engine.h>
 #include <Scene.h>
+#include <Profiler.h>
 #pragma GCC diagnostic pop
 #ifdef _WIN32
 	#include "ports/windows_sockets.h"
@@ -20,6 +21,7 @@
 	#include <unistd.h>
 #endif
 #include <iostream>
+#include <climits>
 #include <signal.h>
 #include <string.h>	// strerror()
 #include <time.h>	// struct timeval
@@ -157,10 +159,13 @@ int main(int argc, char *argv[])
 		// Main loop
 		uint64_t next_tick_us = get_timeofday_us();
 		uint64_t t_per_tick = 1000 * 50;
+
 		set_<int> attempt_bad_fds;
 		int last_added_attempt_bad_fd = -42;
 		set_<int> bad_fds;
 		size_t num_consequent_valid_selects = 0;
+		float profiler_print_timer = 0;
+
 		while(!g_sigint_received){
 			uint64_t current_us = get_timeofday_us();
 			int64_t delay_us = next_tick_us - current_us;
@@ -258,6 +263,21 @@ int main(int argc, char *argv[])
 				magic::Engine *engine = context->GetSubsystem<magic::Engine>();
 				engine->SetNextTimeStep(t_per_tick / 1e6);
 				engine->RunFrame();
+
+				profiler_print_timer += t_per_tick / 1e6;
+				if(profiler_print_timer >= 10.0f){
+					// Aim for long-time stability in profiler intervals
+					profiler_print_timer -= 10.0f;
+					// Avoid useless flooding in case of stuck server
+					if(profiler_print_timer > 5.0f)
+						profiler_print_timer = 0.0f;
+					magic::Profiler *p = context->GetSubsystem<magic::Profiler>();
+					if(p){
+						magic::String s = p->GetData(false, false, UINT_MAX);
+						p->BeginInterval();
+						log_v("main", "Urho3D Profiler:\n%s", s.CString());
+					}
+				}
 			});
 
 			if(state->is_shutdown_requested(&exit_status, &shutdown_reason))
