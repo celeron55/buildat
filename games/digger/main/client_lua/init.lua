@@ -9,6 +9,8 @@ local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
 
+local RENDER_DISTANCE = 160
+
 local PLAYER_HEIGHT = 1.7
 local PLAYER_WIDTH = 0.9
 local MOVE_SPEED = 10
@@ -24,7 +26,7 @@ zone.boundingBox = magic.BoundingBox(-1000, 1000)
 zone.ambientColor = magic.Color(0.1, 0.1, 0.1)
 zone.fogColor = magic.Color(0.6, 0.7, 0.8)
 zone.fogStart = 10
-zone.fogEnd = 300
+zone.fogEnd = RENDER_DISTANCE
 
 -- Add a node that the player can use to walk around with
 local player_node = scene:CreateChild("Player")
@@ -45,30 +47,12 @@ shape:SetCapsule(PLAYER_WIDTH, PLAYER_HEIGHT)
 
 local player_touches_ground = false
 
---[[local other_node = scene:CreateChild("Other")
-other_node.position = magic.Vector3(0, 10, 0)
-local body = other_node:CreateComponent("RigidBody")
-body.mass = 0
---body.friction = 0.7
-local shape = other_node:CreateComponent("CollisionShape")
-shape:SetBox(magic.Vector3(50, 1, 50))]]
-
---[[
--- Add a camera so we can look at the scene
-local camera_node = scene:CreateChild("Camera")
-camera_node.position = magic.Vector3(70.0, 50.0, 70.0)
-camera_node:LookAt(magic.Vector3(0, -5, 0))
-local camera = camera_node:CreateComponent("Camera")
-camera.nearClip = 1.0
-camera.farClip = 500.0
---]]
-
 -- Add a camera so we can look at the scene
 local camera_node = player_node:CreateChild("Camera")
 camera_node.position = magic.Vector3(0, 0.411*PLAYER_HEIGHT, 0)
 local camera = camera_node:CreateComponent("Camera")
 camera.nearClip = 0.3
-camera.farClip = 500.0
+camera.farClip = RENDER_DISTANCE
 camera.fov = 75
 
 -- And this thing so the camera is shown on the screen

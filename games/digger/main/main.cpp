@@ -152,7 +152,7 @@ struct Module: public interface::Module
 			log_v(MODULE, "Testbox: (%f, %f, %f)", p.x_, p.y_, p.z_);
 		});*/
 		static uint a = 0;
-		if(((a++) % 50) == 0){
+		if(((a++) % 100) == 0){
 			m_server->access_scene([&](Scene *scene){
 				Node *n = scene->GetChild("Testbox");
 				n->SetRotation(Quaternion(30, 60, 90));
@@ -187,7 +187,7 @@ struct Module: public interface::Module
 			log_t(MODULE, "on_generation_request(): p1: (%i, %i, %i)",
 					p1.getX(), p1.getY(), p1.getZ());
 
-			interface::NoiseParams np(0, 20, interface::v3f(40,40,40), 0, 4, 0.5);
+			interface::NoiseParams np(0, 25, interface::v3f(80,80,80), 0, 5, 0.5);
 
 			auto lc = region.getLowerCorner();
 			auto uc = region.getUpperCorner();
