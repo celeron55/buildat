@@ -458,6 +458,13 @@ function M.define(dst, util)
 				return util.wrap_instance("Scene", Scene:new())
 			end,
 		},
+		instance = {
+			GetNode = util.wrap_function({"Scene", "number"},
+				function(self, id)
+					return util.wrap_instance("Node", self:GetNode(id))
+				end
+			),
+		},
 	})
 
 	util.wc("ResourceCache", {
