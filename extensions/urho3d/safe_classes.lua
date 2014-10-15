@@ -154,6 +154,9 @@ function M.define(dst, util)
 			__mul = util.wrap_function({"Vector3", "number"}, function(self, n)
 				return util.wrap_instance("Vector3", self * n)
 			end),
+			__div = util.wrap_function({"Vector3", "number"}, function(self, n)
+				return util.wrap_instance("Vector3", self / n)
+			end),
 			__add = util.wrap_function({"Vector3", "Vector3"}, function(self, other)
 				return util.wrap_instance("Vector3", self + other)
 			end),

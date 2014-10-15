@@ -9,6 +9,7 @@ local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
 
+--local RENDER_DISTANCE = 640
 local RENDER_DISTANCE = 480
 --local RENDER_DISTANCE = 320
 --local RENDER_DISTANCE = 240
@@ -16,7 +17,7 @@ local RENDER_DISTANCE = 480
 
 local FOG_END = RENDER_DISTANCE * 1.2
 
-local PLAYER_HEIGHT = 1.7
+local PLAYER_HEIGHT = 1.7*2
 local PLAYER_WIDTH = 0.9
 local MOVE_SPEED = 10
 local JUMP_SPEED = 7 -- Barely 2 voxels
@@ -52,6 +53,7 @@ shape:SetCapsule(PLAYER_WIDTH, PLAYER_HEIGHT)
 --]]
 
 local player_touches_ground = false
+local player_crouched = false
 
 -- Add a camera so we can look at the scene
 local camera_node = player_node:CreateChild("Camera")
@@ -120,7 +122,11 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 			wanted_v.z = wanted_v.z + 1
 		end
 
-		wanted_v = wanted_v:Normalized() * MOVE_SPEED
+		if player_crouched then
+			wanted_v = wanted_v:Normalized() * MOVE_SPEED / 2
+		else
+			wanted_v = wanted_v:Normalized() * MOVE_SPEED
+		end
 
 		if magic.input:GetKeyDown(magic.KEY_SPACE) or
 				magic.input:GetKeyPress(magic.KEY_SPACE) then
@@ -130,12 +136,25 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 			end
 		end
 		if magic.input:GetKeyDown(magic.KEY_SHIFT) then
-			wanted_v.y = wanted_v.y - MOVE_SPEED
+			--wanted_v.y = wanted_v.y - MOVE_SPEED
 
 			-- Delay setting this to here so that it's possible to wait for the
 			-- world to load first
 			if body.mass == 0 then
 				body.mass = 70.0
+			end
+
+			if not player_crouched then
+				shape:SetCapsule(PLAYER_WIDTH, PLAYER_HEIGHT/2)
+				camera_node.position = magic.Vector3(0, 0.411*PLAYER_HEIGHT/2, 0)
+				player_crouched = true
+			end
+		else
+			if player_crouched then
+				shape:SetCapsule(PLAYER_WIDTH, PLAYER_HEIGHT)
+				player_node:Translate(magic.Vector3(0, PLAYER_HEIGHT/4, 0))
+				camera_node.position = magic.Vector3(0, 0.411*PLAYER_HEIGHT, 0)
+				player_crouched = false
 			end
 		end
 
