@@ -50,7 +50,8 @@ ss_ serialize_volume_compressed(const pv::RawVolume<VoxelInstance> &volume)
 			}
 		}
 		std::ostringstream compressed_os(std::ios::binary);
-		interface::compress_zlib(raw_os.str(), compressed_os);
+		// NOTE: 4 uses 98% and 1 uses 58% of the CPU time of 6
+		interface::compress_zlib(raw_os.str(), compressed_os, 6);
 		ar(compressed_os.str());
 	}
 	return os.str();
