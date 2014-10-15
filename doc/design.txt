@@ -195,14 +195,12 @@ The voxel world:
 	- Nodes contain:
 		- the used voxel registry name ("buildat_voxel_registry_name")
 		- the data itself              ("buildat_voxel_data")
-		- the used data format         ("buildat_voxel_data_format") (?)
 		- data modification version    ("buildat_voxel_mod_version")
 	- The data can be raw or compresed, and it can be cached by node id and data
-	  modification version
+	  modification version. The first byte distinguishes different data formats.
 	- Data uses the PODVector<uint8_t> type in Urho3D::Variant because the
 	  String type fails to work with zeroes. It is visible to Lua as
 	  VectorBuffer.
-	- Maybe the format could be included as the first byte in the data
 	- Consider splitting data to multiple user variables if it does not compress
 	  very well (say, to less than 500 bytes)
 - The client is allowed to see all voxel data for each node that gets synced
@@ -277,4 +275,22 @@ The voxel world:
 	  registration of generation callbacks. It could also automate the creation
 	  of extra static nodes when needed by padding the buffer enough for common
 	  things.
+
+- User variable updates (specifically buildat_voxel_data) have to be somehow
+  catched on the client so that builtin/voxelworld can update voxel geometry
+	- There's no built-in event for this, especially as we aren't using the
+	  regular networking implementation of Urho3D (there's nothing there either
+	  though)
+	- Maybe the client-side handler for replicate:latest_node_data could call
+	  into the lua environment on every update, and then the Lua side would
+	  check whether the voxel data was modified
+		- No; in the case of moving nodes this will cause too much unnecessary
+		  processing
+		- Also catching them on the server side is not possible because
+		  variables are handled discreetly only when they are added;
+		  modifications go through Node::WriteLatestDataUpdate().
+	- Maybe builtin/voxelworld can send packets to clients when voxel data is
+	  modified
+		- How does it know which clients know about which node?
+			- builtin/replicate could have an interface for asking this
 
