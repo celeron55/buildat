@@ -9,8 +9,8 @@ local dump = buildat.dump
 local M = {}
 
 --local LOD_DISTANCE = 140
-local LOD_DISTANCE = 100
---local LOD_DISTANCE = 80
+--local LOD_DISTANCE = 100
+local LOD_DISTANCE = 80
 --local LOD_DISTANCE = 50
 local LOD_THRESHOLD = 0.2
 
