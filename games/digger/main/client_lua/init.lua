@@ -17,7 +17,7 @@ local RENDER_DISTANCE = 480
 
 local FOG_END = RENDER_DISTANCE * 1.2
 
-local PLAYER_HEIGHT = 1.7*2
+local PLAYER_HEIGHT = 1.7
 local PLAYER_WIDTH = 0.9
 local MOVE_SPEED = 10
 local JUMP_SPEED = 7 -- Barely 2 voxels
