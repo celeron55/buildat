@@ -28,6 +28,7 @@
 #include <PhysicsWorld.h>
 #include <ResourceCache.h>
 #include <Octree.h>
+#include <Profiler.h>
 #pragma GCC diagnostic pop
 #include <iostream>
 #include <algorithm>
@@ -759,6 +760,9 @@ struct CState: public State, public interface::Server
 
 	void handle_events()
 	{
+		magic::AutoProfileBlock profiler_block(m_magic_context->
+				GetSubsystem<magic::Profiler>(), "Buildat|handle_events");
+
 		// Get modified modules and push events to queue
 		{
 			interface::MutexScope ms(m_modules_mutex);

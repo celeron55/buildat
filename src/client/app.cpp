@@ -33,7 +33,7 @@
 #include <FileSystem.h>
 #include <PhysicsWorld.h>
 #include <DebugRenderer.h>
-#include <Profiler.h>
+//#include <Profiler.h>
 #pragma GCC diagnostic pop
 extern "C" {
 #include <lua.h>
