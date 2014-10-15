@@ -268,6 +268,25 @@ struct CApp: public App, public magic::Application
 			vdef.physically_solid = true;
 			m_voxel_reg->add_voxel(vdef);	// id 4
 		}
+		{
+			interface::VoxelDefinition vdef;
+			vdef.name.block_name = "leaves";
+			vdef.name.segment_x = 0;
+			vdef.name.segment_y = 0;
+			vdef.name.segment_z = 0;
+			vdef.name.rotation_primary = 0;
+			vdef.name.rotation_secondary = 0;
+			vdef.handler_module = "";
+			for(size_t i = 0; i < 6; i++){
+				interface::AtlasSegmentDefinition &seg = vdef.textures[i];
+				seg.resource_name = "main/leaves.png";
+				seg.total_segments = magic::IntVector2(1, 1);
+				seg.select_segment = magic::IntVector2(0, 0);
+			}
+			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
+			vdef.physically_solid = true;
+			m_voxel_reg->add_voxel(vdef);	// id 5
+		}
 	}
 
 	~CApp()
