@@ -53,6 +53,7 @@ template<> struct hash<pv::Vector<3u, int16_t>>{
 
 }
 
+// TODO: Move to a header (core/cereal_polyvox.h or something)
 namespace cereal {
 
 template<class Archive>
@@ -430,6 +431,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 	void on_start()
 	{
+		// TODO: Load from disk or something
+
 		//pv::Region region(-1, 0, -1, 1, 0, 1);
 		//pv::Region region(-1, -1, -1, 1, 1, 1);
 		//pv::Region region(-2, -1, -2, 2, 1, 2);
@@ -447,12 +450,51 @@ struct Module: public interface::Module, public voxelworld::Interface
 		}
 	}
 
+	void unload_node(Scene *scene, uint node_id)
+	{
+		log_v(MODULE, "Unloading node %i", node_id);
+		Node *n = scene->GetNode(node_id);
+		if(!n){
+			log_w(MODULE, "Cannot unload node %i: Not found in scene", node_id);
+			return;
+		}
+		n->RemoveAllComponents();
+		n->Remove();
+	}
+
 	void on_unload()
 	{
+		log_v(MODULE, "on_unload()");
+
+		commit();
+
+		// Remove everything managed by us from the scene
+		m_server->access_scene([&](Scene *scene)
+		{
+			for(auto &sector_pair : m_sections){
+				for(auto &section_pair : sector_pair.second){
+					Section &section = section_pair.second;
+
+					auto region = section.node_ids->getEnclosingRegion();
+					auto lc = region.getLowerCorner();
+					auto uc = region.getUpperCorner();
+					for(int z = lc.getZ(); z <= uc.getZ(); z++){
+						for(int y = lc.getY(); y <= uc.getY(); y++){
+							for(int x = lc.getX(); x <= uc.getX(); x++){
+								uint id = section.node_ids->getVoxelAt(x, y, z);
+								section.node_ids->setVoxelAt(x, y, z, 0);
+								unload_node(scene, id);
+							}
+						}
+					}
+				}
+			}
+		});
 	}
 
 	void on_continue()
 	{
+		on_start();
 	}
 
 	void on_client_connected(const network::NewClient &client_connected)
@@ -788,7 +830,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 		mark_node_for_physics_update(node_id, volume);
 	}
 
-	void set_voxel(const pv::Vector3DInt32 &p, const interface::VoxelInstance &v)
+	void set_voxel(const pv::Vector3DInt32 &p, const interface::VoxelInstance &v,
+			bool disable_warnings)
 	{
 		// Don't log here; this is a too busy place for even ignored log calls
 		/*log_t(MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i",
@@ -798,20 +841,24 @@ struct Module: public interface::Module, public voxelworld::Interface
 				container_coord16(chunk_p, m_section_size_chunks);
 		Section *section = get_section(section_p);
 		if(section == nullptr){
-			log_d(MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i: No section "
-					" " PV3I_FORMAT " for chunk " PV3I_FORMAT,
-					PV3I_PARAMS(p), v.data, PV3I_PARAMS(section_p),
-					PV3I_PARAMS(chunk_p));
+			if(!disable_warnings){
+				log_w(MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i: No section "
+						PV3I_FORMAT " for chunk " PV3I_FORMAT,
+						PV3I_PARAMS(p), v.data, PV3I_PARAMS(section_p),
+						PV3I_PARAMS(chunk_p));
+			}
 			return;
 		}
 
 		// Set in buffer
 		ChunkBuffer &buf = section->get_buffer(chunk_p, m_server);
 		if(!buf.volume){
-			log_d(MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i: Couldn't get "
-					"buffer volume for chunk " PV3I_FORMAT " in section "
-					PV3I_FORMAT, PV3I_PARAMS(p), v.data, PV3I_PARAMS(chunk_p),
-					PV3I_PARAMS(section_p));
+			if(!disable_warnings){
+				log_w(MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i: Couldn't get "
+						"buffer volume for chunk " PV3I_FORMAT " in section "
+						PV3I_FORMAT, PV3I_PARAMS(p), v.data, PV3I_PARAMS(chunk_p),
+						PV3I_PARAMS(section_p));
+			}
 			return;
 		}
 		// NOTE: +1 offset needed for mesh generation
@@ -910,11 +957,49 @@ struct Module: public interface::Module, public voxelworld::Interface
 		m_sections_with_loaded_buffers.clear();
 	}
 
-	VoxelInstance get_voxel(const pv::Vector3DInt32 &p)
+	VoxelInstance get_voxel(const pv::Vector3DInt32 &p, bool disable_warnings)
 	{
-		// TODO: Get buffer
-		// TODO: Get voxel from buffer
-		return VoxelInstance(0);
+		pv::Vector3DInt32 chunk_p = container_coord(p, m_chunk_size_voxels);
+		pv::Vector3DInt16 section_p =
+				container_coord16(chunk_p, m_section_size_chunks);
+		Section *section = get_section(section_p);
+		if(section == nullptr){
+			if(!disable_warnings){
+				log_w(MODULE, "get_voxel() p=" PV3I_FORMAT ": No section "
+						PV3I_FORMAT " for chunk " PV3I_FORMAT,
+						PV3I_PARAMS(p), PV3I_PARAMS(section_p),
+						PV3I_PARAMS(chunk_p));
+			}
+			return VoxelInstance(interface::VOXELTYPEID_UNDEFINED);
+		}
+
+		// Get from buffer
+		ChunkBuffer &buf = section->get_buffer(chunk_p, m_server);
+		if(!buf.volume){
+			if(!disable_warnings){
+				log_w(MODULE, "get_voxel() p=" PV3I_FORMAT ": Couldn't get "
+						"buffer volume for chunk " PV3I_FORMAT " in section "
+						PV3I_FORMAT, PV3I_PARAMS(p), PV3I_PARAMS(chunk_p),
+						PV3I_PARAMS(section_p));
+			}
+			return VoxelInstance(interface::VOXELTYPEID_UNDEFINED);
+		}
+		// NOTE: +1 offset needed for mesh generation
+		pv::Vector3DInt32 voxel_p(
+				p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX() + 1,
+				p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY() + 1,
+				p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ() + 1
+		);
+		VoxelInstance v = buf.volume->getVoxelAt(voxel_p);
+
+		// Set section buffer loaded flag
+		auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
+				m_sections_with_loaded_buffers.end(), section,
+				std::greater<Section*>()); // position in descending order
+		if(it == m_sections_with_loaded_buffers.end() || *it != section)
+			m_sections_with_loaded_buffers.insert(it, section);
+
+		return v;
 	}
 
 	interface::VoxelRegistry* get_voxel_reg()

@@ -40,11 +40,15 @@ namespace voxelworld
 				const pv::Vector3DInt16 &section_p) = 0;
 
 		virtual void set_voxel(const pv::Vector3DInt32 &p,
-				const VoxelInstance &v) = 0;
+				const VoxelInstance &v,
+				bool disable_warnings = false) = 0;
 
 		virtual size_t num_buffers_loaded() = 0;
 
 		virtual void commit() = 0;
+
+		virtual VoxelInstance get_voxel(const pv::Vector3DInt32 &p,
+				bool disable_warnings = false) = 0;
 
 		virtual interface::VoxelRegistry* get_voxel_reg() = 0;
 
