@@ -359,8 +359,9 @@ struct Module: public interface::Module, public loader::Interface
 		set_<ss_> required_modules;
 		auto list = fs->list_directory(current);
 		for(const interface::Filesystem::Node &n : list){
-			if(n.name == "__loader")
+			if(n.name == "__loader" || !n.is_directory)
 				continue;
+			log_t(MODULE, "Requirement from main module path: \"%s\"", cs(n.name));
 			required_modules.insert(n.name);
 		}
 
