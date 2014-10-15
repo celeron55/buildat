@@ -40,6 +40,5 @@ Buildat TODO
 - Threaded mesh generation
 - If an error occurs on the client in module initialization, show error and quit
 - LuaVoxelRegistry
-- Speed up world generation by allowing direct access() to a RawVolume
 - Show sandbox_test status at corner and don't show dialog unless something is
   found

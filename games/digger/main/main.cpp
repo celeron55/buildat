@@ -177,7 +177,7 @@ struct Module: public interface::Module
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
 			const pv::Vector3DInt16 &section_p = event.section_p;
-			pv::Region region = ivoxelworld->get_section_region(section_p);
+			pv::Region region = ivoxelworld->get_section_region_voxels(section_p);
 
 			pv::Vector3DInt32 p0 = region.getLowerCorner();
 			pv::Vector3DInt32 p1 = region.getUpperCorner();

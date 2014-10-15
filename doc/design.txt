@@ -253,6 +253,10 @@ The voxel world:
 	  inside the section.
 	- Overshooting trees and other pseudo objects have to be saved as extra
 	  static nodes if they cross the edges of the section
+		- Altough actually you can just lazymode through it all and just set
+		  voxels in the neighboring sections and chunks. They probably exist and
+		  probably will be saved, and if not, you just get your trees cut in
+		  half. Well, it's a tradeoff.
 	- Save-enabled sections in the memory are saved. Others are discraded.
 	- When saving a section:
 		- The section properties are saved
