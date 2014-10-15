@@ -9,6 +9,29 @@ return {
 	KeyDown = {
 		Key = {variant = "Int", safe = "number"},
 	},
+	MouseButtonDown = {
+		Button = {variant = "Int", safe = "number"},
+		Buttons = {variant = "Int", safe = "number"},
+		Qualifiers = {variant = "Int", safe = "number"},
+	},
+	MouseButtonUp = {
+		Button = {variant = "Int", safe = "number"},
+		Buttons = {variant = "Int", safe = "number"},
+		Qualifiers = {variant = "Int", safe = "number"},
+	},
+	MouseMove = {
+		X = {variant = "Int", safe = "number"},
+		Y = {variant = "Int", safe = "number"},
+		DX = {variant = "Int", safe = "number"},
+		DY = {variant = "Int", safe = "number"},
+		Buttons = {variant = "Int", safe = "number"},
+		Qualifiers = {variant = "Int", safe = "number"},
+	},
+	MouseWheel = {
+		Wheel = {variant = "Int", safe = "number"},
+		Buttons = {variant = "Int", safe = "number"},
+		Qualifiers = {variant = "Int", safe = "number"},
+	},
 	HoverBegin = {
 	},
 	HoverEnd = {
