@@ -36,6 +36,11 @@ ss_ lua_tocppstring(lua_State *L, int index)
 	return ss_(s, length);
 }
 
+ss_ lua_checkcppstring(lua_State *L, int index)
+{
+	return lua_tocppstring(L, index);
+}
+
 int handle_error(lua_State *L)
 {
 	lua_getglobal(L, "debug");

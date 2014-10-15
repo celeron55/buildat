@@ -33,6 +33,7 @@
 #include <FileSystem.h>
 #include <PhysicsWorld.h>
 #include <DebugRenderer.h>
+#include <Profiler.h>
 #pragma GCC diagnostic pop
 extern "C" {
 #include <lua.h>
@@ -513,13 +514,15 @@ struct CApp: public App, public magic::Application
 
 	void on_update(magic::StringHash event_type, magic::VariantMap &event_data)
 	{
+		/*magic::AutoProfileBlock profiler_block(
+				GetSubsystem<magic::Profiler>(), "App::on_update");*/
+
 		m_atlas_reg->update();
 
 		if(g_sigint_received)
 			shutdown();
 		if(m_state)
 			m_state->update();
-		script_tick();
 	}
 
 	void on_post_render_update(
@@ -597,26 +600,6 @@ struct CApp: public App, public magic::Application
 		else if(magic_level == magic::LOG_ERROR)
 			c55_level = LOG_ERROR;
 		log_(c55_level, MODULE, "Urho3D %s", cs(message));
-	}
-
-	void script_tick()
-	{
-		log_t(MODULE, "script_tick()");
-
-		int64_t current_us = get_timeofday_us();
-		int64_t d_us = current_us - m_last_script_tick_us;
-		if(d_us < 0)
-			d_us = 0;
-		m_last_script_tick_us = current_us;
-		double dtime = d_us / 1000000.0;
-
-		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_tick");
-		if(lua_isnil(L, -1)){
-			lua_pop(L, 1);
-			return;
-		}
-		lua_pushnumber(L, dtime);
-		error_logging_pcall(L, 1, 0);
 	}
 
 	// Apps-specific lua functions

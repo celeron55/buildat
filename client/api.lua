@@ -10,6 +10,8 @@ buildat.SpatialUpdateQueue = __buildat_SpatialUpdateQueue
 
 buildat.safe.disconnect    = __buildat_disconnect
 buildat.safe.get_time_us   = __buildat_get_time_us
+buildat.safe.profiler_block_begin = __buildat_profiler_block_begin
+buildat.safe.profiler_block_end   = __buildat_profiler_block_end
 
 buildat.safe.SpatialUpdateQueue = function()
 	local internal = __buildat_SpatialUpdateQueue()

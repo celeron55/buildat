@@ -108,6 +108,7 @@ if(BUILD_CLIENT)
 		src/lua_bindings/cereal.cpp
 		src/lua_bindings/voxel.cpp
 		src/lua_bindings/spatial_update_queue.cpp
+		src/lua_bindings/misc_urho3d.cpp
 	)
 
 	add_executable(${CLIENT_EXE_NAME} ${CLIENT_SRCS})

@@ -173,6 +173,8 @@ function M.init()
 	end
 
 	magic.SubscribeToEvent("Update", function(event_type, event_data)
+		buildat.profiler_block_begin("Buildat|voxelworld:update")
+
 		--local t0 = buildat.get_time_us()
 		--local dt = event_data:GetFloat("TimeStep")
 		update_counter = update_counter + 1
@@ -251,6 +253,7 @@ function M.init()
 			camera_last_p = camera_p
 		end
 		--log:info(buildat.get_time_us()-t0)
+		buildat.profiler_block_end()
 	end)
 
 	replicate.sub_sync_node_added({}, function(node)
