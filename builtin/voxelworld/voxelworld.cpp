@@ -685,6 +685,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 				std::greater<QueuedNodePhysicsUpdate>());
 		if(it == m_nodes_needing_physics_update.end()){
 			m_nodes_needing_physics_update.insert(it, update);
+		} else if(it->node_id != node_id){
+			m_nodes_needing_physics_update.insert(it, update);
 		} else {
 			*it = update;
 		}
