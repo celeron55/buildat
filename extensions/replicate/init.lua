@@ -33,6 +33,8 @@ end
 
 local nodes_waiting_for_name = {}
 
+-- NOTE: Using this safe version of magic.SubscribeToEvent() does not have a
+-- performance impact over the unsafe one. Tested 2014-10-15.
 magic.SubscribeToEvent("NodeAdded", function(event_type, event_data)
 	local node = event_data:GetPtr("Node", "Node")
 	--log:info("NodeAdded: "..node:GetName())

@@ -39,3 +39,4 @@ Buildat TODO
   auto-tag each module at runtime with game_<current_game>
 - Threaded mesh generation
 - If an error occurs on the client in module initialization, show error and quit
+- LuaVoxelRegistry
