@@ -245,7 +245,7 @@ struct Module: public interface::Module
 				}
 				y++;*/
 				double a = interface::NoisePerlin2D(&np, x, z, 0);
-				int y = a + 11.5;
+				int y = a + 11.0;
 				if(y < lc.getY() - 5 || y > uc.getY() - 5)
 					continue;
 
