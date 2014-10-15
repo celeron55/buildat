@@ -764,8 +764,13 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 		PODVector<CustomGeometryVertex> &cg_vertices = cg_all_vertices[cg_i];
 		cg_vertices = tg.vertex_data;
 		Material *material = new Material(context);
-		material->SetTechnique(0,
-				cache->GetResource<Technique>("Techniques/Diff.xml"));
+		if(lod <= interface::MAX_LOD_WITH_SHADOWS){
+			material->SetTechnique(0,
+					cache->GetResource<Technique>("Techniques/Diff.xml"));
+		} else {
+			material->SetTechnique(0,
+					cache->GetResource<Technique>("Techniques/DiffUnlit.xml"));
+		}
 		material->SetTexture(TU_DIFFUSE, atlas_cache->texture);
 		cg->SetMaterial(cg_i, material);
 		cg_i++;

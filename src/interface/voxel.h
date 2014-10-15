@@ -57,7 +57,7 @@ namespace interface
 		//       and what thing type that is in this case
 	};
 
-	static constexpr size_t VOXELDEF_NUM_LOD = 2;
+	static constexpr size_t VOXELDEF_NUM_LOD = 3;
 
 	// This definition should be as small as practical so that large portions of
 	// the definition array can fit in CPU cache

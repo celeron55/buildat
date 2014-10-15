@@ -203,8 +203,10 @@ static int l_set_voxel_lod_geometry(lua_State *L)
 	// Maybe appropriate
 	cg->SetOccluder(true);
 
-	// TODO: Don't do this here; allow the caller to do this
-	cg->SetCastShadows(true);
+	if(lod <= interface::MAX_LOD_WITH_SHADOWS)
+		cg->SetCastShadows(true);
+	else
+		cg->SetCastShadows(false);
 
 	return 0;
 }

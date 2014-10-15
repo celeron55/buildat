@@ -9,9 +9,12 @@ local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
 
+local RENDER_DISTANCE = 480
 --local RENDER_DISTANCE = 320
 --local RENDER_DISTANCE = 240
-local RENDER_DISTANCE = 160
+--local RENDER_DISTANCE = 160
+
+local FOG_END = RENDER_DISTANCE * 1.2
 
 local PLAYER_HEIGHT = 1.7
 local PLAYER_WIDTH = 0.9
@@ -28,13 +31,14 @@ zone.boundingBox = magic.BoundingBox(-1000, 1000)
 zone.ambientColor = magic.Color(0.1, 0.1, 0.1)
 zone.fogColor = magic.Color(0.6, 0.7, 0.8)
 zone.fogStart = 10
-zone.fogEnd = RENDER_DISTANCE * 1.0
+zone.fogEnd = FOG_END
 
 -- Add a node that the player can use to walk around with
 local player_node = scene:CreateChild("Player")
 --player_node.position = magic.Vector3(0, 30, 0)
 player_node.position = magic.Vector3(55, 30, 40)
-player_node.direction = magic.Vector3(-1, 0, 0.4)
+--player_node.direction = magic.Vector3(-1, 0, 0.4)
+player_node:Yaw(-177.49858)
 ---[[
 local body = player_node:CreateComponent("RigidBody")
 --body.mass = 70.0
@@ -52,6 +56,7 @@ local player_touches_ground = false
 -- Add a camera so we can look at the scene
 local camera_node = player_node:CreateChild("Camera")
 camera_node.position = magic.Vector3(0, 0.411*PLAYER_HEIGHT, 0)
+camera_node:Pitch(13.60000)
 local camera = camera_node:CreateComponent("Camera")
 camera.nearClip = 0.3
 camera.farClip = RENDER_DISTANCE
@@ -95,6 +100,8 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		--log:info("dmouse: ("..dmouse.x..", "..dmouse.y..")")
 		camera_node:Pitch(dmouse.y * 0.1)
 		player_node:Yaw(dmouse.x * 0.1)
+		--[[log:info("y="..player_node:GetRotation():YawAngle())
+		log:info("p="..camera_node:GetRotation():PitchAngle())]]
 
 		local body = player_node:GetComponent("RigidBody")
 

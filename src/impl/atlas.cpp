@@ -218,9 +218,15 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 						);
 						magic::IntVector2 dst_p = dst_p00 + magic::IntVector2(x, y);
 						magic::Color c = seg_img->GetPixel(src_p.x_, src_p.y_);
-						c.r_ *= 1.0f;
-						c.g_ *= 1.0f;
-						c.b_ *= 0.875f;
+						if(flags & ATLAS_LOD_BAKE_SHADOWS){
+							c.r_ *= 0.8f;
+							c.g_ *= 0.8f;
+							c.b_ *= 0.8f;
+						} else {
+							c.r_ *= 1.0f;
+							c.g_ *= 1.0f;
+							c.b_ *= 0.875f;
+						}
 						atlas.image->SetPixel(dst_p.x_, dst_p.y_, c);
 					} else {
 						// Simulate sides
@@ -230,35 +236,66 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 						);
 						magic::IntVector2 dst_p = dst_p00 + magic::IntVector2(x, y);
 						magic::Color c = seg_img->GetPixel(src_p.x_, src_p.y_);
-						/*c.r_ *= 1.0f;
-						c.g_ *= 1.0f;
-						c.b_ *= 1.0f;*/
 						// Leave horizontal edges look like they are bright
 						// topsides
 						// TODO: This should be variable according to the
 						// camera's height relative to the thing the atlas
 						// segment is representing
 						int edge_size = lod * seg_size.y_ / 16;
-						/*bool is_final_edge = (
-								y <= seg_size.y_/2 + edge_size / lod ||
-								y >= seg_size.y_*3/2 - edge_size / lod 
-						);*/
 						bool is_edge = (
 								src_p.y_ <= edge_size ||
 								src_p.y_ >= seg_size.y_ - edge_size
 						);
-						if(/*is_final_edge ||*/ !is_edge){
-							//if((x*lod/seg_size.x_ + y*lod/seg_size.y_) % 2 == 0){
-							if(flags & ATLAS_LOD_HALFBRIGHT_FACE){
-								c.r_ *= 0.70f;
-								c.g_ *= 0.70f;
-								c.b_ *= 0.65f;
+						if(flags & ATLAS_LOD_BAKE_SHADOWS){
+							if(is_edge){
+								if(flags & ATLAS_LOD_SEMIBRIGHT1_FACE){
+									c.r_ *= 0.75f;
+									c.g_ *= 0.75f;
+									c.b_ *= 0.8f;
+								} else if(flags & ATLAS_LOD_SEMIBRIGHT2_FACE){
+									c.r_ *= 0.75f;
+									c.g_ *= 0.75f;
+									c.b_ *= 0.8f;
+								} else {
+									c.r_ *= 0.8f * 0.49f;
+									c.g_ *= 0.8f * 0.49f;
+									c.b_ *= 0.8f * 0.52f;
+								}
 							} else {
-								c.r_ *= 0.5f;
-								c.g_ *= 0.5f;
-								c.b_ *= 0.5f;
+								if(flags & ATLAS_LOD_SEMIBRIGHT1_FACE){
+									c.r_ *= 0.70f * 0.75f;
+									c.g_ *= 0.70f * 0.75f;
+									c.b_ *= 0.65f * 0.8f;
+								} else if(flags & ATLAS_LOD_SEMIBRIGHT2_FACE){
+									c.r_ *= 0.50f * 0.75f;
+									c.g_ *= 0.50f * 0.75f;
+									c.b_ *= 0.50f * 0.8f;
+								} else {
+									c.r_ *= 0.5f * 0.15f;
+									c.g_ *= 0.5f * 0.15f;
+									c.b_ *= 0.5f * 0.16f;
+								}
 							}
-							//}
+						} else {
+							if(is_edge){
+								c.r_ *= 1.0f;
+								c.g_ *= 1.0f;
+								c.b_ *= 0.875f;
+							} else {
+								if(flags & ATLAS_LOD_SEMIBRIGHT1_FACE){
+									c.r_ *= 0.70f;
+									c.g_ *= 0.70f;
+									c.b_ *= 0.65f;
+								} else if(flags & ATLAS_LOD_SEMIBRIGHT2_FACE){
+									c.r_ *= 0.50f;
+									c.g_ *= 0.50f;
+									c.b_ *= 0.50f;
+								} else {
+									c.r_ *= 0.5f;
+									c.g_ *= 0.5f;
+									c.b_ *= 0.5f;
+								}
+							}
 						}
 						atlas.image->SetPixel(dst_p.x_, dst_p.y_, c);
 					}

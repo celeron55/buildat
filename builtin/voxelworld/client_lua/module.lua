@@ -8,12 +8,15 @@ local cereal = require("buildat/extension/cereal")
 local dump = buildat.dump
 local M = {}
 
-local LOD_DISTANCE = 100
 --local LOD_DISTANCE = 140
+local LOD_DISTANCE = 100
+--local LOD_DISTANCE = 80
 --local LOD_DISTANCE = 50
 local LOD_THRESHOLD = 0.2
 
 local PHYSICS_DISTANCE = 100
+
+local MAX_LOD = 4
 
 local camera_node = nil
 local update_counter = -1
@@ -68,9 +71,7 @@ function M.init()
 		local d = (node_p - camera_p):Length()
 		local lod_fraction = d / LOD_DISTANCE
 		local lod = math.floor(1 + lod_fraction)
-		if lod > 3 then
-			lod = 3
-		end
+		if lod > MAX_LOD then lod = MAX_LOD end
 
 		log:verbose("update_voxel_geometry(): node="..dump(node:GetName())..
 				", #data="..data:GetSize()..", d="..d..", lod="..lod)
@@ -109,6 +110,13 @@ function M.init()
 				-- 3 -> 2
 				near_trigger_d = 2 * LOD_DISTANCE * (1.0 - LOD_THRESHOLD)
 				near_weight = 0.5
+				-- 3 -> 4
+				far_trigger_d = 3 * LOD_DISTANCE * (1.0 + LOD_THRESHOLD)
+				far_weight = 0.2
+			elseif lod == 4 then
+				-- 4 -> 3
+				near_trigger_d = 3 * LOD_DISTANCE * (1.0 - LOD_THRESHOLD)
+				near_weight = 0.2
 			end
 		end
 		node_update_queue:put(node_p,

@@ -24,8 +24,13 @@ namespace interface
 		uint segment_id = 0;
 	};
 
+	// LOD lower than this will have shadow baked into its texture
+	const int MAX_LOD_WITH_SHADOWS = 2;
+
 	const uint8_t ATLAS_LOD_TOP_FACE = 0x10;
-	const uint8_t ATLAS_LOD_HALFBRIGHT_FACE = 0x20;
+	const uint8_t ATLAS_LOD_SEMIBRIGHT1_FACE = 0x20;
+	const uint8_t ATLAS_LOD_SEMIBRIGHT2_FACE = 0x40;
+	const uint8_t ATLAS_LOD_BAKE_SHADOWS = 0x80;
 
 	struct AtlasSegmentDefinition
 	{
