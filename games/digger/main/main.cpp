@@ -187,7 +187,8 @@ struct Module: public interface::Module
 			log_t(MODULE, "on_generation_request(): p1: (%i, %i, %i)",
 					p1.getX(), p1.getY(), p1.getZ());
 
-			interface::NoiseParams np(0, 25, interface::v3f(80,80,80), 0, 5, 0.5);
+			interface::NoiseParams np(0, 35, interface::v3f(160,160,160),
+					1, 6, 0.475);
 
 			auto lc = region.getLowerCorner();
 			auto uc = region.getUpperCorner();
@@ -222,6 +223,42 @@ struct Module: public interface::Module
 							ivoxelworld->set_voxel(p, VoxelInstance(4));
 						} else {
 							ivoxelworld->set_voxel(p, VoxelInstance(1));
+						}
+					}
+				}
+			}
+
+			// Add random trees
+			auto extent = uc - lc + pv::Vector3DInt32(1,1,1);
+			int area = extent.getX() * extent.getZ();
+			auto pr = interface::PseudoRandom(13241);
+			for(int i = 0; i < area / 100; i++){
+				int x = pr.range(lc.getX(), uc.getX());
+				int z = pr.range(lc.getZ(), uc.getZ());
+
+				/*int y = 50;
+				for(; y>-50; y--){
+					pv::Vector3DInt32 p(x, y, z);
+					VoxelInstance v = ivoxelworld->get_voxel(p);
+					if(v.getId() != 1)
+						break;
+				}
+				y++;*/
+				double a = interface::NoisePerlin2D(&np, x, z, 0);
+				int y = a + 11.5;
+				if(y < lc.getY() - 5 || y > uc.getY() - 5)
+					continue;
+
+				for(int y1=y; y1<y+4; y1++){
+					pv::Vector3DInt32 p(x, y1, z);
+					ivoxelworld->set_voxel(p, VoxelInstance(3));
+				}
+
+				for(int x1 = x-2; x1 <= x+2; x1++){
+					for(int y1 = y+3; y1 <= y+7; y1++){
+						for(int z1 = z-2; z1 <= z+2; z1++){
+							pv::Vector3DInt32 p(x1, y1, z1);
+							ivoxelworld->set_voxel(p, VoxelInstance(5));
 						}
 					}
 				}
