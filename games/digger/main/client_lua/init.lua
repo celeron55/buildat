@@ -37,8 +37,8 @@ zone.fogEnd = FOG_END
 local player_node = scene:CreateChild("Player")
 --player_node.position = magic.Vector3(0, 30, 0)
 player_node.position = magic.Vector3(55, 30, 40)
---player_node.direction = magic.Vector3(-1, 0, 0.4)
-player_node:Yaw(-177.49858)
+player_node.direction = magic.Vector3(-1, 0, 0.4)
+--player_node:Yaw(-177.49858)
 ---[[
 local body = player_node:CreateComponent("RigidBody")
 --body.mass = 70.0
@@ -56,7 +56,7 @@ local player_touches_ground = false
 -- Add a camera so we can look at the scene
 local camera_node = player_node:CreateChild("Camera")
 camera_node.position = magic.Vector3(0, 0.411*PLAYER_HEIGHT, 0)
-camera_node:Pitch(13.60000)
+--camera_node:Pitch(13.60000)
 local camera = camera_node:CreateComponent("Camera")
 camera.nearClip = 0.3
 camera.farClip = RENDER_DISTANCE
