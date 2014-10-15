@@ -15,6 +15,9 @@ local LOD_DISTANCE = 80
 local LOD_THRESHOLD = 0.2
 
 local PHYSICS_DISTANCE = 100
+local INITIAL_PHYSICS_NEAR_WEIGHT = 1.0
+
+local INITIAL_GEOMETRY_NEAR_WEIGHT = 0.15
 
 local MAX_LOD = 4
 
@@ -73,8 +76,9 @@ function M.init()
 		local lod = math.floor(1 + lod_fraction)
 		if lod > MAX_LOD then lod = MAX_LOD end
 
-		log:verbose("update_voxel_geometry(): node="..dump(node:GetName())..
-				", #data="..data:GetSize()..", d="..d..", lod="..lod)
+		log:verbose("update_voxel_geometry(): lod="..lod..
+				", d="..math.floor(d)..", #data="..data:GetSize()..
+				", node="..node:GetID())
 
 		local near_trigger_d = nil
 		local near_weight = nil
@@ -86,14 +90,15 @@ function M.init()
 					..camera_far_clip..")")
 			buildat.clear_voxel_geometry(node)
 
+			-- clip out -> 4
 			near_trigger_d = 1.2 * camera_far_clip
-			near_weight = 0.3
+			near_weight = 0.4
 		elseif lod == 1 then
 			buildat.set_voxel_geometry(node, data, registry_name)
 
 			-- 1 -> 2
 			far_trigger_d = LOD_DISTANCE * (1.0 + LOD_THRESHOLD)
-			far_weight = 0.4
+			far_weight = 0.5
 		else
 			buildat.set_voxel_lod_geometry(lod, node, data, registry_name)
 
@@ -102,21 +107,24 @@ function M.init()
 			elseif lod == 2 then
 				-- 2 -> 1
 				near_trigger_d = LOD_DISTANCE * (1.0 - LOD_THRESHOLD)
-				near_weight = 2.0
+				near_weight = 0.75
 				-- 2 -> 3
 				far_trigger_d = 2 * LOD_DISTANCE * (1.0 + LOD_THRESHOLD)
-				far_weight = 0.3
+				far_weight = 0.4
 			elseif lod == 3 then
 				-- 3 -> 2
 				near_trigger_d = 2 * LOD_DISTANCE * (1.0 - LOD_THRESHOLD)
-				near_weight = 0.5
+				near_weight = 0.6
 				-- 3 -> 4
 				far_trigger_d = 3 * LOD_DISTANCE * (1.0 + LOD_THRESHOLD)
-				far_weight = 0.2
+				far_weight = 0.4
 			elseif lod == 4 then
 				-- 4 -> 3
 				near_trigger_d = 3 * LOD_DISTANCE * (1.0 - LOD_THRESHOLD)
-				near_weight = 0.2
+				near_weight = 0.5
+				-- 4 -> clip out
+				far_trigger_d = camera_far_clip * 1.4
+				far_weight = 0.4
 			end
 		end
 		node_update_queue:put(node_p,
@@ -135,8 +143,8 @@ function M.init()
 		local node_p = node:GetWorldPosition()
 		local d = (node_p - camera_p):Length()
 
-		log:verbose("update_voxel_physics(): node="..dump(node:GetName())..
-				", #data="..data:GetSize()..", d="..d)
+		log:verbose("update_voxel_physics(): d="..math.floor(d)..
+				", #data="..data:GetSize()..", node="..node:GetID())
 
 		local near_trigger_d = nil
 		local near_weight = nil
@@ -249,7 +257,8 @@ function M.init()
 		if not node:GetVar("buildat_voxel_data"):IsEmpty() then
 			-- TODO: node:GetWorldPosition() is not at center of node
 			node_update_queue:put(node:GetWorldPosition(),
-					0.2, camera_far_clip * 1.2, nil, nil, {
+					INITIAL_GEOMETRY_NEAR_WEIGHT, camera_far_clip * 1.2,
+					nil, nil, {
 				type = "geometry",
 				current_lod = 0,
 				node_id = node:GetID(),
@@ -257,7 +266,7 @@ function M.init()
 			-- Create physics stuff when node comes closer than 100
 			-- TODO: node:GetWorldPosition() is not at center of node
 			node_update_queue:put(node:GetWorldPosition(),
-					1.0, PHYSICS_DISTANCE, nil, nil, {
+					INITIAL_PHYSICS_NEAR_WEIGHT, PHYSICS_DISTANCE, nil, nil, {
 				type = "physics",
 				node_id = node:GetID(),
 			})
