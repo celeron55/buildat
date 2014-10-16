@@ -76,7 +76,7 @@ int main(int argc, char *argv[])
 
 	std::string module_path;
 
-	const char opts[100] = "hm:r:i:S:U:c:l:C:";
+	const char opts[100] = "hm:r:i:S:U:c:l:L:C:";
 	const char usagefmt[1000] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
@@ -87,6 +87,7 @@ int main(int argc, char *argv[])
 			"  -U [urho3d_path]     Specify Urho3D path\n"
 			"  -c [command]         Set compiler command\n"
 			"  -l [integer]         Set maximum log level (0...5)\n"
+			"  -L [log file path]   Append log to a specified file\n"
 			"  -C [module_name]     Skip compiling specified module\n"
 	;
 
@@ -124,6 +125,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'l':
 			log_set_max_level(atoi(c55_optarg));
+			break;
+		case 'L':
+			log_set_file(c55_optarg);
 			break;
 		case 'C':
 			fprintf(stderr, "INFO: config.skip_compiling_modules += %s\n",
