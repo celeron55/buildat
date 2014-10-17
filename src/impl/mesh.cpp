@@ -714,11 +714,11 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 			tg.vertex_data.Resize(tg.vertex_data.Size() + 1);
 			CustomGeometryVertex &tg_vert = tg.vertex_data.Back();
 			tg_vert.position_.x_ = pv_vert.position.getX() * lod
-					- w/2.0f - 1.0f - lod/2.0f - 0.5f;
+					- w/2.0f - 1.0f - lod/2.0f;
 			tg_vert.position_.y_ = pv_vert.position.getY() * lod
-					- h/2.0f - 1.0f - lod/2.0f - 0.5f;
+					- h/2.0f - 1.0f - lod/2.0f;
 			tg_vert.position_.z_ = pv_vert.position.getZ() * lod
-					- d/2.0f - 1.0f - lod/2.0f - 0.5f;
+					- d/2.0f - 1.0f - lod/2.0f;
 			// Set real normal temporarily for assign_txcoords().
 			tg_vert.normal_.x_ = pv_vert.normal.getX();
 			tg_vert.normal_.y_ = pv_vert.normal.getY();
