@@ -93,7 +93,7 @@ static inline int container_coord(int x, int d)
 	return (x>=0 ? x : x-d+1) / d;
 }
 static inline pv::Vector3DInt32 container_coord(
-	const pv::Vector3DInt32 &p, const pv::Vector3DInt32 &d)
+		const pv::Vector3DInt32 &p, const pv::Vector3DInt32 &d)
 {
 	return pv::Vector3DInt32(
 			container_coord(p.getX(), d.getX()),
@@ -101,7 +101,7 @@ static inline pv::Vector3DInt32 container_coord(
 			container_coord(p.getZ(), d.getZ()));
 }
 static inline pv::Vector3DInt32 container_coord(
-	const pv::Vector3DInt32 &p, const pv::Vector3DInt16 &d)
+		const pv::Vector3DInt32 &p, const pv::Vector3DInt16 &d)
 {
 	return pv::Vector3DInt32(
 			container_coord(p.getX(), d.getX()),
@@ -109,7 +109,7 @@ static inline pv::Vector3DInt32 container_coord(
 			container_coord(p.getZ(), d.getZ()));
 }
 static inline pv::Vector3DInt16 container_coord16(
-	const pv::Vector3DInt32 &p, const pv::Vector3DInt16 &d)
+		const pv::Vector3DInt32 &p, const pv::Vector3DInt16 &d)
 {
 	return pv::Vector3DInt16(
 			container_coord(p.getX(), d.getX()),

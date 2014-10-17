@@ -215,7 +215,7 @@ Model* create_voxel_physics_model(Context *context,
 	IsQuadNeededByRegistryPhysics<VoxelInstance> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
 	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
-	IsQuadNeededByRegistryPhysics<VoxelInstance>>
+			IsQuadNeededByRegistryPhysics<VoxelInstance>>
 	surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh, iqn);
 	surfaceExtractor.execute();
 
@@ -430,7 +430,7 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg, atlas_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
 	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
-	IsQuadNeededByRegistry<VoxelInstance>>
+			IsQuadNeededByRegistry<VoxelInstance>>
 	surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh, iqn);
 	surfaceExtractor.execute();
 
@@ -641,7 +641,7 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg, atlas_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
 	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
-	IsQuadNeededByRegistry<VoxelInstance>>
+			IsQuadNeededByRegistry<VoxelInstance>>
 	surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh, iqn);
 	surfaceExtractor.execute();
 
