@@ -70,6 +70,11 @@ uncrustify -c "$uncrustify_cpp" --no-backup $cpp_files
 python "$script_dir/extra_cpp_style.py" -i $header_files
 python "$script_dir/extra_cpp_style.py" -i -b $cpp_files
 
+# Fix comment indentation from spaces to tabs (because uncrusfity is unable to
+# indent comments inside parameter lists (including lambda functions) with tabs
+# if it aligns them by spaces)
+sed -i -e ':loop' -e 's/    \(\t*\)\/\//\1\t\/\//' -e 't loop' $header_files $cpp_files
+
 # Remove trailing whitespace
 #sed -i -e 's/[\t ]*$//' $header_files $cpp_files $lua_files $cmake_files
 
