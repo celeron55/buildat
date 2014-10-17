@@ -128,13 +128,13 @@ struct ResolveState
 			if(m_promised_modules.count(dep.module)){
 				log_w(MODULE, "%s: Reverse dependency %s ignored (already "
 						"marked to be loaded)", cs(name), cs(dep.module));
-				continue;	// Adding the dependency would have no effect
+				continue; // Adding the dependency would have no effect
 			}
 
 			// Store dependency information
 			interface::ModuleDependency forward_dep;
-			forward_dep = dep;	// Base dependency on reverted one
-			forward_dep.module = name;	// The other module depends now on this
+			forward_dep = dep; // Base dependency on reverted one
+			forward_dep.module = name; // The other module depends now on this
 			// dep.module is the other module which should depeend on this one
 			m_reverse_dependencies[dep.module].push_back(forward_dep);
 
@@ -257,7 +257,7 @@ struct ResolveState
 				set_error("Missing dependencies");
 		}
 
-		return !m_failed;	// Make sure to return any leftover failure as false
+		return !m_failed; // Make sure to return any leftover failure as false
 	}
 };
 
@@ -265,7 +265,7 @@ struct Module: public interface::Module, public loader::Interface
 {
 	interface::Server *m_server;
 	bool m_activated = false;
-	sv_<ss_> m_module_load_paths;	// In order of preference
+	sv_<ss_> m_module_load_paths; // In order of preference
 
 	Module(interface::Server *server):
 		interface::Module("loader"),

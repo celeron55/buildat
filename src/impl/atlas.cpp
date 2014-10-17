@@ -30,7 +30,7 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 	CTextureAtlasRegistry(magic::Context *context):
 		m_context(context)
 	{
-		m_defs.resize(1);	// id=0 is ATLAS_UNDEFINED
+		m_defs.resize(1); // id=0 is ATLAS_UNDEFINED
 	}
 
 	const AtlasSegmentReference add_segment(
@@ -55,7 +55,7 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 			if(def0.segment_resolution == seg_img_size){
 				size_t max = def0.total_segments.x_ * def0.total_segments.y_;
 				if(def0.segments.size() >= max)
-					continue;	// Full
+					continue; // Full
 				atlas_def = &def0;
 				break;
 			}

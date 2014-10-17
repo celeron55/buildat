@@ -23,8 +23,8 @@
 #include <iostream>
 #include <climits>
 #include <signal.h>
-#include <string.h>	// strerror()
-#include <time.h>	// struct timeval
+#include <string.h> // strerror()
+#include <time.h> // struct timeval
 #define MODULE "main"
 
 namespace magic = Urho3D;
@@ -35,7 +35,7 @@ bool g_sigint_received = false;
 void sigint_handler(int sig)
 {
 	if(!g_sigint_received){
-		fprintf(stdout, "\n");	// Newline after "^C"
+		fprintf(stdout, "\n"); // Newline after "^C"
 		log_i("process", "SIGINT");
 		g_sigint_received = true;
 	} else {

@@ -50,7 +50,7 @@ namespace interface
 			type(t(name)), p(up_<Private>(p))
 		{}
 
-		static Type t(const ss_ &name);	// Shorthand function
+		static Type t(const ss_ &name); // Shorthand function
 	};
 
 	struct EventRegistry

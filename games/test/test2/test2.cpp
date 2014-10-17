@@ -43,22 +43,22 @@ struct Module: public interface::Module
 	{
 		log_i(MODULE, "test2 start(): Calling test1");
 
-		{	// Raw
+		{ // Raw
 			Event::Type type = Event::t("test1:thing");
 			Event event(type, up_<Event::Private>(new test1::Thing("Nakki")));
 			m_server->emit_event(std::move(event));
 		}
 
-		{	// Simplified raw
+		{ // Simplified raw
 			Event event("test1:thing", new test1::Thing("Kebab"));
 			m_server->emit_event(std::move(event));
 		}
 
-		{	// Even simpler
+		{ // Even simpler
 			m_server->emit_event("test1:thing", new test1::Thing("Pitsa"));
 		}
 
-		{	// Inline wrapper
+		{ // Inline wrapper
 			test1::do_thing(m_server, "Rulla");
 		}
 	}

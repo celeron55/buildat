@@ -27,7 +27,7 @@ namespace voxelworld
 		pv::Vector3DInt16 section_p;
 
 		GenerationRequest(const pv::Vector3DInt16 &section_p):
-				section_p(section_p)
+			section_p(section_p)
 		{}
 	};
 

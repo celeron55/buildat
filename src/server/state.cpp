@@ -216,16 +216,16 @@ struct CState: public State, public interface::Server
 	//       modules. In every other case modules must use access_scene().
 	// NOTE: If not locked, creating or destructing Urho3D Objects can cause a
 	//       crash.
-	interface::Mutex m_magic_mutex;	// Lock for all of Urho3D
+	interface::Mutex m_magic_mutex; // Lock for all of Urho3D
 
-	sm_<ss_, interface::ModuleInfo> m_module_info;	// Info of every seen module
-	sm_<ss_, ModuleContainer> m_modules;// Currently loaded modules
+	sm_<ss_, interface::ModuleInfo> m_module_info; // Info of every seen module
+	sm_<ss_, ModuleContainer> m_modules; // Currently loaded modules
 	set_<ss_> m_unloads_requested;
 	sm_<ss_, sp_<interface::FileWatch>> m_module_file_watches;
 	// Module modifications are accumulated here and core:module_modified events
 	// are fired every event loop based on this to lump multiple modifications
 	// into one (generally a modification causes many notifications)
-	set_<ss_> m_modified_modules;	// Module names
+	set_<ss_> m_modified_modules; // Module names
 	// TODO: Handle properly in reloads (unload by popping from top, then reload
 	//       everything until top)
 	sv_<ss_> m_module_load_order;
@@ -275,7 +275,7 @@ struct CState: public State, public interface::Server
 					g_server_config.urho3d_path+"/Source/Engine/"+subdir);
 		}
 		m_compiler->include_directories.push_back(
-				g_server_config.urho3d_path+"/Build/Engine");	// Urho3D.h
+				g_server_config.urho3d_path+"/Build/Engine"); // Urho3D.h
 		m_compiler->library_directories.push_back(
 				g_server_config.urho3d_path+"/Lib");
 		m_compiler->libraries.push_back("-lUrho3D");
@@ -302,7 +302,7 @@ struct CState: public State, public interface::Server
 		magic::VariantMap params;
 		params["ResourcePaths"] = resource_paths_s.c_str();
 		params["Headless"] = true;
-		params["LogName"] = "";	// Don't log to file
+		params["LogName"] = ""; // Don't log to file
 		//params["LogQuiet"]      = true; // Don't log to stdout
 		if(!m_magic_engine->Initialize(params))
 			throw Exception("Urho3D engine initialization failed");
@@ -761,7 +761,7 @@ struct CState: public State, public interface::Server
 	void handle_events()
 	{
 		magic::AutoProfileBlock profiler_block(m_magic_context->
-				GetSubsystem<magic::Profiler>(), "Buildat|handle_events");
+			GetSubsystem<magic::Profiler>(), "Buildat|handle_events");
 
 		// Get modified modules and push events to queue
 		{
@@ -821,8 +821,8 @@ struct CState: public State, public interface::Server
 			interface::MutexScope ms(m_modules_mutex);
 			for(auto it = m_unloads_requested.begin();
 					it != m_unloads_requested.end();){
-				ss_ module_name = *it;	// Copy
-				it++;	// Increment before unload_module_u; it erases this
+				ss_ module_name = *it; // Copy
+				it++; // Increment before unload_module_u; it erases this
 				log_i("state", "Unloading %s as requested", cs(module_name));
 				unload_module_u(module_name);
 			}

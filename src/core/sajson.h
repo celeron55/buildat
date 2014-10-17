@@ -34,7 +34,7 @@
 #include <cstdio>
 #include <limits>
 
-#include <string>	// for error messages.  kill someday?
+#include <string> // for error messages.  kill someday?
 
 #if defined(__GNUC__) || defined(__clang__)
 	#define SAJSON_LIKELY(x) __builtin_expect(!!(x), 1)
@@ -123,7 +123,7 @@ namespace sajson {
 		const char*const text;
 		const size_t _length;
 
-		string();	/*=delete*/
+		string(); /*=delete*/
 	};
 
 	class literal: public string {
@@ -893,7 +893,7 @@ done:
 
 			int i = 0;
 			double d =
-					0.0;// gcc complains that d might be used uninitialized which isn't true. appease the warning anyway.
+					0.0; // gcc complains that d might be used uninitialized which isn't true. appease the warning anyway.
 			for(;;){
 				char c = *p;
 				if(c < '0' || c > '9'){
@@ -1067,7 +1067,7 @@ done:
 				tag = out;
 			}
 
-			++p;// "
+			++p; // "
 			size_t start = p - input.get_data();
 			for(;;){
 				if(SAJSON_UNLIKELY(p >= input_end)){
@@ -1113,7 +1113,7 @@ done:
 			}
 
 			u = v;
-			return TYPE_NULL;	// ???
+			return TYPE_NULL; // ???
 		}
 
 		void write_utf8(unsigned codepoint, char* &end){
@@ -1196,7 +1196,7 @@ replace:
 								return error("unexpected end of input h");
 							}
 							unsigned u =
-									0;	// gcc's complaining that this could be used uninitialized. wrong.
+									0; // gcc's complaining that this could be used uninitialized. wrong.
 							parse_result result = read_hex(u);
 							if(!result){
 								return result;
@@ -1213,7 +1213,7 @@ replace:
 								}
 								p += 2;
 								unsigned v =
-										0;	// gcc's complaining that this could be used uninitialized. wrong.
+										0; // gcc's complaining that this could be used uninitialized. wrong.
 								result = read_hex(v);
 								if(!result){
 									return result;

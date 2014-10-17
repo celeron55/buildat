@@ -8,21 +8,21 @@
 #include <algorithm>
 #define MODULE "lua_bindings"
 
-#define DEF_METHOD(name){\
-		lua_pushcfunction(L, l_##name);\
-		lua_setfield(L, -2, #name);\
+#define DEF_METHOD(name){ \
+		lua_pushcfunction(L, l_##name); \
+		lua_setfield(L, -2, #name); \
 }
 
-#define GET_TOLUA_STUFF(result_name, index, type)\
-	if(!tolua_isusertype(L, index, #type, 0, &tolua_err)){\
-		tolua_error(L, __PRETTY_FUNCTION__, &tolua_err);\
-		return 0;\
-	}\
+#define GET_TOLUA_STUFF(result_name, index, type) \
+	if(!tolua_isusertype(L, index, #type, 0, &tolua_err)){ \
+		tolua_error(L, __PRETTY_FUNCTION__, &tolua_err); \
+		return 0; \
+	} \
 	type *result_name = (type*)tolua_tousertype(L, index, 0);
-#define TRY_GET_TOLUA_STUFF(result_name, index, type)\
-	type *result_name = nullptr;\
-	if(tolua_isusertype(L, index, #type, 0, &tolua_err)){\
-		result_name = (type*)tolua_tousertype(L, index, 0);\
+#define TRY_GET_TOLUA_STUFF(result_name, index, type) \
+	type *result_name = nullptr; \
+	if(tolua_isusertype(L, index, #type, 0, &tolua_err)){ \
+		result_name = (type*)tolua_tousertype(L, index, 0); \
 	}
 
 // Just do this; Urho3D's stuff doesn't really clash with anything in buildat
@@ -81,7 +81,7 @@ struct SpatialUpdateQueue
 		void insert(const Value &value, std::list<Item>::iterator queue_it){
 			Entry entry(value, queue_it);
 			auto it = std::lower_bound(m_set.begin(), m_set.end(), entry,
-					std::greater<Entry>());
+						std::greater<Entry>());
 			if(it == m_set.end())
 				m_set.insert(it, entry);
 			else if(it->value.node_id != value.node_id ||
@@ -93,15 +93,15 @@ struct SpatialUpdateQueue
 		void remove(const Value &value){
 			Entry entry(value);
 			auto it = std::lower_bound(m_set.begin(), m_set.end(), entry,
-					std::greater<Entry>());
+						std::greater<Entry>());
 			if(it == m_set.end())
 				return;
 			m_set.erase(it);
 		}
-		std::list<Item>::iterator* find(const Value &value){
+		std::list<Item>::iterator*find(const Value &value){
 			Entry entry(value);
 			auto it = std::lower_bound(m_set.begin(), m_set.end(), entry,
-					std::greater<Entry>());
+						std::greater<Entry>());
 			if(it == m_set.end())
 				return nullptr;
 			if(it->value.node_id != value.node_id ||
@@ -125,7 +125,7 @@ struct SpatialUpdateQueue
 			return;
 		log_d(MODULE, "SpatialUpdateQueue(): Items in old queue: %zu",
 				m_old_queue.size());
-		for(int i=0; i<max_operations; i++){
+		for(int i = 0; i<max_operations; i++){
 			if(m_old_queue.empty())
 				break;
 			Item &item = m_old_queue.back();
@@ -190,7 +190,7 @@ struct SpatialUpdateQueue
 		}
 
 		auto it = std::lower_bound(m_queue.begin(), m_queue.end(),
-				item, std::greater<Item>()); // position in descending order
+					item, std::greater<Item>()); // position in descending order
 		auto inserted_it = m_queue.insert(it, item);
 		m_queue_length++;
 		m_value_set.insert(item.value, inserted_it);
@@ -264,7 +264,7 @@ struct LuaSUQ
 {
 	static constexpr const char *class_name = "SpatialUpdateQueue";
 	SpatialUpdateQueue internal;
-	
+
 	static int gc_object(lua_State *L){
 		delete *(LuaSUQ**)(lua_touserdata(L, 1));
 		return 0;
@@ -303,7 +303,7 @@ struct LuaSUQ
 		value.node_id = luaL_checkinteger(L, -1);
 		lua_pop(L, 1);
 		o->internal.put(*p, near_weight, near_trigger_d,
-					far_weight, far_trigger_d, value);
+				far_weight, far_trigger_d, value);
 		return 0;
 	}
 	static int l_get(lua_State *L){
@@ -406,6 +406,6 @@ void init_spatial_update_queue(lua_State *L)
 	DEF_BUILDAT_FUNC(SpatialUpdateQueue);
 }
 
-}	// namespace lua_bindingss
-// vim: set noet ts=4 sw=4:
+} // namespace lua_bindingss
 
+// vim: set noet ts=4 sw=4:

@@ -71,7 +71,7 @@ struct Module: public interface::Module
 					seg.select_segment = magic::IntVector2(0, 0);
 				}
 				vdef.edge_material_id = interface::EDGEMATERIALID_EMPTY;
-				m_voxel_reg->add_voxel(vdef);	// id 1
+				m_voxel_reg->add_voxel(vdef); // id 1
 			}
 			{
 				interface::VoxelDefinition vdef;
@@ -90,7 +90,7 @@ struct Module: public interface::Module
 				}
 				vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
 				vdef.physically_solid = true;
-				m_voxel_reg->add_voxel(vdef);	// id 2
+				m_voxel_reg->add_voxel(vdef); // id 2
 			}
 			{
 				interface::VoxelDefinition vdef;
@@ -109,7 +109,7 @@ struct Module: public interface::Module
 				}
 				vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
 				vdef.physically_solid = true;
-				m_voxel_reg->add_voxel(vdef);	// id 3
+				m_voxel_reg->add_voxel(vdef); // id 3
 			}
 		});
 	}
@@ -145,8 +145,8 @@ struct Module: public interface::Module
 				n->SetPosition(Vector3(0.0f, 6.0f, 0.0f));
 				n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
 
-				/*int w = 1, h = 1, d = 1;
-				ss_ data = "1";*/
+	            /*int w = 1, h = 1, d = 1;
+	            ss_ data = "1";*/
 				int w = 2, h = 2, d = 1;
 				ss_ data = "1333";
 

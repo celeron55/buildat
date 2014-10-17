@@ -60,8 +60,8 @@ struct CState: public State
 	sp_<app::App> m_app;
 	ss_ m_remote_cache_path;
 	ss_ m_tmp_path;
-	sm_<ss_, ss_> m_file_hashes;// name -> hash
-	set_<ss_> m_waiting_files;	// name
+	sm_<ss_, ss_> m_file_hashes; // name -> hash
+	set_<ss_> m_waiting_files; // name
 	bool m_tell_after_all_files_transferred_requested = false;
 	// Connecting is possible only once. After that has happened, the whole
 	// state has to be recreated for making a new connection.

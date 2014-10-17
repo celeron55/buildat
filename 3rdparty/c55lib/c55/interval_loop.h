@@ -2,16 +2,16 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #pragma once
 #include <functional>
-#include <cstring>	// memset()
-#include <unistd.h>	// usleep()
-#include "os.h"	// get_timeofday_us()
+#include <cstring> // memset()
+#include <unistd.h> // usleep()
+#include "os.h" // get_timeofday_us()
 #include "log.h"
 
 // If f() returns false, loop ends
 void interval_loop(int interval_us, std::function<bool(float load_avg)> f)
 {
 	int64_t t_scheduled_tick_start = get_timeofday_us();
-	t_scheduled_tick_start /= interval_us;	// Align to round numbers
+	t_scheduled_tick_start /= interval_us; // Align to round numbers
 	t_scheduled_tick_start *= interval_us;
 	float load_sum = 0;
 	const int load_avg_length = interval_us < 500000 ? 5000000 / interval_us : 1;

@@ -20,7 +20,7 @@ namespace interface
 
 	struct AtlasSegmentReference
 	{
-		uint atlas_id = ATLAS_UNDEFINED;// 0 = undefined atlas
+		uint atlas_id = ATLAS_UNDEFINED; // 0 = undefined atlas
 		uint segment_id = 0;
 	};
 
@@ -34,7 +34,7 @@ namespace interface
 
 	struct AtlasSegmentDefinition
 	{
-		ss_ resource_name;	// If "", segment won't be added
+		ss_ resource_name; // If "", segment won't be added
 		magic::IntVector2 total_segments;
 		magic::IntVector2 select_segment;
 		// Mask 0x0f: LOD level, mask 0xf0: flags

@@ -22,7 +22,7 @@ struct FileInfo {
 	ss_ name;
 	ss_ content;
 	ss_ hash;
-	ss_ path;	// Empty if not a physical file
+	ss_ path; // Empty if not a physical file
 	FileInfo(const ss_ &name, const ss_ &content, const ss_ &hash, const ss_ &path):
 		name(name), content(content), hash(hash), path(path){}
 };

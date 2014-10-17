@@ -16,7 +16,7 @@ struct Module: public interface::Module
 {
 	interface::Server *m_server;
 
-	Event::Type m_EventType_test1_thing;// You can cache these for more speed
+	Event::Type m_EventType_test1_thing; // You can cache these for more speed
 
 	Module(interface::Server *server):
 		interface::Module("test1"),

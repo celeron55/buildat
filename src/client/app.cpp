@@ -19,8 +19,8 @@
 #include <Input.h>
 #include <ResourceCache.h>
 #include <Graphics.h>
-#include <GraphicsEvents.h>	// E_SCREENMODE
-#include <IOEvents.h>	// E_LOGMESSAGE
+#include <GraphicsEvents.h> // E_SCREENMODE
+#include <IOEvents.h> // E_LOGMESSAGE
 #include <Log.h>
 #include <DebugHud.h>
 #include <XMLFile.h>
@@ -121,7 +121,7 @@ struct CApp: public App, public magic::Application
 
 		sv_<ss_> resource_paths = {
 			g_client_config.cache_path+"/tmp",
-			g_client_config.share_path+"/extensions",	// Could be unsafe
+			g_client_config.share_path+"/extensions", // Could be unsafe
 			g_client_config.urho3d_path+"/Bin/CoreData",
 			g_client_config.urho3d_path+"/Bin/Data",
 		};
@@ -150,7 +150,7 @@ struct CApp: public App, public magic::Application
 		engineParameters_["ResourcePaths"] = resource_paths_s.c_str();
 		engineParameters_["AutoloadPaths"] = "";
 		engineParameters_["LogName"] = "";
-		engineParameters_["LogQuiet"] = true;	// Don't log to stdout
+		engineParameters_["LogQuiet"] = true; // Don't log to stdout
 
 		// Graphics options
 		engineParameters_["FullScreen"] = m_options.graphics.fullscreen;
@@ -210,7 +210,7 @@ struct CApp: public App, public magic::Application
 				seg.select_segment = magic::IntVector2(0, 0);
 			}
 			vdef.edge_material_id = interface::EDGEMATERIALID_EMPTY;
-			m_voxel_reg->add_voxel(vdef);	// id 1
+			m_voxel_reg->add_voxel(vdef); // id 1
 		}
 		{
 			interface::VoxelDefinition vdef;
@@ -229,7 +229,7 @@ struct CApp: public App, public magic::Application
 			}
 			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
 			vdef.physically_solid = true;
-			m_voxel_reg->add_voxel(vdef);	// id 2
+			m_voxel_reg->add_voxel(vdef); // id 2
 		}
 		{
 			interface::VoxelDefinition vdef;
@@ -248,7 +248,7 @@ struct CApp: public App, public magic::Application
 			}
 			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
 			vdef.physically_solid = true;
-			m_voxel_reg->add_voxel(vdef);	// id 3
+			m_voxel_reg->add_voxel(vdef); // id 3
 		}
 		{
 			interface::VoxelDefinition vdef;
@@ -267,7 +267,7 @@ struct CApp: public App, public magic::Application
 			}
 			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
 			vdef.physically_solid = true;
-			m_voxel_reg->add_voxel(vdef);	// id 4
+			m_voxel_reg->add_voxel(vdef); // id 4
 		}
 		{
 			interface::VoxelDefinition vdef;
@@ -286,7 +286,7 @@ struct CApp: public App, public magic::Application
 			}
 			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
 			vdef.physically_solid = true;
-			m_voxel_reg->add_voxel(vdef);	// id 5
+			m_voxel_reg->add_voxel(vdef); // id 5
 		}
 	}
 
@@ -515,7 +515,7 @@ struct CApp: public App, public magic::Application
 	void on_update(magic::StringHash event_type, magic::VariantMap &event_data)
 	{
 		/*magic::AutoProfileBlock profiler_block(
-				GetSubsystem<magic::Profiler>(), "App::on_update");*/
+		        GetSubsystem<magic::Profiler>(), "App::on_update");*/
 
 		m_atlas_reg->update();
 

@@ -203,6 +203,6 @@ namespace json
 	};
 }
 
-#define JSON_INDENT(x)	// Dummy for now
+#define JSON_INDENT(x)  // Dummy for now
 
 // vim: set noet ts=4 sw=4:

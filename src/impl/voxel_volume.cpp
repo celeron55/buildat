@@ -21,13 +21,13 @@ ss_ serialize_volume_simple(const pv::RawVolume<VoxelInstance> &volume)
 		auto region = volume.getEnclosingRegion();
 		auto lc = region.getLowerCorner();
 		auto uc = region.getUpperCorner();
-		for(size_t i=0; i<volume.m_dataSize; i++){
+		for(size_t i = 0; i<volume.m_dataSize; i++){
 			const VoxelInstance &v = volume.m_pData[i];
 			ar((uint32_t)v.data);
 		}
 	}
 	return os.str();
-};
+}
 
 ss_ serialize_volume_compressed(const pv::RawVolume<VoxelInstance> &volume)
 {
@@ -44,7 +44,7 @@ ss_ serialize_volume_compressed(const pv::RawVolume<VoxelInstance> &volume)
 			auto region = volume.getEnclosingRegion();
 			auto lc = region.getLowerCorner();
 			auto uc = region.getUpperCorner();
-			for(size_t i=0; i<volume.m_dataSize; i++){
+			for(size_t i = 0; i<volume.m_dataSize; i++){
 				const VoxelInstance &v = volume.m_pData[i];
 				ar((uint32_t)v.data);
 			}
@@ -55,7 +55,7 @@ ss_ serialize_volume_compressed(const pv::RawVolume<VoxelInstance> &volume)
 		ar(compressed_os.str());
 	}
 	return os.str();
-};
+}
 
 up_<pv::RawVolume<VoxelInstance>> deserialize_volume(const ss_ &data)
 {
@@ -71,7 +71,7 @@ up_<pv::RawVolume<VoxelInstance>> deserialize_volume(const ss_ &data)
 		pv::Region region(0, 0, 0, w-1, h-1, d-1);
 		up_<pv::RawVolume<VoxelInstance>> volume(
 				new pv::RawVolume<VoxelInstance>(region));
-		for(size_t i=0; i<volume->m_dataSize; i++){
+		for(size_t i = 0; i<volume->m_dataSize; i++){
 			uint32_t v;
 			ar(v);
 			volume->m_pData[i].data = v;
@@ -94,7 +94,7 @@ up_<pv::RawVolume<VoxelInstance>> deserialize_volume(const ss_ &data)
 		{
 			std::istringstream raw_is(raw_os.str(), std::ios::binary);
 			cereal::PortableBinaryInputArchive ar(raw_is);
-			for(size_t i=0; i<volume->m_dataSize; i++){
+			for(size_t i = 0; i<volume->m_dataSize; i++){
 				uint32_t v;
 				ar(v);
 				volume->m_pData[i].data = v;
@@ -102,7 +102,7 @@ up_<pv::RawVolume<VoxelInstance>> deserialize_volume(const ss_ &data)
 		}
 		return volume;
 	}
-	return up_<pv::RawVolume<VoxelInstance>>();;
+	return up_<pv::RawVolume<VoxelInstance>>();
 }
 
 }

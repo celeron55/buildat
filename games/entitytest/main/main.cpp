@@ -73,13 +73,13 @@ struct Module: public interface::Module
 			// NOTE: Modified or created materials will not be replicated to the
 			//       client. Make sure to always have a resource file or create
 			//       the material on the client.
-			/*m->SetTexture(TU_DIFFUSE,
-			        cache->GetResource<Texture2D>("main/green_texture.png"));*/
-			/*Material *m = new Material(context);
-			m->SetTexture(TU_DIFFUSE,
-			        cache->GetResource<Texture2D>("main/green_texture.png"));
-			m->SetTechnique(0, cache->GetResource<Technique>(
-			        "Techniques/Diff.xml"));*/
+	        /*m->SetTexture(TU_DIFFUSE,
+	                cache->GetResource<Texture2D>("main/green_texture.png"));*/
+	        /*Material *m = new Material(context);
+	        m->SetTexture(TU_DIFFUSE,
+	                cache->GetResource<Texture2D>("main/green_texture.png"));
+	        m->SetTechnique(0, cache->GetResource<Technique>(
+	                "Techniques/Diff.xml"));*/
 
 			{
 				Node *node = scene->CreateChild("DirectionalLight");

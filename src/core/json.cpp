@@ -8,9 +8,9 @@
 #include <iomanip>
 #include <fstream>
 #include <streambuf>
-#include <cinttypes>// PRId64
-#include <cmath>// isnan/isinf
-#include <cfloat>	// DBL_MAX/DBL_MIN
+#include <cinttypes> // PRId64
+#include <cmath> // isnan/isinf
+#include <cfloat> // DBL_MAX/DBL_MIN
 #include "sajson.h"
 
 using namespace json;

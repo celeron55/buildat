@@ -22,5 +22,5 @@ void init(lua_State *L)
 	init_misc_urho3d(L);
 }
 
-}	// namespace lua_bindingss
+} // namespace lua_bindingss
 // vim: set noet ts=4 sw=4:

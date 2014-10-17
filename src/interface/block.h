@@ -17,19 +17,19 @@ namespace interface
 	{
 		BlockName name;
 		BlockTypeId id = BLOCKTYPEID_UNDEFINED;
-		uint8_t num_rotations = 0;	// Supported: 0, 4, 24
-		pv::Vector3DUint8 size = pv::Vector3DUint8(0, 0, 0);// Size in voxels
-		sv_<VoxelTypeId> segments;	// Rotations*voxels
+		uint8_t num_rotations = 0; // Supported: 0, 4, 24
+		pv::Vector3DUint8 size = pv::Vector3DUint8(0, 0, 0); // Size in voxels
+		sv_<VoxelTypeId> segments; // Rotations*voxels
 	};
 
 	// Voxels and a BlockDefinition can be generated based on this
 	struct BlockSourceDefinition
 	{
 		BlockName name;
-		uint8_t num_rotations = 0;	// Supported: 0, 4, 24
-		pv::Vector3DUint8 size = pv::Vector3DUint8(0, 0, 0);// Size in voxels
+		uint8_t num_rotations = 0; // Supported: 0, 4, 24
+		pv::Vector3DUint8 size = pv::Vector3DUint8(0, 0, 0); // Size in voxels
 		// Definitions for creating voxels
-		sv_<ss_> side_textures;	// 6 resource names
+		sv_<ss_> side_textures; // 6 resource names
 		ss_ handler_module;
 	};
 

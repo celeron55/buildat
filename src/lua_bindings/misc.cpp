@@ -98,5 +98,5 @@ void init_misc(lua_State *L)
 	DEF_BUILDAT_FUNC(get_time_us)
 }
 
-}	// namespace lua_bindingss
+} // namespace lua_bindingss
 // vim: set noet ts=4 sw=4:

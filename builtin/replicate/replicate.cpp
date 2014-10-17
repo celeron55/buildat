@@ -462,7 +462,7 @@ struct Module: public interface::Module, public replicate::Interface
 	sv_<PeerId> find_peers_that_know_node(uint node_id)
 	{
 		sv_<PeerId> result;
-		for(auto &pair: m_scene_states){
+		for(auto &pair : m_scene_states){
 			PeerId peer_id = pair.first;
 			magic::SceneReplicationState &scene_state = pair.second;
 			auto &node_states = scene_state.nodeStates_;

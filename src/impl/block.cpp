@@ -86,7 +86,7 @@ struct CBlockRegistry: public BlockRegistry
 	CBlockRegistry(VoxelRegistry *voxel_reg):
 		m_voxel_reg(voxel_reg)
 	{
-		m_defs.resize(1);	// Id 0 is BLOCKTYPEID_UNDEFINEDD
+		m_defs.resize(1); // Id 0 is BLOCKTYPEID_UNDEFINEDD
 	}
 
 	BlockTypeId add_block_with_predefined_segments(const BlockDefinition &def)

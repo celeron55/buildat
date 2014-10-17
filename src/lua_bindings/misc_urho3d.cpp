@@ -19,16 +19,16 @@ using namespace Urho3D;
 
 namespace lua_bindings {
 
-#define GET_TOLUA_STUFF(result_name, index, type)\
-	if(!tolua_isusertype(L, index, #type, 0, &tolua_err)){\
-		tolua_error(L, __PRETTY_FUNCTION__, &tolua_err);\
-		return 0;\
-	}\
+#define GET_TOLUA_STUFF(result_name, index, type) \
+	if(!tolua_isusertype(L, index, #type, 0, &tolua_err)){ \
+		tolua_error(L, __PRETTY_FUNCTION__, &tolua_err); \
+		return 0; \
+	} \
 	type *result_name = (type*)tolua_tousertype(L, index, 0);
-#define TRY_GET_TOLUA_STUFF(result_name, index, type)\
-	type *result_name = nullptr;\
-	if(tolua_isusertype(L, index, #type, 0, &tolua_err)){\
-		result_name = (type*)tolua_tousertype(L, index, 0);\
+#define TRY_GET_TOLUA_STUFF(result_name, index, type) \
+	type *result_name = nullptr; \
+	if(tolua_isusertype(L, index, #type, 0, &tolua_err)){ \
+		result_name = (type*)tolua_tousertype(L, index, 0); \
 	}
 
 static int l_profiler_block_begin(lua_State *L)
@@ -71,6 +71,6 @@ void init_misc_urho3d(lua_State *L)
 	DEF_BUILDAT_FUNC(profiler_block_end);
 }
 
-}	// namespace lua_bindingss
+} // namespace lua_bindingss
 
 // vim: set noet ts=4 sw=4:

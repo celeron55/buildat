@@ -16,7 +16,7 @@
 	#include <sys/socket.h>
 #endif
 #include <deque>
-#include <cstring>	// strerror()
+#include <cstring> // strerror()
 
 using interface::Event;
 

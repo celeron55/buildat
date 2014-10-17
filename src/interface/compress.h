@@ -5,7 +5,7 @@
 
 namespace interface
 {
-	void compress_zlib(const ss_ &data_in, std::ostream &os, int level=6);
+	void compress_zlib(const ss_ &data_in, std::ostream &os, int level = 6);
 	void decompress_zlib(std::istream &is, std::ostream &os);
 }
 // vim: set noet ts=4 sw=4:

@@ -93,7 +93,7 @@ static inline int container_coord(int x, int d)
 	return (x>=0 ? x : x-d+1) / d;
 }
 static inline pv::Vector3DInt32 container_coord(
-		const pv::Vector3DInt32 &p, const pv::Vector3DInt32 &d)
+	const pv::Vector3DInt32 &p, const pv::Vector3DInt32 &d)
 {
 	return pv::Vector3DInt32(
 			container_coord(p.getX(), d.getX()),
@@ -101,7 +101,7 @@ static inline pv::Vector3DInt32 container_coord(
 			container_coord(p.getZ(), d.getZ()));
 }
 static inline pv::Vector3DInt32 container_coord(
-		const pv::Vector3DInt32 &p, const pv::Vector3DInt16 &d)
+	const pv::Vector3DInt32 &p, const pv::Vector3DInt16 &d)
 {
 	return pv::Vector3DInt32(
 			container_coord(p.getX(), d.getX()),
@@ -109,7 +109,7 @@ static inline pv::Vector3DInt32 container_coord(
 			container_coord(p.getZ(), d.getZ()));
 }
 static inline pv::Vector3DInt16 container_coord16(
-		const pv::Vector3DInt32 &p, const pv::Vector3DInt16 &d)
+	const pv::Vector3DInt32 &p, const pv::Vector3DInt16 &d)
 {
 	return pv::Vector3DInt16(
 			container_coord(p.getX(), d.getX()),
@@ -127,9 +127,9 @@ struct ChunkBuffer
 
 struct Section
 {
-	pv::Vector3DInt16 section_p;// Position in sections
+	pv::Vector3DInt16 section_p; // Position in sections
 	pv::Vector3DInt16 chunk_size;
-	pv::Region contained_chunks;// Position and size in chunks
+	pv::Region contained_chunks; // Position and size in chunks
 	// Static voxel nodes (each contains one chunk); Initialized to 0.
 	sp_<pv::RawVolume<uint32_t>> node_ids;
 	size_t num_chunks = 0;
@@ -157,8 +157,8 @@ struct Section
 		contained_chunks(contained_chunks),
 		node_ids(new pv::RawVolume<uint32_t>(contained_chunks)),
 		num_chunks(contained_chunks.getWidthInVoxels() *
-				contained_chunks.getHeightInVoxels() *
-				contained_chunks.getDepthInVoxels())
+			contained_chunks.getHeightInVoxels() *
+			contained_chunks.getDepthInVoxels())
 	{
 		chunk_buffers.resize(num_chunks);
 		// Cache these for speed
@@ -186,7 +186,7 @@ size_t Section::get_chunk_i(const pv::Vector3DInt32 &chunk_p) // global chunk_p
 	size_t i = local_z * h * w + local_y * w + local_x;
 	if(i >= num_chunks) // NOTE: This is not accurate but it is safe and fast
 		throw Exception(ss_()+"get_chunk_i: Section "+cs(section_p)+
-				" does not contain chunk"+cs(chunk_p));
+					  " does not contain chunk"+cs(chunk_p));
 	return i;
 }
 
@@ -222,7 +222,8 @@ ChunkBuffer& Section::get_buffer(const pv::Vector3DInt32 &chunk_p,
 	{
 		Node *n = scene->GetNode(node_id);
 		if(!n){
-			log_w("voxelworld", "Section::get_buffer(): Node %i not found in scene "
+			log_w("voxelworld",
+					"Section::get_buffer(): Node %i not found in scene "
 					"for chunk " PV3I_FORMAT " in section " PV3I_FORMAT,
 					node_id, PV3I_PARAMS(chunk_p), PV3I_PARAMS(section_p));
 			return;
@@ -231,10 +232,11 @@ ChunkBuffer& Section::get_buffer(const pv::Vector3DInt32 &chunk_p,
 		const PODVector<unsigned char> &rawbuf = var.GetBuffer();
 		ss_ data((const char*)&rawbuf[0], rawbuf.Size());
 		up_<pv::RawVolume<VoxelInstance>> volume =
-				interface::deserialize_volume(data);
+			interface::deserialize_volume(data);
 		buf.volume = sp_<pv::RawVolume<VoxelInstance>>(std::move(volume));
 		if(!buf.volume){
-			log_w("voxelworld", "Section::get_buffer(): Voxel volume could not be "
+			log_w("voxelworld",
+					"Section::get_buffer(): Voxel volume could not be "
 					"loaded from node %i for chunk "
 					PV3I_FORMAT " in section " PV3I_FORMAT,
 					node_id, PV3I_PARAMS(chunk_p), PV3I_PARAMS(section_p));
@@ -337,7 +339,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 				seg.select_segment = magic::IntVector2(0, 0);
 			}
 			vdef.edge_material_id = interface::EDGEMATERIALID_EMPTY;
-			m_voxel_reg->add_voxel(vdef);	// id 1
+			m_voxel_reg->add_voxel(vdef); // id 1
 		}
 		{
 			interface::VoxelDefinition vdef;
@@ -356,7 +358,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 			}
 			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
 			vdef.physically_solid = true;
-			m_voxel_reg->add_voxel(vdef);	// id 2
+			m_voxel_reg->add_voxel(vdef); // id 2
 		}
 		{
 			interface::VoxelDefinition vdef;
@@ -375,7 +377,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 			}
 			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
 			vdef.physically_solid = true;
-			m_voxel_reg->add_voxel(vdef);	// id 3
+			m_voxel_reg->add_voxel(vdef); // id 3
 		}
 		{
 			interface::VoxelDefinition vdef;
@@ -394,7 +396,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 			}
 			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
 			vdef.physically_solid = true;
-			m_voxel_reg->add_voxel(vdef);	// id 4
+			m_voxel_reg->add_voxel(vdef); // id 4
 		}
 		{
 			interface::VoxelDefinition vdef;
@@ -413,7 +415,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 			}
 			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
 			vdef.physically_solid = true;
-			m_voxel_reg->add_voxel(vdef);	// id 5
+			m_voxel_reg->add_voxel(vdef); // id 5
 		}
 	}
 
@@ -475,8 +477,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 		// Remove everything managed by us from the scene
 		m_server->access_scene([&](Scene *scene)
 		{
-			for(auto &sector_pair : m_sections){
-				for(auto &section_pair : sector_pair.second){
+			for(auto &sector_pair: m_sections){
+				for(auto &section_pair: sector_pair.second){
 					Section &section = section_pair.second;
 
 					auto region = section.node_ids->getEnclosingRegion();
@@ -520,7 +522,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 				log_v(MODULE, "on_tick(): Doing %zu lazy node physics updates",
 						m_nodes_needing_physics_update.size());
 			}
-			for(QueuedNodePhysicsUpdate &update : m_nodes_needing_physics_update){
+			for(QueuedNodePhysicsUpdate &update: m_nodes_needing_physics_update){
 				uint node_id = update.node_id;
 				sp_<pv::RawVolume<VoxelInstance>> volume = update.volume;
 				Node *n = scene->GetNode(node_id);
@@ -586,7 +588,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 			ar((int32_t)event.node_id);
 		}
 		network::access(m_server, [&](network::Interface *inetwork){
-			for(auto &peer_id : peers){
+			for(auto &peer_id: peers){
 				inetwork->send(peer_id, "voxelworld:node_voxel_data_updated",
 						os.str());
 			}
@@ -652,11 +654,11 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 		Vector3 node_p(
 				chunk_p.getX() * m_chunk_size_voxels.getX() +
-						m_chunk_size_voxels.getX() / 2.0f,
+				m_chunk_size_voxels.getX() / 2.0f,
 				chunk_p.getY() * m_chunk_size_voxels.getY() +
-						m_chunk_size_voxels.getY() / 2.0f,
+				m_chunk_size_voxels.getY() / 2.0f,
 				chunk_p.getZ() * m_chunk_size_voxels.getZ() +
-						m_chunk_size_voxels.getZ() / 2.0f
+				m_chunk_size_voxels.getZ() / 2.0f
 		);
 		log_t(MODULE, "create_chunk_node(): node_p=(%f, %f, %f)",
 				node_p.x_, node_p.y_, node_p.z_);
@@ -694,7 +696,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		ss_ data = interface::serialize_volume_compressed(volume);
 
 		n->SetVar(StringHash("buildat_voxel_data"), Variant(
-				PODVector<uint8_t>((const uint8_t*)data.c_str(), data.size())));
+					PODVector<uint8_t>((const uint8_t*)data.c_str(), data.size())));
 
 		// There are no collision shapes initially, but add the rigid body now
 		RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
@@ -750,8 +752,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 	{
 		QueuedNodePhysicsUpdate update(node_id, volume);
 		auto it = std::lower_bound(m_nodes_needing_physics_update.begin(),
-				m_nodes_needing_physics_update.end(), update,
-				std::greater<QueuedNodePhysicsUpdate>());
+					m_nodes_needing_physics_update.end(), update,
+					std::greater<QueuedNodePhysicsUpdate>());
 		if(it == m_nodes_needing_physics_update.end()){
 			m_nodes_needing_physics_update.insert(it, update);
 		} else if(it->node_id != node_id){
@@ -776,11 +778,11 @@ struct Module: public interface::Module, public voxelworld::Interface
 	{
 		pv::Vector3DInt32 p0 = pv::Vector3DInt32(
 				section_p.getX() * m_section_size_chunks.getX() *
-						m_chunk_size_voxels.getX(),
+				m_chunk_size_voxels.getX(),
 				section_p.getY() * m_section_size_chunks.getY() *
-						m_chunk_size_voxels.getY(),
+				m_chunk_size_voxels.getY(),
 				section_p.getZ() * m_section_size_chunks.getZ() *
-						m_chunk_size_voxels.getZ()
+				m_chunk_size_voxels.getZ()
 		);
 		pv::Vector3DInt32 p1 = p0 + pv::Vector3DInt32(
 				m_section_size_chunks.getX() * m_chunk_size_voxels.getX() - 1,
@@ -830,15 +832,15 @@ struct Module: public interface::Module, public voxelworld::Interface
 			const PODVector<unsigned char> &buf = var.GetBuffer();
 			ss_ data((const char*)&buf[0], buf.Size());
 			volume = sp_<pv::RawVolume<VoxelInstance>>(std::move(
-					interface::deserialize_volume(data)
-			));
+						interface::deserialize_volume(data)
+					));
 
 			// NOTE: +1 offset needed for mesh generation
 			pv::Vector3DInt32 voxel_p(
-					p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX() + 1,
-					p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY() + 1,
-					p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ() + 1
-			);
+						p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX() + 1,
+						p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY() + 1,
+						p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ() + 1
+					);
 			log_t(MODULE, "set_voxel_direct() p=" PV3I_FORMAT ", v=%i: "
 					"Chunk " PV3I_FORMAT " in section " PV3I_FORMAT
 					"; internal position " PV3I_FORMAT,
@@ -849,8 +851,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 			ss_ new_data = interface::serialize_volume_compressed(*volume);
 
 			n->SetVar(StringHash("buildat_voxel_data"), Variant(
-					PODVector<uint8_t>((const uint8_t*)new_data.c_str(),
-							new_data.size())));
+						PODVector<uint8_t>((const uint8_t*)new_data.c_str(),
+						new_data.size())));
 		});
 
 		// Mark node for collision box update
@@ -862,7 +864,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 	{
 		// Don't log here; this is a too busy place for even ignored log calls
 		/*log_t(MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i",
-				PV3I_PARAMS(p), v.data);*/
+		        PV3I_PARAMS(p), v.data);*/
 		pv::Vector3DInt32 chunk_p = container_coord(p, m_chunk_size_voxels);
 		pv::Vector3DInt16 section_p =
 				container_coord16(chunk_p, m_section_size_chunks);
@@ -901,8 +903,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 		// Set section buffer loaded flag
 		auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
-				m_sections_with_loaded_buffers.end(), section,
-				std::greater<Section*>()); // position in descending order
+					m_sections_with_loaded_buffers.end(), section,
+					std::greater<Section*>()); // position in descending order
 		if(it == m_sections_with_loaded_buffers.end() || *it != section)
 			m_sections_with_loaded_buffers.insert(it, section);
 	}
@@ -952,15 +954,15 @@ struct Module: public interface::Module, public voxelworld::Interface
 			}
 
 			n->SetVar(StringHash("buildat_voxel_data"), Variant(
-					PODVector<uint8_t>((const uint8_t*)new_data.c_str(),
-							new_data.size())));
+						PODVector<uint8_t>((const uint8_t*)new_data.c_str(),
+						new_data.size())));
 		});
 
 		// Tell replicate to emit events once it has done its job
 		replicate::access(m_server, [&](replicate::Interface *ireplicate){
 			ireplicate->emit_after_next_sync(Event(
-					"voxelworld:node_voxel_data_updated",
-					new NodeVoxelDataUpdatedEvent(node_id)));
+						"voxelworld:node_voxel_data_updated",
+						new NodeVoxelDataUpdatedEvent(node_id)));
 		});
 
 		// Mark node for collision box update
@@ -1028,8 +1030,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 		// Set section buffer loaded flag
 		auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
-				m_sections_with_loaded_buffers.end(), section,
-				std::greater<Section*>()); // position in descending order
+					m_sections_with_loaded_buffers.end(), section,
+					std::greater<Section*>()); // position in descending order
 		if(it == m_sections_with_loaded_buffers.end() || *it != section)
 			m_sections_with_loaded_buffers.insert(it, section);
 

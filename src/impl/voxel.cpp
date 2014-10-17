@@ -51,7 +51,7 @@ struct CVoxelRegistry: public VoxelRegistry
 
 	CVoxelRegistry()
 	{
-		m_defs.resize(1);	// Id 0 is VOXELTYPEID_UNDEFINEDD
+		m_defs.resize(1); // Id 0 is VOXELTYPEID_UNDEFINEDD
 	}
 
 	VoxelTypeId add_voxel(const VoxelDefinition &def)
@@ -136,7 +136,7 @@ struct CVoxelRegistry: public VoxelRegistry
 		for(size_t i = 0; i<6; i++){
 			const AtlasSegmentDefinition &seg_def = def.textures[i];
 			if(seg_def.resource_name == ""){
-				AtlasSegmentReference seg_ref;	// Use default values
+				AtlasSegmentReference seg_ref; // Use default values
 				cache.textures[i] = seg_ref;
 				for(size_t j = 0; j < VOXELDEF_NUM_LOD; j++){
 					cache.lod_textures[j][i] = seg_ref;
@@ -155,11 +155,11 @@ struct CVoxelRegistry: public VoxelRegistry
 						lod_seg_def.lod_simulation |=
 								interface::ATLAS_LOD_TOP_FACE;
 					}
-					if(i == 5/*Z-*/){
+					if(i == 5 /*Z-*/){
 						lod_seg_def.lod_simulation |=
 								interface::ATLAS_LOD_SEMIBRIGHT1_FACE;
 					}
-					if(i == 2/*X+*/){
+					if(i == 2 /*X+*/){
 						lod_seg_def.lod_simulation |=
 								interface::ATLAS_LOD_SEMIBRIGHT2_FACE;
 					}

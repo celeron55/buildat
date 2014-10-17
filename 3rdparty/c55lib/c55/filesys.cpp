@@ -46,7 +46,7 @@ std::string stripFilename(const std::string &path)
 	return "";
 }
 
-#ifdef _WIN32	// WINDOWS
+#ifdef _WIN32 // WINDOWS
 
 	#define _WIN32_WINNT 0x0501
 	#include <windows.h>
@@ -188,7 +188,7 @@ bool RecursiveDelete(std::string path)
 	return true;
 }
 
-#else	// POSIX
+#else // POSIX
 
 	#include <unistd.h>
 	#include <sys/types.h>
@@ -348,6 +348,6 @@ bool CreateAllDirs(std::string path)
 	return true;
 }
 
-}	// namespace fs
+} // namespace fs
 
 // vim: set noet ts=4 sw=4:

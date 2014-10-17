@@ -118,14 +118,15 @@ struct Module: public interface::Module
 
 			voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 			{
-				interface::VoxelRegistry *voxel_reg = ivoxelworld->get_voxel_reg();
+				interface::VoxelRegistry *voxel_reg =
+					ivoxelworld->get_voxel_reg();
 
 				Node *n = scene->CreateChild("Testbox");
 				n->SetPosition(Vector3(30.0f, 30.0f, 40.0f));
 				n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
 
-				/*int w = 1, h = 1, d = 1;
-				ss_ data = "1";*/
+	            /*int w = 1, h = 1, d = 1;
+	            ss_ data = "1";*/
 				int w = 2, h = 2, d = 1;
 				ss_ data = "1333";
 
@@ -136,8 +137,8 @@ struct Module: public interface::Module
 				}
 
 				n->SetVar(StringHash("simple_voxel_data"), Variant(
-						PODVector<uint8_t>((const uint8_t*)data.c_str(),
-								data.size())));
+							PODVector<uint8_t>((const uint8_t*)data.c_str(),
+							data.size())));
 				n->SetVar(StringHash("simple_voxel_w"), Variant(w));
 				n->SetVar(StringHash("simple_voxel_h"), Variant(h));
 				n->SetVar(StringHash("simple_voxel_d"), Variant(d));
@@ -152,7 +153,8 @@ struct Module: public interface::Module
 				RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
 				body->SetFriction(0.75f);
 				body->SetMass(1.0);
-				CollisionShape *shape = n->CreateComponent<CollisionShape>(LOCAL);
+				CollisionShape *shape =
+					n->CreateComponent<CollisionShape>(LOCAL);
 				shape->SetConvexHull(model, 0, Vector3::ONE);
 				//shape->SetTriangleMesh(model, 0, Vector3::ONE);
 				//shape->SetBox(Vector3::ONE);
@@ -171,9 +173,9 @@ struct Module: public interface::Module
 	void on_tick(const interface::TickEvent &event)
 	{
 		/*m_server->access_scene([&](Scene *scene){
-			Node *n = scene->GetChild("Testbox");
-			auto p = n->GetPosition();
-			log_v(MODULE, "Testbox: (%f, %f, %f)", p.x_, p.y_, p.z_);
+		    Node *n = scene->GetChild("Testbox");
+		    auto p = n->GetPosition();
+		    log_v(MODULE, "Testbox: (%f, %f, %f)", p.x_, p.y_, p.z_);
 		});*/
 		static uint a = 0;
 		if(((a++) % 100) == 0){
@@ -201,7 +203,8 @@ struct Module: public interface::Module
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
 			const pv::Vector3DInt16 &section_p = event.section_p;
-			pv::Region region = ivoxelworld->get_section_region_voxels(section_p);
+			pv::Region region = ivoxelworld->get_section_region_voxels(
+						section_p);
 
 			pv::Vector3DInt32 p0 = region.getLowerCorner();
 			pv::Vector3DInt32 p1 = region.getUpperCorner();
@@ -211,7 +214,7 @@ struct Module: public interface::Module
 			log_t(MODULE, "on_generation_request(): p1: (%i, %i, %i)",
 					p1.getX(), p1.getY(), p1.getZ());
 
-			interface::NoiseParams np(0, 35, interface::v3f(160,160,160),
+			interface::NoiseParams np(0, 35, interface::v3f(160, 160, 160),
 					1, 6, 0.475);
 
 			auto lc = region.getLowerCorner();
@@ -253,27 +256,27 @@ struct Module: public interface::Module
 			}
 
 			// Add random trees
-			auto extent = uc - lc + pv::Vector3DInt32(1,1,1);
+			auto extent = uc - lc + pv::Vector3DInt32(1, 1, 1);
 			int area = extent.getX() * extent.getZ();
 			auto pr = interface::PseudoRandom(13241);
 			for(int i = 0; i < area / 100; i++){
 				int x = pr.range(lc.getX(), uc.getX());
 				int z = pr.range(lc.getZ(), uc.getZ());
 
-				/*int y = 50;
-				for(; y>-50; y--){
-					pv::Vector3DInt32 p(x, y, z);
-					VoxelInstance v = ivoxelworld->get_voxel(p);
-					if(v.getId() != 1)
-						break;
-				}
-				y++;*/
+	            /*int y = 50;
+	            for(; y>-50; y--){
+	                pv::Vector3DInt32 p(x, y, z);
+	                VoxelInstance v = ivoxelworld->get_voxel(p);
+	                if(v.getId() != 1)
+	                    break;
+	            }
+	            y++;*/
 				double a = interface::NoisePerlin2D(&np, x, z, 0);
 				int y = a + 11.0;
 				if(y < lc.getY() - 5 || y > uc.getY() - 5)
 					continue;
 
-				for(int y1=y; y1<y+4; y1++){
+				for(int y1 = y; y1<y+4; y1++){
 					pv::Vector3DInt32 p(x, y1, z);
 					ivoxelworld->set_voxel(p, VoxelInstance(3), true);
 				}

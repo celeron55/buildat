@@ -190,5 +190,5 @@ Compiler* createCompiler(const ss_ &compiler_command)
 	return new CCompiler(compiler_command);
 }
 
-}	// rccpp
+} // rccpp
 // vim: set noet ts=4 sw=4:

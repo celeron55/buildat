@@ -61,6 +61,6 @@ int handle_error(lua_State *L)
 	return 1;
 }
 
-}	// namespace lua_bindingss
+} // namespace lua_bindingss
 
 // vim: set noet ts=4 sw=4:

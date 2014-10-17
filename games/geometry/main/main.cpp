@@ -77,8 +77,8 @@ struct Module: public interface::Module
 				n->SetPosition(Vector3(0.0f, 6.0f, 0.0f));
 				n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
 
-				/*int w = 1, h = 1, d = 1;
-				ss_ data = "1";*/
+	            /*int w = 1, h = 1, d = 1;
+	            ss_ data = "1";*/
 				int w = 2, h = 2, d = 1;
 				ss_ data = "0111";
 

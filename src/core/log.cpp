@@ -103,21 +103,21 @@ static void print(int level, const char *sys, const char *fmt, va_list va_args)
 	if(use_colors && !file &&
 			(level != current_level || line_begin) && level <= max_level){
 		if(level == LOG_FATAL)
-			fprintf(stderr, "\033[0m\033[0;1;41m");	// reset, bright red bg
+			fprintf(stderr, "\033[0m\033[0;1;41m"); // reset, bright red bg
 		else if(level == LOG_ERROR)
-			fprintf(stderr, "\033[0m\033[1;31m");	// bright red fg, black bg
+			fprintf(stderr, "\033[0m\033[1;31m"); // bright red fg, black bg
 		else if(level == LOG_WARNING)
-			fprintf(stderr, "\033[0m\033[1;33m");	// bright yellow fg, black bg
+			fprintf(stderr, "\033[0m\033[1;33m"); // bright yellow fg, black bg
 		else if(level == LOG_INFO)
-			fprintf(stderr, "\033[0m");	// reset
+			fprintf(stderr, "\033[0m"); // reset
 		else if(level == LOG_VERBOSE)
-			fprintf(stderr, "\033[0m\033[0;36m");	// cyan fg, black bg
+			fprintf(stderr, "\033[0m\033[0;36m"); // cyan fg, black bg
 		else if(level == LOG_DEBUG)
-			fprintf(stderr, "\033[0m\033[1;30m");	// bright black fg, black bg
+			fprintf(stderr, "\033[0m\033[1;30m"); // bright black fg, black bg
 		else if(level == LOG_TRACE)
-			fprintf(stderr, "\033[0m\033[0;35m");	//
+			fprintf(stderr, "\033[0m\033[0;35m"); //
 		else
-			fprintf(stderr, "\033[0m");	// reset
+			fprintf(stderr, "\033[0m"); // reset
 	}
 	current_level = level;
 	if(level > max_level)

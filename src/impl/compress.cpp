@@ -13,11 +13,11 @@ namespace interface {
 
 ss_ zerr(int ret)
 {
-	switch (ret) {
+	switch(ret){
 	case Z_ERRNO:
-		if (ferror(stdin))
+		if(ferror(stdin))
 			return "error reading stdin";
-		if (ferror(stdout))
+		if(ferror(stdout))
 			return "error writing stdout";
 		return "errno";
 	case Z_STREAM_ERROR:
@@ -48,7 +48,7 @@ void compress_zlib(const ss_ &data_in, std::ostream &os, int level)
 	ret = deflateInit(&z, level);
 	if(ret != Z_OK)
 		throw Exception("compress_zlib: deflateInit failed");
-	
+
 	// Point zlib to our input buffer
 	z.next_in = (Bytef*)data_in.c_str();
 	z.avail_in = data_in.size();
@@ -57,7 +57,7 @@ void compress_zlib(const ss_ &data_in, std::ostream &os, int level)
 	{
 		z.next_out = (Bytef*)output_buffer;
 		z.avail_out = bufsize;
-		
+
 		status = deflate(&z, Z_FINISH);
 		if(status == Z_NEED_DICT || status == Z_DATA_ERROR
 				|| status == Z_MEM_ERROR)
@@ -94,9 +94,9 @@ void decompress_zlib(std::istream &is, std::ostream &os)
 	ret = inflateInit(&z);
 	if(ret != Z_OK)
 		throw Exception("dcompress_zlib: inflateInit failed");
-	
+
 	z.avail_in = 0;
-	
+
 	//dstream<<"initial fail="<<is.fail()<<" bad="<<is.bad()<<std::endl;
 
 	for(;;)
@@ -116,7 +116,7 @@ void decompress_zlib(std::istream &is, std::ostream &os)
 			//dstream<<"z.avail_in == 0"<<std::endl;
 			break;
 		}
-			
+
 		//dstream<<"1 z.avail_in="<<z.avail_in<<std::endl;
 		status = inflate(&z, Z_NO_FLUSH);
 		//dstream<<"2 z.avail_in="<<z.avail_in<<std::endl;
@@ -136,11 +136,11 @@ void decompress_zlib(std::istream &is, std::ostream &os)
 		if(status == Z_STREAM_END)
 		{
 			//dstream<<"Z_STREAM_END"<<std::endl;
-			
+
 			//dstream<<"z.avail_in="<<z.avail_in<<std::endl;
 			//dstream<<"fail="<<is.fail()<<" bad="<<is.bad()<<std::endl;
 			// Unget all the data that inflate didn't take
-			for(size_t i=0; i < z.avail_in; i++)
+			for(size_t i = 0; i < z.avail_in; i++)
 			{
 				is.unget();
 				if(is.fail() || is.bad())
@@ -150,7 +150,7 @@ void decompress_zlib(std::istream &is, std::ostream &os)
 					throw Exception("decompress_zlib: unget failed");
 				}
 			}
-			
+
 			break;
 		}
 	}

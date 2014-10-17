@@ -36,7 +36,7 @@ namespace app
 		bool resizable = true;
 		bool vsync = true;
 		bool triple_buffer = false;
-		int multisampling = 1;	// 2 looks much better but is much heavier(?)
+		int multisampling = 1; // 2 looks much better but is much heavier(?)
 		int window_x = UNDEFINED_INT;
 		int window_y = UNDEFINED_INT;
 

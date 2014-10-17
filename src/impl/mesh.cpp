@@ -11,16 +11,16 @@
 #include <Scene.h>
 #include <Node.h>
 #include <StaticModel.h>
-#include <Model.h>	// Resource parameter of StaticModel
+#include <Model.h> // Resource parameter of StaticModel
 #include <Geometry.h>
 #include <IndexBuffer.h>
 #include <VertexBuffer.h>
-#include <CustomGeometry.h>	// A Drawable similarly as StaticModel
+#include <CustomGeometry.h> // A Drawable similarly as StaticModel
 #include <Material.h>
 #include <Technique.h>
 #include <Context.h>
 #include <ResourceCache.h>
-#include <Texture2D.h>	// Allows cast to Texture
+#include <Texture2D.h> // Allows cast to Texture
 #include <CollisionShape.h>
 #include <RigidBody.h>
 #pragma GCC diagnostic pop
@@ -70,7 +70,7 @@ Model* create_simple_voxel_model(Context *context,
 	const size_t num_indices = pv_indices.size();
 
 	sv_<float> vertex_data;
-	vertex_data.resize(num_vertices * 6);	// vertex + normal
+	vertex_data.resize(num_vertices * 6); // vertex + normal
 	for(size_t i = 0; i < num_vertices; i++){
 		vertex_data[i*6 + 0] = pv_vertices[i].position.getX() - w/2.0f - 0.5f;
 		vertex_data[i*6 + 1] = pv_vertices[i].position.getY() - h/2.0f - 0.5f;
@@ -183,7 +183,7 @@ public:
 	IsQuadNeededByRegistryPhysics(interface::VoxelRegistry *voxel_reg):
 		m_voxel_reg(voxel_reg)
 	{}
-	IsQuadNeededByRegistryPhysics():// PolyVox wants this
+	IsQuadNeededByRegistryPhysics(): // PolyVox wants this
 		m_voxel_reg(nullptr)
 	{}
 	bool operator()(VoxelType back, VoxelType front, uint32_t &materialToUse)
@@ -197,7 +197,7 @@ public:
 		if(!back_def || !back_def->physically_solid)
 			return false;
 		if(!front_def || !front_def->physically_solid){
-			materialToUse = 1;	// Doesn't matter
+			materialToUse = 1; // Doesn't matter
 			return true;
 		}
 		return false;
@@ -215,7 +215,7 @@ Model* create_voxel_physics_model(Context *context,
 	IsQuadNeededByRegistryPhysics<VoxelInstance> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
 	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
-			IsQuadNeededByRegistryPhysics<VoxelInstance>>
+	IsQuadNeededByRegistryPhysics<VoxelInstance>>
 	surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh, iqn);
 	surfaceExtractor.execute();
 
@@ -232,7 +232,7 @@ Model* create_voxel_physics_model(Context *context,
 	int h = volume.getHeight() - 2;
 	int d = volume.getDepth() - 2;
 	sv_<float> vertex_data;
-	vertex_data.resize(num_vertices * 6);	// vertex + normal
+	vertex_data.resize(num_vertices * 6); // vertex + normal
 	for(size_t i = 0; i < num_vertices; i++){
 		vertex_data[i*6 + 0] = pv_vertices[i].position.getX() - w/2.0f - 1.0f;
 		vertex_data[i*6 + 1] = pv_vertices[i].position.getY() - h/2.0f - 1.0f;
@@ -290,7 +290,7 @@ public:
 			interface::TextureAtlasRegistry *atlas_reg):
 		m_voxel_reg(voxel_reg), m_atlas_reg(atlas_reg)
 	{}
-	IsQuadNeededByRegistry():	// PolyVox wants this
+	IsQuadNeededByRegistry(): // PolyVox wants this
 		m_voxel_reg(nullptr),
 		m_atlas_reg(nullptr)
 	{}
@@ -331,8 +331,8 @@ public:
 struct TemporaryGeometry
 {
 	uint atlas_id = 0;
-	sv_<float> vertex_data;	// vertex(3) + normal(3) + texcoord(2)
-	sv_<unsigned> index_data;	// Urho3D eats unsigned as large indices
+	sv_<float> vertex_data; // vertex(3) + normal(3) + texcoord(2)
+	sv_<unsigned> index_data; // Urho3D eats unsigned as large indices
 };
 #else
 struct TemporaryGeometry
@@ -430,7 +430,7 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg, atlas_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
 	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
-			IsQuadNeededByRegistry<VoxelInstance>>
+	IsQuadNeededByRegistry<VoxelInstance>>
 	surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh, iqn);
 	surfaceExtractor.execute();
 
@@ -601,8 +601,8 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 	auto &lc_orig = region_orig.getLowerCorner();
 	auto &uc_orig = region_orig.getUpperCorner();
 
-	pv::Region region(lc_orig / lod - pv::Vector3DInt32(1,1,1),
-			uc_orig / lod + pv::Vector3DInt32(1,1,1));
+	pv::Region region(lc_orig / lod - pv::Vector3DInt32(1, 1, 1),
+		uc_orig / lod + pv::Vector3DInt32(1, 1, 1));
 	auto &lc = region.getLowerCorner();
 	auto &uc = region.getUpperCorner();
 
@@ -632,7 +632,7 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 					}
 				}
 				/*const interface::CachedVoxelDefinition *def =
-						voxel_reg->get_cached(v_orig);*/
+				        voxel_reg->get_cached(v_orig);*/
 				volume.setVoxelAt(x, y, z, v_orig);
 			}
 		}
@@ -641,7 +641,7 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg, atlas_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
 	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
-			IsQuadNeededByRegistry<VoxelInstance>>
+	IsQuadNeededByRegistry<VoxelInstance>>
 	surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh, iqn);
 	surfaceExtractor.execute();
 
@@ -901,15 +901,15 @@ z_plane_does_not_fit:
 			else
 				shape = node->CreateComponent<CollisionShape>(LOCAL);
 			shape->SetBox(Vector3(
-					x1 - x0 + 1,
-					y1 - y0 + 1,
-					z1 - z0 + 1
-			));
+						x1 - x0 + 1,
+						y1 - y0 + 1,
+						z1 - z0 + 1
+				));
 			shape->SetPosition(Vector3(
-					(x0 + x1)/2.0f - w/2 - 1.0f,
-					(y0 + y1)/2.0f - h/2 - 1.0f,
-					(z0 + z1)/2.0f - d/2 - 1.0f
-			));
+						(x0 + x1)/2.0f - w/2 - 1.0f,
+						(y0 + y1)/2.0f - h/2 - 1.0f,
+						(z0 + z1)/2.0f - d/2 - 1.0f
+				));
 		}
 	}
 
@@ -925,5 +925,5 @@ z_plane_does_not_fit:
 	}
 }
 
-}	// namespace interface
+} // namespace interface
 // vim: set noet ts=4 sw=4:

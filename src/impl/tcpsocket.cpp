@@ -15,7 +15,7 @@
 	#define closesocket close
 //typedef int socket_t;
 #endif
-#include <string.h>	// strerror()
+#include <string.h> // strerror()
 #include <iostream>
 #include <iomanip>
 
@@ -120,7 +120,7 @@ struct CTCPSocket: public TCPSocket
 		hints.ai_socktype = SOCK_STREAM;
 		hints.ai_protocol = IPPROTO_TCP;
 		if(address == "any")
-			hints.ai_flags = AI_PASSIVE;// Wildcard address
+			hints.ai_flags = AI_PASSIVE; // Wildcard address
 		const char *address_c = (address == "any" ? NULL : address.c_str());
 		const char *port_c = (port == "any" ? NULL : port.c_str());
 		int err = getaddrinfo(address_c, port_c, &hints, &res0);
@@ -194,7 +194,7 @@ struct CTCPSocket: public TCPSocket
 			hints.ai_family = AF_INET6;
 		}
 		if(address1 == "any"){
-			hints.ai_flags = AI_PASSIVE;// Wildcard address
+			hints.ai_flags = AI_PASSIVE; // Wildcard address
 		}
 		const char *address_c = (address1 == "any" ? NULL : address1.c_str());
 		const char *port_c = (port == "any" ? NULL : port.c_str());
