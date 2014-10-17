@@ -15,9 +15,15 @@ namespace Urho3D
 namespace replicate
 {
 	namespace magic = Urho3D;
+	using interface::Event;
+
+	typedef size_t PeerId;
 
 	struct Interface
 	{
+		virtual sv_<PeerId> find_peers_that_know_node(uint node_id) = 0;
+
+		virtual void emit_after_next_sync(Event event) = 0;
 	};
 
 	inline bool access(interface::Server *server,

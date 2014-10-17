@@ -42,6 +42,25 @@ M.section_size_voxels = nil
 function M.init()
 	log:info("voxelworld.init()")
 
+	local node_update_queue = buildat.SpatialUpdateQueue()
+
+	local function queue_initial_node_update(node)
+		-- TODO: node:GetWorldPosition() is not at center of node
+		node_update_queue:put(node:GetWorldPosition(),
+				INITIAL_GEOMETRY_NEAR_WEIGHT, camera_far_clip * 1.2,
+				nil, nil, {
+			type = "geometry",
+			current_lod = 0,
+			node_id = node:GetID(),
+		})
+		-- TODO: node:GetWorldPosition() is not at center of node
+		node_update_queue:put(node:GetWorldPosition(),
+				INITIAL_PHYSICS_NEAR_WEIGHT, PHYSICS_DISTANCE, nil, nil, {
+			type = "physics",
+			node_id = node:GetID(),
+		})
+	end
+
 	buildat.sub_packet("voxelworld:init", function(data)
 		local values = cereal.binary_input(data, {"object",
 			{"chunk_size_voxels", {"object",
@@ -55,15 +74,21 @@ function M.init()
 				{"z", "int32_t"},
 			}},
 		})
-		log:info(dump(values))
+		log:info("voxelworld:init: "..dump(values))
 		M.chunk_size_voxels = buildat.Vector3(values.chunk_size_voxels)
 		M.section_size_chunks = buildat.Vector3(values.section_size_chunks)
 		M.section_size_voxels =
 				M.chunk_size_voxels:mul_components(M.section_size_chunks)
 	end)
 
-	--local node_update_queue = SpatialUpdateQueue()
-	local node_update_queue = buildat.SpatialUpdateQueue()
+	buildat.sub_packet("voxelworld:node_voxel_data_updated", function(data)
+		local values = cereal.binary_input(data, {"object",
+			{"node_id", "int32_t"},
+		})
+		log:info("voxelworld:node_voxel_data_updated: "..dump(values))
+		local node = replicate.main_scene:GetNode(values.node_id)
+		queue_initial_node_update(node)
+	end)
 
 	local function update_voxel_geometry(node)
 		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
@@ -258,21 +283,7 @@ function M.init()
 
 	replicate.sub_sync_node_added({}, function(node)
 		if not node:GetVar("buildat_voxel_data"):IsEmpty() then
-			-- TODO: node:GetWorldPosition() is not at center of node
-			node_update_queue:put(node:GetWorldPosition(),
-					INITIAL_GEOMETRY_NEAR_WEIGHT, camera_far_clip * 1.2,
-					nil, nil, {
-				type = "geometry",
-				current_lod = 0,
-				node_id = node:GetID(),
-			})
-			-- Create physics stuff when node comes closer than 100
-			-- TODO: node:GetWorldPosition() is not at center of node
-			node_update_queue:put(node:GetWorldPosition(),
-					INITIAL_PHYSICS_NEAR_WEIGHT, PHYSICS_DISTANCE, nil, nil, {
-				type = "physics",
-				node_id = node:GetID(),
-			})
+			queue_initial_node_update(node)
 		end
 		--local name = node:GetName()
 	end)

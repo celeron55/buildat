@@ -472,7 +472,7 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 		AtlasSegmentReference seg_ref = voxel_def0->textures[face_id];
 		if(seg_ref.atlas_id == interface::ATLAS_UNDEFINED){
 			// This is usually intentional for invisible voxels
-			log_t(MODULE, "Voxel %i face %i atlas undefined", voxel_id0, face_id);
+			//log_t(MODULE, "Voxel %i face %i atlas undefined", voxel_id0, face_id);
 			continue;
 		}
 		const AtlasSegmentCache *aseg = atlas_reg->get_texture(seg_ref);
@@ -686,7 +686,7 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 		AtlasSegmentReference seg_ref = voxel_def0->lod_textures[lod_i][face_id];
 		if(seg_ref.atlas_id == interface::ATLAS_UNDEFINED){
 			// This is usually intentional for invisible voxels
-			log_t(MODULE, "Voxel %i face %i atlas undefined", voxel_id0, face_id);
+			//log_t(MODULE, "Voxel %i face %i atlas undefined", voxel_id0, face_id);
 			continue;
 		}
 		const AtlasSegmentCache *aseg = atlas_reg->get_texture(seg_ref);

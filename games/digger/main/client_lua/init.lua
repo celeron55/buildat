@@ -95,6 +95,24 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	end
 end)
 
+magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
+	local button = event_data:GetInt("Button")
+	log:info(""..button)
+	if button == 1 then
+		local p = player_node.position
+		local data = cereal.binary_output({
+			p = {x = p.x, y = p.y, z = p.z},
+		}, {"object",
+			{"p", {"object",
+				{"x", "int32_t"},
+				{"y", "int32_t"},
+				{"z", "int32_t"},
+			}},
+		})
+		buildat.send_packet("main:place_voxel", data)
+	end
+end)
+
 magic.SubscribeToEvent("Update", function(event_type, event_data)
 	--log:info("Update")
 	if player_node then

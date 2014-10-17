@@ -24,6 +24,8 @@
 
 namespace interface
 {
+	// NOTE: Event has no copy constructor due to up_<Private> p; just pass it
+	// by non-const value if it will be placed in a container by the receiver.
 	struct Event
 	{
 		typedef size_t Type;

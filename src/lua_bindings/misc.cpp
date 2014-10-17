@@ -46,7 +46,7 @@ static int l_mkdir(lua_State *L)
 // pcall(function) -> status, error
 static int l_pcall(lua_State *L)
 {
-	log_d(MODULE, "l_pcall()");
+	log_t(MODULE, "l_pcall() begin");
 	lua_pushcfunction(L, handle_error);
 	int handle_error_stack_i = lua_gettop(L);
 
@@ -54,7 +54,7 @@ static int l_pcall(lua_State *L)
 	int r = lua_pcall(L, 0, 0, handle_error_stack_i);
 	int error_stack_i = lua_gettop(L);
 	if(r == 0){
-		log_d(MODULE, "l_pcall() returned 0 (no error)");
+		log_t(MODULE, "l_pcall() returned 0 (no error)");
 		lua_pushboolean(L, true);
 		return 1;
 	}

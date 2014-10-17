@@ -417,10 +417,11 @@ void CState::setup_packet_handlers()
 		uint node_id = msg.ReadNetID();
 		Node *node = scene->GetNode(node_id);
 		if(node){
-			log_d(MODULE, "Updating node %i", node_id);
+			log_d(MODULE, "Updating node %i (LatestDataUpdate)", node_id);
 			node->ReadLatestDataUpdate(msg);
 		} else {
 			log_w(MODULE, "Out-of-order node data ignored for %i", node_id);
+			// Note: Network/Connection.cpp would buffer this
 		}
 	};
 
@@ -432,36 +433,55 @@ void CState::setup_packet_handlers()
 		uint c_id = msg.ReadNetID();
 		Component *c = scene->GetComponent(c_id);
 		if(c){
-			log_d(MODULE, "Updating component %i", c_id);
+			log_d(MODULE, "Updating component %i (LatestDataUpdate)", c_id);
 			c->ReadLatestDataUpdate(msg);
 			c->ApplyAttributes();
 		} else {
 			log_w(MODULE, "Out-of-order component data ignored for %i", c_id);
+			// Note: Network/Connection.cpp would buffer this
 		}
 	};
 
 	m_packet_handlers["replicate:node_delta_update"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
-		log_w("TODO: %s", cs(packet_name));
+		magic::Scene *scene = m_app->get_scene();
+		magic::MemoryBuffer msg(data.c_str(), data.size());
+		uint node_id = msg.ReadNetID();
+		Node *node = scene->GetNode(node_id);
+		if(node){
+			log_d(MODULE, "Updating node %i (DeltaUpdate)", node_id);
+			node->ReadDeltaUpdate(msg);
+		} else {
+			log_w(MODULE, "Out-of-order node data ignored for %i", node_id);
+			// Note: Network/Connection.cpp would NOT buffer this
+		}
+		// Read user variables
+		uint num_vars = msg.ReadVLE();
+		while(num_vars){
+			auto key = msg.ReadStringHash();
+			node->SetVar(key, msg.ReadVariant());
+			num_vars--;
+		}
 	};
 
 	m_packet_handlers["replicate:component_delta_update"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
-		log_w("TODO: %s", cs(packet_name));
+		log_w(MODULE, "TODO: %s", cs(packet_name));
+		// Note: Network/Connection.cpp would NOT buffer this
 	};
 
 	m_packet_handlers["replicate:remove_node"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
-		log_w("TODO: %s", cs(packet_name));
+		log_w(MODULE, "TODO: %s", cs(packet_name));
 	};
 
 	m_packet_handlers["replicate:remove_component"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
-		log_w("TODO: %s", cs(packet_name));
+		log_w(MODULE, "TODO: %s", cs(packet_name));
 	};
 
 	m_packet_handlers[""] =

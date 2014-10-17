@@ -31,6 +31,13 @@ namespace voxelworld
 		{}
 	};
 
+	struct NodeVoxelDataUpdatedEvent: public interface::Event::Private
+	{
+		uint node_id;
+
+		NodeVoxelDataUpdatedEvent(uint node_id): node_id(node_id){}
+	};
+
 	struct Interface
 	{
 		virtual void load_or_generate_section(

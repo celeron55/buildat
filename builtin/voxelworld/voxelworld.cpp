@@ -3,6 +3,7 @@
 #include "voxelworld/api.h"
 #include "network/api.h"
 #include "client_file/api.h"
+#include "replicate/api.h"
 #include "core/log.h"
 #include "interface/module.h"
 #include "interface/server.h"
@@ -309,6 +310,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t(
 					"network:packet_received/voxelworld:get_section"));
+		m_server->sub_event(this, Event::t("voxelworld:node_voxel_data_updated"));
 
 		m_server->access_scene([&](Scene *scene)
 		{
@@ -427,6 +429,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 				client_file::FilesTransmitted)
 		EVENT_TYPEN("network:packet_received/voxelworld:get_section",
 				on_get_section, network::Packet)
+		EVENT_TYPEN("voxelworld:node_voxel_data_updated",
+				on_node_voxel_data_updated, voxelworld::NodeVoxelDataUpdatedEvent)
 	}
 
 	void on_start()
@@ -564,6 +568,29 @@ struct Module: public interface::Module, public voxelworld::Interface
 		}
 		log_v(MODULE, "C%i: on_get_section(): " PV3I_FORMAT,
 				packet.sender, PV3I_PARAMS(section_p));
+	}
+
+	void on_node_voxel_data_updated(const NodeVoxelDataUpdatedEvent &event)
+	{
+		// NOTE: This delayed event is used so that when this is received,
+		//       replicate has already sent the data to clients
+
+		// Notify clients that know the node
+		sv_<replicate::PeerId> peers;
+		replicate::access(m_server, [&](replicate::Interface *ireplicate){
+			peers = ireplicate->find_peers_that_know_node(event.node_id);
+		});
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar((int32_t)event.node_id);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(auto &peer_id : peers){
+				inetwork->send(peer_id, "voxelworld:node_voxel_data_updated",
+						os.str());
+			}
+		});
 	}
 
 	// Get section if exists
@@ -927,6 +954,13 @@ struct Module: public interface::Module, public voxelworld::Interface
 			n->SetVar(StringHash("buildat_voxel_data"), Variant(
 					PODVector<uint8_t>((const uint8_t*)new_data.c_str(),
 							new_data.size())));
+		});
+
+		// Tell replicate to emit events once it has done its job
+		replicate::access(m_server, [&](replicate::Interface *ireplicate){
+			ireplicate->emit_after_next_sync(Event(
+					"voxelworld:node_voxel_data_updated",
+					new NodeVoxelDataUpdatedEvent(node_id)));
 		});
 
 		// Mark node for collision box update

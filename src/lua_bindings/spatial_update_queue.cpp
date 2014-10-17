@@ -32,7 +32,7 @@ namespace lua_bindings {
 
 struct SpatialUpdateQueue
 {
-	struct Value { // Describes an update
+	struct Value {
 		ss_ type;
 		uint32_t node_id = -1;
 	};
@@ -50,11 +50,74 @@ struct SpatialUpdateQueue
 		bool operator>(const Item &other) const;
 	};
 
+	// Set of values with iterators for fast access of items, so that items
+	// can be removed quickly by value
+	struct ValueSet
+	{
+		struct Entry
+		{
+			Value value;
+			std::list<Item>::iterator it;
+
+			Entry(const Value &value, std::list<Item>::iterator it =
+					std::list<Item>::iterator()):
+				value(value), it(it)
+			{}
+			bool operator>(const Entry &other) const {
+				if(value.node_id > other.value.node_id)
+					return true;
+				if(value.node_id < other.value.node_id)
+					return false;
+				return value.type > other.value.type;
+			}
+		};
+
+		// sorted list in descending node_id and type order
+		std::list<Entry> m_set;
+
+		void clear(){
+			m_set.clear();
+		}
+		void insert(const Value &value, std::list<Item>::iterator queue_it){
+			Entry entry(value, queue_it);
+			auto it = std::lower_bound(m_set.begin(), m_set.end(), entry,
+					std::greater<Entry>());
+			if(it == m_set.end())
+				m_set.insert(it, entry);
+			else if(it->value.node_id != value.node_id ||
+					it->value.type != value.type)
+				m_set.insert(it, entry);
+			else
+				*it = entry;
+		}
+		void remove(const Value &value){
+			Entry entry(value);
+			auto it = std::lower_bound(m_set.begin(), m_set.end(), entry,
+					std::greater<Entry>());
+			if(it == m_set.end())
+				return;
+			m_set.erase(it);
+		}
+		std::list<Item>::iterator* find(const Value &value){
+			Entry entry(value);
+			auto it = std::lower_bound(m_set.begin(), m_set.end(), entry,
+					std::greater<Entry>());
+			if(it == m_set.end())
+				return nullptr;
+			if(it->value.node_id != value.node_id ||
+					it->value.type != value.type)
+				return nullptr;
+			return &(it->it);
+		}
+	};
+
 	Vector3 m_p;
 	Vector3 m_queue_oldest_p;
 	size_t m_queue_length = 0; // GCC std::list's size() is O(n)
 	std::list<Item> m_queue;
 	std::list<Item> m_old_queue;
+
+	ValueSet m_value_set;
 
 	void update(int max_operations)
 	{
@@ -76,6 +139,7 @@ struct SpatialUpdateQueue
 		m_p = p;
 		if(m_old_queue.empty() && (m_p - m_queue_oldest_p).Length() > 20){
 			m_queue_length = 0;
+			m_value_set.clear();
 			m_old_queue.swap(m_queue);
 			m_queue_oldest_p = m_p;
 		}
@@ -109,10 +173,27 @@ struct SpatialUpdateQueue
 		if(item.f == -1.0f || item.fw == -1.0f)
 			throw Exception("item.f == -1.0f || item.fw == -1.0f");
 
+		// Find old entry; if the old entry is more important, discard the new
+		// one; if the old entry is less important, remove the old entry
+		std::list<Item>::iterator *itp = m_value_set.find(item.value);
+		if(itp != nullptr){
+			Item &old_item = **itp;
+			if(old_item.fw < item.fw){
+				// Old item is more important
+				return;
+			} else {
+				// New item is more important
+				m_value_set.remove(item.value);
+				m_queue.erase(*itp);
+				m_queue_length--;
+			}
+		}
+
 		auto it = std::lower_bound(m_queue.begin(), m_queue.end(),
 				item, std::greater<Item>()); // position in descending order
-		m_queue.insert(it, item);
+		auto inserted_it = m_queue.insert(it, item);
 		m_queue_length++;
+		m_value_set.insert(item.value, inserted_it);
 	}
 
 	void put(const Vector3 &p, float near_weight, float near_trigger_d,
@@ -135,6 +216,10 @@ struct SpatialUpdateQueue
 
 	void pop()
 	{
+		if(m_queue.empty())
+			throw Exception("SpatialUpdateQueue::pop(): Empty");
+		Item &item = m_queue.back();
+		m_value_set.remove(item.value);
 		m_queue.pop_back();
 		m_queue_length--;
 	}

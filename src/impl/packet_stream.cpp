@@ -20,7 +20,7 @@ void PacketStream::input(std::deque<char> &socket_buffer,
 				(socket_buffer[3] & 0xff)<<8 |
 				(socket_buffer[4] & 0xff)<<16 |
 				(socket_buffer[5] & 0xff)<<24;
-		log_d(MODULE, "size=%zu", size);
+		//log_d(MODULE, "size=%zu", size);
 		if(socket_buffer.size() < 6 + size)
 			return;
 		log_d(MODULE, "Received full packet; type=%zu, "

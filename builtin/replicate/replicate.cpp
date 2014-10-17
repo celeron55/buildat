@@ -55,7 +55,9 @@ struct Module: public interface::Module, public replicate::Interface
 	// NOTE: We use pointers to SceneReplicationStates as Connection pointers in
 	//       other replication states in order to scene->CleanupConnection()
 	//       without an actual Connection object (which we don't want to use)
-	sm_<network::PeerInfo::Id, magic::SceneReplicationState> m_scene_states;
+	sm_<PeerId, magic::SceneReplicationState> m_scene_states;
+
+	sv_<Event> m_events_to_emit_after_next_sync;
 
 	Module(interface::Server *server):
 		interface::Module("replicate"),
@@ -137,11 +139,16 @@ struct Module: public interface::Module, public replicate::Interface
 		log_d(MODULE, "replicate::on_tick");
 
 		sync_changes();
+
+		for(Event &event : m_events_to_emit_after_next_sync){
+			m_server->emit_event(std::move(event));
+		}
+		m_events_to_emit_after_next_sync.clear();
 	}
 
 	void sync_changes()
 	{
-		sv_<network::PeerInfo::Id> peers;
+		sv_<PeerId> peers;
 		network::access(m_server, [&](network::Interface *inetwork){
 			peers = inetwork->list_peers();
 		});
@@ -175,7 +182,7 @@ struct Module: public interface::Module, public replicate::Interface
 		});
 	}
 
-	void sync_node(network::PeerInfo::Id peer,
+	void sync_node(PeerId peer,
 			uint node_id, magic::HashSet<uint> &nodes_to_process,
 			magic::Scene *scene, magic::SceneReplicationState &scene_state)
 	{
@@ -209,7 +216,7 @@ struct Module: public interface::Module, public replicate::Interface
 		}
 	}
 
-	void sync_create_node(network::PeerInfo::Id peer, Node *node,
+	void sync_create_node(PeerId peer, Node *node,
 			magic::HashSet<uint> &nodes_to_process,
 			Scene *scene, magic::SceneReplicationState &scene_state)
 	{
@@ -264,7 +271,7 @@ struct Module: public interface::Module, public replicate::Interface
 		scene_state.dirtyNodes_.Erase(node->GetID());
 	}
 
-	void sync_existing_node(network::PeerInfo::Id peer,
+	void sync_existing_node(PeerId peer,
 			Node *node, magic::NodeReplicationState &node_state,
 			magic::HashSet<uint> &nodes_to_process,
 			Scene *scene, magic::SceneReplicationState &scene_state)
@@ -278,9 +285,9 @@ struct Module: public interface::Module, public replicate::Interface
 		}
 
 		// Handle changed attributes
-		if(node_state.dirtyAttributes_.Count()){
-			log_d(MODULE, "sync_existing_node(): %zu: Changed attributes",
-					node->GetID());
+		if(node_state.dirtyAttributes_.Count() || node_state.dirtyVars_.Size()){
+			log_d(MODULE, "sync_existing_node(): %zu: Changed attributes "
+					"or variables", node->GetID());
 			const magic::Vector<magic::AttributeInfo> &attributes =
 					*node->GetNetworkAttributes();
 			uint num = attributes.Size();
@@ -428,8 +435,7 @@ struct Module: public interface::Module, public replicate::Interface
 		scene_state.dirtyNodes_.Erase(node->GetID());
 	}
 
-	void send_to_peer(network::PeerInfo::Id peer,
-			const ss_ &name, const magic::VectorBuffer &buf)
+	void send_to_peer(PeerId peer, const ss_ &name, const magic::VectorBuffer &buf)
 	{
 		log_d(MODULE, "%s: Update size: %zu, data=%s",
 				cs(name), buf.GetBuffer().Size());
@@ -452,6 +458,26 @@ struct Module: public interface::Module, public replicate::Interface
 	}*/
 
 	// Interface
+
+	sv_<PeerId> find_peers_that_know_node(uint node_id)
+	{
+		sv_<PeerId> result;
+		for(auto &pair: m_scene_states){
+			PeerId peer_id = pair.first;
+			magic::SceneReplicationState &scene_state = pair.second;
+			auto &node_states = scene_state.nodeStates_;
+			auto it = node_states.Find(node_id);
+			if(it != node_states.End()){
+				result.push_back(peer_id);
+			}
+		}
+		return result;
+	}
+
+	void emit_after_next_sync(Event event)
+	{
+		m_events_to_emit_after_next_sync.push_back(std::move(event));
+	}
 
 	void* get_interface()
 	{

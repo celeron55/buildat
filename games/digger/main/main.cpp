@@ -23,13 +23,33 @@
 #include <cereal/types/unordered_map.hpp>
 #include <cereal/types/vector.hpp>
 
-namespace digger {
-
 namespace magic = Urho3D;
 namespace pv = PolyVox;
 
 using interface::Event;
 using interface::VoxelInstance;
+
+// TODO: Move to a header (core/types_polyvox.h or something)
+#define PV3I_FORMAT "(%i, %i, %i)"
+#define PV3I_PARAMS(p) p.getX(), p.getY(), p.getZ()
+
+// TODO: Move to a header (core/cereal_polyvox.h or something)
+namespace cereal {
+
+template<class Archive>
+void save(Archive &archive, const pv::Vector3DInt32 &v){
+	archive((int32_t)v.getX(), (int32_t)v.getY(), (int32_t)v.getZ());
+}
+template<class Archive>
+void load(Archive &archive, pv::Vector3DInt32 &v){
+	int32_t x, y, z;
+	archive(x, y, z);
+	v.setX(x); v.setY(y); v.setZ(z);
+}
+
+}
+
+namespace digger {
 
 using namespace Urho3D;
 
@@ -53,6 +73,8 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t("voxelworld:generation_request"));
+		m_server->sub_event(this, Event::t(
+					"network:packet_received/main:place_voxel"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -64,6 +86,8 @@ struct Module: public interface::Module
 				on_files_transmitted, client_file::FilesTransmitted)
 		EVENT_TYPEN("voxelworld:generation_request",
 				on_generation_request, voxelworld::GenerationRequest)
+		EVENT_TYPEN("network:packet_received/main:place_voxel",
+				on_place_voxel, network::Packet)
 	}
 
 	void on_start()
@@ -251,18 +275,35 @@ struct Module: public interface::Module
 
 				for(int y1=y; y1<y+4; y1++){
 					pv::Vector3DInt32 p(x, y1, z);
-					ivoxelworld->set_voxel(p, VoxelInstance(3));
+					ivoxelworld->set_voxel(p, VoxelInstance(3), true);
 				}
 
 				for(int x1 = x-2; x1 <= x+2; x1++){
 					for(int y1 = y+3; y1 <= y+7; y1++){
 						for(int z1 = z-2; z1 <= z+2; z1++){
 							pv::Vector3DInt32 p(x1, y1, z1);
-							ivoxelworld->set_voxel(p, VoxelInstance(5));
+							ivoxelworld->set_voxel(p, VoxelInstance(5), true);
 						}
 					}
 				}
 			}
+		});
+	}
+
+	void on_place_voxel(const network::Packet &packet)
+	{
+		pv::Vector3DInt32 voxel_p;
+		{
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(voxel_p);
+		}
+		log_v(MODULE, "C%i: on_place_voxel(): p=" PV3I_FORMAT,
+				packet.sender, PV3I_PARAMS(voxel_p));
+
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
+		{
+			ivoxelworld->set_voxel(voxel_p, VoxelInstance(2));
 		});
 	}
 };

@@ -251,8 +251,9 @@ struct Module: public interface::Module, public network::Interface
 		// Grab Peer (which contains socket)
 		auto it = m_peers.find(recipient);
 		if(it == m_peers.end()){
-			throw Exception(ss_()+"network::send(): Peer "+itos(recipient) +
-						  " doesn't exist");
+			log_w(MODULE, "network::send(): Peer %i doesn't exist",
+					recipient);
+			return;
 		}
 		Peer &peer = it->second;
 
