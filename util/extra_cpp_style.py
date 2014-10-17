@@ -30,6 +30,7 @@ class ParenMatch:
 			"()": 0,
 			"''": 0,
 			'""': 0,
+			"<>": 0,
 			'=;': 0,
 			'/**/': 0,
 			'//': 0,
@@ -71,8 +72,9 @@ class ParenMatch:
 				self.level["=;"] = 1
 				self.assignment_begin_paren_level = self.level["()"]
 				return i + 2
-		if self.level["=;"] > 0:
-			if line[i] == ';':
+		if line[i] == ';':
+			self.level["<>"] = 0
+			if self.level["=;"] > 0:
 				self.level["=;"] = 0
 				return i + 1
 		if self.level["#"] > 0:
@@ -82,6 +84,13 @@ class ParenMatch:
 		if line[i] == '#':
 			self.level["#"] = 1
 			return i + 1
+		if line[i] == '<':
+			if line[i-1] != '<' and line[i+1] != '<':
+				self.level["<>"] += 1
+		if line[i] == '>':
+			self.level["<>"] -= 1
+		if line[i] in ["|", "&", "(", ")", "]", "["]:
+			self.level["<>"] = 0
 		for k in ["{}", "[]", "()", "''", '""']:
 			if line[i] == k[0]:
 				self.level[k] += 1
@@ -135,6 +144,12 @@ class State:
 			return
 		self.indent_fix_amount += d
 		log("indent"+("+="+str(d) if d >= 0 else "-="+str(-d))+": "+description)
+
+	def get_top_block_base_levels(self):
+		if not self.blocks:
+			return ParenMatch().level
+		top_block = self.blocks[-1]
+		return top_block.base_levels
 
 	def feed_line(self, line, line_i):
 		self.indent_fix_amount = 0
@@ -320,46 +335,53 @@ class State:
 			added_multiline_paren_indentation = False  # Avoid adding twice
 			# If inside broken indentation, do manual indentation of things
 			# content because uncrustify can't bother
-			if is_inside_broken_block and self.blocks:
-				top_block = self.blocks[-1]
+			if is_inside_broken_block:
+				base_levels = self.get_top_block_base_levels()
 				# Manual indentation of multiline () content
-				if level_before["()"] > top_block.base_levels["()"]:
+				if level_before["()"] > base_levels["()"]:
 					self.print_debug_state(level_before, level_after)
-					if top_block.base_levels["()"] < level_before["()"]:
-						if top_block.base_levels["{}"] >= level_before["{}"]:
+					if base_levels["()"] < level_before["()"]:
+						if base_levels["{}"] >= level_before["{}"]:
 							self.fix_indent(8,
 									"Indenting multiline () in broken block")
 							added_multiline_paren_indentation = True
 				# Manual indentation of multiline assignment
 				self.print_debug_state(level_before, level_after)
-				if (level_before["=;"] > top_block.base_levels["=;"] and
+				base_levels = self.get_top_block_base_levels()
+				if (level_before["=;"] > base_levels["=;"] and
 						not re.match(r'^.*[ \t]=( |\t|\n).*$', line) and
 						not added_multiline_paren_indentation):
 					self.fix_indent(4, "Indenting multiline assigmnent in "+
 							"broken block")
-			# If not inside broken indentation, add one level to inside
-			# multiline () content because uncrustify is unable to do so
-			# consistently. It randomly uses 1 and 2 tabs if an attempt is made
-			# to configure it to do this. It is now configured to always add 1.
-			# Also member initializers get correct indentation this way.
-			if not is_inside_broken_block and self.blocks:
-				top_block = self.blocks[-1]
-				if (level_before["()"] > top_block.base_levels["()"] and
+			# If not inside broken indentation
+			else:
+				# Add one level to inside multiline () content because
+				# uncrustify is unable to do so consistently. It randomly uses 1
+				# and 2 tabs if an attempt is made to configure it to do this.
+				# It is now configured to always add 1.
+				# Also member initializers get correct indentation this way.
+				base_levels = self.get_top_block_base_levels()
+				if (level_before["()"] > base_levels["()"] and
 						not re.match(r'^[ \t]*[)}\];].*$', line)):
 					self.fix_indent(4, "Adding indentation to regular multiline ()")
 					added_multiline_paren_indentation = True
-			# If not inside broken indentation, add one level to inside
-			# multiline assignment  content because uncrustify is unable to do
-			# so consistently. It randomly uses 1 and 2 tabs if an attempt is
-			# made to configure it to do this. It is now configured to always
-			# add 1.
-			if (not is_inside_broken_block and self.blocks and
-					not added_multiline_paren_indentation):
-				top_block = self.blocks[-1]
-				if (level_before["=;"] > top_block.base_levels["=;"] and
-						not re.match(r'^.*[ \t]=( |\t|\n).*$', line) and
-						not re.match(r'^[ \t]*[)}\];].*$', line)):
-					self.fix_indent(4, "Adding indentation to regular multiline =;")
+				# Add two levels to inside multiline <> content because
+				# uncrustify does not do that.
+				base_levels = self.get_top_block_base_levels()
+				if (level_before["<>"] > base_levels["<>"]):
+					self.fix_indent(8, "Adding indentation to regular multiline <>")
+					added_multiline_paren_indentation = True
+				# Add one level to inside multiline assignment  content because
+				# uncrustify is unable to do so consistently. It randomly uses 1
+				# and 2 tabs if an attempt is made to configure it to do this.
+				# It is now configured to always add 1.
+				if not added_multiline_paren_indentation:
+					base_levels = self.get_top_block_base_levels()
+					if (level_before["=;"] > base_levels["=;"] and
+							not re.match(r'^.*[ \t]=( |\t|\n).*$', line) and
+							not re.match(r'^[ \t]*[)}\];].*$', line)):
+						self.fix_indent(4, "Adding indentation to regular "+
+								"multiline =;")
 
 		# Log final indent fix amount
 		if self.indent_fix_amount != 0:
