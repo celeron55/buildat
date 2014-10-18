@@ -8,6 +8,8 @@ local cereal = require("buildat/extension/cereal")
 local dump = buildat.dump
 local M = {}
 
+local UPDATE_TIME_FRACTION = 0.20
+
 --local LOD_DISTANCE = 140
 --local LOD_DISTANCE = 100
 local LOD_DISTANCE = 80
@@ -231,7 +233,8 @@ function M.init()
 		-- Node updates: Handle one or a few per frame
 		local current_us = buildat.get_time_us()
 		-- Spend time doing this proportionate to the rest of the update cycle
-		local max_handling_time_us = (current_us - end_of_update_processing_us) / 3
+		local last_outer_frame_us = (current_us - end_of_update_processing_us)
+		local max_handling_time_us = last_outer_frame_us * UPDATE_TIME_FRACTION
 		local stop_at_us = current_us + max_handling_time_us
 
 		node_update_queue:set_p(camera_p)
