@@ -1,0 +1,2 @@
+8e7d21a7d651e84acbf5d8b5c5b00e4dfacb111b 2013-10-18 17:09:17
+https://github.com/decimad/luabind-deboostified.git

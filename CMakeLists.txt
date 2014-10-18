@@ -5,23 +5,6 @@ cmake_minimum_required(VERSION 2.6)
 project(buildat)
 
 #
-# Bundled libraries
-#
-
-add_subdirectory("3rdparty/cereal")
-add_subdirectory("3rdparty/c55lib")
-add_subdirectory("3rdparty/smallsha1")
-add_subdirectory("3rdparty/polyvox")
-add_subdirectory("3rdparty/zlib")
-
-include_directories("src")
-include_directories("3rdparty/cereal/include")
-include_directories("3rdparty/c55lib")
-include_directories("3rdparty/smallsha1")
-include_directories("3rdparty/polyvox/library/PolyVoxCore/include")
-include_directories("3rdparty/zlib")
-
-#
 # Global options
 #
 
@@ -55,12 +38,41 @@ find_package(Urho3D REQUIRED)
 include_directories(${URHO3D_INCLUDE_DIRS})
 
 # Urho3D's Lua
-include_directories("${URHO3D_HOME}/Source/ThirdParty/Lua/src")
+# Set some variables so that Luabind compiles too
+set(LUA_FOUND true)
+set(LUA_INCLUDE_DIRS "${URHO3D_HOME}/Source/ThirdParty/Lua/src")
+if(URHO3D_LUAJIT)
+	set(LUA_LIBRARY "${URHO3D_HOME}/Build/ThirdParty/LuaJIT/libLuaJIT.a")
+else()
+	set(LUA_LIBRARY "${URHO3D_HOME}/Build/ThirdParty/Lua/libLua.a")
+endif()
+include_directories(${LUA_INCLUDE_DIRS})
+
+# Urho3D's Tolua++
 include_directories("${URHO3D_HOME}/Source/ThirdParty/toluapp/include")
 
 # Run some automagic from Urho3D.
 # This appends to at least ${ABSOLUTE_PATH_LIBS} and {LINK_LIBS_ONLY}
 define_dependency_libs("Urho3D")
+
+#
+# Bundled libraries
+#
+
+add_subdirectory("3rdparty/cereal")
+add_subdirectory("3rdparty/c55lib")
+add_subdirectory("3rdparty/smallsha1")
+add_subdirectory("3rdparty/polyvox")
+add_subdirectory("3rdparty/zlib")
+add_subdirectory("3rdparty/luabind-deboostified")
+
+include_directories("src")
+include_directories("3rdparty/cereal/include")
+include_directories("3rdparty/c55lib")
+include_directories("3rdparty/smallsha1")
+include_directories("3rdparty/polyvox/library/PolyVoxCore/include")
+include_directories("3rdparty/zlib")
+include_directories("3rdparty/luabind-deboostified")
 
 #
 # Buildat
@@ -158,16 +170,8 @@ if(BUILD_CLIENT)
 		${ABSOLUTE_PATH_LIBS}
 		${LINK_LIBS_ONLY}
 		${URHO3D_HOME}/Build/ThirdParty/toluapp/src/lib/libtoluapp.a
+		${LUA_LIBRARY}
 	)
-	if(URHO3D_LUAJIT)
-		target_link_libraries(${CLIENT_EXE_NAME}
-			${URHO3D_HOME}/Build/ThirdParty/LuaJIT/libLuaJIT.a
-		)
-	else()
-		target_link_libraries(${CLIENT_EXE_NAME}
-			${URHO3D_HOME}/Build/ThirdParty/Lua/libLua.a
-		)
-	endif()
 endif(BUILD_CLIENT)
 
 #
