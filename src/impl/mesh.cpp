@@ -779,22 +779,16 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 	cg->Commit();
 }
 
+struct TemporaryBox
+{
+	Vector3 size;
+	Vector3 position;
+};
+
 void set_voxel_physics_boxes(Node *node, Context *context,
 		pv::RawVolume<VoxelInstance> &volume_orig,
 		VoxelRegistry *voxel_reg)
 {
-	PODVector<CollisionShape*> previous_shapes;
-	node->GetComponents<CollisionShape>(previous_shapes);
-	// Number of previous shapes reused
-	// (they are reused because deleting them is very expensive)
-	size_t num_shapes_reused = 0;
-
-	// Do this. Otherwise modifying CollisionShapes causes a massive CPU waste
-	// when they call RigidBody::UpdateMass().
-	RigidBody *body = node->GetComponent<RigidBody>();
-	if(body)
-		body->ReleaseBody();
-
 	int w = volume_orig.getWidth() - 2;
 	int h = volume_orig.getHeight() - 2;
 	int d = volume_orig.getDepth() - 2;
@@ -820,6 +814,8 @@ void set_voxel_physics_boxes(Node *node, Context *context,
 	// Create minimal number of boxes to fill the solid voxels. Boxes can
 	// overlap. When a box is added, its voxels are set to value 2 in the
 	// temporary volume.
+
+	sv_<TemporaryBox> result_boxes;
 
 	for(int z0 = lc.getZ(); z0 <= uc.getZ(); z0++){
 		// Loop until this z0 plane is done, then handle the next one
@@ -894,23 +890,44 @@ z_plane_does_not_fit:
 					}
 				}
 			}
-			// Create the box (reuse a previous shape if possible)
-			CollisionShape *shape = nullptr;
-			if(num_shapes_reused < previous_shapes.Size())
-				shape = previous_shapes[num_shapes_reused++];
-			else
-				shape = node->CreateComponent<CollisionShape>(LOCAL);
-			shape->SetBox(Vector3(
-						x1 - x0 + 1,
-						y1 - y0 + 1,
-						z1 - z0 + 1
-				));
-			shape->SetPosition(Vector3(
-						(x0 + x1)/2.0f - w/2 - 0.5f,
-						(y0 + y1)/2.0f - h/2 - 0.5f,
-						(z0 + z1)/2.0f - d/2 - 0.5f
-				));
+			// Store the box in results
+			TemporaryBox box;
+			box.size = Vector3(
+					x1 - x0 + 1,
+					y1 - y0 + 1,
+					z1 - z0 + 1
+			);
+			box.position = Vector3(
+					(x0 + x1)/2.0f - w/2 - 0.5f,
+					(y0 + y1)/2.0f - h/2 - 0.5f,
+					(z0 + z1)/2.0f - d/2 - 0.5f
+			);
+			result_boxes.push_back(box);
 		}
+	}
+
+	// Get previous shapes
+	PODVector<CollisionShape*> previous_shapes;
+	node->GetComponents<CollisionShape>(previous_shapes);
+	// Number of previous shapes reused
+	// (they are reused because deleting them is very expensive)
+	size_t num_shapes_reused = 0;
+
+	// Do this. Otherwise modifying CollisionShapes causes a massive CPU waste
+	// when they call RigidBody::UpdateMass().
+	RigidBody *body = node->GetComponent<RigidBody>();
+	if(body)
+		body->ReleaseBody();
+
+	// Create the boxes (reuse previous shapes if possible)
+	for(auto &box : result_boxes){
+		CollisionShape *shape = nullptr;
+		if(num_shapes_reused < previous_shapes.Size())
+			shape = previous_shapes[num_shapes_reused++];
+		else
+			shape = node->CreateComponent<CollisionShape>(LOCAL);
+		shape->SetBox(box.size);
+		shape->SetPosition(box.position);
 	}
 
 	// Remove excess shapes
