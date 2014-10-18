@@ -85,6 +85,8 @@ namespace interface
 
 		virtual const VoxelDefinition* get(const VoxelTypeId &id) = 0;
 		virtual const VoxelDefinition* get(const VoxelName &name) = 0;
+
+		// atlas_reg may only be supplied when called from Urho3D main thread
 		virtual const CachedVoxelDefinition* get_cached(const VoxelTypeId &id,
 				TextureAtlasRegistry *atlas_reg = nullptr) = 0;
 		virtual const CachedVoxelDefinition* get_cached(const VoxelInstance &v,

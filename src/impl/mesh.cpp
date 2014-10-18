@@ -284,26 +284,22 @@ template<typename VoxelType>
 class IsQuadNeededByRegistry
 {
 	interface::VoxelRegistry *m_voxel_reg;
-	interface::TextureAtlasRegistry *m_atlas_reg;
 	// NOTE: The voxel type id is used directly as PolyVox material value
 public:
-	IsQuadNeededByRegistry(interface::VoxelRegistry *voxel_reg,
-			interface::TextureAtlasRegistry *atlas_reg):
-		m_voxel_reg(voxel_reg), m_atlas_reg(atlas_reg)
+	IsQuadNeededByRegistry(interface::VoxelRegistry *voxel_reg):
+		m_voxel_reg(voxel_reg)
 	{}
 	IsQuadNeededByRegistry(): // PolyVox wants this
-		m_voxel_reg(nullptr),
-		m_atlas_reg(nullptr)
+		m_voxel_reg(nullptr)
 	{}
-	bool operator()(VoxelType backv, VoxelType front, uint32_t &materialToUse)
+	bool operator()(VoxelType back, VoxelType front, uint32_t &materialToUse)
 	{
-		uint32_t back = backv.getId();
 		if(m_voxel_reg == nullptr)
 			throw Exception("IsQuadNeededByRegistry not initialized");
 		const interface::CachedVoxelDefinition *back_def =
-				m_voxel_reg->get_cached(back, m_atlas_reg);
+				m_voxel_reg->get_cached(back);
 		const interface::CachedVoxelDefinition *front_def =
-				m_voxel_reg->get_cached(front, m_atlas_reg);
+				m_voxel_reg->get_cached(front);
 		if(!back_def){
 			return false;
 		}
@@ -311,38 +307,21 @@ public:
 			return false;
 		}
 		else if(back_def->face_draw_type == interface::FaceDrawType::ALWAYS){
-			materialToUse = back;
+			materialToUse = back.getId();
 			return true;
 		}
 		// interface::FaceDrawType::ON_EDGE
 		if(!front_def){
-			materialToUse = back;
+			materialToUse = back.getId();
 			return true;
 		}
 		if(back_def->edge_material_id != front_def->edge_material_id){
-			materialToUse = back;
+			materialToUse = back.getId();
 			return true;
 		}
 		return false;
 	}
 };
-
-#if 0
-// TODO: Create a custom Drawable that can use an index buffer
-struct TemporaryGeometry
-{
-	uint atlas_id = 0;
-	sv_<float> vertex_data; // vertex(3) + normal(3) + texcoord(2)
-	sv_<unsigned> index_data; // Urho3D eats unsigned as large indices
-};
-#else
-struct TemporaryGeometry
-{
-	uint atlas_id = 0;
-	// CustomGeometry can't handle an index buffer
-	PODVector<CustomGeometryVertex> vertex_data;
-};
-#endif
 
 void assign_txcoords(size_t pv_vertex_i1, const AtlasSegmentCache *aseg,
 		CustomGeometryVertex &tg_vert)
@@ -422,13 +401,30 @@ void assign_txcoords(size_t pv_vertex_i1, const AtlasSegmentCache *aseg,
 	}
 }
 
-// Set custom geometry from voxel volume, using a voxel registry
-// Volume should be padded by one voxel on each edge
-void set_voxel_geometry(CustomGeometry *cg, Context *context,
+void preload_textures(pv::RawVolume<VoxelInstance> &volume,
+		VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg)
+{
+	auto region = volume.getEnclosingRegion();
+	auto &lc = region.getLowerCorner();
+	auto &uc = region.getUpperCorner();
+
+	for(int z = lc.getZ(); z <= uc.getZ(); z++){
+		for(int y = lc.getY(); y <= uc.getY(); y++){
+			for(int x = lc.getX(); x <= uc.getX(); x++){
+				VoxelInstance v = volume.getVoxelAt(x, y, z);
+				const interface::CachedVoxelDefinition *def =
+						voxel_reg->get_cached(v, atlas_reg);
+				(void)def; // Unused
+			}
+		}
+	}
+}
+
+void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		pv::RawVolume<VoxelInstance> &volume,
 		VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg)
 {
-	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg, atlas_reg);
+	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
 	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
 			IsQuadNeededByRegistry<VoxelInstance>>
@@ -437,8 +433,6 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 
 	const sv_<uint32_t> &pv_indices = pv_mesh.getIndices();
 	const sv_<pv::PositionMaterialNormal> &pv_vertices = pv_mesh.getVertices();
-
-	sm_<uint, TemporaryGeometry> temp_geoms;
 
 	int w = volume.getWidth() - 2;
 	int h = volume.getHeight() - 2;
@@ -483,7 +477,7 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 #if 0
 // TODO: Create a custom Drawable that can use an index buffer
 		// Get or create the appropriate temporary geometry for this atlas
-		TemporaryGeometry &tg = temp_geoms[seg_ref.atlas_id];
+		TemporaryGeometry &tg = result[seg_ref.atlas_id];
 		if(tg.vertex_data.empty()){
 			tg.atlas_id = seg_ref.atlas_id;
 			// It can't get larger than these and will only exist temporarily in
@@ -527,7 +521,7 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 		}
 #else
 		// Get or create the appropriate temporary geometry for this atlas
-		TemporaryGeometry &tg = temp_geoms[seg_ref.atlas_id];
+		TemporaryGeometry &tg = result[seg_ref.atlas_id];
 		if(tg.vertex_data.Empty()){
 			tg.atlas_id = seg_ref.atlas_id;
 			// It can't get larger than this and will only exist temporarily in
@@ -558,7 +552,12 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 		}
 #endif
 	}
+}
 
+void set_voxel_geometry(CustomGeometry *cg, Context *context,
+		const sm_<uint, TemporaryGeometry> &temp_geoms,
+		TextureAtlasRegistry *atlas_reg)
+{
 	// Generate CustomGeometry from TemporaryGeometry
 
 	ResourceCache *cache = context->GetSubsystem<ResourceCache>();
@@ -590,6 +589,20 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 	}
 
 	cg->Commit();
+}
+
+// Set custom geometry from voxel volume, using a voxel registry
+// Volume should be padded by one voxel on each edge
+void set_voxel_geometry(CustomGeometry *cg, Context *context,
+		pv::RawVolume<VoxelInstance> &volume,
+		VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg)
+{
+	preload_textures(volume, voxel_reg, atlas_reg);
+
+	sm_<uint, TemporaryGeometry> temp_geoms;
+	generate_voxel_geometry(temp_geoms, volume, voxel_reg, atlas_reg);
+
+	set_voxel_geometry(cg, context, temp_geoms, atlas_reg);
 }
 
 // Set custom geometry from voxel volume, using a voxel registry
@@ -639,7 +652,9 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 		}
 	}
 
-	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg, atlas_reg);
+	preload_textures(volume, voxel_reg, atlas_reg);
+
+	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
 	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
 			IsQuadNeededByRegistry<VoxelInstance>>
@@ -780,13 +795,8 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 	cg->Commit();
 }
 
-struct TemporaryBox
-{
-	Vector3 size;
-	Vector3 position;
-};
-
-void set_voxel_physics_boxes(Node *node, Context *context,
+void generate_voxel_physics_boxes(
+		sv_<TemporaryBox> &result_boxes,
 		pv::RawVolume<VoxelInstance> &volume_orig,
 		VoxelRegistry *voxel_reg)
 {
@@ -815,8 +825,6 @@ void set_voxel_physics_boxes(Node *node, Context *context,
 	// Create minimal number of boxes to fill the solid voxels. Boxes can
 	// overlap. When a box is added, its voxels are set to value 2 in the
 	// temporary volume.
-
-	sv_<TemporaryBox> result_boxes;
 
 	for(int z0 = lc.getZ(); z0 <= uc.getZ(); z0++){
 		// Loop until this z0 plane is done, then handle the next one
@@ -906,7 +914,11 @@ z_plane_does_not_fit:
 			result_boxes.push_back(box);
 		}
 	}
+}
 
+void set_voxel_physics_boxes(Node *node, Context *context,
+		const sv_<TemporaryBox> &boxes)
+{
 	// Get previous shapes
 	PODVector<CollisionShape*> previous_shapes;
 	node->GetComponents<CollisionShape>(previous_shapes);
@@ -921,7 +933,7 @@ z_plane_does_not_fit:
 		body->ReleaseBody();
 
 	// Create the boxes (reuse previous shapes if possible)
-	for(auto &box : result_boxes){
+	for(auto &box : boxes){
 		CollisionShape *shape = nullptr;
 		if(num_shapes_reused < previous_shapes.Size())
 			shape = previous_shapes[num_shapes_reused++];
@@ -941,6 +953,16 @@ z_plane_does_not_fit:
 		// re-creates the internal btRigidBody and also calls UpdateMass()
 		body->OnSetEnabled();
 	}
+}
+
+void set_voxel_physics_boxes(Node *node, Context *context,
+		pv::RawVolume<VoxelInstance> &volume,
+		VoxelRegistry *voxel_reg)
+{
+	sv_<TemporaryBox> result_boxes;
+	generate_voxel_physics_boxes(result_boxes, volume, voxel_reg);
+
+	set_voxel_physics_boxes(node, context, result_boxes);
 }
 
 } // namespace mesh

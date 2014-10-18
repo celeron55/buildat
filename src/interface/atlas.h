@@ -72,6 +72,7 @@ namespace interface
 	{
 		virtual ~TextureAtlasRegistry(){}
 
+		// These two may only be called from Urho3D main thread
 		virtual const AtlasSegmentReference add_segment(
 				const AtlasSegmentDefinition &segment_def) = 0;
 		virtual const AtlasSegmentReference find_or_add_segment(

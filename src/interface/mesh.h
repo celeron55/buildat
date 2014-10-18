@@ -4,6 +4,10 @@
 #include "core/types.h"
 #include "interface/voxel.h"
 #include <PolyVoxCore/RawVolume.h>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstrict-aliasing"
+#include <CustomGeometry.h>
+#pragma GCC diagnostic pop
 
 namespace Urho3D
 {
@@ -45,16 +49,65 @@ namespace interface
 				pv::RawVolume<VoxelInstance> &volume,
 				VoxelRegistry *voxel_reg);
 
+		// Voxel geometry generation
+
+		#if 0
+		// TODO: Create a custom Drawable that can use an index buffer
+		struct TemporaryGeometry
+		{
+			uint atlas_id = 0;
+			sv_<float> vertex_data; // vertex(3) + normal(3) + texcoord(2)
+			sv_<unsigned> index_data; // Urho3D eats unsigned as large indices
+		};
+		#else
+		struct TemporaryGeometry
+		{
+			uint atlas_id = 0;
+			// CustomGeometry can't handle an index buffer
+			PODVector<CustomGeometryVertex> vertex_data;
+		};
+		#endif
+
+		void preload_textures(pv::RawVolume<VoxelInstance> &volume,
+				VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg);
+
+		// Can be called from any thread
+		void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
+				pv::RawVolume<VoxelInstance> &volume,
+				VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg);
+
+		void set_voxel_geometry(CustomGeometry *cg, Context *context,
+				const sm_<uint, TemporaryGeometry> &temp_geoms,
+				TextureAtlasRegistry *atlas_reg);
+
 		// Set custom geometry from voxel volume, using a voxel registry
 		// Volume should be padded by one voxel on each edge
 		// NOTE: volume is non-const due to PolyVox deficiency
 		void set_voxel_geometry(CustomGeometry *cg, Context *context,
 				pv::RawVolume<VoxelInstance> &volume,
 				VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg);
+
 		// lod=1 -> 1:1, lod=3 -> 1:3
 		void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 				pv::RawVolume<VoxelInstance> &volume_orig,
 				VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg);
+
+		// Voxel physics generation
+
+		struct TemporaryBox
+		{
+			Vector3 size;
+			Vector3 position;
+		};
+
+		// Can be called from any thread
+		void generate_voxel_physics_boxes(
+				sv_<TemporaryBox> &result_boxes,
+				pv::RawVolume<VoxelInstance> &volume,
+				VoxelRegistry *voxel_reg);
+
+		void set_voxel_physics_boxes(Node *node, Context *context,
+				const sv_<TemporaryBox> &boxes);
 
 		void set_voxel_physics_boxes(Node *node, Context *context,
 				pv::RawVolume<VoxelInstance> &volume,
