@@ -4,6 +4,7 @@
 #include "interface/mutex.h"
 #include "interface/semaphore.h"
 #include "core/log.h"
+#include <c55/os.h>
 #include <deque>
 #ifdef _WIN32
 	#include "ports/windows_compat.h"
@@ -127,16 +128,48 @@ struct CThreadPool: public ThreadPool
 
 	void run_post()
 	{
-		std::deque<up_<Task>> output_queue;
-		{
-			interface::MutexScope ms(m_mutex);
-			output_queue.swap(m_output_queue);
+		int64_t t1 = get_timeofday_us();
+		size_t queue_size = 0;
+		size_t post_count = 0;
+		for(;;){
+			// Pop an output task
+			up_<Task> task;
+			{
+				interface::MutexScope ms(m_mutex);
+				if(!m_output_queue.empty()){
+					queue_size = m_output_queue.size();
+					task = std::move(m_output_queue.front());
+					m_output_queue.pop_front();
+				}
+			}
+			if(!task)
+				break;
+			// run post() until too long has passed
+			bool done = false;
+			for(;;){
+				post_count++;
+				done = task->post();
+				// If done, take next output task
+				if(done)
+					break;
+				int64_t t2 = get_timeofday_us();
+				int64_t max_t = 2000;
+				if(queue_size > 4)
+					max_t += (queue_size - 4) * 5000;
+				if(t2 - t1 >= max_t)
+					break;
+			}
+			// If still not done, push task to back to front of queue and stop
+			// processing
+			if(!done){
+				interface::MutexScope ms(m_mutex);
+				m_output_queue.push_front(std::move(task));
+				break;
+			}
 		}
-		// TODO: Limit task->post() execution time per frame
-		for(auto &task : output_queue){
-			while(!task->post());
-		}
-		// Done with tasks; discard them
+		/*int64_t t2 = get_timeofday_us();
+		log_v(MODULE, "output post(): %ius (%zu calls; queue size: %zu)",
+				(int)(t2 - t1), post_count, queue_size);*/
 	}
 };
 

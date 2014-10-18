@@ -34,7 +34,7 @@
 #include <FileSystem.h>
 #include <PhysicsWorld.h>
 #include <DebugRenderer.h>
-//#include <Profiler.h>
+#include <Profiler.h>
 #pragma GCC diagnostic pop
 extern "C" {
 #include <lua.h>
@@ -535,7 +535,11 @@ struct CApp: public App, public magic::Application
 		if(m_state)
 			m_state->update();
 
-		m_thread_pool->run_post();
+		{
+			magic::AutoProfileBlock profiler_block(
+					GetSubsystem<magic::Profiler>(), "Buildat|ThreadPool::post");
+			m_thread_pool->run_post();
+		}
 	}
 
 	void on_post_render_update(

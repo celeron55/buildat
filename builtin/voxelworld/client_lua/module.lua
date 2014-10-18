@@ -8,7 +8,7 @@ local cereal = require("buildat/extension/cereal")
 local dump = buildat.dump
 local M = {}
 
-local UPDATE_TIME_FRACTION = 0.20
+local UPDATE_TIME_FRACTION = 0.10
 
 --local LOD_DISTANCE = 140
 --local LOD_DISTANCE = 100
