@@ -206,22 +206,30 @@ struct Module: public interface::Module
 			pv::Region region = ivoxelworld->get_section_region_voxels(
 						section_p);
 
-			pv::Vector3DInt32 p0 = region.getLowerCorner();
-			pv::Vector3DInt32 p1 = region.getUpperCorner();
-
-			log_t(MODULE, "on_generation_request(): p0: (%i, %i, %i)",
-					p0.getX(), p0.getY(), p0.getZ());
-			log_t(MODULE, "on_generation_request(): p1: (%i, %i, %i)",
-					p1.getX(), p1.getY(), p1.getZ());
-
-			interface::NoiseParams np(0, 35, interface::v3f(160, 160, 160),
-					1, 6, 0.475);
-
 			auto lc = region.getLowerCorner();
 			auto uc = region.getUpperCorner();
+
+			log_t(MODULE, "on_generation_request(): lc: (%i, %i, %i)",
+					lc.getX(), lc.getY(), lc.getZ());
+			log_t(MODULE, "on_generation_request(): uc: (%i, %i, %i)",
+					uc.getX(), uc.getY(), uc.getZ());
+
+			interface::v3f spread(320, 320, 320);
+			interface::NoiseParams np(0, 40, spread, 0, 7, 0.55);
+
+			int w = uc.getX() - lc.getX() + 1;
+			int d = uc.getZ() - lc.getZ() + 1;
+
+			interface::Noise noise(&np, 2, w, d);
+			noise.perlinMap2D(lc.getX() + spread.X/2, lc.getZ() + spread.Z/2);
+			noise.transformNoiseMap(); // ?
+
+			size_t noise_i = 0;
 			for(int z = lc.getZ(); z <= uc.getZ(); z++){
-				for(int y = lc.getY(); y <= uc.getY(); y++){
-					for(int x = lc.getX(); x <= uc.getX(); x++){
+				for(int x = lc.getX(); x <= uc.getX(); x++){
+					double a = noise.result[noise_i];
+					noise_i++;
+					for(int y = lc.getY(); y <= uc.getY(); y++){
 						pv::Vector3DInt32 p(x, y, z);
 						pv::Vector3DInt32 cp(-112, 20, 253);
 						if((p - cp).lengthSquared() < 30*30){
@@ -241,7 +249,6 @@ struct Module: public interface::Module
 							ivoxelworld->set_voxel(p, VoxelInstance(1));
 							continue;
 						}
-						double a = interface::NoisePerlin2D(&np, x, z, 0);
 						if(y < a+5){
 							ivoxelworld->set_voxel(p, VoxelInstance(2));
 						} else if(y < a+10){
@@ -271,7 +278,8 @@ struct Module: public interface::Module
 	                    break;
 	            }
 	            y++;*/
-				double a = interface::NoisePerlin2D(&np, x, z, 0);
+	            size_t noise_i = (z-lc.getZ())*d + (x-lc.getX());
+				double a = noise.result[noise_i];
 				int y = a + 11.0;
 				if(y < lc.getY() - 5 || y > uc.getY() - 5)
 					continue;
