@@ -404,7 +404,7 @@ struct CState: public State, public interface::Server
 		extra_cxxflags += " "+info.meta.cxxflags_windows;
 		extra_ldflags += " "+info.meta.ldflags_windows;
 		// Needed for every module
-		extra_ldflags += " -lbuildat_server_core";
+		extra_ldflags += " -lbuildat_core";
 		// Always include these to make life easier
 		extra_ldflags += " -lwsock32 -lws2_32";
 #else

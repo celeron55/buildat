@@ -78,30 +78,59 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib") # Static libs
 # Security / crash protection
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstack-protector-all")
 
+set(BUILDAT_CORE_NAME buildat_core)
 set(CLIENT_EXE_NAME buildat_client)
 set(SERVER_EXE_NAME buildat_server)
-set(SERVER_CORE_NAME buildat_server_core)
+
+#
+# Core library - shared code between executables and modules
+#
+
+set(BUILDAT_CORE_SRCS
+	src/core/log.cpp
+	src/core/json.cpp
+	src/impl/fs.cpp
+	src/impl/event.cpp
+	src/impl/tcpsocket.cpp
+	src/impl/module.cpp
+	src/impl/sha1.cpp
+	src/impl/packet_stream.cpp
+	src/impl/mesh.cpp
+	src/impl/atlas.cpp
+	src/impl/voxel.cpp
+	src/impl/block.cpp
+	src/impl/noise.cpp
+	src/impl/voxel_volume.cpp
+	src/impl/compress.cpp
+)
+if(WIN32)
+	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/windows/file_watch.cpp)
+	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/windows/process.cpp)
+else()
+	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/linux/file_watch.cpp)
+	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/linux/process.cpp)
+endif()
+add_library(${BUILDAT_CORE_NAME} SHARED ${BUILDAT_CORE_SRCS})
+target_link_libraries(${BUILDAT_CORE_NAME}
+	c55lib
+	smallsha1
+	PolyVoxCore
+	zlib
+)
+if(WIN32)
+	target_link_libraries(${BUILDAT_CORE_NAME} wsock32 ws2_32)
+endif()
+
+#
+# Client
+#
 
 if(BUILD_CLIENT)
-	# Client
 	set(CLIENT_SRCS
 		src/client/main.cpp
 		src/client/state.cpp
 		src/client/app.cpp
 		src/client/config.cpp
-		src/core/log.cpp
-		src/core/json.cpp
-		src/impl/fs.cpp
-		src/impl/tcpsocket.cpp
-		src/impl/sha1.cpp
-		src/impl/packet_stream.cpp
-		src/impl/mesh.cpp
-		src/impl/atlas.cpp
-		src/impl/voxel.cpp
-		src/impl/block.cpp
-		src/impl/noise.cpp
-		src/impl/voxel_volume.cpp
-		src/impl/compress.cpp
 		src/lua_bindings/util.cpp
 		src/lua_bindings/init.cpp
 		src/lua_bindings/misc.cpp
@@ -114,6 +143,7 @@ if(BUILD_CLIENT)
 	add_executable(${CLIENT_EXE_NAME} ${CLIENT_SRCS})
 
 	target_link_libraries(${CLIENT_EXE_NAME}
+		${BUILDAT_CORE_NAME}
 		c55lib
 		smallsha1
 		PolyVoxCore
@@ -133,44 +163,11 @@ if(BUILD_CLIENT)
 	endif()
 endif(BUILD_CLIENT)
 
-if(BUILD_SERVER)
-	# Server core library - shared code between executable and modules
-	set(SERVER_CORE_SRCS
-		src/core/log.cpp
-		src/core/json.cpp
-		src/impl/fs.cpp
-		src/impl/event.cpp
-		src/impl/tcpsocket.cpp
-		src/impl/module.cpp
-		src/impl/sha1.cpp
-		src/impl/packet_stream.cpp
-		src/impl/mesh.cpp
-		src/impl/atlas.cpp
-		src/impl/voxel.cpp
-		src/impl/block.cpp
-		src/impl/noise.cpp
-		src/impl/voxel_volume.cpp
-		src/impl/compress.cpp
-	)
-	if(WIN32)
-		set(SERVER_CORE_SRCS ${SERVER_CORE_SRCS} src/impl/windows/file_watch.cpp)
-		set(SERVER_CORE_SRCS ${SERVER_CORE_SRCS} src/impl/windows/process.cpp)
-	else()
-		set(SERVER_CORE_SRCS ${SERVER_CORE_SRCS} src/impl/linux/file_watch.cpp)
-		set(SERVER_CORE_SRCS ${SERVER_CORE_SRCS} src/impl/linux/process.cpp)
-	endif()
-	add_library(${SERVER_CORE_NAME} SHARED ${SERVER_CORE_SRCS})
-	target_link_libraries(${SERVER_CORE_NAME}
-		c55lib
-		smallsha1
-		PolyVoxCore
-		zlib
-	)
-	if(WIN32)
-		target_link_libraries(${SERVER_CORE_NAME} wsock32 ws2_32)
-	endif()
+#
+# Server
+#
 
-	# Server
+if(BUILD_SERVER)
 	set(SERVER_SRCS
 		src/server/main.cpp
 		src/server/state.cpp
@@ -180,7 +177,7 @@ if(BUILD_SERVER)
 	add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
 
 	target_link_libraries(${SERVER_EXE_NAME}
-		${SERVER_CORE_NAME}
+		${BUILDAT_CORE_NAME}
 		c55lib
 		smallsha1
 		${ABSOLUTE_PATH_LIBS}
@@ -211,6 +208,8 @@ if(WIN32)
 	get_filename_component(COMPILER_USR_PATH "${COMPILER_BIN_PATH}" DIRECTORY)
 	message(STATUS "COMPILER_USR_PATH: ${COMPILER_USR_PATH}")
 
+	install(TARGETS ${BUILDAT_CORE_NAME} DESTINATION "${DST_BIN}")
+
 	if(BUILD_CLIENT)
 		install(TARGETS ${CLIENT_EXE_NAME} DESTINATION "${DST_BIN}")
 		install(DIRECTORY "${CMAKE_SOURCE_DIR}/client" DESTINATION "${DST_SHARE}")
@@ -225,7 +224,6 @@ if(WIN32)
 
 	if(BUILD_SERVER)
 		install(TARGETS ${SERVER_EXE_NAME} DESTINATION "${DST_BIN}")
-		install(TARGETS ${SERVER_CORE_NAME} DESTINATION "${DST_BIN}")
 		install(DIRECTORY "${CMAKE_SOURCE_DIR}/builtin" DESTINATION "${DST_SHARE}")
 		install(DIRECTORY "${CMAKE_SOURCE_DIR}/games" DESTINATION "${DST_SHARE}")
 		install(DIRECTORY "${CMAKE_SOURCE_DIR}/src" DESTINATION "${DST_SHARE}")
