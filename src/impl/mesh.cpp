@@ -558,8 +558,6 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 		const sm_<uint, TemporaryGeometry> &temp_geoms,
 		TextureAtlasRegistry *atlas_reg)
 {
-	// Generate CustomGeometry from TemporaryGeometry
-
 	ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 
 	cg->Clear();
@@ -605,11 +603,8 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 	set_voxel_geometry(cg, context, temp_geoms, atlas_reg);
 }
 
-// Set custom geometry from voxel volume, using a voxel registry
-// Volume should be padded by one voxel on each edge
-void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
-		pv::RawVolume<VoxelInstance> &volume_orig,
-		VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg)
+up_<pv::RawVolume<VoxelInstance>> generate_voxel_lod_volume(
+		int lod, pv::RawVolume<VoxelInstance> &volume_orig)
 {
 	pv::Region region_orig = volume_orig.getEnclosingRegion();
 	auto &lc_orig = region_orig.getLowerCorner();
@@ -620,10 +615,11 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 	auto &lc = region.getLowerCorner();
 	auto &uc = region.getUpperCorner();
 
-	pv::RawVolume<VoxelInstance> volume(region);
-	for(int x = lc.getX(); x <= uc.getX(); x++){
+	up_<pv::RawVolume<VoxelInstance>> volume(
+			new pv::RawVolume<VoxelInstance>(region));
+	for(int z = lc.getZ(); z <= uc.getZ(); z++){
 		for(int y = lc.getY(); y <= uc.getY(); y++){
-			for(int z = lc.getZ(); z <= uc.getZ(); z++){
+			for(int x = lc.getX(); x <= uc.getX(); x++){
 				VoxelInstance v_orig(interface::VOXELTYPEID_UNDEFINED);
 				for(int x1 = 0; x1 < lod; x1++){
 					for(int y1 = 0; y1 < lod; y1++){
@@ -645,30 +641,32 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 						}
 					}
 				}
-				/*const interface::CachedVoxelDefinition *def =
-				        voxel_reg->get_cached(v_orig);*/
-				volume.setVoxelAt(x, y, z, v_orig);
+				volume->setVoxelAt(x, y, z, v_orig);
 			}
 		}
 	}
+	return volume;
+}
 
-	preload_textures(volume, voxel_reg, atlas_reg);
-
+// Can be called from any thread
+void generate_voxel_lod_geometry(int lod,
+		sm_<uint, TemporaryGeometry> &result,
+		pv::RawVolume<VoxelInstance> &lod_volume,
+		VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg)
+{
 	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
 	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
 			IsQuadNeededByRegistry<VoxelInstance>>
-	surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh, iqn);
+	surfaceExtractor(&lod_volume, lod_volume.getEnclosingRegion(), &pv_mesh, iqn);
 	surfaceExtractor.execute();
 
 	const sv_<uint32_t> &pv_indices = pv_mesh.getIndices();
 	const sv_<pv::PositionMaterialNormal> &pv_vertices = pv_mesh.getVertices();
 
-	sm_<uint, TemporaryGeometry> temp_geoms;
-
-	int w = volume_orig.getWidth() - 2;
-	int h = volume_orig.getHeight() - 2;
-	int d = volume_orig.getDepth() - 2;
+	int w = (lod_volume.getWidth() - 2) * lod - 2;
+	int h = (lod_volume.getHeight() - 2) * lod - 2;
+	int d = (lod_volume.getDepth() - 2) * lod - 2;
 
 	// Handle vertices face-by-face in order to copy indices at the same time
 	for(size_t pv_face_i = 0; pv_face_i < pv_vertices.size() / 4; pv_face_i++){
@@ -710,7 +708,7 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 			throw Exception("No atlas segment cache for voxel "+itos(voxel_id0)+
 						  " face "+itos(face_id));
 		// Get or create the appropriate temporary geometry for this atlas
-		TemporaryGeometry &tg = temp_geoms[seg_ref.atlas_id];
+		TemporaryGeometry &tg = result[seg_ref.atlas_id];
 		if(tg.vertex_data.Empty()){
 			tg.atlas_id = seg_ref.atlas_id;
 			// It can't get larger than this and will only exist temporarily in
@@ -756,9 +754,12 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 			tg_vert.normal_.z_ = 0;
 		}
 	}
+}
 
-	// Generate CustomGeometry from TemporaryGeometry
-
+void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
+		const sm_<uint, TemporaryGeometry> &temp_geoms,
+		TextureAtlasRegistry *atlas_reg)
+{
 	ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 
 	cg->Clear();
@@ -795,6 +796,24 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 	cg->Commit();
 }
 
+// Set custom geometry from voxel volume, using a voxel registry
+// Volume should be padded by one voxel on each edge
+void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
+		pv::RawVolume<VoxelInstance> &volume_orig,
+		VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg)
+{
+	up_<pv::RawVolume<VoxelInstance>> lod_volume = generate_voxel_lod_volume(
+			lod, volume_orig);
+
+	preload_textures(*lod_volume, voxel_reg, atlas_reg);
+
+	sm_<uint, TemporaryGeometry> temp_geoms;
+	generate_voxel_lod_geometry(
+			lod, temp_geoms, *lod_volume, voxel_reg, atlas_reg);
+
+	set_voxel_lod_geometry(lod, cg, context, temp_geoms, atlas_reg);
+}
+
 void generate_voxel_physics_boxes(
 		sv_<TemporaryBox> &result_boxes,
 		pv::RawVolume<VoxelInstance> &volume_orig,
@@ -810,9 +829,9 @@ void generate_voxel_physics_boxes(
 
 	// Create a new volume which only holds the solidity of the voxels
 	pv::RawVolume<uint8_t> volume(region);
-	for(int x = lc.getX(); x <= uc.getX(); x++){
+	for(int z = lc.getZ(); z <= uc.getZ(); z++){
 		for(int y = lc.getY(); y <= uc.getY(); y++){
-			for(int z = lc.getZ(); z <= uc.getZ(); z++){
+			for(int x = lc.getX(); x <= uc.getX(); x++){
 				VoxelInstance v_orig = volume_orig.getVoxelAt(x, y, z);
 				const interface::CachedVoxelDefinition *def =
 						voxel_reg->get_cached(v_orig);

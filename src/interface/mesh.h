@@ -87,7 +87,22 @@ namespace interface
 				pv::RawVolume<VoxelInstance> &volume,
 				VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg);
 
-		// lod=1 -> 1:1, lod=3 -> 1:3
+		// Voxel LOD geometry generation (lod=1 -> 1:1, lod=3 -> 1:3)
+
+		// Can be called from any thread
+		up_<pv::RawVolume<VoxelInstance>> generate_voxel_lod_volume(
+				int lod, pv::RawVolume<VoxelInstance> &volume_orig);
+
+		// Can be called from any thread
+		void generate_voxel_lod_geometry(int lod,
+				sm_<uint, TemporaryGeometry> &result,
+				pv::RawVolume<VoxelInstance> &lod_volume,
+				VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg);
+
+		void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
+				const sm_<uint, TemporaryGeometry> &temp_geoms,
+				TextureAtlasRegistry *atlas_reg);
+
 		void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 				pv::RawVolume<VoxelInstance> &volume_orig,
 				VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg);
