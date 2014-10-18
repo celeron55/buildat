@@ -5,6 +5,7 @@
 #include "client/app.h"
 #include "interface/mesh.h"
 #include "interface/voxel_volume.h"
+#include "interface/worker_thread.h"
 #include <tolua++.h>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
@@ -128,6 +129,48 @@ static int l_set_8bit_voxel_geometry(lua_State *L)
 	return 0;
 }
 
+struct SetVoxelGeometryTask: public interface::worker_thread::Task
+{
+	Node *node;
+	ss_ data;
+	interface::VoxelRegistry *voxel_reg;
+	interface::TextureAtlasRegistry *atlas_reg;
+
+	up_<pv::RawVolume<VoxelInstance>> volume;
+	sm_<uint, interface::mesh::TemporaryGeometry> temp_geoms;
+
+	SetVoxelGeometryTask(Node *node, const ss_ &data,
+			interface::VoxelRegistry *voxel_reg,
+			interface::TextureAtlasRegistry *atlas_reg):
+		node(node), data(data), voxel_reg(voxel_reg), atlas_reg(atlas_reg)
+	{
+	}
+	// Called repeatedly from main thread until returns true
+	bool pre()
+	{
+		// NOTE: Could be split in two calls
+		volume = interface::deserialize_volume(data);
+		interface::mesh::preload_textures(*volume, voxel_reg, atlas_reg);
+		return true;
+	}
+	// Called repeatedly from worker thread until returns true
+	bool thread()
+	{
+		generate_voxel_geometry(temp_geoms, *volume, voxel_reg, atlas_reg);
+		return true;
+	}
+	// Called repeatedly from main thread until returns true
+	bool post()
+	{
+		Context *context = node->GetContext();
+		CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>();
+		interface::mesh::set_voxel_geometry(cg, context, temp_geoms, atlas_reg);
+		cg->SetOccluder(true);
+		cg->SetCastShadows(true);
+		return true;
+	}
+};
+
 // set_voxel_geometry(node, buffer: VectorBuffer)
 static int l_set_voxel_geometry(lua_State *L)
 {
@@ -148,24 +191,71 @@ static int l_set_voxel_geometry(lua_State *L)
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
 	lua_pop(L, 1);
-	Context *context = buildat_app->get_scene()->GetContext();
 	auto *voxel_reg = buildat_app->get_voxel_registry();
 	auto *atlas_reg = buildat_app->get_atlas_registry();
 
-	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>();
+	up_<SetVoxelGeometryTask> task(new SetVoxelGeometryTask(
+			node, data, voxel_reg, atlas_reg
+	));
 
-	up_<pv::RawVolume<VoxelInstance>> volume = interface::deserialize_volume(data);
+	auto *thread_pool = buildat_app->get_thread_pool();
 
-	interface::mesh::set_voxel_geometry(cg, context, *volume, voxel_reg, atlas_reg);
-
-	// Maybe appropriate
-	cg->SetOccluder(true);
-
-	// TODO: Don't do this here; allow the caller to do this
-	cg->SetCastShadows(true);
+	thread_pool->add_task(std::move(task));
 
 	return 0;
 }
+
+struct SetVoxelLodGeometryTask: public interface::worker_thread::Task
+{
+	int lod;
+	Node *node;
+	ss_ data;
+	interface::VoxelRegistry *voxel_reg;
+	interface::TextureAtlasRegistry *atlas_reg;
+
+	up_<pv::RawVolume<VoxelInstance>> lod_volume;
+	sm_<uint, interface::mesh::TemporaryGeometry> temp_geoms;
+
+	SetVoxelLodGeometryTask(int lod, Node *node, const ss_ &data,
+			interface::VoxelRegistry *voxel_reg,
+			interface::TextureAtlasRegistry *atlas_reg):
+		lod(lod), node(node), data(data),
+		voxel_reg(voxel_reg), atlas_reg(atlas_reg)
+	{
+	}
+	// Called repeatedly from main thread until returns true
+	bool pre()
+	{
+		// NOTE: Could be split in three calls
+		up_<pv::RawVolume<VoxelInstance>> volume_orig =
+				interface::deserialize_volume(data);
+		lod_volume = interface::mesh::generate_voxel_lod_volume(
+				lod, *volume_orig);
+		interface::mesh::preload_textures(*lod_volume, voxel_reg, atlas_reg);
+		return true;
+	}
+	// Called repeatedly from worker thread until returns true
+	bool thread()
+	{
+		generate_voxel_lod_geometry(
+				lod, temp_geoms, *lod_volume, voxel_reg, atlas_reg);
+		return true;
+	}
+	// Called repeatedly from main thread until returns true
+	bool post()
+	{
+		Context *context = node->GetContext();
+		CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>();
+		interface::mesh::set_voxel_lod_geometry(
+				lod, cg, context, temp_geoms, atlas_reg);
+		cg->SetOccluder(true);
+		if(lod <= interface::MAX_LOD_WITH_SHADOWS)
+			cg->SetCastShadows(true);
+		else
+			cg->SetCastShadows(false);
+		return true;
+	}
+};
 
 // set_voxel_lod_geometry(lod: number, node: Node, buffer: VectorBuffer)
 static int l_set_voxel_lod_geometry(lua_State *L)
@@ -189,24 +279,16 @@ static int l_set_voxel_lod_geometry(lua_State *L)
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
 	lua_pop(L, 1);
-	Context *context = buildat_app->get_scene()->GetContext();
 	auto *voxel_reg = buildat_app->get_voxel_registry();
 	auto *atlas_reg = buildat_app->get_atlas_registry();
 
-	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>();
+	up_<SetVoxelLodGeometryTask> task(new SetVoxelLodGeometryTask(
+			lod, node, data, voxel_reg, atlas_reg
+	));
 
-	up_<pv::RawVolume<VoxelInstance>> volume = interface::deserialize_volume(data);
+	auto *thread_pool = buildat_app->get_thread_pool();
 
-	interface::mesh::set_voxel_lod_geometry(lod, cg, context, *volume,
-			voxel_reg, atlas_reg);
-
-	// Maybe appropriate
-	cg->SetOccluder(true);
-
-	if(lod <= interface::MAX_LOD_WITH_SHADOWS)
-		cg->SetCastShadows(true);
-	else
-		cg->SetCastShadows(false);
+	thread_pool->add_task(std::move(task));
 
 	return 0;
 }

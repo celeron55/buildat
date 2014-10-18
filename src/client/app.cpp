@@ -8,6 +8,7 @@
 #include "lua_bindings/util.h"
 #include "interface/fs.h"
 #include "interface/voxel.h"
+#include "interface/worker_thread.h"
 #include <c55/getopt.h>
 #include <c55/os.h>
 #pragma GCC diagnostic push
@@ -108,16 +109,21 @@ struct CApp: public App, public magic::Application
 	sp_<interface::VoxelRegistry> m_voxel_reg;
 	//sp_<interface::BlockRegistry> m_block_reg;
 
+	sp_<interface::worker_thread::ThreadPool> m_thread_pool;
+
 	CApp(magic::Context *context, const Options &options):
 		magic::Application(context),
 		m_script(nullptr),
 		L(nullptr),
 		m_last_script_tick_us(get_timeofday_us()),
-		m_options(options)
+		m_options(options),
+		m_thread_pool(interface::worker_thread::createThreadPool())
 	{
 		log_v(MODULE, "constructor()");
 		log_v(MODULE, "window size: %ix%i",
 				m_options.graphics.window_w, m_options.graphics.window_h);
+
+		m_thread_pool->start(4); // TODO: Configurable
 
 		sv_<ss_> resource_paths = {
 			g_client_config.cache_path+"/tmp",
@@ -404,6 +410,11 @@ struct CApp: public App, public magic::Application
 		return m_atlas_reg.get();
 	}
 
+	interface::worker_thread::ThreadPool* get_thread_pool()
+	{
+		return m_thread_pool.get();
+	}
+
 	// Non-public methods
 
 	void Start()
@@ -523,6 +534,8 @@ struct CApp: public App, public magic::Application
 			shutdown();
 		if(m_state)
 			m_state->update();
+
+		m_thread_pool->run_post();
 	}
 
 	void on_post_render_update(

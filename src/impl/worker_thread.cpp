@@ -26,6 +26,12 @@ struct CThreadPool: public ThreadPool
 
 	//std::deque<up_<Task>> m_pre_tasks; // Push back, pop front
 
+	~CThreadPool()
+	{
+		request_stop();
+		join();
+	}
+
 	struct Thread {
 		bool stop_requested = true;
 		bool running = false;
@@ -126,8 +132,8 @@ struct CThreadPool: public ThreadPool
 			interface::MutexScope ms(m_mutex);
 			output_queue.swap(m_output_queue);
 		}
+		// TODO: Limit task->post() execution time per frame
 		for(auto &task : output_queue){
-			// TODO: Limit task->post() execution time per frame
 			while(!task->post());
 		}
 		// Done with tasks; discard them

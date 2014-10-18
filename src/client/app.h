@@ -14,6 +14,10 @@ namespace client {
 namespace interface {
 	struct VoxelRegistry;
 	struct TextureAtlasRegistry;
+
+	namespace worker_thread {
+		struct ThreadPool;
+	};
 }
 
 namespace app
@@ -64,6 +68,7 @@ namespace app
 		virtual Urho3D::Scene* get_scene() = 0;
 		virtual interface::VoxelRegistry* get_voxel_registry() = 0;
 		virtual interface::TextureAtlasRegistry* get_atlas_registry() = 0;
+		virtual interface::worker_thread::ThreadPool* get_thread_pool() = 0;
 	};
 
 	App* createApp(Urho3D::Context *context, const Options &options = Options());
