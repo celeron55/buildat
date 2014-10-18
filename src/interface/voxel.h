@@ -92,7 +92,11 @@ namespace interface
 		virtual const CachedVoxelDefinition* get_cached(const VoxelInstance &v,
 				TextureAtlasRegistry *atlas_reg = nullptr) = 0;
 
-		// TODO: Network serialization
+		virtual void serialize(std::ostream &os) = 0;
+		virtual void deserialize(std::istream &is) = 0;
+		virtual ss_  serialize() = 0;
+		virtual void deserialize(const ss_ &s) = 0;
+
 		// TODO: Ability to track changes (just some kind of set_dirty()?)
 	};
 

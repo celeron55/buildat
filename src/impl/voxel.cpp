@@ -176,8 +176,28 @@ struct CVoxelRegistry: public VoxelRegistry
 		// Caller sets cache.textures_valid = true
 	}
 
-	// TODO: Network serialization
-	// TODO: Ability to track changes (just some kind of set_dirty()?)
+	void serialize(std::ostream &os)
+	{
+		// TODO
+	}
+
+	void deserialize(std::istream &is)
+	{
+		// TODO
+	}
+
+	ss_ serialize()
+	{
+		std::ostringstream os(std::ios::binary);
+		serialize(os);
+		return os.str();
+	}
+
+	void deserialize(const ss_ &s)
+	{
+		std::istringstream is(s, std::ios::binary);
+		deserialize(is);
+	}
 };
 
 VoxelRegistry* createVoxelRegistry()

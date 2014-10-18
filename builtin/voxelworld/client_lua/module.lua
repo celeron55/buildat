@@ -37,6 +37,9 @@ local camera_last_dir = camera_dir
 
 local end_of_update_processing_us = 0
 
+local voxel_reg = buildat.createVoxelRegistry()
+voxel_reg:deserialize("foo")
+
 M.chunk_size_voxels = nil
 M.section_size_chunks = nil
 M.section_size_voxels = nil

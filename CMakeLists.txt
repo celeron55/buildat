@@ -155,6 +155,7 @@ if(BUILD_CLIENT)
 		src/lua_bindings/misc.cpp
 		src/lua_bindings/cereal.cpp
 		src/lua_bindings/voxel.cpp
+		src/lua_bindings/mesh.cpp
 		src/lua_bindings/spatial_update_queue.cpp
 		src/lua_bindings/misc_urho3d.cpp
 	)
@@ -167,6 +168,7 @@ if(BUILD_CLIENT)
 		smallsha1
 		PolyVoxCore
 		zlib
+		luabind
 		${ABSOLUTE_PATH_LIBS}
 		${LINK_LIBS_ONLY}
 		${URHO3D_HOME}/Build/ThirdParty/toluapp/src/lib/libtoluapp.a
