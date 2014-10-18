@@ -214,13 +214,13 @@ struct Module: public interface::Module
 			log_t(MODULE, "on_generation_request(): uc: (%i, %i, %i)",
 					uc.getX(), uc.getY(), uc.getZ());
 
-			interface::v3f spread(320, 320, 320);
+			interface::v3f spread(160, 160, 160);
 			interface::NoiseParams np(0, 40, spread, 0, 7, 0.55);
 
 			int w = uc.getX() - lc.getX() + 1;
 			int d = uc.getZ() - lc.getZ() + 1;
 
-			interface::Noise noise(&np, 2, w, d);
+			interface::Noise noise(&np, 3, w, d);
 			noise.perlinMap2D(lc.getX() + spread.X/2, lc.getZ() + spread.Z/2);
 			noise.transformNoiseMap(); // ?
 
