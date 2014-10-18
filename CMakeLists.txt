@@ -102,6 +102,7 @@ set(BUILDAT_CORE_SRCS
 	src/impl/noise.cpp
 	src/impl/voxel_volume.cpp
 	src/impl/compress.cpp
+	src/impl/worker_thread.cpp
 )
 if(WIN32)
 	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/windows/file_watch.cpp)
