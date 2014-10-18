@@ -131,6 +131,7 @@ struct CThreadPool: public ThreadPool
 		int64_t t1 = get_timeofday_us();
 		size_t queue_size = 0;
 		size_t post_count = 0;
+		bool last_was_partly_procesed = false;
 		for(;;){
 			// Pop an output task
 			up_<Task> task;
@@ -145,31 +146,38 @@ struct CThreadPool: public ThreadPool
 			if(!task)
 				break;
 			// run post() until too long has passed
+			bool overtime = false;
 			bool done = false;
 			for(;;){
 				post_count++;
 				done = task->post();
-				// If done, take next output task
-				if(done)
-					break;
 				int64_t t2 = get_timeofday_us();
 				int64_t max_t = 2000;
 				if(queue_size > 4)
 					max_t += (queue_size - 4) * 5000;
-				if(t2 - t1 >= max_t)
+				if(t2 - t1 >= max_t){
+					overtime = true;
+					break;
+				}
+				// If done, take next output task (after calculating overtime)
+				if(done)
 					break;
 			}
-			// If still not done, push task to back to front of queue and stop
-			// processing
+			// If still not done, push task to back to front of queue
 			if(!done){
 				interface::MutexScope ms(m_mutex);
 				m_output_queue.push_front(std::move(task));
+				last_was_partly_procesed = true;
+			}
+			// If overtime, stop processing
+			if(overtime){
 				break;
 			}
 		}
 		/*int64_t t2 = get_timeofday_us();
-		log_v(MODULE, "output post(): %ius (%zu calls; queue size: %zu)",
-				(int)(t2 - t1), post_count, queue_size);*/
+		log_v(MODULE, "output post(): %ius (%zu calls; queue size: %zu%s)",
+				(int)(t2 - t1), post_count, queue_size,
+				(last_was_partly_procesed?"; last was partly processed":""));*/
 	}
 };
 
