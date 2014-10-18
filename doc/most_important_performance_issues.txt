@@ -1,0 +1,26 @@
+Buildat: Most important performance issues
+==========================================
+
+Issues are ordered by descending importance.
+
+1. Applying the physics box generation result for 32x32x32 voxels into the
+physics world is too slow. It is currently split to only two parts; the creation
+of the Urho3D::CollisionShapes and constructing the physics stuff in Bullet.
+Both can take up to 20us in worst practical case, and cannot be threaded.
+
+This can probably be fixed by splitting the resulting CollisionShapes into
+multiple child nodes (assuming the physics system handles that appropriately).
+
+Measured on Dell Precision M6800, release build, 2014-10-18.
+
+2. Creating the CustomGeometry for a 32x32x32 node is too slow. It can take up
+to 5000us in the worst practical case and cannot be threaded. It likely cannot
+be split into multiple steps (measuring needed).
+
+It is definitely solvable by splitting the node to multiple subvolumes and
+creating child nodes out of them.
+
+It might not be worth solving because the time is relatively low.
+
+Measured on Dell Precision M6800, release build, 2014-10-18.
+

@@ -50,6 +50,7 @@ Buildat TODO
 	  but less automatic and most people don't know how to get rid of window
 	  borders
 - A way for module reloading to interrupt world generation
-- Maintain a global budget of background processing per frame so that
-  a long woxelworld:update and ThreadPool::run_post() will not be run on the
-  same frame
+- Maintain a global budget of background processing per frame so that a long
+  woxelworld:update and ThreadPool::run_post() will not be run on the same frame
+	- Pre (lod) geometry can take up to 2500us, and post can take 7200us, which
+	  means this will have a visible effect.
