@@ -42,3 +42,10 @@ Buildat TODO
 - LuaVoxelRegistry
 - Show sandbox_test status at corner and don't show dialog unless something is
   found
+- Threaded geometry generation
+- Local split-screen multiplayer: Two options:
+	- One Urho3D instance with systems in place to manage two UIs and things in
+	  the same instance (may be impossible)
+	- Allow connecting the input systems of multiple windows, which is simple
+	  but less automatic and most people don't know how to get rid of window
+	  borders
