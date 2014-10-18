@@ -36,6 +36,7 @@ using interface::VoxelInstance;
 using namespace Urho3D;
 
 namespace interface {
+namespace mesh {
 
 // Create a model from a string; eg. (2, 2, 2, "11101111")
 Model* create_simple_voxel_model(Context *context,
@@ -942,5 +943,6 @@ z_plane_does_not_fit:
 	}
 }
 
+} // namespace mesh
 } // namespace interface
 // vim: set noet ts=4 sw=4:

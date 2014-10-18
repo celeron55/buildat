@@ -146,7 +146,7 @@ struct Module: public interface::Module
 
 				// Load the same model in here and give it to the physics
 				// subsystem so that it can be collided to
-				SharedPtr<Model> model(interface::
+				SharedPtr<Model> model(interface::mesh::
 						create_8bit_voxel_physics_model(context, w, h, d, data,
 						voxel_reg));
 

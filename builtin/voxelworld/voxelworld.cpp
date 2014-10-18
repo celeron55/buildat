@@ -532,7 +532,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 					return;
 				}
 				// Update collision shape
-				interface::set_voxel_physics_boxes(n, context, *volume,
+				interface::mesh::set_voxel_physics_boxes(n, context, *volume,
 						m_voxel_reg.get());
 			}
 			m_nodes_needing_physics_update.clear();

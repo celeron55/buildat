@@ -73,7 +73,7 @@ static int l_set_simple_voxel_model(lua_State *L)
 	Context *context = buildat_app->get_scene()->GetContext();
 
 	SharedPtr<Model> fromScratchModel(
-			interface::create_simple_voxel_model(context, w, h, d, data));
+			interface::mesh::create_simple_voxel_model(context, w, h, d, data));
 
 	StaticModel *object = node->GetOrCreateComponent<StaticModel>();
 	object->SetModel(fromScratchModel);
@@ -116,7 +116,7 @@ static int l_set_8bit_voxel_geometry(lua_State *L)
 
 	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>();
 
-	interface::set_8bit_voxel_geometry(cg, context, w, h, d, data,
+	interface::mesh::set_8bit_voxel_geometry(cg, context, w, h, d, data,
 			voxel_reg, atlas_reg);
 
 	// Maybe appropriate
@@ -156,7 +156,7 @@ static int l_set_voxel_geometry(lua_State *L)
 
 	up_<pv::RawVolume<VoxelInstance>> volume = interface::deserialize_volume(data);
 
-	interface::set_voxel_geometry(cg, context, *volume, voxel_reg, atlas_reg);
+	interface::mesh::set_voxel_geometry(cg, context, *volume, voxel_reg, atlas_reg);
 
 	// Maybe appropriate
 	cg->SetOccluder(true);
@@ -197,7 +197,7 @@ static int l_set_voxel_lod_geometry(lua_State *L)
 
 	up_<pv::RawVolume<VoxelInstance>> volume = interface::deserialize_volume(data);
 
-	interface::set_voxel_lod_geometry(lod, cg, context, *volume,
+	interface::mesh::set_voxel_lod_geometry(lod, cg, context, *volume,
 			voxel_reg, atlas_reg);
 
 	// Maybe appropriate
@@ -255,7 +255,7 @@ static int l_set_voxel_physics_boxes(lua_State *L)
 	up_<pv::RawVolume<VoxelInstance>> volume = interface::deserialize_volume(data);
 
 	node->GetOrCreateComponent<RigidBody>(LOCAL);
-	interface::set_voxel_physics_boxes(node, context, *volume, voxel_reg);
+	interface::mesh::set_voxel_physics_boxes(node, context, *volume, voxel_reg);
 
 	return 0;
 }
