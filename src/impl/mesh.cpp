@@ -936,7 +936,7 @@ z_plane_does_not_fit:
 }
 
 void set_voxel_physics_boxes(Node *node, Context *context,
-		const sv_<TemporaryBox> &boxes)
+		const sv_<TemporaryBox> &boxes, bool do_update_mass)
 {
 	// Get previous shapes
 	PODVector<CollisionShape*> previous_shapes;
@@ -967,7 +967,7 @@ void set_voxel_physics_boxes(Node *node, Context *context,
 		node->RemoveComponent(previous_shapes[i]);
 	}
 
-	if(body){
+	if(body && do_update_mass){
 		// Call this to cause the private AddBodyToWorld() to be called, which
 		// re-creates the internal btRigidBody and also calls UpdateMass()
 		body->OnSetEnabled();
@@ -981,7 +981,7 @@ void set_voxel_physics_boxes(Node *node, Context *context,
 	sv_<TemporaryBox> result_boxes;
 	generate_voxel_physics_boxes(result_boxes, volume, voxel_reg);
 
-	set_voxel_physics_boxes(node, context, result_boxes);
+	set_voxel_physics_boxes(node, context, result_boxes, true);
 }
 
 } // namespace mesh

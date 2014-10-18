@@ -122,7 +122,7 @@ namespace interface
 				VoxelRegistry *voxel_reg);
 
 		void set_voxel_physics_boxes(Node *node, Context *context,
-				const sv_<TemporaryBox> &boxes);
+				const sv_<TemporaryBox> &boxes, bool do_update_mass);
 
 		void set_voxel_physics_boxes(Node *node, Context *context,
 				pv::RawVolume<VoxelInstance> &volume,

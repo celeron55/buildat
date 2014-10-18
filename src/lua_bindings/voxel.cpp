@@ -144,13 +144,15 @@ struct SetVoxelGeometryTask: public interface::worker_thread::Task
 			interface::TextureAtlasRegistry *atlas_reg):
 		node(node), data(data), voxel_reg(voxel_reg), atlas_reg(atlas_reg)
 	{
+		// NOTE: Do the pre-processing here so that the calling code can
+		//       meaasure how long its execution takes
+		// NOTE: Could be split in two calls
+		volume = interface::deserialize_volume(data);
+		interface::mesh::preload_textures(*volume, voxel_reg, atlas_reg);
 	}
 	// Called repeatedly from main thread until returns true
 	bool pre()
 	{
-		// NOTE: Could be split in two calls
-		volume = interface::deserialize_volume(data);
-		interface::mesh::preload_textures(*volume, voxel_reg, atlas_reg);
 		return true;
 	}
 	// Called repeatedly from worker thread until returns true
@@ -222,16 +224,18 @@ struct SetVoxelLodGeometryTask: public interface::worker_thread::Task
 		lod(lod), node(node), data(data),
 		voxel_reg(voxel_reg), atlas_reg(atlas_reg)
 	{
-	}
-	// Called repeatedly from main thread until returns true
-	bool pre()
-	{
+		// NOTE: Do the pre-processing here so that the calling code can
+		//       meaasure how long its execution takes
 		// NOTE: Could be split in three calls
 		up_<pv::RawVolume<VoxelInstance>> volume_orig =
 				interface::deserialize_volume(data);
 		lod_volume = interface::mesh::generate_voxel_lod_volume(
 				lod, *volume_orig);
 		interface::mesh::preload_textures(*lod_volume, voxel_reg, atlas_reg);
+	}
+	// Called repeatedly from main thread until returns true
+	bool pre()
+	{
 		return true;
 	}
 	// Called repeatedly from worker thread until returns true
@@ -311,6 +315,60 @@ static int l_clear_voxel_geometry(lua_State *L)
 	return 0;
 }
 
+struct SetPhysicsBoxesTask: public interface::worker_thread::Task
+{
+	Node *node;
+	ss_ data;
+	interface::VoxelRegistry *voxel_reg;
+
+	up_<pv::RawVolume<VoxelInstance>> volume;
+	sv_<interface::mesh::TemporaryBox> result_boxes;
+
+	SetPhysicsBoxesTask(Node *node, const ss_ &data,
+			interface::VoxelRegistry *voxel_reg):
+		node(node), data(data), voxel_reg(voxel_reg)
+	{
+		// NOTE: Do the pre-processing here so that the calling code can
+		//       meaasure how long its execution takes
+		// NOTE: Could be split in two calls
+		volume = interface::deserialize_volume(data);
+	}
+	// Called repeatedly from main thread until returns true
+	bool pre()
+	{
+		return true;
+	}
+	// Called repeatedly from worker thread until returns true
+	bool thread()
+	{
+		interface::mesh::generate_voxel_physics_boxes(
+				result_boxes, *volume, voxel_reg);
+		return true;
+	}
+	// Called repeatedly from main thread until returns true
+	int post_step = 1;
+	bool post()
+	{
+		Context *context = node->GetContext();
+		switch(post_step){
+		case 1:
+			node->GetOrCreateComponent<RigidBody>(LOCAL);
+			break;
+		case 2:
+			interface::mesh::set_voxel_physics_boxes(
+					node, context, result_boxes, false);
+			break;
+		case 3: {
+			RigidBody *body = node->GetComponent<RigidBody>();
+			if(body)
+				body->OnSetEnabled();
+			return true; }
+		}
+		post_step++;
+		return false;
+	}
+};
+
 // set_voxel_physics_boxes(node, buffer: VectorBuffer)
 static int l_set_voxel_physics_boxes(lua_State *L)
 {
@@ -331,13 +389,15 @@ static int l_set_voxel_physics_boxes(lua_State *L)
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
 	lua_pop(L, 1);
-	Context *context = buildat_app->get_scene()->GetContext();
 	auto *voxel_reg = buildat_app->get_voxel_registry();
 
-	up_<pv::RawVolume<VoxelInstance>> volume = interface::deserialize_volume(data);
+	up_<SetPhysicsBoxesTask> task(new SetPhysicsBoxesTask(
+			node, data, voxel_reg
+	));
 
-	node->GetOrCreateComponent<RigidBody>(LOCAL);
-	interface::mesh::set_voxel_physics_boxes(node, context, *volume, voxel_reg);
+	auto *thread_pool = buildat_app->get_thread_pool();
+
+	thread_pool->add_task(std::move(task));
 
 	return 0;
 }
