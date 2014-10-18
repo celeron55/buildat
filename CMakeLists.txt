@@ -27,6 +27,7 @@ include_directories("3rdparty/zlib")
 
 set(BUILD_SERVER TRUE CACHE BOOL "Build server")
 set(BUILD_CLIENT TRUE CACHE BOOL "Build client")
+set(DEBUG_LOG_TIMING FALSE CACHE BOOL "Output log messages of interesting but floody time measurements")
 
 #
 # Urho3D dependency
@@ -65,10 +66,15 @@ define_dependency_libs("Urho3D")
 # Buildat
 #
 
+if(DEBUG_LOG_TIMING)
+	set(COMMON_CXX_FLAGS "${COMMON_CXX_FLAGS} -DDEBUG_LOG_TIMING")
+endif()
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++0x -Wall")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Wno-unused-parameter")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${COMMON_CXX_FLAGS}")
 #set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -std=c++0x -g -O0 -Wall")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -std=c++0x -g -O1 -Wall")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${COMMON_CXX_FLAGS}")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin") # Executables
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib") # Shared libs
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib") # Static libs

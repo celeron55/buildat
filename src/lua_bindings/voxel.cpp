@@ -7,6 +7,7 @@
 #include "interface/voxel_volume.h"
 #include "interface/worker_thread.h"
 #include <tolua++.h>
+#include <c55/os.h>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Scene.h>
@@ -129,6 +130,27 @@ static int l_set_8bit_voxel_geometry(lua_State *L)
 	return 0;
 }
 
+#ifdef DEBUG_LOG_TIMING
+struct ScopeTimer {
+	const char *name;
+	uint64_t t0;
+	ScopeTimer(const char *name="unknown"): name(name){
+		t0 = get_timeofday_us();
+	}
+	~ScopeTimer(){
+		int d = get_timeofday_us() - t0;
+		if(d > 3000)
+			log_w(MODULE, "%ius (%s)", d, name);
+		else
+			log_v(MODULE, "%ius (%s)", d, name);
+	}
+};
+#else
+struct ScopeTimer {
+	ScopeTimer(const char *name=""){}
+};
+#endif
+
 struct SetVoxelGeometryTask: public interface::worker_thread::Task
 {
 	Node *node;
@@ -144,6 +166,7 @@ struct SetVoxelGeometryTask: public interface::worker_thread::Task
 			interface::TextureAtlasRegistry *atlas_reg):
 		node(node), data(data), voxel_reg(voxel_reg), atlas_reg(atlas_reg)
 	{
+		ScopeTimer timer("pre geometry");
 		// NOTE: Do the pre-processing here so that the calling code can
 		//       meaasure how long its execution takes
 		// NOTE: Could be split in two calls
@@ -164,6 +187,7 @@ struct SetVoxelGeometryTask: public interface::worker_thread::Task
 	// Called repeatedly from main thread until returns true
 	bool post()
 	{
+		ScopeTimer timer("post geometry");
 		Context *context = node->GetContext();
 		CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>();
 		interface::mesh::set_voxel_geometry(cg, context, temp_geoms, atlas_reg);
@@ -224,6 +248,7 @@ struct SetVoxelLodGeometryTask: public interface::worker_thread::Task
 		lod(lod), node(node), data(data),
 		voxel_reg(voxel_reg), atlas_reg(atlas_reg)
 	{
+		ScopeTimer timer("pre lod geometry");
 		// NOTE: Do the pre-processing here so that the calling code can
 		//       meaasure how long its execution takes
 		// NOTE: Could be split in three calls
@@ -248,6 +273,7 @@ struct SetVoxelLodGeometryTask: public interface::worker_thread::Task
 	// Called repeatedly from main thread until returns true
 	bool post()
 	{
+		ScopeTimer timer("post lod geometry");
 		Context *context = node->GetContext();
 		CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>();
 		interface::mesh::set_voxel_lod_geometry(
@@ -349,16 +375,34 @@ struct SetPhysicsBoxesTask: public interface::worker_thread::Task
 	int post_step = 1;
 	bool post()
 	{
+		ScopeTimer timer(
+				post_step == 1 ? "post physics 1" :
+				post_step == 2 ? "post_physics 2" :
+				post_step == 3 ? "post physics 3" :
+				"post physics");
 		Context *context = node->GetContext();
 		switch(post_step){
 		case 1:
 			node->GetOrCreateComponent<RigidBody>(LOCAL);
 			break;
 		case 2:
+#ifdef DEBUG_LOG_TIMING
+			log_v(MODULE, "num boxes: %zu", result_boxes.size());
+#endif
+			// Times on Dell Precision M6800:
+			//   0 boxes ->    30us
+			//   1 box   ->   136us
+			// 160 boxes ->  7625us (hilly forest)
+			// 259 boxes -> 18548us (hilly forest, bad case)
 			interface::mesh::set_voxel_physics_boxes(
 					node, context, result_boxes, false);
 			break;
 		case 3: {
+			// Times on Dell Precision M6800:
+			//   0 boxes ->    30us
+			//   1 box   ->    64us
+			// 160 boxes ->  8419us (hilly forest)
+			// 259 boxes -> 15704us (hilly forest, bad case)
 			RigidBody *body = node->GetComponent<RigidBody>();
 			if(body)
 				body->OnSetEnabled();

@@ -174,10 +174,14 @@ struct CThreadPool: public ThreadPool
 				break;
 			}
 		}
-		/*int64_t t2 = get_timeofday_us();
+#ifdef DEBUG_LOG_TIMING
+		int64_t t2 = get_timeofday_us();
 		log_v(MODULE, "output post(): %ius (%zu calls; queue size: %zu%s)",
 				(int)(t2 - t1), post_count, queue_size,
-				(last_was_partly_procesed?"; last was partly processed":""));*/
+				(last_was_partly_procesed?"; last was partly processed":""));
+#else
+		(void)last_was_partly_procesed; // Unused
+#endif
 	}
 };
 

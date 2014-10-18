@@ -97,10 +97,10 @@ struct CApp: public App, public magic::Application
 	BuildatResourceRouter *m_router;
 	magic::LuaScript *m_script;
 	lua_State *L;
-	int64_t m_last_script_tick_us;
 	bool m_reboot_requested = false;
 	Options m_options;
 	bool m_draw_debug_geometry = false;
+	int64_t m_last_update_us;
 
 	magic::SharedPtr<magic::Scene> m_scene;
 	magic::SharedPtr<magic::Node> m_camera_node;
@@ -115,8 +115,8 @@ struct CApp: public App, public magic::Application
 		magic::Application(context),
 		m_script(nullptr),
 		L(nullptr),
-		m_last_script_tick_us(get_timeofday_us()),
 		m_options(options),
+		m_last_update_us(get_timeofday_us()),
 		m_thread_pool(interface::worker_thread::createThreadPool())
 	{
 		log_v(MODULE, "constructor()");
@@ -540,6 +540,14 @@ struct CApp: public App, public magic::Application
 					GetSubsystem<magic::Profiler>(), "Buildat|ThreadPool::post");
 			m_thread_pool->run_post();
 		}
+
+#ifdef DEBUG_LOG_TIMING
+		int64_t t1 = get_timeofday_us();
+		int interval = t1 - m_last_update_us;
+		if(interval > 30000)
+			log_w(MODULE, "Too long update interval: %ius", interval);
+		m_last_update_us = t1;
+#endif
 	}
 
 	void on_post_render_update(
