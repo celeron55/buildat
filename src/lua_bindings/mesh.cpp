@@ -26,31 +26,30 @@ namespace magic = Urho3D;
 namespace pv = PolyVox;
 
 using interface::VoxelInstance;
-
-// Just do this; Urho3D's stuff doesn't really clash with anything in buildat
 using namespace Urho3D;
 
 namespace lua_bindings {
 
-#define GET_TOLUA_STUFF(result_name, index, type) \
-	if(!tolua_isusertype(L, index, #type, 0, &tolua_err)){ \
-		tolua_error(L, __PRETTY_FUNCTION__, &tolua_err); \
-		throw Exception("Expected \"" #type "\""); \
+#define GET_TOLUA_STUFF(result_name, index, type){ \
+		tolua_Error tolua_err; \
+		if(!tolua_isusertype(L, index, #type, 0, &tolua_err)){ \
+			tolua_error(L, __PRETTY_FUNCTION__, &tolua_err); \
+			throw Exception("Expected \"" #type "\""); \
+		} \
 	} \
 	type *result_name = (type*)tolua_tousertype(L, index, 0);
 #define TRY_GET_TOLUA_STUFF(result_name, index, type) \
 	type *result_name = nullptr; \
-	if(tolua_isusertype(L, index, #type, 0, &tolua_err)){ \
-		result_name = (type*)tolua_tousertype(L, index, 0); \
+	{ \
+		tolua_Error tolua_err; \
+		if(tolua_isusertype(L, index, #type, 0, &tolua_err)) \
+			result_name = (type*)tolua_tousertype(L, index, 0); \
 	}
 
-// NOTE: This API is designed this way because otherwise ownership management of
-//       objects sucks
 void set_simple_voxel_model(const luabind::object &node_o,
 		int w, int h, int d, const luabind::object &buffer_o)
 {
 	lua_State *L = node_o.interpreter();
-	tolua_Error tolua_err;
 
 	GET_TOLUA_STUFF(node, 1, Node);
 	TRY_GET_TOLUA_STUFF(buf, 5, const VectorBuffer);
@@ -85,7 +84,6 @@ void set_8bit_voxel_geometry(const luabind::object &node_o,
 		int w, int h, int d, const luabind::object &buffer_o)
 {
 	lua_State *L = node_o.interpreter();
-	tolua_Error tolua_err;
 
 	GET_TOLUA_STUFF(node, 1, Node);
 	TRY_GET_TOLUA_STUFF(buf, 5, const VectorBuffer);
@@ -191,7 +189,6 @@ void set_voxel_geometry(const luabind::object &node_o,
 		const luabind::object &buffer_o)
 {
 	lua_State *L = node_o.interpreter();
-	tolua_Error tolua_err;
 
 	GET_TOLUA_STUFF(node, 1, Node);
 	log_d(MODULE, "set_voxel_geometry(): node=%p", node);
@@ -280,7 +277,6 @@ void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
 		const luabind::object &buffer_o)
 {
 	lua_State *L = node_o.interpreter();
-	tolua_Error tolua_err;
 
 	GET_TOLUA_STUFF(node, 2, Node);
 	TRY_GET_TOLUA_STUFF(buf, 3, const VectorBuffer);
@@ -313,7 +309,6 @@ void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
 void clear_voxel_geometry(const luabind::object &node_o)
 {
 	lua_State *L = node_o.interpreter();
-	tolua_Error tolua_err;
 
 	GET_TOLUA_STUFF(node, 1, Node);
 
@@ -402,7 +397,6 @@ void set_voxel_physics_boxes(const luabind::object &node_o,
 		const luabind::object &buffer_o)
 {
 	lua_State *L = node_o.interpreter();
-	tolua_Error tolua_err;
 
 	GET_TOLUA_STUFF(node, 1, Node);
 	TRY_GET_TOLUA_STUFF(buf, 2, const VectorBuffer);
@@ -433,7 +427,6 @@ void set_voxel_physics_boxes(const luabind::object &node_o,
 void clear_voxel_physics_boxes(const luabind::object &node_o)
 {
 	lua_State *L = node_o.interpreter();
-	tolua_Error tolua_err;
 
 	GET_TOLUA_STUFF(node, 1, Node);
 
