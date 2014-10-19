@@ -88,9 +88,9 @@ namespace interface
 
 		// atlas_reg may only be supplied when called from Urho3D main thread
 		virtual const CachedVoxelDefinition* get_cached(const VoxelTypeId &id,
-				TextureAtlasRegistry *atlas_reg = nullptr) = 0;
+				AtlasRegistry *atlas_reg = nullptr) = 0;
 		virtual const CachedVoxelDefinition* get_cached(const VoxelInstance &v,
-				TextureAtlasRegistry *atlas_reg = nullptr) = 0;
+				AtlasRegistry *atlas_reg = nullptr) = 0;
 
 		virtual void serialize(std::ostream &os) = 0;
 		virtual void deserialize(std::istream &is) = 0;

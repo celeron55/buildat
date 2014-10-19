@@ -187,7 +187,7 @@ struct CVoxelRegistry: public VoxelRegistry
 	}
 
 	const CachedVoxelDefinition* get_cached(const VoxelTypeId &id,
-			TextureAtlasRegistry *atlas_reg)
+			AtlasRegistry *atlas_reg)
 	{
 		if(id >= m_defs.size()){
 			log_w(MODULE, "CVoxelRegistry::get_cached(): id=%i not found", id);
@@ -210,7 +210,7 @@ struct CVoxelRegistry: public VoxelRegistry
 	}
 
 	const CachedVoxelDefinition* get_cached(const VoxelInstance &v,
-			TextureAtlasRegistry *atlas_reg)
+			AtlasRegistry *atlas_reg)
 	{
 		return get_cached(v.getId(), atlas_reg);
 	}
@@ -227,7 +227,7 @@ struct CVoxelRegistry: public VoxelRegistry
 	}
 
 	void update_cache_textures(CachedVoxelDefinition &cache,
-			const VoxelDefinition &def, TextureAtlasRegistry *atlas_reg)
+			const VoxelDefinition &def, AtlasRegistry *atlas_reg)
 	{
 		log_d(MODULE, "CVoxelRegistry::update_cache_textures(): id=%i", def.id);
 		for(size_t i = 0; i<6; i++){

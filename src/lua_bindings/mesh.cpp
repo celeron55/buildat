@@ -27,7 +27,7 @@ namespace pv = PolyVox;
 
 using interface::VoxelInstance;
 using interface::VoxelRegistry;
-using interface::TextureAtlasRegistry;
+using interface::AtlasRegistry;
 using namespace Urho3D;
 
 namespace lua_bindings {
@@ -84,7 +84,7 @@ void set_simple_voxel_model(const luabind::object &node_o,
 
 void set_8bit_voxel_geometry(const luabind::object &node_o,
 		int w, int h, int d, const luabind::object &buffer_o,
-		sp_<VoxelRegistry> voxel_reg, sp_<TextureAtlasRegistry> atlas_reg)
+		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg)
 {
 	lua_State *L = node_o.interpreter();
 
@@ -145,13 +145,13 @@ struct SetVoxelGeometryTask: public interface::worker_thread::Task
 	Node *node;
 	ss_ data;
 	sp_<VoxelRegistry> voxel_reg;
-	sp_<TextureAtlasRegistry> atlas_reg;
+	sp_<AtlasRegistry> atlas_reg;
 
 	up_<pv::RawVolume<VoxelInstance>> volume;
 	sm_<uint, interface::mesh::TemporaryGeometry> temp_geoms;
 
 	SetVoxelGeometryTask(Node *node, const ss_ &data,
-			sp_<VoxelRegistry> voxel_reg, sp_<TextureAtlasRegistry> atlas_reg):
+			sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg):
 		node(node), data(data), voxel_reg(voxel_reg), atlas_reg(atlas_reg)
 	{
 		ScopeTimer timer("pre geometry");
@@ -194,13 +194,13 @@ struct SetVoxelLodGeometryTask: public interface::worker_thread::Task
 	Node *node;
 	ss_ data;
 	sp_<VoxelRegistry> voxel_reg;
-	sp_<TextureAtlasRegistry> atlas_reg;
+	sp_<AtlasRegistry> atlas_reg;
 
 	up_<pv::RawVolume<VoxelInstance>> lod_volume;
 	sm_<uint, interface::mesh::TemporaryGeometry> temp_geoms;
 
 	SetVoxelLodGeometryTask(int lod, Node *node, const ss_ &data,
-			sp_<VoxelRegistry> voxel_reg, sp_<TextureAtlasRegistry> atlas_reg):
+			sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg):
 		lod(lod), node(node), data(data),
 		voxel_reg(voxel_reg), atlas_reg(atlas_reg)
 	{
@@ -320,7 +320,7 @@ struct SetPhysicsBoxesTask: public interface::worker_thread::Task
 
 void set_voxel_geometry(const luabind::object &node_o,
 		const luabind::object &buffer_o,
-		sp_<VoxelRegistry> voxel_reg, sp_<TextureAtlasRegistry> atlas_reg)
+		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg)
 {
 	lua_State *L = node_o.interpreter();
 
@@ -351,7 +351,7 @@ void set_voxel_geometry(const luabind::object &node_o,
 
 void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
 		const luabind::object &buffer_o,
-		sp_<VoxelRegistry> voxel_reg, sp_<TextureAtlasRegistry> atlas_reg)
+		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg)
 {
 	lua_State *L = node_o.interpreter();
 

@@ -38,7 +38,7 @@ local camera_last_dir = camera_dir
 local end_of_update_processing_us = 0
 
 local voxel_reg = buildat.createVoxelRegistry()
-local atlas_reg = buildat.createTextureAtlasRegistry()
+local atlas_reg = buildat.createAtlasRegistry()
 
 log:info("voxel_reg type: "..dump(buildat.class_info(voxel_reg).name))
 log:info("atlas_reg type: "..dump(buildat.class_info(atlas_reg).name))

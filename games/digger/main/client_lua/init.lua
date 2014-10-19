@@ -219,7 +219,7 @@ end)
 
 -- TODO: Fill in some stuff to the voxel registry
 local voxel_reg = buildat.createVoxelRegistry()
-local atlas_reg = buildat.createTextureAtlasRegistry()
+local atlas_reg = buildat.createAtlasRegistry()
 
 function setup_simple_voxel_data(node)
 	local data = node:GetVar("simple_voxel_data"):GetBuffer()

@@ -15,19 +15,19 @@
 #pragma GCC diagnostic pop
 #define MODULE "lua_bindings"
 
-using interface::TextureAtlasRegistry;
+using interface::AtlasRegistry;
 
 namespace lua_bindings {
 
-sp_<TextureAtlasRegistry> createTextureAtlasRegistry(lua_State *L)
+sp_<AtlasRegistry> createAtlasRegistry(lua_State *L)
 {
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
 	lua_pop(L, 1);
 	Urho3D::Context *context = buildat_app->get_scene()->GetContext();
 
-	return sp_<TextureAtlasRegistry>(
-			interface::createTextureAtlasRegistry(context));
+	return sp_<AtlasRegistry>(
+			interface::createAtlasRegistry(context));
 }
 
 void init_atlas(lua_State *L)
@@ -35,9 +35,9 @@ void init_atlas(lua_State *L)
 	using namespace luabind;
 
 	module(L)[
-		class_<TextureAtlasRegistry, bases<>, sp_<TextureAtlasRegistry>>("TextureAtlasRegistry")
-			.def("update", &TextureAtlasRegistry::update),
-		def("createTextureAtlasRegistry", &createTextureAtlasRegistry)
+		class_<AtlasRegistry, bases<>, sp_<AtlasRegistry>>("AtlasRegistry")
+			.def("update", &AtlasRegistry::update),
+		def("createAtlasRegistry", &createAtlasRegistry)
 	];
 }
 

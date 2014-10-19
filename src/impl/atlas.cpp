@@ -24,13 +24,13 @@ bool AtlasSegmentDefinition::operator==(const AtlasSegmentDefinition &other) con
 	);
 }
 
-struct CTextureAtlasRegistry: public TextureAtlasRegistry
+struct CAtlasRegistry: public AtlasRegistry
 {
 	magic::Context *m_context;
-	sv_<TextureAtlasDefinition> m_defs;
-	sv_<TextureAtlasCache> m_cache;
+	sv_<AtlasDefinition> m_defs;
+	sv_<AtlasCache> m_cache;
 
-	CTextureAtlasRegistry(magic::Context *context):
+	CAtlasRegistry(magic::Context *context):
 		m_context(context)
 	{
 		m_defs.resize(1); // id=0 is ATLAS_UNDEFINED
@@ -45,14 +45,14 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 		magic::Image *seg_img = magic_cache->GetResource<magic::Image>(
 				segment_def.resource_name.c_str());
 		if(seg_img == nullptr)
-			throw Exception("CTextureAtlasRegistry::add_segment(): Couldn't "
+			throw Exception("CAtlasRegistry::add_segment(): Couldn't "
 						  "find image \""+segment_def.resource_name+"\" when adding "
 						  "segment");
 		// Get resolution of texture
 		magic::IntVector2 seg_img_size(seg_img->GetWidth(), seg_img->GetHeight());
 		// Try to find a texture atlas for this texture size
-		TextureAtlasDefinition *atlas_def = nullptr;
-		for(TextureAtlasDefinition &def0 : m_defs){
+		AtlasDefinition *atlas_def = nullptr;
+		for(AtlasDefinition &def0 : m_defs){
 			if(def0.id == ATLAS_UNDEFINED)
 				continue;
 			if(def0.segment_resolution == seg_img_size){
@@ -98,7 +98,7 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 			// Add new atlas to cache
 			const auto &id = atlas_def->id;
 			m_cache.resize(id+1);
-			TextureAtlasCache *cache = &m_cache[id];
+			AtlasCache *cache = &m_cache[id];
 			cache->image = atlas_img;
 			cache->texture = atlas_tex;
 			cache->segment_resolution = atlas_def->segment_resolution;
@@ -109,7 +109,7 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 		atlas_def->segments.resize(seg_id + 1);
 		atlas_def->segments[seg_id] = segment_def;
 		// Update this segment in cache
-		TextureAtlasCache &atlas_cache = m_cache[atlas_def->id];
+		AtlasCache &atlas_cache = m_cache[atlas_def->id];
 		atlas_cache.segments.resize(seg_id + 1);
 		AtlasSegmentCache &seg_cache = atlas_cache.segments[seg_id];
 		update_segment_cache(seg_id, seg_img, seg_cache, segment_def, atlas_cache);
@@ -139,7 +139,7 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 		return add_segment(segment_def);
 	}
 
-	const TextureAtlasDefinition* get_atlas_definition(uint atlas_id)
+	const AtlasDefinition* get_atlas_definition(uint atlas_id)
 	{
 		if(atlas_id == ATLAS_UNDEFINED)
 			return nullptr;
@@ -151,7 +151,7 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 	const AtlasSegmentDefinition* get_segment_definition(
 			const AtlasSegmentReference &ref)
 	{
-		const TextureAtlasDefinition *atlas = get_atlas_definition(ref.atlas_id);
+		const AtlasDefinition *atlas = get_atlas_definition(ref.atlas_id);
 		if(!atlas)
 			return nullptr;
 		if(ref.segment_id >= atlas->segments.size())
@@ -161,7 +161,7 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 
 	void update_segment_cache(uint seg_id, magic::Image *seg_img,
 			AtlasSegmentCache &cache, const AtlasSegmentDefinition &def,
-			const TextureAtlasCache &atlas)
+			const AtlasCache &atlas)
 	{
 		// Check if atlas is full
 		size_t max_segments = atlas.total_segments.x_ * atlas.total_segments.y_;
@@ -315,7 +315,7 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 		atlas.image->Save(f);*/
 	}
 
-	const TextureAtlasCache* get_atlas_cache(uint atlas_id)
+	const AtlasCache* get_atlas_cache(uint atlas_id)
 	{
 		if(atlas_id == ATLAS_UNDEFINED)
 			return nullptr;
@@ -328,7 +328,7 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 
 	const AtlasSegmentCache* get_texture(const AtlasSegmentReference &ref)
 	{
-		const TextureAtlasCache *cache = get_atlas_cache(ref.atlas_id);
+		const AtlasCache *cache = get_atlas_cache(ref.atlas_id);
 		if(cache == nullptr)
 			return nullptr;
 		if(ref.segment_id >= cache->segments.size()){
@@ -344,7 +344,7 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 		// Re-create textures if a device reset has destroyed them
 		for(uint atlas_id = ATLAS_UNDEFINED + 1;
 				atlas_id < m_cache.size(); atlas_id++){
-			TextureAtlasCache &cache = m_cache[atlas_id];
+			AtlasCache &cache = m_cache[atlas_id];
 			if(cache.texture->IsDataLost()){
 				log_v(MODULE, "Atlas %i texture data lost - re-creating",
 						atlas_id);
@@ -355,9 +355,9 @@ struct CTextureAtlasRegistry: public TextureAtlasRegistry
 	}
 };
 
-TextureAtlasRegistry* createTextureAtlasRegistry(magic::Context *context)
+AtlasRegistry* createAtlasRegistry(magic::Context *context)
 {
-	return new CTextureAtlasRegistry(context);
+	return new CAtlasRegistry(context);
 }
 
 }

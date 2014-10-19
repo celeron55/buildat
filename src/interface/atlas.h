@@ -51,7 +51,7 @@ namespace interface
 		magic::Vector2 coord1;
 	};
 
-	struct TextureAtlasDefinition
+	struct AtlasDefinition
 	{
 		uint id = ATLAS_UNDEFINED;
 		magic::IntVector2 segment_resolution;
@@ -59,7 +59,7 @@ namespace interface
 		sv_<AtlasSegmentDefinition> segments;
 	};
 
-	struct TextureAtlasCache
+	struct AtlasCache
 	{
 		magic::SharedPtr<magic::Image> image;
 		magic::SharedPtr<magic::Texture2D> texture;
@@ -68,9 +68,9 @@ namespace interface
 		sv_<AtlasSegmentCache> segments;
 	};
 
-	struct TextureAtlasRegistry
+	struct AtlasRegistry
 	{
-		virtual ~TextureAtlasRegistry(){}
+		virtual ~AtlasRegistry(){}
 
 		// These two may only be called from Urho3D main thread
 		virtual const AtlasSegmentReference add_segment(
@@ -78,12 +78,12 @@ namespace interface
 		virtual const AtlasSegmentReference find_or_add_segment(
 				const AtlasSegmentDefinition &segment_def) = 0;
 
-		virtual const TextureAtlasDefinition* get_atlas_definition(
+		virtual const AtlasDefinition* get_atlas_definition(
 				uint atlas_id) = 0;
 		virtual const AtlasSegmentDefinition* get_segment_definition(
 				const AtlasSegmentReference &ref) = 0;
 
-		virtual const TextureAtlasCache* get_atlas_cache(uint atlas_id) = 0;
+		virtual const AtlasCache* get_atlas_cache(uint atlas_id) = 0;
 
 		virtual const AtlasSegmentCache* get_texture(
 				const AtlasSegmentReference &ref) = 0;
@@ -91,6 +91,6 @@ namespace interface
 		virtual void update() = 0;
 	};
 
-	TextureAtlasRegistry* createTextureAtlasRegistry(magic::Context *context);
+	AtlasRegistry* createAtlasRegistry(magic::Context *context);
 }
 // vim: set noet ts=4 sw=4:

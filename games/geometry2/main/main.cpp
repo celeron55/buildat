@@ -31,7 +31,7 @@ struct Module: public interface::Module
 {
 	interface::Server *m_server;
 	uint m_slow_count = 0;
-	sp_<interface::TextureAtlasRegistry> m_atlas_reg;
+	sp_<interface::AtlasRegistry> m_atlas_reg;
 	sp_<interface::VoxelRegistry> m_voxel_reg;
 
 	Module(interface::Server *server):
@@ -53,7 +53,7 @@ struct Module: public interface::Module
 		m_server->access_scene([&](Scene *scene)
 		{
 			Context *context = scene->GetContext();
-			m_atlas_reg.reset(interface::createTextureAtlasRegistry(context));
+			m_atlas_reg.reset(interface::createAtlasRegistry(context));
 			m_voxel_reg.reset(interface::createVoxelRegistry(m_atlas_reg.get()));
 			{
 				interface::VoxelDefinition vdef;

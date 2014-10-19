@@ -38,7 +38,7 @@ namespace interface
 		// Set custom geometry from 8-bit voxel data, using a voxel registry
 		void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 				int w, int h, int d, const ss_ &source_data,
-				VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg);
+				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg);
 
 		// Create a model from voxel volume, using a voxel registry, without
 		// textures or normals, based on the physically_solid flag.
@@ -69,23 +69,23 @@ namespace interface
 #endif
 
 		void preload_textures(pv::RawVolume<VoxelInstance> &volume,
-				VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg);
+				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg);
 
 		// Can be called from any thread
 		void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 				pv::RawVolume<VoxelInstance> &volume,
-				VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg);
+				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg);
 
 		void set_voxel_geometry(CustomGeometry *cg, Context *context,
 				const sm_<uint, TemporaryGeometry> &temp_geoms,
-				TextureAtlasRegistry *atlas_reg);
+				AtlasRegistry *atlas_reg);
 
 		// Set custom geometry from voxel volume, using a voxel registry
 		// Volume should be padded by one voxel on each edge
 		// NOTE: volume is non-const due to PolyVox deficiency
 		void set_voxel_geometry(CustomGeometry *cg, Context *context,
 				pv::RawVolume<VoxelInstance> &volume,
-				VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg);
+				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg);
 
 		// Voxel LOD geometry generation (lod=1 -> 1:1, lod=3 -> 1:3)
 
@@ -97,15 +97,15 @@ namespace interface
 		void generate_voxel_lod_geometry(int lod,
 				sm_<uint, TemporaryGeometry> &result,
 				pv::RawVolume<VoxelInstance> &lod_volume,
-				VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg);
+				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg);
 
 		void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 				const sm_<uint, TemporaryGeometry> &temp_geoms,
-				TextureAtlasRegistry *atlas_reg);
+				AtlasRegistry *atlas_reg);
 
 		void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 				pv::RawVolume<VoxelInstance> &volume_orig,
-				VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg);
+				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg);
 
 		// Voxel physics generation
 

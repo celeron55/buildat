@@ -264,7 +264,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 	interface::Server *m_server;
 
 	// Accessing any of these outside of Server::access_scene is disallowed
-	sp_<interface::TextureAtlasRegistry> m_atlas_reg;
+	sp_<interface::AtlasRegistry> m_atlas_reg;
 	sp_<interface::VoxelRegistry> m_voxel_reg;
 	sp_<interface::BlockRegistry> m_block_reg;
 
@@ -318,7 +318,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		{
 			Context *context = scene->GetContext();
 
-			m_atlas_reg.reset(interface::createTextureAtlasRegistry(context));
+			m_atlas_reg.reset(interface::createAtlasRegistry(context));
 		});
 	}
 

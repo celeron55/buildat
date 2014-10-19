@@ -13,7 +13,7 @@ namespace client {
 }
 namespace interface {
 	struct VoxelRegistry;
-	struct TextureAtlasRegistry;
+	struct AtlasRegistry;
 
 	namespace worker_thread {
 		struct ThreadPool;

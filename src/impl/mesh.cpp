@@ -148,7 +148,7 @@ Model* create_8bit_voxel_physics_model(Context *context,
 // Set custom geometry from 8-bit voxel data, using a voxel registry
 void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 		int w, int h, int d, const ss_ &source_data,
-		VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg)
+		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg)
 {
 	if(w < 0 || h < 0 || d < 0)
 		throw Exception("Negative dimension");
@@ -402,7 +402,7 @@ void assign_txcoords(size_t pv_vertex_i1, const AtlasSegmentCache *aseg,
 }
 
 void preload_textures(pv::RawVolume<VoxelInstance> &volume,
-		VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg)
+		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg)
 {
 	auto region = volume.getEnclosingRegion();
 	auto &lc = region.getLowerCorner();
@@ -422,7 +422,7 @@ void preload_textures(pv::RawVolume<VoxelInstance> &volume,
 
 void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		pv::RawVolume<VoxelInstance> &volume,
-		VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg)
+		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg)
 {
 	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
@@ -556,7 +556,7 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 
 void set_voxel_geometry(CustomGeometry *cg, Context *context,
 		const sm_<uint, TemporaryGeometry> &temp_geoms,
-		TextureAtlasRegistry *atlas_reg)
+		AtlasRegistry *atlas_reg)
 {
 	ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 
@@ -568,7 +568,7 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 	unsigned cg_i = 0;
 	for(auto &pair : temp_geoms){
 		const TemporaryGeometry &tg = pair.second;
-		const TextureAtlasCache *atlas_cache =
+		const AtlasCache *atlas_cache =
 				atlas_reg->get_atlas_cache(tg.atlas_id);
 		if(atlas_cache == nullptr)
 			throw Exception("atlas_cache == nullptr");
@@ -593,7 +593,7 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 // Volume should be padded by one voxel on each edge
 void set_voxel_geometry(CustomGeometry *cg, Context *context,
 		pv::RawVolume<VoxelInstance> &volume,
-		VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg)
+		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg)
 {
 	preload_textures(volume, voxel_reg, atlas_reg);
 
@@ -652,7 +652,7 @@ up_<pv::RawVolume<VoxelInstance>> generate_voxel_lod_volume(
 void generate_voxel_lod_geometry(int lod,
 		sm_<uint, TemporaryGeometry> &result,
 		pv::RawVolume<VoxelInstance> &lod_volume,
-		VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg)
+		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg)
 {
 	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
@@ -758,7 +758,7 @@ void generate_voxel_lod_geometry(int lod,
 
 void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 		const sm_<uint, TemporaryGeometry> &temp_geoms,
-		TextureAtlasRegistry *atlas_reg)
+		AtlasRegistry *atlas_reg)
 {
 	ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 
@@ -770,7 +770,7 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 	unsigned cg_i = 0;
 	for(auto &pair : temp_geoms){
 		const TemporaryGeometry &tg = pair.second;
-		const TextureAtlasCache *atlas_cache =
+		const AtlasCache *atlas_cache =
 				atlas_reg->get_atlas_cache(tg.atlas_id);
 		if(atlas_cache == nullptr)
 			throw Exception("atlas_cache == nullptr");
@@ -800,7 +800,7 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 // Volume should be padded by one voxel on each edge
 void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 		pv::RawVolume<VoxelInstance> &volume_orig,
-		VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg)
+		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg)
 {
 	up_<pv::RawVolume<VoxelInstance>> lod_volume = generate_voxel_lod_volume(
 			lod, volume_orig);
