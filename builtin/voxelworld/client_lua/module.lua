@@ -44,6 +44,22 @@ M.chunk_size_voxels = nil
 M.section_size_chunks = nil
 M.section_size_voxels = nil
 
+-- voxelworld is ready once the init and voxel_registry packets (and in the
+-- future possibly some other ones) have been received)
+local is_ready = false
+local on_ready_callbacks = {}
+
+function on_ready()
+	if is_ready then
+		error("on_ready(): already ready")
+	end
+	is_ready = true
+	for _, v in ipairs(on_ready_callbacks) do
+		v()
+	end
+	on_ready_callbacks = nil
+end
+
 function M.init()
 	log:info("voxelworld.init()")
 
@@ -86,6 +102,7 @@ function M.init()
 
 	buildat.sub_packet("voxelworld:voxel_registry", function(data)
 		voxel_reg:deserialize(data)
+		on_ready() -- This is the last packet
 	end)
 
 	buildat.sub_packet("voxelworld:node_voxel_data_updated", function(data)
@@ -308,6 +325,14 @@ end
 
 function M.get_atlas_registry()
 	return atlas_reg
+end
+
+function M.sub_ready(cb)
+	if is_ready then
+		cb()
+	else
+		table.insert(on_ready_callbacks, cb)
+	end
 end
 
 function send_get_section(p)

@@ -230,11 +230,15 @@ function setup_simple_voxel_data(node)
 	node:SetScale(magic.Vector3(1, 1, 1))
 end
 
-replicate.sub_sync_node_added({}, function(node)
-	if not node:GetVar("simple_voxel_data"):IsEmpty() then
-		setup_simple_voxel_data(node)
-	end
-	local name = node:GetName()
+voxelworld.sub_ready(function()
+	-- Subscribe to this only after the voxelworld is ready because we are using
+	-- voxelworld's registries
+	replicate.sub_sync_node_added({}, function(node)
+		if not node:GetVar("simple_voxel_data"):IsEmpty() then
+			setup_simple_voxel_data(node)
+		end
+		local name = node:GetName()
+	end)
 end)
 
 -- vim: set noet ts=4 sw=4:

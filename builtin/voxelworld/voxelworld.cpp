@@ -14,6 +14,7 @@
 #include "interface/voxel_volume.h"
 #include <PolyVoxCore/RawVolume.h>
 #include <cereal/archives/portable_binary.hpp>
+#include <cereal/types/string.hpp>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Node.h>
@@ -400,10 +401,29 @@ struct Module: public interface::Module, public voxelworld::Interface
 				}
 			}
 		});
+
+		// Store voxel registry and stuff
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(m_voxel_reg->serialize());
+		}
+		m_server->tmp_store_data("voxelworld:restore_info", os.str());
 	}
 
 	void on_continue()
 	{
+		// Restore voxel registry and stuff
+		ss_ data = m_server->tmp_restore_data("voxelworld:restore_info");
+		ss_ voxel_reg_data;
+		{
+			std::istringstream is(data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(voxel_reg_data);
+		}
+		m_voxel_reg->deserialize(voxel_reg_data);
+
+		// Start up normally
 		on_start();
 	}
 
