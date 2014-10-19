@@ -5,7 +5,7 @@ import copy
 ENABLE_LOG = False
 IN_PLACE = False
 # Not actually needed because indent level is autodetected for eaach block
-IGNORE_FIRST_BLOCK_LEVEL = False
+NO_NAMESPACE_INDENT = False
 
 def log(message):
 	if ENABLE_LOG:
@@ -18,7 +18,7 @@ for a in sys.argv[1:]:
 	elif a == '-i':
 		IN_PLACE = True
 	elif a == '-b':
-		IGNORE_FIRST_BLOCK_LEVEL = True
+		NO_NAMESPACE_INDENT = True
 	else:
 		input_filenames.append(a)
 
@@ -113,7 +113,8 @@ class ParenMatch:
 				break
 
 class DetectedBlock:
-	def __init__(self, line_i, start_level, base_indent_level, base_levels):
+	def __init__(self, line_i, start_level, base_indent_level,
+			base_levels, block_type=None):
 		# If a block starts at the end of some line, the indentation of the
 		# block should always be one tab level, not more like uncrustify makes
 		# it in case the block belongs to a function parameter
@@ -122,6 +123,7 @@ class DetectedBlock:
 		self.base_indent_level = base_indent_level
 		self.inner_indent_level = None  # Detected level (which can be wrong)
 		self.base_levels = base_levels  # Basae ParenMatch levels inside block
+		self.block_type = block_type    # None/"namespace"/something
 
 class State:
 	def __init__(self):
@@ -129,6 +131,7 @@ class State:
 		self.blocks = [] # Stack
 		self.assign_multiline_params_paren_level = None
 		self.paren_level_indentations = {}  # Level -> starting indentation level
+		self.next_block_type = None
 
 		# Output values
 		self.indent_fix_amount = 0
@@ -194,6 +197,7 @@ class State:
 			block = self.blocks[-1]
 			if block.inner_indent_level is None:
 				if re.match(r'^[ \t]*[a-z]+.*:$', line):
+					# label
 					block.inner_indent_level = indent_level + 4
 				else:
 					block.inner_indent_level = indent_level
@@ -204,9 +208,8 @@ class State:
 
 		# Fix block indentation level
 		for i, block in enumerate(self.blocks):
-			if IGNORE_FIRST_BLOCK_LEVEL:
-				if i == 0:  # Ignore first block, it's the namespace or something
-					continue
+			if NO_NAMESPACE_INDENT and block.block_type == "namespace":
+				continue
 			if block.inner_indent_level is None:
 				continue
 			#log("block.base_indent_level: "+str(block.base_indent_level))
@@ -236,6 +239,10 @@ class State:
 					self.fix_indent(d, "Hack: public/private/protected at"+
 							" wrong level")
 
+		# Not ideal but generally works
+		if not line_is_comment and not line_is_macro and "namespace" in line:
+			self.next_block_type = "namespace"
+
 		if not line_is_comment and not line_is_macro:
 			# Block level detection: Detect block starts
 			# Really works only if there is only one { on the line
@@ -256,10 +263,12 @@ class State:
 					base_paren_level = level_after["()"]
 					block_indent_level = self.paren_level_indentations[base_paren_level]
 					use_paren_based_indentation = True
+				block_type = self.next_block_type
+				self.next_block_type = None
 				log("Detected block level "+str(block_open_level)+" begin; indent "+
-						str(block_indent_level))
+						str(block_indent_level)+", type "+repr(block_type))
 				self.blocks.append(DetectedBlock(line_i, block_open_level,
-						block_indent_level, level_after))
+						block_indent_level, level_after, block_type))
 				if not use_paren_based_indentation:
 					# Fix { to be on the correct indentation level
 					d = block_indent_level - indent_level
@@ -290,7 +299,7 @@ class State:
 		## Fix indentation level
 		#wanted_indent_level = 0
 		#for i, block in enumerate(self.blocks):
-		#	if IGNORE_FIRST_BLOCK_LEVEL:
+		#	if NO_NAMESPACE_INDENT:
 		#		if i == 0:  # Ignore first block, it's the namespace or something
 		#			continue
 		#	if block.inner_indent_level is None:
