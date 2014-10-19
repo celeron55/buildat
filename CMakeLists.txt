@@ -35,7 +35,8 @@ else()
 endif()
 
 find_package(Urho3D REQUIRED)
-include_directories(${URHO3D_INCLUDE_DIRS})
+# SYSTEM gets rid of annoying warnings that we're not going to fix
+include_directories(SYSTEM ${URHO3D_INCLUDE_DIRS})
 
 # Urho3D's Lua
 # Set some variables so that Luabind compiles too
@@ -72,7 +73,8 @@ include_directories("3rdparty/c55lib")
 include_directories("3rdparty/smallsha1")
 include_directories("3rdparty/polyvox/library/PolyVoxCore/include")
 include_directories("3rdparty/zlib")
-include_directories("3rdparty/luabind-deboostified")
+# SYSTEM gets rid of annoying warnings that we're not going to fix
+include_directories(SYSTEM "3rdparty/luabind-deboostified")
 
 #
 # Buildat
