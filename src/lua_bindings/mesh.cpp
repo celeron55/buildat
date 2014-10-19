@@ -38,7 +38,7 @@ namespace lua_bindings {
 			tolua_error(L, __PRETTY_FUNCTION__, &tolua_err); \
 			throw Exception("Expected \"" #type "\""); \
 		} \
-	} \
+} \
 	type *result_name = (type*)tolua_tousertype(L, index, 0);
 #define TRY_GET_TOLUA_STUFF(result_name, index, type) \
 	type *result_name = nullptr; \
@@ -67,7 +67,7 @@ void set_simple_voxel_model(const luabind::object &node_o,
 
 	if((int)data.size() != w * h * d){
 		throw Exception(ss_()+"set_simple_voxel_model(): Data size does not match"
-				" with dimensions ("+cs(data.size())+" vs. "+cs(w*h*d)+")");
+					  " with dimensions ("+cs(data.size())+" vs. "+cs(w*h*d)+")");
 	}
 
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
@@ -102,7 +102,7 @@ void set_8bit_voxel_geometry(const luabind::object &node_o,
 
 	if((int)data.size() != w * h * d){
 		throw Exception(ss_()+"set_8bit_voxel_geometry(): Data size does not match"
-				" with dimensions ("+cs(data.size())+" vs. "+cs(w*h*d)+")");
+					  " with dimensions ("+cs(data.size())+" vs. "+cs(w*h*d)+")");
 	}
 
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
@@ -123,7 +123,7 @@ void set_8bit_voxel_geometry(const luabind::object &node_o,
 struct ScopeTimer {
 	const char *name;
 	uint64_t t0;
-	ScopeTimer(const char *name="unknown"): name(name){
+	ScopeTimer(const char *name = "unknown"): name(name){
 		t0 = get_timeofday_us();
 	}
 	~ScopeTimer(){
@@ -136,7 +136,7 @@ struct ScopeTimer {
 };
 #else
 struct ScopeTimer {
-	ScopeTimer(const char *name=""){}
+	ScopeTimer(const char *name = ""){}
 };
 #endif
 
@@ -300,16 +300,18 @@ struct SetPhysicsBoxesTask: public interface::worker_thread::Task
 			interface::mesh::set_voxel_physics_boxes(
 					node, context, result_boxes, false);
 			break;
-		case 3: {
+		case 3:
 			// Times on Dell Precision M6800:
 			//   0 boxes ->    30us
 			//   1 box   ->    64us
 			// 160 boxes ->  8419us (hilly forest)
 			// 259 boxes -> 15704us (hilly forest, bad case)
-			RigidBody *body = node->GetComponent<RigidBody>();
-			if(body)
-				body->OnSetEnabled();
-			return true; }
+			{
+				RigidBody *body = node->GetComponent<RigidBody>();
+				if(body)
+					body->OnSetEnabled();
+			}
+			return true;
 		}
 		post_step++;
 		return false;
@@ -440,9 +442,10 @@ void clear_voxel_physics_boxes(const luabind::object &node_o)
 		node->RemoveComponent(previous_shapes[i]);
 }
 
+#define LUABIND_FUNC(name) def("__buildat_" #name, name)
+
 void init_mesh(lua_State *L)
 {
-#define LUABIND_FUNC(name) def("__buildat_" #name, name)
 	using namespace luabind;
 	module(L)[
 		LUABIND_FUNC(set_simple_voxel_model),
@@ -457,5 +460,5 @@ void init_mesh(lua_State *L)
 
 } // namespace lua_bindingss
 
-// vim: set noet ts=4 sw=4:
 
+// vim: set noet ts=4 sw=4:

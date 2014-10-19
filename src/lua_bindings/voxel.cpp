@@ -25,9 +25,9 @@ void init_voxel(lua_State *L)
 
 	module(L)[
 		class_<VoxelRegistry, bases<>, sp_<VoxelRegistry>>("VoxelRegistry")
-			.def("serialize", (ss_(VoxelRegistry::*)())
+			.def("serialize", (ss_(VoxelRegistry::*) ())
 					&VoxelRegistry::serialize)
-			.def("deserialize", (void(VoxelRegistry::*)(const ss_&))
+			.def("deserialize", (void(VoxelRegistry::*) (const ss_ &))
 					&VoxelRegistry::deserialize),
 		def("createVoxelRegistry", &createVoxelRegistry)
 	];
@@ -35,4 +35,5 @@ void init_voxel(lua_State *L)
 
 } // namespace lua_bindingss
 
+// codestyle:disable (currently util/codestyle.sh screws up the .def formatting)
 // vim: set noet ts=4 sw=4:

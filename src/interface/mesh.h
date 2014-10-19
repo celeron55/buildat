@@ -51,7 +51,7 @@ namespace interface
 
 		// Voxel geometry generation
 
-		#if 0
+#if 0
 		// TODO: Create a custom Drawable that can use an index buffer
 		struct TemporaryGeometry
 		{
@@ -59,14 +59,14 @@ namespace interface
 			sv_<float> vertex_data; // vertex(3) + normal(3) + texcoord(2)
 			sv_<unsigned> index_data; // Urho3D eats unsigned as large indices
 		};
-		#else
+#else
 		struct TemporaryGeometry
 		{
 			uint atlas_id = 0;
 			// CustomGeometry can't handle an index buffer
 			PODVector<CustomGeometryVertex> vertex_data;
 		};
-		#endif
+#endif
 
 		void preload_textures(pv::RawVolume<VoxelInstance> &volume,
 				VoxelRegistry *voxel_reg, TextureAtlasRegistry *atlas_reg);
@@ -91,7 +91,7 @@ namespace interface
 
 		// Can be called from any thread
 		up_<pv::RawVolume<VoxelInstance>> generate_voxel_lod_volume(
-				int lod, pv::RawVolume<VoxelInstance> &volume_orig);
+				int lod, pv::RawVolume<VoxelInstance>&volume_orig);
 
 		// Can be called from any thread
 		void generate_voxel_lod_geometry(int lod,

@@ -475,7 +475,7 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			throw Exception("No atlas segment cache for voxel "+itos(voxel_id0)+
 						  " face "+itos(face_id));
 #if 0
-// TODO: Create a custom Drawable that can use an index buffer
+		// TODO: Create a custom Drawable that can use an index buffer
 		// Get or create the appropriate temporary geometry for this atlas
 		TemporaryGeometry &tg = result[seg_ref.atlas_id];
 		if(tg.vertex_data.empty()){
@@ -604,7 +604,7 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 }
 
 up_<pv::RawVolume<VoxelInstance>> generate_voxel_lod_volume(
-		int lod, pv::RawVolume<VoxelInstance> &volume_orig)
+		int lod, pv::RawVolume<VoxelInstance>&volume_orig)
 {
 	pv::Region region_orig = volume_orig.getEnclosingRegion();
 	auto &lc_orig = region_orig.getLowerCorner();

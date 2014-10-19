@@ -278,7 +278,7 @@ struct Module: public interface::Module
 	                    break;
 	            }
 	            y++;*/
-	            size_t noise_i = (z-lc.getZ())*d + (x-lc.getX());
+				size_t noise_i = (z-lc.getZ())*d + (x-lc.getX());
 				double a = noise.result[noise_i];
 				int y = a + 11.0;
 				if(y < lc.getY() - 5 || y > uc.getY() - 5)

@@ -37,8 +37,8 @@
 #include <Profiler.h>
 #pragma GCC diagnostic pop
 extern "C" {
-#include <lua.h>
-#include <lauxlib.h>
+	#include <lua.h>
+	#include <lauxlib.h>
 }
 #include <signal.h>
 #define MODULE "__app"

@@ -17,7 +17,7 @@ namespace interface {
 
 	namespace worker_thread {
 		struct ThreadPool;
-	};
+	}
 }
 
 namespace app

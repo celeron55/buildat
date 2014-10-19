@@ -42,7 +42,7 @@ struct CThreadPool: public ThreadPool
 	};
 	sv_<Thread> m_threads;
 
-	static void *run_thread(void *arg)
+	static void* run_thread(void *arg)
 	{
 		log_d(MODULE, "Worker thread %p start", arg);
 		Thread *thread = (Thread*)arg;
@@ -61,7 +61,7 @@ struct CThreadPool: public ThreadPool
 			}
 			// Run the task's threaded part
 			try {
-				while(!current->thread());
+				while(!current->thread()) ;
 			} catch(std::exception &e){
 				log_w(MODULE, "Worker task failed: %s", e.what());
 			}
@@ -82,7 +82,7 @@ struct CThreadPool: public ThreadPool
 	void add_task(up_<Task> task)
 	{
 		// TODO: Limit task->pre() execution time per frame
-		while(!task->pre());
+		while(!task->pre()) ;
 		interface::MutexScope ms(m_mutex);
 		m_input_queue.push_back(std::move(task));
 		m_tasks_sem.post();
@@ -178,7 +178,7 @@ struct CThreadPool: public ThreadPool
 		int64_t t2 = get_timeofday_us();
 		log_v(MODULE, "output post(): %ius (%zu calls; queue size: %zu%s)",
 				(int)(t2 - t1), post_count, queue_size,
-				(last_was_partly_procesed?"; last was partly processed":""));
+				(last_was_partly_procesed ? "; last was partly processed" : ""));
 #else
 		(void)last_was_partly_procesed; // Unused
 #endif
