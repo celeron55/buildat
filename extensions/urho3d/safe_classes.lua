@@ -235,8 +235,9 @@ function M.define(dst, util)
 	})
 
 	util.wc("BoundingBox", {
-		unsafe_constructor = util.wrap_function({"number", "number"},
-		function(min, max) -- TOOD: Many alternative constructors
+		unsafe_constructor = util.wrap_function({
+				{"number", "Vector3"}, {"number", "Vector3"}},
+		function(min, max)
 			return util.wrap_instance("BoundingBox", BoundingBox(min, max))
 		end),
 		instance_meta = {
@@ -285,6 +286,8 @@ function M.define(dst, util)
 			shadowBias = util.simple_property("BiasParameters"),
 			shadowCascade = util.simple_property("CascadeParameters"),
 			color = util.simple_property("Color"),
+			range = util.simple_property("number"),
+			fadeDistance = util.simple_property("number"),
 		},
 	})
 
@@ -335,6 +338,10 @@ function M.define(dst, util)
 			fogColor = util.simple_property(dst.Color),
 			fogStart = util.simple_property("number"),
 			fogEnd = util.simple_property("number"),
+			priority = util.simple_property("number"),
+			heightFog = util.simple_property("boolean"),
+			override = util.simple_property("boolean"),
+			ambientGradient = util.simple_property("boolean"),
 		},
 	})
 

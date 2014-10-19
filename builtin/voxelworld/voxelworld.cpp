@@ -344,9 +344,10 @@ struct Module: public interface::Module, public voxelworld::Interface
 		// TODO: Load from disk or something
 
 		//pv::Region region(-1, 0, -1, 1, 0, 1);
-		pv::Region region(-1, -1, -1, 1, 1, 1);
+		//pv::Region region(-1, -1, -1, 1, 1, 1);
 		//pv::Region region(-2, -1, -2, 2, 1, 2);
 		//pv::Region region(-3, -1, -3, 3, 1, 3);
+		pv::Region region(-5, -1, 0, 0, 1, 5);
 		//pv::Region region(-5, -1, -5, 5, 1, 5);
 		//pv::Region region(-6, -1, -6, 6, 1, 6);
 		//pv::Region region(-8, -1, -8, 8, 1, 8);
@@ -623,6 +624,25 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 		n->SetVar(StringHash("buildat_voxel_data"), Variant(
 					PODVector<uint8_t>((const uint8_t*)data.c_str(), data.size())));
+
+		{
+			// Y-seethrough (1 = can see, 0 = can't see)
+			pv::Region yst_region(0, 0, 0, w, 0, d);
+			pv::RawVolume<uint8_t> yst_volume(yst_region);
+			auto lc = yst_region.getLowerCorner();
+			auto uc = yst_region.getUpperCorner();
+			for(int z = lc.getZ(); z <= uc.getZ(); z++){
+				for(int y = lc.getY(); y <= uc.getY(); y++){
+					for(int x = lc.getX(); x <= uc.getX(); x++){
+						volume.setVoxelAt(x, y, z, 1);
+					}
+				}
+			}
+			ss_ data = interface::serialize_volume_compressed(yst_volume);
+			n->SetVar(StringHash("buildat_voxel_yst_data"), Variant(
+						PODVector<uint8_t>((const uint8_t*)data.c_str(),
+								data.size())));
+		}
 
 		// There are no collision shapes initially, but add the rigid body now
 		RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);

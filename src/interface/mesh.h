@@ -127,6 +127,11 @@ namespace interface
 		void set_voxel_physics_boxes(Node *node, Context *context,
 				pv::RawVolume<VoxelInstance> &volume,
 				VoxelRegistry *voxel_reg);
+
+		// Heuristics
+
+		bool voxel_heuristic_has_sunlight(pv::RawVolume<VoxelInstance> &volume,
+				VoxelRegistry *voxel_reg);
 	}
 }
 // vim: set noet ts=4 sw=4:

@@ -27,94 +27,144 @@ local scene = replicate.main_scene
 magic.input:SetMouseVisible(false)
 
 -- Set up zone (global visual parameters)
-local zone_node = scene:CreateChild("Zone")
-local zone = zone_node:CreateComponent("Zone")
-zone.boundingBox = magic.BoundingBox(-1000, 1000)
---zone.ambientColor = magic.Color(0.15, 0.15, 0.15)
-zone.ambientColor = magic.Color(0.1, 0.1, 0.1)
---zone.ambientColor = magic.Color(0, 0, 0)
-zone.fogColor = magic.Color(0.6, 0.7, 0.8)
-zone.fogStart = 10
-zone.fogEnd = FOG_END
+--[[
+do
+	local zone_node = scene:CreateChild("Zone")
+	local zone = zone_node:CreateComponent("Zone")
+	zone.boundingBox = magic.BoundingBox(-1000, 1000)
+	zone.ambientColor = magic.Color(0.1, 0.1, 0.1)
+	--zone.ambientColor = magic.Color(0, 0, 0)
+	zone.fogColor = magic.Color(0.6, 0.7, 0.8)
+	--zone.fogColor = magic.Color(0, 0, 0)
+	zone.fogStart = 10
+	zone.fogEnd = FOG_END
+end
+--]]
 
 -- Add lights
---local node = scene:CreateChild("DirectionalLight")
---node.direction = magic.Vector3(0.0, -1.0, 0.0)
---local light = node:CreateComponent("Light")
---light.lightType = magic.LIGHT_DIRECTIONAL
---light.castShadows = true
---light.brightness = 0.1
---light.color = magic.Color(1.0, 1.0, 1.0)
+do
+	--[[
+	local dirs = {
+		magic.Vector3( 1.0, -1.0,  1.0),
+		magic.Vector3( 1.0, -1.0, -1.0),
+		magic.Vector3(-1.0, -1.0, -1.0),
+		magic.Vector3(-1.0, -1.0,  1.0),
+	}
+	for _, dir in ipairs(dirs) do
+		local node = scene:CreateChild("DirectionalLight")
+		node.direction = dir
+		local light = node:CreateComponent("Light")
+		light.lightType = magic.LIGHT_DIRECTIONAL
+		light.castShadows = true
+		light.brightness = 0.2
+		light.color = magic.Color(0.7, 0.7, 1.0)
+	end
+	--]]
 
-local node = scene:CreateChild("DirectionalLight")
-node.direction = magic.Vector3(-0.6, -1.0, 0.8)
-local light = node:CreateComponent("Light")
-light.lightType = magic.LIGHT_DIRECTIONAL
-light.castShadows = true
-light.brightness = 0.8
-light.color = magic.Color(1.0, 1.0, 0.95)
+	local node = scene:CreateChild("DirectionalLight")
+	node.direction = magic.Vector3(-0.6, -1.0, 0.8)
+	local light = node:CreateComponent("Light")
+	light.lightType = magic.LIGHT_DIRECTIONAL
+	light.castShadows = true
+	light.brightness = 0.8
+	light.color = magic.Color(1.0, 1.0, 0.95)
 
-local node = scene:CreateChild("DirectionalLight")
-node.direction = magic.Vector3(0.3, -1.0, -0.4)
-local light = node:CreateComponent("Light")
-light.lightType = magic.LIGHT_DIRECTIONAL
-light.castShadows = true
-light.brightness = 0.2
-light.color = magic.Color(0.7, 0.7, 1.0)
+	---[[
+	local node = scene:CreateChild("DirectionalLight")
+	node.direction = magic.Vector3(0.3, -1.0, -0.4)
+	local light = node:CreateComponent("Light")
+	light.lightType = magic.LIGHT_DIRECTIONAL
+	light.castShadows = true
+	light.brightness = 0.2
+	light.color = magic.Color(0.7, 0.7, 1.0)
+	--]]
+
+	--[[
+	local node = scene:CreateChild("DirectionalLight")
+	node.direction = magic.Vector3(0.0, -1.0, 0.0)
+	local light = node:CreateComponent("Light")
+	light.lightType = magic.LIGHT_DIRECTIONAL
+	light.castShadows = false
+	light.brightness = 0.05
+	light.color = magic.Color(1.0, 1.0, 1.0)
+	--]]
+end
 
 -- Add a node that the player can use to walk around with
 local player_node = scene:CreateChild("Player")
---player_node.position = magic.Vector3(0, 30, 0)
-player_node.position = magic.Vector3(55, 30, 40)
-player_node.direction = magic.Vector3(-1, 0, 0.4)
---player_node:Yaw(-177.49858)
----[[
-local body = player_node:CreateComponent("RigidBody")
---body.mass = 70.0
-body.friction = 0
---body.linearVelocity = magic.Vector3(0, -10, 0)
-body.angularFactor = magic.Vector3(0, 0, 0)
-body.gravityOverride = magic.Vector3(0, -15.0, 0) -- A bit more than normally
-local shape = player_node:CreateComponent("CollisionShape")
---shape:SetBox(magic.Vector3(1, 1.7*PLAYER_SCALE, 1))
-shape:SetCapsule(PLAYER_WIDTH, PLAYER_HEIGHT)
---]]
+local player_shape = player_node:CreateComponent("CollisionShape")
+do
+	--player_node.position = magic.Vector3(0, 30, 0)
+	--player_node.position = magic.Vector3(55, 30, 40)
+	player_node.position = magic.Vector3(-5, 1, 257)
+	player_node.direction = magic.Vector3(-1, 0, 0.4)
+	--player_node:Yaw(-177.49858)
+	---[[
+	local body = player_node:CreateComponent("RigidBody")
+	--body.mass = 70.0
+	body.friction = 0
+	--body.linearVelocity = magic.Vector3(0, -10, 0)
+	body.angularFactor = magic.Vector3(0, 0, 0)
+	body.gravityOverride = magic.Vector3(0, -15.0, 0) -- A bit more than normally
+	--player_shape:SetBox(magic.Vector3(1, 1.7*PLAYER_SCALE, 1))
+	player_shape:SetCapsule(PLAYER_WIDTH, PLAYER_HEIGHT)
+	--]]
+end
 
 local player_touches_ground = false
 local player_crouched = false
 
 -- Add a camera so we can look at the scene
 local camera_node = player_node:CreateChild("Camera")
-camera_node.position = magic.Vector3(0, 0.411*PLAYER_HEIGHT, 0)
---camera_node:Pitch(13.60000)
-local camera = camera_node:CreateComponent("Camera")
-camera.nearClip = 0.3
-camera.farClip = RENDER_DISTANCE
-camera.fov = 75
+do
+	camera_node.position = magic.Vector3(0, 0.411*PLAYER_HEIGHT, 0)
+	--camera_node:Pitch(13.60000)
+	local camera = camera_node:CreateComponent("Camera")
+	camera.nearClip = 0.3
+	camera.farClip = RENDER_DISTANCE
+	camera.fov = 75
 
--- And this thing so the camera is shown on the screen
-local viewport = magic.Viewport:new(scene, camera_node:GetComponent("Camera"))
-magic.renderer:SetViewport(0, viewport)
+	-- And this thing so the camera is shown on the screen
+	local viewport = magic.Viewport:new(scene, camera_node:GetComponent("Camera"))
+	magic.renderer:SetViewport(0, viewport)
+end
 
 -- Tell about the camera to the voxel world so it can do stuff based on the
 -- camera's position and other properties
 voxelworld.set_camera(camera_node)
 
+--[[
+-- Add a light to the camera
+do
+	local node = camera_node:CreateChild("Light")
+	local light = node:CreateComponent("Light")
+	light.lightType = magic.LIGHT_POINT
+	light.castShadows = false
+	light.brightness = 0.15
+	light.color = magic.Color(1.0, 1.0, 0.8)
+	light.range = 10.0
+	light.fadeDistance = 10.0
+end
+--]]
+
 -- Add some text
 local title_text = magic.ui.root:CreateChild("Text")
-title_text:SetText("digger/init.lua")
-title_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
-title_text.horizontalAlignment = magic.HA_CENTER
-title_text.verticalAlignment = magic.VA_CENTER
-title_text:SetPosition(0, -magic.ui.root.height/2 + 20)
-
 local misc_text = magic.ui.root:CreateChild("Text")
-misc_text:SetText("")
-misc_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
-misc_text.horizontalAlignment = magic.HA_CENTER
-misc_text.verticalAlignment = magic.VA_CENTER
-misc_text:SetPosition(0, -magic.ui.root.height/2 + 40)
+do
+	title_text:SetText("digger/init.lua")
+	title_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
+	title_text.horizontalAlignment = magic.HA_CENTER
+	title_text.verticalAlignment = magic.VA_CENTER
+	title_text:SetPosition(0, -magic.ui.root.height/2 + 20)
 
+	misc_text:SetText("")
+	misc_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
+	misc_text.horizontalAlignment = magic.HA_CENTER
+	misc_text.verticalAlignment = magic.VA_CENTER
+	misc_text:SetPosition(0, -magic.ui.root.height/2 + 40)
+end
+
+-- Unfocus UI
 magic.ui:SetFocusElement(nil)
 
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
@@ -210,13 +260,13 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 			end
 
 			if not player_crouched then
-				shape:SetCapsule(PLAYER_WIDTH, PLAYER_HEIGHT/2)
+				player_shape:SetCapsule(PLAYER_WIDTH, PLAYER_HEIGHT/2)
 				camera_node.position = magic.Vector3(0, 0.411*PLAYER_HEIGHT/2, 0)
 				player_crouched = true
 			end
 		else
 			if player_crouched then
-				shape:SetCapsule(PLAYER_WIDTH, PLAYER_HEIGHT)
+				player_shape:SetCapsule(PLAYER_WIDTH, PLAYER_HEIGHT)
 				player_node:Translate(magic.Vector3(0, PLAYER_HEIGHT/4, 0))
 				camera_node.position = magic.Vector3(0, 0.411*PLAYER_HEIGHT, 0)
 				player_crouched = false

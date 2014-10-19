@@ -9,7 +9,10 @@ namespace interface
 {
 	ss_ serialize_volume_simple(const pv::RawVolume<VoxelInstance> &volume);
 	ss_ serialize_volume_compressed(const pv::RawVolume<VoxelInstance> &volume);
-
 	up_<pv::RawVolume<VoxelInstance>> deserialize_volume(const ss_ &data);
+
+	ss_ serialize_volume_simple(const pv::RawVolume<uint8_t> &volume);
+	ss_ serialize_volume_compressed(const pv::RawVolume<uint8_t> &volume);
+	up_<pv::RawVolume<uint8_t>> deserialize_volume_8bit(const ss_ &data);
 }
 // vim: set noet ts=4 sw=4:

@@ -995,6 +995,31 @@ void set_voxel_physics_boxes(Node *node, Context *context,
 	set_voxel_physics_boxes(node, context, result_boxes, true);
 }
 
+bool voxel_heuristic_has_sunlight(pv::RawVolume<VoxelInstance> &volume,
+		VoxelRegistry *voxel_reg)
+{
+	auto region = volume.getEnclosingRegion();
+	auto &lc = region.getLowerCorner();
+	auto &uc = region.getUpperCorner();
+
+	int num = 0;
+	int y = uc.getY()-1;
+	for(int z = lc.getZ()+1; z <= uc.getZ()-1; z++){
+		for(int x = lc.getX()+1; x <= uc.getX()-1; x++){
+			VoxelInstance v = volume.getVoxelAt(x, y, z);
+			const interface::CachedVoxelDefinition *def = voxel_reg->get_cached(v);
+			if(!def)
+				throw Exception(ss_()+"Undefined voxel: "+itos(v.getId()));
+			// TODO: Some proper lighting property
+			bool light_passes = (!def || !def->physically_solid);
+			if(light_passes)
+				num++;
+		}
+	}
+	log_w(MODULE, "num=%i", num);
+	return (num >= 3);
+}
+
 } // namespace mesh
 } // namespace interface
 // vim: set noet ts=4 sw=4:

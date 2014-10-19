@@ -127,6 +127,31 @@ function M.init()
 				", d="..math.floor(d)..", #data="..data:GetSize()..
 				", node="..node:GetID())
 
+		do
+			local zone_node = replicate.main_scene:CreateChild("Zone")
+			local zone = zone_node:CreateComponent("Zone")
+			local cs = M.chunk_size_voxels
+			zone.boundingBox = magic.BoundingBox(
+					node_p - magic.Vector3(cs.x, cs.y, cs.z)/2,
+					node_p + magic.Vector3(cs.x, cs.y, cs.z)/2
+			)
+			local has_sunlight = buildat.voxel_heuristic_has_sunlight(
+					data, voxel_reg)
+			if has_sunlight then
+				zone.ambientColor = magic.Color(0.1, 0.1, 0.1)
+				zone.fogColor = magic.Color(0.6, 0.7, 0.8)
+			else
+				zone.ambientColor = magic.Color(0, 0, 0)
+				zone.fogColor = magic.Color(0, 0, 0)
+			end
+			--zone.ambientColor = magic.Color(
+			--		math.random(), math.random(), math.random())
+			--zone.fogEnd = 10 + math.random() * 50
+			zone.fogStart = 10
+			zone.fogEnd = camera_far_clip * 1.2
+			--zone.ambientGradient = true
+		end
+
 		local near_trigger_d = nil
 		local near_weight = nil
 		local far_trigger_d = nil
