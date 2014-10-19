@@ -16,11 +16,13 @@ namespace interface
 	struct VoxelName
 	{
 		ss_ block_name; // Name of the block this was instanced from
-		uint segment_x = 0; // Which segment of the block this was instanced from
-		uint segment_y = 0;
-		uint segment_z = 0;
-		uint rotation_primary = 0; // 4 possible rotations when looking at a face
-		uint rotation_secondary = 0; // 6 possible directions for a face to point to
+		uint8_t segment_x = 0; // Which segment of the block this was instanced from
+		uint8_t segment_y = 0;
+		uint8_t segment_z = 0;
+		// 4 possible rotations when looking at a face
+		uint8_t rotation_primary = 0;
+		// 6 possible directions for a face to point to
+		uint8_t rotation_secondary = 0;
 
 		ss_ dump() const;
 		bool operator==(const VoxelName &other) const;
@@ -81,6 +83,9 @@ namespace interface
 	{
 		virtual ~VoxelRegistry(){}
 
+		virtual void clear() = 0;
+		virtual sv_<VoxelDefinition> get_all() = 0;
+
 		virtual VoxelTypeId add_voxel(const VoxelDefinition &def) = 0;
 
 		virtual const VoxelDefinition* get(const VoxelTypeId &id) = 0;
@@ -92,10 +97,10 @@ namespace interface
 		virtual const CachedVoxelDefinition* get_cached(const VoxelInstance &v,
 				AtlasRegistry *atlas_reg = nullptr) = 0;
 
-		virtual void serialize(std::ostream &os) = 0;
-		virtual void deserialize(std::istream &is) = 0;
-		virtual ss_  serialize() = 0;
-		virtual void deserialize(const ss_ &s) = 0;
+		void serialize(std::ostream &os);
+		void deserialize(std::istream &is);
+		ss_  serialize();
+		void deserialize(const ss_ &s);
 
 		// TODO: Ability to track changes (just some kind of set_dirty()?)
 	};

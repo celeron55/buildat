@@ -2,6 +2,9 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/voxel.h"
 #include "core/log.h"
+#include "interface/voxel_cereal.h"
+#include <cereal/archives/portable_binary.hpp>
+#include <cereal/types/vector.hpp>
 #define MODULE "voxel"
 
 namespace std {
@@ -24,9 +27,10 @@ ss_ VoxelName::dump() const
 	std::ostringstream os(std::ios::binary);
 	os<<"VoxelName(";
 	os<<"block_name="<<block_name;
-	os<<", segment=("<<segment_x<<","<<segment_y<<","<<segment_z<<")";
-	os<<", rotation_primary="<<rotation_primary;
-	os<<", rotation_secondary="<<rotation_secondary;
+	os<<", segment=("<<(int)segment_x<<","<<(int)segment_y<<","
+			<<(int)segment_z<<")";
+	os<<", rotation_primary="<<(int)rotation_primary;
+	os<<", rotation_secondary="<<(int)rotation_secondary;
 	os<<")";
 	return os.str();
 }
@@ -52,108 +56,30 @@ struct CVoxelRegistry: public VoxelRegistry
 	CVoxelRegistry()
 	{
 		m_defs.resize(1); // Id 0 is VOXELTYPEID_UNDEFINEDD
+	}
 
-		// Add test voxels
-		// TODO: Remove this from here
-		{
-			VoxelDefinition vdef;
-			vdef.name.block_name = "air";
-			vdef.name.segment_x = 0;
-			vdef.name.segment_y = 0;
-			vdef.name.segment_z = 0;
-			vdef.name.rotation_primary = 0;
-			vdef.name.rotation_secondary = 0;
-			vdef.handler_module = "";
-			for(size_t i = 0; i < 6; i++){
-				AtlasSegmentDefinition &seg = vdef.textures[i];
-				seg.resource_name = "";
-				seg.total_segments = magic::IntVector2(0, 0);
-				seg.select_segment = magic::IntVector2(0, 0);
-			}
-			vdef.edge_material_id = EDGEMATERIALID_EMPTY;
-			add_voxel(vdef); // id 1
-		}
-		{
-			VoxelDefinition vdef;
-			vdef.name.block_name = "rock";
-			vdef.name.segment_x = 0;
-			vdef.name.segment_y = 0;
-			vdef.name.segment_z = 0;
-			vdef.name.rotation_primary = 0;
-			vdef.name.rotation_secondary = 0;
-			vdef.handler_module = "";
-			for(size_t i = 0; i < 6; i++){
-				AtlasSegmentDefinition &seg = vdef.textures[i];
-				seg.resource_name = "main/rock.png";
-				seg.total_segments = magic::IntVector2(1, 1);
-				seg.select_segment = magic::IntVector2(0, 0);
-			}
-			vdef.edge_material_id = EDGEMATERIALID_GROUND;
-			vdef.physically_solid = true;
-			add_voxel(vdef); // id 2
-		}
-		{
-			VoxelDefinition vdef;
-			vdef.name.block_name = "dirt";
-			vdef.name.segment_x = 0;
-			vdef.name.segment_y = 0;
-			vdef.name.segment_z = 0;
-			vdef.name.rotation_primary = 0;
-			vdef.name.rotation_secondary = 0;
-			vdef.handler_module = "";
-			for(size_t i = 0; i < 6; i++){
-				AtlasSegmentDefinition &seg = vdef.textures[i];
-				seg.resource_name = "main/dirt.png";
-				seg.total_segments = magic::IntVector2(1, 1);
-				seg.select_segment = magic::IntVector2(0, 0);
-			}
-			vdef.edge_material_id = EDGEMATERIALID_GROUND;
-			vdef.physically_solid = true;
-			add_voxel(vdef); // id 3
-		}
-		{
-			VoxelDefinition vdef;
-			vdef.name.block_name = "grass";
-			vdef.name.segment_x = 0;
-			vdef.name.segment_y = 0;
-			vdef.name.segment_z = 0;
-			vdef.name.rotation_primary = 0;
-			vdef.name.rotation_secondary = 0;
-			vdef.handler_module = "";
-			for(size_t i = 0; i < 6; i++){
-				AtlasSegmentDefinition &seg = vdef.textures[i];
-				seg.resource_name = "main/grass.png";
-				seg.total_segments = magic::IntVector2(1, 1);
-				seg.select_segment = magic::IntVector2(0, 0);
-			}
-			vdef.edge_material_id = EDGEMATERIALID_GROUND;
-			vdef.physically_solid = true;
-			add_voxel(vdef); // id 4
-		}
-		{
-			VoxelDefinition vdef;
-			vdef.name.block_name = "leaves";
-			vdef.name.segment_x = 0;
-			vdef.name.segment_y = 0;
-			vdef.name.segment_z = 0;
-			vdef.name.rotation_primary = 0;
-			vdef.name.rotation_secondary = 0;
-			vdef.handler_module = "";
-			for(size_t i = 0; i < 6; i++){
-				AtlasSegmentDefinition &seg = vdef.textures[i];
-				seg.resource_name = "main/leaves.png";
-				seg.total_segments = magic::IntVector2(1, 1);
-				seg.select_segment = magic::IntVector2(0, 0);
-			}
-			vdef.edge_material_id = EDGEMATERIALID_GROUND;
-			vdef.physically_solid = true;
-			add_voxel(vdef); // id 5
-		}
+	void clear()
+	{
+		m_defs.clear();
+		m_cached_defs.clear();
+		m_name_to_id.clear();
+
+		m_defs.resize(1); // Id 0 is VOXELTYPEID_UNDEFINEDD
+	}
+
+	sv_<VoxelDefinition> get_all()
+	{
+		sv_<VoxelDefinition> result;
+		result.insert(result.end(), m_defs.begin()+1, m_defs.end());
+		return result;
 	}
 
 	VoxelTypeId add_voxel(const VoxelDefinition &def)
 	{
 		VoxelTypeId id = m_defs.size();
+		if(def.id != VOXELTYPEID_UNDEFINED && id != def.id)
+			throw Exception(ss_()+"add_voxel(): def.id="+itos(def.id)+
+					"; should be "+itos(id));
 		// NOTE: This invalidates all previous pointers to cache entries that
 		//       were given out
 		m_defs.resize(id + 1);
@@ -272,29 +198,6 @@ struct CVoxelRegistry: public VoxelRegistry
 		}
 		// Caller sets cache.textures_valid = true
 	}
-
-	void serialize(std::ostream &os)
-	{
-		// TODO
-	}
-
-	void deserialize(std::istream &is)
-	{
-		// TODO
-	}
-
-	ss_ serialize()
-	{
-		std::ostringstream os(std::ios::binary);
-		serialize(os);
-		return os.str();
-	}
-
-	void deserialize(const ss_ &s)
-	{
-		std::istringstream is(s, std::ios::binary);
-		deserialize(is);
-	}
 };
 
 VoxelRegistry* createVoxelRegistry()
@@ -302,5 +205,35 @@ VoxelRegistry* createVoxelRegistry()
 	return new CVoxelRegistry();
 }
 
+void VoxelRegistry::serialize(std::ostream &os)
+{
+	sv_<VoxelDefinition> defs = get_all();
+	cereal::PortableBinaryOutputArchive archive(os);
+	archive(defs);
 }
+
+void VoxelRegistry::deserialize(std::istream &is)
+{
+	sv_<VoxelDefinition> defs;
+	cereal::PortableBinaryInputArchive archive(is);
+	archive(defs);
+	clear();
+	for(auto &def : defs)
+		add_voxel(def);
+}
+
+ss_ VoxelRegistry::serialize()
+{
+	std::ostringstream os(std::ios::binary);
+	serialize(os);
+	return os.str();
+}
+
+void VoxelRegistry::deserialize(const ss_ &s)
+{
+	std::istringstream is(s, std::ios::binary);
+	deserialize(is);
+}
+
+} // interface
 // vim: set noet ts=4 sw=4:

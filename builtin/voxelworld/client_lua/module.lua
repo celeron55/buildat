@@ -40,9 +40,6 @@ local end_of_update_processing_us = 0
 local voxel_reg = buildat.createVoxelRegistry()
 local atlas_reg = buildat.createAtlasRegistry()
 
-log:info("voxel_reg type: "..dump(buildat.class_info(voxel_reg).name))
-log:info("atlas_reg type: "..dump(buildat.class_info(atlas_reg).name))
-
 M.chunk_size_voxels = nil
 M.section_size_chunks = nil
 M.section_size_voxels = nil
@@ -85,6 +82,10 @@ function M.init()
 		M.section_size_chunks = buildat.Vector3(values.section_size_chunks)
 		M.section_size_voxels =
 				M.chunk_size_voxels:mul_components(M.section_size_chunks)
+	end)
+
+	buildat.sub_packet("voxelworld:voxel_registry", function(data)
+		voxel_reg:deserialize(data)
 	end)
 
 	buildat.sub_packet("voxelworld:node_voxel_data_updated", function(data)
@@ -203,6 +204,9 @@ function M.init()
 
 	magic.SubscribeToEvent("Update", function(event_type, event_data)
 		buildat.profiler_block_begin("Buildat|voxelworld:update")
+
+		-- Required for handling device resets (eg. fullscreen toggle)
+		atlas_reg:update()
 
 		--local t0 = buildat.get_time_us()
 		--local dt = event_data:GetFloat("TimeStep")

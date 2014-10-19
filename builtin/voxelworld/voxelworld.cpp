@@ -458,6 +458,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 		}
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, "voxelworld:init", os.str());
+			inetwork->send(peer, "voxelworld:voxel_registry",
+					m_voxel_reg->serialize());
 		});
 	}
 

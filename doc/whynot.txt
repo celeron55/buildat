@@ -6,3 +6,6 @@ Why not use protobuf?
 Why not detect -DURHO3D_64BIT automatically in the build system?
 - It's not possible
 
+Why not use cereal's versioning system?
+- It doesn't support forward compatibility
+

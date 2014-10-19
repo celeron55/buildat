@@ -4,8 +4,6 @@
 #include "core/log.h"
 #include "interface/voxel.h"
 #include <luabind/luabind.hpp>
-#include <luabind/adopt_policy.hpp>
-#include <luabind/pointer_traits.hpp>
 #define MODULE "lua_bindings"
 
 using interface::VoxelInstance;
@@ -29,7 +27,7 @@ void init_voxel(lua_State *L)
 					&VoxelRegistry::serialize)
 			.def("deserialize", (void(VoxelRegistry::*) (const ss_ &))
 					&VoxelRegistry::deserialize),
-		def("createVoxelRegistry", &createVoxelRegistry)
+		def("__buildat_createVoxelRegistry", &createVoxelRegistry)
 	];
 }
 

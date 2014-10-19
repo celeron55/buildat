@@ -195,6 +195,10 @@ public:
 				m_voxel_reg->get_cached(back);
 		const interface::CachedVoxelDefinition *front_def =
 				m_voxel_reg->get_cached(front);
+		if(!back_def)
+			throw Exception(ss_()+"Undefined voxel: back="+itos(back.getId()));
+		if(!front_def)
+			throw Exception(ss_()+"Undefined voxel: front="+itos(front.getId()));
 		if(!back_def || !back_def->physically_solid)
 			return false;
 		if(!front_def || !front_def->physically_solid){
@@ -300,9 +304,13 @@ public:
 				m_voxel_reg->get_cached(back);
 		const interface::CachedVoxelDefinition *front_def =
 				m_voxel_reg->get_cached(front);
-		if(!back_def){
+		if(!back_def)
+			throw Exception(ss_()+"Undefined voxel: back="+itos(back.getId()));
+		if(!front_def)
+			throw Exception(ss_()+"Undefined voxel: front="+itos(front.getId()));
+		/*if(!back_def){
 			return false;
-		}
+		}*/
 		else if(back_def->face_draw_type == interface::FaceDrawType::NEVER){
 			return false;
 		}
@@ -414,7 +422,8 @@ void preload_textures(pv::RawVolume<VoxelInstance> &volume,
 				VoxelInstance v = volume.getVoxelAt(x, y, z);
 				const interface::CachedVoxelDefinition *def =
 						voxel_reg->get_cached(v, atlas_reg);
-				(void)def; // Unused
+				if(!def)
+					throw Exception(ss_()+"Undefined voxel: "+itos(v.getId()));
 			}
 		}
 	}

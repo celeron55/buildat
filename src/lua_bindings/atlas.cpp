@@ -37,7 +37,7 @@ void init_atlas(lua_State *L)
 	module(L)[
 		class_<AtlasRegistry, bases<>, sp_<AtlasRegistry>>("AtlasRegistry")
 			.def("update", &AtlasRegistry::update),
-		def("createAtlasRegistry", &createAtlasRegistry)
+		def("__buildat_createAtlasRegistry", &createAtlasRegistry)
 	];
 }
 

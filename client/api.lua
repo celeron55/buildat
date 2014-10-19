@@ -12,11 +12,11 @@ buildat.safe.disconnect    = __buildat_disconnect
 buildat.safe.get_time_us   = __buildat_get_time_us
 buildat.safe.profiler_block_begin = __buildat_profiler_block_begin
 buildat.safe.profiler_block_end   = __buildat_profiler_block_end
-buildat.safe.createVoxelRegistry        = createVoxelRegistry
-buildat.safe.createAtlasRegistry = createAtlasRegistry
+buildat.safe.createVoxelRegistry  = __buildat_createVoxelRegistry
+buildat.safe.createAtlasRegistry  = __buildat_createAtlasRegistry
 
 -- NOTE: Maybe not actually safe
-buildat.safe.class_info = class_info -- Luabind class_info()
+--buildat.safe.class_info = class_info -- Luabind class_info()
 
 buildat.safe.SpatialUpdateQueue = function()
 	local internal = __buildat_SpatialUpdateQueue()

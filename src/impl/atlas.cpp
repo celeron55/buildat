@@ -69,6 +69,9 @@ struct CAtlasRegistry: public AtlasRegistry
 			m_defs.resize(m_defs.size()+1);
 			atlas_def = &m_defs[m_defs.size()-1];
 			atlas_def->id = m_defs.size()-1;
+			if(segment_def.total_segments.x_ == 0 ||
+					segment_def.total_segments.y_ == 0)
+				throw Exception("segment_def.total_segments is zero");
 			// Calculate segment resolution
 			magic::IntVector2 seg_res(
 					seg_img_size.x_ / segment_def.total_segments.x_,
