@@ -80,6 +80,9 @@ struct CVoxelRegistry: public VoxelRegistry
 		if(def.id != VOXELTYPEID_UNDEFINED && id != def.id)
 			throw Exception(ss_()+"add_voxel(): def.id="+itos(def.id)+
 						  "; should be "+itos(id));
+		if(m_name_to_id.count(def.name) != 0)
+			throw Exception(ss_()+"add_voxel(): Already exists: "+
+						  cs(def.name.dump()));
 		// NOTE: This invalidates all previous pointers to cache entries that
 		//       were given out
 		m_defs.resize(id + 1);
