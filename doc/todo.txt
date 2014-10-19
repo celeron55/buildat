@@ -54,3 +54,6 @@ Buildat TODO
   woxelworld:update and ThreadPool::run_post() will not be run on the same frame
 	- Pre (lod) geometry can take up to 2500us, and post can take 7200us, which
 	  means this will have a visible effect.
+- Multiple replicated scens and voxelworlds, with threading, for servers with a
+  lobby and multiple worlds
+- Don't emit all world generation events at once

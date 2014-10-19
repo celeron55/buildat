@@ -50,7 +50,6 @@ function M.init()
 	local node_update_queue = buildat.SpatialUpdateQueue()
 
 	local function queue_initial_node_update(node)
-		-- TODO: node:GetWorldPosition() is not at center of node
 		node_update_queue:put(node:GetWorldPosition(),
 				INITIAL_GEOMETRY_NEAR_WEIGHT, camera_far_clip * 1.2,
 				nil, nil, {
@@ -58,7 +57,6 @@ function M.init()
 			current_lod = 0,
 			node_id = node:GetID(),
 		})
-		-- TODO: node:GetWorldPosition() is not at center of node
 		node_update_queue:put(node:GetWorldPosition(),
 				INITIAL_PHYSICS_NEAR_WEIGHT, PHYSICS_DISTANCE, nil, nil, {
 			type = "physics",
@@ -99,7 +97,6 @@ function M.init()
 		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
 		--local registry_name = node:GetVar("buildat_voxel_registry_name"):GetBuffer()
 
-		-- TODO: node:GetWorldPosition() is not at center of node
 		local node_p = node:GetWorldPosition()
 		local d = (node_p - camera_p):Length()
 		local lod_fraction = d / LOD_DISTANCE
