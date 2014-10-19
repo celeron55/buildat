@@ -185,38 +185,6 @@ struct SetVoxelGeometryTask: public interface::worker_thread::Task
 	}
 };
 
-void set_voxel_geometry(const luabind::object &node_o,
-		const luabind::object &buffer_o)
-{
-	lua_State *L = node_o.interpreter();
-
-	GET_TOLUA_STUFF(node, 1, Node);
-	log_d(MODULE, "set_voxel_geometry(): node=%p", node);
-
-	TRY_GET_TOLUA_STUFF(buf, 2, const VectorBuffer);
-	log_d(MODULE, "set_voxel_geometry(): buf=%p", buf);
-
-	ss_ data;
-	if(buf == nullptr)
-		data = lua_checkcppstring(L, 2);
-	else
-		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
-
-	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
-	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
-	lua_pop(L, 1);
-	auto *voxel_reg = buildat_app->get_voxel_registry();
-	auto *atlas_reg = buildat_app->get_atlas_registry();
-
-	up_<SetVoxelGeometryTask> task(new SetVoxelGeometryTask(
-			node, data, voxel_reg, atlas_reg
-	));
-
-	auto *thread_pool = buildat_app->get_thread_pool();
-
-	thread_pool->add_task(std::move(task));
-}
-
 struct SetVoxelLodGeometryTask: public interface::worker_thread::Task
 {
 	int lod;
@@ -272,54 +240,6 @@ struct SetVoxelLodGeometryTask: public interface::worker_thread::Task
 		return true;
 	}
 };
-
-void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
-		const luabind::object &buffer_o)
-{
-	lua_State *L = node_o.interpreter();
-
-	GET_TOLUA_STUFF(node, 2, Node);
-	TRY_GET_TOLUA_STUFF(buf, 3, const VectorBuffer);
-
-	log_d(MODULE, "set_voxel_lod_geometry(): lod=%i", lod);
-	log_d(MODULE, "set_voxel_lod_geometry(): node=%p", node);
-	log_d(MODULE, "set_voxel_lod_geometry(): buf=%p", buf);
-
-	ss_ data;
-	if(buf == nullptr)
-		data = lua_tocppstring(L, 2);
-	else
-		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
-
-	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
-	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
-	lua_pop(L, 1);
-	auto *voxel_reg = buildat_app->get_voxel_registry();
-	auto *atlas_reg = buildat_app->get_atlas_registry();
-
-	up_<SetVoxelLodGeometryTask> task(new SetVoxelLodGeometryTask(
-			lod, node, data, voxel_reg, atlas_reg
-	));
-
-	auto *thread_pool = buildat_app->get_thread_pool();
-
-	thread_pool->add_task(std::move(task));
-}
-
-void clear_voxel_geometry(const luabind::object &node_o)
-{
-	lua_State *L = node_o.interpreter();
-
-	GET_TOLUA_STUFF(node, 1, Node);
-
-	log_d(MODULE, "clear_voxel_geometry(): node=%p", node);
-
-	CustomGeometry *cg = node->GetComponent<CustomGeometry>();
-	if(cg)
-		node->RemoveComponent(cg);
-	//cg->Clear();
-	//cg->Commit();
-}
 
 struct SetPhysicsBoxesTask: public interface::worker_thread::Task
 {
@@ -392,6 +312,84 @@ struct SetPhysicsBoxesTask: public interface::worker_thread::Task
 		return false;
 	}
 };
+
+void set_voxel_geometry(const luabind::object &node_o,
+		const luabind::object &buffer_o)
+{
+	lua_State *L = node_o.interpreter();
+
+	GET_TOLUA_STUFF(node, 1, Node);
+	log_d(MODULE, "set_voxel_geometry(): node=%p", node);
+
+	TRY_GET_TOLUA_STUFF(buf, 2, const VectorBuffer);
+	log_d(MODULE, "set_voxel_geometry(): buf=%p", buf);
+
+	ss_ data;
+	if(buf == nullptr)
+		data = lua_checkcppstring(L, 2);
+	else
+		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+
+	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
+	lua_pop(L, 1);
+	auto *voxel_reg = buildat_app->get_voxel_registry();
+	auto *atlas_reg = buildat_app->get_atlas_registry();
+
+	up_<SetVoxelGeometryTask> task(new SetVoxelGeometryTask(
+			node, data, voxel_reg, atlas_reg
+	));
+
+	auto *thread_pool = buildat_app->get_thread_pool();
+
+	thread_pool->add_task(std::move(task));
+}
+
+void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
+		const luabind::object &buffer_o)
+{
+	lua_State *L = node_o.interpreter();
+
+	GET_TOLUA_STUFF(node, 2, Node);
+	TRY_GET_TOLUA_STUFF(buf, 3, const VectorBuffer);
+
+	log_d(MODULE, "set_voxel_lod_geometry(): lod=%i", lod);
+	log_d(MODULE, "set_voxel_lod_geometry(): node=%p", node);
+	log_d(MODULE, "set_voxel_lod_geometry(): buf=%p", buf);
+
+	ss_ data;
+	if(buf == nullptr)
+		data = lua_tocppstring(L, 2);
+	else
+		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+
+	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
+	lua_pop(L, 1);
+	auto *voxel_reg = buildat_app->get_voxel_registry();
+	auto *atlas_reg = buildat_app->get_atlas_registry();
+
+	up_<SetVoxelLodGeometryTask> task(new SetVoxelLodGeometryTask(
+			lod, node, data, voxel_reg, atlas_reg
+	));
+
+	auto *thread_pool = buildat_app->get_thread_pool();
+
+	thread_pool->add_task(std::move(task));
+}
+
+void clear_voxel_geometry(const luabind::object &node_o)
+{
+	lua_State *L = node_o.interpreter();
+
+	GET_TOLUA_STUFF(node, 1, Node);
+
+	log_d(MODULE, "clear_voxel_geometry(): node=%p", node);
+
+	CustomGeometry *cg = node->GetComponent<CustomGeometry>();
+	if(cg)
+		node->RemoveComponent(cg);
+}
 
 void set_voxel_physics_boxes(const luabind::object &node_o,
 		const luabind::object &buffer_o)
