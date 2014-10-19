@@ -6,8 +6,11 @@
 #include "interface/mesh.h"
 #include "interface/voxel_volume.h"
 #include "interface/worker_thread.h"
-#include <tolua++.h>
 #include <c55/os.h>
+#include <tolua++.h>
+#include <luabind/luabind.hpp>
+#include <luabind/adopt_policy.hpp>
+#include <luabind/pointer_traits.hpp>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Scene.h>
@@ -32,7 +35,7 @@ namespace lua_bindings {
 #define GET_TOLUA_STUFF(result_name, index, type) \
 	if(!tolua_isusertype(L, index, #type, 0, &tolua_err)){ \
 		tolua_error(L, __PRETTY_FUNCTION__, &tolua_err); \
-		return 0; \
+		throw Exception("Expected \"" #type "\""); \
 	} \
 	type *result_name = (type*)tolua_tousertype(L, index, 0);
 #define TRY_GET_TOLUA_STUFF(result_name, index, type) \
@@ -43,15 +46,13 @@ namespace lua_bindings {
 
 // NOTE: This API is designed this way because otherwise ownership management of
 //       objects sucks
-// set_simple_voxel_model(node, w, h, d, buffer: VectorBuffer)
-static int l_set_simple_voxel_model(lua_State *L)
+void set_simple_voxel_model(const luabind::object &node_o,
+		int w, int h, int d, const luabind::object &buffer_o)
 {
+	lua_State *L = node_o.interpreter();
 	tolua_Error tolua_err;
 
 	GET_TOLUA_STUFF(node, 1, Node);
-	int w = lua_tointeger(L, 2);
-	int h = lua_tointeger(L, 3);
-	int d = lua_tointeger(L, 4);
 	TRY_GET_TOLUA_STUFF(buf, 5, const VectorBuffer);
 
 	log_d(MODULE, "set_simple_voxel_model(): node=%p", node);
@@ -64,9 +65,8 @@ static int l_set_simple_voxel_model(lua_State *L)
 		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
 
 	if((int)data.size() != w * h * d){
-		log_e(MODULE, "set_simple_voxel_model(): Data size does not match "
-				"with dimensions (%zu vs. %i)", data.size(), w*h*d);
-		return 0;
+		throw Exception(ss_()+"set_simple_voxel_model(): Data size does not match"
+				" with dimensions ("+cs(data.size())+" vs. "+cs(w*h*d)+")");
 	}
 
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
@@ -79,19 +79,15 @@ static int l_set_simple_voxel_model(lua_State *L)
 
 	StaticModel *object = node->GetOrCreateComponent<StaticModel>();
 	object->SetModel(fromScratchModel);
-
-	return 0;
 }
 
-// set_8bit_voxel_geometry(node, w, h, d, buffer: VectorBuffer)
-static int l_set_8bit_voxel_geometry(lua_State *L)
+void set_8bit_voxel_geometry(const luabind::object &node_o,
+		int w, int h, int d, const luabind::object &buffer_o)
 {
+	lua_State *L = node_o.interpreter();
 	tolua_Error tolua_err;
 
 	GET_TOLUA_STUFF(node, 1, Node);
-	int w = lua_tointeger(L, 2);
-	int h = lua_tointeger(L, 3);
-	int d = lua_tointeger(L, 4);
 	TRY_GET_TOLUA_STUFF(buf, 5, const VectorBuffer);
 
 	log_d(MODULE, "set_8bit_voxel_geometry(): node=%p", node);
@@ -104,9 +100,8 @@ static int l_set_8bit_voxel_geometry(lua_State *L)
 		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
 
 	if((int)data.size() != w * h * d){
-		log_e(MODULE, "set_8bit_voxel_geometry(): Data size does not match "
-				"with dimensions (%zu vs. %i)", data.size(), w*h*d);
-		return 0;
+		throw Exception(ss_()+"set_8bit_voxel_geometry(): Data size does not match"
+				" with dimensions ("+cs(data.size())+" vs. "+cs(w*h*d)+")");
 	}
 
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
@@ -121,13 +116,8 @@ static int l_set_8bit_voxel_geometry(lua_State *L)
 	interface::mesh::set_8bit_voxel_geometry(cg, context, w, h, d, data,
 			voxel_reg, atlas_reg);
 
-	// Maybe appropriate
 	cg->SetOccluder(true);
-
-	// TODO: Don't do this here; allow the caller to do this
 	cg->SetCastShadows(true);
-
-	return 0;
 }
 
 #ifdef DEBUG_LOG_TIMING
@@ -197,20 +187,21 @@ struct SetVoxelGeometryTask: public interface::worker_thread::Task
 	}
 };
 
-// set_voxel_geometry(node, buffer: VectorBuffer)
-static int l_set_voxel_geometry(lua_State *L)
+void set_voxel_geometry(const luabind::object &node_o,
+		const luabind::object &buffer_o)
 {
+	lua_State *L = node_o.interpreter();
 	tolua_Error tolua_err;
 
 	GET_TOLUA_STUFF(node, 1, Node);
-	TRY_GET_TOLUA_STUFF(buf, 2, const VectorBuffer);
-
 	log_d(MODULE, "set_voxel_geometry(): node=%p", node);
+
+	TRY_GET_TOLUA_STUFF(buf, 2, const VectorBuffer);
 	log_d(MODULE, "set_voxel_geometry(): buf=%p", buf);
 
 	ss_ data;
 	if(buf == nullptr)
-		data = lua_tocppstring(L, 2);
+		data = lua_checkcppstring(L, 2);
 	else
 		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
 
@@ -227,8 +218,6 @@ static int l_set_voxel_geometry(lua_State *L)
 	auto *thread_pool = buildat_app->get_thread_pool();
 
 	thread_pool->add_task(std::move(task));
-
-	return 0;
 }
 
 struct SetVoxelLodGeometryTask: public interface::worker_thread::Task
@@ -287,12 +276,12 @@ struct SetVoxelLodGeometryTask: public interface::worker_thread::Task
 	}
 };
 
-// set_voxel_lod_geometry(lod: number, node: Node, buffer: VectorBuffer)
-static int l_set_voxel_lod_geometry(lua_State *L)
+void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
+		const luabind::object &buffer_o)
 {
+	lua_State *L = node_o.interpreter();
 	tolua_Error tolua_err;
 
-	int lod = lua_tointeger(L, 1);
 	GET_TOLUA_STUFF(node, 2, Node);
 	TRY_GET_TOLUA_STUFF(buf, 3, const VectorBuffer);
 
@@ -319,13 +308,11 @@ static int l_set_voxel_lod_geometry(lua_State *L)
 	auto *thread_pool = buildat_app->get_thread_pool();
 
 	thread_pool->add_task(std::move(task));
-
-	return 0;
 }
 
-// clear_voxel_geometry(node: Node)
-static int l_clear_voxel_geometry(lua_State *L)
+void clear_voxel_geometry(const luabind::object &node_o)
 {
+	lua_State *L = node_o.interpreter();
 	tolua_Error tolua_err;
 
 	GET_TOLUA_STUFF(node, 1, Node);
@@ -337,8 +324,6 @@ static int l_clear_voxel_geometry(lua_State *L)
 		node->RemoveComponent(cg);
 	//cg->Clear();
 	//cg->Commit();
-
-	return 0;
 }
 
 struct SetPhysicsBoxesTask: public interface::worker_thread::Task
@@ -413,9 +398,10 @@ struct SetPhysicsBoxesTask: public interface::worker_thread::Task
 	}
 };
 
-// set_voxel_physics_boxes(node, buffer: VectorBuffer)
-static int l_set_voxel_physics_boxes(lua_State *L)
+void set_voxel_physics_boxes(const luabind::object &node_o,
+		const luabind::object &buffer_o)
 {
+	lua_State *L = node_o.interpreter();
 	tolua_Error tolua_err;
 
 	GET_TOLUA_STUFF(node, 1, Node);
@@ -442,13 +428,11 @@ static int l_set_voxel_physics_boxes(lua_State *L)
 	auto *thread_pool = buildat_app->get_thread_pool();
 
 	thread_pool->add_task(std::move(task));
-
-	return 0;
 }
 
-// clear_voxel_physics_boxes(node)
-static int l_clear_voxel_physics_boxes(lua_State *L)
+void clear_voxel_physics_boxes(const luabind::object &node_o)
 {
+	lua_State *L = node_o.interpreter();
 	tolua_Error tolua_err;
 
 	GET_TOLUA_STUFF(node, 1, Node);
@@ -463,23 +447,21 @@ static int l_clear_voxel_physics_boxes(lua_State *L)
 	node->GetComponents<CollisionShape>(previous_shapes);
 	for(size_t i = 0; i < previous_shapes.Size(); i++)
 		node->RemoveComponent(previous_shapes[i]);
-
-	return 0;
 }
 
 void init_mesh(lua_State *L)
 {
-#define DEF_BUILDAT_FUNC(name){ \
-		lua_pushcfunction(L, l_##name); \
-		lua_setglobal(L, "__buildat_" #name); \
-}
-	DEF_BUILDAT_FUNC(set_simple_voxel_model);
-	DEF_BUILDAT_FUNC(set_8bit_voxel_geometry);
-	DEF_BUILDAT_FUNC(set_voxel_geometry);
-	DEF_BUILDAT_FUNC(set_voxel_lod_geometry);
-	DEF_BUILDAT_FUNC(clear_voxel_geometry);
-	DEF_BUILDAT_FUNC(set_voxel_physics_boxes);
-	DEF_BUILDAT_FUNC(clear_voxel_physics_boxes);
+#define LUABIND_FUNC(name) def("__buildat_" #name, name)
+	using namespace luabind;
+	module(L)[
+		LUABIND_FUNC(set_simple_voxel_model),
+		LUABIND_FUNC(set_8bit_voxel_geometry),
+		LUABIND_FUNC(set_voxel_geometry),
+		LUABIND_FUNC(set_voxel_lod_geometry),
+		LUABIND_FUNC(clear_voxel_geometry),
+		LUABIND_FUNC(set_voxel_physics_boxes),
+		LUABIND_FUNC(clear_voxel_physics_boxes)
+	];
 }
 
 } // namespace lua_bindingss

@@ -3,6 +3,7 @@
 #include "lua_bindings/init.h"
 #include "core/log.h"
 #include "interface/fs.h"
+#include <luabind/luabind.hpp>
 #define MODULE "lua_bindings"
 
 namespace lua_bindings {
@@ -16,6 +17,8 @@ extern void init_misc_urho3d(lua_State *L);
 
 void init(lua_State *L)
 {
+	luabind::open(L);
+
 	init_misc(L);
 	init_cereal(L);
 	init_voxel(L);
