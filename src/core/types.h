@@ -92,6 +92,11 @@ inline ss_ dump(const double &v){
 }
 
 template<>
+inline ss_ dump(const int &v){
+	return itos(v);
+}
+
+template<>
 inline ss_ dump(const uint32_t &v){
 	return itos(v);
 }
