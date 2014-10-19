@@ -302,6 +302,14 @@ function M.set_camera(new_camera_node)
 	camera_node = new_camera_node
 end
 
+function M.get_voxel_registry()
+	return voxel_reg
+end
+
+function M.get_atlas_registry()
+	return atlas_reg
+end
+
 function send_get_section(p)
 	local data = cereal.binary_output({
 		p = {

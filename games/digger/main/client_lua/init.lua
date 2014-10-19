@@ -217,11 +217,10 @@ magic.SubscribeToEvent("PhysicsCollision", function(event_type, event_data)
 	end
 end)
 
--- TODO: Fill in some stuff to the voxel registry
-local voxel_reg = buildat.createVoxelRegistry()
-local atlas_reg = buildat.createAtlasRegistry()
-
 function setup_simple_voxel_data(node)
+	local voxel_reg = voxelworld.get_voxel_registry()
+	local atlas_reg = voxelworld.get_atlas_registry()
+
 	local data = node:GetVar("simple_voxel_data"):GetBuffer()
 	local w = node:GetVar("simple_voxel_w"):GetInt()
 	local h = node:GetVar("simple_voxel_h"):GetInt()
