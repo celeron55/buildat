@@ -68,6 +68,34 @@ struct Module: public interface::Module
 
 	void init()
 	{
+		m_server->sub_event(this, Event::t("core:start"));
+		m_server->sub_event(this, Event::t("core:continue"));
+		m_server->sub_event(this, Event::t("core:tick"));
+		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
+		m_server->sub_event(this, Event::t("voxelworld:generation_request"));
+		m_server->sub_event(this, Event::t(
+					"network:packet_received/main:place_voxel"));
+		m_server->sub_event(this, Event::t(
+					"network:packet_received/main:dig"));
+	}
+
+	void event(const Event::Type &type, const Event::Private *p)
+	{
+		EVENT_VOIDN("core:start", on_start)
+		EVENT_VOIDN("core:continue", on_continue)
+		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
+		EVENT_TYPEN("client_file:files_transmitted",
+				on_files_transmitted, client_file::FilesTransmitted)
+		EVENT_TYPEN("voxelworld:generation_request",
+				on_generation_request, voxelworld::GenerationRequest)
+		EVENT_TYPEN("network:packet_received/main:place_voxel",
+				on_place_voxel, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:dig",
+				on_dig, network::Packet)
+	}
+
+	void on_start()
+	{
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
 			interface::VoxelRegistry *voxel_reg =
@@ -168,30 +196,6 @@ struct Module: public interface::Module
 			}
 		});
 
-		m_server->sub_event(this, Event::t("core:start"));
-		m_server->sub_event(this, Event::t("core:continue"));
-		m_server->sub_event(this, Event::t("core:tick"));
-		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
-		m_server->sub_event(this, Event::t("voxelworld:generation_request"));
-		m_server->sub_event(this, Event::t(
-					"network:packet_received/main:place_voxel"));
-	}
-
-	void event(const Event::Type &type, const Event::Private *p)
-	{
-		EVENT_VOIDN("core:start", on_start)
-		EVENT_VOIDN("core:continue", on_continue)
-		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
-		EVENT_TYPEN("client_file:files_transmitted",
-				on_files_transmitted, client_file::FilesTransmitted)
-		EVENT_TYPEN("voxelworld:generation_request",
-				on_generation_request, voxelworld::GenerationRequest)
-		EVENT_TYPEN("network:packet_received/main:place_voxel",
-				on_place_voxel, network::Packet)
-	}
-
-	void on_start()
-	{
 		m_server->access_scene([&](Scene *scene)
 		{
 			Context *context = scene->GetContext();
@@ -415,6 +419,34 @@ struct Module: public interface::Module
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
 			ivoxelworld->set_voxel(voxel_p, VoxelInstance(2));
+		});
+	}
+
+	void on_dig(const network::Packet &packet)
+	{
+		pv::Vector3DInt32 voxel_p;
+		{
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(voxel_p);
+		}
+		log_v(MODULE, "C%i: on_dig(): p=" PV3I_FORMAT,
+				packet.sender, PV3I_PARAMS(voxel_p));
+
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
+		{
+			VoxelInstance v(1);
+			pv::Region region(-1, -1, -1, 1, 0, 1);
+			auto lc = region.getLowerCorner();
+			auto uc = region.getUpperCorner();
+			for(int z = lc.getZ(); z <= uc.getZ(); z++){
+				for(int y = lc.getY(); y <= uc.getY(); y++){
+					for(int x = lc.getX(); x <= uc.getX(); x++){
+						ivoxelworld->set_voxel(
+								voxel_p + pv::Vector3DInt32(x, y, z), v);
+					}
+				}
+			}
 		});
 	}
 };

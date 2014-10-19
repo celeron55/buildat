@@ -60,7 +60,7 @@ local camera_node = player_node:CreateChild("Camera")
 camera_node.position = magic.Vector3(0, 0.411*PLAYER_HEIGHT, 0)
 --camera_node:Pitch(13.60000)
 local camera = camera_node:CreateComponent("Camera")
-camera.nearClip = 0.3
+camera.nearClip = 0.2
 camera.farClip = RENDER_DISTANCE
 camera.fov = 75
 
@@ -98,7 +98,7 @@ end)
 magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	local button = event_data:GetInt("Button")
 	log:info("MouseButtonDown: "..button)
-	if button == 4 then
+	if button == magic.MOUSEB_RIGHT then
 		local p = player_node.position
 		local data = cereal.binary_output({
 			p = {x = p.x, y = p.y, z = p.z},
@@ -110,6 +110,23 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 			}},
 		})
 		buildat.send_packet("main:place_voxel", data)
+	end
+	if button == magic.MOUSEB_LEFT then
+		local p = player_node.position
+		local data = cereal.binary_output({
+			p = {
+				x = math.floor(p.x),
+				y = math.floor(p.y+0.5),
+				z = math.floor(p.z)
+			},
+		}, {"object",
+			{"p", {"object",
+				{"x", "int32_t"},
+				{"y", "int32_t"},
+				{"z", "int32_t"},
+			}},
+		})
+		buildat.send_packet("main:dig", data)
 	end
 end)
 
