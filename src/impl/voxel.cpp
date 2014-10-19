@@ -28,7 +28,7 @@ ss_ VoxelName::dump() const
 	os<<"VoxelName(";
 	os<<"block_name="<<block_name;
 	os<<", segment=("<<(int)segment_x<<","<<(int)segment_y<<","
-			<<(int)segment_z<<")";
+	  <<(int)segment_z<<")";
 	os<<", rotation_primary="<<(int)rotation_primary;
 	os<<", rotation_secondary="<<(int)rotation_secondary;
 	os<<")";
@@ -79,7 +79,7 @@ struct CVoxelRegistry: public VoxelRegistry
 		VoxelTypeId id = m_defs.size();
 		if(def.id != VOXELTYPEID_UNDEFINED && id != def.id)
 			throw Exception(ss_()+"add_voxel(): def.id="+itos(def.id)+
-					"; should be "+itos(id));
+						  "; should be "+itos(id));
 		// NOTE: This invalidates all previous pointers to cache entries that
 		//       were given out
 		m_defs.resize(id + 1);

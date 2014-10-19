@@ -309,7 +309,7 @@ public:
 		if(!front_def)
 			throw Exception(ss_()+"Undefined voxel: front="+itos(front.getId()));
 		/*if(!back_def){
-			return false;
+		    return false;
 		}*/
 		else if(back_def->face_draw_type == interface::FaceDrawType::NEVER){
 			return false;
