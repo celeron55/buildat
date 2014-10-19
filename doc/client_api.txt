@@ -222,3 +222,37 @@ SubscribeToEvent(object, event_name, callback)
 - Return value: Name of the generated global callback which can be unusbscbribed
   from Urho3D via UnsubscribeFromEvent(event_name, callback_name).
 
+
+Miscellaneous
+=============
+
+You can create a client-side voxel registry like this:
+
+local voxel_reg = buildat.createVoxelRegistry()
+local atlas_reg = buildat.createAtlasRegistry()
+do
+	local vdef = buildat.VoxelDefinition()
+	vdef.name.block_name = "rock"
+	vdef.name.segment_x = 0
+	vdef.name.segment_y = 0
+	vdef.name.segment_z = 0
+	vdef.name.rotation_primary = 0
+	vdef.name.rotation_secondary = 0
+	vdef.handler_module = ""
+	local textures = {}
+	for i = 1, 6 do
+		local seg = buildat.AtlasSegmentDefinition()
+		seg.resource_name = "main/rock.png"
+		seg.total_segments = magic.IntVector2(1, 1)
+		seg.select_segment = magic.IntVector2(0, 0)
+		table.insert(textures, seg)
+	end
+	vdef.textures = textures
+	vdef.edge_material_id = buildat.VoxelDefinition.EDGEMATERIALID_GROUND
+	vdef.physically_solid = true
+	voxel_reg:add_voxel(vdef)
+	voxel_reg:add_voxel(vdef)
+	voxel_reg:add_voxel(vdef)
+	voxel_reg:add_voxel(vdef)
+end
+

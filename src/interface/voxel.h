@@ -38,6 +38,7 @@ namespace interface
 	typedef uint8_t EdgeMaterialId;
 	static constexpr EdgeMaterialId EDGEMATERIALID_EMPTY = 0;
 	static constexpr EdgeMaterialId EDGEMATERIALID_GROUND = 1;
+	// Values at and above 10 are freely usable.
 
 	struct VoxelDefinition
 	{
