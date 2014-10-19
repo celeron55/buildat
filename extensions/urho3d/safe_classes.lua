@@ -284,6 +284,7 @@ function M.define(dst, util)
 			castShadows = util.simple_property("boolean"),
 			shadowBias = util.simple_property("BiasParameters"),
 			shadowCascade = util.simple_property("CascadeParameters"),
+			color = util.simple_property("Color"),
 		},
 	})
 

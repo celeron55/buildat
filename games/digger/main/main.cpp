@@ -201,25 +201,6 @@ struct Module: public interface::Module
 			Context *context = scene->GetContext();
 			ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 
-			{
-				Node *node = scene->CreateChild("DirectionalLight");
-				node->SetDirection(Vector3(-0.6f, -1.0f, 0.8f));
-				Light *light = node->CreateComponent<Light>();
-				light->SetLightType(LIGHT_DIRECTIONAL);
-				light->SetCastShadows(true);
-				light->SetBrightness(0.8);
-				light->SetColor(Color(1.0, 1.0, 0.95));
-			}
-			{
-				Node *node = scene->CreateChild("DirectionalLight");
-				node->SetDirection(Vector3(0.3f, -1.0f, -0.4f));
-				Light *light = node->CreateComponent<Light>();
-				light->SetLightType(LIGHT_DIRECTIONAL);
-				light->SetCastShadows(true);
-				light->SetBrightness(0.2);
-				light->SetColor(Color(0.7, 0.7, 1.0));
-			}
-
 			voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 			{
 				interface::VoxelRegistry *voxel_reg =

@@ -26,13 +26,41 @@ local scene = replicate.main_scene
 
 magic.input:SetMouseVisible(false)
 
+-- Set up zone (global visual parameters)
 local zone_node = scene:CreateChild("Zone")
 local zone = zone_node:CreateComponent("Zone")
 zone.boundingBox = magic.BoundingBox(-1000, 1000)
+--zone.ambientColor = magic.Color(0.15, 0.15, 0.15)
 zone.ambientColor = magic.Color(0.1, 0.1, 0.1)
+--zone.ambientColor = magic.Color(0, 0, 0)
 zone.fogColor = magic.Color(0.6, 0.7, 0.8)
 zone.fogStart = 10
 zone.fogEnd = FOG_END
+
+-- Add lights
+--local node = scene:CreateChild("DirectionalLight")
+--node.direction = magic.Vector3(0.0, -1.0, 0.0)
+--local light = node:CreateComponent("Light")
+--light.lightType = magic.LIGHT_DIRECTIONAL
+--light.castShadows = true
+--light.brightness = 0.1
+--light.color = magic.Color(1.0, 1.0, 1.0)
+
+local node = scene:CreateChild("DirectionalLight")
+node.direction = magic.Vector3(-0.6, -1.0, 0.8)
+local light = node:CreateComponent("Light")
+light.lightType = magic.LIGHT_DIRECTIONAL
+light.castShadows = true
+light.brightness = 0.8
+light.color = magic.Color(1.0, 1.0, 0.95)
+
+local node = scene:CreateChild("DirectionalLight")
+node.direction = magic.Vector3(0.3, -1.0, -0.4)
+local light = node:CreateComponent("Light")
+light.lightType = magic.LIGHT_DIRECTIONAL
+light.castShadows = true
+light.brightness = 0.2
+light.color = magic.Color(0.7, 0.7, 1.0)
 
 -- Add a node that the player can use to walk around with
 local player_node = scene:CreateChild("Player")
@@ -60,7 +88,7 @@ local camera_node = player_node:CreateChild("Camera")
 camera_node.position = magic.Vector3(0, 0.411*PLAYER_HEIGHT, 0)
 --camera_node:Pitch(13.60000)
 local camera = camera_node:CreateComponent("Camera")
-camera.nearClip = 0.2
+camera.nearClip = 0.3
 camera.farClip = RENDER_DISTANCE
 camera.fov = 75
 
@@ -68,6 +96,8 @@ camera.fov = 75
 local viewport = magic.Viewport:new(scene, camera_node:GetComponent("Camera"))
 magic.renderer:SetViewport(0, viewport)
 
+-- Tell about the camera to the voxel world so it can do stuff based on the
+-- camera's position and other properties
 voxelworld.set_camera(camera_node)
 
 -- Add some text
