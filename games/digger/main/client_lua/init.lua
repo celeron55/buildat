@@ -97,8 +97,8 @@ end)
 
 magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	local button = event_data:GetInt("Button")
-	log:info(""..button)
-	if button == 3 then
+	log:info("MouseButtonDown: "..button)
+	if button == 4 then
 		local p = player_node.position
 		local data = cereal.binary_output({
 			p = {x = p.x, y = p.y, z = p.z},
