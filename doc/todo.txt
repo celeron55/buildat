@@ -39,17 +39,14 @@ Buildat TODO
   auto-tag each module at runtime with game_<current_game>
 - Threaded mesh generation
 - If an error occurs on the client in module initialization, show error and quit
-- LuaVoxelRegistry
 - Show sandbox_test status at corner and don't show dialog unless something is
   found
-- Threaded geometry generation
 - Local split-screen multiplayer: Two options:
 	- One Urho3D instance with systems in place to manage two UIs and things in
 	  the same instance (may be impossible)
 	- Allow connecting the input systems of multiple windows, which is simple
 	  but less automatic and most people don't know how to get rid of window
 	  borders
-- A way for module reloading to interrupt world generation
 - Maintain a global budget of background processing per frame so that a long
   woxelworld:update and ThreadPool::run_post() will not be run on the same frame
 	- Pre (lod) geometry can take up to 2500us, and post can take 7200us, which

@@ -8,15 +8,16 @@
 #include <luabind/pointer_traits.hpp>
 #define MODULE "lua_bindings"
 
-#define DEF_METHOD(name){ \
-		lua_pushcfunction(L, l_##name); \
-		lua_setfield(L, -2, #name); \
-}
-
 using interface::VoxelInstance;
 using interface::VoxelRegistry;
 
 namespace lua_bindings {
+
+sp_<VoxelRegistry> createVoxelRegistry(lua_State *L)
+{
+	return sp_<VoxelRegistry>(
+			interface::createVoxelRegistry());
+}
 
 void init_voxel(lua_State *L)
 {
@@ -28,8 +29,7 @@ void init_voxel(lua_State *L)
 					&VoxelRegistry::serialize)
 			.def("deserialize", (void(VoxelRegistry::*)(const ss_&))
 					&VoxelRegistry::deserialize),
-		def("createVoxelRegistry", &interface::createVoxelRegistry,
-				adopt_policy<0>())
+		def("createVoxelRegistry", &createVoxelRegistry)
 	];
 }
 

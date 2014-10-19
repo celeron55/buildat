@@ -38,7 +38,10 @@ local camera_last_dir = camera_dir
 local end_of_update_processing_us = 0
 
 local voxel_reg = buildat.createVoxelRegistry()
-voxel_reg:deserialize("foo")
+local atlas_reg = buildat.createTextureAtlasRegistry()
+
+log:info("voxel_reg type: "..dump(buildat.class_info(voxel_reg).name))
+log:info("atlas_reg type: "..dump(buildat.class_info(atlas_reg).name))
 
 M.chunk_size_voxels = nil
 M.section_size_chunks = nil
@@ -95,7 +98,6 @@ function M.init()
 
 	local function update_voxel_geometry(node)
 		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
-		--local registry_name = node:GetVar("buildat_voxel_registry_name"):GetBuffer()
 
 		local node_p = node:GetWorldPosition()
 		local d = (node_p - camera_p):Length()
@@ -121,13 +123,14 @@ function M.init()
 			near_trigger_d = 1.2 * camera_far_clip
 			near_weight = 0.4
 		elseif lod == 1 then
-			buildat.set_voxel_geometry(node, data, registry_name)
+			buildat.set_voxel_geometry(
+					node, data, voxel_reg, atlas_reg)
 
 			-- 1 -> 2
 			far_trigger_d = LOD_DISTANCE * (1.0 + LOD_THRESHOLD)
 			far_weight = 0.5
 		else
-			buildat.set_voxel_lod_geometry(lod, node, data, registry_name)
+			buildat.set_voxel_lod_geometry(lod, node, data, voxel_reg, atlas_reg)
 
 			if lod == 1 then
 				-- Shouldn't go here
@@ -165,7 +168,6 @@ function M.init()
 
 	local function update_voxel_physics(node)
 		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
-		--local registry_name = node:GetVar("buildat_voxel_registry_name"):GetBuffer()
 
 		local node_p = node:GetWorldPosition()
 		local d = (node_p - camera_p):Length()
@@ -186,7 +188,7 @@ function M.init()
 			near_trigger_d = PHYSICS_DISTANCE * 0.8
 			near_weight = 1.0
 		else
-			buildat.set_voxel_physics_boxes(node, data, registry_name)
+			buildat.set_voxel_physics_boxes(node, data, voxel_reg)
 
 			far_trigger_d = PHYSICS_DISTANCE * 1.2
 			far_weight = 0.2

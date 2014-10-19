@@ -105,10 +105,6 @@ struct CApp: public App, public magic::Application
 	magic::SharedPtr<magic::Scene> m_scene;
 	magic::SharedPtr<magic::Node> m_camera_node;
 
-	sp_<interface::TextureAtlasRegistry> m_atlas_reg;
-	sp_<interface::VoxelRegistry> m_voxel_reg;
-	//sp_<interface::BlockRegistry> m_block_reg;
-
 	sp_<interface::worker_thread::ThreadPool> m_thread_pool;
 
 	CApp(magic::Context *context, const Options &options):
@@ -193,107 +189,6 @@ struct CApp: public App, public magic::Application
 		magic_cache->SetAutoReloadResources(true);
 		m_router = new BuildatResourceRouter(context_);
 		magic_cache->SetResourceRouter(m_router);
-
-		// Create atlas and voxel registries
-		m_atlas_reg.reset(interface::createTextureAtlasRegistry(context));
-		m_voxel_reg.reset(interface::createVoxelRegistry());
-
-		// Add test voxels
-		// TOOD: Remove this from here
-		{
-			interface::VoxelDefinition vdef;
-			vdef.name.block_name = "air";
-			vdef.name.segment_x = 0;
-			vdef.name.segment_y = 0;
-			vdef.name.segment_z = 0;
-			vdef.name.rotation_primary = 0;
-			vdef.name.rotation_secondary = 0;
-			vdef.handler_module = "";
-			for(size_t i = 0; i < 6; i++){
-				interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-				seg.resource_name = "";
-				seg.total_segments = magic::IntVector2(0, 0);
-				seg.select_segment = magic::IntVector2(0, 0);
-			}
-			vdef.edge_material_id = interface::EDGEMATERIALID_EMPTY;
-			m_voxel_reg->add_voxel(vdef); // id 1
-		}
-		{
-			interface::VoxelDefinition vdef;
-			vdef.name.block_name = "rock";
-			vdef.name.segment_x = 0;
-			vdef.name.segment_y = 0;
-			vdef.name.segment_z = 0;
-			vdef.name.rotation_primary = 0;
-			vdef.name.rotation_secondary = 0;
-			vdef.handler_module = "";
-			for(size_t i = 0; i < 6; i++){
-				interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-				seg.resource_name = "main/rock.png";
-				seg.total_segments = magic::IntVector2(1, 1);
-				seg.select_segment = magic::IntVector2(0, 0);
-			}
-			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
-			vdef.physically_solid = true;
-			m_voxel_reg->add_voxel(vdef); // id 2
-		}
-		{
-			interface::VoxelDefinition vdef;
-			vdef.name.block_name = "dirt";
-			vdef.name.segment_x = 0;
-			vdef.name.segment_y = 0;
-			vdef.name.segment_z = 0;
-			vdef.name.rotation_primary = 0;
-			vdef.name.rotation_secondary = 0;
-			vdef.handler_module = "";
-			for(size_t i = 0; i < 6; i++){
-				interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-				seg.resource_name = "main/dirt.png";
-				seg.total_segments = magic::IntVector2(1, 1);
-				seg.select_segment = magic::IntVector2(0, 0);
-			}
-			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
-			vdef.physically_solid = true;
-			m_voxel_reg->add_voxel(vdef); // id 3
-		}
-		{
-			interface::VoxelDefinition vdef;
-			vdef.name.block_name = "grass";
-			vdef.name.segment_x = 0;
-			vdef.name.segment_y = 0;
-			vdef.name.segment_z = 0;
-			vdef.name.rotation_primary = 0;
-			vdef.name.rotation_secondary = 0;
-			vdef.handler_module = "";
-			for(size_t i = 0; i < 6; i++){
-				interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-				seg.resource_name = "main/grass.png";
-				seg.total_segments = magic::IntVector2(1, 1);
-				seg.select_segment = magic::IntVector2(0, 0);
-			}
-			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
-			vdef.physically_solid = true;
-			m_voxel_reg->add_voxel(vdef); // id 4
-		}
-		{
-			interface::VoxelDefinition vdef;
-			vdef.name.block_name = "leaves";
-			vdef.name.segment_x = 0;
-			vdef.name.segment_y = 0;
-			vdef.name.segment_z = 0;
-			vdef.name.rotation_primary = 0;
-			vdef.name.rotation_secondary = 0;
-			vdef.handler_module = "";
-			for(size_t i = 0; i < 6; i++){
-				interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-				seg.resource_name = "main/leaves.png";
-				seg.total_segments = magic::IntVector2(1, 1);
-				seg.select_segment = magic::IntVector2(0, 0);
-			}
-			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
-			vdef.physically_solid = true;
-			m_voxel_reg->add_voxel(vdef); // id 5
-		}
 	}
 
 	~CApp()
@@ -398,16 +293,6 @@ struct CApp: public App, public magic::Application
 	magic::Scene* get_scene()
 	{
 		return m_scene;
-	}
-
-	interface::VoxelRegistry* get_voxel_registry()
-	{
-		return m_voxel_reg.get();
-	}
-
-	interface::TextureAtlasRegistry* get_atlas_registry()
-	{
-		return m_atlas_reg.get();
 	}
 
 	interface::worker_thread::ThreadPool* get_thread_pool()
@@ -527,8 +412,6 @@ struct CApp: public App, public magic::Application
 	{
 		/*magic::AutoProfileBlock profiler_block(
 		        GetSubsystem<magic::Profiler>(), "App::on_update");*/
-
-		m_atlas_reg->update();
 
 		if(g_sigint_received)
 			shutdown();

@@ -12,7 +12,11 @@ buildat.safe.disconnect    = __buildat_disconnect
 buildat.safe.get_time_us   = __buildat_get_time_us
 buildat.safe.profiler_block_begin = __buildat_profiler_block_begin
 buildat.safe.profiler_block_end   = __buildat_profiler_block_end
-buildat.safe.createVoxelRegistry = createVoxelRegistry
+buildat.safe.createVoxelRegistry        = createVoxelRegistry
+buildat.safe.createTextureAtlasRegistry = createTextureAtlasRegistry
+
+-- NOTE: Maybe not actually safe
+buildat.safe.class_info = class_info -- Luabind class_info()
 
 buildat.safe.SpatialUpdateQueue = function()
 	local internal = __buildat_SpatialUpdateQueue()
@@ -77,7 +81,7 @@ function buildat.safe.set_simple_voxel_model(safe_node, w, h, d, safe_buffer)
 	__buildat_set_simple_voxel_model(node, w, h, d, buffer)
 end
 
-function buildat.safe.set_8bit_voxel_geometry(safe_node, w, h, d, safe_buffer)
+function buildat.safe.set_8bit_voxel_geometry(safe_node, w, h, d, safe_buffer, ...)
 	if not getmetatable(safe_node) or
 			getmetatable(safe_node).type_name ~= "Node" then
 		error("node is not a sandboxed Node instance")
@@ -94,10 +98,10 @@ function buildat.safe.set_8bit_voxel_geometry(safe_node, w, h, d, safe_buffer)
 		end
 		buffer = getmetatable(safe_buffer).unsafe
 	end
-	__buildat_set_8bit_voxel_geometry(node, w, h, d, buffer)
+	__buildat_set_8bit_voxel_geometry(node, w, h, d, buffer, ...)
 end
 
-function buildat.safe.set_voxel_geometry(safe_node, safe_buffer)
+function buildat.safe.set_voxel_geometry(safe_node, safe_buffer, ...)
 	if not getmetatable(safe_node) or
 			getmetatable(safe_node).type_name ~= "Node" then
 		error("node is not a sandboxed Node instance")
@@ -114,10 +118,10 @@ function buildat.safe.set_voxel_geometry(safe_node, safe_buffer)
 		end
 		buffer = getmetatable(safe_buffer).unsafe
 	end
-	__buildat_set_voxel_geometry(node, buffer)
+	__buildat_set_voxel_geometry(node, buffer, ...)
 end
 
-function buildat.safe.set_voxel_lod_geometry(lod, safe_node, safe_buffer)
+function buildat.safe.set_voxel_lod_geometry(lod, safe_node, safe_buffer, ...)
 	if not getmetatable(safe_node) or
 			getmetatable(safe_node).type_name ~= "Node" then
 		error("node is not a sandboxed Node instance")
@@ -134,7 +138,7 @@ function buildat.safe.set_voxel_lod_geometry(lod, safe_node, safe_buffer)
 		end
 		buffer = getmetatable(safe_buffer).unsafe
 	end
-	__buildat_set_voxel_lod_geometry(lod, node, buffer)
+	__buildat_set_voxel_lod_geometry(lod, node, buffer, ...)
 end
 
 function buildat.safe.clear_voxel_geometry(safe_node)
@@ -147,7 +151,7 @@ function buildat.safe.clear_voxel_geometry(safe_node)
 	__buildat_clear_voxel_geometry(node)
 end
 
-function buildat.safe.set_voxel_physics_boxes(safe_node, safe_buffer)
+function buildat.safe.set_voxel_physics_boxes(safe_node, safe_buffer, ...)
 	if not getmetatable(safe_node) or
 			getmetatable(safe_node).type_name ~= "Node" then
 		error("node is not a sandboxed Node instance")
@@ -164,7 +168,7 @@ function buildat.safe.set_voxel_physics_boxes(safe_node, safe_buffer)
 		end
 		buffer = getmetatable(safe_buffer).unsafe
 	end
-	__buildat_set_voxel_physics_boxes(node, buffer)
+	__buildat_set_voxel_physics_boxes(node, buffer, ...)
 end
 
 function buildat.safe.clear_voxel_physics_boxes(safe_node)

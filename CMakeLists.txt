@@ -157,6 +157,7 @@ if(BUILD_CLIENT)
 		src/lua_bindings/misc.cpp
 		src/lua_bindings/cereal.cpp
 		src/lua_bindings/voxel.cpp
+		src/lua_bindings/atlas.cpp
 		src/lua_bindings/mesh.cpp
 		src/lua_bindings/spatial_update_queue.cpp
 		src/lua_bindings/misc_urho3d.cpp

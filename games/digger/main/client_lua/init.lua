@@ -217,13 +217,17 @@ magic.SubscribeToEvent("PhysicsCollision", function(event_type, event_data)
 	end
 end)
 
+-- TODO: Fill in some stuff to the voxel registry
+local voxel_reg = buildat.createVoxelRegistry()
+local atlas_reg = buildat.createTextureAtlasRegistry()
+
 function setup_simple_voxel_data(node)
 	local data = node:GetVar("simple_voxel_data"):GetBuffer()
 	local w = node:GetVar("simple_voxel_w"):GetInt()
 	local h = node:GetVar("simple_voxel_h"):GetInt()
 	local d = node:GetVar("simple_voxel_d"):GetInt()
 	log:info(dump(node:GetName()).." voxel data size: "..data:GetSize())
-	buildat.set_8bit_voxel_geometry(node, w, h, d, data)
+	buildat.set_8bit_voxel_geometry(node, w, h, d, data, voxel_reg, atlas_reg)
 	node:SetScale(magic.Vector3(1, 1, 1))
 end
 

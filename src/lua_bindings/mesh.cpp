@@ -26,6 +26,8 @@ namespace magic = Urho3D;
 namespace pv = PolyVox;
 
 using interface::VoxelInstance;
+using interface::VoxelRegistry;
+using interface::TextureAtlasRegistry;
 using namespace Urho3D;
 
 namespace lua_bindings {
@@ -81,7 +83,8 @@ void set_simple_voxel_model(const luabind::object &node_o,
 }
 
 void set_8bit_voxel_geometry(const luabind::object &node_o,
-		int w, int h, int d, const luabind::object &buffer_o)
+		int w, int h, int d, const luabind::object &buffer_o,
+		sp_<VoxelRegistry> voxel_reg, sp_<TextureAtlasRegistry> atlas_reg)
 {
 	lua_State *L = node_o.interpreter();
 
@@ -106,13 +109,11 @@ void set_8bit_voxel_geometry(const luabind::object &node_o,
 	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
 	lua_pop(L, 1);
 	Context *context = buildat_app->get_scene()->GetContext();
-	auto *voxel_reg = buildat_app->get_voxel_registry();
-	auto *atlas_reg = buildat_app->get_atlas_registry();
 
 	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>();
 
 	interface::mesh::set_8bit_voxel_geometry(cg, context, w, h, d, data,
-			voxel_reg, atlas_reg);
+			voxel_reg.get(), atlas_reg.get());
 
 	cg->SetOccluder(true);
 	cg->SetCastShadows(true);
@@ -143,15 +144,14 @@ struct SetVoxelGeometryTask: public interface::worker_thread::Task
 {
 	Node *node;
 	ss_ data;
-	interface::VoxelRegistry *voxel_reg;
-	interface::TextureAtlasRegistry *atlas_reg;
+	sp_<VoxelRegistry> voxel_reg;
+	sp_<TextureAtlasRegistry> atlas_reg;
 
 	up_<pv::RawVolume<VoxelInstance>> volume;
 	sm_<uint, interface::mesh::TemporaryGeometry> temp_geoms;
 
 	SetVoxelGeometryTask(Node *node, const ss_ &data,
-			interface::VoxelRegistry *voxel_reg,
-			interface::TextureAtlasRegistry *atlas_reg):
+			sp_<VoxelRegistry> voxel_reg, sp_<TextureAtlasRegistry> atlas_reg):
 		node(node), data(data), voxel_reg(voxel_reg), atlas_reg(atlas_reg)
 	{
 		ScopeTimer timer("pre geometry");
@@ -159,7 +159,8 @@ struct SetVoxelGeometryTask: public interface::worker_thread::Task
 		//       meaasure how long its execution takes
 		// NOTE: Could be split in two calls
 		volume = interface::deserialize_volume(data);
-		interface::mesh::preload_textures(*volume, voxel_reg, atlas_reg);
+		interface::mesh::preload_textures(
+				*volume, voxel_reg.get(), atlas_reg.get());
 	}
 	// Called repeatedly from main thread until returns true
 	bool pre()
@@ -169,7 +170,8 @@ struct SetVoxelGeometryTask: public interface::worker_thread::Task
 	// Called repeatedly from worker thread until returns true
 	bool thread()
 	{
-		generate_voxel_geometry(temp_geoms, *volume, voxel_reg, atlas_reg);
+		generate_voxel_geometry(
+				temp_geoms, *volume, voxel_reg.get(), atlas_reg.get());
 		return true;
 	}
 	// Called repeatedly from main thread until returns true
@@ -178,7 +180,8 @@ struct SetVoxelGeometryTask: public interface::worker_thread::Task
 		ScopeTimer timer("post geometry");
 		Context *context = node->GetContext();
 		CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>();
-		interface::mesh::set_voxel_geometry(cg, context, temp_geoms, atlas_reg);
+		interface::mesh::set_voxel_geometry(
+				cg, context, temp_geoms, atlas_reg.get());
 		cg->SetOccluder(true);
 		cg->SetCastShadows(true);
 		return true;
@@ -190,15 +193,14 @@ struct SetVoxelLodGeometryTask: public interface::worker_thread::Task
 	int lod;
 	Node *node;
 	ss_ data;
-	interface::VoxelRegistry *voxel_reg;
-	interface::TextureAtlasRegistry *atlas_reg;
+	sp_<VoxelRegistry> voxel_reg;
+	sp_<TextureAtlasRegistry> atlas_reg;
 
 	up_<pv::RawVolume<VoxelInstance>> lod_volume;
 	sm_<uint, interface::mesh::TemporaryGeometry> temp_geoms;
 
 	SetVoxelLodGeometryTask(int lod, Node *node, const ss_ &data,
-			interface::VoxelRegistry *voxel_reg,
-			interface::TextureAtlasRegistry *atlas_reg):
+			sp_<VoxelRegistry> voxel_reg, sp_<TextureAtlasRegistry> atlas_reg):
 		lod(lod), node(node), data(data),
 		voxel_reg(voxel_reg), atlas_reg(atlas_reg)
 	{
@@ -210,7 +212,8 @@ struct SetVoxelLodGeometryTask: public interface::worker_thread::Task
 				interface::deserialize_volume(data);
 		lod_volume = interface::mesh::generate_voxel_lod_volume(
 				lod, *volume_orig);
-		interface::mesh::preload_textures(*lod_volume, voxel_reg, atlas_reg);
+		interface::mesh::preload_textures(
+				*lod_volume, voxel_reg.get(), atlas_reg.get());
 	}
 	// Called repeatedly from main thread until returns true
 	bool pre()
@@ -221,7 +224,7 @@ struct SetVoxelLodGeometryTask: public interface::worker_thread::Task
 	bool thread()
 	{
 		generate_voxel_lod_geometry(
-				lod, temp_geoms, *lod_volume, voxel_reg, atlas_reg);
+				lod, temp_geoms, *lod_volume, voxel_reg.get(), atlas_reg.get());
 		return true;
 	}
 	// Called repeatedly from main thread until returns true
@@ -231,7 +234,7 @@ struct SetVoxelLodGeometryTask: public interface::worker_thread::Task
 		Context *context = node->GetContext();
 		CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>();
 		interface::mesh::set_voxel_lod_geometry(
-				lod, cg, context, temp_geoms, atlas_reg);
+				lod, cg, context, temp_geoms, atlas_reg.get());
 		cg->SetOccluder(true);
 		if(lod <= interface::MAX_LOD_WITH_SHADOWS)
 			cg->SetCastShadows(true);
@@ -245,13 +248,13 @@ struct SetPhysicsBoxesTask: public interface::worker_thread::Task
 {
 	Node *node;
 	ss_ data;
-	interface::VoxelRegistry *voxel_reg;
+	sp_<VoxelRegistry> voxel_reg;
 
 	up_<pv::RawVolume<VoxelInstance>> volume;
 	sv_<interface::mesh::TemporaryBox> result_boxes;
 
 	SetPhysicsBoxesTask(Node *node, const ss_ &data,
-			interface::VoxelRegistry *voxel_reg):
+			sp_<VoxelRegistry> voxel_reg):
 		node(node), data(data), voxel_reg(voxel_reg)
 	{
 		// NOTE: Do the pre-processing here so that the calling code can
@@ -268,7 +271,7 @@ struct SetPhysicsBoxesTask: public interface::worker_thread::Task
 	bool thread()
 	{
 		interface::mesh::generate_voxel_physics_boxes(
-				result_boxes, *volume, voxel_reg);
+				result_boxes, *volume, voxel_reg.get());
 		return true;
 	}
 	// Called repeatedly from main thread until returns true
@@ -314,7 +317,8 @@ struct SetPhysicsBoxesTask: public interface::worker_thread::Task
 };
 
 void set_voxel_geometry(const luabind::object &node_o,
-		const luabind::object &buffer_o)
+		const luabind::object &buffer_o,
+		sp_<VoxelRegistry> voxel_reg, sp_<TextureAtlasRegistry> atlas_reg)
 {
 	lua_State *L = node_o.interpreter();
 
@@ -333,8 +337,6 @@ void set_voxel_geometry(const luabind::object &node_o,
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
 	lua_pop(L, 1);
-	auto *voxel_reg = buildat_app->get_voxel_registry();
-	auto *atlas_reg = buildat_app->get_atlas_registry();
 
 	up_<SetVoxelGeometryTask> task(new SetVoxelGeometryTask(
 			node, data, voxel_reg, atlas_reg
@@ -346,7 +348,8 @@ void set_voxel_geometry(const luabind::object &node_o,
 }
 
 void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
-		const luabind::object &buffer_o)
+		const luabind::object &buffer_o,
+		sp_<VoxelRegistry> voxel_reg, sp_<TextureAtlasRegistry> atlas_reg)
 {
 	lua_State *L = node_o.interpreter();
 
@@ -366,8 +369,6 @@ void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
 	lua_pop(L, 1);
-	auto *voxel_reg = buildat_app->get_voxel_registry();
-	auto *atlas_reg = buildat_app->get_atlas_registry();
 
 	up_<SetVoxelLodGeometryTask> task(new SetVoxelLodGeometryTask(
 			lod, node, data, voxel_reg, atlas_reg
@@ -392,7 +393,7 @@ void clear_voxel_geometry(const luabind::object &node_o)
 }
 
 void set_voxel_physics_boxes(const luabind::object &node_o,
-		const luabind::object &buffer_o)
+		const luabind::object &buffer_o, sp_<VoxelRegistry> voxel_reg)
 {
 	lua_State *L = node_o.interpreter();
 
@@ -411,7 +412,6 @@ void set_voxel_physics_boxes(const luabind::object &node_o,
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
 	lua_pop(L, 1);
-	auto *voxel_reg = buildat_app->get_voxel_registry();
 
 	up_<SetPhysicsBoxesTask> task(new SetPhysicsBoxesTask(
 			node, data, voxel_reg
