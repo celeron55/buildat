@@ -4,6 +4,7 @@
 #include "interface/voxel.h"
 #include "lua_bindings/util.h"
 #include "lua_bindings/luabind_util.h"
+#include "lua_bindings/sandbox_util.h"
 #include <luabind/luabind.hpp>
 #include <luabind/adopt_policy.hpp>
 #include <luabind/object.hpp>
@@ -13,15 +14,6 @@
 #include <Vector2.h>
 #pragma GCC diagnostic pop
 #define MODULE "lua_bindings"
-
-#define GET_TOLUA_STUFF(result_name, index, type){ \
-		tolua_Error tolua_err; \
-		if(!tolua_isusertype(L, index, #type, 0, &tolua_err)){ \
-			tolua_error(L, __PRETTY_FUNCTION__, &tolua_err); \
-			throw Exception("Expected \"" #type "\""); \
-		} \
-} \
-	type *result_name = (type*)tolua_tousertype(L, index, 0);
 
 using namespace interface;
 using Urho3D::IntVector2;
@@ -40,28 +32,8 @@ luabind::object asd_get_total_segments(
 void asd_set_total_segments(
 		AtlasSegmentDefinition &def, luabind::object value_safe, lua_State *L)
 {
-	// This won't work
-	/*luabind::object value_meta = luabind::getmetatable(value_safe);
-	if(luabind::object_cast<ss_>(value_meta["type_name"]) != "IntVector2")
-		throw Exception("Value is not a sandboxed IntVector2");
-	luabind::object value = value_meta["unsafe"];
-	value.push(L);
-	int top_L = lua_gettop(L);
-	GET_TOLUA_STUFF(v, top_L, IntVector2);*/
-
-	// This works
-	lua_getmetatable(L, 2);
-	lua_getfield(L, -1, "type_name");
-	if(ss_(lua_tostring(L, -1)) != "IntVector2"){
-		lua_pop(L, 2); // type_name, metatable
-		throw Exception("Value is not a sandboxed IntVector2");
-	}
-	lua_pop(L, 1); // type_name
-	lua_getfield(L, -1, "unsafe");
-	int top_L = lua_gettop(L);
-	GET_TOLUA_STUFF(v, top_L, IntVector2);
+	GET_SANDBOX_STUFF(v, 2, IntVector2);
 	def.total_segments = *v;
-	lua_pop(L, 2); // unsafe, metatable
 }
 
 luabind::object asd_get_select_segment(
@@ -74,18 +46,8 @@ luabind::object asd_get_select_segment(
 void asd_set_select_segment(
 		AtlasSegmentDefinition &def, luabind::object value, lua_State *L)
 {
-	lua_getmetatable(L, 2);
-	lua_getfield(L, -1, "type_name");
-	if(ss_(lua_tostring(L, -1)) != "IntVector2"){
-		lua_pop(L, 2); // type_name, metatable
-		throw Exception("Value is not a sandboxed IntVector2");
-	}
-	lua_pop(L, 1); // type_name
-	lua_getfield(L, -1, "unsafe");
-	int top_L = lua_gettop(L);
-	GET_TOLUA_STUFF(v, top_L, IntVector2);
+	GET_SANDBOX_STUFF(v, 2, IntVector2);
 	def.select_segment = *v;
-	lua_pop(L, 2); // unsafe, metatable
 }
 
 luabind::object vdef_get_textures(const VoxelDefinition &def, lua_State *L)

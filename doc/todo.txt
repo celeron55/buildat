@@ -23,8 +23,6 @@ Buildat TODO
 		- "Continuation voxels"
 - Support Cereal's shared pointer serialization in Lua
 - Automatically fetch and build and patch Urho3D when building buildat
-- Handle module load order properly in reloads (unload by popping from top,
-  then reload everything until top)
 - Automatic buildat root detection so that the server and the client can
   generally be started with any working directory in either the in-source or
   windows-installed configuration
@@ -54,3 +52,12 @@ Buildat TODO
 - Multiple replicated scens and voxelworlds, with threading, for servers with a
   lobby and multiple worlds
 - Don't emit all world generation events at once
+- Handle module load order properly in reloads (unload by popping from top,
+  then reload everything until top)
+	- When reloading a module, unload all dependants first; then load dependants
+	  again
+	- Each module should be able to choose whether they want their dependants
+	  unloaded or not; eg. network can just store the socket fds and be reloaded
+	  without anyone noticing
+		- Altough, network is very rarely modified so it doesn't really matter
+- Rename VoxelInstance::getId() to VoxelInstance::get_id()

@@ -17,6 +17,10 @@ buildat.safe.AtlasSegmentDefinition = __buildat_AtlasSegmentDefinition
 buildat.safe.VoxelDefinition      = __buildat_VoxelDefinition
 buildat.safe.createVoxelRegistry  = __buildat_createVoxelRegistry
 buildat.safe.createAtlasRegistry  = __buildat_createAtlasRegistry
+buildat.safe.Region        = __buildat_Region
+buildat.safe.VoxelInstance = __buildat_VoxelInstance
+buildat.safe.Volume        = __buildat_Volume
+buildat.safe.deserialize_volume_8bit = __buildat_deserialize_volume_8bit
 
 -- NOTE: Maybe not actually safe
 --buildat.safe.class_info = class_info -- Luabind class_info()

@@ -519,6 +519,10 @@ function M.define(dst, util)
 		},
 	})
 
+	-- Add properties to Node, using types defined later
+	getmetatable(dst.Node).def.properties["scene"] =
+			util.simple_property(dst.Scene),
+
 	util.wc("ResourceCache", {
 		instance = {
 			GetResource = util.wrap_function({"ResourceCache", "string", "string"},

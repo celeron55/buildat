@@ -14,6 +14,7 @@ namespace Urho3D
 {
 	class Context;
 	class Scene;
+	class Node;
 }
 
 namespace voxelworld
@@ -38,12 +39,33 @@ namespace voxelworld
 		NodeVoxelDataUpdatedEvent(uint node_id): node_id(node_id){}
 	};
 
+	struct Interface;
+
+	struct CommitHook
+	{
+		virtual ~CommitHook(){}
+		virtual void in_thread(voxelworld::Interface *ivoxelworld,
+				const pv::Vector3DInt32 &chunk_p,
+				sp_<pv::RawVolume<VoxelInstance>> volume){}
+		virtual void in_scene(voxelworld::Interface *ivoxelworld,
+				const pv::Vector3DInt32 &chunk_p, magic::Node *n){}
+	};
+
 	struct Interface
 	{
-		virtual void load_or_generate_section(
-				const pv::Vector3DInt16 &section_p) = 0;
+		virtual interface::VoxelRegistry* get_voxel_reg() = 0;
+
+		virtual void add_commit_hook(up_<CommitHook> hook) = 0;
 
 		virtual pv::Region get_section_region_voxels(
+				const pv::Vector3DInt16 &section_p) = 0;
+
+		virtual const pv::Vector3DInt16& get_chunk_size_voxels() = 0;
+
+		virtual pv::Region get_chunk_region_voxels(
+				const pv::Vector3DInt32 &chunk_p) = 0;
+
+		virtual void load_or_generate_section(
 				const pv::Vector3DInt16 &section_p) = 0;
 
 		virtual void set_voxel(const pv::Vector3DInt32 &p,
@@ -56,8 +78,6 @@ namespace voxelworld
 
 		virtual VoxelInstance get_voxel(const pv::Vector3DInt32 &p,
 				bool disable_warnings = false) = 0;
-
-		virtual interface::VoxelRegistry* get_voxel_reg() = 0;
 
 		// NOTE: There is no interface in here for directly accessing chunk
 		// volumes of static nodes, because it is so much more hassly and was

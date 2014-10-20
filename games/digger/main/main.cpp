@@ -9,6 +9,7 @@
 #include "interface/mesh.h"
 #include "interface/voxel.h"
 #include "interface/noise.h"
+#include "interface/voxel_volume.h"
 #include <Scene.h>
 #include <RigidBody.h>
 #include <CollisionShape.h>
@@ -52,6 +53,63 @@ void load(Archive &archive, pv::Vector3DInt32 &v){
 namespace digger {
 
 using namespace Urho3D;
+
+// Y-seethrough commit hook
+struct YstCommitHook: public voxelworld::CommitHook
+{
+	static constexpr const char *MODULE = "YstCommitHook";
+	ss_ m_yst_data;
+
+	void in_thread(voxelworld::Interface *ivoxelworld,
+			const pv::Vector3DInt32 &chunk_p,
+			sp_<pv::RawVolume<VoxelInstance>> volume)
+	{
+		interface::VoxelRegistry *voxel_reg = ivoxelworld->get_voxel_reg();
+		const auto &chunk_size_voxels = ivoxelworld->get_chunk_size_voxels();
+		int w = chunk_size_voxels.getX();
+		int h = chunk_size_voxels.getY();
+		int d = chunk_size_voxels.getZ();
+		pv::Region yst_region(0, 0, 0, w, 0, d);
+		// Y-seethrough (value: Lowest Y where light can go)
+		// If chunk above does not pass light to this chunk, value=d+1
+		up_<pv::RawVolume<uint8_t>> yst_volume(
+				new pv::RawVolume<uint8_t>(yst_region));
+		auto lc = yst_region.getLowerCorner();
+		auto uc = yst_region.getUpperCorner();
+		for(int z = 0; z < d; z++){
+			for(int x = 0; x <= w; x++){
+				// TODO: Read initial value from the chunk above
+				int y;
+				for(y = d; y >= 0; y--){
+					VoxelInstance v = volume->getVoxelAt(x+1, y+1, z+1);
+					const auto *def = voxel_reg->get_cached(v);
+					if(!def)
+						throw Exception(ss_()+"Undefined voxel: "+itos(v.getId()));
+					bool light_passes = (!def || !def->physically_solid);
+					if(!light_passes)
+						break;
+				}
+				y++;
+				yst_volume->setVoxelAt(x, 0, z, y);
+			}
+		}
+		m_yst_data = interface::serialize_volume_compressed(*yst_volume);
+	}
+
+	void in_scene(voxelworld::Interface *ivoxelworld,
+			const pv::Vector3DInt32 &chunk_p, magic::Node *n)
+	{
+		if(m_yst_data.empty()){
+			// Can happen if in_thread() fails
+			log_w(MODULE, "Commit hook in_scene executed without in_thread");
+			return;
+		}
+		n->SetVar(StringHash("main_voxel_yst_data"), Variant(
+					PODVector<uint8_t>((const uint8_t*)m_yst_data.c_str(),
+							m_yst_data.size())));
+		m_yst_data.clear();
+	}
+};
 
 struct Module: public interface::Module
 {
@@ -98,8 +156,10 @@ struct Module: public interface::Module
 	{
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
-			interface::VoxelRegistry *voxel_reg =
-				ivoxelworld->get_voxel_reg();
+			ivoxelworld->add_commit_hook(
+					up_<YstCommitHook>(new YstCommitHook()));
+
+			interface::VoxelRegistry *voxel_reg = ivoxelworld->get_voxel_reg();
 			{
 				interface::VoxelDefinition vdef;
 				vdef.name.block_name = "air";

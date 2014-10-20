@@ -157,7 +157,7 @@ ss_ serialize_volume_compressed(const pv::RawVolume<uint8_t> &volume)
 	return os.str();
 }
 
-up_<pv::RawVolume<uint8_t>> deserialize_volume_uint8(const ss_ &data)
+up_<pv::RawVolume<uint8_t>> deserialize_volume_8bit(const ss_ &data)
 {
 	std::istringstream is(data, std::ios::binary);
 	cereal::PortableBinaryInputArchive ar(is);

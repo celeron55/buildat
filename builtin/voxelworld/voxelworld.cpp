@@ -269,6 +269,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 	sp_<interface::VoxelRegistry> m_voxel_reg;
 	sp_<interface::BlockRegistry> m_block_reg;
 
+	sv_<up_<CommitHook>> m_commit_hooks;
+
 	// One node holds one chunk of voxels (eg. 24x24x24)
 	pv::Vector3DInt16 m_chunk_size_voxels = pv::Vector3DInt16(32, 32, 32);
 	//pv::Vector3DInt16 m_chunk_size_voxels = pv::Vector3DInt16(24, 24, 24);
@@ -364,12 +366,17 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 	void unload_node(Scene *scene, uint node_id)
 	{
-		log_v(MODULE, "Unloading node %i", node_id);
+		log_d(MODULE, "Unloading node %i", node_id);
 		Node *n = scene->GetNode(node_id);
 		if(!n){
 			log_w(MODULE, "Cannot unload node %i: Not found in scene", node_id);
 			return;
 		}
+		// Remove RigidBody first to speed up removal of CollisionShapes
+		RigidBody *body = n->GetComponent<RigidBody>();
+		if(body)
+			n->RemoveComponent(body);
+		// Remove everything else
 		n->RemoveAllComponents();
 		n->Remove();
 	}
@@ -383,7 +390,11 @@ struct Module: public interface::Module, public voxelworld::Interface
 		// Remove everything managed by us from the scene
 		m_server->access_scene([&](Scene *scene)
 		{
+			size_t progress = 0;
 			for(auto &sector_pair: m_sections){
+				log_v(MODULE, "Unloading nodes... %i%%",
+						100 * progress / m_sections.size());
+				progress++;
 				for(auto &section_pair: sector_pair.second){
 					Section &section = section_pair.second;
 
@@ -401,6 +412,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 					}
 				}
 			}
+			log_v(MODULE, "Unloading nodes... 100%%");
 		});
 
 		// Store voxel registry and stuff
@@ -608,41 +620,26 @@ struct Module: public interface::Module, public voxelworld::Interface
 		// NOTE: These volumes have one extra voxel at each edge in order to
 		//       make proper meshes without gaps
 		pv::Region region(-1, -1, -1, w, h, d);
-		pv::RawVolume<VoxelInstance> volume(region);
+		sp_<pv::RawVolume<VoxelInstance>> volume(
+				new pv::RawVolume<VoxelInstance>(region));
 
 		auto lc = region.getLowerCorner();
 		auto uc = region.getUpperCorner();
 		for(int z = lc.getZ(); z <= uc.getZ(); z++){
 			for(int y = lc.getY(); y <= uc.getY(); y++){
 				for(int x = lc.getX(); x <= uc.getX(); x++){
-					volume.setVoxelAt(x, y, z, VoxelInstance(0));
+					volume->setVoxelAt(x, y, z, VoxelInstance(0));
 				}
 			}
 		}
 
-		ss_ data = interface::serialize_volume_compressed(volume);
+		run_commit_hooks_in_thread(chunk_p, volume);
 
+		ss_ data = interface::serialize_volume_compressed(*volume);
 		n->SetVar(StringHash("buildat_voxel_data"), Variant(
 					PODVector<uint8_t>((const uint8_t*)data.c_str(), data.size())));
 
-		{
-			// Y-seethrough (1 = can see, 0 = can't see)
-			pv::Region yst_region(0, 0, 0, w, 0, d);
-			pv::RawVolume<uint8_t> yst_volume(yst_region);
-			auto lc = yst_region.getLowerCorner();
-			auto uc = yst_region.getUpperCorner();
-			for(int z = lc.getZ(); z <= uc.getZ(); z++){
-				for(int y = lc.getY(); y <= uc.getY(); y++){
-					for(int x = lc.getX(); x <= uc.getX(); x++){
-						volume.setVoxelAt(x, y, z, 1);
-					}
-				}
-			}
-			ss_ data = interface::serialize_volume_compressed(yst_volume);
-			n->SetVar(StringHash("buildat_voxel_yst_data"), Variant(
-						PODVector<uint8_t>((const uint8_t*)data.c_str(),
-								data.size())));
-		}
+		run_commit_hooks_in_scene(chunk_p, n);
 
 		// There are no collision shapes initially, but add the rigid body now
 		RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
@@ -709,15 +706,33 @@ struct Module: public interface::Module, public voxelworld::Interface
 		}
 	}
 
+	// Should be called before the volume is serialized so that the hook can
+	// modify the volume
+	void run_commit_hooks_in_thread(
+			const pv::Vector3DInt32 &chunk_p,
+			sp_<pv::RawVolume<VoxelInstance>> volume)
+	{
+		for(up_<CommitHook> &hook : m_commit_hooks)
+			hook->in_thread(this, chunk_p, volume);
+	}
+
+	void run_commit_hooks_in_scene(
+			const pv::Vector3DInt32 &chunk_p, magic::Node *n)
+	{
+		for(up_<CommitHook> &hook : m_commit_hooks)
+			hook->in_scene(this, chunk_p, n);
+	}
+
 	// Interface
 
-	void load_or_generate_section(const pv::Vector3DInt16 &section_p)
+	interface::VoxelRegistry* get_voxel_reg()
 	{
-		Section &section = force_get_section(section_p);
-		if(!section.loaded)
-			load_section(section);
-		if(!section.generated)
-			generate_section(section);
+		return m_voxel_reg.get();
+	}
+
+	void add_commit_hook(up_<CommitHook> hook)
+	{
+		m_commit_hooks.push_back(std::move(hook));
 	}
 
 	pv::Region get_section_region_voxels(const pv::Vector3DInt16 &section_p)
@@ -736,6 +751,35 @@ struct Module: public interface::Module, public voxelworld::Interface
 				m_section_size_chunks.getZ() * m_chunk_size_voxels.getZ() - 1
 		);
 		return pv::Region(p0, p1);
+	}
+
+	const pv::Vector3DInt16& get_chunk_size_voxels()
+	{
+		return m_chunk_size_voxels;
+	}
+
+	pv::Region get_chunk_region_voxels(const pv::Vector3DInt32 &chunk_p)
+	{
+		pv::Vector3DInt32 p0 = pv::Vector3DInt32(
+				chunk_p.getX() * m_chunk_size_voxels.getX(),
+				chunk_p.getY() * m_chunk_size_voxels.getY(),
+				chunk_p.getZ() * m_chunk_size_voxels.getZ()
+		);
+		pv::Vector3DInt32 p1 = p0 + pv::Vector3DInt32(
+				m_chunk_size_voxels.getX() - 1,
+				m_chunk_size_voxels.getY() - 1,
+				m_chunk_size_voxels.getZ() - 1
+		);
+		return pv::Region(p0, p1);
+	}
+
+	void load_or_generate_section(const pv::Vector3DInt16 &section_p)
+	{
+		Section &section = force_get_section(section_p);
+		if(!section.loaded)
+			load_section(section);
+		if(!section.generated)
+			generate_section(section);
 	}
 
 	void set_voxel_direct(const pv::Vector3DInt32 &p,
@@ -794,11 +838,15 @@ struct Module: public interface::Module, public voxelworld::Interface
 					PV3I_PARAMS(section_p), PV3I_PARAMS(voxel_p));
 			volume->setVoxelAt(voxel_p, v);
 
+			run_commit_hooks_in_thread(chunk_p, volume);
+
 			ss_ new_data = interface::serialize_volume_compressed(*volume);
 
 			n->SetVar(StringHash("buildat_voxel_data"), Variant(
 						PODVector<uint8_t>((const uint8_t*)new_data.c_str(),
 						new_data.size())));
+
+			run_commit_hooks_in_scene(chunk_p, n);
 		});
 
 		// Mark node for collision box update
@@ -878,6 +926,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 			return;
 		}
 
+		run_commit_hooks_in_thread(chunk_p, chunk_buffer.volume);
+
 		ss_ new_data = interface::serialize_volume_compressed(
 				*chunk_buffer.volume);
 
@@ -902,6 +952,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 			n->SetVar(StringHash("buildat_voxel_data"), Variant(
 						PODVector<uint8_t>((const uint8_t*)new_data.c_str(),
 						new_data.size())));
+
+			run_commit_hooks_in_scene(chunk_p, n);
 		});
 
 		// Tell replicate to emit events once it has done its job
@@ -982,11 +1034,6 @@ struct Module: public interface::Module, public voxelworld::Interface
 			m_sections_with_loaded_buffers.insert(it, section);
 
 		return v;
-	}
-
-	interface::VoxelRegistry* get_voxel_reg()
-	{
-		return m_voxel_reg.get();
 	}
 
 	void* get_interface()

@@ -28,9 +28,6 @@ local update_counter = -1
 
 local camera_p = magic.Vector3(0, 0, 0)
 local camera_dir = magic.Vector3(0, 0, 0)
--- Start higher than any conceivable value because otherwise things will never
--- be triggered to reflect this value
-local camera_far_clip = 1000
 
 local camera_last_p = camera_p
 local camera_last_dir = camera_dir
@@ -43,6 +40,9 @@ local atlas_reg = buildat.createAtlasRegistry()
 M.chunk_size_voxels = nil
 M.section_size_chunks = nil
 M.section_size_voxels = nil
+-- Start higher than any conceivable value because otherwise things will never
+-- be triggered to reflect this value
+M.camera_far_clip = 1000
 
 -- voxelworld is ready once the init and voxel_registry packets (and in the
 -- future possibly some other ones) have been received)
@@ -60,6 +60,8 @@ function on_ready()
 	on_ready_callbacks = nil
 end
 
+local geometry_update_cbs = {} -- function(node)
+
 function M.init()
 	log:info("voxelworld.init()")
 
@@ -67,7 +69,7 @@ function M.init()
 
 	local function queue_initial_node_update(node)
 		node_update_queue:put(node:GetWorldPosition(),
-				INITIAL_GEOMETRY_NEAR_WEIGHT, camera_far_clip * 1.2,
+				INITIAL_GEOMETRY_NEAR_WEIGHT, M.camera_far_clip * 1.2,
 				nil, nil, {
 			type = "geometry",
 			current_lod = 0,
@@ -127,29 +129,8 @@ function M.init()
 				", d="..math.floor(d)..", #data="..data:GetSize()..
 				", node="..node:GetID())
 
-		do
-			local zone_node = replicate.main_scene:CreateChild("Zone")
-			local zone = zone_node:CreateComponent("Zone")
-			local cs = M.chunk_size_voxels
-			zone.boundingBox = magic.BoundingBox(
-					node_p - magic.Vector3(cs.x, cs.y, cs.z)/2,
-					node_p + magic.Vector3(cs.x, cs.y, cs.z)/2
-			)
-			local has_sunlight = buildat.voxel_heuristic_has_sunlight(
-					data, voxel_reg)
-			if has_sunlight then
-				zone.ambientColor = magic.Color(0.1, 0.1, 0.1)
-				zone.fogColor = magic.Color(0.6, 0.7, 0.8)
-			else
-				zone.ambientColor = magic.Color(0, 0, 0)
-				zone.fogColor = magic.Color(0, 0, 0)
-			end
-			--zone.ambientColor = magic.Color(
-			--		math.random(), math.random(), math.random())
-			--zone.fogEnd = 10 + math.random() * 50
-			zone.fogStart = 10
-			zone.fogEnd = camera_far_clip * 1.2
-			--zone.ambientGradient = true
+		for _, cb in ipairs(geometry_update_cbs) do
+			cb(node)
 		end
 
 		local near_trigger_d = nil
@@ -157,13 +138,13 @@ function M.init()
 		local far_trigger_d = nil
 		local far_weight = nil
 
-		if d >= camera_far_clip * 1.4 then
+		if d >= M.camera_far_clip * 1.4 then
 			log:verbose("Clearing voxel geometry outside camera far clip ("
-					..camera_far_clip..")")
+					..M.camera_far_clip..")")
 			buildat.clear_voxel_geometry(node)
 
 			-- clip out -> 4
-			near_trigger_d = 1.2 * camera_far_clip
+			near_trigger_d = 1.2 * M.camera_far_clip
 			near_weight = 0.4
 		elseif lod == 1 then
 			buildat.set_voxel_geometry(
@@ -196,7 +177,7 @@ function M.init()
 				near_trigger_d = 3 * LOD_DISTANCE * (1.0 - LOD_THRESHOLD)
 				near_weight = 0.5
 				-- 4 -> clip out
-				far_trigger_d = camera_far_clip * 1.4
+				far_trigger_d = M.camera_far_clip * 1.4
 				far_weight = 0.4
 			end
 		end
@@ -257,7 +238,7 @@ function M.init()
 		if camera_node then
 			camera_dir = camera_node.direction
 			camera_p = camera_node:GetWorldPosition()
-			camera_far_clip = camera_node:GetComponent("Camera").farClip
+			M.camera_far_clip = camera_node:GetComponent("Camera").farClip
 		end
 
 		if camera_node and M.section_size_voxels then
@@ -358,6 +339,10 @@ function M.sub_ready(cb)
 	else
 		table.insert(on_ready_callbacks, cb)
 	end
+end
+
+function M.sub_geometry_update(cb)
+	table.insert(geometry_update_cbs, cb)
 end
 
 function send_get_section(p)
