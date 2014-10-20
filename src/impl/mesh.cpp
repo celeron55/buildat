@@ -233,9 +233,9 @@ Model* create_voxel_physics_model(Context *context,
 	if(num_indices == 0)
 		return nullptr;
 
-	int w = volume.getWidth() - 2;
-	int h = volume.getHeight() - 2;
-	int d = volume.getDepth() - 2;
+	int w = volume.getWidth();
+	int h = volume.getHeight();
+	int d = volume.getDepth();
 	sv_<float> vertex_data;
 	vertex_data.resize(num_vertices * 6); // vertex + normal
 	for(size_t i = 0; i < num_vertices; i++){
@@ -443,9 +443,9 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 	const sv_<uint32_t> &pv_indices = pv_mesh.getIndices();
 	const sv_<pv::PositionMaterialNormal> &pv_vertices = pv_mesh.getVertices();
 
-	int w = volume.getWidth() - 2;
-	int h = volume.getHeight() - 2;
-	int d = volume.getDepth() - 2;
+	int w = volume.getWidth();
+	int h = volume.getHeight();
+	int d = volume.getDepth();
 
 	// Handle vertices face-by-face in order to copy indices at the same time
 	for(size_t pv_face_i = 0; pv_face_i < pv_vertices.size() / 4; pv_face_i++){

@@ -542,6 +542,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 		// NOTE: These volumes have one extra voxel at each edge in order to
 		//       make proper meshes without gaps
+		// TODO: Is this needed anymore?
 		pv::Region region(-1, -1, -1, w, h, d);
 		sp_<pv::RawVolume<VoxelInstance>> volume(
 				new pv::RawVolume<VoxelInstance>(region));
@@ -757,11 +758,10 @@ struct Module: public interface::Module, public voxelworld::Interface
 						interface::deserialize_volume(data)
 					));
 
-			// NOTE: +1 offset needed for mesh generation
 			pv::Vector3DInt32 voxel_p(
-						p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX() + 1,
-						p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY() + 1,
-						p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ() + 1
+						p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX(),
+						p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY(),
+						p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ()
 					);
 			log_t(MODULE, "set_voxel_direct() p=" PV3I_FORMAT ", v=%i: "
 					"Chunk " PV3I_FORMAT " in section " PV3I_FORMAT
@@ -816,11 +816,10 @@ struct Module: public interface::Module, public voxelworld::Interface
 			}
 			return;
 		}
-		// NOTE: +1 offset needed for mesh generation
 		pv::Vector3DInt32 voxel_p(
-				p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX() + 1,
-				p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY() + 1,
-				p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ() + 1
+				p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX(),
+				p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY(),
+				p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ()
 		);
 		buf.volume->setVoxelAt(voxel_p, v);
 
@@ -950,11 +949,10 @@ struct Module: public interface::Module, public voxelworld::Interface
 			}
 			return VoxelInstance(interface::VOXELTYPEID_UNDEFINED);
 		}
-		// NOTE: +1 offset needed for mesh generation
 		pv::Vector3DInt32 voxel_p(
-				p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX() + 1,
-				p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY() + 1,
-				p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ() + 1
+				p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX(),
+				p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY(),
+				p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ()
 		);
 		VoxelInstance v = buf.volume->getVoxelAt(voxel_p);
 

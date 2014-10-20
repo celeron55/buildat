@@ -2,6 +2,8 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/voxel_volume.h"
 #include "interface/compress.h"
+#include "interface/polyvox_cereal.h"
+#include "interface/voxel_cereal.h"
 #include "core/log.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
@@ -9,46 +11,42 @@
 
 namespace interface {
 
-// pv::RawVolume<VoxelInstance>
+// pv::RawVolume<T>
 
-ss_ serialize_volume_simple(const pv::RawVolume<VoxelInstance> &volume)
+template<typename T>
+ss_ generic_serialize_volume_simple(const pv::RawVolume<T> &volume)
 {
 	std::ostringstream os(std::ios::binary);
 	{
 		cereal::PortableBinaryOutputArchive ar(os);
 		ar((uint8_t)2); // Format
-		ar((int32_t)volume.getWidth());
-		ar((int32_t)volume.getHeight());
-		ar((int32_t)volume.getDepth());
 		auto region = volume.getEnclosingRegion();
-		auto lc = region.getLowerCorner();
-		auto uc = region.getUpperCorner();
+		ar(region.getLowerCorner());
+		ar(region.getUpperCorner());
 		for(size_t i = 0; i<volume.m_dataSize; i++){
-			const VoxelInstance &v = volume.m_pData[i];
-			ar((uint32_t)v.data);
+			const T &v = volume.m_pData[i];
+			ar(v);
 		}
 	}
 	return os.str();
 }
 
-ss_ serialize_volume_compressed(const pv::RawVolume<VoxelInstance> &volume)
+template<typename T>
+ss_ generic_serialize_volume_compressed(const pv::RawVolume<T> &volume)
 {
 	std::ostringstream os(std::ios::binary);
 	{
 		cereal::PortableBinaryOutputArchive ar(os);
 		ar((uint8_t)3); // Format
-		ar((int32_t)volume.getWidth());
-		ar((int32_t)volume.getHeight());
-		ar((int32_t)volume.getDepth());
+		auto region = volume.getEnclosingRegion();
+		ar(region.getLowerCorner());
+		ar(region.getUpperCorner());
 		std::ostringstream raw_os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(raw_os);
-			auto region = volume.getEnclosingRegion();
-			auto lc = region.getLowerCorner();
-			auto uc = region.getUpperCorner();
 			for(size_t i = 0; i<volume.m_dataSize; i++){
-				const VoxelInstance &v = volume.m_pData[i];
-				ar((uint32_t)v.data);
+				const T &v = volume.m_pData[i];
+				ar(v);
 			}
 		}
 		std::ostringstream compressed_os(std::ios::binary);
@@ -59,35 +57,32 @@ ss_ serialize_volume_compressed(const pv::RawVolume<VoxelInstance> &volume)
 	return os.str();
 }
 
-up_<pv::RawVolume<VoxelInstance>> deserialize_volume(const ss_ &data)
+template<typename T>
+up_<pv::RawVolume<T>> generic_deserialize_volume(const ss_ &data)
 {
 	std::istringstream is(data, std::ios::binary);
 	cereal::PortableBinaryInputArchive ar(is);
-	int8_t format = 0;
+	uint8_t format = 0;
 	ar(format);
 	if(format == 2){
-		int32_t w = 0;
-		int32_t h = 0;
-		int32_t d = 0;
-		ar(w, h, d);
-		pv::Region region(0, 0, 0, w-1, h-1, d-1);
-		up_<pv::RawVolume<VoxelInstance>> volume(
-				new pv::RawVolume<VoxelInstance>(region));
+		pv::Vector3DInt32 lc, uc;
+		ar(lc, uc);
+		pv::Region region(lc, uc);
+		up_<pv::RawVolume<T>> volume(
+				new pv::RawVolume<T>(region));
 		for(size_t i = 0; i<volume->m_dataSize; i++){
-			uint32_t v;
+			T v;
 			ar(v);
-			volume->m_pData[i].data = v;
+			volume->m_pData[i] = v;
 		}
 		return volume;
 	}
 	if(format == 3){
-		int32_t w = 0;
-		int32_t h = 0;
-		int32_t d = 0;
-		ar(w, h, d);
-		pv::Region region(0, 0, 0, w-1, h-1, d-1);
-		up_<pv::RawVolume<VoxelInstance>> volume(
-				new pv::RawVolume<VoxelInstance>(region));
+		pv::Vector3DInt32 lc, uc;
+		ar(lc, uc);
+		pv::Region region(lc, uc);
+		up_<pv::RawVolume<T>> volume(
+				new pv::RawVolume<T>(region));
 		ss_ compressed_data;
 		ar(compressed_data);
 		std::istringstream compressed_is(compressed_data, std::ios::binary);
@@ -97,210 +92,65 @@ up_<pv::RawVolume<VoxelInstance>> deserialize_volume(const ss_ &data)
 			std::istringstream raw_is(raw_os.str(), std::ios::binary);
 			cereal::PortableBinaryInputArchive ar(raw_is);
 			for(size_t i = 0; i<volume->m_dataSize; i++){
-				uint32_t v;
+				T v;
 				ar(v);
-				volume->m_pData[i].data = v;
+				volume->m_pData[i] = v;
 			}
 		}
 		return volume;
 	}
-	return up_<pv::RawVolume<VoxelInstance>>();
+	return up_<pv::RawVolume<T>>();
+}
+
+// pv::RawVolume<VoxelInstance>
+
+ss_ serialize_volume_simple(const pv::RawVolume<VoxelInstance> &volume)
+{
+	return generic_serialize_volume_simple(volume);
+}
+
+ss_ serialize_volume_compressed(const pv::RawVolume<VoxelInstance> &volume)
+{
+	return generic_serialize_volume_compressed(volume);
+}
+
+up_<pv::RawVolume<VoxelInstance>> deserialize_volume(const ss_ &data)
+{
+	return generic_deserialize_volume<VoxelInstance>(data);
 }
 
 // pv::RawVolume<int32_t>
 
 ss_ serialize_volume_simple(const pv::RawVolume<int32_t> &volume)
 {
-	std::ostringstream os(std::ios::binary);
-	{
-		cereal::PortableBinaryOutputArchive ar(os);
-		ar((int32_t)2); // Format
-		ar((int32_t)volume.getWidth());
-		ar((int32_t)volume.getHeight());
-		ar((int32_t)volume.getDepth());
-		auto region = volume.getEnclosingRegion();
-		auto lc = region.getLowerCorner();
-		auto uc = region.getUpperCorner();
-		for(size_t i = 0; i<volume.m_dataSize; i++){
-			const int32_t &v = volume.m_pData[i];
-			ar(v);
-		}
-	}
-	return os.str();
+	return generic_serialize_volume_simple(volume);
 }
 
 ss_ serialize_volume_compressed(const pv::RawVolume<int32_t> &volume)
 {
-	std::ostringstream os(std::ios::binary);
-	{
-		cereal::PortableBinaryOutputArchive ar(os);
-		ar((int32_t)3); // Format
-		ar((int32_t)volume.getWidth());
-		ar((int32_t)volume.getHeight());
-		ar((int32_t)volume.getDepth());
-		std::ostringstream raw_os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(raw_os);
-			auto region = volume.getEnclosingRegion();
-			auto lc = region.getLowerCorner();
-			auto uc = region.getUpperCorner();
-			for(size_t i = 0; i<volume.m_dataSize; i++){
-				const int32_t &v = volume.m_pData[i];
-				ar(v);
-			}
-		}
-		std::ostringstream compressed_os(std::ios::binary);
-		// NOTE: 4 uses 98% and 1 uses 58% of the CPU time of 6
-		interface::compress_zlib(raw_os.str(), compressed_os, 6);
-		ar(compressed_os.str());
-	}
-	return os.str();
+	return generic_serialize_volume_compressed(volume);
 }
 
 up_<pv::RawVolume<int32_t>> deserialize_volume_int32(const ss_ &data)
 {
-	std::istringstream is(data, std::ios::binary);
-	cereal::PortableBinaryInputArchive ar(is);
-	int8_t format = 0;
-	ar(format);
-	if(format == 2){
-		int32_t w = 0;
-		int32_t h = 0;
-		int32_t d = 0;
-		ar(w, h, d);
-		pv::Region region(0, 0, 0, w-1, h-1, d-1);
-		up_<pv::RawVolume<int32_t>> volume(
-				new pv::RawVolume<int32_t>(region));
-		for(size_t i = 0; i<volume->m_dataSize; i++){
-			int32_t v;
-			ar(v);
-			volume->m_pData[i] = v;
-		}
-		return volume;
-	}
-	if(format == 3){
-		int32_t w = 0;
-		int32_t h = 0;
-		int32_t d = 0;
-		ar(w, h, d);
-		pv::Region region(0, 0, 0, w-1, h-1, d-1);
-		up_<pv::RawVolume<int32_t>> volume(
-				new pv::RawVolume<int32_t>(region));
-		ss_ compressed_data;
-		ar(compressed_data);
-		std::istringstream compressed_is(compressed_data, std::ios::binary);
-		std::ostringstream raw_os(std::ios::binary);
-		decompress_zlib(compressed_is, raw_os);
-		{
-			std::istringstream raw_is(raw_os.str(), std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(raw_is);
-			for(size_t i = 0; i<volume->m_dataSize; i++){
-				int32_t v;
-				ar(v);
-				volume->m_pData[i] = v;
-			}
-		}
-		return volume;
-	}
-	return up_<pv::RawVolume<int32_t>>();
+	return generic_deserialize_volume<int32_t>(data);
 }
 
 // pv::RawVolume<uint8_t>
 
 ss_ serialize_volume_simple(const pv::RawVolume<uint8_t> &volume)
 {
-	std::ostringstream os(std::ios::binary);
-	{
-		cereal::PortableBinaryOutputArchive ar(os);
-		ar((uint8_t)2); // Format
-		ar((int32_t)volume.getWidth());
-		ar((int32_t)volume.getHeight());
-		ar((int32_t)volume.getDepth());
-		auto region = volume.getEnclosingRegion();
-		auto lc = region.getLowerCorner();
-		auto uc = region.getUpperCorner();
-		for(size_t i = 0; i<volume.m_dataSize; i++){
-			const uint8_t &v = volume.m_pData[i];
-			ar(v);
-		}
-	}
-	return os.str();
+	return generic_serialize_volume_simple(volume);
 }
 
 ss_ serialize_volume_compressed(const pv::RawVolume<uint8_t> &volume)
 {
-	std::ostringstream os(std::ios::binary);
-	{
-		cereal::PortableBinaryOutputArchive ar(os);
-		ar((uint8_t)3); // Format
-		ar((int32_t)volume.getWidth());
-		ar((int32_t)volume.getHeight());
-		ar((int32_t)volume.getDepth());
-		std::ostringstream raw_os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(raw_os);
-			auto region = volume.getEnclosingRegion();
-			auto lc = region.getLowerCorner();
-			auto uc = region.getUpperCorner();
-			for(size_t i = 0; i<volume.m_dataSize; i++){
-				const uint8_t &v = volume.m_pData[i];
-				ar(v);
-			}
-		}
-		std::ostringstream compressed_os(std::ios::binary);
-		// NOTE: 4 uses 98% and 1 uses 58% of the CPU time of 6
-		interface::compress_zlib(raw_os.str(), compressed_os, 6);
-		ar(compressed_os.str());
-	}
-	return os.str();
+	return generic_serialize_volume_compressed(volume);
 }
 
 up_<pv::RawVolume<uint8_t>> deserialize_volume_8bit(const ss_ &data)
 {
-	std::istringstream is(data, std::ios::binary);
-	cereal::PortableBinaryInputArchive ar(is);
-	int8_t format = 0;
-	ar(format);
-	if(format == 2){
-		int32_t w = 0;
-		int32_t h = 0;
-		int32_t d = 0;
-		ar(w, h, d);
-		pv::Region region(0, 0, 0, w-1, h-1, d-1);
-		up_<pv::RawVolume<uint8_t>> volume(
-				new pv::RawVolume<uint8_t>(region));
-		for(size_t i = 0; i<volume->m_dataSize; i++){
-			uint8_t v;
-			ar(v);
-			volume->m_pData[i] = v;
-		}
-		return volume;
-	}
-	if(format == 3){
-		int32_t w = 0;
-		int32_t h = 0;
-		int32_t d = 0;
-		ar(w, h, d);
-		pv::Region region(0, 0, 0, w-1, h-1, d-1);
-		up_<pv::RawVolume<uint8_t>> volume(
-				new pv::RawVolume<uint8_t>(region));
-		ss_ compressed_data;
-		ar(compressed_data);
-		std::istringstream compressed_is(compressed_data, std::ios::binary);
-		std::ostringstream raw_os(std::ios::binary);
-		decompress_zlib(compressed_is, raw_os);
-		{
-			std::istringstream raw_is(raw_os.str(), std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(raw_is);
-			for(size_t i = 0; i<volume->m_dataSize; i++){
-				uint8_t v;
-				ar(v);
-				volume->m_pData[i] = v;
-			}
-		}
-		return volume;
-	}
-	return up_<pv::RawVolume<uint8_t>>();
+	return generic_deserialize_volume<uint8_t>(data);
 }
 
 }
