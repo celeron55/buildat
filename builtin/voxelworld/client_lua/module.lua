@@ -18,8 +18,10 @@ local LOD_THRESHOLD = 0.2
 
 local PHYSICS_DISTANCE = 100
 local INITIAL_PHYSICS_NEAR_WEIGHT = 1.0
+local MODIFIED_PHYSICS_NEAR_WEIGHT = 1.0
 
 local INITIAL_GEOMETRY_NEAR_WEIGHT = 0.15
+local MODIFIED_GEOMETRY_NEAR_WEIGHT = 1.0
 
 local MAX_LOD = 4
 
@@ -82,6 +84,21 @@ function M.init()
 		})
 	end
 
+	local function queue_modified_node_update(node)
+		node_update_queue:put(node:GetWorldPosition(),
+				MODIFIED_GEOMETRY_NEAR_WEIGHT, M.camera_far_clip * 1.2,
+				nil, nil, {
+			type = "geometry",
+			current_lod = 0,
+			node_id = node:GetID(),
+		})
+		node_update_queue:put(node:GetWorldPosition(),
+				MODIFIED_PHYSICS_NEAR_WEIGHT, PHYSICS_DISTANCE, nil, nil, {
+			type = "physics",
+			node_id = node:GetID(),
+		})
+	end
+
 	buildat.sub_packet("voxelworld:init", function(data)
 		local values = cereal.binary_input(data, {"object",
 			{"chunk_size_voxels", {"object",
@@ -113,7 +130,7 @@ function M.init()
 		})
 		log:info("voxelworld:node_voxel_data_updated: "..dump(values))
 		local node = replicate.main_scene:GetNode(values.node_id)
-		queue_initial_node_update(node)
+		queue_modified_node_update(node)
 	end)
 
 	local function update_voxel_geometry(node)

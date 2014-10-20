@@ -39,6 +39,7 @@ do
 	zone.fogStart = 10
 	zone.fogEnd = FOG_END
 	zone.priority = -1
+	zone.override = true
 end
 --]]
 
@@ -134,7 +135,7 @@ end
 -- camera's position and other properties
 voxelworld.set_camera(camera_node)
 
---[[
+---[[
 -- Add a light to the camera
 do
 	local node = camera_node:CreateChild("Light")
@@ -142,9 +143,9 @@ do
 	light.lightType = magic.LIGHT_POINT
 	light.castShadows = false
 	light.brightness = 0.15
-	light.color = magic.Color(1.0, 1.0, 0.8)
-	light.range = 10.0
-	light.fadeDistance = 10.0
+	light.color = magic.Color(1.0, 1.0, 1.0)
+	light.range = 15.0
+	light.fadeDistance = 15.0
 end
 --]]
 

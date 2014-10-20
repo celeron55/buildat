@@ -565,6 +565,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 		run_commit_hooks_in_scene(chunk_p, n);
 
+		run_commit_hooks_after_commit(chunk_p);
+
 		// There are no collision shapes initially, but add the rigid body now
 		RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
 		body->SetFriction(0.75f);
@@ -645,6 +647,12 @@ struct Module: public interface::Module, public voxelworld::Interface
 	{
 		for(up_<CommitHook> &hook : m_commit_hooks)
 			hook->in_scene(this, chunk_p, n);
+	}
+
+	void run_commit_hooks_after_commit(const pv::Vector3DInt32 &chunk_p)
+	{
+		for(up_<CommitHook> &hook : m_commit_hooks)
+			hook->after_commit(this, chunk_p);
 	}
 
 	// Interface
@@ -783,6 +791,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 		// Mark node for collision box update
 		mark_node_for_physics_update(node_id, volume);
+
+		run_commit_hooks_after_commit(chunk_p);
 	}
 
 	void set_voxel(const pv::Vector3DInt32 &p, const interface::VoxelInstance &v,
@@ -901,6 +911,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 		chunk_buffer.dirty = false;
 		// Unload buffer volume
 		chunk_buffer.volume.reset();
+
+		run_commit_hooks_after_commit(chunk_p);
 	}
 
 	size_t num_buffers_loaded()

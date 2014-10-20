@@ -79,7 +79,8 @@ sp_<CommonVolume> deserialize_volume_int32(
 	for(int z = lc.getZ(); z <= uc.getZ(); z++){
 		for(int y = lc.getY(); y <= uc.getY(); y++){
 			for(int x = lc.getX(); x <= uc.getX(); x++){
-				uint8_t v = volume_int32->getVoxelAt(x, y, z);
+				int32_t v = volume_int32->getVoxelAt(x, y, z);
+				//log_w(MODULE, "v=%i", v);
 				volume->setVoxelAt(x, y, z, VoxelInstance(v));
 			}
 		}

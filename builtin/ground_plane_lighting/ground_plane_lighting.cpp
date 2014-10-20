@@ -173,16 +173,11 @@ struct YstCommitHook: public voxelworld::CommitHook
 		m_server(server)
 	{}
 
-	void in_thread(voxelworld::Interface *ivoxelworld,
-			const pv::Vector3DInt32 &chunk_p,
-			sp_<pv::RawVolume<VoxelInstance>> volume)
+	void after_commit(voxelworld::Interface *ivoxelworld,
+			const pv::Vector3DInt32 &chunk_p)
 	{
 		interface::VoxelRegistry *voxel_reg = ivoxelworld->get_voxel_reg();
-		const auto &chunk_size_voxels = ivoxelworld->get_chunk_size_voxels();
-		int w = chunk_size_voxels.getX();
-		int h = chunk_size_voxels.getY();
-		int d = chunk_size_voxels.getZ();
-
+		//const auto &chunk_size_voxels = ivoxelworld->get_chunk_size_voxels();
 		pv::Region chunk_region = ivoxelworld->get_chunk_region_voxels(chunk_p);
 
 		ground_plane_lighting::access(m_server,
@@ -191,32 +186,39 @@ struct YstCommitHook: public voxelworld::CommitHook
 			auto lc = chunk_region.getLowerCorner();
 			auto uc = chunk_region.getUpperCorner();
 			log_nv(MODULE, "yst=[");
-			for(int z = 0; z <= d; z++){
-				for(int x = 0; x <= w; x++){
-					int32_t yst0 = igpl->get_yst(lc.getX() + x, lc.getZ() + z);
+			for(int z = lc.getZ(); z <= uc.getZ(); z++){
+				for(int x = lc.getX(); x <= uc.getX(); x++){
+					int32_t yst0 = igpl->get_yst(x, z);
 					if(yst0 > uc.getY()){
 						// Y-seethrough doesn't reach here
 						continue;
 					}
 					//log_nv(MODULE, "%i, ", yst);
-					int y = h - 1;
-					for(; y >= 0; y--){
-						VoxelInstance v = volume->getVoxelAt(x, y, z);
+					int y = uc.getY();
+					for(;; y--){
+						VoxelInstance v = ivoxelworld->get_voxel(
+								pv::Vector3DInt32(x, y, z), true);
+						if(v.getId() == interface::VOXELTYPEID_UNDEFINED){
+							// NOTE: This leaves the chunks below unhandled;
+							// there would have to be some kind of a dirty
+							// flag based on which this seach would be
+							// continued at a later point when the chunk
+							// gets loaded
+							break;
+						}
 						const auto *def = voxel_reg->get_cached(v);
 						if(!def)
-							throw Exception(ss_()+"Undefined voxel: "+itos(v.getId()));
+							throw Exception(ss_()+"Undefined voxel: "+
+									itos(v.getId()));
 						bool light_passes = (!def || !def->physically_solid);
 						if(!light_passes)
 							break;
 					}
-					y++;
-					if(y == 0){
-						log_w(MODULE, "YST should propagate down");
-						// TODO: Continue to lower chunks until solid found
-					}
-					int32_t yst1 = lc.getY() + y;
+					// The first voxel downwards from the top of the world that
+					// doesn't pass light
+					int32_t yst1 = y;
 					log_nv(MODULE, "%i -> %i, ", yst0, yst1);
-					igpl->set_yst(lc.getX() + x, lc.getZ() + z, yst1);
+					igpl->set_yst(x, z, yst1);
 				}
 			}
 			log_v(MODULE, "]");

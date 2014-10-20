@@ -9,6 +9,11 @@ local cereal = require("buildat/extension/cereal")
 local voxelworld = require("buildat/module/voxelworld")
 local M = {}
 
+-- NOTE: This should actually be always equal to the voxelworld chunk size
+-- because each chunk will be rendered as a whole according to the zone its
+-- center position is in
+--local ideal_zone_size = 32
+-- NOTE: Actually, when zone overrides are used, this can be lower
 local ideal_zone_size = 16
 
 M.sector_size = buildat.Vector2(0, 0)
@@ -52,7 +57,7 @@ local function get_sector_zones(x, y)
 end
 
 local function set_dark_zones(sector_p, yst_volume)
-	log:verbose("set_dark_zones(): sector_p="..sector_p:dump())
+	log:debug("set_dark_zones(): sector_p="..sector_p:dump())
 	local scene = replicate.main_scene -- TODO: More flexibility
 	local sector_zones = get_sector_zones(sector_p.x, sector_p.y)
 	local zone_i = 1
@@ -67,20 +72,21 @@ local function set_dark_zones(sector_p, yst_volume)
 			local zone = zone_node:GetComponent("Zone")
 			do
 				local yst_min = 1000000
-				for x = 0, M.zone_size.x - 1 do
-					for y = 0, M.zone_size.y - 1 do
-						local x_in_sector = x + x_div * M.zone_size.x
-						local y_in_sector = y + y_div * M.zone_size.y
-						local v = yst_volume:get_voxel_at(
-								x_in_sector, 0, y_in_sector)
-						log:warning("v.int32="..v.int32)
+				for y0 = 0, M.zone_size.y - 1 do
+					for x0 = 0, M.zone_size.x - 1 do
+						-- NOTE: yst_volume uses global coordinates
+						local x = sector_p.x * M.sector_size.x +
+								x_div * M.zone_size.x + x0
+						local y = sector_p.y * M.sector_size.y +
+								y_div * M.zone_size.y + y0
+						local v = yst_volume:get_voxel_at(x, 0, y)
 						if v.int32 < yst_min then
 							yst_min = v.int32
 						end
 					end
 				end
 				local y_min = -10000
-				local y_max = yst_min
+				local y_max = yst_min - 1
 				local lc = magic.Vector3(
 					sector_p.x * M.sector_size.x + x_div * M.zone_size.x,
 					y_min,
@@ -91,16 +97,14 @@ local function set_dark_zones(sector_p, yst_volume)
 					y_max,
 					lc.z + M.zone_size.y
 				)
-				log:verbose("Adding zone at lc=("..lc.x..", "..lc.y..", "..lc.z..
+				log:debug("Dark zone at lc=("..lc.x..", "..lc.y..", "..lc.z..
 						"), uc=("..uc.x..", "..uc.y..", "..uc.z..")")
 				zone.boundingBox = magic.BoundingBox(lc, uc)
 				zone.ambientColor = magic.Color(0, 0, 0)
 				zone.fogColor = magic.Color(0.6, 0.7, 0.8)
-				--zone.ambientColor = magic.Color(
-				--		math.random(), math.random(), math.random())
-				--zone.fogEnd = 10 + math.random() * 50
 				zone.fogStart = 10
 				zone.fogEnd = voxelworld.camera_far_clip * 1.2
+				zone.override = true
 			end
 			zone_i = zone_i + 1
 		end
@@ -123,7 +127,7 @@ buildat.sub_packet("ground_plane_lighting:update", function(data)
 	--log:verbose("values.data="..dump(buildat.bytes(values.data)))
 	local volume = buildat.deserialize_volume_int32(values.data)
 	local region = volume:get_enclosing_region()
-	log:verbose("region: ("..region.x0..", "..region.y0..", "..region.z0..", "..
+	log:debug("region: ("..region.x0..", "..region.y0..", "..region.z0..", "..
 			region.x1..", "..region.y1..", "..region.z1..")")
 	
 	local sector_p = buildat.Vector2(values.p)
