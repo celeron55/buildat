@@ -27,7 +27,7 @@ namespace lua_bindings {
 }) */
 
 static constexpr auto known_types =
-		"byte, int32_t, double, array, unordered_map, object";
+		"byte, int16_t, int32_t, double, array, unordered_map, object";
 
 // Places result value on top of stack
 static void binary_input_read_value(lua_State *L, int type_L,
@@ -55,6 +55,12 @@ static void binary_input_read_value(lua_State *L, int type_L,
 		uchar value;
 		ar(value);
 		log_t(MODULE, "byte value=%i", (int)value);
+		lua_pushinteger(L, value);
+		// value is left on stack
+	} else if(outfield_type == "int16_t"){
+		int16_t value;
+		ar(value);
+		log_t(MODULE, "int16_t value=%i", value);
 		lua_pushinteger(L, value);
 		// value is left on stack
 	} else if(outfield_type == "int32_t"){
@@ -167,6 +173,10 @@ static void binary_output_write_value(lua_State *L, int value_L, int type_L,
 	if(outfield_type == "byte"){
 		uchar value = lua_tointeger(L, value_L);
 		log_t(MODULE, "byte value=%i", (int)value);
+		ar(value);
+	} else if(outfield_type == "int16_t"){
+		int16_t value = lua_tointeger(L, value_L);
+		log_t(MODULE, "int16_t value=%i", value);
 		ar(value);
 	} else if(outfield_type == "int32_t"){
 		int32_t value = lua_tointeger(L, value_L);
