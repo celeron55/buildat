@@ -24,6 +24,7 @@ static inline cc_* cs(const ss_ &s){
 }
 template<typename T> using up_ = std::unique_ptr<T>;
 template<typename T> using sp_ = std::shared_ptr<T>;
+template<typename T> using wp_ = std::weak_ptr<T>;
 template<typename T> using sil_ = std::initializer_list<T>;
 
 #define IDF "%" PRId64
