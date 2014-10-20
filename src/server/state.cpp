@@ -530,6 +530,9 @@ struct CState: public State, public interface::Server
 		emit_event(Event("core:load_modules"));
 		handle_events();
 
+		if(is_shutdown_requested())
+			return;
+
 		// Now that everyone is listening, we can fire the start event
 		emit_event(Event("core:start"));
 		handle_events();
