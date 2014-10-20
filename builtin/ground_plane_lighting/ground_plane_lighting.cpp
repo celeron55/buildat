@@ -6,6 +6,7 @@
 #include "client_file/api.h"
 #include "voxelworld/api.h"
 #include "replicate/api.h"
+#include "network/api.h"
 #include "core/log.h"
 #include "interface/module.h"
 #include "interface/server.h"
@@ -14,20 +15,37 @@
 #include "interface/voxel.h"
 #include "interface/block.h"
 #include "interface/voxel_volume.h"
+#include "interface/polyvox_numeric.h"
+#include "interface/polyvox_cereal.h"
 #include <PolyVoxCore/RawVolume.h>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstrict-aliasing"
+#include <cereal/types/vector.hpp>
+#include <cereal/types/tuple.hpp>
 #include <Node.h>
-#pragma GCC diagnostic pop
+#include <deque>
+#include <algorithm>
+#include <climits>
 
-// TODO: Clean up
 using interface::Event;
 namespace magic = Urho3D;
 namespace pv = PolyVox;
 using namespace Urho3D;
 using interface::VoxelInstance;
+using interface::container_coord;
+using interface::container_coord16;
+
+namespace std {
+
+// TODO: Move to a header (core/types_polyvox.h or something)
+template<> struct hash<pv::Vector<2u, int16_t>>{
+	std::size_t operator()(const pv::Vector<2u, int16_t> &v) const {
+		return ((std::hash<int16_t>() (v.getX()) << 0) ^
+				   (std::hash<int16_t>() (v.getY()) << 1));
+	}
+};
+
+}
 
 // TODO: Move to a header (core/types_polyvox.h or something)
 #define PV3I_FORMAT "(%i, %i, %i)"
@@ -35,11 +53,120 @@ using interface::VoxelInstance;
 
 namespace ground_plane_lighting {
 
+// Y-seethrough data of a sector (size defined by voxelworld)
+struct YSTSector
+{
+	pv::Vector<2, int16_t> sector_p; // In sectors
+	pv::Vector<2, int16_t> sector_size; // In voxels
+	sp_<pv::RawVolume<int32_t>> volume; // Voxel columns (region in global coords)
+
+	YSTSector():
+		sector_size(0, 0) // This is used to detect uninitialized instance
+	{}
+	YSTSector(const pv::Vector<2, int16_t> &sector_p,
+			const pv::Vector<2, int16_t> &sector_size):
+		sector_p(sector_p),
+		sector_size(sector_size),
+		volume(new pv::RawVolume<int32_t>(pv::Region(
+				sector_p.getX() * sector_size.getX(),
+				1,
+				sector_p.getZ() * sector_size.getZ(),
+				sector_p.getX() * sector_size.getX() + sector_size.getX() - 1,
+				1,
+				sector_p.getZ() * sector_size.getZ() + sector_size.getZ() - 1
+		)))
+	{
+		pv::Region region = volume->getEnclosingRegion();
+		auto lc = region.getLowerCorner();
+		auto uc = region.getUpperCorner();
+		for(int z = lc.getZ(); z <= uc.getZ(); z++){
+			for(int x = lc.getX(); x <= uc.getX(); x++){
+				volume->setVoxelAt(x, 0, z, INT_MIN);
+			}
+		}
+	}
+};
+
+// Global Y-seethrough map
+struct GlobalYSTMap
+{
+	pv::Vector<2, int16_t> m_sector_size;
+	sm_<pv::Vector<2, int16_t>, YSTSector> m_sectors;
+	// Cache of last used sectors (add to end, remove from beginning)
+	std::deque<YSTSector*> m_last_used_sectors;
+	// Set of sectors that have been modified
+	// (as a sorted array in descending order)
+	sv_<YSTSector*> m_dirty_sectors;
+
+	GlobalYSTMap(const pv::Vector<2, int16_t> &sector_size):
+		m_sector_size(sector_size)
+	{}
+
+	YSTSector* get_sector(pv::Vector<2, int16_t> &sector_p, bool create)
+	{
+		// Check cache
+		for(YSTSector *sector : m_last_used_sectors){
+			if(sector->sector_p == sector_p)
+				return sector;
+		}
+		// Not in cache
+		YSTSector *sector = nullptr;
+		auto it = m_sectors.find(sector_p);
+		if(it == m_sectors.end()){
+			if(!create)
+				return nullptr;
+			sector = &m_sectors[sector_p];
+			*sector = YSTSector(sector_p, m_sector_size);
+		} else {
+			sector = &it->second;
+		}
+		// Add to cache and return
+		m_last_used_sectors.push_back(sector);
+		if(m_last_used_sectors.size() > 2) // 2 is maybe optimal-ish
+			m_last_used_sectors.pop_front();
+		return sector;
+	}
+
+	pv::Vector<2, int16_t> get_sector_p(int32_t x, int32_t z)
+	{
+		if(m_sector_size.getX() == 0)
+			throw Exception("GlobalYSTMap not initialized");
+		return container_coord16(pv::Vector<2, int32_t>(x, z), m_sector_size);
+	}
+
+	void set_yst(int32_t x, int32_t z, int32_t yst)
+	{
+		auto sector_p = get_sector_p(x, z);
+		YSTSector *sector = get_sector(sector_p, true);
+		sector->volume->setVoxelAt(x, 0, z, yst);
+
+		// Set sector dirty flag
+		auto it = std::lower_bound(m_dirty_sectors.begin(),
+					m_dirty_sectors.end(), sector,
+					std::greater<YSTSector*>()); // position in descending order
+		if(it == m_dirty_sectors.end() || *it != sector)
+			m_dirty_sectors.insert(it, sector);
+	}
+
+	int32_t get_yst(int32_t x, int32_t z)
+	{
+		auto sector_p = get_sector_p(x, z);
+		YSTSector *sector = get_sector(sector_p, false);
+		if(!sector)
+			return INT_MIN;
+		return sector->volume->getVoxelAt(x, 0, z);
+	}
+};
+
 // Y-seethrough commit hook
 struct YstCommitHook: public voxelworld::CommitHook
 {
 	static constexpr const char *MODULE = "YstCommitHook";
-	ss_ m_yst_data;
+	interface::Server *m_server;
+
+	YstCommitHook(interface::Server *server):
+		m_server(server)
+	{}
 
 	void in_thread(voxelworld::Interface *ivoxelworld,
 			const pv::Vector3DInt32 &chunk_p,
@@ -50,52 +177,50 @@ struct YstCommitHook: public voxelworld::CommitHook
 		int w = chunk_size_voxels.getX();
 		int h = chunk_size_voxels.getY();
 		int d = chunk_size_voxels.getZ();
-		pv::Region yst_region(0, 0, 0, w, 0, d);
-		// Y-seethrough (value: Lowest Y where light can go)
-		// If chunk above does not pass light to this chunk, value=d+1
-		up_<pv::RawVolume<uint8_t>> yst_volume(
-				new pv::RawVolume<uint8_t>(yst_region));
-		auto lc = yst_region.getLowerCorner();
-		auto uc = yst_region.getUpperCorner();
-		for(int z = 0; z < d; z++){
-			for(int x = 0; x <= w; x++){
-				// TODO: Read initial value from the chunk above
 
-				int y;
-				for(y = d; y >= 0; y--){
-					VoxelInstance v = volume->getVoxelAt(x+1, y+1, z+1);
-					const auto *def = voxel_reg->get_cached(v);
-					if(!def)
-						throw Exception(ss_()+"Undefined voxel: "+itos(v.getId()));
-					bool light_passes = (!def || !def->physically_solid);
-					if(!light_passes)
-						break;
+		pv::Region chunk_region = ivoxelworld->get_chunk_region_voxels(chunk_p);
+
+		ground_plane_lighting::access(m_server,
+				[&](ground_plane_lighting::Interface *igpl)
+		{
+			auto lc = chunk_region.getLowerCorner();
+			auto uc = chunk_region.getUpperCorner();
+			log_nv(MODULE, "yst=[");
+			for(int z = 0; z <= d; z++){
+				for(int x = 0; x <= w; x++){
+					int32_t yst0 = igpl->get_yst(lc.getX() + x, lc.getZ() + z);
+					if(yst0 > uc.getY()){
+						// Y-seethrough doesn't reach here
+						continue;
+					}
+					//log_nv(MODULE, "%i, ", yst);
+					int y = h - 1;
+					for(; y >= 0; y--){
+						VoxelInstance v = volume->getVoxelAt(x+1, y+1, z+1);
+						const auto *def = voxel_reg->get_cached(v);
+						if(!def)
+							throw Exception(ss_()+"Undefined voxel: "+itos(v.getId()));
+						bool light_passes = (!def || !def->physically_solid);
+						if(!light_passes)
+							break;
+					}
+					y++;
+					int32_t yst1 = lc.getY() + y;
+					log_nv(MODULE, "%i -> %i, ", yst0, yst1);
+					igpl->set_yst(lc.getX() + x, lc.getZ() + z, yst1);
+					// TODO: If y==0, continue to lower chunk
 				}
-				y++;
-				yst_volume->setVoxelAt(x, 0, z, y);
 			}
-		}
-		m_yst_data = interface::serialize_volume_compressed(*yst_volume);
-	}
-
-	void in_scene(voxelworld::Interface *ivoxelworld,
-			const pv::Vector3DInt32 &chunk_p, magic::Node *n)
-	{
-		if(m_yst_data.empty()){
-			// Can happen if in_thread() fails
-			log_w(MODULE, "Commit hook in_scene executed without in_thread");
-			return;
-		}
-		n->SetVar(StringHash("gpl_voxel_yst_data"), Variant(
-					PODVector<uint8_t>((const uint8_t*)m_yst_data.c_str(),
-							m_yst_data.size())));
-		m_yst_data.clear();
+			log_v(MODULE, "]");
+		});
 	}
 };
 
 struct Module: public interface::Module, public ground_plane_lighting::Interface
 {
 	interface::Server *m_server;
+
+	up_<GlobalYSTMap> m_global_yst;
 
 	Module(interface::Server *server):
 		interface::Module("ground_plane_lighting"),
@@ -115,6 +240,15 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 		m_server->sub_event(this, Event::t("network:client_connected"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
+
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
+		{
+			pv::Vector3DInt16 section_size =
+					ivoxelworld->get_section_size_voxels();
+			pv::Vector<2, int16_t> sector_size(
+					section_size.getX(), section_size.getZ());
+			m_global_yst.reset(new GlobalYSTMap(sector_size));
+		});
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -134,7 +268,7 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
 			ivoxelworld->add_commit_hook(
-					up_<YstCommitHook>(new YstCommitHook()));
+					up_<YstCommitHook>(new YstCommitHook(m_server)));
 		});
 	}
 
@@ -152,6 +286,26 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 
 	void on_tick(const interface::TickEvent &event)
 	{
+		if(!m_global_yst->m_dirty_sectors.empty()){
+			sv_<std::tuple<pv::Vector<2, int16_t>, ss_>> sector_data;
+			for(YSTSector *sector : m_global_yst->m_dirty_sectors){
+				ss_ s = interface::serialize_volume_compressed(*sector->volume);
+				std::tuple<pv::Vector<2, int16_t>, ss_> thing(sector->sector_p, s);
+				sector_data.push_back(thing);
+			}
+			m_global_yst->m_dirty_sectors.clear();
+
+			std::ostringstream os(std::ios::binary);
+			{
+				cereal::PortableBinaryOutputArchive ar(os);
+				ar(sector_data);
+			}
+			network::access(m_server, [&](network::Interface *inetwork){
+				sv_<network::PeerInfo::Id> peers = inetwork->list_peers();
+				for(auto &peer : peers)
+					inetwork->send(peer, "ground_plane_lighting:update", os.str());
+			});
+		}
 	}
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
@@ -161,9 +315,27 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 			inetwork->send(peer, "core:run_script",
 					"require(\"buildat/module/ground_plane_lighting\")");
 		});
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(m_global_yst->m_sector_size);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "ground_plane_lighting:init", os.str());
+		});
 	}
 
 	// Interface
+
+	void set_yst(int32_t x, int32_t z, int32_t yst)
+	{
+		return m_global_yst->set_yst(x, z, yst);
+	}
+
+	int32_t get_yst(int32_t x, int32_t z)
+	{
+		return m_global_yst->get_yst(x, z);
+	}
 
 	void* get_interface()
 	{

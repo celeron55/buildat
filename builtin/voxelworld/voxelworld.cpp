@@ -12,6 +12,9 @@
 #include "interface/voxel.h"
 #include "interface/block.h"
 #include "interface/voxel_volume.h"
+#include "interface/polyvox_numeric.h"
+#include "interface/polyvox_cereal.h"
+#include "interface/polyvox_std.h"
 #include <PolyVoxCore/RawVolume.h>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
@@ -35,88 +38,8 @@ namespace magic = Urho3D;
 namespace pv = PolyVox;
 using namespace Urho3D;
 using interface::VoxelInstance;
-
-namespace std {
-
-template<> struct hash<pv::Vector<2u, int16_t>>{
-	std::size_t operator()(const pv::Vector<2u, int16_t> &v) const {
-		return ((std::hash<int16_t>() (v.getX()) << 0) ^
-				   (std::hash<int16_t>() (v.getY()) << 1));
-	}
-};
-
-template<> struct hash<pv::Vector<3u, int16_t>>{
-	std::size_t operator()(const pv::Vector<3u, int16_t> &v) const {
-		return ((std::hash<int16_t>() (v.getX()) << 0) ^
-				   (std::hash<int16_t>() (v.getY()) << 1) ^
-				   (std::hash<int16_t>() (v.getZ()) << 2));
-	}
-};
-
-}
-
-// TODO: Move to a header (core/cereal_polyvox.h or something)
-namespace cereal {
-
-template<class Archive>
-void save(Archive &archive, const pv::Vector3DInt16 &v){
-	archive((int32_t)v.getX(), (int32_t)v.getY(), (int32_t)v.getZ());
-}
-template<class Archive>
-void load(Archive &archive, pv::Vector3DInt16 &v){
-	int32_t x, y, z;
-	archive(x, y, z);
-	v.setX(x); v.setY(y); v.setZ(z);
-}
-
-}
-
-// PolyVox logging helpers
-// TODO: Move to a header (core/types_polyvox.h or something)
-template<>
-ss_ dump(const pv::Vector3DInt16 &v){
-	std::ostringstream os(std::ios::binary);
-	os<<"("<<v.getX()<<", "<<v.getY()<<", "<<v.getZ()<<")";
-	return os.str();
-}
-template<>
-ss_ dump(const pv::Vector3DInt32 &v){
-	std::ostringstream os(std::ios::binary);
-	os<<"("<<v.getX()<<", "<<v.getY()<<", "<<v.getZ()<<")";
-	return os.str();
-}
-#define PV3I_FORMAT "(%i, %i, %i)"
-#define PV3I_PARAMS(p) p.getX(), p.getY(), p.getZ()
-
-// TODO: Move to a header (core/numeric.h or something)
-static inline int container_coord(int x, int d)
-{
-	return (x>=0 ? x : x-d+1) / d;
-}
-static inline pv::Vector3DInt32 container_coord(
-		const pv::Vector3DInt32 &p, const pv::Vector3DInt32 &d)
-{
-	return pv::Vector3DInt32(
-			container_coord(p.getX(), d.getX()),
-			container_coord(p.getY(), d.getY()),
-			container_coord(p.getZ(), d.getZ()));
-}
-static inline pv::Vector3DInt32 container_coord(
-		const pv::Vector3DInt32 &p, const pv::Vector3DInt16 &d)
-{
-	return pv::Vector3DInt32(
-			container_coord(p.getX(), d.getX()),
-			container_coord(p.getY(), d.getY()),
-			container_coord(p.getZ(), d.getZ()));
-}
-static inline pv::Vector3DInt16 container_coord16(
-		const pv::Vector3DInt32 &p, const pv::Vector3DInt16 &d)
-{
-	return pv::Vector3DInt16(
-			container_coord(p.getX(), d.getX()),
-			container_coord(p.getY(), d.getY()),
-			container_coord(p.getZ(), d.getZ()));
-}
+using interface::container_coord;
+using interface::container_coord16;
 
 namespace voxelworld {
 
@@ -733,6 +656,15 @@ struct Module: public interface::Module, public voxelworld::Interface
 	void add_commit_hook(up_<CommitHook> hook)
 	{
 		m_commit_hooks.push_back(std::move(hook));
+	}
+
+	pv::Vector3DInt16 get_section_size_voxels()
+	{
+		return pv::Vector3DInt16(
+				m_section_size_chunks.getX() * m_chunk_size_voxels.getX(),
+				m_section_size_chunks.getY() * m_chunk_size_voxels.getY(),
+				m_section_size_chunks.getZ() * m_chunk_size_voxels.getZ()
+		);
 	}
 
 	pv::Region get_section_region_voxels(const pv::Vector3DInt16 &section_p)

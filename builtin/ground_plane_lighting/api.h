@@ -28,6 +28,8 @@ namespace ground_plane_lighting
 
 	struct Interface
 	{
+		virtual void set_yst(int32_t x, int32_t z, int32_t yst) = 0;
+		virtual int32_t get_yst(int32_t x, int32_t z) = 0;
 	};
 
 	inline bool access(interface::Server *server,

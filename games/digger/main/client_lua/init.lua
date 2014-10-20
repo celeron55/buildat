@@ -27,7 +27,7 @@ local scene = replicate.main_scene
 magic.input:SetMouseVisible(false)
 
 -- Set up zone (global visual parameters)
---[[
+---[[
 do
 	local zone_node = scene:CreateChild("Zone")
 	local zone = zone_node:CreateComponent("Zone")

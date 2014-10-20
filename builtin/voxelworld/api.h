@@ -57,6 +57,8 @@ namespace voxelworld
 
 		virtual void add_commit_hook(up_<CommitHook> hook) = 0;
 
+		virtual pv::Vector3DInt16 get_section_size_voxels() = 0;
+
 		virtual pv::Region get_section_region_voxels(
 				const pv::Vector3DInt16 &section_p) = 0;
 

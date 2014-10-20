@@ -85,14 +85,14 @@ function M.init()
 	buildat.sub_packet("voxelworld:init", function(data)
 		local values = cereal.binary_input(data, {"object",
 			{"chunk_size_voxels", {"object",
-				{"x", "int32_t"},
-				{"y", "int32_t"},
-				{"z", "int32_t"},
+				{"x", "int16_t"},
+				{"y", "int16_t"},
+				{"z", "int16_t"},
 			}},
 			{"section_size_chunks", {"object",
-				{"x", "int32_t"},
-				{"y", "int32_t"},
-				{"z", "int32_t"},
+				{"x", "int16_t"},
+				{"y", "int16_t"},
+				{"z", "int16_t"},
 			}},
 		})
 		log:info("voxelworld:init: "..dump(values))
