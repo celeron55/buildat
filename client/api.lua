@@ -252,4 +252,48 @@ function buildat.safe.Vector3(x, y, z)
 	return self
 end
 
+local Vector2_prototype = {
+	x = 0,
+	y = 0,
+	mul_components = function(a, b)
+		return buildat.safe.Vector2(
+				a.x * b.x, a.y * b.y)
+	end,
+	div_components = function(a, b)
+		return buildat.safe.Vector2(
+				a.x / b.x, a.y / b.y)
+	end,
+	floor = function(a)
+		return buildat.safe.Vector2(
+				math.floor(a.x), math.floor(a.y))
+	end,
+	add = function(a, b)
+		return buildat.safe.Vector2(
+				a.x + b.x, a.y + b.y)
+	end,
+	sub = function(a, b)
+		return buildat.safe.Vector2(
+				a.x - b.x, a.y - b.y)
+	end,
+	length = function(a)
+		return math.sqrt(a.x*a.x + a.y*a.y)
+	end,
+}
+function buildat.safe.Vector2(x, y)
+	local self = {}
+	if x ~= nil and y == nil then
+		self.x = x.x
+		self.y = x.y
+	else
+		self.x = x
+		self.y = y
+	end
+	setmetatable(self, {
+		__index = Vector2_prototype,
+		__add = Vector2_prototype.add,
+		__sub = Vector2_prototype.sub,
+	})
+	return self
+end
+
 -- vim: set noet ts=4 sw=4:
