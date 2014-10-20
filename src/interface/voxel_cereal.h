@@ -38,5 +38,11 @@ namespace interface
 				v.physically_solid
 		);
 	}
+
+	template<class Archive>
+	void serialize(Archive &archive, VoxelInstance &v)
+	{
+		archive(v.data);
+	}
 }
 // vim: set noet ts=4 sw=4:

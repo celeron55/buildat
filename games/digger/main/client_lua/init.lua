@@ -38,6 +38,7 @@ do
 	--zone.fogColor = magic.Color(0, 0, 0)
 	zone.fogStart = 10
 	zone.fogEnd = FOG_END
+	zone.priority = -1
 end
 --]]
 

@@ -17,6 +17,7 @@
 #include "interface/voxel_volume.h"
 #include "interface/polyvox_numeric.h"
 #include "interface/polyvox_cereal.h"
+#include "interface/os.h"
 #include <PolyVoxCore/RawVolume.h>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
@@ -56,6 +57,7 @@ namespace ground_plane_lighting {
 // Y-seethrough data of a sector (size defined by voxelworld)
 struct YSTSector
 {
+	static constexpr const char *MODULE = "YSTSector";
 	pv::Vector<2, int16_t> sector_p; // In sectors
 	pv::Vector<2, int16_t> sector_size; // In voxels
 	sp_<pv::RawVolume<int32_t>> volume; // Voxel columns (region in global coords)
@@ -69,16 +71,19 @@ struct YSTSector
 		sector_size(sector_size),
 		volume(new pv::RawVolume<int32_t>(pv::Region(
 				sector_p.getX() * sector_size.getX(),
-				1,
-				sector_p.getZ() * sector_size.getZ(),
+				0,
+				sector_p.getY() * sector_size.getY(),
 				sector_p.getX() * sector_size.getX() + sector_size.getX() - 1,
-				1,
-				sector_p.getZ() * sector_size.getZ() + sector_size.getZ() - 1
+				0,
+				sector_p.getY() * sector_size.getY() + sector_size.getY() - 1
 		)))
 	{
 		pv::Region region = volume->getEnclosingRegion();
 		auto lc = region.getLowerCorner();
 		auto uc = region.getUpperCorner();
+		/*log_v(MODULE, "YSTSector volume lc=" PV3I_FORMAT ", uc=" PV3I_FORMAT
+				", size=%zu", PV3I_PARAMS(lc), PV3I_PARAMS(uc),
+				volume->m_dataSize);*/
 		for(int z = lc.getZ(); z <= uc.getZ(); z++){
 			for(int x = lc.getX(); x <= uc.getX(); x++){
 				volume->setVoxelAt(x, 0, z, INT_MIN);
@@ -196,7 +201,7 @@ struct YstCommitHook: public voxelworld::CommitHook
 					//log_nv(MODULE, "%i, ", yst);
 					int y = h - 1;
 					for(; y >= 0; y--){
-						VoxelInstance v = volume->getVoxelAt(x+1, y+1, z+1);
+						VoxelInstance v = volume->getVoxelAt(x, y, z);
 						const auto *def = voxel_reg->get_cached(v);
 						if(!def)
 							throw Exception(ss_()+"Undefined voxel: "+itos(v.getId()));
@@ -205,10 +210,13 @@ struct YstCommitHook: public voxelworld::CommitHook
 							break;
 					}
 					y++;
+					if(y == 0){
+						log_w(MODULE, "YST should propagate down");
+						// TODO: Continue to lower chunks until solid found
+					}
 					int32_t yst1 = lc.getY() + y;
 					log_nv(MODULE, "%i -> %i, ", yst0, yst1);
 					igpl->set_yst(lc.getX() + x, lc.getZ() + z, yst1);
-					// TODO: If y==0, continue to lower chunk
 				}
 			}
 			log_v(MODULE, "]");
@@ -287,24 +295,24 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 	void on_tick(const interface::TickEvent &event)
 	{
 		if(!m_global_yst->m_dirty_sectors.empty()){
-			sv_<std::tuple<pv::Vector<2, int16_t>, ss_>> sector_data;
-			for(YSTSector *sector : m_global_yst->m_dirty_sectors){
+			sv_<YSTSector*> dirty_sectors;
+			dirty_sectors.swap(m_global_yst->m_dirty_sectors);
+			for(YSTSector *sector : dirty_sectors){
 				ss_ s = interface::serialize_volume_compressed(*sector->volume);
-				std::tuple<pv::Vector<2, int16_t>, ss_> thing(sector->sector_p, s);
-				sector_data.push_back(thing);
+				std::ostringstream os(std::ios::binary);
+				{
+					cereal::PortableBinaryOutputArchive ar(os);
+					ar(sector->sector_p);
+					ar(s);
+				}
+				network::access(m_server, [&](network::Interface *inetwork){
+					sv_<network::PeerInfo::Id> peers = inetwork->list_peers();
+					for(auto &peer : peers){
+						inetwork->send(peer, "ground_plane_lighting:update",
+								os.str());
+					}
+				});
 			}
-			m_global_yst->m_dirty_sectors.clear();
-
-			std::ostringstream os(std::ios::binary);
-			{
-				cereal::PortableBinaryOutputArchive ar(os);
-				ar(sector_data);
-			}
-			network::access(m_server, [&](network::Interface *inetwork){
-				sv_<network::PeerInfo::Id> peers = inetwork->list_peers();
-				for(auto &peer : peers)
-					inetwork->send(peer, "ground_plane_lighting:update", os.str());
-			});
 		}
 	}
 
@@ -323,6 +331,25 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, "ground_plane_lighting:init", os.str());
 		});
+
+		send_initial_sectors(peer);
+	}
+
+	void send_initial_sectors(int peer)
+	{
+		for(auto &pair : m_global_yst->m_sectors){
+			YSTSector *sector = &pair.second;
+			ss_ s = interface::serialize_volume_compressed(*sector->volume);
+			std::ostringstream os(std::ios::binary);
+			{
+				cereal::PortableBinaryOutputArchive ar(os);
+				ar(sector->sector_p);
+				ar(s);
+			}
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(peer, "ground_plane_lighting:update", os.str());
+			});
+		}
 	}
 
 	// Interface

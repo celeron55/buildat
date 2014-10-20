@@ -16,7 +16,7 @@
 #define GET_SANDBOX_STUFF(result_name, index, type) \
 	lua_getmetatable(L, index); \
 	lua_getfield(L, -1, "type_name"); \
-	if(ss_(lua_tostring(L, -1)) != #type){ \
+	if(!lua_isstring(L, -1) || ss_(lua_tostring(L, -1)) != #type){ \
 		lua_pop(L, 2); /* type_name, metatable */ \
 		throw Exception("Value is not a sandboxed " #type); \
 	} \
@@ -30,9 +30,8 @@
 	lua_getmetatable(L, index); \
 	lua_getfield(L, -1, "type_name"); \
 	type *result_name = nullptr; \
-	if(ss_(lua_tostring(L, -1)) != #type){ \
+	if(!lua_isstring(L, -1) || ss_(lua_tostring(L, -1)) != #type){ \
 		lua_pop(L, 2); /* type_name, metatable */ \
-		throw Exception("Value is not a sandboxed " #type); \
 	} else { \
 		lua_pop(L, 1); /* type_name */ \
 		lua_getfield(L, -1, "unsafe"); \

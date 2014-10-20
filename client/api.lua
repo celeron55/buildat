@@ -20,7 +20,8 @@ buildat.safe.createAtlasRegistry  = __buildat_createAtlasRegistry
 buildat.safe.Region        = __buildat_Region
 buildat.safe.VoxelInstance = __buildat_VoxelInstance
 buildat.safe.Volume        = __buildat_Volume
-buildat.safe.deserialize_volume_8bit = __buildat_deserialize_volume_8bit
+buildat.safe.deserialize_volume_int32 = __buildat_deserialize_volume_int32
+buildat.safe.deserialize_volume_8bit  = __buildat_deserialize_volume_8bit
 
 -- NOTE: Maybe not actually safe
 --buildat.safe.class_info = class_info -- Luabind class_info()
@@ -209,6 +210,9 @@ local Vector3_prototype = {
 	x = 0,
 	y = 0,
 	z = 0,
+	dump = function(a)
+		return "("..a.x..", "..a.y..", "..a.z..")"
+	end,
 	mul_components = function(a, b)
 		return buildat.safe.Vector3(
 				a.x * b.x, a.y * b.y, a.z * b.z)
@@ -229,6 +233,14 @@ local Vector3_prototype = {
 		return buildat.safe.Vector3(
 				a.x - b.x, a.y - b.y, a.z - b.z)
 	end,
+	mul = function(a, b)
+		return buildat.safe.Vector3(
+				a.x * b, a.y * b, a.z * b)
+	end,
+	div = function(a, b)
+		return buildat.safe.Vector3(
+				a.x / b, a.y / b, a.z / b)
+	end,
 	length = function(a)
 		return math.sqrt(a.x*a.x + a.y*a.y + a.z*a.z)
 	end,
@@ -248,6 +260,8 @@ function buildat.safe.Vector3(x, y, z)
 		__index = Vector3_prototype,
 		__add = Vector3_prototype.add,
 		__sub = Vector3_prototype.sub,
+		__mul = Vector3_prototype.mul,
+		__div = Vector3_prototype.div,
 	})
 	return self
 end
@@ -255,6 +269,9 @@ end
 local Vector2_prototype = {
 	x = 0,
 	y = 0,
+	dump = function(a)
+		return "("..a.x..", "..a.y..")"
+	end,
 	mul_components = function(a, b)
 		return buildat.safe.Vector2(
 				a.x * b.x, a.y * b.y)
@@ -275,6 +292,14 @@ local Vector2_prototype = {
 		return buildat.safe.Vector2(
 				a.x - b.x, a.y - b.y)
 	end,
+	mul = function(a, b)
+		return buildat.safe.Vector2(
+				a.x * b, a.y * b)
+	end,
+	div = function(a, b)
+		return buildat.safe.Vector2(
+				a.x / b, a.y / b)
+	end,
 	length = function(a)
 		return math.sqrt(a.x*a.x + a.y*a.y)
 	end,
@@ -292,6 +317,8 @@ function buildat.safe.Vector2(x, y)
 		__index = Vector2_prototype,
 		__add = Vector2_prototype.add,
 		__sub = Vector2_prototype.sub,
+		__mul = Vector2_prototype.mul,
+		__div = Vector2_prototype.div,
 	})
 	return self
 end

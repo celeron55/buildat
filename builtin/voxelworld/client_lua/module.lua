@@ -125,7 +125,7 @@ function M.init()
 		local lod = math.floor(1 + lod_fraction)
 		if lod > MAX_LOD then lod = MAX_LOD end
 
-		log:verbose("update_voxel_geometry(): lod="..lod..
+		log:debug("update_voxel_geometry(): lod="..lod..
 				", d="..math.floor(d)..", #data="..data:GetSize()..
 				", node="..node:GetID())
 
@@ -139,7 +139,7 @@ function M.init()
 		local far_weight = nil
 
 		if d >= M.camera_far_clip * 1.4 then
-			log:verbose("Clearing voxel geometry outside camera far clip ("
+			log:debug("Clearing voxel geometry outside camera far clip ("
 					..M.camera_far_clip..")")
 			buildat.clear_voxel_geometry(node)
 
@@ -196,7 +196,7 @@ function M.init()
 		local node_p = node:GetWorldPosition()
 		local d = (node_p - camera_p):Length()
 
-		log:verbose("update_voxel_physics(): d="..math.floor(d)..
+		log:debug("update_voxel_physics(): d="..math.floor(d)..
 				", #data="..data:GetSize()..", node="..node:GetID())
 
 		local near_trigger_d = nil
@@ -205,7 +205,7 @@ function M.init()
 		local far_weight = nil
 
 		if d > PHYSICS_DISTANCE then
-			log:verbose("Clearing physics boxes outside physics distance ("..
+			log:debug("Clearing physics boxes outside physics distance ("..
 					PHYSICS_DISTANCE..")")
 			buildat.clear_voxel_physics_boxes(node)
 
@@ -278,7 +278,7 @@ function M.init()
 			if f and f <= 1.0 then
 				local node_update = node_update_queue:get()
 				local node = replicate.main_scene:GetNode(node_update.node_id)
-				log:verbose("Node update #"..
+				log:debug("Node update #"..
 						node_update_queue:get_length()..
 						" (f="..(math.floor(f*100)/100)..""..
 						", fw="..(math.floor(fw*100)/100)..")"..
@@ -291,7 +291,7 @@ function M.init()
 				end
 				did_update = true
 			else
-				log:verbose("Poked update #"..
+				log:debug("Poked update #"..
 						node_update_queue:get_length()..
 						" (f="..(math.floor((f or -1)*100)/100)..""..
 						", fw="..(math.floor((fw or -1)*100)/100)..")")
