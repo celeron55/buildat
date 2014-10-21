@@ -24,6 +24,8 @@ namespace replicate
 		virtual sv_<PeerId> find_peers_that_know_node(uint node_id) = 0;
 
 		virtual void emit_after_next_sync(Event event) = 0;
+
+		virtual void sync_node_immediate(uint node_id) = 0;
 	};
 
 	inline bool access(interface::Server *server,

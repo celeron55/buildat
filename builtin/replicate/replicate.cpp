@@ -479,6 +479,31 @@ struct Module: public interface::Module, public replicate::Interface
 		m_events_to_emit_after_next_sync.push_back(std::move(event));
 	}
 
+	// TODO: Check if this is correctly implemented
+	void sync_node_immediate(uint node_id)
+	{
+		sv_<PeerId> peers;
+		network::access(m_server, [&](network::Interface *inetwork){
+			peers = inetwork->list_peers();
+		});
+		m_server->access_scene([&](magic::Scene *scene){
+			Node *n = scene->GetNode(node_id);
+			n->PrepareNetworkUpdate();
+			for(auto &peer: peers){
+				magic::SceneReplicationState &scene_state = m_scene_states[peer];
+
+				magic::HashSet<uint> nodes_to_process;
+				nodes_to_process.Insert(node_id);
+
+				while(!nodes_to_process.Empty()){
+					uint node_id = nodes_to_process.Front();
+					sync_node(peer, node_id, nodes_to_process, scene,
+							scene_state);
+				}
+			}
+		});
+	}
+
 	void* get_interface()
 	{
 		return dynamic_cast<Interface*>(this);
