@@ -122,7 +122,10 @@ do
 	camera_node.position = magic.Vector3(0, 0.411*PLAYER_HEIGHT, 0)
 	--camera_node:Pitch(13.60000)
 	local camera = camera_node:CreateComponent("Camera")
-	camera.nearClip = 0.3
+	camera.nearClip = 0.5 * math.min(
+			PLAYER_WIDTH * 0.15,
+			PLAYER_HEIGHT * (0.5 - 0.411)
+	)
 	camera.farClip = RENDER_DISTANCE
 	camera.fov = 75
 
