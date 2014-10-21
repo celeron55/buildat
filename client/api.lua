@@ -193,20 +193,6 @@ function buildat.safe.clear_voxel_physics_boxes(safe_node)
 	__buildat_clear_voxel_physics_boxes(node)
 end
 
-function buildat.safe.voxel_heuristic_has_sunlight(safe_buffer, ...)
-	buffer = nil
-	if type(safe_buffer) == 'string' then
-		buffer = safe_buffer
-	else
-		if not getmetatable(safe_buffer) or
-				getmetatable(safe_buffer).type_name ~= "VectorBuffer" then
-			error("safe_buffer is not a sandboxed VectorBuffer instance")
-		end
-		buffer = getmetatable(safe_buffer).unsafe
-	end
-	return __buildat_voxel_heuristic_has_sunlight(buffer, ...)
-end
-
 local Vector3_prototype = {
 	x = 0,
 	y = 0,

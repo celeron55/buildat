@@ -442,21 +442,6 @@ void clear_voxel_physics_boxes(const luabind::object &node_o)
 		node->RemoveComponent(previous_shapes[i]);
 }
 
-bool voxel_heuristic_has_sunlight(const luabind::object &buffer_o,
-		sp_<VoxelRegistry> voxel_reg, lua_State *L)
-{
-	TRY_GET_TOLUA_STUFF(buf, 1, const VectorBuffer);
-
-	ss_ data;
-	if(buf == nullptr)
-		data = lua_tocppstring(L, 2);
-	else
-		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
-
-	up_<pv::RawVolume<VoxelInstance>> volume = interface::deserialize_volume(data);
-	return interface::mesh::voxel_heuristic_has_sunlight(*volume, voxel_reg.get());
-}
-
 #define LUABIND_FUNC(name) def("__buildat_" #name, name)
 
 void init_mesh(lua_State *L)
@@ -469,8 +454,7 @@ void init_mesh(lua_State *L)
 		LUABIND_FUNC(set_voxel_lod_geometry),
 		LUABIND_FUNC(clear_voxel_geometry),
 		LUABIND_FUNC(set_voxel_physics_boxes),
-		LUABIND_FUNC(clear_voxel_physics_boxes),
-		LUABIND_FUNC(voxel_heuristic_has_sunlight)
+		LUABIND_FUNC(clear_voxel_physics_boxes)
 	];
 }
 
