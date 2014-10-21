@@ -64,12 +64,12 @@ do
 
 	-- Face edges
 	local d = 0.502
-	local d2 = 0.1
-	local c = magic.Color(0.04, 0.12, 0.04)
+	local d2 = 1.0 / 16
+	local c = magic.Color(0.12, 0.36, 0.12)
 	define_face(magic.Vector3(-d, d, d-d2), magic.Vector3(d, d, d), c)
 	define_face(magic.Vector3(-d, d, -d), magic.Vector3(d, d, -d+d2), c)
-	--define_face(magic.Vector3(d-d2, d, -d+d2), magic.Vector3(d, d, d-d2), c)
-	--define_face(magic.Vector3(-d, d, -d+d2), magic.Vector3(-d+d2, d, d-d2), c)
+	define_face(magic.Vector3(d-d2, d, -d+d2), magic.Vector3(d, d, d-d2), c)
+	define_face(magic.Vector3(-d, d, -d+d2), magic.Vector3(-d+d2, d, d-d2), c)
 	pointed_voxel_visual_geometry:Commit()
 	local m = magic.Material.new()
 	m:SetTechnique(0, magic.cache:GetResource("Technique",
