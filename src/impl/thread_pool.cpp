@@ -11,6 +11,7 @@
 #else
 	#include <pthread.h>
 	#include <semaphore.h>
+	#include <signal.h>
 #endif
 #define MODULE "thread_pool"
 
@@ -45,6 +46,11 @@ struct CThreadPool: public ThreadPool
 	static void* run_thread(void *arg)
 	{
 		log_d(MODULE, "Worker thread %p start", arg);
+		// Disable all signals
+		sigset_t sigset;
+		sigemptyset(&sigset);
+		(void)pthread_sigmask(SIG_SETMASK, &sigset, NULL);
+		// Go on
 		Thread *thread = (Thread*)arg;
 		for(;;){
 			// Wait for a task
