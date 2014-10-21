@@ -6,6 +6,7 @@
 #include "interface/fs.h"
 #include "interface/event.h"
 #include "interface/module_info.h"
+#include "interface/os.h"
 #include "loader/api.h"
 #include "core/json.h"
 #include <fstream>
@@ -267,6 +268,11 @@ struct Module: public interface::Module, public loader::Interface
 	bool m_activated = false;
 	sv_<ss_> m_module_load_paths; // In order of preference
 
+	// Buffer names of modules that should be reloaded in this until modules
+	// aren't being modified for a period of time, and then reload them
+	set_<ss_> m_modules_to_reload;
+	int64_t m_last_module_modification_time = 0;
+
 	Module(interface::Server *server):
 		interface::Module("loader"),
 		m_server(server)
@@ -286,12 +292,14 @@ struct Module: public interface::Module, public loader::Interface
 	{
 		log_v(MODULE, "loader init");
 		m_server->sub_event(this, Event::t("core:module_modified"));
+		m_server->sub_event(this, Event::t("core:tick"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
 		EVENT_TYPEN("core:module_modified", on_module_modified,
 				interface::ModuleModifiedEvent)
+		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 	}
 
 	sm_<ss_, interface::ModuleInfo> m_module_info;
@@ -402,7 +410,20 @@ struct Module: public interface::Module, public loader::Interface
 		log_v(MODULE, "loader::on_module_modified(): %s", cs(event.name));
 		if(event.name == "loader")
 			return;
-		m_server->reload_module(event.name);
+		m_modules_to_reload.insert(event.name);
+		m_last_module_modification_time = interface::os::get_timeofday_us();
+	}
+
+	void on_tick(const interface::TickEvent &event)
+	{
+		int64_t t = interface::os::get_timeofday_us();
+		if(!m_modules_to_reload.empty() &&
+				t > m_last_module_modification_time + 1000000){
+			for(const ss_ &name : m_modules_to_reload){
+				m_server->reload_module(name);
+			}
+			m_modules_to_reload.clear();
+		}
 	}
 
 	// Interface
