@@ -233,9 +233,9 @@ Model* create_voxel_physics_model(Context *context,
 	if(num_indices == 0)
 		return nullptr;
 
-	int w = volume.getWidth();
-	int h = volume.getHeight();
-	int d = volume.getDepth();
+	int w = volume.getWidth() - 2;
+	int h = volume.getHeight() - 2;
+	int d = volume.getDepth() - 2;
 	sv_<float> vertex_data;
 	vertex_data.resize(num_vertices * 6); // vertex + normal
 	for(size_t i = 0; i < num_vertices; i++){
@@ -443,9 +443,9 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 	const sv_<uint32_t> &pv_indices = pv_mesh.getIndices();
 	const sv_<pv::PositionMaterialNormal> &pv_vertices = pv_mesh.getVertices();
 
-	int w = volume.getWidth();
-	int h = volume.getHeight();
-	int d = volume.getDepth();
+	int w = volume.getWidth() - 2;
+	int h = volume.getHeight() - 2;
+	int d = volume.getDepth() - 2;
 
 	// Handle vertices face-by-face in order to copy indices at the same time
 	for(size_t pv_face_i = 0; pv_face_i < pv_vertices.size() / 4; pv_face_i++){
@@ -549,9 +549,9 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			const auto &pv_vert = pv_vertices[pv_vertex_i];
 			tg.vertex_data.Resize(tg.vertex_data.Size() + 1);
 			CustomGeometryVertex &tg_vert = tg.vertex_data.Back();
-			tg_vert.position_.x_ = pv_vert.position.getX() - w/2.0f;
-			tg_vert.position_.y_ = pv_vert.position.getY() - h/2.0f;
-			tg_vert.position_.z_ = pv_vert.position.getZ() - d/2.0f;
+			tg_vert.position_.x_ = pv_vert.position.getX() - w/2.0f - 0.5f;
+			tg_vert.position_.y_ = pv_vert.position.getY() - h/2.0f - 0.5f;
+			tg_vert.position_.z_ = pv_vert.position.getZ() - d/2.0f - 0.5f;
 			tg_vert.normal_.x_ = pv_vert.normal.getX();
 			tg_vert.normal_.y_ = pv_vert.normal.getY();
 			tg_vert.normal_.z_ = pv_vert.normal.getZ();
@@ -937,9 +937,9 @@ z_plane_does_not_fit:
 					z1 - z0 + 1
 			);
 			box.position = Vector3(
-					(x0 + x1)/2.0f - w/2,
-					(y0 + y1)/2.0f - h/2,
-					(z0 + z1)/2.0f - d/2
+					(x0 + x1)/2.0f - w/2 + 0.5f,
+					(y0 + y1)/2.0f - h/2 + 0.5f,
+					(z0 + z1)/2.0f - d/2 + 0.5f
 			);
 			result_boxes.push_back(box);
 		}

@@ -491,11 +491,11 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 		Vector3 node_p(
 				chunk_p.getX() * m_chunk_size_voxels.getX() +
-				m_chunk_size_voxels.getX() / 2.0f,
+				m_chunk_size_voxels.getX() / 2.0f - 0.5f,
 				chunk_p.getY() * m_chunk_size_voxels.getY() +
-				m_chunk_size_voxels.getY() / 2.0f,
+				m_chunk_size_voxels.getY() / 2.0f - 0.5f,
 				chunk_p.getZ() * m_chunk_size_voxels.getZ() +
-				m_chunk_size_voxels.getZ() / 2.0f
+				m_chunk_size_voxels.getZ() / 2.0f - 0.5f
 		);
 		log_t(MODULE, "create_chunk_node(): node_p=(%f, %f, %f)",
 				node_p.x_, node_p.y_, node_p.z_);
