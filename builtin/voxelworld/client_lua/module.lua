@@ -362,18 +362,20 @@ function M.sub_geometry_update(cb)
 	table.insert(geometry_update_cbs, cb)
 end
 
--- Return value: VoxelInstance (found), VoxelInstance(0) (not found)
-function M.get_static_voxel(p)
-	p = buildat.Vector3(p):round()
-	log:debug("get_static_voxel(): p="..p:dump())
-	-- Calculate which chunk this voxel is in
+function M.get_chunk_position(voxel_p)
+	local p = buildat.Vector3(voxel_p):round()
 	local chunk_p = p:div_components(M.chunk_size_voxels):floor()
-	log:debug("get_static_voxel(): chunk_p="..chunk_p:dump())
+	local in_chunk_p = p - M.chunk_size_voxels:mul_components(chunk_p)
+	return chunk_p, in_chunk_p
+end
+
+function M.get_static_node(chunk_p)
+	log:debug("get_static_node(): chunk_p="..chunk_p:dump())
 	-- NOTE: Chunks are positioned by their center position, and chunks are
 	--       aligned to a grid offset by half their size from global origin
 	local chunk_center_p = chunk_p:mul_components(M.chunk_size_voxels) +
 			M.chunk_size_voxels / 2
-	log:debug("get_static_voxel(): chunk_center_p="..chunk_center_p:dump())
+	log:debug("get_static_node(): chunk_center_p="..chunk_center_p:dump())
 
 	-- Find the static node
 	local scene = replicate.main_scene
@@ -381,19 +383,19 @@ function M.get_static_voxel(p)
 	local clearance = magic.Vector3(1,1,1)
 	local find_lc = chunk_center_p - clearance
 	local find_uc = chunk_center_p + clearance
-	log:debug("get_static_voxel(): find_lc="..find_lc:dump())
-	log:debug("get_static_voxel(): find_uc="..find_uc:dump())
+	log:debug("get_static_node(): find_lc="..find_lc:dump())
+	log:debug("get_static_node(): find_uc="..find_uc:dump())
 	local result = octree:GetDrawables(magic.BoundingBox(
 			magic.Vector3.from_buildat(find_lc),
 			magic.Vector3.from_buildat(find_uc)))
-	log:debug("get_static_voxel(): result="..dump(result))
+	log:debug("get_static_node(): result="..dump(result))
 	-- NOTE: The result will contain all kinds of global things like zones and
 	--       lights
 	-- NOTE: Static nodes can be distinguished by the user variable
 	--       buildat_static=true
 	local node = nil
 	for _, v in ipairs(result) do
-		--log:debug("get_static_voxel(): result node:GetName()="..v.node:GetName())
+		--log:debug("get_static_node(): result node:GetName()="..v.node:GetName())
 		local buildat_static_var = v.node:GetVar("buildat_static")
 		if buildat_static_var:GetBool() == true then
 			node = v.node
@@ -401,22 +403,41 @@ function M.get_static_voxel(p)
 		end
 	end
 	if node == nil then
-		log:debug("get_static_voxel(): static node not found")
+		log:debug("get_static_node(): static node "..chunk_p:dump()..
+				" not found")
 		for _, v in ipairs(result) do
-			log:debug("get_static_voxel(): * not "..v.node:GetName())
+			log:debug("get_static_node(): * not "..v.node:GetName())
 		end
-		return buildat.VoxelInstance(0)
 	end
-	-- Calculate position inside the chunk
-	local in_chunk_p = p - M.chunk_size_voxels:mul_components(chunk_p)
-	log:debug("get_static_voxel(): in_chunk_p="..in_chunk_p:dump())
-	-- Get voxel from volume
+	return node
+end
+
+function M.get_volume(node)
 	local data = node:GetVar("buildat_voxel_data"):GetBuffer()
 	if data == nil then
-		log_w(MODULE, "Invalid static node does not contain buildat_voxel_data")
-		return buildat.VoxelInstance(0)
+		log_w(MODULE, "get_volume(): Node does not contain "..
+				"buildat_voxel_data")
+		return nil
 	end
 	local volume = buildat.deserialize_volume(data)
+	return volume
+end
+
+-- Return value: VoxelInstance (found), VoxelInstance(0) (not found)
+function M.get_static_voxel(p)
+	p = buildat.Vector3(p):round()
+	log:debug("get_static_voxel(): p="..p:dump())
+	-- Calculate which chunk this voxel is in
+	local chunk_p, in_chunk_p = M.get_chunk_position(p)
+	log:debug("get_static_voxel(): chunk_p="..chunk_p:dump()..
+			", in_chunk_p="..in_chunk_p:dump())
+	-- Find the static node
+	local node = M.get_static_node(chunk_p)
+	if node == nil then
+		return buildat.VoxelInstance(0)
+	end
+	-- Get voxel from volume
+	local volume = M.get_volume(node)
 	log:debug("get_static_voxel(): volume="..dump(volume))
 	local v = volume:get_voxel_at(in_chunk_p.x, in_chunk_p.y, in_chunk_p.z)
 	log:debug("get_static_voxel(): v="..dump(v))
