@@ -196,9 +196,9 @@ public:
 		const interface::CachedVoxelDefinition *front_def =
 				m_voxel_reg->get_cached(front);
 		if(!back_def)
-			throw Exception(ss_()+"Undefined voxel: back="+itos(back.getId()));
+			throw Exception(ss_()+"Undefined voxel: back="+itos(back.get_id()));
 		if(!front_def)
-			throw Exception(ss_()+"Undefined voxel: front="+itos(front.getId()));
+			throw Exception(ss_()+"Undefined voxel: front="+itos(front.get_id()));
 		if(!back_def || !back_def->physically_solid)
 			return false;
 		if(!front_def || !front_def->physically_solid){
@@ -305,9 +305,9 @@ public:
 		const interface::CachedVoxelDefinition *front_def =
 				m_voxel_reg->get_cached(front);
 		if(!back_def)
-			throw Exception(ss_()+"Undefined voxel: back="+itos(back.getId()));
+			throw Exception(ss_()+"Undefined voxel: back="+itos(back.get_id()));
 		if(!front_def)
-			throw Exception(ss_()+"Undefined voxel: front="+itos(front.getId()));
+			throw Exception(ss_()+"Undefined voxel: front="+itos(front.get_id()));
 		/*if(!back_def){
 		    return false;
 		}*/
@@ -315,16 +315,16 @@ public:
 			return false;
 		}
 		else if(back_def->face_draw_type == interface::FaceDrawType::ALWAYS){
-			materialToUse = back.getId();
+			materialToUse = back.get_id();
 			return true;
 		}
 		// interface::FaceDrawType::ON_EDGE
 		if(!front_def){
-			materialToUse = back.getId();
+			materialToUse = back.get_id();
 			return true;
 		}
 		if(back_def->edge_material_id != front_def->edge_material_id){
-			materialToUse = back.getId();
+			materialToUse = back.get_id();
 			return true;
 		}
 		return false;
@@ -423,7 +423,7 @@ void preload_textures(pv::RawVolume<VoxelInstance> &volume,
 				const interface::CachedVoxelDefinition *def =
 						voxel_reg->get_cached(v, atlas_reg);
 				if(!def)
-					throw Exception(ss_()+"Undefined voxel: "+itos(v.getId()));
+					throw Exception(ss_()+"Undefined voxel: "+itos(v.get_id()));
 			}
 		}
 	}
@@ -641,11 +641,11 @@ up_<pv::RawVolume<VoxelInstance>> generate_voxel_lod_volume(
 							if(!region_orig.containsPoint(p_orig))
 								continue;
 							VoxelInstance v1 = volume_orig.getVoxelAt(p_orig);
-							if(v1.getId() == interface::VOXELTYPEID_UNDEFINED)
+							if(v1.get_id() == interface::VOXELTYPEID_UNDEFINED)
 								continue;
 							// TODO: Prioritize voxel types better
 							// Higher is probably more interesting
-							if(v1.getId() > v_orig.getId())
+							if(v1.get_id() > v_orig.get_id())
 								v_orig = v1;
 						}
 					}
@@ -845,7 +845,7 @@ void generate_voxel_physics_boxes(
 				const interface::CachedVoxelDefinition *def =
 						voxel_reg->get_cached(v_orig);
 				if(!def)
-					throw Exception(ss_()+"Undefined voxel: "+itos(v_orig.getId()));
+					throw Exception(ss_()+"Undefined voxel: "+itos(v_orig.get_id()));
 				uint8_t v = (def && def->physically_solid);
 				volume.setVoxelAt(x, y, z, v);
 			}

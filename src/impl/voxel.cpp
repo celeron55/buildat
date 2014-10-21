@@ -141,7 +141,7 @@ struct CVoxelRegistry: public VoxelRegistry
 	const CachedVoxelDefinition* get_cached(const VoxelInstance &v,
 			AtlasRegistry *atlas_reg)
 	{
-		return get_cached(v.getId(), atlas_reg);
+		return get_cached(v.get_id(), atlas_reg);
 	}
 
 	void update_cache_basic(CachedVoxelDefinition &cache,

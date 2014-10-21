@@ -197,7 +197,7 @@ struct YstCommitHook: public voxelworld::CommitHook
 					for(;; y--){
 						VoxelInstance v = ivoxelworld->get_voxel(
 								pv::Vector3DInt32(x, y, z), true);
-						if(v.getId() == interface::VOXELTYPEID_UNDEFINED){
+						if(v.get_id() == interface::VOXELTYPEID_UNDEFINED){
 							// NOTE: This leaves the chunks below unhandled;
 							// there would have to be some kind of a dirty
 							// flag based on which this seach would be
@@ -208,7 +208,7 @@ struct YstCommitHook: public voxelworld::CommitHook
 						const auto *def = voxel_reg->get_cached(v);
 						if(!def)
 							throw Exception(ss_()+"Undefined voxel: "+
-									itos(v.getId()));
+									itos(v.get_id()));
 						bool light_passes = (!def || !def->physically_solid);
 						if(!light_passes)
 							break;

@@ -153,10 +153,10 @@ void init_voxel_volume(lua_State *L)
 		class_<VoxelInstance>("__buildat_VoxelInstance")
 			.def(constructor<uint32_t>())
 			.def_readwrite("data", &VoxelInstance::data)
-			.property("id", &VoxelInstance::getId)
+			.property("id", &VoxelInstance::get_id)
 			.property("int32", &voxelinstance_get_int32,
 					&voxelinstance_set_int32)
-			.def("get_id", &VoxelInstance::getId)
+			.def("get_id", &VoxelInstance::get_id)
 		,
 		class_<CommonVolume, bases<>, sp_<CommonVolume>>("__buildat_Volume")
 			.def(constructor<const pv::Region &>())

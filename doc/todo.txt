@@ -60,9 +60,9 @@ Buildat TODO
 	  unloaded or not; eg. network can just store the socket fds and be reloaded
 	  without anyone noticing
 		- Altough, network is very rarely modified so it doesn't really matter
-- Rename VoxelInstance::getId() to VoxelInstance::get_id()
 - If a file tracked by client_data is deleted and re-added, it won't get updated
   before server restart(?)
 - Debug instability in server at module reload
 - An option in the server to just compile and quit (to be used when one wants to
   check for compiler errors but not actually run anything)
+- Figure out why digger doesn't work properly when the client connects via menu

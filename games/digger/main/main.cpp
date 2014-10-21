@@ -385,7 +385,7 @@ struct Module: public interface::Module
 	            for(; y>-50; y--){
 	                pv::Vector3DInt32 p(x, y, z);
 	                VoxelInstance v = ivoxelworld->get_voxel(p);
-	                if(v.getId() != 1)
+	                if(v.get_id() != 1)
 	                    break;
 	            }
 	            y++;*/
