@@ -6,6 +6,9 @@ return {
 	Update = {
 		TimeStep = {variant = "Float", safe = "number"},
 	},
+	PostRenderUpdate = {
+		TimeStep = {variant = "Float", safe = "number"},
+	},
 	KeyDown = {
 		Key = {variant = "Int", safe = "number"},
 	},

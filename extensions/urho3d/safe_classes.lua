@@ -94,9 +94,17 @@ function M.define(dst, util)
 	})
 
 	util.wc("Quaternion", {
-		unsafe_constructor = util.wrap_function({"number", "number", "number", "number"},
+		unsafe_constructor = util.wrap_function({
+				"number", {"number", "Vector3"}, {"number", "__nil"},
+						{"number", "__nil"}},
 		function(w, x, y, z)
-			return util.wrap_instance("Quaternion", Quaternion(w, x, y, z))
+			if type(w) == "number" and type(x) == "number" and
+					type(y) == "number" and type(z) == "number" then
+				return util.wrap_instance("Quaternion", Quaternion(w, x, y, z))
+			else
+				-- angle, axis
+				return util.wrap_instance("Quaternion", Quaternion(w, x))
+			end
 		end),
 		instance = {
 			YawAngle = util.self_function(
@@ -317,6 +325,31 @@ function M.define(dst, util)
 		},
 	})
 
+	util.wc("CustomGeometry", {
+		inherited_from_by_wrapper = dst.Drawable,
+		instance = {
+			SetNumGeometries = util.self_function(
+					"SetNumGeometries", {}, {"CustomGeometry", "number"}),
+			BeginGeometry = util.self_function(
+					"BeginGeometry", {}, {"CustomGeometry", "number", "number"}),
+			DefineVertex = util.self_function(
+					"DefineVertex", {}, {"CustomGeometry", "Vector3"}),
+			DefineNormal = util.self_function(
+					"DefineNormal", {}, {"CustomGeometry", "Vector3"}),
+			DefineColor = util.self_function(
+					"DefineColor", {}, {"CustomGeometry", "Color"}),
+			Commit = util.self_function(
+					"Commit", {}, {"CustomGeometry"}),
+			GetMaterial = util.self_function(
+					"GetMaterial", {{"Material", "nil"}}, {"CustomGeometry", "number"}),
+			SetMaterial = util.self_function(
+					"SetMaterial", {}, {"CustomGeometry", "number", "Material"}),
+		},
+		properties = {
+			dynamic = util.simple_property("boolean"),
+		},
+	})
+
 	util.wc("Camera", {
 		inherited_from_by_wrapper = dst.Component,
 		properties = {
@@ -511,6 +544,7 @@ function M.define(dst, util)
 			SetVar = util.self_function("SetVar", {},
 					{"Node", "StringHash", "Variant"}),
 			GetWorldPosition = util.self_function("GetWorldPosition", {dst.Vector3}, {"Node"}),
+			GetWorldDirection = util.self_function("GetWorldDirection", {dst.Vector3}, {"Node"}),
 			GetRotation = util.self_function("GetRotation", {dst.Quaternion}, {"Node"}),
 			Pitch = util.self_function("Pitch", {}, {"Node", "number"}),
 			Yaw = util.self_function("Yaw", {}, {"Node", "number"}),
@@ -520,6 +554,10 @@ function M.define(dst, util)
 			scale = util.simple_property(dst.Vector3),
 			direction = util.simple_property(dst.Vector3),
 			position = util.simple_property(dst.Vector3),
+			worldDirection = util.simple_property(dst.Vector3),
+			worldPosition = util.simple_property(dst.Vector3),
+			enabled = util.simple_property("boolean"),
+			rotation = util.simple_property(dst.Quaternion),
 		},
 	})
 
