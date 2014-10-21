@@ -49,6 +49,7 @@ namespace voxelworld
 				sp_<pv::RawVolume<VoxelInstance>> volume){}
 		virtual void in_scene(voxelworld::Interface *ivoxelworld,
 				const pv::Vector3DInt32 &chunk_p, magic::Node *n){}
+		// TODO: Remove this hook callback and use an event instead
 		virtual void after_commit(voxelworld::Interface *ivoxelworld,
 				const pv::Vector3DInt32 &chunk_p){}
 	};

@@ -239,7 +239,6 @@ struct Module: public interface::Module, public voxelworld::Interface
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t(
 					"network:packet_received/voxelworld:get_section"));
-		m_server->sub_event(this, Event::t("voxelworld:node_voxel_data_updated"));
 
 		m_server->access_scene([&](Scene *scene)
 		{
@@ -261,8 +260,6 @@ struct Module: public interface::Module, public voxelworld::Interface
 				client_file::FilesTransmitted)
 		EVENT_TYPEN("network:packet_received/voxelworld:get_section",
 				on_get_section, network::Packet)
-		EVENT_TYPEN("voxelworld:node_voxel_data_updated",
-				on_node_voxel_data_updated, voxelworld::NodeVoxelDataUpdatedEvent)
 	}
 
 	void on_start()
@@ -435,29 +432,6 @@ struct Module: public interface::Module, public voxelworld::Interface
 				packet.sender, PV3I_PARAMS(section_p));
 	}
 
-	void on_node_voxel_data_updated(const NodeVoxelDataUpdatedEvent &event)
-	{
-		// NOTE: This delayed event is used so that when this is received,
-		//       replicate has already sent the data to clients
-
-		// Notify clients that know the node
-		sv_<replicate::PeerId> peers;
-		replicate::access(m_server, [&](replicate::Interface *ireplicate){
-			peers = ireplicate->find_peers_that_know_node(event.node_id);
-		});
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar((int32_t)event.node_id);
-		}
-		network::access(m_server, [&](network::Interface *inetwork){
-			for(auto &peer_id: peers){
-				inetwork->send(peer_id, "voxelworld:node_voxel_data_updated",
-						os.str());
-			}
-		});
-	}
-
 	// Get section if exists
 	Section* get_section(const pv::Vector3DInt16 &section_p)
 	{
@@ -576,6 +550,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 		run_commit_hooks_in_scene(chunk_p, n);
 
+		// TODO: Remove this hook callback and use an event instead
 		run_commit_hooks_after_commit(chunk_p);
 
 		// There are no collision shapes initially, but add the rigid body now
@@ -803,6 +778,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		// Mark node for collision box update
 		mark_node_for_physics_update(node_id, volume);
 
+		// TODO: Remove this hook callback and use an event instead
 		run_commit_hooks_after_commit(chunk_p);
 	}
 
@@ -909,10 +885,23 @@ struct Module: public interface::Module, public voxelworld::Interface
 		});
 
 		// Tell replicate to emit events once it has done its job
+		// TODO: Have some way of invoking replication directly for this node;
+		//       this is too slow
+		sv_<replicate::PeerId> peers;
 		replicate::access(m_server, [&](replicate::Interface *ireplicate){
-			ireplicate->emit_after_next_sync(Event(
-						"voxelworld:node_voxel_data_updated",
-						new NodeVoxelDataUpdatedEvent(node_id)));
+			ireplicate->sync_node_immediate(node_id);
+			peers = ireplicate->find_peers_that_know_node(node_id);
+		});
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar((int32_t)node_id);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(auto &peer_id: peers){
+				inetwork->send(peer_id, "voxelworld:node_voxel_data_updated",
+						os.str());
+			}
 		});
 
 		// Mark node for collision box update
@@ -923,6 +912,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		// Unload buffer volume
 		chunk_buffer.volume.reset();
 
+		// TODO: Remove this hook callback and use an event instead
 		run_commit_hooks_after_commit(chunk_p);
 	}
 

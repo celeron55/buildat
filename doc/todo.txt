@@ -64,3 +64,5 @@ Buildat TODO
 - If a file tracked by client_data is deleted and re-added, it won't get updated
   before server restart(?)
 - Debug instability in server at module reload
+- An option in the server to just compile and quit (to be used when one wants to
+  check for compiler errors but not actually run anything)
