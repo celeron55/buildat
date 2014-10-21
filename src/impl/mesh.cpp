@@ -73,9 +73,9 @@ Model* create_simple_voxel_model(Context *context,
 	sv_<float> vertex_data;
 	vertex_data.resize(num_vertices * 6); // vertex + normal
 	for(size_t i = 0; i < num_vertices; i++){
-		vertex_data[i*6 + 0] = pv_vertices[i].position.getX() - w/2.0f - 0.0f;
-		vertex_data[i*6 + 1] = pv_vertices[i].position.getY() - h/2.0f - 0.0f;
-		vertex_data[i*6 + 2] = pv_vertices[i].position.getZ() - d/2.0f - 0.0f;
+		vertex_data[i*6 + 0] = pv_vertices[i].position.getX() - w/2.0f - 0.5f;
+		vertex_data[i*6 + 1] = pv_vertices[i].position.getY() - h/2.0f - 0.5f;
+		vertex_data[i*6 + 2] = pv_vertices[i].position.getZ() - d/2.0f - 0.5f;
 		vertex_data[i*6 + 3] = pv_vertices[i].normal.getX();
 		vertex_data[i*6 + 4] = pv_vertices[i].normal.getY();
 		vertex_data[i*6 + 5] = pv_vertices[i].normal.getZ();
