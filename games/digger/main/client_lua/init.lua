@@ -314,7 +314,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		local p, p_above = find_pointed_voxel(camera_node)
 		pointed_voxel_p = p
 		pointed_voxel_p_above = p_above
-		if p then
+		if p and p_above then
 			local v = voxelworld.get_static_voxel(p)
 			--log:info("pointed voxel: "..p:dump()..": "..v.id)
 			pointed_voxel_visual_node.position = magic.Vector3.from_buildat(p)
