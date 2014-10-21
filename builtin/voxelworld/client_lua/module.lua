@@ -56,6 +56,9 @@ local geometry_update_cbs = {} -- function(node)
 -- TODO: Implement unload by timeout
 local node_volume_cache = {} -- {node_id: {volume:, last_access_us:}}
 
+-- NOTE: node can be nil, meaning that it was cached to be nil
+local static_node_cache = {} -- {z: {y: {x: {node:, fetched:}}}} (chunk_p)
+
 function on_ready()
 	if is_ready then
 		error("on_ready(): already ready")
@@ -373,8 +376,33 @@ function M.get_chunk_position(voxel_p)
 	return chunk_p, in_chunk_p
 end
 
+function M.get_static_node_cache(chunk_p)
+	local ztable = static_node_cache[chunk_p.z]
+	if not ztable then
+		ztable = {}
+		static_node_cache[chunk_p.z] = ztable
+	end
+	local ytable = ztable[chunk_p.y]
+	if not ytable then
+		ytable = {}
+		ztable[chunk_p.y] = ytable
+	end
+	local xtable = ytable[chunk_p.x]
+	if not xtable then
+		xtable = {fetched=false}
+		xtable[chunk_p.x] = xtable
+	end
+	return xtable
+end
+
 function M.get_static_node(chunk_p)
-	log:debug("get_static_node(): chunk_p="..chunk_p:dump())
+	local cache = M.get_static_node_cache(chunk_p)
+	if cache and cache.fetched then
+		log:debug("get_static_node(): chunk_p="..chunk_p:dump().." (cache)")
+		-- NOTE: cache.node can be nil, meaning that it was cached to be nil
+		return cache.node
+	end
+	log:debug("get_static_node(): chunk_p="..chunk_p:dump().." (no cache)")
 	-- NOTE: Chunks are positioned by their center position, and chunks are
 	--       aligned to a grid offset by half their size from global origin
 	local chunk_center_p = chunk_p:mul_components(M.chunk_size_voxels) +
@@ -406,6 +434,8 @@ function M.get_static_node(chunk_p)
 			break
 		end
 	end
+	cache.node = node
+	cache.fetched = true
 	if node == nil then
 		log:debug("get_static_node(): static node "..chunk_p:dump()..
 				" not found")
@@ -417,11 +447,13 @@ function M.get_static_node(chunk_p)
 end
 
 function M.get_volume(node)
-	local cache = node_volume_cache[node:GetID()]
+	local node_id = node:GetID()
+	local cache = node_volume_cache[node_id]
 	if not cache then
+		log:verbose("Fetching node "..node_id.." volume into cache")
 		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
 		if data == nil then
-			log_w(MODULE, "get_volume(): Node "..node:GetID()..
+			log_w(MODULE, "get_volume(): Node "..node_id..
 					" does not contain buildat_voxel_data")
 			return nil
 		end
@@ -429,7 +461,7 @@ function M.get_volume(node)
 			volume = buildat.deserialize_volume(data),
 			last_access_us = buildat.get_time_us(),
 		}
-		node_volume_cache[node:GetID()] = cache
+		node_volume_cache[node_id] = cache
 	end
 	return cache.volume
 end
