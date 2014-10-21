@@ -1,6 +1,6 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
-#include "interface/worker_thread.h"
+#include "interface/thread_pool.h"
 #include "interface/mutex.h"
 #include "interface/semaphore.h"
 #include "core/log.h"
@@ -12,10 +12,10 @@
 	#include <pthread.h>
 	#include <semaphore.h>
 #endif
-#define MODULE "worker_thread"
+#define MODULE "thread_pool"
 
 namespace interface {
-namespace worker_thread {
+namespace thread_pool {
 
 struct CThreadPool: public ThreadPool
 {

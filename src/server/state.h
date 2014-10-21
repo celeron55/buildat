@@ -8,6 +8,10 @@ namespace interface
 {
 	struct ModuleInfo;
 	struct Module;
+
+	namespace thread_pool {
+		struct ThreadPool;
+	}
 }
 
 namespace Urho3D
@@ -52,6 +56,9 @@ namespace server
 		virtual void add_file_path(const ss_ &name, const ss_ &path) = 0;
 		// Returns "" if not found
 		virtual ss_ get_file_path(const ss_ &name) = 0;
+
+		virtual void access_thread_pool(std::function<void(
+				interface::thread_pool::ThreadPool *pool)> cb) = 0;
 	};
 
 	State* createState();

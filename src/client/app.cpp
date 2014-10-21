@@ -8,7 +8,7 @@
 #include "lua_bindings/util.h"
 #include "interface/fs.h"
 #include "interface/voxel.h"
-#include "interface/worker_thread.h"
+#include "interface/thread_pool.h"
 #include <c55/getopt.h>
 #include <c55/os.h>
 #pragma GCC diagnostic push
@@ -105,7 +105,7 @@ struct CApp: public App, public magic::Application
 	magic::SharedPtr<magic::Scene> m_scene;
 	magic::SharedPtr<magic::Node> m_camera_node;
 
-	sp_<interface::worker_thread::ThreadPool> m_thread_pool;
+	sp_<interface::thread_pool::ThreadPool> m_thread_pool;
 
 	CApp(magic::Context *context, const Options &options):
 		magic::Application(context),
@@ -113,7 +113,7 @@ struct CApp: public App, public magic::Application
 		L(nullptr),
 		m_options(options),
 		m_last_update_us(get_timeofday_us()),
-		m_thread_pool(interface::worker_thread::createThreadPool())
+		m_thread_pool(interface::thread_pool::createThreadPool())
 	{
 		log_v(MODULE, "constructor()");
 		log_v(MODULE, "window size: %ix%i",
@@ -295,7 +295,7 @@ struct CApp: public App, public magic::Application
 		return m_scene;
 	}
 
-	interface::worker_thread::ThreadPool* get_thread_pool()
+	interface::thread_pool::ThreadPool* get_thread_pool()
 	{
 		return m_thread_pool.get();
 	}

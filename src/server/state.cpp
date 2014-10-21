@@ -12,8 +12,8 @@
 #include "interface/fs.h"
 #include "interface/magic_event.h"
 #include "interface/sha1.h"
-//#include "interface/thread.h"
 #include "interface/mutex.h"
+#include "interface/thread_pool.h"
 #include <c55/string_util.h>
 #include <c55/filesys.h>
 #pragma GCC diagnostic push
@@ -246,9 +246,15 @@ struct CState: public State, public interface::Server
 	sm_<ss_, ss_> m_file_paths;
 	interface::Mutex m_file_paths_mutex;
 
+	sp_<interface::thread_pool::ThreadPool> m_thread_pool;
+	interface::Mutex m_thread_pool_mutex;
+
 	CState():
-		m_compiler(rccpp::createCompiler(g_server_config.compiler_command))
+		m_compiler(rccpp::createCompiler(g_server_config.compiler_command)),
+		m_thread_pool(interface::thread_pool::createThreadPool())
 	{
+		m_thread_pool->start(4); // TODO: Configurable
+
 		// Set basic RCC++ include directories
 
 		// We don't want to directly add the interface path as it contains
@@ -935,6 +941,13 @@ struct CState: public State, public interface::Server
 		if(it == m_file_paths.end())
 			return "";
 		return it->second;
+	}
+
+	void access_thread_pool(std::function<void(
+			interface::thread_pool::ThreadPool *pool)> cb)
+	{
+		interface::MutexScope ms(m_thread_pool_mutex);
+		cb(m_thread_pool.get());
 	}
 };
 

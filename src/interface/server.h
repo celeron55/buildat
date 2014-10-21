@@ -18,6 +18,10 @@ namespace interface
 	struct ModuleInfo;
 	struct Module;
 
+	namespace thread_pool {
+		struct ThreadPool;
+	}
+
 	struct TickEvent: public interface::Event::Private {
 		float dtime;
 		TickEvent(float dtime): dtime(dtime){}
@@ -83,6 +87,9 @@ namespace interface
 
 		// Add resource file path (to make a mirror of the client)
 		virtual void add_file_path(const ss_ &name, const ss_ &path) = 0;
+
+		virtual void access_thread_pool(std::function<void(
+				interface::thread_pool::ThreadPool *pool)> cb) = 0;
 	};
 }
 // vim: set noet ts=4 sw=4:

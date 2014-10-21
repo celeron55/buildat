@@ -15,7 +15,7 @@ namespace interface {
 	struct VoxelRegistry;
 	struct AtlasRegistry;
 
-	namespace worker_thread {
+	namespace thread_pool {
 		struct ThreadPool;
 	}
 }
@@ -66,7 +66,7 @@ namespace app
 		virtual void file_updated_in_cache(const ss_ &file_name,
 				const ss_ &file_hash, const ss_ &cached_path) = 0;
 		virtual Urho3D::Scene* get_scene() = 0;
-		virtual interface::worker_thread::ThreadPool* get_thread_pool() = 0;
+		virtual interface::thread_pool::ThreadPool* get_thread_pool() = 0;
 	};
 
 	App* createApp(Urho3D::Context *context, const Options &options = Options());

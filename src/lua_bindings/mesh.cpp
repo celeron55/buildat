@@ -5,7 +5,7 @@
 #include "client/app.h"
 #include "interface/mesh.h"
 #include "interface/voxel_volume.h"
-#include "interface/worker_thread.h"
+#include "interface/thread_pool.h"
 #include <c55/os.h>
 #include <tolua++.h>
 #include <luabind/luabind.hpp>
@@ -140,7 +140,7 @@ struct ScopeTimer {
 };
 #endif
 
-struct SetVoxelGeometryTask: public interface::worker_thread::Task
+struct SetVoxelGeometryTask: public interface::thread_pool::Task
 {
 	Node *node;
 	ss_ data;
@@ -188,7 +188,7 @@ struct SetVoxelGeometryTask: public interface::worker_thread::Task
 	}
 };
 
-struct SetVoxelLodGeometryTask: public interface::worker_thread::Task
+struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 {
 	int lod;
 	Node *node;
@@ -244,7 +244,7 @@ struct SetVoxelLodGeometryTask: public interface::worker_thread::Task
 	}
 };
 
-struct SetPhysicsBoxesTask: public interface::worker_thread::Task
+struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 {
 	Node *node;
 	ss_ data;

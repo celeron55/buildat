@@ -5,7 +5,7 @@
 
 namespace interface
 {
-	namespace worker_thread
+	namespace thread_pool
 	{
 		struct Task
 		{

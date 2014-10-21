@@ -122,7 +122,7 @@ set(BUILDAT_CORE_SRCS
 	src/impl/noise.cpp
 	src/impl/voxel_volume.cpp
 	src/impl/compress.cpp
-	src/impl/worker_thread.cpp
+	src/impl/thread_pool.cpp
 	src/impl/os.cpp
 )
 if(WIN32)
