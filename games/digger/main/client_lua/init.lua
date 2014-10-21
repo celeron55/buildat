@@ -177,6 +177,10 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	end
 end)
 
+-- Return value: nil or buildat.Vector3
+local function find_pointed_voxel()
+end
+
 magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	local button = event_data:GetInt("Button")
 	log:info("MouseButtonDown: "..button)
@@ -213,6 +217,12 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 			}},
 		})
 		buildat.send_packet("main:dig", data)
+	end
+	if button == magic.MOUSEB_MIDDLE then
+		local p = player_node.position
+		local v = voxelworld.get_static_voxel(p)
+		log:info("get_static_voxel("..buildat.Vector3(p):dump()..")"..
+				" returned v.id="..dump(v.id))
 	end
 end)
 

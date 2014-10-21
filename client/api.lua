@@ -20,6 +20,7 @@ buildat.safe.createAtlasRegistry  = __buildat_createAtlasRegistry
 buildat.safe.Region        = __buildat_Region
 buildat.safe.VoxelInstance = __buildat_VoxelInstance
 buildat.safe.Volume        = __buildat_Volume
+buildat.safe.deserialize_volume       = __buildat_deserialize_volume
 buildat.safe.deserialize_volume_int32 = __buildat_deserialize_volume_int32
 buildat.safe.deserialize_volume_8bit  = __buildat_deserialize_volume_8bit
 
@@ -225,6 +226,10 @@ local Vector3_prototype = {
 		return buildat.safe.Vector3(
 				math.floor(a.x), math.floor(a.y), math.floor(a.z))
 	end,
+	round = function(a)
+		return buildat.safe.Vector3(
+				math.floor(a.x+0.5), math.floor(a.y+0.5), math.floor(a.z+0.5))
+	end,
 	add = function(a, b)
 		return buildat.safe.Vector3(
 				a.x + b.x, a.y + b.y, a.z + b.z)
@@ -283,6 +288,10 @@ local Vector2_prototype = {
 	floor = function(a)
 		return buildat.safe.Vector2(
 				math.floor(a.x), math.floor(a.y))
+	end,
+	round = function(a)
+		return buildat.safe.Vector2(
+				math.floor(a.x+0.5), math.floor(a.y+0.5))
 	end,
 	add = function(a, b)
 		return buildat.safe.Vector2(

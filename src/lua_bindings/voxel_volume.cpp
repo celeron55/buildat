@@ -56,6 +56,20 @@ void voxelinstance_set_int32(VoxelInstance &v, int32_t d){
 
 typedef pv::RawVolume<VoxelInstance> CommonVolume;
 
+sp_<CommonVolume> deserialize_volume(
+		const luabind::object &buffer_o, lua_State *L)
+{
+	TRY_GET_SANDBOX_STUFF(buf, 1, VectorBuffer);
+
+	ss_ data;
+	if(buf == nullptr)
+		data = lua_checkcppstring(L, 1);
+	else
+		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+
+	return interface::deserialize_volume(data);
+}
+
 sp_<CommonVolume> deserialize_volume_int32(
 		const luabind::object &buffer_o, lua_State *L)
 {
@@ -153,6 +167,7 @@ void init_voxel_volume(lua_State *L)
 					&CommonVolume::setVoxelAt)
 			.def("get_enclosing_region", &CommonVolume::getEnclosingRegion)
 		,
+		LUABIND_FUNC(deserialize_volume),
 		LUABIND_FUNC(deserialize_volume_int32),
 		LUABIND_FUNC(deserialize_volume_8bit)
 	];

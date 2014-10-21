@@ -256,6 +256,8 @@ function M.unsafe_to_safe(unsafe_thing, valid_types)
 		if valid_type == '__nil' and unsafe_thing == nil then
 			return unsafe_thing
 		end
+		-- NOTE: Do not consider tables safe until explicitly allowed, because
+		--       tables often are unsafe
 		if valid_type == '__safe' and (
 				unsafe_thing == nil or
 				(type(thing_meta) == 'table' and thing_meta.type_name) or

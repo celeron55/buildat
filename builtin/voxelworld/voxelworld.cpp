@@ -29,6 +29,7 @@
 #include <ResourceCache.h>
 #include <Light.h>
 #include <Geometry.h>
+#include <Zone.h>
 #pragma GCC diagnostic pop
 #include <deque>
 #include <algorithm>
@@ -533,12 +534,22 @@ struct Module: public interface::Module, public voxelworld::Interface
 			throw Exception("Can't handle static node id=0");
 		section.node_ids->setVoxelAt(chunk_p, n->GetID());
 
-		n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
-		n->SetPosition(node_p);
+		// Distinguish static voxel nodes from others
+		n->SetVar(StringHash("buildat_static"), Variant(true));
 
 		int w = m_chunk_size_voxels.getX();
 		int h = m_chunk_size_voxels.getY();
 		int d = m_chunk_size_voxels.getZ();
+
+		// This makes sure the node will be found when searched from the octree,
+		// both on the server and the client
+		Zone *node_zone = n->CreateComponent<Zone>();
+		node_zone->SetPriority(-1000);
+		node_zone->SetBoundingBox(BoundingBox(
+				Vector3(-w/2, -h/2, -d/2), Vector3(w/2, h/2, d/2)));
+
+		n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
+		n->SetPosition(node_p);
 
 		// NOTE: These volumes have one extra voxel at each edge in order to
 		//       make proper meshes without gaps

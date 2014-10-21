@@ -61,3 +61,5 @@ Buildat TODO
 	  without anyone noticing
 		- Altough, network is very rarely modified so it doesn't really matter
 - Rename VoxelInstance::getId() to VoxelInstance::get_id()
+- A way of figuring out which voxel is being pointed at
+- Get rid of the dual module reload when saving a C++ file in Vim

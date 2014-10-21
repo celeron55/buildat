@@ -362,6 +362,78 @@ function M.sub_geometry_update(cb)
 	table.insert(geometry_update_cbs, cb)
 end
 
+-- Return value: VoxelInstance (found), VoxelInstance(0) (not found)
+function M.get_static_voxel(p)
+	p = buildat.Vector3(p):round()
+	log:debug("get_static_voxel(): p="..p:dump())
+	-- Calculate which chunk this voxel is in
+	local chunk_p = p:div_components(M.chunk_size_voxels):floor()
+	log:debug("get_static_voxel(): chunk_p="..chunk_p:dump())
+	-- NOTE: Chunks are positioned by their center position, and chunks are
+	--       aligned to a grid offset by half their size from global origin
+	local chunk_center_p = chunk_p:mul_components(M.chunk_size_voxels) +
+			M.chunk_size_voxels / 2
+	log:debug("get_static_voxel(): chunk_center_p="..chunk_center_p:dump())
+
+	-- Find the static node
+	local scene = replicate.main_scene
+	local octree = scene:GetComponent("Octree")
+	local clearance = magic.Vector3(1,1,1)
+	local find_lc = chunk_center_p - clearance
+	local find_uc = chunk_center_p + clearance
+	log:debug("get_static_voxel(): find_lc="..find_lc:dump())
+	log:debug("get_static_voxel(): find_uc="..find_uc:dump())
+	local result = octree:GetDrawables(magic.BoundingBox(
+			magic.Vector3.from_buildat(find_lc),
+			magic.Vector3.from_buildat(find_uc)))
+	log:debug("get_static_voxel(): result="..dump(result))
+	-- NOTE: The result will contain all kinds of global things like zones and
+	--       lights
+	-- NOTE: Static nodes can be distinguished by the user variable
+	--       buildat_static=true
+	local node = nil
+	for _, v in ipairs(result) do
+		--log:debug("get_static_voxel(): result node:GetName()="..v.node:GetName())
+		local buildat_static_var = v.node:GetVar("buildat_static")
+		if buildat_static_var:GetBool() == true then
+			node = v.node
+			break
+		end
+	end
+	if node == nil then
+		log:debug("get_static_voxel(): static node not found")
+		for _, v in ipairs(result) do
+			log:debug("get_static_voxel(): * not "..v.node:GetName())
+		end
+		return buildat.VoxelInstance(0)
+	end
+	-- Calculate position inside the chunk
+	local in_chunk_p = p - M.chunk_size_voxels:mul_components(chunk_p)
+	log:debug("get_static_voxel(): in_chunk_p="..in_chunk_p:dump())
+	-- Get voxel from volume
+	local data = node:GetVar("buildat_voxel_data"):GetBuffer()
+	if data == nil then
+		log_w(MODULE, "Invalid static node does not contain buildat_voxel_data")
+		return buildat.VoxelInstance(0)
+	end
+	local volume = buildat.deserialize_volume(data)
+	log:debug("get_static_voxel(): volume="..dump(volume))
+	local v = volume:get_voxel_at(in_chunk_p.x, in_chunk_p.y, in_chunk_p.z)
+	log:debug("get_static_voxel(): v="..dump(v))
+	return v
+end
+
+-- TODO
+-- NOTE: This does not synchronize the voxel to the server, because games have
+--       to implement their own mechanisms for disallowing cheating
+function M.set_static_voxel(x, y, z, v)
+	if type(x) == "table" then
+		z = x.z
+		y = x.y
+		x = x.x
+	end
+end
+
 function send_get_section(p)
 	local data = cereal.binary_output({
 		p = {

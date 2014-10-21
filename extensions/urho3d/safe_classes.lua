@@ -49,6 +49,8 @@ function M.define(dst, util)
 					"GetString", {"string"}, {"Variant"}),
 			GetInt = util.self_function(
 					"GetInt", {"number"}, {"Variant"}),
+			GetBool = util.self_function(
+					"GetBool", {"boolean"}, {"Variant"}),
 			GetBuffer = util.wrap_function({"Variant"},
 				function(self)
 					return util.wrap_instance("VectorBuffer", self:GetBuffer())
@@ -136,6 +138,11 @@ function M.define(dst, util)
 		function(x, y, z)
 			return util.wrap_instance("Vector3", Vector3(x, y, z))
 		end),
+		class = {
+			from_buildat = function(v)
+				return util.wrap_instance("Vector3", Vector3(v.x, v.y, v.z))
+			end,
+		},
 		instance = {
 			Length = util.self_function(
 					"Length", {"number"}, {"Vector3"}),
@@ -271,6 +278,25 @@ function M.define(dst, util)
 
 	util.wc("Octree", {
 		inherited_from_by_wrapper = dst.Component,
+		instance = {
+			GetDrawables = util.wrap_function({"table"}, {"Octree", "BoundingBox"},
+				function(self, query)
+					local unsafe_result = self:GetDrawables(query)
+					--log:info(dump(result))
+					-- The result is a list of OctreeQueryResults; we will
+					-- convert it to a list of tables that contain the fields of
+					-- OctreeQueryResult.
+					local result = {}
+					for _, v in ipairs(unsafe_result) do
+						table.insert(result, {
+							drawable = util.wrap_instance("Drawable", v.drawable),
+							node = util.wrap_instance("Node", v.node),
+						})
+					end
+					return result
+				end
+			),
+		},
 	})
 
 	util.wc("Drawable", {

@@ -13,7 +13,8 @@ local M = {}
 -- because each chunk will be rendered as a whole according to the zone its
 -- center position is in
 --local ideal_zone_size = 32
--- NOTE: Actually, when zone overrides are used, this can be lower
+-- NOTE: Actually, when zone overrides are used, this can be lower; but it will
+--       require more processing as all renderable things are in the same octree
 local ideal_zone_size = 16
 
 M.sector_size = buildat.Vector2(0, 0)
