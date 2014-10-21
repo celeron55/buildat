@@ -57,17 +57,26 @@ struct CAtlasRegistry: public AtlasRegistry
 				continue;
 			if(def0.segment_resolution == seg_img_size){
 				size_t max = def0.total_segments.x_ * def0.total_segments.y_;
-				if(def0.segments.size() >= max)
+				if(def0.segments.size() >= max){
+					log_d(MODULE, "add_segment(): Found atlas for segment size "
+							"(%i, %i) %p, but it is full",
+							seg_img_size.x_, seg_img_size.y_, &def0);
 					continue; // Full
+				}
 				atlas_def = &def0;
 				break;
 			}
 		}
 		// If not found, create a texture atlas for this texture size
-		if(!atlas_def){
+		if(atlas_def){
+			log_d(MODULE, "add_segment(): Found atlas for segment size "
+					"(%i, %i): %p", seg_img_size.x_, seg_img_size.y_, atlas_def);
+		} else {
 			// Create a new texture atlas
 			m_defs.resize(m_defs.size()+1);
 			atlas_def = &m_defs[m_defs.size()-1];
+			log_d(MODULE, "add_segment(): Creating atlas for segment size "
+					"(%i, %i): %p", seg_img_size.x_, seg_img_size.y_, atlas_def);
 			atlas_def->id = m_defs.size()-1;
 			if(segment_def.total_segments.x_ == 0 ||
 					segment_def.total_segments.y_ == 0)
@@ -166,16 +175,22 @@ struct CAtlasRegistry: public AtlasRegistry
 			AtlasSegmentCache &cache, const AtlasSegmentDefinition &def,
 			const AtlasCache &atlas)
 	{
-		// Check if atlas is full
+		// Check if atlas has too many segments
 		size_t max_segments = atlas.total_segments.x_ * atlas.total_segments.y_;
-		if(atlas.segments.size() >= max_segments)
-			throw Exception("Atlas is full");
+		if(atlas.segments.size() > max_segments){
+			throw Exception("Atlas has too many segments (segments.size()="+
+					itos(atlas.segments.size())+", total_segments=("+
+					itos(atlas.total_segments.x_)+", "+
+					itos(atlas.total_segments.y_)+"))");
+		}
 		// Set segment texture
 		cache.texture = atlas.texture;
 		// Calculate segment's position in atlas texture
 		magic::IntVector2 total_segs = atlas.total_segments;
 		uint seg_iy = seg_id / total_segs.x_;
-		uint seg_ix = seg_id - seg_iy;
+		uint seg_ix = seg_id - seg_iy * total_segs.x_;
+		log_d(MODULE, "update_segment_cache(): seg_id=%i, seg_iy=%i, seg_ix=%i",
+				seg_id, seg_iy, seg_ix);
 		magic::IntVector2 seg_size = atlas.segment_resolution;
 		magic::IntVector2 dst_p00(
 				seg_ix * seg_size.x_ * 2,
