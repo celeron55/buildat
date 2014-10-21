@@ -61,4 +61,3 @@ Buildat TODO
 	  without anyone noticing
 		- Altough, network is very rarely modified so it doesn't really matter
 - Rename VoxelInstance::getId() to VoxelInstance::get_id()
-- Re-align integer positions in floating point space

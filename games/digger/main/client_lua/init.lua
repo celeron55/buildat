@@ -183,7 +183,11 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	if button == magic.MOUSEB_RIGHT then
 		local p = player_node.position
 		local data = cereal.binary_output({
-			p = {x = p.x, y = p.y, z = p.z},
+			p = {
+				x = math.floor(p.x+0.5),
+				y = math.floor(p.y+0.5),
+				z = math.floor(p.z+0.5),
+			},
 		}, {"object",
 			{"p", {"object",
 				{"x", "int32_t"},
@@ -197,9 +201,9 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 		local p = player_node.position
 		local data = cereal.binary_output({
 			p = {
-				x = math.floor(p.x),
-				y = math.floor(p.y+0.5),
-				z = math.floor(p.z)
+				x = math.floor(p.x+0.5),
+				y = math.floor(p.y+0.5 + 0.2),
+				z = math.floor(p.z+0.5),
 			},
 		}, {"object",
 			{"p", {"object",
