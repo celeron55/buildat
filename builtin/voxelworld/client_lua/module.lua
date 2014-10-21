@@ -51,6 +51,11 @@ M.camera_far_clip = 1000
 local is_ready = false
 local on_ready_callbacks = {}
 
+local geometry_update_cbs = {} -- function(node)
+
+-- TODO: Implement unload by timeout
+local node_volume_cache = {} -- {node_id: {volume:, last_access_us:}}
+
 function on_ready()
 	if is_ready then
 		error("on_ready(): already ready")
@@ -61,8 +66,6 @@ function on_ready()
 	end
 	on_ready_callbacks = nil
 end
-
-local geometry_update_cbs = {} -- function(node)
 
 function M.init()
 	log:info("voxelworld.init()")
@@ -129,6 +132,7 @@ function M.init()
 			{"node_id", "int32_t"},
 		})
 		log:info("voxelworld:node_voxel_data_updated: "..dump(values))
+		node_volume_cache[values.node_id] = nil -- Clear cache
 		local node = replicate.main_scene:GetNode(values.node_id)
 		queue_modified_node_update(node)
 	end)
@@ -413,14 +417,21 @@ function M.get_static_node(chunk_p)
 end
 
 function M.get_volume(node)
-	local data = node:GetVar("buildat_voxel_data"):GetBuffer()
-	if data == nil then
-		log_w(MODULE, "get_volume(): Node does not contain "..
-				"buildat_voxel_data")
-		return nil
+	local cache = node_volume_cache[node:GetID()]
+	if not cache then
+		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
+		if data == nil then
+			log_w(MODULE, "get_volume(): Node "..node:GetID()..
+					" does not contain buildat_voxel_data")
+			return nil
+		end
+		cache = {
+			volume = buildat.deserialize_volume(data),
+			last_access_us = buildat.get_time_us(),
+		}
+		node_volume_cache[node:GetID()] = cache
 	end
-	local volume = buildat.deserialize_volume(data)
-	return volume
+	return cache.volume
 end
 
 -- Return value: VoxelInstance (found), VoxelInstance(0) (not found)
