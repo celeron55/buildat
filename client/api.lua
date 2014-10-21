@@ -214,6 +214,9 @@ local Vector3_prototype = {
 	dump = function(a)
 		return "("..a.x..", "..a.y..", "..a.z..")"
 	end,
+	eq = function(a, b)
+		return (a.x == b.x and a.y == b.y and a.z == b.z)
+	end,
 	mul_components = function(a, b)
 		return buildat.safe.Vector3(
 				a.x * b.x, a.y * b.y, a.z * b.z)
@@ -253,6 +256,8 @@ local Vector3_prototype = {
 function buildat.safe.Vector3(x, y, z)
 	local self = {}
 	if x ~= nil and y == nil and z == nil then
+		assert(type(x.x) == "number" and type(x.y) == "number" and
+				type(x.z) == "number")
 		self.x = x.x
 		self.y = x.y
 		self.z = x.z
@@ -263,6 +268,7 @@ function buildat.safe.Vector3(x, y, z)
 	end
 	setmetatable(self, {
 		__index = Vector3_prototype,
+		__eq = Vector3_prototype.eq,
 		__add = Vector3_prototype.add,
 		__sub = Vector3_prototype.sub,
 		__mul = Vector3_prototype.mul,
@@ -276,6 +282,9 @@ local Vector2_prototype = {
 	y = 0,
 	dump = function(a)
 		return "("..a.x..", "..a.y..")"
+	end,
+	eq = function(a, b)
+		return (a.x == b.x and a.y == b.y)
 	end,
 	mul_components = function(a, b)
 		return buildat.safe.Vector2(
@@ -316,6 +325,7 @@ local Vector2_prototype = {
 function buildat.safe.Vector2(x, y)
 	local self = {}
 	if x ~= nil and y == nil then
+		assert(type(x.x) == "number" and type(x.y) == "number")
 		self.x = x.x
 		self.y = x.y
 	else
@@ -324,6 +334,7 @@ function buildat.safe.Vector2(x, y)
 	end
 	setmetatable(self, {
 		__index = Vector2_prototype,
+		__eq = Vector3_prototype.eq,
 		__add = Vector2_prototype.add,
 		__sub = Vector2_prototype.sub,
 		__mul = Vector2_prototype.mul,
