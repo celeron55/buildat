@@ -39,6 +39,66 @@ function handle_keydown(event_type, event_data)
 end
 magic.SubscribeToEvent("KeyDown", "handle_keydown")
 
+local voxel_reg = buildat.createVoxelRegistry()
+local atlas_reg = buildat.createAtlasRegistry()
+do
+	local vdef = buildat.VoxelDefinition()
+	vdef.name.block_name = "empty"
+	vdef.name.segment_x = 0
+	vdef.name.segment_y = 0
+	vdef.name.segment_z = 0
+	vdef.name.rotation_primary = 0
+	vdef.name.rotation_secondary = 0
+	vdef.handler_module = ""
+	vdef.edge_material_id = buildat.VoxelDefinition.EDGEMATERIALID_EMPTY
+	vdef.physically_solid = true
+	voxel_reg:add_voxel(vdef)
+end
+do
+	local vdef = buildat.VoxelDefinition()
+	vdef.name.block_name = "foo"
+	vdef.name.segment_x = 0
+	vdef.name.segment_y = 0
+	vdef.name.segment_z = 0
+	vdef.name.rotation_primary = 0
+	vdef.name.rotation_secondary = 0
+	vdef.handler_module = ""
+	local textures = {}
+	for i = 1, 6 do
+		local seg = buildat.AtlasSegmentDefinition()
+		seg.resource_name = "main/green_texture.png"
+		seg.total_segments = magic.IntVector2(1, 1)
+		seg.select_segment = magic.IntVector2(0, 0)
+		table.insert(textures, seg)
+	end
+	vdef.textures = textures
+	vdef.edge_material_id = buildat.VoxelDefinition.EDGEMATERIALID_GROUND
+	vdef.physically_solid = true
+	voxel_reg:add_voxel(vdef)
+end
+do
+	local vdef = buildat.VoxelDefinition()
+	vdef.name.block_name = "bar"
+	vdef.name.segment_x = 0
+	vdef.name.segment_y = 0
+	vdef.name.segment_z = 0
+	vdef.name.rotation_primary = 0
+	vdef.name.rotation_secondary = 0
+	vdef.handler_module = ""
+	local textures = {}
+	for i = 1, 6 do
+		local seg = buildat.AtlasSegmentDefinition()
+		seg.resource_name = "main/pink_texture.png"
+		seg.total_segments = magic.IntVector2(1, 1)
+		seg.select_segment = magic.IntVector2(0, 0)
+		table.insert(textures, seg)
+	end
+	vdef.textures = textures
+	vdef.edge_material_id = buildat.VoxelDefinition.EDGEMATERIALID_GROUND
+	vdef.physically_solid = true
+	voxel_reg:add_voxel(vdef)
+end
+
 function setup_simple_voxel_data(node)
 	--buildat.set_simple_voxel_model(node, 3, 3, 3, "010111010111111111010111010")
 	--node:SetScale(magic.Vector3(0.5, 0.5, 0.5))
@@ -48,13 +108,12 @@ function setup_simple_voxel_data(node)
 	--node:SetScale(magic.Vector3(2, 2, 2))
 
 	-- Should be something like "11101111"
-	local data = node:GetVar("simple_voxel_data"):GetString()
+	local data = node:GetVar("simple_voxel_data"):GetBuffer()
 	local w = node:GetVar("simple_voxel_w"):GetInt()
 	local h = node:GetVar("simple_voxel_h"):GetInt()
 	local d = node:GetVar("simple_voxel_d"):GetInt()
-	log:info(dump(node:GetName()).." voxel data size: "..#data)
-	buildat.set_8bit_voxel_geometry(node, w, h, d, data)
-	node:SetScale(magic.Vector3(1, 1, 1))
+	log:info(dump(node:GetName()).." voxel data size: "..data:GetSize())
+	buildat.set_8bit_voxel_geometry(node, w, h, d, data, voxel_reg, atlas_reg)
 
 	--local object = node:GetComponent("StaticModel")
 	--object.castShadows = true

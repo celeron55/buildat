@@ -284,7 +284,7 @@ struct Module: public interface::Module
 		    log_v(MODULE, "Testbox: (%f, %f, %f)", p.x_, p.y_, p.z_);
 		});*/
 		static uint a = 0;
-		if(((a++) % 100) == 0){
+		if(((a++) % 150) == 0){
 			m_server->access_scene([&](Scene *scene){
 				Node *n = scene->GetChild("Testbox");
 				n->SetRotation(Quaternion(30, 60, 90));

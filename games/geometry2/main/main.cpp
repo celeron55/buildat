@@ -38,6 +38,7 @@ struct Module: public interface::Module
 		interface::Module("geometry"),
 		m_server(server)
 	{
+		m_voxel_reg.reset(interface::createVoxelRegistry());
 	}
 
 	~Module()
@@ -54,7 +55,6 @@ struct Module: public interface::Module
 		{
 			Context *context = scene->GetContext();
 			m_atlas_reg.reset(interface::createAtlasRegistry(context));
-			m_voxel_reg.reset(interface::createVoxelRegistry(m_atlas_reg.get()));
 			{
 				interface::VoxelDefinition vdef;
 				vdef.name.block_name = "air";
@@ -158,21 +158,22 @@ struct Module: public interface::Module
 
 				// Crude way of dynamically defining a voxel model
 				n->SetVar(StringHash("simple_voxel_data"), Variant(
-							magic::String(data.c_str(), data.size())));
+							PODVector<uint8_t>((const uint8_t*)data.c_str(),
+							data.size())));
 				n->SetVar(StringHash("simple_voxel_w"), Variant(w));
 				n->SetVar(StringHash("simple_voxel_h"), Variant(h));
 				n->SetVar(StringHash("simple_voxel_d"), Variant(d));
 
 				// Load the same model in here and give it to the physics
 				// subsystem so that it can be collided to
-				SharedPtr<Model> model(interface::
+				SharedPtr<Model> model(interface::mesh::
 						create_8bit_voxel_physics_model(context, w, h, d, data,
 						m_voxel_reg.get()));
 
-				RigidBody *body = n->CreateComponent<RigidBody>();
+				RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
 				body->SetFriction(0.75f);
 				body->SetMass(1.0);
-				CollisionShape *shape = n->CreateComponent<CollisionShape>();
+				CollisionShape *shape = n->CreateComponent<CollisionShape>(LOCAL);
 				shape->SetConvexHull(model, 0, Vector3::ONE);
 				//shape->SetTriangleMesh(model, 0, Vector3::ONE);
 				//shape->SetBox(Vector3::ONE);
@@ -223,20 +224,21 @@ struct Module: public interface::Module
 
 				// Crude way of dynamically defining a voxel model
 				n->SetVar(StringHash("simple_voxel_data"), Variant(
-							magic::String(data.c_str(), data.size())));
+							PODVector<uint8_t>((const uint8_t*)data.c_str(),
+							data.size())));
 				n->SetVar(StringHash("simple_voxel_w"), Variant(w));
 				n->SetVar(StringHash("simple_voxel_h"), Variant(h));
 				n->SetVar(StringHash("simple_voxel_d"), Variant(d));
 
 				// Load the same model in here and give it to the physics
 				// subsystem so that it can be collided to
-				SharedPtr<Model> model(interface::
+				SharedPtr<Model> model(interface::mesh::
 						create_8bit_voxel_physics_model(context, w, h, d, data,
 						m_voxel_reg.get()));
 
-				RigidBody *body = n->CreateComponent<RigidBody>();
+				RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
 				body->SetFriction(0.75f);
-				CollisionShape *shape = n->CreateComponent<CollisionShape>();
+				CollisionShape *shape = n->CreateComponent<CollisionShape>(LOCAL);
 				shape->SetTriangleMesh(model, 0, Vector3::ONE);
 			}
 		});
@@ -245,7 +247,7 @@ struct Module: public interface::Module
 	void on_tick(const interface::TickEvent &event)
 	{
 		static uint a = 0;
-		if(((a++) % 50) == 0){
+		if(((a++) % 100) == 0){
 			m_server->access_scene([&](Scene *scene){
 				Node *n = scene->GetChild("Testbox");
 				//n->SetPosition(Vector3(0.0f, 8.0f, 0.0f));

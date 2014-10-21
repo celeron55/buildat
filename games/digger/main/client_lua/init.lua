@@ -152,10 +152,9 @@ local player_node = scene:CreateChild("Player")
 local player_shape = player_node:CreateComponent("CollisionShape")
 do
 	--player_node.position = magic.Vector3(0, 30, 0)
-	--player_node.position = magic.Vector3(55, 30, 40)
-	player_node.position = magic.Vector3(-5, 1, 257)
+	player_node.position = magic.Vector3(55, 30, 40)
+	--player_node.position = magic.Vector3(-5, 1, 257)
 	player_node.direction = magic.Vector3(-1, 0, 0.4)
-	--player_node:Yaw(-177.49858)
 	---[[
 	local body = player_node:CreateComponent("RigidBody")
 	--body.mass = 70.0
@@ -461,7 +460,6 @@ function setup_simple_voxel_data(node)
 	local d = node:GetVar("simple_voxel_d"):GetInt()
 	log:info(dump(node:GetName()).." voxel data size: "..data:GetSize())
 	buildat.set_8bit_voxel_geometry(node, w, h, d, data, voxel_reg, atlas_reg)
-	node:SetScale(magic.Vector3(1, 1, 1))
 end
 
 voxelworld.sub_ready(function()

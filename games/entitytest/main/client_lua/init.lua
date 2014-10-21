@@ -39,7 +39,7 @@ function handle_keydown(event_type, event_data)
 end
 magic.SubscribeToEvent("KeyDown", "handle_keydown")
 
-magic.sub_sync_node_added({}, function(node)
+replicate.sub_sync_node_added({}, function(node)
 	local name = node:GetName()
 	if name == "Box" then
 		-- Models and materials can be created dynamically on the client side

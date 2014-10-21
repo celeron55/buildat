@@ -135,7 +135,7 @@ struct Module: public interface::Module
 	{
 		log_d(MODULE, "entitytest::on_tick");
 		static uint a = 0;
-		if(((a++) % 50) == 0){
+		if(((a++) % 100) == 0){
 			m_server->access_scene([&](Scene *scene){
 				Node *n = scene->GetChild("Box");
 				n->SetPosition(Vector3(0.0f, 6.0f, 0.0f));

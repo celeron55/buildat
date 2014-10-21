@@ -91,13 +91,13 @@ struct Module: public interface::Module
 
 				// Load the same model in here and give it to the physics
 				// subsystem so that it can be collided to
-				SharedPtr<Model> model(interface::
+				SharedPtr<Model> model(interface::mesh::
 						create_simple_voxel_model(context, w, h, d, data.c_str()));
 
-				RigidBody *body = n->CreateComponent<RigidBody>();
+				RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
 				body->SetFriction(0.75f);
 				body->SetMass(1.0);
-				CollisionShape *shape = n->CreateComponent<CollisionShape>();
+				CollisionShape *shape = n->CreateComponent<CollisionShape>(LOCAL);
 				shape->SetConvexHull(model, 0, Vector3::ONE);
 				//shape->SetTriangleMesh(model, 0, Vector3::ONE);
 				//shape->SetBox(Vector3::ONE);
@@ -149,12 +149,12 @@ struct Module: public interface::Module
 
 				// Load the same model in here and give it to the physics
 				// subsystem so that it can be collided to
-				SharedPtr<Model> model(interface::
+				SharedPtr<Model> model(interface::mesh::
 						create_simple_voxel_model(context, w, h, d, data.c_str()));
 
-				RigidBody *body = n->CreateComponent<RigidBody>();
+				RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
 				body->SetFriction(0.75f);
-				CollisionShape *shape = n->CreateComponent<CollisionShape>();
+				CollisionShape *shape = n->CreateComponent<CollisionShape>(LOCAL);
 				shape->SetTriangleMesh(model, 0, Vector3::ONE);
 			}
 		});
@@ -163,13 +163,13 @@ struct Module: public interface::Module
 	void on_tick(const interface::TickEvent &event)
 	{
 		static uint a = 0;
-		if(((a++) % 50) == 0){
+		if(((a++) % 100) == 0){
+			float rx = (float)rand() / RAND_MAX * 180;
+			float ry = (float)rand() / RAND_MAX * 180;
+			float rz = (float)rand() / RAND_MAX * 180;
 			m_server->access_scene([&](Scene *scene){
 				Node *n = scene->GetChild("Testbox");
-				//n->SetPosition(Vector3(0.0f, 8.0f, 0.0f));
-				n->SetRotation(Quaternion(30, 60, 90));
-				//n->SetPosition(Vector3(0.0f, 6.0f, 0.0f));
-				//n->SetPosition(Vector3(0.0f, 4.0f, 0.0f));
+				n->SetRotation(Quaternion(rx, ry, rz));
 				n->SetPosition(Vector3(-0.5f, 8.0f, 0.0f));
 			});
 			return;
