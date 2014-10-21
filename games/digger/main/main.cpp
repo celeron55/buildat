@@ -77,7 +77,7 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t(
 					"network:packet_received/main:place_voxel"));
 		m_server->sub_event(this, Event::t(
-					"network:packet_received/main:dig"));
+					"network:packet_received/main:dig_voxel"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -91,8 +91,8 @@ struct Module: public interface::Module
 				on_generation_request, voxelworld::GenerationRequest)
 		EVENT_TYPEN("network:packet_received/main:place_voxel",
 				on_place_voxel, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:dig",
-				on_dig, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:dig_voxel",
+				on_dig_voxel, network::Packet)
 	}
 
 	void on_start()
@@ -429,7 +429,7 @@ struct Module: public interface::Module
 		});
 	}
 
-	void on_dig(const network::Packet &packet)
+	void on_dig_voxel(const network::Packet &packet)
 	{
 		pv::Vector3DInt32 voxel_p;
 		{
@@ -437,23 +437,12 @@ struct Module: public interface::Module
 			cereal::PortableBinaryInputArchive ar(is);
 			ar(voxel_p);
 		}
-		log_v(MODULE, "C%i: on_dig(): p=" PV3I_FORMAT,
+		log_v(MODULE, "C%i: on_dig_voxel(): p=" PV3I_FORMAT,
 				packet.sender, PV3I_PARAMS(voxel_p));
 
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
-			VoxelInstance v(1);
-			pv::Region region(-1, -1, -1, 1, 0, 1);
-			auto lc = region.getLowerCorner();
-			auto uc = region.getUpperCorner();
-			for(int z = lc.getZ(); z <= uc.getZ(); z++){
-				for(int y = lc.getY(); y <= uc.getY(); y++){
-					for(int x = lc.getX(); x <= uc.getX(); x++){
-						ivoxelworld->set_voxel(
-									voxel_p + pv::Vector3DInt32(x, y, z), v);
-					}
-				}
-			}
+			ivoxelworld->set_voxel(voxel_p, VoxelInstance(1));
 		});
 	}
 };

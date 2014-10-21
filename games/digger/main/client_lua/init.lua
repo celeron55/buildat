@@ -24,6 +24,38 @@ local JUMP_SPEED = 7 -- Barely 2 voxels
 
 local scene = replicate.main_scene
 
+local pointed_voxel_p = nil
+local pointed_voxel_p_above = nil
+local pointed_voxel_visual_node = scene:CreateChild("node")
+local pointed_voxel_visual_geometry =
+		pointed_voxel_visual_node:CreateComponent("CustomGeometry")
+do
+	-- TODO: Figure out how to draw thick lines instead of a translucent face
+	--pointed_voxel_visual_geometry:BeginGeometry(0, magic.LINE_LIST)
+	pointed_voxel_visual_geometry:BeginGeometry(0, magic.TRIANGLE_LIST)
+	pointed_voxel_visual_geometry:SetNumGeometries(1)
+	local d = 0.502
+	local c = magic.Color(0.08, 0.08, 0.08)
+	pointed_voxel_visual_geometry:DefineVertex(magic.Vector3(-d,  d,  d))
+	pointed_voxel_visual_geometry:DefineColor(c)
+	pointed_voxel_visual_geometry:DefineVertex(magic.Vector3( d,  d,  d))
+	pointed_voxel_visual_geometry:DefineColor(c)
+	pointed_voxel_visual_geometry:DefineVertex(magic.Vector3( d,  d, -d))
+	pointed_voxel_visual_geometry:DefineColor(c)
+	pointed_voxel_visual_geometry:DefineVertex(magic.Vector3( d,  d, -d))
+	pointed_voxel_visual_geometry:DefineColor(c)
+	pointed_voxel_visual_geometry:DefineVertex(magic.Vector3(-d,  d, -d))
+	pointed_voxel_visual_geometry:DefineColor(c)
+	pointed_voxel_visual_geometry:DefineVertex(magic.Vector3(-d,  d,  d))
+	pointed_voxel_visual_geometry:DefineColor(c)
+	pointed_voxel_visual_geometry:Commit()
+	local m = magic.Material.new()
+	m:SetTechnique(0, magic.cache:GetResource("Technique",
+			"Techniques/NoTextureVColAdd.xml"))
+	pointed_voxel_visual_geometry:SetMaterial(0, m)
+	pointed_voxel_visual_node.enabled = false
+end
+
 magic.input:SetMouseVisible(false)
 
 -- Set up zone (global visual parameters)
@@ -180,46 +212,69 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	end
 end)
 
--- Return value: nil or buildat.Vector3
-local function find_pointed_voxel()
+-- Returns: nil or p_under, p_above: buildat.Vector3
+-- TODO: This algorithm is quite wasteful
+local function find_pointed_voxel(camera_node)
+	local max_d = 6
+	local d_per_step = 0.1
+	local p0 = buildat.Vector3(camera_node.worldPosition)
+	local dir = buildat.Vector3(camera_node.worldDirection)
+	local last_p = nil
+	--log:verbose("p0="..p0:dump()..", dir="..dir:dump())
+	for i = 1, math.floor(max_d / d_per_step) do
+		local p = (p0 + dir * i * d_per_step):round()
+		if p ~= last_p then
+			local v = voxelworld.get_static_voxel(p)
+			--log:verbose("i="..i..": p="..p:dump()..", v.id="..v.id)
+			if v.id ~= 1 and v.id ~= 0 then
+				return p, last_p
+			end
+			last_p = p
+		end
+	end
+	return nil
 end
 
 magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	local button = event_data:GetInt("Button")
 	log:info("MouseButtonDown: "..button)
 	if button == magic.MOUSEB_RIGHT then
-		local p = player_node.position
-		local data = cereal.binary_output({
-			p = {
-				x = math.floor(p.x+0.5),
-				y = math.floor(p.y+0.5),
-				z = math.floor(p.z+0.5),
-			},
-		}, {"object",
-			{"p", {"object",
-				{"x", "int32_t"},
-				{"y", "int32_t"},
-				{"z", "int32_t"},
-			}},
-		})
-		buildat.send_packet("main:place_voxel", data)
+		local p = pointed_voxel_p_above
+		if p then
+			local data = cereal.binary_output({
+				p = {
+					x = math.floor(p.x+0.5),
+					y = math.floor(p.y+0.5),
+					z = math.floor(p.z+0.5),
+				},
+			}, {"object",
+				{"p", {"object",
+					{"x", "int32_t"},
+					{"y", "int32_t"},
+					{"z", "int32_t"},
+				}},
+			})
+			buildat.send_packet("main:place_voxel", data)
+		end
 	end
 	if button == magic.MOUSEB_LEFT then
-		local p = player_node.position
-		local data = cereal.binary_output({
-			p = {
-				x = math.floor(p.x+0.5),
-				y = math.floor(p.y+0.5 + 0.2),
-				z = math.floor(p.z+0.5),
-			},
-		}, {"object",
-			{"p", {"object",
-				{"x", "int32_t"},
-				{"y", "int32_t"},
-				{"z", "int32_t"},
-			}},
-		})
-		buildat.send_packet("main:dig", data)
+		local p = pointed_voxel_p
+		if p then
+			local data = cereal.binary_output({
+				p = {
+					x = math.floor(p.x+0.5),
+					y = math.floor(p.y+0.5 + 0.2),
+					z = math.floor(p.z+0.5),
+				},
+			}, {"object",
+				{"p", {"object",
+					{"x", "int32_t"},
+					{"y", "int32_t"},
+					{"z", "int32_t"},
+				}},
+			})
+			buildat.send_packet("main:dig_voxel", data)
+		end
 	end
 	if button == magic.MOUSEB_MIDDLE then
 		local p = player_node.position
@@ -231,6 +286,41 @@ end)
 
 magic.SubscribeToEvent("Update", function(event_type, event_data)
 	--log:info("Update")
+
+	if camera_node then
+		local p, p_above = find_pointed_voxel(camera_node)
+		pointed_voxel_p = p
+		pointed_voxel_p_above = p_above
+		if p then
+			local v = voxelworld.get_static_voxel(p)
+			--log:info("pointed voxel: "..p:dump()..": "..v.id)
+			pointed_voxel_visual_node.position = magic.Vector3.from_buildat(p)
+			local d = p_above - p
+			if d.x > 0 then
+				pointed_voxel_visual_node.rotation =
+						magic.Quaternion(-90, magic.Vector3(0, 0, 1))
+			elseif d.x < 0 then
+				pointed_voxel_visual_node.rotation =
+						magic.Quaternion(90, magic.Vector3(0, 0, 1))
+			elseif d.y > 0 then
+				pointed_voxel_visual_node.rotation =
+						magic.Quaternion(0, 0, 0, 0)
+			elseif d.y < 0 then
+				pointed_voxel_visual_node.rotation =
+						magic.Quaternion(-180, magic.Vector3(0, 0, 1))
+			elseif d.z > 0 then
+				pointed_voxel_visual_node.rotation =
+						magic.Quaternion(90, magic.Vector3(1, 0, 0))
+			elseif d.z < 0 then
+				pointed_voxel_visual_node.rotation =
+						magic.Quaternion(-90, magic.Vector3(1, 0, 0))
+			end
+			pointed_voxel_visual_node.enabled = true
+		else
+			pointed_voxel_visual_node.enabled = false
+		end
+	end
+
 	if player_node then
 		-- If falling out of world, restore onto world
 		if player_node.position.y < -500 then
