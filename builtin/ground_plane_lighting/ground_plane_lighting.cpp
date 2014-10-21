@@ -185,7 +185,7 @@ struct YstCommitHook: public voxelworld::CommitHook
 		{
 			auto lc = chunk_region.getLowerCorner();
 			auto uc = chunk_region.getUpperCorner();
-			log_nv(MODULE, "yst=[");
+			//log_nv(MODULE, "yst=[");
 			for(int z = lc.getZ(); z <= uc.getZ(); z++){
 				for(int x = lc.getX(); x <= uc.getX(); x++){
 					int32_t yst0 = igpl->get_yst(x, z);
@@ -193,7 +193,6 @@ struct YstCommitHook: public voxelworld::CommitHook
 						// Y-seethrough doesn't reach here
 						continue;
 					}
-					//log_nv(MODULE, "%i, ", yst);
 					int y = uc.getY();
 					for(;; y--){
 						VoxelInstance v = ivoxelworld->get_voxel(
@@ -217,11 +216,11 @@ struct YstCommitHook: public voxelworld::CommitHook
 					// The first voxel downwards from the top of the world that
 					// doesn't pass light
 					int32_t yst1 = y;
-					log_nv(MODULE, "%i -> %i, ", yst0, yst1);
+					//log_nv(MODULE, "%i -> %i, ", yst0, yst1);
 					igpl->set_yst(x, z, yst1);
 				}
 			}
-			log_v(MODULE, "]");
+			//log_v(MODULE, "]");
 		});
 	}
 };
