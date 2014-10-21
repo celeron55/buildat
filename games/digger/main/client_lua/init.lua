@@ -30,28 +30,51 @@ local pointed_voxel_visual_node = scene:CreateChild("node")
 local pointed_voxel_visual_geometry =
 		pointed_voxel_visual_node:CreateComponent("CustomGeometry")
 do
-	-- TODO: Figure out how to draw thick lines instead of a translucent face
-	--pointed_voxel_visual_geometry:BeginGeometry(0, magic.LINE_LIST)
 	pointed_voxel_visual_geometry:BeginGeometry(0, magic.TRIANGLE_LIST)
 	pointed_voxel_visual_geometry:SetNumGeometries(1)
+	local function define_face(lc, uc, color)
+		pointed_voxel_visual_geometry:DefineVertex(
+				magic.Vector3(lc.x, uc.y, uc.z))
+		pointed_voxel_visual_geometry:DefineColor(color)
+		pointed_voxel_visual_geometry:DefineVertex(
+				magic.Vector3(uc.x, uc.y, uc.z))
+		pointed_voxel_visual_geometry:DefineColor(color)
+		pointed_voxel_visual_geometry:DefineVertex(
+				magic.Vector3(uc.x, uc.y, lc.z))
+		pointed_voxel_visual_geometry:DefineColor(color)
+		pointed_voxel_visual_geometry:DefineVertex(
+				magic.Vector3(uc.x, uc.y, lc.z))
+		pointed_voxel_visual_geometry:DefineColor(color)
+		pointed_voxel_visual_geometry:DefineVertex(
+				magic.Vector3(lc.x, uc.y, lc.z))
+		pointed_voxel_visual_geometry:DefineColor(color)
+		pointed_voxel_visual_geometry:DefineVertex(
+				magic.Vector3(lc.x, uc.y, uc.z))
+		pointed_voxel_visual_geometry:DefineColor(color)
+	end
+
+	-- Full face
+	--local d = 0.502
+	--local c = magic.Color(0.04, 0.12, 0.04)
+	--define_face(magic.Vector3(-d, d, -d), magic.Vector3(d, d, d), c)
+	--pointed_voxel_visual_geometry:Commit()
+	--local m = magic.Material.new()
+	--m:SetTechnique(0, magic.cache:GetResource("Technique",
+	--		"Techniques/NoTextureVColAdd.xml"))
+
+	-- Face edges
 	local d = 0.502
-	local c = magic.Color(0.08, 0.08, 0.08)
-	pointed_voxel_visual_geometry:DefineVertex(magic.Vector3(-d,  d,  d))
-	pointed_voxel_visual_geometry:DefineColor(c)
-	pointed_voxel_visual_geometry:DefineVertex(magic.Vector3( d,  d,  d))
-	pointed_voxel_visual_geometry:DefineColor(c)
-	pointed_voxel_visual_geometry:DefineVertex(magic.Vector3( d,  d, -d))
-	pointed_voxel_visual_geometry:DefineColor(c)
-	pointed_voxel_visual_geometry:DefineVertex(magic.Vector3( d,  d, -d))
-	pointed_voxel_visual_geometry:DefineColor(c)
-	pointed_voxel_visual_geometry:DefineVertex(magic.Vector3(-d,  d, -d))
-	pointed_voxel_visual_geometry:DefineColor(c)
-	pointed_voxel_visual_geometry:DefineVertex(magic.Vector3(-d,  d,  d))
-	pointed_voxel_visual_geometry:DefineColor(c)
+	local d2 = 0.1
+	local c = magic.Color(0.04, 0.12, 0.04)
+	define_face(magic.Vector3(-d, d, d-d2), magic.Vector3(d, d, d), c)
+	define_face(magic.Vector3(-d, d, -d), magic.Vector3(d, d, -d+d2), c)
+	--define_face(magic.Vector3(d-d2, d, -d+d2), magic.Vector3(d, d, d-d2), c)
+	--define_face(magic.Vector3(-d, d, -d+d2), magic.Vector3(-d+d2, d, d-d2), c)
 	pointed_voxel_visual_geometry:Commit()
 	local m = magic.Material.new()
 	m:SetTechnique(0, magic.cache:GetResource("Technique",
-			"Techniques/NoTextureVColAdd.xml"))
+			"Techniques/NoTextureVColMultiply.xml"))
+
 	pointed_voxel_visual_geometry:SetMaterial(0, m)
 	pointed_voxel_visual_node.enabled = false
 end
@@ -298,22 +321,22 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 			local d = p_above - p
 			if d.x > 0 then
 				pointed_voxel_visual_node.rotation =
-						magic.Quaternion(-90, magic.Vector3(0, 0, 1))
+						magic.Quaternion(90, 0, -90)
 			elseif d.x < 0 then
 				pointed_voxel_visual_node.rotation =
-						magic.Quaternion(90, magic.Vector3(0, 0, 1))
+						magic.Quaternion(90, 0, 90)
 			elseif d.y > 0 then
 				pointed_voxel_visual_node.rotation =
-						magic.Quaternion(0, 0, 0, 0)
+						magic.Quaternion(0, 0, 0)
 			elseif d.y < 0 then
 				pointed_voxel_visual_node.rotation =
-						magic.Quaternion(-180, magic.Vector3(0, 0, 1))
+						magic.Quaternion(0, 0, -180)
 			elseif d.z > 0 then
 				pointed_voxel_visual_node.rotation =
-						magic.Quaternion(90, magic.Vector3(1, 0, 0))
+						magic.Quaternion(90, 0, 0)
 			elseif d.z < 0 then
 				pointed_voxel_visual_node.rotation =
-						magic.Quaternion(-90, magic.Vector3(1, 0, 0))
+						magic.Quaternion(-90, 0, 0)
 			end
 			pointed_voxel_visual_node.enabled = true
 		else

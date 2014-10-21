@@ -101,8 +101,12 @@ function M.define(dst, util)
 			if type(w) == "number" and type(x) == "number" and
 					type(y) == "number" and type(z) == "number" then
 				return util.wrap_instance("Quaternion", Quaternion(w, x, y, z))
+			elseif type(w) == "number" and type(x) == "number" and
+					type(y) == "number" and z == nil then
+				-- y, x, z (euler angles)
+				return util.wrap_instance("Quaternion", Quaternion(w, x, y))
 			else
-				-- angle, axis
+				-- angle: float, axis: Vector3
 				return util.wrap_instance("Quaternion", Quaternion(w, x))
 			end
 		end),
