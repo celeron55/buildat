@@ -54,6 +54,10 @@ struct CThreadPool: public ThreadPool
 				interface::MutexScope ms_pool(thread->pool->m_mutex);
 				if(thread->pool->m_input_queue.empty()){
 					// Can happen in special cases, eg. when stopping thread
+					interface::MutexScope ms(thread->mutex);
+					// So, if stopping thread, stop thread
+					if(thread->stop_requested)
+						break;
 					continue;
 				}
 				current = std::move(thread->pool->m_input_queue.front());
@@ -109,18 +113,31 @@ struct CThreadPool: public ThreadPool
 
 	void request_stop()
 	{
+		interface::MutexScope ms(m_mutex);
+		// Remove everything from task queue
+		m_input_queue.clear();
+		// Ask threads to stop
 		for(Thread &thread : m_threads){
 			interface::MutexScope ms(thread.mutex);
 			thread.stop_requested = true;
+		}
+		// Poke the threads awake
+		for(Thread &thread : m_threads){
+			(void)thread;
+			m_tasks_sem.post();
 		}
 	}
 
 	void join()
 	{
 		for(Thread &thread : m_threads){
-			interface::MutexScope ms(thread.mutex);
-			if(!thread.stop_requested)
-				log_w(MODULE, "Joining a thread that was not requested to stop");
+			{
+				interface::MutexScope ms(thread.mutex);
+				if(!thread.stop_requested){
+					log_w(MODULE, "Joining a thread that was not requested "
+							"to stop");
+				}
+			}
 			pthread_join(thread.thread, NULL);
 		}
 		m_threads.clear();
