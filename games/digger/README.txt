@@ -5,5 +5,9 @@ When not specified separately:
 
 main/client_data/grass.png
 main/client_data/leaves.png
+main/client_data/dirt.png
+main/client_data/tree.png
+main/client_data/tree_top.png
+main/client_data/rock.png
 - CC BY-SA 3.0 2013 PilzAdam <pilzadam@minetest.net>
 

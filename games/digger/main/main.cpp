@@ -194,6 +194,27 @@ struct Module: public interface::Module
 				vdef.physically_solid = true;
 				voxel_reg->add_voxel(vdef); // id 5
 			}
+			{
+				interface::VoxelDefinition vdef;
+				vdef.name.block_name = "tree";
+				vdef.name.segment_x = 0;
+				vdef.name.segment_y = 0;
+				vdef.name.segment_z = 0;
+				vdef.name.rotation_primary = 0;
+				vdef.name.rotation_secondary = 0;
+				vdef.handler_module = "";
+				for(size_t i = 0; i < 6; i++){
+					interface::AtlasSegmentDefinition &seg = vdef.textures[i];
+					seg.resource_name = "main/tree.png";
+					seg.total_segments = magic::IntVector2(1, 1);
+					seg.select_segment = magic::IntVector2(0, 0);
+				}
+				vdef.textures[0].resource_name = "main/tree_top.png";
+				vdef.textures[1].resource_name = "main/tree_top.png";
+				vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
+				vdef.physically_solid = true;
+				voxel_reg->add_voxel(vdef); // id 6
+			}
 		});
 
 		m_server->access_scene([&](Scene *scene)
@@ -376,7 +397,7 @@ struct Module: public interface::Module
 
 				for(int y1 = y; y1<y+4; y1++){
 					pv::Vector3DInt32 p(x, y1, z);
-					ivoxelworld->set_voxel(p, VoxelInstance(3), true);
+					ivoxelworld->set_voxel(p, VoxelInstance(6), true);
 				}
 
 				for(int x1 = x-2; x1 <= x+2; x1++){

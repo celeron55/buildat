@@ -232,6 +232,11 @@ end)
 magic.SubscribeToEvent("Update", function(event_type, event_data)
 	--log:info("Update")
 	if player_node then
+		-- If falling out of world, restore onto world
+		if player_node.position.y < -500 then
+			player_node.position = magic.Vector3(0, 500, 0)
+		end
+
 		local dmouse = magic.input:GetMouseMove()
 		--log:info("dmouse: ("..dmouse.x..", "..dmouse.y..")")
 		camera_node:Pitch(dmouse.y * 0.1)

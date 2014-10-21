@@ -63,3 +63,5 @@ Buildat TODO
 - Rename VoxelInstance::getId() to VoxelInstance::get_id()
 - A way of figuring out which voxel is being pointed at
 - Get rid of the dual module reload when saving a C++ file in Vim
+- If a file tracked by client_data is deleted and re-added, it won't get updated
+  before server restart(?)
