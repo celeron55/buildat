@@ -78,6 +78,7 @@ include_directories("3rdparty/c55lib")
 include_directories("3rdparty/smallsha1")
 include_directories("3rdparty/polyvox/library/PolyVoxCore/include")
 include_directories("3rdparty/zlib")
+include_directories("${CMAKE_BINARY_DIR}/3rdparty/zlib")
 # SYSTEM gets rid of annoying warnings that we're not going to fix
 include_directories(SYSTEM "3rdparty/luabind-deboostified")
 
