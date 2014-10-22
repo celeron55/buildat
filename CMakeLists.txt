@@ -38,6 +38,13 @@ find_package(Urho3D REQUIRED)
 # SYSTEM gets rid of annoying warnings that we're not going to fix
 include_directories(SYSTEM ${URHO3D_INCLUDE_DIRS})
 
+# Urho3D's Tolua++
+include_directories("${URHO3D_HOME}/Source/ThirdParty/toluapp/include")
+
+# Run some automagic from Urho3D.
+# This appends to at least ${ABSOLUTE_PATH_LIBS} and {LINK_LIBS_ONLY}
+define_dependency_libs("Urho3D")
+
 # Urho3D's Lua
 # Set some variables so that Luabind compiles too
 set(LUA_FOUND true)
@@ -47,14 +54,12 @@ if(URHO3D_LUAJIT)
 else()
 	set(LUA_LIBRARY "${URHO3D_HOME}/Build/ThirdParty/Lua/libLua.a")
 endif()
+if(WIN32)
+	# Needed by luabind on Windows
+	set(LUA_LIBRARIES ${LUA_LIBRARY})
+	message(STATUS "LUA_LIBRARIES=${LUA_LIBRARIES}")
+endif()
 include_directories(${LUA_INCLUDE_DIRS})
-
-# Urho3D's Tolua++
-include_directories("${URHO3D_HOME}/Source/ThirdParty/toluapp/include")
-
-# Run some automagic from Urho3D.
-# This appends to at least ${ABSOLUTE_PATH_LIBS} and {LINK_LIBS_ONLY}
-define_dependency_libs("Urho3D")
 
 #
 # Bundled libraries
@@ -140,7 +145,12 @@ target_link_libraries(${BUILDAT_CORE_NAME}
 	zlib
 )
 if(WIN32)
-	target_link_libraries(${BUILDAT_CORE_NAME} wsock32 ws2_32)
+	target_link_libraries(${BUILDAT_CORE_NAME}
+		wsock32
+		ws2_32
+		${ABSOLUTE_PATH_LIBS}
+		${LINK_LIBS_ONLY}
+	)
 endif()
 
 #
@@ -180,6 +190,11 @@ if(BUILD_CLIENT)
 		${URHO3D_HOME}/Build/ThirdParty/toluapp/src/lib/libtoluapp.a
 		${LUA_LIBRARY}
 	)
+	#if(NOT WIN32)
+	#	target_link_libraries(${CLIENT_EXE_NAME}
+	#		${LUA_LIBRARY}
+	#	)
+	#endif()
 endif(BUILD_CLIENT)
 
 #
@@ -234,6 +249,7 @@ if(WIN32)
 		install(DIRECTORY "${CMAKE_SOURCE_DIR}/client" DESTINATION "${DST_SHARE}")
 		install(DIRECTORY "${CMAKE_SOURCE_DIR}/extensions" DESTINATION "${DST_SHARE}")
 		install(FILES "${CMAKE_SOURCE_DIR}/util/windows/launch_client.bat" DESTINATION ".")
+		install(FILES "${CMAKE_SOURCE_DIR}/util/windows/wine_launch_client.sh" DESTINATION ".")
 		if(NOT BUILD_SERVER)
 			install(FILES "${COMPILER_USR_PATH}/bin/libwinpthread-1.dll" DESTINATION "${DST_BIN}")
 			install(FILES "${COMPILER_USR_PATH}/bin/libgcc_s_dw2-1.dll" DESTINATION "${DST_BIN}")
@@ -247,8 +263,10 @@ if(WIN32)
 		install(DIRECTORY "${CMAKE_SOURCE_DIR}/games" DESTINATION "${DST_SHARE}")
 		install(DIRECTORY "${CMAKE_SOURCE_DIR}/src" DESTINATION "${DST_SHARE}")
 		install(FILES "${CMAKE_SOURCE_DIR}/util/windows/launch_server.bat" DESTINATION ".")
+		install(FILES "${CMAKE_SOURCE_DIR}/util/windows/wine_launch_server.sh" DESTINATION ".")
 
 		install(DIRECTORY "${CMAKE_SOURCE_DIR}/3rdparty/cereal/include" DESTINATION "${DST_SHARE}/3rdparty/cereal")
+		install(DIRECTORY "${CMAKE_SOURCE_DIR}/3rdparty/polyvox/library/PolyvoxCore/include" DESTINATION "${DST_SHARE}/3rdparty/polyvox/library/PolyvoxCore")
 		install(DIRECTORY "${URHO3D_HOME}/Source" DESTINATION "${DST_SHARE}/Urho3D")
 		install(FILES "${URHO3D_HOME}/Build/Engine/Urho3D.h" DESTINATION "${DST_SHARE}/Urho3D/Build/Engine")
 

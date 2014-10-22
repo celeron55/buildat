@@ -61,3 +61,4 @@ Buildat TODO
 - An option in the server to just compile and quit (to be used when one wants to
   check for compiler errors but not actually run anything)
 - Saving and loading of the world
+- Redirect stdout and stderr of compiler to log so that it's readable on Windows

@@ -4,9 +4,6 @@
 #include "core/log.h"
 #define MODULE "compress"
 
-#ifdef _WIN32
-	#define ZLIB_WINAPI
-#endif
 #include "zlib.h"
 
 namespace interface {

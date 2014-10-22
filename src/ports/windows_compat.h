@@ -9,7 +9,12 @@ static inline void usleep(unsigned int us)
 }
 
 // Prefer using mingw-w64 with pthreads!
-#ifndef __WINPTHREADS_VERSION
+#ifdef __WINPTHREADS_VERSION
+
+#include <pthread.h>
+#include <semaphore.h>
+
+#else
 
 typedef HANDLE pthread_mutex_t;
 typedef HANDLE pthread_t;
