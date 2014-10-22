@@ -62,3 +62,11 @@ Buildat TODO
   check for compiler errors but not actually run anything)
 - Saving and loading of the world
 - Redirect stdout and stderr of compiler to log so that it's readable on Windows
+- voxelworld: An easy way of turning a piece of static voxels to a dynamic node
+- Fix server from crashing to socket "no error" on windows when a client
+  disconnects
+- Keep track of voxel instances with handler_module defined on the client, and
+  call the handler module in construction and destruction
+- Make some kind of an ace of spades clone (or less of a clone); something that
+  requires the game to control the creation and deletion of the world anyway,
+  and implement the required interfaces
