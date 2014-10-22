@@ -6,6 +6,7 @@
 #include "client/state.h"
 #include "lua_bindings/init.h"
 #include "lua_bindings/util.h"
+#include "lua_bindings/replicate.h"
 #include "interface/fs.h"
 #include "interface/voxel.h"
 #include "interface/thread_pool.h"
@@ -352,27 +353,8 @@ struct CApp: public App, public magic::Application
 		m_scene->CreateComponent<magic::PhysicsWorld>(magic::LOCAL);
 		m_scene->CreateComponent<magic::DebugRenderer>(magic::LOCAL);
 
-		// Create a camera and a viewport for the scene. The scene can then be
-		// accessed in Lua by magic.renderer:GetViewport(0):GetScene().
-
-		// NOTE: These are accessed, stored and removed by
-		//       client/replication.lua, and extensions/replicate exposes the
-		//       scene as a clean API.
-
-		m_camera_node = m_scene->CreateChild(
-				"__buildat_replicated_scene_camera", magic::LOCAL);
-		magic::Camera *camera =
-				m_camera_node->CreateComponent<magic::Camera>(magic::LOCAL);
-		camera->SetFarClip(300.0f);
-		m_camera_node->SetPosition(magic::Vector3(7.0, 7.0, 7.0));
-		m_camera_node->LookAt(magic::Vector3(0, 1, 0));
-
-		// TODO: Pass the scene to the Lua environment in a proper way (see
-		//       stuff in lua_bindings)
-		magic::Renderer *renderer = GetSubsystem<magic::Renderer>();
-		magic::SharedPtr<magic::Viewport> viewport(new magic::Viewport(
-				context_, m_scene, m_camera_node->GetComponent<magic::Camera>()));
-		renderer->SetViewport(0, viewport);
+		// Push the scene to the Lua environment
+		lua_bindings::replicate::set_scene(L, m_scene);
 
 		// Run initial client Lua scripts
 		ss_ init_lua_path = g_client_config.share_path+"/client/init.lua";
