@@ -23,6 +23,7 @@
 #ifndef LUABIND_GET_POINTER_051023_HPP
 # define LUABIND_GET_POINTER_051023_HPP
 #include <memory>
+#include <stdexcept>
 
 // TODO: Rename to pointer_traits
 
