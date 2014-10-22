@@ -42,5 +42,5 @@
 		lua_pop(L, 2); /* unsafe, metatable */ \
 	}
 
-// vim: set noet ts=4 sw=4:
 
+// vim: set noet ts=4 sw=4:

@@ -36,9 +36,9 @@ namespace ground_plane_lighting
 			std::function<void(ground_plane_lighting::Interface*)> cb)
 	{
 		return server->access_module("ground_plane_lighting",
-				[&](interface::Module *module){
+		[&](interface::Module *module){
 			auto *iface = (ground_plane_lighting::Interface*)
-					module->check_interface();
+				module->check_interface();
 			cb(iface);
 		});
 	}

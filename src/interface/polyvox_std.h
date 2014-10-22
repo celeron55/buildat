@@ -6,20 +6,20 @@
 
 namespace std {
 
-template<> struct hash<PolyVox::Vector<2u, int16_t>>{
-	std::size_t operator()(const PolyVox::Vector<2u, int16_t> &v) const {
-		return ((std::hash<int16_t>() (v.getX()) << 0) ^
-				   (std::hash<int16_t>() (v.getY()) << 1));
-	}
-};
+	template<> struct hash<PolyVox::Vector<2u, int16_t>>{
+		std::size_t operator()(const PolyVox::Vector<2u, int16_t> &v) const {
+			return ((std::hash<int16_t>() (v.getX()) << 0) ^
+					   (std::hash<int16_t>() (v.getY()) << 1));
+		}
+	};
 
-template<> struct hash<PolyVox::Vector<3u, int16_t>>{
-	std::size_t operator()(const PolyVox::Vector<3u, int16_t> &v) const {
-		return ((std::hash<int16_t>() (v.getX()) << 0) ^
-				   (std::hash<int16_t>() (v.getY()) << 1) ^
-				   (std::hash<int16_t>() (v.getZ()) << 2));
-	}
-};
+	template<> struct hash<PolyVox::Vector<3u, int16_t>>{
+		std::size_t operator()(const PolyVox::Vector<3u, int16_t> &v) const {
+			return ((std::hash<int16_t>() (v.getX()) << 0) ^
+					   (std::hash<int16_t>() (v.getY()) << 1) ^
+					   (std::hash<int16_t>() (v.getZ()) << 2));
+		}
+	};
 
 }
 

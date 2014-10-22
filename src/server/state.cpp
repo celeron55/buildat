@@ -944,7 +944,7 @@ struct CState: public State, public interface::Server
 	}
 
 	void access_thread_pool(std::function<void(
-			interface::thread_pool::ThreadPool *pool)> cb)
+				interface::thread_pool::ThreadPool*pool)> cb)
 	{
 		interface::MutexScope ms(m_thread_pool_mutex);
 		cb(m_thread_pool.get());

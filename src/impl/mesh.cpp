@@ -846,6 +846,7 @@ void generate_voxel_physics_boxes(
 						voxel_reg->get_cached(v_orig);
 				if(!def)
 					throw Exception(ss_()+"Undefined voxel: "+itos(v_orig.get_id()));
+
 				uint8_t v = (def && def->physically_solid);
 				volume.setVoxelAt(x, y, z, v);
 			}

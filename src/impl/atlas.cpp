@@ -179,9 +179,9 @@ struct CAtlasRegistry: public AtlasRegistry
 		size_t max_segments = atlas.total_segments.x_ * atlas.total_segments.y_;
 		if(atlas.segments.size() > max_segments){
 			throw Exception("Atlas has too many segments (segments.size()="+
-					itos(atlas.segments.size())+", total_segments=("+
-					itos(atlas.total_segments.x_)+", "+
-					itos(atlas.total_segments.y_)+"))");
+						  itos(atlas.segments.size())+", total_segments=("+
+						  itos(atlas.total_segments.x_)+", "+
+						  itos(atlas.total_segments.y_)+"))");
 		}
 		// Set segment texture
 		cache.texture = atlas.texture;

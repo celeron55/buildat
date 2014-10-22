@@ -173,7 +173,8 @@ struct Module: public interface::Module
 				RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
 				body->SetFriction(0.75f);
 				body->SetMass(1.0);
-				CollisionShape *shape = n->CreateComponent<CollisionShape>(LOCAL);
+				CollisionShape *shape = n->CreateComponent<CollisionShape>(
+							LOCAL);
 				shape->SetConvexHull(model, 0, Vector3::ONE);
 				//shape->SetTriangleMesh(model, 0, Vector3::ONE);
 				//shape->SetBox(Vector3::ONE);
@@ -238,7 +239,8 @@ struct Module: public interface::Module
 
 				RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
 				body->SetFriction(0.75f);
-				CollisionShape *shape = n->CreateComponent<CollisionShape>(LOCAL);
+				CollisionShape *shape = n->CreateComponent<CollisionShape>(
+							LOCAL);
 				shape->SetTriangleMesh(model, 0, Vector3::ONE);
 			}
 		});

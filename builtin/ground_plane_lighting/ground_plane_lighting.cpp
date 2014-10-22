@@ -82,8 +82,8 @@ struct YSTSector
 		auto lc = region.getLowerCorner();
 		auto uc = region.getUpperCorner();
 		/*log_v(MODULE, "YSTSector volume lc=" PV3I_FORMAT ", uc=" PV3I_FORMAT
-				", size=%zu", PV3I_PARAMS(lc), PV3I_PARAMS(uc),
-				volume->m_dataSize);*/
+		        ", size=%zu", PV3I_PARAMS(lc), PV3I_PARAMS(uc),
+		        volume->m_dataSize);*/
 		for(int z = lc.getZ(); z <= uc.getZ(); z++){
 			for(int x = lc.getX(); x <= uc.getX(); x++){
 				volume->setVoxelAt(x, 0, z, INT_MIN);
@@ -196,7 +196,7 @@ struct YstCommitHook: public voxelworld::CommitHook
 					int y = uc.getY();
 					for(;; y--){
 						VoxelInstance v = ivoxelworld->get_voxel(
-								pv::Vector3DInt32(x, y, z), true);
+									pv::Vector3DInt32(x, y, z), true);
 						if(v.get_id() == interface::VOXELTYPEID_UNDEFINED){
 							// NOTE: This leaves the chunks below unhandled;
 							// there would have to be some kind of a dirty
@@ -253,9 +253,9 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
 			pv::Vector3DInt16 section_size =
-					ivoxelworld->get_section_size_voxels();
+				ivoxelworld->get_section_size_voxels();
 			pv::Vector<2, int16_t> sector_size(
-					section_size.getX(), section_size.getZ());
+						section_size.getX(), section_size.getZ());
 			m_global_yst.reset(new GlobalYSTMap(sector_size));
 		});
 	}
@@ -277,7 +277,7 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
 			ivoxelworld->add_commit_hook(
-					up_<YstCommitHook>(new YstCommitHook(m_server)));
+						up_<YstCommitHook>(new YstCommitHook(m_server)));
 		});
 	}
 
@@ -308,7 +308,7 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 				}
 				network::access(m_server, [&](network::Interface *inetwork){
 					sv_<network::PeerInfo::Id> peers = inetwork->list_peers();
-					for(auto &peer : peers){
+					for(auto &peer: peers){
 						inetwork->send(peer, "ground_plane_lighting:update",
 								os.str());
 					}

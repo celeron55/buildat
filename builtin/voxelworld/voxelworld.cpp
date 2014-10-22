@@ -521,7 +521,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		Zone *node_zone = n->CreateComponent<Zone>();
 		node_zone->SetPriority(-1000);
 		node_zone->SetBoundingBox(BoundingBox(
-				Vector3(-w/2, -h/2, -d/2), Vector3(w/2, h/2, d/2)));
+					Vector3(-w/2, -h/2, -d/2), Vector3(w/2, h/2, d/2)));
 
 		n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
 		n->SetPosition(node_p);
