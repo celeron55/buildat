@@ -358,7 +358,16 @@ void CState::setup_packet_handlers()
 		magic::MemoryBuffer msg(data.c_str(), data.size());
 		uint node_id = msg.ReadNetID();
 		Node *node = scene->GetNode(node_id);
-		if(!node){
+		if(node && node_id == 1){
+			// This is the scene
+		} else if(node){
+			log_w(MODULE, "replicate:create_node: Node %i (old name=\"%s\")"
+					" already exists. This could be due to a node having been"
+					" accidentally created on the client side without mode=LOCAL."
+					" If a node seems to mysteriously disappear, this is the"
+					" reason.",
+					node_id, node->GetName().CString());
+		} else {
 			log_v(MODULE, "Creating node %i", node_id);
 			// Add to the root level; it may be moved as we receive the parent
 			// attribute
@@ -390,8 +399,15 @@ void CState::setup_packet_handlers()
 
 			Component *c = scene->GetComponent(c_id);
 			if(!c || c->GetType() != type || c->GetNode() != node){
-				if(c)
+				if(c){
+					log_w(MODULE, "replicate:create_node: Component %i already"
+							" exists. This could be due to a component having"
+							" been accidentally created on the client side"
+							" without mode=LOCAL."
+							" If a component seems to mysteriously disappear,"
+							" this is the reason.", c_id);
 					c->Remove();
+				}
 				log_v(MODULE, "Creating component %i", c_id);
 				c = node->CreateComponent(type, magic::REPLICATED, c_id);
 				if(!c){
