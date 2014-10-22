@@ -143,8 +143,8 @@ local function wrap_globals(base_sandbox)
 		__newindex = function(t, k, v)
 			if not sandbox_declared_globals[k] then
 				local info = debug.getinfo(2, "Sl")
-				log:info("sandbox["..dump(k).."] set by what="..dump(info.what)..
-						", name="..dump(info.name))
+				log:debug("Global: "..dump(k).." (set by {what="..dump(info.what)..
+						", name="..dump(info.name).."})")
 				if info.what == "Lua" then
 					error("Assignment to undeclared global \""..k.."\"\n     in "..
 							info.short_src.." line "..info.currentline)
