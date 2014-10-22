@@ -78,7 +78,7 @@ void set_simple_voxel_model(const luabind::object &node_o,
 	SharedPtr<Model> fromScratchModel(
 			interface::mesh::create_simple_voxel_model(context, w, h, d, data));
 
-	StaticModel *object = node->GetOrCreateComponent<StaticModel>();
+	StaticModel *object = node->GetOrCreateComponent<StaticModel>(LOCAL);
 	object->SetModel(fromScratchModel);
 }
 
@@ -110,7 +110,7 @@ void set_8bit_voxel_geometry(const luabind::object &node_o,
 	lua_pop(L, 1);
 	Context *context = buildat_app->get_scene()->GetContext();
 
-	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>();
+	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
 
 	interface::mesh::set_8bit_voxel_geometry(cg, context, w, h, d, data,
 			voxel_reg.get(), atlas_reg.get());
@@ -179,7 +179,7 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	{
 		ScopeTimer timer("post geometry");
 		Context *context = node->GetContext();
-		CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>();
+		CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
 		interface::mesh::set_voxel_geometry(
 				cg, context, temp_geoms, atlas_reg.get());
 		cg->SetOccluder(true);
@@ -232,7 +232,7 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 	{
 		ScopeTimer timer("post lod geometry");
 		Context *context = node->GetContext();
-		CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>();
+		CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
 		interface::mesh::set_voxel_lod_geometry(
 				lod, cg, context, temp_geoms, atlas_reg.get());
 		cg->SetOccluder(true);
