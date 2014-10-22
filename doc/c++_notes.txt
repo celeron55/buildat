@@ -1,0 +1,9 @@
+Buildat C++ Notes
+=================
+
+Urho3D: Scene replication
+-------------------------
+Make sure to explicitly pass LOCAL or REPLICATED as the CreateMode for
+Node::CreateChild() and Node::CreateComponent(); otherwise you WILL cause
+unexpected issues at a very unexpected point of time.
+

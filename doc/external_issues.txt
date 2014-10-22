@@ -1,10 +1,3 @@
 Issues in other projects affecting Buildat
 ==========================================
 
-Urho3D:
-- It is not possible to implement any kind of custom loading functionality into
-  Urho3D::ResourceCache. It is not inheritable, and it does not provide any way
-  to insert custom loaders in other ways. The only thing we can currently do is
-  wrap GetResource in Lua, and copy the files into a temporary file structure
-  before calling the actual GetResource.
-

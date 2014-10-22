@@ -65,4 +65,3 @@ Buildat TODO
 - Debug instability in server at module reload
 - An option in the server to just compile and quit (to be used when one wants to
   check for compiler errors but not actually run anything)
-- Figure out why digger doesn't work properly when the client connects via menu
