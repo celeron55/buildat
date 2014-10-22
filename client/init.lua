@@ -68,6 +68,10 @@ function buildat.Logger(module)
 		text = fix_text(text)
 		__buildat_print_log("debug", module, text)
 	end
+	function logger:trace(text)
+		text = fix_text(text)
+		__buildat_print_log("trace", module, text)
+	end
 	return logger
 end
 buildat.safe.Logger = buildat.Logger

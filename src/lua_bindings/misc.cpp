@@ -15,7 +15,9 @@ static int l_print_log(lua_State *L)
 	const char *module_c = lua_tostring(L, 2);
 	const char *text_c = lua_tostring(L, 3);
 	int loglevel = LOG_INFO;
-	if(level == "debug")
+	if(level == "trace")
+		loglevel = LOG_TRACE;
+	else if(level == "debug")
 		loglevel = LOG_DEBUG;
 	else if(level == "verbose")
 		loglevel = LOG_VERBOSE;
