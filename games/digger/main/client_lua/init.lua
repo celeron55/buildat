@@ -152,8 +152,8 @@ local player_node = scene:CreateChild("Player")
 local player_shape = player_node:CreateComponent("CollisionShape")
 do
 	--player_node.position = magic.Vector3(0, 30, 0)
-	player_node.position = magic.Vector3(55, 30, 40)
-	--player_node.position = magic.Vector3(-5, 1, 257)
+	--player_node.position = magic.Vector3(55, 30, 40)
+	player_node.position = magic.Vector3(-5, 1, 257)
 	player_node.direction = magic.Vector3(-1, 0, 0.4)
 	---[[
 	local body = player_node:CreateComponent("RigidBody")
