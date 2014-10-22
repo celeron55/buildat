@@ -1,13 +1,12 @@
 Buildat TODO
 ============
 - Modules should be run in threads.
-- Include hmmmm/kwolekr's MT noise under interfaces (Simplified BSD)
 - Design how to manage scenes in a future-proof way
 - Implement easy Lua scripting on the server
 	- Allow creating Lua modules on the server, for those who don't like C++
 	- Allow recycling the same Lua code on the client and the server
-- Move self-contained library-like Lua functions from client/app.cpp to a
-  reusable location so that they can be used from server-side Lua in the future
+- Move all Lua functions from client/app.cpp to a reusable location so that they
+  can be used from server-side Lua in the future
 - New things in meta.json?
 	- disable_module
 	- override_module (in such a way that the module will be gotten from the
@@ -17,19 +16,15 @@ Buildat TODO
 - Doxygen for the C++ interfaces
 - Copy compiler flags (at least -m32/64 and stuff like -D_GLIBCXX_DEBUG) from
   CMake to RCC++
-- Voxel world with arbitrary chunk size and offset, with pluggable loader
-  modules. Main world has worldspace_id=1. Try Polyvox.
-	- Normal block size should be definable to be a multiple of the voxel size
-		- "Continuation voxels"
 - Support Cereal's shared pointer serialization in Lua
 - Automatically fetch and build and patch Urho3D when building buildat
+	- Maybe no
 - Automatic buildat root detection so that the server and the client can
   generally be started with any working directory in either the in-source or
   windows-installed configuration
 - Precompiled mode
 - Singleplayer UI
 - Show all exceptions and errors on client using ui_utils.show_message_dialog
-- Pass the replicated scene properly to Lua
 - Allow creating and destroying arbitrary amounts of replicated scenes
 - Switch to using #define MODULE in modules, and rename Module::MODULE
 - magic.sub_sync_node_added -> replicate.sub_sync_node_added
@@ -65,3 +60,4 @@ Buildat TODO
 - Debug instability in server at module reload
 - An option in the server to just compile and quit (to be used when one wants to
   check for compiler errors but not actually run anything)
+- Saving and loading of the world
