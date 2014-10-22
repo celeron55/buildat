@@ -8,6 +8,7 @@
 #include "interface/packet_stream.h"
 #include "interface/sha1.h"
 #include "interface/fs.h"
+#include "lua_bindings/replicate.h"
 #include <c55/string_util.h>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
@@ -401,6 +402,9 @@ void CState::setup_packet_handlers()
 			c->ReadDeltaUpdate(msg);
 			c->ApplyAttributes();
 		}
+
+		lua_State *L = m_app->get_lua();
+		lua_bindings::replicate::on_node_created(L, node_id);
 	};
 
 	m_packet_handlers["replicate:create_component"] =

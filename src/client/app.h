@@ -19,6 +19,10 @@ namespace interface {
 		struct ThreadPool;
 	}
 }
+extern "C" {
+	struct lua_State;
+	typedef struct lua_State lua_State;
+}
 
 namespace app
 {
@@ -67,6 +71,7 @@ namespace app
 				const ss_ &file_hash, const ss_ &cached_path) = 0;
 		virtual Urho3D::Scene* get_scene() = 0;
 		virtual interface::thread_pool::ThreadPool* get_thread_pool() = 0;
+		virtual lua_State* get_lua() = 0;
 	};
 
 	App* createApp(Urho3D::Context *context, const Options &options = Options());

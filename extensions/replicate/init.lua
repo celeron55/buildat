@@ -12,8 +12,8 @@ M.safe.main_scene = getmetatable(magic.Scene).wrap(__buildat_replicated_scene)
 
 local sync_node_added_subs = {}
 
--- Callback will be called for each node added to the scene, once they have a
--- name. Callback is called immediately for all existing nodes.
+-- Callback will be called for each node added to the scene.
+-- Callback is called immediately for all existing nodes.
 function M.safe.sub_sync_node_added(opts, cb)
 	-- Add to subscriber table
 	table.insert(sync_node_added_subs, cb)
@@ -31,32 +31,17 @@ function M.safe.sub_sync_node_added(opts, cb)
 	handle_node(scene)
 end
 
-local nodes_waiting_for_name = {}
-
--- NOTE: Using this safe version of magic.SubscribeToEvent() does not have a
--- performance impact over the unsafe one. Tested 2014-10-15.
-magic.SubscribeToEvent("NodeAdded", function(event_type, event_data)
-	local node = event_data:GetPtr("Node", "Node")
-	--log:info("NodeAdded: "..node:GetName())
-	if node:GetName() == "" then
-		nodes_waiting_for_name[node:GetID()] = true
-	else
-		for _, v in ipairs(sync_node_added_subs) do
-			v(node)
-		end
+-- Override dummy default
+function __buildat_replicate_on_node_created(node_id)
+	log:debug("__buildat_replicate_on_node_created(): id="..node_id)
+	local node = M.safe.main_scene:GetNode(node_id)
+	if not node then
+		return
 	end
-end)
-
-magic.SubscribeToEvent("NodeNameChanged", function(event_type, event_data)
-	local node = event_data:GetPtr("Node", "Node")
-	--log:info("NodeNameChanged: "..node:GetName())
-	if nodes_waiting_for_name[node:GetID()] then
-		nodes_waiting_for_name[node:GetID()] = nil
-		for _, v in ipairs(sync_node_added_subs) do
-			v(node)
-		end
+	for _, v in ipairs(sync_node_added_subs) do
+		v(node)
 	end
-end)
+end
 
 return M
 -- vim: set noet ts=4 sw=4:

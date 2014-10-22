@@ -9,6 +9,9 @@ extern "C" {
 
 namespace lua_bindings
 {
-	void init(lua_State *L);
+	namespace replicate
+	{
+		void on_node_created(lua_State *L, uint node_id);
+	}
 }
 // vim: set noet ts=4 sw=4:

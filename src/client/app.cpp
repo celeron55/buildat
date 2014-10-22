@@ -300,6 +300,11 @@ struct CApp: public App, public magic::Application
 		return m_thread_pool.get();
 	}
 
+	lua_State* get_lua()
+	{
+		return L;
+	}
+
 	// Non-public methods
 
 	void Start()
@@ -362,19 +367,12 @@ struct CApp: public App, public magic::Application
 		m_camera_node->SetPosition(magic::Vector3(7.0, 7.0, 7.0));
 		m_camera_node->LookAt(magic::Vector3(0, 1, 0));
 
+		// TODO: Pass the scene to the Lua environment in a proper way (see
+		//       stuff in lua_bindings)
 		magic::Renderer *renderer = GetSubsystem<magic::Renderer>();
 		magic::SharedPtr<magic::Viewport> viewport(new magic::Viewport(
 				context_, m_scene, m_camera_node->GetComponent<magic::Camera>()));
 		renderer->SetViewport(0, viewport);
-
-		// Won't work; accessing the resulting value in Lua segfaults.
-		/*magic::WeakPtr<magic::LuaFunction> f =
-		        m_script->GetFunction("__buildat_set_sync_scene");
-		if(!f)
-		    throw Exception("__buildat_set_sync_scene not found");
-		f->BeginCall();
-		f->PushUserType(m_scene.Get(), "Scene");
-		f->EndCall();*/
 
 		// Run initial client Lua scripts
 		ss_ init_lua_path = g_client_config.share_path+"/client/init.lua";
