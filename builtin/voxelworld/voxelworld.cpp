@@ -63,7 +63,7 @@ struct ChunkBuffer
 			return true;
 		if(interface::os::get_timeofday_us() < last_accessed_us + timeout_us)
 			return false;
-		log_d(MODULE, "Unloading chunk " PV3I_FORMAT, PV3I_PARAMS(chunk_p));
+		log_t(MODULE, "Unloading chunk " PV3I_FORMAT, PV3I_PARAMS(chunk_p));
 		volume.reset();
 		return true;
 	}
@@ -156,7 +156,6 @@ ChunkBuffer& Section::get_buffer(const pv::Vector3DInt32 &chunk_p,
 	if(buf.volume)
 		return buf;
 	// Not loaded.
-	log_d(MODULE, "Loading chunk " PV3I_FORMAT, PV3I_PARAMS(chunk_p));
 	// Get the static voxel node from the scene and read the volume from it
 	int32_t node_id = node_ids->getVoxelAt(chunk_p);
 	if(node_id == 0){
@@ -165,6 +164,8 @@ ChunkBuffer& Section::get_buffer(const pv::Vector3DInt32 &chunk_p,
 				PV3I_PARAMS(chunk_p), PV3I_PARAMS(section_p));
 		return buf;
 	}
+	log_t(MODULE, "Loading chunk " PV3I_FORMAT " (node %i)",
+			PV3I_PARAMS(chunk_p), node_id);
 	server->access_scene([&](Scene *scene)
 	{
 		Node *n = scene->GetNode(node_id);
@@ -402,7 +403,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 			// Update node collision boxes
 			if(!m_nodes_needing_physics_update.empty()){
-				log_v(MODULE, "on_tick(): Doing %zu lazy node physics updates",
+				log_v(MODULE, "Updating physics of %zu nodes",
 						m_nodes_needing_physics_update.size());
 			}
 			for(QueuedNodePhysicsUpdate &update: m_nodes_needing_physics_update){
@@ -615,7 +616,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 			return;
 		section.loaded = true;
 		pv::Vector3DInt16 section_p = section.section_p;
-		log_v(MODULE, "Loading section " PV3I_FORMAT, PV3I_PARAMS(section_p));
+		log_d(MODULE, "Loading section " PV3I_FORMAT, PV3I_PARAMS(section_p));
 
 		// TODO: If found on disk, load nodes from there
 		// TODO: If not found on disk, create new static nodes
@@ -630,7 +631,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 			return;
 		section.generated = true;
 		pv::Vector3DInt16 section_p = section.section_p;
-		log_v(MODULE, "Generating section " PV3I_FORMAT, PV3I_PARAMS(section_p));
+		log_v(MODULE, "Section will be generated: " PV3I_FORMAT,
+				PV3I_PARAMS(section_p));
 		m_server->emit_event("voxelworld:generation_request",
 				new GenerationRequest(section_p));
 	}
@@ -903,8 +905,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 		pv::Vector3DInt32 chunk_p = section->get_chunk_p(chunk_i);
 		uint node_id = section->node_ids->getVoxelAt(chunk_p);
 
-		log_d(MODULE, "commit_chunk_buffer(): Updating node %i volume (chunk "
-				PV3I_FORMAT ")", node_id, PV3I_PARAMS(chunk_p));
+		log_d(MODULE, "Committing chunk " PV3I_FORMAT " (node %i)",
+				PV3I_PARAMS(chunk_p), node_id);
 
 		if(node_id == 0){
 			log_w(MODULE, "commit_chunk_buffer() chunk_i=%zu: "
@@ -977,14 +979,15 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 	size_t num_buffers_loaded()
 	{
-		return m_sections_with_loaded_buffers.size();
+		return m_total_buffers_loaded;
 	}
 
 	void commit()
 	{
 		if(m_sections_with_loaded_buffers.empty())
 			return;
-		log_d(MODULE, "commit(): %zu sections have loaded buffers",
+		log_d(MODULE, "Committing %zu buffers in %zu sections",
+				m_total_buffers_loaded,
 				m_sections_with_loaded_buffers.size());
 		for(Section *section : m_sections_with_loaded_buffers){
 			for(size_t i = 0; i < section->chunk_buffers.size(); i++){

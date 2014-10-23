@@ -276,7 +276,7 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 	{
 		if(!event.is_static_chunk)
 			return;
-		log_v(MODULE, "on_node_volume_updated(): " PV3I_FORMAT,
+		log_v(MODULE, "Checking ground level in chunk " PV3I_FORMAT,
 				PV3I_PARAMS(event.chunk_p));
 		const pv::Vector3DInt32 &chunk_p = event.chunk_p;
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)

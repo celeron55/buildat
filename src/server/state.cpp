@@ -782,7 +782,11 @@ struct CState: public State, public interface::Server
 
 	void emit_event(Event event)
 	{
-		log_d("state", "emit_event(): type=%zu", event.type);
+		if(log_get_max_level() >= LOG_TRACE){
+			auto *evreg = interface::getGlobalEventRegistry();
+			log_t("state", "emit_event(): %s (%zu)",
+					cs(evreg->name(event.type)), event.type);
+		}
 		interface::MutexScope ms(m_event_queue_mutex);
 		m_event_queue.push_back(std::move(event));
 	}
@@ -845,20 +849,20 @@ struct CState: public State, public interface::Server
 			}
 			if(event_queue_snapshot.empty()){
 				if(loop_i == 0)
-					log_d("state", "handle_events(); Nothing to do");
+					log_t("state", "handle_events(); Nothing to do");
 				break;
 			}
 			for(const Event &event : event_queue_snapshot){
 				if(event.type >= event_subs_snapshot.size()){
-					log_d("state", "handle_events(): %zu: No subs", event.type);
+					log_t("state", "handle_events(): %zu: No subs", event.type);
 					continue;
 				}
 				sv_<ModuleContainer*> &sublist = event_subs_snapshot[event.type];
 				if(sublist.empty()){
-					log_d("state", "handle_events(): %zu: No subs", event.type);
+					log_t("state", "handle_events(): %zu: No subs", event.type);
 					continue;
 				}
-				log_d("state", "handle_events(): %zu: Handling (%zu handlers)",
+				log_t("state", "handle_events(): %zu: Handling (%zu handlers)",
 						event.type, sublist.size());
 				for(ModuleContainer *mc : sublist){
 					interface::MutexScope mc_ms(mc->mutex);
