@@ -163,68 +163,6 @@ struct GlobalYSTMap
 	}
 };
 
-// Y-seethrough commit hook
-struct YstCommitHook: public voxelworld::CommitHook
-{
-	static constexpr const char *MODULE = "YstCommitHook";
-	interface::Server *m_server;
-
-	YstCommitHook(interface::Server *server):
-		m_server(server)
-	{}
-
-	void after_commit(voxelworld::Interface *ivoxelworld,
-			const pv::Vector3DInt32 &chunk_p)
-	{
-		interface::VoxelRegistry *voxel_reg = ivoxelworld->get_voxel_reg();
-		//const auto &chunk_size_voxels = ivoxelworld->get_chunk_size_voxels();
-		pv::Region chunk_region = ivoxelworld->get_chunk_region_voxels(chunk_p);
-
-		ground_plane_lighting::access(m_server,
-				[&](ground_plane_lighting::Interface *igpl)
-		{
-			auto lc = chunk_region.getLowerCorner();
-			auto uc = chunk_region.getUpperCorner();
-			//log_nv(MODULE, "yst=[");
-			for(int z = lc.getZ(); z <= uc.getZ(); z++){
-				for(int x = lc.getX(); x <= uc.getX(); x++){
-					int32_t yst0 = igpl->get_yst(x, z);
-					if(yst0 > uc.getY()){
-						// Y-seethrough doesn't reach here
-						continue;
-					}
-					int y = uc.getY();
-					for(;; y--){
-						VoxelInstance v = ivoxelworld->get_voxel(
-									pv::Vector3DInt32(x, y, z), true);
-						if(v.get_id() == interface::VOXELTYPEID_UNDEFINED){
-							// NOTE: This leaves the chunks below unhandled;
-							// there would have to be some kind of a dirty
-							// flag based on which this seach would be
-							// continued at a later point when the chunk
-							// gets loaded
-							break;
-						}
-						const auto *def = voxel_reg->get_cached(v);
-						if(!def)
-							throw Exception(ss_()+"Undefined voxel: "+
-									itos(v.get_id()));
-						bool light_passes = (!def || !def->physically_solid);
-						if(!light_passes)
-							break;
-					}
-					// The first voxel downwards from the top of the world that
-					// doesn't pass light
-					int32_t yst1 = y;
-					//log_nv(MODULE, "%i -> %i, ", yst0, yst1);
-					igpl->set_yst(x, z, yst1);
-				}
-			}
-			//log_v(MODULE, "]");
-		});
-	}
-};
-
 struct Module: public interface::Module, public ground_plane_lighting::Interface
 {
 	interface::Server *m_server;
@@ -246,9 +184,10 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));
-		m_server->sub_event(this, Event::t("network:client_connected"));
 		m_server->sub_event(this, Event::t("core:tick"));
+		m_server->sub_event(this, Event::t("network:client_connected"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
+		m_server->sub_event(this, Event::t("voxelworld:node_volume_updated"));
 
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
@@ -265,20 +204,17 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_VOIDN("core:unload", on_unload)
 		EVENT_VOIDN("core:continue", on_continue)
+		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 		EVENT_TYPEN("network:client_connected", on_client_connected,
 				network::NewClient)
-		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
 				client_file::FilesTransmitted)
+		EVENT_TYPEN("voxelworld:node_volume_updated",
+				on_node_volume_updated, voxelworld::NodeVolumeUpdated)
 	}
 
 	void on_start()
 	{
-		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
-		{
-			ivoxelworld->add_commit_hook(
-						up_<YstCommitHook>(new YstCommitHook(m_server)));
-		});
 	}
 
 	void on_unload()
@@ -286,10 +222,6 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 	}
 
 	void on_continue()
-	{
-	}
-
-	void on_client_connected(const network::NewClient &client_connected)
 	{
 	}
 
@@ -317,6 +249,10 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 		}
 	}
 
+	void on_client_connected(const network::NewClient &client_connected)
+	{
+	}
+
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
 		int peer = event.recipient;
@@ -334,6 +270,64 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 		});
 
 		send_initial_sectors(peer);
+	}
+
+	void on_node_volume_updated(const voxelworld::NodeVolumeUpdated &event)
+	{
+		if(!event.is_static_chunk)
+			return;
+		log_v(MODULE, "on_node_volume_updated(): " PV3I_FORMAT,
+				PV3I_PARAMS(event.chunk_p));
+		const pv::Vector3DInt32 &chunk_p = event.chunk_p;
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
+		{
+			interface::VoxelRegistry *voxel_reg = ivoxelworld->get_voxel_reg();
+			//const auto &chunk_size_voxels = ivoxelworld->get_chunk_size_voxels();
+			pv::Region chunk_region = ivoxelworld->get_chunk_region_voxels(chunk_p);
+
+			ground_plane_lighting::access(m_server,
+					[&](ground_plane_lighting::Interface *igpl)
+			{
+				auto lc = chunk_region.getLowerCorner();
+				auto uc = chunk_region.getUpperCorner();
+				//log_nv(MODULE, "yst=[");
+				for(int z = lc.getZ(); z <= uc.getZ(); z++){
+					for(int x = lc.getX(); x <= uc.getX(); x++){
+						int32_t yst0 = igpl->get_yst(x, z);
+						if(yst0 > uc.getY()){
+							// Y-seethrough doesn't reach here
+							continue;
+						}
+						int y = uc.getY();
+						for(;; y--){
+							VoxelInstance v = ivoxelworld->get_voxel(
+										pv::Vector3DInt32(x, y, z), true);
+							if(v.get_id() == interface::VOXELTYPEID_UNDEFINED){
+								// NOTE: This leaves the chunks below unhandled;
+								// there would have to be some kind of a dirty
+								// flag based on which this seach would be
+								// continued at a later point when the chunk
+								// gets loaded
+								break;
+							}
+							const auto *def = voxel_reg->get_cached(v);
+							if(!def)
+								throw Exception(ss_()+"Undefined voxel: "+
+										itos(v.get_id()));
+							bool light_passes = (!def || !def->physically_solid);
+							if(!light_passes)
+								break;
+						}
+						// The first voxel downwards from the top of the world that
+						// doesn't pass light
+						int32_t yst1 = y;
+						//log_nv(MODULE, "%i -> %i, ", yst0, yst1);
+						igpl->set_yst(x, z, yst1);
+					}
+				}
+				//log_v(MODULE, "]");
+			});
+		});
 	}
 
 	void send_initial_sectors(int peer)

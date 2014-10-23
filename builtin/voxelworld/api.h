@@ -32,11 +32,16 @@ namespace voxelworld
 		{}
 	};
 
-	struct NodeVoxelDataUpdatedEvent: public interface::Event::Private
+	struct NodeVolumeUpdated: public interface::Event::Private
 	{
 		uint node_id;
+		bool is_static_chunk = false;
+		pv::Vector3DInt32 chunk_p; // Only set if is_static_chunk == true
 
-		NodeVoxelDataUpdatedEvent(uint node_id): node_id(node_id){}
+		NodeVolumeUpdated(uint node_id, bool is_static_chunk,
+				const pv::Vector3DInt32 &chunk_p):
+			node_id(node_id), is_static_chunk(is_static_chunk), chunk_p(chunk_p)
+		{}
 	};
 
 	struct Interface;
@@ -46,12 +51,9 @@ namespace voxelworld
 		virtual ~CommitHook(){}
 		virtual void in_thread(voxelworld::Interface *ivoxelworld,
 				const pv::Vector3DInt32 &chunk_p,
-				sp_<pv::RawVolume<VoxelInstance>> volume){}
+				pv::RawVolume<VoxelInstance> &volume){}
 		virtual void in_scene(voxelworld::Interface *ivoxelworld,
 				const pv::Vector3DInt32 &chunk_p, magic::Node *n){}
-		// TODO: Remove this hook callback and use an event instead
-		virtual void after_commit(voxelworld::Interface *ivoxelworld,
-				const pv::Vector3DInt32 &chunk_p){}
 	};
 
 	struct Interface

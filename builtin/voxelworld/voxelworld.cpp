@@ -15,6 +15,7 @@
 #include "interface/polyvox_numeric.h"
 #include "interface/polyvox_cereal.h"
 #include "interface/polyvox_std.h"
+#include "interface/os.h"
 #include <PolyVoxCore/RawVolume.h>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
@@ -46,12 +47,31 @@ namespace voxelworld {
 
 struct ChunkBuffer
 {
-	sp_<pv::RawVolume<VoxelInstance>> volume;
+	static constexpr const char *MODULE = "ChunkBuffer";
+	pv::Vector3DInt32 chunk_p; // For logging
+	up_<pv::RawVolume<VoxelInstance>> volume;
 	bool dirty = false; // If false, buffer has only been read from so far
+	int64_t last_accessed_us = 0;
+
+	ChunkBuffer(){}
+	void timer_reset(const pv::Vector3DInt32 &chunk_p_){
+		chunk_p = chunk_p_;
+		last_accessed_us = interface::os::get_timeofday_us();
+	}
+	bool unload_if_old(int64_t timeout_us){ // True if not loaded
+		if(!volume)
+			return true;
+		if(interface::os::get_timeofday_us() < last_accessed_us + timeout_us)
+			return false;
+		log_d(MODULE, "Unloading chunk " PV3I_FORMAT, PV3I_PARAMS(chunk_p));
+		volume.reset();
+		return true;
+	}
 };
 
 struct Section
 {
+	static constexpr const char *MODULE = "Section";
 	pv::Vector3DInt16 section_p; // Position in sections
 	pv::Vector3DInt16 chunk_size;
 	pv::Region contained_chunks; // Position and size in chunks
@@ -96,7 +116,7 @@ struct Section
 	pv::Vector3DInt32 get_chunk_p(size_t chunk_p);
 
 	ChunkBuffer& get_buffer(const pv::Vector3DInt32 &chunk_p,
-			interface::Server *server);
+			interface::Server *server, size_t *total_buffers_loaded);
 };
 
 size_t Section::get_chunk_i(const pv::Vector3DInt32 &chunk_p) // global chunk_p
@@ -127,14 +147,16 @@ pv::Vector3DInt32 Section::get_chunk_p(size_t chunk_i)
 }
 
 ChunkBuffer& Section::get_buffer(const pv::Vector3DInt32 &chunk_p,
-		interface::Server *server)
+		interface::Server *server, size_t *total_buffers_loaded)
 {
 	size_t chunk_i = get_chunk_i(chunk_p);
 	ChunkBuffer &buf = chunk_buffers[chunk_i];
+	buf.timer_reset(chunk_p);
 	// If loaded, return right away
 	if(buf.volume)
 		return buf;
 	// Not loaded.
+	log_d(MODULE, "Loading chunk " PV3I_FORMAT, PV3I_PARAMS(chunk_p));
 	// Get the static voxel node from the scene and read the volume from it
 	int32_t node_id = node_ids->getVoxelAt(chunk_p);
 	if(node_id == 0){
@@ -156,9 +178,7 @@ ChunkBuffer& Section::get_buffer(const pv::Vector3DInt32 &chunk_p,
 		const Variant &var = n->GetVar(StringHash("buildat_voxel_data"));
 		const PODVector<unsigned char> &rawbuf = var.GetBuffer();
 		ss_ data((const char*)&rawbuf[0], rawbuf.Size());
-		up_<pv::RawVolume<VoxelInstance>> volume =
-			interface::deserialize_volume(data);
-		buf.volume = sp_<pv::RawVolume<VoxelInstance>>(std::move(volume));
+		buf.volume = interface::deserialize_volume(data);
 		if(!buf.volume){
 			log_w("voxelworld",
 					"Section::get_buffer(): Voxel volume could not be "
@@ -168,17 +188,18 @@ ChunkBuffer& Section::get_buffer(const pv::Vector3DInt32 &chunk_p,
 			return;
 		}
 	});
+	(*total_buffers_loaded)++;
 	return buf;
 }
 
 struct QueuedNodePhysicsUpdate
 {
 	uint node_id = 0;
-	sp_<pv::RawVolume<VoxelInstance>> volume;
+	// TODO bool is_static_chunk = false;
+	// TODO pv::Vector3DInt32 chunk_p; // Only set if is_static_chunk == true
 
-	QueuedNodePhysicsUpdate(const uint &node_id,
-			sp_<pv::RawVolume<VoxelInstance>> volume):
-		node_id(node_id), volume(volume){}
+	QueuedNodePhysicsUpdate(const uint &node_id):
+		node_id(node_id){}
 	bool operator>(const QueuedNodePhysicsUpdate &other) const {
 		return node_id > other.node_id;
 	}
@@ -204,6 +225,9 @@ struct Module: public interface::Module, public voxelworld::Interface
 	// The world is loaded and unloaded by sections (eg. 2x2x2)
 	pv::Vector3DInt16 m_section_size_chunks = pv::Vector3DInt16(2, 2, 2);
 
+	int64_t m_buffer_unload_timeout = 5000000;
+	size_t m_max_buffers_loaded = 50;
+
 	// Sections (this(y,z)=sector, sector(x)=section)
 	sm_<pv::Vector<2, int16_t>, sm_<int16_t, Section>> m_sections;
 	// Cache of last used sections (add to end, remove from beginning)
@@ -212,6 +236,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 	// Set of sections that have buffers allocated
 	// (as a sorted array in descending order)
 	std::vector<Section*> m_sections_with_loaded_buffers;
+	size_t m_total_buffers_loaded = 0;
 
 	// Set of nodes by node_id that need set_voxel_physics_boxes()
 	// (as a sorted array in descending node_id order)
@@ -382,19 +407,27 @@ struct Module: public interface::Module, public voxelworld::Interface
 			}
 			for(QueuedNodePhysicsUpdate &update: m_nodes_needing_physics_update){
 				uint node_id = update.node_id;
-				sp_<pv::RawVolume<VoxelInstance>> volume = update.volume;
 				Node *n = scene->GetNode(node_id);
 				if(!n){
 					log_w(MODULE, "on_tick(): Node physics update: "
 							"Node %i not found", node_id);
 					return;
 				}
+				// Get volume
+				const Variant &var = n->GetVar(StringHash("buildat_voxel_data"));
+				const PODVector<unsigned char> &rawbuf = var.GetBuffer();
+				ss_ data((const char*)&rawbuf[0], rawbuf.Size());
+				up_<pv::RawVolume<VoxelInstance>> volume =
+						interface::deserialize_volume(data);
 				// Update collision shape
 				interface::mesh::set_voxel_physics_boxes(n, context, *volume,
 						m_voxel_reg.get());
 			}
 			m_nodes_needing_physics_update.clear();
 		});
+
+		// Unload stuff if needed
+		maintain_maximum_buffer_limit();
 	}
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
@@ -543,7 +576,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 			}
 		}
 
-		run_commit_hooks_in_thread(chunk_p, volume);
+		run_commit_hooks_in_thread(chunk_p, *volume);
 
 		ss_ data = interface::serialize_volume_compressed(*volume);
 		n->SetVar(StringHash("buildat_voxel_data"), Variant(
@@ -551,8 +584,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 		run_commit_hooks_in_scene(chunk_p, n);
 
-		// TODO: Remove this hook callback and use an event instead
-		run_commit_hooks_after_commit(chunk_p);
+		m_server->emit_event("voxelworld:node_volume_updated",
+				new NodeVolumeUpdated(n->GetID(), true, chunk_p));
 
 		// There are no collision shapes initially, but add the rigid body now
 		RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
@@ -603,10 +636,9 @@ struct Module: public interface::Module, public voxelworld::Interface
 				new GenerationRequest(section_p));
 	}
 
-	void mark_node_for_physics_update(uint node_id,
-			sp_<pv::RawVolume<VoxelInstance>> volume)
+	void mark_node_for_physics_update(uint node_id)
 	{
-		QueuedNodePhysicsUpdate update(node_id, volume);
+		QueuedNodePhysicsUpdate update(node_id);
 		auto it = std::lower_bound(m_nodes_needing_physics_update.begin(),
 					m_nodes_needing_physics_update.end(), update,
 					std::greater<QueuedNodePhysicsUpdate>());
@@ -623,7 +655,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 	// modify the volume
 	void run_commit_hooks_in_thread(
 			const pv::Vector3DInt32 &chunk_p,
-			sp_<pv::RawVolume<VoxelInstance>> volume)
+			pv::RawVolume<VoxelInstance> &volume)
 	{
 		for(up_<CommitHook> &hook : m_commit_hooks)
 			hook->in_thread(this, chunk_p, volume);
@@ -636,10 +668,38 @@ struct Module: public interface::Module, public voxelworld::Interface
 			hook->in_scene(this, chunk_p, n);
 	}
 
-	void run_commit_hooks_after_commit(const pv::Vector3DInt32 &chunk_p)
+	void unload_old_buffers(int64_t unload_timeout, size_t max_buffers)
 	{
-		for(up_<CommitHook> &hook : m_commit_hooks)
-			hook->after_commit(this, chunk_p);
+		// Swap out the current set
+		std::vector<Section*> sections_with_loaded_buffers;
+		sections_with_loaded_buffers.swap(m_sections_with_loaded_buffers);
+		// Allocate a new set to put back stuff that is still loaded
+		m_sections_with_loaded_buffers.reserve(
+				sections_with_loaded_buffers.size());
+		// Go through the swapped set, putting back sections that are still loaded
+		m_total_buffers_loaded = 0;
+		for(Section *section : sections_with_loaded_buffers){
+			size_t num_loaded = 0;
+			for(size_t i = 0; i < section->chunk_buffers.size(); i++){
+				ChunkBuffer &chunk_buffer = section->chunk_buffers[i];
+				bool unloaded = chunk_buffer.unload_if_old(unload_timeout);
+				if(!unloaded){
+					num_loaded++;
+					m_total_buffers_loaded++;
+				}
+			}
+			if(num_loaded > 0)
+				m_sections_with_loaded_buffers.push_back(section);
+		}
+		// Call recursively if too many buffers are still loaded
+		if(unload_timeout > 1000 && m_total_buffers_loaded > max_buffers)
+			unload_old_buffers(unload_timeout / 4, max_buffers);
+	}
+
+	void maintain_maximum_buffer_limit()
+	{
+		if(m_total_buffers_loaded > m_max_buffers_loaded)
+			unload_old_buffers(m_buffer_unload_timeout, m_max_buffers_loaded);
 	}
 
 	// Interface
@@ -740,18 +800,14 @@ struct Module: public interface::Module, public voxelworld::Interface
 		// TODO: Commit only the current chunk
 		commit();
 
-		// Volume will be used after access_scene()
-		sp_<pv::RawVolume<VoxelInstance>> volume;
-
 		m_server->access_scene([&](Scene *scene)
 		{
 			Node *n = scene->GetNode(node_id);
 			const Variant &var = n->GetVar(StringHash("buildat_voxel_data"));
 			const PODVector<unsigned char> &buf = var.GetBuffer();
 			ss_ data((const char*)&buf[0], buf.Size());
-			volume = sp_<pv::RawVolume<VoxelInstance>>(std::move(
-						interface::deserialize_volume(data)
-					));
+			up_<pv::RawVolume<VoxelInstance>> volume =
+					interface::deserialize_volume(data);
 
 			pv::Vector3DInt32 voxel_p(
 						p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX(),
@@ -765,7 +821,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 					PV3I_PARAMS(section_p), PV3I_PARAMS(voxel_p));
 			volume->setVoxelAt(voxel_p, v);
 
-			run_commit_hooks_in_thread(chunk_p, volume);
+			run_commit_hooks_in_thread(chunk_p, *volume);
 
 			ss_ new_data = interface::serialize_volume_compressed(*volume);
 
@@ -777,10 +833,10 @@ struct Module: public interface::Module, public voxelworld::Interface
 		});
 
 		// Mark node for collision box update
-		mark_node_for_physics_update(node_id, volume);
+		mark_node_for_physics_update(node_id);
 
-		// TODO: Remove this hook callback and use an event instead
-		run_commit_hooks_after_commit(chunk_p);
+		m_server->emit_event("voxelworld:node_volume_updated",
+				new NodeVolumeUpdated(node_id, true, chunk_p));
 	}
 
 	void set_voxel(const pv::Vector3DInt32 &p, const interface::VoxelInstance &v,
@@ -803,8 +859,12 @@ struct Module: public interface::Module, public voxelworld::Interface
 			return;
 		}
 
+		// Unload stuff if needed
+		maintain_maximum_buffer_limit();
+
 		// Set in buffer
-		ChunkBuffer &buf = section->get_buffer(chunk_p, m_server);
+		ChunkBuffer &buf = section->get_buffer(chunk_p, m_server,
+				&m_total_buffers_loaded);
 		if(!buf.volume){
 			if(!disable_warnings){
 				log_w(MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i: Couldn't get "
@@ -833,19 +893,20 @@ struct Module: public interface::Module, public voxelworld::Interface
 	}
 
 	// Commit and unload chunk buffer
-	// TODO: Unload after a timeout instead of always
 	void commit_chunk_buffer(Section *section, size_t chunk_i)
 	{
 		ChunkBuffer &chunk_buffer = section->chunk_buffers[chunk_i];
 		if(!chunk_buffer.dirty){
-			// No changes made; unload buffer volume and return
-			chunk_buffer.volume.reset();
+			// No changes
 			return;
 		}
 
 		pv::Vector3DInt32 chunk_p = section->get_chunk_p(chunk_i);
-
 		uint node_id = section->node_ids->getVoxelAt(chunk_p);
+
+		log_d(MODULE, "commit_chunk_buffer(): Updating node %i volume (chunk "
+				PV3I_FORMAT ")", node_id, PV3I_PARAMS(chunk_p));
+
 		if(node_id == 0){
 			log_w(MODULE, "commit_chunk_buffer() chunk_i=%zu: "
 					"No node found for chunk " PV3I_FORMAT
@@ -855,7 +916,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 			return;
 		}
 
-		run_commit_hooks_in_thread(chunk_p, chunk_buffer.volume);
+		run_commit_hooks_in_thread(chunk_p, *chunk_buffer.volume);
 
 		ss_ new_data = interface::serialize_volume_compressed(
 				*chunk_buffer.volume);
@@ -900,21 +961,19 @@ struct Module: public interface::Module, public voxelworld::Interface
 		}
 		network::access(m_server, [&](network::Interface *inetwork){
 			for(auto &peer_id: peers){
-				inetwork->send(peer_id, "voxelworld:node_voxel_data_updated",
+				inetwork->send(peer_id, "voxelworld:node_volume_updated",
 						os.str());
 			}
 		});
 
 		// Mark node for collision box update
-		mark_node_for_physics_update(node_id, chunk_buffer.volume);
+		mark_node_for_physics_update(node_id);
 
 		// Reset dirty flag
 		chunk_buffer.dirty = false;
-		// Unload buffer volume
-		chunk_buffer.volume.reset();
 
-		// TODO: Remove this hook callback and use an event instead
-		run_commit_hooks_after_commit(chunk_p);
+		m_server->emit_event("voxelworld:node_volume_updated",
+				new NodeVolumeUpdated(node_id, true, chunk_p));
 	}
 
 	size_t num_buffers_loaded()
@@ -926,14 +985,13 @@ struct Module: public interface::Module, public voxelworld::Interface
 	{
 		if(m_sections_with_loaded_buffers.empty())
 			return;
-		log_v(MODULE, "commit(): %zu sections have loaded buffers",
+		log_d(MODULE, "commit(): %zu sections have loaded buffers",
 				m_sections_with_loaded_buffers.size());
 		for(Section *section : m_sections_with_loaded_buffers){
 			for(size_t i = 0; i < section->chunk_buffers.size(); i++){
 				commit_chunk_buffer(section, i);
 			}
 		}
-		m_sections_with_loaded_buffers.clear();
 	}
 
 	VoxelInstance get_voxel(const pv::Vector3DInt32 &p, bool disable_warnings)
@@ -952,8 +1010,12 @@ struct Module: public interface::Module, public voxelworld::Interface
 			return VoxelInstance(interface::VOXELTYPEID_UNDEFINED);
 		}
 
+		// Unload stuff if needed
+		maintain_maximum_buffer_limit();
+
 		// Get from buffer
-		ChunkBuffer &buf = section->get_buffer(chunk_p, m_server);
+		ChunkBuffer &buf = section->get_buffer(chunk_p, m_server,
+				&m_total_buffers_loaded);
 		if(!buf.volume){
 			if(!disable_warnings){
 				log_w(MODULE, "get_voxel() p=" PV3I_FORMAT ": Couldn't get "
