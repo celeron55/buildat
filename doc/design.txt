@@ -105,6 +105,16 @@ streaming.
 
 Voxels
 ------
+Terminology:
+- "voxel": Low-cost thing using the space of a cube, stored in large amounts
+- "block": Defines an arrangement of voxels (often 1x1x1)
+- "volume": 3-dimensional volume of voxels
+- "node": Scene node
+- "static node": Stationary voxel-aligned node containing a volume, used for
+  containing most of the generated world
+- "chunk": The volume in a static node
+- "dynamic node": Freely positioned node containing a volume
+
 A way to define voxel properties:
 - Polyvox can output about 2**23 = 8388608 different face materials (uint32_t ->
   float conversion)
@@ -212,11 +222,6 @@ The voxel world:
 	  positioned nodes?
 		- Maybe all nodes, including the chunk nodes, could be grouped in
 		  sections when saved on disk
-- Terminology:
-	- "static node": Stationary voxel-aligned node used for main world content
-	- "dynamic node": Freely positioned node (containing voxels)
-	- "static voxel": Voxel stored in a static node
-	- "dynamic voxel": Voxel stored in a dynamic node
 - Save format tables:
 	- section_size(w, h, d) <- only one row
 	- section(sx, sy, sz, save_enabled, generated)
