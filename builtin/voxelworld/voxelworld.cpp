@@ -531,8 +531,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 				m_chunk_size_voxels.getZ() / 2.0f - 0.5f
 		);
 
-		ss_ name = "static_"+dump(section_p)+
-				"_("+itos(x)+","+itos(y)+","+itos(z)+")";
+		ss_ name = "static_"+dump(chunk_p);
 
 		log_t(MODULE, "create_chunk_node(): node_p=(%f, %f, %f), name=\"%s\"",
 				node_p.x_, node_p.y_, node_p.z_, cs(name));
