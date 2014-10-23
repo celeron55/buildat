@@ -1,9 +1,10 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "state.h"
+#include "core/log.h"
 #include "rccpp.h"
 #include "config.h"
-#include "core/log.h"
+#include "urho3d_log_redirect.h"
 #include "interface/module.h"
 #include "interface/module_info.h"
 #include "interface/server.h"
@@ -132,6 +133,7 @@ public:
 	}
 };
 
+// This can be used for subscribing to Urho3D events as Buildat events
 struct MagicEventHandler: public magic::Object
 {
 	OBJECT(MagicEventHandler);
@@ -295,6 +297,16 @@ struct CState: public State, public interface::Server
 		m_magic_context = new magic::Context();
 		m_magic_engine = new magic::Engine(m_magic_context);
 
+		// Load hardcoded log redirection module
+		{
+			interface::Module *m = new urho3d_log_redirect::Module(this);
+			load_module_direct_u(m, "urho3d_log_redirect");
+
+			// Disable timestamps in Urho3D log message events
+			magic::Log *magic_log = m_magic_context->GetSubsystem<magic::Log>();
+			magic_log->SetTimeStamp(false);
+		}
+
 		sv_<ss_> resource_paths = {
 			g_server_config.urho3d_path+"/Bin/CoreData",
 			g_server_config.urho3d_path+"/Bin/Data",
@@ -311,7 +323,7 @@ struct CState: public State, public interface::Server
 		params["ResourcePaths"] = resource_paths_s.c_str();
 		params["Headless"] = true;
 		params["LogName"] = ""; // Don't log to file
-		//params["LogQuiet"]      = true; // Don't log to stdout
+		params["LogQuiet"] = true; // Don't log to stdout
 		if(!m_magic_engine->Initialize(params))
 			throw Exception("Urho3D engine initialization failed");
 
@@ -484,6 +496,30 @@ struct CState: public State, public interface::Server
 		interface::Module *m = static_cast<interface::Module*>(
 				m_compiler->construct(info.name.c_str(), this));
 		return m;
+	}
+
+	// Can be used for loading hardcoded modules.
+	// There intentionally is no core:module_loaded event.
+	void load_module_direct_u(interface::Module *m, const ss_ &name)
+	{
+		interface::MutexScope ms(m_modules_mutex);
+		interface::MutexScope ms_magic(m_magic_mutex);
+
+		interface::ModuleInfo info;
+		info.name = name;
+		info.path = "";
+
+		log_i(MODULE, "Loading module %s (hardcoded)", cs(info.name));
+
+		m_module_info[info.name] = info;
+
+		m_modules[info.name] = ModuleContainer(m, info);
+		m_module_load_order.push_back(info.name);
+
+		// Call init()
+		ModuleContainer &mc = m_modules[info.name];
+		interface::MutexScope ms2(mc.mutex);
+		mc.module->init();
 	}
 
 	bool load_module(const interface::ModuleInfo &info)
