@@ -19,10 +19,16 @@ local FOG_END = RENDER_DISTANCE * 1.2
 
 local PLAYER_HEIGHT = 1.7
 local PLAYER_WIDTH = 0.9
+local PLAYER_MASS = 70
 local MOVE_SPEED = 10
 local JUMP_SPEED = 7 -- Barely 2 voxels
+local PLAYER_ACCELERATION = 40
+local PLAYER_DECELERATION = 40
 
 local scene = replicate.main_scene
+
+local player_touches_ground = false
+local player_crouched = false
 
 local pointed_voxel_p = nil
 local pointed_voxel_p_above = nil
@@ -167,9 +173,6 @@ do
 	--]]
 end
 
-local player_touches_ground = false
-local player_crouched = false
-
 -- Add a camera so we can look at the scene
 local camera_node = player_node:CreateChild("Camera")
 do
@@ -308,6 +311,7 @@ end)
 
 magic.SubscribeToEvent("Update", function(event_type, event_data)
 	--log:info("Update")
+	local dt = event_data:GetFloat("TimeStep")
 
 	if camera_node then
 		local p, p_above = find_pointed_voxel(camera_node)
@@ -358,41 +362,64 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 
 		local body = player_node:GetComponent("RigidBody")
 
-		local wanted_v = magic.Vector3(0, 0, 0)
+		do 
+			local wanted_v = magic.Vector3(0, 0, 0) -- re. world
+			do
+				local wanted_v_re_body = magic.Vector3(0, 0, 0)
+				if magic.input:GetKeyDown(magic.KEY_W) then
+					wanted_v_re_body.x = wanted_v_re_body.x + 1
+				end
+				if magic.input:GetKeyDown(magic.KEY_S) then
+					wanted_v_re_body.x = wanted_v_re_body.x - 1
+				end
+				if magic.input:GetKeyDown(magic.KEY_D) then
+					wanted_v_re_body.z = wanted_v_re_body.z - 1
+				end
+				if magic.input:GetKeyDown(magic.KEY_A) then
+					wanted_v_re_body.z = wanted_v_re_body.z + 1
+				end
+				wanted_v_re_body = wanted_v_re_body:Normalized() * MOVE_SPEED
+				local u = player_node.direction
+				local v = u:CrossProduct(magic.Vector3(0, 1, 0))
+				wanted_v = wanted_v + u * wanted_v_re_body.x
+				wanted_v = wanted_v + v * wanted_v_re_body.z
+			end
 
-		if magic.input:GetKeyDown(magic.KEY_W) then
-			wanted_v.x = wanted_v.x + 1
-		end
-		if magic.input:GetKeyDown(magic.KEY_S) then
-			wanted_v.x = wanted_v.x - 1
-		end
-		if magic.input:GetKeyDown(magic.KEY_D) then
-			wanted_v.z = wanted_v.z - 1
-		end
-		if magic.input:GetKeyDown(magic.KEY_A) then
-			wanted_v.z = wanted_v.z + 1
-		end
+			local current_v = body.linearVelocity
+			current_v.y = 0
 
-		if player_crouched then
-			wanted_v = wanted_v:Normalized() * MOVE_SPEED / 2
-		else
-			wanted_v = wanted_v:Normalized() * MOVE_SPEED
+			local v_diff = (wanted_v - current_v) / MOVE_SPEED
+
+			if v_diff:Length() > 0.1 then
+				v_diff = v_diff:Normalized()
+				local f = v_diff * dt * PLAYER_ACCELERATION * PLAYER_MASS
+				body:ApplyImpulse(f)
+			else
+				local bv = body.linearVelocity
+				bv.x = wanted_v.x
+				bv.z = wanted_v.z
+				body.linearVelocity = bv
+			end
 		end
 
 		if magic.input:GetKeyDown(magic.KEY_SPACE) or
 				magic.input:GetKeyPress(magic.KEY_SPACE) then
 			if player_touches_ground and
 					math.abs(body.linearVelocity.y) < JUMP_SPEED then
-				wanted_v.y = wanted_v.y + JUMP_SPEED
+				local bv = body.linearVelocity
+				bv.y = JUMP_SPEED
+				body.linearVelocity = bv
 			end
 		end
 		if magic.input:GetKeyDown(magic.KEY_SHIFT) then
-			--wanted_v.y = wanted_v.y - MOVE_SPEED
+			--local bv = body.linearVelocity
+			--bv.y = -MOVE_SPEED
+			--body.linearVelocity = bv
 
 			-- Delay setting this to here so that it's possible to wait for the
 			-- world to load first
 			if body.mass == 0 then
-				body.mass = 70.0
+				body.mass = PLAYER_MASS
 			end
 
 			if not player_crouched then
@@ -408,19 +435,6 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 				player_crouched = false
 			end
 		end
-
-		local u = player_node.direction
-		local v = u:CrossProduct(magic.Vector3(0, 1, 0))
-		local bv = body.linearVelocity
-		bv.x = 0
-		bv.z = 0
-		if wanted_v.y ~= 0 then
-			bv.y = 0
-		end
-		bv = bv + u * wanted_v.x
-		bv = bv + v * wanted_v.z
-		bv = bv + magic.Vector3(0, 1, 0) * wanted_v.y
-		body.linearVelocity = bv
 
 		local p = player_node:GetWorldPosition()
 		misc_text:SetText("("..math.floor(p.x + 0.5)..", "..
