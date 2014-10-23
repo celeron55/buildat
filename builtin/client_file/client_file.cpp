@@ -40,19 +40,19 @@ struct Module: public interface::Module, public client_file::Interface
 		m_server(server),
 		m_watch(interface::createFileWatch())
 	{
-		log_v(MODULE, "client_file construct");
+		log_d(MODULE, "client_file construct");
 	}
 
 	~Module()
 	{
-		log_v(MODULE, "client_file destruct");
+		log_d(MODULE, "client_file destruct");
 		for(int fd : m_watch->get_fds())
 			m_server->remove_socket_event(fd);
 	}
 
 	void init()
 	{
-		log_v(MODULE, "client_file init");
+		log_d(MODULE, "client_file init");
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));

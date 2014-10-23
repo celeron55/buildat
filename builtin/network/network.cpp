@@ -50,12 +50,12 @@ struct Module: public interface::Module, public network::Interface
 		m_server(server),
 		m_listening_socket(interface::createTCPSocket())
 	{
-		log_v(MODULE, "network construct");
+		log_d(MODULE, "network construct");
 	}
 
 	~Module()
 	{
-		log_v(MODULE, "network destruct");
+		log_d(MODULE, "network destruct");
 		if(m_listening_socket->good()){
 			m_server->remove_socket_event(m_listening_socket->fd());
 			if(m_will_restore_after_unload)
@@ -73,7 +73,7 @@ struct Module: public interface::Module, public network::Interface
 
 	void init()
 	{
-		log_v(MODULE, "network init");
+		log_d(MODULE, "network init");
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));

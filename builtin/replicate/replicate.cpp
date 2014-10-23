@@ -63,12 +63,12 @@ struct Module: public interface::Module, public replicate::Interface
 		interface::Module("replicate"),
 		m_server(server)
 	{
-		log_v(MODULE, "replicate construct");
+		log_d(MODULE, "replicate construct");
 	}
 
 	~Module()
 	{
-		log_v(MODULE, "replicate destruct");
+		log_d(MODULE, "replicate destruct");
 		m_server->access_scene([&](magic::Scene *scene){
 			for(auto &pair: m_scene_states){
 				magic::SceneReplicationState &scene_state = pair.second;
@@ -79,7 +79,7 @@ struct Module: public interface::Module, public replicate::Interface
 
 	void init()
 	{
-		log_v(MODULE, "replicate init");
+		log_d(MODULE, "replicate init");
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));

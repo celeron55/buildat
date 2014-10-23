@@ -277,7 +277,7 @@ struct Module: public interface::Module, public loader::Interface
 		interface::Module("loader"),
 		m_server(server)
 	{
-		log_v(MODULE, "loader construct");
+		log_d(MODULE, "loader construct");
 
 		m_module_load_paths.push_back(m_server->get_modules_path());
 		m_module_load_paths.push_back(m_server->get_builtin_modules_path());
@@ -285,12 +285,12 @@ struct Module: public interface::Module, public loader::Interface
 
 	~Module()
 	{
-		log_v(MODULE, "loader destruct");
+		log_d(MODULE, "loader destruct");
 	}
 
 	void init()
 	{
-		log_v(MODULE, "loader init");
+		log_d(MODULE, "loader init");
 		m_server->sub_event(this, Event::t("core:module_modified"));
 		m_server->sub_event(this, Event::t("core:tick"));
 	}

@@ -24,17 +24,17 @@ struct Module: public interface::Module
 		m_server(server),
 		interface::Module("client_data")
 	{
-		log_v(MODULE, "client_data construct");
+		log_d(MODULE, "client_data construct");
 	}
 
 	~Module()
 	{
-		log_v(MODULE, "client_data destruct");
+		log_d(MODULE, "client_data destruct");
 	}
 
 	void init()
 	{
-		log_v(MODULE, "client_data init");
+		log_d(MODULE, "client_data init");
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:module_loaded"));
 		m_server->sub_event(this, Event::t("core:module_unloaded"));

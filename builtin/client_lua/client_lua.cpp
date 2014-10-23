@@ -24,17 +24,17 @@ struct Module: public interface::Module
 		m_server(server),
 		interface::Module("client_lua")
 	{
-		log_v(MODULE, "client_lua construct");
+		log_d(MODULE, "client_lua construct");
 	}
 
 	~Module()
 	{
-		log_v(MODULE, "client_lua destruct");
+		log_d(MODULE, "client_lua destruct");
 	}
 
 	void init()
 	{
-		log_v(MODULE, "client_lua init");
+		log_d(MODULE, "client_lua init");
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:module_loaded"));
 		m_server->sub_event(this, Event::t("core:module_unloaded"));
