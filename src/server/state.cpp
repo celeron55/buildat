@@ -64,6 +64,8 @@ static sv_<ss_> list_includes(const ss_ &path, const sv_<ss_> &include_dirs)
 		f.while_any(" ");
 		ss_ quote = f.while_any("<\"");
 		ss_ include = f.next(quote == "<" ? ">" : "\"");
+		if(include == "")
+			continue;
 		bool found = false;
 		sv_<ss_> include_dirs_now = include_dirs;
 		if(quote == "\"")
