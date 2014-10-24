@@ -73,3 +73,7 @@ Buildat TODO
   building long pillars. Parts of the pillars will be invisible depending on
   where the camera is located. The situation will fix itself when a new client
   is started to the same scene.
+	- This affects physics in some way too, in such a way that when building a
+	  pillar and you start getting invisible nodes, after a few of them you
+	  can't jump anymore - but you can still climb them from the side, and build
+	  on them
