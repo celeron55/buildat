@@ -225,6 +225,7 @@ struct CState: public State, public interface::Server
 	sm_<ss_, interface::ModuleInfo> m_module_info; // Info of every seen module
 	sm_<ss_, ModuleContainer> m_modules; // Currently loaded modules
 	set_<ss_> m_unloads_requested;
+	sv_<interface::ModuleInfo> m_reloads_requested;
 	sm_<ss_, sp_<interface::FileWatch>> m_module_file_watches;
 	// Module modifications are accumulated here and core:module_modified events
 	// are fired every event loop based on this to lump multiple modifications
@@ -527,6 +528,12 @@ struct CState: public State, public interface::Server
 		interface::MutexScope ms(m_modules_mutex);
 		interface::MutexScope ms_magic(m_magic_mutex);
 
+		if(m_modules.find(info.name) != m_modules.end()){
+			log_w(MODULE, "Cannot load module %s from %s: Already loaded",
+					cs(info.name), cs(info.path));
+			return false;
+		}
+
 		log_i(MODULE, "Loading module %s from %s", cs(info.name), cs(info.path));
 
 		m_module_info[info.name] = info;
@@ -598,24 +605,14 @@ struct CState: public State, public interface::Server
 	void reload_module(const interface::ModuleInfo &info)
 	{
 		log_i(MODULE, "reload_module(%s)", cs(info.name));
-		{
-			interface::MutexScope ms(m_modules_mutex);
-			unload_module_u(info.name);
-		}
-		load_module(info);
-		// Send core::continue directly to module
-		{
-			interface::MutexScope ms(m_modules_mutex);
-			auto it = m_modules.find(info.name);
-			if(it == m_modules.end()){
-				log_w(MODULE, "reload_module: Module not found: %s",
-						cs(info.name));
+		interface::MutexScope ms(m_modules_mutex);
+		for(interface::ModuleInfo &info0 : m_reloads_requested){
+			if(info0.name == info.name){
+				info0 = info; // Update existing request
 				return;
 			}
-			ModuleContainer *mc = &it->second;
-			interface::MutexScope mc_ms(mc->mutex);
-			mc->module->event(Event::t("core:continue"), nullptr);
 		}
+		m_reloads_requested.push_back(info);
 	}
 
 	void reload_module(const ss_ &module_name)
@@ -646,31 +643,31 @@ struct CState: public State, public interface::Server
 			return;
 		}
 		ModuleContainer *mc = &it->second;
-		interface::MutexScope mc_ms(mc->mutex);
-		// Send core::unload directly to module
-		mc->module->event(Event::t("core:unload"), nullptr);
-		// Clear unload request
-		m_unloads_requested.erase(module_name);
-		// Delete subscriptions
 		{
-			interface::MutexScope ms(m_event_subs_mutex);
-			for(Event::Type type = 0; type < m_event_subs.size(); type++){
-				sv_<ModuleContainer*> &sublist = m_event_subs[type];
-				sv_<ModuleContainer*> new_sublist;
-				for(ModuleContainer *mc1 : sublist){
-					if(mc1 != mc)
-						new_sublist.push_back(mc1);
-					else
-						log_v(MODULE, "Removing %s subscription to event %zu",
-								cs(module_name), type);
+			interface::MutexScope mc_ms(mc->mutex);
+			// Send core::unload directly to module
+			mc->module->event(Event::t("core:unload"), nullptr);
+			// Delete subscriptions
+			{
+				interface::MutexScope ms(m_event_subs_mutex);
+				for(Event::Type type = 0; type < m_event_subs.size(); type++){
+					sv_<ModuleContainer*> &sublist = m_event_subs[type];
+					sv_<ModuleContainer*> new_sublist;
+					for(ModuleContainer *mc1 : sublist){
+						if(mc1 != mc)
+							new_sublist.push_back(mc1);
+						else
+							log_v(MODULE, "Removing %s subscription to event %zu",
+									cs(module_name), type);
+					}
+					sublist = new_sublist;
 				}
-				sublist = new_sublist;
 			}
-		}
-		// Delete module
-		{
-			interface::MutexScope ms_magic(m_magic_mutex);
-			delete mc->module;
+			// Delete module
+			{
+				interface::MutexScope ms_magic(m_magic_mutex);
+				delete mc->module;
+			}
 		}
 		m_modules.erase(module_name);
 		m_compiler->unload(module_name);
@@ -869,16 +866,46 @@ struct CState: public State, public interface::Server
 					mc->module->event(event.type, event.p.get());
 				}
 			}
-			interface::MutexScope ms(m_modules_mutex);
-			for(auto it = m_unloads_requested.begin();
-					it != m_unloads_requested.end();){
-				ss_ module_name = *it; // Copy
-				it++; // Increment before unload_module_u; it erases this
-				log_i("state", "Unloading %s as requested", cs(module_name));
-				unload_module_u(module_name);
-			}
-			m_unloads_requested.clear();
+			handle_unloads_and_reloads();
 		}
+	}
+
+	void handle_unloads_and_reloads()
+	{
+		interface::MutexScope ms(m_modules_mutex);
+		// Unload according to unload requests
+		for(auto it = m_unloads_requested.begin();
+				it != m_unloads_requested.end();){
+			ss_ module_name = *it; // Copy
+			it++;
+			log_i("state", "Unloading %s (unload requested)", cs(module_name));
+			m_unloads_requested.erase(module_name);
+			unload_module_u(module_name);
+		}
+		// Unload according to reload requests
+		for(const interface::ModuleInfo &info : m_reloads_requested){
+			log_i("state", "Unloading %s (reload requested)", cs(info.name));
+			unload_module_u(info.name);
+		}
+		// Load according to reload requests
+		for(const interface::ModuleInfo &info : m_reloads_requested){
+			log_i("state", "Loading %s (reload requested)", cs(info.name));
+			load_module(info);
+			// Send core::continue directly to module
+			{
+				interface::MutexScope ms(m_modules_mutex);
+				auto it = m_modules.find(info.name);
+				if(it == m_modules.end()){
+					log_w(MODULE, "reload_module: Module not found: %s",
+							cs(info.name));
+					return;
+				}
+				ModuleContainer *mc = &it->second;
+				interface::MutexScope mc_ms(mc->mutex);
+				mc->module->event(Event::t("core:continue"), nullptr);
+			}
+		}
+		m_reloads_requested.clear();
 	}
 
 	void add_socket_event(int fd, const Event::Type &event_type)
