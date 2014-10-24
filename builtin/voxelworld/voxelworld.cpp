@@ -65,6 +65,7 @@ struct ChunkBuffer
 			return false;
 		log_t(MODULE, "Unloading chunk " PV3I_FORMAT, PV3I_PARAMS(chunk_p));
 		volume.reset();
+		dirty = false;
 		return true;
 	}
 };
@@ -238,6 +239,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 	// (as a sorted array in descending order)
 	std::vector<Section*> m_sections_with_loaded_buffers;
 	size_t m_total_buffers_loaded = 0;
+	size_t m_total_buffers_dirty = 0;
 
 	// Set of nodes by node_id that need set_voxel_physics_boxes()
 	// (as a sorted array in descending node_id order)
@@ -292,6 +294,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 	{
 		// TODO: Load from disk or something
 
+		//pv::Region region(0, 0, 0, 0, 0, 0); // Use this for valgrind
 		//pv::Region region(-1, 0, -1, 1, 0, 1);
 		//pv::Region region(-1, -1, -1, 1, 1, 1);
 		//pv::Region region(-2, -1, -2, 2, 1, 2);
@@ -679,6 +682,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 				sections_with_loaded_buffers.size());
 		// Go through the swapped set, putting back sections that are still loaded
 		m_total_buffers_loaded = 0;
+		m_total_buffers_dirty = 0;
 		for(Section *section : sections_with_loaded_buffers){
 			size_t num_loaded = 0;
 			for(size_t i = 0; i < section->chunk_buffers.size(); i++){
@@ -687,6 +691,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 				if(!unloaded){
 					num_loaded++;
 					m_total_buffers_loaded++;
+					if(chunk_buffer.dirty)
+						m_total_buffers_dirty++;
 				}
 			}
 			if(num_loaded > 0)
@@ -851,12 +857,11 @@ struct Module: public interface::Module, public voxelworld::Interface
 				container_coord16(chunk_p, m_section_size_chunks);
 		Section *section = get_section(section_p);
 		if(section == nullptr){
-			if(!disable_warnings){
-				log_w(MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i: No section "
-						PV3I_FORMAT " for chunk " PV3I_FORMAT,
-						PV3I_PARAMS(p), v.data, PV3I_PARAMS(section_p),
-						PV3I_PARAMS(chunk_p));
-			}
+			log_(disable_warnings ? LOG_DEBUG : LOG_WARNING,
+					MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i: No section "
+					PV3I_FORMAT " for chunk " PV3I_FORMAT,
+					PV3I_PARAMS(p), v.data, PV3I_PARAMS(section_p),
+					PV3I_PARAMS(chunk_p));
 			return;
 		}
 
@@ -867,12 +872,11 @@ struct Module: public interface::Module, public voxelworld::Interface
 		ChunkBuffer &buf = section->get_buffer(chunk_p, m_server,
 				&m_total_buffers_loaded);
 		if(!buf.volume){
-			if(!disable_warnings){
-				log_w(MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i: Couldn't get "
-						"buffer volume for chunk " PV3I_FORMAT " in section "
-						PV3I_FORMAT, PV3I_PARAMS(p), v.data, PV3I_PARAMS(chunk_p),
-						PV3I_PARAMS(section_p));
-			}
+			log_(disable_warnings ? LOG_DEBUG : LOG_WARNING,
+					MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i: Couldn't get "
+					"buffer volume for chunk " PV3I_FORMAT " in section "
+					PV3I_FORMAT, PV3I_PARAMS(p), v.data, PV3I_PARAMS(chunk_p),
+					PV3I_PARAMS(section_p));
 			return;
 		}
 		pv::Vector3DInt32 voxel_p(
@@ -883,7 +887,10 @@ struct Module: public interface::Module, public voxelworld::Interface
 		buf.volume->setVoxelAt(voxel_p, v);
 
 		// Set buffer dirty
-		buf.dirty = true;
+		if(!buf.dirty){
+			buf.dirty = true;
+			m_total_buffers_dirty++;
+		}
 
 		// Set section buffer loaded flag
 		auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
@@ -972,6 +979,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 		// Reset dirty flag
 		chunk_buffer.dirty = false;
+		m_total_buffers_dirty--;
 
 		m_server->emit_event("voxelworld:node_volume_updated",
 				new NodeVolumeUpdated(node_id, true, chunk_p));
@@ -986,8 +994,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 	{
 		if(m_sections_with_loaded_buffers.empty())
 			return;
-		log_d(MODULE, "Committing %zu buffers in %zu sections",
-				m_total_buffers_loaded,
+		log_d(MODULE, "Committing %zu dirty buffers in %zu sections",
+				m_total_buffers_dirty,
 				m_sections_with_loaded_buffers.size());
 		for(Section *section : m_sections_with_loaded_buffers){
 			for(size_t i = 0; i < section->chunk_buffers.size(); i++){
@@ -1003,12 +1011,11 @@ struct Module: public interface::Module, public voxelworld::Interface
 				container_coord16(chunk_p, m_section_size_chunks);
 		Section *section = get_section(section_p);
 		if(section == nullptr){
-			if(!disable_warnings){
-				log_w(MODULE, "get_voxel() p=" PV3I_FORMAT ": No section "
-						PV3I_FORMAT " for chunk " PV3I_FORMAT,
-						PV3I_PARAMS(p), PV3I_PARAMS(section_p),
-						PV3I_PARAMS(chunk_p));
-			}
+			log_(disable_warnings ? LOG_DEBUG : LOG_WARNING,
+					MODULE, "get_voxel() p=" PV3I_FORMAT ": No section "
+					PV3I_FORMAT " for chunk " PV3I_FORMAT,
+					PV3I_PARAMS(p), PV3I_PARAMS(section_p),
+					PV3I_PARAMS(chunk_p));
 			return VoxelInstance(interface::VOXELTYPEID_UNDEFINED);
 		}
 
@@ -1019,12 +1026,11 @@ struct Module: public interface::Module, public voxelworld::Interface
 		ChunkBuffer &buf = section->get_buffer(chunk_p, m_server,
 				&m_total_buffers_loaded);
 		if(!buf.volume){
-			if(!disable_warnings){
-				log_w(MODULE, "get_voxel() p=" PV3I_FORMAT ": Couldn't get "
-						"buffer volume for chunk " PV3I_FORMAT " in section "
-						PV3I_FORMAT, PV3I_PARAMS(p), PV3I_PARAMS(chunk_p),
-						PV3I_PARAMS(section_p));
-			}
+			log_(disable_warnings ? LOG_DEBUG : LOG_WARNING,
+					MODULE, "get_voxel() p=" PV3I_FORMAT ": Couldn't get "
+					"buffer volume for chunk " PV3I_FORMAT " in section "
+					PV3I_FORMAT, PV3I_PARAMS(p), PV3I_PARAMS(chunk_p),
+					PV3I_PARAMS(section_p));
 			return VoxelInstance(interface::VOXELTYPEID_UNDEFINED);
 		}
 		pv::Vector3DInt32 voxel_p(
