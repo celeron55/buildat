@@ -130,11 +130,11 @@ function M.init()
 		on_ready() -- This is the last packet
 	end)
 
-	buildat.sub_packet("voxelworld:node_voxel_data_updated", function(data)
+	buildat.sub_packet("voxelworld:node_volume_updated", function(data)
 		local values = cereal.binary_input(data, {"object",
 			{"node_id", "int32_t"},
 		})
-		log:info("voxelworld:node_voxel_data_updated: "..dump(values))
+		log:info("voxelworld:node_volume_updated: "..dump(values))
 		node_volume_cache[values.node_id] = nil -- Clear cache
 		local node = replicate.main_scene:GetNode(values.node_id)
 		queue_modified_node_update(node)
