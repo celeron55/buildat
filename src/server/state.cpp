@@ -973,8 +973,8 @@ struct CState: public State, public interface::Server
 				break;
 			SocketState &s = it->second;
 			// Create and emit event
-			interface::Event event(s.event_type);
-			event.p.reset(new interface::SocketEvent(fd));
+			interface::Event event(s.event_type,
+					new interface::SocketEvent(fd));
 			emit_event(std::move(event));
 			return;
 		} while(0);

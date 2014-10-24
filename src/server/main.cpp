@@ -256,8 +256,8 @@ int main(int argc, char *argv[])
 					log_w("main", "Skipping %zuus", current_us - next_tick_us);
 					next_tick_us = current_us;
 				}
-				interface::Event event("core:tick");
-				event.p.reset(new interface::TickEvent(t_per_tick / 1e6));
+				interface::Event event("core:tick",
+						new interface::TickEvent(t_per_tick / 1e6));
 				state->emit_event(std::move(event));
 
 				state->access_scene([&](magic::Scene *scene)

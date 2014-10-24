@@ -33,12 +33,14 @@ namespace interface
 			virtual ~Private(){}
 		};
 		Type type;
-		up_<Private> p;
+		const sp_<Private> p;
 
 		Event():
 			type(0){}
 		Event(const Type &type):
 			type(type){}
+		Event(const Type &type, Private *p):
+			type(type), p(p){}
 		Event(const Type &type, up_<Private> p):
 			type(type), p(std::move(p)){}
 		Event(const ss_ &name):
