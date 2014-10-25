@@ -17,8 +17,6 @@
 #include "interface/thread_pool.h"
 #include <c55/string_util.h>
 #include <c55/filesys.h>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Variant.h>
 #include <Context.h>
 #include <Engine.h>
@@ -30,7 +28,6 @@
 #include <ResourceCache.h>
 #include <Octree.h>
 #include <Profiler.h>
-#pragma GCC diagnostic pop
 #include <iostream>
 #include <algorithm>
 #include <fstream>

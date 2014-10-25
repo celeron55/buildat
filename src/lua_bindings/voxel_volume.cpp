@@ -10,10 +10,7 @@
 #include <luabind/luabind.hpp>
 #include <luabind/adopt_policy.hpp>
 #include <luabind/pointer_traits.hpp>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <VectorBuffer.h>
-#pragma GCC diagnostic pop
 #define MODULE "lua_bindings"
 
 namespace magic = Urho3D;

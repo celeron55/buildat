@@ -7,13 +7,10 @@
 #include "interface/server.h"
 #include <c55/getopt.h>
 #include <c55/os.h>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Context.h>
 #include <Engine.h>
 #include <Scene.h>
 #include <Profiler.h>
-#pragma GCC diagnostic pop
 #ifdef _WIN32
 	#include "ports/windows_sockets.h"
 	#include "ports/windows_compat.h"

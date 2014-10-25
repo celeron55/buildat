@@ -2,13 +2,10 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/atlas.h"
 #include "core/log.h"
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Context.h>
 #include <ResourceCache.h>
 #include <Texture2D.h>
 #include <Graphics.h>
-#pragma GCC diagnostic pop
 #include <Image.h>
 #define MODULE "atlas"
 

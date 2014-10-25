@@ -8,11 +8,8 @@
 #include <luabind/pointer_traits.hpp>
 #include <luabind/adopt_policy.hpp>
 #include <luabind/raw_policy.hpp>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Scene.h>
 #include <Context.h>
-#pragma GCC diagnostic pop
 #define MODULE "lua_bindings"
 
 using interface::AtlasRegistry;

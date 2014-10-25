@@ -4,12 +4,9 @@
 #include "core/log.h"
 #include "client/app.h"
 #include <tolua++.h>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Context.h>
 #include <Scene.h>
 #include <Profiler.h>
-#pragma GCC diagnostic pop
 #define MODULE "lua_bindings"
 
 namespace magic = Urho3D;

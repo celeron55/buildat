@@ -6,8 +6,6 @@
 #include <PolyVoxCore/SimpleVolume.h>
 #include <PolyVoxCore/SurfaceMesh.h>
 #include <PolyVoxCore/CubicSurfaceExtractorWithNormals.h>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Scene.h>
 #include <Node.h>
 #include <StaticModel.h>
@@ -23,7 +21,6 @@
 #include <Texture2D.h> // Allows cast to Texture
 #include <CollisionShape.h>
 #include <RigidBody.h>
-#pragma GCC diagnostic pop
 #include <climits>
 #define MODULE "mesh"
 

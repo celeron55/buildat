@@ -12,13 +12,10 @@
 #include <c55/string_util.h>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Node.h>
 #include <Scene.h>
 #include <MemoryBuffer.h>
 #include <SmoothedTransform.h>
-#pragma GCC diagnostic pop
 #include <cstring>
 #include <fstream>
 #include <deque>

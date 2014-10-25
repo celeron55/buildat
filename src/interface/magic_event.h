@@ -3,12 +3,9 @@
 #pragma once
 #include "core/types.h"
 #include "interface/event.h"
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Object.h>
 #include <Variant.h>
 #include <StringHash.h>
-#pragma GCC diagnostic pop
 #include <functional>
 
 namespace interface

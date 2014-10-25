@@ -4,10 +4,7 @@
 #include "core/types.h"
 #include "interface/voxel.h"
 #include <PolyVoxCore/RawVolume.h>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <CustomGeometry.h>
-#pragma GCC diagnostic pop
 
 namespace Urho3D
 {

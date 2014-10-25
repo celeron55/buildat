@@ -6,10 +6,7 @@
 #include "client/state.h"
 #include "client/app.h"
 #include <c55/getopt.h>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Context.h>
-#pragma GCC diagnostic pop
 #include <signal.h>
 #define MODULE "__main"
 namespace magic = Urho3D;

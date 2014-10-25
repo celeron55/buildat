@@ -9,10 +9,7 @@
 #include <luabind/adopt_policy.hpp>
 #include <luabind/object.hpp>
 #include <tolua++.h>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Vector2.h>
-#pragma GCC diagnostic pop
 #define MODULE "lua_bindings"
 
 using namespace interface;

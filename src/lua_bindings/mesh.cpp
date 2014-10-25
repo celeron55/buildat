@@ -11,15 +11,12 @@
 #include <luabind/luabind.hpp>
 #include <luabind/adopt_policy.hpp>
 #include <luabind/pointer_traits.hpp>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Scene.h>
 #include <StaticModel.h>
 #include <Model.h>
 #include <CustomGeometry.h>
 #include <CollisionShape.h>
 #include <RigidBody.h>
-#pragma GCC diagnostic pop
 #define MODULE "lua_bindings"
 
 namespace magic = Urho3D;

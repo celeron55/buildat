@@ -12,8 +12,6 @@
 #include "interface/thread_pool.h"
 #include <c55/getopt.h>
 #include <c55/os.h>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Application.h>
 #include <Engine.h>
 #include <LuaScript.h>
@@ -36,7 +34,6 @@
 #include <PhysicsWorld.h>
 #include <DebugRenderer.h>
 #include <Profiler.h>
-#pragma GCC diagnostic pop
 extern "C" {
 	#include <lua.h>
 	#include <lauxlib.h>

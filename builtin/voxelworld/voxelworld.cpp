@@ -19,8 +19,6 @@
 #include <PolyVoxCore/RawVolume.h>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #include <Node.h>
 #include <Scene.h>
 #include <Model.h>
@@ -31,7 +29,6 @@
 #include <Light.h>
 #include <Geometry.h>
 #include <Zone.h>
-#pragma GCC diagnostic pop
 #include <deque>
 #include <algorithm>
 
