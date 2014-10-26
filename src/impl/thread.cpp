@@ -62,7 +62,7 @@ struct CThread: public Thread
 	}
 
 	// Interface
-	
+
 	void start()
 	{
 		interface::MutexScope ms(m_mutex);

@@ -282,7 +282,7 @@ struct Module: public interface::Module
 	{
 		/*main_context::access(m_server, [&](main_context::Interface *imc)
 		{
-			Scene *scene = imc->get_scene();
+		    Scene *scene = imc->get_scene();
 		    Node *n = scene->GetChild("Testbox");
 		    auto p = n->GetPosition();
 		    log_v(MODULE, "Testbox: (%f, %f, %f)", p.x_, p.y_, p.z_);

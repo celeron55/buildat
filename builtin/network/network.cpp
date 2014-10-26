@@ -331,7 +331,7 @@ void NetworkThread::run(interface::Thread *thread)
 		(void)ok; // Unused
 
 		network::access(m_module->m_server, [&](network::Interface *inetwork){
-			for(int fd : active_sockets){
+			for(int fd: active_sockets){
 				m_module->handle_active_socket(fd);
 			}
 		});

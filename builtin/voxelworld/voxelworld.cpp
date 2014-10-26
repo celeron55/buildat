@@ -421,7 +421,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 				const PODVector<unsigned char> &rawbuf = var.GetBuffer();
 				ss_ data((const char*)&rawbuf[0], rawbuf.Size());
 				up_<pv::RawVolume<VoxelInstance>> volume =
-						interface::deserialize_volume(data);
+					interface::deserialize_volume(data);
 				// Update collision shape
 				interface::mesh::set_voxel_physics_boxes(n, context, *volume,
 						m_voxel_reg.get());
@@ -832,7 +832,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 			const PODVector<unsigned char> &buf = var.GetBuffer();
 			ss_ data((const char*)&buf[0], buf.Size());
 			up_<pv::RawVolume<VoxelInstance>> volume =
-					interface::deserialize_volume(data);
+				interface::deserialize_volume(data);
 
 			pv::Vector3DInt32 voxel_p(
 						p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX(),
@@ -888,7 +888,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 		// Set in buffer
 		ChunkBuffer &buf = section->get_buffer(chunk_p, m_server,
-				&m_total_buffers_loaded);
+					&m_total_buffers_loaded);
 		if(!buf.volume){
 			log_(disable_warnings ? LOG_DEBUG : LOG_WARNING,
 					MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i: Couldn't get "
@@ -1042,7 +1042,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 		// Get from buffer
 		ChunkBuffer &buf = section->get_buffer(chunk_p, m_server,
-				&m_total_buffers_loaded);
+					&m_total_buffers_loaded);
 		if(!buf.volume){
 			log_(disable_warnings ? LOG_DEBUG : LOG_WARNING,
 					MODULE, "get_voxel() p=" PV3I_FORMAT ": Couldn't get "

@@ -70,3 +70,4 @@ ss_ hash_files(const sv_<ss_> &paths)
 }
 
 }
+// vim: set noet ts=4 sw=4:

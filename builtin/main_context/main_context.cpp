@@ -61,8 +61,8 @@ struct Module: public interface::Module, public main_context::Interface
 	magic::SharedPtr<magic::Context> m_context;
 	magic::SharedPtr<magic::Engine> m_engine;
 	magic::SharedPtr<magic::Scene> m_scene;
-	sm_<Event::Type, magic::SharedPtr<interface::MagicEventHandler>>
-			m_magic_event_handlers;
+	sm_<Event::Type, magic::SharedPtr<interface::MagicEventHandler>
+			> m_magic_event_handlers;
 
 	uint64_t profiler_last_print_us = 0;
 
@@ -152,7 +152,7 @@ struct Module: public interface::Module, public main_context::Interface
 		magic_cache->SetResourceRouter(
 				new BuildatResourceRouter(m_context, m_server));
 
-		sub_magic_event(magic::E_LOGMESSAGE, 
+		sub_magic_event(magic::E_LOGMESSAGE,
 				Event::t("urho3d_log_redirect:message"));
 		m_server->sub_event(this, Event::t("urho3d_log_redirect:message"));
 	}
@@ -224,7 +224,7 @@ struct Module: public interface::Module, public main_context::Interface
 	{
 		m_magic_event_handlers[buildat_event_type] =
 				new interface::MagicEventHandler(
-						m_context, m_server, event_type, buildat_event_type);
+				m_context, m_server, event_type, buildat_event_type);
 	}
 
 	void* get_interface()

@@ -11,8 +11,8 @@ static inline void usleep(unsigned int us)
 // Prefer using mingw-w64 with pthreads!
 #ifdef __WINPTHREADS_VERSION
 
-#include <pthread.h>
-#include <semaphore.h>
+	#include <pthread.h>
+	#include <semaphore.h>
 
 #else
 

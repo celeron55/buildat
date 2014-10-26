@@ -338,7 +338,7 @@ void FileWatchThread::run(interface::Thread *thread)
 		client_file::access(m_module->m_server,
 				[&](client_file::Interface *iclient_file)
 		{
-			for(int fd : active_sockets){
+			for(int fd: active_sockets){
 				m_module->handle_active_socket(fd);
 			}
 		});

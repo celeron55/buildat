@@ -29,7 +29,7 @@ namespace urho3d_log_redirect
 
 		void init()
 		{
-			m_server->sub_magic_event(this, magic::E_LOGMESSAGE, 
+			m_server->sub_magic_event(this, magic::E_LOGMESSAGE,
 					Event::t("urho3d_log_redirect:message"));
 		}
 
@@ -42,7 +42,8 @@ namespace urho3d_log_redirect
 		void on_message(const interface::MagicEvent &event)
 		{
 			int magic_level = event.magic_data.Find("Level")->second_.GetInt();
-			ss_ message = event.magic_data.Find("Message")->second_.GetString().CString();
+			ss_ message =
+					event.magic_data.Find("Message")->second_.GetString().CString();
 			int core_level = LOG_ERROR;
 			if(magic_level == magic::LOG_DEBUG)
 				core_level = LOG_DEBUG;
@@ -56,3 +57,4 @@ namespace urho3d_log_redirect
 		}
 	};
 } // urho3d_log_redirect
+// vim: set noet ts=4 sw=4:

@@ -172,7 +172,7 @@ int main(int argc, char *argv[])
 					next_tick_us = current_us;
 				}
 				interface::Event event("core:tick",
-						new interface::TickEvent(t_per_tick / 1e6));
+					new interface::TickEvent(t_per_tick / 1e6));
 				state->emit_event(std::move(event));
 			}
 

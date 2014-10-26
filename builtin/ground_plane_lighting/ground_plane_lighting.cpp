@@ -283,7 +283,8 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 		{
 			interface::VoxelRegistry *voxel_reg = ivoxelworld->get_voxel_reg();
 			//const auto &chunk_size_voxels = ivoxelworld->get_chunk_size_voxels();
-			pv::Region chunk_region = ivoxelworld->get_chunk_region_voxels(chunk_p);
+			pv::Region chunk_region =
+				ivoxelworld->get_chunk_region_voxels(chunk_p);
 
 			ground_plane_lighting::access(m_server,
 					[&](ground_plane_lighting::Interface *igpl)
