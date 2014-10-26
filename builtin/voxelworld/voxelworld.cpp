@@ -435,8 +435,10 @@ struct Module: public interface::Module, public voxelworld::Interface
 	{
 		int peer = event.recipient;
 		network::access(m_server, [&](network::Interface *inetwork){
+			// Load the module by calling require() on it so that it can start
+			// receiving data
 			inetwork->send(peer, "core:run_script",
-					"require(\"buildat/module/voxelworld\").init()");
+					"require(\"buildat/module/voxelworld\")");
 		});
 		std::ostringstream os(std::ios::binary);
 		{

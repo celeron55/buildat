@@ -7,6 +7,7 @@ local replicate = require("buildat/extension/replicate")
 local cereal = require("buildat/extension/cereal")
 local dump = buildat.dump
 local M = {}
+log:info("voxelworld loading")
 
 local UPDATE_TIME_FRACTION = 0.10
 
@@ -70,9 +71,7 @@ function on_ready()
 	on_ready_callbacks = nil
 end
 
-function M.init()
-	log:info("voxelworld.init()")
-
+local function sub_events()
 	local node_update_queue = buildat.SpatialUpdateQueue()
 
 	local function queue_initial_node_update(node)
@@ -370,6 +369,9 @@ function M.sub_geometry_update(cb)
 end
 
 function M.get_chunk_position(voxel_p)
+	if M.chunk_size_voxels == nil then
+		error("Voxelworld not yet initialized; chunk size not known")
+	end
 	local p = buildat.Vector3(voxel_p):round()
 	local chunk_p = p:div_components(M.chunk_size_voxels):floor()
 	local in_chunk_p = p - M.chunk_size_voxels:mul_components(chunk_p)
@@ -517,6 +519,8 @@ function send_get_section(p)
 	--log:info(dump(buildat.bytes(data)))
 	buildat.send_packet("voxelworld:get_section", data)
 end
+
+sub_events()
 
 return M
 -- vim: set noet ts=4 sw=4:
