@@ -181,6 +181,8 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 				cg, context, temp_geoms, atlas_reg.get());
 		cg->SetOccluder(true);
 		cg->SetCastShadows(true);
+		// Octree update: Trigger CustomGeometry::OnWorldBoundingBoxUpdate()
+		cg->SetZoneMask(magic::DEFAULT_ZONEMASK);
 		return true;
 	}
 };
@@ -237,6 +239,8 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 			cg->SetCastShadows(true);
 		else
 			cg->SetCastShadows(false);
+		// Octree update: Trigger CustomGeometry::OnWorldBoundingBoxUpdate()
+		cg->SetZoneMask(magic::DEFAULT_ZONEMASK);
 		return true;
 	}
 };

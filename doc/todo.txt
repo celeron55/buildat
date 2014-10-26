@@ -69,11 +69,3 @@ Buildat TODO
 - Make some kind of an ace of spades clone (or less of a clone); something that
   requires the game to control the creation and deletion of the world anyway,
   and implement the required interfaces
-- There is some kind of a bug in node visibility checking which can be caused by
-  building long pillars. Parts of the pillars will be invisible depending on
-  where the camera is located. The situation will fix itself when a new client
-  is started to the same scene.
-	- This affects physics in some way too, in such a way that when building a
-	  pillar and you start getting invisible nodes, after a few of them you
-	  can't jump anymore - but you can still climb them from the side, and build
-	  on them
