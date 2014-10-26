@@ -52,6 +52,7 @@ struct CVoxelRegistry: public VoxelRegistry
 	sv_<VoxelDefinition> m_defs;
 	sv_<CachedVoxelDefinition> m_cached_defs;
 	sm_<VoxelName, VoxelTypeId> m_name_to_id;
+	bool m_is_dirty = false;
 
 	CVoxelRegistry()
 	{
@@ -91,6 +92,7 @@ struct CVoxelRegistry: public VoxelRegistry
 		m_name_to_id[def.name] = id;
 		log_v(MODULE, "CVoxelRegistyr::add_voxel(): Added id=%i name=%s",
 				id, cs(def.name.dump()));
+		m_is_dirty = true;
 		return id;
 	}
 
@@ -142,6 +144,16 @@ struct CVoxelRegistry: public VoxelRegistry
 			AtlasRegistry *atlas_reg)
 	{
 		return get_cached(v.get_id(), atlas_reg);
+	}
+
+	bool is_dirty()
+	{
+		return m_is_dirty;
+	}
+
+	void clear_dirty()
+	{
+		m_is_dirty = false;
 	}
 
 	void update_cache_basic(CachedVoxelDefinition &cache,

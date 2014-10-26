@@ -98,12 +98,13 @@ namespace interface
 		virtual const CachedVoxelDefinition* get_cached(const VoxelInstance &v,
 				AtlasRegistry *atlas_reg = nullptr) = 0;
 
+		virtual bool is_dirty() = 0;
+		virtual void clear_dirty() = 0;
+
 		void serialize(std::ostream &os);
 		void deserialize(std::istream &is);
 		ss_  serialize();
 		void deserialize(const ss_ &s);
-
-		// TODO: Ability to track changes (just some kind of set_dirty()?)
 	};
 
 	VoxelRegistry* createVoxelRegistry();
