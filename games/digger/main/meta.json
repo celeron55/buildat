@@ -5,6 +5,7 @@
 		{"module": "client_data"},
 		{"module": "replicate"},
 		{"module": "voxelworld"},
-		{"module": "ground_plane_lighting"}
+		{"module": "ground_plane_lighting"},
+		{"module": "worldgen"}
 	]
 }
