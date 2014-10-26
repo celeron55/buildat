@@ -429,6 +429,23 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 		// Unload stuff if needed
 		maintain_maximum_buffer_limit();
+
+		// Send updated voxel registry if needed
+		// NOTE: This probably really only supports additions
+		if(m_voxel_reg->is_dirty()){
+			m_voxel_reg->clear_dirty();
+			log_v(MODULE, "Sending updated voxel registry to peers");
+
+			ss_ voxel_reg_data = m_voxel_reg->serialize();
+
+			network::access(m_server, [&](network::Interface *inetwork){
+				sv_<network::PeerInfo::Id> peers = inetwork->list_peers();
+				for(auto &peer: peers){
+					inetwork->send(peer, "voxelworld:voxel_registry",
+							voxel_reg_data);
+				}
+			});
+		}
 	}
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
