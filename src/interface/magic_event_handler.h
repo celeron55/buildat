@@ -9,7 +9,7 @@
 #include <Node.h>
 #include <Component.h>
 
-namespace server
+namespace interface
 {
 	using interface::Event;
 	namespace magic = Urho3D;

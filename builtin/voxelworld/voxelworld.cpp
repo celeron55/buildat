@@ -4,6 +4,7 @@
 #include "network/api.h"
 #include "client_file/api.h"
 #include "replicate/api.h"
+#include "main_context/api.h"
 #include "core/log.h"
 #include "interface/module.h"
 #include "interface/server.h"
@@ -164,8 +165,10 @@ ChunkBuffer& Section::get_buffer(const pv::Vector3DInt32 &chunk_p,
 	}
 	log_t(MODULE, "Loading chunk " PV3I_FORMAT " (node %i)",
 			PV3I_PARAMS(chunk_p), node_id);
-	server->access_scene([&](Scene *scene)
+
+	main_context::access(server, [&](main_context::Interface *imc)
 	{
+		Scene *scene = imc->get_scene();
 		Node *n = scene->GetNode(node_id);
 		if(!n){
 			log_w("voxelworld",
@@ -265,9 +268,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 		m_server->sub_event(this, Event::t(
 					"network:packet_received/voxelworld:get_section"));
 
-		m_server->access_scene([&](Scene *scene)
-		{
-			Context *context = scene->GetContext();
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			Context *context = imc->get_context();
 
 			m_atlas_reg.reset(interface::createAtlasRegistry(context));
 		});
@@ -335,8 +337,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 		commit();
 
 		// Remove everything managed by us from the scene
-		m_server->access_scene([&](Scene *scene)
-		{
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			Scene *scene = imc->get_scene();
 			size_t progress = 0;
 			for(auto &sector_pair: m_sections){
 				log_v(MODULE, "Unloading nodes... %i%%",
@@ -397,9 +399,9 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 	void on_tick(const interface::TickEvent &event)
 	{
-		m_server->access_scene([&](Scene *scene)
-		{
-			Context *context = scene->GetContext();
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			Scene *scene = imc->get_scene();
+			Context *context = imc->get_context();
 
 			// Update node collision boxes
 			if(!m_nodes_needing_physics_update.empty()){
@@ -613,8 +615,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 	void create_section(Section &section)
 	{
-		m_server->access_scene([&](Scene *scene)
-		{
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			Scene *scene = imc->get_scene();
 			auto lc = section.contained_chunks.getLowerCorner();
 			auto uc = section.contained_chunks.getUpperCorner();
 			for(int z = 0; z <= uc.getZ() - lc.getZ(); z++){
@@ -682,7 +684,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 	}
 
 	void run_commit_hooks_in_scene(
-			const pv::Vector3DInt32 &chunk_p, magic::Node *n)
+			const pv::Vector3DInt32 &chunk_p, Node *n)
 	{
 		for(up_<CommitHook> &hook : m_commit_hooks)
 			hook->in_scene(this, chunk_p, n);
@@ -823,8 +825,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 		// TODO: Commit only the current chunk
 		commit();
 
-		m_server->access_scene([&](Scene *scene)
-		{
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			Scene *scene = imc->get_scene();
 			Node *n = scene->GetNode(node_id);
 			const Variant &var = n->GetVar(StringHash("buildat_voxel_data"));
 			const PODVector<unsigned char> &buf = var.GetBuffer();
@@ -945,8 +947,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 		ss_ new_data = interface::serialize_volume_compressed(
 				*chunk_buffer.volume);
 
-		m_server->access_scene([&](Scene *scene)
-		{
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			Scene *scene = imc->get_scene();
 			Context *context = scene->GetContext();
 
 			Node *n = scene->GetNode(node_id);

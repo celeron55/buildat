@@ -33,7 +33,7 @@ namespace interface
 			virtual ~Private(){}
 		};
 		Type type;
-		const sp_<Private> p;
+		sp_<const Private> p;
 
 		Event():
 			type(0){}

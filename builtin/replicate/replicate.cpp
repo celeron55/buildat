@@ -1,8 +1,9 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "replicate/api.h"
-#include "core/log.h"
+#include "main_context/api.h"
 #include "network/api.h"
+#include "core/log.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
@@ -69,7 +70,8 @@ struct Module: public interface::Module, public replicate::Interface
 	~Module()
 	{
 		log_d(MODULE, "replicate destruct");
-		m_server->access_scene([&](magic::Scene *scene){
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			magic::Scene *scene = imc->get_scene();
 			for(auto &pair: m_scene_states){
 				magic::SceneReplicationState &scene_state = pair.second;
 				scene->CleanupConnection((magic::Connection*)&scene_state);
@@ -124,7 +126,8 @@ struct Module: public interface::Module, public replicate::Interface
 		if(it == m_scene_states.end())
 			return;
 		magic::SceneReplicationState &scene_state = it->second;
-		m_server->access_scene([&](magic::Scene *scene){
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			magic::Scene *scene = imc->get_scene();
 			// NOTE: We use pointers to SceneReplicationStates as Connection
 			//       pointers in other replication states in order to
 			//       scene->CleanupConnection() without an actual Connection object
@@ -152,7 +155,8 @@ struct Module: public interface::Module, public replicate::Interface
 		network::access(m_server, [&](network::Interface *inetwork){
 			peers = inetwork->list_peers();
 		});
-		m_server->access_scene([&](magic::Scene *scene){
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			magic::Scene *scene = imc->get_scene();
 			// For a reference implementation of this kind of network
 			// synchronization, see Urho3D's Network/Connection.cpp
 
@@ -485,7 +489,8 @@ struct Module: public interface::Module, public replicate::Interface
 		network::access(m_server, [&](network::Interface *inetwork){
 			peers = inetwork->list_peers();
 		});
-		m_server->access_scene([&](magic::Scene *scene){
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			magic::Scene *scene = imc->get_scene();
 			Node *n = scene->GetNode(node_id);
 			n->PrepareNetworkUpdate();
 			for(auto &peer: peers){

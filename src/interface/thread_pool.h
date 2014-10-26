@@ -18,19 +18,6 @@ namespace interface
 			virtual bool post() = 0;
 		};
 
-		/*struct Thread
-		{
-		    virtual ~Thread(){}
-		    virtual void add_task(up_<Task> task) = 0;
-		    virtual void start() = 0;
-		    virtual void request_stop() = 0;
-		    virtual void join() = 0;
-		    virtual bool is_running() = 0;
-		    virtual void main() = 0; // Allow task to do stuff in main thread
-		};
-
-		Thread* createThread();*/
-
 		struct ThreadPool
 		{
 			virtual ~ThreadPool(){}

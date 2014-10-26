@@ -14,15 +14,8 @@ namespace interface
 	}
 }
 
-namespace Urho3D
-{
-	class Scene;
-}
-
 namespace server
 {
-	namespace magic = Urho3D;
-
 	struct ServerShutdownRequest: public Exception {
 		ss_ msg;
 		ServerShutdownRequest(const ss_ &msg): Exception(msg){}
@@ -46,11 +39,8 @@ namespace server
 		virtual void sub_event(struct interface::Module *module,
 				const interface::Event::Type &type) = 0;
 		virtual void emit_event(interface::Event event) = 0;
-		virtual void access_scene(std::function<void(magic::Scene*)> cb) = 0;
 
 		virtual void handle_events() = 0;
-		virtual sv_<int> get_sockets() = 0;
-		virtual void emit_socket_event(int fd) = 0;
 
 		// Add resource file path (to make a mirror of the client)
 		virtual void add_file_path(const ss_ &name, const ss_ &path) = 0;

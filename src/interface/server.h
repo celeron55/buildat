@@ -11,12 +11,18 @@ namespace Urho3D
 	class StringHash;
 }
 
+namespace server
+{
+	struct Config;
+}
+
 namespace interface
 {
 	namespace magic = Urho3D;
 
 	struct ModuleInfo;
 	struct Module;
+	typedef server::Config ServerConfig;
 
 	namespace thread_pool {
 		struct ThreadPool;
@@ -25,11 +31,6 @@ namespace interface
 	struct TickEvent: public interface::Event::Private {
 		float dtime;
 		TickEvent(float dtime): dtime(dtime){}
-	};
-
-	struct SocketEvent: public interface::Event::Private {
-		int fd;
-		SocketEvent(int fd): fd(fd){}
 	};
 
 	struct ModuleModifiedEvent: public interface::Event::Private {
@@ -74,19 +75,15 @@ namespace interface
 			emit_event(std::move(Event(type, up_<Event::Private>(p))));
 		}
 
-		virtual void access_scene(std::function<void(magic::Scene*)> cb) = 0;
-		virtual void sub_magic_event(struct interface::Module *module,
-				const magic::StringHash &event_type,
-				const Event::Type &buildat_event_type) = 0;
-
-		virtual void add_socket_event(int fd, const Event::Type &event_type) = 0;
-		virtual void remove_socket_event(int fd) = 0;
-
 		virtual void tmp_store_data(const ss_ &name, const ss_ &data) = 0;
 		virtual ss_ tmp_restore_data(const ss_ &name) = 0;
 
 		// Add resource file path (to make a mirror of the client)
 		virtual void add_file_path(const ss_ &name, const ss_ &path) = 0;
+		// Returns "" if not found
+		virtual ss_ get_file_path(const ss_ &name) = 0;
+
+		virtual const ServerConfig& get_config() = 0;
 
 		virtual void access_thread_pool(std::function<void(
 					interface::thread_pool::ThreadPool*pool)> cb) = 0;

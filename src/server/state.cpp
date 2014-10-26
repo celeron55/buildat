@@ -5,32 +5,21 @@
 #include "rccpp.h"
 #include "rccpp_util.h"
 #include "config.h"
-#include "magic_event_handler.h"
-#include "urho3d_log_redirect.h"
 #include "interface/module.h"
 #include "interface/module_info.h"
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/file_watch.h"
 #include "interface/fs.h"
-#include "interface/magic_event.h"
 #include "interface/sha1.h"
 #include "interface/mutex.h"
 #include "interface/thread_pool.h"
-#include <Variant.h>
-#include <Context.h>
-#include <Engine.h>
-#include <Scene.h>
-#include <SceneEvents.h>
-#include <Component.h>
-#include <ReplicationState.h>
-#include <PhysicsWorld.h>
-#include <ResourceCache.h>
-#include <Octree.h>
-#include <Profiler.h>
+#include "interface/thread.h"
+#include "interface/semaphore.h"
 #include <iostream>
 #include <algorithm>
 #include <fstream>
+#include <deque>
 #define MODULE "__state"
 
 #ifdef _WIN32
@@ -45,44 +34,114 @@ extern bool g_sigint_received;
 namespace server {
 
 using interface::Event;
-namespace magic = Urho3D;
 
-class BuildatResourceRouter: public magic::ResourceRouter
+struct ModuleContainer;
+
+struct ModuleThread: public interface::ThreadedThing
 {
-	OBJECT(BuildatResourceRouter);
+	ModuleContainer *mc = nullptr;
 
-	server::State *m_server;
-public:
-	BuildatResourceRouter(magic::Context *context, server::State *server):
-		magic::ResourceRouter(context),
-		m_server(server)
+	ModuleThread(ModuleContainer *mc):
+		mc(mc)
 	{}
-	void Route(magic::String &name, magic::ResourceRequest requestType)
-	{
-		ss_ path = m_server->get_file_path(name.CString());
-		if(path == ""){
-			log_v(MODULE, "Resource route access: %s (assuming local file)",
-					name.CString());
-			return;
+
+	void run(interface::Thread *thread);
+};
+
+struct ModuleContainer
+{
+	up_<interface::Module> module;
+	interface::ModuleInfo info;
+	interface::Mutex mutex; // Protects each of the former variables
+	up_<interface::Thread> thread;
+
+	std::deque<Event> event_queue; // Push back, pop front
+	interface::Mutex event_queue_mutex;
+	interface::Semaphore event_queue_sem; // Counts queued events
+
+	ModuleContainer(interface::Module *module = NULL,
+			const interface::ModuleInfo &info = interface::ModuleInfo()):
+		module(module),
+		info(info)
+	{}
+	~ModuleContainer(){
+		log_t(MODULE, "ModuleContainer[%s]: Destructing", cs(info.name));
+		stop_and_delete_module();
+	}
+	void stop_and_delete_module(){
+		if(thread){
+			log_t(MODULE, "ModuleContainer[%s]: Asking thread to exit",
+					cs(info.name));
+			thread->request_stop();
+			event_queue_sem.post(); // Wake up thread so it can exit
+			log_t(MODULE, "ModuleContainer[%s]: Asked thread to exit; waiting",
+					cs(info.name));
+			thread->join();
+			thread.reset();
+			log_t(MODULE, "ModuleContainer[%s]: Thread exited", cs(info.name));
+		} else {
+			log_t(MODULE, "ModuleContainer[%s]: No thread", cs(info.name));
 		}
-		log_v(MODULE, "Resource route access: %s -> %s",
-				name.CString(), cs(path));
-		name = path.c_str();
+		// Module should have been deleted by the thread. In case the thread
+		// failed, delete it here.
+		module.reset();
+	}
+	void push_event(const Event &event){
+		interface::MutexScope ms(event_queue_mutex);
+		event_queue.push_back(event);
+		event_queue_sem.post();
+	}
+	void emit_event_sync(const Event &event){
+		interface::MutexScope ms(mutex);
+		module->event(event.type, event.p.get());
 	}
 };
 
+void ModuleThread::run(interface::Thread *thread)
+{
+	for(;;){
+		// Wait for an event
+		mc->event_queue_sem.wait();
+		// Check if should stop
+		if(thread->stop_requested())
+			break;
+		// Grab an event from the queue
+		Event event;
+		{
+			interface::MutexScope ms(mc->event_queue_mutex);
+			if(mc->event_queue.empty())
+				continue;
+			event = mc->event_queue.front();
+			mc->event_queue.pop_front();
+		}
+		// Handle the event
+		interface::MutexScope ms(mc->mutex);
+		if(!mc->module){
+			log_w(MODULE, "ModuleContainer[%s]: Module is null; cannot"
+					" handle event", cs(mc->info.name));
+			continue;
+		}
+		try {
+			mc->module->event(event.type, event.p.get());
+		} catch(std::exception &e){
+			log_w(MODULE, "module->event() failed: %s", e.what());
+		}
+	}
+	// Delete module in this thread. This is important in case the destruction
+	// of some objects in the module is required to be done in the same thread
+	// as they were created in.
+	// It is also important to delete the module outside of mc->mutex, as doing
+	// it in the locked state will only cause deadlocks.
+	up_<interface::Module> module_moved;
+	{
+		interface::MutexScope ms(mc->mutex);
+		module_moved = std::move(mc->module);
+	}
+	module_moved.reset();
+}
+
 struct CState: public State, public interface::Server
 {
-	struct ModuleContainer {
-		interface::Mutex mutex;
-		interface::Module *module;
-		interface::ModuleInfo info;
-
-		ModuleContainer(interface::Module *module = NULL,
-				const interface::ModuleInfo &info = interface::ModuleInfo()):
-			module(module), info(info){}
-	};
-
 	struct SocketState {
 		int fd = 0;
 		Event::Type event_type;
@@ -95,18 +154,8 @@ struct CState: public State, public interface::Server
 	up_<rccpp::Compiler> m_compiler;
 	ss_ m_modules_path;
 
-	magic::SharedPtr<magic::Context> m_magic_context;
-	magic::SharedPtr<magic::Engine> m_magic_engine;
-	magic::SharedPtr<magic::Scene> m_magic_scene;
-	sm_<Event::Type, magic::SharedPtr<MagicEventHandler>> m_magic_event_handlers;
-	// NOTE: m_magic_mutex must be locked when constructing or destructing
-	//       modules. In every other case modules must use access_scene().
-	// NOTE: If not locked, creating or destructing Urho3D Objects can cause a
-	//       crash.
-	interface::Mutex m_magic_mutex; // Lock for all of Urho3D
-
 	sm_<ss_, interface::ModuleInfo> m_module_info; // Info of every seen module
-	sm_<ss_, ModuleContainer> m_modules; // Currently loaded modules
+	sm_<ss_, sp_<ModuleContainer>> m_modules; // Currently loaded modules
 	set_<ss_> m_unloads_requested;
 	sv_<interface::ModuleInfo> m_reloads_requested;
 	sm_<ss_, sp_<interface::FileWatch>> m_module_file_watches;
@@ -117,16 +166,10 @@ struct CState: public State, public interface::Server
 	// TODO: Handle properly in reloads (unload by popping from top, then reload
 	//       everything until top)
 	sv_<ss_> m_module_load_order;
+	sv_<sv_<wp_<ModuleContainer>>> m_event_subs;
+	// NOTE: You can make a copy of an sp_<ModuleContainer> and unlock this
+	//       mutex for processing the module asynchronously (just lock mc->mutex)
 	interface::Mutex m_modules_mutex;
-
-	sv_<Event> m_event_queue;
-	interface::Mutex m_event_queue_mutex;
-
-	sv_<sv_<ModuleContainer* >> m_event_subs;
-	interface::Mutex m_event_subs_mutex;
-
-	sm_<int, SocketState> m_sockets;
-	interface::Mutex m_sockets_mutex;
 
 	sm_<ss_, ss_> m_tmp_data;
 	interface::Mutex m_tmp_data_mutex;
@@ -175,74 +218,32 @@ struct CState: public State, public interface::Server
 		m_compiler->libraries.push_back("-lUrho3D");
 		m_compiler->include_directories.push_back(
 				g_server_config.urho3d_path+"/Source/ThirdParty/Bullet/src");
-
-		// Initialize Urho3D
-
-		m_magic_context = new magic::Context();
-		m_magic_engine = new magic::Engine(m_magic_context);
-
-		// Load hardcoded log redirection module
-		{
-			interface::Module *m = new urho3d_log_redirect::Module(this);
-			load_module_direct_u(m, "urho3d_log_redirect");
-
-			// Disable timestamps in Urho3D log message events
-			magic::Log *magic_log = m_magic_context->GetSubsystem<magic::Log>();
-			magic_log->SetTimeStamp(false);
-		}
-
-		sv_<ss_> resource_paths = {
-			g_server_config.urho3d_path+"/Bin/CoreData",
-			g_server_config.urho3d_path+"/Bin/Data",
-		};
-		auto *fs = interface::getGlobalFilesystem();
-		ss_ resource_paths_s;
-		for(const ss_ &path : resource_paths){
-			if(!resource_paths_s.empty())
-				resource_paths_s += ";";
-			resource_paths_s += fs->get_absolute_path(path);
-		}
-
-		magic::VariantMap params;
-		params["ResourcePaths"] = resource_paths_s.c_str();
-		params["Headless"] = true;
-		params["LogName"] = ""; // Don't log to file
-		params["LogQuiet"] = true; // Don't log to stdout
-		if(!m_magic_engine->Initialize(params))
-			throw Exception("Urho3D engine initialization failed");
-
-		m_magic_scene = new magic::Scene(m_magic_context);
-
-		auto *physics = m_magic_scene->CreateComponent<magic::PhysicsWorld>(
-				magic::LOCAL);
-		physics->SetFps(30);
-		physics->SetInterpolation(false);
-
-		// Useless but gets rid of warnings like
-		// "ERROR: No Octree component in scene, drawable will not render"
-		m_magic_scene->CreateComponent<magic::Octree>(magic::LOCAL);
-
-		magic::ResourceCache *magic_cache =
-				m_magic_context->GetSubsystem<magic::ResourceCache>();
-		//magic_cache->SetAutoReloadResources(true);
-		magic_cache->SetResourceRouter(
-				new BuildatResourceRouter(m_magic_context, this));
 	}
 	~CState()
 	{
-		interface::MutexScope ms(m_modules_mutex);
-		interface::MutexScope ms_magic(m_magic_mutex);
 		// Unload modules in reverse load order to make things work more
 		// predictably
-		for(auto name_it = m_module_load_order.rbegin();
-				name_it != m_module_load_order.rend(); ++name_it){
-			auto it2 = m_modules.find(*name_it);
-			if(it2 == m_modules.end())
-				continue;
-			ModuleContainer &mc = it2->second;
-			// Don't lock; it would only cause deadlocks
-			delete mc.module;
-			mc.module = nullptr;
+		sv_<sp_<ModuleContainer>> mcs;
+		{
+			// Don't have this locked when handling modules because it causes
+			// deadlocks
+			interface::MutexScope ms(m_modules_mutex);
+			for(auto name_it = m_module_load_order.rbegin();
+					name_it != m_module_load_order.rend(); ++name_it){
+				auto it2 = m_modules.find(*name_it);
+				if(it2 == m_modules.end())
+					continue;
+				sp_<ModuleContainer> &mc = it2->second;
+				mcs.push_back(mc);
+			}
+		}
+		for(sp_<ModuleContainer> &mc : mcs){
+			log_v(MODULE, "Destructing module %s", cs(mc->info.name));
+			mc->stop_and_delete_module();
+			// Remove our reference to the module container.
+			// This stops the module's main thread.
+			// (This is a shared pointer)
+			mc.reset();
 		}
 	}
 
@@ -270,7 +271,6 @@ struct CState: public State, public interface::Server
 		return m_shutdown_requested;
 	}
 
-	// Call with m_modules_mutex and m_magic_mutex locked
 	interface::Module* build_module_u(const interface::ModuleInfo &info)
 	{
 		ss_ init_cpp_path = info.path+"/"+info.name+".cpp";
@@ -387,7 +387,6 @@ struct CState: public State, public interface::Server
 	void load_module_direct_u(interface::Module *m, const ss_ &name)
 	{
 		interface::MutexScope ms(m_modules_mutex);
-		interface::MutexScope ms_magic(m_magic_mutex);
 
 		interface::ModuleInfo info;
 		info.name = name;
@@ -397,19 +396,21 @@ struct CState: public State, public interface::Server
 
 		m_module_info[info.name] = info;
 
-		m_modules[info.name] = ModuleContainer(m, info);
+		m_modules[info.name] = sp_<ModuleContainer>(
+				new ModuleContainer(m, info));
 		m_module_load_order.push_back(info.name);
 
 		// Call init()
-		ModuleContainer &mc = m_modules[info.name];
-		interface::MutexScope ms2(mc.mutex);
-		mc.module->init();
+		sp_<ModuleContainer> mc = m_modules[info.name];
+		interface::MutexScope ms2(mc->mutex);
+		mc->module->init();
+		mc->thread.reset(interface::createThread(new ModuleThread(mc.get())));
+		mc->thread->start();
 	}
 
 	bool load_module(const interface::ModuleInfo &info)
 	{
 		interface::MutexScope ms(m_modules_mutex);
-		interface::MutexScope ms_magic(m_magic_mutex);
 
 		if(m_modules.find(info.name) != m_modules.end()){
 			log_w(MODULE, "Cannot load module %s from %s: Already loaded",
@@ -431,15 +432,18 @@ struct CState: public State, public interface::Server
 				return false;
 			}
 		}
-		m_modules[info.name] = ModuleContainer(m, info);
+		m_modules[info.name] = sp_<ModuleContainer>(
+				new ModuleContainer(m, info));
 		m_module_load_order.push_back(info.name);
 
 		// Call init()
 
 		if(m){
-			ModuleContainer &mc = m_modules[info.name];
-			interface::MutexScope ms2(mc.mutex);
-			mc.module->init();
+			sp_<ModuleContainer> mc = m_modules[info.name];
+			interface::MutexScope ms2(mc->mutex);
+			mc->module->init();
+			mc->thread.reset(interface::createThread(new ModuleThread(mc.get())));
+			mc->thread->start();
 		}
 
 		emit_event(Event("core:module_loaded",
@@ -460,16 +464,16 @@ struct CState: public State, public interface::Server
 			return;
 		}
 
-		// Allow loader to load other modules
-		emit_event(Event("core:load_modules"));
-		handle_events();
+		// Allow loader to load other modules.
+		// Emit synchronously because threading doesn't matter at this point in
+		// initialization and we have to wait for it to complete.
+		emit_event(Event("core:load_modules"), true);
 
 		if(is_shutdown_requested())
 			return;
 
 		// Now that everyone is listening, we can fire the start event
 		emit_event(Event("core:start"));
-		handle_events();
 	}
 
 	// interface::Server version; doesn't directly unload
@@ -525,19 +529,19 @@ struct CState: public State, public interface::Server
 			log_w(MODULE, "unload_module_u: Module not found: %s", cs(module_name));
 			return;
 		}
-		ModuleContainer *mc = &it->second;
+		sp_<ModuleContainer> mc = it->second;
 		{
 			interface::MutexScope mc_ms(mc->mutex);
 			// Send core::unload directly to module
 			mc->module->event(Event::t("core:unload"), nullptr);
 			// Delete subscriptions
 			{
-				interface::MutexScope ms(m_event_subs_mutex);
 				for(Event::Type type = 0; type < m_event_subs.size(); type++){
-					sv_<ModuleContainer*> &sublist = m_event_subs[type];
-					sv_<ModuleContainer*> new_sublist;
-					for(ModuleContainer *mc1 : sublist){
-						if(mc1 != mc)
+					sv_<wp_<ModuleContainer>> &sublist = m_event_subs[type];
+					sv_<wp_<ModuleContainer>> new_sublist;
+					for(wp_<ModuleContainer> &mc1 : sublist){
+						if(sp_<ModuleContainer>(mc1.lock()).get() !=
+								mc.get())
 							new_sublist.push_back(mc1);
 						else
 							log_v(MODULE, "Removing %s subscription to event %zu",
@@ -546,13 +550,11 @@ struct CState: public State, public interface::Server
 					sublist = new_sublist;
 				}
 			}
-			// Delete module
-			{
-				interface::MutexScope ms_magic(m_magic_mutex);
-				delete mc->module;
-			}
 		}
-		m_modules.erase(module_name);
+		{
+			// Delete module and container
+			m_modules.erase(module_name);
+		}
 		m_compiler->unload(module_name);
 
 		emit_event(Event("core:module_unloaded",
@@ -575,7 +577,7 @@ struct CState: public State, public interface::Server
 		auto it = m_modules.find(module_name);
 		if(it == m_modules.end())
 			throw ModuleNotFoundException(ss_()+"Module not found: "+module_name);
-		ModuleContainer *mc = &it->second;
+		ModuleContainer *mc = it->second.get();
 		return mc->info.path;
 	}
 
@@ -585,7 +587,7 @@ struct CState: public State, public interface::Server
 		auto it = m_modules.find(module_name);
 		if(it == m_modules.end())
 			return NULL;
-		return it->second.module;
+		return it->second->module.get();
 	}
 
 	interface::Module* check_module(const ss_ &module_name)
@@ -615,14 +617,20 @@ struct CState: public State, public interface::Server
 	bool access_module(const ss_ &module_name,
 			std::function<void(interface::Module*)> cb)
 	{
-		// This prevents module from being deleted while it is being called
-		interface::MutexScope ms(m_modules_mutex);
-		auto it = m_modules.find(module_name);
-		if(it == m_modules.end())
-			return false;
-		ModuleContainer *mc = &it->second;
+		sp_<ModuleContainer> mc;
+		{
+			// This prevents module from being deleted while a reference is
+			// being copied
+			interface::MutexScope ms(m_modules_mutex);
+			auto it = m_modules.find(module_name);
+			if(it == m_modules.end())
+				return false;
+			mc = it->second;
+		}
 		interface::MutexScope mc_ms(mc->mutex);
-		cb(mc->module);
+		if(!mc->module)
+			return false;
+		cb(mc->module.get());
 		return true;
 	}
 
@@ -632,12 +640,12 @@ struct CState: public State, public interface::Server
 		// Lock modules so that the subscribing one isn't removed asynchronously
 		interface::MutexScope ms(m_modules_mutex);
 		// Make sure module is a known instance
-		ModuleContainer *mc0 = NULL;
+		sp_<ModuleContainer> mc0;
 		ss_ module_name = "(unknown)";
 		for(auto &pair : m_modules){
-			ModuleContainer &mc = pair.second;
-			if(mc.module == module){
-				mc0 = &mc;
+			sp_<ModuleContainer> &mc = pair.second;
+			if(mc->module.get() == module){
+				mc0 = mc;
 				module_name = pair.first;
 				break;
 			}
@@ -646,21 +654,28 @@ struct CState: public State, public interface::Server
 			log_w(MODULE, "sub_event(): Not a known module");
 			return;
 		}
-		interface::MutexScope ms2(m_event_subs_mutex);
 		if(m_event_subs.size() <= type + 1)
 			m_event_subs.resize(type + 1);
-		sv_<ModuleContainer*> &sublist = m_event_subs[type];
-		if(std::find(sublist.begin(), sublist.end(), mc0) != sublist.end()){
+		sv_<wp_<ModuleContainer>> &sublist = m_event_subs[type];
+		bool found = false;
+		for(wp_<ModuleContainer> &item : sublist){
+			if(item.lock() == mc0){
+				found = true;
+				break;
+			}
+		}
+		if(found){
 			log_w(MODULE, "sub_event(): Already on list: %s", cs(module_name));
 			return;
 		}
 		auto *evreg = interface::getGlobalEventRegistry();
 		log_d(MODULE, "sub_event(): %s subscribed to %s (%zu)",
 				cs(module_name), cs(evreg->name(type)), type);
-		sublist.push_back(mc0);
+		sublist.push_back(wp_<ModuleContainer>(mc0));
 	}
 
-	void emit_event(Event event)
+	// Do not use synchronous=true unless specifically needed in a special case.
+	void emit_event(Event event, bool synchronous)
 	{
 		if(log_get_max_level() >= LOG_TRACE){
 			auto *evreg = interface::getGlobalEventRegistry();
@@ -668,37 +683,48 @@ struct CState: public State, public interface::Server
 					cs(evreg->name(event.type)), event.type);
 		}
 
-		// TODO: Run modules in threads and have a separate event queue in each
-		//       of them, and copy the event to the queues in here according to
-		//       subscriptions
-
-		interface::MutexScope ms(m_event_queue_mutex);
-		m_event_queue.push_back(std::move(event));
-	}
-
-	void access_scene(std::function<void(magic::Scene*)> cb)
-	{
-		interface::MutexScope ms(m_magic_mutex);
-		cb(m_magic_scene);
-	}
-
-	void sub_magic_event(struct interface::Module *module,
-			const magic::StringHash &event_type,
-			const Event::Type &buildat_event_type)
-	{
+		sv_<sv_<wp_<ModuleContainer>>> event_subs_snapshot;
 		{
-			interface::MutexScope ms(m_magic_mutex);
-			m_magic_event_handlers[buildat_event_type] = new MagicEventHandler(
-					m_magic_context, this, event_type, buildat_event_type);
+			interface::MutexScope ms(m_modules_mutex);
+			event_subs_snapshot = m_event_subs;
 		}
-		sub_event(module, buildat_event_type);
+
+		if(event.type >= event_subs_snapshot.size()){
+			log_t("state", "emit_event(): %zu: No subs", event.type);
+			return;
+		}
+		sv_<wp_<ModuleContainer>> &sublist = event_subs_snapshot[event.type];
+		if(sublist.empty()){
+			log_t("state", "emit_event(): %zu: No subs", event.type);
+			return;
+		}
+		if(log_get_max_level() >= LOG_TRACE){
+			auto *evreg = interface::getGlobalEventRegistry();
+			log_t("state", "emit_event(): %s (%zu): Pushing to %zu modules",
+					cs(evreg->name(event.type)), event.type, sublist.size());
+		}
+		for(wp_<ModuleContainer> &mc_weak : sublist){
+			sp_<ModuleContainer> mc(mc_weak.lock());
+			if(mc){
+				if(synchronous)
+					mc->emit_event_sync(event);
+				else
+					mc->push_event(event);
+			} else {
+				auto *evreg = interface::getGlobalEventRegistry();
+				log_t("state", "emit_event(): %s: (%zu): Subscriber weak pointer"
+						" is null", cs(evreg->name(event.type)), event.type);
+			}
+		}
+	}
+
+	void emit_event(Event event)
+	{
+		emit_event(event, false);
 	}
 
 	void handle_events()
 	{
-		magic::AutoProfileBlock profiler_block(m_magic_context->
-			GetSubsystem<magic::Profiler>(), "Buildat|handle_events");
-
 		// Get modified modules and push events to queue
 		{
 			interface::MutexScope ms(m_modules_mutex);
@@ -714,48 +740,9 @@ struct CState: public State, public interface::Server
 							info.name, info.path)));
 			}
 		}
-		// Note: Locking m_modules_mutex here is not needed because no modules
-		// can be deleted while this is running, because modules are deleted
-		// only by this same thread.
-		for(size_t loop_i = 0;; loop_i++){
-			if(g_sigint_received){
-				// Get out fast
-				throw ServerShutdownRequest("Server shutdown requested via SIGINT");
-			}
-			sv_<Event> event_queue_snapshot;
-			sv_<sv_<ModuleContainer* >> event_subs_snapshot;
-			{
-				interface::MutexScope ms2(m_event_queue_mutex);
-				interface::MutexScope ms3(m_event_subs_mutex);
-				// Swap to clear queue
-				m_event_queue.swap(event_queue_snapshot);
-				// Copy to leave subscriptions active
-				event_subs_snapshot = m_event_subs;
-			}
-			if(event_queue_snapshot.empty()){
-				if(loop_i == 0)
-					log_t("state", "handle_events(); Nothing to do");
-				break;
-			}
-			for(const Event &event : event_queue_snapshot){
-				if(event.type >= event_subs_snapshot.size()){
-					log_t("state", "handle_events(): %zu: No subs", event.type);
-					continue;
-				}
-				sv_<ModuleContainer*> &sublist = event_subs_snapshot[event.type];
-				if(sublist.empty()){
-					log_t("state", "handle_events(): %zu: No subs", event.type);
-					continue;
-				}
-				log_t("state", "handle_events(): %zu: Handling (%zu handlers)",
-						event.type, sublist.size());
-				for(ModuleContainer *mc : sublist){
-					interface::MutexScope mc_ms(mc->mutex);
-					mc->module->event(event.type, event.p.get());
-				}
-			}
-			handle_unloads_and_reloads();
-		}
+
+		// Handle module unloads and reloads as requested
+		handle_unloads_and_reloads();
 	}
 
 	void handle_unloads_and_reloads()
@@ -781,91 +768,24 @@ struct CState: public State, public interface::Server
 			load_module(info);
 			// Send core::continue directly to module
 			{
-				interface::MutexScope ms(m_modules_mutex);
-				auto it = m_modules.find(info.name);
-				if(it == m_modules.end()){
-					log_w(MODULE, "reload_module: Module not found: %s",
-							cs(info.name));
-					return;
+				sp_<ModuleContainer> mc;
+				{
+					// This prevents module from being deleted while a reference
+					// is being copied
+					interface::MutexScope ms(m_modules_mutex);
+					auto it = m_modules.find(info.name);
+					if(it == m_modules.end()){
+						log_w(MODULE, "reload_module: Module not found: %s",
+								cs(info.name));
+						return;
+					}
+					mc = it->second;
 				}
-				ModuleContainer *mc = &it->second;
 				interface::MutexScope mc_ms(mc->mutex);
 				mc->module->event(Event::t("core:continue"), nullptr);
 			}
 		}
 		m_reloads_requested.clear();
-	}
-
-	void add_socket_event(int fd, const Event::Type &event_type)
-	{
-		log_d("state", "add_socket_event(): fd=%i", fd);
-		interface::MutexScope ms(m_sockets_mutex);
-		auto it = m_sockets.find(fd);
-		if(it == m_sockets.end()){
-			SocketState s;
-			s.fd = fd;
-			s.event_type = event_type;
-			m_sockets[fd] = s;
-			return;
-		}
-		const SocketState &s = it->second;
-		if(s.event_type != event_type){
-			throw Exception("Socket events already requested with different"
-						  " event type");
-		}
-		// Nothing to do; already set.
-	}
-
-	void remove_socket_event(int fd)
-	{
-		interface::MutexScope ms(m_sockets_mutex);
-		m_sockets.erase(fd);
-	}
-
-	sv_<int> get_sockets()
-	{
-		sv_<int> result;
-		{
-			interface::MutexScope ms(m_sockets_mutex);
-			for(auto &pair : m_sockets)
-				result.push_back(pair.second.fd);
-		}
-		{
-			interface::MutexScope ms(m_modules_mutex);
-			for(auto &pair : m_module_file_watches){
-				auto fds = pair.second->get_fds();
-				result.insert(result.end(), fds.begin(), fds.end());
-			}
-		}
-		return result;
-	}
-
-	void emit_socket_event(int fd)
-	{
-		log_d(MODULE, "emit_socket_event(): fd=%i", fd);
-		// Break if not found; return if found and handled.
-		do {
-			interface::MutexScope ms(m_modules_mutex);
-			for(auto &pair : m_module_file_watches){
-				sv_<int> fds = pair.second->get_fds();
-				if(std::find(fds.begin(), fds.end(), fd) != fds.end()){
-					pair.second->report_fd(fd);
-					return;
-				}
-			}
-		} while(0);
-		do {
-			interface::MutexScope ms(m_sockets_mutex);
-			auto it = m_sockets.find(fd);
-			if(it == m_sockets.end())
-				break;
-			SocketState &s = it->second;
-			// Create and emit event
-			interface::Event event(s.event_type,
-					new interface::SocketEvent(fd));
-			emit_event(std::move(event));
-			return;
-		} while(0);
 	}
 
 	void tmp_store_data(const ss_ &name, const ss_ &data)
@@ -898,6 +818,11 @@ struct CState: public State, public interface::Server
 		if(it == m_file_paths.end())
 			return "";
 		return it->second;
+	}
+
+	const interface::ServerConfig& get_config()
+	{
+		return g_server_config;
 	}
 
 	void access_thread_pool(std::function<void(

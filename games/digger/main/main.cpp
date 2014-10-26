@@ -3,6 +3,7 @@
 #include "network/api.h"
 #include "replicate/api.h"
 #include "voxelworld/api.h"
+#include "main_context/api.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
@@ -217,13 +218,14 @@ struct Module: public interface::Module
 			}
 		});
 
-		m_server->access_scene([&](Scene *scene)
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
-			Context *context = scene->GetContext();
-			ResourceCache *cache = context->GetSubsystem<ResourceCache>();
-
-			voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
+			main_context::access(m_server, [&](main_context::Interface *imc)
 			{
+				Scene *scene = imc->get_scene();
+				Context *context = imc->get_context();
+				ResourceCache *cache = context->GetSubsystem<ResourceCache>();
+
 				interface::VoxelRegistry *voxel_reg =
 					ivoxelworld->get_voxel_reg();
 
@@ -278,14 +280,18 @@ struct Module: public interface::Module
 
 	void on_tick(const interface::TickEvent &event)
 	{
-		/*m_server->access_scene([&](Scene *scene){
+		/*main_context::access(m_server, [&](main_context::Interface *imc)
+		{
+			Scene *scene = imc->get_scene();
 		    Node *n = scene->GetChild("Testbox");
 		    auto p = n->GetPosition();
 		    log_v(MODULE, "Testbox: (%f, %f, %f)", p.x_, p.y_, p.z_);
 		});*/
 		static uint a = 0;
 		if(((a++) % 150) == 0){
-			m_server->access_scene([&](Scene *scene){
+			main_context::access(m_server, [&](main_context::Interface *imc)
+			{
+				Scene *scene = imc->get_scene();
 				Node *n = scene->GetChild("Testbox");
 				n->SetRotation(Quaternion(30, 60, 90));
 				n->SetPosition(Vector3(30.0f, 30.0f, 40.0f));

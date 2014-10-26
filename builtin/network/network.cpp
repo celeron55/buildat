@@ -7,20 +7,38 @@
 #include "interface/event.h"
 #include "interface/tcpsocket.h"
 #include "interface/packet_stream.h"
+#include "interface/thread.h"
+#include "interface/select_handler.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/vector.hpp>
 #include <cereal/types/tuple.hpp>
 #ifdef _WIN32
 	#include "ports/windows_sockets.h"
+	#include "ports/windows_compat.h" // usleep()
 #else
 	#include <sys/socket.h>
+	#include <unistd.h> // usleep()
 #endif
 #include <deque>
-#include <cstring> // strerror()
 
 using interface::Event;
 
 namespace network {
+
+struct Module;
+
+struct NetworkThread: public interface::ThreadedThing
+{
+	static constexpr const char *MODULE = "network";
+
+	Module *m_module = nullptr;
+
+	NetworkThread(Module *module):
+		m_module(module)
+	{}
+
+	void run(interface::Thread *thread);
+};
 
 struct Peer
 {
@@ -44,6 +62,7 @@ struct Module: public interface::Module, public network::Interface
 	sm_<int, Peer*> m_peers_by_socket;
 	size_t m_next_peer_id = 1;
 	bool m_will_restore_after_unload = false;
+	sp_<interface::Thread> m_thread;
 
 	Module(interface::Server *server):
 		interface::Module("network"),
@@ -51,22 +70,24 @@ struct Module: public interface::Module, public network::Interface
 		m_listening_socket(interface::createTCPSocket())
 	{
 		log_d(MODULE, "network construct");
+
+		m_thread.reset(interface::createThread(new NetworkThread(this)));
+		m_thread->start();
 	}
 
 	~Module()
 	{
 		log_d(MODULE, "network destruct");
-		if(m_listening_socket->good()){
-			m_server->remove_socket_event(m_listening_socket->fd());
-			if(m_will_restore_after_unload)
+
+		if(m_will_restore_after_unload){
+			if(m_listening_socket->good()){
 				m_listening_socket->release_fd();
-		}
-		for(auto pair : m_peers){
-			const Peer &peer = pair.second;
-			if(peer.socket->good()){
-				m_server->remove_socket_event(peer.socket->fd());
-				if(m_will_restore_after_unload)
+			}
+			for(auto pair : m_peers){
+				const Peer &peer = pair.second;
+				if(peer.socket->good()){
 					peer.socket->release_fd();
+				}
 			}
 		}
 	}
@@ -77,8 +98,6 @@ struct Module: public interface::Module, public network::Interface
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));
-		m_server->sub_event(this, Event::t("network:listen_event"));
-		m_server->sub_event(this, Event::t("network:incoming_data"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -86,9 +105,6 @@ struct Module: public interface::Module, public network::Interface
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_VOIDN("core:unload", on_unload)
 		EVENT_VOIDN("core:continue", on_continue)
-		EVENT_TYPEN("network:listen_event", on_listen_event, interface::SocketEvent)
-		EVENT_TYPEN("network:incoming_data", on_incoming_data,
-				interface::SocketEvent)
 	}
 
 	void on_start()
@@ -109,9 +125,6 @@ struct Module: public interface::Module, public network::Interface
 			log_i(MODULE, "Listening at %s:%s, fd=%i", cs(address), cs(port),
 					m_listening_socket->fd());
 		}
-
-		m_server->add_socket_event(m_listening_socket->fd(),
-				Event::t("network:listen_event"));
 	}
 
 	void on_unload()
@@ -159,14 +172,12 @@ struct Module: public interface::Module, public network::Interface
 			sp_<interface::TCPSocket> socket(interface::createTCPSocket(fd));
 			m_peers[peer_id] = Peer(peer_id, socket);
 			m_peers_by_socket[socket->fd()] = &m_peers[peer_id];
-			m_server->add_socket_event(socket->fd(),
-					Event::t("network:incoming_data"));
 		}
 	}
 
-	void on_listen_event(const interface::SocketEvent &event)
+	void on_listen_event(int event_fd)
 	{
-		log_v(MODULE, "network: on_listen_event(): fd=%i", event.fd);
+		log_v(MODULE, "network: on_listen_event(): fd=%i", event_fd);
 		// Create socket
 		sp_<interface::TCPSocket> socket(interface::createTCPSocket());
 		// Accept connection
@@ -182,23 +193,21 @@ struct Module: public interface::Module, public network::Interface
 		pinfo.id = peer_id;
 		pinfo.address = socket->get_remote_address();
 		m_server->emit_event("network:client_connected", new NewClient(pinfo));
-		m_server->add_socket_event(socket->fd(),
-				Event::t("network:incoming_data"));
 	}
 
-	void on_incoming_data(const interface::SocketEvent &event)
+	void on_incoming_data(int event_fd)
 	{
-		log_v(MODULE, "network: on_incoming_data(): fd=%i", event.fd);
+		log_v(MODULE, "network: on_incoming_data(): fd=%i", event_fd);
 
-		auto it = m_peers_by_socket.find(event.fd);
+		auto it = m_peers_by_socket.find(event_fd);
 		if(it == m_peers_by_socket.end()){
-			log_w(MODULE, "network: Peer with fd=%i not found", event.fd);
+			log_w(MODULE, "network: Peer with fd=%i not found", event_fd);
 			return;
 		}
 		Peer &peer = *it->second;
 
 		int fd = peer.socket->fd();
-		if(fd != event.fd)
+		if(fd != event_fd)
 			throw Exception("on_incoming_data: fds don't match");
 		char buf[100000];
 		ssize_t r = recv(fd, buf, 100000, 0);
@@ -219,7 +228,6 @@ struct Module: public interface::Module, public network::Interface
 			m_server->emit_event("network:client_disconnected",
 					new OldClient(pinfo));
 
-			m_server->remove_socket_event(peer.socket->fd());
 			m_peers_by_socket.erase(peer.socket->fd());
 			m_peers.erase(peer.id);
 			return;
@@ -260,6 +268,28 @@ struct Module: public interface::Module, public network::Interface
 		send_u(peer, name, data);
 	}
 
+	// Interface for NetworkThread
+
+	sv_<int> get_sockets()
+	{
+		sv_<int> result;
+		result.push_back(m_listening_socket->fd());
+		for(auto &pair : m_peers){
+			Peer &peer = pair.second;
+			result.push_back(peer.socket->fd());
+		}
+		return result;
+	}
+
+	void handle_active_socket(int fd)
+	{
+		if(fd == m_listening_socket->fd()){
+			on_listen_event(fd);
+		} else {
+			on_incoming_data(fd);
+		}
+	}
+
 	// Interface
 
 	void send(PeerInfo::Id recipient, const ss_ &name, const ss_ &data)
@@ -283,6 +313,30 @@ struct Module: public interface::Module, public network::Interface
 		return dynamic_cast<Interface*>(this);
 	}
 };
+
+void NetworkThread::run(interface::Thread *thread)
+{
+	interface::SelectHandler handler;
+
+	while(!thread->stop_requested()){
+		sv_<int> sockets;
+		// We can avoid implementing our own mutex locking in Module by using
+		// interface::Server::access_module() instead of directly accessing it.
+		network::access(m_module->m_server, [&](network::Interface *inetwork){
+			sockets = m_module->get_sockets();
+		});
+
+		sv_<int> active_sockets;
+		bool ok = handler.check(500000, sockets, active_sockets);
+		(void)ok; // Unused
+
+		network::access(m_module->m_server, [&](network::Interface *inetwork){
+			for(int fd : active_sockets){
+				m_module->handle_active_socket(fd);
+			}
+		});
+	}
+}
 
 extern "C" {
 	BUILDAT_EXPORT void* createModule_network(interface::Server *server){

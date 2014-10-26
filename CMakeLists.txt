@@ -130,6 +130,7 @@ set(BUILDAT_CORE_SRCS
 	src/impl/compress.cpp
 	src/impl/thread_pool.cpp
 	src/impl/os.cpp
+	src/impl/thread.cpp
 )
 if(WIN32)
 	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/windows/file_watch.cpp)

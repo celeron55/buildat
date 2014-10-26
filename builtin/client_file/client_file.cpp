@@ -7,6 +7,8 @@
 #include "interface/sha1.h"
 #include "interface/file_watch.h"
 #include "interface/fs.h"
+#include "interface/thread.h"
+#include "interface/select_handler.h"
 #include "client_file/api.h"
 #include "network/api.h"
 #include <cereal/archives/portable_binary.hpp>
@@ -29,11 +31,27 @@ struct FileInfo {
 
 namespace client_file {
 
+struct Module;
+
+struct FileWatchThread: public interface::ThreadedThing
+{
+	static constexpr const char *MODULE = "client_file";
+
+	Module *m_module = nullptr;
+
+	FileWatchThread(Module *module):
+		m_module(module)
+	{}
+
+	void run(interface::Thread *thread);
+};
+
 struct Module: public interface::Module, public client_file::Interface
 {
 	interface::Server *m_server;
 	sm_<ss_, sp_<FileInfo>> m_files;
 	sp_<interface::FileWatch> m_watch;
+	sp_<interface::Thread> m_thread;
 
 	Module(interface::Server *server):
 		interface::Module("client_file"),
@@ -41,13 +59,14 @@ struct Module: public interface::Module, public client_file::Interface
 		m_watch(interface::createFileWatch())
 	{
 		log_d(MODULE, "client_file construct");
+
+		m_thread.reset(interface::createThread(new FileWatchThread(this)));
+		m_thread->start();
 	}
 
 	~Module()
 	{
 		log_d(MODULE, "client_file destruct");
-		for(int fd : m_watch->get_fds())
-			m_server->remove_socket_event(fd);
 	}
 
 	void init()
@@ -61,10 +80,6 @@ struct Module: public interface::Module, public client_file::Interface
 				Event::t("network:packet_received/core:request_file"));
 		m_server->sub_event(this,
 				Event::t("network:packet_received/core:all_files_transferred"));
-		m_server->sub_event(this, Event::t("watch_file:watch_fd_event"));
-
-		for(int fd : m_watch->get_fds())
-			m_server->add_socket_event(fd, Event::t("watch_file:watch_fd_event"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -78,8 +93,6 @@ struct Module: public interface::Module, public client_file::Interface
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/core:all_files_transferred",
 				on_all_files_transferred, network::Packet)
-		EVENT_TYPEN("watch_file:watch_fd_event", on_watch_fd_event,
-				interface::SocketEvent);
 	}
 
 	void on_start()
@@ -203,10 +216,17 @@ struct Module: public interface::Module, public client_file::Interface
 				new FilesTransmitted(packet.sender));
 	}
 
-	void on_watch_fd_event(const interface::SocketEvent &event)
+	// Interface for FileWatchThread
+
+	sv_<int> get_sockets()
 	{
-		log_d(MODULE, "on_watch_fd_event()");
-		m_watch->report_fd(event.fd);
+		return m_watch->get_fds();
+	}
+
+	void handle_active_socket(int fd)
+	{
+		log_d(MODULE, "handle_active_socket(): fd=%i", fd);
+		m_watch->report_fd(fd);
 	}
 
 	// Interface
@@ -296,6 +316,34 @@ struct Module: public interface::Module, public client_file::Interface
 		return dynamic_cast<Interface*>(this);
 	}
 };
+
+void FileWatchThread::run(interface::Thread *thread)
+{
+	interface::SelectHandler handler;
+
+	while(!thread->stop_requested()){
+		sv_<int> sockets;
+		// We can avoid implementing our own mutex locking in Module by using
+		// interface::Server::access_module() instead of directly accessing it.
+		client_file::access(m_module->m_server,
+				[&](client_file::Interface *iclient_file)
+		{
+			sockets = m_module->get_sockets();
+		});
+
+		sv_<int> active_sockets;
+		bool ok = handler.check(500000, sockets, active_sockets);
+		(void)ok; // Unused
+
+		client_file::access(m_module->m_server,
+				[&](client_file::Interface *iclient_file)
+		{
+			for(int fd : active_sockets){
+				m_module->handle_active_socket(fd);
+			}
+		});
+	}
+}
 
 extern "C" {
 	BUILDAT_EXPORT void* createModule_client_file(interface::Server *server){
