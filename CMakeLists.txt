@@ -208,6 +208,7 @@ if(BUILD_SERVER)
 		src/server/state.cpp
 		src/server/rccpp.cpp
 		src/server/config.cpp
+		src/server/rccpp_util.cpp
 	)
 	add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
 
