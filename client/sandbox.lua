@@ -10,6 +10,7 @@ local dump = buildat.dump
 
 __buildat_sandbox_environment = {
 	assert = assert, -- Safe according to http://lua-users.org/wiki/SandBoxes
+	error = error,
 	-- Base sandbox from
 	-- http://stackoverflow.com/questions/1224708/how-can-i-create-a-secure-lua-sandbox/6982080#6982080
 	ipairs = ipairs,
