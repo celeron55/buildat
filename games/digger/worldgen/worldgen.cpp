@@ -1,9 +1,6 @@
 #include "core/log.h"
-#include "client_file/api.h"
-#include "network/api.h"
-#include "replicate/api.h"
 #include "voxelworld/api.h"
-#include "main_context/api.h"
+#include "worldgen/api.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
@@ -11,19 +8,14 @@
 #include "interface/voxel.h"
 #include "interface/noise.h"
 #include "interface/voxel_volume.h"
-#include <Scene.h>
-#include <RigidBody.h>
-#include <CollisionShape.h>
-#include <ResourceCache.h>
-#include <Context.h>
-#include <StaticModel.h>
-#include <Model.h>
-#include <Material.h>
-#include <Texture2D.h>
-#include <Technique.h>
+#include "interface/thread.h"
+#include "interface/semaphore.h"
+#include "interface/os.h"
+#include <Vector2.h>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/unordered_map.hpp>
 #include <cereal/types/vector.hpp>
+#include <deque>
 #define MODULE "worldgen"
 
 namespace magic = Urho3D;
@@ -54,20 +46,39 @@ void load(Archive &archive, pv::Vector3DInt32 &v){
 
 namespace worldgen {
 
-using namespace Urho3D;
+struct Module;
 
-struct Module: public interface::Module
+struct GenerateThread: public interface::ThreadedThing
+{
+	Module *m_module = nullptr;
+
+	GenerateThread(Module *module):
+		m_module(module)
+	{}
+
+	void run(interface::Thread *thread);
+};
+
+struct Module: public interface::Module, public Interface
 {
 	interface::Server *m_server;
+	std::deque<pv::Vector3DInt16> m_queued_sections;
+	interface::Semaphore m_queued_sections_sem;
+	sp_<interface::Thread> m_thread;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
 		m_server(server)
 	{
+		m_thread.reset(interface::createThread(new GenerateThread(this)));
+		m_thread->start();
 	}
 
 	~Module()
-	{}
+	{
+		m_thread->request_stop();
+		m_queued_sections_sem.post();
+	}
 
 	void init()
 	{
@@ -81,6 +92,7 @@ struct Module: public interface::Module
 	{
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_VOIDN("core:continue", on_continue)
+		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 		EVENT_TYPEN("voxelworld:generation_request",
 				on_generation_request, voxelworld::GenerationRequest)
 	}
@@ -215,18 +227,38 @@ struct Module: public interface::Module
 	{
 	}
 
-	void update_scene()
+	void on_tick(const interface::TickEvent &event)
 	{
 	}
 
 	void on_generation_request(const voxelworld::GenerationRequest &event)
 	{
-		log_v(MODULE, "on_generation_request(): section_p: (%i, %i, %i)",
+		m_queued_sections.push_back(event.section_p);
+		m_queued_sections_sem.post();
+		log_v(MODULE, "Queued section (%i, %i, %i); queue size: %zu",
 				event.section_p.getX(), event.section_p.getY(),
-				event.section_p.getZ());
+				event.section_p.getZ(), m_queued_sections.size());
+		m_server->emit_event("worldgen:queue_modified",
+				new QueueModifiedEvent(m_queued_sections.size()));
+	}
+
+	// Interface for GenerateThread
+
+	// NOTE: on_tick() cannot be used here, because as this takes much longer
+	//       than a tick, the ticks accumulate and result in nothing getting
+	//       queued but instead sectors get queued in the event queue.
+	void generate_next_section()
+	{
+		if(m_queued_sections.empty())
+			return;
+		const pv::Vector3DInt16 section_p = m_queued_sections.front();
+		m_queued_sections.pop_front();
+
+		log_v(MODULE, "Generating section (%i, %i, %i); queue size: %zu",
+				section_p.getX(), section_p.getY(), section_p.getZ(),
+				m_queued_sections.size());
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
-			const pv::Vector3DInt16 &section_p = event.section_p;
 			pv::Region region = ivoxelworld->get_section_region_voxels(
 						section_p);
 
@@ -328,8 +360,41 @@ struct Module: public interface::Module
 				}
 			}
 		});
+
+		m_server->emit_event("worldgen:queue_modified",
+				new QueueModifiedEvent(m_queued_sections.size()));
+	}
+
+	// Interface
+
+	size_t get_num_sections_queued()
+	{
+		return m_queued_sections.size();
+	}
+
+	void* get_interface()
+	{
+		return dynamic_cast<Interface*>(this);
 	}
 };
+
+void GenerateThread::run(interface::Thread *thread)
+{
+	for(;;){
+		// Give some time for accumulating the section queue
+		interface::os::sleep_us(5000);
+		m_module->m_queued_sections_sem.wait();
+		if(thread->stop_requested())
+			break;
+		// We can avoid implementing our own mutex locking in Module by using
+		// interface::Server::access_module() instead of directly accessing it.
+		worldgen::access(m_module->m_server,
+				[&](worldgen::Interface *iworldgen)
+		{
+			m_module->generate_next_section();
+		});
+	}
+}
 
 extern "C" {
 	BUILDAT_EXPORT void* createModule_worldgen(interface::Server *server){
