@@ -17,6 +17,7 @@
 #include <cereal/types/tuple.hpp>
 #include <fstream>
 #include <streambuf>
+#define MODULE "client_file"
 
 using interface::Event;
 
@@ -35,8 +36,6 @@ struct Module;
 
 struct FileWatchThread: public interface::ThreadedThing
 {
-	static constexpr const char *MODULE = "client_file";
-
 	Module *m_module = nullptr;
 
 	FileWatchThread(Module *module):
@@ -54,7 +53,7 @@ struct Module: public interface::Module, public client_file::Interface
 	sp_<interface::Thread> m_thread;
 
 	Module(interface::Server *server):
-		interface::Module("client_file"),
+		interface::Module(MODULE),
 		m_server(server),
 		m_watch(interface::createFileWatch())
 	{

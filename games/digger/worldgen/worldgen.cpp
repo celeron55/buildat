@@ -24,6 +24,7 @@
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/unordered_map.hpp>
 #include <cereal/types/vector.hpp>
+#define MODULE "worldgen"
 
 namespace magic = Urho3D;
 namespace pv = PolyVox;
@@ -60,7 +61,7 @@ struct Module: public interface::Module
 	interface::Server *m_server;
 
 	Module(interface::Server *server):
-		interface::Module("worldgen"),
+		interface::Module(MODULE),
 		m_server(server)
 	{
 	}

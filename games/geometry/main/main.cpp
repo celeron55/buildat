@@ -19,6 +19,7 @@
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/unordered_map.hpp>
 #include <cereal/types/vector.hpp>
+#define MODULE "main"
 
 namespace geometry {
 
@@ -31,7 +32,7 @@ struct Module: public interface::Module
 	uint m_slow_count = 0;
 
 	Module(interface::Server *server):
-		interface::Module("geometry"),
+		interface::Module(MODULE),
 		m_server(server)
 	{}
 

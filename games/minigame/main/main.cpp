@@ -8,6 +8,7 @@
 #include <cereal/types/unordered_map.hpp>
 #include <cereal/types/vector.hpp>
 #include <cstdlib>
+#define MODULE "main"
 
 using interface::Event;
 
@@ -72,7 +73,7 @@ struct Module: public interface::Module
 	sm_<int, Player> m_players;
 
 	Module(interface::Server *server):
-		interface::Module("minigame"),
+		interface::Module(MODULE),
 		m_server(server),
 		m_playfield(10, 10)
 	{

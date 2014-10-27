@@ -27,6 +27,7 @@
 #include <deque>
 #include <algorithm>
 #include <climits>
+#define MODULE "ground_plane_lighting"
 
 using interface::Event;
 namespace magic = Urho3D;
@@ -57,7 +58,6 @@ namespace ground_plane_lighting {
 // Y-seethrough data of a sector (size defined by voxelworld)
 struct YSTSector
 {
-	static constexpr const char *MODULE = "YSTSector";
 	pv::Vector<2, int16_t> sector_p; // In sectors
 	pv::Vector<2, int16_t> sector_size; // In voxels
 	sp_<pv::RawVolume<int32_t>> volume; // Voxel columns (region in global coords)
@@ -170,7 +170,7 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 	up_<GlobalYSTMap> m_global_yst;
 
 	Module(interface::Server *server):
-		interface::Module("ground_plane_lighting"),
+		interface::Module(MODULE),
 		m_server(server)
 	{
 	}

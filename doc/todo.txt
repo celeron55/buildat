@@ -26,7 +26,6 @@ Buildat TODO
 - Singleplayer UI
 - Show all exceptions and errors on client using ui_utils.show_message_dialog
 - Allow creating and destroying arbitrary amounts of replicated scenes
-- Switch to using #define MODULE in modules, and rename Module::MODULE
 - magic.sub_sync_node_added -> replicate.sub_sync_node_added
 - Use tags for module dependencies (tags, require_tag, disallow_tag), and
   auto-tag each module at runtime with game_<current_game>
@@ -71,3 +70,5 @@ Buildat TODO
   and implement the required interfaces
 - Check that modules are accessed in order of dependency to effectively maintain
   recursive locking
+- Fix everything in /games/
+	- Use builtin/main_context

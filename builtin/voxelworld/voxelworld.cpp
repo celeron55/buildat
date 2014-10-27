@@ -32,6 +32,7 @@
 #include <Zone.h>
 #include <deque>
 #include <algorithm>
+#define MODULE "voxelworld"
 
 using interface::Event;
 namespace magic = Urho3D;
@@ -45,7 +46,6 @@ namespace voxelworld {
 
 struct ChunkBuffer
 {
-	static constexpr const char *MODULE = "ChunkBuffer";
 	pv::Vector3DInt32 chunk_p; // For logging
 	up_<pv::RawVolume<VoxelInstance>> volume;
 	bool dirty = false; // If false, buffer has only been read from so far
@@ -70,7 +70,6 @@ struct ChunkBuffer
 
 struct Section
 {
-	static constexpr const char *MODULE = "Section";
 	pv::Vector3DInt16 section_p; // Position in sections
 	pv::Vector3DInt16 chunk_size;
 	pv::Region contained_chunks; // Position and size in chunks
@@ -158,7 +157,7 @@ ChunkBuffer& Section::get_buffer(const pv::Vector3DInt32 &chunk_p,
 	// Get the static voxel node from the scene and read the volume from it
 	int32_t node_id = node_ids->getVoxelAt(chunk_p);
 	if(node_id == 0){
-		log_w("voxelworld", "Section::get_buffer(): No node found for chunk "
+		log_w(MODULE, "Section::get_buffer(): No node found for chunk "
 				PV3I_FORMAT " in section " PV3I_FORMAT,
 				PV3I_PARAMS(chunk_p), PV3I_PARAMS(section_p));
 		return buf;
@@ -171,7 +170,7 @@ ChunkBuffer& Section::get_buffer(const pv::Vector3DInt32 &chunk_p,
 		Scene *scene = imc->get_scene();
 		Node *n = scene->GetNode(node_id);
 		if(!n){
-			log_w("voxelworld",
+			log_w(MODULE,
 					"Section::get_buffer(): Node %i not found in scene "
 					"for chunk " PV3I_FORMAT " in section " PV3I_FORMAT,
 					node_id, PV3I_PARAMS(chunk_p), PV3I_PARAMS(section_p));
@@ -182,7 +181,7 @@ ChunkBuffer& Section::get_buffer(const pv::Vector3DInt32 &chunk_p,
 		ss_ data((const char*)&rawbuf[0], rawbuf.Size());
 		buf.volume = interface::deserialize_volume(data);
 		if(!buf.volume){
-			log_w("voxelworld",
+			log_w(MODULE,
 					"Section::get_buffer(): Voxel volume could not be "
 					"loaded from node %i for chunk "
 					PV3I_FORMAT " in section " PV3I_FORMAT,
@@ -246,7 +245,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 	std::vector<QueuedNodePhysicsUpdate> m_nodes_needing_physics_update;
 
 	Module(interface::Server *server):
-		interface::Module("voxelworld"),
+		interface::Module(MODULE),
 		m_server(server)
 	{
 		m_voxel_reg.reset(interface::createVoxelRegistry());

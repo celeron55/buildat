@@ -11,6 +11,7 @@
 #include <cereal/types/string.hpp>
 #include <fstream>
 #include <streambuf>
+#define MODULE "client_lua"
 
 using interface::Event;
 
@@ -22,7 +23,7 @@ struct Module: public interface::Module
 
 	Module(interface::Server *server):
 		m_server(server),
-		interface::Module("client_lua")
+		interface::Module(MODULE)
 	{
 		log_d(MODULE, "client_lua construct");
 	}

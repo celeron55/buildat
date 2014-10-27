@@ -1,10 +1,15 @@
+// http://www.apache.org/licenses/LICENSE-2.0
+// Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "core/log.h"
 #include "interface/module.h"
 #include "interface/module_info.h"
 #include "interface/server.h"
-#include "interface/fs.h"
 #include "interface/event.h"
 #include "loader/api.h"
+#define MODULE "__loader"
+
+// __loader.cpp
+// Minimal loader-invoker for games
 
 using interface::Event;
 
@@ -15,20 +20,13 @@ struct Module: public interface::Module
 	interface::Server *m_server;
 
 	Module(interface::Server *server):
-		interface::Module("__loader"),
-		m_server(server)
-	{
-		log_v(MODULE, "__loader construct");
-	}
+		interface::Module(MODULE),
+		m_server(server){}
 
-	~Module()
-	{
-		log_v(MODULE, "__loader destruct");
-	}
+	~Module(){}
 
 	void init()
 	{
-		log_v(MODULE, "__loader init");
 		m_server->sub_event(this, Event::t("core:load_modules"));
 	}
 

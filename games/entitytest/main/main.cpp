@@ -18,6 +18,7 @@
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/unordered_map.hpp>
 #include <cereal/types/vector.hpp>
+#define MODULE "main"
 
 namespace entitytest {
 
@@ -30,7 +31,7 @@ struct Module: public interface::Module
 	uint m_slow_count = 0;
 
 	Module(interface::Server *server):
-		interface::Module("entitytest"),
+		interface::Module(MODULE),
 		m_server(server)
 	{
 		log_v(MODULE, "entitytest construct");

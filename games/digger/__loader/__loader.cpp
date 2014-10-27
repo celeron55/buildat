@@ -6,6 +6,7 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "loader/api.h"
+#define MODULE "__loader"
 
 // __loader.cpp
 // Minimal loader-invoker for games
@@ -19,7 +20,7 @@ struct Module: public interface::Module
 	interface::Server *m_server;
 
 	Module(interface::Server *server):
-		interface::Module("__loader"),
+		interface::Module(MODULE),
 		m_server(server){}
 
 	~Module(){}

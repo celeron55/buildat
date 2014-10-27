@@ -83,7 +83,11 @@ struct ModuleContainer
 		{
 			interface::MutexScope ms(mutex);
 			if(!module)
-				return;
+				throw Exception("init_and_start_thread(): module is null");
+			if(info.name != module->m_module_name)
+				throw Exception("init_and_start_thread(): Module name does not"
+						" match: info.name=\""+info.name+"\","
+						" module->m_module_name=\""+module->m_module_name+"\"");
 			thread.reset(interface::createThread(new ModuleThread(this)));
 			thread->set_name(info.name);
 			thread->start();

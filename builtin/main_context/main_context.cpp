@@ -25,6 +25,7 @@
 #include <IOEvents.h> // E_LOGMESSAGE
 #include <Thread.h>
 #include <climits>
+#define MODULE "main_context"
 
 namespace main_context {
 
@@ -32,7 +33,6 @@ using interface::Event;
 
 class BuildatResourceRouter: public magic::ResourceRouter
 {
-	static constexpr const char *MODULE = "main_context";
 	OBJECT(BuildatResourceRouter);
 
 	interface::Server *m_server;
@@ -67,7 +67,7 @@ struct Module: public interface::Module, public main_context::Interface
 	uint64_t profiler_last_print_us = 0;
 
 	Module(interface::Server *server):
-		interface::Module("main_context"),
+		interface::Module(MODULE),
 		m_server(server),
 		profiler_last_print_us(interface::os::get_timeofday_us())
 	{

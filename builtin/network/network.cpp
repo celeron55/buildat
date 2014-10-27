@@ -20,6 +20,7 @@
 	#include <unistd.h> // usleep()
 #endif
 #include <deque>
+#define MODULE "network"
 
 using interface::Event;
 
@@ -29,8 +30,6 @@ struct Module;
 
 struct NetworkThread: public interface::ThreadedThing
 {
-	static constexpr const char *MODULE = "network";
-
 	Module *m_module = nullptr;
 
 	NetworkThread(Module *module):
@@ -65,7 +64,7 @@ struct Module: public interface::Module, public network::Interface
 	sp_<interface::Thread> m_thread;
 
 	Module(interface::Server *server):
-		interface::Module("network"),
+		interface::Module(MODULE),
 		m_server(server),
 		m_listening_socket(interface::createTCPSocket())
 	{

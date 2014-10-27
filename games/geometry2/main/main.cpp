@@ -20,6 +20,7 @@
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/unordered_map.hpp>
 #include <cereal/types/vector.hpp>
+#define MODULE "main"
 
 namespace geometry {
 
@@ -35,7 +36,7 @@ struct Module: public interface::Module
 	sp_<interface::VoxelRegistry> m_voxel_reg;
 
 	Module(interface::Server *server):
-		interface::Module("geometry"),
+		interface::Module(MODULE),
 		m_server(server)
 	{
 		m_voxel_reg.reset(interface::createVoxelRegistry());

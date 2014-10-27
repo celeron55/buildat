@@ -23,6 +23,7 @@
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/vector.hpp>
 #include <cereal/types/tuple.hpp>
+#define MODULE "replicate"
 
 using interface::Event;
 namespace magic = Urho3D;
@@ -61,7 +62,7 @@ struct Module: public interface::Module, public replicate::Interface
 	sv_<Event> m_events_to_emit_after_next_sync;
 
 	Module(interface::Server *server):
-		interface::Module("replicate"),
+		interface::Module(MODULE),
 		m_server(server)
 	{
 		log_d(MODULE, "replicate construct");

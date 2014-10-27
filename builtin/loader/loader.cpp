@@ -10,6 +10,7 @@
 #include "loader/api.h"
 #include "core/json.h"
 #include <fstream>
+#define MODULE "loader"
 
 using interface::Event;
 
@@ -49,8 +50,6 @@ static interface::ModuleMeta load_module_meta(const json::Value &v)
 
 struct ResolveState
 {
-	const char *MODULE = "loader";
-
 	Interface *m_loader;
 
 	bool m_failed = false;
@@ -274,7 +273,7 @@ struct Module: public interface::Module, public loader::Interface
 	int64_t m_last_module_modification_time = 0;
 
 	Module(interface::Server *server):
-		interface::Module("loader"),
+		interface::Module(MODULE),
 		m_server(server)
 	{
 		log_d(MODULE, "loader construct");
