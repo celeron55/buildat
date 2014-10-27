@@ -50,6 +50,7 @@ struct ModuleThread: public interface::ThreadedThing
 
 struct ModuleContainer
 {
+	interface::ThreadLocalKey *thread_local_key; // Stores mc*
 	up_<interface::Module> module;
 	interface::ModuleInfo info;
 	interface::Mutex mutex; // Protects each of the former variables
@@ -68,8 +69,10 @@ struct ModuleContainer
 	// post() when direct_cb becomes free, wait() for that to happen
 	interface::Semaphore direct_cb_free_sem;
 
-	ModuleContainer(interface::Module *module = NULL,
+	ModuleContainer(interface::ThreadLocalKey *thread_local_key = NULL,
+			interface::Module *module = NULL,
 			const interface::ModuleInfo &info = interface::ModuleInfo()):
+		thread_local_key(thread_local_key),
 		module(module),
 		info(info)
 	{
@@ -156,6 +159,8 @@ struct ModuleContainer
 
 void ModuleThread::run(interface::Thread *thread)
 {
+	mc->thread_local_key->set((void*)mc);
+
 	for(;;){
 		// Wait for an event
 		mc->event_queue_sem.wait();
@@ -239,6 +244,10 @@ struct CState: public State, public interface::Server
 
 	up_<rccpp::Compiler> m_compiler;
 	ss_ m_modules_path;
+
+	// Thread-local pointer to ModuleContainer of the module of each module
+	// thread
+	interface::ThreadLocalKey m_thread_local_mc_key;
 
 	sm_<ss_, interface::ModuleInfo> m_module_info; // Info of every seen module
 	sm_<ss_, sp_<ModuleContainer>> m_modules; // Currently loaded modules
@@ -485,7 +494,8 @@ struct CState: public State, public interface::Server
 
 			m_module_info[info.name] = info;
 
-			mc = sp_<ModuleContainer>(new ModuleContainer(m, info));
+			mc = sp_<ModuleContainer>(new ModuleContainer(
+					&m_thread_local_mc_key, m, info));
 			m_modules[info.name] = mc;
 			m_module_load_order.push_back(info.name);
 		}
@@ -520,7 +530,8 @@ struct CState: public State, public interface::Server
 					return false;
 				}
 			}
-			mc = sp_<ModuleContainer>(new ModuleContainer(m, info));
+			mc = sp_<ModuleContainer>(new ModuleContainer(
+					&m_thread_local_mc_key, m, info));
 			m_modules[info.name] = mc;
 			m_module_load_order.push_back(info.name);
 		}
@@ -708,6 +719,21 @@ struct CState: public State, public interface::Server
 			if(it == m_modules.end())
 				return false;
 			mc = it->second;
+
+			// Get container of current module
+			ModuleContainer *caller_mc =
+					(ModuleContainer*)mc->thread_local_key->get();
+			if(caller_mc){
+				log_t(MODULE, "access_module(\"%s\"): Called by \"%s\"",
+						cs(mc->info.name), cs(caller_mc->info.name));
+			} else {
+				log_t(MODULE, "access_module(\"%s\"): Called by something else"
+						" than a module", cs(mc->info.name));
+			}
+
+			// TODO: Check that the module being accessed is a direct or
+			//       indirect dependency of the module accessing it, and not the
+			//       module itself
 		}
 		mc->execute_direct_cb(cb);
 		return true;
