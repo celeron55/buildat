@@ -86,23 +86,6 @@ struct Module: public interface::Module, public main_context::Interface
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("core:tick"));
-	}
-
-	void event(const Event::Type &type, const Event::Private *p)
-	{
-		EVENT_VOIDN("core:start", on_start)
-		EVENT_VOIDN("core:unload", on_unload)
-		EVENT_VOIDN("core:continue", on_continue)
-		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
-		EVENT_TYPEN("urho3d_log_redirect:message", on_message,
-				interface::MagicEvent)
-	}
-
-	void init_in_module_thread()
-	{
-		// Urho3D wants to know which is the main thread of the context. Module
-		// constructor and init() are called from a different thread than
-		// regular event(), so this is required.
 
 		// Initialize Urho3D
 
@@ -157,10 +140,19 @@ struct Module: public interface::Module, public main_context::Interface
 		m_server->sub_event(this, Event::t("urho3d_log_redirect:message"));
 	}
 
+	void event(const Event::Type &type, const Event::Private *p)
+	{
+		EVENT_VOIDN("core:start", on_start)
+		EVENT_VOIDN("core:unload", on_unload)
+		EVENT_VOIDN("core:continue", on_continue)
+		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
+		EVENT_TYPEN("urho3d_log_redirect:message", on_message,
+				interface::MagicEvent)
+	}
+
 	void on_start()
 	{
 		log_v(MODULE, "main_context start");
-		init_in_module_thread();
 	}
 
 	void on_unload()
@@ -171,7 +163,6 @@ struct Module: public interface::Module, public main_context::Interface
 	void on_continue()
 	{
 		log_v(MODULE, "main_context continue");
-		init_in_module_thread();
 	}
 
 	void on_tick(const interface::TickEvent &event)
