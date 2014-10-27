@@ -73,6 +73,7 @@ struct Module: public interface::Module
 	{
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:continue"));
+		m_server->sub_event(this, Event::t("worldgen:voxels_defined"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t(
@@ -85,6 +86,7 @@ struct Module: public interface::Module
 	{
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_VOIDN("core:continue", on_continue)
+		EVENT_VOIDN("worldgen:voxels_defined", on_voxels_defined)
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 		EVENT_TYPEN("client_file:files_transmitted",
 				on_files_transmitted, client_file::FilesTransmitted)
@@ -95,6 +97,14 @@ struct Module: public interface::Module
 	}
 
 	void on_start()
+	{
+	}
+
+	void on_continue()
+	{
+	}
+
+	void on_voxels_defined()
 	{
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
@@ -148,10 +158,6 @@ struct Module: public interface::Module
 		});
 	}
 
-	void on_continue()
-	{
-	}
-
 	void update_scene()
 	{
 	}
@@ -171,8 +177,10 @@ struct Module: public interface::Module
 			{
 				Scene *scene = imc->get_scene();
 				Node *n = scene->GetChild("Testbox");
-				n->SetRotation(Quaternion(30, 60, 90));
-				n->SetPosition(Vector3(30.0f, 30.0f, 40.0f));
+				if(n){
+					n->SetRotation(Quaternion(30, 60, 90));
+					n->SetPosition(Vector3(30.0f, 30.0f, 40.0f));
+				}
 			});
 		}
 	}

@@ -207,6 +207,8 @@ struct Module: public interface::Module
 				voxel_reg->add_voxel(vdef); // id 6
 			}
 		});
+
+		m_server->emit_event(Event("worldgen:voxels_defined"));
 	}
 
 	void on_continue()

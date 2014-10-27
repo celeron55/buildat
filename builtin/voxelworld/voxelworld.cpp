@@ -244,6 +244,9 @@ struct Module: public interface::Module, public voxelworld::Interface
 	// (as a sorted array in descending node_id order)
 	std::vector<QueuedNodePhysicsUpdate> m_nodes_needing_physics_update;
 
+	// Clients that are ready to receive things (by peer id)
+	set_<int> m_clients_initialized;
+
 	Module(interface::Server *server):
 		interface::Module(MODULE),
 		m_server(server)
@@ -394,6 +397,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 	void on_client_disconnected(const network::OldClient &old_client)
 	{
+		m_clients_initialized.erase(old_client.info.id);
 	}
 
 	void on_tick(const interface::TickEvent &event)
@@ -432,6 +436,12 @@ struct Module: public interface::Module, public voxelworld::Interface
 		maintain_maximum_buffer_limit();
 
 		// Send updated voxel registry if needed
+		send_voxel_registry_if_dirty();
+	}
+
+	void send_voxel_registry_if_dirty()
+	{
+		// Send updated voxel registry if needed
 		// NOTE: This probably really only supports additions
 		if(m_voxel_reg->is_dirty()){
 			m_voxel_reg->clear_dirty();
@@ -442,6 +452,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 			network::access(m_server, [&](network::Interface *inetwork){
 				sv_<network::PeerInfo::Id> peers = inetwork->list_peers();
 				for(auto &peer: peers){
+					if(!m_clients_initialized.count(peer))
+						continue;
 					inetwork->send(peer, "voxelworld:voxel_registry",
 							voxel_reg_data);
 				}
@@ -452,12 +464,12 @@ struct Module: public interface::Module, public voxelworld::Interface
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
 		int peer = event.recipient;
+		// Load the client-side module
 		network::access(m_server, [&](network::Interface *inetwork){
-			// Load the module by calling require() on it so that it can start
-			// receiving data
 			inetwork->send(peer, "core:run_script",
 					"require(\"buildat/module/voxelworld\")");
 		});
+		// Send initialization data and tell the client that it is now ready
 		std::ostringstream os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(os);
@@ -468,7 +480,9 @@ struct Module: public interface::Module, public voxelworld::Interface
 			inetwork->send(peer, "voxelworld:init", os.str());
 			inetwork->send(peer, "voxelworld:voxel_registry",
 					m_voxel_reg->serialize());
+			inetwork->send(peer, "voxelworld:ready", "");
 		});
+		m_clients_initialized.insert(peer);
 	}
 
 	// TODO: How should nodes be filtered for replication?
@@ -971,9 +985,11 @@ struct Module: public interface::Module, public voxelworld::Interface
 			run_commit_hooks_in_scene(chunk_p, n);
 		});
 
-		// Tell replicate to emit events once it has done its job
-		// TODO: Have some way of invoking replication directly for this node;
-		//       this is too slow
+		// First send updated voxel registry to clients so that they are ready
+		// to generate stuff from the voxels
+		send_voxel_registry_if_dirty();
+
+		// Then synchronize node and notify clients about it
 		sv_<replicate::PeerId> peers;
 		replicate::access(m_server, [&](replicate::Interface *ireplicate){
 			ireplicate->sync_node_immediate(node_id);
@@ -986,6 +1002,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 		}
 		network::access(m_server, [&](network::Interface *inetwork){
 			for(auto &peer_id: peers){
+				if(!m_clients_initialized.count(peer_id))
+					continue;
 				inetwork->send(peer_id, "voxelworld:node_volume_updated",
 						os.str());
 			}

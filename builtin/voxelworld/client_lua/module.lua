@@ -47,8 +47,7 @@ M.section_size_voxels = nil
 -- be triggered to reflect this value
 M.camera_far_clip = 1000
 
--- voxelworld is ready once the init and voxel_registry packets (and in the
--- future possibly some other ones) have been received)
+-- client-side voxelworld is ready once the server tells it is
 local is_ready = false
 local on_ready_callbacks = {}
 
@@ -71,7 +70,36 @@ function on_ready()
 	on_ready_callbacks = nil
 end
 
-local function sub_events()
+buildat.sub_packet("voxelworld:init", function(data)
+	local values = cereal.binary_input(data, {"object",
+		{"chunk_size_voxels", {"object",
+			{"x", "int16_t"},
+			{"y", "int16_t"},
+			{"z", "int16_t"},
+		}},
+		{"section_size_chunks", {"object",
+			{"x", "int16_t"},
+			{"y", "int16_t"},
+			{"z", "int16_t"},
+		}},
+	})
+	log:info("voxelworld:init: "..dump(values))
+	M.chunk_size_voxels = buildat.Vector3(values.chunk_size_voxels)
+	M.section_size_chunks = buildat.Vector3(values.section_size_chunks)
+	M.section_size_voxels =
+			M.chunk_size_voxels:mul_components(M.section_size_chunks)
+end)
+
+buildat.sub_packet("voxelworld:voxel_registry", function(data)
+	voxel_reg:deserialize(data)
+end)
+
+buildat.sub_packet("voxelworld:ready", function(data)
+	sub_events()
+	on_ready()
+end)
+
+function sub_events()
 	local node_update_queue = buildat.SpatialUpdateQueue()
 
 	local function queue_initial_node_update(node)
@@ -103,31 +131,6 @@ local function sub_events()
 			node_id = node:GetID(),
 		})
 	end
-
-	buildat.sub_packet("voxelworld:init", function(data)
-		local values = cereal.binary_input(data, {"object",
-			{"chunk_size_voxels", {"object",
-				{"x", "int16_t"},
-				{"y", "int16_t"},
-				{"z", "int16_t"},
-			}},
-			{"section_size_chunks", {"object",
-				{"x", "int16_t"},
-				{"y", "int16_t"},
-				{"z", "int16_t"},
-			}},
-		})
-		log:info("voxelworld:init: "..dump(values))
-		M.chunk_size_voxels = buildat.Vector3(values.chunk_size_voxels)
-		M.section_size_chunks = buildat.Vector3(values.section_size_chunks)
-		M.section_size_voxels =
-				M.chunk_size_voxels:mul_components(M.section_size_chunks)
-	end)
-
-	buildat.sub_packet("voxelworld:voxel_registry", function(data)
-		voxel_reg:deserialize(data)
-		on_ready() -- This is the last packet
-	end)
 
 	buildat.sub_packet("voxelworld:node_volume_updated", function(data)
 		local values = cereal.binary_input(data, {"object",
@@ -519,8 +522,6 @@ function send_get_section(p)
 	--log:info(dump(buildat.bytes(data)))
 	buildat.send_packet("voxelworld:get_section", data)
 end
-
-sub_events()
 
 return M
 -- vim: set noet ts=4 sw=4:
