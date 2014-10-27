@@ -208,7 +208,7 @@ struct Module: public interface::Module
 			}
 		});
 
-		m_server->emit_event(Event("worldgen:voxels_defined"));
+		m_server->emit_event("worldgen:voxels_defined");
 	}
 
 	void on_continue()

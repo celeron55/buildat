@@ -72,6 +72,10 @@ namespace interface
 
 		virtual void sub_event(struct Module *module, const Event::Type &type) = 0;
 		virtual void emit_event(Event event) = 0;
+		template<typename TypeT>
+		void emit_event(const TypeT &type){
+			emit_event(std::move(Event(type)));
+		}
 		template<typename TypeT, typename PrivateT>
 		void emit_event(const TypeT &type, PrivateT *p){
 			emit_event(std::move(Event(type, up_<Event::Private>(p))));
