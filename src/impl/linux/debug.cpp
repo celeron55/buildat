@@ -1,0 +1,139 @@
+// http://www.apache.org/licenses/LICENSE-2.0
+// Copyright 2014 Perttu Ahola <celeron55@gmail.com>
+#include "interface/debug.h"
+#include "core/log.h"
+#include <c55/string_util.h>
+#include <stdexcept>
+#include <iostream>
+#include <cstdlib>
+#include <cstring>
+#include <execinfo.h>
+#include <signal.h>
+#include <sys/ucontext.h>
+#include <unistd.h>
+#define MODULE "debug"
+
+namespace interface {
+namespace debug {
+
+// Execute a program and return whatever it writes to stdout
+static ss_ exec_get_stdout(char *cmd)
+{
+	FILE* pipe = popen(cmd, "r");
+	if(!pipe) return "ERROR";
+	char buffer[50];
+	ss_ result;
+	try{
+		while(!feof(pipe)){
+			if(fgets(buffer, 50, pipe) != NULL)
+				result += buffer; // Can cause std::bad_alloc
+		}
+		pclose(pipe);
+		return result;
+	}catch(std::bad_alloc){
+		return ss_();
+	}
+}
+
+// Execute a program and return whatever it writes to stdout, without trailing
+// newline
+static ss_ exec_get_stdout_without_newline(char *cmd)
+{
+	ss_ s = exec_get_stdout(cmd);
+	if(!s.empty() && s[s.size()-1] == '\n')
+		s = s.substr(0, s.size()-1);
+	return s;
+}
+
+static void* get_library_executable_address(const ss_ &lib_path)
+{
+	char cmdbuf[500];
+	snprintf(cmdbuf, sizeof cmdbuf,
+			"cat /proc/%i/maps | grep %s | grep ' ..x. ' | cut -d- -f1",
+			getpid(), cs(lib_path));
+	ss_ address_s = exec_get_stdout_without_newline(cmdbuf);
+	//log_v(MODULE, "address_s=\"%s\"", cs(address_s));
+	if(address_s.empty())
+		return (void*)0x0;
+	void *address = (void*)strtoul(address_s.c_str(), NULL, 16);
+	return address;
+}
+
+//#define __USE_GNU
+#include <ucontext.h> // REG_EIP (or REG_RIP)
+
+#if __WORDSIZE == 64 // REG_RIP replaces REG_EIP on x86_64
+	#define REG_EIP REG_RIP
+#endif
+
+static void debug_sighandler(int sig, siginfo_t *info, void *secret)
+{
+	ucontext_t *uc = (ucontext_t*)secret;
+	log_i(MODULE, " ");
+	if(sig == SIGSEGV)
+		log_w(MODULE, "Crash: SIGSEGV: Address %p (executing %p)",
+				info->si_addr, (void*)uc->uc_mcontext.gregs[REG_EIP]);
+	else
+		log_w(MODULE, "Crash: Signal %d", sig);
+
+	void *trace[16];
+	int trace_size = backtrace(trace, 16);
+	// Overwrite sigaction with caller's address
+	trace[1] = (void*) uc->uc_mcontext.gregs[REG_EIP];
+	char **symbols = backtrace_symbols(trace, trace_size);
+
+	// The first stack frame points to this functiton
+	log_i(MODULE, "Backtrace:");
+	for(int i = 1; i < trace_size; i++){
+		char cmdbuf[500];
+		// Parse symbol to get file name
+		// Example: "../cache/rccpp_build/main.so(+0x14e2c) [0x7f7880d36e2c]"
+		//log_v(MODULE, "symbol: %s", symbols[i]);
+		c55::Strfnd f(symbols[i]);
+		ss_ file_path = f.next("(");
+		//log_v(MODULE, "file_path: %s", cs(file_path));
+
+		void *address = trace[i];
+
+		bool is_shared_lib = (file_path.find(".so") != ss_::npos);
+		//log_v(MODULE, "is_shared_lib=%s", is_shared_lib?"true":"false");
+		if(is_shared_lib){
+			void *base_addr = get_library_executable_address(file_path);
+			//log_v(MODULE, "base_addr=%p", base_addr);
+			address = (void*)((char*)trace[i] - (char*)base_addr);
+			//log_v(MODULE, "address=%p", address);
+		}
+
+		snprintf(cmdbuf, sizeof cmdbuf, "echo '%s' | c++filt", symbols[i]);
+		ss_ cppfilt_symbol = exec_get_stdout_without_newline(cmdbuf);
+
+		snprintf(cmdbuf, sizeof cmdbuf, "addr2line %p -e %s",
+				address, cs(file_path));
+		ss_ addr2line_output = exec_get_stdout_without_newline(cmdbuf);
+
+		if(addr2line_output.size() > 4){
+			log_i(MODULE, "#%i  %s", i-1, cs(addr2line_output));
+			log_v(MODULE, "    = %s", cs(cppfilt_symbol));
+		} else {
+			log_i(MODULE, "#%i  %s", i-1, cs(cppfilt_symbol));
+		}
+	}
+	exit(1);
+}
+
+void init_signal_handlers(const SigConfig &config)
+{
+	struct sigaction sa;
+	sa.sa_sigaction = debug_sighandler;
+	sigemptyset (&sa.sa_mask);
+	sa.sa_flags = SA_RESTART | SA_SIGINFO;
+
+	if(config.catch_segfault)
+		sigaction(SIGSEGV, &sa, NULL);
+	if(config.catch_abort)
+		sigaction(SIGABRT, &sa, NULL);
+}
+
+}
+}
+// vim: set noet ts=4 sw=4:

@@ -5,6 +5,7 @@
 #include "server/config.h"
 #include "server/state.h"
 #include "interface/server.h"
+#include "interface/debug.h"
 #include <c55/getopt.h>
 #include <c55/os.h>
 #ifdef _WIN32
@@ -57,6 +58,9 @@ void basic_init()
 
 	log_init();
 	log_set_max_level(LOG_VERBOSE);
+
+	interface::debug::SigConfig debug_sig_config;
+	interface::debug::init_signal_handlers(debug_sig_config);
 }
 
 int main(int argc, char *argv[])

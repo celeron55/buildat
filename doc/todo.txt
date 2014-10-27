@@ -70,3 +70,5 @@ Buildat TODO
   and implement the required interfaces
 - Fix everything in /games/
 	- Use builtin/main_context
+- A debug handler that is attached to every thread, which will log a backtrace
+  of exceptions and segfaults
