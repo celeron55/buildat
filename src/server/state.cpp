@@ -80,13 +80,18 @@ struct ModuleContainer
 		stop_and_delete_module();
 	}
 	void init_and_start_thread(){
-		interface::MutexScope ms(mutex);
-		if(!module)
-			return;
-		module->init();
-		thread.reset(interface::createThread(new ModuleThread(this)));
-		thread->set_name(info.name);
-		thread->start();
+		{
+			interface::MutexScope ms(mutex);
+			if(!module)
+				return;
+			thread.reset(interface::createThread(new ModuleThread(this)));
+			thread->set_name(info.name);
+			thread->start();
+		}
+		// Initialize in thread
+		execute_direct_cb([&](interface::Module *module){
+			module->init();
+		});
 	}
 	void stop_and_delete_module(){
 		if(thread){
@@ -464,55 +469,59 @@ struct CState: public State, public interface::Server
 	// There intentionally is no core:module_loaded event.
 	void load_module_direct_u(interface::Module *m, const ss_ &name)
 	{
-		interface::MutexScope ms(m_modules_mutex);
+		sp_<ModuleContainer> mc;
+		{
+			interface::MutexScope ms(m_modules_mutex);
 
-		interface::ModuleInfo info;
-		info.name = name;
-		info.path = "";
+			interface::ModuleInfo info;
+			info.name = name;
+			info.path = "";
 
-		log_i(MODULE, "Loading module %s (hardcoded)", cs(info.name));
+			log_i(MODULE, "Loading module %s (hardcoded)", cs(info.name));
 
-		m_module_info[info.name] = info;
+			m_module_info[info.name] = info;
 
-		m_modules[info.name] = sp_<ModuleContainer>(
-				new ModuleContainer(m, info));
-		m_module_load_order.push_back(info.name);
+			mc = sp_<ModuleContainer>(new ModuleContainer(m, info));
+			m_modules[info.name] = mc;
+			m_module_load_order.push_back(info.name);
+		}
 
 		// Call init() and start thread
-		sp_<ModuleContainer> mc = m_modules[info.name];
 		mc->init_and_start_thread();
 	}
 
 	bool load_module(const interface::ModuleInfo &info)
 	{
-		interface::MutexScope ms(m_modules_mutex);
+		sp_<ModuleContainer> mc;
+		{
+			interface::MutexScope ms(m_modules_mutex);
 
-		if(m_modules.find(info.name) != m_modules.end()){
-			log_w(MODULE, "Cannot load module %s from %s: Already loaded",
-					cs(info.name), cs(info.path));
-			return false;
-		}
-
-		log_i(MODULE, "Loading module %s from %s", cs(info.name), cs(info.path));
-
-		m_module_info[info.name] = info;
-
-		interface::Module *m = nullptr;
-		if(!info.meta.disable_cpp){
-			m = build_module_u(info);
-
-			if(m == nullptr){
-				log_w(MODULE, "Failed to construct module %s instance",
-						cs(info.name));
+			if(m_modules.find(info.name) != m_modules.end()){
+				log_w(MODULE, "Cannot load module %s from %s: Already loaded",
+						cs(info.name), cs(info.path));
 				return false;
 			}
+
+			log_i(MODULE, "Loading module %s from %s", cs(info.name), cs(info.path));
+
+			m_module_info[info.name] = info;
+
+			interface::Module *m = nullptr;
+			if(!info.meta.disable_cpp){
+				m = build_module_u(info);
+
+				if(m == nullptr){
+					log_w(MODULE, "Failed to construct module %s instance",
+							cs(info.name));
+					return false;
+				}
+			}
+			mc = sp_<ModuleContainer>(new ModuleContainer(m, info));
+			m_modules[info.name] = mc;
+			m_module_load_order.push_back(info.name);
 		}
-		m_modules[info.name] = sp_<ModuleContainer>(
-				new ModuleContainer(m, info));
-		m_module_load_order.push_back(info.name);
 
 		// Call init() and start thread
-		sp_<ModuleContainer> mc = m_modules[info.name];
 		mc->init_and_start_thread();
 
 		emit_event(Event("core:module_loaded",
