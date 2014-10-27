@@ -50,6 +50,7 @@ struct ModuleThread: public interface::ThreadedThing
 
 struct ModuleContainer
 {
+	interface::Server *server;
 	interface::ThreadLocalKey *thread_local_key; // Stores mc*
 	up_<interface::Module> module;
 	interface::ModuleInfo info;
@@ -69,9 +70,11 @@ struct ModuleContainer
 	// post() when direct_cb becomes free, wait() for that to happen
 	interface::Semaphore direct_cb_free_sem;
 
-	ModuleContainer(interface::ThreadLocalKey *thread_local_key = NULL,
+	ModuleContainer(interface::Server *server = nullptr,
+			interface::ThreadLocalKey *thread_local_key = NULL,
 			interface::Module *module = NULL,
 			const interface::ModuleInfo &info = interface::ModuleInfo()):
+		server(server),
 		thread_local_key(thread_local_key),
 		module(module),
 		info(info)
@@ -196,6 +199,7 @@ void ModuleThread::run(interface::Thread *thread)
 							cs(mc->info.name));
 				} catch(std::exception &e){
 					log_w(MODULE, "direct_cb() failed: %s", e.what());
+					mc->server->shutdown(1, mc->info.name+" failed: "+e.what());
 				}
 			}
 			{
@@ -215,6 +219,7 @@ void ModuleThread::run(interface::Thread *thread)
 				mc->module->event(event.type, event.p.get());
 			} catch(std::exception &e){
 				log_w(MODULE, "module->event() failed: %s", e.what());
+				mc->server->shutdown(1, mc->info.name+" failed: "+e.what());
 			}
 		}
 	}
@@ -495,7 +500,7 @@ struct CState: public State, public interface::Server
 			m_module_info[info.name] = info;
 
 			mc = sp_<ModuleContainer>(new ModuleContainer(
-					&m_thread_local_mc_key, m, info));
+					this, &m_thread_local_mc_key, m, info));
 			m_modules[info.name] = mc;
 			m_module_load_order.push_back(info.name);
 		}
@@ -531,7 +536,7 @@ struct CState: public State, public interface::Server
 				}
 			}
 			mc = sp_<ModuleContainer>(new ModuleContainer(
-					&m_thread_local_mc_key, m, info));
+					this, &m_thread_local_mc_key, m, info));
 			m_modules[info.name] = mc;
 			m_module_load_order.push_back(info.name);
 		}
@@ -707,18 +712,73 @@ struct CState: public State, public interface::Server
 		return result;
 	}
 
+	// Call with m_modules_mutex locked
+	bool is_dependency_u(ModuleContainer *mc_should_be_dependent,
+			ModuleContainer *mc_should_be_dependency)
+	{
+		const ss_ &search_dep_name = mc_should_be_dependency->info.name;
+		const interface::ModuleInfo &info = mc_should_be_dependent->info;
+		// Breadth-first
+		for(const interface::ModuleDependency &dep : info.meta.dependencies){
+			/*log_t(MODULE, "is_dependency_u(): \"%s\" has dependency \"%s\"; "
+					"searching for \"%s\"",
+					cs(info.name), cs(dep.module), cs(search_dep_name));*/
+			if(dep.module == search_dep_name)
+				return true;
+		}
+		for(const interface::ModuleDependency &dep : info.meta.dependencies){
+			auto it = m_modules.find(dep.module);
+			if(it == m_modules.end())
+				continue;
+			ModuleContainer *mc_dependency = it->second.get();
+			bool is = is_dependency_u(mc_dependency, mc_should_be_dependency);
+			if(is)
+				return true;
+		}
+		/*log_t(MODULE, "is_dependency_u(): \"%s\" does not depend on \"%s\"",
+				cs(info.name), cs(search_dep_name));*/
+		return false;
+	}
+
+	// Throws on invalid access
+	// Call with m_modules_mutex locked
+	void check_valid_access_u(
+			ModuleContainer *target_mc,
+			ModuleContainer *caller_mc
+	){
+		const ss_ &target_name = target_mc->info.name;
+		const ss_ &caller_name = caller_mc->info.name;
+
+		// Access is invalid if target is caller
+		if(caller_mc == target_mc)
+			throw Exception("Cannot access \""+target_name+"\" from \""+
+					caller_name+"\": Accessing itself is disallowed");
+
+		// Access is invalid if target is being accessed by somebody who is
+		// being accessed by caller, directly or indirectly
+		if(!is_dependency_u(caller_mc, target_mc))
+			throw Exception("Cannot access \""+target_name+"\" from \""+
+					caller_name+"\": Not a dependency");
+
+		// Access is valid
+	}
+
 	bool access_module(const ss_ &module_name,
 			std::function<void(interface::Module*)> cb)
 	{
 		sp_<ModuleContainer> mc;
+		ss_ caller_module_name;
 		{
-			// This prevents module from being deleted while a reference is
-			// being copied
 			interface::MutexScope ms(m_modules_mutex);
+
 			auto it = m_modules.find(module_name);
 			if(it == m_modules.end())
-				return false;
+				throw Exception("access_module(): Module \""+module_name+
+						"\" not found");
 			mc = it->second;
+			if(!mc)
+				throw Exception("access_module(): Module \""+module_name+
+						"\" container is null");
 
 			// Get container of current module
 			ModuleContainer *caller_mc =
@@ -726,15 +786,22 @@ struct CState: public State, public interface::Server
 			if(caller_mc){
 				log_t(MODULE, "access_module(\"%s\"): Called by \"%s\"",
 						cs(mc->info.name), cs(caller_mc->info.name));
+
+				// Throws exception if not valid.
+				// If accessing a module from a nested access_module(), this
+				// function is called from the thread of the nested module,
+				// effectively taking into account the lock hierarchy.
+				check_valid_access_u(mc.get(), caller_mc);
+
+				// Access OK; copy the caller's name so we can use it
+				caller_module_name = caller_mc->info.name;
 			} else {
 				log_t(MODULE, "access_module(\"%s\"): Called by something else"
 						" than a module", cs(mc->info.name));
 			}
-
-			// TODO: Check that the module being accessed is a direct or
-			//       indirect dependency of the module accessing it, and not the
-			//       module itself
 		}
+
+		// Execute callback in module thread
 		mc->execute_direct_cb(cb);
 		return true;
 	}

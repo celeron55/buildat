@@ -65,8 +65,10 @@ namespace interface
 		virtual ss_ get_module_path(const ss_ &module_name) = 0;
 		virtual bool has_module(const ss_ &module_name) = 0;
 		virtual sv_<ss_> get_loaded_modules() = 0;
-		virtual bool access_module(const ss_ &module_name,
+		virtual bool access_module(const ss_ &module_name, // Always returns true
 				std::function<void(interface::Module*)> cb) = 0;
+		/*virtual bool access_module_optional(const ss_ &module_name, TODO
+				std::function<void(interface::Module*)> cb) = 0;*/
 
 		virtual void sub_event(struct Module *module, const Event::Type &type) = 0;
 		virtual void emit_event(Event event) = 0;

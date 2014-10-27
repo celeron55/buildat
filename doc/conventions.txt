@@ -37,6 +37,11 @@ Function naming:
 Do not use assert(); throw anonymous exceptions instead:
 - if(fail) throw Exception("Thing failed");
 
+In normal operation, zero exceptions should be thrown. Unless any potential bugs
+are occurring, you should be able to play the game fine if you set a breakpoint
+on a GCC Linux build to __cxa_throw, which will stop the program immediately
+when an exception occurs.
+
 Naming:
 - "type": Numeric id representing a type
 - "name": A string; generally works as an identifier but not necessarily
