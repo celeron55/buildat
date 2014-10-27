@@ -128,5 +128,33 @@ Thread* createThread(ThreadedThing *thing)
 	return new CThread(thing);
 }
 
+// ThreadLocalKey
+
+struct ThreadLocalKeyPrivate
+{
+	pthread_key_t key;
+};
+
+ThreadLocalKey::ThreadLocalKey():
+	m_private(new ThreadLocalKeyPrivate)
+{
+	pthread_key_create(&m_private->key, NULL);
+}
+
+ThreadLocalKey::~ThreadLocalKey()
+{
+	pthread_key_delete(m_private->key);
+}
+
+void ThreadLocalKey::set(void *p)
+{
+	pthread_setspecific(m_private->key, p);
+}
+
+void* ThreadLocalKey::get()
+{
+	return pthread_getspecific(m_private->key);
+}
+
 }
 // vim: set noet ts=4 sw=4:

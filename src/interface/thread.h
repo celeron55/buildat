@@ -26,5 +26,17 @@ namespace interface
 	};
 
 	Thread* createThread(ThreadedThing *thing);
+
+	struct ThreadLocalKeyPrivate;
+
+	struct ThreadLocalKey
+	{
+		ThreadLocalKey();
+		~ThreadLocalKey();
+		void set(void *p);
+		void* get();
+	private:
+		up_<ThreadLocalKeyPrivate> m_private;
+	};
 }
 // vim: set noet ts=4 sw=4:
