@@ -8,6 +8,7 @@ namespace interface
 	namespace os
 	{
 		int64_t get_timeofday_us();
+		void sleep_us(int us);
 	}
 }
 
