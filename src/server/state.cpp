@@ -55,25 +55,53 @@ struct ModuleContainer
 	interface::Mutex mutex; // Protects each of the former variables
 	up_<interface::Thread> thread;
 
+	// Allows directly executing code in the module thread
+	const std::function<void(interface::Module*)> *direct_cb = nullptr;
+	// The actual event queue
 	std::deque<Event> event_queue; // Push back, pop front
+	// Protects direct_cb and event_queue
 	interface::Mutex event_queue_mutex;
-	interface::Semaphore event_queue_sem; // Counts queued events
+	// Counts queued events, and +1 for direct_cb
+	interface::Semaphore event_queue_sem;
+	// post() when direct_cb has been executed, wait() for that to happen
+	interface::Semaphore direct_cb_executed_sem;
+	// post() when direct_cb becomes free, wait() for that to happen
+	interface::Semaphore direct_cb_free_sem;
 
 	ModuleContainer(interface::Module *module = NULL,
 			const interface::ModuleInfo &info = interface::ModuleInfo()):
 		module(module),
 		info(info)
-	{}
+	{
+		direct_cb_free_sem.post();
+	}
 	~ModuleContainer(){
 		log_t(MODULE, "ModuleContainer[%s]: Destructing", cs(info.name));
 		stop_and_delete_module();
+	}
+	void init_and_start_thread(){
+		interface::MutexScope ms(mutex);
+		if(!module)
+			return;
+		module->init();
+		thread.reset(interface::createThread(new ModuleThread(this)));
+		thread->set_name(info.name);
+		thread->start();
 	}
 	void stop_and_delete_module(){
 		if(thread){
 			log_t(MODULE, "ModuleContainer[%s]: Asking thread to exit",
 					cs(info.name));
 			thread->request_stop();
-			event_queue_sem.post(); // Wake up thread so it can exit
+			// Clear direct callback
+			{
+				interface::MutexScope ms(event_queue_mutex);
+				direct_cb = nullptr;
+			}
+			// Pretend that the current direct callback was executed
+			direct_cb_executed_sem.post();
+			// Wake up thread so it can exit
+			event_queue_sem.post();
 			log_t(MODULE, "ModuleContainer[%s]: Asked thread to exit; waiting",
 					cs(info.name));
 			thread->join();
@@ -95,6 +123,26 @@ struct ModuleContainer
 		interface::MutexScope ms(mutex);
 		module->event(event.type, event.p.get());
 	}
+	void execute_direct_cb(const std::function<void(interface::Module*)> &cb){
+		log_t(MODULE, "execute_direct_cb[%s]: Waiting for direct_cb to be free",
+				cs(info.name));
+		direct_cb_free_sem.wait(); // Wait for direct_cb to be free
+		log_t(MODULE, "execute_direct_cb[%s]: Direct_cb is now free. "
+				"Waiting for event queue lock", cs(info.name));
+		{
+			interface::MutexScope ms(event_queue_mutex);
+			log_t(MODULE, "execute_direct_cb[%s]: Posting direct_cb",
+					cs(info.name));
+			direct_cb = &cb;
+			event_queue_sem.post();
+		}
+		log_t(MODULE, "execute_direct_cb[%s]: Waiting for execution to finish",
+				cs(info.name));
+		direct_cb_executed_sem.wait(); // Wait for execution to finish
+		direct_cb_free_sem.post(); // Set direct_cb to be free now
+		log_t(MODULE, "execute_direct_cb[%s]: Execution finished",
+				cs(info.name));
+	}
 };
 
 void ModuleThread::run(interface::Thread *thread)
@@ -105,26 +153,55 @@ void ModuleThread::run(interface::Thread *thread)
 		// Check if should stop
 		if(thread->stop_requested())
 			break;
-		// Grab an event from the queue
+		// Grab the direct callback or an event from the queue
+		const std::function<void(interface::Module*)> *direct_cb = nullptr;
 		Event event;
 		{
 			interface::MutexScope ms(mc->event_queue_mutex);
-			if(mc->event_queue.empty())
+			if(mc->direct_cb){
+				direct_cb = mc->direct_cb;
+			} else if(!mc->event_queue.empty()){
+				event = mc->event_queue.front();
+				mc->event_queue.pop_front();
+			} else {
 				continue;
-			event = mc->event_queue.front();
-			mc->event_queue.pop_front();
+			}
 		}
-		// Handle the event
-		interface::MutexScope ms(mc->mutex);
-		if(!mc->module){
-			log_w(MODULE, "ModuleContainer[%s]: Module is null; cannot"
-					" handle event", cs(mc->info.name));
-			continue;
-		}
-		try {
-			mc->module->event(event.type, event.p.get());
-		} catch(std::exception &e){
-			log_w(MODULE, "module->event() failed: %s", e.what());
+		if(direct_cb){
+			// Handle the direct callback
+			interface::MutexScope ms(mc->mutex);
+			if(!mc->module){
+				log_w(MODULE, "ModuleContainer[%s]: Module is null; cannot"
+						" call direct callback", cs(mc->info.name));
+			} else {
+				try {
+					log_t(MODULE, "run[%s]: Direct_cb: Executing",
+							cs(mc->info.name));
+					(*direct_cb)(mc->module.get());
+					log_t(MODULE, "run[%s]: Direct_cb: Executed",
+							cs(mc->info.name));
+				} catch(std::exception &e){
+					log_w(MODULE, "direct_cb() failed: %s", e.what());
+				}
+			}
+			{
+				interface::MutexScope ms(mc->event_queue_mutex);
+				mc->direct_cb = nullptr;
+			}
+			mc->direct_cb_executed_sem.post();
+		} else {
+			// Handle the event
+			interface::MutexScope ms(mc->mutex);
+			if(!mc->module){
+				log_w(MODULE, "ModuleContainer[%s]: Module is null; cannot"
+						" handle event", cs(mc->info.name));
+				continue;
+			}
+			try {
+				mc->module->event(event.type, event.p.get());
+			} catch(std::exception &e){
+				log_w(MODULE, "module->event() failed: %s", e.what());
+			}
 		}
 	}
 	// Delete module in this thread. This is important in case the destruction
@@ -240,8 +317,9 @@ struct CState: public State, public interface::Server
 		for(sp_<ModuleContainer> &mc : mcs){
 			log_v(MODULE, "Destructing module %s", cs(mc->info.name));
 			mc->stop_and_delete_module();
-			// Remove our reference to the module container.
-			// This stops the module's main thread.
+			// Remove our reference to the module container, so that any child
+			// threads it will now delete will not get deadlocked in trying to
+			// access the module
 			// (This is a shared pointer)
 			mc.reset();
 		}
@@ -400,12 +478,9 @@ struct CState: public State, public interface::Server
 				new ModuleContainer(m, info));
 		m_module_load_order.push_back(info.name);
 
-		// Call init()
+		// Call init() and start thread
 		sp_<ModuleContainer> mc = m_modules[info.name];
-		interface::MutexScope ms2(mc->mutex);
-		mc->module->init();
-		mc->thread.reset(interface::createThread(new ModuleThread(mc.get())));
-		mc->thread->start();
+		mc->init_and_start_thread();
 	}
 
 	bool load_module(const interface::ModuleInfo &info)
@@ -436,15 +511,9 @@ struct CState: public State, public interface::Server
 				new ModuleContainer(m, info));
 		m_module_load_order.push_back(info.name);
 
-		// Call init()
-
-		if(m){
-			sp_<ModuleContainer> mc = m_modules[info.name];
-			interface::MutexScope ms2(mc->mutex);
-			mc->module->init();
-			mc->thread.reset(interface::createThread(new ModuleThread(mc.get())));
-			mc->thread->start();
-		}
+		// Call init() and start thread
+		sp_<ModuleContainer> mc = m_modules[info.name];
+		mc->init_and_start_thread();
 
 		emit_event(Event("core:module_loaded",
 				new interface::ModuleLoadedEvent(info.name)));
@@ -627,10 +696,7 @@ struct CState: public State, public interface::Server
 				return false;
 			mc = it->second;
 		}
-		interface::MutexScope mc_ms(mc->mutex);
-		if(!mc->module)
-			return false;
-		cb(mc->module.get());
+		mc->execute_direct_cb(cb);
 		return true;
 	}
 

@@ -69,3 +69,10 @@ Buildat TODO
 - Make some kind of an ace of spades clone (or less of a clone); something that
   requires the game to control the creation and deletion of the world anyway,
   and implement the required interfaces
+- Check that modules are accessed in order of dependency to effectively maintain
+  recursive locking
+- Don't immediately start processing a chunk in ground_plane_lighting on
+  voxelworld:node_volume_updated because those will repeat the same chunk
+  multiple times
+- Use std::atomic_bool in impl/thread
+- Use std::atomic_int for log level in core/log and check it early
