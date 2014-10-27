@@ -71,7 +71,3 @@ Buildat TODO
   and implement the required interfaces
 - Check that modules are accessed in order of dependency to effectively maintain
   recursive locking
-- Don't immediately start processing a chunk in ground_plane_lighting on
-  voxelworld:node_volume_updated because those will repeat the same chunk
-  multiple times
-- Use std::atomic_bool in impl/thread
