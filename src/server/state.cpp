@@ -16,6 +16,7 @@
 #include "interface/thread_pool.h"
 #include "interface/thread.h"
 #include "interface/semaphore.h"
+#include "interface/debug.h"
 #include <iostream>
 #include <algorithm>
 #include <fstream>
@@ -199,6 +200,7 @@ void ModuleThread::run(interface::Thread *thread)
 							cs(mc->info.name));
 				} catch(std::exception &e){
 					log_w(MODULE, "direct_cb() failed: %s", e.what());
+					interface::debug::log_exception_backtrace();
 					mc->server->shutdown(1, mc->info.name+" failed: "+e.what());
 				}
 			}
@@ -219,6 +221,7 @@ void ModuleThread::run(interface::Thread *thread)
 				mc->module->event(event.type, event.p.get());
 			} catch(std::exception &e){
 				log_w(MODULE, "module->event() failed: %s", e.what());
+				interface::debug::log_exception_backtrace();
 				mc->server->shutdown(1, mc->info.name+" failed: "+e.what());
 			}
 		}

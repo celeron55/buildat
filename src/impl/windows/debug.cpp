@@ -12,6 +12,16 @@ void init_signal_handlers(const SigConfig &config)
 	// No-op
 }
 
+void log_current_backtrace()
+{
+	log_i(MODULE, "Backtrace logging not implemented on Windows");
+}
+
+void log_exception_backtrace()
+{
+	log_i(MODULE, "Backtrace logging not implemented on Windows");
+}
+
 }
 }
 // vim: set noet ts=4 sw=4:

@@ -13,6 +13,10 @@ namespace interface
 		};
 
 		void init_signal_handlers(const SigConfig &config);
+
+		void log_current_backtrace();
+
+		void log_exception_backtrace();
 	}
 }
 // vim: set noet ts=4 sw=4:

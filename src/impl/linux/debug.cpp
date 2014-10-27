@@ -66,6 +66,8 @@ static void* get_library_executable_address(const ss_ &lib_path)
 	#define REG_EIP REG_RIP
 #endif
 
+static void log_backtrace(void* const *trace, int trace_size);
+
 static void debug_sighandler(int sig, siginfo_t *info, void *secret)
 {
 	ucontext_t *uc = (ucontext_t*)secret;
@@ -80,6 +82,27 @@ static void debug_sighandler(int sig, siginfo_t *info, void *secret)
 	int trace_size = backtrace(trace, 16);
 	// Overwrite sigaction with caller's address
 	trace[1] = (void*) uc->uc_mcontext.gregs[REG_EIP];
+
+	log_backtrace(trace, trace_size);
+
+	exit(1);
+}
+
+void init_signal_handlers(const SigConfig &config)
+{
+	struct sigaction sa;
+	sa.sa_sigaction = debug_sighandler;
+	sigemptyset (&sa.sa_mask);
+	sa.sa_flags = SA_RESTART | SA_SIGINFO;
+
+	if(config.catch_segfault)
+		sigaction(SIGSEGV, &sa, NULL);
+	if(config.catch_abort)
+		sigaction(SIGABRT, &sa, NULL);
+}
+
+static void log_backtrace(void* const *trace, int trace_size)
+{
 	char **symbols = backtrace_symbols(trace, trace_size);
 
 	// The first stack frame points to this functiton
@@ -113,25 +136,55 @@ static void debug_sighandler(int sig, siginfo_t *info, void *secret)
 
 		if(addr2line_output.size() > 4){
 			log_i(MODULE, "#%i  %s", i-1, cs(addr2line_output));
-			log_v(MODULE, "    = %s", cs(cppfilt_symbol));
+			log_d(MODULE, "    = %s", cs(cppfilt_symbol));
 		} else {
 			log_i(MODULE, "#%i  %s", i-1, cs(cppfilt_symbol));
 		}
 	}
-	exit(1);
 }
 
-void init_signal_handlers(const SigConfig &config)
+void log_current_backtrace()
 {
-	struct sigaction sa;
-	sa.sa_sigaction = debug_sighandler;
-	sigemptyset (&sa.sa_mask);
-	sa.sa_flags = SA_RESTART | SA_SIGINFO;
+	void *trace[16];
+	int trace_size = backtrace(trace, 16);
 
-	if(config.catch_segfault)
-		sigaction(SIGSEGV, &sa, NULL);
-	if(config.catch_abort)
-		sigaction(SIGABRT, &sa, NULL);
+	log_backtrace(trace, trace_size);
+}
+
+#include <cxxabi.h>
+#include <dlfcn.h>
+
+static void *last_exception_frames[16];
+static int last_exception_num_frames = 0;
+static ss_ last_exception_name;
+
+// GCC-specific
+static ss_ demangle(const char *name)
+{
+	int status;
+	std::unique_ptr<char,void(*)(void*)>
+			realname(abi::__cxa_demangle(name, 0, 0, &status), &std::free);
+	return status ? "failed" : &*realname;
+}
+
+// GCC-specific
+extern "C" {
+	void __cxa_throw(void *ex, void *info, void (*dest)(void *)) {
+		last_exception_name = demangle(
+				reinterpret_cast<const std::type_info*>(info)->name());
+		last_exception_num_frames = backtrace(last_exception_frames,
+				sizeof last_exception_frames / sizeof(void*));
+
+		static void (*const rethrow)(void*,void*,void(*)(void*))
+		__attribute__((noreturn)) = (void (*)(void*,void*,void(*)(void*)))
+				dlsym(RTLD_NEXT, "__cxa_throw");
+		rethrow(ex,info,dest);
+	}
+}
+
+void log_exception_backtrace()
+{
+	log_backtrace(last_exception_frames, last_exception_num_frames);
 }
 
 }
