@@ -757,11 +757,16 @@ struct CState: public State, public interface::Server
 			throw Exception("Cannot access \""+target_name+"\" from \""+
 					caller_name+"\": Accessing itself is disallowed");
 
-		// Access is invalid if target is being accessed by somebody who is
-		// being accessed by caller, directly or indirectly
-		if(!is_dependency_u(caller_mc, target_mc))
+		// Access is invalid if caller is a direct or indirect dependency of
+		// target
+		if(is_dependency_u(target_mc, caller_mc))
 			throw Exception("Cannot access \""+target_name+"\" from \""+
-					caller_name+"\": Not a dependency");
+					caller_name+"\": Target depends on caller - access must "
+					"happen the other way around");
+
+		// The thing we are trying to disallow is that if module 1 accesses
+		// module 2 at some point, then at no point shall module 2 be allowed to
+		// access module 1.
 
 		// Access is valid
 	}
