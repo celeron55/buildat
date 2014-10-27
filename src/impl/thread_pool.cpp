@@ -45,7 +45,12 @@ struct CThreadPool: public ThreadPool
 
 	static void* run_thread(void *arg)
 	{
+		Thread *thread = (Thread*)arg;
 		log_d(MODULE, "Worker thread %p start", arg);
+		// Set name
+		if(pthread_setname_np(thread->thread, "buildat:worker")){
+			log_w(MODULE, "Failed to set worker thread %p name", thread);
+		}
 #ifndef _WIN32
 		// Disable all signals
 		sigset_t sigset;
@@ -53,7 +58,6 @@ struct CThreadPool: public ThreadPool
 		(void)pthread_sigmask(SIG_SETMASK, &sigset, NULL);
 #endif
 		// Go on
-		Thread *thread = (Thread*)arg;
 		for(;;){
 			// Wait for a task
 			thread->pool->m_tasks_sem.wait();

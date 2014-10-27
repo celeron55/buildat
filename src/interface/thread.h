@@ -17,6 +17,7 @@ namespace interface
 	struct Thread
 	{
 		virtual ~Thread(){}
+		virtual void set_name(const ss_ &name) = 0; // Useful for debugging
 		virtual void start() = 0;
 		virtual bool is_running() = 0;
 		virtual void request_stop() = 0;

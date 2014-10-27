@@ -22,6 +22,7 @@ struct CThread: public Thread
 	bool m_running = false;
 	bool m_stop_requested = false;
 	interface::Mutex m_mutex; // Protects each of the former variables
+	ss_ m_name = "unknown"; // Read-only when thread is running (no mutex)
 	up_<ThreadedThing> m_thing;
 	pthread_t m_thread;
 
@@ -37,15 +38,25 @@ struct CThread: public Thread
 
 	static void* run_thread(void *arg)
 	{
-		log_d(MODULE, "Thread %p start", arg);
+		CThread *thread = (CThread*)arg;
+		log_d(MODULE, "Thread started: %p (%s)", thread, cs(thread->m_name));
+
+		// Set name
+		if(!thread->m_name.empty()){
+			ss_ limited_name = thread->m_name.size() <= 15 ?
+					thread->m_name : thread->m_name.substr(0, 15);
+			if(pthread_setname_np(thread->m_thread, limited_name.c_str())){
+				log_w(MODULE, "Failed to set thread name (thread %p, name \"%s\")",
+						thread, limited_name.c_str());
+			}
+		}
+
 #ifndef _WIN32
 		// Disable all signals
 		sigset_t sigset;
 		sigemptyset(&sigset);
 		(void)pthread_sigmask(SIG_SETMASK, &sigset, NULL);
 #endif
-		// Go on
-		CThread *thread = (CThread*)arg;
 
 		try {
 			if(thread->m_thing)
@@ -62,6 +73,14 @@ struct CThread: public Thread
 	}
 
 	// Interface
+
+	void set_name(const ss_ &name)
+	{
+		interface::MutexScope ms(m_mutex);
+		if(m_running)
+			throw Exception("Cannot set name of running thread");
+		m_name = name;
+	}
 
 	void start()
 	{
