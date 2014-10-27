@@ -87,7 +87,7 @@ Edit something and then restart the client (CTRL+C in terminal 2):
 Buildat Windows How-To
 ======================
 
-Use Mingw-w64 in an MSYS environment.
+Use Mingw-w64 in an MSYS environment. Make sure to use a pthreads version of Mingw-w64. Windows threads are not supported ATM.
 
     $ cd /path/to/Urho3D
     $ mkdir Build
