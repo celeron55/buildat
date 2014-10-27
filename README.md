@@ -38,7 +38,8 @@ NOTE: Occasionally you have to use celeron55's fork of Urho3D due to special
 
     $ git clone https://github.com/celeron55/Urho3D.git
     $ cd Urho3D
-    $ ./cmake_gcc.sh -DURHO3D_LIB_TYPE=SHARED -DURHO3D_LUA=true -DURHO3D_SAFE_LUA=true  # Add -DURHO3D_64BIT=true on 64-bit systems
+    $ # Add -DURHO3D_64BIT=true on 64-bit systems
+    $ ./cmake_gcc.sh -DURHO3D_LIB_TYPE=SHARED -DURHO3D_ENFORCE_SINGLE_THREAD=false -DURHO3D_LUA=true -DURHO3D_SAFE_LUA=true
     $ cd Build
     $ make -j4
 
