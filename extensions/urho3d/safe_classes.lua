@@ -706,6 +706,7 @@ function M.define(dst, util)
 			horizontalAlignment = util.simple_property("number"),
 			verticalAlignment = util.simple_property("number"),
 			height = util.simple_property("number"),
+			width = util.simple_property("number"),
 			color = util.simple_property("Color"),
 			minHeight = util.simple_property("number"),
 			minWidth = util.simple_property("number"),
