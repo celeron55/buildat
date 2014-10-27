@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "log.h"
 #include "c55/os.h"
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <ctime>
@@ -24,16 +25,16 @@ const int LOG_DEBUG = 5;
 const int LOG_TRACE = 6;
 
 #ifdef _WIN32
-const bool use_colors = false;
+static const bool use_colors = false;
 #else
-const bool use_colors = true;
+static const bool use_colors = true;
 #endif
 
-bool line_begin = true;
-int current_level = 0;
-//int max_level = LOG_DEBUG;
-int max_level = LOG_INFO;
-FILE *file = NULL;
+static std::atomic_bool line_begin(true);
+static std::atomic_int current_level(0);
+static std::atomic_int max_level(LOG_INFO);
+
+static FILE *file = NULL;
 
 void log_init()
 {
@@ -42,17 +43,12 @@ void log_init()
 
 void log_set_max_level(int level)
 {
-	pthread_mutex_lock(&log_mutex);
 	max_level = level;
-	pthread_mutex_unlock(&log_mutex);
 }
 
 int log_get_max_level()
 {
-	pthread_mutex_lock(&log_mutex);
-	int l = max_level;
-	pthread_mutex_unlock(&log_mutex);
-	return l;
+	return max_level;
 }
 
 void log_set_file(const char *path)
@@ -93,6 +89,10 @@ void log_nl_nolock()
 
 void log_nl()
 {
+	if(current_level > max_level){ // Fast path
+		line_begin = true;
+		return;
+	}
 	pthread_mutex_lock(&log_mutex);
 	log_nl_nolock();
 	pthread_mutex_unlock(&log_mutex);
@@ -149,6 +149,9 @@ static void print(int level, const char *sys, const char *fmt, va_list va_args)
 
 void log_(int level, const char *sys, const char *fmt, ...)
 {
+	if(level > max_level){ // Fast path
+		return;
+	}
 	pthread_mutex_lock(&log_mutex);
 	va_list va_args;
 	va_start(va_args, fmt);
@@ -160,6 +163,9 @@ void log_(int level, const char *sys, const char *fmt, ...)
 
 void log_no_nl(int level, const char *sys, const char *fmt, ...)
 {
+	if(level > max_level){ // Fast path
+		return;
+	}
 	pthread_mutex_lock(&log_mutex);
 	va_list va_args;
 	va_start(va_args, fmt);

@@ -75,4 +75,3 @@ Buildat TODO
   voxelworld:node_volume_updated because those will repeat the same chunk
   multiple times
 - Use std::atomic_bool in impl/thread
-- Use std::atomic_int for log level in core/log and check it early
