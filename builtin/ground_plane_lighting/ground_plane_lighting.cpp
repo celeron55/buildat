@@ -286,48 +286,44 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 			pv::Region chunk_region =
 				ivoxelworld->get_chunk_region_voxels(chunk_p);
 
-			ground_plane_lighting::access(m_server,
-					[&](ground_plane_lighting::Interface *igpl)
-			{
-				auto lc = chunk_region.getLowerCorner();
-				auto uc = chunk_region.getUpperCorner();
-				//log_nv(MODULE, "yst=[");
-				for(int z = lc.getZ(); z <= uc.getZ(); z++){
-					for(int x = lc.getX(); x <= uc.getX(); x++){
-						int32_t yst0 = igpl->get_yst(x, z);
-						if(yst0 > uc.getY()){
-							// Y-seethrough doesn't reach here
-							continue;
-						}
-						int y = uc.getY();
-						for(;; y--){
-							VoxelInstance v = ivoxelworld->get_voxel(
-										pv::Vector3DInt32(x, y, z), true);
-							if(v.get_id() == interface::VOXELTYPEID_UNDEFINED){
-								// NOTE: This leaves the chunks below unhandled;
-								// there would have to be some kind of a dirty
-								// flag based on which this seach would be
-								// continued at a later point when the chunk
-								// gets loaded
-								break;
-							}
-							const auto *def = voxel_reg->get_cached(v);
-							if(!def)
-								throw Exception(ss_()+"Undefined voxel: "+
-										itos(v.get_id()));
-							bool light_passes = (!def || !def->physically_solid);
-							if(!light_passes)
-								break;
-						}
-						// The first voxel downwards from the top of the world that
-						// doesn't pass light
-						int32_t yst1 = y;
-						//log_nv(MODULE, "%i -> %i, ", yst0, yst1);
-						igpl->set_yst(x, z, yst1);
+			auto lc = chunk_region.getLowerCorner();
+			auto uc = chunk_region.getUpperCorner();
+			//log_nv(MODULE, "yst=[");
+			for(int z = lc.getZ(); z <= uc.getZ(); z++){
+				for(int x = lc.getX(); x <= uc.getX(); x++){
+					int32_t yst0 = get_yst(x, z);
+					if(yst0 > uc.getY()){
+						// Y-seethrough doesn't reach here
+						continue;
 					}
+					int y = uc.getY();
+					for(;; y--){
+						VoxelInstance v = ivoxelworld->get_voxel(
+									pv::Vector3DInt32(x, y, z), true);
+						if(v.get_id() == interface::VOXELTYPEID_UNDEFINED){
+							// NOTE: This leaves the chunks below unhandled;
+							// there would have to be some kind of a dirty
+							// flag based on which this seach would be
+							// continued at a later point when the chunk
+							// gets loaded
+							break;
+						}
+						const auto *def = voxel_reg->get_cached(v);
+						if(!def)
+							throw Exception(ss_()+"Undefined voxel: "+
+									itos(v.get_id()));
+						bool light_passes = (!def || !def->physically_solid);
+						if(!light_passes)
+							break;
+					}
+					// The first voxel downwards from the top of the world that
+					// doesn't pass light
+					int32_t yst1 = y;
+					//log_nv(MODULE, "%i -> %i, ", yst0, yst1);
+					set_yst(x, z, yst1);
 				}
-				//log_v(MODULE, "]");
-			});
+			}
+			//log_v(MODULE, "]");
 		});
 	}
 
