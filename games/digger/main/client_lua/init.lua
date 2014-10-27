@@ -212,6 +212,7 @@ end
 -- Add some text
 local title_text = magic.ui.root:CreateChild("Text")
 local misc_text = magic.ui.root:CreateChild("Text")
+local worldgen_text = magic.ui.root:CreateChild("Text")
 do
 	title_text:SetText("digger/init.lua")
 	title_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
@@ -224,6 +225,15 @@ do
 	misc_text.horizontalAlignment = magic.HA_CENTER
 	misc_text.verticalAlignment = magic.VA_CENTER
 	misc_text:SetPosition(0, -magic.ui.root.height/2 + 40)
+
+	worldgen_text:SetText("")
+	worldgen_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
+	--[[worldgen_text.horizontalAlignment = magic.HA_LEFT
+	worldgen_text.verticalAlignment = magic.VA_TOP
+	worldgen_text:SetPosition(0, 0)--]]
+	worldgen_text.horizontalAlignment = magic.HA_CENTER
+	worldgen_text.verticalAlignment = magic.VA_CENTER
+	worldgen_text:SetPosition(0, -magic.ui.root.height/2 + 60)
 end
 
 -- Unfocus UI
@@ -485,6 +495,15 @@ voxelworld.sub_ready(function()
 		end
 		local name = node:GetName()
 	end)
+end)
+
+buildat.sub_packet("main:worldgen_queue_size", function(data)
+	local queue_size = tonumber(data)
+	if queue_size > 0 then
+		worldgen_text:SetText("Worldgen queue size: "..queue_size)
+	else
+		worldgen_text:SetText("")
+	end
 end)
 
 -- vim: set noet ts=4 sw=4:

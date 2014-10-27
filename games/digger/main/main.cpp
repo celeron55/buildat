@@ -4,6 +4,7 @@
 #include "replicate/api.h"
 #include "voxelworld/api.h"
 #include "main_context/api.h"
+#include "worldgen/api.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
@@ -80,6 +81,7 @@ struct Module: public interface::Module
 					"network:packet_received/main:place_voxel"));
 		m_server->sub_event(this, Event::t(
 					"network:packet_received/main:dig_voxel"));
+		m_server->sub_event(this, Event::t("worldgen:queue_modified"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -94,6 +96,8 @@ struct Module: public interface::Module
 				on_place_voxel, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:dig_voxel",
 				on_dig_voxel, network::Packet)
+		EVENT_TYPEN("worldgen:queue_modified",
+				on_worldgen_queue_modified, worldgen::QueueModifiedEvent);
 	}
 
 	void on_start()
@@ -158,10 +162,6 @@ struct Module: public interface::Module
 		});
 	}
 
-	void update_scene()
-	{
-	}
-
 	void on_tick(const interface::TickEvent &event)
 	{
 		/*main_context::access(m_server, [&](main_context::Interface *imc)
@@ -224,6 +224,18 @@ struct Module: public interface::Module
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
 			ivoxelworld->set_voxel(voxel_p, VoxelInstance(1));
+		});
+	}
+
+	void on_worldgen_queue_modified(const worldgen::QueueModifiedEvent &event)
+	{
+		log_t(MODULE, "on_worldgen_queue_modified()");
+		network::access(m_server, [&](network::Interface *inetwork){
+			sv_<network::PeerInfo::Id> peers = inetwork->list_peers();
+			for(auto &peer: peers){
+				inetwork->send(peer, "main:worldgen_queue_size",
+						itos(event.queue_size));
+			}
 		});
 	}
 };
