@@ -399,6 +399,11 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 				client_file::FilesTransmitted)
 		EVENT_TYPEN("voxelworld:node_volume_updated",
 				on_node_volume_updated, voxelworld::NodeVolumeUpdated)
+
+		for(auto &pair : m_instances){
+			up_<CInstance> &instance = pair.second;
+			instance->event(type, p);
+		}
 	}
 
 	void on_start()
