@@ -130,6 +130,14 @@ struct Module: public interface::Module
 		});
 	}
 
+	void create_new_player(int peer)
+	{
+		m_players[peer] = Player(peer, rand() % 10, rand() % 10);
+
+		for(auto &pair : m_players)
+			send_update(pair.second.peer);
+	}
+
 	void on_client_connected(const network::NewClient &client_connected)
 	{
 		log_v(MODULE, "minigame::on_client_connected: id=%zu",
@@ -137,10 +145,7 @@ struct Module: public interface::Module
 
 		int peer = client_connected.info.id;
 
-		m_players[peer] = Player(peer, rand() % 10, rand() % 10);
-
-		for(auto &pair : m_players)
-			send_update(pair.second.peer);
+		create_new_player(peer);
 	}
 
 	void on_client_disconnected(const network::OldClient &old_client)
@@ -174,7 +179,10 @@ struct Module: public interface::Module
 				cs(packet.name), packet.data.size());
 		auto it = m_players.find(packet.sender);
 		if(it == m_players.end()){
-			log_w(MODULE, "Player not found: %i", packet.sender);
+			// This can occur when this module has been reloaded
+			// TODO: Should store and restore by using m_server->tmp_store_data()
+			log_w(MODULE, "Player not found: %i; creating new", packet.sender);
+			create_new_player(packet.sender);
 			return;
 		}
 		Player &player = it->second;
