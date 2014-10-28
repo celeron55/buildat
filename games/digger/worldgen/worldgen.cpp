@@ -59,12 +59,84 @@ struct GenerateThread: public interface::ThreadedThing
 	void run(interface::Thread *thread);
 };
 
+struct CInstance: public worldgen::Instance
+{
+	interface::Server *m_server;
+	SceneReference m_scene_ref;
+
+	up_<GeneratorInterface> m_generator;
+	bool m_enabled = false;
+
+	std::deque<pv::Vector3DInt16> m_queued_sections;
+
+	CInstance(interface::Server *server, SceneReference scene_ref):
+		m_server(server),
+		m_scene_ref(scene_ref)
+	{}
+
+	~CInstance()
+	{}
+
+	void on_generation_request(const pv::Vector3DInt16 &section_p)
+	{
+		m_queued_sections.push_back(section_p);
+		log_v(MODULE, "Queued section (%i, %i, %i); queue size: %zu (scene %p)",
+				section_p.getX(), section_p.getY(),
+				section_p.getZ(), m_queued_sections.size(), m_scene_ref);
+		m_server->emit_event("worldgen:queue_modified",
+				new QueueModifiedEvent(m_scene_ref, m_queued_sections.size()));
+	}
+
+	// Interface for GenerateThread
+
+	// NOTE: on_tick() cannot be used here, because as this takes much longer
+	//       than a tick, the ticks accumulate and result in nothing getting
+	//       queued but instead sectors get queued in the event queue.
+	void generate_next_section()
+	{
+		if(!m_enabled)
+			throw Exception("generate_next_section(): Not enabled");
+		if(m_queued_sections.empty())
+			return;
+		const pv::Vector3DInt16 section_p = m_queued_sections.front();
+		m_queued_sections.pop_front();
+
+		log_v(MODULE, "Generating section (%i, %i, %i); queue size: %zu",
+				section_p.getX(), section_p.getY(), section_p.getZ(),
+				m_queued_sections.size());
+
+		if(m_generator)
+			m_generator->generate_section(m_server, m_scene_ref, section_p);
+
+		m_server->emit_event("worldgen:queue_modified",
+				new QueueModifiedEvent(m_scene_ref, m_queued_sections.size()));
+	}
+
+	// Interface
+
+	void set_generator(GeneratorInterface *generator)
+	{
+		m_generator.reset(generator);
+	}
+
+	void enable()
+	{
+		m_enabled = true;
+	}
+
+	size_t get_num_sections_queued()
+	{
+		return m_queued_sections.size();
+	}
+};
+
 struct Module: public interface::Module, public Interface
 {
 	interface::Server *m_server;
-	std::deque<pv::Vector3DInt16> m_queued_sections;
-	interface::Semaphore m_queued_sections_sem;
+
+	sm_<SceneReference, up_<CInstance>> m_instances;
 	sp_<interface::Thread> m_thread;
+	interface::Semaphore m_queued_sections_sem;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -99,128 +171,6 @@ struct Module: public interface::Module, public Interface
 
 	void on_start()
 	{
-		// Define voxels on core:start (woxelworld will restore them on reload)
-		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
-		{
-			interface::VoxelRegistry *voxel_reg = ivoxelworld->get_voxel_reg();
-			{
-				interface::VoxelDefinition vdef;
-				vdef.name.block_name = "air";
-				vdef.name.segment_x = 0;
-				vdef.name.segment_y = 0;
-				vdef.name.segment_z = 0;
-				vdef.name.rotation_primary = 0;
-				vdef.name.rotation_secondary = 0;
-				vdef.handler_module = "";
-				for(size_t i = 0; i < 6; i++){
-					interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-					seg.resource_name = "";
-					seg.total_segments = magic::IntVector2(0, 0);
-					seg.select_segment = magic::IntVector2(0, 0);
-				}
-				vdef.edge_material_id = interface::EDGEMATERIALID_EMPTY;
-				voxel_reg->add_voxel(vdef); // id 1
-			}
-			{
-				interface::VoxelDefinition vdef;
-				vdef.name.block_name = "rock";
-				vdef.name.segment_x = 0;
-				vdef.name.segment_y = 0;
-				vdef.name.segment_z = 0;
-				vdef.name.rotation_primary = 0;
-				vdef.name.rotation_secondary = 0;
-				vdef.handler_module = "";
-				for(size_t i = 0; i < 6; i++){
-					interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-					seg.resource_name = "main/rock.png";
-					seg.total_segments = magic::IntVector2(1, 1);
-					seg.select_segment = magic::IntVector2(0, 0);
-				}
-				vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
-				vdef.physically_solid = true;
-				voxel_reg->add_voxel(vdef); // id 2
-			}
-			{
-				interface::VoxelDefinition vdef;
-				vdef.name.block_name = "dirt";
-				vdef.name.segment_x = 0;
-				vdef.name.segment_y = 0;
-				vdef.name.segment_z = 0;
-				vdef.name.rotation_primary = 0;
-				vdef.name.rotation_secondary = 0;
-				vdef.handler_module = "";
-				for(size_t i = 0; i < 6; i++){
-					interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-					seg.resource_name = "main/dirt.png";
-					seg.total_segments = magic::IntVector2(1, 1);
-					seg.select_segment = magic::IntVector2(0, 0);
-				}
-				vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
-				vdef.physically_solid = true;
-				voxel_reg->add_voxel(vdef); // id 3
-			}
-			{
-				interface::VoxelDefinition vdef;
-				vdef.name.block_name = "grass";
-				vdef.name.segment_x = 0;
-				vdef.name.segment_y = 0;
-				vdef.name.segment_z = 0;
-				vdef.name.rotation_primary = 0;
-				vdef.name.rotation_secondary = 0;
-				vdef.handler_module = "";
-				for(size_t i = 0; i < 6; i++){
-					interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-					seg.resource_name = "main/grass.png";
-					seg.total_segments = magic::IntVector2(1, 1);
-					seg.select_segment = magic::IntVector2(0, 0);
-				}
-				vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
-				vdef.physically_solid = true;
-				voxel_reg->add_voxel(vdef); // id 4
-			}
-			{
-				interface::VoxelDefinition vdef;
-				vdef.name.block_name = "leaves";
-				vdef.name.segment_x = 0;
-				vdef.name.segment_y = 0;
-				vdef.name.segment_z = 0;
-				vdef.name.rotation_primary = 0;
-				vdef.name.rotation_secondary = 0;
-				vdef.handler_module = "";
-				for(size_t i = 0; i < 6; i++){
-					interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-					seg.resource_name = "main/leaves.png";
-					seg.total_segments = magic::IntVector2(1, 1);
-					seg.select_segment = magic::IntVector2(0, 0);
-				}
-				vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
-				vdef.physically_solid = true;
-				voxel_reg->add_voxel(vdef); // id 5
-			}
-			{
-				interface::VoxelDefinition vdef;
-				vdef.name.block_name = "tree";
-				vdef.name.segment_x = 0;
-				vdef.name.segment_y = 0;
-				vdef.name.segment_z = 0;
-				vdef.name.rotation_primary = 0;
-				vdef.name.rotation_secondary = 0;
-				vdef.handler_module = "";
-				for(size_t i = 0; i < 6; i++){
-					interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-					seg.resource_name = "main/tree.png";
-					seg.total_segments = magic::IntVector2(1, 1);
-					seg.select_segment = magic::IntVector2(0, 0);
-				}
-				vdef.textures[0].resource_name = "main/tree_top.png";
-				vdef.textures[1].resource_name = "main/tree_top.png";
-				vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
-				vdef.physically_solid = true;
-				voxel_reg->add_voxel(vdef); // id 6
-			}
-		});
-
-		m_server->emit_event("worldgen:voxels_defined");
 	}
 
 	void on_continue()
@@ -233,143 +183,41 @@ struct Module: public interface::Module, public Interface
 
 	void on_generation_request(const voxelworld::GenerationRequest &event)
 	{
-		m_queued_sections.push_back(event.section_p);
-		m_queued_sections_sem.post();
-		log_v(MODULE, "Queued section (%i, %i, %i); queue size: %zu",
-				event.section_p.getX(), event.section_p.getY(),
-				event.section_p.getZ(), m_queued_sections.size());
-		m_server->emit_event("worldgen:queue_modified",
-				new QueueModifiedEvent(m_queued_sections.size()));
-	}
-
-	// Interface for GenerateThread
-
-	// NOTE: on_tick() cannot be used here, because as this takes much longer
-	//       than a tick, the ticks accumulate and result in nothing getting
-	//       queued but instead sectors get queued in the event queue.
-	void generate_next_section()
-	{
-		if(m_queued_sections.empty())
+		auto it = m_instances.find(event.scene);
+		if(it == m_instances.end())
 			return;
-		const pv::Vector3DInt16 section_p = m_queued_sections.front();
-		m_queued_sections.pop_front();
-
-		log_v(MODULE, "Generating section (%i, %i, %i); queue size: %zu",
-				section_p.getX(), section_p.getY(), section_p.getZ(),
-				m_queued_sections.size());
-		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
-		{
-			pv::Region region = ivoxelworld->get_section_region_voxels(
-						section_p);
-
-			auto lc = region.getLowerCorner();
-			auto uc = region.getUpperCorner();
-
-			log_t(MODULE, "on_generation_request(): lc: (%i, %i, %i)",
-					lc.getX(), lc.getY(), lc.getZ());
-			log_t(MODULE, "on_generation_request(): uc: (%i, %i, %i)",
-					uc.getX(), uc.getY(), uc.getZ());
-
-			interface::v3f spread(160, 160, 160);
-			interface::NoiseParams np(0, 40, spread, 0, 7, 0.55);
-
-			int w = uc.getX() - lc.getX() + 1;
-			int d = uc.getZ() - lc.getZ() + 1;
-
-			interface::Noise noise(&np, 3, w, d);
-			noise.perlinMap2D(lc.getX() + spread.X/2, lc.getZ() + spread.Z/2);
-			noise.transformNoiseMap(); // ?
-
-			size_t noise_i = 0;
-			for(int z = lc.getZ(); z <= uc.getZ(); z++){
-				for(int x = lc.getX(); x <= uc.getX(); x++){
-					double a = noise.result[noise_i];
-					noise_i++;
-					for(int y = lc.getY(); y <= uc.getY(); y++){
-						pv::Vector3DInt32 p(x, y, z);
-						pv::Vector3DInt32 cp(-112, 20, 253);
-						if((p - cp).lengthSquared() < 30*30){
-							ivoxelworld->set_voxel(p, VoxelInstance(1));
-							continue;
-						}
-						if(y >= 2 && y <= 3 && z >= 256 && z <= 258 &&
-								x >= -112 && x <= -5){
-							ivoxelworld->set_voxel(p, VoxelInstance(1));
-							continue;
-						}
-						if(z > 37 && z < 50 && y > 20){
-							ivoxelworld->set_voxel(p, VoxelInstance(1));
-							continue;
-						}
-						if(x > 27 && x < 40 && y > 20){
-							ivoxelworld->set_voxel(p, VoxelInstance(1));
-							continue;
-						}
-						if(x > 18 && x < 25 && z >= 32 && z <= 37 &&
-								y > 20 && y < 25){
-							ivoxelworld->set_voxel(p, VoxelInstance(1));
-							continue;
-						}
-						if(y < a+5){
-							ivoxelworld->set_voxel(p, VoxelInstance(2));
-						} else if(y < a+10){
-							ivoxelworld->set_voxel(p, VoxelInstance(3));
-						} else if(y < a+11){
-							ivoxelworld->set_voxel(p, VoxelInstance(4));
-						} else {
-							ivoxelworld->set_voxel(p, VoxelInstance(1));
-						}
-					}
-				}
-			}
-
-			// Add random trees
-			auto extent = uc - lc + pv::Vector3DInt32(1, 1, 1);
-			int area = extent.getX() * extent.getZ();
-			auto pr = interface::PseudoRandom(13241);
-			for(int i = 0; i < area / 100; i++){
-				int x = pr.range(lc.getX(), uc.getX());
-				int z = pr.range(lc.getZ(), uc.getZ());
-
-	            /*int y = 50;
-	            for(; y>-50; y--){
-	                pv::Vector3DInt32 p(x, y, z);
-	                VoxelInstance v = ivoxelworld->get_voxel(p);
-	                if(v.get_id() != 1)
-	                    break;
-	            }
-	            y++;*/
-				size_t noise_i = (z-lc.getZ())*d + (x-lc.getX());
-				double a = noise.result[noise_i];
-				int y = a + 11.0;
-				if(y < lc.getY() - 5 || y > uc.getY() - 5)
-					continue;
-
-				for(int y1 = y; y1<y+4; y1++){
-					pv::Vector3DInt32 p(x, y1, z);
-					ivoxelworld->set_voxel(p, VoxelInstance(6), true);
-				}
-
-				for(int x1 = x-2; x1 <= x+2; x1++){
-					for(int y1 = y+3; y1 <= y+7; y1++){
-						for(int z1 = z-2; z1 <= z+2; z1++){
-							pv::Vector3DInt32 p(x1, y1, z1);
-							ivoxelworld->set_voxel(p, VoxelInstance(5), true);
-						}
-					}
-				}
-			}
-		});
-
-		m_server->emit_event("worldgen:queue_modified",
-				new QueueModifiedEvent(m_queued_sections.size()));
+		up_<CInstance> &instance = it->second;
+		instance->on_generation_request(event.section_p);
+		m_queued_sections_sem.post();
 	}
 
 	// Interface
 
-	size_t get_num_sections_queued()
+	void create_instance(SceneReference scene_ref)
 	{
-		return m_queued_sections.size();
+		auto it = m_instances.find(scene_ref);
+		// TODO: Is an exception the best way to handle this?
+		if(it != m_instances.end())
+			throw Exception("create_instance(): Scene already has worldgen");
+
+		up_<CInstance> instance(new CInstance(m_server, scene_ref));
+		m_instances[scene_ref] = std::move(instance);
+	}
+
+	void delete_instance(SceneReference scene_ref)
+	{
+		auto it = m_instances.find(scene_ref);
+		if(it == m_instances.end())
+			throw Exception("delete_instance(): Scene does not have worldgen");
+		m_instances.erase(it);
+	}
+
+	Instance* get_instance(SceneReference scene_ref)
+	{
+		auto it = m_instances.find(scene_ref);
+		if(it == m_instances.end())
+			throw Exception("get_instance(): Scene does not have worldgen");
+		return it->second.get();
 	}
 
 	void* get_interface()
@@ -381,8 +229,9 @@ struct Module: public interface::Module, public Interface
 void GenerateThread::run(interface::Thread *thread)
 {
 	for(;;){
-		// Give some time for accumulating the section queue
+		// Give some time for accumulating the section queues
 		interface::os::sleep_us(5000);
+		// Wait for some generation requests
 		m_module->m_queued_sections_sem.wait();
 		if(thread->stop_requested())
 			break;
@@ -391,7 +240,16 @@ void GenerateThread::run(interface::Thread *thread)
 		worldgen::access(m_module->m_server,
 				[&](worldgen::Interface *iworldgen)
 		{
-			m_module->generate_next_section();
+			// Generate one section for each instance
+			for(auto &pair : m_module->m_instances){
+				up_<CInstance> &instance = pair.second;
+				if(!instance->m_enabled && !instance->m_queued_sections.empty()){
+					// Has to be checked later
+					m_module->m_queued_sections_sem.post();
+					continue;
+				}
+				instance->generate_next_section();
+			}
 		});
 	}
 }
