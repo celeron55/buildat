@@ -57,7 +57,7 @@ void basic_init()
 	setlocale(LC_NUMERIC, "C");
 
 	log_init();
-	log_set_max_level(LOG_VERBOSE);
+	log_set_max_level(CORE_VERBOSE);
 
 	interface::debug::SigConfig debug_sig_config;
 	interface::debug::init_signal_handlers(debug_sig_config);

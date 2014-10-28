@@ -888,7 +888,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 				container_coord16(chunk_p, m_section_size_chunks);
 		Section *section = get_section(section_p);
 		if(section == nullptr){
-			log_(disable_warnings ? LOG_DEBUG : LOG_WARNING,
+			log_(disable_warnings ? CORE_DEBUG : CORE_WARNING,
 					MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i: No section "
 					PV3I_FORMAT " for chunk " PV3I_FORMAT,
 					PV3I_PARAMS(p), v.data, PV3I_PARAMS(section_p),
@@ -903,7 +903,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		ChunkBuffer &buf = section->get_buffer(chunk_p, m_server,
 					&m_total_buffers_loaded);
 		if(!buf.volume){
-			log_(disable_warnings ? LOG_DEBUG : LOG_WARNING,
+			log_(disable_warnings ? CORE_DEBUG : CORE_WARNING,
 					MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i: Couldn't get "
 					"buffer volume for chunk " PV3I_FORMAT " in section "
 					PV3I_FORMAT, PV3I_PARAMS(p), v.data, PV3I_PARAMS(chunk_p),
@@ -1046,7 +1046,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 				container_coord16(chunk_p, m_section_size_chunks);
 		Section *section = get_section(section_p);
 		if(section == nullptr){
-			log_(disable_warnings ? LOG_DEBUG : LOG_WARNING,
+			log_(disable_warnings ? CORE_DEBUG : CORE_WARNING,
 					MODULE, "get_voxel() p=" PV3I_FORMAT ": No section "
 					PV3I_FORMAT " for chunk " PV3I_FORMAT,
 					PV3I_PARAMS(p), PV3I_PARAMS(section_p),
@@ -1061,7 +1061,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		ChunkBuffer &buf = section->get_buffer(chunk_p, m_server,
 					&m_total_buffers_loaded);
 		if(!buf.volume){
-			log_(disable_warnings ? LOG_DEBUG : LOG_WARNING,
+			log_(disable_warnings ? CORE_DEBUG : CORE_WARNING,
 					MODULE, "get_voxel() p=" PV3I_FORMAT ": Couldn't get "
 					"buffer volume for chunk " PV3I_FORMAT " in section "
 					PV3I_FORMAT, PV3I_PARAMS(p), PV3I_PARAMS(chunk_p),

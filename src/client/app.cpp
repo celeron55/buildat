@@ -401,7 +401,7 @@ struct CApp: public App, public magic::Application
 			m_thread_pool->run_post();
 		}
 
-#ifdef DEBUG_LOG_TIMING
+#ifdef DEBUG_CORE_TIMING
 		int64_t t1 = get_timeofday_us();
 		int interval = t1 - m_last_update_us;
 		if(interval > 30000)
@@ -475,15 +475,15 @@ struct CApp: public App, public magic::Application
 		int magic_level = event_data["Level"].GetInt();
 		ss_ message = event_data["Message"].GetString().CString();
 		//log_v(MODULE, "on_logmessage(): %i, %s", magic_level, cs(message));
-		int c55_level = LOG_ERROR;
+		int c55_level = CORE_ERROR;
 		if(magic_level == magic::LOG_DEBUG)
-			c55_level = LOG_DEBUG;
+			c55_level = CORE_DEBUG;
 		else if(magic_level == magic::LOG_INFO)
-			c55_level = LOG_VERBOSE;
+			c55_level = CORE_VERBOSE;
 		else if(magic_level == magic::LOG_WARNING)
-			c55_level = LOG_WARNING;
+			c55_level = CORE_WARNING;
 		else if(magic_level == magic::LOG_ERROR)
-			c55_level = LOG_ERROR;
+			c55_level = CORE_ERROR;
 		log_(c55_level, MODULE, "Urho3D %s", cs(message));
 	}
 

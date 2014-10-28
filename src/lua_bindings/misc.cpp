@@ -14,19 +14,19 @@ static int l_print_log(lua_State *L)
 	ss_ level = lua_tocppstring(L, 1);
 	const char *module_c = lua_tostring(L, 2);
 	const char *text_c = lua_tostring(L, 3);
-	int loglevel = LOG_INFO;
+	int loglevel = CORE_INFO;
 	if(level == "trace")
-		loglevel = LOG_TRACE;
+		loglevel = CORE_TRACE;
 	else if(level == "debug")
-		loglevel = LOG_DEBUG;
+		loglevel = CORE_DEBUG;
 	else if(level == "verbose")
-		loglevel = LOG_VERBOSE;
+		loglevel = CORE_VERBOSE;
 	else if(level == "info")
-		loglevel = LOG_INFO;
+		loglevel = CORE_INFO;
 	else if(level == "warning")
-		loglevel = LOG_WARNING;
+		loglevel = CORE_WARNING;
 	else if(level == "error")
-		loglevel = LOG_ERROR;
+		loglevel = CORE_ERROR;
 	log_(loglevel, module_c, "%s", text_c);
 	return 0;
 }

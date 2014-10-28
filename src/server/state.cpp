@@ -857,7 +857,7 @@ struct CState: public State, public interface::Server
 	// Do not use synchronous=true unless specifically needed in a special case.
 	void emit_event(Event event, bool synchronous)
 	{
-		if(log_get_max_level() >= LOG_TRACE){
+		if(log_get_max_level() >= CORE_TRACE){
 			auto *evreg = interface::getGlobalEventRegistry();
 			log_t("state", "emit_event(): %s (%zu)",
 					cs(evreg->name(event.type)), event.type);
@@ -878,7 +878,7 @@ struct CState: public State, public interface::Server
 			log_t("state", "emit_event(): %zu: No subs", event.type);
 			return;
 		}
-		if(log_get_max_level() >= LOG_TRACE){
+		if(log_get_max_level() >= CORE_TRACE){
 			auto *evreg = interface::getGlobalEventRegistry();
 			log_t("state", "emit_event(): %s (%zu): Pushing to %zu modules",
 					cs(evreg->name(event.type)), event.type, sublist.size());

@@ -44,7 +44,7 @@ void basic_init()
 	setlocale(LC_NUMERIC, "C");
 
 	log_init();
-	log_set_max_level(LOG_VERBOSE);
+	log_set_max_level(CORE_VERBOSE);
 }
 
 int main(int argc, char *argv[])

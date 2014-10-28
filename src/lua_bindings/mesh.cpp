@@ -116,7 +116,7 @@ void set_8bit_voxel_geometry(const luabind::object &node_o,
 	cg->SetCastShadows(true);
 }
 
-#ifdef DEBUG_LOG_TIMING
+#ifdef DEBUG_CORE_TIMING
 struct ScopeTimer {
 	const char *name;
 	uint64_t t0;
@@ -290,7 +290,7 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 			node->GetOrCreateComponent<RigidBody>(LOCAL);
 			break;
 		case 2:
-#ifdef DEBUG_LOG_TIMING
+#ifdef DEBUG_CORE_TIMING
 			log_v(MODULE, "num boxes: %zu", result_boxes.size());
 #endif
 			// Times on Dell Precision M6800:

@@ -16,13 +16,13 @@
 
 pthread_mutex_t log_mutex;
 
-const int LOG_FATAL = 0;
-const int LOG_ERROR = 1;
-const int LOG_WARNING = 2;
-const int LOG_INFO = 3;
-const int LOG_VERBOSE = 4;
-const int LOG_DEBUG = 5;
-const int LOG_TRACE = 6;
+const int CORE_FATAL = 0;
+const int CORE_ERROR = 1;
+const int CORE_WARNING = 2;
+const int CORE_INFO = 3;
+const int CORE_VERBOSE = 4;
+const int CORE_DEBUG = 5;
+const int CORE_TRACE = 6;
 
 #ifdef _WIN32
 static const bool use_colors = false;
@@ -32,7 +32,7 @@ static const bool use_colors = true;
 
 static std::atomic_bool line_begin(true);
 static std::atomic_int current_level(0);
-static std::atomic_int max_level(LOG_INFO);
+static std::atomic_int max_level(CORE_INFO);
 
 static FILE *file = NULL;
 
@@ -102,19 +102,19 @@ static void print(int level, const char *sys, const char *fmt, va_list va_args)
 {
 	if(use_colors && !file &&
 			(level != current_level || line_begin) && level <= max_level){
-		if(level == LOG_FATAL)
+		if(level == CORE_FATAL)
 			fprintf(stderr, "\033[0m\033[0;1;41m"); // reset, bright red bg
-		else if(level == LOG_ERROR)
+		else if(level == CORE_ERROR)
 			fprintf(stderr, "\033[0m\033[1;31m"); // bright red fg, black bg
-		else if(level == LOG_WARNING)
+		else if(level == CORE_WARNING)
 			fprintf(stderr, "\033[0m\033[1;33m"); // bright yellow fg, black bg
-		else if(level == LOG_INFO)
+		else if(level == CORE_INFO)
 			fprintf(stderr, "\033[0m"); // reset
-		else if(level == LOG_VERBOSE)
+		else if(level == CORE_VERBOSE)
 			fprintf(stderr, "\033[0m\033[0;36m"); // cyan fg, black bg
-		else if(level == LOG_DEBUG)
+		else if(level == CORE_DEBUG)
 			fprintf(stderr, "\033[0m\033[1;30m"); // bright black fg, black bg
-		else if(level == LOG_TRACE)
+		else if(level == CORE_TRACE)
 			fprintf(stderr, "\033[0m\033[0;35m"); //
 		else
 			fprintf(stderr, "\033[0m"); // reset

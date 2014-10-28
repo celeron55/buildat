@@ -203,7 +203,7 @@ struct CThreadPool: public ThreadPool
 				break;
 			}
 		}
-#ifdef DEBUG_LOG_TIMING
+#ifdef DEBUG_CORE_TIMING
 		int64_t t2 = get_timeofday_us();
 		log_v(MODULE, "output post(): %ius (%zu calls; queue size: %zu%s)",
 				(int)(t2 - t1), post_count, queue_size,

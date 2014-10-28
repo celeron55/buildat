@@ -37,7 +37,7 @@ namespace interface
 		void on_event(magic::StringHash event_type, magic::VariantMap &event_data)
 		{
 			auto *evreg = interface::getGlobalEventRegistry();
-			if(log_get_max_level() >= LOG_DEBUG){
+			if(log_get_max_level() >= CORE_DEBUG){
 				log_d(MODULE, "MagicEventHandler::on_event(): %s (%zu)",
 						cs(evreg->name(m_buildat_event_type)), m_buildat_event_type);
 			}

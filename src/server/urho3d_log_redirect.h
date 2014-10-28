@@ -44,15 +44,15 @@ namespace urho3d_log_redirect
 			int magic_level = event.magic_data.Find("Level")->second_.GetInt();
 			ss_ message =
 					event.magic_data.Find("Message")->second_.GetString().CString();
-			int core_level = LOG_ERROR;
+			int core_level = CORE_ERROR;
 			if(magic_level == magic::LOG_DEBUG)
-				core_level = LOG_DEBUG;
+				core_level = CORE_DEBUG;
 			else if(magic_level == magic::LOG_INFO)
-				core_level = LOG_VERBOSE;
+				core_level = CORE_VERBOSE;
 			else if(magic_level == magic::LOG_WARNING)
-				core_level = LOG_WARNING;
+				core_level = CORE_WARNING;
 			else if(magic_level == magic::LOG_ERROR)
-				core_level = LOG_ERROR;
+				core_level = CORE_ERROR;
 			log_(core_level, MODULE, "Urho3D %s", cs(message));
 		}
 	};
