@@ -163,40 +163,32 @@ struct GlobalYSTMap
 	}
 };
 
-struct Module: public interface::Module, public ground_plane_lighting::Interface
+struct CInstance: public ground_plane_lighting::Instance
 {
 	interface::Server *m_server;
-
+	SceneReference m_scene_ref;
 	up_<GlobalYSTMap> m_global_yst;
 
-	Module(interface::Server *server):
-		interface::Module(MODULE),
-		m_server(server)
-	{
-	}
+	// Clients that are ready to receive things (by peer id)
+	set_<int> m_clients_initialized;
 
-	~Module()
+	CInstance(interface::Server *server, SceneReference scene_ref):
+		m_server(server),
+		m_scene_ref(scene_ref)
 	{
-	}
-
-	void init()
-	{
-		m_server->sub_event(this, Event::t("core:start"));
-		m_server->sub_event(this, Event::t("core:unload"));
-		m_server->sub_event(this, Event::t("core:continue"));
-		m_server->sub_event(this, Event::t("core:tick"));
-		m_server->sub_event(this, Event::t("network:client_connected"));
-		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
-		m_server->sub_event(this, Event::t("voxelworld:node_volume_updated"));
-
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
-			pv::Vector3DInt16 section_size =
-				ivoxelworld->get_section_size_voxels();
+			voxelworld::Instance *world =
+					ivoxelworld->get_instance(m_scene_ref);
+			pv::Vector3DInt16 section_size = world->get_section_size_voxels();
 			pv::Vector<2, int16_t> sector_size(
 						section_size.getX(), section_size.getZ());
 			m_global_yst.reset(new GlobalYSTMap(sector_size));
 		});
+	}
+
+	~CInstance()
+	{
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -205,16 +197,22 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 		EVENT_VOIDN("core:unload", on_unload)
 		EVENT_VOIDN("core:continue", on_continue)
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
-		EVENT_TYPEN("network:client_connected", on_client_connected,
-				network::NewClient)
-		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
-				client_file::FilesTransmitted)
+		EVENT_TYPEN("replicate:peer_joined_scene", on_peer_joined_scene,
+				replicate::PeerJoinedScene);
+		EVENT_TYPEN("replicate:peer_left_scene", on_peer_left_scene,
+				replicate::PeerLeftScene);
 		EVENT_TYPEN("voxelworld:node_volume_updated",
 				on_node_volume_updated, voxelworld::NodeVolumeUpdated)
 	}
 
+	void initial_update()
+	{
+		// TODO
+	}
+
 	void on_start()
 	{
+		initial_update();
 	}
 
 	void on_unload()
@@ -223,6 +221,7 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 
 	void on_continue()
 	{
+		initial_update();
 	}
 
 	void on_tick(const interface::TickEvent &event)
@@ -239,8 +238,7 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 					ar(s);
 				}
 				network::access(m_server, [&](network::Interface *inetwork){
-					sv_<network::PeerInfo::Id> peers = inetwork->list_peers();
-					for(auto &peer: peers){
+					for(auto &peer : m_clients_initialized){
 						inetwork->send(peer, "ground_plane_lighting:update",
 								os.str());
 					}
@@ -249,13 +247,9 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 		}
 	}
 
-	void on_client_connected(const network::NewClient &client_connected)
+	void on_peer_joined_scene(const replicate::PeerJoinedScene &event)
 	{
-	}
-
-	void on_files_transmitted(const client_file::FilesTransmitted &event)
-	{
-		int peer = event.recipient;
+		int peer = event.peer;
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, "core:run_script",
 					"require(\"buildat/module/ground_plane_lighting\")");
@@ -269,22 +263,32 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 			inetwork->send(peer, "ground_plane_lighting:init", os.str());
 		});
 
+		m_clients_initialized.insert(peer);
 		send_initial_sectors(peer);
+	}
+
+	void on_peer_left_scene(const replicate::PeerLeftScene &event)
+	{
+		m_clients_initialized.erase(event.peer);
 	}
 
 	void on_node_volume_updated(const voxelworld::NodeVolumeUpdated &event)
 	{
 		if(!event.is_static_chunk)
 			return;
+		if(event.scene != m_scene_ref)
+			return;
 		log_v(MODULE, "Checking ground level in chunk " PV3I_FORMAT,
 				PV3I_PARAMS(event.chunk_p));
 		const pv::Vector3DInt32 &chunk_p = event.chunk_p;
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
-			interface::VoxelRegistry *voxel_reg = ivoxelworld->get_voxel_reg();
-			//const auto &chunk_size_voxels = ivoxelworld->get_chunk_size_voxels();
+			voxelworld::Instance *world =
+					ivoxelworld->get_instance(m_scene_ref);
+			interface::VoxelRegistry *voxel_reg = world->get_voxel_reg();
+			//const auto &chunk_size_voxels = world->get_chunk_size_voxels();
 			pv::Region chunk_region =
-				ivoxelworld->get_chunk_region_voxels(chunk_p);
+				world->get_chunk_region_voxels(chunk_p);
 
 			auto lc = chunk_region.getLowerCorner();
 			auto uc = chunk_region.getUpperCorner();
@@ -298,7 +302,7 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 					}
 					int y = uc.getY();
 					for(;; y--){
-						VoxelInstance v = ivoxelworld->get_voxel(
+						VoxelInstance v = world->get_voxel(
 									pv::Vector3DInt32(x, y, z), true);
 						if(v.get_id() == interface::VOXELTYPEID_UNDEFINED){
 							// NOTE: This leaves the chunks below unhandled;
@@ -354,6 +358,100 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 	int32_t get_yst(int32_t x, int32_t z)
 	{
 		return m_global_yst->get_yst(x, z);
+	}
+};
+
+struct Module: public interface::Module, public ground_plane_lighting::Interface
+{
+	interface::Server *m_server;
+
+	sm_<SceneReference, up_<CInstance>> m_instances;
+
+	Module(interface::Server *server):
+		interface::Module(MODULE),
+		m_server(server)
+	{
+	}
+
+	~Module()
+	{
+	}
+
+	void init()
+	{
+		m_server->sub_event(this, Event::t("core:start"));
+		m_server->sub_event(this, Event::t("core:unload"));
+		m_server->sub_event(this, Event::t("core:continue"));
+		m_server->sub_event(this, Event::t("core:tick"));
+		m_server->sub_event(this, Event::t("replicate:peer_joined_scene"));
+		m_server->sub_event(this, Event::t("replicate:peer_left_scene"));
+		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
+		m_server->sub_event(this, Event::t("voxelworld:node_volume_updated"));
+	}
+
+	void event(const Event::Type &type, const Event::Private *p)
+	{
+		EVENT_VOIDN("core:start", on_start)
+		EVENT_VOIDN("core:unload", on_unload)
+		EVENT_VOIDN("core:continue", on_continue)
+		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
+		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
+				client_file::FilesTransmitted)
+		EVENT_TYPEN("voxelworld:node_volume_updated",
+				on_node_volume_updated, voxelworld::NodeVolumeUpdated)
+	}
+
+	void on_start()
+	{
+	}
+
+	void on_unload()
+	{
+	}
+
+	void on_continue()
+	{
+	}
+
+	void on_tick(const interface::TickEvent &event)
+	{
+	}
+
+	void on_files_transmitted(const client_file::FilesTransmitted &event)
+	{
+	}
+
+	void on_node_volume_updated(const voxelworld::NodeVolumeUpdated &event)
+	{
+	}
+
+	// Interface
+
+	void create_instance(SceneReference scene_ref)
+	{
+		auto it = m_instances.find(scene_ref);
+		// TODO: Is an exception the best way to handle this?
+		if(it != m_instances.end())
+			throw Exception("create_instance(): Scene already has gpl");
+
+		up_<CInstance> instance(new CInstance(m_server, scene_ref));
+		m_instances[scene_ref] = std::move(instance);
+	}
+
+	void delete_instance(SceneReference scene_ref)
+	{
+		auto it = m_instances.find(scene_ref);
+		if(it == m_instances.end())
+			throw Exception("delete_instance(): Scene does not have gpl");
+		m_instances.erase(it);
+	}
+
+	Instance* get_instance(SceneReference scene_ref)
+	{
+		auto it = m_instances.find(scene_ref);
+		if(it == m_instances.end())
+			throw Exception("get_instance(): Scene does not have gpl");
+		return it->second.get();
 	}
 
 	void* get_interface()

@@ -30,6 +30,8 @@ local function setup_sizes(sector_size)
 	log:info("zone_size: "..M.zone_size:dump())
 end
 
+local dark_zones = {} -- {sector_y: {sector_x: {zone nodes}}}
+
 buildat.sub_packet("ground_plane_lighting:init", function(data)
 	local values = cereal.binary_input(data, {"object",
 		{"sector_size", {"object",
@@ -39,9 +41,17 @@ buildat.sub_packet("ground_plane_lighting:init", function(data)
 	})
 	log:info("ground_plane_lighting:init: "..dump(values))
 	setup_sizes(buildat.Vector2(values.sector_size))
-end)
 
-local dark_zones = {} -- {sector_y: {sector_x: {zone nodes}}}
+	-- Clear existing zone nodes
+	for sector_y, x_list in pairs(dark_zones) do
+		for sector_x, zone_node_list in pairs(x_lists) do
+			for _, node in ipairs(zone_node_list) do
+				node:Remove()
+			end
+		end
+	end
+	dark_zones = {}
+end)
 
 local function get_sector_zones(x, y)
 	local ytable = dark_zones[y]

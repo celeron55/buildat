@@ -4,32 +4,30 @@
 #include "interface/event.h"
 #include "interface/server.h"
 #include "interface/module.h"
-// TODO: Clean up
-#include "interface/voxel.h"
-#include <PolyVoxCore/Vector.h>
-#include <PolyVoxCore/Region.h>
-#include <PolyVoxCore/RawVolume.h>
 #include <functional>
 
-// TODO: Clean up
-namespace Urho3D
+namespace main_context
 {
-	class Context;
-	class Scene;
-	class Node;
-}
+	struct OpaqueSceneReference;
+	typedef OpaqueSceneReference* SceneReference;
+};
 
 namespace ground_plane_lighting
 {
-	// TODO: Clean up
-	namespace magic = Urho3D;
-	namespace pv = PolyVox;
-	using interface::VoxelInstance;
+	using main_context::SceneReference;
 
-	struct Interface
+	struct Instance
 	{
 		virtual void set_yst(int32_t x, int32_t z, int32_t yst) = 0;
 		virtual int32_t get_yst(int32_t x, int32_t z) = 0;
+	};
+
+	struct Interface
+	{
+		virtual void create_instance(SceneReference scene_ref) = 0;
+		virtual void delete_instance(SceneReference scene_ref) = 0;
+
+		virtual Instance* get_instance(SceneReference scene_ref) = 0;
 	};
 
 	inline bool access(interface::Server *server,
