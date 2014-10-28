@@ -4,6 +4,7 @@
 #include "interface/event.h"
 #include "network/api.h"
 #include "client_file/api.h"
+#define MODULE "main"
 
 using interface::Event;
 
@@ -14,7 +15,7 @@ struct Module: public interface::Module
 	interface::Server *m_server;
 
 	Module(interface::Server *server):
-		interface::Module("main"),
+		interface::Module(MODULE),
 		m_server(server)
 	{
 		log_v(MODULE, "main construct");

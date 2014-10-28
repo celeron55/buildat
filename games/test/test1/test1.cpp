@@ -7,6 +7,7 @@
 #include "core/log.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/vector.hpp>
+#define MODULE "test1"
 
 using interface::Event;
 
@@ -19,7 +20,7 @@ struct Module: public interface::Module
 	Event::Type m_EventType_test1_thing; // You can cache these for more speed
 
 	Module(interface::Server *server):
-		interface::Module("test1"),
+		interface::Module(MODULE),
 		m_server(server),
 		m_EventType_test1_thing(Event::t("test1:thing"))
 	{

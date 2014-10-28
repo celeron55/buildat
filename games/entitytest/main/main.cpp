@@ -2,6 +2,7 @@
 #include "client_file/api.h"
 #include "network/api.h"
 #include "replicate/api.h"
+#include "main_context/api.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
@@ -22,13 +23,17 @@
 
 namespace entitytest {
 
-using interface::Event;
 using namespace Urho3D;
+
+using interface::Event;
+using main_context::SceneReference;
 
 struct Module: public interface::Module
 {
 	interface::Server *m_server;
 	uint m_slow_count = 0;
+
+	SceneReference m_main_scene;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -66,8 +71,10 @@ struct Module: public interface::Module
 
 	void on_start()
 	{
-		m_server->access_scene([&](Scene *scene)
-		{
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			m_main_scene = imc->create_scene();
+
+			Scene *scene = imc->get_scene(m_main_scene);
 			Context *context = scene->GetContext();
 			ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 			auto *m = cache->GetResource<Material>("Materials/Stone.xml");
@@ -137,7 +144,8 @@ struct Module: public interface::Module
 		log_d(MODULE, "entitytest::on_tick");
 		static uint a = 0;
 		if(((a++) % 100) == 0){
-			m_server->access_scene([&](Scene *scene){
+			main_context::access(m_server, [&](main_context::Interface *imc){
+				Scene *scene = imc->get_scene(m_main_scene);
 				Node *n = scene->GetChild("Box");
 				n->SetPosition(Vector3(0.0f, 6.0f, 0.0f));
 				n->SetRotation(Quaternion(30, 60, 90));
@@ -159,7 +167,8 @@ struct Module: public interface::Module
 			});
 			return;
 		}
-		m_server->access_scene([&](Scene *scene){
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			Scene *scene = imc->get_scene(m_main_scene);
 			Node *n = scene->GetChild("Box");
 			//n->Translate(Vector3(0.1f, 0, 0));
 			Vector3 p = n->GetPosition();
@@ -183,6 +192,9 @@ struct Module: public interface::Module
 	{
 		log_v(MODULE, "on_files_transmitted(): recipient=%zu", event.recipient);
 
+		replicate::access(m_server, [&](replicate::Interface *ireplicate){
+			ireplicate->assign_scene_to_peer(m_main_scene, event.recipient);
+		});
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(event.recipient, "core:run_script",
 					"buildat.run_script_file(\"main/init.lua\")");

@@ -3,6 +3,7 @@
 #include "interface/event.h"
 #include "test1/api.h"
 #include "core/log.h"
+#define MODULE "test2"
 
 using interface::Event;
 
@@ -14,7 +15,7 @@ struct Module: public interface::Module
 	Event::Type m_EventType_core_start;
 
 	Module(interface::Server *server):
-		interface::Module("test2"),
+		interface::Module(MODULE),
 		m_server(server),
 		m_EventType_core_start(Event::t("core:start"))
 	{

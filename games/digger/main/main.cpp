@@ -433,7 +433,7 @@ struct Module: public interface::Module
 		// TODO: Store main scene reference
 		// Just do this for now
 		main_context::access(m_server, [&](main_context::Interface *imc){
-			m_main_scene = imc->create_scene();
+			imc->delete_scene(m_main_scene);
 		});
 	}
 

@@ -65,5 +65,3 @@ Buildat TODO
 - Make some kind of an ace of spades clone (or less of a clone); something that
   requires the game to control the creation and deletion of the world anyway,
   and implement the required interfaces
-- Fix everything in /games/
-	- Use builtin/main_context

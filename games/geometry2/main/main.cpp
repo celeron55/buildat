@@ -2,6 +2,7 @@
 #include "client_file/api.h"
 #include "network/api.h"
 #include "replicate/api.h"
+#include "main_context/api.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
@@ -24,9 +25,10 @@
 
 namespace geometry {
 
-using interface::Event;
-using namespace Urho3D;
 namespace magic = Urho3D;
+using namespace Urho3D;
+using interface::Event;
+using main_context::SceneReference;
 
 struct Module: public interface::Module
 {
@@ -34,6 +36,8 @@ struct Module: public interface::Module
 	uint m_slow_count = 0;
 	sp_<interface::AtlasRegistry> m_atlas_reg;
 	sp_<interface::VoxelRegistry> m_voxel_reg;
+
+	SceneReference m_main_scene;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -52,8 +56,10 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 
-		m_server->access_scene([&](Scene *scene)
-		{
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			m_main_scene = imc->create_scene();
+
+			Scene *scene = imc->get_scene(m_main_scene);
 			Context *context = scene->GetContext();
 			m_atlas_reg.reset(interface::createAtlasRegistry(context));
 			{
@@ -126,8 +132,9 @@ struct Module: public interface::Module
 
 	void on_start()
 	{
-		m_server->access_scene([&](Scene *scene)
+		main_context::access(m_server, [&](main_context::Interface *imc)
 		{
+			Scene *scene = imc->get_scene(m_main_scene);
 			Context *context = scene->GetContext();
 			ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 
@@ -192,8 +199,9 @@ struct Module: public interface::Module
 
 	void update_scene()
 	{
-		m_server->access_scene([&](Scene *scene)
+		main_context::access(m_server, [&](main_context::Interface *imc)
 		{
+			Scene *scene = imc->get_scene(m_main_scene);
 			Context *context = scene->GetContext();
 			ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 
@@ -251,7 +259,8 @@ struct Module: public interface::Module
 	{
 		static uint a = 0;
 		if(((a++) % 100) == 0){
-			m_server->access_scene([&](Scene *scene){
+			main_context::access(m_server, [&](main_context::Interface *imc){
+				Scene *scene = imc->get_scene(m_main_scene);
 				Node *n = scene->GetChild("Testbox");
 				//n->SetPosition(Vector3(0.0f, 8.0f, 0.0f));
 				n->SetRotation(Quaternion(30, 60, 90));
@@ -265,6 +274,9 @@ struct Module: public interface::Module
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
+		replicate::access(m_server, [&](replicate::Interface *ireplicate){
+			ireplicate->assign_scene_to_peer(m_main_scene, event.recipient);
+		});
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(event.recipient, "core:run_script",
 					"buildat.run_script_file(\"main/init.lua\")");
