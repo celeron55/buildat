@@ -17,46 +17,58 @@ namespace Urho3D
 	class Node;
 }
 
+namespace main_context
+{
+	struct OpaqueSceneReference;
+	typedef OpaqueSceneReference* SceneReference;
+};
+
 namespace voxelworld
 {
 	namespace magic = Urho3D;
 	namespace pv = PolyVox;
 	using interface::VoxelInstance;
+	using main_context::SceneReference;
 
 	struct GenerationRequest: public interface::Event::Private
 	{
+		SceneReference scene;
 		pv::Vector3DInt16 section_p;
 
-		GenerationRequest(const pv::Vector3DInt16 &section_p):
+		GenerationRequest(SceneReference scene,
+				const pv::Vector3DInt16 &section_p):
+			scene(scene),
 			section_p(section_p)
 		{}
 	};
 
 	struct NodeVolumeUpdated: public interface::Event::Private
 	{
+		SceneReference scene;
 		uint node_id;
 		bool is_static_chunk = false;
 		pv::Vector3DInt32 chunk_p; // Only set if is_static_chunk == true
 
-		NodeVolumeUpdated(uint node_id, bool is_static_chunk,
-				const pv::Vector3DInt32 &chunk_p):
-			node_id(node_id), is_static_chunk(is_static_chunk), chunk_p(chunk_p)
+		NodeVolumeUpdated(SceneReference scene, uint node_id,
+				bool is_static_chunk, const pv::Vector3DInt32 &chunk_p):
+			scene(scene), node_id(node_id),
+			is_static_chunk(is_static_chunk), chunk_p(chunk_p)
 		{}
 	};
 
-	struct Interface;
+	struct Instance;
 
 	struct CommitHook
 	{
 		virtual ~CommitHook(){}
-		virtual void in_thread(voxelworld::Interface *ivoxelworld,
+		virtual void in_thread(voxelworld::Instance *world,
 				const pv::Vector3DInt32 &chunk_p,
 				pv::RawVolume<VoxelInstance> &volume){}
-		virtual void in_scene(voxelworld::Interface *ivoxelworld,
+		virtual void in_scene(voxelworld::Instance *world,
 				const pv::Vector3DInt32 &chunk_p, magic::Node *n){}
 	};
 
-	struct Interface
+	struct Instance
 	{
 		virtual interface::VoxelRegistry* get_voxel_reg() = 0;
 
@@ -92,6 +104,16 @@ namespace voxelworld
 		// robust interface.
 	};
 
+	struct Interface
+	{
+		virtual void create_instance(SceneReference scene_ref) = 0;
+		virtual void delete_instance(SceneReference scene_ref) = 0;
+
+		virtual Instance* get_instance(SceneReference scene_ref) = 0;
+
+		virtual void commit() = 0;
+	};
+
 	inline bool access(interface::Server *server,
 			std::function<void(voxelworld::Interface*)> cb)
 	{
@@ -99,6 +121,15 @@ namespace voxelworld
 			auto *iface = (voxelworld::Interface*)module->check_interface();
 			cb(iface);
 			iface->commit();
+		});
+	}
+
+	inline bool access(interface::Server *server, SceneReference scene_ref,
+			std::function<void(voxelworld::Instance *instance)> cb)
+	{
+		return access(server, [&](voxelworld::Interface *i){
+			voxelworld::Instance *instance = i->get_instance(scene_ref);
+			cb(instance);
 		});
 	}
 }

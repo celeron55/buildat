@@ -88,6 +88,10 @@ buildat.sub_packet("voxelworld:init", function(data)
 	M.section_size_chunks = buildat.Vector3(values.section_size_chunks)
 	M.section_size_voxels =
 			M.chunk_size_voxels:mul_components(M.section_size_chunks)
+
+	-- Clear caches
+	node_volume_cache = {}
+	static_node_cache = {}
 end)
 
 buildat.sub_packet("voxelworld:voxel_registry", function(data)

@@ -70,6 +70,7 @@ struct ChunkBuffer
 
 struct Section
 {
+	SceneReference m_scene_ref;
 	pv::Vector3DInt16 section_p; // Position in sections
 	pv::Vector3DInt16 chunk_size;
 	pv::Region contained_chunks; // Position and size in chunks
@@ -92,9 +93,11 @@ struct Section
 	Section(): // Needed for containers
 		chunk_size(0, 0, 0) // This is used to detect uninitialized instance
 	{}
-	Section(pv::Vector3DInt16 section_p,
+	Section(SceneReference scene_ref,
+			pv::Vector3DInt16 section_p,
 			pv::Vector3DInt16 chunk_size,
 			pv::Region contained_chunks):
+		m_scene_ref(scene_ref),
 		section_p(section_p),
 		chunk_size(chunk_size),
 		contained_chunks(contained_chunks),
@@ -167,7 +170,7 @@ ChunkBuffer& Section::get_buffer(const pv::Vector3DInt32 &chunk_p,
 
 	main_context::access(server, [&](main_context::Interface *imc)
 	{
-		Scene *scene = imc->get_scene();
+		Scene *scene = imc->get_scene(m_scene_ref);
 		Node *n = scene->GetNode(node_id);
 		if(!n){
 			log_w(MODULE,
@@ -206,9 +209,14 @@ struct QueuedNodePhysicsUpdate
 	}
 };
 
-struct Module: public interface::Module, public voxelworld::Interface
+struct CInstance: public voxelworld::Instance
 {
 	interface::Server *m_server;
+
+	SceneReference m_scene_ref;
+
+	// Clients that are ready to receive things (by peer id)
+	set_<int> m_clients_initialized;
 
 	// Accessing any of these outside of Server::access_scene is disallowed
 	sp_<interface::AtlasRegistry> m_atlas_reg;
@@ -244,55 +252,19 @@ struct Module: public interface::Module, public voxelworld::Interface
 	// (as a sorted array in descending node_id order)
 	std::vector<QueuedNodePhysicsUpdate> m_nodes_needing_physics_update;
 
-	// Clients that are ready to receive things (by peer id)
-	set_<int> m_clients_initialized;
-
-	Module(interface::Server *server):
-		interface::Module(MODULE),
-		m_server(server)
+	CInstance(interface::Server *server, SceneReference scene_ref):
+		m_server(server),
+		m_scene_ref(scene_ref)
 	{
 		m_voxel_reg.reset(interface::createVoxelRegistry());
 		m_block_reg.reset(interface::createBlockRegistry(m_voxel_reg.get()));
-	}
-
-	~Module()
-	{
-	}
-
-	void init()
-	{
-		m_server->sub_event(this, Event::t("core:start"));
-		m_server->sub_event(this, Event::t("core:unload"));
-		m_server->sub_event(this, Event::t("core:continue"));
-		m_server->sub_event(this, Event::t("network:client_connected"));
-		m_server->sub_event(this, Event::t("core:tick"));
-		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
-		m_server->sub_event(this, Event::t(
-					"network:packet_received/voxelworld:get_section"));
 
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			Context *context = imc->get_context();
 
 			m_atlas_reg.reset(interface::createAtlasRegistry(context));
 		});
-	}
 
-	void event(const Event::Type &type, const Event::Private *p)
-	{
-		EVENT_VOIDN("core:start", on_start)
-		EVENT_VOIDN("core:unload", on_unload)
-		EVENT_VOIDN("core:continue", on_continue)
-		EVENT_TYPEN("network:client_connected", on_client_connected,
-				network::NewClient)
-		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
-		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
-				client_file::FilesTransmitted)
-		EVENT_TYPEN("network:packet_received/voxelworld:get_section",
-				on_get_section, network::Packet)
-	}
-
-	void on_start()
-	{
 		// TODO: Load from disk or something
 
 		//pv::Region region(0, 0, 0, 0, 0, 0); // Use this for valgrind
@@ -313,97 +285,33 @@ struct Module: public interface::Module, public voxelworld::Interface
 				}
 			}
 		}
+
+		// TODO
+		log_w(MODULE, "TODO: Send initialization stuff to clients that already"
+				" were on this scene");
 	}
 
-	void unload_node(Scene *scene, uint node_id)
-	{
-		log_d(MODULE, "Unloading node %i", node_id);
-		Node *n = scene->GetNode(node_id);
-		if(!n){
-			log_w(MODULE, "Cannot unload node %i: Not found in scene", node_id);
-			return;
-		}
-		// Remove RigidBody first to speed up removal of CollisionShapes
-		RigidBody *body = n->GetComponent<RigidBody>();
-		if(body)
-			n->RemoveComponent(body);
-		// Remove everything else
-		n->RemoveAllComponents();
-		n->Remove();
-	}
-
-	void on_unload()
-	{
-		log_v(MODULE, "on_unload()");
-
-		commit();
-
-		// Remove everything managed by us from the scene
-		main_context::access(m_server, [&](main_context::Interface *imc){
-			Scene *scene = imc->get_scene();
-			size_t progress = 0;
-			for(auto &sector_pair: m_sections){
-				log_v(MODULE, "Unloading nodes... %i%%",
-						100 * progress / m_sections.size());
-				progress++;
-				for(auto &section_pair: sector_pair.second){
-					Section &section = section_pair.second;
-
-					auto region = section.node_ids->getEnclosingRegion();
-					auto lc = region.getLowerCorner();
-					auto uc = region.getUpperCorner();
-					for(int z = lc.getZ(); z <= uc.getZ(); z++){
-						for(int y = lc.getY(); y <= uc.getY(); y++){
-							for(int x = lc.getX(); x <= uc.getX(); x++){
-								uint id = section.node_ids->getVoxelAt(x, y, z);
-								section.node_ids->setVoxelAt(x, y, z, 0);
-								unload_node(scene, id);
-							}
-						}
-					}
-				}
-			}
-			log_v(MODULE, "Unloading nodes... 100%%");
-		});
-
-		// Store voxel registry and stuff
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar(m_voxel_reg->serialize());
-		}
-		m_server->tmp_store_data("voxelworld:restore_info", os.str());
-	}
-
-	void on_continue()
-	{
-		// Restore voxel registry and stuff
-		ss_ data = m_server->tmp_restore_data("voxelworld:restore_info");
-		ss_ voxel_reg_data;
-		{
-			std::istringstream is(data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(voxel_reg_data);
-		}
-		m_voxel_reg->deserialize(voxel_reg_data);
-
-		// Start up normally
-		on_start();
-	}
-
-	void on_client_connected(const network::NewClient &client_connected)
+	~CInstance()
 	{
 	}
 
-	void on_client_disconnected(const network::OldClient &old_client)
+	void event(const Event::Type &type, const Event::Private *p)
 	{
-		m_clients_initialized.erase(old_client.info.id);
+		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
+		EVENT_TYPEN("replicate:peer_joined_scene", on_peer_joined_scene,
+				replicate::PeerJoinedScene);
+		EVENT_TYPEN("replicate:peer_left_scene", on_peer_left_scene,
+				replicate::PeerLeftScene);
+		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
+				client_file::FilesTransmitted)
+		/*EVENT_TYPEN("network:packet_received/voxelworld:get_section",
+				on_get_section, network::Packet)*/
 	}
 
 	void on_tick(const interface::TickEvent &event)
 	{
 		main_context::access(m_server, [&](main_context::Interface *imc){
-			Scene *scene = imc->get_scene();
+			Scene *scene = imc->get_scene(m_scene_ref);
 			Context *context = imc->get_context();
 
 			// Update node collision boxes
@@ -439,32 +347,10 @@ struct Module: public interface::Module, public voxelworld::Interface
 		send_voxel_registry_if_dirty();
 	}
 
-	void send_voxel_registry_if_dirty()
+	void on_peer_joined_scene(const replicate::PeerJoinedScene &event)
 	{
-		// Send updated voxel registry if needed
-		// NOTE: This probably really only supports additions
-		if(m_voxel_reg->is_dirty()){
-			m_voxel_reg->clear_dirty();
-			log_v(MODULE, "Sending updated voxel registry to peers");
-
-			ss_ voxel_reg_data = m_voxel_reg->serialize();
-
-			network::access(m_server, [&](network::Interface *inetwork){
-				sv_<network::PeerInfo::Id> peers = inetwork->list_peers();
-				for(auto &peer: peers){
-					if(!m_clients_initialized.count(peer))
-						continue;
-					inetwork->send(peer, "voxelworld:voxel_registry",
-							voxel_reg_data);
-				}
-			});
-		}
-	}
-
-	void on_files_transmitted(const client_file::FilesTransmitted &event)
-	{
-		int peer = event.recipient;
-		// Load the client-side module
+		int peer = event.peer;
+		// Load the client-side module (can be called multiple times)
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, "core:run_script",
 					"require(\"buildat/module/voxelworld\")");
@@ -485,10 +371,19 @@ struct Module: public interface::Module, public voxelworld::Interface
 		m_clients_initialized.insert(peer);
 	}
 
+	void on_peer_left_scene(const replicate::PeerLeftScene &event)
+	{
+		m_clients_initialized.erase(event.peer);
+	}
+
+	void on_files_transmitted(const client_file::FilesTransmitted &event)
+	{
+	}
+
 	// TODO: How should nodes be filtered for replication?
 	// TODO: Generally the client wants roughly one section, but isn't
 	//       positioned at the middle of a section
-	void on_get_section(const network::Packet &packet)
+	/*void on_get_section(const network::Packet &packet)
 	{
 		pv::Vector3DInt16 section_p;
 		{
@@ -498,6 +393,42 @@ struct Module: public interface::Module, public voxelworld::Interface
 		}
 		log_v(MODULE, "C%i: on_get_section(): " PV3I_FORMAT,
 				packet.sender, PV3I_PARAMS(section_p));
+	}*/
+
+	void unload_node(Scene *scene, uint node_id)
+	{
+		log_d(MODULE, "Unloading node %i", node_id);
+		Node *n = scene->GetNode(node_id);
+		if(!n){
+			log_w(MODULE, "Cannot unload node %i: Not found in scene", node_id);
+			return;
+		}
+		// Remove RigidBody first to speed up removal of CollisionShapes
+		RigidBody *body = n->GetComponent<RigidBody>();
+		if(body)
+			n->RemoveComponent(body);
+		// Remove everything else
+		n->RemoveAllComponents();
+		n->Remove();
+	}
+
+	void send_voxel_registry_if_dirty()
+	{
+		// Send updated voxel registry if needed
+		// NOTE: This probably really only supports additions
+		if(m_voxel_reg->is_dirty()){
+			m_voxel_reg->clear_dirty();
+			log_v(MODULE, "Sending updated voxel registry to peers");
+
+			ss_ voxel_reg_data = m_voxel_reg->serialize();
+
+			network::access(m_server, [&](network::Interface *inetwork){
+				for(auto &peer : m_clients_initialized){
+					inetwork->send(peer, "voxelworld:voxel_registry",
+							voxel_reg_data);
+				}
+			});
+		}
 	}
 
 	// Get section if exists
@@ -541,7 +472,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 					(section_p.getY()+1) * m_section_size_chunks.getY() - 1,
 					(section_p.getZ()+1) * m_section_size_chunks.getZ() - 1
 			);
-			section = Section(section_p, m_chunk_size_voxels, contained_chunks);
+			section = Section(m_scene_ref, section_p, m_chunk_size_voxels,
+					contained_chunks);
 		}
 		return section;
 	}
@@ -619,7 +551,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		run_commit_hooks_in_scene(chunk_p, n);
 
 		m_server->emit_event("voxelworld:node_volume_updated",
-				new NodeVolumeUpdated(n->GetID(), true, chunk_p));
+				new NodeVolumeUpdated(m_scene_ref, n->GetID(), true, chunk_p));
 
 		// There are no collision shapes initially, but add the rigid body now
 		RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
@@ -629,7 +561,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 	void create_section(Section &section)
 	{
 		main_context::access(m_server, [&](main_context::Interface *imc){
-			Scene *scene = imc->get_scene();
+			Scene *scene = imc->get_scene(m_scene_ref);
 			auto lc = section.contained_chunks.getLowerCorner();
 			auto uc = section.contained_chunks.getUpperCorner();
 			for(int z = 0; z <= uc.getZ() - lc.getZ(); z++){
@@ -668,7 +600,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		log_v(MODULE, "Section will be generated: " PV3I_FORMAT,
 				PV3I_PARAMS(section_p));
 		m_server->emit_event("voxelworld:generation_request",
-				new GenerationRequest(section_p));
+				new GenerationRequest(m_scene_ref, section_p));
 	}
 
 	void mark_node_for_physics_update(uint node_id)
@@ -839,7 +771,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		commit();
 
 		main_context::access(m_server, [&](main_context::Interface *imc){
-			Scene *scene = imc->get_scene();
+			Scene *scene = imc->get_scene(m_scene_ref);
 			Node *n = scene->GetNode(node_id);
 			const Variant &var = n->GetVar(StringHash("buildat_voxel_data"));
 			const PODVector<unsigned char> &buf = var.GetBuffer();
@@ -874,7 +806,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		mark_node_for_physics_update(node_id);
 
 		m_server->emit_event("voxelworld:node_volume_updated",
-				new NodeVolumeUpdated(node_id, true, chunk_p));
+				new NodeVolumeUpdated(m_scene_ref, node_id, true, chunk_p));
 	}
 
 	void set_voxel(const pv::Vector3DInt32 &p, const interface::VoxelInstance &v,
@@ -961,7 +893,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 				*chunk_buffer.volume);
 
 		main_context::access(m_server, [&](main_context::Interface *imc){
-			Scene *scene = imc->get_scene();
+			Scene *scene = imc->get_scene(m_scene_ref);
 			Context *context = scene->GetContext();
 
 			Node *n = scene->GetNode(node_id);
@@ -992,8 +924,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 		// Then synchronize node and notify clients about it
 		sv_<replicate::PeerId> peers;
 		replicate::access(m_server, [&](replicate::Interface *ireplicate){
-			ireplicate->sync_node_immediate(node_id);
-			peers = ireplicate->find_peers_that_know_node(node_id);
+			ireplicate->sync_node_immediate(m_scene_ref, node_id);
+			peers = ireplicate->find_peers_that_know_node(m_scene_ref, node_id);
 		});
 		std::ostringstream os(std::ios::binary);
 		{
@@ -1017,7 +949,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		m_total_buffers_dirty--;
 
 		m_server->emit_event("voxelworld:node_volume_updated",
-				new NodeVolumeUpdated(node_id, true, chunk_p));
+				new NodeVolumeUpdated(m_scene_ref, node_id, true, chunk_p));
 	}
 
 	size_t num_buffers_loaded()
@@ -1083,6 +1015,211 @@ struct Module: public interface::Module, public voxelworld::Interface
 			m_sections_with_loaded_buffers.insert(it, section);
 
 		return v;
+	}
+};
+
+struct Module: public interface::Module, public voxelworld::Interface
+{
+	interface::Server *m_server;
+
+	sm_<SceneReference, up_<CInstance>> m_instances;
+
+	Module(interface::Server *server):
+		interface::Module(MODULE),
+		m_server(server)
+	{
+	}
+
+	~Module()
+	{
+	}
+
+	void init()
+	{
+		// NOTE: These also apply to CInstances
+		m_server->sub_event(this, Event::t("core:start"));
+		m_server->sub_event(this, Event::t("core:unload"));
+		m_server->sub_event(this, Event::t("core:continue"));
+		m_server->sub_event(this, Event::t("core:tick"));
+		m_server->sub_event(this, Event::t("replicate:peer_joined_scene"));
+		m_server->sub_event(this, Event::t("replicate:peer_left_scene"));
+		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
+		/*m_server->sub_event(this, Event::t(
+					"network:packet_received/voxelworld:get_section"));*/
+	}
+
+	void event(const Event::Type &type, const Event::Private *p)
+	{
+		EVENT_VOIDN("core:start", on_start)
+		EVENT_VOIDN("core:unload", on_unload)
+		EVENT_VOIDN("core:continue", on_continue)
+		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
+		EVENT_TYPEN("replicate:peer_joined_scene", on_peer_joined_scene,
+				replicate::PeerJoinedScene);
+		EVENT_TYPEN("replicate:peer_left_scene", on_peer_left_scene,
+				replicate::PeerLeftScene);
+		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
+				client_file::FilesTransmitted)
+
+		for(auto &pair : m_instances){
+			up_<CInstance> &instance = pair.second;
+			instance->event(type, p);
+		}
+	}
+
+	void on_start()
+	{
+	}
+
+	void unload_node(Scene *scene, uint node_id)
+	{
+		log_d(MODULE, "Unloading node %i", node_id);
+		Node *n = scene->GetNode(node_id);
+		if(!n){
+			log_w(MODULE, "Cannot unload node %i: Not found in scene", node_id);
+			return;
+		}
+		// Remove RigidBody first to speed up removal of CollisionShapes
+		RigidBody *body = n->GetComponent<RigidBody>();
+		if(body)
+			n->RemoveComponent(body);
+		// Remove everything else
+		n->RemoveAllComponents();
+		n->Remove();
+	}
+
+	void on_unload()
+	{
+		log_v(MODULE, "on_unload()");
+
+		// TODO
+
+		/*commit();
+
+		// Remove everything managed by us from the scene
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			Scene *scene = imc->get_scene();
+			size_t progress = 0;
+			for(auto &sector_pair: m_sections){
+				log_v(MODULE, "Unloading nodes... %i%%",
+						100 * progress / m_sections.size());
+				progress++;
+				for(auto &section_pair: sector_pair.second){
+					Section &section = section_pair.second;
+
+					auto region = section.node_ids->getEnclosingRegion();
+					auto lc = region.getLowerCorner();
+					auto uc = region.getUpperCorner();
+					for(int z = lc.getZ(); z <= uc.getZ(); z++){
+						for(int y = lc.getY(); y <= uc.getY(); y++){
+							for(int x = lc.getX(); x <= uc.getX(); x++){
+								uint id = section.node_ids->getVoxelAt(x, y, z);
+								section.node_ids->setVoxelAt(x, y, z, 0);
+								unload_node(scene, id);
+							}
+						}
+					}
+				}
+			}
+			log_v(MODULE, "Unloading nodes... 100%%");
+		});
+
+		// Store voxel registry and stuff
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(m_voxel_reg->serialize());
+		}
+		m_server->tmp_store_data("voxelworld:restore_info", os.str());*/
+	}
+
+	void on_continue()
+	{
+		// TODO
+
+		/*// Restore voxel registry and stuff
+		ss_ data = m_server->tmp_restore_data("voxelworld:restore_info");
+		ss_ voxel_reg_data;
+		{
+			std::istringstream is(data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(voxel_reg_data);
+		}
+		m_voxel_reg->deserialize(voxel_reg_data);*/
+
+		// Start up normally
+		on_start();
+	}
+
+	void on_tick(const interface::TickEvent &event)
+	{
+	}
+
+	void on_peer_joined_scene(const replicate::PeerJoinedScene &event)
+	{
+	}
+
+	void on_peer_left_scene(const replicate::PeerLeftScene &event)
+	{
+	}
+
+	void on_files_transmitted(const client_file::FilesTransmitted &event)
+	{
+	}
+
+	// TODO: How should nodes be filtered for replication?
+	// TODO: Generally the client wants roughly one section, but isn't
+	//       positioned at the middle of a section
+	void on_get_section(const network::Packet &packet)
+	{
+		pv::Vector3DInt16 section_p;
+		{
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(section_p);
+		}
+		log_v(MODULE, "C%i: on_get_section(): " PV3I_FORMAT,
+				packet.sender, PV3I_PARAMS(section_p));
+	}
+
+	// Interface
+
+	void create_instance(SceneReference scene_ref)
+	{
+		auto it = m_instances.find(scene_ref);
+		// TODO: Is an exception the best way to handle this?
+		if(it != m_instances.end())
+			throw Exception("create_instance(): Scene already has a voxel"
+					" world instance");
+
+		up_<CInstance> instance(new CInstance(m_server, scene_ref));
+		m_instances[scene_ref] = std::move(instance);
+	}
+
+	void delete_instance(SceneReference scene_ref)
+	{
+		auto it = m_instances.find(scene_ref);
+		if(it == m_instances.end())
+			throw Exception("delete_instance(): Scene does not have a voxel"
+					" world instance");
+		m_instances.erase(it);
+	}
+
+	Instance* get_instance(SceneReference scene_ref)
+	{
+		auto it = m_instances.find(scene_ref);
+		if(it == m_instances.end())
+			throw Exception("get_instance(): Scene does not have a voxel"
+					" world instance");
+		return it->second.get();
+	}
+
+	void commit()
+	{
+		for(auto &pair : m_instances){
+			up_<CInstance> &instance = pair.second;
+			instance->commit();
+		}
 	}
 
 	void* get_interface()
