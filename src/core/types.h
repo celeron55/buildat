@@ -146,4 +146,20 @@ template<typename T>
 static inline cc_* cs(const T &v){
 	return dump(v).c_str();
 }
+
+// check()
+
+template<typename T>
+static inline T* check(T *v){
+	if(v == nullptr)
+		throw Exception("check(): nullptr");
+	return v;
+}
+template<typename T>
+static inline const T* check(const T *v){
+	if(v == nullptr)
+		throw Exception("check(): nullptr");
+	return v;
+}
+
 // vim: set noet ts=4 sw=4:
