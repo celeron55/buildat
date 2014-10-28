@@ -561,8 +561,10 @@ struct CState: public State, public interface::Server
 			m_module_load_order.push_back(info.name);
 		}
 
-		// Call init() and start thread
-		mc->init_and_start_thread();
+		if(!info.meta.disable_cpp){
+			// Call init() and start thread
+			mc->init_and_start_thread();
+		}
 
 		emit_event(Event("core:module_loaded",
 				new interface::ModuleLoadedEvent(info.name)));
