@@ -22,6 +22,7 @@ Buildat TODO
 - Automatic buildat root detection so that the server and the client can
   generally be started with any working directory in either the in-source or
   windows-installed configuration
+	- Does mingw have rpath?
 - Precompiled mode
 - Singleplayer UI
 - Show all exceptions and errors on client using ui_utils.show_message_dialog
@@ -43,8 +44,8 @@ Buildat TODO
   woxelworld:update and ThreadPool::run_post() will not be run on the same frame
 	- Pre (lod) geometry can take up to 2500us, and post can take 7200us, which
 	  means this will have a visible effect.
-- Multiple replicated scens and voxelworlds, with threading, for servers with a
-  lobby and multiple worlds
+- Multiple replicated scenes and voxelworlds, for servers with a lobby and
+  multiple worlds
 - Don't emit all world generation events at once
 - Handle module load order properly in reloads (unload by popping from top,
   then reload everything until top)
@@ -70,3 +71,4 @@ Buildat TODO
   and implement the required interfaces
 - Fix everything in /games/
 	- Use builtin/main_context
+- Implement proper get_x behavior or rename get_x things to find_x
