@@ -29,6 +29,9 @@ namespace server
 	struct State
 	{
 		virtual ~State(){}
+		virtual void thread_request_stop() = 0;
+		virtual void thread_join() = 0;
+
 		virtual void shutdown(int exit_status = 0, const ss_ &reason = "") = 0;
 		virtual bool is_shutdown_requested(int *exit_status = nullptr,
 				ss_ *reason = nullptr) = 0;

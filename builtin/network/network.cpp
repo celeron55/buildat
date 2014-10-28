@@ -61,7 +61,7 @@ struct Module: public interface::Module, public network::Interface
 	sm_<int, Peer*> m_peers_by_socket;
 	size_t m_next_peer_id = 1;
 	bool m_will_restore_after_unload = false;
-	sp_<interface::Thread> m_thread;
+	up_<interface::Thread> m_thread;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -71,12 +71,16 @@ struct Module: public interface::Module, public network::Interface
 		log_d(MODULE, "network construct");
 
 		m_thread.reset(interface::createThread(new NetworkThread(this)));
+		m_thread->set_name("network/select");
 		m_thread->start();
 	}
 
 	~Module()
 	{
 		log_d(MODULE, "network destruct");
+
+		m_thread->request_stop();
+		m_thread->join();
 
 		if(m_will_restore_after_unload){
 			if(m_listening_socket->good()){

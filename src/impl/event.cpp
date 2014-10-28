@@ -1,6 +1,7 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/event.h"
+#include "interface/mutex.h"
 
 namespace interface {
 
@@ -13,9 +14,11 @@ struct CEventRegistry: public EventRegistry
 {
 	sm_<ss_, Event::Type> m_types;
 	Event::Type m_next_type = 1;
+	interface::Mutex m_mutex;
 
 	Event::Type type(const ss_ &name)
 	{
+		interface::MutexScope ms(m_mutex);
 		auto it = m_types.find(name);
 		if(it != m_types.end())
 			return it->second;
@@ -25,6 +28,7 @@ struct CEventRegistry: public EventRegistry
 
 	ss_ name(const Event::Type &type)
 	{
+		interface::MutexScope ms(m_mutex);
 		for(auto &pair : m_types){
 			if(pair.second == type)
 				return pair.first;

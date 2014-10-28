@@ -50,7 +50,7 @@ struct Module: public interface::Module, public client_file::Interface
 	interface::Server *m_server;
 	sm_<ss_, sp_<FileInfo>> m_files;
 	sp_<interface::FileWatch> m_watch;
-	sp_<interface::Thread> m_thread;
+	up_<interface::Thread> m_thread;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -60,12 +60,15 @@ struct Module: public interface::Module, public client_file::Interface
 		log_d(MODULE, "client_file construct");
 
 		m_thread.reset(interface::createThread(new FileWatchThread(this)));
+		m_thread->set_name("client_file/select");
 		m_thread->start();
 	}
 
 	~Module()
 	{
 		log_d(MODULE, "client_file destruct");
+		m_thread->request_stop();
+		m_thread->join();
 	}
 
 	void init()

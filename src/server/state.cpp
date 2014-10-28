@@ -56,8 +56,8 @@ struct ModuleContainer
 	interface::ThreadLocalKey *thread_local_key; // Stores mc*
 	up_<interface::Module> module;
 	interface::ModuleInfo info;
-	interface::Mutex mutex; // Protects each of the former variables
 	up_<interface::Thread> thread;
+	interface::Mutex mutex; // Protects each of the former variables
 
 	// Allows directly executing code in the module thread
 	const std::function<void(interface::Module*)> *direct_cb = nullptr;
@@ -84,8 +84,7 @@ struct ModuleContainer
 		direct_cb_free_sem.post();
 	}
 	~ModuleContainer(){
-		log_t(MODULE, "ModuleContainer[%s]: Destructing", cs(info.name));
-		stop_and_delete_module();
+		//log_t(MODULE, "M[%s]: Container: Destructing", cs(info.name));
 	}
 	void init_and_start_thread(){
 		{
@@ -96,39 +95,49 @@ struct ModuleContainer
 				throw Exception("init_and_start_thread(): Module name does not"
 						" match: info.name=\""+info.name+"\","
 						" module->m_module_name=\""+module->m_module_name+"\"");
+			if(thread != nullptr)
+				throw Exception("init_and_start_thread(): thread != nullptr");
 			thread.reset(interface::createThread(new ModuleThread(this)));
 			thread->set_name(info.name);
 			thread->start();
 		}
 		// Initialize in thread
-		execute_direct_cb([&](interface::Module *module){
+		bool ok = execute_direct_cb([&](interface::Module *module){
 			module->init();
 		});
+		(void)ok; // Ignored; fails generally on SIGINT at statup
 	}
-	void stop_and_delete_module(){
+	void thread_request_stop(){
+		interface::MutexScope ms(mutex);
+		if(!thread)
+			return;
+		log_t(MODULE, "M[%s]: Container: Asking thread to exit",
+				cs(info.name));
+		thread->request_stop();
+		// Pretend that direct_cb is now free so that execute_direct_cb can
+		// continue (it will cancel due to thread->stop_requested()).
+		direct_cb_free_sem.post();
+		// Wake up thread so it can exit
+		event_queue_sem.post();
+		log_t(MODULE, "M[%s]: Container: Asked thread to exit",
+				cs(info.name));
+	}
+	void thread_join(){
+		interface::MutexScope ms(mutex);
 		if(thread){
-			log_t(MODULE, "ModuleContainer[%s]: Asking thread to exit",
+			log_t(MODULE, "M[%s]: Container: Waiting thread to exit",
 					cs(info.name));
-			thread->request_stop();
-			// Clear direct callback
-			{
-				interface::MutexScope ms(event_queue_mutex);
-				direct_cb = nullptr;
-			}
-			// Pretend that the current direct callback was executed
-			direct_cb_executed_sem.post();
-			// Wake up thread so it can exit
-			event_queue_sem.post();
-			log_t(MODULE, "ModuleContainer[%s]: Asked thread to exit; waiting",
-					cs(info.name));
+			// But... having mutex locked can make this deadlock?
 			thread->join();
+			log_t(MODULE, "M[%s]: Container: Thread exited; deleting thread",
+					cs(info.name));
 			thread.reset();
-			log_t(MODULE, "ModuleContainer[%s]: Thread exited", cs(info.name));
-		} else {
-			log_t(MODULE, "ModuleContainer[%s]: No thread", cs(info.name));
+			log_t(MODULE, "M[%s]: Container: Thread exited; thread deleted",
+					cs(info.name));
 		}
 		// Module should have been deleted by the thread. In case the thread
 		// failed, delete it here.
+		// TODO: This is weird
 		module.reset();
 	}
 	void push_event(const Event &event){
@@ -140,10 +149,21 @@ struct ModuleContainer
 		interface::MutexScope ms(mutex);
 		module->event(event.type, event.p.get());
 	}
-	void execute_direct_cb(const std::function<void(interface::Module*)> &cb){
+	// If returns false, the module thread is stopping and cannot be called
+	bool execute_direct_cb(const std::function<void(interface::Module*)> &cb){
 		log_t(MODULE, "execute_direct_cb[%s]: Waiting for direct_cb to be free",
 				cs(info.name));
 		direct_cb_free_sem.wait(); // Wait for direct_cb to be free
+		{
+			interface::MutexScope ms(mutex);
+			// This is the last chance to turn around
+			if(thread->stop_requested()){
+				log_t(MODULE, "execute_direct_cb[%s]: Stop requested; cancelling.",
+						cs(info.name));
+				direct_cb_free_sem.post(); // Let the next ones pass too
+				return false;
+			}
+		}
 		log_t(MODULE, "execute_direct_cb[%s]: Direct_cb is now free. "
 				"Waiting for event queue lock", cs(info.name));
 		{
@@ -155,10 +175,15 @@ struct ModuleContainer
 		}
 		log_t(MODULE, "execute_direct_cb[%s]: Waiting for execution to finish",
 				cs(info.name));
+		// NOTE: If execution hangs here, the problem cannot be solved by
+		//       forcing this semaphore to open, because exiting this function
+		//       while direct_cb is being executed is unsafe. You have to figure
+		//       out what direct_cb has ended up waiting for, and fix that.
 		direct_cb_executed_sem.wait(); // Wait for execution to finish
 		direct_cb_free_sem.post(); // Set direct_cb to be free now
 		log_t(MODULE, "execute_direct_cb[%s]: Execution finished",
 				cs(info.name));
+		return true;
 	}
 };
 
@@ -169,12 +194,13 @@ void ModuleThread::run(interface::Thread *thread)
 	for(;;){
 		// Wait for an event
 		mc->event_queue_sem.wait();
-		// Check if should stop
-		if(thread->stop_requested())
-			break;
+		// NOTE: Do not stop here, because we have to process the waited direct
+		//       callback or event in order for the caller to be able to safely
+		//       return.
 		// Grab the direct callback or an event from the queue
 		const std::function<void(interface::Module*)> *direct_cb = nullptr;
 		Event event;
+		bool got_event = false;
 		{
 			interface::MutexScope ms(mc->event_queue_mutex);
 			if(mc->direct_cb){
@@ -182,27 +208,46 @@ void ModuleThread::run(interface::Thread *thread)
 			} else if(!mc->event_queue.empty()){
 				event = mc->event_queue.front();
 				mc->event_queue.pop_front();
-			} else {
-				continue;
+				got_event = true;
 			}
+		}
+		// Check if should stop
+		if(thread->stop_requested()){
+			log_t(MODULE, "M[%s]: Stopping event loop", cs(mc->info.name));
+			// Act like we processed the request
+			if(direct_cb){
+				log_t(MODULE, "M[%s]: Discarding direct_cb", cs(mc->info.name));
+				{
+					interface::MutexScope ms(mc->event_queue_mutex);
+					mc->direct_cb = nullptr;
+				}
+				mc->direct_cb_executed_sem.post();
+			}
+			if(got_event){
+				log_t(MODULE, "M[%s]: Discarding event", cs(mc->info.name));
+			}
+			// Stop
+			break;
 		}
 		if(direct_cb){
 			// Handle the direct callback
-			interface::MutexScope ms(mc->mutex);
+			//interface::MutexScope ms(mc->mutex);
 			if(!mc->module){
-				log_w(MODULE, "ModuleContainer[%s]: Module is null; cannot"
+				log_w(MODULE, "M[%s]: Module is null; cannot"
 						" call direct callback", cs(mc->info.name));
 			} else {
 				try {
-					log_t(MODULE, "run[%s]: Direct_cb: Executing",
+					log_t(MODULE, "M[%s] ~direct_cb(): Executing",
 							cs(mc->info.name));
 					(*direct_cb)(mc->module.get());
-					log_t(MODULE, "run[%s]: Direct_cb: Executed",
+					log_t(MODULE, "M[%s] ~direct_cb(): Executed",
 							cs(mc->info.name));
 				} catch(std::exception &e){
-					log_w(MODULE, "direct_cb() failed: %s", e.what());
+					log_w(MODULE, "M[%s] ~direct_cb() failed: %s",
+							cs(mc->info.name), e.what());
 					interface::debug::log_exception_backtrace();
-					mc->server->shutdown(1, mc->info.name+" failed: "+e.what());
+					mc->server->shutdown(1, "M["+mc->info.name+"]~>direct_cb() "
+							"failed: "+e.what());
 				}
 			}
 			{
@@ -210,21 +255,31 @@ void ModuleThread::run(interface::Thread *thread)
 				mc->direct_cb = nullptr;
 			}
 			mc->direct_cb_executed_sem.post();
-		} else {
+		} else if(got_event) {
 			// Handle the event
-			interface::MutexScope ms(mc->mutex);
+			//interface::MutexScope ms(mc->mutex);
 			if(!mc->module){
-				log_w(MODULE, "ModuleContainer[%s]: Module is null; cannot"
+				log_w(MODULE, "M[%s]: Module is null; cannot"
 						" handle event", cs(mc->info.name));
-				continue;
+			} else {
+				try {
+					log_t(MODULE, "M[%s]->event(): Executing",
+							cs(mc->info.name));
+					mc->module->event(event.type, event.p.get());
+					log_t(MODULE, "M[%s]->event(): Executed",
+							cs(mc->info.name));
+				} catch(std::exception &e){
+					log_w(MODULE, "M[%s]->event() failed: %s",
+							cs(mc->info.name), e.what());
+					interface::debug::log_exception_backtrace();
+					mc->server->shutdown(1, "M["+mc->info.name+"]->event() "
+							"failed: "+e.what());
+				}
 			}
-			try {
-				mc->module->event(event.type, event.p.get());
-			} catch(std::exception &e){
-				log_w(MODULE, "module->event() failed: %s", e.what());
-				interface::debug::log_exception_backtrace();
-				mc->server->shutdown(1, mc->info.name+" failed: "+e.what());
-			}
+		} else {
+			log_w(MODULE, "M[%s]: Event semaphore indicated something happened,"
+					" but there was no event, direct callback nor was the thread"
+					" asked to stop.", cs(mc->info.name));
 		}
 	}
 	// Delete module in this thread. This is important in case the destruction
@@ -294,7 +349,7 @@ struct CState: public State, public interface::Server
 
 	// Must come after the members this will access, which are m_modules_mutex
 	// and m_module_file_watches.
-	sp_<interface::Thread> m_file_watch_thread;
+	up_<interface::Thread> m_file_watch_thread;
 
 	CState():
 		m_compiler(rccpp::createCompiler(g_server_config.compiler_command)),
@@ -304,6 +359,7 @@ struct CState: public State, public interface::Server
 
 		m_file_watch_thread.reset(interface::createThread(
 				new FileWatchThread(this)));
+		m_file_watch_thread->set_name("state/select");
 		m_file_watch_thread->start();
 
 		// Set basic RCC++ include directories
@@ -341,6 +397,10 @@ struct CState: public State, public interface::Server
 	}
 	~CState()
 	{
+	}
+
+	sv_<sp_<ModuleContainer>> get_modules_in_unload_order()
+	{
 		// Unload modules in reverse load order to make things work more
 		// predictably
 		sv_<sp_<ModuleContainer>> mcs;
@@ -357,9 +417,31 @@ struct CState: public State, public interface::Server
 				mcs.push_back(mc);
 			}
 		}
+		return mcs;
+	}
+
+	void thread_request_stop()
+	{
+		m_file_watch_thread->request_stop();
+
+		sv_<sp_<ModuleContainer>> mcs = get_modules_in_unload_order();
+
 		for(sp_<ModuleContainer> &mc : mcs){
-			log_v(MODULE, "Destructing module %s", cs(mc->info.name));
-			mc->stop_and_delete_module();
+			log_t(MODULE, "Requesting module to stop: [%s]", cs(mc->info.name));
+			mc->thread_request_stop();
+		}
+	}
+
+	void thread_join()
+	{
+		m_file_watch_thread->join();
+
+		sv_<sp_<ModuleContainer>> mcs = get_modules_in_unload_order();
+
+		// Wait for threads to stop and delete module container references
+		for(sp_<ModuleContainer> &mc : mcs){
+			log_v(MODULE, "Waiting for module to stop: [%s]", cs(mc->info.name));
+			mc->thread_join();
 			// Remove our reference to the module container, so that any child
 			// threads it will now delete will not get deadlocked in trying to
 			// access the module
@@ -519,6 +601,7 @@ struct CState: public State, public interface::Server
 
 			m_module_info[info.name] = info;
 
+			// TODO: Fix to something like in load_module()
 			mc = sp_<ModuleContainer>(new ModuleContainer(
 					this, &m_thread_local_mc_key, m, info));
 			m_modules[info.name] = mc;
@@ -531,7 +614,7 @@ struct CState: public State, public interface::Server
 
 	bool load_module(const interface::ModuleInfo &info)
 	{
-		sp_<ModuleContainer> mc;
+		interface::Module *m = nullptr;
 		{
 			interface::MutexScope ms(m_modules_mutex);
 
@@ -545,7 +628,6 @@ struct CState: public State, public interface::Server
 
 			m_module_info[info.name] = info;
 
-			interface::Module *m = nullptr;
 			if(!info.meta.disable_cpp){
 				m = build_module_u(info);
 
@@ -555,8 +637,14 @@ struct CState: public State, public interface::Server
 					return false;
 				}
 			}
-			mc = sp_<ModuleContainer>(new ModuleContainer(
-					this, &m_thread_local_mc_key, m, info));
+		}
+
+		sp_<ModuleContainer> mc = sp_<ModuleContainer>(
+				new ModuleContainer(this, &m_thread_local_mc_key, m, info));
+
+		{
+			interface::MutexScope ms(m_modules_mutex);
+
 			m_modules[info.name] = mc;
 			m_module_load_order.push_back(info.name);
 		}
@@ -680,7 +768,8 @@ struct CState: public State, public interface::Server
 		}
 		// Destruct module
 		log_t(MODULE, "unload_module_u[%s]: Deleting module", cs(module_name));
-		mc->stop_and_delete_module();
+		mc->thread_request_stop();
+		mc->thread_join();
 		// So, hopefully this is the last reference because we're going to
 		// unload the shared executable...
 		if(!mc.unique())
@@ -829,7 +918,7 @@ struct CState: public State, public interface::Server
 			ModuleContainer *caller_mc =
 					(ModuleContainer*)mc->thread_local_key->get();
 			if(caller_mc){
-				log_t(MODULE, "access_module(\"%s\"): Called by \"%s\"",
+				log_t(MODULE, "access_module[%s]: Called by \"%s\"",
 						cs(mc->info.name), cs(caller_mc->info.name));
 
 				// Throws exception if not valid.
@@ -841,13 +930,19 @@ struct CState: public State, public interface::Server
 				// Access OK; copy the caller's name so we can use it
 				caller_module_name = caller_mc->info.name;
 			} else {
-				log_t(MODULE, "access_module(\"%s\"): Called by something else"
+				log_t(MODULE, "access_module[%s]: Called by something else"
 						" than a module", cs(mc->info.name));
 			}
 		}
 
 		// Execute callback in module thread
-		mc->execute_direct_cb(cb);
+		bool ok = mc->execute_direct_cb(cb);
+		(void)ok; // Unused
+		/*if(!ok && !caller_module_name.empty()){
+			throw interface::TargetModuleStopped("access_module(): Module \""+
+					module_name+"\" is stopping (called by \""+
+					caller_module_name+"\")");
+		}*/
 		return true;
 	}
 
@@ -896,7 +991,7 @@ struct CState: public State, public interface::Server
 	{
 		if(log_get_max_level() >= CORE_TRACE){
 			auto *evreg = interface::getGlobalEventRegistry();
-			log_t("state", "emit_event(): %s (%zu)",
+			log_t(MODULE, "emit_event(): %s (%zu)",
 					cs(evreg->name(event.type)), event.type);
 		}
 
@@ -907,17 +1002,17 @@ struct CState: public State, public interface::Server
 		}
 
 		if(event.type >= event_subs_snapshot.size()){
-			log_t("state", "emit_event(): %zu: No subs", event.type);
+			log_t(MODULE, "emit_event(): %zu: No subs", event.type);
 			return;
 		}
 		sv_<wp_<ModuleContainer>> &sublist = event_subs_snapshot[event.type];
 		if(sublist.empty()){
-			log_t("state", "emit_event(): %zu: No subs", event.type);
+			log_t(MODULE, "emit_event(): %zu: No subs", event.type);
 			return;
 		}
 		if(log_get_max_level() >= CORE_TRACE){
 			auto *evreg = interface::getGlobalEventRegistry();
-			log_t("state", "emit_event(): %s (%zu): Pushing to %zu modules",
+			log_t(MODULE, "emit_event(): %s (%zu): Pushing to %zu modules",
 					cs(evreg->name(event.type)), event.type, sublist.size());
 		}
 		for(wp_<ModuleContainer> &mc_weak : sublist){
@@ -929,7 +1024,7 @@ struct CState: public State, public interface::Server
 					mc->push_event(event);
 			} else {
 				auto *evreg = interface::getGlobalEventRegistry();
-				log_t("state", "emit_event(): %s: (%zu): Subscriber weak pointer"
+				log_t(MODULE, "emit_event(): %s: (%zu): Subscriber weak pointer"
 						" is null", cs(evreg->name(event.type)), event.type);
 			}
 		}
@@ -973,13 +1068,13 @@ struct CState: public State, public interface::Server
 					it != m_unloads_requested.end();){
 				ss_ module_name = *it; // Copy
 				it++;
-				log_i("state", "Unloading %s (unload requested)", cs(module_name));
+				log_i(MODULE, "Unloading %s (unload requested)", cs(module_name));
 				m_unloads_requested.erase(module_name);
 				unload_module_u(module_name);
 			}
 			// Unload according to reload requests
 			for(const interface::ModuleInfo &info : m_reloads_requested){
-				log_i("state", "Unloading %s (reload requested)", cs(info.name));
+				log_i(MODULE, "Unloading %s (reload requested)", cs(info.name));
 				unload_module_u(info.name);
 			}
 			// Grab reload requests out from this mutex scope
@@ -987,7 +1082,7 @@ struct CState: public State, public interface::Server
 		}
 		// Load according to reload requests
 		for(const interface::ModuleInfo &info : reloads_requested){
-			log_i("state", "Loading %s (reload requested)", cs(info.name));
+			log_i(MODULE, "Loading %s (reload requested)", cs(info.name));
 			load_module(info);
 			// Send core::continue directly to module
 			{

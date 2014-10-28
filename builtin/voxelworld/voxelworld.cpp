@@ -1028,10 +1028,12 @@ struct Module: public interface::Module, public voxelworld::Interface
 		interface::Module(MODULE),
 		m_server(server)
 	{
+		log_t(MODULE, "voxelworld construct");
 	}
 
 	~Module()
 	{
+		log_t(MODULE, "voxelworld destruct");
 	}
 
 	void init()

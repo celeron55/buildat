@@ -5,6 +5,7 @@
 #include <c55/string_util.h>
 #include <stdexcept>
 #include <iostream>
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <execinfo.h>
@@ -101,9 +102,19 @@ void init_signal_handlers(const SigConfig &config)
 		sigaction(SIGABRT, &sa, NULL);
 }
 
+static std::atomic_int log_backtrace_spinlock(0);
+
 static void log_backtrace(void* const *trace, int trace_size)
 {
 	char **symbols = backtrace_symbols(trace, trace_size);
+
+	// Lock spinlock
+	for(;;){
+		int previous_value = log_backtrace_spinlock.fetch_add(1);
+		if(previous_value == 0)
+			break;
+		log_backtrace_spinlock--;
+	}
 
 	// The first stack frame points to this functiton
 	log_i(MODULE, "Backtrace:");
@@ -141,6 +152,9 @@ static void log_backtrace(void* const *trace, int trace_size)
 			log_i(MODULE, "#%i  %s", i-1, cs(cppfilt_symbol));
 		}
 	}
+
+	// Unlock spinlock
+	log_backtrace_spinlock--;
 }
 
 void log_current_backtrace()

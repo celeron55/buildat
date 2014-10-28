@@ -72,6 +72,21 @@ Non-exception throwing and exception-throwing methods
 To check for nullptr returned by get_x() or find_x(), use the check() function
 in core/types.h.
 
+Threads
+-------
+The program should always be debuggable with Helgrind and DRD, without false
+positives.
+
+Only use synchronization primitives that wrap pthreads, because that is what
+Helgrind and DRD support.
+
+If an object owns a thread, the thread should not be stopped in the object's
+destructor. Instead the object should have thread_request_stop() and
+thread_join() methods which should always be called before the object is
+destructed. This allows fast parallel shutdown and better control over
+destruction. You can skip this if you somehow can do it without Hellgrind and
+DRD bitching at you though.
+
 Directory structure
 -------------------
 ├── 3rdparty    << Bundled 3rd-party libraries

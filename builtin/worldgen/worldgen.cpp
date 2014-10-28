@@ -143,6 +143,7 @@ struct Module: public interface::Module, public Interface
 		m_server(server)
 	{
 		m_thread.reset(interface::createThread(new GenerateThread(this)));
+		m_thread->set_name("worldgen/generate");
 		m_thread->start();
 	}
 
@@ -150,6 +151,7 @@ struct Module: public interface::Module, public Interface
 	{
 		m_thread->request_stop();
 		m_queued_sections_sem.post();
+		m_thread->join();
 	}
 
 	void init()

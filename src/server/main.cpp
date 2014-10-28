@@ -183,6 +183,9 @@ int main(int argc, char *argv[])
 			if(state->is_shutdown_requested(&exit_status, &shutdown_reason))
 				break;
 		}
+
+		state->thread_request_stop();
+		state->thread_join();
 	} catch(server::ServerShutdownRequest &e){
 		log_v(MODULE, "ServerShutdownRequest: %s", e.what());
 	}
