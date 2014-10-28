@@ -65,8 +65,8 @@ Ordering of #include directives:
 
 Non-exception throwing and exception-throwing methods
 -----------------------------------------------------
+- get_x: Returns nullptr or equivalent if not found
 - find_x: Returns nullptr or equivalent if not found
-- get_x: Throws exception if not found
 - check_x: Throws exception if not found
 
 Directory structure

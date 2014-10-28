@@ -22,7 +22,6 @@ Buildat TODO
 - Automatic buildat root detection so that the server and the client can
   generally be started with any working directory in either the in-source or
   windows-installed configuration
-	- Does mingw have rpath?
 - Precompiled mode
 - Singleplayer UI
 - Show all exceptions and errors on client using ui_utils.show_message_dialog
@@ -68,4 +67,3 @@ Buildat TODO
   and implement the required interfaces
 - Fix everything in /games/
 	- Use builtin/main_context
-- Implement proper get_x behavior or rename get_x things to find_x
