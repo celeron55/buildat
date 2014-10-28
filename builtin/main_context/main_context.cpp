@@ -121,8 +121,8 @@ struct Module: public interface::Module, public main_context::Interface
 		const interface::ServerConfig &server_config = m_server->get_config();
 
 		sv_<ss_> resource_paths = {
-			server_config.urho3d_path+"/Bin/CoreData",
-			server_config.urho3d_path+"/Bin/Data",
+			server_config.get<ss_>("urho3d_path")+"/Bin/CoreData",
+			server_config.get<ss_>("urho3d_path")+"/Bin/Data",
 		};
 		auto *fs = interface::getGlobalFilesystem();
 		ss_ resource_paths_s;

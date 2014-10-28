@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "core/types.h"
 #include "core/log.h"
+#include "core/config.h"
 #include "server/config.h"
 #include "server/state.h"
 #include "interface/server.h"
@@ -104,23 +105,23 @@ int main(int argc, char *argv[])
 			break;
 		case 'r':
 			fprintf(stderr, "INFO: config.rccpp_build_path: %s\n", c55_optarg);
-			config.rccpp_build_path = c55_optarg;
+			config.set("rccpp_build_path", c55_optarg);
 			break;
 		case 'i':
 			fprintf(stderr, "INFO: config.interface_path: %s\n", c55_optarg);
-			config.interface_path = c55_optarg;
+			config.set("interface_path", c55_optarg);
 			break;
 		case 'S':
 			fprintf(stderr, "INFO: config.share_path: %s\n", c55_optarg);
-			config.share_path = c55_optarg;
+			config.set("share_path", c55_optarg);
 			break;
 		case 'U':
 			fprintf(stderr, "INFO: config.urho3d_path: %s\n", c55_optarg);
-			config.urho3d_path = c55_optarg;
+			config.set("urho3d_path", c55_optarg);
 			break;
 		case 'c':
 			fprintf(stderr, "INFO: config.compiler_command: %s\n", c55_optarg);
-			config.compiler_command = c55_optarg;
+			config.set("compiler_command", c55_optarg);
 			break;
 		case 'l':
 			log_set_max_level(atoi(c55_optarg));
@@ -131,7 +132,11 @@ int main(int argc, char *argv[])
 		case 'C':
 			fprintf(stderr, "INFO: config.skip_compiling_modules += %s\n",
 					c55_optarg);
-			config.skip_compiling_modules.insert(c55_optarg);
+			{
+				auto v = config.get<json::Value>("skip_compiling_modules");
+				v.set(c55_optarg, json::Value(true));
+				config.set("skip_compiling_modules", v);
+			}
 			break;
 		default:
 			fprintf(stderr, "ERROR: Invalid command-line argument\n");

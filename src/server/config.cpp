@@ -43,8 +43,24 @@ static bool check_runnable(const ss_ &command)
 	}
 }
 
+Config::Config()
+{
+	set_default("rccpp_build_path", "../cache/rccpp_build");
+	set_default("interface_path", "../src/interface");
+	set_default("share_path", "..");
+	set_default("urho3d_path", "../../Urho3D");
+	set_default("compiler_command", "c++");
+	set_default("skip_compiling_modules", json::object());
+}
+
 bool Config::check_paths()
 {
+	ss_ rccpp_build_path = get<ss_>("rccpp_build_path");
+	ss_ interface_path = get<ss_>("interface_path");
+	ss_ share_path = get<ss_>("share_path");
+	ss_ urho3d_path = get<ss_>("urho3d_path");
+	ss_ compiler_command = get<ss_>("compiler_command");
+
 	bool fail = false;
 
 	if(!check_file_readable(share_path+"/builtin/network/network.cpp")){
@@ -85,5 +101,4 @@ bool Config::check_paths()
 }
 
 }
-
 // vim: set noet ts=4 sw=4:

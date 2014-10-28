@@ -21,13 +21,7 @@ namespace json
 	struct ValuePrivate;
 	class Value
 	{
-		friend const Value json::object();
-		friend const Value json::array();
-		friend const Value json::null();
-		friend const Value json::load_sajson(const sajson::value &src);
-		friend class Iterator;
-
-		ValuePrivate *p;
+	public:
 		enum Type {
 			T_UNDEFINED,
 			T_NULL,
@@ -38,7 +32,16 @@ namespace json
 			T_ARRAY,
 			T_OBJECT,
 			//T_RAW,
-		} type;
+		};
+	private:
+		friend const Value json::object();
+		friend const Value json::array();
+		friend const Value json::null();
+		friend const Value json::load_sajson(const sajson::value &src);
+		friend class Iterator;
+
+		mutable ValuePrivate *p;
+		Type type;
 		union {
 			bool b;
 			int64_t i;
@@ -59,6 +62,11 @@ namespace json
 
 		// assignment operator
 		Value& operator=(const Value &value);
+
+		// get type
+		Type get_type() const {return type;}
+		// describe type
+		const char* desc_type() const;
 
 		// check value type
 		bool is_undefined() const;
@@ -95,12 +103,14 @@ namespace json
 
 		// get value cast to specified type
 		const char* as_cstring() const;
-		std::string as_string(const std::string &default_value =
-				std::string()) const;
-		int as_integer(int default_value = 0) const;
-		double as_real(double default_value = 0.0) const;
-		double as_number(double default_value = 0.0) const;
-		bool as_boolean(bool default_value = false) const;
+		const std::string& as_string() const;
+		const int64_t& as_integer() const;
+		const double& as_real() const;
+		const double& as_number() const;
+		const bool& as_boolean() const;
+
+		// get value according to template type
+		template<typename T> const T& as() const;
 
 		// set an object property (converts value to object is not one already)
 		Value& set_key(const char *key, const Value &value);
@@ -135,6 +145,22 @@ namespace json
 
 		const Value deepcopy() const;
 	};
+
+	template<> inline const json::Value& Value::as<json::Value>() const {
+		return *this;
+	}
+	template<> inline const std::string& Value::as<std::string>() const {
+		return as_string();
+	}
+	template<> inline const int64_t& Value::as<int64_t>() const {
+		return as_integer();
+	}
+	template<> inline const  double& Value::as<double> () const {
+		return as_number();
+	}
+	template<> inline const    bool& Value::as<bool>   () const {
+		return as_boolean();
+	}
 
 	// iterators over a JSON object
 	struct IteratorPrivate;
@@ -204,5 +230,5 @@ namespace json
 }
 
 #define JSON_INDENT(x)  // Dummy for now
-
+// codestyle:disable (muh beautiful alignments)
 // vim: set noet ts=4 sw=4:

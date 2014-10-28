@@ -352,7 +352,7 @@ struct CState: public State, public interface::Server
 	up_<interface::Thread> m_file_watch_thread;
 
 	CState():
-		m_compiler(rccpp::createCompiler(g_server_config.compiler_command)),
+		m_compiler(rccpp::createCompiler(g_server_config.get<ss_>("compiler_command"))),
 		m_thread_pool(interface::thread_pool::createThreadPool())
 	{
 		m_thread_pool->start(4); // TODO: Configurable
@@ -367,14 +367,14 @@ struct CState: public State, public interface::Server
 		// We don't want to directly add the interface path as it contains
 		// stuff like mutex.h which match on Windows to Urho3D's Mutex.h
 		m_compiler->include_directories.push_back(
-				g_server_config.interface_path+"/..");
+				g_server_config.get<ss_>("interface_path")+"/..");
 		m_compiler->include_directories.push_back(
-				g_server_config.interface_path+"/../../3rdparty/cereal/include");
+				g_server_config.get<ss_>("interface_path")+"/../../3rdparty/cereal/include");
 		m_compiler->include_directories.push_back(
-				g_server_config.interface_path+
+				g_server_config.get<ss_>("interface_path")+
 				"/../../3rdparty/polyvox/library/PolyVoxCore/include");
 		m_compiler->include_directories.push_back(
-				g_server_config.share_path+"/builtin");
+				g_server_config.get<ss_>("share_path")+"/builtin");
 
 		// Setup Urho3D in RCC++
 
@@ -385,15 +385,15 @@ struct CState: public State, public interface::Server
 		};
 		for(const ss_ &subdir : urho3d_subdirs){
 			m_compiler->include_directories.push_back(
-					g_server_config.urho3d_path+"/Source/Engine/"+subdir);
+					g_server_config.get<ss_>("urho3d_path")+"/Source/Engine/"+subdir);
 		}
 		m_compiler->include_directories.push_back(
-				g_server_config.urho3d_path+"/Build/Engine"); // Urho3D.h
+				g_server_config.get<ss_>("urho3d_path")+"/Build/Engine"); // Urho3D.h
 		m_compiler->library_directories.push_back(
-				g_server_config.urho3d_path+"/Lib");
+				g_server_config.get<ss_>("urho3d_path")+"/Lib");
 		m_compiler->libraries.push_back("-lUrho3D");
 		m_compiler->include_directories.push_back(
-				g_server_config.urho3d_path+"/Source/ThirdParty/Bullet/src");
+				g_server_config.get<ss_>("urho3d_path")+"/Source/ThirdParty/Bullet/src");
 	}
 	~CState()
 	{
@@ -521,7 +521,8 @@ struct CState: public State, public interface::Server
 		log_d(MODULE, "extra_cxxflags: %s", cs(extra_cxxflags));
 		log_d(MODULE, "extra_ldflags: %s", cs(extra_ldflags));
 
-		bool skip_compile = g_server_config.skip_compiling_modules.count(info.name);
+		bool skip_compile = g_server_config.get<json::Value>(
+				"skip_compiling_modules").get(info.name).as_boolean();
 
 		sv_<ss_> files_to_hash = {init_cpp_path};
 		files_to_hash.insert(
@@ -532,12 +533,12 @@ struct CState: public State, public interface::Server
 #ifdef _WIN32
 		// On Windows, we need a new name for each modification of the module
 		// because Windows caches DLLs by name
-		ss_ build_dst = g_server_config.rccpp_build_path +
+		ss_ build_dst = g_server_config.get<ss_>("rccpp_build_path") +
 				"/"+info.name+"_"+interface::sha1::hex(content_hash)+"."+
 				MODULE_EXTENSION;
 		// TODO: Delete old ones
 #else
-		ss_ build_dst = g_server_config.rccpp_build_path +
+		ss_ build_dst = g_server_config.get<ss_>("rccpp_build_path") +
 				"/"+info.name+"."+MODULE_EXTENSION;
 #endif
 
@@ -795,7 +796,7 @@ struct CState: public State, public interface::Server
 
 	ss_ get_builtin_modules_path()
 	{
-		return g_server_config.share_path+"/builtin";
+		return g_server_config.get<ss_>("share_path")+"/builtin";
 	}
 
 	ss_ get_module_path(const ss_ &module_name)

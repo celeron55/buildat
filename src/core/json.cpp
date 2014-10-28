@@ -89,6 +89,7 @@ struct ValuePrivate
 	std::string s;
 	std::vector<Value> a;
 	std::map<std::string, Value> o;
+	double number; // Used if integer value is referenced as const double
 };
 }
 
@@ -173,6 +174,20 @@ Value& json::Value::operator=(const Value &other)
 		break;
 	}
 	return *this;
+}
+
+const char* json::Value::desc_type() const {
+	switch(type){
+	case T_UNDEFINED: return "UNDEFINED";
+	case T_NULL:      return "NULL";
+	case T_BOOL:      return "BOOL";
+	case T_INT:       return "INT";
+	case T_FLOAT:     return "FLOAT";
+	case T_STRING:    return "STRING";
+	case T_ARRAY:     return "ARRAY";
+	case T_OBJECT:    return "OBJECT";
+	}
+	return "unknown";
 }
 
 bool json::Value::is_undefined() const {
@@ -266,9 +281,9 @@ const Value& json::Value::get(const std::string &key) const {
 			return it->second;
 		}
 		break;
-		default:
-			return dummy;
-		}
+	default:
+		return dummy;
+	}
 }
 
 Value& json::Value::operator[](const char *key){
@@ -283,9 +298,9 @@ Value& json::Value::operator[](const std::string &key){
 			return it->second;
 		}
 		break;
-		default:
-			throw MutableDoesNotExist();
-		}
+	default:
+		throw MutableDoesNotExist();
+	}
 }
 
 void json::Value::clear(){
@@ -307,7 +322,8 @@ const char* json::Value::as_cstring() const {
 		return p->s.c_str();
 	}
 }
-std::string json::Value::as_string(const std::string &default_value) const {
+const std::string& json::Value::as_string() const {
+	static std::string default_value;
 	switch(type){
 	default:
 		return default_value;
@@ -315,7 +331,8 @@ std::string json::Value::as_string(const std::string &default_value) const {
 		return p->s;
 	}
 }
-int json::Value::as_integer(int default_value) const {
+const int64_t& json::Value::as_integer() const {
+	static int64_t default_value = 0;
 	switch(type){
 	default:
 		return default_value;
@@ -323,7 +340,8 @@ int json::Value::as_integer(int default_value) const {
 		return value.i;
 	}
 }
-double json::Value::as_real(double default_value) const {
+const double& json::Value::as_real() const {
+	static double default_value = 0;
 	switch(type){
 	default:
 		return default_value;
@@ -331,17 +349,21 @@ double json::Value::as_real(double default_value) const {
 		return value.f;
 	}
 }
-double json::Value::as_number(double default_value) const {
+const double& json::Value::as_number() const {
+	static double default_value = 0.0;
 	switch(type){
 	default:
 		return default_value;
 	case T_INT:
-		return value.i;
+		p = new ValuePrivate();
+		p->number = value.i;
+		return p->number;
 	case T_FLOAT:
 		return value.f;
 	}
 }
-bool json::Value::as_boolean(bool default_value) const {
+const bool& json::Value::as_boolean() const {
+	static bool default_value = false;
 	switch(type){
 	default:
 		return default_value;
@@ -696,4 +718,5 @@ const Value json::load_file(const char *path, json_error_t *error){
 	t.read(&buffer[0], size);
 	return json::load_string(buffer.c_str(), error);
 }
+// codestyle:disable (muh beautiful alignments)
 // vim: set noet ts=4 sw=4:
