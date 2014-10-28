@@ -18,6 +18,9 @@ namespace main_context
 	namespace magic = Urho3D;
 	using interface::Event;
 
+	struct OpaqueSceneReference;
+	typedef OpaqueSceneReference* SceneReference;
+
 	struct Interface
 	{
 		// NOTE: Do not store Urho3D::SharedPtr<>s or any other kinds of pointers
@@ -25,7 +28,11 @@ namespace main_context
 		//       thread-safe.
 
 		virtual magic::Context* get_context() = 0;
-		virtual magic::Scene* get_scene() = 0;
+		virtual magic::Scene* find_scene(SceneReference ref) = 0;
+		virtual magic::Scene* get_scene(SceneReference ref) = 0;
+
+		virtual SceneReference create_scene() = 0;
+		virtual void delete_scene(SceneReference ref) = 0;
 
 		virtual void sub_magic_event(
 				const magic::StringHash &event_type,

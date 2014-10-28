@@ -33,7 +33,7 @@ using magic::Component;
 
 namespace replicate {
 
-ss_ dump(const magic::VectorBuffer &buf)
+static ss_ dump(const magic::VectorBuffer &buf)
 {
 	std::ostringstream os(std::ios::binary);
 	os<<"[";
@@ -46,10 +46,17 @@ ss_ dump(const magic::VectorBuffer &buf)
 	return os.str();
 }
 
-ss_ buf_to_string(const magic::VectorBuffer &buf)
+static ss_ buf_to_string(const magic::VectorBuffer &buf)
 {
 	return ss_((const char*)&buf.GetBuffer().Front(), buf.GetBuffer().Size());
 }
+
+struct PeerState
+{
+	PeerId peer_id = 0;
+	main_context::SceneReference scene_ref = nullptr;
+	magic::SceneReplicationState scene_state;
+};
 
 struct Module: public interface::Module, public replicate::Interface
 {
@@ -57,7 +64,7 @@ struct Module: public interface::Module, public replicate::Interface
 	// NOTE: We use pointers to SceneReplicationStates as Connection pointers in
 	//       other replication states in order to scene->CleanupConnection()
 	//       without an actual Connection object (which we don't want to use)
-	sm_<PeerId, magic::SceneReplicationState> m_scene_states;
+	sm_<PeerId, PeerState> m_peers;
 
 	sv_<Event> m_events_to_emit_after_next_sync;
 
@@ -72,10 +79,16 @@ struct Module: public interface::Module, public replicate::Interface
 	{
 		log_d(MODULE, "replicate destruct");
 		main_context::access(m_server, [&](main_context::Interface *imc){
-			magic::Scene *scene = imc->get_scene();
-			for(auto &pair: m_scene_states){
-				magic::SceneReplicationState &scene_state = pair.second;
-				scene->CleanupConnection((magic::Connection*)&scene_state);
+			for(auto &pair: m_peers){
+				PeerState &ps = pair.second;
+				if(ps.scene_ref == nullptr)
+					continue;
+				magic::Scene *scene = imc->find_scene(ps.scene_ref);
+				if(!scene){
+					log_w(MODULE, "~Module(): Scene %p not found", ps.scene_ref);
+					continue;
+				}
+				scene->CleanupConnection((magic::Connection*)&ps.scene_state);
 			}
 		});
 	}
@@ -87,6 +100,7 @@ struct Module: public interface::Module, public replicate::Interface
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("network:client_connected"));
+		m_server->sub_event(this, Event::t("network:client_disconnected"));
 		m_server->sub_event(this, Event::t("core:tick"));
 	}
 
@@ -97,6 +111,8 @@ struct Module: public interface::Module, public replicate::Interface
 		EVENT_VOIDN("core:continue", on_continue)
 		EVENT_TYPEN("network:client_connected", on_client_connected,
 				network::NewClient)
+		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
+				network::OldClient)
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 	}
 
@@ -123,19 +139,28 @@ struct Module: public interface::Module, public replicate::Interface
 		log_v(MODULE, "replicate::on_client_disconnected: id=%zu",
 				old_client.info.id);
 		auto peer = old_client.info.id;
-		auto it = m_scene_states.find(peer);
-		if(it == m_scene_states.end())
+		auto it = m_peers.find(peer);
+		if(it == m_peers.end())
 			return;
-		magic::SceneReplicationState &scene_state = it->second;
-		main_context::access(m_server, [&](main_context::Interface *imc){
-			magic::Scene *scene = imc->get_scene();
-			// NOTE: We use pointers to SceneReplicationStates as Connection
-			//       pointers in other replication states in order to
-			//       scene->CleanupConnection() without an actual Connection object
-			//       (which we don't want to use)
-			scene->CleanupConnection((magic::Connection*)&scene_state);
-			m_scene_states.erase(peer);
-		});
+		PeerState &ps = it->second;
+		if(ps.scene_ref){
+			main_context::access(m_server, [&](main_context::Interface *imc){
+				magic::Scene *scene = imc->find_scene(ps.scene_ref);
+				if(!scene){
+					log_w(MODULE, "on_client_disconnected(): Scene %p not found",
+							ps.scene_ref);
+					return;
+				}
+				// NOTE: We use pointers to SceneReplicationStates as Connection
+				//       pointers in other replication states in order to
+				//       scene->CleanupConnection() without an actual Connection
+				//       object (which we don't want to use)
+				scene->CleanupConnection((magic::Connection*)&ps.scene_state);
+			});
+			m_server->emit_event("replicate:peer_left_scene",
+					new PeerLeftScene(peer, ps.scene_ref));
+		}
+		m_peers.erase(peer);
 	}
 
 	void on_tick(const interface::TickEvent &event)
@@ -152,36 +177,44 @@ struct Module: public interface::Module, public replicate::Interface
 
 	void sync_changes()
 	{
-		sv_<PeerId> peers;
-		network::access(m_server, [&](network::Interface *inetwork){
-			peers = inetwork->list_peers();
-		});
-		main_context::access(m_server, [&](main_context::Interface *imc){
-			magic::Scene *scene = imc->get_scene();
-			// For a reference implementation of this kind of network
-			// synchronization, see Urho3D's Network/Connection.cpp
+		// For a reference implementation of this kind of network
+		// synchronization, see Urho3D's Network/Connection.cpp
 
-			// Compare attributes and set replication states dirty as needed;
-			// this accesses every replication state for every node.
-			scene->PrepareNetworkUpdate();
-
+		main_context::access(m_server, [&](main_context::Interface *imc)
+		{
 			// Send changes to each peer (each of which has its own replication
 			// state)
-			for(auto &peer: peers){
-				magic::SceneReplicationState &scene_state = m_scene_states[peer];
+			for(auto &pair: m_peers){
+				PeerState &ps = pair.second;
+				if(ps.scene_ref == nullptr)
+					continue;
+				magic::Scene *scene = imc->find_scene(ps.scene_ref);
+				if(!scene){
+					log_w(MODULE, "sync_changes(): Scene %p not found",
+							ps.scene_ref);
+					continue;
+				}
+
+				// Compare attributes and set replication states dirty as needed;
+				// this accesses every replication state for every node.
+				// NOTE: This can be called multiple times per scene; only the
+				//       first call will do anything as it clears the
+				//       marked-for-update lists
+				scene->PrepareNetworkUpdate();
 
 				magic::HashSet<uint> nodes_to_process;
 				uint scene_id = scene->GetID();
 				nodes_to_process.Insert(scene_id);
-				sync_node(peer, scene_id, nodes_to_process, scene, scene_state);
+				sync_node(ps.peer_id, scene_id, nodes_to_process, scene,
+						ps.scene_state);
 
-				nodes_to_process.Insert(scene_state.dirtyNodes_);
+				nodes_to_process.Insert(ps.scene_state.dirtyNodes_);
 				nodes_to_process.Erase(scene_id);
 
 				while(!nodes_to_process.Empty()){
 					uint node_id = nodes_to_process.Front();
-					sync_node(peer, node_id, nodes_to_process, scene,
-							scene_state);
+					sync_node(ps.peer_id, node_id, nodes_to_process, scene,
+							ps.scene_state);
 				}
 			}
 		});
@@ -463,16 +496,44 @@ struct Module: public interface::Module, public replicate::Interface
 
 	// Interface
 
-	sv_<PeerId> find_peers_that_know_node(uint node_id)
+	void assign_scene_to_peer(
+			main_context::SceneReference scene_ref, PeerId peer)
+	{
+		log_v(MODULE, "assign_scene_to_peer(): scene_ref=%p, peer=%i",
+				scene_ref, peer);
+		if(scene_ref == nullptr){
+			auto it = m_peers.find(peer);
+			if(it == m_peers.end())
+				return; // Peer wasn't in any scene
+			PeerState &ps = it->second;
+			m_server->emit_event("replicate:peer_left_scene",
+					new PeerLeftScene(peer, ps.scene_ref));
+			m_peers.erase(peer);
+
+			log_w(MODULE, "assign_scene_to_peer(): Deassign not properly"
+					" implemented");
+			// TODO: Tell client to remove replicated nodes and components
+		} else {
+			m_server->emit_event("replicate:peer_joined_scene",
+					new PeerJoinedScene(peer, scene_ref));
+			PeerState &ps = m_peers[peer];
+			ps.peer_id = peer;
+			ps.scene_ref = scene_ref;
+		}
+	}
+
+	sv_<PeerId> find_peers_that_know_node(
+			main_context::SceneReference scene_ref, uint node_id)
 	{
 		sv_<PeerId> result;
-		for(auto &pair : m_scene_states){
-			PeerId peer_id = pair.first;
-			magic::SceneReplicationState &scene_state = pair.second;
-			auto &node_states = scene_state.nodeStates_;
+		for(auto &pair: m_peers){
+			PeerState &ps = pair.second;
+			if(ps.scene_ref == nullptr || ps.scene_ref != scene_ref)
+				continue;
+			auto &node_states = ps.scene_state.nodeStates_;
 			auto it = node_states.Find(node_id);
 			if(it != node_states.End()){
-				result.push_back(peer_id);
+				result.push_back(ps.peer_id);
 			}
 		}
 		return result;
@@ -483,27 +544,39 @@ struct Module: public interface::Module, public replicate::Interface
 		m_events_to_emit_after_next_sync.push_back(std::move(event));
 	}
 
-	// TODO: Check if this is correctly implemented
-	void sync_node_immediate(uint node_id)
+	void sync_node_immediate(
+			main_context::SceneReference scene_ref, uint node_id)
 	{
-		sv_<PeerId> peers;
-		network::access(m_server, [&](network::Interface *inetwork){
-			peers = inetwork->list_peers();
-		});
 		main_context::access(m_server, [&](main_context::Interface *imc){
-			magic::Scene *scene = imc->get_scene();
-			Node *n = scene->GetNode(node_id);
-			n->PrepareNetworkUpdate();
-			for(auto &peer: peers){
-				magic::SceneReplicationState &scene_state = m_scene_states[peer];
+			for(auto &pair: m_peers){
+				PeerState &ps = pair.second;
+				if(ps.scene_ref == nullptr || ps.scene_ref != scene_ref)
+					continue;
+				magic::Scene *scene = imc->find_scene(ps.scene_ref);
+				if(!scene){
+					log_w(MODULE, "sync_node_immdiate(): Scene %p not found",
+							ps.scene_ref);
+					continue;
+				}
+				Node *n = scene->GetNode(node_id);
+				if(!n){
+					log_w(MODULE, "sync_node_immediate(): Node %i not found",
+							node_id);
+					continue;
+				}
+				// Compare attributes and set replication states dirty as needed;
+				// this accesses every replication state for every child node.
+				// NOTE: This can be called multiple times; only the first call
+				//       will do anything as it clears the marked-for-update lists
+				n->PrepareNetworkUpdate();
 
 				magic::HashSet<uint> nodes_to_process;
 				nodes_to_process.Insert(node_id);
 
 				while(!nodes_to_process.Empty()){
 					uint node_id = nodes_to_process.Front();
-					sync_node(peer, node_id, nodes_to_process, scene,
-							scene_state);
+					sync_node(ps.peer_id, node_id, nodes_to_process, scene,
+							ps.scene_state);
 				}
 			}
 		});

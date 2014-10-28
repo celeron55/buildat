@@ -26,7 +26,6 @@ Buildat TODO
 - Precompiled mode
 - Singleplayer UI
 - Show all exceptions and errors on client using ui_utils.show_message_dialog
-- Allow creating and destroying arbitrary amounts of replicated scenes
 - magic.sub_sync_node_added -> replicate.sub_sync_node_added
 - Use tags for module dependencies (tags, require_tag, disallow_tag), and
   auto-tag each module at runtime with game_<current_game>
@@ -44,8 +43,6 @@ Buildat TODO
   woxelworld:update and ThreadPool::run_post() will not be run on the same frame
 	- Pre (lod) geometry can take up to 2500us, and post can take 7200us, which
 	  means this will have a visible effect.
-- Multiple replicated scenes and voxelworlds, for servers with a lobby and
-  multiple worlds
 - Don't emit all world generation events at once
 - Handle module load order properly in reloads (unload by popping from top,
   then reload everything until top)

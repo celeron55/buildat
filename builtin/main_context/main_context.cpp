@@ -24,24 +24,26 @@
 #include <Log.h>
 #include <IOEvents.h> // E_LOGMESSAGE
 #include <Thread.h>
+#include <algorithm>
 #include <climits>
 #define MODULE "main_context"
 
 namespace main_context {
 
 using interface::Event;
+using namespace Urho3D;
 
-class BuildatResourceRouter: public magic::ResourceRouter
+class BuildatResourceRouter: public ResourceRouter
 {
 	OBJECT(BuildatResourceRouter);
 
 	interface::Server *m_server;
 public:
-	BuildatResourceRouter(magic::Context *context, interface::Server *server):
-		magic::ResourceRouter(context),
+	BuildatResourceRouter(Context *context, interface::Server *server):
+		ResourceRouter(context),
 		m_server(server)
 	{}
-	void Route(magic::String &name, magic::ResourceRequest requestType)
+	void Route(String &name, ResourceRequest requestType)
 	{
 		ss_ path = m_server->get_file_path(name.CString());
 		if(path == ""){
@@ -55,16 +57,36 @@ public:
 	}
 };
 
+struct SceneSetItem
+{
+	SharedPtr<Scene> scene;
+	void *raw_ptr = nullptr; // If scene is not set, this is used for searching
+
+	SceneSetItem() {}
+	SceneSetItem(SharedPtr<Scene> scene): scene(scene) {}
+	SceneSetItem(void *raw_ptr): raw_ptr(raw_ptr) {}
+	void* get_raw_ptr() const {
+		if(scene) return scene.Get();
+		return raw_ptr;
+	}
+	bool operator>(const SceneSetItem &other) const {
+		return get_raw_ptr() > other.get_raw_ptr();
+	}
+};
+
 struct Module: public interface::Module, public main_context::Interface
 {
 	interface::Server *m_server;
-	magic::SharedPtr<magic::Context> m_context;
-	magic::SharedPtr<magic::Engine> m_engine;
-	magic::SharedPtr<magic::Scene> m_scene;
-	sm_<Event::Type, magic::SharedPtr<interface::MagicEventHandler>
-			> m_magic_event_handlers;
-
 	uint64_t profiler_last_print_us = 0;
+
+	SharedPtr<Context> m_context;
+	SharedPtr<Engine> m_engine;
+
+	// Set of scenes as a sorted array in descending address order
+	sv_<SceneSetItem> m_scenes;
+
+	sm_<Event::Type, SharedPtr<
+			interface::MagicEventHandler>> m_magic_event_handlers;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -89,11 +111,11 @@ struct Module: public interface::Module, public main_context::Interface
 
 		// Initialize Urho3D
 
-		m_context = new magic::Context();
-		m_engine = new magic::Engine(m_context);
+		m_context = new Context();
+		m_engine = new Engine(m_context);
 
 		// Disable timestamps in Urho3D log message events
-		magic::Log *magic_log = m_context->GetSubsystem<magic::Log>();
+		Log *magic_log = m_context->GetSubsystem<Log>();
 		magic_log->SetTimeStamp(false);
 
 		const interface::ServerConfig &server_config = m_server->get_config();
@@ -110,7 +132,7 @@ struct Module: public interface::Module, public main_context::Interface
 			resource_paths_s += fs->get_absolute_path(path);
 		}
 
-		magic::VariantMap params;
+		VariantMap params;
 		params["ResourcePaths"] = resource_paths_s.c_str();
 		params["Headless"] = true;
 		params["LogName"] = ""; // Don't log to file
@@ -118,24 +140,13 @@ struct Module: public interface::Module, public main_context::Interface
 		if(!m_engine->Initialize(params))
 			throw Exception("Urho3D engine initialization failed");
 
-		m_scene = new magic::Scene(m_context);
-
-		auto *physics = m_scene->CreateComponent<magic::PhysicsWorld>(
-				magic::LOCAL);
-		physics->SetFps(30);
-		physics->SetInterpolation(false);
-
-		// Useless but gets rid of warnings like
-		// "ERROR: No Octree component in scene, drawable will not render"
-		m_scene->CreateComponent<magic::Octree>(magic::LOCAL);
-
-		magic::ResourceCache *magic_cache =
-				m_context->GetSubsystem<magic::ResourceCache>();
+		ResourceCache *magic_cache =
+				m_context->GetSubsystem<ResourceCache>();
 		//magic_cache->SetAutoReloadResources(true);
 		magic_cache->SetResourceRouter(
 				new BuildatResourceRouter(m_context, m_server));
 
-		sub_magic_event(magic::E_LOGMESSAGE,
+		sub_magic_event(E_LOGMESSAGE,
 				Event::t("urho3d_log_redirect:message"));
 		m_server->sub_event(this, Event::t("urho3d_log_redirect:message"));
 	}
@@ -171,10 +182,10 @@ struct Module: public interface::Module, public main_context::Interface
 		m_engine->RunFrame();
 
 		uint64_t current_us = interface::os::get_timeofday_us();
-		magic::Profiler *p = m_context->GetSubsystem<magic::Profiler>();
+		Profiler *p = m_context->GetSubsystem<Profiler>();
 		if(p && profiler_last_print_us < current_us - 10000000){
 			profiler_last_print_us = current_us;
-			magic::String s = p->GetData(false, false, UINT_MAX);
+			String s = p->GetData(false, false, UINT_MAX);
 			p->BeginInterval();
 			log_v(MODULE, "Urho3D profiler:\n%s", s.CString());
 		}
@@ -199,14 +210,60 @@ struct Module: public interface::Module, public main_context::Interface
 
 	// Interface
 
-	magic::Context* get_context()
+	Context* get_context()
 	{
 		return m_context;
 	}
 
-	magic::Scene* get_scene()
+	Scene* find_scene(SceneReference ref)
 	{
-		return m_scene;
+		SceneSetItem item((void*)ref);
+		auto it = std::lower_bound(m_scenes.begin(), m_scenes.end(), item,
+					std::greater<SceneSetItem>());
+		if(it == m_scenes.end())
+			return nullptr;
+		return it->scene.Get();
+	}
+
+	Scene* get_scene(SceneReference ref)
+	{
+		Scene *scene = find_scene(ref);
+		if(!scene)
+			throw Exception("get_scene(): Scene not found");
+		return scene;
+	}
+
+	SceneReference create_scene()
+	{
+		SharedPtr<Scene> scene(new Scene(m_context));
+
+		auto *physics = scene->CreateComponent<PhysicsWorld>(LOCAL);
+		physics->SetFps(30);
+		physics->SetInterpolation(false);
+
+		// Useless but gets rid of warnings like
+		// "ERROR: No Octree component in scene, drawable will not render"
+		scene->CreateComponent<Octree>(LOCAL);
+
+		// Insert into m_scenes
+		SceneSetItem item(scene);
+		auto it = std::lower_bound(m_scenes.begin(), m_scenes.end(), item,
+					std::greater<SceneSetItem>());
+		if(it == m_scenes.end())
+			m_scenes.insert(it, item);
+
+		return (SceneReference)scene.Get();
+	}
+
+	void delete_scene(SceneReference ref)
+	{
+		// Erase from m_scenes
+		SceneSetItem item((void*)ref);
+		auto it = std::lower_bound(m_scenes.begin(), m_scenes.end(), item,
+					std::greater<SceneSetItem>());
+		if(it == m_scenes.end())
+			throw Exception("delete_scene(): Scene not found");
+		m_scenes.erase(it);
 	}
 
 	void sub_magic_event(
