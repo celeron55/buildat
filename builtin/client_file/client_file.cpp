@@ -334,6 +334,9 @@ void FileWatchThread::run(interface::Thread *thread)
 		bool ok = handler.check(500000, sockets, active_sockets);
 		(void)ok; // Unused
 
+		if(active_sockets.empty())
+			continue;
+
 		client_file::access(m_module->m_server,
 				[&](client_file::Interface *iclient_file)
 		{

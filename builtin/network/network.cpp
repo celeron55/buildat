@@ -329,6 +329,9 @@ void NetworkThread::run(interface::Thread *thread)
 		bool ok = handler.check(500000, sockets, active_sockets);
 		(void)ok; // Unused
 
+		if(active_sockets.empty())
+			continue;
+
 		network::access(m_module->m_server, [&](network::Interface *inetwork){
 			for(int fd: active_sockets){
 				m_module->handle_active_socket(fd);
