@@ -62,7 +62,7 @@ namespace worldgen
 			std::function<void(worldgen::Instance *instance)> cb)
 	{
 		return access(server, [&](worldgen::Interface *i){
-			worldgen::Instance *instance = i->get_instance(scene_ref);
+			worldgen::Instance *instance = check(i->get_instance(scene_ref));
 			cb(instance);
 		});
 	}

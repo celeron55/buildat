@@ -455,7 +455,7 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 	{
 		auto it = m_instances.find(scene_ref);
 		if(it == m_instances.end())
-			throw Exception("get_instance(): Scene does not have gpl");
+			return nullptr;
 		return it->second.get();
 	}
 

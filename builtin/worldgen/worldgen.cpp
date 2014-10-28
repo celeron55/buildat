@@ -216,7 +216,7 @@ struct Module: public interface::Module, public Interface
 	{
 		auto it = m_instances.find(scene_ref);
 		if(it == m_instances.end())
-			throw Exception("get_instance(): Scene does not have worldgen");
+			return nullptr;
 		return it->second.get();
 	}
 

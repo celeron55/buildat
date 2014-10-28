@@ -128,7 +128,7 @@ namespace voxelworld
 			std::function<void(voxelworld::Instance *instance)> cb)
 	{
 		return access(server, [&](voxelworld::Interface *i){
-			voxelworld::Instance *instance = i->get_instance(scene_ref);
+			voxelworld::Instance *instance = check(i->get_instance(scene_ref));
 			cb(instance);
 		});
 	}
