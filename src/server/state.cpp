@@ -729,61 +729,70 @@ struct CState: public State, public interface::Server
 	}
 
 	// Direct version; internal and unsafe
-	// Call with m_modules_mutex locked.
+	// Call with no mutexes locked.
 	void unload_module_u(const ss_ &module_name)
 	{
 		log_i(MODULE, "unload_module_u(): module_name=%s", cs(module_name));
-		// Get and lock module
-		auto it = m_modules.find(module_name);
-		if(it == m_modules.end()){
-			log_w(MODULE, "unload_module_u(): Module not found: %s",
-					cs(module_name));
-			return;
-		}
-		sp_<ModuleContainer> mc = it->second;
+		sp_<ModuleContainer> mc;
 		{
-			interface::MutexScope mc_ms(mc->mutex);
-			// Delete subscriptions
-			log_t(MODULE, "unload_module_u[%s]: Deleting subscriptions",
-					cs(module_name));
-			{
-				for(Event::Type type = 0; type < m_event_subs.size(); type++){
-					sv_<wp_<ModuleContainer>> &sublist = m_event_subs[type];
-					sv_<wp_<ModuleContainer>> new_sublist;
-					for(wp_<ModuleContainer> &mc1 : sublist){
-						if(sp_<ModuleContainer>(mc1.lock()).get() !=
-								mc.get())
-							new_sublist.push_back(mc1);
-						else
-							log_v(MODULE, "Removing %s subscription to event %zu",
-									cs(module_name), type);
-					}
-					sublist = new_sublist;
-				}
+			interface::MutexScope ms(m_modules_mutex);
+			// Get and lock module
+			auto it = m_modules.find(module_name);
+			if(it == m_modules.end()){
+				log_w(MODULE, "unload_module_u(): Module not found: %s",
+						cs(module_name));
+				return;
 			}
-			// Remove server-wide reference to module container
-			m_modules.erase(module_name);
+			mc = it->second;
+			{
+				interface::MutexScope mc_ms(mc->mutex);
+				// Delete subscriptions
+				log_t(MODULE, "unload_module_u[%s]: Deleting subscriptions",
+						cs(module_name));
+				{
+					for(Event::Type type = 0; type < m_event_subs.size(); type++){
+						sv_<wp_<ModuleContainer>> &sublist = m_event_subs[type];
+						sv_<wp_<ModuleContainer>> new_sublist;
+						for(wp_<ModuleContainer> &mc1 : sublist){
+							if(sp_<ModuleContainer>(mc1.lock()).get() !=
+									mc.get())
+								new_sublist.push_back(mc1);
+							else
+								log_v(MODULE, "Removing %s subscription to event %zu",
+										cs(module_name), type);
+						}
+						sublist = new_sublist;
+					}
+				}
+				// Remove server-wide reference to module container
+				m_modules.erase(module_name);
+			}
 		}
+
 		// Destruct module
 		log_t(MODULE, "unload_module_u[%s]: Deleting module", cs(module_name));
 		mc->thread_request_stop();
 		mc->thread_join();
-		// So, hopefully this is the last reference because we're going to
-		// unload the shared executable...
-		if(!mc.unique())
-			log_w(MODULE, "unload_module_u[%s]: This is not the last container"
-					" reference; unloading shared executable is probably unsafe",
-					cs(module_name));
-		// Drop reference to container
-		log_t(MODULE, "unload_module_u[%s]: Dropping container", cs(module_name));
-		mc.reset();
-		// Unload shared executable
-		log_t(MODULE, "unload_module_u[%s]: Unloading shared executable",
-				cs(module_name));
-		m_compiler->unload(module_name);
 
-		emit_event(Event("core:module_unloaded",
-				new interface::ModuleUnloadedEvent(module_name)));
+		{
+			interface::MutexScope ms(m_modules_mutex);
+			// So, hopefully this is the last reference because we're going to
+			// unload the shared executable...
+			if(!mc.unique())
+				log_w(MODULE, "unload_module_u[%s]: This is not the last container"
+						" reference; unloading shared executable is probably unsafe",
+						cs(module_name));
+			// Drop reference to container
+			log_t(MODULE, "unload_module_u[%s]: Dropping container", cs(module_name));
+			mc.reset();
+			// Unload shared executable
+			log_t(MODULE, "unload_module_u[%s]: Unloading shared executable",
+					cs(module_name));
+			m_compiler->unload(module_name);
+
+			emit_event(Event("core:module_unloaded",
+					new interface::ModuleUnloadedEvent(module_name)));
+		}
 	}
 
 	ss_ get_modules_path()
@@ -1081,13 +1090,10 @@ struct CState: public State, public interface::Server
 				module->event(Event::t("core:unload"), nullptr);
 			});
 		}
-		// Unload modules using unload_module_u()
-		{
-			interface::MutexScope ms(m_modules_mutex);
-			for(const ss_ &module_name : unloads_requested){
-				log_i(MODULE, "Unloading %s", cs(module_name));
-				unload_module_u(module_name);
-			}
+		// Unload modules
+		for(const ss_ &module_name : unloads_requested){
+			log_i(MODULE, "Unloading %s", cs(module_name));
+			unload_module_u(module_name);
 		}
 		// Load modules
 		for(const interface::ModuleInfo &info : loads_requested){
