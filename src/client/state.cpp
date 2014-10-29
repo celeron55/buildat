@@ -75,9 +75,8 @@ struct CState: public State
 		m_tmp_path(g_client_config.cache_path+"/tmp")
 	{
 		// Create directory for cached files
-		auto *fs = interface::getGlobalFilesystem();
-		fs->create_directories(m_remote_cache_path);
-		fs->create_directories(m_tmp_path);
+		interface::fs::create_directories(m_remote_cache_path);
+		interface::fs::create_directories(m_tmp_path);
 
 		setup_packet_handlers();
 	}

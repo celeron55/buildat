@@ -314,8 +314,7 @@ struct Module: public interface::Module, public loader::Interface
 		for(const ss_ &base_path : m_module_load_paths){
 			ss_ module_path = base_path+"/"+name;
 			ss_ meta_path = module_path+"/meta.json";
-			auto *fs = interface::getGlobalFilesystem();
-			if(!fs->path_exists(meta_path)){
+			if(!interface::fs::path_exists(meta_path)){
 				log_t(MODULE, "%s: Doesn't exist", cs(meta_path));
 				continue;
 			} else {
@@ -357,15 +356,14 @@ struct Module: public interface::Module, public loader::Interface
 	void load_modules()
 	{
 		log_v(MODULE, "loader::load_modules()");
-		auto *fs = interface::getGlobalFilesystem();
 		ss_ builtin = m_server->get_builtin_modules_path();
 		ss_ current = m_server->get_modules_path();
 
 		// Get a list of required modules; that is, everything in the main
 		// module path
 		set_<ss_> required_modules;
-		auto list = fs->list_directory(current);
-		for(const interface::Filesystem::Node &n : list){
+		auto list = interface::fs::list_directory(current);
+		for(const interface::fs::Node &n : list){
 			if(n.name == "__loader" || !n.is_directory)
 				continue;
 			log_t(MODULE, "Requirement from main module path: \"%s\"", cs(n.name));

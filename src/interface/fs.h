@@ -5,32 +5,27 @@
 
 namespace interface
 {
-	// TODO: Get some sanity into this; what's up with the virtual methods?
-	struct Filesystem
+	namespace fs
 	{
-		virtual ~Filesystem(){}
-
 		struct Node {
 			ss_ name;
 			bool is_directory;
 		};
 
-		virtual sv_<Node> list_directory(const ss_ &path) = 0;
+		sv_<Node> list_directory(const ss_ &path);
 
-		virtual bool create_directories(const ss_ &path) = 0;
+		bool create_directories(const ss_ &path);
 
-		virtual ss_ get_cwd() = 0;
+		ss_ get_cwd();
 
-		virtual ss_ get_absolute_path(const ss_ &path) = 0;
+		ss_ get_absolute_path(const ss_ &path);
 
-		virtual bool path_exists(const ss_ &path) = 0;
+		bool path_exists(const ss_ &path);
 
 		// "image.png", "png" -> true
-		static bool check_file_extension(const char *path, const char *ext);
-		static ss_ strip_file_extension(const ss_ &path);
-		static ss_ strip_file_name(const ss_ &path);
+		bool check_file_extension(const char *path, const char *ext);
+		ss_ strip_file_extension(const ss_ &path);
+		ss_ strip_file_name(const ss_ &path);
 	};
-
-	Filesystem* getGlobalFilesystem();
 }
 // vim: set noet ts=4 sw=4:

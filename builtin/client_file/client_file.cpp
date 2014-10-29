@@ -288,7 +288,7 @@ struct Module: public interface::Module, public client_file::Interface
 		// Tell path to server so that it can be used in network-synced Scene
 		m_server->add_file_path(name, path);
 
-		ss_ dir_path = interface::Filesystem::strip_file_name(path);
+		ss_ dir_path = interface::fs::strip_file_name(path);
 		m_watch->add(dir_path, [this, name, path](const ss_ &path_){
 			if(path_ != path){
 				//log_d(MODULE, "Ignoring file watch callback: %s (we want %s)",

@@ -125,21 +125,20 @@ struct CApp: public App, public magic::Application
 			g_client_config.urho3d_path+"/Bin/CoreData",
 			g_client_config.urho3d_path+"/Bin/Data",
 		};
-		auto *fs = interface::getGlobalFilesystem();
 		ss_ resource_paths_s;
 		for(const ss_ &path : resource_paths){
 			if(!resource_paths_s.empty())
 				resource_paths_s += ";";
-			resource_paths_s += fs->get_absolute_path(path);
+			resource_paths_s += interface::fs::get_absolute_path(path);
 		}
 
 		// Set allowed paths in urho3d filesystem (part of sandbox)
 		magic::FileSystem *magic_fs = GetSubsystem<magic::FileSystem>();
 		for(const ss_ &path : resource_paths){
-			magic_fs->RegisterPath(fs->get_absolute_path(path).c_str());
+			magic_fs->RegisterPath(interface::fs::get_absolute_path(path).c_str());
 		}
-		magic_fs->RegisterPath(
-				fs->get_absolute_path(g_client_config.cache_path).c_str());
+		magic_fs->RegisterPath(interface::fs::get_absolute_path(
+				g_client_config.cache_path).c_str());
 
 		// Useful for saving stuff for inspection when debugging
 		magic_fs->RegisterPath("/tmp");

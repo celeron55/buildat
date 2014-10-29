@@ -35,7 +35,7 @@ static int l_print_log(lua_State *L)
 static int l_mkdir(lua_State *L)
 {
 	ss_ path = lua_tocppstring(L, 1);
-	bool ok = interface::getGlobalFilesystem()->create_directories(path);
+	bool ok = interface::fs::create_directories(path);
 	if(!ok)
 		log_w(MODULE, "Failed to create directory: \"%s\"", cs(path));
 	else

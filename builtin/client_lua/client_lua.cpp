@@ -63,20 +63,19 @@ struct Module: public interface::Module
 		ss_ module_name = event.name;
 		ss_ module_path = m_server->get_module_path(module_name);
 		ss_ client_lua_path = module_path+"/client_lua";
-		auto list = interface::getGlobalFilesystem()
-				->list_directory(client_lua_path);
+		auto list = interface::fs::list_directory(client_lua_path);
 		if(list.empty())
 			return;
 
 		sv_<ss_> log_list;
-		for(const interface::Filesystem::Node &n : list){
+		for(const interface::fs::Node &n : list){
 			if(n.is_directory)
 				continue;
 			log_list.push_back(n.name);
 		}
 		log_i(MODULE, "client_lua: %s: %s", cs(module_name), cs(dump(log_list)));
 
-		for(const interface::Filesystem::Node &n : list){
+		for(const interface::fs::Node &n : list){
 			if(n.is_directory)
 				continue;
 			const ss_ &file_path = client_lua_path+"/"+n.name;

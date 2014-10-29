@@ -45,10 +45,12 @@ static bool check_runnable(const ss_ &command)
 
 Config::Config()
 {
-	set_default("rccpp_build_path", "../cache/rccpp_build");
-	set_default("interface_path", "../src/interface");
-	set_default("share_path", "..");
-	set_default("urho3d_path", "../../Urho3D");
+	// Paths are filled in by autodetection
+	set_default("rccpp_build_path", "");
+	set_default("interface_path", "");
+	set_default("share_path", "");
+	set_default("urho3d_path", "");
+
 	set_default("compiler_command", "c++");
 	set_default("skip_compiling_modules", json::object());
 }
@@ -82,8 +84,7 @@ bool Config::check_paths()
 		fail = true;
 	}
 
-	auto *fs = interface::getGlobalFilesystem();
-	fs->create_directories(rccpp_build_path);
+	interface::fs::create_directories(rccpp_build_path);
 	if(!check_file_writable(rccpp_build_path+"/write.test")){
 		log_e(MODULE, "Cannot write into rccpp_build_path=\"%s\"",
 				cs(rccpp_build_path));

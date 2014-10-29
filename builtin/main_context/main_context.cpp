@@ -124,12 +124,11 @@ struct Module: public interface::Module, public main_context::Interface
 			server_config.get<ss_>("urho3d_path")+"/Bin/CoreData",
 			server_config.get<ss_>("urho3d_path")+"/Bin/Data",
 		};
-		auto *fs = interface::getGlobalFilesystem();
 		ss_ resource_paths_s;
 		for(const ss_ &path : resource_paths){
 			if(!resource_paths_s.empty())
 				resource_paths_s += ";";
-			resource_paths_s += fs->get_absolute_path(path);
+			resource_paths_s += interface::fs::get_absolute_path(path);
 		}
 
 		VariantMap params;

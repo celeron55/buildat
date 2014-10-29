@@ -491,7 +491,7 @@ struct CState: public State, public interface::Server
 		if(m_module_file_watches.count(info.name) == 0){
 			sp_<interface::FileWatch> w(interface::createFileWatch());
 			for(const ss_ &watch_path : files_to_watch){
-				ss_ dir_path = interface::Filesystem::strip_file_name(watch_path);
+				ss_ dir_path = interface::fs::strip_file_name(watch_path);
 				w->add(dir_path, [this, info, watch_path](const ss_ &modified_path){
 					if(modified_path != watch_path)
 						return;

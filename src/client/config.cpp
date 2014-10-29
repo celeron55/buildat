@@ -28,10 +28,9 @@ static bool check_file_writable(const ss_ &path)
 
 void Config::make_paths_absolute()
 {
-	auto *fs = interface::getGlobalFilesystem();
-	share_path = fs->get_absolute_path(share_path);
-	cache_path = fs->get_absolute_path(cache_path);
-	urho3d_path = fs->get_absolute_path(urho3d_path);
+	share_path = interface::fs::get_absolute_path(share_path);
+	cache_path = interface::fs::get_absolute_path(cache_path);
+	urho3d_path = interface::fs::get_absolute_path(urho3d_path);
 }
 
 bool Config::check_paths()
@@ -56,8 +55,7 @@ bool Config::check_paths()
 		fail = true;
 	}
 
-	auto *fs = interface::getGlobalFilesystem();
-	if(!fs->create_directories(cache_path)){
+	if(!interface::fs::create_directories(cache_path)){
 		log_e(MODULE, "Could not create directory \"%s\"", cs(cache_path));
 		fail = true;
 	}
