@@ -1,0 +1,56 @@
+{
+   "Urho3D WorkQueue Complete"
+   Helgrind:Race
+   ...
+   fun:_ZN6Urho3D9WorkQueue8CompleteEj
+   ...
+}
+{
+   "Urho3D WorkQueue ProcessItems"
+   Helgrind:Race
+   ...
+   fun:_ZN6Urho3D9WorkQueue12ProcessItemsEj
+   ...
+}
+{
+   "Urho3D WorkQueue destructor"
+   Helgrind:Race
+   ...
+   fun:_ZN6Urho3D9WorkQueueD1Ev
+   ...
+}
+{
+   "interface::Event::Private destructor (usually in a shared_ptr, often created inside a random mutex and then deleted in a completely different thread and context)"
+   Helgrind:Race
+   ...
+   fun:_ZNKSt14default_deleteIN9interface5Event7PrivateEEclEPS2_
+   ...
+}
+{
+   "Urho3D WorkQueue Complete"
+   drd:ConflictingAccess
+   ...
+   fun:_ZN6Urho3D9WorkQueue8CompleteEj
+   ...
+}
+{
+   "Urho3D WorkQueue ProcessItems"
+   drd:ConflictingAccess
+   ...
+   fun:_ZN6Urho3D9WorkQueue12ProcessItemsEj
+   ...
+}
+{
+   "Urho3D WorkQueue destructor"
+   drd:ConflictingAccess
+   ...
+   fun:_ZN6Urho3D9WorkQueueD1Ev
+   ...
+}
+{
+   "interface::Event::Private destructor (usually in a shared_ptr, often created inside a random mutex and then deleted in a completely different thread and context)"
+   drd:ConflictingAccess
+   ...
+   fun:_ZNKSt14default_deleteIN9interface5Event7PrivateEEclEPS2_
+   ...
+}
