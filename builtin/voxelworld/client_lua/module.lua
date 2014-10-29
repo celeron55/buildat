@@ -377,7 +377,9 @@ end
 
 function M.get_chunk_position(voxel_p)
 	if M.chunk_size_voxels == nil then
-		error("Voxelworld not yet initialized; chunk size not known")
+		-- Not initialized
+		log:debug("get_chunk_position(): Not initialized")
+		return nil, nil
 	end
 	local p = buildat.Vector3(voxel_p):round()
 	local chunk_p = p:div_components(M.chunk_size_voxels):floor()
