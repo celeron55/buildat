@@ -123,15 +123,16 @@ struct ModuleContainer
 				cs(info.name));
 	}
 	void thread_join(){
-		interface::MutexScope ms(mutex);
 		if(thread){
 			log_t(MODULE, "M[%s]: Container: Waiting thread to exit",
 					cs(info.name));
-			// But... having mutex locked can make this deadlock?
 			thread->join();
 			log_t(MODULE, "M[%s]: Container: Thread exited; deleting thread",
 					cs(info.name));
-			thread.reset();
+			{
+				interface::MutexScope ms(mutex);
+				thread.reset();
+			}
 			log_t(MODULE, "M[%s]: Container: Thread exited; thread deleted",
 					cs(info.name));
 		}
