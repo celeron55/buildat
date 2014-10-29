@@ -5,6 +5,7 @@
 #include "interface/os.h"
 #include "interface/fs.h"
 #include "interface/process.h"
+#include "interface/mutex.h"
 #include <fstream>
 #define MODULE "boot"
 
@@ -35,14 +36,22 @@ static bool check_file_writable(const ss_ &path)
 	return writable;
 }
 
+static set_<ss_> m_valid_commands;
+static interface::Mutex m_valid_commands_mutex;
+
 static bool check_runnable(const ss_ &command)
 {
+	interface::MutexScope ms(m_valid_commands_mutex);
+	if(m_valid_commands.count(command))
+		return true;
+
 	int exit_status = interface::process::shell_exec(command);
 	if(exit_status != 0){
 		log_d(MODULE, "Command failed: [%s]", cs(command));
 		return false;
 	} else {
 		log_d(MODULE, "Command succeeded: [%s]", cs(command));
+		m_valid_commands.insert(command);
 		return true;
 	}
 }
