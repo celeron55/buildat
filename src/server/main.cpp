@@ -3,6 +3,7 @@
 #include "core/types.h"
 #include "core/log.h"
 #include "core/config.h"
+#include "boot/autodetect.h"
 #include "server/config.h"
 #include "server/state.h"
 #include "interface/server.h"
@@ -146,6 +147,9 @@ int main(int argc, char *argv[])
 	}
 
 	std::cerr<<"Buildat server"<<std::endl;
+
+	if(!boot::autodetect::detect_server_paths(config))
+		return 1;
 
 	if(!config.check_paths()){
 		return 1;
