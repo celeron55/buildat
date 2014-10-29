@@ -101,27 +101,27 @@ int main(int argc, char *argv[])
 			printf(usagefmt, argv[0]);
 			return 1;
 		case 'm':
-			fprintf(stderr, "INFO: module_path: %s\n", c55_optarg);
+			log_i(MODULE, "module_path: %s", c55_optarg);
 			module_path = c55_optarg;
 			break;
 		case 'r':
-			fprintf(stderr, "INFO: config.rccpp_build_path: %s\n", c55_optarg);
+			log_i(MODULE, "config.rccpp_build_path: %s", c55_optarg);
 			config.set("rccpp_build_path", c55_optarg);
 			break;
 		case 'i':
-			fprintf(stderr, "INFO: config.interface_path: %s\n", c55_optarg);
+			log_i(MODULE, "config.interface_path: %s", c55_optarg);
 			config.set("interface_path", c55_optarg);
 			break;
 		case 'S':
-			fprintf(stderr, "INFO: config.share_path: %s\n", c55_optarg);
+			log_i(MODULE, "config.share_path: %s", c55_optarg);
 			config.set("share_path", c55_optarg);
 			break;
 		case 'U':
-			fprintf(stderr, "INFO: config.urho3d_path: %s\n", c55_optarg);
+			log_i(MODULE, "config.urho3d_path: %s", c55_optarg);
 			config.set("urho3d_path", c55_optarg);
 			break;
 		case 'c':
-			fprintf(stderr, "INFO: config.compiler_command: %s\n", c55_optarg);
+			log_i(MODULE, "config.compiler_command: %s", c55_optarg);
 			config.set("compiler_command", c55_optarg);
 			break;
 		case 'l':
@@ -131,7 +131,7 @@ int main(int argc, char *argv[])
 			log_set_file(c55_optarg);
 			break;
 		case 'C':
-			fprintf(stderr, "INFO: config.skip_compiling_modules += %s\n",
+			log_i(MODULE, "config.skip_compiling_modules += %s",
 					c55_optarg);
 			{
 				auto v = config.get<json::Value>("skip_compiling_modules");

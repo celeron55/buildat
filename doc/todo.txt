@@ -65,11 +65,3 @@ Buildat TODO
 - If loading a pre-built module fails even while files haven't been modified,
   try building it again (this is sometimes needed when buildat_core is updated
   without header modifications)
-- Don't use fprintf in server/main
-
-Doing now:
-- Automatic buildat root detection so that the server and the client can
-  generally be started with any working directory in either the in-source or
-  windows-installed configuration
-- Allow developing a game outside of the buildat source tree without hassle
-

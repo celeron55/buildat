@@ -76,19 +76,19 @@ int main(int argc, char *argv[])
 			printf(usagefmt, argv[0]);
 			return 1;
 		case 's':
-			fprintf(stderr, "INFO: config.server_address: %s\n", c55_optarg);
+			log_i(MODULE, "config.server_address: %s", c55_optarg);
 			config.set("server_address", c55_optarg);
 			break;
 		case 'P':
-			fprintf(stderr, "INFO: config.share_path: %s\n", c55_optarg);
+			log_i(MODULE, "config.share_path: %s", c55_optarg);
 			config.set("share_path", c55_optarg);
 			break;
 		case 'C':
-			fprintf(stderr, "INFO: config.cache_path: %s\n", c55_optarg);
+			log_i(MODULE, "config.cache_path: %s", c55_optarg);
 			config.set("cache_path", c55_optarg);
 			break;
 		case 'U':
-			fprintf(stderr, "INFO: config.urho3d_path: %s\n", c55_optarg);
+			log_i(MODULE, "config.urho3d_path: %s", c55_optarg);
 			config.set("urho3d_path", c55_optarg);
 			break;
 		case 'l':
@@ -98,11 +98,11 @@ int main(int argc, char *argv[])
 			log_set_file(c55_optarg);
 			break;
 		case 'm':
-			fprintf(stderr, "INFO: config.menu_extension_name: %s\n", c55_optarg);
+			log_i(MODULE, "config.menu_extension_name: %s", c55_optarg);
 			config.set("menu_extension_name", c55_optarg);
 			break;
 		default:
-			fprintf(stderr, "ERROR: Invalid command-line argument\n");
+			fprintf(stderr, "Invalid command-line argument\n");
 			fprintf(stderr, usagefmt, argv[0]);
 			return 1;
 		}
