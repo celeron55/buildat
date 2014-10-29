@@ -6,6 +6,7 @@
 #include "server/state.h"
 #include "interface/server.h"
 #include "interface/debug.h"
+#include "interface/mutex.h"
 #include <c55/getopt.h>
 #include <c55/os.h>
 #ifdef _WIN32
@@ -24,8 +25,11 @@
 server::Config g_server_config;
 
 bool g_sigint_received = false;
+interface::Mutex g_sigint_received_mutex;
+
 void sigint_handler(int sig)
 {
+	interface::MutexScope ms(g_sigint_received_mutex);
 	if(!g_sigint_received){
 		fprintf(stdout, "\n"); // Newline after "^C"
 		log_i("process", "SIGINT");
@@ -159,7 +163,12 @@ int main(int argc, char *argv[])
 		uint64_t next_tick_us = get_timeofday_us();
 		uint64_t t_per_tick = 1000000 / 30; // Same as physics FPS
 
-		while(!g_sigint_received){
+		for(;;){
+			{
+				interface::MutexScope ms(g_sigint_received_mutex);
+				if(g_sigint_received)
+					break;
+			}
 			uint64_t current_us = get_timeofday_us();
 			int64_t delay_us = next_tick_us - current_us;
 			if(delay_us < 0)
