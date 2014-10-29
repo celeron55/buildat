@@ -283,7 +283,8 @@ struct CInstance: public voxelworld::Instance
 		replicate::access(m_server, [&](replicate::Interface *ireplicate){
 			peers = ireplicate->find_peers_on_scene(m_scene_ref);
 		});
-		log_v(MODULE, "Existing peers on scene: %s", cs(peers));
+		ss_ peers_s = dump(peers);
+		log_v(MODULE, "Existing peers on scene: %s", cs(peers_s));
 		for(auto &peer : peers){
 			initialize_peer(peer);
 		}
