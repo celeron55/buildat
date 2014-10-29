@@ -1,17 +1,16 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "ground_plane_lighting/api.h"
-// TODO: Clean up
 #include "network/api.h"
 #include "client_file/api.h"
 #include "voxelworld/api.h"
 #include "replicate/api.h"
 #include "network/api.h"
+#include "main_context/api.h"
 #include "core/log.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
-#include "interface/mesh.h"
 #include "interface/voxel.h"
 #include "interface/block.h"
 #include "interface/voxel_volume.h"
@@ -23,7 +22,6 @@
 #include <cereal/types/string.hpp>
 #include <cereal/types/vector.hpp>
 #include <cereal/types/tuple.hpp>
-#include <Node.h>
 #include <deque>
 #include <algorithm>
 #include <climits>
@@ -387,6 +385,7 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 		m_server->sub_event(this, Event::t("replicate:peer_left_scene"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t("voxelworld:node_volume_updated"));
+		m_server->sub_event(this, Event::t("main_context:scene_deleted"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -399,6 +398,8 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 				client_file::FilesTransmitted)
 		EVENT_TYPEN("voxelworld:node_volume_updated",
 				on_node_volume_updated, voxelworld::NodeVolumeUpdated)
+		EVENT_TYPEN("main_context:scene_deleted", on_scene_deleted,
+				main_context::SceneDeleted);
 
 		for(auto &pair : m_instances){
 			up_<CInstance> &instance = pair.second;
@@ -428,6 +429,19 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 
 	void on_node_volume_updated(const voxelworld::NodeVolumeUpdated &event)
 	{
+	}
+
+	void on_scene_deleted(const main_context::SceneDeleted &event)
+	{
+		// Drop instance of the deleted scene (there should be only one, but
+		// loop through all of them just for robustness)
+		for(auto it = m_instances.begin(); it != m_instances.end(); ){
+			auto current_it = it++;
+			up_<CInstance> &instance = current_it->second;
+			if(instance->m_scene_ref == event.scene){
+				m_instances.erase(current_it);
+			}
+		}
 	}
 
 	// Interface
