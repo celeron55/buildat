@@ -252,7 +252,8 @@ struct CInstance: public voxelworld::Instance
 	// (as a sorted array in descending node_id order)
 	std::vector<QueuedNodePhysicsUpdate> m_nodes_needing_physics_update;
 
-	CInstance(interface::Server *server, SceneReference scene_ref):
+	CInstance(interface::Server *server, SceneReference scene_ref,
+			const pv::Region &region):
 		m_server(server),
 		m_scene_ref(scene_ref)
 	{
@@ -267,15 +268,6 @@ struct CInstance: public voxelworld::Instance
 
 		// TODO: Load from disk or something
 
-		//pv::Region region(0, 0, 0, 0, 0, 0); // Use this for valgrind
-		//pv::Region region(-1, 0, -1, 1, 0, 1);
-		//pv::Region region(-1, -1, -1, 1, 1, 1);
-		//pv::Region region(-2, -1, -2, 2, 1, 2);
-		//pv::Region region(-3, -1, -3, 3, 1, 3);
-		pv::Region region(-5, -1, 0, 0, 1, 5);
-		//pv::Region region(-5, -1, -5, 5, 1, 5);
-		//pv::Region region(-6, -1, -6, 6, 1, 6);
-		//pv::Region region(-8, -1, -8, 8, 1, 8);
 		auto lc = region.getLowerCorner();
 		auto uc = region.getUpperCorner();
 		for(int z = lc.getZ(); z <= uc.getZ(); z++){
@@ -1197,7 +1189,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 	// Interface
 
-	void create_instance(SceneReference scene_ref)
+	void create_instance(SceneReference scene_ref, const pv::Region &region)
 	{
 		auto it = m_instances.find(scene_ref);
 		// TODO: Is an exception the best way to handle this?
@@ -1205,7 +1197,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 			throw Exception("create_instance(): Scene already has a voxel"
 					" world instance");
 
-		up_<CInstance> instance(new CInstance(m_server, scene_ref));
+		up_<CInstance> instance(new CInstance(m_server, scene_ref, region));
 		m_instances[scene_ref] = std::move(instance);
 	}
 

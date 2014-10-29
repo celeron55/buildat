@@ -106,7 +106,8 @@ namespace voxelworld
 
 	struct Interface
 	{
-		virtual void create_instance(SceneReference scene_ref) = 0;
+		virtual void create_instance(SceneReference scene_ref,
+				const pv::Region &region) = 0;
 		virtual void delete_instance(SceneReference scene_ref) = 0;
 
 		virtual Instance* get_instance(SceneReference scene_ref) = 0;

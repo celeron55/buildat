@@ -237,7 +237,16 @@ struct Module: public interface::Module
 
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
-			ivoxelworld->create_instance(m_main_scene);
+			//pv::Region region(0, 0, 0, 0, 0, 0); // Use this for valgrind
+			//pv::Region region(-1, 0, -1, 1, 0, 1);
+			//pv::Region region(-1, -1, -1, 1, 1, 1);
+			//pv::Region region(-2, -1, -2, 2, 1, 2);
+			//pv::Region region(-3, -1, -3, 3, 1, 3);
+			pv::Region region(-5, -1, 0, 0, 1, 5);
+			//pv::Region region(-5, -1, -5, 5, 1, 5);
+			//pv::Region region(-6, -1, -6, 6, 1, 6);
+			//pv::Region region(-8, -1, -8, 8, 1, 8);
+			ivoxelworld->create_instance(m_main_scene, region);
 		});
 
 		ground_plane_lighting::access(m_server,
