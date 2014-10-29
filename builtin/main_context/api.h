@@ -21,6 +21,13 @@ namespace main_context
 	struct OpaqueSceneReference;
 	typedef OpaqueSceneReference* SceneReference;
 
+	struct SceneDeleted: public interface::Event::Private
+	{
+		SceneReference scene;
+
+		SceneDeleted(SceneReference scene): scene(scene) {}
+	};
+
 	struct Interface
 	{
 		// NOTE: Do not store Urho3D::SharedPtr<>s or any other kinds of pointers
@@ -29,7 +36,7 @@ namespace main_context
 
 		virtual magic::Context* get_context() = 0;
 		virtual magic::Scene* find_scene(SceneReference ref) = 0;
-		virtual magic::Scene* get_scene(SceneReference ref) = 0;
+		virtual magic::Scene* check_scene(SceneReference ref) = 0;
 
 		virtual SceneReference create_scene() = 0;
 		virtual void delete_scene(SceneReference ref) = 0;

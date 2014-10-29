@@ -66,7 +66,7 @@ struct Module: public interface::Module
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			m_main_scene = imc->create_scene();
 
-			Scene *scene = imc->get_scene(m_main_scene);
+			Scene *scene = imc->check_scene(m_main_scene);
 			Context *context = scene->GetContext();
 			ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 
@@ -124,7 +124,7 @@ struct Module: public interface::Module
 	void update_scene()
 	{
 		main_context::access(m_server, [&](main_context::Interface *imc){
-			Scene *scene = imc->get_scene(m_main_scene);
+			Scene *scene = imc->check_scene(m_main_scene);
 			Context *context = scene->GetContext();
 			ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 
@@ -178,7 +178,7 @@ struct Module: public interface::Module
 			float ry = (float)rand() / RAND_MAX * 180;
 			float rz = (float)rand() / RAND_MAX * 180;
 			main_context::access(m_server, [&](main_context::Interface *imc){
-				Scene *scene = imc->get_scene(m_main_scene);
+				Scene *scene = imc->check_scene(m_main_scene);
 				Node *n = scene->GetChild("Testbox");
 				n->SetRotation(Quaternion(rx, ry, rz));
 				n->SetPosition(Vector3(-0.5f, 8.0f, 0.0f));

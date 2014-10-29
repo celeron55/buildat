@@ -57,21 +57,11 @@ public:
 	}
 };
 
-struct SceneSetItem
+struct OpaqueSceneReference
 {
 	SharedPtr<Scene> scene;
-	void *raw_ptr = nullptr; // If scene is not set, this is used for searching
 
-	SceneSetItem() {}
-	SceneSetItem(SharedPtr<Scene> scene): scene(scene) {}
-	SceneSetItem(void *raw_ptr): raw_ptr(raw_ptr) {}
-	void* get_raw_ptr() const {
-		if(scene) return scene.Get();
-		return raw_ptr;
-	}
-	bool operator>(const SceneSetItem &other) const {
-		return get_raw_ptr() > other.get_raw_ptr();
-	}
+	OpaqueSceneReference(const SharedPtr<Scene> &scene): scene(scene) {}
 };
 
 struct Module: public interface::Module, public main_context::Interface
@@ -82,8 +72,9 @@ struct Module: public interface::Module, public main_context::Interface
 	SharedPtr<Context> m_context;
 	SharedPtr<Engine> m_engine;
 
-	// Set of scenes as a sorted array in descending address order
-	sv_<SceneSetItem> m_scenes;
+	// OpaqueSceneReferences are never dropped from memory so that they stay
+	// unique, but the scenes itself are dropped.
+	sm_<SceneReference, up_<OpaqueSceneReference>> m_scenes;
 
 	sm_<Event::Type, SharedPtr<
 			interface::MagicEventHandler>> m_magic_event_handlers;
@@ -216,25 +207,24 @@ struct Module: public interface::Module, public main_context::Interface
 
 	Scene* find_scene(SceneReference ref)
 	{
-		SceneSetItem item((void*)ref);
-		auto it = std::lower_bound(m_scenes.begin(), m_scenes.end(), item,
-					std::greater<SceneSetItem>());
+		auto it = m_scenes.find(ref);
 		if(it == m_scenes.end())
 			return nullptr;
-		return it->scene.Get();
+		return it->second->scene.Get();
 	}
 
-	Scene* get_scene(SceneReference ref)
+	Scene* check_scene(SceneReference ref)
 	{
 		Scene *scene = find_scene(ref);
 		if(!scene)
-			throw Exception("get_scene(): Scene not found");
+			throw Exception("check_scene(): Scene not found");
 		return scene;
 	}
 
 	SceneReference create_scene()
 	{
 		SharedPtr<Scene> scene(new Scene(m_context));
+		log_d(MODULE, "create_scene() -> %p", scene.Get());
 
 		auto *physics = scene->CreateComponent<PhysicsWorld>(LOCAL);
 		physics->SetFps(30);
@@ -245,24 +235,20 @@ struct Module: public interface::Module, public main_context::Interface
 		scene->CreateComponent<Octree>(LOCAL);
 
 		// Insert into m_scenes
-		SceneSetItem item(scene);
-		auto it = std::lower_bound(m_scenes.begin(), m_scenes.end(), item,
-					std::greater<SceneSetItem>());
-		if(it == m_scenes.end())
-			m_scenes.insert(it, item);
-
-		return (SceneReference)scene.Get();
+		OpaqueSceneReference *ref = new OpaqueSceneReference(scene);
+		m_scenes[ref] = std::move(up_<OpaqueSceneReference>(ref));
+		return ref;
 	}
 
 	void delete_scene(SceneReference ref)
 	{
-		// Erase from m_scenes
-		SceneSetItem item((void*)ref);
-		auto it = std::lower_bound(m_scenes.begin(), m_scenes.end(), item,
-					std::greater<SceneSetItem>());
+		log_d(MODULE, "delete_scene(%p)", ref);
+		// Drop scene, but not the reference
+		auto it = m_scenes.find(ref);
 		if(it == m_scenes.end())
-			throw Exception("delete_scene(): Scene not found");
-		m_scenes.erase(it);
+			return;
+		it->second->scene.Reset();
+		m_server->emit_event("main_context:scene_deleted", new SceneDeleted(ref));
 	}
 
 	void sub_magic_event(

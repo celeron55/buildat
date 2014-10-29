@@ -59,7 +59,7 @@ struct Module: public interface::Module
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			m_main_scene = imc->create_scene();
 
-			Scene *scene = imc->get_scene(m_main_scene);
+			Scene *scene = imc->check_scene(m_main_scene);
 			Context *context = scene->GetContext();
 			m_atlas_reg.reset(interface::createAtlasRegistry(context));
 			{
@@ -134,7 +134,7 @@ struct Module: public interface::Module
 	{
 		main_context::access(m_server, [&](main_context::Interface *imc)
 		{
-			Scene *scene = imc->get_scene(m_main_scene);
+			Scene *scene = imc->check_scene(m_main_scene);
 			Context *context = scene->GetContext();
 			ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 
@@ -201,7 +201,7 @@ struct Module: public interface::Module
 	{
 		main_context::access(m_server, [&](main_context::Interface *imc)
 		{
-			Scene *scene = imc->get_scene(m_main_scene);
+			Scene *scene = imc->check_scene(m_main_scene);
 			Context *context = scene->GetContext();
 			ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 
@@ -260,7 +260,7 @@ struct Module: public interface::Module
 		static uint a = 0;
 		if(((a++) % 100) == 0){
 			main_context::access(m_server, [&](main_context::Interface *imc){
-				Scene *scene = imc->get_scene(m_main_scene);
+				Scene *scene = imc->check_scene(m_main_scene);
 				Node *n = scene->GetChild("Testbox");
 				//n->SetPosition(Vector3(0.0f, 8.0f, 0.0f));
 				n->SetRotation(Quaternion(30, 60, 90));

@@ -389,7 +389,7 @@ struct Module: public interface::Module
 		{
 			main_context::access(m_server, [&](main_context::Interface *imc)
 			{
-				Scene *scene = imc->get_scene(m_main_scene);
+				Scene *scene = imc->check_scene(m_main_scene);
 				Context *context = imc->get_context();
 				ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 
@@ -457,7 +457,7 @@ struct Module: public interface::Module
 	{
 		/*main_context::access(m_server, [&](main_context::Interface *imc)
 		{
-		    Scene *scene = imc->get_scene(m_main_scene);
+		    Scene *scene = imc->check_scene(m_main_scene);
 		    Node *n = scene->GetChild("Testbox");
 		    auto p = n->GetPosition();
 		    log_v(MODULE, "Testbox: (%f, %f, %f)", p.x_, p.y_, p.z_);
@@ -466,7 +466,7 @@ struct Module: public interface::Module
 		if(((a++) % 150) == 0){
 			main_context::access(m_server, [&](main_context::Interface *imc)
 			{
-				Scene *scene = imc->get_scene(m_main_scene);
+				Scene *scene = imc->check_scene(m_main_scene);
 				Node *n = scene->GetChild("Testbox");
 				if(n){
 					n->SetRotation(Quaternion(30, 60, 90));

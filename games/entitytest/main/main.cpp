@@ -74,7 +74,7 @@ struct Module: public interface::Module
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			m_main_scene = imc->create_scene();
 
-			Scene *scene = imc->get_scene(m_main_scene);
+			Scene *scene = imc->check_scene(m_main_scene);
 			Context *context = scene->GetContext();
 			ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 			auto *m = cache->GetResource<Material>("Materials/Stone.xml");
@@ -145,7 +145,7 @@ struct Module: public interface::Module
 		static uint a = 0;
 		if(((a++) % 100) == 0){
 			main_context::access(m_server, [&](main_context::Interface *imc){
-				Scene *scene = imc->get_scene(m_main_scene);
+				Scene *scene = imc->check_scene(m_main_scene);
 				Node *n = scene->GetChild("Box");
 				n->SetPosition(Vector3(0.0f, 6.0f, 0.0f));
 				n->SetRotation(Quaternion(30, 60, 90));
@@ -168,7 +168,7 @@ struct Module: public interface::Module
 			return;
 		}
 		main_context::access(m_server, [&](main_context::Interface *imc){
-			Scene *scene = imc->get_scene(m_main_scene);
+			Scene *scene = imc->check_scene(m_main_scene);
 			Node *n = scene->GetChild("Box");
 			//n->Translate(Vector3(0.1f, 0, 0));
 			Vector3 p = n->GetPosition();

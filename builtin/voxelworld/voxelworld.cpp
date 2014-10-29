@@ -170,7 +170,7 @@ ChunkBuffer& Section::get_buffer(const pv::Vector3DInt32 &chunk_p,
 
 	main_context::access(server, [&](main_context::Interface *imc)
 	{
-		Scene *scene = imc->get_scene(m_scene_ref);
+		Scene *scene = imc->check_scene(m_scene_ref);
 		Node *n = scene->GetNode(node_id);
 		if(!n){
 			log_w(MODULE,
@@ -310,7 +310,12 @@ struct CInstance: public voxelworld::Instance
 	void on_tick(const interface::TickEvent &event)
 	{
 		main_context::access(m_server, [&](main_context::Interface *imc){
-			Scene *scene = imc->get_scene(m_scene_ref);
+			Scene *scene = imc->find_scene(m_scene_ref);
+			if(!scene){
+				// Scene was deleted; hope that Module deletes us at some point
+				return;
+			}
+
 			Context *context = imc->get_context();
 
 			// Update node collision boxes
@@ -565,7 +570,7 @@ struct CInstance: public voxelworld::Instance
 	void create_section(Section &section)
 	{
 		main_context::access(m_server, [&](main_context::Interface *imc){
-			Scene *scene = imc->get_scene(m_scene_ref);
+			Scene *scene = imc->check_scene(m_scene_ref);
 			auto lc = section.contained_chunks.getLowerCorner();
 			auto uc = section.contained_chunks.getUpperCorner();
 			for(int z = 0; z <= uc.getZ() - lc.getZ(); z++){
@@ -775,7 +780,7 @@ struct CInstance: public voxelworld::Instance
 		commit();
 
 		main_context::access(m_server, [&](main_context::Interface *imc){
-			Scene *scene = imc->get_scene(m_scene_ref);
+			Scene *scene = imc->check_scene(m_scene_ref);
 			Node *n = scene->GetNode(node_id);
 			const Variant &var = n->GetVar(StringHash("buildat_voxel_data"));
 			const PODVector<unsigned char> &buf = var.GetBuffer();
@@ -897,7 +902,7 @@ struct CInstance: public voxelworld::Instance
 				*chunk_buffer.volume);
 
 		main_context::access(m_server, [&](main_context::Interface *imc){
-			Scene *scene = imc->get_scene(m_scene_ref);
+			Scene *scene = imc->check_scene(m_scene_ref);
 			Context *context = scene->GetContext();
 
 			Node *n = scene->GetNode(node_id);
@@ -1050,6 +1055,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		m_server->sub_event(this, Event::t("replicate:peer_joined_scene"));
 		m_server->sub_event(this, Event::t("replicate:peer_left_scene"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
+		m_server->sub_event(this, Event::t("main_context:scene_deleted"));
 		/*m_server->sub_event(this, Event::t(
 					"network:packet_received/voxelworld:get_section"));*/
 	}
@@ -1066,6 +1072,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 				replicate::PeerLeftScene);
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
 				client_file::FilesTransmitted)
+		EVENT_TYPEN("main_context:scene_deleted", on_scene_deleted,
+				main_context::SceneDeleted);
 
 		for(auto &pair : m_instances){
 			up_<CInstance> &instance = pair.second;
@@ -1104,7 +1112,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 		// Remove everything managed by us from the scene
 		main_context::access(m_server, [&](main_context::Interface *imc){
-			Scene *scene = imc->get_scene();
+			Scene *scene = imc->check_scene();
 			size_t progress = 0;
 			for(auto &sector_pair: m_sections){
 				log_v(MODULE, "Unloading nodes... %i%%",
@@ -1173,7 +1181,20 @@ struct Module: public interface::Module, public voxelworld::Interface
 	{
 	}
 
-	// TODO: How should nodes be filtered for replication?
+	void on_scene_deleted(const main_context::SceneDeleted &event)
+	{
+		// Drop instance of the deleted scene (there should be only one, but
+		// loop through all of them just for robustness)
+		for(auto it = m_instances.begin(); it != m_instances.end(); ){
+			auto current_it = it++;
+			up_<CInstance> &instance = current_it->second;
+			if(instance->m_scene_ref == event.scene){
+				m_instances.erase(current_it);
+			}
+		}
+	}
+
+	/*// TODO: How should nodes be filtered for replication?
 	// TODO: Generally the client wants roughly one section, but isn't
 	//       positioned at the middle of a section
 	void on_get_section(const network::Packet &packet)
@@ -1186,7 +1207,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		}
 		log_v(MODULE, "C%i: on_get_section(): " PV3I_FORMAT,
 				packet.sender, PV3I_PARAMS(section_p));
-	}
+	}*/
 
 	// Interface
 
