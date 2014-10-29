@@ -171,8 +171,6 @@ struct Module: public interface::Module, public replicate::Interface
 
 	void on_tick(const interface::TickEvent &event)
 	{
-		log_d(MODULE, "replicate::on_tick");
-
 		sync_changes();
 
 		for(Event &event : m_events_to_emit_after_next_sync){
