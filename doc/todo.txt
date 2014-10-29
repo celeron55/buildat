@@ -65,3 +65,6 @@ Buildat TODO
 - If loading a pre-built module fails even while files haven't been modified,
   try building it again (this is sometimes needed when buildat_core is updated
   without header modifications)
+- Figure out a way to let the windows executables run without copying all DLLs
+  to the same binary directory (can be done on the client, but on the server
+  they must be in the compiler directory too)
