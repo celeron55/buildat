@@ -50,6 +50,9 @@ namespace replicate
 		virtual void assign_scene_to_peer(
 				main_context::SceneReference scene_ref, PeerId peer) = 0;
 
+		virtual sv_<PeerId> find_peers_on_scene(
+				main_context::SceneReference scene_ref) = 0;
+
 		virtual sv_<PeerId> find_peers_that_know_node(
 				main_context::SceneReference scene_ref, uint node_id) = 0;
 

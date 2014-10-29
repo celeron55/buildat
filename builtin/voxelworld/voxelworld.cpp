@@ -286,9 +286,15 @@ struct CInstance: public voxelworld::Instance
 			}
 		}
 
-		// TODO
-		log_w(MODULE, "TODO: Send initialization stuff to clients that already"
-				" were on this scene");
+		// Find peers that already are on the scene and iniitalize them
+		sv_<replicate::PeerId> peers;
+		replicate::access(m_server, [&](replicate::Interface *ireplicate){
+			peers = ireplicate->find_peers_on_scene(m_scene_ref);
+		});
+		log_v(MODULE, "Existing peers on scene: %s", cs(peers));
+		for(auto &peer : peers){
+			initialize_peer(peer);
+		}
 	}
 
 	~CInstance()
@@ -349,26 +355,7 @@ struct CInstance: public voxelworld::Instance
 
 	void on_peer_joined_scene(const replicate::PeerJoinedScene &event)
 	{
-		int peer = event.peer;
-		// Load the client-side module (can be called multiple times)
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, "core:run_script",
-					"require(\"buildat/module/voxelworld\")");
-		});
-		// Send initialization data and tell the client that it is now ready
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar(m_chunk_size_voxels);
-			ar(m_section_size_chunks);
-		}
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, "voxelworld:init", os.str());
-			inetwork->send(peer, "voxelworld:voxel_registry",
-					m_voxel_reg->serialize());
-			inetwork->send(peer, "voxelworld:ready", "");
-		});
-		m_clients_initialized.insert(peer);
+		initialize_peer(event.peer);
 	}
 
 	void on_peer_left_scene(const replicate::PeerLeftScene &event)
@@ -394,6 +381,30 @@ struct CInstance: public voxelworld::Instance
 		log_v(MODULE, "C%i: on_get_section(): " PV3I_FORMAT,
 				packet.sender, PV3I_PARAMS(section_p));
 	}*/
+
+	void initialize_peer(replicate::PeerId peer)
+	{
+		log_v(MODULE, "Initializing peer %i", peer);
+		// Load the client-side module (can be called multiple times)
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "core:run_script",
+					"require(\"buildat/module/voxelworld\")");
+		});
+		// Send initialization data and tell the client that it is now ready
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(m_chunk_size_voxels);
+			ar(m_section_size_chunks);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "voxelworld:init", os.str());
+			inetwork->send(peer, "voxelworld:voxel_registry",
+					m_voxel_reg->serialize());
+			inetwork->send(peer, "voxelworld:ready", "");
+		});
+		m_clients_initialized.insert(peer);
+	}
 
 	void unload_node(Scene *scene, uint node_id)
 	{

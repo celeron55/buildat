@@ -528,6 +528,19 @@ struct Module: public interface::Module, public replicate::Interface
 		}
 	}
 
+	sv_<PeerId> find_peers_on_scene(
+			main_context::SceneReference scene_ref)
+	{
+		sv_<PeerId> result;
+		for(auto &pair: m_peers){
+			PeerState &ps = pair.second;
+			if(ps.scene_ref == nullptr || ps.scene_ref != scene_ref)
+				continue;
+			result.push_back(ps.peer_id);
+		}
+		return result;
+	}
+
 	sv_<PeerId> find_peers_that_know_node(
 			main_context::SceneReference scene_ref, uint node_id)
 	{
