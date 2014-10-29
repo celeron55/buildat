@@ -485,6 +485,10 @@ function M.get_static_voxel(p)
 	log:trace("get_static_voxel(): p="..p:dump())
 	-- Calculate which chunk this voxel is in
 	local chunk_p, in_chunk_p = M.get_chunk_position(p)
+	if chunk_p == nil then
+		log:trace("get_static_voxel(): Not initialized")
+		return buildat.VoxelInstance(0)
+	end
 	log:trace("get_static_voxel(): chunk_p="..chunk_p:dump()..
 			", in_chunk_p="..in_chunk_p:dump())
 	-- Find the static node
