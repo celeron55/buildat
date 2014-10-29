@@ -65,3 +65,6 @@ Buildat TODO
 - Make some kind of an ace of spades clone (or less of a clone); something that
   requires the game to control the creation and deletion of the world anyway,
   and implement the required interfaces
+- If loading a pre-built module fails even while files haven't been modified,
+  try building it again (this is sometimes needed when buildat_core is updated
+  without header modifications)
