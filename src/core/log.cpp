@@ -13,6 +13,7 @@
 #else
 	#include <pthread.h>
 #endif
+#include <errno.h> // EBUSY
 
 pthread_mutex_t log_mutex;
 
@@ -93,7 +94,15 @@ void log_nl()
 		line_begin = true;
 		return;
 	}
-	pthread_mutex_lock(&log_mutex);
+	int r = pthread_mutex_trylock(&log_mutex);
+	if(r == EBUSY){
+		// Yo dawg, I heard you like logging so I'm launching a signal handler
+		// in the middle of your logging routine!
+		// Just call the damn function; it's fine enough for the rare occasions
+		// this happens in
+		log_nl_nolock();
+		return;
+	}
 	log_nl_nolock();
 	pthread_mutex_unlock(&log_mutex);
 }
@@ -147,12 +156,35 @@ static void print(int level, const char *sys, const char *fmt, va_list va_args)
 		vfprintf(stderr, fmt, va_args);
 }
 
+// Does not require any locking
+static void fallback_print(int level, const char *sys, const char *fmt,
+		va_list va_args)
+{
+	FILE *f = file;
+	if(f == NULL)
+		f = stderr;
+	if(use_colors && !file)
+		fprintf(f, "\033[0m"); // reset
+	vfprintf(f, fmt, va_args);
+	fprintf(f, "\n");
+}
+
 void log_(int level, const char *sys, const char *fmt, ...)
 {
 	if(level > max_level){ // Fast path
 		return;
 	}
-	pthread_mutex_lock(&log_mutex);
+	int r = pthread_mutex_trylock(&log_mutex);
+	if(r == EBUSY){
+		// Yo dawg, I heard you like logging so I'm launching a signal handler
+		// in the middle of your logging routine so you can synchronize your
+		// threads while you are synchronizing your threads
+		va_list va_args;
+		va_start(va_args, fmt);
+		fallback_print(level, sys, fmt, va_args);
+		va_end(va_args);
+		return;
+	}
 	va_list va_args;
 	va_start(va_args, fmt);
 	print(level, sys, fmt, va_args);
@@ -166,7 +198,17 @@ void log_no_nl(int level, const char *sys, const char *fmt, ...)
 	if(level > max_level){ // Fast path
 		return;
 	}
-	pthread_mutex_lock(&log_mutex);
+	int r = pthread_mutex_trylock(&log_mutex);
+	if(r == EBUSY){
+		// Yo dawg, I heard you like logging so I'm launching a signal handler
+		// in the middle of your logging routine so you can synchronize your
+		// threads while you are synchronizing your threads
+		va_list va_args;
+		va_start(va_args, fmt);
+		fallback_print(level, sys, fmt, va_args);
+		va_end(va_args);
+		return;
+	}
 	va_list va_args;
 	va_start(va_args, fmt);
 	print(level, sys, fmt, va_args);
