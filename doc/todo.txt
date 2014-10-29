@@ -42,6 +42,7 @@ Buildat TODO
 - Don't emit all world generation events at once
 - Handle module load order properly in reloads (unload by popping from top,
   then reload everything until top)
+	- Is this actually needed?
 	- When reloading a module, unload all dependants first; then load dependants
 	  again
 	- Each module should be able to choose whether they want their dependants
@@ -68,3 +69,11 @@ Buildat TODO
 - Figure out a way to let the windows executables run without copying all DLLs
   to the same binary directory (can be done on the client, but on the server
   they must be in the compiler directory too)
+- When a module is modified at runtime and reload fails, the server crashes:
+	- terminate called after throwing an instance of 'Exception'
+	  what():  access_module(): Module "main" not found
+	- Probably should try building first, and only if it succeeds, then unload
+	  and reload
+- Everything can hang when the debug (or the SIGINT) signal handler is executed
+  inside log_(), because it tries to use log_() from inside log_()
+  synchronization
