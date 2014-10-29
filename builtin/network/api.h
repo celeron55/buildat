@@ -8,9 +8,11 @@
 
 namespace network
 {
+	typedef size_t PeerId;
+
 	struct PeerInfo
 	{
-		typedef size_t Id;
+		typedef PeerId Id;
 
 		Id id = 0;
 		ss_ address;
