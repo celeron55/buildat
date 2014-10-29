@@ -81,14 +81,20 @@ struct Module: public interface::Module, public replicate::Interface
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			for(auto &pair: m_peers){
 				PeerState &ps = pair.second;
-				if(ps.scene_ref == nullptr)
-					continue;
-				magic::Scene *scene = imc->find_scene(ps.scene_ref);
-				if(!scene){
-					log_w(MODULE, "~Module(): Scene %p not found", ps.scene_ref);
-					continue;
+				magic::Scene *scene = nullptr;
+				if(ps.scene_ref != nullptr){
+					scene = imc->find_scene(ps.scene_ref);
+					if(!scene)
+						log_w(MODULE, "~Module(): Scene %p not found", ps.scene_ref);
 				}
-				scene->CleanupConnection((magic::Connection*)&ps.scene_state);
+				if(scene){
+					scene->CleanupConnection((magic::Connection*)&ps.scene_state);
+				}
+				// Make sure to fully clear the SceneReplicationState in
+				// the context of main_context. Otherwise race conditions can
+				// occur inside NodeReplicationStates due to usage of Urho3D's
+				// thread-unsafe weak pointers.
+				ps.scene_state.Clear();
 			}
 		});
 	}
