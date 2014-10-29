@@ -366,6 +366,16 @@ struct Module: public interface::Module, public loader::Interface
 		for(const interface::fs::Node &n : list){
 			if(n.name == "__loader" || !n.is_directory)
 				continue;
+			// This is a module if it contains a file named "meta.json"
+			ss_ module_path = current+"/"+n.name;
+			ss_ meta_path = module_path+"/meta.json";
+			if(!interface::fs::path_exists(meta_path)){
+				// Not a module
+				log_t(MODULE, "No meta.json; \"%s\" is not a module",
+						cs(n.name));
+				continue;
+			}
+			// Is a module
 			log_t(MODULE, "Requirement from main module path: \"%s\"", cs(n.name));
 			required_modules.insert(n.name);
 		}
