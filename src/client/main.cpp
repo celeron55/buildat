@@ -1,7 +1,8 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "core/types.h"
-#include <core/log.h>
+#include "core/log.h"
+#include "boot/autodetect.h"
 #include "client/config.h"
 #include "client/state.h"
 #include "client/app.h"
@@ -76,19 +77,19 @@ int main(int argc, char *argv[])
 			return 1;
 		case 's':
 			fprintf(stderr, "INFO: config.server_address: %s\n", c55_optarg);
-			config.server_address = c55_optarg;
+			config.set("server_address", c55_optarg);
 			break;
 		case 'P':
 			fprintf(stderr, "INFO: config.share_path: %s\n", c55_optarg);
-			config.share_path = c55_optarg;
+			config.set("share_path", c55_optarg);
 			break;
 		case 'C':
 			fprintf(stderr, "INFO: config.cache_path: %s\n", c55_optarg);
-			config.cache_path = c55_optarg;
+			config.set("cache_path", c55_optarg);
 			break;
 		case 'U':
 			fprintf(stderr, "INFO: config.urho3d_path: %s\n", c55_optarg);
-			config.urho3d_path = c55_optarg;
+			config.set("urho3d_path", c55_optarg);
 			break;
 		case 'l':
 			log_set_max_level(atoi(c55_optarg));
@@ -98,7 +99,7 @@ int main(int argc, char *argv[])
 			break;
 		case 'm':
 			fprintf(stderr, "INFO: config.menu_extension_name: %s\n", c55_optarg);
-			config.menu_extension_name = c55_optarg;
+			config.set("menu_extension_name", c55_optarg);
 			break;
 		default:
 			fprintf(stderr, "ERROR: Invalid command-line argument\n");
@@ -107,7 +108,9 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	config.make_paths_absolute();
+	if(!boot::autodetect::detect_client_paths(config))
+		return 1;
+
 	if(!config.check_paths()){
 		return 1;
 	}
@@ -121,14 +124,14 @@ int main(int argc, char *argv[])
 		sp_<client::State> state(client::createState(app0));
 		app0->set_state(state);
 
-		if(config.server_address != ""){
+		if(config.get<ss_>("server_address") != ""){
 			ss_ error;
-			if(!state->connect(config.server_address, &error)){
+			if(!state->connect(config.get<ss_>("server_address"), &error)){
 				log_e(MODULE, "Connect failed: %s", cs(error));
 				return 1;
 			}
 		} else {
-			config.boot_to_menu = true;
+			config.set("boot_to_menu", true);
 		}
 
 		exit_status = app0->run();

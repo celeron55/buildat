@@ -71,8 +71,8 @@ struct CState: public State
 	CState(sp_<app::App> app):
 		m_socket(interface::createTCPSocket()),
 		m_app(app),
-		m_remote_cache_path(g_client_config.cache_path+"/remote"),
-		m_tmp_path(g_client_config.cache_path+"/tmp")
+		m_remote_cache_path(g_client_config.get<ss_>("cache_path")+"/remote"),
+		m_tmp_path(g_client_config.get<ss_>("cache_path")+"/tmp")
 	{
 		// Create directory for cached files
 		interface::fs::create_directories(m_remote_cache_path);
@@ -329,7 +329,7 @@ void CState::setup_packet_handlers()
 			return;
 		}
 		ss_ file_hash_hex = interface::sha1::hex(file_hash);
-		ss_ path = g_client_config.cache_path+"/remote/"+file_hash_hex;
+		ss_ path = g_client_config.get<ss_>("cache_path")+"/remote/"+file_hash_hex;
 		log_i(MODULE, "Saving %s to %s", cs(file_name), cs(path));
 		std::ofstream of(path, std::ios::binary);
 		of<<file_content;

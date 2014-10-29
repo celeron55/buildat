@@ -120,10 +120,10 @@ struct CApp: public App, public magic::Application
 		m_thread_pool->start(4); // TODO: Configurable
 
 		sv_<ss_> resource_paths = {
-			g_client_config.cache_path+"/tmp",
-			g_client_config.share_path+"/extensions", // Could be unsafe
-			g_client_config.urho3d_path+"/Bin/CoreData",
-			g_client_config.urho3d_path+"/Bin/Data",
+			g_client_config.get<ss_>("cache_path")+"/tmp",
+			g_client_config.get<ss_>("share_path")+"/extensions", // Could be unsafe
+			g_client_config.get<ss_>("urho3d_path")+"/Bin/CoreData",
+			g_client_config.get<ss_>("urho3d_path")+"/Bin/Data",
 		};
 		ss_ resource_paths_s;
 		for(const ss_ &path : resource_paths){
@@ -138,7 +138,7 @@ struct CApp: public App, public magic::Application
 			magic_fs->RegisterPath(interface::fs::get_absolute_path(path).c_str());
 		}
 		magic_fs->RegisterPath(interface::fs::get_absolute_path(
-				g_client_config.cache_path).c_str());
+				g_client_config.get<ss_>("cache_path")).c_str());
 
 		// Useful for saving stuff for inspection when debugging
 		magic_fs->RegisterPath("/tmp");
@@ -353,7 +353,7 @@ struct CApp: public App, public magic::Application
 		lua_bindings::replicate::set_scene(L, m_scene);
 
 		// Run initial client Lua scripts
-		ss_ init_lua_path = g_client_config.share_path+"/client/init.lua";
+		ss_ init_lua_path = g_client_config.get<ss_>("share_path")+"/client/init.lua";
 		int error = luaL_dofile(L, init_lua_path.c_str());
 		if(error){
 			log_w(MODULE, "luaL_dofile: An error occurred: %s\n",
@@ -363,8 +363,8 @@ struct CApp: public App, public magic::Application
 		}
 
 		// Launch menu if requested
-		if(g_client_config.boot_to_menu){
-			ss_ extname = g_client_config.menu_extension_name;
+		if(g_client_config.get<bool>("boot_to_menu")){
+			ss_ extname = g_client_config.get<ss_>("menu_extension_name");
 			ss_ script = ss_() +
 				"local m = require('buildat/extension/"+extname+"')\n"
 					"if type(m) ~= 'table' then\n"
@@ -514,7 +514,7 @@ struct CApp: public App, public magic::Application
 		CApp *self = (CApp*)lua_touserdata(L, -1);
 		lua_pop(L, 1);
 
-		if(g_client_config.boot_to_menu){
+		if(g_client_config.get<bool>("boot_to_menu")){
 			// If menu, reboot client into menu
 			self->m_reboot_requested = true;
 			self->shutdown();
@@ -631,17 +631,17 @@ struct CApp: public App, public magic::Application
 		ss_ name = lua_bindings::lua_tocppstring(L, 1);
 
 		if(name == "share"){
-			ss_ path = g_client_config.share_path;
+			ss_ path = g_client_config.get<ss_>("share_path");
 			lua_pushlstring(L, path.c_str(), path.size());
 			return 1;
 		}
 		if(name == "cache"){
-			ss_ path = g_client_config.cache_path;
+			ss_ path = g_client_config.get<ss_>("cache_path");
 			lua_pushlstring(L, path.c_str(), path.size());
 			return 1;
 		}
 		if(name == "tmp"){
-			ss_ path = g_client_config.cache_path+"/tmp";
+			ss_ path = g_client_config.get<ss_>("cache_path")+"/tmp";
 			lua_pushlstring(L, path.c_str(), path.size());
 			return 1;
 		}
@@ -653,7 +653,7 @@ struct CApp: public App, public magic::Application
 	static int l_extension_path(lua_State *L)
 	{
 		ss_ name = lua_bindings::lua_tocppstring(L, 1);
-		ss_ path = g_client_config.share_path+"/extensions/"+name;
+		ss_ path = g_client_config.get<ss_>("share_path")+"/extensions/"+name;
 		// TODO: Check if extension actually exists and do something suitable if
 		//       not
 		lua_pushlstring(L, path.c_str(), path.size());
