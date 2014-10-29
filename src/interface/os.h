@@ -9,6 +9,7 @@ namespace interface
 	{
 		int64_t get_timeofday_us();
 		void sleep_us(int us);
+		ss_ get_current_exe_path();
 	}
 }
 

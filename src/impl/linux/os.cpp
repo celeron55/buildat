@@ -1,12 +1,10 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/os.h"
+#include "interface/fs.h"
+#include <cstring>
 #include <sys/time.h>
-#ifdef _WIN32
-	#include "ports/windows_compat.h"
-#else
-	#include <unistd.h>
-#endif
+#include <unistd.h>
 
 namespace interface {
 namespace os {
@@ -21,6 +19,15 @@ int64_t get_timeofday_us()
 void sleep_us(int us)
 {
 	usleep(us);
+}
+
+ss_ get_current_exe_path()
+{
+	char buf[BUFSIZ];
+	memset(buf, 0, BUFSIZ);
+	if(readlink("/proc/self/exe", buf, BUFSIZ-1) == -1)
+		throw Exception("readlink(\"/proc/self/exe\") failed");
+	return buf;
 }
 
 }
