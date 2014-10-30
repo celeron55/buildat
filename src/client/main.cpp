@@ -14,6 +14,7 @@ namespace magic = Urho3D;
 
 client::Config g_client_config;
 
+// TODO: This isn't thread-safe
 bool g_sigint_received = false;
 void sigint_handler(int sig)
 {

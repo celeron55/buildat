@@ -18,6 +18,11 @@ int log_get_max_level();
 void log_set_file(const char *path);
 void log_close();
 
+// Try to stop using malloc() and other heavyweight interfaces. Call when
+// SIGSEGV or SIGABRT occurs to make the program much more likely to be able to
+// print out the necessary errors.
+void log_disable_bloat();
+
 void log_nl();
 void log_(int level, const char *sys, const char *fmt, ...)
 __attribute__((format(printf, 3, 4)));

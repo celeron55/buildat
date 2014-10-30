@@ -33,6 +33,7 @@ static const bool use_colors = true;
 static interface::Mutex log_mutex;
 //static interface::Thread *log_active_thread = nullptr;
 
+static std::atomic_bool disable_bloat(false);
 static std::atomic_bool line_begin(true);
 static std::atomic_int current_level(0);
 static std::atomic_int max_level(CORE_INFO);
@@ -72,6 +73,11 @@ void log_close()
 		file = NULL;
 	}
 	log_mutex.unlock();
+}
+
+void log_disable_bloat()
+{
+	disable_bloat = true;
 }
 
 void log_nl_nolock()
@@ -126,13 +132,17 @@ static void print(int level, const char *sys, const char *fmt, va_list va_args)
 	if(line_begin){
 		time_t now = time(NULL);
 		char timestr[30];
-		size_t timestr_len = strftime(timestr, sizeof(timestr),
-					"%b %d %H:%M:%S", localtime(&now));
-		if(timestr_len == 0)
-			timestr[0] = '\0';
-		int ms = (get_timeofday_us() % 1000000) / 1000;
-		timestr_len += snprintf(timestr + timestr_len,
-					sizeof(timestr) - timestr_len, ".%03i", ms);
+		if(disable_bloat){
+			timestr[0] = 0;
+		} else {
+			size_t timestr_len = strftime(timestr, sizeof(timestr),
+						"%b %d %H:%M:%S", localtime(&now));
+			if(timestr_len == 0)
+				timestr[0] = '\0';
+			int ms = (get_timeofday_us() % 1000000) / 1000;
+			timestr_len += snprintf(timestr + timestr_len,
+						sizeof(timestr) - timestr_len, ".%03i", ms);
+		}
 		char sysstr[9];
 		snprintf(sysstr, 9, "%s        ", sys);
 		const char *levelcs = "FEWIVDT";

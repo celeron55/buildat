@@ -11,8 +11,10 @@ namespace interface
 		void log_current_backtrace(const ss_ &title="Current backtrace:");
 		void log_exception_backtrace(const ss_ &title="Exception backtrace:");
 
+		static const size_t BACKTRACE_SIZE = 48;
+
 		struct StoredBacktrace {
-			void *frames[16];
+			void *frames[BACKTRACE_SIZE];
 			int num_frames = 0;
 			ss_ exception_name;
 		};

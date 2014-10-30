@@ -58,7 +58,7 @@ static void* get_library_executable_address(const ss_ &lib_path)
 	//log_v(MODULE, "address_s=\"%s\"", cs(address_s));
 	if(address_s.empty())
 		return (void*)0x0;
-	void *address = (void*)strtoul(address_s.c_str(), NULL, 16);
+	void *address = (void*)strtoul(address_s.c_str(), NULL, BACKTRACE_SIZE);
 	return address;
 }
 
@@ -141,9 +141,12 @@ static void bt_print_backtrace(char **symbols, void* const *trace, int trace_siz
 		snprintf(cmdbuf, sizeof cmdbuf, "echo '%s' | c++filt", symbols[i]);
 		ss_ cppfilt_symbol = exec_get_stdout_without_newline(cmdbuf);
 
-		snprintf(cmdbuf, sizeof cmdbuf, "addr2line %p -e %s",
-				address, cs(file_path));
-		ss_ addr2line_output = exec_get_stdout_without_newline(cmdbuf);
+		ss_ addr2line_output;
+		if(address != nullptr){
+			snprintf(cmdbuf, sizeof cmdbuf, "addr2line %p -e %s",
+					address, cs(file_path));
+			addr2line_output = exec_get_stdout_without_newline(cmdbuf);
+		}
 
 		auto r = filter_f(i, first_real_i, cppfilt_symbol,addr2line_output);
 		if(r == BFA_PASS){
@@ -191,12 +194,14 @@ static void log_backtrace(void* const *trace, int trace_size, const ss_ &title,
 		// Unlock spinlock
 		backtrace_mutex.unlock();
 	}
+
+	free(symbols);
 }
 
 void log_current_backtrace(const ss_ &title)
 {
-	void *trace[16];
-	int trace_size = backtrace(trace, 16);
+	void *trace[BACKTRACE_SIZE];
+	int trace_size = backtrace(trace, BACKTRACE_SIZE);
 
 	log_backtrace(trace, trace_size, title);
 }
@@ -204,7 +209,7 @@ void log_current_backtrace(const ss_ &title)
 #include <cxxabi.h>
 #include <dlfcn.h>
 
-static void *last_exception_frames[16];
+static void *last_exception_frames[BACKTRACE_SIZE];
 static int last_exception_num_frames = 0;
 static ss_ last_exception_name;
 
@@ -240,7 +245,7 @@ void log_exception_backtrace(const ss_ &title)
 void get_current_backtrace(StoredBacktrace &result)
 {
 	result.exception_name.clear();
-	result.num_frames = backtrace(result.frames, 16);
+	result.num_frames = backtrace(result.frames, BACKTRACE_SIZE);
 }
 
 void get_exception_backtrace(StoredBacktrace &result)
@@ -304,29 +309,95 @@ void log_backtrace_chain(const std::list<ThreadBacktrace> &chain,
 		bt_print_backtrace(symbols, bt_step.bt.frames, bt_step.bt.num_frames,
 				1, bt_filter);
 		bt_print_newline();
+
+		free(symbols);
 	}
 	// Print to log
 	backtrace_buffer[sizeof backtrace_buffer - 1] = 0;
 	log_i(MODULE, "%s", backtrace_buffer);
 }
 
+// Used for signals because a signal often occurs inside core/log's mutex
+// synchronization, causing a deadlock. Also, does not allocate new memory.
+static void stderr_backtrace(void* const *trace, int trace_size, int sig)
+{
+	char **symbols = backtrace_symbols(trace, trace_size);
+
+	backtrace_mutex.lock();
+
+	backtrace_buffer_len = 0;
+	// The first stack frame points to this functiton
+	bt_print_backtrace(symbols, trace, trace_size, 1);
+
+	// Print to stderr
+	backtrace_buffer[sizeof backtrace_buffer - 1] = 0;
+	fprintf(stderr, "  Backtrace for signal %i:\n%s\n", sig, backtrace_buffer);
+
+	backtrace_mutex.unlock();
+
+	free(symbols);
+}
+
+// Used for avoiding the handing of a SIGSEGV caused by trying to handle a
+// SIGABRT or so.
+static std::atomic_int g_signal_handlers_active(0);
+
 static void debug_sighandler(int sig, siginfo_t *info, void *secret)
 {
-	ucontext_t *uc = (ucontext_t*)secret;
-	log_i(MODULE, " ");
-	if(sig == SIGSEGV)
-		log_w(MODULE, "Crash: SIGSEGV: Address %p (executing %p)",
-				info->si_addr, (void*)uc->uc_mcontext.gregs[REG_EIP]);
-	else
-		log_w(MODULE, "Crash: Signal %d", sig);
+	int num_handlers_active = g_signal_handlers_active.fetch_add(1);
+	if(num_handlers_active != 0){
+		// Get out of here, we're in deep trouble
+		g_signal_handlers_active--;
+		exit(1);
+	}
 
-	void *trace[16];
-	int trace_size = backtrace(trace, 16);
+	log_disable_bloat(); // First get this out of the way
+
+	// NOTE: Do not use log in here, because a signal can occur inside the
+	//       logging functions too
+
+	ucontext_t *uc = (ucontext_t*)secret;
+	bool malloc_might_not_work = false;
+	fprintf(stderr, "\n");
+	if(sig == SIGSEGV){
+		fprintf(stderr, "Crash: SIGSEGV: Address %p (executing %p)\n",
+				info->si_addr, (void*)uc->uc_mcontext.gregs[REG_EIP]);
+		// If segfault isn't a nullptr dereference, do not fetch symbols; it
+		// would just cause a deadlock in glibc (due to malloc mutex)
+		if(info->si_addr != nullptr)
+			malloc_might_not_work = true;
+	} else if(sig == SIGABRT){
+		fprintf(stderr, "Crash: SIGABRT\n");
+		// glibc SIGABRT is a can of worms
+		malloc_might_not_work = true;
+	} else {
+		fprintf(stderr, "Crash: Signal %d\n", sig);
+	}
+
+	void *trace[BACKTRACE_SIZE];
+	int trace_size = backtrace(trace, BACKTRACE_SIZE);
 	// Overwrite sigaction with caller's address
 	trace[1] = (void*) uc->uc_mcontext.gregs[REG_EIP];
 
-	log_backtrace(trace, trace_size, "Backtrace for signal:");
+	if(malloc_might_not_work){
+		// Can't use backtrace_symbols() due to whatever situation we're in.
+		// Just print the symbols directly to stderr (fd=2).
+		backtrace_symbols_fd(trace, trace_size, 2);
+		fprintf(stderr, "\n");
+		fprintf(stderr, "Will not attempt to print the backtrace with symbols.\n");
+		fprintf(stderr, "\n");
+		/*fprintf(stderr, "\n");
+		fprintf(stderr, "Attempting to print the backtrace with symbols - if it"
+				" does not work, you will see some kind of a crash instead:\n");
+		fprintf(stderr, "Backtrace:\n");
+		stderr_backtrace(trace, trace_size, sig);*/
+	} else {
+		stderr_backtrace(trace, trace_size, sig);
+	}
 
+	g_signal_handlers_active--;
+	// In case of SIGSEGV or SIGABRT, all is fucked and exit() can deadlock due
+	// to not being able to use malloc(), but whatever...
 	exit(1);
 }
 
