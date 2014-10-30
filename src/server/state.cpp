@@ -61,6 +61,7 @@ struct ModuleContainer
 
 	// Allows directly executing code in the module thread
 	const std::function<void(interface::Module*)> *direct_cb = nullptr;
+	std::exception_ptr direct_cb_exception = nullptr;
 	// The actual event queue
 	std::deque<Event> event_queue; // Push back, pop front
 	// Protects direct_cb and event_queue
@@ -172,6 +173,7 @@ struct ModuleContainer
 			log_t(MODULE, "execute_direct_cb[%s]: Posting direct_cb",
 					cs(info.name));
 			direct_cb = &cb;
+			direct_cb_exception = nullptr;
 			event_queue_sem.post();
 		}
 		log_t(MODULE, "execute_direct_cb[%s]: Waiting for execution to finish",
@@ -180,11 +182,23 @@ struct ModuleContainer
 		//       forcing this semaphore to open, because exiting this function
 		//       while direct_cb is being executed is unsafe. You have to figure
 		//       out what direct_cb has ended up waiting for, and fix that.
-		direct_cb_executed_sem.wait(); // Wait for execution to finish
-		direct_cb_free_sem.post(); // Set direct_cb to be free now
-		log_t(MODULE, "execute_direct_cb[%s]: Execution finished",
-				cs(info.name));
-		return true;
+		// Wait for execution to finish
+		direct_cb_executed_sem.wait();
+		// Grab execution result
+		std::exception_ptr eptr = direct_cb_exception;
+		direct_cb_exception = nullptr; // Not to be used anymore
+		// Set direct_cb to be free again
+		direct_cb_free_sem.post();
+		// Handle execution result
+		if(eptr){
+			log_t(MODULE, "execute_direct_cb[%s]: Execution finished by"
+					" exception", cs(info.name));
+			std::rethrow_exception(eptr);
+		} else {
+			log_t(MODULE, "execute_direct_cb[%s]: Execution finished",
+					cs(info.name));
+			return true;
+		}
 	}
 };
 
@@ -232,7 +246,7 @@ void ModuleThread::run(interface::Thread *thread)
 		}
 		if(direct_cb){
 			// Handle the direct callback
-			//interface::MutexScope ms(mc->mutex);
+			std::exception_ptr eptr = nullptr;
 			if(!mc->module){
 				log_w(MODULE, "M[%s]: Module is null; cannot"
 						" call direct callback", cs(mc->info.name));
@@ -243,22 +257,24 @@ void ModuleThread::run(interface::Thread *thread)
 					(*direct_cb)(mc->module.get());
 					log_t(MODULE, "M[%s] ~direct_cb(): Executed",
 							cs(mc->info.name));
-				} catch(std::exception &e){
-					log_w(MODULE, "M[%s] ~direct_cb() failed: %s",
-							cs(mc->info.name), e.what());
-					interface::debug::log_exception_backtrace();
-					mc->server->shutdown(1, "M["+mc->info.name+"]~>direct_cb() "
-							"failed: "+e.what());
+				} catch(...){
+					log_v(MODULE, "M[%s] ~direct_cb() failed (exception)",
+							cs(mc->info.name));
+					// direct_cb() exception should not directly shutdown the
+					// server; instead they are passed to the caller. Eventually
+					// a caller is reached who isn't using direct_cb(), which
+					// then determines the final result of the exception.
+					eptr = std::current_exception();
 				}
 			}
 			{
 				interface::MutexScope ms(mc->event_queue_mutex);
 				mc->direct_cb = nullptr;
+				mc->direct_cb_exception = eptr;
 			}
 			mc->direct_cb_executed_sem.post();
 		} else if(got_event) {
 			// Handle the event
-			//interface::MutexScope ms(mc->mutex);
 			if(!mc->module){
 				log_w(MODULE, "M[%s]: Module is null; cannot"
 						" handle event", cs(mc->info.name));
@@ -272,6 +288,8 @@ void ModuleThread::run(interface::Thread *thread)
 				} catch(std::exception &e){
 					log_w(MODULE, "M[%s]->event() failed: %s",
 							cs(mc->info.name), e.what());
+					// If event handling results in an uncatched exception, the
+					// server shall shut down.
 					interface::debug::log_exception_backtrace();
 					mc->server->shutdown(1, "M["+mc->info.name+"]->event() "
 							"failed: "+e.what());
