@@ -12,12 +12,12 @@ void init_signal_handlers(const SigConfig &config)
 	// No-op
 }
 
-void log_current_backtrace()
+void log_current_backtrace(const ss_ &title)
 {
 	log_i(MODULE, "Backtrace logging not implemented on Windows");
 }
 
-void log_exception_backtrace()
+void log_exception_backtrace(const ss_ &title)
 {
 	log_i(MODULE, "Backtrace logging not implemented on Windows");
 }

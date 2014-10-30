@@ -193,6 +193,8 @@ struct ModuleContainer
 		if(eptr){
 			log_t(MODULE, "execute_direct_cb[%s]: Execution finished by"
 					" exception", cs(info.name));
+			/*interface::debug::log_current_backtrace(
+					"Backtrace for M["+info.name+"]'s caller:");*/
 			std::rethrow_exception(eptr);
 		} else {
 			log_t(MODULE, "execute_direct_cb[%s]: Execution finished",
@@ -290,7 +292,8 @@ void ModuleThread::run(interface::Thread *thread)
 							cs(mc->info.name), e.what());
 					// If event handling results in an uncatched exception, the
 					// server shall shut down.
-					interface::debug::log_exception_backtrace();
+					interface::debug::log_exception_backtrace(
+							"Backtrace for M["+mc->info.name+"]->event():");
 					mc->server->shutdown(1, "M["+mc->info.name+"]->event() "
 							"failed: "+e.what());
 				}

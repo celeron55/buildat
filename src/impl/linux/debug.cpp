@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <cstdarg>
 #include <execinfo.h>
 #include <signal.h>
 #include <sys/ucontext.h>
@@ -67,7 +68,7 @@ static void* get_library_executable_address(const ss_ &lib_path)
 	#define REG_EIP REG_RIP
 #endif
 
-static void log_backtrace(void* const *trace, int trace_size);
+static void log_backtrace(void* const *trace, int trace_size, const ss_ &title);
 
 static void debug_sighandler(int sig, siginfo_t *info, void *secret)
 {
@@ -84,7 +85,7 @@ static void debug_sighandler(int sig, siginfo_t *info, void *secret)
 	// Overwrite sigaction with caller's address
 	trace[1] = (void*) uc->uc_mcontext.gregs[REG_EIP];
 
-	log_backtrace(trace, trace_size);
+	log_backtrace(trace, trace_size, "Backtrace for signal:");
 
 	exit(1);
 }
@@ -103,8 +104,25 @@ void init_signal_handlers(const SigConfig &config)
 }
 
 static std::atomic_int log_backtrace_spinlock(0);
+static char backtrace_buffer[10000];
+static size_t backtrace_buffer_len = 0;
 
-static void log_backtrace(void* const *trace, int trace_size)
+static void bt_print(const char *fmt, ...)
+{
+	va_list va_args;
+	va_start(va_args, fmt);
+	backtrace_buffer_len += vsnprintf(
+			backtrace_buffer + backtrace_buffer_len,
+			sizeof backtrace_buffer - backtrace_buffer_len,
+			fmt, va_args);
+	va_end(va_args);
+	backtrace_buffer_len += snprintf(
+			backtrace_buffer + backtrace_buffer_len,
+			sizeof backtrace_buffer - backtrace_buffer_len,
+			"\n");
+}
+
+static void log_backtrace(void* const *trace, int trace_size, const ss_ &title)
 {
 	char **symbols = backtrace_symbols(trace, trace_size);
 
@@ -117,7 +135,8 @@ static void log_backtrace(void* const *trace, int trace_size)
 	}
 
 	// The first stack frame points to this functiton
-	log_i(MODULE, "Backtrace:");
+	backtrace_buffer_len = 0;
+	bt_print("\n  %s", cs(title));
 	for(int i = 1; i < trace_size; i++){
 		char cmdbuf[500];
 		// Parse symbol to get file name
@@ -146,23 +165,27 @@ static void log_backtrace(void* const *trace, int trace_size)
 		ss_ addr2line_output = exec_get_stdout_without_newline(cmdbuf);
 
 		if(addr2line_output.size() > 4){
-			log_i(MODULE, "#%i  %s", i-1, cs(addr2line_output));
+			bt_print("    #%i  %s", i-1, cs(addr2line_output));
 			log_d(MODULE, "    = %s", cs(cppfilt_symbol));
 		} else {
-			log_i(MODULE, "#%i  %s", i-1, cs(cppfilt_symbol));
+			bt_print("    #%i  %s", i-1, cs(cppfilt_symbol));
 		}
 	}
+
+	// Print to log
+	backtrace_buffer[sizeof backtrace_buffer - 1] = 0;
+	log_i(MODULE, "%s", backtrace_buffer);
 
 	// Unlock spinlock
 	log_backtrace_spinlock--;
 }
 
-void log_current_backtrace()
+void log_current_backtrace(const ss_ &title)
 {
 	void *trace[16];
 	int trace_size = backtrace(trace, 16);
 
-	log_backtrace(trace, trace_size);
+	log_backtrace(trace, trace_size, title);
 }
 
 #include <cxxabi.h>
@@ -196,9 +219,9 @@ extern "C" {
 	}
 }
 
-void log_exception_backtrace()
+void log_exception_backtrace(const ss_ &title)
 {
-	log_backtrace(last_exception_frames, last_exception_num_frames);
+	log_backtrace(last_exception_frames, last_exception_num_frames, title);
 }
 
 }

@@ -14,9 +14,9 @@ namespace interface
 
 		void init_signal_handlers(const SigConfig &config);
 
-		void log_current_backtrace();
+		void log_current_backtrace(const ss_ &title="Current backtrace:");
 
-		void log_exception_backtrace();
+		void log_exception_backtrace(const ss_ &title="Exception backtrace:");
 	}
 }
 // vim: set noet ts=4 sw=4:
