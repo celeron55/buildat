@@ -7,11 +7,6 @@
 namespace interface {
 namespace debug {
 
-void init_signal_handlers(const SigConfig &config)
-{
-	// No-op
-}
-
 void log_current_backtrace(const ss_ &title)
 {
 	log_i(MODULE, "Backtrace logging not implemented on Windows");
@@ -35,8 +30,13 @@ void log_backtrace(const StoredBacktrace &result, const ss_ &title)
 }
 
 void log_backtrace_chain(const std::list<ThreadBacktrace> &chain,
-		const char *reason)
+		const char *reason, bool cut_at_api)
 {
+}
+
+void init_signal_handlers(const SigConfig &config)
+{
+	// No-op
 }
 
 }

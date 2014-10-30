@@ -8,13 +8,6 @@ namespace interface
 {
 	namespace debug
 	{
-		struct SigConfig {
-			bool catch_segfault = true;
-			bool catch_abort = true;
-		};
-
-		void init_signal_handlers(const SigConfig &config);
-
 		void log_current_backtrace(const ss_ &title="Current backtrace:");
 		void log_exception_backtrace(const ss_ &title="Exception backtrace:");
 
@@ -36,7 +29,14 @@ namespace interface
 		};
 
 		void log_backtrace_chain(const std::list<ThreadBacktrace> &chain,
-				const char *reason);
+				const char *reason, bool cut_at_api = true);
+
+		struct SigConfig {
+			bool catch_segfault = true;
+			bool catch_abort = true;
+		};
+
+		void init_signal_handlers(const SigConfig &config);
 	}
 }
 // vim: set noet ts=4 sw=4:

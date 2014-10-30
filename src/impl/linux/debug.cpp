@@ -69,42 +69,6 @@ static void* get_library_executable_address(const ss_ &lib_path)
 	#define REG_EIP REG_RIP
 #endif
 
-static void log_backtrace(void* const *trace, int trace_size, const ss_ &title,
-		bool use_lock = true);
-
-static void debug_sighandler(int sig, siginfo_t *info, void *secret)
-{
-	ucontext_t *uc = (ucontext_t*)secret;
-	log_i(MODULE, " ");
-	if(sig == SIGSEGV)
-		log_w(MODULE, "Crash: SIGSEGV: Address %p (executing %p)",
-				info->si_addr, (void*)uc->uc_mcontext.gregs[REG_EIP]);
-	else
-		log_w(MODULE, "Crash: Signal %d", sig);
-
-	void *trace[16];
-	int trace_size = backtrace(trace, 16);
-	// Overwrite sigaction with caller's address
-	trace[1] = (void*) uc->uc_mcontext.gregs[REG_EIP];
-
-	log_backtrace(trace, trace_size, "Backtrace for signal:");
-
-	exit(1);
-}
-
-void init_signal_handlers(const SigConfig &config)
-{
-	struct sigaction sa;
-	sa.sa_sigaction = debug_sighandler;
-	sigemptyset (&sa.sa_mask);
-	sa.sa_flags = SA_RESTART | SA_SIGINFO;
-
-	if(config.catch_segfault)
-		sigaction(SIGSEGV, &sa, NULL);
-	if(config.catch_abort)
-		sigaction(SIGABRT, &sa, NULL);
-}
-
 static interface::Mutex backtrace_mutex;
 
 static char backtrace_buffer[10000];
@@ -130,9 +94,29 @@ static void bt_print(const char *fmt, ...)
 	bt_print_newline();
 }
 
-static void bt_print_backtrace(char **symbols, void* const *trace, int trace_size,
-		int start_from_i = 1)
+enum BacktraceFilterAction {BFA_PASS, BFA_START_LATER, BFA_STOP};
+typedef std::function<BacktraceFilterAction(int i, int &first_real_i,
+		ss_ &cppfilt_symbol, ss_ &addr2line_output)> backtrace_filter_t;
+
+auto bt_default_filter = [](int i, int &first_real_i, 
+		ss_ &cppfilt_symbol, ss_ &addr2line_output)
 {
+	// Clean up the beginning of the backtrace (for whatever reason there
+	// often seems to be two basic_string-related lines at the beginnong of
+	// the backtrace)
+	if(i <= 2 && i <= first_real_i &&
+			addr2line_output.find("/basic_string.h") != ss_::npos){
+		return BFA_START_LATER;
+	}
+	return BFA_PASS;
+};
+
+static void bt_print_backtrace(char **symbols, void* const *trace, int trace_size,
+		int start_from_i = 1, backtrace_filter_t filter_f = backtrace_filter_t())
+{
+	if(!filter_f)
+		filter_f = bt_default_filter;
+
 	int first_real_i = start_from_i;
 	for(int i = 1; i < trace_size; i++){
 		char cmdbuf[500];
@@ -161,13 +145,12 @@ static void bt_print_backtrace(char **symbols, void* const *trace, int trace_siz
 				address, cs(file_path));
 		ss_ addr2line_output = exec_get_stdout_without_newline(cmdbuf);
 
-		// Clean up the beginning of the backtrace (for whatever reason there
-		// often seems to be two basic_string-related lines at the beginnong of
-		// the backtrace)
-		if(i <= 2 && i <= first_real_i &&
-				addr2line_output.find("/basic_string.h") != ss_::npos){
+		auto r = filter_f(i, first_real_i, cppfilt_symbol,addr2line_output);
+		if(r == BFA_PASS){
+		} else if(r == BFA_START_LATER){
 			first_real_i = i + 1;
-			continue;
+		} else if(r == BFA_STOP){
+			break;
 		}
 
 		if(addr2line_output.size() > 4){
@@ -186,7 +169,7 @@ static void bt_print_backtrace(char **symbols, void* const *trace, int trace_siz
 }
 
 static void log_backtrace(void* const *trace, int trace_size, const ss_ &title,
-		bool use_lock)
+		bool use_lock = true)
 {
 	char **symbols = backtrace_symbols(trace, trace_size);
 
@@ -275,7 +258,7 @@ void log_backtrace(const StoredBacktrace &result, const ss_ &title)
 }
 
 void log_backtrace_chain(const std::list<ThreadBacktrace> &chain,
-		const char *reason)
+		const char *reason, bool cut_at_api)
 {
 	interface::MutexScope ms(backtrace_mutex);
 
@@ -295,12 +278,69 @@ void log_backtrace_chain(const std::list<ThreadBacktrace> &chain,
 		}
 		bt_print("  Thread(%s):", cs(bt_step.thread_name));
 		char **symbols = backtrace_symbols(bt_step.bt.frames, bt_step.bt.num_frames);
-		bt_print_backtrace(symbols, bt_step.bt.frames, bt_step.bt.num_frames, 1);
+
+		bool stop_at_next = false;
+
+		auto bt_filter = [&](int i, int &first_real_i, 
+				ss_ &cppfilt_symbol, ss_ &addr2line_output)
+		{
+			if(stop_at_next){
+				return BFA_STOP;
+			}
+			// Skip this stuff at the beginning
+			if(i <= 2 && i <= first_real_i &&
+					addr2line_output.find("/basic_string.h") != ss_::npos){
+				return BFA_START_LATER;
+			}
+			// Stop at current module API
+			if(!bt_step.thread_name.empty() && addr2line_output.find(
+					"/"+bt_step.thread_name+"/api.h") != ss_::npos){
+				stop_at_next = true;
+				return BFA_PASS;
+			}
+			return BFA_PASS;
+		};
+
+		bt_print_backtrace(symbols, bt_step.bt.frames, bt_step.bt.num_frames,
+				1, bt_filter);
 		bt_print_newline();
 	}
 	// Print to log
 	backtrace_buffer[sizeof backtrace_buffer - 1] = 0;
 	log_i(MODULE, "%s", backtrace_buffer);
+}
+
+static void debug_sighandler(int sig, siginfo_t *info, void *secret)
+{
+	ucontext_t *uc = (ucontext_t*)secret;
+	log_i(MODULE, " ");
+	if(sig == SIGSEGV)
+		log_w(MODULE, "Crash: SIGSEGV: Address %p (executing %p)",
+				info->si_addr, (void*)uc->uc_mcontext.gregs[REG_EIP]);
+	else
+		log_w(MODULE, "Crash: Signal %d", sig);
+
+	void *trace[16];
+	int trace_size = backtrace(trace, 16);
+	// Overwrite sigaction with caller's address
+	trace[1] = (void*) uc->uc_mcontext.gregs[REG_EIP];
+
+	log_backtrace(trace, trace_size, "Backtrace for signal:");
+
+	exit(1);
+}
+
+void init_signal_handlers(const SigConfig &config)
+{
+	struct sigaction sa;
+	sa.sa_sigaction = debug_sighandler;
+	sigemptyset (&sa.sa_mask);
+	sa.sa_flags = SA_RESTART | SA_SIGINFO;
+
+	if(config.catch_segfault)
+		sigaction(SIGSEGV, &sa, NULL);
+	if(config.catch_abort)
+		sigaction(SIGABRT, &sa, NULL);
 }
 
 }
