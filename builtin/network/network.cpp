@@ -69,10 +69,6 @@ struct Module: public interface::Module, public network::Interface
 		m_listening_socket(interface::createTCPSocket())
 	{
 		log_d(MODULE, "network construct");
-
-		m_thread.reset(interface::createThread(new NetworkThread(this)));
-		m_thread->set_name("network/select");
-		m_thread->start();
 	}
 
 	~Module()
@@ -101,6 +97,12 @@ struct Module: public interface::Module, public network::Interface
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));
+
+		// Don't start thread in constructor because in there this module is not
+		// guaranteed to be available by server->access_module()
+		m_thread.reset(interface::createThread(new NetworkThread(this)));
+		m_thread->set_name("network/select");
+		m_thread->start();
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)

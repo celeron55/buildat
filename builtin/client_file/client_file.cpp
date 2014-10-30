@@ -58,10 +58,6 @@ struct Module: public interface::Module, public client_file::Interface
 		m_watch(interface::createFileWatch())
 	{
 		log_d(MODULE, "client_file construct");
-
-		m_thread.reset(interface::createThread(new FileWatchThread(this)));
-		m_thread->set_name("client_file/select");
-		m_thread->start();
 	}
 
 	~Module()
@@ -82,6 +78,12 @@ struct Module: public interface::Module, public client_file::Interface
 				Event::t("network:packet_received/core:request_file"));
 		m_server->sub_event(this,
 				Event::t("network:packet_received/core:all_files_transferred"));
+
+		// Don't start thread in constructor because in there this module is not
+		// guaranteed to be available by server->access_module()
+		m_thread.reset(interface::createThread(new FileWatchThread(this)));
+		m_thread->set_name("client_file/select");
+		m_thread->start();
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
