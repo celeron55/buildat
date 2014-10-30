@@ -2,6 +2,8 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #pragma once
 #include "core/types.h"
+#include "interface/debug.h"
+#include <list>
 
 namespace interface
 {
@@ -14,6 +16,11 @@ namespace interface
 		virtual void run(interface::Thread *thread) = 0;
 	};
 
+	struct ThreadBacktrace {
+		ss_ thread_name;
+		interface::debug::StoredBacktrace bt;
+	};
+
 	struct Thread
 	{
 		virtual ~Thread(){}
@@ -23,6 +30,14 @@ namespace interface
 		virtual void request_stop() = 0;
 		virtual bool stop_requested() = 0;
 		virtual void join() = 0;
+
+		// Debugging interface (not thread-safe; access only from thread itself)
+		virtual ss_ get_name() = 0;
+		virtual std::list<ThreadBacktrace>& ref_backtraces() = 0;
+		virtual void set_caller_thread(Thread *thread) = 0;
+		virtual Thread* get_caller_thread() = 0;
+
+		static Thread* get_current_thread();
 	};
 
 	Thread* createThread(ThreadedThing *thing);

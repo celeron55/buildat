@@ -2,11 +2,9 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/thread.h"
 #include "interface/mutex.h"
-//#include "interface/semaphore.h"
 #include "interface/debug.h"
 #include "core/log.h"
 #include <c55/os.h>
-#include <deque>
 #ifdef _WIN32
 	#include "ports/windows_compat.h"
 #else
@@ -16,6 +14,13 @@
 #define MODULE "thread"
 
 namespace interface {
+
+ThreadLocalKey g_current_thread_key;
+
+Thread* Thread::get_current_thread()
+{
+	return (Thread*)g_current_thread_key.get();
+}
 
 int g_thread_name_counter = 0;
 interface::Mutex g_thread_name_counter_mutex;
@@ -29,12 +34,14 @@ struct CThread: public Thread
 	ThreadedThing *m_thing;
 	pthread_t m_thread;
 	bool m_thread_exists = false;
-	//interface::Semaphore m_thread_exit_sem;
+
+	// Debug data
+	std::list<ThreadBacktrace> m_backtraces;
+	Thread *m_caller_thread = nullptr;
 
 	CThread(ThreadedThing *thing)
 	{
 		m_thing = thing;
-		//m_thread_exit_sem.post();
 	}
 
 	~CThread()
@@ -46,15 +53,17 @@ struct CThread: public Thread
 			log_e(MODULE, "Thread %p (%s) destructed but not stopped",
 					this, cs(m_name));
 		}
-		/*request_stop();
-		join();*/
-		//m_thread_exit_sem.wait();
 		delete m_thing;
 	}
 
 	static void* run_thread(void *arg)
 	{
 		CThread *thread = (CThread*)arg;
+
+		// Set pointer in thread-local storage
+		g_current_thread_key.set(thread);
+
+		// Get name from parameter
 		ss_ thread_name;
 		{
 			interface::MutexScope ms(thread->m_mutex);
@@ -62,7 +71,7 @@ struct CThread: public Thread
 		}
 		log_d(MODULE, "Thread started: %p (%s)", thread, cs(thread_name));
 
-		// Set name
+		// Set thread name
 		if(!thread_name.empty()){
 			ss_ limited_name = thread_name.size() <= 15 ?
 					thread_name : thread_name.substr(0, 15);
@@ -85,11 +94,23 @@ struct CThread: public Thread
 		} catch(std::exception &e){
 			log_w(MODULE, "ThreadThing of thread %p (%s) failed: %s",
 					arg, cs(thread_name), e.what());
-			interface::debug::StoredBacktrace bt;
-			interface::debug::get_exception_backtrace(bt);
-			interface::debug::log_backtrace(bt,
-					"Backtrace in ThreadThing("+thread_name+") for "+
-							bt.exception_name+"(\""+e.what()+"\")");
+			if(!thread->m_backtraces.empty()){
+				ss_ ex_name;
+				for(const interface::ThreadBacktrace &bt_step :
+						thread->m_backtraces){
+					if(!bt_step.bt.exception_name.empty())
+						ex_name = bt_step.bt.exception_name;
+					interface::debug::log_backtrace(bt_step.bt,
+							"Backtrace in M["+bt_step.thread_name+"] for "+
+									ex_name+"(\""+e.what()+"\")");
+				}
+			} else {
+				interface::debug::StoredBacktrace bt;
+				interface::debug::get_exception_backtrace(bt);
+				interface::debug::log_backtrace(bt,
+						"Backtrace in ThreadThing("+thread_name+") for "+
+								bt.exception_name+"(\""+e.what()+"\")");
+			}
 		}
 
 		log_d(MODULE, "Thread %p (%s) exit", arg, cs(thread_name));
@@ -97,7 +118,6 @@ struct CThread: public Thread
 			interface::MutexScope ms(thread->m_mutex);
 			thread->m_running = false;
 		}
-		//thread->m_thread_exit_sem.post();
 		pthread_exit(NULL);
 	}
 
@@ -115,7 +135,6 @@ struct CThread: public Thread
 
 	void start()
 	{
-		//m_thread_exit_sem.wait();
 		if(m_name.empty()){
 			// Generate a name
 			interface::MutexScope ms(g_thread_name_counter_mutex);
@@ -167,6 +186,29 @@ struct CThread: public Thread
 			pthread_join(m_thread, NULL);
 			m_thread_exists = false;
 		}
+	}
+
+	// Debugging interface (not thread-safe; access only from thread itself)
+
+	ss_ get_name()
+	{
+		interface::MutexScope ms(m_mutex);
+		return m_name;
+	}
+
+	std::list<ThreadBacktrace>& ref_backtraces()
+	{
+		return m_backtraces;
+	}
+
+	void set_caller_thread(Thread *thread)
+	{
+		m_caller_thread = thread;
+	}
+
+	Thread* get_caller_thread()
+	{
+		return m_caller_thread;
 	}
 };
 

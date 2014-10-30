@@ -67,7 +67,6 @@ struct ModuleContainer
 	// Allows directly executing code in the module thread
 	const std::function<void(interface::Module*)> *direct_cb = nullptr;
 	std::exception_ptr direct_cb_exception = nullptr;
-	ModuleContainer *direct_cb_caller_mc = nullptr;
 	// The actual event queue
 	std::deque<Event> event_queue; // Push back, pop front
 	// Protects direct_cb and event_queue
@@ -79,14 +78,10 @@ struct ModuleContainer
 	// post() when direct_cb becomes free, wait() for that to happen
 	interface::Semaphore direct_cb_free_sem;
 
-	// Holds the backtraces along the way of a direct callback chain initiated
-	// by this module. Cleared when beginning to execute a direct callback. Read
-	// when event() (and maybe something else) returns an uncatched exception.
-	struct BacktraceStep {
-		ss_ module_name; // From which thread this backtrace is
-		interface::debug::StoredBacktrace bt;
-	};
-	std::list<ModuleContainer::BacktraceStep> direct_cb_exception_backtraces;
+	// NOTE: thread-ref_backtraces() Holds the backtraces along the way of a
+	// direct callback chain initiated by this module. Cleared when beginning to
+	// execute a direct callback. Read when event() (and maybe something else)
+	// returns an uncatched exception.
 
 	ModuleContainer(interface::Server *server = nullptr,
 			interface::ThreadLocalKey *thread_local_key = NULL,
@@ -200,8 +195,8 @@ struct ModuleContainer
 					cs(info.name));
 			direct_cb = &cb;
 			direct_cb_exception = nullptr;
-			direct_cb_caller_mc = caller_mc;
-			direct_cb_exception_backtraces.clear();
+			thread->set_caller_thread(interface::Thread::get_current_thread());
+			thread->ref_backtraces().clear();
 			event_queue_sem.post();
 		}
 		log_t(MODULE, "execute_direct_cb[%s]: Waiting for execution to finish",
@@ -215,7 +210,7 @@ struct ModuleContainer
 		// Grab execution result
 		std::exception_ptr eptr = direct_cb_exception;
 		direct_cb_exception = nullptr; // Not to be used anymore
-		direct_cb_caller_mc = nullptr; // Not used anymore
+		thread->set_caller_thread(nullptr);
 		// Set direct_cb to be free again
 		direct_cb_free_sem.post();
 		// Handle execution result
@@ -323,21 +318,24 @@ void ModuleThread::handle_direct_cb(
 			// then determines the final result of the exception.
 			eptr = std::current_exception();
 
-			// If called from a module
-			if(mc->direct_cb_caller_mc){
-				// Find out the original MC that initiated this direct_cb chain
-				ModuleContainer *orig_mc = mc->direct_cb_caller_mc;
-				while(orig_mc->direct_cb_caller_mc){
-					orig_mc = orig_mc->direct_cb_caller_mc;
+			// If called from another thread
+			interface::Thread *current_thread =
+					interface::Thread::get_current_thread();
+			if(current_thread->get_caller_thread()){
+				// Find out the original thread that initiated this direct_cb chain
+				interface::Thread *orig_thread =
+						current_thread->get_caller_thread();
+				while(orig_thread->get_caller_thread()){
+					orig_thread = orig_thread->get_caller_thread();
 				}
 
 				// Insert exception backtrace to original chain initiator's
 				// backtrace list, IF the list is empty
-				if(orig_mc->direct_cb_exception_backtraces.empty()){
-					ModuleContainer::BacktraceStep bt_step;
-					bt_step.module_name = mc->info.name; // Current module name
+				if(orig_thread->ref_backtraces().empty()){
+					interface::ThreadBacktrace bt_step;
+					bt_step.thread_name = current_thread->get_name();
 					interface::debug::get_exception_backtrace(bt_step.bt);
-					orig_mc->direct_cb_exception_backtraces.push_back(bt_step);
+					orig_thread->ref_backtraces().push_back(bt_step);
 				}
 			}
 		}
@@ -369,14 +367,14 @@ void ModuleThread::handle_event(Event &event)
 					"failed: "+e.what());
 			log_w(MODULE, "M[%s]->event() failed: %s",
 					cs(mc->info.name), e.what());
-			if(!mc->direct_cb_exception_backtraces.empty()){
+			if(!mc->thread->ref_backtraces().empty()){
 				ss_ ex_name;
-				for(const ModuleContainer::BacktraceStep &bt_step :
-						mc->direct_cb_exception_backtraces){
+				for(const interface::ThreadBacktrace &bt_step :
+						mc->thread->ref_backtraces()){
 					if(!bt_step.bt.exception_name.empty())
 						ex_name = bt_step.bt.exception_name;
 					interface::debug::log_backtrace(bt_step.bt,
-							"Backtrace in M["+bt_step.module_name+"] for "+
+							"Backtrace in M["+bt_step.thread_name+"] for "+
 									ex_name+"(\""+e.what()+"\")");
 				}
 			} else {
@@ -1039,30 +1037,33 @@ struct CState: public State, public interface::Server
 		bool ok = mc->execute_direct_cb(cb, eptr, caller_mc);
 		(void)ok; // Unused
 		if(eptr){
-			// If not being called by a module thread, there's nowhere we can
-			// store the backtrace (and it wouldn't make sense anyway as there
-			// is no callback chain)
-			if(caller_mc == nullptr){
+			interface::Thread *current_thread =
+					interface::Thread::get_current_thread();
+
+			// If not being called by a thread, there's nowhere we can store the
+			// backtrace (and it wouldn't make sense anyway as there is no
+			// callback chain)
+			if(current_thread == nullptr){
 				std::rethrow_exception(eptr);
 			}
 
-			// NOTE: In each ModuleContainer there is a pointer to the
-			//       ModuleContainer that is currently doing a direct call, or
-			//       nullptr if a direct call is not being executed.
+			// NOTE: In each Thread there is a pointer to the Thread that is
+			//       currently doing a direct call, or nullptr if a direct call
+			//       is not being executed.
 			// NOTE: The parent callers in the chain cannot be deleted while
 			//       this function is executing so we can freely access them.
 
-			// Get the original MC that initiated this direct_cb chain
-			ModuleContainer *orig_mc = caller_mc;
-			while(orig_mc->direct_cb_caller_mc){
-				orig_mc = orig_mc->direct_cb_caller_mc;
+			// Find out the original thread that initiated this direct_cb chain
+			interface::Thread *orig_thread = current_thread;
+			while(orig_thread->get_caller_thread()){
+				orig_thread = orig_thread->get_caller_thread();
 			}
 
 			// Insert backtrace to original chain initiator's backtrace list
-			ModuleContainer::BacktraceStep bt_step;
-			bt_step.module_name = caller_mc->info.name; // Caller module name
+			interface::ThreadBacktrace bt_step;
+			bt_step.thread_name = current_thread->get_name();
 			interface::debug::get_current_backtrace(bt_step.bt);
-			orig_mc->direct_cb_exception_backtraces.push_back(bt_step);
+			orig_thread->ref_backtraces().push_back(bt_step);
 
 			// NOTE: When an exception comes uncatched from module->event(), the
 			//       direct_cb backtrace stack can be logged after the backtrace
