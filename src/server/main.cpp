@@ -10,6 +10,7 @@
 #include "interface/server.h"
 #include "interface/debug.h"
 #include "interface/mutex.h"
+#include "interface/os.h"
 #include <c55/getopt.h>
 #include <c55/os.h>
 #ifdef _WIN32
@@ -20,6 +21,7 @@
 #endif
 #include <iostream>
 #include <climits>
+#include <cstdlib> // srand()
 #include <signal.h>
 #include <string.h> // strerror()
 #include <time.h> // struct timeval
@@ -70,6 +72,8 @@ void basic_init()
 
 	interface::debug::SigConfig debug_sig_config;
 	interface::debug::init_signal_handlers(debug_sig_config);
+
+	srand(interface::os::get_timeofday_us());
 }
 
 int main(int argc, char *argv[])

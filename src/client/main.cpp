@@ -7,8 +7,10 @@
 #include "client/config.h"
 #include "client/state.h"
 #include "client/app.h"
+#include "interface/os.h"
 #include <c55/getopt.h>
 #include <Context.h>
+#include <cstdlib> // srand()
 #include <signal.h>
 #define MODULE "__main"
 namespace magic = Urho3D;
@@ -50,6 +52,8 @@ void basic_init()
 
 	log_init();
 	log_set_max_level(CORE_VERBOSE);
+
+	srand(interface::os::get_timeofday_us());
 }
 
 int main(int argc, char *argv[])
