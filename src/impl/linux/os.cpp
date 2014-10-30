@@ -9,7 +9,7 @@
 namespace interface {
 namespace os {
 
-int64_t get_timeofday_us()
+int64_t time_us()
 {
 	struct timeval tv;
 	gettimeofday(&tv, nullptr);

@@ -53,7 +53,7 @@ void basic_init()
 	log_init();
 	log_set_max_level(CORE_VERBOSE);
 
-	srand(interface::os::get_timeofday_us());
+	srand(interface::os::time_us());
 }
 
 int main(int argc, char *argv[])

@@ -82,7 +82,7 @@ struct Module: public interface::Module, public main_context::Interface
 	Module(interface::Server *server):
 		interface::Module(MODULE),
 		m_server(server),
-		profiler_last_print_us(interface::os::get_timeofday_us())
+		profiler_last_print_us(interface::os::time_us())
 	{
 		log_d(MODULE, "main_context construct");
 	}
@@ -171,7 +171,7 @@ struct Module: public interface::Module, public main_context::Interface
 		m_engine->SetNextTimeStep(event.dtime);
 		m_engine->RunFrame();
 
-		uint64_t current_us = interface::os::get_timeofday_us();
+		uint64_t current_us = interface::os::time_us();
 		Profiler *p = m_context->GetSubsystem<Profiler>();
 		if(p && profiler_last_print_us < current_us - 10000000){
 			profiler_last_print_us = current_us;

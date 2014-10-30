@@ -7,7 +7,7 @@ namespace interface
 {
 	namespace os
 	{
-		int64_t get_timeofday_us();
+		int64_t time_us();
 		void sleep_us(int us);
 		ss_ get_current_exe_path();
 	}

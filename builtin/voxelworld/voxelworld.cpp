@@ -54,12 +54,12 @@ struct ChunkBuffer
 	ChunkBuffer(){}
 	void timer_reset(const pv::Vector3DInt32 &chunk_p_){
 		chunk_p = chunk_p_;
-		last_accessed_us = interface::os::get_timeofday_us();
+		last_accessed_us = interface::os::time_us();
 	}
 	bool unload_if_old(int64_t timeout_us){ // True if not loaded
 		if(!volume)
 			return true;
-		if(interface::os::get_timeofday_us() < last_accessed_us + timeout_us)
+		if(interface::os::time_us() < last_accessed_us + timeout_us)
 			return false;
 		log_t(MODULE, "Unloading chunk " PV3I_FORMAT, PV3I_PARAMS(chunk_p));
 		volume.reset();

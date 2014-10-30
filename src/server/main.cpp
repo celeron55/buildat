@@ -73,7 +73,7 @@ void basic_init()
 	interface::debug::SigConfig debug_sig_config;
 	interface::debug::init_signal_handlers(debug_sig_config);
 
-	srand(interface::os::get_timeofday_us());
+	srand(interface::os::time_us());
 }
 
 int main(int argc, char *argv[])

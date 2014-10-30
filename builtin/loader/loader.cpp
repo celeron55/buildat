@@ -418,12 +418,12 @@ struct Module: public interface::Module, public loader::Interface
 		if(event.name == "loader")
 			return;
 		m_modules_to_reload.insert(event.name);
-		m_last_module_modification_time = interface::os::get_timeofday_us();
+		m_last_module_modification_time = interface::os::time_us();
 	}
 
 	void on_tick(const interface::TickEvent &event)
 	{
-		int64_t t = interface::os::get_timeofday_us();
+		int64_t t = interface::os::time_us();
 		if(!m_modules_to_reload.empty() &&
 				t > m_last_module_modification_time + 1000000){
 			for(const ss_ &name : m_modules_to_reload){
