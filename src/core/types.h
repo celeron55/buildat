@@ -66,7 +66,9 @@ struct Exception: public std::exception {
 	}
 };
 #define DEFINE_EXCEPTION(name, base) struct name: public base \
-{name(const ss_ &msg = ""): base(ss_()+#name+msg){}}
+{name(const ss_ &msg): base(msg){}}
+
+DEFINE_EXCEPTION(NullptrCatch, Exception);
 
 static inline ss_ itos(int64_t i){
 	char buf[22];
@@ -152,13 +154,13 @@ static inline cc_* cs(const T &v){
 template<typename T>
 static inline T* check(T *v){
 	if(v == nullptr)
-		throw Exception("check(): nullptr");
+		throw NullptrCatch("check(): nullptr");
 	return v;
 }
 template<typename T>
 static inline const T* check(const T *v){
 	if(v == nullptr)
-		throw Exception("check(): nullptr");
+		throw NullptrCatch("check(): nullptr");
 	return v;
 }
 

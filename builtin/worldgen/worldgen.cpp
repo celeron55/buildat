@@ -94,22 +94,27 @@ struct CInstance: public worldgen::Instance
 	//       queued but instead sectors get queued in the event queue.
 	void generate_next_section()
 	{
-		if(!m_enabled)
-			throw Exception("generate_next_section(): Not enabled");
-		if(m_queued_sections.empty())
-			return;
-		const pv::Vector3DInt16 section_p = m_queued_sections.front();
-		m_queued_sections.pop_front();
+		try {
+			if(!m_enabled)
+				throw Exception("generate_next_section(): Not enabled");
+			if(m_queued_sections.empty())
+				return;
+			const pv::Vector3DInt16 section_p = m_queued_sections.front();
+			m_queued_sections.pop_front();
 
-		log_v(MODULE, "Generating section (%i, %i, %i); queue size: %zu",
-				section_p.getX(), section_p.getY(), section_p.getZ(),
-				m_queued_sections.size());
+			log_v(MODULE, "Generating section (%i, %i, %i); queue size: %zu",
+					section_p.getX(), section_p.getY(), section_p.getZ(),
+					m_queued_sections.size());
 
-		if(m_generator)
-			m_generator->generate_section(m_server, m_scene_ref, section_p);
+			if(m_generator)
+				m_generator->generate_section(m_server, m_scene_ref, section_p);
 
-		m_server->emit_event("worldgen:queue_modified",
-				new QueueModifiedEvent(m_scene_ref, m_queued_sections.size()));
+			m_server->emit_event("worldgen:queue_modified",
+					new QueueModifiedEvent(m_scene_ref, m_queued_sections.size()));
+		} catch(NullptrCatch &e){
+			// Something was probably deleted or unloaded
+			log_v(MODULE, "NullptrCatch: %s", e.what());
+		}
 	}
 
 	// Interface

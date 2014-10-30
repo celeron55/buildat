@@ -217,7 +217,7 @@ struct Module: public interface::Module, public main_context::Interface
 	{
 		Scene *scene = find_scene(ref);
 		if(!scene)
-			throw Exception("check_scene(): Scene not found");
+			throw NullptrCatch("check_scene(): Scene not found");
 		return scene;
 	}
 

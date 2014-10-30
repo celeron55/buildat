@@ -315,7 +315,7 @@ void ModuleThread::handle_direct_cb(
 			log_t(MODULE, "M[%s] ~direct_cb(): Executed",
 					cs(mc->info.name));
 		} catch(...){
-			log_v(MODULE, "M[%s] ~direct_cb() failed (exception)",
+			log_t(MODULE, "M[%s] ~direct_cb() failed (exception)",
 					cs(mc->info.name));
 			// direct_cb() exception should not directly shutdown the
 			// server; instead they are passed to the caller. Eventually
