@@ -183,9 +183,9 @@ struct SpatialUpdateQueue
 				return;
 			} else {
 				// New item is more important
-				m_value_set.remove(item.value);
 				m_queue.erase(*itp);
 				m_queue_length--;
+				m_value_set.remove(item.value);
 			}
 		}
 
