@@ -22,6 +22,18 @@ void log_exception_backtrace(const ss_ &title)
 	log_i(MODULE, "Backtrace logging not implemented on Windows");
 }
 
+void get_current_backtrace(StoredBacktrace &result)
+{
+}
+
+void get_exception_backtrace(StoredBacktrace &result)
+{
+}
+
+void log_backtrace(const StoredBacktrace &result, const ss_ &title)
+{
+}
+
 }
 }
 // vim: set noet ts=4 sw=4:

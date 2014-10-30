@@ -137,6 +137,7 @@ static void log_backtrace(void* const *trace, int trace_size, const ss_ &title)
 	// The first stack frame points to this functiton
 	backtrace_buffer_len = 0;
 	bt_print("\n  %s", cs(title));
+	int first_real_i = 1;
 	for(int i = 1; i < trace_size; i++){
 		char cmdbuf[500];
 		// Parse symbol to get file name
@@ -164,11 +165,20 @@ static void log_backtrace(void* const *trace, int trace_size, const ss_ &title)
 				address, cs(file_path));
 		ss_ addr2line_output = exec_get_stdout_without_newline(cmdbuf);
 
+		// Clean up the beginning of the backtrace (for whatever reason there
+		// often seems to be two basic_string-related lines at the beginnong of
+		// the backtrace)
+		if(i <= 2 && i <= first_real_i &&
+				addr2line_output.find("/basic_string.h") != ss_::npos){
+			first_real_i = i + 1;
+			continue;
+		}
+
 		if(addr2line_output.size() > 4){
-			bt_print("    #%i  %s", i-1, cs(addr2line_output));
+			bt_print("    #%i  %s", i-first_real_i, cs(addr2line_output));
 			log_d(MODULE, "    = %s", cs(cppfilt_symbol));
 		} else {
-			bt_print("    #%i  %s", i-1, cs(cppfilt_symbol));
+			bt_print("    #%i  %s", i-first_real_i, cs(cppfilt_symbol));
 		}
 	}
 
@@ -222,6 +232,26 @@ extern "C" {
 void log_exception_backtrace(const ss_ &title)
 {
 	log_backtrace(last_exception_frames, last_exception_num_frames, title);
+}
+
+void get_current_backtrace(StoredBacktrace &result)
+{
+	result.exception_name.clear();
+	result.num_frames = backtrace(result.frames, 16);
+}
+
+void get_exception_backtrace(StoredBacktrace &result)
+{
+	result.exception_name = last_exception_name;
+	result.num_frames = last_exception_num_frames;
+	for(int i = 0; i < result.num_frames; i++){
+		result.frames[i] = last_exception_frames[i];
+	}
+}
+
+void log_backtrace(const StoredBacktrace &result, const ss_ &title)
+{
+	log_backtrace(result.frames, result.num_frames, title);
 }
 
 }

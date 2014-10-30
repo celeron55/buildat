@@ -103,10 +103,14 @@ struct ModuleContainer
 			thread->start();
 		}
 		// Initialize in thread
+		std::exception_ptr eptr;
 		bool ok = execute_direct_cb([&](interface::Module *module){
 			module->init();
-		});
+		}, eptr);
 		(void)ok; // Ignored; fails generally on SIGINT at statup
+		if(eptr){
+			std::rethrow_exception(eptr);
+		}
 	}
 	void thread_request_stop(){
 		interface::MutexScope ms(mutex);
@@ -152,7 +156,8 @@ struct ModuleContainer
 		module->event(event.type, event.p.get());
 	}
 	// If returns false, the module thread is stopping and cannot be called
-	bool execute_direct_cb(const std::function<void(interface::Module*)> &cb){
+	bool execute_direct_cb(const std::function<void(interface::Module*)> &cb,
+			std::exception_ptr &result_exception){
 		log_t(MODULE, "execute_direct_cb[%s]: Waiting for direct_cb to be free",
 				cs(info.name));
 		direct_cb_free_sem.wait(); // Wait for direct_cb to be free
@@ -195,12 +200,16 @@ struct ModuleContainer
 					" exception", cs(info.name));
 			/*interface::debug::log_current_backtrace(
 					"Backtrace for M["+info.name+"]'s caller:");*/
-			std::rethrow_exception(eptr);
+			interface::debug::StoredBacktrace bt;
+			interface::debug::get_current_backtrace(bt);
+			interface::debug::log_backtrace(bt, 
+					"Backtrace for M["+info.name+"]'s caller:");
+			result_exception = eptr;
 		} else {
 			log_t(MODULE, "execute_direct_cb[%s]: Execution finished",
 					cs(info.name));
-			return true;
 		}
+		return true;
 	}
 };
 
@@ -966,13 +975,12 @@ struct CState: public State, public interface::Server
 		}
 
 		// Execute callback in module thread
-		bool ok = mc->execute_direct_cb(cb);
+		std::exception_ptr eptr;
+		bool ok = mc->execute_direct_cb(cb, eptr);
 		(void)ok; // Unused
-		/*if(!ok && !caller_module_name.empty()){
-			throw interface::TargetModuleStopped("access_module(): Module \""+
-					module_name+"\" is stopping (called by \""+
-					caller_module_name+"\")");
-		}*/
+		if(eptr){
+			std::rethrow_exception(eptr);
+		}
 		return true;
 	}
 
