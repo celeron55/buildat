@@ -4,6 +4,7 @@
 #include "core/log.h"
 #include "core/config.h"
 #include "boot/autodetect.h"
+#include "boot/cmem.h"
 #include "server/config.h"
 #include "server/state.h"
 #include "interface/server.h"
@@ -51,6 +52,8 @@ void signal_handler_init()
 
 void basic_init()
 {
+	boot::buildat_mem_libc_enable();
+
 	signal_handler_init();
 
 	// Force '.' as decimal point

@@ -3,6 +3,7 @@
 #include "core/types.h"
 #include "core/log.h"
 #include "boot/autodetect.h"
+#include "boot/cmem.h"
 #include "client/config.h"
 #include "client/state.h"
 #include "client/app.h"
@@ -34,6 +35,8 @@ void signal_handler_init()
 
 void basic_init()
 {
+	boot::buildat_mem_libc_enable();
+
 	signal_handler_init();
 
 	// Force '.' as decimal point

@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/debug.h"
 #include "interface/mutex.h"
+#include "boot/cmem.h"
 #include "core/log.h"
 #include <c55/string_util.h>
 #include <stdexcept>
@@ -58,7 +59,7 @@ static void* get_library_executable_address(const ss_ &lib_path)
 	//log_v(MODULE, "address_s=\"%s\"", cs(address_s));
 	if(address_s.empty())
 		return (void*)0x0;
-	void *address = (void*)strtoul(address_s.c_str(), NULL, BACKTRACE_SIZE);
+	void *address = (void*)strtoul(address_s.c_str(), NULL, 16);
 	return address;
 }
 
@@ -317,6 +318,10 @@ void log_backtrace_chain(const std::list<ThreadBacktrace> &chain,
 	log_i(MODULE, "%s", backtrace_buffer);
 }
 
+/*************************************************************************
+ * Signal handling
+ *************************************************************************/
+
 // Used for signals because a signal often occurs inside core/log's mutex
 // synchronization, causing a deadlock. Also, does not allocate new memory.
 static void stderr_backtrace(void* const *trace, int trace_size, int sig)
@@ -344,6 +349,7 @@ static std::atomic_int g_signal_handlers_active(0);
 
 static void debug_sighandler(int sig, siginfo_t *info, void *secret)
 {
+	// Make sure we're not handling a signal inside a signal handler
 	int num_handlers_active = g_signal_handlers_active.fetch_add(1);
 	if(num_handlers_active != 0){
 		// Get out of here, we're in deep trouble
@@ -351,25 +357,21 @@ static void debug_sighandler(int sig, siginfo_t *info, void *secret)
 		exit(1);
 	}
 
-	log_disable_bloat(); // First get this out of the way
+	// Disable libc memory allocation (and use the static memory pool)
+	boot::buildat_mem_libc_disable();
+	// Disable worst memory allocation stuff in logging
+	log_disable_bloat();
 
 	// NOTE: Do not use log in here, because a signal can occur inside the
 	//       logging functions too
 
 	ucontext_t *uc = (ucontext_t*)secret;
-	bool malloc_might_not_work = false;
 	fprintf(stderr, "\n");
 	if(sig == SIGSEGV){
 		fprintf(stderr, "Crash: SIGSEGV: Address %p (executing %p)\n",
 				info->si_addr, (void*)uc->uc_mcontext.gregs[REG_EIP]);
-		// If segfault isn't a nullptr dereference, do not fetch symbols; it
-		// would just cause a deadlock in glibc (due to malloc mutex)
-		if(info->si_addr != nullptr)
-			malloc_might_not_work = true;
 	} else if(sig == SIGABRT){
 		fprintf(stderr, "Crash: SIGABRT\n");
-		// glibc SIGABRT is a can of worms
-		malloc_might_not_work = true;
 	} else {
 		fprintf(stderr, "Crash: Signal %d\n", sig);
 	}
@@ -379,25 +381,9 @@ static void debug_sighandler(int sig, siginfo_t *info, void *secret)
 	// Overwrite sigaction with caller's address
 	trace[1] = (void*) uc->uc_mcontext.gregs[REG_EIP];
 
-	if(malloc_might_not_work){
-		// Can't use backtrace_symbols() due to whatever situation we're in.
-		// Just print the symbols directly to stderr (fd=2).
-		backtrace_symbols_fd(trace, trace_size, 2);
-		fprintf(stderr, "\n");
-		fprintf(stderr, "Will not attempt to print the backtrace with symbols.\n");
-		fprintf(stderr, "\n");
-		/*fprintf(stderr, "\n");
-		fprintf(stderr, "Attempting to print the backtrace with symbols - if it"
-				" does not work, you will see some kind of a crash instead:\n");
-		fprintf(stderr, "Backtrace:\n");
-		stderr_backtrace(trace, trace_size, sig);*/
-	} else {
-		stderr_backtrace(trace, trace_size, sig);
-	}
+	stderr_backtrace(trace, trace_size, sig);
 
 	g_signal_handlers_active--;
-	// In case of SIGSEGV or SIGABRT, all is fucked and exit() can deadlock due
-	// to not being able to use malloc(), but whatever...
 	exit(1);
 }
 

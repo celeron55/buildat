@@ -115,6 +115,7 @@ set(SERVER_EXE_NAME buildat_server)
 set(BUILDAT_CORE_SRCS
 	src/core/log.cpp
 	src/core/json.cpp
+	src/boot/cmem.c
 	src/boot/autodetect.cpp
 	src/impl/fs.cpp
 	src/impl/event.cpp
