@@ -16,11 +16,6 @@ namespace interface
 		virtual void run(interface::Thread *thread) = 0;
 	};
 
-	struct ThreadBacktrace {
-		ss_ thread_name;
-		interface::debug::StoredBacktrace bt;
-	};
-
 	struct Thread
 	{
 		virtual ~Thread(){}
@@ -33,7 +28,7 @@ namespace interface
 
 		// Debugging interface (not thread-safe; access only from thread itself)
 		virtual ss_ get_name() = 0;
-		virtual std::list<ThreadBacktrace>& ref_backtraces() = 0;
+		virtual std::list<debug::ThreadBacktrace>& ref_backtraces() = 0;
 		virtual void set_caller_thread(Thread *thread) = 0;
 		virtual Thread* get_caller_thread() = 0;
 

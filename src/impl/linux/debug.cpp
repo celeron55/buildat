@@ -1,6 +1,7 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/debug.h"
+#include "interface/mutex.h"
 #include "core/log.h"
 #include <c55/string_util.h>
 #include <stdexcept>
@@ -68,7 +69,8 @@ static void* get_library_executable_address(const ss_ &lib_path)
 	#define REG_EIP REG_RIP
 #endif
 
-static void log_backtrace(void* const *trace, int trace_size, const ss_ &title);
+static void log_backtrace(void* const *trace, int trace_size, const ss_ &title,
+		bool use_lock = true);
 
 static void debug_sighandler(int sig, siginfo_t *info, void *secret)
 {
@@ -103,9 +105,18 @@ void init_signal_handlers(const SigConfig &config)
 		sigaction(SIGABRT, &sa, NULL);
 }
 
-static std::atomic_int log_backtrace_spinlock(0);
+static interface::Mutex backtrace_mutex;
+
 static char backtrace_buffer[10000];
 static size_t backtrace_buffer_len = 0;
+
+static void bt_print_newline()
+{
+	backtrace_buffer_len += snprintf(
+			backtrace_buffer + backtrace_buffer_len,
+			sizeof backtrace_buffer - backtrace_buffer_len,
+			"\n");
+}
 
 static void bt_print(const char *fmt, ...)
 {
@@ -116,28 +127,13 @@ static void bt_print(const char *fmt, ...)
 			sizeof backtrace_buffer - backtrace_buffer_len,
 			fmt, va_args);
 	va_end(va_args);
-	backtrace_buffer_len += snprintf(
-			backtrace_buffer + backtrace_buffer_len,
-			sizeof backtrace_buffer - backtrace_buffer_len,
-			"\n");
+	bt_print_newline();
 }
 
-static void log_backtrace(void* const *trace, int trace_size, const ss_ &title)
+static void bt_print_backtrace(char **symbols, void* const *trace, int trace_size,
+		int start_from_i = 1)
 {
-	char **symbols = backtrace_symbols(trace, trace_size);
-
-	// Lock spinlock
-	for(;;){
-		int previous_value = log_backtrace_spinlock.fetch_add(1);
-		if(previous_value == 0)
-			break;
-		log_backtrace_spinlock--;
-	}
-
-	// The first stack frame points to this functiton
-	backtrace_buffer_len = 0;
-	bt_print("\n  %s", cs(title));
-	int first_real_i = 1;
+	int first_real_i = start_from_i;
 	for(int i = 1; i < trace_size; i++){
 		char cmdbuf[500];
 		// Parse symbol to get file name
@@ -182,12 +178,36 @@ static void log_backtrace(void* const *trace, int trace_size, const ss_ &title)
 		}
 	}
 
+	// Remove trailing newline
+	if(backtrace_buffer[backtrace_buffer_len-1] == '\n'){
+		backtrace_buffer[backtrace_buffer_len-1] = 0;
+		backtrace_buffer_len--;
+	}
+}
+
+static void log_backtrace(void* const *trace, int trace_size, const ss_ &title,
+		bool use_lock)
+{
+	char **symbols = backtrace_symbols(trace, trace_size);
+
+	if(use_lock){
+		// Lock spinlock
+		backtrace_mutex.lock();
+	}
+
+	backtrace_buffer_len = 0;
+	bt_print("\n  %s", cs(title));
+	// The first stack frame points to this functiton
+	bt_print_backtrace(symbols, trace, trace_size, 1);
+
 	// Print to log
 	backtrace_buffer[sizeof backtrace_buffer - 1] = 0;
 	log_i(MODULE, "%s", backtrace_buffer);
 
-	// Unlock spinlock
-	log_backtrace_spinlock--;
+	if(use_lock){
+		// Unlock spinlock
+		backtrace_mutex.unlock();
+	}
 }
 
 void log_current_backtrace(const ss_ &title)
@@ -252,6 +272,35 @@ void get_exception_backtrace(StoredBacktrace &result)
 void log_backtrace(const StoredBacktrace &result, const ss_ &title)
 {
 	log_backtrace(result.frames, result.num_frames, title);
+}
+
+void log_backtrace_chain(const std::list<ThreadBacktrace> &chain,
+		const char *reason)
+{
+	interface::MutexScope ms(backtrace_mutex);
+
+	backtrace_buffer_len = 0;
+	ss_ ex_name;
+	bool header_printed = false;
+	for(const interface::debug::ThreadBacktrace &bt_step : chain){
+		if(!bt_step.bt.exception_name.empty()){
+			ex_name = bt_step.bt.exception_name;
+		}
+		if(!header_printed){
+			header_printed = true;
+			if(!ex_name.empty())
+				bt_print("\n  Backtrace for %s(\"%s\"):", cs(ex_name), reason);
+			else
+				bt_print("\n  Backtrace for %s:", reason);
+		}
+		bt_print("  Thread(%s):", cs(bt_step.thread_name));
+		char **symbols = backtrace_symbols(bt_step.bt.frames, bt_step.bt.num_frames);
+		bt_print_backtrace(symbols, bt_step.bt.frames, bt_step.bt.num_frames, 1);
+		bt_print_newline();
+	}
+	// Print to log
+	backtrace_buffer[sizeof backtrace_buffer - 1] = 0;
+	log_i(MODULE, "%s", backtrace_buffer);
 }
 
 }

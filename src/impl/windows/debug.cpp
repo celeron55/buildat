@@ -34,6 +34,11 @@ void log_backtrace(const StoredBacktrace &result, const ss_ &title)
 {
 }
 
+void log_backtrace_chain(const std::list<ThreadBacktrace> &chain,
+		const char *reason)
+{
+}
+
 }
 }
 // vim: set noet ts=4 sw=4:

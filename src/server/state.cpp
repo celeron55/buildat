@@ -332,7 +332,7 @@ void ModuleThread::handle_direct_cb(
 				// Insert exception backtrace to original chain initiator's
 				// backtrace list, IF the list is empty
 				if(orig_thread->ref_backtraces().empty()){
-					interface::ThreadBacktrace bt_step;
+					interface::debug::ThreadBacktrace bt_step;
 					bt_step.thread_name = current_thread->get_name();
 					interface::debug::get_exception_backtrace(bt_step.bt);
 					orig_thread->ref_backtraces().push_back(bt_step);
@@ -368,15 +368,8 @@ void ModuleThread::handle_event(Event &event)
 			log_w(MODULE, "M[%s]->event() failed: %s",
 					cs(mc->info.name), e.what());
 			if(!mc->thread->ref_backtraces().empty()){
-				ss_ ex_name;
-				for(const interface::ThreadBacktrace &bt_step :
-						mc->thread->ref_backtraces()){
-					if(!bt_step.bt.exception_name.empty())
-						ex_name = bt_step.bt.exception_name;
-					interface::debug::log_backtrace(bt_step.bt,
-							"Backtrace in M["+bt_step.thread_name+"] for "+
-									ex_name+"(\""+e.what()+"\")");
-				}
+				interface::debug::log_backtrace_chain(
+						mc->thread->ref_backtraces(), e.what());
 			} else {
 				interface::debug::StoredBacktrace bt;
 				interface::debug::get_exception_backtrace(bt);
@@ -1060,7 +1053,7 @@ struct CState: public State, public interface::Server
 			}
 
 			// Insert backtrace to original chain initiator's backtrace list
-			interface::ThreadBacktrace bt_step;
+			interface::debug::ThreadBacktrace bt_step;
 			bt_step.thread_name = current_thread->get_name();
 			interface::debug::get_current_backtrace(bt_step.bt);
 			orig_thread->ref_backtraces().push_back(bt_step);

@@ -36,7 +36,7 @@ struct CThread: public Thread
 	bool m_thread_exists = false;
 
 	// Debug data
-	std::list<ThreadBacktrace> m_backtraces;
+	std::list<debug::ThreadBacktrace> m_backtraces;
 	Thread *m_caller_thread = nullptr;
 
 	CThread(ThreadedThing *thing)
@@ -95,15 +95,8 @@ struct CThread: public Thread
 			log_w(MODULE, "ThreadThing of thread %p (%s) failed: %s",
 					arg, cs(thread_name), e.what());
 			if(!thread->m_backtraces.empty()){
-				ss_ ex_name;
-				for(const interface::ThreadBacktrace &bt_step :
-						thread->m_backtraces){
-					if(!bt_step.bt.exception_name.empty())
-						ex_name = bt_step.bt.exception_name;
-					interface::debug::log_backtrace(bt_step.bt,
-							"Backtrace in M["+bt_step.thread_name+"] for "+
-									ex_name+"(\""+e.what()+"\")");
-				}
+				interface::debug::log_backtrace_chain(
+						thread->m_backtraces, e.what());
 			} else {
 				interface::debug::StoredBacktrace bt;
 				interface::debug::get_exception_backtrace(bt);
@@ -196,7 +189,7 @@ struct CThread: public Thread
 		return m_name;
 	}
 
-	std::list<ThreadBacktrace>& ref_backtraces()
+	std::list<debug::ThreadBacktrace>& ref_backtraces()
 	{
 		return m_backtraces;
 	}
