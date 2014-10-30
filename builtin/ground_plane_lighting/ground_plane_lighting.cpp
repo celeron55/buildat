@@ -282,7 +282,7 @@ struct CInstance: public ground_plane_lighting::Instance
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
 			voxelworld::Instance *world =
-					ivoxelworld->get_instance(m_scene_ref);
+					check(ivoxelworld->get_instance(m_scene_ref));
 			interface::VoxelRegistry *voxel_reg = world->get_voxel_reg();
 			//const auto &chunk_size_voxels = world->get_chunk_size_voxels();
 			pv::Region chunk_region =
