@@ -57,6 +57,7 @@ struct GenerateThread: public interface::ThreadedThing
 	{}
 
 	void run(interface::Thread *thread);
+	void on_crash(interface::Thread *thread);
 };
 
 struct CInstance: public worldgen::Instance
@@ -259,6 +260,11 @@ void GenerateThread::run(interface::Thread *thread)
 			}
 		});
 	}
+}
+
+void GenerateThread::on_crash(interface::Thread *thread)
+{
+	m_module->m_server->shutdown(1, "GenerateThread crashed");
 }
 
 extern "C" {

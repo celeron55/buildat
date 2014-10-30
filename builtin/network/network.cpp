@@ -37,6 +37,7 @@ struct NetworkThread: public interface::ThreadedThing
 	{}
 
 	void run(interface::Thread *thread);
+	void on_crash(interface::Thread *thread);
 };
 
 struct Peer
@@ -344,6 +345,11 @@ void NetworkThread::run(interface::Thread *thread)
 			}
 		});
 	}
+}
+
+void NetworkThread::on_crash(interface::Thread *thread)
+{
+	m_module->m_server->shutdown(1, "NetworkThread crashed");
 }
 
 extern "C" {

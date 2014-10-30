@@ -92,7 +92,7 @@ struct CThread: public Thread
 			if(thread->m_thing)
 				thread->m_thing->run(thread);
 		} catch(std::exception &e){
-			log_w(MODULE, "ThreadThing of thread %p (%s) failed: %s",
+			log_w(MODULE, "ThreadThing of thread %p (%s) crashed: %s",
 					arg, cs(thread_name), e.what());
 			if(!thread->m_backtraces.empty()){
 				interface::debug::log_backtrace_chain(
@@ -103,6 +103,24 @@ struct CThread: public Thread
 				interface::debug::log_backtrace(bt,
 						"Backtrace in ThreadThing("+thread_name+") for "+
 								bt.exception_name+"(\""+e.what()+"\")");
+			}
+			// Call crash handler
+			try {
+				if(thread->m_thing)
+					thread->m_thing->on_crash(thread);
+			} catch(std::exception &e){
+				log_w(MODULE, "ThreadThing::on_crash() of thread %p (%s)"
+						" crashed: %s", arg, cs(thread_name), e.what());
+				if(!thread->m_backtraces.empty()){
+					interface::debug::log_backtrace_chain(
+							thread->m_backtraces, e.what());
+				} else {
+					interface::debug::StoredBacktrace bt;
+					interface::debug::get_exception_backtrace(bt);
+					interface::debug::log_backtrace(bt,
+							"Backtrace in ThreadThing("+thread_name+") for "+
+									bt.exception_name+"(\""+e.what()+"\")");
+				}
 			}
 		}
 

@@ -43,6 +43,7 @@ struct FileWatchThread: public interface::ThreadedThing
 	{}
 
 	void run(interface::Thread *thread);
+	void on_crash(interface::Thread *thread);
 };
 
 struct Module: public interface::Module, public client_file::Interface
@@ -350,6 +351,11 @@ void FileWatchThread::run(interface::Thread *thread)
 			}
 		});
 	}
+}
+
+void FileWatchThread::on_crash(interface::Thread *thread)
+{
+	m_module->m_server->shutdown(1, "FileWatchThread crashed");
 }
 
 extern "C" {

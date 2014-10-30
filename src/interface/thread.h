@@ -14,6 +14,8 @@ namespace interface
 		virtual ~ThreadedThing(){}
 		// Shall run until finished or until thread->stop_requested()
 		virtual void run(interface::Thread *thread) = 0;
+		// Called if thread crashes due to an uncaught exception or a signal
+		virtual void on_crash(interface::Thread *thread) = 0;
 	};
 
 	struct Thread

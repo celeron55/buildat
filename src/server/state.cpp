@@ -49,6 +49,7 @@ struct ModuleThread: public interface::ThreadedThing
 	{}
 
 	void run(interface::Thread *thread);
+	void on_crash(interface::Thread *thread);
 
 	void handle_direct_cb(
 			const std::function<void(interface::Module*)> *direct_cb);
@@ -83,6 +84,9 @@ struct ModuleContainer
 	// execute a direct callback. Read when event() (and maybe something else)
 	// returns an uncatched exception.
 
+	// Set to true when deleting the module; used for enforcing some limitations
+	bool executing_module_destructor = false;
+
 	ModuleContainer(interface::Server *server = nullptr,
 			interface::ThreadLocalKey *thread_local_key = NULL,
 			interface::Module *module = NULL,
@@ -114,10 +118,9 @@ struct ModuleContainer
 		}
 		// Initialize in thread
 		std::exception_ptr eptr;
-		bool ok = execute_direct_cb([&](interface::Module *module){
+		execute_direct_cb([&](interface::Module *module){
 			module->init();
 		}, eptr, nullptr);
-		(void)ok; // Ignored; fails generally on SIGINT at statup
 		if(eptr){
 			std::rethrow_exception(eptr);
 		}
@@ -168,7 +171,7 @@ struct ModuleContainer
 	// If returns false, the module thread is stopping and cannot be called
 	// NOTE: It's not possible for the caller module to be deleted while this is
 	//       being executed so a pointer to it is fine (which can be nullptr).
-	bool execute_direct_cb(const std::function<void(interface::Module*)> &cb,
+	void execute_direct_cb(const std::function<void(interface::Module*)> &cb,
 			std::exception_ptr &result_exception,
 			ModuleContainer *caller_mc)
 	{
@@ -183,8 +186,25 @@ struct ModuleContainer
 			if(thread->stop_requested()){
 				log_t(MODULE, "execute_direct_cb[%s]: Stop requested; cancelling.",
 						cs(info.name));
-				direct_cb_free_sem.post(); // Let the next ones pass too
-				return false;
+
+				// Let the next ones pass too
+				direct_cb_free_sem.post();
+
+				// Return an exception to make sure the caller doesn't continue
+				// without knowing what it's doing
+				ss_ caller_name = caller_mc ? caller_mc->info.name : "__unknown";
+				/*try {
+					// TODO: Use a more specific exception
+					throw Exception("Target module ["+info.name+"] is stopping"
+							" - called by ["+caller_name+"]");
+				} catch(...){
+					// Return it the exception this way so that the caller can
+					// record the backtrace
+					result_exception = std::current_exception();
+				}
+				return;*/
+				throw Exception("Target module ["+info.name+"] is stopping - "
+						"called by ["+caller_name+"]");
 			}
 		}
 		log_t(MODULE, "execute_direct_cb[%s]: Direct_cb is now free. "
@@ -224,7 +244,6 @@ struct ModuleContainer
 			log_t(MODULE, "execute_direct_cb[%s]: Execution finished",
 					cs(info.name));
 		}
-		return true;
 	}
 };
 
@@ -292,7 +311,15 @@ void ModuleThread::run(interface::Thread *thread)
 		interface::MutexScope ms(mc->mutex);
 		module_moved = std::move(mc->module);
 	}
+	mc->executing_module_destructor = true;
 	module_moved.reset();
+	mc->executing_module_destructor = false;
+}
+
+void ModuleThread::on_crash(interface::Thread *thread)
+{
+	// TODO: Could just restart or something
+	mc->server->shutdown(1, "M["+mc->info.name+"] crashed");
 }
 
 void ModuleThread::handle_direct_cb(
@@ -392,6 +419,7 @@ struct FileWatchThread: public interface::ThreadedThing
 	{}
 
 	void run(interface::Thread *thread);
+	void on_crash(interface::Thread *thread);
 };
 
 struct CState: public State, public interface::Server
@@ -399,6 +427,7 @@ struct CState: public State, public interface::Server
 	bool m_shutdown_requested = false;
 	int m_shutdown_exit_status = 0;
 	ss_ m_shutdown_reason;
+	interface::Mutex m_shutdown_mutex;
 
 	up_<rccpp::Compiler> m_compiler;
 	ss_ m_modules_path;
@@ -540,6 +569,7 @@ struct CState: public State, public interface::Server
 
 	void shutdown(int exit_status, const ss_ &reason)
 	{
+		interface::MutexScope ms(m_shutdown_mutex);
 		if(m_shutdown_requested && exit_status == 0){
 			// Only reset these values for exit values indicating failure
 			return;
@@ -553,6 +583,7 @@ struct CState: public State, public interface::Server
 
 	bool is_shutdown_requested(int *exit_status = nullptr, ss_ *reason = nullptr)
 	{
+		interface::MutexScope ms(m_shutdown_mutex);
 		if(m_shutdown_requested){
 			if(exit_status)
 				*exit_status = m_shutdown_exit_status;
@@ -997,77 +1028,98 @@ struct CState: public State, public interface::Server
 		ModuleContainer *caller_mc =
 				(ModuleContainer*)m_thread_local_mc_key.get();
 
-		sp_<ModuleContainer> mc;
-		{
-			interface::MutexScope ms(m_modules_mutex);
+		try {
+			sp_<ModuleContainer> mc;
+			{
+				interface::MutexScope ms(m_modules_mutex);
 
-			auto it = m_modules.find(module_name);
-			if(it == m_modules.end())
-				throw Exception("access_module(): Module \""+module_name+
-						"\" not found");
-			mc = it->second;
-			if(!mc)
-				throw Exception("access_module(): Module \""+module_name+
-						"\" container is null");
+				auto it = m_modules.find(module_name);
+				if(it == m_modules.end())
+					throw Exception("access_module(): Module \""+module_name+
+							"\" not found");
+				mc = it->second;
+				if(!mc)
+					throw Exception("access_module(): Module \""+module_name+
+							"\" container is null");
 
-			if(caller_mc){
-				log_t(MODULE, "access_module[%s]: Called by \"%s\"",
-						cs(mc->info.name), cs(caller_mc->info.name));
+				if(caller_mc){
+					log_t(MODULE, "access_module[%s]: Called by \"%s\"",
+							cs(mc->info.name), cs(caller_mc->info.name));
 
-				// Throws exception if not valid.
-				// If accessing a module from a nested access_module(), this
-				// function is called from the thread of the nested module,
-				// effectively taking into account the lock hierarchy.
-				check_valid_access_u(mc.get(), caller_mc);
-			} else {
-				log_t(MODULE, "access_module[%s]: Called by something else"
-						" than a module", cs(mc->info.name));
+					// Throws exception if not valid.
+					// If accessing a module from a nested access_module(), this
+					// function is called from the thread of the nested module,
+					// effectively taking into account the lock hierarchy.
+					check_valid_access_u(mc.get(), caller_mc);
+				} else {
+					log_t(MODULE, "access_module[%s]: Called by something else"
+							" than a module", cs(mc->info.name));
+				}
 			}
-		}
 
-		// Execute callback in module thread
-		std::exception_ptr eptr;
-		bool ok = mc->execute_direct_cb(cb, eptr, caller_mc);
-		(void)ok; // Unused
-		if(eptr){
-			interface::Thread *current_thread =
-					interface::Thread::get_current_thread();
+			// Execute callback in module thread
+			std::exception_ptr eptr;
+			mc->execute_direct_cb(cb, eptr, caller_mc);
+			if(eptr){
+				interface::Thread *current_thread =
+						interface::Thread::get_current_thread();
 
-			// If not being called by a thread, there's nowhere we can store the
-			// backtrace (and it wouldn't make sense anyway as there is no
-			// callback chain)
-			if(current_thread == nullptr){
+				// If not being called by a thread, there's nowhere we can store the
+				// backtrace (and it wouldn't make sense anyway as there is no
+				// callback chain)
+				if(current_thread == nullptr){
+					std::rethrow_exception(eptr);
+				}
+
+				// NOTE: In each Thread there is a pointer to the Thread that is
+				//       currently doing a direct call, or nullptr if a direct call
+				//       is not being executed.
+				// NOTE: The parent callers in the chain cannot be deleted while
+				//       this function is executing so we can freely access them.
+
+				// Find out the original thread that initiated this direct_cb chain
+				interface::Thread *orig_thread = current_thread;
+				while(orig_thread->get_caller_thread()){
+					orig_thread = orig_thread->get_caller_thread();
+				}
+
+				// Insert backtrace to original chain initiator's backtrace list
+				interface::debug::ThreadBacktrace bt_step;
+				bt_step.thread_name = current_thread->get_name();
+				interface::debug::get_current_backtrace(bt_step.bt);
+				orig_thread->ref_backtraces().push_back(bt_step);
+
+				// NOTE: When an exception comes uncatched from module->event(), the
+				//       direct_cb backtrace stack can be logged after the backtrace
+				//       gotten from the __cxa_throw catch. The backtrace catched by
+				//       the __cxa_throw wrapper is from the furthermost thread in
+				//       the direct_cb chain, from which the event was just
+				//       propagated downwards (while recording the other backtraces
+				//       like specified here).
+
+				// Re-throw the exception so that the chain gets unwinded (while we
+				// collect backtraces at each step)
 				std::rethrow_exception(eptr);
 			}
-
-			// NOTE: In each Thread there is a pointer to the Thread that is
-			//       currently doing a direct call, or nullptr if a direct call
-			//       is not being executed.
-			// NOTE: The parent callers in the chain cannot be deleted while
-			//       this function is executing so we can freely access them.
-
-			// Find out the original thread that initiated this direct_cb chain
-			interface::Thread *orig_thread = current_thread;
-			while(orig_thread->get_caller_thread()){
-				orig_thread = orig_thread->get_caller_thread();
+		} catch(...){
+			std::exception_ptr eptr = std::current_exception();
+			// If a destructor doesn't catch an exception, the whole program
+			// will abort. So, do not pass exception to destructor.
+			if(caller_mc && caller_mc->executing_module_destructor){
+				try {
+					std::rethrow_exception(eptr);
+				} catch(std::exception &e){
+					log_w(MODULE, "access_module[%s]: Ignoring exception in"
+							" [%s] destructor: \"%s\"", cs(module_name),
+							cs(caller_mc->info.name), e.what());
+				} catch(...){
+					log_w(MODULE, "access_module[%s]: Ignoring exception in"
+							" [%s] destructor", cs(module_name),
+							cs(caller_mc->info.name));
+				}
+				return true;
 			}
-
-			// Insert backtrace to original chain initiator's backtrace list
-			interface::debug::ThreadBacktrace bt_step;
-			bt_step.thread_name = current_thread->get_name();
-			interface::debug::get_current_backtrace(bt_step.bt);
-			orig_thread->ref_backtraces().push_back(bt_step);
-
-			// NOTE: When an exception comes uncatched from module->event(), the
-			//       direct_cb backtrace stack can be logged after the backtrace
-			//       gotten from the __cxa_throw catch. The backtrace catched by
-			//       the __cxa_throw wrapper is from the furthermost thread in
-			//       the direct_cb chain, from which the event was just
-			//       propagated downwards (while recording the other backtraces
-			//       like specified here).
-
-			// Re-throw the exception so that the chain gets unwinded (while we
-			// collect backtraces at each step)
+			// Pass exception to caller normally
 			std::rethrow_exception(eptr);
 		}
 		return true;
@@ -1302,6 +1354,11 @@ void FileWatchThread::run(interface::Thread *thread)
 			}
 		}
 	}
+}
+
+void FileWatchThread::on_crash(interface::Thread *thread)
+{
+	m_server->shutdown(1, "FileWatchThread crashed");
 }
 
 State* createState()
