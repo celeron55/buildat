@@ -85,10 +85,11 @@ struct CThread: public Thread
 		} catch(std::exception &e){
 			log_w(MODULE, "ThreadThing of thread %p (%s) failed: %s",
 					arg, cs(thread_name), e.what());
-			interface::debug::log_exception_backtrace(
-					"Backtrace for ThreadThing("+thread_name+"):");
-			/*interface::debug::log_current_backtrace(
-					"Backtrace for ThreadThing("+thread_name+") (current):");*/
+			interface::debug::StoredBacktrace bt;
+			interface::debug::get_exception_backtrace(bt);
+			interface::debug::log_backtrace(bt,
+					"Backtrace in ThreadThing("+thread_name+") for "+
+							bt.exception_name+"(\""+e.what()+"\")");
 		}
 
 		log_d(MODULE, "Thread %p (%s) exit", arg, cs(thread_name));

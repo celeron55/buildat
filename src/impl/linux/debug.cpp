@@ -176,7 +176,7 @@ static void log_backtrace(void* const *trace, int trace_size, const ss_ &title)
 
 		if(addr2line_output.size() > 4){
 			bt_print("    #%i  %s", i-first_real_i, cs(addr2line_output));
-			log_d(MODULE, "    = %s", cs(cppfilt_symbol));
+			//bt_print("    = %s", cs(cppfilt_symbol));
 		} else {
 			bt_print("    #%i  %s", i-first_real_i, cs(cppfilt_symbol));
 		}
