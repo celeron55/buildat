@@ -3,6 +3,7 @@
 #include "interface/thread_pool.h"
 #include "interface/mutex.h"
 #include "interface/semaphore.h"
+#include "interface/debug.h"
 #include "core/log.h"
 #include <c55/os.h>
 #include <deque>
@@ -80,6 +81,7 @@ struct CThreadPool: public ThreadPool
 				while(!current->thread()) ;
 			} catch(std::exception &e){
 				log_w(MODULE, "Worker task failed: %s", e.what());
+				interface::debug::log_exception_backtrace();
 			}
 			// Push the task to pool's output queue
 			{

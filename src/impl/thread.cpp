@@ -3,6 +3,7 @@
 #include "interface/thread.h"
 #include "interface/mutex.h"
 //#include "interface/semaphore.h"
+#include "interface/debug.h"
 #include "core/log.h"
 #include <c55/os.h>
 #include <deque>
@@ -82,8 +83,9 @@ struct CThread: public Thread
 			if(thread->m_thing)
 				thread->m_thing->run(thread);
 		} catch(std::exception &e){
-			log_w(MODULE, "ThreadThing of thread %p failed: %s",
-					arg, e.what());
+			log_w(MODULE, "ThreadThing of thread %p (%s) failed: %s",
+					arg, cs(thread_name), e.what());
+			interface::debug::log_exception_backtrace();
 		}
 
 		log_d(MODULE, "Thread %p (%s) exit", arg, cs(thread_name));
