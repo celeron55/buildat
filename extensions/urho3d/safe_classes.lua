@@ -675,6 +675,7 @@ function M.define(dst, util)
 					self:RemoveChild(child)
 				end
 			),
+			Remove = util.self_function("Remove", {}, {"UIElement"}),
 			SetName = util.self_function("SetName", {}, {"UIElement", "string"}),
 			SetText = util.self_function("SetText", {}, {"UIElement", "string"}),
 			SetFont = util.self_function("SetFont", {}, {"UIElement", "Font"}),
