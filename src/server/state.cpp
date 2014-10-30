@@ -456,13 +456,15 @@ struct CState: public State, public interface::Server
 
 	void thread_join()
 	{
+		log_v(MODULE, "Waiting: file watch");
 		m_file_watch_thread->join();
 
 		sv_<sp_<ModuleContainer>> mcs = get_modules_in_unload_order();
 
 		// Wait for threads to stop and delete module container references
+		log_v(MODULE, "Waiting: modules");
 		for(sp_<ModuleContainer> &mc : mcs){
-			log_v(MODULE, "Waiting for module to stop: [%s]", cs(mc->info.name));
+			log_d(MODULE, "Waiting for module to stop: [%s]", cs(mc->info.name));
 			mc->thread_join();
 			// Remove our reference to the module container, so that any child
 			// threads it will now delete will not get deadlocked in trying to
