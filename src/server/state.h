@@ -17,12 +17,10 @@ namespace interface
 namespace server
 {
 	struct ServerShutdownRequest: public Exception {
-		ss_ msg;
 		ServerShutdownRequest(const ss_ &msg): Exception(msg){}
 	};
 
 	struct ModuleNotFoundException: public Exception {
-		ss_ msg;
 		ModuleNotFoundException(const ss_ &msg): Exception(msg){}
 	};
 

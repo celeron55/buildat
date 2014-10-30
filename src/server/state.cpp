@@ -193,17 +193,8 @@ struct ModuleContainer
 				// Return an exception to make sure the caller doesn't continue
 				// without knowing what it's doing
 				ss_ caller_name = caller_mc ? caller_mc->info.name : "__unknown";
-				/*try {
-					// TODO: Use a more specific exception
-					throw Exception("Target module ["+info.name+"] is stopping"
-							" - called by ["+caller_name+"]");
-				} catch(...){
-					// Return it the exception this way so that the caller can
-					// record the backtrace
-					result_exception = std::current_exception();
-				}
-				return;*/
-				throw Exception("Target module ["+info.name+"] is stopping - "
+				throw interface::TargetModuleNotAvailable(
+						"Target module ["+info.name+"] is stopping - "
 						"called by ["+caller_name+"]");
 			}
 		}

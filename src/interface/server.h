@@ -50,12 +50,11 @@ namespace interface
 		ModuleUnloadedEvent(const ss_ &name): name(name){}
 	};
 
-	/*// Occurs when trying to access a module using access_module(), but it has
+	// Occurs when trying to access a module using access_module(), but it has
 	// been stopped (and possibly deleted)
-	struct TargetModuleStopped: public Exception {
-		ss_ msg;
-		TargetModuleStopped(const ss_ &msg): Exception(msg){}
-	};*/
+	struct TargetModuleNotAvailable: public Exception {
+		TargetModuleNotAvailable(const ss_ &msg): Exception(msg){}
+	};
 
 	struct Server
 	{
