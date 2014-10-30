@@ -27,6 +27,23 @@
    ...
 }
 {
+   "interface::Event::Private destructor (usually in a shared_ptr, often created inside a random mutex and then deleted in a completely different thread and context)"
+   Helgrind:Race
+   ...
+   fun:_ZNSt19_Sp_counted_deleterIPN9interface5Event7PrivateESt14default_deleteIS2_ESaIvELN9__gnu_cxx12_Lock_policyE2EE10_M_disposeEv
+   ...
+}
+{
+   "Some kind of an exception handling detail"
+   Helgrind:Race
+   ...
+   fun:_Unwind_Resume
+   fun:_ZN9interface7CThread10run_threadEPv
+   ...
+}
+
+
+{
    "Urho3D WorkQueue Complete"
    drd:ConflictingAccess
    ...
@@ -52,5 +69,20 @@
    drd:ConflictingAccess
    ...
    fun:_ZNKSt14default_deleteIN9interface5Event7PrivateEEclEPS2_
+   ...
+}
+{
+   "interface::Event::Private destructor (usually in a shared_ptr, often created inside a random mutex and then deleted in a completely different thread and context)"
+   drd:ConflictingAccess
+   ...
+   fun:_ZNSt19_Sp_counted_deleterIPN9interface5Event7PrivateESt14default_deleteIS2_ESaIvELN9__gnu_cxx12_Lock_policyE2EE10_M_disposeEv
+   ...
+}
+{
+   "Some kind of an exception handling detail"
+   drd:ConflictingAccess
+   ...
+   fun:_Unwind_Resume
+   fun:_ZN9interface7CThread10run_threadEPv
    ...
 }
