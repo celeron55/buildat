@@ -74,3 +74,4 @@ Buildat TODO
 	  what():  access_module(): Module "main" not found
 	- Probably should try building first, and only if it succeeds, then unload
 	  and reload
+- Implement backtraces in Windows: http://stackoverflow.com/questions/16768363/exception-handling-and-stacktrace-under-windows-mingw-gcc
