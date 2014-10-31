@@ -199,6 +199,7 @@ static void generate_urho3d_root_alternatives(sv_<ss_> &roots)
 	generate_buildat_root_alternatives(buildat_roots);
 
 	for(const ss_ &buildat_root : buildat_roots){
+		roots.push_back(buildat_root + "/Urho3D");
 		roots.push_back(buildat_root + "/../Urho3D");
 	}
 }

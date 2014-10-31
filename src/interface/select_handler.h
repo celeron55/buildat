@@ -10,6 +10,7 @@
 	#include <unistd.h> // usleep()
 #endif
 #include <cstring> // strerror()
+#include <cstdlib> // rand()
 
 namespace interface
 {
@@ -26,6 +27,14 @@ namespace interface
 		bool check(int timeout_us, const sv_<int> &sockets,
 				sv_<int> &active_sockets)
 		{
+#ifdef _WIN32
+			// On Windows select() returns an error if no sockets are supplied
+			if(sockets.empty()){
+				usleep(timeout_us);
+				return true;
+			}
+#endif
+
 			struct timeval tv;
 			tv.tv_sec = 0;
 			tv.tv_usec = timeout_us;

@@ -12,6 +12,7 @@
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/vector.hpp>
 #include <cereal/types/tuple.hpp>
+#include <deque>
 #ifdef _WIN32
 	#include "ports/windows_sockets.h"
 	#include "ports/windows_compat.h" // usleep()
@@ -19,7 +20,7 @@
 	#include <sys/socket.h>
 	#include <unistd.h> // usleep()
 #endif
-#include <deque>
+#include <errno.h>
 #define MODULE "network"
 
 using interface::Event;
@@ -218,10 +219,12 @@ struct Module: public interface::Module, public network::Interface
 		char buf[100000];
 		ssize_t r = recv(fd, buf, 100000, 0);
 		if(r == -1){
+#ifdef ECONNRESET // No idea why this isn't defined on MinGW
 			if(errno == ECONNRESET){
 				log_v(MODULE, "Peer %zu: Connection reset by peer", peer.id);
 				return;
 			}
+#endif
 			throw Exception(ss_()+"Receive failed: "+strerror(errno));
 		}
 		if(r == 0){

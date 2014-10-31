@@ -48,11 +48,11 @@ struct CThreadPool: public ThreadPool
 	{
 		Thread *thread = (Thread*)arg;
 		log_d(MODULE, "Worker thread %p start", arg);
+#ifndef _WIN32
 		// Set name
 		if(pthread_setname_np(thread->thread, "buildat:worker")){
 			log_w(MODULE, "Failed to set worker thread %p name", thread);
 		}
-#ifndef _WIN32
 		// Disable all signals
 		sigset_t sigset;
 		sigemptyset(&sigset);

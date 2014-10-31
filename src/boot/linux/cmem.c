@@ -1,3 +1,5 @@
+// http://www.apache.org/licenses/LICENSE-2.0
+// Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #define _GNU_SOURCE // RTLD_NEXT
 #include <stdint.h>
 #include <stdlib.h>

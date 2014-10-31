@@ -115,7 +115,6 @@ set(SERVER_EXE_NAME buildat_server)
 set(BUILDAT_CORE_SRCS
 	src/core/log.cpp
 	src/core/json.cpp
-	src/boot/cmem.c
 	src/boot/autodetect.cpp
 	src/impl/fs.cpp
 	src/impl/event.cpp
@@ -134,11 +133,13 @@ set(BUILDAT_CORE_SRCS
 	src/impl/thread.cpp
 )
 if(WIN32)
+	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/boot/windows/cmem.c)
 	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/windows/file_watch.cpp)
 	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/windows/process.cpp)
 	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/windows/debug.cpp)
 	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/windows/os.cpp)
 else()
+	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/boot/linux/cmem.c)
 	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/linux/file_watch.cpp)
 	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/linux/process.cpp)
 	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/linux/debug.cpp)
@@ -155,6 +156,7 @@ if(WIN32)
 	target_link_libraries(${BUILDAT_CORE_NAME}
 		wsock32
 		ws2_32
+		psapi # Process stuff
 		${ABSOLUTE_PATH_LIBS}
 		${LINK_LIBS_ONLY}
 	)
@@ -252,17 +254,20 @@ if(WIN32)
 
 	install(TARGETS ${BUILDAT_CORE_NAME} DESTINATION "${DST_BIN}")
 
+	# Always copy these DLLs to the same directory as the executables. On the
+	# server, they also exist in the compiler's path, but there really is no
+	# reasonable way of accessing them from there.
+	# Even Rust does it this way: https://github.com/rust-lang/rust/issues/1011
+	install(FILES "${COMPILER_USR_PATH}/bin/libwinpthread-1.dll" DESTINATION "${DST_BIN}")
+	install(FILES "${COMPILER_USR_PATH}/bin/libgcc_s_dw2-1.dll" DESTINATION "${DST_BIN}")
+	install(FILES "${COMPILER_USR_PATH}/bin/libstdc++-6.dll" DESTINATION "${DST_BIN}")
+
 	if(BUILD_CLIENT)
 		install(TARGETS ${CLIENT_EXE_NAME} DESTINATION "${DST_BIN}")
 		install(DIRECTORY "${CMAKE_SOURCE_DIR}/client" DESTINATION "${DST_SHARE}")
 		install(DIRECTORY "${CMAKE_SOURCE_DIR}/extensions" DESTINATION "${DST_SHARE}")
 		install(FILES "${CMAKE_SOURCE_DIR}/util/windows/launch_client.bat" DESTINATION ".")
 		install(FILES "${CMAKE_SOURCE_DIR}/util/windows/wine_launch_client.sh" DESTINATION ".")
-		if(NOT BUILD_SERVER)
-			install(FILES "${COMPILER_USR_PATH}/bin/libwinpthread-1.dll" DESTINATION "${DST_BIN}")
-			install(FILES "${COMPILER_USR_PATH}/bin/libgcc_s_dw2-1.dll" DESTINATION "${DST_BIN}")
-			install(FILES "${COMPILER_USR_PATH}/bin/libstdc++-6.dll" DESTINATION "${DST_BIN}")
-		endif()
 	endif()
 
 	if(BUILD_SERVER)

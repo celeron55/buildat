@@ -18,6 +18,7 @@
 #include "interface/semaphore.h"
 #include "interface/debug.h"
 #include "interface/select_handler.h"
+#include "interface/os.h"
 #include <iostream>
 #include <algorithm>
 #include <fstream>
@@ -624,6 +625,12 @@ struct CState: public State, public interface::Server
 		extra_ldflags += " -lbuildat_core";
 		// Always include these to make life easier
 		extra_ldflags += " -lwsock32 -lws2_32";
+		// Add the path of the current executable to the library search path
+		{
+			ss_ exe_path = interface::os::get_current_exe_path();
+			ss_ exe_dir = interface::fs::strip_file_name(exe_path);
+			extra_ldflags += " -L\""+exe_dir+"\"";
+		}
 #else
 		extra_cxxflags += " "+info.meta.cxxflags_linux;
 		extra_ldflags += " "+info.meta.ldflags_linux;

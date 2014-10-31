@@ -3,8 +3,8 @@
 #include "core/types.h"
 #include "core/log.h"
 #include "core/config.h"
+#include "boot/basic_init.h"
 #include "boot/autodetect.h"
-#include "boot/cmem.h"
 #include "server/config.h"
 #include "server/state.h"
 #include "interface/server.h"
@@ -13,12 +13,6 @@
 #include "interface/os.h"
 #include <c55/getopt.h>
 #include <c55/os.h>
-#ifdef _WIN32
-	#include "ports/windows_sockets.h"
-	#include "ports/windows_compat.h"
-#else
-	#include <unistd.h>
-#endif
 #include <iostream>
 #include <climits>
 #include <cstdlib> // srand()
@@ -52,33 +46,9 @@ void signal_handler_init()
 #endif
 }
 
-void basic_init()
-{
-	boot::buildat_mem_libc_enable();
-
-	signal_handler_init();
-
-	// Force '.' as decimal point
-	try {
-		std::locale::global(std::locale(std::locale(""), "C", std::locale::numeric));
-	} catch(std::runtime_error &e){
-		// Can happen on Wine
-		fprintf(stderr, "Failed to set numeric C++ locale\n");
-	}
-	setlocale(LC_NUMERIC, "C");
-
-	log_init();
-	log_set_max_level(CORE_VERBOSE);
-
-	interface::debug::SigConfig debug_sig_config;
-	interface::debug::init_signal_handlers(debug_sig_config);
-
-	srand(interface::os::time_us());
-}
-
 int main(int argc, char *argv[])
 {
-	basic_init();
+	boot::BasicInitScope basic_init_scope;
 
 	server::Config &config = g_server_config;
 

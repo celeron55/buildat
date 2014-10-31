@@ -2,8 +2,8 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "core/types.h"
 #include "core/log.h"
+#include "boot/basic_init.h"
 #include "boot/autodetect.h"
-#include "boot/cmem.h"
 #include "client/config.h"
 #include "client/state.h"
 #include "client/app.h"
@@ -35,30 +35,9 @@ void signal_handler_init()
 	(void)signal(SIGINT, sigint_handler);
 }
 
-void basic_init()
-{
-	boot::buildat_mem_libc_enable();
-
-	signal_handler_init();
-
-	// Force '.' as decimal point
-	try {
-		std::locale::global(std::locale(std::locale(""), "C", std::locale::numeric));
-	} catch(std::runtime_error &e){
-		// Can happen on Wine
-		fprintf(stderr, "Failed to set numeric C++ locale\n");
-	}
-	setlocale(LC_NUMERIC, "C");
-
-	log_init();
-	log_set_max_level(CORE_VERBOSE);
-
-	srand(interface::os::time_us());
-}
-
 int main(int argc, char *argv[])
 {
-	basic_init();
+	boot::BasicInitScope basic_init_scope;
 
 	client::Config &config = g_client_config;
 

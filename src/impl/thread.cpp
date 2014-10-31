@@ -71,6 +71,7 @@ struct CThread: public Thread
 		}
 		log_d(MODULE, "Thread started: %p (%s)", thread, cs(thread_name));
 
+#ifndef _WIN32
 		// Set thread name
 		if(!thread_name.empty()){
 			ss_ limited_name = thread_name.size() <= 15 ?
@@ -81,7 +82,6 @@ struct CThread: public Thread
 			}
 		}
 
-#ifndef _WIN32
 		// Disable all signals
 		sigset_t sigset;
 		sigemptyset(&sigset);
