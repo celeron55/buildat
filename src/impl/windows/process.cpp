@@ -17,7 +17,14 @@ static ss_ format_last_error()
 	return buf;
 };
 
-int shell_exec(const ss_ &command)
+ss_ get_environment_variable(const ss_ &name)
+{
+	char buf[10000];
+	DWORD len = GetEnvironmentVariable(name.c_str(), buf, sizeof buf);
+	return ss_(buf, len);
+}
+
+int shell_exec(const ss_ &command, const ExecOptions &opts)
 {
 	log_d(MODULE, "shell_exec(\"%s\")", cs(command));
 
@@ -32,6 +39,18 @@ int shell_exec(const ss_ &command)
 	char command_c[50000];
 	snprintf(command_c, 50000, cs(command));
 
+	// The environment block is a null-terminated buffer of null-terminated strings
+	sv_<char> env_block;
+	for(auto &pair : opts.env){
+		const ss_ &name = pair.first;
+		const ss_ &value = pair.second;
+		env_block.insert(env_block.end(), name.c_str(), name.c_str() + name.size());
+		env_block.push_back('=');
+		env_block.insert(env_block.end(), value.c_str(), value.c_str() + value.size());
+		env_block.push_back(0);
+	}
+	env_block.push_back(0);
+
 	if(!CreateProcess(
 			NULL, // Module name
 			command_c, // Command line (non-const)
@@ -39,7 +58,8 @@ int shell_exec(const ss_ &command)
 			NULL, // Thread handle not inheritable
 			false, // Set handle inheritance to FALSE
 			0, // No creation flags
-			NULL, // Use parent's environment block
+			env_block.data(), // Use a new environment block
+			//NULL, // Use parent's environment block
 			NULL, // Use parent's starting directory
 			&si, // Pointer to STARTUPINFO structure
 			&pi // Pointer to PROCESS_INFORMATION structure

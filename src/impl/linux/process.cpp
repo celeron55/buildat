@@ -7,7 +7,13 @@
 namespace interface {
 namespace process {
 
-int shell_exec(const ss_ &command)
+ss_ get_environment_variable(const ss_ &name)
+{
+	// TODO
+	throw("get_environment_variable(): Not implemented");
+}
+
+int shell_exec(const ss_ &command, const ExecOptions &opts)
 {
 	log_d(MODULE, "shell_exec(\"%s\")", cs(command));
 	int f = fork();
