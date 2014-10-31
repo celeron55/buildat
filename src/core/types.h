@@ -164,8 +164,9 @@ static inline const T* check(const T *v){
 	return v;
 }
 
+#if 0 // Don't use this; this isn't needed on MinGW 4.9.1 and newer
 #ifdef __MINGW32__
-// MinGW doesn't have std::to_string (as of mingw-w64 4.9.1); define something to replace it
+// MinGW doesn't have std::to_string (as of mingw-w64 4.8.1); define something to replace it
 // This include is going to fuck things up for Linux users that use modules developed on Windows
 #include <sstream>
 namespace std {
@@ -176,8 +177,9 @@ namespace std {
 		return os.str();
 	}
 }
-// Also this doesn't exist on MinGW (as of mingw-w64 4.9.1)
+// Also this doesn't exist on MinGW (as of mingw-w64 4.8.1)
 typedef int ssize_t;
+#endif
 #endif
 
 // vim: set noet ts=4 sw=4:
