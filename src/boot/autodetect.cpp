@@ -206,6 +206,20 @@ static void generate_urho3d_root_alternatives(sv_<ss_> &roots)
 	}
 }
 
+static void generate_compiler_binary_dir_alternatives(sv_<ss_> &roots)
+{
+	sv_<ss_> buildat_roots;
+	generate_buildat_root_alternatives(buildat_roots);
+
+	for(const ss_ &buildat_root : buildat_roots){
+		// NOTE: These contain a trailing slash so that the command can be
+		//       appended without a leading slash
+		roots.push_back(buildat_root + "/compiler/bin/");
+	}
+
+	roots.push_back(""); // In case command is found in PATH (least priority)
+}
+
 // Server-only paths
 
 PathDefinition server_paths[] = {
@@ -224,11 +238,6 @@ PathDefinition server_paths[] = {
 		"/write.test",
 		"RCC++ build directory"
 	},
-	{PD_RUN, "compiler_command",
-		"|c++",
-		" --version",
-		"Compiler command"
-	},
 	{PD_END,  "", "", "", ""},
 };
 
@@ -237,6 +246,25 @@ static bool detect_buildat_server_paths(core::Config &config)
 	sv_<ss_> roots;
 	generate_buildat_root_alternatives(roots);
 	return detect_paths(config, roots, server_paths, "Buildat server root");
+}
+
+// Compiler paths
+
+// NOTE: For these, the root contains a trailing slash, and can be an empty string.
+PathDefinition compiler_bin_paths[] = {
+	{PD_RUN, "compiler_command",
+		"c++",
+		" --version",
+		"Compiler command"
+	},
+	{PD_END,  "", "", "", ""},
+};
+
+static bool detect_compiler_bin_paths(core::Config &config)
+{
+	sv_<ss_> roots;
+	generate_compiler_binary_dir_alternatives(roots);
+	return detect_paths(config, roots, compiler_bin_paths, "Compiler binary directory");
 }
 
 // Client-only paths
@@ -305,6 +333,8 @@ bool check_server_paths(const core::Config &config, bool log_issues)
 	bool ok = true;
 	if(!check_paths(config, server_paths, log_issues))
 		ok = false;
+	if(!check_paths(config, compiler_bin_paths, log_issues))
+		ok = false;
 	if(!check_paths(config, server_urho3d_paths, log_issues))
 		ok = false;
 	return ok;
@@ -325,6 +355,8 @@ bool detect_server_paths(core::Config &config)
 	bool ok = true;
 
 	if(!detect_buildat_server_paths(config))
+		ok = false;
+	if(!detect_compiler_bin_paths(config))
 		ok = false;
 	if(!detect_server_urho3d_paths(config))
 		ok = false;
