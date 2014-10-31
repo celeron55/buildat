@@ -135,7 +135,7 @@ static void set_default_subpaths(core::Config &config, const PathDefinition *def
 
 // If not found, returns empty string and logs issues
 static ss_ find_root(const sv_<ss_> &roots, const PathDefinition *defs,
-		const char *description)
+		const char *description, const core::Config &base_config)
 {
 	log_d(MODULE, "Searching root: %s", description);
 	// Try to find root
@@ -144,6 +144,7 @@ static ss_ find_root(const sv_<ss_> &roots, const PathDefinition *defs,
 		log_d(MODULE, "Checking root [%s]", cs(root));
 		core::Config config;
 		set_default_subpaths(config, defs, root);
+		config.values = base_config.values;
 		if(check_paths(config, defs, false)){
 			log_d(MODULE, "-> Root [%s] matches (%s)", cs(root), description);
 			return root;
@@ -156,6 +157,7 @@ static ss_ find_root(const sv_<ss_> &roots, const PathDefinition *defs,
 		log_e(MODULE, "Checked [%s]:", cs(root));
 		core::Config config;
 		set_default_subpaths(config, defs, root);
+		config.values = base_config.values;
 		check_paths(config, defs, true);
 	}
 	return "";
@@ -164,7 +166,7 @@ static ss_ find_root(const sv_<ss_> &roots, const PathDefinition *defs,
 static bool detect_paths(core::Config &config, const sv_<ss_> &roots,
 		const PathDefinition *defs, const char *description)
 {
-	ss_ root = find_root(roots, defs, description);
+	ss_ root = find_root(roots, defs, description, config);
 	if(root.empty()){
 		log_w(MODULE, "Could not determine %s path (tried %s)",
 				description, cs(roots));

@@ -15,8 +15,8 @@ Config::Config()
 	set_default("interface_path", "");
 	set_default("share_path", "");
 	set_default("urho3d_path", "");
+	set_default("compiler_command", "");
 
-	set_default("compiler_command", "c++");
 	set_default("skip_compiling_modules", json::object());
 }
 
