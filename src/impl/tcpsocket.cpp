@@ -288,6 +288,9 @@ struct CTCPSocket: public TCPSocket
 	}
 	bool wait_data(int timeout_us)
 	{
+		if(m_fd == -1)
+			return false;
+
 		struct timeval tv;
 		tv.tv_sec = 0;
 		tv.tv_usec = timeout_us;
