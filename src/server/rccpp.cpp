@@ -4,6 +4,7 @@
 #include "core/log.h"
 #include "interface/server.h"
 #include "interface/process.h"
+#include "interface/fs.h"
 #include <c55/filesys.h>
 #include <vector>
 #include <string>
@@ -103,7 +104,22 @@ struct CCompiler: public Compiler
 
 		for(const std::string &lib : libraries) command += " "+lib;
 
-		int exit_status = interface::process::shell_exec(command);
+		interface::process::ExecOptions exec_opts;
+#ifdef _WIN32
+		// If compiler_command looks like a path, add the directory part of it to
+		// PATH. This seems to be required on Wine for running mingw g++, in which
+		// case the DLLs are in the directory of the called executable, but the
+		// called executable calls another executable in a directory that does not
+		// contain the DLLs.
+		if(m_compiler_command.find("/") != ss_::npos ||
+				m_compiler_command.find("\\") != ss_::npos){
+			ss_ command_dir = interface::fs::strip_file_name(m_compiler_command);
+			exec_opts.env["PATH"] = command_dir + ";" +
+					interface::process::get_environment_variable("PATH");
+			log_d(MODULE, "Using PATH=%s", cs(exec_opts.env["PATH"]));
+		}
+#endif
+		int exit_status = interface::process::shell_exec(command, exec_opts);
 
 		return exit_status == 0;
 	}
