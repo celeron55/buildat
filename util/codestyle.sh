@@ -1,5 +1,5 @@
 #!/bin/sh
-# NOTE: You can supply parameters as $@ to util/extra_cpp_style.py
+# NOTE: You can supply parameters as $@ to util/cpp_indent.py
 
 set -euv
 script_dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -84,8 +84,8 @@ sed -i -e 's/typedef \(.*\)\*\(.*\)/typedef \1* \2/g' $header_files $cpp_files
 #sed -i -e 's/[\t ]*$//' $header_files $cpp_files $lua_files $cmake_files
 
 # Indent and do some other things that uncrustify isn't capable of doing properly
-python "$script_dir/extra_cpp_style.py" -i $@ $header_files
-python "$script_dir/extra_cpp_style.py" -i -b $@ $cpp_files
+python "$script_dir/cpp_indent.py" -i $@ $header_files
+python "$script_dir/cpp_indent.py" -i -b $@ $cpp_files
 
 # Fix or add Vim modeline magic
 sed -i '/^\/\/ vim: set /d' $header_files $cpp_files
