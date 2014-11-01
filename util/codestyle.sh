@@ -73,20 +73,19 @@ for f in $cpp_files; do
 	uncrustify -c "$uncrustify_cpp" --no-backup $f
 done
 
-# Fix miscellaneous stuff that uncrustify isn't capable of doing
-python "$script_dir/extra_cpp_style.py" -i $@ $header_files
-python "$script_dir/extra_cpp_style.py" -i -b $@ $cpp_files
-
-# Fix comment indentation from spaces to tabs (because uncrusfity is unable to
-# indent comments inside parameter lists (including lambda functions) with tabs
-# if it aligns them by spaces)
-sed -i -e ':loop' -e 's/    \(\t*\)\/\//\1\t\/\//' -e 't loop' $header_files $cpp_files
-
 # Why the hell does uncrustify do stuff like "while(1) ;"?
-sed -i -e 's/)[\t ]+;$/);/' $header_files $cpp_files
+sed -i -e 's/)[\t ]\+;$/);/' $header_files $cpp_files
+
+# Fix some random things (what the fuck uncrustify?)
+# typedef T1*T2 -> typedef T1* T2
+sed -i -e 's/typedef \(.*\)\*\(.*\)/typedef \1* \2/g' $header_files $cpp_files
 
 # Remove trailing whitespace
 #sed -i -e 's/[\t ]*$//' $header_files $cpp_files $lua_files $cmake_files
+
+# Indent and do some other things that uncrustify isn't capable of doing properly
+python "$script_dir/extra_cpp_style.py" -i $@ $header_files
+python "$script_dir/extra_cpp_style.py" -i -b $@ $cpp_files
 
 # Fix or add Vim modeline magic
 sed -i '/^\/\/ vim: set /d' $header_files $cpp_files

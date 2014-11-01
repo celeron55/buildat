@@ -36,10 +36,15 @@ def create_zero_levels():
 		"''": 0,
 		'""': 0,
 		"<>": 0,
-		'=;': 0,
-		'/**/': 0,
-		'//': 0,
-		'#': 0,
+		"=;": 0,
+		"/**/": 0,
+		"//": 0,
+		"#": 0,
+		"):{": 0,
+		";": 0,
+		# if(), for() and whatever without a block. Resets at end of statement
+		# and at beginning of actual block; set by caller.
+		"implicit_block": 0,
 	}
 
 class ParenMatch:
@@ -49,6 +54,7 @@ class ParenMatch:
 		self.level_before_line_end = None
 		self.level_after_line = None
 		self.level_lowest_on_line = None
+		self.level_highest_on_line = None
 		self.assignment_begin_paren_level = 0
 
 	def feed_part(self, line, i):
@@ -84,18 +90,43 @@ class ParenMatch:
 			if line[i+1] == '/':
 				self._level["//"] = 1
 				return i + 1
+		if line[i] == '#':
+			self._level["#"] = 1
+			return i + 1
+		if self._level["#"]:
+			return i + 1 # Ignore macro content
+
+		# Statements and implicit blocks
+		if self._level[";"] == 0:
+			if line[i] not in " \t\n()[]{};":
+				#print(repr(line[i])+" begins statement")
+				self._level[";"] = 1 # Automatically start a new statement
+		if self._level[";"] > 0:
+			if line[i] in ";{}":
+				self._level[";"] = 0
+				self._level["implicit_block"] = 0
+			if line[i] == ':' and line[i-1] != ':':  # Not very precise
+				self._level[";"] = 0
+				self._level["implicit_block"] = 0
+		if line[i] == '{':
+			self._level["implicit_block"] = 0
+
 		if line[i] == '=':
 			if line[i+1] not in '=<>!' and line[i-1] not in '=<>!':
 				self._level["=;"] = 1
 				self.assignment_begin_paren_level = self._level["()"]
-				return i + 2
+				return i + 1
 		if line[i] == ';':
 			self._level["<>"] = 0
 			if self._level["=;"] > 0:
 				self._level["=;"] = 0
 				return i + 1
-		if line[i] == '#':
-			self._level["#"] = 1
+		if self._level["):{"] > 0:
+			if line[i] == '{':
+				self._level["):{"] = 0
+				# Allow other processing
+		if line[i] == ':' and line[i-1] == ')':
+			self._level["):{"] = 1
 			return i + 1
 		if line[i] == '<':
 			if line[i-1] != '<' and line[i+1] != '<':
@@ -118,13 +149,16 @@ class ParenMatch:
 				return i + 1
 		return i + 1
 
-	def update_lowest_levels(self):
+	def record_levels(self):
 		for bracetype, level in self._level.items():
 			if level < self.level_lowest_on_line[bracetype]:
 				self.level_lowest_on_line[bracetype] = level
+			if level > self.level_highest_on_line[bracetype]:
+				self.level_highest_on_line[bracetype] = level
 
 	def feed_line(self, line):
 		self.level_lowest_on_line = copy.copy(self._level)
+		self.level_highest_on_line = copy.copy(self._level)
 		self.level_before_line = copy.copy(self._level)
 		i = 0
 		while True:
@@ -133,8 +167,8 @@ class ParenMatch:
 				self.level_before_line_end = copy.copy(self._level)
 			# Process current position
 			i = self.feed_part(line, i)
-			# Record lowest levels
-			self.update_lowest_levels()
+			# Record levels
+			self.record_levels()
 			# Stop if at end of line
 			if i == len(line):
 				break
@@ -152,26 +186,49 @@ class DetectedBlock:
 		self.start_line = line_i
 		self.open_level = start_level
 		self.base_indent_level = base_indent_level
-		self.inner_indent_level = None  # Detected level (which can be wrong)
+		if block_type == "namespace" and NO_NAMESPACE_INDENT:
+			self.inner_indent_level = base_indent_level
+		else:
+			self.inner_indent_level = base_indent_level + 4
 		self.base_levels = base_levels  # Basae ParenMatch levels inside block
 		self.block_type = block_type    # None/"namespace"/something
+
+BLOCK_TYPE_REGEXES = [
+	("namespace", r'^[\t ]*namespace.*$'),
+	("struct",    r'^[\t ]*struct.*$'),
+	("class",     r'^[\t ]*class.*$'),
+	("if",        r'^[\t ]*if.*$'),
+	("for",       r'^[\t ]*for.*$'),
+	("while",     r'^[\t ]*while.*$'),
+	("lambda",    r'^.*\)\[.*$'),
+	("enum",      r'^[\t ]*enum.*$'),
+	("=",         r'^[\t ]*=[^;=]*$'),  # == is probably in if(.*==.*){
+]
+STRUCTURE_BLOCK_TYPES = ["namespace", "struct"]
+CODE_BLOCK_TYPES = [None, "if", "for", "while", "lambda"]
+VALUE_BLOCK_TYPES = ["enum", "="]
 
 class State:
 	def __init__(self):
 		self.match = ParenMatch()
 		self.blocks = [] # Stack
-		self.assign_multiline_params_paren_level = None
 		self.paren_level_indentations = {}  # Level -> starting indentation level
+		self.paren_level_start_lines = {}  # Level -> starting line
+		self.paren_level_identifiers = {}  # Level -> identifier
 		self.next_block_type = None
+		self.comment_orig_base_indent = None
 
 		# Output values
 		self.reset_output()
 
 	def reset_output(self):
+		# Annotations
 		self.fix_annotation = None
 		self.annotation_is_inside_macro = False  # Need for macro continuation
 		self.annotation_is_inside_comment = False  # Need for avoiding /*/**/*/
-		self.indent_fix_amount = 0
+
+		# Actual output
+		self.indent_level = 0
 
 	def print_debug_state(self, level_before, level_after):
 		if self.blocks:
@@ -187,12 +244,12 @@ class State:
 			self.fix_annotation = ""
 		self.fix_annotation += description
 
-	def fix_indent(self, d, description):
+	def add_indent(self, d, description):
 		if d == 0:
 			return
-		self.add_fix_annotation(description)
-		self.indent_fix_amount += d
-		log("indent"+("+="+str(d) if d >= 0 else "-="+str(-d))+": "+description)
+		self.add_fix_annotation("indent"+("+="+str(d) if d >= 0
+				else "-="+str(-d))+": "+description)
+		self.indent_level += d
 
 	def get_top_block_base_levels(self):
 		if not self.blocks:
@@ -211,8 +268,19 @@ class State:
 		level_at_end = copy.copy(self.match.level_before_line_end)
 		level_after = copy.copy(self.match.level_after_line)
 		level_lowest = copy.copy(self.match.level_lowest_on_line)
+		level_highest = copy.copy(self.match.level_highest_on_line)
 
 		#self.add_fix_annotation("Levels before line: "+repr(level_before))
+
+		# Measure original indentation level
+		orig_indent_level = 0
+		for c in line:
+			if c == "\t":
+				orig_indent_level += 4
+			elif c == " ":
+				orig_indent_level += 1
+			else:
+				break
 
 		line_is_comment = False
 		#if level_at_end["//"] > 0: # Bad; we care if the whole line is a comment
@@ -228,11 +296,15 @@ class State:
 			#self.add_fix_annotation("Line is C comment continuation")
 			self.annotation_is_inside_comment = True
 
+		if not line_is_comment:
+			self.comment_orig_base_indent = None
+
 		line_is_macro = (level_at_end['#'] > 0)
 		macro_continued = (level_before['#'] > 0)
 
-		if line_is_macro and not line_is_comment:
+		if line_is_macro:
 			# Leave macros as-is
+			self.indent_level = orig_indent_level
 			if not macro_continued:
 				self.add_fix_annotation("Line is macro")
 			else:
@@ -240,273 +312,231 @@ class State:
 				self.annotation_is_inside_macro = True
 			return
 
-		indent_level = 0
-		space_count = 0
-		for c in line:
-			if c == "\t":
-				indent_level += 4
-			elif c == " ":
-				indent_level += 1
+		# Set indent level based on block level
+		self.indent_level = 0
+		if self.blocks:
+			top_block = self.blocks[-1]
+			self.indent_level = top_block.inner_indent_level
+
+		# So let's process the REAL CODE
+		if line_is_comment:
+			# Fluctuate comment's indentation from block-based self.indent_level
+			# by the amount the indentation originally fluctuates
+			if self.comment_orig_base_indent is None:
+				self.comment_orig_base_indent = orig_indent_level
+			# Add difference to output level
+			d = orig_indent_level - self.comment_orig_base_indent
+			self.add_indent(d, "Comment's internal indentation variation")
+			return
+
+		# Detect parenthesis starting levels
+		if level_highest["()"] > level_before["()"]:
+			for paren_level in range(level_before["()"], level_highest["()"]):
+				# NOTE: This isn't accurate because the line can contain
+				#       multiple opening parenthesis with all having a different
+				#       keyword
+				identifier = None
+				m = re.match(r'^.*?([^(){}\t ]+)[ \t]*\(.*$', line)
+				if m is not None:
+					identifier = m.group(1)
+				#self.add_fix_annotation("identifier="+repr(identifier))
+				self.paren_level_indentations[paren_level] = self.indent_level
+				self.paren_level_start_lines[paren_level] = line_i
+				self.paren_level_identifiers[paren_level] = identifier
+				log("Detected paren level "+str(paren_level)+": indentation "+
+						str(self.indent_level)+", start line "+str(line_i)+
+						", identifier "+repr(identifier))
+
+		# Get current block type
+		current_block_type = None
+		if self.blocks:
+			block = self.blocks[-1]
+			current_block_type = block.block_type
+		self.add_fix_annotation("Current block type: "+repr(current_block_type))
+		is_value_block = (current_block_type in ["enum", "="])
+
+		#
+		# Block type
+		#
+		# Not ideal but generally works
+
+		# Reset block type in these (rather common) cases
+		if (level_lowest["{}"] < level_before["{}"] or
+				level_lowest["()"] != level_highest["()"] or
+				level_lowest["):{"] != level_highest["):{"]):
+			self.next_block_type = None
+
+		for (t, regex) in BLOCK_TYPE_REGEXES:
+			if re.match(regex, line):
+				self.next_block_type = t
+				break
+		# The '=' block type is inherited when there is no other option
+		if self.next_block_type is None and current_block_type == '=':
+			self.next_block_type = current_block_type
+		self.add_fix_annotation("Next block type: "+repr(self.next_block_type))
+
+		#
+		# Block level
+		#
+
+		# Update current block level
+		while self.blocks:
+			block = self.blocks[-1]
+			if level_lowest["{}"] <= block.open_level:
+				base_indent_level = block.base_indent_level
+				self.add_fix_annotation("Block level "+str(block.open_level)+
+						" end (begun on line "+str(block.start_line)+
+						", base_indent_level="+str(base_indent_level)+")")
+				self.blocks = self.blocks[:-1]
+				# Fix indentation of last line if it begins with '}'
+				if re.match(r'^[\t ]*}.*$', line):
+					self.print_debug_state(level_before, level_after)
+					self.add_indent(-4, "Fixing indent of block end")
 			else:
 				break
 
-		if not line_is_comment and not line_is_macro:
-			if level_after["()"] > level_before["()"]:
-				for paren_level in range(level_before["()"], level_after["()"]):
-					self.paren_level_indentations[paren_level] = indent_level
-					log("Detected paren level "+str(paren_level)+" indentation "+
-							str(indent_level))
+		# Block level detection: Detect block starts
+		# Really works only if there is only one { on the line
+		if level_after["{}"] > level_lowest["{}"]:
+			block_open_level = level_lowest["{}"]
+			base_indent = self.indent_level
+			# If this line closes parenthesis, take the indent level from the
+			# parentheesis starting indentation level
+			use_paren_based_indentation = False
+			if level_after["()"] < level_before["()"]:
+				base_paren_level = level_after["()"]
+				base_indent = self.paren_level_indentations[
+						base_paren_level]
+				use_paren_based_indentation = True
+				self.add_fix_annotation("This line closes parenthesis; taking "+
+						"indent level from the line that started the "+
+						"parenthesis")
+			if not use_paren_based_indentation and self.blocks:
+				# Use the indent level of the outside block if possible
+				parent = self.blocks[-1]
+				if parent.inner_indent_level is not None:
+					base_indent = parent.inner_indent_level
+					self.add_fix_annotation("Basing on inner indentation level "+
+							str(base_indent)+" of outside block level "+
+							str(parent.open_level))
+			block_type = self.next_block_type
+			self.next_block_type = None
+			self.add_fix_annotation("Block level "+
+					str(block_open_level)+" begin; base indent "+
+					str(base_indent)+", type "+repr(block_type))
+			self.blocks.append(DetectedBlock(line_i, block_open_level,
+					base_indent, level_after, block_type))
+			if not use_paren_based_indentation:
+				# Fix { to be on the correct indentation level
+				d = base_indent - self.indent_level
+				self.add_indent(d, "Fixing { to have correct indentation")
 
-		# Fill in inner block level of current block
-		if not line_is_comment and not line_is_macro:
-			if (line.strip() != "" and self.blocks and
-					level_lowest["{}"] >= level_before["{}"]):
-				block = self.blocks[-1]
-				if block.inner_indent_level is None:
-					if re.match(r'^[ \t]*[a-z]+.*:$', line):
-						# label
-						block.inner_indent_level = indent_level + 4
-					else:
-						block.inner_indent_level = indent_level
-					self.add_fix_annotation("Inner indent level: "+
-							str(block.inner_indent_level))
+		#
+		# Indentation level fine-tuning
+		#
 
-		# Final indentation level fix
-		is_inside_broken_block = False
+		# Indent some stuff
+		block_base_levels = self.get_top_block_base_levels()
 
-		# Fix block indentation level
-		enable_indent_fix = True
-		if line_is_macro:
-			enable_indent_fix = False
-		if line_is_comment:
-			if indent_level > 0:
-				enable_indent_fix = True
-		if enable_indent_fix:
-			for i, block in enumerate(self.blocks):
-				if NO_NAMESPACE_INDENT and block.block_type == "namespace":
-					continue
-				if block.inner_indent_level is None:
-					continue
-				#log("block.base_indent_level: "+str(block.base_indent_level))
-				#log("block.inner_indent_level: "+str(block.inner_indent_level))
-				if block.inner_indent_level - block.base_indent_level != 4:
-					d = block.base_indent_level - block.inner_indent_level + 4
-					self.fix_indent(d, "Fixing broken block indent")
-					is_inside_broken_block = True
+		# Label
+		if re.match(r'^[\t ]*[a-zA-Z0-9_]*:$', line):
+			self.add_indent(-4, "Label")
 
-		# Hack: If line contains 'else', it has to be on lower indentation level
-		# This has to be done because we do stuff on a line-by-line basis
-		#if re.match(r'^.*}[\t ]else[\t ]+(if|).*$', line):
-		#	self.fix_indent(-4, "Hack: else")
+		# case
+		if re.match(r'^[\t ]*case .*:$', line):
+			self.add_indent(-4, "case")
 
-		# Another hack; "case FOO: {" must be on lower indetation level
-		if not line_is_comment and not line_is_macro:
-			if re.match(r'^.*:[\t ]*{.*$', line):
-				self.fix_indent(-4, "Hack: case Foo: {")
+		# Detect statements that look enough like function calls to be
+		# considered statements (macro calls without trailing ';')
+		# (if(), for() and others look like this too)
+		# It can look like a statement only if the parenthesis are ending to the
+		# block's base parenthesis level
+		may_create_implicit_block = False
+		if (level_highest["()"] > level_after["()"] and
+				level_after["()"] == block_base_levels["()"] and
+				level_highest[";"] > 0 and
+				level_after[";"] == level_highest[";"]):
+			try:
+				identifier = self.paren_level_identifiers[level_after["()"]]
+				if identifier in ["if", "for", "while"]:
+					#self.add_fix_annotation("Keyword "+repr(identifier))
+					if level_lowest["{}"] == level_after["{}"]:
+						self.add_fix_annotation("May create implicit "+
+								repr(identifier)+" block")
+						self.match._level["implicit_block"] = 1
+						may_create_implicit_block = True
+						# Cheat the state
+						self.match._level[";"] = 0
+				elif (identifier and re.match(r'^[a-zA-Z0-9_]*$', identifier) and
+						re.match(r'^.*\)$', line)):
+					self.add_fix_annotation("Isn't a full statement but looks "+
+							"like a function call to "+repr(identifier))
+					# Cheat the state
+					self.match._level[";"] = 0
+			except KeyError:
+				pass
 
-		# Another hack; "public:, private:, protected:"
-		if not line_is_comment and not line_is_macro:
-			if self.blocks:
-				top_block = self.blocks[-1]
-				if (re.match(r'^[\t ]*(public|private|protected):$', line) and
-						top_block.base_indent_level != indent_level):
-					d = top_block.base_indent_level - indent_level
-					self.fix_indent(d, "Hack: public/private/protected at"+
-							" wrong level")
+		# Handle else's implicit block
+		if re.match(r'^[ \t]*else[ \t]*$', line):
+			self.add_fix_annotation("May create implicit "+
+					repr("else")+" block")
+			self.match._level["implicit_block"] = 1
+			may_create_implicit_block = True
+			# Cheat the state
+			self.match._level[";"] = 0
 
-		# Not ideal but generally works
-		if not line_is_comment and not line_is_macro and "namespace" in line:
-			self.next_block_type = "namespace"
+		# Keep member initializers at proper indentation level
+		if (current_block_type in ["struct", "class"] and
+				level_before["):{"] > 0 and
+				level_after["()"] <= block_base_levels["()"]):
+			self.add_fix_annotation("Keeping member initializer at proper "+
+					"indentation level")
+			# Cheat the state
+			self.match._level[";"] = 0
 
-		if not line_is_comment and not line_is_macro:
-			# Block level detection: Detect block starts
-			# Really works only if there is only one { on the line
-			m = re.match(r'.*{', line)
-			m2 = re.match(r'.*}.*{', line)
-			if m and not m2:
-				self.add_fix_annotation("{} level "+str(level_before["{}"])+
-						" -> "+str(level_after["{}"]))
-			if m and not m2 and level_after["{}"] > level_before["{}"]:
-				block_open_level = level_before["{}"]
-				base_indent = indent_level
-				# If this line closes parenthesis, take the indent level from the
-				# parentheesis starting indentation level
-				use_paren_based_indentation = False
-				if level_after["()"] < level_before["()"]:
-					base_paren_level = level_after["()"]
-					base_indent = self.paren_level_indentations[
-							base_paren_level]
-					use_paren_based_indentation = True
-					self.add_fix_annotation("This line closes parenthesis; taking "+
-							"indent level from the line that started the "+
-							"parenthesis")
-				if not use_paren_based_indentation and self.blocks:
-					# Use the indent level of the outside block if possible
-					parent = self.blocks[-1]
-					if parent.inner_indent_level is not None:
-						base_indent = parent.inner_indent_level
-						self.add_fix_annotation("Basing on inner indentation level "+
-								str(base_indent)+" of outside block level "+
-								str(parent.open_level))
-				block_type = self.next_block_type
-				self.next_block_type = None
-				self.add_fix_annotation("Block level "+
-						str(block_open_level)+" begin; base indent "+
-						str(base_indent)+", type "+repr(block_type))
-				self.blocks.append(DetectedBlock(line_i, block_open_level,
-						base_indent, level_after, block_type))
-				if not use_paren_based_indentation:
-					# Fix { to be on the correct indentation level
-					d = base_indent - indent_level
-					self.fix_indent(d, "Fixing { to have correct indentation")
+		# Implicit block indentation
+		if (not may_create_implicit_block and # Handle blockless nested loop
+				level_before["implicit_block"] > 0 and line.strip() != "{"):
+			self.add_indent(4, "Implicit block")
 
-		if not line_is_comment and not line_is_macro:
-			# Update current block level
-			while self.blocks:
-				block = self.blocks[-1]
-				if level_after["{}"] <= block.open_level:
-					base_indent_level = block.base_indent_level
-					self.add_fix_annotation("Block level "+str(block.open_level)+
-							" end (begun on line "+str(block.start_line)+
-							", base_indent_level="+str(base_indent_level)+")")
-					self.blocks = self.blocks[:-1]
-					# Fix indentation of last line if it doesn't contain
-					# anything special at all (only '}' or ';', no ')')
-					# This applies to blocks that are not parameters or are not
-					# being assigned to anything
-					self.print_debug_state(level_before, level_after)
-					if re.match(r'^[ \t]*[};]+$', line) and level_after["{}"] == 0:
-						self.fix_indent(-4, "Fixing indent of simple block end")
-				else:
-					break
+		# Multi-line statements
+		if (
+			not is_value_block and
+			level_before[";"] > 0 and
+			(
+				level_lowest["{}"] == level_after["{}"] or
+				level_before["()"] > block_base_levels["()"]
+			) and
+			line.strip() not in ["{}", "{", "}", "};", ")", ");"]
+		):
+			self.add_indent(8, "Multi-line statement")
 
-		# Can't do this because we don't have the correct logic for all
-		# constructs; we only track block level
-		## Fix indentation level
-		#wanted_indent_level = 0
-		#for i, block in enumerate(self.blocks):
-		#	if NO_NAMESPACE_INDENT:
-		#		if i == 0:  # Ignore first block, it's the namespace or something
-		#			continue
-		#	if block.inner_indent_level is None:
-		#		continue
-		#	wanted_indent_level += 4
-		#self.indent_fix_amount = wanted_indent_level - indent_level
-		#log("Line should have indent level "+str(wanted_indent_level)+
-		#		", fix amount: "+str(self.indent_fix_amount))
+		# Class member initializer indentation
+		if (level_before["):{"] > 0 and
+				line.strip() not in ["{}", "{", "}", "};"]):
+			self.add_indent(4, "Adding indentation between ): and {")
 
-		if not line_is_comment and not line_is_macro:
-			# Assignment-with-multiline-parameters handling
-			m = re.match(r'.*=.*\(', line)
-			if m and self.assign_multiline_params_paren_level is None:
-				if level_after["()"] > level_before["()"]:
-					log("Detected assignment with starting multi-line parameters at "+
-							"paren level "+str(level_after["()"]))
-					self.assign_multiline_params_paren_level = level_after["()"]
+		# Add two levels to inside multiline <> content because
+		# uncrustify does not do that.
+		if level_before["<>"] > block_base_levels["<>"]:
+			self.add_indent(4, "Adding indentation to regular multiline <>")
 
-		if not line_is_comment and not line_is_macro:
-			# Match sole ); without extra stuff except more parentheses
-			if (self.assign_multiline_params_paren_level is not None and
-					level_after["()"] < self.assign_multiline_params_paren_level):
-				self.assign_multiline_params_paren_level = None
-				log("Detected end of multi-line parameters")
-				# Fix indentation of last line if it doesn't contain any
-				# parameters
-				if re.match(r'^[ \t]*[});]+$', line):
-					# Indent it properly according to the current block level
-					# Use the indent level of the outside block
-					block_indent_level = 0
-					if self.blocks:
-						parent = self.blocks[-1]
-						if parent.inner_indent_level is not None:
-							block_indent_level = parent.inner_indent_level
-					#log("block_indent_level: "+str(block_indent_level))
-					#log("indent_level: "+str(indent_level))
-					d = block_indent_level - indent_level
-					self.fix_indent(d, "Aligning parameter-less end of multi-line "+
-							"parameters")
-
-		if not line_is_comment and not line_is_macro:
-			added_multiline_paren_indentation = False  # Avoid adding twice
-			# If inside broken indentation, do manual indentation of things
-			# content because uncrustify can't bother
-			if is_inside_broken_block:
-				base_levels = self.get_top_block_base_levels()
-				# Manual indentation of multiline () content
-				if level_before["()"] > base_levels["()"]:
-					self.print_debug_state(level_before, level_after)
-					if base_levels["()"] < level_before["()"]:
-						if base_levels["{}"] >= level_before["{}"]:
-							self.fix_indent(8,
-									"Indenting multiline () in broken block")
-							added_multiline_paren_indentation = True
-				# Manual indentation of multiline assignment
-				self.print_debug_state(level_before, level_after)
-				base_levels = self.get_top_block_base_levels()
-				if (level_before["=;"] > base_levels["=;"] and
-						not re.match(r'^.*[ \t]=( |\t|\n).*$', line) and
-						not added_multiline_paren_indentation):
-					self.fix_indent(4, "Indenting multiline assigmnent in "+
-							"broken block")
-			# If not inside broken indentation
-			else:
-				# Add one level to inside multiline () content because
-				# uncrustify is unable to do so consistently. It randomly uses 1
-				# and 2 tabs if an attempt is made to configure it to do this.
-				# It is now configured to always add 1.
-				# Also member initializers get correct indentation this way.
-				base_levels = self.get_top_block_base_levels()
-				if (level_before["()"] > base_levels["()"] and
-						not re.match(r'^[ \t]*[)}\];].*$', line)):
-					self.fix_indent(4, "Adding indentation to regular multiline ()")
-					added_multiline_paren_indentation = True
-				# Add two levels to inside multiline <> content because
-				# uncrustify does not do that.
-				base_levels = self.get_top_block_base_levels()
-				if (level_before["<>"] > base_levels["<>"]):
-					self.fix_indent(8, "Adding indentation to regular multiline <>")
-					added_multiline_paren_indentation = True
-				# Add one level to inside multiline assignment  content because
-				# uncrustify is unable to do so consistently. It randomly uses 1
-				# and 2 tabs if an attempt is made to configure it to do this.
-				# It is now configured to always add 1.
-				if not added_multiline_paren_indentation:
-					base_levels = self.get_top_block_base_levels()
-					if (level_before["=;"] > base_levels["=;"] and
-							not re.match(r'^.*[ \t]=( |\t|\n).*$', line) and
-							not re.match(r'^[ \t]*[)}\];].*$', line)):
-						self.fix_indent(4, "Adding indentation to regular "+
-								"multiline =;")
-
-		# Log final indent fix amount
-		if self.indent_fix_amount != 0:
-			log("Indent has to be fixed by "+str(self.indent_fix_amount))
 
 def fix_line(line, state):
-	if state.indent_fix_amount < 0:
-		remove_spaces_total = -state.indent_fix_amount
-		remove_tabs = int(remove_spaces_total / 4)
-		remove_spaces = remove_spaces_total - remove_tabs * 4
-		#log("Removing "+str(remove_tabs)+" tabs and "+str(remove_spaces)+" spaces")
-		for i in range(0, remove_tabs):
-			if line[0] == '\t':
-				line = line[1:]
-			else:
-				log("Can't remove enough tabs")
-		for i in range(0, remove_spaces):
-			did = False
-			for i, c in enumerate(line):
-				if c not in ' \t':
-					break
-				if c == ' ':
-					line = line[0:i] + line[i+1:]
-					did = True
-					break
-			if not did:
-				log("Can't remove enough spaces")
-	elif state.indent_fix_amount > 0:
-		for i in range(0, state.indent_fix_amount / 4):
-			line = "\t" + line
+	# Remove all indentation
+	num_whitespace_chars = 0
+	for i in range(0, len(line)):
+		num_whitespace_chars = i
+		if line[i] not in ' \t':
+			break
+	line = line[num_whitespace_chars:]
+	# Set wanted indentation
+	tabs = int(state.indent_level / 4)
+	remaining_spaces = state.indent_level - tabs * 4
+	for i in range(0, remaining_spaces):
+		line = " " + line
+	for i in range(0, tabs):
+		line = "\t" + line
 	return line
 
 for input_filename in input_filenames:
@@ -530,8 +560,12 @@ for input_filename in input_filenames:
 			else:
 				pre = "// "
 				post = ""
-			fixed_lines.append(pre + ANNOTATION_PREFIX + state.fix_annotation +
+			annotation_line = (pre + ANNOTATION_PREFIX + state.fix_annotation +
 					ANNOTATION_POSTFIX + post + "\n")
+			if IN_PLACE:
+				fixed_lines.append(annotation_line)
+			else:
+				sys.stdout.write(annotation_line)
 		if ENABLE_LOG:
 			sys.stdout.write("original "+str(line_i)+": "+orig_line)
 			if fixed_line != orig_line:
