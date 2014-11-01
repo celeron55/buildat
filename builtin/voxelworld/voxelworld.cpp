@@ -1162,7 +1162,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		m_voxel_reg->deserialize(voxel_reg_data);*/
 
 		// Start up normally
-				on_start();
+		on_start();
 	}
 
 	void on_tick(const interface::TickEvent &event)
@@ -1209,9 +1209,9 @@ struct Module: public interface::Module, public voxelworld::Interface
 				packet.sender, PV3I_PARAMS(section_p));
 		}*/
 
-		// Interface
+	// Interface
 
-				void create_instance(SceneReference scene_ref, const pv::Region &region)
+	void create_instance(SceneReference scene_ref, const pv::Region &region)
 	{
 		auto it = m_instances.find(scene_ref);
 		// TODO: Is an exception the best way to handle this?
