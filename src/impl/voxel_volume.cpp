@@ -14,7 +14,7 @@ namespace interface {
 // pv::RawVolume<T>
 
 template<typename T>
-ss_ generic_serialize_volume_simple(const pv::RawVolume<T> &volume)
+		ss_ generic_serialize_volume_simple(const pv::RawVolume<T> &volume)
 {
 	std::ostringstream os(std::ios::binary);
 	{
@@ -32,7 +32,7 @@ ss_ generic_serialize_volume_simple(const pv::RawVolume<T> &volume)
 }
 
 template<typename T>
-ss_ generic_serialize_volume_compressed(const pv::RawVolume<T> &volume)
+		ss_ generic_serialize_volume_compressed(const pv::RawVolume<T> &volume)
 {
 	std::ostringstream os(std::ios::binary);
 	{
@@ -58,7 +58,7 @@ ss_ generic_serialize_volume_compressed(const pv::RawVolume<T> &volume)
 }
 
 template<typename T>
-up_<pv::RawVolume<T>> generic_deserialize_volume(const ss_ &data)
+		up_<pv::RawVolume<T>> generic_deserialize_volume(const ss_ &data)
 {
 	std::istringstream is(data, std::ios::binary);
 	cereal::PortableBinaryInputArchive ar(is);

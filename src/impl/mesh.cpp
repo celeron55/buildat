@@ -58,7 +58,7 @@ Model* create_simple_voxel_model(Context *context,
 
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
 	pv::CubicSurfaceExtractorWithNormals<pv::SimpleVolume<uint8_t>>
-	surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh);
+			surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh);
 	surfaceExtractor.execute();
 
 	const sv_<uint32_t> &pv_indices = pv_mesh.getIndices();
@@ -107,7 +107,7 @@ Model* create_simple_voxel_model(Context *context,
 	fromScratchModel->SetNumGeometries(1);
 	fromScratchModel->SetGeometry(0, 0, geom);
 	fromScratchModel->SetBoundingBox(BoundingBox(
-				Vector3(-0.5f*w, -0.5f*h, -0.5f*d), Vector3(0.5f*w, 0.5f*h, 0.5f*d)));
+			Vector3(-0.5f*w, -0.5f*h, -0.5f*d), Vector3(0.5f*w, 0.5f*h, 0.5f*d)));
 
 	return fromScratchModel;
 }
@@ -173,7 +173,7 @@ void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 }
 
 template<typename VoxelType>
-class IsQuadNeededByRegistryPhysics
+		class IsQuadNeededByRegistryPhysics
 {
 	interface::VoxelRegistry *m_voxel_reg;
 	// NOTE: The voxel type id is used directly as PolyVox material value
@@ -217,8 +217,8 @@ Model* create_voxel_physics_model(Context *context,
 	IsQuadNeededByRegistryPhysics<VoxelInstance> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
 	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
-			IsQuadNeededByRegistryPhysics<VoxelInstance>>
-	surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh, iqn);
+				IsQuadNeededByRegistryPhysics<VoxelInstance>>
+			surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh, iqn);
 	surfaceExtractor.execute();
 
 	const sv_<uint32_t> &pv_indices = pv_mesh.getIndices();
@@ -249,7 +249,7 @@ Model* create_voxel_physics_model(Context *context,
 	index_data.resize(num_indices);
 	for(size_t i = 0; i < num_indices; i++){
 		/*if(pv_indices[i] >= 0x10000)
-		    throw Exception("Index too large");*/
+			throw Exception("Index too large");*/
 		index_data[i] = pv_indices[i];
 	}
 
@@ -276,13 +276,13 @@ Model* create_voxel_physics_model(Context *context,
 	fromScratchModel->SetNumGeometries(1);
 	fromScratchModel->SetGeometry(0, 0, geom);
 	fromScratchModel->SetBoundingBox(BoundingBox(
-				Vector3(-0.5f*w, -0.5f*h, -0.5f*d), Vector3(0.5f*w, 0.5f*h, 0.5f*d)));
+			Vector3(-0.5f*w, -0.5f*h, -0.5f*d), Vector3(0.5f*w, 0.5f*h, 0.5f*d)));
 
 	return fromScratchModel;
 }
 
 template<typename VoxelType>
-class IsQuadNeededByRegistry
+		class IsQuadNeededByRegistry
 {
 	interface::VoxelRegistry *m_voxel_reg;
 	// NOTE: The voxel type id is used directly as PolyVox material value
@@ -306,7 +306,7 @@ public:
 		if(!front_def)
 			throw Exception(ss_()+"Undefined voxel: front="+itos(front.get_id()));
 		/*if(!back_def){
-		    return false;
+			return false;
 		}*/
 		else if(back_def->face_draw_type == interface::FaceDrawType::NEVER){
 			return false;
@@ -433,8 +433,8 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
 	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
-			IsQuadNeededByRegistry<VoxelInstance>>
-	surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh, iqn);
+				IsQuadNeededByRegistry<VoxelInstance>>
+			surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh, iqn);
 	surfaceExtractor.execute();
 
 	const sv_<uint32_t> &pv_indices = pv_mesh.getIndices();
@@ -453,7 +453,7 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 				voxel_reg->get_cached(voxel_id0);
 		if(voxel_def0 == nullptr)
 			throw Exception("Unknown voxel in generated geometry: "+
-						  itos(voxel_id0));
+					itos(voxel_id0));
 		// Figure out which face this is
 		uint face_id = 0;
 		const pv::Vector3DFloat &n = pv_vertices[pv_vertex_i0].normal;
@@ -479,7 +479,7 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		const AtlasSegmentCache *aseg = atlas_reg->get_texture(seg_ref);
 		if(aseg == nullptr)
 			throw Exception("No atlas segment cache for voxel "+itos(voxel_id0)+
-						  " face "+itos(face_id));
+					" face "+itos(face_id));
 #if 0
 		// TODO: Create a custom Drawable that can use an index buffer
 		// Get or create the appropriate temporary geometry for this atlas
@@ -542,7 +542,7 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			size_t pv_vertex_i = pv_indices[pv_index_i];
 			if(pv_index_i1 == 0 && pv_vertex_i0 != pv_vertex_i)
 				throw Exception("First index of face does not point to first "
-							  "vertex of face");
+						"vertex of face");
 			const auto &pv_vert = pv_vertices[pv_vertex_i];
 			tg.vertex_data.Resize(tg.vertex_data.Size() + 1);
 			CustomGeometryVertex &tg_vert = tg.vertex_data.Back();
@@ -617,7 +617,7 @@ up_<pv::RawVolume<VoxelInstance>> generate_voxel_lod_volume(
 	auto &uc_orig = region_orig.getUpperCorner();
 
 	pv::Region region(lc_orig / lod - pv::Vector3DInt32(1, 1, 1),
-		uc_orig / lod + pv::Vector3DInt32(1, 1, 1));
+			uc_orig / lod + pv::Vector3DInt32(1, 1, 1));
 	auto &lc = region.getLowerCorner();
 	auto &uc = region.getUpperCorner();
 
@@ -663,8 +663,8 @@ void generate_voxel_lod_geometry(int lod,
 	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
 	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
-			IsQuadNeededByRegistry<VoxelInstance>>
-	surfaceExtractor(&lod_volume, lod_volume.getEnclosingRegion(), &pv_mesh, iqn);
+				IsQuadNeededByRegistry<VoxelInstance>>
+			surfaceExtractor(&lod_volume, lod_volume.getEnclosingRegion(), &pv_mesh, iqn);
 	surfaceExtractor.execute();
 
 	const sv_<uint32_t> &pv_indices = pv_mesh.getIndices();
@@ -683,7 +683,7 @@ void generate_voxel_lod_geometry(int lod,
 				voxel_reg->get_cached(voxel_id0);
 		if(voxel_def0 == nullptr)
 			throw Exception("Unknown voxel in generated geometry: "+
-						  itos(voxel_id0));
+					itos(voxel_id0));
 		// Figure out which face this is
 		uint face_id = 0;
 		const pv::Vector3DFloat &n = pv_vertices[pv_vertex_i0].normal;
@@ -712,7 +712,7 @@ void generate_voxel_lod_geometry(int lod,
 		const AtlasSegmentCache *aseg = atlas_reg->get_texture(seg_ref);
 		if(aseg == nullptr)
 			throw Exception("No atlas segment cache for voxel "+itos(voxel_id0)+
-						  " face "+itos(face_id));
+					" face "+itos(face_id));
 		// Get or create the appropriate temporary geometry for this atlas
 		TemporaryGeometry &tg = result[seg_ref.atlas_id];
 		if(tg.vertex_data.Empty()){
@@ -729,7 +729,7 @@ void generate_voxel_lod_geometry(int lod,
 			size_t pv_vertex_i = pv_indices[pv_index_i];
 			if(pv_index_i1 == 0 && pv_vertex_i0 != pv_vertex_i)
 				throw Exception("First index of face does not point to first "
-							  "vertex of face");
+						"vertex of face");
 			const auto &pv_vert = pv_vertices[pv_vertex_i];
 			tg.vertex_data.Resize(tg.vertex_data.Size() + 1);
 			CustomGeometryVertex &tg_vert = tg.vertex_data.Back();
@@ -848,6 +848,7 @@ void generate_voxel_physics_boxes(
 
 
 
+
 				uint8_t v = (def && def->physically_solid);
 				volume.setVoxelAt(x, y, z, v);
 			}
@@ -875,7 +876,7 @@ void generate_voxel_physics_boxes(
 				}
 			}
 			break; // Done
-found_non_covered_voxel:
+		found_non_covered_voxel:
 			// Stretch this box first in x, then y and then z to be as large as
 			// possible without covering any non-solid voxels
 			int x1 = x0;
@@ -891,7 +892,7 @@ found_non_covered_voxel:
 					}
 				}
 				continue; // Fits
-x_plane_does_not_fit:
+			x_plane_does_not_fit:
 				x1--;
 				break;
 			}
@@ -905,7 +906,7 @@ x_plane_does_not_fit:
 					}
 				}
 				continue; // Fits
-y_plane_does_not_fit:
+			y_plane_does_not_fit:
 				y1--;
 				break;
 			}
@@ -919,7 +920,7 @@ y_plane_does_not_fit:
 					}
 				}
 				continue; // Fits
-z_plane_does_not_fit:
+			z_plane_does_not_fit:
 				z1--;
 				break;
 			}

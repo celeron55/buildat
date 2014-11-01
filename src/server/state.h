@@ -49,7 +49,7 @@ namespace server
 		virtual ss_ get_file_path(const ss_ &name) = 0;
 
 		virtual void access_thread_pool(std::function<void(
-					interface::thread_pool::ThreadPool*pool)> cb) = 0;
+				interface::thread_pool::ThreadPool*pool)> cb) = 0;
 	};
 
 	State* createState();

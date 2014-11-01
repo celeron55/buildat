@@ -9,7 +9,7 @@
 namespace interface
 {
 	template<class Archive>
-	void serialize(Archive &archive, AtlasSegmentDefinition &v)
+			void serialize(Archive &archive, AtlasSegmentDefinition &v)
 	{
 		uint8_t version = 1;
 		archive(

@@ -11,11 +11,11 @@ namespace std {
 template<> struct hash<interface::VoxelName>{
 	std::size_t operator()(const interface::VoxelName &v) const {
 		return ((std::hash<ss_>() (v.block_name) << 0) ^
-				   (std::hash<uint>() (v.segment_x) << 1) ^
-				   (std::hash<uint>() (v.segment_y) << 2) ^
-				   (std::hash<uint>() (v.segment_z) << 3) ^
-				   (std::hash<uint>() (v.rotation_primary) << 4) ^
-				   (std::hash<uint>() (v.rotation_secondary) << 5));
+				(std::hash<uint>() (v.segment_x) << 1) ^
+				(std::hash<uint>() (v.segment_y) << 2) ^
+				(std::hash<uint>() (v.segment_z) << 3) ^
+				(std::hash<uint>() (v.rotation_primary) << 4) ^
+				(std::hash<uint>() (v.rotation_secondary) << 5));
 	}
 };
 }
@@ -28,7 +28,7 @@ ss_ VoxelName::dump() const
 	os<<"VoxelName(";
 	os<<"block_name="<<block_name;
 	os<<", segment=("<<(int)segment_x<<","<<(int)segment_y<<","
-	  <<(int)segment_z<<")";
+			<<(int)segment_z<<")";
 	os<<", rotation_primary="<<(int)rotation_primary;
 	os<<", rotation_secondary="<<(int)rotation_secondary;
 	os<<")";
@@ -80,10 +80,10 @@ struct CVoxelRegistry: public VoxelRegistry
 		VoxelTypeId id = m_defs.size();
 		if(def.id != VOXELTYPEID_UNDEFINED && id != def.id)
 			throw Exception(ss_()+"add_voxel(): def.id="+itos(def.id)+
-						  "; should be "+itos(id));
+					"; should be "+itos(id));
 		if(m_name_to_id.count(def.name) != 0)
 			throw Exception(ss_()+"add_voxel(): Already exists: "+
-						  cs(def.name.dump()));
+					cs(def.name.dump()));
 		// NOTE: This invalidates all previous pointers to cache entries that
 		//       were given out
 		m_defs.resize(id + 1);
@@ -194,12 +194,12 @@ struct CVoxelRegistry: public VoxelRegistry
 								interface::ATLAS_LOD_TOP_FACE;
 					}
 					if(i == 5 /*Z-*/){
-						lod_seg_def.lod_simulation |=
-								interface::ATLAS_LOD_SEMIBRIGHT1_FACE;
+					lod_seg_def.lod_simulation |=
+							interface::ATLAS_LOD_SEMIBRIGHT1_FACE;
 					}
 					if(i == 2 /*X+*/){
-						lod_seg_def.lod_simulation |=
-								interface::ATLAS_LOD_SEMIBRIGHT2_FACE;
+					lod_seg_def.lod_simulation |=
+							interface::ATLAS_LOD_SEMIBRIGHT2_FACE;
 					}
 					if(lod > MAX_LOD_WITH_SHADOWS){
 						lod_seg_def.lod_simulation |=

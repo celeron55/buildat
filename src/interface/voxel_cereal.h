@@ -9,7 +9,7 @@
 namespace interface
 {
 	template<class Archive>
-	void serialize(Archive &archive, VoxelName &v)
+			void serialize(Archive &archive, VoxelName &v)
 	{
 		uint8_t version = 1;
 		archive(
@@ -24,7 +24,7 @@ namespace interface
 	}
 
 	template<class Archive>
-	void serialize(Archive &archive, VoxelDefinition &v)
+			void serialize(Archive &archive, VoxelDefinition &v)
 	{
 		uint8_t version = 1;
 		archive(
@@ -40,7 +40,7 @@ namespace interface
 	}
 
 	template<class Archive>
-	void serialize(Archive &archive, VoxelInstance &v)
+			void serialize(Archive &archive, VoxelInstance &v)
 	{
 		archive(v.data);
 	}

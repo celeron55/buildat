@@ -11,7 +11,7 @@ namespace main_context
 {
 	struct OpaqueSceneReference;
 	typedef OpaqueSceneReference* SceneReference;
-};
+}
 
 namespace worldgen
 {
@@ -59,14 +59,15 @@ namespace worldgen
 	}
 
 	inline bool access(interface::Server *server, SceneReference scene_ref,
-			std::function<void(worldgen::Instance *instance)> cb)
+			std::function<void(worldgen::Instance*instance)> cb)
 	{
 		return access(server, [&](worldgen::Interface *i){
-			worldgen::Instance *instance = check(i->get_instance(scene_ref));
+			worldgen::Instance *instance =
+					check(i->get_instance(scene_ref));
 			cb(instance);
 		});
 	}
 }
 
-// vim: set noet ts=4 sw=4:
 
+// vim: set noet ts=4 sw=4:

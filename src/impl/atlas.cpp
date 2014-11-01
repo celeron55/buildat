@@ -43,8 +43,8 @@ struct CAtlasRegistry: public AtlasRegistry
 				segment_def.resource_name.c_str());
 		if(seg_img == nullptr)
 			throw Exception("CAtlasRegistry::add_segment(): Couldn't "
-						  "find image \""+segment_def.resource_name+"\" when adding "
-						  "segment");
+					"find image \""+segment_def.resource_name+"\" when adding "
+					"segment");
 		// Get resolution of texture
 		magic::IntVector2 seg_img_size(seg_img->GetWidth(), seg_img->GetHeight());
 		// Try to find a texture atlas for this texture size
@@ -176,9 +176,9 @@ struct CAtlasRegistry: public AtlasRegistry
 		size_t max_segments = atlas.total_segments.x_ * atlas.total_segments.y_;
 		if(atlas.segments.size() > max_segments){
 			throw Exception("Atlas has too many segments (segments.size()="+
-						  itos(atlas.segments.size())+", total_segments=("+
-						  itos(atlas.total_segments.x_)+", "+
-						  itos(atlas.total_segments.y_)+"))");
+					itos(atlas.segments.size())+", total_segments=("+
+					itos(atlas.total_segments.x_)+", "+
+					itos(atlas.total_segments.y_)+"))");
 		}
 		// Set segment texture
 		cache.texture = atlas.texture;
@@ -325,7 +325,7 @@ struct CAtlasRegistry: public AtlasRegistry
 
 		// Debug: save atlas image to file
 		/*ss_ atlas_img_name = "/tmp/atlas_"+itos(seg_size.x_)+"x"+
-		        itos(seg_size.y_)+".png";
+				itos(seg_size.y_)+".png";
 		magic::File f(m_context, atlas_img_name.c_str(), magic::FILE_WRITE);
 		atlas.image->Save(f);*/
 	}
@@ -358,7 +358,7 @@ struct CAtlasRegistry: public AtlasRegistry
 	{
 		// Re-create textures if a device reset has destroyed them
 		for(uint atlas_id = ATLAS_UNDEFINED + 1;
-				atlas_id < m_cache.size(); atlas_id++){
+		atlas_id < m_cache.size(); atlas_id++){
 			AtlasCache &cache = m_cache[atlas_id];
 			if(cache.texture->IsDataLost()){
 				log_v(MODULE, "Atlas %i texture data lost - re-creating",

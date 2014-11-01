@@ -8,11 +8,11 @@ namespace interface {
 
 static const pv::Vector3DUint8 FACE_DIRS[6] = {
 	pv::Vector3DUint8(0, 1, 0),
-	pv::Vector3DUint8(0, -1, 0),
-	pv::Vector3DUint8(1, 0, 0),
-	pv::Vector3DUint8(-1, 0, 0),
-	pv::Vector3DUint8(0, 0, 1),
-	pv::Vector3DUint8(0, 0, -1),
+			pv::Vector3DUint8(0, -1, 0),
+			pv::Vector3DUint8(1, 0, 0),
+			pv::Vector3DUint8(-1, 0, 0),
+			pv::Vector3DUint8(0, 0, 1),
+			pv::Vector3DUint8(0, 0, -1),
 };
 
 // Map part block segment's face to atlas segment definition
@@ -104,7 +104,7 @@ struct CBlockRegistry: public BlockRegistry
 		// Check this because VoxelDefinition has a static number of textures
 		if(def.side_textures.size() != 6)
 			throw Exception("BlockSourceDefinition::side_textures must contain "
-						  "6 resource names");
+					"6 resource names");
 		// Create block definition without segments
 		BlockDefinition plain_def;
 		plain_def.name = def.name;

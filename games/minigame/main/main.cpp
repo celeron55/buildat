@@ -209,8 +209,8 @@ struct Module: public interface::Module
 				cs(packet.name), packet.data.size());
 
 		for(size_t y = 0; y < m_playfield.h; y++)
-			for(size_t x = 0; x < m_playfield.w; x++)
-				m_playfield.set(x, y, 0);
+		for(size_t x = 0; x < m_playfield.w; x++)
+			m_playfield.set(x, y, 0);
 
 		for(auto &pair : m_players)
 			send_update(pair.second.peer);

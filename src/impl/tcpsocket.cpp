@@ -22,7 +22,7 @@
 namespace interface {
 
 const unsigned char prefix[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-									0x00, 0x00, 0x00, 0xFF, 0xFF};
+			0x00, 0x00, 0x00, 0xFF, 0xFF};
 
 bool sockaddr_to_bytes(const sockaddr_storage *ptr, sv_<uchar> &to)
 {
@@ -52,16 +52,16 @@ std::string address_bytes_to_string(const sv_<uchar> &ip)
 	for(size_t i = 0; i < ip.size(); i++){
 		if(ip.size() == 4){
 			os<<std::dec<<std::setfill('0')<<std::setw(0)
-			  <<((uint32_t)ip[i] & 0xff);
+					<<((uint32_t)ip[i] & 0xff);
 			if(i < ip.size() - 1)
 				os<<".";
 		} else {
 			os<<std::hex<<std::setfill('0')<<std::setw(2)
-			  <<((uint32_t)ip[i] & 0xff);
+					<<((uint32_t)ip[i] & 0xff);
 			i++;
 			if(i < ip.size())
 				os<<std::hex<<std::setfill('0')<<std::setw(2)
-				  <<((uint32_t)ip[i] & 0xff);
+					<<((uint32_t)ip[i] & 0xff);
 			if(i < ip.size() - 1)
 				os<<":";
 		}

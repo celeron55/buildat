@@ -52,7 +52,7 @@ int main(int argc, char *argv[])
 			"  -l [level number]    Set maximum log level (0...5)\n"
 			"  -L [log file path]   Append log to a specified file\n"
 			"  -m [name]            Choose menu extension name\n"
-	;
+			;
 
 	int c;
 	while((c = c55_getopt(argc, argv, opts)) != -1)

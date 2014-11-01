@@ -249,7 +249,7 @@ void GenerateThread::run(interface::Thread *thread)
 				[&](worldgen::Interface *iworldgen)
 		{
 			// Generate one section for each instance
-			for(auto &pair : m_module->m_instances){
+			for(auto &pair: m_module->m_instances){
 				up_<CInstance> &instance = pair.second;
 				if(!instance->m_enabled && !instance->m_queued_sections.empty()){
 					// Has to be checked later

@@ -9,13 +9,13 @@
 namespace cereal
 {
 	template<class Archive>
-	void save(Archive &archive, const Urho3D::IntVector2 &v)
+			void save(Archive &archive, const Urho3D::IntVector2 &v)
 	{
 		archive((int32_t)v.x_);
 		archive((int32_t)v.y_);
 	}
 	template<class Archive>
-	void load(Archive &archive, Urho3D::IntVector2 &v)
+			void load(Archive &archive, Urho3D::IntVector2 &v)
 	{
 		int32_t x, y;
 		archive(x, y);

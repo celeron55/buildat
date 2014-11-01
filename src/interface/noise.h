@@ -143,44 +143,44 @@ namespace interface
 	inline float NoisePerlin2D(const NoiseParams *np, float x, float y, float s)
 	{
 		return (np->offset + np->scale * noise2d_perlin(
-					   (float)x / np->spread.X,
-					   (float)y / np->spread.Y,
-					   s + np->seed, np->octaves, np->persist));
+				(float)x / np->spread.X,
+				(float)y / np->spread.Y,
+				s + np->seed, np->octaves, np->persist));
 	}
 
 	inline float NoisePerlin2DNoTxfm(
 			const NoiseParams *np, float x, float y, float s)
 	{
 		return (noise2d_perlin(
-					   (float)x / np->spread.X,
-					   (float)y / np->spread.Y,
-					   s + np->seed, np->octaves, np->persist));
+				(float)x / np->spread.X,
+				(float)y / np->spread.Y,
+				s + np->seed, np->octaves, np->persist));
 	}
 
 	inline float NoisePerlin2DPosOffset(const NoiseParams *np, float x, float xoff,
 			float y, float yoff, float s)
 	{
 		return (np->offset + np->scale * noise2d_perlin(
-					   (float)xoff + (float)x / np->spread.X,
-					   (float)yoff + (float)y / np->spread.Y,
-					   s + np->seed, np->octaves, np->persist));
+				(float)xoff + (float)x / np->spread.X,
+				(float)yoff + (float)y / np->spread.Y,
+				s + np->seed, np->octaves, np->persist));
 	}
 
 	inline float NoisePerlin2DNoTxfmPosOffset(const NoiseParams *np, float x,
 			float xoff, float y, float yoff, float s)
 	{
 		return (noise2d_perlin(
-					   (float)xoff + (float)x / np->spread.X,
-					   (float)yoff + (float)y / np->spread.Y,
-					   s + np->seed, np->octaves, np->persist));
+				(float)xoff + (float)x / np->spread.X,
+				(float)yoff + (float)y / np->spread.Y,
+				s + np->seed, np->octaves, np->persist));
 	}
 
 	inline float NoisePerlin3D(
 			const NoiseParams *np, float x, float y, float z, float s)
 	{
 		return (np->offset + np->scale *
-				   noise3d_perlin((float)x / np->spread.X, (float)y / np->spread.Y,
-				   (float)z / np->spread.Z, s + np->seed, np->octaves, np->persist));
+				noise3d_perlin((float)x / np->spread.X, (float)y / np->spread.Y,
+				(float)z / np->spread.Z, s + np->seed, np->octaves, np->persist));
 	}
 }
 // vim: set noet ts=4 sw=4:

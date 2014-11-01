@@ -17,7 +17,7 @@ namespace core
 		{}
 
 		template<typename T>
-		void set_default(const ss_ &name, const T &native_v)
+				void set_default(const ss_ &name, const T &native_v)
 		{
 			json::Value new_v(native_v);
 
@@ -33,7 +33,7 @@ namespace core
 		}
 
 		template<typename T>
-		void set(const ss_ &name, const T &native_v)
+				void set(const ss_ &name, const T &native_v)
 		{
 			json::Value new_v(native_v);
 
@@ -49,7 +49,7 @@ namespace core
 		}
 
 		template<typename T>
-		const T& get(const ss_ &name) const
+				const T& get(const ss_ &name) const
 		{
 			const json::Value &current_v = values.get(name);
 			if(current_v.is_undefined()){

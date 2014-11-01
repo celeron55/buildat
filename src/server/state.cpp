@@ -284,7 +284,7 @@ void ModuleThread::run(interface::Thread *thread)
 		if(direct_cb){
 			// Handle the direct callback
 			handle_direct_cb(direct_cb);
-		} else if(got_event) {
+		} else if(got_event){
 			// Handle the event
 			handle_event(event);
 		} else {
@@ -394,7 +394,7 @@ void ModuleThread::handle_event(Event &event)
 				interface::debug::get_exception_backtrace(bt);
 				interface::debug::log_backtrace(bt,
 						"Backtrace in M["+mc->info.name+"] for "+
-								bt.exception_name+"(\""+e.what()+"\")");
+						bt.exception_name+"(\""+e.what()+"\")");
 			}
 		}
 	}
@@ -459,7 +459,8 @@ struct CState: public State, public interface::Server
 	up_<interface::Thread> m_file_watch_thread;
 
 	CState():
-		m_compiler(rccpp::createCompiler(g_server_config.get<ss_>("compiler_command"))),
+		m_compiler(rccpp::createCompiler(
+				g_server_config.get<ss_>("compiler_command"))),
 		m_thread_pool(interface::thread_pool::createThreadPool())
 	{
 		m_thread_pool->start(4); // TODO: Configurable
@@ -476,7 +477,8 @@ struct CState: public State, public interface::Server
 		m_compiler->include_directories.push_back(
 				g_server_config.get<ss_>("interface_path")+"/..");
 		m_compiler->include_directories.push_back(
-				g_server_config.get<ss_>("interface_path")+"/../../3rdparty/cereal/include");
+				g_server_config.get<ss_>(
+				"interface_path")+"/../../3rdparty/cereal/include");
 		m_compiler->include_directories.push_back(
 				g_server_config.get<ss_>("interface_path")+
 				"/../../3rdparty/polyvox/library/PolyVoxCore/include");
@@ -487,8 +489,8 @@ struct CState: public State, public interface::Server
 
 		sv_<ss_> urho3d_subdirs = {
 			"Audio", "Container", "Core", "Engine", "Graphics", "Input", "IO",
-			"LuaScript", "Math", "Navigation", "Network", "Physics", "Resource",
-			"Scene", "Script", "UI", "Urho2D",
+					"LuaScript", "Math", "Navigation", "Network", "Physics", "Resource",
+					"Scene", "Script", "UI", "Urho2D",
 		};
 		for(const ss_ &subdir : urho3d_subdirs){
 			m_compiler->include_directories.push_back(
@@ -516,7 +518,7 @@ struct CState: public State, public interface::Server
 			// deadlocks
 			interface::MutexScope ms(m_modules_mutex);
 			for(auto name_it = m_module_load_order.rbegin();
-					name_it != m_module_load_order.rend(); ++name_it){
+			name_it != m_module_load_order.rend(); ++name_it){
 				auto it2 = m_modules.find(*name_it);
 				if(it2 == m_modules.end())
 					continue;
@@ -670,7 +672,7 @@ struct CState: public State, public interface::Server
 					std::ifstream f(hashfile_path);
 					if(f.good()){
 						previous_hash = ss_((std::istreambuf_iterator<char>(f)),
-									std::istreambuf_iterator<char>());
+								std::istreambuf_iterator<char>());
 					}
 				}
 				if(previous_hash == content_hash){
@@ -682,7 +684,7 @@ struct CState: public State, public interface::Server
 
 		m_compiler->include_directories.push_back(m_modules_path);
 		bool build_ok = m_compiler->build(info.name, init_cpp_path, build_dst,
-					extra_cxxflags, extra_ldflags, skip_compile);
+				extra_cxxflags, extra_ldflags, skip_compile);
 		m_compiler->include_directories.pop_back();
 
 		if(!build_ok){
@@ -874,7 +876,8 @@ struct CState: public State, public interface::Server
 									mc.get())
 								new_sublist.push_back(mc1);
 							else
-								log_v(MODULE, "Removing %s subscription to event %zu",
+								log_v(MODULE,
+										"Removing %s subscription to event %zu",
 										cs(module_name), type);
 						}
 						sublist = new_sublist;
@@ -899,7 +902,8 @@ struct CState: public State, public interface::Server
 						" reference; unloading shared executable is probably unsafe",
 						cs(module_name));
 			// Drop reference to container
-			log_t(MODULE, "unload_module_u[%s]: Dropping container", cs(module_name));
+			log_t(MODULE, "unload_module_u[%s]: Dropping container",
+					cs(module_name));
 			mc.reset();
 			// Unload shared executable
 			log_t(MODULE, "unload_module_u[%s]: Unloading shared executable",
@@ -997,7 +1001,7 @@ struct CState: public State, public interface::Server
 	void check_valid_access_u(
 			ModuleContainer *target_mc,
 			ModuleContainer *caller_mc
-	){
+			){
 		const ss_ &target_name = target_mc->info.name;
 		const ss_ &caller_name = caller_mc->info.name;
 
@@ -1226,7 +1230,7 @@ struct CState: public State, public interface::Server
 				interface::ModuleInfo &info = it->second;
 				emit_event(Event("core:module_modified",
 						new interface::ModuleModifiedEvent(
-							info.name, info.path)));
+						info.name, info.path)));
 			}
 		}
 
@@ -1315,7 +1319,7 @@ struct CState: public State, public interface::Server
 	}
 
 	void access_thread_pool(std::function<void(
-				interface::thread_pool::ThreadPool*pool)> cb)
+			interface::thread_pool::ThreadPool*pool)> cb)
 	{
 		interface::MutexScope ms(m_thread_pool_mutex);
 		cb(m_thread_pool.get());
@@ -1346,7 +1350,7 @@ void FileWatchThread::run(interface::Thread *thread)
 		{
 			interface::MutexScope ms(m_server->m_modules_mutex);
 			for(auto &pair : m_server->m_module_file_watches){
-				for(int fd: active_sockets){
+				for(int fd : active_sockets){
 					pair.second->report_fd(fd);
 				}
 			}

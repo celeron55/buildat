@@ -172,7 +172,7 @@ struct CState: public State
 		if(!f.good())
 			throw Exception(ss_()+"Could not open file: "+path);
 		std::string file_content((std::istreambuf_iterator<char>(f)),
-			std::istreambuf_iterator<char>());
+				std::istreambuf_iterator<char>());
 		ss_ file_hash2 = interface::sha1::calculate(file_content);
 		if(file_hash != file_hash2){
 			log_e(MODULE, "Opened file differs in hash: \"%s\": "
@@ -251,7 +251,7 @@ void CState::setup_packet_handlers()
 		m_file_hashes[file_name] = file_hash;
 		ss_ file_hash_hex = interface::sha1::hex(file_hash);
 		log_v(MODULE, "Server announces file: %s %s",
-					cs(file_hash_hex), cs(file_name));
+				cs(file_hash_hex), cs(file_name));
 		// Check if we already have this file
 		ss_ path = m_remote_cache_path+"/"+file_hash_hex;
 		std::ifstream ifs(path, std::ios::binary);
@@ -263,13 +263,13 @@ void CState::setup_packet_handlers()
 			if(content_hash == file_hash){
 				// We have it; no need to ask this file
 				log_i(MODULE, "%s %s: cached",
-							cs(file_hash_hex), cs(file_name));
+						cs(file_hash_hex), cs(file_name));
 				cached_is_ok = true;
 			} else {
 				// Our copy is broken, re-request it
 				log_i(MODULE, "%s %s: Our copy is broken (has hash %s)",
-							cs(file_hash_hex), cs(file_name),
-							cs(interface::sha1::hex(content_hash)));
+						cs(file_hash_hex), cs(file_name),
+						cs(interface::sha1::hex(content_hash)));
 			}
 		}
 		if(cached_is_ok){
@@ -279,7 +279,7 @@ void CState::setup_packet_handlers()
 		} else {
 			// We don't have it; request this file
 			log_i(MODULE, "%s %s: requesting",
-						cs(file_hash_hex), cs(file_name));
+					cs(file_hash_hex), cs(file_name));
 			std::ostringstream os(std::ios::binary);
 			{
 				cereal::PortableBinaryOutputArchive ar(os);
@@ -316,20 +316,21 @@ void CState::setup_packet_handlers()
 		}
 		if(m_waiting_files.count(file_name) == 0){
 			log_w(MODULE, "Received file was not requested: %s %s",
-						cs(interface::sha1::hex(file_hash)), cs(file_name));
+					cs(interface::sha1::hex(file_hash)), cs(file_name));
 			return;
 		}
 		m_waiting_files.erase(file_name);
 		ss_ file_hash2 = interface::sha1::calculate(file_content);
 		if(file_hash != file_hash2){
 			log_w(MODULE, "Requested file differs in hash: \"%s\": "
-						"requested %s, actual %s", cs(file_name),
-						cs(interface::sha1::hex(file_hash)),
-						cs(interface::sha1::hex(file_hash2)));
+					"requested %s, actual %s", cs(file_name),
+					cs(interface::sha1::hex(file_hash)),
+					cs(interface::sha1::hex(file_hash2)));
 			return;
 		}
 		ss_ file_hash_hex = interface::sha1::hex(file_hash);
-		ss_ path = g_client_config.get<ss_>("cache_path")+"/remote/"+file_hash_hex;
+		ss_ path = g_client_config.get<ss_>("cache_path")+"/remote/"+
+				file_hash_hex;
 		log_i(MODULE, "Saving %s to %s", cs(file_name), cs(path));
 		std::ofstream of(path, std::ios::binary);
 		of<<file_content;
@@ -358,11 +359,11 @@ void CState::setup_packet_handlers()
 			// This is the scene
 		} else if(node){
 			log_w(MODULE, "replicate:create_node: Node %i (old name=\"%s\")"
-						" already exists. This could be due to a node having been"
-						" accidentally created on the client side without mode=LOCAL."
-						" If a node seems to mysteriously disappear, this is the"
-						" reason.",
-						node_id, node->GetName().CString());
+					" already exists. This could be due to a node having been"
+					" accidentally created on the client side without mode=LOCAL."
+					" If a node seems to mysteriously disappear, this is the"
+					" reason.",
+					node_id, node->GetName().CString());
 		} else {
 			log_v(MODULE, "Creating node %i", node_id);
 			// Add to the root level; it may be moved as we receive the parent
@@ -397,11 +398,11 @@ void CState::setup_packet_handlers()
 			if(!c || c->GetType() != type || c->GetNode() != node){
 				if(c){
 					log_w(MODULE, "replicate:create_node: Component %i already"
-								" exists. This could be due to a component having"
-								" been accidentally created on the client side"
-								" without mode=LOCAL."
-								" If a component seems to mysteriously disappear,"
-								" this is the reason.", c_id);
+							" exists. This could be due to a component having"
+							" been accidentally created on the client side"
+							" without mode=LOCAL."
+							" If a component seems to mysteriously disappear,"
+							" this is the reason.", c_id);
 					c->Remove();
 				}
 				log_v(MODULE, "Creating component %i", c_id);
@@ -503,7 +504,7 @@ void CState::setup_packet_handlers()
 	m_packet_handlers[""] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
-		};
+	};
 }
 
 State* createState(sp_<app::App> app)

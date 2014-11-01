@@ -16,7 +16,7 @@ namespace main_context
 {
 	struct OpaqueSceneReference;
 	typedef OpaqueSceneReference* SceneReference;
-};
+}
 
 namespace replicate
 {

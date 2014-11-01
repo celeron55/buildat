@@ -136,12 +136,12 @@ static void print(int level, const char *sys, const char *fmt, va_list va_args)
 			timestr[0] = 0;
 		} else {
 			size_t timestr_len = strftime(timestr, sizeof(timestr),
-						"%b %d %H:%M:%S", localtime(&now));
+					"%b %d %H:%M:%S", localtime(&now));
 			if(timestr_len == 0)
 				timestr[0] = '\0';
 			int ms = (get_timeofday_us() % 1000000) / 1000;
 			timestr_len += snprintf(timestr + timestr_len,
-						sizeof(timestr) - timestr_len, ".%03i", ms);
+					sizeof(timestr) - timestr_len, ".%03i", ms);
 		}
 		char sysstr[9];
 		snprintf(sysstr, 9, "%s        ", sys);

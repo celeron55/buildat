@@ -66,7 +66,7 @@ namespace interface
 				event_data.Erase("Component");
 			}
 			m_server->emit_event(m_buildat_event_type, new interface::MagicEvent(
-						event_type, event_data));
+					event_type, event_data));
 		}
 	};
 }

@@ -25,7 +25,7 @@ namespace main_context
 	{
 		SceneReference scene;
 
-		SceneDeleted(SceneReference scene): scene(scene) {}
+		SceneDeleted(SceneReference scene): scene(scene){}
 	};
 
 	struct Interface

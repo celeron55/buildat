@@ -21,7 +21,7 @@ namespace main_context
 {
 	struct OpaqueSceneReference;
 	typedef OpaqueSceneReference* SceneReference;
-};
+}
 
 namespace voxelworld
 {
@@ -126,10 +126,11 @@ namespace voxelworld
 	}
 
 	inline bool access(interface::Server *server, SceneReference scene_ref,
-			std::function<void(voxelworld::Instance *instance)> cb)
+			std::function<void(voxelworld::Instance*instance)> cb)
 	{
 		return access(server, [&](voxelworld::Interface *i){
-			voxelworld::Instance *instance = check(i->get_instance(scene_ref));
+			voxelworld::Instance *instance =
+					check(i->get_instance(scene_ref));
 			cb(instance);
 		});
 	}

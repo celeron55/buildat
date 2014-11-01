@@ -67,7 +67,7 @@ static const char* library_error(){
 }
 #endif
 
-typedef void*(*RCCPP_Constructor)(interface::Server *server);
+typedef void*(*RCCPP_Constructor)(interface::Server * server);
 
 struct RCCPP_Info {
 	void *module;

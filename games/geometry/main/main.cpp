@@ -85,14 +85,14 @@ struct Module: public interface::Module
 				n->SetPosition(Vector3(0.0f, 6.0f, 0.0f));
 				n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
 
-	            /*int w = 1, h = 1, d = 1;
-	            ss_ data = "1";*/
+				/*int w = 1, h = 1, d = 1;
+				ss_ data = "1";*/
 				int w = 2, h = 2, d = 1;
 				ss_ data = "0111";
 
 				// Crude way of dynamically defining a voxel model
 				n->SetVar(StringHash("simple_voxel_data"), Variant(
-							data.c_str()));
+						data.c_str()));
 				n->SetVar(StringHash("simple_voxel_w"), Variant(w));
 				n->SetVar(StringHash("simple_voxel_h"), Variant(h));
 				n->SetVar(StringHash("simple_voxel_d"), Variant(d));
@@ -106,7 +106,7 @@ struct Module: public interface::Module
 				body->SetFriction(0.75f);
 				body->SetMass(1.0);
 				CollisionShape *shape = n->CreateComponent<CollisionShape>(
-							LOCAL);
+						LOCAL);
 				shape->SetConvexHull(model, 0, Vector3::ONE);
 				//shape->SetTriangleMesh(model, 0, Vector3::ONE);
 				//shape->SetBox(Vector3::ONE);
@@ -137,21 +137,21 @@ struct Module: public interface::Module
 
 				int w = 10, h = 3, d = 10;
 				ss_ data =
-					"111111111100100000100000000000"
-					"111111111100000000000000000000"
-					"111111111100000000000000000000"
-					"111111111100000000000000000000"
-					"111111111100011000000001000000"
-					"111111111100011000000001000000"
-					"111111111100000000000000000000"
-					"111111111100000000000000000000"
-					"111111111100000000000000000000"
-					"111111111100000000000000000000"
-					;
+						"111111111100100000100000000000"
+						"111111111100000000000000000000"
+						"111111111100000000000000000000"
+						"111111111100000000000000000000"
+						"111111111100011000000001000000"
+						"111111111100011000000001000000"
+						"111111111100000000000000000000"
+						"111111111100000000000000000000"
+						"111111111100000000000000000000"
+						"111111111100000000000000000000"
+						;
 
 				// Crude way of dynamically defining a voxel model
 				n->SetVar(StringHash("simple_voxel_data"), Variant(
-							data.c_str()));
+						data.c_str()));
 				n->SetVar(StringHash("simple_voxel_w"), Variant(w));
 				n->SetVar(StringHash("simple_voxel_h"), Variant(h));
 				n->SetVar(StringHash("simple_voxel_d"), Variant(d));
@@ -164,7 +164,7 @@ struct Module: public interface::Module
 				RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
 				body->SetFriction(0.75f);
 				CollisionShape *shape = n->CreateComponent<CollisionShape>(
-							LOCAL);
+						LOCAL);
 				shape->SetTriangleMesh(model, 0, Vector3::ONE);
 			}
 		});

@@ -67,7 +67,7 @@ int main(int argc, char *argv[])
 			"  -l [integer]         Set maximum log level (0...5)\n"
 			"  -L [log file path]   Append log to a specified file\n"
 			"  -C [module_name]     Skip compiling specified module\n"
-	;
+			;
 
 	int c;
 	while((c = c55_getopt(argc, argv, opts)) != -1)
@@ -171,7 +171,7 @@ int main(int argc, char *argv[])
 					next_tick_us = current_us;
 				}
 				interface::Event event("core:tick",
-					new interface::TickEvent(t_per_tick / 1e6));
+						new interface::TickEvent(t_per_tick / 1e6));
 				state->emit_event(std::move(event));
 			}
 

@@ -78,7 +78,7 @@ struct CThreadPool: public ThreadPool
 			}
 			// Run the task's threaded part
 			try {
-				while(!current->thread()) ;
+				while(!current->thread());
 			} catch(std::exception &e){
 				log_w(MODULE, "Worker task failed: %s", e.what());
 				interface::debug::log_exception_backtrace();
@@ -100,7 +100,7 @@ struct CThreadPool: public ThreadPool
 	void add_task(up_<Task> task)
 	{
 		// TODO: Limit task->pre() execution time per frame
-		while(!task->pre()) ;
+		while(!task->pre());
 		interface::MutexScope ms(m_mutex);
 		m_input_queue.push_back(std::move(task));
 		m_tasks_sem.post();

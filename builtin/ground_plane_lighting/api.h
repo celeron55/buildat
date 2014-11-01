@@ -10,7 +10,7 @@ namespace main_context
 {
 	struct OpaqueSceneReference;
 	typedef OpaqueSceneReference* SceneReference;
-};
+}
 
 namespace ground_plane_lighting
 {
@@ -36,7 +36,7 @@ namespace ground_plane_lighting
 		return server->access_module("ground_plane_lighting",
 		[&](interface::Module *module){
 			auto *iface = (ground_plane_lighting::Interface*)
-				module->check_interface();
+					module->check_interface();
 			cb(iface);
 		});
 	}

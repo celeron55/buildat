@@ -43,8 +43,7 @@ void interval_loop(int interval_us, std::function<bool(float load_avg)> f)
 
 		int64_t t_tick_end = get_timeofday_us();
 		int64_t t_tick_length = t_tick_end > t_tick_start ? t_tick_end -
-				t_tick_start :
-				0;
+				t_tick_start : 0;
 		float load_ratio = (float)t_tick_length / interval_us;
 		//log_i("loop", "load_ratio=%f", load_ratio);
 		load_log[load_log_i] = load_ratio;

@@ -41,7 +41,7 @@ namespace std {
 template<> struct hash<pv::Vector<2u, int16_t>>{
 	std::size_t operator()(const pv::Vector<2u, int16_t> &v) const {
 		return ((std::hash<int16_t>() (v.getX()) << 0) ^
-				   (std::hash<int16_t>() (v.getY()) << 1));
+				(std::hash<int16_t>() (v.getY()) << 1));
 	}
 };
 
@@ -74,14 +74,14 @@ struct YSTSector
 				sector_p.getX() * sector_size.getX() + sector_size.getX() - 1,
 				0,
 				sector_p.getY() * sector_size.getY() + sector_size.getY() - 1
-		)))
+				)))
 	{
 		pv::Region region = volume->getEnclosingRegion();
 		auto lc = region.getLowerCorner();
 		auto uc = region.getUpperCorner();
 		/*log_v(MODULE, "YSTSector volume lc=" PV3I_FORMAT ", uc=" PV3I_FORMAT
-		        ", size=%zu", PV3I_PARAMS(lc), PV3I_PARAMS(uc),
-		        volume->m_dataSize);*/
+				", size=%zu", PV3I_PARAMS(lc), PV3I_PARAMS(uc),
+				volume->m_dataSize);*/
 		for(int z = lc.getZ(); z <= uc.getZ(); z++){
 			for(int x = lc.getX(); x <= uc.getX(); x++){
 				volume->setVoxelAt(x, 0, z, INT_MIN);
@@ -145,8 +145,8 @@ struct GlobalYSTMap
 
 		// Set sector dirty flag
 		auto it = std::lower_bound(m_dirty_sectors.begin(),
-					m_dirty_sectors.end(), sector,
-					std::greater<YSTSector*>()); // position in descending order
+				m_dirty_sectors.end(), sector,
+				std::greater<YSTSector*>()); // position in descending order
 		if(it == m_dirty_sectors.end() || *it != sector)
 			m_dirty_sectors.insert(it, sector);
 	}
@@ -180,7 +180,7 @@ struct CInstance: public ground_plane_lighting::Instance
 					ivoxelworld->get_instance(m_scene_ref);
 			pv::Vector3DInt16 section_size = world->get_section_size_voxels();
 			pv::Vector<2, int16_t> sector_size(
-						section_size.getX(), section_size.getZ());
+					section_size.getX(), section_size.getZ());
 			m_global_yst.reset(new GlobalYSTMap(sector_size));
 		});
 	}
@@ -236,7 +236,7 @@ struct CInstance: public ground_plane_lighting::Instance
 					ar(s);
 				}
 				network::access(m_server, [&](network::Interface *inetwork){
-					for(auto &peer : m_clients_initialized){
+					for(auto &peer: m_clients_initialized){
 						inetwork->send(peer, "ground_plane_lighting:update",
 								os.str());
 					}
@@ -287,7 +287,7 @@ struct CInstance: public ground_plane_lighting::Instance
 				interface::VoxelRegistry *voxel_reg = world->get_voxel_reg();
 				//const auto &chunk_size_voxels = world->get_chunk_size_voxels();
 				pv::Region chunk_region =
-					world->get_chunk_region_voxels(chunk_p);
+						world->get_chunk_region_voxels(chunk_p);
 
 				auto lc = chunk_region.getLowerCorner();
 				auto uc = chunk_region.getUpperCorner();
@@ -302,7 +302,7 @@ struct CInstance: public ground_plane_lighting::Instance
 						int y = uc.getY();
 						for(;; y--){
 							VoxelInstance v = world->get_voxel(
-										pv::Vector3DInt32(x, y, z), true);
+									pv::Vector3DInt32(x, y, z), true);
 							if(v.get_id() == interface::VOXELTYPEID_UNDEFINED){
 								// NOTE: This leaves the chunks below unhandled;
 								// there would have to be some kind of a dirty
@@ -440,7 +440,7 @@ struct Module: public interface::Module, public ground_plane_lighting::Interface
 	{
 		// Drop instance of the deleted scene (there should be only one, but
 		// loop through all of them just for robustness)
-		for(auto it = m_instances.begin(); it != m_instances.end(); ){
+		for(auto it = m_instances.begin(); it != m_instances.end();){
 			auto current_it = it++;
 			up_<CInstance> &instance = current_it->second;
 			if(instance->m_scene_ref == event.scene){

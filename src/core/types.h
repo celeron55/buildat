@@ -87,7 +87,7 @@ static inline ss_ ftos(float f){
 #define SLEN(x) (sizeof(x)/sizeof((x)[0]))
 
 template<typename T>
-static inline ss_ dump(const T &v);
+		static inline ss_ dump(const T &v);
 
 template<>
 inline ss_ dump(const double &v){
@@ -165,10 +165,10 @@ static inline const T* check(const T *v){
 }
 
 #if 0 // Don't use this; this isn't needed on MinGW 4.9.1 and newer
-#ifdef __MINGW32__
+	#ifdef __MINGW32__
 // MinGW doesn't have std::to_string (as of mingw-w64 4.8.1); define something to replace it
 // This include is going to fuck things up for Linux users that use modules developed on Windows
-#include <sstream>
+		#include <sstream>
 namespace std {
 	template<typename T>
 	ss_ to_string(const T &v){
@@ -179,7 +179,7 @@ namespace std {
 }
 // Also this doesn't exist on MinGW (as of mingw-w64 4.8.1)
 typedef int ssize_t;
-#endif
+	#endif
 #endif
 
 // vim: set noet ts=4 sw=4:

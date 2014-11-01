@@ -26,6 +26,6 @@ namespace interface
 		bool check_file_extension(const char *path, const char *ext);
 		ss_ strip_file_extension(const ss_ &path);
 		ss_ strip_file_name(const ss_ &path);
-	};
+	}
 }
 // vim: set noet ts=4 sw=4:

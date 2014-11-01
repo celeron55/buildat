@@ -104,7 +104,7 @@ struct ResolveState
 				return true;
 			}
 			return set_error(ss_()+"Couldn't get module info for \""+name+"\""+
-						   (log_extra_info == "" ? "" : ss_()+" ("+log_extra_info+")"));
+					(log_extra_info == "" ? "" : ss_()+" ("+log_extra_info+")"));
 		}
 
 		m_required_modules.insert(name);
@@ -150,7 +150,7 @@ struct ResolveState
 	{
 		if(m_promised_modules.count(name)){
 			throw Exception(ss_()+"Logic error in ResolveState: "
-						  "load_module(\""+name+"\"): already promised");
+					"load_module(\""+name+"\"): already promised");
 		}
 		log_d(MODULE, "Marking \"%s\" to be loaded", cs(name));
 		m_module_load_order.push_back(name);
@@ -224,10 +224,10 @@ struct ResolveState
 	{
 		log_d(MODULE, "step_through()");
 
-		while(step(true)) ;
+		while(step(true));
 		if(m_failed) return false;
 
-		while(step(false)) ;
+		while(step(false));
 		if(m_failed) return false;
 
 		for(const ss_ &name : m_required_modules){
@@ -329,7 +329,7 @@ struct Module: public interface::Module, public loader::Interface
 				log_t(MODULE, "%s: Opened", cs(meta_path));
 			}
 			std::string meta_content((std::istreambuf_iterator<char>(f)),
-				std::istreambuf_iterator<char>());
+					std::istreambuf_iterator<char>());
 			log_t(MODULE, "%s: File length: %zu", cs(meta_path),
 					meta_content.size());
 			json::json_error_t json_error;

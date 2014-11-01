@@ -116,5 +116,6 @@ bool path_exists(const ss_ &path)
 	return c55fs::PathExists(path);
 }
 
-}}
+}
+}
 // vim: set noet ts=4 sw=4:

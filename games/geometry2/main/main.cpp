@@ -153,8 +153,8 @@ struct Module: public interface::Module
 				n->SetPosition(Vector3(0.0f, 6.0f, 0.0f));
 				n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
 
-	            /*int w = 1, h = 1, d = 1;
-	            ss_ data = "1";*/
+				/*int w = 1, h = 1, d = 1;
+				ss_ data = "1";*/
 				int w = 2, h = 2, d = 1;
 				ss_ data = "1333";
 
@@ -166,8 +166,8 @@ struct Module: public interface::Module
 
 				// Crude way of dynamically defining a voxel model
 				n->SetVar(StringHash("simple_voxel_data"), Variant(
-							PODVector<uint8_t>((const uint8_t*)data.c_str(),
-							data.size())));
+						PODVector<uint8_t>((const uint8_t*)data.c_str(),
+						data.size())));
 				n->SetVar(StringHash("simple_voxel_w"), Variant(w));
 				n->SetVar(StringHash("simple_voxel_h"), Variant(h));
 				n->SetVar(StringHash("simple_voxel_d"), Variant(d));
@@ -182,7 +182,7 @@ struct Module: public interface::Module
 				body->SetFriction(0.75f);
 				body->SetMass(1.0);
 				CollisionShape *shape = n->CreateComponent<CollisionShape>(
-							LOCAL);
+						LOCAL);
 				shape->SetConvexHull(model, 0, Vector3::ONE);
 				//shape->SetTriangleMesh(model, 0, Vector3::ONE);
 				//shape->SetBox(Vector3::ONE);
@@ -214,17 +214,17 @@ struct Module: public interface::Module
 
 				int w = 10, h = 3, d = 10;
 				ss_ data =
-					"222222222211211111211111111111"
-					"222222222211111111111111111111"
-					"222222222211111111111111111111"
-					"222222222211111111111111111111"
-					"222222222211122111111112111111"
-					"222233222211123111111112111111"
-					"222233222211111111111111111111"
-					"222222222211111111111111111111"
-					"222222222211111111111111111111"
-					"222222222211111111111111111111"
-					;
+						"222222222211211111211111111111"
+						"222222222211111111111111111111"
+						"222222222211111111111111111111"
+						"222222222211111111111111111111"
+						"222222222211122111111112111111"
+						"222233222211123111111112111111"
+						"222233222211111111111111111111"
+						"222222222211111111111111111111"
+						"222222222211111111111111111111"
+						"222222222211111111111111111111"
+						;
 
 				// Convert data to the actually usable voxel type id namespace
 				// starting from VOXELTYPEID_UNDEFINED=0
@@ -234,8 +234,8 @@ struct Module: public interface::Module
 
 				// Crude way of dynamically defining a voxel model
 				n->SetVar(StringHash("simple_voxel_data"), Variant(
-							PODVector<uint8_t>((const uint8_t*)data.c_str(),
-							data.size())));
+						PODVector<uint8_t>((const uint8_t*)data.c_str(),
+						data.size())));
 				n->SetVar(StringHash("simple_voxel_w"), Variant(w));
 				n->SetVar(StringHash("simple_voxel_h"), Variant(h));
 				n->SetVar(StringHash("simple_voxel_d"), Variant(d));
@@ -249,7 +249,7 @@ struct Module: public interface::Module
 				RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
 				body->SetFriction(0.75f);
 				CollisionShape *shape = n->CreateComponent<CollisionShape>(
-							LOCAL);
+						LOCAL);
 				shape->SetTriangleMesh(model, 0, Vector3::ONE);
 			}
 		});

@@ -251,7 +251,7 @@ bool PathExists(std::string path)
 bool RecursiveDelete(std::string path)
 {
 	/*
-	    Execute the 'rm' command directly, by fork() and execve()
+		Execute the 'rm' command directly, by fork() and execve()
 	*/
 
 	std::cerr<<"Removing \""<<path<<"\""<<std::endl;
@@ -274,7 +274,7 @@ bool RecursiveDelete(std::string path)
 		argv[3] = NULL;
 
 		std::cerr<<"Executing '"<<argv[0]<<"' '"<<argv[1]<<"' '"
-				 <<argv[2]<<"'"<<std::endl;
+				<<argv[2]<<"'"<<std::endl;
 
 		execv(argv[0], argv);
 

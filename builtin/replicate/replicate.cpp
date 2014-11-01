@@ -85,10 +85,12 @@ struct Module: public interface::Module, public replicate::Interface
 				if(ps.scene_ref != nullptr){
 					scene = imc->find_scene(ps.scene_ref);
 					if(!scene)
-						log_w(MODULE, "~Module(): Scene %p not found", ps.scene_ref);
+						log_w(MODULE, "~Module(): Scene %p not found",
+								ps.scene_ref);
 				}
 				if(scene){
-					scene->CleanupConnection((magic::Connection*)&ps.scene_state);
+					scene->CleanupConnection(
+							(magic::Connection*)&ps.scene_state);
 				}
 				// Make sure to fully clear the SceneReplicationState in
 				// the context of main_context. Otherwise race conditions can
@@ -387,7 +389,7 @@ struct Module: public interface::Module, public replicate::Interface
 
 		// Handle changed or removed components
 		magic::HashMap<unsigned, magic::ComponentReplicationState>
-		&component_states = node_state.componentStates_;
+				&component_states = node_state.componentStates_;
 		for(auto it = component_states.Begin(); it != component_states.End();){
 			auto current_it = it++;
 			uint component_id = current_it->first_;
@@ -448,7 +450,7 @@ struct Module: public interface::Module, public replicate::Interface
 		// Handle new components
 		if(component_states.Size() != node->GetNumNetworkComponents()){
 			const magic::Vector<magic::SharedPtr<Component>>
-			&components = node->GetComponents();
+					&components = node->GetComponents();
 			for(uint i = 0; i<components.Size(); i++){
 				Component *component = components[i];
 				if(component->GetID() >= magic::FIRST_LOCAL_ID)
@@ -488,14 +490,14 @@ struct Module: public interface::Module, public replicate::Interface
 
 	/*void send_to_all(const ss_ &name, const magic::VectorBuffer &buf)
 	{
-	    log_i(MODULE, "%s: Update size: %zu, data=%s",
-	            cs(name), buf.GetBuffer().Size(), cs(dump(buf)));
-	    ss_ data = buf_to_string(buf);
-	    network::access(m_server, [&](network::Interface * inetwork){
-	        auto peers = inetwork->list_peers();
-	        for(auto &peer : peers)
-	            inetwork->send(peer, name, data);
-	    });
+		log_i(MODULE, "%s: Update size: %zu, data=%s",
+				cs(name), buf.GetBuffer().Size(), cs(dump(buf)));
+		ss_ data = buf_to_string(buf);
+		network::access(m_server, [&](network::Interface * inetwork){
+			auto peers = inetwork->list_peers();
+			for(auto &peer : peers)
+				inetwork->send(peer, name, data);
+		});
 	}*/
 
 	// Interface
@@ -530,7 +532,7 @@ struct Module: public interface::Module, public replicate::Interface
 			main_context::SceneReference scene_ref)
 	{
 		sv_<PeerId> result;
-		for(auto &pair: m_peers){
+		for(auto &pair : m_peers){
 			PeerState &ps = pair.second;
 			if(ps.scene_ref == nullptr || ps.scene_ref != scene_ref)
 				continue;
@@ -543,7 +545,7 @@ struct Module: public interface::Module, public replicate::Interface
 			main_context::SceneReference scene_ref, uint node_id)
 	{
 		sv_<PeerId> result;
-		for(auto &pair: m_peers){
+		for(auto &pair : m_peers){
 			PeerState &ps = pair.second;
 			if(ps.scene_ref == nullptr || ps.scene_ref != scene_ref)
 				continue;

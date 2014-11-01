@@ -48,7 +48,7 @@ namespace interface
 		Event(const ss_ &name, up_<Private> p):
 			type(t(name)), p(std::move(p)){}
 		template<typename PrivateT>
-		Event(const ss_ &name, PrivateT *p):
+				Event(const ss_ &name, PrivateT *p):
 			type(t(name)), p(up_<Private>(p))
 		{}
 

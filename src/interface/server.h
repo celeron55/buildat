@@ -98,7 +98,7 @@ namespace interface
 		virtual const ServerConfig& get_config() = 0;
 
 		virtual void access_thread_pool(std::function<void(
-					interface::thread_pool::ThreadPool*pool)> cb) = 0;
+				interface::thread_pool::ThreadPool*pool)> cb) = 0;
 	};
 }
 // vim: set noet ts=4 sw=4:

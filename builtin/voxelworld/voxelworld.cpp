@@ -103,8 +103,8 @@ struct Section
 		contained_chunks(contained_chunks),
 		node_ids(new pv::RawVolume<uint32_t>(contained_chunks)),
 		num_chunks(contained_chunks.getWidthInVoxels() *
-			contained_chunks.getHeightInVoxels() *
-			contained_chunks.getDepthInVoxels())
+				contained_chunks.getHeightInVoxels() *
+				contained_chunks.getDepthInVoxels())
 	{
 		chunk_buffers.resize(num_chunks);
 		// Cache these for speed
@@ -132,7 +132,7 @@ size_t Section::get_chunk_i(const pv::Vector3DInt32 &chunk_p) // global chunk_p
 	size_t i = local_z * h * w + local_y * w + local_x;
 	if(i >= num_chunks) // NOTE: This is not accurate but it is safe and fast
 		throw Exception(ss_()+"get_chunk_i: Section "+cs(section_p)+
-					  " does not contain chunk"+cs(chunk_p));
+				" does not contain chunk"+cs(chunk_p));
 	return i;
 }
 
@@ -336,7 +336,7 @@ struct CInstance: public voxelworld::Instance
 				const PODVector<unsigned char> &rawbuf = var.GetBuffer();
 				ss_ data((const char*)&rawbuf[0], rawbuf.Size());
 				up_<pv::RawVolume<VoxelInstance>> volume =
-					interface::deserialize_volume(data);
+						interface::deserialize_volume(data);
 				// Update collision shape
 				interface::mesh::set_voxel_physics_boxes(n, context, *volume,
 						m_voxel_reg.get());
@@ -432,7 +432,7 @@ struct CInstance: public voxelworld::Instance
 			ss_ voxel_reg_data = m_voxel_reg->serialize();
 
 			network::access(m_server, [&](network::Interface *inetwork){
-				for(auto &peer : m_clients_initialized){
+				for(auto &peer: m_clients_initialized){
 					inetwork->send(peer, "voxelworld:voxel_registry",
 							voxel_reg_data);
 				}
@@ -529,7 +529,7 @@ struct CInstance: public voxelworld::Instance
 		Zone *node_zone = n->CreateComponent<Zone>();
 		node_zone->SetPriority(-1000);
 		node_zone->SetBoundingBox(BoundingBox(
-					Vector3(-w/2, -h/2, -d/2), Vector3(w/2, h/2, d/2)));
+				Vector3(-w/2, -h/2, -d/2), Vector3(w/2, h/2, d/2)));
 
 		n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
 		n->SetPosition(node_p);
@@ -555,7 +555,7 @@ struct CInstance: public voxelworld::Instance
 
 		ss_ data = interface::serialize_volume_compressed(*volume);
 		n->SetVar(StringHash("buildat_voxel_data"), Variant(
-					PODVector<uint8_t>((const uint8_t*)data.c_str(), data.size())));
+				PODVector<uint8_t>((const uint8_t*)data.c_str(), data.size())));
 
 		run_commit_hooks_in_scene(chunk_p, n);
 
@@ -616,8 +616,8 @@ struct CInstance: public voxelworld::Instance
 	{
 		QueuedNodePhysicsUpdate update(node_id);
 		auto it = std::lower_bound(m_nodes_needing_physics_update.begin(),
-					m_nodes_needing_physics_update.end(), update,
-					std::greater<QueuedNodePhysicsUpdate>());
+				m_nodes_needing_physics_update.end(), update,
+				std::greater<QueuedNodePhysicsUpdate>());
 		if(it == m_nodes_needing_physics_update.end()){
 			m_nodes_needing_physics_update.insert(it, update);
 		} else if(it->node_id != node_id){
@@ -786,13 +786,13 @@ struct CInstance: public voxelworld::Instance
 			const PODVector<unsigned char> &buf = var.GetBuffer();
 			ss_ data((const char*)&buf[0], buf.Size());
 			up_<pv::RawVolume<VoxelInstance>> volume =
-				interface::deserialize_volume(data);
+					interface::deserialize_volume(data);
 
 			pv::Vector3DInt32 voxel_p(
-						p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX(),
-						p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY(),
-						p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ()
-					);
+					p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX(),
+					p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY(),
+					p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ()
+			);
 			log_t(MODULE, "set_voxel_direct() p=" PV3I_FORMAT ", v=%i: "
 					"Chunk " PV3I_FORMAT " in section " PV3I_FORMAT
 					"; internal position " PV3I_FORMAT,
@@ -805,8 +805,8 @@ struct CInstance: public voxelworld::Instance
 			ss_ new_data = interface::serialize_volume_compressed(*volume);
 
 			n->SetVar(StringHash("buildat_voxel_data"), Variant(
-						PODVector<uint8_t>((const uint8_t*)new_data.c_str(),
-						new_data.size())));
+					PODVector<uint8_t>((const uint8_t*)new_data.c_str(),
+					new_data.size())));
 
 			run_commit_hooks_in_scene(chunk_p, n);
 		});
@@ -823,7 +823,7 @@ struct CInstance: public voxelworld::Instance
 	{
 		// Don't log here; this is a too busy place for even ignored log calls
 		/*log_t(MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i",
-		        PV3I_PARAMS(p), v.data);*/
+				PV3I_PARAMS(p), v.data);*/
 		pv::Vector3DInt32 chunk_p = container_coord(p, m_chunk_size_voxels);
 		pv::Vector3DInt16 section_p =
 				container_coord16(chunk_p, m_section_size_chunks);
@@ -842,7 +842,7 @@ struct CInstance: public voxelworld::Instance
 
 		// Set in buffer
 		ChunkBuffer &buf = section->get_buffer(chunk_p, m_server,
-					&m_total_buffers_loaded);
+				&m_total_buffers_loaded);
 		if(!buf.volume){
 			log_(disable_warnings ? CORE_DEBUG : CORE_WARNING,
 					MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i: Couldn't get "
@@ -866,8 +866,8 @@ struct CInstance: public voxelworld::Instance
 
 		// Set section buffer loaded flag
 		auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
-					m_sections_with_loaded_buffers.end(), section,
-					std::greater<Section*>()); // position in descending order
+				m_sections_with_loaded_buffers.end(), section,
+				std::greater<Section*>()); // position in descending order
 		if(it == m_sections_with_loaded_buffers.end() || *it != section)
 			m_sections_with_loaded_buffers.insert(it, section);
 	}
@@ -920,8 +920,8 @@ struct CInstance: public voxelworld::Instance
 			}
 
 			n->SetVar(StringHash("buildat_voxel_data"), Variant(
-						PODVector<uint8_t>((const uint8_t*)new_data.c_str(),
-						new_data.size())));
+					PODVector<uint8_t>((const uint8_t*)new_data.c_str(),
+					new_data.size())));
 
 			run_commit_hooks_in_scene(chunk_p, n);
 		});
@@ -1000,7 +1000,7 @@ struct CInstance: public voxelworld::Instance
 
 		// Get from buffer
 		ChunkBuffer &buf = section->get_buffer(chunk_p, m_server,
-					&m_total_buffers_loaded);
+				&m_total_buffers_loaded);
 		if(!buf.volume){
 			log_(disable_warnings ? CORE_DEBUG : CORE_WARNING,
 					MODULE, "get_voxel() p=" PV3I_FORMAT ": Couldn't get "
@@ -1018,8 +1018,8 @@ struct CInstance: public voxelworld::Instance
 
 		// Set section buffer loaded flag
 		auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
-					m_sections_with_loaded_buffers.end(), section,
-					std::greater<Section*>()); // position in descending order
+				m_sections_with_loaded_buffers.end(), section,
+				std::greater<Section*>()); // position in descending order
 		if(it == m_sections_with_loaded_buffers.end() || *it != section)
 			m_sections_with_loaded_buffers.insert(it, section);
 
@@ -1152,7 +1152,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		// TODO
 
 		/*// Restore voxel registry and stuff
-		ss_ data = m_server->tmp_restore_data("voxelworld:restore_info");
+				ss_ data = m_server->tmp_restore_data("voxelworld:restore_info");
 		ss_ voxel_reg_data;
 		{
 			std::istringstream is(data, std::ios::binary);
@@ -1162,7 +1162,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		m_voxel_reg->deserialize(voxel_reg_data);*/
 
 		// Start up normally
-		on_start();
+				on_start();
 	}
 
 	void on_tick(const interface::TickEvent &event)
@@ -1185,7 +1185,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 	{
 		// Drop instance of the deleted scene (there should be only one, but
 		// loop through all of them just for robustness)
-		for(auto it = m_instances.begin(); it != m_instances.end(); ){
+		for(auto it = m_instances.begin(); it != m_instances.end();){
 			auto current_it = it++;
 			up_<CInstance> &instance = current_it->second;
 			if(instance->m_scene_ref == event.scene){
@@ -1197,7 +1197,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 	/*// TODO: How should nodes be filtered for replication?
 	// TODO: Generally the client wants roughly one section, but isn't
 	//       positioned at the middle of a section
-	void on_get_section(const network::Packet &packet)
+			void on_get_section(const network::Packet &packet)
 	{
 		pv::Vector3DInt16 section_p;
 		{
@@ -1207,11 +1207,11 @@ struct Module: public interface::Module, public voxelworld::Interface
 		}
 		log_v(MODULE, "C%i: on_get_section(): " PV3I_FORMAT,
 				packet.sender, PV3I_PARAMS(section_p));
-	}*/
+		}*/
 
-	// Interface
+		// Interface
 
-	void create_instance(SceneReference scene_ref, const pv::Region &region)
+				void create_instance(SceneReference scene_ref, const pv::Region &region)
 	{
 		auto it = m_instances.find(scene_ref);
 		// TODO: Is an exception the best way to handle this?

@@ -25,7 +25,8 @@ namespace boot
 
 			// Force '.' as decimal point
 			try {
-				std::locale::global(std::locale(std::locale(""), "C", std::locale::numeric));
+				std::locale::global(std::locale(std::locale(""), "C",
+						std::locale::numeric));
 			} catch(std::runtime_error &e){
 				// Can happen on Wine
 				fprintf(stderr, "Failed to set numeric C++ locale\n");

@@ -8,8 +8,8 @@ namespace interface
 {
 	namespace debug
 	{
-		void log_current_backtrace(const ss_ &title="Current backtrace:");
-		void log_exception_backtrace(const ss_ &title="Exception backtrace:");
+		void log_current_backtrace(const ss_ &title = "Current backtrace:");
+		void log_exception_backtrace(const ss_ &title = "Exception backtrace:");
 
 		static const size_t BACKTRACE_SIZE = 48;
 
@@ -23,7 +23,7 @@ namespace interface
 		void get_exception_backtrace(StoredBacktrace &result);
 
 		void log_backtrace(const StoredBacktrace &result,
-				const ss_ &title="Stored backtrace:");
+				const ss_ &title = "Stored backtrace:");
 
 		struct ThreadBacktrace {
 			ss_ thread_name;

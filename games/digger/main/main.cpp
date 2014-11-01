@@ -71,7 +71,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 					ivoxelworld->get_instance(scene_ref);
 
 			pv::Region region = world->get_section_region_voxels(
-						section_p);
+					section_p);
 
 			auto lc = region.getLowerCorner();
 			auto uc = region.getUpperCorner();
@@ -142,14 +142,14 @@ struct Worldgen: public worldgen::GeneratorInterface
 				int x = pr.range(lc.getX(), uc.getX());
 				int z = pr.range(lc.getZ(), uc.getZ());
 
-	            /*int y = 50;
-	            for(; y>-50; y--){
-	                pv::Vector3DInt32 p(x, y, z);
-	                VoxelInstance v = world->get_voxel(p);
-	                if(v.get_id() != 1)
-	                    break;
-	            }
-	            y++;*/
+				/*int y = 50;
+				for(; y>-50; y--){
+					pv::Vector3DInt32 p(x, y, z);
+					VoxelInstance v = world->get_voxel(p);
+					if(v.get_id() != 1)
+						break;
+				}
+				y++;*/
 				size_t noise_i = (z-lc.getZ())*d + (x-lc.getX());
 				double a = noise.result[noise_i];
 				int y = a + 11.0;
@@ -197,9 +197,9 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t(
-					"network:packet_received/main:place_voxel"));
+				"network:packet_received/main:place_voxel"));
 		m_server->sub_event(this, Event::t(
-					"network:packet_received/main:dig_voxel"));
+				"network:packet_received/main:dig_voxel"));
 		m_server->sub_event(this, Event::t("worldgen:queue_modified"));
 	}
 
@@ -394,14 +394,14 @@ struct Module: public interface::Module
 				ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 
 				interface::VoxelRegistry *voxel_reg =
-					instance->get_voxel_reg();
+						instance->get_voxel_reg();
 
 				Node *n = scene->CreateChild("Testbox");
 				n->SetPosition(Vector3(30.0f, 30.0f, 40.0f));
 				n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
 
-	            /*int w = 1, h = 1, d = 1;
-	            ss_ data = "1";*/
+				/*int w = 1, h = 1, d = 1;
+				ss_ data = "1";*/
 				int w = 2, h = 2, d = 1;
 				ss_ data = "1333";
 
@@ -412,8 +412,8 @@ struct Module: public interface::Module
 				}
 
 				n->SetVar(StringHash("simple_voxel_data"), Variant(
-							PODVector<uint8_t>((const uint8_t*)data.c_str(),
-							data.size())));
+						PODVector<uint8_t>((const uint8_t*)data.c_str(),
+						data.size())));
 				n->SetVar(StringHash("simple_voxel_w"), Variant(w));
 				n->SetVar(StringHash("simple_voxel_h"), Variant(h));
 				n->SetVar(StringHash("simple_voxel_d"), Variant(d));
@@ -429,7 +429,7 @@ struct Module: public interface::Module
 				body->SetFriction(0.75f);
 				body->SetMass(1.0);
 				CollisionShape *shape =
-					n->CreateComponent<CollisionShape>(LOCAL);
+						n->CreateComponent<CollisionShape>(LOCAL);
 				shape->SetConvexHull(model, 0, Vector3::ONE);
 				//shape->SetTriangleMesh(model, 0, Vector3::ONE);
 				//shape->SetBox(Vector3::ONE);
@@ -457,10 +457,10 @@ struct Module: public interface::Module
 	{
 		/*main_context::access(m_server, [&](main_context::Interface *imc)
 		{
-		    Scene *scene = imc->check_scene(m_main_scene);
-		    Node *n = scene->GetChild("Testbox");
-		    auto p = n->GetPosition();
-		    log_v(MODULE, "Testbox: (%f, %f, %f)", p.x_, p.y_, p.z_);
+			Scene *scene = imc->check_scene(m_main_scene);
+			Node *n = scene->GetChild("Testbox");
+			auto p = n->GetPosition();
+			log_v(MODULE, "Testbox: (%f, %f, %f)", p.x_, p.y_, p.z_);
 		});*/
 		static uint a = 0;
 		if(((a++) % 150) == 0){

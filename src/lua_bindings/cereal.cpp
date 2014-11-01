@@ -10,20 +10,20 @@ namespace lua_bindings {
 
 /* Type format:
 {"object",
-    {"peer", "int32_t"},
-    {"players", {"unordered_map",
-        "int32_t",
-        {"object",
-            {"peer", "int32_t"},
-            {"x", "int32_t"},
-            {"y", "int32_t"},
-        },
-    }},
-    {"playfield", {"object",
-        {"w", "int32_t"},
-        {"h", "int32_t"},
-        {"tiles", {"array", "int32_t"}},
-    }},
+	{"peer", "int32_t"},
+	{"players", {"unordered_map",
+		"int32_t",
+		{"object",
+			{"peer", "int32_t"},
+			{"x", "int32_t"},
+			{"y", "int32_t"},
+		},
+	}},
+	{"playfield", {"object",
+		{"w", "int32_t"},
+		{"h", "int32_t"},
+		{"tiles", {"array", "int32_t"}},
+	}},
 }) */
 
 static constexpr auto known_types =
@@ -144,7 +144,7 @@ static void binary_input_read_value(lua_State *L, int type_L,
 		// value_result_table_L is left on stack
 	} else {
 		throw Exception(ss_()+"Unknown type \""+outfield_type+"\""
-					  "; known types are "+known_types);
+				"; known types are "+known_types);
 	}
 }
 
@@ -265,7 +265,7 @@ static void binary_output_write_value(lua_State *L, int value_L, int type_L,
 		}
 	} else {
 		throw Exception(ss_()+"Unknown type \""+outfield_type+"\""
-					  "; known types are "+known_types);
+				"; known types are "+known_types);
 	}
 }
 

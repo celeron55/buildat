@@ -81,7 +81,7 @@ struct SpatialUpdateQueue
 		void insert(const Value &value, std::list<Item>::iterator queue_it){
 			Entry entry(value, queue_it);
 			auto it = std::lower_bound(m_set.begin(), m_set.end(), entry,
-						std::greater<Entry>());
+					std::greater<Entry>());
 			if(it == m_set.end())
 				m_set.insert(it, entry);
 			else if(it->value.node_id != value.node_id ||
@@ -93,7 +93,7 @@ struct SpatialUpdateQueue
 		void remove(const Value &value){
 			Entry entry(value);
 			auto it = std::lower_bound(m_set.begin(), m_set.end(), entry,
-						std::greater<Entry>());
+					std::greater<Entry>());
 			if(it == m_set.end())
 				return;
 			m_set.erase(it);
@@ -101,7 +101,7 @@ struct SpatialUpdateQueue
 		std::list<Item>::iterator*find(const Value &value){
 			Entry entry(value);
 			auto it = std::lower_bound(m_set.begin(), m_set.end(), entry,
-						std::greater<Entry>());
+					std::greater<Entry>());
 			if(it == m_set.end())
 				return nullptr;
 			if(it->value.node_id != value.node_id ||
@@ -190,7 +190,7 @@ struct SpatialUpdateQueue
 		}
 
 		auto it = std::lower_bound(m_queue.begin(), m_queue.end(),
-					item, std::greater<Item>()); // position in descending order
+				item, std::greater<Item>()); // position in descending order
 		auto inserted_it = m_queue.insert(it, item);
 		m_queue_length++;
 		m_value_set.insert(item.value, inserted_it);

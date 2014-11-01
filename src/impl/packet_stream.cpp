@@ -68,7 +68,7 @@ void PacketStream::output(const ss_ &name, const ss_ &data,
 		PacketType highest_known_type_was = m_highest_known_type;
 		m_highest_known_type = m_outgoing_types.m_next_type - 1;
 		for(PacketType t1 = highest_known_type_was + 1;
-				t1 < m_outgoing_types.m_next_type; t1++){
+		t1 < m_outgoing_types.m_next_type; t1++){
 			ss_ name = m_outgoing_types.get_name(t1);
 			log_d(MODULE, "Sending type %zu = %s", t1, cs(name));
 			std::ostringstream os(std::ios::binary);

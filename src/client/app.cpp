@@ -35,8 +35,8 @@
 #include <DebugRenderer.h>
 #include <Profiler.h>
 extern "C" {
-	#include <lua.h>
-	#include <lauxlib.h>
+#include <lua.h>
+#include <lauxlib.h>
 }
 #include <signal.h>
 #define MODULE "__app"
@@ -121,9 +121,9 @@ struct CApp: public App, public magic::Application
 
 		sv_<ss_> resource_paths = {
 			g_client_config.get<ss_>("cache_path")+"/tmp",
-			g_client_config.get<ss_>("share_path")+"/extensions", // Could be unsafe
-			g_client_config.get<ss_>("urho3d_path")+"/Bin/CoreData",
-			g_client_config.get<ss_>("urho3d_path")+"/Bin/Data",
+					g_client_config.get<ss_>("share_path")+"/extensions", // Could be unsafe
+					g_client_config.get<ss_>("urho3d_path")+"/Bin/CoreData",
+					g_client_config.get<ss_>("urho3d_path")+"/Bin/Data",
 		};
 		ss_ resource_paths_s;
 		for(const ss_ &path : resource_paths){
@@ -278,8 +278,8 @@ struct CApp: public App, public magic::Application
 
 		/*lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_file_updated_in_cache");
 		if(lua_isnil(L, -1)){
-		    lua_pop(L, 1);
-		    return;
+			lua_pop(L, 1);
+			return;
 		}
 		lua_pushlstring(L, file_name.c_str(), file_name.size());
 		lua_pushlstring(L, file_hash.c_str(), file_hash.size());
@@ -353,7 +353,8 @@ struct CApp: public App, public magic::Application
 		lua_bindings::replicate::set_scene(L, m_scene);
 
 		// Run initial client Lua scripts
-		ss_ init_lua_path = g_client_config.get<ss_>("share_path")+"/client/init.lua";
+		ss_ init_lua_path = g_client_config.get<ss_>("share_path")+
+				"/client/init.lua";
 		int error = luaL_dofile(L, init_lua_path.c_str());
 		if(error){
 			log_w(MODULE, "luaL_dofile: An error occurred: %s\n",
@@ -366,14 +367,14 @@ struct CApp: public App, public magic::Application
 		if(g_client_config.get<bool>("boot_to_menu")){
 			ss_ extname = g_client_config.get<ss_>("menu_extension_name");
 			ss_ script = ss_() +
-				"local m = require('buildat/extension/"+extname+"')\n"
+					"local m = require('buildat/extension/"+extname+"')\n"
 					"if type(m) ~= 'table' then\n"
 					"    error('Failed to load extension "+extname+"')\n"
 					"end\n"
 					"m.boot()\n";
 			if(!run_script_no_sandbox(script)){
 				throw AppStartupError(ss_()+
-							  "Failed to load and run extension "+extname);
+						"Failed to load and run extension "+extname);
 			}
 		}
 
@@ -381,13 +382,13 @@ struct CApp: public App, public magic::Application
 		magic::ResourceCache *magic_cache = GetSubsystem<magic::ResourceCache>();
 		magic::DebugHud *dhud = GetSubsystem<magic::Engine>()->CreateDebugHud();
 		dhud->SetDefaultStyle(magic_cache->GetResource<magic::XMLFile>(
-					"UI/DefaultStyle.xml"));
+				"UI/DefaultStyle.xml"));
 	}
 
 	void on_update(magic::StringHash event_type, magic::VariantMap &event_data)
 	{
 		/*magic::AutoProfileBlock profiler_block(
-		        GetSubsystem<magic::Profiler>(), "App::on_update");*/
+				GetSubsystem<magic::Profiler>(), "App::on_update");*/
 
 		if(g_sigint_received)
 			shutdown();
@@ -439,7 +440,7 @@ struct CApp: public App, public magic::Application
 		if(key == Urho3D::KEY_F10){
 			ss_ extname = "sandbox_test";
 			ss_ script = ss_() +
-				"local m = require('buildat/extension/"+extname+"')\n"
+					"local m = require('buildat/extension/"+extname+"')\n"
 					"if type(m) ~= 'table' then\n"
 					"    error('Failed to load extension "+extname+"')\n"
 					"end\n"
@@ -601,8 +602,8 @@ struct CApp: public App, public magic::Application
 			lua_pop(L, 1);
 			const char *msg =
 					r == LUA_ERRRUN ? "runtime error" :
-					r == LUA_ERRMEM ? "ran out of memory" :
-					r == LUA_ERRERR ? "error handler failed" : "unknown error";
+			r == LUA_ERRMEM ? "ran out of memory" :
+			r == LUA_ERRERR ? "error handler failed" : "unknown error";
 			//log_e(MODULE, "Lua %s: %s", msg, cs(traceback));
 			throw Exception(ss_()+"Lua "+msg+":\n"+traceback);
 		}

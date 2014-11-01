@@ -114,10 +114,10 @@ struct Module: public interface::Module, public client_file::Interface
 			const FileInfo &info = *pair.second.get();
 			if(info.path != ""){
 				file_restore_info.push_back(std::tuple<ss_, ss_, ss_>(
-							info.name, "", info.path));
+						info.name, "", info.path));
 			} else {
 				file_restore_info.push_back(std::tuple<ss_, ss_, ss_>(
-							info.name, info.content, ""));
+						info.name, info.content, ""));
 			}
 		}
 
@@ -280,9 +280,9 @@ struct Module: public interface::Module, public client_file::Interface
 		std::ifstream f(path, std::ios::binary);
 		if(!f.good())
 			throw Exception("client_file::add_file_path(): Couldn't open \""+
-						  name+"\" from \""+path+"\"");
+					name+"\" from \""+path+"\"");
 		std::string content((std::istreambuf_iterator<char>(f)),
-			std::istreambuf_iterator<char>());
+				std::istreambuf_iterator<char>());
 		ss_ hash = interface::sha1::calculate(content);
 		log_v(MODULE, "File added: %s: %s (%s)", cs(name),
 				cs(interface::sha1::hex(hash)), cs(path));

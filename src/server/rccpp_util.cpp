@@ -58,7 +58,7 @@ ss_ hash_files(const sv_<ss_> &paths)
 		std::ifstream f(path);
 		try {
 			std::string content((std::istreambuf_iterator<char>(f)),
-				std::istreambuf_iterator<char>());
+					std::istreambuf_iterator<char>());
 			os<<content;
 		} catch(std::ios_base::failure &e){
 			// Just ignore errors

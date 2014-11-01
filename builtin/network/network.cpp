@@ -144,7 +144,7 @@ struct Module: public interface::Module, public network::Interface
 		for(auto &pair : m_peers){
 			Peer &peer = pair.second;
 			peer_restore_info.push_back(std::tuple<Peer::Id, int>(
-						peer.id, peer.socket->fd()));
+					peer.id, peer.socket->fd()));
 		}
 
 		std::ostringstream os(std::ios::binary);

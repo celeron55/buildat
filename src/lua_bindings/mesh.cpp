@@ -64,7 +64,7 @@ void set_simple_voxel_model(const luabind::object &node_o,
 
 	if((int)data.size() != w * h * d){
 		throw Exception(ss_()+"set_simple_voxel_model(): Data size does not match"
-					  " with dimensions ("+cs(data.size())+" vs. "+cs(w*h*d)+")");
+				" with dimensions ("+cs(data.size())+" vs. "+cs(w*h*d)+")");
 	}
 
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
@@ -99,7 +99,7 @@ void set_8bit_voxel_geometry(const luabind::object &node_o,
 
 	if((int)data.size() != w * h * d){
 		throw Exception(ss_()+"set_8bit_voxel_geometry(): Data size does not match"
-					  " with dimensions ("+cs(data.size())+" vs. "+cs(w*h*d)+")");
+				" with dimensions ("+cs(data.size())+" vs. "+cs(w*h*d)+")");
 	}
 
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
@@ -281,9 +281,9 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 	{
 		ScopeTimer timer(
 				post_step == 1 ? "post physics 1" :
-				post_step == 2 ? "post_physics 2" :
-				post_step == 3 ? "post physics 3" :
-				"post physics");
+		post_step == 2 ? "post_physics 2" :
+		post_step == 3 ? "post physics 3" :
+		"post physics");
 		Context *context = node->GetContext();
 		switch(post_step){
 		case 1:
@@ -343,7 +343,7 @@ void set_voxel_geometry(const luabind::object &node_o,
 
 	up_<SetVoxelGeometryTask> task(new SetVoxelGeometryTask(
 			node, data, voxel_reg, atlas_reg
-	));
+			));
 
 	auto *thread_pool = buildat_app->get_thread_pool();
 
@@ -375,7 +375,7 @@ void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
 
 	up_<SetVoxelLodGeometryTask> task(new SetVoxelLodGeometryTask(
 			lod, node, data, voxel_reg, atlas_reg
-	));
+			));
 
 	auto *thread_pool = buildat_app->get_thread_pool();
 
@@ -418,7 +418,7 @@ void set_voxel_physics_boxes(const luabind::object &node_o,
 
 	up_<SetPhysicsBoxesTask> task(new SetPhysicsBoxesTask(
 			node, data, voxel_reg
-	));
+			));
 
 	auto *thread_pool = buildat_app->get_thread_pool();
 
@@ -449,13 +449,13 @@ void init_mesh(lua_State *L)
 {
 	using namespace luabind;
 	module(L)[
-		LUABIND_FUNC(set_simple_voxel_model),
-		LUABIND_FUNC(set_8bit_voxel_geometry),
-		LUABIND_FUNC(set_voxel_geometry),
-		LUABIND_FUNC(set_voxel_lod_geometry),
-		LUABIND_FUNC(clear_voxel_geometry),
-		LUABIND_FUNC(set_voxel_physics_boxes),
-		LUABIND_FUNC(clear_voxel_physics_boxes)
+			LUABIND_FUNC(set_simple_voxel_model),
+			LUABIND_FUNC(set_8bit_voxel_geometry),
+			LUABIND_FUNC(set_voxel_geometry),
+			LUABIND_FUNC(set_voxel_lod_geometry),
+			LUABIND_FUNC(clear_voxel_geometry),
+			LUABIND_FUNC(set_voxel_physics_boxes),
+			LUABIND_FUNC(clear_voxel_physics_boxes)
 	];
 }
 

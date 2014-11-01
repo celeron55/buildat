@@ -75,7 +75,7 @@ struct CThread: public Thread
 		// Set thread name
 		if(!thread_name.empty()){
 			ss_ limited_name = thread_name.size() <= 15 ?
-					thread_name : thread_name.substr(0, 15);
+						thread_name : thread_name.substr(0, 15);
 			if(pthread_setname_np(thread->m_thread, limited_name.c_str())){
 				log_w(MODULE, "Failed to set thread name (thread %p, name \"%s\")",
 						thread, limited_name.c_str());
@@ -102,7 +102,7 @@ struct CThread: public Thread
 				interface::debug::get_exception_backtrace(bt);
 				interface::debug::log_backtrace(bt,
 						"Backtrace in ThreadThing("+thread_name+") for "+
-								bt.exception_name+"(\""+e.what()+"\")");
+						bt.exception_name+"(\""+e.what()+"\")");
 			}
 			// Call crash handler
 			try {
@@ -119,7 +119,7 @@ struct CThread: public Thread
 					interface::debug::get_exception_backtrace(bt);
 					interface::debug::log_backtrace(bt,
 							"Backtrace in ThreadThing("+thread_name+") for "+
-									bt.exception_name+"(\""+e.what()+"\")");
+							bt.exception_name+"(\""+e.what()+"\")");
 				}
 			}
 		}

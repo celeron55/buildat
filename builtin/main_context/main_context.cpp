@@ -61,7 +61,7 @@ struct OpaqueSceneReference
 {
 	SharedPtr<Scene> scene;
 
-	OpaqueSceneReference(const SharedPtr<Scene> &scene): scene(scene) {}
+	OpaqueSceneReference(const SharedPtr<Scene> &scene): scene(scene){}
 };
 
 struct Module: public interface::Module, public main_context::Interface
@@ -77,7 +77,7 @@ struct Module: public interface::Module, public main_context::Interface
 	sm_<SceneReference, up_<OpaqueSceneReference>> m_scenes;
 
 	sm_<Event::Type, SharedPtr<
-			interface::MagicEventHandler>> m_magic_event_handlers;
+				interface::MagicEventHandler>> m_magic_event_handlers;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -113,7 +113,7 @@ struct Module: public interface::Module, public main_context::Interface
 
 		sv_<ss_> resource_paths = {
 			server_config.get<ss_>("urho3d_path")+"/Bin/CoreData",
-			server_config.get<ss_>("urho3d_path")+"/Bin/Data",
+					server_config.get<ss_>("urho3d_path")+"/Bin/Data",
 		};
 		ss_ resource_paths_s;
 		for(const ss_ &path : resource_paths){
