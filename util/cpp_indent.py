@@ -59,7 +59,7 @@ class ParenMatch:
 
 	def feed_part(self, line, i):
 		if self._level["/**/"] > 0:
-			if line[i:i+2] == '*/':
+			if line[i:i+2] == '*/' and line[i-1] != '/':
 				self._level["/**/"] = 0
 				return i + 2
 			return i + 1  # Ignore all other comment content
@@ -285,15 +285,15 @@ class State:
 		line_is_comment = False
 		#if level_at_end["//"] > 0: # Bad; we care if the whole line is a comment
 		if re.match(r'[\t ]*//.*', line):
-			line_is_comment = True
 			#self.add_fix_annotation("Line is C++ comment")
+			line_is_comment = True
 		if (re.match(r'[\t ]*/\*.*', line) or re.match(r'.*\*/', line) or
 				level_after['/**/'] > 0):
-			line_is_comment = True
 			#self.add_fix_annotation("Line is C comment")
-		if level_before['/**/'] > 0:
 			line_is_comment = True
+		if level_before['/**/'] > 0:
 			#self.add_fix_annotation("Line is C comment continuation")
+			line_is_comment = True
 			self.annotation_is_inside_comment = True
 
 		if not line_is_comment:
@@ -352,7 +352,7 @@ class State:
 		if self.blocks:
 			block = self.blocks[-1]
 			current_block_type = block.block_type
-		self.add_fix_annotation("Current block type: "+repr(current_block_type))
+		#self.add_fix_annotation("Current block type: "+repr(current_block_type))
 		is_value_block = (current_block_type in ["enum", "="])
 
 		#
@@ -373,7 +373,7 @@ class State:
 		# The '=' block type is inherited when there is no other option
 		if self.next_block_type is None and current_block_type == '=':
 			self.next_block_type = current_block_type
-		self.add_fix_annotation("Next block type: "+repr(self.next_block_type))
+		#self.add_fix_annotation("Next block type: "+repr(self.next_block_type))
 
 		#
 		# Block level
