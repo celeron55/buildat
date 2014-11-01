@@ -1,4 +1,6 @@
 #!/bin/sh
+# NOTE: You can supply parameters as $@ to util/extra_cpp_style.py
+
 set -euv
 script_dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
@@ -63,12 +65,17 @@ uncrustify_cpp="/tmp/buildat.uncrustify.cpp.cfg"
 cat "$uncrustify_base" "$uncrustify_add_header" > "$uncrustify_header"
 cat "$uncrustify_base" "$uncrustify_add_cpp" > "$uncrustify_cpp"
 
-uncrustify -c "$uncrustify_header" --no-backup $header_files
-uncrustify -c "$uncrustify_cpp" --no-backup $cpp_files
+# Process these one at a time for easier debugging when something goes wrong
+for f in $header_files; do
+	uncrustify -c "$uncrustify_header" --no-backup $f
+done
+for f in $cpp_files; do
+	uncrustify -c "$uncrustify_cpp" --no-backup $f
+done
 
 # Fix miscellaneous stuff that uncrustify isn't capable of doing
-python "$script_dir/extra_cpp_style.py" -i $header_files
-python "$script_dir/extra_cpp_style.py" -i -b $cpp_files
+python "$script_dir/extra_cpp_style.py" -i $@ $header_files
+python "$script_dir/extra_cpp_style.py" -i -b $@ $cpp_files
 
 # Fix comment indentation from spaces to tabs (because uncrusfity is unable to
 # indent comments inside parameter lists (including lambda functions) with tabs
