@@ -8,11 +8,11 @@ namespace interface {
 
 static const pv::Vector3DUint8 FACE_DIRS[6] = {
 	pv::Vector3DUint8(0, 1, 0),
-			pv::Vector3DUint8(0, -1, 0),
-			pv::Vector3DUint8(1, 0, 0),
-			pv::Vector3DUint8(-1, 0, 0),
-			pv::Vector3DUint8(0, 0, 1),
-			pv::Vector3DUint8(0, 0, -1),
+	pv::Vector3DUint8(0, -1, 0),
+	pv::Vector3DUint8(1, 0, 0),
+	pv::Vector3DUint8(-1, 0, 0),
+	pv::Vector3DUint8(0, 0, 1),
+	pv::Vector3DUint8(0, 0, -1),
 };
 
 // Map part block segment's face to atlas segment definition

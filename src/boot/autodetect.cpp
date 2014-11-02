@@ -226,18 +226,18 @@ static void generate_compiler_binary_dir_alternatives(sv_<ss_> &roots)
 
 PathDefinition server_paths[] = {
 	{PD_READ, "share_path",
-				"",
-				"/builtin/network/network.cpp",
-				"Static files"},
+		"",
+		"/builtin/network/network.cpp",
+		"Static files"},
 	{PD_READ, "interface_path",
-				"/src/interface",
-				"/event.h",
-				"Interface files"},
+		"/src/interface",
+		"/event.h",
+		"Interface files"},
 	{PD_WRITE, "rccpp_build_path",
-				"/cache/rccpp_build",
-				"/write.test",
-				"RCC++ build directory"},
-			{PD_END, "", "", "", ""},
+		"/cache/rccpp_build",
+		"/write.test",
+		"RCC++ build directory"},
+	{PD_END, "", "", "", ""},
 };
 
 static bool detect_buildat_server_paths(core::Config &config)
@@ -252,10 +252,10 @@ static bool detect_buildat_server_paths(core::Config &config)
 // NOTE: For these, the root contains a trailing slash, and can be an empty string.
 PathDefinition compiler_bin_paths[] = {
 	{PD_RUN, "compiler_command",
-				"c++",
-				" --version",
-				"Compiler command"},
-			{PD_END, "", "", "", ""},
+		"c++",
+		" --version",
+		"Compiler command"},
+	{PD_END, "", "", "", ""},
 };
 
 static bool detect_compiler_bin_paths(core::Config &config)
@@ -270,14 +270,14 @@ static bool detect_compiler_bin_paths(core::Config &config)
 
 PathDefinition client_paths[] = {
 	{PD_READ, "share_path",
-				"",
-				"/client/init.lua",
-				"Static files"},
+		"",
+		"/client/init.lua",
+		"Static files"},
 	{PD_WRITE, "cache_path",
-				"/cache",
-				"/write.test",
-				"Cache directory"},
-			{PD_END, "", "", "", ""},
+		"/cache",
+		"/write.test",
+		"Cache directory"},
+	{PD_END, "", "", "", ""},
 };
 
 static bool detect_buildat_client_paths(core::Config &config)
@@ -291,10 +291,10 @@ static bool detect_buildat_client_paths(core::Config &config)
 
 PathDefinition server_urho3d_paths[] = {
 	{PD_READ, "urho3d_path",
-				"",
-				"/Bin/CoreData/Shaders/GLSL/Basic.glsl",
-				"Urho3D path"},
-			{PD_END, "", "", "", ""},
+		"",
+		"/Bin/CoreData/Shaders/GLSL/Basic.glsl",
+		"Urho3D path"},
+	{PD_END, "", "", "", ""},
 };
 
 static bool detect_server_urho3d_paths(core::Config &config)
@@ -308,10 +308,10 @@ static bool detect_server_urho3d_paths(core::Config &config)
 
 PathDefinition client_urho3d_paths[] = {
 	{PD_READ, "urho3d_path",
-				"",
-				"/Bin/CoreData/Shaders/GLSL/Basic.glsl",
-				"Urho3D path"},
-			{PD_END, "", "", "", ""},
+		"",
+		"/Bin/CoreData/Shaders/GLSL/Basic.glsl",
+		"Urho3D path"},
+	{PD_END, "", "", "", ""},
 };
 
 static bool detect_client_urho3d_paths(core::Config &config)

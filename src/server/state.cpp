@@ -489,8 +489,8 @@ struct CState: public State, public interface::Server
 
 		sv_<ss_> urho3d_subdirs = {
 			"Audio", "Container", "Core", "Engine", "Graphics", "Input", "IO",
-					"LuaScript", "Math", "Navigation", "Network", "Physics", "Resource",
-					"Scene", "Script", "UI", "Urho2D",
+			"LuaScript", "Math", "Navigation", "Network", "Physics", "Resource",
+			"Scene", "Script", "UI", "Urho2D",
 		};
 		for(const ss_ &subdir : urho3d_subdirs){
 			m_compiler->include_directories.push_back(

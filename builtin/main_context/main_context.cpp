@@ -113,7 +113,7 @@ struct Module: public interface::Module, public main_context::Interface
 
 		sv_<ss_> resource_paths = {
 			server_config.get<ss_>("urho3d_path")+"/Bin/CoreData",
-					server_config.get<ss_>("urho3d_path")+"/Bin/Data",
+			server_config.get<ss_>("urho3d_path")+"/Bin/Data",
 		};
 		ss_ resource_paths_s;
 		for(const ss_ &path : resource_paths){

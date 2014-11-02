@@ -121,9 +121,9 @@ struct CApp: public App, public magic::Application
 
 		sv_<ss_> resource_paths = {
 			g_client_config.get<ss_>("cache_path")+"/tmp",
-					g_client_config.get<ss_>("share_path")+"/extensions", // Could be unsafe
-					g_client_config.get<ss_>("urho3d_path")+"/Bin/CoreData",
-					g_client_config.get<ss_>("urho3d_path")+"/Bin/Data",
+			g_client_config.get<ss_>("share_path")+"/extensions", // Could be unsafe
+			g_client_config.get<ss_>("urho3d_path")+"/Bin/CoreData",
+			g_client_config.get<ss_>("urho3d_path")+"/Bin/Data",
 		};
 		ss_ resource_paths_s;
 		for(const ss_ &path : resource_paths){
