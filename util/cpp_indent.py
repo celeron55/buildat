@@ -202,7 +202,7 @@ BLOCK_TYPE_REGEXES = [
 	("while",     r'^[\t ]*while.*$'),
 	("lambda",    r'^.*\)\[.*$'),
 	("enum",      r'^[\t ]*enum.*$'),
-	("=",         r'^[\t ]*=[^;=]*$'),  # == is probably in if(.*==.*){
+	("=",         r'^.*[^;=!<>]=[^;=!<>]*$'),  # == is probably in if(.*==.*){
 ]
 STRUCTURE_BLOCK_TYPES = ["namespace", "struct"]
 CODE_BLOCK_TYPES = [None, "if", "for", "while", "lambda"]
@@ -352,7 +352,6 @@ class State:
 		if self.blocks:
 			block = self.blocks[-1]
 			current_block_type = block.block_type
-		#self.add_fix_annotation("Current block type: "+repr(current_block_type))
 		is_value_block = (current_block_type in ["enum", "="])
 
 		#
@@ -373,6 +372,8 @@ class State:
 		# The '=' block type is inherited when there is no other option
 		if self.next_block_type is None and current_block_type == '=':
 			self.next_block_type = current_block_type
+
+		#self.add_fix_annotation("Current block type: "+repr(current_block_type))
 		#self.add_fix_annotation("Next block type: "+repr(self.next_block_type))
 
 		#
@@ -454,6 +455,7 @@ class State:
 		may_create_implicit_block = False
 		if (level_highest["()"] > level_after["()"] and
 				level_after["()"] == block_base_levels["()"] and
+				level_after["[]"] == block_base_levels["[]"] and
 				level_highest[";"] > 0 and
 				level_after[";"] == level_highest[";"]):
 			try:
@@ -467,12 +469,17 @@ class State:
 						may_create_implicit_block = True
 						# Cheat the state
 						self.match._level[";"] = 0
-				elif (identifier and re.match(r'^[a-zA-Z0-9_]*$', identifier) and
-						re.match(r'^.*\)$', line)):
-					self.add_fix_annotation("Isn't a full statement but looks "+
-							"like a function call to "+repr(identifier))
-					# Cheat the state
-					self.match._level[";"] = 0
+				elif identifier and re.match(r'^[a-zA-Z0-9_]*$', identifier):
+					if re.match(r'^.*\),?$', line):
+						self.add_fix_annotation("Isn't a full statement but looks "+
+								"like a function call to "+repr(identifier))
+						# Cheat the state
+						self.match._level[";"] = 0
+					else:
+						self.add_fix_annotation("Assuming multi-line statement")
+				else:
+					self.add_fix_annotation("Identifier "+repr(identifier)+
+							" doesn't make this look like a function call")
 			except KeyError:
 				pass
 
@@ -507,7 +514,7 @@ class State:
 				level_lowest["{}"] == level_after["{}"] or
 				level_before["()"] > block_base_levels["()"]
 			) and
-			line.strip() not in ["{}", "{", "}", "};", ")", ");"]
+			line.strip() not in ["{}", "{", "}", "};", ")", ");", "]", "];"]
 		):
 			self.add_indent(8, "Multi-line statement")
 
