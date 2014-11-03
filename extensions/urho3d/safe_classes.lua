@@ -708,9 +708,14 @@ function M.define(dst, util)
 			verticalAlignment = util.simple_property("number"),
 			height = util.simple_property("number"),
 			width = util.simple_property("number"),
+			size = util.simple_property("IntVector2"),
 			color = util.simple_property("Color"),
 			minHeight = util.simple_property("number"),
 			minWidth = util.simple_property("number"),
+			minSize = util.simple_property("IntVector2"),
+			fixedHeight = util.simple_property("number"),
+			fixedWidth = util.simple_property("number"),
+			fixedSize = util.simple_property("IntVector2"),
 			defaultStyle = util.simple_property("XMLFile"),
 		},
 	})
@@ -728,6 +733,9 @@ function M.define(dst, util)
 
 	util.wc("BorderImage", {
 		inherited_from_by_wrapper = dst.UIElement,
+		properties = {
+			texture = util.simple_property("Texture"),
+		},
 	})
 
 	util.wc("Window", {
