@@ -4,6 +4,7 @@
 #include "core/types.h"
 #include <cereal/cereal.hpp>
 #include <Vector2.h>
+#include <Vector3.h>
 #include <Ptr.h>
 
 namespace cereal
@@ -21,6 +22,22 @@ namespace cereal
 		archive(x, y);
 		v.x_ = x;
 		v.y_ = y;
+	}
+	template<class Archive>
+			void save(Archive &archive, const Urho3D::Vector3 &v)
+	{
+		archive((double)v.x_);
+		archive((double)v.y_);
+		archive((double)v.z_);
+	}
+	template<class Archive>
+			void load(Archive &archive, Urho3D::Vector3 &v)
+	{
+		double x, y, z;
+		archive(x, y, z);
+		v.x_ = x;
+		v.y_ = y;
+		v.z_ = z;
 	}
 }
 // vim: set noet ts=4 sw=4:
