@@ -251,9 +251,11 @@ void GenerateThread::run(interface::Thread *thread)
 			// Generate one section for each instance
 			for(auto &pair: m_module->m_instances){
 				up_<CInstance> &instance = pair.second;
-				if(!instance->m_enabled && !instance->m_queued_sections.empty()){
-					// Has to be checked later
-					m_module->m_queued_sections_sem.post();
+				if(!instance->m_enabled){
+					if(!instance->m_queued_sections.empty()){
+						// Has to be checked later
+						m_module->m_queued_sections_sem.post();
+					}
 					continue;
 				}
 				instance->generate_next_section();
