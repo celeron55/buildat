@@ -165,38 +165,48 @@ function Safe.SubscribeToEvent(x, y, z)
 			local safe_fields = safe_events[got_event_type]
 			if not safe_fields then
 				log:warning("Received unsafe event: "..dump(got_event_type))
+				return
 			end
+			-- 1.7 VariantMap is indexed: eventData["Key"] returns a Variant.
 			local safe_event_data = Safe.VariantMap()
 			for field_name, field_def in pairs(safe_fields) do
 				local variant_type = field_def.variant
 				local safe_type = field_def.safe
+				local variant = unsafe_event_data[field_name]
+				if variant == nil then
+					error("Value for field "..dump(field_name).." in "..
+							dump(got_event_type).." is nil")
+				end
 				local safe_value = nil
 				if variant_type == "Ptr" then
 					local get_type = field_def.get_type or safe_type
-					local unsafe_value = unsafe_event_data:GetPtr(
-							get_type, field_name)
+					local unsafe_value = variant:GetPtr(get_type)
 					if unsafe_value == nil then
 						error("Value for field "..dump(field_name).." as "..
 								dump(safe_type).." in "..dump(got_event_type)..
 								" gotten as "..dump(get_type).." is nil")
 					end
 					safe_value = wrap_instance(safe_type, unsafe_value)
-					safe_event_data["SetPtr"](
-							safe_event_data, field_name, safe_value)
+					safe_event_data:SetPtr(field_name, safe_value)
 				else
 					local get_type = field_def.get_type or variant_type
-					local unsafe_value = unsafe_event_data["Get"..get_type](
-							unsafe_event_data, field_name)
+					local getter = variant["Get"..get_type]
+					if type(getter) ~= "function" then
+						error("Variant has no Get"..get_type.." for field "..
+								dump(field_name).." in "..dump(got_event_type))
+					end
+					local unsafe_value = getter(variant)
 					if safe_type == 'number' or safe_type == 'string' or
 							safe_type == 'boolean' then
-						-- Regular type
 						safe_value = magic_sandbox.unsafe_to_safe(unsafe_value, safe_type)
 					else
-						-- Object wrapper
 						safe_value = wrap_instance(safe_type, unsafe_value)
 					end
-					safe_event_data["Set"..get_type](
-							safe_event_data, field_name, safe_value)
+					local setter = safe_event_data["Set"..get_type]
+					if type(setter) ~= "function" then
+						error("Safe.VariantMap has no Set"..get_type)
+					end
+					setter(safe_event_data, field_name, safe_value)
 				end
 			end
 			-- Call callback
