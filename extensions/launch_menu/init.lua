@@ -11,6 +11,25 @@ local function show_error(message)
 	ui_utils.show_message_dialog(message)
 end
 
+local function format_bytes(n)
+	n = math.floor(tonumber(n) or 0)
+	if n < 1024 then
+		return n.." B"
+	end
+	local kb = n / 1024
+	if kb < 1024 then
+		if kb < 10 then
+			return string.format("%.1f KB", kb)
+		end
+		return math.floor(kb + 0.5).." KB"
+	end
+	local mb = kb / 1024
+	if mb < 10 then
+		return string.format("%.1f MB", mb)
+	end
+	return math.floor(mb + 0.5).." MB"
+end
+
 local function make_button(parent, label)
 	local button = parent:CreateChild("Button")
 	button:SetStyleAuto()
@@ -22,6 +41,31 @@ local function make_button(parent, label)
 	text:SetStyleAuto()
 	text.text = label
 	text:SetTextAlignment(HA_CENTER)
+	return button
+end
+
+-- Name + size as separate texts so the size can be smaller and duller.
+-- minWidth is ~30% over the old single-line content width.
+local function make_game_button(parent, name, size)
+	local button = parent:CreateChild("Button")
+	button:SetStyleAuto()
+	button:SetName("Button")
+	button:SetLayout(LM_HORIZONTAL, 8, magic.IntRect(12, 2, 12, 2))
+	button.minHeight = 24
+	button.minWidth = 200
+	local text = button:CreateChild("Text")
+	text:SetName("ButtonText")
+	text:SetStyleAuto()
+	text.text = name
+	if text.width > 0 then
+		text.fixedWidth = text.width
+	end
+	local size_text = button:CreateChild("Text")
+	size_text:SetStyleAuto()
+	size_text.text = format_bytes(size)
+	size_text:SetFontSize(12)
+	size_text.color = magic.Color(0.5, 0.5, 0.5)
+	size_text:SetTextAlignment(HA_RIGHT)
 	return button
 end
 
@@ -241,8 +285,9 @@ local function show_local_game()
 		empty:SetStyleAuto()
 		empty.text = "No games found"
 	else
-		for _, name in ipairs(games) do
-			local button = make_button(window, name)
+		for _, game in ipairs(games) do
+			local name = game.name
+			local button = make_game_button(window, name, game.size)
 			magic.SubscribeToEvent(button, "Released",
 			function(self, event_type, event_data)
 				start_local_game(name)
