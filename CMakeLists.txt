@@ -258,6 +258,7 @@ if(BUILD_CLIENT)
 		src/client/state.cpp
 		src/client/app.cpp
 		src/client/config.cpp
+		src/client/command_seq.cpp
 		src/lua_bindings/util.cpp
 		src/lua_bindings/init.cpp
 		src/lua_bindings/misc.cpp

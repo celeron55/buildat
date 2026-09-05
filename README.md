@@ -16,6 +16,7 @@ Further reading:
 * [doc/design.txt](doc/design.txt)
 * [doc/conventions.txt](doc/conventions.txt)
 * [doc/client_api.txt](doc/client_api.txt)
+* [doc/client_commands.txt](doc/client_commands.txt)
 * [doc/todo.txt](doc/todo.txt)
 
 Buildat Linux How-To
@@ -68,6 +69,17 @@ Terminal 2:
 
     $ $wherever_buildat_is/Build
     $ bin/buildat_client -s localhost
+
+Client command sequence (CI / visual checks)
+--------------------------------------------
+
+The client can run a one-shot command script and exit. Screenshots, delays,
+and injected keyboard/mouse input:
+
+    $ bin/buildat_client -c $'delay 2000\nscreenshot /tmp/menu.png'
+    $ bin/buildat_client -c @commands.txt
+
+See [doc/client_commands.txt](doc/client_commands.txt).
 
 Modify something and see stuff happen
 ---------------------------------------
