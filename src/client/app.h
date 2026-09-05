@@ -33,20 +33,17 @@ namespace app
 
 	struct GraphicsOptions
 	{
-		static const int UNDEFINED_INT = 2147483647;
-
-		int window_w = 1024;
-		int window_h = 768;
+		int window_w = 0; // 0 = pick from saved size or desktop
+		int window_h = 0;
 		int full_w = 0;
 		int full_h = 0;
 		bool fullscreen = false;
+		bool maximized = false;
 		bool borderless = false;
 		bool resizable = true;
 		bool vsync = true;
 		bool triple_buffer = false;
 		int multisampling = 1; // 2 looks much better but is much heavier(?)
-		int window_x = UNDEFINED_INT;
-		int window_y = UNDEFINED_INT;
 
 		void apply(Urho3D::Graphics *magic_graphics);
 	};
