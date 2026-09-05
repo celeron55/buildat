@@ -193,6 +193,12 @@ return {
 	"LOCK_SHADOW",
 	"LOCK_SCRATCH",
 
+	-- MouseMode
+	"MM_ABSOLUTE",
+	"MM_RELATIVE",
+	"MM_WRAP",
+	"MM_FREE",
+
 	-- LoopMode2D
 	"LM_DEFAULT",
 	"LM_FORCE_LOOPED",
