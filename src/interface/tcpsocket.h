@@ -24,6 +24,9 @@ namespace interface
 	};
 
 	TCPSocket* createTCPSocket(int fd = -1);
+
+	// Quiet connect attempt; does not keep the socket.
+	bool probe_connect(const ss_ &address, const ss_ &port);
 }
 
 // vim: set noet ts=4 sw=4:
