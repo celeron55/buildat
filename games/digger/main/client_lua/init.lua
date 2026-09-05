@@ -251,6 +251,18 @@ do
 	wait_text.horizontalAlignment = magic.HA_CENTER
 	wait_text.verticalAlignment = magic.VA_CENTER
 	wait_text:SetPosition(0, 0)
+
+	local function crosshair_bar(w, h)
+		local bar = magic.ui.root:CreateChild("BorderImage")
+		bar.width = w
+		bar.height = h
+		bar.horizontalAlignment = magic.HA_CENTER
+		bar.verticalAlignment = magic.VA_CENTER
+		bar:SetPosition(0, 0)
+		bar.color = magic.Color(1, 1, 1)
+	end
+	crosshair_bar(15, 1)
+	crosshair_bar(1, 15)
 end
 
 local function set_generating_status(queue_size)
