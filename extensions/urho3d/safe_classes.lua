@@ -434,6 +434,7 @@ function M.define(dst, util)
 			angularFactor = util.simple_property(dst.Vector3),
 			kinematic = util.simple_property("boolean"),
 			linearVelocity = util.simple_property(dst.Vector3),
+			collisionEventMode = util.simple_property("number"),
 		},
 	})
 
