@@ -6,6 +6,9 @@
 #include <errno.h>
 #include <cstring>
 #include <vector>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 #define MODULE "__process"
 
 namespace interface {
@@ -23,9 +26,11 @@ int shell_exec(const ss_ &command, const ExecOptions &opts)
 	int f = fork();
 	if(f == 0){
 		execl("/bin/sh", "sh", "-c", command.c_str(), (const char*)nullptr);
+		_exit(127);
 	}
-	int exit_status;
-	while(wait(&exit_status) > 0);
+	int exit_status = 1;
+	if(waitpid(f, &exit_status, 0) < 0)
+		return 1;
 	return exit_status;
 }
 
@@ -43,6 +48,12 @@ Handle start(const ss_ &path, const sv_<ss_> &args)
 		return h;
 	}
 	if(pid == 0){
+		setpgid(0, 0);
+#ifdef __linux__
+		prctl(PR_SET_PDEATHSIG, SIGKILL);
+		if(getppid() == 1)
+			_exit(1);
+#endif
 		std::vector<char*> argv;
 		argv.push_back(const_cast<char*>(path.c_str()));
 		for(const ss_ &a : args)
@@ -52,27 +63,53 @@ Handle start(const ss_ &path, const sv_<ss_> &args)
 		log_w(MODULE, "execv(\"%s\") failed: %s", cs(path), strerror(errno));
 		_exit(127);
 	}
+	setpgid(pid, pid);
 	h.impl = pid;
 	log_i(MODULE, "Started pid %i: %s", (int)pid, cs(path));
 	return h;
 }
 
-void terminate(Handle &h)
+static void kill_tree(pid_t pid, int sig)
+{
+	kill(-pid, sig);
+	kill(pid, sig);
+}
+
+static bool reap_dead(Handle &h)
+{
+	if(!h.valid())
+		return true;
+	pid_t pid = (pid_t)h.impl;
+	int status = 0;
+	pid_t r = waitpid(pid, &status, WNOHANG);
+	if(r == pid || (r < 0 && errno == ECHILD && kill(pid, 0) != 0 &&
+			errno == ESRCH)){
+		h.impl = 0;
+		return true;
+	}
+	return false;
+}
+
+void request_terminate(Handle &h)
 {
 	if(!h.valid())
 		return;
+	if(reap_dead(h))
+		return;
 	pid_t pid = (pid_t)h.impl;
-	kill(pid, SIGTERM);
-	for(int i = 0; i < 100; i++){
-		int status = 0;
-		pid_t r = waitpid(pid, &status, WNOHANG);
-		if(r == pid || (r < 0 && errno == ECHILD)){
-			h.impl = 0;
-			return;
-		}
-		usleep(50000);
-	}
-	kill(pid, SIGKILL);
+	log_i(MODULE, "SIGTERM pid %i", (int)pid);
+	kill_tree(pid, SIGTERM);
+}
+
+void kill_force(Handle &h)
+{
+	if(!h.valid())
+		return;
+	if(reap_dead(h))
+		return;
+	pid_t pid = (pid_t)h.impl;
+	log_w(MODULE, "SIGKILL pid %i", (int)pid);
+	kill_tree(pid, SIGKILL);
 	waitpid(pid, nullptr, 0);
 	h.impl = 0;
 }
@@ -89,6 +126,19 @@ bool is_running(const Handle &h)
 		return false;
 	}
 	return true;
+}
+
+void terminate(Handle &h)
+{
+	if(!h.valid())
+		return;
+	request_terminate(h);
+	for(int i = 0; i < 200; i++){
+		if(!is_running(h) || reap_dead(h))
+			return;
+		usleep(50000);
+	}
+	kill_force(h);
 }
 
 }

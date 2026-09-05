@@ -23,6 +23,12 @@ namespace interface
 		};
 
 		Handle start(const std::string &path, const sv_<ss_> &args);
+		// SIGTERM (or equivalent). Does not wait. Handle stays valid until
+		// the process exits or kill_force() is used.
+		void request_terminate(Handle &h);
+		// SIGKILL and reap. Clears the handle.
+		void kill_force(Handle &h);
+		// request_terminate, wait up to 10s, then kill_force.
 		void terminate(Handle &h);
 		bool is_running(const Handle &h);
 	}
