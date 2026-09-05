@@ -158,6 +158,9 @@ do
 	--body.linearVelocity = magic.Vector3(0, -10, 0)
 	body.angularFactor = magic.Vector3(0, 0, 0)
 	body.gravityOverride = magic.Vector3(0, -15.0, 0) -- A bit more than normally
+	-- Default COLLISION_ACTIVE drops events when the body sleeps, so jump
+	-- would fail while standing still.
+	body.collisionEventMode = magic.COLLISION_ALWAYS
 	--player_shape:SetBox(magic.Vector3(1, 1.7*PLAYER_SCALE, 1))
 	player_shape:SetCapsule(PLAYER_WIDTH, PLAYER_HEIGHT)
 	--]]
@@ -501,7 +504,12 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		misc_text:SetText("("..math.floor(p.x + 0.5)..", "..
 				math.floor(p.y + 0.5)..", "..math.floor(p.z + 0.5)..")")
 	end
+end)
 
+-- PhysicsCollision is only sent on a Bullet step. Update can run on
+-- interpolation frames with no step; keep the last step's grounded flag
+-- until the next PreStep instead of clearing it every Update.
+magic.SubscribeToEvent("PhysicsPreStep", function(event_type, event_data)
 	player_touches_ground = false
 end)
 
@@ -512,13 +520,15 @@ magic.SubscribeToEvent("PhysicsCollision", function(event_type, event_data)
 	local contacts = event_data:GetBuffer("Contacts")
 	if node_a:GetID() == player_node:GetID() or
 			node_b:GetID() == player_node:GetID() then
+		-- PhysicsCollision normals are NodeA's view and flip with pointer
+		-- order. Contact height does not: feet are below the capsule center.
+		local player_y = player_node:GetWorldPosition().y
 		while not contacts.eof do
 			local position = contacts:ReadVector3()
 			local normal = contacts:ReadVector3()
 			local distance = contacts:ReadFloat()
 			local impulse = contacts:ReadFloat()
-			--log:info("normal: ("..normal.x..", "..normal.y..", "..normal.z..")")
-			if normal.y < 0.5 then
+			if position.y < player_y then
 				player_touches_ground = true
 			end
 		end

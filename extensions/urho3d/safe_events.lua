@@ -67,6 +67,9 @@ return {
 		Scene = {variant = "Ptr", safe = "Scene"},
 		Node = {variant = "Ptr", safe = "Node"},
 	},
+	PhysicsPreStep = {
+		TimeStep = {variant = "Float", safe = "number"},
+	},
 	PhysicsCollision = {
 		NodeA = {variant = "Ptr", safe = "Node"},
 		NodeB = {variant = "Ptr", safe = "Node"},
