@@ -28,38 +28,24 @@ Install dependencies
 	$ sudo apt-get install libx11-dev libxrandr-dev libasound2-dev libgl1-mesa-dev
 	$ sudo yum install libX11-devel libXrandr-devel alsa-lib-devel
 
-Get and build Urho3D
-----------------------
+Build
+-------
 
-NOTE: Occasionally you have to use celeron55's fork of Urho3D due to special
-	  features needed by Buildat that are missing in upstream Urho3D. Don't
-	  worry, Urho3D isn't a distro-packageable library due to its various
-	  configuration options.
+Urho3D is bundled in `3rdparty/Urho3D` and is configured/built as part of this
+project (shared library, Lua, safe Lua). `-DURHO3D_LIB_TYPE=SHARED` is required
+for the module interface.
 
-    $ git clone https://github.com/celeron55/Urho3D.git
-    $ cd Urho3D
-    $ ./cmake_gcc.sh -DURHO3D_LIB_TYPE=SHARED -DURHO3D_LUA=true -DURHO3D_SAFE_LUA=true  # Add -DURHO3D_64BIT=true on 64-bit systems
-    $ cd Build
-    $ make -j4
-
-* `-DURHO3D_LIB_TYPE=SHARED` is required for the operation of the module interface.
-* `-DURHO3D_SAFE_LUA=true` helps debugging issues in Lua.
-
-Take note whether you build a 32 or a 64 bit version and use the same option in
-Buildat's CMake configuration.
-
-Build Buildat
----------------
-
-    $ export URHO3D_HOME=/path/to/urho3d
     $ cd $wherever_buildat_is
     $ mkdir Build  # Capital B is a good idea so it stays out of the way in tabcomplete
     $ cd Build
-    $ cmake .. -DCMAKE_BUILD_TYPE=Debug -DURHO3D_LIB_TYPE=SHARED  # Add -DURHO3D_64BIT=true on 64-bit systems
+    $ cmake .. -DCMAKE_BUILD_TYPE=Debug  # Add -DURHO3D_64BIT=true on 64-bit systems
     $ make -j4
 
 You can use -DBUILD_SERVER=false or -DBUILD_CLIENT=false if you don't need the
 server or the client, respectively.
+
+Optional: `-DURHO3D_LUAJIT=TRUE` builds the bundled LuaJIT instead of Lua.
+`URHO3D_HOME` still overrides the bundled tree if you need an external build.
 
 Run Buildat
 -------------
@@ -72,7 +58,7 @@ Terminal 1:
 Terminal 2:
 
     $ $wherever_buildat_is/Build
-    $ bin/buildat_client -s localhost -U $URHO3D_HOME
+    $ bin/buildat_client -s localhost
 
 Modify something and see stuff happen
 ---------------------------------------
@@ -89,17 +75,10 @@ Buildat Windows How-To
 
 Use Mingw-w64 in an MSYS environment. Make sure to use a pthreads version of Mingw-w64. Windows threads are not supported ATM.
 
-    $ cd /path/to/Urho3D
-    $ mkdir Build
-    $ cd Build
-    $ cmake ../Source -G "MSYS Makefiles" -DURHO3D_LIB_TYPE=SHARED -DURHO3D_LUAJIT=TRUE
-    $ make -j4
-
     $ cd /path/to/buildat
     $ mkdir Build
     $ cd Build
-	$ export URHO3D_HOME="/path/to/Urho3D"
-    $ cmake .. -G "MSYS Makefiles" -DCMAKE_BUILD_TYPE=Debug -DURHO3D_LIB_TYPE=SHARED -DURHO3D_LUAJIT=TRUE
+    $ cmake .. -G "MSYS Makefiles" -DCMAKE_BUILD_TYPE=Debug -DURHO3D_LUAJIT=TRUE
     $ make -j4
 
 Running the server:

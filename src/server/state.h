@@ -3,6 +3,7 @@
 #pragma once
 #include "core/types.h"
 #include "interface/event.h"
+#include <functional>
 
 namespace interface
 {
