@@ -29,6 +29,8 @@ local scene = replicate.main_scene
 
 local player_touches_ground = false
 local player_crouched = false
+local physics_enabled = false
+local spawn_received = false
 
 local pointed_voxel_p = nil
 local pointed_voxel_p_above = nil
@@ -93,9 +95,9 @@ do
 	local zone_node = scene:CreateChild("Zone")
 	local zone = zone_node:CreateComponent("Zone")
 	zone.boundingBox = magic.BoundingBox(-1000, 1000)
-	zone.ambientColor = magic.Color(0.1, 0.1, 0.1)
+	zone.ambientColor = magic.Color(0.42, 0.48, 0.60)
 	--zone.ambientColor = magic.Color(0, 0, 0)
-	zone.fogColor = magic.Color(0.6, 0.7, 0.8)
+	zone.fogColor = magic.Color(0.68, 0.76, 0.85)
 	--zone.fogColor = magic.Color(0, 0, 0)
 	zone.fogStart = 10
 	zone.fogEnd = FOG_END
@@ -129,18 +131,8 @@ do
 	local light = node:CreateComponent("Light")
 	light.lightType = magic.LIGHT_DIRECTIONAL
 	light.castShadows = true
-	light.brightness = 0.8
+	light.brightness = 1.2
 	light.color = magic.Color(1.0, 1.0, 0.95)
-
-	---[[
-	local node = scene:CreateChild("DirectionalLight")
-	node.direction = magic.Vector3(0.3, -1.0, -0.4)
-	local light = node:CreateComponent("Light")
-	light.lightType = magic.LIGHT_DIRECTIONAL
-	light.castShadows = true
-	light.brightness = 0.2
-	light.color = magic.Color(0.7, 0.7, 1.0)
-	--]]
 
 	--[[
 	local node = scene:CreateChild("DirectionalLight")
@@ -157,13 +149,11 @@ end
 local player_node = scene:CreateChild("Player")
 local player_shape = player_node:CreateComponent("CollisionShape")
 do
-	--player_node.position = magic.Vector3(0, 30, 0)
-	--player_node.position = magic.Vector3(55, 30, 40)
-	player_node.position = magic.Vector3(-5, 1, 257)
+	-- Placeholder until main:spawn arrives with terrain height at this x,z
+	player_node.position = magic.Vector3(-5, 80, 257)
 	player_node.direction = magic.Vector3(-1, 0, 0.4)
 	---[[
 	local body = player_node:CreateComponent("RigidBody")
-	--body.mass = 70.0
 	body.friction = 0
 	--body.linearVelocity = magic.Vector3(0, -10, 0)
 	body.angularFactor = magic.Vector3(0, 0, 0)
@@ -171,6 +161,42 @@ do
 	--player_shape:SetBox(magic.Vector3(1, 1.7*PLAYER_SCALE, 1))
 	player_shape:SetCapsule(PLAYER_WIDTH, PLAYER_HEIGHT)
 	--]]
+end
+
+-- Volume data can exist before Bullet boxes. Require a solid voxel under
+-- the feet and a RigidBody on that chunk (set_voxel_physics_boxes).
+local function floor_has_collision()
+	local p = player_node:GetWorldPosition()
+	local floor = magic.Vector3(p.x, p.y - PLAYER_HEIGHT / 2 - 0.25, p.z)
+	local v = voxelworld.get_static_voxel(floor)
+	if v.id < 2 then
+		return false
+	end
+	local chunk_p = voxelworld.get_chunk_position(floor)
+	if not chunk_p then
+		return false
+	end
+	local node = voxelworld.get_static_node(chunk_p)
+	if not node then
+		return false
+	end
+	return node:GetComponent("RigidBody") ~= nil
+end
+
+local function enable_physics()
+	if physics_enabled or not spawn_received then
+		return
+	end
+	if not floor_has_collision() then
+		return
+	end
+	local body = player_node:GetComponent("RigidBody")
+	if not body then
+		return
+	end
+	body.mass = PLAYER_MASS
+	physics_enabled = true
+	log:info("player physics enabled")
 end
 
 -- Add a camera so we can look at the scene
@@ -213,27 +239,60 @@ end
 local title_text = magic.ui.root:CreateChild("Text")
 local misc_text = magic.ui.root:CreateChild("Text")
 local worldgen_text = magic.ui.root:CreateChild("Text")
+local wait_text = magic.ui.root:CreateChild("Text")
 do
 	title_text:SetText("digger/init.lua")
 	title_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
 	title_text.horizontalAlignment = magic.HA_CENTER
-	title_text.verticalAlignment = magic.VA_CENTER
-	title_text:SetPosition(0, -magic.ui.root.height/2 + 20)
+	title_text.verticalAlignment = magic.VA_TOP
+	title_text:SetPosition(0, 20)
 
 	misc_text:SetText("")
 	misc_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
 	misc_text.horizontalAlignment = magic.HA_CENTER
-	misc_text.verticalAlignment = magic.VA_CENTER
-	misc_text:SetPosition(0, -magic.ui.root.height/2 + 40)
+	misc_text.verticalAlignment = magic.VA_TOP
+	misc_text:SetPosition(0, 40)
 
 	worldgen_text:SetText("")
 	worldgen_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
-	--[[worldgen_text.horizontalAlignment = magic.HA_LEFT
-	worldgen_text.verticalAlignment = magic.VA_TOP
-	worldgen_text:SetPosition(0, 0)--]]
 	worldgen_text.horizontalAlignment = magic.HA_CENTER
-	worldgen_text.verticalAlignment = magic.VA_CENTER
-	worldgen_text:SetPosition(0, -magic.ui.root.height/2 + 60)
+	worldgen_text.verticalAlignment = magic.VA_TOP
+	worldgen_text:SetPosition(0, 60)
+
+	wait_text:SetText("Generating terrain...")
+	wait_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 24)
+	wait_text.horizontalAlignment = magic.HA_CENTER
+	wait_text.verticalAlignment = magic.VA_CENTER
+	wait_text:SetPosition(0, 0)
+
+	local function crosshair_bar(w, h)
+		local bar = magic.ui.root:CreateChild("BorderImage")
+		bar.width = w
+		bar.height = h
+		bar.horizontalAlignment = magic.HA_CENTER
+		bar.verticalAlignment = magic.VA_CENTER
+		bar:SetPosition(0, 0)
+		bar.color = magic.Color(1, 1, 1)
+	end
+	crosshair_bar(15, 1)
+	crosshair_bar(1, 15)
+end
+
+local function set_generating_status(queue_size)
+	if spawn_received then
+		wait_text:SetText("")
+		if queue_size and queue_size > 0 then
+			worldgen_text:SetText("Worldgen queue size: "..queue_size)
+		else
+			worldgen_text:SetText("")
+		end
+		return
+	end
+	if queue_size and queue_size > 0 then
+		wait_text:SetText("Generating terrain... ("..queue_size.." sections left)")
+	else
+		wait_text:SetText("Generating terrain...")
+	end
 end
 
 -- Unfocus UI
@@ -371,6 +430,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		log:info("p="..camera_node:GetRotation():PitchAngle())]]
 
 		local body = player_node:GetComponent("RigidBody")
+		enable_physics()
 
 		do 
 			local wanted_v = magic.Vector3(0, 0, 0) -- re. world
@@ -422,16 +482,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 			end
 		end
 		if magic.input:GetKeyDown(magic.KEY_SHIFT) then
-			--local bv = body.linearVelocity
-			--bv.y = -MOVE_SPEED
-			--body.linearVelocity = bv
-
-			-- Delay setting this to here so that it's possible to wait for the
-			-- world to load first
-			if body.mass == 0 then
-				body.mass = PLAYER_MASS
-			end
-
+			enable_physics()
 			if not player_crouched then
 				player_shape:SetCapsule(PLAYER_WIDTH, PLAYER_HEIGHT/2)
 				camera_node.position = magic.Vector3(0, 0.411*PLAYER_HEIGHT/2, 0)
@@ -497,13 +548,25 @@ voxelworld.sub_ready(function()
 	end)
 end)
 
-buildat.sub_packet("main:worldgen_queue_size", function(data)
-	local queue_size = tonumber(data)
-	if queue_size > 0 then
-		worldgen_text:SetText("Worldgen queue size: "..queue_size)
-	else
-		worldgen_text:SetText("")
+buildat.sub_packet("main:spawn", function(data)
+	local v = cereal.binary_input(data, {"object",
+		{"x", "double"},
+		{"y", "double"},
+		{"z", "double"},
+	})
+	log:info("spawn ("..v.x..", "..v.y..", "..v.z..")")
+	player_node.position = magic.Vector3(v.x, v.y, v.z)
+	local body = player_node:GetComponent("RigidBody")
+	if body then
+		body.linearVelocity = magic.Vector3(0, 0, 0)
 	end
+	spawn_received = true
+	enable_physics()
+	set_generating_status(0)
+end)
+
+buildat.sub_packet("main:worldgen_queue_size", function(data)
+	set_generating_status(tonumber(data))
 end)
 
 -- vim: set noet ts=4 sw=4:
