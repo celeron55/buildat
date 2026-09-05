@@ -9,13 +9,9 @@ local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
 
---local RENDER_DISTANCE = 640
-local RENDER_DISTANCE = 480
---local RENDER_DISTANCE = 320
---local RENDER_DISTANCE = 240
---local RENDER_DISTANCE = 160
-
-local FOG_END = RENDER_DISTANCE * 1.2
+-- Fog hides the streaming edge (section = 64 voxels, load radius 5).
+local RENDER_DISTANCE = 280
+local FOG_END = RENDER_DISTANCE * 1.15
 
 local PLAYER_HEIGHT = 1.7
 local PLAYER_WIDTH = 0.9
@@ -94,7 +90,7 @@ magic.input:SetMouseVisible(false)
 do
 	local zone_node = scene:CreateChild("Zone")
 	local zone = zone_node:CreateComponent("Zone")
-	zone.boundingBox = magic.BoundingBox(-1000, 1000)
+	zone.boundingBox = magic.BoundingBox(-100000, 100000)
 	zone.ambientColor = magic.Color(0.42, 0.48, 0.60)
 	--zone.ambientColor = magic.Color(0, 0, 0)
 	zone.fogColor = magic.Color(0.68, 0.76, 0.85)
@@ -151,7 +147,7 @@ local player_shape = player_node:CreateComponent("CollisionShape")
 do
 	-- Placeholder until main:spawn arrives with terrain height at this x,z
 	player_node.position = magic.Vector3(-5, 80, 257)
-	player_node.direction = magic.Vector3(-1, 0, 0.4)
+	player_node.direction = magic.Vector3(-1, 0, 0.35)
 	---[[
 	local body = player_node:CreateComponent("RigidBody")
 	body.friction = 0
@@ -298,6 +294,20 @@ local function set_generating_status(queue_size)
 	end
 end
 
+local function send_player_pos()
+	local p = player_node:GetWorldPosition()
+	local data = cereal.binary_output({
+		x = p.x,
+		y = p.y,
+		z = p.z,
+	}, {"object",
+		{"x", "double"},
+		{"y", "double"},
+		{"z", "double"},
+	})
+	buildat.send_packet("main:player_pos", data)
+end
+
 -- Unfocus UI
 magic.ui:SetFocusElement(nil)
 
@@ -381,9 +391,17 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	end
 end)
 
+local pos_send_counter = 0
+
 magic.SubscribeToEvent("Update", function(event_type, event_data)
 	--log:info("Update")
 	local dt = event_data:GetFloat("TimeStep")
+
+	pos_send_counter = pos_send_counter + 1
+	if pos_send_counter >= 15 then
+		pos_send_counter = 0
+		send_player_pos()
+	end
 
 	if camera_node then
 		local p, p_above = find_pointed_voxel(camera_node)
@@ -421,8 +439,8 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 
 	if player_node then
 		-- If falling out of world, restore onto world
-		if player_node.position.y < -500 then
-			player_node.position = magic.Vector3(0, 500, 0)
+		if player_node.position.y < -200 then
+			player_node.position = magic.Vector3(-5, 80, 257)
 		end
 
 		local dmouse = magic.input:GetMouseMove()
@@ -573,6 +591,7 @@ buildat.sub_packet("main:spawn", function(data)
 	spawn_received = true
 	enable_physics()
 	set_generating_status(0)
+	send_player_pos()
 end)
 
 buildat.sub_packet("main:worldgen_queue_size", function(data)

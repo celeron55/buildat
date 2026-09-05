@@ -13,6 +13,7 @@
 #include "interface/voxel.h"
 #include "interface/noise.h"
 #include "interface/voxel_volume.h"
+#include "interface/polyvox_numeric.h"
 #include <Scene.h>
 #include <RigidBody.h>
 #include <CollisionShape.h>
@@ -27,6 +28,8 @@
 #include <cereal/types/unordered_map.hpp>
 #include <cereal/types/vector.hpp>
 #include <sstream>
+#include <cmath>
+#include <set>
 #define MODULE "main"
 
 namespace magic = Urho3D;
@@ -82,51 +85,37 @@ struct Worldgen: public worldgen::GeneratorInterface
 			log_t(MODULE, "on_generation_request(): uc: (%i, %i, %i)",
 					uc.getX(), uc.getY(), uc.getZ());
 
-			interface::v3f spread(160, 160, 160);
-			interface::NoiseParams np(0, 20, spread, 0, 7, 0.4);
-
 			int w = uc.getX() - lc.getX() + 1;
 			int d = uc.getZ() - lc.getZ() + 1;
 
-			interface::Noise noise(&np, 3, w, d);
-			noise.perlinMap2D(lc.getX() + spread.X/2, lc.getZ() + spread.Z/2);
-			noise.transformNoiseMap(); // ?
+			interface::v3f spread_h(280, 280, 280);
+			interface::NoiseParams np_h(0, 14, spread_h, 0, 5, 0.45);
+			interface::Noise noise_h(&np_h, 3, w, d);
+			noise_h.perlinMap2D(lc.getX() + spread_h.X/2,
+					lc.getZ() + spread_h.Z/2);
+			noise_h.transformNoiseMap();
+
+			interface::v3f spread_b(48, 48, 48);
+			interface::NoiseParams np_b(0, 3, spread_b, 11, 3, 0.5);
+			interface::Noise noise_b(&np_b, 3, w, d);
+			noise_b.perlinMap2D(lc.getX() + spread_b.X/2,
+					lc.getZ() + spread_b.Z/2);
+			noise_b.transformNoiseMap();
 
 			size_t noise_i = 0;
 			for(int z = lc.getZ(); z <= uc.getZ(); z++){
 				for(int x = lc.getX(); x <= uc.getX(); x++){
-					double a = noise.result[noise_i];
+					float surface = 16.f + noise_h.result[noise_i] +
+							noise_b.result[noise_i];
 					noise_i++;
+					int ground_y = (int)std::floor(surface);
 					for(int y = lc.getY(); y <= uc.getY(); y++){
 						pv::Vector3DInt32 p(x, y, z);
-						pv::Vector3DInt32 cp(-112, 20, 253);
-						if((p - cp).lengthSquared() < 30*30){
-							world->set_voxel(p, VoxelInstance(1));
-							continue;
-						}
-						if(y >= 2 && y <= 3 && z >= 256 && z <= 258 &&
-								x >= -112 && x <= -5){
-							world->set_voxel(p, VoxelInstance(1));
-							continue;
-						}
-						if(z > 37 && z < 50 && y > 20){
-							world->set_voxel(p, VoxelInstance(1));
-							continue;
-						}
-						if(x > 27 && x < 40 && y > 20){
-							world->set_voxel(p, VoxelInstance(1));
-							continue;
-						}
-						if(x > 18 && x < 25 && z >= 32 && z <= 37 &&
-								y > 20 && y < 25){
-							world->set_voxel(p, VoxelInstance(1));
-							continue;
-						}
-						if(y < a+5){
+						if(y < ground_y - 4){
 							world->set_voxel(p, VoxelInstance(2));
-						} else if(y < a+10){
+						} else if(y < ground_y){
 							world->set_voxel(p, VoxelInstance(3));
-						} else if(y < a+11){
+						} else if(y == ground_y){
 							world->set_voxel(p, VoxelInstance(4));
 						} else {
 							world->set_voxel(p, VoxelInstance(1));
@@ -135,38 +124,33 @@ struct Worldgen: public worldgen::GeneratorInterface
 				}
 			}
 
-			// Add random trees
 			auto extent = uc - lc + pv::Vector3DInt32(1, 1, 1);
 			int area = extent.getX() * extent.getZ();
-			auto pr = interface::PseudoRandom(13241);
-			for(int i = 0; i < area / 100; i++){
+			auto pr = interface::PseudoRandom(
+					13241 + section_p.getX() * 131 +
+					section_p.getZ() * 9176);
+			for(int i = 0; i < area / 110; i++){
 				int x = pr.range(lc.getX(), uc.getX());
 				int z = pr.range(lc.getZ(), uc.getZ());
-
-				/*int y = 50;
-				for(; y>-50; y--){
-					pv::Vector3DInt32 p(x, y, z);
-					VoxelInstance v = world->get_voxel(p);
-					if(v.get_id() != 1)
-						break;
-				}
-				y++;*/
-				size_t noise_i = (z-lc.getZ())*d + (x-lc.getX());
-				double a = noise.result[noise_i];
-				int y = a + 11.0;
+				size_t ti = (z-lc.getZ())*w + (x-lc.getX());
+				int ground_y = (int)std::floor(16.f + noise_h.result[ti] +
+						noise_b.result[ti]);
+				int y = ground_y + 1;
 				if(y < lc.getY() - 5 || y > uc.getY() - 5)
 					continue;
 
-				for(int y1 = y; y1<y+4; y1++){
-					pv::Vector3DInt32 p(x, y1, z);
-					world->set_voxel(p, VoxelInstance(6), true);
+				int trunk = 3 + pr.range(0, 2);
+				for(int y1 = y; y1 < y + trunk; y1++){
+					world->set_voxel(pv::Vector3DInt32(x, y1, z),
+							VoxelInstance(6), true);
 				}
-
+				int leaves_y0 = y + trunk - 1;
+				int leaves_y1 = y + trunk + 3;
 				for(int x1 = x-2; x1 <= x+2; x1++){
-					for(int y1 = y+3; y1 <= y+7; y1++){
+					for(int y1 = leaves_y0; y1 <= leaves_y1; y1++){
 						for(int z1 = z-2; z1 <= z+2; z1++){
-							pv::Vector3DInt32 p(x1, y1, z1);
-							world->set_voxel(p, VoxelInstance(5), true);
+							world->set_voxel(pv::Vector3DInt32(x1, y1, z1),
+									VoxelInstance(5), true);
 						}
 					}
 				}
@@ -187,8 +171,21 @@ struct Module: public interface::Module
 	static const int SPAWN_Y_MIN = -64;
 	static constexpr float PLAYER_HEIGHT = 1.7f;
 
+	// Section is 64 voxels. Radius 5 fills a ~320-voxel view; Y is finite.
+	// simplified: no unload. replicate:remove_node is unimplemented on the
+	// client; distant sections stay in memory for the session.
+	static const int STREAM_RADIUS_XZ = 5;
+	static const int STREAM_RADIUS_Y = 1;
+	static const int STREAM_Y_MIN = -1;
+	static const int STREAM_Y_MAX = 1;
+	static const size_t STREAM_QUEUE_SOFT_MAX = 12;
+
 	bool m_spawn_ready = false;
 	float m_spawn_y = 0;
+	size_t m_worldgen_queue = 0;
+
+	sm_<network::PeerInfo::Id, pv::Vector3DInt32> m_player_voxel_p;
+	std::set<uint64_t> m_requested_sections;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -210,6 +207,9 @@ struct Module: public interface::Module
 				"network:packet_received/main:place_voxel"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:dig_voxel"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:player_pos"));
+		m_server->sub_event(this, Event::t("network:client_disconnected"));
 		m_server->sub_event(this, Event::t("worldgen:queue_modified"));
 	}
 
@@ -225,6 +225,10 @@ struct Module: public interface::Module
 				on_place_voxel, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:dig_voxel",
 				on_dig_voxel, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:player_pos",
+				on_player_pos, network::Packet)
+		EVENT_TYPEN("network:client_disconnected",
+				on_client_disconnected, network::OldClient)
 		EVENT_TYPEN("worldgen:queue_modified",
 				on_worldgen_queue_modified, worldgen::QueueModifiedEvent);
 	}
@@ -247,15 +251,10 @@ struct Module: public interface::Module
 
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
-			//pv::Region region(0, 0, 0, 0, 0, 0); // Use this for valgrind
-			//pv::Region region(-1, 0, -1, 1, 0, 1);
-			//pv::Region region(-1, -1, -1, 1, 1, 1);
-			//pv::Region region(-2, -1, -2, 2, 1, 2);
-			//pv::Region region(-3, -1, -3, 3, 1, 3);
-			pv::Region region(-5, -1, 0, 0, 1, 5);
-			//pv::Region region(-5, -1, -5, 5, 1, 5);
-			//pv::Region region(-6, -1, -6, 6, 1, 6);
-			//pv::Region region(-8, -1, -8, 8, 1, 8);
+			// Spawn section only; stream_around() loads the rest on demand.
+			// PolyVox Region asserts upper >= lower, so an empty box is not
+			// possible.
+			pv::Region region(-1, 0, 4, -1, 0, 4);
 			ivoxelworld->create_instance(m_main_scene, region);
 		});
 
@@ -394,6 +393,9 @@ struct Module: public interface::Module
 			instance->enable();
 		});
 
+		m_requested_sections.insert(section_key(-1, 0, 4));
+		stream_around(pv::Vector3DInt32(SPAWN_X, 20, SPAWN_Z));
+
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *instance)
 		{
@@ -407,7 +409,8 @@ struct Module: public interface::Module
 						instance->get_voxel_reg();
 
 				Node *n = scene->CreateChild("Testbox");
-				n->SetPosition(Vector3(30.0f, 30.0f, 40.0f));
+				n->SetPosition(Vector3(
+						(float)SPAWN_X + 3.0f, 40.0f, (float)SPAWN_Z + 2.0f));
 				n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
 
 				/*int w = 1, h = 1, d = 1;
@@ -463,56 +466,88 @@ struct Module: public interface::Module
 		on_start();
 	}
 
-	void on_tick(const interface::TickEvent &event)
+	static uint64_t section_key(int16_t x, int16_t y, int16_t z)
 	{
-		/*main_context::access(m_server, [&](main_context::Interface *imc)
-		{
-			Scene *scene = imc->check_scene(m_main_scene);
-			Node *n = scene->GetChild("Testbox");
-			auto p = n->GetPosition();
-			log_v(MODULE, "Testbox: (%f, %f, %f)", p.x_, p.y_, p.z_);
-		});*/
-		static uint a = 0;
-		if(((a++) % 150) == 0){
-			main_context::access(m_server, [&](main_context::Interface *imc)
-			{
-				Scene *scene = imc->check_scene(m_main_scene);
-				Node *n = scene->GetChild("Testbox");
-				if(n){
-					n->SetRotation(Quaternion(30, 60, 90));
-					n->SetPosition(Vector3(30.0f, 30.0f, 40.0f));
-				}
-			});
-		}
+		return (uint64_t)(uint16_t)x |
+				((uint64_t)(uint16_t)y << 16) |
+				((uint64_t)(uint16_t)z << 32);
 	}
 
-	// Standing-height air along -X (player facing). No path check; long enough
-	// that it is likely to hit a slope, pocket, or the world edge.
-	void carve_spawn_tunnel(int floor_y)
+	void request_section(voxelworld::Instance *world,
+			const pv::Vector3DInt16 &section_p)
 	{
-		const int length = 96;
-		const int height = 3;
-		const int half_w = 1;
-		const int back = 2;
-		voxelworld::access(m_server, m_main_scene,
-				[&](voxelworld::Instance *world)
-		{
-			for(int dx = -back; dx < length; dx++){
-				int x = SPAWN_X - dx;
-				for(int dz = -half_w; dz <= half_w; dz++){
-					int z = SPAWN_Z + dz;
-					for(int dy = 1; dy <= height; dy++){
-						world->set_voxel(
-								pv::Vector3DInt32(x, floor_y + dy, z),
-								VoxelInstance(1), true);
+		if(section_p.getY() < STREAM_Y_MIN || section_p.getY() > STREAM_Y_MAX)
+			return;
+		uint64_t k = section_key(section_p.getX(), section_p.getY(),
+				section_p.getZ());
+		if(!m_requested_sections.insert(k).second)
+			return;
+		world->load_or_generate_section(section_p);
+	}
+
+	void stream_around(const pv::Vector3DInt32 &voxel_p)
+	{
+		// Use m_worldgen_queue, not worldgen::access: generation holds that
+		// module for the whole section and would stall this thread's events.
+		size_t queued = m_worldgen_queue;
+
+		const int ssv = 64; // chunk 32 * section 2; matches voxelworld defaults
+		int sx = interface::container_coord(voxel_p.getX(), ssv);
+		int sy = interface::container_coord(voxel_p.getY(), ssv);
+		int sz = interface::container_coord(voxel_p.getZ(), ssv);
+
+		sv_<pv::Vector3DInt16> wanted;
+		for(int r = 0; r <= STREAM_RADIUS_XZ; r++){
+			for(int dy = -STREAM_RADIUS_Y; dy <= STREAM_RADIUS_Y; dy++){
+				int y = sy + dy;
+				if(y < STREAM_Y_MIN || y > STREAM_Y_MAX)
+					continue;
+				for(int dz = -r; dz <= r; dz++){
+					for(int dx = -r; dx <= r; dx++){
+						if(r > 0 && dx != r && dx != -r &&
+								dz != r && dz != -r)
+							continue;
+						if(queued >= STREAM_QUEUE_SOFT_MAX && r > 0)
+							goto have_wanted;
+						uint64_t k = section_key(sx + dx, y, sz + dz);
+						if(m_requested_sections.count(k))
+							continue;
+						wanted.push_back(pv::Vector3DInt16(sx + dx, y, sz + dz));
+						queued++;
+						if(wanted.size() >= 2)
+							goto have_wanted;
 					}
 				}
 			}
+		}
+	have_wanted:
+		if(wanted.empty())
+			return;
+
+		voxelworld::access(m_server, m_main_scene,
+				[&](voxelworld::Instance *world)
+		{
+			for(const auto &p : wanted)
+				request_section(world, p);
 		});
-		log_i(MODULE, "Spawn tunnel: x=%i..%i y=%i..%i z=%i..%i",
-				SPAWN_X + back, SPAWN_X - (length - 1),
-				floor_y + 1, floor_y + height,
-				SPAWN_Z - half_w, SPAWN_Z + half_w);
+	}
+
+	void stream_players_or_spawn()
+	{
+		if(m_player_voxel_p.empty()){
+			stream_around(pv::Vector3DInt32(SPAWN_X, 20, SPAWN_Z));
+			return;
+		}
+		for(auto &pair : m_player_voxel_p)
+			stream_around(pair.second);
+	}
+
+	void on_tick(const interface::TickEvent &event)
+	{
+		static uint tick_n = 0;
+		if(((tick_n++) % 4) == 0)
+			stream_players_or_spawn();
+		try_resolve_spawn();
 	}
 
 	void send_spawn(network::PeerInfo::Id peer)
@@ -533,12 +568,14 @@ struct Module: public interface::Module
 	}
 
 	// Terrain ids: 2 rock, 3 dirt, 4 grass. Skip air (1), trees/leaves (5, 6).
+	// Unloaded voxels are UNDEFINED; skip them so spawn can resolve as soon
+	// as the surface section exists, while further sections still generate.
 	void try_resolve_spawn()
 	{
 		if(m_spawn_ready)
 			return;
 		int surface_y = SPAWN_Y_MIN - 1;
-		bool column_ready = true;
+		bool saw_defined = false;
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *world)
 		{
@@ -546,24 +583,40 @@ struct Module: public interface::Module
 				VoxelInstance v = world->get_voxel(
 						pv::Vector3DInt32(SPAWN_X, y, SPAWN_Z), true);
 				auto id = v.get_id();
-				if(id == interface::VOXELTYPEID_UNDEFINED){
-					column_ready = false;
+				if(id == interface::VOXELTYPEID_UNDEFINED)
+					continue;
+				saw_defined = true;
+				if(id != 2 && id != 3 && id != 4)
+					continue;
+				VoxelInstance above = world->get_voxel(
+						pv::Vector3DInt32(SPAWN_X, y + 1, SPAWN_Z), true);
+				auto above_id = above.get_id();
+				if(above_id == interface::VOXELTYPEID_UNDEFINED)
 					return;
-				}
-				if(id == 2 || id == 3 || id == 4){
-					surface_y = y;
-					return;
+				if(above_id != 1 && above_id != 5 && above_id != 6)
+					continue;
+				surface_y = y;
+				return;
+			}
+		});
+		if(!saw_defined)
+			return;
+		if(surface_y < SPAWN_Y_MIN)
+			return;
+		voxelworld::access(m_server, m_main_scene,
+				[&](voxelworld::Instance *world)
+		{
+			for(int dx = -2; dx <= 2; dx++){
+				for(int dz = -2; dz <= 2; dz++){
+					for(int dy = 1; dy <= 3; dy++){
+						world->set_voxel(
+								pv::Vector3DInt32(SPAWN_X + dx,
+								surface_y + dy, SPAWN_Z + dz),
+								VoxelInstance(1), true);
+					}
 				}
 			}
 		});
-		if(!column_ready)
-			return;
-		if(surface_y < SPAWN_Y_MIN){
-			log_w(MODULE, "Spawn column (%i, *, %i) has no terrain",
-					SPAWN_X, SPAWN_Z);
-			return;
-		}
-		carve_spawn_tunnel(surface_y);
 		// Voxel n is a 1x1x1 cube centered at n; stand on its top face.
 		m_spawn_y = (float)surface_y + 0.5f + PLAYER_HEIGHT / 2.0f + 0.05f;
 		m_spawn_ready = true;
@@ -585,20 +638,17 @@ struct Module: public interface::Module
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
-		replicate::access(m_server, [&](replicate::Interface *ireplicate){
-			ireplicate->assign_scene_to_peer(m_main_scene, event.recipient);
-		});
-		size_t queue_size = 0;
-		worldgen::access(m_server, m_main_scene,
-				[&](worldgen::Instance *instance)
-		{
-			queue_size = instance->get_num_sections_queued();
-		});
+		log_i(MODULE, "on_files_transmitted(): peer %zu", event.recipient);
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(event.recipient, "core:run_script",
 					"buildat.run_script_file(\"main/init.lua\")");
+		});
+		replicate::access(m_server, [&](replicate::Interface *ireplicate){
+			ireplicate->assign_scene_to_peer(m_main_scene, event.recipient);
+		});
+		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(event.recipient, "main:worldgen_queue_size",
-					itos(queue_size));
+					itos(m_worldgen_queue));
 		});
 		send_spawn(event.recipient);
 	}
@@ -642,6 +692,7 @@ struct Module: public interface::Module
 	void on_worldgen_queue_modified(const worldgen::QueueModifiedEvent &event)
 	{
 		log_t(MODULE, "on_worldgen_queue_modified()");
+		m_worldgen_queue = event.queue_size;
 		network::access(m_server, [&](network::Interface *inetwork){
 			sv_<network::PeerInfo::Id> peers = inetwork->list_peers();
 			for(auto &peer: peers){
@@ -649,8 +700,26 @@ struct Module: public interface::Module
 						itos(event.queue_size));
 			}
 		});
-		if(event.queue_size == 0)
-			try_resolve_spawn();
+		try_resolve_spawn();
+	}
+
+	void on_player_pos(const network::Packet &packet)
+	{
+		double x, y, z;
+		{
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(x, y, z);
+		}
+		m_player_voxel_p[packet.sender] = pv::Vector3DInt32(
+				(int32_t)std::floor(x), (int32_t)std::floor(y),
+				(int32_t)std::floor(z));
+		stream_around(m_player_voxel_p[packet.sender]);
+	}
+
+	void on_client_disconnected(const network::OldClient &old_client)
+	{
+		m_player_voxel_p.erase(old_client.info.id);
 	}
 };
 

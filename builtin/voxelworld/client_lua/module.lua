@@ -347,7 +347,15 @@ function sub_events()
 		if not node:GetVar("buildat_voxel_data"):IsEmpty() then
 			queue_initial_node_update(node)
 		end
-		--local name = node:GetName()
+		if node:GetVar("buildat_static"):GetBool() == true and
+				M.chunk_size_voxels then
+			local p = node:GetWorldPosition()
+			local chunk_p = buildat.Vector3(p):div_components(
+					M.chunk_size_voxels):floor()
+			local cache = M.get_static_node_cache(chunk_p)
+			cache.node = node
+			cache.fetched = true
+		end
 	end)
 end
 
@@ -401,7 +409,7 @@ function M.get_static_node_cache(chunk_p)
 	local xtable = ytable[chunk_p.x]
 	if not xtable then
 		xtable = {fetched=false}
-		xtable[chunk_p.x] = xtable
+		ytable[chunk_p.x] = xtable
 	end
 	return xtable
 end
