@@ -26,6 +26,7 @@
 #include "../Core/Context.h"
 #include "../Core/Profiler.h"
 #include "../Graphics/Animation.h"
+#include "../Graphics/GLTFLoader.h"
 #include "../IO/Deserializer.h"
 #include "../IO/FileSystem.h"
 #include "../IO/Log.h"
@@ -126,8 +127,12 @@ bool Animation::BeginLoad(Deserializer& source)
     unsigned memoryUse = sizeof(Animation);
 
     // Check ID
+    unsigned start = source.GetPosition();
     if (source.ReadFileID() != "UANI")
     {
+        source.Seek(start);
+        if (LoadGLTFAnimation(this, source))
+            return true;
         URHO3D_LOGERROR(source.GetName() + " is not a valid animation file");
         return false;
     }

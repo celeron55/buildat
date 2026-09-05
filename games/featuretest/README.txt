@@ -21,5 +21,11 @@ main/client_data/fire_basic_flame.png
 main/client_data/default_stone.png
 - CC BY-SA 3.0 Cisoun (Cisoun's texture pack)
 
+main/client_data/gltf_spider_animated.gltf
+main/client_data/gltf_spider.png
+- CC0 archfan7411
+  https://github.com/archfan7411
+  Copied from Luanti devtest (games/devtest/mods/gltf)
+
 Urho3D bundled models, particles, skybox, Jack, and materials stay
 under the Urho3D license (MIT).

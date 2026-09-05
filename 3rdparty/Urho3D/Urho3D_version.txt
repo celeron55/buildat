@@ -14,13 +14,15 @@ Kept for Lua whitelist / runtime:
 - Full CoreData (shaders, techniques, renderpaths, PBR)
 - UI, Input, Graphics, Physics, Urho2D, Navigation, IK, Network, Audio
 - Lua + LuaJIT + SAFE_LUA, Bullet, Box2D, SDL, FreeType, Recast/Detour, ik, WebP
-- Assimp + Tools (AssetImporter for .mdl/.ani); not built unless URHO3D_TOOLS=TRUE
+- tinygltf runtime .gltf/.glb loader (vendored from rbfx)
 - Data: fonts, UI styles, primitives, Jack+walk (animation), Stone/UI textures,
   Urho2D sample sprites, particles, postprocess XMLs
 - CMake modules and host/cross toolchains
 
 Source changes vs 1.7.1:
 - Source/Tools/CMakeLists.txt: Urho3DPlayer only when URHO3D_TOOLS (Buildat does not ship the player)
+- Graphics/GLTFLoader: runtime glTF 2.0 via tinygltf (rbfx importer algorithms)
+- Assimp thirdparty and AssetImporter tool removed
 
 Buildat cmake configures this tree as a sub-build of the Urho root:
   URHO3D_LIB_TYPE=SHARED URHO3D_LUA=TRUE URHO3D_SAFE_LUA=TRUE
