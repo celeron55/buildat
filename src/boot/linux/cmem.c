@@ -137,7 +137,7 @@ void* realloc(void *p, size_t size)
 
 // Allocates memory until buildat_mem_libc_enable() is called
 
-#define POOL_SIZE 100000 // 100kB
+#define POOL_SIZE 400000 // 400kB
 static char preinit_pool[POOL_SIZE] = {0};
 static size_t preinit_pool_i = 0;
 #define POINTERS_SIZE (POOL_SIZE / 20)

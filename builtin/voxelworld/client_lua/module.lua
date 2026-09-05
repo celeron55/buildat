@@ -499,6 +499,10 @@ function M.get_static_voxel(p)
 	-- Get voxel from volume
 	local volume = M.get_volume(node)
 	log:trace("get_static_voxel(): volume="..dump(volume))
+	if volume == nil then
+		log:warning("get_static_voxel(): volume is nil")
+		return buildat.VoxelInstance(0)
+	end
 	local v = volume:get_voxel_at(in_chunk_p.x, in_chunk_p.y, in_chunk_p.z)
 	log:trace("get_static_voxel(): v="..dump(v))
 	return v

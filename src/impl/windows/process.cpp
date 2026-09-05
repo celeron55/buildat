@@ -117,18 +117,32 @@ Handle start(const ss_ &path, const sv_<ss_> &args)
 	return h;
 }
 
-void terminate(Handle &h)
+void request_terminate(Handle &h)
+{
+	if(!h.valid())
+		return;
+	TerminateProcess((HANDLE)h.impl, 1);
+}
+
+void kill_force(Handle &h)
 {
 	if(!h.valid())
 		return;
 	HANDLE process = (HANDLE)h.impl;
 	TerminateProcess(process, 1);
-	WaitForSingleObject(process, 5000);
-	if(WaitForSingleObject(process, 0) != WAIT_OBJECT_0)
-		TerminateProcess(process, 1);
 	WaitForSingleObject(process, INFINITE);
 	CloseHandle(process);
 	h.impl = 0;
+}
+
+void terminate(Handle &h)
+{
+	if(!h.valid())
+		return;
+	request_terminate(h);
+	HANDLE process = (HANDLE)h.impl;
+	WaitForSingleObject(process, 10000);
+	kill_force(h);
 }
 
 bool is_running(const Handle &h)
