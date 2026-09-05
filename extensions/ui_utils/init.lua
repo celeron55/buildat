@@ -65,8 +65,8 @@ function M.safe.show_message_dialog(message)
 
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 		local key = event_data:GetInt("Key")
-		if key == KEY_ESC then
-			log:info("show_message_dialog: KEY_ESC pressed")
+		if key == KEY_ESCAPE then
+			log:info("show_message_dialog: KEY_ESCAPE pressed")
 			uistack.main:pop(root)
 			message_handle = nil
 		end
@@ -126,7 +126,7 @@ function M.safe.show_confirm_dialog(message, on_yes, on_no)
 	end)
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 		local key = event_data:GetInt("Key")
-		if key == KEY_ESC then
+		if key == KEY_ESCAPE then
 			finish(false)
 		end
 	end)

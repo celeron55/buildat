@@ -118,8 +118,6 @@ for _, name in ipairs(safe_globals) do
 		Safe[name] = v
 	end
 end
--- 1.6 renamed KEY_ESC to KEY_ESCAPE. Keep the old name for existing games.
-Safe.KEY_ESC = Safe.KEY_ESCAPE
 
 local mouse = { hide_wanted = false }
 
