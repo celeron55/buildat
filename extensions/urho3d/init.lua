@@ -20,6 +20,9 @@ local function wc(name, def)
 end
 
 local function wrap_instance(name, instance)
+	if instance == nil then
+		return nil
+	end
 	local class = Safe[name]
 	local class_meta = getmetatable(class)
 	if not class_meta then error(dump(name).." is not a whitelisted class") end

@@ -308,16 +308,18 @@ function sub_events()
 			if f and f <= 1.0 then
 				local node_update = node_update_queue:get()
 				local node = replicate.main_scene:GetNode(node_update.node_id)
-				log:debug("Node update #"..
-						node_update_queue:get_length()..
-						" (f="..(math.floor(f*100)/100)..""..
-						", fw="..(math.floor(fw*100)/100)..")"..
-						": "..node:GetName())
-				if node_update.type == "geometry" then
-					update_voxel_geometry(node)
-				end
-				if node_update.type == "physics" then
-					update_voxel_physics(node)
+				if node then
+					log:debug("Node update #"..
+							node_update_queue:get_length()..
+							" (f="..(math.floor(f*100)/100)..""..
+							", fw="..(math.floor(fw*100)/100)..")"..
+							": "..node:GetName())
+					if node_update.type == "geometry" then
+						update_voxel_geometry(node)
+					end
+					if node_update.type == "physics" then
+						update_voxel_physics(node)
+					end
 				end
 				did_update = true
 			else
@@ -347,7 +349,27 @@ function sub_events()
 		if not node:GetVar("buildat_voxel_data"):IsEmpty() then
 			queue_initial_node_update(node)
 		end
-		--local name = node:GetName()
+		if node:GetVar("buildat_static"):GetBool() == true and
+				M.chunk_size_voxels then
+			local p = node:GetWorldPosition()
+			local chunk_p = buildat.Vector3(p):div_components(
+					M.chunk_size_voxels):floor()
+			local cache = M.get_static_node_cache(chunk_p)
+			cache.node = node
+			cache.fetched = true
+		end
+	end)
+
+	replicate.sub_sync_node_removed(function(node, node_id)
+		node_volume_cache[node_id] = nil
+		if node and M.chunk_size_voxels then
+			local p = node:GetWorldPosition()
+			local chunk_p = buildat.Vector3(p):div_components(
+					M.chunk_size_voxels):floor()
+			local cache = M.get_static_node_cache(chunk_p)
+			cache.node = nil
+			cache.fetched = false
+		end
 	end)
 end
 
@@ -401,7 +423,7 @@ function M.get_static_node_cache(chunk_p)
 	local xtable = ytable[chunk_p.x]
 	if not xtable then
 		xtable = {fetched=false}
-		xtable[chunk_p.x] = xtable
+		ytable[chunk_p.x] = xtable
 	end
 	return xtable
 end
@@ -410,9 +432,18 @@ end
 function M.get_static_node(chunk_p)
 	local cache = M.get_static_node_cache(chunk_p)
 	if cache and cache.fetched then
-		log:trace("get_static_node(): chunk_p="..chunk_p:dump().." (cache)")
-		-- NOTE: cache.node can be nil, meaning that it was cached to be nil
-		return cache.node
+		if cache.node then
+			local live = replicate.main_scene:GetNode(cache.node:GetID())
+			if live then
+				log:trace("get_static_node(): chunk_p="..chunk_p:dump().." (cache)")
+				return live
+			end
+			cache.node = nil
+			cache.fetched = false
+		else
+			log:trace("get_static_node(): chunk_p="..chunk_p:dump().." (cache)")
+			return nil
+		end
 	end
 	log:trace("get_static_node(): chunk_p="..chunk_p:dump().." (no cache)")
 	-- NOTE: Chunks are positioned by their center position, and chunks are

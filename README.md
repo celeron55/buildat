@@ -9,7 +9,8 @@ whitelisted subset of Urho3D's Lua API in a sandbox; scripts and data
 come from the server.
 
 Voxel worlds, replication, and worldgen are builtin modules. Nothing
-requires a block game. Digger is one example.
+requires a block game. Digger is a finite voxel example. Infidigger
+streams an infinite world with the same modules.
 
 Further reading:
 
