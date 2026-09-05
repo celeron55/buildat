@@ -350,5 +350,31 @@ TCPSocket* createTCPSocket(int fd)
 	return new CTCPSocket(fd);
 }
 
+bool probe_connect(const ss_ &address, const ss_ &port)
+{
+	struct addrinfo hints;
+	struct addrinfo *res0 = NULL;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_protocol = IPPROTO_TCP;
+	int err = getaddrinfo(address.c_str(), port.c_str(), &hints, &res0);
+	if(err || res0 == NULL)
+		return false;
+	bool ok = false;
+	for(struct addrinfo *res = res0; res != NULL; res = res->ai_next){
+		int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+		if(fd == -1)
+			continue;
+		if(connect(fd, res->ai_addr, res->ai_addrlen) == 0)
+			ok = true;
+		closesocket(fd);
+		if(ok)
+			break;
+	}
+	freeaddrinfo(res0);
+	return ok;
+}
+
 }
 // vim: set noet ts=4 sw=4:

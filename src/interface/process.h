@@ -15,6 +15,16 @@ namespace interface
 
 		int shell_exec(const std::string &command,
 				const ExecOptions &opts = ExecOptions());
+
+		// Long-running child. Does not wait. path is the executable.
+		struct Handle {
+			intptr_t impl = 0;
+			bool valid() const;
+		};
+
+		Handle start(const std::string &path, const sv_<ss_> &args);
+		void terminate(Handle &h);
+		bool is_running(const Handle &h);
 	}
 }
 // vim: set noet ts=4 sw=4:
