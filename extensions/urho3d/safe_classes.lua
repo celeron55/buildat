@@ -840,6 +840,7 @@ function M.define(dst, util)
 			fixedWidth = util.simple_property("number"),
 			fixedSize = util.simple_property("IntVector2"),
 			defaultStyle = util.simple_property("XMLFile"),
+			selected = util.simple_property("boolean"),
 		},
 	})
 
@@ -860,6 +861,7 @@ function M.define(dst, util)
 		inherited_from_by_wrapper = dst.UIElement,
 		properties = {
 			texture = util.simple_property("Texture"),
+			hoverOffset = util.simple_property(dst.IntVector2),
 		},
 	})
 
@@ -869,6 +871,9 @@ function M.define(dst, util)
 
 	util.wc("Button", {
 		inherited_from_by_wrapper = dst.BorderImage,
+		properties = {
+			pressedOffset = util.simple_property(dst.IntVector2),
+		},
 	})
 
 	util.wc("LineEdit", {
