@@ -39,6 +39,7 @@
 #include <PhysicsWorld.h>
 #include <DebugRenderer.h>
 #include <Profiler.h>
+#include <UI.h>
 extern "C" {
 #include <lua.h>
 #include <lauxlib.h>
@@ -52,6 +53,9 @@ extern "C" {
 #endif
 #define MODULE "__app"
 namespace magic = Urho3D;
+
+// Auto UI scale: min(window w,h) / this. Lua/config/CLI overrides replace it.
+static const float UI_REF_SHORT = 1080.f;
 
 extern client::Config g_client_config;
 extern bool g_sigint_received;
@@ -231,6 +235,7 @@ struct CApp: public App, public magic::Application
 	magic::LuaScript *m_script;
 	lua_State *L;
 	bool m_reboot_requested = false;
+	float m_ui_scale_lua = 0.f; // 0 = not set by Lua
 	Options m_options;
 	bool m_draw_debug_geometry = false;
 	int64_t m_last_update_us;
@@ -445,9 +450,37 @@ struct CApp: public App, public magic::Application
 
 	// Non-public methods
 
+	void apply_ui_scale()
+	{
+		magic::Graphics *g = GetSubsystem<magic::Graphics>();
+		magic::UI *ui = GetSubsystem<magic::UI>();
+		if(!g || !ui)
+			return;
+		float s = 0.f;
+		if(m_ui_scale_lua > 0.f)
+			s = m_ui_scale_lua;
+		else {
+			double cfg = g_client_config.get<double>("ui_scale");
+			if(cfg > 0)
+				s = (float)cfg;
+			else {
+				int short_side = g->GetWidth();
+				if(g->GetHeight() < short_side)
+					short_side = g->GetHeight();
+				s = (float)short_side / UI_REF_SHORT;
+				if(s < 0.01f)
+					s = 0.01f;
+			}
+		}
+		ui->SetScale(s);
+		log_i(MODULE, "UI scale %g (%ix%i)", s, g->GetWidth(), g->GetHeight());
+	}
+
 	void Start()
 	{
 		log_v(MODULE, "Start()");
+
+		apply_ui_scale();
 
 		// Restore window to previous position
 		if(m_options.graphics.window_x != GraphicsOptions::UNDEFINED_INT &&
@@ -490,6 +523,8 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(get_file_content)
 		DEF_BUILDAT_FUNC(get_path)
 		DEF_BUILDAT_FUNC(extension_path)
+		DEF_BUILDAT_FUNC(set_ui_scale)
+		DEF_BUILDAT_FUNC(get_ui_scale)
 
 		// Create a scene that will be synchronized from the server
 		m_scene = new magic::Scene(context_);
@@ -616,6 +651,7 @@ struct CApp: public App, public magic::Application
 			log_v(MODULE, "Window size in graphics options updated: %ix%i",
 					m_options.graphics.window_w, m_options.graphics.window_h);
 		}
+		apply_ui_scale();
 	}
 
 	void on_logmessage(magic::StringHash event_type, magic::VariantMap &event_data)
@@ -729,6 +765,29 @@ struct CApp: public App, public magic::Application
 	{
 		stop_local_server();
 		return 0;
+	}
+
+	// set_ui_scale(scale: number)  -- <=0 restores auto/config
+	static int l_set_ui_scale(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		double s = lua_tonumber(L, 1);
+		self->m_ui_scale_lua = (s > 0) ? (float)s : 0.f;
+		self->apply_ui_scale();
+		return 0;
+	}
+
+	// get_ui_scale() -> number
+	static int l_get_ui_scale(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		magic::UI *ui = self->GetSubsystem<magic::UI>();
+		lua_pushnumber(L, ui ? ui->GetScale() : 1.0);
+		return 1;
 	}
 
 	// request_stop_local_server()

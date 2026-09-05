@@ -829,10 +829,28 @@ function M.define(dst, util)
 					end
 				end
 			),
+			SetScale = util.wrap_function({"UI", "number"},
+				function(self, scale)
+					__buildat_set_ui_scale(scale)
+				end),
+			GetScale = util.self_function(
+					"GetScale", {"number"}, {"UI"}),
 		},
 		properties = {
 			root = util.simple_property(dst.UIElement),
 			focusElement = util.simple_property({dst.UIElement, "__nil"}),
+			scale = {
+				get = function(current_value)
+					return current_value
+				end,
+				set = function(new_value)
+					if type(new_value) ~= "number" then
+						error("UI.scale must be a number")
+					end
+					__buildat_set_ui_scale(new_value)
+					return new_value
+				end,
+			},
 		},
 	})
 
