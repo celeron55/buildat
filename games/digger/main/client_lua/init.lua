@@ -29,6 +29,8 @@ local scene = replicate.main_scene
 
 local player_touches_ground = false
 local player_crouched = false
+local physics_enabled = false
+local spawn_received = false
 
 local pointed_voxel_p = nil
 local pointed_voxel_p_above = nil
@@ -162,7 +164,6 @@ do
 	player_node.direction = magic.Vector3(-1, 0, 0.4)
 	---[[
 	local body = player_node:CreateComponent("RigidBody")
-	--body.mass = 70.0
 	body.friction = 0
 	--body.linearVelocity = magic.Vector3(0, -10, 0)
 	body.angularFactor = magic.Vector3(0, 0, 0)
@@ -170,6 +171,19 @@ do
 	--player_shape:SetBox(magic.Vector3(1, 1.7*PLAYER_SCALE, 1))
 	player_shape:SetCapsule(PLAYER_WIDTH, PLAYER_HEIGHT)
 	--]]
+end
+
+local function enable_physics()
+	if physics_enabled then
+		return
+	end
+	local body = player_node:GetComponent("RigidBody")
+	if not body then
+		return
+	end
+	body.mass = PLAYER_MASS
+	physics_enabled = true
+	log:info("player physics enabled")
 end
 
 -- Add a camera so we can look at the scene
@@ -225,7 +239,7 @@ do
 	misc_text.verticalAlignment = magic.VA_CENTER
 	misc_text:SetPosition(0, -magic.ui.root.height/2 + 40)
 
-	worldgen_text:SetText("")
+	worldgen_text:SetText("Waiting for terrain")
 	worldgen_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
 	--[[worldgen_text.horizontalAlignment = magic.HA_LEFT
 	worldgen_text.verticalAlignment = magic.VA_TOP
@@ -370,6 +384,14 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		log:info("p="..camera_node:GetRotation():PitchAngle())]]
 
 		local body = player_node:GetComponent("RigidBody")
+		local moving = magic.input:GetKeyDown(magic.KEY_W) or
+				magic.input:GetKeyDown(magic.KEY_S) or
+				magic.input:GetKeyDown(magic.KEY_A) or
+				magic.input:GetKeyDown(magic.KEY_D) or
+				magic.input:GetKeyDown(magic.KEY_SPACE)
+		if moving then
+			enable_physics()
+		end
 
 		do 
 			local wanted_v = magic.Vector3(0, 0, 0) -- re. world
@@ -421,16 +443,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 			end
 		end
 		if magic.input:GetKeyDown(magic.KEY_SHIFT) then
-			--local bv = body.linearVelocity
-			--bv.y = -MOVE_SPEED
-			--body.linearVelocity = bv
-
-			-- Delay setting this to here so that it's possible to wait for the
-			-- world to load first
-			if body.mass == 0 then
-				body.mass = PLAYER_MASS
-			end
-
+			enable_physics()
 			if not player_crouched then
 				player_shape:SetCapsule(PLAYER_WIDTH, PLAYER_HEIGHT/2)
 				camera_node.position = magic.Vector3(0, 0.411*PLAYER_HEIGHT/2, 0)
@@ -508,11 +521,19 @@ buildat.sub_packet("main:spawn", function(data)
 	if body then
 		body.linearVelocity = magic.Vector3(0, 0, 0)
 	end
+	spawn_received = true
+	enable_physics()
 end)
 
 buildat.sub_packet("main:worldgen_queue_size", function(data)
 	local queue_size = tonumber(data)
-	if queue_size > 0 then
+	if not spawn_received then
+		if queue_size > 0 then
+			worldgen_text:SetText("Waiting for terrain ("..queue_size..")")
+		else
+			worldgen_text:SetText("Waiting for terrain")
+		end
+	elseif queue_size > 0 then
 		worldgen_text:SetText("Worldgen queue size: "..queue_size)
 	else
 		worldgen_text:SetText("")
