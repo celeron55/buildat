@@ -72,6 +72,8 @@ struct Worldgen: public worldgen::GeneratorInterface
 		{
 			voxelworld::Instance *world =
 					ivoxelworld->get_instance(scene_ref);
+			if(!world->is_section_loaded(section_p))
+				return;
 
 			pv::Region region = world->get_section_region_voxels(
 					section_p);
@@ -578,19 +580,16 @@ struct Module: public interface::Module
 		auto near_p = [&](const pv::Vector3DInt32 &voxel_p){
 			int sx = interface::container_coord(voxel_p.getX(),
 					SECTION_SIZE_VOXELS);
-			int sy = interface::container_coord(voxel_p.getY(),
-					SECTION_SIZE_VOXELS);
 			int sz = interface::container_coord(voxel_p.getZ(),
 					SECTION_SIZE_VOXELS);
 			int dx = section_p.getX() - sx;
-			int dy = section_p.getY() - sy;
 			int dz = section_p.getZ() - sz;
 			if(dx < 0) dx = -dx;
-			if(dy < 0) dy = -dy;
 			if(dz < 0) dz = -dz;
+			// Y is only three layers; keep the whole column while XZ is near
+			// so climbing a hill does not drop in-flight underground generate.
 			return dx <= STREAM_UNLOAD_RADIUS_XZ &&
-					dz <= STREAM_UNLOAD_RADIUS_XZ &&
-					dy <= STREAM_RADIUS_Y;
+					dz <= STREAM_UNLOAD_RADIUS_XZ;
 		};
 		if(m_player_voxel_p.empty())
 			return near_p(pv::Vector3DInt32(SPAWN_X, 20, SPAWN_Z));

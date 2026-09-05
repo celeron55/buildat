@@ -800,6 +800,12 @@ struct CInstance: public voxelworld::Instance
 			m_sections.erase(sector_it);
 	}
 
+	bool is_section_loaded(const pv::Vector3DInt16 &section_p)
+	{
+		Section *section = get_section(section_p);
+		return section && section->loaded;
+	}
+
 	void set_voxel_direct(const pv::Vector3DInt32 &p,
 			const interface::VoxelInstance &v)
 	{

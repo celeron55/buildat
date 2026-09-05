@@ -89,6 +89,8 @@ namespace voxelworld
 
 		virtual void unload_section(const pv::Vector3DInt16 &section_p) = 0;
 
+		virtual bool is_section_loaded(const pv::Vector3DInt16 &section_p) = 0;
+
 		virtual void set_voxel(const pv::Vector3DInt32 &p,
 				const VoxelInstance &v,
 				bool disable_warnings = false) = 0;
