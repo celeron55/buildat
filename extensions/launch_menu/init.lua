@@ -280,39 +280,31 @@ local function show_local_game()
 	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
 	root.defaultStyle = style
 
-	local window = root:CreateChild("Window")
-	window:SetStyleAuto()
-	window:SetLayout(LM_VERTICAL, 10, magic.IntRect(10, 10, 10, 10))
-	window:SetAlignment(HA_LEFT, VA_CENTER)
+	local menu = ui_utils.vertical_menu(root, {min_width = MENU_BUTTON_WIDTH})
 
-	local title = window:CreateChild("Text")
+	local title = menu.window:CreateChild("Text")
 	title:SetStyleAuto()
 	title.text = "Local game"
 
 	local games = buildat.list_games()
 	if #games == 0 then
-		local empty = window:CreateChild("Text")
+		local empty = menu.window:CreateChild("Text")
 		empty:SetStyleAuto()
 		empty.text = "No games found"
 	else
 		for _, game in ipairs(games) do
 			local name = game.name
-			local button = make_game_button(window, name, game.size)
-			magic.SubscribeToEvent(button, "Released",
-			function(self, event_type, event_data)
+			local button = make_game_button(menu.window, name, game.size)
+			menu:add(button, function()
 				start_local_game(name)
 			end)
 		end
 	end
 
-	local back_button = make_button(window, "Back")
-	magic.SubscribeToEvent(back_button, "Released",
-	function(self, event_type, event_data)
+	menu:add("Back", function()
 		uistack.main:pop(root)
 	end)
-
-	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
-		local key = event_data:GetInt("Key")
+	menu:on_key(function(key)
 		if key == KEY_ESCAPE then
 			uistack.main:pop(root)
 		end
@@ -325,46 +317,30 @@ function M.boot()
 	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
 	root.defaultStyle = style
 
-	local window = root:CreateChild("Window")
-	window:SetStyleAuto()
-	window:SetLayout(LM_VERTICAL, 16, magic.IntRect(10, 20, 10, 20))
-	window:SetAlignment(HA_LEFT, VA_CENTER)
+	local menu = ui_utils.vertical_menu(root, {
+		spacing = 16,
+		padding = magic.IntRect(10, 20, 10, 20),
+		min_width = MENU_BUTTON_WIDTH,
+	})
 
-	local logo = window:CreateChild("Sprite")
+	local logo = menu.window:CreateChild("Sprite")
 	logo:SetTexture(magic.cache:GetResource("Texture2D", "buildat_logo.png"))
 	logo:SetFixedSize(160, 160)
 
-	local title = window:CreateChild("Text")
+	local title = menu.window:CreateChild("Text")
 	title:SetStyleAuto()
 	title.text = "Buildat"
 	title:SetFontSize(28)
 	title:SetTextAlignment(HA_CENTER)
 
-	local local_button = make_button(window, "Local game")
-	magic.SubscribeToEvent(local_button, "Released",
-	function(self, event_type, event_data)
-		show_local_game()
-	end)
-
-	local connect_button = make_button(window, "Connect to server")
-	magic.SubscribeToEvent(connect_button, "Released",
-	function(self, event_type, event_data)
-		show_connect_to_server()
-	end)
-
-	local exit_button = make_button(window, "Exit")
-	magic.SubscribeToEvent(exit_button, "Released",
-	function(self, event_type, event_data)
+	menu:add("Local game", show_local_game)
+	menu:add("Connect to server", show_connect_to_server)
+	menu:add("Exit", function()
 		engine:Exit()
 	end)
-
-	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
-		local key = event_data:GetInt("Key")
+	menu:on_key(function(key)
 		if key == KEY_ESCAPE then
 			engine:Exit()
-		end
-		if key == KEY_RETURN then
-			show_local_game()
 		end
 	end)
 end
