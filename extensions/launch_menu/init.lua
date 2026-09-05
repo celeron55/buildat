@@ -30,12 +30,16 @@ local function format_bytes(n)
 	return math.floor(mb + 0.5).." MB"
 end
 
+-- Same min width as the local-game list, so the boot menu is as wide.
+local MENU_BUTTON_WIDTH = 200
+
 local function make_button(parent, label)
 	local button = parent:CreateChild("Button")
 	button:SetStyleAuto()
 	button:SetName("Button")
 	button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
 	button.minHeight = 24
+	button.minWidth = MENU_BUTTON_WIDTH
 	local text = button:CreateChild("Text")
 	text:SetName("ButtonText")
 	text:SetStyleAuto()
@@ -52,7 +56,7 @@ local function make_game_button(parent, name, size)
 	button:SetName("Button")
 	button:SetLayout(LM_HORIZONTAL, 8, magic.IntRect(12, 2, 12, 2))
 	button.minHeight = 24
-	button.minWidth = 200
+	button.minWidth = MENU_BUTTON_WIDTH
 	local text = button:CreateChild("Text")
 	text:SetName("ButtonText")
 	text:SetStyleAuto()
@@ -135,6 +139,12 @@ local function show_connect_to_server()
 	magic.SubscribeToEvent(port_edit, "TextFinished",
 	function(self, event_type, event_data)
 		do_connect()
+	end)
+
+	local back_button = make_button(window, "Back")
+	magic.SubscribeToEvent(back_button, "Released",
+	function(self, event_type, event_data)
+		uistack.main:pop(root)
 	end)
 
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
@@ -295,6 +305,12 @@ local function show_local_game()
 		end
 	end
 
+	local back_button = make_button(window, "Back")
+	magic.SubscribeToEvent(back_button, "Released",
+	function(self, event_type, event_data)
+		uistack.main:pop(root)
+	end)
+
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 		local key = event_data:GetInt("Key")
 		if key == KEY_ESCAPE then
@@ -311,7 +327,7 @@ function M.boot()
 
 	local window = root:CreateChild("Window")
 	window:SetStyleAuto()
-	window:SetLayout(LM_VERTICAL, 16, magic.IntRect(20, 20, 20, 20))
+	window:SetLayout(LM_VERTICAL, 16, magic.IntRect(10, 20, 10, 20))
 	window:SetAlignment(HA_LEFT, VA_CENTER)
 
 	local logo = window:CreateChild("Sprite")
@@ -334,6 +350,12 @@ function M.boot()
 	magic.SubscribeToEvent(connect_button, "Released",
 	function(self, event_type, event_data)
 		show_connect_to_server()
+	end)
+
+	local exit_button = make_button(window, "Exit")
+	magic.SubscribeToEvent(exit_button, "Released",
+	function(self, event_type, event_data)
+		engine:Exit()
 	end)
 
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
