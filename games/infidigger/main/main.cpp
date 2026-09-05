@@ -14,19 +14,14 @@
 #include "interface/noise.h"
 #include "interface/voxel_volume.h"
 #include "interface/polyvox_numeric.h"
+#include "interface/polyvox_cereal.h"
+#include "interface/polyvox_std.h"
 #include <Scene.h>
 #include <RigidBody.h>
 #include <CollisionShape.h>
-#include <ResourceCache.h>
 #include <Context.h>
-#include <StaticModel.h>
 #include <Model.h>
-#include <Material.h>
-#include <Texture2D.h>
-#include <Technique.h>
 #include <cereal/archives/portable_binary.hpp>
-#include <cereal/types/unordered_map.hpp>
-#include <cereal/types/vector.hpp>
 #include <sstream>
 #include <cmath>
 #define MODULE "main"
@@ -37,26 +32,6 @@ namespace pv = PolyVox;
 using interface::Event;
 using interface::VoxelInstance;
 using main_context::SceneReference;
-
-// TODO: Move to a header (core/types_polyvox.h or something)
-#define PV3I_FORMAT "(%i, %i, %i)"
-#define PV3I_PARAMS(p) p.getX(), p.getY(), p.getZ()
-
-// TODO: Move to a header (core/cereal_polyvox.h or something)
-namespace cereal {
-
-template<class Archive>
-void save(Archive &archive, const pv::Vector3DInt32 &v){
-	archive((int32_t)v.getX(), (int32_t)v.getY(), (int32_t)v.getZ());
-}
-template<class Archive>
-void load(Archive &archive, pv::Vector3DInt32 &v){
-	int32_t x, y, z;
-	archive(x, y, z);
-	v.setX(x); v.setY(y); v.setZ(z);
-}
-
-}
 
 namespace main {
 
@@ -412,7 +387,6 @@ struct Module: public interface::Module
 			{
 				Scene *scene = imc->check_scene(m_main_scene);
 				Context *context = imc->get_context();
-				ResourceCache *cache = context->GetSubsystem<ResourceCache>();
 
 				interface::VoxelRegistry *voxel_reg =
 						instance->get_voxel_reg();
