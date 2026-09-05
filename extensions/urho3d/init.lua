@@ -121,6 +121,8 @@ end
 -- 1.6 renamed KEY_ESC to KEY_ESCAPE. Keep the old name for existing games.
 Safe.KEY_ESC = Safe.KEY_ESCAPE
 
+local mouse = { hide_wanted = false }
+
 safe_classes.define(Safe, {
 	wc = wc,
 	wrap_instance = wrap_instance,
@@ -128,6 +130,7 @@ safe_classes.define(Safe, {
 	self_function = self_function,
 	simple_property = simple_property,
 	check_safe_resource_name = Unsafe.check_safe_resource_name,
+	mouse = mouse,
 	--resave_file = Unsafe.resave_file,
 })
 
@@ -370,6 +373,28 @@ function Unsafe.SubscribeToEvent(x, y, z)
 	end
 	return global_callback_name
 end
+
+-- Alt drops capture (ungrab + show cursor) so alt+tab reaches the WM.
+-- Click recaptures if the game still wants the cursor hidden.
+Safe.SubscribeToEvent("KeyDown", function(_, event_data)
+	if not mouse.hide_wanted then
+		return
+	end
+	local key = event_data:GetInt("Key")
+	if key == KEY_ALT or key == KEY_LALT or key == KEY_RALT then
+		input:SetMouseMode(MM_FREE)
+		input:SetMouseVisible(true)
+	end
+end)
+Safe.SubscribeToEvent("MouseButtonDown", function()
+	if not mouse.hide_wanted then
+		return
+	end
+	if input:GetMouseMode() == MM_FREE then
+		input:SetMouseMode(MM_ABSOLUTE)
+		input:SetMouseVisible(false)
+	end
+end)
 
 --
 -- Create the final interface
