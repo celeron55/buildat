@@ -69,8 +69,8 @@ local function show_connect_to_server()
 
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 		local key = event_data:GetInt("Key")
-		if key == KEY_ESC then
-			log:info("KEY_ESC pressed at connect_to_server level")
+		if key == KEY_ESCAPE then
+			log:info("KEY_ESCAPE pressed at connect_to_server level")
 			uistack.main:pop(root)
 		end
 	end)
@@ -135,8 +135,8 @@ function M.boot()
 
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 		local key = event_data:GetInt("Key")
-		if key == KEY_ESC then
-			log:info("KEY_ESC pressed at top level")
+		if key == KEY_ESCAPE then
+			log:info("KEY_ESCAPE pressed at top level")
 			engine:Exit()
 		end
 		if key == KEY_RETURN then
