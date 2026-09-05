@@ -6,6 +6,7 @@
 #define LUABIND_CALL2_080911_HPP
 
 #include <luabind/config.hpp>
+#include <limits>
 #include <typeinfo>
 #include <luabind/detail/meta.hpp>
 #include <luabind/detail/policy.hpp>

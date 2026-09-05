@@ -34,10 +34,10 @@ namespace json
 			//T_RAW,
 		};
 	private:
-		friend const Value json::object();
-		friend const Value json::array();
-		friend const Value json::null();
-		friend const Value json::load_sajson(const sajson::value &src);
+		friend const Value object();
+		friend const Value array();
+		friend const Value null();
+		friend const Value load_sajson(const sajson::value &src);
 		friend class Iterator;
 
 		mutable ValuePrivate *p;

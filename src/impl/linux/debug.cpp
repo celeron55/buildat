@@ -7,6 +7,7 @@
 #include <c55/string_util.h>
 #include <stdexcept>
 #include <iostream>
+#include <functional>
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
