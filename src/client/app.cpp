@@ -8,8 +8,13 @@
 #include "lua_bindings/util.h"
 #include "lua_bindings/replicate.h"
 #include "interface/fs.h"
+#include "interface/os.h"
+#include "interface/process.h"
+#include "interface/tcpsocket.h"
 #include "interface/voxel.h"
 #include "interface/thread_pool.h"
+#include <cctype>
+#include <algorithm>
 #include <c55/getopt.h>
 #include <c55/os.h>
 #include <Application.h>
@@ -44,6 +49,35 @@ namespace magic = Urho3D;
 
 extern client::Config g_client_config;
 extern bool g_sigint_received;
+
+static bool valid_game_name(const ss_ &name)
+{
+	if(name.empty() || name.size() > 64)
+		return false;
+	for(char c : name){
+		if(!(isalnum((unsigned char)c) || c == '_' || c == '-'))
+			return false;
+	}
+	return true;
+}
+
+// Survives CApp reboot so disconnect can kill the server we started.
+static interface::process::Handle g_local_server;
+
+static void stop_local_server()
+{
+	if(!g_local_server.valid())
+		return;
+	log_i(MODULE, "Stopping local server");
+	interface::process::terminate(g_local_server);
+	for(int i = 0; i < 200; i++){
+		if(!interface::process::is_running(g_local_server) &&
+				!interface::probe_connect("127.0.0.1", "20000"))
+			return;
+		interface::os::sleep_us(50000);
+	}
+	log_w(MODULE, "Local server did not release port 20000");
+}
 
 namespace app {
 
@@ -190,6 +224,7 @@ struct CApp: public App, public magic::Application
 
 	~CApp()
 	{
+		stop_local_server();
 	}
 
 	void set_state(sp_<client::State> state)
@@ -337,6 +372,11 @@ struct CApp: public App, public magic::Application
 
 		DEF_BUILDAT_FUNC(connect_server)
 		DEF_BUILDAT_FUNC(disconnect)
+		DEF_BUILDAT_FUNC(list_games)
+		DEF_BUILDAT_FUNC(start_local_server)
+		DEF_BUILDAT_FUNC(stop_local_server)
+		DEF_BUILDAT_FUNC(local_server_ready)
+		DEF_BUILDAT_FUNC(local_server_running)
 		DEF_BUILDAT_FUNC(send_packet);
 		DEF_BUILDAT_FUNC(get_file_path)
 		DEF_BUILDAT_FUNC(get_file_content)
@@ -508,12 +548,99 @@ struct CApp: public App, public magic::Application
 		return 2;
 	}
 
+	// list_games() -> {name, ...}
+	static int l_list_games(lua_State *L)
+	{
+		ss_ games_dir = g_client_config.get<ss_>("share_path")+"/games";
+		auto nodes = interface::fs::list_directory(games_dir);
+		sv_<ss_> names;
+		for(const auto &n : nodes){
+			if(!n.is_directory || !valid_game_name(n.name))
+				continue;
+			names.push_back(n.name);
+		}
+		std::sort(names.begin(), names.end());
+		lua_newtable(L);
+		int i = 1;
+		for(const ss_ &name : names){
+			lua_pushstring(L, name.c_str());
+			lua_rawseti(L, -2, i++);
+		}
+		return 1;
+	}
+
+	// start_local_server(game: string) -> status: bool, error: string or nil
+	static int l_start_local_server(lua_State *L)
+	{
+		ss_ game = lua_bindings::lua_tocppstring(L, 1);
+		if(!valid_game_name(game)){
+			lua_pushboolean(L, false);
+			lua_pushstring(L, "Invalid game name");
+			return 2;
+		}
+
+		ss_ game_path = g_client_config.get<ss_>("share_path")+"/games/"+game;
+		if(!interface::fs::path_exists(game_path)){
+			lua_pushboolean(L, false);
+			lua_pushstring(L, "Game not found");
+			return 2;
+		}
+
+		stop_local_server();
+
+		ss_ server_path = interface::os::get_sibling_exe_path("buildat_server");
+		if(!interface::fs::path_exists(server_path)){
+			lua_pushboolean(L, false);
+			lua_pushstring(L, "buildat_server not found");
+			return 2;
+		}
+
+		game_path = interface::fs::get_absolute_path(game_path);
+		g_local_server = interface::process::start(
+				server_path, {"-m", game_path});
+		if(!g_local_server.valid()){
+			lua_pushboolean(L, false);
+			lua_pushstring(L, "Failed to start server");
+			return 2;
+		}
+		lua_pushboolean(L, true);
+		lua_pushnil(L);
+		return 2;
+	}
+
+	// stop_local_server()
+	static int l_stop_local_server(lua_State *L)
+	{
+		stop_local_server();
+		return 0;
+	}
+
+	// local_server_ready() -> bool
+	static int l_local_server_ready(lua_State *L)
+	{
+		if(!interface::process::is_running(g_local_server)){
+			lua_pushboolean(L, false);
+			return 1;
+		}
+		lua_pushboolean(L, interface::probe_connect("127.0.0.1", "20000"));
+		return 1;
+	}
+
+	// local_server_running() -> bool
+	static int l_local_server_running(lua_State *L)
+	{
+		lua_pushboolean(L, interface::process::is_running(g_local_server));
+		return 1;
+	}
+
 	// disconnect()
 	static int l_disconnect(lua_State *L)
 	{
 		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 		CApp *self = (CApp*)lua_touserdata(L, -1);
 		lua_pop(L, 1);
+
+		stop_local_server();
 
 		if(g_client_config.get<bool>("boot_to_menu")){
 			// If menu, reboot client into menu
