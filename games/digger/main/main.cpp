@@ -486,6 +486,35 @@ struct Module: public interface::Module
 		}
 	}
 
+	// Standing-height air along -X (player facing). No path check; long enough
+	// that it is likely to hit a slope, pocket, or the world edge.
+	void carve_spawn_tunnel(int floor_y)
+	{
+		const int length = 96;
+		const int height = 3;
+		const int half_w = 1;
+		const int back = 2;
+		voxelworld::access(m_server, m_main_scene,
+				[&](voxelworld::Instance *world)
+		{
+			for(int dx = -back; dx < length; dx++){
+				int x = SPAWN_X - dx;
+				for(int dz = -half_w; dz <= half_w; dz++){
+					int z = SPAWN_Z + dz;
+					for(int dy = 1; dy <= height; dy++){
+						world->set_voxel(
+								pv::Vector3DInt32(x, floor_y + dy, z),
+								VoxelInstance(1), true);
+					}
+				}
+			}
+		});
+		log_i(MODULE, "Spawn tunnel: x=%i..%i y=%i..%i z=%i..%i",
+				SPAWN_X + back, SPAWN_X - (length - 1),
+				floor_y + 1, floor_y + height,
+				SPAWN_Z - half_w, SPAWN_Z + half_w);
+	}
+
 	void send_spawn(network::PeerInfo::Id peer)
 	{
 		if(!m_spawn_ready)
@@ -534,6 +563,7 @@ struct Module: public interface::Module
 					SPAWN_X, SPAWN_Z);
 			return;
 		}
+		carve_spawn_tunnel(surface_y);
 		// Voxel n is a 1x1x1 cube centered at n; stand on its top face.
 		m_spawn_y = (float)surface_y + 0.5f + PLAYER_HEIGHT / 2.0f + 0.05f;
 		m_spawn_ready = true;
