@@ -810,10 +810,25 @@ function M.define(dst, util)
 
 	util.wc("Input", {
 		instance = {
-			SetMouseVisible = util.self_function("SetMouseVisible", {}, {"Input", "boolean"}),
+			-- 1.7 only reports mouse motion in relative/visible/free modes.
+			-- Hiding the cursor without MM_RELATIVE grabs the window but
+			-- GetMouseMove stays zero (2014 hid+relative in one call).
+			SetMouseVisible = util.wrap_function({"Input", "boolean"},
+				function(self, enable)
+					if enable then
+						self:SetMouseMode(MM_ABSOLUTE)
+						self:SetMouseVisible(true)
+					else
+						self:SetMouseMode(MM_RELATIVE)
+					end
+				end),
+			SetMouseMode = util.self_function("SetMouseMode", {},
+					{"Input", "number"}),
 			GetKeyDown = util.self_function("GetKeyDown", {"boolean"}, {"Input", "number"}),
 			GetKeyPress = util.self_function("GetKeyPress", {"boolean"}, {"Input", "number"}),
 			GetMouseMove = util.self_function("GetMouseMove", {dst.IntVector2}, {"Input"}),
+			GetMouseButtonDown = util.self_function("GetMouseButtonDown",
+					{"boolean"}, {"Input", "number"}),
 		},
 	})
 
