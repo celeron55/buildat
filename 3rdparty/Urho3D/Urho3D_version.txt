@@ -17,7 +17,7 @@ Kept:
 - Source/ThirdParty/LuaJIT (optional via -DURHO3D_LUAJIT=TRUE)
 - Source/ThirdParty/MojoShader (D3D)
 - Host cmake launchers for VS/Android/iOS/OSX/MinGW
-- Bin/Data sample media (kept fonts, default UI, Box/Plane/Stone)
+- Bin/Data sample media (kept fonts, default UI, MessageBox, Box/Plane/Stone)
 
 Buildat cmake configures this tree with:
   URHO3D_LIB_TYPE=SHARED URHO3D_LUA=TRUE URHO3D_SAFE_LUA=TRUE
