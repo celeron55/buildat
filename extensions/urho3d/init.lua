@@ -85,10 +85,14 @@ end
 
 for _, name in ipairs(safe_globals) do
 	local v = _G[name]
-	if type(v) ~= 'number' and type(v) ~= 'string' then
+	if v == nil then
+		-- Dropped or renamed in later Urho; skip so the sandbox still loads.
+		log:info("safe global missing: "..name)
+	elseif type(v) ~= 'number' and type(v) ~= 'string' then
 		error("Invalid safe global "..dump(name).." type: "..dump(type(v)))
+	else
+		Safe[name] = v
 	end
-	Safe[name] = v
 end
 -- 1.6 renamed KEY_ESC to KEY_ESCAPE. Keep the old name for existing games.
 Safe.KEY_ESC = Safe.KEY_ESCAPE
