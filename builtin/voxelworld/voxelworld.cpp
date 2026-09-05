@@ -329,7 +329,7 @@ struct CInstance: public voxelworld::Instance
 				if(!n){
 					log_w(MODULE, "on_tick(): Node physics update: "
 							"Node %i not found", node_id);
-					return;
+					continue;
 				}
 				// Get volume
 				const Variant &var = n->GetVar(StringHash("buildat_voxel_data"));
@@ -747,6 +747,57 @@ struct CInstance: public voxelworld::Instance
 			load_section(section);
 		if(!section.generated)
 			generate_section(section);
+	}
+
+	void unload_section(const pv::Vector3DInt16 &section_p)
+	{
+		Section *section = get_section(section_p);
+		if(!section || !section->loaded)
+			return;
+
+		log_v(MODULE, "Unloading section " PV3I_FORMAT, PV3I_PARAMS(section_p));
+
+		for(ChunkBuffer &buf : section->chunk_buffers){
+			if(!buf.volume)
+				continue;
+			m_total_buffers_loaded--;
+			if(buf.dirty)
+				m_total_buffers_dirty--;
+			buf.volume.reset();
+			buf.dirty = false;
+		}
+
+		m_last_used_sections.erase(
+				std::remove(m_last_used_sections.begin(),
+				m_last_used_sections.end(), section),
+				m_last_used_sections.end());
+		m_sections_with_loaded_buffers.erase(
+				std::remove(m_sections_with_loaded_buffers.begin(),
+				m_sections_with_loaded_buffers.end(), section),
+				m_sections_with_loaded_buffers.end());
+
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			Scene *scene = imc->check_scene(m_scene_ref);
+			auto lc = section->contained_chunks.getLowerCorner();
+			auto uc = section->contained_chunks.getUpperCorner();
+			for(int z = lc.getZ(); z <= uc.getZ(); z++){
+				for(int y = lc.getY(); y <= uc.getY(); y++){
+					for(int x = lc.getX(); x <= uc.getX(); x++){
+						uint id = section->node_ids->getVoxelAt(x, y, z);
+						if(id)
+							unload_node(scene, id);
+					}
+				}
+			}
+		});
+
+		pv::Vector<2, int16_t> p_yz(section_p.getY(), section_p.getZ());
+		auto sector_it = m_sections.find(p_yz);
+		if(sector_it == m_sections.end())
+			return;
+		sector_it->second.erase(section_p.getX());
+		if(sector_it->second.empty())
+			m_sections.erase(sector_it);
 	}
 
 	void set_voxel_direct(const pv::Vector3DInt32 &p,

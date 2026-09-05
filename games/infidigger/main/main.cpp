@@ -172,10 +172,9 @@ struct Module: public interface::Module
 
 	// chunk 32 * section 2; matches voxelworld defaults
 	static const int SECTION_SIZE_VOXELS = 64;
-	// Radius 5 fills a ~320-voxel view; Y is finite.
-	// simplified: no unload. replicate:remove_node is unimplemented on the
-	// client; distant sections stay in memory for the session.
+	// Radius 5 fills a ~320-voxel view; Y is finite. Unload beyond 7.
 	static const int STREAM_RADIUS_XZ = 5;
+	static const int STREAM_UNLOAD_RADIUS_XZ = 7;
 	static const int STREAM_RADIUS_Y = 1;
 	static const int STREAM_Y_MIN = -1;
 	static const int STREAM_Y_MAX = 1;
@@ -189,6 +188,7 @@ struct Module: public interface::Module
 
 	sm_<network::PeerInfo::Id, pv::Vector3DInt32> m_player_voxel_p;
 	set_<uint64_t> m_requested_sections;
+	set_<uint64_t> m_pinned_sections;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -480,6 +480,27 @@ struct Module: public interface::Module
 				((uint64_t)(uint16_t)z << 32);
 	}
 
+	static pv::Vector3DInt16 section_from_key(uint64_t k)
+	{
+		return pv::Vector3DInt16(
+				(int16_t)k,
+				(int16_t)(k >> 16),
+				(int16_t)(k >> 32));
+	}
+
+	static uint64_t section_key_at_voxel(const pv::Vector3DInt32 &p)
+	{
+		return section_key(
+				interface::container_coord(p.getX(), SECTION_SIZE_VOXELS),
+				interface::container_coord(p.getY(), SECTION_SIZE_VOXELS),
+				interface::container_coord(p.getZ(), SECTION_SIZE_VOXELS));
+	}
+
+	void pin_section_at_voxel(const pv::Vector3DInt32 &p)
+	{
+		m_pinned_sections.insert(section_key_at_voxel(p));
+	}
+
 	void request_section(voxelworld::Instance *world,
 			const pv::Vector3DInt16 &section_p)
 	{
@@ -552,10 +573,65 @@ struct Module: public interface::Module
 			stream_around(pair.second);
 	}
 
+	bool section_near_any_player(const pv::Vector3DInt16 &section_p)
+	{
+		auto near_p = [&](const pv::Vector3DInt32 &voxel_p){
+			int sx = interface::container_coord(voxel_p.getX(),
+					SECTION_SIZE_VOXELS);
+			int sy = interface::container_coord(voxel_p.getY(),
+					SECTION_SIZE_VOXELS);
+			int sz = interface::container_coord(voxel_p.getZ(),
+					SECTION_SIZE_VOXELS);
+			int dx = section_p.getX() - sx;
+			int dy = section_p.getY() - sy;
+			int dz = section_p.getZ() - sz;
+			if(dx < 0) dx = -dx;
+			if(dy < 0) dy = -dy;
+			if(dz < 0) dz = -dz;
+			return dx <= STREAM_UNLOAD_RADIUS_XZ &&
+					dz <= STREAM_UNLOAD_RADIUS_XZ &&
+					dy <= STREAM_RADIUS_Y;
+		};
+		if(m_player_voxel_p.empty())
+			return near_p(pv::Vector3DInt32(SPAWN_X, 20, SPAWN_Z));
+		for(auto &pair : m_player_voxel_p){
+			if(near_p(pair.second))
+				return true;
+		}
+		return false;
+	}
+
+	void unload_distant_sections()
+	{
+		sv_<uint64_t> drop;
+		for(uint64_t k : m_requested_sections){
+			if(m_pinned_sections.count(k))
+				continue;
+			pv::Vector3DInt16 p = section_from_key(k);
+			if(section_near_any_player(p))
+				continue;
+			drop.push_back(k);
+			if(drop.size() >= STREAM_SECTIONS_PER_PASS)
+				break;
+		}
+		if(drop.empty())
+			return;
+		voxelworld::access(m_server, m_main_scene,
+				[&](voxelworld::Instance *world)
+		{
+			for(uint64_t k : drop){
+				world->unload_section(section_from_key(k));
+				m_requested_sections.erase(k);
+			}
+		});
+	}
+
 	void on_tick(const interface::TickEvent &event)
 	{
-		if(((m_stream_tick++) % 4) == 0)
+		if(((m_stream_tick++) % 4) == 0){
 			stream_players_or_spawn();
+			unload_distant_sections();
+		}
 		try_resolve_spawn();
 	}
 
@@ -672,6 +748,7 @@ struct Module: public interface::Module
 		log_v(MODULE, "C%i: on_place_voxel(): p=" PV3I_FORMAT,
 				packet.sender, PV3I_PARAMS(voxel_p));
 
+		pin_section_at_voxel(voxel_p);
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *instance)
 		{
@@ -690,6 +767,7 @@ struct Module: public interface::Module
 		log_v(MODULE, "C%i: on_dig_voxel(): p=" PV3I_FORMAT,
 				packet.sender, PV3I_PARAMS(voxel_p));
 
+		pin_section_at_voxel(voxel_p);
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *instance)
 		{

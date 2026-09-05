@@ -11,6 +11,7 @@ M.unsafe_main_scene = __buildat_replicated_scene
 M.safe.main_scene = getmetatable(magic.Scene).wrap(__buildat_replicated_scene)
 
 local sync_node_added_subs = {}
+local sync_node_removed_subs = {}
 
 -- Callback will be called for each node added to the scene.
 -- Callback is called immediately for all existing nodes.
@@ -31,6 +32,10 @@ function M.safe.sub_sync_node_added(opts, cb)
 	handle_node(scene)
 end
 
+function M.safe.sub_sync_node_removed(cb)
+	table.insert(sync_node_removed_subs, cb)
+end
+
 -- Override dummy default
 function __buildat_replicate_on_node_created(node_id)
 	log:debug("__buildat_replicate_on_node_created(): id="..node_id)
@@ -40,6 +45,14 @@ function __buildat_replicate_on_node_created(node_id)
 	end
 	for _, v in ipairs(sync_node_added_subs) do
 		v(node)
+	end
+end
+
+function __buildat_replicate_on_node_removed(node_id)
+	log:debug("__buildat_replicate_on_node_removed(): id="..node_id)
+	local node = M.safe.main_scene:GetNode(node_id)
+	for _, v in ipairs(sync_node_removed_subs) do
+		v(node, node_id)
 	end
 end
 

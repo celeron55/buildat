@@ -469,16 +469,15 @@ void CState::setup_packet_handlers()
 		if(node){
 			log_d(MODULE, "Updating node %i (DeltaUpdate)", node_id);
 			node->ReadDeltaUpdate(msg);
+			uint num_vars = msg.ReadVLE();
+			while(num_vars){
+				auto key = msg.ReadStringHash();
+				node->SetVar(key, msg.ReadVariant());
+				num_vars--;
+			}
 		} else {
 			log_w(MODULE, "Out-of-order node data ignored for %i", node_id);
 			// Note: Network/Connection.cpp would NOT buffer this
-		}
-		// Read user variables
-		uint num_vars = msg.ReadVLE();
-		while(num_vars){
-			auto key = msg.ReadStringHash();
-			node->SetVar(key, msg.ReadVariant());
-			num_vars--;
 		}
 	};
 
@@ -492,13 +491,25 @@ void CState::setup_packet_handlers()
 	m_packet_handlers["replicate:remove_node"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
-		log_w(MODULE, "TODO: %s", cs(packet_name));
+		magic::Scene *scene = m_app->get_scene();
+		magic::MemoryBuffer msg(data.c_str(), data.size());
+		uint node_id = msg.ReadNetID();
+		lua_State *L = m_app->get_lua();
+		lua_bindings::replicate::on_node_removed(L, node_id);
+		Node *node = scene->GetNode(node_id);
+		if(node)
+			node->Remove();
 	};
 
 	m_packet_handlers["replicate:remove_component"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
-		log_w(MODULE, "TODO: %s", cs(packet_name));
+		magic::Scene *scene = m_app->get_scene();
+		magic::MemoryBuffer msg(data.c_str(), data.size());
+		uint c_id = msg.ReadNetID();
+		Component *c = scene->GetComponent(c_id);
+		if(c)
+			c->Remove();
 	};
 
 	m_packet_handlers[""] =
