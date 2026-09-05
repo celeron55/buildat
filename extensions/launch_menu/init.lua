@@ -95,7 +95,7 @@ local function show_connect_to_server()
 
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 		local key = event_data:GetInt("Key")
-		if key == KEY_ESC then
+		if key == KEY_ESCAPE then
 			uistack.main:pop(root)
 		end
 	end)
@@ -143,7 +143,7 @@ local function show_starting(game)
 
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 		local key = event_data:GetInt("Key")
-		if key == KEY_ESC then
+		if key == KEY_ESCAPE then
 			done = true
 			buildat.request_stop_local_server()
 			uistack.main:pop(root)
@@ -204,7 +204,7 @@ local function show_waiting_for_old_server(game)
 
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 		local key = event_data:GetInt("Key")
-		if key == KEY_ESC then
+		if key == KEY_ESCAPE then
 			done = true
 			uistack.main:pop(root)
 		end
@@ -252,7 +252,7 @@ local function show_local_game()
 
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 		local key = event_data:GetInt("Key")
-		if key == KEY_ESC then
+		if key == KEY_ESCAPE then
 			uistack.main:pop(root)
 		end
 	end)
@@ -293,7 +293,7 @@ function M.boot()
 
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 		local key = event_data:GetInt("Key")
-		if key == KEY_ESC then
+		if key == KEY_ESCAPE then
 			engine:Exit()
 		end
 		if key == KEY_RETURN then

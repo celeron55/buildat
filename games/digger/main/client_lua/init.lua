@@ -300,8 +300,8 @@ magic.ui:SetFocusElement(nil)
 
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	local key = event_data:GetInt("Key")
-	if key == magic.KEY_ESC then
-		log:info("KEY_ESC pressed")
+	if key == magic.KEY_ESCAPE then
+		log:info("KEY_ESCAPE pressed")
 		buildat.disconnect()
 	end
 end)
