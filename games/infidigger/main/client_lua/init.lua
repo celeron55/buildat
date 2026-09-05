@@ -19,7 +19,6 @@ local PLAYER_MASS = 70
 local MOVE_SPEED = 10
 local JUMP_SPEED = 7 -- Barely 2 voxels
 local PLAYER_ACCELERATION = 40
-local PLAYER_DECELERATION = 40
 
 local scene = replicate.main_scene
 
