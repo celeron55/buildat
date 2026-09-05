@@ -22,6 +22,11 @@ namespace interface
 
 		bool path_exists(const ss_ &path);
 
+		// Bytes in a regular file; 0 if missing or not a regular file.
+		uint64_t file_size(const ss_ &path);
+		// Sum of file_size for every regular file under path, recursively.
+		uint64_t directory_tree_size(const ss_ &path);
+
 		// "image.png", "png" -> true
 		bool check_file_extension(const char *path, const char *ext);
 		ss_ strip_file_extension(const ss_ &path);
