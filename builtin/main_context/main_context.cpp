@@ -35,7 +35,7 @@ using namespace Urho3D;
 
 class BuildatResourceRouter: public ResourceRouter
 {
-	OBJECT(BuildatResourceRouter);
+	URHO3D_OBJECT(BuildatResourceRouter, ResourceRouter);
 
 	interface::Server *m_server;
 public:
@@ -112,8 +112,8 @@ struct Module: public interface::Module, public main_context::Interface
 		const interface::ServerConfig &server_config = m_server->get_config();
 
 		sv_<ss_> resource_paths = {
-			server_config.get<ss_>("urho3d_path")+"/Bin/CoreData",
-			server_config.get<ss_>("urho3d_path")+"/Bin/Data",
+			server_config.get<ss_>("urho3d_path")+"/bin/CoreData",
+			server_config.get<ss_>("urho3d_path")+"/bin/Data",
 		};
 		ss_ resource_paths_s;
 		for(const ss_ &path : resource_paths){
@@ -133,7 +133,7 @@ struct Module: public interface::Module, public main_context::Interface
 		ResourceCache *magic_cache =
 				m_context->GetSubsystem<ResourceCache>();
 		//magic_cache->SetAutoReloadResources(true);
-		magic_cache->SetResourceRouter(
+		magic_cache->AddResourceRouter(
 				new BuildatResourceRouter(m_context, m_server));
 
 		sub_magic_event(E_LOGMESSAGE,

@@ -90,6 +90,8 @@ for _, name in ipairs(safe_globals) do
 	end
 	Safe[name] = v
 end
+-- 1.6 renamed KEY_ESC to KEY_ESCAPE. Keep the old name for existing games.
+Safe.KEY_ESC = Safe.KEY_ESCAPE
 
 safe_classes.define(Safe, {
 	wc = wc,

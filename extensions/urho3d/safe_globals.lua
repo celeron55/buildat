@@ -483,7 +483,7 @@ return {
     "KEY_DOWN",
     "KEY_E",
     "KEY_END",
-    "KEY_ESC",
+    "KEY_ESCAPE",
     "KEY_F",
     "KEY_F1",
     "KEY_F10",

@@ -16,11 +16,13 @@
 * 3. This notice may not be removed or altered from any source distribution.
 */
 
-#include <Box2D/Dynamics/b2Body.h>
-#include <Box2D/Dynamics/b2Fixture.h>
-#include <Box2D/Dynamics/b2World.h>
-#include <Box2D/Dynamics/Contacts/b2Contact.h>
-#include <Box2D/Dynamics/Joints/b2Joint.h>
+// Modified by 1vanK for Urho3D
+
+#include "Box2D/Dynamics/b2Body.h"
+#include "Box2D/Dynamics/b2Fixture.h"
+#include "Box2D/Dynamics/b2World.h"
+#include "Box2D/Dynamics/Contacts/b2Contact.h"
+#include "Box2D/Dynamics/Joints/b2Joint.h"
 
 b2Body::b2Body(const b2BodyDef* bd, b2World* world)
 {
@@ -213,6 +215,13 @@ b2Fixture* b2Body::CreateFixture(const b2Shape* shape, float32 density)
 
 void b2Body::DestroyFixture(b2Fixture* fixture)
 {
+	// Urho3D: avoid requirement C++11
+	//if (fixture == nullptr)
+	if (!fixture)
+	{
+		return;
+	}
+
 	b2Assert(m_world->IsLocked() == false);
 	if (m_world->IsLocked() == true)
 	{
@@ -266,9 +275,9 @@ void b2Body::DestroyFixture(b2Fixture* fixture)
 		fixture->DestroyProxies(broadPhase);
 	}
 
-	fixture->Destroy(allocator);
 	fixture->m_body = NULL;
 	fixture->m_next = NULL;
+	fixture->Destroy(allocator);
 	fixture->~b2Fixture();
 	allocator->Free(fixture, sizeof(b2Fixture));
 

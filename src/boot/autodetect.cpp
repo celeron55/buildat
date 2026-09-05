@@ -293,7 +293,7 @@ static bool detect_buildat_client_paths(core::Config &config)
 PathDefinition server_urho3d_paths[] = {
 	{PD_READ, "urho3d_path",
 		"",
-		"/Bin/CoreData/Shaders/GLSL/Basic.glsl",
+		"/bin/CoreData/Shaders/GLSL/Basic.glsl",
 		"Urho3D path"},
 	{PD_END, "", "", "", ""},
 };
@@ -310,7 +310,7 @@ static bool detect_server_urho3d_paths(core::Config &config)
 PathDefinition client_urho3d_paths[] = {
 	{PD_READ, "urho3d_path",
 		"",
-		"/Bin/CoreData/Shaders/GLSL/Basic.glsl",
+		"/bin/CoreData/Shaders/GLSL/Basic.glsl",
 		"Urho3D path"},
 	{PD_END, "", "", "", ""},
 };

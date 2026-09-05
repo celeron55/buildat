@@ -86,12 +86,12 @@ void GraphicsOptions::apply(magic::Graphics *magic_graphics)
 	int w = fullscreen ? full_w : window_w;
 	int h = fullscreen ? full_h : window_h;
 	magic_graphics->SetMode(w, h, fullscreen, borderless, resizable,
-			vsync, triple_buffer, multisampling);
+			false, vsync, triple_buffer, multisampling, 0, 0);
 }
 
 class BuildatResourceRouter: public magic::ResourceRouter
 {
-	OBJECT(BuildatResourceRouter);
+	URHO3D_OBJECT(BuildatResourceRouter, magic::ResourceRouter);
 
 	sp_<client::State> m_client;
 public:
@@ -156,8 +156,8 @@ struct CApp: public App, public magic::Application
 		sv_<ss_> resource_paths = {
 			g_client_config.get<ss_>("cache_path")+"/tmp",
 			g_client_config.get<ss_>("share_path")+"/extensions", // Could be unsafe
-			g_client_config.get<ss_>("urho3d_path")+"/Bin/CoreData",
-			g_client_config.get<ss_>("urho3d_path")+"/Bin/Data",
+			g_client_config.get<ss_>("urho3d_path")+"/bin/CoreData",
+			g_client_config.get<ss_>("urho3d_path")+"/bin/Data",
 		};
 		ss_ resource_paths_s;
 		for(const ss_ &path : resource_paths){
@@ -204,12 +204,12 @@ struct CApp: public App, public magic::Application
 		magic_log->SetTimeStamp(false);
 
 		// Set up event handlers
-		SubscribeToEvent(magic::E_UPDATE, HANDLER(CApp, on_update));
+		SubscribeToEvent(magic::E_UPDATE, URHO3D_HANDLER(CApp, on_update));
 		SubscribeToEvent(magic::E_POSTRENDERUPDATE,
-				HANDLER(CApp, on_post_render_update));
-		SubscribeToEvent(magic::E_KEYDOWN, HANDLER(CApp, on_keydown));
-		SubscribeToEvent(magic::E_SCREENMODE, HANDLER(CApp, on_screenmode));
-		SubscribeToEvent(magic::E_LOGMESSAGE, HANDLER(CApp, on_logmessage));
+				URHO3D_HANDLER(CApp, on_post_render_update));
+		SubscribeToEvent(magic::E_KEYDOWN, URHO3D_HANDLER(CApp, on_keydown));
+		SubscribeToEvent(magic::E_SCREENMODE, URHO3D_HANDLER(CApp, on_screenmode));
+		SubscribeToEvent(magic::E_LOGMESSAGE, URHO3D_HANDLER(CApp, on_logmessage));
 
 		// Default to not grabbing the mouse
 		magic::Input *magic_input = GetSubsystem<magic::Input>();
@@ -219,7 +219,7 @@ struct CApp: public App, public magic::Application
 		magic::ResourceCache *magic_cache = GetSubsystem<magic::ResourceCache>();
 		magic_cache->SetAutoReloadResources(true);
 		m_router = new BuildatResourceRouter(context_);
-		magic_cache->SetResourceRouter(m_router);
+		magic_cache->AddResourceRouter(m_router);
 	}
 
 	~CApp()
