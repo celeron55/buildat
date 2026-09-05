@@ -1,6 +1,6 @@
 Buildat
 =======
-A minecraftlike with vast extendability.
+A small engine for networked 3D games.
 
 License: Apache 2.0
 
