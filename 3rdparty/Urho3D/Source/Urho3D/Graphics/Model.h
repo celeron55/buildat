@@ -228,6 +228,8 @@ private:
     Vector<IndexBufferDesc> loadIBData_;
     /// Geometry definitions for asynchronous loading.
     Vector<PODVector<GeometryDesc> > loadGeometries_;
+
+    friend bool LoadGLTFModel(Model* model, Deserializer& source);
 };
 
 }

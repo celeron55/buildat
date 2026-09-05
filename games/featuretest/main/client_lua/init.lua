@@ -92,6 +92,22 @@ do
 	anim:SetSpeed("Models/Jack_Walk.ani", 0.8)
 end
 
+spider_node = scene:CreateChild("Spider")
+do
+	spider_node.position = magic.Vector3(5, 0.65, 2)
+	spider_node:Yaw(-40)
+	local model = spider_node:CreateComponent("AnimatedModel")
+	model.model = magic.cache:GetResource("Model", "main/gltf_spider_animated.gltf")
+	local mat = magic.Material:new()
+	mat:SetTechnique(0, magic.cache:GetResource("Technique", "Techniques/Diff.xml"))
+	mat:SetTexture(magic.TU_DIFFUSE,
+			magic.cache:GetResource("Texture2D", "main/gltf_spider.png"))
+	model.material = mat
+	model.castShadows = true
+	local anim = spider_node:CreateComponent("AnimationController")
+	anim:Play("main/gltf_spider_animated.gltf", 0, true)
+end
+
 do
 	local node = scene:CreateChild("Fire")
 	node.position = magic.Vector3(3.5, 0.2, -3)
@@ -206,8 +222,8 @@ title:SetPosition(0, 16)
 local info = magic.ui.root:CreateChild("Text")
 info:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 13)
 info.text = "physics  particles  billboards\n"..
-		"animated model  ribbon trail  point light\n"..
-		"ambient + 3D audio"
+		"animated model  glTF spider  ribbon trail\n"..
+		"point light  ambient + 3D audio"
 info.horizontalAlignment = magic.HA_LEFT
 info.verticalAlignment = magic.VA_TOP
 info:SetPosition(16, 16)

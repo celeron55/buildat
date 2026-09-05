@@ -27,6 +27,7 @@
 #include "../Graphics/Geometry.h"
 #include "../Graphics/IndexBuffer.h"
 #include "../Graphics/Model.h"
+#include "../Graphics/GLTFLoader.h"
 #include "../Graphics/Graphics.h"
 #include "../Graphics/VertexBuffer.h"
 #include "../IO/Log.h"
@@ -77,9 +78,13 @@ void Model::RegisterObject(Context* context)
 bool Model::BeginLoad(Deserializer& source)
 {
     // Check ID
+    unsigned start = source.GetPosition();
     String fileID = source.ReadFileID();
     if (fileID != "UMDL" && fileID != "UMD2")
     {
+        source.Seek(start);
+        if (LoadGLTFModel(this, source))
+            return true;
         URHO3D_LOGERROR(source.GetName() + " is not a valid model file");
         return false;
     }

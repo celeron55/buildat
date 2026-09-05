@@ -61,7 +61,6 @@ endif ()
 
 if (URHO3D_TOOLS)
     # Urho3D tools
-    add_subdirectory (AssetImporter)
     add_subdirectory (OgreImporter)
     add_subdirectory (PackageTool)
     add_subdirectory (RampGenerator)
