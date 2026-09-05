@@ -781,6 +781,8 @@ function M.define(dst, util)
 		instance = {
 			SetTextAlignment = util.self_function(
 					"SetTextAlignment", {}, {"UIElement", "number"}),
+			SetFontSize = util.self_function(
+					"SetFontSize", {}, {"Text", "number"}),
 		},
 		properties = {
 			text = util.simple_property("string"),

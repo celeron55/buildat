@@ -85,8 +85,19 @@ function M.boot()
 	local layout = root:CreateChild("Window")
 	layout:SetStyleAuto()
 	layout:SetName("Layout")
-	layout:SetLayout(LM_HORIZONTAL, 20, magic.IntRect(0, 0, 0, 0))
+	layout:SetLayout(LM_VERTICAL, 16, magic.IntRect(20, 20, 20, 20))
 	layout:SetAlignment(HA_LEFT, VA_CENTER)
+
+	local logo = layout:CreateChild("Sprite")
+	logo:SetTexture(magic.cache:GetResource("Texture2D", "buildat_logo.png"))
+	logo:SetFixedSize(160, 160)
+
+	local title = layout:CreateChild("Text")
+	title:SetStyleAuto()
+	title.text = "Buildat"
+	title:SetFontSize(28)
+	title:SetTextAlignment(HA_CENTER)
+	title.color = magic.Color(0.867, 0.867, 0.867)
 
 	local button = layout:CreateChild("Button")
 	button:SetStyleAuto()
@@ -96,13 +107,13 @@ function M.boot()
 	button_image:SetName("ButtonImage")
 	button_image:SetTexture(
 			magic.cache:GetResource("Texture2D", "__menu/res/icon_network.png"))
-	button_image.color = magic.Color(.3, .3, .3)
-	button_image:SetFixedSize(200, 200)
+	button_image.color = magic.Color(0.55, 0.55, 0.55)
+	button_image:SetFixedSize(120, 120)
 	local button_text = button:CreateChild("Text")
 	button_text:SetName("ButtonText")
 	button_text:SetStyleAuto()
 	button_text.text = "Connect to server"
-	button_text.color = magic.Color(.3, .3, .3)
+	button_text.color = magic.Color(0.55, 0.55, 0.55)
 	button_text:SetAlignment(HA_CENTER, VA_TOP)
 	button_text:SetTextAlignment(HA_CENTER)
 
@@ -113,8 +124,8 @@ function M.boot()
 	end)
 	magic.SubscribeToEvent(button, "HoverEnd",
 	function(self, event_type, event_data)
-		self:GetChild("ButtonImage").color = magic.Color(.3, .3, .3)
-		self:GetChild("ButtonText").color = magic.Color(.3, .3, .3)
+		self:GetChild("ButtonImage").color = magic.Color(0.55, 0.55, 0.55)
+		self:GetChild("ButtonText").color = magic.Color(0.55, 0.55, 0.55)
 	end)
 	magic.SubscribeToEvent(button, "Released",
 	function(self, event_type, event_data)
