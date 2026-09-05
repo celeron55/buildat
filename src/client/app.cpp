@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "app.h"
 #include "core/log.h"
+#include "core/json.h"
 #include "client/config.h"
 #include "client/state.h"
 #include "client/command_seq.h"
@@ -41,6 +42,7 @@
 #include <DebugRenderer.h>
 #include <Profiler.h>
 #include <UI.h>
+#include <SDL/SDL.h>
 extern "C" {
 #include <lua.h>
 #include <lauxlib.h>
@@ -61,9 +63,150 @@ static const float UI_REF_SHORT = 1080.f;
 // Under: maximized window chrome (taskbar, title). Over: 16:10 like 1200p.
 static const float UI_SNAP_UNDER = 0.08f;
 static const float UI_SNAP_OVER = 0.12f;
+static const int MIN_WINDOW_W = 640;
+static const int MIN_WINDOW_H = 360;
 
 extern client::Config g_client_config;
 extern bool g_sigint_received;
+
+static ss_ window_state_path()
+{
+	return g_client_config.get<ss_>("cache_path")+"/window.json";
+}
+
+static bool desktop_size(int *w, int *h)
+{
+	if(!SDL_WasInit(SDL_INIT_VIDEO)){
+		if(SDL_InitSubSystem(SDL_INIT_VIDEO) != 0)
+			return false;
+	}
+	SDL_DisplayMode mode;
+	if(SDL_GetDesktopDisplayMode(0, &mode) != 0)
+		return false;
+	if(mode.w < 1 || mode.h < 1)
+		return false;
+	*w = mode.w;
+	*h = mode.h;
+	return true;
+}
+
+// Half the desktop height, at least 720p, at most 75%. 16:9. If the short
+// side is already in the UI integer-scale band, nudge to n*1080 x 16:9 when
+// that still leaves ~15% desktop margin. 1080p -> 1280x720; 4K -> 1920x1080.
+static void pick_default_window_size(int desk_w, int desk_h, int *out_w, int *out_h)
+{
+	if(desk_w < MIN_WINDOW_W)
+		desk_w = MIN_WINDOW_W;
+	if(desk_h < 480)
+		desk_h = 480;
+
+	int h = desk_h / 2;
+	if(h < 720)
+		h = 720;
+	int max_h = desk_h * 3 / 4;
+	if(h > max_h)
+		h = max_h;
+	int w = h * 16 / 9;
+	int max_w = desk_w * 85 / 100;
+	if(w > max_w){
+		w = max_w;
+		h = w * 9 / 16;
+	}
+	if(w < MIN_WINDOW_W)
+		w = MIN_WINDOW_W;
+	if(h < MIN_WINDOW_H)
+		h = MIN_WINDOW_H;
+	if(w > desk_w)
+		w = desk_w;
+	if(h > desk_h)
+		h = desk_h;
+
+	int short_side = w < h ? w : h;
+	float s = (float)short_side / UI_REF_SHORT;
+	int n = (int)(s + 0.5f);
+	if(n >= 1 &&
+			s >= (float)n * (1.f - UI_SNAP_UNDER) &&
+			s <= (float)n * (1.f + UI_SNAP_OVER)){
+		int snap_h = n * (int)UI_REF_SHORT;
+		int snap_w = snap_h * 16 / 9;
+		if(snap_w <= desk_w * 85 / 100 && snap_h <= desk_h * 85 / 100 &&
+				snap_w >= MIN_WINDOW_W && snap_h >= MIN_WINDOW_H){
+			w = snap_w;
+			h = snap_h;
+		}
+	}
+
+	*out_w = w;
+	*out_h = h;
+}
+
+static void check_pick_default_window_size()
+{
+	int w = 0;
+	int h = 0;
+	pick_default_window_size(1920, 1080, &w, &h);
+	if(w != 1280 || h != 720)
+		throw Exception("pick_default_window_size 1080p");
+	pick_default_window_size(3840, 2160, &w, &h);
+	if(w != 1920 || h != 1080)
+		throw Exception("pick_default_window_size 4K");
+}
+
+static bool window_is_maximized(magic::Graphics *g)
+{
+	SDL_Window *win = g ? g->GetWindow() : nullptr;
+	if(!win)
+		return false;
+	return (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED) != 0;
+}
+
+static bool load_window_state(int desk_w, int desk_h, app::GraphicsOptions *opt)
+{
+	json::json_error_t err;
+	json::Value o = json::load_file(window_state_path().c_str(), &err);
+	if(!o.is_object())
+		return false;
+	const json::Value &jw = o.get("width");
+	const json::Value &jh = o.get("height");
+	if(!jw.is_integer() || !jh.is_integer())
+		return false;
+	int rw = (int)jw.as_integer();
+	int rh = (int)jh.as_integer();
+	if(rw < MIN_WINDOW_W || rh < MIN_WINDOW_H || rw > desk_w || rh > desk_h)
+		return false;
+	opt->window_w = rw;
+	opt->window_h = rh;
+	const json::Value &jm = o.get("maximized");
+	const json::Value &jf = o.get("fullscreen");
+	opt->maximized = jm.is_boolean() && jm.as_boolean();
+	opt->fullscreen = jf.is_boolean() && jf.as_boolean();
+	return true;
+}
+
+static void save_window_state(const app::GraphicsOptions &opt)
+{
+	if(opt.window_w < MIN_WINDOW_W || opt.window_h < MIN_WINDOW_H)
+		return;
+	json::Value o = json::object();
+	o.set("width", opt.window_w);
+	o.set("height", opt.window_h);
+	o.set("maximized", opt.maximized);
+	o.set("fullscreen", opt.fullscreen);
+	o.save_file(window_state_path().c_str());
+}
+
+static void resolve_window_size(app::GraphicsOptions *opt)
+{
+	int desk_w = 0;
+	int desk_h = 0;
+	if(!desktop_size(&desk_w, &desk_h)){
+		desk_w = 1920;
+		desk_h = 1080;
+	}
+	if(load_window_state(desk_w, desk_h, opt))
+		return;
+	pick_default_window_size(desk_w, desk_h, &opt->window_w, &opt->window_h);
+}
 
 static bool valid_game_name(const ss_ &name)
 {
@@ -263,6 +406,7 @@ struct CApp: public App, public magic::Application
 	lua_State *L;
 	bool m_reboot_requested = false;
 	float m_ui_scale_lua = 0.f; // 0 = not set by Lua
+	bool m_restore_maximized = false;
 	Options m_options;
 	bool m_draw_debug_geometry = false;
 	int64_t m_last_update_us;
@@ -289,8 +433,15 @@ struct CApp: public App, public magic::Application
 		m_thread_pool(interface::thread_pool::createThreadPool())
 	{
 		log_v(MODULE, "constructor()");
-		log_v(MODULE, "window size: %ix%i",
-				m_options.graphics.window_w, m_options.graphics.window_h);
+		check_pick_default_window_size();
+		if(m_options.graphics.window_w <= 0 || m_options.graphics.window_h <= 0){
+			resolve_window_size(&m_options.graphics);
+		}
+		m_restore_maximized = m_options.graphics.maximized;
+		log_v(MODULE, "window size: %ix%i maximized=%i fullscreen=%i",
+				m_options.graphics.window_w, m_options.graphics.window_h,
+				m_options.graphics.maximized ? 1 : 0,
+				m_options.graphics.fullscreen ? 1 : 0);
 
 		m_thread_pool->start(4); // TODO: Configurable
 
@@ -397,11 +548,13 @@ struct CApp: public App, public magic::Application
 		else
 			stop_local_server();
 
-		// Save window position
-		magic::Graphics *magic_graphics = GetSubsystem<magic::Graphics>();
-		magic::IntVector2 v = magic_graphics->GetWindowPosition();
-		m_options.graphics.window_x = v.x_;
-		m_options.graphics.window_y = v.y_;
+		magic::Graphics *g = GetSubsystem<magic::Graphics>();
+		if(g){
+			m_options.graphics.fullscreen = g->GetFullscreen();
+			if(!m_options.graphics.fullscreen)
+				m_options.graphics.maximized = window_is_maximized(g);
+			save_window_state(m_options.graphics);
+		}
 
 		magic::Engine *engine = GetSubsystem<magic::Engine>();
 		engine->Exit();
@@ -535,12 +688,14 @@ struct CApp: public App, public magic::Application
 
 		apply_ui_scale();
 
-		// Restore window to previous position
-		if(m_options.graphics.window_x != GraphicsOptions::UNDEFINED_INT &&
-				m_options.graphics.window_y != GraphicsOptions::UNDEFINED_INT){
-			magic::Graphics *magic_graphics = GetSubsystem<magic::Graphics>();
-			magic_graphics->SetWindowPosition(
-					m_options.graphics.window_x, m_options.graphics.window_y);
+		if(!m_options.graphics.fullscreen && m_restore_maximized){
+			magic::Graphics *g = GetSubsystem<magic::Graphics>();
+			if(g){
+				g->Maximize();
+				m_options.graphics.maximized = true;
+				save_window_state(m_options.graphics);
+			}
+			m_restore_maximized = false;
 		}
 
 		// Instantiate and register the Lua script subsystem so that we can use the LuaScriptInstance component
@@ -827,14 +982,12 @@ struct CApp: public App, public magic::Application
 			log_v(MODULE, "F11");
 			magic::Graphics *magic_graphics = GetSubsystem<magic::Graphics>();
 			if(magic_graphics->GetFullscreen()){
-				// Switch to windowed mode
-				magic::Graphics *magic_graphics = GetSubsystem<magic::Graphics>();
 				m_options.graphics.fullscreen = false;
 				m_options.graphics.resizable = true;
 				m_options.graphics.apply(magic_graphics);
+				if(m_options.graphics.maximized)
+					magic_graphics->Maximize();
 			} else {
-				// Switch to fullscreen mode
-				magic::Graphics *magic_graphics = GetSubsystem<magic::Graphics>();
 				m_options.graphics.fullscreen = true;
 				m_options.graphics.resizable = false;
 				m_options.graphics.apply(magic_graphics);
@@ -863,14 +1016,31 @@ struct CApp: public App, public magic::Application
 
 	void on_screenmode(magic::StringHash event_type, magic::VariantMap &event_data)
 	{
-		// If in windowed mode, update resolution in options
 		magic::Graphics *magic_graphics = GetSubsystem<magic::Graphics>();
-		if(!magic_graphics->GetFullscreen()){
-			m_options.graphics.window_w = event_data["Width"].GetInt();
-			m_options.graphics.window_h = event_data["Height"].GetInt();
-			log_v(MODULE, "Window size in graphics options updated: %ix%i",
-					m_options.graphics.window_w, m_options.graphics.window_h);
+		bool full = magic_graphics->GetFullscreen();
+		bool maxed = !full && window_is_maximized(magic_graphics);
+		int w = event_data["Width"].GetInt();
+		int h = event_data["Height"].GetInt();
+		int desk_w = 0;
+		int desk_h = 0;
+		bool fills_desktop = desktop_size(&desk_w, &desk_h) &&
+				w >= desk_w * 9 / 10 && h >= desk_h * 9 / 10;
+		m_options.graphics.fullscreen = full;
+		if(!full){
+			if(maxed || fills_desktop){
+				// Don't save maximized pixel size as the restore size.
+				m_options.graphics.maximized = true;
+			} else {
+				m_options.graphics.maximized = false;
+				m_options.graphics.window_w = w;
+				m_options.graphics.window_h = h;
+			}
 		}
+		log_v(MODULE, "Window state: %ix%i maximized=%i fullscreen=%i",
+				m_options.graphics.window_w, m_options.graphics.window_h,
+				m_options.graphics.maximized ? 1 : 0,
+				m_options.graphics.fullscreen ? 1 : 0);
+		save_window_state(m_options.graphics);
 		apply_ui_scale();
 	}
 
