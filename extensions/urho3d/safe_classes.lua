@@ -321,6 +321,7 @@ function M.define(dst, util)
 			lightType = util.simple_property("number"),
 			brightness = util.simple_property("number"),
 			castShadows = util.simple_property("boolean"),
+			shadowIntensity = util.simple_property("number"),
 			shadowBias = util.simple_property("BiasParameters"),
 			shadowCascade = util.simple_property("CascadeParameters"),
 			color = util.simple_property("Color"),
