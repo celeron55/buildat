@@ -174,7 +174,7 @@ do
 end
 
 local function enable_physics()
-	if physics_enabled then
+	if physics_enabled or not spawn_received then
 		return
 	end
 	local body = player_node:GetComponent("RigidBody")
@@ -226,6 +226,7 @@ end
 local title_text = magic.ui.root:CreateChild("Text")
 local misc_text = magic.ui.root:CreateChild("Text")
 local worldgen_text = magic.ui.root:CreateChild("Text")
+local wait_text = magic.ui.root:CreateChild("Text")
 do
 	title_text:SetText("digger/init.lua")
 	title_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
@@ -239,14 +240,34 @@ do
 	misc_text.verticalAlignment = magic.VA_CENTER
 	misc_text:SetPosition(0, -magic.ui.root.height/2 + 40)
 
-	worldgen_text:SetText("Waiting for terrain")
+	worldgen_text:SetText("")
 	worldgen_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
-	--[[worldgen_text.horizontalAlignment = magic.HA_LEFT
-	worldgen_text.verticalAlignment = magic.VA_TOP
-	worldgen_text:SetPosition(0, 0)--]]
 	worldgen_text.horizontalAlignment = magic.HA_CENTER
 	worldgen_text.verticalAlignment = magic.VA_CENTER
 	worldgen_text:SetPosition(0, -magic.ui.root.height/2 + 60)
+
+	wait_text:SetText("Generating terrain...")
+	wait_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 24)
+	wait_text.horizontalAlignment = magic.HA_CENTER
+	wait_text.verticalAlignment = magic.VA_CENTER
+	wait_text:SetPosition(0, 0)
+end
+
+local function set_generating_status(queue_size)
+	if spawn_received then
+		wait_text:SetText("")
+		if queue_size and queue_size > 0 then
+			worldgen_text:SetText("Worldgen queue size: "..queue_size)
+		else
+			worldgen_text:SetText("")
+		end
+		return
+	end
+	if queue_size and queue_size > 0 then
+		wait_text:SetText("Generating terrain... ("..queue_size.." sections left)")
+	else
+		wait_text:SetText("Generating terrain...")
+	end
 end
 
 -- Unfocus UI
@@ -523,21 +544,11 @@ buildat.sub_packet("main:spawn", function(data)
 	end
 	spawn_received = true
 	enable_physics()
+	set_generating_status(0)
 end)
 
 buildat.sub_packet("main:worldgen_queue_size", function(data)
-	local queue_size = tonumber(data)
-	if not spawn_received then
-		if queue_size > 0 then
-			worldgen_text:SetText("Waiting for terrain ("..queue_size..")")
-		else
-			worldgen_text:SetText("Waiting for terrain")
-		end
-	elseif queue_size > 0 then
-		worldgen_text:SetText("Worldgen queue size: "..queue_size)
-	else
-		worldgen_text:SetText("")
-	end
+	set_generating_status(tonumber(data))
 end)
 
 -- vim: set noet ts=4 sw=4:

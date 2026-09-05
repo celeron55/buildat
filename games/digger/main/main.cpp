@@ -588,9 +588,17 @@ struct Module: public interface::Module
 		replicate::access(m_server, [&](replicate::Interface *ireplicate){
 			ireplicate->assign_scene_to_peer(m_main_scene, event.recipient);
 		});
+		size_t queue_size = 0;
+		worldgen::access(m_server, m_main_scene,
+				[&](worldgen::Instance *instance)
+		{
+			queue_size = instance->get_num_sections_queued();
+		});
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(event.recipient, "core:run_script",
 					"buildat.run_script_file(\"main/init.lua\")");
+			inetwork->send(event.recipient, "main:worldgen_queue_size",
+					itos(queue_size));
 		});
 		send_spawn(event.recipient);
 	}
