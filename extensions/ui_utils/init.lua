@@ -9,6 +9,150 @@ local M = {safe = {}}
 -- show_*_notification()
 -- show_*_dialog()
 -- show_*_window() (?)
+-- vertical_menu() / bind_button_menu()
+
+-- One selected index for mouse hover and arrow keys. Button.selected uses
+-- pressedOffset; native hover would still highlight the mouse-over item if
+-- arrows move elsewhere, so copy hoverOffset onto pressedOffset and clear it.
+local function button_menu_nav(root)
+	local items = {}
+	local selected = 1
+	local on_other_key = nil
+
+	local function apply()
+		for i, item in ipairs(items) do
+			item.button.selected = (i == selected)
+		end
+	end
+
+	local function select_i(i)
+		local n = #items
+		if n == 0 then
+			return
+		end
+		if i < 1 then
+			i = n
+		elseif i > n then
+			i = 1
+		end
+		selected = i
+		apply()
+	end
+
+	local nav = {}
+
+	function nav:add(button, action)
+		if button == nil or action == nil then
+			error("button_menu: add() needs a button and an action")
+		end
+		local i = #items + 1
+		items[i] = {button = button, action = action}
+		local hover = button.hoverOffset
+		button.pressedOffset = magic.IntVector2(hover.x, hover.y)
+		button.hoverOffset = magic.IntVector2(0, 0)
+		magic.SubscribeToEvent(button, "Released",
+		function(self, event_type, event_data)
+			action()
+		end)
+		magic.SubscribeToEvent(button, "HoverBegin",
+		function(self, event_type, event_data)
+			select_i(i)
+		end)
+		apply()
+		return button
+	end
+
+	function nav:on_key(fn)
+		on_other_key = fn
+		return self
+	end
+
+	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
+		local key = event_data:GetInt("Key")
+		if key == KEY_UP then
+			select_i(selected - 1)
+		elseif key == KEY_DOWN then
+			select_i(selected + 1)
+		elseif key == KEY_RETURN or key == KEY_RETURN2 or key == KEY_KP_ENTER then
+			if magic.input:GetKeyPress(key) and items[selected] then
+				items[selected].action()
+			end
+		elseif on_other_key then
+			on_other_key(key)
+		end
+	end)
+
+	return nav
+end
+
+-- Bind up/down/enter and hover selection to existing buttons on a uistack
+-- root. Each item is {button, action} or {button=..., action=...}.
+-- Subscribes Released on the buttons; don't also subscribe Released.
+-- Returns a handle with :add(button, action) and :on_key(fn).
+function M.safe.bind_button_menu(root, items, on_other_key)
+	local nav = button_menu_nav(root)
+	if items then
+		for _, item in ipairs(items) do
+			nav:add(item.button or item[1], item.action or item[2])
+		end
+	end
+	if on_other_key then
+		nav:on_key(on_other_key)
+	end
+	return nav
+end
+
+local function make_menu_button(parent, label, options)
+	local button = parent:CreateChild("Button")
+	button:SetStyleAuto()
+	button:SetName("Button")
+	button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
+	button.minHeight = options.min_height or 24
+	if options.min_width then
+		button.minWidth = options.min_width
+	end
+	local text = button:CreateChild("Text")
+	text:SetName("ButtonText")
+	text:SetStyleAuto()
+	text.text = label
+	text:SetTextAlignment(HA_CENTER)
+	return button
+end
+
+-- Vertical Window on a uistack root, with the same keyboard/mouse nav.
+-- Extra widgets (logo, titles) go on menu.window before :add().
+-- :add("Label", action) creates a button; :add(button, action) registers one.
+function M.safe.vertical_menu(root, options)
+	options = options or {}
+	local window = root:CreateChild("Window")
+	window:SetStyleAuto()
+	window:SetLayout(LM_VERTICAL, options.spacing or 10,
+			options.padding or magic.IntRect(10, 10, 10, 10))
+	window:SetAlignment(HA_LEFT, VA_CENTER)
+
+	local nav = button_menu_nav(root)
+	if options.on_key then
+		nav:on_key(options.on_key)
+	end
+
+	local menu = {window = window}
+
+	function menu:add(label_or_button, action)
+		local button = label_or_button
+		if type(label_or_button) == "string" then
+			button = make_menu_button(window, label_or_button, options)
+		end
+		nav:add(button, action)
+		return button
+	end
+
+	function menu:on_key(fn)
+		nav:on_key(fn)
+		return self
+	end
+
+	return menu
+end
 
 local message_handle = nil
 
