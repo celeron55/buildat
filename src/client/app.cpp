@@ -704,7 +704,7 @@ struct CApp: public App, public magic::Application
 		return 2;
 	}
 
-	// list_games() -> {name, ...}
+	// list_games() -> {{name=, size=}, ...}
 	static int l_list_games(lua_State *L)
 	{
 		ss_ games_dir = g_client_config.get<ss_>("share_path")+"/games";
@@ -719,7 +719,13 @@ struct CApp: public App, public magic::Application
 		lua_newtable(L);
 		int i = 1;
 		for(const ss_ &name : names){
+			ss_ game_path = games_dir+"/"+name;
+			lua_newtable(L);
 			lua_pushstring(L, name.c_str());
+			lua_setfield(L, -2, "name");
+			lua_pushnumber(L, (lua_Number)interface::fs::directory_tree_size(
+					game_path));
+			lua_setfield(L, -2, "size");
 			lua_rawseti(L, -2, i++);
 		}
 		return 1;
