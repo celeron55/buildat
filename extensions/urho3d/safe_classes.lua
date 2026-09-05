@@ -74,7 +74,11 @@ function M.define(dst, util)
 			GetFloat = util.wrap_function({"number"}, {"VariantMap", "string"},
 				function(self, key)
 					local v = self[key]
-					return v and v:GetFloat() or 0
+					if v == nil or (v.IsEmpty and v:IsEmpty()) then
+						error("VariantMap:GetFloat("..tostring(key)..
+								"): missing or empty")
+					end
+					return v:GetFloat()
 				end),
 			SetInt = util.wrap_function({"VariantMap", "string", "number"},
 				function(self, key, value)
@@ -83,7 +87,11 @@ function M.define(dst, util)
 			GetInt = util.wrap_function({"number"}, {"VariantMap", "string"},
 				function(self, key)
 					local v = self[key]
-					return v and v:GetInt() or 0
+					if v == nil or (v.IsEmpty and v:IsEmpty()) then
+						error("VariantMap:GetInt("..tostring(key)..
+								"): missing or empty")
+					end
+					return v:GetInt()
 				end),
 			SetString = util.wrap_function({"VariantMap", "string", "string"},
 				function(self, key, value)
@@ -92,7 +100,11 @@ function M.define(dst, util)
 			GetString = util.wrap_function({"string"}, {"VariantMap", "string"},
 				function(self, key)
 					local v = self[key]
-					return v and v:GetString() or ""
+					if v == nil or (v.IsEmpty and v:IsEmpty()) then
+						error("VariantMap:GetString("..tostring(key)..
+								"): missing or empty")
+					end
+					return v:GetString()
 				end),
 			SetBuffer = util.wrap_function({"VariantMap", "string", "VectorBuffer"},
 				function(self, key, value)
@@ -102,7 +114,11 @@ function M.define(dst, util)
 					{"VariantMap", "string"},
 				function(self, key)
 					local v = self[key]
-					return v and v:GetBuffer()
+					if v == nil or (v.IsEmpty and v:IsEmpty()) then
+						error("VariantMap:GetBuffer("..tostring(key)..
+								"): missing or empty")
+					end
+					return v:GetBuffer()
 				end),
 			SetPtr = util.wrap_function({"VariantMap", "string",
 					{"Node", "Component"}},
@@ -112,10 +128,16 @@ function M.define(dst, util)
 			GetPtr = util.wrap_function({"VariantMap", "string", "string"},
 				function(self, type, key)
 					local v = self[key]
-					if v == nil then
-						return nil
+					if v == nil or (v.IsEmpty and v:IsEmpty()) then
+						error("VariantMap:GetPtr("..tostring(key)..
+								"): missing or empty")
 					end
-					return util.wrap_instance(type, v:GetPtr(type))
+					local ptr = v:GetPtr(type)
+					if ptr == nil then
+						error("VariantMap:GetPtr("..tostring(key)..", "..
+								tostring(type).."): ptr is nil")
+					end
+					return util.wrap_instance(type, ptr)
 				end),
 		}
 	})
@@ -321,16 +343,22 @@ function M.define(dst, util)
 			GetDrawables = util.wrap_function({"table"}, {"Octree", "BoundingBox"},
 				function(self, query)
 					local unsafe_result = self:GetDrawables(query)
-					--log:info(dump(result))
 					-- The result is a list of OctreeQueryResults; we will
 					-- convert it to a list of tables that contain the fields of
 					-- OctreeQueryResult.
 					local result = {}
+					if unsafe_result == nil then
+						log:error("GetDrawables returned nil")
+						return result
+					end
 					for _, v in ipairs(unsafe_result) do
-						table.insert(result, {
-							drawable = util.wrap_instance("Drawable", v.drawable),
-							node = util.wrap_instance("Node", v.node),
-						})
+						if v.drawable ~= nil and v.node ~= nil then
+							table.insert(result, {
+								drawable = util.wrap_instance("Drawable",
+										v.drawable),
+								node = util.wrap_instance("Node", v.node),
+							})
+						end
 					end
 					return result
 				end

@@ -26,6 +26,24 @@ local function wrap_instance(name, instance)
 	return class_meta.wrap(instance)
 end
 
+local function type_allows_nil(valid_types)
+	if valid_types == '__nil' then
+		return true
+	end
+	if type(valid_types) == 'table' then
+		local meta = getmetatable(valid_types)
+		if meta and meta.type_name then
+			return false
+		end
+		for _, t in ipairs(valid_types) do
+			if t == '__nil' then
+				return true
+			end
+		end
+	end
+	return false
+end
+
 -- (return_types, param_types, f) or (param_types, f)
 local function wrap_function(return_types, param_types, f)
 	if type(param_types) == 'function' and f == nil then
@@ -37,6 +55,9 @@ local function wrap_function(return_types, param_types, f)
 		local arg = {...}
 		local checked_arg = {}
 		for i = 1, #param_types do
+			if arg[i] == nil and not type_allows_nil(param_types[i]) then
+				error("wrapped call argument "..i.." is nil")
+			end
 			checked_arg[i] = magic_sandbox.safe_to_unsafe(arg[i], param_types[i])
 		end
 		local wrapped_ret = {}
@@ -56,6 +77,9 @@ local function self_function(function_name, return_types, param_types)
 		local arg = {...}
 		local checked_arg = {}
 		for i = 1, #param_types do
+			if arg[i] == nil and not type_allows_nil(param_types[i]) then
+				error(function_name.." argument "..i.." is nil")
+			end
 			checked_arg[i] = magic_sandbox.safe_to_unsafe(arg[i], param_types[i])
 		end
 		local wrapped_ret = {}
@@ -116,9 +140,50 @@ setmetatable(Safe, {
 })
 
 -- SubscribeToEvent
+--
+-- 1.7 LuaScriptEventInvoker stores one handler per event type (last subscribe
+-- wins). 2014 kept a vector of functions. Multiplex global events so voxelworld
+-- and games can both receive Update.
+
+local urho_SubscribeToEvent = SubscribeToEvent
+-- Dropped so Lua cannot replace the mux. Object-specific subs still use
+-- urho_SubscribeToEvent (one handler per sender+event, which is correct).
+-- UnsubscribeFromEvent("Update") would strip the mux, so drop it too.
+SubscribeToEvent = nil
+UnsubscribeFromEvent = nil
 
 local sandbox_callback_to_global_function_name = {}
 local next_sandbox_global_function_i = 1
+local global_event_mux = {} -- event_type -> { {name=, fn=}, ... }
+local global_event_mux_installed = {}
+
+local function add_global_event_handler(event_type, cb_name, fn)
+	if not global_event_mux_installed[event_type] then
+		global_event_mux[event_type] = {}
+		local mux_name = "__buildat_mux_"..event_type
+		_G[mux_name] = function(event_type_thing, unsafe_event_data)
+			local list = global_event_mux[event_type]
+			for i = 1, #list do
+				list[i].fn(event_type_thing, unsafe_event_data)
+			end
+		end
+		urho_SubscribeToEvent(event_type, mux_name)
+		global_event_mux_installed[event_type] = true
+	end
+	table.insert(global_event_mux[event_type], {name = cb_name, fn = fn})
+end
+
+local function remove_global_event_handler(event_type, cb_name)
+	local list = global_event_mux[event_type]
+	if not list then
+		return
+	end
+	for i = #list, 1, -1 do
+		if list[i].name == cb_name then
+			table.remove(list, i)
+		end
+	end
+end
 
 function Safe.SubscribeToEvent(x, y, z)
 	log:debug("Safe.SubscribeToEvent("..dump(x)..", "..dump(y)..", "..dump(z)..")")
@@ -177,6 +242,12 @@ function Safe.SubscribeToEvent(x, y, z)
 					error("Value for field "..dump(field_name).." in "..
 							dump(got_event_type).." is nil")
 				end
+				-- 1.7 VariantMap __index returns an empty Variant for missing
+				-- keys, not nil. Treat empty as missing.
+				if variant.IsEmpty and variant:IsEmpty() then
+					error("Value for field "..dump(field_name).." in "..
+							dump(got_event_type).." is empty")
+				end
 				local safe_value = nil
 				if variant_type == "Ptr" then
 					local get_type = field_def.get_type or safe_type
@@ -220,9 +291,10 @@ function Safe.SubscribeToEvent(x, y, z)
 	end
 	if object then
 		local unsafe_object = getmetatable(object).unsafe
-		SubscribeToEvent(unsafe_object, sub_event_type, global_callback_name)
+		urho_SubscribeToEvent(unsafe_object, sub_event_type, global_callback_name)
 	else
-		SubscribeToEvent(sub_event_type, global_callback_name)
+		add_global_event_handler(sub_event_type, global_callback_name,
+				_G[global_callback_name])
 	end
 	log:debug("-> global_callback_name="..dump(global_callback_name))
 	return global_callback_name
@@ -230,8 +302,7 @@ end
 
 function Safe.UnsubscribeFromEvent(sub_event_type, cb_name)
 	log:debug("Safe.UnsubscribeFromEvent("..dump(sub_event_type)..", "..dump(cb_name)..")")
-	UnsubscribeFromEvent(sub_event_type, cb_name)
-	-- TODO: Delete the generated global callback
+	remove_global_event_handler(sub_event_type, cb_name)
 end
 
 --
@@ -292,9 +363,10 @@ function Unsafe.SubscribeToEvent(x, y, z)
 		end
 	end
 	if object then
-		SubscribeToEvent(object, event_name, global_callback_name)
+		urho_SubscribeToEvent(object, event_name, global_callback_name)
 	else
-		SubscribeToEvent(event_name, global_callback_name)
+		add_global_event_handler(event_name, global_callback_name,
+				_G[global_callback_name])
 	end
 	return global_callback_name
 end
