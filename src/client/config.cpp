@@ -20,6 +20,8 @@ Config::Config()
 	set_default("boot_to_menu", false);
 	set_default("menu_extension_name", "__menu");
 	set_default("ui_scale", 0.0); // 0 = auto from short side / 1080
+	set_default("command_seq", "");
+	set_default("command_seq_enabled", false);
 }
 
 bool Config::check_paths()

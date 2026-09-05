@@ -7,10 +7,13 @@
 #include "client/config.h"
 #include "client/state.h"
 #include "client/app.h"
+#include "client/command_seq.h"
 #include "interface/os.h"
 #include <c55/getopt.h>
 #include <Context.h>
 #include <cstdlib> // srand()
+#include <fstream>
+#include <sstream>
 #include <signal.h>
 #define MODULE "__main"
 namespace magic = Urho3D;
@@ -41,7 +44,7 @@ int main(int argc, char *argv[])
 
 	client::Config &config = g_client_config;
 
-	const char opts[100] = "hs:P:C:U:l:L:m:u:";
+	const char opts[100] = "hs:P:C:U:l:L:m:u:c:";
 	const char usagefmt[1000] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
@@ -53,6 +56,9 @@ int main(int argc, char *argv[])
 			"  -L [log file path]   Append log to a specified file\n"
 			"  -m [name]            Choose menu extension name\n"
 			"  -u [scale]           UI scale (0 = auto from short side / 1080)\n"
+			"  -c [commands]        Run command sequence and exit\n"
+			"                       One command per line. @file reads a file.\n"
+			"                       See doc/client_commands.txt\n"
 			;
 
 	int c;
@@ -93,6 +99,39 @@ int main(int argc, char *argv[])
 			log_i(MODULE, "config.ui_scale: %s", c55_optarg);
 			config.set("ui_scale", atof(c55_optarg));
 			break;
+		case 'c': {
+			ss_ arg = c55_optarg ? c55_optarg : "";
+			ss_ text;
+			if(!arg.empty() && arg[0] == '@'){
+				ss_ path = arg.substr(1);
+				if(path.empty()){
+					fprintf(stderr, "-c @file: empty path\n");
+					return 1;
+				}
+				std::ifstream in(path.c_str());
+				if(!in){
+					fprintf(stderr, "Failed to read command file: %s\n",
+							path.c_str());
+					return 1;
+				}
+				std::ostringstream ss;
+				ss<<in.rdbuf();
+				text = ss.str();
+			} else {
+				text = arg;
+			}
+			sv_<client::command_seq::Command> parsed;
+			ss_ err;
+			if(!client::command_seq::parse(text, &parsed, &err)){
+				fprintf(stderr, "Invalid -c command sequence: %s\n",
+						err.c_str());
+				return 1;
+			}
+			log_i(MODULE, "config.command_seq: %zu commands", parsed.size());
+			config.set("command_seq", text);
+			config.set("command_seq_enabled", true);
+			break;
+		}
 		default:
 			fprintf(stderr, "Invalid command-line argument\n");
 			fprintf(stderr, usagefmt, argv[0]);
