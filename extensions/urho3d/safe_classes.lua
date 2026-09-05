@@ -65,31 +65,58 @@ function M.define(dst, util)
 			return util.wrap_instance("VariantMap", VariantMap())
 		end),
 		instance = {
-			SetFloat = util.self_function(
-					"SetFloat", {}, {"VariantMap", "string", "number"}),
-			GetFloat = util.self_function(
-					"GetFloat", {"number"}, {"VariantMap", "string"}),
-			SetInt = util.self_function(
-					"SetInt", {}, {"VariantMap", "string", "number"}),
-			GetInt = util.self_function(
-					"GetInt", {"number"}, {"VariantMap", "string"}),
-			SetString = util.self_function(
-					"SetString", {}, {"VariantMap", "string", "string"}),
-			GetString = util.self_function(
-					"GetString", {"string"}, {"VariantMap", "string"}),
-			SetBuffer = util.self_function(
-					"SetBuffer", {}, {"VariantMap", "string", "VectorBuffer"}),
-			GetBuffer = util.self_function(
-					"GetBuffer", {dst.VectorBuffer}, {"VariantMap", "string"}),
-
-			SetPtr = util.self_function(
-					"SetPtr", {}, {"VariantMap", "string",
-						{"Node", "Component"}}),
+			-- 1.7 Lua VariantMap has no Get/Set methods; values are Variants
+			-- via eventData["Key"]. Keep the 2014 method names for games.
+			SetFloat = util.wrap_function({"VariantMap", "string", "number"},
+				function(self, key, value)
+					self[key] = value
+				end),
+			GetFloat = util.wrap_function({"number"}, {"VariantMap", "string"},
+				function(self, key)
+					local v = self[key]
+					return v and v:GetFloat() or 0
+				end),
+			SetInt = util.wrap_function({"VariantMap", "string", "number"},
+				function(self, key, value)
+					self[key] = value
+				end),
+			GetInt = util.wrap_function({"number"}, {"VariantMap", "string"},
+				function(self, key)
+					local v = self[key]
+					return v and v:GetInt() or 0
+				end),
+			SetString = util.wrap_function({"VariantMap", "string", "string"},
+				function(self, key, value)
+					self[key] = value
+				end),
+			GetString = util.wrap_function({"string"}, {"VariantMap", "string"},
+				function(self, key)
+					local v = self[key]
+					return v and v:GetString() or ""
+				end),
+			SetBuffer = util.wrap_function({"VariantMap", "string", "VectorBuffer"},
+				function(self, key, value)
+					self[key] = value
+				end),
+			GetBuffer = util.wrap_function({dst.VectorBuffer},
+					{"VariantMap", "string"},
+				function(self, key)
+					local v = self[key]
+					return v and v:GetBuffer()
+				end),
+			SetPtr = util.wrap_function({"VariantMap", "string",
+					{"Node", "Component"}},
+				function(self, key, value)
+					self[key] = value
+				end),
 			GetPtr = util.wrap_function({"VariantMap", "string", "string"},
 				function(self, type, key)
-					return util.wrap_instance(type, self:GetPtr(type, key))
-				end
-			),
+					local v = self[key]
+					if v == nil then
+						return nil
+					end
+					return util.wrap_instance(type, v:GetPtr(type))
+				end),
 		}
 	})
 
