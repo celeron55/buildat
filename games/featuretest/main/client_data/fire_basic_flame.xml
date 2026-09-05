@@ -1,0 +1,6 @@
+<texture>
+	<filter mode="nearest" />
+	<mipmap enable="false" />
+	<address coord="u" mode="clamp" />
+	<address coord="v" mode="clamp" />
+</texture>
