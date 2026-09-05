@@ -173,8 +173,31 @@ do
 	--]]
 end
 
+-- Volume data can exist before Bullet boxes. Require a solid voxel under
+-- the feet and a RigidBody on that chunk (set_voxel_physics_boxes).
+local function floor_has_collision()
+	local p = player_node:GetWorldPosition()
+	local floor = magic.Vector3(p.x, p.y - PLAYER_HEIGHT / 2 - 0.25, p.z)
+	local v = voxelworld.get_static_voxel(floor)
+	if v.id < 2 then
+		return false
+	end
+	local chunk_p = voxelworld.get_chunk_position(floor)
+	if not chunk_p then
+		return false
+	end
+	local node = voxelworld.get_static_node(chunk_p)
+	if not node then
+		return false
+	end
+	return node:GetComponent("RigidBody") ~= nil
+end
+
 local function enable_physics()
 	if physics_enabled or not spawn_received then
+		return
+	end
+	if not floor_has_collision() then
 		return
 	end
 	local body = player_node:GetComponent("RigidBody")
@@ -417,14 +440,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		log:info("p="..camera_node:GetRotation():PitchAngle())]]
 
 		local body = player_node:GetComponent("RigidBody")
-		local moving = magic.input:GetKeyDown(magic.KEY_W) or
-				magic.input:GetKeyDown(magic.KEY_S) or
-				magic.input:GetKeyDown(magic.KEY_A) or
-				magic.input:GetKeyDown(magic.KEY_D) or
-				magic.input:GetKeyDown(magic.KEY_SPACE)
-		if moving then
-			enable_physics()
-		end
+		enable_physics()
 
 		do 
 			local wanted_v = magic.Vector3(0, 0, 0) -- re. world
