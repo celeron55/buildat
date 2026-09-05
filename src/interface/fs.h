@@ -22,6 +22,8 @@ namespace interface
 
 		bool path_exists(const ss_ &path);
 
+		bool copy_file(const ss_ &from, const ss_ &to);
+
 		// Bytes in a regular file; 0 if missing or not a regular file.
 		uint64_t file_size(const ss_ &path);
 		// Sum of file_size for every regular file under path, recursively.

@@ -183,11 +183,21 @@ function M.safe_to_unsafe(safe_thing, valid_types)
 	elseif getmetatable(valid_types) and getmetatable(valid_types).type_name then
 		valid_types = {getmetatable(valid_types).type_name}
 	end
+	local function allowed_type_name(valid_type)
+		if type(valid_type) == "string" then
+			return valid_type
+		end
+		local vm = getmetatable(valid_type)
+		if vm and vm.type_name then
+			return vm.type_name
+		end
+		return nil
+	end
 	local meta = getmetatable(safe_thing)
 	if meta and meta.type_name then
 		-- Check if it is directly this kind of wrapped type
 		for _, valid_type in ipairs(valid_types) do
-			if valid_type == meta.type_name then
+			if allowed_type_name(valid_type) == meta.type_name then
 				return meta.unsafe
 			end
 			if valid_type == '__to_nil' then
@@ -196,8 +206,8 @@ function M.safe_to_unsafe(safe_thing, valid_types)
 		end
 		-- Check if safe_thing is inherited safely from a valid type
 		local unsafe_instance = meta.unsafe
+		local tried_super_types = {}
 		while true do
-			local tried_super_types = {} -- For error message
 			local super = meta.inherited_from_in_sandbox or
 					meta.inherited_from_by_wrapper
 			--print("super="..dump(super)..", valid_types="..dump(valid_types))
@@ -207,11 +217,11 @@ function M.safe_to_unsafe(safe_thing, valid_types)
 			meta = getmetatable(super)
 			for _, valid_type in ipairs(valid_types) do
 				--print("meta="..dump(meta))
-				if valid_type == meta.type_name then
+				if allowed_type_name(valid_type) == meta.type_name then
 					return unsafe_instance
 				end
-				table.insert(tried_super_types, meta.type_name)
 			end
+			table.insert(tried_super_types, meta.type_name)
 		end
 		error("Disallowed type: "..dump(meta.type_name)..", inherited "
 				..dump(tried_super_types).."; Allowed types: "..dump(valid_types))

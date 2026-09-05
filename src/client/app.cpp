@@ -219,12 +219,34 @@ public:
 					name.CString());
 			return;
 		}
-		ss_ path = m_client->get_file_path(name.CString());
+		ss_ orig(name.CString());
+		ss_ path = m_client->get_file_path(orig);
 		if(path == ""){
 			log_v(MODULE, "Resource route access: %s (assuming local file)",
 					name.CString());
 			// NOTE: Path safety is checked by magic::FileSystem
 			return;
+		}
+		// Cache files are stored as a bare hash. Urho Sound (and some
+		// other loaders) pick the decoder from the File path extension.
+		magic::String ext = magic::GetExtension(name);
+		if(!ext.Empty()){
+			ss_ hex = path;
+			size_t slash = hex.rfind('/');
+			if(slash != ss_::npos)
+				hex = hex.substr(slash + 1);
+			ss_ dest = g_client_config.get<ss_>("cache_path")+
+					"/tmp/"+hex+ext.CString();
+			if(!interface::fs::path_exists(dest)){
+				if(!interface::fs::copy_file(path, dest)){
+					log_w(MODULE, "Resource route copy failed: %s -> %s",
+							cs(path), cs(dest));
+				} else {
+					path = dest;
+				}
+			} else {
+				path = dest;
+			}
 		}
 		log_v(MODULE, "Resource route access: %s -> %s",
 				name.CString(), cs(path));
