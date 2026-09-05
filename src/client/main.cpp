@@ -41,7 +41,7 @@ int main(int argc, char *argv[])
 
 	client::Config &config = g_client_config;
 
-	const char opts[100] = "hs:P:C:U:l:L:m:";
+	const char opts[100] = "hs:P:C:U:l:L:m:u:";
 	const char usagefmt[1000] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
@@ -52,6 +52,7 @@ int main(int argc, char *argv[])
 			"  -l [level number]    Set maximum log level (0...5)\n"
 			"  -L [log file path]   Append log to a specified file\n"
 			"  -m [name]            Choose menu extension name\n"
+			"  -u [scale]           UI scale (0 = auto from short side / 1080)\n"
 			;
 
 	int c;
@@ -87,6 +88,10 @@ int main(int argc, char *argv[])
 		case 'm':
 			log_i(MODULE, "config.menu_extension_name: %s", c55_optarg);
 			config.set("menu_extension_name", c55_optarg);
+			break;
+		case 'u':
+			log_i(MODULE, "config.ui_scale: %s", c55_optarg);
+			config.set("ui_scale", atof(c55_optarg));
 			break;
 		default:
 			fprintf(stderr, "Invalid command-line argument\n");
