@@ -29,7 +29,6 @@
 #include <cereal/types/vector.hpp>
 #include <sstream>
 #include <cmath>
-#include <set>
 #define MODULE "main"
 
 namespace magic = Urho3D;
@@ -171,7 +170,9 @@ struct Module: public interface::Module
 	static const int SPAWN_Y_MIN = -64;
 	static constexpr float PLAYER_HEIGHT = 1.7f;
 
-	// Section is 64 voxels. Radius 5 fills a ~320-voxel view; Y is finite.
+	// chunk 32 * section 2; matches voxelworld defaults
+	static const int SECTION_SIZE_VOXELS = 64;
+	// Radius 5 fills a ~320-voxel view; Y is finite.
 	// simplified: no unload. replicate:remove_node is unimplemented on the
 	// client; distant sections stay in memory for the session.
 	static const int STREAM_RADIUS_XZ = 5;
@@ -179,13 +180,15 @@ struct Module: public interface::Module
 	static const int STREAM_Y_MIN = -1;
 	static const int STREAM_Y_MAX = 1;
 	static const size_t STREAM_QUEUE_SOFT_MAX = 12;
+	static const size_t STREAM_SECTIONS_PER_PASS = 2;
 
 	bool m_spawn_ready = false;
 	float m_spawn_y = 0;
 	size_t m_worldgen_queue = 0;
+	uint m_stream_tick = 0;
 
 	sm_<network::PeerInfo::Id, pv::Vector3DInt32> m_player_voxel_p;
-	std::set<uint64_t> m_requested_sections;
+	set_<uint64_t> m_requested_sections;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -393,8 +396,12 @@ struct Module: public interface::Module
 			instance->enable();
 		});
 
-		m_requested_sections.insert(section_key(-1, 0, 4));
-		stream_around(pv::Vector3DInt32(SPAWN_X, 20, SPAWN_Z));
+		pv::Vector3DInt32 spawn_p(SPAWN_X, 20, SPAWN_Z);
+		m_requested_sections.insert(section_key(
+				interface::container_coord(spawn_p.getX(), SECTION_SIZE_VOXELS),
+				interface::container_coord(spawn_p.getY(), SECTION_SIZE_VOXELS),
+				interface::container_coord(spawn_p.getZ(), SECTION_SIZE_VOXELS)));
+		stream_around(spawn_p);
 
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *instance)
@@ -485,19 +492,19 @@ struct Module: public interface::Module
 		world->load_or_generate_section(section_p);
 	}
 
-	void stream_around(const pv::Vector3DInt32 &voxel_p)
+	sv_<pv::Vector3DInt16> sections_to_request(const pv::Vector3DInt32 &voxel_p)
 	{
 		// Use m_worldgen_queue, not worldgen::access: generation holds that
 		// module for the whole section and would stall this thread's events.
 		size_t queued = m_worldgen_queue;
-
-		const int ssv = 64; // chunk 32 * section 2; matches voxelworld defaults
-		int sx = interface::container_coord(voxel_p.getX(), ssv);
-		int sy = interface::container_coord(voxel_p.getY(), ssv);
-		int sz = interface::container_coord(voxel_p.getZ(), ssv);
+		int sx = interface::container_coord(voxel_p.getX(), SECTION_SIZE_VOXELS);
+		int sy = interface::container_coord(voxel_p.getY(), SECTION_SIZE_VOXELS);
+		int sz = interface::container_coord(voxel_p.getZ(), SECTION_SIZE_VOXELS);
 
 		sv_<pv::Vector3DInt16> wanted;
 		for(int r = 0; r <= STREAM_RADIUS_XZ; r++){
+			if(queued >= STREAM_QUEUE_SOFT_MAX && r > 0)
+				break;
 			for(int dy = -STREAM_RADIUS_Y; dy <= STREAM_RADIUS_Y; dy++){
 				int y = sy + dy;
 				if(y < STREAM_Y_MIN || y > STREAM_Y_MAX)
@@ -507,20 +514,23 @@ struct Module: public interface::Module
 						if(r > 0 && dx != r && dx != -r &&
 								dz != r && dz != -r)
 							continue;
-						if(queued >= STREAM_QUEUE_SOFT_MAX && r > 0)
-							goto have_wanted;
 						uint64_t k = section_key(sx + dx, y, sz + dz);
 						if(m_requested_sections.count(k))
 							continue;
 						wanted.push_back(pv::Vector3DInt16(sx + dx, y, sz + dz));
 						queued++;
-						if(wanted.size() >= 2)
-							goto have_wanted;
+						if(wanted.size() >= STREAM_SECTIONS_PER_PASS)
+							return wanted;
 					}
 				}
 			}
 		}
-	have_wanted:
+		return wanted;
+	}
+
+	void stream_around(const pv::Vector3DInt32 &voxel_p)
+	{
+		sv_<pv::Vector3DInt16> wanted = sections_to_request(voxel_p);
 		if(wanted.empty())
 			return;
 
@@ -544,8 +554,7 @@ struct Module: public interface::Module
 
 	void on_tick(const interface::TickEvent &event)
 	{
-		static uint tick_n = 0;
-		if(((tick_n++) % 4) == 0)
+		if(((m_stream_tick++) % 4) == 0)
 			stream_players_or_spawn();
 		try_resolve_spawn();
 	}
@@ -638,7 +647,6 @@ struct Module: public interface::Module
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
-		log_i(MODULE, "on_files_transmitted(): peer %zu", event.recipient);
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(event.recipient, "core:run_script",
 					"buildat.run_script_file(\"main/init.lua\")");
