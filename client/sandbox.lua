@@ -50,11 +50,11 @@ __buildat_sandbox_environment.require = function(name)
 	log:debug("require(\""..name.."\")")
 	-- Check loaded modules
 	if package.loaded[name] then
-		local unsafe = package.loaded[name]
-		if type(unsafe.safe) ~= 'table' then
-			error("require: \""..name.."\" didn't return safe interface")
+		local loaded = package.loaded[name]
+		if type(loaded) == 'table' and type(loaded.safe) == 'table' then
+			return loaded.safe
 		end
-		return unsafe.safe
+		return loaded
 	end
 	-- Allow loading extensions
 	local m = string.match(name, '^buildat/extension/([a-zA-Z0-9_]+)$')
@@ -77,6 +77,7 @@ __buildat_sandbox_environment.require = function(name)
 		if interface == nil then
 			error("require: Cannot load module: \""..m.."\"")
 		end
+		package.loaded[name] = interface
 		log:verbose("Loaded module \""..name.."\"")
 		return interface
 	end
