@@ -266,8 +266,18 @@ function M.boot()
 
 	local window = root:CreateChild("Window")
 	window:SetStyleAuto()
-	window:SetLayout(LM_VERTICAL, 10, magic.IntRect(10, 10, 10, 10))
+	window:SetLayout(LM_VERTICAL, 16, magic.IntRect(20, 20, 20, 20))
 	window:SetAlignment(HA_LEFT, VA_CENTER)
+
+	local logo = window:CreateChild("Sprite")
+	logo:SetTexture(magic.cache:GetResource("Texture2D", "buildat_logo.png"))
+	logo:SetFixedSize(160, 160)
+
+	local title = window:CreateChild("Text")
+	title:SetStyleAuto()
+	title.text = "Buildat"
+	title:SetFontSize(28)
+	title:SetTextAlignment(HA_CENTER)
 
 	local local_button = make_button(window, "Local game")
 	magic.SubscribeToEvent(local_button, "Released",

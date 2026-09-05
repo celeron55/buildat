@@ -23,7 +23,7 @@ magic.renderer:SetViewport(0, viewport)
 -- Add some text
 local title_text = magic.ui.root:CreateChild("Text")
 title_text:SetText("geometry2/init.lua")
-title_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
+title_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 15)
 title_text.horizontalAlignment = magic.HA_CENTER
 title_text.verticalAlignment = magic.VA_CENTER
 title_text:SetPosition(0, magic.ui.root.height*(-0.33))

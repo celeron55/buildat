@@ -641,8 +641,13 @@ void UI::SetFontOversampling(int oversampling)
 
 void UI::SetScale(float scale)
 {
-    uiScale_ = Max(scale, M_EPSILON);
-    ResizeRootElement();
+    scale = Max(scale, M_EPSILON);
+    if (scale != uiScale_)
+    {
+        uiScale_ = scale;
+        ReleaseFontFaces();
+        ResizeRootElement();
+    }
 }
 
 void UI::SetWidth(float width)
