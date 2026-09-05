@@ -18,6 +18,7 @@ namespace lua_bindings
 	namespace replicate
 	{
 		void on_node_created(lua_State *L, uint node_id);
+		void on_node_removed(lua_State *L, uint node_id);
 		void set_scene(lua_State *L, magic::Scene *scene);
 	}
 }

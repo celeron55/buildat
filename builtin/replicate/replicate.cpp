@@ -253,6 +253,8 @@ struct Module: public interface::Module, public replicate::Interface
 				magic::VectorBuffer buf;
 				buf.WriteNetID(node_id);
 				send_to_peer(peer, "replicate:remove_node", buf);
+				scene_state.nodeStates_.Erase(node_id);
+				scene_state.dirtyNodes_.Erase(node_id);
 			} else {
 				sync_existing_node(peer, n, node_state, nodes_to_process,
 						scene, scene_state);

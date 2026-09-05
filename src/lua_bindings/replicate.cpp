@@ -15,6 +15,12 @@ void on_node_created(lua_State *L, uint node_id)
 			(uint32_t)node_id);
 }
 
+void on_node_removed(lua_State *L, uint node_id)
+{
+	luabind::call_function<void>(L, "__buildat_replicate_on_node_removed",
+			(uint32_t)node_id);
+}
+
 void set_scene(lua_State *L, magic::Scene *scene)
 {
 	tolua_pushusertype(L, scene, "Scene");
