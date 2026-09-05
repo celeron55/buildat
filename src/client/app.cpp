@@ -56,6 +56,10 @@ namespace magic = Urho3D;
 
 // Auto UI scale: min(window w,h) / this. Lua/config/CLI overrides replace it.
 static const float UI_REF_SHORT = 1080.f;
+// Snap to 1x, 2x, ... when close, so 1px lines stay on-pixel.
+// Under: maximized window chrome (taskbar, title). Over: 16:10 like 1200p.
+static const float UI_SNAP_UNDER = 0.08f;
+static const float UI_SNAP_OVER = 0.12f;
 
 extern client::Config g_client_config;
 extern bool g_sigint_received;
@@ -470,6 +474,13 @@ struct CApp: public App, public magic::Application
 				s = (float)short_side / UI_REF_SHORT;
 				if(s < 0.01f)
 					s = 0.01f;
+				else {
+					int n = (int)(s + 0.5f);
+					if(n >= 1 &&
+							s >= (float)n * (1.f - UI_SNAP_UNDER) &&
+							s <= (float)n * (1.f + UI_SNAP_OVER))
+						s = (float)n;
+				}
 			}
 		}
 		ui->SetScale(s);
