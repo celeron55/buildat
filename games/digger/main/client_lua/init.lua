@@ -231,20 +231,20 @@ do
 	title_text:SetText("digger/init.lua")
 	title_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
 	title_text.horizontalAlignment = magic.HA_CENTER
-	title_text.verticalAlignment = magic.VA_CENTER
-	title_text:SetPosition(0, -magic.ui.root.height/2 + 20)
+	title_text.verticalAlignment = magic.VA_TOP
+	title_text:SetPosition(0, 20)
 
 	misc_text:SetText("")
 	misc_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
 	misc_text.horizontalAlignment = magic.HA_CENTER
-	misc_text.verticalAlignment = magic.VA_CENTER
-	misc_text:SetPosition(0, -magic.ui.root.height/2 + 40)
+	misc_text.verticalAlignment = magic.VA_TOP
+	misc_text:SetPosition(0, 40)
 
 	worldgen_text:SetText("")
 	worldgen_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 15)
 	worldgen_text.horizontalAlignment = magic.HA_CENTER
-	worldgen_text.verticalAlignment = magic.VA_CENTER
-	worldgen_text:SetPosition(0, -magic.ui.root.height/2 + 60)
+	worldgen_text.verticalAlignment = magic.VA_TOP
+	worldgen_text:SetPosition(0, 60)
 
 	wait_text:SetText("Generating terrain...")
 	wait_text:SetFont(magic.cache:GetResource("Font", "Fonts/Anonymous Pro.ttf"), 24)
