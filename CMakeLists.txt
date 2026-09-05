@@ -13,16 +13,29 @@ set(BUILD_CLIENT TRUE CACHE BOOL "Build client")
 set(DEBUG_LOG_TIMING FALSE CACHE BOOL "Output log messages of interesting but floody time measurements")
 
 #
-# Urho3D dependency
+# Urho3D dependency (bundled in 3rdparty/Urho3D)
 #
 
-set(URHO3D_HOME $ENV{URHO3D_HOME})
+set(URHO3D_BUNDLED_HOME "${CMAKE_SOURCE_DIR}/3rdparty/Urho3D")
+if(NOT URHO3D_HOME)
+	if(DEFINED ENV{URHO3D_HOME} AND NOT "$ENV{URHO3D_HOME}" STREQUAL "")
+		set(URHO3D_HOME "$ENV{URHO3D_HOME}")
+	else()
+		set(URHO3D_HOME "${URHO3D_BUNDLED_HOME}")
+	endif()
+endif()
 message(STATUS "URHO3D_HOME=\"${URHO3D_HOME}\"")
-if("${URHO3D_HOME}" STREQUAL "")
-	message(FATAL_ERROR "You need to set the URHO3D_HOME environment variable.")
+if(NOT EXISTS "${URHO3D_HOME}/Source/CMakeLists.txt")
+	message(FATAL_ERROR "Urho3D not found at URHO3D_HOME=${URHO3D_HOME}")
 endif()
 
-set(CMAKE_MODULE_PATH ${URHO3D_HOME}/Source/CMake/Modules PATH "Path to Urho3D-specific CMake modules")
+# SHARED is required for the module interface. Set before Urho3D-CMake-common.
+set(URHO3D_LIB_TYPE SHARED CACHE STRING "Urho3D library type (SHARED required by Buildat modules)")
+set(URHO3D_LUA TRUE CACHE BOOL "Enable Urho3D Lua")
+set(URHO3D_SAFE_LUA TRUE CACHE BOOL "Enable Urho3D Lua safety checks")
+set(URHO3D_ANGELSCRIPT FALSE CACHE BOOL "Enable Urho3D AngelScript")
+
+set(CMAKE_MODULE_PATH "${URHO3D_HOME}/Source/CMake/Modules")
 
 if(MINGW)
 	# Urho3D Does some stupid things when MinGW is set, messing up our
@@ -34,9 +47,66 @@ else()
 	include(Urho3D-CMake-common)
 endif()
 
+# Build the in-tree engine as part of this project.
+get_filename_component(URHO3D_HOME_ABS "${URHO3D_HOME}" ABSOLUTE)
+get_filename_component(URHO3D_BUNDLED_HOME_ABS "${URHO3D_BUNDLED_HOME}" ABSOLUTE)
+if(URHO3D_HOME_ABS STREQUAL URHO3D_BUNDLED_HOME_ABS)
+	if(NOT CMAKE_BUILD_TYPE)
+		set(CMAKE_BUILD_TYPE Debug)
+	endif()
+	file(MAKE_DIRECTORY "${URHO3D_HOME}/Build")
+	set(URHO3D_BUNDLE_CMAKE_ARGS
+		-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+		-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+		-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+		-DURHO3D_LIB_TYPE=${URHO3D_LIB_TYPE}
+		-DURHO3D_LUA=${URHO3D_LUA}
+		-DURHO3D_SAFE_LUA=${URHO3D_SAFE_LUA}
+		-DURHO3D_LUAJIT=${URHO3D_LUAJIT}
+		-DURHO3D_ANGELSCRIPT=${URHO3D_ANGELSCRIPT}
+		-DURHO3D_SAMPLES=FALSE
+		-DURHO3D_TOOLS=FALSE
+		-DURHO3D_EXTRAS=FALSE
+		-DURHO3D_DOCS=FALSE
+		-DURHO3D_64BIT=${URHO3D_64BIT}
+	)
+	execute_process(
+		COMMAND ${CMAKE_COMMAND} ${URHO3D_BUNDLE_CMAKE_ARGS} "${URHO3D_HOME}/Source"
+		WORKING_DIRECTORY "${URHO3D_HOME}/Build"
+		RESULT_VARIABLE URHO3D_CONFIGURE_RESULT
+	)
+	if(NOT URHO3D_CONFIGURE_RESULT EQUAL 0)
+		message(FATAL_ERROR "Failed to configure bundled Urho3D")
+	endif()
+	if(WIN32)
+		set(URHO3D_LIBRARY_FILE "${URHO3D_HOME}/Bin/Urho3D.dll")
+	else()
+		set(URHO3D_LIBRARY_FILE "${URHO3D_HOME}/Lib/libUrho3D${CMAKE_SHARED_LIBRARY_SUFFIX}")
+	endif()
+	add_custom_target(urho3d_build
+		COMMAND ${CMAKE_COMMAND} --build "${URHO3D_HOME}/Build"
+		WORKING_DIRECTORY "${URHO3D_HOME}/Build"
+		COMMENT "Building bundled Urho3D"
+		VERBATIM
+	)
+	if(NOT TARGET Urho3D)
+		add_library(Urho3D SHARED IMPORTED GLOBAL)
+		set_target_properties(Urho3D PROPERTIES
+			IMPORTED_LOCATION "${URHO3D_LIBRARY_FILE}")
+		if(WIN32)
+			set_target_properties(Urho3D PROPERTIES
+				IMPORTED_IMPLIB "${URHO3D_HOME}/Lib/libUrho3D.dll.a")
+		endif()
+	endif()
+endif()
+
 find_package(Urho3D REQUIRED)
 # SYSTEM gets rid of annoying warnings that we're not going to fix
 include_directories(SYSTEM ${URHO3D_INCLUDE_DIRS})
+if(NOT WIN32)
+	set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+	set(CMAKE_INSTALL_RPATH "\$ORIGIN/../lib;${URHO3D_HOME}/Lib")
+endif()
 
 # Urho3D's Tolua++
 include_directories("${URHO3D_HOME}/Source/ThirdParty/toluapp/include")
@@ -233,6 +303,15 @@ if(BUILD_SERVER)
 		target_link_libraries(${SERVER_EXE_NAME} dl)
 	endif()
 endif(BUILD_SERVER)
+
+if(TARGET urho3d_build)
+	if(BUILD_CLIENT)
+		add_dependencies(${CLIENT_EXE_NAME} urho3d_build)
+	endif()
+	if(BUILD_SERVER)
+		add_dependencies(${SERVER_EXE_NAME} urho3d_build)
+	endif()
+endif()
 
 #
 # Installation

@@ -1,0 +1,28 @@
+celeron55/Urho3D 21088f5149bd45997f4874ffa0d517f9271ead8b (2014-era fork)
+
+Bundled from https://github.com/celeron55/Urho3D.git
+
+Stripped out:
+- .git
+- Docs
+- SourceAssets
+- Source/Samples
+- Source/Extras
+- Source/Tools
+- Source/Android
+- Source/ThirdParty/Assimp (tools only)
+- Source/ThirdParty/AngelScript (Buildat uses Lua)
+
+Kept:
+- Source/ThirdParty/LuaJIT (optional via -DURHO3D_LUAJIT=TRUE)
+- Source/ThirdParty/MojoShader (D3D)
+- Host cmake launchers for VS/Android/iOS/OSX/MinGW
+- Bin/Data sample media (kept fonts, default UI, MessageBox, Box/Plane/Stone)
+
+Buildat cmake configures this tree with:
+  URHO3D_LIB_TYPE=SHARED URHO3D_LUA=TRUE URHO3D_SAFE_LUA=TRUE
+  URHO3D_SAMPLES=FALSE URHO3D_TOOLS=FALSE URHO3D_EXTRAS=FALSE
+  URHO3D_ANGELSCRIPT=FALSE URHO3D_DOCS=FALSE
+
+Source changes vs the cloned commit:
+- kNet MessageListParser.cpp: size_t initializer uses (size_t)-1 (GCC 15)

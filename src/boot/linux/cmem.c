@@ -98,15 +98,28 @@ void* calloc(size_t nmemb, size_t size)
 
 void* realloc(void *p, size_t size)
 {
+	// realloc(NULL, n) is malloc(n); libGLX does this in its constructor
+	// before buildat_mem_libc_enable().
+	if(p == NULL)
+		return malloc(size);
+	if(size == 0){
+		free(p);
+		return NULL;
+	}
 	if(preinit_owns(p))
 		return preinit_realloc(p, size);
-	if(!r_realloc)
+	if(!r_realloc){
+		fprintf(stderr, "boot/cmem: realloc(%p, %zu) before libc enable\n",
+				p, size);
 		abort();
+	}
 	size_t old_size = malloc_usable_size(p);
 	void *p2 = r_realloc(p, size);
+	if(p2 == NULL)
+		return NULL;
 	if(ENABLE_MEMORY_CLEARING){
 		if(size > old_size)
-			memset(p2 + old_size, REALLOC_MEMORY_PATTERN, size - old_size);
+			memset((char*)p2 + old_size, REALLOC_MEMORY_PATTERN, size - old_size);
 	}
 	return p2;
 }
@@ -182,6 +195,8 @@ static void* preinit_calloc(size_t nmemb, size_t size)
 }
 static void* preinit_realloc(void *p, size_t size)
 {
+	if(p == NULL)
+		return malloc(size);
 	size_t pointer_i = SIZE_MAX;
 	size_t i;
 	for(i=0; i<preinit_pointer_i; i++){

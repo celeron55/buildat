@@ -18,7 +18,7 @@ Buildat TODO
   CMake to RCC++
 - Support Cereal's shared pointer serialization in Lua
 - Automatically fetch and build and patch Urho3D when building buildat
-	- Maybe no
+	- Bundled in 3rdparty/Urho3D and built from the main CMakeLists.txt
 - Precompiled mode
 - Singleplayer UI
 - Show all exceptions and errors on client using ui_utils.show_message_dialog

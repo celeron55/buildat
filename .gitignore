@@ -1,14 +1,12 @@
-*.sw*
+.*
+!.gitignore
 *~
-*.old
-*.tar.gz
+
 session.vim
-session.vim.auto
-*.orig
 
 /build
 /Build
 /cache
 
-/.idea
 /tmp
+/local

@@ -155,6 +155,7 @@ struct ResolveState
 		log_d(MODULE, "Marking \"%s\" to be loaded", cs(name));
 		m_module_load_order.push_back(name);
 		m_promised_modules.insert(name);
+		return true;
 	}
 
 	// Return value: false if nothing can be done anymore
