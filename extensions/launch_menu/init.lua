@@ -11,17 +11,65 @@ local function show_error(message)
 	ui_utils.show_message_dialog(message)
 end
 
+local function format_bytes(n)
+	n = math.floor(tonumber(n) or 0)
+	if n < 1024 then
+		return n.." B"
+	end
+	local kb = n / 1024
+	if kb < 1024 then
+		if kb < 10 then
+			return string.format("%.1f KB", kb)
+		end
+		return math.floor(kb + 0.5).." KB"
+	end
+	local mb = kb / 1024
+	if mb < 10 then
+		return string.format("%.1f MB", mb)
+	end
+	return math.floor(mb + 0.5).." MB"
+end
+
+-- Same min width as the local-game list, so the boot menu is as wide.
+local MENU_BUTTON_WIDTH = 200
+
 local function make_button(parent, label)
 	local button = parent:CreateChild("Button")
 	button:SetStyleAuto()
 	button:SetName("Button")
 	button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
 	button.minHeight = 24
+	button.minWidth = MENU_BUTTON_WIDTH
 	local text = button:CreateChild("Text")
 	text:SetName("ButtonText")
 	text:SetStyleAuto()
 	text.text = label
 	text:SetTextAlignment(HA_CENTER)
+	return button
+end
+
+-- Name + size as separate texts so the size can be smaller and duller.
+-- minWidth is ~30% over the old single-line content width.
+local function make_game_button(parent, name, size)
+	local button = parent:CreateChild("Button")
+	button:SetStyleAuto()
+	button:SetName("Button")
+	button:SetLayout(LM_HORIZONTAL, 8, magic.IntRect(12, 2, 12, 2))
+	button.minHeight = 24
+	button.minWidth = MENU_BUTTON_WIDTH
+	local text = button:CreateChild("Text")
+	text:SetName("ButtonText")
+	text:SetStyleAuto()
+	text.text = name
+	if text.width > 0 then
+		text.fixedWidth = text.width
+	end
+	local size_text = button:CreateChild("Text")
+	size_text:SetStyleAuto()
+	size_text.text = format_bytes(size)
+	size_text:SetFontSize(12)
+	size_text.color = magic.Color(0.5, 0.5, 0.5)
+	size_text:SetTextAlignment(HA_RIGHT)
 	return button
 end
 
@@ -91,6 +139,12 @@ local function show_connect_to_server()
 	magic.SubscribeToEvent(port_edit, "TextFinished",
 	function(self, event_type, event_data)
 		do_connect()
+	end)
+
+	local back_button = make_button(window, "Back")
+	magic.SubscribeToEvent(back_button, "Released",
+	function(self, event_type, event_data)
+		uistack.main:pop(root)
 	end)
 
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
@@ -241,14 +295,21 @@ local function show_local_game()
 		empty:SetStyleAuto()
 		empty.text = "No games found"
 	else
-		for _, name in ipairs(games) do
-			local button = make_button(window, name)
+		for _, game in ipairs(games) do
+			local name = game.name
+			local button = make_game_button(window, name, game.size)
 			magic.SubscribeToEvent(button, "Released",
 			function(self, event_type, event_data)
 				start_local_game(name)
 			end)
 		end
 	end
+
+	local back_button = make_button(window, "Back")
+	magic.SubscribeToEvent(back_button, "Released",
+	function(self, event_type, event_data)
+		uistack.main:pop(root)
+	end)
 
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 		local key = event_data:GetInt("Key")
@@ -266,7 +327,7 @@ function M.boot()
 
 	local window = root:CreateChild("Window")
 	window:SetStyleAuto()
-	window:SetLayout(LM_VERTICAL, 16, magic.IntRect(20, 20, 20, 20))
+	window:SetLayout(LM_VERTICAL, 16, magic.IntRect(10, 20, 10, 20))
 	window:SetAlignment(HA_LEFT, VA_CENTER)
 
 	local logo = window:CreateChild("Sprite")
@@ -289,6 +350,12 @@ function M.boot()
 	magic.SubscribeToEvent(connect_button, "Released",
 	function(self, event_type, event_data)
 		show_connect_to_server()
+	end)
+
+	local exit_button = make_button(window, "Exit")
+	magic.SubscribeToEvent(exit_button, "Released",
+	function(self, event_type, event_data)
+		engine:Exit()
 	end)
 
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)

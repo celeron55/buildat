@@ -116,6 +116,19 @@ bool path_exists(const ss_ &path)
 	return c55fs::PathExists(path);
 }
 
+uint64_t directory_tree_size(const ss_ &path)
+{
+	uint64_t total = 0;
+	for(const Node &n : list_directory(path)){
+		ss_ child = path + "/" + n.name;
+		if(n.is_directory)
+			total += directory_tree_size(child);
+		else
+			total += file_size(child);
+	}
+	return total;
+}
+
 }
 }
 // vim: set noet ts=4 sw=4:
