@@ -488,21 +488,32 @@ struct CState: public State, public interface::Server
 		// Setup Urho3D in RCC++
 
 		sv_<ss_> urho3d_subdirs = {
-			"Audio", "Container", "Core", "Engine", "Graphics", "Input", "IO",
-			"LuaScript", "Math", "Navigation", "Network", "Physics", "Resource",
-			"Scene", "Script", "UI", "Urho2D",
+			"Audio", "Container", "Core", "Engine", "Graphics", "IK", "Input",
+			"IO", "LuaScript", "Math", "Navigation", "Network", "Physics",
+			"Resource", "Scene", "UI", "Urho2D",
 		};
+		ss_ urho3d_path = g_server_config.get<ss_>("urho3d_path");
+		m_compiler->include_directories.push_back(
+				urho3d_path+"/Source/Urho3D");
 		for(const ss_ &subdir : urho3d_subdirs){
 			m_compiler->include_directories.push_back(
-					g_server_config.get<ss_>("urho3d_path")+"/Source/Engine/"+subdir);
+					urho3d_path+"/Source/Urho3D/"+subdir);
 		}
 		m_compiler->include_directories.push_back(
-				g_server_config.get<ss_>("urho3d_path")+"/Build/Engine"); // Urho3D.h
+				urho3d_path+"/Build/include");
+		m_compiler->include_directories.push_back(
+				urho3d_path+"/Build/include/Urho3D");
+		m_compiler->include_directories.push_back(
+				urho3d_path+"/Build/include/Urho3D/ThirdParty");
+		m_compiler->include_directories.push_back(
+				urho3d_path+"/Build/include/Urho3D/ThirdParty/Bullet");
+		m_compiler->include_directories.push_back(
+				urho3d_path+"/Source/ThirdParty/SDL/include");
 		m_compiler->library_directories.push_back(
-				g_server_config.get<ss_>("urho3d_path")+"/Lib");
+				urho3d_path+"/Build/lib");
 		m_compiler->libraries.push_back("-lUrho3D");
 		m_compiler->include_directories.push_back(
-				g_server_config.get<ss_>("urho3d_path")+"/Source/ThirdParty/Bullet/src");
+				urho3d_path+"/Source/ThirdParty/Bullet/src");
 	}
 	~CState()
 	{

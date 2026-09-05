@@ -14,7 +14,7 @@ namespace interface
 	// This can be used for subscribing to Urho3D events as Buildat events
 	struct MagicEventHandler: public magic::Object
 	{
-		OBJECT(MagicEventHandler);
+		URHO3D_OBJECT(MagicEventHandler, magic::Object);
 		static constexpr const char *MODULE = "MagicEventHandler";
 
 		interface::Server *m_server;
@@ -28,7 +28,7 @@ namespace interface
 			m_server(server),
 			m_buildat_event_type(buildat_event_type)
 		{
-			SubscribeToEvent(event_type, HANDLER(MagicEventHandler, on_event));
+			SubscribeToEvent(event_type, URHO3D_HANDLER(MagicEventHandler, on_event));
 		}
 
 		void emit_event(magic::StringHash event_type, magic::VariantMap &event_data)
