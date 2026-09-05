@@ -95,9 +95,9 @@ do
 	local zone_node = scene:CreateChild("Zone")
 	local zone = zone_node:CreateComponent("Zone")
 	zone.boundingBox = magic.BoundingBox(-1000, 1000)
-	zone.ambientColor = magic.Color(0.1, 0.1, 0.1)
+	zone.ambientColor = magic.Color(0.42, 0.48, 0.60)
 	--zone.ambientColor = magic.Color(0, 0, 0)
-	zone.fogColor = magic.Color(0.6, 0.7, 0.8)
+	zone.fogColor = magic.Color(0.68, 0.76, 0.85)
 	--zone.fogColor = magic.Color(0, 0, 0)
 	zone.fogStart = 10
 	zone.fogEnd = FOG_END
@@ -131,18 +131,8 @@ do
 	local light = node:CreateComponent("Light")
 	light.lightType = magic.LIGHT_DIRECTIONAL
 	light.castShadows = true
-	light.brightness = 0.8
+	light.brightness = 1.2
 	light.color = magic.Color(1.0, 1.0, 0.95)
-
-	---[[
-	local node = scene:CreateChild("DirectionalLight")
-	node.direction = magic.Vector3(0.3, -1.0, -0.4)
-	local light = node:CreateComponent("Light")
-	light.lightType = magic.LIGHT_DIRECTIONAL
-	light.castShadows = true
-	light.brightness = 0.2
-	light.color = magic.Color(0.7, 0.7, 1.0)
-	--]]
 
 	--[[
 	local node = scene:CreateChild("DirectionalLight")
