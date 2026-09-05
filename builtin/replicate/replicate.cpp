@@ -281,7 +281,7 @@ struct Module: public interface::Module, public replicate::Interface
 
 		magic::VectorBuffer buf;
 		buf.WriteNetID(node->GetID());
-		node->WriteInitialDeltaUpdate(buf);
+		node->WriteInitialDeltaUpdate(buf, 0);
 
 		// User variables
 		auto &vars = node->GetVars();
@@ -306,7 +306,7 @@ struct Module: public interface::Module, public replicate::Interface
 			component->AddReplicationState(&component_state);
 			buf.WriteStringHash(component->GetType());
 			buf.WriteNetID(component->GetID());
-			component->WriteInitialDeltaUpdate(buf);
+			component->WriteInitialDeltaUpdate(buf, 0);
 		}
 
 		send_to_peer(peer, "replicate:create_node", buf);
@@ -351,7 +351,7 @@ struct Module: public interface::Module, public replicate::Interface
 				magic::VectorBuffer buf;
 
 				buf.WriteNetID(node->GetID());
-				node->WriteLatestDataUpdate(buf);
+				node->WriteLatestDataUpdate(buf, 0);
 
 				send_to_peer(peer, "replicate:latest_node_data", buf);
 			}
@@ -361,7 +361,7 @@ struct Module: public interface::Module, public replicate::Interface
 				magic::VectorBuffer buf;
 
 				buf.WriteNetID(node->GetID());
-				node->WriteDeltaUpdate(buf, node_state.dirtyAttributes_);
+				node->WriteDeltaUpdate(buf, node_state.dirtyAttributes_, 0);
 
 				// Variables
 				buf.WriteVLE(node_state.dirtyVars_.Size());
@@ -427,7 +427,7 @@ struct Module: public interface::Module, public replicate::Interface
 					magic::VectorBuffer buf;
 
 					buf.WriteNetID(component->GetID());
-					component->WriteLatestDataUpdate(buf);
+					component->WriteLatestDataUpdate(buf, 0);
 
 					send_to_peer(peer, "replicate:latest_component_data", buf);
 				}
@@ -438,7 +438,7 @@ struct Module: public interface::Module, public replicate::Interface
 
 					buf.WriteNetID(component->GetID());
 					component->WriteDeltaUpdate(buf,
-							component_state.dirtyAttributes_);
+							component_state.dirtyAttributes_, 0);
 
 					send_to_peer(peer, "replicate:component_delta_update", buf);
 
@@ -469,7 +469,7 @@ struct Module: public interface::Module, public replicate::Interface
 				buf.WriteNetID(component->GetID());
 				buf.WriteStringHash(component->GetType());
 				buf.WriteNetID(component->GetID());
-				component->WriteInitialDeltaUpdate(buf);
+				component->WriteInitialDeltaUpdate(buf, 0);
 
 				send_to_peer(peer, "replicate:create_component", buf);
 			}
