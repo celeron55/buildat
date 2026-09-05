@@ -44,6 +44,12 @@ extern "C" {
 #include <lauxlib.h>
 }
 #include <signal.h>
+#include <cstdio>
+#include <cstring>
+#ifndef _WIN32
+#include <unistd.h>
+#include <limits.h>
+#endif
 #define MODULE "__app"
 namespace magic = Urho3D;
 
@@ -64,15 +70,110 @@ static bool valid_game_name(const ss_ &name)
 // Survives CApp reboot so disconnect can kill the server we started.
 static interface::process::Handle g_local_server;
 
+static ss_ pidfile_path()
+{
+	return g_client_config.get<ss_>("cache_path")+"/local_server.pid";
+}
+
+static void clear_pidfile()
+{
+	remove(pidfile_path().c_str());
+}
+
+static void write_pidfile()
+{
+#ifndef _WIN32
+	if(!g_local_server.valid())
+		return;
+	FILE *f = fopen(pidfile_path().c_str(), "w");
+	if(!f)
+		return;
+	fprintf(f, "%ld\n", (long)g_local_server.impl);
+	fclose(f);
+#endif
+}
+
+#ifndef _WIN32
+static bool exe_is_buildat_server(long pid)
+{
+	char link[64];
+	snprintf(link, sizeof link, "/proc/%ld/exe", pid);
+	char buf[PATH_MAX];
+	ssize_t n = readlink(link, buf, sizeof buf - 1);
+	if(n < 0)
+		return false;
+	buf[n] = 0;
+	const char *base = strrchr(buf, '/');
+	base = base ? base + 1 : buf;
+	return strcmp(base, "buildat_server") == 0;
+}
+#endif
+
+static void adopt_pidfile()
+{
+#ifndef _WIN32
+	if(g_local_server.valid() && interface::process::is_running(g_local_server))
+		return;
+	g_local_server.impl = 0;
+	FILE *f = fopen(pidfile_path().c_str(), "r");
+	if(!f)
+		return;
+	long pid = 0;
+	if(fscanf(f, "%ld", &pid) != 1 || pid <= 0){
+		fclose(f);
+		clear_pidfile();
+		return;
+	}
+	fclose(f);
+	if(!exe_is_buildat_server(pid)){
+		clear_pidfile();
+		return;
+	}
+	g_local_server.impl = pid;
+	if(!interface::process::is_running(g_local_server)){
+		g_local_server.impl = 0;
+		clear_pidfile();
+		return;
+	}
+	log_i(MODULE, "Adopted leftover local server pid %ld", pid);
+#endif
+}
+
+static void request_stop_local_server()
+{
+	adopt_pidfile();
+	if(!g_local_server.valid())
+		return;
+	if(!interface::process::is_running(g_local_server)){
+		g_local_server.impl = 0;
+		clear_pidfile();
+		return;
+	}
+	log_i(MODULE, "Stopping local server");
+	interface::process::request_terminate(g_local_server);
+}
+
+static void force_kill_local_server()
+{
+	adopt_pidfile();
+	if(!g_local_server.valid())
+		return;
+	log_w(MODULE, "Force-killing local server");
+	interface::process::kill_force(g_local_server);
+	clear_pidfile();
+}
+
+// Quit path: SIGTERM, wait 10s, SIGKILL. No dialog (window is closing).
 static void stop_local_server()
 {
+	adopt_pidfile();
 	if(!g_local_server.valid())
 		return;
 	log_i(MODULE, "Stopping local server");
 	interface::process::terminate(g_local_server);
-	for(int i = 0; i < 200; i++){
-		if(!interface::process::is_running(g_local_server) &&
-				!interface::probe_connect("127.0.0.1", "20000"))
+	clear_pidfile();
+	for(int i = 0; i < 40; i++){
+		if(!interface::probe_connect("127.0.0.1", "20000"))
 			return;
 		interface::os::sleep_us(50000);
 	}
@@ -224,7 +325,8 @@ struct CApp: public App, public magic::Application
 
 	~CApp()
 	{
-		stop_local_server();
+		if(!m_reboot_requested)
+			stop_local_server();
 	}
 
 	void set_state(sp_<client::State> state)
@@ -241,6 +343,10 @@ struct CApp: public App, public magic::Application
 	void shutdown()
 	{
 		log_v(MODULE, "shutdown()");
+		if(m_reboot_requested)
+			request_stop_local_server();
+		else
+			stop_local_server();
 
 		// Save window position
 		magic::Graphics *magic_graphics = GetSubsystem<magic::Graphics>();
@@ -375,6 +481,8 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(list_games)
 		DEF_BUILDAT_FUNC(start_local_server)
 		DEF_BUILDAT_FUNC(stop_local_server)
+		DEF_BUILDAT_FUNC(request_stop_local_server)
+		DEF_BUILDAT_FUNC(force_kill_local_server)
 		DEF_BUILDAT_FUNC(local_server_ready)
 		DEF_BUILDAT_FUNC(local_server_running)
 		DEF_BUILDAT_FUNC(send_packet);
@@ -586,7 +694,14 @@ struct CApp: public App, public magic::Application
 			return 2;
 		}
 
-		stop_local_server();
+		adopt_pidfile();
+		if(interface::process::is_running(g_local_server)){
+			lua_pushboolean(L, false);
+			lua_pushstring(L, "Previous local server is still running");
+			return 2;
+		}
+		g_local_server.impl = 0;
+		clear_pidfile();
 
 		ss_ server_path = interface::os::get_sibling_exe_path("buildat_server");
 		if(!interface::fs::path_exists(server_path)){
@@ -603,6 +718,7 @@ struct CApp: public App, public magic::Application
 			lua_pushstring(L, "Failed to start server");
 			return 2;
 		}
+		write_pidfile();
 		lua_pushboolean(L, true);
 		lua_pushnil(L);
 		return 2;
@@ -615,9 +731,24 @@ struct CApp: public App, public magic::Application
 		return 0;
 	}
 
+	// request_stop_local_server()
+	static int l_request_stop_local_server(lua_State *L)
+	{
+		request_stop_local_server();
+		return 0;
+	}
+
+	// force_kill_local_server()
+	static int l_force_kill_local_server(lua_State *L)
+	{
+		force_kill_local_server();
+		return 0;
+	}
+
 	// local_server_ready() -> bool
 	static int l_local_server_ready(lua_State *L)
 	{
+		adopt_pidfile();
 		if(!interface::process::is_running(g_local_server)){
 			lua_pushboolean(L, false);
 			return 1;
@@ -629,6 +760,7 @@ struct CApp: public App, public magic::Application
 	// local_server_running() -> bool
 	static int l_local_server_running(lua_State *L)
 	{
+		adopt_pidfile();
 		lua_pushboolean(L, interface::process::is_running(g_local_server));
 		return 1;
 	}
@@ -640,14 +772,10 @@ struct CApp: public App, public magic::Application
 		CApp *self = (CApp*)lua_touserdata(L, -1);
 		lua_pop(L, 1);
 
-		stop_local_server();
-
 		if(g_client_config.get<bool>("boot_to_menu")){
-			// If menu, reboot client into menu
 			self->m_reboot_requested = true;
 			self->shutdown();
 		} else {
-			// If no menu, shutdown client
 			self->shutdown();
 		}
 
