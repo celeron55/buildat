@@ -15,11 +15,15 @@ buildat.extension_path    = __buildat_extension_path
 buildat.get_time_us       = __buildat_get_time_us
 buildat.set_ui_scale      = __buildat_set_ui_scale
 buildat.get_ui_scale      = __buildat_get_ui_scale
+buildat.font_sans         = "Fonts/Overpass-Regular.ttf"
+buildat.font_mono         = "Fonts/OverpassMono-Regular.ttf"
 buildat.SpatialUpdateQueue = __buildat_SpatialUpdateQueue
 
 buildat.safe.disconnect    = __buildat_disconnect
 buildat.safe.set_ui_scale  = __buildat_set_ui_scale
 buildat.safe.get_ui_scale  = __buildat_get_ui_scale
+buildat.safe.font_sans     = buildat.font_sans
+buildat.safe.font_mono     = buildat.font_mono
 buildat.safe.get_time_us   = __buildat_get_time_us
 buildat.safe.profiler_block_begin = __buildat_profiler_block_begin
 buildat.safe.profiler_block_end   = __buildat_profiler_block_end

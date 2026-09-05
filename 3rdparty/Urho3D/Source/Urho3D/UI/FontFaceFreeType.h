@@ -65,6 +65,8 @@ private:
     bool subpixel_;
     /// Oversampling level.
     int oversampling_;
+    /// UI scale used when rasterizing this face (glyphs are stored in virtual units).
+    float uiScale_;
     /// Ascender.
     float ascender_;
     /// Has mutable glyph.

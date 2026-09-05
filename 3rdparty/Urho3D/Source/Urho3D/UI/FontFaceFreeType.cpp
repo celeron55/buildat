@@ -28,6 +28,7 @@
 #include "../IO/FileSystem.h"
 #include "../IO/Log.h"
 #include "../IO/MemoryBuffer.h"
+#include "../Math/MathDefs.h"
 #include "../UI/Font.h"
 #include "../UI/FontFaceFreeType.h"
 #include "../UI/UI.h"
@@ -80,6 +81,7 @@ FontFaceFreeType::FontFaceFreeType(Font* font) :
     FontFace(font),
     face_(0),
     loadMode_(FT_LOAD_DEFAULT),
+    uiScale_(1.0f),
     hasMutableGlyph_(false)
 {
 }
@@ -110,7 +112,12 @@ bool FontFaceFreeType::Load(const unsigned char* fontData, unsigned fontDataSize
     const FontHintLevel hintLevel = ui->GetFontHintLevel();
     const float subpixelThreshold = ui->GetFontSubpixelThreshold();
 
-    subpixel_ = (hintLevel <= FONT_HINT_LEVEL_LIGHT) && (pointSize <= subpixelThreshold);
+    uiScale_ = ui->GetScale();
+    if (uiScale_ < M_EPSILON)
+        uiScale_ = 1.0f;
+    const float rasterSize = pointSize * uiScale_;
+
+    subpixel_ = (hintLevel <= FONT_HINT_LEVEL_LIGHT) && (rasterSize <= subpixelThreshold);
     oversampling_ = subpixel_ ? ui->GetFontOversampling() : 1;
 
     FT_Face face;
@@ -135,7 +142,7 @@ bool FontFaceFreeType::Load(const unsigned char* fontData, unsigned fontDataSize
         URHO3D_LOGERROR("Could not create font face");
         return false;
     }
-    error = FT_Set_Char_Size(face, 0, pointSize * 64, oversampling_ * FONT_DPI, FONT_DPI);
+    error = FT_Set_Char_Size(face, 0, rasterSize * 64, oversampling_ * FONT_DPI, FONT_DPI);
     if (error)
     {
         FT_Done_Face(face);
@@ -195,6 +202,10 @@ bool FontFaceFreeType::Load(const unsigned char* fontData, unsigned fontDataSize
         descender = Max(descender, os2Info->sTypoDescender * face->size->metrics.y_ppem / unitsPerEm);
         rowHeight_ = Max(rowHeight_, ascender_ + descender);
     }
+
+    // Layout metrics are in virtual (unscaled) units; bitmaps stay at raster size.
+    ascender_ /= uiScale_;
+    rowHeight_ /= uiScale_;
 
     int textureWidth = maxTextureSize;
     int textureHeight = maxTextureSize;
@@ -270,7 +281,7 @@ bool FontFaceFreeType::Load(const unsigned char* fontData, unsigned fontDataSize
                     deserializer.Seek((unsigned)(deserializer.GetPosition() + 3 * sizeof(unsigned short)));
 
                     // x_scale is a 16.16 fixed-point value that converts font units -> 26.6 pixels (oversampled!)
-                    float xScale = face->size->metrics.x_scale / float(1 << 22) / oversampling_;
+                    float xScale = face->size->metrics.x_scale / float(1 << 22) / oversampling_ / uiScale_;
 
                     for (unsigned j = 0; j < numKerningPairs; ++j)
                     {
@@ -440,7 +451,7 @@ bool FontFaceFreeType::LoadCharGlyph(unsigned charCode, Image* image)
         fontGlyph.width_ = slot->bitmap.width + oversampling_ - 1;
         fontGlyph.height_ = slot->bitmap.rows;
         fontGlyph.offsetX_ = slot->bitmap_left - (oversampling_ - 1) / 2.0f;
-        fontGlyph.offsetY_ = floorf(ascender_ + 0.5f) - slot->bitmap_top;
+        fontGlyph.offsetY_ = floorf(ascender_ + 0.5f) - slot->bitmap_top / uiScale_;
 
         if (subpixel_ && slot->linearHoriAdvance)
         {
@@ -456,6 +467,10 @@ bool FontFaceFreeType::LoadCharGlyph(unsigned charCode, Image* image)
         fontGlyph.width_ /= oversampling_;
         fontGlyph.offsetX_ /= oversampling_;
         fontGlyph.advanceX_ /= oversampling_;
+        fontGlyph.width_ /= uiScale_;
+        fontGlyph.height_ /= uiScale_;
+        fontGlyph.offsetX_ /= uiScale_;
+        fontGlyph.advanceX_ /= uiScale_;
     }
 
     int x = 0, y = 0;

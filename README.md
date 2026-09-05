@@ -1,3 +1,5 @@
+![Buildat](client/data/buildat_logo.png)
+
 Buildat
 =======
 A small engine for networked 3D games.
