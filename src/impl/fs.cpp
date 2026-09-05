@@ -3,6 +3,7 @@
 #include "interface/fs.h"
 #include <c55/filesys.h>
 #include <c55/string_util.h>
+#include <fstream>
 #ifdef _WIN32
 	#include "ports/windows_minimal.h"
 #else
@@ -114,6 +115,20 @@ ss_ get_absolute_path(const ss_ &path0)
 bool path_exists(const ss_ &path)
 {
 	return c55fs::PathExists(path);
+}
+
+bool copy_file(const ss_ &from, const ss_ &to)
+{
+	if(from == to)
+		return true;
+	std::ifstream in(from.c_str(), std::ios::binary);
+	if(!in)
+		return false;
+	std::ofstream out(to.c_str(), std::ios::binary);
+	if(!out)
+		return false;
+	out << in.rdbuf();
+	return (bool)out;
 }
 
 uint64_t directory_tree_size(const ss_ &path)
