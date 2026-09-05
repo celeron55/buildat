@@ -45,8 +45,17 @@ server or the client, respectively.
 Optional: `-DURHO3D_LUAJIT=TRUE` builds the bundled LuaJIT instead of Lua.
 `URHO3D_HOME` still overrides the bundled tree if you need an external build.
 
-Run Buildat
--------------
+Play
+----
+
+    $ $wherever_buildat_is/Build/bin/buildat
+
+Local game or connect to a server.
+
+Server and client
+-----------------
+
+For development or hosting, run the two binaries separately:
 
 Terminal 1:
 

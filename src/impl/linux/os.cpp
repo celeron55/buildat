@@ -30,6 +30,11 @@ ss_ get_current_exe_path()
 	return buf;
 }
 
+ss_ get_sibling_exe_path(const ss_ &name)
+{
+	return interface::fs::strip_file_name(get_current_exe_path())+"/"+name;
+}
+
 }
 }
 // vim: set noet ts=4 sw=4:

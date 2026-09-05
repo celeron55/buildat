@@ -81,5 +81,65 @@ int shell_exec(const ss_ &command, const ExecOptions &opts)
 	return exit_code;
 }
 
+bool Handle::valid() const
+{
+	return impl != 0;
+}
+
+Handle start(const ss_ &path, const sv_<ss_> &args)
+{
+	Handle h;
+	ss_ cmd = "\"" + path + "\"";
+	for(const ss_ &a : args)
+		cmd += " \"" + a + "\"";
+
+	STARTUPINFO si;
+	PROCESS_INFORMATION pi;
+	memset(&si, 0, sizeof(si));
+	si.cb = sizeof(si);
+	memset(&pi, 0, sizeof(pi));
+
+	char command_c[50000];
+	snprintf(command_c, 50000, "%s", cs(cmd));
+
+	if(!CreateProcess(
+			path.c_str(),
+			command_c,
+			NULL, NULL, false, 0,
+			NULL, NULL, &si, &pi)){
+		log_w(MODULE, "start(\"%s\"): CreateProcess failed: %s",
+				cs(path), cs(format_last_error()));
+		return h;
+	}
+	CloseHandle(pi.hThread);
+	h.impl = (intptr_t)pi.hProcess;
+	log_i(MODULE, "Started process: %s", cs(path));
+	return h;
+}
+
+void terminate(Handle &h)
+{
+	if(!h.valid())
+		return;
+	HANDLE process = (HANDLE)h.impl;
+	TerminateProcess(process, 1);
+	WaitForSingleObject(process, 5000);
+	if(WaitForSingleObject(process, 0) != WAIT_OBJECT_0)
+		TerminateProcess(process, 1);
+	WaitForSingleObject(process, INFINITE);
+	CloseHandle(process);
+	h.impl = 0;
+}
+
+bool is_running(const Handle &h)
+{
+	if(!h.valid())
+		return false;
+	DWORD code = 0;
+	if(!GetExitCodeProcess((HANDLE)h.impl, &code))
+		return false;
+	return code == STILL_ACTIVE;
+}
+
 }
 }

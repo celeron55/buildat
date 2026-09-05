@@ -4,6 +4,11 @@
 local log = buildat.Logger("__client/api")
 
 buildat.connect_server    = __buildat_connect_server
+buildat.list_games        = __buildat_list_games
+buildat.start_local_server = __buildat_start_local_server
+buildat.stop_local_server = __buildat_stop_local_server
+buildat.local_server_ready = __buildat_local_server_ready
+buildat.local_server_running = __buildat_local_server_running
 buildat.extension_path    = __buildat_extension_path
 buildat.get_time_us       = __buildat_get_time_us
 buildat.SpatialUpdateQueue = __buildat_SpatialUpdateQueue

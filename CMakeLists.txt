@@ -275,6 +275,9 @@ if(BUILD_CLIENT)
 	#		${LUA_LIBRARY}
 	#	)
 	#endif()
+
+	add_executable(buildat src/launcher/main.cpp)
+	add_dependencies(buildat ${CLIENT_EXE_NAME})
 endif(BUILD_CLIENT)
 
 #
@@ -343,7 +346,7 @@ if(WIN32)
 	install(FILES "${COMPILER_USR_PATH}/bin/libstdc++-6.dll" DESTINATION "${DST_BIN}")
 
 	if(BUILD_CLIENT)
-		install(TARGETS ${CLIENT_EXE_NAME} DESTINATION "${DST_BIN}")
+		install(TARGETS ${CLIENT_EXE_NAME} buildat DESTINATION "${DST_BIN}")
 		install(DIRECTORY "${CMAKE_SOURCE_DIR}/client" DESTINATION "${DST_SHARE}")
 		install(DIRECTORY "${CMAKE_SOURCE_DIR}/extensions" DESTINATION "${DST_SHARE}")
 	endif()

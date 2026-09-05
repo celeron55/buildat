@@ -1,6 +1,7 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/os.h"
+#include "interface/fs.h"
 #include "core/log.h"
 #include <sys/time.h>
 #include "ports/windows_minimal.h"
@@ -55,6 +56,11 @@ ss_ get_current_exe_path()
 		}
 	}
 	throw Exception("get_current_exe_path(): .exe module not found");
+}
+
+ss_ get_sibling_exe_path(const ss_ &name)
+{
+	return interface::fs::strip_file_name(get_current_exe_path())+"/"+name+".exe";
 }
 
 }
