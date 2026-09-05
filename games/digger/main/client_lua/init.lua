@@ -157,9 +157,8 @@ end
 local player_node = scene:CreateChild("Player")
 local player_shape = player_node:CreateComponent("CollisionShape")
 do
-	--player_node.position = magic.Vector3(0, 30, 0)
-	--player_node.position = magic.Vector3(55, 30, 40)
-	player_node.position = magic.Vector3(-5, 1, 257)
+	-- Placeholder until main:spawn arrives with terrain height at this x,z
+	player_node.position = magic.Vector3(-5, 80, 257)
 	player_node.direction = magic.Vector3(-1, 0, 0.4)
 	---[[
 	local body = player_node:CreateComponent("RigidBody")
@@ -495,6 +494,20 @@ voxelworld.sub_ready(function()
 		end
 		local name = node:GetName()
 	end)
+end)
+
+buildat.sub_packet("main:spawn", function(data)
+	local v = cereal.binary_input(data, {"object",
+		{"x", "double"},
+		{"y", "double"},
+		{"z", "double"},
+	})
+	log:info("spawn ("..v.x..", "..v.y..", "..v.z..")")
+	player_node.position = magic.Vector3(v.x, v.y, v.z)
+	local body = player_node:GetComponent("RigidBody")
+	if body then
+		body.linearVelocity = magic.Vector3(0, 0, 0)
+	end
 end)
 
 buildat.sub_packet("main:worldgen_queue_size", function(data)

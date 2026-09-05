@@ -26,6 +26,7 @@
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/unordered_map.hpp>
 #include <cereal/types/vector.hpp>
+#include <sstream>
 #define MODULE "main"
 
 namespace magic = Urho3D;
@@ -179,6 +180,15 @@ struct Module: public interface::Module
 	interface::Server *m_server;
 
 	SceneReference m_main_scene;
+
+	static const int SPAWN_X = -5;
+	static const int SPAWN_Z = 257;
+	static const int SPAWN_Y_MAX = 127;
+	static const int SPAWN_Y_MIN = -64;
+	static constexpr float PLAYER_HEIGHT = 1.7f;
+
+	bool m_spawn_ready = false;
+	float m_spawn_y = 0;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -476,6 +486,73 @@ struct Module: public interface::Module
 		}
 	}
 
+	void send_spawn(network::PeerInfo::Id peer)
+	{
+		if(!m_spawn_ready)
+			return;
+		std::ostringstream os(std::ios::binary);
+		cereal::PortableBinaryOutputArchive ar(os);
+		double x = SPAWN_X;
+		double y = m_spawn_y;
+		double z = SPAWN_Z;
+		ar(x, y, z);
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "main:spawn", os.str());
+		});
+		log_v(MODULE, "Sent spawn (%.2f, %.2f, %.2f) to peer %zu",
+				x, y, z, peer);
+	}
+
+	// Terrain ids: 2 rock, 3 dirt, 4 grass. Skip air (1), trees/leaves (5, 6).
+	void try_resolve_spawn()
+	{
+		if(m_spawn_ready)
+			return;
+		int surface_y = SPAWN_Y_MIN - 1;
+		bool column_ready = true;
+		voxelworld::access(m_server, m_main_scene,
+				[&](voxelworld::Instance *world)
+		{
+			for(int y = SPAWN_Y_MAX; y >= SPAWN_Y_MIN; y--){
+				VoxelInstance v = world->get_voxel(
+						pv::Vector3DInt32(SPAWN_X, y, SPAWN_Z), true);
+				auto id = v.get_id();
+				if(id == interface::VOXELTYPEID_UNDEFINED){
+					column_ready = false;
+					return;
+				}
+				if(id == 2 || id == 3 || id == 4){
+					surface_y = y;
+					return;
+				}
+			}
+		});
+		if(!column_ready)
+			return;
+		if(surface_y < SPAWN_Y_MIN){
+			log_w(MODULE, "Spawn column (%i, *, %i) has no terrain",
+					SPAWN_X, SPAWN_Z);
+			return;
+		}
+		// Voxel n is a 1x1x1 cube centered at n; stand on its top face.
+		m_spawn_y = (float)surface_y + 0.5f + PLAYER_HEIGHT / 2.0f + 0.05f;
+		m_spawn_ready = true;
+		log_i(MODULE, "Spawn at (%i, %.2f, %i) (terrain y=%i)",
+				SPAWN_X, m_spawn_y, SPAWN_Z, surface_y);
+
+		network::access(m_server, [&](network::Interface *inetwork){
+			std::ostringstream os(std::ios::binary);
+			cereal::PortableBinaryOutputArchive ar(os);
+			double x = SPAWN_X;
+			double y = m_spawn_y;
+			double z = SPAWN_Z;
+			ar(x, y, z);
+			ss_ data = os.str();
+			for(auto peer : inetwork->list_peers())
+				inetwork->send(peer, "main:spawn", data);
+		});
+	}
+
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
 		replicate::access(m_server, [&](replicate::Interface *ireplicate){
@@ -485,6 +562,7 @@ struct Module: public interface::Module
 			inetwork->send(event.recipient, "core:run_script",
 					"buildat.run_script_file(\"main/init.lua\")");
 		});
+		send_spawn(event.recipient);
 	}
 
 	void on_place_voxel(const network::Packet &packet)
@@ -533,6 +611,8 @@ struct Module: public interface::Module
 						itos(event.queue_size));
 			}
 		});
+		if(event.queue_size == 0)
+			try_resolve_spawn();
 	}
 };
 
