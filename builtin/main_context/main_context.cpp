@@ -175,7 +175,7 @@ struct Module: public interface::Module, public main_context::Interface
 		Profiler *p = m_context->GetSubsystem<Profiler>();
 		if(p && profiler_last_print_us < current_us - 10000000){
 			profiler_last_print_us = current_us;
-			String s = p->GetData(false, false, UINT_MAX);
+			String s = p->PrintData(false, false, UINT_MAX);
 			p->BeginInterval();
 			log_v(MODULE, "Urho3D profiler:\n%s", s.CString());
 		}
