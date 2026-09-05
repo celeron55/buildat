@@ -264,6 +264,7 @@ struct CApp: public App, public magic::Application
 		m_thread_pool->start(4); // TODO: Configurable
 
 		sv_<ss_> resource_paths = {
+			g_client_config.get<ss_>("share_path")+"/client/data",
 			g_client_config.get<ss_>("cache_path")+"/tmp",
 			g_client_config.get<ss_>("share_path")+"/extensions", // Could be unsafe
 			g_client_config.get<ss_>("urho3d_path")+"/bin/CoreData",
