@@ -258,6 +258,15 @@ return {
 	"SOUND_MUSIC",
 	"SOUND_MASTER",
 
+	-- AutoRemoveMode
+	"REMOVE_DISABLED",
+	"REMOVE_COMPONENT",
+	"REMOVE_NODE",
+
+	-- TrailType
+	"TT_FACE_CAMERA",
+	"TT_BONE",
+
 	-- StencilOp
 	"OP_KEEP",
 	"OP_ZERO",

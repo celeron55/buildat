@@ -77,5 +77,13 @@ return {
 		BodyB = {variant = "Ptr", safe = "RigidBody"},
 		Contacts = {variant = "Buffer", safe = "VectorBuffer", get_type = "Buffer"},
 	},
+	PhysicsPostStep = {
+		TimeStep = {variant = "Float", safe = "number"},
+	},
+	SoundFinished = {
+		Node = {variant = "Ptr", safe = "Node"},
+		SoundSource = {variant = "Ptr", safe = "SoundSource"},
+		Sound = {variant = "Ptr", safe = "Sound"},
+	},
 }
 -- vim: set noet ts=4 sw=4:

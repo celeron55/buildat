@@ -242,6 +242,43 @@ function M.define(dst, util)
 		},
 	})
 
+	util.wc("Vector2", {
+		unsafe_constructor = util.wrap_function({"number", "number"},
+		function(x, y)
+			return util.wrap_instance("Vector2", Vector2(x, y))
+		end),
+		instance = {
+			Length = util.self_function(
+					"Length", {"number"}, {"Vector2"}),
+			Normalized = util.wrap_function({"Vector2"},
+				function(self)
+					return util.wrap_instance("Vector2", self:Normalized())
+				end
+			),
+		},
+		instance_meta = {
+			__mul = util.wrap_function({"Vector2", "number"}, function(self, n)
+				return util.wrap_instance("Vector2", self * n)
+			end),
+			__div = util.wrap_function({"Vector2", "number"}, function(self, n)
+				return util.wrap_instance("Vector2", self / n)
+			end),
+			__add = util.wrap_function({"Vector2", "Vector2"}, function(self, other)
+				return util.wrap_instance("Vector2", self + other)
+			end),
+			__sub = util.wrap_function({"Vector2", "Vector2"}, function(self, other)
+				return util.wrap_instance("Vector2", self - other)
+			end),
+			__eq = util.wrap_function({"Vector2", "Vector2"}, function(self, other)
+				return (self == other)
+			end),
+		},
+		properties = {
+			x = util.simple_property("number"),
+			y = util.simple_property("number"),
+		},
+	})
+
 	util.wc("IntVector2", {
 		unsafe_constructor = util.wrap_function({"number", "number"},
 		function(x, y)
@@ -382,6 +419,8 @@ function M.define(dst, util)
 			color = util.simple_property("Color"),
 			range = util.simple_property("number"),
 			fadeDistance = util.simple_property("number"),
+			fov = util.simple_property("number"),
+			specularIntensity = util.simple_property("number"),
 		},
 	})
 
@@ -416,6 +455,8 @@ function M.define(dst, util)
 			nearClip = util.simple_property("number"),
 			farClip = util.simple_property("number"),
 			fov = util.simple_property("number"),
+			orthographic = util.simple_property("boolean"),
+			orthoSize = util.simple_property("number"),
 		},
 	})
 
@@ -434,7 +475,12 @@ function M.define(dst, util)
 			angularFactor = util.simple_property(dst.Vector3),
 			kinematic = util.simple_property("boolean"),
 			linearVelocity = util.simple_property(dst.Vector3),
+			angularVelocity = util.simple_property(dst.Vector3),
 			collisionEventMode = util.simple_property("number"),
+			restitution = util.simple_property("number"),
+			linearDamping = util.simple_property("number"),
+			angularDamping = util.simple_property("number"),
+			useGravity = util.simple_property("boolean"),
 		},
 	})
 
@@ -445,6 +491,14 @@ function M.define(dst, util)
 					"SetBox", {}, {"CollisionShape", "Vector3"}),
 			SetCapsule = util.self_function(
 					"SetCapsule", {}, {"CollisionShape", "number", "number"}),
+			SetSphere = util.self_function(
+					"SetSphere", {}, {"CollisionShape", "number"}),
+			SetStaticPlane = util.self_function(
+					"SetStaticPlane", {}, {"CollisionShape"}),
+			SetCylinder = util.self_function(
+					"SetCylinder", {}, {"CollisionShape", "number", "number"}),
+			SetCone = util.self_function(
+					"SetCone", {}, {"CollisionShape", "number", "number"}),
 		},
 	})
 
@@ -610,6 +664,18 @@ function M.define(dst, util)
 			Pitch = util.self_function("Pitch", {}, {"Node", "number"}),
 			Yaw = util.self_function("Yaw", {}, {"Node", "number"}),
 			Roll = util.self_function("Roll", {}, {"Node", "number"}),
+			Rotate = util.wrap_function({"Node", "Quaternion", {"number", "__nil"}},
+				function(self, q, space)
+					if space ~= nil then
+						self:Rotate(q, space)
+					else
+						self:Rotate(q)
+					end
+				end
+			),
+			Remove = util.self_function("Remove", {}, {"Node"}),
+			SetEnabled = util.self_function(
+					"SetEnabled", {}, {"Node", "boolean"}),
 		},
 		properties = {
 			scale = util.simple_property(dst.Vector3),
@@ -874,10 +940,184 @@ function M.define(dst, util)
 		},
 	})
 
+	util.wc("PhysicsWorld", {
+		inherited_from_by_wrapper = dst.Component,
+	})
+
+	util.wc("TextureCube", {
+		inherited_from_by_wrapper = dst.Texture,
+	})
+
+	util.wc("ParticleEffect", {
+		inherited_from_by_wrapper = dst.Resource,
+	})
+
+	util.wc("Animation", {
+		inherited_from_by_wrapper = dst.Resource,
+	})
+
+	util.wc("Sound", {
+		inherited_from_by_wrapper = dst.Resource,
+		properties = {
+			looped = util.simple_property("boolean"),
+			length = util.simple_property("number"),
+			frequency = util.simple_property("number"),
+		},
+	})
+
+	util.wc("SoundSource", {
+		inherited_from_by_wrapper = dst.Component,
+		instance = {
+			Play = util.self_function(
+					"Play", {}, {"SoundSource", "Sound"}),
+			Stop = util.self_function("Stop", {}, {"SoundSource"}),
+		},
+		properties = {
+			gain = util.simple_property("number"),
+			frequency = util.simple_property("number"),
+			panning = util.simple_property("number"),
+			soundType = util.simple_property("string"),
+			autoRemoveMode = util.simple_property("number"),
+			playing = util.simple_property("boolean"),
+		},
+	})
+
+	util.wc("SoundSource3D", {
+		inherited_from_by_wrapper = dst.SoundSource,
+		properties = {
+			nearDistance = util.simple_property("number"),
+			farDistance = util.simple_property("number"),
+			innerAngle = util.simple_property("number"),
+			outerAngle = util.simple_property("number"),
+			rolloffFactor = util.simple_property("number"),
+		},
+	})
+
+	util.wc("SoundListener", {
+		inherited_from_by_wrapper = dst.Component,
+	})
+
+	util.wc("Audio", {
+		instance = {
+			SetMasterGain = util.self_function(
+					"SetMasterGain", {}, {"Audio", "string", "number"}),
+			Play = util.self_function("Play", {"boolean"}, {"Audio"}),
+			Stop = util.self_function("Stop", {}, {"Audio"}),
+		},
+		properties = {
+			listener = util.simple_property({dst.SoundListener, "__nil"}),
+			playing = util.simple_property("boolean"),
+		},
+	})
+
+	util.wc("Billboard", {
+		properties = {
+			position = util.simple_property(dst.Vector3),
+			size = util.simple_property(dst.Vector2),
+			color = util.simple_property(dst.Color),
+			rotation = util.simple_property("number"),
+			enabled = util.simple_property("boolean"),
+		},
+	})
+
+	util.wc("BillboardSet", {
+		inherited_from_by_wrapper = dst.Drawable,
+		instance = {
+			Commit = util.self_function("Commit", {}, {"BillboardSet"}),
+			GetBillboard = util.wrap_function({"BillboardSet", "number"},
+				function(self, index)
+					local b = self:GetBillboard(index)
+					if b == nil then
+						return nil
+					end
+					return util.wrap_instance("Billboard", b)
+				end
+			),
+		},
+		properties = {
+			material = util.simple_property(dst.Material),
+			numBillboards = util.simple_property("number"),
+			sorted = util.simple_property("boolean"),
+			relative = util.simple_property("boolean"),
+			faceCameraMode = util.simple_property("number"),
+		},
+	})
+
+	util.wc("ParticleEmitter", {
+		inherited_from_by_wrapper = dst.BillboardSet,
+		instance = {
+			Reset = util.self_function("Reset", {}, {"ParticleEmitter"}),
+		},
+		properties = {
+			effect = util.simple_property(dst.ParticleEffect),
+			emitting = util.simple_property("boolean"),
+			numParticles = util.simple_property("number"),
+		},
+	})
+
+	util.wc("Skybox", {
+		inherited_from_by_wrapper = dst.StaticModel,
+	})
+
+	util.wc("AnimatedModel", {
+		inherited_from_by_wrapper = dst.StaticModel,
+	})
+
+	util.wc("AnimationController", {
+		inherited_from_by_wrapper = dst.Component,
+		instance = {
+			Play = util.wrap_function({"boolean"},
+					{"AnimationController", "string", "number", "boolean",
+							{"number", "__nil"}},
+				function(self, name, layer, looped, fade)
+					if fade ~= nil then
+						return self:Play(name, layer, looped, fade)
+					end
+					return self:Play(name, layer, looped)
+				end
+			),
+			Stop = util.wrap_function({"boolean"},
+					{"AnimationController", "string", {"number", "__nil"}},
+				function(self, name, fade)
+					if fade ~= nil then
+						return self:Stop(name, fade)
+					end
+					return self:Stop(name)
+				end
+			),
+			SetSpeed = util.self_function(
+					"SetSpeed", {"boolean"},
+					{"AnimationController", "string", "number"}),
+			IsPlaying = util.self_function(
+					"IsPlaying", {"boolean"},
+					{"AnimationController", "string"}),
+		},
+	})
+
+	util.wc("RibbonTrail", {
+		inherited_from_by_wrapper = dst.Drawable,
+		properties = {
+			material = util.simple_property(dst.Material),
+			vertexDistance = util.simple_property("number"),
+			width = util.simple_property("number"),
+			startColor = util.simple_property(dst.Color),
+			endColor = util.simple_property(dst.Color),
+			startScale = util.simple_property("number"),
+			endScale = util.simple_property("number"),
+			trailType = util.simple_property("number"),
+			lifetime = util.simple_property("number"),
+			emitting = util.simple_property("boolean"),
+			sorted = util.simple_property("boolean"),
+		},
+	})
+
 	dst.cache = util.wrap_instance("ResourceCache", cache)
 	dst.renderer = util.wrap_instance("Renderer", renderer)
 	dst.ui = util.wrap_instance("UI", ui)
 	dst.input = util.wrap_instance("Input", input)
+	if audio ~= nil then
+		dst.audio = util.wrap_instance("Audio", audio)
+	end
 end
 
 return M
