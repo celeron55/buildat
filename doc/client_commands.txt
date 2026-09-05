@@ -1,0 +1,88 @@
+Client command sequence
+=======================
+The client can run a one-shot list of commands and then exit. Intended for
+CI, visual checks of UI/rendering changes, and checking that an input action
+actually registers.
+
+Pass the sequence with -c. One command per line. When -c is given, the client
+exits after the sequence finishes (exit status 1 if a command fails).
+
+    $ bin/buildat_client -c $'delay 2000\nscreenshot /tmp/menu.png'
+    $ bin/buildat_client -c @commands.txt
+    $ bin/buildat_client -s localhost -c @commands.txt
+
+@path reads the commands from a file. Empty lines and lines starting with # are
+ignored.
+
+delay is wall-clock milliseconds of game time continuing to run. Use it to wait
+for startup, network, or for a held key to have an effect. Input is queued as
+SDL events at the start of the frame (before Urho3D Input::Update). Screenshots
+are taken after the current frame has been rendered (3D + UI), before buffer
+swap.
+
+The OS mouse is never captured or grabbed in -c mode, even if the game calls
+SetMouseVisible(false). Use mouse_move for look (GetMouseMove); that is
+relative and does not use a cursor position. mouse_pos is for a visible UI
+cursor.
+
+The window is raised when the sequence starts. Injected keys go through
+Urho3D's Input path (GetKeyDown / GetKeyPress). Under Xvfb that is normally
+fine.
+
+Commands
+--------
+delay <ms>
+    Wait this many milliseconds before the next command. Game keeps running.
+
+screenshot <path>
+    Write a PNG of the current framebuffer. Parent directories are created.
+    Path may be relative to the working directory.
+
+keydown <key>
+keyup <key>
+    Hold or release a key. Key names are SDL names: W, Space, Return, Escape,
+    Left Shift, F1, Left, ... Aliases: enter, esc, shift, ctrl, alt.
+
+keypress <key>
+    Key down and up in the same frame. Use for taps (UI, GetKeyPress). Use
+    keydown / delay / keyup to hold a key across frames (movement).
+
+mouse_pos <x> <y>
+    Move the visible cursor to window pixel coordinates (backbuffer). For UI.
+
+mouse_move <dx> <dy>
+    Relative motion in pixels (GetMouseMove). Use this to look around. Does
+    not move the OS cursor.
+
+mouse_down <button>
+mouse_up <button>
+mouse_click <button>
+    Buttons: left, middle, right (or 1, 2, 3). click is down+up same frame.
+
+mouse_wheel <delta>
+    Wheel ticks. Positive is away from the user.
+
+text <string>
+    SDL text input (UI text fields). Rest of the line is the string.
+
+quit
+    Stop the sequence early. The client always exits at the end of -c anyway.
+
+Example
+-------
+Wait for the launcher, screenshot it, click a point, wait, screenshot again:
+
+    delay 2000
+    screenshot /tmp/buildat_menu.png
+    mouse_pos 400 300
+    mouse_click left
+    delay 1000
+    screenshot /tmp/buildat_after_click.png
+
+Hold W for half a second while connected to a local server:
+
+    delay 3000
+    keydown W
+    delay 500
+    keyup W
+    screenshot /tmp/buildat_moved.png

@@ -4,6 +4,7 @@
 #include "core/log.h"
 #include "client/config.h"
 #include "client/state.h"
+#include "client/command_seq.h"
 #include "lua_bindings/init.h"
 #include "lua_bindings/util.h"
 #include "lua_bindings/replicate.h"
@@ -266,6 +267,14 @@ struct CApp: public App, public magic::Application
 	bool m_draw_debug_geometry = false;
 	int64_t m_last_update_us;
 
+	sv_<client::command_seq::Command> m_commands;
+	size_t m_command_index = 0;
+	int64_t m_command_wait_until_us = 0;
+	ss_ m_pending_screenshot;
+	bool m_command_seq_active = false;
+	bool m_command_seq_failed = false;
+	bool m_command_seq_extra_frame = false;
+
 	magic::SharedPtr<magic::Scene> m_scene;
 	magic::SharedPtr<magic::Node> m_camera_node;
 
@@ -337,9 +346,12 @@ struct CApp: public App, public magic::Application
 		magic_log->SetTimeStamp(false);
 
 		// Set up event handlers
+		SubscribeToEvent(magic::E_BEGINFRAME, URHO3D_HANDLER(CApp, on_begin_frame));
 		SubscribeToEvent(magic::E_UPDATE, URHO3D_HANDLER(CApp, on_update));
 		SubscribeToEvent(magic::E_POSTRENDERUPDATE,
 				URHO3D_HANDLER(CApp, on_post_render_update));
+		SubscribeToEvent(magic::E_ENDRENDERING,
+				URHO3D_HANDLER(CApp, on_end_rendering));
 		SubscribeToEvent(magic::E_KEYDOWN, URHO3D_HANDLER(CApp, on_keydown));
 		SubscribeToEvent(magic::E_SCREENMODE, URHO3D_HANDLER(CApp, on_screenmode));
 		SubscribeToEvent(magic::E_LOGMESSAGE, URHO3D_HANDLER(CApp, on_logmessage));
@@ -369,7 +381,12 @@ struct CApp: public App, public magic::Application
 
 	int run()
 	{
-		return magic::Application::Run();
+		int r = magic::Application::Run();
+		if(m_command_seq_failed)
+			return 1;
+		if(m_command_seq_active)
+			return 1;
+		return r;
 	}
 
 	void shutdown()
@@ -392,6 +409,8 @@ struct CApp: public App, public magic::Application
 
 	bool reboot_requested()
 	{
+		if(g_client_config.get<bool>("command_seq_enabled"))
+			return false;
 		return m_reboot_requested;
 	}
 
@@ -600,6 +619,154 @@ struct CApp: public App, public magic::Application
 		magic::DebugHud *dhud = GetSubsystem<magic::Engine>()->CreateDebugHud();
 		dhud->SetDefaultStyle(magic_cache->GetResource<magic::XMLFile>(
 				"UI/DefaultStyle.xml"));
+
+		if(g_client_config.get<bool>("command_seq_enabled")){
+			ss_ text = g_client_config.get<ss_>("command_seq");
+			ss_ err;
+			if(!client::command_seq::parse(text, &m_commands, &err))
+				throw AppStartupError("command sequence: "+err);
+			m_command_seq_active = true;
+			client::command_seq::raise_window(GetSubsystem<magic::Graphics>());
+			log_i(MODULE, "Command sequence: %zu commands, will exit when done",
+					m_commands.size());
+		}
+	}
+
+	void command_seq_fail(const ss_ &err)
+	{
+		log_e(MODULE, "Command sequence failed: %s", cs(err));
+		m_command_seq_failed = true;
+		m_command_seq_active = false;
+		shutdown();
+	}
+
+	void command_seq_finish()
+	{
+		if(m_command_seq_failed)
+			return;
+		if(!m_command_seq_extra_frame){
+			m_command_seq_extra_frame = true;
+			return;
+		}
+		log_i(MODULE, "Command sequence complete");
+		m_command_seq_active = false;
+		shutdown();
+	}
+
+	// Game code may SetMouseVisible(false) / grab. Do not actually capture
+	// the OS mouse; injected mouse_move is relative (GetMouseMove) and does
+	// not need a cursor position.
+	void command_seq_keep_mouse_free()
+	{
+		if(!m_command_seq_active)
+			return;
+		magic::Input *input = GetSubsystem<magic::Input>();
+		if(!input)
+			return;
+		if(input->GetMouseMode() == magic::MM_RELATIVE ||
+				input->GetMouseMode() == magic::MM_WRAP)
+			input->SetMouseMode(magic::MM_ABSOLUTE);
+		if(!input->IsMouseVisible())
+			input->SetMouseVisible(true);
+		if(input->IsMouseGrabbed())
+			input->SetMouseGrabbed(false);
+	}
+
+	bool command_seq_exec(const client::command_seq::Command &c)
+	{
+		using client::command_seq::Type;
+		magic::Input *input = GetSubsystem<magic::Input>();
+		magic::Graphics *graphics = GetSubsystem<magic::Graphics>();
+		ss_ err;
+		bool ok = true;
+		switch(c.type){
+		case Type::KeyDown:
+			client::command_seq::raise_window(graphics);
+			ok = client::command_seq::inject_key(input, c.s, true, false, &err);
+			break;
+		case Type::KeyUp:
+			ok = client::command_seq::inject_key(input, c.s, false, false, &err);
+			break;
+		case Type::KeyPress:
+			client::command_seq::raise_window(graphics);
+			ok = client::command_seq::inject_key(input, c.s, true, true, &err);
+			break;
+		case Type::MousePos:
+			client::command_seq::raise_window(graphics);
+			ok = client::command_seq::inject_mouse_pos(input, c.x, c.y, &err);
+			break;
+		case Type::MouseMove:
+			ok = client::command_seq::inject_mouse_move(input, c.x, c.y, &err);
+			break;
+		case Type::MouseDown:
+			client::command_seq::raise_window(graphics);
+			ok = client::command_seq::inject_mouse_button(
+					input, c.x, true, false, &err);
+			break;
+		case Type::MouseUp:
+			ok = client::command_seq::inject_mouse_button(
+					input, c.x, false, false, &err);
+			break;
+		case Type::MouseClick:
+			client::command_seq::raise_window(graphics);
+			ok = client::command_seq::inject_mouse_button(
+					input, c.x, true, true, &err);
+			break;
+		case Type::MouseWheel:
+			ok = client::command_seq::inject_mouse_wheel(input, (int)c.n, &err);
+			break;
+		case Type::Text:
+			ok = client::command_seq::inject_text(input, c.s, &err);
+			break;
+		case Type::Quit:
+		case Type::Delay:
+		case Type::Screenshot:
+			return true;
+		}
+		if(!ok)
+			command_seq_fail(err);
+		return ok;
+	}
+
+	void command_seq_tick()
+	{
+		using client::command_seq::Type;
+		if(!m_command_seq_active)
+			return;
+		if(!m_pending_screenshot.empty())
+			return;
+		int64_t now = get_timeofday_us();
+		if(m_command_wait_until_us > now)
+			return;
+
+		while(m_command_index < m_commands.size()){
+			const client::command_seq::Command &c =
+					m_commands[m_command_index];
+			log_i(MODULE, "command: %s",
+					cs(client::command_seq::dump_command(c)));
+			if(c.type == Type::Delay){
+				m_command_wait_until_us = now + c.n * 1000;
+				m_command_index++;
+				return;
+			}
+			if(c.type == Type::Screenshot){
+				m_pending_screenshot = c.s;
+				m_command_index++;
+				return;
+			}
+			if(c.type == Type::Quit){
+				m_command_index = m_commands.size();
+				break;
+			}
+			if(!command_seq_exec(c))
+				return;
+			m_command_index++;
+		}
+
+		if(m_command_index >= m_commands.size() &&
+				m_pending_screenshot.empty() &&
+				m_command_wait_until_us <= now)
+			command_seq_finish();
 	}
 
 	void on_update(magic::StringHash event_type, magic::VariantMap &event_data)
@@ -627,11 +794,30 @@ struct CApp: public App, public magic::Application
 #endif
 	}
 
+	void on_begin_frame(magic::StringHash event_type, magic::VariantMap &event_data)
+	{
+		command_seq_keep_mouse_free();
+		command_seq_tick();
+	}
+
 	void on_post_render_update(
 			magic::StringHash event_type, magic::VariantMap &event_data)
 	{
 		if(m_draw_debug_geometry)
 			m_scene->GetComponent<magic::PhysicsWorld>()->DrawDebugGeometry(true);
+	}
+
+	void on_end_rendering(
+			magic::StringHash event_type, magic::VariantMap &event_data)
+	{
+		if(m_pending_screenshot.empty())
+			return;
+		ss_ path = m_pending_screenshot;
+		m_pending_screenshot.clear();
+		ss_ err;
+		if(!client::command_seq::save_screenshot(
+				GetSubsystem<magic::Graphics>(), path, &err))
+			command_seq_fail(err);
 	}
 
 	void on_keydown(magic::StringHash event_type, magic::VariantMap &event_data)
