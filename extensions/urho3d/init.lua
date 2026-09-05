@@ -26,6 +26,24 @@ local function wrap_instance(name, instance)
 	return class_meta.wrap(instance)
 end
 
+local function type_allows_nil(valid_types)
+	if valid_types == '__nil' then
+		return true
+	end
+	if type(valid_types) == 'table' then
+		local meta = getmetatable(valid_types)
+		if meta and meta.type_name then
+			return false
+		end
+		for _, t in ipairs(valid_types) do
+			if t == '__nil' then
+				return true
+			end
+		end
+	end
+	return false
+end
+
 -- (return_types, param_types, f) or (param_types, f)
 local function wrap_function(return_types, param_types, f)
 	if type(param_types) == 'function' and f == nil then
@@ -37,6 +55,9 @@ local function wrap_function(return_types, param_types, f)
 		local arg = {...}
 		local checked_arg = {}
 		for i = 1, #param_types do
+			if arg[i] == nil and not type_allows_nil(param_types[i]) then
+				error("wrapped call argument "..i.." is nil")
+			end
 			checked_arg[i] = magic_sandbox.safe_to_unsafe(arg[i], param_types[i])
 		end
 		local wrapped_ret = {}
@@ -56,6 +77,9 @@ local function self_function(function_name, return_types, param_types)
 		local arg = {...}
 		local checked_arg = {}
 		for i = 1, #param_types do
+			if arg[i] == nil and not type_allows_nil(param_types[i]) then
+				error(function_name.." argument "..i.." is nil")
+			end
 			checked_arg[i] = magic_sandbox.safe_to_unsafe(arg[i], param_types[i])
 		end
 		local wrapped_ret = {}
@@ -85,11 +109,19 @@ end
 
 for _, name in ipairs(safe_globals) do
 	local v = _G[name]
-	if type(v) ~= 'number' and type(v) ~= 'string' then
+	if v == nil then
+		-- Dropped or renamed in later Urho; skip so the sandbox still loads.
+		log:info("safe global missing: "..name)
+	elseif type(v) ~= 'number' and type(v) ~= 'string' then
 		error("Invalid safe global "..dump(name).." type: "..dump(type(v)))
+	else
+		Safe[name] = v
 	end
-	Safe[name] = v
 end
+-- 1.6 renamed KEY_ESC to KEY_ESCAPE. Keep the old name for existing games.
+Safe.KEY_ESC = Safe.KEY_ESCAPE
+
+local mouse = { hide_wanted = false }
 
 safe_classes.define(Safe, {
 	wc = wc,
@@ -98,6 +130,7 @@ safe_classes.define(Safe, {
 	self_function = self_function,
 	simple_property = simple_property,
 	check_safe_resource_name = Unsafe.check_safe_resource_name,
+	mouse = mouse,
 	--resave_file = Unsafe.resave_file,
 })
 
@@ -110,9 +143,50 @@ setmetatable(Safe, {
 })
 
 -- SubscribeToEvent
+--
+-- 1.7 LuaScriptEventInvoker stores one handler per event type (last subscribe
+-- wins). 2014 kept a vector of functions. Multiplex global events so voxelworld
+-- and games can both receive Update.
+
+local urho_SubscribeToEvent = SubscribeToEvent
+-- Dropped so Lua cannot replace the mux. Object-specific subs still use
+-- urho_SubscribeToEvent (one handler per sender+event, which is correct).
+-- UnsubscribeFromEvent("Update") would strip the mux, so drop it too.
+SubscribeToEvent = nil
+UnsubscribeFromEvent = nil
 
 local sandbox_callback_to_global_function_name = {}
 local next_sandbox_global_function_i = 1
+local global_event_mux = {} -- event_type -> { {name=, fn=}, ... }
+local global_event_mux_installed = {}
+
+local function add_global_event_handler(event_type, cb_name, fn)
+	if not global_event_mux_installed[event_type] then
+		global_event_mux[event_type] = {}
+		local mux_name = "__buildat_mux_"..event_type
+		_G[mux_name] = function(event_type_thing, unsafe_event_data)
+			local list = global_event_mux[event_type]
+			for i = 1, #list do
+				list[i].fn(event_type_thing, unsafe_event_data)
+			end
+		end
+		urho_SubscribeToEvent(event_type, mux_name)
+		global_event_mux_installed[event_type] = true
+	end
+	table.insert(global_event_mux[event_type], {name = cb_name, fn = fn})
+end
+
+local function remove_global_event_handler(event_type, cb_name)
+	local list = global_event_mux[event_type]
+	if not list then
+		return
+	end
+	for i = #list, 1, -1 do
+		if list[i].name == cb_name then
+			table.remove(list, i)
+		end
+	end
+end
 
 function Safe.SubscribeToEvent(x, y, z)
 	log:debug("Safe.SubscribeToEvent("..dump(x)..", "..dump(y)..", "..dump(z)..")")
@@ -159,38 +233,54 @@ function Safe.SubscribeToEvent(x, y, z)
 			local safe_fields = safe_events[got_event_type]
 			if not safe_fields then
 				log:warning("Received unsafe event: "..dump(got_event_type))
+				return
 			end
+			-- 1.7 VariantMap is indexed: eventData["Key"] returns a Variant.
 			local safe_event_data = Safe.VariantMap()
 			for field_name, field_def in pairs(safe_fields) do
 				local variant_type = field_def.variant
 				local safe_type = field_def.safe
+				local variant = unsafe_event_data[field_name]
+				if variant == nil then
+					error("Value for field "..dump(field_name).." in "..
+							dump(got_event_type).." is nil")
+				end
+				-- 1.7 VariantMap __index returns an empty Variant for missing
+				-- keys, not nil. Treat empty as missing.
+				if variant.IsEmpty and variant:IsEmpty() then
+					error("Value for field "..dump(field_name).." in "..
+							dump(got_event_type).." is empty")
+				end
 				local safe_value = nil
 				if variant_type == "Ptr" then
 					local get_type = field_def.get_type or safe_type
-					local unsafe_value = unsafe_event_data:GetPtr(
-							get_type, field_name)
+					local unsafe_value = variant:GetPtr(get_type)
 					if unsafe_value == nil then
 						error("Value for field "..dump(field_name).." as "..
 								dump(safe_type).." in "..dump(got_event_type)..
 								" gotten as "..dump(get_type).." is nil")
 					end
 					safe_value = wrap_instance(safe_type, unsafe_value)
-					safe_event_data["SetPtr"](
-							safe_event_data, field_name, safe_value)
+					safe_event_data:SetPtr(field_name, safe_value)
 				else
 					local get_type = field_def.get_type or variant_type
-					local unsafe_value = unsafe_event_data["Get"..get_type](
-							unsafe_event_data, field_name)
+					local getter = variant["Get"..get_type]
+					if type(getter) ~= "function" then
+						error("Variant has no Get"..get_type.." for field "..
+								dump(field_name).." in "..dump(got_event_type))
+					end
+					local unsafe_value = getter(variant)
 					if safe_type == 'number' or safe_type == 'string' or
 							safe_type == 'boolean' then
-						-- Regular type
 						safe_value = magic_sandbox.unsafe_to_safe(unsafe_value, safe_type)
 					else
-						-- Object wrapper
 						safe_value = wrap_instance(safe_type, unsafe_value)
 					end
-					safe_event_data["Set"..get_type](
-							safe_event_data, field_name, safe_value)
+					local setter = safe_event_data["Set"..get_type]
+					if type(setter) ~= "function" then
+						error("Safe.VariantMap has no Set"..get_type)
+					end
+					setter(safe_event_data, field_name, safe_value)
 				end
 			end
 			-- Call callback
@@ -204,9 +294,10 @@ function Safe.SubscribeToEvent(x, y, z)
 	end
 	if object then
 		local unsafe_object = getmetatable(object).unsafe
-		SubscribeToEvent(unsafe_object, sub_event_type, global_callback_name)
+		urho_SubscribeToEvent(unsafe_object, sub_event_type, global_callback_name)
 	else
-		SubscribeToEvent(sub_event_type, global_callback_name)
+		add_global_event_handler(sub_event_type, global_callback_name,
+				_G[global_callback_name])
 	end
 	log:debug("-> global_callback_name="..dump(global_callback_name))
 	return global_callback_name
@@ -214,8 +305,7 @@ end
 
 function Safe.UnsubscribeFromEvent(sub_event_type, cb_name)
 	log:debug("Safe.UnsubscribeFromEvent("..dump(sub_event_type)..", "..dump(cb_name)..")")
-	UnsubscribeFromEvent(sub_event_type, cb_name)
-	-- TODO: Delete the generated global callback
+	remove_global_event_handler(sub_event_type, cb_name)
 end
 
 --
@@ -276,12 +366,35 @@ function Unsafe.SubscribeToEvent(x, y, z)
 		end
 	end
 	if object then
-		SubscribeToEvent(object, event_name, global_callback_name)
+		urho_SubscribeToEvent(object, event_name, global_callback_name)
 	else
-		SubscribeToEvent(event_name, global_callback_name)
+		add_global_event_handler(event_name, global_callback_name,
+				_G[global_callback_name])
 	end
 	return global_callback_name
 end
+
+-- Alt drops capture (ungrab + show cursor) so alt+tab reaches the WM.
+-- Click recaptures if the game still wants the cursor hidden.
+Safe.SubscribeToEvent("KeyDown", function(_, event_data)
+	if not mouse.hide_wanted then
+		return
+	end
+	local key = event_data:GetInt("Key")
+	if key == KEY_ALT or key == KEY_LALT or key == KEY_RALT then
+		input:SetMouseMode(MM_FREE)
+		input:SetMouseVisible(true)
+	end
+end)
+Safe.SubscribeToEvent("MouseButtonDown", function()
+	if not mouse.hide_wanted then
+		return
+	end
+	if input:GetMouseMode() == MM_FREE then
+		input:SetMouseMode(MM_ABSOLUTE)
+		input:SetMouseVisible(false)
+	end
+end)
 
 --
 -- Create the final interface

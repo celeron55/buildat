@@ -1,28 +1,29 @@
-celeron55/Urho3D 21088f5149bd45997f4874ffa0d517f9271ead8b (2014-era fork)
+urho3d/Urho3D 1.7.1 (9941b25)
 
-Bundled from https://github.com/celeron55/Urho3D.git
+Bundled from https://github.com/urho3d/Urho3D/archive/refs/tags/1.7.1.tar.gz
 
-Stripped out:
-- .git
-- Docs
-- SourceAssets
-- Source/Samples
-- Source/Extras
-- Source/Tools
-- Source/Android
-- Source/ThirdParty/Assimp (tools only)
-- Source/ThirdParty/AngelScript (Buildat uses Lua)
+Stripped:
+- CI, Rakefile, Android project, SourceAssets
+- Source/Samples, Source/Extras, Source/Clang-Tools
+- AngelScript + boost (Buildat uses Lua)
+- SQLite, nanodbc (database off)
+- bin/Autoload (PBR demo bulk)
+- Sample-only Data (scripts, scenes, music, sounds, ninja/mutant/kachujin)
 
-Kept:
-- Source/ThirdParty/LuaJIT (optional via -DURHO3D_LUAJIT=TRUE)
-- Source/ThirdParty/MojoShader (D3D)
-- Host cmake launchers for VS/Android/iOS/OSX/MinGW
-- Bin/Data sample media (kept fonts, default UI, MessageBox, Box/Plane/Stone)
+Kept for Lua whitelist / runtime:
+- Full CoreData (shaders, techniques, renderpaths, PBR)
+- UI, Input, Graphics, Physics, Urho2D, Navigation, IK, Network, Audio
+- Lua + LuaJIT + SAFE_LUA, Bullet, Box2D, SDL, FreeType, Recast/Detour, ik, WebP
+- Assimp + Tools (AssetImporter for .mdl/.ani); not built unless URHO3D_TOOLS=TRUE
+- Data: fonts, UI styles, primitives, Jack+walk (animation), Stone/UI textures,
+  Urho2D sample sprites, particles, postprocess XMLs
+- CMake modules and host/cross toolchains
 
-Buildat cmake configures this tree with:
+Source changes vs 1.7.1:
+- Source/Tools/CMakeLists.txt: Urho3DPlayer only when URHO3D_TOOLS (Buildat does not ship the player)
+
+Buildat cmake configures this tree as a sub-build of the Urho root:
   URHO3D_LIB_TYPE=SHARED URHO3D_LUA=TRUE URHO3D_SAFE_LUA=TRUE
   URHO3D_SAMPLES=FALSE URHO3D_TOOLS=FALSE URHO3D_EXTRAS=FALSE
-  URHO3D_ANGELSCRIPT=FALSE URHO3D_DOCS=FALSE
-
-Source changes vs the cloned commit:
-- kNet MessageListParser.cpp: size_t initializer uses (size_t)-1 (GCC 15)
+  URHO3D_ANGELSCRIPT=FALSE URHO3D_DOCS=FALSE URHO3D_DATABASE_SQLITE=FALSE
+  URHO3D_PCH=FALSE

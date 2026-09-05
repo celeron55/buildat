@@ -65,31 +65,80 @@ function M.define(dst, util)
 			return util.wrap_instance("VariantMap", VariantMap())
 		end),
 		instance = {
-			SetFloat = util.self_function(
-					"SetFloat", {}, {"VariantMap", "string", "number"}),
-			GetFloat = util.self_function(
-					"GetFloat", {"number"}, {"VariantMap", "string"}),
-			SetInt = util.self_function(
-					"SetInt", {}, {"VariantMap", "string", "number"}),
-			GetInt = util.self_function(
-					"GetInt", {"number"}, {"VariantMap", "string"}),
-			SetString = util.self_function(
-					"SetString", {}, {"VariantMap", "string", "string"}),
-			GetString = util.self_function(
-					"GetString", {"string"}, {"VariantMap", "string"}),
-			SetBuffer = util.self_function(
-					"SetBuffer", {}, {"VariantMap", "string", "VectorBuffer"}),
-			GetBuffer = util.self_function(
-					"GetBuffer", {dst.VectorBuffer}, {"VariantMap", "string"}),
-
-			SetPtr = util.self_function(
-					"SetPtr", {}, {"VariantMap", "string",
-						{"Node", "Component"}}),
+			-- 1.7 Lua VariantMap has no Get/Set methods; values are Variants
+			-- via eventData["Key"]. Keep the 2014 method names for games.
+			SetFloat = util.wrap_function({"VariantMap", "string", "number"},
+				function(self, key, value)
+					self[key] = value
+				end),
+			GetFloat = util.wrap_function({"number"}, {"VariantMap", "string"},
+				function(self, key)
+					local v = self[key]
+					if v == nil or (v.IsEmpty and v:IsEmpty()) then
+						error("VariantMap:GetFloat("..tostring(key)..
+								"): missing or empty")
+					end
+					return v:GetFloat()
+				end),
+			SetInt = util.wrap_function({"VariantMap", "string", "number"},
+				function(self, key, value)
+					self[key] = value
+				end),
+			GetInt = util.wrap_function({"number"}, {"VariantMap", "string"},
+				function(self, key)
+					local v = self[key]
+					if v == nil or (v.IsEmpty and v:IsEmpty()) then
+						error("VariantMap:GetInt("..tostring(key)..
+								"): missing or empty")
+					end
+					return v:GetInt()
+				end),
+			SetString = util.wrap_function({"VariantMap", "string", "string"},
+				function(self, key, value)
+					self[key] = value
+				end),
+			GetString = util.wrap_function({"string"}, {"VariantMap", "string"},
+				function(self, key)
+					local v = self[key]
+					if v == nil or (v.IsEmpty and v:IsEmpty()) then
+						error("VariantMap:GetString("..tostring(key)..
+								"): missing or empty")
+					end
+					return v:GetString()
+				end),
+			SetBuffer = util.wrap_function({"VariantMap", "string", "VectorBuffer"},
+				function(self, key, value)
+					self[key] = value
+				end),
+			GetBuffer = util.wrap_function({dst.VectorBuffer},
+					{"VariantMap", "string"},
+				function(self, key)
+					local v = self[key]
+					if v == nil or (v.IsEmpty and v:IsEmpty()) then
+						error("VariantMap:GetBuffer("..tostring(key)..
+								"): missing or empty")
+					end
+					return v:GetBuffer()
+				end),
+			SetPtr = util.wrap_function({"VariantMap", "string",
+					{"Node", "Component"}},
+				function(self, key, value)
+					self[key] = value
+				end),
 			GetPtr = util.wrap_function({"VariantMap", "string", "string"},
 				function(self, type, key)
-					return util.wrap_instance(type, self:GetPtr(type, key))
-				end
-			),
+					local v = self[key]
+					if v == nil or (v.IsEmpty and v:IsEmpty()) then
+						error("VariantMap:GetPtr("..tostring(key)..
+								"): missing or empty")
+					end
+					local ptr = v:GetPtr(type)
+					if ptr == nil then
+						error("VariantMap:GetPtr("..tostring(key)..", "..
+								tostring(type).."): ptr is nil")
+					end
+					return util.wrap_instance(type, ptr)
+				end),
 		}
 	})
 
@@ -294,16 +343,22 @@ function M.define(dst, util)
 			GetDrawables = util.wrap_function({"table"}, {"Octree", "BoundingBox"},
 				function(self, query)
 					local unsafe_result = self:GetDrawables(query)
-					--log:info(dump(result))
 					-- The result is a list of OctreeQueryResults; we will
 					-- convert it to a list of tables that contain the fields of
 					-- OctreeQueryResult.
 					local result = {}
+					if unsafe_result == nil then
+						log:error("GetDrawables returned nil")
+						return result
+					end
 					for _, v in ipairs(unsafe_result) do
-						table.insert(result, {
-							drawable = util.wrap_instance("Drawable", v.drawable),
-							node = util.wrap_instance("Node", v.node),
-						})
+						if v.drawable ~= nil and v.node ~= nil then
+							table.insert(result, {
+								drawable = util.wrap_instance("Drawable",
+										v.drawable),
+								node = util.wrap_instance("Node", v.node),
+							})
+						end
 					end
 					return result
 				end
@@ -783,7 +838,15 @@ function M.define(dst, util)
 
 	util.wc("Input", {
 		instance = {
-			SetMouseVisible = util.self_function("SetMouseVisible", {}, {"Input", "boolean"}),
+			SetMouseVisible = util.wrap_function({"Input", "boolean"},
+				function(self, enable)
+					if util.mouse then
+						util.mouse.hide_wanted = not enable
+					end
+					self:SetMouseVisible(enable)
+				end),
+			SetMouseMode = util.self_function("SetMouseMode", {},
+					{"Input", "number"}),
 			GetKeyDown = util.self_function("GetKeyDown", {"boolean"}, {"Input", "number"}),
 			GetKeyPress = util.self_function("GetKeyPress", {"boolean"}, {"Input", "number"}),
 			GetMouseMove = util.self_function("GetMouseMove", {dst.IntVector2}, {"Input"}),

@@ -29,9 +29,9 @@ Install dependencies
 Build
 -------
 
-Urho3D is bundled in `3rdparty/Urho3D` and is configured/built as part of this
-project (shared library, Lua, safe Lua). `-DURHO3D_LIB_TYPE=SHARED` is required
-for the module interface.
+Urho3D 1.7.1 is bundled in `3rdparty/Urho3D` and is configured/built as part of
+this project (shared library, Lua, safe Lua). `-DURHO3D_LIB_TYPE=SHARED` is
+required for the module interface.
 
     $ cd $wherever_buildat_is
     $ mkdir Build  # Capital B is a good idea so it stays out of the way in tabcomplete

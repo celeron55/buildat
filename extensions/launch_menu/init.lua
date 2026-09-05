@@ -50,7 +50,7 @@ local function connect_or_show_error(address)
 end
 
 local function show_connect_to_server()
-	buildat.stop_local_server()
+	buildat.request_stop_local_server()
 	local root = uistack.main:push({desc="connect_to_server"})
 
 	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
@@ -135,7 +135,7 @@ local function show_starting(game)
 		end
 		if buildat.get_time_us() - t0 > 90 * 1000000 then
 			done = true
-			buildat.stop_local_server()
+			buildat.request_stop_local_server()
 			show_error("Server did not start")
 			uistack.main:pop(root)
 		end
@@ -145,19 +145,79 @@ local function show_starting(game)
 		local key = event_data:GetInt("Key")
 		if key == KEY_ESC then
 			done = true
-			buildat.stop_local_server()
+			buildat.request_stop_local_server()
 			uistack.main:pop(root)
 		end
 	end)
 end
 
-local function start_local_game(game)
+local function do_start_local_game(game)
 	local ok, err = buildat.start_local_server(game)
 	if not ok then
 		show_error(err)
 		return
 	end
 	show_starting(game)
+end
+
+local function show_waiting_for_old_server(game)
+	local root = uistack.main:push({desc="stopping_old_server"})
+
+	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
+	root.defaultStyle = style
+
+	local window = root:CreateChild("Window")
+	window:SetStyleAuto()
+	window:SetLayout(LM_VERTICAL, 10, magic.IntRect(10, 10, 10, 10))
+	window:SetAlignment(HA_LEFT, VA_CENTER)
+
+	local status = window:CreateChild("Text")
+	status:SetStyleAuto()
+	status.text = "Stopping previous server..."
+
+	local t0 = buildat.get_time_us()
+	local done = false
+	root:SubscribeToStackEvent("Update", function(event_type, event_data)
+		if done then
+			return
+		end
+		if not buildat.local_server_running() then
+			done = true
+			uistack.main:pop(root)
+			do_start_local_game(game)
+			return
+		end
+		if buildat.get_time_us() - t0 > 10 * 1000000 then
+			done = true
+			uistack.main:pop(root)
+			ui_utils.show_confirm_dialog(
+				"The previous local server is still running.\n"..
+				"It may be saving. Force kill it?",
+				function()
+					buildat.force_kill_local_server()
+					do_start_local_game(game)
+				end,
+				function()
+				end)
+		end
+	end)
+
+	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
+		local key = event_data:GetInt("Key")
+		if key == KEY_ESC then
+			done = true
+			uistack.main:pop(root)
+		end
+	end)
+end
+
+local function start_local_game(game)
+	buildat.request_stop_local_server()
+	if not buildat.local_server_running() then
+		do_start_local_game(game)
+		return
+	end
+	show_waiting_for_old_server(game)
 end
 
 local function show_local_game()

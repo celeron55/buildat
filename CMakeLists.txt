@@ -1,7 +1,7 @@
 # http://www.apache.org/licenses/LICENSE-2.0
 # Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 
-cmake_minimum_required(VERSION 2.6)
+cmake_minimum_required(VERSION 3.2.3)
 project(buildat)
 
 #
@@ -15,6 +15,10 @@ set(DEBUG_LOG_TIMING FALSE CACHE BOOL "Output log messages of interesting but fl
 #
 # Urho3D dependency (bundled in 3rdparty/Urho3D)
 #
+# 1.7.1 UrhoCommon.cmake treats CMAKE_SOURCE_DIR as the Urho tree. Do not
+# include it from this file. Configure the engine as a sub-build of the Urho
+# root instead of Source/.
+#
 
 set(URHO3D_BUNDLED_HOME "${CMAKE_SOURCE_DIR}/3rdparty/Urho3D")
 if(NOT URHO3D_HOME)
@@ -25,27 +29,47 @@ if(NOT URHO3D_HOME)
 	endif()
 endif()
 message(STATUS "URHO3D_HOME=\"${URHO3D_HOME}\"")
-if(NOT EXISTS "${URHO3D_HOME}/Source/CMakeLists.txt")
+if(NOT EXISTS "${URHO3D_HOME}/CMakeLists.txt")
 	message(FATAL_ERROR "Urho3D not found at URHO3D_HOME=${URHO3D_HOME}")
 endif()
 
-# SHARED is required for the module interface. Set before Urho3D-CMake-common.
+# SHARED is required for the module interface.
 set(URHO3D_LIB_TYPE SHARED CACHE STRING "Urho3D library type (SHARED required by Buildat modules)")
 set(URHO3D_LUA TRUE CACHE BOOL "Enable Urho3D Lua")
 set(URHO3D_SAFE_LUA TRUE CACHE BOOL "Enable Urho3D Lua safety checks")
 set(URHO3D_ANGELSCRIPT FALSE CACHE BOOL "Enable Urho3D AngelScript")
-
-set(CMAKE_MODULE_PATH "${URHO3D_HOME}/Source/CMake/Modules")
-
-if(MINGW)
-	# Urho3D Does some stupid things when MinGW is set, messing up our
-	# precious core/exe linking stage
-	set(MINGW 0)
-	include(Urho3D-CMake-common)
-	set(MINGW 1)
-else()
-	include(Urho3D-CMake-common)
+set(URHO3D_LUAJIT FALSE CACHE BOOL "Enable Urho3D LuaJIT")
+if(NOT DEFINED URHO3D_64BIT)
+	if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+		set(URHO3D_64BIT TRUE)
+	else()
+		set(URHO3D_64BIT FALSE)
+	endif()
 endif()
+
+set(URHO3D_BUILD_DIR "${URHO3D_HOME}/Build")
+if(WIN32)
+	set(URHO3D_LIBRARY_FILE "${URHO3D_BUILD_DIR}/bin/Urho3D.dll")
+	set(URHO3D_IMPLIB_FILE "${URHO3D_BUILD_DIR}/lib/libUrho3D.dll.a")
+else()
+	set(URHO3D_LIBRARY_FILE "${URHO3D_BUILD_DIR}/lib/libUrho3D${CMAKE_SHARED_LIBRARY_SUFFIX}")
+endif()
+
+# Flat includes so existing #include <Scene.h> and RCC++ modules keep working.
+set(URHO3D_INCLUDE_DIRS
+	"${URHO3D_HOME}/Source/Urho3D"
+	"${URHO3D_BUILD_DIR}/include"
+	"${URHO3D_BUILD_DIR}/include/Urho3D"
+	"${URHO3D_BUILD_DIR}/include/Urho3D/ThirdParty"
+	"${URHO3D_BUILD_DIR}/include/Urho3D/ThirdParty/Bullet"
+	"${URHO3D_HOME}/Source/ThirdParty/toluapp/include"
+)
+file(GLOB URHO3D_ENGINE_SUBDIRS "${URHO3D_HOME}/Source/Urho3D/*")
+foreach(URHO3D_ENGINE_SUBDIR ${URHO3D_ENGINE_SUBDIRS})
+	if(IS_DIRECTORY "${URHO3D_ENGINE_SUBDIR}")
+		list(APPEND URHO3D_INCLUDE_DIRS "${URHO3D_ENGINE_SUBDIR}")
+	endif()
+endforeach()
 
 # Build the in-tree engine as part of this project.
 get_filename_component(URHO3D_HOME_ABS "${URHO3D_HOME}" ABSOLUTE)
@@ -54,7 +78,7 @@ if(URHO3D_HOME_ABS STREQUAL URHO3D_BUNDLED_HOME_ABS)
 	if(NOT CMAKE_BUILD_TYPE)
 		set(CMAKE_BUILD_TYPE Debug)
 	endif()
-	file(MAKE_DIRECTORY "${URHO3D_HOME}/Build")
+	file(MAKE_DIRECTORY "${URHO3D_BUILD_DIR}")
 	set(URHO3D_BUNDLE_CMAKE_ARGS
 		-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
 		-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
@@ -68,68 +92,58 @@ if(URHO3D_HOME_ABS STREQUAL URHO3D_BUNDLED_HOME_ABS)
 		-DURHO3D_TOOLS=FALSE
 		-DURHO3D_EXTRAS=FALSE
 		-DURHO3D_DOCS=FALSE
+		-DURHO3D_DATABASE_SQLITE=FALSE
+		-DURHO3D_PCH=FALSE
 		-DURHO3D_64BIT=${URHO3D_64BIT}
 	)
 	execute_process(
-		COMMAND ${CMAKE_COMMAND} ${URHO3D_BUNDLE_CMAKE_ARGS} "${URHO3D_HOME}/Source"
-		WORKING_DIRECTORY "${URHO3D_HOME}/Build"
+		COMMAND ${CMAKE_COMMAND} ${URHO3D_BUNDLE_CMAKE_ARGS} "${URHO3D_HOME}"
+		WORKING_DIRECTORY "${URHO3D_BUILD_DIR}"
 		RESULT_VARIABLE URHO3D_CONFIGURE_RESULT
 	)
 	if(NOT URHO3D_CONFIGURE_RESULT EQUAL 0)
 		message(FATAL_ERROR "Failed to configure bundled Urho3D")
 	endif()
-	if(WIN32)
-		set(URHO3D_LIBRARY_FILE "${URHO3D_HOME}/Bin/Urho3D.dll")
-	else()
-		set(URHO3D_LIBRARY_FILE "${URHO3D_HOME}/Lib/libUrho3D${CMAKE_SHARED_LIBRARY_SUFFIX}")
-	endif()
 	add_custom_target(urho3d_build
-		COMMAND ${CMAKE_COMMAND} --build "${URHO3D_HOME}/Build"
-		WORKING_DIRECTORY "${URHO3D_HOME}/Build"
+		COMMAND ${CMAKE_COMMAND} --build "${URHO3D_BUILD_DIR}" --parallel
+		WORKING_DIRECTORY "${URHO3D_BUILD_DIR}"
 		COMMENT "Building bundled Urho3D"
 		VERBATIM
 	)
-	if(NOT TARGET Urho3D)
-		add_library(Urho3D SHARED IMPORTED GLOBAL)
+endif()
+
+if(NOT TARGET Urho3D)
+	add_library(Urho3D SHARED IMPORTED GLOBAL)
+	set_target_properties(Urho3D PROPERTIES
+		IMPORTED_LOCATION "${URHO3D_LIBRARY_FILE}")
+	if(WIN32)
 		set_target_properties(Urho3D PROPERTIES
-			IMPORTED_LOCATION "${URHO3D_LIBRARY_FILE}")
-		if(WIN32)
-			set_target_properties(Urho3D PROPERTIES
-				IMPORTED_IMPLIB "${URHO3D_HOME}/Lib/libUrho3D.dll.a")
-		endif()
+			IMPORTED_IMPLIB "${URHO3D_IMPLIB_FILE}")
 	endif()
 endif()
 
-find_package(Urho3D REQUIRED)
 # SYSTEM gets rid of annoying warnings that we're not going to fix
 include_directories(SYSTEM ${URHO3D_INCLUDE_DIRS})
 if(NOT WIN32)
 	set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
-	set(CMAKE_INSTALL_RPATH "\$ORIGIN/../lib;${URHO3D_HOME}/Lib")
+	set(CMAKE_INSTALL_RPATH "\$ORIGIN/../lib;${URHO3D_BUILD_DIR}/lib")
 endif()
 
-# Urho3D's Tolua++
-include_directories("${URHO3D_HOME}/Source/ThirdParty/toluapp/include")
-
-# Run some automagic from Urho3D.
-# This appends to at least ${ABSOLUTE_PATH_LIBS} and {LINK_LIBS_ONLY}
-define_dependency_libs("Urho3D")
-
-# Urho3D's Lua
-# Set some variables so that Luabind compiles too
+# Urho3D's Lua (luabind needs the headers and a Lua archive)
 set(LUA_FOUND true)
-set(LUA_INCLUDE_DIRS "${URHO3D_HOME}/Source/ThirdParty/Lua/src")
 if(URHO3D_LUAJIT)
-	set(LUA_LIBRARY "${URHO3D_HOME}/Build/ThirdParty/LuaJIT/libLuaJIT.a")
+	set(LUA_INCLUDE_DIRS "${URHO3D_HOME}/Source/ThirdParty/LuaJIT/src")
+	set(LUA_LIBRARY "${URHO3D_BUILD_DIR}/Source/ThirdParty/LuaJIT/libLuaJIT.a")
 else()
-	set(LUA_LIBRARY "${URHO3D_HOME}/Build/ThirdParty/Lua/libLua.a")
+	set(LUA_INCLUDE_DIRS "${URHO3D_HOME}/Source/ThirdParty/Lua/src")
+	set(LUA_LIBRARY "${URHO3D_BUILD_DIR}/Source/ThirdParty/Lua/libLua.a")
 endif()
 if(WIN32)
-	# Needed by luabind on Windows
 	set(LUA_LIBRARIES ${LUA_LIBRARY})
 	message(STATUS "LUA_LIBRARIES=${LUA_LIBRARIES}")
 endif()
 include_directories(${LUA_INCLUDE_DIRS})
+set(URHO3D_TOLUA_LIBRARY "${URHO3D_BUILD_DIR}/Source/ThirdParty/toluapp/src/lib/libtoluapp.a")
 
 #
 # Bundled libraries
@@ -228,8 +242,7 @@ if(WIN32)
 		wsock32
 		ws2_32
 		psapi # Process stuff
-		${ABSOLUTE_PATH_LIBS}
-		${LINK_LIBS_ONLY}
+		Urho3D
 	)
 endif()
 
@@ -265,9 +278,8 @@ if(BUILD_CLIENT)
 		PolyVoxCore
 		zlib
 		luabind
-		${ABSOLUTE_PATH_LIBS}
-		${LINK_LIBS_ONLY}
-		${URHO3D_HOME}/Build/ThirdParty/toluapp/src/lib/libtoluapp.a
+		Urho3D
+		${URHO3D_TOLUA_LIBRARY}
 		${LUA_LIBRARY}
 	)
 	#if(NOT WIN32)
@@ -298,8 +310,7 @@ if(BUILD_SERVER)
 		${BUILDAT_CORE_NAME}
 		c55lib
 		smallsha1
-		${ABSOLUTE_PATH_LIBS}
-		${LINK_LIBS_ONLY}
+		Urho3D
 	)
 	if(WIN32)
 	else()
@@ -360,7 +371,7 @@ if(WIN32)
 		install(DIRECTORY "${CMAKE_SOURCE_DIR}/3rdparty/cereal/include" DESTINATION "${DST_SHARE}/3rdparty/cereal")
 		install(DIRECTORY "${CMAKE_SOURCE_DIR}/3rdparty/polyvox/library/PolyvoxCore/include" DESTINATION "${DST_SHARE}/3rdparty/polyvox/library/PolyvoxCore")
 		install(DIRECTORY "${URHO3D_HOME}/Source" DESTINATION "${DST_SHARE}/Urho3D")
-		install(FILES "${URHO3D_HOME}/Build/Engine/Urho3D.h" DESTINATION "${DST_SHARE}/Urho3D/Build/Engine")
+		install(FILES "${URHO3D_BUILD_DIR}/include/Urho3D/Urho3D.h" DESTINATION "${DST_SHARE}/Urho3D/Build/include/Urho3D")
 
 		install(DIRECTORY "${COMPILER_USR_PATH}/bin" DESTINATION "${DST_COMPILER}")
 		install(DIRECTORY "${COMPILER_USR_PATH}/i686-w64-mingw32" DESTINATION "${DST_COMPILER}")
@@ -381,9 +392,9 @@ if(WIN32)
 		endforeach()
 	endif()
 
-	install(DIRECTORY "${URHO3D_HOME}/Bin/CoreData" DESTINATION "${DST_SHARE}/Urho3D/Bin")
-	install(DIRECTORY "${URHO3D_HOME}/Bin/Data" DESTINATION "${DST_SHARE}/Urho3D/Bin")
-	install(FILES "${URHO3D_HOME}/Bin/Urho3D.dll" DESTINATION "${DST_BIN}")
+	install(DIRECTORY "${URHO3D_HOME}/bin/CoreData" DESTINATION "${DST_SHARE}/Urho3D/bin")
+	install(DIRECTORY "${URHO3D_HOME}/bin/Data" DESTINATION "${DST_SHARE}/Urho3D/bin")
+	install(FILES "${URHO3D_LIBRARY_FILE}" DESTINATION "${DST_BIN}")
 
 	set(PACKAGE_NAME "${PROJECT_NAME}")
 	if(BUILD_CLIENT AND BUILD_SERVER)

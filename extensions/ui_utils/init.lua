@@ -73,5 +73,64 @@ function M.safe.show_message_dialog(message)
 	end)
 end
 
+function M.safe.show_confirm_dialog(message, on_yes, on_no)
+	local root = uistack.main:push({desc="show_confirm_dialog"})
+
+	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
+	root.defaultStyle = style
+
+	local window = root:CreateChild("Window")
+	window:SetStyleAuto()
+	window:SetLayout(LM_VERTICAL, 10, magic.IntRect(10, 10, 10, 10))
+	window:SetAlignment(HA_LEFT, VA_CENTER)
+
+	local message_text = window:CreateChild("Text")
+	message_text:SetStyleAuto()
+	message_text.text = message
+
+	local function finish(yes)
+		uistack.main:pop(root)
+		if yes then
+			if on_yes then on_yes() end
+		else
+			if on_no then on_no() end
+		end
+	end
+
+	local yes_button = window:CreateChild("Button")
+	yes_button:SetStyleAuto()
+	yes_button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
+	yes_button.minHeight = 20
+	local yes_text = yes_button:CreateChild("Text")
+	yes_text:SetStyleAuto()
+	yes_text.text = "Force kill"
+	yes_text:SetTextAlignment(HA_CENTER)
+
+	local no_button = window:CreateChild("Button")
+	no_button:SetStyleAuto()
+	no_button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
+	no_button.minHeight = 20
+	local no_text = no_button:CreateChild("Text")
+	no_text:SetStyleAuto()
+	no_text.text = "Cancel"
+	no_text:SetTextAlignment(HA_CENTER)
+	no_button:SetFocus(true)
+
+	magic.SubscribeToEvent(yes_button, "Released",
+	function(self, event_type, event_data)
+		finish(true)
+	end)
+	magic.SubscribeToEvent(no_button, "Released",
+	function(self, event_type, event_data)
+		finish(false)
+	end)
+	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
+		local key = event_data:GetInt("Key")
+		if key == KEY_ESC then
+			finish(false)
+		end
+	end)
+end
+
 return M
 -- vim: set noet ts=4 sw=4:
