@@ -12,6 +12,9 @@ local scene = replicate.main_scene
 -- LOD, and there is no player, so no collision shapes are wanted at all.
 voxelworld.lod_distance = 1000
 voxelworld.physics_distance = 1
+-- The server fills the skylight bits of every voxel, so chunk geometry can be
+-- shaded by them. This is what tells a cave apart from a tree's shadow.
+voxelworld.use_skylight = true
 
 -- Benchmark 1: outside the high +X +Y +Z corner, looking down the diagonal at
 -- the opposite one. Pulled far enough back that a 45 degree fov covers the
@@ -72,14 +75,29 @@ local yaw = benchmarks[1].yaw
 local pitch = benchmarks[1].pitch
 local free_look = false
 
--- Global visual parameters. Deliberately plain: this is the baseline the
--- lighting work is measured against.
+-- Lighting. The voxel material is PBR (rough dielectric), lit in HDR and
+-- tonemapped, so the sun can be brighter than white without the whole frame
+-- clipping and a cave can be genuinely dark without going to pure black.
+--
+-- The zone's ambient color is the sky: it is what a surface with full skylight
+-- receives. The mesher scales it per face by the stored skylight, tinting
+-- towards a warm grey as skylight falls, so cave walls end up lit by something
+-- that reads as bounced rock rather than as dim sky.
+local SKY_AMBIENT = magic.Color(0.26, 0.33, 0.46)
+-- Urho's PBR direct lighting is normalized (the BRDF is divided by pi, and so
+-- is the diffuse term inside it), so a sun that reads as bright here is a much
+-- larger number than the same sun under the legacy Diff technique.
+local SUN_BRIGHTNESS = 50.0
+-- Fixed rather than auto-exposed: auto exposure would lift the inside of the
+-- cave back to mid grey, which is the thing being looked at.
+local EXPOSURE_BIAS = 1.6
+
 do
 	local zone_node = scene:CreateChild("Zone")
 	local zone = zone_node:CreateComponent("Zone")
 	zone.boundingBox = magic.BoundingBox(-1000, 1000)
-	zone.ambientColor = magic.Color(0.42, 0.48, 0.60)
-	zone.fogColor = magic.Color(0.68, 0.76, 0.85)
+	zone.ambientColor = SKY_AMBIENT
+	zone.fogColor = magic.Color(0.60, 0.72, 0.88)
 	zone.fogStart = FAR_CLIP * 0.6
 	zone.fogEnd = FAR_CLIP
 	zone.priority = -1
@@ -92,8 +110,8 @@ do
 	local light = node:CreateComponent("Light")
 	light.lightType = magic.LIGHT_DIRECTIONAL
 	light.castShadows = true
-	light.brightness = 1.2
-	light.color = magic.Color(1.0, 1.0, 0.95)
+	light.brightness = SUN_BRIGHTNESS
+	light.color = magic.Color(1.0, 0.96, 0.88)
 end
 
 local camera_node = scene:CreateChild("Camera")
@@ -108,6 +126,19 @@ do
 
 	local viewport = magic.Viewport:new(scene, camera)
 	magic.renderer:SetViewport(0, viewport)
+
+	magic.renderer.HDRRendering = true
+	local rp = viewport.renderPath:Clone()
+	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/BloomHDR.xml"))
+	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/Tonemap.xml"))
+	rp:Append(magic.cache:GetResource("XMLFile",
+			"PostProcess/GammaCorrection.xml"))
+	-- Tonemap.xml ships with Reinhard on; Uncharted2 keeps more contrast in
+	-- the shadows, which is where the whole scene is.
+	rp:SetEnabled("TonemapReinhardEq3", false)
+	rp:SetEnabled("TonemapUncharted2", true)
+	rp:SetShaderParameter("TonemapExposureBias", EXPOSURE_BIAS)
+	viewport.renderPath = rp
 end
 
 voxelworld.set_camera(camera_node)

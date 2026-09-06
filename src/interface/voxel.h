@@ -119,6 +119,15 @@ namespace interface
 
 		VoxelTypeId get_id() const {return data & 0x001fffff; }
 		uint8_t getMSB() const {return (data>>24) & 0xff; }
+
+		// Bits 24..27 hold skylight. It is only meaningful in transparent
+		// voxels: the mesher reads it from the voxel in front of each face.
+		// Nothing computes it by default; a world opts in by filling it.
+		static const uint8_t SKYLIGHT_MAX = 15;
+		uint8_t get_skylight() const {return (data>>24) & 0x0f; }
+		void set_skylight(uint8_t l){
+			data = (data & ~0x0f000000UL) | ((uint32_t)(l & 0x0f) << 24);
+		}
 	};
 }
 // vim: set noet ts=4 sw=4:

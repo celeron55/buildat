@@ -109,19 +109,40 @@ struct Worldgen: public worldgen::GeneratorInterface
 				return noise.result[i] + GROUND_OFFSET;
 			};
 
+			// Everything is built into a local array first so that skylight
+			// can be flood filled over the finished shape, and so that each
+			// voxel is written to the world exactly once, with its light.
+			const int W = uc.getX() - lc.getX() + 1;
+			const int H = uc.getY() - lc.getY() + 1;
+			const int D = uc.getZ() - lc.getZ() + 1;
+			const uint8_t AIR = 1;
+			sv_<uint8_t> ids((size_t)W * H * D, AIR);
+			auto idx = [&](int x, int y, int z) -> size_t {
+				return ((size_t)(y - lc.getY()) * D + (z - lc.getZ())) * W +
+						(x - lc.getX());
+			};
+			auto inside = [&](int x, int y, int z){
+				return x >= lc.getX() && x <= uc.getX() &&
+						y >= lc.getY() && y <= uc.getY() &&
+						z >= lc.getZ() && z <= uc.getZ();
+			};
+			auto set_id = [&](int x, int y, int z, uint8_t id){
+				if(inside(x, y, z))
+					ids[idx(x, y, z)] = id;
+			};
+
 			for(int z = lc.getZ(); z <= uc.getZ(); z++){
 				for(int x = lc.getX(); x <= uc.getX(); x++){
 					float a = surface_at(x, z);
 					for(int y = lc.getY(); y <= uc.getY(); y++){
-						pv::Vector3DInt32 p(x, y, z);
 						if(y < a + 5)
-							world->set_voxel(p, VoxelInstance(2));
+							set_id(x, y, z, 2);
 						else if(y < a + 10)
-							world->set_voxel(p, VoxelInstance(3));
+							set_id(x, y, z, 3);
 						else if(y < a + 11)
-							world->set_voxel(p, VoxelInstance(4));
+							set_id(x, y, z, 4);
 						else
-							world->set_voxel(p, VoxelInstance(1));
+							set_id(x, y, z, AIR);
 					}
 				}
 			}
@@ -138,13 +159,11 @@ struct Worldgen: public worldgen::GeneratorInterface
 					continue;
 
 				for(int y1 = y; y1 < y + 4; y1++)
-					world->set_voxel(pv::Vector3DInt32(x, y1, z),
-							VoxelInstance(6), true);
+					set_id(x, y1, z, 6);
 				for(int x1 = x-2; x1 <= x+2; x1++)
 					for(int y1 = y+3; y1 <= y+7; y1++)
 						for(int z1 = z-2; z1 <= z+2; z1++)
-							world->set_voxel(pv::Vector3DInt32(x1, y1, z1),
-									VoxelInstance(5), true);
+							set_id(x1, y1, z1, 5);
 			}
 
 			// Carve the cave with a sphere swept along the view direction
@@ -192,14 +211,13 @@ struct Worldgen: public worldgen::GeneratorInterface
 				for(int z = z0; z <= z1; z++){
 					for(int y = y0; y <= y1; y++){
 						for(int x = x0; x <= x1; x++){
-							if(!region.containsPoint(pv::Vector3DInt32(x, y, z)))
+							if(!inside(x, y, z))
 								continue;
 							float ddx = x - cx, ddy = y - cy, ddz = z - cz;
 							if(ddx*ddx + ddy*ddy + ddz*ddz >
 									CAVE_RADIUS * CAVE_RADIUS)
 								continue;
-							world->set_voxel(pv::Vector3DInt32(x, y, z),
-									VoxelInstance(1));
+							ids[idx(x, y, z)] = AIR;
 							carved++;
 						}
 					}
@@ -216,6 +234,97 @@ struct Worldgen: public worldgen::GeneratorInterface
 			log_v(MODULE, "Cave: mouth (%i, %.0f, %i), dir (%.2f, %.2f, %.2f), "
 					"%zu brush writes", mouth_x, sy, mouth_z, dx, dy, dz,
 					carved);
+
+			// Skylight. Sunlight falls straight down through air at full
+			// strength and stops at the first solid voxel; from there it
+			// spreads sideways and downwards losing one step per voxel, which
+			// is what makes a cave get darker the deeper it goes while a
+			// hollow just under the surface stays bright.
+			const uint8_t SKY_MAX = VoxelInstance::SKYLIGHT_MAX;
+			sv_<uint8_t> sky((size_t)W * H * D, 0);
+			for(int z = lc.getZ(); z <= uc.getZ(); z++){
+				for(int x = lc.getX(); x <= uc.getX(); x++){
+					uint8_t l = SKY_MAX;
+					for(int y = uc.getY(); y >= lc.getY(); y--){
+						size_t i = idx(x, y, z);
+						if(ids[i] != AIR)
+							l = 0;
+						sky[i] = l;
+					}
+				}
+			}
+			// One pass per level, brightest first: a voxel written during the
+			// pass for level L is picked up by the pass for L-1, so this is a
+			// breadth-first spread without a queue.
+			for(int level = SKY_MAX; level >= 2; level--){
+				for(int y = lc.getY(); y <= uc.getY(); y++){
+				for(int z = lc.getZ(); z <= uc.getZ(); z++){
+				for(int x = lc.getX(); x <= uc.getX(); x++){
+					if(sky[idx(x, y, z)] != level)
+						continue;
+					static const int off[6][3] = {
+						{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1}
+					};
+					for(size_t k = 0; k < 6; k++){
+						int nx = x + off[k][0], ny = y + off[k][1];
+						int nz = z + off[k][2];
+						if(!inside(nx, ny, nz))
+							continue;
+						size_t ni = idx(nx, ny, nz);
+						if(ids[ni] != AIR || sky[ni] >= level - 1)
+							continue;
+						sky[ni] = level - 1;
+					}
+				}
+				}
+				}
+			}
+			// Solid voxels keep the brightest skylight next to them. The
+			// mesher normally reads the air voxel in front of a face, but at a
+			// chunk edge that voxel is outside the chunk it is meshing, and it
+			// falls back to this.
+			sv_<uint8_t> solid_sky((size_t)W * H * D, 0);
+			for(int y = lc.getY(); y <= uc.getY(); y++){
+			for(int z = lc.getZ(); z <= uc.getZ(); z++){
+			for(int x = lc.getX(); x <= uc.getX(); x++){
+				size_t i = idx(x, y, z);
+				if(ids[i] == AIR)
+					continue;
+				static const int off[6][3] = {
+					{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1}
+				};
+				uint8_t best = 0;
+				for(size_t k = 0; k < 6; k++){
+					int nx = x + off[k][0], ny = y + off[k][1];
+					int nz = z + off[k][2];
+					if(!inside(nx, ny, nz))
+						continue;
+					size_t ni = idx(nx, ny, nz);
+					if(ids[ni] == AIR && sky[ni] > best)
+						best = sky[ni];
+				}
+				solid_sky[i] = best;
+			}
+			}
+			}
+
+			size_t dark_air = 0, lit_air = 0;
+			for(int y = lc.getY(); y <= uc.getY(); y++){
+				for(int z = lc.getZ(); z <= uc.getZ(); z++){
+					for(int x = lc.getX(); x <= uc.getX(); x++){
+						size_t i = idx(x, y, z);
+						VoxelInstance v(ids[i]);
+						v.set_skylight(ids[i] == AIR ? sky[i] : solid_sky[i]);
+						world->set_voxel(pv::Vector3DInt32(x, y, z), v);
+						if(ids[i] == AIR){
+							if(sky[i] == 0) dark_air++;
+							else lit_air++;
+						}
+					}
+				}
+			}
+			log_v(MODULE, "Skylight: %zu lit air voxels, %zu fully dark",
+					lit_air, dark_air);
 		});
 	}
 };

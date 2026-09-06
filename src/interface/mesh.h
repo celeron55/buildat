@@ -60,6 +60,8 @@ namespace interface
 		struct TemporaryGeometry
 		{
 			uint atlas_id = 0;
+			// Set when the generator wrote skylight into vertex colors
+			bool has_colors = false;
 			// CustomGeometry can't handle an index buffer
 			PODVector<CustomGeometryVertex> vertex_data;
 		};
@@ -69,9 +71,15 @@ namespace interface
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg);
 
 		// Can be called from any thread
+		// use_skylight: light the geometry by VoxelInstance::get_skylight()
+		// of the voxel in front of each face, along with per-vertex ambient
+		// occlusion and a per-face brightness, written into vertex colors and
+		// read by the PBRVoxel technique. Only worlds that actually fill those
+		// bits should ask for it.
 		void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 				pv::RawVolume<VoxelInstance> &volume,
-				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg);
+				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+				bool use_skylight = false);
 
 		void set_voxel_geometry(CustomGeometry *cg, Context *context,
 				const sm_<uint, TemporaryGeometry> &temp_geoms,
@@ -82,7 +90,8 @@ namespace interface
 		// NOTE: volume is non-const due to PolyVox deficiency
 		void set_voxel_geometry(CustomGeometry *cg, Context *context,
 				pv::RawVolume<VoxelInstance> &volume,
-				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg);
+				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+				bool use_skylight = false);
 
 		// Voxel LOD geometry generation (lod=1 -> 1:1, lod=3 -> 1:3)
 
@@ -94,7 +103,8 @@ namespace interface
 		void generate_voxel_lod_geometry(int lod,
 				sm_<uint, TemporaryGeometry> &result,
 				pv::RawVolume<VoxelInstance> &lod_volume,
-				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg);
+				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+				bool use_skylight = false);
 
 		void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 				const sm_<uint, TemporaryGeometry> &temp_geoms,
@@ -102,7 +112,8 @@ namespace interface
 
 		void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 				pv::RawVolume<VoxelInstance> &volume_orig,
-				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg);
+				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+				bool use_skylight = false);
 
 		// Voxel physics generation
 
