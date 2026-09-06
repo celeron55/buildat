@@ -89,6 +89,8 @@ local SKY_AMBIENT = magic.Color(0.26, 0.33, 0.46)
 -- is the diffuse term inside it), so a sun that reads as bright here is a much
 -- larger number than the same sun under the legacy Diff technique.
 local SUN_BRIGHTNESS = 50.0
+-- Which way the sunlight travels; the sun itself is in the opposite direction
+local SUN_DIR = {x = -0.6, y = -1.0, z = 0.8}
 -- Fixed rather than auto-exposed: auto exposure would lift the inside of the
 -- cave back to mid grey, which is the thing being looked at.
 local EXPOSURE_BIAS = 1.6
@@ -113,7 +115,7 @@ end
 
 do
 	local node = scene:CreateChild("DirectionalLight")
-	node.direction = magic.Vector3(-0.6, -1.0, 0.8)
+	node.direction = magic.Vector3(SUN_DIR.x, SUN_DIR.y, SUN_DIR.z)
 	local light = node:CreateComponent("Light")
 	light.lightType = magic.LIGHT_DIRECTIONAL
 	light.castShadows = true
@@ -208,6 +210,40 @@ buildat.sub_packet("main:cave", function(data)
 	}
 	log:info(string.format("cave mouth (%.1f, %.1f, %.1f) dir (%.2f, %.2f, "..
 			"%.2f); benchmarks 2 and 3 ready", mx, my, mz, dx, dy, dz))
+end)
+
+-- Benchmark 5 looks at a canopy with the sun behind and above it, which is the
+-- framing that says whether light comes through the leaves. The camera goes on
+-- the shaded side of the tree the server picked, on the sun's line, far enough
+-- out to see the whole canopy and high enough to see its top face rather than
+-- only its silhouette.
+local TREE_DISTANCE = 16
+local TREE_EYE_RISE = 5
+
+-- The middle of that canopy, as "x y z"
+buildat.sub_packet("main:tree", function(data)
+	local tx, ty, tz = string.match(data, "([^ ]+) ([^ ]+) ([^ ]+)")
+	if not tz then
+		log:error("main:tree: cannot parse \""..data.."\"")
+		return
+	end
+	tx, ty, tz = tonumber(tx), tonumber(ty), tonumber(tz)
+	-- Downwind of the sunlight, so the sun is behind the tree from here
+	local d = normalized({x = SUN_DIR.x, y = 0, z = SUN_DIR.z})
+	local eye = {
+		x = tx + d.x * TREE_DISTANCE,
+		y = ty + TREE_EYE_RISE,
+		z = tz + d.z * TREE_DISTANCE,
+	}
+	local t_yaw, t_pitch = angles_from_dir(
+			{x = tx - eye.x, y = ty - eye.y, z = tz - eye.z})
+	benchmarks[5] = {
+		name = "Against the sun",
+		x = eye.x, y = eye.y, z = eye.z,
+		yaw = t_yaw, pitch = t_pitch,
+	}
+	log:info(string.format("canopy at (%.1f, %.1f, %.1f); benchmark 5 ready",
+			tx, ty, tz))
 end)
 
 -- Benchmark 4's camera, as "ex ey ez tx ty tz". Placed by the server, which
@@ -369,6 +405,7 @@ do
 	add_button("2 Cave mouth", function() go_to_benchmark(2) end)
 	add_button("3 Inside cave", function() go_to_benchmark(3) end)
 	add_button("4 Pond", function() go_to_benchmark(4) end)
+	add_button("5 Against sun", function() go_to_benchmark(5) end)
 	add_button("Dig shaft (P)", function()
 		buildat.send_packet("main:bench_shaft", "")
 	end)
@@ -394,6 +431,8 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		go_to_benchmark(3)
 	elseif key == magic.KEY_4 then
 		go_to_benchmark(4)
+	elseif key == magic.KEY_5 then
+		go_to_benchmark(5)
 	elseif key == magic.KEY_P then
 		buildat.send_packet("main:bench_shaft", "")
 	elseif key == magic.KEY_O then
