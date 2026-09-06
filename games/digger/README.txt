@@ -11,3 +11,6 @@ main/client_data/tree_top.png
 main/client_data/rock.png
 - CC BY-SA 3.0 2013 PilzAdam <pilzadam@minetest.net>
 
+main/client_data/water.png
+- Copied from games/voxel_lighting, where make_client_data.py generates it
+
