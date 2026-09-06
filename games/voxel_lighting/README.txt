@@ -166,8 +166,10 @@ made an HDR value, so that neither swamps the other.
 The same sky is also drawn, by VoxelSkybox.glsl on a skybox, in the gradient
 the cube map is baked in so that what a surface reflects agrees with what is
 overhead. It has a square sun rather than a disc, since everything else here
-is cubic, and a layer of noise clouds projected onto the sky by direction. A
-skybox has no depth presence, so neither is ever in the way of the ground.
+is cubic, and a layer of clouds projected onto the sky by direction. The
+clouds are noise snapped to a grid of their own and drawn in two flat tones,
+so they come out in squares rather than as a gradient. A skybox has no depth
+presence, so neither is ever in the way of the ground.
 
 The clouds are the one place the drawn sky and the reflected one knowingly
 disagree: they are not in the cube map, so nothing reflects them. Below the

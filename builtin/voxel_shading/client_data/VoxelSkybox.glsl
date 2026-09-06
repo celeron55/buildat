@@ -28,13 +28,16 @@ const float SUN_HALF = 0.075;
 const float SUN_EDGE = 0.004;
 const vec3 SUN_COLOR = vec3(1.7, 1.66, 1.52);
 
-// A flat layer of cloud, projected onto the sky by direction. Coverage is how
-// much of it is cloud at all, softness how far the edges are drawn out.
+// A flat layer of cloud, projected onto the sky by direction and snapped to a
+// grid of its own, so that it is drawn in squares like everything else here.
+// Coverage is how much of the layer is cloud at all; the two thresholds either
+// side of it are where a cloud goes from its edge tone to its lit one.
 const float CLOUD_SCALE = 6.0;
-const float CLOUD_COVERAGE = 0.42;
-const float CLOUD_SOFTNESS = 0.30;
+const float CLOUD_PIXELS = 11.0;   // Cloud grid squares per unit of the layer
+const float CLOUD_COVERAGE = 0.34;
+const float CLOUD_LIT_STEP = 0.07;
 const vec3 CLOUD_LIT = vec3(1.05, 1.04, 1.02);
-const vec3 CLOUD_SHADED = vec3(0.52, 0.57, 0.68);
+const vec3 CLOUD_SHADED = vec3(0.72, 0.76, 0.84);
 const vec2 CLOUD_WIND = vec2(0.010, 0.004);
 // Below this the layer is edge on, and is faded out rather than smeared along
 // the horizon
@@ -57,12 +60,13 @@ float SkyNoise(vec2 p)
                f.y);
 }
 
+// Two octaves rather than three: a third one is finer than the grid the
+// clouds are snapped to and only breaks them up into loose squares
 float CloudDensity(vec2 p)
 {
-    float v = SkyNoise(p) * 0.5;
-    v += SkyNoise(p * 2.03) * 0.25;
-    v += SkyNoise(p * 4.01) * 0.125;
-    return v / 0.875;
+    float v = SkyNoise(p) * 0.65;
+    v += SkyNoise(p * 2.03) * 0.35;
+    return v;
 }
 
 void VS()
@@ -88,12 +92,15 @@ void PS()
     if(d.y > 0.0){
         vec2 p = d.xz / max(d.y, CLOUD_HORIZON) * CLOUD_SCALE +
                 cElapsedTimePS * CLOUD_WIND;
-        float density = CloudDensity(p);
-        float cover = smoothstep(1.0 - CLOUD_COVERAGE,
-                1.0 - CLOUD_COVERAGE + CLOUD_SOFTNESS, density);
-        // Thicker in the middle than at the edges, and lit from the sun's side
-        vec3 cloud = mix(CLOUD_SHADED, CLOUD_LIT, cover);
-        cover *= smoothstep(0.0, CLOUD_HORIZON * 2.0, d.y);
+        // One value per square, so the edges land on the grid rather than
+        // wherever the noise happened to cross the threshold
+        float density = CloudDensity(floor(p * CLOUD_PIXELS) / CLOUD_PIXELS);
+        float threshold = 1.0 - CLOUD_COVERAGE;
+        // Two tones: the thicker middle of a cloud and the squares around it
+        vec3 cloud = density > threshold + CLOUD_LIT_STEP ?
+                CLOUD_LIT : CLOUD_SHADED;
+        float cover = step(threshold, density) *
+                smoothstep(0.0, CLOUD_HORIZON * 2.0, d.y);
         color = mix(color, cloud, cover);
     }
 
