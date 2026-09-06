@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Generates the environment cube map the voxel shader reflects and the water
-# texture. The output is committed, so this only needs running when one of them
+# Generates the two environment cube maps the voxel shader reflects and the
+# water texture. The output is committed, so this only needs running when one of them
 # is being changed.
 #
 # The cube map goes into the client's own data directory, next to the technique
@@ -42,6 +42,20 @@ SUN_DISC = (1.0, 0.97, 0.88)
 SUN_OUTER_DEG = 6.0
 SUN_INNER_DEG = 3.5
 
+# The indoor map, which the shader fades to as the camera loses sight of the
+# sky. The sky's own gradient survives dimmed around the horizon, where windows
+# would be, and gives way to a flat grey both below and above: what is over and
+# under a surface indoors is whatever the room is made of, and neither a blue
+# ceiling nor a lit floor can be assumed here. The grey is the dimmed horizon's
+# own brightness, so they meet without a seam. No sun disc and no glow.
+# A brighter ring at the horizon stands in for the windows, and is most of what
+# makes an indoor reflection interesting rather than flat grey. Its half width
+# is in units of sin(elevation), so 0.45 is about 27 degrees either side.
+INDOOR_DIM = 0.25
+INDOOR_GREY = (0.15, 0.15, 0.15)
+INDOOR_BAND = (0.34, 0.35, 0.38)
+INDOOR_BAND_HALF = 0.45
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))))
 GAME_DIR = os.path.join(ROOT, "games", "voxel_lighting", "main", "client_data")
@@ -74,6 +88,21 @@ def sky_color(d):
     inner = math.cos(math.radians(SUN_INNER_DEG))
     disc = max(0.0, min(1.0, (cos_sun - outer) / (inner - outer)))
     return mix(c, SUN_DISC, disc * disc * (3.0 - 2.0 * disc))
+
+
+def indoor_base(d):
+    if d[1] < 0.0:
+        return INDOOR_GREY
+    sky = mix(HORIZON, ZENITH, d[1] ** 0.5)
+    sky = tuple(c * INDOOR_DIM for c in sky)
+    return mix(sky, INDOOR_GREY, d[1] ** 0.7)
+
+
+def indoor_color(d):
+    d = normalized(d)
+    base = indoor_base(d)
+    band = max(0.0, 1.0 - abs(d[1]) / INDOOR_BAND_HALF)
+    return mix(base, INDOOR_BAND, band * band * (3.0 - 2.0 * band))
 
 
 # The standard cube map face parametrization: u and v run 0..1 from the top
@@ -132,8 +161,7 @@ def make_water():
     print("water.png")
 
 
-def main():
-    make_water()
+def make_cubemap(prefix, color_of):
     for name, to_dir in FACES.items():
         rows = []
         for y in range(SIZE):
@@ -141,12 +169,18 @@ def main():
             row = []
             for x in range(SIZE):
                 sc = (x + 0.5) / SIZE * 2.0 - 1.0
-                for c in sky_color(to_dir(sc, tc)):
+                for c in color_of(to_dir(sc, tc)):
                     row.append(max(0, min(255, int(c * 255.0 + 0.5))))
             rows.append(row)
-        write_png_size(os.path.join(SKY_DIR, "VoxelSky_" + name + ".png"),
+        write_png_size(os.path.join(SKY_DIR, prefix + "_" + name + ".png"),
                 rows, SIZE)
-        print("VoxelSky_" + name + ".png")
+        print(prefix + "_" + name + ".png")
+
+
+def main():
+    make_water()
+    make_cubemap("VoxelSky", sky_color)
+    make_cubemap("VoxelSkyIndoor", indoor_color)
 
 
 main()

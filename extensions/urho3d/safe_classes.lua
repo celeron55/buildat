@@ -439,8 +439,16 @@ function M.define(dst, util)
 					"DefineColor", {}, {"CustomGeometry", "Color"}),
 			Commit = util.self_function(
 					"Commit", {}, {"CustomGeometry"}),
-			GetMaterial = util.self_function(
-					"GetMaterial", {{"Material", "nil"}}, {"CustomGeometry", "number"}),
+			-- Urho returns null past the last geometry, which is how a caller
+			-- finds out how many there are
+			GetMaterial = util.wrap_function({"CustomGeometry", "number"},
+			function(self, index)
+				local material = self:GetMaterial(index)
+				if not material then
+					return nil
+				end
+				return util.wrap_instance("Material", material)
+			end),
 			SetMaterial = util.self_function(
 					"SetMaterial", {}, {"CustomGeometry", "number", "Material"}),
 		},
@@ -519,8 +527,13 @@ function M.define(dst, util)
 			--	log:info("Material:SetTexture("..dump(index)..", "..dump(texture)..")")
 			--	self:SetTexture(index, texture)
 			--end),
-			SetShaderParameter = util.self_function(
-					"SetShaderParameter", {}, {"Material", "string", "Variant"}),
+			SetShaderParameter = util.wrap_function(
+				{"Material", "string",
+					{"number", "boolean", "Vector2", "Color", "Variant"}},
+				function(self, name, value)
+					self:SetShaderParameter(name, Variant(value))
+				end
+			),
 			SetTexture = util.self_function(
 					"SetTexture", {}, {"Material", "number", "Texture"}),
 			SetTechnique = util.self_function(
