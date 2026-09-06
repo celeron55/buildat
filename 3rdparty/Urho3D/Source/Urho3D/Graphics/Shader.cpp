@@ -182,11 +182,22 @@ bool Shader::ProcessSource(String& code, Deserializer& source)
 
         if (line.StartsWith("#include"))
         {
-            String includeFileName = GetPath(source.GetName()) + line.Substring(9).Replaced("\"", "").Trimmed();
+            String includeName = line.Substring(9).Replaced("\"", "").Trimmed();
 
-            SharedPtr<File> includeFile = cache->GetFile(includeFileName);
+            SharedPtr<File> includeFile = cache->GetFile(GetPath(source.GetName()) + includeName, false);
+            // buildat: a shader outside the shader directory, as one shipped by
+            // a game is, still gets the engine's own includes
             if (!includeFile)
+            {
+                Graphics* graphics = GetSubsystem<Graphics>();
+                if (graphics)
+                    includeFile = cache->GetFile(graphics->GetShaderPath() + includeName, false);
+            }
+            if (!includeFile)
+            {
+                URHO3D_LOGERROR("Could not find shader include " + includeName + " of " + source.GetName());
                 return false;
+            }
 
             // Add the include file into the current code recursively
             if (!ProcessSource(code, *includeFile))

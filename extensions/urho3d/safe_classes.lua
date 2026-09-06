@@ -439,8 +439,16 @@ function M.define(dst, util)
 					"DefineColor", {}, {"CustomGeometry", "Color"}),
 			Commit = util.self_function(
 					"Commit", {}, {"CustomGeometry"}),
-			GetMaterial = util.self_function(
-					"GetMaterial", {{"Material", "nil"}}, {"CustomGeometry", "number"}),
+			-- Urho returns null past the last geometry, which is how a caller
+			-- finds out how many there are
+			GetMaterial = util.wrap_function({"CustomGeometry", "number"},
+			function(self, index)
+				local material = self:GetMaterial(index)
+				if not material then
+					return nil
+				end
+				return util.wrap_instance("Material", material)
+			end),
 			SetMaterial = util.self_function(
 					"SetMaterial", {}, {"CustomGeometry", "number", "Material"}),
 		},
@@ -502,23 +510,6 @@ function M.define(dst, util)
 		},
 	})
 
-	util.wc("Zone", {
-		inherited_from_by_wrapper = dst.Component,
-		instance = {
-		},
-		properties = {
-			boundingBox = util.simple_property(dst.BoundingBox),
-			ambientColor = util.simple_property(dst.Color),
-			fogColor = util.simple_property(dst.Color),
-			fogStart = util.simple_property("number"),
-			fogEnd = util.simple_property("number"),
-			priority = util.simple_property("number"),
-			heightFog = util.simple_property("boolean"),
-			override = util.simple_property("boolean"),
-			ambientGradient = util.simple_property("boolean"),
-		},
-	})
-
 	util.wc("Model", {
 		inherited_from_by_wrapper = dst.Resource,
 	})
@@ -536,8 +527,14 @@ function M.define(dst, util)
 			--	log:info("Material:SetTexture("..dump(index)..", "..dump(texture)..")")
 			--	self:SetTexture(index, texture)
 			--end),
-			SetShaderParameter = util.self_function(
-					"SetShaderParameter", {}, {"Material", "string", "Variant"}),
+			SetShaderParameter = util.wrap_function(
+				{"Material", "string",
+					{"number", "boolean", "Vector2", "Vector3", "Color",
+						"Variant"}},
+				function(self, name, value)
+					self:SetShaderParameter(name, Variant(value))
+				end
+			),
 			SetTexture = util.self_function(
 					"SetTexture", {}, {"Material", "number", "Texture"}),
 			SetTechnique = util.self_function(
@@ -552,6 +549,25 @@ function M.define(dst, util)
 
 	util.wc("Texture2D", {
 		inherited_from_by_wrapper = dst.Texture,
+	})
+
+	util.wc("Zone", {
+		inherited_from_by_wrapper = dst.Component,
+		instance = {
+		},
+		properties = {
+			boundingBox = util.simple_property(dst.BoundingBox),
+			ambientColor = util.simple_property(dst.Color),
+			fogColor = util.simple_property(dst.Color),
+			fogStart = util.simple_property("number"),
+			fogEnd = util.simple_property("number"),
+			priority = util.simple_property("number"),
+			heightFog = util.simple_property("boolean"),
+			override = util.simple_property("boolean"),
+			ambientGradient = util.simple_property("boolean"),
+			-- The environment cube map the PBR shaders reflect
+			zoneTexture = util.simple_property(dst.Texture),
+		},
 	})
 
 	util.wc("Font", {
@@ -693,6 +709,11 @@ function M.define(dst, util)
 
 	util.wc("Scene", {
 		inherited_from_by_wrapper = dst.Node,
+		properties = {
+			-- What cElapsedTime(PS) in the shaders is
+			elapsedTime = util.simple_property("number"),
+			timeScale = util.simple_property("number"),
+		},
 		unsafe_constructor = util.wrap_function({}, function()
 			return util.wrap_instance("Scene", Scene())
 		end),

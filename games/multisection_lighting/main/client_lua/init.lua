@@ -6,6 +6,7 @@ local cereal = require("buildat/extension/cereal")
 local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
+local voxel_shading = require("buildat/module/voxel_shading")
 
 local scene = replicate.main_scene
 
@@ -36,6 +37,14 @@ local FAR_CLIP = 400
 -- that the opening reads as a bright hole at the end of a dark tunnel.
 local CAVE_OUTSIDE_DISTANCE = 22
 local CAVE_INSIDE_DISTANCE = 26
+
+-- Light through leaves is animated off the scene's clock, so a screenshot of
+-- it is different every run. F holds the clock here, which is what check.txt
+-- does before it shoots anything; it is a toggle rather than something the
+-- benchmark cameras do by themselves, so that just looking around the scene
+-- always shows it moving. Any value would do for the moment to stop at.
+local FROZEN_TIME = 12.0
+local time_frozen = false
 
 local MOVE_SPEED = 20
 local MOUSE_SENSITIVITY = 0.15
@@ -91,6 +100,8 @@ local SKY_AMBIENT = magic.Color(0.26, 0.33, 0.46)
 -- is the diffuse term inside it), so a sun that reads as bright here is a much
 -- larger number than the same sun under the legacy Diff technique.
 local SUN_BRIGHTNESS = 50.0
+-- The way the light travels, so the sun is the other way
+local SUN_DIR = {x = -0.6, y = -1.0, z = 0.8}
 -- Fixed rather than auto-exposed: auto exposure would lift the inside of the
 -- cave back to mid grey, which is the thing being looked at.
 local EXPOSURE_BIAS = 1.6
@@ -105,17 +116,22 @@ do
 	zone.fogEnd = FAR_CLIP
 	zone.priority = -1
 	zone.override = true
+	-- Same sky as voxel_lighting; see its init.lua
+	zone.zoneTexture = magic.cache:GetResource("TextureCube",
+			voxel_shading.sky_cubemap)
 end
 
 do
 	local node = scene:CreateChild("DirectionalLight")
-	node.direction = magic.Vector3(-0.6, -1.0, 0.8)
+	node.direction = magic.Vector3(SUN_DIR.x, SUN_DIR.y, SUN_DIR.z)
 	local light = node:CreateComponent("Light")
 	light.lightType = magic.LIGHT_DIRECTIONAL
 	light.castShadows = true
 	light.brightness = SUN_BRIGHTNESS
 	light.color = magic.Color(1.0, 0.96, 0.88)
 end
+
+voxel_shading.create_skybox(scene, SUN_DIR)
 
 local camera_node = scene:CreateChild("Camera")
 do
@@ -145,8 +161,17 @@ do
 end
 
 voxelworld.set_camera(camera_node)
+voxel_shading.set_camera(camera_node)
 
 magic.input:SetMouseVisible(true)
+
+local function set_time_frozen(enable)
+	time_frozen = enable
+	if time_frozen then
+		scene.elapsedTime = FROZEN_TIME
+	end
+	log:info("wind frozen: "..tostring(time_frozen))
+end
 
 local function set_free_look(enable)
 	free_look = enable
@@ -170,6 +195,9 @@ local function go_to_benchmark(i)
 	pitch = b.pitch
 	camera_node.position = magic.Vector3(b.x, b.y, b.z)
 	apply_angles(camera_node, yaw, pitch)
+	-- Snapped, or a screenshot taken right after this would catch the blend
+	-- part way and differ from run to run
+	voxel_shading.update(nil)
 	log:info(string.format("benchmark %d (%s): camera (%.1f, %.1f, %.1f) "..
 			"yaw %.1f pitch %.1f", i, b.name, b.x, b.y, b.z, yaw, pitch))
 end
@@ -350,6 +378,9 @@ do
 	add_button("Verify light (V)", function()
 		buildat.send_packet("main:verify_skylight", "")
 	end)
+	add_button("Freeze wind (F)", function()
+		set_time_frozen(not time_frozen)
+	end)
 
 	magic.ui:SetFocusElement(nil)
 end
@@ -370,6 +401,8 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		buildat.send_packet("main:bench_slab", "")
 	elseif key == magic.KEY_V then
 		buildat.send_packet("main:verify_skylight", "")
+	elseif key == magic.KEY_F then
+		set_time_frozen(not time_frozen)
 	elseif key == magic.KEY_ESCAPE then
 		if free_look then
 			set_free_look(false)
@@ -378,6 +411,10 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 end)
 
 magic.SubscribeToEvent("Update", function(event_type, event_data)
+	if time_frozen then
+		scene.elapsedTime = FROZEN_TIME
+	end
+	voxel_shading.update(event_data:GetFloat("TimeStep"))
 	if not free_look then
 		pointed_node.enabled = false
 		return

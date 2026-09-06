@@ -1,0 +1,490 @@
+// Copied from CoreData/Shaders/GLSL/PBRLitSolid.glsl (Urho3D 1.7.1). Two
+// changes, both about how voxel skylight reaches the ambient term:
+//
+//   VS  vVertexLight mixes the zone ambient with the vertex color instead of
+//       being the zone ambient alone
+//   PS  the vertex color is not multiplied into diffColor
+//
+// The mesher packs a voxel's lighting into the vertex color as
+//   rgb = light bounced off nearby surfaces, already attenuated
+//   a   = how much of the sky the surface sees
+// so the ambient a surface receives is
+//   cAmbientColor.rgb * color.a + color.rgb
+// which is a real mix of two colors: sky blue where the sky is visible, and
+// the neutral grey of bounced light where it is not. Ambient occlusion and a
+// per-face brightness are already folded into both terms by the mesher.
+//
+// Direct light is deliberately left alone. The sun is shadow mapped, so
+// attenuating it by skylight as well would darken shadowed faces twice.
+//
+// On top of that, two things the stock PBR shaders do differently:
+//
+//   VOXELNORMALMAP  the tangent frame is built from the derivatives of the
+//       world position and the texture coordinate rather than from a vertex
+//       attribute, because the voxel mesher writes no tangents
+//   VOXELIBL  reflections of the zone cube map, specular only. The diffuse
+//       half of image based lighting is left out: the skylight in the vertex
+//       color is already the scene's ambient diffuse, and adding an
+//       unoccluded sky on top of it would light the inside of a cave. The
+//       specular term is scaled by the same skylight for the same reason.
+//       cIndoorBlend fades that to sEnvCubeMap, a dimmer sky for when the
+//       camera cannot see the real one; the game sets both. Only which map is
+//       reflected changes; the skylight scaling applies to either.
+//   VOXELSPOTS  which parts of a surface are turned to catch the light at this
+//       moment. Worked out per pixel from world position and time rather than
+//       stored, so the specks come and go the way leaves in wind do, and a
+//       surface with no animated normal map can still sparkle.
+//   VOXELTRANSLUCENCY  light reaching a surface from behind and coming through
+//       it at those spots, tinted by the surface's own color. This is why a
+//       leaf against the sun reads yellow-green and not as the blue of the sky
+//       lighting its front.
+//
+// sSpecMap carries roughness in r, where Urho's own PBR shaders read it, and
+// spec_strength, translucency and the spot fraction in gba. Metalness is not
+// per texel here; nothing has been metal yet, so it stays cMetallic.
+
+#include "Uniforms.glsl"
+#include "Samplers.glsl"
+#include "Transform.glsl"
+#include "ScreenPos.glsl"
+#include "Lighting.glsl"
+#include "Constants.glsl"
+#include "Fog.glsl"
+#include "PBR.glsl"
+#include "IBL.glsl"
+#line 30010
+
+#if defined(NORMALMAP)
+    varying vec4 vTexCoord;
+    varying vec4 vTangent;
+#else
+    varying vec2 vTexCoord;
+#endif
+varying vec3 vNormal;
+varying vec4 vWorldPos;
+#ifdef PERPIXEL
+    #ifdef SHADOW
+        #ifndef GL_ES
+            varying vec4 vShadowPos[NUMCASCADES];
+        #else
+            varying highp vec4 vShadowPos[NUMCASCADES];
+        #endif
+    #endif
+    #ifdef SPOTLIGHT
+        varying vec4 vSpotPos;
+    #endif
+    #ifdef POINTLIGHT
+        varying vec3 vCubeMaskVec;
+    #endif
+#else
+    varying vec3 vVertexLight;
+    // How much of the sky this vertex sees, ambient occlusion included; the
+    // alpha the mesher packed into the vertex color
+    varying float vSkyVisibility;
+    varying vec4 vScreenPos;
+    #ifdef ENVCUBEMAP
+        varying vec3 vReflectionVec;
+    #endif
+    #if defined(LIGHTMAP) || defined(AO)
+        varying vec2 vTexCoord2;
+    #endif
+#endif
+
+void VS()
+{
+    mat4 modelMatrix = iModelMatrix;
+    vec3 worldPos = GetWorldPos(modelMatrix);
+    gl_Position = GetClipPos(worldPos);
+    vNormal = GetWorldNormal(modelMatrix);
+    vWorldPos = vec4(worldPos, GetDepth(gl_Position));
+
+
+    #if defined(NORMALMAP) || defined(DIRBILLBOARD)
+        vec4 tangent = GetWorldTangent(modelMatrix);
+        vec3 bitangent = cross(tangent.xyz, vNormal) * tangent.w;
+        vTexCoord = vec4(GetTexCoord(iTexCoord), bitangent.xy);
+        vTangent = vec4(tangent.xyz, bitangent.z);
+    #else
+        vTexCoord = GetTexCoord(iTexCoord);
+    #endif
+
+    #ifdef PERPIXEL
+        // Per-pixel forward lighting
+        vec4 projWorldPos = vec4(worldPos, 1.0);
+
+        #ifdef SHADOW
+            // Shadow projection: transform from world space to shadow space
+            for (int i = 0; i < NUMCASCADES; i++)
+                vShadowPos[i] = GetShadowPos(i, vNormal, projWorldPos);
+        #endif
+
+        #ifdef SPOTLIGHT
+            // Spotlight projection: transform from world space to projector texture coordinates
+            vSpotPos = projWorldPos * cLightMatrices[0];
+        #endif
+
+        #ifdef POINTLIGHT
+            vCubeMaskVec = (worldPos - cLightPos.xyz) * mat3(cLightMatrices[0][0].xyz, cLightMatrices[0][1].xyz, cLightMatrices[0][2].xyz);
+        #endif
+    #else
+        // Ambient & per-vertex lighting
+        #if defined(LIGHTMAP) || defined(AO)
+            // If using lightmap, disregard zone ambient light
+            // If using AO, calculate ambient in the PS
+            vVertexLight = vec3(0.0, 0.0, 0.0);
+            vTexCoord2 = iTexCoord1;
+        #else
+            vVertexLight = GetAmbient(GetZonePos(worldPos)) * iColor.a +
+                iColor.rgb;
+        #endif
+        vSkyVisibility = iColor.a;
+
+        #ifdef NUMVERTEXLIGHTS
+            for (int i = 0; i < NUMVERTEXLIGHTS; ++i)
+                vVertexLight += GetVertexLight(i, worldPos, vNormal) * cVertexLights[i * 3].rgb;
+        #endif
+
+        vScreenPos = GetScreenPos(gl_Position);
+
+        #ifdef ENVCUBEMAP
+            vReflectionVec = worldPos - cCameraPos;
+        #endif
+    #endif
+}
+
+#ifdef COMPILEPS
+    // How much of the surface is letting light through at this point, right
+    // now. A leaf lets light past when it happens to have a gap behind it, and
+    // in any wind that is a different leaf a moment later, so this is a
+    // function of where and when rather than a map: nothing about it is stored
+    // per texel.
+    //
+    // The world is diced into cells a fraction of a voxel across. Each cell
+    // gets its own phase and its own rate from a hash of its position, and
+    // opens and closes on a sine of those; the threshold decides how much of
+    // that cycle counts as open, and so what fraction of cells are open at
+    // once. A slow term along the wind direction is added to the phase, which
+    // turns what would be an even twinkle into gusts crossing the surface.
+    // 0 where the camera sees full sky, 1 where it sees none
+    uniform float cIndoorBlend;
+
+    const float TRANSMISSION_CELLS = 16.0;   // Cells per voxel, per axis
+    // A material whose own roughness is already below this cannot glint, so
+    // water is given a duller base than a still pond would have
+    const float SPOT_ROUGHNESS = 0.10;
+    // How far a spot turns away from the surface it is on. This is what makes
+    // a spot catch the sun: glossiness on its own only shows where the thing
+    // being reflected has some contrast to it, and the sky in the cube map is
+    // a smooth gradient with no sun drawn in it, so a sharper reflection of it
+    // looks no different from a blurred one. A turned normal moves the direct
+    // sunlight's own highlight instead, which is the bright thing in the scene.
+    const float SPOT_TILT = 0.45;
+    // Bigger than the moving ones: a facet is a chip of rock, not a leaf.
+    // Taken from the world position for the same reason as those, that a map
+    // lives in one voxel face and would repeat every voxel.
+    const float STATIC_SPOT_CELLS = 6.0;     // Cells per voxel, per axis
+    const float STATIC_SPOT_TILT = 0.35;
+    const float TRANSMISSION_RATE = 0.03;    // Cycles per second, mean
+    const vec3 TRANSMISSION_WIND = vec3(0.35, 0.0, -0.2);
+
+    // fract(sin(dot(...))) loses its uniformity once the coordinates get
+    // large, and a cell index here is the world position times sixteen, so
+    // this hashes by mixing fractional parts instead and stays even across the
+    // whole volume.
+    float TransmissionHash(vec3 cell)
+    {
+        vec3 p = fract(cell * 0.1031);
+        p += dot(p, p.yzx + 33.33);
+        return fract((p.x + p.y) * p.z);
+    }
+
+    // How much of a spot this point is, right now. Each cell runs its own
+    // cycle, at its own rate and from its own starting point, and is a spot for
+    // openFraction of it. Working in the cycle's own
+    // 0..1 position rather than in the height of a wave keeps that fraction
+    // exact: near the top of a sine the wave is almost flat, so a threshold
+    // that lets 4 per cent of cells fully open leaves another 10 per cent
+    // hovering just under it, and the surface hazes over instead of speckling.
+    // Which way a spot has turned, before it is flattened onto the surface.
+    // Constant per cell, so a spot holds still while it is open rather than
+    // shimmering within itself.
+    vec3 GetSpotTilt(vec3 worldPos, float cells)
+    {
+        vec3 cell = floor(worldPos * cells);
+        return vec3(TransmissionHash(cell + 41.0),
+            TransmissionHash(cell + 67.0),
+            TransmissionHash(cell + 89.0)) * 2.0 - 1.0;
+    }
+
+    // A still spot is on or off with no fade: a facet has an edge, and its
+    // tilt is constant across the cell, so it reads as one flat surface.
+    float GetStaticSpots(vec3 worldPos, float fraction)
+    {
+        if (fraction <= 0.0)
+            return 0.0;
+        vec3 cell = floor(worldPos * STATIC_SPOT_CELLS);
+        return TransmissionHash(cell + 7.0) < fraction ? 1.0 : 0.0;
+    }
+
+    float GetSurfaceSpots(vec3 worldPos, float openFraction)
+    {
+        if (openFraction <= 0.0)
+            return 1.0;
+        vec3 cell = floor(worldPos * TRANSMISSION_CELLS);
+        float rate = TRANSMISSION_RATE * (0.6 + TransmissionHash(cell + 19.0));
+        // A slow ramp along the wind direction, which turns what would be an
+        // even twinkle into gusts crossing the surface
+        float gust = dot(worldPos, TRANSMISSION_WIND);
+        float u = fract(TransmissionHash(cell) + cElapsedTimePS * rate + gust);
+        // Fade in and out rather than blink, using a quarter of the window at
+        // each end so that a gap is still fully open in the middle of it
+        float edge = openFraction * 0.25;
+        return smoothstep(0.0, edge, u) *
+            (1.0 - smoothstep(openFraction - edge, openFraction, u));
+    }
+#endif
+
+void PS()
+{
+    // Get material diffuse albedo
+    #ifdef DIFFMAP
+        vec4 diffInput = texture2D(sDiffMap, vTexCoord.xy);
+        #ifdef ALPHAMASK
+            if (diffInput.a < 0.5)
+                discard;
+        #endif
+        vec4 diffColor = cMatDiffColor * diffInput;
+    #else
+        vec4 diffColor = cMatDiffColor;
+    #endif
+
+
+    // How much of a spot this pixel is. Used twice: to gloss the surface here,
+    // and to let light through it in the lighting below.
+    float surfaceSpots = 0.0;
+    float staticSpots = 0.0;
+
+    #ifdef METALLIC
+        vec4 surfaceSrc = texture2D(sSpecMap, vTexCoord.xy);
+
+        float roughness = surfaceSrc.r + cRoughness;
+        float metalness = cMetallic;
+        float specStrength = surfaceSrc.g;
+        #ifdef VOXELSPOTS
+            surfaceSpots = GetSurfaceSpots(vWorldPos.xyz, surfaceSrc.a);
+            staticSpots = GetStaticSpots(vWorldPos.xyz,
+                texture2D(sNormalMap, vTexCoord.xy).a);
+            float spotMask = max(surfaceSpots, staticSpots);
+            roughness = mix(roughness, SPOT_ROUGHNESS, spotMask);
+            // Full strength however matte the rest is, so that rock can be
+            // dull everywhere except at its facets
+            specStrength = mix(specStrength, 1.0, spotMask);
+        #endif
+    #else
+        float roughness = cRoughness;
+        float metalness = cMetallic;
+        float specStrength = 1.0;
+    #endif
+
+    roughness *= roughness;
+
+    roughness = clamp(roughness, ROUGHNESS_FLOOR, 1.0);
+    metalness = clamp(metalness, METALNESS_FLOOR, 1.0);
+
+    vec3 specColor = mix(0.08 * specStrength * cMatSpecColor.rgb,
+        diffColor.rgb, metalness);
+    diffColor.rgb = diffColor.rgb - diffColor.rgb * metalness;
+
+    // Get normal
+    #if defined(NORMALMAP) || defined(DIRBILLBOARD)
+        vec3 tangent = vTangent.xyz;
+        vec3 bitangent = vec3(vTexCoord.zw, vTangent.w);
+        mat3 tbn = mat3(tangent, bitangent, vNormal);
+    #endif
+
+    #ifdef NORMALMAP
+        vec3 nn = DecodeNormal(texture2D(sNormalMap, vTexCoord.xy));
+        //nn.rg *= 2.0;
+        vec3 normal = normalize(tbn * nn);
+    #elif defined(VOXELNORMALMAP)
+        // Cotangent frame: the tangent is the direction in world space that
+        // the texture's u axis runs, recovered from the screen space
+        // derivatives. Voxel faces are flat and axis aligned, so this is exact
+        // for them and costs no vertex attribute.
+        vec3 geomNormal = normalize(vNormal);
+        vec3 dpdx = dFdx(vWorldPos.xyz);
+        vec3 dpdy = dFdy(vWorldPos.xyz);
+        vec2 dtdx = dFdx(vTexCoord.xy);
+        vec2 dtdy = dFdy(vTexCoord.xy);
+        vec3 dpdyPerp = cross(dpdy, geomNormal);
+        vec3 dpdxPerp = cross(geomNormal, dpdx);
+        vec3 tangentU = dpdyPerp * dtdx.x + dpdxPerp * dtdy.x;
+        vec3 tangentV = dpdyPerp * dtdx.y + dpdxPerp * dtdy.y;
+        float invMax = inversesqrt(max(dot(tangentU, tangentU),
+            dot(tangentV, tangentV)));
+        vec3 nn = DecodeNormal(texture2D(sNormalMap, vTexCoord.xy));
+        vec3 normal = normalize(mat3(tangentU * invMax, tangentV * invMax,
+            geomNormal) * nn);
+    #else
+        vec3 normal = normalize(vNormal);
+    #endif
+
+    #ifdef VOXELSPOTS
+        // A spot is a piece of the surface that has turned: a leaf facing a
+        // different way, or a ripple. Same mask as the gloss and the
+        // transmission, so all three are the same event.
+        //
+        // The turn is taken across the surface rather than in any direction.
+        // A free direction tips some normals past the horizon, and those
+        // reflect the ground half of the cube map: brown specks on water.
+        vec3 spotTilt =
+            GetSpotTilt(vWorldPos.xyz, TRANSMISSION_CELLS) *
+                (SPOT_TILT * surfaceSpots) +
+            GetSpotTilt(vWorldPos.xyz, STATIC_SPOT_CELLS) *
+                (STATIC_SPOT_TILT * staticSpots);
+        spotTilt -= normal * dot(spotTilt, normal);
+        normal = normalize(normal + spotTilt);
+    #endif
+
+    // Get fog factor
+    #ifdef HEIGHTFOG
+        float fogFactor = GetHeightFogFactor(vWorldPos.w, vWorldPos.y);
+    #else
+        float fogFactor = GetFogFactor(vWorldPos.w);
+    #endif
+
+    #if defined(PERPIXEL)
+        // Per-pixel forward lighting
+        vec3 lightColor;
+        vec3 lightDir;
+        vec3 finalColor;
+
+        float atten = 1;
+
+        #if defined(DIRLIGHT)
+            atten = GetAtten(normal, vWorldPos.xyz, lightDir);
+        #elif defined(SPOTLIGHT)
+            atten = GetAttenSpot(normal, vWorldPos.xyz, lightDir);
+        #else
+            atten = GetAttenPoint(normal, vWorldPos.xyz, lightDir);
+        #endif
+
+        float shadow = 1.0;
+        #ifdef SHADOW
+            shadow = GetShadow(vShadowPos, vWorldPos.w);
+        #endif
+
+        #if defined(SPOTLIGHT)
+            lightColor = vSpotPos.w > 0.0 ? texture2DProj(sLightSpotMap, vSpotPos).rgb * cLightColor.rgb : vec3(0.0, 0.0, 0.0);
+        #elif defined(CUBEMASK)
+            lightColor = textureCube(sLightCubeMap, vCubeMaskVec).rgb * cLightColor.rgb;
+        #else
+            lightColor = cLightColor.rgb;
+        #endif
+        vec3 toCamera = normalize(cCameraPosPS - vWorldPos.xyz);
+        vec3 lightVec = normalize(lightDir);
+        float ndl = clamp((dot(normal, lightVec)), M_EPSILON, 1.0);
+
+        vec3 BRDF = GetBRDF(vWorldPos.xyz, lightDir, lightVec, toCamera, normal, roughness, diffColor.rgb, specColor);
+
+        finalColor.rgb = BRDF * lightColor * (atten * shadow) / M_PI;
+
+        #if defined(VOXELTRANSLUCENCY) && defined(METALLIC)
+            // Light through the surface from the far side. It needs the light
+            // on the back (atten is zero there, which is why this cannot ride
+            // on it) and the camera roughly opposite the light, which is the
+            // one geometry where a thin surface glows.
+            //
+            // simplified: not multiplied by shadow. A surface lit from behind
+            // is its own shadow caster, so the shadow map says it is shadowed
+            // and the term would never appear. That also means a leaf in
+            // somebody else's shadow glows; with voxel geometry, where only
+            // the outside of a canopy is meshed at all, that is rare enough to
+            // leave. Sampling the shadow map along the transmission direction
+            // would be the fix.
+            //
+            // The light keeps only part of the surface's color on the way
+            // through. A spot where light comes through a canopy is partly a
+            // gap, which passes the sun unchanged, and partly thin leaf, which
+            // tints it; what a surface transmits is not what it reflects. Using
+            // the albedo raw applies the leaf's green a second time and the
+            // spots come out as saturated as the texture.
+            const float TRANSMISSION_TINT = 0.55;
+            vec3 transmitted = mix(vec3(1.0), diffColor.rgb,
+                TRANSMISSION_TINT);
+            float backNdl = max(0.0, -dot(normal, lightVec));
+            float forward = pow(max(0.0, dot(-lightVec, toCamera)), 6.0);
+            // A material with no spots at all is translucent all over
+            #ifdef VOXELSPOTS
+                float through = surfaceSrc.a > 0.0 ? surfaceSpots : 1.0;
+            #else
+                float through = 1.0;
+            #endif
+            finalColor.rgb += surfaceSrc.b * through * transmitted *
+                lightColor * (backNdl * forward) / M_PI;
+        #endif
+
+        #ifdef AMBIENT
+            finalColor += cAmbientColor.rgb * diffColor.rgb;
+            finalColor += cMatEmissiveColor;
+            gl_FragColor = vec4(GetFog(finalColor, fogFactor), diffColor.a);
+        #else
+            gl_FragColor = vec4(GetLitFog(finalColor, fogFactor), diffColor.a);
+        #endif
+    #elif defined(DEFERRED)
+        // Fill deferred G-buffer
+        const vec3 spareData = vec3(0,0,0); // Can be used to pass more data to deferred renderer
+        gl_FragData[0] = vec4(specColor, spareData.r);
+        gl_FragData[1] = vec4(diffColor.rgb, spareData.g);
+        gl_FragData[2] = vec4(normal * roughness, spareData.b);
+        gl_FragData[3] = vec4(EncodeDepth(vWorldPos.w), 0.0);
+    #else
+        // Ambient & per-vertex lighting
+        vec3 finalColor = vVertexLight * diffColor.rgb;
+        #ifdef AO
+            // If using AO, the vertex light ambient is black, calculate occluded ambient here
+            finalColor += texture2D(sEmissiveMap, vTexCoord2).rgb * cAmbientColor.rgb * diffColor.rgb;
+        #endif
+
+        #ifdef MATERIAL
+            // Add light pre-pass accumulation result
+            // Lights are accumulated at half intensity. Bring back to full intensity now
+            vec4 lightInput = 2.0 * texture2DProj(sLightBuffer, vScreenPos);
+            vec3 lightSpecColor = lightInput.a * lightInput.rgb / max(GetIntensity(lightInput.rgb), 0.001);
+
+            finalColor += lightInput.rgb * diffColor.rgb + lightSpecColor * specColor;
+        #endif
+
+        vec3 toCamera = normalize(vWorldPos.xyz - cCameraPosPS);
+        vec3 reflection = normalize(reflect(toCamera, normal));
+
+        #ifdef VOXELIBL
+            // Specular half of image based lighting only; see the note at the
+            // top of this file. Rougher surfaces read a blurrier mip, which is
+            // what makes water a mirror and rock not.
+            vec3 reflectDir = GetSpecularDominantDir(normal, reflection,
+                roughness);
+            float ndv = clamp(dot(-toCamera, normal), 0.0, 1.0);
+            float mip = GetMipFromRoughness(roughness);
+            vec3 lookup = FixCubeLookup(reflectDir);
+            vec3 cube = mix(textureLod(sZoneCubeMap, lookup, mip).rgb,
+                textureLod(sEnvCubeMap, lookup, mip).rgb, cIndoorBlend);
+            finalColor.rgb += cube * EnvBRDFApprox(specColor, roughness, ndv) *
+                vSkyVisibility;
+        #endif
+
+        #ifdef ENVCUBEMAP
+            finalColor += cMatEnvMapColor * textureCube(sEnvCubeMap, reflect(vReflectionVec, normal)).rgb;
+        #endif
+        #ifdef LIGHTMAP
+            finalColor += texture2D(sEmissiveMap, vTexCoord2).rgb * diffColor.rgb;
+        #endif
+        #ifdef EMISSIVEMAP
+            finalColor += cMatEmissiveColor * texture2D(sEmissiveMap, vTexCoord.xy).rgb;
+        #else
+            finalColor += cMatEmissiveColor;
+        #endif
+
+        gl_FragColor = vec4(GetFog(finalColor, fogFactor), diffColor.a);
+    #endif
+}

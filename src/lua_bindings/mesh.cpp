@@ -137,6 +137,26 @@ struct ScopeTimer {
 };
 #endif
 
+// A game gets to set up the materials of each chunk it is shown: which
+// technique, which cube map, whatever its own shader wants. Called once the
+// geometry exists, on the main thread. See interface/atlas.h for what the
+// maps the default setup hands the shader contain.
+//
+// Takes no arguments: the caller knows which node it asked for, and a Node
+// handed over from here would be a raw one, which the sandbox rejects.
+static void call_material_cb(const luabind::object &cb)
+{
+	if(!cb.is_valid() || luabind::type(cb) == LUA_TNIL)
+		return;
+	try {
+		luabind::call_function<void>(cb);
+	} catch(luabind::error &e){
+		lua_State *L = e.state();
+		log_e(MODULE, "Material callback failed: %s", lua_tostring(L, -1));
+		lua_pop(L, 1);
+	}
+}
+
 struct SetVoxelGeometryTask: public interface::thread_pool::Task
 {
 	Node *node;
@@ -144,15 +164,16 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	sp_<VoxelRegistry> voxel_reg;
 	sp_<AtlasRegistry> atlas_reg;
 	bool use_skylight;
+	luabind::object material_cb;
 
 	up_<pv::RawVolume<VoxelInstance>> volume;
 	sm_<uint, interface::mesh::TemporaryGeometry> temp_geoms;
 
 	SetVoxelGeometryTask(Node *node, const ss_ &data,
 			sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
-			bool use_skylight):
+			bool use_skylight, const luabind::object &material_cb):
 		node(node), data(data), voxel_reg(voxel_reg), atlas_reg(atlas_reg),
-		use_skylight(use_skylight)
+		use_skylight(use_skylight), material_cb(material_cb)
 	{
 		ScopeTimer timer("pre geometry");
 		// NOTE: Do the pre-processing here so that the calling code can
@@ -183,6 +204,7 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 		CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
 		interface::mesh::set_voxel_geometry(
 				cg, context, temp_geoms, atlas_reg.get());
+		call_material_cb(material_cb);
 		cg->SetOccluder(true);
 		cg->SetCastShadows(true);
 		// Octree update: Trigger CustomGeometry::OnWorldBoundingBoxUpdate()
@@ -199,15 +221,17 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 	sp_<VoxelRegistry> voxel_reg;
 	sp_<AtlasRegistry> atlas_reg;
 	bool use_skylight;
+	luabind::object material_cb;
 
 	up_<pv::RawVolume<VoxelInstance>> lod_volume;
 	sm_<uint, interface::mesh::TemporaryGeometry> temp_geoms;
 
 	SetVoxelLodGeometryTask(int lod, Node *node, const ss_ &data,
 			sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
-			bool use_skylight):
+			bool use_skylight, const luabind::object &material_cb):
 		lod(lod), node(node), data(data),
-		voxel_reg(voxel_reg), atlas_reg(atlas_reg), use_skylight(use_skylight)
+		voxel_reg(voxel_reg), atlas_reg(atlas_reg), use_skylight(use_skylight),
+		material_cb(material_cb)
 	{
 		ScopeTimer timer("pre lod geometry");
 		// NOTE: Do the pre-processing here so that the calling code can
@@ -241,6 +265,7 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 		CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
 		interface::mesh::set_voxel_lod_geometry(
 				lod, cg, context, temp_geoms, atlas_reg.get());
+		call_material_cb(material_cb);
 		cg->SetOccluder(true);
 		if(lod <= interface::MAX_LOD_WITH_SHADOWS)
 			cg->SetCastShadows(true);
@@ -329,7 +354,7 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 void set_voxel_geometry(const luabind::object &node_o,
 		const luabind::object &buffer_o,
 		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
-		bool use_skylight)
+		bool use_skylight, const luabind::object &material_cb)
 {
 	lua_State *L = node_o.interpreter();
 
@@ -350,7 +375,7 @@ void set_voxel_geometry(const luabind::object &node_o,
 	lua_pop(L, 1);
 
 	up_<SetVoxelGeometryTask> task(new SetVoxelGeometryTask(
-			node, data, voxel_reg, atlas_reg, use_skylight
+			node, data, voxel_reg, atlas_reg, use_skylight, material_cb
 			));
 
 	auto *thread_pool = buildat_app->get_thread_pool();
@@ -361,7 +386,7 @@ void set_voxel_geometry(const luabind::object &node_o,
 void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
 		const luabind::object &buffer_o,
 		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
-		bool use_skylight)
+		bool use_skylight, const luabind::object &material_cb)
 {
 	lua_State *L = node_o.interpreter();
 
@@ -383,7 +408,7 @@ void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
 	lua_pop(L, 1);
 
 	up_<SetVoxelLodGeometryTask> task(new SetVoxelLodGeometryTask(
-			lod, node, data, voxel_reg, atlas_reg, use_skylight
+			lod, node, data, voxel_reg, atlas_reg, use_skylight, material_cb
 			));
 
 	auto *thread_pool = buildat_app->get_thread_pool();

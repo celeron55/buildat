@@ -50,6 +50,17 @@ static const float TERRAIN_AMPLITUDE = 9.0f;
 static const float GROUND_OFFSET = 0.0f;
 
 static const float CAVE_RADIUS = 3.5f;
+// A pond, for a surface smooth enough to reflect the sky where everything else
+// in the scene is matte. This terrain has no basin to fill: it is one slope,
+// so a water line drawn across it puts the water along the edge of the volume
+// and it reads as a sea that the world runs out of rather than as a pond. So a
+// basin is dug for it instead, on the flattest ground the generator's surface
+// map shows, well away from the cave.
+static const int POND_CENTRE_X = 50;
+static const int POND_CENTRE_Z = 12;
+static const int POND_RADIUS = 9;
+static const int POND_DEPTH = 4;
+static const int WATER_LEVEL = 31;
 static const float CAVE_LENGTH = 62.0f;
 
 // The cave is the view direction rotated about the vertical axis through the
@@ -75,6 +86,13 @@ struct Worldgen: public worldgen::GeneratorInterface
 	// The client places its benchmark cameras relative to the cave, so it is
 	// told where the cave ended up rather than recomputing it from a copy of
 	// these constants.
+	bool tree_valid = false;
+	float tree_centre[3] = {0, 0, 0};
+	bool water_valid = false;
+	// Benchmark 4's camera and what it looks at. Worked out here rather than
+	// on the client because it needs the terrain height to stay above ground.
+	float water_eye[3] = {0, 0, 0};
+	float water_target[3] = {0, 0, 0};
 	bool cave_valid = false;
 	float cave_mouth[3] = {0, 0, 0};
 	float cave_dir[3] = {0, 0, 0};
@@ -188,6 +206,72 @@ struct Worldgen: public worldgen::GeneratorInterface
 					for(int y1 = y+3; y1 <= y+7; y1++)
 						for(int z1 = z-2; z1 <= z+2; z1++)
 							set_id(x1, y1, z1, 5);
+
+				// Keep the most central tree for benchmark 5, which looks at
+				// a canopy with the sun behind it. Central so that the camera
+				// it puts on the far side of the tree is still in the scene.
+				float cdx = x - (lc.getX() + VOLUME_SIZE / 2.0f);
+				float cdz = z - (lc.getZ() + VOLUME_SIZE / 2.0f);
+				float bdx = tree_centre[0] - (lc.getX() + VOLUME_SIZE / 2.0f);
+				float bdz = tree_centre[2] - (lc.getZ() + VOLUME_SIZE / 2.0f);
+				if(!tree_valid ||
+						cdx * cdx + cdz * cdz < bdx * bdx + bdz * bdz){
+					tree_centre[0] = x;
+					tree_centre[1] = y + 5;
+					tree_centre[2] = z;
+					tree_valid = true;
+				}
+			}
+
+			// Dig the basin and fill it. Done before the cave is carved, so
+			// the cave stays dry however far below the water line it runs.
+			// The floor is a bowl that meets the water line at the rim, which
+			// leaves a shoreline instead of a wall of water.
+			for(int z = POND_CENTRE_Z - POND_RADIUS;
+					z <= POND_CENTRE_Z + POND_RADIUS; z++){
+				for(int x = POND_CENTRE_X - POND_RADIUS;
+						x <= POND_CENTRE_X + POND_RADIUS; x++){
+					float dx = x - POND_CENTRE_X, dz = z - POND_CENTRE_Z;
+					float d2 = (dx * dx + dz * dz) /
+							(float)(POND_RADIUS * POND_RADIUS);
+					if(d2 > 1.0f)
+						continue;
+					int floor_y = WATER_LEVEL -
+							(int)(POND_DEPTH * (1.0f - d2) + 0.5f);
+					for(int y = floor_y; y < WATER_LEVEL; y++)
+						set_id(x, y, z, 7);
+					for(int y = WATER_LEVEL; y <= uc.getY(); y++){
+						if(!inside(x, y, z) || ids[idx(x, y, z)] == AIR)
+							break;
+						set_id(x, y, z, AIR);
+					}
+				}
+			}
+
+			// Benchmark 4 looks across the water at a grazing angle, which is
+			// where a reflection is strongest and so where the environment
+			// cube map either shows up or does not. The camera sits over the
+			// far edge of the pond, which is the one place near it that no
+			// tree can grow into, and looks back across it towards the middle
+			// of the volume.
+			{
+				float ux = POND_CENTRE_X - (lc.getX() + VOLUME_SIZE / 2.0f);
+				float uz = POND_CENTRE_Z - (lc.getZ() + VOLUME_SIZE / 2.0f);
+				float ul = std::sqrt(ux * ux + uz * uz);
+				if(ul < 0.001f){ ux = 0.0f; uz = 1.0f; ul = 1.0f; }
+				ux /= ul;
+				uz /= ul;
+				water_eye[0] = POND_CENTRE_X + ux * POND_RADIUS * 0.7f;
+				water_eye[1] = WATER_LEVEL + 4.0f;
+				water_eye[2] = POND_CENTRE_Z + uz * POND_RADIUS * 0.7f;
+				water_target[0] = POND_CENTRE_X - ux * POND_RADIUS * 0.9f;
+				water_target[1] = WATER_LEVEL;
+				water_target[2] = POND_CENTRE_Z - uz * POND_RADIUS * 0.9f;
+				water_valid = true;
+				log_v(MODULE, "pond at (%i, %i, %i) r %i; camera "
+						"(%.1f, %.1f, %.1f)", POND_CENTRE_X, WATER_LEVEL,
+						POND_CENTRE_Z, POND_RADIUS, water_eye[0],
+						water_eye[1], water_eye[2]);
 			}
 
 			// Carve the cave with a sphere swept along the view direction
@@ -362,8 +446,12 @@ struct Module: public interface::Module
 				on_verify_skylight, network::Packet)
 	}
 
+	// The six numbers after solid describe the surface; see interface/atlas.h
 	void add_voxel(interface::VoxelRegistry *reg, const ss_ &name,
-			const ss_ &texture, bool solid)
+			const ss_ &texture, bool solid, float roughness = 0.9f,
+			float spec_strength = 1.0f, float bumpiness = 1.0f,
+			float translucency = 0.0f, float spots = 0.0f,
+			float static_spots = 0.0f)
 	{
 		interface::VoxelDefinition vdef;
 		vdef.name.block_name = name;
@@ -379,6 +467,12 @@ struct Module: public interface::Module
 			seg.total_segments = magic::IntVector2(texture.empty() ? 0 : 1,
 					texture.empty() ? 0 : 1);
 			seg.select_segment = magic::IntVector2(0, 0);
+			seg.roughness = roughness;
+			seg.spec_strength = spec_strength;
+			seg.bumpiness = bumpiness;
+			seg.translucency = translucency;
+			seg.spots = spots;
+			seg.static_spots = static_spots;
 		}
 		vdef.edge_material_id = solid ? interface::EDGEMATERIALID_GROUND :
 				interface::EDGEMATERIALID_EMPTY;
@@ -413,11 +507,20 @@ struct Module: public interface::Module
 			interface::VoxelRegistry *reg = ivoxelworld->
 					get_instance(m_main_scene)->get_voxel_reg();
 			add_voxel(reg, "air", "", false);              // id 1
-			add_voxel(reg, "rock", "main/rock.png", true); // id 2
-			add_voxel(reg, "dirt", "main/dirt.png", true); // id 3
-			add_voxel(reg, "grass", "main/grass.png", true); // id 4
-			add_voxel(reg, "leaves", "main/leaves.png", true); // id 5
-			add_voxel(reg, "tree", "main/tree.png", true); // id 6
+			// roughness, spec_strength, bumpiness, translucency, spots,
+			// static_spots. The README says why these values.
+			add_voxel(reg, "rock", "main/rock.png", true,
+					0.95f, 0.15f, 0.5f, 0.0f, 0.0f, 0.04f); // id 2
+			add_voxel(reg, "dirt", "main/dirt.png", true,
+					0.98f, 0.15f, 0.6f, 0.0f, 0.0f, 0.04f); // id 3
+			add_voxel(reg, "grass", "main/grass.png", true,
+					0.90f, 1.0f, 0.75f, 0.06f, 0.012f); // id 4
+			add_voxel(reg, "leaves", "main/leaves.png", true,
+					0.95f, 1.0f, 1.5f, 0.11f, 0.03f); // id 5
+			add_voxel(reg, "tree", "main/tree.png", true,
+					0.85f, 0.35f, 2.0f); // id 6
+			add_voxel(reg, "water", "main/water.png", true,
+					0.28f, 1.0f, 6.0f, 0.0f, 0.05f); // id 7
 
 			// The whole point of this scene: let voxelworld light it
 			ivoxelworld->get_instance(m_main_scene)->
@@ -457,6 +560,26 @@ struct Module: public interface::Module
 		return buf;
 	}
 
+	// "x y z", the middle of the canopy benchmark 5 looks at
+	ss_ tree_packet()
+	{
+		char buf[80];
+		snprintf(buf, sizeof buf, "%f %f %f", m_worldgen->tree_centre[0],
+				m_worldgen->tree_centre[1], m_worldgen->tree_centre[2]);
+		return buf;
+	}
+
+	// "ex ey ez tx ty tz": benchmark 4's camera and what it looks at
+	ss_ water_packet()
+	{
+		char buf[160];
+		snprintf(buf, sizeof buf, "%f %f %f %f %f %f",
+				m_worldgen->water_eye[0], m_worldgen->water_eye[1],
+				m_worldgen->water_eye[2], m_worldgen->water_target[0],
+				m_worldgen->water_target[1], m_worldgen->water_target[2]);
+		return buf;
+	}
+
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
 		replicate::access(m_server, [&](replicate::Interface *ireplicate){
@@ -469,6 +592,10 @@ struct Module: public interface::Module
 			// has not, on_worldgen_queue_modified() sends this instead
 			if(m_worldgen && m_worldgen->cave_valid)
 				inetwork->send(event.recipient, "main:cave", cave_packet());
+			if(m_worldgen && m_worldgen->water_valid)
+				inetwork->send(event.recipient, "main:water", water_packet());
+			if(m_worldgen && m_worldgen->tree_valid)
+				inetwork->send(event.recipient, "main:tree", tree_packet());
 		});
 	}
 
@@ -668,8 +795,13 @@ struct Module: public interface::Module
 		if(event.queue_size != 0 || !m_worldgen || !m_worldgen->cave_valid)
 			return;
 		network::access(m_server, [&](network::Interface *inetwork){
-			for(auto &peer : inetwork->list_peers())
+			for(auto &peer : inetwork->list_peers()){
 				inetwork->send(peer, "main:cave", cave_packet());
+				if(m_worldgen->water_valid)
+					inetwork->send(peer, "main:water", water_packet());
+				if(m_worldgen->tree_valid)
+					inetwork->send(peer, "main:tree", tree_packet());
+			}
 		});
 	}
 };

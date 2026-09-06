@@ -41,6 +41,41 @@ namespace interface
 		uint8_t lod_simulation = 0;
 		// TODO: Rotation
 
+		// The atlas derives the normal and surface maps from the segment's
+		// image and these six numbers; nothing is authored. See impl/atlas.cpp.
+		//   roughness      how wide the highlight is. Brighter texels than the
+		//                  segment's mean come out a little smoother.
+		//   spec_strength  how much of a highlight there is at all, against
+		//                  the 0.08 a dielectric reflects head on. Roughness
+		//                  only widens a highlight, so this is the only way to
+		//                  make a surface matte. Spots ignore it.
+		//   bumpiness      how much of the image's luminance is height. Sets
+		//                  how grainy a surface looks, diffuse as much as
+		//                  specular.
+		//   translucency   how much light passes through from behind at a
+		//                  spot, tinted by the surface's own color.
+		//   spots          fraction of the surface that at any one moment is
+		//                  turned off the face it is on, reflects at full
+		//                  strength and passes translucency. Worked out in the
+		//                  shader from world position and time, not stored.
+		//   static_spots   the same, for spots that hold still: bigger, and on
+		//                  or off with no fade.
+		//
+		// Gloss and transmission share one fraction because they are the same
+		// event from two sides; the geometry decides which one shows.
+		//
+		// TODO: For a game that wants a surface these six numbers cannot
+		// describe, add normal_resource_name and surface_resource_name here
+		// and have atlas.cpp blit them in place of deriving them. Derivation
+		// stays the default; a game that overrides both also decides what the
+		// channels mean, and ships the shader that reads them.
+		float roughness = 0.9f;
+		float spec_strength = 1.0f;
+		float bumpiness = 1.0f;
+		float translucency = 0.0f;
+		float spots = 0.0f;
+		float static_spots = 0.0f;
+
 		bool operator==(const AtlasSegmentDefinition &other) const;
 	};
 
@@ -63,6 +98,15 @@ namespace interface
 	{
 		magic::SharedPtr<magic::Image> image;
 		magic::SharedPtr<magic::Texture2D> texture;
+		// Derived from the segment images; same layout as the diffuse atlas.
+		// normal: tangent space normal in rgb, static_spots in a.
+		// spec: roughness in r, where Urho's PBR shaders read it from
+		// sSpecMap, and spec_strength, translucency and spots in gba, which
+		// only PBRVoxel reads.
+		magic::SharedPtr<magic::Image> normal_image;
+		magic::SharedPtr<magic::Texture2D> normal_texture;
+		magic::SharedPtr<magic::Image> spec_image;
+		magic::SharedPtr<magic::Texture2D> spec_texture;
 		magic::IntVector2 segment_resolution;
 		magic::IntVector2 total_segments;
 		sv_<AtlasSegmentCache> segments;
