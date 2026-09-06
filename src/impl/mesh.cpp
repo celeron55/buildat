@@ -329,6 +329,30 @@ public:
 	}
 };
 
+// PolyVox extracts the faces of the padding voxels too, and a padding voxel's
+// face pointing into the chunk is the same surface that the neighbouring chunk
+// draws for its own voxel. Drawing both leaves a doubled, z-fighting layer
+// along every chunk boundary, so faces owned by the padding are dropped. The
+// face belongs to the voxel half a voxel behind it, against the normal.
+static bool face_owned_by_padding(pv::RawVolume<VoxelInstance> &volume,
+		const pv::Vector3DFloat *quad, const pv::Vector3DFloat &n)
+{
+	pv::Vector3DFloat centre(0, 0, 0);
+	for(size_t i = 0; i < 4; i++)
+		centre += quad[i];
+	centre /= 4.0f;
+	const pv::Region &region = volume.getEnclosingRegion();
+	const pv::Vector3DInt32 lc = region.getLowerCorner();
+	const pv::Vector3DInt32 uc = region.getUpperCorner();
+	pv::Vector3DInt32 back(
+			lc.getX() + (int)std::floor(centre.getX() - n.getX()*0.5f + 0.5f),
+			lc.getY() + (int)std::floor(centre.getY() - n.getY()*0.5f + 0.5f),
+			lc.getZ() + (int)std::floor(centre.getZ() - n.getZ()*0.5f + 0.5f));
+	return back.getX() <= lc.getX() || back.getX() >= uc.getX() ||
+			back.getY() <= lc.getY() || back.getY() >= uc.getY() ||
+			back.getZ() <= lc.getZ() || back.getZ() >= uc.getZ();
+}
+
 // Vertex colors for skylit voxel geometry, decoded by PBRVoxel.glsl as
 //   ambient = cAmbientColor.rgb * color.a + color.rgb
 // The zone's ambient color is the sky, so a world picks that itself; what is
@@ -380,10 +404,10 @@ static bool occludes(pv::RawVolume<VoxelInstance> &volume,
 // center; half a voxel along the normal lands in the voxel the face looks into,
 // and half a voxel against it in the solid voxel behind it.
 //
-// Chunk volumes are padded by one voxel, but nothing fills that padding, so a
-// face on a chunk edge looks into a voxel that has no skylight. Those fall back
-// to the skylight of the solid voxel, which the world stores as a per-voxel
-// approximation for exactly this case.
+// Chunk volumes are padded by one voxel, which the world fills from the chunks
+// next to it. It cannot always: a neighbour that is not in memory leaves its
+// side undefined. Those faces fall back to the skylight of the solid voxel,
+// which the world stores as a per-voxel approximation for exactly this case.
 static void face_vertex_colors(pv::RawVolume<VoxelInstance> &volume,
 		VoxelRegistry *voxel_reg, const pv::Vector3DFloat *quad,
 		const pv::Vector3DFloat &n, uint face_id, unsigned out[4])
@@ -651,16 +675,18 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			// memory, so let's do only one big memory allocation
 			tg.vertex_data.Reserve(pv_vertices.size() / 4 * 6);
 		}
+		pv::Vector3DFloat quad[4] = {
+			pv_vertices[pv_vertex_i0 + 0].position,
+			pv_vertices[pv_vertex_i0 + 1].position,
+			pv_vertices[pv_vertex_i0 + 2].position,
+			pv_vertices[pv_vertex_i0 + 3].position,
+		};
+		if(face_owned_by_padding(volume, quad, n))
+			continue;
 		unsigned corner_colors[4] = {
 			0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff
 		};
 		if(use_skylight){
-			pv::Vector3DFloat quad[4] = {
-				pv_vertices[pv_vertex_i0 + 0].position,
-				pv_vertices[pv_vertex_i0 + 1].position,
-				pv_vertices[pv_vertex_i0 + 2].position,
-				pv_vertices[pv_vertex_i0 + 3].position,
-			};
 			face_vertex_colors(volume, voxel_reg, quad, n, face_id,
 					corner_colors);
 		}
@@ -868,16 +894,18 @@ void generate_voxel_lod_geometry(int lod,
 			// memory, so let's do only one big memory allocation
 			tg.vertex_data.Reserve(pv_vertices.size() / 4 * 6);
 		}
+		pv::Vector3DFloat quad[4] = {
+			pv_vertices[pv_vertex_i0 + 0].position,
+			pv_vertices[pv_vertex_i0 + 1].position,
+			pv_vertices[pv_vertex_i0 + 2].position,
+			pv_vertices[pv_vertex_i0 + 3].position,
+		};
+		if(face_owned_by_padding(lod_volume, quad, n))
+			continue;
 		unsigned corner_colors[4] = {
 			0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff
 		};
 		if(use_skylight){
-			pv::Vector3DFloat quad[4] = {
-				pv_vertices[pv_vertex_i0 + 0].position,
-				pv_vertices[pv_vertex_i0 + 1].position,
-				pv_vertices[pv_vertex_i0 + 2].position,
-				pv_vertices[pv_vertex_i0 + 3].position,
-			};
 			face_vertex_colors(lod_volume, voxel_reg, quad, n, face_id,
 					corner_colors);
 		}
