@@ -131,7 +131,27 @@ something, the "add" verb should be left out. Fine enough examples:
 - client: Disable Urho3D log file
 - extensions/__menu: Fix UI warnings
 
+Coordinates
+-----------
+Urho3D's convention, unchanged: left-handed, Y up, +X right, +Z forward. It is
+the Direct3D convention, and the one Unity uses.
+
+Rotations are in degrees. Yaw turns around Y and grows turning right, so yaw 0
+looks towards +Z and yaw 90 towards +X. Pitch turns around X and grows looking
+down. This is the order Quaternion(pitch, yaw, roll) takes them in.
+
+Voxel coordinates are the same axes, and a voxel is centred on its integer
+coordinate: it spans from -0.5 to +0.5 around it (impl/mesh.cpp shifts the
+PolyVox vertices by that half unit).
+
+Content authored elsewhere generally is not in this convention. glTF is
+right-handed, and Blender is right-handed and Z up. The glTF loader converts
+(3rdparty/Urho3D/Source/Urho3D/Graphics/GLTFLoader.cpp); anything else that
+imports geometry has to.
+
 Urho3D
 ------
 Urho3D's namespace should generally be aliased to be "magic".
+
+The bundled copy is patched. See urho3d_fork.txt before updating it.
 
