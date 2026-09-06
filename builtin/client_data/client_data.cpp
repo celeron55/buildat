@@ -57,29 +57,37 @@ struct Module: public interface::Module
 	{
 	}
 
+	// Files are published as <module>/<path under client_data>, which is the
+	// name the client's resource cache knows them by. The subdirectories
+	// matter: Urho looks up a shader include and a cube map face relative to
+	// the resource that named them.
+	void collect_files(const ss_ &dir_path, const ss_ &name_prefix,
+			sv_<ss_> &result)
+	{
+		for(const interface::fs::Node &n : interface::fs::list_directory(dir_path)){
+			if(n.is_directory)
+				collect_files(dir_path+"/"+n.name, name_prefix+n.name+"/", result);
+			else
+				result.push_back(name_prefix+n.name);
+		}
+	}
+
 	void on_module_loaded(const interface::ModuleLoadedEvent &event)
 	{
 		log_t(MODULE, "on_module_loaded(): %s", cs(event.name));
 		ss_ module_name = event.name;
 		ss_ module_path = m_server->get_module_path(module_name);
 		ss_ client_data_path = module_path+"/client_data";
-		auto list = interface::fs::list_directory(client_data_path);
-		if(list.empty())
+		sv_<ss_> names;
+		collect_files(client_data_path, "", names);
+		if(names.empty())
 			return;
 
-		sv_<ss_> log_list;
-		for(const interface::fs::Node &n : list){
-			if(n.is_directory)
-				continue;
-			log_list.push_back(n.name);
-		}
-		log_i(MODULE, "client_data: %s: %s", cs(module_name), cs(dump(log_list)));
+		log_i(MODULE, "client_data: %s: %s", cs(module_name), cs(dump(names)));
 
-		for(const interface::fs::Node &n : list){
-			if(n.is_directory)
-				continue;
-			const ss_ &file_path = client_data_path+"/"+n.name;
-			const ss_ &public_file_name = module_name+"/"+n.name;
+		for(const ss_ &name : names){
+			const ss_ &file_path = client_data_path+"/"+name;
+			const ss_ &public_file_name = module_name+"/"+name;
 			client_file::access(m_server, [&](client_file::Interface *i){
 				i->add_file_path(public_file_name, file_path);
 			});

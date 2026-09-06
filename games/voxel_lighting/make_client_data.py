@@ -3,10 +3,10 @@
 # water texture. The output is committed, so this only needs running when one of them
 # is being changed.
 #
-# The cube map goes into the client's own data directory, next to the technique
-# that reflects it, rather than into this game's: it is the sky that goes with
-# PBRVoxel's lighting model, and both games that use skylight share it. The
-# water texture is this game's alone and goes into main/client_data.
+# Everything is written into a client_data directory, from where the server
+# hands it to the client on connect. The cube maps go to the voxel_shading
+# module, next to the shader that reflects them; the water texture is this
+# game's alone.
 #
 # The other voxel textures are hand drawn and predate this; there is no normal
 # or roughness map for any of them, because the atlas derives both from the
@@ -59,7 +59,9 @@ INDOOR_BAND_HALF = 0.45
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))))
 GAME_DIR = os.path.join(ROOT, "games", "voxel_lighting", "main", "client_data")
-SKY_DIR = os.path.join(ROOT, "client", "data", "Textures")
+# The sky belongs to the shader that reflects it, which both games get from
+# the voxel_shading module
+SKY_DIR = os.path.join(ROOT, "builtin", "voxel_shading", "client_data")
 
 
 def normalized(v):

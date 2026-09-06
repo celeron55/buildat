@@ -70,12 +70,25 @@ namespace interface
 		void preload_textures(pv::RawVolume<VoxelInstance> &volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg);
 
+		// What a voxel shader is handed, which is the whole interface between
+		// this and a game's own rendering:
+		//   TU_DIFFUSE   the atlas of the voxel textures
+		//   TU_NORMAL    tangent space normal in rgb, static_spots in a
+		//   TU_SPECULAR  a surface map, not Urho's specular: roughness in r
+		//                and spec_strength, translucency and spots in gba
+		//   vertex color ambient = cAmbientColor.rgb * a + rgb, when
+		//                use_skylight; see BOUNCE_COLOR in impl/mesh.cpp
+		//   Roughness, Metallic  both 0; the maps carry these
+		// interface/atlas.h says what fills the two maps. No technique is set:
+		// a game picks one for its chunks in voxelworld.sub_material_update(),
+		// and skylit geometry stays invisible until it does. The reference
+		// implementation is PBRVoxel in games/voxel_lighting.
+
 		// Can be called from any thread
 		// use_skylight: light the geometry by VoxelInstance::get_skylight()
 		// of the voxel in front of each face, along with per-vertex ambient
-		// occlusion and a per-face brightness, written into vertex colors and
-		// read by the PBRVoxel technique. Only worlds that actually fill those
-		// bits should ask for it.
+		// occlusion and a per-face brightness, written into vertex colors.
+		// Only worlds that actually fill those bits should ask for it.
 		void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 				pv::RawVolume<VoxelInstance> &volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,

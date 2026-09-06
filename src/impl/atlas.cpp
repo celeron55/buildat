@@ -339,6 +339,8 @@ struct CAtlasRegistry: public AtlasRegistry
 				}
 			}
 		}
+		// TODO: Skip the derivation for a segment that names authored normal
+		// and surface maps, and blit those instead. See interface/atlas.h.
 		// Derive the normal and roughness/metalness maps from the same source
 		// pixels. Nothing authors these; the segment's image is read as a
 		// height field for the normals and as a per-texel deviation from the
