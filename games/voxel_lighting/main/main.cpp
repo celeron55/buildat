@@ -531,7 +531,7 @@ struct Module: public interface::Module
 			add_voxel(reg, "grass", "main/grass.png", true,
 					0.90f, 0.0f, 0.75f, 0.0f, 0.06f, 0.012f); // id 4
 			add_voxel(reg, "leaves", "main/leaves.png", true,
-					0.95f, 0.0f, 1.5f, 0.08f, 0.22f, 0.04f); // id 5
+					0.95f, 0.0f, 1.5f, 0.08f, 0.11f, 0.03f); // id 5
 			add_voxel(reg, "tree", "main/tree.png", true,
 					0.85f, 0.0f, 2.0f); // id 6
 			add_voxel(reg, "water", "main/water.png", true,
