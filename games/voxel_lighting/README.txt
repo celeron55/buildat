@@ -158,6 +158,22 @@ directional light draws the sun's highlight as well, so a surface facing it
 right gets both; the disc is left at the top of the 8 bit range rather than
 made an HDR value, so that neither swamps the other.
 
+There are two of them. Textures/VoxelSkyIndoor.xml is the same sky dimmed, with
+no sun disc and no glow, going to a flat grey both above and below a brighter
+band at the horizon: indoors the bright thing around you is the windows, and
+what is over and under you is whatever the room is made of, which cannot be
+known when the map is generated. The shader fades between the two by
+IndoorBlend, which the client sets each frame from the skylight of the voxel the
+camera is in, eased so that crossing a voxel boundary does not step. Digging the
+shaft with P lets skylight into the cave and takes the blend back to the outdoor
+map, which is the easiest way to see it work.
+
+Only which map is reflected changes; the skylight scaling below applies to
+either. That keeps the feature from brightening the cave, and it is also why it
+is subtle there: a surface that sees no sky has almost no reflection to
+recolour. Where it shows is the middle ground the indoor map is named for, a
+surface that sees some sky while the camera sees none.
+
 Only the specular half of image based lighting is taken. The diffuse half
 would be an unoccluded sky added to every surface, which would light the
 inside of the cave; the skylight in the vertex color is this scene's ambient

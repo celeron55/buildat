@@ -162,6 +162,54 @@ voxelworld.set_camera(camera_node)
 
 magic.input:SetMouseVisible(true)
 
+-- What the voxel shader reflects where the sky cannot be seen. The shader
+-- fades between this and the zone's own cube map by IndoorBlend, which is 1
+-- where the camera's voxel has no skylight; see the README.
+local INDOOR_SKY = magic.cache:GetResource("TextureCube",
+		"Textures/VoxelSkyIndoor.xml")
+local TU_ENVIRONMENT = 4 -- sEnvCubeMap in the shader
+-- Skylight is four bits per voxel, so the blend steps as the camera crosses a
+-- voxel boundary and is eased rather than followed
+local INDOOR_BLEND_RATE = 4.0
+local indoor_blend = 0.0
+local voxel_nodes = {}
+
+voxelworld.sub_geometry_update(function(node)
+	voxel_nodes[node:GetID()] = node
+end)
+
+-- dt of nil snaps, for when the camera has been moved rather than has moved
+local function update_indoor_blend(dt)
+	local v = voxelworld.get_static_voxel(camera_node:GetWorldPosition())
+	-- Nothing is generated outside the volume, and nothing shades the camera
+	-- there either
+	local target = 0.0
+	if v:get_id() ~= 0 then
+		target = 1.0 - v:get_skylight() / 15.0
+	end
+	if dt == nil then
+		indoor_blend = target
+	else
+		indoor_blend = indoor_blend + (target - indoor_blend) *
+				math.min(1.0, dt * INDOOR_BLEND_RATE)
+	end
+	-- The mesher makes new materials on every remesh, so this is set every
+	-- frame rather than cached and invalidated
+	for _, node in pairs(voxel_nodes) do
+		local cg = node:GetComponent("CustomGeometry")
+		if cg then
+			local i = 0
+			while true do
+				local m = cg:GetMaterial(i)
+				if m == nil then break end
+				m:SetTexture(TU_ENVIRONMENT, INDOOR_SKY)
+				m:SetShaderParameter("IndoorBlend", indoor_blend)
+				i = i + 1
+			end
+		end
+	end
+end
+
 local function set_time_frozen(enable)
 	time_frozen = enable
 	if time_frozen then
@@ -192,6 +240,9 @@ local function go_to_benchmark(i)
 	pitch = b.pitch
 	camera_node.position = magic.Vector3(b.x, b.y, b.z)
 	apply_angles(camera_node, yaw, pitch)
+	-- Snapped, or a screenshot taken right after this would catch the blend
+	-- part way and differ from run to run
+	update_indoor_blend(nil)
 	log:info(string.format("benchmark %d (%s): camera (%.1f, %.1f, %.1f) "..
 			"yaw %.1f pitch %.1f", i, b.name, b.x, b.y, b.z, yaw, pitch))
 end
@@ -498,6 +549,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	if time_frozen then
 		scene.elapsedTime = FROZEN_TIME
 	end
+	update_indoor_blend(event_data:GetFloat("TimeStep"))
 	if not free_look then
 		pointed_node.enabled = false
 		return

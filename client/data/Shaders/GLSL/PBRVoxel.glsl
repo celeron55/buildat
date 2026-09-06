@@ -27,6 +27,9 @@
 //       color is already the scene's ambient diffuse, and adding an
 //       unoccluded sky on top of it would light the inside of a cave. The
 //       specular term is scaled by the same skylight for the same reason.
+//       cIndoorBlend fades that to sEnvCubeMap, a dimmer sky for when the
+//       camera cannot see the real one; the game sets both. Only which map is
+//       reflected changes; the skylight scaling applies to either.
 //   VOXELSPOTS  which parts of a surface are turned to catch the light at this
 //       moment. Worked out per pixel from world position and time rather than
 //       stored, so the specks come and go the way leaves in wind do, and a
@@ -162,6 +165,9 @@ void VS()
     // that cycle counts as open, and so what fraction of cells are open at
     // once. A slow term along the wind direction is added to the phase, which
     // turns what would be an even twinkle into gusts crossing the surface.
+    // 0 where the camera sees full sky, 1 where it sees none
+    uniform float cIndoorBlend;
+
     const float TRANSMISSION_CELLS = 16.0;   // Cells per voxel, per axis
     // A material whose own roughness is already below this cannot glint, so
     // water is given a duller base than a still pond would have
@@ -459,8 +465,10 @@ void PS()
             vec3 reflectDir = GetSpecularDominantDir(normal, reflection,
                 roughness);
             float ndv = clamp(dot(-toCamera, normal), 0.0, 1.0);
-            vec3 cube = textureLod(sZoneCubeMap, FixCubeLookup(reflectDir),
-                GetMipFromRoughness(roughness)).rgb;
+            float mip = GetMipFromRoughness(roughness);
+            vec3 lookup = FixCubeLookup(reflectDir);
+            vec3 cube = mix(textureLod(sZoneCubeMap, lookup, mip).rgb,
+                textureLod(sEnvCubeMap, lookup, mip).rgb, cIndoorBlend);
             finalColor.rgb += cube * EnvBRDFApprox(specColor, roughness, ndv) *
                 vSkyVisibility;
         #endif
