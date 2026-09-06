@@ -27,13 +27,18 @@
 //       color is already the scene's ambient diffuse, and adding an
 //       unoccluded sky on top of it would light the inside of a cave. The
 //       specular term is scaled by the same skylight for the same reason.
+//   VOXELSPOTS  which parts of a surface are, at this moment, turned to catch
+//       the light: glossier than the roughness map says, and letting light
+//       through if the material passes any. Not stored anywhere. It is worked
+//       out per pixel from the world position and the time, so the specks come
+//       and go the way leaves in wind do, and a surface with no animated normal
+//       map of its own can still be given a moving sparkle. The alpha of the
+//       roughness/metalness map says how much of a surface is doing it at once.
 //   VOXELTRANSLUCENCY  light that reaches a surface from behind and comes
-//       through it, tinted by the surface's own color. This is why a leaf
-//       against the sun reads as yellow-green and not as the blue of the sky
-//       that is the only thing lighting its front. The amount is in the blue
-//       channel of the roughness/metalness map; where it gets through is not
-//       stored at all but worked out per pixel from the world position and the
-//       time, so the specks come and go the way leaves in wind do.
+//       through it at those spots, tinted by the surface's own color. This is
+//       why a leaf against the sun reads as yellow-green and not as the blue of
+//       the sky that is the only thing lighting its front. The amount is in the
+//       blue channel of the roughness/metalness map.
 
 #include "Uniforms.glsl"
 #include "Samplers.glsl"
@@ -158,6 +163,18 @@ void VS()
     // once. A slow term along the wind direction is added to the phase, which
     // turns what would be an even twinkle into gusts crossing the surface.
     const float TRANSMISSION_CELLS = 16.0;   // Cells per voxel, per axis
+    // What a spot's roughness becomes. Glossy enough to pick the sky out
+    // against a matte surround without turning the surface into a mirror.
+    // A material whose own roughness is already below this cannot glint,
+    // so water is given a duller base than a still pond would have.
+    const float SPOT_ROUGHNESS = 0.10;
+    // How far a spot turns away from the surface it is on. This is what makes
+    // a spot catch the sun: glossiness on its own only shows where the thing
+    // being reflected has some contrast to it, and the sky in the cube map is
+    // a smooth gradient with no sun drawn in it, so a sharper reflection of it
+    // looks no different from a blurred one. A turned normal moves the direct
+    // sunlight's own highlight instead, which is the bright thing in the scene.
+    const float SPOT_TILT = 0.45;
     const float TRANSMISSION_RATE = 0.03;    // Cycles per second, mean
     const vec3 TRANSMISSION_WIND = vec3(0.35, 0.0, -0.2);
 
@@ -172,13 +189,25 @@ void VS()
         return fract((p.x + p.y) * p.z);
     }
 
-    // Each cell runs its own cycle, at its own rate and from its own starting
-    // point, and is open for openFraction of it. Working in the cycle's own
+    // How much of a spot this point is, right now. Each cell runs its own
+    // cycle, at its own rate and from its own starting point, and is a spot for
+    // openFraction of it. Working in the cycle's own
     // 0..1 position rather than in the height of a wave keeps that fraction
     // exact: near the top of a sine the wave is almost flat, so a threshold
     // that lets 4 per cent of cells fully open leaves another 10 per cent
     // hovering just under it, and the surface hazes over instead of speckling.
-    float GetTransmissionGaps(vec3 worldPos, float openFraction)
+    // Which way a spot has turned, before it is flattened onto the surface.
+    // Constant per cell, so a spot holds still while it is open rather than
+    // shimmering within itself.
+    vec3 GetSpotTilt(vec3 worldPos)
+    {
+        vec3 cell = floor(worldPos * TRANSMISSION_CELLS);
+        return vec3(TransmissionHash(cell + 41.0),
+            TransmissionHash(cell + 67.0),
+            TransmissionHash(cell + 89.0)) * 2.0 - 1.0;
+    }
+
+    float GetSurfaceSpots(vec3 worldPos, float openFraction)
     {
         if (openFraction <= 0.0)
             return 1.0;
@@ -211,11 +240,19 @@ void PS()
     #endif
 
 
+    // How much of a spot this pixel is. Used twice: to gloss the surface here,
+    // and to let light through it in the lighting below.
+    float surfaceSpots = 0.0;
+
     #ifdef METALLIC
         vec4 roughMetalSrc = texture2D(sSpecMap, vTexCoord.xy);
 
         float roughness = roughMetalSrc.r + cRoughness;
         float metalness = roughMetalSrc.g + cMetallic;
+        #ifdef VOXELSPOTS
+            surfaceSpots = GetSurfaceSpots(vWorldPos.xyz, roughMetalSrc.a);
+            roughness = mix(roughness, SPOT_ROUGHNESS, surfaceSpots);
+        #endif
     #else
         float roughness = cRoughness;
         float metalness = cMetallic;
@@ -261,6 +298,19 @@ void PS()
             geomNormal) * nn);
     #else
         vec3 normal = normalize(vNormal);
+    #endif
+
+    #ifdef VOXELSPOTS
+        // A spot is a piece of the surface that has turned: a leaf facing a
+        // different way, or a ripple. Same mask as the gloss and the
+        // transmission, so all three are the same event.
+        //
+        // The turn is taken across the surface rather than in any direction.
+        // A free direction tips some normals past the horizon, and those
+        // reflect the ground half of the cube map: brown specks on water.
+        vec3 spotTilt = GetSpotTilt(vWorldPos.xyz);
+        spotTilt -= normal * dot(spotTilt, normal);
+        normal = normalize(normal + spotTilt * (SPOT_TILT * surfaceSpots));
     #endif
 
     // Get fog factor
@@ -331,9 +381,14 @@ void PS()
                 TRANSMISSION_TINT);
             float backNdl = max(0.0, -dot(normal, lightVec));
             float forward = pow(max(0.0, dot(-lightVec, toCamera)), 6.0);
-            finalColor.rgb += roughMetalSrc.b * GetTransmissionGaps(
-                vWorldPos.xyz, roughMetalSrc.a) * transmitted * lightColor *
-                (backNdl * forward) / M_PI;
+            // A material with no spots at all is translucent all over
+            #ifdef VOXELSPOTS
+                float through = roughMetalSrc.a > 0.0 ? surfaceSpots : 1.0;
+            #else
+                float through = 1.0;
+            #endif
+            finalColor.rgb += roughMetalSrc.b * through * transmitted *
+                lightColor * (backNdl * forward) / M_PI;
         #endif
 
         #ifdef AMBIENT

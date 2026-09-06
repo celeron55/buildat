@@ -47,32 +47,48 @@ Materials
 The same technique also does normal mapping and per-texel roughness, and
 reflects an environment cube map. None of the maps are authored: the atlas
 derives a normal map and a roughness/metalness map from each texture as it
-packs it, from three numbers a voxel gives with it (interface/atlas.h):
+packs it, from a handful of numbers a voxel gives with it (interface/atlas.h):
 
     roughness  the mean over the texture. Texels brighter than the texture's
                own mean come out smoother and darker ones rougher
     metalness  constant over the texture
     bumpiness  how much the texture's luminance is read as height
-    gloss_spots  fraction of the texture's texels, the brightest ones, that
-               come out glossy instead of following the rule above
-    translucency  how much light passes through from behind
-    translucency_spots  fraction of the surface that lets it through at any
-               one moment; the rest lets none through
+    roughness_variation  how much of that first rule to apply; 0 makes the
+               whole texture one roughness
+    translucency  how much light passes through from behind, at a spot
+    spots      fraction of the surface that is a spot at any one moment
 
-Grass has the same specks as leaves. Transmission is bright, being the sun
+Those cover the range this scene needs. Rock and dirt are matte at any
+brightness and take all of their variation from their textures. Grass is matte
+too, and reads as smooth however many shapes are in it, so its normals are kept
+low; any more and it turns grainy at a distance. Grass and leaves take no
+roughness from their textures at all: what gloss they have comes from their
+spots instead, because a leaf catching the light is a leaf that has turned, and
+a bright texel sits still. Water keeps its texture's roughness, being the one
+surface here shiny enough for that to show, and has spots on top of it.
+
+A spot is one thing with three effects, from one mask: the surface there is
+turned away from the face it is on, is glossier than its roughness map says,
+and passes translucency. They are the same event seen three ways, and which of
+them shows is settled by the geometry, since transmission only appears with the
+light behind the surface and a highlight only with it in front.
+
+The turn is what does most of the work. Gloss on its own only shows where the
+thing being reflected has contrast in it, and this cube map is a smooth
+gradient with no sun drawn in it, so a sharper reflection of it looks no
+different from a blurred one. Turning the normal moves the direct sunlight's
+own highlight instead, which is the bright thing in the scene, and that is what
+stands in for the animated normal map the water has not got. The turn is taken
+across the surface rather than in any direction: a free direction tips some
+normals past the horizon, and those reflect the ground half of the cube map as
+brown specks on the water.
+
+Grass has the same spots as leaves. Transmission is bright, being the sun
 rather than the sky, and grass is usually near the camera, so its specks are
 both large and clipped: a blown-out speck is what a gap in a backlit surface
 looks like, and dialling the amount down until it stops clipping only makes it
 a dull mottle. What is worth keeping down is how many there are, not how bright
 each one is.
-
-Those cover the range this scene needs. Rock and dirt are matte at any
-brightness. Grass is matte too, and reads as smooth however many shapes are in
-it, so its normals are kept low; any more and it turns grainy at a distance.
-Leaves are matte almost everywhere with a few per cent of the texture glossy,
-which reads as individual leaves that happen to face the right way rather than
-as a waxy canopy. Water has a low mean roughness and a high bumpiness, so its
-texture's ripple turns into normals and it reflects.
 
 Leaves are also the one translucent thing here. A backlit leaf gets no direct
 sun on the side facing the camera, so without it the only thing lighting the
@@ -85,13 +101,13 @@ sky behind the camera, away from the sun.
 It is a few specks rather than a whole face. A face at a time is a lamp, not a
 tree; light gets through a canopy where a leaf happens to have a gap behind it.
 Where that is, is not something the leaf texture knows, and it does not hold
-still either: in any wind it is a different leaf a moment later. So the specks
+still either: in any wind it is a different leaf a moment later. So the spots
 are not stored anywhere. The shader dices the world into cells a sixteenth of a
 voxel across, gives each one its own cycle from a hash of its position, and
-opens it for translucency_spots of that cycle; a slow ramp along the wind
-direction is added to the phase, so the openings cross the surface in gusts
+makes it a spot for the material's fraction of that cycle; a slow ramp along
+the wind direction is added to the phase, so they cross the surface in gusts
 rather than twinkling evenly. The map carries only how much light gets through
-and how much of the surface is open at once.
+and how much of the surface is a spot at once.
 
 The cycle is worked in its own 0..1 position rather than in the height of a
 wave. Near the top of a sine the wave is almost flat, so a threshold that fully
