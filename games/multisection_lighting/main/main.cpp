@@ -454,8 +454,8 @@ struct Module: public interface::Module
 	void add_voxel(interface::VoxelRegistry *reg, const ss_ &name,
 			const ss_ &texture, bool solid, float roughness = 0.9f,
 			float metalness = 0.0f, float bumpiness = 1.0f,
-			float gloss_spots = 0.0f, float translucency = 0.0f,
-			float translucency_spots = 0.0f)
+			float roughness_variation = 1.0f, float translucency = 0.0f,
+			float spots = 0.0f)
 	{
 		interface::VoxelDefinition vdef;
 		vdef.name.block_name = name;
@@ -474,9 +474,9 @@ struct Module: public interface::Module
 			seg.roughness = roughness;
 			seg.metalness = metalness;
 			seg.bumpiness = bumpiness;
-			seg.gloss_spots = gloss_spots;
+			seg.roughness_variation = roughness_variation;
 			seg.translucency = translucency;
-			seg.translucency_spots = translucency_spots;
+			seg.spots = spots;
 		}
 		vdef.edge_material_id = solid ? interface::EDGEMATERIALID_GROUND :
 				interface::EDGEMATERIALID_EMPTY;
@@ -520,7 +520,7 @@ struct Module: public interface::Module
 			add_voxel(reg, "grass", "main/grass.png", true,
 					0.90f, 0.0f, 0.75f, 0.0f, 0.06f, 0.012f); // id 4
 			add_voxel(reg, "leaves", "main/leaves.png", true,
-					0.95f, 0.0f, 1.5f, 0.08f, 0.22f, 0.04f); // id 5
+					0.95f, 0.0f, 1.5f, 0.0f, 0.11f, 0.03f); // id 5
 			add_voxel(reg, "tree", "main/tree.png", true,
 					0.85f, 0.0f, 2.0f); // id 6
 

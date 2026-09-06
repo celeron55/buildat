@@ -452,8 +452,8 @@ struct Module: public interface::Module
 	void add_voxel(interface::VoxelRegistry *reg, const ss_ &name,
 			const ss_ &texture, bool solid, float roughness = 0.9f,
 			float metalness = 0.0f, float bumpiness = 1.0f,
-			float gloss_spots = 0.0f, float translucency = 0.0f,
-			float translucency_spots = 0.0f)
+			float roughness_variation = 1.0f, float translucency = 0.0f,
+			float spots = 0.0f)
 	{
 		interface::VoxelDefinition vdef;
 		vdef.name.block_name = name;
@@ -472,9 +472,9 @@ struct Module: public interface::Module
 			seg.roughness = roughness;
 			seg.metalness = metalness;
 			seg.bumpiness = bumpiness;
-			seg.gloss_spots = gloss_spots;
+			seg.roughness_variation = roughness_variation;
 			seg.translucency = translucency;
-			seg.translucency_spots = translucency_spots;
+			seg.spots = spots;
 		}
 		vdef.edge_material_id = solid ? interface::EDGEMATERIALID_GROUND :
 				interface::EDGEMATERIALID_EMPTY;
@@ -513,17 +513,20 @@ struct Module: public interface::Module
 			// all the shapes in it, reads as smooth at any distance, so its
 			// normals are kept low; any more and it turns grainy. Light gets
 			// through the odd blade of it the same way it gets through leaves,
-			// so it has the same specks, fewer of them. They are meant to blow
-			// out: grass is close to the camera, so a speck covers several
-			// pixels, and a gap in a backlit surface is white.
-			// Leaves are matte almost everywhere, with a few per cent of the
-			// texture glossy: individual leaves that happen to face the right
-			// way, rather than a whole waxy canopy. Light comes through them
-			// in the same way, at a few texels rather than over a whole face,
-			// which is what makes a canopy blocking the sun show yellow-green
-			// specks instead of lighting up like a lamp.
-			// Water is the other end of the range, smooth enough to mirror the
-			// sky, with the ripple of its texture pushed into the normals.
+			// so it has the same spots, fewer of them. Their transmission is
+			// meant to blow out: grass is close to the camera, so a speck
+			// covers several pixels, and a gap in a backlit surface is white.
+			// Grass and leaves take no roughness from their textures at all.
+			// What gloss they have is their spots: a few per cent of them at
+			// any moment, a leaf turned to catch the light, and the same leaf
+			// letting light past it. That is what makes a canopy blocking the
+			// sun show yellow-green specks instead of lighting up like a lamp,
+			// and it moves, where a bright texel would sit still.
+			// Water keeps its texture's roughness, being the one surface here
+			// shiny enough for it to show, and has spots of its own on top: a
+			// surface already glossier than a spot cannot glint, so its
+			// roughness is set well above a still pond's. Between them they
+			// stand in for the animated normal map it has not got.
 			add_voxel(reg, "rock", "main/rock.png", true,
 					0.95f, 0.0f, 2.0f); // id 2
 			add_voxel(reg, "dirt", "main/dirt.png", true,
@@ -531,11 +534,11 @@ struct Module: public interface::Module
 			add_voxel(reg, "grass", "main/grass.png", true,
 					0.90f, 0.0f, 0.75f, 0.0f, 0.06f, 0.012f); // id 4
 			add_voxel(reg, "leaves", "main/leaves.png", true,
-					0.95f, 0.0f, 1.5f, 0.08f, 0.11f, 0.03f); // id 5
+					0.95f, 0.0f, 1.5f, 0.0f, 0.11f, 0.03f); // id 5
 			add_voxel(reg, "tree", "main/tree.png", true,
 					0.85f, 0.0f, 2.0f); // id 6
 			add_voxel(reg, "water", "main/water.png", true,
-					0.08f, 0.0f, 12.0f); // id 7
+					0.28f, 0.0f, 6.0f, 1.0f, 0.0f, 0.05f); // id 7
 
 			// The whole point of this scene: let voxelworld light it
 			ivoxelworld->get_instance(m_main_scene)->

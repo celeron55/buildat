@@ -98,11 +98,11 @@ void init_voxel(lua_State *L)
 			.def_readwrite("roughness", &AtlasSegmentDefinition::roughness)
 			.def_readwrite("metalness", &AtlasSegmentDefinition::metalness)
 			.def_readwrite("bumpiness", &AtlasSegmentDefinition::bumpiness)
-			.def_readwrite("gloss_spots", &AtlasSegmentDefinition::gloss_spots)
+			.def_readwrite("roughness_variation",
+					&AtlasSegmentDefinition::roughness_variation)
 			.def_readwrite("translucency",
 					&AtlasSegmentDefinition::translucency)
-			.def_readwrite("translucency_spots",
-					&AtlasSegmentDefinition::translucency_spots)
+			.def_readwrite("spots", &AtlasSegmentDefinition::spots)
 		,
 		class_<VoxelDefinition, bases<>, sp_<VoxelDefinition>>(
 				"__buildat_VoxelDefinition")

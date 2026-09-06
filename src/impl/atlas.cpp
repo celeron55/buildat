@@ -8,7 +8,6 @@
 #include <Graphics.h>
 #include <Image.h>
 #include <Vector3.h>
-#include <algorithm>
 #include <cmath>
 #define MODULE "atlas"
 
@@ -24,9 +23,9 @@ bool AtlasSegmentDefinition::operator==(const AtlasSegmentDefinition &other) con
 			roughness == other.roughness &&
 			metalness == other.metalness &&
 			bumpiness == other.bumpiness &&
-			gloss_spots == other.gloss_spots &&
+			roughness_variation == other.roughness_variation &&
 			translucency == other.translucency &&
-			translucency_spots == other.translucency_spots
+			spots == other.spots
 	);
 }
 
@@ -391,36 +390,13 @@ struct CAtlasRegistry: public AtlasRegistry
 		// Enough that a texture with any contrast at all spans a visible range
 		// of roughness, and little enough that a flat one stays flat
 		const float ROUGHNESS_PER_LUM = -0.8f;
-		// Glossy enough to catch the sky against a matte surround without
-		// becoming a mirror
-		const float GLOSS_SPOT_ROUGHNESS = 0.15f;
-		// The luminance a texel has to reach to be one of the glossy spots.
-		// Taken as a quantile of the segment's own texels rather than as an
-		// absolute, so that gloss_spots means the same thing whatever the
-		// texture's contrast is: a glossy spot is a leaf catching the light,
-		// so it belongs on the parts of the texture that are already bright.
-		float gloss_threshold = 2.0f; // Above any luminance, so: no spots
-		if(def.gloss_spots > 0.0f){
-			sv_<float> lums;
-			lums.reserve(seg_size.x_ * seg_size.y_);
-			for(int ly = 0; ly<seg_size.y_; ly++)
-				for(int lx = 0; lx<seg_size.x_; lx++)
-					lums.push_back(segment_luminance(
-							seg_img, src_off, seg_size, lx, ly));
-			std::sort(lums.begin(), lums.end());
-			size_t i = (size_t)(lums.size() *
-					(1.0f - std::min(1.0f, def.gloss_spots)));
-			if(i >= lums.size())
-				i = lums.size() - 1;
-			gloss_threshold = lums[i];
-		}
-		// Where light comes through is not something the texture knows, and it
-		// does not hold still either: it is which leaves happen to have a gap
-		// behind them at this moment. The shader works that out from the world
-		// position and the time, so all that is stored is how much of the
-		// surface is open at once.
-		float trans_open = std::min(1.0f, std::max(0.0f,
-				def.translucency_spots));
+		// Which parts of a surface are catching the light or letting it past
+		// is not something the texture knows, and it does not hold still
+		// either. The shader works that out from the world position and the
+		// time, so all that is stored is how much of the surface is doing it
+		// at once.
+		float spots = def.spots < 0.0f ? 0.0f :
+				(def.spots > 1.0f ? 1.0f : def.spots);
 		for(int y = 0; y<seg_size.y_ * 2; y++){
 			for(int x = 0; x<seg_size.x_ * 2; x++){
 				int lx = ((x + seg_size.x_ / 2) * step) % seg_size.x_;
@@ -446,20 +422,15 @@ struct CAtlasRegistry: public AtlasRegistry
 						n.x_ * 0.5f + 0.5f,
 						n.y_ * 0.5f + 0.5f,
 						n.z_ * 0.5f + 0.5f, 1.0f));
-				float roughness;
-				if(lum >= gloss_threshold){
-					roughness = GLOSS_SPOT_ROUGHNESS;
-				} else {
-					roughness = def.roughness +
-							(lum - mean_lum) * ROUGHNESS_PER_LUM;
-					if(roughness < 0.03f)
-						roughness = 0.03f;
-					if(roughness > 1.0f)
-						roughness = 1.0f;
-				}
+				float roughness = def.roughness + (lum - mean_lum) *
+						ROUGHNESS_PER_LUM * def.roughness_variation;
+				if(roughness < 0.03f)
+					roughness = 0.03f;
+				if(roughness > 1.0f)
+					roughness = 1.0f;
 				atlas.spec_image->SetPixel(dst_p.x_, dst_p.y_,
 						magic::Color(roughness, def.metalness,
-						def.translucency, trans_open));
+						def.translucency, spots));
 			}
 		}
 	}
