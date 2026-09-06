@@ -175,6 +175,14 @@ void VS()
     // looks no different from a blurred one. A turned normal moves the direct
     // sunlight's own highlight instead, which is the bright thing in the scene.
     const float SPOT_TILT = 0.45;
+    // Spots that hold still. A cracked rock face is mostly dull, with the odd
+    // crystalline facet in it that catches the light, and those do not move.
+    // Cells are bigger than the moving ones because a facet is a chip of rock
+    // rather than a leaf, and they are taken from the world position rather
+    // than from a map: a map lives in one voxel face and would repeat every
+    // voxel, which is the one thing a speckle must not do.
+    const float STATIC_SPOT_CELLS = 6.0;     // Cells per voxel, per axis
+    const float STATIC_SPOT_TILT = 0.35;
     const float TRANSMISSION_RATE = 0.03;    // Cycles per second, mean
     const vec3 TRANSMISSION_WIND = vec3(0.35, 0.0, -0.2);
 
@@ -199,12 +207,22 @@ void VS()
     // Which way a spot has turned, before it is flattened onto the surface.
     // Constant per cell, so a spot holds still while it is open rather than
     // shimmering within itself.
-    vec3 GetSpotTilt(vec3 worldPos)
+    vec3 GetSpotTilt(vec3 worldPos, float cells)
     {
-        vec3 cell = floor(worldPos * TRANSMISSION_CELLS);
+        vec3 cell = floor(worldPos * cells);
         return vec3(TransmissionHash(cell + 41.0),
             TransmissionHash(cell + 67.0),
             TransmissionHash(cell + 89.0)) * 2.0 - 1.0;
+    }
+
+    // A still spot is on or off with no fade: a facet has an edge, and its
+    // tilt is constant across the cell, so it reads as one flat surface.
+    float GetStaticSpots(vec3 worldPos, float fraction)
+    {
+        if (fraction <= 0.0)
+            return 0.0;
+        vec3 cell = floor(worldPos * STATIC_SPOT_CELLS);
+        return TransmissionHash(cell + 7.0) < fraction ? 1.0 : 0.0;
     }
 
     float GetSurfaceSpots(vec3 worldPos, float openFraction)
@@ -243,6 +261,7 @@ void PS()
     // How much of a spot this pixel is. Used twice: to gloss the surface here,
     // and to let light through it in the lighting below.
     float surfaceSpots = 0.0;
+    float staticSpots = 0.0;
 
     #ifdef METALLIC
         vec4 roughMetalSrc = texture2D(sSpecMap, vTexCoord.xy);
@@ -251,7 +270,12 @@ void PS()
         float metalness = roughMetalSrc.g + cMetallic;
         #ifdef VOXELSPOTS
             surfaceSpots = GetSurfaceSpots(vWorldPos.xyz, roughMetalSrc.a);
-            roughness = mix(roughness, SPOT_ROUGHNESS, surfaceSpots);
+            // How many of the surface's spots hold still rides in the normal
+            // map's alpha, the one channel these maps had left
+            staticSpots = GetStaticSpots(vWorldPos.xyz,
+                texture2D(sNormalMap, vTexCoord.xy).a);
+            roughness = mix(roughness, SPOT_ROUGHNESS,
+                max(surfaceSpots, staticSpots));
         #endif
     #else
         float roughness = cRoughness;
@@ -308,9 +332,13 @@ void PS()
         // The turn is taken across the surface rather than in any direction.
         // A free direction tips some normals past the horizon, and those
         // reflect the ground half of the cube map: brown specks on water.
-        vec3 spotTilt = GetSpotTilt(vWorldPos.xyz);
+        vec3 spotTilt =
+            GetSpotTilt(vWorldPos.xyz, TRANSMISSION_CELLS) *
+                (SPOT_TILT * surfaceSpots) +
+            GetSpotTilt(vWorldPos.xyz, STATIC_SPOT_CELLS) *
+                (STATIC_SPOT_TILT * staticSpots);
         spotTilt -= normal * dot(spotTilt, normal);
-        normal = normalize(normal + spotTilt * (SPOT_TILT * surfaceSpots));
+        normal = normalize(normal + spotTilt);
     #endif
 
     // Get fog factor

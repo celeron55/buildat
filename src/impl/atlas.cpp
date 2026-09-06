@@ -25,7 +25,8 @@ bool AtlasSegmentDefinition::operator==(const AtlasSegmentDefinition &other) con
 			bumpiness == other.bumpiness &&
 			roughness_variation == other.roughness_variation &&
 			translucency == other.translucency &&
-			spots == other.spots
+			spots == other.spots &&
+			static_spots == other.static_spots
 	);
 }
 
@@ -397,6 +398,13 @@ struct CAtlasRegistry: public AtlasRegistry
 		// at once.
 		float spots = def.spots < 0.0f ? 0.0f :
 				(def.spots > 1.0f ? 1.0f : def.spots);
+		// The still spots are worked out from the world position too, and for
+		// the same reason: a map of them would repeat once per voxel face,
+		// which is exactly what specks in rock must not do. Only how many of
+		// them there are is stored, and the normal map's alpha is the one
+		// channel free to carry it.
+		float static_spots = def.static_spots < 0.0f ? 0.0f :
+				(def.static_spots > 1.0f ? 1.0f : def.static_spots);
 		for(int y = 0; y<seg_size.y_ * 2; y++){
 			for(int x = 0; x<seg_size.x_ * 2; x++){
 				int lx = ((x + seg_size.x_ / 2) * step) % seg_size.x_;
@@ -421,7 +429,7 @@ struct CAtlasRegistry: public AtlasRegistry
 				atlas.normal_image->SetPixel(dst_p.x_, dst_p.y_, magic::Color(
 						n.x_ * 0.5f + 0.5f,
 						n.y_ * 0.5f + 0.5f,
-						n.z_ * 0.5f + 0.5f, 1.0f));
+						n.z_ * 0.5f + 0.5f, static_spots));
 				float roughness = def.roughness + (lum - mean_lum) *
 						ROUGHNESS_PER_LUM * def.roughness_variation;
 				if(roughness < 0.03f)
