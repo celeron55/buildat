@@ -380,6 +380,8 @@ public:
     ShaderVariation* GetShader(ShaderType type, const String& name, const String& defines = String::EMPTY) const;
     /// Return a shader variation by name and defines.
     ShaderVariation* GetShader(ShaderType type, const char* name, const char* defines) const;
+    /// Return the directory shader names without a path of their own are looked up in.
+    const String& GetShaderPath() const { return shaderPath_; }
     /// Return current vertex buffer by index.
     VertexBuffer* GetVertexBuffer(unsigned index) const;
 

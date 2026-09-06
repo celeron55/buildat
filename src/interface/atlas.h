@@ -63,6 +63,12 @@ namespace interface
 		//
 		// Gloss and transmission share one fraction because they are the same
 		// event from two sides; the geometry decides which one shows.
+		//
+		// TODO: For a game that wants a surface these six numbers cannot
+		// describe, add normal_resource_name and surface_resource_name here
+		// and have atlas.cpp blit them in place of deriving them. Derivation
+		// stays the default; a game that overrides both also decides what the
+		// channels mean, and ships the shader that reads them.
 		float roughness = 0.9f;
 		float spec_strength = 1.0f;
 		float bumpiness = 1.0f;

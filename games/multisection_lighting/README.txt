@@ -44,8 +44,12 @@ Lighting
 The server flood fills a 4 bit skylight value into every voxel: full straight
 down through air, losing one step per voxel as it spreads sideways and deeper.
 The mesher packs that into vertex colors, and chunk geometry is drawn with
-PBRVoxel, a technique and shader in client/data. The scene is rendered in HDR
-and tonemapped.
+PBRVoxel, a technique and shader in the voxel_shading module, which puts them
+on each chunk in voxelworld.sub_material_update(). The mesher sets no technique
+of its own; interface/mesh.h lists what it does hand a voxel shader. Nothing in
+voxel_shading needs a module's privileges, since a module has none a game
+lacks; it is a module so that both lighting games can share it. The scene is
+rendered in HDR and tonemapped.
 
 The vertex color carries how much sky a surface sees in its alpha and the
 light bounced off nearby surfaces in its rgb, and the shader adds them:

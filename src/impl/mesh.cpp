@@ -353,7 +353,7 @@ static bool face_owned_by_padding(pv::RawVolume<VoxelInstance> &volume,
 			back.getZ() <= lc.getZ() || back.getZ() >= uc.getZ();
 }
 
-// Vertex colors for skylit voxel geometry, decoded by PBRVoxel.glsl as
+// Vertex colors for skylit voxel geometry, decoded by a voxel shader as
 //   ambient = cAmbientColor.rgb * color.a + color.rgb
 // The zone's ambient color is the sky, so a world picks that itself; what is
 // carried here is how much of the sky the surface sees, and the light bounced
@@ -743,8 +743,12 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 		cg_vertices = tg.vertex_data;
 		Material *material = new Material(context);
 		if(tg.has_colors){
-			material->SetTechnique(0, cache->GetResource<Technique>(
-					"Techniques/PBRVoxel.xml"));
+			// No technique: the game picks one in its material callback, as
+			// only it knows which shader reads the maps set up here. Skylit
+			// geometry stays invisible until it does. See interface/atlas.h
+			// for what the maps contain and interface/mesh.h for the rest of
+			// what a shader is handed.
+			//
 			// The atlas derives a normal map and a surface map
 			// from each segment's image, so the maps are the whole material
 			// and these two constants are only added on top of them
@@ -981,8 +985,7 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 		Material *material = new Material(context);
 		if(lod <= interface::MAX_LOD_WITH_SHADOWS){
 			if(tg.has_colors){
-				material->SetTechnique(0, cache->GetResource<Technique>(
-						"Techniques/PBRVoxel.xml"));
+				// The game sets the technique; see set_voxel_geometry()
 				material->SetShaderParameter("Roughness", 0.0f);
 				material->SetShaderParameter("Metallic", 0.0f);
 				material->SetTexture(TU_NORMAL, atlas_cache->normal_texture);

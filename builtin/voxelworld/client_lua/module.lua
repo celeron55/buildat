@@ -58,6 +58,9 @@ local is_ready = false
 local on_ready_callbacks = {}
 
 local geometry_update_cbs = {} -- function(node)
+-- Called after a chunk's materials exist, so that a game can put its own
+-- technique, cube maps and shader parameters on them
+local material_update_cbs = {} -- function(node)
 
 -- TODO: Implement unload by timeout
 local node_volume_cache = {} -- {node_id: {volume:, last_access_us:}}
@@ -174,6 +177,12 @@ function sub_events()
 		local far_trigger_d = nil
 		local far_weight = nil
 
+		local function set_up_materials()
+			for _, cb in ipairs(material_update_cbs) do
+				cb(node)
+			end
+		end
+
 		if d >= M.camera_far_clip * 1.4 then
 			log:debug("Clearing voxel geometry outside camera far clip ("
 					..M.camera_far_clip..")")
@@ -184,14 +193,15 @@ function sub_events()
 			near_weight = 0.4
 		elseif lod == 1 then
 			buildat.set_voxel_geometry(
-					node, data, voxel_reg, atlas_reg, M.use_skylight)
+					node, data, voxel_reg, atlas_reg, M.use_skylight,
+					set_up_materials)
 
 			-- 1 -> 2
 			far_trigger_d = M.lod_distance * (1.0 + LOD_THRESHOLD)
 			far_weight = 0.5
 		else
 			buildat.set_voxel_lod_geometry(lod, node, data, voxel_reg,
-					atlas_reg, M.use_skylight)
+					atlas_reg, M.use_skylight, set_up_materials)
 
 			if lod == 1 then
 				-- Shouldn't go here
@@ -402,6 +412,10 @@ end
 
 function M.sub_geometry_update(cb)
 	table.insert(geometry_update_cbs, cb)
+end
+
+function M.sub_material_update(cb)
+	table.insert(material_update_cbs, cb)
 end
 
 function M.get_chunk_position(voxel_p)
