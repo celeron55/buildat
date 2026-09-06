@@ -113,10 +113,12 @@ that differ and the first one. check.txt runs it after generation and after
 every edit, so a run says outright whether the incremental relight got the same
 answer as doing it all again.
 
-Materials are voxel_lighting's, minus the pond: the same per-voxel roughness
-and bumpiness, and the same zone cube map, so a rendering change can be
-compared between the two scenes. See voxel_lighting's README for what those
-mean.
+Materials are voxel_lighting's, minus the pond: the same per-voxel roughness,
+bumpiness, gloss and transmission, and the same zone cube map, so a rendering
+change can be compared between the two scenes. See voxel_lighting's README for
+what those mean. The benchmark cameras here are only its first three, the ones
+for skylight; the ones it added for materials (the pond and the two of a
+canopy against the sun) are not repeated.
 
 Running
 -------

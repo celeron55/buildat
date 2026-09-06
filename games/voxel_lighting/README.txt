@@ -59,6 +59,11 @@ packs it, from three numbers a voxel gives with it (interface/atlas.h):
     translucency_spots  fraction of the texture's texels, picked at random,
                that let it through; the rest let none through
 
+Transmission is bright: it is the sun rather than the sky, so a little goes a
+long way. Grass has the same specks as leaves at a fraction of the amount,
+which is a mottle on a backlit slope rather than the white tiles it becomes
+when it is set anywhere near the leaves' value.
+
 Those cover the range this scene needs. Rock and dirt are matte at any
 brightness. Grass is matte too, and reads as smooth however many shapes are in
 it, so its normals are kept low; any more and it turns grainy at a distance.
@@ -105,25 +110,41 @@ unaffected.
 Benchmarks
 ----------
 
-Three fixed camera placements, on the HUD buttons at the top right and on
-keys 1, 2 and 3:
+Six fixed camera placements, on the HUD buttons at the top right and on keys
+1 to 6. Each is there for something specific, so a rendering change can be
+judged against the previous run's images one feature at a time:
 
-    1 Overview      outside the high +X +Y +Z corner, down the diagonal
-    2 Cave mouth    on the cave axis outside it, looking in
-    3 Inside cave   on the cave axis inside it, looking back out
-    4 Pond          over the far rim of the pond, looking across it
-    5 Backlit canopy  back from a tree and above it, sun behind and above
-    6 Sun behind      below the same tree, looking up at the sun through it
+  # Name            Frames                      What it is there for
+  - --------------  --------------------------  --------------------------
+  1 Overview        the whole volume from the   the scene as a whole; the
+                    high +X +Y +Z corner        shape of the terrain and
+                                                where everything else is
+  2 Cave mouth      the cave axis from          skylight falling off into an
+                    outside, looking in         opening, and the shape of the
+                                                mouth against lit ground
+  3 Inside cave     the cave axis from inside,  skylight at its darkest: rock
+                    looking back out            that sees no sky at all
+                                                around a blown-out opening.
+                                                The main one for relighting;
+                                                the shaft and slab edits are
+                                                shot from here
+  4 Pond            across the water from over  the environment cube map. A
+                    its far rim                 reflection is strongest at a
+                                                grazing angle, and leaves,
+                                                grass and dirt are in the
+                                                same frame for contrast
+  5 Backlit canopy  a tree from back and above  the canopy's directly lit top
+                    it, sun behind and above    face against its shaded side,
+                                                in one frame
+  6 Sun behind      the same tree from below,   light through the leaves at
+                    looking up at the sun       its strongest: the leaves
+                    through it                  facing the camera have the
+                                                sun square behind them. Also
+                                                the grass on the terrain
+                                                either side
 
-3 is the one that matters most for skylight: dark rock around a blown-out
-opening. 4, 5 and 6 are the ones for materials. A reflection is strongest at a
-grazing angle, so 4 says whether the cube map is reaching the water, with
-leaves and grass in the same frame for contrast. 5 stands back with the sun
-behind and above the tree, so the canopy's directly lit top face and its
-shaded side are in the same frame. 6 is where transmission is strongest: the
-sun is high, so putting a canopy between it and the camera means standing under
-the tree and looking up, and the leaves facing the camera then have the sun
-square behind them.
+Reading them, 3 is the one that matters for skylight and relighting, 4 to 6
+are the ones for materials.
 
 The pond is dug rather than found. This terrain is one slope, so a water line
 drawn across it fills the low ground at the edge of the volume and reads as a
@@ -131,6 +152,12 @@ sea the world runs out of; a basin dug into the flattest ground away from the
 cave reads as a pond. POND_CENTRE_X, POND_CENTRE_Z, POND_RADIUS, POND_DEPTH
 and WATER_LEVEL in main.cpp were picked off the surface heights the generator
 reports, in the same way as GROUND_OFFSET and TERRAIN_AMPLITUDE.
+
+5 and 6 are two framings of the same tree, the one nearest the middle of the
+volume. The sun is high, so they cannot be the same camera: standing back from
+a tree far enough to see its top means the sun is above it rather than behind
+it, and putting a canopy between the camera and the sun means standing under
+the tree and looking up.
 
 Tab (or the top HUD button) toggles free move: WASD on the horizontal plane
 whatever the camera is pitched at, Space up, Shift down, mouse to look.
