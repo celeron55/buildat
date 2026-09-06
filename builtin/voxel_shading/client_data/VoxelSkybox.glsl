@@ -39,9 +39,12 @@ const float CLOUD_LIT_STEP = 0.07;
 const vec3 CLOUD_LIT = vec3(1.05, 1.04, 1.02);
 const vec3 CLOUD_SHADED = vec3(0.72, 0.76, 0.84);
 const vec2 CLOUD_WIND = vec2(0.010, 0.004);
-// Below this the layer is edge on, and is faded out rather than smeared along
-// the horizon
+// Below CLOUD_HORIZON the projection is clamped, and holding it still is what
+// would smear the layer down the sky in vertical streaks. The clouds are gone
+// by then: they fade out between the two, so nothing of the clamped part is
+// ever drawn. A flat layer thins into haze towards the horizon anyway.
 const float CLOUD_HORIZON = 0.16;
+const float CLOUD_FADE = 0.38;
 
 float SkyHash(vec2 p)
 {
@@ -100,7 +103,7 @@ void PS()
         vec3 cloud = density > threshold + CLOUD_LIT_STEP ?
                 CLOUD_LIT : CLOUD_SHADED;
         float cover = step(threshold, density) *
-                smoothstep(0.0, CLOUD_HORIZON * 2.0, d.y);
+                smoothstep(CLOUD_HORIZON, CLOUD_FADE, d.y);
         color = mix(color, cloud, cover);
     }
 
