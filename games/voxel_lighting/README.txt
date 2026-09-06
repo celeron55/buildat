@@ -59,12 +59,12 @@ packs it, from a handful of numbers a voxel gives with it (interface/atlas.h):
     spots      fraction of the surface that is a spot at any one moment
     static_spots  the same, for spots that hold still
 
-Those cover the range this scene needs. Dirt is matte at any brightness and
-takes all of its variation from its texture. Rock takes most of its back out:
-cracked stone is dull nearly everywhere, and what gloss it has is the odd
-crystalline facet in it rather than whichever texel happens to be bright. Those
-are its static_spots. The tree trunk keeps about a third of the gloss its bark
-texture asks for. Grass is matte
+Those cover the range this scene needs. Rock keeps a seventh of the roughness
+variation its texture would give it: cracked stone is dull nearly everywhere,
+and what gloss it has is the odd crystalline facet in it rather than whichever
+texel happens to be bright. Those are its static_spots. Dirt is the same
+surface as far as light is concerned and has the same numbers. The tree trunk
+keeps about a third of the gloss its bark texture asks for. Grass is matte
 too, and reads as smooth however many shapes are in it, so its normals are kept
 low; any more and it turns grainy at a distance. Grass and leaves take no
 roughness from their textures at all: what gloss they have comes from their

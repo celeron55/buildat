@@ -515,9 +515,9 @@ struct Module: public interface::Module
 			add_voxel(reg, "air", "", false);              // id 1
 			// Same surfaces as voxel_lighting; see its main.cpp
 			add_voxel(reg, "rock", "main/rock.png", true,
-					0.95f, 0.0f, 2.0f, 0.3f, 0.0f, 0.0f, 0.04f); // id 2
+					0.95f, 0.0f, 2.0f, 0.15f, 0.0f, 0.0f, 0.04f); // id 2
 			add_voxel(reg, "dirt", "main/dirt.png", true,
-					0.98f, 0.0f, 2.5f); // id 3
+					0.98f, 0.0f, 2.5f, 0.15f, 0.0f, 0.0f, 0.04f); // id 3
 			add_voxel(reg, "grass", "main/grass.png", true,
 					0.90f, 0.0f, 0.75f, 0.0f, 0.06f, 0.012f); // id 4
 			add_voxel(reg, "leaves", "main/leaves.png", true,

@@ -514,9 +514,11 @@ struct Module: public interface::Module
 			// with the odd crystalline facet in it that catches the light.
 			// Those are its static_spots, and they are worked out from the
 			// world position rather than from its texture, so they do not
-			// repeat once per voxel the way anything in the map does. Most of
-			// the roughness its texture would give it is taken back out, so
-			// what gloss it has is the facets. Dirt is matte and coarse.
+			// repeat once per voxel the way anything in the map does. Nearly
+			// all of the roughness its texture would give it is taken back
+			// out, so what gloss it has is the facets. Dirt is the same
+			// surface as far as light is concerned, and gets the same
+			// numbers.
 			// The tree trunk keeps only a third of the gloss its bark texture
 			// asks for; bark is not that shiny. Grass is matte and, for
 			// all the shapes in it, reads as smooth at any distance, so its
@@ -537,9 +539,9 @@ struct Module: public interface::Module
 			// roughness is set well above a still pond's. Between them they
 			// stand in for the animated normal map it has not got.
 			add_voxel(reg, "rock", "main/rock.png", true,
-					0.95f, 0.0f, 2.0f, 0.3f, 0.0f, 0.0f, 0.04f); // id 2
+					0.95f, 0.0f, 2.0f, 0.15f, 0.0f, 0.0f, 0.04f); // id 2
 			add_voxel(reg, "dirt", "main/dirt.png", true,
-					0.98f, 0.0f, 2.5f); // id 3
+					0.98f, 0.0f, 2.5f, 0.15f, 0.0f, 0.0f, 0.04f); // id 3
 			add_voxel(reg, "grass", "main/grass.png", true,
 					0.90f, 0.0f, 0.75f, 0.0f, 0.06f, 0.012f); // id 4
 			add_voxel(reg, "leaves", "main/leaves.png", true,
