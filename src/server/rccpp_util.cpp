@@ -51,9 +51,10 @@ sv_<ss_> list_includes(const ss_ &path, const sv_<ss_> &include_dirs)
 	return result;
 }
 
-ss_ hash_files(const sv_<ss_> &paths)
+ss_ hash_files(const sv_<ss_> &paths, const ss_ &extra)
 {
 	std::ostringstream os(std::ios::binary);
+	os<<extra;
 	for(const ss_ &path : paths){
 		std::ifstream f(path);
 		try {
