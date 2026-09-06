@@ -56,6 +56,36 @@ keys 1, 2 and 3:
 Tab (or the top HUD button) toggles free move: WASD on the horizontal plane
 whatever the camera is pitched at, Space up, Shift down, mouse to look.
 
+Editing
+-------
+
+In free move, left mouse digs the pointed voxel and right mouse places rock
+next to it. P and O (or the last two HUD buttons) make the two fixed edits used
+for comparing images.
+
+P digs a 3x3 shaft straight up out of the cave to the open air, starting far
+enough in that the skylight there was 0. That is the strong test: a whole part
+of the scene that had no skylight at all has to come up to daylight, and
+benchmark 3 goes from near-black rock to a lit cave.
+
+O caps the shaft with a 5x2x5 slab filling the two air voxels above the ground,
+which takes back the light the shaft let in: benchmark 3 returns to the dark it
+started at. The shaft reaches through the cap, so digging again cuts it back
+out and the two can be alternated for as long as anyone wants to watch them.
+
+Relighting is voxelworld's, not this game's: it is turned on with
+set_skylight_enabled(true) and from then on every set_voxel keeps the light up
+to date, generation included. An edit costs well under a millisecond
+here, and what it costs depends on how far the light moves rather than on how
+big the world is. Lighting the whole section at generation costs 40 ms.
+
+V (or the last HUD button) checks that: it runs a skylight flood fill from
+scratch over the whole scene and compares it voxel by voxel against what
+voxelworld stored, logging either "skylight verify: ok" or the number of voxels
+that differ and the first one. check.txt runs it after generation and after
+every edit, so a run says outright whether the incremental relight got the same
+answer as doing it all again.
+
 Running
 -------
 
@@ -65,7 +95,13 @@ Running
 check.txt visits all three benchmarks and screenshots each, for comparing a
 rendering change against the previous run:
 
-    $ bin/buildat_client -s localhost -c @../games/voxel_lighting/check.txt
+    $ bin/buildat_client -s localhost -w 1600x900 \
+            -c @../games/voxel_lighting/check.txt
+
+-w gives the run a fixed window size without changing the remembered one, so
+the images come out the same size whatever the window was left at last time.
+It also shoots both benchmark edits, so a run is: all three views of the scene
+as generated, then the same three after the shaft and after the slab.
 
 NOTE: the server reads client_lua and client_data once at startup, so restart
 it after editing init.lua or the client will be served the previous version.

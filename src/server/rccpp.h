@@ -9,6 +9,10 @@ namespace interface {
 
 namespace rccpp
 {
+	// Optimization flags modules are compiled with. Part of the build cache
+	// hash, so changing it rebuilds what is already cached.
+	ss_ cxxflags_optimize();
+
 	struct Compiler {
 		virtual ~Compiler(){}
 
