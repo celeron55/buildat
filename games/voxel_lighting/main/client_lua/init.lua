@@ -304,6 +304,8 @@ buildat.sub_packet("main:tree", function(data)
 			"and 7 ready", tx, ty, tz))
 end)
 
+local POND_BACK_OFF = 10
+
 -- Benchmark 4's camera, as "ex ey ez tx ty tz". Placed by the server, which
 -- knows where the water and the terrain around it ended up; it looks along the
 -- water at a grazing angle, where the reflection of the sky is strongest.
@@ -316,12 +318,19 @@ buildat.sub_packet("main:water", function(data)
 	end
 	ex, ey, ez = tonumber(ex), tonumber(ey), tonumber(ez)
 	tx, ty, tz = tonumber(tx), tonumber(ty), tonumber(tz)
-	local w_yaw, w_pitch = angles_from_dir(
-			{x = tx - ex, y = ty - ey, z = tz - ez})
+	-- Squared up to an axis and levelled, then backed off, so that the frame
+	-- holds the horizon as well as the water: the grazing reflection is what
+	-- this benchmark is for, and the sky it grazes is worth seeing too. Yaw
+	-- grows turning right, so flooring it to a quarter turn turns left.
+	local w_yaw = angles_from_dir({x = tx - ex, y = ty - ey, z = tz - ez})
+	w_yaw = math.floor(w_yaw / 90) * 90
+	local look = {x = math.sin(math.rad(w_yaw)), z = math.cos(math.rad(w_yaw))}
 	benchmarks[4] = {
 		name = "Pond",
-		x = ex, y = ey, z = ez,
-		yaw = w_yaw, pitch = w_pitch,
+		x = ex - look.x * POND_BACK_OFF,
+		y = ey,
+		z = ez - look.z * POND_BACK_OFF,
+		yaw = w_yaw, pitch = 0,
 	}
 	log:info(string.format("pond at (%.1f, %.1f, %.1f); benchmark 4 ready",
 			tx, ty, tz))
