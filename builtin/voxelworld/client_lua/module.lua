@@ -41,6 +41,11 @@ local end_of_update_processing_us = 0
 local voxel_reg = buildat.createVoxelRegistry()
 local atlas_reg = buildat.createAtlasRegistry()
 
+-- Opt-in per world: shade static chunk geometry by the skylight the server
+-- stored in the voxel data. Off by default; a world that does not fill those
+-- bits (and any dynamic voxel node) would come out uniformly dark.
+M.use_skylight = false
+
 M.chunk_size_voxels = nil
 M.section_size_chunks = nil
 M.section_size_voxels = nil
@@ -179,13 +184,14 @@ function sub_events()
 			near_weight = 0.4
 		elseif lod == 1 then
 			buildat.set_voxel_geometry(
-					node, data, voxel_reg, atlas_reg)
+					node, data, voxel_reg, atlas_reg, M.use_skylight)
 
 			-- 1 -> 2
 			far_trigger_d = M.lod_distance * (1.0 + LOD_THRESHOLD)
 			far_weight = 0.5
 		else
-			buildat.set_voxel_lod_geometry(lod, node, data, voxel_reg, atlas_reg)
+			buildat.set_voxel_lod_geometry(lod, node, data, voxel_reg,
+					atlas_reg, M.use_skylight)
 
 			if lod == 1 then
 				-- Shouldn't go here
