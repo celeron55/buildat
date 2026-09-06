@@ -11,6 +11,25 @@ this size. A cave is carved into it with a sphere swept along the camera's
 view direction, yawed 20 degrees so it does not run straight away from the
 camera.
 
+Lighting
+--------
+
+The server flood fills a 4 bit skylight value into every voxel: full straight
+down through air, losing one step per voxel as it spreads sideways and deeper.
+The mesher turns the skylight of the voxel in front of each face into a vertex
+color, and chunk geometry is drawn with PBRDiffVCol, a PBR technique in
+client/data/Techniques. The scene is rendered in HDR and tonemapped.
+
+The vertex color multiplies the zone's ambient color, which is a blue sky
+bounce. Because it fades towards a warm tint rather than towards black, a face
+that has lost most of its skylight ends up neutral grey, like light bounced off
+rock, while a merely shaded outdoor face stays blue. That is what makes a cave
+look different from a tree's shadow.
+
+Skylight is opt-in per world: voxelworld.use_skylight, off by default. A world
+that does not fill the bits, and any dynamic voxel node meshed by a game
+itself, keeps the plain Diff technique and full brightness.
+
 Benchmarks
 ----------
 
