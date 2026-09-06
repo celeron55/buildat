@@ -59,10 +59,12 @@ packs it, from three numbers a voxel gives with it (interface/atlas.h):
     translucency_spots  fraction of the texture's texels, picked at random,
                that let it through; the rest let none through
 
-Transmission is bright: it is the sun rather than the sky, so a little goes a
-long way. Grass has the same specks as leaves at a fraction of the amount,
-which is a mottle on a backlit slope rather than the white tiles it becomes
-when it is set anywhere near the leaves' value.
+Grass has the same specks as leaves. Transmission is bright, being the sun
+rather than the sky, and grass is usually near the camera, so its specks are
+both large and clipped: a blown-out speck is what a gap in a backlit surface
+looks like, and dialling the amount down until it stops clipping only makes it
+a dull mottle. What is worth keeping down is how many there are, not how bright
+each one is.
 
 Those cover the range this scene needs. Rock and dirt are matte at any
 brightness. Grass is matte too, and reads as smooth however many shapes are in

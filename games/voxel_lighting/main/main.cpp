@@ -513,7 +513,9 @@ struct Module: public interface::Module
 			// all the shapes in it, reads as smooth at any distance, so its
 			// normals are kept low; any more and it turns grainy. Light gets
 			// through the odd blade of it the same way it gets through leaves,
-			// so it has the same specks, thinner on the ground.
+			// so it has the same specks, fewer of them. They are meant to blow
+			// out: grass is close to the camera, so a speck covers several
+			// pixels, and a gap in a backlit surface is white.
 			// Leaves are matte almost everywhere, with a few per cent of the
 			// texture glossy: individual leaves that happen to face the right
 			// way, rather than a whole waxy canopy. Light comes through them
@@ -527,7 +529,7 @@ struct Module: public interface::Module
 			add_voxel(reg, "dirt", "main/dirt.png", true,
 					0.98f, 0.0f, 2.5f); // id 3
 			add_voxel(reg, "grass", "main/grass.png", true,
-					0.90f, 0.0f, 0.75f, 0.0f, 0.015f, 0.012f); // id 4
+					0.90f, 0.0f, 0.75f, 0.0f, 0.06f, 0.012f); // id 4
 			add_voxel(reg, "leaves", "main/leaves.png", true,
 					0.95f, 0.0f, 1.5f, 0.08f, 0.22f, 0.04f); // id 5
 			add_voxel(reg, "tree", "main/tree.png", true,
