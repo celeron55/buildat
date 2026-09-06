@@ -43,9 +43,11 @@ namespace command_seq
 
 	ss_ dump_command(const Command &c);
 
-	// Drop real mouse events while a sequence runs, so that the physical
-	// mouse cannot perturb it. Injected mouse events still get through.
-	void inhibit_real_mouse(bool enable);
+	// Drop real mouse and keyboard events while a sequence runs, so that
+	// neither can perturb it and so that typing aimed at another window is
+	// not swallowed by the client raising itself. Injected events still get
+	// through, as do escape and alt+tab.
+	void inhibit_real_input(bool enable);
 
 	// Feed Urho3D the one mouse motion it drops after a mouse state change,
 	// so that the next injected mouse_move is not the one that gets eaten.
