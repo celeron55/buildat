@@ -68,10 +68,10 @@ enough in that the skylight there was 0. That is the strong test: a whole part
 of the scene that had no skylight at all has to come up to daylight, and
 benchmark 3 goes from near-black rock to a lit cave.
 
-O hangs a 5x2x5 slab over the cave mouth, high enough that it does not sit in
-front of the mouth in benchmark 2. It takes light back out of the entrance, but
-note that after the shaft is dug the cave is lit mostly through the shaft, so
-this second step reads much more weakly than it did on its own.
+O caps the shaft with a 5x2x5 slab filling the two air voxels above the ground,
+which takes back the light the shaft let in: benchmark 3 returns to the dark it
+started at. The two edits change a similar number of voxels in opposite
+directions, so they check the relight both ways.
 
 Every edit relights the whole scene: the skylight flood fill is run again over
 all of it and only the voxels whose skylight actually changed are written back,

@@ -342,7 +342,7 @@ do
 	add_button("Dig shaft (P)", function()
 		buildat.send_packet("main:bench_shaft", "")
 	end)
-	add_button("Place slab (O)", function()
+	add_button("Cap shaft (O)", function()
 		buildat.send_packet("main:bench_slab", "")
 	end)
 
@@ -412,5 +412,5 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 end)
 
 log:info("voxel_lighting client ready; Tab = free move, 1/2/3 = benchmarks, "..
-		"P/O = benchmark shaft/slab")
+		"P/O = benchmark shaft dig/cap")
 -- vim: set noet ts=4 sw=4:

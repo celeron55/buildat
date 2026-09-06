@@ -362,13 +362,13 @@ struct Worldgen: public worldgen::GeneratorInterface
 			bench_shaft_centre = pv::Vector3DInt32(shaft_x,
 					(shaft_bottom + shaft_top) / 2, shaft_z);
 
-			int slab_x = clamp_xz(mouth_x + 2, lc.getX() + 3, uc.getX() - 3);
-			int slab_z = clamp_xz(mouth_z + 2, lc.getZ() + 3, uc.getZ() - 3);
-			// The slab hangs clear above the mouth rather than following the
-			// ground: benchmark camera 2 looks down at the mouth from the +X +Z
-			// side, and anything level with the mouth would sit in front of it.
-			bench_slab_centre = pv::Vector3DInt32(slab_x,
-					(int)std::floor(sy) + 6, slab_z);
+			// The slab caps the shaft, filling the two air voxels directly
+			// above the ground, so the second edit takes back exactly the light
+			// the first one let in and the cave returns to where it started.
+			bench_slab_centre = pv::Vector3DInt32(
+					clamp_xz(shaft_x, lc.getX() + 3, uc.getX() - 3),
+					shaft_top + 1,
+					clamp_xz(shaft_z, lc.getZ() + 3, uc.getZ() - 3));
 
 			log_v(MODULE, "Bench: shaft " PV3I_FORMAT " h %i, slab "
 					PV3I_FORMAT, PV3I_PARAMS(bench_shaft_centre),
