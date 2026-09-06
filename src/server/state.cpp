@@ -657,7 +657,10 @@ struct CState: public State, public interface::Server
 		sv_<ss_> files_to_hash = {init_cpp_path};
 		files_to_hash.insert(
 				files_to_hash.begin(), includes.begin(), includes.end());
-		ss_ content_hash = hash_files(files_to_hash);
+		// The optimization flags go in too; without them a cache built at a
+		// different level is kept and silently used
+		ss_ content_hash = hash_files(files_to_hash,
+				rccpp::cxxflags_optimize());
 		log_d(MODULE, "Module hash: %s", cs(interface::sha1::hex(content_hash)));
 
 #ifdef _WIN32
