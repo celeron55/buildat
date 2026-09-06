@@ -9,15 +9,16 @@ local dump = buildat.dump
 local M = {}
 log:info("voxelworld loading")
 
+-- Set by the game before the camera is set, if the defaults do not suit it.
+-- A scene viewed from far outside itself wants a large lod_distance so that
+-- it does not render at a reduced LOD, and a scene with no player wants
+-- physics_distance small so no collision shapes are built at all.
+M.lod_distance = 80
+M.physics_distance = 100
+
 local UPDATE_TIME_FRACTION = 0.10
 
---local LOD_DISTANCE = 140
---local LOD_DISTANCE = 100
-local LOD_DISTANCE = 80
---local LOD_DISTANCE = 50
 local LOD_THRESHOLD = 0.2
-
-local PHYSICS_DISTANCE = 100
 local INITIAL_PHYSICS_NEAR_WEIGHT = 1.0
 local MODIFIED_PHYSICS_NEAR_WEIGHT = 1.0
 
@@ -115,7 +116,7 @@ function sub_events()
 			node_id = node:GetID(),
 		})
 		node_update_queue:put(node:GetWorldPosition(),
-				INITIAL_PHYSICS_NEAR_WEIGHT, PHYSICS_DISTANCE, nil, nil, {
+				INITIAL_PHYSICS_NEAR_WEIGHT, M.physics_distance, nil, nil, {
 			type = "physics",
 			node_id = node:GetID(),
 		})
@@ -130,7 +131,7 @@ function sub_events()
 			node_id = node:GetID(),
 		})
 		node_update_queue:put(node:GetWorldPosition(),
-				MODIFIED_PHYSICS_NEAR_WEIGHT, PHYSICS_DISTANCE, nil, nil, {
+				MODIFIED_PHYSICS_NEAR_WEIGHT, M.physics_distance, nil, nil, {
 			type = "physics",
 			node_id = node:GetID(),
 		})
@@ -151,7 +152,7 @@ function sub_events()
 
 		local node_p = node:GetWorldPosition()
 		local d = (node_p - camera_p):Length()
-		local lod_fraction = d / LOD_DISTANCE
+		local lod_fraction = d / M.lod_distance
 		local lod = math.floor(1 + lod_fraction)
 		if lod > MAX_LOD then lod = MAX_LOD end
 
@@ -181,7 +182,7 @@ function sub_events()
 					node, data, voxel_reg, atlas_reg)
 
 			-- 1 -> 2
-			far_trigger_d = LOD_DISTANCE * (1.0 + LOD_THRESHOLD)
+			far_trigger_d = M.lod_distance * (1.0 + LOD_THRESHOLD)
 			far_weight = 0.5
 		else
 			buildat.set_voxel_lod_geometry(lod, node, data, voxel_reg, atlas_reg)
@@ -190,21 +191,21 @@ function sub_events()
 				-- Shouldn't go here
 			elseif lod == 2 then
 				-- 2 -> 1
-				near_trigger_d = LOD_DISTANCE * (1.0 - LOD_THRESHOLD)
+				near_trigger_d = M.lod_distance * (1.0 - LOD_THRESHOLD)
 				near_weight = 0.75
 				-- 2 -> 3
-				far_trigger_d = 2 * LOD_DISTANCE * (1.0 + LOD_THRESHOLD)
+				far_trigger_d = 2 * M.lod_distance * (1.0 + LOD_THRESHOLD)
 				far_weight = 0.4
 			elseif lod == 3 then
 				-- 3 -> 2
-				near_trigger_d = 2 * LOD_DISTANCE * (1.0 - LOD_THRESHOLD)
+				near_trigger_d = 2 * M.lod_distance * (1.0 - LOD_THRESHOLD)
 				near_weight = 0.6
 				-- 3 -> 4
-				far_trigger_d = 3 * LOD_DISTANCE * (1.0 + LOD_THRESHOLD)
+				far_trigger_d = 3 * M.lod_distance * (1.0 + LOD_THRESHOLD)
 				far_weight = 0.4
 			elseif lod == 4 then
 				-- 4 -> 3
-				near_trigger_d = 3 * LOD_DISTANCE * (1.0 - LOD_THRESHOLD)
+				near_trigger_d = 3 * M.lod_distance * (1.0 - LOD_THRESHOLD)
 				near_weight = 0.5
 				-- 4 -> clip out
 				far_trigger_d = M.camera_far_clip * 1.4
@@ -234,17 +235,17 @@ function sub_events()
 		local far_trigger_d = nil
 		local far_weight = nil
 
-		if d > PHYSICS_DISTANCE then
+		if d > M.physics_distance then
 			log:debug("Clearing physics boxes outside physics distance ("..
-					PHYSICS_DISTANCE..")")
+					M.physics_distance..")")
 			buildat.clear_voxel_physics_boxes(node)
 
-			near_trigger_d = PHYSICS_DISTANCE * 0.8
+			near_trigger_d = M.physics_distance * 0.8
 			near_weight = 1.0
 		else
 			buildat.set_voxel_physics_boxes(node, data, voxel_reg)
 
-			far_trigger_d = PHYSICS_DISTANCE * 1.2
+			far_trigger_d = M.physics_distance * 1.2
 			far_weight = 0.2
 		end
 		node_update_queue:put(node_p,
