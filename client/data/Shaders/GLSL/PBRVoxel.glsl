@@ -27,18 +27,18 @@
 //       color is already the scene's ambient diffuse, and adding an
 //       unoccluded sky on top of it would light the inside of a cave. The
 //       specular term is scaled by the same skylight for the same reason.
-//   VOXELSPOTS  which parts of a surface are, at this moment, turned to catch
-//       the light: glossier than the roughness map says, and letting light
-//       through if the material passes any. Not stored anywhere. It is worked
-//       out per pixel from the world position and the time, so the specks come
-//       and go the way leaves in wind do, and a surface with no animated normal
-//       map of its own can still be given a moving sparkle. The alpha of the
-//       roughness/metalness map says how much of a surface is doing it at once.
-//   VOXELTRANSLUCENCY  light that reaches a surface from behind and comes
-//       through it at those spots, tinted by the surface's own color. This is
-//       why a leaf against the sun reads as yellow-green and not as the blue of
-//       the sky that is the only thing lighting its front. The amount is in the
-//       blue channel of the roughness/metalness map.
+//   VOXELSPOTS  which parts of a surface are turned to catch the light at this
+//       moment. Worked out per pixel from world position and time rather than
+//       stored, so the specks come and go the way leaves in wind do, and a
+//       surface with no animated normal map can still sparkle.
+//   VOXELTRANSLUCENCY  light reaching a surface from behind and coming through
+//       it at those spots, tinted by the surface's own color. This is why a
+//       leaf against the sun reads yellow-green and not as the blue of the sky
+//       lighting its front.
+//
+// sSpecMap carries roughness in r, where Urho's own PBR shaders read it, and
+// spec_strength, translucency and the spot fraction in gba. Metalness is not
+// per texel here; nothing has been metal yet, so it stays cMetallic.
 
 #include "Uniforms.glsl"
 #include "Samplers.glsl"
@@ -163,10 +163,8 @@ void VS()
     // once. A slow term along the wind direction is added to the phase, which
     // turns what would be an even twinkle into gusts crossing the surface.
     const float TRANSMISSION_CELLS = 16.0;   // Cells per voxel, per axis
-    // What a spot's roughness becomes. Glossy enough to pick the sky out
-    // against a matte surround without turning the surface into a mirror.
-    // A material whose own roughness is already below this cannot glint,
-    // so water is given a duller base than a still pond would have.
+    // A material whose own roughness is already below this cannot glint, so
+    // water is given a duller base than a still pond would have
     const float SPOT_ROUGHNESS = 0.10;
     // How far a spot turns away from the surface it is on. This is what makes
     // a spot catch the sun: glossiness on its own only shows where the thing
@@ -175,12 +173,9 @@ void VS()
     // looks no different from a blurred one. A turned normal moves the direct
     // sunlight's own highlight instead, which is the bright thing in the scene.
     const float SPOT_TILT = 0.45;
-    // Spots that hold still. A cracked rock face is mostly dull, with the odd
-    // crystalline facet in it that catches the light, and those do not move.
-    // Cells are bigger than the moving ones because a facet is a chip of rock
-    // rather than a leaf, and they are taken from the world position rather
-    // than from a map: a map lives in one voxel face and would repeat every
-    // voxel, which is the one thing a speckle must not do.
+    // Bigger than the moving ones: a facet is a chip of rock, not a leaf.
+    // Taken from the world position for the same reason as those, that a map
+    // lives in one voxel face and would repeat every voxel.
     const float STATIC_SPOT_CELLS = 6.0;     // Cells per voxel, per axis
     const float STATIC_SPOT_TILT = 0.35;
     const float TRANSMISSION_RATE = 0.03;    // Cycles per second, mean
@@ -264,22 +259,25 @@ void PS()
     float staticSpots = 0.0;
 
     #ifdef METALLIC
-        vec4 roughMetalSrc = texture2D(sSpecMap, vTexCoord.xy);
+        vec4 surfaceSrc = texture2D(sSpecMap, vTexCoord.xy);
 
-        float roughness = roughMetalSrc.r + cRoughness;
-        float metalness = roughMetalSrc.g + cMetallic;
+        float roughness = surfaceSrc.r + cRoughness;
+        float metalness = cMetallic;
+        float specStrength = surfaceSrc.g;
         #ifdef VOXELSPOTS
-            surfaceSpots = GetSurfaceSpots(vWorldPos.xyz, roughMetalSrc.a);
-            // How many of the surface's spots hold still rides in the normal
-            // map's alpha, the one channel these maps had left
+            surfaceSpots = GetSurfaceSpots(vWorldPos.xyz, surfaceSrc.a);
             staticSpots = GetStaticSpots(vWorldPos.xyz,
                 texture2D(sNormalMap, vTexCoord.xy).a);
-            roughness = mix(roughness, SPOT_ROUGHNESS,
-                max(surfaceSpots, staticSpots));
+            float spotMask = max(surfaceSpots, staticSpots);
+            roughness = mix(roughness, SPOT_ROUGHNESS, spotMask);
+            // Full strength however matte the rest is, so that rock can be
+            // dull everywhere except at its facets
+            specStrength = mix(specStrength, 1.0, spotMask);
         #endif
     #else
         float roughness = cRoughness;
         float metalness = cMetallic;
+        float specStrength = 1.0;
     #endif
 
     roughness *= roughness;
@@ -287,7 +285,8 @@ void PS()
     roughness = clamp(roughness, ROUGHNESS_FLOOR, 1.0);
     metalness = clamp(metalness, METALNESS_FLOOR, 1.0);
 
-    vec3 specColor = mix(0.08 * cMatSpecColor.rgb, diffColor.rgb, metalness);
+    vec3 specColor = mix(0.08 * specStrength * cMatSpecColor.rgb,
+        diffColor.rgb, metalness);
     diffColor.rgb = diffColor.rgb - diffColor.rgb * metalness;
 
     // Get normal
@@ -411,11 +410,11 @@ void PS()
             float forward = pow(max(0.0, dot(-lightVec, toCamera)), 6.0);
             // A material with no spots at all is translucent all over
             #ifdef VOXELSPOTS
-                float through = roughMetalSrc.a > 0.0 ? surfaceSpots : 1.0;
+                float through = surfaceSrc.a > 0.0 ? surfaceSpots : 1.0;
             #else
                 float through = 1.0;
             #endif
-            finalColor.rgb += roughMetalSrc.b * through * transmitted *
+            finalColor.rgb += surfaceSrc.b * through * transmitted *
                 lightColor * (backNdl * forward) / M_PI;
         #endif
 

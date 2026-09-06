@@ -41,51 +41,31 @@ namespace interface
 		uint8_t lod_simulation = 0;
 		// TODO: Rotation
 
-		// How the surface responds to light. There are no authored normal or
-		// roughness maps; the atlas derives both from this segment's image and
-		// these three numbers, so a material is described by what it is rather
-		// than by extra files. See impl/atlas.cpp.
-		//   roughness  the segment's mean perceptual roughness. Texels brighter
-		//              than the segment's mean come out smoother than this and
-		//              darker ones rougher, which is what gives a stone wall
-		//              its wet-looking patches and leaves flat surfaces flat.
-		//   metalness  constant over the segment.
-		//   bumpiness  how much the image's luminance is taken to be height
-		//              when deriving the normal map. 0 is a flat surface.
-		//   roughness_variation  how much of the rule above to apply. 1 is all
-		//              of it; 0 makes the whole segment the one roughness,
-		//              which is what a surface wants when its gloss is meant to
-		//              come from its spots moving rather than from which part
-		//              of the texture is bright.
-		//   translucency  how much light passes through the surface from
-		//              behind at a spot, tinting itself with the surface's own
-		//              color on the way. This is what makes a backlit leaf
-		//              glow.
-		//   static_spots  fraction of the surface that is a spot that does
-		//              not move: a crystalline face in cracked rock, glossier
-		//              than the rest and turned a little off the voxel face.
-		//              Worked out from the world position alone, so it is not
-		//              tied to the texture and does not repeat with it.
-		//   spots      fraction of the surface that is a spot at any one
-		//              moment: glossier than the roughness above, and letting
-		//              translucency through. Which parts they are is not baked
-		//              into the map. The shader works them out from the world
-		//              position and the time, so they come and go the way
-		//              leaves in wind do, and a surface with no normal map to
-		//              animate can still be given a moving sparkle. 0 leaves
-		//              the surface with the roughness map alone and, if it is
-		//              translucent at all, translucent all over, which is what
-		//              a material that should not move wants.
+		// The atlas derives the normal and surface maps from the segment's
+		// image and these six numbers; nothing is authored. See impl/atlas.cpp.
+		//   roughness      how wide the highlight is. Brighter texels than the
+		//                  segment's mean come out a little smoother.
+		//   spec_strength  how much of a highlight there is at all, against
+		//                  the 0.08 a dielectric reflects head on. Roughness
+		//                  only widens a highlight, so this is the only way to
+		//                  make a surface matte. Spots ignore it.
+		//   bumpiness      how much of the image's luminance is height. Sets
+		//                  how grainy a surface looks, diffuse as much as
+		//                  specular.
+		//   translucency   how much light passes through from behind at a
+		//                  spot, tinted by the surface's own color.
+		//   spots          fraction of the surface that at any one moment is
+		//                  turned off the face it is on, reflects at full
+		//                  strength and passes translucency. Worked out in the
+		//                  shader from world position and time, not stored.
+		//   static_spots   the same, for spots that hold still: bigger, and on
+		//                  or off with no fade.
 		//
-		// One fraction covers both because they are the same thing seen from
-		// two sides: the leaf that has turned to catch the light is the leaf
-		// that lets light past it. Which of the two shows is settled by the
-		// geometry, since transmission only appears when the light is behind
-		// the surface and a highlight only when it is not.
+		// Gloss and transmission share one fraction because they are the same
+		// event from two sides; the geometry decides which one shows.
 		float roughness = 0.9f;
-		float metalness = 0.0f;
+		float spec_strength = 1.0f;
 		float bumpiness = 1.0f;
-		float roughness_variation = 1.0f;
 		float translucency = 0.0f;
 		float spots = 0.0f;
 		float static_spots = 0.0f;
@@ -113,10 +93,10 @@ namespace interface
 		magic::SharedPtr<magic::Image> image;
 		magic::SharedPtr<magic::Texture2D> texture;
 		// Derived from the segment images; same layout as the diffuse atlas.
-		// normal is a tangent space normal map with static_spots in its
-		// alpha, spec is roughness in r and metalness in g (what Urho's PBR
-		// shaders read from sSpecMap), and, which only PBRVoxel reads,
-		// translucency in b and spots in a.
+		// normal: tangent space normal in rgb, static_spots in a.
+		// spec: roughness in r, where Urho's PBR shaders read it from
+		// sSpecMap, and spec_strength, translucency and spots in gba, which
+		// only PBRVoxel reads.
 		magic::SharedPtr<magic::Image> normal_image;
 		magic::SharedPtr<magic::Texture2D> normal_texture;
 		magic::SharedPtr<magic::Image> spec_image;

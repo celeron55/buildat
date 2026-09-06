@@ -745,7 +745,7 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 		if(tg.has_colors){
 			material->SetTechnique(0, cache->GetResource<Technique>(
 					"Techniques/PBRVoxel.xml"));
-			// The atlas derives a normal map and a roughness/metalness map
+			// The atlas derives a normal map and a surface map
 			// from each segment's image, so the maps are the whole material
 			// and these two constants are only added on top of them
 			material->SetShaderParameter("Roughness", 0.0f);

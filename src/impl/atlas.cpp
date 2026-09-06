@@ -21,9 +21,8 @@ bool AtlasSegmentDefinition::operator==(const AtlasSegmentDefinition &other) con
 			select_segment == other.select_segment &&
 			lod_simulation == other.lod_simulation &&
 			roughness == other.roughness &&
-			metalness == other.metalness &&
+			spec_strength == other.spec_strength &&
 			bumpiness == other.bumpiness &&
-			roughness_variation == other.roughness_variation &&
 			translucency == other.translucency &&
 			spots == other.spots &&
 			static_spots == other.static_spots
@@ -389,20 +388,15 @@ struct CAtlasRegistry: public AtlasRegistry
 				mean_lum += segment_luminance(seg_img, src_off, seg_size, lx, ly);
 		mean_lum /= (float)(seg_size.x_ * seg_size.y_);
 		// Enough that a texture with any contrast at all spans a visible range
-		// of roughness, and little enough that a flat one stays flat
+		// of roughness, and little enough that a flat one stays flat. How
+		// matte a surface is overall is spec_strength's job.
 		const float ROUGHNESS_PER_LUM = -0.8f;
-		// Which parts of a surface are catching the light or letting it past
-		// is not something the texture knows, and it does not hold still
-		// either. The shader works that out from the world position and the
-		// time, so all that is stored is how much of the surface is doing it
-		// at once.
+		// Which parts are catching the light is worked out in the shader from
+		// the world position and the time; only the fraction is stored
 		float spots = def.spots < 0.0f ? 0.0f :
 				(def.spots > 1.0f ? 1.0f : def.spots);
-		// The still spots are worked out from the world position too, and for
-		// the same reason: a map of them would repeat once per voxel face,
-		// which is exactly what specks in rock must not do. Only how many of
-		// them there are is stored, and the normal map's alpha is the one
-		// channel free to carry it.
+		// Worked out from the world position too, so only how many there are
+		// is stored; the normal map's alpha is the channel free to carry it
 		float static_spots = def.static_spots < 0.0f ? 0.0f :
 				(def.static_spots > 1.0f ? 1.0f : def.static_spots);
 		for(int y = 0; y<seg_size.y_ * 2; y++){
@@ -431,13 +425,13 @@ struct CAtlasRegistry: public AtlasRegistry
 						n.y_ * 0.5f + 0.5f,
 						n.z_ * 0.5f + 0.5f, static_spots));
 				float roughness = def.roughness + (lum - mean_lum) *
-						ROUGHNESS_PER_LUM * def.roughness_variation;
+						ROUGHNESS_PER_LUM;
 				if(roughness < 0.03f)
 					roughness = 0.03f;
 				if(roughness > 1.0f)
 					roughness = 1.0f;
 				atlas.spec_image->SetPixel(dst_p.x_, dst_p.y_,
-						magic::Color(roughness, def.metalness,
+						magic::Color(roughness, def.spec_strength,
 						def.translucency, spots));
 			}
 		}
