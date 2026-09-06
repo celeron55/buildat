@@ -19,25 +19,29 @@ keypress 3
 delay 500
 screenshot ../tmp/voxel_lighting_check/3_inside_cave.png
 
-# Relight on edit: dig the pit next to the cave mouth, then hang the slab over
-# it. Views 1 and 2 are shot after each, so the two edits can be followed as a
-# sequence of three images each.
+# Relight on edit: dig the shaft up out of the cave, then hang the slab over the
+# mouth. All three views are shot after each, so each edit can be followed as a
+# sequence of three images. View 3 is the telling one for the shaft: the part of
+# the cave it opens up had no skylight at all before.
 keypress P
 delay 1500
 keypress 1
 delay 500
-screenshot ../tmp/voxel_lighting_check/4_pit_overview.png
+screenshot ../tmp/voxel_lighting_check/4_shaft_overview.png
 keypress 2
 delay 500
-screenshot ../tmp/voxel_lighting_check/5_pit_cave_mouth.png
+screenshot ../tmp/voxel_lighting_check/5_shaft_cave_mouth.png
+keypress 3
+delay 500
+screenshot ../tmp/voxel_lighting_check/6_shaft_inside_cave.png
 keypress O
 delay 1500
 keypress 1
 delay 500
-screenshot ../tmp/voxel_lighting_check/6_slab_overview.png
+screenshot ../tmp/voxel_lighting_check/7_slab_overview.png
 keypress 2
 delay 500
-screenshot ../tmp/voxel_lighting_check/7_slab_cave_mouth.png
+screenshot ../tmp/voxel_lighting_check/8_slab_cave_mouth.png
 keypress 3
 delay 500
-screenshot ../tmp/voxel_lighting_check/8_slab_inside_cave.png
+screenshot ../tmp/voxel_lighting_check/9_slab_inside_cave.png
