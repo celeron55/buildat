@@ -30,8 +30,10 @@
 //   VOXELTRANSLUCENCY  light that reaches a surface from behind and comes
 //       through it, tinted by the surface's own color. This is why a leaf
 //       against the sun reads as yellow-green and not as the blue of the sky
-//       that is the only thing lighting its front. The amount is per texel,
-//       in the blue channel of the roughness/metalness map.
+//       that is the only thing lighting its front. The amount is in the blue
+//       channel of the roughness/metalness map; where it gets through is not
+//       stored at all but worked out per pixel from the world position and the
+//       time, so the specks come and go the way leaves in wind do.
 
 #include "Uniforms.glsl"
 #include "Samplers.glsl"
@@ -141,6 +143,58 @@ void VS()
         #endif
     #endif
 }
+
+#ifdef COMPILEPS
+    // How much of the surface is letting light through at this point, right
+    // now. A leaf lets light past when it happens to have a gap behind it, and
+    // in any wind that is a different leaf a moment later, so this is a
+    // function of where and when rather than a map: nothing about it is stored
+    // per texel.
+    //
+    // The world is diced into cells a fraction of a voxel across. Each cell
+    // gets its own phase and its own rate from a hash of its position, and
+    // opens and closes on a sine of those; the threshold decides how much of
+    // that cycle counts as open, and so what fraction of cells are open at
+    // once. A slow term along the wind direction is added to the phase, which
+    // turns what would be an even twinkle into gusts crossing the surface.
+    const float TRANSMISSION_CELLS = 16.0;   // Cells per voxel, per axis
+    const float TRANSMISSION_RATE = 0.18;    // Cycles per second, mean
+    const vec3 TRANSMISSION_WIND = vec3(0.35, 0.0, -0.2);
+
+    // fract(sin(dot(...))) loses its uniformity once the coordinates get
+    // large, and a cell index here is the world position times sixteen, so
+    // this hashes by mixing fractional parts instead and stays even across the
+    // whole volume.
+    float TransmissionHash(vec3 cell)
+    {
+        vec3 p = fract(cell * 0.1031);
+        p += dot(p, p.yzx + 33.33);
+        return fract((p.x + p.y) * p.z);
+    }
+
+    // Each cell runs its own cycle, at its own rate and from its own starting
+    // point, and is open for openFraction of it. Working in the cycle's own
+    // 0..1 position rather than in the height of a wave keeps that fraction
+    // exact: near the top of a sine the wave is almost flat, so a threshold
+    // that lets 4 per cent of cells fully open leaves another 10 per cent
+    // hovering just under it, and the surface hazes over instead of speckling.
+    float GetTransmissionGaps(vec3 worldPos, float openFraction)
+    {
+        if (openFraction <= 0.0)
+            return 1.0;
+        vec3 cell = floor(worldPos * TRANSMISSION_CELLS);
+        float rate = TRANSMISSION_RATE * (0.6 + TransmissionHash(cell + 19.0));
+        // A slow ramp along the wind direction, which turns what would be an
+        // even twinkle into gusts crossing the surface
+        float gust = dot(worldPos, TRANSMISSION_WIND);
+        float u = fract(TransmissionHash(cell) + cElapsedTimePS * rate + gust);
+        // Fade in and out rather than blink, using a quarter of the window at
+        // each end so that a gap is still fully open in the middle of it
+        float edge = openFraction * 0.25;
+        return smoothstep(0.0, edge, u) *
+            (1.0 - smoothstep(openFraction - edge, openFraction, u));
+    }
+#endif
 
 void PS()
 {
@@ -277,7 +331,8 @@ void PS()
                 TRANSMISSION_TINT);
             float backNdl = max(0.0, -dot(normal, lightVec));
             float forward = pow(max(0.0, dot(-lightVec, toCamera)), 3.0);
-            finalColor.rgb += roughMetalSrc.b * transmitted * lightColor *
+            finalColor.rgb += roughMetalSrc.b * GetTransmissionGaps(
+                vWorldPos.xyz, roughMetalSrc.a) * transmitted * lightColor *
                 (backNdl * forward) / M_PI;
         #endif
 

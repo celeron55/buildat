@@ -695,6 +695,11 @@ function M.define(dst, util)
 
 	util.wc("Scene", {
 		inherited_from_by_wrapper = dst.Node,
+		properties = {
+			-- What cElapsedTime(PS) in the shaders is
+			elapsedTime = util.simple_property("number"),
+			timeScale = util.simple_property("number"),
+		},
 		unsafe_constructor = util.wrap_function({}, function()
 			return util.wrap_instance("Scene", Scene())
 		end),

@@ -9,7 +9,7 @@
 #include <Image.h>
 #include <Vector3.h>
 #include <algorithm>
-#include <cstdint>
+#include <cmath>
 #define MODULE "atlas"
 
 namespace interface {
@@ -414,25 +414,13 @@ struct CAtlasRegistry: public AtlasRegistry
 				i = lums.size() - 1;
 			gloss_threshold = lums[i];
 		}
-		// Where light comes through is not something the texture knows: it is
-		// which leaves happen to have a gap behind them. Scattering the spots
-		// at random keeps them off whatever the texture's own bright and dark
-		// parts are, and gives the effect a variance the texture cannot. The
-		// hash is of the texel's position in the segment, so the spots tile
-		// with it and come out the same on every run.
-		uint32_t spot_seed = 0;
-		for(char c : def.resource_name)
-			spot_seed = spot_seed * 31u + (uint8_t)c;
-		auto is_translucent_texel = [&](int lx, int ly) -> bool {
-			if(def.translucency_spots <= 0.0f)
-				return true; // Translucent everywhere
-			uint32_t h = (uint32_t)lx * 374761393u +
-					(uint32_t)ly * 668265263u + spot_seed;
-			h = (h ^ (h >> 13)) * 1274126177u;
-			h ^= h >> 16;
-			return (h & 0xffffffu) <
-					def.translucency_spots * (float)0x1000000u;
-		};
+		// Where light comes through is not something the texture knows, and it
+		// does not hold still either: it is which leaves happen to have a gap
+		// behind them at this moment. The shader works that out from the world
+		// position and the time, so all that is stored is how much of the
+		// surface is open at once.
+		float trans_open = std::min(1.0f, std::max(0.0f,
+				def.translucency_spots));
 		for(int y = 0; y<seg_size.y_ * 2; y++){
 			for(int x = 0; x<seg_size.x_ * 2; x++){
 				int lx = ((x + seg_size.x_ / 2) * step) % seg_size.x_;
@@ -469,10 +457,9 @@ struct CAtlasRegistry: public AtlasRegistry
 					if(roughness > 1.0f)
 						roughness = 1.0f;
 				}
-				float translucency = is_translucent_texel(lx, ly) ?
-						def.translucency : 0.0f;
-				atlas.spec_image->SetPixel(dst_p.x_, dst_p.y_, magic::Color(
-						roughness, def.metalness, translucency, 1.0f));
+				atlas.spec_image->SetPixel(dst_p.x_, dst_p.y_,
+						magic::Color(roughness, def.metalness,
+						def.translucency, trans_open));
 			}
 		}
 	}

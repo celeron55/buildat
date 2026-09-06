@@ -35,6 +35,14 @@ local FAR_CLIP = 400
 local CAVE_OUTSIDE_DISTANCE = 22
 local CAVE_INSIDE_DISTANCE = 26
 
+-- Light through leaves is animated off the scene's clock, so a screenshot of
+-- it is different every run. F holds the clock here, which is what check.txt
+-- does before it shoots anything; it is a toggle rather than something the
+-- benchmark cameras do by themselves, so that just looking around the scene
+-- always shows it moving. Any value would do for the moment to stop at.
+local FROZEN_TIME = 12.0
+local time_frozen = false
+
 local MOVE_SPEED = 20
 local MOUSE_SENSITIVITY = 0.15
 
@@ -153,6 +161,14 @@ end
 voxelworld.set_camera(camera_node)
 
 magic.input:SetMouseVisible(true)
+
+local function set_time_frozen(enable)
+	time_frozen = enable
+	if time_frozen then
+		scene.elapsedTime = FROZEN_TIME
+	end
+	log:info("wind frozen: "..tostring(time_frozen))
+end
 
 local function set_free_look(enable)
 	free_look = enable
@@ -440,6 +456,9 @@ do
 	add_button("Verify light (V)", function()
 		buildat.send_packet("main:verify_skylight", "")
 	end)
+	add_button("Freeze wind (F)", function()
+		set_time_frozen(not time_frozen)
+	end)
 
 	magic.ui:SetFocusElement(nil)
 end
@@ -466,6 +485,8 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		buildat.send_packet("main:bench_slab", "")
 	elseif key == magic.KEY_V then
 		buildat.send_packet("main:verify_skylight", "")
+	elseif key == magic.KEY_F then
+		set_time_frozen(not time_frozen)
 	elseif key == magic.KEY_ESCAPE then
 		if free_look then
 			set_free_look(false)
@@ -474,6 +495,9 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 end)
 
 magic.SubscribeToEvent("Update", function(event_type, event_data)
+	if time_frozen then
+		scene.elapsedTime = FROZEN_TIME
+	end
 	if not free_look then
 		pointed_node.enabled = false
 		return

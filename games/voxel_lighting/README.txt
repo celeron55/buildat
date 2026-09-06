@@ -56,8 +56,8 @@ packs it, from three numbers a voxel gives with it (interface/atlas.h):
     gloss_spots  fraction of the texture's texels, the brightest ones, that
                come out glossy instead of following the rule above
     translucency  how much light passes through from behind
-    translucency_spots  fraction of the texture's texels, picked at random,
-               that let it through; the rest let none through
+    translucency_spots  fraction of the surface that lets it through at any
+               one moment; the rest lets none through
 
 Grass has the same specks as leaves. Transmission is bright, being the sun
 rather than the sky, and grass is usually near the camera, so its specks are
@@ -82,11 +82,21 @@ term rather than anything to do with reflections: tinting the cube map towards
 the sun would not reach it, because in that geometry the surface reflects the
 sky behind the camera, away from the sun.
 
-It is a few texels rather than a whole face. A face at a time is a lamp, not a
+It is a few specks rather than a whole face. A face at a time is a lamp, not a
 tree; light gets through a canopy where a leaf happens to have a gap behind it.
-Where that is, is not something the leaf texture knows, so the spots are
-scattered at random rather than taken off the texture, which also keeps them
-clear of the glossy ones and gives the effect a variance of its own.
+Where that is, is not something the leaf texture knows, and it does not hold
+still either: in any wind it is a different leaf a moment later. So the specks
+are not stored anywhere. The shader dices the world into cells a sixteenth of a
+voxel across, gives each one its own cycle from a hash of its position, and
+opens it for translucency_spots of that cycle; a slow ramp along the wind
+direction is added to the phase, so the openings cross the surface in gusts
+rather than twinkling evenly. The map carries only how much light gets through
+and how much of the surface is open at once.
+
+The cycle is worked in its own 0..1 position rather than in the height of a
+wave. Near the top of a sine the wave is almost flat, so a threshold that fully
+opens 4 per cent of cells leaves another 10 per cent hovering just under it,
+and the surface hazes over instead of speckling.
 
 What comes through keeps only part of the surface's color. Taking the albedo
 raw would apply the leaf's green a second time and the spots would come out as
@@ -148,6 +158,13 @@ judged against the previous run's images one feature at a time:
 Reading them, 3 is the one that matters for skylight and relighting, 4 to 6
 are the ones for materials.
 
+Light through leaves is animated off the scene's clock, so a shot of it comes
+out differently every run. F (or the last HUD button) holds the clock at
+FROZEN_TIME, and check.txt presses it before it shoots anything. It is a toggle
+rather than something the benchmark cameras do by themselves: moving between
+cameras should not stop the scene animating, and a frozen scene that nothing
+said it had frozen is a confusing thing to land in.
+
 The pond is dug rather than found. This terrain is one slope, so a water line
 drawn across it fills the low ground at the edge of the volume and reads as a
 sea the world runs out of; a basin dug into the flattest ground away from the
@@ -166,6 +183,8 @@ whatever the camera is pitched at, Space up, Shift down, mouse to look.
 
 Editing
 -------
+
+F freezes and unfreezes the wind, whatever mode the camera is in.
 
 In free move, left mouse digs the pointed voxel and right mouse places rock
 next to it. P and O (or the last two HUD buttons) make the two fixed edits used
