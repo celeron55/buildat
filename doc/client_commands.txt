@@ -11,6 +11,9 @@ exits after the sequence finishes (exit status 1 if a command fails).
     $ bin/buildat_client -c @commands.txt
     $ bin/buildat_client -s localhost -c @commands.txt
 
+-w WxH runs windowed at a fixed size without changing the size the client
+remembers between runs. Use it for anything that compares images between runs.
+
 @path reads the commands from a file. Empty lines and lines starting with # are
 ignored.
 

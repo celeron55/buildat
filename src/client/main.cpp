@@ -11,6 +11,7 @@
 #include "interface/os.h"
 #include <c55/getopt.h>
 #include <Context.h>
+#include <cstdio> // sscanf()
 #include <cstdlib> // srand()
 #include <fstream>
 #include <sstream>
@@ -44,7 +45,7 @@ int main(int argc, char *argv[])
 
 	client::Config &config = g_client_config;
 
-	const char opts[100] = "hs:P:C:U:l:L:m:u:c:";
+	const char opts[100] = "hs:P:C:U:l:L:m:u:w:c:";
 	const char usagefmt[1000] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
@@ -56,10 +57,13 @@ int main(int argc, char *argv[])
 			"  -L [log file path]   Append log to a specified file\n"
 			"  -m [name]            Choose menu extension name\n"
 			"  -u [scale]           UI scale (0 = auto from short side / 1080)\n"
+			"  -w [WxH]             Windowed at this size; not remembered\n"
 			"  -c [commands]        Run command sequence and exit\n"
 			"                       One command per line. @file reads a file.\n"
 			"                       See doc/client_commands.txt\n"
 			;
+
+	int forced_w = 0, forced_h = 0;
 
 	int c;
 	while((c = c55_getopt(argc, argv, opts)) != -1)
@@ -98,6 +102,14 @@ int main(int argc, char *argv[])
 		case 'u':
 			log_i(MODULE, "config.ui_scale: %s", c55_optarg);
 			config.set("ui_scale", atof(c55_optarg));
+			break;
+		case 'w':
+			if(sscanf(c55_optarg, "%dx%d", &forced_w, &forced_h) != 2 ||
+					forced_w <= 0 || forced_h <= 0){
+				fprintf(stderr, "-w: expected WxH, got \"%s\"\n", c55_optarg);
+				return 1;
+			}
+			log_i(MODULE, "window size: %ix%i", forced_w, forced_h);
 			break;
 		case 'c': {
 			ss_ arg = c55_optarg ? c55_optarg : "";
@@ -147,6 +159,11 @@ int main(int argc, char *argv[])
 	}
 
 	app::Options app_options;
+	if(forced_w > 0){
+		app_options.graphics.window_w = forced_w;
+		app_options.graphics.window_h = forced_h;
+		app_options.graphics.size_forced = true;
+	}
 
 	int exit_status = 0;
 	while(exit_status == 0){

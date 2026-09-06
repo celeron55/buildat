@@ -44,6 +44,9 @@ namespace app
 		bool vsync = true;
 		bool triple_buffer = false;
 		int multisampling = 1; // 2 looks much better but is much heavier(?)
+		// Set by -w: the size came from the command line, so it is not
+		// remembered across runs and the saved size is left alone
+		bool size_forced = false;
 
 		void apply(Urho3D::Graphics *magic_graphics);
 	};
