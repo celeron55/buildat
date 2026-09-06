@@ -9,6 +9,7 @@
 #include <Image.h>
 #include <Vector3.h>
 #include <algorithm>
+#include <cstdint>
 #define MODULE "atlas"
 
 namespace interface {
@@ -24,7 +25,8 @@ bool AtlasSegmentDefinition::operator==(const AtlasSegmentDefinition &other) con
 			metalness == other.metalness &&
 			bumpiness == other.bumpiness &&
 			gloss_spots == other.gloss_spots &&
-			translucency == other.translucency
+			translucency == other.translucency &&
+			translucency_spots == other.translucency_spots
 	);
 }
 
@@ -395,8 +397,9 @@ struct CAtlasRegistry: public AtlasRegistry
 		// The luminance a texel has to reach to be one of the glossy spots.
 		// Taken as a quantile of the segment's own texels rather than as an
 		// absolute, so that gloss_spots means the same thing whatever the
-		// texture's contrast is.
-		float spot_threshold = 2.0f; // Above any luminance, so: no spots
+		// texture's contrast is: a glossy spot is a leaf catching the light,
+		// so it belongs on the parts of the texture that are already bright.
+		float gloss_threshold = 2.0f; // Above any luminance, so: no spots
 		if(def.gloss_spots > 0.0f){
 			sv_<float> lums;
 			lums.reserve(seg_size.x_ * seg_size.y_);
@@ -409,8 +412,27 @@ struct CAtlasRegistry: public AtlasRegistry
 					(1.0f - std::min(1.0f, def.gloss_spots)));
 			if(i >= lums.size())
 				i = lums.size() - 1;
-			spot_threshold = lums[i];
+			gloss_threshold = lums[i];
 		}
+		// Where light comes through is not something the texture knows: it is
+		// which leaves happen to have a gap behind them. Scattering the spots
+		// at random keeps them off whatever the texture's own bright and dark
+		// parts are, and gives the effect a variance the texture cannot. The
+		// hash is of the texel's position in the segment, so the spots tile
+		// with it and come out the same on every run.
+		uint32_t spot_seed = 0;
+		for(char c : def.resource_name)
+			spot_seed = spot_seed * 31u + (uint8_t)c;
+		auto is_translucent_texel = [&](int lx, int ly) -> bool {
+			if(def.translucency_spots <= 0.0f)
+				return true; // Translucent everywhere
+			uint32_t h = (uint32_t)lx * 374761393u +
+					(uint32_t)ly * 668265263u + spot_seed;
+			h = (h ^ (h >> 13)) * 1274126177u;
+			h ^= h >> 16;
+			return (h & 0xffffffu) <
+					def.translucency_spots * (float)0x1000000u;
+		};
 		for(int y = 0; y<seg_size.y_ * 2; y++){
 			for(int x = 0; x<seg_size.x_ * 2; x++){
 				int lx = ((x + seg_size.x_ / 2) * step) % seg_size.x_;
@@ -437,7 +459,7 @@ struct CAtlasRegistry: public AtlasRegistry
 						n.y_ * 0.5f + 0.5f,
 						n.z_ * 0.5f + 0.5f, 1.0f));
 				float roughness;
-				if(lum >= spot_threshold){
+				if(lum >= gloss_threshold){
 					roughness = GLOSS_SPOT_ROUGHNESS;
 				} else {
 					roughness = def.roughness +
@@ -447,8 +469,10 @@ struct CAtlasRegistry: public AtlasRegistry
 					if(roughness > 1.0f)
 						roughness = 1.0f;
 				}
+				float translucency = is_translucent_texel(lx, ly) ?
+						def.translucency : 0.0f;
 				atlas.spec_image->SetPixel(dst_p.x_, dst_p.y_, magic::Color(
-						roughness, def.metalness, def.translucency, 1.0f));
+						roughness, def.metalness, translucency, 1.0f));
 			}
 		}
 	}

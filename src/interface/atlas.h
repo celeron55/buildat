@@ -60,11 +60,20 @@ namespace interface
 		//   translucency  how much light passes through the surface from
 		//              behind, tinting itself with the surface's own color on
 		//              the way. This is what makes a backlit leaf glow.
+		//   translucency_spots  fraction of the segment's texels that let that
+		//              light through; the rest let none through at all. A whole
+		//              face at once would be a lamp rather than a tree. The
+		//              texels are picked at random rather than off the texture,
+		//              so the spots do not line up with anything else derived
+		//              from it and each material gets its own scatter. 0 means
+		//              the whole segment is translucent, for something that
+		//              really is.
 		float roughness = 0.9f;
 		float metalness = 0.0f;
 		float bumpiness = 1.0f;
 		float gloss_spots = 0.0f;
 		float translucency = 0.0f;
+		float translucency_spots = 0.0f;
 
 		bool operator==(const AtlasSegmentDefinition &other) const;
 	};

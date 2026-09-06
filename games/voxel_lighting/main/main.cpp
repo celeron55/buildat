@@ -452,7 +452,8 @@ struct Module: public interface::Module
 	void add_voxel(interface::VoxelRegistry *reg, const ss_ &name,
 			const ss_ &texture, bool solid, float roughness = 0.9f,
 			float metalness = 0.0f, float bumpiness = 1.0f,
-			float gloss_spots = 0.0f, float translucency = 0.0f)
+			float gloss_spots = 0.0f, float translucency = 0.0f,
+			float translucency_spots = 0.0f)
 	{
 		interface::VoxelDefinition vdef;
 		vdef.name.block_name = name;
@@ -473,6 +474,7 @@ struct Module: public interface::Module
 			seg.bumpiness = bumpiness;
 			seg.gloss_spots = gloss_spots;
 			seg.translucency = translucency;
+			seg.translucency_spots = translucency_spots;
 		}
 		vdef.edge_material_id = solid ? interface::EDGEMATERIALID_GROUND :
 				interface::EDGEMATERIALID_EMPTY;
@@ -512,9 +514,10 @@ struct Module: public interface::Module
 			// normals are kept low; any more and it turns grainy.
 			// Leaves are matte almost everywhere, with a few per cent of the
 			// texture glossy: individual leaves that happen to face the right
-			// way, rather than a whole waxy canopy. They are also the one
-			// translucent thing here, which is what makes them yellow-green
-			// against the sun instead of sky blue.
+			// way, rather than a whole waxy canopy. Light comes through them
+			// in the same way, at a few texels rather than over a whole face,
+			// which is what makes a canopy blocking the sun show yellow-green
+			// specks instead of lighting up like a lamp.
 			// Water is the other end of the range, smooth enough to mirror the
 			// sky, with the ripple of its texture pushed into the normals.
 			add_voxel(reg, "rock", "main/rock.png", true,
@@ -524,7 +527,7 @@ struct Module: public interface::Module
 			add_voxel(reg, "grass", "main/grass.png", true,
 					0.90f, 0.0f, 0.75f); // id 4
 			add_voxel(reg, "leaves", "main/leaves.png", true,
-					0.95f, 0.0f, 1.5f, 0.08f, 0.7f); // id 5
+					0.95f, 0.0f, 1.5f, 0.08f, 0.22f, 0.04f); // id 5
 			add_voxel(reg, "tree", "main/tree.png", true,
 					0.85f, 0.0f, 2.0f); // id 6
 			add_voxel(reg, "water", "main/water.png", true,

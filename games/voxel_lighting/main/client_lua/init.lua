@@ -212,13 +212,22 @@ buildat.sub_packet("main:cave", function(data)
 			"%.2f); benchmarks 2 and 3 ready", mx, my, mz, dx, dy, dz))
 end)
 
--- Benchmark 5 looks at a canopy with the sun behind and above it, which is the
--- framing that says whether light comes through the leaves. The camera goes on
--- the shaded side of the tree the server picked, on the sun's line, far enough
--- out to see the whole canopy and high enough to see its top face rather than
--- only its silhouette.
+-- Two framings of the same tree, both from the shaded side of it.
+--
+-- Benchmark 5 stands back and above, looking at the canopy with the sun behind
+-- and above it. Its top face is in direct sun and the side facing the camera is
+-- not, so the two are in the same frame.
 local TREE_DISTANCE = 16
 local TREE_EYE_RISE = 5
+--
+-- Benchmark 6 puts the canopy between the camera and the sun, which is where
+-- light through the leaves is strongest, and looks at the sun rather than at
+-- the tree. The sun is high, so the camera has to be low: it starts on the line
+-- from the sun through the canopy, three voxels below the canopy's middle, and
+-- then backs off far enough to be outside the leaves.
+local SUN_BLOCK_DROP = 3
+local SUN_BLOCK_BACK = 6
+local SUN_BLOCK_DOWN = 4
 
 -- The middle of that canopy, as "x y z"
 buildat.sub_packet("main:tree", function(data)
@@ -228,22 +237,37 @@ buildat.sub_packet("main:tree", function(data)
 		return
 	end
 	tx, ty, tz = tonumber(tx), tonumber(ty), tonumber(tz)
-	-- Downwind of the sunlight, so the sun is behind the tree from here
-	local d = normalized({x = SUN_DIR.x, y = 0, z = SUN_DIR.z})
-	local eye = {
-		x = tx + d.x * TREE_DISTANCE,
+	-- 5: back along the sunlight on the horizontal, and up
+	local h = normalized({x = SUN_DIR.x, y = 0, z = SUN_DIR.z})
+	local eye5 = {
+		x = tx + h.x * TREE_DISTANCE,
 		y = ty + TREE_EYE_RISE,
-		z = tz + d.z * TREE_DISTANCE,
+		z = tz + h.z * TREE_DISTANCE,
 	}
-	local t_yaw, t_pitch = angles_from_dir(
-			{x = tx - eye.x, y = ty - eye.y, z = tz - eye.z})
+	local yaw5, pitch5 = angles_from_dir(
+			{x = tx - eye5.x, y = ty - eye5.y, z = tz - eye5.z})
 	benchmarks[5] = {
-		name = "Against the sun",
-		x = eye.x, y = eye.y, z = eye.z,
-		yaw = t_yaw, pitch = t_pitch,
+		name = "Backlit canopy",
+		x = eye5.x, y = eye5.y, z = eye5.z,
+		yaw = yaw5, pitch = pitch5,
 	}
-	log:info(string.format("canopy at (%.1f, %.1f, %.1f); benchmark 5 ready",
-			tx, ty, tz))
+
+	-- 6: on the line from the sun through the canopy, then out of the leaves
+	local d = normalized({x = -SUN_DIR.x, y = -SUN_DIR.y, z = -SUN_DIR.z})
+	local drop = SUN_BLOCK_DROP / d.y
+	local eye6 = {
+		x = tx - d.x * drop - h.x * SUN_BLOCK_BACK,
+		y = ty - d.y * drop - SUN_BLOCK_DOWN,
+		z = tz - d.z * drop - h.z * SUN_BLOCK_BACK,
+	}
+	local yaw6, pitch6 = angles_from_dir(d)
+	benchmarks[6] = {
+		name = "Sun behind canopy",
+		x = eye6.x, y = eye6.y, z = eye6.z,
+		yaw = yaw6, pitch = pitch6,
+	}
+	log:info(string.format("canopy at (%.1f, %.1f, %.1f); benchmarks 5 and 6 "..
+			"ready", tx, ty, tz))
 end)
 
 -- Benchmark 4's camera, as "ex ey ez tx ty tz". Placed by the server, which
@@ -405,7 +429,8 @@ do
 	add_button("2 Cave mouth", function() go_to_benchmark(2) end)
 	add_button("3 Inside cave", function() go_to_benchmark(3) end)
 	add_button("4 Pond", function() go_to_benchmark(4) end)
-	add_button("5 Against sun", function() go_to_benchmark(5) end)
+	add_button("5 Backlit canopy", function() go_to_benchmark(5) end)
+	add_button("6 Sun behind", function() go_to_benchmark(6) end)
 	add_button("Dig shaft (P)", function()
 		buildat.send_packet("main:bench_shaft", "")
 	end)
@@ -433,6 +458,8 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		go_to_benchmark(4)
 	elseif key == magic.KEY_5 then
 		go_to_benchmark(5)
+	elseif key == magic.KEY_6 then
+		go_to_benchmark(6)
 	elseif key == magic.KEY_P then
 		buildat.send_packet("main:bench_shaft", "")
 	elseif key == magic.KEY_O then

@@ -6,7 +6,7 @@
 # the images are the same size whatever the window was left at last time.
 # See doc/client_commands.txt.
 #
-# The benchmark cameras are keys 1 to 5, so nothing here depends on timing a
+# The benchmark cameras are keys 1 to 6, so nothing here depends on timing a
 # movement, and the images are directly comparable between runs.
 delay 8000
 keypress 1
@@ -23,7 +23,10 @@ delay 500
 screenshot ../tmp/voxel_lighting_check/4_pond.png
 keypress 5
 delay 500
-screenshot ../tmp/voxel_lighting_check/5_against_the_sun.png
+screenshot ../tmp/voxel_lighting_check/5_backlit_canopy.png
+keypress 6
+delay 500
+screenshot ../tmp/voxel_lighting_check/6_sun_behind_canopy.png
 
 # Relight on edit: dig the shaft up out of the cave, then hang the slab over the
 # mouth. All three views are shot after each, so each edit can be followed as a
@@ -35,26 +38,26 @@ keypress P
 delay 1500
 keypress 1
 delay 500
-screenshot ../tmp/voxel_lighting_check/6_shaft_overview.png
+screenshot ../tmp/voxel_lighting_check/7_shaft_overview.png
 keypress 2
 delay 500
-screenshot ../tmp/voxel_lighting_check/7_shaft_cave_mouth.png
+screenshot ../tmp/voxel_lighting_check/8_shaft_cave_mouth.png
 keypress 3
 delay 500
-screenshot ../tmp/voxel_lighting_check/8_shaft_inside_cave.png
+screenshot ../tmp/voxel_lighting_check/9_shaft_inside_cave.png
 keypress V
 delay 1500
 keypress O
 delay 1500
 keypress 1
 delay 500
-screenshot ../tmp/voxel_lighting_check/9_slab_overview.png
+screenshot ../tmp/voxel_lighting_check/10_slab_overview.png
 keypress 2
 delay 500
-screenshot ../tmp/voxel_lighting_check/10_slab_cave_mouth.png
+screenshot ../tmp/voxel_lighting_check/11_slab_cave_mouth.png
 keypress 3
 delay 500
-screenshot ../tmp/voxel_lighting_check/11_slab_inside_cave.png
+screenshot ../tmp/voxel_lighting_check/12_slab_inside_cave.png
 keypress V
 delay 1500
 # Dig the shaft a second time. It reaches through the cap, so this cuts the cap
@@ -65,4 +68,4 @@ keypress V
 delay 1500
 keypress 3
 delay 500
-screenshot ../tmp/voxel_lighting_check/12_recycled_inside_cave.png
+screenshot ../tmp/voxel_lighting_check/13_recycled_inside_cave.png
