@@ -12,8 +12,13 @@
 #include "interface/event.h"
 #include "interface/voxel.h"
 #include "interface/noise.h"
+#include "interface/polyvox_std.h"
+#include "interface/polyvox_cereal.h"
+#include <cereal/archives/portable_binary.hpp>
 #include <cmath>
 #include <cstdio>
+#include <sstream>
+#include <chrono>
 #define MODULE "main"
 
 namespace magic = Urho3D;
@@ -53,6 +58,100 @@ static const float CAVE_LENGTH = 62.0f;
 // Positive is clockwise seen from above.
 static const float CAVE_YAW_DEGREES = 20.0f;
 
+// The benchmark edits: a cube dug out of the ground next to the cave mouth,
+// and a slab hung over both of them. Sized so that the change in skylight is
+// obvious in benchmark views 1 and 2 without the slab filling the frame.
+static const int BENCH_PIT_SIZE = 3;
+static const int BENCH_SLAB_W = 5;
+static const int BENCH_SLAB_H = 2;
+
+static const uint8_t AIR_ID = 1;
+
+static inline size_t sky_idx(int x, int y, int z, int W, int D)
+{
+	return ((size_t)y * D + z) * W + x;
+}
+
+// Skylight over a W*H*D block of voxel ids. Sunlight falls straight down
+// through air at full strength and stops at the first solid voxel; from there
+// it spreads sideways and downwards losing one step per voxel, which is what
+// makes a cave get darker the deeper it goes while a hollow just under the
+// surface stays bright.
+//
+// sky is the light in air voxels. solid_sky is the brightest skylight next to
+// a solid voxel: the mesher normally reads the air voxel in front of a face,
+// but at a chunk edge that voxel is outside the chunk it is meshing, and it
+// falls back to this.
+static void compute_skylight(const sv_<uint8_t> &ids, int W, int H, int D,
+		sv_<uint8_t> &sky, sv_<uint8_t> &solid_sky)
+{
+	const uint8_t SKY_MAX = VoxelInstance::SKYLIGHT_MAX;
+	static const int off[6][3] = {
+		{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1}
+	};
+	auto inside = [&](int x, int y, int z){
+		return x >= 0 && x < W && y >= 0 && y < H && z >= 0 && z < D;
+	};
+
+	sky.assign((size_t)W * H * D, 0);
+	solid_sky.assign((size_t)W * H * D, 0);
+
+	for(int z = 0; z < D; z++){
+		for(int x = 0; x < W; x++){
+			uint8_t l = SKY_MAX;
+			for(int y = H - 1; y >= 0; y--){
+				size_t i = sky_idx(x, y, z, W, D);
+				if(ids[i] != AIR_ID)
+					l = 0;
+				sky[i] = l;
+			}
+		}
+	}
+	// One pass per level, brightest first: a voxel written during the pass for
+	// level L is picked up by the pass for L-1, so this is a breadth-first
+	// spread without a queue.
+	for(int level = SKY_MAX; level >= 2; level--){
+		for(int y = 0; y < H; y++){
+		for(int z = 0; z < D; z++){
+		for(int x = 0; x < W; x++){
+			if(sky[sky_idx(x, y, z, W, D)] != level)
+				continue;
+			for(size_t k = 0; k < 6; k++){
+				int nx = x + off[k][0], ny = y + off[k][1];
+				int nz = z + off[k][2];
+				if(!inside(nx, ny, nz))
+					continue;
+				size_t ni = sky_idx(nx, ny, nz, W, D);
+				if(ids[ni] != AIR_ID || sky[ni] >= level - 1)
+					continue;
+				sky[ni] = level - 1;
+			}
+		}
+		}
+		}
+	}
+	for(int y = 0; y < H; y++){
+	for(int z = 0; z < D; z++){
+	for(int x = 0; x < W; x++){
+		size_t i = sky_idx(x, y, z, W, D);
+		if(ids[i] == AIR_ID)
+			continue;
+		uint8_t best = 0;
+		for(size_t k = 0; k < 6; k++){
+			int nx = x + off[k][0], ny = y + off[k][1];
+			int nz = z + off[k][2];
+			if(!inside(nx, ny, nz))
+				continue;
+			size_t ni = sky_idx(nx, ny, nz, W, D);
+			if(ids[ni] == AIR_ID && sky[ni] > best)
+				best = sky[ni];
+		}
+		solid_sky[i] = best;
+	}
+	}
+	}
+}
+
 struct Worldgen: public worldgen::GeneratorInterface
 {
 	// The client places its benchmark cameras relative to the cave, so it is
@@ -61,6 +160,12 @@ struct Worldgen: public worldgen::GeneratorInterface
 	bool cave_valid = false;
 	float cave_mouth[3] = {0, 0, 0};
 	float cave_dir[3] = {0, 0, 0};
+
+	// Where the benchmark edits go. Both sit on the +X +Z side of the cave
+	// mouth, which is the side both benchmark cameras look from, and the slab
+	// floats above the sight line rather than across it.
+	pv::Vector3DInt32 bench_pit_centre;   // BENCH_PIT_SIZE^3 dug out here
+	pv::Vector3DInt32 bench_slab_centre;  // BENCH_SLAB_W x 2 x BENCH_SLAB_W
 
 	void generate_section(interface::Server *server,
 			SceneReference scene_ref,
@@ -115,7 +220,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 			const int W = uc.getX() - lc.getX() + 1;
 			const int H = uc.getY() - lc.getY() + 1;
 			const int D = uc.getZ() - lc.getZ() + 1;
-			const uint8_t AIR = 1;
+			const uint8_t AIR = AIR_ID;
 			sv_<uint8_t> ids((size_t)W * H * D, AIR);
 			auto idx = [&](int x, int y, int z) -> size_t {
 				return ((size_t)(y - lc.getY()) * D + (z - lc.getZ())) * W +
@@ -231,82 +336,32 @@ struct Worldgen: public worldgen::GeneratorInterface
 			cave_dir[2] = dz;
 			cave_valid = true;
 
+			// The pit breaks the ground next to the mouth; the slab hangs over
+			// both of them, so pressing the two buttons in order takes skylight
+			// away from the pit and out of the cave entrance.
+			auto clamp_xz = [&](int v, int lo, int hi){
+				return v < lo ? lo : (v > hi ? hi : v);
+			};
+			int pit_x = clamp_xz(mouth_x + 3, lc.getX() + 2, uc.getX() - 2);
+			int pit_z = clamp_xz(mouth_z + 3, lc.getZ() + 2, uc.getZ() - 2);
+			int slab_x = clamp_xz(mouth_x + 2, lc.getX() + 3, uc.getX() - 3);
+			int slab_z = clamp_xz(mouth_z + 2, lc.getZ() + 3, uc.getZ() - 3);
+			// surface_at() + 10 is the topmost solid voxel, so a pit centred
+			// one below it breaks the ground open instead of leaving a pocket
+			bench_pit_centre = pv::Vector3DInt32(pit_x,
+					(int)std::floor(surface_at(pit_x, pit_z)) + 9, pit_z);
+			// The slab hangs clear above the mouth rather than following the
+			// ground: benchmark camera 2 looks down at the mouth from the +X +Z
+			// side, and anything level with the mouth would sit in front of it.
+			bench_slab_centre = pv::Vector3DInt32(slab_x,
+					(int)std::floor(sy) + 6, slab_z);
+
 			log_v(MODULE, "Cave: mouth (%i, %.0f, %i), dir (%.2f, %.2f, %.2f), "
 					"%zu brush writes", mouth_x, sy, mouth_z, dx, dy, dz,
 					carved);
 
-			// Skylight. Sunlight falls straight down through air at full
-			// strength and stops at the first solid voxel; from there it
-			// spreads sideways and downwards losing one step per voxel, which
-			// is what makes a cave get darker the deeper it goes while a
-			// hollow just under the surface stays bright.
-			const uint8_t SKY_MAX = VoxelInstance::SKYLIGHT_MAX;
-			sv_<uint8_t> sky((size_t)W * H * D, 0);
-			for(int z = lc.getZ(); z <= uc.getZ(); z++){
-				for(int x = lc.getX(); x <= uc.getX(); x++){
-					uint8_t l = SKY_MAX;
-					for(int y = uc.getY(); y >= lc.getY(); y--){
-						size_t i = idx(x, y, z);
-						if(ids[i] != AIR)
-							l = 0;
-						sky[i] = l;
-					}
-				}
-			}
-			// One pass per level, brightest first: a voxel written during the
-			// pass for level L is picked up by the pass for L-1, so this is a
-			// breadth-first spread without a queue.
-			for(int level = SKY_MAX; level >= 2; level--){
-				for(int y = lc.getY(); y <= uc.getY(); y++){
-				for(int z = lc.getZ(); z <= uc.getZ(); z++){
-				for(int x = lc.getX(); x <= uc.getX(); x++){
-					if(sky[idx(x, y, z)] != level)
-						continue;
-					static const int off[6][3] = {
-						{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1}
-					};
-					for(size_t k = 0; k < 6; k++){
-						int nx = x + off[k][0], ny = y + off[k][1];
-						int nz = z + off[k][2];
-						if(!inside(nx, ny, nz))
-							continue;
-						size_t ni = idx(nx, ny, nz);
-						if(ids[ni] != AIR || sky[ni] >= level - 1)
-							continue;
-						sky[ni] = level - 1;
-					}
-				}
-				}
-				}
-			}
-			// Solid voxels keep the brightest skylight next to them. The
-			// mesher normally reads the air voxel in front of a face, but at a
-			// chunk edge that voxel is outside the chunk it is meshing, and it
-			// falls back to this.
-			sv_<uint8_t> solid_sky((size_t)W * H * D, 0);
-			for(int y = lc.getY(); y <= uc.getY(); y++){
-			for(int z = lc.getZ(); z <= uc.getZ(); z++){
-			for(int x = lc.getX(); x <= uc.getX(); x++){
-				size_t i = idx(x, y, z);
-				if(ids[i] == AIR)
-					continue;
-				static const int off[6][3] = {
-					{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1}
-				};
-				uint8_t best = 0;
-				for(size_t k = 0; k < 6; k++){
-					int nx = x + off[k][0], ny = y + off[k][1];
-					int nz = z + off[k][2];
-					if(!inside(nx, ny, nz))
-						continue;
-					size_t ni = idx(nx, ny, nz);
-					if(ids[ni] == AIR && sky[ni] > best)
-						best = sky[ni];
-				}
-				solid_sky[i] = best;
-			}
-			}
-			}
+			sv_<uint8_t> sky, solid_sky;
+			compute_skylight(ids, W, H, D, sky, solid_sky);
 
 			size_t dark_air = 0, lit_air = 0;
 			for(int y = lc.getY(); y <= uc.getY(); y++){
@@ -350,6 +405,14 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t("worldgen:queue_modified"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:dig_voxel"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:place_voxel"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:bench_pit"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:bench_slab"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -361,6 +424,14 @@ struct Module: public interface::Module
 				on_files_transmitted, client_file::FilesTransmitted)
 		EVENT_TYPEN("worldgen:queue_modified",
 				on_worldgen_queue_modified, worldgen::QueueModifiedEvent)
+		EVENT_TYPEN("network:packet_received/main:dig_voxel",
+				on_dig_voxel, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:place_voxel",
+				on_place_voxel, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:bench_pit",
+				on_bench_pit, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:bench_slab",
+				on_bench_slab, network::Packet)
 	}
 
 	void add_voxel(interface::VoxelRegistry *reg, const ss_ &name,
@@ -467,6 +538,128 @@ struct Module: public interface::Module
 			if(m_worldgen && m_worldgen->cave_valid)
 				inetwork->send(event.recipient, "main:cave", cave_packet());
 		});
+	}
+
+	// Skylight is generated for the whole scene at once, and the scene is a
+	// single 64^3 section, so an edit is relit by simply doing that again over
+	// all of it. Only voxels whose skylight actually changed are written back,
+	// which keeps the number of chunks that have to be remeshed down to the
+	// ones the light really moved in.
+	void relight(voxelworld::Instance *world)
+	{
+		auto t0 = std::chrono::steady_clock::now();
+		pv::Region region = world->get_section_region_voxels(
+				pv::Vector3DInt16(0, 0, 0));
+		auto lc = region.getLowerCorner();
+		auto uc = region.getUpperCorner();
+		const int W = uc.getX() - lc.getX() + 1;
+		const int H = uc.getY() - lc.getY() + 1;
+		const int D = uc.getZ() - lc.getZ() + 1;
+
+		sv_<uint8_t> ids((size_t)W * H * D, AIR_ID);
+		for(int y = 0; y < H; y++)
+		for(int z = 0; z < D; z++)
+		for(int x = 0; x < W; x++){
+			VoxelInstance v = world->get_voxel(pv::Vector3DInt32(
+					lc.getX() + x, lc.getY() + y, lc.getZ() + z), true);
+			ids[sky_idx(x, y, z, W, D)] = (uint8_t)v.get_id();
+		}
+
+		sv_<uint8_t> sky, solid_sky;
+		compute_skylight(ids, W, H, D, sky, solid_sky);
+
+		size_t changed = 0;
+		for(int y = 0; y < H; y++)
+		for(int z = 0; z < D; z++)
+		for(int x = 0; x < W; x++){
+			size_t i = sky_idx(x, y, z, W, D);
+			uint8_t l = (ids[i] == AIR_ID) ? sky[i] : solid_sky[i];
+			pv::Vector3DInt32 p(lc.getX() + x, lc.getY() + y, lc.getZ() + z);
+			VoxelInstance v = world->get_voxel(p, true);
+			if(v.get_skylight() == l)
+				continue;
+			v.set_skylight(l);
+			world->set_voxel(p, v, true);
+			changed++;
+		}
+		log_v(MODULE, "relight(): %zu voxels changed skylight in %i ms",
+				changed, (int)std::chrono::duration_cast<
+						std::chrono::milliseconds>(
+						std::chrono::steady_clock::now() - t0).count());
+	}
+
+	void edit_voxel(const pv::Vector3DInt32 &p, uint32_t id)
+	{
+		voxelworld::access(m_server, m_main_scene,
+				[&](voxelworld::Instance *world)
+		{
+			world->set_voxel(p, VoxelInstance(id));
+			relight(world);
+		});
+	}
+
+	pv::Vector3DInt32 read_voxel_p(const network::Packet &packet)
+	{
+		pv::Vector3DInt32 p;
+		std::istringstream is(packet.data, std::ios::binary);
+		cereal::PortableBinaryInputArchive ar(is);
+		ar(p);
+		return p;
+	}
+
+	void on_dig_voxel(const network::Packet &packet)
+	{
+		pv::Vector3DInt32 p = read_voxel_p(packet);
+		log_v(MODULE, "C%i: dig " PV3I_FORMAT, packet.sender, PV3I_PARAMS(p));
+		edit_voxel(p, AIR_ID);
+	}
+
+	void on_place_voxel(const network::Packet &packet)
+	{
+		pv::Vector3DInt32 p = read_voxel_p(packet);
+		log_v(MODULE, "C%i: place " PV3I_FORMAT, packet.sender, PV3I_PARAMS(p));
+		edit_voxel(p, 2); // rock
+	}
+
+	// The two benchmark edits. Their positions come from worldgen so that they
+	// stay next to the cave mouth whatever the terrain noise does.
+	void bench_box(const pv::Vector3DInt32 &centre, int w, int h, int d,
+			uint32_t id)
+	{
+		if(!m_worldgen || !m_worldgen->cave_valid){
+			log_w(MODULE, "bench_box(): world is not generated yet");
+			return;
+		}
+		voxelworld::access(m_server, m_main_scene,
+				[&](voxelworld::Instance *world)
+		{
+			for(int y = -(h/2); y <= (h-1)/2; y++)
+			for(int z = -(d/2); z <= (d-1)/2; z++)
+			for(int x = -(w/2); x <= (w-1)/2; x++){
+				world->set_voxel(pv::Vector3DInt32(centre.getX() + x,
+						centre.getY() + y, centre.getZ() + z),
+						VoxelInstance(id), true);
+			}
+			relight(world);
+		});
+		log_v(MODULE, "bench_box(): %ix%ix%i id %i at " PV3I_FORMAT,
+				w, h, d, id, PV3I_PARAMS(centre));
+	}
+
+	void on_bench_pit(const network::Packet &packet)
+	{
+		(void)packet;
+		if(!m_worldgen) return;
+		bench_box(m_worldgen->bench_pit_centre, BENCH_PIT_SIZE, BENCH_PIT_SIZE,
+				BENCH_PIT_SIZE, AIR_ID);
+	}
+
+	void on_bench_slab(const network::Packet &packet)
+	{
+		(void)packet;
+		if(!m_worldgen) return;
+		bench_box(m_worldgen->bench_slab_centre, BENCH_SLAB_W, BENCH_SLAB_H,
+				BENCH_SLAB_W, 2); // rock
 	}
 
 	void on_worldgen_queue_modified(const worldgen::QueueModifiedEvent &event)

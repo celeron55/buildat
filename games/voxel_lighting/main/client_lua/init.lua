@@ -2,6 +2,7 @@
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("voxel_lighting")
+local cereal = require("buildat/extension/cereal")
 local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
@@ -203,6 +204,110 @@ buildat.sub_packet("main:cave", function(data)
 			"%.2f); benchmarks 2 and 3 ready", mx, my, mz, dx, dy, dz))
 end)
 
+-- Voxel pointing and digging, so the relighting can be poked at by hand. Only
+-- active in free move mode; the benchmark cameras must not be disturbed.
+-- The highlight is a thin outline drawn on the +Y face of a unit cube and
+-- rotated onto whichever face is being pointed at.
+local pointed_voxel_p = nil
+local pointed_voxel_p_above = nil
+local pointed_node = scene:CreateChild("PointedVoxel")
+do
+	local g = pointed_node:CreateComponent("CustomGeometry")
+	g:BeginGeometry(0, magic.TRIANGLE_LIST)
+	g:SetNumGeometries(1)
+	local c = magic.Color(0.12, 0.36, 0.12)
+	local function define_face(lc, uc)
+		local function v(x, y, z)
+			g:DefineVertex(magic.Vector3(x, y, z))
+			g:DefineColor(c)
+		end
+		v(lc.x, uc.y, uc.z) v(uc.x, uc.y, uc.z) v(uc.x, uc.y, lc.z)
+		v(uc.x, uc.y, lc.z) v(lc.x, uc.y, lc.z) v(lc.x, uc.y, uc.z)
+	end
+	local d = 0.502
+	local d2 = 1.0 / 16
+	define_face(magic.Vector3(-d, d, d-d2), magic.Vector3(d, d, d))
+	define_face(magic.Vector3(-d, d, -d), magic.Vector3(d, d, -d+d2))
+	define_face(magic.Vector3(d-d2, d, -d+d2), magic.Vector3(d, d, d-d2))
+	define_face(magic.Vector3(-d, d, -d+d2), magic.Vector3(-d+d2, d, d-d2))
+	g:Commit()
+	local m = magic.Material.new()
+	m:SetTechnique(0, magic.cache:GetResource("Technique",
+			"Techniques/NoTextureVColMultiply.xml"))
+	g:SetMaterial(0, m)
+	pointed_node.enabled = false
+end
+
+local DIG_REACH = 8
+
+-- Returns nil, or the pointed voxel and the empty one just before it
+local function find_pointed_voxel()
+	local d_per_step = 0.1
+	local p0 = buildat.Vector3(camera_node.worldPosition)
+	local dir = buildat.Vector3(camera_node.worldDirection)
+	local last_p = nil
+	for i = 1, math.floor(DIG_REACH / d_per_step) do
+		local p = (p0 + dir * i * d_per_step):round()
+		if p ~= last_p then
+			local v = voxelworld.get_static_voxel(p)
+			-- 0 is "not loaded", 1 is air
+			if v.id ~= 1 and v.id ~= 0 then
+				return p, last_p
+			end
+			last_p = p
+		end
+	end
+	return nil
+end
+
+local function send_voxel_p(name, p)
+	buildat.send_packet(name, cereal.binary_output({
+		p = {
+			x = math.floor(p.x+0.5),
+			y = math.floor(p.y+0.5),
+			z = math.floor(p.z+0.5),
+		},
+	}, {"object",
+		{"p", {"object",
+			{"x", "int32_t"},
+			{"y", "int32_t"},
+			{"z", "int32_t"},
+		}},
+	}))
+end
+
+local function update_pointed_voxel()
+	local p, p_above = find_pointed_voxel()
+	pointed_voxel_p = p
+	pointed_voxel_p_above = p_above
+	if not (p and p_above) then
+		pointed_node.enabled = false
+		return
+	end
+	pointed_node.position = magic.Vector3.from_buildat(p)
+	local d = p_above - p
+	if d.x > 0 then pointed_node.rotation = magic.Quaternion(90, 0, -90)
+	elseif d.x < 0 then pointed_node.rotation = magic.Quaternion(90, 0, 90)
+	elseif d.y > 0 then pointed_node.rotation = magic.Quaternion(0, 0, 0)
+	elseif d.y < 0 then pointed_node.rotation = magic.Quaternion(0, 0, -180)
+	elseif d.z > 0 then pointed_node.rotation = magic.Quaternion(90, 0, 0)
+	elseif d.z < 0 then pointed_node.rotation = magic.Quaternion(-90, 0, 0)
+	end
+	pointed_node.enabled = true
+end
+
+magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
+	if not free_look then
+		return
+	end
+	local button = event_data:GetInt("Button")
+	if button == magic.MOUSEB_LEFT and pointed_voxel_p then
+		send_voxel_p("main:dig_voxel", pointed_voxel_p)
+	elseif button == magic.MOUSEB_RIGHT and pointed_voxel_p_above then
+		send_voxel_p("main:place_voxel", pointed_voxel_p_above)
+	end
+end)
+
 -- HUD, so the scene can be inspected without remembering the keys
 do
 	local ui_root = magic.ui.root
@@ -234,6 +339,12 @@ do
 	add_button("1 Overview", function() go_to_benchmark(1) end)
 	add_button("2 Cave mouth", function() go_to_benchmark(2) end)
 	add_button("3 Inside cave", function() go_to_benchmark(3) end)
+	add_button("Dig pit (P)", function()
+		buildat.send_packet("main:bench_pit", "")
+	end)
+	add_button("Place slab (O)", function()
+		buildat.send_packet("main:bench_slab", "")
+	end)
 
 	magic.ui:SetFocusElement(nil)
 end
@@ -248,6 +359,10 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		go_to_benchmark(2)
 	elseif key == magic.KEY_3 then
 		go_to_benchmark(3)
+	elseif key == magic.KEY_P then
+		buildat.send_packet("main:bench_pit", "")
+	elseif key == magic.KEY_O then
+		buildat.send_packet("main:bench_slab", "")
 	elseif key == magic.KEY_ESCAPE then
 		if free_look then
 			set_free_look(false)
@@ -257,8 +372,10 @@ end)
 
 magic.SubscribeToEvent("Update", function(event_type, event_data)
 	if not free_look then
+		pointed_node.enabled = false
 		return
 	end
+	update_pointed_voxel()
 	local dt = event_data:GetFloat("TimeStep")
 
 	local dmouse = magic.input:GetMouseMove()
@@ -294,5 +411,6 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	apply_angles(camera_node, yaw, pitch)
 end)
 
-log:info("voxel_lighting client ready; Tab = free move, 1/2/3 = benchmarks")
+log:info("voxel_lighting client ready; Tab = free move, 1/2/3 = benchmarks, "..
+		"P/O = benchmark pit/slab")
 -- vim: set noet ts=4 sw=4:

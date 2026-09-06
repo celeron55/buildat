@@ -1,5 +1,9 @@
 # Client command sequence for a visual check. Run from Build/:
-#   bin/buildat_client -s localhost -c @../games/voxel_lighting/check.txt
+#   bin/buildat_client -s localhost -w 1600x900 \
+#           -c @../games/voxel_lighting/check.txt
+#
+# -w fixes the window size for the run without touching the remembered one, so
+# the images are the same size whatever the window was left at last time.
 # See doc/client_commands.txt.
 #
 # The benchmark cameras are keys 1/2/3, so nothing here depends on timing a
@@ -14,3 +18,26 @@ screenshot ../tmp/voxel_lighting_check/2_cave_mouth.png
 keypress 3
 delay 500
 screenshot ../tmp/voxel_lighting_check/3_inside_cave.png
+
+# Relight on edit: dig the pit next to the cave mouth, then hang the slab over
+# it. Views 1 and 2 are shot after each, so the two edits can be followed as a
+# sequence of three images each.
+keypress P
+delay 1500
+keypress 1
+delay 500
+screenshot ../tmp/voxel_lighting_check/4_pit_overview.png
+keypress 2
+delay 500
+screenshot ../tmp/voxel_lighting_check/5_pit_cave_mouth.png
+keypress O
+delay 1500
+keypress 1
+delay 500
+screenshot ../tmp/voxel_lighting_check/6_slab_overview.png
+keypress 2
+delay 500
+screenshot ../tmp/voxel_lighting_check/7_slab_cave_mouth.png
+keypress 3
+delay 500
+screenshot ../tmp/voxel_lighting_check/8_slab_inside_cave.png

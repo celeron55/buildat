@@ -56,6 +56,24 @@ keys 1, 2 and 3:
 Tab (or the top HUD button) toggles free move: WASD on the horizontal plane
 whatever the camera is pitched at, Space up, Shift down, mouse to look.
 
+Editing
+-------
+
+In free move, left mouse digs the pointed voxel and right mouse places rock
+next to it. P and O (or the last two HUD buttons) make the two fixed edits used
+for comparing images: P digs a 3x3x3 pit into the ground beside the cave mouth,
+and O hangs a 5x2x5 slab above both of them. Both are placed relative to the
+cave mouth the generator chose, on the side the benchmark cameras look from,
+and the slab hangs high enough that it does not sit in front of the mouth in
+benchmark 2.
+
+Every edit relights the whole scene: the skylight flood fill is run again over
+all of it and only the voxels whose skylight actually changed are written back,
+so only the chunks the light really moved in are remeshed. That costs about
+130 ms for this 64^3 scene, which is fine for one section and would not be for
+a streaming world; an incremental relight, unlighting outwards from the changed
+voxels and refilling, is what that would need.
+
 Running
 -------
 
@@ -65,7 +83,13 @@ Running
 check.txt visits all three benchmarks and screenshots each, for comparing a
 rendering change against the previous run:
 
-    $ bin/buildat_client -s localhost -c @../games/voxel_lighting/check.txt
+    $ bin/buildat_client -s localhost -w 1600x900 \
+            -c @../games/voxel_lighting/check.txt
+
+-w gives the run a fixed window size without changing the remembered one, so
+the images come out the same size whatever the window was left at last time.
+It also shoots both benchmark edits, so a run is: three images of the scene as
+generated, then the same views after the pit and after the slab.
 
 NOTE: the server reads client_lua and client_data once at startup, so restart
 it after editing init.lua or the client will be served the previous version.
