@@ -16,6 +16,17 @@
 //
 // Direct light is deliberately left alone. The sun is shadow mapped, so
 // attenuating it by skylight as well would darken shadowed faces twice.
+//
+// On top of that, two things the stock PBR shaders do differently:
+//
+//   VOXELNORMALMAP  the tangent frame is built from the derivatives of the
+//       world position and the texture coordinate rather than from a vertex
+//       attribute, because the voxel mesher writes no tangents
+//   VOXELIBL  reflections of the zone cube map, specular only. The diffuse
+//       half of image based lighting is left out: the skylight in the vertex
+//       color is already the scene's ambient diffuse, and adding an
+//       unoccluded sky on top of it would light the inside of a cave. The
+//       specular term is scaled by the same skylight for the same reason.
 
 #include "Uniforms.glsl"
 #include "Samplers.glsl"
@@ -52,6 +63,9 @@ varying vec4 vWorldPos;
     #endif
 #else
     varying vec3 vVertexLight;
+    // How much of the sky this vertex sees, ambient occlusion included; the
+    // alpha the mesher packed into the vertex color
+    varying float vSkyVisibility;
     varying vec4 vScreenPos;
     #ifdef ENVCUBEMAP
         varying vec3 vReflectionVec;
@@ -108,6 +122,7 @@ void VS()
             vVertexLight = GetAmbient(GetZonePos(worldPos)) * iColor.a +
                 iColor.rgb;
         #endif
+        vSkyVisibility = iColor.a;
 
         #ifdef NUMVERTEXLIGHTS
             for (int i = 0; i < NUMVERTEXLIGHTS; ++i)
@@ -166,6 +181,25 @@ void PS()
         vec3 nn = DecodeNormal(texture2D(sNormalMap, vTexCoord.xy));
         //nn.rg *= 2.0;
         vec3 normal = normalize(tbn * nn);
+    #elif defined(VOXELNORMALMAP)
+        // Cotangent frame: the tangent is the direction in world space that
+        // the texture's u axis runs, recovered from the screen space
+        // derivatives. Voxel faces are flat and axis aligned, so this is exact
+        // for them and costs no vertex attribute.
+        vec3 geomNormal = normalize(vNormal);
+        vec3 dpdx = dFdx(vWorldPos.xyz);
+        vec3 dpdy = dFdy(vWorldPos.xyz);
+        vec2 dtdx = dFdx(vTexCoord.xy);
+        vec2 dtdy = dFdy(vTexCoord.xy);
+        vec3 dpdyPerp = cross(dpdy, geomNormal);
+        vec3 dpdxPerp = cross(geomNormal, dpdx);
+        vec3 tangentU = dpdyPerp * dtdx.x + dpdxPerp * dtdy.x;
+        vec3 tangentV = dpdyPerp * dtdx.y + dpdxPerp * dtdy.y;
+        float invMax = inversesqrt(max(dot(tangentU, tangentU),
+            dot(tangentV, tangentV)));
+        vec3 nn = DecodeNormal(texture2D(sNormalMap, vTexCoord.xy));
+        vec3 normal = normalize(mat3(tangentU * invMax, tangentV * invMax,
+            geomNormal) * nn);
     #else
         vec3 normal = normalize(vNormal);
     #endif
@@ -247,12 +281,17 @@ void PS()
         vec3 toCamera = normalize(vWorldPos.xyz - cCameraPosPS);
         vec3 reflection = normalize(reflect(toCamera, normal));
 
-        vec3 cubeColor = vVertexLight.rgb;
-
-        #ifdef IBL
-          vec3 iblColor = ImageBasedLighting(reflection, normal, toCamera, diffColor.rgb, specColor.rgb, roughness, cubeColor);
-          float gamma = 0.0;
-          finalColor.rgb += iblColor;
+        #ifdef VOXELIBL
+            // Specular half of image based lighting only; see the note at the
+            // top of this file. Rougher surfaces read a blurrier mip, which is
+            // what makes water a mirror and rock not.
+            vec3 reflectDir = GetSpecularDominantDir(normal, reflection,
+                roughness);
+            float ndv = clamp(dot(-toCamera, normal), 0.0, 1.0);
+            vec3 cube = textureLod(sZoneCubeMap, FixCubeLookup(reflectDir),
+                GetMipFromRoughness(roughness)).rgb;
+            finalColor.rgb += cube * EnvBRDFApprox(specColor, roughness, ndv) *
+                vSkyVisibility;
         #endif
 
         #ifdef ENVCUBEMAP

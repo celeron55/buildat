@@ -95,6 +95,9 @@ void init_voxel(lua_State *L)
 					&asd_get_select_segment, &asd_set_select_segment)
 			.def_readwrite("lod_simulation",
 					&AtlasSegmentDefinition::lod_simulation)
+			.def_readwrite("roughness", &AtlasSegmentDefinition::roughness)
+			.def_readwrite("metalness", &AtlasSegmentDefinition::metalness)
+			.def_readwrite("bumpiness", &AtlasSegmentDefinition::bumpiness)
 		,
 		class_<VoxelDefinition, bases<>, sp_<VoxelDefinition>>(
 				"__buildat_VoxelDefinition")
