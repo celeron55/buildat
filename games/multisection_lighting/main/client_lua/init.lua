@@ -100,6 +100,8 @@ local SKY_AMBIENT = magic.Color(0.26, 0.33, 0.46)
 -- is the diffuse term inside it), so a sun that reads as bright here is a much
 -- larger number than the same sun under the legacy Diff technique.
 local SUN_BRIGHTNESS = 50.0
+-- The way the light travels, so the sun is the other way
+local SUN_DIR = {x = -0.6, y = -1.0, z = 0.8}
 -- Fixed rather than auto-exposed: auto exposure would lift the inside of the
 -- cave back to mid grey, which is the thing being looked at.
 local EXPOSURE_BIAS = 1.6
@@ -121,13 +123,15 @@ end
 
 do
 	local node = scene:CreateChild("DirectionalLight")
-	node.direction = magic.Vector3(-0.6, -1.0, 0.8)
+	node.direction = magic.Vector3(SUN_DIR.x, SUN_DIR.y, SUN_DIR.z)
 	local light = node:CreateComponent("Light")
 	light.lightType = magic.LIGHT_DIRECTIONAL
 	light.castShadows = true
 	light.brightness = SUN_BRIGHTNESS
 	light.color = magic.Color(1.0, 0.96, 0.88)
 end
+
+voxel_shading.create_skybox(scene, SUN_DIR)
 
 local camera_node = scene:CreateChild("Camera")
 do

@@ -132,6 +132,8 @@ do
 	light.color = magic.Color(1.0, 0.96, 0.88)
 end
 
+voxel_shading.create_skybox(scene, SUN_DIR)
+
 local camera_node = scene:CreateChild("Camera")
 do
 	camera_node.position = magic.Vector3(
@@ -249,6 +251,8 @@ local TREE_EYE_RISE = 5
 local SUN_BLOCK_DROP = 3
 local SUN_BLOCK_BACK = 6
 local SUN_BLOCK_DOWN = 4
+-- Above the canopy, so the sun in the sky is not behind the tree
+local SUN_VIEW_RISE = 10
 
 -- The middle of that canopy, as "x y z"
 buildat.sub_packet("main:tree", function(data)
@@ -278,7 +282,7 @@ buildat.sub_packet("main:tree", function(data)
 	local drop = SUN_BLOCK_DROP / d.y
 	local eye6 = {
 		x = tx - d.x * drop - h.x * SUN_BLOCK_BACK,
-		y = ty - d.y * drop - SUN_BLOCK_DOWN,
+		y = ty - d.y * drop - SUN_BLOCK_DOWN + SUN_VIEW_RISE,
 		z = tz - d.z * drop - h.z * SUN_BLOCK_BACK,
 	}
 	local yaw6, pitch6 = angles_from_dir(d)

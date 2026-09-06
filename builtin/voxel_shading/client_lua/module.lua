@@ -10,6 +10,7 @@
 --
 -- A game needs:
 --   zone.zoneTexture = magic.cache:GetResource("TextureCube", M.sky_cubemap)
+--   voxel_shading.create_skybox(scene, sun_dir)
 --   voxel_shading.set_camera(camera_node)
 -- and voxelworld.use_skylight set, which is what fills the vertex colors.
 local log = buildat.Logger("voxel_shading")
@@ -84,6 +85,22 @@ function M.update(dt)
 			m:SetShaderParameter("IndoorBlend", indoor_blend)
 		end)
 	end
+end
+
+-- The sky the world stands under, drawn by VoxelSkybox.glsl in the same
+-- gradient the cube map is baked in. sun_dir points the way the light travels,
+-- as a Light's direction does, so the sun itself is the other way.
+function M.create_skybox(scene, sun_dir)
+	local node = scene:CreateChild("Sky")
+	local skybox = node:CreateComponent("Skybox")
+	skybox:SetModel(magic.cache:GetResource("Model", "Models/Box.mdl"))
+	local material = magic.Material:new()
+	material:SetTechnique(0, magic.cache:GetResource("Technique",
+			"voxel_shading/VoxelSkybox.xml"))
+	material:SetShaderParameter("SunDirection", magic.Vector3(
+			-sun_dir.x, -sun_dir.y, -sun_dir.z))
+	skybox.material = material
+	return node
 end
 
 function M.set_camera(new_camera_node)

@@ -529,7 +529,8 @@ function M.define(dst, util)
 			--end),
 			SetShaderParameter = util.wrap_function(
 				{"Material", "string",
-					{"number", "boolean", "Vector2", "Color", "Variant"}},
+					{"number", "boolean", "Vector2", "Vector3", "Color",
+						"Variant"}},
 				function(self, name, value)
 					self:SetShaderParameter(name, Variant(value))
 				end

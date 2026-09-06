@@ -163,7 +163,18 @@ directional light draws the sun's highlight as well, so a surface facing it
 right gets both; the disc is left at the top of the 8 bit range rather than
 made an HDR value, so that neither swamps the other.
 
-There are two of them. voxel_shading/VoxelSkyIndoor.xml is the same sky
+The same sky is also drawn, by VoxelSkybox.glsl on a skybox, in the gradient
+the cube map is baked in so that what a surface reflects agrees with what is
+overhead. It has a square sun rather than a disc, since everything else here
+is cubic, and a layer of noise clouds projected onto the sky by direction. A
+skybox has no depth presence, so neither is ever in the way of the ground.
+
+The clouds are the one place the drawn sky and the reflected one knowingly
+disagree: they are not in the cube map, so nothing reflects them. Below the
+horizon the drawn sky is a neutral haze rather than the cube map's ground
+color, since the only time it shows is past the edge of the world.
+
+There are two cube maps. voxel_shading/VoxelSkyIndoor.xml is the same sky
 dimmed, with
 no sun disc and no glow, going to a flat grey both above and below a brighter
 band at the horizon: indoors the bright thing around you is the windows, and
