@@ -904,17 +904,6 @@ struct CInstance: public voxelworld::Instance
 	void set_voxel(const pv::Vector3DInt32 &p, const interface::VoxelInstance &v,
 			bool disable_warnings)
 	{
-		set_voxel_impl(p, v, disable_warnings, false);
-	}
-
-	// is_light_update: the skylight bits in v are meant to be written as they
-	// are. Every other caller gets them carried over from the voxel that was
-	// there, because once skylight is on those bits belong to voxelworld and a
-	// caller writing a plain voxel would otherwise wipe the light out of it.
-	void set_voxel_impl(const pv::Vector3DInt32 &p,
-			const interface::VoxelInstance &v, bool disable_warnings,
-			bool is_light_update)
-	{
 		// Don't log here; this is a too busy place for even ignored log calls
 		/*log_t(MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i",
 				PV3I_PARAMS(p), v.data);*/
@@ -951,13 +940,17 @@ struct CInstance: public voxelworld::Instance
 				p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ()
 		);
 		VoxelInstance nv = v;
-		if(m_skylight_enabled && !is_light_update){
+		if(m_skylight_enabled){
 			VoxelInstance old = buf.volume->getVoxelAt(voxel_p);
 			bool old_transparent = voxel_transmits_light(old);
 			if(old_transparent != voxel_transmits_light(v)){
 				m_skylight_seeds.push_back(SkylightSeed{
 						p, old.get_skylight(), old_transparent});
 			}
+			// Once skylight is on those bits belong to voxelworld, so they
+			// are carried over from the voxel that was there; a caller writing
+			// a plain voxel would otherwise wipe the light out of one whose
+			// transparency did not change, and nothing would put it back
 			nv.set_skylight(old.get_skylight());
 		}
 
@@ -1062,19 +1055,125 @@ struct CInstance: public voxelworld::Instance
 				(m_section_region.getUpperCorner().getY() + 1) * section_h - 1;
 	}
 
-	void set_skylight_at(const pv::Vector3DInt32 &p, const VoxelInstance &v,
-			uint8_t level)
-	{
-		VoxelInstance nv = v;
-		nv.set_skylight(level);
-		set_voxel_impl(p, nv, true, true);
-	}
-
 	struct LightNode
 	{
 		pv::Vector3DInt32 p;
 		uint8_t level;
 	};
+
+	// The light update walks one voxel at a time and nearly every step stays
+	// inside the chunk the last one was in, so it keeps that chunk's buffer
+	// rather than going through get_voxel()/set_voxel() and their section
+	// lookup and bookkeeping for every neighbour. Only crossing a chunk
+	// boundary costs a lookup. Nothing is unloaded while this is in use, so
+	// the buffer stays put.
+	pv::Vector3DInt32 m_light_chunk_p;
+	ChunkBuffer *m_light_buf = nullptr;
+	pv::Vector3DInt16 m_light_section_p;
+	Section *m_light_section = nullptr;
+	// World position of the cached chunk's first voxel, so that a position
+	// inside it can be turned into a local one by subtraction. Dividing to
+	// find the chunk costs more than everything else the light update does.
+	pv::Vector3DInt32 m_light_chunk_lc;
+	// Indexed by voxel type id: 1 transmits light, 0 does not, 2 not asked yet
+	sv_<uint8_t> m_light_transmits;
+
+	ChunkBuffer* light_buffer(const pv::Vector3DInt32 &chunk_p)
+	{
+		if(m_light_buf && chunk_p == m_light_chunk_p)
+			return m_light_buf;
+		pv::Vector3DInt16 section_p =
+				container_coord16(chunk_p, m_section_size_chunks);
+		Section *section = m_light_section;
+		if(section == nullptr || section_p != m_light_section_p){
+			section = get_section(section_p);
+			if(section == nullptr)
+				return nullptr;
+			auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
+					m_sections_with_loaded_buffers.end(), section,
+					std::greater<Section*>());
+			if(it == m_sections_with_loaded_buffers.end() || *it != section)
+				m_sections_with_loaded_buffers.insert(it, section);
+			m_light_section = section;
+			m_light_section_p = section_p;
+		}
+		// Reached straight into rather than through get_buffer(), which reads
+		// the clock to timestamp the buffer on every call; the light update
+		// changes chunk often enough for that to be most of its time. Loading
+		// one that is not in memory still goes the long way.
+		ChunkBuffer &buf = section->chunk_buffers[section->get_chunk_i(chunk_p)];
+		if(!buf.volume){
+			if(!section->get_buffer(chunk_p, m_server,
+					&m_total_buffers_loaded).volume)
+				return nullptr;
+		}
+		m_light_chunk_p = chunk_p;
+		m_light_chunk_lc = pv::Vector3DInt32(
+				chunk_p.getX() * m_chunk_size_voxels.getX(),
+				chunk_p.getY() * m_chunk_size_voxels.getY(),
+				chunk_p.getZ() * m_chunk_size_voxels.getZ());
+		m_light_buf = &buf;
+		return m_light_buf;
+	}
+
+	pv::Vector3DInt32 light_local_p(const pv::Vector3DInt32 &p,
+			const pv::Vector3DInt32 &chunk_p)
+	{
+		return pv::Vector3DInt32(
+				p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX(),
+				p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY(),
+				p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ());
+	}
+
+	VoxelInstance light_get(const pv::Vector3DInt32 &p)
+	{
+		pv::Vector3DInt32 chunk_p = container_coord(p, m_chunk_size_voxels);
+		ChunkBuffer *buf = light_buffer(chunk_p);
+		if(buf == nullptr)
+			return VoxelInstance(interface::VOXELTYPEID_UNDEFINED);
+		return buf->volume->getVoxelAt(light_local_p(p, chunk_p));
+	}
+
+	// Give the voxels that block light the brightest light next to them, by
+	// pushing each new light value into the blocking neighbours of the voxel
+	// that got it. Only ever raises one, so it is right on its own as long as
+	// no light went away; update_skylight() recomputes the few that did.
+	void light_bleed_into_blockers(const pv::Vector3DInt32 &p, uint8_t level)
+	{
+		for(size_t k = 0; k < 6; k++){
+			pv::Vector3DInt32 n(p.getX() + LIGHT_OFF[k][0],
+					p.getY() + LIGHT_OFF[k][1], p.getZ() + LIGHT_OFF[k][2]);
+			VoxelInstance nv = light_get(n);
+			if(transmits_light(nv) || nv.get_skylight() >= level)
+				continue;
+			light_set(n, nv, level);
+		}
+	}
+
+	void light_set(const pv::Vector3DInt32 &p, VoxelInstance v, uint8_t level)
+	{
+		pv::Vector3DInt32 chunk_p = container_coord(p, m_chunk_size_voxels);
+		ChunkBuffer *buf = light_buffer(chunk_p);
+		if(buf == nullptr)
+			return;
+		v.set_skylight(level);
+		buf->volume->setVoxelAt(light_local_p(p, chunk_p), v);
+		if(!buf->dirty){
+			buf->dirty = true;
+			m_total_buffers_dirty++;
+		}
+	}
+
+	bool transmits_light(const VoxelInstance &v)
+	{
+		uint32_t id = v.get_id();
+		if(id >= m_light_transmits.size())
+			m_light_transmits.resize(id + 1, 2);
+		uint8_t &t = m_light_transmits[id];
+		if(t == 2)
+			t = voxel_transmits_light(v) ? 1 : 0;
+		return t == 1;
+	}
 
 	// Bring the skylight up to date after the voxels in m_skylight_seeds
 	// changed. Light is taken out of everything the changed voxels were
@@ -1091,17 +1190,19 @@ struct CInstance: public voxelworld::Instance
 		if(!m_skylight_enabled || seeds.empty())
 			return;
 		auto t0 = std::chrono::steady_clock::now();
+		m_light_buf = nullptr;
+		m_light_section = nullptr;
 
 		std::vector<LightNode> unlight;
 		std::vector<LightNode> spread;
-		// Voxels that block light and are next to something that changed.
-		// Duplicates are left in; recomputing one twice costs a little and is
-		// simpler than keeping a set.
+		// Voxels that block light next to light that went away. Only these
+		// have to be worked out the slow way; everywhere else the light is
+		// pushed into them as it is written.
 		std::vector<pv::Vector3DInt32> blockers;
 
 		for(const SkylightSeed &seed : seeds){
-			VoxelInstance v = get_voxel(seed.p, true);
-			bool now_transparent = voxel_transmits_light(v);
+			VoxelInstance v = light_get(seed.p);
+			bool now_transparent = transmits_light(v);
 			if(seed.was_transparent && !now_transparent){
 				// It took its light with it
 				unlight.push_back(LightNode{seed.p, seed.old_level});
@@ -1109,19 +1210,19 @@ struct CInstance: public voxelworld::Instance
 			} else if(!seed.was_transparent && now_transparent){
 				// It is dark and has to be filled from around it
 				uint8_t l = is_below_open_sky(seed.p) ? SKYLIGHT_MAX : 0;
-				set_skylight_at(seed.p, v, l);
-				if(l > 0)
+				light_set(seed.p, v, l);
+				if(l > 0){
 					spread.push_back(LightNode{seed.p, l});
+					light_bleed_into_blockers(seed.p, l);
+				}
 				for(size_t k = 0; k < 6; k++){
 					pv::Vector3DInt32 n(
 							seed.p.getX() + LIGHT_OFF[k][0],
 							seed.p.getY() + LIGHT_OFF[k][1],
 							seed.p.getZ() + LIGHT_OFF[k][2]);
-					VoxelInstance nv = get_voxel(n, true);
-					if(!voxel_transmits_light(nv)){
-						blockers.push_back(n);
+					VoxelInstance nv = light_get(n);
+					if(!transmits_light(nv))
 						continue;
-					}
 					if(nv.get_skylight() > 0)
 						spread.push_back(LightNode{n, nv.get_skylight()});
 				}
@@ -1141,8 +1242,9 @@ struct CInstance: public voxelworld::Instance
 						node.p.getX() + LIGHT_OFF[k][0],
 						node.p.getY() + LIGHT_OFF[k][1],
 						node.p.getZ() + LIGHT_OFF[k][2]);
-				VoxelInstance nv = get_voxel(n, true);
-				if(!voxel_transmits_light(nv)){
+				VoxelInstance nv = light_get(n);
+				if(!transmits_light(nv)){
+					// It may have been holding the light that is going away
 					blockers.push_back(n);
 					continue;
 				}
@@ -1152,7 +1254,7 @@ struct CInstance: public voxelworld::Instance
 				bool lit_from_above = (k == LIGHT_DOWN &&
 						node.level == SKYLIGHT_MAX && nl == SKYLIGHT_MAX);
 				if(nl < node.level || lit_from_above){
-					set_skylight_at(n, nv, 0);
+					light_set(n, nv, 0);
 					unlight.push_back(LightNode{n, nl});
 				} else {
 					spread.push_back(LightNode{n, nl});
@@ -1169,8 +1271,8 @@ struct CInstance: public voxelworld::Instance
 			// was put on the list: a source can be unlit by another branch
 			// after it was queued, and spreading the level it used to have
 			// would put light back where it was just taken from.
-			VoxelInstance v = get_voxel(node.p, true);
-			if(!voxel_transmits_light(v))
+			VoxelInstance v = light_get(node.p);
+			if(!transmits_light(v))
 				continue;
 			node.level = v.get_skylight();
 			if(node.level == 0)
@@ -1180,41 +1282,55 @@ struct CInstance: public voxelworld::Instance
 						node.p.getX() + LIGHT_OFF[k][0],
 						node.p.getY() + LIGHT_OFF[k][1],
 						node.p.getZ() + LIGHT_OFF[k][2]);
-				VoxelInstance nv = get_voxel(n, true);
-				if(!voxel_transmits_light(nv)){
-					blockers.push_back(n);
+				VoxelInstance nv = light_get(n);
+				if(!transmits_light(nv)){
+					if(nv.get_skylight() < node.level)
+						light_set(n, nv, node.level);
 					continue;
 				}
 				uint8_t target = (k == LIGHT_DOWN &&
 						node.level == SKYLIGHT_MAX) ?
 						SKYLIGHT_MAX : node.level - 1;
 				if(target > nv.get_skylight()){
-					set_skylight_at(n, nv, target);
+					light_set(n, nv, target);
 					spread.push_back(LightNode{n, target});
 				}
 			}
 		}
 
-		// Give the voxels that block light the brightest light next to them
+		// Give the voxels that block light the brightest light next to them.
+		// The same one is reached from every transparent voxel around it, so
+		// this is mostly duplicates by now and recomputing each of them costs
+		// seven voxel reads.
+		auto before = [](const pv::Vector3DInt32 &a, const pv::Vector3DInt32 &b){
+			if(a.getX() != b.getX()) return a.getX() < b.getX();
+			if(a.getY() != b.getY()) return a.getY() < b.getY();
+			return a.getZ() < b.getZ();
+		};
+		std::sort(blockers.begin(), blockers.end(), before);
+		blockers.erase(std::unique(blockers.begin(), blockers.end()),
+				blockers.end());
+		size_t n_blockers = blockers.size();
 		for(const pv::Vector3DInt32 &p : blockers){
-			VoxelInstance v = get_voxel(p, true);
-			if(voxel_transmits_light(v))
+			VoxelInstance v = light_get(p);
+			if(transmits_light(v))
 				continue;
 			uint8_t best = 0;
 			for(size_t k = 0; k < 6; k++){
-				VoxelInstance nv = get_voxel(pv::Vector3DInt32(
+				VoxelInstance nv = light_get(pv::Vector3DInt32(
 						p.getX() + LIGHT_OFF[k][0],
 						p.getY() + LIGHT_OFF[k][1],
-						p.getZ() + LIGHT_OFF[k][2]), true);
-				if(voxel_transmits_light(nv) && nv.get_skylight() > best)
+						p.getZ() + LIGHT_OFF[k][2]));
+				if(transmits_light(nv) && nv.get_skylight() > best)
 					best = nv.get_skylight();
 			}
 			if(v.get_skylight() != best)
-				set_skylight_at(p, v, best);
+				light_set(p, v, best);
 		}
 
-		log_v(MODULE, "update_skylight(): %zu seeds, %zu unlit, %zu spread "
-				"in %i ms", seeds.size(), unlight.size(), spread.size(),
+		log_v(MODULE, "update_skylight(): %zu seeds, %zu unlit, %zu spread, "
+				"%zu blockers in %i ms", seeds.size(), unlight.size(),
+				spread.size(), n_blockers,
 				(int)std::chrono::duration_cast<std::chrono::milliseconds>(
 				std::chrono::steady_clock::now() - t0).count());
 	}
