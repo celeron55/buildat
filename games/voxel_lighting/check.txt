@@ -1,0 +1,16 @@
+# Client command sequence for a visual check. Run from Build/:
+#   bin/buildat_client -s localhost -c @../games/voxel_lighting/check.txt
+# See doc/client_commands.txt.
+#
+# The benchmark cameras are keys 1/2/3, so nothing here depends on timing a
+# movement, and the three images are directly comparable between runs.
+delay 8000
+keypress 1
+delay 500
+screenshot ../tmp/voxel_lighting_check/1_overview.png
+keypress 2
+delay 500
+screenshot ../tmp/voxel_lighting_check/2_cave_mouth.png
+keypress 3
+delay 500
+screenshot ../tmp/voxel_lighting_check/3_inside_cave.png

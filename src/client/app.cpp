@@ -781,6 +781,7 @@ struct CApp: public App, public magic::Application
 			if(!client::command_seq::parse(text, &m_commands, &err))
 				throw AppStartupError("command sequence: "+err);
 			m_command_seq_active = true;
+			client::command_seq::inhibit_real_mouse(true);
 			client::command_seq::raise_window(GetSubsystem<magic::Graphics>());
 			log_i(MODULE, "Command sequence: %zu commands, will exit when done",
 					m_commands.size());
@@ -792,6 +793,7 @@ struct CApp: public App, public magic::Application
 		log_e(MODULE, "Command sequence failed: %s", cs(err));
 		m_command_seq_failed = true;
 		m_command_seq_active = false;
+		client::command_seq::inhibit_real_mouse(false);
 		shutdown();
 	}
 
@@ -805,6 +807,7 @@ struct CApp: public App, public magic::Application
 		}
 		log_i(MODULE, "Command sequence complete");
 		m_command_seq_active = false;
+		client::command_seq::inhibit_real_mouse(false);
 		shutdown();
 	}
 
@@ -818,13 +821,22 @@ struct CApp: public App, public magic::Application
 		magic::Input *input = GetSubsystem<magic::Input>();
 		if(!input)
 			return;
+		bool changed = false;
 		if(input->GetMouseMode() == magic::MM_RELATIVE ||
-				input->GetMouseMode() == magic::MM_WRAP)
+				input->GetMouseMode() == magic::MM_WRAP){
 			input->SetMouseMode(magic::MM_ABSOLUTE);
-		if(!input->IsMouseVisible())
+			changed = true;
+		}
+		if(!input->IsMouseVisible()){
 			input->SetMouseVisible(true);
-		if(input->IsMouseGrabbed())
+			changed = true;
+		}
+		if(input->IsMouseGrabbed()){
 			input->SetMouseGrabbed(false);
+			changed = true;
+		}
+		if(changed)
+			client::command_seq::absorb_mouse_move_suppression(input);
 	}
 
 	bool command_seq_exec(const client::command_seq::Command &c)

@@ -331,6 +331,71 @@ static Uint32 window_id(magic::Input *input)
 	return w ? SDL_GetWindowID(w) : 0;
 }
 
+// Marks the mouse events this file pushes, so that the event filter can tell
+// them apart from whatever the real mouse is doing. Urho3D does not read the
+// "which" field of mouse events, so it is free for this.
+static const Uint32 INJECTED_MOUSE_ID = 0x42554944; // "BUID"
+
+static SDL_EventFilter g_prev_filter = nullptr;
+static void *g_prev_filter_userdata = nullptr;
+static bool g_mouse_inhibited = false;
+
+static int SDLCALL mouse_inhibit_filter(void *userdata, SDL_Event *e)
+{
+	Uint32 which = 0;
+	switch(e->type){
+	case SDL_MOUSEMOTION: which = e->motion.which; break;
+	case SDL_MOUSEBUTTONDOWN:
+	case SDL_MOUSEBUTTONUP: which = e->button.which; break;
+	case SDL_MOUSEWHEEL: which = e->wheel.which; break;
+	default:
+		// Not a mouse event; leave it to whoever was filtering before us
+		if(g_prev_filter)
+			return g_prev_filter(g_prev_filter_userdata, e);
+		return 1;
+	}
+	if(which != INJECTED_MOUSE_ID)
+		return 0; // A real mouse moved or clicked; the sequence owns input
+	if(g_prev_filter)
+		return g_prev_filter(g_prev_filter_userdata, e);
+	return 1;
+}
+
+// The window is not grabbed during a sequence, so the physical mouse sits on
+// the same display and its motion would otherwise land in GetMouseMove along
+// with the injected motion, which makes a run unreproducible.
+void inhibit_real_mouse(bool enable)
+{
+	if(enable == g_mouse_inhibited)
+		return;
+	if(enable){
+		SDL_GetEventFilter(&g_prev_filter, &g_prev_filter_userdata);
+		SDL_SetEventFilter(mouse_inhibit_filter, nullptr);
+	} else {
+		SDL_SetEventFilter(g_prev_filter, g_prev_filter_userdata);
+		g_prev_filter = nullptr;
+		g_prev_filter_userdata = nullptr;
+	}
+	g_mouse_inhibited = enable;
+}
+
+// Urho3D calls SuppressNextMouseMove() whenever mouse visibility, mode or
+// grab actually changes, which makes it drop the next mouse motion it sees --
+// including an injected one, so a mouse_move issued after the game toggled the
+// mouse would silently do nothing. Feed it one pixel of motion to swallow
+// instead. It is dropped by definition, so it moves nothing.
+void absorb_mouse_move_suppression(magic::Input *input)
+{
+	SDL_Event e;
+	memset(&e, 0, sizeof(e));
+	e.type = SDL_MOUSEMOTION;
+	e.motion.windowID = window_id(input);
+	e.motion.which = INJECTED_MOUSE_ID;
+	e.motion.xrel = 1;
+	e.motion.yrel = 0;
+	SDL_PushEvent(&e);
+}
+
 void raise_window(magic::Graphics *graphics)
 {
 	if(!graphics)
@@ -386,6 +451,7 @@ static bool push_mouse_button(magic::Input *input, int sdl_button, bool down,
 	e.button.button = (Uint8)sdl_button;
 	e.button.state = down ? SDL_PRESSED : SDL_RELEASED;
 	e.button.clicks = 1;
+	e.button.which = INJECTED_MOUSE_ID;
 	e.button.x = p.x_;
 	e.button.y = p.y_;
 	if(SDL_PushEvent(&e) != 1){
@@ -413,6 +479,7 @@ bool inject_mouse_pos(magic::Input *input, int x, int y, ss_ *error)
 	memset(&e, 0, sizeof(e));
 	e.type = SDL_MOUSEMOTION;
 	e.motion.windowID = window_id(input);
+	e.motion.which = INJECTED_MOUSE_ID;
 	e.motion.x = x;
 	e.motion.y = y;
 	e.motion.xrel = x - old.x_;
@@ -431,6 +498,7 @@ bool inject_mouse_move(magic::Input *input, int dx, int dy, ss_ *error)
 	memset(&e, 0, sizeof(e));
 	e.type = SDL_MOUSEMOTION;
 	e.motion.windowID = window_id(input);
+	e.motion.which = INJECTED_MOUSE_ID;
 	e.motion.xrel = dx;
 	e.motion.yrel = dy;
 	if(SDL_PushEvent(&e) != 1){
@@ -446,6 +514,7 @@ bool inject_mouse_wheel(magic::Input *input, int delta, ss_ *error)
 	memset(&e, 0, sizeof(e));
 	e.type = SDL_MOUSEWHEEL;
 	e.wheel.windowID = window_id(input);
+	e.wheel.which = INJECTED_MOUSE_ID;
 	e.wheel.y = delta;
 	if(SDL_PushEvent(&e) != 1){
 		*error = "SDL_PushEvent failed";

@@ -25,6 +25,11 @@ SetMouseVisible(false). Use mouse_move for look (GetMouseMove); that is
 relative and does not use a cursor position. mouse_pos is for a visible UI
 cursor.
 
+Real mouse events are dropped for the duration of the sequence, so moving the
+physical mouse over the window cannot perturb a run. Injected mouse events are
+tagged and still get through. Keyboard is not filtered: typing at the window
+during a sequence still reaches the game.
+
 The window is raised when the sequence starts. Injected keys go through
 Urho3D's Input path (GetKeyDown / GetKeyPress). Under Xvfb that is normally
 fine.
