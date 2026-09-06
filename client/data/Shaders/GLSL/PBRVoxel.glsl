@@ -158,7 +158,7 @@ void VS()
     // once. A slow term along the wind direction is added to the phase, which
     // turns what would be an even twinkle into gusts crossing the surface.
     const float TRANSMISSION_CELLS = 16.0;   // Cells per voxel, per axis
-    const float TRANSMISSION_RATE = 0.18;    // Cycles per second, mean
+    const float TRANSMISSION_RATE = 0.03;    // Cycles per second, mean
     const vec3 TRANSMISSION_WIND = vec3(0.35, 0.0, -0.2);
 
     // fract(sin(dot(...))) loses its uniformity once the coordinates get
@@ -330,7 +330,7 @@ void PS()
             vec3 transmitted = mix(vec3(1.0), diffColor.rgb,
                 TRANSMISSION_TINT);
             float backNdl = max(0.0, -dot(normal, lightVec));
-            float forward = pow(max(0.0, dot(-lightVec, toCamera)), 3.0);
+            float forward = pow(max(0.0, dot(-lightVec, toCamera)), 6.0);
             finalColor.rgb += roughMetalSrc.b * GetTransmissionGaps(
                 vWorldPos.xyz, roughMetalSrc.a) * transmitted * lightColor *
                 (backNdl * forward) / M_PI;
