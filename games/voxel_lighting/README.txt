@@ -46,31 +46,42 @@ Materials
 
 The same technique also does normal mapping and per-texel roughness, and
 reflects an environment cube map. None of the maps are authored: the atlas
-derives a normal map and a roughness/metalness map from each texture as it
-packs it, from a handful of numbers a voxel gives with it (interface/atlas.h):
+derives a normal map and a surface map from each texture as it packs it, from
+six numbers a voxel gives with it (interface/atlas.h):
 
-    roughness  the mean over the texture. Texels brighter than the texture's
-               own mean come out smoother and darker ones rougher
-    metalness  constant over the texture
+    roughness  how wide the highlight is; the mean over the texture, with
+               brighter texels a little smoother and darker ones rougher
+    spec_strength  how much of a highlight there is at all
     bumpiness  how much the texture's luminance is read as height
-    roughness_variation  how much of that first rule to apply; 0 makes the
-               whole texture one roughness
     translucency  how much light passes through from behind, at a spot
     spots      fraction of the surface that is a spot at any one moment
     static_spots  the same, for spots that hold still
 
-Those cover the range this scene needs. Rock keeps a seventh of the roughness
-variation its texture would give it: cracked stone is dull nearly everywhere,
-and what gloss it has is the odd crystalline facet in it rather than whichever
-texel happens to be bright. Those are its static_spots. Dirt is the same
-surface as far as light is concerned and has the same numbers. The tree trunk
-keeps about a third of the gloss its bark texture asks for. Grass is matte
-too, and reads as smooth however many shapes are in it, so its normals are kept
-low; any more and it turns grainy at a distance. Grass and leaves take no
-roughness from their textures at all: what gloss they have comes from their
-spots instead, because a leaf catching the light is a leaf that has turned, and
-a bright texel sits still. Water keeps its texture's roughness, being the one
-surface here shiny enough for that to show, and has spots on top of it.
+The first two are separate because roughness alone cannot make a surface matte.
+It sets how wide a highlight is, and everything here except water sits between
+0.85 and 0.98, a band across which the difference is barely visible;
+spec_strength is what says whether there is a highlight to widen. Rock and dirt
+are at 0.15 of it, so they are dull all over, and the tree trunk at 0.35, since
+bark is not that shiny. Spots ignore spec_strength and reflect at full
+strength, which is the whole point of it: rock can be dull everywhere except at
+its crystalline facets, which is not something a single roughness could say.
+
+bumpiness is the other half of how busy a surface looks, and the one that is
+easy to mistake for gloss. It breaks the light up across the texture, diffuse
+as much as specular, so a surface with a high one reads as grainy whether or
+not it reflects anything. Rock and dirt were at 2.0 and 2.5 and are now at 0.5
+and 0.6; most of what looked like too much shine on them was this. Grass reads
+as smooth however many shapes are in it, so its normals are kept low as well;
+any more and it turns grainy at a distance.
+
+Grass and leaves keep full spec_strength but get their gloss from their spots,
+because a leaf catching the light is a leaf that has turned and a bright texel
+sits still. Water is the one surface here shiny enough for its texture's own
+roughness to show, and has spots on top of that.
+
+Metalness is not among the numbers. Nothing in this world has been metal, so it
+is the material's own constant rather than a per-texel channel, and that channel
+carries spec_strength instead.
 
 Spots come in two kinds, and both are worked out from the world position
 rather than stored in a map. That is the answer to the maps repeating: a map

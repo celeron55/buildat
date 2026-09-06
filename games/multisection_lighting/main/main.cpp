@@ -448,14 +448,12 @@ struct Module: public interface::Module
 				on_verify_skylight, network::Packet)
 	}
 
-	// roughness, metalness and bumpiness describe the surface to the atlas,
-	// which derives a normal map and a roughness/metalness map from the
-	// texture with them. See interface/atlas.h.
+	// The six numbers after solid describe the surface; see interface/atlas.h
 	void add_voxel(interface::VoxelRegistry *reg, const ss_ &name,
 			const ss_ &texture, bool solid, float roughness = 0.9f,
-			float metalness = 0.0f, float bumpiness = 1.0f,
-			float roughness_variation = 1.0f, float translucency = 0.0f,
-			float spots = 0.0f, float static_spots = 0.0f)
+			float spec_strength = 1.0f, float bumpiness = 1.0f,
+			float translucency = 0.0f, float spots = 0.0f,
+			float static_spots = 0.0f)
 	{
 		interface::VoxelDefinition vdef;
 		vdef.name.block_name = name;
@@ -472,9 +470,8 @@ struct Module: public interface::Module
 					texture.empty() ? 0 : 1);
 			seg.select_segment = magic::IntVector2(0, 0);
 			seg.roughness = roughness;
-			seg.metalness = metalness;
+			seg.spec_strength = spec_strength;
 			seg.bumpiness = bumpiness;
-			seg.roughness_variation = roughness_variation;
 			seg.translucency = translucency;
 			seg.spots = spots;
 			seg.static_spots = static_spots;
@@ -513,17 +510,17 @@ struct Module: public interface::Module
 			interface::VoxelRegistry *reg = ivoxelworld->
 					get_instance(m_main_scene)->get_voxel_reg();
 			add_voxel(reg, "air", "", false);              // id 1
-			// Same surfaces as voxel_lighting; see its main.cpp
+			// Same surfaces as voxel_lighting; see its README
 			add_voxel(reg, "rock", "main/rock.png", true,
-					0.95f, 0.0f, 2.0f, 0.15f, 0.0f, 0.0f, 0.04f); // id 2
+					0.95f, 0.15f, 0.5f, 0.0f, 0.0f, 0.04f); // id 2
 			add_voxel(reg, "dirt", "main/dirt.png", true,
-					0.98f, 0.0f, 2.5f, 0.15f, 0.0f, 0.0f, 0.04f); // id 3
+					0.98f, 0.15f, 0.6f, 0.0f, 0.0f, 0.04f); // id 3
 			add_voxel(reg, "grass", "main/grass.png", true,
-					0.90f, 0.0f, 0.75f, 0.0f, 0.06f, 0.012f); // id 4
+					0.90f, 1.0f, 0.75f, 0.06f, 0.012f); // id 4
 			add_voxel(reg, "leaves", "main/leaves.png", true,
-					0.95f, 0.0f, 1.5f, 0.0f, 0.11f, 0.03f); // id 5
+					0.95f, 1.0f, 1.5f, 0.11f, 0.03f); // id 5
 			add_voxel(reg, "tree", "main/tree.png", true,
-					0.85f, 0.0f, 2.0f, 0.35f); // id 6
+					0.85f, 0.35f, 2.0f); // id 6
 
 			// The whole point of this scene: let voxelworld light it
 			ivoxelworld->get_instance(m_main_scene)->
