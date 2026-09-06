@@ -58,10 +58,14 @@ static const float CAVE_LENGTH = 62.0f;
 // Positive is clockwise seen from above.
 static const float CAVE_YAW_DEGREES = 20.0f;
 
-// The benchmark edits: a cube dug out of the ground next to the cave mouth,
-// and a slab hung over both of them. Sized so that the change in skylight is
-// obvious in benchmark views 1 and 2 without the slab filling the frame.
-static const int BENCH_PIT_SIZE = 3;
+// The benchmark edits: a shaft dug straight up out of the cave to the open air,
+// and a slab hung over the cave mouth. The shaft starts this far along the cave
+// axis, which is deep enough that the skylight there is 0 before it is dug, so
+// what the relight has to do is bring a whole column of daylight into a part of
+// the scene that had none. It is also in front of benchmark camera 3, so the
+// change shows from inside the cave as well as from above.
+static const float BENCH_SHAFT_T = 20.0f;
+static const int BENCH_SHAFT_W = 3;
 static const int BENCH_SLAB_W = 5;
 static const int BENCH_SLAB_H = 2;
 
@@ -164,8 +168,9 @@ struct Worldgen: public worldgen::GeneratorInterface
 	// Where the benchmark edits go. Both sit on the +X +Z side of the cave
 	// mouth, which is the side both benchmark cameras look from, and the slab
 	// floats above the sight line rather than across it.
-	pv::Vector3DInt32 bench_pit_centre;   // BENCH_PIT_SIZE^3 dug out here
-	pv::Vector3DInt32 bench_slab_centre;  // BENCH_SLAB_W x 2 x BENCH_SLAB_W
+	pv::Vector3DInt32 bench_shaft_centre;  // BENCH_SHAFT_W^2 x bench_shaft_h
+	int bench_shaft_h = 0;
+	pv::Vector3DInt32 bench_slab_centre;   // BENCH_SLAB_W x 2 x BENCH_SLAB_W
 
 	void generate_section(interface::Server *server,
 			SceneReference scene_ref,
@@ -336,29 +341,38 @@ struct Worldgen: public worldgen::GeneratorInterface
 			cave_dir[2] = dz;
 			cave_valid = true;
 
-			// The pit breaks the ground next to the mouth; the slab hangs over
-			// both of them, so pressing the two buttons in order takes skylight
-			// away from the pit and out of the cave entrance.
+			// The shaft goes straight up out of the cave to the open air; the
+			// slab hangs over the mouth. Together they swap where the cave gets
+			// its light from, which is the thing the relight has to get right.
 			auto clamp_xz = [&](int v, int lo, int hi){
 				return v < lo ? lo : (v > hi ? hi : v);
 			};
-			int pit_x = clamp_xz(mouth_x + 3, lc.getX() + 2, uc.getX() - 2);
-			int pit_z = clamp_xz(mouth_z + 3, lc.getZ() + 2, uc.getZ() - 2);
+			int shaft_x = clamp_xz((int)std::floor(sx + dx * BENCH_SHAFT_T +
+					0.5f), lc.getX() + 2, uc.getX() - 2);
+			int shaft_z = clamp_xz((int)std::floor(sz + dz * BENCH_SHAFT_T +
+					0.5f), lc.getZ() + 2, uc.getZ() - 2);
+			int shaft_bottom = (int)std::floor(sy + dy * BENCH_SHAFT_T + 0.5f);
+			// surface_at() + 11 is the first air voxel above the ground, so
+			// this breaks the surface open rather than stopping under it
+			int shaft_top = (int)std::floor(
+					surface_at(shaft_x, shaft_z)) + 11;
+			if(shaft_top < shaft_bottom)
+				shaft_top = shaft_bottom;
+			bench_shaft_h = shaft_top - shaft_bottom + 1;
+			bench_shaft_centre = pv::Vector3DInt32(shaft_x,
+					(shaft_bottom + shaft_top) / 2, shaft_z);
+
 			int slab_x = clamp_xz(mouth_x + 2, lc.getX() + 3, uc.getX() - 3);
 			int slab_z = clamp_xz(mouth_z + 2, lc.getZ() + 3, uc.getZ() - 3);
-			// surface_at() + 10 is the topmost solid voxel, so a pit centred
-			// one below it breaks the ground open instead of leaving a pocket
-			bench_pit_centre = pv::Vector3DInt32(pit_x,
-					(int)std::floor(surface_at(pit_x, pit_z)) + 9, pit_z);
 			// The slab hangs clear above the mouth rather than following the
 			// ground: benchmark camera 2 looks down at the mouth from the +X +Z
 			// side, and anything level with the mouth would sit in front of it.
 			bench_slab_centre = pv::Vector3DInt32(slab_x,
 					(int)std::floor(sy) + 6, slab_z);
 
-			log_v(MODULE, "Cave: mouth (%i, %.0f, %i), dir (%.2f, %.2f, %.2f), "
-					"%zu brush writes", mouth_x, sy, mouth_z, dx, dy, dz,
-					carved);
+			log_v(MODULE, "Bench: shaft " PV3I_FORMAT " h %i, slab "
+					PV3I_FORMAT, PV3I_PARAMS(bench_shaft_centre),
+					bench_shaft_h, PV3I_PARAMS(bench_slab_centre));
 
 			sv_<uint8_t> sky, solid_sky;
 			compute_skylight(ids, W, H, D, sky, solid_sky);
@@ -410,7 +424,7 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:place_voxel"));
 		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:bench_pit"));
+				"network:packet_received/main:bench_shaft"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:bench_slab"));
 	}
@@ -428,8 +442,8 @@ struct Module: public interface::Module
 				on_dig_voxel, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:place_voxel",
 				on_place_voxel, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:bench_pit",
-				on_bench_pit, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:bench_shaft",
+				on_bench_shaft, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:bench_slab",
 				on_bench_slab, network::Packet)
 	}
@@ -646,12 +660,12 @@ struct Module: public interface::Module
 				w, h, d, id, PV3I_PARAMS(centre));
 	}
 
-	void on_bench_pit(const network::Packet &packet)
+	void on_bench_shaft(const network::Packet &packet)
 	{
 		(void)packet;
 		if(!m_worldgen) return;
-		bench_box(m_worldgen->bench_pit_centre, BENCH_PIT_SIZE, BENCH_PIT_SIZE,
-				BENCH_PIT_SIZE, AIR_ID);
+		bench_box(m_worldgen->bench_shaft_centre, BENCH_SHAFT_W,
+				m_worldgen->bench_shaft_h, BENCH_SHAFT_W, AIR_ID);
 	}
 
 	void on_bench_slab(const network::Packet &packet)

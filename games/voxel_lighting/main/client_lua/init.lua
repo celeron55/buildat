@@ -339,8 +339,8 @@ do
 	add_button("1 Overview", function() go_to_benchmark(1) end)
 	add_button("2 Cave mouth", function() go_to_benchmark(2) end)
 	add_button("3 Inside cave", function() go_to_benchmark(3) end)
-	add_button("Dig pit (P)", function()
-		buildat.send_packet("main:bench_pit", "")
+	add_button("Dig shaft (P)", function()
+		buildat.send_packet("main:bench_shaft", "")
 	end)
 	add_button("Place slab (O)", function()
 		buildat.send_packet("main:bench_slab", "")
@@ -360,7 +360,7 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	elseif key == magic.KEY_3 then
 		go_to_benchmark(3)
 	elseif key == magic.KEY_P then
-		buildat.send_packet("main:bench_pit", "")
+		buildat.send_packet("main:bench_shaft", "")
 	elseif key == magic.KEY_O then
 		buildat.send_packet("main:bench_slab", "")
 	elseif key == magic.KEY_ESCAPE then
@@ -412,5 +412,5 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 end)
 
 log:info("voxel_lighting client ready; Tab = free move, 1/2/3 = benchmarks, "..
-		"P/O = benchmark pit/slab")
+		"P/O = benchmark shaft/slab")
 -- vim: set noet ts=4 sw=4:

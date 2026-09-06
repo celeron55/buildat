@@ -61,11 +61,17 @@ Editing
 
 In free move, left mouse digs the pointed voxel and right mouse places rock
 next to it. P and O (or the last two HUD buttons) make the two fixed edits used
-for comparing images: P digs a 3x3x3 pit into the ground beside the cave mouth,
-and O hangs a 5x2x5 slab above both of them. Both are placed relative to the
-cave mouth the generator chose, on the side the benchmark cameras look from,
-and the slab hangs high enough that it does not sit in front of the mouth in
-benchmark 2.
+for comparing images.
+
+P digs a 3x3 shaft straight up out of the cave to the open air, starting far
+enough in that the skylight there was 0. That is the strong test: a whole part
+of the scene that had no skylight at all has to come up to daylight, and
+benchmark 3 goes from near-black rock to a lit cave.
+
+O hangs a 5x2x5 slab over the cave mouth, high enough that it does not sit in
+front of the mouth in benchmark 2. It takes light back out of the entrance, but
+note that after the shaft is dug the cave is lit mostly through the shaft, so
+this second step reads much more weakly than it did on its own.
 
 Every edit relights the whole scene: the skylight flood fill is run again over
 all of it and only the voxels whose skylight actually changed are written back,
@@ -88,8 +94,8 @@ rendering change against the previous run:
 
 -w gives the run a fixed window size without changing the remembered one, so
 the images come out the same size whatever the window was left at last time.
-It also shoots both benchmark edits, so a run is: three images of the scene as
-generated, then the same views after the pit and after the slab.
+It also shoots both benchmark edits, so a run is: all three views of the scene
+as generated, then the same three after the shaft and after the slab.
 
 NOTE: the server reads client_lua and client_data once at startup, so restart
 it after editing init.lua or the client will be served the previous version.
