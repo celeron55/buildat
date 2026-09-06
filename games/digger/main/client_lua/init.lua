@@ -241,8 +241,15 @@ do
 	-- a PBR point light needs a much larger number than the legacy one did
 	light.brightness = 15.0
 	light.color = magic.Color(1.0, 0.97, 0.92)
-	light.range = 15.0
-	light.fadeDistance = 15.0
+	-- A pool of light around the player rather than a lit tunnel, so that
+	-- digging into the dark still reads as going into the dark. The ramp is
+	-- what keeps the edge of it from showing: full brightness out to two
+	-- voxels, then a smoothstep to nothing at five, flat at both ends.
+	-- lamp_ramp.png holds that curve as 64 texels of distance/range.
+	light.range = 5.0
+	light.fadeDistance = 5.0
+	light.rampTexture = magic.cache:GetResource("Texture2D",
+			"main/lamp_ramp.png")
 end
 --]]
 
