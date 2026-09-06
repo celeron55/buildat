@@ -355,6 +355,14 @@ static const float FACE_SHADE[6] = {
 // face in direct sun is shaped by the sun, not by this.
 static const float AO_LEVELS[4] = {1.0f, 0.72f, 0.52f, 0.38f};
 
+// How much of that occlusion the bounce term takes. Occlusion is a statement
+// about how much of the sky a corner can see, which is the wrong question to
+// ask about light that came off the surrounding surfaces in the first place:
+// inside a cave there is no sky to occlude, and taking it at full strength
+// there darkens every pocket until the corners that stick out into the cave
+// are the brightest thing in it.
+static const float BOUNCE_AO = 0.35f;
+
 static bool occludes(pv::RawVolume<VoxelInstance> &volume,
 		VoxelRegistry *voxel_reg, const pv::Vector3DInt32 &p)
 {
@@ -423,12 +431,15 @@ static void face_vertex_colors(pv::RawVolume<VoxelInstance> &volume,
 		// Two solid sides bury the corner whatever is diagonally behind it
 		int level = (s1 && s2) ? 0 : 3 - ((s1 ? 1 : 0) + (s2 ? 1 : 0) +
 				(occludes(volume, voxel_reg, front_p + du + dv) ? 1 : 0));
-		float shade = AO_LEVELS[level] * FACE_SHADE[face_id];
+		float ao = AO_LEVELS[level];
+		float sky_shade = ao * FACE_SHADE[face_id];
+		float bounce_shade = (1.0f - BOUNCE_AO + BOUNCE_AO * ao) *
+				FACE_SHADE[face_id] * (1.0f - sky_f);
 		out[i] = Color(
-				BOUNCE_COLOR.r_ * (1.0f - sky_f) * shade,
-				BOUNCE_COLOR.g_ * (1.0f - sky_f) * shade,
-				BOUNCE_COLOR.b_ * (1.0f - sky_f) * shade,
-				sky_f * shade).ToUInt();
+				BOUNCE_COLOR.r_ * bounce_shade,
+				BOUNCE_COLOR.g_ * bounce_shade,
+				BOUNCE_COLOR.b_ * bounce_shade,
+				sky_f * sky_shade).ToUInt();
 	}
 }
 
