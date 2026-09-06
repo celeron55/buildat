@@ -143,13 +143,16 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	ss_ data;
 	sp_<VoxelRegistry> voxel_reg;
 	sp_<AtlasRegistry> atlas_reg;
+	bool use_skylight;
 
 	up_<pv::RawVolume<VoxelInstance>> volume;
 	sm_<uint, interface::mesh::TemporaryGeometry> temp_geoms;
 
 	SetVoxelGeometryTask(Node *node, const ss_ &data,
-			sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg):
-		node(node), data(data), voxel_reg(voxel_reg), atlas_reg(atlas_reg)
+			sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
+			bool use_skylight):
+		node(node), data(data), voxel_reg(voxel_reg), atlas_reg(atlas_reg),
+		use_skylight(use_skylight)
 	{
 		ScopeTimer timer("pre geometry");
 		// NOTE: Do the pre-processing here so that the calling code can
@@ -168,7 +171,8 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	bool thread()
 	{
 		generate_voxel_geometry(
-				temp_geoms, *volume, voxel_reg.get(), atlas_reg.get());
+				temp_geoms, *volume, voxel_reg.get(), atlas_reg.get(),
+				use_skylight);
 		return true;
 	}
 	// Called repeatedly from main thread until returns true
@@ -194,14 +198,16 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 	ss_ data;
 	sp_<VoxelRegistry> voxel_reg;
 	sp_<AtlasRegistry> atlas_reg;
+	bool use_skylight;
 
 	up_<pv::RawVolume<VoxelInstance>> lod_volume;
 	sm_<uint, interface::mesh::TemporaryGeometry> temp_geoms;
 
 	SetVoxelLodGeometryTask(int lod, Node *node, const ss_ &data,
-			sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg):
+			sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
+			bool use_skylight):
 		lod(lod), node(node), data(data),
-		voxel_reg(voxel_reg), atlas_reg(atlas_reg)
+		voxel_reg(voxel_reg), atlas_reg(atlas_reg), use_skylight(use_skylight)
 	{
 		ScopeTimer timer("pre lod geometry");
 		// NOTE: Do the pre-processing here so that the calling code can
@@ -223,7 +229,8 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 	bool thread()
 	{
 		generate_voxel_lod_geometry(
-				lod, temp_geoms, *lod_volume, voxel_reg.get(), atlas_reg.get());
+				lod, temp_geoms, *lod_volume, voxel_reg.get(), atlas_reg.get(),
+				use_skylight);
 		return true;
 	}
 	// Called repeatedly from main thread until returns true
@@ -321,7 +328,8 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 
 void set_voxel_geometry(const luabind::object &node_o,
 		const luabind::object &buffer_o,
-		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg)
+		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
+		bool use_skylight)
 {
 	lua_State *L = node_o.interpreter();
 
@@ -342,7 +350,7 @@ void set_voxel_geometry(const luabind::object &node_o,
 	lua_pop(L, 1);
 
 	up_<SetVoxelGeometryTask> task(new SetVoxelGeometryTask(
-			node, data, voxel_reg, atlas_reg
+			node, data, voxel_reg, atlas_reg, use_skylight
 			));
 
 	auto *thread_pool = buildat_app->get_thread_pool();
@@ -352,7 +360,8 @@ void set_voxel_geometry(const luabind::object &node_o,
 
 void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
 		const luabind::object &buffer_o,
-		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg)
+		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
+		bool use_skylight)
 {
 	lua_State *L = node_o.interpreter();
 
@@ -374,7 +383,7 @@ void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
 	lua_pop(L, 1);
 
 	up_<SetVoxelLodGeometryTask> task(new SetVoxelLodGeometryTask(
-			lod, node, data, voxel_reg, atlas_reg
+			lod, node, data, voxel_reg, atlas_reg, use_skylight
 			));
 
 	auto *thread_pool = buildat_app->get_thread_pool();

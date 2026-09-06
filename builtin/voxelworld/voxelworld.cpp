@@ -929,6 +929,65 @@ struct CInstance: public voxelworld::Instance
 			m_sections_with_loaded_buffers.insert(it, section);
 	}
 
+	// Read a voxel without loading anything or touching any bookkeeping, so
+	// that it is safe to call while chunk buffers are being committed. A chunk
+	// that is not in memory reads as undefined.
+	VoxelInstance peek_voxel(const pv::Vector3DInt32 &p)
+	{
+		const VoxelInstance undefined(interface::VOXELTYPEID_UNDEFINED);
+		pv::Vector3DInt32 chunk_p = container_coord(p, m_chunk_size_voxels);
+		pv::Vector3DInt16 section_p =
+				container_coord16(chunk_p, m_section_size_chunks);
+		Section *section = get_section(section_p);
+		if(section == nullptr)
+			return undefined;
+		ChunkBuffer &buf =
+				section->chunk_buffers[section->get_chunk_i(chunk_p)];
+		if(!buf.volume)
+			return undefined;
+		return buf.volume->getVoxelAt(
+				p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX(),
+				p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY(),
+				p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ());
+	}
+
+	// Fill the one voxel of padding around a chunk from the chunks next to it.
+	// The mesher needs it to see what is on the other side of a chunk edge;
+	// with the padding left empty, every face there is meshed against nothing,
+	// and anything the mesher reads per voxel, such as skylight or the
+	// neighbours ambient occlusion counts, breaks along chunk boundaries.
+	//
+	// Taken from whatever is loaded; a neighbour that is not in memory leaves
+	// its side undefined, which is what the mesher falls back on anyway.
+	// Nothing is written back to the neighbours, so a voxel changed at a chunk
+	// edge leaves the neighbour's copy of it stale until that neighbour is
+	// committed in turn.
+	void fill_chunk_padding(const pv::Vector3DInt32 &chunk_p,
+			pv::RawVolume<VoxelInstance> &volume)
+	{
+		const pv::Region &region = volume.getEnclosingRegion();
+		auto lc = region.getLowerCorner();
+		auto uc = region.getUpperCorner();
+		const pv::Vector3DInt32 chunk_lc(
+				chunk_p.getX() * m_chunk_size_voxels.getX(),
+				chunk_p.getY() * m_chunk_size_voxels.getY(),
+				chunk_p.getZ() * m_chunk_size_voxels.getZ());
+		for(int z = lc.getZ(); z <= uc.getZ(); z++){
+			bool z_edge = (z == lc.getZ() || z == uc.getZ());
+			for(int y = lc.getY(); y <= uc.getY(); y++){
+				bool y_edge = (y == lc.getY() || y == uc.getY());
+				// Skip straight across the interior of each row
+				int x_step = (z_edge || y_edge) ? 1 :
+						uc.getX() - lc.getX();
+				for(int x = lc.getX(); x <= uc.getX(); x += x_step){
+					volume.setVoxelAt(x, y, z, peek_voxel(
+							pv::Vector3DInt32(chunk_lc.getX() + x,
+							chunk_lc.getY() + y, chunk_lc.getZ() + z)));
+				}
+			}
+		}
+	}
+
 	// Commit and unload chunk buffer
 	void commit_chunk_buffer(Section *section, size_t chunk_i)
 	{
@@ -952,6 +1011,8 @@ struct CInstance: public voxelworld::Instance
 					PV3I_PARAMS(section->section_p));
 			return;
 		}
+
+		fill_chunk_padding(chunk_p, *chunk_buffer.volume);
 
 		run_commit_hooks_in_thread(chunk_p, *chunk_buffer.volume);
 
