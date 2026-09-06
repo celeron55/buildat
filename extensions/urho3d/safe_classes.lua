@@ -734,6 +734,31 @@ function M.define(dst, util)
 		},
 	})
 
+	util.wc("RenderPath", {
+		instance = {
+			Clone = util.wrap_function({"RenderPath"},
+				function(self)
+					return util.wrap_instance("RenderPath", self:Clone())
+				end
+			),
+			Append = util.self_function(
+					"Append", {"boolean"}, {"RenderPath", "XMLFile"}),
+			Load = util.self_function(
+					"Load", {"boolean"}, {"RenderPath", "XMLFile"}),
+			SetEnabled = util.self_function(
+					"SetEnabled", {}, {"RenderPath", "string", "boolean"}),
+			ToggleEnabled = util.self_function(
+					"ToggleEnabled", {}, {"RenderPath", "string"}),
+			SetShaderParameter = util.wrap_function(
+				{"RenderPath", "string",
+					{"number", "boolean", "Vector2", "Color", "Variant"}},
+				function(self, name, value)
+					self:SetShaderParameter(name, Variant(value))
+				end
+			),
+		},
+	})
+
 	util.wc("Viewport", {
 		class = {
 			new = util.wrap_function({"__to_nil", "Scene", "Camera"},
@@ -753,6 +778,9 @@ function M.define(dst, util)
 				end
 			),
 		},
+		properties = {
+			renderPath = util.simple_property(dst.RenderPath),
+		},
 	})
 
 	util.wc("Renderer", {
@@ -769,6 +797,9 @@ function M.define(dst, util)
 					return util.wrap_instance("Viewport", ret)
 				end
 			),
+		},
+		properties = {
+			HDRRendering = util.simple_property("boolean"),
 		},
 	})
 
