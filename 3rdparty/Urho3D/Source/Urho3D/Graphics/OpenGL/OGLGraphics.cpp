@@ -2177,7 +2177,13 @@ ShaderVariation* Graphics::GetShader(ShaderType type, const char* name, const ch
     {
         ResourceCache* cache = GetSubsystem<ResourceCache>();
 
-        String fullShaderName = shaderPath_ + name + shaderExtension_;
+        // buildat: a name that carries a path of its own is a full
+        // resource name, so that a shader shipped by a game can stay
+        // inside its module's namespace instead of having to occupy
+        // the one shader directory every game shares.
+        String fullShaderName = String(name).Contains('/') ?
+            String(name) + shaderExtension_ :
+            shaderPath_ + name + shaderExtension_;
         // Try to reduce repeated error log prints because of missing shaders
         if (lastShaderName_ == name && !cache->Exists(fullShaderName))
             return 0;

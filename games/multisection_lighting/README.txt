@@ -44,8 +44,12 @@ Lighting
 The server flood fills a 4 bit skylight value into every voxel: full straight
 down through air, losing one step per voxel as it spreads sideways and deeper.
 The mesher packs that into vertex colors, and chunk geometry is drawn with
-PBRVoxel, a technique and shader in client/data. The scene is rendered in HDR
-and tonemapped.
+PBRVoxel, a technique and shader in the voxel_shading module, which puts them
+on each chunk in voxelworld.sub_material_update(). The mesher sets no technique
+of its own; interface/mesh.h lists what it does hand a voxel shader. Nothing in
+voxel_shading needs a module's privileges, since a module has none a game
+lacks; it is a module so that both lighting games can share it. The scene is
+rendered in HDR and tonemapped.
 
 The vertex color carries how much sky a surface sees in its alpha and the
 light bounced off nearby surfaces in its rgb, and the shader adds them:
@@ -112,6 +116,13 @@ voxelworld stored, logging either "skylight verify: ok" or the number of voxels
 that differ and the first one. check.txt runs it after generation and after
 every edit, so a run says outright whether the incremental relight got the same
 answer as doing it all again.
+
+Materials are voxel_lighting's, minus the pond: the same per-voxel roughness,
+bumpiness, gloss and transmission, and the same zone cube map, so a rendering
+change can be compared between the two scenes. See voxel_lighting's README for
+what those mean. The benchmark cameras here are only its first three, the ones
+for skylight; the ones it added for materials (the pond and the two of a
+canopy against the sun) are not repeated.
 
 Running
 -------

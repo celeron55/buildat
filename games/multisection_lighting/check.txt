@@ -9,6 +9,10 @@
 # The benchmark cameras are keys 1/2/3, so nothing here depends on timing a
 # movement, and the three images are directly comparable between runs.
 delay 8000
+# Light through leaves is animated; F holds the clock still so the
+# images are comparable between runs. See the game's README.
+keypress F
+delay 200
 keypress 1
 delay 500
 screenshot ../tmp/multisection_lighting_check/1_overview.png

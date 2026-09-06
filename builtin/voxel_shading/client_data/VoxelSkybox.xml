@@ -1,0 +1,6 @@
+<!-- The sky behind everything; see VoxelSkybox.glsl. postopaque and no depth
+     write is what keeps it out of the way of the world; the box is seen from
+     the inside, so nothing is culled. -->
+<technique vs="voxel_shading/VoxelSkybox" ps="voxel_shading/VoxelSkybox">
+    <pass name="postopaque" depthwrite="false" cull="none" />
+</technique>

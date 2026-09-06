@@ -154,6 +154,7 @@ void init_voxel_volume(lua_State *L)
 			.property("int32", &voxelinstance_get_int32,
 					&voxelinstance_set_int32)
 			.def("get_id", &VoxelInstance::get_id)
+			.def("get_skylight", &VoxelInstance::get_skylight)
 		,
 		class_<CommonVolume, bases<>, sp_<CommonVolume>>("__buildat_Volume")
 			.def(constructor<const pv::Region &>())
