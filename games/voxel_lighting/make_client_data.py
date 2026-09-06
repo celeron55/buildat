@@ -29,8 +29,10 @@ import struct
 import zlib
 
 SIZE = 64
-ZENITH = (0.16, 0.26, 0.52)
-HORIZON = (0.60, 0.68, 0.80)
+# Kept equal to the same names in builtin/voxel_shading/VoxelSkybox.glsl, so
+# that what a surface reflects agrees with what is overhead
+ZENITH = (0.13, 0.24, 0.58)
+HORIZON = (0.55, 0.66, 0.84)
 GROUND = (0.14, 0.13, 0.11)
 # The scene's light points this way, so the sun is in the opposite direction
 LIGHT_DIR = (-0.6, -1.0, 0.8)
