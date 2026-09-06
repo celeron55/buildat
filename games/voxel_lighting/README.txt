@@ -16,15 +16,26 @@ Lighting
 
 The server flood fills a 4 bit skylight value into every voxel: full straight
 down through air, losing one step per voxel as it spreads sideways and deeper.
-The mesher turns the skylight of the voxel in front of each face into a vertex
-color, and chunk geometry is drawn with PBRDiffVCol, a PBR technique in
-client/data/Techniques. The scene is rendered in HDR and tonemapped.
+The mesher packs that into vertex colors, and chunk geometry is drawn with
+PBRVoxel, a technique and shader in client/data. The scene is rendered in HDR
+and tonemapped.
 
-The vertex color multiplies the zone's ambient color, which is a blue sky
-bounce. Because it fades towards a warm tint rather than towards black, a face
-that has lost most of its skylight ends up neutral grey, like light bounced off
-rock, while a merely shaded outdoor face stays blue. That is what makes a cave
-look different from a tree's shadow.
+The vertex color carries how much sky a surface sees in its alpha and the
+light bounced off nearby surfaces in its rgb, and the shader adds them:
+
+    ambient = zone ambient * color.a + color.rgb
+
+so a face that can see the sky gets the zone's blue and one that cannot gets
+the near-neutral grey of bounced light. That is what makes a cave look
+different from a tree's shadow. Direct sunlight is left out of it, being
+shadow mapped already.
+
+Folded into both terms are per-vertex ambient occlusion, from how many of the
+three voxels around each quad corner are solid, and a fixed per-face
+brightness (top brightest, bottom darkest, the four sides spread either side
+of the middle). The latter is for legibility rather than physics: without it,
+two faces of a voxel in shadow receive the same light and the edge between
+them disappears.
 
 Skylight is opt-in per world: voxelworld.use_skylight, off by default. A world
 that does not fill the bits, and any dynamic voxel node meshed by a game

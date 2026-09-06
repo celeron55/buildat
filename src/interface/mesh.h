@@ -71,9 +71,11 @@ namespace interface
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg);
 
 		// Can be called from any thread
-		// use_skylight: shade each face by VoxelInstance::get_skylight() of
-		// the voxel in front of it, via vertex colors. Only worlds that
-		// actually fill those bits should ask for it.
+		// use_skylight: light the geometry by VoxelInstance::get_skylight()
+		// of the voxel in front of each face, along with per-vertex ambient
+		// occlusion and a per-face brightness, written into vertex colors and
+		// read by the PBRVoxel technique. Only worlds that actually fill those
+		// bits should ask for it.
 		void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 				pv::RawVolume<VoxelInstance> &volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
