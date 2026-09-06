@@ -105,6 +105,9 @@ do
 	zone.fogEnd = FAR_CLIP
 	zone.priority = -1
 	zone.override = true
+	-- Same sky as voxel_lighting; see its init.lua
+	zone.zoneTexture = magic.cache:GetResource("TextureCube",
+			"Textures/VoxelSky.xml")
 end
 
 do

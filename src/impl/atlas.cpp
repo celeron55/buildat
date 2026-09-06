@@ -7,6 +7,7 @@
 #include <Texture2D.h>
 #include <Graphics.h>
 #include <Image.h>
+#include <Vector3.h>
 #define MODULE "atlas"
 
 namespace interface {
@@ -17,7 +18,10 @@ bool AtlasSegmentDefinition::operator==(const AtlasSegmentDefinition &other) con
 			resource_name == other.resource_name &&
 			total_segments == other.total_segments &&
 			select_segment == other.select_segment &&
-			lod_simulation == other.lod_simulation
+			lod_simulation == other.lod_simulation &&
+			roughness == other.roughness &&
+			metalness == other.metalness &&
+			bumpiness == other.bumpiness
 	);
 }
 
@@ -94,22 +98,33 @@ struct CAtlasRegistry: public AtlasRegistry
 					atlas_def->total_segments.x_ * seg_res.x_ * 2,
 					atlas_def->total_segments.y_ * seg_res.y_ * 2
 			);
-			// Create image for new atlas
-			magic::Image *atlas_img = new magic::Image(m_context);
-			atlas_img->SetSize(atlas_resolution.x_, atlas_resolution.y_, 4);
-			// Create texture for new atlas
-			magic::Texture2D *atlas_tex = new magic::Texture2D(m_context);
-			// TODO: Make this configurable
-			atlas_tex->SetFilterMode(magic::FILTER_NEAREST);
-			// TODO: Use TEXTURE_STATIC or TEXTURE_DYNAMIC?
-			atlas_tex->SetSize(atlas_resolution.x_, atlas_resolution.y_,
-					magic::Graphics::GetRGBAFormat(), magic::TEXTURE_STATIC);
+			// Create images for new atlas. The normal and spec ones have the
+			// same layout as the diffuse one and are filled from the same
+			// source pixels, so a segment reference addresses all three.
+			auto create_atlas_image = [&](){
+				magic::Image *img = new magic::Image(m_context);
+				img->SetSize(atlas_resolution.x_, atlas_resolution.y_, 4);
+				return img;
+			};
+			auto create_atlas_texture = [&](){
+				magic::Texture2D *tex = new magic::Texture2D(m_context);
+				// TODO: Make this configurable
+				tex->SetFilterMode(magic::FILTER_NEAREST);
+				// TODO: Use TEXTURE_STATIC or TEXTURE_DYNAMIC?
+				tex->SetSize(atlas_resolution.x_, atlas_resolution.y_,
+						magic::Graphics::GetRGBAFormat(), magic::TEXTURE_STATIC);
+				return tex;
+			};
 			// Add new atlas to cache
 			const auto &id = atlas_def->id;
 			m_cache.resize(id+1);
 			AtlasCache *cache = &m_cache[id];
-			cache->image = atlas_img;
-			cache->texture = atlas_tex;
+			cache->image = create_atlas_image();
+			cache->texture = create_atlas_texture();
+			cache->normal_image = create_atlas_image();
+			cache->normal_texture = create_atlas_texture();
+			cache->spec_image = create_atlas_image();
+			cache->spec_texture = create_atlas_texture();
 			cache->segment_resolution = atlas_def->segment_resolution;
 			cache->total_segments = atlas_def->total_segments;
 		}
@@ -320,14 +335,92 @@ struct CAtlasRegistry: public AtlasRegistry
 				}
 			}
 		}
-		// Update atlas texture from atlas image
+		// Derive the normal and roughness/metalness maps from the same source
+		// pixels. Nothing authors these; the segment's image is read as a
+		// height field for the normals and as a per-texel deviation from the
+		// segment's mean roughness, which is enough to tell water from rock
+		// and to give leaves the mix of waxy and matte parts they have.
+		draw_surface_maps(seg_img, def, atlas, src_off, dst_p00, seg_size);
+
+		// Update atlas textures from atlas images
 		atlas.texture->SetData(atlas.image);
+		atlas.normal_texture->SetData(atlas.normal_image);
+		atlas.spec_texture->SetData(atlas.spec_image);
 
 		// Debug: save atlas image to file
 		/*ss_ atlas_img_name = "/tmp/atlas_"+itos(seg_size.x_)+"x"+
 				itos(seg_size.y_)+".png";
 		magic::File f(m_context, atlas_img_name.c_str(), magic::FILE_WRITE);
 		atlas.image->Save(f);*/
+	}
+
+	// Luminance of a pixel of a segment, wrapped inside the segment so that a
+	// tiling texture's derived maps tile too
+	static float segment_luminance(magic::Image *seg_img,
+			const magic::IntVector2 &src_off, const magic::IntVector2 &seg_size,
+			int lx, int ly)
+	{
+		lx = ((lx % seg_size.x_) + seg_size.x_) % seg_size.x_;
+		ly = ((ly % seg_size.y_) + seg_size.y_) % seg_size.y_;
+		magic::Color c = seg_img->GetPixel(src_off.x_ + lx, src_off.y_ + ly);
+		return 0.299f * c.r_ + 0.587f * c.g_ + 0.114f * c.b_;
+	}
+
+	void draw_surface_maps(magic::Image *seg_img,
+			const AtlasSegmentDefinition &def, const AtlasCache &atlas,
+			const magic::IntVector2 &src_off, const magic::IntVector2 &dst_p00,
+			const magic::IntVector2 &seg_size)
+	{
+		// LOD segments sample the source at a stride; the same stride has to
+		// be used here or the maps would not line up with the diffuse texture
+		int step = def.lod_simulation & 0x0f;
+		if(step == 0)
+			step = 1;
+		// The mean is what def.roughness names, so a texel is only made
+		// smoother or rougher by how far it is from its own segment's average
+		float mean_lum = 0.0f;
+		for(int ly = 0; ly<seg_size.y_; ly++)
+			for(int lx = 0; lx<seg_size.x_; lx++)
+				mean_lum += segment_luminance(seg_img, src_off, seg_size, lx, ly);
+		mean_lum /= (float)(seg_size.x_ * seg_size.y_);
+		// Enough that a texture with any contrast at all spans a visible range
+		// of roughness, and little enough that a flat one stays flat
+		const float ROUGHNESS_PER_LUM = -0.8f;
+		for(int y = 0; y<seg_size.y_ * 2; y++){
+			for(int x = 0; x<seg_size.x_ * 2; x++){
+				int lx = ((x + seg_size.x_ / 2) * step) % seg_size.x_;
+				int ly = ((y + seg_size.y_ / 2) * step) % seg_size.y_;
+				magic::IntVector2 dst_p = dst_p00 + magic::IntVector2(x, y);
+				// Central differences of the luminance height field. The
+				// tangent frame in the shader is built from the derivatives of
+				// the texture coordinate, so x is +u and y is +v here.
+				float lum = segment_luminance(
+						seg_img, src_off, seg_size, lx, ly);
+				float dhdx = segment_luminance(
+						seg_img, src_off, seg_size, lx + step, ly) -
+						segment_luminance(
+						seg_img, src_off, seg_size, lx - step, ly);
+				float dhdy = segment_luminance(
+						seg_img, src_off, seg_size, lx, ly + step) -
+						segment_luminance(
+						seg_img, src_off, seg_size, lx, ly - step);
+				magic::Vector3 n(-dhdx * def.bumpiness, -dhdy * def.bumpiness,
+						1.0f);
+				n.Normalize();
+				atlas.normal_image->SetPixel(dst_p.x_, dst_p.y_, magic::Color(
+						n.x_ * 0.5f + 0.5f,
+						n.y_ * 0.5f + 0.5f,
+						n.z_ * 0.5f + 0.5f, 1.0f));
+				float roughness = def.roughness +
+						(lum - mean_lum) * ROUGHNESS_PER_LUM;
+				if(roughness < 0.03f)
+					roughness = 0.03f;
+				if(roughness > 1.0f)
+					roughness = 1.0f;
+				atlas.spec_image->SetPixel(dst_p.x_, dst_p.y_,
+						magic::Color(roughness, def.metalness, 0.0f, 1.0f));
+			}
+		}
 	}
 
 	const AtlasCache* get_atlas_cache(uint atlas_id)
@@ -365,6 +458,10 @@ struct CAtlasRegistry: public AtlasRegistry
 						atlas_id);
 				cache.texture->SetData(cache.image);
 				cache.texture->ClearDataLost();
+				cache.normal_texture->SetData(cache.normal_image);
+				cache.normal_texture->ClearDataLost();
+				cache.spec_texture->SetData(cache.spec_image);
+				cache.spec_texture->ClearDataLost();
 			}
 		}
 	}

@@ -745,10 +745,13 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 		if(tg.has_colors){
 			material->SetTechnique(0, cache->GetResource<Technique>(
 					"Techniques/PBRVoxel.xml"));
-			// Voxel terrain is rough and non-metallic throughout; there are no
-			// roughness or metalness maps, so these are the whole material
-			material->SetShaderParameter("Roughness", 0.9f);
+			// The atlas derives a normal map and a roughness/metalness map
+			// from each segment's image, so the maps are the whole material
+			// and these two constants are only added on top of them
+			material->SetShaderParameter("Roughness", 0.0f);
 			material->SetShaderParameter("Metallic", 0.0f);
+			material->SetTexture(TU_NORMAL, atlas_cache->normal_texture);
+			material->SetTexture(TU_SPECULAR, atlas_cache->spec_texture);
 		} else {
 			material->SetTechnique(0,
 					cache->GetResource<Technique>("Techniques/Diff.xml"));
@@ -980,8 +983,10 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 			if(tg.has_colors){
 				material->SetTechnique(0, cache->GetResource<Technique>(
 						"Techniques/PBRVoxel.xml"));
-				material->SetShaderParameter("Roughness", 0.9f);
+				material->SetShaderParameter("Roughness", 0.0f);
 				material->SetShaderParameter("Metallic", 0.0f);
+				material->SetTexture(TU_NORMAL, atlas_cache->normal_texture);
+				material->SetTexture(TU_SPECULAR, atlas_cache->spec_texture);
 			} else {
 				material->SetTechnique(0,
 						cache->GetResource<Technique>("Techniques/Diff.xml"));

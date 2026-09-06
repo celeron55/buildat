@@ -502,23 +502,6 @@ function M.define(dst, util)
 		},
 	})
 
-	util.wc("Zone", {
-		inherited_from_by_wrapper = dst.Component,
-		instance = {
-		},
-		properties = {
-			boundingBox = util.simple_property(dst.BoundingBox),
-			ambientColor = util.simple_property(dst.Color),
-			fogColor = util.simple_property(dst.Color),
-			fogStart = util.simple_property("number"),
-			fogEnd = util.simple_property("number"),
-			priority = util.simple_property("number"),
-			heightFog = util.simple_property("boolean"),
-			override = util.simple_property("boolean"),
-			ambientGradient = util.simple_property("boolean"),
-		},
-	})
-
 	util.wc("Model", {
 		inherited_from_by_wrapper = dst.Resource,
 	})
@@ -552,6 +535,25 @@ function M.define(dst, util)
 
 	util.wc("Texture2D", {
 		inherited_from_by_wrapper = dst.Texture,
+	})
+
+	util.wc("Zone", {
+		inherited_from_by_wrapper = dst.Component,
+		instance = {
+		},
+		properties = {
+			boundingBox = util.simple_property(dst.BoundingBox),
+			ambientColor = util.simple_property(dst.Color),
+			fogColor = util.simple_property(dst.Color),
+			fogStart = util.simple_property("number"),
+			fogEnd = util.simple_property("number"),
+			priority = util.simple_property("number"),
+			heightFog = util.simple_property("boolean"),
+			override = util.simple_property("boolean"),
+			ambientGradient = util.simple_property("boolean"),
+			-- The environment cube map the PBR shaders reflect
+			zoneTexture = util.simple_property(dst.Texture),
+		},
 	})
 
 	util.wc("Font", {

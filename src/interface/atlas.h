@@ -41,6 +41,21 @@ namespace interface
 		uint8_t lod_simulation = 0;
 		// TODO: Rotation
 
+		// How the surface responds to light. There are no authored normal or
+		// roughness maps; the atlas derives both from this segment's image and
+		// these three numbers, so a material is described by what it is rather
+		// than by extra files. See impl/atlas.cpp.
+		//   roughness  the segment's mean perceptual roughness. Texels brighter
+		//              than the segment's mean come out smoother than this and
+		//              darker ones rougher, which is what gives leaves their
+		//              mix of waxy and matte and leaves flat surfaces flat.
+		//   metalness  constant over the segment.
+		//   bumpiness  how much the image's luminance is taken to be height
+		//              when deriving the normal map. 0 is a flat surface.
+		float roughness = 0.9f;
+		float metalness = 0.0f;
+		float bumpiness = 1.0f;
+
 		bool operator==(const AtlasSegmentDefinition &other) const;
 	};
 
@@ -63,6 +78,13 @@ namespace interface
 	{
 		magic::SharedPtr<magic::Image> image;
 		magic::SharedPtr<magic::Texture2D> texture;
+		// Derived from the segment images; same layout as the diffuse atlas.
+		// normal is a tangent space normal map, spec is roughness in r and
+		// metalness in g (what Urho's PBR shaders read from sSpecMap).
+		magic::SharedPtr<magic::Image> normal_image;
+		magic::SharedPtr<magic::Texture2D> normal_texture;
+		magic::SharedPtr<magic::Image> spec_image;
+		magic::SharedPtr<magic::Texture2D> spec_texture;
 		magic::IntVector2 segment_resolution;
 		magic::IntVector2 total_segments;
 		sv_<AtlasSegmentCache> segments;

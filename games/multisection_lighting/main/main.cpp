@@ -448,8 +448,12 @@ struct Module: public interface::Module
 				on_verify_skylight, network::Packet)
 	}
 
+	// roughness, metalness and bumpiness describe the surface to the atlas,
+	// which derives a normal map and a roughness/metalness map from the
+	// texture with them. See interface/atlas.h.
 	void add_voxel(interface::VoxelRegistry *reg, const ss_ &name,
-			const ss_ &texture, bool solid)
+			const ss_ &texture, bool solid, float roughness = 0.9f,
+			float metalness = 0.0f, float bumpiness = 1.0f)
 	{
 		interface::VoxelDefinition vdef;
 		vdef.name.block_name = name;
@@ -465,6 +469,9 @@ struct Module: public interface::Module
 			seg.total_segments = magic::IntVector2(texture.empty() ? 0 : 1,
 					texture.empty() ? 0 : 1);
 			seg.select_segment = magic::IntVector2(0, 0);
+			seg.roughness = roughness;
+			seg.metalness = metalness;
+			seg.bumpiness = bumpiness;
 		}
 		vdef.edge_material_id = solid ? interface::EDGEMATERIALID_GROUND :
 				interface::EDGEMATERIALID_EMPTY;
@@ -500,11 +507,17 @@ struct Module: public interface::Module
 			interface::VoxelRegistry *reg = ivoxelworld->
 					get_instance(m_main_scene)->get_voxel_reg();
 			add_voxel(reg, "air", "", false);              // id 1
-			add_voxel(reg, "rock", "main/rock.png", true); // id 2
-			add_voxel(reg, "dirt", "main/dirt.png", true); // id 3
-			add_voxel(reg, "grass", "main/grass.png", true); // id 4
-			add_voxel(reg, "leaves", "main/leaves.png", true); // id 5
-			add_voxel(reg, "tree", "main/tree.png", true); // id 6
+			// Same surfaces as voxel_lighting; see its main.cpp
+			add_voxel(reg, "rock", "main/rock.png", true,
+					0.95f, 0.0f, 2.0f); // id 2
+			add_voxel(reg, "dirt", "main/dirt.png", true,
+					0.98f, 0.0f, 2.5f); // id 3
+			add_voxel(reg, "grass", "main/grass.png", true,
+					0.90f, 0.0f, 1.5f); // id 4
+			add_voxel(reg, "leaves", "main/leaves.png", true,
+					0.55f, 0.0f, 1.5f); // id 5
+			add_voxel(reg, "tree", "main/tree.png", true,
+					0.85f, 0.0f, 2.0f); // id 6
 
 			// The whole point of this scene: let voxelworld light it
 			ivoxelworld->get_instance(m_main_scene)->
