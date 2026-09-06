@@ -60,14 +60,15 @@ namespace interface
 		//   translucency  how much light passes through the surface from
 		//              behind, tinting itself with the surface's own color on
 		//              the way. This is what makes a backlit leaf glow.
-		//   translucency_spots  fraction of the segment's texels that let that
-		//              light through; the rest let none through at all. A whole
-		//              face at once would be a lamp rather than a tree. The
-		//              texels are picked at random rather than off the texture,
-		//              so the spots do not line up with anything else derived
-		//              from it and each material gets its own scatter. 0 means
-		//              the whole segment is translucent, for something that
-		//              really is.
+		//   translucency_spots  fraction of the surface that lets that light
+		//              through at any one moment; the rest lets none through.
+		//              A whole face at once would be a lamp rather than a tree.
+		//              Which parts they are is not baked into the map: the
+		//              shader picks them from the world position and the time,
+		//              so they come and go the way leaves in wind do. This is
+		//              stored as the threshold that produces the fraction. 0
+		//              means the whole segment is translucent all the time, for
+		//              something that really is.
 		float roughness = 0.9f;
 		float metalness = 0.0f;
 		float bumpiness = 1.0f;
@@ -99,8 +100,9 @@ namespace interface
 		magic::SharedPtr<magic::Texture2D> texture;
 		// Derived from the segment images; same layout as the diffuse atlas.
 		// normal is a tangent space normal map, spec is roughness in r and
-		// metalness in g (what Urho's PBR shaders read from sSpecMap) and
-		// translucency in b (which only PBRVoxel reads).
+		// metalness in g (what Urho's PBR shaders read from sSpecMap), and,
+		// which only PBRVoxel reads, translucency in b and the threshold that
+		// makes translucency_spots of the surface let it through in a.
 		magic::SharedPtr<magic::Image> normal_image;
 		magic::SharedPtr<magic::Texture2D> normal_texture;
 		magic::SharedPtr<magic::Image> spec_image;
