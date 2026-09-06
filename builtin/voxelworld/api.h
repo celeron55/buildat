@@ -95,6 +95,24 @@ namespace voxelworld
 				const VoxelInstance &v,
 				bool disable_warnings = false) = 0;
 
+		// Maintain VoxelInstance::get_skylight() of every voxel in the world.
+		// Off by default; a world that does not want skylight pays nothing and
+		// keeps whatever is in those bits. Once on, the light is kept up to
+		// date by set_voxel(), including through generation, and is settled
+		// before commit() meshes anything.
+		//
+		// Light enters from above the top of the world region at full
+		// strength, falls through anything that transmits light without
+		// losing any, and spreads sideways and upwards losing one step per
+		// voxel. A voxel transmits light if its edge material is
+		// EDGEMATERIALID_EMPTY, which is the same test the mesher uses to
+		// decide whether a face is drawn against it.
+		//
+		// simplified: transparency is that one test, so glass would have to
+		// be a light barrier or a hole in the terrain. A voxel definition
+		// flag of its own is the upgrade path.
+		virtual void set_skylight_enabled(bool enabled) = 0;
+
 		virtual size_t num_buffers_loaded() = 0;
 
 		virtual void commit() = 0;

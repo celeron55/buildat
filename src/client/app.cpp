@@ -185,6 +185,8 @@ static bool load_window_state(int desk_w, int desk_h, app::GraphicsOptions *opt)
 
 static void save_window_state(const app::GraphicsOptions &opt)
 {
+	if(opt.size_forced)
+		return;
 	if(opt.window_w < MIN_WINDOW_W || opt.window_h < MIN_WINDOW_H)
 		return;
 	json::Value o = json::object();
@@ -436,6 +438,10 @@ struct CApp: public App, public magic::Application
 		check_pick_default_window_size();
 		if(m_options.graphics.window_w <= 0 || m_options.graphics.window_h <= 0){
 			resolve_window_size(&m_options.graphics);
+		}
+		if(m_options.graphics.size_forced){
+			m_options.graphics.fullscreen = false;
+			m_options.graphics.maximized = false;
 		}
 		m_restore_maximized = m_options.graphics.maximized;
 		log_v(MODULE, "window size: %ix%i maximized=%i fullscreen=%i",
