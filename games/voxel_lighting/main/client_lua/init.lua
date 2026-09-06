@@ -235,7 +235,7 @@ buildat.sub_packet("main:cave", function(data)
 			"%.2f); benchmarks 2 and 3 ready", mx, my, mz, dx, dy, dz))
 end)
 
--- Two framings of the same tree, both from the shaded side of it.
+-- Three framings of the same tree, all from the shaded side of it.
 --
 -- Benchmark 5 stands back and above, looking at the canopy with the sun behind
 -- and above it. Its top face is in direct sun and the side facing the camera is
@@ -251,7 +251,8 @@ local TREE_EYE_RISE = 5
 local SUN_BLOCK_DROP = 3
 local SUN_BLOCK_BACK = 6
 local SUN_BLOCK_DOWN = 4
--- Above the canopy, so the sun in the sky is not behind the tree
+-- Benchmark 7 stands where 6 does but above the canopy, so that the sun in the
+-- sky is not behind the tree
 local SUN_VIEW_RISE = 10
 
 -- The middle of that canopy, as "x y z"
@@ -282,7 +283,7 @@ buildat.sub_packet("main:tree", function(data)
 	local drop = SUN_BLOCK_DROP / d.y
 	local eye6 = {
 		x = tx - d.x * drop - h.x * SUN_BLOCK_BACK,
-		y = ty - d.y * drop - SUN_BLOCK_DOWN + SUN_VIEW_RISE,
+		y = ty - d.y * drop - SUN_BLOCK_DOWN,
 		z = tz - d.z * drop - h.z * SUN_BLOCK_BACK,
 	}
 	local yaw6, pitch6 = angles_from_dir(d)
@@ -291,8 +292,16 @@ buildat.sub_packet("main:tree", function(data)
 		x = eye6.x, y = eye6.y, z = eye6.z,
 		yaw = yaw6, pitch = pitch6,
 	}
-	log:info(string.format("canopy at (%.1f, %.1f, %.1f); benchmarks 5 and 6 "..
-			"ready", tx, ty, tz))
+
+	-- 7: the same line of sight, lifted clear of the leaves, which is the one
+	-- benchmark that looks at the sky itself
+	benchmarks[7] = {
+		name = "Sun in sky",
+		x = eye6.x, y = eye6.y + SUN_VIEW_RISE, z = eye6.z,
+		yaw = yaw6, pitch = pitch6,
+	}
+	log:info(string.format("canopy at (%.1f, %.1f, %.1f); benchmarks 5, 6 "..
+			"and 7 ready", tx, ty, tz))
 end)
 
 -- Benchmark 4's camera, as "ex ey ez tx ty tz". Placed by the server, which
@@ -456,6 +465,7 @@ do
 	add_button("4 Pond", function() go_to_benchmark(4) end)
 	add_button("5 Backlit canopy", function() go_to_benchmark(5) end)
 	add_button("6 Sun behind", function() go_to_benchmark(6) end)
+	add_button("7 Sun in sky", function() go_to_benchmark(7) end)
 	add_button("Dig shaft (P)", function()
 		buildat.send_packet("main:bench_shaft", "")
 	end)
@@ -488,6 +498,8 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		go_to_benchmark(5)
 	elseif key == magic.KEY_6 then
 		go_to_benchmark(6)
+	elseif key == magic.KEY_7 then
+		go_to_benchmark(7)
 	elseif key == magic.KEY_P then
 		buildat.send_packet("main:bench_shaft", "")
 	elseif key == magic.KEY_O then
