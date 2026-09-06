@@ -53,7 +53,7 @@ SUN_INNER_DEG = 3.5
 # is in units of sin(elevation), so 0.45 is about 27 degrees either side.
 INDOOR_DIM = 0.25
 INDOOR_GREY = (0.15, 0.15, 0.15)
-INDOOR_BAND = (0.34, 0.35, 0.38)
+INDOOR_BAND = (0.43, 0.44, 0.48)
 INDOOR_BAND_HALF = 0.45
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
