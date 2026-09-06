@@ -18,7 +18,6 @@
 #include <cmath>
 #include <cstdio>
 #include <sstream>
-#include <chrono>
 #define MODULE "main"
 
 namespace magic = Urho3D;
@@ -70,91 +69,6 @@ static const int BENCH_SLAB_W = 5;
 static const int BENCH_SLAB_H = 2;
 
 static const uint8_t AIR_ID = 1;
-
-static inline size_t sky_idx(int x, int y, int z, int W, int D)
-{
-	return ((size_t)y * D + z) * W + x;
-}
-
-// Skylight over a W*H*D block of voxel ids. Sunlight falls straight down
-// through air at full strength and stops at the first solid voxel; from there
-// it spreads sideways and downwards losing one step per voxel, which is what
-// makes a cave get darker the deeper it goes while a hollow just under the
-// surface stays bright.
-//
-// sky is the light in air voxels. solid_sky is the brightest skylight next to
-// a solid voxel: the mesher normally reads the air voxel in front of a face,
-// but at a chunk edge that voxel is outside the chunk it is meshing, and it
-// falls back to this.
-static void compute_skylight(const sv_<uint8_t> &ids, int W, int H, int D,
-		sv_<uint8_t> &sky, sv_<uint8_t> &solid_sky)
-{
-	const uint8_t SKY_MAX = VoxelInstance::SKYLIGHT_MAX;
-	static const int off[6][3] = {
-		{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1}
-	};
-	auto inside = [&](int x, int y, int z){
-		return x >= 0 && x < W && y >= 0 && y < H && z >= 0 && z < D;
-	};
-
-	sky.assign((size_t)W * H * D, 0);
-	solid_sky.assign((size_t)W * H * D, 0);
-
-	for(int z = 0; z < D; z++){
-		for(int x = 0; x < W; x++){
-			uint8_t l = SKY_MAX;
-			for(int y = H - 1; y >= 0; y--){
-				size_t i = sky_idx(x, y, z, W, D);
-				if(ids[i] != AIR_ID)
-					l = 0;
-				sky[i] = l;
-			}
-		}
-	}
-	// One pass per level, brightest first: a voxel written during the pass for
-	// level L is picked up by the pass for L-1, so this is a breadth-first
-	// spread without a queue.
-	for(int level = SKY_MAX; level >= 2; level--){
-		for(int y = 0; y < H; y++){
-		for(int z = 0; z < D; z++){
-		for(int x = 0; x < W; x++){
-			if(sky[sky_idx(x, y, z, W, D)] != level)
-				continue;
-			for(size_t k = 0; k < 6; k++){
-				int nx = x + off[k][0], ny = y + off[k][1];
-				int nz = z + off[k][2];
-				if(!inside(nx, ny, nz))
-					continue;
-				size_t ni = sky_idx(nx, ny, nz, W, D);
-				if(ids[ni] != AIR_ID || sky[ni] >= level - 1)
-					continue;
-				sky[ni] = level - 1;
-			}
-		}
-		}
-		}
-	}
-	for(int y = 0; y < H; y++){
-	for(int z = 0; z < D; z++){
-	for(int x = 0; x < W; x++){
-		size_t i = sky_idx(x, y, z, W, D);
-		if(ids[i] == AIR_ID)
-			continue;
-		uint8_t best = 0;
-		for(size_t k = 0; k < 6; k++){
-			int nx = x + off[k][0], ny = y + off[k][1];
-			int nz = z + off[k][2];
-			if(!inside(nx, ny, nz))
-				continue;
-			size_t ni = sky_idx(nx, ny, nz, W, D);
-			if(ids[ni] == AIR_ID && sky[ni] > best)
-				best = sky[ni];
-		}
-		solid_sky[i] = best;
-	}
-	}
-	}
-}
 
 struct Worldgen: public worldgen::GeneratorInterface
 {
@@ -353,18 +267,24 @@ struct Worldgen: public worldgen::GeneratorInterface
 					0.5f), lc.getZ() + 2, uc.getZ() - 2);
 			int shaft_bottom = (int)std::floor(sy + dy * BENCH_SHAFT_T + 0.5f);
 			// surface_at() + 11 is the first air voxel above the ground, so
-			// this breaks the surface open rather than stopping under it
+			// this breaks the surface open rather than stopping under it. The
+			// shaft goes two voxels past that, which is where the cap sits, so
+			// digging it again cuts the cap out and the two edits can be
+			// cycled for as long as anyone wants to watch them.
 			int shaft_top = (int)std::floor(
 					surface_at(shaft_x, shaft_z)) + 11;
 			if(shaft_top < shaft_bottom)
 				shaft_top = shaft_bottom;
-			bench_shaft_h = shaft_top - shaft_bottom + 1;
+			// A box of height h centred at c covers c-(h/2) .. c+(h-1)/2
+			bench_shaft_h = (shaft_top + 1) - shaft_bottom + 1;
 			bench_shaft_centre = pv::Vector3DInt32(shaft_x,
-					(shaft_bottom + shaft_top) / 2, shaft_z);
+					shaft_bottom + bench_shaft_h / 2, shaft_z);
 
 			// The slab caps the shaft, filling the two air voxels directly
 			// above the ground, so the second edit takes back exactly the light
 			// the first one let in and the cave returns to where it started.
+			// The shaft reaches through both of them, so digging again cuts the
+			// cap back out.
 			bench_slab_centre = pv::Vector3DInt32(
 					clamp_xz(shaft_x, lc.getX() + 3, uc.getX() - 3),
 					shaft_top + 1,
@@ -374,26 +294,16 @@ struct Worldgen: public worldgen::GeneratorInterface
 					PV3I_FORMAT, PV3I_PARAMS(bench_shaft_centre),
 					bench_shaft_h, PV3I_PARAMS(bench_slab_centre));
 
-			sv_<uint8_t> sky, solid_sky;
-			compute_skylight(ids, W, H, D, sky, solid_sky);
-
-			size_t dark_air = 0, lit_air = 0;
+			// voxelworld keeps the skylight of every voxel up to date from
+			// here on, so these go in as plain ids
 			for(int y = lc.getY(); y <= uc.getY(); y++){
 				for(int z = lc.getZ(); z <= uc.getZ(); z++){
 					for(int x = lc.getX(); x <= uc.getX(); x++){
-						size_t i = idx(x, y, z);
-						VoxelInstance v(ids[i]);
-						v.set_skylight(ids[i] == AIR ? sky[i] : solid_sky[i]);
-						world->set_voxel(pv::Vector3DInt32(x, y, z), v);
-						if(ids[i] == AIR){
-							if(sky[i] == 0) dark_air++;
-							else lit_air++;
-						}
+						world->set_voxel(pv::Vector3DInt32(x, y, z),
+								VoxelInstance(ids[idx(x, y, z)]));
 					}
 				}
 			}
-			log_v(MODULE, "Skylight: %zu lit air voxels, %zu fully dark",
-					lit_air, dark_air);
 		});
 	}
 };
@@ -427,6 +337,8 @@ struct Module: public interface::Module
 				"network:packet_received/main:bench_shaft"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:bench_slab"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:verify_skylight"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -446,6 +358,8 @@ struct Module: public interface::Module
 				on_bench_shaft, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:bench_slab",
 				on_bench_slab, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:verify_skylight",
+				on_verify_skylight, network::Packet)
 	}
 
 	void add_voxel(interface::VoxelRegistry *reg, const ss_ &name,
@@ -504,6 +418,10 @@ struct Module: public interface::Module
 			add_voxel(reg, "grass", "main/grass.png", true); // id 4
 			add_voxel(reg, "leaves", "main/leaves.png", true); // id 5
 			add_voxel(reg, "tree", "main/tree.png", true); // id 6
+
+			// The whole point of this scene: let voxelworld light it
+			ivoxelworld->get_instance(m_main_scene)->
+					set_skylight_enabled(true);
 		});
 
 		worldgen::access(m_server, m_main_scene,
@@ -554,61 +472,12 @@ struct Module: public interface::Module
 		});
 	}
 
-	// Skylight is generated for the whole scene at once, and the scene is a
-	// single 64^3 section, so an edit is relit by simply doing that again over
-	// all of it. Only voxels whose skylight actually changed are written back,
-	// which keeps the number of chunks that have to be remeshed down to the
-	// ones the light really moved in.
-	void relight(voxelworld::Instance *world)
-	{
-		auto t0 = std::chrono::steady_clock::now();
-		pv::Region region = world->get_section_region_voxels(
-				pv::Vector3DInt16(0, 0, 0));
-		auto lc = region.getLowerCorner();
-		auto uc = region.getUpperCorner();
-		const int W = uc.getX() - lc.getX() + 1;
-		const int H = uc.getY() - lc.getY() + 1;
-		const int D = uc.getZ() - lc.getZ() + 1;
-
-		sv_<uint8_t> ids((size_t)W * H * D, AIR_ID);
-		for(int y = 0; y < H; y++)
-		for(int z = 0; z < D; z++)
-		for(int x = 0; x < W; x++){
-			VoxelInstance v = world->get_voxel(pv::Vector3DInt32(
-					lc.getX() + x, lc.getY() + y, lc.getZ() + z), true);
-			ids[sky_idx(x, y, z, W, D)] = (uint8_t)v.get_id();
-		}
-
-		sv_<uint8_t> sky, solid_sky;
-		compute_skylight(ids, W, H, D, sky, solid_sky);
-
-		size_t changed = 0;
-		for(int y = 0; y < H; y++)
-		for(int z = 0; z < D; z++)
-		for(int x = 0; x < W; x++){
-			size_t i = sky_idx(x, y, z, W, D);
-			uint8_t l = (ids[i] == AIR_ID) ? sky[i] : solid_sky[i];
-			pv::Vector3DInt32 p(lc.getX() + x, lc.getY() + y, lc.getZ() + z);
-			VoxelInstance v = world->get_voxel(p, true);
-			if(v.get_skylight() == l)
-				continue;
-			v.set_skylight(l);
-			world->set_voxel(p, v, true);
-			changed++;
-		}
-		log_v(MODULE, "relight(): %zu voxels changed skylight in %i ms",
-				changed, (int)std::chrono::duration_cast<
-						std::chrono::milliseconds>(
-						std::chrono::steady_clock::now() - t0).count());
-	}
-
 	void edit_voxel(const pv::Vector3DInt32 &p, uint32_t id)
 	{
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *world)
 		{
 			world->set_voxel(p, VoxelInstance(id));
-			relight(world);
 		});
 	}
 
@@ -654,7 +523,6 @@ struct Module: public interface::Module
 						centre.getY() + y, centre.getZ() + z),
 						VoxelInstance(id), true);
 			}
-			relight(world);
 		});
 		log_v(MODULE, "bench_box(): %ix%ix%i id %i at " PV3I_FORMAT,
 				w, h, d, id, PV3I_PARAMS(centre));
@@ -674,6 +542,125 @@ struct Module: public interface::Module
 		if(!m_worldgen) return;
 		bench_box(m_worldgen->bench_slab_centre, BENCH_SLAB_W, BENCH_SLAB_H,
 				BENCH_SLAB_W, 2); // rock
+	}
+
+	// Check voxelworld's incremental skylight against a flood fill done from
+	// scratch over the whole scene. The scene is one section, so the whole
+	// thing fits in memory and the two can be compared voxel by voxel; this is
+	// what says whether an edit relit everything it should have.
+	void verify_skylight()
+	{
+		voxelworld::access(m_server, m_main_scene,
+				[&](voxelworld::Instance *world)
+		{
+			pv::Region region = world->get_section_region_voxels(
+					pv::Vector3DInt16(0, 0, 0));
+			auto lc = region.getLowerCorner();
+			auto uc = region.getUpperCorner();
+			const int W = uc.getX() - lc.getX() + 1;
+			const int H = uc.getY() - lc.getY() + 1;
+			const int D = uc.getZ() - lc.getZ() + 1;
+			auto idx = [&](int x, int y, int z){
+				return ((size_t)y * D + z) * W + x;
+			};
+			auto inside = [&](int x, int y, int z){
+				return x >= 0 && x < W && y >= 0 && y < H && z >= 0 && z < D;
+			};
+
+			sv_<uint8_t> ids((size_t)W * H * D, 0);
+			sv_<uint8_t> stored((size_t)W * H * D, 0);
+			for(int y = 0; y < H; y++)
+			for(int z = 0; z < D; z++)
+			for(int x = 0; x < W; x++){
+				VoxelInstance v = world->get_voxel(pv::Vector3DInt32(
+						lc.getX() + x, lc.getY() + y, lc.getZ() + z), true);
+				ids[idx(x, y, z)] = (uint8_t)v.get_id();
+				stored[idx(x, y, z)] = v.get_skylight();
+			}
+
+			// Straight down at full strength until something stops it, then
+			// one step lost per voxel in every direction
+			const uint8_t SKY_MAX = VoxelInstance::SKYLIGHT_MAX;
+			sv_<uint8_t> sky((size_t)W * H * D, 0);
+			for(int z = 0; z < D; z++){
+				for(int x = 0; x < W; x++){
+					uint8_t l = SKY_MAX;
+					for(int y = H - 1; y >= 0; y--){
+						size_t i = idx(x, y, z);
+						if(ids[i] != AIR_ID)
+							l = 0;
+						sky[i] = l;
+					}
+				}
+			}
+			static const int off[6][3] = {
+				{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1}
+			};
+			for(int level = SKY_MAX; level >= 2; level--){
+				for(int y = 0; y < H; y++)
+				for(int z = 0; z < D; z++)
+				for(int x = 0; x < W; x++){
+					if(sky[idx(x, y, z)] != level)
+						continue;
+					for(size_t k = 0; k < 6; k++){
+						int nx = x + off[k][0], ny = y + off[k][1];
+						int nz = z + off[k][2];
+						if(!inside(nx, ny, nz))
+							continue;
+						size_t ni = idx(nx, ny, nz);
+						if(ids[ni] != AIR_ID || sky[ni] >= level - 1)
+							continue;
+						sky[ni] = level - 1;
+					}
+				}
+			}
+
+			size_t mismatches = 0;
+			pv::Vector3DInt32 first(0, 0, 0);
+			uint8_t first_want = 0, first_got = 0;
+			for(int y = 0; y < H; y++)
+			for(int z = 0; z < D; z++)
+			for(int x = 0; x < W; x++){
+				size_t i = idx(x, y, z);
+				uint8_t want = sky[i];
+				if(ids[i] != AIR_ID){
+					// Voxels that block light hold the brightest light next
+					// to them instead
+					want = 0;
+					for(size_t k = 0; k < 6; k++){
+						int nx = x + off[k][0], ny = y + off[k][1];
+						int nz = z + off[k][2];
+						if(!inside(nx, ny, nz))
+							continue;
+						size_t ni = idx(nx, ny, nz);
+						if(ids[ni] == AIR_ID && sky[ni] > want)
+							want = sky[ni];
+					}
+				}
+				if(want == stored[i])
+					continue;
+				if(mismatches == 0){
+					first = pv::Vector3DInt32(lc.getX() + x, lc.getY() + y,
+							lc.getZ() + z);
+					first_want = want;
+					first_got = stored[i];
+				}
+				mismatches++;
+			}
+			if(mismatches == 0){
+				log_v(MODULE, "skylight verify: ok");
+			} else {
+				log_w(MODULE, "skylight verify: %zu voxels differ from a "
+						"fresh fill; first " PV3I_FORMAT " wants %i, has %i",
+						mismatches, PV3I_PARAMS(first), first_want, first_got);
+			}
+		});
+	}
+
+	void on_verify_skylight(const network::Packet &packet)
+	{
+		(void)packet;
+		verify_skylight();
 	}
 
 	void on_worldgen_queue_modified(const worldgen::QueueModifiedEvent &event)

@@ -70,15 +70,20 @@ benchmark 3 goes from near-black rock to a lit cave.
 
 O caps the shaft with a 5x2x5 slab filling the two air voxels above the ground,
 which takes back the light the shaft let in: benchmark 3 returns to the dark it
-started at. The two edits change a similar number of voxels in opposite
-directions, so they check the relight both ways.
+started at. The shaft reaches through the cap, so digging again cuts it back
+out and the two can be alternated for as long as anyone wants to watch them.
 
-Every edit relights the whole scene: the skylight flood fill is run again over
-all of it and only the voxels whose skylight actually changed are written back,
-so only the chunks the light really moved in are remeshed. That costs about
-130 ms for this 64^3 scene, which is fine for one section and would not be for
-a streaming world; an incremental relight, unlighting outwards from the changed
-voxels and refilling, is what that would need.
+Relighting is voxelworld's, not this game's: it is turned on with
+set_skylight_enabled(true) and from then on every set_voxel keeps the light up
+to date, generation included. An edit costs 2-3 ms here, and what it costs
+depends on how far the light moves rather than on how big the world is.
+
+V (or the last HUD button) checks that: it runs a skylight flood fill from
+scratch over the whole scene and compares it voxel by voxel against what
+voxelworld stored, logging either "skylight verify: ok" or the number of voxels
+that differ and the first one. check.txt runs it after generation and after
+every edit, so a run says outright whether the incremental relight got the same
+answer as doing it all again.
 
 Running
 -------
