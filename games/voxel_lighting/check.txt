@@ -23,6 +23,8 @@ screenshot ../tmp/voxel_lighting_check/3_inside_cave.png
 # mouth. All three views are shot after each, so each edit can be followed as a
 # sequence of three images. View 3 is the telling one for the shaft: the part of
 # the cave it opens up had no skylight at all before.
+keypress V
+delay 1500
 keypress P
 delay 1500
 keypress 1
@@ -34,6 +36,8 @@ screenshot ../tmp/voxel_lighting_check/5_shaft_cave_mouth.png
 keypress 3
 delay 500
 screenshot ../tmp/voxel_lighting_check/6_shaft_inside_cave.png
+keypress V
+delay 1500
 keypress O
 delay 1500
 keypress 1
@@ -45,3 +49,14 @@ screenshot ../tmp/voxel_lighting_check/8_slab_cave_mouth.png
 keypress 3
 delay 500
 screenshot ../tmp/voxel_lighting_check/9_slab_inside_cave.png
+keypress V
+delay 1500
+# Dig the shaft a second time. It reaches through the cap, so this cuts the cap
+# back out and the cave lights up again; the scene can be cycled like this.
+keypress P
+delay 1500
+keypress V
+delay 1500
+keypress 3
+delay 500
+screenshot ../tmp/voxel_lighting_check/10_recycled_inside_cave.png

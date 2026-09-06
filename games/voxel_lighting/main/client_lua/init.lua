@@ -345,6 +345,9 @@ do
 	add_button("Cap shaft (O)", function()
 		buildat.send_packet("main:bench_slab", "")
 	end)
+	add_button("Verify light (V)", function()
+		buildat.send_packet("main:verify_skylight", "")
+	end)
 
 	magic.ui:SetFocusElement(nil)
 end
@@ -363,6 +366,8 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		buildat.send_packet("main:bench_shaft", "")
 	elseif key == magic.KEY_O then
 		buildat.send_packet("main:bench_slab", "")
+	elseif key == magic.KEY_V then
+		buildat.send_packet("main:verify_skylight", "")
 	elseif key == magic.KEY_ESCAPE then
 		if free_look then
 			set_free_look(false)
@@ -412,5 +417,5 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 end)
 
 log:info("voxel_lighting client ready; Tab = free move, 1/2/3 = benchmarks, "..
-		"P/O = benchmark shaft dig/cap")
+		"P/O = benchmark shaft dig/cap, V = verify light")
 -- vim: set noet ts=4 sw=4:

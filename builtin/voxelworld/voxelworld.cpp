@@ -6,6 +6,7 @@
 #include "replicate/api.h"
 #include "main_context/api.h"
 #include "core/log.h"
+#include <chrono>
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
@@ -209,6 +210,14 @@ struct QueuedNodePhysicsUpdate
 	}
 };
 
+// Skylight neighbour offsets. The last pair is +Y and -Y; LIGHT_DOWN is
+// straight down, the one direction light falls through without losing any.
+static const int LIGHT_OFF[6][3] = {
+	{1,0,0}, {-1,0,0}, {0,0,1}, {0,0,-1}, {0,1,0}, {0,-1,0}
+};
+static const size_t LIGHT_DOWN = 5;
+static const uint8_t SKYLIGHT_MAX = VoxelInstance::SKYLIGHT_MAX;
+
 struct CInstance: public voxelworld::Instance
 {
 	interface::Server *m_server;
@@ -252,10 +261,27 @@ struct CInstance: public voxelworld::Instance
 	// (as a sorted array in descending node_id order)
 	std::vector<QueuedNodePhysicsUpdate> m_nodes_needing_physics_update;
 
+	// Skylight. Off unless the world asks for it; see api.h.
+	bool m_skylight_enabled = false;
+	// The world region in sections, so that the top of it can be found. Light
+	// enters from above that; everything outside is a barrier.
+	pv::Region m_section_region;
+	// Voxels that started or stopped transmitting light since the last commit,
+	// with what they were before, because the new voxel has already replaced
+	// the old light value by the time this is looked at.
+	struct SkylightSeed
+	{
+		pv::Vector3DInt32 p;
+		uint8_t old_level;
+		bool was_transparent;
+	};
+	std::vector<SkylightSeed> m_skylight_seeds;
+
 	CInstance(interface::Server *server, SceneReference scene_ref,
 			const pv::Region &region):
 		m_server(server),
-		m_scene_ref(scene_ref)
+		m_scene_ref(scene_ref),
+		m_section_region(region)
 	{
 		m_voxel_reg.reset(interface::createVoxelRegistry());
 		m_block_reg.reset(interface::createBlockRegistry(m_voxel_reg.get()));
@@ -878,6 +904,17 @@ struct CInstance: public voxelworld::Instance
 	void set_voxel(const pv::Vector3DInt32 &p, const interface::VoxelInstance &v,
 			bool disable_warnings)
 	{
+		set_voxel_impl(p, v, disable_warnings, false);
+	}
+
+	// is_light_update: the skylight bits in v are meant to be written as they
+	// are. Every other caller gets them carried over from the voxel that was
+	// there, because once skylight is on those bits belong to voxelworld and a
+	// caller writing a plain voxel would otherwise wipe the light out of it.
+	void set_voxel_impl(const pv::Vector3DInt32 &p,
+			const interface::VoxelInstance &v, bool disable_warnings,
+			bool is_light_update)
+	{
 		// Don't log here; this is a too busy place for even ignored log calls
 		/*log_t(MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i",
 				PV3I_PARAMS(p), v.data);*/
@@ -913,7 +950,18 @@ struct CInstance: public voxelworld::Instance
 				p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY(),
 				p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ()
 		);
-		buf.volume->setVoxelAt(voxel_p, v);
+		VoxelInstance nv = v;
+		if(m_skylight_enabled && !is_light_update){
+			VoxelInstance old = buf.volume->getVoxelAt(voxel_p);
+			bool old_transparent = voxel_transmits_light(old);
+			if(old_transparent != voxel_transmits_light(v)){
+				m_skylight_seeds.push_back(SkylightSeed{
+						p, old.get_skylight(), old_transparent});
+			}
+			nv.set_skylight(old.get_skylight());
+		}
+
+		buf.volume->setVoxelAt(voxel_p, nv);
 
 		// Set buffer dirty
 		if(!buf.dirty){
@@ -986,6 +1034,189 @@ struct CInstance: public voxelworld::Instance
 				}
 			}
 		}
+	}
+
+	// Skylight
+	//
+	// Air voxels hold the light itself. Voxels that block light hold the
+	// brightest light next to them instead, which is what the mesher reads
+	// when the air voxel in front of a face is in a chunk it is not meshing.
+
+	bool voxel_transmits_light(const VoxelInstance &v)
+	{
+		if(v.get_id() == interface::VOXELTYPEID_UNDEFINED)
+			return false;
+		const interface::CachedVoxelDefinition *def =
+				m_voxel_reg->get_cached(v);
+		if(def == nullptr)
+			return false;
+		return def->edge_material_id == interface::EDGEMATERIALID_EMPTY;
+	}
+
+	// Voxels in the topmost row of the world see the open sky
+	bool is_below_open_sky(const pv::Vector3DInt32 &p)
+	{
+		int section_h = m_section_size_chunks.getY() *
+				m_chunk_size_voxels.getY();
+		return p.getY() ==
+				(m_section_region.getUpperCorner().getY() + 1) * section_h - 1;
+	}
+
+	void set_skylight_at(const pv::Vector3DInt32 &p, const VoxelInstance &v,
+			uint8_t level)
+	{
+		VoxelInstance nv = v;
+		nv.set_skylight(level);
+		set_voxel_impl(p, nv, true, true);
+	}
+
+	struct LightNode
+	{
+		pv::Vector3DInt32 p;
+		uint8_t level;
+	};
+
+	// Bring the skylight up to date after the voxels in m_skylight_seeds
+	// changed. Light is taken out of everything the changed voxels were
+	// lighting, and then spread back in from whatever still has light, so the
+	// work done is proportional to how far the change reaches rather than to
+	// the size of the world. Neighbours are read in world coordinates, so this
+	// crosses chunk and section boundaries by itself; a section that is not in
+	// memory reads as undefined and stops the light, which keeps an edit next
+	// to the edge of the loaded world from running away.
+	void update_skylight()
+	{
+		std::vector<SkylightSeed> seeds;
+		seeds.swap(m_skylight_seeds);
+		if(!m_skylight_enabled || seeds.empty())
+			return;
+		auto t0 = std::chrono::steady_clock::now();
+
+		std::vector<LightNode> unlight;
+		std::vector<LightNode> spread;
+		// Voxels that block light and are next to something that changed.
+		// Duplicates are left in; recomputing one twice costs a little and is
+		// simpler than keeping a set.
+		std::vector<pv::Vector3DInt32> blockers;
+
+		for(const SkylightSeed &seed : seeds){
+			VoxelInstance v = get_voxel(seed.p, true);
+			bool now_transparent = voxel_transmits_light(v);
+			if(seed.was_transparent && !now_transparent){
+				// It took its light with it
+				unlight.push_back(LightNode{seed.p, seed.old_level});
+				blockers.push_back(seed.p);
+			} else if(!seed.was_transparent && now_transparent){
+				// It is dark and has to be filled from around it
+				uint8_t l = is_below_open_sky(seed.p) ? SKYLIGHT_MAX : 0;
+				set_skylight_at(seed.p, v, l);
+				if(l > 0)
+					spread.push_back(LightNode{seed.p, l});
+				for(size_t k = 0; k < 6; k++){
+					pv::Vector3DInt32 n(
+							seed.p.getX() + LIGHT_OFF[k][0],
+							seed.p.getY() + LIGHT_OFF[k][1],
+							seed.p.getZ() + LIGHT_OFF[k][2]);
+					VoxelInstance nv = get_voxel(n, true);
+					if(!voxel_transmits_light(nv)){
+						blockers.push_back(n);
+						continue;
+					}
+					if(nv.get_skylight() > 0)
+						spread.push_back(LightNode{n, nv.get_skylight()});
+				}
+			}
+		}
+
+		// Take the light out. A neighbour dimmer than where the light is being
+		// removed from was lit by it and goes dark too; one that is as bright
+		// or brighter is lit by something else and becomes a source to spread
+		// back from. Straight down is the exception: light does not dim on the
+		// way down, so a full strength voxel below a full strength one was
+		// still lit by it.
+		for(size_t i = 0; i < unlight.size(); i++){
+			LightNode node = unlight[i];
+			for(size_t k = 0; k < 6; k++){
+				pv::Vector3DInt32 n(
+						node.p.getX() + LIGHT_OFF[k][0],
+						node.p.getY() + LIGHT_OFF[k][1],
+						node.p.getZ() + LIGHT_OFF[k][2]);
+				VoxelInstance nv = get_voxel(n, true);
+				if(!voxel_transmits_light(nv)){
+					blockers.push_back(n);
+					continue;
+				}
+				uint8_t nl = nv.get_skylight();
+				if(nl == 0)
+					continue;
+				bool lit_from_above = (k == LIGHT_DOWN &&
+						node.level == SKYLIGHT_MAX && nl == SKYLIGHT_MAX);
+				if(nl < node.level || lit_from_above){
+					set_skylight_at(n, nv, 0);
+					unlight.push_back(LightNode{n, nl});
+				} else {
+					spread.push_back(LightNode{n, nl});
+				}
+			}
+		}
+
+		// Spread it back in
+		for(size_t i = 0; i < spread.size(); i++){
+			LightNode node = spread[i];
+			if(node.level == 0)
+				continue;
+			// Spread whatever the voxel holds now, not what it held when it
+			// was put on the list: a source can be unlit by another branch
+			// after it was queued, and spreading the level it used to have
+			// would put light back where it was just taken from.
+			VoxelInstance v = get_voxel(node.p, true);
+			if(!voxel_transmits_light(v))
+				continue;
+			node.level = v.get_skylight();
+			if(node.level == 0)
+				continue;
+			for(size_t k = 0; k < 6; k++){
+				pv::Vector3DInt32 n(
+						node.p.getX() + LIGHT_OFF[k][0],
+						node.p.getY() + LIGHT_OFF[k][1],
+						node.p.getZ() + LIGHT_OFF[k][2]);
+				VoxelInstance nv = get_voxel(n, true);
+				if(!voxel_transmits_light(nv)){
+					blockers.push_back(n);
+					continue;
+				}
+				uint8_t target = (k == LIGHT_DOWN &&
+						node.level == SKYLIGHT_MAX) ?
+						SKYLIGHT_MAX : node.level - 1;
+				if(target > nv.get_skylight()){
+					set_skylight_at(n, nv, target);
+					spread.push_back(LightNode{n, target});
+				}
+			}
+		}
+
+		// Give the voxels that block light the brightest light next to them
+		for(const pv::Vector3DInt32 &p : blockers){
+			VoxelInstance v = get_voxel(p, true);
+			if(voxel_transmits_light(v))
+				continue;
+			uint8_t best = 0;
+			for(size_t k = 0; k < 6; k++){
+				VoxelInstance nv = get_voxel(pv::Vector3DInt32(
+						p.getX() + LIGHT_OFF[k][0],
+						p.getY() + LIGHT_OFF[k][1],
+						p.getZ() + LIGHT_OFF[k][2]), true);
+				if(voxel_transmits_light(nv) && nv.get_skylight() > best)
+					best = nv.get_skylight();
+			}
+			if(v.get_skylight() != best)
+				set_skylight_at(p, v, best);
+		}
+
+		log_v(MODULE, "update_skylight(): %zu seeds, %zu unlit, %zu spread "
+				"in %i ms", seeds.size(), unlight.size(), spread.size(),
+				(int)std::chrono::duration_cast<std::chrono::milliseconds>(
+				std::chrono::steady_clock::now() - t0).count());
 	}
 
 	// Commit and unload chunk buffer
@@ -1084,8 +1315,17 @@ struct CInstance: public voxelworld::Instance
 		return m_total_buffers_loaded;
 	}
 
+	void set_skylight_enabled(bool enabled)
+	{
+		m_skylight_enabled = enabled;
+	}
+
 	void commit()
 	{
+		// Before anything is meshed, so that the light lands in the same
+		// remesh as the voxels that changed it
+		update_skylight();
+
 		if(m_sections_with_loaded_buffers.empty())
 			return;
 		log_d(MODULE, "Committing %zu dirty buffers in %zu sections",
