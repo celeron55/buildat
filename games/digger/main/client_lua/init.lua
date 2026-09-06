@@ -8,6 +8,7 @@ local cereal = require("buildat/extension/cereal")
 local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
+local voxel_shading = require("buildat/module/voxel_shading")
 
 --local RENDER_DISTANCE = 640
 local RENDER_DISTANCE = 480
@@ -16,6 +17,24 @@ local RENDER_DISTANCE = 480
 --local RENDER_DISTANCE = 160
 
 local FOG_END = RENDER_DISTANCE * 1.2
+
+-- The server fills the skylight bits of every voxel and the mesher shades the
+-- geometry by them, which is what tells a cave apart from a shadow.
+voxelworld.use_skylight = true
+
+-- Lighting as in games/voxel_lighting: a PBR voxel material lit in HDR and
+-- tonemapped, so the sun can be brighter than white without the frame clipping
+-- and a dug tunnel can be genuinely dark. The zone's ambient color is the sky,
+-- which is what a surface with full skylight receives.
+local SKY_AMBIENT = magic.Color(0.26, 0.33, 0.46)
+-- Urho's PBR direct lighting is normalized, so a sun that reads as bright is a
+-- much larger number here than under the legacy Diff technique
+local SUN_BRIGHTNESS = 50.0
+-- The way the light travels, so the sun is the other way
+local SUN_DIR = {x = -0.6, y = -1.0, z = 0.8}
+-- Auto exposure would lift the inside of a tunnel back to mid grey, which is
+-- the thing worth being dark in a digging game
+local EXPOSURE_BIAS = 1.6
 
 local PLAYER_HEIGHT = 1.7
 local PLAYER_WIDTH = 0.9
@@ -90,60 +109,33 @@ end
 magic.input:SetMouseVisible(false)
 
 -- Set up zone (global visual parameters)
----[[
 do
 	local zone_node = scene:CreateChild("Zone")
 	local zone = zone_node:CreateComponent("Zone")
 	zone.boundingBox = magic.BoundingBox(-1000, 1000)
-	zone.ambientColor = magic.Color(0.42, 0.48, 0.60)
-	--zone.ambientColor = magic.Color(0, 0, 0)
-	zone.fogColor = magic.Color(0.68, 0.76, 0.85)
-	--zone.fogColor = magic.Color(0, 0, 0)
-	zone.fogStart = 10
+	zone.ambientColor = SKY_AMBIENT
+	zone.fogColor = magic.Color(0.60, 0.72, 0.88)
+	zone.fogStart = FOG_END * 0.6
 	zone.fogEnd = FOG_END
 	zone.priority = -1
 	zone.override = true
+	-- What the voxel shader reflects; see builtin/voxel_shading
+	zone.zoneTexture = magic.cache:GetResource("TextureCube",
+			voxel_shading.sky_cubemap)
 end
---]]
 
 -- Add lights
 do
-	--[[
-	local dirs = {
-		magic.Vector3( 1.0, -1.0,  1.0),
-		magic.Vector3( 1.0, -1.0, -1.0),
-		magic.Vector3(-1.0, -1.0, -1.0),
-		magic.Vector3(-1.0, -1.0,  1.0),
-	}
-	for _, dir in ipairs(dirs) do
-		local node = scene:CreateChild("DirectionalLight")
-		node.direction = dir
-		local light = node:CreateComponent("Light")
-		light.lightType = magic.LIGHT_DIRECTIONAL
-		light.castShadows = true
-		light.brightness = 0.2
-		light.color = magic.Color(0.7, 0.7, 1.0)
-	end
-	--]]
-
 	local node = scene:CreateChild("DirectionalLight")
-	node.direction = magic.Vector3(-0.6, -1.0, 0.8)
+	node.direction = magic.Vector3(SUN_DIR.x, SUN_DIR.y, SUN_DIR.z)
 	local light = node:CreateComponent("Light")
 	light.lightType = magic.LIGHT_DIRECTIONAL
 	light.castShadows = true
-	light.brightness = 1.2
-	light.color = magic.Color(1.0, 1.0, 0.95)
-
-	--[[
-	local node = scene:CreateChild("DirectionalLight")
-	node.direction = magic.Vector3(0.0, -1.0, 0.0)
-	local light = node:CreateComponent("Light")
-	light.lightType = magic.LIGHT_DIRECTIONAL
-	light.castShadows = false
-	light.brightness = 0.05
-	light.color = magic.Color(1.0, 1.0, 1.0)
-	--]]
+	light.brightness = SUN_BRIGHTNESS
+	light.color = magic.Color(1.0, 0.96, 0.88)
 end
+
+voxel_shading.create_skybox(scene, SUN_DIR)
 
 -- Add a node that the player can use to walk around with
 local player_node = scene:CreateChild("Player")
@@ -218,11 +210,25 @@ do
 	-- And this thing so the camera is shown on the screen
 	local viewport = magic.Viewport:new(scene, camera_node:GetComponent("Camera"))
 	magic.renderer:SetViewport(0, viewport)
+
+	magic.renderer.HDRRendering = true
+	local rp = viewport.renderPath:Clone()
+	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/BloomHDR.xml"))
+	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/Tonemap.xml"))
+	rp:Append(magic.cache:GetResource("XMLFile",
+			"PostProcess/GammaCorrection.xml"))
+	-- Tonemap.xml ships with Reinhard on; Uncharted2 keeps more contrast in
+	-- the shadows, which is where a dug tunnel is
+	rp:SetEnabled("TonemapReinhardEq3", false)
+	rp:SetEnabled("TonemapUncharted2", true)
+	rp:SetShaderParameter("TonemapExposureBias", EXPOSURE_BIAS)
+	viewport.renderPath = rp
 end
 
 -- Tell about the camera to the voxel world so it can do stuff based on the
 -- camera's position and other properties
 voxelworld.set_camera(camera_node)
+voxel_shading.set_camera(camera_node)
 
 ---[[
 -- Add a light to the camera
@@ -231,8 +237,10 @@ do
 	local light = node:CreateComponent("Light")
 	light.lightType = magic.LIGHT_POINT
 	light.castShadows = false
-	light.brightness = 0.15
-	light.color = magic.Color(1.0, 1.0, 1.0)
+	-- Enough to dig by without lifting a tunnel to the brightness of outside;
+	-- a PBR point light needs a much larger number than the legacy one did
+	light.brightness = 15.0
+	light.color = magic.Color(1.0, 0.97, 0.92)
 	light.range = 15.0
 	light.fadeDistance = 15.0
 end
@@ -384,6 +392,10 @@ end)
 magic.SubscribeToEvent("Update", function(event_type, event_data)
 	--log:info("Update")
 	local dt = event_data:GetFloat("TimeStep")
+
+	-- Blends the reflected sky towards the indoor one as the camera goes
+	-- under ground; see builtin/voxel_shading
+	voxel_shading.update(dt)
 
 	if camera_node then
 		local p, p_above = find_pointed_voxel(camera_node)
