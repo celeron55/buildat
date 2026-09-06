@@ -455,7 +455,7 @@ struct Module: public interface::Module
 			const ss_ &texture, bool solid, float roughness = 0.9f,
 			float metalness = 0.0f, float bumpiness = 1.0f,
 			float roughness_variation = 1.0f, float translucency = 0.0f,
-			float spots = 0.0f)
+			float spots = 0.0f, float static_spots = 0.0f)
 	{
 		interface::VoxelDefinition vdef;
 		vdef.name.block_name = name;
@@ -477,6 +477,7 @@ struct Module: public interface::Module
 			seg.roughness_variation = roughness_variation;
 			seg.translucency = translucency;
 			seg.spots = spots;
+			seg.static_spots = static_spots;
 		}
 		vdef.edge_material_id = solid ? interface::EDGEMATERIALID_GROUND :
 				interface::EDGEMATERIALID_EMPTY;
@@ -514,7 +515,7 @@ struct Module: public interface::Module
 			add_voxel(reg, "air", "", false);              // id 1
 			// Same surfaces as voxel_lighting; see its main.cpp
 			add_voxel(reg, "rock", "main/rock.png", true,
-					0.95f, 0.0f, 2.0f); // id 2
+					0.95f, 0.0f, 2.0f, 0.3f, 0.0f, 0.0f, 0.04f); // id 2
 			add_voxel(reg, "dirt", "main/dirt.png", true,
 					0.98f, 0.0f, 2.5f); // id 3
 			add_voxel(reg, "grass", "main/grass.png", true,
@@ -522,7 +523,7 @@ struct Module: public interface::Module
 			add_voxel(reg, "leaves", "main/leaves.png", true,
 					0.95f, 0.0f, 1.5f, 0.0f, 0.11f, 0.03f); // id 5
 			add_voxel(reg, "tree", "main/tree.png", true,
-					0.85f, 0.0f, 2.0f); // id 6
+					0.85f, 0.0f, 2.0f, 0.35f); // id 6
 
 			// The whole point of this scene: let voxelworld light it
 			ivoxelworld->get_instance(m_main_scene)->

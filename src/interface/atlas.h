@@ -61,6 +61,11 @@ namespace interface
 		//              behind at a spot, tinting itself with the surface's own
 		//              color on the way. This is what makes a backlit leaf
 		//              glow.
+		//   static_spots  fraction of the surface that is a spot that does
+		//              not move: a crystalline face in cracked rock, glossier
+		//              than the rest and turned a little off the voxel face.
+		//              Worked out from the world position alone, so it is not
+		//              tied to the texture and does not repeat with it.
 		//   spots      fraction of the surface that is a spot at any one
 		//              moment: glossier than the roughness above, and letting
 		//              translucency through. Which parts they are is not baked
@@ -83,6 +88,7 @@ namespace interface
 		float roughness_variation = 1.0f;
 		float translucency = 0.0f;
 		float spots = 0.0f;
+		float static_spots = 0.0f;
 
 		bool operator==(const AtlasSegmentDefinition &other) const;
 	};
@@ -107,9 +113,10 @@ namespace interface
 		magic::SharedPtr<magic::Image> image;
 		magic::SharedPtr<magic::Texture2D> texture;
 		// Derived from the segment images; same layout as the diffuse atlas.
-		// normal is a tangent space normal map, spec is roughness in r and
-		// metalness in g (what Urho's PBR shaders read from sSpecMap), and,
-		// which only PBRVoxel reads, translucency in b and spots in a.
+		// normal is a tangent space normal map with static_spots in its
+		// alpha, spec is roughness in r and metalness in g (what Urho's PBR
+		// shaders read from sSpecMap), and, which only PBRVoxel reads,
+		// translucency in b and spots in a.
 		magic::SharedPtr<magic::Image> normal_image;
 		magic::SharedPtr<magic::Texture2D> normal_texture;
 		magic::SharedPtr<magic::Image> spec_image;

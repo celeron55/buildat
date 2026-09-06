@@ -453,7 +453,7 @@ struct Module: public interface::Module
 			const ss_ &texture, bool solid, float roughness = 0.9f,
 			float metalness = 0.0f, float bumpiness = 1.0f,
 			float roughness_variation = 1.0f, float translucency = 0.0f,
-			float spots = 0.0f)
+			float spots = 0.0f, float static_spots = 0.0f)
 	{
 		interface::VoxelDefinition vdef;
 		vdef.name.block_name = name;
@@ -475,6 +475,7 @@ struct Module: public interface::Module
 			seg.roughness_variation = roughness_variation;
 			seg.translucency = translucency;
 			seg.spots = spots;
+			seg.static_spots = static_spots;
 		}
 		vdef.edge_material_id = solid ? interface::EDGEMATERIALID_GROUND :
 				interface::EDGEMATERIALID_EMPTY;
@@ -509,7 +510,15 @@ struct Module: public interface::Module
 			interface::VoxelRegistry *reg = ivoxelworld->
 					get_instance(m_main_scene)->get_voxel_reg();
 			add_voxel(reg, "air", "", false);              // id 1
-			// Rock and dirt are matte and coarse. Grass is matte and, for
+			// Rock is not a polished slab: it is dull nearly everywhere,
+			// with the odd crystalline facet in it that catches the light.
+			// Those are its static_spots, and they are worked out from the
+			// world position rather than from its texture, so they do not
+			// repeat once per voxel the way anything in the map does. Most of
+			// the roughness its texture would give it is taken back out, so
+			// what gloss it has is the facets. Dirt is matte and coarse.
+			// The tree trunk keeps only a third of the gloss its bark texture
+			// asks for; bark is not that shiny. Grass is matte and, for
 			// all the shapes in it, reads as smooth at any distance, so its
 			// normals are kept low; any more and it turns grainy. Light gets
 			// through the odd blade of it the same way it gets through leaves,
@@ -528,7 +537,7 @@ struct Module: public interface::Module
 			// roughness is set well above a still pond's. Between them they
 			// stand in for the animated normal map it has not got.
 			add_voxel(reg, "rock", "main/rock.png", true,
-					0.95f, 0.0f, 2.0f); // id 2
+					0.95f, 0.0f, 2.0f, 0.3f, 0.0f, 0.0f, 0.04f); // id 2
 			add_voxel(reg, "dirt", "main/dirt.png", true,
 					0.98f, 0.0f, 2.5f); // id 3
 			add_voxel(reg, "grass", "main/grass.png", true,
@@ -536,7 +545,7 @@ struct Module: public interface::Module
 			add_voxel(reg, "leaves", "main/leaves.png", true,
 					0.95f, 0.0f, 1.5f, 0.0f, 0.11f, 0.03f); // id 5
 			add_voxel(reg, "tree", "main/tree.png", true,
-					0.85f, 0.0f, 2.0f); // id 6
+					0.85f, 0.0f, 2.0f, 0.35f); // id 6
 			add_voxel(reg, "water", "main/water.png", true,
 					0.28f, 0.0f, 6.0f, 1.0f, 0.0f, 0.05f); // id 7
 

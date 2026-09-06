@@ -12,13 +12,18 @@
 # or roughness map for any of them, because the atlas derives both from the
 # texture itself (see src/impl/atlas.cpp).
 #
-# The sun disc is deliberately not drawn. The scene's directional light already
-# provides the sun's specular highlight, and putting it in the cube map as well
-# would give every surface two suns.
+# A sun disc is drawn, a few degrees across rather than the half degree the
+# real one is: at this resolution a half-degree disc is smaller than a texel.
+# It is what gives a glossy surface something with contrast in it to reflect,
+# which is what a highlight needs. The scene's directional light also draws the
+# sun's highlight, so a surface facing it right gets both; the disc is kept at
+# the top of the 8 bit range rather than made an HDR value so that the two stay
+# close in brightness instead of the reflection swamping the light.
 #
 # Values are in the same scale as the zone's ambient color, which is what a
 # surface with full skylight receives: this map is the same sky seen in a
 # mirror rather than a separate, brighter one.
+import math
 import os
 import struct
 import zlib
@@ -31,6 +36,11 @@ GROUND = (0.14, 0.13, 0.11)
 LIGHT_DIR = (-0.6, -1.0, 0.8)
 GLOW = (0.34, 0.28, 0.18)
 GLOW_EXPONENT = 4.0
+SUN_DISC = (1.0, 0.97, 0.88)
+# Degrees, outer and inner: the disc fades between them so it does not stair
+# step across the face's texels
+SUN_OUTER_DEG = 6.0
+SUN_INNER_DEG = 3.5
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))))
@@ -59,7 +69,11 @@ def sky_color(d):
     # A broad glow around the sun, cut off at the horizon along with the sky
     cos_sun = max(0.0, sum(d[i] * SUN[i] for i in range(3)))
     glow = cos_sun ** GLOW_EXPONENT * max(0.0, min(1.0, d[1] * 4.0 + 0.5))
-    return tuple(min(1.0, c[i] + GLOW[i] * glow) for i in range(3))
+    c = tuple(min(1.0, c[i] + GLOW[i] * glow) for i in range(3))
+    outer = math.cos(math.radians(SUN_OUTER_DEG))
+    inner = math.cos(math.radians(SUN_INNER_DEG))
+    disc = max(0.0, min(1.0, (cos_sun - outer) / (inner - outer)))
+    return mix(c, SUN_DISC, disc * disc * (3.0 - 2.0 * disc))
 
 
 # The standard cube map face parametrization: u and v run 0..1 from the top
@@ -100,7 +114,6 @@ WATER_RIPPLE = 0.022
 
 
 def make_water():
-    import math
     rows = []
     for y in range(WATER_SIZE):
         row = []
