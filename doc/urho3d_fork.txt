@@ -1,0 +1,53 @@
+Urho3D fork
+===========
+3rdparty/Urho3D is official Urho3D 1.7.1 with the changes below. They are not
+upstream and will not survive an update of the bundled copy unless carried
+over. Keep this list current when patching further.
+
+"git log -- 3rdparty/Urho3D" is the authoritative history; the commit hashes
+here are where to read the actual diff.
+
+Shader names that carry a path (bf72454)
+----------------------------------------
+Graphics/{OpenGL/OGLGraphics,Direct3D9/D3D9Graphics,Direct3D11/D3D11Graphics}.cpp
+Graphics/Graphics.h
+Graphics/Shader.cpp
+
+GetShader() treats a name containing '/' as a full resource name instead of
+prefixing shaderPath_ ("Shaders/GLSL/"), and Shader::ProcessSource falls back
+to shaderPath_ when an #include is not found next to the including shader.
+Together these let a module ship a shader under its own resource namespace and
+still use the engine's includes; without them every game would have to occupy
+the one shader directory they all share. Graphics::GetShaderPath() is the
+accessor the fallback needs. See builtin/voxel_shading.
+
+glTF 2.0 loading, Assimp dropped (4e20d9e)
+------------------------------------------
+Graphics/GLTFLoader.{cpp,h}, Graphics/Model.cpp, Graphics/Animation.cpp
+Source/ThirdParty/tinygltf (added), Source/ThirdParty/Assimp (removed)
+
+Model and Animation load .gltf/.glb at runtime through tinygltf, so a game can
+ship a glTF file as client data with no conversion step. The parse path follows
+rbfx's Utility/GLTFImporter. Assimp was removed with it; nothing else used it.
+
+The right-handed to left-handed conversion is an X mirror applied in several
+places at once, and the comment above MirrorX in GLTFLoader.cpp says which and
+why. Read it before touching any of them.
+
+Sharp scaled UI text (de35f88)
+------------------------------
+UI/FontFaceFreeType.{cpp,h}, UI/UI.cpp
+
+FontFaceFreeType remembers the UI scale it rasterised at and stores glyphs in
+virtual units, and UI::SetScale releases the font faces when the scale actually
+changes so they are rasterised again at the new one. Without it, scaled UI text
+is a magnified bitmap. The Overpass fonts that go with it are in
+client/data/Fonts and are not part of the fork.
+
+UI/MessageBox.xml (5d2117a)
+---------------------------
+Bin/Data/UI/MessageBox.xml
+
+Kept from an earlier bundled version; 1.7.1 does not ship it, and
+UI/MessageBox.cpp loads it by name when a MessageBox is created without a
+layout of its own.

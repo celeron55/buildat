@@ -71,6 +71,19 @@ namespace tg = tinygltf;
 namespace
 {
 
+// glTF is right-handed and Urho3D is left-handed, so one axis has to be
+// mirrored on the way in. X is the one to pick: it leaves +Y up and +Z
+// forward reading the same in both, where mirroring Z would turn the model
+// around. Every piece of geometry that meets another has to be mirrored the
+// same way or they come apart, so all of these go together:
+//   node translation and rotation    GetNodeLocalTRS
+//   inverse bind matrices            BuildSkeleton
+//   positions and normals            LoadGLTFModel
+//   position and rotation tracks     LoadGLTFAnimation
+// and mirroring reverses triangle winding, which LoadGLTFModel undoes by
+// swapping two indices of every triangle. Drop any one of these and the
+// result still nearly works -- inside-out faces, or animation that slides off
+// the mesh -- so treat them as one change.
 Vector3 MirrorX(const Vector3& v)
 {
     return Vector3(-v.x_, v.y_, v.z_);
