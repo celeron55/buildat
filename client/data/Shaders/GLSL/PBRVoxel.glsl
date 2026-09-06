@@ -27,6 +27,11 @@
 //       color is already the scene's ambient diffuse, and adding an
 //       unoccluded sky on top of it would light the inside of a cave. The
 //       specular term is scaled by the same skylight for the same reason.
+//   VOXELTRANSLUCENCY  light that reaches a surface from behind and comes
+//       through it, tinted by the surface's own color. This is why a leaf
+//       against the sun reads as yellow-green and not as the blue of the sky
+//       that is the only thing lighting its front. The amount is per texel,
+//       in the blue channel of the roughness/metalness map.
 
 #include "Uniforms.glsl"
 #include "Samplers.glsl"
@@ -246,6 +251,25 @@ void PS()
         vec3 BRDF = GetBRDF(vWorldPos.xyz, lightDir, lightVec, toCamera, normal, roughness, diffColor.rgb, specColor);
 
         finalColor.rgb = BRDF * lightColor * (atten * shadow) / M_PI;
+
+        #if defined(VOXELTRANSLUCENCY) && defined(METALLIC)
+            // Light through the surface from the far side. It needs the light
+            // on the back (atten is zero there, which is why this cannot ride
+            // on it) and the camera roughly opposite the light, which is the
+            // one geometry where a thin surface glows.
+            //
+            // simplified: not multiplied by shadow. A surface lit from behind
+            // is its own shadow caster, so the shadow map says it is shadowed
+            // and the term would never appear. That also means a leaf in
+            // somebody else's shadow glows; with voxel geometry, where only
+            // the outside of a canopy is meshed at all, that is rare enough to
+            // leave. Sampling the shadow map along the transmission direction
+            // would be the fix.
+            float backNdl = max(0.0, -dot(normal, lightVec));
+            float forward = pow(max(0.0, dot(-lightVec, toCamera)), 3.0);
+            finalColor.rgb += roughMetalSrc.b * diffColor.rgb * lightColor *
+                (backNdl * forward) / M_PI;
+        #endif
 
         #ifdef AMBIENT
             finalColor += cAmbientColor.rgb * diffColor.rgb;

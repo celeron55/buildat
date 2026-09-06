@@ -86,6 +86,8 @@ struct Worldgen: public worldgen::GeneratorInterface
 	// The client places its benchmark cameras relative to the cave, so it is
 	// told where the cave ended up rather than recomputing it from a copy of
 	// these constants.
+	bool tree_valid = false;
+	float tree_centre[3] = {0, 0, 0};
 	bool water_valid = false;
 	// Benchmark 4's camera and what it looks at. Worked out here rather than
 	// on the client because it needs the terrain height to stay above ground.
@@ -204,6 +206,21 @@ struct Worldgen: public worldgen::GeneratorInterface
 					for(int y1 = y+3; y1 <= y+7; y1++)
 						for(int z1 = z-2; z1 <= z+2; z1++)
 							set_id(x1, y1, z1, 5);
+
+				// Keep the most central tree for benchmark 5, which looks at
+				// a canopy with the sun behind it. Central so that the camera
+				// it puts on the far side of the tree is still in the scene.
+				float cdx = x - (lc.getX() + VOLUME_SIZE / 2.0f);
+				float cdz = z - (lc.getZ() + VOLUME_SIZE / 2.0f);
+				float bdx = tree_centre[0] - (lc.getX() + VOLUME_SIZE / 2.0f);
+				float bdz = tree_centre[2] - (lc.getZ() + VOLUME_SIZE / 2.0f);
+				if(!tree_valid ||
+						cdx * cdx + cdz * cdz < bdx * bdx + bdz * bdz){
+					tree_centre[0] = x;
+					tree_centre[1] = y + 5;
+					tree_centre[2] = z;
+					tree_valid = true;
+				}
 			}
 
 			// Dig the basin and fill it. Done before the cave is carved, so
@@ -434,7 +451,8 @@ struct Module: public interface::Module
 	// texture with them. See interface/atlas.h.
 	void add_voxel(interface::VoxelRegistry *reg, const ss_ &name,
 			const ss_ &texture, bool solid, float roughness = 0.9f,
-			float metalness = 0.0f, float bumpiness = 1.0f)
+			float metalness = 0.0f, float bumpiness = 1.0f,
+			float gloss_spots = 0.0f, float translucency = 0.0f)
 	{
 		interface::VoxelDefinition vdef;
 		vdef.name.block_name = name;
@@ -453,6 +471,8 @@ struct Module: public interface::Module
 			seg.roughness = roughness;
 			seg.metalness = metalness;
 			seg.bumpiness = bumpiness;
+			seg.gloss_spots = gloss_spots;
+			seg.translucency = translucency;
 		}
 		vdef.edge_material_id = solid ? interface::EDGEMATERIALID_GROUND :
 				interface::EDGEMATERIALID_EMPTY;
@@ -487,10 +507,14 @@ struct Module: public interface::Module
 			interface::VoxelRegistry *reg = ivoxelworld->
 					get_instance(m_main_scene)->get_voxel_reg();
 			add_voxel(reg, "air", "", false);              // id 1
-			// Rock and dirt are matte and coarse; grass is matte but finer.
-			// Leaves are the interesting one: a mean roughness in the middle
-			// means the light parts of the texture come out as waxy highlights
-			// and the dark parts stay matte, which is how a canopy looks.
+			// Rock and dirt are matte and coarse. Grass is matte and, for
+			// all the shapes in it, reads as smooth at any distance, so its
+			// normals are kept low; any more and it turns grainy.
+			// Leaves are matte almost everywhere, with a few per cent of the
+			// texture glossy: individual leaves that happen to face the right
+			// way, rather than a whole waxy canopy. They are also the one
+			// translucent thing here, which is what makes them yellow-green
+			// against the sun instead of sky blue.
 			// Water is the other end of the range, smooth enough to mirror the
 			// sky, with the ripple of its texture pushed into the normals.
 			add_voxel(reg, "rock", "main/rock.png", true,
@@ -498,9 +522,9 @@ struct Module: public interface::Module
 			add_voxel(reg, "dirt", "main/dirt.png", true,
 					0.98f, 0.0f, 2.5f); // id 3
 			add_voxel(reg, "grass", "main/grass.png", true,
-					0.90f, 0.0f, 1.5f); // id 4
+					0.90f, 0.0f, 0.75f); // id 4
 			add_voxel(reg, "leaves", "main/leaves.png", true,
-					0.55f, 0.0f, 1.5f); // id 5
+					0.95f, 0.0f, 1.5f, 0.08f, 0.7f); // id 5
 			add_voxel(reg, "tree", "main/tree.png", true,
 					0.85f, 0.0f, 2.0f); // id 6
 			add_voxel(reg, "water", "main/water.png", true,
@@ -544,6 +568,15 @@ struct Module: public interface::Module
 		return buf;
 	}
 
+	// "x y z", the middle of the canopy benchmark 5 looks at
+	ss_ tree_packet()
+	{
+		char buf[80];
+		snprintf(buf, sizeof buf, "%f %f %f", m_worldgen->tree_centre[0],
+				m_worldgen->tree_centre[1], m_worldgen->tree_centre[2]);
+		return buf;
+	}
+
 	// "ex ey ez tx ty tz": benchmark 4's camera and what it looks at
 	ss_ water_packet()
 	{
@@ -569,6 +602,8 @@ struct Module: public interface::Module
 				inetwork->send(event.recipient, "main:cave", cave_packet());
 			if(m_worldgen && m_worldgen->water_valid)
 				inetwork->send(event.recipient, "main:water", water_packet());
+			if(m_worldgen && m_worldgen->tree_valid)
+				inetwork->send(event.recipient, "main:tree", tree_packet());
 		});
 	}
 
@@ -772,6 +807,8 @@ struct Module: public interface::Module
 				inetwork->send(peer, "main:cave", cave_packet());
 				if(m_worldgen->water_valid)
 					inetwork->send(peer, "main:water", water_packet());
+				if(m_worldgen->tree_valid)
+					inetwork->send(peer, "main:tree", tree_packet());
 			}
 		});
 	}

@@ -52,9 +52,19 @@ namespace interface
 		//   metalness  constant over the segment.
 		//   bumpiness  how much the image's luminance is taken to be height
 		//              when deriving the normal map. 0 is a flat surface.
+		//   gloss_spots  fraction of the segment's texels, the brightest ones,
+		//              that come out glossy instead of following the rule
+		//              above. For a surface that is mostly matte with a few
+		//              parts catching the light, like a canopy of leaves of
+		//              which a few happen to face the right way. 0 is off.
+		//   translucency  how much light passes through the surface from
+		//              behind, tinting itself with the surface's own color on
+		//              the way. This is what makes a backlit leaf glow.
 		float roughness = 0.9f;
 		float metalness = 0.0f;
 		float bumpiness = 1.0f;
+		float gloss_spots = 0.0f;
+		float translucency = 0.0f;
 
 		bool operator==(const AtlasSegmentDefinition &other) const;
 	};
@@ -80,7 +90,8 @@ namespace interface
 		magic::SharedPtr<magic::Texture2D> texture;
 		// Derived from the segment images; same layout as the diffuse atlas.
 		// normal is a tangent space normal map, spec is roughness in r and
-		// metalness in g (what Urho's PBR shaders read from sSpecMap).
+		// metalness in g (what Urho's PBR shaders read from sSpecMap) and
+		// translucency in b (which only PBRVoxel reads).
 		magic::SharedPtr<magic::Image> normal_image;
 		magic::SharedPtr<magic::Texture2D> normal_texture;
 		magic::SharedPtr<magic::Image> spec_image;
