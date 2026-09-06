@@ -101,6 +101,8 @@ void init_voxel(lua_State *L)
 			.def_readwrite("gloss_spots", &AtlasSegmentDefinition::gloss_spots)
 			.def_readwrite("translucency",
 					&AtlasSegmentDefinition::translucency)
+			.def_readwrite("translucency_spots",
+					&AtlasSegmentDefinition::translucency_spots)
 		,
 		class_<VoxelDefinition, bases<>, sp_<VoxelDefinition>>(
 				"__buildat_VoxelDefinition")

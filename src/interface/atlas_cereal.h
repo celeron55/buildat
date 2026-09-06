@@ -11,7 +11,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, AtlasSegmentDefinition &v)
 	{
-		uint8_t version = 3;
+		uint8_t version = 4;
 		archive(
 				version,
 				v.resource_name,
@@ -22,7 +22,8 @@ namespace interface
 				v.metalness,
 				v.bumpiness,
 				v.gloss_spots,
-				v.translucency
+				v.translucency,
+				v.translucency_spots
 		);
 	}
 }

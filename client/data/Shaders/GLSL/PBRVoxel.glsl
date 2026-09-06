@@ -265,9 +265,19 @@ void PS()
             // the outside of a canopy is meshed at all, that is rare enough to
             // leave. Sampling the shadow map along the transmission direction
             // would be the fix.
+            //
+            // The light keeps only part of the surface's color on the way
+            // through. A spot where light comes through a canopy is partly a
+            // gap, which passes the sun unchanged, and partly thin leaf, which
+            // tints it; what a surface transmits is not what it reflects. Using
+            // the albedo raw applies the leaf's green a second time and the
+            // spots come out as saturated as the texture.
+            const float TRANSMISSION_TINT = 0.55;
+            vec3 transmitted = mix(vec3(1.0), diffColor.rgb,
+                TRANSMISSION_TINT);
             float backNdl = max(0.0, -dot(normal, lightVec));
             float forward = pow(max(0.0, dot(-lightVec, toCamera)), 3.0);
-            finalColor.rgb += roughMetalSrc.b * diffColor.rgb * lightColor *
+            finalColor.rgb += roughMetalSrc.b * transmitted * lightColor *
                 (backNdl * forward) / M_PI;
         #endif
 
