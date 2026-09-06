@@ -31,6 +31,9 @@ screenshot ../tmp/voxel_lighting_check/5_backlit_canopy.png
 keypress 6
 delay 500
 screenshot ../tmp/voxel_lighting_check/6_sun_behind_canopy.png
+keypress 7
+delay 500
+screenshot ../tmp/voxel_lighting_check/7_sun_in_sky.png
 
 # Relight on edit: dig the shaft up out of the cave, then hang the slab over the
 # mouth. All three views are shot after each, so each edit can be followed as a
@@ -42,26 +45,26 @@ keypress P
 delay 1500
 keypress 1
 delay 500
-screenshot ../tmp/voxel_lighting_check/7_shaft_overview.png
+screenshot ../tmp/voxel_lighting_check/8_shaft_overview.png
 keypress 2
 delay 500
-screenshot ../tmp/voxel_lighting_check/8_shaft_cave_mouth.png
+screenshot ../tmp/voxel_lighting_check/9_shaft_cave_mouth.png
 keypress 3
 delay 500
-screenshot ../tmp/voxel_lighting_check/9_shaft_inside_cave.png
+screenshot ../tmp/voxel_lighting_check/10_shaft_inside_cave.png
 keypress V
 delay 1500
 keypress O
 delay 1500
 keypress 1
 delay 500
-screenshot ../tmp/voxel_lighting_check/10_slab_overview.png
+screenshot ../tmp/voxel_lighting_check/11_slab_overview.png
 keypress 2
 delay 500
-screenshot ../tmp/voxel_lighting_check/11_slab_cave_mouth.png
+screenshot ../tmp/voxel_lighting_check/12_slab_cave_mouth.png
 keypress 3
 delay 500
-screenshot ../tmp/voxel_lighting_check/12_slab_inside_cave.png
+screenshot ../tmp/voxel_lighting_check/13_slab_inside_cave.png
 keypress V
 delay 1500
 # Dig the shaft a second time. It reaches through the cap, so this cuts the cap
@@ -72,4 +75,4 @@ keypress V
 delay 1500
 keypress 3
 delay 500
-screenshot ../tmp/voxel_lighting_check/13_recycled_inside_cave.png
+screenshot ../tmp/voxel_lighting_check/14_recycled_inside_cave.png

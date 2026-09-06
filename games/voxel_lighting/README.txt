@@ -309,7 +309,7 @@ rendering change against the previous run:
 
 -w gives the run a fixed window size without changing the remembered one, so
 the images come out the same size whatever the window was left at last time.
-It also shoots both benchmark edits, so a run is: all six views of the scene
+It also shoots both benchmark edits, so a run is: all seven views of the scene
 as generated, then three of them after the shaft and after the slab.
 
 NOTE: the server reads client_lua and client_data once at startup, so restart
@@ -326,10 +326,10 @@ by reading that, not derived at runtime, so the scene stays put between
 changes. The tree seed was picked by eye to keep the cave mouth clear.
 
 Where the cave ended up is sent to the client in main:cave, where benchmark 4's
-camera goes in main:water, and which tree benchmarks 5 and 6 look at in main:tree, so
+camera goes in main:water, and which tree benchmarks 5 to 7 look at in main:tree, so
 none of those can drift out of sync with what was generated. Benchmark 4's
 camera is worked out on the server rather than the client because it needs the
-terrain height around the pond to stay above ground; benchmarks 5 and 6 are
+terrain height around the pond to stay above ground; benchmarks 5 to 7 are
 worked out on the client because they need the sun direction, which lives
 there. VIEW_DIR is the one thing still
 duplicated between main.cpp and client_lua/init.lua, and has to be changed in
