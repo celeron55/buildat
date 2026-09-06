@@ -75,8 +75,9 @@ out and the two can be alternated for as long as anyone wants to watch them.
 
 Relighting is voxelworld's, not this game's: it is turned on with
 set_skylight_enabled(true) and from then on every set_voxel keeps the light up
-to date, generation included. An edit costs 2-3 ms here, and what it costs
-depends on how far the light moves rather than on how big the world is.
+to date, generation included. An edit costs well under a millisecond
+here, and what it costs depends on how far the light moves rather than on how
+big the world is. Lighting the whole section at generation costs 40 ms.
 
 V (or the last HUD button) checks that: it runs a skylight flood fill from
 scratch over the whole scene and compares it voxel by voxel against what
