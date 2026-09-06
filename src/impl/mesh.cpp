@@ -329,66 +329,107 @@ public:
 	}
 };
 
-// Skylight as a vertex color multiplier on the zone's ambient color.
+// Vertex colors for skylit voxel geometry, decoded by PBRVoxel.glsl as
+//   ambient = cAmbientColor.rgb * color.a + color.rgb
+// The zone's ambient color is the sky, so a world picks that itself; what is
+// carried here is how much of the sky the surface sees, and the light bounced
+// off nearby surfaces that reaches it regardless.
 //
-// A single multiply cannot turn one ambient color into two, so what is
-// multiplied is a ratio: at full skylight the color is white and the surface
-// gets the zone ambient unchanged (a blue sky bounce), and at zero skylight it
-// gets SHADE_TINT of it. SHADE_TINT is deliberately warmer than it is dark, so
-// against a blue ambient the result reads as the neutral grey of light bounced
-// off rock, rather than as dimmer sky. Shaded-but-open places, such as under a
-// tree canopy, land in between and stay blue.
-//
-// The light passes multiply by the same color, so direct sunlight is tinted
-// too. That is close enough to right, because a face with little skylight is
-// almost always a face the sun cannot see either.
-//
-// simplified: the two ambient colors are fixed here rather than being material
-// or shader parameters, so a world cannot pick its own sky and bounce colors.
-// Moving them into a shader uniform is the upgrade path, and would also let the
-// two be mixed properly instead of through a ratio.
-static const Color SHADE_TINT(0.13f, 0.09f, 0.06f);
+// The bounce color is a property of the rock and dirt a voxel world is made
+// of, so it lives here rather than in a world's settings. It is close to
+// neutral, which is what makes a cave read as grey while a face that is merely
+// shaded from the sun keeps the sky's blue.
+static const Color BOUNCE_COLOR(0.055f, 0.050f, 0.045f);
 
-static unsigned skylight_color(uint8_t sky)
+// Per-face brightness, for legibility rather than for physics: two faces of a
+// voxel that happen to receive the same light have no visible edge between
+// them, which in shadow is most of them. Top is brightest and bottom darkest,
+// and the four sides are spread either side of 1.0 so that no two faces
+// meeting at an edge carry the same value. Indexed by face_id: +Y -Y +X -X +Z -Z.
+static const float FACE_SHADE[6] = {
+	1.15f, 0.80f, 1.00f, 0.90f, 0.95f, 0.85f
+};
+
+// Ambient occlusion by the number of the three voxels around a quad corner
+// that are solid. Applied to ambient only, which is where it is visible: a
+// face in direct sun is shaped by the sun, not by this.
+static const float AO_LEVELS[4] = {1.0f, 0.72f, 0.52f, 0.38f};
+
+static bool occludes(pv::RawVolume<VoxelInstance> &volume,
+		VoxelRegistry *voxel_reg, const pv::Vector3DInt32 &p)
 {
-	float f = (float)sky / VoxelInstance::SKYLIGHT_MAX;
-	return Color(
-			SHADE_TINT.r_ + (1.0f - SHADE_TINT.r_) * f,
-			SHADE_TINT.g_ + (1.0f - SHADE_TINT.g_) * f,
-			SHADE_TINT.b_ + (1.0f - SHADE_TINT.b_) * f).ToUInt();
+	VoxelInstance v = volume.getVoxelAt(p);
+	if(v.get_id() == interface::VOXELTYPEID_UNDEFINED)
+		return false; // Unfilled chunk padding; assume open
+	const interface::CachedVoxelDefinition *def = voxel_reg->get_cached(v);
+	if(def == nullptr)
+		return false;
+	return def->edge_material_id != interface::EDGEMATERIALID_EMPTY;
 }
 
-// Skylight of the transparent voxel this face looks into. PolyVox vertex
-// positions are region-relative and sit on voxel corners, so the average of
-// a quad's four corners is the face center; half a voxel along the normal
-// lands in the voxel in front of it, and half a voxel against it in the solid
-// voxel behind it.
+// One color per corner of a quad. PolyVox vertex positions are region-relative
+// and sit on voxel corners, so the average of a quad's four corners is the face
+// center; half a voxel along the normal lands in the voxel the face looks into,
+// and half a voxel against it in the solid voxel behind it.
 //
 // Chunk volumes are padded by one voxel, but nothing fills that padding, so a
-// face on a chunk edge looks into a voxel that has no skylight. Those fall
-// back to the skylight of the solid voxel, which the world stores as a
-// per-voxel approximation for exactly this case.
-static unsigned face_skylight_color(pv::RawVolume<VoxelInstance> &volume,
-		const pv::Vector3DFloat *quad, const pv::Vector3DFloat &n)
+// face on a chunk edge looks into a voxel that has no skylight. Those fall back
+// to the skylight of the solid voxel, which the world stores as a per-voxel
+// approximation for exactly this case.
+static void face_vertex_colors(pv::RawVolume<VoxelInstance> &volume,
+		VoxelRegistry *voxel_reg, const pv::Vector3DFloat *quad,
+		const pv::Vector3DFloat &n, uint face_id, unsigned out[4])
 {
-	float cx = 0, cy = 0, cz = 0;
-	for(size_t i = 0; i < 4; i++){
-		cx += quad[i].getX();
-		cy += quad[i].getY();
-		cz += quad[i].getZ();
-	}
-	const pv::Vector3DInt32 vlc =
-			volume.getEnclosingRegion().getLowerCorner();
-	auto at = [&](float s) -> VoxelInstance {
-		return volume.getVoxelAt(
-				vlc.getX() + (int)std::floor(cx / 4 + n.getX() * s + 0.5f),
-				vlc.getY() + (int)std::floor(cy / 4 + n.getY() * s + 0.5f),
-				vlc.getZ() + (int)std::floor(cz / 4 + n.getZ() * s + 0.5f));
+	pv::Vector3DFloat centre(0, 0, 0);
+	for(size_t i = 0; i < 4; i++)
+		centre += quad[i];
+	centre /= 4.0f;
+
+	const pv::Vector3DInt32 vlc = volume.getEnclosingRegion().getLowerCorner();
+	auto voxel_at = [&](float s){
+		return pv::Vector3DInt32(
+				vlc.getX() + (int)std::floor(centre.getX() + n.getX()*s + 0.5f),
+				vlc.getY() + (int)std::floor(centre.getY() + n.getY()*s + 0.5f),
+				vlc.getZ() + (int)std::floor(centre.getZ() + n.getZ()*s + 0.5f));
 	};
-	VoxelInstance front = at(0.5f);
-	if(front.get_id() == interface::VOXELTYPEID_UNDEFINED)
-		return skylight_color(at(-0.5f).get_skylight());
-	return skylight_color(front.get_skylight());
+	const pv::Vector3DInt32 front_p = voxel_at(0.5f);
+	VoxelInstance front = volume.getVoxelAt(front_p);
+	uint8_t sky = front.get_id() == interface::VOXELTYPEID_UNDEFINED ?
+			volume.getVoxelAt(voxel_at(-0.5f)).get_skylight() :
+			front.get_skylight();
+	float sky_f = (float)sky / VoxelInstance::SKYLIGHT_MAX;
+
+	// The two axes of the face's own plane, to step around it in
+	pv::Vector3DInt32 u(0, 1, 0), v(0, 0, 1);
+	if(n.getY() != 0){
+		u = pv::Vector3DInt32(1, 0, 0);
+		v = pv::Vector3DInt32(0, 0, 1);
+	} else if(n.getZ() != 0){
+		u = pv::Vector3DInt32(1, 0, 0);
+		v = pv::Vector3DInt32(0, 1, 0);
+	}
+	auto along = [&](const pv::Vector3DFloat &d, const pv::Vector3DInt32 &axis){
+		float c = d.getX()*axis.getX() + d.getY()*axis.getY() +
+				d.getZ()*axis.getZ();
+		return c < 0 ? -1 : 1;
+	};
+
+	for(size_t i = 0; i < 4; i++){
+		pv::Vector3DFloat d = quad[i] - centre;
+		pv::Vector3DInt32 du = u * along(d, u);
+		pv::Vector3DInt32 dv = v * along(d, v);
+		bool s1 = occludes(volume, voxel_reg, front_p + du);
+		bool s2 = occludes(volume, voxel_reg, front_p + dv);
+		// Two solid sides bury the corner whatever is diagonally behind it
+		int level = (s1 && s2) ? 0 : 3 - ((s1 ? 1 : 0) + (s2 ? 1 : 0) +
+				(occludes(volume, voxel_reg, front_p + du + dv) ? 1 : 0));
+		float shade = AO_LEVELS[level] * FACE_SHADE[face_id];
+		out[i] = Color(
+				BOUNCE_COLOR.r_ * (1.0f - sky_f) * shade,
+				BOUNCE_COLOR.g_ * (1.0f - sky_f) * shade,
+				BOUNCE_COLOR.b_ * (1.0f - sky_f) * shade,
+				sky_f * shade).ToUInt();
+	}
 }
 
 void assign_txcoords(size_t pv_vertex_i1, const AtlasSegmentCache *aseg,
@@ -599,7 +640,9 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			// memory, so let's do only one big memory allocation
 			tg.vertex_data.Reserve(pv_vertices.size() / 4 * 6);
 		}
-		unsigned face_color = 0xffffffff;
+		unsigned corner_colors[4] = {
+			0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff
+		};
 		if(use_skylight){
 			pv::Vector3DFloat quad[4] = {
 				pv_vertices[pv_vertex_i0 + 0].position,
@@ -607,7 +650,8 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 				pv_vertices[pv_vertex_i0 + 2].position,
 				pv_vertices[pv_vertex_i0 + 3].position,
 			};
-			face_color = face_skylight_color(volume, quad, n);
+			face_vertex_colors(volume, voxel_reg, quad, n, face_id,
+					corner_colors);
 		}
 		// Go through indices of the face and mangle vertices according to them
 		// into the temporary vertex buffer
@@ -627,10 +671,10 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			tg_vert.normal_.x_ = pv_vert.normal.getX();
 			tg_vert.normal_.y_ = pv_vert.normal.getY();
 			tg_vert.normal_.z_ = pv_vert.normal.getZ();
-			tg_vert.color_ = face_color;
 			// Figure out texture coordinates
 			size_t pv_vertex_i1 = pv_vertex_i - pv_vertex_i0;
 			assign_txcoords(pv_vertex_i1, aseg, tg_vert);
+			tg_vert.color_ = corner_colors[pv_vertex_i1];
 		}
 #endif
 	}
@@ -663,7 +707,7 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 		Material *material = new Material(context);
 		if(tg.has_colors){
 			material->SetTechnique(0, cache->GetResource<Technique>(
-					"Techniques/PBRDiffVCol.xml"));
+					"Techniques/PBRVoxel.xml"));
 			// Voxel terrain is rough and non-metallic throughout; there are no
 			// roughness or metalness maps, so these are the whole material
 			material->SetShaderParameter("Roughness", 0.9f);
@@ -813,7 +857,9 @@ void generate_voxel_lod_geometry(int lod,
 			// memory, so let's do only one big memory allocation
 			tg.vertex_data.Reserve(pv_vertices.size() / 4 * 6);
 		}
-		unsigned face_color = 0xffffffff;
+		unsigned corner_colors[4] = {
+			0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff
+		};
 		if(use_skylight){
 			pv::Vector3DFloat quad[4] = {
 				pv_vertices[pv_vertex_i0 + 0].position,
@@ -821,7 +867,8 @@ void generate_voxel_lod_geometry(int lod,
 				pv_vertices[pv_vertex_i0 + 2].position,
 				pv_vertices[pv_vertex_i0 + 3].position,
 			};
-			face_color = face_skylight_color(lod_volume, quad, n);
+			face_vertex_colors(lod_volume, voxel_reg, quad, n, face_id,
+					corner_colors);
 		}
 		// Go through indices of the face and mangle vertices according to them
 		// into the temporary vertex buffer
@@ -848,7 +895,7 @@ void generate_voxel_lod_geometry(int lod,
 			// Figure out texture coordinates
 			size_t pv_vertex_i1 = pv_vertex_i - pv_vertex_i0;
 			assign_txcoords(pv_vertex_i1, aseg, tg_vert);
-			tg_vert.color_ = face_color;
+			tg_vert.color_ = corner_colors[pv_vertex_i1];
 			// Don't use the real normal.
 			// Constant bright shading is needed so that the look of multiple
 			// shaded faces can be emulated by using textures. This normal
@@ -893,7 +940,7 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 		if(lod <= interface::MAX_LOD_WITH_SHADOWS){
 			if(tg.has_colors){
 				material->SetTechnique(0, cache->GetResource<Technique>(
-						"Techniques/PBRDiffVCol.xml"));
+						"Techniques/PBRVoxel.xml"));
 				material->SetShaderParameter("Roughness", 0.9f);
 				material->SetShaderParameter("Metallic", 0.0f);
 			} else {
