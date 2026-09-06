@@ -1084,6 +1084,12 @@ void generate_voxel_physics_boxes(
 			int z1 = z0;
 			for(;;){
 				x1++;
+				// getVoxelAt() past the region reads outside the volume's
+				// data, so the plane loops below would happily accept
+				// whatever is in that memory and stretch the box out of the
+				// world. Stop at the region instead.
+				if(x1 > uc.getX())
+					goto x_plane_does_not_fit;
 				for(int y = y0; y <= y1; y++){
 					for(int z = z0; z <= z1; z++){
 						uint8_t v = volume.getVoxelAt(x1, y, z);
@@ -1098,6 +1104,8 @@ void generate_voxel_physics_boxes(
 			}
 			for(;;){
 				y1++;
+				if(y1 > uc.getY())
+					goto y_plane_does_not_fit;
 				for(int x = x0; x <= x1; x++){
 					for(int z = z0; z <= z1; z++){
 						uint8_t v = volume.getVoxelAt(x, y1, z);
@@ -1112,6 +1120,8 @@ void generate_voxel_physics_boxes(
 			}
 			for(;;){
 				z1++;
+				if(z1 > uc.getZ())
+					goto z_plane_does_not_fit;
 				for(int x = x0; x <= x1; x++){
 					for(int y = y0; y <= y1; y++){
 						uint8_t v = volume.getVoxelAt(x, y, z1);
