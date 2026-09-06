@@ -338,18 +338,46 @@ static const Uint32 INJECTED_MOUSE_ID = 0x42554944; // "BUID"
 
 static SDL_EventFilter g_prev_filter = nullptr;
 static void *g_prev_filter_userdata = nullptr;
-static bool g_mouse_inhibited = false;
+static bool g_input_inhibited = false;
+// SDL_PushEvent runs the event filter in the pushing thread, before it returns,
+// so a flag held across a push is enough to tell our own events apart from
+// whatever the real keyboard is doing. Keyboard events have no free field to
+// mark the way mouse events do.
+static bool g_injecting_keys = false;
 
-static int SDLCALL mouse_inhibit_filter(void *userdata, SDL_Event *e)
+// Left through even while a sequence runs: escape, so that a run can be
+// abandoned, and alt+tab, so that the window can be left if it grabbed the
+// real mouse.
+static bool always_allowed_key(SDL_Keycode sym)
+{
+	return sym == SDLK_ESCAPE || sym == SDLK_TAB ||
+			sym == SDLK_LALT || sym == SDLK_RALT;
+}
+
+static int SDLCALL input_inhibit_filter(void *userdata, SDL_Event *e)
 {
 	Uint32 which = 0;
 	switch(e->type){
+	case SDL_KEYDOWN:
+	case SDL_KEYUP:
+		if(!g_injecting_keys && !always_allowed_key(e->key.keysym.sym))
+			return 0; // The real keyboard; the sequence owns input
+		if(g_prev_filter)
+			return g_prev_filter(g_prev_filter_userdata, e);
+		return 1;
+	case SDL_TEXTINPUT:
+	case SDL_TEXTEDITING:
+		if(!g_injecting_keys)
+			return 0;
+		if(g_prev_filter)
+			return g_prev_filter(g_prev_filter_userdata, e);
+		return 1;
 	case SDL_MOUSEMOTION: which = e->motion.which; break;
 	case SDL_MOUSEBUTTONDOWN:
 	case SDL_MOUSEBUTTONUP: which = e->button.which; break;
 	case SDL_MOUSEWHEEL: which = e->wheel.which; break;
 	default:
-		// Not a mouse event; leave it to whoever was filtering before us
+		// Not an input event; leave it to whoever was filtering before us
 		if(g_prev_filter)
 			return g_prev_filter(g_prev_filter_userdata, e);
 		return 1;
@@ -363,20 +391,22 @@ static int SDLCALL mouse_inhibit_filter(void *userdata, SDL_Event *e)
 
 // The window is not grabbed during a sequence, so the physical mouse sits on
 // the same display and its motion would otherwise land in GetMouseMove along
-// with the injected motion, which makes a run unreproducible.
-void inhibit_real_mouse(bool enable)
+// with the injected motion, which makes a run unreproducible. The keyboard is
+// worse than that: the window raises itself, so typing meant for another
+// window lands in the client and perturbs the run in both places.
+void inhibit_real_input(bool enable)
 {
-	if(enable == g_mouse_inhibited)
+	if(enable == g_input_inhibited)
 		return;
 	if(enable){
 		SDL_GetEventFilter(&g_prev_filter, &g_prev_filter_userdata);
-		SDL_SetEventFilter(mouse_inhibit_filter, nullptr);
+		SDL_SetEventFilter(input_inhibit_filter, nullptr);
 	} else {
 		SDL_SetEventFilter(g_prev_filter, g_prev_filter_userdata);
 		g_prev_filter = nullptr;
 		g_prev_filter_userdata = nullptr;
 	}
-	g_mouse_inhibited = enable;
+	g_input_inhibited = enable;
 }
 
 // Urho3D calls SuppressNextMouseMove() whenever mouse visibility, mode or
@@ -418,7 +448,10 @@ static bool push_key(magic::Input *input, int key, bool down, ss_ *error)
 	e.key.windowID = window_id(input);
 	e.key.keysym.sym = key;
 	e.key.keysym.scancode = SDL_GetScancodeFromKey((SDL_Keycode)key);
-	if(SDL_PushEvent(&e) != 1){
+	g_injecting_keys = true;
+	int r = SDL_PushEvent(&e);
+	g_injecting_keys = false;
+	if(r != 1){
 		*error = "SDL_PushEvent failed";
 		return false;
 	}
@@ -536,7 +569,10 @@ bool inject_text(magic::Input *input, const ss_ &text, ss_ *error)
 			n = sizeof(e.text.text) - 1;
 		memcpy(e.text.text, text.c_str() + i, n);
 		e.text.text[n] = 0;
-		if(SDL_PushEvent(&e) != 1){
+		g_injecting_keys = true;
+		int r = SDL_PushEvent(&e);
+		g_injecting_keys = false;
+		if(r != 1){
 			*error = "SDL_PushEvent failed";
 			return false;
 		}
