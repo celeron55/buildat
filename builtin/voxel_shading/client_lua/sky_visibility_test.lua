@@ -32,21 +32,38 @@ local RAY = {BLOCKED = 0, NO_DATA = 1, RANGE = 2, SKYLIGHT = 3}
 
 -- Stands in for buildat.cast_voxel_rays. Steps voxel by voxel rather than by
 -- the binding's DDA, which is close enough for a world made of slabs.
+--
+-- Directions arrive as a flat array, three numbers to a ray, and consecutive
+-- rays belong to one cell: what comes back is their average, one value per
+-- cell. The rule turning a ray into a value lives in the engine now, so the
+-- copy here mirrors what src/lua_bindings/voxel_volume.cpp documents -- which
+-- means these checks pin the module's own part, the cell directions and the
+-- shader agreeing with them, and not the engine's arithmetic.
+local function stub_ray_visibility(status, skylight, steps)
+	if status == RAY.BLOCKED then return 0.0 end
+	if steps <= 1 then return 1.0 end
+	if skylight < 0 then return 0.0 end
+	return skylight / 15
+end
+
 local function cast_voxel_rays(args)
-	local status, skylight_out, steps_out = {}, {}, {}
+	local per_cell = args.rays_per_cell or 0
+	local vis = {}
 	local n = 0
-	for di = args.first, args.first + args.count - 1 do
-		local dir = args.directions[di]
-		if dir == nil then break end
+	for ri = args.first, args.first + args.count - 1 do
+		local base = (ri - 1) * 3
+		local dx, dy, dz = args.directions[base + 1], args.directions[base + 2],
+				args.directions[base + 3]
+		if dx == nil then break end
 		n = n + 1
-		local len = math.sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z)
+		local len = math.sqrt(dx * dx + dy * dy + dz * dz)
 		local st, sky, steps = RAY.RANGE, -1, 0
 		for i = 1, args.max_steps do
 			steps = i
 			local v = world({
-				x = args.origin.x + dir.x / len * i,
-				y = args.origin.y + dir.y / len * i,
-				z = args.origin.z + dir.z / len * i,
+				x = args.origin.x + dx / len * i,
+				y = args.origin.y + dy / len * i,
+				z = args.origin.z + dz / len * i,
 			})
 			if v == nil then
 				st = RAY.NO_DATA
@@ -62,10 +79,19 @@ local function cast_voxel_rays(args)
 				break
 			end
 		end
-		status[n], skylight_out[n], steps_out[n] = st, sky, steps
+		vis[n] = stub_ray_visibility(st, sky, steps)
 	end
-	return {count = n, status = status, skylight = skylight_out,
-			steps = steps_out, hit_id = {}}
+	assert(per_cell > 0, "the module is expected to ask for values per cell")
+	assert(n % per_cell == 0, "rays are not a whole number of cells")
+	local cells = {}
+	for c = 1, n / per_cell do
+		local sum = 0.0
+		for k = 1, per_cell do
+			sum = sum + vis[(c - 1) * per_cell + k]
+		end
+		cells[c] = sum / per_cell
+	end
+	return {count = #cells, visibility = cells}
 end
 
 local voxelworld_stub

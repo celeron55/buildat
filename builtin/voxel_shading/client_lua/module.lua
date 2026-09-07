@@ -121,12 +121,14 @@ local FACE_AXES = {
 
 local CELL_SIZE = 2.0 / CELLS
 
--- One table per ray, reused: the sweep rewrites their components rather than
--- building thousands of tables of three numbers every time. RAYS_PER_CELL of
--- them per cell, in cell order, so a slice of cells is a run of directions.
+-- The directions, three numbers to a ray, in cell order: RAYS_PER_CELL of them
+-- per cell, so a slice of cells is a run of directions. One flat array rather
+-- than a table per ray because the engine reads every one of these every
+-- frame, and a table each was most of what the sampling cost.
+local AXIS_OFFSET = {x = 0, y = 1, z = 2}
 local DIRS = {}
-for i = 1, CELL_COUNT * RAYS_PER_CELL do
-	DIRS[i] = {x = 0, y = 0, z = 0}
+for i = 1, CELL_COUNT * RAYS_PER_CELL * 3 do
+	DIRS[i] = 0.0
 end
 
 local camera_node = nil
@@ -156,6 +158,12 @@ local ray_args = {
 	-- sky is. The engine will stop a ray at a skylight level for callers that
 	-- do want that.
 	stop_skylight = 0,
+	-- Consecutive rays are one cell's, and the engine hands back their average
+	-- per cell rather than what each of them found: a few hundred numbers a
+	-- frame instead of four per ray. What a ray is worth is then the engine's
+	-- rule; see cast_voxel_rays() in src/lua_bindings/voxel_volume.cpp. A game
+	-- wanting its own leaves this unset and reads the rays itself.
+	rays_per_cell = RAYS_PER_CELL,
 	first = 1,
 	count = 1,
 	origin = {x = 0, y = 0, z = 0},
@@ -165,6 +173,7 @@ local ray_args = {
 -- per frame
 local sky_vis_buffer = magic.VectorBuffer:new()
 local sky_vis_param = nil
+local sky_vis_dirty = false
 -- Multiplies the reflected sky in the shader. 1 is what a game renders; the
 -- benchmarks turn it up to look at the reflections themselves. See
 -- M.set_specular_emphasis().
@@ -246,18 +255,21 @@ local function aim_dirs(index)
 	local i = 1
 	for face = 1, FACES do
 		local a = FACE_AXES[face]
+		local mo = AXIS_OFFSET[a.major] + 1
+		local uo = AXIS_OFFSET[a.u] + 1
+		local vo = AXIS_OFFSET[a.v] + 1
 		for row = 0, CELLS - 1 do
 			for col = 0, CELLS - 1 do
 				local bu = CELL_JITTER_U[i] + su
 				local bv = CELL_JITTER_V[i] + sv
-				local base = (i - 1) * RAYS_PER_CELL
+				local base = (i - 1) * RAYS_PER_CELL * 3
 				for k = 1, RAYS_PER_CELL do
-					local d = DIRS[base + k]
 					local ju = (bu + STRAT_U[k]) % 1.0 - 0.5
 					local jv = (bv + STRAT_V[k]) % 1.0 - 0.5
-					d[a.major] = a.sign
-					d[a.u] = (col + 0.5 + ju) * CELL_SIZE - 1.0
-					d[a.v] = (row + 0.5 + jv) * CELL_SIZE - 1.0
+					DIRS[base + mo] = a.sign
+					DIRS[base + uo] = (col + 0.5 + ju) * CELL_SIZE - 1.0
+					DIRS[base + vo] = (row + 0.5 + jv) * CELL_SIZE - 1.0
+					base = base + 3
 				end
 				i = i + 1
 			end
@@ -272,38 +284,17 @@ end
 -- however brightly lit the air in between happens to be. Partial values come
 -- from the sampling, not from softening this.
 --
--- Where the ray got to without being stopped, the skylight of the air it
--- ended in is the answer: skylight says the sky is open straight up from
--- there, and a ray that has travelled its whole length has put that point
--- where the reflection is looking. Fully lit air at the far end is sky, dark
--- air deep inside a cavern is not, which is the case a fixed length gets
--- wrong on its own -- a ray crossing sixty-four voxels of unlit cavern has
--- met nothing and seen no sky either.
+-- What a ray is worth is the engine's rule now, since averaging rays into a
+-- cell means deciding that: nothing if something solid stopped it, otherwise
+-- the skylight of the air it ended in. See ray_visibility() in
+-- src/lua_bindings/voxel_volume.cpp for why it is there and what it means.
 --
--- Note where skylight is not used: not as something that stops a ray. It
--- says the sky is open above a point, which is nothing to do with whether the
--- sky lies along the ray, and stopping rays at full skylight looked right and
--- was badly wrong -- at the mouth of digger's tunnel the air is fully lit, so
--- every direction, the tunnel included, came back at 1 and the tunnel got
--- full outdoor reflections. At the far end of a ray it answers a question it
--- can answer, about the place the ray reached.
---
--- Running out of loaded chunks part way is the same answer for the same
--- reason. A ray that never got into voxel data at all is outdoors, which is a
--- camera above the world.
-local SKYLIGHT_MAX = 15
-local RAY = buildat.VOXEL_RAY
-
-local function ray_visibility(status, skylight, steps)
-	if status == RAY.BLOCKED then
-		return 0.0
-	elseif steps <= 1 then
-		return 1.0 -- Left the voxel data at once: nothing is around us
-	elseif skylight < 0 then
-		return 0.0
-	end
-	return skylight / SKYLIGHT_MAX
-end
+-- Note what that rule does not do: stop a ray at full skylight. Skylight says
+-- the sky is open above a point, which is nothing to do with whether the sky
+-- lies along the ray, and stopping rays on it looked right and was badly wrong
+-- -- at the mouth of digger's tunnel the air is fully lit, so every direction
+-- including the tunnel came back at 1. At the far end of a ray it answers
+-- about the place the ray reached, which is a question it can answer.
 
 -- The chunks a ray could reach. The engine picks the one it needs per step out
 -- of this list, so it only has to be the right set, not a short one.
@@ -354,18 +345,12 @@ local function collect_volumes(origin)
 	return n > 0
 end
 
--- What a finished slice's rays found, into the sweep: a cell's RAYS_PER_CELL
--- rays are consecutive, and the cell keeps their average
+-- What a finished slice found, into the sweep: the engine has already averaged
+-- each cell's rays into one value
 local function keep_slice(first_cell, count_cells, out)
-	local status, skylight, steps = out.status, out.skylight, out.steps
-	local n = 0
+	local vis = out.visibility
 	for c = 1, count_cells do
-		local sum = 0.0
-		for k = 1, RAYS_PER_CELL do
-			n = n + 1
-			sum = sum + ray_visibility(status[n], skylight[n], steps[n])
-		end
-		sweep_vis[first_cell + c - 1] = sum / RAYS_PER_CELL
+		sweep_vis[first_cell + c - 1] = vis[c]
 	end
 end
 
@@ -387,10 +372,20 @@ local function blend_cells(first, count, f)
 	for i = first, first + count - 1 do
 		sky_vis[i] = sky_vis[i] + (sweep_vis[i] - sky_vis[i]) * f
 	end
-	-- One parameter of 216 floats rather than 216 parameters: Urho sets a
-	-- Variant buffer as a float array, sized by what the uniform declares.
-	-- Packed by the engine because this happens every frame and WriteFloat()
-	-- per value is a sandbox call each.
+	sky_vis_dirty = true
+end
+
+-- The values as the shader takes them. One parameter of CELL_COUNT floats
+-- rather than that many parameters: Urho sets a Variant buffer as a float
+-- array, sized by what the uniform declares. Packed by the engine because
+-- WriteFloat() per value is a sandbox call each.
+--
+-- Once a frame, however many slices landed in it. Repacking per slice meant
+-- reading every cell out of Lua twice a frame to publish a cube that only the
+-- shader ever reads, and the shader reads it once.
+local function repack_sky_vis()
+	if not sky_vis_dirty then return end
+	sky_vis_dirty = false
 	buildat.write_floats(sky_vis_buffer, sky_vis)
 	sky_vis_param = magic.Variant(sky_vis_buffer)
 end
@@ -473,6 +468,7 @@ end
 local DECLARE_EVERY_FRAMES = 60
 
 local function push_sky_vis()
+	repack_sky_vis()
 	if sky_vis_param == nil then return end
 	local viewport = magic.renderer:GetViewport(0)
 	if viewport == nil then return end

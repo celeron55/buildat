@@ -263,22 +263,33 @@ reads as fine.
 What that costs, measured at benchmark 3 over 4800 frames -- marching on its
 worker with thread CPU time, the rest on the main thread:
 
-    marching                    0.085 ms/frame   0.29 us/ray, 7.8 steps/ray
-    submitting (Lua -> C++)     0.223 ms/frame
-    collecting (C++ -> Lua)     0.256 ms/frame
-    aiming the directions       0.114 ms/frame
+    marching                    0.090 ms/frame   0.31 us/ray, 7.8 steps/ray
+    submitting (Lua -> C++)     0.183 ms/frame
+    collecting (C++ -> Lua)     0.042 ms/frame
+    aiming the directions       0.112 ms/frame
                                 -----
-                                0.678 ms/frame
+                                0.427 ms/frame
 
-The marching is an eighth of it. The rest is 288 direction tables built in Lua
-and read by luabind every frame, and a result table per ray read back, which is
-about eight table operations a ray against the eight voxels a ray actually
-walks. Rays are not what this costs; handing them over is.
+The marching is a fifth of it, and the rest is the price of 288 rays crossing
+between Lua and C++ every frame: 864 numbers written in Lua to aim them and 864
+read back by luabind to cast them. Rays are not what this costs; handing them
+over is. It was 0.678 ms before the engine started averaging each cell's rays
+itself and before the shader's copy of the cube was repacked once a frame
+rather than once per slice -- the second of those was worth more than the
+first, since repacking read every cell out of Lua twice a frame to publish a
+cube the shader reads once.
 
 Two things follow. Making the marching itself faster -- skipping empty space
-with a coarse occupancy mip, say -- would be optimising the eighth. And putting
-the rays on a worker thread, which is what happens now, moves that same eighth
-off the frame and leaves the rest of it there.
+with a coarse occupancy mip, say -- would be optimising the fifth, and rays
+that die after eight voxels have little empty space to skip. And putting the
+rays on a worker thread, which is what happens now, moves that same fifth off
+the frame and leaves the rest of it there.
+
+What is left is the direction crossing, and the only way past it is for the
+directions not to cross: the engine would have to work them out from the cell
+layout rather than being told each one. That is the part a game defines for
+itself, so it would have to become something a game opts into rather than
+something done to it.
 
 Note also that two slices are kept in flight, so the rays cast per frame are
 twice CELLS_PER_UPDATE times RAYS_PER_CELL: 288 here, where the constants read
