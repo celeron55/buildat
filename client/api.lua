@@ -39,6 +39,13 @@ buildat.safe.deserialize_volume       = __buildat_deserialize_volume
 buildat.safe.deserialize_volume_int32 = __buildat_deserialize_volume_int32
 buildat.safe.deserialize_volume_8bit  = __buildat_deserialize_volume_8bit
 buildat.safe.cast_voxel_rays          = __buildat_cast_voxel_rays
+-- cast_voxel_rays_start(args) takes what cast_voxel_rays() takes and returns a
+-- handle; cast_voxel_rays_collect(handle) returns nil until the marching has
+-- finished on a worker thread, and then what cast_voxel_rays() would have
+-- returned. The volumes and the registry are held for the job's lifetime, so a
+-- chunk arriving meanwhile does not pull data out from under it.
+buildat.safe.cast_voxel_rays_start    = __buildat_cast_voxel_rays_start
+buildat.safe.cast_voxel_rays_collect  = __buildat_cast_voxel_rays_collect
 -- write_floats(vector_buffer, values): the values into the buffer as floats,
 -- replacing what was in it
 buildat.safe.write_floats             = __buildat_write_floats

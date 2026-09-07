@@ -289,16 +289,77 @@ local function collect_volumes(origin)
 	return n > 0
 end
 
--- One slice of a sweep: cast the rays for cells first..first+count-1 and keep
--- what they found
-local function cast_slice(first, count)
-	ray_args.first = first
-	ray_args.count = count
-	local out = buildat.cast_voxel_rays(ray_args)
+-- What a finished slice's rays found, into the sweep
+local function keep_slice(first, out)
 	local status, skylight, steps = out.status, out.skylight, out.steps
 	for i = 1, out.count do
 		sweep_vis[first + i - 1] =
 				ray_visibility(status[i], skylight[i], steps[i])
+	end
+end
+
+-- One slice of a sweep, marched here and now. Only the snap uses this: it is
+-- thousands of rays wanted before the next frame is drawn, which is what
+-- blocking is for.
+local function cast_slice(first, count)
+	ray_args.first = first
+	ray_args.count = count
+	keep_slice(first, buildat.cast_voxel_rays(ray_args))
+end
+
+-- f is how much of the sweep's rays to take; 1.0 replaces the values outright
+local function blend_cells(first, count, f)
+	for i = first, first + count - 1 do
+		sky_vis[i] = sky_vis[i] + (sweep_vis[i] - sky_vis[i]) * f
+	end
+	-- One parameter of 216 floats rather than 216 parameters: Urho sets a
+	-- Variant buffer as a float array, sized by what the uniform declares.
+	-- Packed by the engine because this happens every frame and WriteFloat()
+	-- per value is a sandbox call each.
+	buildat.write_floats(sky_vis_buffer, sky_vis)
+	sky_vis_param = magic.Variant(sky_vis_buffer)
+end
+
+-- Slices out on worker threads, oldest first. The marching is the same work
+-- wherever it runs; what moves it off the frame is that the frame has better
+-- uses for a third of a millisecond, and that the sampling wants several times
+-- more rays than that.
+--
+-- More than one is kept in flight because a slice submitted in one frame is
+-- collected in a later one: with a single slice out, every other frame would
+-- have nothing to collect and nothing to submit, and the sweep would take
+-- twice as long for no reason. Two is enough to keep a worker fed. The pool
+-- has four of them and the mesher is the other caller.
+local MAX_IN_FLIGHT = 2
+local in_flight = {}
+
+local function submit_slice(first, count)
+	ray_args.first = first
+	ray_args.count = count
+	in_flight[#in_flight + 1] = {first = first, count = count,
+			job = buildat.cast_voxel_rays_start(ray_args)}
+end
+
+-- Blends in what has finished, oldest first, and stops at the first slice that
+-- has not: they are taken in the order they were cast.
+local function collect_slices(f)
+	while in_flight[1] ~= nil do
+		local slice = in_flight[1]
+		local out = buildat.cast_voxel_rays_collect(slice.job)
+		if out == nil then
+			return
+		end
+		table.remove(in_flight, 1)
+		keep_slice(slice.first, out)
+		blend_cells(slice.first, slice.count, f)
+	end
+end
+
+-- Anything in flight is reading volumes it holds itself, so dropping the
+-- handles is enough; what they find is no longer wanted.
+local function drop_slices()
+	for i = #in_flight, 1, -1 do
+		in_flight[i] = nil
 	end
 end
 
@@ -316,18 +377,6 @@ local function begin_sweep()
 	aim_dirs(sweep_index)
 end
 
--- f is how much of the sweep's rays to take; 1.0 replaces the values outright
-local function blend_cells(first, count, f)
-	for i = first, first + count - 1 do
-		sky_vis[i] = sky_vis[i] + (sweep_vis[i] - sky_vis[i]) * f
-	end
-	-- One parameter of 216 floats rather than 216 parameters: Urho sets a
-	-- Variant buffer as a float array, sized by what the uniform declares.
-	-- Packed by the engine because this happens every frame and WriteFloat()
-	-- per value is a sandbox call each.
-	buildat.write_floats(sky_vis_buffer, sky_vis)
-	sky_vis_param = magic.Variant(sky_vis_buffer)
-end
 
 -- The values go on the render path's scene pass commands rather than on
 -- materials. Urho hands a scene pass command's shader parameters to every
@@ -398,6 +447,10 @@ function M.update(dt)
 		-- Several sweeps at once, averaged the way the easing would have
 		-- averaged them over a second. A single sweep is one ray per cell,
 		-- which is too coarse to look at.
+		--
+		-- What is already out on a worker was cast from where the camera used
+		-- to be, and blending it in afterwards would undo part of the snap.
+		drop_slices()
 		for sweep = 1, SNAP_SWEEPS do
 			begin_sweep()
 			if collect_volumes(origin) then
@@ -411,27 +464,31 @@ function M.update(dt)
 		push_sky_vis()
 		return
 	end
-	if sweep_next == 1 and not collect_volumes(origin) then
-		sweep_all_open()
-		blend_cells(1, CELL_COUNT, SKY_VIS_BLEND)
-		begin_sweep()
-		push_sky_vis()
-		return
-	end
 	-- Each frame's cells are blended in and handed to the shader as their own
 	-- rays land, rather than a whole sweep at a time: waiting for the sweep
 	-- steps every reflection in the scene together, six frames apart, where
 	-- this spreads the same change out. Reasoning rather than measurement --
 	-- see the note in games/voxel_lighting/README.txt.
-	local first = sweep_next
-	local count = math.min(RAYS_PER_UPDATE, CELL_COUNT - sweep_next + 1)
-	cast_slice(first, count)
-	blend_cells(first, count, SKY_VIS_BLEND)
-	push_sky_vis()
-	sweep_next = sweep_next + count
-	if sweep_next > CELL_COUNT then
-		begin_sweep()
+	collect_slices(SKY_VIS_BLEND)
+	-- Topped back up to the same depth every frame, so what is submitted is
+	-- what came back: if the workers are busy, nothing is submitted and the
+	-- sweep waits rather than piling up.
+	while #in_flight < MAX_IN_FLIGHT do
+		if sweep_next == 1 and not collect_volumes(origin) then
+			sweep_all_open()
+			blend_cells(1, CELL_COUNT, SKY_VIS_BLEND)
+			begin_sweep()
+			break
+		end
+		local first = sweep_next
+		local count = math.min(RAYS_PER_UPDATE, CELL_COUNT - sweep_next + 1)
+		submit_slice(first, count)
+		sweep_next = sweep_next + count
+		if sweep_next > CELL_COUNT then
+			begin_sweep()
+		end
 	end
+	push_sky_vis()
 end
 
 -- The sky the world stands under, drawn by VoxelSkybox.glsl in the same
