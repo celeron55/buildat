@@ -543,13 +543,14 @@ struct CState: public State, public interface::Server
 	void thread_request_stop()
 	{
 		m_file_watch_thread->request_stop();
-
-		sv_<sp_<ModuleContainer>> mcs = get_modules_in_unload_order();
-
-		for(sp_<ModuleContainer> &mc : mcs){
-			log_t(MODULE, "Requesting module to stop: [%s]", cs(mc->info.name));
-			mc->thread_request_stop();
-		}
+		// The modules are not stopped here. A module is destructed by its own
+		// thread as it stops, and a destructor may still call into the modules
+		// it was built on -- replicate clears its replication state inside
+		// main_context, on purpose, because Urho3D's weak pointers are not
+		// thread safe. Asking every module to stop up front makes every one of
+		// those calls fail, so each is stopped in thread_join() instead, one at
+		// a time and in reverse load order, with the ones below it still
+		// running.
 	}
 
 	void thread_join()
@@ -559,10 +560,10 @@ struct CState: public State, public interface::Server
 
 		sv_<sp_<ModuleContainer>> mcs = get_modules_in_unload_order();
 
-		// Wait for threads to stop and delete module container references
 		log_v(MODULE, "Waiting: modules");
 		for(sp_<ModuleContainer> &mc : mcs){
-			log_d(MODULE, "Waiting for module to stop: [%s]", cs(mc->info.name));
+			log_d(MODULE, "Stopping module: [%s]", cs(mc->info.name));
+			mc->thread_request_stop();
 			mc->thread_join();
 			// Remove our reference to the module container, so that any child
 			// threads it will now delete will not get deadlocked in trying to
