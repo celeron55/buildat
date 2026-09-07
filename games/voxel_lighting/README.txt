@@ -230,7 +230,32 @@ same reason, and that beats calling the edge of the loaded world sky.
 Partial values come from the sampling instead. The rays are jittered inside
 their cells and differently each sweep, and each cell keeps an average of its
 own rays at 0.15, so a cell settles at the fraction of its directions that see
-sky. That average is also what keeps the speculars still: taking a ray whole
+sky.
+
+Each cell is jittered by an offset of its own, and this matters more than the
+number of rays does. With one offset for the whole cube -- which is what it was
+at first -- every cell samples the same relative point at the same time and
+their errors line up, so a sweep whose offset leans towards the sky brightens
+every cell straddling an opening at once and the reflections in the whole scene
+move together. Coherent like that it reads as the scene pulsing, which is far
+more visible than the same amount of noise spread over cells, and since the
+sweep steps by a fixed sequence the pulsing is periodic. Casting more rays does
+not help with any of that: it was never a shortage of samples, it was 216 cells
+making the same error at the same moment.
+
+Measured at benchmark 3 with the emphasis at 16, over the mouth region:
+
+                                    one offset   per cell
+    coherent std of the region       0.2049       0.0923
+    per-pixel per-sweep |diff|       0.2964       0.1058
+    the same on the worst patch      2.32         0.99
+
+Noise falling by 2.8 is what casting eight times the rays would have bought,
+for no rays at all. The region also sits about a value lower afterwards, at
+16x: large coherent excursions through the tonemap do not average to the same
+place as the steady signal they were swinging around.
+
+ That average is also what keeps the speculars still: taking a ray whole
 put its own yes-or-no on the screen, which flickered several times a second --
 measured over bursts of twelve frames of digger's tunnel wall as the mean
 absolute difference between consecutive frames, 1.05 taking rays whole against

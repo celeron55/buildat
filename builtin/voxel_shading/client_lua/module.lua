@@ -179,18 +179,47 @@ voxelworld.sub_material_update(function(node)
 	end)
 end)
 
--- Where in its cell this sweep samples. Two irrational steps, so the point
--- walks the cell instead of landing on a few spots, and the same sequence
--- every run.
+-- Where in its cell each ray of this sweep samples.
+--
+-- Two parts: a fixed offset per cell, and a step the whole sweep takes. The
+-- step is two irrationals, so a cell's sample point walks its cell instead of
+-- landing on a few spots, and the sequence is the same every run.
+--
+-- The per-cell offset is the part that matters for what this looks like. With
+-- one offset for the whole cube, every cell samples the same relative point at
+-- the same time and their errors line up: a sweep whose offset happens to lean
+-- towards the sky brightens every cell that straddles an opening at once, so
+-- the reflections in the whole scene move together rather than each surface
+-- wobbling on its own. Coherent like that it reads as the scene pulsing, which
+-- is far more visible than the same amount of noise spread over cells, and
+-- since the step is a fixed sequence the pulsing is periodic. More rays does
+-- not help: it is not a shortage of samples, it is 216 cells making the same
+-- error at the same moment.
+--
+-- The offsets are the R2 low discrepancy sequence over the cells, which spreads
+-- them evenly in the square rather than clumping the way independent random
+-- ones would. The sweep step is the golden ratio and root two, unrelated to R2
+-- so the two do not come back into step with each other.
+local CELL_JITTER_U = {}
+local CELL_JITTER_V = {}
+for i = 1, CELL_COUNT do
+	CELL_JITTER_U[i] = (i * 0.7548776662) % 1.0
+	CELL_JITTER_V[i] = (i * 0.5698402909) % 1.0
+end
+local SWEEP_STEP_U = 0.6180339887
+local SWEEP_STEP_V = 0.4142135624
+
 local function aim_dirs(index)
-	local ju = (index * 0.7548776662) % 1.0 - 0.5
-	local jv = (index * 0.5698402909) % 1.0 - 0.5
+	local su = (index * SWEEP_STEP_U) % 1.0
+	local sv = (index * SWEEP_STEP_V) % 1.0
 	local i = 1
 	for face = 1, FACES do
 		local a = FACE_AXES[face]
 		for row = 0, CELLS - 1 do
 			for col = 0, CELLS - 1 do
 				local d = DIRS[i]
+				local ju = (CELL_JITTER_U[i] + su) % 1.0 - 0.5
+				local jv = (CELL_JITTER_V[i] + sv) % 1.0 - 0.5
 				d[a.major] = a.sign
 				d[a.u] = (col + 0.5 + ju) * CELL_SIZE - 1.0
 				d[a.v] = (row + 0.5 + jv) * CELL_SIZE - 1.0
