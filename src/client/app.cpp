@@ -791,7 +791,8 @@ struct CApp: public App, public magic::Application
 				throw AppStartupError("command sequence: "+err);
 			m_command_seq_active = true;
 			client::command_seq::inhibit_real_input(true);
-			client::command_seq::raise_window(GetSubsystem<magic::Graphics>());
+			client::command_seq::show_window(GetSubsystem<magic::Graphics>(),
+					GetSubsystem<magic::Input>());
 			log_i(MODULE, "Command sequence: %zu commands, will exit when done",
 					m_commands.size());
 		}
@@ -803,6 +804,8 @@ struct CApp: public App, public magic::Application
 		m_command_seq_failed = true;
 		m_command_seq_active = false;
 		client::command_seq::inhibit_real_input(false);
+		client::command_seq::release_forced_focus(
+				GetSubsystem<magic::Input>());
 		shutdown();
 	}
 
@@ -817,6 +820,8 @@ struct CApp: public App, public magic::Application
 		log_i(MODULE, "Command sequence complete");
 		m_command_seq_active = false;
 		client::command_seq::inhibit_real_input(false);
+		client::command_seq::release_forced_focus(
+				GetSubsystem<magic::Input>());
 		shutdown();
 	}
 
@@ -852,30 +857,25 @@ struct CApp: public App, public magic::Application
 	{
 		using client::command_seq::Type;
 		magic::Input *input = GetSubsystem<magic::Input>();
-		magic::Graphics *graphics = GetSubsystem<magic::Graphics>();
 		ss_ err;
 		bool ok = true;
 		switch(c.type){
 		case Type::KeyDown:
-			client::command_seq::raise_window(graphics);
 			ok = client::command_seq::inject_key(input, c.s, true, false, &err);
 			break;
 		case Type::KeyUp:
 			ok = client::command_seq::inject_key(input, c.s, false, false, &err);
 			break;
 		case Type::KeyPress:
-			client::command_seq::raise_window(graphics);
 			ok = client::command_seq::inject_key(input, c.s, true, true, &err);
 			break;
 		case Type::MousePos:
-			client::command_seq::raise_window(graphics);
 			ok = client::command_seq::inject_mouse_pos(input, c.x, c.y, &err);
 			break;
 		case Type::MouseMove:
 			ok = client::command_seq::inject_mouse_move(input, c.x, c.y, &err);
 			break;
 		case Type::MouseDown:
-			client::command_seq::raise_window(graphics);
 			ok = client::command_seq::inject_mouse_button(
 					input, c.x, true, false, &err);
 			break;
@@ -884,7 +884,6 @@ struct CApp: public App, public magic::Application
 					input, c.x, false, false, &err);
 			break;
 		case Type::MouseClick:
-			client::command_seq::raise_window(graphics);
 			ok = client::command_seq::inject_mouse_button(
 					input, c.x, true, true, &err);
 			break;
