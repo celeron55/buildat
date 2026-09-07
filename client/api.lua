@@ -38,6 +38,11 @@ buildat.safe.Volume        = __buildat_Volume
 buildat.safe.deserialize_volume       = __buildat_deserialize_volume
 buildat.safe.deserialize_volume_int32 = __buildat_deserialize_volume_int32
 buildat.safe.deserialize_volume_8bit  = __buildat_deserialize_volume_8bit
+-- cast_voxel_rays(args): marches rays through voxel data. args.directions is a
+-- flat array of numbers, three to a ray. With args.rays_per_cell set,
+-- consecutive rays are one cell's and what comes back is their average
+-- visibility per cell; without it, what every ray ran into. See the comments
+-- in src/lua_bindings/voxel_volume.cpp.
 buildat.safe.cast_voxel_rays          = __buildat_cast_voxel_rays
 -- cast_voxel_rays_start(args) takes what cast_voxel_rays() takes and returns a
 -- handle; cast_voxel_rays_collect(handle) returns nil until the marching has

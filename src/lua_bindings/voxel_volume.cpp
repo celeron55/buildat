@@ -199,9 +199,16 @@ struct RayJob
 	sv_<double> dirs;   // Three per ray, not normalized
 	int max_steps = 32;
 	int stop_skylight = 0;
+	// Rays per cell. Zero hands back what every ray found and leaves the
+	// caller to make of it what it likes; above zero, consecutive rays are one
+	// cell's and the job hands back a value per cell instead. See
+	// ray_visibility() on what that costs the caller in freedom, and
+	// cast_voxel_rays() on why it is worth it.
+	int rays_per_cell = 0;
 
-	// Outputs, one per ray
+	// Outputs. Per ray, or per cell when rays_per_cell is set.
 	sv_<int> status, hit_id, skylight, steps;
+	sv_<double> visibility;
 
 	// Set by the task's post(), which the pool runs on the main thread after
 	// thread() has finished; read by cast_voxel_rays_collect(). Both on the
@@ -265,6 +272,26 @@ static pv::Vector3DInt32 table_vector3_int(const luabind::object &t,
 			(int)table_number(v, "x", 0),
 			(int)table_number(v, "y", 0),
 			(int)table_number(v, "z", 0));
+}
+
+// What one ray is worth, as a fraction of sky along it: nothing if something
+// solid stopped it, and otherwise the skylight of the air it ended in, which
+// says how open the sky is above the point the ray reached. A ray that left
+// the voxel data immediately had nothing around it to see.
+//
+// This is the one piece of policy in here, and it is here only because
+// averaging rays into a cell means deciding what a ray is worth. A caller that
+// wants a different rule leaves rays_per_cell unset and gets what every ray
+// found, which is what this is computed from.
+static double ray_visibility(int status, int skylight, int steps)
+{
+	if(status == VOXEL_RAY_BLOCKED)
+		return 0.0;
+	if(steps <= 1)
+		return 1.0;
+	if(skylight < 0)
+		return 0.0;
+	return (double)skylight / (double)interface::VoxelInstance::SKYLIGHT_MAX;
 }
 
 // Marches the job's rays. Touches nothing that belongs to a thread -- no Lua,
@@ -387,6 +414,20 @@ static void march_rays(RayJob &job)
 		job.skylight[ri] = skylight;
 		job.steps[ri] = steps;
 	}
+
+	// One value per cell, if that is what was asked for
+	if(job.rays_per_cell > 0){
+		const size_t cells = n / (size_t)job.rays_per_cell;
+		job.visibility.assign(cells, 0.0);
+		size_t ri = 0;
+		for(size_t c = 0; c < cells; c++){
+			double sum = 0.0;
+			for(int k = 0; k < job.rays_per_cell; k++, ri++)
+				sum += ray_visibility(job.status[ri], job.skylight[ri],
+						job.steps[ri]);
+			job.visibility[c] = sum / (double)job.rays_per_cell;
+		}
+	}
 }
 
 // Reads the argument table into a job. Everything Lua-side happens here, so
@@ -448,6 +489,14 @@ static void ray_job_from_lua(RayJob &job, const luabind::object &args)
 
 	job.stop_skylight = (int)table_number(args, "stop_skylight", 0);
 
+	job.rays_per_cell = (int)table_number(args, "rays_per_cell", 0);
+	if(job.rays_per_cell < 0)
+		job.rays_per_cell = 0;
+
+	// A flat array of numbers, three to a ray, rather than a table per ray:
+	// this is read once a frame for every ray and a table each was most of
+	// what the sampling cost. Three array reads a ray, and the caller still
+	// says where every one of them points.
 	luabind::object directions_o = args["directions"];
 	if(!directions_o || luabind::type(directions_o) != LUA_TTABLE)
 		throw Exception("cast_voxel_rays(): args.directions is not a table");
@@ -457,20 +506,42 @@ static void ray_job_from_lua(RayJob &job, const luabind::object &args)
 		first = 1;
 	int count = (int)table_number(args, "count", -1);
 
-	for(int di = first; count < 0 || di < first + count; di++){
-		luabind::object dir_o = directions_o[di];
-		if(!dir_o || luabind::type(dir_o) != LUA_TTABLE)
-			break; // End of the array, or the slice asked for runs past it
+	for(int ri = first; count < 0 || ri < first + count; ri++){
 		if(job.dirs.size() / 3 >= VOXEL_RAY_MAX_DIRECTIONS)
 			break;
-		job.dirs.push_back(table_number(dir_o, "x", 0.0));
-		job.dirs.push_back(table_number(dir_o, "y", 0.0));
-		job.dirs.push_back(table_number(dir_o, "z", 0.0));
+		luabind::object x_o = directions_o[(ri - 1) * 3 + 1];
+		if(!x_o || luabind::type(x_o) != LUA_TNUMBER)
+			break; // End of the array, or the slice asked for runs past it
+		luabind::object y_o = directions_o[(ri - 1) * 3 + 2];
+		luabind::object z_o = directions_o[(ri - 1) * 3 + 3];
+		job.dirs.push_back(luabind::object_cast<double>(x_o));
+		job.dirs.push_back(y_o && luabind::type(y_o) == LUA_TNUMBER ?
+				luabind::object_cast<double>(y_o) : 0.0);
+		job.dirs.push_back(z_o && luabind::type(z_o) == LUA_TNUMBER ?
+				luabind::object_cast<double>(z_o) : 0.0);
 	}
+
+	if(job.rays_per_cell > 0 &&
+			(job.dirs.size() / 3) % (size_t)job.rays_per_cell != 0)
+		throw Exception("cast_voxel_rays(): rays are not a whole number of "
+				"cells");
 }
 
 static luabind::object ray_job_to_lua(const RayJob &job, lua_State *L)
 {
+	// A value per cell is the whole point of asking for it: what the caller
+	// gets back is then a few hundred numbers instead of four per ray, and
+	// none of the per-ray tables are built at all
+	if(job.rays_per_cell > 0){
+		luabind::object visibility_t = luabind::newtable(L);
+		for(size_t i = 0; i < job.visibility.size(); i++)
+			visibility_t[i + 1] = job.visibility[i];
+		luabind::object result = luabind::newtable(L);
+		result["count"] = (int)job.visibility.size();
+		result["visibility"] = visibility_t;
+		return result;
+	}
+
 	luabind::object status_t = luabind::newtable(L);
 	luabind::object hit_id_t = luabind::newtable(L);
 	luabind::object skylight_t = luabind::newtable(L);
