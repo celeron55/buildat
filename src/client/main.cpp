@@ -21,22 +21,32 @@ namespace magic = Urho3D;
 
 client::Config g_client_config;
 
-// TODO: This isn't thread-safe
-bool g_sigint_received = false;
-void sigint_handler(int sig)
+// The signal that asked for shutdown, read by App::on_update(). Only things a
+// signal handler may touch belong in here: no logging, no locking, no
+// allocation. The frame that sees this does all of that.
+volatile sig_atomic_t g_shutdown_signal = 0;
+
+void shutdown_signal_handler(int sig)
 {
-	if(!g_sigint_received){
-		fprintf(stdout, "\n"); // Newline after "^C"
-		log_i("process", "SIGINT");
-		g_sigint_received = true;
+	if(g_shutdown_signal == 0){
+		g_shutdown_signal = sig;
 	} else {
-		(void)signal(SIGINT, SIG_DFL);
+		// Asked twice: the shutdown is not getting anywhere -- or the frame
+		// loop is not running yet -- so let the default action have the
+		// process
+		(void)signal(sig, SIG_DFL);
+		(void)raise(sig);
 	}
 }
 
 void signal_handler_init()
 {
-	(void)signal(SIGINT, sigint_handler);
+	(void)signal(SIGINT, shutdown_signal_handler);
+	(void)signal(SIGTERM, shutdown_signal_handler);
+#ifndef _WIN32
+	// A write to a socket the server has dropped must not kill the client
+	(void)signal(SIGPIPE, SIG_IGN);
+#endif
 }
 
 int main(int argc, char *argv[])
@@ -150,6 +160,8 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 	}
+
+	signal_handler_init();
 
 	if(!boot::autodetect::detect_client_paths(config))
 		return 1;
