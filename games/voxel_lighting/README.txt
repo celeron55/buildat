@@ -255,18 +255,34 @@ Noise falling by 2.8 is what casting eight times the rays would have bought,
 for no rays at all. Brightness is unchanged by it: the rim region reads 77.5660
 before and 77.5657 after at emphasis 1, over thirty frames each.
 
-The settings now are 12x12 cells and sixteen rays each, which is what the same
-measurement makes of them:
+Twelve by twelve cells with sixteen rays each measures 0.0097, 0.0028 and 0.05
+on those three, which is as still as it gets and far past what is needed. The
+settings are 6x6 cells with four rays each, which leaves a slight shimmer that
+reads as fine.
 
-    coherent std of the region       0.0097
-    per-pixel per-sweep |diff|       0.0028
-    the same on the worst patch      0.05
+What that costs, measured at benchmark 3 over 4800 frames -- marching on its
+worker with thread CPU time, the rest on the main thread:
 
-That is a ceiling rather than a considered choice: 576 rays a frame against the
-36 this started at, picked to find out what the sampling can do before deciding
-what it should cost. Walking back down from it is the open question -- the two
-knobs are RAYS_PER_CELL, which divides a sweep's variance, and CELLS, which
-decides how narrowly the cube can be aimed and costs rays for nothing else.
+    marching                    0.085 ms/frame   0.29 us/ray, 7.8 steps/ray
+    submitting (Lua -> C++)     0.223 ms/frame
+    collecting (C++ -> Lua)     0.256 ms/frame
+    aiming the directions       0.114 ms/frame
+                                -----
+                                0.678 ms/frame
+
+The marching is an eighth of it. The rest is 288 direction tables built in Lua
+and read by luabind every frame, and a result table per ray read back, which is
+about eight table operations a ray against the eight voxels a ray actually
+walks. Rays are not what this costs; handing them over is.
+
+Two things follow. Making the marching itself faster -- skipping empty space
+with a coarse occupancy mip, say -- would be optimising the eighth. And putting
+the rays on a worker thread, which is what happens now, moves that same eighth
+off the frame and leaves the rest of it there.
+
+Note also that two slices are kept in flight, so the rays cast per frame are
+twice CELLS_PER_UPDATE times RAYS_PER_CELL: 288 here, where the constants read
+144.
 
  That average is also what keeps the speculars still: taking a ray whole
 put its own yes-or-no on the screen, which flickered several times a second --
