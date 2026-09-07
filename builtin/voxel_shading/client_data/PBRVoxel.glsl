@@ -27,9 +27,13 @@
 //       color is already the scene's ambient diffuse, and adding an
 //       unoccluded sky on top of it would light the inside of a cave. The
 //       specular term is scaled by the same skylight for the same reason.
-//       cIndoorBlend fades that to sEnvCubeMap, a dimmer sky for when the
-//       camera cannot see the real one; the game sets both. Only which map is
-//       reflected changes; the skylight scaling applies to either.
+//       cSkyVis dims the cube map by direction: it is how much of the sky the
+//       camera can see each way, as 6x6 values per cube face, which the client
+//       fills by marching the voxel data. So a tunnel's walls stop reflecting
+//       sky while the sky out of its mouth still reflects, and a cave seen
+//       from outside reflects no horizon band it cannot see. There is no
+//       separate indoor cube map: the same sky, dimmed where it is not
+//       visible, is what a surface indoors reflects.
 //   VOXELSPOTS  which parts of a surface are turned to catch the light at this
 //       moment. Worked out per pixel from world position and time rather than
 //       stored, so the specks come and go the way leaves in wind do, and a
@@ -165,8 +169,17 @@ void VS()
     // that cycle counts as open, and so what fraction of cells are open at
     // once. A slow term along the wind direction is added to the phase, which
     // turns what would be an even twinkle into gusts crossing the surface.
-    // 0 where the camera sees full sky, 1 where it sees none
-    uniform float cIndoorBlend;
+
+    // How much of the sky the camera can see, per direction: a cube of 6x6
+    // values per face, 1 for full sky and 0 for none. 216 numbers, packed four
+    // to a vec4 in face, row, column order. The client writes them as one
+    // buffer parameter, which Urho hands to a float array uniform; a cube map
+    // texture would have to be built and uploaded per update instead.
+    //
+    // vec4 rather than a float array so the packing is the same whether or not
+    // the driver lays uniforms out as std140, where an array of float or vec3
+    // pads every element out to four.
+    uniform vec4 cSkyVis[54];
 
     const float TRANSMISSION_CELLS = 16.0;   // Cells per voxel, per axis
     // A material whose own roughness is already below this cannot glint, so
@@ -224,6 +237,62 @@ void VS()
             return 0.0;
         vec3 cell = floor(worldPos * STATIC_SPOT_CELLS);
         return TransmissionHash(cell + 7.0) < fraction ? 1.0 : 0.0;
+    }
+
+    float SkyVisCell(int face, int row, int col)
+    {
+        // "flat" is a reserved word in GLSL, hence the name
+        int cell = face * 36 + row * 6 + col;
+        return cSkyVis[cell / 4][cell - (cell / 4) * 4];
+    }
+
+    // How much sky is visible along dir. The largest component of the
+    // direction picks the cube face and the other two, divided by it, are the
+    // position on that face in -1..1; the client builds a cell's direction the
+    // same way round, so the two agree without either of them following a cube
+    // map face convention. Bilinear between cell centers, clamped at the face
+    // edges the way a cube map with clamped wrapping would be: neighbouring
+    // faces' edge cells look nearly the same way, so the seam does not show.
+    float GetSkyVisibility(vec3 dir)
+    {
+        vec3 a = abs(dir);
+        float m, u, v;
+        int face;
+        if (a.x >= a.y && a.x >= a.z)
+        {
+            m = a.x;
+            face = dir.x >= 0.0 ? 0 : 1;
+            u = dir.y;
+            v = dir.z;
+        }
+        else if (a.y >= a.z)
+        {
+            m = a.y;
+            face = dir.y >= 0.0 ? 2 : 3;
+            u = dir.x;
+            v = dir.z;
+        }
+        else
+        {
+            m = a.z;
+            face = dir.z >= 0.0 ? 4 : 5;
+            u = dir.x;
+            v = dir.y;
+        }
+        m = max(m, M_EPSILON);
+        // Cell centers sit half a cell in from each edge, so the position in
+        // cells is the position across the face times six, less a half
+        float fu = clamp((u / m + 1.0) * 3.0 - 0.5, 0.0, 5.0);
+        float fv = clamp((v / m + 1.0) * 3.0 - 0.5, 0.0, 5.0);
+        int c0 = int(fu);
+        int c1 = min(c0 + 1, 5);
+        int r0 = int(fv);
+        int r1 = min(r0 + 1, 5);
+        float tu = fu - float(c0);
+        return mix(
+            mix(SkyVisCell(face, r0, c0), SkyVisCell(face, r0, c1), tu),
+            mix(SkyVisCell(face, r1, c0), SkyVisCell(face, r1, c1), tu),
+            fv - float(r0));
     }
 
     float GetSurfaceSpots(vec3 worldPos, float openFraction)
@@ -467,8 +536,15 @@ void PS()
             float ndv = clamp(dot(-toCamera, normal), 0.0, 1.0);
             float mip = GetMipFromRoughness(roughness);
             vec3 lookup = FixCubeLookup(reflectDir);
-            vec3 cube = mix(textureLod(sZoneCubeMap, lookup, mip).rgb,
-                textureLod(sEnvCubeMap, lookup, mip).rgb, cIndoorBlend);
+            // simplified: a direction the camera cannot see the sky along
+            // reflects nothing rather than the dark rock that is actually
+            // there. Bounced light is in the vertex color if a floor for it is
+            // ever wanted.
+            vec3 cube = textureLod(sZoneCubeMap, lookup, mip).rgb *
+                GetSkyVisibility(reflectDir);
+            // Scaled by how much sky the surface itself sees as well as by
+            // how much is visible along the reflection: the cube map answers
+            // for the direction, the vertex color for the place.
             finalColor.rgb += cube * EnvBRDFApprox(specColor, roughness, ndv) *
                 vSkyVisibility;
         #endif
