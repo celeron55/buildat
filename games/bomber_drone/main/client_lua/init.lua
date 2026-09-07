@@ -60,9 +60,18 @@ local BOMB_GRAVITY = 20
 local BOMB_DRAG = 0.15
 local BOMB_EJECT_SPEED = 4
 local BOMB_MAX_AGE = 30
+-- Voxels a bomb may cover between two collision tests. A bomb reaches some
+-- 25 voxels a second, so at a low frame rate one step of a whole frame would
+-- pass clean through the ground it should hit.
+local BOMB_MAX_STEP = 0.4
+-- Enough for a frame of any length worth simulating
+local BOMB_MAX_STEPS = 200
 
 local CHASE_DIST = 14
-local CHASE_UP = 3
+local CHASE_UP = 7
+-- Aimed this far below the drone, so the frame carries the terrain under it
+-- and a bomb can be watched down to the ground
+local CHASE_AIM_DOWN = 9
 local CHASE_MIN_ALT = 6
 local CHASE_LAG = 4
 
@@ -124,8 +133,13 @@ local function matte_material(r, g, b)
 	return m
 end
 
+-- A Material made here is kept alive only by the components that use it:
+-- Urho3D's Lua binding hands out the object without holding a reference of
+-- its own. One shared between nodes that all get removed again -- every bomb
+-- so far -- is freed the moment the last of them goes, and this side is left
+-- with a dangling handle. The drone's parts live as long as the session, so
+-- they can share one; a bomb gets its own.
 local drone_material = matte_material(0.05, 0.055, 0.045)
-local bomb_material = matte_material(0.04, 0.04, 0.045)
 
 -- The drone: cuboids only, no propeller, wingspan 4 voxels
 local drone_node = scene:CreateChild("Drone")
@@ -175,12 +189,27 @@ nose_camera_node.position = magic.Vector3(0, 0.2, 1.9)
 -- Left: a gimbal on an imaginary aircraft flying ahead of the drone
 local chase_camera_node, chase_camera = make_camera("ChaseCamera", scene)
 
-do
+local viewports = {}
+local viewport_w, viewport_h = nil, nil
+
+-- Half the window each. Called again whenever the window size changes; a
+-- Viewport rect is in backbuffer pixels and does not follow it by itself.
+local function layout_viewports()
 	local w = magic.graphics.width
 	local h = magic.graphics.height
-	local function add_viewport(index, camera, rect)
+	if w == viewport_w and h == viewport_h then
+		return
+	end
+	viewport_w, viewport_h = w, h
+	local half = math.floor(w / 2)
+	viewports[1]:SetRect(magic.IntRect(0, 0, half, h))
+	viewports[2]:SetRect(magic.IntRect(half, 0, w, h))
+end
+
+do
+	local function add_viewport(index, camera)
 		local viewport = magic.Viewport:new(scene, camera)
-		viewport:SetRect(rect)
+		viewports[index + 1] = viewport
 		magic.renderer:SetViewport(index, viewport)
 		local rp = viewport.renderPath:Clone()
 		rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/BloomHDR.xml"))
@@ -194,8 +223,9 @@ do
 	end
 	magic.renderer.numViewports = 2
 	magic.renderer.HDRRendering = true
-	add_viewport(0, chase_camera, magic.IntRect(0, 0, math.floor(w / 2), h))
-	add_viewport(1, nose_camera, magic.IntRect(math.floor(w / 2), 0, w, h))
+	add_viewport(0, chase_camera)
+	add_viewport(1, nose_camera)
+	layout_viewports()
 end
 
 -- The nose camera is the drone's own point of view; stream and shade for it
@@ -298,7 +328,7 @@ local function drop_bomb()
 	node.scale = magic.Vector3(0.3, 0.9, 0.3)
 	local sm = node:CreateComponent("StaticModel")
 	sm.model = magic.cache:GetResource("Model", "Models/Cylinder.mdl")
-	sm.material = bomb_material
+	sm.material = matte_material(0.04, 0.04, 0.045)
 	sm.castShadows = true
 	local vel = drone_node:GetWorldDirection() * speed +
 			drone_down() * BOMB_EJECT_SPEED
@@ -319,14 +349,30 @@ local function update_bombs(dt)
 	while i <= #bombs do
 		local b = bombs[i]
 		b.age = b.age + dt
-		b.vel.y = b.vel.y - BOMB_GRAVITY * dt
-		b.vel = b.vel * (1 - BOMB_DRAG * dt)
-		local p = b.node.position + b.vel * dt
+		-- Substepped so that the terrain is tested along the whole path of
+		-- this frame rather than only at its end
+		local steps = math.ceil(b.vel:Length() * dt / BOMB_MAX_STEP)
+		if steps < 1 then
+			steps = 1
+		elseif steps > BOMB_MAX_STEPS then
+			steps = BOMB_MAX_STEPS
+		end
+		local sdt = dt / steps
+		local p = b.node.position
+		local hit = false
+		for _ = 1, steps do
+			b.vel.y = b.vel.y - BOMB_GRAVITY * sdt
+			b.vel = b.vel * (1 - BOMB_DRAG * sdt)
+			p = p + b.vel * sdt
+			if voxelworld.get_static_voxel(buildat.Vector3(p)).id >= 2 then
+				hit = true
+				break
+			end
+		end
 		b.node.position = p
 		-- Cylinder points along its own +Y; aim that along the trajectory
 		b.node.direction = b.vel:Normalized()
 		b.node:Pitch(90)
-		local hit = voxelworld.get_static_voxel(buildat.Vector3(p)).id >= 2
 		if hit then
 			explode(p)
 		end
@@ -356,10 +402,10 @@ local function update_flight(dt)
 		pitch_input = pitch_input - 1 -- nose up
 	end
 	if magic.input:GetKeyDown(magic.KEY_D) then
-		roll_input = roll_input + 1
+		roll_input = roll_input - 1
 	end
 	if magic.input:GetKeyDown(magic.KEY_A) then
-		roll_input = roll_input - 1
+		roll_input = roll_input + 1
 	end
 
 	-- Control authority and stability both come from airflow
@@ -387,7 +433,7 @@ local function update_flight(dt)
 		roll = roll - normalize_angle(roll) * math.min(1, ROLL_LEVEL_K * dt)
 	end
 
-	yaw = yaw + YAW_PER_ROLL * math.sin(math.rad(roll)) * q * dt
+	yaw = yaw - YAW_PER_ROLL * math.sin(math.rad(roll)) * q * dt
 
 	pitch = normalize_angle(pitch)
 	roll = normalize_angle(roll)
@@ -438,7 +484,7 @@ local function update_chase_camera(dt)
 	local cam_p = chase_camera_node.position
 	chase_camera_node.position = cam_p +
 			(desired - cam_p) * math.min(1, CHASE_LAG * dt)
-	chase_camera_node:LookAt(drone_p)
+	chase_camera_node:LookAt(drone_p - magic.Vector3(0, CHASE_AIM_DOWN, 0))
 end
 
 -- One action per press of the key: KeyDown also fires on key repeat, and the
@@ -463,6 +509,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	local dt = event_data:GetFloat("TimeStep")
 
 	voxel_shading.update(dt)
+	layout_viewports()
 
 	pos_send_counter = pos_send_counter + 1
 	if pos_send_counter >= 15 then
