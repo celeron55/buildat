@@ -328,6 +328,35 @@ rather than something the benchmark cameras do by themselves: moving between
 cameras should not stop the scene animating, and a frozen scene that nothing
 said it had frozen is a confusing thing to land in.
 
+R (or the HUD button beside the wind one) cycles the specular emphasis
+through 1, 4, 16 and 64, multiplying the reflected sky and nothing else.
+
+This exists because the reflections are too faint to measure at 1. A change to
+voxel_shading's sky visibility sampling moves a cave wall by a fraction of a
+value out of 255 -- below what a PNG rounds to -- so bursts of screenshots come
+back byte-identical whatever the sampling does, and comparing two approaches by
+eye or by ImageMagick says nothing. Turned up, the same change is tens of
+values and can be measured.
+
+The pulsation the sampling produces is what this was built to see. At benchmark
+3, with the wind frozen and the camera left alone, sampling one frame per sweep
+off the brightest patch of the cave mouth's rim:
+
+    16x:  84.8 82.7 83.2 81.9 84.9 84.7 83.0 88.3 86.9 ... 91.0 88.1 87.3
+          per-sweep |diff| mean 2.32, max 8.15, on a level of 86
+    1x:   per-sweep |diff| mean 0.16, max 0.54
+
+The rim is the whole of it: a per-pixel map of temporal range over the mouth
+traces the dirt and rock edges and is black everywhere else. Cells looking at
+solid rock sit at 0 and cells looking out of the mouth sit at 1, and neither
+varies; the variance is entirely in the cells straddling the rim, where a
+cell's rays are a coin flip weighted by how much of it the opening covers.
+
+Emphasis scales the reflection alone, so what it exaggerates is exactly what
+that sampling decides. It does also make the VOXELSPOTS sparkle plain, since
+those spots reflect the sky too -- worth knowing before reading a screenshot
+taken at 64.
+
 The pond is dug rather than found. This terrain is one slope, so a water line
 drawn across it fills the low ground at the edge of the volume and reads as a
 sea the world runs out of; a basin dug into the flattest ground away from the

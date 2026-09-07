@@ -181,6 +181,14 @@ void VS()
     // pads every element out to four.
     uniform vec4 cSkyVis[54];
 
+    // Multiplies the reflected sky, for looking at the reflections rather
+    // than at the scene. 1 is what a game renders; the benchmarks turn it up
+    // so that changes to the sky visibility sampling are visible at all --
+    // most of a cave is rock reflecting almost nothing, and a change worth
+    // arguing about moves a wall by a fraction of a value out of 255. Zero
+    // when nothing sets it, so voxel_shading pushes it every frame.
+    uniform float cSpecEmphasis;
+
     const float TRANSMISSION_CELLS = 16.0;   // Cells per voxel, per axis
     // A material whose own roughness is already below this cannot glint, so
     // water is given a duller base than a still pond would have
@@ -546,7 +554,7 @@ void PS()
             // how much is visible along the reflection: the cube map answers
             // for the direction, the vertex color for the place.
             finalColor.rgb += cube * EnvBRDFApprox(specColor, roughness, ndv) *
-                vSkyVisibility;
+                vSkyVisibility * cSpecEmphasis;
         #endif
 
         #ifdef ENVCUBEMAP

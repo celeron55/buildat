@@ -156,6 +156,10 @@ local ray_args = {
 -- per frame
 local sky_vis_buffer = magic.VectorBuffer:new()
 local sky_vis_param = nil
+-- Multiplies the reflected sky in the shader. 1 is what a game renders; the
+-- benchmarks turn it up to look at the reflections themselves. See
+-- M.set_specular_emphasis().
+local spec_emphasis = 1.0
 
 local function each_material(node, cb)
 	local cg = node:GetComponent("CustomGeometry")
@@ -358,11 +362,29 @@ local function push_sky_vis()
 			local command = render_path:GetCommand(i)
 			if command ~= nil and command.type == magic.CMD_SCENEPASS then
 				command:SetShaderParameter("SkyVis", sky_vis_param)
+				command:SetShaderParameter("SpecEmphasis", spec_emphasis)
 			end
 		end
 		return
 	end
 	render_path:SetShaderParameter("SkyVis", sky_vis_param)
+	render_path:SetShaderParameter("SpecEmphasis", spec_emphasis)
+end
+
+-- How much to multiply the reflected sky by, 1 being what a game renders.
+--
+-- For looking at what this module does rather than at the scene. Most of a
+-- cave is rock reflecting almost nothing, so a change to the sampling that is
+-- worth arguing about moves a wall by a fraction of a value out of 255 -- less
+-- than PNG rounding, which makes screenshots useless as a way to tell whether
+-- a change did anything. Turned up, the same change is tens of values and can
+-- be measured. It scales the reflection alone, so what it exaggerates is
+-- exactly what this module decides and nothing else.
+function M.set_specular_emphasis(v)
+	spec_emphasis = v
+	-- Straight away rather than at the next declaring walk, so a key that
+	-- changes it takes effect on the next frame
+	declare_countdown = 0
 end
 
 -- dt of nil snaps, for when the camera has been moved rather than has moved
