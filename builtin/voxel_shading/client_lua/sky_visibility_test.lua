@@ -178,7 +178,7 @@ local M = chunk()
 M.set_camera(camera_node)
 
 -- GetSkyVisibility() from PBRVoxel.glsl, in Lua
-local CELLS = 12
+local CELLS = 6
 
 local function vis_at(vals, x, y, z)
 	local ax, ay, az = math.abs(x), math.abs(y), math.abs(z)
@@ -210,8 +210,8 @@ end
 local function sweep(w)
 	world = w
 	M.update(nil) -- nil snaps: a full sweep, no easing
-	assert(#params.SkyVis == 864,
-			"expected 864 values, got "..#params.SkyVis)
+	assert(#params.SkyVis == 216,
+			"expected 216 values, got "..#params.SkyVis)
 	return params.SkyVis
 end
 

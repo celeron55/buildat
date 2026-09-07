@@ -62,7 +62,7 @@ local TECHNIQUE = magic.cache:GetResource("Technique",
 -- and differently each sweep, and each cell keeps an average of its own rays,
 -- so a cell settles at the fraction of its directions that see sky.
 local FACES = 6
-local CELLS = 12                -- Per face, per axis
+local CELLS = 6                -- Per face, per axis
 local CELL_COUNT = FACES * CELLS * CELLS
 -- Rays cast into each cell per sweep, averaged into that cell's value. This is
 -- the knob for how noisy one sweep's answer is: a cell's rays are yes or no,
@@ -70,7 +70,7 @@ local CELL_COUNT = FACES * CELLS * CELLS
 -- the average of K of them has a K-th of the variance. They are stratified
 -- within the cell rather than independent, so they cover it evenly instead of
 -- clumping the way K independent samples would.
-local RAYS_PER_CELL = 16
+local RAYS_PER_CELL = 4
 -- Cells refreshed per frame. A sweep is every cell once, so this is how often
 -- the whole cube is renewed: 36 cells of a 12x12x6 cube is a sweep every 24
 -- frames. Rays per frame is this times RAYS_PER_CELL.

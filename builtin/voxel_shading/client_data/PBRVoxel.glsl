@@ -183,8 +183,8 @@ void VS()
     // packed four to a vec4, so the array is 6*C*C/4 long -- keep the two in
     // step, and in step with CELLS in the client's module.lua, which fills
     // them.
-    const int SKYVIS_CELLS = 12;
-    uniform vec4 cSkyVis[216];
+    const int SKYVIS_CELLS = 6;
+    uniform vec4 cSkyVis[54];
 
     // Multiplies the reflected sky, for looking at the reflections rather
     // than at the scene. 1 is what a game renders; the benchmarks turn it up
