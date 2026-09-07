@@ -82,13 +82,15 @@ local scene = replicate.main_scene
 local spawn_received = false
 local spawn_p = nil
 
--- The drone's attitude is kept here rather than read back from the node: euler
--- angles extracted from a quaternion fold at +-90 degrees of pitch, and this
--- thing is meant to loop.
-local pitch = 0 -- Positive is nose down, as Urho3D counts it
-local yaw = 90  -- The runway runs towards +X
-local roll = 0
+-- The node's own rotation is the attitude. Control and trim are rotations
+-- about the drone's own axes, so that pitch pulls towards wherever its own
+-- roof is pointing rather than towards the sky; euler angles of our own
+-- cannot express that, and would fold at +-90 degrees of pitch besides.
 local speed = 0
+-- Which way the drone is going, level, for the chase camera. Kept rather
+-- than derived every frame because it is meaningless while the nose points
+-- straight up or down.
+local heading = magic.Vector3(1, 0, 0)
 local motor_on = false
 local on_ground = true
 -- The client only knows the terrain once its chunks arrive; until then the
@@ -167,6 +169,19 @@ end
 -- point and direction are the drone's own coordinate space at any attitude.
 local bomb_mount = drone_node:CreateChild("BombMount")
 bomb_mount.position = magic.Vector3(0, -0.6, 0.2)
+
+-- The drone's own axes in world space. The sandbox has no quaternion times
+-- vector, but a child node's world position is that same rotation applied,
+-- which is all these are.
+local axis_right = drone_node:CreateChild("AxisRight")
+axis_right.position = magic.Vector3(1, 0, 0)
+local axis_up = drone_node:CreateChild("AxisUp")
+axis_up.position = magic.Vector3(0, 1, 0)
+
+local function body_axis(node)
+	return (node:GetWorldPosition() -
+			drone_node:GetWorldPosition()):Normalized()
+end
 
 local function drone_down()
 	return (bomb_mount:GetWorldPosition() -
@@ -310,14 +325,6 @@ local function terrain_top_near(p, max_d)
 	return nil
 end
 
-local function normalize_angle(a)
-	a = math.fmod(a + 180, 360)
-	if a < 0 then
-		a = a + 360
-	end
-	return a - 180
-end
-
 magic.ui:SetFocusElement(nil)
 
 local bombs = {} -- {node=, vel=, age=}
@@ -415,32 +422,59 @@ local function update_flight(dt)
 	-- let it roll off down a slope
 	local rolling = on_ground and speed < STALL_SPEED
 
+	-- Where the drone stands relative to the horizon. Roll is how far its
+	-- own roof has turned away from up, and climb is where its nose points.
+	local forward = drone_node:GetWorldDirection()
+	local right = body_axis(axis_right)
+	local up = body_axis(axis_up)
+	local roll_angle = math.deg(math.atan2(right.y, up.y))
+	local climb = math.deg(math.asin(
+			math.max(-1, math.min(1, forward.y))))
+
+	-- Every one of these turns the drone about its own axes: pitch about the
+	-- wing line, roll about the nose. A rolled drone pitching therefore pulls
+	-- towards its own roof, which is what makes a bank turn.
+	local pitch_deg = 0
+	local roll_deg = 0
 	if pitch_input ~= 0 and not rolling then
-		pitch = pitch + pitch_input * PITCH_RATE * q * dt
+		pitch_deg = pitch_input * PITCH_RATE * q * dt
 	elseif rolling then
-		pitch = pitch * math.max(0, 1 - 4 * dt)
+		-- On its gear: level, and nothing that would let it roll off a slope
+		pitch_deg = climb * math.min(1, 4 * dt)
 	else
 		-- Above stall speed it trims itself level; below it, the nose drops
-		local target = (speed >= STALL_SPEED) and 0 or STALL_PITCH_DOWN
-		pitch = pitch + (target - normalize_angle(pitch)) *
-				math.min(1, PITCH_LEVEL_K * dt)
+		local target = (speed >= STALL_SPEED) and 0 or -STALL_PITCH_DOWN
+		pitch_deg = (climb - target) * math.min(1, PITCH_LEVEL_K * dt)
 	end
 	if roll_input ~= 0 and not rolling then
-		roll = roll + roll_input * ROLL_RATE * q * dt
+		roll_deg = roll_input * ROLL_RATE * q * dt
 	elseif rolling then
-		roll = roll * math.max(0, 1 - 4 * dt)
+		roll_deg = -roll_angle * math.min(1, 4 * dt)
 	else
-		roll = roll - normalize_angle(roll) * math.min(1, ROLL_LEVEL_K * dt)
+		roll_deg = -roll_angle * math.min(1, ROLL_LEVEL_K * dt)
 	end
 
-	yaw = yaw - YAW_PER_ROLL * math.sin(math.rad(roll)) * q * dt
+	if pitch_deg ~= 0 then
+		drone_node:Rotate(magic.Quaternion(pitch_deg,
+				magic.Vector3(1, 0, 0)), magic.TS_LOCAL)
+	end
+	if roll_deg ~= 0 then
+		drone_node:Rotate(magic.Quaternion(roll_deg,
+				magic.Vector3(0, 0, 1)), magic.TS_LOCAL)
+	end
+	-- The yaw a bank drags with it turns about the world's vertical, not the
+	-- drone's own, so that it reads as a turn however far the drone is rolled
+	local yaw_deg = -YAW_PER_ROLL * math.sin(math.rad(roll_angle)) * q * dt
+	if yaw_deg ~= 0 then
+		drone_node:Rotate(magic.Quaternion(yaw_deg,
+				magic.Vector3(0, 1, 0)), magic.TS_WORLD)
+	end
 
-	pitch = normalize_angle(pitch)
-	roll = normalize_angle(roll)
-	yaw = normalize_angle(yaw)
-	drone_node.rotation = magic.Quaternion(pitch, yaw, roll)
-
-	local forward = drone_node:GetWorldDirection()
+	forward = drone_node:GetWorldDirection()
+	-- Keep the last heading that meant anything: straight up has none
+	if math.abs(forward.x) + math.abs(forward.z) > 0.1 then
+		heading = magic.Vector3(forward.x, 0, forward.z):Normalized()
+	end
 	if motor_on then
 		speed = math.min(MOTOR_SPEED, speed + MOTOR_ACCEL * dt)
 	else
@@ -472,10 +506,9 @@ end
 
 local function update_chase_camera(dt)
 	local drone_p = drone_node:GetWorldPosition()
-	-- Yaw only: the gimbal aircraft flies level even when the drone loops
-	local fwd = magic.Vector3(math.sin(math.rad(yaw)), 0,
-			math.cos(math.rad(yaw)))
-	local desired = drone_p + fwd * CHASE_DIST + magic.Vector3(0, CHASE_UP, 0)
+	-- Level heading only: the gimbal aircraft flies level even in a loop
+	local desired = drone_p + heading * CHASE_DIST +
+			magic.Vector3(0, CHASE_UP, 0)
 	-- Near the ground the camera stays in the air and points down instead
 	local ground_top = terrain_top_near(desired, 32)
 	if ground_top and desired.y < ground_top + CHASE_MIN_ALT then
@@ -521,7 +554,8 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		-- Out of the world (it can only get there through a gap in the
 		-- streamed terrain); put it back on the runway
 		drone_node.position = spawn_p
-		pitch, yaw, roll = 0, 90, 0
+		drone_node.rotation = magic.Quaternion(0, 90, 0)
+		heading = magic.Vector3(1, 0, 0)
 		speed = 0
 		motor_on = false
 	end
@@ -546,10 +580,11 @@ buildat.sub_packet("main:spawn", function(data)
 	log:info("spawn ("..v.x..", "..v.y..", "..v.z..")")
 	spawn_p = magic.Vector3(v.x, v.y, v.z)
 	drone_node.position = spawn_p
-	pitch, yaw, roll = 0, 90, 0
+	-- Level, pointing along the runway towards +X
+	drone_node.rotation = magic.Quaternion(0, 90, 0)
+	heading = magic.Vector3(1, 0, 0)
 	speed = 0
 	motor_on = false
-	drone_node.rotation = magic.Quaternion(pitch, yaw, roll)
 	spawn_received = true
 	set_generating_status(0)
 	send_drone_pos()
