@@ -406,7 +406,6 @@ struct CApp: public App, public magic::Application
 	BuildatResourceRouter *m_router;
 	magic::LuaScript *m_script;
 	lua_State *L;
-	bool m_reboot_requested = false;
 	// shutdown() is not instant; the frames until the window closes must not
 	// each call it again
 	bool m_shutdown_signal_handled = false;
@@ -529,8 +528,7 @@ struct CApp: public App, public magic::Application
 
 	~CApp()
 	{
-		if(!m_reboot_requested)
-			stop_local_server();
+		stop_local_server();
 	}
 
 	void set_state(sp_<client::State> state)
@@ -552,10 +550,7 @@ struct CApp: public App, public magic::Application
 	void shutdown()
 	{
 		log_v(MODULE, "shutdown()");
-		if(m_reboot_requested)
-			request_stop_local_server();
-		else
-			stop_local_server();
+		stop_local_server();
 
 		magic::Graphics *g = GetSubsystem<magic::Graphics>();
 		if(g){
@@ -567,18 +562,6 @@ struct CApp: public App, public magic::Application
 
 		magic::Engine *engine = GetSubsystem<magic::Engine>();
 		engine->Exit();
-	}
-
-	bool reboot_requested()
-	{
-		if(g_client_config.get<bool>("command_seq_enabled"))
-			return false;
-		return m_reboot_requested;
-	}
-
-	Options get_current_options()
-	{
-		return m_options;
 	}
 
 	void run_script(const ss_ &script)
@@ -1254,12 +1237,9 @@ struct CApp: public App, public magic::Application
 		CApp *self = (CApp*)lua_touserdata(L, -1);
 		lua_pop(L, 1);
 
-		if(g_client_config.get<bool>("boot_to_menu")){
-			self->m_reboot_requested = true;
-			self->shutdown();
-		} else {
-			self->shutdown();
-		}
+		// Exiting a game exits the client, also when started from the
+		// launcher: the menu's Urho3D/Lua state is not resettable in place.
+		self->shutdown();
 
 		return 0;
 	}

@@ -178,7 +178,7 @@ int main(int argc, char *argv[])
 	}
 
 	int exit_status = 0;
-	while(exit_status == 0){
+	{
 		magic::Context context;
 		sp_<app::App> app0(app::createApp(&context, app_options));
 		sp_<client::State> state(client::createState(app0));
@@ -195,11 +195,6 @@ int main(int argc, char *argv[])
 		}
 
 		exit_status = app0->run();
-
-		if(!app0->reboot_requested())
-			break;
-
-		app_options = app0->get_current_options();
 	}
 	log_v(MODULE, "Succesful shutdown");
 	return exit_status;
