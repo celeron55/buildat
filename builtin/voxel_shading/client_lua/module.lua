@@ -50,11 +50,15 @@ local TECHNIQUE = magic.cache:GetResource("Technique",
 --
 -- The values come from marching rays through the voxel data from the camera.
 -- No geometry, depth buffer or render pass is involved. buildat.cast_voxel_rays
--- does the marching, which is what makes this many rays affordable: the same
--- loop written in Lua cost half a millisecond a frame for four rays of twenty
--- voxels, where the engine does 36 of sixty-four in 0.33 ms. It also decides
--- what stops a ray by the voxel registry's own physically_solid, so glass and
--- water are whatever the world says they are.
+-- does the marching, on a worker thread, which is what makes this many rays
+-- affordable: the same loop written in Lua cost half a millisecond a frame for
+-- four rays of twenty voxels, where the engine marches one in a third of a
+-- microsecond. It also decides what stops a ray by the voxel registry's own
+-- physically_solid, so glass and water are whatever the world says they are.
+--
+-- Handing the rays over costs several times more than marching them does --
+-- see the note in games/voxel_lighting/README.txt for where the time goes, and
+-- for why making the marching itself faster would be the wrong thing to try.
 --
 -- A ray answers no if something solid stops it, and otherwise the skylight of
 -- the air it ended in. Partial values come from sampling rather
@@ -72,24 +76,26 @@ local CELL_COUNT = FACES * CELLS * CELLS
 -- clumping the way K independent samples would.
 local RAYS_PER_CELL = 4
 -- Cells refreshed per frame. A sweep is every cell once, so this is how often
--- the whole cube is renewed: 36 cells of a 12x12x6 cube is a sweep every 24
--- frames. Rays per frame is this times RAYS_PER_CELL.
+-- the whole cube is renewed: 36 cells of the 216 here is a sweep every six
+-- frames, or every three at the rate MAX_IN_FLIGHT actually keeps up -- read
+-- its comment before taking this or RAYS_PER_CELL as rays per frame.
 local CELLS_PER_UPDATE = 36
 -- How far a ray looks. Long, because the length is what makes the answer
 -- strict: a ray down digger's tunnel has to reach the end of it to find out
 -- that the tunnel is not a way to the sky, and the tunnel is tens of voxels
 -- long. Cheap enough that this is not the thing to save on.
 local RAY_VOXELS = 64
--- How much of a cell's new ray is taken into its value. One ray is a yes or a
--- no, so this average is what turns the rays into the fraction of a cell that
--- sees sky. At 0.15, with a ray per cell every sixth frame, a cell settles in
--- under a second and the reflections trail the camera by about that. Taking
--- more of each ray puts their own noise on the screen, which reads as the
--- speculars flickering several times a second.
+-- How much of a cell's new value is taken into the one the shader sees. What a
+-- sweep hands over is already an average of RAYS_PER_CELL rays; this averages
+-- those over time as well. At 0.10 a cell settles in about a second and the
+-- reflections trail the camera by about that. Taking more of each sweep puts
+-- the sampling's own noise on the screen, which reads as the speculars
+-- flickering several times a second.
 local SKY_VIS_BLEND = 0.10
 -- Sweeps averaged when snapping, for a camera that has been moved rather than
 -- has moved: the same averaging done at once, so a screenshot taken right
--- after a teleport is as settled as one taken later. This is some thousands of
+-- after a teleport is as settled as one taken later. Two rather than more
+-- because a sweep is already RAYS_PER_CELL deep. This is some thousands of
 -- rays in one frame and drops one, which is what a teleport does anyway.
 local SNAP_SWEEPS = 2
 -- Chunks are collected around the camera out to the reach of a ray, and the
@@ -154,9 +160,10 @@ local volumes_age = VOLUME_REFRESH_SWEEPS
 local ray_args = {
 	directions = DIRS,
 	max_steps = RAY_VOXELS,
-	-- Not used: see ray_visibility() on why skylight cannot say which way the
-	-- sky is. The engine will stop a ray at a skylight level for callers that
-	-- do want that.
+	-- Not used: skylight says the sky is open above a voxel, which is nothing
+	-- to do with whether the sky lies along the ray, so stopping a ray at it
+	-- answers the wrong question -- see the note further down. The engine will
+	-- do it for callers that do want it.
 	stop_skylight = 0,
 	-- Consecutive rays are one cell's, and the engine hands back their average
 	-- per cell rather than what each of them found: a few hundred numbers a
@@ -211,7 +218,7 @@ end)
 -- wobbling on its own. Coherent like that it reads as the scene pulsing, which
 -- is far more visible than the same amount of noise spread over cells, and
 -- since the step is a fixed sequence the pulsing is periodic. More rays does
--- not help: it is not a shortage of samples, it is 216 cells making the same
+-- not help: it is not a shortage of samples, it is every cell making the same
 -- error at the same moment.
 --
 -- The offsets are the R2 low discrepancy sequence over the cells, which spreads
@@ -400,6 +407,12 @@ end
 -- have nothing to collect and nothing to submit, and the sweep would take
 -- twice as long for no reason. Two is enough to keep a worker fed. The pool
 -- has four of them and the mesher is the other caller.
+--
+-- Note what this does to the rate. The queue is topped back up to this depth
+-- every frame, so when the workers keep up, two slices are submitted per frame
+-- and the rays cast are twice CELLS_PER_UPDATE times RAYS_PER_CELL: 288 a
+-- frame where those two constants read 144. Worth knowing before reading
+-- either of them as a rate.
 local MAX_IN_FLIGHT = 2
 local in_flight = {}
 

@@ -153,11 +153,15 @@ sp_<CommonVolume> deserialize_volume_8bit(
 //                  volumes; a ray entering a chunk that is not in here stops
 //                  with status "no data"
 //   origin         {x=,y=,z=} in voxels; the voxel it is in is not sampled
-//   directions     array of {x=,y=,z=}, need not be unit vectors
-//   first, count   which of the directions to cast, 1-based (default: all)
+//   directions     flat array of numbers, three to a ray, need not be unit
+//                  vectors. Flat rather than a table per ray because this is
+//                  read for every ray every frame and a table each cost more
+//                  than the marching did.
+//   first, count   which rays to cast, 1-based (default: all)
 //   max_steps      voxels a ray may enter before giving up
 //   stop_skylight  optional 1..15; a passable voxel at or above this stops the
 //                  ray with status "skylight"
+//   rays_per_cell  optional; see below
 //
 // Returns a table of four arrays, each indexed 1..count:
 //   status    one of the VoxelRayStatus values below, which the client Lua
@@ -165,6 +169,15 @@ sp_<CommonVolume> deserialize_volume_8bit(
 //   hit_id    the voxel id that stopped the ray, or 0
 //   skylight  skylight of the last passable voxel entered, or -1 for none
 //   steps     voxels entered
+//
+// With rays_per_cell set, consecutive rays are taken to be one cell's and what
+// comes back instead is
+//   count       cells
+//   visibility  their mean ray_visibility(), one per cell
+// which is a few hundred numbers a frame rather than four arrays per ray, and
+// is most of what this call costs at any real ray count. The price is that the
+// rule turning a ray into a number is then this file's rather than the
+// caller's; a caller that wants its own leaves rays_per_cell unset.
 //
 // The march is a DDA over voxel centers, so it enters every voxel the ray
 // passes through and cannot step over a wall one voxel thick.

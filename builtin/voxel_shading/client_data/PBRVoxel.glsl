@@ -170,9 +170,9 @@ void VS()
     // once. A slow term along the wind direction is added to the phase, which
     // turns what would be an even twinkle into gusts crossing the surface.
 
-    // How much of the sky the camera can see, per direction: a cube of 6x6
-    // values per face, 1 for full sky and 0 for none. 216 numbers, packed four
-    // to a vec4 in face, row, column order. The client writes them as one
+    // How much of the sky the camera can see, per direction: a cube of
+    // SKYVIS_CELLS squared values per face, 1 for full sky and 0 for none,
+    // packed four to a vec4 in face, row, column order. The client writes them as one
     // buffer parameter, which Urho hands to a float array uniform; a cube map
     // texture would have to be built and uploaded per update instead.
     //
