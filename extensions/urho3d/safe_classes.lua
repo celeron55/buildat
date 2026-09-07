@@ -16,7 +16,19 @@ function M.define(dst, util)
 	})
 
 	util.wc("VectorBuffer", {
+		class = {
+			new = function()
+				return util.wrap_instance("VectorBuffer", VectorBuffer())
+			end,
+		},
 		instance = {
+			-- Writing, for handing a shader a float array: a Variant made of
+			-- one of these is VAR_BUFFER, which Urho sets as a float array of
+			-- whatever length the uniform declares
+			WriteFloat = util.self_function(
+					"WriteFloat", {"boolean"}, {"VectorBuffer", "number"}),
+			Clear = util.self_function(
+					"Clear", {}, {"VectorBuffer"}),
 			GetSize = util.self_function(
 					"GetSize", {"number"}, {"VectorBuffer"}),
 			ReadString = util.self_function(
@@ -38,7 +50,7 @@ function M.define(dst, util)
 	})
 
 	util.wc("Variant", {
-		unsafe_constructor = util.wrap_function({{"Color"}},
+		unsafe_constructor = util.wrap_function({{"Color", "VectorBuffer"}},
 		function(value)
 			return util.wrap_instance("Variant", Variant(value))
 		end),
