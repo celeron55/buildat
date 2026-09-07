@@ -179,7 +179,12 @@ void VS()
     // vec4 rather than a float array so the packing is the same whether or not
     // the driver lays uniforms out as std140, where an array of float or vec3
     // pads every element out to four.
-    uniform vec4 cSkyVis[54];
+    // Cells per cube face, per axis. Six faces of SKYVIS_CELLS squared values,
+    // packed four to a vec4, so the array is 6*C*C/4 long -- keep the two in
+    // step, and in step with CELLS in the client's module.lua, which fills
+    // them.
+    const int SKYVIS_CELLS = 12;
+    uniform vec4 cSkyVis[216];
 
     // Multiplies the reflected sky, for looking at the reflections rather
     // than at the scene. 1 is what a game renders; the benchmarks turn it up
@@ -250,7 +255,7 @@ void VS()
     float SkyVisCell(int face, int row, int col)
     {
         // "flat" is a reserved word in GLSL, hence the name
-        int cell = face * 36 + row * 6 + col;
+        int cell = (face * SKYVIS_CELLS + row) * SKYVIS_CELLS + col;
         return cSkyVis[cell / 4][cell - (cell / 4) * 4];
     }
 
@@ -289,13 +294,16 @@ void VS()
         }
         m = max(m, M_EPSILON);
         // Cell centers sit half a cell in from each edge, so the position in
-        // cells is the position across the face times six, less a half
-        float fu = clamp((u / m + 1.0) * 3.0 - 0.5, 0.0, 5.0);
-        float fv = clamp((v / m + 1.0) * 3.0 - 0.5, 0.0, 5.0);
+        // cells is the position across the face times the cell count, less a
+        // half
+        float half_cells = float(SKYVIS_CELLS) * 0.5;
+        float last = float(SKYVIS_CELLS - 1);
+        float fu = clamp((u / m + 1.0) * half_cells - 0.5, 0.0, last);
+        float fv = clamp((v / m + 1.0) * half_cells - 0.5, 0.0, last);
         int c0 = int(fu);
-        int c1 = min(c0 + 1, 5);
+        int c1 = min(c0 + 1, SKYVIS_CELLS - 1);
         int r0 = int(fv);
-        int r1 = min(r0 + 1, 5);
+        int r1 = min(r0 + 1, SKYVIS_CELLS - 1);
         float tu = fu - float(c0);
         return mix(
             mix(SkyVisCell(face, r0, c0), SkyVisCell(face, r0, c1), tu),

@@ -62,11 +62,19 @@ local TECHNIQUE = magic.cache:GetResource("Technique",
 -- and differently each sweep, and each cell keeps an average of its own rays,
 -- so a cell settles at the fraction of its directions that see sky.
 local FACES = 6
-local CELLS = 6                 -- Per face, per axis: 6x6
+local CELLS = 12                -- Per face, per axis
 local CELL_COUNT = FACES * CELLS * CELLS
--- Rays per frame. A sweep is one ray per cell, so this is also how often the
--- whole set is renewed: 36 gives a sweep every sixth frame.
-local RAYS_PER_UPDATE = 36
+-- Rays cast into each cell per sweep, averaged into that cell's value. This is
+-- the knob for how noisy one sweep's answer is: a cell's rays are yes or no,
+-- so one of them is a coin flip weighted by how much of the cell sees sky, and
+-- the average of K of them has a K-th of the variance. They are stratified
+-- within the cell rather than independent, so they cover it evenly instead of
+-- clumping the way K independent samples would.
+local RAYS_PER_CELL = 16
+-- Cells refreshed per frame. A sweep is every cell once, so this is how often
+-- the whole cube is renewed: 36 cells of a 12x12x6 cube is a sweep every 24
+-- frames. Rays per frame is this times RAYS_PER_CELL.
+local CELLS_PER_UPDATE = 36
 -- How far a ray looks. Long, because the length is what makes the answer
 -- strict: a ray down digger's tunnel has to reach the end of it to find out
 -- that the tunnel is not a way to the sky, and the tunnel is tens of voxels
@@ -78,12 +86,12 @@ local RAY_VOXELS = 64
 -- under a second and the reflections trail the camera by about that. Taking
 -- more of each ray puts their own noise on the screen, which reads as the
 -- speculars flickering several times a second.
-local SKY_VIS_BLEND = 0.15
+local SKY_VIS_BLEND = 0.10
 -- Sweeps averaged when snapping, for a camera that has been moved rather than
 -- has moved: the same averaging done at once, so a screenshot taken right
 -- after a teleport is as settled as one taken later. This is some thousands of
 -- rays in one frame and drops one, which is what a teleport does anyway.
-local SNAP_SWEEPS = 8
+local SNAP_SWEEPS = 2
 -- Chunks are collected around the camera out to the reach of a ray, and the
 -- list is kept until the camera crosses into another chunk: which chunks are
 -- within reach does not change until then. Rebuilt every so many sweeps as
@@ -113,10 +121,11 @@ local FACE_AXES = {
 
 local CELL_SIZE = 2.0 / CELLS
 
--- One table per cell, reused: the sweep rewrites their components rather than
--- building 216 tables of three numbers every time
+-- One table per ray, reused: the sweep rewrites their components rather than
+-- building thousands of tables of three numbers every time. RAYS_PER_CELL of
+-- them per cell, in cell order, so a slice of cells is a run of directions.
 local DIRS = {}
-for i = 1, CELL_COUNT do
+for i = 1, CELL_COUNT * RAYS_PER_CELL do
 	DIRS[i] = {x = 0, y = 0, z = 0}
 end
 
@@ -148,7 +157,7 @@ local ray_args = {
 	-- do want that.
 	stop_skylight = 0,
 	first = 1,
-	count = RAYS_PER_UPDATE,
+	count = 1,
 	origin = {x = 0, y = 0, z = 0},
 	volumes = {},
 }
@@ -209,6 +218,28 @@ end
 local SWEEP_STEP_U = 0.6180339887
 local SWEEP_STEP_V = 0.4142135624
 
+-- Where a cell's rays sit relative to each other: a Hammersley set, which
+-- covers the cell evenly. The set is then shifted as a whole by the cell's own
+-- offset and by the sweep's step, which keeps the even coverage while moving
+-- it, so no two cells sample the same relative points and no cell samples the
+-- same points twice.
+local function radical_inverse_2(n)
+	local r, f = 0.0, 0.5
+	while n > 0 do
+		r = r + (n % 2) * f
+		n = math.floor(n / 2)
+		f = f * 0.5
+	end
+	return r
+end
+
+local STRAT_U = {}
+local STRAT_V = {}
+for k = 1, RAYS_PER_CELL do
+	STRAT_U[k] = (k - 0.5) / RAYS_PER_CELL
+	STRAT_V[k] = radical_inverse_2(k - 1)
+end
+
 local function aim_dirs(index)
 	local su = (index * SWEEP_STEP_U) % 1.0
 	local sv = (index * SWEEP_STEP_V) % 1.0
@@ -217,12 +248,17 @@ local function aim_dirs(index)
 		local a = FACE_AXES[face]
 		for row = 0, CELLS - 1 do
 			for col = 0, CELLS - 1 do
-				local d = DIRS[i]
-				local ju = (CELL_JITTER_U[i] + su) % 1.0 - 0.5
-				local jv = (CELL_JITTER_V[i] + sv) % 1.0 - 0.5
-				d[a.major] = a.sign
-				d[a.u] = (col + 0.5 + ju) * CELL_SIZE - 1.0
-				d[a.v] = (row + 0.5 + jv) * CELL_SIZE - 1.0
+				local bu = CELL_JITTER_U[i] + su
+				local bv = CELL_JITTER_V[i] + sv
+				local base = (i - 1) * RAYS_PER_CELL
+				for k = 1, RAYS_PER_CELL do
+					local d = DIRS[base + k]
+					local ju = (bu + STRAT_U[k]) % 1.0 - 0.5
+					local jv = (bv + STRAT_V[k]) % 1.0 - 0.5
+					d[a.major] = a.sign
+					d[a.u] = (col + 0.5 + ju) * CELL_SIZE - 1.0
+					d[a.v] = (row + 0.5 + jv) * CELL_SIZE - 1.0
+				end
 				i = i + 1
 			end
 		end
@@ -318,22 +354,32 @@ local function collect_volumes(origin)
 	return n > 0
 end
 
--- What a finished slice's rays found, into the sweep
-local function keep_slice(first, out)
+-- What a finished slice's rays found, into the sweep: a cell's RAYS_PER_CELL
+-- rays are consecutive, and the cell keeps their average
+local function keep_slice(first_cell, count_cells, out)
 	local status, skylight, steps = out.status, out.skylight, out.steps
-	for i = 1, out.count do
-		sweep_vis[first + i - 1] =
-				ray_visibility(status[i], skylight[i], steps[i])
+	local n = 0
+	for c = 1, count_cells do
+		local sum = 0.0
+		for k = 1, RAYS_PER_CELL do
+			n = n + 1
+			sum = sum + ray_visibility(status[n], skylight[n], steps[n])
+		end
+		sweep_vis[first_cell + c - 1] = sum / RAYS_PER_CELL
 	end
+end
+
+local function aim_args(first_cell, count_cells)
+	ray_args.first = (first_cell - 1) * RAYS_PER_CELL + 1
+	ray_args.count = count_cells * RAYS_PER_CELL
 end
 
 -- One slice of a sweep, marched here and now. Only the snap uses this: it is
 -- thousands of rays wanted before the next frame is drawn, which is what
 -- blocking is for.
-local function cast_slice(first, count)
-	ray_args.first = first
-	ray_args.count = count
-	keep_slice(first, buildat.cast_voxel_rays(ray_args))
+local function cast_slice(first_cell, count_cells)
+	aim_args(first_cell, count_cells)
+	keep_slice(first_cell, count_cells, buildat.cast_voxel_rays(ray_args))
 end
 
 -- f is how much of the sweep's rays to take; 1.0 replaces the values outright
@@ -362,10 +408,9 @@ end
 local MAX_IN_FLIGHT = 2
 local in_flight = {}
 
-local function submit_slice(first, count)
-	ray_args.first = first
-	ray_args.count = count
-	in_flight[#in_flight + 1] = {first = first, count = count,
+local function submit_slice(first_cell, count_cells)
+	aim_args(first_cell, count_cells)
+	in_flight[#in_flight + 1] = {first = first_cell, count = count_cells,
 			job = buildat.cast_voxel_rays_start(ray_args)}
 end
 
@@ -379,7 +424,7 @@ local function collect_slices(f)
 			return
 		end
 		table.remove(in_flight, 1)
-		keep_slice(slice.first, out)
+		keep_slice(slice.first, slice.count, out)
 		blend_cells(slice.first, slice.count, f)
 	end
 end
@@ -510,7 +555,7 @@ function M.update(dt)
 			break
 		end
 		local first = sweep_next
-		local count = math.min(RAYS_PER_UPDATE, CELL_COUNT - sweep_next + 1)
+		local count = math.min(CELLS_PER_UPDATE, CELL_COUNT - sweep_next + 1)
 		submit_slice(first, count)
 		sweep_next = sweep_next + count
 		if sweep_next > CELL_COUNT then
