@@ -67,17 +67,12 @@ static const int WATER_LEVEL = 25;
 
 struct Worldgen: public worldgen::GeneratorInterface
 {
-	void generate_section(interface::Server *server,
-			SceneReference scene_ref,
-			const pv::Vector3DInt16 &section_p)
+	void generate(SceneReference scene_ref,
+			const pv::Vector3DInt16 &section_p,
+			pv::RawVolume<VoxelInstance> &volume)
 	{
-		voxelworld::access(server, [&](voxelworld::Interface *ivoxelworld)
 		{
-			voxelworld::Instance *world =
-					ivoxelworld->get_instance(scene_ref);
-
-			pv::Region region = world->get_section_region_voxels(
-					section_p);
+			const pv::Region region = volume.getEnclosingRegion();
 
 			auto lc = region.getLowerCorner();
 			auto uc = region.getUpperCorner();
@@ -106,37 +101,37 @@ struct Worldgen: public worldgen::GeneratorInterface
 						pv::Vector3DInt32 p(x, y, z);
 						pv::Vector3DInt32 cp(-112, 20, 253);
 						if((p - cp).lengthSquared() < 30*30){
-							world->set_voxel(p, VoxelInstance(1));
+							volume.setVoxelAt(p, VoxelInstance(1));
 							continue;
 						}
 						if(y >= 2 && y <= 3 && z >= 256 && z <= 258 &&
 								x >= -112 && x <= -5){
-							world->set_voxel(p, VoxelInstance(1));
+							volume.setVoxelAt(p, VoxelInstance(1));
 							continue;
 						}
 						if(z > 37 && z < 50 && y > 20){
-							world->set_voxel(p, VoxelInstance(1));
+							volume.setVoxelAt(p, VoxelInstance(1));
 							continue;
 						}
 						if(x > 27 && x < 40 && y > 20){
-							world->set_voxel(p, VoxelInstance(1));
+							volume.setVoxelAt(p, VoxelInstance(1));
 							continue;
 						}
 						if(x > 18 && x < 25 && z >= 32 && z <= 37 &&
 								y > 20 && y < 25){
-							world->set_voxel(p, VoxelInstance(1));
+							volume.setVoxelAt(p, VoxelInstance(1));
 							continue;
 						}
 						if(y < a+5){
-							world->set_voxel(p, VoxelInstance(2));
+							volume.setVoxelAt(p, VoxelInstance(2));
 						} else if(y < a+10){
-							world->set_voxel(p, VoxelInstance(3));
+							volume.setVoxelAt(p, VoxelInstance(3));
 						} else if(y < a+11){
-							world->set_voxel(p, VoxelInstance(4));
+							volume.setVoxelAt(p, VoxelInstance(4));
 						} else if(y <= WATER_LEVEL){
-							world->set_voxel(p, VoxelInstance(7));
+							volume.setVoxelAt(p, VoxelInstance(7));
 						} else {
-							world->set_voxel(p, VoxelInstance(1));
+							volume.setVoxelAt(p, VoxelInstance(1));
 						}
 					}
 				}
@@ -153,7 +148,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 				/*int y = 50;
 				for(; y>-50; y--){
 					pv::Vector3DInt32 p(x, y, z);
-					VoxelInstance v = world->get_voxel(p);
+					VoxelInstance v = volume.getVoxelAt(p);
 					if(v.get_id() != 1)
 						break;
 				}
@@ -169,19 +164,19 @@ struct Worldgen: public worldgen::GeneratorInterface
 
 				for(int y1 = y; y1<y+4; y1++){
 					pv::Vector3DInt32 p(x, y1, z);
-					world->set_voxel(p, VoxelInstance(6), true);
+					volume.setVoxelAt(p, VoxelInstance(6));
 				}
 
 				for(int x1 = x-2; x1 <= x+2; x1++){
 					for(int y1 = y+3; y1 <= y+7; y1++){
 						for(int z1 = z-2; z1 <= z+2; z1++){
 							pv::Vector3DInt32 p(x1, y1, z1);
-							world->set_voxel(p, VoxelInstance(5), true);
+							volume.setVoxelAt(p, VoxelInstance(5));
 						}
 					}
 				}
 			}
-		});
+		}
 	}
 };
 
@@ -244,7 +239,7 @@ struct Module: public interface::Module
 	// passes through. top_texture, when given, goes on the +Y and -Y faces.
 	void add_voxel(interface::VoxelRegistry *reg, const ss_ &name,
 			const ss_ &texture, bool visible, bool solid,
-			float roughness = 0.9f, float spec_strength = 1.0f,
+			bool fully_empty, float roughness = 0.9f, float spec_strength = 1.0f,
 			float bumpiness = 1.0f, float translucency = 0.0f,
 			float spots = 0.0f, float static_spots = 0.0f,
 			const ss_ &top_texture = "")
@@ -274,6 +269,7 @@ struct Module: public interface::Module
 		vdef.edge_material_id = visible ? interface::EDGEMATERIALID_GROUND :
 				interface::EDGEMATERIALID_EMPTY;
 		vdef.physically_solid = solid;
+		vdef.fully_empty = fully_empty;
 		reg->add_voxel(vdef);
 	}
 
@@ -316,22 +312,22 @@ struct Module: public interface::Module
 			// roughness, spec_strength, bumpiness, translucency, spots,
 			// static_spots; see interface/atlas.h. The values are
 			// voxel_lighting's, which is where they were chosen.
-			add_voxel(voxel_reg, "air", "", false, false);     // id 1
-			add_voxel(voxel_reg, "rock", "main/rock.png", true, true,
+			add_voxel(voxel_reg, "air", "", false, false, true);     // id 1
+			add_voxel(voxel_reg, "rock", "main/rock.png", true, true, false,
 					0.95f, 0.15f, 0.5f, 0.0f, 0.0f, 0.04f);    // id 2
-			add_voxel(voxel_reg, "dirt", "main/dirt.png", true, true,
+			add_voxel(voxel_reg, "dirt", "main/dirt.png", true, true, false,
 					0.98f, 0.15f, 0.6f, 0.0f, 0.0f, 0.04f);    // id 3
-			add_voxel(voxel_reg, "grass", "main/grass.png", true, true,
+			add_voxel(voxel_reg, "grass", "main/grass.png", true, true, false,
 					0.90f, 1.0f, 0.75f, 0.06f, 0.012f);        // id 4
-			add_voxel(voxel_reg, "leaves", "main/leaves.png", true, true,
+			add_voxel(voxel_reg, "leaves", "main/leaves.png", true, true, false,
 					0.95f, 1.0f, 1.5f, 0.11f, 0.03f);          // id 5
-			add_voxel(voxel_reg, "tree", "main/tree.png", true, true,
+			add_voxel(voxel_reg, "tree", "main/tree.png", true, true, false,
 					0.85f, 0.35f, 2.0f, 0.0f, 0.0f, 0.0f,
 					"main/tree_top.png");                      // id 6
 			// Walked into rather than stood on: the player sinks to the lake
 			// floor and can dig or climb out. Nothing simulates flow, so a
 			// dug shore leaves a hole in the water rather than draining it.
-			add_voxel(voxel_reg, "water", "main/water.png", true, false,
+			add_voxel(voxel_reg, "water", "main/water.png", true, false, false,
 					0.28f, 1.0f, 6.0f, 0.0f, 0.05f);           // id 7
 
 			// Skylight, which is what the voxel shading reads to tell a cave
