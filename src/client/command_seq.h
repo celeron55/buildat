@@ -53,7 +53,10 @@ namespace command_seq
 	// so that the next injected mouse_move is not the one that gets eaten.
 	void absorb_mouse_move_suppression(Urho3D::Input *input);
 
-	void raise_window(Urho3D::Graphics *graphics);
+	// Map the window without raising it or taking input focus, and make
+	// Urho3D accept injected input while the window has none.
+	void show_window(Urho3D::Graphics *graphics, Urho3D::Input *input);
+	void release_forced_focus(Urho3D::Input *input);
 	bool inject_key(Urho3D::Input *input, const ss_ &name, bool down,
 			bool up_too, ss_ *error);
 	bool inject_mouse_button(Urho3D::Input *input, int sdl_button, bool down,
