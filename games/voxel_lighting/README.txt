@@ -176,22 +176,80 @@ disagree: they are not in the cube map, so nothing reflects them. Below the
 horizon the drawn sky is a neutral haze rather than the cube map's ground
 color, since the only time it shows is past the edge of the world.
 
-There are two cube maps. voxel_shading/VoxelSkyIndoor.xml is the same sky
-dimmed, with
-no sun disc and no glow, going to a flat grey both above and below a brighter
-band at the horizon: indoors the bright thing around you is the windows, and
-what is over and under you is whatever the room is made of, which cannot be
-known when the map is generated. The shader fades between the two by
-IndoorBlend, which the client sets each frame from the skylight of the voxel the
-camera is in, eased so that crossing a voxel boundary does not step. Digging the
-shaft with P lets skylight into the cave and takes the blend back to the outdoor
-map, which is the easiest way to see it work.
+There is one cube map, and where the sky cannot be seen the shader dims it by
+direction rather than reflecting a second, indoor one. How much of the sky the
+camera can see is kept as 6x6 values per cube face, 216 in all; the shader
+looks the value up along each pixel's reflection direction, bilinear between
+cell centers, and multiplies the sky by it. A cell is about 15 degrees across.
 
-Only which map is reflected changes; the skylight scaling below applies to
-either. That keeps the feature from brightening the cave, and it is also why it
-is subtle there: a surface that sees no sky has almost no reflection to
-recolour. Where it shows is the middle ground the indoor map is named for, a
-surface that sees some sky while the camera sees none.
+The client fills those by marching a ray per cell through the voxel data from
+the camera, 36 rays a frame, so the whole set is renewed every sixth frame.
+buildat.cast_voxel_rays() does the marching -- see its comment in
+src/lua_bindings/voxel_volume.cpp -- because the same loop written in Lua cost
+half a millisecond a frame for four rays of twenty voxels, and this wants
+hundreds of sixty-four.
+
+Measured in digger, per frame: 0.33 ms for the rays, 0.02 ms for keeping the
+list of chunks they may reach, and 0.32 ms handing the values to chunk
+materials, so 0.66 ms in all.
+
+Neither of the last two started there. Handing every chunk material its own
+copy of the 216 values cost 5.2 ms a frame -- there are hundreds of materials
+in a streaming world, and a parameter on each costs more than the ray marching
+does -- and is now spread over frames against a 0.3 ms budget, so a pass takes
+a fifth of a second instead of a frame. A render path parameter would reach
+every shader in the viewport with one call and is the obvious next step if it
+ever matters again. Collecting the chunks was another 0.5 ms until it stopped
+happening every sweep: the set within reach of a ray does not change until the
+camera crosses into another chunk.
+
+A ray answers yes if it gets its whole length, 64 voxels, without meeting
+anything, and no if something solid stops it. Nothing in between, and nothing
+to do with skylight: a voxel's skylight says the sky is open straight up from
+it, which is no answer to whether the sky lies along the ray. The length is
+what makes the answer strict -- a ray down digger's tunnel has to reach the far
+end to find out that the tunnel is not a way out -- so it is not the thing to
+economise on.
+
+Partial values come from the sampling instead. The rays are jittered inside
+their cells and differently each sweep, and each finished sweep is averaged
+into the values at 0.15, so a cell settles at the fraction of its directions
+that see sky. That average is also what keeps the speculars still: taking a
+sweep whole put the rays' own yes-or-no on the screen, which flickered several
+times a second. Measured as the mean absolute difference between consecutive
+frames over a crop of digger's tunnel wall, over bursts of twelve: 1.05 taking
+sweeps whole, 0.02 with the average.
+
+Skylight does answer for a ray that runs out of loaded chunks part way: the
+skylight where it stopped is how far along the way out it had got, and
+believing that beats calling the edge of the loaded world sky.
+
+Resolution is what decides how narrowly this can be aimed. The sky over
+digger's spawn tunnel is a few degrees off the tunnel's own direction, and a
+3x3 cube's cells are 40 degrees across with the interpolation spreading each
+one over most of a face; the self-check's flat ground reads 0.50 to the sides
+at 6x6 and 0.92 at 3x3, where the ground and the sky above it fall in one
+cell. Looking at a cave from outside with nothing but terrain
+in view, nothing reflects a sky that is not there either -- which a baked indoor
+map could not get right, since its brighter horizon band assumes windows all
+around. Digging the shaft with P lets skylight into the cave and brings the
+reflections back, which is the easiest way to see it work.
+
+A direction with no sky visible reflects nothing rather than the rock that is
+actually there. That is where a second, indoor cube map used to do some work,
+giving a cave wall a dim grey to reflect; it is gone, along with the half of
+make_client_data.py that generated it, because a dimmed real sky says the same
+thing without having to guess at the geometry. Bounced light is in the vertex
+color if a floor for the reflection is ever wanted.
+
+What counts as solid is the voxel registry's own physically_solid, so glass and
+water are whatever the world says they are.
+
+The surface's own skylight scales all of this on top of the cube: the cube
+answers for the direction and the vertex color for the place. Both matter.
+Standing at the mouth of a tunnel, the mirror direction off its walls points
+back out at the open sky, so the cube is bright there and it is the wall's own
+dim skylight that keeps the reflection down.
 
 Only the specular half of image based lighting is taken. The diffuse half
 would be an unoccluded sky added to every surface, which would light the
