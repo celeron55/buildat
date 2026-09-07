@@ -39,6 +39,9 @@ buildat.safe.deserialize_volume       = __buildat_deserialize_volume
 buildat.safe.deserialize_volume_int32 = __buildat_deserialize_volume_int32
 buildat.safe.deserialize_volume_8bit  = __buildat_deserialize_volume_8bit
 buildat.safe.cast_voxel_rays          = __buildat_cast_voxel_rays
+-- write_floats(vector_buffer, values): the values into the buffer as floats,
+-- replacing what was in it
+buildat.safe.write_floats             = __buildat_write_floats
 -- What stopped a ray cast by cast_voxel_rays(); see its comment in
 -- src/lua_bindings/voxel_volume.cpp
 buildat.safe.VOXEL_RAY = {

@@ -437,6 +437,30 @@ luabind::object cast_voxel_rays(const luabind::object &args, lua_State *L)
 	return result;
 }
 
+// Writes an array of numbers into a VectorBuffer as floats, replacing what was
+// in it. One call for the lot: WriteFloat() per value is a sandbox call each,
+// and a shader array parameter rebuilt per frame is hundreds of them.
+//
+// The buffer is what Urho sets as a float array shader parameter once it is in
+// a Variant, so this is how a script hands a shader an array.
+void write_floats(const luabind::object &buffer_o,
+		const luabind::object &values_o, lua_State *L)
+{
+	TRY_GET_SANDBOX_STUFF(buf, 1, VectorBuffer);
+	if(buf == nullptr)
+		throw Exception("write_floats(): first argument is not a VectorBuffer");
+	if(!values_o || luabind::type(values_o) != LUA_TTABLE)
+		throw Exception("write_floats(): second argument is not a table");
+
+	buf->Clear();
+	for(size_t i = 1;; i++){
+		luabind::object v = values_o[i];
+		if(!v || luabind::type(v) != LUA_TNUMBER)
+			break;
+		buf->WriteFloat((float)luabind::object_cast<double>(v));
+	}
+}
+
 #define LUABIND_FUNC(name) def("__buildat_" #name, name)
 
 void init_voxel_volume(lua_State *L)
@@ -473,7 +497,8 @@ void init_voxel_volume(lua_State *L)
 		LUABIND_FUNC(deserialize_volume),
 		LUABIND_FUNC(deserialize_volume_int32),
 		LUABIND_FUNC(deserialize_volume_8bit),
-		LUABIND_FUNC(cast_voxel_rays)
+		LUABIND_FUNC(cast_voxel_rays),
+		LUABIND_FUNC(write_floats)
 	];
 }
 

@@ -70,9 +70,7 @@ end
 
 local voxelworld_stub
 voxelworld_stub = {
-	geometry_cb = nil,
 	material_cb = nil,
-	sub_geometry_update = function(cb) voxelworld_stub.geometry_cb = cb end,
 	sub_material_update = function(cb) voxelworld_stub.material_cb = cb end,
 	chunk_size_voxels = {x = CHUNK, y = CHUNK, z = CHUNK},
 	get_static_node = function(chunk_p) return {chunk_p = chunk_p} end,
@@ -83,17 +81,32 @@ voxelworld_stub = {
 -- The shader gets the values as a buffer parameter; here the buffer keeps
 -- them as a table so the test can read them back
 local function fake_buffer()
-	local floats = {}
-	return {
-		floats = floats,
-		Clear = function(self)
-			for i = #floats, 1, -1 do floats[i] = nil end
-		end,
-		WriteFloat = function(self, v) floats[#floats + 1] = v end,
-	}
+	return {floats = {}}
 end
 
+local function fake_write_floats(buffer, values)
+	local floats = {}
+	for i, v in ipairs(values) do floats[i] = v end
+	buffer.floats = floats
+end
+
+-- The values reach the shader as a parameter on the render path's scene pass
+-- commands; this is the one command a viewport is stubbed to have
 local params = {}
+local scene_pass_command = {
+	type = 2, -- CMD_SCENEPASS
+	SetShaderParameter = function(self, name, value) params[name] = value end,
+}
+local render_path = {
+	GetNumCommands = function() return 1 end,
+	GetCommand = function(self, i) return scene_pass_command end,
+	-- The real one sets the value on every command that already carries the
+	-- name, which after the first declaring walk is the scene pass
+	SetShaderParameter = function(self, name, value)
+		if params[name] ~= nil then params[name] = value end
+	end,
+}
+local viewport = {renderPath = render_path}
 local material = {
 	SetShaderParameter = function(self, name, value) params[name] = value end,
 	SetTechnique = function() end,
@@ -114,6 +127,7 @@ local camera_node = {GetWorldPosition = function() return camera_pos end}
 local env = setmetatable({
 	buildat = {Vector3 = function(x, y, z) return {x = x, y = y, z = z} end,
 		VOXEL_RAY = RAY,
+		write_floats = fake_write_floats,
 		get_time_us = function() return 0 end,
 		cast_voxel_rays = cast_voxel_rays,
 		Logger = function()
@@ -126,6 +140,8 @@ local env = setmetatable({
 			cache = {GetResource = function() return {} end},
 			Vector3 = function(x, y, z) return {x = x, y = y, z = z} end,
 			Material = {new = function() return material end},
+			renderer = {GetViewport = function() return viewport end},
+			CMD_SCENEPASS = 2,
 			VectorBuffer = {new = fake_buffer},
 			-- The real one copies; a shallow copy of the floats is enough here
 			Variant = function(buffer)
@@ -148,7 +164,6 @@ end
 local M = chunk()
 
 M.set_camera(camera_node)
-voxelworld_stub.geometry_cb(node)
 
 -- GetSkyVisibility() from PBRVoxel.glsl, in Lua
 local CELLS = 6

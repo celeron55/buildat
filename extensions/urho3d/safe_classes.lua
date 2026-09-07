@@ -772,8 +772,44 @@ function M.define(dst, util)
 		},
 	})
 
+	-- One command of a render path. A scene pass command's shader parameters
+	-- reach every batch it draws, which is how one value can be handed to
+	-- every material in the viewport at once; see builtin/voxel_shading.
+	util.wc("RenderPathCommand", {
+		instance = {
+			SetShaderParameter = util.wrap_function(
+				{"RenderPathCommand", "string",
+					{"number", "boolean", "Vector2", "Vector3", "Color",
+						"Variant"}},
+				function(self, name, value)
+					self:SetShaderParameter(name, Variant(value))
+				end
+			),
+			RemoveShaderParameter = util.self_function(
+					"RemoveShaderParameter", {},
+					{"RenderPathCommand", "string"}),
+		},
+		properties = {
+			-- One of the CMD_ constants; CMD_SCENEPASS is the one that draws
+			-- scene geometry
+			type = util.simple_property("number"),
+			-- The technique pass it draws, "base" and so on
+			pass = util.simple_property("string"),
+			enabled = util.simple_property("boolean"),
+		},
+	})
+
 	util.wc("RenderPath", {
 		instance = {
+			GetNumCommands = util.self_function(
+					"GetNumCommands", {"number"}, {"RenderPath"}),
+			-- 0-based, as Urho counts them
+			GetCommand = util.wrap_function({"RenderPath", "number"},
+				function(self, index)
+					return util.wrap_instance("RenderPathCommand",
+							self:GetCommand(index))
+				end
+			),
 			Clone = util.wrap_function({"RenderPath"},
 				function(self)
 					return util.wrap_instance("RenderPath", self:Clone())
