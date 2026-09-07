@@ -130,6 +130,18 @@ local env = setmetatable({
 		write_floats = fake_write_floats,
 		get_time_us = function() return 0 end,
 		cast_voxel_rays = cast_voxel_rays,
+		-- The threaded pair, as the engine's contract describes it: start
+		-- takes what the blocking call takes, collect answers nil until the
+		-- marching is done. Ready on the second ask rather than the first, so
+		-- the module's waiting path is exercised and not just the lucky one.
+		cast_voxel_rays_start = function(args)
+			return {out = cast_voxel_rays(args), polls = 0}
+		end,
+		cast_voxel_rays_collect = function(job)
+			job.polls = job.polls + 1
+			if job.polls < 2 then return nil end
+			return job.out
+		end,
 		Logger = function()
 			return setmetatable({},
 					{__index = function() return function() end end})

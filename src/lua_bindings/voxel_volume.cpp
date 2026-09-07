@@ -5,6 +5,7 @@
 #include "lua_bindings/sandbox_util.h"
 #include "client/app.h"
 #include "interface/voxel_volume.h"
+#include "interface/thread_pool.h"
 #include <c55/os.h>
 #include <tolua++.h>
 #include <luabind/luabind.hpp>
@@ -177,25 +178,59 @@ enum VoxelRayStatus {
 static const int VOXEL_RAY_MAX_STEPS = 4096;
 static const size_t VOXEL_RAY_MAX_DIRECTIONS = 8192;
 
-// Chunk position -> volume, for the duration of one call
+// One casting job: everything the marching reads and everything it produces,
+// with no Lua anywhere in it. Separate from the binding so that the same
+// marching can run on a thread pool worker, where a lua_State must not be
+// touched.
+struct RayJob
+{
+	// Inputs
+	pv::Vector3DInt32 chunk_size = pv::Vector3DInt32(1, 1, 1);
+	// The volumes are held rather than borrowed. A chunk that arrives while a
+	// job is in flight replaces the entry in voxelworld's cache and drops its
+	// reference, and the volume this job is part way through reading has to
+	// outlive that. Holding them is a refcount each and no copying: the voxel
+	// data itself is never written after it is deserialized.
+	sv_<std::pair<pv::Vector3DInt32, sp_<CommonVolume>>> volumes;
+	// Held for the same reason. The mesher's tasks already read the registry
+	// from worker threads; get() is a lookup and does not write.
+	sp_<VoxelRegistry> voxel_reg;
+	double origin_x = 0.0, origin_y = 0.0, origin_z = 0.0;
+	sv_<double> dirs;   // Three per ray, not normalized
+	int max_steps = 32;
+	int stop_skylight = 0;
+
+	// Outputs, one per ray
+	sv_<int> status, hit_id, skylight, steps;
+
+	// Set by the task's post(), which the pool runs on the main thread after
+	// thread() has finished; read by cast_voxel_rays_collect(). Both on the
+	// main thread, so this needs no atomic of its own.
+	bool done = false;
+};
+
+// Chunk position -> volume, for the duration of one job
 struct RayVolumeSet
 {
+	const sv_<std::pair<pv::Vector3DInt32, sp_<CommonVolume>>> *volumes;
 	pv::Vector3DInt32 chunk_size;
 	// A flat vector rather than a hash: a ray crosses a chunk boundary once
 	// every chunk_size voxels and asks again only then, and the one it asked
 	// for last is nearly always the one it wants, so the scan behind that is
 	// rare enough that its length does not matter
-	sv_<std::pair<pv::Vector3DInt32, CommonVolume*>> volumes;
 	int last_hit = -1;
+
+	RayVolumeSet(const RayJob &job):
+		volumes(&job.volumes), chunk_size(job.chunk_size){}
 
 	CommonVolume* find(const pv::Vector3DInt32 &chunk_p)
 	{
-		if(last_hit >= 0 && volumes[last_hit].first == chunk_p)
-			return volumes[last_hit].second;
-		for(size_t i = 0; i < volumes.size(); i++){
-			if(volumes[i].first == chunk_p){
+		if(last_hit >= 0 && (*volumes)[last_hit].first == chunk_p)
+			return (*volumes)[last_hit].second.get();
+		for(size_t i = 0; i < volumes->size(); i++){
+			if((*volumes)[i].first == chunk_p){
 				last_hit = i;
-				return volumes[i].second;
+				return (*volumes)[i].second.get();
 			}
 		}
 		return nullptr;
@@ -232,117 +267,42 @@ static pv::Vector3DInt32 table_vector3_int(const luabind::object &t,
 			(int)table_number(v, "z", 0));
 }
 
-luabind::object cast_voxel_rays(const luabind::object &args, lua_State *L)
+// Marches the job's rays. Touches nothing that belongs to a thread -- no Lua,
+// no Urho -- which is what lets a worker run it.
+static void march_rays(RayJob &job)
 {
-	if(!args || luabind::type(args) != LUA_TTABLE)
-		throw Exception("cast_voxel_rays(): args is not a table");
+	const size_t n = job.dirs.size() / 3;
+	job.status.assign(n, VOXEL_RAY_RANGE);
+	job.hit_id.assign(n, 0);
+	job.skylight.assign(n, -1);
+	job.steps.assign(n, 0);
 
-	VoxelRegistry *voxel_reg = nullptr;
-	{
-		luabind::object o = args["registry"];
-		if(o)
-			voxel_reg = luabind::object_cast<VoxelRegistry*>(o);
-	}
-	if(voxel_reg == nullptr)
-		throw Exception("cast_voxel_rays(): args.registry is not a registry");
-
-	RayVolumeSet volume_set;
-	volume_set.chunk_size = table_vector3_int(args, "chunk_size");
-	if(volume_set.chunk_size.getX() <= 0 || volume_set.chunk_size.getY() <= 0 ||
-			volume_set.chunk_size.getZ() <= 0)
-		throw Exception("cast_voxel_rays(): args.chunk_size is not positive");
-
-	{
-		luabind::object volumes_o = args["volumes"];
-		if(!volumes_o || luabind::type(volumes_o) != LUA_TTABLE)
-			throw Exception("cast_voxel_rays(): args.volumes is not a table");
-		for(luabind::iterator it(volumes_o), end; it != end; ++it){
-			luabind::object entry = *it;
-			if(luabind::type(entry) != LUA_TTABLE)
-				continue;
-			luabind::object volume_o = entry["volume"];
-			if(!volume_o)
-				continue;
-			sp_<CommonVolume> volume =
-					luabind::object_cast<sp_<CommonVolume>>(volume_o);
-			if(volume == nullptr)
-				continue;
-			volume_set.volumes.push_back(std::make_pair(pv::Vector3DInt32(
-					(int)table_number(entry, "x", 0),
-					(int)table_number(entry, "y", 0),
-					(int)table_number(entry, "z", 0)), volume.get()));
-		}
-	}
-
-	double origin_x = 0.0, origin_y = 0.0, origin_z = 0.0;
-	{
-		luabind::object o = args["origin"];
-		if(!o || luabind::type(o) != LUA_TTABLE)
-			throw Exception("cast_voxel_rays(): args.origin is not a table");
-		origin_x = table_number(o, "x", 0.0);
-		origin_y = table_number(o, "y", 0.0);
-		origin_z = table_number(o, "z", 0.0);
-	}
-
-	luabind::object directions_o = args["directions"];
-	if(!directions_o || luabind::type(directions_o) != LUA_TTABLE)
-		throw Exception("cast_voxel_rays(): args.directions is not a table");
-
-	int max_steps = (int)table_number(args, "max_steps", 32);
-	if(max_steps < 1)
-		max_steps = 1;
-	if(max_steps > VOXEL_RAY_MAX_STEPS)
-		max_steps = VOXEL_RAY_MAX_STEPS;
-
-	int stop_skylight = (int)table_number(args, "stop_skylight", 0);
-
-	int first = (int)table_number(args, "first", 1);
-	if(first < 1)
-		first = 1;
-	int count = (int)table_number(args, "count", -1);
+	RayVolumeSet volume_set(job);
 
 	// physically_solid per voxel id, filled as ids turn up. Unknown ids stop a
 	// ray: an id with no definition is not something to see the sky through.
 	sv_<int8_t> solid_cache;
 
-	luabind::object status_t = luabind::newtable(L);
-	luabind::object hit_id_t = luabind::newtable(L);
-	luabind::object skylight_t = luabind::newtable(L);
-	luabind::object steps_t = luabind::newtable(L);
-
-	int out_i = 0;
-	for(int di = first; count < 0 || di < first + count; di++){
-		luabind::object dir_o = directions_o[di];
-		if(!dir_o || luabind::type(dir_o) != LUA_TTABLE)
-			break; // End of the array, or the slice asked for runs past it
-		if((size_t)out_i >= VOXEL_RAY_MAX_DIRECTIONS)
-			break;
-		out_i++;
-
-		double dx = table_number(dir_o, "x", 0.0);
-		double dy = table_number(dir_o, "y", 0.0);
-		double dz = table_number(dir_o, "z", 0.0);
+	for(size_t ri = 0; ri < n; ri++){
+		double dx = job.dirs[ri * 3 + 0];
+		double dy = job.dirs[ri * 3 + 1];
+		double dz = job.dirs[ri * 3 + 2];
 		double len = sqrt(dx * dx + dy * dy + dz * dz);
+		if(!(len > 1e-9))
+			continue; // A zero or broken direction goes nowhere, not forever
+		dx /= len; dy /= len; dz /= len;
 
 		int status = VOXEL_RAY_RANGE;
 		int hit_id = 0;
 		int skylight = -1;
 		int steps = 0;
 
-		if(!(len > 1e-9)){
-			// A zero or broken direction goes nowhere rather than looping
-			status_t[out_i] = VOXEL_RAY_RANGE;
-			hit_id_t[out_i] = 0;
-			skylight_t[out_i] = -1;
-			steps_t[out_i] = 0;
-			continue;
-		}
-		dx /= len; dy /= len; dz /= len;
-
 		// Voxel coordinates are voxel centers, so the boundaries are at half
 		// integers; shifting by a half puts them on integers, where a DDA
 		// wants them.
-		double px = origin_x + 0.5, py = origin_y + 0.5, pz = origin_z + 0.5;
+		double px = job.origin_x + 0.5;
+		double py = job.origin_y + 0.5;
+		double pz = job.origin_z + 0.5;
 		int vx = (int)floor(px), vy = (int)floor(py), vz = (int)floor(pz);
 
 		int step_x = dx > 0.0 ? 1 : -1;
@@ -366,7 +326,7 @@ luabind::object cast_voxel_rays(const luabind::object &args, lua_State *L)
 		pv::Vector3DInt32 volume_chunk_p(0, 0, 0);
 		bool have_volume = false;
 
-		for(int step = 0; step < max_steps; step++){
+		for(int step = 0; step < job.max_steps; step++){
 			// Step into the next voxel first: the one the origin is in is the
 			// caller's own and is not what it is asking about
 			if(t_max_x < t_max_y && t_max_x < t_max_z){
@@ -405,7 +365,7 @@ luabind::object cast_voxel_rays(const luabind::object &args, lua_State *L)
 				solid_cache.resize((size_t)id + 1, -1);
 			int8_t solid = solid_cache[id];
 			if(solid < 0){
-				const interface::VoxelDefinition *def = voxel_reg->get(id);
+				const interface::VoxelDefinition *def = job.voxel_reg->get(id);
 				solid = (def == nullptr || def->physically_solid) ? 1 : 0;
 				solid_cache[id] = solid;
 			}
@@ -416,25 +376,174 @@ luabind::object cast_voxel_rays(const luabind::object &args, lua_State *L)
 			}
 
 			skylight = v.get_skylight();
-			if(stop_skylight > 0 && skylight >= stop_skylight){
+			if(job.stop_skylight > 0 && skylight >= job.stop_skylight){
 				status = VOXEL_RAY_SKYLIGHT;
 				break;
 			}
 		}
 
-		status_t[out_i] = status;
-		hit_id_t[out_i] = hit_id;
-		skylight_t[out_i] = skylight;
-		steps_t[out_i] = steps;
+		job.status[ri] = status;
+		job.hit_id[ri] = hit_id;
+		job.skylight[ri] = skylight;
+		job.steps[ri] = steps;
+	}
+}
+
+// Reads the argument table into a job. Everything Lua-side happens here, so
+// that what is handed to a worker is plain C++ that owns what it reads.
+static void ray_job_from_lua(RayJob &job, const luabind::object &args)
+{
+	if(!args || luabind::type(args) != LUA_TTABLE)
+		throw Exception("cast_voxel_rays(): args is not a table");
+
+	{
+		luabind::object o = args["registry"];
+		if(o)
+			job.voxel_reg = luabind::object_cast<sp_<VoxelRegistry>>(o);
+	}
+	if(job.voxel_reg == nullptr)
+		throw Exception("cast_voxel_rays(): args.registry is not a registry");
+
+	job.chunk_size = table_vector3_int(args, "chunk_size");
+	if(job.chunk_size.getX() <= 0 || job.chunk_size.getY() <= 0 ||
+			job.chunk_size.getZ() <= 0)
+		throw Exception("cast_voxel_rays(): args.chunk_size is not positive");
+
+	{
+		luabind::object volumes_o = args["volumes"];
+		if(!volumes_o || luabind::type(volumes_o) != LUA_TTABLE)
+			throw Exception("cast_voxel_rays(): args.volumes is not a table");
+		for(luabind::iterator it(volumes_o), end; it != end; ++it){
+			luabind::object entry = *it;
+			if(luabind::type(entry) != LUA_TTABLE)
+				continue;
+			luabind::object volume_o = entry["volume"];
+			if(!volume_o)
+				continue;
+			sp_<CommonVolume> volume =
+					luabind::object_cast<sp_<CommonVolume>>(volume_o);
+			if(volume == nullptr)
+				continue;
+			job.volumes.push_back(std::make_pair(pv::Vector3DInt32(
+					(int)table_number(entry, "x", 0),
+					(int)table_number(entry, "y", 0),
+					(int)table_number(entry, "z", 0)), volume));
+		}
 	}
 
+	{
+		luabind::object o = args["origin"];
+		if(!o || luabind::type(o) != LUA_TTABLE)
+			throw Exception("cast_voxel_rays(): args.origin is not a table");
+		job.origin_x = table_number(o, "x", 0.0);
+		job.origin_y = table_number(o, "y", 0.0);
+		job.origin_z = table_number(o, "z", 0.0);
+	}
+
+	job.max_steps = (int)table_number(args, "max_steps", 32);
+	if(job.max_steps < 1)
+		job.max_steps = 1;
+	if(job.max_steps > VOXEL_RAY_MAX_STEPS)
+		job.max_steps = VOXEL_RAY_MAX_STEPS;
+
+	job.stop_skylight = (int)table_number(args, "stop_skylight", 0);
+
+	luabind::object directions_o = args["directions"];
+	if(!directions_o || luabind::type(directions_o) != LUA_TTABLE)
+		throw Exception("cast_voxel_rays(): args.directions is not a table");
+
+	int first = (int)table_number(args, "first", 1);
+	if(first < 1)
+		first = 1;
+	int count = (int)table_number(args, "count", -1);
+
+	for(int di = first; count < 0 || di < first + count; di++){
+		luabind::object dir_o = directions_o[di];
+		if(!dir_o || luabind::type(dir_o) != LUA_TTABLE)
+			break; // End of the array, or the slice asked for runs past it
+		if(job.dirs.size() / 3 >= VOXEL_RAY_MAX_DIRECTIONS)
+			break;
+		job.dirs.push_back(table_number(dir_o, "x", 0.0));
+		job.dirs.push_back(table_number(dir_o, "y", 0.0));
+		job.dirs.push_back(table_number(dir_o, "z", 0.0));
+	}
+}
+
+static luabind::object ray_job_to_lua(const RayJob &job, lua_State *L)
+{
+	luabind::object status_t = luabind::newtable(L);
+	luabind::object hit_id_t = luabind::newtable(L);
+	luabind::object skylight_t = luabind::newtable(L);
+	luabind::object steps_t = luabind::newtable(L);
+	for(size_t i = 0; i < job.status.size(); i++){
+		status_t[i + 1] = job.status[i];
+		hit_id_t[i + 1] = job.hit_id[i];
+		skylight_t[i + 1] = job.skylight[i];
+		steps_t[i + 1] = job.steps[i];
+	}
 	luabind::object result = luabind::newtable(L);
-	result["count"] = out_i;
+	result["count"] = (int)job.status.size();
 	result["status"] = status_t;
 	result["hit_id"] = hit_id_t;
 	result["skylight"] = skylight_t;
 	result["steps"] = steps_t;
 	return result;
+}
+
+luabind::object cast_voxel_rays(const luabind::object &args, lua_State *L)
+{
+	RayJob job;
+	ray_job_from_lua(job, args);
+	march_rays(job);
+	return ray_job_to_lua(job, L);
+}
+
+// The same marching on a thread pool worker. The point is not that marching is
+// slow -- it is a third of a millisecond -- but that sampling wants several
+// times more rays than that, and the frame has better uses for the time. The
+// work itself is identical, so this should cost the machine the same and the
+// frame much less; that it does is worth re-checking rather than assuming,
+// since two threads walking voxel data at once share a cache.
+//
+// The pool is the client's own, four workers, already started and idle, and
+// already used this way by the mesher.
+struct CastVoxelRaysTask: public interface::thread_pool::Task
+{
+	sp_<RayJob> job;
+
+	CastVoxelRaysTask(sp_<RayJob> job): job(job){}
+
+	bool pre(){ return true; }
+	bool thread(){ march_rays(*job); return true; }
+	bool post(){ job->done = true; return true; }
+};
+
+// Starts a job and hands back a handle to ask about later. Takes what
+// cast_voxel_rays() takes.
+sp_<RayJob> cast_voxel_rays_start(const luabind::object &args, lua_State *L)
+{
+	sp_<RayJob> job(new RayJob());
+	ray_job_from_lua(*job, args);
+
+	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
+	lua_pop(L, 1);
+	if(buildat_app == nullptr)
+		throw Exception("cast_voxel_rays_start(): no app");
+
+	up_<CastVoxelRaysTask> task(new CastVoxelRaysTask(job));
+	buildat_app->get_thread_pool()->add_task(std::move(task));
+	return job;
+}
+
+// Nil until the job has finished, then what cast_voxel_rays() would have
+// returned. Asking again after that returns it again: the job holds its
+// results until it is dropped.
+luabind::object cast_voxel_rays_collect(sp_<RayJob> job, lua_State *L)
+{
+	if(job == nullptr || !job->done)
+		return luabind::object();
+	return ray_job_to_lua(*job, L);
 }
 
 // Writes an array of numbers into a VectorBuffer as floats, replacing what was
@@ -497,7 +606,13 @@ void init_voxel_volume(lua_State *L)
 		LUABIND_FUNC(deserialize_volume),
 		LUABIND_FUNC(deserialize_volume_int32),
 		LUABIND_FUNC(deserialize_volume_8bit),
+		// An opaque handle: a job in flight, with nothing to call on it.
+		// cast_voxel_rays_collect() is what asks whether it has finished.
+		class_<RayJob, bases<>, sp_<RayJob>>("__buildat_VoxelRayJob")
+		,
 		LUABIND_FUNC(cast_voxel_rays),
+		LUABIND_FUNC(cast_voxel_rays_start),
+		LUABIND_FUNC(cast_voxel_rays_collect),
 		LUABIND_FUNC(write_floats)
 	];
 }
