@@ -182,12 +182,14 @@ camera can see is kept as 6x6 values per cube face, 216 in all; the shader
 looks the value up along each pixel's reflection direction, bilinear between
 cell centers, and multiplies the sky by it. A cell is about 15 degrees across.
 
-The client fills those by marching a ray per cell through the voxel data from
-the camera, 36 rays a frame, so every cell is renewed every sixth frame.
-buildat.cast_voxel_rays() does the marching -- see its comment in
-src/lua_bindings/voxel_volume.cpp -- because the same loop written in Lua cost
-half a millisecond a frame for four rays of twenty voxels, and this wants
-hundreds of sixty-four.
+The client fills those by marching rays through the voxel data from the camera:
+four per cell, thirty-six cells a frame, and two slices kept in flight at once,
+so 288 rays a frame and every cell renewed every third. A cell keeps the
+average of its four, and that average is eased into what the shader sees.
+buildat.cast_voxel_rays() does the marching, on a worker thread -- see its
+comment in src/lua_bindings/voxel_volume.cpp -- because the same loop written
+in Lua cost half a millisecond a frame for four rays of twenty voxels, and this
+wants hundreds of sixty-four.
 
 The values do not go on materials. They go on the render path's scene pass
 commands, whose shader parameters Urho hands to every batch the command draws,
