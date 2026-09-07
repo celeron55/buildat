@@ -38,6 +38,18 @@ buildat.safe.Volume        = __buildat_Volume
 buildat.safe.deserialize_volume       = __buildat_deserialize_volume
 buildat.safe.deserialize_volume_int32 = __buildat_deserialize_volume_int32
 buildat.safe.deserialize_volume_8bit  = __buildat_deserialize_volume_8bit
+buildat.safe.cast_voxel_rays          = __buildat_cast_voxel_rays
+-- write_floats(vector_buffer, values): the values into the buffer as floats,
+-- replacing what was in it
+buildat.safe.write_floats             = __buildat_write_floats
+-- What stopped a ray cast by cast_voxel_rays(); see its comment in
+-- src/lua_bindings/voxel_volume.cpp
+buildat.safe.VOXEL_RAY = {
+	BLOCKED  = 0, -- Ran into something not passable
+	NO_DATA  = 1, -- Left the volumes it was given
+	RANGE    = 2, -- Used up max_steps
+	SKYLIGHT = 3, -- Reached the stop_skylight it was given
+}
 
 -- NOTE: Maybe not actually safe
 --buildat.safe.class_info = class_info -- Luabind class_info()

@@ -44,20 +44,6 @@ SUN_DISC = (1.0, 0.97, 0.88)
 SUN_OUTER_DEG = 6.0
 SUN_INNER_DEG = 3.5
 
-# The indoor map, which the shader fades to as the camera loses sight of the
-# sky. The sky's own gradient survives dimmed around the horizon, where windows
-# would be, and gives way to a flat grey both below and above: what is over and
-# under a surface indoors is whatever the room is made of, and neither a blue
-# ceiling nor a lit floor can be assumed here. The grey is the dimmed horizon's
-# own brightness, so they meet without a seam. No sun disc and no glow.
-# A brighter ring at the horizon stands in for the windows, and is most of what
-# makes an indoor reflection interesting rather than flat grey. Its half width
-# is in units of sin(elevation), so 0.45 is about 27 degrees either side.
-INDOOR_DIM = 0.25
-INDOOR_GREY = (0.15, 0.15, 0.15)
-INDOOR_BAND = (0.43, 0.44, 0.48)
-INDOOR_BAND_HALF = 0.45
-
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))))
 GAME_DIR = os.path.join(ROOT, "games", "voxel_lighting", "main", "client_data")
@@ -92,21 +78,6 @@ def sky_color(d):
     inner = math.cos(math.radians(SUN_INNER_DEG))
     disc = max(0.0, min(1.0, (cos_sun - outer) / (inner - outer)))
     return mix(c, SUN_DISC, disc * disc * (3.0 - 2.0 * disc))
-
-
-def indoor_base(d):
-    if d[1] < 0.0:
-        return INDOOR_GREY
-    sky = mix(HORIZON, ZENITH, d[1] ** 0.5)
-    sky = tuple(c * INDOOR_DIM for c in sky)
-    return mix(sky, INDOOR_GREY, d[1] ** 0.7)
-
-
-def indoor_color(d):
-    d = normalized(d)
-    base = indoor_base(d)
-    band = max(0.0, 1.0 - abs(d[1]) / INDOOR_BAND_HALF)
-    return mix(base, INDOOR_BAND, band * band * (3.0 - 2.0 * band))
 
 
 # The standard cube map face parametrization: u and v run 0..1 from the top
@@ -184,7 +155,6 @@ def make_cubemap(prefix, color_of):
 def main():
     make_water()
     make_cubemap("VoxelSky", sky_color)
-    make_cubemap("VoxelSkyIndoor", indoor_color)
 
 
 main()

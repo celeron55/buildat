@@ -16,7 +16,19 @@ function M.define(dst, util)
 	})
 
 	util.wc("VectorBuffer", {
+		class = {
+			new = function()
+				return util.wrap_instance("VectorBuffer", VectorBuffer())
+			end,
+		},
 		instance = {
+			-- Writing, for handing a shader a float array: a Variant made of
+			-- one of these is VAR_BUFFER, which Urho sets as a float array of
+			-- whatever length the uniform declares
+			WriteFloat = util.self_function(
+					"WriteFloat", {"boolean"}, {"VectorBuffer", "number"}),
+			Clear = util.self_function(
+					"Clear", {}, {"VectorBuffer"}),
 			GetSize = util.self_function(
 					"GetSize", {"number"}, {"VectorBuffer"}),
 			ReadString = util.self_function(
@@ -38,7 +50,7 @@ function M.define(dst, util)
 	})
 
 	util.wc("Variant", {
-		unsafe_constructor = util.wrap_function({{"Color"}},
+		unsafe_constructor = util.wrap_function({{"Color", "VectorBuffer"}},
 		function(value)
 			return util.wrap_instance("Variant", Variant(value))
 		end),
@@ -760,8 +772,44 @@ function M.define(dst, util)
 		},
 	})
 
+	-- One command of a render path. A scene pass command's shader parameters
+	-- reach every batch it draws, which is how one value can be handed to
+	-- every material in the viewport at once; see builtin/voxel_shading.
+	util.wc("RenderPathCommand", {
+		instance = {
+			SetShaderParameter = util.wrap_function(
+				{"RenderPathCommand", "string",
+					{"number", "boolean", "Vector2", "Vector3", "Color",
+						"Variant"}},
+				function(self, name, value)
+					self:SetShaderParameter(name, Variant(value))
+				end
+			),
+			RemoveShaderParameter = util.self_function(
+					"RemoveShaderParameter", {},
+					{"RenderPathCommand", "string"}),
+		},
+		properties = {
+			-- One of the CMD_ constants; CMD_SCENEPASS is the one that draws
+			-- scene geometry
+			type = util.simple_property("number"),
+			-- The technique pass it draws, "base" and so on
+			pass = util.simple_property("string"),
+			enabled = util.simple_property("boolean"),
+		},
+	})
+
 	util.wc("RenderPath", {
 		instance = {
+			GetNumCommands = util.self_function(
+					"GetNumCommands", {"number"}, {"RenderPath"}),
+			-- 0-based, as Urho counts them
+			GetCommand = util.wrap_function({"RenderPath", "number"},
+				function(self, index)
+					return util.wrap_instance("RenderPathCommand",
+							self:GetCommand(index))
+				end
+			),
 			Clone = util.wrap_function({"RenderPath"},
 				function(self)
 					return util.wrap_instance("RenderPath", self:Clone())
