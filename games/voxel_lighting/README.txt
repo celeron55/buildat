@@ -182,12 +182,14 @@ camera can see is kept as 6x6 values per cube face, 216 in all; the shader
 looks the value up along each pixel's reflection direction, bilinear between
 cell centers, and multiplies the sky by it. A cell is about 15 degrees across.
 
-The client fills those by marching a ray per cell through the voxel data from
-the camera, 36 rays a frame, so every cell is renewed every sixth frame.
-buildat.cast_voxel_rays() does the marching -- see its comment in
-src/lua_bindings/voxel_volume.cpp -- because the same loop written in Lua cost
-half a millisecond a frame for four rays of twenty voxels, and this wants
-hundreds of sixty-four.
+The client fills those by marching rays through the voxel data from the camera:
+four per cell, thirty-six cells a frame, and two slices kept in flight at once,
+so 288 rays a frame and every cell renewed every third. A cell keeps the
+average of its four, and that average is eased into what the shader sees.
+buildat.cast_voxel_rays() does the marching, on a worker thread -- see its
+comment in src/lua_bindings/voxel_volume.cpp -- because the same loop written
+in Lua cost half a millisecond a frame for four rays of twenty voxels, and this
+wants hundreds of sixty-four.
 
 The values do not go on materials. They go on the render path's scene pass
 commands, whose shader parameters Urho hands to every batch the command draws,
@@ -210,18 +212,92 @@ ms in all. In voxel_lighting, whose world is one section, 0.10 ms. Collecting
 the chunks was 0.5 ms until it stopped happening every sweep: the set within
 reach of a ray does not change until the camera crosses into another chunk.
 
-A ray answers yes if it gets its whole length, 64 voxels, without meeting
-anything, and no if something solid stops it. Nothing in between, and nothing
-to do with skylight: a voxel's skylight says the sky is open straight up from
-it, which is no answer to whether the sky lies along the ray. The length is
-what makes the answer strict -- a ray down digger's tunnel has to reach the far
-end to find out that the tunnel is not a way out -- so it is not the thing to
-economise on.
+A ray answers no if something solid stops it. If nothing does, the answer is
+the skylight of the air it ended in, which is 1 for fully lit air and 0 for
+dark. Getting its whole length, 64 voxels, is not itself a yes: a ray crossing
+sixty-four voxels of unlit cavern has met nothing and seen no sky either, and
+calling that sky is how a fixed length goes wrong on its own. The length still
+matters -- a ray down digger's tunnel has to reach the far end to find out that
+the tunnel is not a way out -- so it is not the thing to economise on.
+
+Skylight is used there and nowhere else along the ray. It says the sky is open
+straight up from a point, which is no answer to whether the sky lies along the
+ray, and stopping rays wherever they met full skylight looked right and was
+badly wrong: at the mouth of digger's tunnel the air is fully lit, so every
+direction including the tunnel came back at 1. At the far end of a ray it is
+answering about the place the ray reached, which is a question it can answer.
+A ray that runs out of loaded chunks part way is read the same way, for the
+same reason, and that beats calling the edge of the loaded world sky.
 
 Partial values come from the sampling instead. The rays are jittered inside
 their cells and differently each sweep, and each cell keeps an average of its
 own rays at 0.15, so a cell settles at the fraction of its directions that see
-sky. That average is also what keeps the speculars still: taking a ray whole
+sky.
+
+Each cell is jittered by an offset of its own, and this matters more than the
+number of rays does. With one offset for the whole cube -- which is what it was
+at first -- every cell samples the same relative point at the same time and
+their errors line up, so a sweep whose offset leans towards the sky brightens
+every cell straddling an opening at once and the reflections in the whole scene
+move together. Coherent like that it reads as the scene pulsing, which is far
+more visible than the same amount of noise spread over cells, and since the
+sweep steps by a fixed sequence the pulsing is periodic. Casting more rays does
+not help with any of that: it was never a shortage of samples, it was 216 cells
+making the same error at the same moment.
+
+Measured at benchmark 3 with the emphasis at 16, over the mouth region, with
+6x6 cells and one ray each:
+
+                                    one offset   per cell
+    coherent std of the region       0.2049       0.0923
+    per-pixel per-sweep |diff|       0.2964       0.1058
+    the same on the worst patch      2.32         0.99
+
+Noise falling by 2.8 is what casting eight times the rays would have bought,
+for no rays at all. Brightness is unchanged by it: the rim region reads 77.5660
+before and 77.5657 after at emphasis 1, over thirty frames each.
+
+Twelve by twelve cells with sixteen rays each measures 0.0097, 0.0028 and 0.05
+on those three, which is as still as it gets and far past what is needed. The
+settings are 6x6 cells with four rays each, which leaves a slight shimmer that
+reads as fine.
+
+What that costs, measured at benchmark 3 over 4800 frames -- marching on its
+worker with thread CPU time, the rest on the main thread:
+
+    marching                    0.090 ms/frame   0.31 us/ray, 7.8 steps/ray
+    submitting (Lua -> C++)     0.183 ms/frame
+    collecting (C++ -> Lua)     0.042 ms/frame
+    aiming the directions       0.112 ms/frame
+                                -----
+                                0.427 ms/frame
+
+The marching is a fifth of it, and the rest is the price of 288 rays crossing
+between Lua and C++ every frame: 864 numbers written in Lua to aim them and 864
+read back by luabind to cast them. Rays are not what this costs; handing them
+over is. It was 0.678 ms before the engine started averaging each cell's rays
+itself and before the shader's copy of the cube was repacked once a frame
+rather than once per slice -- the second of those was worth more than the
+first, since repacking read every cell out of Lua twice a frame to publish a
+cube the shader reads once.
+
+Two things follow. Making the marching itself faster -- skipping empty space
+with a coarse occupancy mip, say -- would be optimising the fifth, and rays
+that die after eight voxels have little empty space to skip. And putting the
+rays on a worker thread, which is what happens now, moves that same fifth off
+the frame and leaves the rest of it there.
+
+What is left is the direction crossing, and the only way past it is for the
+directions not to cross: the engine would have to work them out from the cell
+layout rather than being told each one. That is the part a game defines for
+itself, so it would have to become something a game opts into rather than
+something done to it.
+
+Note also that two slices are kept in flight, so the rays cast per frame are
+twice CELLS_PER_UPDATE times RAYS_PER_CELL: 288 here, where the constants read
+144.
+
+ That average is also what keeps the speculars still: taking a ray whole
 put its own yes-or-no on the screen, which flickered several times a second --
 measured over bursts of twelve frames of digger's tunnel wall as the mean
 absolute difference between consecutive frames, 1.05 taking rays whole against
@@ -235,10 +311,6 @@ the runs that were supposed to compare the two turned out to differ in whether
 the wind was frozen and whether the camera had reached the benchmark at all, so
 the numbers that looked like a verdict were not one. Worth measuring properly
 before anyone leans on it.
-
-Skylight does answer for a ray that runs out of loaded chunks part way: the
-skylight where it stopped is how far along the way out it had got, and
-believing that beats calling the edge of the loaded world sky.
 
 Resolution is what decides how narrowly this can be aimed. The sky over
 digger's spawn tunnel is a few degrees off the tunnel's own direction, and a
@@ -322,6 +394,35 @@ FROZEN_TIME, and check.txt presses it before it shoots anything. It is a toggle
 rather than something the benchmark cameras do by themselves: moving between
 cameras should not stop the scene animating, and a frozen scene that nothing
 said it had frozen is a confusing thing to land in.
+
+R (or the HUD button beside the wind one) cycles the specular emphasis
+through 1, 4, 16 and 64, multiplying the reflected sky and nothing else.
+
+This exists because the reflections are too faint to measure at 1. A change to
+voxel_shading's sky visibility sampling moves a cave wall by a fraction of a
+value out of 255 -- below what a PNG rounds to -- so bursts of screenshots come
+back byte-identical whatever the sampling does, and comparing two approaches by
+eye or by ImageMagick says nothing. Turned up, the same change is tens of
+values and can be measured.
+
+The pulsation the sampling produces is what this was built to see. At benchmark
+3, with the wind frozen and the camera left alone, sampling one frame per sweep
+off the brightest patch of the cave mouth's rim:
+
+    16x:  84.8 82.7 83.2 81.9 84.9 84.7 83.0 88.3 86.9 ... 91.0 88.1 87.3
+          per-sweep |diff| mean 2.32, max 8.15, on a level of 86
+    1x:   per-sweep |diff| mean 0.16, max 0.54
+
+The rim is the whole of it: a per-pixel map of temporal range over the mouth
+traces the dirt and rock edges and is black everywhere else. Cells looking at
+solid rock sit at 0 and cells looking out of the mouth sit at 1, and neither
+varies; the variance is entirely in the cells straddling the rim, where a
+cell's rays are a coin flip weighted by how much of it the opening covers.
+
+Emphasis scales the reflection alone, so what it exaggerates is exactly what
+that sampling decides. It does also make the VOXELSPOTS sparkle plain, since
+those spots reflect the sky too -- worth knowing before reading a screenshot
+taken at 64.
 
 The pond is dug rather than found. This terrain is one slope, so a water line
 drawn across it fills the low ground at the edge of the volume and reads as a
