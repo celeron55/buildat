@@ -268,6 +268,13 @@ assert(out > 0.3, "tunnel +x: the mouth of the tunnel is dark: "..out)
 local off = vis_at(tunnel, 1, 1, 0)
 assert(off < out * 0.7, "tunnel +x: rock beside the mouth is lit: "..off)
 
+-- A cavern wider than a ray is long, unlit: every ray runs its whole length
+-- through air and meets nothing, so being stopped by rock is not what tells
+-- us there is no sky here. The air the rays end in is dark, and that does.
+check("dark cavern", sweep(function(p) return fake_voxel(AIR, 0) end),
+		{["+x"] = 0, ["-x"] = 0, ["+y"] = 0, ["-y"] = 0, ["+z"] = 0,
+			["-z"] = 0})
+
 -- Deep in a cave, dt-driven updates ease rather than snap
 world = function(p) return fake_voxel(ROCK, 0) end
 for i = 1, 400 do M.update(1 / 60) end

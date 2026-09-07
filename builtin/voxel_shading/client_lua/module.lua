@@ -56,8 +56,8 @@ local TECHNIQUE = magic.cache:GetResource("Technique",
 -- what stops a ray by the voxel registry's own physically_solid, so glass and
 -- water are whatever the world says they are.
 --
--- A ray answers yes if it gets its whole length without meeting anything and
--- no if something solid stops it. Partial values come from sampling rather
+-- A ray answers no if something solid stops it, and otherwise the skylight of
+-- the air it ended in. Partial values come from sampling rather
 -- than from any softening of that: the rays are jittered within their cells
 -- and differently each sweep, and each cell keeps an average of its own rays,
 -- so a cell settles at the fraction of its directions that see sky.
@@ -203,18 +203,24 @@ end
 -- however brightly lit the air in between happens to be. Partial values come
 -- from the sampling, not from softening this.
 --
--- "Nothing stopped it" means the ray got RAY_VOXELS of the way without
--- meeting anything, which is as much as this asks. Note what is not used
--- here: a voxel's skylight says the sky is open straight up from it, which is
--- nothing to do with whether the sky lies along the ray. Stopping a ray at
--- full skylight looked right and was badly wrong -- at the mouth of digger's
--- tunnel the air is fully lit, so every direction, the tunnel included, came
--- back at 1 and the tunnel got full outdoor reflections.
+-- Where the ray got to without being stopped, the skylight of the air it
+-- ended in is the answer: skylight says the sky is open straight up from
+-- there, and a ray that has travelled its whole length has put that point
+-- where the reflection is looking. Fully lit air at the far end is sky, dark
+-- air deep inside a cavern is not, which is the case a fixed length gets
+-- wrong on its own -- a ray crossing sixty-four voxels of unlit cavern has
+-- met nothing and seen no sky either.
 --
--- Skylight is still what answers for a ray that runs out of loaded chunks
--- part way: the skylight where it stopped is how far along the way out it had
--- got, and believing that is better than calling the edge of the loaded world
--- sky. A ray that never got into voxel data at all is outdoors, which is a
+-- Note where skylight is not used: not as something that stops a ray. It
+-- says the sky is open above a point, which is nothing to do with whether the
+-- sky lies along the ray, and stopping rays at full skylight looked right and
+-- was badly wrong -- at the mouth of digger's tunnel the air is fully lit, so
+-- every direction, the tunnel included, came back at 1 and the tunnel got
+-- full outdoor reflections. At the far end of a ray it answers a question it
+-- can answer, about the place the ray reached.
+--
+-- Running out of loaded chunks part way is the same answer for the same
+-- reason. A ray that never got into voxel data at all is outdoors, which is a
 -- camera above the world.
 local SKYLIGHT_MAX = 15
 local RAY = buildat.VOXEL_RAY
@@ -222,8 +228,6 @@ local RAY = buildat.VOXEL_RAY
 local function ray_visibility(status, skylight, steps)
 	if status == RAY.BLOCKED then
 		return 0.0
-	elseif status == RAY.RANGE then
-		return 1.0
 	elseif steps <= 1 then
 		return 1.0 -- Left the voxel data at once: nothing is around us
 	elseif skylight < 0 then
