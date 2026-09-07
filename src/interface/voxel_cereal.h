@@ -26,7 +26,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 1;
+		uint8_t version = 2;
 		archive(
 				version,
 				v.name,
@@ -35,7 +35,8 @@ namespace interface
 				v.handler_module,
 				v.face_draw_type,
 				v.edge_material_id,
-				v.physically_solid
+				v.physically_solid,
+				v.fully_empty
 		);
 	}
 
