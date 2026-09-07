@@ -243,7 +243,8 @@ sweep steps by a fixed sequence the pulsing is periodic. Casting more rays does
 not help with any of that: it was never a shortage of samples, it was 216 cells
 making the same error at the same moment.
 
-Measured at benchmark 3 with the emphasis at 16, over the mouth region:
+Measured at benchmark 3 with the emphasis at 16, over the mouth region, with
+6x6 cells and one ray each:
 
                                     one offset   per cell
     coherent std of the region       0.2049       0.0923
@@ -251,9 +252,21 @@ Measured at benchmark 3 with the emphasis at 16, over the mouth region:
     the same on the worst patch      2.32         0.99
 
 Noise falling by 2.8 is what casting eight times the rays would have bought,
-for no rays at all. The region also sits about a value lower afterwards, at
-16x: large coherent excursions through the tonemap do not average to the same
-place as the steady signal they were swinging around.
+for no rays at all. Brightness is unchanged by it: the rim region reads 77.5660
+before and 77.5657 after at emphasis 1, over thirty frames each.
+
+The settings now are 12x12 cells and sixteen rays each, which is what the same
+measurement makes of them:
+
+    coherent std of the region       0.0097
+    per-pixel per-sweep |diff|       0.0028
+    the same on the worst patch      0.05
+
+That is a ceiling rather than a considered choice: 576 rays a frame against the
+36 this started at, picked to find out what the sampling can do before deciding
+what it should cost. Walking back down from it is the open question -- the two
+knobs are RAYS_PER_CELL, which divides a sweep's variance, and CELLS, which
+decides how narrowly the cube can be aimed and costs rays for nothing else.
 
  That average is also what keeps the speculars still: taking a ray whole
 put its own yes-or-no on the screen, which flickered several times a second --

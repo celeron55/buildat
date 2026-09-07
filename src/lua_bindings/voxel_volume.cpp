@@ -176,7 +176,7 @@ enum VoxelRayStatus {
 };
 
 static const int VOXEL_RAY_MAX_STEPS = 4096;
-static const size_t VOXEL_RAY_MAX_DIRECTIONS = 8192;
+static const size_t VOXEL_RAY_MAX_DIRECTIONS = 65536;
 
 // One casting job: everything the marching reads and everything it produces,
 // with no Lua anywhere in it. Separate from the binding so that the same
