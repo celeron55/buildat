@@ -193,7 +193,7 @@ local function make_camera(name, parent)
 	local camera = node:CreateComponent("Camera")
 	camera.nearClip = 0.15
 	camera.farClip = RENDER_DISTANCE
-	camera.fov = 75
+	camera.fov = 90
 	return node, camera
 end
 
