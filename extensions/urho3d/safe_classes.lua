@@ -105,6 +105,19 @@ function M.define(dst, util)
 					end
 					return v:GetInt()
 				end),
+			SetBool = util.wrap_function({"VariantMap", "string", "boolean"},
+				function(self, key, value)
+					self[key] = value
+				end),
+			GetBool = util.wrap_function({"boolean"}, {"VariantMap", "string"},
+				function(self, key)
+					local v = self[key]
+					if v == nil or (v.IsEmpty and v:IsEmpty()) then
+						error("VariantMap:GetBool("..tostring(key)..
+								"): missing or empty")
+					end
+					return v:GetBool()
+				end),
 			SetString = util.wrap_function({"VariantMap", "string", "string"},
 				function(self, key, value)
 					self[key] = value
@@ -851,9 +864,12 @@ function M.define(dst, util)
 					return util.wrap_instance("Camera", self:GetCamera())
 				end
 			),
+			-- Backbuffer pixels; an all-zero rect is the whole window
+			SetRect = util.self_function("SetRect", {}, {"Viewport", "IntRect"}),
 		},
 		properties = {
 			renderPath = util.simple_property(dst.RenderPath),
+			rect = util.simple_property(dst.IntRect),
 		},
 	})
 
@@ -874,6 +890,15 @@ function M.define(dst, util)
 		},
 		properties = {
 			HDRRendering = util.simple_property("boolean"),
+			numViewports = util.simple_property("number"),
+		},
+	})
+
+	-- Window size in backbuffer pixels, which is what a Viewport rect is in
+	util.wc("Graphics", {
+		properties = {
+			width = util.simple_property("number"),
+			height = util.simple_property("number"),
 		},
 	})
 
@@ -1223,6 +1248,7 @@ function M.define(dst, util)
 
 	dst.cache = util.wrap_instance("ResourceCache", cache)
 	dst.renderer = util.wrap_instance("Renderer", renderer)
+	dst.graphics = util.wrap_instance("Graphics", graphics)
 	dst.ui = util.wrap_instance("UI", ui)
 	dst.input = util.wrap_instance("Input", input)
 	if audio ~= nil then
