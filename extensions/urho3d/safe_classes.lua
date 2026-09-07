@@ -407,23 +407,6 @@ function M.define(dst, util)
 		inherited_from_by_wrapper = dst.Component,
 	})
 
-	util.wc("Light", {
-		inherited_from_by_wrapper = dst.Drawable,
-		properties = {
-			lightType = util.simple_property("number"),
-			brightness = util.simple_property("number"),
-			castShadows = util.simple_property("boolean"),
-			shadowIntensity = util.simple_property("number"),
-			shadowBias = util.simple_property("BiasParameters"),
-			shadowCascade = util.simple_property("CascadeParameters"),
-			color = util.simple_property("Color"),
-			range = util.simple_property("number"),
-			fadeDistance = util.simple_property("number"),
-			fov = util.simple_property("number"),
-			specularIntensity = util.simple_property("number"),
-		},
-	})
-
 	util.wc("CustomGeometry", {
 		inherited_from_by_wrapper = dst.Drawable,
 		instance = {
@@ -549,6 +532,28 @@ function M.define(dst, util)
 
 	util.wc("Texture2D", {
 		inherited_from_by_wrapper = dst.Texture,
+	})
+
+	-- Declared here rather than next to Drawable: its ramp property needs
+	-- Texture, and these are wrapped in the order they are written in
+	util.wc("Light", {
+		inherited_from_by_wrapper = dst.Drawable,
+		properties = {
+			lightType = util.simple_property("number"),
+			brightness = util.simple_property("number"),
+			castShadows = util.simple_property("boolean"),
+			shadowIntensity = util.simple_property("number"),
+			shadowBias = util.simple_property("BiasParameters"),
+			shadowCascade = util.simple_property("CascadeParameters"),
+			color = util.simple_property("Color"),
+			range = util.simple_property("number"),
+			fadeDistance = util.simple_property("number"),
+			fov = util.simple_property("number"),
+			specularIntensity = util.simple_property("number"),
+			-- How the light falls off over its range, sampled at
+			-- distance/range; Textures/Ramp.png is the default one
+			rampTexture = util.simple_property(dst.Texture),
+		},
 	})
 
 	util.wc("Zone", {

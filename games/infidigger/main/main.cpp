@@ -4,7 +4,6 @@
 #include "main_context/api.h"
 #include "replicate/api.h"
 #include "voxelworld/api.h"
-#include "ground_plane_lighting/api.h"
 #include "worldgen/api.h"
 #include "interface/module.h"
 #include "interface/server.h"
@@ -213,6 +212,44 @@ struct Module: public interface::Module
 				on_worldgen_queue_modified, worldgen::QueueModifiedEvent);
 	}
 
+	// The six numbers after solid describe the surface; see interface/atlas.h.
+	// visible is the edge material: an invisible voxel is also one light
+	// passes through. top_texture, when given, goes on the +Y and -Y faces.
+	void add_voxel(interface::VoxelRegistry *reg, const ss_ &name,
+			const ss_ &texture, bool visible, bool solid,
+			float roughness = 0.9f, float spec_strength = 1.0f,
+			float bumpiness = 1.0f, float translucency = 0.0f,
+			float spots = 0.0f, float static_spots = 0.0f,
+			const ss_ &top_texture = "")
+	{
+		interface::VoxelDefinition vdef;
+		vdef.name.block_name = name;
+		vdef.name.segment_x = 0;
+		vdef.name.segment_y = 0;
+		vdef.name.segment_z = 0;
+		vdef.name.rotation_primary = 0;
+		vdef.name.rotation_secondary = 0;
+		vdef.handler_module = "";
+		for(size_t i = 0; i < 6; i++){
+			interface::AtlasSegmentDefinition &seg = vdef.textures[i];
+			seg.resource_name = (i < 2 && !top_texture.empty()) ?
+					top_texture : texture;
+			seg.total_segments = magic::IntVector2(texture.empty() ? 0 : 1,
+					texture.empty() ? 0 : 1);
+			seg.select_segment = magic::IntVector2(0, 0);
+			seg.roughness = roughness;
+			seg.spec_strength = spec_strength;
+			seg.bumpiness = bumpiness;
+			seg.translucency = translucency;
+			seg.spots = spots;
+			seg.static_spots = static_spots;
+		}
+		vdef.edge_material_id = visible ? interface::EDGEMATERIALID_GROUND :
+				interface::EDGEMATERIALID_EMPTY;
+		vdef.physically_solid = solid;
+		reg->add_voxel(vdef);
+	}
+
 	void on_start()
 	{
 		main_context::access(m_server, [&](main_context::Interface *imc){
@@ -238,133 +275,33 @@ struct Module: public interface::Module
 			ivoxelworld->create_instance(m_main_scene, region);
 		});
 
-		ground_plane_lighting::access(m_server,
-				[&](ground_plane_lighting::Interface *igpl)
-		{
-			igpl->create_instance(m_main_scene);
-		});
-
-		// Define voxels on core:start (woxelworld will restore them on reload)
+		// Define voxels on core:start (voxelworld will restore them on reload)
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
 			voxelworld::Instance *world =
 					ivoxelworld->get_instance(m_main_scene);
 			interface::VoxelRegistry *voxel_reg = world->get_voxel_reg();
-			{
-				interface::VoxelDefinition vdef;
-				vdef.name.block_name = "air";
-				vdef.name.segment_x = 0;
-				vdef.name.segment_y = 0;
-				vdef.name.segment_z = 0;
-				vdef.name.rotation_primary = 0;
-				vdef.name.rotation_secondary = 0;
-				vdef.handler_module = "";
-				for(size_t i = 0; i < 6; i++){
-					interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-					seg.resource_name = "";
-					seg.total_segments = magic::IntVector2(0, 0);
-					seg.select_segment = magic::IntVector2(0, 0);
-				}
-				vdef.edge_material_id = interface::EDGEMATERIALID_EMPTY;
-				voxel_reg->add_voxel(vdef); // id 1
-			}
-			{
-				interface::VoxelDefinition vdef;
-				vdef.name.block_name = "rock";
-				vdef.name.segment_x = 0;
-				vdef.name.segment_y = 0;
-				vdef.name.segment_z = 0;
-				vdef.name.rotation_primary = 0;
-				vdef.name.rotation_secondary = 0;
-				vdef.handler_module = "";
-				for(size_t i = 0; i < 6; i++){
-					interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-					seg.resource_name = "main/rock.png";
-					seg.total_segments = magic::IntVector2(1, 1);
-					seg.select_segment = magic::IntVector2(0, 0);
-				}
-				vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
-				vdef.physically_solid = true;
-				voxel_reg->add_voxel(vdef); // id 2
-			}
-			{
-				interface::VoxelDefinition vdef;
-				vdef.name.block_name = "dirt";
-				vdef.name.segment_x = 0;
-				vdef.name.segment_y = 0;
-				vdef.name.segment_z = 0;
-				vdef.name.rotation_primary = 0;
-				vdef.name.rotation_secondary = 0;
-				vdef.handler_module = "";
-				for(size_t i = 0; i < 6; i++){
-					interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-					seg.resource_name = "main/dirt.png";
-					seg.total_segments = magic::IntVector2(1, 1);
-					seg.select_segment = magic::IntVector2(0, 0);
-				}
-				vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
-				vdef.physically_solid = true;
-				voxel_reg->add_voxel(vdef); // id 3
-			}
-			{
-				interface::VoxelDefinition vdef;
-				vdef.name.block_name = "grass";
-				vdef.name.segment_x = 0;
-				vdef.name.segment_y = 0;
-				vdef.name.segment_z = 0;
-				vdef.name.rotation_primary = 0;
-				vdef.name.rotation_secondary = 0;
-				vdef.handler_module = "";
-				for(size_t i = 0; i < 6; i++){
-					interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-					seg.resource_name = "main/grass.png";
-					seg.total_segments = magic::IntVector2(1, 1);
-					seg.select_segment = magic::IntVector2(0, 0);
-				}
-				vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
-				vdef.physically_solid = true;
-				voxel_reg->add_voxel(vdef); // id 4
-			}
-			{
-				interface::VoxelDefinition vdef;
-				vdef.name.block_name = "leaves";
-				vdef.name.segment_x = 0;
-				vdef.name.segment_y = 0;
-				vdef.name.segment_z = 0;
-				vdef.name.rotation_primary = 0;
-				vdef.name.rotation_secondary = 0;
-				vdef.handler_module = "";
-				for(size_t i = 0; i < 6; i++){
-					interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-					seg.resource_name = "main/leaves.png";
-					seg.total_segments = magic::IntVector2(1, 1);
-					seg.select_segment = magic::IntVector2(0, 0);
-				}
-				vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
-				vdef.physically_solid = true;
-				voxel_reg->add_voxel(vdef); // id 5
-			}
-			{
-				interface::VoxelDefinition vdef;
-				vdef.name.block_name = "tree";
-				vdef.name.segment_x = 0;
-				vdef.name.segment_y = 0;
-				vdef.name.segment_z = 0;
-				vdef.name.rotation_primary = 0;
-				vdef.name.rotation_secondary = 0;
-				vdef.handler_module = "";
-				for(size_t i = 0; i < 6; i++){
-					interface::AtlasSegmentDefinition &seg = vdef.textures[i];
-					seg.resource_name = "main/tree.png";
-					seg.total_segments = magic::IntVector2(1, 1);
-					seg.select_segment = magic::IntVector2(0, 0);
-				}
-				vdef.textures[0].resource_name = "main/tree_top.png";
-				vdef.textures[1].resource_name = "main/tree_top.png";
-				vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
-				vdef.physically_solid = true;
-				voxel_reg->add_voxel(vdef); // id 6
-			}
+			// roughness, spec_strength, bumpiness, translucency, spots,
+			// static_spots; see interface/atlas.h. The values are
+			// voxel_lighting's, which is where they were chosen.
+			add_voxel(voxel_reg, "air", "", false, false);     // id 1
+			add_voxel(voxel_reg, "rock", "main/rock.png", true, true,
+					0.95f, 0.15f, 0.5f, 0.0f, 0.0f, 0.04f);    // id 2
+			add_voxel(voxel_reg, "dirt", "main/dirt.png", true, true,
+					0.98f, 0.15f, 0.6f, 0.0f, 0.0f, 0.04f);    // id 3
+			add_voxel(voxel_reg, "grass", "main/grass.png", true, true,
+					0.90f, 1.0f, 0.75f, 0.06f, 0.012f);        // id 4
+			add_voxel(voxel_reg, "leaves", "main/leaves.png", true, true,
+					0.95f, 1.0f, 1.5f, 0.11f, 0.03f);          // id 5
+			add_voxel(voxel_reg, "tree", "main/tree.png", true, true,
+					0.85f, 0.35f, 2.0f, 0.0f, 0.0f, 0.0f,
+					"main/tree_top.png");                      // id 6
+
+			// Skylight, which is what the voxel shading reads to tell a dug
+			// tunnel apart from a shadow. Enabled after the voxels are
+			// defined, as it needs their edge materials to know what blocks
+			// light.
+			world->set_skylight_enabled(true);
 		});
 
 		// Enable world generation now that the voxels are defined
