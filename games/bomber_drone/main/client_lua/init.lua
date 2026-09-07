@@ -49,8 +49,8 @@ local PITCH_RATE = 55
 local ROLL_RATE = 110
 -- Aerodynamic stability: how fast the attitude returns to level flight with no
 -- input. Roll returns slower than pitch, and both are mushy under stall speed.
-local PITCH_LEVEL_K = 1.5
-local ROLL_LEVEL_K = 0.6
+local PITCH_LEVEL_K = 0.2
+local ROLL_LEVEL_K = 0.2
 -- Under stall speed the nose drops instead of leveling
 local STALL_PITCH_DOWN = 25
 -- Degrees per second of yaw at full 90-degree bank
