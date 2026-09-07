@@ -67,7 +67,7 @@ static const int MIN_WINDOW_W = 640;
 static const int MIN_WINDOW_H = 360;
 
 extern client::Config g_client_config;
-extern bool g_sigint_received;
+extern volatile sig_atomic_t g_shutdown_signal;
 
 static ss_ window_state_path()
 {
@@ -407,6 +407,9 @@ struct CApp: public App, public magic::Application
 	magic::LuaScript *m_script;
 	lua_State *L;
 	bool m_reboot_requested = false;
+	// shutdown() is not instant; the frames until the window closes must not
+	// each call it again
+	bool m_shutdown_signal_handled = false;
 	float m_ui_scale_lua = 0.f; // 0 = not set by Lua
 	bool m_restore_maximized = false;
 	Options m_options;
@@ -947,8 +950,15 @@ struct CApp: public App, public magic::Application
 		/*magic::AutoProfileBlock profiler_block(
 				GetSubsystem<magic::Profiler>(), "App::on_update");*/
 
-		if(g_sigint_received)
+		if(g_shutdown_signal != 0 && !m_shutdown_signal_handled){
+			m_shutdown_signal_handled = true;
+			// SIGINT leaves a "^C" on the terminal to write past
+			if(g_shutdown_signal == SIGINT)
+				fprintf(stdout, "\n");
+			log_i(MODULE, "%s; shutting down",
+					g_shutdown_signal == SIGINT ? "SIGINT" : "SIGTERM");
 			shutdown();
+		}
 		if(m_state)
 			m_state->update();
 
