@@ -2,7 +2,6 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #pragma once
 #include "core/types.h"
-#include "boot/cmem.h"
 #include "interface/debug.h"
 #include "interface/os.h"
 #ifdef _WIN32
@@ -19,8 +18,6 @@ namespace boot
 	struct BasicInitScope
 	{
 		BasicInitScope(){
-			boot::buildat_mem_libc_enable();
-
 			signal_handler_init();
 
 			// Force '.' as decimal point

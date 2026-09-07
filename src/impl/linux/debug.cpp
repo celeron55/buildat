@@ -2,7 +2,6 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/debug.h"
 #include "interface/mutex.h"
-#include "boot/cmem.h"
 #include "core/log.h"
 #include <c55/string_util.h>
 #include <stdexcept>
@@ -358,8 +357,6 @@ static void debug_sighandler(int sig, siginfo_t *info, void *secret)
 		exit(1);
 	}
 
-	// Disable libc memory allocation (and use the static memory pool)
-	boot::buildat_mem_libc_disable();
 	// Disable worst memory allocation stuff in logging
 	log_disable_bloat();
 
