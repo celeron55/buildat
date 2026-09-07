@@ -164,6 +164,7 @@ struct CVoxelRegistry: public VoxelRegistry
 		cache.face_draw_type = def.face_draw_type;
 		cache.edge_material_id = def.edge_material_id;
 		cache.physically_solid = def.physically_solid;
+		cache.fully_empty = def.fully_empty;
 		// Caller sets cache.valid = true
 	}
 
