@@ -59,8 +59,8 @@ local TECHNIQUE = magic.cache:GetResource("Technique",
 -- A ray answers yes if it gets its whole length without meeting anything and
 -- no if something solid stops it. Partial values come from sampling rather
 -- than from any softening of that: the rays are jittered within their cells
--- and differently each sweep, and the values are averaged over sweeps, so a
--- cell settles at the fraction of its directions that see sky.
+-- and differently each sweep, and each cell keeps an average of its own rays,
+-- so a cell settles at the fraction of its directions that see sky.
 local FACES = 6
 local CELLS = 6                 -- Per face, per axis: 6x6
 local CELL_COUNT = FACES * CELLS * CELLS
@@ -72,30 +72,18 @@ local RAYS_PER_UPDATE = 36
 -- that the tunnel is not a way to the sky, and the tunnel is tens of voxels
 -- long. Cheap enough that this is not the thing to save on.
 local RAY_VOXELS = 64
--- How much of a finished sweep is taken into the values it updates. One ray
--- per cell is a yes or no, so this average over sweeps is what turns the rays
--- into the fraction of a cell that sees sky. At 0.15, with a sweep every sixth
--- frame, a cell settles in under a second and the reflections trail the camera
--- by about that. Following the sweeps any faster puts the rays' own noise on
--- the screen, which reads as the speculars flickering several times a second.
+-- How much of a cell's new ray is taken into its value. One ray is a yes or a
+-- no, so this average is what turns the rays into the fraction of a cell that
+-- sees sky. At 0.15, with a ray per cell every sixth frame, a cell settles in
+-- under a second and the reflections trail the camera by about that. Taking
+-- more of each ray puts their own noise on the screen, which reads as the
+-- speculars flickering several times a second.
 local SKY_VIS_BLEND = 0.15
 -- Sweeps averaged when snapping, for a camera that has been moved rather than
 -- has moved: the same averaging done at once, so a screenshot taken right
 -- after a teleport is as settled as one taken later. This is some thousands of
 -- rays in one frame and drops one, which is what a teleport does anyway.
 local SNAP_SWEEPS = 8
--- Every chunk material carries the same 216 values, and in a streaming world
--- there are hundreds of them; setting the parameter on all of them at once
--- costs many times what casting the rays does. So they are updated a few at a
--- time against a time budget, which spreads a pass over a fifth of a second
--- or so.
---
--- simplified: materials updated early in a pass hold slightly older values
--- than ones updated late. The values move slowly by design, so this is not
--- visible; if it ever is, the fix is to stop handing every material its own
--- copy -- a render path parameter reaches every shader in the viewport with
--- one call, and a small data texture would be another way.
-local PUSH_BUDGET_US = 300
 -- Chunks are collected around the camera out to the reach of a ray, and the
 -- list is kept until the camera crosses into another chunk: which chunks are
 -- within reach does not change until then. Rebuilt every so many sweeps as
@@ -144,12 +132,12 @@ for i = 1, CELL_COUNT do
 end
 local sweep_next = 1
 local sweep_index = 0
+-- Frames until the sky visibility parameter is put on the render path's scene
+-- passes again; see push_sky_vis()
+local declare_countdown = 0
 -- Which chunk the collected volumes are for, and how many sweeps ago
 local volumes_chunk_x, volumes_chunk_y, volumes_chunk_z = nil, nil, nil
 local volumes_age = VOLUME_REFRESH_SWEEPS
-local push_queue = {}
-local push_queue_n = 0
-local push_dirty = false
 -- The one table handed to buildat.cast_voxel_rays, reused: only the slice
 -- bounds, the origin and the chunk list change between calls
 local ray_args = {
@@ -168,8 +156,6 @@ local ray_args = {
 -- per frame
 local sky_vis_buffer = magic.VectorBuffer:new()
 local sky_vis_param = nil
-local voxel_nodes = {}
-local set_sky_vis -- Defined below, used by the material callback above it
 
 local function each_material(node, cb)
 	local cg = node:GetComponent("CustomGeometry")
@@ -183,14 +169,9 @@ local function each_material(node, cb)
 	end
 end
 
-voxelworld.sub_geometry_update(function(node)
-	voxel_nodes[node:GetID()] = node
-end)
-
 voxelworld.sub_material_update(function(node)
 	each_material(node, function(m)
 		m:SetTechnique(0, TECHNIQUE)
-		set_sky_vis(m)
 	end)
 end)
 
@@ -327,54 +308,57 @@ local function begin_sweep()
 	aim_dirs(sweep_index)
 end
 
--- f is how much of the sweep to take; 1.0 replaces the values outright
-local function finish_sweep(f)
-	for i = 1, CELL_COUNT do
+-- f is how much of the sweep's rays to take; 1.0 replaces the values outright
+local function blend_cells(first, count, f)
+	for i = first, first + count - 1 do
 		sky_vis[i] = sky_vis[i] + (sweep_vis[i] - sky_vis[i]) * f
 	end
 	-- One parameter of 216 floats rather than 216 parameters: Urho sets a
-	-- Variant buffer as a float array, sized by what the uniform declares
-	sky_vis_buffer:Clear()
-	for i = 1, CELL_COUNT do
-		sky_vis_buffer:WriteFloat(sky_vis[i])
-	end
+	-- Variant buffer as a float array, sized by what the uniform declares.
+	-- Packed by the engine because this happens every frame and WriteFloat()
+	-- per value is a sandbox call each.
+	buildat.write_floats(sky_vis_buffer, sky_vis)
 	sky_vis_param = magic.Variant(sky_vis_buffer)
 end
 
+-- The values go on the render path's scene pass commands rather than on
+-- materials. Urho hands a scene pass command's shader parameters to every
+-- batch that command draws, so this reaches the whole scene however many
+-- chunks are loaded; a copy per material was hundreds of calls a sweep and
+-- cost more than the ray marching did.
+--
+-- Two steps, because the cheap way to set it is not the way to declare it.
+-- RenderPath:SetShaderParameter() only touches commands that already carry the
+-- name, and that is the per frame path: three calls, no matter how long the
+-- render path is. Adding the name to the scene passes means walking the
+-- commands, and each command asked for is a fresh sandbox wrapper, which came
+-- to a third of a millisecond a frame; so the walk happens now and then
+-- instead. A game that swaps its render path -- they clone one and append post
+-- processing to it -- gets the name back on the next walk, and until then the
+-- shader keeps the values it had.
+--
+-- The commands themselves are deliberately not kept: they are pointers into a
+-- vector the render path can reallocate.
+local DECLARE_EVERY_FRAMES = 60
 
-set_sky_vis = function(m)
-	if sky_vis_param ~= nil then
-		m:SetShaderParameter("SkyVis", sky_vis_param)
-	end
-end
-
--- A finished sweep does not push anything itself; it marks the values as
--- moved on and service_push() works through the nodes from there
 local function push_sky_vis()
-	push_dirty = true
-end
-
-local function service_push()
-	if push_queue_n == 0 then
-		if not push_dirty then return end
-		push_dirty = false
-		for id, _ in pairs(voxel_nodes) do
-			push_queue_n = push_queue_n + 1
-			push_queue[push_queue_n] = id
+	if sky_vis_param == nil then return end
+	local viewport = magic.renderer:GetViewport(0)
+	if viewport == nil then return end
+	local render_path = viewport.renderPath
+	if render_path == nil then return end
+	declare_countdown = declare_countdown - 1
+	if declare_countdown <= 0 then
+		declare_countdown = DECLARE_EVERY_FRAMES
+		for i = 0, render_path:GetNumCommands() - 1 do
+			local command = render_path:GetCommand(i)
+			if command ~= nil and command.type == magic.CMD_SCENEPASS then
+				command:SetShaderParameter("SkyVis", sky_vis_param)
+			end
 		end
+		return
 	end
-	local t0 = buildat.get_time_us()
-	while push_queue_n > 0 do
-		local node = voxel_nodes[push_queue[push_queue_n]]
-		push_queue[push_queue_n] = nil
-		push_queue_n = push_queue_n - 1
-		if node ~= nil then
-			each_material(node, set_sky_vis)
-		end
-		if buildat.get_time_us() - t0 >= PUSH_BUDGET_US then
-			break
-		end
-	end
+	render_path:SetShaderParameter("SkyVis", sky_vis_param)
 end
 
 -- dt of nil snaps, for when the camera has been moved rather than has moved
@@ -395,36 +379,32 @@ function M.update(dt)
 			else
 				sweep_all_open()
 			end
-			finish_sweep(sweep == 1 and 1.0 or 1.0 / sweep)
+			blend_cells(1, CELL_COUNT, sweep == 1 and 1.0 or 1.0 / sweep)
 		end
 		begin_sweep()
-		-- A snap is for a camera that has been put somewhere, so the whole
-		-- scene takes the new values at once rather than over a pass
-		for _, node in pairs(voxel_nodes) do
-			each_material(node, set_sky_vis)
-		end
-		push_dirty = false
-		for i = push_queue_n, 1, -1 do
-			push_queue[i] = nil
-		end
-		push_queue_n = 0
+		push_sky_vis()
 		return
 	end
 	if sweep_next == 1 and not collect_volumes(origin) then
 		sweep_all_open()
-		finish_sweep(SKY_VIS_BLEND)
+		blend_cells(1, CELL_COUNT, SKY_VIS_BLEND)
 		begin_sweep()
 		push_sky_vis()
 		return
 	end
-	service_push()
+	-- Each frame's cells are blended in and handed to the shader as their own
+	-- rays land, rather than a whole sweep at a time: waiting for the sweep
+	-- steps every reflection in the scene together, six frames apart, where
+	-- this spreads the same change out. Reasoning rather than measurement --
+	-- see the note in games/voxel_lighting/README.txt.
+	local first = sweep_next
 	local count = math.min(RAYS_PER_UPDATE, CELL_COUNT - sweep_next + 1)
-	cast_slice(sweep_next, count)
+	cast_slice(first, count)
+	blend_cells(first, count, SKY_VIS_BLEND)
+	push_sky_vis()
 	sweep_next = sweep_next + count
 	if sweep_next > CELL_COUNT then
-		finish_sweep(SKY_VIS_BLEND)
 		begin_sweep()
-		push_sky_vis()
 	end
 end
 

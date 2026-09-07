@@ -183,25 +183,32 @@ looks the value up along each pixel's reflection direction, bilinear between
 cell centers, and multiplies the sky by it. A cell is about 15 degrees across.
 
 The client fills those by marching a ray per cell through the voxel data from
-the camera, 36 rays a frame, so the whole set is renewed every sixth frame.
+the camera, 36 rays a frame, so every cell is renewed every sixth frame.
 buildat.cast_voxel_rays() does the marching -- see its comment in
 src/lua_bindings/voxel_volume.cpp -- because the same loop written in Lua cost
 half a millisecond a frame for four rays of twenty voxels, and this wants
 hundreds of sixty-four.
 
-Measured in digger, per frame: 0.33 ms for the rays, 0.02 ms for keeping the
-list of chunks they may reach, and 0.32 ms handing the values to chunk
-materials, so 0.66 ms in all.
+The values do not go on materials. They go on the render path's scene pass
+commands, whose shader parameters Urho hands to every batch the command draws,
+so one set of them covers the scene however many chunks are loaded. Giving
+every chunk material its own copy cost 5.2 ms a frame -- a streaming world has
+hundreds of materials, and a parameter on each costs more than the ray marching
+does.
 
-Neither of the last two started there. Handing every chunk material its own
-copy of the 216 values cost 5.2 ms a frame -- there are hundreds of materials
-in a streaming world, and a parameter on each costs more than the ray marching
-does -- and is now spread over frames against a 0.3 ms budget, so a pass takes
-a fifth of a second instead of a frame. A render path parameter would reach
-every shader in the viewport with one call and is the obvious next step if it
-ever matters again. Collecting the chunks was another 0.5 ms until it stopped
-happening every sweep: the set within reach of a ray does not change until the
-camera crosses into another chunk.
+Setting it and declaring it are separate, because they cost differently.
+RenderPath:SetShaderParameter() only touches commands that already carry the
+name, and is what runs per frame: three calls whatever the render path holds.
+Putting the name on the scene passes in the first place means walking the
+commands, and every command asked for is a fresh sandbox wrapper, which came to
+a third of a millisecond a frame; so that walk happens once a second instead. A
+game that swaps its render path gets the name back on the next walk.
+
+Measured in digger, per frame: 0.35 ms for the rays, 0.05 ms for keeping the
+list of chunks they may reach, and the parameter too small to measure, so 0.40
+ms in all. In voxel_lighting, whose world is one section, 0.10 ms. Collecting
+the chunks was 0.5 ms until it stopped happening every sweep: the set within
+reach of a ray does not change until the camera crosses into another chunk.
 
 A ray answers yes if it gets its whole length, 64 voxels, without meeting
 anything, and no if something solid stops it. Nothing in between, and nothing
@@ -212,13 +219,22 @@ end to find out that the tunnel is not a way out -- so it is not the thing to
 economise on.
 
 Partial values come from the sampling instead. The rays are jittered inside
-their cells and differently each sweep, and each finished sweep is averaged
-into the values at 0.15, so a cell settles at the fraction of its directions
-that see sky. That average is also what keeps the speculars still: taking a
-sweep whole put the rays' own yes-or-no on the screen, which flickered several
-times a second. Measured as the mean absolute difference between consecutive
-frames over a crop of digger's tunnel wall, over bursts of twelve: 1.05 taking
-sweeps whole, 0.02 with the average.
+their cells and differently each sweep, and each cell keeps an average of its
+own rays at 0.15, so a cell settles at the fraction of its directions that see
+sky. That average is also what keeps the speculars still: taking a ray whole
+put its own yes-or-no on the screen, which flickered several times a second --
+measured over bursts of twelve frames of digger's tunnel wall as the mean
+absolute difference between consecutive frames, 1.05 taking rays whole against
+0.13 with the average.
+
+A cell is blended in and handed to the shader as its own ray lands, rather than
+a whole sweep at a time, on the reasoning that waiting for the sweep steps
+every reflection in the scene together, six frames apart, where a cell changing
+when its own ray arrives spreads the same change out. That one is not measured:
+the runs that were supposed to compare the two turned out to differ in whether
+the wind was frozen and whether the camera had reached the benchmark at all, so
+the numbers that looked like a verdict were not one. Worth measuring properly
+before anyone leans on it.
 
 Skylight does answer for a ray that runs out of loaded chunks part way: the
 skylight where it stopped is how far along the way out it had got, and
