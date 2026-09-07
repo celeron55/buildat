@@ -9,7 +9,6 @@
 #include "server/state.h"
 #include "interface/server.h"
 #include "interface/debug.h"
-#include "interface/mutex.h"
 #include "interface/os.h"
 #include <c55/getopt.h>
 #include <c55/os.h>
@@ -23,24 +22,27 @@
 
 server::Config g_server_config;
 
-bool g_sigint_received = false;
-interface::Mutex g_sigint_received_mutex;
+// The signal that asked for shutdown, read by the main loop. Only things a
+// signal handler may touch belong in here: no logging, no locking, no
+// allocation. The loop does all of that once it sees this.
+volatile sig_atomic_t g_shutdown_signal = 0;
 
-void sigint_handler(int sig)
+void shutdown_signal_handler(int sig)
 {
-	interface::MutexScope ms(g_sigint_received_mutex);
-	if(!g_sigint_received){
-		fprintf(stdout, "\n"); // Newline after "^C"
-		log_i("process", "SIGINT");
-		g_sigint_received = true;
+	if(g_shutdown_signal == 0){
+		g_shutdown_signal = sig;
 	} else {
-		(void)signal(SIGINT, SIG_DFL);
+		// Asked twice: the shutdown is not getting anywhere, so let the
+		// default action have the process
+		(void)signal(sig, SIG_DFL);
+		(void)raise(sig);
 	}
 }
 
 void signal_handler_init()
 {
-	(void)signal(SIGINT, sigint_handler);
+	(void)signal(SIGINT, shutdown_signal_handler);
+	(void)signal(SIGTERM, shutdown_signal_handler);
 #ifndef _WIN32
 	(void)signal(SIGPIPE, SIG_IGN);
 #endif
@@ -125,6 +127,8 @@ int main(int argc, char *argv[])
 
 	std::cerr<<"Buildat server"<<std::endl;
 
+	signal_handler_init();
+
 	if(!boot::autodetect::detect_server_paths(config))
 		return 1;
 
@@ -150,10 +154,14 @@ int main(int argc, char *argv[])
 		uint64_t t_per_tick = 1000000 / 30; // Same as physics FPS
 
 		for(;;){
-			{
-				interface::MutexScope ms(g_sigint_received_mutex);
-				if(g_sigint_received)
-					break;
+			if(g_shutdown_signal != 0){
+				// SIGINT leaves a "^C" on the terminal to write past
+				if(g_shutdown_signal == SIGINT)
+					fprintf(stdout, "\n");
+				log_i(MODULE, "%s; shutting down",
+						g_shutdown_signal == SIGINT ? "SIGINT" : "SIGTERM");
+				shutdown_reason = "Signal";
+				break;
 			}
 			uint64_t current_us = get_timeofday_us();
 			int64_t delay_us = next_tick_us - current_us;
