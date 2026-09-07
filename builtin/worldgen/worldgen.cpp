@@ -60,6 +60,14 @@ struct GenerateThread: public interface::ThreadedThing
 	void on_crash(interface::Thread *thread);
 };
 
+// One section of one instance: what has to be known before generating it
+struct GenerateTask
+{
+	SceneReference scene_ref;
+	pv::Vector3DInt16 section_p = pv::Vector3DInt16(0, 0, 0);
+	GeneratorInterface *generator = nullptr;
+};
+
 struct CInstance: public worldgen::Instance
 {
 	interface::Server *m_server;
@@ -93,29 +101,24 @@ struct CInstance: public worldgen::Instance
 	// NOTE: on_tick() cannot be used here, because as this takes much longer
 	//       than a tick, the ticks accumulate and result in nothing getting
 	//       queued but instead sectors get queued in the event queue.
-	void generate_next_section()
+
+	// Take one section off the queue. Called with the module held; the
+	// generation itself is done outside it.
+	bool take_next_section(pv::Vector3DInt16 *section_p_out,
+			GeneratorInterface **generator_out)
 	{
-		try {
-			if(!m_enabled)
-				throw Exception("generate_next_section(): Not enabled");
-			if(m_queued_sections.empty())
-				return;
-			const pv::Vector3DInt16 section_p = m_queued_sections.front();
-			m_queued_sections.pop_front();
+		if(!m_enabled || m_queued_sections.empty())
+			return false;
+		*section_p_out = m_queued_sections.front();
+		*generator_out = m_generator.get();
+		m_queued_sections.pop_front();
+		return true;
+	}
 
-			log_v(MODULE, "Generating section (%i, %i, %i); queue size: %zu",
-					section_p.getX(), section_p.getY(), section_p.getZ(),
-					m_queued_sections.size());
-
-			if(m_generator)
-				m_generator->generate_section(m_server, m_scene_ref, section_p);
-
-			m_server->emit_event("worldgen:queue_modified",
-					new QueueModifiedEvent(m_scene_ref, m_queued_sections.size()));
-		} catch(NullptrCatch &e){
-			// Something was probably deleted or unloaded
-			log_v(MODULE, "NullptrCatch: %s", e.what());
-		}
+	void announce_queue_size()
+	{
+		m_server->emit_event("worldgen:queue_modified",
+				new QueueModifiedEvent(m_scene_ref, m_queued_sections.size()));
 	}
 
 	// Interface
@@ -232,6 +235,62 @@ struct Module: public interface::Module, public Interface
 	{
 		return dynamic_cast<Interface*>(this);
 	}
+
+	// Interface for GenerateThread. Called with no module held.
+	void generate_and_merge(const GenerateTask &task)
+	{
+		try {
+			if(!task.generator)
+				return;
+
+			// The section grown by whatever the generator needs to place a
+			// thing that crosses the section boundary
+			pv::Region region;
+			voxelworld::access(m_server, task.scene_ref,
+					[&](voxelworld::Instance *world)
+			{
+				region = world->get_section_region_voxels(task.section_p);
+			});
+			pv::Vector3DInt32 pad = task.generator->get_padding_voxels();
+			region.setLowerCorner(region.getLowerCorner() - pad);
+			region.setUpperCorner(region.getUpperCorner() + pad);
+
+			log_v(MODULE, "Generating section " PV3I_FORMAT " (scene %p)",
+					PV3I_PARAMS(task.section_p), task.scene_ref);
+
+			// Undefined is what a generator leaves where it puts nothing, so
+			// it is what the volume starts as; RawVolume does not initialize
+			// a VoxelInstance by itself
+			pv::RawVolume<VoxelInstance> volume(region);
+			const VoxelInstance undefined(interface::VOXELTYPEID_UNDEFINED);
+			auto lc = region.getLowerCorner();
+			auto uc = region.getUpperCorner();
+			for(int z = lc.getZ(); z <= uc.getZ(); z++)
+				for(int y = lc.getY(); y <= uc.getY(); y++)
+					for(int x = lc.getX(); x <= uc.getX(); x++)
+						volume.setVoxelAt(x, y, z, undefined);
+
+			task.generator->generate(task.scene_ref, task.section_p, volume);
+
+			// Only this part needs voxelworld. A section the padding reaches
+			// into that does not exist yet is created ungenerated, so that it
+			// keeps whatever crossed into it and is still generated later.
+			voxelworld::access(m_server, task.scene_ref,
+					[&](voxelworld::Instance *world)
+			{
+				world->merge_volume(volume, true);
+			});
+
+			worldgen::access(m_server, task.scene_ref,
+					[&](worldgen::Instance *instance)
+			{
+				((CInstance*)instance)->announce_queue_size();
+			});
+		} catch(NullptrCatch &e){
+			// Something was probably deleted or unloaded
+			log_v(MODULE, "NullptrCatch: %s", e.what());
+		}
+	}
 };
 
 void GenerateThread::run(interface::Thread *thread)
@@ -243,12 +302,14 @@ void GenerateThread::run(interface::Thread *thread)
 		m_module->m_queued_sections_sem.wait();
 		if(thread->stop_requested())
 			break;
-		// We can avoid implementing our own mutex locking in Module by using
+
+		// Take one section for each instance. We can avoid implementing our
+		// own mutex locking in Module by using
 		// interface::Server::access_module() instead of directly accessing it.
+		sv_<GenerateTask> tasks;
 		worldgen::access(m_module->m_server,
 				[&](worldgen::Interface *iworldgen)
 		{
-			// Generate one section for each instance
 			for(auto &pair: m_module->m_instances){
 				up_<CInstance> &instance = pair.second;
 				if(!instance->m_enabled){
@@ -258,9 +319,20 @@ void GenerateThread::run(interface::Thread *thread)
 					}
 					continue;
 				}
-				instance->generate_next_section();
+				GenerateTask task;
+				task.scene_ref = instance->m_scene_ref;
+				if(instance->take_next_section(&task.section_p,
+						&task.generator))
+					tasks.push_back(task);
 			}
 		});
+
+		// Generate outside of every module: this is the part that takes
+		// milliseconds per section, and voxelworld is wanted by everything
+		// else in the meantime -- an explosion waiting for it is an explosion
+		// the player sees seconds after the bomb landed.
+		for(const GenerateTask &task : tasks)
+			m_module->generate_and_merge(task);
 	}
 }
 

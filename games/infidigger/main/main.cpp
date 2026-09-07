@@ -38,99 +38,111 @@ using namespace Urho3D;
 
 struct Worldgen: public worldgen::GeneratorInterface
 {
-	void generate_section(interface::Server *server,
-			SceneReference scene_ref,
-			const pv::Vector3DInt16 &section_p)
+	// A tree stands two voxels out from its trunk, and a trunk of five with
+	// four voxels of leaves on top reaches nine above the ground it grows
+	// from, which can be the topmost voxel of the section
+	pv::Vector3DInt32 get_padding_voxels()
 	{
-		voxelworld::access(server, [&](voxelworld::Interface *ivoxelworld)
-		{
-			voxelworld::Instance *world =
-					ivoxelworld->get_instance(scene_ref);
-			if(!world->is_section_loaded(section_p))
-				return;
+		return pv::Vector3DInt32(2, 9, 2);
+	}
 
-			pv::Region region = world->get_section_region_voxels(
-					section_p);
+	// Only the voxels of the section itself get terrain; the padding carries
+	// the parts of a tree that cross into the next section, and everything
+	// else in it is left undefined for that section's own generation.
+	void generate(SceneReference scene_ref,
+			const pv::Vector3DInt16 &section_p,
+			pv::RawVolume<VoxelInstance> &volume)
+	{
+		const pv::Region padded = volume.getEnclosingRegion();
+		pv::Vector3DInt32 pad = get_padding_voxels();
+		pv::Region region(padded.getLowerCorner() + pad,
+				padded.getUpperCorner() - pad);
 
-			auto lc = region.getLowerCorner();
-			auto uc = region.getUpperCorner();
+		auto lc = region.getLowerCorner();
+		auto uc = region.getUpperCorner();
 
-			log_t(MODULE, "on_generation_request(): lc: (%i, %i, %i)",
-					lc.getX(), lc.getY(), lc.getZ());
-			log_t(MODULE, "on_generation_request(): uc: (%i, %i, %i)",
-					uc.getX(), uc.getY(), uc.getZ());
+		int w = uc.getX() - lc.getX() + 1;
+		int d = uc.getZ() - lc.getZ() + 1;
 
-			int w = uc.getX() - lc.getX() + 1;
-			int d = uc.getZ() - lc.getZ() + 1;
+		interface::v3f spread_h(280, 280, 280);
+		interface::NoiseParams np_h(0, 14, spread_h, 0, 5, 0.45);
+		interface::Noise noise_h(&np_h, 3, w, d);
+		noise_h.perlinMap2D(lc.getX() + spread_h.X/2,
+				lc.getZ() + spread_h.Z/2);
+		noise_h.transformNoiseMap();
 
-			interface::v3f spread_h(280, 280, 280);
-			interface::NoiseParams np_h(0, 14, spread_h, 0, 5, 0.45);
-			interface::Noise noise_h(&np_h, 3, w, d);
-			noise_h.perlinMap2D(lc.getX() + spread_h.X/2,
-					lc.getZ() + spread_h.Z/2);
-			noise_h.transformNoiseMap();
+		interface::v3f spread_b(48, 48, 48);
+		interface::NoiseParams np_b(0, 3, spread_b, 11, 3, 0.5);
+		interface::Noise noise_b(&np_b, 3, w, d);
+		noise_b.perlinMap2D(lc.getX() + spread_b.X/2,
+				lc.getZ() + spread_b.Z/2);
+		noise_b.transformNoiseMap();
 
-			interface::v3f spread_b(48, 48, 48);
-			interface::NoiseParams np_b(0, 3, spread_b, 11, 3, 0.5);
-			interface::Noise noise_b(&np_b, 3, w, d);
-			noise_b.perlinMap2D(lc.getX() + spread_b.X/2,
-					lc.getZ() + spread_b.Z/2);
-			noise_b.transformNoiseMap();
-
-			size_t noise_i = 0;
-			for(int z = lc.getZ(); z <= uc.getZ(); z++){
-				for(int x = lc.getX(); x <= uc.getX(); x++){
-					float surface = 16.f + noise_h.result[noise_i] +
-							noise_b.result[noise_i];
-					noise_i++;
-					int ground_y = (int)std::floor(surface);
-					for(int y = lc.getY(); y <= uc.getY(); y++){
-						pv::Vector3DInt32 p(x, y, z);
-						if(y < ground_y - 4){
-							world->set_voxel(p, VoxelInstance(2));
-						} else if(y < ground_y){
-							world->set_voxel(p, VoxelInstance(3));
-						} else if(y == ground_y){
-							world->set_voxel(p, VoxelInstance(4));
-						} else {
-							world->set_voxel(p, VoxelInstance(1));
-						}
+		size_t noise_i = 0;
+		for(int z = lc.getZ(); z <= uc.getZ(); z++){
+			for(int x = lc.getX(); x <= uc.getX(); x++){
+				float surface = 16.f + noise_h.result[noise_i] +
+						noise_b.result[noise_i];
+				noise_i++;
+				int ground_y = (int)std::floor(surface);
+				for(int y = lc.getY(); y <= uc.getY(); y++){
+					pv::Vector3DInt32 p(x, y, z);
+					if(y < ground_y - 4){
+						volume.setVoxelAt(p, VoxelInstance(2));
+					} else if(y < ground_y){
+						volume.setVoxelAt(p, VoxelInstance(3));
+					} else if(y == ground_y){
+						volume.setVoxelAt(p, VoxelInstance(4));
+					} else {
+						volume.setVoxelAt(p, VoxelInstance(1));
 					}
 				}
 			}
+		}
 
-			auto extent = uc - lc + pv::Vector3DInt32(1, 1, 1);
-			int area = extent.getX() * extent.getZ();
-			auto pr = interface::PseudoRandom(
-					13241 + section_p.getX() * 131 +
-					section_p.getZ() * 9176);
-			for(int i = 0; i < area / 110; i++){
-				int x = pr.range(lc.getX(), uc.getX());
-				int z = pr.range(lc.getZ(), uc.getZ());
-				size_t ti = (z-lc.getZ())*w + (x-lc.getX());
-				int ground_y = (int)std::floor(16.f + noise_h.result[ti] +
-						noise_b.result[ti]);
-				int y = ground_y + 1;
-				if(y < lc.getY() - 5 || y > uc.getY() - 5)
-					continue;
+		auto extent = uc - lc + pv::Vector3DInt32(1, 1, 1);
+		int area = extent.getX() * extent.getZ();
+		auto pr = interface::PseudoRandom(
+				13241 + section_p.getX() * 131 +
+				section_p.getZ() * 9176);
+		for(int i = 0; i < area / 110; i++){
+			int x = pr.range(lc.getX(), uc.getX());
+			int z = pr.range(lc.getZ(), uc.getZ());
+			size_t ti = (z-lc.getZ())*w + (x-lc.getX());
+			int ground_y = (int)std::floor(16.f + noise_h.result[ti] +
+					noise_b.result[ti]);
+			int y = ground_y + 1;
+			// A tree grows from the ground of this section; one whose ground
+			// is in the next section is that section's to place
+			if(y < lc.getY() || y > uc.getY())
+				continue;
 
-				int trunk = 3 + pr.range(0, 2);
-				for(int y1 = y; y1 < y + trunk; y1++){
-					world->set_voxel(pv::Vector3DInt32(x, y1, z),
-							VoxelInstance(6), true);
-				}
-				int leaves_y0 = y + trunk - 1;
-				int leaves_y1 = y + trunk + 3;
-				for(int x1 = x-2; x1 <= x+2; x1++){
-					for(int y1 = leaves_y0; y1 <= leaves_y1; y1++){
-						for(int z1 = z-2; z1 <= z+2; z1++){
-							world->set_voxel(pv::Vector3DInt32(x1, y1, z1),
-									VoxelInstance(5), true);
-						}
+			int trunk = 3 + pr.range(0, 2);
+			for(int y1 = y; y1 < y + trunk; y1++){
+				set_if_inside(volume, pv::Vector3DInt32(x, y1, z),
+						VoxelInstance(6));
+			}
+			int leaves_y0 = y + trunk - 1;
+			int leaves_y1 = y + trunk + 3;
+			for(int x1 = x-2; x1 <= x+2; x1++){
+				for(int y1 = leaves_y0; y1 <= leaves_y1; y1++){
+					for(int z1 = z-2; z1 <= z+2; z1++){
+						set_if_inside(volume,
+								pv::Vector3DInt32(x1, y1, z1),
+								VoxelInstance(5));
 					}
 				}
 			}
-		});
+		}
+	}
+
+	// A tree at the very top of a section reaches past even the padding
+	static void set_if_inside(pv::RawVolume<VoxelInstance> &volume,
+			const pv::Vector3DInt32 &p, const VoxelInstance &v)
+	{
+		if(!volume.getEnclosingRegion().containsPoint(p))
+			return;
+		volume.setVoxelAt(p, v);
 	}
 };
 
@@ -217,7 +229,7 @@ struct Module: public interface::Module
 	// passes through. top_texture, when given, goes on the +Y and -Y faces.
 	void add_voxel(interface::VoxelRegistry *reg, const ss_ &name,
 			const ss_ &texture, bool visible, bool solid,
-			float roughness = 0.9f, float spec_strength = 1.0f,
+			bool fully_empty, float roughness = 0.9f, float spec_strength = 1.0f,
 			float bumpiness = 1.0f, float translucency = 0.0f,
 			float spots = 0.0f, float static_spots = 0.0f,
 			const ss_ &top_texture = "")
@@ -247,6 +259,7 @@ struct Module: public interface::Module
 		vdef.edge_material_id = visible ? interface::EDGEMATERIALID_GROUND :
 				interface::EDGEMATERIALID_EMPTY;
 		vdef.physically_solid = solid;
+		vdef.fully_empty = fully_empty;
 		reg->add_voxel(vdef);
 	}
 
@@ -284,16 +297,16 @@ struct Module: public interface::Module
 			// roughness, spec_strength, bumpiness, translucency, spots,
 			// static_spots; see interface/atlas.h. The values are
 			// voxel_lighting's, which is where they were chosen.
-			add_voxel(voxel_reg, "air", "", false, false);     // id 1
-			add_voxel(voxel_reg, "rock", "main/rock.png", true, true,
+			add_voxel(voxel_reg, "air", "", false, false, true);     // id 1
+			add_voxel(voxel_reg, "rock", "main/rock.png", true, true, false,
 					0.95f, 0.15f, 0.5f, 0.0f, 0.0f, 0.04f);    // id 2
-			add_voxel(voxel_reg, "dirt", "main/dirt.png", true, true,
+			add_voxel(voxel_reg, "dirt", "main/dirt.png", true, true, false,
 					0.98f, 0.15f, 0.6f, 0.0f, 0.0f, 0.04f);    // id 3
-			add_voxel(voxel_reg, "grass", "main/grass.png", true, true,
+			add_voxel(voxel_reg, "grass", "main/grass.png", true, true, false,
 					0.90f, 1.0f, 0.75f, 0.06f, 0.012f);        // id 4
-			add_voxel(voxel_reg, "leaves", "main/leaves.png", true, true,
+			add_voxel(voxel_reg, "leaves", "main/leaves.png", true, true, false,
 					0.95f, 1.0f, 1.5f, 0.11f, 0.03f);          // id 5
-			add_voxel(voxel_reg, "tree", "main/tree.png", true, true,
+			add_voxel(voxel_reg, "tree", "main/tree.png", true, true, false,
 					0.85f, 0.35f, 2.0f, 0.0f, 0.0f, 0.0f,
 					"main/tree_top.png");                      // id 6
 

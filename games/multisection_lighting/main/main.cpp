@@ -127,16 +127,12 @@ struct Worldgen: public worldgen::GeneratorInterface
 	pv::Vector3DInt32 bench_slab_centre;   // BENCH_SLAB_W x 2 x BENCH_SLAB_W
 	bool bench_valid = false;
 
-	void generate_section(interface::Server *server,
-			SceneReference scene_ref,
-			const pv::Vector3DInt16 &section_p)
+	void generate(SceneReference scene_ref,
+			const pv::Vector3DInt16 &section_p,
+			pv::RawVolume<VoxelInstance> &volume)
 	{
-		voxelworld::access(server, [&](voxelworld::Interface *ivoxelworld)
 		{
-			voxelworld::Instance *world =
-					ivoxelworld->get_instance(scene_ref);
-
-			pv::Region region = world->get_section_region_voxels(section_p);
+			const pv::Region region = volume.getEnclosingRegion();
 			auto lc = region.getLowerCorner();
 			auto uc = region.getUpperCorner();
 
@@ -385,12 +381,12 @@ struct Worldgen: public worldgen::GeneratorInterface
 			for(int y = lc.getY(); y <= uc.getY(); y++){
 				for(int z = lc.getZ(); z <= uc.getZ(); z++){
 					for(int x = lc.getX(); x <= uc.getX(); x++){
-						world->set_voxel(pv::Vector3DInt32(x, y, z),
+						volume.setVoxelAt(pv::Vector3DInt32(x, y, z),
 								VoxelInstance(ids[idx(x, y, z)]));
 					}
 				}
 			}
-		});
+		}
 	}
 };
 
@@ -450,7 +446,8 @@ struct Module: public interface::Module
 
 	// The six numbers after solid describe the surface; see interface/atlas.h
 	void add_voxel(interface::VoxelRegistry *reg, const ss_ &name,
-			const ss_ &texture, bool solid, float roughness = 0.9f,
+			const ss_ &texture, bool solid, bool fully_empty,
+			float roughness = 0.9f,
 			float spec_strength = 1.0f, float bumpiness = 1.0f,
 			float translucency = 0.0f, float spots = 0.0f,
 			float static_spots = 0.0f)
@@ -479,6 +476,7 @@ struct Module: public interface::Module
 		vdef.edge_material_id = solid ? interface::EDGEMATERIALID_GROUND :
 				interface::EDGEMATERIALID_EMPTY;
 		vdef.physically_solid = solid;
+		vdef.fully_empty = fully_empty;
 		reg->add_voxel(vdef);
 	}
 
@@ -509,17 +507,17 @@ struct Module: public interface::Module
 		{
 			interface::VoxelRegistry *reg = ivoxelworld->
 					get_instance(m_main_scene)->get_voxel_reg();
-			add_voxel(reg, "air", "", false);              // id 1
+			add_voxel(reg, "air", "", false, true);              // id 1
 			// Same surfaces as voxel_lighting; see its README
-			add_voxel(reg, "rock", "main/rock.png", true,
+			add_voxel(reg, "rock", "main/rock.png", true, false,
 					0.95f, 0.15f, 0.5f, 0.0f, 0.0f, 0.04f); // id 2
-			add_voxel(reg, "dirt", "main/dirt.png", true,
+			add_voxel(reg, "dirt", "main/dirt.png", true, false,
 					0.98f, 0.15f, 0.6f, 0.0f, 0.0f, 0.04f); // id 3
-			add_voxel(reg, "grass", "main/grass.png", true,
+			add_voxel(reg, "grass", "main/grass.png", true, false,
 					0.90f, 1.0f, 0.75f, 0.06f, 0.012f); // id 4
-			add_voxel(reg, "leaves", "main/leaves.png", true,
+			add_voxel(reg, "leaves", "main/leaves.png", true, false,
 					0.95f, 1.0f, 1.5f, 0.11f, 0.03f); // id 5
-			add_voxel(reg, "tree", "main/tree.png", true,
+			add_voxel(reg, "tree", "main/tree.png", true, false,
 					0.85f, 0.35f, 2.0f); // id 6
 
 			// The whole point of this scene: let voxelworld light it
