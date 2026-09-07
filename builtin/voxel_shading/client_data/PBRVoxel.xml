@@ -3,10 +3,12 @@
 
      METALLIC reads the roughness/metalness atlas the atlas registry derives
      from each texture, VOXELNORMALMAP the normal atlas beside it, VOXELIBL
-     reflects the zone cube map, VOXELSPOTS moves the glossy parts of a surface
-     around over time and VOXELTRANSLUCENCY lets light through them from behind.
+     reflects the zone cube map, dimmed in the directions the camera cannot see
+     the sky along, VOXELSPOTS moves the glossy parts of a surface around over
+     time and VOXELTRANSLUCENCY lets light through them from behind.
      A world that sets no zone cube map gets black reflections, so IBL is only
-     useful together with Zone.zoneTexture. -->
+     useful together with Zone.zoneTexture, and the client has to keep the
+     SkyVis parameter up to date; builtin/voxel_shading's module.lua does. -->
 <technique vs="voxel_shading/PBRVoxel" ps="voxel_shading/PBRVoxel"
         psdefines="DIFFMAP PBR METALLIC VOXELNORMALMAP VOXELIBL VOXELSPOTS VOXELTRANSLUCENCY">
     <pass name="base" />

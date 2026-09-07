@@ -410,8 +410,8 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	--log:info("Update")
 	local dt = event_data:GetFloat("TimeStep")
 
-	-- Blends the reflected sky towards the indoor one as the camera goes
-	-- under ground; see builtin/voxel_shading
+	-- Samples how much sky the camera can see, per direction, which is what
+	-- dims the reflected sky under ground; see builtin/voxel_shading
 	voxel_shading.update(dt)
 
 	pos_send_counter = pos_send_counter + 1
