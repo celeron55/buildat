@@ -342,6 +342,7 @@ Input::Input(Context* context) :
 #endif
     touchEmulation_(false),
     inputFocus_(false),
+    forceInputFocus_(false),
     minimized_(false),
     focusedThisFrame_(false),
     suppressNextMouseMove_(false),
@@ -405,11 +406,15 @@ void Input::Update()
 #endif
             focusedThisFrame_ = true;
 
+        // Forced focus does not wait for the OS to hand any over
+        if (!inputFocus_ && forceInputFocus_)
+            focusedThisFrame_ = true;
+
         if (focusedThisFrame_)
             GainFocus();
 
         // Check for losing focus. The window flags are not reliable when using an external window, so prevent losing focus in that case
-        if (inputFocus_ && !graphics_->GetExternalWindow() && (flags & SDL_WINDOW_INPUT_FOCUS) == 0)
+        if (inputFocus_ && !forceInputFocus_ && !graphics_->GetExternalWindow() && (flags & SDL_WINDOW_INPUT_FOCUS) == 0)
             LoseFocus();
     }
     else
