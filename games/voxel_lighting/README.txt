@@ -210,13 +210,22 @@ ms in all. In voxel_lighting, whose world is one section, 0.10 ms. Collecting
 the chunks was 0.5 ms until it stopped happening every sweep: the set within
 reach of a ray does not change until the camera crosses into another chunk.
 
-A ray answers yes if it gets its whole length, 64 voxels, without meeting
-anything, and no if something solid stops it. Nothing in between, and nothing
-to do with skylight: a voxel's skylight says the sky is open straight up from
-it, which is no answer to whether the sky lies along the ray. The length is
-what makes the answer strict -- a ray down digger's tunnel has to reach the far
-end to find out that the tunnel is not a way out -- so it is not the thing to
-economise on.
+A ray answers no if something solid stops it. If nothing does, the answer is
+the skylight of the air it ended in, which is 1 for fully lit air and 0 for
+dark. Getting its whole length, 64 voxels, is not itself a yes: a ray crossing
+sixty-four voxels of unlit cavern has met nothing and seen no sky either, and
+calling that sky is how a fixed length goes wrong on its own. The length still
+matters -- a ray down digger's tunnel has to reach the far end to find out that
+the tunnel is not a way out -- so it is not the thing to economise on.
+
+Skylight is used there and nowhere else along the ray. It says the sky is open
+straight up from a point, which is no answer to whether the sky lies along the
+ray, and stopping rays wherever they met full skylight looked right and was
+badly wrong: at the mouth of digger's tunnel the air is fully lit, so every
+direction including the tunnel came back at 1. At the far end of a ray it is
+answering about the place the ray reached, which is a question it can answer.
+A ray that runs out of loaded chunks part way is read the same way, for the
+same reason, and that beats calling the edge of the loaded world sky.
 
 Partial values come from the sampling instead. The rays are jittered inside
 their cells and differently each sweep, and each cell keeps an average of its
@@ -235,10 +244,6 @@ the runs that were supposed to compare the two turned out to differ in whether
 the wind was frozen and whether the camera had reached the benchmark at all, so
 the numbers that looked like a verdict were not one. Worth measuring properly
 before anyone leans on it.
-
-Skylight does answer for a ray that runs out of loaded chunks part way: the
-skylight where it stopped is how far along the way out it had got, and
-believing that beats calling the edge of the loaded world sky.
 
 Resolution is what decides how narrowly this can be aimed. The sky over
 digger's spawn tunnel is a few degrees off the tunnel's own direction, and a
