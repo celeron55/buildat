@@ -8,6 +8,13 @@
 
 namespace interface
 {
+	// Thrown by access_module() when the target module's thread has been asked
+	// to stop, ie. the server is shutting down or the module is being reloaded
+	// or unloaded. The module may already be deleted.
+	struct ModuleAskedToStop: public Exception {
+		ModuleAskedToStop(const ss_ &msg): Exception(msg){}
+	};
+
 	struct Module
 	{
 		const char *m_module_name = "(unknown module)";
