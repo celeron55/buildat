@@ -166,6 +166,23 @@ voxel_shading.set_camera(camera_node)
 
 magic.input:SetMouseVisible(true)
 
+-- Multiplies the reflected sky, for looking at what voxel_shading's sky
+-- visibility sampling does rather than at the scene. At 1, which is how the
+-- game renders, a change to the sampling worth arguing about moves a cave wall
+-- by a fraction of a value out of 255 -- below PNG rounding, so screenshots
+-- cannot tell whether it did anything. At 16 the same change is tens of values.
+-- Only the reflection is scaled, so nothing but what that sampling decides is
+-- exaggerated. See the note in the README.
+local SPECULAR_EMPHASIS = {1, 4, 16, 64}
+local specular_emphasis_i = 1
+
+local function cycle_specular_emphasis()
+	specular_emphasis_i = specular_emphasis_i % #SPECULAR_EMPHASIS + 1
+	local v = SPECULAR_EMPHASIS[specular_emphasis_i]
+	voxel_shading.set_specular_emphasis(v)
+	log:info("specular emphasis: "..v.."x")
+end
+
 local function set_time_frozen(enable)
 	time_frozen = enable
 	if time_frozen then
@@ -487,6 +504,7 @@ do
 	add_button("Freeze wind (F)", function()
 		set_time_frozen(not time_frozen)
 	end)
+	add_button("Emphasis (R)", cycle_specular_emphasis)
 
 	magic.ui:SetFocusElement(nil)
 end
@@ -517,6 +535,8 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		buildat.send_packet("main:verify_skylight", "")
 	elseif key == magic.KEY_F then
 		set_time_frozen(not time_frozen)
+	elseif key == magic.KEY_R then
+		cycle_specular_emphasis()
 	elseif key == magic.KEY_ESCAPE then
 		if free_look then
 			set_free_look(false)

@@ -170,16 +170,29 @@ void VS()
     // once. A slow term along the wind direction is added to the phase, which
     // turns what would be an even twinkle into gusts crossing the surface.
 
-    // How much of the sky the camera can see, per direction: a cube of 6x6
-    // values per face, 1 for full sky and 0 for none. 216 numbers, packed four
-    // to a vec4 in face, row, column order. The client writes them as one
+    // How much of the sky the camera can see, per direction: a cube of
+    // SKYVIS_CELLS squared values per face, 1 for full sky and 0 for none,
+    // packed four to a vec4 in face, row, column order. The client writes them as one
     // buffer parameter, which Urho hands to a float array uniform; a cube map
     // texture would have to be built and uploaded per update instead.
     //
     // vec4 rather than a float array so the packing is the same whether or not
     // the driver lays uniforms out as std140, where an array of float or vec3
     // pads every element out to four.
+    // Cells per cube face, per axis. Six faces of SKYVIS_CELLS squared values,
+    // packed four to a vec4, so the array is 6*C*C/4 long -- keep the two in
+    // step, and in step with CELLS in the client's module.lua, which fills
+    // them.
+    const int SKYVIS_CELLS = 6;
     uniform vec4 cSkyVis[54];
+
+    // Multiplies the reflected sky, for looking at the reflections rather
+    // than at the scene. 1 is what a game renders; the benchmarks turn it up
+    // so that changes to the sky visibility sampling are visible at all --
+    // most of a cave is rock reflecting almost nothing, and a change worth
+    // arguing about moves a wall by a fraction of a value out of 255. Zero
+    // when nothing sets it, so voxel_shading pushes it every frame.
+    uniform float cSpecEmphasis;
 
     const float TRANSMISSION_CELLS = 16.0;   // Cells per voxel, per axis
     // A material whose own roughness is already below this cannot glint, so
@@ -242,7 +255,7 @@ void VS()
     float SkyVisCell(int face, int row, int col)
     {
         // "flat" is a reserved word in GLSL, hence the name
-        int cell = face * 36 + row * 6 + col;
+        int cell = (face * SKYVIS_CELLS + row) * SKYVIS_CELLS + col;
         return cSkyVis[cell / 4][cell - (cell / 4) * 4];
     }
 
@@ -281,13 +294,16 @@ void VS()
         }
         m = max(m, M_EPSILON);
         // Cell centers sit half a cell in from each edge, so the position in
-        // cells is the position across the face times six, less a half
-        float fu = clamp((u / m + 1.0) * 3.0 - 0.5, 0.0, 5.0);
-        float fv = clamp((v / m + 1.0) * 3.0 - 0.5, 0.0, 5.0);
+        // cells is the position across the face times the cell count, less a
+        // half
+        float half_cells = float(SKYVIS_CELLS) * 0.5;
+        float last = float(SKYVIS_CELLS - 1);
+        float fu = clamp((u / m + 1.0) * half_cells - 0.5, 0.0, last);
+        float fv = clamp((v / m + 1.0) * half_cells - 0.5, 0.0, last);
         int c0 = int(fu);
-        int c1 = min(c0 + 1, 5);
+        int c1 = min(c0 + 1, SKYVIS_CELLS - 1);
         int r0 = int(fv);
-        int r1 = min(r0 + 1, 5);
+        int r1 = min(r0 + 1, SKYVIS_CELLS - 1);
         float tu = fu - float(c0);
         return mix(
             mix(SkyVisCell(face, r0, c0), SkyVisCell(face, r0, c1), tu),
@@ -546,7 +562,7 @@ void PS()
             // how much is visible along the reflection: the cube map answers
             // for the direction, the vertex color for the place.
             finalColor.rgb += cube * EnvBRDFApprox(specColor, roughness, ndv) *
-                vSkyVisibility;
+                vSkyVisibility * cSpecEmphasis;
         #endif
 
         #ifdef ENVCUBEMAP

@@ -50,40 +50,54 @@ local TECHNIQUE = magic.cache:GetResource("Technique",
 --
 -- The values come from marching rays through the voxel data from the camera.
 -- No geometry, depth buffer or render pass is involved. buildat.cast_voxel_rays
--- does the marching, which is what makes this many rays affordable: the same
--- loop written in Lua cost half a millisecond a frame for four rays of twenty
--- voxels, where the engine does 36 of sixty-four in 0.33 ms. It also decides
--- what stops a ray by the voxel registry's own physically_solid, so glass and
--- water are whatever the world says they are.
+-- does the marching, on a worker thread, which is what makes this many rays
+-- affordable: the same loop written in Lua cost half a millisecond a frame for
+-- four rays of twenty voxels, where the engine marches one in a third of a
+-- microsecond. It also decides what stops a ray by the voxel registry's own
+-- physically_solid, so glass and water are whatever the world says they are.
 --
--- A ray answers yes if it gets its whole length without meeting anything and
--- no if something solid stops it. Partial values come from sampling rather
+-- Handing the rays over costs several times more than marching them does --
+-- see the note in games/voxel_lighting/README.txt for where the time goes, and
+-- for why making the marching itself faster would be the wrong thing to try.
+--
+-- A ray answers no if something solid stops it, and otherwise the skylight of
+-- the air it ended in. Partial values come from sampling rather
 -- than from any softening of that: the rays are jittered within their cells
 -- and differently each sweep, and each cell keeps an average of its own rays,
 -- so a cell settles at the fraction of its directions that see sky.
 local FACES = 6
-local CELLS = 6                 -- Per face, per axis: 6x6
+local CELLS = 6                -- Per face, per axis
 local CELL_COUNT = FACES * CELLS * CELLS
--- Rays per frame. A sweep is one ray per cell, so this is also how often the
--- whole set is renewed: 36 gives a sweep every sixth frame.
-local RAYS_PER_UPDATE = 36
+-- Rays cast into each cell per sweep, averaged into that cell's value. This is
+-- the knob for how noisy one sweep's answer is: a cell's rays are yes or no,
+-- so one of them is a coin flip weighted by how much of the cell sees sky, and
+-- the average of K of them has a K-th of the variance. They are stratified
+-- within the cell rather than independent, so they cover it evenly instead of
+-- clumping the way K independent samples would.
+local RAYS_PER_CELL = 4
+-- Cells refreshed per frame. A sweep is every cell once, so this is how often
+-- the whole cube is renewed: 36 cells of the 216 here is a sweep every six
+-- frames, or every three at the rate MAX_IN_FLIGHT actually keeps up -- read
+-- its comment before taking this or RAYS_PER_CELL as rays per frame.
+local CELLS_PER_UPDATE = 36
 -- How far a ray looks. Long, because the length is what makes the answer
 -- strict: a ray down digger's tunnel has to reach the end of it to find out
 -- that the tunnel is not a way to the sky, and the tunnel is tens of voxels
 -- long. Cheap enough that this is not the thing to save on.
 local RAY_VOXELS = 64
--- How much of a cell's new ray is taken into its value. One ray is a yes or a
--- no, so this average is what turns the rays into the fraction of a cell that
--- sees sky. At 0.15, with a ray per cell every sixth frame, a cell settles in
--- under a second and the reflections trail the camera by about that. Taking
--- more of each ray puts their own noise on the screen, which reads as the
--- speculars flickering several times a second.
-local SKY_VIS_BLEND = 0.15
+-- How much of a cell's new value is taken into the one the shader sees. What a
+-- sweep hands over is already an average of RAYS_PER_CELL rays; this averages
+-- those over time as well. At 0.10 a cell settles in about a second and the
+-- reflections trail the camera by about that. Taking more of each sweep puts
+-- the sampling's own noise on the screen, which reads as the speculars
+-- flickering several times a second.
+local SKY_VIS_BLEND = 0.10
 -- Sweeps averaged when snapping, for a camera that has been moved rather than
 -- has moved: the same averaging done at once, so a screenshot taken right
--- after a teleport is as settled as one taken later. This is some thousands of
+-- after a teleport is as settled as one taken later. Two rather than more
+-- because a sweep is already RAYS_PER_CELL deep. This is some thousands of
 -- rays in one frame and drops one, which is what a teleport does anyway.
-local SNAP_SWEEPS = 8
+local SNAP_SWEEPS = 2
 -- Chunks are collected around the camera out to the reach of a ray, and the
 -- list is kept until the camera crosses into another chunk: which chunks are
 -- within reach does not change until then. Rebuilt every so many sweeps as
@@ -113,11 +127,14 @@ local FACE_AXES = {
 
 local CELL_SIZE = 2.0 / CELLS
 
--- One table per cell, reused: the sweep rewrites their components rather than
--- building 216 tables of three numbers every time
+-- The directions, three numbers to a ray, in cell order: RAYS_PER_CELL of them
+-- per cell, so a slice of cells is a run of directions. One flat array rather
+-- than a table per ray because the engine reads every one of these every
+-- frame, and a table each was most of what the sampling cost.
+local AXIS_OFFSET = {x = 0, y = 1, z = 2}
 local DIRS = {}
-for i = 1, CELL_COUNT do
-	DIRS[i] = {x = 0, y = 0, z = 0}
+for i = 1, CELL_COUNT * RAYS_PER_CELL * 3 do
+	DIRS[i] = 0.0
 end
 
 local camera_node = nil
@@ -143,12 +160,19 @@ local volumes_age = VOLUME_REFRESH_SWEEPS
 local ray_args = {
 	directions = DIRS,
 	max_steps = RAY_VOXELS,
-	-- Not used: see ray_visibility() on why skylight cannot say which way the
-	-- sky is. The engine will stop a ray at a skylight level for callers that
-	-- do want that.
+	-- Not used: skylight says the sky is open above a voxel, which is nothing
+	-- to do with whether the sky lies along the ray, so stopping a ray at it
+	-- answers the wrong question -- see the note further down. The engine will
+	-- do it for callers that do want it.
 	stop_skylight = 0,
+	-- Consecutive rays are one cell's, and the engine hands back their average
+	-- per cell rather than what each of them found: a few hundred numbers a
+	-- frame instead of four per ray. What a ray is worth is then the engine's
+	-- rule; see cast_voxel_rays() in src/lua_bindings/voxel_volume.cpp. A game
+	-- wanting its own leaves this unset and reads the rays itself.
+	rays_per_cell = RAYS_PER_CELL,
 	first = 1,
-	count = RAYS_PER_UPDATE,
+	count = 1,
 	origin = {x = 0, y = 0, z = 0},
 	volumes = {},
 }
@@ -156,6 +180,11 @@ local ray_args = {
 -- per frame
 local sky_vis_buffer = magic.VectorBuffer:new()
 local sky_vis_param = nil
+local sky_vis_dirty = false
+-- Multiplies the reflected sky in the shader. 1 is what a game renders; the
+-- benchmarks turn it up to look at the reflections themselves. See
+-- M.set_specular_emphasis().
+local spec_emphasis = 1.0
 
 local function each_material(node, cb)
 	local cg = node:GetComponent("CustomGeometry")
@@ -175,21 +204,80 @@ voxelworld.sub_material_update(function(node)
 	end)
 end)
 
--- Where in its cell this sweep samples. Two irrational steps, so the point
--- walks the cell instead of landing on a few spots, and the same sequence
--- every run.
+-- Where in its cell each ray of this sweep samples.
+--
+-- Two parts: a fixed offset per cell, and a step the whole sweep takes. The
+-- step is two irrationals, so a cell's sample point walks its cell instead of
+-- landing on a few spots, and the sequence is the same every run.
+--
+-- The per-cell offset is the part that matters for what this looks like. With
+-- one offset for the whole cube, every cell samples the same relative point at
+-- the same time and their errors line up: a sweep whose offset happens to lean
+-- towards the sky brightens every cell that straddles an opening at once, so
+-- the reflections in the whole scene move together rather than each surface
+-- wobbling on its own. Coherent like that it reads as the scene pulsing, which
+-- is far more visible than the same amount of noise spread over cells, and
+-- since the step is a fixed sequence the pulsing is periodic. More rays does
+-- not help: it is not a shortage of samples, it is every cell making the same
+-- error at the same moment.
+--
+-- The offsets are the R2 low discrepancy sequence over the cells, which spreads
+-- them evenly in the square rather than clumping the way independent random
+-- ones would. The sweep step is the golden ratio and root two, unrelated to R2
+-- so the two do not come back into step with each other.
+local CELL_JITTER_U = {}
+local CELL_JITTER_V = {}
+for i = 1, CELL_COUNT do
+	CELL_JITTER_U[i] = (i * 0.7548776662) % 1.0
+	CELL_JITTER_V[i] = (i * 0.5698402909) % 1.0
+end
+local SWEEP_STEP_U = 0.6180339887
+local SWEEP_STEP_V = 0.4142135624
+
+-- Where a cell's rays sit relative to each other: a Hammersley set, which
+-- covers the cell evenly. The set is then shifted as a whole by the cell's own
+-- offset and by the sweep's step, which keeps the even coverage while moving
+-- it, so no two cells sample the same relative points and no cell samples the
+-- same points twice.
+local function radical_inverse_2(n)
+	local r, f = 0.0, 0.5
+	while n > 0 do
+		r = r + (n % 2) * f
+		n = math.floor(n / 2)
+		f = f * 0.5
+	end
+	return r
+end
+
+local STRAT_U = {}
+local STRAT_V = {}
+for k = 1, RAYS_PER_CELL do
+	STRAT_U[k] = (k - 0.5) / RAYS_PER_CELL
+	STRAT_V[k] = radical_inverse_2(k - 1)
+end
+
 local function aim_dirs(index)
-	local ju = (index * 0.7548776662) % 1.0 - 0.5
-	local jv = (index * 0.5698402909) % 1.0 - 0.5
+	local su = (index * SWEEP_STEP_U) % 1.0
+	local sv = (index * SWEEP_STEP_V) % 1.0
 	local i = 1
 	for face = 1, FACES do
 		local a = FACE_AXES[face]
+		local mo = AXIS_OFFSET[a.major] + 1
+		local uo = AXIS_OFFSET[a.u] + 1
+		local vo = AXIS_OFFSET[a.v] + 1
 		for row = 0, CELLS - 1 do
 			for col = 0, CELLS - 1 do
-				local d = DIRS[i]
-				d[a.major] = a.sign
-				d[a.u] = (col + 0.5 + ju) * CELL_SIZE - 1.0
-				d[a.v] = (row + 0.5 + jv) * CELL_SIZE - 1.0
+				local bu = CELL_JITTER_U[i] + su
+				local bv = CELL_JITTER_V[i] + sv
+				local base = (i - 1) * RAYS_PER_CELL * 3
+				for k = 1, RAYS_PER_CELL do
+					local ju = (bu + STRAT_U[k]) % 1.0 - 0.5
+					local jv = (bv + STRAT_V[k]) % 1.0 - 0.5
+					DIRS[base + mo] = a.sign
+					DIRS[base + uo] = (col + 0.5 + ju) * CELL_SIZE - 1.0
+					DIRS[base + vo] = (row + 0.5 + jv) * CELL_SIZE - 1.0
+					base = base + 3
+				end
 				i = i + 1
 			end
 		end
@@ -203,34 +291,17 @@ end
 -- however brightly lit the air in between happens to be. Partial values come
 -- from the sampling, not from softening this.
 --
--- "Nothing stopped it" means the ray got RAY_VOXELS of the way without
--- meeting anything, which is as much as this asks. Note what is not used
--- here: a voxel's skylight says the sky is open straight up from it, which is
--- nothing to do with whether the sky lies along the ray. Stopping a ray at
--- full skylight looked right and was badly wrong -- at the mouth of digger's
--- tunnel the air is fully lit, so every direction, the tunnel included, came
--- back at 1 and the tunnel got full outdoor reflections.
+-- What a ray is worth is the engine's rule now, since averaging rays into a
+-- cell means deciding that: nothing if something solid stopped it, otherwise
+-- the skylight of the air it ended in. See ray_visibility() in
+-- src/lua_bindings/voxel_volume.cpp for why it is there and what it means.
 --
--- Skylight is still what answers for a ray that runs out of loaded chunks
--- part way: the skylight where it stopped is how far along the way out it had
--- got, and believing that is better than calling the edge of the loaded world
--- sky. A ray that never got into voxel data at all is outdoors, which is a
--- camera above the world.
-local SKYLIGHT_MAX = 15
-local RAY = buildat.VOXEL_RAY
-
-local function ray_visibility(status, skylight, steps)
-	if status == RAY.BLOCKED then
-		return 0.0
-	elseif status == RAY.RANGE then
-		return 1.0
-	elseif steps <= 1 then
-		return 1.0 -- Left the voxel data at once: nothing is around us
-	elseif skylight < 0 then
-		return 0.0
-	end
-	return skylight / SKYLIGHT_MAX
-end
+-- Note what that rule does not do: stop a ray at full skylight. Skylight says
+-- the sky is open above a point, which is nothing to do with whether the sky
+-- lies along the ray, and stopping rays on it looked right and was badly wrong
+-- -- at the mouth of digger's tunnel the air is fully lit, so every direction
+-- including the tunnel came back at 1. At the far end of a ray it answers
+-- about the place the ray reached, which is a question it can answer.
 
 -- The chunks a ray could reach. The engine picks the one it needs per step out
 -- of this list, so it only has to be the right set, not a short one.
@@ -281,16 +352,96 @@ local function collect_volumes(origin)
 	return n > 0
 end
 
--- One slice of a sweep: cast the rays for cells first..first+count-1 and keep
--- what they found
-local function cast_slice(first, count)
-	ray_args.first = first
-	ray_args.count = count
-	local out = buildat.cast_voxel_rays(ray_args)
-	local status, skylight, steps = out.status, out.skylight, out.steps
-	for i = 1, out.count do
-		sweep_vis[first + i - 1] =
-				ray_visibility(status[i], skylight[i], steps[i])
+-- What a finished slice found, into the sweep: the engine has already averaged
+-- each cell's rays into one value
+local function keep_slice(first_cell, count_cells, out)
+	local vis = out.visibility
+	for c = 1, count_cells do
+		sweep_vis[first_cell + c - 1] = vis[c]
+	end
+end
+
+local function aim_args(first_cell, count_cells)
+	ray_args.first = (first_cell - 1) * RAYS_PER_CELL + 1
+	ray_args.count = count_cells * RAYS_PER_CELL
+end
+
+-- One slice of a sweep, marched here and now. Only the snap uses this: it is
+-- thousands of rays wanted before the next frame is drawn, which is what
+-- blocking is for.
+local function cast_slice(first_cell, count_cells)
+	aim_args(first_cell, count_cells)
+	keep_slice(first_cell, count_cells, buildat.cast_voxel_rays(ray_args))
+end
+
+-- f is how much of the sweep's rays to take; 1.0 replaces the values outright
+local function blend_cells(first, count, f)
+	for i = first, first + count - 1 do
+		sky_vis[i] = sky_vis[i] + (sweep_vis[i] - sky_vis[i]) * f
+	end
+	sky_vis_dirty = true
+end
+
+-- The values as the shader takes them. One parameter of CELL_COUNT floats
+-- rather than that many parameters: Urho sets a Variant buffer as a float
+-- array, sized by what the uniform declares. Packed by the engine because
+-- WriteFloat() per value is a sandbox call each.
+--
+-- Once a frame, however many slices landed in it. Repacking per slice meant
+-- reading every cell out of Lua twice a frame to publish a cube that only the
+-- shader ever reads, and the shader reads it once.
+local function repack_sky_vis()
+	if not sky_vis_dirty then return end
+	sky_vis_dirty = false
+	buildat.write_floats(sky_vis_buffer, sky_vis)
+	sky_vis_param = magic.Variant(sky_vis_buffer)
+end
+
+-- Slices out on worker threads, oldest first. The marching is the same work
+-- wherever it runs; what moves it off the frame is that the frame has better
+-- uses for a third of a millisecond, and that the sampling wants several times
+-- more rays than that.
+--
+-- More than one is kept in flight because a slice submitted in one frame is
+-- collected in a later one: with a single slice out, every other frame would
+-- have nothing to collect and nothing to submit, and the sweep would take
+-- twice as long for no reason. Two is enough to keep a worker fed. The pool
+-- has four of them and the mesher is the other caller.
+--
+-- Note what this does to the rate. The queue is topped back up to this depth
+-- every frame, so when the workers keep up, two slices are submitted per frame
+-- and the rays cast are twice CELLS_PER_UPDATE times RAYS_PER_CELL: 288 a
+-- frame where those two constants read 144. Worth knowing before reading
+-- either of them as a rate.
+local MAX_IN_FLIGHT = 2
+local in_flight = {}
+
+local function submit_slice(first_cell, count_cells)
+	aim_args(first_cell, count_cells)
+	in_flight[#in_flight + 1] = {first = first_cell, count = count_cells,
+			job = buildat.cast_voxel_rays_start(ray_args)}
+end
+
+-- Blends in what has finished, oldest first, and stops at the first slice that
+-- has not: they are taken in the order they were cast.
+local function collect_slices(f)
+	while in_flight[1] ~= nil do
+		local slice = in_flight[1]
+		local out = buildat.cast_voxel_rays_collect(slice.job)
+		if out == nil then
+			return
+		end
+		table.remove(in_flight, 1)
+		keep_slice(slice.first, slice.count, out)
+		blend_cells(slice.first, slice.count, f)
+	end
+end
+
+-- Anything in flight is reading volumes it holds itself, so dropping the
+-- handles is enough; what they find is no longer wanted.
+local function drop_slices()
+	for i = #in_flight, 1, -1 do
+		in_flight[i] = nil
 	end
 end
 
@@ -308,18 +459,6 @@ local function begin_sweep()
 	aim_dirs(sweep_index)
 end
 
--- f is how much of the sweep's rays to take; 1.0 replaces the values outright
-local function blend_cells(first, count, f)
-	for i = first, first + count - 1 do
-		sky_vis[i] = sky_vis[i] + (sweep_vis[i] - sky_vis[i]) * f
-	end
-	-- One parameter of 216 floats rather than 216 parameters: Urho sets a
-	-- Variant buffer as a float array, sized by what the uniform declares.
-	-- Packed by the engine because this happens every frame and WriteFloat()
-	-- per value is a sandbox call each.
-	buildat.write_floats(sky_vis_buffer, sky_vis)
-	sky_vis_param = magic.Variant(sky_vis_buffer)
-end
 
 -- The values go on the render path's scene pass commands rather than on
 -- materials. Urho hands a scene pass command's shader parameters to every
@@ -342,6 +481,7 @@ end
 local DECLARE_EVERY_FRAMES = 60
 
 local function push_sky_vis()
+	repack_sky_vis()
 	if sky_vis_param == nil then return end
 	local viewport = magic.renderer:GetViewport(0)
 	if viewport == nil then return end
@@ -354,11 +494,29 @@ local function push_sky_vis()
 			local command = render_path:GetCommand(i)
 			if command ~= nil and command.type == magic.CMD_SCENEPASS then
 				command:SetShaderParameter("SkyVis", sky_vis_param)
+				command:SetShaderParameter("SpecEmphasis", spec_emphasis)
 			end
 		end
 		return
 	end
 	render_path:SetShaderParameter("SkyVis", sky_vis_param)
+	render_path:SetShaderParameter("SpecEmphasis", spec_emphasis)
+end
+
+-- How much to multiply the reflected sky by, 1 being what a game renders.
+--
+-- For looking at what this module does rather than at the scene. Most of a
+-- cave is rock reflecting almost nothing, so a change to the sampling that is
+-- worth arguing about moves a wall by a fraction of a value out of 255 -- less
+-- than PNG rounding, which makes screenshots useless as a way to tell whether
+-- a change did anything. Turned up, the same change is tens of values and can
+-- be measured. It scales the reflection alone, so what it exaggerates is
+-- exactly what this module decides and nothing else.
+function M.set_specular_emphasis(v)
+	spec_emphasis = v
+	-- Straight away rather than at the next declaring walk, so a key that
+	-- changes it takes effect on the next frame
+	declare_countdown = 0
 end
 
 -- dt of nil snaps, for when the camera has been moved rather than has moved
@@ -372,6 +530,10 @@ function M.update(dt)
 		-- Several sweeps at once, averaged the way the easing would have
 		-- averaged them over a second. A single sweep is one ray per cell,
 		-- which is too coarse to look at.
+		--
+		-- What is already out on a worker was cast from where the camera used
+		-- to be, and blending it in afterwards would undo part of the snap.
+		drop_slices()
 		for sweep = 1, SNAP_SWEEPS do
 			begin_sweep()
 			if collect_volumes(origin) then
@@ -385,27 +547,31 @@ function M.update(dt)
 		push_sky_vis()
 		return
 	end
-	if sweep_next == 1 and not collect_volumes(origin) then
-		sweep_all_open()
-		blend_cells(1, CELL_COUNT, SKY_VIS_BLEND)
-		begin_sweep()
-		push_sky_vis()
-		return
-	end
 	-- Each frame's cells are blended in and handed to the shader as their own
 	-- rays land, rather than a whole sweep at a time: waiting for the sweep
 	-- steps every reflection in the scene together, six frames apart, where
 	-- this spreads the same change out. Reasoning rather than measurement --
 	-- see the note in games/voxel_lighting/README.txt.
-	local first = sweep_next
-	local count = math.min(RAYS_PER_UPDATE, CELL_COUNT - sweep_next + 1)
-	cast_slice(first, count)
-	blend_cells(first, count, SKY_VIS_BLEND)
-	push_sky_vis()
-	sweep_next = sweep_next + count
-	if sweep_next > CELL_COUNT then
-		begin_sweep()
+	collect_slices(SKY_VIS_BLEND)
+	-- Topped back up to the same depth every frame, so what is submitted is
+	-- what came back: if the workers are busy, nothing is submitted and the
+	-- sweep waits rather than piling up.
+	while #in_flight < MAX_IN_FLIGHT do
+		if sweep_next == 1 and not collect_volumes(origin) then
+			sweep_all_open()
+			blend_cells(1, CELL_COUNT, SKY_VIS_BLEND)
+			begin_sweep()
+			break
+		end
+		local first = sweep_next
+		local count = math.min(CELLS_PER_UPDATE, CELL_COUNT - sweep_next + 1)
+		submit_slice(first, count)
+		sweep_next = sweep_next + count
+		if sweep_next > CELL_COUNT then
+			begin_sweep()
+		end
 	end
+	push_sky_vis()
 end
 
 -- The sky the world stands under, drawn by VoxelSkybox.glsl in the same

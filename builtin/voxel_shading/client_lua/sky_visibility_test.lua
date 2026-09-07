@@ -32,21 +32,38 @@ local RAY = {BLOCKED = 0, NO_DATA = 1, RANGE = 2, SKYLIGHT = 3}
 
 -- Stands in for buildat.cast_voxel_rays. Steps voxel by voxel rather than by
 -- the binding's DDA, which is close enough for a world made of slabs.
+--
+-- Directions arrive as a flat array, three numbers to a ray, and consecutive
+-- rays belong to one cell: what comes back is their average, one value per
+-- cell. The rule turning a ray into a value lives in the engine now, so the
+-- copy here mirrors what src/lua_bindings/voxel_volume.cpp documents -- which
+-- means these checks pin the module's own part, the cell directions and the
+-- shader agreeing with them, and not the engine's arithmetic.
+local function stub_ray_visibility(status, skylight, steps)
+	if status == RAY.BLOCKED then return 0.0 end
+	if steps <= 1 then return 1.0 end
+	if skylight < 0 then return 0.0 end
+	return skylight / 15
+end
+
 local function cast_voxel_rays(args)
-	local status, skylight_out, steps_out = {}, {}, {}
+	local per_cell = args.rays_per_cell or 0
+	local vis = {}
 	local n = 0
-	for di = args.first, args.first + args.count - 1 do
-		local dir = args.directions[di]
-		if dir == nil then break end
+	for ri = args.first, args.first + args.count - 1 do
+		local base = (ri - 1) * 3
+		local dx, dy, dz = args.directions[base + 1], args.directions[base + 2],
+				args.directions[base + 3]
+		if dx == nil then break end
 		n = n + 1
-		local len = math.sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z)
+		local len = math.sqrt(dx * dx + dy * dy + dz * dz)
 		local st, sky, steps = RAY.RANGE, -1, 0
 		for i = 1, args.max_steps do
 			steps = i
 			local v = world({
-				x = args.origin.x + dir.x / len * i,
-				y = args.origin.y + dir.y / len * i,
-				z = args.origin.z + dir.z / len * i,
+				x = args.origin.x + dx / len * i,
+				y = args.origin.y + dy / len * i,
+				z = args.origin.z + dz / len * i,
 			})
 			if v == nil then
 				st = RAY.NO_DATA
@@ -62,10 +79,19 @@ local function cast_voxel_rays(args)
 				break
 			end
 		end
-		status[n], skylight_out[n], steps_out[n] = st, sky, steps
+		vis[n] = stub_ray_visibility(st, sky, steps)
 	end
-	return {count = n, status = status, skylight = skylight_out,
-			steps = steps_out, hit_id = {}}
+	assert(per_cell > 0, "the module is expected to ask for values per cell")
+	assert(n % per_cell == 0, "rays are not a whole number of cells")
+	local cells = {}
+	for c = 1, n / per_cell do
+		local sum = 0.0
+		for k = 1, per_cell do
+			sum = sum + vis[(c - 1) * per_cell + k]
+		end
+		cells[c] = sum / per_cell
+	end
+	return {count = #cells, visibility = cells}
 end
 
 local voxelworld_stub
@@ -130,6 +156,18 @@ local env = setmetatable({
 		write_floats = fake_write_floats,
 		get_time_us = function() return 0 end,
 		cast_voxel_rays = cast_voxel_rays,
+		-- The threaded pair, as the engine's contract describes it: start
+		-- takes what the blocking call takes, collect answers nil until the
+		-- marching is done. Ready on the second ask rather than the first, so
+		-- the module's waiting path is exercised and not just the lucky one.
+		cast_voxel_rays_start = function(args)
+			return {out = cast_voxel_rays(args), polls = 0}
+		end,
+		cast_voxel_rays_collect = function(job)
+			job.polls = job.polls + 1
+			if job.polls < 2 then return nil end
+			return job.out
+		end,
 		Logger = function()
 			return setmetatable({},
 					{__index = function() return function() end end})
@@ -267,6 +305,13 @@ assert(out > 0.3, "tunnel +x: the mouth of the tunnel is dark: "..out)
 -- 45 degrees off the tunnel is into the rock
 local off = vis_at(tunnel, 1, 1, 0)
 assert(off < out * 0.7, "tunnel +x: rock beside the mouth is lit: "..off)
+
+-- A cavern wider than a ray is long, unlit: every ray runs its whole length
+-- through air and meets nothing, so being stopped by rock is not what tells
+-- us there is no sky here. The air the rays end in is dark, and that does.
+check("dark cavern", sweep(function(p) return fake_voxel(AIR, 0) end),
+		{["+x"] = 0, ["-x"] = 0, ["+y"] = 0, ["-y"] = 0, ["+z"] = 0,
+			["-z"] = 0})
 
 -- Deep in a cave, dt-driven updates ease rather than snap
 world = function(p) return fake_voxel(ROCK, 0) end
