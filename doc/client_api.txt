@@ -174,11 +174,38 @@ replicate.main_scene
   Urho3D. With urho3d.REPLICATED (native default) they will end up in the
   synchronized ID space and will be overridden by data coming from the server.
 
+network
+-------
+TCP and UDP sockets, with the user in the loop: the first connection or
+datagram to an address in a week needs the user to accept the address and give
+it a description. Answers live in cache/network_addresses.csv.
+
+tcp_connect(host: string, port: number, cb: function)
+udp_connect(host: string, port: number, cb: function)
+- cb(socket, error) is called once the user has answered; socket is nil if the
+  connection was not made or the user declined
+- A socket is connected to one peer; a UDP socket only receives datagrams from
+  the address it was opened for
+- socket:send(data: string) -> was it all sent
+- socket:receive() -> data; "" means nothing has arrived
+- socket:good() -> false once the peer has closed the connection or the socket
+  has errored
+- socket:error() -> why it is not good()
+- socket:address() -> "host:port"
+- socket:close()
+
+See extensions/network_test for a working example:
+  $ bin/buildat_client -m network_test
+
 ui_utils
 --------
 UI utiltiies.
 
 show_message_dialog(message)
+
+show_notification(text, duration_s)
+- A small non-modal notice in the top right corner, gone after duration_s
+  (2 seconds by default)
 
 
 Unsafe interfaces of built-in extensions
