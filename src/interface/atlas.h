@@ -24,20 +24,18 @@ namespace interface
 		uint segment_id = 0;
 	};
 
-	// LOD lower than this will have shadow baked into its texture
+	// LOD above this does not cast shadows. Every LOD is lit and shaded the
+	// same way; only the shadow it casts on the rest of the scene is dropped,
+	// which is not visible at the distance those LODs are drawn at.
 	const int MAX_LOD_WITH_SHADOWS = 2;
-
-	const uint8_t ATLAS_LOD_TOP_FACE = 0x10;
-	const uint8_t ATLAS_LOD_SEMIBRIGHT1_FACE = 0x20;
-	const uint8_t ATLAS_LOD_SEMIBRIGHT2_FACE = 0x40;
-	const uint8_t ATLAS_LOD_BAKE_SHADOWS = 0x80;
 
 	struct AtlasSegmentDefinition
 	{
 		ss_ resource_name; // If "", segment won't be added
 		magic::IntVector2 total_segments;
 		magic::IntVector2 select_segment;
-		// Mask 0x0f: LOD level, mask 0xf0: flags
+		// LOD level: 0 is the texture as it is, n >= 2 samples it n texels at
+		// a time so that one LOD voxel shows what n voxels of it would have.
 		uint8_t lod_simulation = 0;
 		// TODO: Rotation
 

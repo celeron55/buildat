@@ -190,22 +190,6 @@ struct CVoxelRegistry: public VoxelRegistry
 					int lod = 2 + j;
 					AtlasSegmentDefinition lod_seg_def = seg_def;
 					lod_seg_def.lod_simulation = lod;
-					if(i == 0){
-						lod_seg_def.lod_simulation |=
-								interface::ATLAS_LOD_TOP_FACE;
-					}
-					if(i == 5 /*Z-*/){
-					lod_seg_def.lod_simulation |=
-							interface::ATLAS_LOD_SEMIBRIGHT1_FACE;
-					}
-					if(i == 2 /*X+*/){
-					lod_seg_def.lod_simulation |=
-							interface::ATLAS_LOD_SEMIBRIGHT2_FACE;
-					}
-					if(lod > MAX_LOD_WITH_SHADOWS){
-						lod_seg_def.lod_simulation |=
-								interface::ATLAS_LOD_BAKE_SHADOWS;
-					}
 					AtlasSegmentReference lod_seg_ref =
 							atlas_reg->find_or_add_segment(lod_seg_def);
 					cache.lod_textures[j][i] = lod_seg_ref;

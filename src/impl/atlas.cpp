@@ -243,99 +243,37 @@ struct CAtlasRegistry: public AtlasRegistry
 				}
 			}
 		} else {
-			int lod = def.lod_simulation & 0x0f;
-			uint8_t flags = def.lod_simulation & 0xf0;
+			// One LOD voxel stands for lod voxels each way, so the segment has
+			// to carry the texture tiled lod times as densely to keep the
+			// texel density of LOD 1. The segment is not big enough to hold
+			// that at full resolution, so each texel is the average of the
+			// lod x lod source texels it stands for -- which is what those
+			// voxels look like from the distance this LOD is drawn at anyway.
+			// Picking one of them instead leaves a blotchy pattern that has
+			// nothing to do with the texture and shimmers as the camera moves.
+			//
+			// The shading is left to the scene's lighting; the LOD geometry
+			// keeps its real normals, so nothing is baked in here.
+			int lod = def.lod_simulation;
+			float inv = 1.0f / (lod * lod);
 			for(int y = 0; y<seg_size.y_ * 2; y++){
 				for(int x = 0; x<seg_size.x_ * 2; x++){
-					if(flags & ATLAS_LOD_TOP_FACE){
-						// Preserve original colors
-						magic::IntVector2 src_p = src_off + magic::IntVector2(
-								((x + seg_size.x_ / 2) * lod) % seg_size.x_,
-								((y + seg_size.y_ / 2) * lod) % seg_size.y_
-						);
-						magic::IntVector2 dst_p = dst_p00 + magic::IntVector2(x, y);
-						magic::Color c = seg_img->GetPixel(src_p.x_, src_p.y_);
-						if(flags & ATLAS_LOD_BAKE_SHADOWS){
-							c.r_ *= 0.8f;
-							c.g_ *= 0.8f;
-							c.b_ *= 0.8f;
-						} else {
-							c.r_ *= 1.0f;
-							c.g_ *= 1.0f;
-							c.b_ *= 0.875f;
+					int sx0 = (x + seg_size.x_ / 2) * lod;
+					int sy0 = (y + seg_size.y_ / 2) * lod;
+					magic::Color c(0.0f, 0.0f, 0.0f, 0.0f);
+					for(int sy = 0; sy < lod; sy++){
+						for(int sx = 0; sx < lod; sx++){
+							magic::Color sc = seg_img->GetPixel(
+									src_off.x_ + (sx0 + sx) % seg_size.x_,
+									src_off.y_ + (sy0 + sy) % seg_size.y_);
+							c.r_ += sc.r_ * inv;
+							c.g_ += sc.g_ * inv;
+							c.b_ += sc.b_ * inv;
+							c.a_ += sc.a_ * inv;
 						}
-						atlas.image->SetPixel(dst_p.x_, dst_p.y_, c);
-					} else {
-						// Simulate sides
-						magic::IntVector2 src_p = src_off + magic::IntVector2(
-								((x + seg_size.x_ / 2) * lod) % seg_size.x_,
-								((y + seg_size.y_ / 2) * lod) % seg_size.y_
-						);
-						magic::IntVector2 dst_p = dst_p00 + magic::IntVector2(x, y);
-						magic::Color c = seg_img->GetPixel(src_p.x_, src_p.y_);
-						// Leave horizontal edges look like they are bright
-						// topsides
-						// TODO: This should be variable according to the
-						// camera's height relative to the thing the atlas
-						// segment is representing
-						int edge_size = lod * seg_size.y_ / 16;
-						bool is_edge = (
-								src_p.y_ <= edge_size ||
-								src_p.y_ >= seg_size.y_ - edge_size
-						);
-						if(flags & ATLAS_LOD_BAKE_SHADOWS){
-							if(is_edge){
-								if(flags & ATLAS_LOD_SEMIBRIGHT1_FACE){
-									c.r_ *= 0.75f;
-									c.g_ *= 0.75f;
-									c.b_ *= 0.8f;
-								} else if(flags & ATLAS_LOD_SEMIBRIGHT2_FACE){
-									c.r_ *= 0.75f;
-									c.g_ *= 0.75f;
-									c.b_ *= 0.8f;
-								} else {
-									c.r_ *= 0.8f * 0.49f;
-									c.g_ *= 0.8f * 0.49f;
-									c.b_ *= 0.8f * 0.52f;
-								}
-							} else {
-								if(flags & ATLAS_LOD_SEMIBRIGHT1_FACE){
-									c.r_ *= 0.70f * 0.75f;
-									c.g_ *= 0.70f * 0.75f;
-									c.b_ *= 0.65f * 0.8f;
-								} else if(flags & ATLAS_LOD_SEMIBRIGHT2_FACE){
-									c.r_ *= 0.50f * 0.75f;
-									c.g_ *= 0.50f * 0.75f;
-									c.b_ *= 0.50f * 0.8f;
-								} else {
-									c.r_ *= 0.5f * 0.15f;
-									c.g_ *= 0.5f * 0.15f;
-									c.b_ *= 0.5f * 0.16f;
-								}
-							}
-						} else {
-							if(is_edge){
-								c.r_ *= 1.0f;
-								c.g_ *= 1.0f;
-								c.b_ *= 0.875f;
-							} else {
-								if(flags & ATLAS_LOD_SEMIBRIGHT1_FACE){
-									c.r_ *= 0.70f;
-									c.g_ *= 0.70f;
-									c.b_ *= 0.65f;
-								} else if(flags & ATLAS_LOD_SEMIBRIGHT2_FACE){
-									c.r_ *= 0.50f;
-									c.g_ *= 0.50f;
-									c.b_ *= 0.50f;
-								} else {
-									c.r_ *= 0.5f;
-									c.g_ *= 0.5f;
-									c.b_ *= 0.5f;
-								}
-							}
-						}
-						atlas.image->SetPixel(dst_p.x_, dst_p.y_, c);
 					}
+					magic::IntVector2 dst_p = dst_p00 + magic::IntVector2(x, y);
+					atlas.image->SetPixel(dst_p.x_, dst_p.y_, c);
 				}
 			}
 		}
@@ -379,7 +317,7 @@ struct CAtlasRegistry: public AtlasRegistry
 	{
 		// LOD segments sample the source at a stride; the same stride has to
 		// be used here or the maps would not line up with the diffuse texture
-		int step = def.lod_simulation & 0x0f;
+		int step = def.lod_simulation;
 		if(step == 0)
 			step = 1;
 		// The mean is what def.roughness names, so a texel is only made
