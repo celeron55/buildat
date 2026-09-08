@@ -18,6 +18,10 @@ buildat.Logger(module_name) -> object
 	:verbose(message)
 	:debug(message)
 
+buildat.sha1(data) -> 20 bytes
+buildat.sha256(data) -> 32 bytes
+buildat.hex(data) -> string
+
 buildat.send_packet(name, data)
 
 buildat.sub_packet(name, function)
@@ -53,6 +57,18 @@ API specific to the extension environment:
 
 buildat.connect_server(address)
 - Address may include port in format "host:port" or "[host]:port"
+
+buildat.random_bytes(n) -> n bytes
+- From the platform's cryptographic random source; 1...1024 bytes
+
+buildat.bignum
+- Arbitrary-precision unsigned integers, for what is too slow or too fiddly to
+  do in Lua. Numbers are big-endian byte strings and come back with no leading
+  zero bytes ("" is zero).
+- add(a, b), mul(a, b), mod(a, m), sub_mod(a, b, m), mul_mod(a, b, m),
+  mod_exp(base, exponent, m)
+- What is built on these belongs in Lua; extensions/luanti_client/srp.lua is an
+  SRP-6a login written that way.
 
 buildat.extension_path(name)
 
