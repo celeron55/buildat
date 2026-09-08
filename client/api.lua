@@ -10,6 +10,7 @@ buildat.stop_local_server = __buildat_stop_local_server
 buildat.request_stop_local_server = __buildat_request_stop_local_server
 buildat.force_kill_local_server = __buildat_force_kill_local_server
 buildat.local_server_ready = __buildat_local_server_ready
+buildat.local_server_port = __buildat_local_server_port
 buildat.local_server_running = __buildat_local_server_running
 buildat.extension_path    = __buildat_extension_path
 buildat.get_time_us       = __buildat_get_time_us
