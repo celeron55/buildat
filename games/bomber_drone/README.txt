@@ -14,8 +14,9 @@ Controls:
 The screen is split: the left view is a gimbal on an imaginary aircraft flying
 ahead of the drone, the right one is fixed to the drone's nose.
 
-Known limitation: at cruise speed the drone outruns terrain streaming, so the
-view ahead can be empty until the chunks arrive.
+At cruise speed the drone is close to outrunning terrain streaming: the
+generation queue sits at its soft maximum, so a turn into unseen terrain can
+still show the streaming edge for a moment before the chunks arrive.
 
 Licenses of textures and other media:
 ------------------------------------

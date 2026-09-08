@@ -56,6 +56,12 @@ Play
 
 Local game or connect to a server.
 
+Debug keys, in any game:
+
+* F8: draw debug geometry
+* F9: on-screen profiler, render and resource stats
+* F10: sandbox test extension
+
 Server and client
 -----------------
 
