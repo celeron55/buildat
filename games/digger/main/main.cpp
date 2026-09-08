@@ -8,17 +8,12 @@
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
-#include "interface/mesh.h"
 #include "interface/voxel.h"
 #include "interface/noise.h"
 #include "interface/voxel_volume.h"
 #include <Scene.h>
-#include <RigidBody.h>
-#include <CollisionShape.h>
-#include <ResourceCache.h>
 #include <Context.h>
 #include <StaticModel.h>
-#include <Model.h>
 #include <Material.h>
 #include <Texture2D.h>
 #include <Technique.h>
@@ -209,7 +204,6 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));
-		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:place_voxel"));
@@ -223,7 +217,6 @@ struct Module: public interface::Module
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_VOIDN("core:unload", on_unload)
 		EVENT_VOIDN("core:continue", on_continue)
-		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 		EVENT_TYPEN("client_file:files_transmitted",
 				on_files_transmitted, client_file::FilesTransmitted)
 		EVENT_TYPEN("network:packet_received/main:place_voxel",
@@ -341,58 +334,6 @@ struct Module: public interface::Module
 		{
 			instance->enable();
 		});
-
-		voxelworld::access(m_server, m_main_scene,
-				[&](voxelworld::Instance *instance)
-		{
-			main_context::access(m_server, [&](main_context::Interface *imc)
-			{
-				Scene *scene = imc->check_scene(m_main_scene);
-				Context *context = imc->get_context();
-				ResourceCache *cache = context->GetSubsystem<ResourceCache>();
-
-				interface::VoxelRegistry *voxel_reg =
-						instance->get_voxel_reg();
-
-				Node *n = scene->CreateChild("Testbox");
-				n->SetPosition(Vector3(30.0f, 30.0f, 40.0f));
-				n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
-
-				/*int w = 1, h = 1, d = 1;
-				ss_ data = "1";*/
-				int w = 2, h = 2, d = 1;
-				ss_ data = "1333";
-
-				// Convert data to the actually usable voxel type id namespace
-				// starting from VOXELTYPEID_UNDEFINED=0
-				for(size_t i = 0; i < data.size(); i++){
-					data[i] = data[i] - '0';
-				}
-
-				n->SetVar(StringHash("simple_voxel_data"), Variant(
-						PODVector<uint8_t>((const uint8_t*)data.c_str(),
-						data.size())));
-				n->SetVar(StringHash("simple_voxel_w"), Variant(w));
-				n->SetVar(StringHash("simple_voxel_h"), Variant(h));
-				n->SetVar(StringHash("simple_voxel_d"), Variant(d));
-
-
-				// Load the same model in here and give it to the physics
-				// subsystem so that it can be collided to
-				SharedPtr<Model> model(interface::mesh::
-						create_8bit_voxel_physics_model(context, w, h, d, data,
-						voxel_reg));
-
-				RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
-				body->SetFriction(0.75f);
-				body->SetMass(1.0);
-				CollisionShape *shape =
-						n->CreateComponent<CollisionShape>(LOCAL);
-				shape->SetConvexHull(model, 0, Vector3::ONE);
-				//shape->SetTriangleMesh(model, 0, Vector3::ONE);
-				//shape->SetBox(Vector3::ONE);
-			});
-		});
 	}
 
 	void on_unload()
@@ -409,29 +350,6 @@ struct Module: public interface::Module
 		// TODO: Restore main scene reference
 		// Just do this for now
 		on_start();
-	}
-
-	void on_tick(const interface::TickEvent &event)
-	{
-		/*main_context::access(m_server, [&](main_context::Interface *imc)
-		{
-			Scene *scene = imc->check_scene(m_main_scene);
-			Node *n = scene->GetChild("Testbox");
-			auto p = n->GetPosition();
-			log_v(MODULE, "Testbox: (%f, %f, %f)", p.x_, p.y_, p.z_);
-		});*/
-		static uint a = 0;
-		if(((a++) % 150) == 0){
-			main_context::access(m_server, [&](main_context::Interface *imc)
-			{
-				Scene *scene = imc->check_scene(m_main_scene);
-				Node *n = scene->GetChild("Testbox");
-				if(n){
-					n->SetRotation(Quaternion(30, 60, 90));
-					n->SetPosition(Vector3(30.0f, 30.0f, 40.0f));
-				}
-			});
-		}
 	}
 
 	// Standing-height air along -X (player facing). No path check; long enough
