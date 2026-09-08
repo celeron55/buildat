@@ -140,6 +140,7 @@ float triLinearInterpolation(
 
 
 #if 0
+// Actual gradient (Perlin) noise, unlike the value noise used below
 float noise2d_gradient(float x, float y, int seed)
 {
 	// Calculate the integer coordinates
@@ -165,7 +166,7 @@ float noise2d_gradient(float x, float y, int seed)
 #endif
 
 
-float noise2d_gradient(float x, float y, int seed)
+float noise2d_value(float x, float y, int seed)
 {
 	// Calculate the integer coordinates
 	int x0 = floor(x);
@@ -183,7 +184,7 @@ float noise2d_gradient(float x, float y, int seed)
 }
 
 
-float noise3d_gradient(float x, float y, float z, int seed)
+float noise3d_value(float x, float y, float z, int seed)
 {
 	// Calculate the integer coordinates
 	int x0 = floor(x);
@@ -209,7 +210,7 @@ float noise3d_gradient(float x, float y, float z, int seed)
 }
 
 
-float noise2d_perlin(float x, float y, int seed,
+float noise2d_fbm(float x, float y, int seed,
 		int octaves, float persistence)
 {
 	float a = 0;
@@ -217,7 +218,7 @@ float noise2d_perlin(float x, float y, int seed,
 	float g = 1.0;
 	for (int i = 0; i < octaves; i++)
 	{
-		a += g * noise2d_gradient(x * f, y * f, seed + i);
+		a += g * noise2d_value(x * f, y * f, seed + i);
 		f *= 2.0;
 		g *= persistence;
 	}
@@ -225,7 +226,7 @@ float noise2d_perlin(float x, float y, int seed,
 }
 
 
-float noise2d_perlin_abs(float x, float y, int seed,
+float noise2d_fbm_abs(float x, float y, int seed,
 		int octaves, float persistence)
 {
 	float a = 0;
@@ -233,7 +234,7 @@ float noise2d_perlin_abs(float x, float y, int seed,
 	float g = 1.0;
 	for (int i = 0; i < octaves; i++)
 	{
-		a += g * fabs(noise2d_gradient(x * f, y * f, seed + i));
+		a += g * fabs(noise2d_value(x * f, y * f, seed + i));
 		f *= 2.0;
 		g *= persistence;
 	}
@@ -241,7 +242,7 @@ float noise2d_perlin_abs(float x, float y, int seed,
 }
 
 
-float noise3d_perlin(float x, float y, float z, int seed,
+float noise3d_fbm(float x, float y, float z, int seed,
 		int octaves, float persistence)
 {
 	float a = 0;
@@ -249,7 +250,7 @@ float noise3d_perlin(float x, float y, float z, int seed,
 	float g = 1.0;
 	for (int i = 0; i < octaves; i++)
 	{
-		a += g * noise3d_gradient(x * f, y * f, z * f, seed + i);
+		a += g * noise3d_value(x * f, y * f, z * f, seed + i);
 		f *= 2.0;
 		g *= persistence;
 	}
@@ -257,7 +258,7 @@ float noise3d_perlin(float x, float y, float z, int seed,
 }
 
 
-float noise3d_perlin_abs(float x, float y, float z, int seed,
+float noise3d_fbm_abs(float x, float y, float z, int seed,
 		int octaves, float persistence)
 {
 	float a = 0;
@@ -265,7 +266,7 @@ float noise3d_perlin_abs(float x, float y, float z, int seed,
 	float g = 1.0;
 	for (int i = 0; i < octaves; i++)
 	{
-		a += g * fabs(noise3d_gradient(x * f, y * f, z * f, seed + i));
+		a += g * fabs(noise3d_value(x * f, y * f, z * f, seed + i));
 		f *= 2.0;
 		g *= persistence;
 	}
@@ -283,7 +284,7 @@ float contour(float v)
 }
 
 
-///////////////////////// [ New perlin stuff ] ////////////////////////////
+///////////////////////// [ New value noise stuff ] //////////////////////////
 
 
 Noise::Noise(NoiseParams *np, int seed, int sx, int sy) {
@@ -385,7 +386,7 @@ void Noise::resizeNoiseBuf(bool is3d) {
  * next octave.
  */
 #define idx(x, y) ((y) * nlx + (x))
-void Noise::gradientMap2D(float x, float y, float step_x, float step_y, int seed) {
+void Noise::valueMap2D(float x, float y, float step_x, float step_y, int seed) {
 	float v00, v01, v10, v11, u, v, orig_u;
 	int index, i, j, x0, y0, noisex, noisey;
 	int nlx, nly;
@@ -439,7 +440,7 @@ void Noise::gradientMap2D(float x, float y, float step_x, float step_y, int seed
 
 
 #define idx(x, y, z) ((z) * nly * nlx + (y) * nlx + (x))
-void Noise::gradientMap3D(float x, float y, float z,
+void Noise::valueMap3D(float x, float y, float z,
 						  float step_x, float step_y, float step_z,
 						  int seed) {
 	float v000, v010, v100, v110;
@@ -523,7 +524,7 @@ void Noise::gradientMap3D(float x, float y, float z,
 #undef idx
 
 
-float *Noise::perlinMap2D(float x, float y) {
+float *Noise::fbmMap2D(float x, float y) {
 	float f = 1.0, g = 1.0;
 	int i, j, index, oct;
 
@@ -533,7 +534,7 @@ float *Noise::perlinMap2D(float x, float y) {
 	memset(result, 0, sizeof(float) * sx * sy);
 
 	for (oct = 0; oct < np->octaves; oct++) {
-		gradientMap2D(x * f, y * f,
+		valueMap2D(x * f, y * f,
 			f / np->spread.X, f / np->spread.Y,
 			seed + np->seed + oct);
 
@@ -553,7 +554,7 @@ float *Noise::perlinMap2D(float x, float y) {
 }
 
 
-float *Noise::perlinMap2DModulated(float x, float y, float *persist_map) {
+float *Noise::fbmMap2DModulated(float x, float y, float *persist_map) {
 	float f = 1.0;
 	int i, j, index, oct;
 
@@ -567,7 +568,7 @@ float *Noise::perlinMap2DModulated(float x, float y, float *persist_map) {
 		g[index] = 1.0;
 
 	for (oct = 0; oct < np->octaves; oct++) {
-		gradientMap2D(x * f, y * f,
+		valueMap2D(x * f, y * f,
 			f / np->spread.X, f / np->spread.Y,
 			seed + np->seed + oct);
 
@@ -588,7 +589,7 @@ float *Noise::perlinMap2DModulated(float x, float y, float *persist_map) {
 }
 
 
-float *Noise::perlinMap3D(float x, float y, float z) {
+float *Noise::fbmMap3D(float x, float y, float z) {
 	float f = 1.0, g = 1.0;
 	int i, j, k, index, oct;
 
@@ -599,7 +600,7 @@ float *Noise::perlinMap3D(float x, float y, float z) {
 	memset(result, 0, sizeof(float) * sx * sy * sz);
 
 	for (oct = 0; oct < np->octaves; oct++) {
-		gradientMap3D(x * f, y * f, z * f,
+		valueMap3D(x * f, y * f, z * f,
 			f / np->spread.X, f / np->spread.Y, f / np->spread.Z,
 			seed + np->seed + oct);
 
