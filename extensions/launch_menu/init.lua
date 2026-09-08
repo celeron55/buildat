@@ -110,7 +110,7 @@ local function show_connect_to_server()
 	window:SetAlignment(HA_LEFT, VA_CENTER)
 
 	local address_edit = make_labeled_edit(window, "Address", "localhost")
-	local port_edit = make_labeled_edit(window, "Port (optional)", "20000")
+	local port_edit = make_labeled_edit(window, "Port (optional)", "29500")
 	address_edit:SetFocus(true)
 
 	local function do_connect()
