@@ -120,6 +120,19 @@ title_text.verticalAlignment = magic.VA_TOP
 title_text:SetPosition(0, 10)
 magic.ui:SetFocusElement(nil)
 
+-- The terrain is generated on the server after the client has connected, which
+-- takes a few seconds and shows as nothing but sky. Say what is going on until
+-- the first chunk's geometry exists.
+local wait_text = magic.ui.root:CreateChild("Text")
+wait_text:SetText("Generating terrain...")
+wait_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 24)
+wait_text.horizontalAlignment = magic.HA_CENTER
+wait_text.verticalAlignment = magic.VA_CENTER
+wait_text:SetPosition(0, 0)
+voxelworld.sub_geometry_update(function(node)
+	wait_text:SetText("")
+end)
+
 -- The pieces. They are replicated scene nodes carrying voxel data in their
 -- vars, not part of the voxel world, so the geometry is built here out of the
 -- world's own registry: same textures and atlas as the terrain.
