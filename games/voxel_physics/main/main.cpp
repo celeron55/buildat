@@ -72,32 +72,30 @@ static float bowl_surface(float x, float z)
 
 struct Worldgen: public worldgen::GeneratorInterface
 {
-	void generate_section(interface::Server *server,
-			SceneReference scene_ref,
-			const pv::Vector3DInt16 &section_p)
+	// Runs in a worker thread with no module held, so it writes the voxels
+	// into the volume it is given rather than into the world
+	void generate(SceneReference scene_ref,
+			const pv::Vector3DInt16 &section_p,
+			pv::RawVolume<VoxelInstance> &volume)
 	{
-		voxelworld::access(server, scene_ref,
-				[&](voxelworld::Instance *world)
-		{
-			pv::Region region = world->get_section_region_voxels(section_p);
-			auto lc = region.getLowerCorner();
-			auto uc = region.getUpperCorner();
+		const pv::Region region = volume.getEnclosingRegion();
+		auto lc = region.getLowerCorner();
+		auto uc = region.getUpperCorner();
 
-			for(int z = lc.getZ(); z <= uc.getZ(); z++){
-				for(int x = lc.getX(); x <= uc.getX(); x++){
-					float a = bowl_surface(x, z);
-					for(int y = lc.getY(); y <= uc.getY(); y++){
-						uint8_t id = AIR_ID;
-						if(y < a - GRASS_DEPTH)
-							id = ROCK_ID;
-						else if(y < a)
-							id = GRASS_ID;
-						world->set_voxel(pv::Vector3DInt32(x, y, z),
-								VoxelInstance(id));
-					}
+		for(int z = lc.getZ(); z <= uc.getZ(); z++){
+			for(int x = lc.getX(); x <= uc.getX(); x++){
+				float a = bowl_surface(x, z);
+				for(int y = lc.getY(); y <= uc.getY(); y++){
+					uint8_t id = AIR_ID;
+					if(y < a - GRASS_DEPTH)
+						id = ROCK_ID;
+					else if(y < a)
+						id = GRASS_ID;
+					volume.setVoxelAt(pv::Vector3DInt32(x, y, z),
+							VoxelInstance(id));
 				}
 			}
-		});
+		}
 	}
 };
 
@@ -188,11 +186,12 @@ struct Module: public interface::Module
 
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
-			// A single section: the whole scene, never streamed. The chunk
-			// nodes get collision shapes, which is what the pieces fall on:
-			// the terrain is simulated here on the server.
+			// A single section: the whole scene, never streamed. Physics on,
+			// so the chunk nodes get collision shapes: that is what the
+			// pieces fall on, and this is the one game whose server
+			// simulates something against the terrain.
 			pv::Region region(0, 0, 0, 0, 0, 0);
-			ivoxelworld->create_instance(m_main_scene, region);
+			ivoxelworld->create_instance(m_main_scene, region, true);
 		});
 
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
