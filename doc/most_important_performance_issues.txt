@@ -3,7 +3,49 @@ Buildat: Most important performance issues
 
 Issues are ordered by descending importance.
 
-1. Applying the physics box generation result for 32x32x32 voxels into the
+Measured by flying straight and level over infinite terrain in
+games/bomber_drone (turn the motor on with M, hold the runway until it is at
+flying speed, tap S to climb) with the on-screen profiler up (F9). Debug build,
+-O1, 2026-09-08. Numbers are per frame of the client or, where said, of one
+section on the server.
+
+Fixed, kept here for what the shape of the problem was:
+
+* The client's spatial update queue was a sorted std::list with a sorted
+  std::list as its index, so every put walked thousands of items several times.
+  21% of the client's CPU; the whole voxelworld Lua update was 45 ms of every
+  frame. A multimap and an unordered_map instead.
+
+* Urho3D's LuaScript ran a full lua_gc collect every frame, walking a heap that
+  is large and mostly live. 20 ms per frame. An incremental step instead.
+
+* voxelworld built Bullet collision shapes for every chunk on the server
+  whether or not anything simulated against them, and Bullet then kept their
+  AABBs up to date forever. 19% of the server's CPU, competing with world
+  generation for the module. set_physics_enabled(false) for a world that reads
+  its terrain out of the voxel volumes.
+
+Still open, in the order they showed up in a profile after those:
+
+1. update_skylight() and its voxel reads are about 25% of the server's CPU, and
+a freshly generated section costs 35-50 ms of it. The incremental unlight and
+spread machinery is right for an edit, but a whole new section hands it 262144
+seeds when nothing above it is loaded yet. A top-down column sweep for that
+case would cost a fraction of it.
+
+Chunk serialization and its zlib compression is another 14% of the server, and
+a section is serialized more than once on its way in.
+
+2. The client's software occlusion buffer is about 6.5% of its CPU. Every chunk
+is an occluder, LOD chunks included, and the terrain is not a shape that
+occludes much of itself from the air.
+
+3. The atlas rebuilds all three of its textures, with their mipmap chains, for
+every segment added to it. The segments are bounded per voxel registry, so this
+is a startup hitch rather than a steady cost, but batching the SetData of a
+whole registry's worth of segments would remove it.
+
+4. Applying the physics box generation result for 32x32x32 voxels into the
 physics world is too slow. It is currently split to only two parts; the creation
 of the Urho3D::CollisionShapes and constructing the physics stuff in Bullet.
 Both can take up to 20us in worst practical case, and cannot be threaded.
@@ -13,7 +55,7 @@ multiple child nodes (assuming the physics system handles that appropriately).
 
 Measured on Dell Precision M6800, release build, 2014-10-18.
 
-2. Creating the CustomGeometry for a 32x32x32 node is too slow. It can take up
+5. Creating the CustomGeometry for a 32x32x32 node is too slow. It can take up
 to 5000us in the worst practical case and cannot be threaded. It likely cannot
 be split into multiple steps (measuring needed).
 
@@ -23,4 +65,3 @@ creating child nodes out of them.
 It might not be worth solving because the time is relatively low.
 
 Measured on Dell Precision M6800, release build, 2014-10-18.
-
