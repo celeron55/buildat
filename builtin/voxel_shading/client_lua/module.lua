@@ -13,6 +13,7 @@
 --   voxel_shading.create_skybox(scene, sun_dir)
 --   voxel_shading.set_camera(camera_node)
 --   voxel_shading.update(dt) every frame, or update(nil) to snap
+--   voxel_shading.apply_to_node(node) for voxel geometry of its own
 -- and voxelworld.use_skylight set, which is what fills the vertex colors.
 local log = buildat.Logger("voxel_shading")
 local magic = require("buildat/extension/urho3d")
@@ -198,11 +199,19 @@ local function each_material(node, cb)
 	end
 end
 
-voxelworld.sub_material_update(function(node)
+-- Draw a node's voxel geometry with this module's shader. Called for every
+-- chunk voxelworld meshes; a game with voxel geometry of its own outside the
+-- voxel world -- a rigid body made of voxels, say -- calls it for that node so
+-- that the two are lit the same way. Such a node has no skylight in its vertex
+-- data, and the shader then sees full skylight, which is what an object out in
+-- the open should get.
+function M.apply_to_node(node)
 	each_material(node, function(m)
 		m:SetTechnique(0, TECHNIQUE)
 	end)
-end)
+end
+
+voxelworld.sub_material_update(M.apply_to_node)
 
 -- Where in its cell each ray of this sweep samples.
 --
