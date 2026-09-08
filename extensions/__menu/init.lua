@@ -29,7 +29,7 @@ local function show_connect_to_server()
 	line_edit:SetName("connect_to_server line_edit")
 	line_edit.minHeight = 24
 	line_edit.minWidth = 300
-	line_edit:SetText("localhost:20000")
+	line_edit:SetText("localhost:29500")
 	line_edit:SetFocus(true)
 
 	local connect_button = window:CreateChild("Button")

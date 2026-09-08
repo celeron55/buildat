@@ -48,6 +48,7 @@ extern "C" {
 #include <lauxlib.h>
 }
 #include <signal.h>
+#include <random>
 #include <cstdio>
 #include <cstring>
 #ifndef _WIN32
@@ -223,6 +224,26 @@ static bool valid_game_name(const ss_ &name)
 
 // Survives CApp reboot so disconnect can kill the server we started.
 static interface::process::Handle g_local_server;
+// Port the local server was told to listen on ("" if none was started)
+static ss_ g_local_server_port;
+
+// simplified: A free port is picked by probing; a race with another process
+// grabbing it in between is possible but harmless for a local game (the server
+// exits and the menu says so). Upgrade path: have the server bind port 0 and
+// report the actual port back to the client.
+static ss_ pick_free_local_port()
+{
+	std::random_device rd;
+	for(int i = 0; i < 100; i++){
+		// 29168...29999 is unassigned in IANA's registry and below the
+		// ephemeral port range, so nothing else should want it
+		int port = 29168 + rd() % 832;
+		ss_ port_s = std::to_string(port);
+		if(!interface::probe_connect("127.0.0.1", port_s))
+			return port_s;
+	}
+	return "29500";
+}
 
 static ss_ pidfile_path()
 {
@@ -327,11 +348,11 @@ static void stop_local_server()
 	interface::process::terminate(g_local_server);
 	clear_pidfile();
 	for(int i = 0; i < 40; i++){
-		if(!interface::probe_connect("127.0.0.1", "20000"))
+		if(!interface::probe_connect("127.0.0.1", g_local_server_port))
 			return;
 		interface::os::sleep_us(50000);
 	}
-	log_w(MODULE, "Local server did not release port 20000");
+	log_w(MODULE, "Local server did not release port %s", cs(g_local_server_port));
 }
 
 namespace app {
@@ -718,6 +739,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(force_kill_local_server)
 		DEF_BUILDAT_FUNC(local_server_ready)
 		DEF_BUILDAT_FUNC(local_server_running)
+		DEF_BUILDAT_FUNC(local_server_port)
 		DEF_BUILDAT_FUNC(send_packet);
 		DEF_BUILDAT_FUNC(get_file_path)
 		DEF_BUILDAT_FUNC(get_file_content)
@@ -1153,8 +1175,10 @@ struct CApp: public App, public magic::Application
 		}
 
 		game_path = interface::fs::get_absolute_path(game_path);
+		g_local_server_port = pick_free_local_port();
+		log_i(MODULE, "Starting local server on port %s", cs(g_local_server_port));
 		g_local_server = interface::process::start(
-				server_path, {"-m", game_path});
+				server_path, {"-m", game_path, "-P", g_local_server_port});
 		if(!g_local_server.valid()){
 			lua_pushboolean(L, false);
 			lua_pushstring(L, "Failed to start server");
@@ -1218,7 +1242,15 @@ struct CApp: public App, public magic::Application
 			lua_pushboolean(L, false);
 			return 1;
 		}
-		lua_pushboolean(L, interface::probe_connect("127.0.0.1", "20000"));
+		lua_pushboolean(L, interface::probe_connect("127.0.0.1",
+				g_local_server_port));
+		return 1;
+	}
+
+	// local_server_port() -> string
+	static int l_local_server_port(lua_State *L)
+	{
+		lua_pushstring(L, g_local_server_port.c_str());
 		return 1;
 	}
 

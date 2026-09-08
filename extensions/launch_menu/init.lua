@@ -110,7 +110,7 @@ local function show_connect_to_server()
 	window:SetAlignment(HA_LEFT, VA_CENTER)
 
 	local address_edit = make_labeled_edit(window, "Address", "localhost")
-	local port_edit = make_labeled_edit(window, "Port (optional)", "20000")
+	local port_edit = make_labeled_edit(window, "Port (optional)", "29500")
 	address_edit:SetFocus(true)
 
 	local function do_connect()
@@ -178,7 +178,7 @@ local function show_starting(game)
 		end
 		if buildat.local_server_ready() then
 			done = true
-			connect_or_show_error("localhost")
+			connect_or_show_error("localhost:"..buildat.local_server_port())
 			return
 		end
 		if not buildat.local_server_running() then
