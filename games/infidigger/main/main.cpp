@@ -63,14 +63,14 @@ struct Worldgen: public worldgen::GeneratorInterface
 		interface::v3f spread_h(280, 280, 280);
 		interface::NoiseParams np_h(0, 14, spread_h, 0, 5, 0.45);
 		interface::Noise noise_h(&np_h, 3, w, d);
-		noise_h.perlinMap2D(lc.getX() + spread_h.X/2,
+		noise_h.fbmMap2D(lc.getX() + spread_h.X/2,
 				lc.getZ() + spread_h.Z/2);
 		noise_h.transformNoiseMap();
 
 		interface::v3f spread_b(48, 48, 48);
 		interface::NoiseParams np_b(0, 3, spread_b, 11, 3, 0.5);
 		interface::Noise noise_b(&np_b, 3, w, d);
-		noise_b.perlinMap2D(lc.getX() + spread_b.X/2,
+		noise_b.fbmMap2D(lc.getX() + spread_b.X/2,
 				lc.getZ() + spread_b.Z/2);
 		noise_b.transformNoiseMap();
 

@@ -103,83 +103,86 @@ namespace interface
 		void setOctaves(int octaves);
 		void resizeNoiseBuf(bool is3d);
 
-		void gradientMap2D(
+		void valueMap2D(
 				float x, float y,
 				float step_x, float step_y,
 				int seed);
-		void gradientMap3D(
+		void valueMap3D(
 				float x, float y, float z,
 				float step_x, float step_y, float step_z,
 				int seed);
-		float* perlinMap2D(float x, float y);
-		float* perlinMap2DModulated(float x, float y, float *persist_map);
-		float* perlinMap3D(float x, float y, float z);
+		float* fbmMap2D(float x, float y);
+		float* fbmMap2DModulated(float x, float y, float *persist_map);
+		float* fbmMap3D(float x, float y, float z);
 		void transformNoiseMap();
 	};
+
+	// Value noise (not gradient/Perlin noise): the hashes below are the lattice
+	// values themselves, interpolated between. The _fbm variants sum octaves.
 
 	// Return value: -1 ... 1
 	float noise2d(int x, int y, int seed);
 	float noise3d(int x, int y, int z, int seed);
 
-	float noise2d_gradient(float x, float y, int seed);
-	float noise3d_gradient(float x, float y, float z, int seed);
+	float noise2d_value(float x, float y, int seed);
+	float noise3d_value(float x, float y, float z, int seed);
 
-	float noise2d_perlin(float x, float y, int seed,
+	float noise2d_fbm(float x, float y, int seed,
 			int octaves, float persistence);
 
-	float noise2d_perlin_abs(float x, float y, int seed,
+	float noise2d_fbm_abs(float x, float y, int seed,
 			int octaves, float persistence);
 
-	float noise3d_perlin(float x, float y, float z, int seed,
+	float noise3d_fbm(float x, float y, float z, int seed,
 			int octaves, float persistence);
 
-	float noise3d_perlin_abs(float x, float y, float z, int seed,
+	float noise3d_fbm_abs(float x, float y, float z, int seed,
 			int octaves, float persistence);
 
 	inline float easeCurve(float t){
 		return t * t * t * (t * (6.f * t - 15.f) + 10.f);
 	}
 
-	inline float NoisePerlin2D(const NoiseParams *np, float x, float y, float s)
+	inline float NoiseFbm2D(const NoiseParams *np, float x, float y, float s)
 	{
-		return (np->offset + np->scale * noise2d_perlin(
+		return (np->offset + np->scale * noise2d_fbm(
 				(float)x / np->spread.X,
 				(float)y / np->spread.Y,
 				s + np->seed, np->octaves, np->persist));
 	}
 
-	inline float NoisePerlin2DNoTxfm(
+	inline float NoiseFbm2DNoTxfm(
 			const NoiseParams *np, float x, float y, float s)
 	{
-		return (noise2d_perlin(
+		return (noise2d_fbm(
 				(float)x / np->spread.X,
 				(float)y / np->spread.Y,
 				s + np->seed, np->octaves, np->persist));
 	}
 
-	inline float NoisePerlin2DPosOffset(const NoiseParams *np, float x, float xoff,
+	inline float NoiseFbm2DPosOffset(const NoiseParams *np, float x, float xoff,
 			float y, float yoff, float s)
 	{
-		return (np->offset + np->scale * noise2d_perlin(
+		return (np->offset + np->scale * noise2d_fbm(
 				(float)xoff + (float)x / np->spread.X,
 				(float)yoff + (float)y / np->spread.Y,
 				s + np->seed, np->octaves, np->persist));
 	}
 
-	inline float NoisePerlin2DNoTxfmPosOffset(const NoiseParams *np, float x,
+	inline float NoiseFbm2DNoTxfmPosOffset(const NoiseParams *np, float x,
 			float xoff, float y, float yoff, float s)
 	{
-		return (noise2d_perlin(
+		return (noise2d_fbm(
 				(float)xoff + (float)x / np->spread.X,
 				(float)yoff + (float)y / np->spread.Y,
 				s + np->seed, np->octaves, np->persist));
 	}
 
-	inline float NoisePerlin3D(
+	inline float NoiseFbm3D(
 			const NoiseParams *np, float x, float y, float z, float s)
 	{
 		return (np->offset + np->scale *
-				noise3d_perlin((float)x / np->spread.X, (float)y / np->spread.Y,
+				noise3d_fbm((float)x / np->spread.X, (float)y / np->spread.Y,
 				(float)z / np->spread.Z, s + np->seed, np->octaves, np->persist));
 	}
 }
