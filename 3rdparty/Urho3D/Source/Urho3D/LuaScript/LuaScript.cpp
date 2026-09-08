@@ -473,10 +473,13 @@ void LuaScript::HandlePostUpdate(StringHash eventType, VariantMap& eventData)
         coroutineUpdate_->EndCall();
     }
 
-    // Collect garbage
+    // Collect garbage. A full collect here walks the whole heap every frame,
+    // which with a large bound heap (voxel geometry, the Urho3D bindings) costs
+    // more than everything else the frame does. An incremental step keeps the
+    // heap bounded at a cost proportional to what was allocated.
     {
         URHO3D_PROFILE(LuaCollectGarbage);
-        lua_gc(luaState_, LUA_GCCOLLECT, 0);
+        lua_gc(luaState_, LUA_GCSTEP, 0);
     }
 }
 
