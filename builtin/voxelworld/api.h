@@ -151,8 +151,16 @@ namespace voxelworld
 
 	struct Interface
 	{
+		// physics_enabled gives the chunk nodes server-side Bullet collision
+		// shapes. Off by default: they cost more than the world generation
+		// they are built alongside, and only a game that has the server
+		// simulate something against the terrain queries them at all. A game
+		// that reads terrain hits out of the voxel volumes does not need them.
+		// It is a parameter and not a setting because the initial sections are
+		// created here. The client has its own switch; see physics_distance in
+		// voxelworld's client_lua.
 		virtual void create_instance(SceneReference scene_ref,
-				const pv::Region &region) = 0;
+				const pv::Region &region, bool physics_enabled = false) = 0;
 		virtual void delete_instance(SceneReference scene_ref) = 0;
 
 		virtual Instance* get_instance(SceneReference scene_ref) = 0;

@@ -263,6 +263,7 @@ struct CInstance: public voxelworld::Instance
 
 	// Skylight. Off unless the world asks for it; see api.h.
 	bool m_skylight_enabled = false;
+	bool m_physics_enabled;
 	// The world region in sections, so that the top of it can be found. Light
 	// enters from above that; everything outside is a barrier.
 	pv::Region m_section_region;
@@ -278,10 +279,11 @@ struct CInstance: public voxelworld::Instance
 	std::vector<SkylightSeed> m_skylight_seeds;
 
 	CInstance(interface::Server *server, SceneReference scene_ref,
-			const pv::Region &region):
+			const pv::Region &region, bool physics_enabled):
 		m_server(server),
 		m_scene_ref(scene_ref),
-		m_section_region(region)
+		m_section_region(region),
+		m_physics_enabled(physics_enabled)
 	{
 		m_voxel_reg.reset(interface::createVoxelRegistry());
 		m_block_reg.reset(interface::createBlockRegistry(m_voxel_reg.get()));
@@ -589,8 +591,10 @@ struct CInstance: public voxelworld::Instance
 				new NodeVolumeUpdated(m_scene_ref, n->GetID(), true, chunk_p));
 
 		// There are no collision shapes initially, but add the rigid body now
-		RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
-		body->SetFriction(0.75f);
+		if(m_physics_enabled){
+			RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
+			body->SetFriction(0.75f);
+		}
 	}
 
 	void create_section(Section &section)
@@ -640,6 +644,8 @@ struct CInstance: public voxelworld::Instance
 
 	void mark_node_for_physics_update(uint node_id)
 	{
+		if(!m_physics_enabled)
+			return;
 		QueuedNodePhysicsUpdate update(node_id);
 		auto it = std::lower_bound(m_nodes_needing_physics_update.begin(),
 				m_nodes_needing_physics_update.end(), update,
@@ -1831,7 +1837,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 	// Interface
 
-	void create_instance(SceneReference scene_ref, const pv::Region &region)
+	void create_instance(SceneReference scene_ref, const pv::Region &region,
+			bool physics_enabled)
 	{
 		auto it = m_instances.find(scene_ref);
 		// TODO: Is an exception the best way to handle this?
@@ -1839,7 +1846,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 			throw Exception("create_instance(): Scene already has a voxel"
 					" world instance");
 
-		up_<CInstance> instance(new CInstance(m_server, scene_ref, region));
+		up_<CInstance> instance(new CInstance(m_server, scene_ref, region,
+				physics_enabled));
 		m_instances[scene_ref] = std::move(instance);
 	}
 
