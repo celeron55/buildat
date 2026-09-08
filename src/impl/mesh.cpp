@@ -159,18 +159,25 @@ void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 	for(int z = -1; z <= d; z++){
 		for(int y = -1; y <= h; y++){
 			for(int x = -1; x <= w; x++){
-				if(z == -1 || y == -1 || x == -1 ||
-						z == d || y == h || x == w){
-					volume.setVoxelAt(x, y, z, VoxelInstance(0));
-				} else {
-					char c = source_data[i++];
-					volume.setVoxelAt(x, y, z, VoxelInstance(c));
-				}
+				VoxelInstance v(0);
+				if(!(z == -1 || y == -1 || x == -1 ||
+						z == d || y == h || x == w))
+					v = VoxelInstance(source_data[i++]);
+				// 8 bit data has no room for a light value, and this is a
+				// model standing on its own rather than a piece of a world
+				// that could light it, so it is lit as if it were out in the
+				// open. Handing a voxel shader no light at all is not the
+				// safe choice it looks like: with the ambient term zeroed,
+				// what is left is the reflection, and every texel of the
+				// derived normal map then reflects the sky in its own
+				// direction, which comes out as speckle.
+				v.set_skylight(VoxelInstance::SKYLIGHT_MAX);
+				volume.setVoxelAt(x, y, z, v);
 			}
 		}
 	}
 
-	return set_voxel_geometry(cg, context, volume, voxel_reg, atlas_reg);
+	return set_voxel_geometry(cg, context, volume, voxel_reg, atlas_reg, true);
 }
 
 template<typename VoxelType>

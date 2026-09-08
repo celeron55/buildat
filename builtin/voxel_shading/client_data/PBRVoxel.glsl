@@ -313,8 +313,16 @@ void VS()
 
     float GetSurfaceSpots(vec3 worldPos, float openFraction)
     {
+        // No spots at all: none of the surface is one. The translucency term
+        // wants the opposite of this -- a material with no spots lets light
+        // through all over rather than nowhere -- and says so where it uses
+        // it, rather than here, where the value is also the mask that glosses
+        // the surface and turns its normal. Returning 1.0 here made every
+        // material that named no spots fully spotted: its whole surface took
+        // the spot roughness and a per cell random tilt, which is the speckle
+        // that showed on plain rock and grass.
         if (openFraction <= 0.0)
-            return 1.0;
+            return 0.0;
         vec3 cell = floor(worldPos * TRANSMISSION_CELLS);
         float rate = TRANSMISSION_RATE * (0.6 + TransmissionHash(cell + 19.0));
         // A slow ramp along the wind direction, which turns what would be an
