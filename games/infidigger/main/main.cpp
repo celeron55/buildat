@@ -8,7 +8,6 @@
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
-#include "interface/mesh.h"
 #include "interface/voxel.h"
 #include "interface/noise.h"
 #include "interface/voxel_volume.h"
@@ -16,10 +15,7 @@
 #include "interface/polyvox_cereal.h"
 #include "interface/polyvox_std.h"
 #include <Scene.h>
-#include <RigidBody.h>
-#include <CollisionShape.h>
 #include <Context.h>
-#include <Model.h>
 #include <cereal/archives/portable_binary.hpp>
 #include <sstream>
 #include <cmath>
@@ -329,58 +325,6 @@ struct Module: public interface::Module
 				interface::container_coord(spawn_p.getY(), SECTION_SIZE_VOXELS),
 				interface::container_coord(spawn_p.getZ(), SECTION_SIZE_VOXELS)));
 		stream_around(spawn_p);
-
-		voxelworld::access(m_server, m_main_scene,
-				[&](voxelworld::Instance *instance)
-		{
-			main_context::access(m_server, [&](main_context::Interface *imc)
-			{
-				Scene *scene = imc->check_scene(m_main_scene);
-				Context *context = imc->get_context();
-
-				interface::VoxelRegistry *voxel_reg =
-						instance->get_voxel_reg();
-
-				Node *n = scene->CreateChild("Testbox");
-				n->SetPosition(Vector3(
-						(float)SPAWN_X + 3.0f, 40.0f, (float)SPAWN_Z + 2.0f));
-				n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
-
-				/*int w = 1, h = 1, d = 1;
-				ss_ data = "1";*/
-				int w = 2, h = 2, d = 1;
-				ss_ data = "1333";
-
-				// Convert data to the actually usable voxel type id namespace
-				// starting from VOXELTYPEID_UNDEFINED=0
-				for(size_t i = 0; i < data.size(); i++){
-					data[i] = data[i] - '0';
-				}
-
-				n->SetVar(StringHash("simple_voxel_data"), Variant(
-						PODVector<uint8_t>((const uint8_t*)data.c_str(),
-						data.size())));
-				n->SetVar(StringHash("simple_voxel_w"), Variant(w));
-				n->SetVar(StringHash("simple_voxel_h"), Variant(h));
-				n->SetVar(StringHash("simple_voxel_d"), Variant(d));
-
-
-				// Load the same model in here and give it to the physics
-				// subsystem so that it can be collided to
-				SharedPtr<Model> model(interface::mesh::
-						create_8bit_voxel_physics_model(context, w, h, d, data,
-						voxel_reg));
-
-				RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
-				body->SetFriction(0.75f);
-				body->SetMass(1.0);
-				CollisionShape *shape =
-						n->CreateComponent<CollisionShape>(LOCAL);
-				shape->SetConvexHull(model, 0, Vector3::ONE);
-				//shape->SetTriangleMesh(model, 0, Vector3::ONE);
-				//shape->SetBox(Vector3::ONE);
-			});
-		});
 	}
 
 	void on_unload()
