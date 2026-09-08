@@ -126,7 +126,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 			// at this one it would swing the surface across the whole volume.
 			interface::NoiseParams np(0, TERRAIN_AMPLITUDE, spread, 0, 5, 0.4);
 			interface::Noise noise(&np, 3, w, d);
-			noise.perlinMap2D(lc.getX() + spread.X/2, lc.getZ() + spread.Z/2);
+			noise.fbmMap2D(lc.getX() + spread.X/2, lc.getZ() + spread.Z/2);
 			noise.transformNoiseMap();
 
 			// Reported so GROUND_OFFSET and TERRAIN_AMPLITUDE can be retuned

@@ -84,7 +84,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 			int d = uc.getZ() - lc.getZ() + 1;
 
 			interface::Noise noise(&np, 3, w, d);
-			noise.perlinMap2D(lc.getX() + spread.X/2, lc.getZ() + spread.Z/2);
+			noise.fbmMap2D(lc.getX() + spread.X/2, lc.getZ() + spread.Z/2);
 			noise.transformNoiseMap(); // ?
 
 			size_t noise_i = 0;

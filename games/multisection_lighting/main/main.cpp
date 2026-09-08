@@ -160,7 +160,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 			// Sampled at scene coordinates, so the terrain under the cave is
 			// the terrain voxel_lighting's cave was carved into
 			interface::Noise noise(&np, 3, nw, nd);
-			noise.perlinMap2D(nx0 - SCENE_OFFSET_X + spread.X/2,
+			noise.fbmMap2D(nx0 - SCENE_OFFSET_X + spread.X/2,
 					nz0 - SCENE_OFFSET_Z + spread.Z/2);
 			noise.transformNoiseMap();
 
@@ -175,7 +175,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 			// TUNING: pick a cave mouth whose cave stays under the terrain
 			if(section_p == pv::Vector3DInt16(0, 0, 0)){
 				interface::Noise wn(&np, 3, WORLD_SIZE, WORLD_SIZE);
-				wn.perlinMap2D(spread.X/2, spread.Z/2);
+				wn.fbmMap2D(spread.X/2, spread.Z/2);
 				wn.transformNoiseMap();
 				auto wnoise = [&](int x, int z){
 					if(x < 0 || x >= WORLD_SIZE || z < 0 || z >= WORLD_SIZE)
@@ -296,7 +296,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 			// the noise map of the sections the mouth is over. One extra
 			// sample of the same noise gives it to all of them.
 			interface::Noise mouth_noise(&np, 3, 1, 1);
-			mouth_noise.perlinMap2D(mouth_x - SCENE_OFFSET_X + spread.X/2,
+			mouth_noise.fbmMap2D(mouth_x - SCENE_OFFSET_X + spread.X/2,
 					mouth_z - SCENE_OFFSET_Z + spread.Z/2);
 			mouth_noise.transformNoiseMap();
 			float mouth_surface = mouth_noise.result[0] + GROUND_OFFSET +
