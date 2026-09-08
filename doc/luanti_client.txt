@@ -1,0 +1,56 @@
+Luanti client
+=============
+extensions/luanti_client makes buildat_client talk to an unmodified Luanti
+server: it does the client's side of Luanti's protocol.
+
+    $ bin/buildat_client -m luanti_client
+
+It asks for an address, a player name and a password, and then shows what the
+server is sending. BUILDAT_LUANTI_ADDRESS sets the address the dialog starts
+with, which is what scripted runs (-c) use.
+
+The network dialog of extension/network asks about the address the first time;
+see doc/client_api.txt.
+
+What is where
+-------------
+serialize.lua   Luanti's big-endian numbers and length-prefixed strings
+connection.lua  The UDP transport: channels, reliable packets, acks, splits
+srp.lua         The client half of the SRP-6a login, on buildat.bignum
+client.lua      The commands: the login, and dispatch for the rest
+init.lua        The connect dialog and the status screen
+
+The engine side of this is nothing Luanti-specific: sockets (extension/network),
+SHA-256 and bignum arithmetic (buildat.sha256, buildat.bignum).
+
+Checks
+------
+    $ lua extensions/luanti_client/test.lua
+
+covers serialize.lua and connection.lua against a fake socket: the packet
+framing, reliable packets arriving out of order or twice, acknowledgements,
+resending, split reassembly and the peer id handshake.
+
+srp.lua has self_test(), which init.lua runs at boot; its vectors come from
+util/srp_reference.py, which does SRP-6a separately in Python.
+
+Both login paths have been run against a real Luanti server: registering a new
+player (FIRST_SRP) and logging in as one the server knows (SRP).
+
+What is done
+------------
+- The UDP transport, both directions, except splitting what we send
+- Registering and logging in, and the peer id and protocol version handshake
+- INIT2, and access denied messages
+
+What is next
+------------
+- The definitions and the media: ITEMDEF, NODEDEF, ANNOUNCE_MEDIA, MEDIA.
+  These are zlib-compressed, so the engine needs a decompress primitive
+  (src/interface/compress.h is already there, it just has no Lua binding).
+- CLIENT_READY once the definitions are in, which is what makes the server
+  spawn the player. client.lua has send_client_ready() ready for it.
+- Map blocks (BLOCKDATA) and turning them into meshes
+- The player: MOVE_PLAYER, position and input, HP, breath
+- Active objects, formspecs, the HUD, chat, sounds
+- Splitting outgoing packets, which media requests need

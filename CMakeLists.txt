@@ -205,6 +205,8 @@ set(BUILDAT_CORE_SRCS
 	src/impl/tcpsocket.cpp
 	src/impl/module.cpp
 	src/impl/sha1.cpp
+	src/impl/sha256.cpp
+	src/impl/bignum.cpp
 	src/impl/packet_stream.cpp
 	src/impl/mesh.cpp
 	src/impl/atlas.cpp
@@ -268,6 +270,7 @@ if(BUILD_CLIENT)
 		src/lua_bindings/spatial_update_queue.cpp
 		src/lua_bindings/misc_urho3d.cpp
 		src/lua_bindings/network.cpp
+		src/lua_bindings/crypto.cpp
 		src/lua_bindings/replicate.cpp
 	)
 
