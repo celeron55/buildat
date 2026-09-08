@@ -78,6 +78,7 @@ struct Module: public interface::Module
 					seg.select_segment = magic::IntVector2(0, 0);
 				}
 				vdef.edge_material_id = interface::EDGEMATERIALID_EMPTY;
+				vdef.fully_empty = true;
 				m_voxel_reg->add_voxel(vdef); // id 1
 			}
 			{

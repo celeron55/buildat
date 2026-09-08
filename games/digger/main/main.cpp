@@ -8,17 +8,12 @@
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
-#include "interface/mesh.h"
 #include "interface/voxel.h"
 #include "interface/noise.h"
 #include "interface/voxel_volume.h"
 #include <Scene.h>
-#include <RigidBody.h>
-#include <CollisionShape.h>
-#include <ResourceCache.h>
 #include <Context.h>
 #include <StaticModel.h>
-#include <Model.h>
 #include <Material.h>
 #include <Texture2D.h>
 #include <Technique.h>
@@ -67,17 +62,12 @@ static const int WATER_LEVEL = 25;
 
 struct Worldgen: public worldgen::GeneratorInterface
 {
-	void generate_section(interface::Server *server,
-			SceneReference scene_ref,
-			const pv::Vector3DInt16 &section_p)
+	void generate(SceneReference scene_ref,
+			const pv::Vector3DInt16 &section_p,
+			pv::RawVolume<VoxelInstance> &volume)
 	{
-		voxelworld::access(server, [&](voxelworld::Interface *ivoxelworld)
 		{
-			voxelworld::Instance *world =
-					ivoxelworld->get_instance(scene_ref);
-
-			pv::Region region = world->get_section_region_voxels(
-					section_p);
+			const pv::Region region = volume.getEnclosingRegion();
 
 			auto lc = region.getLowerCorner();
 			auto uc = region.getUpperCorner();
@@ -106,37 +96,37 @@ struct Worldgen: public worldgen::GeneratorInterface
 						pv::Vector3DInt32 p(x, y, z);
 						pv::Vector3DInt32 cp(-112, 20, 253);
 						if((p - cp).lengthSquared() < 30*30){
-							world->set_voxel(p, VoxelInstance(1));
+							volume.setVoxelAt(p, VoxelInstance(1));
 							continue;
 						}
 						if(y >= 2 && y <= 3 && z >= 256 && z <= 258 &&
 								x >= -112 && x <= -5){
-							world->set_voxel(p, VoxelInstance(1));
+							volume.setVoxelAt(p, VoxelInstance(1));
 							continue;
 						}
 						if(z > 37 && z < 50 && y > 20){
-							world->set_voxel(p, VoxelInstance(1));
+							volume.setVoxelAt(p, VoxelInstance(1));
 							continue;
 						}
 						if(x > 27 && x < 40 && y > 20){
-							world->set_voxel(p, VoxelInstance(1));
+							volume.setVoxelAt(p, VoxelInstance(1));
 							continue;
 						}
 						if(x > 18 && x < 25 && z >= 32 && z <= 37 &&
 								y > 20 && y < 25){
-							world->set_voxel(p, VoxelInstance(1));
+							volume.setVoxelAt(p, VoxelInstance(1));
 							continue;
 						}
 						if(y < a+5){
-							world->set_voxel(p, VoxelInstance(2));
+							volume.setVoxelAt(p, VoxelInstance(2));
 						} else if(y < a+10){
-							world->set_voxel(p, VoxelInstance(3));
+							volume.setVoxelAt(p, VoxelInstance(3));
 						} else if(y < a+11){
-							world->set_voxel(p, VoxelInstance(4));
+							volume.setVoxelAt(p, VoxelInstance(4));
 						} else if(y <= WATER_LEVEL){
-							world->set_voxel(p, VoxelInstance(7));
+							volume.setVoxelAt(p, VoxelInstance(7));
 						} else {
-							world->set_voxel(p, VoxelInstance(1));
+							volume.setVoxelAt(p, VoxelInstance(1));
 						}
 					}
 				}
@@ -153,7 +143,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 				/*int y = 50;
 				for(; y>-50; y--){
 					pv::Vector3DInt32 p(x, y, z);
-					VoxelInstance v = world->get_voxel(p);
+					VoxelInstance v = volume.getVoxelAt(p);
 					if(v.get_id() != 1)
 						break;
 				}
@@ -169,19 +159,19 @@ struct Worldgen: public worldgen::GeneratorInterface
 
 				for(int y1 = y; y1<y+4; y1++){
 					pv::Vector3DInt32 p(x, y1, z);
-					world->set_voxel(p, VoxelInstance(6), true);
+					volume.setVoxelAt(p, VoxelInstance(6));
 				}
 
 				for(int x1 = x-2; x1 <= x+2; x1++){
 					for(int y1 = y+3; y1 <= y+7; y1++){
 						for(int z1 = z-2; z1 <= z+2; z1++){
 							pv::Vector3DInt32 p(x1, y1, z1);
-							world->set_voxel(p, VoxelInstance(5), true);
+							volume.setVoxelAt(p, VoxelInstance(5));
 						}
 					}
 				}
 			}
-		});
+		}
 	}
 };
 
@@ -214,7 +204,6 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));
-		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:place_voxel"));
@@ -228,7 +217,6 @@ struct Module: public interface::Module
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_VOIDN("core:unload", on_unload)
 		EVENT_VOIDN("core:continue", on_continue)
-		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 		EVENT_TYPEN("client_file:files_transmitted",
 				on_files_transmitted, client_file::FilesTransmitted)
 		EVENT_TYPEN("network:packet_received/main:place_voxel",
@@ -244,7 +232,7 @@ struct Module: public interface::Module
 	// passes through. top_texture, when given, goes on the +Y and -Y faces.
 	void add_voxel(interface::VoxelRegistry *reg, const ss_ &name,
 			const ss_ &texture, bool visible, bool solid,
-			float roughness = 0.9f, float spec_strength = 1.0f,
+			bool fully_empty, float roughness = 0.9f, float spec_strength = 1.0f,
 			float bumpiness = 1.0f, float translucency = 0.0f,
 			float spots = 0.0f, float static_spots = 0.0f,
 			const ss_ &top_texture = "")
@@ -274,6 +262,7 @@ struct Module: public interface::Module
 		vdef.edge_material_id = visible ? interface::EDGEMATERIALID_GROUND :
 				interface::EDGEMATERIALID_EMPTY;
 		vdef.physically_solid = solid;
+		vdef.fully_empty = fully_empty;
 		reg->add_voxel(vdef);
 	}
 
@@ -316,22 +305,22 @@ struct Module: public interface::Module
 			// roughness, spec_strength, bumpiness, translucency, spots,
 			// static_spots; see interface/atlas.h. The values are
 			// voxel_lighting's, which is where they were chosen.
-			add_voxel(voxel_reg, "air", "", false, false);     // id 1
-			add_voxel(voxel_reg, "rock", "main/rock.png", true, true,
+			add_voxel(voxel_reg, "air", "", false, false, true);     // id 1
+			add_voxel(voxel_reg, "rock", "main/rock.png", true, true, false,
 					0.95f, 0.15f, 0.5f, 0.0f, 0.0f, 0.04f);    // id 2
-			add_voxel(voxel_reg, "dirt", "main/dirt.png", true, true,
+			add_voxel(voxel_reg, "dirt", "main/dirt.png", true, true, false,
 					0.98f, 0.15f, 0.6f, 0.0f, 0.0f, 0.04f);    // id 3
-			add_voxel(voxel_reg, "grass", "main/grass.png", true, true,
+			add_voxel(voxel_reg, "grass", "main/grass.png", true, true, false,
 					0.90f, 1.0f, 0.75f, 0.06f, 0.012f);        // id 4
-			add_voxel(voxel_reg, "leaves", "main/leaves.png", true, true,
+			add_voxel(voxel_reg, "leaves", "main/leaves.png", true, true, false,
 					0.95f, 1.0f, 1.5f, 0.11f, 0.03f);          // id 5
-			add_voxel(voxel_reg, "tree", "main/tree.png", true, true,
+			add_voxel(voxel_reg, "tree", "main/tree.png", true, true, false,
 					0.85f, 0.35f, 2.0f, 0.0f, 0.0f, 0.0f,
 					"main/tree_top.png");                      // id 6
 			// Walked into rather than stood on: the player sinks to the lake
 			// floor and can dig or climb out. Nothing simulates flow, so a
 			// dug shore leaves a hole in the water rather than draining it.
-			add_voxel(voxel_reg, "water", "main/water.png", true, false,
+			add_voxel(voxel_reg, "water", "main/water.png", true, false, false,
 					0.28f, 1.0f, 6.0f, 0.0f, 0.05f);           // id 7
 
 			// Skylight, which is what the voxel shading reads to tell a cave
@@ -344,58 +333,6 @@ struct Module: public interface::Module
 		worldgen::access(m_server, m_main_scene, [&](worldgen::Instance *instance)
 		{
 			instance->enable();
-		});
-
-		voxelworld::access(m_server, m_main_scene,
-				[&](voxelworld::Instance *instance)
-		{
-			main_context::access(m_server, [&](main_context::Interface *imc)
-			{
-				Scene *scene = imc->check_scene(m_main_scene);
-				Context *context = imc->get_context();
-				ResourceCache *cache = context->GetSubsystem<ResourceCache>();
-
-				interface::VoxelRegistry *voxel_reg =
-						instance->get_voxel_reg();
-
-				Node *n = scene->CreateChild("Testbox");
-				n->SetPosition(Vector3(30.0f, 30.0f, 40.0f));
-				n->SetScale(Vector3(1.0f, 1.0f, 1.0f));
-
-				/*int w = 1, h = 1, d = 1;
-				ss_ data = "1";*/
-				int w = 2, h = 2, d = 1;
-				ss_ data = "1333";
-
-				// Convert data to the actually usable voxel type id namespace
-				// starting from VOXELTYPEID_UNDEFINED=0
-				for(size_t i = 0; i < data.size(); i++){
-					data[i] = data[i] - '0';
-				}
-
-				n->SetVar(StringHash("simple_voxel_data"), Variant(
-						PODVector<uint8_t>((const uint8_t*)data.c_str(),
-						data.size())));
-				n->SetVar(StringHash("simple_voxel_w"), Variant(w));
-				n->SetVar(StringHash("simple_voxel_h"), Variant(h));
-				n->SetVar(StringHash("simple_voxel_d"), Variant(d));
-
-
-				// Load the same model in here and give it to the physics
-				// subsystem so that it can be collided to
-				SharedPtr<Model> model(interface::mesh::
-						create_8bit_voxel_physics_model(context, w, h, d, data,
-						voxel_reg));
-
-				RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
-				body->SetFriction(0.75f);
-				body->SetMass(1.0);
-				CollisionShape *shape =
-						n->CreateComponent<CollisionShape>(LOCAL);
-				shape->SetConvexHull(model, 0, Vector3::ONE);
-				//shape->SetTriangleMesh(model, 0, Vector3::ONE);
-				//shape->SetBox(Vector3::ONE);
-			});
 		});
 	}
 
@@ -413,29 +350,6 @@ struct Module: public interface::Module
 		// TODO: Restore main scene reference
 		// Just do this for now
 		on_start();
-	}
-
-	void on_tick(const interface::TickEvent &event)
-	{
-		/*main_context::access(m_server, [&](main_context::Interface *imc)
-		{
-			Scene *scene = imc->check_scene(m_main_scene);
-			Node *n = scene->GetChild("Testbox");
-			auto p = n->GetPosition();
-			log_v(MODULE, "Testbox: (%f, %f, %f)", p.x_, p.y_, p.z_);
-		});*/
-		static uint a = 0;
-		if(((a++) % 150) == 0){
-			main_context::access(m_server, [&](main_context::Interface *imc)
-			{
-				Scene *scene = imc->check_scene(m_main_scene);
-				Node *n = scene->GetChild("Testbox");
-				if(n){
-					n->SetRotation(Quaternion(30, 60, 90));
-					n->SetPosition(Vector3(30.0f, 30.0f, 40.0f));
-				}
-			});
-		}
 	}
 
 	// Standing-height air along -X (player facing). No path check; long enough

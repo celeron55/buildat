@@ -1,0 +1,11 @@
+{
+	"dependencies": [
+		{"module": "network"},
+		{"module": "client_lua"},
+		{"module": "client_data"},
+		{"module": "replicate"},
+		{"module": "voxelworld"},
+		{"module": "voxel_shading"},
+		{"module": "worldgen"}
+	]
+}

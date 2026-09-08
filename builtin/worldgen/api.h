@@ -4,7 +4,9 @@
 #include "interface/event.h"
 #include "interface/server.h"
 #include "interface/module.h"
+#include "interface/voxel.h"
 #include <PolyVoxCore/Vector.h>
+#include <PolyVoxCore/RawVolume.h>
 #include <functional>
 
 namespace main_context
@@ -31,8 +33,27 @@ namespace worldgen
 	struct GeneratorInterface
 	{
 		virtual ~GeneratorInterface(){}
-		virtual void generate_section(interface::Server *server,
-				SceneReference scene_ref, const pv::Vector3DInt16 &section_p) = 0;
+
+		// How far outside the section a single generated thing can reach. A
+		// tree grown at the edge of a section stands partly in the next one,
+		// and the volume handed to generate() is the section grown by this
+		// much on every side so that the whole tree can be placed at once.
+		virtual pv::Vector3DInt32 get_padding_voxels()
+		{
+			return pv::Vector3DInt32(0, 0, 0);
+		}
+
+		// Fill the volume over the whole of its region, which is the section
+		// plus the padding above.
+		//
+		// This runs in a worker thread with no module held, so that
+		// generation does not keep voxelworld from anything else: nothing in
+		// here may access another module. The result is merged into the world
+		// afterwards, and a voxel left VOXELTYPEID_UNDEFINED is left to
+		// whatever generates the section it belongs to.
+		virtual void generate(SceneReference scene_ref,
+				const pv::Vector3DInt16 &section_p,
+				pv::RawVolume<interface::VoxelInstance> &volume) = 0;
 	};
 
 	struct Instance

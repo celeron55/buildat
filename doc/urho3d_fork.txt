@@ -51,3 +51,13 @@ Bin/Data/UI/MessageBox.xml
 Kept from an earlier bundled version; 1.7.1 does not ship it, and
 UI/MessageBox.cpp loads it by name when a MessageBox is created without a
 layout of its own.
+
+Forced input focus (01faa4b)
+----------------------------
+Input/Input.{cpp,h}
+
+Input::SetForceInputFocus() makes Input treat the window as focused whether or
+not the OS gives it any focus, so injected keyboard and mouse events are not
+dropped by the no-focus early-out in HandleSDLEvent(). The client's command
+sequence mode uses it to run without raising its window or stealing focus from
+whatever the user is doing; see doc/client_commands.txt.

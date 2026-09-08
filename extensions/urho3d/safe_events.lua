@@ -11,6 +11,11 @@ return {
 	},
 	KeyDown = {
 		Key = {variant = "Int", safe = "number"},
+		-- True when this is a key repeat rather than a fresh press
+		Repeat = {variant = "Bool", safe = "boolean"},
+	},
+	KeyUp = {
+		Key = {variant = "Int", safe = "number"},
 	},
 	MouseButtonDown = {
 		Button = {variant = "Int", safe = "number"},

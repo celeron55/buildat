@@ -27,6 +27,12 @@ local MODIFIED_GEOMETRY_NEAR_WEIGHT = 1.0
 
 local MAX_LOD = 4
 
+-- A chunk that is not in the scene yet is only missing for now: the section
+-- may still be streaming in. Anything that asks about it (a game reading
+-- voxels ahead of itself, say) would otherwise get nil for the rest of the
+-- session.
+local NEGATIVE_CACHE_US = 200000
+
 local camera_node = nil
 local update_counter = -1
 
@@ -461,7 +467,8 @@ function M.get_static_node(chunk_p)
 			end
 			cache.node = nil
 			cache.fetched = false
-		else
+		elseif buildat.get_time_us() - (cache.fetched_us or 0) <
+				NEGATIVE_CACHE_US then
 			log:trace("get_static_node(): chunk_p="..chunk_p:dump().." (cache)")
 			return nil
 		end
@@ -500,6 +507,7 @@ function M.get_static_node(chunk_p)
 	end
 	cache.node = node
 	cache.fetched = true
+	cache.fetched_us = buildat.get_time_us()
 	if node == nil then
 		log:trace("get_static_node(): static node "..chunk_p:dump()..
 				" not found")

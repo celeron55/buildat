@@ -130,7 +130,10 @@ SDL_DBus_Quit(void)
     if (dbus.session_conn) {
         dbus.connection_close(dbus.session_conn);
         dbus.connection_unref(dbus.session_conn);
-        dbus.shutdown();
+        /* Don't call dbus.shutdown() here: it bumps libdbus' global
+           generation counter, which makes any other library holding a D-Bus
+           connection (e.g. libGLX_nvidia) abort in its own exit cleanup.
+           Upstream SDL removed this call for the same reason. */
         SDL_memset(&dbus, 0, sizeof(dbus));
     }
     UnloadDBUSLibrary();

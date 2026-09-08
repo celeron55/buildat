@@ -300,6 +300,12 @@ public:
     /// Return whether application window has input focus.
     bool HasFocus() { return inputFocus_; }
 
+    /// Treat the window as having input focus whether or not the OS gives it any. For injecting input into a window that must not steal focus from whatever the user is doing.
+    void SetForceInputFocus(bool enable) { forceInputFocus_ = enable; }
+
+    /// Return whether input focus is being forced.
+    bool GetForceInputFocus() const { return forceInputFocus_; }
+
     /// Return whether application window is minimized.
     bool IsMinimized() const;
 
@@ -421,6 +427,8 @@ private:
     bool touchEmulation_;
     /// Input focus flag.
     bool inputFocus_;
+    /// Forced input focus flag.
+    bool forceInputFocus_;
     /// Minimized flag.
     bool minimized_;
     /// Gained focus on this frame flag.

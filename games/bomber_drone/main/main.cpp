@@ -148,11 +148,18 @@ struct Module: public interface::Module
 
 	SceneReference m_main_scene;
 
+	// Runway start; the drone spawns here and accelerates towards +X
 	static const int SPAWN_X = -5;
 	static const int SPAWN_Z = 257;
 	static const int SPAWN_Y_MAX = 127;
 	static const int SPAWN_Y_MIN = -64;
-	static constexpr float PLAYER_HEIGHT = 1.7f;
+
+	static const int RUNWAY_LENGTH = 32;
+	static const int RUNWAY_HALF_WIDTH = 2; // 5 voxels wide
+	// Airspace: cleared above the runway and past its end, so a takeoff does
+	// not need the terrain to happen to be flat around the strip
+	static const int AIRSPACE_HEIGHT = 24;
+	static const int AIRSPACE_MARGIN = 6;
 
 	// chunk 32 * section 2; matches voxelworld defaults
 	static const int SECTION_SIZE_VOXELS = 64;
@@ -166,11 +173,12 @@ struct Module: public interface::Module
 	static const size_t STREAM_SECTIONS_PER_PASS = 2;
 
 	bool m_spawn_ready = false;
+	size_t m_sent_worldgen_queue = (size_t)-1;
 	float m_spawn_y = 0;
 	size_t m_worldgen_queue = 0;
 	uint m_stream_tick = 0;
 
-	sm_<network::PeerInfo::Id, pv::Vector3DInt32> m_player_voxel_p;
+	sm_<network::PeerInfo::Id, pv::Vector3DInt32> m_drone_voxel_p;
 	set_<uint64_t> m_requested_sections;
 	set_<uint64_t> m_pinned_sections;
 
@@ -191,11 +199,9 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:place_voxel"));
+				"network:packet_received/main:explode"));
 		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:dig_voxel"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:player_pos"));
+				"network:packet_received/main:drone_pos"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
 		m_server->sub_event(this, Event::t("worldgen:queue_modified"));
 	}
@@ -208,12 +214,10 @@ struct Module: public interface::Module
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 		EVENT_TYPEN("client_file:files_transmitted",
 				on_files_transmitted, client_file::FilesTransmitted)
-		EVENT_TYPEN("network:packet_received/main:place_voxel",
-				on_place_voxel, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:dig_voxel",
-				on_dig_voxel, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:player_pos",
-				on_player_pos, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:explode",
+				on_explode, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:drone_pos",
+				on_drone_pos, network::Packet)
 		EVENT_TYPEN("network:client_disconnected",
 				on_client_disconnected, network::OldClient)
 		EVENT_TYPEN("worldgen:queue_modified",
@@ -291,8 +295,7 @@ struct Module: public interface::Module
 					ivoxelworld->get_instance(m_main_scene);
 			interface::VoxelRegistry *voxel_reg = world->get_voxel_reg();
 			// roughness, spec_strength, bumpiness, translucency, spots,
-			// static_spots; see interface/atlas.h. The values are
-			// voxel_lighting's, which is where they were chosen.
+			// static_spots; see interface/atlas.h
 			add_voxel(voxel_reg, "air", "", false, false, true);     // id 1
 			add_voxel(voxel_reg, "rock", "main/rock.png", true, true, false,
 					0.95f, 0.15f, 0.5f, 0.0f, 0.0f, 0.04f);    // id 2
@@ -306,10 +309,8 @@ struct Module: public interface::Module
 					0.85f, 0.35f, 2.0f, 0.0f, 0.0f, 0.0f,
 					"main/tree_top.png");                      // id 6
 
-			// Skylight, which is what the voxel shading reads to tell a dug
-			// tunnel apart from a shadow. Enabled after the voxels are
-			// defined, as it needs their edge materials to know what blocks
-			// light.
+			// Skylight, which is what the voxel shading reads to tell a bomb
+			// crater apart from a shadow
 			world->set_skylight_enabled(true);
 		});
 
@@ -366,6 +367,8 @@ struct Module: public interface::Module
 				interface::container_coord(p.getZ(), SECTION_SIZE_VOXELS));
 	}
 
+	// Modified voxels only exist in memory; a section that unloads would come
+	// back as freshly generated terrain, so keep the modified ones loaded.
 	void pin_section_at_voxel(const pv::Vector3DInt32 &p)
 	{
 		m_pinned_sections.insert(section_key_at_voxel(p));
@@ -433,17 +436,17 @@ struct Module: public interface::Module
 		});
 	}
 
-	void stream_players_or_spawn()
+	void stream_drones_or_spawn()
 	{
-		if(m_player_voxel_p.empty()){
+		if(m_drone_voxel_p.empty()){
 			stream_around(pv::Vector3DInt32(SPAWN_X, 20, SPAWN_Z));
 			return;
 		}
-		for(auto &pair : m_player_voxel_p)
+		for(auto &pair : m_drone_voxel_p)
 			stream_around(pair.second);
 	}
 
-	bool section_near_any_player(const pv::Vector3DInt16 &section_p)
+	bool section_near_any_drone(const pv::Vector3DInt16 &section_p)
 	{
 		auto near_p = [&](const pv::Vector3DInt32 &voxel_p){
 			int sx = interface::container_coord(voxel_p.getX(),
@@ -455,13 +458,12 @@ struct Module: public interface::Module
 			if(dx < 0) dx = -dx;
 			if(dz < 0) dz = -dz;
 			// Y is only three layers; keep the whole column while XZ is near
-			// so climbing a hill does not drop in-flight underground generate.
 			return dx <= STREAM_UNLOAD_RADIUS_XZ &&
 					dz <= STREAM_UNLOAD_RADIUS_XZ;
 		};
-		if(m_player_voxel_p.empty())
+		if(m_drone_voxel_p.empty())
 			return near_p(pv::Vector3DInt32(SPAWN_X, 20, SPAWN_Z));
-		for(auto &pair : m_player_voxel_p){
+		for(auto &pair : m_drone_voxel_p){
 			if(near_p(pair.second))
 				return true;
 		}
@@ -475,7 +477,7 @@ struct Module: public interface::Module
 			if(m_pinned_sections.count(k))
 				continue;
 			pv::Vector3DInt16 p = section_from_key(k);
-			if(section_near_any_player(p))
+			if(section_near_any_drone(p))
 				continue;
 			drop.push_back(k);
 			if(drop.size() >= STREAM_SECTIONS_PER_PASS)
@@ -496,9 +498,11 @@ struct Module: public interface::Module
 	void on_tick(const interface::TickEvent &event)
 	{
 		if(((m_stream_tick++) % 4) == 0){
-			stream_players_or_spawn();
+			stream_drones_or_spawn();
 			unload_distant_sections();
 		}
+		if((m_stream_tick % 10) == 0)
+			send_worldgen_queue_size();
 		try_resolve_spawn();
 	}
 
@@ -517,6 +521,38 @@ struct Module: public interface::Module
 		});
 		log_v(MODULE, "Sent spawn (%.2f, %.2f, %.2f) to peer %zu",
 				x, y, z, peer);
+	}
+
+	// The strip itself is rock, the ground under it dirt so a runway laid over
+	// a dip does not float, and everything above it air out to a margin so
+	// takeoff has somewhere to go.
+	void build_runway(voxelworld::Instance *world, int runway_y)
+	{
+		for(int dx = -AIRSPACE_MARGIN; dx < RUNWAY_LENGTH + AIRSPACE_MARGIN;
+				dx++){
+			for(int dz = -RUNWAY_HALF_WIDTH - AIRSPACE_MARGIN;
+					dz <= RUNWAY_HALF_WIDTH + AIRSPACE_MARGIN; dz++){
+				int x = SPAWN_X + dx;
+				int z = SPAWN_Z + dz;
+				bool on_strip = (dx >= 0 && dx < RUNWAY_LENGTH &&
+						dz >= -RUNWAY_HALF_WIDTH && dz <= RUNWAY_HALF_WIDTH);
+				pin_section_at_voxel(pv::Vector3DInt32(x, runway_y, z));
+				if(on_strip){
+					world->set_voxel(pv::Vector3DInt32(x, runway_y, z),
+							VoxelInstance(2), true);
+					for(int dy = -1; dy >= -4; dy--){
+						world->set_voxel(
+								pv::Vector3DInt32(x, runway_y + dy, z),
+								VoxelInstance(3), true);
+					}
+				}
+				for(int dy = 1; dy <= AIRSPACE_HEIGHT; dy++){
+					pv::Vector3DInt32 p(x, runway_y + dy, z);
+					pin_section_at_voxel(p);
+					world->set_voxel(p, VoxelInstance(1), true);
+				}
+			}
+		}
 	}
 
 	// Terrain ids: 2 rock, 3 dirt, 4 grass. Skip air (1), trees/leaves (5, 6).
@@ -558,34 +594,20 @@ struct Module: public interface::Module
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *world)
 		{
-			for(int dx = -2; dx <= 2; dx++){
-				for(int dz = -2; dz <= 2; dz++){
-					for(int dy = 1; dy <= 3; dy++){
-						world->set_voxel(
-								pv::Vector3DInt32(SPAWN_X + dx,
-								surface_y + dy, SPAWN_Z + dz),
-								VoxelInstance(1), true);
-					}
-				}
-			}
+			build_runway(world, surface_y);
 		});
-		// Voxel n is a 1x1x1 cube centered at n; stand on its top face.
-		m_spawn_y = (float)surface_y + 0.5f + PLAYER_HEIGHT / 2.0f + 0.05f;
+		// Voxel n is a 1x1x1 cube centered at n; sit on its top face
+		m_spawn_y = (float)surface_y + 0.5f + 0.4f;
 		m_spawn_ready = true;
-		log_i(MODULE, "Spawn at (%i, %.2f, %i) (terrain y=%i)",
-				SPAWN_X, m_spawn_y, SPAWN_Z, surface_y);
+		log_i(MODULE, "Runway at (%i, %i, %i), spawn y=%.2f",
+				SPAWN_X, surface_y, SPAWN_Z, m_spawn_y);
 
+		sv_<network::PeerInfo::Id> peers;
 		network::access(m_server, [&](network::Interface *inetwork){
-			std::ostringstream os(std::ios::binary);
-			cereal::PortableBinaryOutputArchive ar(os);
-			double x = SPAWN_X;
-			double y = m_spawn_y;
-			double z = SPAWN_Z;
-			ar(x, y, z);
-			ss_ data = os.str();
-			for(auto peer : inetwork->list_peers())
-				inetwork->send(peer, "main:spawn", data);
+			peers = inetwork->list_peers();
 		});
+		for(auto peer : peers)
+			send_spawn(peer);
 	}
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
@@ -604,59 +626,68 @@ struct Module: public interface::Module
 		send_spawn(event.recipient);
 	}
 
-	void on_place_voxel(const network::Packet &packet)
+	// A bomb hit: delete a sphere of voxels. The client decides where and how
+	// large; there is nothing to cheat for in a single-player-shaped game.
+	void on_explode(const network::Packet &packet)
 	{
-		pv::Vector3DInt32 voxel_p;
+		double x, y, z, diameter;
 		{
 			std::istringstream is(packet.data, std::ios::binary);
 			cereal::PortableBinaryInputArchive ar(is);
-			ar(voxel_p);
+			ar(x, y, z, diameter);
 		}
-		log_v(MODULE, "C%i: on_place_voxel(): p=" PV3I_FORMAT,
-				packet.sender, PV3I_PARAMS(voxel_p));
-
-		pin_section_at_voxel(voxel_p);
+		if(!(diameter > 0.0 && diameter <= 64.0)){
+			log_w(MODULE, "C%i: on_explode(): bad diameter %.2f",
+					packet.sender, diameter);
+			return;
+		}
+		float r = diameter / 2.0f;
+		int ri = (int)std::ceil(r);
+		int cx = (int)std::floor(x + 0.5), cy = (int)std::floor(y + 0.5),
+				cz = (int)std::floor(z + 0.5);
+		log_v(MODULE, "C%i: on_explode(): (%i, %i, %i) d=%.1f",
+				packet.sender, cx, cy, cz, diameter);
 		voxelworld::access(m_server, m_main_scene,
-				[&](voxelworld::Instance *instance)
+				[&](voxelworld::Instance *world)
 		{
-			instance->set_voxel(voxel_p, VoxelInstance(2));
+			for(int dx = -ri; dx <= ri; dx++){
+				for(int dy = -ri; dy <= ri; dy++){
+					for(int dz = -ri; dz <= ri; dz++){
+						if(dx*dx + dy*dy + dz*dz > r*r)
+							continue;
+						pv::Vector3DInt32 p(cx + dx, cy + dy, cz + dz);
+						pin_section_at_voxel(p);
+						world->set_voxel(p, VoxelInstance(1), true);
+					}
+				}
+			}
 		});
 	}
 
-	void on_dig_voxel(const network::Packet &packet)
-	{
-		pv::Vector3DInt32 voxel_p;
-		{
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(voxel_p);
-		}
-		log_v(MODULE, "C%i: on_dig_voxel(): p=" PV3I_FORMAT,
-				packet.sender, PV3I_PARAMS(voxel_p));
-
-		pin_section_at_voxel(voxel_p);
-		voxelworld::access(m_server, m_main_scene,
-				[&](voxelworld::Instance *instance)
-		{
-			instance->set_voxel(voxel_p, VoxelInstance(1));
-		});
-	}
-
+	// Only take the number here. Reaching into the network module from a
+	// worldgen event can deadlock against the thread that is already in it,
+	// and the queue changes far too often to be worth a packet each time.
 	void on_worldgen_queue_modified(const worldgen::QueueModifiedEvent &event)
 	{
 		log_t(MODULE, "on_worldgen_queue_modified()");
 		m_worldgen_queue = event.queue_size;
-		network::access(m_server, [&](network::Interface *inetwork){
-			sv_<network::PeerInfo::Id> peers = inetwork->list_peers();
-			for(auto &peer: peers){
-				inetwork->send(peer, "main:worldgen_queue_size",
-						itos(event.queue_size));
-			}
-		});
 		try_resolve_spawn();
 	}
 
-	void on_player_pos(const network::Packet &packet)
+	void send_worldgen_queue_size()
+	{
+		if(m_worldgen_queue == m_sent_worldgen_queue)
+			return;
+		m_sent_worldgen_queue = m_worldgen_queue;
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(auto &peer : inetwork->list_peers()){
+				inetwork->send(peer, "main:worldgen_queue_size",
+						itos(m_worldgen_queue));
+			}
+		});
+	}
+
+	void on_drone_pos(const network::Packet &packet)
 	{
 		double x, y, z;
 		{
@@ -664,15 +695,15 @@ struct Module: public interface::Module
 			cereal::PortableBinaryInputArchive ar(is);
 			ar(x, y, z);
 		}
-		m_player_voxel_p[packet.sender] = pv::Vector3DInt32(
+		m_drone_voxel_p[packet.sender] = pv::Vector3DInt32(
 				(int32_t)std::floor(x), (int32_t)std::floor(y),
 				(int32_t)std::floor(z));
-		stream_around(m_player_voxel_p[packet.sender]);
+		stream_around(m_drone_voxel_p[packet.sender]);
 	}
 
 	void on_client_disconnected(const network::OldClient &old_client)
 	{
-		m_player_voxel_p.erase(old_client.info.id);
+		m_drone_voxel_p.erase(old_client.info.id);
 	}
 };
 

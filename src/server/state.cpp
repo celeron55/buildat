@@ -194,7 +194,7 @@ struct ModuleContainer
 				// Return an exception to make sure the caller doesn't continue
 				// without knowing what it's doing
 				ss_ caller_name = caller_mc ? caller_mc->info.name : "__unknown";
-				throw interface::TargetModuleNotAvailable(
+				throw interface::ModuleAskedToStop(
 						"Target module ["+info.name+"] is stopping - "
 						"called by ["+caller_name+"]");
 			}
