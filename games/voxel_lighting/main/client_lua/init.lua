@@ -509,6 +509,19 @@ do
 	magic.ui:SetFocusElement(nil)
 end
 
+-- The terrain is generated on the server after the client has connected, which
+-- takes a few seconds and shows as nothing but sky. Say what is going on until
+-- the first chunk's geometry exists.
+local wait_text = magic.ui.root:CreateChild("Text")
+wait_text:SetText("Generating terrain...")
+wait_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 24)
+wait_text.horizontalAlignment = magic.HA_CENTER
+wait_text.verticalAlignment = magic.VA_CENTER
+wait_text:SetPosition(0, 0)
+voxelworld.sub_geometry_update(function(node)
+	wait_text:SetText("")
+end)
+
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	local key = event_data:GetInt("Key")
 	if key == magic.KEY_TAB then
