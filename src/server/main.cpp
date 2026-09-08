@@ -56,7 +56,7 @@ int main(int argc, char *argv[])
 
 	std::string module_path;
 
-	const char opts[100] = "hm:r:i:S:U:c:l:L:C:";
+	const char opts[100] = "hm:r:i:S:U:c:l:L:C:A:P:";
 	const char usagefmt[1000] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
@@ -69,6 +69,8 @@ int main(int argc, char *argv[])
 			"  -l [integer]         Set maximum log level (0...5)\n"
 			"  -L [log file path]   Append log to a specified file\n"
 			"  -C [module_name]     Skip compiling specified module\n"
+			"  -A [address]         Set listening address (default any4)\n"
+			"  -P [port]            Set network port (default 20000)\n"
 			;
 
 	int c;
@@ -102,6 +104,14 @@ int main(int argc, char *argv[])
 		case 'c':
 			log_i(MODULE, "config.compiler_command: %s", c55_optarg);
 			config.set("compiler_command", c55_optarg);
+			break;
+		case 'A':
+			log_i(MODULE, "config.network_address: %s", c55_optarg);
+			config.set("network_address", c55_optarg);
+			break;
+		case 'P':
+			log_i(MODULE, "config.network_port: %s", c55_optarg);
+			config.set("network_port", c55_optarg);
 			break;
 		case 'l':
 			log_set_max_level(atoi(c55_optarg));
