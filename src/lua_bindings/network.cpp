@@ -16,6 +16,7 @@
 #endif
 #include <luabind/luabind.hpp>
 #include <string.h>
+#include <stdlib.h> // atoi()
 #include <vector>
 #define MODULE "lua_bindings"
 
@@ -41,6 +42,19 @@ static void close_socket_fd(int fd)
 #else
 	::close(fd);
 #endif
+}
+
+static bool sockaddr_to_ip_port(const struct sockaddr *sa, socklen_t len,
+		ss_ &ip, int &port)
+{
+	char host[NI_MAXHOST];
+	char serv[NI_MAXSERV];
+	if(getnameinfo(sa, len, host, sizeof host, serv, sizeof serv,
+			NI_NUMERICHOST | NI_NUMERICSERV) != 0)
+		return false;
+	ip = host;
+	port = atoi(serv);
+	return true;
 }
 
 static ss_ last_socket_error()
@@ -92,6 +106,8 @@ struct LuaSocket
 	bool m_udp = false;
 	ss_ m_remote; // "host:port" as given by the caller
 	ss_ m_error;
+	ss_ m_peer_ip;
+	int m_peer_port = 0;
 
 	LuaSocket(bool udp, const ss_ &remote):
 		m_udp(udp), m_remote(remote)
@@ -180,6 +196,13 @@ struct LuaSocket
 		if(m_fd == -1)
 			return false;
 		m_error = "";
+		{
+			struct sockaddr_storage sa;
+			socklen_t len = sizeof(sa);
+			if(getpeername(m_fd, (struct sockaddr*)&sa, &len) == 0)
+				sockaddr_to_ip_port((struct sockaddr*)&sa, len,
+						m_peer_ip, m_peer_port);
+		}
 		if(!m_udp){
 			int val = 1;
 			setsockopt(m_fd, IPPROTO_TCP, TCP_NODELAY, (const char*)&val,
@@ -200,33 +223,69 @@ struct LuaSocket
 		return m_error;
 	}
 
+	// "host:port" as the caller gave it; for showing to the user
 	ss_ address() const
 	{
 		return m_remote;
 	}
 
-	// send(data) -> was everything sent
-	bool send(const ss_ &data)
+	ss_ peer_ip() const
+	{
+		return m_peer_ip;
+	}
+
+	int peer_port() const
+	{
+		return m_peer_port;
+	}
+
+	ss_ local_ip() const
+	{
+		ss_ ip;
+		int port = 0;
+		local_address(ip, port);
+		return ip;
+	}
+
+	int local_port() const
+	{
+		ss_ ip;
+		int port = 0;
+		local_address(ip, port);
+		return port;
+	}
+
+	void local_address(ss_ &ip, int &port) const
 	{
 		if(m_fd == -1)
-			return false;
+			return;
+		struct sockaddr_storage sa;
+		socklen_t len = sizeof(sa);
+		if(getsockname(m_fd, (struct sockaddr*)&sa, &len) == 0)
+			sockaddr_to_ip_port((struct sockaddr*)&sa, len, ip, port);
+	}
+
+	// send(data) -> bytes sent, or -1 if the socket errored. Less than the
+	// whole thing means the send buffer is full; there is no send queue here,
+	// the caller retries with the rest.
+	int send(const ss_ &data)
+	{
+		if(m_fd == -1)
+			return -1;
 		size_t sent_total = 0;
 		while(sent_total < data.size()){
 			int sent = ::send(m_fd, &data[sent_total], data.size() - sent_total, 0);
 			if(sent < 0){
-				if(would_block()){
-					// simplified: no send queue. TCP writers should retry with
-					// what wasn't sent; UDP datagrams are all-or-nothing anyway.
-					return false;
-				}
+				if(would_block())
+					break;
 				fail("send: "+last_socket_error());
-				return false;
+				return -1;
 			}
-			if(m_udp)
-				return (size_t)sent == data.size();
 			sent_total += sent;
+			if(m_udp) // One datagram per call, whole or not at all
+				break;
 		}
-		return true;
+		return sent_total;
 	}
 
 	// receive() -> data; "" means nothing was available. If the peer closed the
@@ -239,7 +298,7 @@ struct LuaSocket
 		int r = recv(m_fd, &buf[0], buf.size(), 0);
 		if(r == 0){
 			if(!m_udp){
-				fail("peer closed the connection");
+				fail("closed");
 				return "";
 			}
 			return ""; // Empty datagram; indistinguishable from nothing
@@ -294,6 +353,10 @@ void init_network(lua_State *L)
 			.def("good", &LuaSocket::good)
 			.def("error", &LuaSocket::error)
 			.def("address", &LuaSocket::address)
+			.def("peer_ip", &LuaSocket::peer_ip)
+			.def("peer_port", &LuaSocket::peer_port)
+			.def("local_ip", &LuaSocket::local_ip)
+			.def("local_port", &LuaSocket::local_port)
 			.def("send", &LuaSocket::send)
 			.def("receive", &LuaSocket::receive)
 			.def("close", &LuaSocket::close),

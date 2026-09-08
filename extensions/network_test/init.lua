@@ -9,6 +9,7 @@
 -- With no arguments it opens a UDP socket to localhost:30001 (a Luanti
 -- server), sends one datagram and shows whatever comes back.
 local log = buildat.Logger("extension/network_test")
+local dump = buildat.dump
 local magic = require("buildat/extension/urho3d").safe
 local uistack = require("buildat/extension/uistack")
 local network = require("buildat/extension/network")
@@ -42,6 +43,8 @@ function M.boot()
 			set_status("udp_connect failed: "..err)
 			return
 		end
+		log:info("Socket at "..dump({socket:getsockname()}).." talking to "..
+				dump({socket:getpeername()})) 
 		-- A Luanti reliable packet with a nonsense body: the server ACKs a
 		-- reliable packet before it looks at what is inside, which is enough
 		-- of a reply to check the receive path with.
@@ -51,18 +54,23 @@ function M.boot()
 				0x00,                   -- channel
 				0x03, 0xff, 0xdc,       -- reliable, seqnum
 				0x01, 0x00, 0x02)       -- original, TOSERVER_INIT
-		if not socket:send(packet) then
-			set_status("send failed: "..socket:error())
+		local sent, send_err = socket:send(packet)
+		if not sent then
+			set_status("send failed: "..send_err)
 			return
 		end
 		set_status("Sent a datagram to "..socket:address())
+		local done = false
 		magic.SubscribeToEvent("Update", function(event_type, event_data)
-			if not socket:good() then
+			if done then
 				return
 			end
-			local data = socket:receive()
-			if data ~= "" then
+			local data, err = socket:receive()
+			if data then
 				set_status("Received "..#data.." bytes from "..socket:address())
+			elseif err ~= "timeout" then
+				set_status("receive failed: "..err)
+				done = true
 			end
 		end)
 	end)
