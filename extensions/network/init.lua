@@ -7,15 +7,24 @@
 -- address and name it. Answers are remembered in
 -- cache/network_addresses.csv.
 --
---   local network = require("buildat/extension/network")
---   network.udp_connect("localhost", 30001, function(socket, err)
---       if not socket then log:error(err) return end
---       socket:send("hello")
---       local data = socket:receive() -- "" if nothing arrived yet
+--   local socket = require("buildat/extension/network")
+--   socket.udp_connect("localhost", 30001, function(sock, err)
+--       if not sock then log:error(err) return end
+--       sock:send("hello")
+--       local data, err = sock:receive() -- nil, "timeout" if nothing yet
 --   end)
 --
--- The socket is connected to one peer; a UDP socket only receives datagrams
--- from the address it was opened for.
+-- The socket objects are LuaSocket's, as far as the safety layer allows:
+--
+-- * Opening a socket takes a callback, because the user has to answer the
+--   dialog first, and the address comes with it: there is no socket.tcp() /
+--   socket.udp() followed by connect() or setpeername().
+-- * A socket only talks to the one address the user accepted. Listening
+--   sockets and unconnected UDP do not exist here.
+-- * The sockets are always non-blocking, as with settimeout(0); settimeout()
+--   accepts 0 and warns about anything else.
+-- * socket.select(), socket.sleep(), socket.dns and socket.bind() are not
+--   provided. A game polls its sockets from an Update handler instead.
 
 local log = buildat.Logger("extension/network")
 local ui_utils = require("buildat/extension/ui_utils").safe
@@ -175,10 +184,30 @@ local function ask_user(uri, entry, on_answer)
 end
 
 -- The sockets
+--
+-- The interface is LuaSocket's, as far as the safety layer allows: opening a
+-- socket takes a callback because the user has to answer first, and there are
+-- no listening sockets and no unconnected UDP. Everything after opening --
+-- send, receive, patterns, error strings, timeouts -- works like LuaSocket
+-- with settimeout(0).
+
+-- LuaSocket's word for why receive() or send() got nothing done
+local function socket_error(socket)
+	if socket:good() then
+		return "timeout"
+	end
+	local err = socket:error()
+	if err == "" then
+		return "closed"
+	end
+	return err
+end
 
 -- Plain Lua wrapper; the socket object from C++ is not sandbox-safe, and this
 -- is where the first-packet notification happens.
-local function wrap_socket(socket, uri, is_udp)
+local function wrap_common(socket, uri, is_udp)
+	local w = {}
+
 	local function notify()
 		if notified[uri] then
 			return
@@ -186,34 +215,176 @@ local function wrap_socket(socket, uri, is_udp)
 		notified[uri] = true
 		ui_utils.show_notification("Connected to "..socket:address())
 	end
-
 	if not is_udp then
-		notify()
+		notify() -- The connection itself is the event for TCP
 	end
 
-	local w = {}
-	function w:send(data)
-		local ok = socket:send(data)
-		if ok then
+	-- send(data [, i [, j]]) -> index of the last byte sent
+	function w:send(data, i, j)
+		local first = i or 1
+		if first < 0 then
+			first = #data + first + 1
+		end
+		local part = data:sub(first, j or -1)
+		local sent = socket:send(part)
+		if sent > 0 then
 			notify()
 		end
-		return ok
+		if sent < 0 then
+			return nil, socket_error(socket)
+		end
+		if is_udp then
+			-- A datagram goes whole or not at all
+			if sent < #part then
+				return nil, socket_error(socket)
+			end
+			return 1
+		end
+		if sent == #part then
+			return first + sent - 1
+		end
+		return nil, "timeout", first + sent - 1
 	end
-	function w:receive()
-		return socket:receive()
+
+	function w:close()
+		socket:close()
+		return 1
 	end
-	function w:good()
-		return socket:good()
+
+	function w:getpeername()
+		return socket:peer_ip(), socket:peer_port()
 	end
-	function w:error()
-		return socket:error()
+
+	function w:getsockname()
+		return socket:local_ip(), socket:local_port()
 	end
+
+	-- simplified: the sockets are always non-blocking, which is what
+	-- settimeout(0) asks for. Upgrade path if a script needs to wait: select()
+	-- around the recv() in src/lua_bindings/network.cpp.
+	function w:settimeout(value, mode)
+		if value ~= nil and value ~= 0 then
+			log:warning("settimeout("..tostring(value)..
+					"): only 0 is supported; staying non-blocking")
+		end
+		return 1
+	end
+
+	function w:setoption(option, value)
+		return nil, "setoption() is not supported"
+	end
+
+	-- Not LuaSocket's, but the address as the user accepted it
 	function w:address()
 		return socket:address()
 	end
-	function w:close()
-		socket:close()
+
+	return w
+end
+
+local function wrap_tcp(socket, uri)
+	local w = wrap_common(socket, uri, false)
+	local buffer = ""
+
+	local function pump()
+		while true do
+			local data = socket:receive()
+			if data == "" then
+				return
+			end
+			buffer = buffer..data
+		end
 	end
+
+	local function take_all()
+		local data = buffer
+		buffer = ""
+		return data
+	end
+
+	-- receive([pattern [, prefix]]): a number of bytes, "*a" until the peer
+	-- closes the connection, or "*l" one line (the default). What was read
+	-- before a timeout comes back as the third value; pass it back as prefix.
+	function w:receive(pattern, prefix)
+		prefix = prefix or ""
+		pattern = pattern or "*l"
+		pump()
+		if type(pattern) == "number" then
+			if #buffer >= pattern then
+				local data = buffer:sub(1, pattern)
+				buffer = buffer:sub(pattern + 1)
+				return prefix..data
+			end
+			return nil, socket_error(socket), prefix..take_all()
+		end
+		if pattern == "*a" then
+			local data = prefix..take_all()
+			if socket:good() then
+				return nil, "timeout", data
+			end
+			if socket:error() == "closed" then
+				return data
+			end
+			return nil, socket:error(), data
+		end
+		if pattern == "*l" then
+			local i = buffer:find("\n", 1, true)
+			if i then
+				local line = buffer:sub(1, i - 1)
+				buffer = buffer:sub(i + 1)
+				if line:sub(-1) == "\r" then
+					line = line:sub(1, -2)
+				end
+				return prefix..line
+			end
+			return nil, socket_error(socket), prefix..take_all()
+		end
+		error("receive(): unknown pattern "..tostring(pattern))
+	end
+
+	return w
+end
+
+local function wrap_udp(socket, uri)
+	local w = wrap_common(socket, uri, true)
+
+	-- receive([size]): one datagram, truncated to size if given. An empty
+	-- datagram is indistinguishable from no datagram.
+	function w:receive(size)
+		local data = socket:receive()
+		if data == "" then
+			return nil, socket_error(socket)
+		end
+		if size and #data > size then
+			return data:sub(1, size)
+		end
+		return data
+	end
+
+	function w:receivefrom(size)
+		local data, err = w.receive(self, size)
+		if not data then
+			return nil, err
+		end
+		return data, socket:peer_ip(), socket:peer_port()
+	end
+
+	-- The socket only talks to the address the user accepted
+	function w:sendto(data, ip, port)
+		if ip ~= socket:peer_ip() or tonumber(port) ~= socket:peer_port() then
+			return nil, "this socket is connected to "..socket:address()
+		end
+		return w.send(self, data)
+	end
+
+	function w:setpeername(ip, port)
+		return nil, "the peer is set when the socket is opened"
+	end
+
+	function w:setsockname(ip, port)
+		return nil, "listening sockets are not supported"
+	end
+
 	return w
 end
 
@@ -225,8 +396,8 @@ local function open_socket(is_udp, host, port, cb)
 		cb(nil, socket:error())
 		return
 	end
-	cb(wrap_socket(socket, (is_udp and "udp://" or "tcp://")..
-			host..":"..port, is_udp))
+	local uri = (is_udp and "udp://" or "tcp://")..host..":"..port
+	cb(is_udp and wrap_udp(socket, uri) or wrap_tcp(socket, uri))
 end
 
 -- cb(socket, error): socket is nil if the connection was not made or the user
@@ -262,8 +433,14 @@ function M.safe.udp_connect(host, port, cb)
 	connect(true, host, port, cb)
 end
 
+-- LuaSocket's socket.gettime()
+function M.safe.gettime()
+	return buildat.get_time_us() / 1000000
+end
+
 M.tcp_connect = M.safe.tcp_connect
 M.udp_connect = M.safe.udp_connect
+M.gettime = M.safe.gettime
 
 return M
 -- vim: set noet ts=4 sw=4:
