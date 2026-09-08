@@ -4,6 +4,7 @@
 #include "core/log.h"
 #include "interface/module.h"
 #include "interface/server.h"
+#include "interface/server_config.h"
 #include "interface/event.h"
 #include "interface/tcpsocket.h"
 #include "interface/packet_stream.h"
@@ -116,8 +117,8 @@ struct Module: public interface::Module, public network::Interface
 
 	void on_start()
 	{
-		ss_ address = "any4";
-		ss_ port = "20000";
+		ss_ address = m_server->get_config().get<ss_>("network_address");
+		ss_ port = m_server->get_config().get<ss_>("network_port");
 
 		if(!m_listening_socket->bind_fd(address, port) ||
 				!m_listening_socket->listen_fd()){
