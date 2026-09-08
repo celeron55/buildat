@@ -70,7 +70,7 @@ int main(int argc, char *argv[])
 			"  -L [log file path]   Append log to a specified file\n"
 			"  -C [module_name]     Skip compiling specified module\n"
 			"  -A [address]         Set listening address (default any4)\n"
-			"  -P [port]            Set network port (default 20000)\n"
+			"  -P [port]            Set network port (default 29500)\n"
 			;
 
 	int c;

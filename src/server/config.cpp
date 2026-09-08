@@ -17,7 +17,7 @@ Config::Config()
 	set_default("urho3d_path", "");
 	set_default("compiler_command", "");
 	set_default("network_address", "any4");
-	set_default("network_port", "20000");
+	set_default("network_port", "29500");
 
 	set_default("skip_compiling_modules", json::object());
 }

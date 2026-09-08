@@ -235,12 +235,14 @@ static ss_ pick_free_local_port()
 {
 	std::random_device rd;
 	for(int i = 0; i < 100; i++){
-		int port = 30000 + rd() % 20000;
+		// 29168...29999 is unassigned in IANA's registry and below the
+		// ephemeral port range, so nothing else should want it
+		int port = 29168 + rd() % 832;
 		ss_ port_s = std::to_string(port);
 		if(!interface::probe_connect("127.0.0.1", port_s))
 			return port_s;
 	}
-	return "20000";
+	return "29500";
 }
 
 static ss_ pidfile_path()

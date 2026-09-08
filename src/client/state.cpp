@@ -138,7 +138,7 @@ struct CState: public State
 			return false;
 		}
 		if(port == ""){
-			port = "20000";
+			port = "29500";
 		}
 		return connect_host_port(host, port, error);
 	}
