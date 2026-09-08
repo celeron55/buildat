@@ -53,6 +53,14 @@ namespace interface
 		FaceDrawType face_draw_type = FaceDrawType::ON_EDGE;
 		EdgeMaterialId edge_material_id = EDGEMATERIALID_EMPTY;
 		bool physically_solid = false;
+		// Nothing whatsoever occupies this voxel: it is air, or something
+		// that behaves as air and only differs in what the game makes of it.
+		//
+		// This is not the same as EDGEMATERIALID_EMPTY, which only says that
+		// the cube faces against this voxel are not drawn; a voxel can do
+		// that and still hold a mesh of its own shape inside itself. What
+		// wants to know whether a voxel is free is this flag.
+		bool fully_empty = false;
 		// TODO: Flag for whether all faces should be always drawn (in case the
 		//       textures contain holes)
 		// TODO: Some kind of property for defining whether this is a thing for
@@ -72,6 +80,7 @@ namespace interface
 		FaceDrawType face_draw_type = FaceDrawType::ON_EDGE;
 		EdgeMaterialId edge_material_id = EDGEMATERIALID_EMPTY;
 		bool physically_solid = false;
+		bool fully_empty = false;
 
 		bool textures_valid = false;
 		AtlasSegmentReference textures[6];

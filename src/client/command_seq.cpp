@@ -426,16 +426,27 @@ void absorb_mouse_move_suppression(magic::Input *input)
 	SDL_PushEvent(&e);
 }
 
-void raise_window(magic::Graphics *graphics)
+// The window has to be mapped for the GL context to render what a screenshot
+// reads, but it is deliberately not raised and not given input focus: a
+// sequence can then run beside whatever the user is doing without the window
+// jumping in front of it at every injected key. Urho3D drops key and mouse
+// events while it has no focus, so the sequence forces the focus flag
+// instead; see Input::SetForceInputFocus.
+void show_window(magic::Graphics *graphics, magic::Input *input)
 {
-	if(!graphics)
-		return;
-	SDL_Window *w = graphics->GetWindow();
-	if(!w)
-		return;
-	SDL_ShowWindow(w);
-	SDL_RaiseWindow(w);
-	SDL_SetWindowInputFocus(w);
+	if(graphics){
+		SDL_Window *w = graphics->GetWindow();
+		if(w)
+			SDL_ShowWindow(w);
+	}
+	if(input)
+		input->SetForceInputFocus(true);
+}
+
+void release_forced_focus(magic::Input *input)
+{
+	if(input)
+		input->SetForceInputFocus(false);
 }
 
 static bool push_key(magic::Input *input, int key, bool down, ss_ *error)

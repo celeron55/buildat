@@ -263,6 +263,7 @@ struct CInstance: public voxelworld::Instance
 
 	// Skylight. Off unless the world asks for it; see api.h.
 	bool m_skylight_enabled = false;
+	bool m_physics_enabled;
 	// The world region in sections, so that the top of it can be found. Light
 	// enters from above that; everything outside is a barrier.
 	pv::Region m_section_region;
@@ -278,10 +279,11 @@ struct CInstance: public voxelworld::Instance
 	std::vector<SkylightSeed> m_skylight_seeds;
 
 	CInstance(interface::Server *server, SceneReference scene_ref,
-			const pv::Region &region):
+			const pv::Region &region, bool physics_enabled):
 		m_server(server),
 		m_scene_ref(scene_ref),
-		m_section_region(region)
+		m_section_region(region),
+		m_physics_enabled(physics_enabled)
 	{
 		m_voxel_reg.reset(interface::createVoxelRegistry());
 		m_block_reg.reset(interface::createBlockRegistry(m_voxel_reg.get()));
@@ -589,8 +591,10 @@ struct CInstance: public voxelworld::Instance
 				new NodeVolumeUpdated(m_scene_ref, n->GetID(), true, chunk_p));
 
 		// There are no collision shapes initially, but add the rigid body now
-		RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
-		body->SetFriction(0.75f);
+		if(m_physics_enabled){
+			RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
+			body->SetFriction(0.75f);
+		}
 	}
 
 	void create_section(Section &section)
@@ -640,6 +644,8 @@ struct CInstance: public voxelworld::Instance
 
 	void mark_node_for_physics_update(uint node_id)
 	{
+		if(!m_physics_enabled)
+			return;
 		QueuedNodePhysicsUpdate update(node_id);
 		auto it = std::lower_bound(m_nodes_needing_physics_update.begin(),
 				m_nodes_needing_physics_update.end(), update,
@@ -970,6 +976,137 @@ struct CInstance: public voxelworld::Instance
 			m_sections_with_loaded_buffers.insert(it, section);
 	}
 
+	// See the comment on Instance::merge_volume() in api.h for what the
+	// priorities are. This is chunk by chunk rather than voxel by voxel
+	// through set_voxel(): a section is a quarter of a million voxels, and
+	// all of this is done while holding the module.
+	void merge_volume(const pv::RawVolume<VoxelInstance> &volume,
+			bool create_missing_sections)
+	{
+		const pv::Region region = volume.getEnclosingRegion();
+		auto rlc = region.getLowerCorner();
+		auto ruc = region.getUpperCorner();
+		pv::Vector3DInt32 chunk_lc = container_coord(rlc, m_chunk_size_voxels);
+		pv::Vector3DInt32 chunk_uc = container_coord(ruc, m_chunk_size_voxels);
+
+		size_t num_written = 0;
+		for(int cz = chunk_lc.getZ(); cz <= chunk_uc.getZ(); cz++){
+		for(int cy = chunk_lc.getY(); cy <= chunk_uc.getY(); cy++){
+		for(int cx = chunk_lc.getX(); cx <= chunk_uc.getX(); cx++){
+			pv::Vector3DInt32 chunk_p(cx, cy, cz);
+			pv::Vector3DInt16 section_p =
+					container_coord16(chunk_p, m_section_size_chunks);
+			Section *section = get_section(section_p);
+			if(section == nullptr || !section->loaded){
+				if(!create_missing_sections)
+					continue;
+				// Created but not generated: the voxels are undefined apart
+				// from what this volume writes, and generate_section() will
+				// still ask for the rest when someone wants this section
+				Section &new_section = force_get_section(section_p);
+				if(!new_section.loaded)
+					load_section(new_section);
+				section = &new_section;
+			}
+			ChunkBuffer &buf = section->get_buffer(chunk_p, m_server,
+					&m_total_buffers_loaded);
+			if(!buf.volume){
+				log_d(MODULE, "merge_volume(): No buffer volume for chunk "
+						PV3I_FORMAT, PV3I_PARAMS(chunk_p));
+				continue;
+			}
+
+			pv::Region chunk_region = get_chunk_region_voxels(chunk_p);
+			pv::Vector3DInt32 lc = chunk_region.getLowerCorner();
+			pv::Vector3DInt32 uc = chunk_region.getUpperCorner();
+			// The part of this chunk the volume actually covers
+			if(lc.getX() < rlc.getX()) lc.setX(rlc.getX());
+			if(lc.getY() < rlc.getY()) lc.setY(rlc.getY());
+			if(lc.getZ() < rlc.getZ()) lc.setZ(rlc.getZ());
+			if(uc.getX() > ruc.getX()) uc.setX(ruc.getX());
+			if(uc.getY() > ruc.getY()) uc.setY(ruc.getY());
+			if(uc.getZ() > ruc.getZ()) uc.setZ(ruc.getZ());
+
+			pv::Vector3DInt32 chunk_off(
+					chunk_p.getX() * m_chunk_size_voxels.getX(),
+					chunk_p.getY() * m_chunk_size_voxels.getY(),
+					chunk_p.getZ() * m_chunk_size_voxels.getZ());
+
+			// Both volumes are walked by a sampler, which holds a pointer
+			// into the data and moves it by one per step, rather than by
+			// getVoxelAt()/setVoxelAt(), which work out the index from the
+			// coordinates every time. Luanti's VoxelManipulator walks its
+			// own index the same way, and for a whole section of voxels the
+			// difference is the bulk of the work.
+			pv::RawVolume<VoxelInstance>::Sampler src(
+					const_cast<pv::RawVolume<VoxelInstance>*>(&volume));
+			pv::RawVolume<VoxelInstance>::Sampler dst(buf.volume.get());
+
+			bool chunk_written = false;
+			for(int z = lc.getZ(); z <= uc.getZ(); z++){
+			for(int y = lc.getY(); y <= uc.getY(); y++){
+				src.setPosition(lc.getX(), y, z);
+				dst.setPosition(
+						lc.getX() - chunk_off.getX(),
+						y - chunk_off.getY(),
+						z - chunk_off.getZ());
+			for(int x = lc.getX(); x <= uc.getX(); x++,
+					src.movePositiveX(), dst.movePositiveX()){
+				VoxelInstance nv = src.getVoxel();
+				if(nv.get_id() == interface::VOXELTYPEID_UNDEFINED)
+					continue;
+				VoxelInstance old = dst.getVoxel();
+				bool old_undefined =
+						(old.get_id() == interface::VOXELTYPEID_UNDEFINED);
+				if(!old_undefined){
+					// Anything already standing here wins
+					if(!voxel_is_fully_empty(old))
+						continue;
+					// Empty stays empty unless something is put in it
+					if(voxel_is_fully_empty(nv))
+						continue;
+				}
+
+				if(m_skylight_enabled){
+					bool old_transparent = voxel_transmits_light(old);
+					if(old_transparent != voxel_transmits_light(nv)){
+						m_skylight_seeds.push_back(SkylightSeed{
+								pv::Vector3DInt32(x, y, z),
+								old.get_skylight(), old_transparent});
+					}
+					nv.set_skylight(old.get_skylight());
+				}
+
+				dst.setVoxel(nv);
+				chunk_written = true;
+				num_written++;
+			}
+			}
+			}
+
+			if(chunk_written){
+				if(!buf.dirty){
+					buf.dirty = true;
+					m_total_buffers_dirty++;
+				}
+				auto it = std::lower_bound(
+						m_sections_with_loaded_buffers.begin(),
+						m_sections_with_loaded_buffers.end(), section,
+						std::greater<Section*>());
+				if(it == m_sections_with_loaded_buffers.end() ||
+						*it != section)
+					m_sections_with_loaded_buffers.insert(it, section);
+			}
+		}
+		}
+		}
+
+		// Buffers were loaded above; keep to the limit once, not per voxel
+		maintain_maximum_buffer_limit();
+
+		log_d(MODULE, "merge_volume(): %zu voxels written", num_written);
+	}
+
 	// Read a voxel without loading anything or touching any bookkeeping, so
 	// that it is safe to call while chunk buffers are being committed. A chunk
 	// that is not in memory reads as undefined.
@@ -1034,6 +1171,21 @@ struct CInstance: public voxelworld::Instance
 	// Air voxels hold the light itself. Voxels that block light hold the
 	// brightest light next to them instead, which is what the mesher reads
 	// when the air voxel in front of a face is in a chunk it is not meshing.
+
+	// Whether nothing at all occupies the voxel. Not the same as
+	// voxel_transmits_light(): a voxel can leave the faces against it
+	// undrawn and still hold a mesh of its own inside itself, and such a
+	// voxel is not free for something else to take.
+	bool voxel_is_fully_empty(const VoxelInstance &v)
+	{
+		if(v.get_id() == interface::VOXELTYPEID_UNDEFINED)
+			return false;
+		const interface::CachedVoxelDefinition *def =
+				m_voxel_reg->get_cached(v);
+		if(def == nullptr)
+			return false;
+		return def->fully_empty;
+	}
 
 	bool voxel_transmits_light(const VoxelInstance &v)
 	{
@@ -1685,7 +1837,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 	// Interface
 
-	void create_instance(SceneReference scene_ref, const pv::Region &region)
+	void create_instance(SceneReference scene_ref, const pv::Region &region,
+			bool physics_enabled)
 	{
 		auto it = m_instances.find(scene_ref);
 		// TODO: Is an exception the best way to handle this?
@@ -1693,7 +1846,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 			throw Exception("create_instance(): Scene already has a voxel"
 					" world instance");
 
-		up_<CInstance> instance(new CInstance(m_server, scene_ref, region));
+		up_<CInstance> instance(new CInstance(m_server, scene_ref, region,
+				physics_enabled));
 		m_instances[scene_ref] = std::move(instance);
 	}
 

@@ -3,6 +3,7 @@
 #include "interface/thread.h"
 #include "interface/mutex.h"
 #include "interface/debug.h"
+#include "interface/module.h"
 #include "core/log.h"
 #include <c55/os.h>
 #ifdef _WIN32
@@ -89,8 +90,20 @@ struct CThread: public Thread
 #endif
 
 		try {
-			if(thread->m_thing)
-				thread->m_thing->run(thread);
+			try {
+				if(thread->m_thing)
+					thread->m_thing->run(thread);
+			} catch(ModuleAskedToStop &e){
+				// A module this thread needs is going away, so this thread has
+				// no work left either. Not a crash: exit quietly.
+				// simplified: this cannot tell shutdown apart from a module
+				// being reloaded from under an unrelated thread, which ends
+				// that thread silently. Distinguishing them needs the module
+				// container to know its module's child threads and stop them
+				// with it; do that if reload-time thread loss ever bites.
+				log_v(MODULE, "Thread %p (%s) stopping: %s",
+						arg, cs(thread_name), e.what());
+			}
 		} catch(std::exception &e){
 			log_w(MODULE, "ThreadThing of thread %p (%s) crashed: %s",
 					arg, cs(thread_name), e.what());

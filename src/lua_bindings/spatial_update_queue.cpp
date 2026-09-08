@@ -4,8 +4,9 @@
 #include "core/log.h"
 #include <tolua++.h>
 #include <Vector3.h>
-#include <list>
-#include <algorithm>
+#include <cassert>
+#include <map>
+#include <unordered_map>
 #define MODULE "lua_bindings"
 
 #define DEF_METHOD(name){ \
@@ -35,6 +36,17 @@ struct SpatialUpdateQueue
 	struct Value {
 		ss_ type;
 		uint32_t node_id = -1;
+
+		bool operator==(const Value &other) const {
+			return node_id == other.node_id && type == other.type;
+		}
+	};
+
+	struct ValueHash {
+		size_t operator()(const Value &v) const {
+			return std::hash<ss_>()(v.type) ^
+					(std::hash<uint32_t>()(v.node_id) * 2654435761u);
+		}
 	};
 
 	struct Item { // Queue item
@@ -46,78 +58,28 @@ struct SpatialUpdateQueue
 		float far_trigger_d = -1.0f;
 		float f = -1.0f;
 		float fw = -1.0f;
-
-		bool operator>(const Item &other) const;
 	};
 
-	// Set of values with iterators for fast access of items, so that items
-	// can be removed quickly by value
-	struct ValueSet
-	{
-		struct Entry
-		{
-			Value value;
-			std::list<Item>::iterator it;
-
-			Entry(const Value &value, std::list<Item>::iterator it =
-					std::list<Item>::iterator()):
-				value(value), it(it)
-			{}
-			bool operator>(const Entry &other) const {
-				if(value.node_id > other.value.node_id)
-					return true;
-				if(value.node_id < other.value.node_id)
-					return false;
-				return value.type > other.value.type;
-			}
-		};
-
-		// sorted list in descending node_id and type order
-		std::list<Entry> m_set;
-
-		void clear(){
-			m_set.clear();
-		}
-		void insert(const Value &value, std::list<Item>::iterator queue_it){
-			Entry entry(value, queue_it);
-			auto it = std::lower_bound(m_set.begin(), m_set.end(), entry,
-					std::greater<Entry>());
-			if(it == m_set.end())
-				m_set.insert(it, entry);
-			else if(it->value.node_id != value.node_id ||
-					it->value.type != value.type)
-				m_set.insert(it, entry);
-			else
-				*it = entry;
-		}
-		void remove(const Value &value){
-			Entry entry(value);
-			auto it = std::lower_bound(m_set.begin(), m_set.end(), entry,
-					std::greater<Entry>());
-			if(it == m_set.end())
-				return;
-			m_set.erase(it);
-		}
-		std::list<Item>::iterator*find(const Value &value){
-			Entry entry(value);
-			auto it = std::lower_bound(m_set.begin(), m_set.end(), entry,
-					std::greater<Entry>());
-			if(it == m_set.end())
-				return nullptr;
-			if(it->value.node_id != value.node_id ||
-					it->value.type != value.type)
-				return nullptr;
-			return &(it->it);
-		}
-	};
+	// Items that are due (f <= 1) come before ones that are not, and among
+	// those the smallest fw is the most important. That is the order the queue
+	// is popped in, so it is the order the map keeps.
+	typedef std::pair<bool, float> Key; // (f > 1.0f, fw)
+	typedef std::multimap<Key, Item> Queue;
 
 	Vector3 m_p;
 	Vector3 m_queue_oldest_p;
-	size_t m_queue_length = 0; // GCC std::list's size() is O(n)
-	std::list<Item> m_queue;
-	std::list<Item> m_old_queue;
+	Queue m_queue;
+	// Iterators into m_queue by value, so that an item can be found and
+	// replaced without walking the queue
+	std::unordered_map<Value, Queue::iterator, ValueHash> m_index;
+	// Items waiting to be re-put with a new f; a plain stack, because they are
+	// all going to be re-sorted anyway
+	sv_<Item> m_old_queue;
 
-	ValueSet m_value_set;
+	static Key key_of(const Item &item)
+	{
+		return Key(item.f > 1.0f, item.fw);
+	}
 
 	void update(int max_operations)
 	{
@@ -128,9 +90,9 @@ struct SpatialUpdateQueue
 		for(int i = 0; i<max_operations; i++){
 			if(m_old_queue.empty())
 				break;
-			Item &item = m_old_queue.back();
-			put_item(item);
+			Item item = m_old_queue.back();
 			m_old_queue.pop_back();
+			put_item(item);
 		}
 	}
 
@@ -138,9 +100,11 @@ struct SpatialUpdateQueue
 	{
 		m_p = p;
 		if(m_old_queue.empty() && (m_p - m_queue_oldest_p).Length() > 20){
-			m_queue_length = 0;
-			m_value_set.clear();
-			m_old_queue.swap(m_queue);
+			m_old_queue.reserve(m_queue.size());
+			for(auto &pair : m_queue)
+				m_old_queue.push_back(pair.second);
+			m_queue.clear();
+			m_index.clear();
 			m_queue_oldest_p = m_p;
 		}
 	}
@@ -175,25 +139,19 @@ struct SpatialUpdateQueue
 
 		// Find old entry; if the old entry is more important, discard the new
 		// one; if the old entry is less important, remove the old entry
-		std::list<Item>::iterator *itp = m_value_set.find(item.value);
-		if(itp != nullptr){
-			Item &old_item = **itp;
-			if(old_item.fw < item.fw){
+		auto index_it = m_index.find(item.value);
+		if(index_it != m_index.end()){
+			if(index_it->second->second.fw < item.fw){
 				// Old item is more important
 				return;
-			} else {
-				// New item is more important
-				m_queue.erase(*itp);
-				m_queue_length--;
-				m_value_set.remove(item.value);
 			}
+			// New item is more important
+			m_queue.erase(index_it->second);
+			m_index.erase(index_it);
 		}
 
-		auto it = std::lower_bound(m_queue.begin(), m_queue.end(),
-				item, std::greater<Item>()); // position in descending order
-		auto inserted_it = m_queue.insert(it, item);
-		m_queue_length++;
-		m_value_set.insert(item.value, inserted_it);
+		m_index[item.value] = m_queue.insert(
+				std::make_pair(key_of(item), item));
 	}
 
 	void put(const Vector3 &p, float near_weight, float near_trigger_d,
@@ -218,46 +176,106 @@ struct SpatialUpdateQueue
 	{
 		if(m_queue.empty())
 			throw Exception("SpatialUpdateQueue::pop(): Empty");
-		Item &item = m_queue.back();
-		m_value_set.remove(item.value);
-		m_queue.pop_back();
-		m_queue_length--;
+		auto it = m_queue.begin();
+		m_index.erase(it->second.value);
+		m_queue.erase(it);
 	}
 
 	Value& get_value()
 	{
 		if(m_queue.empty())
 			throw Exception("SpatialUpdateQueue::get_value(): Empty");
-		return m_queue.back().value;
+		return m_queue.begin()->second.value;
 	}
 
 	float get_f()
 	{
 		if(m_queue.empty())
 			throw Exception("SpatialUpdateQueue::get_f(): Empty");
-		return m_queue.back().f;
+		return m_queue.begin()->second.f;
 	}
 
 	float get_fw()
 	{
 		if(m_queue.empty())
 			throw Exception("SpatialUpdateQueue::get_fw(): Empty");
-		return m_queue.back().fw;
+		return m_queue.begin()->second.fw;
 	}
 
 	size_t get_length()
 	{
-		return m_queue_length;
+		return m_queue.size();
 	}
 };
 
-bool SpatialUpdateQueue::Item::operator>(const Item &other) const
+// The queue decides the order chunks are meshed in, and a silent ordering or
+// replacement bug there shows up only as chunks meshing late. Runs at startup;
+// it is a few microseconds.
+static void self_check()
 {
-	if(f > 1.0f && other.f <= 1.0f)
-		return true;
-	if(f <= 1.0f && other.f > 1.0f)
-		return false;
-	return fw > other.fw;
+	auto item_value = [](const char *type, uint32_t node_id){
+		SpatialUpdateQueue::Value v;
+		v.type = type;
+		v.node_id = node_id;
+		return v;
+	};
+
+	// Whichever is closest to its near trigger comes first, and f > 1 (not due
+	// yet) goes behind f <= 1 whatever the weights say
+	{
+		SpatialUpdateQueue q;
+		q.set_p(Vector3(0, 0, 0));
+		q.put(Vector3(50, 0, 0), 1.0f, 100.0f, -1.0f, -1.0f,
+				item_value("geometry", 1)); // f = 0.5
+		q.put(Vector3(10, 0, 0), 1.0f, 100.0f, -1.0f, -1.0f,
+				item_value("geometry", 2)); // f = 0.1
+		q.put(Vector3(200, 0, 0), 0.01f, 100.0f, -1.0f, -1.0f,
+				item_value("geometry", 3)); // f = 2, lowest fw of the three
+		assert(q.get_length() == 3);
+		assert(q.get_value().node_id == 2);
+		q.pop();
+		assert(q.get_value().node_id == 1);
+		q.pop();
+		assert(q.get_value().node_id == 3);
+		q.pop();
+		assert(q.empty());
+	}
+
+	// The same value put twice is one item: the more important put wins,
+	// whichever order the two come in
+	{
+		SpatialUpdateQueue q;
+		q.set_p(Vector3(0, 0, 0));
+		q.put(Vector3(50, 0, 0), 0.1f, 100.0f, -1.0f, -1.0f,
+				item_value("geometry", 1)); // fw = 5
+		q.put(Vector3(50, 0, 0), 1.0f, 100.0f, -1.0f, -1.0f,
+				item_value("geometry", 1)); // fw = 0.5, more important
+		assert(q.get_length() == 1);
+		assert(q.get_fw() < 1.0f);
+		q.put(Vector3(50, 0, 0), 0.1f, 100.0f, -1.0f, -1.0f,
+				item_value("geometry", 1)); // less important, discarded
+		assert(q.get_length() == 1);
+		assert(q.get_fw() < 1.0f);
+		// Same node, other type, is a different value
+		q.put(Vector3(50, 0, 0), 1.0f, 100.0f, -1.0f, -1.0f,
+				item_value("physics", 1));
+		assert(q.get_length() == 2);
+	}
+
+	// Moving far enough re-puts everything against the new position
+	{
+		SpatialUpdateQueue q;
+		q.set_p(Vector3(0, 0, 0));
+		q.put(Vector3(0, 0, 0), 1.0f, 100.0f, -1.0f, -1.0f,
+				item_value("geometry", 1));
+		q.put(Vector3(500, 0, 0), 1.0f, 100.0f, -1.0f, -1.0f,
+				item_value("geometry", 2));
+		q.set_p(Vector3(500, 0, 0));
+		assert(q.empty()); // Everything is waiting to be re-put
+		q.update(10);
+		assert(q.get_length() == 2);
+		assert(q.get_value().node_id == 2); // Now the near one
+	}
 }
 
 struct LuaSUQ
@@ -401,6 +419,8 @@ void init_spatial_update_queue(lua_State *L)
 		lua_pushcfunction(L, l_##name); \
 		lua_setglobal(L, "__buildat_" #name); \
 }
+	self_check();
+
 	LuaSUQ::register_metatable(L);
 
 	DEF_BUILDAT_FUNC(SpatialUpdateQueue);

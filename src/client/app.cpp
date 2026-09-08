@@ -406,7 +406,6 @@ struct CApp: public App, public magic::Application
 	BuildatResourceRouter *m_router;
 	magic::LuaScript *m_script;
 	lua_State *L;
-	bool m_reboot_requested = false;
 	// shutdown() is not instant; the frames until the window closes must not
 	// each call it again
 	bool m_shutdown_signal_handled = false;
@@ -529,8 +528,7 @@ struct CApp: public App, public magic::Application
 
 	~CApp()
 	{
-		if(!m_reboot_requested)
-			stop_local_server();
+		stop_local_server();
 	}
 
 	void set_state(sp_<client::State> state)
@@ -552,10 +550,7 @@ struct CApp: public App, public magic::Application
 	void shutdown()
 	{
 		log_v(MODULE, "shutdown()");
-		if(m_reboot_requested)
-			request_stop_local_server();
-		else
-			stop_local_server();
+		stop_local_server();
 
 		magic::Graphics *g = GetSubsystem<magic::Graphics>();
 		if(g){
@@ -567,18 +562,6 @@ struct CApp: public App, public magic::Application
 
 		magic::Engine *engine = GetSubsystem<magic::Engine>();
 		engine->Exit();
-	}
-
-	bool reboot_requested()
-	{
-		if(g_client_config.get<bool>("command_seq_enabled"))
-			return false;
-		return m_reboot_requested;
-	}
-
-	Options get_current_options()
-	{
-		return m_options;
 	}
 
 	void run_script(const ss_ &script)
@@ -791,7 +774,8 @@ struct CApp: public App, public magic::Application
 				throw AppStartupError("command sequence: "+err);
 			m_command_seq_active = true;
 			client::command_seq::inhibit_real_input(true);
-			client::command_seq::raise_window(GetSubsystem<magic::Graphics>());
+			client::command_seq::show_window(GetSubsystem<magic::Graphics>(),
+					GetSubsystem<magic::Input>());
 			log_i(MODULE, "Command sequence: %zu commands, will exit when done",
 					m_commands.size());
 		}
@@ -803,6 +787,8 @@ struct CApp: public App, public magic::Application
 		m_command_seq_failed = true;
 		m_command_seq_active = false;
 		client::command_seq::inhibit_real_input(false);
+		client::command_seq::release_forced_focus(
+				GetSubsystem<magic::Input>());
 		shutdown();
 	}
 
@@ -817,6 +803,8 @@ struct CApp: public App, public magic::Application
 		log_i(MODULE, "Command sequence complete");
 		m_command_seq_active = false;
 		client::command_seq::inhibit_real_input(false);
+		client::command_seq::release_forced_focus(
+				GetSubsystem<magic::Input>());
 		shutdown();
 	}
 
@@ -852,30 +840,25 @@ struct CApp: public App, public magic::Application
 	{
 		using client::command_seq::Type;
 		magic::Input *input = GetSubsystem<magic::Input>();
-		magic::Graphics *graphics = GetSubsystem<magic::Graphics>();
 		ss_ err;
 		bool ok = true;
 		switch(c.type){
 		case Type::KeyDown:
-			client::command_seq::raise_window(graphics);
 			ok = client::command_seq::inject_key(input, c.s, true, false, &err);
 			break;
 		case Type::KeyUp:
 			ok = client::command_seq::inject_key(input, c.s, false, false, &err);
 			break;
 		case Type::KeyPress:
-			client::command_seq::raise_window(graphics);
 			ok = client::command_seq::inject_key(input, c.s, true, true, &err);
 			break;
 		case Type::MousePos:
-			client::command_seq::raise_window(graphics);
 			ok = client::command_seq::inject_mouse_pos(input, c.x, c.y, &err);
 			break;
 		case Type::MouseMove:
 			ok = client::command_seq::inject_mouse_move(input, c.x, c.y, &err);
 			break;
 		case Type::MouseDown:
-			client::command_seq::raise_window(graphics);
 			ok = client::command_seq::inject_mouse_button(
 					input, c.x, true, false, &err);
 			break;
@@ -884,7 +867,6 @@ struct CApp: public App, public magic::Application
 					input, c.x, false, false, &err);
 			break;
 		case Type::MouseClick:
-			client::command_seq::raise_window(graphics);
 			ok = client::command_seq::inject_mouse_button(
 					input, c.x, true, true, &err);
 			break;
@@ -1255,12 +1237,9 @@ struct CApp: public App, public magic::Application
 		CApp *self = (CApp*)lua_touserdata(L, -1);
 		lua_pop(L, 1);
 
-		if(g_client_config.get<bool>("boot_to_menu")){
-			self->m_reboot_requested = true;
-			self->shutdown();
-		} else {
-			self->shutdown();
-		}
+		// Exiting a game exits the client, also when started from the
+		// launcher: the menu's Urho3D/Lua state is not resettable in place.
+		self->shutdown();
 
 		return 0;
 	}

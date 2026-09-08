@@ -836,9 +836,6 @@ void generate_voxel_lod_geometry(int lod,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 		bool use_skylight)
 {
-	// Far LODs are drawn unlit, and there is no unlit vertex-color technique
-	// without alpha blending, so skylight stops at the shadowed LODs.
-	use_skylight = use_skylight && lod <= interface::MAX_LOD_WITH_SHADOWS;
 	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
 	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
@@ -934,7 +931,6 @@ void generate_voxel_lod_geometry(int lod,
 					- h/2.0f - 0.5f - lod/2.0f;
 			tg_vert.position_.z_ = pv_vert.position.getZ() * lod
 					- d/2.0f - 0.5f - lod/2.0f;
-			// Set real normal temporarily for assign_txcoords().
 			tg_vert.normal_.x_ = pv_vert.normal.getX();
 			tg_vert.normal_.y_ = pv_vert.normal.getY();
 			tg_vert.normal_.z_ = pv_vert.normal.getZ();
@@ -942,18 +938,6 @@ void generate_voxel_lod_geometry(int lod,
 			size_t pv_vertex_i1 = pv_vertex_i - pv_vertex_i0;
 			assign_txcoords(pv_vertex_i1, aseg, tg_vert);
 			tg_vert.color_ = corner_colors[pv_vertex_i1];
-			// Don't use the real normal.
-			// Constant bright shading is needed so that the look of multiple
-			// shaded faces can be emulated by using textures. This normal
-			// should give it to us.
-			// Note that this normal isn't actually exactly correct: It should
-			// be the normal that points to the main light source of the scene;
-			// however, it is close enough.
-			// We can't turn off lighting for this geometry, because then we
-			// don't get shadows, which we do want.
-			tg_vert.normal_.x_ = 0;
-			tg_vert.normal_.y_ = 1;
-			tg_vert.normal_.z_ = 0;
 		}
 	}
 }
@@ -983,20 +967,19 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 		PODVector<CustomGeometryVertex> &cg_vertices = cg_all_vertices[cg_i];
 		cg_vertices = tg.vertex_data;
 		Material *material = new Material(context);
-		if(lod <= interface::MAX_LOD_WITH_SHADOWS){
-			if(tg.has_colors){
-				// The game sets the technique; see set_voxel_geometry()
-				material->SetShaderParameter("Roughness", 0.0f);
-				material->SetShaderParameter("Metallic", 0.0f);
-				material->SetTexture(TU_NORMAL, atlas_cache->normal_texture);
-				material->SetTexture(TU_SPECULAR, atlas_cache->spec_texture);
-			} else {
-				material->SetTechnique(0,
-						cache->GetResource<Technique>("Techniques/Diff.xml"));
-			}
+		// Every LOD is lit the same way as the geometry next to it. An unlit
+		// technique cannot match a scene lit in HDR and tonemapped, whatever
+		// is baked into its texture, and a visible brightness step at the LOD
+		// boundary is worse than the coarseness of the LOD itself.
+		if(tg.has_colors){
+			// The game sets the technique; see set_voxel_geometry()
+			material->SetShaderParameter("Roughness", 0.0f);
+			material->SetShaderParameter("Metallic", 0.0f);
+			material->SetTexture(TU_NORMAL, atlas_cache->normal_texture);
+			material->SetTexture(TU_SPECULAR, atlas_cache->spec_texture);
 		} else {
 			material->SetTechnique(0,
-					cache->GetResource<Technique>("Techniques/DiffUnlit.xml"));
+					cache->GetResource<Technique>("Techniques/Diff.xml"));
 		}
 		material->SetTexture(TU_DIFFUSE, atlas_cache->texture);
 		cg->SetMaterial(cg_i, material);

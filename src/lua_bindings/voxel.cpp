@@ -113,6 +113,7 @@ void init_voxel(lua_State *L)
 			.def_readwrite("face_draw_type", &VoxelDefinition::face_draw_type)
 			.def_readwrite("edge_material_id", &VoxelDefinition::edge_material_id)
 			.def_readwrite("physically_solid", &VoxelDefinition::physically_solid)
+			.def_readwrite("fully_empty", &VoxelDefinition::fully_empty)
 			.enum_("FaceDrawType")[
 				value("FACEDRAWTYPE_NEVER", (int)FaceDrawType::NEVER),
 				value("FACEDRAWTYPE_ALWAYS", (int)FaceDrawType::ALWAYS),
