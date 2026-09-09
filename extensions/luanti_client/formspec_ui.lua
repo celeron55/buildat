@@ -200,8 +200,9 @@ function M.new(magic, buildat, log, ctx)
 		end
 	end
 
-	-- The slots of one inventory list, and what is in them
-	local function draw_list(parent, layout, e, slots)
+	-- The slots of one inventory list, and what is in them. held is the slot
+	-- whose stack is in hand, which is marked so that it can be seen.
+	local function draw_list(parent, layout, e, slots, held)
 		local pos = formspec.parse_v2(e.fields[3])
 		local geom = formspec.parse_v2(e.fields[4])
 		if not pos or not geom then
@@ -218,7 +219,11 @@ function M.new(magic, buildat, log, ctx)
 				local y = (pos[2] + e.at[2]) * layout.scale[2] +
 						layout.origin[2] + row * step
 				local index = start + row * geom[1] + col + 1
-				box(parent, x, y, slot, slot, magic.Color(0, 0, 0, 0.45))
+				local in_hand = held and held.location == e.fields[1] and
+						held.list == e.fields[2] and held.index == index
+				box(parent, x, y, slot, slot, in_hand and
+						magic.Color(0.6, 0.6, 0.2, 0.55) or
+						magic.Color(0, 0, 0, 0.45))
 				local stack = list and list.items[index] or nil
 				draw_stack(parent, x, y, slot, stack)
 				slots[#slots + 1] = {
@@ -586,7 +591,7 @@ function M.new(magic, buildat, log, ctx)
 			elseif name == "background" or name == "background9" then
 				-- Drawn in the pass above
 			elseif name == "list" then
-				draw_list(window, layout, e, slots)
+				draw_list(window, layout, e, slots, state.held)
 			elseif name == "image" then
 				local x, y = at(e, 1)
 				local w, h = geometry(e, 2)
