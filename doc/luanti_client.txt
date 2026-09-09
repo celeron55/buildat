@@ -365,6 +365,17 @@ object was when it started rather than following it, and PLAY_SOUND's
 start_time is ignored, because seeking is not in the sandbox's SoundSource --
 a game uses that for background music a player rejoins in the middle of.
 
+The crack that grows over a node being dug is the client's own texture rather
+than the game's -- no server sends one -- so res/crack_anylength.png is
+Luanti's, and res/LICENSE says so. The strip is cut into frames by the same
+[verticalframe modifier an animated tile uses, and how many frames there are
+is worked out from the image's shape, which is what "anylength" in its name
+means. Luanti draws the crack as a second layer on the node's own tiles;
+here it is a cube just outside the voxel, so the crack around a stair is a
+cube. One scene node per frame, enabled one at a time: a Material lives only
+as long as something in the engine holds it, and a StaticModel that has been
+handed one is such a thing.
+
 What is next
 ------------
 - What an active object really looks like: Luanti draws a mesh for a mob, a
@@ -379,8 +390,6 @@ What is next
   image waypoint want the camera to turn a world position into a screen one,
   a compass wants the yaw, a minimap wants a map, and an inventory element and
   a hotbar element want the slots this client already draws its own way
-- The crack that grows over a node being dug, which is a texture of the
-  client's own rather than the game's
 - A connected node box, which is a shape that looks at its neighbours: a
   fence with its rails, a pane in a run, and a flowing liquid's sloped
   surface, which Luanti's own mesher works out the same way

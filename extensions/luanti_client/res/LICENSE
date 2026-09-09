@@ -1,0 +1,15 @@
+License information
+======================
+
+Everything in this directory is part of buildat and under the same Apache 2.0
+license as the rest of it, except for what is listed below.
+
+Contents
+---------
+crack_anylength.png
+  Taken from Luanti's default texture pack (textures/base/pack), which is
+  where a Luanti client's own crack overlay comes from: the crack is drawn by
+  the client rather than by the game, so a client needs one of its own.
+  Copyright Perttu Ahola <celeron55@gmail.com>
+  Creative Commons Attribution-ShareAlike 3.0 Unported
+  https://creativecommons.org/licenses/by-sa/3.0/
