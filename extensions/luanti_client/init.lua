@@ -376,9 +376,9 @@ local function show_client(host, port, name, password)
 			-- Luanti's yaw grows counterclockwise seen from above, so the
 			-- mouse going right, which turns the player right, takes it down
 			local yaw = client.yaw - dmouse.x * MOUSE_SENSITIVITY
-			-- Luanti's pitch is positive looking up, and the mouse moving away
-			-- from the user is negative y
-			local pitch = client.pitch - dmouse.y * MOUSE_SENSITIVITY
+			-- Luanti's pitch is positive looking down, which is the way the
+			-- mouse's own y goes
+			local pitch = client.pitch + dmouse.y * MOUSE_SENSITIVITY
 			if pitch > 89 then pitch = 89 end
 			if pitch < -89 then pitch = -89 end
 
@@ -439,7 +439,11 @@ local function show_client(host, port, name, password)
 					view:set_daylight(daylight)
 				end
 			end
-			view:update(dtime, DROP_DISTANCE)
+			-- Nothing is dropped until the server has said where the player
+			-- is: until then the camera is at the origin and everything that
+			-- has arrived looks far away, and a dropped block is one the
+			-- server will not send again
+			view:update(dtime, client.state == "ready" and DROP_DISTANCE or nil)
 
 			-- Media requests go out a batch a frame, and the registry is
 			-- rebuilt once what was asked for has arrived
