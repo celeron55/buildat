@@ -55,6 +55,26 @@ local TOSERVER_DELIVERY = {
 	[TOSERVER.SRP_BYTES_M]   = {1, true},
 }
 
+-- Luanti's PlayerControl bits, which PLAYERPOS carries; see
+-- PlayerControl::getKeysPressed() in its player.cpp
+M.KEY_UP = 1
+M.KEY_DOWN = 2
+M.KEY_LEFT = 4
+M.KEY_RIGHT = 8
+M.KEY_JUMP = 16
+M.KEY_AUX1 = 32
+M.KEY_SNEAK = 64
+M.KEY_DIG = 128
+M.KEY_PLACE = 256
+M.KEY_ZOOM = 512
+
+-- The order TOCLIENT_MOVEMENT's twelve floats come in
+local MOVEMENT_FIELDS = {
+	"acceleration_default", "acceleration_air", "acceleration_fast",
+	"speed_walk", "speed_crouch", "speed_fast", "speed_climb", "speed_jump",
+	"liquid_fluidity", "liquid_fluidity_smooth", "liquid_sink", "gravity",
+}
+
 local TOCLIENT = {
 	HELLO          = 0x02,
 	AUTH_ACCEPT    = 0x03,
@@ -64,6 +84,7 @@ local TOCLIENT = {
 	REMOVENODE     = 0x22,
 	TIME_OF_DAY    = 0x29,
 	MOVE_PLAYER    = 0x34,
+	MOVEMENT       = 0x45,
 	MEDIA          = 0x38,
 	NODEDEF        = 0x3A,
 	ANNOUNCE_MEDIA = 0x3C,
@@ -220,11 +241,19 @@ function M.new(socket, options, log)
 			-- on_media(files, bunch, bunches); media.lua is what keeps them
 			on_announce_media = nil,
 			on_media = nil,
+			-- on_movement(movement) with the game's movement constants, in
+			-- nodes a second and nodes a second squared; player.lua's
+			-- DEFAULT_MOVEMENT says what the fields are
+			on_movement = nil,
 			-- Where the server last put us, in nodes, and where we tell it we
 			-- are. The extension moves this; see set_position().
 			position = {x = 0, y = 0, z = 0},
 			pitch = 0,
 			yaw = 0,
+			-- What we tell the server we are doing: our speed in nodes a
+			-- second, and the keys as Luanti's PlayerControl bits
+			speed = {x = 0, y = 0, z = 0},
+			keys = 0,
 			-- The server's time of day, 0...23999, and how fast it runs
 			time_of_day = nil,
 			time_speed = 0,
@@ -443,6 +472,19 @@ function M.new(socket, options, log)
 		end
 	end
 
+	-- The game's movement constants, which come before the player spawns.
+	-- Twelve floats in the order LocalPlayer keeps them in; on the wire they
+	-- are in nodes and Luanti scales them by BS on the way in.
+	handlers[TOCLIENT.MOVEMENT] = function(r)
+		local m = {}
+		for _, name in ipairs(MOVEMENT_FIELDS) do
+			m[name] = r:f32()
+		end
+		if self.on_movement then
+			self.on_movement(m)
+		end
+	end
+
 	-- One node changed. The position is a node position, not a block one, and
 	-- at serialization version 24 and up a node on the wire is
 	-- u16 param0 | u8 param1 | u8 param2.
@@ -525,10 +567,12 @@ function M.new(socket, options, log)
 		-- Positions go as hundredths of a BS unit, so nodes * 1000
 		w:v3s32(math.floor(p.x * BS * 100), math.floor(p.y * BS * 100),
 				math.floor(p.z * BS * 100))
-		w:v3s32(0, 0, 0) -- Speed; nothing moves yet
+		local v = self.speed
+		w:v3s32(math.floor(v.x * BS * 100), math.floor(v.y * BS * 100),
+				math.floor(v.z * BS * 100))
 		w:s32(math.floor(self.pitch * 100))
 		w:s32(math.floor(self.yaw * 100))
-		w:u32(0) -- Keys pressed
+		w:u32(self.keys)
 		w:u8(math.floor(FOV * 80)) -- The server culls blocks outside this
 		w:u8(WANTED_RANGE_BLOCKS)
 		w:u8(0) -- Bits; the only one so far is an inverted camera
@@ -589,6 +633,14 @@ function M.new(socket, options, log)
 		self.position = {x = x, y = y, z = z}
 		self.pitch = pitch or self.pitch
 		self.yaw = yaw or self.yaw
+	end
+
+	-- What the server is told we are doing, which is what its movement checks
+	-- and its animations of us go by. speed is in nodes a second and keys is
+	-- a mask of M.KEY_*.
+	function self:set_motion(vx, vy, vz, keys)
+		self.speed = {x = vx, y = vy, z = vz}
+		self.keys = keys or 0
 	end
 
 	function self:send_client_ready()

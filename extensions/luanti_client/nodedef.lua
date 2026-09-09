@@ -113,8 +113,19 @@ local function read_tiledef(r)
 	return {name = name, animated = animation_type ~= 0}
 end
 
--- One node's wrapper. Only what is needed to draw a cube is read; the caller
--- has already cut the wrapper to length, so what is left over is dropped.
+-- Luanti's LiquidType
+M.LIQUID_NONE = 0
+M.LIQUID_FLOWING = 1
+M.LIQUID_SOURCE = 2
+
+-- How many extra tiles follow the six: six overlays, and six special tiles
+-- (which is what a flowing liquid's surface and a rooted plant's top are)
+local CF_SPECIAL_COUNT = 6
+
+-- One node's wrapper. Read as far as the fields anything here uses; the
+-- caller has already cut the wrapper to length, so the rest -- node boxes,
+-- sounds, the legacy fields -- is dropped. The order is
+-- ContentFeatures::serialize() in Luanti's nodedef.cpp.
 local function read_node(r)
 	local version = r:u8()
 	if version < CONTENTFEATURES_VERSION then
@@ -142,10 +153,61 @@ local function read_node(r)
 	for i = 1, 6 do
 		def.tiles[i] = read_tiledef(r)
 	end
+	-- The overlay of a tile is drawn on top of it; the special tiles belong to
+	-- draw types that have surfaces the six do not cover
+	def.overlays = {}
+	for i = 1, 6 do
+		def.overlays[i] = read_tiledef(r)
+	end
+	local special_count = r:u8()
+	if special_count ~= CF_SPECIAL_COUNT then
+		error("luanti_client/nodedef: "..special_count.." special tiles")
+	end
+	def.special = {}
+	for i = 1, special_count do
+		def.special[i] = read_tiledef(r)
+	end
+	r:u8() -- alpha for legacy clients; the real one is further down
+	-- The colour a tile is multiplied by, for a node whose paramtype2 is not
+	-- a palette index
+	def.color = {r:u8(), r:u8(), r:u8()}
+	-- The palette a "color" paramtype2 indexes, as a media name
+	def.palette_name = r:string()
+	def.waving = r:u8()
+	r:u8() -- connect_sides
+	for _ = 1, r:u16() do
+		r:u16() -- connects_to ids
+	end
+	r:skip(4) -- post_effect_color
+	def.leveled = r:u8()
+	r:u8() -- light_propagates
+	def.sunlight_propagates = r:u8() ~= 0
+	def.light_source = r:u8()
+	r:u8() -- is_ground_content
+	-- Interaction: what the player can do to this node, and what it does back
+	def.walkable = r:u8() ~= 0
+	def.pointable = r:u8()
+	def.diggable = r:u8() ~= 0
+	def.climbable = r:u8() ~= 0
+	def.buildable_to = r:u8() ~= 0
+	def.rightclickable = r:u8() ~= 0
+	def.damage_per_second = r:u32()
+	def.liquid_type = r:u8()
+	r:string() -- liquid_alternative_flowing
+	r:string() -- liquid_alternative_source
+	def.liquid_viscosity = r:u8()
+	r:u8() -- liquid_renewable
+	def.liquid_range = r:u8()
+	def.drowning = r:u8()
+	def.floodable = r:u8() ~= 0
 	return def
 end
 
--- parse(data) -> {[id] = {name=, drawtype=, tiles={6}, groups=, param_type_2=}}
+-- parse(data) -> {[id] = def}, count
+--
+-- A def holds name, groups, param_type_2, drawtype, the six tiles and their
+-- overlays, the colour and palette, and what the player can do to the node:
+-- walkable, climbable, diggable, pointable, buildable_to, liquid_type.
 --
 -- data is the decompressed NODEDEF payload. A node whose definition cannot be
 -- read is left out rather than stopping the rest: one node drawn as a

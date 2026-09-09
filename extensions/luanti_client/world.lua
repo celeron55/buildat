@@ -56,6 +56,8 @@ local CUBE_DRAWTYPES = {
 	[15] = "glass",  -- NDT_GLASSLIKE_FRAMED_OPTIONAL
 }
 local DRAWTYPE_AIRLIKE = 1
+-- nodedef.lua's M.LIQUID_NONE, which is what a node that is not a liquid has
+local NODEDEF_LIQUID_NONE = 0
 
 -- How many blocks to mesh per frame. Meshing itself is on a worker thread, but
 -- packing the volume and handing it over is not, so a burst of a hundred
@@ -260,6 +262,11 @@ function M.new(magic, buildat, log, options)
 	self.node_map = PLACEHOLDER_MAP
 	self.node_map_default = VOXEL_PLACEHOLDER
 	self.use_skylight = true
+	-- id -> true for the nodes the player collides with, and for the ones it
+	-- swims in. nil rather than a table means the definitions have not
+	-- arrived and everything but air is solid; see is_solid().
+	self.node_solid = nil
+	self.node_liquid = {}
 
 	local function mark_dirty(key)
 		if blocks[key] and not dirty[key] then
@@ -385,6 +392,54 @@ function M.new(magic, buildat, log, options)
 		return blocks[block_key(x, y, z)]
 	end
 
+	-- The Luanti content id at a node position, or nil if the block holding
+	-- it has not arrived. param0 is two big-endian bytes per node, x fastest.
+	function self:node_at(x, y, z)
+		local bx = math.floor(x / BLOCKSIZE)
+		local by = math.floor(y / BLOCKSIZE)
+		local bz = math.floor(z / BLOCKSIZE)
+		local block = blocks[block_key(bx, by, bz)]
+		if not block then
+			return nil
+		end
+		local i = (x - bx * BLOCKSIZE) +
+				(y - by * BLOCKSIZE) * BLOCKSIZE +
+				(z - bz * BLOCKSIZE) * BLOCKSIZE * BLOCKSIZE
+		local hi, lo = block.param0:byte(i * 2 + 1, i * 2 + 2)
+		return hi * 256 + lo
+	end
+
+	-- Whether a node stops the player. A node whose block has not arrived,
+	-- and one the server says is not generated, both count as solid, which is
+	-- what Luanti's own collision does with them: standing still in a world
+	-- that has not loaded is better than falling through it.
+	--
+	-- Until the node definitions arrive nothing is known but air, and
+	-- everything else is drawn as a placeholder cube, so that is what it
+	-- collides as.
+	function self:is_solid(x, y, z)
+		local id = self:node_at(x, y, z)
+		if id == nil or id == CONTENT_IGNORE then
+			return true
+		end
+		if id == CONTENT_AIR then
+			return false
+		end
+		if self.node_solid then
+			-- A node the definitions did not cover is drawn as a placeholder
+			-- cube, so it collides as one; only what the server says is not
+			-- walkable is walked through
+			return self.node_solid[id] ~= false
+		end
+		return true
+	end
+
+	-- Whether a node is something to swim in
+	function self:is_liquid(x, y, z)
+		local id = self:node_at(x, y, z)
+		return id ~= nil and self.node_liquid[id] == true
+	end
+
 	-- One node the server changed, in node coordinates. Patches the block's
 	-- parameter arrays in place; a node on a block's edge is part of the
 	-- neighbour's border, so that mesh goes out of date too.
@@ -446,7 +501,12 @@ function M.new(magic, buildat, log, options)
 			[CONTENT_IGNORE] = VOXEL_AIR,
 		}
 		local cubes = 0
+		local solid = {}
+		local liquid = {}
 		for id, def in pairs(defs) do
+			solid[id] = def.walkable
+			liquid[id] = def.liquid_type ~= nil and
+					def.liquid_type ~= NODEDEF_LIQUID_NONE
 			local kind = CUBE_DRAWTYPES[def.drawtype]
 			if def.drawtype == DRAWTYPE_AIRLIKE then
 				map[id] = VOXEL_AIR
@@ -470,6 +530,8 @@ function M.new(magic, buildat, log, options)
 		-- registry's segment ids
 		self.atlas_reg = buildat.createAtlasRegistry()
 		self.node_map = map
+		self.node_solid = solid
+		self.node_liquid = liquid
 		self:invalidate_all()
 		return cubes
 	end

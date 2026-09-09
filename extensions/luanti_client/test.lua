@@ -18,6 +18,7 @@ end
 
 local serialize = dofile(dir.."/serialize.lua")
 local connection = dofile(dir.."/connection.lua")
+local player = dofile(dir.."/player.lua")
 local nodedef = dofile(dir.."/nodedef.lua")
 local media = dofile(dir.."/media.lua")
 
@@ -315,7 +316,8 @@ local function write_tiledef(w, name, flags, animation)
 	end
 end
 
-local function write_node(name, drawtype, tile_names, flags, animation)
+local function write_node(name, drawtype, tile_names, flags, animation, opts)
+	opts = opts or {}
 	local w = serialize.writer()
 	w:u8(13) -- ContentFeatures version
 	w:string(name)
@@ -331,8 +333,42 @@ local function write_node(name, drawtype, tile_names, flags, animation)
 	for i = 1, 6 do
 		write_tiledef(w, tile_names[i], flags or 0, animation)
 	end
-	-- Everything after the tiles is skipped by the parser, which is what lets
-	-- it read a newer ContentFeatures than it knows
+	for _ = 1, 6 do
+		write_tiledef(w, opts.overlay or "", 0)
+	end
+	w:u8(6) -- CF_SPECIAL_COUNT
+	for _ = 1, 6 do
+		write_tiledef(w, "", 0)
+	end
+	w:u8(255) -- alpha for legacy clients
+	w:u8(255):u8(254):u8(253) -- color
+	w:string(opts.palette or "")
+	w:u8(0) -- waving
+	w:u8(0) -- connect_sides
+	w:u16(0) -- connects_to
+	w:raw(string.rep("\0", 4)) -- post_effect_color
+	w:u8(0) -- leveled
+	w:u8(1) -- light_propagates
+	w:u8(opts.sunlight_propagates and 1 or 0)
+	w:u8(opts.light_source or 0)
+	w:u8(1) -- is_ground_content
+	w:u8(opts.walkable == false and 0 or 1)
+	w:u8(1) -- pointable
+	w:u8(1) -- diggable
+	w:u8(opts.climbable and 1 or 0)
+	w:u8(0) -- buildable_to
+	w:u8(0) -- rightclickable
+	w:u32(opts.damage_per_second or 0)
+	w:u8(opts.liquid_type or 0)
+	w:string(""):string("") -- liquid_alternative_flowing, _source
+	w:u8(0) -- liquid_viscosity
+	w:u8(0) -- liquid_renewable
+	w:u8(0) -- liquid_range
+	w:u8(opts.drowning or 0)
+	w:u8(0) -- floodable
+	-- Everything after this is skipped by the parser, which is what lets it
+	-- read a newer ContentFeatures than it knows: node boxes, sounds, and the
+	-- fields added after them
 	w:raw(string.rep("\255", 40))
 	return w:data()
 end
@@ -344,7 +380,9 @@ local nodes = {
 			"dirt.png^shadow.png", "dirt.png^shadow.png",
 			"dirt.png^shadow.png", "dirt.png^shadow.png"}, 8 + 16 + 32)},
 	{11, write_node("test:water", 2, {"water.png", "water.png", "water.png",
-			"water.png", "water.png", "water.png"}, 1, "vertical")},
+			"water.png", "water.png", "water.png"}, 1, "vertical",
+			{walkable = false, liquid_type = 2, drowning = 1,
+			palette = "water_palette.png"})},
 	{13, write_node("test:torch", 7, {"torch.png", "torch.png", "torch.png",
 			"torch.png", "torch.png", "torch.png"}, 0, "sheet")},
 }
@@ -371,6 +409,15 @@ assert(defs[9].tiles[1].name == "grass_top.png" and
 		"nodedef: tiles after the optional tile fields")
 assert(defs[11].tiles[1].animated, "nodedef: animation not noticed")
 assert(defs[13].tiles[3].name == "torch.png", "nodedef: tiles after a sheet")
+-- The fields past the eighteen tiles: everything walking and digging need
+assert(defs[7].walkable and defs[7].diggable and not defs[7].climbable,
+		"nodedef: interaction fields of a solid node")
+assert(defs[11].walkable == false and defs[11].liquid_type == 2 and
+		defs[11].drowning == 1 and
+		defs[11].palette_name == "water_palette.png",
+		"nodedef: liquid fields")
+assert(defs[7].color[1] == 255 and defs[7].color[3] == 253,
+		"nodedef: colour")
 
 local wanted = nodedef.texture_names(defs)
 assert(wanted["stone.png"] and wanted["grass_top.png"] and wanted["dirt.png"],
@@ -408,5 +455,124 @@ assert(media.server_key("a/../b", 1) == "a_.._b_1")
 assert(media.server_key("..", 1) == ".._1")
 
 print("media: ok")
+
+--
+-- player.lua: the box against the nodes
+--
+
+-- A world made of a function: the bottom of everything at y <= -3, ground at
+-- y <= 0, a wall two nodes tall at x = 3, a one-node plateau at x <= -3, and
+-- a hole at (0, 6) with water in it.
+local function is_solid(x, y, z)
+	if y <= -3 then
+		return true
+	end
+	if x <= -3 and y == 1 then
+		return true
+	end
+	if x == 3 and (y == 1 or y == 2) then
+		return true
+	end
+	if y <= 0 then
+		return not (x == 0 and z == 6)
+	end
+	return false
+end
+
+local function is_liquid(x, y, z)
+	return x == 0 and z == 6 and y <= 0 and y >= -2
+end
+
+local NO_WISH = {x = 0, z = 0}
+
+local function settle(p, n, wish)
+	for _ = 1, n do
+		p:update(1 / 60, wish or NO_WISH)
+	end
+end
+
+-- Standing on the ground: the box's bottom ends up on the top face of the
+-- node at y = 0, which is y = 0.5
+local p = player.new(is_solid)
+p:set_position(0, 4, 0)
+settle(p, 200)
+assert(math.abs(p.y - 0.5) < 1e-6, "player: fell to "..p.y)
+assert(p.on_ground, "player: does not know it is on the ground")
+
+-- Walking into the wall stops a radius short of its face
+p:set_position(0, 0.5, 0)
+settle(p, 200, {x = 1, z = 0})
+assert(math.abs(p.x - (2.5 - player.RADIUS)) < 1e-6,
+		"player: walked to x = "..p.x)
+assert(p.vx == 0, "player: still has speed into the wall")
+
+-- Walking at the wall at an angle slides along it rather than stopping
+p:set_position(0, 0.5, 0)
+settle(p, 200, {x = 1, z = 1})
+assert(math.abs(p.x - (2.5 - player.RADIUS)) < 1e-6 and p.z > 5,
+		"player: did not slide along the wall, at "..p.x..", "..p.z)
+
+-- A node in the way has to be jumped over: nothing steps up on its own,
+-- which is what Luanti does too
+p:set_position(-1, 0.5, 0)
+settle(p, 120, {x = -1, z = 0})
+assert(math.abs(p.x - (-2.5 + player.RADIUS)) < 1e-6,
+		"player: walked up the plateau to x = "..p.x)
+settle(p, 300, {x = -1, z = 0, jump = true})
+settle(p, 120)
+assert(p.x < -3.5, "player: did not get onto the plateau, x = "..p.x)
+assert(math.abs(p.y - 1.5) < 1e-6, "player: is at y = "..p.y..", not on it")
+
+-- Jumping leaves the ground and comes back to it
+p:set_position(0, 0.5, 0)
+p:update(1 / 60, NO_WISH)
+p:update(1 / 60, {x = 0, z = 0, jump = true})
+assert(p.y > 0.5 and not p.on_ground, "player: did not jump")
+local top = p.y
+for _ = 1, 200 do
+	p:update(1 / 60, NO_WISH)
+	if p.y > top then top = p.y end
+end
+assert(top > 1.5 and top < 3, "player: jumped to "..top)
+assert(math.abs(p.y - 0.5) < 1e-6, "player: landed at "..p.y)
+
+-- Falling into the hole lands in the water and stops sinking at its bottom,
+-- and the jump key swims back out of it
+local w = player.new(is_solid, is_liquid)
+w:set_position(0, 0.5, 6)
+settle(w, 300)
+assert(w.in_liquid, "player: not in the water")
+assert(math.abs(w.y - (-2.5)) < 1e-6, "player: sank to "..w.y)
+settle(w, 300, {x = 0, z = 0, jump = true})
+assert(w.y > 0.5, "player: did not swim out, y = "..w.y)
+
+-- Flying ignores gravity, goes down on the sneak key, and still stops at the
+-- ground
+local f = player.new(is_solid)
+f.fly = true
+f:set_position(0, 10, 0)
+settle(f, 60)
+assert(math.abs(f.y - 10) < 1e-6, "player: flying fell to "..f.y)
+settle(f, 300, {x = 0, z = 0, sneak = true, fast = true})
+assert(math.abs(f.y - 0.5) < 1e-6, "player: flew down to "..f.y)
+
+-- Going through walls takes the player out of anything they are inside, and
+-- gravity does not apply while it is on
+local n = player.new(is_solid)
+n:set_position(3, 0.5, 0)
+n.noclip = true
+settle(n, 120)
+assert(math.abs(n.y - 0.5) < 1e-6, "player: fell while noclipping to "..n.y)
+settle(n, 120, {x = 0, z = 0, jump = true})
+assert(n.y > 5, "player: did not rise through the wall, y = "..n.y)
+
+-- A player the server put inside a node can walk out of it rather than being
+-- held there by it
+local i = player.new(is_solid)
+i:set_position(3, 0.5, 0)
+settle(i, 120, {x = -1, z = 0})
+assert(i.x < 2, "player: stuck inside the wall at x = "..i.x)
+
+print("player: ok")
 
 print("luanti_client/test.lua: ok")
