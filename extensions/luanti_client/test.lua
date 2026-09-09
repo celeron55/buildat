@@ -878,6 +878,31 @@ assert(texmod.resolve("a.png^[invert:rgb", ctx) == nil,
 assert(texmod.unimplemented["invert"] == "a.png^[invert:rgb",
 		"texmod: an unimplemented modifier is recorded with an example")
 
+
+-- Base64, and the image "[png:" carries in the expression itself: it goes
+-- into the chain the way a file name does, and the bytes reach ctx.png
+do
+	assert(texmod.base64_decode("aGVsbG8=") == "hello",
+			"texmod: base64 with padding")
+	assert(texmod.base64_decode("YWI=") == "ab", "texmod: two bytes")
+	assert(texmod.base64_decode("!") == nil, "texmod: not base64")
+
+	local got = nil
+	local ops = texmod.build("[png:aGVsbG8=", {
+		resource = function() return nil end,
+		compose = function() return nil end,
+		png = function(bytes) got = bytes; return "written.png" end,
+	})
+	assert(got == "hello", "texmod: [png hands the bytes over")
+	assert(ops and #ops == 1 and ops[1].src == "written.png",
+			"texmod: [png blits what came back")
+	-- No ctx.png, and the expression cannot be built rather than being wrong
+	assert(texmod.build("[png:aGVsbG8=", {
+		resource = function() return nil end,
+		compose = function() return nil end,
+	}) == nil, "texmod: [png needs somewhere to put the file")
+end
+
 print("texmod: ok")
 
 --

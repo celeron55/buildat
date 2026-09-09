@@ -49,6 +49,42 @@ local NAMED_COLORS = {
 	silver = 0xc0c0c0, white = 0xffffff, yellow = 0xffff00,
 }
 
+local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local B64_VALUE = (function()
+	local out = {}
+	for i = 1, #B64 do
+		out[B64:sub(i, i)] = i - 1
+	end
+	return out
+end)()
+
+-- Base64, for the image "[png:" carries in the expression itself. Returns
+-- nil for anything that is not base64: the caller draws what it draws for a
+-- texture it does not have.
+function M.base64_decode(text)
+	local out = {}
+	local bits = 0
+	local held = 0
+	for i = 1, #text do
+		local c = text:sub(i, i)
+		if c ~= "=" and c ~= "\n" and c ~= "\r" then
+			local v = B64_VALUE[c]
+			if v == nil then
+				return nil
+			end
+			held = held * 64 + v
+			bits = bits + 6
+			if bits >= 8 then
+				bits = bits - 8
+				local byte = math.floor(held / 2 ^ bits)
+				held = held - byte * 2 ^ bits
+				out[#out + 1] = string.char(byte)
+			end
+		end
+	end
+	return table.concat(out)
+end
+
 -- A Luanti ColorString: "#rgb", "#rgba", "#rrggbb", "#rrggbbaa" or a name.
 -- Returns {r, g, b, a}, or nil.
 function M.parse_color(s)
@@ -296,6 +332,9 @@ end
 --   nil for one that is not here
 -- ctx.compose(expr) -> the resource name of an expression composed on its own,
 --   or nil if it could not be
+-- ctx.png(bytes) -> the resource name of an image handed over as its own
+--   bytes, or nil; what wants it is "[png:", which carries a whole PNG in
+--   the expression. Optional.
 --
 -- Returns nil for an expression this cannot build. size is the canvas size
 -- when the expression says what it is and nil when it comes from the first
@@ -434,6 +473,17 @@ function M.build(expr, ctx)
 				end
 				ops[#ops + 1] = {op = "blit", src = resource,
 						fill = true, blend = "and"}
+			elseif name == "png" then
+				-- The image is in the expression itself, base64. It goes
+				-- into the chain the way a file name does; whoever has
+				-- somewhere to put a file is the one that can take it.
+				local bytes = M.base64_decode(args[1] or "")
+				local resource = bytes and bytes ~= "" and ctx.png and
+						ctx.png(bytes) or nil
+				if not resource then
+					return nil
+				end
+				blit(resource)
 			elseif name == "verticalframe" then
 				local count = tonumber(args[1])
 				local index = tonumber(args[2])
@@ -453,7 +503,7 @@ function M.build(expr, ctx)
 				end
 				ops[#ops + 1] = {op = "crop", grid = wh, cell = at}
 			else
-				-- [crack, [inventorycube, [png, [invert, [contrast,
+				-- [crack, [inventorycube, [invert, [contrast,
 				-- [colorizehsl, [overlay, [hardlight, [lowpart, [makealpha,
 				-- [applyfiltersformesh. This game's node definitions use one
 				-- [lowpart and none of the rest.
