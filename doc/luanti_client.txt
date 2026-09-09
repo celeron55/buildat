@@ -5,9 +5,12 @@ server: it does the client's side of Luanti's protocol.
 
     $ bin/buildat_client -m luanti_client
 
-It asks for an address, a player name and a password, and then shows what the
-server is sending. BUILDAT_LUANTI_ADDRESS sets the address the dialog starts
-with, which is what scripted runs (-c) use.
+It asks for an address, a player name and a password, logs in, and shows the
+terrain around the player. BUILDAT_LUANTI_ADDRESS sets the address the dialog
+starts with, which is what scripted runs (-c) use. Escape disconnects.
+
+Every node but air is drawn as one placeholder cube for now; what a node
+really looks like needs the node definitions and the server's media.
 
 The network dialog of extension/network asks about the address the first time;
 see doc/client_api.txt.
@@ -19,6 +22,8 @@ connection.lua  The UDP transport: channels, reliable packets, acks, splits
 srp.lua         The client half of the SRP-6a login, on buildat.bignum
 client.lua      The commands: the login, the map blocks, and dispatch for the
                 rest
+world.lua       The scene: a node per map block, with buildat's voxel mesher
+                on it
 engine_test.lua Checks of the engine primitives, run at boot
 init.lua        The connect dialog and the status screen
 
@@ -44,7 +49,17 @@ srp.lua has self_test(), which init.lua runs at boot; its vectors come from
 util/srp_reference.py, which does SRP-6a separately in Python.
 
 Both login paths have been run against a real Luanti server: registering a new
-player (FIRST_SRP) and logging in as one the server knows (SRP).
+player (FIRST_SRP) and logging in as one the server knows (SRP), and the
+terrain of that server's world has been on screen.
+
+How the world sits: a buildat voxel and a Luanti node both occupy the cube
+centred on their integer coordinate, so Luanti node coordinates are Urho3D
+world coordinates one for one. A map block is 16^3 nodes and the mesher wants a
+one-voxel border to cull faces against, so a block goes in as an 18^3 volume:
+itself plus a slice off each of the six neighbours that have arrived. A
+neighbour arriving makes the block's mesh out of date; until it does, there is
+a seam. Packing a block's volume and handing it to the mesher costs the frame
+about 350 us on a 2013 workstation; the meshing itself is on a worker thread.
 
 What is done
 ------------
@@ -56,6 +71,8 @@ What is done
 - Map blocks: BLOCKDATA at serialization version 29, acknowledged with
   GOTBLOCKS, which is what keeps the server sending more
 - MOVE_PLAYER (where the server put us) and TIME_OF_DAY
+- The terrain on screen: a scene node per map block, meshed by buildat's voxel
+  mesher, dropped again once it is far enough away
 
 Only serialization version 29 is read. It is what every current server writes;
 older ones compress the pieces of a mapblock separately and the client says so
@@ -63,7 +80,6 @@ and gives up rather than carrying a second parser.
 
 What is next
 ------------
-- Turning the blocks into meshes
 - The definitions' contents: what a node id means, and the media that goes
   with it (ANNOUNCE_MEDIA, MEDIA)
 - The player: position and input, HP, breath
