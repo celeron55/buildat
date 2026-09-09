@@ -8,7 +8,9 @@ server: it does the client's side of Luanti's protocol.
 It asks for an address, a player name and a password, logs in, and shows the
 terrain around the player with the server's own textures.
 BUILDAT_LUANTI_ADDRESS sets the address the dialog starts with, which is what
-scripted runs (-c) use.
+scripted runs (-c) use. BUILDAT_LUANTI_FORCE_DAY keeps the world at midday
+whatever the server's time is, for the same reason: a run of half a minute
+cannot wait for morning.
 
 Controls: the mouse looks, WASD walks, space jumps, ctrl sneaks, shift is
 faster, K toggles flying, H toggles going through walls, escape disconnects.
@@ -157,6 +159,9 @@ What is done
 - NODEDEF, and a voxel registry built from it
 - Texture modifiers, composed into PNGs beside the server's media and cached
   there between runs
+- Tile overlays and node colours: a tile is drawn in its own colour when it
+  has one and the node's otherwise, which is what makes a grass block's side
+  plain dirt with a green edge on it
 - The media: ANNOUNCE_MEDIA, REQUEST_MEDIA and MEDIA, cached on disk by name
   and checked against the sha1 the server announced
 
@@ -169,7 +174,7 @@ What is next
 - Digging and placing, and an inventory
 - HP, breath
 - Node draw types that are not cubes: node boxes, meshes, plants, liquids
-- Colour palettes: a node with paramtype2 "color" or "colorfacedir" has a
-  greyscale texture that the game colours per node. MineClone's grass comes
-  out grey because of this.
+- A node's colour out of its palette by paramtype2, rather than the one
+  colour in its definition, so that grass and foliage are the biome's shade
+- facedir and wallmounted: which tile goes on which face
 - Active objects, formspecs, the HUD, chat, sounds
