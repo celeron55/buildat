@@ -34,6 +34,10 @@ const float SUN_HALF = 0.075;
 const float MOON_HALF = 0.048;
 const float BODY_EDGE = 0.004;
 const vec3 MOON_COLOR = vec3(0.86, 0.88, 0.94);
+// The sun's own colour, which it wears until it is low enough to take the
+// tint the horizon is painted with: a sun the colour of dawn at midday is
+// what the tint alone gives
+const vec3 SUN_COLOR = vec3(1.0, 0.97, 0.86);
 
 const float CLOUD_SCALE = 6.0;
 const float CLOUD_PIXELS = 11.0;
@@ -44,9 +48,11 @@ const float CLOUD_HORIZON = 0.16;
 const float CLOUD_FADE = 0.38;
 
 // The stars: one per cell of a grid laid over the direction, only some cells
-// holding one at all
+// holding one at all. Grey rather than white and few enough to read as stars:
+// at any greater density the night sky is white noise.
 const float STAR_GRID = 220.0;
-const float STAR_DENSITY = 0.06;
+const float STAR_DENSITY = 0.004;
+const vec3 STAR_COLOR = vec3(0.52, 0.55, 0.62);
 
 float SkyHash(vec2 p)
 {
@@ -128,9 +134,9 @@ void PS()
         vec2 cell = floor(vec2(d.x, d.z) / max(abs(d.y), 0.15) * STAR_GRID);
         float pick = SkyHash(cell);
         if(pick < STAR_DENSITY){
-            float twinkle = 0.6 + 0.4 * SkyHash(cell + 7.0);
-            color += vec3(twinkle * cStarFade *
-                    smoothstep(-0.05, 0.15, d.y));
+            float twinkle = 0.55 + 0.45 * SkyHash(cell + 7.0);
+            color += STAR_COLOR * twinkle * cStarFade *
+                    smoothstep(-0.05, 0.15, d.y);
         }
     }
 
@@ -149,8 +155,11 @@ void PS()
     }
 
     // The sun and the moon, over the clouds: they are the two things up there
-    // that are not behind them
-    color = mix(color, cSunTint * 1.6, Body(d, sun, SUN_HALF));
+    // that are not behind them. The sun goes the colour of the tint as it
+    // comes down to the horizon, which is where that colour belongs; higher
+    // up it is its own.
+    vec3 sun_color = mix(SUN_COLOR, cSunTint * 1.6, low);
+    color = mix(color, sun_color, Body(d, sun, SUN_HALF));
     color = mix(color, MOON_COLOR, Body(d, -sun, MOON_HALF));
 
     gl_FragColor = vec4(color, 1.0);
