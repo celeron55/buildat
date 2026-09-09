@@ -19,11 +19,21 @@ local path = __buildat_extension_path("luanti_client")
 local srp = dofile(path.."/srp.lua")
 local engine_test = dofile(path.."/engine_test.lua")
 local luanti = dofile(path.."/client.lua")
+local world = dofile(path.."/world.lua")
 local M = {safe = nil}
 
 -- BUILDAT_LUANTI_ADDRESS is for scripted runs (bin/buildat_client -c ...),
 -- which cannot easily clear a text field
 local DEFAULT_ADDRESS = os.getenv("BUILDAT_LUANTI_ADDRESS") or "localhost:30000"
+
+-- How far the camera sees, and how far out blocks are kept, in nodes. The
+-- client asks the server for blocks by the same distance; see
+-- WANTED_RANGE_BLOCKS in client.lua.
+local FAR_CLIP = 240
+local DROP_DISTANCE = 260
+-- Luanti puts the player's eyes this far above their feet, and the position
+-- the server sends is the feet
+local EYE_HEIGHT = 1.625
 
 local function labeled_edit(parent, label, value)
 	local text = parent:CreateChild("Text")
@@ -54,25 +64,20 @@ local function show_client(host, port, name, password)
 	root.defaultStyle = magic.cache:GetResource(
 			"XMLFile", "__menu/res/main_style.xml")
 
-	local window = root:CreateChild("Window")
-	window:SetStyleAuto()
-	window:SetLayout(LM_VERTICAL, 6, magic.IntRect(10, 10, 10, 10))
-
-	local title = window:CreateChild("Text")
-	title:SetStyleAuto()
-	title.text = "Luanti: "..host..":"..port
-
-	local lines = {}
-	local status_text = window:CreateChild("Text")
+	-- Text in the corner rather than a window: the world is behind it
+	local status_text = root:CreateChild("Text")
 	status_text:SetStyleAuto()
+	status_text:SetAlignment(HA_LEFT, VA_TOP)
+	status_text:SetPosition(8, 8)
+	status_text.color = magic.Color(1.0, 1.0, 1.0)
 
+	local lines = {"Luanti: "..host..":"..port}
 	local function add_line(text)
 		lines[#lines + 1] = text
-		while #lines > 12 do
-			table.remove(lines, 1)
+		while #lines > 10 do
+			table.remove(lines, 2) -- Keep the address line
 		end
 		status_text.text = table.concat(lines, "\n")
-		window:SetAlignment(HA_LEFT, VA_CENTER)
 	end
 
 	add_line("Asking to connect...")
@@ -88,20 +93,49 @@ local function show_client(host, port, name, password)
 				on_status = add_line,
 		}, log)
 
-		local last_summary = ""
-		magic.SubscribeToEvent("Update", function(event_type, event_data)
+		local view = world.new(magic, buildat.safe, log, {
+				far_clip = FAR_CLIP,
+		})
+
+		client.on_block = function(block)
+			view:set_block(block)
+		end
+
+		-- The bottom line is remade every frame; everything above it is the
+		-- log of what happened
+		local function set_counters()
+			-- What is not handled yet is logged once per command by
+			-- client.lua rather than shown here; it is a long line and the
+			-- world is behind it
+			status_text.text = table.concat(lines, "\n").."\n"..
+					string.format(
+					"%s | blocks: %d received, %d in scene, %d to mesh"..
+					" | %d us to hand over",
+					client.state, client.blocks_received, view:block_count(),
+					view:dirty_count(), view.last_mesh_us)
+		end
+
+		-- A plain subscription rather than root:SubscribeToStackEvent(), which
+		-- only fires while the UI element has focus; the world has to keep
+		-- streaming whatever the UI is doing. Unsubscribed by hand below.
+		local update_cb = magic.SubscribeToEvent("Update",
+				function(event_type, event_data)
 			local dtime = event_data:GetFloat("TimeStep")
 			client:update(dtime)
-			local summary = client:unhandled_summary()
-			if summary ~= last_summary then
-				last_summary = summary
-				log:info("Not handled yet: "..summary)
-			end
+			-- The camera is wherever the server says the player is; moving it
+			-- from here is M4
+			local p = client.position
+			view:set_camera(p.x, p.y + EYE_HEIGHT, p.z, client.pitch,
+					client.yaw)
+			view:update(dtime, DROP_DISTANCE)
+			set_counters()
 		end)
 
 		root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 			if event_data:GetInt("Key") == KEY_ESCAPE then
+				magic.UnsubscribeFromEvent("Update", update_cb)
 				client:disconnect()
+				view:close()
 				uistack.main:pop(root)
 			end
 		end)
