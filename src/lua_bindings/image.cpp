@@ -504,10 +504,39 @@ static int l_compose_image(lua_State *L)
 	}
 }
 
+// read_image(resource_name) -> width, height, rgba
+//
+// The pixels themselves, for whoever has to look at them rather than draw
+// them. What wanted this is a colour palette: an image of a few dozen pixels
+// that a game indexes to say what colour something is drawn in.
+static int l_read_image(lua_State *L)
+{
+	try {
+		ss_ name = luaL_checkstring(L, 1);
+
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		magic::Context *context = buildat_app->get_scene()->GetContext();
+
+		Canvas c;
+		load_source(context, name, c);
+
+		lua_pushinteger(L, c.w);
+		lua_pushinteger(L, c.h);
+		lua_pushlstring(L, (const char*)&c.data[0], c.data.size());
+		return 3;
+	} catch(std::exception &e){
+		return luaL_error(L, "%s", e.what());
+	}
+}
+
 void init_image(lua_State *L)
 {
 	lua_pushcfunction(L, l_compose_image);
 	lua_setglobal(L, "__buildat_compose_image");
+	lua_pushcfunction(L, l_read_image);
+	lua_setglobal(L, "__buildat_read_image");
 }
 
 } // namespace lua_bindings
