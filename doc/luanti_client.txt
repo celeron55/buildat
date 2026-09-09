@@ -376,13 +376,21 @@ cube. One scene node per frame, enabled one at a time: a Material lives only
 as long as something in the engine holds it, and a StaticModel that has been
 handed one is such a thing.
 
+Active objects: an object whose visual is one of Luanti's sprite kinds --
+sprite, upright_sprite, item, wielditem -- is a billboard turned to the
+camera about Y, and everything else is a box wearing the object's first
+texture. The two item visuals put an item's name where a texture would be, so
+a dropped item wears the picture an inventory would draw for it, which for a
+node is the little isometric cube -- the same thing Luanti's wielditem comes
+out as. An upright_sprite turns to the camera here where Luanti turns it with
+the object's own yaw.
+
 What is next
 ------------
-- What an active object really looks like: Luanti draws a mesh for a mob, a
-  billboard for a dropped item and a cube for a few things, and this draws a
-  box wearing the object's first texture whatever it says, because Urho3D
-  reads none of the model formats Luanti's meshes come in. A box wearing a
-  cow's texture reads as a cow; a dropped item does not read as an item.
+- What a mob really looks like: Luanti draws a mesh for one, and this draws a
+  box wearing its first texture, because Urho3D reads none of the model
+  formats Luanti's meshes come in. A box wearing a cow's texture reads as a
+  cow. The meshes are .b3d.
 - Animations, nametags and attachments of the active objects
 - The sun, the moon, the stars and the clouds, which the server describes and
   which are not drawn; the sky is its colours and nothing else

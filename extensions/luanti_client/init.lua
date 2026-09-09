@@ -748,26 +748,34 @@ local function show_client(host, port, name, password)
 		-- the rest of what a form needs
 		local item_image
 
+		-- The visuals whose first "texture" is an item name rather than a
+		-- file: Luanti draws that item there, which is how a dropped item
+		-- wears its own picture.
+		local ITEM_VISUALS = {item = true, wielditem = true}
+
 		-- What an object is drawn wearing. A mob and a player have textures
-		-- of their own; a dropped item has none and carries the item it is
-		-- instead, and what that looks like is what it looks like in an
-		-- inventory.
+		-- of their own; a dropped item carries the item it is instead, and
+		-- what that looks like is what it looks like in an inventory -- for
+		-- a node, the little isometric cube, which is what Luanti's
+		-- wielditem comes out as too.
 		local function object_resource(obj)
 			local props = obj.props
 			if not props then
 				return nil
 			end
-			if props.textures and props.textures[1] and
-					props.textures[1] ~= "" then
-				return media_texture(props.textures[1])
+			local textures = props.textures
+			local function of_item(item)
+				local name = item and item ~= "" and item:match("^(%S+)")
+				return name and item_image(name) or nil
 			end
-			if props.wield_item and props.wield_item ~= "" then
-				local item = props.wield_item:match("^(%S+)")
-				if item then
-					return item_image(item)
-				end
+			if ITEM_VISUALS[props.visual] then
+				return of_item(textures and textures[1] ~= "" and
+						textures[1] or props.wield_item)
 			end
-			return nil
+			if textures and textures[1] and textures[1] ~= "" then
+				return media_texture(textures[1])
+			end
+			return of_item(props.wield_item)
 		end
 
 		client.on_object_add = function(id, object_type, data)
