@@ -385,6 +385,27 @@ local function show_client(host, port, name, password)
 				composed[expr] = resource
 				return resource
 			end,
+			-- The bytes of an image an expression carried itself, out of
+			-- "[png:". Written beside the composed textures under a name
+			-- that is its own hash, so the same image twice is one file.
+			png = function(bytes)
+				local file = "png_"..hex_hash(bytes)..".png"
+				local resource = server_key.."/composed/"..file
+				local path = COMPOSED_DIR.."/"..file
+				local f = io.open(path, "rb")
+				if f then
+					f:close()
+					return resource
+				end
+				f = io.open(path, "wb")
+				if not f then
+					log:warning("could not write "..path)
+					return nil
+				end
+				f:write(bytes)
+				f:close()
+				return resource
+			end,
 		}
 
 		-- The texture expression for one of a node's six faces.
