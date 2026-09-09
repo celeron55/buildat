@@ -42,16 +42,16 @@ local CONTENT_IGNORE = 127
 -- between them, two glass cubes hide the face between each other but not the
 -- one against ground.
 --
--- Leaves (NDT_ALLFACES) are "ground" too, so a canopy is one solid mass. In
--- Luanti they are cubes with a texture full of holes, drawn with every face;
--- there is no alpha in what the mesher builds, so drawing the inside faces
--- would only show the colour behind the holes twice over.
+-- Leaves (NDT_ALLFACES) are "allfaces": a cube whose every face is drawn,
+-- including the ones between two of them, because the texture is full of
+-- holes and what is behind a hole is the next leaf's face. The shader
+-- discards the holes.
 local EDGEMATERIAL_GLASS = 10
 local CUBE_DRAWTYPES = {
 	[0] = "ground",  -- NDT_NORMAL
 	[4] = "glass",   -- NDT_GLASSLIKE
-	[5] = "ground",  -- NDT_ALLFACES, leaves
-	[6] = "ground",  -- NDT_ALLFACES_OPTIONAL
+	[5] = "allfaces",-- NDT_ALLFACES, leaves
+	[6] = "allfaces",-- NDT_ALLFACES_OPTIONAL
 	[13] = "glass",  -- NDT_GLASSLIKE_FRAMED
 	[15] = "glass",  -- NDT_GLASSLIKE_FRAMED_OPTIONAL
 }
@@ -69,6 +69,32 @@ local PLACEHOLDER_MAP = {
 	[CONTENT_AIR] = VOXEL_AIR,
 	[CONTENT_IGNORE] = VOXEL_AIR,
 }
+
+-- Luanti keeps two light values in param1: the low nibble is the light a node
+-- has when the sun is up, the high one the light it gets from light sources
+-- alone. What the sun itself contributes is the difference, which is what
+-- buildat calls skylight; the high nibble is buildat's lamplight.
+--
+-- Both of buildat's nibbles are written by one source with field = "light",
+-- so a block's light costs one pass over its param1 rather than two. The map
+-- is a byte per param1 value, which is what pack_voxel_volume takes.
+local LIGHT_MAP = (function()
+	local out = {}
+	for p = 0, 255 do
+		local day = p % 16
+		local night = math.floor(p / 16)
+		local sky = day > night and day - night or 0
+		out[p + 1] = string.char(night * 16 + sky)
+	end
+	return table.concat(out)
+end)()
+
+-- What the volume is before the block and its neighbours are copied into it:
+-- air that sees the full sky. A face against a neighbour that has not arrived
+-- is then lit as if it were out in the open, which is wrong in a cave but
+-- only until the neighbour comes, and a wrongly lit face reads better than
+-- the black one that unlit air would give. Skylight is bits 24..27.
+local VOXEL_AIR_LIT = VOXEL_AIR + 15 * 0x1000000
 
 local function block_key(x, y, z)
 	return x..","..y..","..z
@@ -97,31 +123,57 @@ function M.new(magic, buildat, log, options)
 
 	local self = {}
 
+	-- The colour of full sunlight for a day/night factor of 0...1, which is
+	-- Luanti's own get_sunlight_color(): a little blue is left at night and a
+	-- little is added in the day, so a shadowed face reads cool rather than
+	-- grey.
+	local function sunlight_color(factor)
+		local rg = factor - 0.04
+		if rg < 0 then
+			rg = 0
+		end
+		return magic.Color(rg, rg, 0.98 * factor + 0.078)
+	end
+
 	local scene = magic.Scene()
 	scene:CreateComponent("Octree")
 	self.scene = scene
 
-	-- Full daylight; set_daylight() scales these by the time of day
-	local AMBIENT = {r = 0.45, g = 0.48, b = 0.55}
 	local FOG = {r = 0.60, g = 0.72, b = 0.88}
 
 	local zone_node = scene:CreateChild("Zone")
 	local zone = zone_node:CreateComponent("Zone")
 	zone.boundingBox = magic.BoundingBox(-100000, 100000)
-	zone.ambientColor = magic.Color(AMBIENT.r, AMBIENT.g, AMBIENT.b)
+	zone.ambientColor = sunlight_color(1.0)
 	zone.fogColor = magic.Color(FOG.r, FOG.g, FOG.b)
 	zone.fogStart = far_clip * 0.7
 	zone.fogEnd = far_clip
 	zone.priority = -1000
 
-	local sun_node = scene:CreateChild("Sun")
-	local sun = sun_node:CreateComponent("Light")
-	sun.lightType = magic.LIGHT_DIRECTIONAL
-	sun.color = magic.Color(1.0, 0.97, 0.90)
-	sun.castShadows = false
-	-- Rotation rather than direction: SetDirection is a shortest-arc rotation
-	-- and would roll the light, which matters once it casts
-	sun_node.rotation = magic.Quaternion(50, 30, 0)
+	-- No light in the scene: the mesher bakes the light into the vertex
+	-- colours and VoxelUnlit reads it from there, so there is nothing for a
+	-- directional light to reach.
+	local technique = magic.cache:GetResource("Technique",
+			"Techniques/VoxelUnlit.xml")
+
+	-- The mesher sets no technique on skylit geometry -- only the game knows
+	-- which shader reads what it packed -- so every block's materials get
+	-- this one once they exist.
+	local function apply_technique(node)
+		local cg = node:GetComponent("CustomGeometry")
+		if not cg then
+			return
+		end
+		local i = 0
+		while true do
+			local m = cg:GetMaterial(i)
+			if m == nil then
+				break
+			end
+			m:SetTechnique(0, technique)
+			i = i + 1
+		end
+	end
 
 	local camera_node = scene:CreateChild("Camera")
 	local camera = camera_node:CreateComponent("Camera")
@@ -160,6 +212,11 @@ function M.new(magic, buildat, log, options)
 		vdef.textures = textures
 		if kind == "glass" then
 			vdef.edge_material_id = EDGEMATERIAL_GLASS
+		elseif kind == "allfaces" then
+			vdef.face_draw_type =
+					buildat.VoxelDefinition.FACEDRAWTYPE_ALWAYS
+			vdef.edge_material_id =
+					buildat.VoxelDefinition.EDGEMATERIALID_GROUND
 		else
 			vdef.edge_material_id =
 					buildat.VoxelDefinition.EDGEMATERIALID_GROUND
@@ -202,7 +259,7 @@ function M.new(magic, buildat, log, options)
 
 	self.node_map = PLACEHOLDER_MAP
 	self.node_map_default = VOXEL_PLACEHOLDER
-	self.use_skylight = false
+	self.use_skylight = true
 
 	local function mark_dirty(key)
 		if blocks[key] and not dirty[key] then
@@ -232,10 +289,9 @@ function M.new(magic, buildat, log, options)
 		}
 		if self.use_skylight then
 			sources[#sources + 1] = {
-				-- param1 keeps the day light in the low nibble
 				data = block.param1, format = "u8",
 				source_size = {BLOCKSIZE, BLOCKSIZE, BLOCKSIZE},
-				at = {0, 0, 0}, mask = 0x0f, field = "skylight",
+				at = {0, 0, 0}, map = LIGHT_MAP, field = "light",
 			}
 		end
 		for _, d in ipairs(NEIGHBOURS) do
@@ -268,7 +324,7 @@ function M.new(magic, buildat, log, options)
 						data = n.param1, format = "u8",
 						source_size = {BLOCKSIZE, BLOCKSIZE, BLOCKSIZE},
 						from = from, size = size, at = at,
-						mask = 0x0f, field = "skylight",
+						map = LIGHT_MAP, field = "light",
 					}
 				end
 			end
@@ -294,13 +350,13 @@ function M.new(magic, buildat, log, options)
 		local data = buildat.pack_voxel_volume{
 			region = {VOLUME_MIN, VOLUME_MIN, VOLUME_MIN,
 					VOLUME_MAX, VOLUME_MAX, VOLUME_MAX},
-			-- Outside the block and its arrived neighbours there is nothing to
-			-- draw against, so faces there are culled rather than shown
-			fill = VOXEL_AIR,
+			fill = VOXEL_AIR_LIT,
 			sources = volume_sources(block),
 		}
-		buildat.set_voxel_geometry(block.node, data, self.voxel_reg,
-				self.atlas_reg, self.use_skylight, self.material_cb)
+		local node = block.node
+		buildat.set_voxel_geometry(node, data, self.voxel_reg,
+				self.atlas_reg, self.use_skylight,
+				function() apply_technique(node) end)
 		self.last_mesh_us = buildat.get_time_us() - t0
 	end
 
@@ -364,13 +420,14 @@ function M.new(magic, buildat, log, options)
 		return true
 	end
 
-	-- The zone's ambient and the sun, for a day/night factor of 0...1
+	-- The colour of the sky, for a day/night factor of 0...1. This is the one
+	-- thing that moves the sun: the mesher put how much of the sky each
+	-- surface sees into its vertex colours, and the shader multiplies that by
+	-- the zone's ambient colour.
 	function self:set_daylight(factor)
-		zone.ambientColor = magic.Color(AMBIENT.r * factor,
-				AMBIENT.g * factor, AMBIENT.b * factor)
+		zone.ambientColor = sunlight_color(factor)
 		zone.fogColor = magic.Color(FOG.r * factor, FOG.g * factor,
 				FOG.b * factor)
-		sun.brightness = factor
 	end
 
 	-- Builds the voxel registry from Luanti's node definitions.

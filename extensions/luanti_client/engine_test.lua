@@ -80,6 +80,13 @@ local function check_pack_voxel_volume()
 				at = {0, 0, 0}, order = "xyz", field = "skylight",
 				mask = 0x0f,
 			},
+			{
+				-- and the light from light sources in the high one
+				data = light_bytes, format = "u8",
+				source_size = {sx, sy, sz},
+				at = {0, 0, 0}, order = "xyz", field = "lamplight",
+				shift = 4, mask = 0x0f,
+			},
 		},
 	}
 
@@ -96,7 +103,8 @@ local function check_pack_voxel_volume()
 		for y = 0, sy - 1 do
 			for x = 0, sx - 1 do
 				local i = x + y * sx + z * sx * sy
-				local v = safe.VoxelInstance(ids[i] + lights[i] * 0x1000000)
+				local v = safe.VoxelInstance(ids[i] + lights[i] * 0x1000000 +
+						lights[i] * 0x10000000)
 				volume:set_voxel_at(x, y, z, v)
 			end
 		end
@@ -119,6 +127,9 @@ local function check_pack_voxel_volume()
 				assert(v:get_skylight() == (inside and lights[i] or 0),
 						"skylight at "..x..","..y..","..z.." is "..
 						v:get_skylight())
+				assert(v:get_lamplight() == (inside and lights[i] or 0),
+						"lamplight at "..x..","..y..","..z.." is "..
+						v:get_lamplight())
 			end
 		end
 	end
@@ -171,6 +182,20 @@ local function check_pack_voxel_volume()
 	}
 	assert(safe.deserialize_volume(clipped):get_voxel_at(0, 0, 0):get_id() ==
 			ids[1 + 1 * sx + 1 * sx * sy], "clipping put the wrong voxel at 0")
+
+	-- field = "light" writes both light channels at once and leaves the id
+	-- alone, which is how a mapblock's param1 goes in
+	local both = buildat.pack_voxel_volume{
+		region = {0, 0, 0, 0, 0, 0},
+		fill = FILL,
+		sources = {{
+			data = string.char(0xa3), format = "u8", source_size = {1, 1, 1},
+			field = "light",
+		}},
+	}
+	local lit = safe.deserialize_volume(both):get_voxel_at(0, 0, 0)
+	assert(lit:get_skylight() == 0x3 and lit:get_lamplight() == 0xa and
+			lit:get_id() == FILL, "field = light wrote "..lit.data)
 end
 
 function M.self_test()

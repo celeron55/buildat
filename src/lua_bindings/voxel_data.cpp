@@ -31,6 +31,8 @@ namespace lua_bindings {
 enum PackField {
 	FIELD_ID,        // The type id, bits 0..20
 	FIELD_SKYLIGHT,  // Bits 24..27
+	FIELD_LAMPLIGHT, // Bits 28..31
+	FIELD_LIGHT,     // Both light channels at once, bits 24..31
 	FIELD_RAW,       // The whole 32 bits
 };
 
@@ -253,6 +255,10 @@ static void parse_source(const luabind::object &t, PackSource &source)
 			source.field = FIELD_ID;
 		else if(field == "skylight")
 			source.field = FIELD_SKYLIGHT;
+		else if(field == "lamplight")
+			source.field = FIELD_LAMPLIGHT;
+		else if(field == "light")
+			source.field = FIELD_LIGHT;
 		else if(field == "raw")
 			source.field = FIELD_RAW;
 		else
@@ -342,6 +348,13 @@ static void apply_source(pv::RawVolume<VoxelInstance> &volume,
 					break;
 				case FIELD_SKYLIGHT:
 					v.set_skylight((uint8_t)value);
+					break;
+				case FIELD_LAMPLIGHT:
+					v.set_lamplight((uint8_t)value);
+					break;
+				case FIELD_LIGHT:
+					v.data = (v.data & ~0xff000000UL) |
+							(((uint32_t)value & 0xffUL) << 24);
 					break;
 				case FIELD_RAW:
 					v.data = (uint32_t)value;

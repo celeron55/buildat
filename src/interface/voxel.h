@@ -137,6 +137,18 @@ namespace interface
 		void set_skylight(uint8_t l){
 			data = (data & ~0x0f000000UL) | ((uint32_t)(l & 0x0f) << 24);
 		}
+
+		// Bits 28..31 hold lamplight: light that reaches the voxel from
+		// something other than the sky, which is a torch or a lava flow or
+		// whatever else a world has. Read the same way as skylight, and
+		// separate from it because the sky's contribution changes with the
+		// time of day and a lamp's does not: a shader that is handed both can
+		// move the sun without anything being meshed again.
+		static const uint8_t LAMPLIGHT_MAX = 15;
+		uint8_t get_lamplight() const {return (data>>28) & 0x0f; }
+		void set_lamplight(uint8_t l){
+			data = (data & ~0xf0000000UL) | ((uint32_t)(l & 0x0f) << 28);
+		}
 	};
 }
 // vim: set noet ts=4 sw=4:

@@ -77,7 +77,13 @@ namespace interface
 		//   TU_SPECULAR  a surface map, not Urho's specular: roughness in r
 		//                and spec_strength, translucency and spots in gba
 		//   vertex color ambient = cAmbientColor.rgb * a + rgb, when
-		//                use_skylight; see BOUNCE_COLOR in impl/mesh.cpp
+		//                use_skylight. The alpha is how much of the sky the
+		//                surface sees and the rgb is the light that reaches
+		//                it regardless of the sky: bounced light, and the
+		//                voxel's lamplight. See BOUNCE_COLOR and LAMP_COLOR
+		//                in impl/mesh.cpp. cAmbientColor being the color of
+		//                the sky, a world moves the sun by setting it and
+		//                nothing has to be meshed again.
 		//   Roughness, Metallic  both 0; the maps carry these
 		// interface/atlas.h says what fills the two maps. No technique is set:
 		// a game picks one for its chunks in voxelworld.sub_material_update(),
@@ -86,9 +92,10 @@ namespace interface
 
 		// Can be called from any thread
 		// use_skylight: light the geometry by VoxelInstance::get_skylight()
-		// of the voxel in front of each face, along with per-vertex ambient
-		// occlusion and a per-face brightness, written into vertex colors.
-		// Only worlds that actually fill those bits should ask for it.
+		// and get_lamplight() of the voxel in front of each face, along with
+		// per-vertex ambient occlusion and a per-face brightness, written
+		// into vertex colors. Only worlds that actually fill those bits
+		// should ask for it.
 		void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 				pv::RawVolume<VoxelInstance> &volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
