@@ -419,6 +419,26 @@ buildat.compose_image(args) -> width, height
 - colorize blends towards the colour by ratio and leaves fully transparent
   pixels alone; at ratio 255 it replaces the colour and multiplies the alpha.
 
+VoxelDefinition.shape
+- A shape of the voxel's own instead of a cube: an array of quads, each
+  {tile = 1...6, p = {12 numbers}, uv = {8 numbers}}. The corners are in the
+  voxel's own cube of -0.5...0.5 and the texture coordinates in the tile's own
+  0...1 with 0,0 at its top left. Empty for a cube, which is what most voxels
+  are and the fast path the voxel mesher exists for; a voxel with quads has
+  them copied into its chunk's mesh, which costs about what its own faces
+  would have -- rather than a scene node per stair.
+- Wind a quad's corners so that the right-handed cross product of its first
+  two edges points out of the shape; the mesher takes that as the normal too.
+  Corner order top left, top right, bottom right, bottom left as the face is
+  seen from outside does it.
+- VoxelDefinition.shape_double_sided draws the quads from both sides, which a
+  shape made of single quads -- a plant, a rail, a sign -- wants and a shape
+  made of boxes does not.
+- A voxel with a shape usually wants face_draw_type FACEDRAWTYPE_NEVER and
+  edge_material_id EDGEMATERIALID_EMPTY too: the cube faces it would
+  otherwise have are not what it looks like, and its neighbours should draw
+  their faces against it.
+
 volume:serialize() -> string
 - The same thing a Volume built one set_voxel_at() at a time can hand to
   set_voxel_geometry(). The slow, flexible path; pack_voxel_volume() is the

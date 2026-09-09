@@ -64,6 +64,76 @@ void vdef_set_textures(VoxelDefinition &def, luabind::object value, lua_State *L
 	}
 }
 
+// vdef.shape: an array of quads, each
+//   {tile = 1...6,
+//    p = {x0,y0,z0, x1,y1,z1, x2,y2,z2, x3,y3,z3},
+//    uv = {u0,v0, u1,v1, u2,v2, u3,v3}}
+// The corners are in the voxel's own cube of -0.5...0.5 and the texture
+// coordinates in the tile's own 0...1; see interface/voxel.h.
+static luabind::object vdef_get_shape(const VoxelDefinition &def,
+		lua_State *L)
+{
+	luabind::object result = luabind::newtable(L);
+	for(size_t i = 0; i < def.shape.size(); i++){
+		const interface::VoxelQuad &q = def.shape[i];
+		luabind::object quad = luabind::newtable(L);
+		quad["tile"] = (int)q.tile + 1;
+		luabind::object p = luabind::newtable(L);
+		luabind::object uv = luabind::newtable(L);
+		for(int c = 0; c < 4; c++){
+			for(int a = 0; a < 3; a++)
+				p[c * 3 + a + 1] = q.p[c][a];
+			for(int a = 0; a < 2; a++)
+				uv[c * 2 + a + 1] = q.uv[c][a];
+		}
+		quad["p"] = p;
+		quad["uv"] = uv;
+		result[i + 1] = quad;
+	}
+	return result;
+}
+
+static double quad_number(const luabind::object &t, int index)
+{
+	luabind::object v = t[index];
+	if(!v || luabind::type(v) != LUA_TNUMBER)
+		throw Exception(ss_()+"VoxelDefinition.shape: entry "+itos(index)+
+				" is not a number");
+	return luabind::object_cast<double>(v);
+}
+
+static void vdef_set_shape(VoxelDefinition &def, const luabind::object &value)
+{
+	def.shape.clear();
+	if(!value || luabind::type(value) != LUA_TTABLE)
+		return;
+	for(luabind::iterator it(value), end; it != end; ++it){
+		luabind::object quad = *it;
+		if(luabind::type(quad) != LUA_TTABLE)
+			throw Exception("VoxelDefinition.shape: a quad is not a table");
+		luabind::object p = quad["p"];
+		luabind::object uv = quad["uv"];
+		if(!p || luabind::type(p) != LUA_TTABLE ||
+				!uv || luabind::type(uv) != LUA_TTABLE)
+			throw Exception("VoxelDefinition.shape: a quad wants p and uv");
+		interface::VoxelQuad q;
+		luabind::object tile = quad["tile"];
+		int tile_i = (tile && luabind::type(tile) == LUA_TNUMBER) ?
+				(int)luabind::object_cast<double>(tile) : 1;
+		if(tile_i < 1 || tile_i > 6)
+			throw Exception(ss_()+"VoxelDefinition.shape: tile "+
+					itos(tile_i)+" is not one of the six");
+		q.tile = (uint8_t)(tile_i - 1);
+		for(int c = 0; c < 4; c++){
+			for(int a = 0; a < 3; a++)
+				q.p[c][a] = (float)quad_number(p, c * 3 + a + 1);
+			for(int a = 0; a < 2; a++)
+				q.uv[c][a] = (float)quad_number(uv, c * 2 + a + 1);
+		}
+		def.shape.push_back(q);
+	}
+}
+
 sp_<VoxelRegistry> createVoxelRegistry(lua_State *L)
 {
 	return sp_<VoxelRegistry>(
@@ -114,6 +184,9 @@ void init_voxel(lua_State *L)
 			.def_readwrite("edge_material_id", &VoxelDefinition::edge_material_id)
 			.def_readwrite("physically_solid", &VoxelDefinition::physically_solid)
 			.def_readwrite("fully_empty", &VoxelDefinition::fully_empty)
+			.property("shape", &vdef_get_shape, &vdef_set_shape)
+			.def_readwrite("shape_double_sided",
+					&VoxelDefinition::shape_double_sided)
 			.enum_("FaceDrawType")[
 				value("FACEDRAWTYPE_NEVER", (int)FaceDrawType::NEVER),
 				value("FACEDRAWTYPE_ALWAYS", (int)FaceDrawType::ALWAYS),

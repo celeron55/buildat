@@ -90,6 +90,11 @@ namespace interface
 		// and skylit geometry stays invisible until it does. The reference
 		// implementation is PBRVoxel in games/voxel_lighting.
 
+		// A voxel whose definition has a shape contributes that shape's quads
+		// instead of cube faces; see VoxelDefinition::shape in
+		// interface/voxel.h. The LOD generators below do not do this, so a
+		// world that uses LOD loses its shaped voxels in the distance.
+		//
 		// Can be called from any thread
 		// use_skylight: light the geometry by VoxelInstance::get_skylight()
 		// and get_lamplight() of the voxel in front of each face, along with
