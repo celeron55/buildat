@@ -6,11 +6,15 @@ server: it does the client's side of Luanti's protocol.
     $ bin/buildat_client -m luanti_client
 
 It asks for an address, a player name and a password, logs in, and shows the
-terrain around the player. BUILDAT_LUANTI_ADDRESS sets the address the dialog
-starts with, which is what scripted runs (-c) use. Escape disconnects.
+terrain around the player with the server's own textures.
+BUILDAT_LUANTI_ADDRESS sets the address the dialog starts with, which is what
+scripted runs (-c) use. Escape disconnects.
 
-Every node but air is drawn as one placeholder cube for now; what a node
-really looks like needs the node definitions and the server's media.
+A node is drawn as a cube with its own six textures when it is one of the
+Luanti draw types that is a cube (normal, glasslike, allfaces) and every one of
+those textures is a plain file name. Everything else -- plants, liquids, node
+boxes, meshes, rails, and anything whose texture is a modifier expression this
+does not reduce -- is one grey placeholder cube.
 
 The network dialog of extension/network asks about the address the first time;
 see doc/client_api.txt.
@@ -22,8 +26,10 @@ connection.lua  The UDP transport: channels, reliable packets, acks, splits
 srp.lua         The client half of the SRP-6a login, on buildat.bignum
 client.lua      The commands: the login, the map blocks, and dispatch for the
                 rest
+nodedef.lua     NODEDEF: what a node id is called, how it is drawn, its tiles
+media.lua       The server's media files, in cache/luanti_media/<server>/
 world.lua       The scene: a node per map block, with buildat's voxel mesher
-                on it
+                on it, and the voxel registry the node definitions build
 engine_test.lua Checks of the engine primitives, run at boot
 init.lua        The connect dialog and the status screen
 
@@ -34,10 +40,12 @@ Checks
 ------
     $ lua extensions/luanti_client/test.lua
 
-covers serialize.lua and connection.lua against a fake socket: the packet
-framing, numbers including f32, reliable packets arriving out of order or
-twice, acknowledgements, resending, splitting what is sent and reassembling
-what arrives, and the peer id handshake.
+covers serialize.lua, connection.lua, nodedef.lua and media.lua without an
+engine: the packet framing, numbers including f32, reliable packets arriving
+out of order or twice, acknowledgements, resending, splitting what is sent and
+reassembling what arrives, the peer id handshake, a NODEDEF packet built the
+way a server builds one and read back, and which media names are usable as
+file names.
 
     $ bin/buildat_client -m luanti_client
 
@@ -50,7 +58,17 @@ util/srp_reference.py, which does SRP-6a separately in Python.
 
 Both login paths have been run against a real Luanti server: registering a new
 player (FIRST_SRP) and logging in as one the server knows (SRP), and the
-terrain of that server's world has been on screen.
+terrain of that server's world has been on screen with its own textures.
+
+Media: only the textures the node definitions name are asked for. A game's
+media is mostly sounds, models and textures for things that are not nodes;
+MineClone announces 3400 files and 900 of them are node textures.
+
+Texture modifiers ("dirt.png^shadow.png", "[combine:...") are a language of
+their own. What is done with them is to take the file name a chain starts
+from and drop the overlays, which is what makes a grass block's sides dirt
+rather than a placeholder; a name that does not start with a file name gets the
+placeholder.
 
 How the world sits: a buildat voxel and a Luanti node both occupy the cube
 centred on their integer coordinate, so Luanti node coordinates are Urho3D
@@ -73,6 +91,9 @@ What is done
 - MOVE_PLAYER (where the server put us) and TIME_OF_DAY
 - The terrain on screen: a scene node per map block, meshed by buildat's voxel
   mesher, dropped again once it is far enough away
+- NODEDEF, and a voxel registry built from it
+- The media: ANNOUNCE_MEDIA, REQUEST_MEDIA and MEDIA, cached on disk by name
+  and checked against the sha1 the server announced
 
 Only serialization version 29 is read. It is what every current server writes;
 older ones compress the pieces of a mapblock separately and the client says so
@@ -80,7 +101,11 @@ and gives up rather than carrying a second parser.
 
 What is next
 ------------
-- The definitions' contents: what a node id means, and the media that goes
-  with it (ANNOUNCE_MEDIA, MEDIA)
 - The player: position and input, HP, breath
+- Node draw types that are not cubes, and texture modifiers
+- Colour palettes: a node with paramtype2 "color" or "colorfacedir" has a
+  greyscale texture that the game colours per node. MineClone's grass comes
+  out grey because of this.
+- Alpha: the mesher builds opaque geometry, so the holes in a leaf texture
+  show as whatever colour is behind them in the image
 - Active objects, formspecs, the HUD, chat, sounds

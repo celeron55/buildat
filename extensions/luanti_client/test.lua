@@ -18,6 +18,12 @@ end
 
 local serialize = dofile(dir.."/serialize.lua")
 local connection = dofile(dir.."/connection.lua")
+local nodedef = dofile(dir.."/nodedef.lua")
+local media = dofile(dir.."/media.lua")
+
+local function dump_name(s)
+	return "\""..s:gsub("[^%w%p ]", "?").."\""
+end
 
 local log = {}
 for _, level in ipairs({"error", "warning", "info", "verbose", "debug"}) do
@@ -263,4 +269,144 @@ assert(disconnect_reason == "closed", "connection: did not notice the close")
 assert(conn.connected == false)
 
 print("connection: ok")
+-- nodedef.lua
+
+-- What comes out of a texture name: a file name, the base of a "^" chain, or
+-- nil where Luanti's modifier language really begins
+local texture_cases = {
+	{"default_dirt.png", "default_dirt.png"},
+	{"default_dirt.png^mcl_dirt_grass_shadow.png", "default_dirt.png"},
+	{"sign.png^[multiply:#917056", "sign.png"},
+	{"a.png^[transformR90^b.png", "a.png"},
+	{"[combine:16x16:0,0=a.png", nil},
+	{"(a.png^b.png)^c.png", nil},
+	{"", nil},
+	{"../secrets/passwd", nil},
+	{"dir/a.png", nil},
+}
+for _, case in ipairs(texture_cases) do
+	local got = nodedef.plain_texture_name(case[1])
+	assert(got == case[2], "nodedef: plain_texture_name("..case[1]..") = "..
+			tostring(got).."; wanted "..tostring(case[2]))
+end
+
+-- A NODEDEF packet built the way the server builds one, and read back. This is
+-- the whole point of the parser: finding the six tiles means reading through
+-- everything in front of them, and a tile is variable-length.
+local function write_tiledef(w, name, flags, animation)
+	w:u8(6) -- TileDef version
+	w:string(name)
+	if animation == "vertical" then
+		w:u8(1):u16(16):u16(16):raw(string.char(0x3f, 0x80, 0, 0)) -- 1.0 s
+	elseif animation == "sheet" then
+		w:u8(2):u8(2):u8(2):raw(string.char(0x3f, 0x80, 0, 0))
+	else
+		w:u8(0)
+	end
+	w:u16(flags)
+	if flags % 16 >= 8 then -- has_color
+		w:u8(255):u8(128):u8(0)
+	end
+	if flags % 32 >= 16 then -- has_scale
+		w:u8(2)
+	end
+	if flags % 64 >= 32 then -- has_align_style
+		w:u8(1)
+	end
+end
+
+local function write_node(name, drawtype, tile_names, flags, animation)
+	local w = serialize.writer()
+	w:u8(13) -- ContentFeatures version
+	w:string(name)
+	w:u16(2) -- Groups
+	w:string("cracky"):s16(3)
+	w:string("oddly_breakable_by_hand"):s16(-1)
+	w:u8(0) -- param_type
+	w:u8(0) -- param_type_2
+	w:u8(drawtype)
+	w:string("") -- mesh
+	w:raw(string.char(0x3f, 0x80, 0, 0)) -- visual_scale 1.0
+	w:u8(6)
+	for i = 1, 6 do
+		write_tiledef(w, tile_names[i], flags or 0, animation)
+	end
+	-- Everything after the tiles is skipped by the parser, which is what lets
+	-- it read a newer ContentFeatures than it knows
+	w:raw(string.rep("\255", 40))
+	return w:data()
+end
+
+local nodes = {
+	{7, write_node("test:stone", 0, {"stone.png", "stone.png", "stone.png",
+			"stone.png", "stone.png", "stone.png"}, 0)},
+	{9, write_node("test:grass", 0, {"grass_top.png", "dirt.png",
+			"dirt.png^shadow.png", "dirt.png^shadow.png",
+			"dirt.png^shadow.png", "dirt.png^shadow.png"}, 8 + 16 + 32)},
+	{11, write_node("test:water", 2, {"water.png", "water.png", "water.png",
+			"water.png", "water.png", "water.png"}, 1, "vertical")},
+	{13, write_node("test:torch", 7, {"torch.png", "torch.png", "torch.png",
+			"torch.png", "torch.png", "torch.png"}, 0, "sheet")},
+}
+local inner = serialize.writer()
+for _, node in ipairs(nodes) do
+	inner:u16(node[1]):string(node[2])
+end
+local nodedef_packet = serialize.writer():u8(1):u16(#nodes)
+		:longstring(inner:data()):data()
+
+local defs, count = nodedef.parse(serialize, nodedef_packet)
+assert(count == #nodes, "nodedef: count is "..count)
+assert(defs[7].name == "test:stone", "nodedef: name is "..
+		tostring(defs[7] and defs[7].name))
+assert(defs[7].drawtype == 0 and defs[9].drawtype == 0 and
+		defs[11].drawtype == 2 and defs[13].drawtype == 7,
+		"nodedef: wrong draw types")
+assert(defs[7].groups.cracky == 3 and
+		defs[7].groups.oddly_breakable_by_hand == -1, "nodedef: groups")
+-- The flags on test:grass add a colour, a scale and an align style after the
+-- name, and getting past those is what finds the next tile
+assert(defs[9].tiles[1].name == "grass_top.png" and
+		defs[9].tiles[6].name == "dirt.png^shadow.png",
+		"nodedef: tiles after the optional tile fields")
+assert(defs[11].tiles[1].animated, "nodedef: animation not noticed")
+assert(defs[13].tiles[3].name == "torch.png", "nodedef: tiles after a sheet")
+
+local wanted = nodedef.texture_names(defs)
+assert(wanted["stone.png"] and wanted["grass_top.png"] and wanted["dirt.png"],
+		"nodedef: texture_names missed one")
+assert(wanted["dirt.png^shadow.png"] == nil,
+		"nodedef: texture_names kept a modifier expression")
+
+-- A node whose definition cannot be read is left out, and the rest still parse
+local broken = serialize.writer():u16(20):string(string.char(13, 0, 200))
+		:data()
+local mixed = serialize.writer():u8(1):u16(2):longstring(
+		broken..serialize.writer():u16(7):string(nodes[1][2]):data()):data()
+local defs2, count2 = nodedef.parse(serialize, mixed)
+assert(count2 == 2 and defs2[20] == nil and defs2[7].name == "test:stone",
+		"nodedef: one broken node should not stop the rest")
+
+print("nodedef: ok")
+
+-- media.lua
+
+-- A name from the server becomes a file name, so what is not usable as one is
+-- refused rather than trusted
+for _, name in ipairs({"default_dirt.png", "mcl_core_stone.png", "a-b_c.png"}) do
+	assert(media.is_safe_name(name), "media: refused "..name)
+end
+for _, name in ipairs({"", ".", "..", "../etc/passwd", "a/b.png", "a\\b.png",
+		".hidden", "a b.png", "a;b.png", string.rep("a", 201)}) do
+	assert(not media.is_safe_name(name), "media: accepted "..dump_name(name))
+end
+assert(media.server_key("127.0.0.1", 30000) == "127.0.0.1_30000")
+assert(media.server_key("::1", 30000) == "__1_30000")
+-- Dots survive, slashes do not, and the port on the end means the name can
+-- never come out as "." or ".."
+assert(media.server_key("a/../b", 1) == "a_.._b_1")
+assert(media.server_key("..", 1) == ".._1")
+
+print("media: ok")
+
 print("luanti_client/test.lua: ok")

@@ -32,6 +32,31 @@ local VOXEL_PLACEHOLDER = 2
 local CONTENT_AIR = 126
 local CONTENT_IGNORE = 127
 
+-- Luanti draw types that are a full cube and can be drawn from the node's own
+-- six tiles. Everything else -- plants, liquids, node boxes, meshes, rails --
+-- is not a cube at all and gets the placeholder until there is something that
+-- can build its shape.
+--
+-- The value is the buildat edge material the cube gets, which is what decides
+-- when a face between two of them is drawn: two "ground" cubes hide the face
+-- between them, two glass cubes hide the face between each other but not the
+-- one against ground.
+--
+-- Leaves (NDT_ALLFACES) are "ground" too, so a canopy is one solid mass. In
+-- Luanti they are cubes with a texture full of holes, drawn with every face;
+-- there is no alpha in what the mesher builds, so drawing the inside faces
+-- would only show the colour behind the holes twice over.
+local EDGEMATERIAL_GLASS = 10
+local CUBE_DRAWTYPES = {
+	[0] = "ground",  -- NDT_NORMAL
+	[4] = "glass",   -- NDT_GLASSLIKE
+	[5] = "ground",  -- NDT_ALLFACES, leaves
+	[6] = "ground",  -- NDT_ALLFACES_OPTIONAL
+	[13] = "glass",  -- NDT_GLASSLIKE_FRAMED
+	[15] = "glass",  -- NDT_GLASSLIKE_FRAMED_OPTIONAL
+}
+local DRAWTYPE_AIRLIKE = 1
+
 -- How many blocks to mesh per frame. Meshing itself is on a worker thread, but
 -- packing the volume and handing it over is not, so a burst of a hundred
 -- blocks arriving at once would otherwise be one long frame.
@@ -113,42 +138,61 @@ function M.new(magic, buildat, log, options)
 	self.viewport = viewport
 	magic.renderer:SetViewport(0, viewport)
 
-	-- One placeholder cube and one air, which is all that can be said about a
-	-- node without the definitions. nodedef.lua replaces this in M3.
-	local voxel_reg = buildat.createVoxelRegistry()
-	local atlas_reg = buildat.createAtlasRegistry()
-	self.voxel_reg = voxel_reg
-	self.atlas_reg = atlas_reg
-
-	do
+	-- A cube whose six faces are the given resource names, in buildat's face
+	-- order (+Y, -Y, +X, -X, +Z, -Z), which is also Luanti's tile order
+	local function add_cube(voxel_reg, name, resources, kind)
 		local vdef = buildat.VoxelDefinition()
-		vdef.name.block_name = "air"
-		vdef.handler_module = ""
-		vdef.edge_material_id = buildat.VoxelDefinition.EDGEMATERIALID_EMPTY
-		vdef.physically_solid = false
-		vdef.fully_empty = true
-		voxel_reg:add_voxel(vdef) -- VOXEL_AIR
-	end
-	do
-		local vdef = buildat.VoxelDefinition()
-		vdef.name.block_name = "placeholder"
+		vdef.name.block_name = name
 		vdef.handler_module = ""
 		local textures = {}
 		for i = 1, 6 do
 			local seg = buildat.AtlasSegmentDefinition()
-			seg.resource_name = texture
+			seg.resource_name = resources[i]
 			seg.total_segments = magic.IntVector2(1, 1)
 			seg.select_segment = magic.IntVector2(0, 0)
+			-- A game's textures are painted, not photographed; a wide, weak
+			-- highlight keeps them looking like what they are painted as
 			seg.roughness = 0.95
 			seg.spec_strength = 0.2
 			seg.bumpiness = 0.3
 			textures[i] = seg
 		end
 		vdef.textures = textures
-		vdef.edge_material_id = buildat.VoxelDefinition.EDGEMATERIALID_GROUND
+		if kind == "glass" then
+			vdef.edge_material_id = EDGEMATERIAL_GLASS
+		else
+			vdef.edge_material_id =
+					buildat.VoxelDefinition.EDGEMATERIALID_GROUND
+		end
 		vdef.physically_solid = true
-		voxel_reg:add_voxel(vdef) -- VOXEL_PLACEHOLDER
+		return voxel_reg:add_voxel(vdef)
 	end
+
+	-- The registry as it is until the node definitions arrive: air, and one
+	-- placeholder cube for everything else. set_node_definitions() replaces
+	-- it with one built from what the server says the nodes are.
+	local function base_registry()
+		local voxel_reg = buildat.createVoxelRegistry()
+		local vdef = buildat.VoxelDefinition()
+		vdef.name.block_name = "air"
+		vdef.handler_module = ""
+		-- Air draws no faces of its own; the solid voxel next to it draws the
+		-- face between them
+		vdef.face_draw_type = buildat.VoxelDefinition.FACEDRAWTYPE_NEVER
+		vdef.edge_material_id = buildat.VoxelDefinition.EDGEMATERIALID_EMPTY
+		vdef.physically_solid = false
+		vdef.fully_empty = true
+		voxel_reg:add_voxel(vdef) -- VOXEL_AIR
+		add_cube(voxel_reg, "placeholder",
+				{texture, texture, texture, texture, texture, texture},
+				"ground") -- VOXEL_PLACEHOLDER
+		return voxel_reg
+	end
+
+	-- On self rather than in a local: set_node_definitions() replaces both,
+	-- and mesh_block() has to use whichever is current
+	self.voxel_reg = base_registry()
+	self.atlas_reg = buildat.createAtlasRegistry()
 
 	-- key -> {x=, y=, z=, param0=, param1=, node=}
 	local blocks = {}
@@ -255,8 +299,8 @@ function M.new(magic, buildat, log, options)
 			fill = VOXEL_AIR,
 			sources = volume_sources(block),
 		}
-		buildat.set_voxel_geometry(block.node, data, voxel_reg, atlas_reg,
-				self.use_skylight, self.material_cb)
+		buildat.set_voxel_geometry(block.node, data, self.voxel_reg,
+				self.atlas_reg, self.use_skylight, self.material_cb)
 		self.last_mesh_us = buildat.get_time_us() - t0
 	end
 
@@ -283,6 +327,50 @@ function M.new(magic, buildat, log, options)
 
 	function self:get_block(x, y, z)
 		return blocks[block_key(x, y, z)]
+	end
+
+	-- Builds the voxel registry from Luanti's node definitions.
+	--
+	-- defs is what nodedef.parse() returned. resolve_texture(name) turns a
+	-- tile's texture name into a resource name the cache can find, or nil for
+	-- one that is not there or is a texture modifier expression rather than a
+	-- file. A node with any face unresolved keeps the placeholder: half a
+	-- cube's textures is worse to look at than none of them.
+	--
+	-- Returns how many node ids came out as their own cube.
+	function self:set_node_definitions(defs, resolve_texture)
+		local new_reg = base_registry()
+		local map = {
+			[CONTENT_AIR] = VOXEL_AIR,
+			[CONTENT_IGNORE] = VOXEL_AIR,
+		}
+		local cubes = 0
+		for id, def in pairs(defs) do
+			local kind = CUBE_DRAWTYPES[def.drawtype]
+			if def.drawtype == DRAWTYPE_AIRLIKE then
+				map[id] = VOXEL_AIR
+			elseif kind then
+				local resources = {}
+				for i = 1, 6 do
+					resources[i] = resolve_texture(def.tiles[i].name)
+					if not resources[i] then
+						break
+					end
+				end
+				if resources[6] then
+					map[id] = add_cube(new_reg, def.name, resources, kind)
+					cubes = cubes + 1
+				end
+			end
+			-- Anything left out keeps map_default, the placeholder cube
+		end
+		self.voxel_reg = new_reg
+		-- A fresh atlas registry: the old one holds atlases built for the old
+		-- registry's segment ids
+		self.atlas_reg = buildat.createAtlasRegistry()
+		self.node_map = map
+		self:invalidate_all()
+		return cubes
 	end
 
 	-- Everything is out of date; used when what a node id means changes, which
