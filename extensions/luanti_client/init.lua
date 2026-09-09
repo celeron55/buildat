@@ -460,6 +460,32 @@ local function show_client(host, port, name, password)
 			return nil
 		end
 
+		-- Declared before what uses it; the definition is further down, with
+		-- the rest of what a form needs
+		local item_image
+
+		-- What an object is drawn wearing. A mob and a player have textures
+		-- of their own; a dropped item has none and carries the item it is
+		-- instead, and what that looks like is what it looks like in an
+		-- inventory.
+		local function object_resource(obj)
+			local props = obj.props
+			if not props then
+				return nil
+			end
+			if props.textures and props.textures[1] and
+					props.textures[1] ~= "" then
+				return object_texture(props.textures[1])
+			end
+			if props.wield_item and props.wield_item ~= "" then
+				local item = props.wield_item:match("^(%S+)")
+				if item then
+					return item_image(item)
+				end
+			end
+			return nil
+		end
+
 		client.on_object_add = function(id, object_type, data)
 			local ok, obj = pcall(objects.parse_init, luanti.serialize, data)
 			if not ok then
@@ -474,7 +500,7 @@ local function show_client(host, port, name, password)
 				obj.is_self = true
 				return
 			end
-			view:set_object(obj, object_texture)
+			view:set_object(obj, object_resource)
 		end
 
 		client.on_object_remove = function(id)
@@ -495,7 +521,7 @@ local function show_client(host, port, name, password)
 				return
 			end
 			if obj.visual_stale and not obj.is_self then
-				view:set_object(obj, object_texture)
+				view:set_object(obj, object_resource)
 			end
 		end
 
@@ -652,7 +678,7 @@ local function show_client(host, port, name, password)
 		-- What an item looks like: its own inventory image, or, for an item
 		-- that places a node, the top of that node. Both are texture
 		-- expressions.
-		local function item_image(item_name)
+		function item_image(item_name)
 			local def = item_defs and item_defs[item_name]
 			if def and def.inventory_image and def.inventory_image ~= "" then
 				return texmod.resolve(def.inventory_image, texmod_ctx)
@@ -955,7 +981,7 @@ local function show_client(host, port, name, password)
 			objects.interpolate(world_objects, dtime)
 			for _, obj in pairs(world_objects) do
 				if obj.visual_stale and not obj.is_self then
-					view:set_object(obj, object_texture)
+					view:set_object(obj, object_resource)
 				end
 			end
 			view:place_objects(world_objects)
