@@ -203,6 +203,10 @@ function M.new(magic, buildat, log, options)
 	options = options or {}
 	local far_clip = options.far_clip or 240
 	local texture = options.texture or "luanti_client/res/placeholder.png"
+	-- options.read_image(resource) -> w, h, rgba, for the colour a light
+	-- source shines in. Handed in rather than taken from buildat because it
+	-- is not part of the sandbox's own interface.
+	local read_image = options.read_image
 
 	local self = {}
 
@@ -554,6 +558,50 @@ function M.new(magic, buildat, log, options)
 	-- the frame.
 	self.last_mesh_us = 0
 
+	-- What colour a light source shines in: the average of its own first
+	-- tile, brightest channel brought up to one so that how bright it is
+	-- stays the light level's business. A torch is then warm and a soul
+	-- torch is blue without anything having to know what either is.
+	--
+	-- Luanti has one number for this -- light_source -- and paints every
+	-- source the same; the plan's "rendering does not have to match" is what
+	-- this leans on.
+	local light_color_cache = {}
+
+	local function light_color(resource)
+		if not resource or not read_image then
+			return LIGHT_COLOR
+		end
+		local held = light_color_cache[resource]
+		if held then
+			return held
+		end
+		local color = LIGHT_COLOR
+		local ok, w, h, rgba = pcall(read_image, resource)
+		if ok and rgba and w and h and w > 0 and h > 0 then
+			local r, g, b, weight = 0, 0, 0, 0
+			-- Every fourth pixel is enough of an average and a 64x64 tile is
+			-- four thousand of them
+			for i = 0, w * h - 1, 4 do
+				local pr, pg, pb, pa = rgba:byte(i * 4 + 1, i * 4 + 4)
+				if pa and pa > 128 then
+					r = r + pr
+					g = g + pg
+					b = b + pb
+					weight = weight + 1
+				end
+			end
+			if weight > 0 then
+				local top = math.max(r, g, b)
+				if top > 0 then
+					color = {r = r / top, g = g / top, b = b / top}
+				end
+			end
+		end
+		light_color_cache[resource] = color
+		return color
+	end
+
 	-- Where the voxels that give light are in a block, in world
 	-- coordinates, and how bright: what a scene light is put at.
 	--
@@ -570,8 +618,8 @@ function M.new(magic, buildat, log, options)
 		local n = BLOCKSIZE * BLOCKSIZE * BLOCKSIZE
 		for i = 0, n - 1 do
 			local hi, lo = param0:byte(i * 2 + 1, i * 2 + 2)
-			local level = levels[hi * 256 + lo]
-			if level then
+			local light = levels[hi * 256 + lo]
+			if light then
 				out = out or {}
 				-- The index order is x fastest, then y, then z
 				local x = i % BLOCKSIZE
@@ -581,7 +629,8 @@ function M.new(magic, buildat, log, options)
 					block.x * BLOCKSIZE + x,
 					block.y * BLOCKSIZE + y,
 					block.z * BLOCKSIZE + z,
-					level,
+					light.level,
+					light.color,
 				}
 				if #out >= MAX_LIGHTS_PER_BLOCK then
 					break
@@ -622,8 +671,6 @@ function M.new(magic, buildat, log, options)
 				local node = scene:CreateChild("light_"..i)
 				held = {node = node, light = node:CreateComponent("Light")}
 				held.light.lightType = magic.LIGHT_POINT
-				held.light.color = magic.Color(LIGHT_COLOR.r, LIGHT_COLOR.g,
-						LIGHT_COLOR.b)
 				held.light.castShadows = false
 				-- The world's own light is diffuse; a highlight moving
 				-- about on a painted texture only looks wrong
@@ -640,6 +687,14 @@ function M.new(magic, buildat, log, options)
 					-- mesher already baked in, and a cave with a few
 					-- torches in it washes out otherwise.
 					held.light.brightness = 0.1 + l[4] / 14 * 0.3
+					-- Setting a colour is a sandbox call; most of these
+					-- keep the one they have from one frame to the next
+					local color = l[5] or LIGHT_COLOR
+					if color ~= held.color then
+						held.color = color
+						held.light.color = magic.Color(color.r, color.g,
+								color.b)
+					end
 					held.node.enabled = true
 				else
 					held.node.enabled = false
@@ -1455,7 +1510,8 @@ function M.new(magic, buildat, log, options)
 		local function one_definition(id, def)
 			solid[id] = def.walkable
 			if def.light_source and def.light_source > 0 then
-				light_ids[id] = def.light_source
+				light_ids[id] = {level = def.light_source,
+						color = light_color(resolve_tile(def, 1))}
 			end
 			-- Luanti's PointabilityType: 0 is not pointable, 1 is, and 2
 			-- stops a ray without being pointed at. Those two values are

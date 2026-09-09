@@ -204,6 +204,7 @@ local function show_client(host, port, name, password)
 
 		local view = world.new(magic, buildat.safe, log, {
 				far_clip = FAR_CLIP,
+				read_image = buildat.read_image,
 		})
 
 		client.on_block = function(block)
