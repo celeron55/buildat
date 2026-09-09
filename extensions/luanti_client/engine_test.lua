@@ -196,6 +196,33 @@ local function check_pack_voxel_volume()
 	local lit = safe.deserialize_volume(both):get_voxel_at(0, 0, 0)
 	assert(lit:get_skylight() == 0x3 and lit:get_lamplight() == 0xa and
 			lit:get_id() == FILL, "field = light wrote "..lit.data)
+
+	-- A second sample array, read in lockstep: what a voxel looks like is a
+	-- pair of samples, which is what Luanti's param0 and param2 are. The
+	-- keys are far apart, so the map is a hash rather than an array.
+	local pairs_ids = string.char(0, 5, 0, 5, 0, 7)
+	local pairs_p2 = string.char(1, 2, 3)
+	local pair_map = {
+		[5 + 1 * 65536] = 11,
+		[5 + 2 * 65536] = 22,
+		-- 7 with param2 3 is not mapped, and gets the default
+	}
+	local paired = buildat.pack_voxel_volume{
+		region = {0, 0, 0, 2, 0, 0},
+		fill = FILL,
+		sources = {{
+			data = pairs_ids, format = "u16be", source_size = {3, 1, 1},
+			second = {data = pairs_p2, format = "u8", scale = 65536},
+			map = pair_map, map_default = 33,
+		}},
+	}
+	local pv = safe.deserialize_volume(paired)
+	assert(pv:get_voxel_at(0, 0, 0):get_id() == 11,
+			"paired id 0 is "..pv:get_voxel_at(0, 0, 0):get_id())
+	assert(pv:get_voxel_at(1, 0, 0):get_id() == 22,
+			"paired id 1 is "..pv:get_voxel_at(1, 0, 0):get_id())
+	assert(pv:get_voxel_at(2, 0, 0):get_id() == 33,
+			"paired id 2 is "..pv:get_voxel_at(2, 0, 0):get_id())
 end
 
 -- compose_image() writes a PNG, and Urho3D can read one back, so the pixels
