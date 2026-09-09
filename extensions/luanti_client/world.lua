@@ -629,9 +629,19 @@ function M.new(magic, buildat, log, options)
 	-- The camera, in Luanti node coordinates. Luanti's yaw is degrees around
 	-- Y with 0 towards +Z, and its pitch is positive looking up; Urho3D's
 	-- euler pitch is positive looking down.
+	-- Where the camera is and which way it looks, in Luanti's terms: pitch is
+	-- positive looking up and yaw is degrees counterclockwise from +Z seen
+	-- from above.
+	--
+	-- Urho3D's pitch is positive looking down, and its yaw turns the other
+	-- way round -- clockwise from above, because it is left-handed where
+	-- Luanti's rotateXZBy() is right-handed -- so both are negated. Getting
+	-- the yaw's sense wrong is not just a mirrored view: the server sends
+	-- the blocks it thinks the player can see, so it would send the ones
+	-- behind them.
 	function self:set_camera(x, y, z, pitch, yaw)
 		camera_node.position = magic.Vector3(x, y, z)
-		camera_node.rotation = magic.Quaternion(-(pitch or 0), yaw or 0, 0)
+		camera_node.rotation = magic.Quaternion(-(pitch or 0), -(yaw or 0), 0)
 	end
 
 	return self

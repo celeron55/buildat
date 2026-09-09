@@ -373,7 +373,9 @@ local function show_client(host, port, name, password)
 		-- us.
 		local function move(dtime)
 			local dmouse = magic.input:GetMouseMove()
-			local yaw = client.yaw + dmouse.x * MOUSE_SENSITIVITY
+			-- Luanti's yaw grows counterclockwise seen from above, so the
+			-- mouse going right, which turns the player right, takes it down
+			local yaw = client.yaw - dmouse.x * MOUSE_SENSITIVITY
 			-- Luanti's pitch is positive looking up, and the mouse moving away
 			-- from the user is negative y
 			local pitch = client.pitch - dmouse.y * MOUSE_SENSITIVITY
@@ -385,8 +387,9 @@ local function show_client(host, port, name, password)
 				avatar:set_position(p.x, p.y, p.z)
 			end
 
+			-- Where forward is, in world coordinates, for that yaw
 			local yr = math.rad(yaw)
-			local fx, fz = math.sin(yr), math.cos(yr)
+			local fx, fz = -math.sin(yr), math.cos(yr)
 			local wish = {x = 0, z = 0,
 					jump = magic.input:GetKeyDown(KEY_SPACE),
 					sneak = magic.input:GetKeyDown(KEY_CTRL),
