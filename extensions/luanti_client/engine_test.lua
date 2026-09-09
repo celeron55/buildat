@@ -398,7 +398,50 @@ local function check_compose_image()
 	})
 	same(opaque, 0, 0, {40, 50, 60, 255}, "alpha")
 
-	assert(made == 14, "compose_image: made "..made.." images")
+	-- A shear maps the source's corners onto a parallelogram. Identity edge
+	-- vectors are a plain copy; halving one and slanting it is what a face of
+	-- an isometric cube is.
+	local flat = compose("shear_flat", {
+		size = {4, 2},
+		ops = {{op = "shear", src = SRC, at = {0, 0},
+				u = {4, 0}, v = {0, 2}}},
+	})
+	same(flat, 0, 0, {200, 100, 50, 255}, "shear as a copy")
+	same(flat, 2, 0, {10, 20, 30, 255}, "shear as a copy, outside the corner")
+
+	-- The source turned into a rhombus in an 8x8 canvas: the top corner and
+	-- the middle are inside it, the canvas corners are not
+	local rhombus = compose("shear_rhombus", {
+		size = {8, 8},
+		ops = {{op = "shear", src = SRC, at = {4, 0},
+				u = {4, 4}, v = {-4, 4}}},
+	})
+	same(rhombus, 4, 4, {10, 20, 30, 255}, "the middle of a rhombus")
+	same(rhombus, 0, 0, {0, 0, 0, 0}, "outside a rhombus")
+	same(rhombus, 7, 7, {0, 0, 0, 0}, "outside a rhombus, far corner")
+	-- The source's own 0,0 corner is the rhombus's top, and its colour is
+	-- the 2x1 corner the source was given
+	same(rhombus, 4, 1, {200, 100, 50, 255}, "a rhombus keeps its corner")
+
+	-- Two parallelograms sharing an edge cover every pixel between them once:
+	-- the left half and the right half of a canvas, and nothing left blank
+	-- along the seam
+	local seam = compose("shear_seam", {
+		size = {8, 4},
+		ops = {
+			{op = "shear", src = SRC, at = {0, 0}, u = {4, 0}, v = {0, 4}},
+			{op = "shear", src = SRC, at = {4, 0}, u = {4, 0}, v = {0, 4}},
+		},
+	})
+	for y = 0, 3 do
+		for x = 0, 7 do
+			local got = pixel(seam, x, y)
+			assert(got[4] == 255,
+					"compose_image: a seam at "..x..","..y.." is blank")
+		end
+	end
+
+	assert(made == 17, "compose_image: made "..made.." images")
 end
 
 function M.self_test()
