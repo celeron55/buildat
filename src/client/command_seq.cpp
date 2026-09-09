@@ -14,6 +14,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <climits>
+#include <fcntl.h>
+#include <unistd.h>
 #define MODULE "cmdseq"
 namespace magic = Urho3D;
 
@@ -202,6 +204,58 @@ static bool parse_body(const ss_ &text, sv_<Command> *out, ss_ *error)
 		out->push_back(c);
 	}
 	return true;
+}
+
+// Standard input, non-blocking, a line at a time. The buffer is static
+// because the fd is: there is only one standard input.
+void read_stdin_lines(sv_<ss_> *out_lines, bool *eof)
+{
+	static ss_ buf;
+	static bool nonblock_set = false;
+	static bool done = false;
+	if(done){
+		*eof = true;
+		return;
+	}
+	if(!nonblock_set){
+		nonblock_set = true;
+		int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+		if(flags == -1 || fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK) == -1)
+			log_w(MODULE, "Could not put stdin in non-blocking mode: %s",
+					strerror(errno));
+	}
+	for(;;){
+		char tmp[4096];
+		ssize_t n = read(STDIN_FILENO, tmp, sizeof tmp);
+		if(n > 0){
+			buf.append(tmp, (size_t)n);
+			continue;
+		}
+		if(n == 0){
+			done = true;
+			break;
+		}
+		if(errno == EINTR)
+			continue;
+		if(errno != EAGAIN && errno != EWOULDBLOCK){
+			log_w(MODULE, "Failed to read stdin: %s", strerror(errno));
+			done = true;
+		}
+		break;
+	}
+	for(;;){
+		size_t nl = buf.find('\n');
+		if(nl == ss_::npos)
+			break;
+		out_lines->push_back(buf.substr(0, nl));
+		buf = buf.substr(nl + 1);
+	}
+	// At end of input, what is left without a newline is still a command
+	if(done && !buf.empty()){
+		out_lines->push_back(buf);
+		buf.clear();
+	}
+	*eof = done;
 }
 
 static void self_check()
