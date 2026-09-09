@@ -178,6 +178,18 @@ sends does not hold the rest back forever -- fifteen seconds with no media
 arriving is enough -- and what the announcement did not cover is still asked
 for when something wants to draw it.
 
+An item that places a voxel is drawn as the little isometric cube Luanti
+draws, when the voxel is a cube at all: the top tile and the two a viewer off
+the +X +Z corner would see, each sheared onto a parallelogram by
+compose_image's "shear", with the two sides darkened by asking for the tile
+with a [multiply on it. A nodebox, a plant or a mesh keeps its flat top tile
+instead -- what those look like is their own shape, and a cube would be a
+worse lie. Luanti renders the node with a camera to get this picture; three
+sheared tiles is what comes out of that without a render target, and it is
+composed and cached on disk like every other composed texture. Rendering to a
+texture is still the more general primitive and is on the list for whatever
+needs a picture a shear cannot draw.
+
 Texture modifiers: a texture name in a node definition is an expression --
 "default_dirt.png^mcl_dirt_grass_shadow.png",
 "mcl_core_glass.png^[multiply:red", "[combine:32x16:0,0=a.png:16,0=b.png".

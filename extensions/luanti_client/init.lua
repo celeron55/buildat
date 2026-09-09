@@ -863,6 +863,77 @@ local function show_client(host, port, name, password)
 		-- drawn for them is a marked square, and this is what says why
 		local imageless = {}
 
+		-- Which drawtypes are a cube, and so are drawn as the little cube an
+		-- inventory shows a voxel as. A nodebox, a plant or a mesh is not:
+		-- what those look like is their own shape, and their flat tile is a
+		-- better lie than a cube would be. NDT_MESH is left out for the same
+		-- reason even though the world draws it as its box.
+		local CUBE_ITEM_DRAWTYPES = {
+			[0] = true,  -- NDT_NORMAL
+			[2] = true,  -- NDT_LIQUID
+			[3] = true,  -- NDT_FLOWINGLIQUID
+			[4] = true,  -- NDT_GLASSLIKE
+			[5] = true,  -- NDT_ALLFACES
+			[6] = true,  -- NDT_ALLFACES_OPTIONAL
+			[13] = true, -- NDT_GLASSLIKE_FRAMED
+			[15] = true, -- NDT_GLASSLIKE_FRAMED_OPTIONAL
+		}
+
+		-- How big the cube is drawn. It is scaled to the slot afterwards, so
+		-- this only decides how much of the texture's detail survives; a
+		-- multiple of four, because the isometric geometry is in quarters.
+		local CUBE_SIZE = 64
+
+		-- A voxel as the cube Luanti draws in an inventory: the top face and
+		-- the two the viewer would see, each a parallelogram, the sides
+		-- darkened so that the three read as three faces.
+		--
+		-- Luanti renders the node with a camera; three sheared tiles is the
+		-- picture that comes out of that, without a render target.
+		local function inventory_cube(def)
+			if not CUBE_ITEM_DRAWTYPES[def.drawtype] then
+				return nil
+			end
+			local s = CUBE_SIZE
+			local half, quarter = s / 2, s / 4
+			-- Tiles are +Y, -Y, +X, -X, +Z, -Z: the top and the two faces
+			-- that point at a viewer standing off the +X +Z corner
+			--
+			-- A side is darkened by asking for the tile with a [multiply on
+			-- it rather than by darkening the canvas: the expression
+			-- language already does that, and a multiply over the canvas
+			-- would darken the faces already drawn as well.
+			local faces = {
+				{tile = 1, at = {half, 0},
+						u = {half, quarter}, v = {-half, quarter}},
+				{tile = 5, at = {half, half},
+						u = {-half, -quarter}, v = {0, half},
+						shade = "#bfbfbf"},
+				{tile = 3, at = {half, half},
+						u = {half, -quarter}, v = {0, half},
+						shade = "#949494"},
+			}
+			local ops = {}
+			local key = "\0cube"
+			for _, face in ipairs(faces) do
+				local expr = tile_expression(def, face.tile)
+				if not expr then
+					return nil
+				end
+				if face.shade then
+					expr = expr.."^[multiply:"..face.shade
+				end
+				local resource = texmod.resolve(expr, texmod_ctx)
+				if not resource then
+					return nil
+				end
+				key = key.."\0"..expr
+				ops[#ops + 1] = {op = "shear", src = resource,
+						at = face.at, u = face.u, v = face.v}
+			end
+			return texmod_ctx.compose(def.name..key, ops, {s, s})
+		end
+
 		function item_image(item_name)
 			-- The name an alias means, so that what is looked for below is
 			-- the item itself
@@ -873,6 +944,12 @@ local function show_client(host, port, name, password)
 			end
 			local node = node_by_name[item_name]
 			if node then
+				-- A voxel with no inventory image of its own is the little
+				-- cube, when it is a cube at all
+				local cube = inventory_cube(node)
+				if cube then
+					return cube
+				end
 				local expr = tile_expression(node, 1)
 				if expr then
 					local resource = texmod.resolve(expr, texmod_ctx)

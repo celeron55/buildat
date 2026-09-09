@@ -226,6 +226,49 @@ static void blit(Canvas &dst, const Canvas &src, int from[4], int at[2],
 	}
 }
 
+// The source mapped onto a parallelogram: its own four corners go to at,
+// at+u, at+u+v and at+v. This is the one thing a rectangular blit cannot do
+// and the little cube an inventory draws a voxel as needs -- three faces,
+// three parallelograms.
+//
+// Worked backwards, from each destination pixel to the source pixel it came
+// from, so that the result has no gaps whatever the edges are: the matrix of
+// the two edge vectors is inverted and every pixel of the parallelogram's
+// bounding box is asked which source pixel it holds. Pixel centres decide it,
+// so two parallelograms sharing an edge claim the pixels along it once each.
+static void shear(Canvas &dst, const Canvas &src, const int at[2],
+		const int u[2], const int v[2], BlendMode mode)
+{
+	double det = (double)u[0] * v[1] - (double)u[1] * v[0];
+	if(std::fabs(det) < 1e-9)
+		return; // A parallelogram with no area covers nothing
+	double xs[4] = {(double)at[0], (double)(at[0] + u[0]),
+			(double)(at[0] + v[0]), (double)(at[0] + u[0] + v[0])};
+	double ys[4] = {(double)at[1], (double)(at[1] + u[1]),
+			(double)(at[1] + v[1]), (double)(at[1] + u[1] + v[1])};
+	int x0 = std::max(0, (int)std::floor(*std::min_element(xs, xs + 4)));
+	int x1 = std::min(dst.w, (int)std::ceil(*std::max_element(xs, xs + 4)));
+	int y0 = std::max(0, (int)std::floor(*std::min_element(ys, ys + 4)));
+	int y1 = std::min(dst.h, (int)std::ceil(*std::max_element(ys, ys + 4)));
+	for(int y = y0; y < y1; y++){
+		for(int x = x0; x < x1; x++){
+			double px = x + 0.5 - at[0];
+			double py = y + 0.5 - at[1];
+			// (a, b) such that the pixel is at a*u + b*v from at
+			double a = (v[1] * px - v[0] * py) / det;
+			double b = (u[0] * py - u[1] * px) / det;
+			if(a < 0.0 || a >= 1.0 || b < 0.0 || b >= 1.0)
+				continue;
+			int sx = (int)(a * src.w);
+			int sy = (int)(b * src.h);
+			if(sx < 0 || sx >= src.w || sy < 0 || sy >= src.h)
+				continue;
+			blend_pixel(&src.data[((size_t)sy * src.w + sx) * 4],
+					dst.at(x, y), mode);
+		}
+	}
+}
+
 // The eight symmetries of a square, in Luanti's order: 0 identity, 1..3
 // rotations by 90 degrees counterclockwise, 4 flip x, 5..7 that flip followed
 // by the rotations. An odd transform swaps the two dimensions.
@@ -372,6 +415,22 @@ static void apply_op(magic::Context *context, Canvas &c,
 	if(!have_canvas)
 		throw Exception("compose_image(): \""+op+
 				"\" before there is a canvas");
+
+	if(op == "shear"){
+		ss_ src_name = table_string(t, "src");
+		if(src_name == "")
+			throw Exception("compose_image(): shear has no src");
+		Canvas src;
+		load_source(context, src_name, src);
+		int at[2] = {0, 0};
+		table_ints(t, "at", at, 2);
+		int u[2] = {src.w, 0};
+		int v[2] = {0, src.h};
+		table_ints(t, "u", u, 2);
+		table_ints(t, "v", v, 2);
+		shear(c, src, at, u, v, parse_blend(table_string(t, "blend")));
+		return;
+	}
 
 	if(op == "multiply"){
 		int color[4] = {255, 255, 255, 255};

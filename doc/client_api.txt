@@ -439,6 +439,11 @@ buildat.compose_image(args) -> width, height
           {op = "resize", size = {w, h}},
           {op = "crop", from = {x, y, w, h}, size = {w, h}},
           {op = "crop", grid = {cols, rows}, cell = {x, y}},
+          {op = "shear", src = "a.png",  -- onto a parallelogram
+              at = {x, y},               -- where the source's 0,0 goes
+              u = {dx, dy},              -- and its right edge
+              v = {dx, dy},              -- and its bottom edge
+              blend = "over"},
       },
   }
 
@@ -456,6 +461,14 @@ buildat.compose_image(args) -> width, height
   how many frames a strip holds without anybody having to count them.
 - colorize blends towards the colour by ratio and leaves fully transparent
   pixels alone; at ratio 255 it replaces the colour and multiplies the alpha.
+- shear puts the source's four corners at at, at+u, at+u+v and at+v: u is
+  where its right edge goes and v where its bottom edge goes, so u = {w, 0}
+  and v = {0, h} is a plain scaled copy. It is worked out backwards, from
+  each destination pixel to the source pixel it holds, so the result has no
+  gaps whatever the edges are, and pixel centres decide it, so two
+  parallelograms sharing an edge cover the pixels along it once each. What
+  wanted this is the little isometric cube an inventory draws a voxel as:
+  three tiles, three parallelograms.
 
 buildat.read_image(resource_name) -> width, height, rgba
 - The pixels of an image, as one string of four bytes per pixel, row by row.
