@@ -30,8 +30,8 @@ local M = {}
 -- The elements that say nothing about what is drawn
 local IGNORED = {
 	listring = true, listcolors = true, style = true, style_type = true,
-	tooltip = true, set_focus = true, field_close_on_enter = true,
-	field_enter_after_edit = true, no_prepend = true, bgcolor = true,
+	tooltip = true, field_enter_after_edit = true,
+	no_prepend = true, bgcolor = true,
 	scrollbaroptions = true, allow_close = true, position = true,
 	anchor = true, padding = true, ["scroll_container_end"] = true,
 }
@@ -455,28 +455,65 @@ function M.new(magic, buildat, log, ctx)
 					local st = style_of(name, e.fields[3])
 					local bg = st.bgcolor and
 							markup_color("\27(c@"..st.bgcolor..")")
-					if not (st.bgimg and st.bgimg ~= "" and
-							image(window, x, y, w, h, st.bgimg)) then
-						-- Luanti's own field is dark with light text in it
-						box(window, x, y, w, h,
-								bg or magic.Color(0.1, 0.1, 0.12, 0.9))
+					if st.bgimg and st.bgimg ~= "" then
+						image(window, x, y, w, h, st.bgimg)
 					end
-					local value = e.fields[5] or ""
-					fields[#fields + 1] = {name = e.fields[3], value = value}
-					if value ~= "" then
-						label(window, x + 4, y + h / 2 - 7, w - 8,
-								formspec.strip_escapes(value), 12,
-								st.textcolor and markup_color(
-										"\27(c@"..st.textcolor..")"))
+					-- A line edit of Urho3D's own, so that the field can be
+					-- typed into; it is drawn dark with light text in it,
+					-- which is what Luanti's own field looks like
+					local edit = window:CreateChild("LineEdit")
+					if ctx.style then
+						edit.defaultStyle = ctx.style
 					end
+					edit:SetStyleAuto()
+					edit:SetPosition(math.floor(x), math.floor(y))
+					edit.size = magic.IntVector2(math.floor(w),
+							math.floor(h))
+					edit.enabled = true
+					edit.priority = next_priority()
+					edit.texture = magic.cache:GetResource("Texture2D", WHITE)
+					edit.color = bg or magic.Color(0.1, 0.1, 0.12, 0.9)
+					local value = name == "field" and e.fields[5] or ""
+					edit:SetText(formspec.strip_escapes(value or ""))
+					if name == "pwdfield" then
+						edit.echoCharacter = 42 -- an asterisk
+					end
+					-- The field's label goes above it, as Luanti puts it
+					local text = e.fields[4]
+					if text and text ~= "" then
+						label(window, x, y - 15, nil,
+								formspec.strip_escapes(text), 12)
+					end
+					fields[#fields + 1] = {name = e.fields[3],
+							value = value or "", edit = edit}
 				end
+			elseif name == "set_focus" or name == "field_close_on_enter" then
+				-- Read after the pass, where the fields are all known
 			elseif not unknown[name] then
 				unknown[name] = true
 				log:info("formspec: nothing drawn for \""..name.."\"")
 			end
 		end
+		-- field_close_on_enter[name;bool] says whether pressing enter in a
+		-- field closes the form; a field nobody said anything about does.
+		-- set_focus[name;force] is which field starts with the keys.
+		local close_on_enter = {}
+		local focus_name = nil
+		for _, e in ipairs(elements) do
+			if e.name == "field_close_on_enter" then
+				close_on_enter[e.fields[1]] = e.fields[2] ~= "false"
+			elseif e.name == "set_focus" then
+				focus_name = e.fields[1]
+			end
+		end
+		for _, f in ipairs(fields) do
+			if f.name == focus_name and f.edit then
+				f.edit:SetFocus(true)
+			end
+		end
 		return {window = window, origin = {ox, oy}, slots = slots,
-				buttons = buttons, fields = fields}
+				buttons = buttons, fields = fields,
+				close_on_enter = close_on_enter}
 	end
 
 	return self

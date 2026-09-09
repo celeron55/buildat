@@ -813,18 +813,62 @@ local function show_client(host, port, name, password)
 					client.hp, 20, ui_root.width, ui_root.height)
 		end
 
+		-- The escape handler a form with fields in it needs, kept so that a
+		-- redraw or a close takes it away again.
+		--
+		-- simplified: what a field itself is subscribed to is not taken
+		-- away. Unsubscribing from an object's event is not something the
+		-- sandbox offers -- UnsubscribeFromEvent takes an event type and a
+		-- callback, not an object -- and Urho3D drops the subscription when
+		-- the line edit is removed anyway, so what is left behind is the
+		-- name of a callback that can no longer fire.
+		local form_key_cb = nil
+
+		local function clear_field_hooks()
+			if form_key_cb then
+				magic.UnsubscribeFromEvent("KeyDown", form_key_cb)
+				form_key_cb = nil
+			end
+		end
+
 		local function close_form()
 			if not form then
 				return
 			end
+			clear_field_hooks()
 			form.drawn.window:Remove()
 			form = nil
 			held = nil
 			magic.input:SetMouseVisible(false)
 		end
 
+		-- The fields a form has, as they are now: what was typed into a
+		-- field rather than what the server put in it
+		local function form_fields()
+			local out = {}
+			for _, f in ipairs(form.drawn.fields) do
+				out[f.name] = f.edit and f.edit:GetText() or f.value
+			end
+			return out
+		end
+
+		-- Pressing enter in a field sends the form the way a button does,
+		-- with which field it was as one of the fields; Luanti's own client
+		-- calls them key_enter and key_enter_field.
+		local function field_entered(name)
+			local fields = form_fields()
+			fields.key_enter = "true"
+			fields.key_enter_field = name
+			log:verbose("form: enter in \""..tostring(name).."\"")
+			client:send_inventory_fields(form.formname, fields)
+			if form.drawn.close_on_enter[name] ~= false then
+				close_form()
+			end
+		end
+
 		local function draw_form()
 			if form.drawn then
+				clear_field_hooks()
 				form.drawn.window:Remove()
 			end
 			local spec = form.spec
@@ -844,6 +888,28 @@ local function show_client(host, port, name, password)
 			local h = ui_root.height
 			local layout = formspec.layout(size, real, w, h)
 			form.drawn = ui:show(ui_root, elements, layout, w, h)
+			local typeable = false
+			for _, f in ipairs(form.drawn.fields) do
+				if f.edit then
+					typeable = true
+					local name = f.name
+					magic.SubscribeToEvent(f.edit, "TextFinished",
+							function()
+								field_entered(name)
+							end)
+				end
+			end
+			if typeable then
+				-- A line edit with the focus swallows the keys, and the
+				-- handler that would otherwise close the form on escape is a
+				-- stack one, which then never fires
+				form_key_cb = magic.SubscribeToEvent("KeyDown",
+						function(event_type, event_data)
+							if event_data:GetInt("Key") == KEY_ESCAPE then
+								close_form()
+							end
+						end)
+			end
 			form_stale = false
 		end
 
@@ -879,10 +945,8 @@ local function show_client(host, port, name, password)
 			for _, b in ipairs(form.drawn.buttons) do
 				if lx >= b.x and lx < b.x + b.w and
 						ly >= b.y and ly < b.y + b.h then
-					local fields = {[b.name] = ""}
-					for _, f in ipairs(form.drawn.fields) do
-						fields[f.name] = f.value
-					end
+					local fields = form_fields()
+					fields[b.name] = ""
 					log:verbose("form: button \""..tostring(b.name)..
 							"\" at "..lx..","..ly)
 					client:send_inventory_fields(form.formname, fields)
