@@ -40,6 +40,24 @@ namespace interface
 	static constexpr EdgeMaterialId EDGEMATERIALID_GROUND = 1;
 	// Values at and above 10 are freely usable.
 
+	// One quad of a shape a voxel has instead of being a cube.
+	//
+	// The corners are in the voxel's own cube, which runs -0.5...0.5 on each
+	// axis, wound so that the quad faces the way its winding says. The
+	// texture coordinates are in the tile's own 0...1, with 0,0 at its top
+	// left, and the mesher maps them into wherever the atlas put that tile.
+	// tile is which of the voxel's six textures this quad wears.
+	//
+	// This is deliberately not a box, a mesh name or anything else with a
+	// shape of its own: a game that wants stairs, fences, plants, rails or a
+	// pane of glass builds the quads it wants and the mesher copies them.
+	struct VoxelQuad
+	{
+		float p[4][3] = {};
+		float uv[4][2] = {};
+		uint8_t tile = 0;
+	};
+
 	struct VoxelDefinition
 	{
 		VoxelName name;
@@ -61,6 +79,20 @@ namespace interface
 		// that and still hold a mesh of its own shape inside itself. What
 		// wants to know whether a voxel is free is this flag.
 		bool fully_empty = false;
+		// A shape of the voxel's own instead of a cube. Empty for a cube,
+		// which is what most voxels are and the fast path the voxel mesher
+		// exists for; a voxel with quads has them copied into the chunk's
+		// mesh, which costs about what its own faces would have.
+		//
+		// A voxel with a shape usually wants face_draw_type NEVER and
+		// edge_material_id EMPTY as well: the cube faces it would otherwise
+		// have are not what it looks like, and its neighbours should draw
+		// their faces against it.
+		sv_<VoxelQuad> shape;
+		// Draw the shape's quads from both sides. What wants it is a shape
+		// made of single quads -- a plant, a rail, a sign -- which is
+		// otherwise invisible from behind. A shape made of boxes does not.
+		bool shape_double_sided = false;
 		// TODO: Flag for whether all faces should be always drawn (in case the
 		//       textures contain holes)
 		// TODO: Some kind of property for defining whether this is a thing for
@@ -81,6 +113,9 @@ namespace interface
 		EdgeMaterialId edge_material_id = EDGEMATERIALID_EMPTY;
 		bool physically_solid = false;
 		bool fully_empty = false;
+		// Copied from the definition; see VoxelDefinition::shape
+		sv_<VoxelQuad> shape;
+		bool shape_double_sided = false;
 
 		bool textures_valid = false;
 		AtlasSegmentReference textures[6];

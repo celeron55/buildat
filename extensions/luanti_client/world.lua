@@ -17,6 +17,9 @@
 -- world coordinates one for one. block_node_position() is the same arithmetic
 -- builtin/voxelworld does for its chunks.
 
+local shapes = dofile(__buildat_extension_path("luanti_client")..
+		"/shapes.lua")
+
 local M = {}
 
 local BLOCKSIZE = 16
@@ -59,7 +62,6 @@ local CUBE_DRAWTYPES = {
 	[4] = "glass",   -- NDT_GLASSLIKE
 	[5] = "allfaces",-- NDT_ALLFACES, leaves
 	[6] = "allfaces",-- NDT_ALLFACES_OPTIONAL
-	[12] = "ground", -- NDT_NODEBOX
 	[13] = "glass",  -- NDT_GLASSLIKE_FRAMED
 	[15] = "glass",  -- NDT_GLASSLIKE_FRAMED_OPTIONAL
 	[16] = "ground", -- NDT_MESH
@@ -201,9 +203,14 @@ function M.new(magic, buildat, log, options)
 	self.viewport = viewport
 	magic.renderer:SetViewport(0, viewport)
 
-	-- A cube whose six faces are the given resource names, in buildat's face
-	-- order (+Y, -Y, +X, -X, +Z, -Z), which is also Luanti's tile order
-	local function add_cube(voxel_reg, name, resources, kind)
+	-- A voxel whose six faces are the given resource names, in buildat's face
+	-- order (+Y, -Y, +X, -X, +Z, -Z), which is also Luanti's tile order.
+	--
+	-- With shape given it is not a cube at all: the quads are the voxel's own
+	-- geometry, it draws no cube faces of its own, and its neighbours draw
+	-- theirs against it. shapes.lua is what builds those.
+	local function add_cube(voxel_reg, name, resources, kind, shape,
+			double_sided)
 		local vdef = buildat.VoxelDefinition()
 		vdef.name.block_name = name
 		vdef.handler_module = ""
@@ -233,6 +240,14 @@ function M.new(magic, buildat, log, options)
 					buildat.VoxelDefinition.EDGEMATERIALID_GROUND
 		end
 		vdef.physically_solid = true
+		if shape then
+			vdef.shape = shape
+			vdef.shape_double_sided = double_sided and true or false
+			vdef.face_draw_type =
+					buildat.VoxelDefinition.FACEDRAWTYPE_NEVER
+			vdef.edge_material_id =
+					buildat.VoxelDefinition.EDGEMATERIALID_EMPTY
+		end
 		return voxel_reg:add_voxel(vdef)
 	end
 
@@ -631,8 +646,36 @@ function M.new(magic, buildat, log, options)
 			liquid[id] = def.liquid_type ~= nil and
 					def.liquid_type ~= NODEDEF_LIQUID_NONE
 			local kind = CUBE_DRAWTYPES[def.drawtype]
+			local shape, double_sided = shapes.for_node(def)
 			if def.drawtype == DRAWTYPE_AIRLIKE then
 				map[id] = VOXEL_AIR
+			elseif shape then
+				-- Only the tiles the shape uses have to be there: a plant
+				-- wears one texture and would be held back by the other five
+				local resources = {}
+				local ok = true
+				for _, quad in ipairs(shape) do
+					local i = quad.tile
+					if not resources[i] then
+						resources[i] = resolve_tile(def, i)
+						if not resources[i] then
+							ok = false
+							break
+						end
+					end
+				end
+				if ok then
+					local first = nil
+					for i = 1, 6 do
+						first = first or resources[i]
+					end
+					for i = 1, 6 do
+						resources[i] = resources[i] or first
+					end
+					map[id] = add_cube(new_reg, def.name, resources, kind,
+							shape, double_sided)
+					cubes = cubes + 1
+				end
 			elseif kind then
 				local resources = {}
 				for i = 1, 6 do

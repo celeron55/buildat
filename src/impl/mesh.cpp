@@ -581,6 +581,11 @@ void preload_textures(pv::RawVolume<VoxelInstance> &volume,
 	}
 }
 
+static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
+		pv::RawVolume<VoxelInstance> &volume,
+		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+		bool use_skylight);
+
 void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		pv::RawVolume<VoxelInstance> &volume,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
@@ -730,6 +735,125 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			tg_vert.color_ = corner_colors[pv_vertex_i1];
 		}
 #endif
+	}
+
+	generate_voxel_shapes(result, volume, voxel_reg, atlas_reg, use_skylight);
+}
+
+// The quads of the voxels that have a shape of their own, appended to the
+// same temporary geometry the cubes went into.
+//
+// A voxel's quads are copied as they are, with the voxel's position added and
+// the texture coordinates mapped into wherever the atlas put the tile. That
+// is the whole point of shapes living in the voxel registry: a chunk full of
+// stairs and fences costs what a chunk of cubes costs, where a scene node per
+// stair would not.
+//
+// Only the voxels inside the chunk are drawn. The padding belongs to the
+// neighbouring chunks, which draw it themselves; the padding is here so that
+// the cube faces can be culled against it.
+static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
+		pv::RawVolume<VoxelInstance> &volume,
+		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+		bool use_skylight)
+{
+	const pv::Region &region = volume.getEnclosingRegion();
+	const pv::Vector3DInt32 lc = region.getLowerCorner();
+	const pv::Vector3DInt32 uc = region.getUpperCorner();
+	const float w = volume.getWidth() - 2;
+	const float h = volume.getHeight() - 2;
+	const float d = volume.getDepth() - 2;
+
+	for(int z = lc.getZ() + 1; z <= uc.getZ() - 1; z++){
+		for(int y = lc.getY() + 1; y <= uc.getY() - 1; y++){
+			for(int x = lc.getX() + 1; x <= uc.getX() - 1; x++){
+				VoxelInstance v = volume.getVoxelAt(x, y, z);
+				const interface::CachedVoxelDefinition *def =
+						voxel_reg->get_cached(v);
+				if(def == nullptr || def->shape.empty())
+					continue;
+				// Where this voxel's centre is in the chunk's own model
+				// coordinates; the same arithmetic the cube faces get
+				const float cx = (x - lc.getX()) - w / 2.0f - 0.5f;
+				const float cy = (y - lc.getY()) - h / 2.0f - 0.5f;
+				const float cz = (z - lc.getZ()) - d / 2.0f - 0.5f;
+				// A shaped voxel is lit by its own light rather than by the
+				// voxel in front of each face: there is no "in front" for an
+				// arbitrary quad, and a plant or a rail is lit by the air it
+				// stands in, which is the voxel it is in.
+				float sky_f = (float)v.get_skylight() /
+						VoxelInstance::SKYLIGHT_MAX;
+				float lamp_f = (float)v.get_lamplight() /
+						VoxelInstance::LAMPLIGHT_MAX;
+				for(const interface::VoxelQuad &quad : def->shape){
+					uint tile = quad.tile < 6 ? quad.tile : 0;
+					AtlasSegmentReference seg_ref = def->textures[tile];
+					if(seg_ref.atlas_id == interface::ATLAS_UNDEFINED)
+						continue;
+					const AtlasSegmentCache *aseg =
+							atlas_reg->get_texture(seg_ref);
+					if(aseg == nullptr)
+						continue;
+					TemporaryGeometry &tg = result[seg_ref.atlas_id];
+					if(tg.vertex_data.Empty()){
+						tg.atlas_id = seg_ref.atlas_id;
+						tg.has_colors = use_skylight;
+					}
+					// The quad's own normal, for the per-face brightness the
+					// cubes get
+					Vector3 e1(quad.p[1][0] - quad.p[0][0],
+							quad.p[1][1] - quad.p[0][1],
+							quad.p[1][2] - quad.p[0][2]);
+					Vector3 e2(quad.p[2][0] - quad.p[0][0],
+							quad.p[2][1] - quad.p[0][1],
+							quad.p[2][2] - quad.p[0][2]);
+					Vector3 n = e1.CrossProduct(e2).Normalized();
+					uint face_id = 0;
+					if(std::fabs(n.y_) >= std::fabs(n.x_) &&
+							std::fabs(n.y_) >= std::fabs(n.z_))
+						face_id = n.y_ >= 0 ? 0 : 1;
+					else if(std::fabs(n.x_) >= std::fabs(n.z_))
+						face_id = n.x_ >= 0 ? 2 : 3;
+					else
+						face_id = n.z_ >= 0 ? 4 : 5;
+					unsigned color = 0xffffffff;
+					if(use_skylight){
+						float shade = FACE_SHADE[face_id];
+						color = Color(
+								BOUNCE_COLOR.r_ * shade * (1.0f - sky_f) +
+										LAMP_COLOR.r_ * lamp_f * shade,
+								BOUNCE_COLOR.g_ * shade * (1.0f - sky_f) +
+										LAMP_COLOR.g_ * lamp_f * shade,
+								BOUNCE_COLOR.b_ * shade * (1.0f - sky_f) +
+										LAMP_COLOR.b_ * lamp_f * shade,
+								sky_f * shade).ToUInt();
+					}
+					// Two triangles, and the same two the other way round
+					// when the shape is drawn from both sides
+					static const int WINDINGS[2][6] = {
+						{0, 1, 2, 0, 2, 3},
+						{0, 2, 1, 0, 3, 2},
+					};
+					int windings = def->shape_double_sided ? 2 : 1;
+					for(int wi = 0; wi < windings; wi++){
+						for(int i = 0; i < 6; i++){
+							int c = WINDINGS[wi][i];
+							tg.vertex_data.Resize(tg.vertex_data.Size() + 1);
+							CustomGeometryVertex &tv = tg.vertex_data.Back();
+							tv.position_ = Vector3(cx + quad.p[c][0],
+									cy + quad.p[c][1], cz + quad.p[c][2]);
+							tv.normal_ = wi == 0 ? n : -n;
+							tv.texCoord_ = Vector2(
+									aseg->coord0.x_ + quad.uv[c][0] *
+											(aseg->coord1.x_ - aseg->coord0.x_),
+									aseg->coord0.y_ + quad.uv[c][1] *
+											(aseg->coord1.y_ - aseg->coord0.y_));
+							tv.color_ = color;
+						}
+					}
+				}
+			}
+		}
 	}
 }
 

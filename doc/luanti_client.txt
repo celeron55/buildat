@@ -63,6 +63,7 @@ nodedef.lua     NODEDEF: what a node id is called, how it is drawn, its tiles
 media.lua       The server's media files, in cache/luanti_media/<server>/
 player.lua      The player's box: the keys, gravity, and collision against
                 the nodes
+shapes.lua      Luanti's node shapes, as the quads a voxel definition takes
 itemdef.lua     ITEMDEF: what an item is, and what a tool can dig
 inventory.lua   TOCLIENT_INVENTORY: what the player is carrying
 formspec.lua    The elements of a formspec, and where they go
@@ -184,6 +185,9 @@ What is done
   is what the server's own anticheat wants, since it refuses a dig that was
   finished sooner than it should have been
 - Placing what is wielded, and the hotbar slot on the number keys
+- Node shapes that are not cubes: node boxes as their boxes, and plants,
+  torches, fires, signs and rails as quads, through a shape in the voxel
+  registry that the mesher copies into the chunk
 - Formspecs: the inventory form, the ones the server shows, and the prepend
   in front of them. Item slots with the item's own image in them, labels,
   images, buttons and fields; clicking a slot picks a stack up and puts it
@@ -203,8 +207,23 @@ Not implemented: editing a field, scroll containers, tabs, dropdowns,
 checkboxes, hypertext, the styles, and drawing an item that places a node as
 the little cube Luanti draws rather than as one of its tiles.
 
+Node shapes: a node box is drawn as its boxes, and a plant, a torch, a fire, a
+sign and a rail as quads, through VoxelDefinition.shape -- a list of quads per
+voxel that buildat's mesher copies into the chunk's mesh, so a chunk full of
+fences costs what a chunk of cubes costs. shapes.lua builds those quads and
+the engine knows nothing about node boxes.
+
+What that does not do yet: a connected node box does not look at its
+neighbours, so a fence is a post without its rails; a wallmounted one is drawn
+the way it looks on the floor, because which way it faces is in its param2; a
+mesh node is drawn as a cube, since Urho3D reads none of the model formats
+Luanti uses; and the player still collides with the whole node rather than
+with the shape.
+
 What is next
 ------------
+- param2: the colour a node takes out of a palette, and facedir, which is
+  which tile goes on which face and which way a shape is turned
 - Node metadata, so that a chest's own slots are in its form
 - HP, breath
 - Node draw types that are not cubes: node boxes, meshes, plants, liquids

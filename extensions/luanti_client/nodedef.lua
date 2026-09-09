@@ -88,6 +88,78 @@ M.LIQUID_SOURCE = 2
 -- (which is what a flowing liquid's surface and a rooted plant's top are)
 local CF_SPECIAL_COUNT = 6
 
+-- Luanti's NodeBoxType
+M.NODEBOX_REGULAR = 0
+M.NODEBOX_FIXED = 1
+M.NODEBOX_WALLMOUNTED = 2
+M.NODEBOX_LEVELED = 3
+M.NODEBOX_CONNECTED = 4
+
+-- On the wire a box's corners are in Luanti's BS units, where a node is ten
+-- across; what comes out is in nodes, so a full node's box is -0.5...0.5.
+local BS = 10.0
+
+-- More boxes than any node has a use for; the limit is so that a broken
+-- definition cannot ask for an unreasonable amount of geometry
+local MAX_BOXES = 64
+
+local function read_box(r)
+	local x0, y0, z0 = r:f32() / BS, r:f32() / BS, r:f32() / BS
+	local x1, y1, z1 = r:f32() / BS, r:f32() / BS, r:f32() / BS
+	-- A box written the other way round is the same box
+	return {
+		math.min(x0, x1), math.min(y0, y1), math.min(z0, z1),
+		math.max(x0, x1), math.max(y0, y1), math.max(z0, z1),
+	}
+end
+
+local function read_boxes(r, out)
+	for _ = 1, r:u16() do
+		local box = read_box(r)
+		if out and #out < MAX_BOXES then
+			out[#out + 1] = box
+		end
+	end
+	return out
+end
+
+-- read_node_box(r) -> {type =, boxes = {...}}
+--
+-- The boxes are the ones to draw for a node standing on its own: a
+-- wallmounted box is the one for a node on the floor, and a connected one is
+-- its fixed boxes plus the ones it has when nothing is connected.
+--
+-- simplified: which boxes a connected node really wants depends on its
+-- neighbours and which wallmounted one on its param2, and neither is known
+-- here, so a fence is a post without its rails and a torch stands upright
+-- wherever it is. The upgrade path is a voxel id per (node, param2) pair for
+-- the wallmounted ones, and for the connected ones a shape that can be built
+-- per voxel rather than per node type.
+local function read_node_box(r)
+	local version = r:u8()
+	if version < 6 then
+		error("luanti_client/nodedef: NodeBox version "..version)
+	end
+	local box_type = r:u8()
+	local boxes = {}
+	if box_type == M.NODEBOX_FIXED or box_type == M.NODEBOX_LEVELED then
+		read_boxes(r, boxes)
+	elseif box_type == M.NODEBOX_WALLMOUNTED then
+		local top = read_box(r)
+		local bottom = read_box(r)
+		read_box(r) -- side
+		boxes[1] = bottom
+	elseif box_type == M.NODEBOX_CONNECTED then
+		read_boxes(r, boxes) -- fixed
+		for _ = 1, 12 do
+			read_boxes(r, nil) -- connect_* and disconnected_*
+		end
+		read_boxes(r, boxes) -- disconnected
+		read_boxes(r, nil) -- disconnected_sides
+	end
+	return {type = box_type, boxes = boxes}
+end
+
 -- One node's wrapper. Read as far as the fields anything here uses; the
 -- caller has already cut the wrapper to length, so the rest -- node boxes,
 -- sounds, the legacy fields -- is dropped. The order is
@@ -108,7 +180,7 @@ local function read_node(r)
 	def.param_type_2 = r:u8()
 	def.drawtype = r:u8()
 	r:string() -- mesh
-	r:f32() -- visual_scale
+	def.visual_scale = r:f32()
 	local tile_count = r:u8()
 	if tile_count ~= 6 then
 		error("luanti_client/nodedef: "..tile_count.." tiles, expected 6")
@@ -166,6 +238,10 @@ local function read_node(r)
 	def.liquid_range = r:u8()
 	def.drowning = r:u8()
 	def.floodable = r:u8() ~= 0
+	-- The shape: what the node is made of, what a ray picks, and what the
+	-- player walks into. Only the first is read; the other two are the same
+	-- format and are left alone.
+	def.node_box = read_node_box(r)
 	return def
 end
 
