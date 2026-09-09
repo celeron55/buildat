@@ -178,7 +178,8 @@ local function read_node(r)
 	r:u8() -- param_type
 	def.param_type_2 = r:u8()
 	def.drawtype = r:u8()
-	r:string() -- mesh
+	-- The model a "mesh" drawtype is drawn as, which is a media name
+	def.mesh = r:string()
 	def.visual_scale = r:f32()
 	local tile_count = r:u8()
 	if tile_count ~= 6 then
@@ -250,7 +251,8 @@ end
 
 -- parse(data) -> {[id] = def}, count
 --
--- A def holds name, groups, param_type_2, drawtype, the six tiles and their
+-- A def holds name, groups, param_type_2, drawtype, the mesh, the six tiles
+-- and their
 -- overlays, the colour and palette, and what the player can do to the node:
 -- walkable, climbable, diggable, pointable, buildable_to, liquid_type.
 --

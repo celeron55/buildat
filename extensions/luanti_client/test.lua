@@ -36,6 +36,7 @@ local media = dofile(dir.."/media.lua")
 local shapes = dofile(dir.."/shapes.lua")
 local itemdef = dofile(dir.."/itemdef.lua")
 local nodemeta = dofile(dir.."/nodemeta.lua")
+local objmesh = dofile(dir.."/objmesh.lua")
 
 local function dump_name(s)
 	return "\""..s:gsub("[^%w%p ]", "?").."\""
@@ -1383,5 +1384,109 @@ assert(ceiling.tile == 2,
 assert(quad_face(ceiling) == nil, "shapes: a torch on the ceiling stands up")
 
 print("shapes: ok")
+
+-- objmesh.lua
+
+-- A quad and a triangle, two materials, and texture coordinates that have to
+-- be turned over: .obj counts its second coordinate from the bottom and a
+-- voxel's shape counts it from the top
+local quads, groups, skipped = objmesh.parse([[
+# a comment
+mtllib thing.mtl
+o thing
+v -0.5 -0.5 0.0
+v 0.5 -0.5 0.0
+v 0.5 0.5 0.0
+v -0.5 0.5 0.0
+vt 0.0 0.0
+vt 1.0 0.0
+vt 1.0 1.0
+vt 0.0 1.0
+usemtl first
+f 1/1/1 2/2/1 3/3/1 4/4/1
+usemtl second
+f 1/1 2/2 3/3
+f 1 2
+]])
+assert(groups == 2, "objmesh: two materials, got "..groups)
+assert(skipped == 1, "objmesh: a two-corner face is not a face")
+assert(#quads == 2, "objmesh: two faces, got "..#quads)
+assert(quads[1].group == 1 and quads[2].group == 2,
+		"objmesh: usemtl starts a group")
+assert(quads[1].p[1] == -0.5 and quads[1].p[2] == -0.5 and
+		quads[1].p[12] == 0.0, "objmesh: the corners go straight through")
+-- vt 0,0 is the bottom left of the texture and 0,1 the top left
+assert(quads[1].uv[1] == 0.0 and quads[1].uv[2] == 1.0,
+		"objmesh: the second texture coordinate is turned over")
+assert(quads[1].uv[7] == 0.0 and quads[1].uv[8] == 0.0,
+		"objmesh: the fourth corner's texture coordinate")
+-- A triangle is a quad with its last corner twice
+local tri = quads[2]
+assert(tri.p[7] == tri.p[10] and tri.p[8] == tri.p[11] and
+		tri.p[9] == tri.p[12], "objmesh: a triangle repeats its last corner")
+assert(tri.uv[5] == tri.uv[7] and tri.uv[6] == tri.uv[8],
+		"objmesh: a triangle repeats its last texture coordinate")
+
+-- A negative index counts back from the end of the list
+local neg = objmesh.parse([[
+v 0 0 0
+v 1 0 0
+v 1 1 0
+v 0 1 0
+f -4 -3 -2 -1
+]])
+assert(#neg == 1 and neg[1].p[1] == 0 and neg[1].p[10] == 0 and
+		neg[1].p[11] == 1, "objmesh: a negative index counts back")
+
+-- No texture coordinates: the whole tile over the whole face
+assert(neg[1].uv[1] == 0 and neg[1].uv[2] == 0 and neg[1].uv[3] == 1 and
+		neg[1].uv[5] == 1 and neg[1].uv[6] == 1 and neg[1].uv[7] == 0,
+		"objmesh: a face with no vt gets the whole tile")
+
+-- visual_scale multiplies every corner
+objmesh.scale(neg, 2)
+assert(neg[1].p[10] == 0 and neg[1].p[11] == 2,
+		"objmesh: scale multiplies the corners")
+
+-- A face naming a vertex that is not there is not a face
+local bad = objmesh.parse("v 0 0 0\nf 1 2 3 9\n")
+assert(#bad == 0, "objmesh: a face out of range is skipped")
+
+-- The winding a shape wants: the cross product of two consecutive edges
+-- points out of the shape. shapes.lua's own boxes are what the mesher is
+-- known to draw right, so they are the reference; a .obj face is wound the
+-- same way, counter-clockwise seen from outside, and goes through untouched.
+local function quad_normal(q)
+	local function corner(i)
+		return {q.p[i * 3 + 1], q.p[i * 3 + 2], q.p[i * 3 + 3]}
+	end
+	local a, b, c = corner(0), corner(1), corner(2)
+	local e1 = {b[1] - a[1], b[2] - a[2], b[3] - a[3]}
+	local e2 = {c[1] - b[1], c[2] - b[2], c[3] - b[3]}
+	return {e1[2] * e2[3] - e1[3] * e2[2], e1[3] * e2[1] - e1[1] * e2[3],
+			e1[1] * e2[2] - e1[2] * e2[1]}
+end
+
+-- The reference: a whole cube's +Y face points +Y
+local cube = shapes.box_quads({-0.5, -0.5, -0.5, 0.5, 0.5, 0.5}, {})
+local up = nil
+for _, q in ipairs(cube) do
+	if q.tile == 1 then up = quad_normal(q) end
+end
+assert(up and up[2] > 0, "shapes: a box's top face points up")
+
+-- The same for a .obj face: a square in the y = 0.5 plane wound
+-- counter-clockwise seen from above has to come out pointing up
+local top = objmesh.parse([[
+v -0.5 0.5 0.5
+v 0.5 0.5 0.5
+v 0.5 0.5 -0.5
+v -0.5 0.5 -0.5
+f 1 2 3 4
+]])
+local n = quad_normal(top[1])
+assert(n[2] > 0, "objmesh: a face wound as .obj winds it points outwards")
+
+print("objmesh: ok")
 
 print("luanti_client/test.lua: ok")
