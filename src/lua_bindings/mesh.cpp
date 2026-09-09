@@ -157,9 +157,13 @@ static void call_material_cb(const luabind::object &cb)
 	}
 }
 
+// A task holds the node weakly: the world it belongs to is free to drop a
+// chunk while the task for it is still in the queue, which is what happens
+// every time a chunk goes out of view or a world is closed. A raw pointer
+// there is a use-after-free in post().
 struct SetVoxelGeometryTask: public interface::thread_pool::Task
 {
-	Node *node;
+	WeakPtr<Node> node;
 	ss_ data;
 	sp_<VoxelRegistry> voxel_reg;
 	sp_<AtlasRegistry> atlas_reg;
@@ -200,6 +204,8 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	bool post()
 	{
 		ScopeTimer timer("post geometry");
+		if(!node)
+			return true; // Dropped while this was in the queue
 		Context *context = node->GetContext();
 		CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
 		interface::mesh::set_voxel_geometry(
@@ -216,7 +222,7 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 {
 	int lod;
-	Node *node;
+	WeakPtr<Node> node;
 	ss_ data;
 	sp_<VoxelRegistry> voxel_reg;
 	sp_<AtlasRegistry> atlas_reg;
@@ -261,6 +267,8 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 	bool post()
 	{
 		ScopeTimer timer("post lod geometry");
+		if(!node)
+			return true; // Dropped while this was in the queue
 		Context *context = node->GetContext();
 		CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
 		interface::mesh::set_voxel_lod_geometry(
@@ -279,7 +287,7 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 
 struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 {
-	Node *node;
+	WeakPtr<Node> node;
 	ss_ data;
 	sp_<VoxelRegistry> voxel_reg;
 
@@ -316,6 +324,8 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 		post_step == 2 ? "post_physics 2" :
 		post_step == 3 ? "post physics 3" :
 		"post physics");
+		if(!node)
+			return true; // Dropped while this was in the queue
 		Context *context = node->GetContext();
 		switch(post_step){
 		case 1:
