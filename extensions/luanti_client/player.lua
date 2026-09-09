@@ -232,6 +232,17 @@ function M.new(is_solid, is_liquid)
 		self.vy = 0
 	end
 
+	-- A push the server gave the player, out of TOCLIENT_PLAYER_SPEED: an
+	-- explosion, a jump pad, being hit. It is added to the speed once, as
+	-- Luanti adds it, and then the physics has it: the vertical part is what
+	-- gravity works off, and the horizontal part decays at whatever the
+	-- acceleration is, because the keys are a target rather than a force.
+	function self:add_velocity(x, y, z)
+		self.vx = self.vx + (x or 0)
+		self.vy = self.vy + (y or 0)
+		self.vz = self.vz + (z or 0)
+	end
+
 	-- One step of the player's own physics. wish is what the keys say:
 	--   x, z    the direction to walk in, in world coordinates, any length
 	--   jump    up, and out of the water

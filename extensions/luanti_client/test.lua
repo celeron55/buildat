@@ -730,6 +730,24 @@ w4:set_position(1.0, 0.5, 0)
 settle(w4, 240, {x = 1, z = 0})
 assert(w4.x < 2.8, "player: climbed the wall to x = "..w4.x)
 
+
+-- A push from the server is added to whatever speed the player has, and the
+-- physics then has it: it carries the player somewhere over the next steps
+do
+	local air = player.new(function() return false end)
+	air.fly = false
+	air:set_position(0, 100, 0)
+	local wish = {x = 0, z = 0, jump = false, sneak = false, fast = false}
+	air:add_velocity(4, 0, 0)
+	local x = air:update(0.1, wish)
+	assert(x > 0, "player: a push moves the player, got "..x)
+	-- And it decays rather than lasting forever, because the keys ask for
+	-- standing still
+	local before = air.vx
+	air:update(0.5, wish)
+	assert(air.vx < before, "player: the push decays")
+end
+
 print("player: ok")
 
 --

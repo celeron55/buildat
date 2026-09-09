@@ -109,7 +109,10 @@ local DAYNIGHT_RAMP = {
 	{5375, 0.500}, {5625, 0.675}, {5875, 0.875}, {6125, 1.000},
 }
 
-local function daynight_ratio(time_of_day)
+-- override is what a server said the light is whatever the time is, or nil.
+-- BUILDAT_LUANTI_FORCE_DAY wins over it: a scripted run asked for daylight
+-- and a game that overrides the ratio underground would take it away again.
+local function daynight_ratio(time_of_day, override)
 	-- A scripted run cannot wait for morning, and a screenshot of the world
 	-- at night says little about how it looks
 	-- An environment variable that is set but empty is a variable that is
@@ -118,6 +121,9 @@ local function daynight_ratio(time_of_day)
 	local force = os.getenv("BUILDAT_LUANTI_FORCE_DAY")
 	if force and force ~= "" then
 		return 1.0
+	end
+	if override then
+		return override
 	end
 	local t = time_of_day % 24000
 	if t > 12000 then
@@ -1290,6 +1296,10 @@ local function show_client(host, port, name, password)
 		-- does not change with this, so a zoomed-in player is still sent the
 		-- blocks a 98-degree view needs. That is more blocks than it wants,
 		-- never fewer.
+		client.on_player_speed = function(x, y, z)
+			avatar:add_velocity(x, y, z)
+		end
+
 		client.on_fov = function(fov, is_multiplier, transition_time)
 			view:set_fov(fov, is_multiplier, transition_time)
 		end
@@ -2013,7 +2023,11 @@ local function show_client(host, port, name, password)
 			update_held_image()
 			local time_of_day = FORCE_TIME or client.time_of_day
 			if time_of_day then
-				local daylight = daynight_ratio(time_of_day)
+				-- A server can say what the light is whatever the time is,
+				-- which is how a game lights another dimension; the sun
+				-- still goes where the time says, as it does in Luanti.
+				local daylight = daynight_ratio(time_of_day,
+						client.day_night_override)
 				-- The ramp is smooth and the zone is not free to set, so
 				-- only a visible step is worth an update. The time itself
 				-- matters as well as the light it comes to: it is where the

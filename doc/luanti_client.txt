@@ -398,6 +398,15 @@ which is how a game labels a chest, a sign or a machine, and it is drawn under
 the chat while that node is pointed at -- where Luanti draws it, cut at six
 lines like Luanti cuts it, and taken away with the rest of the HUD by F1.
 
+Two more things a server says about the player: OVERRIDE_DAY_NIGHT_RATIO
+fixes what the light is whatever the time is, which is how a game lights
+another dimension -- the sun still goes where the time says, as it does in
+Luanti -- and BUILDAT_LUANTI_FORCE_DAY still wins over it, because a scripted
+run asked for daylight. PLAYER_SPEED is a push: an explosion, a jump pad,
+being hit. It is added to the speed once and the physics then has it, so the
+vertical part is what gravity works off and the horizontal part decays at
+whatever the acceleration is.
+
 What is next
 ------------
 - What a mob really looks like: Luanti draws a mesh for one, and this draws a
