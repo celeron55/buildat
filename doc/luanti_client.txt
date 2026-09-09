@@ -10,7 +10,10 @@ terrain around the player with the server's own textures.
 BUILDAT_LUANTI_ADDRESS sets the address the dialog starts with, which is what
 scripted runs (-c) use. BUILDAT_LUANTI_FORCE_DAY keeps the world at midday
 whatever the server's time is, for the same reason: a run of half a minute
-cannot wait for morning. BUILDAT_LUANTI_NAME sets the player name the dialog
+cannot wait for morning. BUILDAT_LUANTI_FORCE_TIME pins the time of day
+itself, as Luanti's 0...24000, which is how the sky at dawn or at night gets
+looked at without waiting or asking the server for the privilege of setting
+its clock. BUILDAT_LUANTI_NAME sets the player name the dialog
 starts with, so that a test run does not fight a session of your own for the
 same player.
 

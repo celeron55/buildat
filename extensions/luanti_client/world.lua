@@ -215,6 +215,19 @@ function M.new(magic, buildat, log, options)
 	local sky = nil
 	local daylight = 1.0
 
+	-- The sky itself: a skybox drawn by client/data/Shaders/GLSL/LuantiSky.glsl,
+	-- which is handed the colours and the sun's direction from here.
+	local sky_node = scene:CreateChild("Sky")
+	local sky_material = nil
+	do
+		local skybox = sky_node:CreateComponent("Skybox")
+		skybox:SetModel(magic.cache:GetResource("Model", "Models/Box.mdl"))
+		sky_material = magic.Material.new()
+		sky_material:SetTechnique(0, magic.cache:GetResource("Technique",
+				"Techniques/LuantiSky.xml"))
+		skybox.material = sky_material
+	end
+
 	local zone_node = scene:CreateChild("Zone")
 	local zone = zone_node:CreateComponent("Zone")
 	zone.boundingBox = magic.BoundingBox(-100000, 100000)
@@ -859,9 +872,13 @@ function M.new(magic, buildat, log, options)
 
 		-- One rectangle in a plane, given as the two axes it runs along and
 		-- the constant of the third. axis is 1, 2 or 3 for x, y or z.
+		-- Wound both ways: the frames on three of the six faces would
+		-- otherwise face away from the middle of the voxel and be culled,
+		-- which is the same as not drawing them at all.
 		local function quad(axis, at, a0, b0, a1, b1)
 			local corners = {
 				{a0, b1}, {a1, b1}, {a1, b0}, {a1, b0}, {a0, b0}, {a0, b1},
+				{a0, b1}, {a0, b0}, {a1, b0}, {a1, b0}, {a1, b1}, {a0, b1},
 			}
 			for _, c in ipairs(corners) do
 				local p = {}
@@ -1110,34 +1127,111 @@ function M.new(magic, buildat, log, options)
 	-- thing that moves the sun: the mesher put how much of the sky each
 	-- surface sees into its vertex colours, and the shader multiplies that by
 	-- the zone's ambient colour.
-	function self:set_daylight(factor)
-		daylight = factor
-		zone.ambientColor = sunlight_color(factor)
-		-- What is behind the world, which the fog fades into. The game's own
-		-- horizon colour when it has said one, between its night and day
-		-- shades by how much daylight there is; the ramp bottoms out at
-		-- 0.175, so that is what counts as night.
-		local r, g, b = FOG.r * factor, FOG.g * factor, FOG.b * factor
-		if sky and sky.day_horizon and sky.night_horizon then
-			local t = (factor - 0.175) / (1 - 0.175)
-			t = t < 0 and 0 or (t > 1 and 1 or t)
-			r = (sky.night_horizon[1] + (sky.day_horizon[1] -
-					sky.night_horizon[1]) * t) / 255
-			g = (sky.night_horizon[2] + (sky.day_horizon[2] -
-					sky.night_horizon[2]) * t) / 255
-			b = (sky.night_horizon[3] + (sky.day_horizon[3] -
-					sky.night_horizon[3]) * t) / 255
-		elseif sky and sky.bgcolor then
-			r = sky.bgcolor[1] / 255 * factor
-			g = sky.bgcolor[2] / 255 * factor
-			b = sky.bgcolor[3] / 255 * factor
+	-- Luanti's own default sky colours, from its skyparams.h. A game that
+	-- says its own replaces them, and this one does.
+	local SKY_DEFAULT = {
+		day_sky = {97, 181, 245},
+		day_horizon = {144, 211, 246},
+		dawn_sky = {180, 186, 250},
+		dawn_horizon = {186, 193, 240},
+		night_sky = {0, 107, 255},
+		night_horizon = {64, 144, 255},
+		indoors = {100, 100, 100},
+		sun_tint = {244, 125, 29},
+	}
+
+	-- Where the sun is, as a direction to it. Luanti's own: the day is
+	-- stretched so that the night takes less than half of it
+	-- (getWickedTimeOfDay), and then the sun rises towards +X, stands
+	-- overhead at noon and sets towards -X.
+	local function sun_direction(time_of_day)
+		local t = ((time_of_day or 12000) % 24000) / 24000
+		local wn = 0.415 / 2
+		local w
+		if t > wn and t < 1 - wn then
+			w = (t - wn) / (1 - wn * 2) * 0.5 + 0.25
+		elseif t < 0.5 then
+			w = t / wn * 0.25
+		else
+			w = 1 - (1 - t) / wn * 0.25
 		end
-		zone.fogColor = magic.Color(r, g, b)
+		local a = math.rad(w * 360 - 90)
+		return math.cos(a), math.sin(a), 0
 	end
 
-	-- What the game says the sky looks like; client.lua's on_sky hands this
-	-- over. Only the colours are used: the sun, the moon, the stars and a
-	-- skybox's six textures are not drawn.
+	-- One of the game's colours, or Luanti's default for it, as 0...1
+	local function sky_color(name, brightness)
+		local c = (sky and sky[name]) or SKY_DEFAULT[name]
+		if not c then
+			return magic.Color(0, 0, 0)
+		end
+		local b = brightness or 1
+		return magic.Color(c[1] / 255 * b, c[2] / 255 * b, c[3] / 255 * b)
+	end
+
+	-- How light it is, from the day/night ratio. Luanti runs the ratio
+	-- through its light curve (decode_light_f) to get this; a gamma of 2.2 is
+	-- the same shape without the table -- 1 stays 1, the 0.175 the ramp
+	-- bottoms out at comes to about 0.02.
+	local function brightness_of(factor)
+		return factor ^ 2.2
+	end
+
+	function self:set_daylight(factor, time_of_day)
+		daylight = factor
+		zone.ambientColor = sunlight_color(factor)
+
+		local brightness = brightness_of(factor)
+		-- Which set of colours, by the same bands Luanti's Sky::update()
+		-- uses: night, dawn, or the day's own.
+		--
+		-- simplified: Luanti eases from one set to the next over a second or
+		-- so of its own frames rather than switching between them, and it
+		-- has a fourth set for a player who cannot see the sky at all. Here
+		-- the brightness is what carries dawn into day, and the set changes
+		-- when the band does.
+		local band = "day"
+		if brightness < 0.13 then
+			band = "night"
+		elseif brightness >= 0.20 and brightness < 0.35 then
+			band = "dawn"
+		end
+		local top = sky_color(band.."_sky", brightness)
+		local horizon = sky_color(band.."_horizon", brightness)
+		if sky and sky.type == "skybox" then
+			-- A game that gave its own textures gets its bgcolor, which is
+			-- the one thing of its sky that is understood here
+			top = sky_color("bgcolor", brightness)
+			horizon = top
+		elseif sky and not sky.day_sky and sky.bgcolor then
+			top = sky_color("bgcolor", brightness)
+			horizon = top
+		end
+
+		-- What is behind the world, which the fog fades into: the horizon
+		-- the sky is drawn with, so the two meet
+		zone.fogColor = horizon
+
+		if sky_material then
+			local sx, sy, sz = sun_direction(time_of_day)
+			sky_material:SetShaderParameter("SkyTop", top)
+			sky_material:SetShaderParameter("SkyHorizon", horizon)
+			sky_material:SetShaderParameter("SunDirection",
+					magic.Vector3(sx, sy, sz))
+			-- The tint the sun paints the horizon with, at its own strength
+			-- rather than the sky's: it is what dawn and dusk are
+			sky_material:SetShaderParameter("SunTint",
+					sky_color("sun_tint", 0.35 + brightness * 0.65))
+			-- Luanti's clouds are the daylight's own colour
+			sky_material:SetShaderParameter("CloudColor", magic.Color(
+					0.9 * brightness + 0.05, 0.92 * brightness + 0.05,
+					0.95 * brightness + 0.06))
+			-- The stars come out as the sky goes dark
+			sky_material:SetShaderParameter("StarFade",
+					math.max(0, math.min(1, (0.25 - brightness) * 6)))
+		end
+	end
+
 	function self:set_sky(new_sky)
 		sky = new_sky
 		self:set_daylight(daylight)
