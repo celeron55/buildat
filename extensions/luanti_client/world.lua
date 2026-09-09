@@ -1414,8 +1414,16 @@ function M.new(magic, buildat, log, options)
 		return add_cube(reg, name or def.name, resources, kind)
 	end
 
-	-- Returns how many node ids came out as their own cube.
-	function self:set_node_definitions(defs, resolve_tile, palette_colors)
+	-- Builds the registry for a set of node definitions a slice at a time.
+	-- What comes back is a function to call with a microsecond budget until
+	-- it says it is done; the new registry is swapped in when it is.
+	--
+	-- A slice at a time because this is two and a half thousand definitions
+	-- with a texture expression each, which is more than a second in one go
+	-- -- and it happens once the media has arrived, which is after the world
+	-- is already on screen. Nothing of the old registry is touched until the
+	-- swap, so the world goes on being drawn and meshed from it meanwhile.
+	function self:begin_node_definitions(defs, resolve_tile, palette_colors)
 		local new_reg = base_registry()
 		local map = {
 			[CONTENT_AIR] = VOXEL_AIR,
@@ -1427,14 +1435,9 @@ function M.new(magic, buildat, log, options)
 		local solid = {}
 		local liquid = {}
 		local pointable = {}
-		self.pair_map = {}
-		self.pair_map_version = self.pair_map_version + 1
-		self.node_map_version = self.node_map_version + 1
-		self.pair_count = 0
-		pair_voxel = {}
-		param2_look = {}
-		pair_epoch = pair_epoch + 1
-		for id, def in pairs(defs) do
+		local new_param2_look = {}
+
+		local function one_definition(id, def)
 			solid[id] = def.walkable
 			if def.light_source and def.light_source > 0 then
 				light_ids[id] = def.light_source
@@ -1480,8 +1483,8 @@ function M.new(magic, buildat, log, options)
 			end
 
 			if voxel and (colors or facing) then
-				param2_look[id] = {def = def, step = step, colors = colors,
-						facing = facing}
+				new_param2_look[id] = {def = def, step = step,
+						colors = colors, facing = facing}
 			end
 		end
 
@@ -1529,22 +1532,66 @@ function M.new(magic, buildat, log, options)
 			end
 		end
 
-		self.voxel_reg = new_reg
-		-- Which voxels give light is decided by the definitions, so what was
-		-- worked out from the old ones says nothing
-		for _, block in pairs(blocks) do
-			block.lights = nil
+		local function commit()
+			self.voxel_reg = new_reg
+			-- Which voxels give light is decided by the definitions, so what
+			-- was worked out from the old ones says nothing
+			for _, block in pairs(blocks) do
+				block.lights = nil
+			end
+			-- A fresh atlas registry: the old one holds atlases built for
+			-- the old registry's segment ids
+			self.atlas_reg = new_atlas_registry()
+			self.node_map = map
+			self.node_light = light_ids
+			self.node_collision = collision
+			self.node_solid = solid
+			self.node_liquid = liquid
+			self.node_pointable = pointable
+			-- Everything a param2 meant is decided by these definitions too,
+			-- and the pairs were built into the registry that is going away
+			self.pair_map = {}
+			self.pair_count = 0
+			pair_voxel = {}
+			param2_look = new_param2_look
+			pair_epoch = pair_epoch + 1
+			self.pair_map_version = self.pair_map_version + 1
+			self.node_map_version = self.node_map_version + 1
+			self:invalidate_all()
 		end
-		-- A fresh atlas registry: the old one holds atlases built for the old
-		-- registry's segment ids
-		self.atlas_reg = new_atlas_registry()
-		self.node_map = map
-		self.node_light = light_ids
-		self.node_collision = collision
-		self.node_solid = solid
-		self.node_liquid = liquid
-		self.node_pointable = pointable
-		self:invalidate_all()
+
+		local at = nil
+		local done = false
+		return function(budget_us)
+			if done then
+				return true, cubes
+			end
+			local t0 = buildat.get_time_us()
+			while true do
+				local id, def = next(defs, at)
+				if id == nil then
+					done = true
+					commit()
+					return true, cubes
+				end
+				at = id
+				one_definition(id, def)
+				if buildat.get_time_us() - t0 >= budget_us then
+					return false, cubes
+				end
+			end
+		end
+	end
+
+	-- The whole of the above in one call, for a caller with no frames to
+	-- spread it over
+	function self:set_node_definitions(defs, resolve_tile, palette_colors)
+		local step = self:begin_node_definitions(defs, resolve_tile,
+				palette_colors)
+		local done, cubes
+		repeat
+			done, cubes = step(1000000000)
+		until done
 		return cubes
 	end
 
