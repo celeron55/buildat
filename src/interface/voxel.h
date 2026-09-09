@@ -66,6 +66,12 @@ namespace interface
 		// These must be definitions (not references) because each client has to
 		// be able to construct their atlases from different texture sizes
 		AtlasSegmentDefinition textures[6];
+		// Quarter turns anticlockwise to give each face's texture inside the
+		// face, 0...3. What wants this is a voxel that faces a direction: the
+		// texture of the top of a turned cube is turned with it, and the same
+		// texture is shared with the cube that is not turned, so the turn
+		// belongs to the face rather than to the atlas segment.
+		uint8_t tile_turns[6] = {};
 		// Other properties
 		ss_ handler_module;
 		FaceDrawType face_draw_type = FaceDrawType::ON_EDGE;
@@ -116,6 +122,8 @@ namespace interface
 		// Copied from the definition; see VoxelDefinition::shape
 		sv_<VoxelQuad> shape;
 		bool shape_double_sided = false;
+
+		uint8_t tile_turns[6] = {};
 
 		bool textures_valid = false;
 		AtlasSegmentReference textures[6];

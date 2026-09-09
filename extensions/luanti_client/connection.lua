@@ -167,11 +167,16 @@ function M.new(socket, log)
 	-- arrives as a hundred packets in one frame and parsing one is not free,
 	-- so what a datagram costs here is the reassembly and the ack; the
 	-- handler runs from pump() on the caller's own time budget.
+	-- A queue with two indices rather than a list: the length operator on a
+	-- table whose first entries have been taken out is not defined, and one
+	-- payload landing on another loses it
 	local pending = {}
 	local pending_first = 1
+	local pending_last = 0
 
 	local function deliver(data, channel)
-		pending[#pending + 1] = {data, channel}
+		pending_last = pending_last + 1
+		pending[pending_last] = {data, channel}
 	end
 
 	-- Hands assembled payloads to on_data until budget_us microseconds have
@@ -180,7 +185,7 @@ function M.new(socket, log)
 	-- budget still gets through.
 	function self:pump(budget_us)
 		local t0 = buildat.get_time_us()
-		while pending[pending_first] do
+		while pending_first <= pending_last do
 			local entry = pending[pending_first]
 			pending[pending_first] = nil
 			pending_first = pending_first + 1
@@ -191,14 +196,14 @@ function M.new(socket, log)
 				break
 			end
 		end
-		if not pending[pending_first] then
-			-- Nothing waiting: start the array over rather than let the
-			-- index run away
-			pending = {}
+		if pending_first > pending_last then
+			-- Nothing waiting: start the indices over rather than let them
+			-- run away
 			pending_first = 1
+			pending_last = 0
 			return 0
 		end
-		return #pending - pending_first + 1
+		return pending_last - pending_first + 1
 	end
 
 	local function process_split(channel, r)

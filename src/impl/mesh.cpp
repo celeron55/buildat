@@ -483,6 +483,32 @@ static void face_vertex_colors(pv::RawVolume<VoxelInstance> &volume,
 	}
 }
 
+// The texture turned inside its own face, which is what
+// VoxelDefinition::tile_turns asks for. In the segment's own 0...1 space a
+// quarter turn is (s, t) -> (1 - t, s), which is what Luanti does to a tile
+// with a rotation -- it lets the coordinates go negative and leans on the
+// texture wrapping, where an atlas segment has to stay inside its own box.
+static void turn_txcoord(const AtlasSegmentCache *aseg, uint8_t turns,
+		CustomGeometryVertex &tg_vert)
+{
+	turns &= 3;
+	if(turns == 0)
+		return;
+	const float w = aseg->coord1.x_ - aseg->coord0.x_;
+	const float h = aseg->coord1.y_ - aseg->coord0.y_;
+	if(w == 0.0f || h == 0.0f)
+		return;
+	float s = (tg_vert.texCoord_.x_ - aseg->coord0.x_) / w;
+	float t = (tg_vert.texCoord_.y_ - aseg->coord0.y_) / h;
+	for(uint8_t i = 0; i < turns; i++){
+		const float s0 = s;
+		s = 1.0f - t;
+		t = s0;
+	}
+	tg_vert.texCoord_.x_ = aseg->coord0.x_ + s * w;
+	tg_vert.texCoord_.y_ = aseg->coord0.y_ + t * h;
+}
+
 void assign_txcoords(size_t pv_vertex_i1, const AtlasSegmentCache *aseg,
 		CustomGeometryVertex &tg_vert)
 {
@@ -732,6 +758,7 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			// Figure out texture coordinates
 			size_t pv_vertex_i1 = pv_vertex_i - pv_vertex_i0;
 			assign_txcoords(pv_vertex_i1, aseg, tg_vert);
+			turn_txcoord(aseg, voxel_def0->tile_turns[face_id], tg_vert);
 			tg_vert.color_ = corner_colors[pv_vertex_i1];
 		}
 #endif

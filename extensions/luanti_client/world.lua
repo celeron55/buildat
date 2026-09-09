@@ -296,8 +296,10 @@ function M.new(magic, buildat, log, options)
 	-- With shape given it is not a cube at all: the quads are the voxel's own
 	-- geometry, it draws no cube faces of its own, and its neighbours draw
 	-- theirs against it. shapes.lua is what builds those.
+	-- turns is nil or six quarter turns, one per face: how far the texture is
+	-- turned inside its own face. See VoxelDefinition.tile_turns.
 	local function add_cube(voxel_reg, name, resources, kind, shape,
-			double_sided)
+			double_sided, turns)
 		local vdef = buildat.VoxelDefinition()
 		vdef.name.block_name = name
 		vdef.handler_module = ""
@@ -315,6 +317,9 @@ function M.new(magic, buildat, log, options)
 			textures[i] = seg
 		end
 		vdef.textures = textures
+		if turns then
+			vdef.tile_turns = turns
+		end
 		if kind == "glass" then
 			vdef.edge_material_id = EDGEMATERIAL_GLASS
 		elseif kind == "allfaces" then
@@ -1099,7 +1104,11 @@ function M.new(magic, buildat, log, options)
 
 		if obj.visual_stale or not entry.textured then
 			obj.visual_stale = false
-			local name = resource(obj)
+			-- An object whose texture is not there yet wears the placeholder
+			-- rather than nothing: a box with no material at all is drawn
+			-- flat white, which reads as a hole in the world
+			local own = resource(obj)
+			local name = own or (not entry.material and texture)
 			if name then
 				local material = magic.Material.new()
 				material:SetTechnique(0, object_technique)
@@ -1108,7 +1117,9 @@ function M.new(magic, buildat, log, options)
 				entry.model.material = material
 				entry.material = material
 				entry.light_key = nil
-				entry.textured = true
+				-- The placeholder does not count as textured: the object's
+				-- own texture may still turn up
+				entry.textured = own ~= nil
 			end
 		end
 	end
@@ -1411,7 +1422,11 @@ function M.new(magic, buildat, log, options)
 				return nil
 			end
 		end
-		return add_cube(reg, name or def.name, resources, kind)
+		-- And how far the texture is turned inside the face it ended up on
+		local turns = facedir and facedir ~= 0 and
+				shapes.FACEDIR_TILE_TURNS[facedir + 1] or nil
+		return add_cube(reg, name or def.name, resources, kind, nil, nil,
+				turns)
 	end
 
 	-- Builds the registry for a set of node definitions a slice at a time.
