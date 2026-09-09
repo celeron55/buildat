@@ -27,6 +27,7 @@ local texmod = dofile(path.."/texmod.lua")
 local itemdef = dofile(path.."/itemdef.lua")
 local inventory = dofile(path.."/inventory.lua")
 local objmesh = dofile(path.."/objmesh.lua")
+local luanti_hud = dofile(path.."/hud.lua")
 local formspec = dofile(path.."/formspec.lua")
 local formspec_ui = dofile(path.."/formspec_ui.lua")
 local objects = dofile(path.."/objects.lua")
@@ -1107,15 +1108,77 @@ local function show_client(host, port, name, password)
 		local hud = nil
 		local hud_key = nil
 
+		-- The game's own HUD: what the server said is on the screen, the
+		-- element holding it, and whether that has to be built again. The
+		-- flags are what a game turns this client's own hotbar, health bar,
+		-- crosshair and chat off with, which a game that draws its own does.
+		local hud_elements = {}
+		local hud_flags = luanti_hud.FLAGS_DEFAULT
+		local game_hud = nil
+		local game_hud_stale = true
+		local game_hud_size = nil
+		local game_hud_missing = false
+		-- How many of them there are, for the counters line
+		local hud_count = 0
+
+		-- Every change to any of it, with the elements keyed by the server's
+		-- own id; client.lua holds them because HUDCHANGE names one field of
+		-- one element
+		client.on_hud = function(elements, flags, params)
+			hud_elements = elements
+			hud_flags = flags
+			game_hud_stale = true
+			hud_count = 0
+			for _ in pairs(elements) do
+				hud_count = hud_count + 1
+			end
+		end
+
 		local function update_hud()
+			local on = show_hud and not loading
 			-- Nothing of the player's own while the loading panel is up: the
 			-- panel is behind the rest of the UI, so a hotbar would float on
 			-- top of it. F1 takes it away as well, crosshair and all, which
 			-- is what that key is for.
 			for _, bar in ipairs(crosshair) do
-				bar.visible = show_hud and not loading
+				bar.visible = on and
+						luanti_hud.has_flag(hud_flags,
+						luanti_hud.FLAG.crosshair)
 			end
-			if loading or not show_hud then
+			chat_text.visible = show_chat and
+					luanti_hud.has_flag(hud_flags, luanti_hud.FLAG.chat)
+
+			-- The game's own elements, built again when the server changed
+			-- any of them or the window changed size
+			local ui_root = magic.ui.root
+			local size = ui_root.width.."x"..ui_root.height
+			if game_hud_stale or size ~= game_hud_size then
+				game_hud_stale = false
+				game_hud_size = size
+				if game_hud then
+					game_hud:Remove()
+				end
+				local missing
+				game_hud, missing = ui:hud_elements(ui_root, hud_elements,
+						ui_root.width, ui_root.height)
+				if not game_hud_missing and next(missing) then
+					game_hud_missing = true
+					local names = {}
+					for type_id, count in pairs(missing) do
+						names[#names + 1] = count.." of type "..type_id
+					end
+					log:info("HUD element types not drawn: "..
+							table.concat(names, ", "))
+				end
+			end
+			game_hud.visible = on
+
+			-- simplified: the hotbar flag takes this client's own hotbar
+			-- away and the health bar goes with it, because the two are one
+			-- element here. A game that turns off the hotbar and keeps the
+			-- health bar is not one this has met.
+			if not on or not luanti_hud.has_flag(hud_flags,
+					luanti_hud.FLAG.hotbar) then
 				if hud then
 					hud:Remove()
 					hud = nil
@@ -1124,7 +1187,10 @@ local function show_client(host, port, name, password)
 				return
 			end
 			local list = inv and inv.main or nil
-			local key = tostring(wield_index).."/"..tostring(client.hp)
+			local healthbar = luanti_hud.has_flag(hud_flags,
+					luanti_hud.FLAG.healthbar)
+			local key = tostring(wield_index).."/"..tostring(client.hp)..
+					"/"..tostring(healthbar)
 			-- What is in the slots, as a string, so that the bar is only
 			-- built again when it would look different
 			for i = 1, HOTBAR_SLOTS do
@@ -1139,9 +1205,9 @@ local function show_client(host, port, name, password)
 			if hud then
 				hud:Remove()
 			end
-			local ui_root = magic.ui.root
 			hud = ui:hud(ui_root, list, HOTBAR_SLOTS, wield_index,
-					client.hp, 20, ui_root.width, ui_root.height)
+					healthbar and client.hp or nil, 20,
+					ui_root.width, ui_root.height)
 		end
 
 		-- The escape handler a form with fields in it needs, kept so that a
@@ -1516,7 +1582,8 @@ local function show_client(host, port, name, password)
 					"%d objects | blocks: %d received,"..
 					" %d in scene, %d to mesh | %d us to hand over"..
 					" | %d commands waiting"..
-					" | %d param2 pairs | media: %d files, %d to come",
+					" | %d param2 pairs | %d hud"..
+					" | media: %d files, %d to come",
 					client.state, condition, avatar.x, avatar.y, avatar.z,
 					avatar.fly and "flying" or
 							(avatar.in_liquid and "swimming" or
@@ -1528,7 +1595,7 @@ local function show_client(host, port, name, password)
 					client.blocks_received, view:block_count(),
 					view:dirty_count(), view.last_mesh_us,
 					client.commands_waiting,
-					view:pair_voxel_count(),
+					view:pair_voxel_count(), hud_count,
 					store:have_count(), store:missing_count())
 		end
 
@@ -2052,6 +2119,10 @@ local function show_client(host, port, name, password)
 				hud:Remove()
 				hud = nil
 			end
+			if game_hud then
+				game_hud:Remove()
+				game_hud = nil
+			end
 			for _, bar in ipairs(crosshair) do
 				bar:Remove()
 			end
@@ -2123,7 +2194,6 @@ local function show_client(host, port, name, password)
 			end
 			if key == KEY_F2 then
 				show_chat = not show_chat
-				chat_text.visible = show_chat
 			end
 			if key == KEY_F5 then
 				show_debug = not show_debug

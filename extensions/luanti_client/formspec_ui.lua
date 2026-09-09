@@ -24,6 +24,7 @@
 
 local formspec = dofile(__buildat_extension_path("luanti_client")..
 		"/formspec.lua")
+local hud = dofile(__buildat_extension_path("luanti_client").."/hud.lua")
 
 local M = {}
 
@@ -281,6 +282,105 @@ function M.new(magic, buildat, log, ctx)
 			end
 		end
 		return holder
+	end
+
+	-- The size a HUD text element is drawn at. Luanti multiplies its own
+	-- default font size by the element's size.X when that is set, so what
+	-- this is decides what a game's "size = {x = 2}" comes to.
+	local HUD_FONT = 14
+
+	-- The HUD the server describes, as one element holding all of it.
+	--
+	-- elements is hud.lua's elements keyed by id. What comes back is the
+	-- holder and a count per element type that is not drawn, so that the
+	-- caller can say once what is missing.
+	--
+	-- simplified: images, text and statbars are drawn, which is what this
+	-- game's hundred elements nearly all are. A waypoint and an image
+	-- waypoint want the camera to turn a world position into a screen one, a
+	-- compass and a minimap want the yaw and the map, and an inventory and a
+	-- hotbar want the slots this client already draws its own way. A text
+	-- element of several lines is one block aligned as a whole, where Luanti
+	-- aligns each line on its own.
+	function self:hud_elements(root, elements, screen_w, screen_h)
+		local holder = root:CreateChild("UIElement")
+		if ctx.style then
+			holder.defaultStyle = ctx.style
+		end
+		holder:SetPosition(0, 0)
+		holder.size = magic.IntVector2(screen_w, screen_h)
+
+		-- z_index is what a game orders its own elements by; the id breaks a
+		-- tie, because table.sort is not stable
+		local order = {}
+		for id, e in pairs(elements) do
+			order[#order + 1] = {id = id, e = e}
+		end
+		table.sort(order, function(a, b)
+			if a.e.z_index ~= b.e.z_index then
+				return a.e.z_index < b.e.z_index
+			end
+			return a.id < b.id
+		end)
+
+		local skipped = {}
+		for _, entry in ipairs(order) do
+			local e = entry.e
+			if e.type == hud.ELEM.IMAGE then
+				local tex = texture(e.text)
+				if tex then
+					local w, h = hud.image_size(e, screen_w, screen_h,
+							tex.width, tex.height)
+					if w > 0 and h > 0 then
+						local x, y = hud.place(e, screen_w, screen_h, w, h)
+						local el = holder:CreateChild("BorderImage")
+						el:SetPosition(math.floor(x), math.floor(y))
+						el.size = magic.IntVector2(w, h)
+						el.texture = tex
+						el.priority = next_priority()
+					end
+				end
+			elseif e.type == hud.ELEM.TEXT then
+				local r, g, b, a = hud.color_of(e.number)
+				local size = HUD_FONT
+				if e.size[1] > 0 then
+					size = math.floor(HUD_FONT * e.size[1])
+				end
+				-- Placed after the text is in it: how wide it turned out is
+				-- what the alignment is worked out from, and a Text only
+				-- knows that once it has text and a font
+				local el = label(holder, 0, 0,
+						nil, formspec.strip_escapes(e.text), size,
+						magic.Color(r / 255, g / 255, b / 255, a / 255))
+				local x, y = hud.place(e, screen_w, screen_h,
+						el.width, el.height)
+				el:SetPosition(math.floor(x), math.floor(y))
+			elseif e.type == hud.ELEM.STATBAR then
+				local tex = texture(e.text)
+				local bg = texture(e.text2)
+				if tex then
+					local icons = hud.statbar_icons(e, screen_w, screen_h,
+							tex.width, tex.height, bg ~= nil)
+					for _, icon in ipairs(icons) do
+						local el = holder:CreateChild("BorderImage")
+						el:SetPosition(math.floor(icon.x), math.floor(icon.y))
+						el.size = magic.IntVector2(math.floor(icon.w),
+								math.floor(icon.h))
+						local t = icon.bg and bg or tex
+						el.texture = t
+						el.imageRect = magic.IntRect(
+								math.floor(icon.src[1] * t.width),
+								math.floor(icon.src[2] * t.height),
+								math.floor(icon.src[3] * t.width),
+								math.floor(icon.src[4] * t.height))
+						el.priority = next_priority()
+					end
+				end
+			else
+				skipped[e.type] = (skipped[e.type] or 0) + 1
+			end
+		end
+		return holder, skipped
 	end
 
 	-- show(root, elements, layout, screen_w, screen_h)

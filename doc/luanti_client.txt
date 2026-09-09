@@ -98,6 +98,8 @@ objects.lua     The things in the world that are not nodes: what the server
                 says they are and where
 itemdef.lua     ITEMDEF: what an item is, and what a tool can dig
 inventory.lua   TOCLIENT_INVENTORY: what the player is carrying
+hud.lua         The HUD the server describes, and the flags that turn this
+                client's own off
 formspec.lua    The elements of a formspec, and where they go
 formspec_ui.lua A formspec on the screen, as Urho3D UI elements
 texmod.lua      Luanti's texture modifier language, as compose_image()
@@ -332,6 +334,21 @@ neighbouring levels, so a slope reads as steps; and a turned node box's
 texture coordinates are the whole tile rather than the part of it Luanti works
 out from the box after the turn.
 
+The HUD: a game puts its own things on the screen with HUDADD and changes
+them one field at a time with HUDCHANGE, and this draws the images, the text
+and the statbars among them -- which on the two games tested is nearly all of
+them. Where an element goes is Luanti's own arithmetic: a position that is a
+fraction of the screen, an alignment saying which side of that point the
+element sits on, and an offset in pixels; an image's size is a multiple of
+its own or a percentage of the screen; a statbar counts in halves, so an odd
+value ends in half an icon cut on the side the icons march away from.
+
+HUD_SET_FLAGS is the other half of it, and it matters more than it looks: a
+game that draws its own hearts turns off the client's, and VoxeLibre does.
+So the hotbar, the health bar, the crosshair and the chat this client draws
+are all behind their flag. What a flag cannot do here is separate the hotbar
+from the health bar, which are one element.
+
 What is next
 ------------
 - What an active object really looks like: Luanti draws a mesh for a mob, a
@@ -342,9 +359,10 @@ What is next
 - Animations, nametags and attachments of the active objects
 - The sun, the moon, the stars and the clouds, which the server describes and
   which are not drawn; the sky is its colours and nothing else
-- The game's own HUD: this server sends a hundred HUD elements -- its hearts,
-  its bubbles, its armour bar, its crosshair -- and what is drawn instead is a
-  hotbar and a health bar of this client's own
+- The HUD elements that are not images, text or statbars: a waypoint and an
+  image waypoint want the camera to turn a world position into a screen one,
+  a compass wants the yaw, a minimap wants a map, and an inventory element and
+  a hotbar element want the slots this client already draws its own way
 - The sounds the game plays, and the crack that grows over a node being dug
 - A connected node box, which is a shape that looks at its neighbours: a
   fence with its rails, a pane in a run, and a flowing liquid's sloped

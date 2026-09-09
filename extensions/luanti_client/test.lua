@@ -34,6 +34,7 @@ local objects = dofile(dir.."/objects.lua")
 local nodedef = dofile(dir.."/nodedef.lua")
 local media = dofile(dir.."/media.lua")
 local shapes = dofile(dir.."/shapes.lua")
+local hud = dofile(dir.."/hud.lua")
 local itemdef = dofile(dir.."/itemdef.lua")
 local nodemeta = dofile(dir.."/nodemeta.lua")
 local objmesh = dofile(dir.."/objmesh.lua")
@@ -1228,6 +1229,141 @@ local abs = nodemeta.parse(serialize.reader(aw:data()), inventory, true)
 assert(abs["-3,9,-40"], "nodemeta: an absolute position is its own key")
 
 print("nodemeta: ok")
+
+-- hud.lua
+
+-- HUDADD, read back out of a packet built the way the server builds one. The
+-- four fields at the end were each added in a later 5.x, so one that stops
+-- after the world position still reads.
+local function hud_add_packet(extra)
+	local w = serialize.writer()
+	w:u32(7)          -- id
+	w:u8(hud.ELEM.STATBAR)
+	w:f32(0.5):f32(1) -- pos
+	w:string("bar")   -- name
+	w:f32(1):f32(1)   -- scale
+	w:string("heart.png")
+	w:u32(0xff8000)   -- number
+	w:u32(20)         -- item
+	w:u32(0)          -- dir
+	w:f32(0):f32(-1)  -- align
+	w:f32(0):f32(-100) -- offset
+	w:v3f(0, 0, 0)    -- world_pos
+	w:f32(16):f32(16) -- size, protocol 52 and up
+	if extra then
+		w:s16(3)
+		w:string("heart_bg.png")
+		w:u32(2)
+		w:u8(0)
+	end
+	return serialize.reader(w:data())
+end
+
+local id, e = hud.read_add(hud_add_packet(true), 52)
+assert(id == 7, "hud: the element's id")
+assert(e.type == hud.ELEM.STATBAR and e.text == "heart.png" and
+		e.item == 20, "hud: the element's fields")
+assert(e.pos[1] == 0.5 and e.align[2] == -1 and e.offset[2] == -100,
+		"hud: the element's pairs")
+assert(e.size[1] == 16 and e.z_index == 3 and e.text2 == "heart_bg.png" and
+		e.style == 2 and e.hideable == 0, "hud: the tail fields")
+
+local _, short = hud.read_add(hud_add_packet(false), 52)
+assert(short.z_index == 0 and short.text2 == "" and short.style == 0 and
+		short.hideable == 1,
+		"hud: an element with no tail keeps the defaults")
+
+-- HUDCHANGE names one field by number, and one this does not know leaves the
+-- element alone rather than reading the rest of the packet wrong
+local ch = serialize.reader(serialize.writer():u32(7):u8(3)
+		:string("other.png"):data())
+local cid, field, value = hud.read_change(ch, 52)
+assert(cid == 7 and field == "text" and value == "other.png",
+		"hud: a changed string field")
+local ch2 = serialize.reader(serialize.writer():u32(7):u8(8)
+		:f32(4):f32(5):data())
+local _, field2, value2 = hud.read_change(ch2, 52)
+assert(field2 == "offset" and value2[1] == 4 and value2[2] == 5,
+		"hud: a changed pair")
+local ch3 = serialize.reader(serialize.writer():u32(7):u8(200):data())
+local _, field3 = hud.read_change(ch3, 52)
+assert(field3 == nil, "hud: an unknown stat changes nothing")
+
+-- The flags: only the bits in the mask move
+assert(hud.apply_flags(hud.FLAGS_DEFAULT, 0, hud.FLAG.crosshair) ==
+		hud.FLAGS_DEFAULT - hud.FLAG.crosshair,
+		"hud: a masked bit takes the new value")
+assert(hud.apply_flags(0, hud.FLAG.chat, hud.FLAG.chat) == hud.FLAG.chat,
+		"hud: a bit turned on")
+assert(hud.apply_flags(hud.FLAG.hotbar, 0, hud.FLAG.chat) == hud.FLAG.hotbar,
+		"hud: a bit outside the mask stays")
+assert(hud.has_flag(hud.FLAGS_DEFAULT, hud.FLAG.basic_debug),
+		"hud: everything is on by default")
+
+-- The hotbar item count comes as a big-endian s32 inside a string, and one
+-- outside 1...32 is not taken
+local function param_packet(bytes)
+	return serialize.reader(serialize.writer():u16(1):string(bytes):data())
+end
+local param, count = hud.read_param(param_packet("\0\0\0\8"))
+assert(param == hud.PARAM_HOTBAR_ITEMCOUNT and count == 8,
+		"hud: the hotbar item count")
+local _, bad = hud.read_param(param_packet("\0\0\0\0"))
+assert(bad == nil, "hud: an item count of zero is refused")
+local _, big = hud.read_param(param_packet("\255\255\255\255"))
+assert(big == nil, "hud: a negative item count is refused")
+
+-- A colour with no alpha byte is opaque, which is what the servers that
+-- never set one rely on
+local r, g, b, a = hud.color_of(0x336699)
+assert(r == 0x33 and g == 0x66 and b == 0x99 and a == 255,
+		"hud: a colour with no alpha is opaque")
+local _, _, _, a2 = hud.color_of(0x80336699)
+assert(a2 == 0x80, "hud: an alpha byte is honoured")
+
+-- Where an element lands: align -1 puts the whole of it left of and above
+-- pos, 1 right of and below it, 0 centred on it, and the offset is pixels on
+-- top of that
+local function placed(ax, ay, w, h)
+	return hud.place({pos = {0.5, 0.5}, align = {ax, ay}, offset = {0, 0}},
+			200, 100, w, h)
+end
+local px, py = placed(-1, -1, 40, 20)
+assert(px == 60 and py == 30, "hud: align -1 is left of and above pos")
+px, py = placed(1, 1, 40, 20)
+assert(px == 100 and py == 50, "hud: align 1 is right of and below it")
+px = placed(0, 0, 40, 20)
+assert(px == 80, "hud: align 0 is centred on it")
+
+-- An image's size is a multiple of its own, or a percentage of the screen
+-- when the scale is negative
+local iw, ih = hud.image_size({scale = {2, 3}}, 200, 100, 16, 8)
+assert(iw == 32 and ih == 24, "hud: a positive scale multiplies the image")
+iw, ih = hud.image_size({scale = {-50, -10}}, 200, 100, 16, 8)
+assert(iw == 100 and ih == 10, "hud: a negative scale is percent of screen")
+
+-- A statbar counts in halves: 7 of 8 is three whole icons and a half over
+-- four background ones, and the half keeps the half of the image the icons
+-- march away from
+local bar = {pos = {0, 0}, align = {-1, -1}, offset = {0, 0},
+		size = {0, 0}, number = 7, item = 8, dir = 0}
+local icons = hud.statbar_icons(bar, 200, 100, 16, 16, true)
+assert(#icons == 8, "hud: four background icons and four over them")
+assert(icons[1].bg and not icons[5].bg, "hud: the background is drawn first")
+assert(icons[8].w == 8 and icons[8].src[3] == 0.5,
+		"hud: the odd half icon keeps the left half of its image")
+assert(icons[7].x == 32 and icons[7].y == 0,
+		"hud: the icons march to the right")
+local down = hud.statbar_icons({pos = {0, 0}, align = {-1, -1},
+		offset = {0, 0}, size = {0, 0}, number = 3, item = 4, dir = 3},
+		200, 100, 16, 16, false)
+assert(#down == 2, "hud: no background texture, no maximum drawn")
+assert(down[1].y == 0 and down[2].y == -16 + 8,
+		"hud: a bottom-to-top bar goes up")
+assert(down[2].src[2] == 0.5,
+		"hud: its half icon keeps the bottom half of the image")
+
+print("hud: ok")
 
 -- shapes.lua
 --
