@@ -134,6 +134,13 @@ namespace interface
 		virtual const AtlasSegmentCache* get_texture(
 				const AtlasSegmentReference &ref) = 0;
 
+		// Whether an atlas carries the normal and surface maps derived from
+		// its segments' pixels. A game whose voxel shader samples neither
+		// says false and gets a third of the work per segment and a third of
+		// the memory. Say it before the first segment; a later change only
+		// applies to atlases created after it.
+		virtual void set_surface_maps(bool enabled) = 0;
+
 		virtual void update() = 0;
 	};
 

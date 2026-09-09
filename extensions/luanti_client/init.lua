@@ -1181,6 +1181,7 @@ local function show_client(host, port, name, password)
 					"%s%s | %.1f, %.1f, %.1f %s | %d: %s | %s\n"..
 					"%d objects | blocks: %d received,"..
 					" %d in scene, %d to mesh | %d us to hand over"..
+					" | %d commands waiting"..
 					" | %d param2 pairs | media: %d files, %d to come",
 					client.state, condition, avatar.x, avatar.y, avatar.z,
 					avatar.fly and "flying" or
@@ -1191,6 +1192,7 @@ local function show_client(host, port, name, password)
 					view:object_count(),
 					client.blocks_received, view:block_count(),
 					view:dirty_count(), view.last_mesh_us,
+					client.commands_waiting,
 					view:pair_voxel_count(),
 					store:have_count(), store:missing_count())
 		end

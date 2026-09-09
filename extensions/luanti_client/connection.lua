@@ -163,10 +163,42 @@ function M.new(socket, log)
 
 	local process_packet
 
+	-- Assembled payloads waiting to be handed over. A burst of map blocks
+	-- arrives as a hundred packets in one frame and parsing one is not free,
+	-- so what a datagram costs here is the reassembly and the ack; the
+	-- handler runs from pump() on the caller's own time budget.
+	local pending = {}
+	local pending_first = 1
+
 	local function deliver(data, channel)
-		if self.on_data then
-			self.on_data(data, channel)
+		pending[#pending + 1] = {data, channel}
+	end
+
+	-- Hands assembled payloads to on_data until budget_us microseconds have
+	-- gone or there are none left, and says how many are still waiting. One
+	-- is always handed over, so a payload that costs more than the whole
+	-- budget still gets through.
+	function self:pump(budget_us)
+		local t0 = buildat.get_time_us()
+		while pending[pending_first] do
+			local entry = pending[pending_first]
+			pending[pending_first] = nil
+			pending_first = pending_first + 1
+			if self.on_data then
+				self.on_data(entry[1], entry[2])
+			end
+			if buildat.get_time_us() - t0 >= budget_us then
+				break
+			end
 		end
+		if not pending[pending_first] then
+			-- Nothing waiting: start the array over rather than let the
+			-- index run away
+			pending = {}
+			pending_first = 1
+			return 0
+		end
+		return #pending - pending_first + 1
 	end
 
 	local function process_split(channel, r)

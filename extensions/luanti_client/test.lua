@@ -16,6 +16,14 @@ __buildat_extension_path = function(name)
 	return dir
 end
 
+-- The engine's own; connection.lua times how long it spends handing
+-- assembled payloads over
+buildat = {
+	get_time_us = function()
+		return math.floor(os.clock() * 1000000)
+	end,
+}
+
 local serialize = dofile(dir.."/serialize.lua")
 local connection = dofile(dir.."/connection.lua")
 local player = dofile(dir.."/player.lua")
@@ -175,6 +183,13 @@ end
 local socket = fake_socket()
 local conn = connection.new(socket, log)
 local got = {}
+-- One frame: what arrived is reassembled and then handed over, with a
+-- budget big enough that everything waiting gets through
+local function conn_update(dtime)
+	conn:update(dtime)
+	conn:pump(1000000000)
+end
+
 conn.on_data = function(data, channel)
 	got[#got + 1] = {data = data, channel = channel}
 end
@@ -200,21 +215,21 @@ assert(rel:u8() == 3, "connection: should be a reliable packet")
 local seqnum = rel:u16()
 assert(seqnum == connection.SEQNUM_INITIAL, "connection: wrong first seqnum")
 socket.sent = {}
-conn:update(0.1)
+conn_update(0.1)
 assert(#socket.sent == 0, "connection: resent too early")
-conn:update(0.5)
+conn_update(0.5)
 assert(#socket.sent == 1, "connection: did not resend an unacknowledged packet")
 socket.sent = {}
 -- The server acknowledges it: no more resending
 socket.incoming = {datagram(1, 0,
 		serialize.writer():u8(0):u8(0):u16(seqnum):data())}
-conn:update(0.6)
+conn_update(0.6)
 assert(#socket.sent == 0, "connection: resent an acknowledged packet")
 
 -- The peer id the server hands out is used in what we send after that
 socket.incoming = {datagram(1, 0,
 		serialize.writer():u8(0):u8(1):u16(1234):data())}
-conn:update(0.01)
+conn_update(0.01)
 assert(conn.peer_id == 1234, "connection: did not take the peer id")
 socket.sent = {}
 conn:send(0, false, "x")
@@ -232,7 +247,7 @@ socket.incoming = {
 	datagram(1, 0, reliable(first, original("first"))),
 	datagram(1, 0, reliable(first + 2, original("third"))),
 }
-conn:update(0.01)
+conn_update(0.01)
 assert(#got == 3, "connection: expected three payloads, got "..#got)
 assert(got[1].data == "first" and got[2].data == "second" and
 		got[3].data == "third", "connection: reliable packets out of order")
@@ -242,7 +257,7 @@ assert(#socket.sent == 3, "connection: did not acknowledge every packet")
 got = {}
 socket.sent = {}
 socket.incoming = {datagram(1, 0, reliable(first, original("first")))}
-conn:update(0.01)
+conn_update(0.01)
 assert(#got == 0, "connection: handed on a duplicate")
 assert(#socket.sent == 1, "connection: did not acknowledge a duplicate")
 
@@ -253,7 +268,7 @@ socket.incoming = {
 	datagram(1, 1, split(5, 3, 0, "a")),
 	datagram(1, 1, split(5, 3, 1, "b")),
 }
-conn:update(0.01)
+conn_update(0.01)
 assert(#got == 1 and got[1].data == "abcde",
 		"connection: split packets did not come back together")
 assert(got[1].channel == 1, "connection: wrong channel")
@@ -295,10 +310,24 @@ rd:skip(7 + 3 + 1)
 assert(rd:u16() == (split_seqnum + 1) % 65536,
 		"connection: split seqnum did not advance")
 
+-- What arrived is handed over on the caller's budget: a frame that has run
+-- out of time leaves the rest waiting, and one always gets through
+got = {}
+socket.incoming = {datagram(1, 0, original("a")),
+		datagram(1, 0, original("b")), datagram(1, 0, original("c"))}
+conn:update(0.01)
+assert(#got == 0, "connection: nothing is handed over before pump()")
+local waiting = conn:pump(0)
+assert(#got == 1 and waiting == 2,
+		"connection: a spent budget still hands one over, got "..#got..
+		" with "..waiting.." waiting")
+assert(conn:pump(1000000000) == 0 and #got == 3,
+		"connection: the rest waited for the next pump")
+
 -- A datagram from something else is ignored, not an error
 got = {}
 socket.incoming = {"garbage", datagram(1, 0, original("fine"))}
-conn:update(0.01)
+conn_update(0.01)
 assert(#got == 1 and got[1].data == "fine",
 		"connection: a bad datagram should not stop the good one")
 
@@ -310,7 +339,7 @@ end
 socket.receive = function()
 	return nil, "closed"
 end
-conn:update(0.01)
+conn_update(0.01)
 assert(disconnect_reason == "closed", "connection: did not notice the close")
 assert(conn.connected == false)
 

@@ -60,6 +60,28 @@ struct PackSecond
 	bool present = false;
 };
 
+// A parsed map: what a sample value turns into. Kept behind a pointer and
+// cached, because compiling one is thousands of Lua table reads and the same
+// map is handed in by every source of every block; see parse_map().
+struct PackMap
+{
+	// map[sample] -> what gets written, or -1 for a sample the map does not
+	// mention
+	sv_<int64_t> dense;
+	// The same thing for keys that are too spread out to be an array, which
+	// is what combining two samples gives
+	std::unordered_map<int64_t, int64_t> sparse;
+	bool is_sparse = false;
+};
+
+// map_id -> the version it was compiled from, and the compiled map. A caller
+// that gives a map an id and a version gets it compiled once; see
+// doc/client_api.txt.
+static sm_<int64_t, std::pair<int64_t, sp_<PackMap>>> g_map_cache;
+// Nothing needs many, and a caller that invents ids should not grow this
+// without bound
+static const size_t PACK_MAP_CACHE_MAX = 64;
+
 struct PackSource
 {
 	ss_ data;
@@ -73,13 +95,8 @@ struct PackSource
 	uint32_t shift = 0;
 	uint32_t mask = 0xffffffff;
 	PackField field = FIELD_ID;
-	// map[sample] -> what gets written, or -1 for a sample the map does not
-	// mention. Empty means no mapping: the sample is the value.
-	sv_<int64_t> map;
-	// The same thing for keys that are too spread out to be an array, which
-	// is what combining two samples gives
-	std::unordered_map<int64_t, int64_t> map_sparse;
-	bool map_is_sparse = false;
+	// No map means no mapping: the sample is the value
+	sp_<PackMap> map;
 	int64_t map_default = -1;  // For samples the map does not mention
 	PackSecond second;
 };
@@ -162,16 +179,17 @@ static void parse_order(const ss_ &order, const int source_size[3],
 	}
 }
 
-static void parse_map(const luabind::object &map_o, PackSource &source)
+static sp_<PackMap> compile_map(const luabind::object &map_o)
 {
+	sp_<PackMap> map(new PackMap());
 	if(luabind::type(map_o) == LUA_TSTRING){
 		// A byte per sample value, which is the compact way to write a mapping
 		// of a few hundred small ids
-		ss_ map = luabind::object_cast<ss_>(map_o);
-		source.map.assign(map.size(), -1);
-		for(size_t i = 0; i < map.size(); i++)
-			source.map[i] = (uint8_t)map[i];
-		return;
+		ss_ s = luabind::object_cast<ss_>(map_o);
+		map->dense.assign(s.size(), -1);
+		for(size_t i = 0; i < s.size(); i++)
+			map->dense[i] = (uint8_t)s[i];
+		return map;
 	}
 	if(luabind::type(map_o) != LUA_TTABLE)
 		throw Exception("pack_voxel_volume(): map is neither a string nor a "
@@ -191,9 +209,9 @@ static void parse_map(const luabind::object &map_o, PackSource &source)
 	}
 	// A dense array while the keys are close together, a hash when they are
 	// not: combining two samples spreads them over a range no array can hold
-	source.map_is_sparse = highest >= PACK_MAP_DENSE_MAX;
-	if(!source.map_is_sparse)
-		source.map.assign(highest + 1, -1);
+	map->is_sparse = highest >= PACK_MAP_DENSE_MAX;
+	if(!map->is_sparse)
+		map->dense.assign(highest + 1, -1);
 	for(luabind::iterator it(map_o), end; it != end; ++it){
 		luabind::object key = it.key();
 		if(luabind::type(key) != LUA_TNUMBER)
@@ -203,22 +221,47 @@ static void parse_map(const luabind::object &map_o, PackSource &source)
 			continue;
 		int64_t k = (int64_t)luabind::object_cast<double>(key);
 		int64_t v = (int64_t)luabind::object_cast<double>(value);
-		if(source.map_is_sparse)
-			source.map_sparse[k] = v;
+		if(map->is_sparse)
+			map->sparse[k] = v;
 		else
-			source.map[(size_t)k] = v;
+			map->dense[(size_t)k] = v;
 	}
+	return map;
+}
+
+// source.map, compiled once per (map_id, map_version) if the source gives an
+// id and every time if it does not. A map of a few thousand entries costs
+// about as much to compile as the whole box copy does, and the maps of a voxel
+// world outlive thousands of copies.
+static void parse_map(const luabind::object &t, const luabind::object &map_o,
+		PackSource &source)
+{
+	int64_t id = (int64_t)table_number(t, "map_id", 0);
+	if(id == 0){
+		source.map = compile_map(map_o);
+		return;
+	}
+	int64_t version = (int64_t)table_number(t, "map_version", 0);
+	auto it = g_map_cache.find(id);
+	if(it != g_map_cache.end() && it->second.first == version){
+		source.map = it->second.second;
+		return;
+	}
+	if(g_map_cache.size() >= PACK_MAP_CACHE_MAX)
+		g_map_cache.clear();
+	source.map = compile_map(map_o);
+	g_map_cache[id] = std::make_pair(version, source.map);
 }
 
 // The value a map holds for a key, or -1 for one it does not mention
-static inline int64_t map_lookup(const PackSource &source, int64_t key)
+static inline int64_t map_lookup(const PackMap &map, int64_t key)
 {
-	if(source.map_is_sparse){
-		auto it = source.map_sparse.find(key);
-		return it == source.map_sparse.end() ? -1 : it->second;
+	if(map.is_sparse){
+		auto it = map.sparse.find(key);
+		return it == map.sparse.end() ? -1 : it->second;
 	}
-	return (key >= 0 && (size_t)key < source.map.size()) ?
-			source.map[(size_t)key] : -1;
+	return (key >= 0 && (size_t)key < map.dense.size()) ?
+			map.dense[(size_t)key] : -1;
 }
 
 static void parse_second(const luabind::object &t, PackSource &source)
@@ -357,7 +400,7 @@ static void parse_source(const luabind::object &t, PackSource &source)
 	{
 		luabind::object map_o = t["map"];
 		if(map_o && luabind::type(map_o) != LUA_TNIL)
-			parse_map(map_o, source);
+			parse_map(t, map_o, source);
 	}
 	parse_second(t, source);
 	{
@@ -429,8 +472,8 @@ static void apply_source(pv::RawVolume<VoxelInstance> &volume,
 				}
 
 				int64_t value = key;
-				if(!source.map.empty() || source.map_is_sparse){
-					value = map_lookup(source, key);
+				if(source.map){
+					value = map_lookup(*source.map, key);
 					if(value < 0)
 						value = source.map_default;
 					if(value < 0)

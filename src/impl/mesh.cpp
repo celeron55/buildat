@@ -562,7 +562,7 @@ void assign_txcoords(size_t pv_vertex_i1, const AtlasSegmentCache *aseg,
 }
 
 void preload_textures(pv::RawVolume<VoxelInstance> &volume,
-		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg)
+		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg, bool with_lod)
 {
 	auto region = volume.getEnclosingRegion();
 	auto &lc = region.getLowerCorner();
@@ -573,7 +573,7 @@ void preload_textures(pv::RawVolume<VoxelInstance> &volume,
 			for(int x = lc.getX(); x <= uc.getX(); x++){
 				VoxelInstance v = volume.getVoxelAt(x, y, z);
 				const interface::CachedVoxelDefinition *def =
-						voxel_reg->get_cached(v, atlas_reg);
+						voxel_reg->get_cached(v, atlas_reg, with_lod);
 				if(!def)
 					throw Exception(ss_()+"Undefined voxel: "+itos(v.get_id()));
 			}
@@ -1139,7 +1139,7 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 	up_<pv::RawVolume<VoxelInstance>> lod_volume = generate_voxel_lod_volume(
 			lod, volume_orig);
 
-	preload_textures(*lod_volume, voxel_reg, atlas_reg);
+	preload_textures(*lod_volume, voxel_reg, atlas_reg, true);
 
 	sm_<uint, TemporaryGeometry> temp_geoms;
 	generate_voxel_lod_geometry(

@@ -118,7 +118,7 @@ struct CVoxelRegistry: public VoxelRegistry
 	}
 
 	const CachedVoxelDefinition* get_cached(const VoxelTypeId &id,
-			AtlasRegistry *atlas_reg)
+			AtlasRegistry *atlas_reg, bool with_lod)
 	{
 		if(id >= m_defs.size()){
 			log_w(MODULE, "CVoxelRegistry::get_cached(): id=%i not found", id);
@@ -137,13 +137,17 @@ struct CVoxelRegistry: public VoxelRegistry
 			update_cache_textures(cache, def, atlas_reg);
 			cache.textures_valid = true;
 		}
+		if(with_lod && !cache.lod_textures_valid && atlas_reg){
+			update_cache_lod_textures(cache, def, atlas_reg);
+			cache.lod_textures_valid = true;
+		}
 		return &cache;
 	}
 
 	const CachedVoxelDefinition* get_cached(const VoxelInstance &v,
-			AtlasRegistry *atlas_reg)
+			AtlasRegistry *atlas_reg, bool with_lod)
 	{
-		return get_cached(v.get_id(), atlas_reg);
+		return get_cached(v.get_id(), atlas_reg, with_lod);
 	}
 
 	bool is_dirty()
@@ -177,28 +181,34 @@ struct CVoxelRegistry: public VoxelRegistry
 		for(size_t i = 0; i<6; i++){
 			const AtlasSegmentDefinition &seg_def = def.textures[i];
 			if(seg_def.resource_name == ""){
-				AtlasSegmentReference seg_ref; // Use default values
-				cache.textures[i] = seg_ref;
-				for(size_t j = 0; j < VOXELDEF_NUM_LOD; j++){
-					cache.lod_textures[j][i] = seg_ref;
-				}
+				cache.textures[i] = AtlasSegmentReference(); // Default values
 			} else {
-				{
-					AtlasSegmentReference seg_ref =
-							atlas_reg->find_or_add_segment(seg_def);
-					cache.textures[i] = seg_ref;
-				}
-				for(size_t j = 0; j < VOXELDEF_NUM_LOD; j++){
-					int lod = 2 + j;
-					AtlasSegmentDefinition lod_seg_def = seg_def;
-					lod_seg_def.lod_simulation = lod;
-					AtlasSegmentReference lod_seg_ref =
-							atlas_reg->find_or_add_segment(lod_seg_def);
-					cache.lod_textures[j][i] = lod_seg_ref;
-				}
+				cache.textures[i] = atlas_reg->find_or_add_segment(seg_def);
 			}
 		}
 		// Caller sets cache.textures_valid = true
+	}
+
+	// The same for the segments a LOD mesh samples, which are a texture
+	// scaled and drawn into an atlas each: three times the work of the
+	// segments above, and nothing but a LOD volume ever looks at them.
+	void update_cache_lod_textures(CachedVoxelDefinition &cache,
+			const VoxelDefinition &def, AtlasRegistry *atlas_reg)
+	{
+		for(size_t i = 0; i<6; i++){
+			const AtlasSegmentDefinition &seg_def = def.textures[i];
+			for(size_t j = 0; j < VOXELDEF_NUM_LOD; j++){
+				if(seg_def.resource_name == ""){
+					cache.lod_textures[j][i] = AtlasSegmentReference();
+					continue;
+				}
+				AtlasSegmentDefinition lod_seg_def = seg_def;
+				lod_seg_def.lod_simulation = 2 + j;
+				cache.lod_textures[j][i] =
+						atlas_reg->find_or_add_segment(lod_seg_def);
+			}
+		}
+		// Caller sets cache.lod_textures_valid = true
 	}
 };
 
