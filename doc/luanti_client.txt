@@ -56,6 +56,8 @@ nodedef.lua     NODEDEF: what a node id is called, how it is drawn, its tiles
 media.lua       The server's media files, in cache/luanti_media/<server>/
 player.lua      The player's box: the keys, gravity, and collision against
                 the nodes
+texmod.lua      Luanti's texture modifier language, as compose_image()
+                operations
 world.lua       The scene: a node per map block, with buildat's voxel mesher
                 on it, and the voxel registry the node definitions build
 engine_test.lua Checks of the engine primitives, run at boot
@@ -68,21 +70,24 @@ Checks
 ------
     $ lua extensions/luanti_client/test.lua
 
-covers serialize.lua, connection.lua, nodedef.lua, media.lua and player.lua
-without an engine: the packet framing, numbers including f32, reliable packets arriving
+covers serialize.lua, connection.lua, nodedef.lua, media.lua, player.lua and
+texmod.lua without an engine: the packet framing, numbers including f32, reliable packets arriving
 out of order or twice, acknowledgements, resending, splitting what is sent and
 reassembling what arrives, the peer id handshake, a NODEDEF packet built the
 way a server builds one and read back, which media names are usable as file
 names, and the player's box against a world made of a function -- falling to
 the ground, stopping at a wall, sliding along it, jumping onto a ledge,
 sinking in water and swimming out, flying, and getting out of a node it ended
-up inside.
+up inside, and the texture modifier language: what an expression parses to,
+which files it needs, and which operations each modifier becomes.
 
     $ bin/buildat_client -m luanti_client
 
 runs engine_test.lua at boot, which checks the engine primitives the extension
-leans on: buildat.compress / buildat.decompress and
-buildat.pack_voxel_volume.
+leans on: buildat.compress / buildat.decompress, buildat.pack_voxel_volume
+and buildat.compose_image. The image checks compose PNGs and read them back
+through Urho3D, so the blending, the eight symmetries, the scaling and the
+colour arithmetic are checked pixel by pixel.
 
 srp.lua has self_test(), which init.lua runs at boot; its vectors come from
 util/srp_reference.py, which does SRP-6a separately in Python.
@@ -95,11 +100,24 @@ Media: only the textures the node definitions name are asked for. A game's
 media is mostly sounds, models and textures for things that are not nodes;
 MineClone announces 3400 files and 900 of them are node textures.
 
-Texture modifiers ("dirt.png^shadow.png", "[combine:...") are a language of
-their own. What is done with them is to take the file name a chain starts
-from and drop the overlays, which is what makes a grass block's sides dirt
-rather than a placeholder; a name that does not start with a file name gets the
-placeholder.
+Texture modifiers: a texture name in a node definition is an expression --
+"default_dirt.png^mcl_dirt_grass_shadow.png",
+"mcl_core_glass.png^[multiply:red", "[combine:32x16:0,0=a.png:16,0=b.png".
+texmod.lua reads Luanti's language for these and turns an expression into
+buildat.compose_image() operations, which do the pixels and save a PNG beside
+the server's own files under a hash of the expression; the atlas then takes it
+by that name. A nested expression -- a group in parentheses, or one of
+[combine's pieces -- is composed on its own first and referred to by the name
+it was written under, so nothing has to hold an image.
+
+What is implemented: chaining with "^", grouping with "(...)", [combine,
+[fill, [colorize, [multiply, [screen, [opacity, [brighten, [noalpha, [hsl,
+[transform, [resize, [mask, [verticalframe and [sheet. That is everything this
+game's node definitions use except one [lowpart. Sixteen of Luanti's named
+colours are known, which is the wool and dye palette these expressions use;
+everything else has to be written as #rgb or #rrggbbaa. An expression that
+reaches something not implemented leaves the node without a texture, which
+draws as the placeholder.
 
 How the world sits: a buildat voxel and a Luanti node both occupy the cube
 centred on their integer coordinate, so Luanti node coordinates are Urho3D
@@ -137,6 +155,8 @@ What is done
 - PLAYERPOS carries the speed and the keys, which is what the server's
   movement checks and its animations of the player go by
 - NODEDEF, and a voxel registry built from it
+- Texture modifiers, composed into PNGs beside the server's media and cached
+  there between runs
 - The media: ANNOUNCE_MEDIA, REQUEST_MEDIA and MEDIA, cached on disk by name
   and checked against the sha1 the server announced
 
@@ -148,7 +168,7 @@ What is next
 ------------
 - Digging and placing, and an inventory
 - HP, breath
-- Node draw types that are not cubes, and texture modifiers
+- Node draw types that are not cubes: node boxes, meshes, plants, liquids
 - Colour palettes: a node with paramtype2 "color" or "colorfacedir" has a
   greyscale texture that the game colours per node. MineClone's grass comes
   out grey because of this.

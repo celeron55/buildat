@@ -55,34 +55,6 @@ local function has_flag(flags, flag)
 	return flags % (flag * 2) >= flag
 end
 
--- A texture name is either a plain file name or an expression in Luanti's
--- texture modifier language: "grass.png^[colorize:#ff0000:128", "[combine:...",
--- "(a.png^b.png)^c.png". A resource cache can only be handed a file name, so
--- what comes back here is the file name a texture is built on:
---
--- - a plain name, as it is
--- - the first element of a "^" chain, with the overlays dropped. This is what
---   a grass block's sides are ("default_dirt.png^mcl_dirt_grass_shadow.png"),
---   and dirt without its shading is much closer than no texture at all.
--- - nil for anything that does not start with a file name, which is where the
---   modifier language really begins: "[combine:...", "(a.png^b.png)^c.png".
---
--- simplified: dropping the overlays. Doing better means interpreting that
--- language and compositing images, which is its own piece of work; the
--- upgrade path is a modifier interpreter that produces an image, with this
--- function's result as the base it starts from.
-function M.plain_texture_name(name)
-	local base = name:match("^([^%^%[%(%)]+)")
-	if not base or base == "" then
-		return nil
-	end
-	-- A media name is a file name, never a path
-	if base:find("[/\\]") then
-		return nil
-	end
-	return base
-end
-
 local function read_tiledef(r)
 	local version = r:u8()
 	if version < 6 then
@@ -241,22 +213,6 @@ function M.parse(serialize, data, log)
 				" node definitions could not be read")
 	end
 	return defs, count
-end
-
--- Every plain texture name the definitions name, as a set. This is what has to
--- be asked of the server; the rest of its media is sounds, models and
--- textures nothing here draws.
-function M.texture_names(defs)
-	local names = {}
-	for _, def in pairs(defs) do
-		for _, tile in ipairs(def.tiles) do
-			local name = M.plain_texture_name(tile.name)
-			if name then
-				names[name] = true
-			end
-		end
-	end
-	return names
 end
 
 return M

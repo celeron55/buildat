@@ -23,6 +23,7 @@ local world = dofile(path.."/world.lua")
 local nodedef = dofile(path.."/nodedef.lua")
 local media = dofile(path.."/media.lua")
 local player = dofile(path.."/player.lua")
+local texmod = dofile(path.."/texmod.lua")
 local M = {safe = nil}
 
 -- BUILDAT_LUANTI_ADDRESS is for scripted runs (bin/buildat_client -c ...),
@@ -163,16 +164,62 @@ local function show_client(host, port, name, password)
 		local media_asked_at = nil
 		local registry_stale = false
 
-		-- A tile's texture name -> a resource name, or nil for one that is not
-		-- there. Texture modifiers ("grass.png^[colorize:...") are their own
-		-- language and are not a file name at all; those nodes keep the
-		-- placeholder.
+		-- Composed textures go beside the server's own files, under a name
+		-- nothing the server sends can collide with: a media name is a file
+		-- name and never a path.
+		local COMPOSED_DIR = MEDIA_ROOT.."/"..server_key.."/composed"
+		__buildat_mkdir(COMPOSED_DIR)
+
+		-- Expression -> the resource name it was composed under. The files
+		-- outlive the run, so a second one composes nothing.
+		local composed = {}
+		local composed_count = 0
+
+		local function hex_hash(s)
+			return (buildat.sha1(s):gsub(".", function(c)
+				return string.format("%02x", c:byte())
+			end))
+		end
+
+		-- A tile's texture name -> a resource name, or nil for one that
+		-- cannot be built. texmod.lua reads Luanti's modifier language and
+		-- buildat.compose_image() does the pixels; a name with no modifiers
+		-- in it is the file itself.
+		local texmod_ctx = {
+			resource = function(name)
+				if not store:have_file(name) then
+					return nil
+				end
+				return server_key.."/"..name
+			end,
+			compose = function(expr, ops, size)
+				local resource = composed[expr]
+				if resource then
+					return resource
+				end
+				local file = hex_hash(expr)..".png"
+				resource = server_key.."/composed/"..file
+				local path = COMPOSED_DIR.."/"..file
+				local f = io.open(path, "rb")
+				if f then
+					f:close()
+				else
+					local ok, err = pcall(buildat.compose_image,
+							{size = size, ops = ops, write = path})
+					if not ok then
+						log:warning("compose_image failed for \""..expr..
+								"\": "..tostring(err))
+						return nil
+					end
+					composed_count = composed_count + 1
+				end
+				composed[expr] = resource
+				return resource
+			end,
+		}
+
 		local function resolve_texture(name)
-			local plain = nodedef.plain_texture_name(name)
-			if not plain or not store:have_file(plain) then
-				return nil
-			end
-			return server_key.."/"..plain
+			return texmod.resolve(name, texmod_ctx)
 		end
 
 		local function rebuild_registry()
@@ -184,7 +231,8 @@ local function show_client(host, port, name, password)
 			local cubes = view:set_node_definitions(node_defs,
 					resolve_texture)
 			add_line(cubes.." node types have their own textures"..
-					" ("..store:have_count().." files, "..
+					" ("..store:have_count().." files, "..composed_count..
+					" composed, "..
 					math.floor((buildat.get_time_us() - t0) / 1000).." ms)")
 		end
 
@@ -194,7 +242,12 @@ local function show_client(host, port, name, password)
 			if not (node_defs and announced) then
 				return
 			end
-			local wanted = nodedef.texture_names(node_defs)
+			local wanted = {}
+			for _, def in pairs(node_defs) do
+				for _, tile in ipairs(def.tiles) do
+					texmod.sources(tile.name, wanted)
+				end
+			end
 			for _, name in ipairs(store:plan(announced, wanted)) do
 				to_ask[#to_ask + 1] = name
 			end
