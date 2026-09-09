@@ -487,14 +487,16 @@ function M.new(magic, buildat, log, options)
 
 	-- Builds the voxel registry from Luanti's node definitions.
 	--
-	-- defs is what nodedef.parse() returned. resolve_texture(name) turns a
-	-- tile's texture name into a resource name the cache can find, or nil for
-	-- one that is not there or is a texture modifier expression rather than a
-	-- file. A node with any face unresolved keeps the placeholder: half a
-	-- cube's textures is worse to look at than none of them.
+	-- defs is what nodedef.parse() returned. resolve_tile(def, i) turns one of
+	-- a node's six faces into a resource name the cache can find, or nil for
+	-- one that cannot be built: what a tile is drawn as is the game's own
+	-- business -- the texture expression, the overlay, the colour -- and this
+	-- only needs the name that comes out. A node with any face unresolved
+	-- keeps the placeholder: half a cube's textures is worse to look at than
+	-- none of them.
 	--
 	-- Returns how many node ids came out as their own cube.
-	function self:set_node_definitions(defs, resolve_texture)
+	function self:set_node_definitions(defs, resolve_tile)
 		local new_reg = base_registry()
 		local map = {
 			[CONTENT_AIR] = VOXEL_AIR,
@@ -513,7 +515,7 @@ function M.new(magic, buildat, log, options)
 			elseif kind then
 				local resources = {}
 				for i = 1, 6 do
-					resources[i] = resolve_texture(def.tiles[i].name)
+					resources[i] = resolve_tile(def, i)
 					if not resources[i] then
 						break
 					end

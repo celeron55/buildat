@@ -73,8 +73,12 @@ local function read_tiledef(r)
 		r:f32()
 	end
 	local flags = r:u16()
+	-- A tile with a colour of its own is not the one the node's paramtype2
+	-- and palette give the rest of them; "white" is how a game says a tile
+	-- is to be left alone
+	local color = nil
 	if has_flag(flags, TILE_FLAG_HAS_COLOR) then
-		r:skip(3)
+		color = {r:u8(), r:u8(), r:u8()}
 	end
 	if has_flag(flags, TILE_FLAG_HAS_SCALE) then
 		r:u8()
@@ -82,7 +86,7 @@ local function read_tiledef(r)
 	if has_flag(flags, TILE_FLAG_HAS_ALIGN_STYLE) then
 		r:u8()
 	end
-	return {name = name, animated = animation_type ~= 0}
+	return {name = name, animated = animation_type ~= 0, color = color}
 end
 
 -- Luanti's LiquidType

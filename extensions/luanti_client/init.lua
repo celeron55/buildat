@@ -61,6 +61,11 @@ local DAYNIGHT_RAMP = {
 }
 
 local function daynight_ratio(time_of_day)
+	-- A scripted run cannot wait for morning, and a screenshot of the world
+	-- at night says little about how it looks
+	if os.getenv("BUILDAT_LUANTI_FORCE_DAY") then
+		return 1.0
+	end
 	local t = time_of_day % 24000
 	if t > 12000 then
 		t = 24000 - t
@@ -218,8 +223,52 @@ local function show_client(host, port, name, password)
 			end,
 		}
 
-		local function resolve_texture(name)
-			return texmod.resolve(name, texmod_ctx)
+		-- The texture expression for one of a node's six faces.
+		--
+		-- Luanti draws a tile as up to two layers, the tile and an overlay
+		-- over it, and each is drawn in a colour: its own when the game gave
+		-- it one, and the node's otherwise. That is how a grass block's side
+		-- is plain dirt with a green edge on top of it. Written as an
+		-- expression, the two layers are a "^" chain and a colour is a
+		-- [multiply, so texmod.lua does the work.
+		--
+		-- simplified: the node's colour is the one in its definition, not the
+		-- one its paramtype2 picks out of a palette, so a node type is one
+		-- colour everywhere rather than the biome's. Every palette node in
+		-- this game also carries the colour it is mostly drawn in, which is
+		-- why this looks right; the upgrade path is a voxel id per (node,
+		-- param2) pair, which is also what a facedir needs.
+		local function tile_expression(def, i)
+			local function layer(tile)
+				if not tile or tile.name == "" then
+					return nil
+				end
+				local color = tile.color or def.color
+				if not color or (color[1] == 255 and color[2] == 255 and
+						color[3] == 255) then
+					return tile.name
+				end
+				return "("..tile.name.."^[multiply:"..
+						string.format("#%02x%02x%02x", color[1], color[2],
+						color[3])..")"
+			end
+			local base = layer(def.tiles[i])
+			if not base then
+				return nil
+			end
+			local overlay = layer(def.overlays and def.overlays[i])
+			if overlay then
+				return base.."^"..overlay
+			end
+			return base
+		end
+
+		local function resolve_tile(def, i)
+			local expr = tile_expression(def, i)
+			if not expr then
+				return nil
+			end
+			return texmod.resolve(expr, texmod_ctx)
 		end
 
 		local function rebuild_registry()
@@ -228,8 +277,7 @@ local function show_client(host, port, name, password)
 				return
 			end
 			local t0 = buildat.get_time_us()
-			local cubes = view:set_node_definitions(node_defs,
-					resolve_texture)
+			local cubes = view:set_node_definitions(node_defs, resolve_tile)
 			add_line(cubes.." node types have their own textures"..
 					" ("..store:have_count().." files, "..composed_count..
 					" composed, "..
@@ -244,8 +292,11 @@ local function show_client(host, port, name, password)
 			end
 			local wanted = {}
 			for _, def in pairs(node_defs) do
-				for _, tile in ipairs(def.tiles) do
-					texmod.sources(tile.name, wanted)
+				for i = 1, 6 do
+					local expr = tile_expression(def, i)
+					if expr then
+						texmod.sources(expr, wanted)
+					end
 				end
 			end
 			for _, name in ipairs(store:plan(announced, wanted)) do

@@ -400,6 +400,14 @@ assert(defs[11].walkable == false and defs[11].liquid_type == 2 and
 		"nodedef: liquid fields")
 assert(defs[7].color[1] == 255 and defs[7].color[3] == 253,
 		"nodedef: colour")
+-- test:grass has the flags that put a colour, a scale and an align style
+-- after the tile's name; the colour is the tile's own
+assert(defs[9].tiles[1].color and defs[9].tiles[1].color[1] == 255 and
+		defs[9].tiles[1].color[2] == 128 and defs[9].tiles[1].color[3] == 0,
+		"nodedef: a tile's own colour")
+assert(defs[7].tiles[1].color == nil, "nodedef: a tile with no colour")
+assert(defs[7].overlays[1].name == "" and #defs[7].special == 6,
+		"nodedef: the overlay and special tiles")
 
 -- A node whose definition cannot be read is left out, and the rest still parse
 local broken = serialize.writer():u16(20):string(string.char(13, 0, 200))
