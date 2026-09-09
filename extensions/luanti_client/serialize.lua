@@ -45,6 +45,15 @@ function M.writer()
 		return self:u32(v < 0 and v + 0x100000000 or v)
 	end
 
+	-- v3s16 and v3s32, which is how Luanti writes positions
+	function w:v3s16(x, y, z)
+		return self:s16(x):s16(y):s16(z)
+	end
+
+	function w:v3s32(x, y, z)
+		return self:s32(x):s32(y):s32(z)
+	end
+
 	-- u16 length and the bytes
 	function w:string(s)
 		return self:u16(#s):raw(s)
@@ -97,6 +106,44 @@ function M.reader(data)
 	function r:s32()
 		local v = self:u32()
 		return v >= 0x80000000 and v - 0x100000000 or v
+	end
+
+	-- IEEE 754 single precision, big-endian, which is what Luanti sends for
+	-- floats from protocol 37 onwards
+	function r:f32()
+		local b1, b2, b3, b4 = string.byte(self:raw(4), 1, 4)
+		local sign = b1 >= 0x80 and -1 or 1
+		local exponent = (b1 % 0x80) * 2 + math.floor(b2 / 0x80)
+		local mantissa = ((b2 % 0x80) * 0x100 + b3) * 0x100 + b4
+		if exponent == 0xff then
+			if mantissa == 0 then
+				return sign * math.huge
+			end
+			return 0 / 0 -- NaN
+		end
+		-- 2^n rather than math.ldexp(), which Lua 5.4 no longer has and
+		-- test.lua wants to run under whatever lua is around
+		if exponent == 0 then
+			-- Zero, or subnormal: no implicit leading one
+			return sign * (mantissa / 0x800000) * 2 ^ -126
+		end
+		return sign * (1 + mantissa / 0x800000) * 2 ^ (exponent - 127)
+	end
+
+	-- The reads are in locals because the order in which Lua evaluates a
+	-- return list is not something to rely on
+	function r:v3s16()
+		local x = self:s16()
+		local y = self:s16()
+		local z = self:s16()
+		return x, y, z
+	end
+
+	function r:v3f()
+		local x = self:f32()
+		local y = self:f32()
+		local z = self:f32()
+		return x, y, z
 	end
 
 	function r:string()

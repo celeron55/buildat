@@ -32,6 +32,8 @@ local VERSION = {major = 5, minor = 15, patch = 0, hash = "buildat"}
 local TOSERVER = {
 	INIT         = 0x02,
 	INIT2        = 0x11,
+	PLAYERPOS    = 0x23,
+	GOTBLOCKS    = 0x24,
 	CLIENT_READY = 0x43,
 	FIRST_SRP    = 0x50,
 	SRP_BYTES_A  = 0x51,
@@ -43,6 +45,8 @@ local TOSERVER = {
 local TOSERVER_DELIVERY = {
 	[TOSERVER.INIT]         = {1, false},
 	[TOSERVER.INIT2]        = {1, true},
+	[TOSERVER.PLAYERPOS]    = {0, false},
+	[TOSERVER.GOTBLOCKS]    = {2, true},
 	[TOSERVER.CLIENT_READY] = {1, true},
 	[TOSERVER.FIRST_SRP]    = {1, true},
 	[TOSERVER.SRP_BYTES_A]  = {1, true},
@@ -53,8 +57,34 @@ local TOCLIENT = {
 	HELLO         = 0x02,
 	AUTH_ACCEPT   = 0x03,
 	ACCESS_DENIED = 0x0A,
+	BLOCKDATA     = 0x20,
+	TIME_OF_DAY   = 0x29,
+	MOVE_PLAYER   = 0x34,
+	NODEDEF       = 0x3A,
+	ITEMDEF       = 0x3D,
 	SRP_BYTES_S_B = 0x60,
 }
+
+-- 16x16x16 nodes to a mapblock, as everywhere in Luanti
+local MAP_BLOCKSIZE = 16
+local NODECOUNT = MAP_BLOCKSIZE * MAP_BLOCKSIZE * MAP_BLOCKSIZE
+-- Luanti's BS: one node is this many of the units positions come in
+local BS = 10.0
+
+-- Node ids that mean something to everyone, whatever the game is; from
+-- Luanti's mapnode.h. Everything else needs the node definitions.
+M.CONTENT_UNKNOWN = 125
+M.CONTENT_AIR = 126
+M.CONTENT_IGNORE = 127
+
+-- How often the server hears where we are. It sends blocks around the last
+-- position it heard, so nothing arrives until this does.
+local PLAYERPOS_INTERVAL = 0.1
+-- How many blocks out to ask for. The server adds one and then clips this to
+-- its own max_block_send_distance.
+local WANTED_RANGE_BLOCKS = 6
+-- The field of view we claim, in radians; the server culls blocks outside it
+local FOV = 1.72
 
 -- For logging what is not handled yet; from Luanti's ToClientCommand enum
 local TOCLIENT_NAME = {
@@ -127,6 +157,40 @@ local AUTH_MECHANISM = {
 	FIRST_SRP       = 4,
 }
 
+-- Parses one BLOCKDATA payload, the u16 command already read off it.
+--
+-- At serialization version 29 the whole block is one zstd frame, and inside it
+--   u8 flags | u16 lighting_complete | u8 content_width | u8 params_width
+--   | 4096 u16be param0 | 4096 u8 param1 | 4096 u8 param2 | node metadata
+-- and after the frame a u8 of MapBlock::serializeNetworkSpecific. Blocks of one
+-- node are expanded before being sent, so the bulk data is always 16384 bytes.
+--
+-- The three parameter arrays are handed on as they came, because that is what
+-- buildat.pack_voxel_volume() takes. Node index order is x fastest, then y,
+-- then z, which is also PolyVox's.
+local function parse_blockdata(data)
+	local r = serialize.reader(data)
+	local x, y, z = r:v3s16()
+	local raw = buildat.decompress(r:rest(), "zstd")
+	local b = serialize.reader(raw)
+	local flags = b:u8()
+	local lighting_complete = b:u16()
+	local content_width = b:u8()
+	local params_width = b:u8()
+	if content_width ~= 2 or params_width ~= 2 then
+		error("luanti_client: mapblock has content_width "..content_width..
+				" and params_width "..params_width..", expected 2 and 2")
+	end
+	return {
+		x = x, y = y, z = z,
+		is_underground = flags % 2 == 1,
+		lighting_complete = lighting_complete,
+		param0 = b:raw(NODECOUNT * 2),
+		param1 = b:raw(NODECOUNT),
+		param2 = b:raw(NODECOUNT),
+	}
+end
+
 -- new(socket, options, log): options.name, options.password and
 -- options.on_status(text), which is called with what is going on.
 -- client.on_command(command, data) gets every command that arrives.
@@ -137,6 +201,18 @@ function M.new(socket, options, log)
 			unhandled = {}, -- command -> how many arrived
 			on_status = options.on_status,
 			on_command = nil,
+			-- on_block(x, y, z, block) for each mapblock that arrives; see
+			-- parse_blockdata() for what a block holds
+			on_block = nil,
+			-- Where the server last put us, in nodes, and where we tell it we
+			-- are. The extension moves this; see set_position().
+			position = {x = 0, y = 0, z = 0},
+			pitch = 0,
+			yaw = 0,
+			-- The server's time of day, 0...23999, and how fast it runs
+			time_of_day = nil,
+			time_speed = 0,
+			blocks_received = 0,
 	}
 	local name = options.name
 	local password = options.password or ""
@@ -207,6 +283,9 @@ function M.new(socket, options, log)
 		end
 	end
 
+	-- Positions of blocks that have arrived and not been acknowledged yet
+	local gotblocks = {}
+
 	local handlers = {}
 
 	handlers[TOCLIENT.HELLO] = function(r)
@@ -218,6 +297,15 @@ function M.new(socket, options, log)
 				" (serialization "..serialization_version..")")
 		if self.protocol_version < CLIENT_PROTOCOL_VERSION_MIN then
 			status("The server is too old for this client")
+			self.state = "failed"
+			return
+		end
+		-- Only serialization version 29 is parsed; older mapblocks compress
+		-- their pieces separately and this client has no branch for that
+		if serialization_version ~= SER_FMT_VER_HIGHEST_READ then
+			status("The server serializes mapblocks as version "..
+					serialization_version..", this client reads "..
+					SER_FMT_VER_HIGHEST_READ)
 			self.state = "failed"
 			return
 		end
@@ -247,6 +335,61 @@ function M.new(socket, options, log)
 		self.state = "authenticated"
 		status("Logged in")
 		send_command(TOSERVER.INIT2, serialize.writer():string(""):data())
+	end
+
+	-- CLIENT_READY is what makes the server spawn the player, and it waits for
+	-- the definitions. Their contents are not used yet.
+	local got_itemdef, got_nodedef, client_ready_sent = false, false, false
+
+	local function maybe_send_client_ready()
+		if client_ready_sent or not (got_itemdef and got_nodedef) then
+			return
+		end
+		client_ready_sent = true
+		self:send_client_ready()
+		self.state = "spawning"
+	end
+
+	handlers[TOCLIENT.ITEMDEF] = function(r)
+		self.itemdef_data = buildat.decompress(r:longstring(), "zstd")
+		got_itemdef = true
+		maybe_send_client_ready()
+	end
+
+	handlers[TOCLIENT.NODEDEF] = function(r)
+		self.nodedef_data = buildat.decompress(r:longstring(), "zstd")
+		got_nodedef = true
+		maybe_send_client_ready()
+	end
+
+	handlers[TOCLIENT.MOVE_PLAYER] = function(r)
+		local x, y, z = r:v3f()
+		self.position = {x = x / BS, y = y / BS, z = z / BS}
+		self.pitch = r:f32()
+		self.yaw = r:f32()
+		-- Nothing is told where we are until now, and PLAYERPOS would move us
+		-- somewhere else if it went out before this
+		if self.state ~= "ready" then
+			self.state = "ready"
+			status(string.format("Spawned at %.0f, %.0f, %.0f",
+					self.position.x, self.position.y, self.position.z))
+		end
+	end
+
+	handlers[TOCLIENT.TIME_OF_DAY] = function(r)
+		self.time_of_day = r:u16() % 24000
+		self.time_speed = r:f32()
+	end
+
+	handlers[TOCLIENT.BLOCKDATA] = function(r)
+		local block = parse_blockdata(r:rest())
+		self.blocks_received = self.blocks_received + 1
+		-- The server throttles on unacknowledged blocks, so this has to go out
+		-- whether anything makes use of the block or not
+		gotblocks[#gotblocks + 1] = {block.x, block.y, block.z}
+		if self.on_block then
+			self.on_block(block)
+		end
 	end
 
 	handlers[TOCLIENT.ACCESS_DENIED] = function(r)
@@ -288,8 +431,62 @@ function M.new(socket, options, log)
 		status("Disconnected: "..tostring(reason))
 	end
 
+	local function send_playerpos()
+		local p = self.position
+		local w = serialize.writer()
+		-- Positions go as hundredths of a BS unit, so nodes * 1000
+		w:v3s32(math.floor(p.x * BS * 100), math.floor(p.y * BS * 100),
+				math.floor(p.z * BS * 100))
+		w:v3s32(0, 0, 0) -- Speed; nothing moves yet
+		w:s32(math.floor(self.pitch * 100))
+		w:s32(math.floor(self.yaw * 100))
+		w:u32(0) -- Keys pressed
+		w:u8(math.floor(FOV * 80)) -- The server culls blocks outside this
+		w:u8(WANTED_RANGE_BLOCKS)
+		w:u8(0) -- Bits; the only one so far is an inverted camera
+		-- The two f32 movement fields after this are optional and the server
+		-- falls back to the keys when they are missing
+		send_command(TOSERVER.PLAYERPOS, w:data())
+	end
+
+	-- One packet holds a u8 count, so the acknowledgements go in batches; 32
+	-- positions and the command still fit one datagram
+	local GOTBLOCKS_PER_PACKET = 32
+
+	local function send_gotblocks()
+		while #gotblocks > 0 do
+			local count = math.min(#gotblocks, GOTBLOCKS_PER_PACKET)
+			local w = serialize.writer():u8(count)
+			for i = 1, count do
+				local p = table.remove(gotblocks, 1)
+				w:v3s16(p[1], p[2], p[3])
+			end
+			send_command(TOSERVER.GOTBLOCKS, w:data())
+		end
+	end
+
+	local playerpos_timer = PLAYERPOS_INTERVAL
+
 	function self:update(dtime)
 		conn:update(dtime)
+		if self.state ~= "ready" then
+			return
+		end
+		playerpos_timer = playerpos_timer + dtime
+		if playerpos_timer >= PLAYERPOS_INTERVAL then
+			playerpos_timer = 0
+			send_playerpos()
+		end
+		send_gotblocks()
+	end
+
+	-- Where the client says it is, in nodes. The server sends the blocks
+	-- around this and moves the player to it, so it is both the camera's
+	-- position and the player's.
+	function self:set_position(x, y, z, pitch, yaw)
+		self.position = {x = x, y = y, z = z}
+		self.pitch = pitch or self.pitch
+		self.yaw = yaw or self.yaw
 	end
 
 	function self:send_client_ready()
@@ -320,6 +517,9 @@ function M.new(socket, options, log)
 	return self
 end
 
+M.MAP_BLOCKSIZE = MAP_BLOCKSIZE
+M.NODECOUNT = NODECOUNT
+M.BS = BS
 M.TOSERVER = TOSERVER
 M.TOCLIENT = TOCLIENT
 M.TOCLIENT_NAME = TOCLIENT_NAME

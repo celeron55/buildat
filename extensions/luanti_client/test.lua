@@ -54,6 +54,30 @@ assert(edge:u32() == 0xffffffff)
 assert(edge:s16() == -32768)
 assert(edge:s32() == -2147483648)
 
+-- f32: IEEE 754 single precision, big-endian, which is what positions come in
+local function f32(a, b, c, d)
+	return serialize.reader(string.char(a, b, c, d)):f32()
+end
+assert(f32(0x00, 0x00, 0x00, 0x00) == 0, "serialize: f32 zero")
+assert(f32(0x3f, 0x80, 0x00, 0x00) == 1, "serialize: f32 one")
+assert(f32(0xbf, 0x80, 0x00, 0x00) == -1, "serialize: f32 minus one")
+assert(f32(0x41, 0x20, 0x00, 0x00) == 10, "serialize: f32 ten")
+assert(f32(0xc5, 0xcd, 0x8c, 0x00) == -6577.5, "serialize: f32 a position")
+assert(f32(0x7f, 0x80, 0x00, 0x00) == math.huge, "serialize: f32 infinity")
+local nan = f32(0x7f, 0xc0, 0x00, 0x00)
+assert(nan ~= nan, "serialize: f32 NaN")
+-- The smallest subnormal, which is the one case with no implicit leading one
+assert(f32(0x00, 0x00, 0x00, 0x01) > 0, "serialize: f32 subnormal")
+
+-- v3s16 and v3f, in the order the bytes came in
+local v = serialize.reader(serialize.writer():v3s16(-1, 2, -3)
+		:raw(string.char(0x3f, 0x80, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00,
+				0x40, 0x40, 0x00, 0x00)):data())
+local x, y, z = v:v3s16()
+assert(x == -1 and y == 2 and z == -3, "serialize: v3s16")
+local fx, fy, fz = v:v3f()
+assert(fx == 1 and fy == 2 and fz == 3, "serialize: v3f")
+
 print("serialize: ok")
 
 -- connection.lua
@@ -181,6 +205,43 @@ conn:update(0.01)
 assert(#got == 1 and got[1].data == "abcde",
 		"connection: split packets did not come back together")
 assert(got[1].channel == 1, "connection: wrong channel")
+
+-- A payload too big for one datagram goes out as split chunks, each of them a
+-- packet in its own right; REQUEST_MEDIA is what needs this
+socket.sent = {}
+local big = string.rep("m", 2000)
+conn:send(2, true, big)
+assert(#socket.sent > 1, "connection: did not split a big send")
+local pieces = {}
+local split_count, split_seqnum = nil, nil
+for i, packet in ipairs(socket.sent) do
+	assert(#packet <= 512, "connection: split chunk "..i.." is "..#packet..
+			" bytes")
+	local rd = serialize.reader(packet)
+	rd:skip(7)
+	assert(rd:u8() == 3, "connection: a split chunk should be reliable")
+	rd:u16() -- Its own reliable seqnum
+	assert(rd:u8() == 2, "connection: should be a split packet")
+	local seqnum = rd:u16()
+	local count = rd:u16()
+	local num = rd:u16()
+	split_seqnum = split_seqnum or seqnum
+	split_count = split_count or count
+	assert(seqnum == split_seqnum, "connection: split seqnum changed")
+	assert(count == split_count, "connection: chunk count changed")
+	assert(num == i - 1, "connection: chunks out of order")
+	pieces[#pieces + 1] = rd:rest()
+end
+assert(split_count == #socket.sent, "connection: wrong chunk count")
+assert(table.concat(pieces) == big, "connection: split lost data")
+
+-- The next big send uses the next split seqnum
+socket.sent = {}
+conn:send(2, true, big)
+local rd = serialize.reader(socket.sent[1])
+rd:skip(7 + 3 + 1)
+assert(rd:u16() == (split_seqnum + 1) % 65536,
+		"connection: split seqnum did not advance")
 
 -- A datagram from something else is ignored, not an error
 got = {}
