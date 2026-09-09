@@ -276,5 +276,52 @@ function M.safe.show_confirm_dialog(message, on_yes, on_no)
 	end)
 end
 
+-- A small non-modal notice in the top right corner. It does not take focus and
+-- disappears by itself. A second call replaces what is showing.
+local notification = nil
+local notification_update_subscribed = false
+
+function M.safe.show_notification(text, duration_s)
+	duration_s = duration_s or 2.0
+
+	if notification then
+		notification.window:Remove()
+		notification = nil
+	end
+
+	local window = magic.ui.root:CreateChild("Window")
+	window.defaultStyle = magic.cache:GetResource(
+			"XMLFile", "__menu/res/main_style.xml")
+	window:SetStyleAuto()
+	window:SetName("show_notification window")
+	window:SetLayout(LM_VERTICAL, 0, magic.IntRect(10, 6, 10, 6))
+	window:SetFocusMode(FM_NOTFOCUSABLE)
+
+	local message_text = window:CreateChild("Text")
+	message_text:SetStyleAuto()
+	message_text.text = text
+
+	-- Align once the text is in; alignment does not follow a later resize
+	window:SetAlignment(HA_RIGHT, VA_TOP)
+
+	notification = {
+		window = window,
+		end_time_us = buildat.get_time_us() + duration_s * 1000000,
+	}
+
+	-- One subscription for the lifetime of the process. Unsubscribing from
+	-- inside a handler breaks extension/urho3d's global event multiplexer.
+	if not notification_update_subscribed then
+		notification_update_subscribed = true
+		magic.SubscribeToEvent("Update",
+		function(event_type, event_data)
+			if notification and buildat.get_time_us() >= notification.end_time_us then
+				notification.window:Remove()
+				notification = nil
+			end
+		end)
+	end
+end
+
 return M
 -- vim: set noet ts=4 sw=4:
