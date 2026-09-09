@@ -81,6 +81,8 @@ local function unescape(s)
 	return (s:gsub("\\(.)", "%1"))
 end
 
+M.unescape = unescape
+
 -- Splits on an unescaped separator
 local function split(s, sep)
 	local parts = {}
@@ -113,9 +115,10 @@ end
 
 -- parse(spec) -> elements, size, real_coordinates
 --
--- elements is an array of {name =, fields = {...}, at = {x, y}}, where at is
--- the container offset in force, already added to the element's own position
--- if it has one. size is what size[] said, defaulting to a small window.
+-- elements is an array of {name =, fields = {...}, raw = {...}, at = {x, y}},
+-- where at is the container offset in force, already added to the element's
+-- own position if it has one, and raw is the fields with their escapes still
+-- in. size is what size[] said, defaulting to a small window.
 function M.parse(spec)
 	local elements = {}
 	local size = {10, 10}
@@ -133,7 +136,11 @@ function M.parse(spec)
 		if i > #spec then
 			break
 		end
-		local name = spec:sub(name_start, i - 1)
+		-- A formspec a mod built out of lines has whitespace between its
+		-- elements, and it belongs to neither of them; Luanti trims the same
+		-- way. Without this every element after the first newline is a
+		-- name nothing knows and the form comes out empty.
+		local name = spec:sub(name_start, i - 1):match("^%s*(.-)%s*$")
 		i = i + 1
 		local body_start = i
 		while i <= #spec do
@@ -149,7 +156,13 @@ function M.parse(spec)
 		i = i + 1
 
 		local fields = split(body, ";")
+		-- The fields as they were written as well: a field that is itself a
+		-- list -- a table's cells, a dropdown's items -- has to be split on
+		-- its commas before the escapes in it are taken out, or a cell with
+		-- a comma of its own turns into two
+		local raw = {}
 		for k, v in ipairs(fields) do
+			raw[k] = v
 			fields[k] = unescape(v)
 		end
 
@@ -171,7 +184,7 @@ function M.parse(spec)
 			offset = table.remove(stack) or {0, 0}
 		else
 			elements[#elements + 1] = {
-				name = name, fields = fields, at = offset,
+				name = name, fields = fields, raw = raw, at = offset,
 			}
 		end
 	end

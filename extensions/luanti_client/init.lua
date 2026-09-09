@@ -887,7 +887,7 @@ local function show_client(host, port, name, password)
 			local w = ui_root.width
 			local h = ui_root.height
 			local layout = formspec.layout(size, real, w, h)
-			form.drawn = ui:show(ui_root, elements, layout, w, h)
+			form.drawn = ui:show(ui_root, elements, layout, w, h, form.state)
 			local typeable = false
 			for _, f in ipairs(form.drawn.fields) do
 				if f.edit then
@@ -920,7 +920,8 @@ local function show_client(host, port, name, password)
 			if not spec or spec == "" then
 				return
 			end
-			form = {spec = spec, formname = formname or "", source = source}
+			form = {spec = spec, formname = formname or "", source = source,
+					state = {scroll = {}}}
 			draw_form()
 			magic.input:SetMouseVisible(true)
 		end
@@ -952,6 +953,33 @@ local function show_client(host, port, name, password)
 					client:send_inventory_fields(form.formname, fields)
 					if b.exit then
 						close_form()
+					end
+					return
+				end
+			end
+			-- A row of a table: the server hears about it as CHG and the
+			-- row's number, which is what its own client sends
+			for _, t in ipairs(form.drawn.tables) do
+				if lx >= t.x and lx < t.x + t.w and
+						ly >= t.y and ly < t.y + t.h then
+					for _, r in ipairs(t.rows) do
+						if ly >= r.y and ly < r.y + t.row_h then
+							-- A row with children opens and closes, which
+							-- is the client's own business; the server
+							-- hears about the row either way
+							if r.opens then
+								local open = form.state.open[t.name]
+								open[r.index] = not open[r.index]
+								form_stale = true
+							end
+							local fields = form_fields()
+							fields[t.name] = "CHG:"..r.index
+							log:verbose("form: table \""..tostring(t.name)..
+									"\" row "..r.index)
+							client:send_inventory_fields(form.formname,
+									fields)
+							return
+						end
 					end
 					return
 				end
@@ -1343,6 +1371,27 @@ local function show_client(host, port, name, password)
 				chat_click(event_data:GetInt("X"), event_data:GetInt("Y"))
 			end
 		end)
+		-- The wheel scrolls the table a form has; a form with two of them
+		-- would want to know which one the mouse is over, and none of this
+		-- game's do.
+		local mouse_wheel_cb = magic.SubscribeToEvent("MouseWheel",
+				function(event_type, event_data)
+					if not form or not form.drawn then
+						return
+					end
+					local t = form.drawn.tables[1]
+					if not t or t.count <= t.visible then
+						return
+					end
+					local by = -event_data:GetInt("Wheel") * 3
+					local at = math.max(0, math.min(t.count - t.visible,
+							t.scroll + by))
+					if at ~= t.scroll then
+						form.state.scroll[t.name] = at
+						form_stale = true
+					end
+				end)
+
 		local mouse_up_cb = magic.SubscribeToEvent("MouseButtonUp",
 				function(event_type, event_data)
 			if event_data:GetInt("Button") == MOUSEB_LEFT then
@@ -1398,6 +1447,7 @@ local function show_client(host, port, name, password)
 				magic.UnsubscribeFromEvent("MouseButtonDown", mouse_down_cb)
 				magic.UnsubscribeFromEvent("MouseButtonUp", mouse_up_cb)
 				magic.UnsubscribeFromEvent("UIMouseClick", ui_click_cb)
+				magic.UnsubscribeFromEvent("MouseWheel", mouse_wheel_cb)
 				close_form()
 				close_chat()
 				chat_text:Remove()

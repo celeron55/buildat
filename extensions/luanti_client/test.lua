@@ -991,6 +991,14 @@ assert(obj.props.visual == "mesh", "objects: an unknown message broke it")
 
 print("objects: ok")
 
+-- A formspec written out as lines has whitespace between its elements, which
+-- is not part of the name of either of them
+local wsel, wssize = formspec.parse("size[3,4]\n	label[0,0;hi]\n"..
+		"	button[0,1;2,1;go;Go]\n")
+assert(wssize[1] == 3, "formspec: size after a newline")
+assert(#wsel == 2 and wsel[1].name == "label" and wsel[2].name == "button",
+		"formspec: element names are trimmed, got \""..wsel[1].name.."\"")
+
 -- shapes.lua
 --
 -- The two ways a facedir is followed have to agree: a cube's tiles are moved
