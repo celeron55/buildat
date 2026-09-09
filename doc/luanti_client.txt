@@ -385,6 +385,12 @@ node is the little isometric cube -- the same thing Luanti's wielditem comes
 out as. An upright_sprite turns to the camera here where Luanti turns it with
 the object's own yaw.
 
+The field of view: TOCLIENT_FOV asks for one in degrees or as a multiple of
+the client's own, over a transition time, which is what a game zooms with. It
+does not change what the client tells the server its view is, so a zoomed-in
+player is still sent the blocks a 72-degree view needs -- more than it wants,
+never fewer.
+
 What is next
 ------------
 - What a mob really looks like: Luanti draws a mesh for one, and this draws a

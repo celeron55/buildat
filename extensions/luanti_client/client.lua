@@ -129,6 +129,7 @@ local TOCLIENT = {
 	PLAY_SOUND     = 0x3F,
 	STOP_SOUND     = 0x40,
 	FADE_SOUND     = 0x55,
+	FOV            = 0x36,
 	SRP_BYTES_S_B  = 0x60,
 }
 
@@ -331,6 +332,11 @@ function M.new(socket, options, log)
 			-- out of PLAY_SOUND, on_stop_sound(id) and
 			-- on_fade_sound(id, step, gain). The id is the server's own and
 			-- is what the latter two name.
+			-- on_fov(fov, is_multiplier, transition_time): what the server
+			-- wants the camera's field of view to be, in degrees or as a
+			-- multiple of the client's own, with zero meaning back to the
+			-- client's own
+			on_fov = nil,
 			on_play_sound = nil,
 			on_stop_sound = nil,
 			on_fade_sound = nil,
@@ -649,6 +655,20 @@ function M.new(socket, options, log)
 		if value ~= nil then
 			self.hud_params[param] = value
 			hud_changed()
+		end
+	end
+
+	-- The transition time came in 5.3, so an older server stops after the
+	-- multiplier flag
+	handlers[TOCLIENT.FOV] = function(r)
+		local fov = r:f32()
+		local is_multiplier = r:u8() ~= 0
+		local transition_time = 0
+		if r:remaining() >= 4 then
+			transition_time = r:f32()
+		end
+		if self.on_fov then
+			self.on_fov(fov, is_multiplier, transition_time)
 		end
 	end
 

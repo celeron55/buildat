@@ -290,9 +290,52 @@ function M.new(magic, buildat, log, options)
 	local camera = camera_node:CreateComponent("Camera")
 	camera.nearClip = 0.1
 	camera.farClip = far_clip
-	camera.fov = 72
+	-- What the field of view is when the server has not asked for anything
+	-- else. TOCLIENT_FOV can ask for degrees or for a multiplier of this,
+	-- over a transition time, which is what a game zooms with.
+	local BASE_FOV = 72
+	camera.fov = BASE_FOV
 	self.camera_node = camera_node
 	self.camera = camera
+
+	local fov_target = BASE_FOV
+	-- Degrees a second while a transition is running, and nil when there is
+	-- none
+	local fov_step = nil
+
+	-- set_fov(fov, is_multiplier, transition_time), out of TOCLIENT_FOV. A
+	-- fov of zero means back to the client's own.
+	function self:set_fov(fov, is_multiplier, transition_time)
+		local want = BASE_FOV
+		if fov and fov > 0 then
+			want = is_multiplier and BASE_FOV * fov or fov
+		end
+		-- A game that asks for something absurd gets the nearest sane thing
+		want = math.min(math.max(want, 5), 160)
+		fov_target = want
+		if transition_time and transition_time > 0 then
+			fov_step = math.abs(want - camera.fov) / transition_time
+		else
+			fov_step = nil
+			camera.fov = want
+		end
+	end
+
+	function self:update_fov(dtime)
+		if not fov_step then
+			return
+		end
+		local at = camera.fov
+		if at < fov_target then
+			at = math.min(fov_target, at + fov_step * dtime)
+		else
+			at = math.max(fov_target, at - fov_step * dtime)
+		end
+		camera.fov = at
+		if at == fov_target then
+			fov_step = nil
+		end
+	end
 
 	-- Held on self: the renderer keeps a raw reference to the viewport, so a
 	-- viewport that only a local pointed at gets freed under it the next time
