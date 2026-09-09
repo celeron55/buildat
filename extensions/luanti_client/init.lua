@@ -1482,7 +1482,9 @@ local function show_client(host, port, name, password)
 			-- screen and what runs off the edge is the half that changes
 			status_text.text = table.concat(lines, "\n").."\n"..
 					string.format(
-					"%s%s | %.1f, %.1f, %.1f %s | %d: %s | %s\n"..
+					"%s%s | %.1f, %.1f, %.1f %s"..
+					" | looking %.0f down, %.0f round"..
+					" | %d: %s | %s\n"..
 					"%d objects | blocks: %d received,"..
 					" %d in scene, %d to mesh | %d us to hand over"..
 					" | %d commands waiting"..
@@ -1491,6 +1493,7 @@ local function show_client(host, port, name, password)
 					avatar.fly and "flying" or
 							(avatar.in_liquid and "swimming" or
 							(avatar.on_ground and "on ground" or "falling")),
+					client.pitch or 0, client.yaw or 0,
 					wield_index, holding,
 					pointed,
 					view:object_count(),

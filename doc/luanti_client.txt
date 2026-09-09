@@ -158,6 +158,12 @@ first. One command and one block always get through, so nothing can starve.
 What a block costs before the mesher's own thread sees it is on screen as
 "us to hand over".
 
+The counter line also says where the player is looking, in degrees down and
+degrees round. A command sequence can only move the look by relative pixels
+(mouse_move, 0.15 degrees each, pitch clamped to 89 either way), so aiming at
+something reproducibly means saturating the pitch and then coming back a
+counted number of pixels; the readout is what makes that checkable.
+
 Loading: until the game's definitions and its media are in there is nothing
 worth drawing -- a world of placeholders is not the game -- so a panel covers
 the screen and says how far along it is, and the voxel registry is built with
