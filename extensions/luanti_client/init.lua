@@ -957,6 +957,23 @@ local function show_client(host, port, name, password)
 					return
 				end
 			end
+			-- A tab or a checkbox: the form goes back with the new value in
+			-- it, the way Luanti's own client sends one
+			for _, t in ipairs(form.drawn.taps) do
+				if lx >= t.x and lx < t.x + t.w and
+						ly >= t.y and ly < t.y + t.h then
+					local fields = form_fields()
+					fields[t.name] = t.value
+					if t.check then
+						form.state.check[t.name] = t.value == "true"
+						form_stale = true
+					end
+					log:verbose("form: \""..tostring(t.name).."\" = "..
+							t.value)
+					client:send_inventory_fields(form.formname, fields)
+					return
+				end
+			end
 			-- A row of a table: the server hears about it as CHG and the
 			-- row's number, which is what its own client sends
 			for _, t in ipairs(form.drawn.tables) do
