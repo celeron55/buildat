@@ -212,6 +212,30 @@ local function show_client(host, port, name, password)
 	loading_text:SetTextAlignment(HA_CENTER)
 	loading_text.text = "Connecting to "..host..":"..port
 
+	-- The crosshair, which is what says where the middle of the screen is
+	-- when the mouse is captured. Two bars rather than a texture: it is two
+	-- rectangles either way and this way there is no image to ship.
+	local function crosshair_bar(w, h)
+		local bar = magic.ui.root:CreateChild("BorderImage")
+		bar.texture = magic.cache:GetResource(
+				"Texture2D", "luanti_client/res/white.png")
+		bar.width = w
+		bar.height = h
+		bar:SetAlignment(HA_CENTER, VA_CENTER)
+		bar:SetPosition(0, 0)
+		bar.color = magic.Color(1, 1, 1, 0.7)
+		bar.enabled = false
+		return bar
+	end
+	local crosshair = {crosshair_bar(13, 1), crosshair_bar(1, 13)}
+
+	-- What F1, F2 and F5 turn on and off, which are the keys Luanti uses for
+	-- them: the player's own HUD and the crosshair, what has been said, and
+	-- the lines of detail in the corner.
+	local show_hud = true
+	local show_chat = true
+	local show_debug = true
+
 	local lines = {"Luanti: "..host..":"..port}
 	local function add_line(text)
 		lines[#lines + 1] = text
@@ -1086,8 +1110,12 @@ local function show_client(host, port, name, password)
 		local function update_hud()
 			-- Nothing of the player's own while the loading panel is up: the
 			-- panel is behind the rest of the UI, so a hotbar would float on
-			-- top of it
-			if loading then
+			-- top of it. F1 takes it away as well, crosshair and all, which
+			-- is what that key is for.
+			for _, bar in ipairs(crosshair) do
+				bar.visible = show_hud and not loading
+			end
+			if loading or not show_hud then
 				if hud then
 					hud:Remove()
 					hud = nil
@@ -2024,6 +2052,9 @@ local function show_client(host, port, name, password)
 				hud:Remove()
 				hud = nil
 			end
+			for _, bar in ipairs(crosshair) do
+				bar:Remove()
+			end
 			if held_element then
 				held_element:Remove()
 				held_element = nil
@@ -2084,6 +2115,19 @@ local function show_client(host, port, name, password)
 			-- The number keys pick a hotbar slot, as they do in Luanti
 			if key >= KEY_1 and key <= KEY_8 then
 				wield_index = key - KEY_1 + 1
+			end
+			-- Luanti's own keys for what is on the screen
+			if key == KEY_F1 then
+				show_hud = not show_hud
+				update_hud()
+			end
+			if key == KEY_F2 then
+				show_chat = not show_chat
+				chat_text.visible = show_chat
+			end
+			if key == KEY_F5 then
+				show_debug = not show_debug
+				status_text.visible = show_debug
 			end
 			if key == KEY_H then
 				avatar.noclip = not avatar.noclip
