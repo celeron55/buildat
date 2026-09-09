@@ -1022,6 +1022,10 @@ function M.define(dst, util)
 	util.wc("LineEdit", {
 		inherited_from_by_wrapper = dst.BorderImage,
 		properties = {
+			-- The character a password field shows instead of what was
+			-- typed, as its code point; 0 shows the text itself
+			echoCharacter = util.simple_property("number"),
+			maxLength = util.simple_property("number"),
 		},
 	})
 
