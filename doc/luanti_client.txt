@@ -234,9 +234,13 @@ formspec_ui.lua is a BorderImage at a position. The units are inventory slots
 and how many pixels one of those is comes out of the screen size, the same way
 Luanti works it out; before formspec version 2 the units were a slot plus its
 spacing and a position had a fixed padding added, and both are implemented.
-Not implemented: editing a field, scroll containers, tabs, dropdowns,
-checkboxes, hypertext, the styles, and drawing an item that places a node as
-the little cube Luanti draws rather than as one of its tiles.
+Implemented as well: fields that can be typed into, tabs, checkboxes, tables
+and text lists, the styles a form asks for in its default state, tooltips
+over a named element or an area, and taking half a stack or one item at a
+time. Not implemented: scroll containers and scrollbars, dropdowns,
+hypertext, the hovered and pressed states of a style, dragging a stack, and
+drawing an item that places a node as the little cube Luanti draws rather
+than as one of its tiles.
 
 Node shapes: a node box is drawn as its boxes, and a plant, a torch, a fire, a
 sign and a rail as quads, through VoxelDefinition.shape -- a list of quads per
@@ -245,11 +249,10 @@ fences costs what a chunk of cubes costs. shapes.lua builds those quads and
 the engine knows nothing about node boxes.
 
 What that does not do yet: a connected node box does not look at its
-neighbours, so a fence is a post without its rails; a wallmounted one is drawn
-the way it looks on the floor, because which way it faces is in its param2; a
-mesh node is drawn as a cube, since Urho3D reads none of the model formats
-Luanti uses; and the player still collides with the whole node rather than
-with the shape.
+neighbours, so a fence is a post without its rails; a mesh node is drawn as
+its selection box, since Urho3D reads none of the model formats Luanti uses;
+and a turned node box's texture coordinates are the whole tile rather than
+the part of it Luanti works out from the box after the turn.
 
 What is next
 ------------

@@ -1299,6 +1299,54 @@ local function show_client(host, port, name, password)
 		-- A plain subscription rather than root:SubscribeToStackEvent(), which
 		-- only fires while the UI element has focus; the world has to keep
 		-- streaming whatever the UI is doing. Unsubscribed by hand below.
+		-- Where the cursor is, for the tooltips a form asks for: the UI does
+		-- not say where it is and Input only gives the movement since the
+		-- last frame, so it is tracked from MouseMove below.
+		local mouse_at = nil
+		-- What the cursor is over and for how long: a tooltip that came up
+		-- the instant the cursor crossed something would be in the way of
+		-- everything. Luanti waits about this long too.
+		local TOOLTIP_DELAY = 0.35
+		local tooltip_over = nil
+		local tooltip_wait = 0
+
+		local function update_tooltip(dtime)
+			local drawn = form and form.drawn
+			if not drawn or not drawn.tooltips or #drawn.tooltips == 0 or
+					not mouse_at then
+				if tooltip_over then
+					tooltip_over = nil
+					ui:tooltip(magic.ui.root, nil)
+				end
+				return
+			end
+			local lx = mouse_at[1] - drawn.origin[1]
+			local ly = mouse_at[2] - drawn.origin[2]
+			-- The last one that covers the cursor: a form's later elements
+			-- are the ones on top
+			local over = nil
+			for _, t in ipairs(drawn.tooltips) do
+				if lx >= t.x and lx < t.x + t.w and
+						ly >= t.y and ly < t.y + t.h then
+					over = t
+				end
+			end
+			if over ~= tooltip_over then
+				tooltip_over = over
+				tooltip_wait = 0
+				ui:tooltip(magic.ui.root, nil)
+				return
+			end
+			if not over then
+				return
+			end
+			tooltip_wait = tooltip_wait + dtime
+			if tooltip_wait >= TOOLTIP_DELAY then
+				ui:tooltip(magic.ui.root, over.text, mouse_at[1], mouse_at[2],
+						magic.ui.root.width, magic.ui.root.height)
+			end
+		end
+
 		local update_cb = magic.SubscribeToEvent("Update",
 				function(event_type, event_data)
 			local dtime = event_data:GetFloat("TimeStep")
@@ -1320,6 +1368,7 @@ local function show_client(host, port, name, password)
 			if form and form_stale then
 				draw_form()
 			end
+			update_tooltip(dtime)
 			local time_of_day = FORCE_TIME or client.time_of_day
 			if time_of_day then
 				local daylight = daynight_ratio(time_of_day)
@@ -1524,6 +1573,21 @@ local function show_client(host, port, name, password)
 			end
 		end)
 
+		local mouse_move_cb = magic.SubscribeToEvent("MouseMove",
+				function(event_type, event_data)
+					-- Input reports window pixels; a form is laid out in
+					-- the UI's own coordinates, which are those divided by
+					-- the UI scale -- the same ones a click arrives in
+					local scale = magic.ui:GetScale()
+					if not scale or scale <= 0 then
+						scale = 1
+					end
+					mouse_at = {
+						math.floor(event_data:GetInt("X") / scale),
+						math.floor(event_data:GetInt("Y") / scale),
+					}
+				end)
+
 		-- Where a click landed, which MouseButtonDown does not say
 		local ui_click_cb = magic.SubscribeToEvent("UIMouseClick",
 				function(event_type, event_data)
@@ -1610,10 +1674,12 @@ local function show_client(host, port, name, password)
 				magic.UnsubscribeFromEvent("Update", update_cb)
 				magic.UnsubscribeFromEvent("MouseButtonDown", mouse_down_cb)
 				magic.UnsubscribeFromEvent("MouseButtonUp", mouse_up_cb)
+				magic.UnsubscribeFromEvent("MouseMove", mouse_move_cb)
 				magic.UnsubscribeFromEvent("UIMouseClick", ui_click_cb)
 				magic.UnsubscribeFromEvent("MouseWheel", mouse_wheel_cb)
 				magic.UnsubscribeFromEvent("ScreenMode", screen_mode_cb)
 				close_form()
+				ui:drop_tooltip()
 				close_chat()
 				chat_text:Remove()
 				status_text:Remove()

@@ -19,8 +19,8 @@
 -- texture, which is what Luanti's own inventory does with a second scene.
 --
 -- The elements that are not implemented are counted and named once, which is
--- what says whether it is worth implementing the next one; styles, tooltips
--- and the list ring are deliberately ignored rather than missing.
+-- what says whether it is worth implementing the next one; styles and the
+-- list ring are deliberately ignored rather than missing.
 
 local formspec = dofile(__buildat_extension_path("luanti_client")..
 		"/formspec.lua")
@@ -30,7 +30,7 @@ local M = {}
 -- The elements that say nothing about what is drawn
 local IGNORED = {
 	listring = true, listcolors = true, style = true, style_type = true,
-	tooltip = true, field_enter_after_edit = true,
+	field_enter_after_edit = true,
 	no_prepend = true, bgcolor = true,
 	scrollbaroptions = true, allow_close = true, position = true,
 	tableoptions = true,
@@ -294,6 +294,78 @@ function M.new(magic, buildat, log, ctx)
 	-- an element's own position.
 	-- state is what has to live longer than one drawing of the form: how far
 	-- a table is scrolled. The caller keeps it and hands it back.
+	-- The text a tooltip shows, next to the cursor, or nothing when text is
+	-- nil. One element that moves and changes rather than one built per
+	-- frame: this is called every frame a form is open.
+	--
+	-- The element is a child of the UI root rather than of the form, so that
+	-- it draws over everything the form put on the screen.
+	local tip = nil
+	local tip_label = nil
+	local tip_text = nil
+
+	function self:tooltip(root, text, x, y, screen_w, screen_h)
+		if not text then
+			if tip then
+				tip.visible = false
+			end
+			tip_text = nil
+			return
+		end
+		if not tip then
+			tip = root:CreateChild("BorderImage")
+			if ctx.style then
+				tip.defaultStyle = ctx.style
+			end
+			tip.texture = magic.cache:GetResource("Texture2D", WHITE)
+			tip.color = magic.Color(0.1, 0.1, 0.12, 0.95)
+			-- Over everything, and never in the way of a click
+			tip.priority = 30000
+			tip.enabled = false
+		end
+		if text ~= tip_text then
+			tip_text = text
+			if tip_label then
+				tip_label:Remove()
+			end
+			tip_label = tip:CreateChild("Text")
+			tip_label:SetStyleAuto()
+			tip_label:SetFontSize(12)
+			tip_label.text = text
+			tip_label.color = magic.Color(1, 1, 1)
+			tip_label:SetPosition(4, 3)
+			-- A Text works out its own size once it has text and a font, so
+			-- the box is what the text turned out to be plus a margin
+			tip.size = magic.IntVector2(tip_label.width + 8,
+					tip_label.height + 6)
+		end
+		-- Beside the cursor, and inside the screen
+		local w = tip.width
+		local h = tip.height
+		local px = x + 14
+		local py = y + 14
+		if px + w > screen_w then
+			px = math.max(0, x - w - 6)
+		end
+		if py + h > screen_h then
+			py = math.max(0, y - h - 6)
+		end
+		tip:SetPosition(math.floor(px), math.floor(py))
+		tip.visible = true
+	end
+
+	-- Takes the tooltip element away, for a session that is ending: it is a
+	-- child of the UI root rather than of the form, so closing the form does
+	-- not take it with it.
+	function self:drop_tooltip()
+		if tip then
+			tip:Remove()
+			tip = nil
+			tip_label = nil
+			tip_text = nil
+		end
+	end
+
 	function self:show(root, elements, layout, screen_w, screen_h, state)
 		state = state or {}
 		state.scroll = state.scroll or {}
@@ -305,6 +377,10 @@ function M.new(magic, buildat, log, ctx)
 		-- The things that are not buttons but send the form back all the
 		-- same: a tab of a tabheader, a checkbox
 		local taps = {}
+		-- tooltip[] asks for text over an area or over a named element; the
+		-- named ones can only be placed once every element has been drawn
+		local tooltips = {}
+		local named_tooltips = {}
 
 		local ox = math.floor((screen_w - layout.width) / 2)
 		local oy = math.floor((screen_h - layout.height) / 2)
@@ -790,7 +866,25 @@ function M.new(magic, buildat, log, ctx)
 								formspec.strip_escapes(text), 12)
 					end
 					fields[#fields + 1] = {name = e.fields[3],
-							value = value or "", edit = edit}
+							value = value or "", edit = edit,
+							x = x, y = y, w = w, h = h}
+				end
+			elseif name == "tooltip" then
+				-- tooltip[X,Y;W,H;text;...] over an area, or
+				-- tooltip[element;text;...] over a named element. The
+				-- colours a tooltip may name are left out: what a form
+				-- says about them is never the interesting part of it.
+				local first = tostring(e.fields[1] or "")
+				if first:match("^%-?[%d.]+,%-?[%d.]+$") and #e.fields >= 3 then
+					local x, y = at(e, 1)
+					local w, h = geometry(e, 2)
+					if x and w then
+						tooltips[#tooltips + 1] = {x = x, y = y, w = w,
+								h = h, text = formspec.strip_escapes(
+										e.fields[3] or "")}
+					end
+				elseif e.fields[2] then
+					named_tooltips[first] = formspec.strip_escapes(e.fields[2])
 				end
 			elseif name == "set_focus" or name == "field_close_on_enter" then
 				-- Read after the pass, where the fields are all known
@@ -816,9 +910,27 @@ function M.new(magic, buildat, log, ctx)
 				f.edit:SetFocus(true)
 			end
 		end
+		-- A tooltip on a named element goes where that element ended up
+		if next(named_tooltips) then
+			local rects = {}
+			for _, list in ipairs({buttons, taps, fields}) do
+				for _, entry in ipairs(list) do
+					if entry.name and entry.w then
+						rects[entry.name] = entry
+					end
+				end
+			end
+			for element_name, text in pairs(named_tooltips) do
+				local r = rects[element_name]
+				if r then
+					tooltips[#tooltips + 1] = {x = r.x, y = r.y, w = r.w,
+							h = r.h, text = text}
+				end
+			end
+		end
 		return {window = window, origin = {ox, oy}, slots = slots,
 				buttons = buttons, fields = fields, tables = tables,
-				taps = taps,
+				taps = taps, tooltips = tooltips,
 				close_on_enter = close_on_enter}
 	end
 
