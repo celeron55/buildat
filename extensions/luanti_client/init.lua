@@ -28,6 +28,7 @@ local itemdef = dofile(path.."/itemdef.lua")
 local inventory = dofile(path.."/inventory.lua")
 local formspec = dofile(path.."/formspec.lua")
 local formspec_ui = dofile(path.."/formspec_ui.lua")
+local objects = dofile(path.."/objects.lua")
 local M = {safe = nil}
 
 -- BUILDAT_LUANTI_ADDRESS is for scripted runs (bin/buildat_client -c ...),
@@ -317,6 +318,12 @@ local function show_client(host, port, name, password)
 			return texmod.resolve(expr, texmod_ctx, extra)
 		end
 
+		-- The things in the world that are not nodes, by id
+		local world_objects = {}
+		-- The texture names the node definitions asked for, which is what
+		-- decides whether arriving media is worth a new registry
+		local node_textures = {}
+
 		-- What has been said, newest last, and the line being typed
 		local CHAT_LINES = 8
 		local chat = {}
@@ -358,6 +365,7 @@ local function show_client(host, port, name, password)
 				return
 			end
 			local wanted = {}
+			node_textures = wanted
 			for _, def in pairs(node_defs) do
 				for i = 1, 6 do
 					local expr = tile_expression(def, i)
@@ -398,7 +406,19 @@ local function show_client(host, port, name, password)
 
 		client.on_media = function(files)
 			store:store(files)
-			registry_stale = true
+			-- Only a texture a node wanted is worth building the registry
+			-- again for; an object's texture arriving is not, and objects
+			-- turn up for as long as the client runs
+			for _, file in ipairs(files) do
+				if node_textures[file.name] then
+					registry_stale = true
+					break
+				end
+			end
+			-- An object that was waiting for its texture can have it now
+			for _, obj in pairs(world_objects) do
+				obj.visual_stale = true
+			end
 		end
 
 		-- The player's own box in the world. It asks the world what stops it;
@@ -417,6 +437,62 @@ local function show_client(host, port, name, password)
 			item_defs = items
 			add_line(count.." item definitions")
 			plan_media()
+		end
+
+		-- An object's texture is media like any other, but objects turn up
+		-- long after the media was asked for, so what is missing is asked for
+		-- when it is wanted and the object gets its texture when it arrives.
+		local function object_texture(name)
+			local resolved = texmod.resolve(name, texmod_ctx)
+			if resolved then
+				return resolved
+			end
+			local wanted = {}
+			if texmod.sources(name, wanted) and announced then
+				for _, missing in ipairs(store:plan(announced, wanted)) do
+					to_ask[#to_ask + 1] = missing
+				end
+			end
+			return nil
+		end
+
+		client.on_object_add = function(id, object_type, data)
+			local ok, obj = pcall(objects.parse_init, luanti.serialize, data)
+			if not ok then
+				log:warning("objects: could not read object "..id..": "..
+						tostring(obj))
+				return
+			end
+			obj.id = id
+			world_objects[id] = obj
+			-- The local player is drawn by nobody: the camera is inside it
+			if obj.is_player and obj.name == name then
+				obj.is_self = true
+				return
+			end
+			view:set_object(obj, object_texture)
+		end
+
+		client.on_object_remove = function(id)
+			world_objects[id] = nil
+			view:remove_object(id)
+		end
+
+		client.on_object_message = function(id, data)
+			local obj = world_objects[id]
+			if not obj then
+				return
+			end
+			local r = luanti.serialize.reader(data)
+			local ok, err = pcall(objects.apply_message, obj, r)
+			if not ok then
+				-- One message this does not understand is not worth losing
+				-- the object over; the rest still arrive
+				return
+			end
+			if obj.visual_stale and not obj.is_self then
+				view:set_object(obj, object_texture)
+			end
 		end
 
 		client.on_chat = function(text, sender)
@@ -736,7 +812,7 @@ local function show_client(host, port, name, password)
 			status_text.text = table.concat(lines, "\n").."\n"..
 					string.format(
 					"%s%s | %.1f, %.1f, %.1f %s | %d: %s | %s"..
-					" | blocks: %d received,"..
+					" | %d objects | blocks: %d received,"..
 					" %d in scene, %d to mesh | %d us to hand over"..
 					" | media: %d files, %d to come",
 					client.state, condition, avatar.x, avatar.y, avatar.z,
@@ -745,6 +821,7 @@ local function show_client(host, port, name, password)
 							(avatar.on_ground and "on ground" or "falling")),
 					wield_index, holding,
 					pointed,
+					view:object_count(),
 					client.blocks_received, view:block_count(),
 					view:dirty_count(), view.last_mesh_us,
 					store:have_count(), store:missing_count())
@@ -833,6 +910,13 @@ local function show_client(host, port, name, password)
 			client:update(dtime)
 			move(dtime)
 			update_dig(dtime)
+			objects.interpolate(world_objects, dtime)
+			for _, obj in pairs(world_objects) do
+				if obj.visual_stale and not obj.is_self then
+					view:set_object(obj, object_texture)
+				end
+			end
+			view:place_objects(world_objects)
 			if form and form_stale then
 				draw_form()
 			end

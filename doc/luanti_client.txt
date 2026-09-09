@@ -64,6 +64,8 @@ media.lua       The server's media files, in cache/luanti_media/<server>/
 player.lua      The player's box: the keys, gravity, and collision against
                 the nodes
 shapes.lua      Luanti's node shapes, as the quads a voxel definition takes
+objects.lua     The things in the world that are not nodes: what the server
+                says they are and where
 itemdef.lua     ITEMDEF: what an item is, and what a tool can dig
 inventory.lua   TOCLIENT_INVENTORY: what the player is carrying
 formspec.lua    The elements of a formspec, and where they go
@@ -83,7 +85,7 @@ Checks
     $ lua extensions/luanti_client/test.lua
 
 covers serialize.lua, connection.lua, nodedef.lua, media.lua, player.lua,
-texmod.lua, inventory.lua and formspec.lua without an engine: the packet framing, numbers including f32, reliable packets arriving
+texmod.lua, inventory.lua, formspec.lua and objects.lua without an engine: the packet framing, numbers including f32, reliable packets arriving
 out of order or twice, acknowledgements, resending, splitting what is sent and
 reassembling what arrives, the peer id handshake, a NODEDEF packet built the
 way a server builds one and read back, which media names are usable as file
@@ -94,7 +96,9 @@ up inside, the texture modifier language -- what an expression parses to,
 which files it needs, and which operations each modifier becomes -- and the
 inventory -- quoted item names, empty slots, KeepList, and which tool
 capabilities a dig goes by -- and formspecs: the elements, escaped fields,
-nested containers, and the two coordinate systems.
+nested containers, and the two coordinate systems -- and the active objects:
+an object's initialization data and its properties, the positions that arrive
+afterwards, and the messages this does not implement going past harmlessly.
 
     $ bin/buildat_client -m luanti_client
 
@@ -189,6 +193,8 @@ What is done
   torches, fires, signs and rails as quads, through a shape in the voxel
   registry that the mesher copies into the chunk
 - Chat, both ways, and the player's hit points and breath
+- Active objects: other players, mobs and dropped items, where the server
+  says they are, drawn as a box wearing the object's own texture
 - Formspecs: the inventory form, the ones the server shows, and the prepend
   in front of them. Item slots with the item's own image in them, labels,
   images, buttons and fields; clicking a slot picks a stack up and puts it
@@ -223,7 +229,12 @@ with the shape.
 
 What is next
 ------------
-- Active objects: other players, mobs, dropped items
+- What an active object really looks like: Luanti draws a mesh for a mob, a
+  billboard for a dropped item and a cube for a few things, and this draws a
+  box wearing the object's first texture whatever it says, because Urho3D
+  reads none of the model formats Luanti's meshes come in. A box wearing a
+  cow's texture reads as a cow; a dropped item does not read as an item.
+- Animations, nametags and attachments of the active objects
 - The sky, the sun, the moon and the clouds, which the server describes and
   which are a flat fog colour here
 - The HUD: the hotbar, the health bar, and what a game puts on the screen
