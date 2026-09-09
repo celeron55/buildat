@@ -473,6 +473,35 @@ function M.build(expr, ctx)
 				end
 				ops[#ops + 1] = {op = "blit", src = resource,
 						fill = true, blend = "and"}
+			elseif name == "lowpart" then
+				-- The bottom part of an overlay, stretched over the whole
+				-- image and then cut: Luanti's [lowpart:<percent>:<file>,
+				-- which is how a game draws a bar that fills up. The clip
+				-- is in fractions of the canvas because how big that is in
+				-- pixels is compose_image()'s business, not this file's.
+				local percent = tonumber(args[1])
+				local resource = ctx.compose(unescape(args[2] or ""))
+				if not percent or not resource then
+					return nil
+				end
+				percent = math.min(math.max(percent, 0), 100)
+				if percent > 0 then
+					ops[#ops + 1] = {op = "blit", src = resource,
+							fill = true, clip = {0, 1 - percent / 100, 1, 1}}
+				end
+			elseif name == "makealpha" then
+				-- The colour a texture was drawn over, which becomes
+				-- transparent: a texture saved without an alpha channel
+				-- says which colour its background was.
+				local parts = {}
+				for v in tostring(args[1] or ""):gmatch("-?%d+") do
+					parts[#parts + 1] = tonumber(v)
+				end
+				if #parts < 3 then
+					return nil
+				end
+				ops[#ops + 1] = {op = "chromakey",
+						color = {parts[1], parts[2], parts[3]}}
 			elseif name == "png" then
 				-- The image is in the expression itself, base64. It goes
 				-- into the chain the way a file name does; whoever has
@@ -504,9 +533,9 @@ function M.build(expr, ctx)
 				ops[#ops + 1] = {op = "crop", grid = wh, cell = at}
 			else
 				-- [crack, [inventorycube, [invert, [contrast,
-				-- [colorizehsl, [overlay, [hardlight, [lowpart, [makealpha,
-				-- [applyfiltersformesh. This game's node definitions use one
-				-- [lowpart and none of the rest.
+				-- [colorizehsl, [overlay, [hardlight,
+				-- [applyfiltersformesh. None of the games tested use any
+				-- of these.
 				if M.unimplemented[name] == nil then
 					M.unimplemented[name] = expr
 				end
