@@ -88,6 +88,27 @@ assert(x == -1 and y == 2 and z == -3, "serialize: v3s16")
 local fx, fy, fz = v:v3f()
 assert(fx == 1 and fy == 2 and fz == 3, "serialize: v3f")
 
+-- Wide strings, which is what chat is: a count of UTF-16 units and then
+-- those, so what is not in the basic plane goes as a surrogate pair
+for _, text in ipairs({"", "hello", "a\228\184\173b",
+		"\195\164\195\182\195\165", "tree \240\159\140\178 here"}) do
+	local packed = serialize.writer():wstring(text):data()
+	local got = serialize.reader(packed):wstring()
+	assert(got == text, "serialize: wstring round trip of "..#text..
+			" bytes gave "..#got)
+end
+-- The count is units, not bytes or code points: one tree is two units
+assert(serialize.reader(serialize.writer():wstring(
+		"\240\159\140\178"):data()):u16() == 2,
+		"serialize: a surrogate pair is two units")
+assert(#serialize.utf16_units("ab") == 2, "serialize: utf16_units")
+-- A byte that is not valid UTF-8 comes out as the replacement character
+-- rather than stopping anything
+local bad = serialize.reader(serialize.writer():wstring("a\255b"):data())
+		:wstring()
+assert(bad:sub(1, 1) == "a" and bad:sub(-1) == "b",
+		"serialize: a bad byte took the rest with it")
+
 print("serialize: ok")
 
 -- connection.lua

@@ -16,9 +16,9 @@ same player.
 
 Controls: the mouse looks, WASD walks, space jumps, ctrl sneaks, shift is
 faster, 1 to 8 pick a hotbar slot, the left mouse button digs what is pointed
-at and the right one places what is wielded, I opens the inventory, K toggles
-flying, H toggles going through walls, escape closes a form and then
-disconnects.
+at and the right one places what is wielded, I opens the inventory, T says
+something (a line starting with a slash is a command), K toggles flying, H
+toggles going through walls, escape closes a form and then disconnects.
 Flying and going through walls need the server to give the player the fly and
 noclip privileges; without them its movement checks pull the player back.
 
@@ -188,6 +188,7 @@ What is done
 - Node shapes that are not cubes: node boxes as their boxes, and plants,
   torches, fires, signs and rails as quads, through a shape in the voxel
   registry that the mesher copies into the chunk
+- Chat, both ways, and the player's hit points and breath
 - Formspecs: the inventory form, the ones the server shows, and the prepend
   in front of them. Item slots with the item's own image in them, labels,
   images, buttons and fields; clicking a slot picks a stack up and puts it
@@ -222,6 +223,10 @@ with the shape.
 
 What is next
 ------------
+- Active objects: other players, mobs, dropped items
+- The sky, the sun, the moon and the clouds, which the server describes and
+  which are a flat fog colour here
+- The HUD: the hotbar, the health bar, and what a game puts on the screen
 - param2: the colour a node takes out of a palette, and facedir, which is
   which tile goes on which face and which way a shape is turned
 - Node metadata, so that a chest's own slots are in its form

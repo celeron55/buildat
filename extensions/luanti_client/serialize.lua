@@ -10,6 +10,63 @@
 
 local M = {}
 
+-- One code point as UTF-8
+function M.utf8_encode(c)
+	if c < 0x80 then
+		return string.char(c)
+	elseif c < 0x800 then
+		return string.char(0xc0 + math.floor(c / 0x40), 0x80 + c % 0x40)
+	elseif c < 0x10000 then
+		return string.char(0xe0 + math.floor(c / 0x1000),
+				0x80 + math.floor(c / 0x40) % 0x40, 0x80 + c % 0x40)
+	end
+	return string.char(0xf0 + math.floor(c / 0x40000),
+			0x80 + math.floor(c / 0x1000) % 0x40,
+			0x80 + math.floor(c / 0x40) % 0x40, 0x80 + c % 0x40)
+end
+
+-- The code points of a UTF-8 string as UTF-16 units, so that what is not in
+-- the basic plane comes out as a surrogate pair. A byte that is not valid
+-- UTF-8 becomes the replacement character rather than stopping anything.
+function M.utf16_units(s)
+	local units = {}
+	local i = 1
+	while i <= #s do
+		local b = s:byte(i)
+		local c, len
+		if b < 0x80 then
+			c, len = b, 1
+		elseif b >= 0xc0 and b < 0xe0 then
+			c, len = b - 0xc0, 2
+		elseif b >= 0xe0 and b < 0xf0 then
+			c, len = b - 0xe0, 3
+		elseif b >= 0xf0 and b < 0xf8 then
+			c, len = b - 0xf0, 4
+		else
+			c, len = 0xfffd, 1
+		end
+		if c ~= 0xfffd then
+			for k = 1, len - 1 do
+				local cont = s:byte(i + k)
+				if not cont or cont < 0x80 or cont >= 0xc0 then
+					c, len = 0xfffd, 1
+					break
+				end
+				c = c * 0x40 + (cont - 0x80)
+			end
+		end
+		i = i + len
+		if c < 0x10000 then
+			units[#units + 1] = c
+		else
+			c = c - 0x10000
+			units[#units + 1] = 0xd800 + math.floor(c / 0x400)
+			units[#units + 1] = 0xdc00 + c % 0x400
+		end
+	end
+	return units
+end
+
 function M.writer()
 	local parts = {}
 	local w = {}
@@ -60,6 +117,15 @@ function M.writer()
 	end
 
 	-- u32 length and the bytes
+	function w:wstring(s)
+		local units = M.utf16_units(s)
+		self:u16(#units)
+		for _, u in ipairs(units) do
+			self:u16(u)
+		end
+		return self
+	end
+
 	function w:longstring(s)
 		return self:u32(#s):raw(s)
 	end
@@ -166,6 +232,31 @@ function M.reader(data)
 					frames_h = self:u8(), length = self:f32()}
 		end
 		return {type = animation_type}
+	end
+
+	-- A wide string: a count of UTF-16 units and then that many, big-endian.
+	-- Chat is the only thing that uses them. What comes out is UTF-8, which
+	-- is what everything else here and in Urho3D wants.
+	function r:wstring()
+		local count = self:u16()
+		local out = {}
+		local i = 1
+		while i <= count do
+			local c = self:u16()
+			if c >= 0xd800 and c < 0xdc00 and i < count then
+				-- A surrogate pair is one code point in two units
+				local low = self:u16()
+				i = i + 1
+				if low >= 0xdc00 and low < 0xe000 then
+					c = 0x10000 + (c - 0xd800) * 0x400 + (low - 0xdc00)
+				else
+					c = 0xfffd
+				end
+			end
+			out[#out + 1] = M.utf8_encode(c)
+			i = i + 1
+		end
+		return table.concat(out)
 	end
 
 	function r:skip(n)
