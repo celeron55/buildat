@@ -434,6 +434,8 @@ local function show_client(host, port, name, password)
 			for _, obj in pairs(world_objects) do
 				obj.visual_stale = true
 			end
+			-- And so can a form: its textures are asked for when it is drawn
+			form_stale = true
 		end
 
 		-- The player's own box in the world. It asks the world what stops it;
@@ -454,10 +456,12 @@ local function show_client(host, port, name, password)
 			plan_media()
 		end
 
-		-- An object's texture is media like any other, but objects turn up
-		-- long after the media was asked for, so what is missing is asked for
-		-- when it is wanted and the object gets its texture when it arrives.
-		local function object_texture(name)
+		-- A texture that is not part of a voxel definition: an object's, or
+		-- one a formspec names. The media for those is not planned up front,
+		-- because what wants them turns up long after the media was asked
+		-- for, so what is missing is asked for when it is wanted and whatever
+		-- was waiting gets it when it arrives.
+		local function media_texture(name)
 			local resolved = texmod.resolve(name, texmod_ctx)
 			if resolved then
 				return resolved
@@ -486,7 +490,7 @@ local function show_client(host, port, name, password)
 			end
 			if props.textures and props.textures[1] and
 					props.textures[1] ~= "" then
-				return object_texture(props.textures[1])
+				return media_texture(props.textures[1])
 			end
 			if props.wield_item and props.wield_item ~= "" then
 				local item = props.wield_item:match("^(%S+)")
@@ -563,6 +567,9 @@ local function show_client(host, port, name, password)
 		client.on_inventory_formspec = function(spec)
 			inventory_spec = spec
 			if form and form.source == "inventory" then
+				-- The spec itself, not only what is in the slots: this is how
+				-- a game changes the page of its own inventory
+				form.spec = spec
 				form_stale = true
 			end
 		end
@@ -705,9 +712,7 @@ local function show_client(host, port, name, password)
 		end
 
 		local ui = formspec_ui.new(magic, buildat, log, {
-			texture = function(expr)
-				return texmod.resolve(expr, texmod_ctx)
-			end,
+			texture = media_texture,
 			item_image = item_image,
 			-- Where a list[] element's slots come from. A form can name the
 			-- player's own inventory, one the server has detached, or a
@@ -773,6 +778,7 @@ local function show_client(host, port, name, password)
 			if not spec:find("no_prepend%[") then
 				spec = prepend..spec
 			end
+			log:verbose("FORMSPEC "..spec)
 			local elements, size, real = formspec.parse(spec)
 			-- Under the UI's own root rather than the element the status
 			-- screen is in: a form is positioned in the coordinates a click

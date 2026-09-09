@@ -999,6 +999,12 @@ function M.define(dst, util)
 		properties = {
 			texture = util.simple_property("Texture"),
 			hoverOffset = util.simple_property(dst.IntVector2),
+			-- The border widths, which is what makes an image nine-sliced:
+			-- the corners keep their size and only the middle stretches
+			border = util.simple_property(dst.IntRect),
+			imageBorder = util.simple_property(dst.IntRect),
+			imageRect = util.simple_property(dst.IntRect),
+			tiled = util.simple_property("boolean"),
 		},
 	})
 

@@ -71,6 +71,25 @@ function M.new(magic, buildat, log, ctx)
 		return e
 	end
 
+	-- A nine-sliced image: the corners keep their size and only the middle
+	-- stretches, which is what a formspec's background9 asks for. middle is
+	-- Luanti's own field: one number for every side, two for horizontal and
+	-- vertical, or four for left, top, right and bottom.
+	local function slice_border(middle)
+		local n = {}
+		for v in tostring(middle or ""):gmatch("-?%d+%.?%d*") do
+			n[#n + 1] = math.floor(math.abs(tonumber(v)))
+		end
+		if #n == 1 then
+			return magic.IntRect(n[1], n[1], n[1], n[1])
+		elseif #n == 2 then
+			return magic.IntRect(n[1], n[2], n[1], n[2])
+		elseif #n >= 4 then
+			return magic.IntRect(n[1], n[2], n[3], n[4])
+		end
+		return nil
+	end
+
 	local function image(parent, x, y, w, h, name)
 		local tex = texture(name)
 		if not tex then
@@ -239,21 +258,51 @@ function M.new(magic, buildat, log, ctx)
 			return g[1] * layout.scale[1], g[2] * layout.scale[2]
 		end
 
+		-- Luanti draws the backgrounds in a pass of their own, behind
+		-- everything else, whatever order they are in; a background that is
+		-- drawn in element order covers the slots that came before it.
+		for _, e in ipairs(elements) do
+			if e.name == "background" or e.name == "background9" then
+				local x, y = at(e, 1)
+				local w, h = geometry(e, 2)
+				if e.fields[4] == "true" then
+					-- auto_clip: the whole form, x and y being an offset
+					-- outwards and w and h not used at all.
+					-- simplified: the offset is dropped, so a background that
+					-- means to stick out past the form's edge does not.
+					x, y, w, h = 0, 0, layout.width, layout.height
+				end
+				if x and w then
+					local img = image(window, x, y, w, h, e.fields[3])
+					if img and e.name == "background9" then
+						local border = slice_border(e.fields[5])
+						if border then
+							img.imageBorder = border
+							img.border = border
+						end
+					end
+				end
+			end
+		end
+
 		for _, e in ipairs(elements) do
 			local name = e.name
 			if IGNORED[name] then
 				-- Nothing to draw
+			elseif name == "background" or name == "background9" then
+				-- Drawn in the pass above
 			elseif name == "list" then
 				draw_list(window, layout, e, slots)
-			elseif name == "image" or name == "background" or
-					name == "background9" then
+			elseif name == "image" then
 				local x, y = at(e, 1)
 				local w, h = geometry(e, 2)
 				if x and w then
-					if not image(window, x, y, w, h, e.fields[3]) then
-						box(window, x, y, w, h,
-								magic.Color(0.25, 0.25, 0.3, 0.6))
-					end
+					-- Nothing at all for a texture that is not there yet:
+					-- these cover a whole form, and a grey box each hides
+					-- what the form is made of. The media is asked for when
+					-- the texture is wanted, and the form is drawn again
+					-- when it arrives.
+					image(window, x, y, w, h, e.fields[3])
 				end
 			elseif name == "box" then
 				local x, y = at(e, 1)
