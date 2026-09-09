@@ -15,6 +15,17 @@ faster, escape disconnects. The camera flies and nothing stops it going
 through a wall; a server that does not give the player the fly and noclip
 privileges will pull it back with its movement checks.
 
+Light: Luanti keeps two light values per node, the light it has when the sun
+is up and the light it gets from light sources alone. Those are what buildat's
+mesher calls skylight and lamplight, and it bakes them into the geometry's
+vertex colours along with ambient occlusion and a per-face brightness. The
+technique in client/data/Techniques/VoxelUnlit.xml draws that: the texture
+times the zone's ambient colour times how much of the sky the surface sees,
+plus the lamplight. So the time of day is one colour on the zone and nothing
+is meshed again when the sun moves, and a cave is dark with its torches lit.
+It also discards texels below half alpha, which is what makes the holes in a
+leaf or a pane of glass be holes.
+
 A node is drawn as a cube with its own six textures when it is one of the
 Luanti draw types that is a cube (normal, glasslike, allfaces) and every one of
 those textures is a plain file name. Everything else -- plants, liquids, node
@@ -82,7 +93,9 @@ one-voxel border to cull faces against, so a block goes in as an 18^3 volume:
 itself plus a slice off each of the six neighbours that have arrived. A
 neighbour arriving makes the block's mesh out of date; until it does, there is
 a seam. Packing a block's volume and handing it to the mesher costs the frame
-about 350 us on a 2013 workstation; the meshing itself is on a worker thread.
+about 3 ms on a 2013 workstation, of which the packing itself is a few hundred
+microseconds; the meshing is on a worker thread. Four blocks a frame is the
+limit for that reason.
 
 What is done
 ------------
@@ -98,8 +111,10 @@ What is done
   mesher, dropped again once it is far enough away
 - Mouse look and flying movement, with the blocks streaming in around the
   camera and dropped again behind it
-- TIME_OF_DAY, through Luanti's own day/night curve, as the zone's ambient
-  light and the sun's brightness
+- TIME_OF_DAY, through Luanti's own day/night curve and its sunlight colour,
+  as the zone's ambient colour
+- Per-node light, day and night, baked into the vertex colours, and the holes
+  in a texture discarded rather than drawn
 - ADDNODE and REMOVENODE, patched into the block and re-meshed
 - NODEDEF, and a voxel registry built from it
 - The media: ANNOUNCE_MEDIA, REQUEST_MEDIA and MEDIA, cached on disk by name
@@ -119,6 +134,4 @@ What is next
 - Colour palettes: a node with paramtype2 "color" or "colorfacedir" has a
   greyscale texture that the game colours per node. MineClone's grass comes
   out grey because of this.
-- Alpha: the mesher builds opaque geometry, so the holes in a leaf texture
-  show as whatever colour is behind them in the image
 - Active objects, formspecs, the HUD, chat, sounds

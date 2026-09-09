@@ -360,14 +360,16 @@ buildat.pack_voxel_volume(args) -> string
               mask = 0xffff,             -- default: all of the format's bits
               map = <string|table|nil>,  -- sample -> value written
               map_default = nil,         -- for samples the map does not have
-              field = "id",              -- id | skylight | raw
+              field = "id",              -- id|skylight|lamplight|light|raw
           },
       },
   }
 
 - field says which part of a voxel a source writes: "id" the type id (bits
-  0..20), "skylight" bits 24..27, "raw" all 32 bits. Other bits are left alone,
-  so ids and light are two sources over the same box.
+  0..20), "skylight" bits 24..27, "lamplight" bits 28..31, "light" both of
+  those in one write (bits 24..31, skylight in the low nibble), "raw" all 32
+  bits. Other bits are left alone, so ids and light are two sources over the
+  same box.
 - map is a table indexed by sample value, or a string with one byte per sample
   value. A sample the map does not mention gets map_default, and with no
   map_default the voxel is left as it was.

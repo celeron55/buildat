@@ -1,0 +1,7 @@
+<!-- Voxel geometry drawn by its baked vertex-color light, with texels below
+     half alpha discarded. See Shaders/GLSL/VoxelUnlit.glsl beside this file.
+     One opaque pass: there is no light pass, so scene lights do not reach it.
+-->
+<technique vs="VoxelUnlit" ps="VoxelUnlit">
+    <pass name="base" />
+</technique>

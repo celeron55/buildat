@@ -372,6 +372,14 @@ static bool face_owned_by_padding(pv::RawVolume<VoxelInstance> &volume,
 // shaded from the sun keeps the sky's blue.
 static const Color BOUNCE_COLOR(0.055f, 0.050f, 0.045f);
 
+// What a voxel's lamplight looks like at full strength. White, because a lamp
+// is as bright as a world says it is and its color belongs in the texture of
+// whatever is emitting it; a world that wants warmer torches gives them a
+// warmer texture. This is added to the vertex color's rgb, next to the bounce
+// term, so a shader following the contract in interface/mesh.h needs to know
+// nothing about it.
+static const Color LAMP_COLOR(1.0f, 1.0f, 1.0f);
+
 // Per-face brightness, for legibility rather than for physics: two faces of a
 // voxel that happen to receive the same light have no visible edge between
 // them, which in shadow is most of them. Top is brightest and bottom darkest,
@@ -433,10 +441,10 @@ static void face_vertex_colors(pv::RawVolume<VoxelInstance> &volume,
 	};
 	const pv::Vector3DInt32 front_p = voxel_at(0.5f);
 	VoxelInstance front = volume.getVoxelAt(front_p);
-	uint8_t sky = front.get_id() == interface::VOXELTYPEID_UNDEFINED ?
-			volume.getVoxelAt(voxel_at(-0.5f)).get_skylight() :
-			front.get_skylight();
-	float sky_f = (float)sky / VoxelInstance::SKYLIGHT_MAX;
+	VoxelInstance lit = front.get_id() == interface::VOXELTYPEID_UNDEFINED ?
+			volume.getVoxelAt(voxel_at(-0.5f)) : front;
+	float sky_f = (float)lit.get_skylight() / VoxelInstance::SKYLIGHT_MAX;
+	float lamp_f = (float)lit.get_lamplight() / VoxelInstance::LAMPLIGHT_MAX;
 
 	// The two axes of the face's own plane, to step around it in
 	pv::Vector3DInt32 u(0, 1, 0), v(0, 0, 1);
@@ -466,10 +474,11 @@ static void face_vertex_colors(pv::RawVolume<VoxelInstance> &volume,
 		float sky_shade = ao * FACE_SHADE[face_id];
 		float bounce_shade = (1.0f - BOUNCE_AO + BOUNCE_AO * ao) *
 				FACE_SHADE[face_id] * (1.0f - sky_f);
+		float lamp_shade = lamp_f * sky_shade;
 		out[i] = Color(
-				BOUNCE_COLOR.r_ * bounce_shade,
-				BOUNCE_COLOR.g_ * bounce_shade,
-				BOUNCE_COLOR.b_ * bounce_shade,
+				BOUNCE_COLOR.r_ * bounce_shade + LAMP_COLOR.r_ * lamp_shade,
+				BOUNCE_COLOR.g_ * bounce_shade + LAMP_COLOR.g_ * lamp_shade,
+				BOUNCE_COLOR.b_ * bounce_shade + LAMP_COLOR.b_ * lamp_shade,
 				sky_f * sky_shade).ToUInt();
 	}
 }
