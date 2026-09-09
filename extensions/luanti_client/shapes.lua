@@ -371,6 +371,30 @@ function M.for_node(def, facedir, wall)
 	if drawtype == 11 then -- RAILLIKE
 		return M.flat_quads(), true
 	end
+	if drawtype == 16 then -- NDT_MESH
+		-- simplified: Urho3D reads none of the formats a Luanti mesh comes
+		-- in, so what is drawn is the box the game says a ray hits, which is
+		-- about the size and shape of the mesh. A torch comes out as a thin
+		-- post rather than as a whole cube, and a cube is what it would be
+		-- otherwise -- with the mesh's own texture on it, holes and all, so
+		-- the wall behind it would show through the hole in its own face.
+		-- The upgrade path is reading the meshes.
+		local box = def.selection_box
+		if not box then
+			return nil
+		end
+		if box.wall then
+			return M.wall_quads(box.wall, wall or 1), false
+		end
+		if #box.boxes == 0 then
+			return nil
+		end
+		local out = {}
+		for _, b in ipairs(box.boxes) do
+			M.box_quads(b, out)
+		end
+		return M.turn_quads(out, facedir), false
+	end
 	return nil
 end
 

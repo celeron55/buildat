@@ -1,7 +1,15 @@
 <!-- Voxel geometry drawn by its baked vertex-color light, with texels below
      half alpha discarded. See Shaders/GLSL/VoxelUnlit.glsl beside this file.
-     One opaque pass: there is no light pass, so scene lights do not reach it.
+
+     The base pass is the whole of the world's own lighting. On top of it there
+     is one additive light pass, Urho3D's own LitSolid, so that a light put in
+     the scene -- a torch, a lamp, anything a game says gives light -- reaches
+     the geometry. A world with no lights in it draws exactly as it did before:
+     the light pass runs per light, and there are none.
 -->
 <technique vs="VoxelUnlit" ps="VoxelUnlit">
     <pass name="base" />
+    <pass name="light" vs="LitSolid" ps="LitSolid"
+            psdefines="DIFFMAP ALPHAMASK"
+            depthtest="equal" depthwrite="false" blend="add" />
 </technique>
