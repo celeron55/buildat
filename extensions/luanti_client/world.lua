@@ -231,6 +231,9 @@ function M.new(magic, buildat, log, options)
 	local FOG = {r = 0.60, g = 0.72, b = 0.88}
 	local sky = nil
 	local daylight = 1.0
+	-- Where the sun was put last, so that a SET_SKY in the middle of the
+	-- night does not draw it back at noon
+	local daylight_time = nil
 
 	-- The sky itself: a skybox drawn by client/data/Shaders/GLSL/LuantiSky.glsl,
 	-- which is handed the colours and the sun's direction from here.
@@ -1351,6 +1354,7 @@ function M.new(magic, buildat, log, options)
 
 	function self:set_daylight(factor, time_of_day)
 		daylight = factor
+		daylight_time = time_of_day or daylight_time
 		zone.ambientColor = sunlight_color(factor)
 
 		local brightness = brightness_of(factor)
@@ -1385,7 +1389,7 @@ function M.new(magic, buildat, log, options)
 		zone.fogColor = horizon
 
 		if sky_material then
-			local sx, sy, sz = sun_direction(time_of_day)
+			local sx, sy, sz = sun_direction(daylight_time)
 			sky_material:SetShaderParameter("SkyTop", top)
 			sky_material:SetShaderParameter("SkyHorizon", horizon)
 			sky_material:SetShaderParameter("SunDirection",
@@ -1406,7 +1410,7 @@ function M.new(magic, buildat, log, options)
 
 	function self:set_sky(new_sky)
 		sky = new_sky
-		self:set_daylight(daylight)
+		self:set_daylight(daylight, daylight_time)
 	end
 
 	-- Builds the voxel registry from Luanti's node definitions.
