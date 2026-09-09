@@ -217,6 +217,10 @@ function M.new(magic, buildat, log, ctx)
 		window.size = magic.IntVector2(math.floor(layout.width),
 				math.floor(layout.height))
 		window:SetPosition(ox, oy)
+		-- Urho3D leaves an element disabled unless told otherwise, and a
+		-- disabled element is not hit by a click: nothing is found under the
+		-- mouse and no click event is sent at all
+		window.enabled = true
 
 		local function at(e, field_i)
 			local pos = formspec.parse_v2(e.fields[field_i])

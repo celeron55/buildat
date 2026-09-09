@@ -45,6 +45,10 @@ M.DEFAULT_MOVEMENT = {
 local OFF_LO = {-M.RADIUS, 0, -M.RADIUS}
 local OFF_HI = {M.RADIUS, M.HEIGHT, M.RADIUS}
 
+-- Acceleration on the wire is in voxels/s² only after another factor of BS;
+-- see where it is used below.
+local BS_ACCEL = 10
+
 -- A node at integer coordinate i covers [i - 0.5, i + 0.5]. These are the
 -- first and last node a span reaches into; touching is not overlapping, which
 -- is what lets the player stand exactly on a surface.
@@ -200,7 +204,11 @@ function M.new(is_solid, is_liquid)
 			accel = wish.fast and m.acceleration_fast or
 					m.acceleration_default
 		end
-		local max = accel * dtime
+		-- Luanti multiplies the acceleration it sent by BS (10) when it
+		-- receives TOCLIENT_MOVEMENT and then again in LocalPlayer::move,
+		-- while speeds get BS only once. In voxel units that leaves the
+		-- effective acceleration ten times the wire value.
+		local max = accel * BS_ACCEL * dtime
 		self.vx = approach(self.vx, target_x, max)
 		self.vz = approach(self.vz, target_z, max)
 
