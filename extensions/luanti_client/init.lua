@@ -61,6 +61,17 @@ local BUILTIN_TEXTURES = {
 	["unknown_object.png"] = "luanti_client/res/placeholder.png",
 }
 
+-- What time it is, whatever the server says: how the sky at dawn or at night
+-- gets looked at without waiting for the world to turn, or asking a server for
+-- the privilege of setting its clock. BUILDAT_LUANTI_FORCE_DAY, in
+-- daynight_ratio() below, is the same kind of thing for the light.
+local FORCE_TIME = tonumber(os.getenv("BUILDAT_LUANTI_FORCE_TIME") or "")
+
+-- How far the day has to move before the sky is worked out again, in
+-- Luanti's own units of 1/24000th of a day: a full turn of the sun is 360
+-- degrees over 24000, so this is about half a degree.
+local SKY_STEP = 30
+
 local HOTBAR_SLOTS = 8
 
 -- Media files are asked for in batches, so that one REQUEST_MEDIA does not
@@ -88,7 +99,11 @@ local DAYNIGHT_RAMP = {
 local function daynight_ratio(time_of_day)
 	-- A scripted run cannot wait for morning, and a screenshot of the world
 	-- at night says little about how it looks
-	if os.getenv("BUILDAT_LUANTI_FORCE_DAY") then
+	-- An environment variable that is set but empty is a variable that is
+	-- not set: a script that passes it through unconditionally passes an
+	-- empty one, and "" is true in Lua
+	local force = os.getenv("BUILDAT_LUANTI_FORCE_DAY")
+	if force and force ~= "" then
 		return 1.0
 	end
 	local t = time_of_day % 24000
@@ -1184,6 +1199,7 @@ local function show_client(host, port, name, password)
 		magic.input:SetMouseVisible(false)
 
 		local last_daylight = nil
+		local last_time_of_day = 0
 
 		-- WASD on the horizontal plane whatever the camera is pitched at,
 		-- space to jump, ctrl to sneak, shift for a faster pace, and K to
@@ -1277,14 +1293,20 @@ local function show_client(host, port, name, password)
 			if form and form_stale then
 				draw_form()
 			end
-			if client.time_of_day then
-				local daylight = daynight_ratio(client.time_of_day)
-				-- The ramp is smooth and the zone is not free to set, so only
-				-- a visible step is worth an update
+			local time_of_day = FORCE_TIME or client.time_of_day
+			if time_of_day then
+				local daylight = daynight_ratio(time_of_day)
+				-- The ramp is smooth and the zone is not free to set, so
+				-- only a visible step is worth an update. The time itself
+				-- matters as well as the light it comes to: it is where the
+				-- sun is in the sky.
 				if not last_daylight or
-						math.abs(daylight - last_daylight) > 0.01 then
+						math.abs(daylight - last_daylight) > 0.01 or
+						math.abs(time_of_day - last_time_of_day) >
+								SKY_STEP then
 					last_daylight = daylight
-					view:set_daylight(daylight)
+					last_time_of_day = time_of_day
+					view:set_daylight(daylight, time_of_day)
 				end
 			end
 			-- Nothing is dropped until the server has said where the player

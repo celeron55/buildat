@@ -550,8 +550,9 @@ function M.new(socket, options, log)
 		sky.bgcolor = read_color(r)
 		sky.type = r:string()
 		sky.clouds = r:u8() ~= 0
-		read_color(r) -- fog_sun_tint
-		read_color(r) -- fog_moon_tint
+		-- What the sun and the moon paint the horizon around them with
+		sky.sun_tint = read_color(r)
+		sky.moon_tint = read_color(r)
 		r:string() -- fog_tint_type
 		if sky.type == "skybox" then
 			sky.textures = {}
