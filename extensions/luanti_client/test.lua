@@ -25,6 +25,7 @@ local formspec = dofile(dir.."/formspec.lua")
 local objects = dofile(dir.."/objects.lua")
 local nodedef = dofile(dir.."/nodedef.lua")
 local media = dofile(dir.."/media.lua")
+local shapes = dofile(dir.."/shapes.lua")
 
 local function dump_name(s)
 	return "\""..s:gsub("[^%w%p ]", "?").."\""
@@ -989,5 +990,117 @@ objects.apply_message(obj, serialize.reader(unknown))
 assert(obj.props.visual == "mesh", "objects: an unknown message broke it")
 
 print("objects: ok")
+
+-- shapes.lua
+--
+-- The two ways a facedir is followed have to agree: a cube's tiles are moved
+-- to other faces by FACEDIR_TILES, and a shape's quads are turned by
+-- turn_quads. Turning the six quads of a full cube must therefore land the
+-- tile FACEDIR_TILES names on each face.
+
+-- Which of our faces a quad points at, from the normal its winding gives
+local function quad_face(q)
+	local p = q.p
+	local function edge(a, b)
+		return {p[b * 3 + 1] - p[a * 3 + 1], p[b * 3 + 2] - p[a * 3 + 2],
+				p[b * 3 + 3] - p[a * 3 + 3]}
+	end
+	local e1, e2 = edge(0, 1), edge(1, 2)
+	local n = {e1[2] * e2[3] - e1[3] * e2[2], e1[3] * e2[1] - e1[1] * e2[3],
+			e1[1] * e2[2] - e1[2] * e2[1]}
+	for i, d in ipairs({{0, 1, 0}, {0, -1, 0}, {1, 0, 0}, {-1, 0, 0},
+			{0, 0, 1}, {0, 0, -1}}) do
+		local dot = n[1] * d[1] + n[2] * d[2] + n[3] * d[3]
+		local len = math.sqrt(n[1] ^ 2 + n[2] ^ 2 + n[3] ^ 2)
+		if len > 1e-9 and dot / len > 0.99 then
+			return i
+		end
+	end
+	return nil
+end
+
+local cube = shapes.box_quads({-0.5, -0.5, -0.5, 0.5, 0.5, 0.5}, {})
+assert(#cube == 6, "shapes: a box is six quads")
+for i, q in ipairs(cube) do
+	assert(quad_face(q) == i, "shapes: box quad "..i.." faces "..
+			tostring(quad_face(q)))
+end
+for facedir = 0, 23 do
+	local turned = shapes.turn_quads(cube, facedir)
+	local seen = {}
+	for _, q in ipairs(turned) do
+		local face = quad_face(q)
+		assert(face, "shapes: facedir "..facedir.." left a quad degenerate")
+		assert(not seen[face], "shapes: facedir "..facedir..
+				" put two quads on face "..face)
+		seen[face] = true
+		local want = shapes.FACEDIR_TILES[facedir + 1][face]
+		assert(q.tile == want, "shapes: facedir "..facedir..", face "..face..
+				" wears tile "..q.tile..", FACEDIR_TILES says "..want)
+		-- A turn stays inside the voxel's own cube
+		for c = 0, 3 do
+			for a = 1, 3 do
+				assert(math.abs(q.p[c * 3 + a]) < 0.5 + 1e-9,
+						"shapes: facedir "..facedir.." moved a corner out")
+			end
+		end
+	end
+end
+
+-- A wallmounted node box is made of the box for the wall it is on
+local wall_boxes = {
+	top = {-0.5, 0.4, -0.5, 0.5, 0.5, 0.5},
+	bottom = {-0.5, -0.5, -0.5, 0.5, -0.4, 0.5},
+	side = {-0.5, -0.5, -0.5, -0.4, 0.5, 0.5},
+}
+local function box_of(quads)
+	local lo, hi = {1e9, 1e9, 1e9}, {-1e9, -1e9, -1e9}
+	for _, q in ipairs(quads) do
+		for c = 0, 3 do
+			for a = 1, 3 do
+				lo[a] = math.min(lo[a], q.p[c * 3 + a])
+				hi[a] = math.max(hi[a], q.p[c * 3 + a])
+			end
+		end
+	end
+	return lo, hi
+end
+local lo, hi = box_of(shapes.wall_quads(wall_boxes, 0))
+assert(lo[2] > 0.39 and hi[2] > 0.49, "shapes: wallmounted on the ceiling")
+lo, hi = box_of(shapes.wall_quads(wall_boxes, 1))
+assert(hi[2] < -0.39, "shapes: wallmounted on the floor")
+-- The side box is against -X to begin with; on the +X wall it is turned round
+lo, hi = box_of(shapes.wall_quads(wall_boxes, 2))
+assert(lo[1] > 0.39, "shapes: wallmounted on the +X wall is at "..lo[1])
+lo, hi = box_of(shapes.wall_quads(wall_boxes, 3))
+assert(hi[1] < -0.39, "shapes: wallmounted on the -X wall")
+lo, hi = box_of(shapes.wall_quads(wall_boxes, 4))
+assert(lo[3] > 0.39, "shapes: wallmounted on the +Z wall")
+lo, hi = box_of(shapes.wall_quads(wall_boxes, 5))
+assert(hi[3] < -0.39, "shapes: wallmounted on the -Z wall")
+
+-- A wallmounted direction is the side of the node the wall is on, so a sign
+-- faces the other way: one on the ceiling looks down
+for wall, face in pairs({[0] = 2, [1] = 1, [2] = 4, [3] = 3, [4] = 6,
+		[5] = 5}) do
+	local q = shapes.sign_quads(1, wall)[1]
+	assert(quad_face(q) == face, "shapes: a sign on wall "..wall..
+			" faces "..tostring(quad_face(q)))
+end
+
+-- A torch on a wall wears the third tile and turns to face out of it; one on
+-- the ceiling wears the second and leans, so it faces no axis at all
+local q = shapes.torch_quads(1, 2, {})[1]
+assert(q.tile == 3, "shapes: a torch on a wall wears tile "..q.tile)
+assert(quad_face(q) == 6, "shapes: a torch on the +X wall faces "..
+		tostring(quad_face(q)))
+assert(quad_face(shapes.torch_quads(1, 3, {})[1]) == 5,
+		"shapes: a torch on the -X wall faces the same way as one on +X")
+local ceiling = shapes.torch_quads(1, 0, {})[1]
+assert(ceiling.tile == 2,
+		"shapes: a torch on the ceiling wears tile "..ceiling.tile)
+assert(quad_face(ceiling) == nil, "shapes: a torch on the ceiling stands up")
+
+print("shapes: ok")
 
 print("luanti_client/test.lua: ok")
