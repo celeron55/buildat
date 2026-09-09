@@ -70,10 +70,14 @@ local DRAWTYPE_AIRLIKE = 1
 -- nodedef.lua's M.LIQUID_NONE, which is what a node that is not a liquid has
 local NODEDEF_LIQUID_NONE = 0
 
--- How many blocks to mesh per frame. Meshing itself is on a worker thread, but
--- packing the volume and handing it over is not, so a burst of a hundred
--- blocks arriving at once would otherwise be one long frame.
-local MESH_PER_FRAME = 4
+-- How long a frame may spend handing blocks to the mesher, and how many it
+-- may hand over however fast they go. Meshing itself is on a worker thread,
+-- but packing the volume and handing it over is not, so a burst of a hundred
+-- blocks arriving at once would otherwise be one long frame. One block is
+-- always meshed, so a block that costs more than the whole budget still gets
+-- drawn.
+local MESH_BUDGET_US = 4000
+local MESH_PER_FRAME = 8
 
 -- What the mesher is told each node id is. Only air is known without the node
 -- definitions, so everything else is the placeholder cube; CONTENT_IGNORE is
@@ -358,7 +362,16 @@ function M.new(magic, buildat, log, options)
 	-- On self rather than in a local: set_node_definitions() replaces both,
 	-- and mesh_block() has to use whichever is current
 	self.voxel_reg = base_registry()
-	self.atlas_reg = buildat.createAtlasRegistry()
+	-- The voxel shader here samples the diffuse atlas and nothing else, and
+	-- deriving the normal and surface maps of a texture is two thirds of what
+	-- adding one to an atlas costs
+	local function new_atlas_registry()
+		local reg = buildat.createAtlasRegistry()
+		reg:set_surface_maps(false)
+		return reg
+	end
+
+	self.atlas_reg = new_atlas_registry()
 
 	-- key -> {x=, y=, z=, param0=, param1=, node=}
 	local blocks = {}
@@ -368,6 +381,14 @@ function M.new(magic, buildat, log, options)
 
 	self.node_map = PLACEHOLDER_MAP
 	self.node_map_default = VOXEL_PLACEHOLDER
+	-- pack_voxel_volume() compiles a map once per (id, version) rather than
+	-- once per source: a map of a few thousand node ids costs more to compile
+	-- than the whole block copy does, and every source of every block hands
+	-- in the same two maps. The ids are ours to pick; the versions say when a
+	-- map has changed. See doc/client_api.txt.
+	local MAP_ID_NODE, MAP_ID_PAIR, MAP_ID_LIGHT = 1, 2, 3
+	self.node_map_version = 1
+	self.pair_map_version = 1
 	self.use_skylight = true
 	-- id -> true for the nodes the player collides with, and for the ones it
 	-- swims in. nil rather than a table means the definitions have not
@@ -444,6 +465,7 @@ function M.new(magic, buildat, log, options)
 				source_size = {BLOCKSIZE, BLOCKSIZE, BLOCKSIZE},
 				at = {0, 0, 0},
 				map = self.node_map, map_default = self.node_map_default,
+				map_id = MAP_ID_NODE, map_version = self.node_map_version,
 			},
 		}
 		-- A second pass over the same box for the voxels whose param2 says
@@ -459,6 +481,7 @@ function M.new(magic, buildat, log, options)
 				second = {data = block.param2, format = "u8",
 						scale = PAIR_SCALE},
 				map = self.pair_map,
+				map_id = MAP_ID_PAIR, map_version = self.pair_map_version,
 			}
 		end
 		if self.use_skylight then
@@ -466,6 +489,7 @@ function M.new(magic, buildat, log, options)
 				data = block.param1, format = "u8",
 				source_size = {BLOCKSIZE, BLOCKSIZE, BLOCKSIZE},
 				at = {0, 0, 0}, map = LIGHT_MAP, field = "light",
+				map_id = MAP_ID_LIGHT, map_version = 1,
 			}
 		end
 		for _, d in ipairs(NEIGHBOURS) do
@@ -492,6 +516,7 @@ function M.new(magic, buildat, log, options)
 					source_size = {BLOCKSIZE, BLOCKSIZE, BLOCKSIZE},
 					from = from, size = size, at = at,
 					map = self.node_map, map_default = self.node_map_default,
+					map_id = MAP_ID_NODE, map_version = self.node_map_version,
 				}
 				if self.pair_count > 0 and n.param2 then
 					sources[#sources + 1] = {
@@ -501,6 +526,8 @@ function M.new(magic, buildat, log, options)
 						second = {data = n.param2, format = "u8",
 								scale = PAIR_SCALE},
 						map = self.pair_map,
+						map_id = MAP_ID_PAIR,
+						map_version = self.pair_map_version,
 					}
 				end
 				if self.use_skylight then
@@ -509,6 +536,7 @@ function M.new(magic, buildat, log, options)
 						source_size = {BLOCKSIZE, BLOCKSIZE, BLOCKSIZE},
 						from = from, size = size, at = at,
 						map = LIGHT_MAP, field = "light",
+						map_id = MAP_ID_LIGHT, map_version = 1,
 					}
 				end
 			end
@@ -637,8 +665,16 @@ function M.new(magic, buildat, log, options)
 			fill = VOXEL_AIR_LIT,
 			sources = volume_sources(block),
 		}
-		block.lights = find_lights(block)
-		lights_stale = true
+		-- Only when this block's own voxels have changed: scanning 4096 of
+		-- them in Lua is not free, and a block is meshed again every time a
+		-- neighbour arrives
+		if block.lights == nil then
+			block.lights = find_lights(block) or false
+			if block.lights or block.had_lights then
+				block.had_lights = block.lights and true or nil
+				lights_stale = true
+			end
+		end
 		local node = block.node
 		buildat.set_voxel_geometry(node, data, self.voxel_reg,
 				self.atlas_reg, self.use_skylight,
@@ -656,6 +692,8 @@ function M.new(magic, buildat, log, options)
 			existing.param1 = block.param1
 			existing.param2 = block.param2
 			existing.meta = block.meta
+			existing.lights = nil -- Its voxels have changed
+			existing.pair_epoch = nil
 		else
 			blocks[key] = {
 				x = block.x, y = block.y, z = block.z,
@@ -1053,6 +1091,10 @@ function M.new(magic, buildat, log, options)
 		entry.node.position = magic.Vector3(obj.position[1],
 				obj.position[2] + cy, obj.position[3])
 		entry.node.rotation = magic.Quaternion(0, -(obj.yaw or 0), 0)
+		entry.at_x, entry.at_y, entry.at_z = obj.position[1], obj.position[2],
+				obj.position[3]
+		entry.at_yaw = obj.yaw or 0
+		entry.lit_at = daylight
 		light_object(entry, obj.position[1], obj.position[2], obj.position[3])
 
 		if obj.visual_stale or not entry.textured then
@@ -1080,17 +1122,35 @@ function M.new(magic, buildat, log, options)
 	end
 
 	-- Moves the objects' scene nodes to where they are now
+	-- Where every object is, once a frame.
+	--
+	-- Each of these writes is a sandbox call and there are a hundred objects,
+	-- which is milliseconds a frame if they all get written; most of them are
+	-- standing still at any one time, so what has not moved is left alone.
+	-- The light an object is drawn in only changes when it moves or when the
+	-- day does.
 	function self:place_objects(objects)
 		for id, obj in pairs(objects) do
 			local entry = object_nodes[id]
 			if entry and obj.position then
-				entry.node.position = magic.Vector3(obj.position[1],
-						obj.position[2] + (entry.offset or 0),
-						obj.position[3])
-				entry.node.rotation = magic.Quaternion(0,
-						-(obj.yaw or 0), 0)
-				light_object(entry, obj.position[1], obj.position[2],
-						obj.position[3])
+				local x = obj.position[1]
+				local y = obj.position[2]
+				local z = obj.position[3]
+				local yaw = obj.yaw or 0
+				if x ~= entry.at_x or y ~= entry.at_y or z ~= entry.at_z then
+					entry.at_x, entry.at_y, entry.at_z = x, y, z
+					entry.node.position = magic.Vector3(x,
+							y + (entry.offset or 0), z)
+					entry.lit_at = nil
+				end
+				if yaw ~= entry.at_yaw then
+					entry.at_yaw = yaw
+					entry.node.rotation = magic.Quaternion(0, -yaw, 0)
+				end
+				if entry.lit_at ~= daylight then
+					entry.lit_at = daylight
+					light_object(entry, x, y, z)
+				end
 			end
 		end
 	end
@@ -1142,6 +1202,7 @@ function M.new(magic, buildat, log, options)
 				block.param0:sub(i * 2 + 3)
 		block.param1 = block.param1:sub(1, i)..string.char(param1 % 256)..
 				block.param1:sub(i + 2)
+		block.lights = nil -- One of its voxels may have been a light
 		if block.param2 then
 			block.param2 = block.param2:sub(1, i)..
 					string.char(param2 % 256)..block.param2:sub(i + 2)
@@ -1367,6 +1428,8 @@ function M.new(magic, buildat, log, options)
 		local liquid = {}
 		local pointable = {}
 		self.pair_map = {}
+		self.pair_map_version = self.pair_map_version + 1
+		self.node_map_version = self.node_map_version + 1
 		self.pair_count = 0
 		pair_voxel = {}
 		param2_look = {}
@@ -1443,6 +1506,9 @@ function M.new(magic, buildat, log, options)
 					tostring(facedir).."/"..tostring(wall)
 			-- Nothing different about it: the voxel the id already has, which
 			-- was built facing 0 and, if wallmounted, on the floor
+			-- Whatever this writes, the map is not the one that was
+			-- compiled for the last block
+			self.pair_map_version = self.pair_map_version + 1
 			if not index and (not facedir or facedir == 0) then
 				self.pair_map[key] = self.node_map[id] or false
 				return
@@ -1464,9 +1530,14 @@ function M.new(magic, buildat, log, options)
 		end
 
 		self.voxel_reg = new_reg
+		-- Which voxels give light is decided by the definitions, so what was
+		-- worked out from the old ones says nothing
+		for _, block in pairs(blocks) do
+			block.lights = nil
+		end
 		-- A fresh atlas registry: the old one holds atlases built for the old
 		-- registry's segment ids
-		self.atlas_reg = buildat.createAtlasRegistry()
+		self.atlas_reg = new_atlas_registry()
 		self.node_map = map
 		self.node_light = light_ids
 		self.node_collision = collision
@@ -1530,7 +1601,11 @@ function M.new(magic, buildat, log, options)
 		-- what arrived this frame plus a backlog, and a full sort of it every
 		-- frame costs more than the meshing does
 		local meshed = 0
+		local t0 = buildat.get_time_us()
 		while meshed < MESH_PER_FRAME do
+			if meshed > 0 and buildat.get_time_us() - t0 >= MESH_BUDGET_US then
+				break
+			end
 			local best_key, best_d = nil, nil
 			for key, _ in pairs(dirty) do
 				local block = blocks[key]

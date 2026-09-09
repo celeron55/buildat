@@ -37,6 +37,8 @@ struct CAtlasRegistry: public AtlasRegistry
 	sv_<AtlasCache> m_cache;
 	// Held rather than allocated per segment; see upload_box()
 	sv_<unsigned char> m_upload_buffer;
+	// See set_surface_maps()
+	bool m_surface_maps = true;
 
 	CAtlasRegistry(magic::Context *context):
 		m_context(context)
@@ -139,10 +141,12 @@ struct CAtlasRegistry: public AtlasRegistry
 			AtlasCache *cache = &m_cache[id];
 			cache->image = create_atlas_image();
 			cache->texture = create_atlas_texture();
-			cache->normal_image = create_atlas_image();
-			cache->normal_texture = create_atlas_texture();
-			cache->spec_image = create_atlas_image();
-			cache->spec_texture = create_atlas_texture();
+			if(m_surface_maps){
+				cache->normal_image = create_atlas_image();
+				cache->normal_texture = create_atlas_texture();
+				cache->spec_image = create_atlas_image();
+				cache->spec_texture = create_atlas_texture();
+			}
 			cache->segment_resolution = atlas_def->segment_resolution;
 			cache->total_segments = atlas_def->total_segments;
 			cache->levels = atlas_def->levels;
@@ -153,8 +157,10 @@ struct CAtlasRegistry: public AtlasRegistry
 			// level, near ones included. Segments write their own box in
 			// every level after this; see upload_box().
 			cache->texture->SetData(cache->image);
-			cache->normal_texture->SetData(cache->normal_image);
-			cache->spec_texture->SetData(cache->spec_image);
+			if(m_surface_maps){
+				cache->normal_texture->SetData(cache->normal_image);
+				cache->spec_texture->SetData(cache->spec_image);
+			}
 		}
 		// Add this segment to the atlas definition
 		uint seg_id = atlas_def->segments.size();
@@ -273,6 +279,7 @@ struct CAtlasRegistry: public AtlasRegistry
 			AtlasSegmentCache &cache, const AtlasSegmentDefinition &def,
 			const AtlasCache &atlas)
 	{
+
 		// Check if atlas has too many segments
 		size_t max_segments = atlas.total_segments.x_ * atlas.total_segments.y_;
 		if(atlas.segments.size() > max_segments){
@@ -366,16 +373,19 @@ struct CAtlasRegistry: public AtlasRegistry
 		// height field for the normals and as a per-texel deviation from the
 		// segment's mean roughness, which is enough to tell water from rock
 		// and to give leaves the mix of waxy and matte parts they have.
-		draw_surface_maps(seg_img, def, atlas, src_off, dst_p00, seg_size);
+		if(atlas.normal_image)
+			draw_surface_maps(seg_img, def, atlas, src_off, dst_p00, seg_size);
 
 		// Update the atlas textures from the atlas images, over the box this
 		// segment wrote and no more; see upload_box()
 		const magic::IntVector2 box = seg_size * 2;
 		upload_box(atlas.texture, atlas.image, dst_p00, box, atlas.levels);
-		upload_box(atlas.normal_texture, atlas.normal_image, dst_p00, box,
-				atlas.levels);
-		upload_box(atlas.spec_texture, atlas.spec_image, dst_p00, box,
-				atlas.levels);
+		if(atlas.normal_image){
+			upload_box(atlas.normal_texture, atlas.normal_image, dst_p00, box,
+					atlas.levels);
+			upload_box(atlas.spec_texture, atlas.spec_image, dst_p00, box,
+					atlas.levels);
+		}
 
 		// Debug: save atlas image to file
 		/*ss_ atlas_img_name = "/tmp/atlas_"+itos(seg_size.x_)+"x"+
@@ -487,6 +497,11 @@ struct CAtlasRegistry: public AtlasRegistry
 		return &seg_cache;
 	}
 
+	void set_surface_maps(bool enabled)
+	{
+		m_surface_maps = enabled;
+	}
+
 	void update()
 	{
 		// Re-create textures if a device reset has destroyed them
@@ -498,10 +513,14 @@ struct CAtlasRegistry: public AtlasRegistry
 						atlas_id);
 				cache.texture->SetData(cache.image);
 				cache.texture->ClearDataLost();
-				cache.normal_texture->SetData(cache.normal_image);
-				cache.normal_texture->ClearDataLost();
-				cache.spec_texture->SetData(cache.spec_image);
-				cache.spec_texture->ClearDataLost();
+				if(cache.normal_texture){
+					cache.normal_texture->SetData(cache.normal_image);
+					cache.normal_texture->ClearDataLost();
+				}
+				if(cache.spec_texture){
+					cache.spec_texture->SetData(cache.spec_image);
+					cache.spec_texture->ClearDataLost();
+				}
 			}
 		}
 	}

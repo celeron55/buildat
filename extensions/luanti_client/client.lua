@@ -333,6 +333,8 @@ function M.new(socket, options, log)
 			time_of_day = nil,
 			time_speed = 0,
 			blocks_received = 0,
+			-- Assembled commands that did not fit in a frame's budget
+			commands_waiting = 0,
 	}
 	local name = options.name
 	local password = options.password or ""
@@ -870,8 +872,15 @@ function M.new(socket, options, log)
 
 	local playerpos_timer = PLAYERPOS_INTERVAL
 
+	-- How long a frame may spend handling what the server sent. A burst of
+	-- map blocks is a hundred packets at once and parsing one is not free, so
+	-- what does not fit in this waits for the next frame; the counters say
+	-- how many are waiting.
+	local COMMAND_BUDGET_US = 4000
+
 	function self:update(dtime)
 		conn:update(dtime)
+		self.commands_waiting = conn:pump(COMMAND_BUDGET_US)
 		if self.state ~= "ready" then
 			return
 		end

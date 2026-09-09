@@ -67,8 +67,11 @@ namespace interface
 		};
 #endif
 
+		// with_lod also builds the atlas segments a LOD mesh samples; see
+		// VoxelRegistry::get_cached()
 		void preload_textures(pv::RawVolume<VoxelInstance> &volume,
-				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg);
+				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+				bool with_lod = false);
 
 		// What a voxel shader is handed, which is the whole interface between
 		// this and a game's own rendering:

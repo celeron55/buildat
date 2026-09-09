@@ -337,6 +337,13 @@ do
 	voxel_reg:add_voxel(vdef)
 end
 
+atlas_reg:set_surface_maps(false) says the game's voxel shader samples the
+diffuse atlas and nothing else. An atlas then carries neither the normal map
+nor the surface map derived from its segments' pixels, which is two thirds of
+what adding a texture to an atlas costs and two thirds of its memory. Say it
+before the first segment goes in; a later change only reaches atlases created
+after it.
+
 
 Voxel data
 ----------
@@ -364,6 +371,8 @@ buildat.pack_voxel_volume(args) -> string
               mask = 0xffff,             -- default: all of the format's bits
               map = <string|table|nil>,  -- key -> value written
               map_default = nil,         -- for keys the map does not have
+              map_id = nil,              -- compile this map once; see below
+              map_version = nil,         -- bump when the map changes
               field = "id",              -- id|skylight|lamplight|light|raw
               second = {                 -- optional; nil for one array
                   data = <string>,       -- as long as the first array
@@ -384,6 +393,12 @@ buildat.pack_voxel_volume(args) -> string
   the map does not mention gets map_default, and with no map_default the voxel
   is left as it was. Keys too far apart to be an array are held as a hash, so
   a sparse table of large keys costs what it holds rather than what it spans.
+- map_id names a map so that it is compiled once instead of once per source.
+  A map of a few thousand keys costs more to compile than the box copy itself,
+  and a voxel world hands the same map to every source of every block. The
+  ids are the caller's to pick, small integers; map_version is what says the
+  map has changed, so bump it on every write to the table. A source with no
+  map_id compiles its map every time, which is what a one-off wants.
 - second is a second sample array read in lockstep with the first, at the same
   index: the key looked up is first + second * scale. What wanted this is
   Luanti's param2, which decides a voxel's colour or which way it faces, so

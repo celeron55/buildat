@@ -119,6 +119,10 @@ namespace interface
 
 		bool textures_valid = false;
 		AtlasSegmentReference textures[6];
+		// The LOD segments are only built for a volume that is actually
+		// meshed at a LOD: building one is a texture loaded, scaled and drawn
+		// into an atlas, and there are VOXELDEF_NUM_LOD of them per face
+		bool lod_textures_valid = false;
 		AtlasSegmentReference lod_textures[VOXELDEF_NUM_LOD][6];
 	};
 
@@ -136,11 +140,13 @@ namespace interface
 		virtual const VoxelDefinition* get(const VoxelTypeId &id) = 0;
 		virtual const VoxelDefinition* get(const VoxelName &name) = 0;
 
-		// atlas_reg may only be supplied when called from Urho3D main thread
+		// atlas_reg may only be supplied when called from Urho3D main thread.
+		// with_lod also builds the segments a LOD mesh samples, which is
+		// most of the cost of a voxel type's textures.
 		virtual const CachedVoxelDefinition* get_cached(const VoxelTypeId &id,
-				AtlasRegistry *atlas_reg = nullptr) = 0;
+				AtlasRegistry *atlas_reg = nullptr, bool with_lod = false) = 0;
 		virtual const CachedVoxelDefinition* get_cached(const VoxelInstance &v,
-				AtlasRegistry *atlas_reg = nullptr) = 0;
+				AtlasRegistry *atlas_reg = nullptr, bool with_lod = false) = 0;
 
 		virtual bool is_dirty() = 0;
 		virtual void clear_dirty() = 0;

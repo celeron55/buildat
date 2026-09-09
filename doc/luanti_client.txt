@@ -127,6 +127,16 @@ Both login paths have been run against a real Luanti server: registering a new
 player (FIRST_SRP) and logging in as one the server knows (SRP), and the
 terrain of that server's world has been on screen with its own textures.
 
+Keeping the frame rate while the world loads: the world is semi-infinite, so
+blocks arrive for as long as the player walks and whatever loading costs is
+paid during play. Two budgets keep a burst of them from being one long frame:
+what the server sent is reassembled and acknowledged as it arrives but handed
+to the command handlers for 4 ms a frame (the counters say how many commands
+are waiting), and blocks are handed to the mesher for 4 ms a frame, nearest
+first. One command and one block always get through, so nothing can starve.
+What a block costs before the mesher's own thread sees it is on screen as
+"us to hand over".
+
 Media: only the textures the node definitions name are asked for. A game's
 media is mostly sounds, models and textures for things that are not nodes;
 MineClone announces 3400 files and 900 of them are node textures.
