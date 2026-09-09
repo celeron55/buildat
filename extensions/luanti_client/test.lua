@@ -21,6 +21,7 @@ local connection = dofile(dir.."/connection.lua")
 local player = dofile(dir.."/player.lua")
 local texmod = dofile(dir.."/texmod.lua")
 local inventory = dofile(dir.."/inventory.lua")
+local formspec = dofile(dir.."/formspec.lua")
 local nodedef = dofile(dir.."/nodedef.lua")
 local media = dofile(dir.."/media.lua")
 
@@ -780,5 +781,72 @@ caps = inventory.dig_capabilities({main = {items = {}}}, 1, items)
 assert(caps.name == "empty", "inventory: the empty item's capabilities")
 
 print("inventory: ok")
+
+--
+-- formspec.lua: the windows the server describes
+--
+
+-- The inventory form this game's server actually sends
+local elements, size, real = formspec.parse(
+		"size[8,7.5]list[current_player;main;0,3.5;8,4;]"..
+		"list[current_player;craft;3,0;3,3;]listring[]"..
+		"list[current_player;craftpreview;7,1;1,1;]")
+assert(size[1] == 8 and size[2] == 7.5, "formspec: size")
+assert(real == false, "formspec: no formspec_version means the old units")
+assert(#elements == 4, "formspec: "..#elements.." elements")
+assert(elements[1].name == "list" and
+		elements[1].fields[1] == "current_player" and
+		elements[1].fields[2] == "main" and
+		elements[1].fields[3] == "0,3.5" and
+		elements[1].fields[4] == "8,4" and elements[1].fields[5] == "",
+		"formspec: the list element")
+assert(elements[3].name == "listring" and elements[3].fields[1] == "",
+		"formspec: an element with nothing in it")
+
+-- A container shifts what is inside it, and formspec_version 2 and up means
+-- the units are inventory slots rather than slots plus their spacing
+local e2, s2, r2 = formspec.parse("formspec_version[6]size[13,11.43]"..
+		"container[0,1.34]image[0.325,7.325;1.1,1.1;a.png]"..
+		"container[1,1]label[0,0;in two]container_end[]container_end[]"..
+		"label[1,2;out]")
+assert(r2 == true, "formspec: formspec_version 6 means real coordinates")
+assert(s2[1] == 13, "formspec: size again")
+assert(#e2 == 3, "formspec: "..#e2.." elements past the containers")
+assert(e2[1].at[1] == 0 and e2[1].at[2] == 1.34, "formspec: one container")
+assert(e2[2].at[1] == 1 and e2[2].at[2] == 2.34,
+		"formspec: containers add up")
+assert(e2[3].at[1] == 0 and e2[3].at[2] == 0,
+		"formspec: container_end goes back")
+
+-- A backslash escapes what would otherwise end a field or the element
+local e3 = formspec.parse("label[0,0;a\\;b\\]c]button[1,1;2,2;n;l]")
+assert(#e3 == 2, "formspec: "..#e3.." escaped elements")
+assert(e3[1].fields[2] == "a;b]c",
+		"formspec: an escaped field is \""..tostring(e3[1].fields[2]).."\"")
+assert(e3[2].name == "button", "formspec: the element after an escape")
+
+-- Luanti's translation and colour markup is not text to show
+assert(formspec.strip_escapes("\27(T@mcl_inventory)Search Items\27E") ==
+		"Search Items", "formspec: escapes stripped")
+
+-- The layout arithmetic, against Luanti's own: with real coordinates a slot
+-- is one unit, and the form is as big as its size says
+local l = formspec.layout({10, 10}, true, 1000, 1000)
+assert(l.imgsize == 1000 / 15, "formspec: imgsize is capped per slot")
+assert(l.slot == l.imgsize and l.slot_step == l.imgsize * 1.25,
+		"formspec: a real-coordinate slot and its step")
+assert(l.origin[1] == 0, "formspec: real coordinates have no padding")
+-- A form too big for the screen is shrunk to fit it
+local big = formspec.layout({40, 10}, true, 1000, 1000)
+assert(math.abs(big.width - 900) < 1e-6,
+		"formspec: a wide form is "..big.width.." across")
+-- The old units are a slot plus its spacing, and a position has padding added
+local old_units = formspec.layout({10, 10}, false, 1000, 1000)
+assert(old_units.slot_step == old_units.imgsize * 1.25,
+		"formspec: the old spacing")
+assert(old_units.origin[1] == old_units.imgsize * 3 / 8,
+		"formspec: the old padding")
+
+print("formspec: ok")
 
 print("luanti_client/test.lua: ok")

@@ -27,6 +27,17 @@ return {
 		Buttons = {variant = "Int", safe = "number"},
 		Qualifiers = {variant = "Int", safe = "number"},
 	},
+	-- A click on the UI, which carries where it landed. MouseButtonDown does
+	-- not: the position of a click is the UI's business, and a game that has
+	-- put something on screen needs to know where in it the player clicked.
+	-- The element that was hit is deliberately not passed on.
+	UIMouseClick = {
+		X = {variant = "Int", safe = "number"},
+		Y = {variant = "Int", safe = "number"},
+		Button = {variant = "Int", safe = "number"},
+		Buttons = {variant = "Int", safe = "number"},
+		Qualifiers = {variant = "Int", safe = "number"},
+	},
 	MouseMove = {
 		X = {variant = "Int", safe = "number"},
 		Y = {variant = "Int", safe = "number"},
