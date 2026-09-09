@@ -203,6 +203,10 @@ function M.new(magic, buildat, log, options)
 	options = options or {}
 	local far_clip = options.far_clip or 240
 	local texture = options.texture or "luanti_client/res/placeholder.png"
+	-- options.read_mesh(def) -> the quads of the model a "mesh" drawtype
+	-- names, or nil for one that could not be read. Whoever has the media
+	-- has the file; this only wants the quads.
+	local read_mesh = options.read_mesh
 	-- options.read_image(resource) -> w, h, rgba, for the colour a light
 	-- source shines in. Handed in rather than taken from buildat because it
 	-- is not part of the sandbox's own interface.
@@ -1436,7 +1440,8 @@ function M.new(magic, buildat, log, options)
 	local function build_voxel(reg, def, resolve_tile, override, name,
 			facedir, wall)
 		local kind = CUBE_DRAWTYPES[def.drawtype]
-		local shape, double_sided = shapes.for_node(def, facedir, wall)
+		local shape, double_sided = shapes.for_node(def, facedir, wall,
+				read_mesh and read_mesh(def) or nil)
 		local tiles = facedir and facedir ~= 0 and
 				shapes.FACEDIR_TILES[facedir + 1] or nil
 		if def.drawtype == DRAWTYPE_AIRLIKE then

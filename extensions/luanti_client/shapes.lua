@@ -382,7 +382,11 @@ end
 --
 -- What comes back is the quads and whether they want drawing from both sides,
 -- which single quads do and boxes do not.
-function M.for_node(def, facedir, wall)
+--
+-- mesh_quads is what objmesh.lua made of the model a "mesh" drawtype names,
+-- when the file was there to read; without it such a node falls back to the
+-- box the game says a ray hits.
+function M.for_node(def, facedir, wall, mesh_quads)
 	local drawtype = def.drawtype
 	if drawtype == 12 then -- NDT_NODEBOX
 		local box = def.node_box
@@ -417,13 +421,20 @@ function M.for_node(def, facedir, wall)
 		return M.flat_quads(), true
 	end
 	if drawtype == 16 then -- NDT_MESH
-		-- simplified: Urho3D reads none of the formats a Luanti mesh comes
-		-- in, so what is drawn is the box the game says a ray hits, which is
-		-- about the size and shape of the mesh. A torch comes out as a thin
-		-- post rather than as a whole cube, and a cube is what it would be
-		-- otherwise -- with the mesh's own texture on it, holes and all, so
-		-- the wall behind it would show through the hole in its own face.
-		-- The upgrade path is reading the meshes.
+		-- The model itself, when it is one of the formats objmesh.lua reads.
+		-- Drawn from both sides: a node mesh is often a shell -- a sign
+		-- face, a flowerpot -- whose inside is meant to be seen, and Luanti
+		-- draws them that way.
+		if mesh_quads and #mesh_quads > 0 then
+			return M.turn_quads(mesh_quads, facedir), true
+		end
+		-- simplified: a mesh in a format this does not read is drawn as the
+		-- box the game says a ray hits, which is about the size and shape of
+		-- the mesh. A torch comes out as a thin post rather than as a whole
+		-- cube, and a cube is what it would be otherwise -- with the mesh's
+		-- own texture on it, holes and all, so the wall behind it would show
+		-- through the hole in its own face. The upgrade path is .b3d, which
+		-- is what the chests and the shulkers are.
 		local box = def.selection_box
 		if not box then
 			return nil

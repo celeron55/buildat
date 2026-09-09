@@ -26,6 +26,7 @@ local player = dofile(path.."/player.lua")
 local texmod = dofile(path.."/texmod.lua")
 local itemdef = dofile(path.."/itemdef.lua")
 local inventory = dofile(path.."/inventory.lua")
+local objmesh = dofile(path.."/objmesh.lua")
 local formspec = dofile(path.."/formspec.lua")
 local formspec_ui = dofile(path.."/formspec_ui.lua")
 local objects = dofile(path.."/objects.lua")
@@ -233,9 +234,17 @@ local function show_client(host, port, name, password)
 				on_status = add_line,
 		}, log)
 
+		-- Assigned further down, where the media store it reads the model
+		-- out of exists; world.new wants the function now, so what it gets
+		-- is a wrapper around whatever this holds by then
+		local read_mesh
+
 		local view = world.new(magic, buildat.safe, log, {
 				far_clip = FAR_CLIP,
 				read_image = buildat.read_image,
+				read_mesh = function(def)
+					return read_mesh and read_mesh(def) or nil
+				end,
 		})
 
 		-- Whether any of the game itself has arrived. A login that is refused
@@ -439,6 +448,61 @@ local function show_client(host, port, name, password)
 			return colors
 		end
 
+		-- The model a "mesh" drawtype names, as the quads a voxel's shape is
+		-- made of: the mesh's name and the scale it was asked for -> quads,
+		-- or false for one that could not be read. Read once each; a game
+		-- has a few dozen of them, two hundred definitions share them, and
+		-- every voxel that faces a different way asks for the same one.
+		-- The scale is part of the key because two definitions can draw one
+		-- model at different sizes.
+		local meshes = {}
+		local meshes_read = 0
+
+		read_mesh = function(def)
+			local name = def.mesh
+			if name == nil or name == "" or not store:have_file(name) then
+				return nil
+			end
+			local scale = def.visual_scale ~= 0 and def.visual_scale or 1
+			local key = name.."@"..tostring(scale)
+			local quads = meshes[key]
+			if quads == nil then
+				-- Only .obj: .b3d is binary and animated, and what a node
+				-- wants of it is its static geometry
+				if not name:lower():match("%.obj$") then
+					meshes[key] = false
+					return nil
+				end
+				local file = io.open(MEDIA_ROOT.."/"..server_key.."/"..
+						name, "rb")
+				if not file then
+					meshes[key] = false
+					return nil
+				end
+				local text = file:read("*all")
+				file:close()
+				local parsed, _, skipped = objmesh.parse(text)
+				if #parsed == 0 then
+					log:warning("mesh "..name.." has no faces this reads")
+					meshes[key] = false
+					return nil
+				end
+				if skipped > 0 then
+					log:info("mesh "..name..": "..skipped..
+							" faces are neither triangles nor quads")
+				end
+				-- A material of the mesh wears the tile of the same number,
+				-- which is how Luanti puts a node's tiles on one
+				for _, q in ipairs(parsed) do
+					q.tile = math.min(q.group, 6)
+				end
+				quads = objmesh.scale(parsed, scale)
+				meshes[key] = quads
+				meshes_read = meshes_read + 1
+			end
+			return quads or nil
+		end
+
 		-- The things in the world that are not nodes, by id
 		local world_objects = {}
 
@@ -508,7 +572,7 @@ local function show_client(host, port, name, password)
 			registry_step = nil
 			local line = cubes.." voxel types have their own textures"..
 					" ("..store:have_count().." files, "..composed_count..
-					" composed, "..
+					" composed, "..meshes_read.." meshes, "..
 					math.floor(registry_spent_us / 1000).." ms over "..
 					math.floor((buildat.get_time_us() - registry_started_us) /
 					1000).." ms)"
@@ -880,9 +944,11 @@ local function show_client(host, port, name, password)
 		}
 
 		-- How big the cube is drawn. It is scaled to the slot afterwards, so
-		-- this only decides how much of the texture's detail survives; a
-		-- multiple of four, because the isometric geometry is in quarters.
-		local CUBE_SIZE = 64
+		-- this only decides how much of the texture's detail survives. Nine
+		-- times a unit, because that is what Luanti's own geometry is in;
+		-- with a unit of eight a face's edge comes out 32 pixels.
+		local CUBE_UNIT = 8
+		local CUBE_SIZE = 9 * CUBE_UNIT
 
 		-- A voxel as the cube Luanti draws in an inventory: the top face and
 		-- the two the viewer would see, each a parallelogram, the sides
@@ -894,8 +960,13 @@ local function show_client(host, port, name, password)
 			if not CUBE_ITEM_DRAWTYPES[def.drawtype] then
 				return nil
 			end
-			local s = CUBE_SIZE
-			local half, quarter = s / 2, s / 4
+			-- Luanti's own geometry, from createInventoryCubeImage() in
+			-- src/client/imagesource.cpp: on a canvas of nine units the cube
+			-- is eight wide and nine tall, a face's horizontal edge runs
+			-- four across and two down, and a side face's vertical edge runs
+			-- five down. Being taller than it is wide is the point -- a cube
+			-- that fills a square canvas reads as squashed.
+			local k = CUBE_UNIT
 			-- Tiles are +Y, -Y, +X, -X, +Z, -Z: the top and the two faces
 			-- that point at a viewer standing off the +X +Z corner
 			--
@@ -903,15 +974,17 @@ local function show_client(host, port, name, password)
 			-- it rather than by darkening the canvas: the expression
 			-- language already does that, and a multiply over the canvas
 			-- would darken the faces already drawn as well.
+			-- The shades are Luanti's too: 214/256 and 171/256 of the top's
+			-- own brightness, which as a [multiply is #d5d5d5 and #aaaaaa
 			local faces = {
-				{tile = 1, at = {half, 0},
-						u = {half, quarter}, v = {-half, quarter}},
-				{tile = 5, at = {half, half},
-						u = {-half, -quarter}, v = {0, half},
-						shade = "#bfbfbf"},
-				{tile = 3, at = {half, half},
-						u = {half, -quarter}, v = {0, half},
-						shade = "#949494"},
+				{tile = 1, at = {4.5 * k, 0},
+						u = {4 * k, 2 * k}, v = {-4 * k, 2 * k}},
+				{tile = 5, at = {0.5 * k, 2 * k},
+						u = {4 * k, 2 * k}, v = {0, 5 * k},
+						shade = "#d5d5d5"},
+				{tile = 3, at = {4.5 * k, 4 * k},
+						u = {4 * k, -2 * k}, v = {0, 5 * k},
+						shade = "#aaaaaa"},
 			}
 			local ops = {}
 			local key = "\0cube"
@@ -931,7 +1004,8 @@ local function show_client(host, port, name, password)
 				ops[#ops + 1] = {op = "shear", src = resource,
 						at = face.at, u = face.u, v = face.v}
 			end
-			return texmod_ctx.compose(def.name..key, ops, {s, s})
+			return texmod_ctx.compose(def.name..key, ops,
+					{CUBE_SIZE, CUBE_SIZE})
 		end
 
 		function item_image(item_name)
