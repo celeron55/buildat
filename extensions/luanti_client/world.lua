@@ -17,6 +17,8 @@
 -- world coordinates one for one. block_node_position() is the same arithmetic
 -- builtin/voxelworld does for its chunks.
 
+local sounds_proto = dofile(__buildat_extension_path("luanti_client")..
+		"/sounds.lua")
 local shapes = dofile(__buildat_extension_path("luanti_client")..
 		"/shapes.lua")
 
@@ -298,6 +300,128 @@ function M.new(magic, buildat, log, options)
 	local viewport = magic.Viewport:new(scene, camera)
 	self.viewport = viewport
 	magic.renderer:SetViewport(0, viewport)
+
+	-- The sounds the server asked for. A sound at a position is a node in
+	-- the scene and the listener rides the camera, which is what makes it
+	-- come from the right side, so this is here rather than in the
+	-- extension. Keyed by the server's own id, which is what STOP_SOUND and
+	-- FADE_SOUND name.
+	camera_node:CreateComponent("SoundListener")
+	magic.audio.listener = camera_node:GetComponent("SoundListener")
+
+	-- How far a positioned sound carries. Luanti leaves this to OpenAL's
+	-- defaults, which are in its own units; these are nodes.
+	local SOUND_NEAR = 2.0
+	local SOUND_FAR = 48.0
+
+	local sounds = {}
+
+	-- play_sound(id, spec, resource)
+	--
+	-- spec is what sounds.lua read out of PLAY_SOUND and resource the name
+	-- of one file of the group it asked for -- picking which one is the
+	-- caller's, because which files there are is the media's business.
+	--
+	-- simplified: a sound attached to an object plays where the object was
+	-- when it started rather than following it, and start_time is ignored,
+	-- because seeking is not in the sandbox's SoundSource. A game uses the
+	-- first for a mob's noises, which are short, and the second for
+	-- background music a player rejoins in the middle of.
+	function self:play_sound(id, spec, resource)
+		local sound = magic.cache:GetResource("Sound", resource)
+		if not sound then
+			return false
+		end
+		sound.looped = spec.loop and true or false
+		local node = scene:CreateChild("sound_"..tostring(id))
+		local source
+		if spec.location == sounds_proto.LOCAL then
+			source = node:CreateComponent("SoundSource")
+		else
+			node.position = magic.Vector3(spec.pos[1], spec.pos[2],
+					spec.pos[3])
+			source = node:CreateComponent("SoundSource3D")
+			source.nearDistance = SOUND_NEAR
+			source.farDistance = SOUND_FAR
+		end
+		source.soundType = magic.SOUND_EFFECT
+		local gain = spec.gain or 1.0
+		-- A fade on the packet means it starts silent and comes up to the
+		-- gain it asked for
+		local entry = {node = node, source = source, gain = gain,
+				started = false}
+		if spec.fade and spec.fade > 0 then
+			entry.target = gain
+			entry.step = spec.fade
+			gain = 0
+		end
+		source.gain = gain
+		if spec.pitch and spec.pitch > 0 and spec.pitch ~= 1 then
+			source.frequency = sound.frequency * spec.pitch
+		end
+		source:Play(sound)
+		-- A sound the server gave no id keeps none: it said it will not talk
+		-- about it again, and the update below takes the node away when it
+		-- has finished
+		self:stop_sound(id)
+		sounds[id] = entry
+		return true
+	end
+
+	function self:stop_sound(id)
+		local entry = sounds[id]
+		if not entry then
+			return
+		end
+		sounds[id] = nil
+		entry.source:Stop()
+		entry.node:Remove()
+	end
+
+	-- FADE_SOUND: gain moves by step a second until it is at gain, and a
+	-- sound faded to nothing stops
+	function self:fade_sound(id, step, gain)
+		local entry = sounds[id]
+		if not entry then
+			return
+		end
+		entry.target = gain
+		entry.step = step
+	end
+
+	-- The fades, and the nodes of the sounds that have finished
+	function self:update_sounds(dtime)
+		for id, entry in pairs(sounds) do
+			if entry.target then
+				local gain, done = sounds_proto.fade_step(entry.gain,
+						entry.target, entry.step, dtime)
+				entry.gain = gain
+				entry.source.gain = gain
+				if done then
+					entry.target = nil
+					if gain <= 0 then
+						self:stop_sound(id)
+					end
+				end
+			end
+			-- Not on the frame it started: a source has not been mixed yet
+			-- and says it is not playing
+			if sounds[id] then
+				if entry.started and not entry.source.playing then
+					self:stop_sound(id)
+				end
+				entry.started = true
+			end
+		end
+	end
+
+	function self:sound_count()
+		local n = 0
+		for _, _ in pairs(sounds) do
+			n = n + 1
+		end
+		return n
+	end
 
 	-- A voxel whose six faces are the given resource names, in buildat's face
 	-- order (+Y, -Y, +X, -X, +Z, -Z), which is also Luanti's tile order.

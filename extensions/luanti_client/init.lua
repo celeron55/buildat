@@ -28,6 +28,7 @@ local itemdef = dofile(path.."/itemdef.lua")
 local inventory = dofile(path.."/inventory.lua")
 local objmesh = dofile(path.."/objmesh.lua")
 local luanti_hud = dofile(path.."/hud.lua")
+local sounds = dofile(path.."/sounds.lua")
 local formspec = dofile(path.."/formspec.lua")
 local formspec_ui = dofile(path.."/formspec_ui.lua")
 local objects = dofile(path.."/objects.lua")
@@ -310,6 +311,10 @@ local function show_client(host, port, name, password)
 		local node_by_name = {}
 		local announced = nil
 		local to_ask = {}
+		-- Sound group name -> the media files in it, out of the
+		-- announcement; a server asks for the group and one of its files is
+		-- played
+		local sound_groups = {}
 		-- When the media last got anywhere: a file asked for, or a bunch
 		-- arriving. The fallback below is a quiet spell rather than a fixed
 		-- time after asking, because a game's whole media is tens of
@@ -659,6 +664,14 @@ local function show_client(host, port, name, password)
 			for _, name in ipairs(store:plan(files)) do
 				to_ask[#to_ask + 1] = name
 			end
+			-- A server asks for a sound by the name of a group, so what
+			-- files are in which group has to be worked out from the
+			-- announcement; see sounds.lua
+			local names = {}
+			for _, file in ipairs(files) do
+				names[#names + 1] = file.name
+			end
+			sound_groups = sounds.groups(names)
 			registry_stale = true
 		end
 
@@ -1124,6 +1137,9 @@ local function show_client(host, port, name, password)
 		local game_hud_missing = false
 		-- How many of them there are, for the counters line
 		local hud_count = 0
+		-- The sound groups a server asked for that are not in its media, so
+		-- that each is said once
+		local sound_missing = {}
 		-- Where the chat lines are, so that they are only moved when the
 		-- lines of detail above them changed height
 		local chat_at_y = nil
@@ -1131,6 +1147,40 @@ local function show_client(host, port, name, password)
 		-- Every change to any of it, with the elements keyed by the server's
 		-- own id; client.lua holds them because HUDCHANGE names one field of
 		-- one element
+		-- A server asks for a sound by group name; one of the files in that
+		-- group is played, picked at random the way Luanti picks one, which
+		-- is why a game ships three recordings of a footstep.
+		client.on_play_sound = function(id, spec)
+			local group = sound_groups[spec.name]
+			if not group then
+				if not sound_missing[spec.name] then
+					sound_missing[spec.name] = true
+					log:info("No sound group \""..spec.name.."\"")
+				end
+				return
+			end
+			-- Only the files that have actually arrived
+			local have = {}
+			for _, file in ipairs(group) do
+				if store:have_file(file) then
+					have[#have + 1] = file
+				end
+			end
+			if #have == 0 then
+				return
+			end
+			local file = have[math.random(#have)]
+			view:play_sound(id, spec, server_key.."/"..file)
+		end
+
+		client.on_stop_sound = function(id)
+			view:stop_sound(id)
+		end
+
+		client.on_fade_sound = function(id, step, gain)
+			view:fade_sound(id, step, gain)
+		end
+
 		client.on_hud = function(elements, flags, params)
 			hud_elements = elements
 			hud_flags = flags
@@ -1597,7 +1647,7 @@ local function show_client(host, port, name, password)
 					"%d objects | blocks: %d received,"..
 					" %d in scene, %d to mesh | %d us to hand over"..
 					" | %d commands waiting"..
-					" | %d param2 pairs | %d hud"..
+					" | %d param2 pairs | %d hud | %d sounds"..
 					" | media: %d files, %d to come",
 					client.state, condition, avatar.x, avatar.y, avatar.z,
 					avatar.fly and "flying" or
@@ -1611,6 +1661,7 @@ local function show_client(host, port, name, password)
 					view:dirty_count(), view.last_mesh_us,
 					client.commands_waiting,
 					view:pair_voxel_count(), hud_count,
+					view:sound_count(),
 					store:have_count(), store:missing_count())
 		end
 
@@ -1797,6 +1848,7 @@ local function show_client(host, port, name, password)
 				end
 			end
 			view:place_objects(world_objects)
+			view:update_sounds(dtime)
 			update_hud()
 			if chat_wanted then
 				chat_wanted = false

@@ -22,6 +22,7 @@ local srp = dofile(path.."/srp.lua")
 local nodemeta = dofile(path.."/nodemeta.lua")
 local inventory = dofile(path.."/inventory.lua")
 local hud = dofile(path.."/hud.lua")
+local sounds = dofile(path.."/sounds.lua")
 
 local M = {}
 
@@ -125,6 +126,9 @@ local TOCLIENT = {
 	HUDCHANGE      = 0x4B,
 	HUD_SET_FLAGS  = 0x4C,
 	HUD_SET_PARAM  = 0x4D,
+	PLAY_SOUND     = 0x3F,
+	STOP_SOUND     = 0x40,
+	FADE_SOUND     = 0x55,
 	SRP_BYTES_S_B  = 0x60,
 }
 
@@ -323,6 +327,13 @@ function M.new(socket, options, log)
 			-- keyed by the server's own id. hud.lua is what reads the
 			-- packets and says what the flags mean.
 			on_hud = nil,
+			-- The sounds: on_play_sound(id, spec) with what sounds.lua read
+			-- out of PLAY_SOUND, on_stop_sound(id) and
+			-- on_fade_sound(id, step, gain). The id is the server's own and
+			-- is what the latter two name.
+			on_play_sound = nil,
+			on_stop_sound = nil,
+			on_fade_sound = nil,
 			-- on_announce_media(files, remote_servers) and
 			-- on_media(files, bunch, bunches); media.lua is what keeps them
 			on_announce_media = nil,
@@ -638,6 +649,26 @@ function M.new(socket, options, log)
 		if value ~= nil then
 			self.hud_params[param] = value
 			hud_changed()
+		end
+	end
+
+	handlers[TOCLIENT.PLAY_SOUND] = function(r)
+		local id, spec = sounds.read_play(r)
+		if self.on_play_sound then
+			self.on_play_sound(id, spec)
+		end
+	end
+
+	handlers[TOCLIENT.STOP_SOUND] = function(r)
+		if self.on_stop_sound then
+			self.on_stop_sound(sounds.read_stop(r))
+		end
+	end
+
+	handlers[TOCLIENT.FADE_SOUND] = function(r)
+		local id, step, gain = sounds.read_fade(r)
+		if self.on_fade_sound then
+			self.on_fade_sound(id, step, gain)
 		end
 	end
 
