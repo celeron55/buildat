@@ -1296,6 +1296,22 @@ local function show_client(host, port, name, password)
 		-- does not change with this, so a zoomed-in player is still sent the
 		-- blocks a 98-degree view needs. That is more blocks than it wants,
 		-- never fewer.
+		client.on_sun = function(sun)
+			view:set_sky_body("sun", sun)
+		end
+
+		client.on_moon = function(moon)
+			view:set_sky_body("moon", moon)
+		end
+
+		client.on_stars = function(stars)
+			view:set_sky_body("stars", stars)
+		end
+
+		client.on_clouds = function(clouds)
+			view:set_sky_body("clouds", clouds)
+		end
+
 		client.on_player_speed = function(x, y, z)
 			avatar:add_velocity(x, y, z)
 		end
