@@ -22,6 +22,7 @@ local luanti = dofile(path.."/client.lua")
 local world = dofile(path.."/world.lua")
 local nodedef = dofile(path.."/nodedef.lua")
 local media = dofile(path.."/media.lua")
+local player = dofile(path.."/player.lua")
 local M = {safe = nil}
 
 -- BUILDAT_LUANTI_ADDRESS is for scripted runs (bin/buildat_client -c ...),
@@ -33,19 +34,7 @@ local DEFAULT_ADDRESS = os.getenv("BUILDAT_LUANTI_ADDRESS") or "localhost:30000"
 -- WANTED_RANGE_BLOCKS in client.lua.
 local FAR_CLIP = 240
 local DROP_DISTANCE = 260
--- Luanti puts the player's eyes this far above their feet, and the position
--- the server sends is the feet
-local EYE_HEIGHT = 1.625
-
--- Nodes a second, and degrees of look per pixel of mouse movement
---
--- simplified: the camera flies, with nothing to stop it going through a wall.
--- The server does not mind for as long as the player has the fly and noclip
--- privileges; without them its movement checks pull the player back, which
--- shows up as the camera being dragged. Walking means the player's collision
--- box against the voxel data, which is its own piece of work.
-local MOVE_SPEED = 12
-local MOVE_SPEED_FAST = 40
+-- Degrees of look per pixel of mouse movement
 local MOUSE_SENSITIVITY = 0.15
 
 -- Media files are asked for in batches, so that one REQUEST_MEDIA does not
@@ -230,6 +219,17 @@ local function show_client(host, port, name, password)
 			registry_stale = true
 		end
 
+		-- The player's own box in the world. It asks the world what stops it;
+		-- a node whose block has not arrived counts as solid, so the player
+		-- stands still until the ground under them is there.
+		local avatar = player.new(
+				function(x, y, z) return view:is_solid(x, y, z) end,
+				function(x, y, z) return view:is_liquid(x, y, z) end)
+		client.on_movement = function(m)
+			avatar.movement = m
+			add_line("The game's movement constants arrived")
+		end
+
 		-- The bottom line is remade every frame; everything above it is the
 		-- log of what happened
 		local function set_counters()
@@ -238,9 +238,14 @@ local function show_client(host, port, name, password)
 			-- world is behind it
 			status_text.text = table.concat(lines, "\n").."\n"..
 					string.format(
-					"%s | blocks: %d received, %d in scene, %d to mesh"..
-					" | %d us to hand over | media: %d files, %d to come",
-					client.state, client.blocks_received, view:block_count(),
+					"%s | %.1f, %.1f, %.1f %s | blocks: %d received,"..
+					" %d in scene, %d to mesh | %d us to hand over"..
+					" | media: %d files, %d to come",
+					client.state, avatar.x, avatar.y, avatar.z,
+					avatar.fly and "flying" or
+							(avatar.in_liquid and "swimming" or
+							(avatar.on_ground and "on ground" or "falling")),
+					client.blocks_received, view:block_count(),
 					view:dirty_count(), view.last_mesh_us,
 					store:have_count(), store:missing_count())
 		end
@@ -252,14 +257,16 @@ local function show_client(host, port, name, password)
 		local last_daylight = nil
 
 		-- WASD on the horizontal plane whatever the camera is pitched at,
-		-- space and shift for height, shift also for a faster pace. What comes
-		-- out is where the client tells the server it is, so the server sends
-		-- the blocks around it: the position is both the camera's and the
-		-- player's.
+		-- space to jump, ctrl to sneak, shift for a faster pace, and K to
+		-- toggle flying. What comes out is where the client tells the server
+		-- it is, so the server sends the blocks around it: the position is
+		-- both the camera's and the player's.
 		--
-		-- The starting point is client.position every frame rather than a
-		-- position of our own, so that MOVE_PLAYER -- the server putting the
-		-- player somewhere, at the spawn or after its movement checks -- wins.
+		-- MOVE_PLAYER -- the server putting the player somewhere, at the spawn
+		-- or after its movement checks -- has to win over what the player is
+		-- doing. client.position is what we told the server last frame, so it
+		-- differing from where the player thinks it is means the server moved
+		-- us.
 		local function move(dtime)
 			local dmouse = magic.input:GetMouseMove()
 			local yaw = client.yaw + dmouse.x * MOUSE_SENSITIVITY
@@ -269,32 +276,42 @@ local function show_client(host, port, name, password)
 			if pitch > 89 then pitch = 89 end
 			if pitch < -89 then pitch = -89 end
 
-			local fast = magic.input:GetKeyDown(KEY_SHIFT)
-			local speed = (fast and MOVE_SPEED_FAST or MOVE_SPEED) * dtime
+			local p = client.position
+			if p.x ~= avatar.x or p.y ~= avatar.y or p.z ~= avatar.z then
+				avatar:set_position(p.x, p.y, p.z)
+			end
+
 			local yr = math.rad(yaw)
 			local fx, fz = math.sin(yr), math.cos(yr)
-			local p = client.position
-			local x, y, z = p.x, p.y, p.z
+			local wish = {x = 0, z = 0,
+					jump = magic.input:GetKeyDown(KEY_SPACE),
+					sneak = magic.input:GetKeyDown(KEY_CTRL),
+					fast = magic.input:GetKeyDown(KEY_SHIFT)}
+			local keys = 0
 			if magic.input:GetKeyDown(KEY_W) then
-				x, z = x + fx * speed, z + fz * speed
+				wish.x, wish.z = wish.x + fx, wish.z + fz
+				keys = keys + luanti.KEY_UP
 			end
 			if magic.input:GetKeyDown(KEY_S) then
-				x, z = x - fx * speed, z - fz * speed
+				wish.x, wish.z = wish.x - fx, wish.z - fz
+				keys = keys + luanti.KEY_DOWN
 			end
 			if magic.input:GetKeyDown(KEY_D) then
-				x, z = x + fz * speed, z - fx * speed
+				wish.x, wish.z = wish.x + fz, wish.z - fx
+				keys = keys + luanti.KEY_RIGHT
 			end
 			if magic.input:GetKeyDown(KEY_A) then
-				x, z = x - fz * speed, z + fx * speed
+				wish.x, wish.z = wish.x - fz, wish.z + fx
+				keys = keys + luanti.KEY_LEFT
 			end
-			if magic.input:GetKeyDown(KEY_SPACE) then
-				y = y + speed
-			end
-			if magic.input:GetKeyDown(KEY_CTRL) then
-				y = y - speed
-			end
+			if wish.jump then keys = keys + luanti.KEY_JUMP end
+			if wish.sneak then keys = keys + luanti.KEY_SNEAK end
+			if wish.fast then keys = keys + luanti.KEY_AUX1 end
+
+			local x, y, z = avatar:update(dtime, wish)
 			client:set_position(x, y, z, pitch, yaw)
-			view:set_camera(x, y + EYE_HEIGHT, z, pitch, yaw)
+			client:set_motion(avatar.vx, avatar.vy, avatar.vz, keys)
+			view:set_camera(x, y + player.EYE_HEIGHT, z, pitch, yaw)
 		end
 
 		-- A plain subscription rather than root:SubscribeToStackEvent(), which
@@ -337,7 +354,18 @@ local function show_client(host, port, name, password)
 		end)
 
 		root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
-			if event_data:GetInt("Key") == KEY_ESCAPE then
+			local key = event_data:GetInt("Key")
+			-- Luanti's own keys for these. A server that does not give the
+			-- player the fly and noclip privileges pulls them back.
+			if key == KEY_K then
+				avatar.fly = not avatar.fly
+				add_line(avatar.fly and "Flying" or "Walking")
+			end
+			if key == KEY_H then
+				avatar.noclip = not avatar.noclip
+				add_line(avatar.noclip and "Through walls" or "Solid walls")
+			end
+			if key == KEY_ESCAPE then
 				magic.UnsubscribeFromEvent("Update", update_cb)
 				magic.input:SetMouseVisible(true)
 				client:disconnect()

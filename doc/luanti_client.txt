@@ -10,10 +10,20 @@ terrain around the player with the server's own textures.
 BUILDAT_LUANTI_ADDRESS sets the address the dialog starts with, which is what
 scripted runs (-c) use.
 
-Controls: the mouse looks, WASD moves, space and ctrl go up and down, shift is
-faster, escape disconnects. The camera flies and nothing stops it going
-through a wall; a server that does not give the player the fly and noclip
-privileges will pull it back with its movement checks.
+Controls: the mouse looks, WASD walks, space jumps, ctrl sneaks, shift is
+faster, K toggles flying, H toggles going through walls, escape disconnects.
+Flying and going through walls need the server to give the player the fly and
+noclip privileges; without them its movement checks pull the player back.
+
+The player is a box 0.6 nodes across and 1.75 tall whose bottom is the
+position the server talks about, and it falls, jumps, walks into things and
+slides along them. A full node in the way has to be jumped over, which is what
+Luanti does too; a stair or a slab would not need it, but that needs the
+collision boxes out of the node definitions. What the player collides with is
+what the server says is walkable, and a node whose block has not arrived
+counts as solid, so the player stands still rather than falling through a
+world that has not loaded. The movement constants -- speeds, acceleration,
+gravity -- are the ones the server sends in TOCLIENT_MOVEMENT.
 
 Light: Luanti keeps two light values per node, the light it has when the sun
 is up and the light it gets from light sources alone. Those are what buildat's
@@ -44,6 +54,8 @@ client.lua      The commands: the login, the map blocks, and dispatch for the
                 rest
 nodedef.lua     NODEDEF: what a node id is called, how it is drawn, its tiles
 media.lua       The server's media files, in cache/luanti_media/<server>/
+player.lua      The player's box: the keys, gravity, and collision against
+                the nodes
 world.lua       The scene: a node per map block, with buildat's voxel mesher
                 on it, and the voxel registry the node definitions build
 engine_test.lua Checks of the engine primitives, run at boot
@@ -56,12 +68,15 @@ Checks
 ------
     $ lua extensions/luanti_client/test.lua
 
-covers serialize.lua, connection.lua, nodedef.lua and media.lua without an
-engine: the packet framing, numbers including f32, reliable packets arriving
+covers serialize.lua, connection.lua, nodedef.lua, media.lua and player.lua
+without an engine: the packet framing, numbers including f32, reliable packets arriving
 out of order or twice, acknowledgements, resending, splitting what is sent and
 reassembling what arrives, the peer id handshake, a NODEDEF packet built the
-way a server builds one and read back, and which media names are usable as
-file names.
+way a server builds one and read back, which media names are usable as file
+names, and the player's box against a world made of a function -- falling to
+the ground, stopping at a wall, sliding along it, jumping onto a ledge,
+sinking in water and swimming out, flying, and getting out of a node it ended
+up inside.
 
     $ bin/buildat_client -m luanti_client
 
@@ -116,6 +131,11 @@ What is done
 - Per-node light, day and night, baked into the vertex colours, and the holes
   in a texture discarded rather than drawn
 - ADDNODE and REMOVENODE, patched into the block and re-meshed
+- Walking: the player's box against the node data, with gravity, jumping,
+  sneaking, swimming, and flying and noclip as toggles
+- TOCLIENT_MOVEMENT, so the speeds and the gravity are the game's own
+- PLAYERPOS carries the speed and the keys, which is what the server's
+  movement checks and its animations of the player go by
 - NODEDEF, and a voxel registry built from it
 - The media: ANNOUNCE_MEDIA, REQUEST_MEDIA and MEDIA, cached on disk by name
   and checked against the sha1 the server announced
@@ -126,8 +146,6 @@ and gives up rather than carrying a second parser.
 
 What is next
 ------------
-- Walking rather than flying: the player's box against the voxel data, and
-  the movement constants the server sends
 - Digging and placing, and an inventory
 - HP, breath
 - Node draw types that are not cubes, and texture modifiers
