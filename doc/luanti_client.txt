@@ -55,6 +55,15 @@ is meshed again when the sun moves, and a cave is dark with its torches lit.
 It also discards texels below half alpha, which is what makes the holes in a
 leaf or a pane of glass be holes.
 
+On top of that, a voxel whose definition gives light gets a real light in the
+scene -- the two dozen nearest the camera, each with a range and a brightness
+from its light level, and an additive light pass in the technique for them to
+reach the geometry. The colour is the average of the voxel's own first tile
+with the brightest channel brought up to one, so a torch is warm, a redstone
+torch is red and a soul torch is blue without anything here having to know
+what any of them are. Luanti has one number for this and paints every source
+the same; this is what the rendering latitude is for.
+
 A node is drawn as a cube with its own six textures when it is one of the
 Luanti draw types that is a cube (normal, glasslike, allfaces) and every one of
 those textures is a plain file name. Everything else -- plants, liquids, node
