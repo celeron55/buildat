@@ -1363,10 +1363,32 @@ local function show_client(host, port, name, password)
 		local tooltip_over = nil
 		local tooltip_wait = 0
 
+		-- What Luanti's own client shows over an inventory slot: the item's
+		-- description, and the name it is known by under it.
+		--
+		--     Calcite
+		--     [mcl_amethyst:calcite]
+		local function slot_tooltip(slot)
+			local stack = slot.stack
+			if not stack or stack.name == "" then
+				return nil
+			end
+			local def = item_defs and item_defs[stack.name] or nil
+			local desc = formspec.strip_escapes(
+					(def and def.description) or "")
+			-- Only the first line: a game writes a whole paragraph into a
+			-- description -- what the thing does, what it is worth -- and
+			-- Luanti's own tooltip is the name of the item
+			desc = desc:match("^[^\n]*") or ""
+			if desc == "" then
+				desc = stack.name
+			end
+			return desc.."\n["..stack.name.."]"
+		end
+
 		local function update_tooltip(dtime)
 			local drawn = form and form.drawn
-			if not drawn or not drawn.tooltips or #drawn.tooltips == 0 or
-					not mouse_at then
+			if not drawn or not mouse_at then
 				if tooltip_over then
 					tooltip_over = nil
 					ui:tooltip(magic.ui.root, nil)
@@ -1376,12 +1398,24 @@ local function show_client(host, port, name, password)
 			local lx = mouse_at[1] - drawn.origin[1]
 			local ly = mouse_at[2] - drawn.origin[2]
 			-- The last one that covers the cursor: a form's later elements
-			-- are the ones on top
-			local over = nil
-			for _, t in ipairs(drawn.tooltips) do
+			-- are the ones on top. The text is worked out here rather than
+			-- read off what was hit, because a slot's is its item's.
+			local over, over_text = nil, nil
+			for _, t in ipairs(drawn.tooltips or {}) do
 				if lx >= t.x and lx < t.x + t.w and
 						ly >= t.y and ly < t.y + t.h then
-					over = t
+					over, over_text = t, t.text
+				end
+			end
+			-- A slot is the most specific thing under the cursor, so it wins
+			-- over an area the form asked for
+			for _, slot in ipairs(drawn.slots or {}) do
+				if lx >= slot.x and lx < slot.x + slot.size and
+						ly >= slot.y and ly < slot.y + slot.size then
+					local text = slot_tooltip(slot)
+					if text then
+						over, over_text = slot, text
+					end
 				end
 			end
 			if over ~= tooltip_over then
@@ -1395,8 +1429,9 @@ local function show_client(host, port, name, password)
 			end
 			tooltip_wait = tooltip_wait + dtime
 			if tooltip_wait >= TOOLTIP_DELAY then
-				ui:tooltip(magic.ui.root, over.text, mouse_at[1], mouse_at[2],
-						magic.ui.root.width, magic.ui.root.height)
+				ui:tooltip(magic.ui.root, over_text, mouse_at[1],
+						mouse_at[2], magic.ui.root.width,
+						magic.ui.root.height)
 			end
 		end
 
