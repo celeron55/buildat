@@ -1,0 +1,371 @@
+// http://www.apache.org/licenses/LICENSE-2.0
+// Copyright 2014 Perttu Ahola <celeron55@gmail.com>
+#include "lua_bindings/util.h"
+#include "core/log.h"
+#ifdef _WIN32
+	#include "ports/windows_sockets.h"
+#else
+	#include <unistd.h>
+	#include <sys/types.h>
+	#include <sys/socket.h>
+	#include <errno.h>
+	#include <fcntl.h>
+	#include <netinet/in.h>
+	#include <netinet/tcp.h>
+	#include <netdb.h>
+#endif
+#include <luabind/luabind.hpp>
+#include <string.h>
+#include <stdlib.h> // atoi()
+#include <vector>
+#define MODULE "lua_bindings"
+
+// Sockets for Lua. This is the raw layer; it does not ask the user about
+// anything. The extension environment guards it (extensions/network).
+//
+// The connect functions always return a socket object; if the connection could
+// not be made, socket:good() is false and socket:error() tells why.
+
+namespace lua_bindings {
+
+// TCP connect blocks for up to this long. simplified: no connecting state to
+// poll from Lua; a slow peer stalls one frame. Upgrade path if that shows up:
+// keep the socket in a connecting state and finish it in receive()/send().
+static const int TCP_CONNECT_TIMEOUT_MS = 5000;
+
+static const size_t RECEIVE_BUFFER_SIZE = 65536;
+
+static void close_socket_fd(int fd)
+{
+#ifdef _WIN32
+	closesocket(fd);
+#else
+	::close(fd);
+#endif
+}
+
+static bool sockaddr_to_ip_port(const struct sockaddr *sa, socklen_t len,
+		ss_ &ip, int &port)
+{
+	char host[NI_MAXHOST];
+	char serv[NI_MAXSERV];
+	if(getnameinfo(sa, len, host, sizeof host, serv, sizeof serv,
+			NI_NUMERICHOST | NI_NUMERICSERV) != 0)
+		return false;
+	ip = host;
+	port = atoi(serv);
+	return true;
+}
+
+static ss_ last_socket_error()
+{
+#ifdef _WIN32
+	char buf[128];
+	snprintf(buf, sizeof buf, "winsock error %i", WSAGetLastError());
+	return buf;
+#else
+	return strerror(errno);
+#endif
+}
+
+static bool would_block()
+{
+#ifdef _WIN32
+	int e = WSAGetLastError();
+	return e == WSAEWOULDBLOCK || e == WSAEINPROGRESS;
+#else
+	return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR;
+#endif
+}
+
+static bool connect_in_progress()
+{
+#ifdef _WIN32
+	return WSAGetLastError() == WSAEWOULDBLOCK;
+#else
+	return errno == EINPROGRESS;
+#endif
+}
+
+static bool set_nonblocking(int fd)
+{
+#ifdef _WIN32
+	u_long on = 1;
+	return ioctlsocket(fd, FIONBIO, &on) == 0;
+#else
+	int flags = fcntl(fd, F_GETFL, 0);
+	if(flags == -1)
+		return false;
+	return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
+#endif
+}
+
+struct LuaSocket
+{
+	int m_fd = -1;
+	bool m_udp = false;
+	ss_ m_remote; // "host:port" as given by the caller
+	ss_ m_error;
+	ss_ m_peer_ip;
+	int m_peer_port = 0;
+
+	LuaSocket(bool udp, const ss_ &remote):
+		m_udp(udp), m_remote(remote)
+	{}
+
+	~LuaSocket()
+	{
+		close();
+	}
+
+	void fail(const ss_ &error)
+	{
+		m_error = error;
+		close();
+	}
+
+	// Waits until the non-blocking connect() on m_fd finishes
+	bool wait_connected()
+	{
+		struct timeval tv;
+		tv.tv_sec = TCP_CONNECT_TIMEOUT_MS / 1000;
+		tv.tv_usec = (TCP_CONNECT_TIMEOUT_MS % 1000) * 1000;
+		fd_set wfds;
+		FD_ZERO(&wfds);
+		FD_SET(m_fd, &wfds);
+		int r = select(m_fd + 1, NULL, &wfds, NULL, &tv);
+		if(r == 0){
+			m_error = "connect timed out";
+			return false;
+		}
+		if(r < 0){
+			m_error = "select: "+last_socket_error();
+			return false;
+		}
+		int so_error = 0;
+		socklen_t len = sizeof(so_error);
+		if(getsockopt(m_fd, SOL_SOCKET, SO_ERROR, (char*)&so_error, &len) != 0){
+			m_error = "getsockopt: "+last_socket_error();
+			return false;
+		}
+		if(so_error != 0){
+			m_error = "connect: "+ss_(strerror(so_error));
+			return false;
+		}
+		return true;
+	}
+
+	bool connect_to(const ss_ &host, const ss_ &port)
+	{
+		struct addrinfo hints;
+		memset(&hints, 0, sizeof(hints));
+		hints.ai_family = AF_UNSPEC;
+		hints.ai_socktype = m_udp ? SOCK_DGRAM : SOCK_STREAM;
+		struct addrinfo *res0 = NULL;
+		int err = getaddrinfo(host.c_str(), port.c_str(), &hints, &res0);
+		if(err || res0 == NULL){
+			m_error = ss_("getaddrinfo: ")+gai_strerror(err);
+			return false;
+		}
+		m_error = "no address to connect to";
+		for(struct addrinfo *res = res0; res != NULL; res = res->ai_next){
+			int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+			if(fd == -1){
+				m_error = "socket: "+last_socket_error();
+				continue;
+			}
+			if(!set_nonblocking(fd)){
+				m_error = "failed to set socket non-blocking";
+				close_socket_fd(fd);
+				continue;
+			}
+			m_fd = fd;
+			// UDP connect() only sets the default peer; it does not block.
+			// It also makes the socket drop datagrams from anyone else.
+			if(connect(fd, res->ai_addr, res->ai_addrlen) == 0)
+				break;
+			if(!m_udp && connect_in_progress()){
+				if(wait_connected()) // Sets m_error if it fails
+					break;
+			} else {
+				m_error = "connect: "+last_socket_error();
+			}
+			close();
+		}
+		freeaddrinfo(res0);
+		if(m_fd == -1)
+			return false;
+		m_error = "";
+		{
+			struct sockaddr_storage sa;
+			socklen_t len = sizeof(sa);
+			if(getpeername(m_fd, (struct sockaddr*)&sa, &len) == 0)
+				sockaddr_to_ip_port((struct sockaddr*)&sa, len,
+						m_peer_ip, m_peer_port);
+		}
+		if(!m_udp){
+			int val = 1;
+			setsockopt(m_fd, IPPROTO_TCP, TCP_NODELAY, (const char*)&val,
+					sizeof(val));
+		}
+		return true;
+	}
+
+	// Lua interface
+
+	bool good() const
+	{
+		return m_fd != -1;
+	}
+
+	ss_ error() const
+	{
+		return m_error;
+	}
+
+	// "host:port" as the caller gave it; for showing to the user
+	ss_ address() const
+	{
+		return m_remote;
+	}
+
+	ss_ peer_ip() const
+	{
+		return m_peer_ip;
+	}
+
+	int peer_port() const
+	{
+		return m_peer_port;
+	}
+
+	ss_ local_ip() const
+	{
+		ss_ ip;
+		int port = 0;
+		local_address(ip, port);
+		return ip;
+	}
+
+	int local_port() const
+	{
+		ss_ ip;
+		int port = 0;
+		local_address(ip, port);
+		return port;
+	}
+
+	void local_address(ss_ &ip, int &port) const
+	{
+		if(m_fd == -1)
+			return;
+		struct sockaddr_storage sa;
+		socklen_t len = sizeof(sa);
+		if(getsockname(m_fd, (struct sockaddr*)&sa, &len) == 0)
+			sockaddr_to_ip_port((struct sockaddr*)&sa, len, ip, port);
+	}
+
+	// send(data) -> bytes sent, or -1 if the socket errored. Less than the
+	// whole thing means the send buffer is full; there is no send queue here,
+	// the caller retries with the rest.
+	int send(const ss_ &data)
+	{
+		if(m_fd == -1)
+			return -1;
+		size_t sent_total = 0;
+		while(sent_total < data.size()){
+			int sent = ::send(m_fd, &data[sent_total], data.size() - sent_total, 0);
+			if(sent < 0){
+				if(would_block())
+					break;
+				fail("send: "+last_socket_error());
+				return -1;
+			}
+			sent_total += sent;
+			if(m_udp) // One datagram per call, whole or not at all
+				break;
+		}
+		return sent_total;
+	}
+
+	// receive() -> data; "" means nothing was available. If the peer closed the
+	// connection or the socket errored, good() turns false.
+	ss_ receive()
+	{
+		if(m_fd == -1)
+			return "";
+		std::vector<char> buf(RECEIVE_BUFFER_SIZE);
+		int r = recv(m_fd, &buf[0], buf.size(), 0);
+		if(r == 0){
+			if(!m_udp){
+				fail("closed");
+				return "";
+			}
+			return ""; // Empty datagram; indistinguishable from nothing
+		}
+		if(r < 0){
+			if(would_block())
+				return "";
+			fail("recv: "+last_socket_error());
+			return "";
+		}
+		return ss_(&buf[0], r);
+	}
+
+	void close()
+	{
+		if(m_fd != -1){
+			close_socket_fd(m_fd);
+			m_fd = -1;
+		}
+	}
+};
+
+static sp_<LuaSocket> connect_socket(bool udp, const ss_ &host, const ss_ &port)
+{
+	sp_<LuaSocket> socket(new LuaSocket(udp, host+":"+port));
+	if(!socket->connect_to(host, port)){
+		log_w(MODULE, "%s connect to %s:%s failed: %s", udp ? "udp" : "tcp",
+				cs(host), cs(port), cs(socket->error()));
+	} else {
+		log_v(MODULE, "%s socket connected to %s:%s", udp ? "udp" : "tcp",
+				cs(host), cs(port));
+	}
+	return socket;
+}
+
+static sp_<LuaSocket> tcp_connect(const ss_ &host, const ss_ &port)
+{
+	return connect_socket(false, host, port);
+}
+
+static sp_<LuaSocket> udp_connect(const ss_ &host, const ss_ &port)
+{
+	return connect_socket(true, host, port);
+}
+
+void init_network(lua_State *L)
+{
+	using namespace luabind;
+
+	module(L)[
+		class_<LuaSocket, bases<>, sp_<LuaSocket>>("Socket")
+			.def("good", &LuaSocket::good)
+			.def("error", &LuaSocket::error)
+			.def("address", &LuaSocket::address)
+			.def("peer_ip", &LuaSocket::peer_ip)
+			.def("peer_port", &LuaSocket::peer_port)
+			.def("local_ip", &LuaSocket::local_ip)
+			.def("local_port", &LuaSocket::local_port)
+			.def("send", &LuaSocket::send)
+			.def("receive", &LuaSocket::receive)
+			.def("close", &LuaSocket::close),
+		def("__buildat_tcp_connect", &tcp_connect),
+		def("__buildat_udp_connect", &udp_connect)
+	];
+}
+
+} // namespace lua_bindings
+
+// codestyle:disable (currently util/codestyle.sh screws up the .def formatting)
+// vim: set noet ts=4 sw=4:

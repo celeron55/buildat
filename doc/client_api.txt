@@ -174,11 +174,60 @@ replicate.main_scene
   Urho3D. With urho3d.REPLICATED (native default) they will end up in the
   synchronized ID space and will be overridden by data coming from the server.
 
+network
+-------
+TCP and UDP sockets, with the user in the loop: the first connection or
+datagram to an address in a week needs the user to accept the address and give
+it a description. Answers live in cache/network_addresses.csv.
+
+The socket objects are LuaSocket's, as far as the safety layer allows. What
+differs from LuaSocket:
+- Opening a socket takes a callback, because the user has to answer the dialog
+  first, and the address comes with it: there is no socket.tcp() / socket.udp()
+  followed by connect() or setpeername()
+- A socket only talks to the one address the user accepted. Listening sockets
+  and unconnected UDP do not exist here; setpeername(), setsockname() and
+  sendto() to another address return nil and a message
+- The sockets are always non-blocking, as with LuaSocket's settimeout(0);
+  settimeout() accepts 0 and warns about anything else
+- socket.select(), socket.sleep(), socket.dns and socket.bind() are not
+  provided. Poll the sockets from an Update handler instead
+- socket:address() is not LuaSocket's; it is the address as the user accepted
+  it, for showing in a UI
+
+tcp_connect(host: string, port: number, cb: function)
+udp_connect(host: string, port: number, cb: function)
+- cb(socket, error) is called once the user has answered; socket is nil if the
+  connection was not made or the user declined
+
+gettime() -> seconds
+
+Socket methods, as in LuaSocket:
+- send(data [, i [, j]]) -> index of the last byte sent, or nil, error
+  [, index of the last byte sent]
+- TCP receive([pattern [, prefix]]) -> data, or nil, error [, partial data].
+  Pattern is a number of bytes, "*a" until the peer closes the connection, or
+  "*l" one line (the default). Error is "timeout" when what was asked for has
+  not arrived yet, or "closed".
+- UDP receive([size]) -> one datagram, truncated to size if given
+- UDP receivefrom([size]) -> data, ip, port
+- getpeername() -> ip, port
+- getsockname() -> ip, port
+- settimeout(0)
+- close()
+
+See extensions/network_test for a working example:
+  $ bin/buildat_client -m network_test
+
 ui_utils
 --------
 UI utiltiies.
 
 show_message_dialog(message)
+
+show_notification(text, duration_s)
+- A small non-modal notice in the top right corner, gone after duration_s
+  (2 seconds by default)
 
 
 Unsafe interfaces of built-in extensions
