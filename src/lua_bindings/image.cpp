@@ -30,6 +30,7 @@
 #include <Scene.h>
 #include <Color.h>
 #include <cmath>
+#include <algorithm>
 #define MODULE "lua_bindings"
 
 namespace magic = Urho3D;
@@ -412,6 +413,13 @@ static void apply_op(magic::Context *context, Canvas &c,
 			// frames is
 			int grid[2] = {1, 1};
 			if(table_ints(t, "grid", grid, 2) == 2){
+				// A zero says to work that side out so that the cells come
+				// out square, which is what a strip of animation frames is:
+				// as many frames as its height holds of its width.
+				if(grid[0] == 0 && grid[1] > 0)
+					grid[0] = std::max(1, c.w / std::max(1, c.h / grid[1]));
+				if(grid[1] == 0 && grid[0] > 0)
+					grid[1] = std::max(1, c.h / std::max(1, c.w / grid[0]));
 				if(grid[0] < 1 || grid[1] < 1)
 					throw Exception("compose_image(): crop grid is empty");
 				int cell[2] = {0, 0};

@@ -32,10 +32,15 @@ local VOXEL_PLACEHOLDER = 2
 local CONTENT_AIR = 126
 local CONTENT_IGNORE = 127
 
--- Luanti draw types that are a full cube and can be drawn from the node's own
--- six tiles. Everything else -- plants, liquids, node boxes, meshes, rails --
--- is not a cube at all and gets the placeholder until there is something that
--- can build its shape.
+-- Luanti draw types drawn as a full cube from the node's own six tiles.
+--
+-- simplified: a node box, a mesh and a liquid are not cubes, and are drawn as
+-- one anyway -- a slab is a whole block, a fence is a solid post -- because a
+-- block of the right texture reads far better than the grey placeholder a
+-- shape nothing can build gets. What stays a placeholder is the draw types
+-- whose texture would be nonsense on a cube: plants, torches, signs, rails
+-- and fire, which are quads rather than boxes. The upgrade path is a
+-- per-voxel geometry primitive; see the plan's M12.
 --
 -- The value is the buildat edge material the cube gets, which is what decides
 -- when a face between two of them is drawn: two "ground" cubes hide the face
@@ -49,11 +54,15 @@ local CONTENT_IGNORE = 127
 local EDGEMATERIAL_GLASS = 10
 local CUBE_DRAWTYPES = {
 	[0] = "ground",  -- NDT_NORMAL
+	[2] = "ground",  -- NDT_LIQUID
+	[3] = "ground",  -- NDT_FLOWINGLIQUID
 	[4] = "glass",   -- NDT_GLASSLIKE
 	[5] = "allfaces",-- NDT_ALLFACES, leaves
 	[6] = "allfaces",-- NDT_ALLFACES_OPTIONAL
+	[12] = "ground", -- NDT_NODEBOX
 	[13] = "glass",  -- NDT_GLASSLIKE_FRAMED
 	[15] = "glass",  -- NDT_GLASSLIKE_FRAMED_OPTIONAL
+	[16] = "ground", -- NDT_MESH
 }
 local DRAWTYPE_AIRLIKE = 1
 -- nodedef.lua's M.LIQUID_NONE, which is what a node that is not a liquid has

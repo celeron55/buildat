@@ -273,12 +273,31 @@ local function show_client(host, port, name, password)
 			return base
 		end
 
+		-- A tile whose texture is a strip of animation frames has to be cut
+		-- down to one before it goes in an atlas; which frame it is on is
+		-- not something this draws yet, so it is the first. How many frames
+		-- there are is not in the definition -- Luanti works it out from the
+		-- texture's own proportions -- so the crop asks for square cells.
+		--
+		-- simplified: the frame never advances, so water and lava and fire
+		-- stand still. The upgrade path is one composed texture per frame
+		-- and a voxel id per frame, or a shader that scrolls the atlas.
+		local FIRST_FRAME = {
+			key = "frame0",
+			ops = {{op = "crop", grid = {1, 0}, cell = {0, 0}}},
+		}
+
 		local function resolve_tile(def, i)
 			local expr = tile_expression(def, i)
 			if not expr then
 				return nil
 			end
-			return texmod.resolve(expr, texmod_ctx)
+			local tile = def.tiles[i]
+			local extra = nil
+			if tile.animation and tile.animation.type == 1 then
+				extra = FIRST_FRAME
+			end
+			return texmod.resolve(expr, texmod_ctx, extra)
 		end
 
 		-- The forms the server sends, and the one on screen

@@ -76,7 +76,7 @@ local function read_tiledef(r)
 	if has_flag(flags, TILE_FLAG_HAS_ALIGN_STYLE) then
 		r:u8()
 	end
-	return {name = name, animated = animation.type ~= 0, color = color}
+	return {name = name, animation = animation, color = color}
 end
 
 -- Luanti's LiquidType
