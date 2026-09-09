@@ -64,7 +64,7 @@ local CUBE_DRAWTYPES = {
 	[6] = "allfaces",-- NDT_ALLFACES_OPTIONAL
 	[13] = "glass",  -- NDT_GLASSLIKE_FRAMED
 	[15] = "glass",  -- NDT_GLASSLIKE_FRAMED_OPTIONAL
-	[16] = "ground", -- NDT_MESH
+	[16] = "ground", -- NDT_MESH, drawn as its selection box; see shapes.lua
 }
 local DRAWTYPE_AIRLIKE = 1
 -- nodedef.lua's M.LIQUID_NONE, which is what a node that is not a liquid has
@@ -146,6 +146,25 @@ local COLOR_STEP = {
 	[CPT2_COLORED_DEGROTATE] = 32,
 	[CPT2_COLORED_4DIR] = 4,
 }
+
+-- Lights in the scene, for the voxels a game says give light. Luanti floods
+-- light through the voxels and bakes it into param1; this puts a real light
+-- where the torch is instead, which is a buildat-ism and looks like one --
+-- the light falls off around corners the way a light does.
+--
+-- There is a cap because a forward renderer draws the geometry again per
+-- light: the nearest few to the camera are lit and the rest of the world
+-- keeps the light its param1 gives it.
+local MAX_SCENE_LIGHTS = 24
+-- Per block, so that a room full of lamps cannot fill the list on its own
+local MAX_LIGHTS_PER_BLOCK = 12
+-- How far a light of level n reaches, in voxels. Luanti's own light falls off
+-- one level per voxel, so the level is the range; a little more looks better
+-- than a little less.
+local LIGHT_RANGE_PER_LEVEL = 1.0
+-- What a light source is coloured. A game does not say -- Luanti's
+-- light_source is one number -- and what gives light in one is mostly fire.
+local LIGHT_COLOR = {r = 1.0, g = 0.85, b = 0.65}
 
 local function block_key(x, y, z)
 	return x..","..y..","..z
@@ -480,6 +499,100 @@ function M.new(magic, buildat, log, options)
 	-- the frame.
 	self.last_mesh_us = 0
 
+	-- Where the voxels that give light are in a block, in world
+	-- coordinates, and how bright: what a scene light is put at.
+	--
+	-- simplified: only the first MAX_LIGHTS_PER_BLOCK of a block are kept,
+	-- and which those are is whichever the scan meets first rather than the
+	-- brightest.
+	local function find_lights(block)
+		local levels = self.node_light
+		if not levels or not next(levels) then
+			return nil
+		end
+		local out = nil
+		local param0 = block.param0
+		local n = BLOCKSIZE * BLOCKSIZE * BLOCKSIZE
+		for i = 0, n - 1 do
+			local hi, lo = param0:byte(i * 2 + 1, i * 2 + 2)
+			local level = levels[hi * 256 + lo]
+			if level then
+				out = out or {}
+				-- The index order is x fastest, then y, then z
+				local x = i % BLOCKSIZE
+				local y = math.floor(i / BLOCKSIZE) % BLOCKSIZE
+				local z = math.floor(i / (BLOCKSIZE * BLOCKSIZE))
+				out[#out + 1] = {
+					block.x * BLOCKSIZE + x,
+					block.y * BLOCKSIZE + y,
+					block.z * BLOCKSIZE + z,
+					level,
+				}
+				if #out >= MAX_LIGHTS_PER_BLOCK then
+					break
+				end
+			end
+		end
+		return out
+	end
+
+	-- The lights that are in the scene now, as scene nodes kept and reused:
+	-- creating and destroying a light every time the player moves would cost
+	-- more than the lighting does.
+	local light_pool = {}
+	local lights_stale = true
+	local lights_at = nil
+
+	-- Puts the scene's lights on the light-giving voxels nearest the camera.
+	local function place_lights()
+		local p = camera_node.position
+		local reach = 60
+		local best = {}
+		for _, block in pairs(blocks) do
+			if block.lights then
+				for _, l in ipairs(block.lights) do
+					local dx, dy, dz = l[1] - p.x, l[2] - p.y, l[3] - p.z
+					local d = dx * dx + dy * dy + dz * dz
+					if d < reach * reach then
+						best[#best + 1] = {d = d, l = l}
+					end
+				end
+			end
+		end
+		table.sort(best, function(a, b) return a.d < b.d end)
+		for i = 1, MAX_SCENE_LIGHTS do
+			local entry = best[i]
+			local held = light_pool[i]
+			if entry and not held then
+				local node = scene:CreateChild("light_"..i)
+				held = {node = node, light = node:CreateComponent("Light")}
+				held.light.lightType = magic.LIGHT_POINT
+				held.light.color = magic.Color(LIGHT_COLOR.r, LIGHT_COLOR.g,
+						LIGHT_COLOR.b)
+				held.light.castShadows = false
+				-- The world's own light is diffuse; a highlight moving
+				-- about on a painted texture only looks wrong
+				held.light.specularIntensity = 0
+				light_pool[i] = held
+			end
+			if held then
+				if entry then
+					local l = entry.l
+					held.node.position = magic.Vector3(l[1], l[2], l[3])
+					held.light.range = l[4] * LIGHT_RANGE_PER_LEVEL
+					-- Luanti's light levels run to 14, and a torch is 12.
+					-- Kept low: this is added on top of the light the
+					-- mesher already baked in, and a cave with a few
+					-- torches in it washes out otherwise.
+					held.light.brightness = 0.1 + l[4] / 14 * 0.3
+					held.node.enabled = true
+				else
+					held.node.enabled = false
+				end
+			end
+		end
+	end
+
 	local function mesh_block(key)
 		local block = blocks[key]
 		if not block then
@@ -502,6 +615,8 @@ function M.new(magic, buildat, log, options)
 			fill = VOXEL_AIR_LIT,
 			sources = volume_sources(block),
 		}
+		block.lights = find_lights(block)
+		lights_stale = true
 		local node = block.node
 		buildat.set_voxel_geometry(node, data, self.voxel_reg,
 				self.atlas_reg, self.use_skylight,
@@ -1051,6 +1166,7 @@ function M.new(magic, buildat, log, options)
 			[CONTENT_IGNORE] = VOXEL_AIR,
 		}
 		local cubes = 0
+		local light_ids = {}
 		local solid = {}
 		local liquid = {}
 		local pointable = {}
@@ -1061,6 +1177,9 @@ function M.new(magic, buildat, log, options)
 		pair_epoch = pair_epoch + 1
 		for id, def in pairs(defs) do
 			solid[id] = def.walkable
+			if def.light_source and def.light_source > 0 then
+				light_ids[id] = def.light_source
+			end
 			-- Luanti's PointabilityType: 0 is not pointable, 1 is, and 2
 			-- stops a ray without being pointed at. Those two values are
 			-- that way round because they used to be a boolean.
@@ -1140,6 +1259,7 @@ function M.new(magic, buildat, log, options)
 		-- registry's segment ids
 		self.atlas_reg = buildat.createAtlasRegistry()
 		self.node_map = map
+		self.node_light = light_ids
 		self.node_solid = solid
 		self.node_liquid = liquid
 		self.node_pointable = pointable
@@ -1166,6 +1286,15 @@ function M.new(magic, buildat, log, options)
 	-- player, which is exactly where a hole is worst.
 	function self:update(dtime, drop_distance)
 		local p = camera_node.position
+		-- Which lights are the nearest changes as the player walks, but not
+		-- so fast that it is worth working out every frame
+		if not lights_at or lights_stale or
+				(p.x - lights_at[1]) ^ 2 + (p.y - lights_at[2]) ^ 2 +
+				(p.z - lights_at[3]) ^ 2 > 4 then
+			lights_at = {p.x, p.y, p.z}
+			lights_stale = false
+			place_lights()
+		end
 		if drop_distance then
 			local limit = drop_distance / BLOCKSIZE
 			for key, block in pairs(blocks) do

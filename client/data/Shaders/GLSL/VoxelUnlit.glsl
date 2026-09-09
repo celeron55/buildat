@@ -11,8 +11,10 @@
 //
 // Unlit because that is the whole point: the light is in the vertex colors,
 // where ambient occlusion and a per-face brightness are already folded in.
-// A dynamic light in the scene does not reach this technique, which has no
-// light pass. The fancier alternative is builtin/voxel_shading's PBRVoxel,
+// A dynamic light in the scene reaches this geometry through the additive
+// light pass the technique beside this file adds, which is Urho3D's own
+// LitSolid rather than anything here. The fancier alternative is
+// builtin/voxel_shading's PBRVoxel,
 // which reads the same vertex colors and adds normal maps, reflections and
 // direct light on top of them.
 //

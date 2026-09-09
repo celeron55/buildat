@@ -238,9 +238,11 @@ local function read_node(r)
 	def.drowning = r:u8()
 	def.floodable = r:u8() ~= 0
 	-- The shape: what the node is made of, what a ray picks, and what the
-	-- player walks into. Only the first is read; the other two are the same
-	-- format and are left alone.
+	-- player walks into. The first two are read -- a node whose shape is a
+	-- mesh has nothing in its node box, and then the selection box is the
+	-- best thing there is to draw -- and the collision box is left alone.
 	def.node_box = read_node_box(r)
+	def.selection_box = read_node_box(r)
 	return def
 end
 
