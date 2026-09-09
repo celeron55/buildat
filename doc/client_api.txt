@@ -413,7 +413,9 @@ buildat.compose_image(args) -> width, height
   by 90 degrees counterclockwise, 4 flip x, 5...7 that flip and then those
   rotations. An odd one swaps the width and the height.
 - crop with a grid cuts the canvas into cols by rows cells and keeps one,
-  which is what a sprite sheet or a stack of animation frames is.
+  which is what a sprite sheet or a stack of animation frames is. A zero for
+  one side of the grid means "as many as makes the cells square", which is
+  how many frames a strip holds without anybody having to count them.
 - colorize blends towards the colour by ratio and leaves fully transparent
   pixels alone; at ratio 255 it replaces the colour and multiplies the alpha.
 

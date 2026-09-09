@@ -234,16 +234,22 @@ function M.sources(expr, out)
 	return ok
 end
 
--- resolve(expr, ctx) -> the resource name to draw with, or nil
+-- resolve(expr, ctx, extra) -> the resource name to draw with, or nil
 --
 -- ctx.resource(media_name) -> the resource name of a file the server sent, or
 --   nil for one that is not here
 -- ctx.compose(expr, ops, size) -> the resource name an expression's operations
 --   were composed and saved under, or nil if that did not work
-function M.resolve(expr, ctx)
+--
+-- extra is {key = , ops = {...}}: compose_image operations to do after the
+-- expression's own, with a key that tells the two results apart. What wants
+-- it is a tile that is a strip of animation frames, which is not something
+-- the expression says -- it is a property of the tile -- and which has to be
+-- cropped to one frame before it goes in an atlas.
+function M.resolve(expr, ctx, extra)
 	-- A plain file name is already a texture; composing a copy of it would
 	-- only cost a file
-	if not expr:find("[%^%[%(]") then
+	if not extra and not expr:find("[%^%[%(]") then
 		return ctx.resource(expr)
 	end
 	local ops, size = M.build(expr, {
@@ -252,6 +258,12 @@ function M.resolve(expr, ctx)
 	})
 	if not ops then
 		return nil
+	end
+	if extra then
+		for _, op in ipairs(extra.ops) do
+			ops[#ops + 1] = op
+		end
+		return ctx.compose(expr.."\0"..extra.key, ops, size)
 	end
 	return ctx.compose(expr, ops, size)
 end

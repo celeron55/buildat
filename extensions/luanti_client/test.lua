@@ -391,7 +391,11 @@ assert(defs[7].groups.cracky == 3 and
 assert(defs[9].tiles[1].name == "grass_top.png" and
 		defs[9].tiles[6].name == "dirt.png^shadow.png",
 		"nodedef: tiles after the optional tile fields")
-assert(defs[11].tiles[1].animated, "nodedef: animation not noticed")
+assert(defs[11].tiles[1].animation.type == 1 and
+		defs[11].tiles[1].animation.aspect_w == 16,
+		"nodedef: a vertical-frames animation")
+assert(defs[13].tiles[1].animation.type == 2, "nodedef: a sheet animation")
+assert(defs[7].tiles[1].animation.type == 0, "nodedef: no animation")
 assert(defs[13].tiles[3].name == "torch.png", "nodedef: tiles after a sheet")
 -- The fields past the eighteen tiles: everything walking and digging need
 assert(defs[7].walkable and defs[7].diggable and not defs[7].climbable,
