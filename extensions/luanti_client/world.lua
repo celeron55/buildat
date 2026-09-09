@@ -123,6 +123,72 @@ local CPT2_COLORED_DEGROTATE = 12
 local CPT2_4DIR = 13
 local CPT2_COLORED_4DIR = 14
 
+-- Which tile goes on which face, per facedir: FACEDIR_TILES[facedir + 1][i]
+-- is the tile our face i is drawn with. Taken from Luanti's own
+-- dir_to_tile[24][8] in mapblock_mesh.cpp, read at the six directions our
+-- faces are in (+Y, -Y, +X, -X, +Z, -Z) -- which is the order Luanti keeps
+-- its tiles in too, one-based here.
+--
+-- simplified: Luanti also rotates the texture within some of those faces (a
+-- facedir voxel's top and bottom, mostly). A cube's tile has no rotation in
+-- the voxel mesher, so those faces are drawn unrotated; the upgrade path is a
+-- per-tile transform in VoxelDefinition, or six quads with rotated UVs.
+local FACEDIR_TILES = {
+	{1, 2, 3, 4, 5, 6},
+	{1, 2, 5, 6, 4, 3},
+	{1, 2, 4, 3, 6, 5},
+	{1, 2, 6, 5, 3, 4},
+	{6, 5, 3, 4, 1, 2},
+	{3, 4, 5, 6, 1, 2},
+	{5, 6, 4, 3, 1, 2},
+	{4, 3, 6, 5, 1, 2},
+	{5, 6, 3, 4, 2, 1},
+	{4, 3, 5, 6, 2, 1},
+	{6, 5, 4, 3, 2, 1},
+	{3, 4, 6, 5, 2, 1},
+	{4, 3, 1, 2, 5, 6},
+	{6, 5, 1, 2, 4, 3},
+	{3, 4, 1, 2, 6, 5},
+	{5, 6, 1, 2, 3, 4},
+	{3, 4, 2, 1, 5, 6},
+	{5, 6, 2, 1, 4, 3},
+	{4, 3, 2, 1, 6, 5},
+	{6, 5, 2, 1, 3, 4},
+	{2, 1, 4, 3, 5, 6},
+	{2, 1, 6, 5, 4, 3},
+	{2, 1, 3, 4, 6, 5},
+	{2, 1, 5, 6, 3, 4},
+}
+
+-- A wallmounted direction is a facedir; Luanti's own
+-- wallmounted_to_facedir[], one-based
+local WALLMOUNTED_FACEDIR = {20, 0, 17, 15, 8, 6, 21, 1}
+
+-- How param2 says which way a voxel faces, per paramtype2: which mask of it
+-- to read, and what the value means
+local FACING = {
+	[CPT2_FACEDIR] = "facedir",
+	[CPT2_COLORED_FACEDIR] = "facedir",
+	[CPT2_4DIR] = "4dir",
+	[CPT2_COLORED_4DIR] = "4dir",
+	[CPT2_WALLMOUNTED] = "wallmounted",
+	[CPT2_COLORED_WALLMOUNTED] = "wallmounted",
+}
+
+-- The facedir a voxel's param2 means, 0...23, or nil for one that does not
+-- turn. Luanti's MapNode::getFaceDir, with allow_wallmounted.
+local function facedir_of(kind, p2)
+	if kind == "facedir" then
+		return p2 % 32 % 24
+	elseif kind == "4dir" then
+		return p2 % 4
+	elseif kind == "wallmounted" then
+		local w = p2 % 8
+		return WALLMOUNTED_FACEDIR[(w > 5 and 5 or w) + 1]
+	end
+	return nil
+end
+
 -- Which bits of param2 are the palette index, per paramtype2. Luanti indexes
 -- the 256-entry palette with the whole of param2 for CPT2_COLOR and with the
 -- high bits for the types that keep a direction in the low ones; what is
@@ -336,9 +402,9 @@ function M.new(magic, buildat, log, options)
 	-- Bumped when the definitions change: every block has to be looked at
 	-- again, because what its param2 means has changed
 	local pair_epoch = 0
-	-- id -> {def =, mask =, palette =} for the definitions whose param2
-	-- changes what they look like; nil for everything else
-	local param2_color = {}
+	-- id -> {def =, step =, colors =, facing =} for the definitions whose
+	-- param2 changes what they look like; nil for everything else
+	local param2_look = {}
 	-- Set by set_node_definitions(), which is what knows how to build one
 	local build_pair = nil
 
@@ -346,7 +412,7 @@ function M.new(magic, buildat, log, options)
 	-- in Lua is not free, so it happens once per block rather than once per
 	-- mesh, and only while some definition cares about param2 at all.
 	local function register_pairs(block)
-		if not build_pair or not block.param2 or not next(param2_color) then
+		if not build_pair or not block.param2 or not next(param2_look) then
 			return
 		end
 		if block.pair_epoch == pair_epoch then
@@ -357,7 +423,7 @@ function M.new(magic, buildat, log, options)
 		local n = BLOCKSIZE * BLOCKSIZE * BLOCKSIZE
 		for i = 0, n - 1 do
 			local hi, lo = param0:byte(i * 2 + 1, i * 2 + 2)
-			local entry = param2_color[hi * 256 + lo]
+			local entry = param2_look[hi * 256 + lo]
 			if entry then
 				local p2 = param2:byte(i + 1)
 				local key = hi * 256 + lo + p2 * PAIR_SCALE
@@ -903,7 +969,7 @@ function M.new(magic, buildat, log, options)
 					string.char(param2 % 256)..block.param2:sub(i + 2)
 			-- What it looks like may be a pair that has no voxel id yet
 			if build_pair then
-				local entry = param2_color[param0]
+				local entry = param2_look[param0]
 				local key = param0 + (param2 % 256) * PAIR_SCALE
 				if entry and self.pair_map[key] == nil then
 					build_pair(entry, param0, param2 % 256, key)
@@ -977,7 +1043,7 @@ function M.new(magic, buildat, log, options)
 	-- name has to be different for every voxel in a registry: the registry
 	-- keys them by it, and adding a second voxel under a name it already has
 	-- is an error. A pair's name carries what makes it different.
-	local function build_voxel(reg, def, resolve_tile, override, name)
+	local function build_voxel(reg, def, resolve_tile, override, name, tiles)
 		local kind = CUBE_DRAWTYPES[def.drawtype]
 		local shape, double_sided = shapes.for_node(def)
 		if def.drawtype == DRAWTYPE_AIRLIKE then
@@ -1011,7 +1077,9 @@ function M.new(magic, buildat, log, options)
 		end
 		local resources = {}
 		for i = 1, 6 do
-			resources[i] = resolve_tile(def, i, override)
+			-- tiles says which of the definition's tiles this face wears,
+			-- which is what a facedir comes to for a cube
+			resources[i] = resolve_tile(def, tiles and tiles[i] or i, override)
 			if not resources[i] then
 				return nil
 			end
@@ -1033,7 +1101,7 @@ function M.new(magic, buildat, log, options)
 		self.pair_map = {}
 		self.pair_count = 0
 		pair_voxel = {}
-		param2_color = {}
+		param2_look = {}
 		pair_epoch = pair_epoch + 1
 		for id, def in pairs(defs) do
 			solid[id] = def.walkable
@@ -1056,13 +1124,22 @@ function M.new(magic, buildat, log, options)
 			-- colour per index, and which colour that is is only known once
 			-- a voxel with that param2 turns up: see register_pairs().
 			local step = COLOR_STEP[def.param_type_2]
-			if step and voxel and def.palette_name ~= "" then
-				local colors = palette_colors and
-						palette_colors(def.palette_name)
-				if colors and #colors > 1 then
-					param2_color[id] = {def = def, step = step,
-							colors = colors}
+			local colors = nil
+			if step and def.palette_name ~= "" and palette_colors then
+				colors = palette_colors(def.palette_name)
+				if colors and #colors < 2 then
+					colors = nil
 				end
+			end
+			-- A shape is not turned yet, only a cube's tiles are, so a voxel
+			-- with a shape of its own is left facing the way it was built
+			local facing = FACING[def.param_type_2]
+			if facing and shapes.for_node(def) then
+				facing = nil
+			end
+			if voxel and (colors or facing) then
+				param2_look[id] = {def = def, step = step, colors = colors,
+						facing = facing}
 			end
 		end
 
@@ -1073,14 +1150,25 @@ function M.new(magic, buildat, log, options)
 		build_pair = function(entry, id, p2, key)
 			-- Luanti stretches a palette to 256 entries by repeating each
 			-- pixel, and indexes that with param2's high bits
-			local index = math.floor((p2 - p2 % entry.step) *
-					#entry.colors / 256) + 1
-			local cache_key = id.."/"..index
+			local index = entry.colors and
+					math.floor((p2 - p2 % entry.step) *
+					#entry.colors / 256) + 1 or nil
+			local facedir = facedir_of(entry.facing, p2)
+			-- Two param2 values that come to the same colour and the same
+			-- facing are the same voxel
+			local cache_key = id.."/"..tostring(index).."/"..tostring(facedir)
+			-- Nothing different about it: the voxel the id already has
+			if not index and (not facedir or facedir == 0) then
+				self.pair_map[key] = self.node_map[id] or false
+				return
+			end
 			local voxel = pair_voxel[cache_key]
 			if voxel == nil then
 				voxel = build_voxel(self.voxel_reg, entry.def, resolve_tile,
-						entry.colors[index],
-						entry.def.name.."^"..index) or false
+						index and entry.colors[index] or nil,
+						entry.def.name.."^"..cache_key,
+						facedir and facedir ~= 0 and
+								FACEDIR_TILES[facedir + 1] or nil) or false
 				pair_voxel[cache_key] = voxel
 			end
 			-- false for a pair whose textures are not there: remembered so
