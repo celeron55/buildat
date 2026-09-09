@@ -633,11 +633,12 @@ function M.new(magic, buildat, log, options)
 			existing.param0 = block.param0
 			existing.param1 = block.param1
 			existing.param2 = block.param2
+			existing.meta = block.meta
 		else
 			blocks[key] = {
 				x = block.x, y = block.y, z = block.z,
 				param0 = block.param0, param1 = block.param1,
-				param2 = block.param2,
+				param2 = block.param2, meta = block.meta,
 			}
 		end
 		mark_dirty(key)
@@ -651,6 +652,45 @@ function M.new(magic, buildat, log, options)
 	-- the counters: this is what says whether the palettes are being used
 	function self:pair_voxel_count()
 		return self.pair_count
+	end
+
+	-- What hangs off the voxel at a node position: {fields =, lists =}, or
+	-- nil. The metadata came with the block the voxel is in, keyed by the
+	-- index into it.
+	function self:node_meta(x, y, z)
+		local bx = math.floor(x / BLOCKSIZE)
+		local by = math.floor(y / BLOCKSIZE)
+		local bz = math.floor(z / BLOCKSIZE)
+		local block = blocks[block_key(bx, by, bz)]
+		if not block or not block.meta then
+			return nil
+		end
+		local ix = x - bx * BLOCKSIZE
+		local iy = y - by * BLOCKSIZE
+		local iz = z - bz * BLOCKSIZE
+		return block.meta[(iz * BLOCKSIZE + iy) * BLOCKSIZE + ix]
+	end
+
+	-- The metadata a server changed, keyed by "x,y,z": it goes into the block
+	-- that holds each position, so that dropping the block drops it too.
+	function self:set_node_meta(entries)
+		for at, entry in pairs(entries) do
+			local x, y, z = at:match("^(-?%d+),(-?%d+),(-?%d+)$")
+			if x then
+				x, y, z = tonumber(x), tonumber(y), tonumber(z)
+				local bx = math.floor(x / BLOCKSIZE)
+				local by = math.floor(y / BLOCKSIZE)
+				local bz = math.floor(z / BLOCKSIZE)
+				local block = blocks[block_key(bx, by, bz)]
+				if block then
+					block.meta = block.meta or {}
+					local i = ((z - bz * BLOCKSIZE) * BLOCKSIZE +
+							(y - by * BLOCKSIZE)) * BLOCKSIZE +
+							(x - bx * BLOCKSIZE)
+					block.meta[i] = entry
+				end
+			end
+		end
 	end
 
 	function self:get_block(x, y, z)

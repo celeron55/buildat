@@ -801,6 +801,13 @@ struct CApp: public App, public magic::Application
 			m_command_seq_stdin =
 					g_client_config.get<bool>("command_seq_stdin");
 			m_command_seq_active = true;
+			// Urho3D toggles fullscreen on alt+enter. A driven run injects
+			// plenty of enters, and SDL's modifier state can have alt in it
+			// from an alt+tab the window never saw the release of, which
+			// then puts the window into fullscreen in the middle of a
+			// sequence -- and a screen mode change loses what was uploaded
+			// to the GPU by hand, so the world comes back black.
+			GetSubsystem<magic::Input>()->SetToggleFullscreen(false);
 			client::command_seq::inhibit_real_input(true);
 			client::command_seq::show_window(GetSubsystem<magic::Graphics>(),
 					GetSubsystem<magic::Input>());

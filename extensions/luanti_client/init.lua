@@ -50,6 +50,17 @@ local POINT_RANGE = 4
 
 -- How many of the player's main slots the hotbar shows. Luanti's own default,
 -- and what the number keys reach.
+-- The textures Luanti's own client ships rather than receiving: a game names
+-- them and nothing arrives for them. blank.png is the one that matters --
+-- what a node whose shape is drawn by something else wears -- and the unknown
+-- ones are what a client puts where it has nothing.
+local BUILTIN_TEXTURES = {
+	["blank.png"] = "luanti_client/res/blank.png",
+	["unknown_node.png"] = "luanti_client/res/placeholder.png",
+	["unknown_item.png"] = "luanti_client/res/placeholder.png",
+	["unknown_object.png"] = "luanti_client/res/placeholder.png",
+}
+
 local HOTBAR_SLOTS = 8
 
 -- Media files are asked for in batches, so that one REQUEST_MEDIA does not
@@ -229,7 +240,9 @@ local function show_client(host, port, name, password)
 		local texmod_ctx = {
 			resource = function(name)
 				if not store:have_file(name) then
-					return nil
+					-- A few names are the client's own in Luanti and no
+					-- server sends them
+					return BUILTIN_TEXTURES[name]
 				end
 				return server_key.."/"..name
 			end,
@@ -415,6 +428,16 @@ local function show_client(host, port, name, password)
 			-- client waits for
 			log:info(line)
 		end
+
+		-- The atlas textures the world is drawn with are filled in by hand
+		-- rather than loaded from a file, and Urho3D can only bring back
+		-- what it loaded: a change of screen mode takes the GL context with
+		-- it and the world comes back black. Building the registry again is
+		-- what fills them.
+		local screen_mode_cb = magic.SubscribeToEvent("ScreenMode",
+				function()
+					registry_stale = true
+				end)
 
 		-- The announcement and the definitions arrive in that order today, but
 		-- the plan needs all three, so any of them arriving makes it
@@ -631,6 +654,15 @@ local function show_client(host, port, name, password)
 			prepend = spec
 		end
 
+		-- A chest somebody put something in: the form showing it is redrawn
+		-- with what it holds now
+		client.on_node_meta = function(entries)
+			view:set_node_meta(entries)
+			if form then
+				form_stale = true
+			end
+		end
+
 		client.on_detached_inventory = function(name, data)
 			detached[name] = data and inventory.parse(data, detached[name])
 					or nil
@@ -792,18 +824,25 @@ local function show_client(host, port, name, password)
 			texture = media_texture,
 			item_image = item_image,
 			style = style,
-			-- Where a list[] element's slots come from. A form can name the
-			-- player's own inventory, one the server has detached, or a
-			-- node's -- and node metadata is not read yet, so a chest's own
-			-- slots come out empty.
+			-- Where a list[] element's slots come from: the player's own
+			-- inventory, one the server has detached, or the one that hangs
+			-- off a voxel, which is what a chest's slots are.
 			inventory = function(location, list_name)
 				local lists = nil
 				if location == "current_player" or
 						location:sub(1, 7) == "player:" then
 					lists = inv
 				else
-					local name = location:match("^detached:(.*)$")
-					lists = name and detached[name] or nil
+					local x, y, z = location:match(
+							"^nodemeta:(-?%d+),(-?%d+),(-?%d+)$")
+					if x then
+						local meta = view:node_meta(tonumber(x),
+								tonumber(y), tonumber(z))
+						lists = meta and meta.lists or nil
+					else
+						local name = location:match("^detached:(.*)$")
+						lists = name and detached[name] or nil
+					end
 				end
 				return lists and lists[list_name] or nil
 			end,
@@ -1522,6 +1561,7 @@ local function show_client(host, port, name, password)
 				magic.UnsubscribeFromEvent("MouseButtonUp", mouse_up_cb)
 				magic.UnsubscribeFromEvent("UIMouseClick", ui_click_cb)
 				magic.UnsubscribeFromEvent("MouseWheel", mouse_wheel_cb)
+				magic.UnsubscribeFromEvent("ScreenMode", screen_mode_cb)
 				close_form()
 				close_chat()
 				chat_text:Remove()
