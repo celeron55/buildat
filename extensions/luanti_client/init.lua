@@ -425,18 +425,42 @@ local function show_client(host, port, name, password)
 		local dig = nil
 		local digging = false
 
+		-- Building the registry is two and a half thousand definitions with a
+		-- texture expression each, and it happens while the world is already
+		-- on screen: a slice a frame rather than one frame of a second and a
+		-- half. registry_step is nil when nothing is being built.
+		local REGISTRY_BUDGET_US = 4000
+		local registry_step = nil
+		local registry_started_us = nil
+		local registry_spent_us = 0
+
 		local function rebuild_registry()
 			registry_stale = false
 			if not node_defs then
 				return
 			end
+			registry_step = view:begin_node_definitions(node_defs,
+					resolve_tile, palette_colors)
+			registry_started_us = buildat.get_time_us()
+			registry_spent_us = 0
+		end
+
+		-- One slice, and the line when it is done
+		local function step_registry()
 			local t0 = buildat.get_time_us()
-			local cubes = view:set_node_definitions(node_defs, resolve_tile,
-					palette_colors)
+			local done, cubes = registry_step(REGISTRY_BUDGET_US)
+			registry_spent_us = registry_spent_us +
+					(buildat.get_time_us() - t0)
+			if not done then
+				return
+			end
+			registry_step = nil
 			local line = cubes.." voxel types have their own textures"..
 					" ("..store:have_count().." files, "..composed_count..
 					" composed, "..
-					math.floor((buildat.get_time_us() - t0) / 1000).." ms)"
+					math.floor(registry_spent_us / 1000).." ms over "..
+					math.floor((buildat.get_time_us() - registry_started_us) /
+					1000).." ms)"
 			add_line(line)
 			-- In the log as well as on the screen: this is the last thing
 			-- before the world is there, which is what anything driving the
@@ -1320,7 +1344,9 @@ local function show_client(host, port, name, password)
 
 			-- Media requests go out a batch a frame, and the registry is
 			-- rebuilt once what was asked for has arrived
-			if #to_ask > 0 then
+			if registry_step then
+				step_registry()
+			elseif #to_ask > 0 then
 				local batch = {}
 				for _ = 1, math.min(#to_ask, MEDIA_PER_REQUEST) do
 					batch[#batch + 1] = table.remove(to_ask)
