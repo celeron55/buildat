@@ -568,9 +568,10 @@ function M.new(magic, buildat, log, options)
 	-- upgrade path is a billboard for the sprite visuals, which is a quad
 	-- turned to the camera, and a converter or a loader for the meshes.
 	--
-	-- obj is what objects.lua parsed; texture(name) turns one of its texture
-	-- names into a resource name, or nil.
-	function self:set_object(obj, texture)
+	-- obj is what objects.lua parsed; resource(obj) says what it is drawn
+	-- wearing, as a resource name, or nil for an object whose texture is not
+	-- there yet.
+	function self:set_object(obj, resource)
 		local entry = object_nodes[obj.id]
 		if not entry then
 			local node = scene:CreateChild("object_"..obj.id)
@@ -599,18 +600,16 @@ function M.new(magic, buildat, log, options)
 
 		if obj.visual_stale or not entry.textured then
 			obj.visual_stale = false
-			local name = props and props.textures and props.textures[1]
-			local resource = name and texture(name) or nil
-			if resource then
+			local name = resource(obj)
+			if name then
 				local material = magic.Material.new()
 				material:SetTechnique(0, object_technique)
 				material:SetTexture(0, magic.cache:GetResource("Texture2D",
-						resource))
+						name))
 				entry.model.material = material
 				entry.textured = true
 			end
 		end
-		return entry.wanted_texture
 	end
 
 	function self:remove_object(id)
