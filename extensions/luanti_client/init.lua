@@ -1087,6 +1087,125 @@ local function show_client(host, port, name, password)
 			open_form(spec, formname, "server")
 		end
 
+		-- Where the cursor is, for the tooltips a form asks for and for the
+		-- stack in hand: the UI does not say where it is and Input only
+		-- gives the movement since the last frame, so it is tracked from
+		-- MouseMove below. Declared here because everything that reads it is
+		-- below this point.
+		local mouse_at = nil
+
+		-- The stack in hand, drawn under the cursor: a stack on its way from
+		-- one slot to another has to be visible on the way. Under the UI's
+		-- own root and over everything, and never in the way of a click.
+		local held_element = nil
+		local held_key = nil
+		local held_size = 32
+
+		local function update_held_image()
+			local key = nil
+			if held and mouse_at and form and form.drawn then
+				key = held.name.." "..held.count
+			end
+			if not key then
+				if held_element then
+					held_element:Remove()
+					held_element = nil
+					held_key = nil
+				end
+				return
+			end
+			if key ~= held_key then
+				held_key = key
+				if held_element then
+					held_element:Remove()
+				end
+				local size = math.floor((form.drawn.slots[1] and
+						form.drawn.slots[1].size) or 32)
+				held_size = size
+				held_element = magic.ui.root:CreateChild("BorderImage")
+				held_element.defaultStyle = style
+				held_element.priority = 30000
+				held_element.enabled = false
+				held_element.size = magic.IntVector2(size, size)
+				local resource = item_image(held.name)
+				if resource then
+					held_element.texture = magic.cache:GetResource(
+							"Texture2D", resource)
+				else
+					held_element.texture = magic.cache:GetResource(
+							"Texture2D", "luanti_client/res/white.png")
+					held_element.color = magic.Color(0.8, 0.4, 0.8, 0.8)
+				end
+				if held.count > 1 then
+					local t = held_element:CreateChild("Text")
+					t:SetStyleAuto()
+					t:SetPosition(0, math.floor(size * 0.5))
+					t.text = tostring(held.count)
+					t:SetFontSize(math.max(8, math.floor(size * 0.32)))
+				end
+			end
+			-- Centred on the cursor, the way Luanti carries it
+			held_element:SetPosition(mouse_at[1] - math.floor(held_size / 2),
+					mouse_at[2] - math.floor(held_size / 2))
+		end
+
+		-- Which of a form's slots is at a point in the form's own
+		-- coordinates, or nil
+		local function slot_at(lx, ly)
+			if not form or not form.drawn then
+				return nil
+			end
+			for _, slot in ipairs(form.drawn.slots) do
+				if lx >= slot.x and lx < slot.x + slot.size and
+						ly >= slot.y and ly < slot.y + slot.size then
+					return slot
+				end
+			end
+			return nil
+		end
+
+		-- Taking a stack out of a slot and putting it into one. Luanti's own
+		-- inventory takes and puts a whole stack with the left button, half
+		-- of it or a single item with the right, and ten with the middle.
+		local function take_from(slot, button)
+			if not slot.stack then
+				return
+			end
+			local have = slot.stack.count
+			local take = have
+			if button == MOUSEB_RIGHT then
+				take = math.ceil(have / 2)
+			elseif button == MOUSEB_MIDDLE then
+				take = math.min(10, have)
+			end
+			held = {location = slot.location, list = slot.list,
+					index = slot.index, count = take,
+					name = slot.stack.name}
+			-- The slot the stack came from is marked as well as the stack
+			-- being drawn under the cursor: which slot it is on its way out
+			-- of is worth seeing
+			form.state.held = held
+			form_stale = true
+		end
+
+		local function put_into(slot, button)
+			local move = held.count
+			if button == MOUSEB_RIGHT then
+				move = 1
+			elseif button == MOUSEB_MIDDLE then
+				move = math.min(10, held.count)
+			end
+			client:send_inventory_move(move,
+					held.location, held.list, held.index,
+					slot.location, slot.list, slot.index)
+			held.count = held.count - move
+			if held.count <= 0 then
+				held = nil
+			end
+			form.state.held = held
+			form_stale = true
+		end
+
 		-- A click in a form: a slot picks a stack up and puts it down, and a
 		-- button sends the form's fields back with the button's own name
 		-- among them.
@@ -1157,53 +1276,14 @@ local function show_client(host, port, name, password)
 					return
 				end
 			end
-			for _, slot in ipairs(form.drawn.slots) do
-				if lx >= slot.x and lx < slot.x + slot.size and
-						ly >= slot.y and ly < slot.y + slot.size then
-					log:verbose("form: slot "..slot.list.." "..slot.index..
-							" at "..lx..","..ly)
-					if not held then
-						if slot.stack then
-							local have = slot.stack.count
-							local take = have
-							if button == MOUSEB_RIGHT then
-								take = math.ceil(have / 2)
-							elseif button == MOUSEB_MIDDLE then
-								take = math.min(10, have)
-							end
-							held = {location = slot.location,
-									list = slot.list, index = slot.index,
-									count = take}
-							-- The slot the stack came from is marked, which
-							-- is as much as there is of a stack on the
-							-- cursor.
-							--
-							-- simplified: Luanti draws what is held under
-							-- the mouse and follows it about. Doing that
-							-- wants the stack drawn every frame, and what
-							-- this needs is only to be able to see which
-							-- stack is in hand.
-							form.state.held = held
-							form_stale = true
-						end
-					else
-						local move = held.count
-						if button == MOUSEB_RIGHT then
-							move = 1
-						elseif button == MOUSEB_MIDDLE then
-							move = math.min(10, held.count)
-						end
-						client:send_inventory_move(move,
-								held.location, held.list, held.index,
-								slot.location, slot.list, slot.index)
-						held.count = held.count - move
-						if held.count <= 0 then
-							held = nil
-						end
-						form.state.held = held
-						form_stale = true
-					end
-					return
+			local slot = slot_at(lx, ly)
+			if slot then
+				log:verbose("form: slot "..slot.list.." "..slot.index..
+						" at "..lx..","..ly)
+				if held then
+					put_into(slot, button)
+				else
+					take_from(slot, button)
 				end
 			end
 		end
@@ -1352,10 +1432,6 @@ local function show_client(host, port, name, password)
 		local left = false
 		local leave
 
-		-- Where the cursor is, for the tooltips a form asks for: the UI does
-		-- not say where it is and Input only gives the movement since the
-		-- last frame, so it is tracked from MouseMove below.
-		local mouse_at = nil
 		-- What the cursor is over and for how long: a tooltip that came up
 		-- the instant the cursor crossed something would be in the way of
 		-- everything. Luanti waits about this long too.
@@ -1466,6 +1542,7 @@ local function show_client(host, port, name, password)
 				draw_form()
 			end
 			update_tooltip(dtime)
+			update_held_image()
 			local time_of_day = FORCE_TIME or client.time_of_day
 			if time_of_day then
 				local daylight = daynight_ratio(time_of_day)
@@ -1744,6 +1821,20 @@ local function show_client(host, port, name, password)
 			if event_data:GetInt("Button") == MOUSEB_LEFT then
 				digging = false
 			end
+			-- Dragging a stack: the press picked it up (UIMouseClick fires
+			-- on the way down), and letting go over another slot puts it
+			-- there. Over the slot it came from, or over nothing, the stack
+			-- stays in hand -- which is a plain click, and what the next
+			-- click puts down.
+			if form and form.drawn and held and mouse_at then
+				local slot = slot_at(mouse_at[1] - form.drawn.origin[1],
+						mouse_at[2] - form.drawn.origin[2])
+				if slot and not (slot.location == held.location and
+						slot.list == held.list and
+						slot.index == held.index) then
+					put_into(slot, event_data:GetInt("Button"))
+				end
+			end
 			if event_data:GetInt("Button") == MOUSEB_RIGHT and not form then
 				-- On the way up rather than the way down, so that holding
 				-- the button does not place a stack of nodes at once
@@ -1778,6 +1869,10 @@ local function show_client(host, port, name, password)
 			if hud then
 				hud:Remove()
 				hud = nil
+			end
+			if held_element then
+				held_element:Remove()
+				held_element = nil
 			end
 			magic.input:SetMouseVisible(true)
 			client:disconnect()
