@@ -1298,32 +1298,72 @@ function M.new(magic, buildat, log, options)
 		entry.material:SetShaderParameter("MatDiffColor", c)
 	end
 
+	-- The visuals drawn as a flat picture turned to the camera rather than
+	-- as a box: Luanti's sprite, and the two an item entity uses. A dropped
+	-- item's picture is the one an inventory draws for it, which for a node
+	-- is already the little isometric cube -- the same picture Luanti's
+	-- wielditem comes out as.
+	--
+	-- simplified: upright_sprite is in here too, where Luanti turns it with
+	-- the object's own yaw rather than to the camera.
+	local SPRITE_VISUALS = {
+		sprite = true,
+		upright_sprite = true,
+		item = true,
+		wielditem = true,
+	}
+
 	-- What an object is drawn as.
 	--
-	-- simplified: a box with the object's first texture on it, whatever its
-	-- visual says. Luanti draws a mesh for a mob, a billboard for a dropped
-	-- item and a cube for a few things, and Urho3D reads none of the model
-	-- formats Luanti's meshes come in -- but a box wearing a cow's texture
-	-- reads as a cow, where nothing at all reads as nothing at all. The
-	-- upgrade path is a billboard for the sprite visuals, which is a quad
-	-- turned to the camera, and a converter or a loader for the meshes.
+	-- simplified: a sprite visual is a billboard and everything else is a
+	-- box with the object's first texture on it, whatever its visual says.
+	-- Luanti draws a mesh for a mob and a cube for a few things, and Urho3D
+	-- reads none of the model formats Luanti's meshes come in -- but a box
+	-- wearing a cow's texture reads as a cow, where nothing at all reads as
+	-- nothing at all. The upgrade path is a converter or a loader for the
+	-- meshes, which are .b3d.
 	--
 	-- obj is what objects.lua parsed; resource(obj) says what it is drawn
 	-- wearing, as a resource name, or nil for an object whose texture is not
 	-- there yet.
 	function self:set_object(obj, resource)
+		local props = obj.props
+		local sprite = props ~= nil and SPRITE_VISUALS[props.visual] or false
 		local entry = object_nodes[obj.id]
+		-- A visual that changed changes which component draws it
+		if entry and entry.sprite ~= sprite then
+			scene:RemoveChild(entry.node)
+			entry = nil
+			object_nodes[obj.id] = nil
+		end
 		if not entry then
 			local node = scene:CreateChild("object_"..obj.id)
-			local model = node:CreateComponent("StaticModel")
-			model:SetModel(box_model)
-			model.castShadows = false
-			entry = {node = node, model = model}
+			entry = {node = node, sprite = sprite}
+			if sprite then
+				local set = node:CreateComponent("BillboardSet")
+				set.numBillboards = 1
+				-- Turned about Y only: a sprite that also leans back when
+				-- the camera looks down does not read as standing in the
+				-- world
+				set.faceCameraMode = magic.FC_ROTATE_Y
+				set.castShadows = false
+				set.sorted = true
+				local billboard = set:GetBillboard(0)
+				billboard.position = magic.Vector3(0, 0, 0)
+				billboard.enabled = true
+				set:Commit()
+				entry.model = set
+				entry.billboard = billboard
+			else
+				local model = node:CreateComponent("StaticModel")
+				model:SetModel(box_model)
+				model.castShadows = false
+				entry.model = model
+			end
 			object_nodes[obj.id] = entry
 		end
-		local props = obj.props
-		-- Where the box is and how big: the object's collision box, which is
-		-- in nodes and is not centred on the object's own position
+		-- Where it is and how big: the object's collision box, which is in
+		-- nodes and is not centred on the object's own position
 		local sx, sy, sz = 0.6, 1.8, 0.6
 		local cy = 0.9
 		if props and props.collision_min and props.collision_max then
@@ -1333,7 +1373,19 @@ function M.new(magic, buildat, log, options)
 			cy = (props.collision_max[2] + props.collision_min[2]) / 2
 		end
 		entry.offset = cy
-		entry.node.scale = magic.Vector3(sx, sy, sz)
+		if sprite then
+			-- A billboard is sized by itself, and by what the object asked
+			-- for rather than by what it collides with: a dropped item's
+			-- collision box is a whole node and its picture is not
+			local w = props.visual_size and props.visual_size[1] or 1
+			local h = props.visual_size and props.visual_size[2] or 1
+			entry.node.scale = magic.Vector3(1, 1, 1)
+			entry.billboard.size = magic.Vector2(math.max(0.05, w) / 2,
+					math.max(0.05, h) / 2)
+			entry.model:Commit()
+		else
+			entry.node.scale = magic.Vector3(sx, sy, sz)
+		end
 		entry.node.position = magic.Vector3(obj.position[1],
 				obj.position[2] + cy, obj.position[3])
 		entry.node.rotation = magic.Quaternion(0, -(obj.yaw or 0), 0)

@@ -430,6 +430,11 @@ function M.define(dst, util)
 
 	util.wc("Drawable", {
 		inherited_from_by_wrapper = dst.Component,
+		properties = {
+			-- Urho3D has this on Drawable, so a billboard set has it as
+			-- much as a static model does
+			castShadows = util.simple_property("boolean"),
+		},
 	})
 
 	util.wc("CustomGeometry", {
@@ -572,7 +577,6 @@ function M.define(dst, util)
 		properties = {
 			lightType = util.simple_property("number"),
 			brightness = util.simple_property("number"),
-			castShadows = util.simple_property("boolean"),
 			shadowIntensity = util.simple_property("number"),
 			shadowBias = util.simple_property("BiasParameters"),
 			shadowCascade = util.simple_property("CascadeParameters"),
@@ -614,8 +618,11 @@ function M.define(dst, util)
 		inherited_from_by_wrapper = dst.Resource,
 	})
 
+	-- Drawable, which is what Urho3D says it is; it used to say Octree here,
+	-- which gave it the octree's query methods and none of a drawable's
+	-- properties
 	util.wc("StaticModel", {
-		inherited_from_by_wrapper = dst.Octree,
+		inherited_from_by_wrapper = dst.Drawable,
 		instance = {
 			SetModel = util.self_function(
 					"SetModel", {}, {"StaticModel", "Model"}),
@@ -623,7 +630,6 @@ function M.define(dst, util)
 		properties = {
 			model = util.simple_property(dst.Model),
 			material = util.simple_property(dst.Material),
-			castShadows = util.simple_property("boolean"),
 		},
 	})
 
