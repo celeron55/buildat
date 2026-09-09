@@ -80,6 +80,33 @@ function M.plant_quads(scale, out)
 	return out
 end
 
+-- Luanti's LIQUID_LEVEL_MASK and LIQUID_LEVEL_MAX: the level a flowing
+-- liquid carries in its param2, 0...7.
+local LIQUID_LEVELS = 8
+
+-- How high a flowing liquid's surface stands in its own voxel, out of the
+-- level in its param2 and the liquid's range. The arithmetic is Luanti's
+-- getLiquidNeighborhood: a liquid whose range is shorter than eight spends
+-- its levels on the top of the voxel and everything below them is the floor.
+--
+-- simplified: at the top level the surface is the top of the voxel, which is
+-- what Luanti draws for a node with the same liquid above it or a source
+-- beside it -- and a node at the top level is nearly always one of those. A
+-- level below that gets a flat top, where Luanti slopes it by averaging the
+-- levels of the four neighbours around each corner. So a slope reads as
+-- steps; the upgrade path is the same per-neighbour data the connected node
+-- boxes want.
+function M.liquid_top(range, p2)
+	local level = p2 % LIQUID_LEVELS
+	if level >= LIQUID_LEVELS - 1 then
+		return 0.5
+	end
+	range = math.min(math.max(range or LIQUID_LEVELS, 1), LIQUID_LEVELS)
+	local floor_levels = LIQUID_LEVELS - range
+	level = level <= floor_levels and 0 or level - floor_levels
+	return -0.5 + (level + 0.5) / range
+end
+
 -- One quad just off the floor, which is what a rail or anything else painted
 -- on the ground is
 function M.flat_quads(out)
@@ -386,7 +413,10 @@ end
 -- mesh_quads is what objmesh.lua made of the model a "mesh" drawtype names,
 -- when the file was there to read; without it such a node falls back to the
 -- box the game says a ray hits.
-function M.for_node(def, facedir, wall, mesh_quads)
+--
+-- liquid_top is how high a flowing liquid's surface stands, from
+-- liquid_top(); without it a flowing liquid is a cube.
+function M.for_node(def, facedir, wall, mesh_quads, liquid_top)
 	local drawtype = def.drawtype
 	if drawtype == 12 then -- NDT_NODEBOX
 		local box = def.node_box
@@ -404,6 +434,19 @@ function M.for_node(def, facedir, wall, mesh_quads)
 			M.box_quads(b, out)
 		end
 		return M.turn_quads(out, facedir), false
+	end
+	if drawtype == 3 and liquid_top then -- NDT_FLOWINGLIQUID
+		-- A box with a lowered top. box_quads takes the side textures from
+		-- the part of the tile the box covers, which is what Luanti's own
+		-- liquid sides do: the surface cuts the texture, it does not squash
+		-- it. Drawn from both sides so that the surface is there when the
+		-- camera is under it.
+		--
+		-- A liquid at the top level has no lowered top and gets no shape at
+		-- all -- see liquid_top() -- so it stays a cube whose faces against
+		-- the next one are culled, which is what a waterfall or the middle of
+		-- a lake is made of.
+		return M.box_quads({-0.5, -0.5, -0.5, 0.5, liquid_top, 0.5}, {}), true
 	end
 	if drawtype == 9 or drawtype == 17 then -- PLANTLIKE, PLANTLIKE_ROOTED
 		return M.plant_quads(def.visual_scale), true

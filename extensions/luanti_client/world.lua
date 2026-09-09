@@ -37,13 +37,10 @@ local CONTENT_IGNORE = 127
 
 -- Luanti draw types drawn as a full cube from the node's own six tiles.
 --
--- simplified: a node box, a mesh and a liquid are not cubes, and are drawn as
--- one anyway -- a slab is a whole block, a fence is a solid post -- because a
--- block of the right texture reads far better than the grey placeholder a
--- shape nothing can build gets. What stays a placeholder is the draw types
--- whose texture would be nonsense on a cube: plants, torches, signs, rails
--- and fire, which are quads rather than boxes. The upgrade path is a
--- per-voxel geometry primitive; see the plan's M12.
+-- A draw type that has a shape of its own -- a node box, a mesh, a flowing
+-- liquid -- is here too: what it gets from this table is only what its cube
+-- is when it has no shape to be drawn as, which is what a mesh in a format
+-- this cannot read and a liquid at its top level come to.
 --
 -- The value is the buildat edge material the cube gets, which is what decides
 -- when a face between two of them is drawn: two "ground" cubes hide the face
@@ -67,6 +64,7 @@ local CUBE_DRAWTYPES = {
 	[16] = "ground", -- NDT_MESH, drawn as its selection box; see shapes.lua
 }
 local DRAWTYPE_AIRLIKE = 1
+local DRAWTYPE_FLOWINGLIQUID = 3
 -- nodedef.lua's M.LIQUID_NONE, which is what a node that is not a liquid has
 local NODEDEF_LIQUID_NONE = 0
 
@@ -1436,12 +1434,13 @@ function M.new(magic, buildat, log, options)
 	--
 	-- facedir and wall are which way the voxel faces, out of its param2: a
 	-- shape is turned by them and a cube's tiles are moved to the faces they
-	-- end up on.
+	-- end up on. liquid_top is how high a flowing liquid's surface stands,
+	-- which is the other thing param2 says about what a voxel looks like.
 	local function build_voxel(reg, def, resolve_tile, override, name,
-			facedir, wall)
+			facedir, wall, liquid_top)
 		local kind = CUBE_DRAWTYPES[def.drawtype]
 		local shape, double_sided = shapes.for_node(def, facedir, wall,
-				read_mesh and read_mesh(def) or nil)
+				read_mesh and read_mesh(def) or nil, liquid_top)
 		local tiles = facedir and facedir ~= 0 and
 				shapes.FACEDIR_TILES[facedir + 1] or nil
 		if def.drawtype == DRAWTYPE_AIRLIKE then
@@ -1549,6 +1548,12 @@ function M.new(magic, buildat, log, options)
 				end
 			end
 			local facing = FACING[def.param_type_2]
+			-- A flowing liquid's param2 says how high its surface stands, so
+			-- it wants a voxel per level the same way a facedir wants one per
+			-- direction. The range is how many of the eight levels the liquid
+			-- spends on the top of a voxel.
+			local liquid_range = def.drawtype == DRAWTYPE_FLOWINGLIQUID and
+					(def.liquid_range or 8) or nil
 
 			-- What the player runs into. Luanti takes the collision box when
 			-- the definition has one and the node box otherwise; a voxel
@@ -1562,9 +1567,10 @@ function M.new(magic, buildat, log, options)
 				collision[id] = {boxes = cbox.boxes, facing = facing}
 			end
 
-			if voxel and (colors or facing) then
+			if voxel and (colors or facing or liquid_range) then
 				new_param2_look[id] = {def = def, step = step,
-						colors = colors, facing = facing}
+						colors = colors, facing = facing,
+						liquid_range = liquid_range}
 			end
 		end
 
@@ -1583,16 +1589,26 @@ function M.new(magic, buildat, log, options)
 			-- facedir it comes to: which of its three boxes it is made of
 			-- depends on it
 			local wall = entry.facing == "wallmounted" and p2 % 8 or nil
-			-- Two param2 values that come to the same colour and the same
-			-- facing are the same voxel
+			-- A liquid at the top level is a whole cube, which the id's own
+			-- voxel already is -- and one whose faces against the next one
+			-- are culled, which a shape's are not
+			local liquid_top = entry.liquid_range and
+					shapes.liquid_top(entry.liquid_range, p2) or nil
+			if liquid_top and liquid_top >= 0.5 then
+				liquid_top = nil
+			end
+			-- Two param2 values that come to the same colour, the same facing
+			-- and the same liquid level are the same voxel
 			local cache_key = id.."/"..tostring(index).."/"..
-					tostring(facedir).."/"..tostring(wall)
+					tostring(facedir).."/"..tostring(wall).."/"..
+					tostring(liquid_top)
 			-- Nothing different about it: the voxel the id already has, which
 			-- was built facing 0 and, if wallmounted, on the floor
 			-- Whatever this writes, the map is not the one that was
 			-- compiled for the last block
 			self.pair_map_version = self.pair_map_version + 1
-			if not index and (not facedir or facedir == 0) then
+			if not index and not liquid_top and
+					(not facedir or facedir == 0) then
 				self.pair_map[key] = self.node_map[id] or false
 				return
 			end
@@ -1601,7 +1617,7 @@ function M.new(magic, buildat, log, options)
 				voxel = build_voxel(self.voxel_reg, entry.def, resolve_tile,
 						index and entry.colors[index] or nil,
 						entry.def.name.."^"..cache_key,
-						facedir, wall) or false
+						facedir, wall, liquid_top) or false
 				pair_voxel[cache_key] = voxel
 			end
 			-- false for a pair whose textures are not there: remembered so

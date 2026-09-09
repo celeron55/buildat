@@ -1383,6 +1383,31 @@ assert(ceiling.tile == 2,
 		"shapes: a torch on the ceiling wears tile "..ceiling.tile)
 assert(quad_face(ceiling) == nil, "shapes: a torch on the ceiling stands up")
 
+-- A flowing liquid's surface, out of its param2. Level 7 is the top of the
+-- voxel whatever the range; a shorter range puts every level it does not have
+-- on the floor, and the flow-down bit above the level bits changes nothing.
+assert(shapes.liquid_top(8, 7) == 0.5,
+		"shapes: a full flowing liquid fills its voxel")
+assert(shapes.liquid_top(8, 7 + 8) == 0.5,
+		"shapes: the flow-down bit is not part of the level")
+assert(math.abs(shapes.liquid_top(8, 0) - (-0.5 + 0.5 / 8)) < 1e-9,
+		"shapes: the lowest flowing liquid is one sixteenth deep")
+assert(shapes.liquid_top(8, 3) < shapes.liquid_top(8, 4),
+		"shapes: a higher level stands higher")
+assert(shapes.liquid_top(4, 3) == shapes.liquid_top(4, 4),
+		"shapes: a range of four puts levels 0...4 on the floor")
+assert(math.abs(shapes.liquid_top(4, 5) - (-0.5 + 1.5 / 4)) < 1e-9,
+		"shapes: a range of four spends its levels on the top of the voxel")
+-- And the box it comes to is a box with a lowered top, drawn from both sides
+local water, water_both = shapes.for_node({drawtype = 3}, nil, nil, nil,
+		shapes.liquid_top(8, 4))
+assert(water_both, "shapes: a liquid is drawn from both sides")
+local wlo, whi = box_of(water)
+assert(wlo[2] == -0.5 and math.abs(whi[2] - shapes.liquid_top(8, 4)) < 1e-9,
+		"shapes: a flowing liquid is a box with a lowered top")
+assert(shapes.for_node({drawtype = 3}, nil, nil, nil, nil) == nil,
+		"shapes: a flowing liquid with no level is a cube")
+
 print("shapes: ok")
 
 -- objmesh.lua
