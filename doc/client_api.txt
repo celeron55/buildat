@@ -3,6 +3,10 @@ Buildat Client API
 
 Lua code is run in two subtly different environments.
 
+Terminology: a *voxel* is one cell of a voxel volume, and a *node* is a scene
+node -- what a Scene holds and a component hangs off. Games that come from
+elsewhere may call a voxel a node (Luanti does); in buildat it is a voxel.
+
 
 Interface common to both environments
 =====================================
@@ -358,10 +362,16 @@ buildat.pack_voxel_volume(args) -> string
               order = "xyz",             -- which axis runs fastest, first
               shift = 0,                 -- sample = (sample >> shift) & mask
               mask = 0xffff,             -- default: all of the format's bits
-              map = <string|table|nil>,  -- sample -> value written
-              map_default = nil,         -- for samples the map does not have
+              map = <string|table|nil>,  -- key -> value written
+              map_default = nil,         -- for keys the map does not have
               field = "id",              -- id|skylight|lamplight|light|raw
-          },
+              second = {                 -- optional; nil for one array
+                  data = <string>,       -- as long as the first array
+                  format = "u8",
+                  shift = 0,             -- (sample >> shift) & mask
+                  mask = 0xff,
+                  scale = 65536,         -- key = first + second * scale
+              },
       },
   }
 
@@ -370,9 +380,15 @@ buildat.pack_voxel_volume(args) -> string
   those in one write (bits 24..31, skylight in the low nibble), "raw" all 32
   bits. Other bits are left alone, so ids and light are two sources over the
   same box.
-- map is a table indexed by sample value, or a string with one byte per sample
-  value. A sample the map does not mention gets map_default, and with no
-  map_default the voxel is left as it was.
+- map is a table indexed by the key, or a string with one byte per key. A key
+  the map does not mention gets map_default, and with no map_default the voxel
+  is left as it was. Keys too far apart to be an array are held as a hash, so
+  a sparse table of large keys costs what it holds rather than what it spans.
+- second is a second sample array read in lockstep with the first, at the same
+  index: the key looked up is first + second * scale. What wanted this is
+  Luanti's param2, which decides a voxel's colour or which way it faces, so
+  what a voxel looks like is a pair of samples rather than one -- one voxel id
+  per (type, param2) pair that actually turns up.
 - A source box that hangs over the edge of the region is clipped, which is what
   a border slice from a neighbour that has not arrived yet needs.
 
