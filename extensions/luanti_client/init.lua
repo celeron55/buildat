@@ -182,8 +182,12 @@ local function show_client(host, port, name, password)
 	-- has none of its own
 	chat_text.defaultStyle = style
 	chat_text:SetStyleAuto()
-	chat_text:SetAlignment(HA_LEFT, VA_BOTTOM)
-	chat_text:SetPosition(8, -34)
+	-- The top left corner, under the lines of detail, which is where a
+	-- Luanti game expects it: what a game puts on the screen of its own is
+	-- along the bottom, and chat down there lands on top of it. update_hud()
+	-- moves it as those lines grow and when F5 takes them away.
+	chat_text:SetAlignment(HA_LEFT, VA_TOP)
+	chat_text:SetPosition(8, 8)
 	chat_text.color = magic.Color(1.0, 1.0, 0.9)
 
 	-- Until the game's definitions and its media are in, the world is a field
@@ -1120,6 +1124,9 @@ local function show_client(host, port, name, password)
 		local game_hud_missing = false
 		-- How many of them there are, for the counters line
 		local hud_count = 0
+		-- Where the chat lines are, so that they are only moved when the
+		-- lines of detail above them changed height
+		local chat_at_y = nil
 
 		-- Every change to any of it, with the elements keyed by the server's
 		-- own id; client.lua holds them because HUDCHANGE names one field of
@@ -1147,6 +1154,14 @@ local function show_client(host, port, name, password)
 			end
 			chat_text.visible = show_chat and
 					luanti_hud.has_flag(hud_flags, luanti_hud.FLAG.chat)
+			local chat_y = 8
+			if show_debug then
+				chat_y = 8 + status_text.height + 8
+			end
+			if chat_y ~= chat_at_y then
+				chat_at_y = chat_y
+				chat_text:SetPosition(8, chat_y)
+			end
 
 			-- The game's own elements, built again when the server changed
 			-- any of them or the window changed size

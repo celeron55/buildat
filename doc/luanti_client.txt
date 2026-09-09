@@ -29,8 +29,9 @@ faster, 1 to 8 pick a hotbar slot, the left mouse button digs what is pointed
 at and the right one places what is wielded, I opens the inventory, T says
 something (a line starting with a slash is a command), K toggles flying, H
 toggles going through walls, F1 hides the hotbar, the health bar and the
-crosshair, F2 hides what has been said, F5 hides the lines of detail in the
-corner, escape closes a form and then disconnects.
+crosshair, F2 hides what has been said (which is in the top left corner under
+those lines, where a Luanti game expects it: what a game draws of its own is
+along the bottom), F5 hides the lines of detail in the corner, escape closes a form and then disconnects.
 Flying and going through walls need the server to give the player the fly and
 noclip privileges; without them its movement checks pull the player back.
 
