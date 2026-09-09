@@ -37,6 +37,9 @@ buildat.font_sans         = "Fonts/Overpass-Regular.ttf"
 buildat.font_mono         = "Fonts/OverpassMono-Regular.ttf"
 buildat.SpatialUpdateQueue = __buildat_SpatialUpdateQueue
 buildat.pack_voxel_volume = __buildat_pack_voxel_volume
+-- add_resource_dir(path) -> bool. Only under the cache path; Urho3D's own Lua
+-- bindings do not have this.
+buildat.add_resource_dir  = __buildat_add_resource_dir
 
 buildat.safe.disconnect    = __buildat_disconnect
 buildat.safe.set_ui_scale  = __buildat_set_ui_scale

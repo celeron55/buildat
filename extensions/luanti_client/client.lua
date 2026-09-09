@@ -30,39 +30,43 @@ local FORMSPEC_API_VERSION = 8
 local VERSION = {major = 5, minor = 15, patch = 0, hash = "buildat"}
 
 local TOSERVER = {
-	INIT         = 0x02,
-	INIT2        = 0x11,
-	PLAYERPOS    = 0x23,
-	GOTBLOCKS    = 0x24,
-	CLIENT_READY = 0x43,
-	FIRST_SRP    = 0x50,
-	SRP_BYTES_A  = 0x51,
-	SRP_BYTES_M  = 0x52,
+	INIT          = 0x02,
+	INIT2         = 0x11,
+	PLAYERPOS     = 0x23,
+	GOTBLOCKS     = 0x24,
+	REQUEST_MEDIA = 0x40,
+	CLIENT_READY  = 0x43,
+	FIRST_SRP     = 0x50,
+	SRP_BYTES_A   = 0x51,
+	SRP_BYTES_M   = 0x52,
 }
 
 -- The channel each command goes on, and whether it is sent reliably; from
 -- Luanti's serverCommandFactoryTable
 local TOSERVER_DELIVERY = {
-	[TOSERVER.INIT]         = {1, false},
-	[TOSERVER.INIT2]        = {1, true},
-	[TOSERVER.PLAYERPOS]    = {0, false},
-	[TOSERVER.GOTBLOCKS]    = {2, true},
-	[TOSERVER.CLIENT_READY] = {1, true},
-	[TOSERVER.FIRST_SRP]    = {1, true},
-	[TOSERVER.SRP_BYTES_A]  = {1, true},
-	[TOSERVER.SRP_BYTES_M]  = {1, true},
+	[TOSERVER.INIT]          = {1, false},
+	[TOSERVER.INIT2]         = {1, true},
+	[TOSERVER.PLAYERPOS]     = {0, false},
+	[TOSERVER.GOTBLOCKS]     = {2, true},
+	[TOSERVER.REQUEST_MEDIA] = {1, true},
+	[TOSERVER.CLIENT_READY]  = {1, true},
+	[TOSERVER.FIRST_SRP]     = {1, true},
+	[TOSERVER.SRP_BYTES_A]   = {1, true},
+	[TOSERVER.SRP_BYTES_M]   = {1, true},
 }
 
 local TOCLIENT = {
-	HELLO         = 0x02,
-	AUTH_ACCEPT   = 0x03,
-	ACCESS_DENIED = 0x0A,
-	BLOCKDATA     = 0x20,
-	TIME_OF_DAY   = 0x29,
-	MOVE_PLAYER   = 0x34,
-	NODEDEF       = 0x3A,
-	ITEMDEF       = 0x3D,
-	SRP_BYTES_S_B = 0x60,
+	HELLO          = 0x02,
+	AUTH_ACCEPT    = 0x03,
+	ACCESS_DENIED  = 0x0A,
+	BLOCKDATA      = 0x20,
+	TIME_OF_DAY    = 0x29,
+	MOVE_PLAYER    = 0x34,
+	MEDIA          = 0x38,
+	NODEDEF        = 0x3A,
+	ANNOUNCE_MEDIA = 0x3C,
+	ITEMDEF        = 0x3D,
+	SRP_BYTES_S_B  = 0x60,
 }
 
 -- 16x16x16 nodes to a mapblock, as everywhere in Luanti
@@ -201,9 +205,16 @@ function M.new(socket, options, log)
 			unhandled = {}, -- command -> how many arrived
 			on_status = options.on_status,
 			on_command = nil,
-			-- on_block(x, y, z, block) for each mapblock that arrives; see
+			-- on_block(block) for each mapblock that arrives; see
 			-- parse_blockdata() for what a block holds
 			on_block = nil,
+			-- on_nodedef(data) with the decompressed NODEDEF payload;
+			-- nodedef.lua is what reads it
+			on_nodedef = nil,
+			-- on_announce_media(files, remote_servers) and
+			-- on_media(files, bunch, bunches); media.lua is what keeps them
+			on_announce_media = nil,
+			on_media = nil,
 			-- Where the server last put us, in nodes, and where we tell it we
 			-- are. The extension moves this; see set_position().
 			position = {x = 0, y = 0, z = 0},
@@ -351,15 +362,66 @@ function M.new(socket, options, log)
 	end
 
 	handlers[TOCLIENT.ITEMDEF] = function(r)
-		self.itemdef_data = buildat.decompress(r:longstring(), "zstd")
+		-- What an item is is of no use until there is an inventory to show;
+		-- the packet arriving is what CLIENT_READY waits for
 		got_itemdef = true
 		maybe_send_client_ready()
 	end
 
 	handlers[TOCLIENT.NODEDEF] = function(r)
-		self.nodedef_data = buildat.decompress(r:longstring(), "zstd")
+		local data = buildat.decompress(r:longstring(), "zstd")
 		got_nodedef = true
+		if self.on_nodedef then
+			self.on_nodedef(data)
+		end
 		maybe_send_client_ready()
+	end
+
+	-- ANNOUNCE_MEDIA at protocol 48 and up: a zstd frame of the file names,
+	-- and then a raw 20-byte sha1 for each of them in the same order, in the
+	-- rest of the packet.
+	--
+	-- The name table is Luanti's serializeString16Array, which is not a list
+	-- of length-prefixed strings: it is a u32 count, then every length, then
+	-- every string's bytes.
+	handlers[TOCLIENT.ANNOUNCE_MEDIA] = function(r)
+		local nr = serialize.reader(buildat.decompress(r:longstring(), "zstd"))
+		local count = nr:u32()
+		local sizes = {}
+		for i = 1, count do
+			sizes[i] = nr:u16()
+		end
+		local files = {}
+		for i = 1, count do
+			files[i] = {name = nr:raw(sizes[i])}
+		end
+		for i = 1, count do
+			files[i].sha1 = r:raw(20)
+		end
+		-- Remote media servers, comma separated. Fetching over HTTP is not
+		-- something this client does; the server sends what we ask it for.
+		local remote = r:remaining() > 0 and r:string() or ""
+		status("The server announced "..count.." media files")
+		if self.on_announce_media then
+			self.on_announce_media(files, remote)
+		end
+	end
+
+	handlers[TOCLIENT.MEDIA] = function(r)
+		local num_bunches = r:u16()
+		local bunch_i = r:u16()
+		local num_files = r:u32()
+		local files = {}
+		for i = 1, num_files do
+			local name = r:string()
+			files[i] = {
+				name = name,
+				data = buildat.decompress(r:longstring(), "zstd"),
+			}
+		end
+		if self.on_media then
+			self.on_media(files, bunch_i, num_bunches)
+		end
 	end
 
 	handlers[TOCLIENT.MOVE_PLAYER] = function(r)
@@ -480,6 +542,20 @@ function M.new(socket, options, log)
 		send_gotblocks()
 	end
 
+	-- Asks the server for media files by name. The list is usually far too big
+	-- for one datagram, which is what connection.lua's outgoing split is for.
+	function self:request_media(names)
+		if #names == 0 then
+			return
+		end
+		local w = serialize.writer():u16(#names)
+		for _, name in ipairs(names) do
+			w:string(name)
+		end
+		send_command(TOSERVER.REQUEST_MEDIA, w:data())
+		status("Asked for "..#names.." media files")
+	end
+
 	-- Where the client says it is, in nodes. The server sends the blocks
 	-- around this and moves the player to it, so it is both the camera's
 	-- position and the player's.
@@ -517,6 +593,7 @@ function M.new(socket, options, log)
 	return self
 end
 
+M.serialize = serialize
 M.MAP_BLOCKSIZE = MAP_BLOCKSIZE
 M.NODECOUNT = NODECOUNT
 M.BS = BS

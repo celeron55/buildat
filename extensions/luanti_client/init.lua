@@ -20,6 +20,8 @@ local srp = dofile(path.."/srp.lua")
 local engine_test = dofile(path.."/engine_test.lua")
 local luanti = dofile(path.."/client.lua")
 local world = dofile(path.."/world.lua")
+local nodedef = dofile(path.."/nodedef.lua")
+local media = dofile(path.."/media.lua")
 local M = {safe = nil}
 
 -- BUILDAT_LUANTI_ADDRESS is for scripted runs (bin/buildat_client -c ...),
@@ -34,6 +36,20 @@ local DROP_DISTANCE = 260
 -- Luanti puts the player's eyes this far above their feet, and the position
 -- the server sends is the feet
 local EYE_HEIGHT = 1.625
+
+-- Media files are asked for in batches, so that one REQUEST_MEDIA does not
+-- turn into hundreds of split chunks in one go
+local MEDIA_PER_REQUEST = 200
+-- The voxel registry is rebuilt when the media that was asked for has all
+-- arrived, and this long after asking whether it has or not: a file the server
+-- never sends must not hold every other texture back forever
+local MEDIA_WAIT_S = 15
+
+-- Where the server's media goes. The whole directory is one resource dir and
+-- the files inside it are addressed as "<server>/<name>", so two servers with
+-- a same-named texture do not collide.
+local MEDIA_ROOT = __buildat_get_path("cache").."/luanti_media"
+local media_root_added = false
 
 local function labeled_edit(parent, label, value)
 	local text = parent:CreateChild("Text")
@@ -101,6 +117,78 @@ local function show_client(host, port, name, password)
 			view:set_block(block)
 		end
 
+		-- The server's media, and what the node definitions make of it
+		local server_key = media.server_key(host, port)
+		local store = media.new(buildat, log, MEDIA_ROOT.."/"..server_key)
+		-- One resource dir for all servers; see MEDIA_ROOT
+		if not media_root_added then
+			__buildat_mkdir(MEDIA_ROOT)
+			buildat.add_resource_dir(MEDIA_ROOT)
+			media_root_added = true
+		end
+
+		local node_defs = nil
+		local announced = nil
+		local to_ask = {}
+		local media_asked_at = nil
+		local registry_stale = false
+
+		-- A tile's texture name -> a resource name, or nil for one that is not
+		-- there. Texture modifiers ("grass.png^[colorize:...") are their own
+		-- language and are not a file name at all; those nodes keep the
+		-- placeholder.
+		local function resolve_texture(name)
+			local plain = nodedef.plain_texture_name(name)
+			if not plain or not store:have_file(plain) then
+				return nil
+			end
+			return server_key.."/"..plain
+		end
+
+		local function rebuild_registry()
+			registry_stale = false
+			if not node_defs then
+				return
+			end
+			local t0 = buildat.get_time_us()
+			local cubes = view:set_node_definitions(node_defs,
+					resolve_texture)
+			add_line(cubes.." node types have their own textures"..
+					" ("..store:have_count().." files, "..
+					math.floor((buildat.get_time_us() - t0) / 1000).." ms)")
+		end
+
+		-- The announcement and the definitions arrive in that order today, but
+		-- the plan needs both, so either one arriving makes it
+		local function plan_media()
+			if not (node_defs and announced) then
+				return
+			end
+			local wanted = nodedef.texture_names(node_defs)
+			for _, name in ipairs(store:plan(announced, wanted)) do
+				to_ask[#to_ask + 1] = name
+			end
+		end
+
+		client.on_nodedef = function(data)
+			local defs, count = nodedef.parse(luanti.serialize, data, log)
+			node_defs = defs
+			add_line(count.." node definitions")
+			registry_stale = true
+			plan_media()
+		end
+
+		client.on_announce_media = function(files)
+			announced = files
+			registry_stale = true
+			plan_media()
+		end
+
+		client.on_media = function(files)
+			store:store(files)
+			registry_stale = true
+		end
+
 		-- The bottom line is remade every frame; everything above it is the
 		-- log of what happened
 		local function set_counters()
@@ -110,9 +198,10 @@ local function show_client(host, port, name, password)
 			status_text.text = table.concat(lines, "\n").."\n"..
 					string.format(
 					"%s | blocks: %d received, %d in scene, %d to mesh"..
-					" | %d us to hand over",
+					" | %d us to hand over | media: %d files, %d to come",
 					client.state, client.blocks_received, view:block_count(),
-					view:dirty_count(), view.last_mesh_us)
+					view:dirty_count(), view.last_mesh_us,
+					store:have_count(), store:missing_count())
 		end
 
 		-- A plain subscription rather than root:SubscribeToStackEvent(), which
@@ -128,6 +217,23 @@ local function show_client(host, port, name, password)
 			view:set_camera(p.x, p.y + EYE_HEIGHT, p.z, client.pitch,
 					client.yaw)
 			view:update(dtime, DROP_DISTANCE)
+
+			-- Media requests go out a batch a frame, and the registry is
+			-- rebuilt once what was asked for has arrived
+			if #to_ask > 0 then
+				local batch = {}
+				for _ = 1, math.min(#to_ask, MEDIA_PER_REQUEST) do
+					batch[#batch + 1] = table.remove(to_ask)
+				end
+				client:request_media(batch)
+				media_asked_at = buildat.get_time_us()
+			elseif registry_stale and node_defs then
+				local waited = media_asked_at and
+						(buildat.get_time_us() - media_asked_at) / 1000000 or 0
+				if store:missing_count() == 0 or waited > MEDIA_WAIT_S then
+					rebuild_registry()
+				end
+			end
 			set_counters()
 		end)
 

@@ -76,6 +76,12 @@ buildat.bignum
 - What is built on these belongs in Lua; extensions/luanti_client/srp.lua is an
   SRP-6a login written that way.
 
+buildat.add_resource_dir(path) -> bool
+- Puts a directory on Urho3D's resource search path, so files written there can
+  be asked of the resource cache by name. Only directories under the client's
+  cache path; a resource dir is readable by everything the client draws.
+- Urho3D's own Lua bindings do not expose AddResourceDir.
+
 buildat.extension_path(name)
 
 
