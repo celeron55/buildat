@@ -544,6 +544,101 @@ function M.new(magic, buildat, log, options)
 		pointed_node.enabled = false
 	end
 
+	--
+	-- The things in the world that are not nodes
+	--
+
+	-- A scene node per object, kept by id
+	local object_nodes = {}
+	local object_technique = magic.cache:GetResource("Technique",
+			"Techniques/UnlitAlphaMask.xml")
+	local box_model = magic.cache:GetResource("Model", "Models/Box.mdl")
+
+	-- What an object is drawn as.
+	--
+	-- simplified: a box with the object's first texture on it, whatever its
+	-- visual says. Luanti draws a mesh for a mob, a billboard for a dropped
+	-- item and a cube for a few things, and Urho3D reads none of the model
+	-- formats Luanti's meshes come in -- but a box wearing a cow's texture
+	-- reads as a cow, where nothing at all reads as nothing at all. The
+	-- upgrade path is a billboard for the sprite visuals, which is a quad
+	-- turned to the camera, and a converter or a loader for the meshes.
+	--
+	-- obj is what objects.lua parsed; texture(name) turns one of its texture
+	-- names into a resource name, or nil.
+	function self:set_object(obj, texture)
+		local entry = object_nodes[obj.id]
+		if not entry then
+			local node = scene:CreateChild("object_"..obj.id)
+			local model = node:CreateComponent("StaticModel")
+			model:SetModel(box_model)
+			model.castShadows = false
+			entry = {node = node, model = model}
+			object_nodes[obj.id] = entry
+		end
+		local props = obj.props
+		-- Where the box is and how big: the object's collision box, which is
+		-- in nodes and is not centred on the object's own position
+		local sx, sy, sz = 0.6, 1.8, 0.6
+		local cy = 0.9
+		if props and props.collision_min and props.collision_max then
+			sx = math.max(0.05, props.collision_max[1] - props.collision_min[1])
+			sy = math.max(0.05, props.collision_max[2] - props.collision_min[2])
+			sz = math.max(0.05, props.collision_max[3] - props.collision_min[3])
+			cy = (props.collision_max[2] + props.collision_min[2]) / 2
+		end
+		entry.offset = cy
+		entry.node.scale = magic.Vector3(sx, sy, sz)
+		entry.node.position = magic.Vector3(obj.position[1],
+				obj.position[2] + cy, obj.position[3])
+		entry.node.rotation = magic.Quaternion(0, -(obj.yaw or 0), 0)
+
+		if obj.visual_stale or not entry.textured then
+			obj.visual_stale = false
+			local name = props and props.textures and props.textures[1]
+			local resource = name and texture(name) or nil
+			if resource then
+				local material = magic.Material.new()
+				material:SetTechnique(0, object_technique)
+				material:SetTexture(0, magic.cache:GetResource("Texture2D",
+						resource))
+				entry.model.material = material
+				entry.textured = true
+			end
+		end
+		return entry.wanted_texture
+	end
+
+	function self:remove_object(id)
+		local entry = object_nodes[id]
+		if entry then
+			scene:RemoveChild(entry.node)
+			object_nodes[id] = nil
+		end
+	end
+
+	-- Moves the objects' scene nodes to where they are now
+	function self:place_objects(objects)
+		for id, obj in pairs(objects) do
+			local entry = object_nodes[id]
+			if entry and obj.position then
+				entry.node.position = magic.Vector3(obj.position[1],
+						obj.position[2] + (entry.offset or 0),
+						obj.position[3])
+				entry.node.rotation = magic.Quaternion(0,
+						-(obj.yaw or 0), 0)
+			end
+		end
+	end
+
+	function self:object_count()
+		local n = 0
+		for _, _ in pairs(object_nodes) do
+			n = n + 1
+		end
+		return n
+	end
+
 	-- Shows the outline on a node, or hides it when there is nothing pointed
 	-- at. above is which way the face points.
 	function self:set_pointed(under, above)
@@ -781,6 +876,10 @@ function M.new(magic, buildat, log, options)
 		end
 		dirty = {}
 		dirty_count = 0
+		for id, entry in pairs(object_nodes) do
+			scene:RemoveChild(entry.node)
+			object_nodes[id] = nil
+		end
 		-- Dropping the viewport rather than replacing it: there is nothing
 		-- else to show, and SetViewport() takes no nil
 		magic.renderer.numViewports = 0

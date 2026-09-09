@@ -22,6 +22,7 @@ local player = dofile(dir.."/player.lua")
 local texmod = dofile(dir.."/texmod.lua")
 local inventory = dofile(dir.."/inventory.lua")
 local formspec = dofile(dir.."/formspec.lua")
+local objects = dofile(dir.."/objects.lua")
 local nodedef = dofile(dir.."/nodedef.lua")
 local media = dofile(dir.."/media.lua")
 
@@ -87,6 +88,14 @@ local x, y, z = v:v3s16()
 assert(x == -1 and y == 2 and z == -3, "serialize: v3s16")
 local fx, fy, fz = v:v3f()
 assert(fx == 1 and fy == 2 and fz == 3, "serialize: v3f")
+
+-- Floats out and back, which is what the object messages and the movement
+-- constants are made of
+for _, v in ipairs({0, 1, -1, 0.5, 1.625, 10.4, 123456.75, -3.5}) do
+	local got = serialize.reader(serialize.writer():f32(v):data()):f32()
+	assert(math.abs(got - v) <= math.abs(v) * 1e-6,
+			"serialize: f32 round trip of "..v.." gave "..got)
+end
 
 -- Wide strings, which is what chat is: a count of UTF-16 units and then
 -- those, so what is not in the basic plane goes as a surrogate pair
@@ -873,5 +882,112 @@ assert(old_units.origin[1] == old_units.imgsize * 3 / 8,
 		"formspec: the old padding")
 
 print("formspec: ok")
+
+--
+-- objects.lua: the things in the world that are not nodes
+--
+
+-- What the server sends for an object that just arrived: its name and where
+-- it is, then the messages that say what it looks like
+local function write_properties()
+	local w = serialize.writer()
+	w:u8(4) -- ObjectProperties version
+	w:u16(20) -- hp_max
+	w:u8(1) -- physical
+	w:u32(0) -- the weight that used to be here
+	w:v3f(-0.4, 0, -0.4):v3f(0.4, 1.8, 0.4) -- collision box
+	w:v3f(-0.4, 0, -0.4):v3f(0.4, 1.8, 0.4) -- selection box
+	w:u8(1) -- pointable
+	w:string("mesh")
+	w:v3f(1, 1, 1) -- visual_size
+	w:u16(2):string("cow.png"):string("cow_extra.png")
+	w:s16(1):s16(1) -- spritediv
+	w:s16(0):s16(0) -- initial_sprite_basepos
+	w:u8(1) -- is_visible
+	w:u8(1) -- makes_footstep_sound
+	w:f32(0) -- automatic_rotate
+	w:string("cow.b3d")
+	w:u16(0) -- colors
+	w:u8(1) -- collide_with_objects
+	w:f32(0.6) -- stepheight
+	w:u8(0) -- automatic_face_movement_dir
+	w:f32(0) -- automatic_face_movement_dir_offset
+	w:u8(1) -- backface_culling
+	w:string("Bella")
+	w:u32(0xffffffff) -- nametag_color
+	w:f32(0) -- automatic_face_movement_max_rotation_per_sec
+	w:string("a cow")
+	w:string("") -- wield_item
+	w:u8(0) -- glow
+	w:u16(10) -- breath_max
+	w:f32(1.5) -- eye_height
+	w:f32(1.72) -- zoom_fov
+	w:u8(1) -- use_texture_alpha
+	return serialize.writer():u8(objects.CMD_SET_PROPERTIES)
+			:raw(w:data()):data()
+end
+
+local init = serialize.writer()
+init:u8(1) -- init data version
+init:string("mobs_mc:cow")
+init:u8(0) -- is_player
+init:u16(42)
+init:v3f(-3200, 180, 250) -- position, in BS units
+init:v3f(0, 90, 0) -- rotation
+init:u16(20) -- hp
+init:u8(1) -- one message follows
+init:longstring(write_properties())
+
+local obj = objects.parse_init(serialize, init:data())
+assert(obj.name == "mobs_mc:cow" and obj.is_player == false and obj.id == 42,
+		"objects: the object's own fields")
+-- Positions arrive in BS units and come out in nodes
+assert(math.abs(obj.position[1] - -320) < 1e-3 and
+		math.abs(obj.position[2] - 18) < 1e-3 and
+		math.abs(obj.position[3] - 25) < 1e-3,
+		"objects: position "..obj.position[1]..","..obj.position[2])
+assert(math.abs(obj.yaw - 90) < 1e-3, "objects: yaw is "..obj.yaw)
+assert(obj.hp == 20, "objects: hp")
+assert(obj.props, "objects: the properties message was not applied")
+assert(obj.props.visual == "mesh" and obj.props.mesh == "cow.b3d",
+		"objects: visual and mesh")
+assert(#obj.props.textures == 2 and obj.props.textures[1] == "cow.png",
+		"objects: textures")
+assert(obj.props.nametag == "Bella" and obj.props.infotext == "a cow",
+		"objects: the strings past the boxes")
+assert(math.abs(obj.props.collision_max[2] - 1.8) < 1e-6,
+		"objects: the collision box, which is in nodes")
+assert(math.abs(obj.props.eye_height - 1.5) < 1e-6, "objects: eye height")
+
+-- Where it is now, which is what most of the messages are
+local move = serialize.writer()
+move:u8(objects.CMD_UPDATE_POSITION)
+move:v3f(-3190, 180, 250) -- position
+move:v3f(0, 0, 0) -- velocity
+move:v3f(0, 0, 0) -- acceleration
+move:v3f(0, 45, 0) -- rotation
+move:u8(1) -- interpolate
+move:u8(0) -- is_end_position
+move:f32(0.1) -- how long until the next one
+objects.apply_message(obj, serialize.reader(move:data()))
+assert(math.abs(obj.target[1] - -319) < 1e-3, "objects: the new position")
+assert(math.abs(obj.yaw - 45) < 1e-3, "objects: the new yaw")
+-- Interpolation walks it there rather than jumping
+assert(math.abs(obj.position[1] - -320) < 1e-3,
+		"objects: it jumped instead of walking")
+objects.interpolate({obj}, 0.05)
+assert(obj.position[1] > -320 and obj.position[1] < -319.4,
+		"objects: half way is "..obj.position[1])
+objects.interpolate({obj}, 1.0)
+assert(math.abs(obj.position[1] - -319) < 1e-3,
+		"objects: it did not arrive, at "..obj.position[1])
+
+-- A message this does not implement leaves the object alone
+local unknown = serialize.writer():u8(objects.CMD_SET_ANIMATION)
+		:raw(string.rep("\0", 20)):data()
+objects.apply_message(obj, serialize.reader(unknown))
+assert(obj.props.visual == "mesh", "objects: an unknown message broke it")
+
+print("objects: ok")
 
 print("luanti_client/test.lua: ok")

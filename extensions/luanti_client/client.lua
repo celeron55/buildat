@@ -104,6 +104,8 @@ local TOCLIENT = {
 	MEDIA          = 0x38,
 	NODEDEF        = 0x3A,
 	ANNOUNCE_MEDIA = 0x3C,
+	ACTIVE_OBJECT_REMOVE_ADD = 0x31,
+	ACTIVE_OBJECT_MESSAGES = 0x32,
 	CHAT_MESSAGE   = 0x2F,
 	HP             = 0x33,
 	BREATH         = 0x4E,
@@ -294,6 +296,13 @@ function M.new(socket, options, log)
 			-- second, and the keys as Luanti's PlayerControl bits
 			speed = {x = 0, y = 0, z = 0},
 			keys = 0,
+			-- The things in the world that are not nodes:
+			-- on_object_add(id, type, init_data), on_object_remove(id) and
+			-- on_object_message(id, data). objects.lua is what reads the
+			-- data and the messages.
+			on_object_add = nil,
+			on_object_remove = nil,
+			on_object_message = nil,
 			-- on_chat(text, sender, message_type) for every chat message,
 			-- the server's own included; a message with no sender is one
 			-- from the server rather than from a player
@@ -503,6 +512,36 @@ function M.new(socket, options, log)
 		r:skip(2) -- Used to be the length of what follows
 		if self.on_detached_inventory then
 			self.on_detached_inventory(name, r:rest())
+		end
+	end
+
+	-- The objects that went away and the ones that arrived
+	handlers[TOCLIENT.ACTIVE_OBJECT_REMOVE_ADD] = function(r)
+		for _ = 1, r:u16() do
+			local id = r:u16()
+			if self.on_object_remove then
+				self.on_object_remove(id)
+			end
+		end
+		for _ = 1, r:u16() do
+			local id = r:u16()
+			local object_type = r:u8()
+			local data = r:longstring()
+			if self.on_object_add then
+				self.on_object_add(id, object_type, data)
+			end
+		end
+	end
+
+	-- What the objects are doing, as a stream of per-object messages with no
+	-- count in front of it: it runs to the end of the packet
+	handlers[TOCLIENT.ACTIVE_OBJECT_MESSAGES] = function(r)
+		while r:remaining() >= 4 do
+			local id = r:u16()
+			local data = r:string()
+			if self.on_object_message then
+				self.on_object_message(id, data)
+			end
 		end
 	end
 

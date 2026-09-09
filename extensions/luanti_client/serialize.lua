@@ -117,6 +117,53 @@ function M.writer()
 	end
 
 	-- u32 length and the bytes
+	-- A 32-bit IEEE-754 float, big-endian, the same way r:f32() reads one.
+	-- Written out by hand because Lua's own bit-level float handling is
+	-- either missing (5.1's math.frexp went away in 5.4) or needs a library.
+	function w:f32(v)
+		if v ~= v then -- NaN
+			return self:u32(0x7fc00000)
+		end
+		local sign = 0
+		if v < 0 or (v == 0 and 1 / v < 0) then
+			sign = 0x80000000
+			v = -v
+		end
+		if v == 0 then
+			return self:u32(sign)
+		end
+		if v == math.huge then
+			return self:u32(sign + 0x7f800000)
+		end
+		local exponent = math.floor(math.log(v) / math.log(2))
+		-- The logarithm can land a step either side of the right exponent
+		local mantissa = v / 2 ^ exponent
+		if mantissa >= 2 then
+			mantissa = mantissa / 2
+			exponent = exponent + 1
+		elseif mantissa < 1 then
+			mantissa = mantissa * 2
+			exponent = exponent - 1
+		end
+		local biased = exponent + 127
+		if biased < 1 then
+			return self:u32(sign) -- Smaller than a normal float holds
+		end
+		if biased > 254 then
+			return self:u32(sign + 0x7f800000)
+		end
+		local frac = math.floor((mantissa - 1) * 0x800000 + 0.5)
+		if frac >= 0x800000 then
+			frac = 0
+			biased = biased + 1
+		end
+		return self:u32(sign + biased * 0x800000 + frac)
+	end
+
+	function w:v3f(x, y, z)
+		return self:f32(x):f32(y):f32(z)
+	end
+
 	function w:wstring(s)
 		local units = M.utf16_units(s)
 		self:u16(#units)
@@ -262,6 +309,11 @@ function M.reader(data)
 	function r:skip(n)
 		self:raw(n)
 		return self
+	end
+
+	-- How many bytes are left, for a packet that is a list with no count
+	function r:remaining()
+		return #data - pos + 1
 	end
 
 	function r:rest()
