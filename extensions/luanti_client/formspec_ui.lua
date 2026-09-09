@@ -150,6 +150,51 @@ function M.new(magic, buildat, log, ctx)
 		end
 	end
 
+	-- The hotbar and the health bar, which are not a formspec at all: the
+	-- game describes them as HUD elements and this draws the two of them a
+	-- player needs to see, out of the inventory and the hit points.
+	--
+	-- simplified: not the game's own HUD. This server sends a hundred HUD
+	-- elements -- its own hearts, its bubbles, its armour bar, its crosshair
+	-- -- and none of them are drawn; what is drawn is a hotbar of the first
+	-- slots of the player's main list and a bar for the hit points. The
+	-- upgrade path is HUDADD and its friends.
+	--
+	-- Returns the element it all went under, for the caller to take away
+	-- again when it changes.
+	function self:hud(root, list, count, wield, hp, hp_max, screen_w,
+			screen_h)
+		local holder = root:CreateChild("UIElement")
+		local slot = math.floor(math.min(screen_w, screen_h) / 15)
+		local step = math.floor(slot * 1.1)
+		local width = step * count
+		local x0 = math.floor((screen_w - width) / 2)
+		local y0 = screen_h - slot - math.floor(slot * 0.5)
+
+		for i = 1, count do
+			local x = x0 + (i - 1) * step
+			local stack = list and list.items[i] or nil
+			-- The wielded slot is the lighter one, which is how a hotbar
+			-- says which it is
+			box(holder, x, y0, slot, slot, i == wield and
+					magic.Color(0.9, 0.9, 0.9, 0.55) or
+					magic.Color(0, 0, 0, 0.45))
+			draw_stack(holder, x, y0, slot, stack)
+		end
+
+		if hp and hp_max and hp_max > 0 then
+			local bar_h = math.max(3, math.floor(slot * 0.14))
+			local y = y0 - bar_h - 4
+			box(holder, x0, y, width, bar_h, magic.Color(0, 0, 0, 0.5))
+			local filled = math.floor(width * math.min(hp, hp_max) / hp_max)
+			if filled > 0 then
+				box(holder, x0, y, filled, bar_h,
+						magic.Color(0.85, 0.15, 0.15, 0.9))
+			end
+		end
+		return holder
+	end
+
 	-- show(root, elements, layout, screen_w, screen_h)
 	--
 	-- root is the UI element everything goes under. What comes back is the
