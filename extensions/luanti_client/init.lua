@@ -24,11 +24,14 @@ local nodedef = dofile(path.."/nodedef.lua")
 local media = dofile(path.."/media.lua")
 local player = dofile(path.."/player.lua")
 local texmod = dofile(path.."/texmod.lua")
+local itemdef = dofile(path.."/itemdef.lua")
+local inventory = dofile(path.."/inventory.lua")
 local M = {safe = nil}
 
 -- BUILDAT_LUANTI_ADDRESS is for scripted runs (bin/buildat_client -c ...),
 -- which cannot easily clear a text field
 local DEFAULT_ADDRESS = os.getenv("BUILDAT_LUANTI_ADDRESS") or "localhost:30000"
+local DEFAULT_NAME = os.getenv("BUILDAT_LUANTI_NAME") or "buildat"
 
 -- How far the camera sees, and how far out blocks are kept, in nodes. The
 -- client asks the server for blocks by the same distance; see
@@ -37,6 +40,10 @@ local FAR_CLIP = 240
 local DROP_DISTANCE = 260
 -- Degrees of look per pixel of mouse movement
 local MOUSE_SENSITIVITY = 0.15
+
+-- How far the player can reach when the item they are holding does not say,
+-- which is Luanti's own default
+local POINT_RANGE = 4
 
 -- Media files are asked for in batches, so that one REQUEST_MEDIA does not
 -- turn into hundreds of split chunks in one go
@@ -334,21 +341,157 @@ local function show_client(host, port, name, password)
 			add_line("The game's movement constants arrived")
 		end
 
+		-- Pointing, digging and placing
+		local item_defs = nil
+		local inv = nil
+		-- Which hotbar slot is wielded, one-based, as the number keys set it
+		local wield_index = 1
+		local pointed_under, pointed_above = nil, nil
+		local dig = nil
+		local digging = false
+
+		client.on_itemdef = function(data)
+			local items, count = itemdef.parse(luanti.serialize, data, log)
+			item_defs = items
+			add_line(count.." item definitions")
+		end
+
+		client.on_inventory = function(data)
+			local first = inv == nil
+			inv = inventory.parse(data, inv)
+			if first then
+				local names = {}
+				for name, list in pairs(inv) do
+					names[#names + 1] = name.." "..list.size
+				end
+				table.sort(names)
+				add_line("The inventory arrived: "..
+						table.concat(names, ", "))
+			end
+		end
+
+		-- The stack in the wielded slot, and the tool capabilities a dig
+		-- goes by: the wielded item's own, the hand slot's when it has none,
+		-- and the empty item's as the last resort. This game keeps a real
+		-- item in the hand slot, so without it nothing could be dug.
+		local function wielded()
+			return inventory.slot(inv, "main", wield_index)
+		end
+
+		local function dig_capabilities()
+			return (inventory.dig_capabilities(inv, wield_index, item_defs))
+		end
+
+		local function reach()
+			local held = wielded()
+			local def = held and item_defs and item_defs[held.name]
+			if def and def.range and def.range > 0 then
+				return def.range
+			end
+			local empty = item_defs and item_defs[""]
+			if empty and empty.range and empty.range > 0 then
+				return empty.range
+			end
+			return POINT_RANGE
+		end
+
+		local function node_def_at(p)
+			local id = view:node_at(p[1], p[2], p[3])
+			return id and node_defs and node_defs[id] or nil
+		end
+
+		-- The pointing ray, and what holding the dig button does to what it
+		-- finds. Luanti's server wants a START_DIGGING at a node before a
+		-- DIGGING_COMPLETED for it, and no sooner than the dig would have
+		-- taken; the node then comes back as a REMOVENODE.
+		local function update_dig(dtime)
+			pointed_under, pointed_above = view:point_ray(reach())
+			if not pointed_above then
+				pointed_under = nil
+			end
+			view:set_pointed(pointed_under, pointed_above)
+
+			if not digging or not pointed_under then
+				if dig then
+					client:interact(luanti.INTERACT_STOP_DIGGING,
+							wield_index - 1)
+					dig = nil
+				end
+				return
+			end
+			if not dig or dig.under[1] ~= pointed_under[1] or
+					dig.under[2] ~= pointed_under[2] or
+					dig.under[3] ~= pointed_under[3] then
+				local def = node_def_at(pointed_under)
+				dig = {
+					under = pointed_under, above = pointed_above, elapsed = 0,
+					-- nil when what the player is holding cannot dig this at
+					-- all, and then nothing is ever completed: the server
+					-- would refuse it as digging the undiggable
+					time = def and itemdef.dig_time(def.groups,
+							dig_capabilities()) or nil,
+					name = def and def.name or "?",
+				}
+				client:interact(luanti.INTERACT_START_DIGGING,
+						wield_index - 1, {under = dig.under,
+						above = dig.above})
+				return
+			end
+			if dig.done then
+				return
+			end
+			dig.elapsed = dig.elapsed + dtime
+			if dig.time and dig.elapsed >= dig.time then
+				client:interact(luanti.INTERACT_DIGGING_COMPLETED,
+						wield_index - 1, {under = dig.under,
+						above = dig.above})
+				dig.done = true
+			end
+		end
+
+		-- Putting the wielded item where the ray came through the node it
+		-- stopped at. What that means is the server's business: a node goes
+		-- there, or the thing is used on what was pointed at, and either way
+		-- what comes back is an ADDNODE or a formspec.
+		local function place()
+			if not pointed_under or not pointed_above then
+				return
+			end
+			client:interact(luanti.INTERACT_PLACE, wield_index - 1,
+					{under = pointed_under, above = pointed_above})
+		end
+
 		-- The bottom line is remade every frame; everything above it is the
 		-- log of what happened
 		local function set_counters()
 			-- What is not handled yet is logged once per command by
 			-- client.lua rather than shown here; it is a long line and the
 			-- world is behind it
+			local held = wielded()
+			local holding = held and (held.name..
+					(held.count > 1 and " x"..held.count or "")) or
+					"nothing"
+			local pointed = "pointing at nothing"
+			if dig then
+				pointed = (dig.done and "dug " or "digging ")..dig.name..
+						(dig.time and string.format(" %.2f/%.2f",
+						dig.elapsed, dig.time) or " (not by hand)")
+			elseif pointed_under then
+				local def = node_def_at(pointed_under)
+				pointed = "pointing at "..(def and def.name or "?")
+			end
 			status_text.text = table.concat(lines, "\n").."\n"..
 					string.format(
-					"%s | %.1f, %.1f, %.1f %s | blocks: %d received,"..
+					"%s | %.1f, %.1f, %.1f %s | %d: %s | %s"..
+					" | blocks: %d received,"..
 					" %d in scene, %d to mesh | %d us to hand over"..
 					" | media: %d files, %d to come",
 					client.state, avatar.x, avatar.y, avatar.z,
 					avatar.fly and "flying" or
 							(avatar.in_liquid and "swimming" or
 							(avatar.on_ground and "on ground" or "falling")),
+					wield_index, holding,
+					pointed,
 					client.blocks_received, view:block_count(),
 					view:dirty_count(), view.last_mesh_us,
 					store:have_count(), store:missing_count())
@@ -429,6 +572,7 @@ local function show_client(host, port, name, password)
 			local dtime = event_data:GetFloat("TimeStep")
 			client:update(dtime)
 			move(dtime)
+			update_dig(dtime)
 			if client.time_of_day then
 				local daylight = daynight_ratio(client.time_of_day)
 				-- The ramp is smooth and the zone is not free to set, so only
@@ -464,6 +608,26 @@ local function show_client(host, port, name, password)
 			set_counters()
 		end)
 
+		-- The dig button. Urho3D's Input does not expose the button state to
+		-- the sandbox, so the two events are what says whether it is held.
+		local mouse_down_cb = magic.SubscribeToEvent("MouseButtonDown",
+				function(event_type, event_data)
+			if event_data:GetInt("Button") == MOUSEB_LEFT then
+				digging = true
+			end
+		end)
+		local mouse_up_cb = magic.SubscribeToEvent("MouseButtonUp",
+				function(event_type, event_data)
+			if event_data:GetInt("Button") == MOUSEB_LEFT then
+				digging = false
+			end
+			if event_data:GetInt("Button") == MOUSEB_RIGHT then
+				-- On the way up rather than the way down, so that holding
+				-- the button does not place a stack of nodes at once
+				place()
+			end
+		end)
+
 		root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 			local key = event_data:GetInt("Key")
 			-- Luanti's own keys for these. A server that does not give the
@@ -472,12 +636,18 @@ local function show_client(host, port, name, password)
 				avatar.fly = not avatar.fly
 				add_line(avatar.fly and "Flying" or "Walking")
 			end
+			-- The number keys pick a hotbar slot, as they do in Luanti
+			if key >= KEY_1 and key <= KEY_8 then
+				wield_index = key - KEY_1 + 1
+			end
 			if key == KEY_H then
 				avatar.noclip = not avatar.noclip
 				add_line(avatar.noclip and "Through walls" or "Solid walls")
 			end
 			if key == KEY_ESCAPE then
 				magic.UnsubscribeFromEvent("Update", update_cb)
+				magic.UnsubscribeFromEvent("MouseButtonDown", mouse_down_cb)
+				magic.UnsubscribeFromEvent("MouseButtonUp", mouse_up_cb)
 				magic.input:SetMouseVisible(true)
 				client:disconnect()
 				view:close()
@@ -500,7 +670,7 @@ local function show_connect_dialog()
 	title.text = "Connect to a Luanti server"
 
 	local address_edit = labeled_edit(window, "Address", DEFAULT_ADDRESS)
-	local name_edit = labeled_edit(window, "Player name", "buildat")
+	local name_edit = labeled_edit(window, "Player name", DEFAULT_NAME)
 	local password_edit = labeled_edit(window, "Password", "")
 	address_edit:SetFocus(true)
 
