@@ -553,6 +553,12 @@ function M.define(dst, util)
 
 	util.wc("Texture", {
 		inherited_from_by_wrapper = dst.Resource,
+		properties = {
+			-- Read-only in Urho3D, so writing one raises. What wanted them
+			-- is a HUD element whose size is a multiple of its own image's.
+			width = util.simple_property("number"),
+			height = util.simple_property("number"),
+		},
 	})
 
 	util.wc("Texture2D", {

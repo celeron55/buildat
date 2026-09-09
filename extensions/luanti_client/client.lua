@@ -21,6 +21,7 @@ local connection = dofile(path.."/connection.lua")
 local srp = dofile(path.."/srp.lua")
 local nodemeta = dofile(path.."/nodemeta.lua")
 local inventory = dofile(path.."/inventory.lua")
+local hud = dofile(path.."/hud.lua")
 
 local M = {}
 
@@ -119,6 +120,11 @@ local TOCLIENT = {
 	DETACHED_INVENTORY = 0x43,
 	SHOW_FORMSPEC  = 0x44,
 	FORMSPEC_PREPEND = 0x61,
+	HUDADD         = 0x49,
+	HUDRM          = 0x4A,
+	HUDCHANGE      = 0x4B,
+	HUD_SET_FLAGS  = 0x4C,
+	HUD_SET_PARAM  = 0x4D,
 	SRP_BYTES_S_B  = 0x60,
 }
 
@@ -312,6 +318,11 @@ function M.new(socket, options, log)
 			on_inventory_formspec = nil,
 			on_show_formspec = nil,
 			on_formspec_prepend = nil,
+			-- The HUD the game puts on the screen: on_hud(elements, flags,
+			-- params) after every change to any of them, with the elements
+			-- keyed by the server's own id. hud.lua is what reads the
+			-- packets and says what the flags mean.
+			on_hud = nil,
 			-- on_announce_media(files, remote_servers) and
 			-- on_media(files, bunch, bunches); media.lua is what keeps them
 			on_announce_media = nil,
@@ -576,6 +587,57 @@ function M.new(socket, options, log)
 		local name = r:string()
 		if self.on_show_formspec then
 			self.on_show_formspec(spec, name)
+		end
+	end
+
+	-- The game's own HUD. The elements are kept here rather than in the
+	-- extension because HUDCHANGE names one field of one of them, so
+	-- somebody has to hold the rest; what the extension gets is the whole
+	-- lot after every change.
+	self.hud_elements = {}
+	self.hud_flags = hud.FLAGS_DEFAULT
+	self.hud_params = {}
+
+	local function hud_changed()
+		if self.on_hud then
+			self.on_hud(self.hud_elements, self.hud_flags, self.hud_params)
+		end
+	end
+
+	handlers[TOCLIENT.HUDADD] = function(r)
+		local id, e = hud.read_add(r, self.protocol_version)
+		self.hud_elements[id] = e
+		hud_changed()
+	end
+
+	handlers[TOCLIENT.HUDRM] = function(r)
+		self.hud_elements[r:u32()] = nil
+		hud_changed()
+	end
+
+	handlers[TOCLIENT.HUDCHANGE] = function(r)
+		local id, field, value = hud.read_change(r, self.protocol_version)
+		local e = self.hud_elements[id]
+		-- A stat this does not know leaves the element as it was, which is
+		-- what Luanti does with one too
+		if e and field then
+			e[field] = value
+			hud_changed()
+		end
+	end
+
+	handlers[TOCLIENT.HUD_SET_FLAGS] = function(r)
+		local flags = r:u32()
+		local mask = r:u32()
+		self.hud_flags = hud.apply_flags(self.hud_flags, flags, mask)
+		hud_changed()
+	end
+
+	handlers[TOCLIENT.HUD_SET_PARAM] = function(r)
+		local param, value = hud.read_param(r)
+		if value ~= nil then
+			self.hud_params[param] = value
+			hud_changed()
 		end
 	end
 
