@@ -18,6 +18,10 @@ buildat.sha1              = __buildat_sha1
 buildat.sha256            = __buildat_sha256
 buildat.hex               = __buildat_hex
 buildat.random_bytes      = __buildat_random_bytes
+-- compress(data, format [, level]) -> string, where format is "zlib" or "zstd"
+-- decompress(data [, format]) -> data, bytes_consumed
+buildat.compress          = __buildat_compress
+buildat.decompress        = __buildat_decompress
 -- Big-endian byte strings in, byte strings out
 buildat.bignum = {
 	add     = __buildat_bignum_add,
@@ -42,6 +46,8 @@ buildat.safe.get_time_us   = __buildat_get_time_us
 buildat.safe.sha1          = __buildat_sha1
 buildat.safe.sha256        = __buildat_sha256
 buildat.safe.hex           = __buildat_hex
+buildat.safe.compress      = __buildat_compress
+buildat.safe.decompress    = __buildat_decompress
 buildat.safe.profiler_block_begin = __buildat_profiler_block_begin
 buildat.safe.profiler_block_end   = __buildat_profiler_block_end
 buildat.safe.VoxelName            = __buildat_VoxelName

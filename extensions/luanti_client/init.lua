@@ -17,6 +17,7 @@ local ui_utils = require("buildat/extension/ui_utils").safe
 local network = require("buildat/extension/network")
 local path = __buildat_extension_path("luanti_client")
 local srp = dofile(path.."/srp.lua")
+local engine_test = dofile(path.."/engine_test.lua")
 local luanti = dofile(path.."/client.lua")
 local M = {safe = nil}
 
@@ -145,6 +146,8 @@ end
 function M.boot()
 	srp.self_test()
 	log:info("srp: self-test ok")
+	engine_test.self_test()
+	log:info("engine primitives: self-test ok")
 	show_connect_dialog()
 end
 
