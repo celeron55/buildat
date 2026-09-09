@@ -9,6 +9,7 @@
 #include <Image.h>
 #include <Vector3.h>
 #include <cmath>
+#include <cstring>
 #define MODULE "atlas"
 
 namespace interface {
@@ -34,6 +35,8 @@ struct CAtlasRegistry: public AtlasRegistry
 	magic::Context *m_context;
 	sv_<AtlasDefinition> m_defs;
 	sv_<AtlasCache> m_cache;
+	// Held rather than allocated per segment; see upload_box()
+	sv_<unsigned char> m_upload_buffer;
 
 	CAtlasRegistry(magic::Context *context):
 		m_context(context)
@@ -110,10 +113,21 @@ struct CAtlasRegistry: public AtlasRegistry
 				img->SetSize(atlas_resolution.x_, atlas_resolution.y_, 4);
 				return img;
 			};
+			// How many mip levels an atlas gets: as many as it takes for one
+			// segment to become one texel, and no more. A level past that
+			// averages texels of different textures together, which is the
+			// bleeding an atlas is always accused of; and levels are what
+			// upload_box() has to keep up to date per segment, so there is
+			// no reason to have ones nothing can sample correctly.
+			unsigned atlas_levels = 1;
+			for(int box = seg_res.x_ * 2; box > 1; box /= 2)
+				atlas_levels++;
+			atlas_def->levels = atlas_levels;
 			auto create_atlas_texture = [&](){
 				magic::Texture2D *tex = new magic::Texture2D(m_context);
 				// TODO: Make this configurable
 				tex->SetFilterMode(magic::FILTER_NEAREST);
+				tex->SetNumLevels(atlas_levels);
 				// TODO: Use TEXTURE_STATIC or TEXTURE_DYNAMIC?
 				tex->SetSize(atlas_resolution.x_, atlas_resolution.y_,
 						magic::Graphics::GetRGBAFormat(), magic::TEXTURE_STATIC);
@@ -131,6 +145,16 @@ struct CAtlasRegistry: public AtlasRegistry
 			cache->spec_texture = create_atlas_texture();
 			cache->segment_resolution = atlas_def->segment_resolution;
 			cache->total_segments = atlas_def->total_segments;
+			cache->levels = atlas_def->levels;
+			// One whole upload per atlas, of nothing, because that is what
+			// allocates the mip levels: Urho3D's Create() makes level 0 and
+			// no more, and a texture whose max level is set but whose levels
+			// have no storage is incomplete -- it samples as black at every
+			// level, near ones included. Segments write their own box in
+			// every level after this; see upload_box().
+			cache->texture->SetData(cache->image);
+			cache->normal_texture->SetData(cache->normal_image);
+			cache->spec_texture->SetData(cache->spec_image);
 		}
 		// Add this segment to the atlas definition
 		uint seg_id = atlas_def->segments.size();
@@ -185,6 +209,64 @@ struct CAtlasRegistry: public AtlasRegistry
 		if(ref.segment_id >= atlas->segments.size())
 			return nullptr;
 		return &atlas->segments[ref.segment_id];
+	}
+
+	// Sends one box of an atlas image to its texture, at every mip level.
+	//
+	// SetData(image) would send the whole atlas, and there are three of them
+	// -- diffuse, normal and surface -- so adding one 16x16 texture to a
+	// 2048x2048 atlas moved 48 MB. A game with a few hundred textures spent
+	// most of a second per chunk doing that. What actually changed is the one
+	// segment, and Urho3D's SetData takes a rectangle.
+	//
+	// The mip levels have to be written too: Urho3D fills them when it is
+	// handed a whole image, and a texture whose levels were never written
+	// samples as black wherever it is minified. Each level averages the 2^n
+	// texels of the level-0 image it stands for, which is what a box filter
+	// is; the levels stop where a segment is one texel, so no level ever
+	// mixes one texture with the next.
+	void upload_box(magic::Texture2D *tex, magic::Image *img,
+			const magic::IntVector2 &at, const magic::IntVector2 &size,
+			unsigned levels)
+	{
+		if(size.x_ <= 0 || size.y_ <= 0)
+			return;
+		const unsigned char *src = img->GetData();
+		if(src == nullptr){
+			tex->SetData(img);
+			return;
+		}
+		const size_t stride = (size_t)img->GetWidth() * 4;
+		for(unsigned level = 0; level < levels; level++){
+			const int step = 1 << level;
+			const int w = size.x_ / step;
+			const int h = size.y_ / step;
+			if(w < 1 || h < 1)
+				break;
+			m_upload_buffer.resize((size_t)w * h * 4);
+			for(int y = 0; y < h; y++){
+				for(int x = 0; x < w; x++){
+					// The texels of level 0 this one stands for
+					unsigned sum[4] = {0, 0, 0, 0};
+					for(int sy = 0; sy < step; sy++){
+						const unsigned char *row = src +
+								(size_t)(at.y_ + y * step + sy) * stride +
+								(size_t)(at.x_ + x * step) * 4;
+						for(int sx = 0; sx < step; sx++){
+							for(int c = 0; c < 4; c++)
+								sum[c] += row[sx * 4 + c];
+						}
+					}
+					unsigned char *dst = &m_upload_buffer[
+							((size_t)y * w + x) * 4];
+					const unsigned n = (unsigned)step * step;
+					for(int c = 0; c < 4; c++)
+						dst[c] = (unsigned char)(sum[c] / n);
+				}
+			}
+			tex->SetData(level, at.x_ / step, at.y_ / step, w, h,
+					&m_upload_buffer[0]);
+		}
 	}
 
 	void update_segment_cache(uint seg_id, magic::Image *seg_img,
@@ -286,10 +368,14 @@ struct CAtlasRegistry: public AtlasRegistry
 		// and to give leaves the mix of waxy and matte parts they have.
 		draw_surface_maps(seg_img, def, atlas, src_off, dst_p00, seg_size);
 
-		// Update atlas textures from atlas images
-		atlas.texture->SetData(atlas.image);
-		atlas.normal_texture->SetData(atlas.normal_image);
-		atlas.spec_texture->SetData(atlas.spec_image);
+		// Update the atlas textures from the atlas images, over the box this
+		// segment wrote and no more; see upload_box()
+		const magic::IntVector2 box = seg_size * 2;
+		upload_box(atlas.texture, atlas.image, dst_p00, box, atlas.levels);
+		upload_box(atlas.normal_texture, atlas.normal_image, dst_p00, box,
+				atlas.levels);
+		upload_box(atlas.spec_texture, atlas.spec_image, dst_p00, box,
+				atlas.levels);
 
 		// Debug: save atlas image to file
 		/*ss_ atlas_img_name = "/tmp/atlas_"+itos(seg_size.x_)+"x"+

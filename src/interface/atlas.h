@@ -89,6 +89,9 @@ namespace interface
 		uint id = ATLAS_UNDEFINED;
 		magic::IntVector2 segment_resolution;
 		magic::IntVector2 total_segments;
+		// Mip levels, which stop where one segment is one texel; see
+		// upload_box() in impl/atlas.cpp
+		unsigned levels = 1;
 		sv_<AtlasSegmentDefinition> segments;
 	};
 
@@ -107,6 +110,7 @@ namespace interface
 		magic::SharedPtr<magic::Texture2D> spec_texture;
 		magic::IntVector2 segment_resolution;
 		magic::IntVector2 total_segments;
+		unsigned levels = 1;
 		sv_<AtlasSegmentCache> segments;
 	};
 
