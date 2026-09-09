@@ -29,6 +29,11 @@
 
 local M = {}
 
+-- Modifier name -> an expression that used it, for the ones build() does not
+-- implement. A game's node stays a placeholder when its expression cannot be
+-- built, and nothing else says why: the caller logs this once.
+M.unimplemented = {}
+
 -- The named colours Luanti has that a texture expression is likely to use,
 -- from its util/string.cpp. Everything else has to be written as #rgb, #rgba,
 -- #rrggbb or #rrggbbaa.
@@ -452,6 +457,9 @@ function M.build(expr, ctx)
 				-- [colorizehsl, [overlay, [hardlight, [lowpart, [makealpha,
 				-- [applyfiltersformesh. This game's node definitions use one
 				-- [lowpart and none of the rest.
+				if M.unimplemented[name] == nil then
+					M.unimplemented[name] = expr
+				end
 				return nil
 			end
 		end

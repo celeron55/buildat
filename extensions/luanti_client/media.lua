@@ -12,9 +12,13 @@
 -- when it is not. That check is also what keeps a file that was written
 -- half-way from being drawn.
 --
--- Only the textures the node definitions name are asked for. A game's media is
--- mostly sounds, models and textures for things that are not nodes, and there
--- can be thousands of them.
+-- Everything the server announces and the cache does not have is asked for in
+-- one go, which is what Luanti's own client does
+-- (ClientMediaDownloader::startConventionalTransfers). A game's media is
+-- mostly sounds, models and textures for things that are not nodes, so most of
+-- it is never drawn -- but working out which files are wanted means walking
+-- every texture expression, and a file discovered late costs a whole rebuild
+-- of the voxel registry. The bytes are cheaper than the rebuilds.
 
 local M = {}
 
@@ -73,13 +77,13 @@ function M.new(buildat, log, dir)
 	-- The announced list, and the names worth having. Returns the names to ask
 	-- the server for; the ones already on disk are counted as had.
 	--
-	-- wanted is a set of names; a name that was not announced cannot be
-	-- fetched and is left out.
+	-- wanted is a set of names, or nil for every announced file. A name that
+	-- was not announced cannot be fetched and is left out.
 	function self:plan(files, wanted)
 		local ask = {}
 		local skipped_unsafe = 0
 		for _, file in ipairs(files) do
-			if wanted[file.name] and not have[file.name] and
+			if (wanted == nil or wanted[file.name]) and not have[file.name] and
 					not missing[file.name] then
 				if not M.is_safe_name(file.name) then
 					skipped_unsafe = skipped_unsafe + 1

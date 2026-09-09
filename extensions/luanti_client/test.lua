@@ -529,6 +529,29 @@ assert(media.server_key("::1", 30000) == "__1_30000")
 assert(media.server_key("a/../b", 1) == "a_.._b_1")
 assert(media.server_key("..", 1) == ".._1")
 
+-- plan() with no set of wanted names asks for every announced file that the
+-- cache does not have, which is what the client does with an announcement:
+-- working out which files a game reaches costs more than the bytes do
+do
+	local dir = os.getenv("TMPDIR") or "/tmp"
+	dir = dir.."/luanti_client_media_test"
+	__buildat_mkdir = function() end
+	buildat.sha1 = function(data) return "sha1:"..data end
+	local store = media.new(buildat, {warning = function() end}, dir)
+	local announced = {
+		{name = "a.png", sha1 = "sha1:a"},
+		{name = "b.png", sha1 = "sha1:b"},
+		{name = "../evil", sha1 = "sha1:e"},
+	}
+	local ask = store:plan(announced)
+	table.sort(ask)
+	assert(#ask == 2 and ask[1] == "a.png" and ask[2] == "b.png",
+			"media: plan() with no set asks for every safe announced name")
+	-- What is already on the way is not asked for a second time
+	assert(#store:plan(announced) == 0, "media: plan() asks once")
+	assert(store:missing_count() == 2, "media: what was asked for is missing")
+end
+
 print("media: ok")
 
 --
@@ -843,6 +866,14 @@ assert(texmod.resolve("a.png^[invert:rgb", ctx) == nil,
 		"texmod: built an unimplemented modifier")
 assert(texmod.resolve("a.png^[colorize:chartreuse", ctx) == nil,
 		"texmod: built an unknown colour")
+
+-- A modifier build() does not implement leaves the expression unusable, and
+-- says so once with an example: a node whose texture cannot be built is drawn
+-- as a placeholder and nothing else explains why
+assert(texmod.resolve("a.png^[invert:rgb", ctx) == nil,
+		"texmod: an unimplemented modifier does not build")
+assert(texmod.unimplemented["invert"] == "a.png^[invert:rgb",
+		"texmod: an unimplemented modifier is recorded with an example")
 
 print("texmod: ok")
 

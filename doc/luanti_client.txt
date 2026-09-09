@@ -158,9 +158,25 @@ first. One command and one block always get through, so nothing can starve.
 What a block costs before the mesher's own thread sees it is on screen as
 "us to hand over".
 
-Media: only the textures the node definitions name are asked for. A game's
-media is mostly sounds, models and textures for things that are not nodes;
-MineClone announces 3400 files and 900 of them are node textures.
+Loading: until the game's definitions and its media are in there is nothing
+worth drawing -- a world of placeholders is not the game -- so a panel covers
+the screen and says how far along it is, and the voxel registry is built with
+50 ms of the frame rather than 4, because behind the panel there is nothing to
+keep smooth. MineClone's 2500 voxel types are then one build of about a
+second, and the whole cold load is the media transfer plus that.
+
+Media: everything the server announces and the cache does not have is asked
+for at once, which is what Luanti's own client does
+(ClientMediaDownloader::startConventionalTransfers). A game's media is mostly
+sounds, models and textures for things that are not nodes, so most of it is
+never drawn -- MineClone announces 3400 files -- but working out which files
+the definitions reach means walking every texture expression, and a file
+discovered after the registry was built costs a whole build again. The bytes
+are cheaper than the rebuilds: the registry is built once, when the
+announcement has arrived and the files it named have. A file the server never
+sends does not hold the rest back forever -- fifteen seconds with no media
+arriving is enough -- and what the announcement did not cover is still asked
+for when something wants to draw it.
 
 Texture modifiers: a texture name in a node definition is an expression --
 "default_dirt.png^mcl_dirt_grass_shadow.png",
@@ -175,7 +191,10 @@ it was written under, so nothing has to hold an image.
 What is implemented: chaining with "^", grouping with "(...)", [combine,
 [fill, [colorize, [multiply, [screen, [opacity, [brighten, [noalpha, [hsl,
 [transform, [resize, [mask, [verticalframe and [sheet. That is everything this
-game's node definitions use except one [lowpart. Sixteen of Luanti's named
+game's node definitions use except one [lowpart. A modifier that is not
+implemented is logged once with an example expression when the registry is
+built, because a node whose texture cannot be built is drawn as a placeholder
+and nothing else says why. Sixteen of Luanti's named
 colours are known, which is the wool and dye palette these expressions use;
 everything else has to be written as #rgb or #rrggbbaa. An expression that
 reaches something not implemented leaves the node without a texture, which

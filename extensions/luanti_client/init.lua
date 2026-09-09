@@ -78,8 +78,8 @@ local HOTBAR_SLOTS = 8
 -- turn into hundreds of split chunks in one go
 local MEDIA_PER_REQUEST = 200
 -- The voxel registry is rebuilt when the media that was asked for has all
--- arrived, and this long after asking whether it has or not: a file the server
--- never sends must not hold every other texture back forever
+-- arrived, and after this long with nothing arriving whether it has or not: a
+-- file the server never sends must not hold every other texture back forever
 local MEDIA_WAIT_S = 15
 
 -- Where the server's media goes. The whole directory is one resource dir and
@@ -184,6 +184,33 @@ local function show_client(host, port, name, password)
 	chat_text:SetPosition(8, -34)
 	chat_text.color = magic.Color(1.0, 1.0, 0.9)
 
+	-- Until the game's definitions and its media are in, the world is a field
+	-- of placeholders and there is nothing worth showing: an opaque panel over
+	-- all of it instead, saying how far along the loading is. A UI element is
+	-- always in front of the world; the priority is what puts it behind the
+	-- rest of the UI, because the lines in the corner are the detail of the
+	-- same story. Removed when the loading is done, and by leave().
+	local loading_panel = magic.ui.root:CreateChild("BorderImage")
+	loading_panel.texture = magic.cache:GetResource(
+			"Texture2D", "luanti_client/res/white.png")
+	loading_panel.color = magic.Color(0.06, 0.07, 0.09)
+	-- Behind the rest of the UI: a dialog -- the one that asks whether the
+	-- network may be used, or the one that says why a session ended -- has to
+	-- come out in front of this, and the lines in the corner are the detail
+	-- of the same story. The hotbar is taken down while it is up instead.
+	loading_panel.priority = -1000
+	loading_panel.enabled = false
+	-- The size it starts at, because the text inside is centred in it and a
+	-- panel of no size centres that in the top left corner
+	loading_panel.width = magic.ui.root.width
+	loading_panel.height = magic.ui.root.height
+	local loading_text = loading_panel:CreateChild("Text")
+	loading_text.defaultStyle = style
+	loading_text:SetStyleAuto()
+	loading_text:SetAlignment(HA_CENTER, VA_CENTER)
+	loading_text:SetTextAlignment(HA_CENTER)
+	loading_text.text = "Connecting to "..host..":"..port
+
 	local lines = {"Luanti: "..host..":"..port}
 	local function add_line(text)
 		lines[#lines + 1] = text
@@ -217,6 +244,12 @@ local function show_client(host, port, name, password)
 		-- that ends after the game has arrived ends the client.
 		local got_content = false
 
+		-- Whether the definitions and the media are still coming in. Until
+		-- they are in there is nothing worth drawing -- a world of
+		-- placeholders is not the game -- so a panel covers it and says how
+		-- far along it is, and the registry is free to spend the frame.
+		local loading = true
+
 		client.on_block = function(block)
 			view:set_block(block)
 		end
@@ -239,7 +272,11 @@ local function show_client(host, port, name, password)
 		local node_by_name = {}
 		local announced = nil
 		local to_ask = {}
-		local media_asked_at = nil
+		-- When the media last got anywhere: a file asked for, or a bunch
+		-- arriving. The fallback below is a quiet spell rather than a fixed
+		-- time after asking, because a game's whole media is tens of
+		-- megabytes and takes longer than that to arrive.
+		local media_progress_us = nil
 		local registry_stale = false
 
 		-- Composed textures go beside the server's own files, under a name
@@ -404,9 +441,6 @@ local function show_client(host, port, name, password)
 
 		-- The things in the world that are not nodes, by id
 		local world_objects = {}
-		-- The texture names the node definitions asked for, which is what
-		-- decides whether arriving media is worth a new registry
-		local node_textures = {}
 
 		-- What has been said, newest last, and the line being typed
 		local CHAT_LINES = 8
@@ -441,6 +475,11 @@ local function show_client(host, port, name, password)
 		-- on screen: a slice a frame rather than one frame of a second and a
 		-- half. registry_step is nil when nothing is being built.
 		local REGISTRY_BUDGET_US = 4000
+		-- Behind the loading panel there is nothing to keep smooth, and the
+		-- budget is what decides how long the wait is: on a big game's
+		-- definitions 4 ms a frame turned two seconds of work into fifteen
+		-- of waiting
+		local REGISTRY_LOADING_BUDGET_US = 50000
 		local registry_step = nil
 		local registry_started_us = nil
 		local registry_spent_us = 0
@@ -459,7 +498,8 @@ local function show_client(host, port, name, password)
 		-- One slice, and the line when it is done
 		local function step_registry()
 			local t0 = buildat.get_time_us()
-			local done, cubes = registry_step(REGISTRY_BUDGET_US)
+			local done, cubes = registry_step(loading and
+					REGISTRY_LOADING_BUDGET_US or REGISTRY_BUDGET_US)
 			registry_spent_us = registry_spent_us +
 					(buildat.get_time_us() - t0)
 			if not done then
@@ -477,6 +517,19 @@ local function show_client(host, port, name, password)
 			-- before the world is there, which is what anything driving the
 			-- client waits for
 			log:info(line)
+			if loading then
+				loading = false
+				if loading_panel then
+					loading_panel:Remove()
+					loading_panel = nil
+				end
+				-- A node whose texture expression cannot be built stays a
+				-- placeholder, and this is the only thing that says why
+				for mod_name, expr in pairs(texmod.unimplemented) do
+					log:warning("texture modifier ["..mod_name..
+							" is not implemented, as in "..expr)
+				end
+			end
 		end
 
 		-- The atlas textures the world is drawn with are filled in by hand
@@ -489,40 +542,6 @@ local function show_client(host, port, name, password)
 					registry_stale = true
 				end)
 
-		-- The announcement and the definitions arrive in that order today, but
-		-- the plan needs all three, so any of them arriving makes it
-		local function plan_media()
-			if not (node_defs and item_defs and announced) then
-				return
-			end
-			local wanted = {}
-			node_textures = wanted
-			for _, def in pairs(node_defs) do
-				for i = 1, 6 do
-					local expr = tile_expression(def, i)
-					if expr then
-						texmod.sources(expr, wanted)
-					end
-				end
-				-- The palette a voxel's param2 indexes is media too, and it
-				-- has to be there before the registry is built: it says what
-				-- colour each of the voxel's own ids is drawn in
-				if def.palette_name ~= "" then
-					texmod.sources(def.palette_name, wanted)
-				end
-			end
-			-- What an item looks like in an inventory is its own texture,
-			-- and a form full of them is most of what a game's media is
-			for _, def in pairs(item_defs) do
-				if def.inventory_image ~= "" then
-					texmod.sources(def.inventory_image, wanted)
-				end
-			end
-			for _, name in ipairs(store:plan(announced, wanted)) do
-				to_ask[#to_ask + 1] = name
-			end
-		end
-
 		client.on_nodedef = function(data)
 			got_content = true
 			local defs, count = nodedef.parse(luanti.serialize, data, log)
@@ -533,25 +552,32 @@ local function show_client(host, port, name, password)
 			end
 			add_line(count.." node definitions")
 			registry_stale = true
-			plan_media()
+			-- Starts the fallback clock: a server that never announces its
+			-- media must not leave the loading panel up forever
+			media_progress_us = media_progress_us or buildat.get_time_us()
 		end
 
+		-- Everything the server has that the cache does not, asked for at
+		-- once: see media.lua. Working out which files a game's definitions
+		-- actually reach means walking every texture expression, and a file
+		-- found after the voxel registry was built costs another build of it.
 		client.on_announce_media = function(files)
 			announced = files
+			for _, name in ipairs(store:plan(files)) do
+				to_ask[#to_ask + 1] = name
+			end
 			registry_stale = true
-			plan_media()
 		end
 
 		client.on_media = function(files)
 			store:store(files)
-			-- Only a texture a node wanted is worth building the registry
-			-- again for; an object's texture arriving is not, and objects
-			-- turn up for as long as the client runs
-			for _, file in ipairs(files) do
-				if node_textures[file.name] then
-					registry_stale = true
-					break
-				end
+			media_progress_us = buildat.get_time_us()
+			-- Everything announced was asked for before the registry was
+			-- built the first time, so a file arriving after that is one the
+			-- announcement did not cover -- a media push, or a name a form or
+			-- an object asked for -- and the voxels may want it too
+			if not loading then
+				registry_stale = true
 			end
 			-- An object that was waiting for its texture can have it now
 			for _, obj in pairs(world_objects) do
@@ -578,7 +604,6 @@ local function show_client(host, port, name, password)
 					client.protocol_version)
 			item_defs = items
 			add_line(count.." item definitions")
-			plan_media()
 		end
 
 		-- A texture that is not part of a voxel definition: an object's, or
@@ -908,6 +933,17 @@ local function show_client(host, port, name, password)
 		local hud_key = nil
 
 		local function update_hud()
+			-- Nothing of the player's own while the loading panel is up: the
+			-- panel is behind the rest of the UI, so a hotbar would float on
+			-- top of it
+			if loading then
+				if hud then
+					hud:Remove()
+					hud = nil
+					hud_key = nil
+				end
+				return
+			end
 			local list = inv and inv.main or nil
 			local key = tostring(wield_index).."/"..tostring(client.hp)
 			-- What is in the slots, as a string, so that the bar is only
@@ -1427,13 +1463,35 @@ local function show_client(host, port, name, password)
 					batch[#batch + 1] = table.remove(to_ask)
 				end
 				client:request_media(batch)
-				media_asked_at = buildat.get_time_us()
+				media_progress_us = buildat.get_time_us()
 			elseif registry_stale and node_defs then
-				local waited = media_asked_at and
-						(buildat.get_time_us() - media_asked_at) / 1000000 or 0
-				if store:missing_count() == 0 or waited > MEDIA_WAIT_S then
+				local waited = media_progress_us and
+						(buildat.get_time_us() - media_progress_us) /
+						1000000 or 0
+				-- The announcement is waited for as well as the files it
+				-- names: the definitions can arrive first, and a registry
+				-- built before the media is a registry of placeholders that
+				-- has to be built all over again
+				local settled = store:missing_count() == 0 and
+						(announced ~= nil or not loading)
+				if settled or waited > MEDIA_WAIT_S then
 					rebuild_registry()
 				end
+			end
+			if loading and loading_panel then
+				local what = "waiting for the game's definitions"
+				if registry_step then
+					what = "building the voxel types"
+				elseif announced then
+					what = "media: "..store:have_count().." of "..
+							#announced.." files, "..
+							(#to_ask + store:missing_count()).." to come"
+				end
+				loading_text.text = "Loading "..host..":"..port.."\n\n"..what
+				-- The root's size, every frame, because the window can be
+				-- resized while this is up
+				loading_panel.width = magic.ui.root.width
+				loading_panel.height = magic.ui.root.height
 			end
 			set_counters()
 		end)
@@ -1678,6 +1736,10 @@ local function show_client(host, port, name, password)
 			close_chat()
 			chat_text:Remove()
 			status_text:Remove()
+			if loading_panel then
+				loading_panel:Remove()
+				loading_panel = nil
+			end
 			if hud then
 				hud:Remove()
 				hud = nil
