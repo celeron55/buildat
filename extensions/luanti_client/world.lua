@@ -109,6 +109,33 @@ end)()
 -- the black one that unlit air would give. Skylight is bits 24..27.
 local VOXEL_AIR_LIT = VOXEL_AIR + 15 * 0x1000000
 
+-- How a (voxel id, param2) pair is keyed: id + param2 * this, which is what
+-- pack_voxel_volume's paired lookup wants. Luanti's ids are 16 bits.
+local PAIR_SCALE = 65536
+
+-- Luanti's ContentParamType2, the values that change what a voxel looks like
+local CPT2_FACEDIR = 3
+local CPT2_WALLMOUNTED = 4
+local CPT2_COLOR = 8
+local CPT2_COLORED_FACEDIR = 9
+local CPT2_COLORED_WALLMOUNTED = 10
+local CPT2_COLORED_DEGROTATE = 12
+local CPT2_4DIR = 13
+local CPT2_COLORED_4DIR = 14
+
+-- Which bits of param2 are the palette index, per paramtype2. Luanti indexes
+-- the 256-entry palette with the whole of param2 for CPT2_COLOR and with the
+-- high bits for the types that keep a direction in the low ones; what is
+-- written here is how much of param2 one colour covers, which is what the low
+-- bits are worth: param2 - param2 % step is the index.
+local COLOR_STEP = {
+	[CPT2_COLOR] = 1,
+	[CPT2_COLORED_FACEDIR] = 32,
+	[CPT2_COLORED_WALLMOUNTED] = 8,
+	[CPT2_COLORED_DEGROTATE] = 32,
+	[CPT2_COLORED_4DIR] = 4,
+}
+
 local function block_key(x, y, z)
 	return x..","..y..","..z
 end
@@ -299,6 +326,48 @@ function M.new(magic, buildat, log, options)
 	-- definitions have not arrived and everything but air stops one
 	self.node_pointable = nil
 
+	-- One voxel id per (definition, param2) pair, for the pairs that turn up
+	-- in a block that arrives. The map is keyed the way the paired lookup
+	-- wants; pair_voxel is keyed by what actually decides the look, so two
+	-- param2 values that pick the same palette colour share a voxel id.
+	self.pair_map = {}
+	self.pair_count = 0
+	local pair_voxel = {}
+	-- Bumped when the definitions change: every block has to be looked at
+	-- again, because what its param2 means has changed
+	local pair_epoch = 0
+	-- id -> {def =, mask =, palette =} for the definitions whose param2
+	-- changes what they look like; nil for everything else
+	local param2_color = {}
+	-- Set by set_node_definitions(), which is what knows how to build one
+	local build_pair = nil
+
+	-- The pairs in one block that have no voxel id yet. Scanning 4096 voxels
+	-- in Lua is not free, so it happens once per block rather than once per
+	-- mesh, and only while some definition cares about param2 at all.
+	local function register_pairs(block)
+		if not build_pair or not block.param2 or not next(param2_color) then
+			return
+		end
+		if block.pair_epoch == pair_epoch then
+			return
+		end
+		block.pair_epoch = pair_epoch
+		local param0, param2 = block.param0, block.param2
+		local n = BLOCKSIZE * BLOCKSIZE * BLOCKSIZE
+		for i = 0, n - 1 do
+			local hi, lo = param0:byte(i * 2 + 1, i * 2 + 2)
+			local entry = param2_color[hi * 256 + lo]
+			if entry then
+				local p2 = param2:byte(i + 1)
+				local key = hi * 256 + lo + p2 * PAIR_SCALE
+				if self.pair_map[key] == nil then
+					build_pair(entry, hi * 256 + lo, p2, key)
+				end
+			end
+		end
+	end
+
 	local function mark_dirty(key)
 		if blocks[key] and not dirty[key] then
 			dirty[key] = true
@@ -325,6 +394,21 @@ function M.new(magic, buildat, log, options)
 				map = self.node_map, map_default = self.node_map_default,
 			},
 		}
+		-- A second pass over the same box for the voxels whose param2 says
+		-- what they look like: no map_default, so a pair that has no voxel id
+		-- of its own leaves what the pass above wrote alone. That is what
+		-- keeps this from having to hold an entry for every (id, param2)
+		-- pair in the game.
+		if self.pair_count > 0 and block.param2 then
+			sources[#sources + 1] = {
+				data = block.param0, format = "u16be",
+				source_size = {BLOCKSIZE, BLOCKSIZE, BLOCKSIZE},
+				at = {0, 0, 0},
+				second = {data = block.param2, format = "u8",
+						scale = PAIR_SCALE},
+				map = self.pair_map,
+			}
+		end
 		if self.use_skylight then
 			sources[#sources + 1] = {
 				data = block.param1, format = "u8",
@@ -357,6 +441,16 @@ function M.new(magic, buildat, log, options)
 					from = from, size = size, at = at,
 					map = self.node_map, map_default = self.node_map_default,
 				}
+				if self.pair_count > 0 and n.param2 then
+					sources[#sources + 1] = {
+						data = n.param0, format = "u16be",
+						source_size = {BLOCKSIZE, BLOCKSIZE, BLOCKSIZE},
+						from = from, size = size, at = at,
+						second = {data = n.param2, format = "u8",
+								scale = PAIR_SCALE},
+						map = self.pair_map,
+					}
+				end
 				if self.use_skylight then
 					sources[#sources + 1] = {
 						data = n.param1, format = "u8",
@@ -381,6 +475,12 @@ function M.new(magic, buildat, log, options)
 			return
 		end
 		local t0 = buildat.get_time_us()
+		-- What the voxels in it look like may depend on their param2, and a
+		-- pair that has no voxel id of its own draws as if its param2 were
+		-- zero. Here rather than when the block arrives, because the blocks
+		-- that were already there when the definitions came have to be
+		-- looked at too, and meshing is already spread over frames.
+		register_pairs(block)
 		if not block.node then
 			block.node = scene:CreateChild("block_"..key)
 			block.node.position = block_node_position(block.x, block.y, block.z)
@@ -406,10 +506,12 @@ function M.new(magic, buildat, log, options)
 		if existing then
 			existing.param0 = block.param0
 			existing.param1 = block.param1
+			existing.param2 = block.param2
 		else
 			blocks[key] = {
 				x = block.x, y = block.y, z = block.z,
 				param0 = block.param0, param1 = block.param1,
+				param2 = block.param2,
 			}
 		end
 		mark_dirty(key)
@@ -417,6 +519,12 @@ function M.new(magic, buildat, log, options)
 			mark_dirty(block_key(block.x + d[1], block.y + d[2],
 					block.z + d[3]))
 		end
+	end
+
+	-- How many (definition, param2) pairs have a voxel id of their own, for
+	-- the counters: this is what says whether the palettes are being used
+	function self:pair_voxel_count()
+		return self.pair_count
 	end
 
 	function self:get_block(x, y, z)
@@ -770,8 +878,9 @@ function M.new(magic, buildat, log, options)
 	-- neighbour's border, so that mesh goes out of date too.
 	-- param1 may be nil, which means the node became air and its light has
 	-- to be worked out here.
-	function self:set_node(x, y, z, param0, param1)
+	function self:set_node(x, y, z, param0, param1, param2)
 		param1 = param1 or removal_light(x, y, z)
+		param2 = param2 or 0
 		local bx = math.floor(x / BLOCKSIZE)
 		local by = math.floor(y / BLOCKSIZE)
 		local bz = math.floor(z / BLOCKSIZE)
@@ -789,6 +898,18 @@ function M.new(magic, buildat, log, options)
 				block.param0:sub(i * 2 + 3)
 		block.param1 = block.param1:sub(1, i)..string.char(param1 % 256)..
 				block.param1:sub(i + 2)
+		if block.param2 then
+			block.param2 = block.param2:sub(1, i)..
+					string.char(param2 % 256)..block.param2:sub(i + 2)
+			-- What it looks like may be a pair that has no voxel id yet
+			if build_pair then
+				local entry = param2_color[param0]
+				local key = param0 + (param2 % 256) * PAIR_SCALE
+				if entry and self.pair_map[key] == nil then
+					build_pair(entry, param0, param2 % 256, key)
+				end
+			end
+		end
 		mark_dirty(key)
 		for _, d in ipairs(NEIGHBOURS) do
 			-- Only the neighbour the node is up against sees it in its border
@@ -850,8 +971,56 @@ function M.new(magic, buildat, log, options)
 	-- keeps the placeholder: half a cube's textures is worse to look at than
 	-- none of them.
 	--
+	-- One definition as a voxel in a registry, or nil for one whose textures
+	-- are not all there. override is a colour that stands in for the
+	-- definition's own, which is what a palette index comes to.
+	-- name has to be different for every voxel in a registry: the registry
+	-- keys them by it, and adding a second voxel under a name it already has
+	-- is an error. A pair's name carries what makes it different.
+	local function build_voxel(reg, def, resolve_tile, override, name)
+		local kind = CUBE_DRAWTYPES[def.drawtype]
+		local shape, double_sided = shapes.for_node(def)
+		if def.drawtype == DRAWTYPE_AIRLIKE then
+			return VOXEL_AIR
+		end
+		if shape then
+			-- Only the tiles the shape uses have to be there: a plant wears
+			-- one texture and would be held back by the other five
+			local resources = {}
+			for _, quad in ipairs(shape) do
+				local i = quad.tile
+				if not resources[i] then
+					resources[i] = resolve_tile(def, i, override)
+					if not resources[i] then
+						return nil
+					end
+				end
+			end
+			local first = nil
+			for i = 1, 6 do
+				first = first or resources[i]
+			end
+			for i = 1, 6 do
+				resources[i] = resources[i] or first
+			end
+			return add_cube(reg, name or def.name, resources, kind, shape,
+					double_sided)
+		end
+		if not kind then
+			return nil
+		end
+		local resources = {}
+		for i = 1, 6 do
+			resources[i] = resolve_tile(def, i, override)
+			if not resources[i] then
+				return nil
+			end
+		end
+		return add_cube(reg, name or def.name, resources, kind)
+	end
+
 	-- Returns how many node ids came out as their own cube.
-	function self:set_node_definitions(defs, resolve_tile)
+	function self:set_node_definitions(defs, resolve_tile, palette_colors)
 		local new_reg = base_registry()
 		local map = {
 			[CONTENT_AIR] = VOXEL_AIR,
@@ -861,6 +1030,11 @@ function M.new(magic, buildat, log, options)
 		local solid = {}
 		local liquid = {}
 		local pointable = {}
+		self.pair_map = {}
+		self.pair_count = 0
+		pair_voxel = {}
+		param2_color = {}
+		pair_epoch = pair_epoch + 1
 		for id, def in pairs(defs) do
 			solid[id] = def.walkable
 			-- Luanti's PointabilityType: 0 is not pointable, 1 is, and 2
@@ -869,52 +1043,54 @@ function M.new(magic, buildat, log, options)
 			pointable[id] = def.pointable ~= 0
 			liquid[id] = def.liquid_type ~= nil and
 					def.liquid_type ~= NODEDEF_LIQUID_NONE
-			local kind = CUBE_DRAWTYPES[def.drawtype]
-			local shape, double_sided = shapes.for_node(def)
-			if def.drawtype == DRAWTYPE_AIRLIKE then
-				map[id] = VOXEL_AIR
-			elseif shape then
-				-- Only the tiles the shape uses have to be there: a plant
-				-- wears one texture and would be held back by the other five
-				local resources = {}
-				local ok = true
-				for _, quad in ipairs(shape) do
-					local i = quad.tile
-					if not resources[i] then
-						resources[i] = resolve_tile(def, i)
-						if not resources[i] then
-							ok = false
-							break
-						end
-					end
-				end
-				if ok then
-					local first = nil
-					for i = 1, 6 do
-						first = first or resources[i]
-					end
-					for i = 1, 6 do
-						resources[i] = resources[i] or first
-					end
-					map[id] = add_cube(new_reg, def.name, resources, kind,
-							shape, double_sided)
-					cubes = cubes + 1
-				end
-			elseif kind then
-				local resources = {}
-				for i = 1, 6 do
-					resources[i] = resolve_tile(def, i)
-					if not resources[i] then
-						break
-					end
-				end
-				if resources[6] then
-					map[id] = add_cube(new_reg, def.name, resources, kind)
+			local voxel = build_voxel(new_reg, def, resolve_tile, nil)
+			if voxel then
+				map[id] = voxel
+				if voxel ~= VOXEL_AIR then
 					cubes = cubes + 1
 				end
 			end
 			-- Anything left out keeps map_default, the placeholder cube
+
+			-- A definition whose param2 is a palette index is drawn in one
+			-- colour per index, and which colour that is is only known once
+			-- a voxel with that param2 turns up: see register_pairs().
+			local step = COLOR_STEP[def.param_type_2]
+			if step and voxel and def.palette_name ~= "" then
+				local colors = palette_colors and
+						palette_colors(def.palette_name)
+				if colors and #colors > 1 then
+					param2_color[id] = {def = def, step = step,
+							colors = colors}
+				end
+			end
 		end
+
+		-- What register_pairs() calls for a pair it has not seen. The voxel
+		-- goes into the registry that is current, which is why this is made
+		-- here rather than kept as a method: a new set of definitions
+		-- replaces the registry and everything built into it.
+		build_pair = function(entry, id, p2, key)
+			-- Luanti stretches a palette to 256 entries by repeating each
+			-- pixel, and indexes that with param2's high bits
+			local index = math.floor((p2 - p2 % entry.step) *
+					#entry.colors / 256) + 1
+			local cache_key = id.."/"..index
+			local voxel = pair_voxel[cache_key]
+			if voxel == nil then
+				voxel = build_voxel(self.voxel_reg, entry.def, resolve_tile,
+						entry.colors[index],
+						entry.def.name.."^"..index) or false
+				pair_voxel[cache_key] = voxel
+			end
+			-- false for a pair whose textures are not there: remembered so
+			-- that it is not built again for every voxel in every block
+			self.pair_map[key] = voxel or false
+			if voxel then
+				self.pair_count = self.pair_count + 1
+			end
+		end
+
 		self.voxel_reg = new_reg
 		-- A fresh atlas registry: the old one holds atlases built for the old
 		-- registry's segment ids

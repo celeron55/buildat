@@ -184,8 +184,8 @@ local function show_client(host, port, name, password)
 			view:set_block(block)
 		end
 
-		client.on_node = function(x, y, z, param0, param1)
-			view:set_node(x, y, z, param0, param1)
+		client.on_node = function(x, y, z, param0, param1, param2)
+			view:set_node(x, y, z, param0, param1, param2)
 		end
 
 		-- The server's media, and what the node definitions make of it
@@ -274,12 +274,15 @@ local function show_client(host, port, name, password)
 		-- this game also carries the colour it is mostly drawn in, which is
 		-- why this looks right; the upgrade path is a voxel id per (node,
 		-- param2) pair, which is also what a facedir needs.
-		local function tile_expression(def, i)
+		local function tile_expression(def, i, override)
 			local function layer(tile)
 				if not tile or tile.name == "" then
 					return nil
 				end
-				local color = tile.color or def.color
+				-- A tile with a colour of its own keeps it; the override is
+				-- what the voxel's param2 picked out of a palette, which
+				-- stands in for the definition's own colour
+				local color = tile.color or override or def.color
 				if not color or (color[1] == 255 and color[2] == 255 and
 						color[3] == 255) then
 					return tile.name
@@ -313,8 +316,8 @@ local function show_client(host, port, name, password)
 			ops = {{op = "crop", grid = {1, 0}, cell = {0, 0}}},
 		}
 
-		local function resolve_tile(def, i)
-			local expr = tile_expression(def, i)
+		local function resolve_tile(def, i, override)
+			local expr = tile_expression(def, i, override)
 			if not expr then
 				return nil
 			end
@@ -324,6 +327,40 @@ local function show_client(host, port, name, password)
 				extra = FIRST_FRAME
 			end
 			return texmod.resolve(expr, texmod_ctx, extra)
+		end
+
+		-- Assigned further down, with the rest of the media handling; the
+		-- palette below is one of the things that wants a texture asked for
+		local media_texture
+
+		-- A palette is an image a game indexes by param2 to say what colour a
+		-- voxel is drawn in; Luanti stretches it to 256 entries by repeating
+		-- each pixel, so a palette of n pixels is n distinct colours. What is
+		-- kept here is the pixels, and the resolving of a name to an index is
+		-- in world.lua where the voxel ids are.
+		local palettes = {}
+
+		local function palette_colors(name)
+			if palettes[name] ~= nil then
+				return palettes[name] or nil
+			end
+			local resource = media_texture(name)
+			if not resource then
+				return nil -- Not arrived yet; the registry is built again
+			end
+			local ok, w, h, rgba = pcall(buildat.read_image, resource)
+			if not ok or w * h < 1 then
+				log:warning("palette "..name.." could not be read")
+				palettes[name] = false
+				return nil
+			end
+			local colors = {}
+			for i = 0, math.min(w * h, 256) - 1 do
+				local r, g, b = rgba:byte(i * 4 + 1, i * 4 + 3)
+				colors[#colors + 1] = {r, g, b}
+			end
+			palettes[name] = colors
+			return colors
 		end
 
 		-- The things in the world that are not nodes, by id
@@ -366,11 +403,17 @@ local function show_client(host, port, name, password)
 				return
 			end
 			local t0 = buildat.get_time_us()
-			local cubes = view:set_node_definitions(node_defs, resolve_tile)
-			add_line(cubes.." node types have their own textures"..
+			local cubes = view:set_node_definitions(node_defs, resolve_tile,
+					palette_colors)
+			local line = cubes.." voxel types have their own textures"..
 					" ("..store:have_count().." files, "..composed_count..
 					" composed, "..
-					math.floor((buildat.get_time_us() - t0) / 1000).." ms)")
+					math.floor((buildat.get_time_us() - t0) / 1000).." ms)"
+			add_line(line)
+			-- In the log as well as on the screen: this is the last thing
+			-- before the world is there, which is what anything driving the
+			-- client waits for
+			log:info(line)
 		end
 
 		-- The announcement and the definitions arrive in that order today, but
@@ -387,6 +430,12 @@ local function show_client(host, port, name, password)
 					if expr then
 						texmod.sources(expr, wanted)
 					end
+				end
+				-- The palette a voxel's param2 indexes is media too, and it
+				-- has to be there before the registry is built: it says what
+				-- colour each of the voxel's own ids is drawn in
+				if def.palette_name ~= "" then
+					texmod.sources(def.palette_name, wanted)
 				end
 			end
 			-- What an item looks like in an inventory is its own texture,
@@ -461,7 +510,7 @@ local function show_client(host, port, name, password)
 		-- because what wants them turns up long after the media was asked
 		-- for, so what is missing is asked for when it is wanted and whatever
 		-- was waiting gets it when it arrives.
-		local function media_texture(name)
+		function media_texture(name)
 			local resolved = texmod.resolve(name, texmod_ctx)
 			if resolved then
 				return resolved
@@ -903,12 +952,14 @@ local function show_client(host, port, name, password)
 							client.breath)
 				end
 			end
+			-- Two lines rather than one: one line of this does not fit on a
+			-- screen and what runs off the edge is the half that changes
 			status_text.text = table.concat(lines, "\n").."\n"..
 					string.format(
-					"%s%s | %.1f, %.1f, %.1f %s | %d: %s | %s"..
-					" | %d objects | blocks: %d received,"..
+					"%s%s | %.1f, %.1f, %.1f %s | %d: %s | %s\n"..
+					"%d objects | blocks: %d received,"..
 					" %d in scene, %d to mesh | %d us to hand over"..
-					" | media: %d files, %d to come",
+					" | %d param2 pairs | media: %d files, %d to come",
 					client.state, condition, avatar.x, avatar.y, avatar.z,
 					avatar.fly and "flying" or
 							(avatar.in_liquid and "swimming" or
@@ -918,6 +969,7 @@ local function show_client(host, port, name, password)
 					view:object_count(),
 					client.blocks_received, view:block_count(),
 					view:dirty_count(), view.last_mesh_us,
+					view:pair_voxel_count(),
 					store:have_count(), store:missing_count())
 		end
 

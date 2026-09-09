@@ -435,6 +435,11 @@ buildat.compose_image(args) -> width, height
 - colorize blends towards the colour by ratio and leaves fully transparent
   pixels alone; at ratio 255 it replaces the colour and multiplies the alpha.
 
+buildat.read_image(resource_name) -> width, height, rgba
+- The pixels of an image, as one string of four bytes per pixel, row by row.
+  What wanted this is a colour palette: an image of a few dozen pixels that a
+  game indexes to say what colour something is drawn in.
+
 VoxelDefinition.shape
 - A shape of the voxel's own instead of a cube: an array of quads, each
   {tile = 1...6, p = {12 numbers}, uv = {8 numbers}}. The corners are in the
