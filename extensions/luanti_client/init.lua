@@ -27,6 +27,7 @@ local texmod = dofile(path.."/texmod.lua")
 local itemdef = dofile(path.."/itemdef.lua")
 local inventory = dofile(path.."/inventory.lua")
 local objmesh = dofile(path.."/objmesh.lua")
+local b3dmesh = dofile(path.."/b3dmesh.lua")
 local luanti_hud = dofile(path.."/hud.lua")
 local sounds = dofile(path.."/sounds.lua")
 local formspec = dofile(path.."/formspec.lua")
@@ -226,6 +227,17 @@ local function show_client(host, port, name, password)
 	loading_text:SetAlignment(HA_CENTER, VA_CENTER)
 	loading_text:SetTextAlignment(HA_CENTER)
 	loading_text.text = "Connecting to "..host..":"..port
+
+	-- What the node being pointed at says about itself: its metadata's
+	-- infotext, which is how a game labels a chest, a sign or a machine.
+	-- Luanti draws it under the chat, a few lines at most, and takes it away
+	-- with the rest of the HUD; update_hud() places it.
+	local info_text = magic.ui.root:CreateChild("Text")
+	info_text.defaultStyle = style
+	info_text:SetStyleAuto()
+	info_text:SetAlignment(HA_LEFT, VA_TOP)
+	info_text:SetPosition(100, 8)
+	info_text.color = magic.Color(1.0, 1.0, 1.0)
 
 	-- The crosshair, which is what says where the middle of the screen is
 	-- when the mouse is captured. Two bars rather than a texture: it is two
@@ -531,9 +543,16 @@ local function show_client(host, port, name, password)
 			local key = name.."@"..tostring(scale)
 			local quads = meshes[key]
 			if quads == nil then
-				-- Only .obj: .b3d is binary and animated, and what a node
-				-- wants of it is its static geometry
-				if not name:lower():match("%.obj$") then
+				local lower = name:lower()
+				-- .obj is text and .b3d is Blitz3D's chunks; the other
+				-- formats Luanti takes (.x, .gltf, .glb) nothing here reads
+				local read = nil
+				if lower:match("%.obj$") then
+					read = objmesh.parse
+				elseif lower:match("%.b3d$") then
+					read = b3dmesh.parse
+				end
+				if not read then
 					meshes[key] = false
 					return nil
 				end
@@ -545,12 +564,14 @@ local function show_client(host, port, name, password)
 				end
 				local text = file:read("*all")
 				file:close()
-				local parsed, _, skipped = objmesh.parse(text)
-				if #parsed == 0 then
-					log:warning("mesh "..name.." has no faces this reads")
+				local parsed, why, skipped = read(text)
+				if not parsed or #parsed == 0 then
+					log:warning("mesh "..name.." has no faces this reads"..
+							(type(why) == "string" and ": "..why or ""))
 					meshes[key] = false
 					return nil
 				end
+				skipped = skipped or 0
 				if skipped > 0 then
 					log:info("mesh "..name..": "..skipped..
 							" faces are neither triangles nor quads")
@@ -1231,8 +1252,10 @@ local function show_client(host, port, name, password)
 		-- that each is said once
 		local sound_missing = {}
 		-- Where the chat lines are, so that they are only moved when the
-		-- lines of detail above them changed height
+		-- lines of detail above them changed height, and the same for the
+		-- infotext under them
 		local chat_at_y = nil
+		local info_at_y = nil
 
 		-- Every change to any of it, with the elements keyed by the server's
 		-- own id; client.lua holds them because HUDCHANGE names one field of
@@ -1309,6 +1332,13 @@ local function show_client(host, port, name, password)
 			if chat_y ~= chat_at_y then
 				chat_at_y = chat_y
 				chat_text:SetPosition(8, chat_y)
+			end
+			-- Under the chat, which is where Luanti puts it
+			info_text.visible = on
+			local info_y = chat_y + chat_text.height + 8
+			if info_y ~= info_at_y then
+				info_at_y = info_y
+				info_text:SetPosition(100, info_y)
 			end
 
 			-- The game's own elements, built again when the server changed
@@ -1726,6 +1756,29 @@ local function show_client(host, port, name, password)
 			elseif pointed_under then
 				local def = node_def_at(pointed_under)
 				pointed = "pointing at "..(def and def.name or "?")
+			end
+			-- What the pointed node says about itself, which is a game's own
+			-- label for it. Only a few lines: Luanti cuts it at six.
+			local info = ""
+			if pointed_under then
+				local meta = view:node_meta(pointed_under[1],
+						pointed_under[2], pointed_under[3])
+				local said = meta and meta.fields and
+						meta.fields.infotext or nil
+				if said and said ~= "" then
+					info = formspec.strip_escapes(said)
+					local lines_out = {}
+					for line in info:gmatch("[^\n]+") do
+						lines_out[#lines_out + 1] = line
+						if #lines_out >= 6 then
+							break
+						end
+					end
+					info = table.concat(lines_out, "\n")
+				end
+			end
+			if info ~= info_text.text then
+				info_text.text = info
 			end
 			local condition = ""
 			if client.hp then
@@ -2276,6 +2329,7 @@ local function show_client(host, port, name, password)
 			ui:drop_tooltip()
 			close_chat()
 			chat_text:Remove()
+			info_text:Remove()
 			status_text:Remove()
 			if loading_panel then
 				loading_panel:Remove()

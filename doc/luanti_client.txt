@@ -394,6 +394,11 @@ does not change what the client tells the server its view is, so a zoomed-in
 player is still sent the blocks a 72-degree view needs -- more than it wants,
 never fewer.
 
+What a node says about itself: a node's metadata can carry an "infotext",
+which is how a game labels a chest, a sign or a machine, and it is drawn under
+the chat while that node is pointed at -- where Luanti draws it, cut at six
+lines like Luanti cuts it, and taken away with the rest of the HUD by F1.
+
 What is next
 ------------
 - What a mob really looks like: Luanti draws a mesh for one, and this draws a
