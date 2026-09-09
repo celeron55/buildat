@@ -305,13 +305,21 @@ function M.new(socket, log)
 		process_packet(channel, r:rest())
 	end
 
-	-- Call this every frame with the time since the last call
+	-- Call this every frame with the time since the last call.
+	--
+	-- self.last_receive_us is when the last datagram arrived, or nil if none
+	-- has: whoever wants to know whether the other end is still there looks
+	-- at that. Every datagram counts, acknowledgements included, because a
+	-- peer that is alive at least acknowledges.
 	function self:update(dtime)
 		if not self.connected then
 			return
 		end
 		while true do
 			local data, err = socket:receive()
+			if data then
+				self.last_receive_us = buildat.get_time_us()
+			end
 			if not data then
 				if err ~= "timeout" then
 					self.connected = false

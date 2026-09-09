@@ -136,6 +136,18 @@ Both login paths have been run against a real Luanti server: registering a new
 player (FIRST_SRP) and logging in as one the server knows (SRP), and the
 terrain of that server's world has been on screen with its own textures.
 
+How a session ends: escape leaves the world, and so does the server denying
+access or the connection going away. A denial and the disconnection that
+follows it arrive together -- the server sends TOCLIENT_ACCESS_DENIED and
+closes -- and the denial is the one that gets shown; the reason codes have no
+words on the wire, so the words come from Luanti's own client
+(accessDeniedStrings in clientpackethandler.cpp). A server that says nothing
+at all for twenty seconds counts as gone as well: a live one acknowledges the
+position we send it several times a second, and without that rule a client
+pointed at an address nothing answers would sit there resending its INIT.
+Whatever the reason, everything this session put on the screen is taken back,
+the reason goes in a dialog, and closing that dialog closes the client.
+
 Keeping the frame rate while the world loads: the world is semi-infinite, so
 blocks arrive for as long as the player walks and whatever loading costs is
 paid during play. Two budgets keep a burst of them from being one long frame:

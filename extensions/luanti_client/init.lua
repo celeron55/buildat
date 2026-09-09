@@ -1297,9 +1297,13 @@ local function show_client(host, port, name, password)
 			view:set_camera(x, y + player.EYE_HEIGHT, z, pitch, yaw)
 		end
 
-		-- A plain subscription rather than root:SubscribeToStackEvent(), which
-		-- only fires while the UI element has focus; the world has to keep
-		-- streaming whatever the UI is doing. Unsubscribed by hand below.
+		-- Set once the session is over -- the server said no, the connection
+		-- went away, or escape was pressed -- and everything this session put
+		-- on the screen has been taken back. leave() is what does that; it is
+		-- defined further down, where all of it is in scope.
+		local left = false
+		local leave
+
 		-- Where the cursor is, for the tooltips a form asks for: the UI does
 		-- not say where it is and Input only gives the movement since the
 		-- last frame, so it is tracked from MouseMove below.
@@ -1348,10 +1352,19 @@ local function show_client(host, port, name, password)
 			end
 		end
 
+		-- A plain subscription rather than root:SubscribeToStackEvent(), which
+		-- only fires while the UI element has focus; the world has to keep
+		-- streaming whatever the UI is doing. Unsubscribed by leave().
 		local update_cb = magic.SubscribeToEvent("Update",
 				function(event_type, event_data)
 			local dtime = event_data:GetFloat("TimeStep")
 			client:update(dtime)
+			-- The client may have found out during that update that the
+			-- session is over, and leave() has then taken the screen apart:
+			-- what is below here would put some of it back
+			if left then
+				return
+			end
 			move(dtime)
 			update_dig(dtime)
 			objects.interpolate(world_objects, dtime)
@@ -1633,6 +1646,48 @@ local function show_client(host, port, name, password)
 			end
 		end)
 
+		-- Everything this session put on the screen or subscribed to, taken
+		-- back. What is left after it is the empty stack the connect dialog
+		-- was pushed on.
+		leave = function()
+			if left then
+				return
+			end
+			left = true
+			magic.UnsubscribeFromEvent("Update", update_cb)
+			magic.UnsubscribeFromEvent("MouseButtonDown", mouse_down_cb)
+			magic.UnsubscribeFromEvent("MouseButtonUp", mouse_up_cb)
+			magic.UnsubscribeFromEvent("MouseMove", mouse_move_cb)
+			magic.UnsubscribeFromEvent("UIMouseClick", ui_click_cb)
+			magic.UnsubscribeFromEvent("MouseWheel", mouse_wheel_cb)
+			magic.UnsubscribeFromEvent("ScreenMode", screen_mode_cb)
+			close_form()
+			ui:drop_tooltip()
+			close_chat()
+			chat_text:Remove()
+			status_text:Remove()
+			if hud then
+				hud:Remove()
+				hud = nil
+			end
+			magic.input:SetMouseVisible(true)
+			client:disconnect()
+			view:close()
+			uistack.main:pop(root)
+		end
+
+		-- The server said no, or the connection went away. Whatever is on the
+		-- screen is no use any more, and a client that writes a line in the
+		-- corner and then sits there is not telling anybody anything: the
+		-- reason goes in a dialog, and closing that closes the client.
+		client.on_failed = function(text)
+			log:info("Session ended: "..(text:gsub("\n", " ")))
+			leave()
+			ui_utils.show_message_dialog(text, function()
+				engine:Exit()
+			end)
+		end
+
 		root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 			local key = event_data:GetInt("Key")
 			if chat_input or chat_wanted then
@@ -1672,26 +1727,7 @@ local function show_client(host, port, name, password)
 			if key == KEY_ESCAPE and form then
 				close_form()
 			elseif key == KEY_ESCAPE then
-				magic.UnsubscribeFromEvent("Update", update_cb)
-				magic.UnsubscribeFromEvent("MouseButtonDown", mouse_down_cb)
-				magic.UnsubscribeFromEvent("MouseButtonUp", mouse_up_cb)
-				magic.UnsubscribeFromEvent("MouseMove", mouse_move_cb)
-				magic.UnsubscribeFromEvent("UIMouseClick", ui_click_cb)
-				magic.UnsubscribeFromEvent("MouseWheel", mouse_wheel_cb)
-				magic.UnsubscribeFromEvent("ScreenMode", screen_mode_cb)
-				close_form()
-				ui:drop_tooltip()
-				close_chat()
-				chat_text:Remove()
-				status_text:Remove()
-				if hud then
-					hud:Remove()
-					hud = nil
-				end
-				magic.input:SetMouseVisible(true)
-				client:disconnect()
-				view:close()
-				uistack.main:pop(root)
+				leave()
 			end
 		end)
 	end)
