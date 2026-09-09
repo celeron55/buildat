@@ -64,6 +64,24 @@ void vdef_set_textures(VoxelDefinition &def, luabind::object value, lua_State *L
 	}
 }
 
+luabind::object vdef_get_tile_turns(const VoxelDefinition &def, lua_State *L)
+{
+	luabind::object result = luabind::newtable(L);
+	for(size_t i = 0; i < 6; i++)
+		result[i+1] = luabind::object(L, (int)def.tile_turns[i]);
+	return result;
+}
+
+void vdef_set_tile_turns(VoxelDefinition &def, luabind::object value,
+		lua_State *L)
+{
+	for(size_t i = 0; i < 6; i++){
+		luabind::object v = value[i+1];
+		def.tile_turns[i] = v && luabind::type(v) == LUA_TNUMBER ?
+				(uint8_t)(luabind::object_cast<int>(v) & 3) : 0;
+	}
+}
+
 // vdef.shape: an array of quads, each
 //   {tile = 1...6,
 //    p = {x0,y0,z0, x1,y1,z1, x2,y2,z2, x3,y3,z3},
@@ -180,6 +198,8 @@ void init_voxel(lua_State *L)
 			.def_readwrite("name", &VoxelDefinition::name)
 			.def_readwrite("id", &VoxelDefinition::id)
 			.property("textures", &vdef_get_textures, &vdef_set_textures)
+			.property("tile_turns", &vdef_get_tile_turns,
+					&vdef_set_tile_turns)
 			.def_readwrite("face_draw_type", &VoxelDefinition::face_draw_type)
 			.def_readwrite("edge_material_id", &VoxelDefinition::edge_material_id)
 			.def_readwrite("physically_solid", &VoxelDefinition::physically_solid)

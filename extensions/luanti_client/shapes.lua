@@ -97,11 +97,6 @@ end
 -- dir_to_tile[24][8] in mapblock_mesh.cpp, read at the six directions our
 -- faces are in (+Y, -Y, +X, -X, +Z, -Z) -- which is the order Luanti keeps
 -- its tiles in too, one-based here.
---
--- simplified: Luanti also rotates the texture within some of those faces (a
--- facedir voxel's top and bottom, mostly). A cube's tile has no rotation in
--- the voxel mesher, so those faces are drawn unrotated; the upgrade path is a
--- per-tile transform in VoxelDefinition, or six quads with rotated UVs.
 M.FACEDIR_TILES = {
 	{1, 2, 3, 4, 5, 6},
 	{1, 2, 5, 6, 4, 3},
@@ -127,6 +122,38 @@ M.FACEDIR_TILES = {
 	{2, 1, 6, 5, 4, 3},
 	{2, 1, 3, 4, 6, 5},
 	{2, 1, 5, 6, 3, 4},
+}
+
+-- How far the texture is turned inside each of those faces, in quarter turns
+-- anticlockwise: FACEDIR_TILE_TURNS[facedir + 1][i] goes with
+-- FACEDIR_TILES[facedir + 1][i]. The other half of Luanti's dir_to_tile
+-- table, read in the same order; a turned cube's top and bottom are what
+-- mostly want it, and an upside-down one has every face turned half way.
+M.FACEDIR_TILE_TURNS = {
+	{0, 0, 0, 0, 0, 0},
+	{3, 1, 0, 0, 0, 0},
+	{2, 2, 0, 0, 0, 0},
+	{1, 3, 0, 0, 0, 0},
+	{0, 2, 3, 1, 2, 0},
+	{0, 2, 3, 1, 1, 1},
+	{0, 2, 3, 1, 0, 2},
+	{0, 2, 3, 1, 3, 3},
+	{2, 0, 1, 3, 2, 0},
+	{2, 0, 1, 3, 3, 3},
+	{2, 0, 1, 3, 0, 2},
+	{2, 0, 1, 3, 1, 1},
+	{3, 3, 3, 3, 1, 3},
+	{3, 3, 2, 0, 1, 3},
+	{3, 3, 1, 1, 1, 3},
+	{3, 3, 0, 2, 1, 3},
+	{1, 1, 1, 1, 3, 1},
+	{1, 1, 2, 0, 3, 1},
+	{1, 1, 3, 3, 3, 1},
+	{1, 1, 0, 2, 3, 1},
+	{2, 2, 2, 2, 2, 2},
+	{3, 1, 2, 2, 2, 2},
+	{0, 0, 2, 2, 2, 2},
+	{1, 3, 2, 2, 2, 2},
 }
 
 -- A wallmounted direction is a facedir too; Luanti's own

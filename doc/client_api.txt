@@ -337,6 +337,13 @@ do
 	voxel_reg:add_voxel(vdef)
 end
 
+vdef.tile_turns is six quarter turns, one per face, of the texture inside its
+own face: {0, 0, 0, 0, 0, 0} for a voxel that does not turn one. What wants it
+is a voxel that faces a direction -- the top of a turned cube wears the same
+texture as the top of one that is not turned, turned with the voxel -- so the
+turn belongs to the face rather than to the atlas segment, which is shared.
+A shape's quads carry their own texture coordinates and are not affected.
+
 atlas_reg:set_surface_maps(false) says the game's voxel shader samples the
 diffuse atlas and nothing else. An atlas then carries neither the normal map
 nor the surface map derived from its segments' pixels, which is two thirds of

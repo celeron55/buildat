@@ -324,6 +324,20 @@ assert(#got == 1 and waiting == 2,
 assert(conn:pump(1000000000) == 0 and #got == 3,
 		"connection: the rest waited for the next pump")
 
+-- More arriving while some are still waiting goes behind them, in order:
+-- what is waiting has left holes at the front of the queue
+got = {}
+socket.incoming = {datagram(1, 0, original("d")),
+		datagram(1, 0, original("e"))}
+conn:update(0.01)
+conn:pump(0)
+socket.incoming = {datagram(1, 0, original("f"))}
+conn:update(0.01)
+conn:pump(1000000000)
+assert(#got == 3 and got[1].data == "d" and got[2].data == "e" and
+		got[3].data == "f",
+		"connection: a payload was lost or came out of order, got "..#got)
+
 -- A datagram from something else is ignored, not an error
 got = {}
 socket.incoming = {"garbage", datagram(1, 0, original("fine"))}
@@ -1237,6 +1251,37 @@ for facedir = 0, 23 do
 			end
 		end
 	end
+end
+
+-- The texture turned inside each face, which is the other half of Luanti's
+-- table. A facedir under 4 is a turn about +Y: the top's texture turns with
+-- the voxel and the bottom's turns the other way, because it is seen from
+-- below. Every face of an upside-down voxel (facedir 20) is turned half way.
+for facedir = 0, 23 do
+	local turns = shapes.FACEDIR_TILE_TURNS[facedir + 1]
+	assert(turns and #turns == 6,
+			"shapes: facedir "..facedir.." has no six turns")
+	for face = 1, 6 do
+		assert(turns[face] >= 0 and turns[face] <= 3,
+				"shapes: facedir "..facedir..", face "..face..
+				" turns "..turns[face])
+	end
+end
+for facedir = 0, 3 do
+	local turns = shapes.FACEDIR_TILE_TURNS[facedir + 1]
+	assert(turns[1] == (4 - facedir) % 4, "shapes: facedir "..facedir..
+			" turns the top "..turns[1])
+	assert(turns[2] == facedir % 4, "shapes: facedir "..facedir..
+			" turns the bottom "..turns[2])
+	-- The sides are upright whichever way it faces
+	for face = 3, 6 do
+		assert(turns[face] == 0, "shapes: facedir "..facedir..
+				" turned a side")
+	end
+end
+for face = 1, 6 do
+	assert(shapes.FACEDIR_TILE_TURNS[21][face] == 2,
+			"shapes: an upside-down voxel's face "..face.." is not turned")
 end
 
 -- A box turns with the voxel: the back half of a stair is at +Z to begin
