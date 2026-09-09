@@ -40,6 +40,9 @@ buildat.pack_voxel_volume = __buildat_pack_voxel_volume
 -- add_resource_dir(path) -> bool. Only under the cache path; Urho3D's own Lua
 -- bindings do not have this.
 buildat.add_resource_dir  = __buildat_add_resource_dir
+-- compose_image(args) -> w, h. Raster operations over an RGBA canvas, saved as
+-- a PNG under the cache path. See doc/client_api.txt.
+buildat.compose_image     = __buildat_compose_image
 
 buildat.safe.disconnect    = __buildat_disconnect
 buildat.safe.set_ui_scale  = __buildat_set_ui_scale

@@ -198,9 +198,186 @@ local function check_pack_voxel_volume()
 			lit:get_id() == FILL, "field = light wrote "..lit.data)
 end
 
+-- compose_image() writes a PNG, and Urho3D can read one back, so the pixels
+-- can actually be checked. The files go where the client's own temporary
+-- resources go, which is a resource dir, so they can be loaded by name.
+local function check_compose_image()
+	-- The unsafe interface, because the sandbox does not whitelist Image:
+	-- it can save a file anywhere, which is not something game code gets.
+	-- This runs in an extension, where that is available.
+	local magic = require("buildat/extension/urho3d").unsafe
+	local dir = __buildat_get_path("cache").."/tmp"
+	local made = 0
+
+	-- Composes ops and hands back the image it wrote
+	local function compose(name, args)
+		args.write = dir.."/buildat_image_test_"..name..".png"
+		local w, h = buildat.compose_image(args)
+		made = made + 1
+		local img = magic.cache:GetResource("Image",
+				"buildat_image_test_"..name..".png")
+		assert(img, "compose_image: could not read back "..name)
+		assert(img.width == w and img.height == h,
+				"compose_image: "..name.." says "..w.."x"..h..
+				" but the file is "..img.width.."x"..img.height)
+		return img, w, h
+	end
+
+	local function pixel(img, x, y)
+		local c = img:GetPixel(x, y)
+		return {math.floor(c.r * 255 + 0.5), math.floor(c.g * 255 + 0.5),
+				math.floor(c.b * 255 + 0.5), math.floor(c.a * 255 + 0.5)}
+	end
+
+	local function same(img, x, y, want, what)
+		local got = pixel(img, x, y)
+		for i = 1, 4 do
+			-- A PNG round trip is exact, so only the arithmetic's own
+			-- rounding is allowed for
+			assert(math.abs(got[i] - want[i]) <= 1,
+					"compose_image: "..what.." at "..x..","..y.." is "..
+					got[1]..","..got[2]..","..got[3]..","..got[4]..
+					" and not "..want[1]..","..want[2]..","..want[3]..","..
+					want[4])
+		end
+	end
+
+	-- A 4x2 source: mostly one colour, with a different 2x1 corner
+	local src = compose("src", {
+		size = {4, 2},
+		ops = {
+			{op = "fill", color = {10, 20, 30, 255}, blend = "set"},
+			{op = "fill", color = {200, 100, 50, 255}, at = {0, 0},
+					size = {2, 1}, blend = "set"},
+		},
+	})
+	same(src, 0, 0, {200, 100, 50, 255}, "fill")
+	same(src, 2, 0, {10, 20, 30, 255}, "fill outside the corner")
+	same(src, 0, 1, {10, 20, 30, 255}, "fill below the corner")
+
+	local SRC = "buildat_image_test_src.png"
+
+	-- No size: the first blit makes the canvas, so this is a copy
+	local img = compose("copy", {ops = {{op = "blit", src = SRC}}})
+	assert(img.width == 4 and img.height == 2,
+			"compose_image: the copy is "..img.width.."x"..img.height)
+	same(img, 0, 0, {200, 100, 50, 255}, "a plain blit")
+
+	-- A rotation by 90 degrees swaps the dimensions, and the corner moves to
+	-- where a counterclockwise turn puts it
+	local rot, w, h = compose("rot", {ops = {
+		{op = "blit", src = SRC},
+		{op = "transform", transform = 1},
+	}})
+	assert(w == 2 and h == 4, "compose_image: R90 gave "..w.."x"..h)
+	same(rot, 0, 2, {200, 100, 50, 255}, "R90")
+	same(rot, 0, 0, {10, 20, 30, 255}, "R90 elsewhere")
+
+	-- Two of the eight symmetries in a row are the identity
+	local back = compose("back", {ops = {
+		{op = "blit", src = SRC},
+		{op = "transform", transform = 2},
+		{op = "transform", transform = 2},
+	}})
+	same(back, 0, 0, {200, 100, 50, 255}, "180 twice")
+	same(back, 3, 1, {10, 20, 30, 255}, "180 twice")
+
+	-- One cell of a grid, which is what a stack of animation frames is
+	local cell, cw, ch = compose("cell", {ops = {
+		{op = "blit", src = SRC},
+		{op = "crop", grid = {2, 1}, cell = {1, 0}},
+	}})
+	assert(cw == 2 and ch == 2, "compose_image: the cell is "..cw.."x"..ch)
+	same(cell, 0, 0, {10, 20, 30, 255}, "the second cell")
+
+	-- Scaling is nearest neighbour, so the colours are the source's own
+	local big, bw, bh = compose("big", {ops = {
+		{op = "blit", src = SRC},
+		{op = "resize", size = {8, 4}},
+	}})
+	assert(bw == 8 and bh == 4, "compose_image: resize gave "..bw.."x"..bh)
+	same(big, 1, 1, {200, 100, 50, 255}, "resize")
+	same(big, 7, 3, {10, 20, 30, 255}, "resize")
+
+	-- Multiply is per channel and takes the alpha with it; colorize blends
+	-- towards a colour and leaves the alpha alone
+	local mul = compose("mul", {ops = {
+		{op = "blit", src = SRC},
+		{op = "multiply", color = {128, 255, 255, 255}},
+	}})
+	same(mul, 0, 0, {100, 100, 50, 255}, "multiply")
+
+	local col = compose("col", {ops = {
+		{op = "blit", src = SRC},
+		{op = "colorize", color = {0, 0, 0, 255}, ratio = 128},
+	}})
+	same(col, 0, 0, {100, 50, 25, 255}, "colorize halfway to black")
+
+	-- A hue turned by 120 degrees takes red to green
+	local red = compose("red", {size = {1, 1}, ops = {
+		{op = "fill", color = {255, 0, 0, 255}, blend = "set"},
+		{op = "hsl", hue = 120},
+	}})
+	same(red, 0, 0, {0, 255, 0, 255}, "a hue turned by 120 degrees")
+
+	-- An overlay with fill covers the whole canvas whatever its own size is,
+	-- and a fully transparent pixel leaves what is under it alone
+	local over = compose("over", {
+		size = {2, 2},
+		ops = {
+			{op = "fill", color = {0, 0, 255, 255}, blend = "set"},
+			{op = "blit", src = SRC, fill = true},
+		},
+	})
+	same(over, 0, 0, {200, 100, 50, 255}, "an overlay stretched to the canvas")
+
+	local hole = compose("hole", {
+		size = {2, 2},
+		ops = {
+			{op = "fill", color = {0, 0, 255, 255}, blend = "set"},
+			{op = "fill", color = {255, 255, 255, 0}},
+		},
+	})
+	same(hole, 0, 0, {0, 0, 255, 255}, "a transparent pixel on top")
+
+	-- Alpha compositing: half-transparent white over blue
+	local half = compose("half", {
+		size = {1, 1},
+		ops = {
+			{op = "fill", color = {0, 0, 200, 255}, blend = "set"},
+			{op = "fill", color = {255, 255, 255, 128}},
+		},
+	})
+	local c = pixel(half, 0, 0)
+	assert(c[4] == 255 and c[1] > 120 and c[1] < 135 and
+			c[3] > 210 and c[3] < 240,
+			"compose_image: half-transparent white over blue is "..c[1]..
+			","..c[2]..","..c[3]..","..c[4])
+
+	-- A mask is a bitwise and, which is what keeps a shape and drops the rest
+	local mask = compose("mask", {ops = {
+		{op = "blit", src = SRC},
+		{op = "fill", color = {255, 0, 255, 255}, blend = "and"},
+	}})
+	same(mask, 0, 0, {200, 0, 50, 255}, "and")
+
+	-- Setting the whole alpha channel
+	local opaque = compose("opaque", {
+		size = {1, 1},
+		ops = {
+			{op = "fill", color = {40, 50, 60, 0}, blend = "set"},
+			{op = "alpha", value = 255},
+		},
+	})
+	same(opaque, 0, 0, {40, 50, 60, 255}, "alpha")
+
+	assert(made == 14, "compose_image: made "..made.." images")
+end
+
 function M.self_test()
 	check_compress()
 	check_pack_voxel_volume()
+	check_compose_image()
 end
 
 return M

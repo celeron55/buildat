@@ -19,6 +19,7 @@ end
 local serialize = dofile(dir.."/serialize.lua")
 local connection = dofile(dir.."/connection.lua")
 local player = dofile(dir.."/player.lua")
+local texmod = dofile(dir.."/texmod.lua")
 local nodedef = dofile(dir.."/nodedef.lua")
 local media = dofile(dir.."/media.lua")
 
@@ -272,25 +273,6 @@ assert(conn.connected == false)
 print("connection: ok")
 -- nodedef.lua
 
--- What comes out of a texture name: a file name, the base of a "^" chain, or
--- nil where Luanti's modifier language really begins
-local texture_cases = {
-	{"default_dirt.png", "default_dirt.png"},
-	{"default_dirt.png^mcl_dirt_grass_shadow.png", "default_dirt.png"},
-	{"sign.png^[multiply:#917056", "sign.png"},
-	{"a.png^[transformR90^b.png", "a.png"},
-	{"[combine:16x16:0,0=a.png", nil},
-	{"(a.png^b.png)^c.png", nil},
-	{"", nil},
-	{"../secrets/passwd", nil},
-	{"dir/a.png", nil},
-}
-for _, case in ipairs(texture_cases) do
-	local got = nodedef.plain_texture_name(case[1])
-	assert(got == case[2], "nodedef: plain_texture_name("..case[1]..") = "..
-			tostring(got).."; wanted "..tostring(case[2]))
-end
-
 -- A NODEDEF packet built the way the server builds one, and read back. This is
 -- the whole point of the parser: finding the six tiles means reading through
 -- everything in front of them, and a tile is variable-length.
@@ -418,12 +400,6 @@ assert(defs[11].walkable == false and defs[11].liquid_type == 2 and
 		"nodedef: liquid fields")
 assert(defs[7].color[1] == 255 and defs[7].color[3] == 253,
 		"nodedef: colour")
-
-local wanted = nodedef.texture_names(defs)
-assert(wanted["stone.png"] and wanted["grass_top.png"] and wanted["dirt.png"],
-		"nodedef: texture_names missed one")
-assert(wanted["dirt.png^shadow.png"] == nil,
-		"nodedef: texture_names kept a modifier expression")
 
 -- A node whose definition cannot be read is left out, and the rest still parse
 local broken = serialize.writer():u16(20):string(string.char(13, 0, 200))
@@ -574,5 +550,147 @@ settle(i, 120, {x = -1, z = 0})
 assert(i.x < 2, "player: stuck inside the wall at x = "..i.x)
 
 print("player: ok")
+
+--
+-- texmod.lua: Luanti's texture modifier language
+--
+
+assert(texmod.parse_color("#f80")[1] == 255 and
+		texmod.parse_color("#f80")[2] == 136 and
+		texmod.parse_color("#f80")[3] == 0, "texmod: #rgb")
+assert(texmod.parse_color("#ff8000")[2] == 128, "texmod: #rrggbb")
+assert(texmod.parse_color("#ff800040")[4] == 64, "texmod: #rrggbbaa")
+assert(texmod.parse_color("#f804")[4] == 68, "texmod: #rgba")
+assert(texmod.parse_color("yellow")[1] == 255 and
+		texmod.parse_color("yellow")[3] == 0, "texmod: a named colour")
+assert(texmod.parse_color("Red")[1] == 255, "texmod: names are lowercased")
+assert(texmod.parse_color("chartreuse") == nil, "texmod: unknown name")
+assert(texmod.parse_color("#ff") == nil, "texmod: five nibbles")
+
+-- The eight symmetries, including several written in a row, which multiply
+assert(texmod.parse_transform("R90") == 1, "texmod: R90")
+assert(texmod.parse_transform("r270") == 3, "texmod: r270")
+assert(texmod.parse_transform("FX") == 4, "texmod: FX")
+assert(texmod.parse_transform("FY") == 6, "texmod: FY")
+assert(texmod.parse_transform("46") == 2, "texmod: a flip and a flip")
+assert(texmod.parse_transform("") == 0, "texmod: nothing")
+
+-- A "^" inside parentheses is not where the chain splits
+local parts = texmod.parse("(a.png^b.png)^[colorize:red:128^c.png")
+assert(#parts == 3, "texmod: "..#parts.." parts")
+assert(parts[1].kind == "group" and parts[1].expr == "a.png^b.png",
+		"texmod: the group")
+assert(parts[2].kind == "mod" and parts[2].name == "colorize" and
+		parts[2].args[1] == "red" and parts[2].args[2] == "128",
+		"texmod: the modifier and its arguments")
+assert(parts[3].kind == "file" and parts[3].name == "c.png",
+		"texmod: the file after it")
+assert(texmod.parse("(a.png") == nil, "texmod: unbalanced parentheses")
+
+-- Every file name an expression reaches, including through the arguments of
+-- [combine and [mask
+local names = {}
+assert(texmod.sources(
+		"[combine:32x16:0,0=a.png:16,0=(b.png^[mask:m.png)", names),
+		"texmod: sources failed")
+assert(names["a.png"] and names["b.png"] and names["m.png"],
+		"texmod: sources missed one")
+local n2 = {}
+texmod.sources("c.png^[opacity:128", n2)
+assert(n2["c.png"] and n2["[opacity:128"] == nil, "texmod: sources of a chain")
+
+-- What an expression builds. The resolve() context is what a caller supplies:
+-- media names in, resource names out, and one composition per expression.
+local composed = {}
+local ctx = {
+	resource = function(name)
+		if name == "missing.png" then
+			return nil
+		end
+		return "srv/"..name
+	end,
+	compose = function(expr, ops, size)
+		composed[#composed + 1] = {expr = expr, ops = ops, size = size}
+		return "srv/composed/"..#composed
+	end,
+}
+
+-- A plain name is not composed at all
+assert(texmod.resolve("a.png", ctx) == "srv/a.png", "texmod: a plain name")
+assert(#composed == 0, "texmod: composed a plain name")
+
+-- An overlay chain: the first image is the canvas, the rest are stretched
+-- over it
+assert(texmod.resolve("a.png^b.png", ctx) == "srv/composed/1",
+		"texmod: an overlay")
+local ops = composed[1].ops
+assert(#ops == 2 and ops[1].op == "blit" and ops[1].src == "srv/a.png" and
+		not ops[1].fill and ops[2].fill, "texmod: overlay ops")
+
+-- The modifiers this game's nodes use
+local function ops_of(expr)
+	composed = {}
+	assert(texmod.resolve(expr, ctx), "texmod: could not build "..expr)
+	return composed[#composed].ops, composed[#composed].size
+end
+
+local o = ops_of("a.png^[multiply:yellow")
+assert(o[2].op == "multiply" and o[2].color[1] == 255 and
+		o[2].color[3] == 0 and o[2].color[4] == 255,
+		"texmod: multiply keeps the alpha")
+o = ops_of("a.png^[opacity:128")
+assert(o[2].op == "multiply" and o[2].color[4] == 128 and
+		o[2].color[1] == 255, "texmod: opacity is an alpha multiply")
+o = ops_of("a.png^[colorize:#ff000080")
+assert(o[2].op == "colorize" and o[2].ratio == 128,
+		"texmod: colorize with no ratio uses the colour's alpha")
+o = ops_of("a.png^[colorize:red:200")
+assert(o[2].ratio == 200, "texmod: colorize with a ratio")
+o = ops_of("a.png^[hsl:120:-50")
+assert(o[2].op == "hsl" and o[2].hue == 120 and o[2].saturation == -50 and
+		o[2].lightness == 0, "texmod: hsl")
+o = ops_of("a.png^[noalpha")
+assert(o[2].op == "alpha" and o[2].value == 255, "texmod: noalpha")
+o = ops_of("a.png^[brighten")
+assert(o[2].op == "colorize" and o[2].ratio == 128, "texmod: brighten")
+o = ops_of("a.png^[transformFX")
+assert(o[2].op == "transform" and o[2].transform == 4, "texmod: transform")
+o = ops_of("a.png^[resize:32x32")
+assert(o[2].op == "resize" and o[2].size[1] == 32, "texmod: resize")
+o = ops_of("a.png^[verticalframe:4:2")
+assert(o[2].op == "crop" and o[2].grid[2] == 4 and o[2].cell[2] == 2,
+		"texmod: verticalframe is one cell of a stack")
+o = ops_of("a.png^[verticalframe:4:9")
+assert(o[2].cell[2] == 3, "texmod: a frame past the end is the last one")
+o = ops_of("a.png^[mask:m.png")
+assert(o[2].op == "blit" and o[2].blend == "and" and o[2].fill,
+		"texmod: mask")
+
+-- [combine says the canvas size and places its pieces
+local size
+o, size = ops_of("[combine:32x16:0,0=a.png:16,0=b.png")
+assert(size[1] == 32 and size[2] == 16, "texmod: combine size")
+assert(#o == 2 and o[1].at[1] == 0 and o[2].at[1] == 16,
+		"texmod: combine places")
+
+-- A nested expression is composed on its own and referred to by name
+composed = {}
+assert(texmod.resolve("(a.png^[transformR90)^[multiply:red", ctx),
+		"texmod: nested")
+assert(#composed == 2, "texmod: "..#composed.." compositions for a nest")
+assert(composed[1].expr == "a.png^[transformR90", "texmod: the inner one")
+assert(composed[2].ops[1].src == "srv/composed/1",
+		"texmod: the outer one refers to the inner")
+
+-- A missing file, and a modifier that is not implemented, make the whole
+-- expression unusable rather than half a texture
+assert(texmod.resolve("missing.png^[noalpha", ctx) == nil,
+		"texmod: built on a missing file")
+assert(texmod.resolve("a.png^[invert:rgb", ctx) == nil,
+		"texmod: built an unimplemented modifier")
+assert(texmod.resolve("a.png^[colorize:chartreuse", ctx) == nil,
+		"texmod: built an unknown colour")
+
+print("texmod: ok")
 
 print("luanti_client/test.lua: ok")

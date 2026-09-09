@@ -376,6 +376,47 @@ buildat.pack_voxel_volume(args) -> string
 - A source box that hangs over the edge of the region is clipped, which is what
   a border slice from a neighbour that has not arrived yet needs.
 
+buildat.compose_image(args) -> width, height
+- Raster operations over an RGBA canvas, saved as a PNG. What wanted this is
+  Luanti's texture modifiers ("dirt.png^grass.png", "[colorize:#ff0000:128",
+  "[combine:32x32:0,0=a.png"), which are a small language over these
+  operations; the language itself belongs in the game's own code.
+
+  buildat.compose_image{
+      size = {16, 16},        -- the canvas; default: the first blit's
+      write = "<path>",       -- where the PNG goes; under the cache path only
+      ops = {
+          {op = "blit", src = "a.png",   -- a resource name
+              from = {0, 0, 16, 16},     -- default: the whole source
+              at = {0, 0},
+              size = {16, 16},           -- scales, nearest neighbour
+              fill = false,              -- or: over the whole canvas
+              blend = "over"},           -- over|set|and|multiply|screen
+          {op = "fill", color = {r, g, b, a}, at =, size =, blend =},
+          {op = "multiply", color = {r, g, b, a}},   -- per channel, 255 = 1
+          {op = "colorize", color = {r, g, b, a}, ratio = 0..255},
+          {op = "hsl", hue = 0, saturation = 0, lightness = 0},
+          {op = "alpha", value = 255},   -- set the whole alpha channel
+          {op = "transform", transform = 0..7},  -- the square's symmetries
+          {op = "resize", size = {w, h}},
+          {op = "crop", from = {x, y, w, h}, size = {w, h}},
+          {op = "crop", grid = {cols, rows}, cell = {x, y}},
+      },
+  }
+
+- With no size, the first blit makes the canvas as big as it needs, which is
+  what a chain of overlays over a base image wants.
+- There is no way to keep an intermediate image: a nested expression is one
+  call per level with the inner results referenced by the name they were
+  written under, which doubles as a cache between runs.
+- transform is the eight symmetries of a square: 0 identity, 1...3 rotations
+  by 90 degrees counterclockwise, 4 flip x, 5...7 that flip and then those
+  rotations. An odd one swaps the width and the height.
+- crop with a grid cuts the canvas into cols by rows cells and keeps one,
+  which is what a sprite sheet or a stack of animation frames is.
+- colorize blends towards the colour by ratio and leaves fully transparent
+  pixels alone; at ratio 255 it replaces the colour and multiplies the alpha.
+
 volume:serialize() -> string
 - The same thing a Volume built one set_voxel_at() at a time can hand to
   set_voxel_geometry(). The slow, flexible path; pack_voxel_volume() is the
