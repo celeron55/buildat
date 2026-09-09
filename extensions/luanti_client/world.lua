@@ -237,7 +237,7 @@ function M.new(magic, buildat, log, options)
 	-- night does not draw it back at noon
 	local daylight_time = nil
 
-	-- The sky itself: a skybox drawn by client/data/Shaders/GLSL/LuantiSky.glsl,
+	-- The sky itself: a skybox drawn by res/LuantiSky.glsl,
 	-- which is handed the colours and the sun's direction from here.
 	local sky_node = scene:CreateChild("Sky")
 	local sky_material = nil
@@ -246,7 +246,7 @@ function M.new(magic, buildat, log, options)
 		skybox:SetModel(magic.cache:GetResource("Model", "Models/Box.mdl"))
 		sky_material = magic.Material.new()
 		sky_material:SetTechnique(0, magic.cache:GetResource("Technique",
-				"Techniques/LuantiSky.xml"))
+				"luanti_client/res/LuantiSky.xml"))
 		skybox.material = sky_material
 	end
 
@@ -263,7 +263,7 @@ function M.new(magic, buildat, log, options)
 	-- colours and VoxelUnlit reads it from there, so there is nothing for a
 	-- directional light to reach.
 	local technique = magic.cache:GetResource("Technique",
-			"Techniques/VoxelUnlit.xml")
+			"luanti_client/res/VoxelUnlit.xml")
 
 	-- The mesher sets no technique on skylit geometry -- only the game knows
 	-- which shader reads what it packed -- so every block's materials get
@@ -1069,7 +1069,7 @@ function M.new(magic, buildat, log, options)
 	-- A scene node per object, kept by id
 	local object_nodes = {}
 	local object_technique = magic.cache:GetResource("Technique",
-			"Techniques/UnlitAlphaMask.xml")
+			"luanti_client/res/UnlitAlphaMask.xml")
 	local box_model = magic.cache:GetResource("Model", "Models/Box.mdl")
 
 	-- The light an object is drawn in. Its texture goes on unlit -- the
