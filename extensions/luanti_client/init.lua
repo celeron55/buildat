@@ -129,8 +129,12 @@ local function show_client(host, port, name, password)
 			"XMLFile", "__menu/res/main_style.xml")
 	root.defaultStyle = style
 
-	-- Text in the corner rather than a window: the world is behind it
-	local status_text = root:CreateChild("Text")
+	-- Text in the top left corner rather than a window: the world is behind
+	-- it. Under the UI's own root, like the chat below and for the same
+	-- reason: the element this extension was given is only as big as what is
+	-- in it, so an alignment inside it lands nowhere in particular.
+	local status_text = magic.ui.root:CreateChild("Text")
+	status_text.defaultStyle = style
 	status_text:SetStyleAuto()
 	status_text:SetAlignment(HA_LEFT, VA_TOP)
 	status_text:SetPosition(8, 8)
@@ -1076,6 +1080,7 @@ local function show_client(host, port, name, password)
 
 		local function send_chat()
 			local text = chat_input:GetText()
+			log:verbose("chat: sending \""..text.."\"")
 			close_chat()
 			if text ~= "" then
 				client:send_chat(text)
@@ -1090,9 +1095,14 @@ local function show_client(host, port, name, password)
 			local w = math.min(560, ui_root.width - 40)
 			local h = 96
 			local ox = math.floor((ui_root.width - w) / 2)
-			local oy = ui_root.height - h - 40
+			-- Above the hotbar and the chat log, which are what is at the
+			-- bottom of the screen
+			local oy = ui_root.height - h - 180
 
 			chat_window = ui_root:CreateChild("BorderImage")
+			-- The style is inherited by everything under it, which is what
+			-- the line edit's own text needs to have a font at all
+			chat_window.defaultStyle = style
 			chat_window.texture = magic.cache:GetResource("Texture2D",
 					"luanti_client/res/white.png")
 			chat_window.color = magic.Color(0.10, 0.10, 0.13, 0.95)
@@ -1115,9 +1125,15 @@ local function show_client(host, port, name, password)
 			chat_input.defaultStyle = style
 			chat_input:SetStyleAuto()
 			chat_input:SetPosition(12, 30)
-			chat_input.fixedHeight = 26
-			chat_input.fixedWidth = w - 24
+			-- size rather than fixedWidth/fixedHeight: the parent has no
+			-- layout to size it, and the element stays 0x0
+			chat_input.size = magic.IntVector2(w - 24, 26)
 			chat_input.enabled = true
+			-- A box of its own, so the field is visible before anything has
+			-- been typed into it
+			chat_input.texture = magic.cache:GetResource("Texture2D",
+					"luanti_client/res/white.png")
+			chat_input.color = magic.Color(0.02, 0.02, 0.03, 0.9)
 			chat_input:SetText("")
 			chat_input:SetFocus(true)
 
@@ -1258,6 +1274,7 @@ local function show_client(host, port, name, password)
 				close_form()
 				close_chat()
 				chat_text:Remove()
+				status_text:Remove()
 				if hud then
 					hud:Remove()
 					hud = nil
