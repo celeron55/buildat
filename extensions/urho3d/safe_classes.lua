@@ -971,6 +971,13 @@ function M.define(dst, util)
 			fixedSize = util.simple_property("IntVector2"),
 			defaultStyle = util.simple_property("XMLFile"),
 			selected = util.simple_property("boolean"),
+			-- Off by default in Urho3D: an element that is not enabled is
+			-- not hit by a click, so nothing under the mouse is found and
+			-- no click event is sent at all
+			enabled = util.simple_property("boolean"),
+			visible = util.simple_property("boolean"),
+			opacity = util.simple_property("number"),
+			priority = util.simple_property("number"),
 		},
 	})
 

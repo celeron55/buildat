@@ -713,7 +713,8 @@ function M.new(socket, options, log)
 	handlers[TOCLIENT.REMOVENODE] = function(r)
 		local x, y, z = r:v3s16()
 		if self.on_node then
-			self.on_node(x, y, z, M.CONTENT_AIR, 0, 0)
+			-- No light comes with a removal; the view works it out
+			self.on_node(x, y, z, M.CONTENT_AIR, nil, 0)
 		end
 	end
 

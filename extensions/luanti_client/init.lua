@@ -332,6 +332,13 @@ local function show_client(host, port, name, password)
 		local CHAT_LINES = 8
 		local chat = {}
 		local chat_input = nil
+		-- The key that opens chat arrives as text as well, and the line edit
+		-- would get it: the dialog goes up on the next frame instead, when
+		-- that text has gone nowhere
+		local chat_wanted = false
+		-- Assigned below, next to the rest of the chat dialog; the frame
+		-- update is what puts it up
+		local open_chat
 
 		-- The forms the server sends, and the one on screen
 		local inventory_spec = nil
@@ -812,6 +819,8 @@ local function show_client(host, port, name, password)
 					for _, f in ipairs(form.drawn.fields) do
 						fields[f.name] = f.value
 					end
+					log:verbose("form: button \""..tostring(b.name)..
+							"\" at "..lx..","..ly)
 					client:send_inventory_fields(form.formname, fields)
 					if b.exit then
 						close_form()
@@ -822,6 +831,8 @@ local function show_client(host, port, name, password)
 			for _, slot in ipairs(form.drawn.slots) do
 				if lx >= slot.x and lx < slot.x + slot.size and
 						ly >= slot.y and ly < slot.y + slot.size then
+					log:verbose("form: slot "..slot.list.." "..slot.index..
+							" at "..lx..","..ly)
 					if not held then
 						if slot.stack then
 							held = slot
@@ -986,6 +997,10 @@ local function show_client(host, port, name, password)
 			end
 			view:place_objects(world_objects)
 			update_hud()
+			if chat_wanted then
+				chat_wanted = false
+				open_chat()
+			end
 			if form and form_stale then
 				draw_form()
 			end
@@ -1024,11 +1039,18 @@ local function show_client(host, port, name, password)
 			set_counters()
 		end)
 
-		-- The line the player types in. A line edit takes the keys while it
-		-- has focus, and a stack event handler does not fire while something
-		-- else has it, so enter arrives as the line edit's own TextFinished
-		-- rather than as a key.
+		-- The line the player types in: a dialog with a text field and the
+		-- two buttons a player expects, because a bare line edit at the
+		-- bottom of the screen is not something anyone can find.
+		--
+		-- The field is a LineEdit rather than something built here: editing a
+		-- line -- the cursor, selection, backspace, paste -- is what Urho3D's
+		-- own already does. Enter arrives as its TextFinished, because a
+		-- stack event handler does not fire while it has the focus.
+		local chat_window = nil
 		local chat_input_cb = nil
+		local chat_key_cb = nil
+		local chat_buttons = nil
 
 		local function close_chat()
 			if not chat_input then
@@ -1039,33 +1061,119 @@ local function show_client(host, port, name, password)
 						chat_input_cb)
 				chat_input_cb = nil
 			end
-			chat_input:Remove()
+			if chat_key_cb then
+				magic.UnsubscribeFromEvent("KeyDown", chat_key_cb)
+				chat_key_cb = nil
+			end
+			chat_window:Remove()
+			chat_window = nil
 			chat_input = nil
+			chat_buttons = nil
 			if not form then
 				magic.input:SetMouseVisible(false)
 			end
 		end
 
-		local function open_chat()
+		local function send_chat()
+			local text = chat_input:GetText()
+			close_chat()
+			if text ~= "" then
+				client:send_chat(text)
+			end
+		end
+
+		function open_chat()
 			if chat_input then
 				return
 			end
-			chat_input = magic.ui.root:CreateChild("LineEdit")
+			local ui_root = magic.ui.root
+			local w = math.min(560, ui_root.width - 40)
+			local h = 96
+			local ox = math.floor((ui_root.width - w) / 2)
+			local oy = ui_root.height - h - 40
+
+			chat_window = ui_root:CreateChild("BorderImage")
+			chat_window.texture = magic.cache:GetResource("Texture2D",
+					"luanti_client/res/white.png")
+			chat_window.color = magic.Color(0.10, 0.10, 0.13, 0.95)
+			chat_window.size = magic.IntVector2(w, h)
+			chat_window:SetPosition(ox, oy)
+			-- An element Urho3D has not been told is enabled is not hit by a
+			-- click, and then no click event carries a position at all
+			chat_window.enabled = true
+
+			local caption = chat_window:CreateChild("Text")
+			caption.defaultStyle = style
+			caption:SetStyleAuto()
+			caption.text = "Say something (a line starting with / is a"..
+					" command)"
+			caption:SetFontSize(12)
+			caption:SetPosition(12, 10)
+			caption.color = magic.Color(0.8, 0.8, 0.85)
+
+			chat_input = chat_window:CreateChild("LineEdit")
 			chat_input.defaultStyle = style
 			chat_input:SetStyleAuto()
-			chat_input:SetAlignment(HA_LEFT, VA_BOTTOM)
-			chat_input:SetPosition(8, -8)
-			chat_input.fixedHeight = 24
-			chat_input.fixedWidth = 600
+			chat_input:SetPosition(12, 30)
+			chat_input.fixedHeight = 26
+			chat_input.fixedWidth = w - 24
+			chat_input.enabled = true
 			chat_input:SetText("")
 			chat_input:SetFocus(true)
+
+			-- The two buttons, as boxes with a word in them: what a click
+			-- landed on is worked out from the rectangles, the same way a
+			-- form's buttons are, rather than from Urho3D's own button
+			-- events, which do not reach the sandbox with a position
+			chat_buttons = {origin = {ox, oy}, items = {}}
+			local bw, bh = 90, 26
+			local by = h - bh - 10
+			local labels = {{"Send", w - 12 - bw * 2 - 8, send_chat},
+					{"Cancel", w - 12 - bw, close_chat}}
+			for _, b in ipairs(labels) do
+				local box = chat_window:CreateChild("BorderImage")
+				box.texture = magic.cache:GetResource("Texture2D",
+						"luanti_client/res/white.png")
+				box.color = magic.Color(0.30, 0.30, 0.38, 0.95)
+				box.size = magic.IntVector2(bw, bh)
+				box:SetPosition(b[2], by)
+				box.enabled = true
+				local t = box:CreateChild("Text")
+				t.defaultStyle = style
+				t:SetStyleAuto()
+				t.text = b[1]
+				t:SetFontSize(13)
+				t:SetAlignment(HA_CENTER, VA_CENTER)
+				chat_buttons.items[#chat_buttons.items + 1] =
+						{x = b[2], y = by, w = bw, h = bh, action = b[3]}
+			end
+
 			magic.input:SetMouseVisible(true)
 			chat_input_cb = magic.SubscribeToEvent(chat_input, "TextFinished",
-					function()
-				local text = chat_input:GetText()
-				close_chat()
-				client:send_chat(text)
+					send_chat)
+			-- Escape cancels. A plain subscription, because the line edit has
+			-- the focus and the stack's own handler is then quiet.
+			chat_key_cb = magic.SubscribeToEvent("KeyDown",
+					function(event_type, event_data)
+				if event_data:GetInt("Key") == KEY_ESCAPE then
+					close_chat()
+				end
 			end)
+		end
+
+		local function chat_click(x, y)
+			if not chat_buttons then
+				return
+			end
+			local lx = x - chat_buttons.origin[1]
+			local ly = y - chat_buttons.origin[2]
+			for _, b in ipairs(chat_buttons.items) do
+				if lx >= b.x and lx < b.x + b.w and
+						ly >= b.y and ly < b.y + b.h then
+					b.action()
+					return
+				end
+			end
 		end
 
 		-- The dig button. Urho3D's Input does not expose the button state to
@@ -1083,8 +1191,13 @@ local function show_client(host, port, name, password)
 		-- Where a click landed, which MouseButtonDown does not say
 		local ui_click_cb = magic.SubscribeToEvent("UIMouseClick",
 				function(event_type, event_data)
-			if form and event_data:GetInt("Button") == MOUSEB_LEFT then
+			if event_data:GetInt("Button") ~= MOUSEB_LEFT then
+				return
+			end
+			if form then
 				form_click(event_data:GetInt("X"), event_data:GetInt("Y"))
+			elseif chat_input then
+				chat_click(event_data:GetInt("X"), event_data:GetInt("Y"))
 			end
 		end)
 		local mouse_up_cb = magic.SubscribeToEvent("MouseButtonUp",
@@ -1101,6 +1214,13 @@ local function show_client(host, port, name, password)
 
 		root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 			local key = event_data:GetInt("Key")
+			if chat_input or chat_wanted then
+				-- The dialog has the keys. Enter arrives as the line edit's
+				-- TextFinished and escape as the plain subscription made in
+				-- open_chat; a stack handler does not fire at all once the
+				-- line edit has the focus.
+				return
+			end
 			-- Luanti's own keys for these. A server that does not give the
 			-- player the fly and noclip privileges pulls them back.
 			if key == KEY_K then
@@ -1110,7 +1230,7 @@ local function show_client(host, port, name, password)
 			-- T says something, which is Luanti's own key for it; a line
 			-- starting with a slash is a command
 			if key == KEY_T and not chat_input then
-				open_chat()
+				chat_wanted = true
 				return
 			end
 			if key == KEY_I then
@@ -1127,11 +1247,6 @@ local function show_client(host, port, name, password)
 			if key == KEY_H then
 				avatar.noclip = not avatar.noclip
 				add_line(avatar.noclip and "Through walls" or "Solid walls")
-			end
-			if chat_input then
-				-- The line edit has the keys; enter is what closes it, and
-				-- that arrives as TextFinished rather than here
-				return
 			end
 			if key == KEY_ESCAPE and form then
 				close_form()

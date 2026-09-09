@@ -440,6 +440,52 @@ function M.new(magic, buildat, log, options)
 		return hi * 256 + lo
 	end
 
+	-- param1 (the two light nibbles) at a node position, or nil if the block
+	-- holding it has not arrived.
+	local function param1_at(x, y, z)
+		local bx = math.floor(x / BLOCKSIZE)
+		local by = math.floor(y / BLOCKSIZE)
+		local bz = math.floor(z / BLOCKSIZE)
+		local block = blocks[block_key(bx, by, bz)]
+		if not block then
+			return nil
+		end
+		local i = (x - bx * BLOCKSIZE) +
+				(y - by * BLOCKSIZE) * BLOCKSIZE +
+				(z - bz * BLOCKSIZE) * BLOCKSIZE * BLOCKSIZE
+		return block.param1:byte(i + 1)
+	end
+
+	-- What light a node that just became air has. The server does not send
+	-- light for a removal and Luanti's own client runs a light flood there;
+	-- this takes the brightest neighbour and dims it by one step instead,
+	-- separately for sunlight and for lamplight, and keeps full sunlight
+	-- undimmed so that a column dug down from the open sky stays lit.
+	--
+	-- simplified: one node deep. Digging a tunnel is right anyway, because
+	-- each node in turn sees the one behind it, but a node that should have
+	-- gone *darker* (or brighter through a corner) only catches up when the
+	-- server resends the block. A real flood fill is the upgrade.
+	local function removal_light(x, y, z)
+		local day, night = 0, 0
+		for _, d in ipairs(NEIGHBOURS) do
+			local p = param1_at(x + d[1], y + d[2], z + d[3])
+			if p then
+				local nd, nn = p % 16, math.floor(p / 16)
+				-- Straight down from the open sky does not dim
+				if nd > 0 and not (nd == 15 and d[2] > 0) then
+					nd = nd - 1
+				end
+				if nn > 0 then
+					nn = nn - 1
+				end
+				if nd > day then day = nd end
+				if nn > night then night = nn end
+			end
+		end
+		return night * 16 + day
+	end
+
 	-- Whether a node stops the player. A node whose block has not arrived,
 	-- and one the server says is not generated, both count as solid, which is
 	-- what Luanti's own collision does with them: standing still in a world
@@ -672,7 +718,10 @@ function M.new(magic, buildat, log, options)
 	-- One node the server changed, in node coordinates. Patches the block's
 	-- parameter arrays in place; a node on a block's edge is part of the
 	-- neighbour's border, so that mesh goes out of date too.
+	-- param1 may be nil, which means the node became air and its light has
+	-- to be worked out here.
 	function self:set_node(x, y, z, param0, param1)
+		param1 = param1 or removal_light(x, y, z)
 		local bx = math.floor(x / BLOCKSIZE)
 		local by = math.floor(y / BLOCKSIZE)
 		local bz = math.floor(z / BLOCKSIZE)
