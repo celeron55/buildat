@@ -35,6 +35,7 @@ local nodedef = dofile(dir.."/nodedef.lua")
 local media = dofile(dir.."/media.lua")
 local shapes = dofile(dir.."/shapes.lua")
 local hud = dofile(dir.."/hud.lua")
+local sounds = dofile(dir.."/sounds.lua")
 local itemdef = dofile(dir.."/itemdef.lua")
 local nodemeta = dofile(dir.."/nodemeta.lua")
 local objmesh = dofile(dir.."/objmesh.lua")
@@ -1230,7 +1231,83 @@ assert(abs["-3,9,-40"], "nodemeta: an absolute position is its own key")
 
 print("nodemeta: ok")
 
+-- sounds.lua
+
+-- Its own block: the main chunk is near Lua's limit of 200 locals
+do
+
+-- A server asks for a group, and "name.ogg" and "name.3.ogg" are both in
+-- group "name". Anything that is not a sound file is in no group.
+assert(sounds.group_of("step.ogg") == "step", "sounds: a plain sound file")
+assert(sounds.group_of("step.3.ogg") == "step", "sounds: a numbered one")
+assert(sounds.group_of("step.12.ogg") == "step.12",
+		"sounds: only a single digit is the number")
+assert(sounds.group_of("dirt.png") == nil, "sounds: a texture is no sound")
+
+local groups = sounds.groups({"dirt.png", "step.1.ogg", "step.2.ogg",
+		"door.ogg", "step.ogg"})
+assert(groups["door"] and #groups["door"] == 1, "sounds: a group of one")
+assert(#groups["step"] == 3, "sounds: three of a footstep in one group")
+assert(groups["step"][1] == "step.1.ogg" and groups["step"][3] == "step.ogg",
+		"sounds: the files in a group are sorted")
+assert(groups["dirt"] == nil, "sounds: nothing but sounds is grouped")
+
+-- PLAY_SOUND, out of a packet built the way the server builds one. The
+-- position is in Luanti's BS units and comes out in nodes; the two fields at
+-- the end were added in 5.2 and 5.8.
+local function play_packet(extra)
+	local w = serialize.writer()
+	w:s32(42)
+	w:string("step")
+	w:f32(0.75)      -- gain
+	w:u8(1)          -- location: at a position
+	w:v3f(100, 200, -300)
+	w:u16(7)         -- object id
+	w:u8(1)          -- loop
+	w:f32(2)         -- fade
+	w:f32(1.5)       -- pitch
+	if extra then
+		w:u8(1)      -- ephemeral
+		w:f32(3.5)   -- start_time
+	end
+	return serialize.reader(w:data())
+end
+
+local sid, spec = sounds.read_play(play_packet(true))
+assert(sid == 42 and spec.name == "step", "sounds: the id and the group")
+assert(spec.gain == 0.75 and spec.location == sounds.POSITION,
+		"sounds: the gain and where it is")
+assert(spec.pos[1] == 10 and spec.pos[2] == 20 and spec.pos[3] == -30,
+		"sounds: the position comes out in nodes")
+assert(spec.object_id == 7 and spec.loop and spec.fade == 2 and
+		spec.pitch == 1.5, "sounds: the rest of the spec")
+assert(spec.ephemeral and spec.start_time == 3.5, "sounds: the tail fields")
+local _, short_spec = sounds.read_play(play_packet(false))
+assert(short_spec.ephemeral == false and short_spec.start_time == 0,
+		"sounds: an older server's packet keeps the defaults")
+
+assert(sounds.read_stop(serialize.reader(serialize.writer():s32(-3):data()))
+		== -3, "sounds: STOP_SOUND names an id")
+local fid, fstep, fgain = sounds.read_fade(serialize.reader(
+		serialize.writer():s32(9):f32(0.5):f32(0.25):data()))
+assert(fid == 9 and fstep == 0.5 and fgain == 0.25, "sounds: FADE_SOUND")
+
+-- A fade goes towards its target whatever the sign of the step, and says
+-- when it is there
+local g, done = sounds.fade_step(1.0, 0.0, 0.5, 1.0)
+assert(g == 0.5 and not done, "sounds: half a second of fading out")
+g, done = sounds.fade_step(0.5, 0.0, -0.5, 2.0)
+assert(g == 0 and done, "sounds: the target is not overshot")
+g, done = sounds.fade_step(0.0, 1.0, 4.0, 0.1)
+assert(math.abs(g - 0.4) < 1e-9 and not done, "sounds: fading in")
+
+end
+
+print("sounds: ok")
+
 -- hud.lua
+
+do
 
 -- HUDADD, read back out of a packet built the way the server builds one. The
 -- four fields at the end were each added in a later 5.x, so one that stops
@@ -1362,6 +1439,8 @@ assert(down[1].y == 0 and down[2].y == -16 + 8,
 		"hud: a bottom-to-top bar goes up")
 assert(down[2].src[2] == 0.5,
 		"hud: its half icon keeps the bottom half of the image")
+
+end
 
 print("hud: ok")
 

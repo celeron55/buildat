@@ -101,6 +101,8 @@ itemdef.lua     ITEMDEF: what an item is, and what a tool can dig
 inventory.lua   TOCLIENT_INVENTORY: what the player is carrying
 hud.lua         The HUD the server describes, and the flags that turn this
                 client's own off
+sounds.lua      PLAY_SOUND and friends, and the sound groups a game's media
+                falls into
 formspec.lua    The elements of a formspec, and where they go
 formspec_ui.lua A formspec on the screen, as Urho3D UI elements
 texmod.lua      Luanti's texture modifier language, as compose_image()
@@ -350,6 +352,19 @@ So the hotbar, the health bar, the crosshair and the chat this client draws
 are all behind their flag. What a flag cannot do here is separate the hotbar
 from the health bar, which are one element.
 
+Sounds: a server names a sound *group* rather than a file -- a game ships
+three recordings of a footstep as "step.1.ogg", "step.2.ogg" and "step.3.ogg"
+and asks for "step" -- so the announced media is sorted into groups and one
+of the group is played at random, which is what Luanti does. A sound at a
+position is a node in the scene with a SoundSource3D on it and the listener
+rides the camera; a local one is a plain SoundSource. FADE_SOUND moves the
+gain by its step a second and a sound faded to nothing stops.
+
+What that does not do yet: a sound attached to an object plays where the
+object was when it started rather than following it, and PLAY_SOUND's
+start_time is ignored, because seeking is not in the sandbox's SoundSource --
+a game uses that for background music a player rejoins in the middle of.
+
 What is next
 ------------
 - What an active object really looks like: Luanti draws a mesh for a mob, a
@@ -364,7 +379,8 @@ What is next
   image waypoint want the camera to turn a world position into a screen one,
   a compass wants the yaw, a minimap wants a map, and an inventory element and
   a hotbar element want the slots this client already draws its own way
-- The sounds the game plays, and the crack that grows over a node being dug
+- The crack that grows over a node being dug, which is a texture of the
+  client's own rather than the game's
 - A connected node box, which is a shape that looks at its neighbours: a
   fence with its rails, a pane in a run, and a flowing liquid's sloped
   surface, which Luanti's own mesher works out the same way
