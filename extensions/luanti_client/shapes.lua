@@ -195,6 +195,24 @@ local function turn_point(v, facedir)
 	end
 end
 
+-- A box turned by a facedir, in the voxel's own -0.5...0.5 coordinates.
+-- Luanti's transformNodeBox does the same: the two corners are turned and
+-- then put back the right way round, which is what keeps the box
+-- axis-aligned.
+function M.turn_box(box, facedir)
+	if not facedir or facedir == 0 then
+		return box
+	end
+	local a = {box[1], box[2], box[3]}
+	local b = {box[4], box[5], box[6]}
+	turn_point(a, facedir)
+	turn_point(b, facedir)
+	return {
+		math.min(a[1], b[1]), math.min(a[2], b[2]), math.min(a[3], b[3]),
+		math.max(a[1], b[1]), math.max(a[2], b[2]), math.max(a[3], b[3]),
+	}
+end
+
 -- Quads turned by a facedir, 0...23. The tiles and the texture coordinates
 -- come along as they are, so a tile follows the face it was on to wherever
 -- that face ends up -- which is what Luanti does as well, by picking the tile

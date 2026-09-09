@@ -596,6 +596,60 @@ i:set_position(3, 0.5, 0)
 settle(i, 120, {x = -1, z = 0})
 assert(i.x < 2, "player: stuck inside the wall at x = "..i.x)
 
+-- A voxel made of boxes rather than a whole cube: a slab at x = 6 whose top
+-- is half a voxel up, and a stair-shaped pair of boxes at x = 8. Walking into
+-- either steps onto it; the wall at x = 3 is still a wall.
+local SLAB = {{-0.5, -0.5, -0.5, 0.5, 0.0, 0.5}}
+local STAIR = {
+	{-0.5, -0.5, -0.5, 0.5, 0.0, 0.5},
+	{-0.5, 0.0, 0.0, 0.5, 0.5, 0.5},
+}
+local function is_solid_boxed(x, y, z)
+	if x >= 6 and y == 1 then
+		return SLAB
+	end
+	return is_solid(x, y, z)
+end
+
+-- The same, with the stair-shaped one from z = 6 instead: its lower half
+-- faces -Z, so walking that way is walking up it
+local function is_solid_stair(x, y, z)
+	if z >= 6 and y == 1 then
+		return STAIR
+	end
+	return is_solid(x, y, z)
+end
+
+-- Standing on the slab: its top is at y = 1 - 0.5 + 0.5 = 1.0
+local b = player.new(is_solid_boxed)
+b:set_position(6, 4, 0)
+settle(b, 240)
+assert(math.abs(b.y - 1.0) < 1e-6, "player: stands on the slab at "..b.y)
+
+-- Walking into the slab steps onto it rather than stopping at it
+local w2 = player.new(is_solid_boxed)
+w2:set_position(4.0, 0.5, 0)
+settle(w2, 240, {x = 1, z = 0})
+assert(w2.x > 6, "player: did not step onto the slab, x = "..w2.x)
+assert(math.abs(w2.y - 1.0) < 1e-6, "player: stepped up to "..w2.y)
+
+-- The lower half of the stair is the same step up; the box on its back half
+-- is what the player then stands on
+-- Up the stair: its lower half is one step and its upper half another, and
+-- both are inside the step height, so a walk goes up it without a jump
+local w3 = player.new(is_solid_stair)
+w3:set_position(0.2, 0.5, 4.0)
+settle(w3, 240, {x = 0, z = 1})
+assert(w3.z > 6, "player: did not walk up the stair, z = "..w3.z)
+assert(math.abs(w3.y - 1.5) < 1e-6,
+		"player: the stair's top is 1.5, stood at "..w3.y)
+
+-- Two nodes of wall are still two nodes of wall
+local w4 = player.new(is_solid_boxed)
+w4:set_position(1.0, 0.5, 0)
+settle(w4, 240, {x = 1, z = 0})
+assert(w4.x < 2.8, "player: climbed the wall to x = "..w4.x)
+
 print("player: ok")
 
 --

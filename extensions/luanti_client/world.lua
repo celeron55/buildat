@@ -753,6 +753,21 @@ function M.new(magic, buildat, log, options)
 	-- each node in turn sees the one behind it, but a node that should have
 	-- gone *darker* (or brighter through a corner) only catches up when the
 	-- server resends the block. A real flood fill is the upgrade.
+	-- The param2 of the voxel at a node position, or 0 when the block is not
+	-- here: which way it faces, or what colour it is
+	local function param2_at(x, y, z)
+		local bx = math.floor(x / BLOCKSIZE)
+		local by = math.floor(y / BLOCKSIZE)
+		local bz = math.floor(z / BLOCKSIZE)
+		local block = blocks[block_key(bx, by, bz)]
+		if not block or not block.param2 then
+			return 0
+		end
+		local i = ((z - bz * BLOCKSIZE) * BLOCKSIZE +
+				(y - by * BLOCKSIZE)) * BLOCKSIZE + (x - bx * BLOCKSIZE)
+		return block.param2:byte(i + 1) or 0
+	end
+
 	local function removal_light(x, y, z)
 		local day, night = 0, 0
 		for _, d in ipairs(NEIGHBOURS) do
@@ -781,6 +796,9 @@ function M.new(magic, buildat, log, options)
 	-- Until the node definitions arrive nothing is known but air, and
 	-- everything else is drawn as a placeholder cube, so that is what it
 	-- collides as.
+	-- What the player runs into at a node position: false for nothing, true
+	-- for the whole voxel, or the boxes it is made of -- a slab, a stair, a
+	-- fence post -- in the voxel's own -0.5...0.5 coordinates.
 	function self:is_solid(x, y, z)
 		local id = self:node_at(x, y, z)
 		if id == nil or id == CONTENT_IGNORE then
@@ -793,7 +811,25 @@ function M.new(magic, buildat, log, options)
 			-- A node the definitions did not cover is drawn as a placeholder
 			-- cube, so it collides as one; only what the server says is not
 			-- walkable is walked through
-			return self.node_solid[id] ~= false
+			if self.node_solid[id] == false then
+				return false
+			end
+			local entry = self.node_collision and self.node_collision[id]
+			if entry then
+				-- The boxes turn with the voxel, the same way its shape does
+				local facedir = entry.facing and shapes.facedir_of(
+						entry.facing, param2_at(x, y, z)) or nil
+				if not facedir or facedir == 0 then
+					return entry.boxes
+				end
+				local key = facedir
+				entry.turned = entry.turned or {}
+				if not entry.turned[key] then
+					entry.turned[key] = turn_boxes(entry.boxes, facedir)
+				end
+				return entry.turned[key]
+			end
+			return true
 		end
 		return true
 	end
@@ -1317,6 +1353,7 @@ function M.new(magic, buildat, log, options)
 		}
 		local cubes = 0
 		local light_ids = {}
+		local collision = {}
 		local solid = {}
 		local liquid = {}
 		local pointable = {}
@@ -1357,6 +1394,19 @@ function M.new(magic, buildat, log, options)
 				end
 			end
 			local facing = FACING[def.param_type_2]
+
+			-- What the player runs into. Luanti takes the collision box when
+			-- the definition has one and the node box otherwise; a voxel
+			-- whose boxes are not there at all is a whole cube, which is
+			-- what is_solid() says by returning true.
+			local cbox = def.collision_box
+			if not cbox or #cbox.boxes == 0 then
+				cbox = def.node_box
+			end
+			if def.walkable and cbox and #cbox.boxes > 0 then
+				collision[id] = {boxes = cbox.boxes, facing = facing}
+			end
+
 			if voxel and (colors or facing) then
 				param2_look[id] = {def = def, step = step, colors = colors,
 						facing = facing}
@@ -1410,6 +1460,7 @@ function M.new(magic, buildat, log, options)
 		self.atlas_reg = buildat.createAtlasRegistry()
 		self.node_map = map
 		self.node_light = light_ids
+		self.node_collision = collision
 		self.node_solid = solid
 		self.node_liquid = liquid
 		self.node_pointable = pointable
