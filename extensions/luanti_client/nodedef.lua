@@ -127,14 +127,14 @@ end
 --
 -- The boxes are the ones to draw for a node standing on its own: a
 -- wallmounted box is the one for a node on the floor, and a connected one is
--- its fixed boxes plus the ones it has when nothing is connected.
+-- its fixed boxes plus the ones it has when nothing is connected. A
+-- wallmounted box's three boxes are kept in wall = {top, bottom, side} as
+-- well, because which of them a node wants is what its param2 says.
 --
 -- simplified: which boxes a connected node really wants depends on its
--- neighbours and which wallmounted one on its param2, and neither is known
--- here, so a fence is a post without its rails and a torch stands upright
--- wherever it is. The upgrade path is a voxel id per (node, param2) pair for
--- the wallmounted ones, and for the connected ones a shape that can be built
--- per voxel rather than per node type.
+-- neighbours, which is not known here, so a fence is a post without its
+-- rails. The upgrade path is a shape that can be built per voxel rather than
+-- per node type.
 local function read_node_box(r)
 	local version = r:u8()
 	if version < 6 then
@@ -142,13 +142,12 @@ local function read_node_box(r)
 	end
 	local box_type = r:u8()
 	local boxes = {}
+	local wall = nil
 	if box_type == M.NODEBOX_FIXED or box_type == M.NODEBOX_LEVELED then
 		read_boxes(r, boxes)
 	elseif box_type == M.NODEBOX_WALLMOUNTED then
-		local top = read_box(r)
-		local bottom = read_box(r)
-		read_box(r) -- side
-		boxes[1] = bottom
+		wall = {top = read_box(r), bottom = read_box(r), side = read_box(r)}
+		boxes[1] = wall.bottom
 	elseif box_type == M.NODEBOX_CONNECTED then
 		read_boxes(r, boxes) -- fixed
 		for _ = 1, 12 do
@@ -157,7 +156,7 @@ local function read_node_box(r)
 		read_boxes(r, boxes) -- disconnected
 		read_boxes(r, nil) -- disconnected_sides
 	end
-	return {type = box_type, boxes = boxes}
+	return {type = box_type, boxes = boxes, wall = wall}
 end
 
 -- One node's wrapper. Read as far as the fields anything here uses; the

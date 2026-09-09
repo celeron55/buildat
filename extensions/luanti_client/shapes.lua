@@ -92,32 +92,281 @@ function M.flat_quads(out)
 	return out
 end
 
+-- Which tile goes on which face, per facedir: FACEDIR_TILES[facedir + 1][i]
+-- is the tile our face i is drawn with. Taken from Luanti's own
+-- dir_to_tile[24][8] in mapblock_mesh.cpp, read at the six directions our
+-- faces are in (+Y, -Y, +X, -X, +Z, -Z) -- which is the order Luanti keeps
+-- its tiles in too, one-based here.
+--
+-- simplified: Luanti also rotates the texture within some of those faces (a
+-- facedir voxel's top and bottom, mostly). A cube's tile has no rotation in
+-- the voxel mesher, so those faces are drawn unrotated; the upgrade path is a
+-- per-tile transform in VoxelDefinition, or six quads with rotated UVs.
+M.FACEDIR_TILES = {
+	{1, 2, 3, 4, 5, 6},
+	{1, 2, 5, 6, 4, 3},
+	{1, 2, 4, 3, 6, 5},
+	{1, 2, 6, 5, 3, 4},
+	{6, 5, 3, 4, 1, 2},
+	{3, 4, 5, 6, 1, 2},
+	{5, 6, 4, 3, 1, 2},
+	{4, 3, 6, 5, 1, 2},
+	{5, 6, 3, 4, 2, 1},
+	{4, 3, 5, 6, 2, 1},
+	{6, 5, 4, 3, 2, 1},
+	{3, 4, 6, 5, 2, 1},
+	{4, 3, 1, 2, 5, 6},
+	{6, 5, 1, 2, 4, 3},
+	{3, 4, 1, 2, 6, 5},
+	{5, 6, 1, 2, 3, 4},
+	{3, 4, 2, 1, 5, 6},
+	{5, 6, 2, 1, 4, 3},
+	{4, 3, 2, 1, 6, 5},
+	{6, 5, 2, 1, 3, 4},
+	{2, 1, 4, 3, 5, 6},
+	{2, 1, 6, 5, 4, 3},
+	{2, 1, 3, 4, 6, 5},
+	{2, 1, 5, 6, 3, 4},
+}
+
+-- A wallmounted direction is a facedir too; Luanti's own
+-- wallmounted_to_facedir[], one-based. 6 and 7 are the two spare states
+-- (DWM_S1 and DWM_S2), which are the ceiling and the floor turned a quarter.
+M.WALLMOUNTED_FACEDIR = {20, 0, 17, 15, 8, 6, 21, 1}
+
+-- The facedir a param2 means, 0...23, or nil for a node that does not turn.
+-- kind is "facedir", "4dir" or "wallmounted"; Luanti's MapNode::getFaceDir
+-- with allow_wallmounted.
+function M.facedir_of(kind, p2)
+	if kind == "facedir" then
+		return p2 % 32 % 24
+	elseif kind == "4dir" then
+		return p2 % 4
+	elseif kind == "wallmounted" then
+		return M.WALLMOUNTED_FACEDIR[p2 % 8 + 1]
+	end
+	return nil
+end
+
+-- Irrlicht's rotateXZBy and friends at right angles, which is all Luanti's
+-- transformNodeBox turns a node box by: ia and ib are the two coordinates the
+-- rotation turns into each other and quarters is how many times 90 degrees.
+local SIN = {0, 1, 0, -1}
+local COS = {1, 0, -1, 0}
+local function turn(v, ia, ib, quarters)
+	local i = quarters % 4 + 1
+	local s, c = SIN[i], COS[i]
+	local a, b = v[ia], v[ib]
+	v[ia] = c * a - s * b
+	v[ib] = s * a + c * b
+end
+
+-- The same at any angle, in degrees, for the one thing that wants an eighth
+-- of a turn: a torch leaning off the floor or the ceiling.
+local function turn_deg(v, ia, ib, deg)
+	local r = math.rad(deg)
+	local s, c = math.sin(r), math.cos(r)
+	local a, b = v[ia], v[ib]
+	v[ia] = c * a - s * b
+	v[ib] = s * a + c * b
+end
+
+-- One point turned the way a facedir turns a node, in place.
+--
+-- The rotations and their order are Luanti's transformNodeBox: the low two
+-- bits turn the node about Y and the rest stand it on another face. Every one
+-- of them is a proper rotation, so a quad's winding -- and therefore the
+-- normal the mesher takes from it -- comes out right without further care.
+local function turn_point(v, facedir)
+	local axisdir = math.floor(facedir / 4)
+	if facedir % 4 ~= 0 then
+		turn(v, 1, 3, -(facedir % 4))
+	end
+	if axisdir == 1 then -- z+
+		turn(v, 2, 3, 1)
+	elseif axisdir == 2 then -- z-
+		turn(v, 2, 3, -1)
+	elseif axisdir == 3 then -- x+
+		turn(v, 1, 2, -1)
+	elseif axisdir == 4 then -- x-
+		turn(v, 1, 2, 1)
+	elseif axisdir == 5 then
+		turn(v, 1, 2, 2)
+	end
+end
+
+-- Quads turned by a facedir, 0...23. The tiles and the texture coordinates
+-- come along as they are, so a tile follows the face it was on to wherever
+-- that face ends up -- which is what Luanti does as well, by picking the tile
+-- for a face from the direction turned back into the node's own frame.
+--
+-- simplified: Luanti computes a rotated box's texture coordinates from the
+-- box after the turn, which also rotates the texture inside the face; here it
+-- turns with the face. Same ceiling as FACEDIR_TILES has, and the same
+-- upgrade path.
+function M.turn_quads(quads, facedir)
+	if not facedir or facedir == 0 then
+		return quads
+	end
+	local out = {}
+	for i, q in ipairs(quads) do
+		local p = {}
+		for c = 0, 3 do
+			local v = {q.p[c * 3 + 1], q.p[c * 3 + 2], q.p[c * 3 + 3]}
+			turn_point(v, facedir)
+			p[c * 3 + 1], p[c * 3 + 2], p[c * 3 + 3] = v[1], v[2], v[3]
+		end
+		out[i] = {tile = q.tile, p = p, uv = q.uv}
+	end
+	return out
+end
+
+-- How far around Y a wallmounted side box is turned, in quarters, per
+-- wallmounted direction; Luanti's transformNodeBox does the same by hand. The
+-- box it starts from lies against -X, so that direction is the one left
+-- alone.
+local WALL_SIDE_TURN = {[2] = 2, [3] = 0, [4] = -1, [5] = 1}
+
+-- The same for the single quad of a sign or a torch, which starts against +X
+-- instead: drawSignlikeNode and drawTorchlikeNode.
+local WALL_QUAD_TURN = {[2] = 0, [3] = 2, [4] = 1, [5] = -1}
+
+-- The quads of a wallmounted node box for a wall direction, 0...7. It picks
+-- one of the three boxes the definition carries -- the one for a ceiling, a
+-- floor or a wall -- and turns it to the wall it is on.
+--
+-- simplified: Luanti's two spare directions (DWM_S1, DWM_S2) are a ceiling
+-- and a floor turned a quarter; they get the side box here, which is what
+-- Luanti's own node box code ends up doing too because their direction vector
+-- is zero.
+function M.wall_quads(wall_boxes, wall, out)
+	out = out or {}
+	if wall == 0 then
+		return M.box_quads(wall_boxes.top, out)
+	end
+	if wall == 1 then
+		return M.box_quads(wall_boxes.bottom, out)
+	end
+	local side = M.box_quads(wall_boxes.side, {})
+	local turned = M.turn_quads_y(side, WALL_SIDE_TURN[wall] or 0)
+	for _, q in ipairs(turned) do
+		out[#out + 1] = q
+	end
+	return out
+end
+
+-- Quads turned about Y by whole quarters. facedir cannot say all of these
+-- turns the way round Luanti's wallmounted boxes want them, so this is its
+-- own thing.
+function M.turn_quads_y(quads, quarters)
+	if quarters % 4 == 0 then
+		return quads
+	end
+	local out = {}
+	for i, q in ipairs(quads) do
+		local p = {}
+		for c = 0, 3 do
+			local v = {q.p[c * 3 + 1], q.p[c * 3 + 2], q.p[c * 3 + 3]}
+			turn(v, 1, 3, quarters)
+			p[c * 3 + 1], p[c * 3 + 2], p[c * 3 + 3] = v[1], v[2], v[3]
+		end
+		out[i] = {tile = q.tile, p = p, uv = q.uv}
+	end
+	return out
+end
+
+-- One quad standing against the wall it is mounted on, which is what a sign,
+-- a ladder or a poster is: Luanti's drawSignlikeNode. wall is 0...7.
+function M.sign_quads(scale, wall, out)
+	out = out or {}
+	local size = 0.5 * (scale or 1)
+	local off = 0.5 - 1.0 / 16
+	-- Against the +X wall, seen from -X
+	local p = {off, size, size, off, size, -size, off, -size, -size,
+			off, -size, size}
+	for c = 0, 3 do
+		local v = {p[c * 3 + 1], p[c * 3 + 2], p[c * 3 + 3]}
+		if wall == 0 then -- ceiling
+			turn(v, 1, 2, 1)
+		elseif wall == 1 then -- floor
+			turn(v, 1, 2, -1)
+		else
+			turn(v, 1, 3, WALL_QUAD_TURN[wall] or 0)
+		end
+		p[c * 3 + 1], p[c * 3 + 2], p[c * 3 + 3] = v[1], v[2], v[3]
+	end
+	out[#out + 1] = {tile = 1, p = p, uv = {0, 0, 1, 0, 1, 1, 0, 1}}
+	return out
+end
+
+-- One quad hanging off the wall at an angle, which is what a torch is:
+-- Luanti's drawTorchlikeNode. The tile is the definition's second for a
+-- ceiling and its third for a wall, as Luanti picks them.
+function M.torch_quads(scale, wall, out)
+	out = out or {}
+	local size = 0.5 * (scale or 1)
+	local tile = 1
+	local p = {-size, size, 0, size, size, 0, size, -size, 0, -size, -size, 0}
+	for c = 0, 3 do
+		local v = {p[c * 3 + 1], p[c * 3 + 2], p[c * 3 + 3]}
+		if wall == 0 or wall == 6 then -- ceiling
+			tile = 2
+			v[2] = v[2] - size + 0.5
+			turn_deg(v, 1, 3, wall == 0 and -45 or 45)
+		elseif wall == 1 or wall == 7 then -- floor
+			v[2] = v[2] + size - 0.5
+			turn_deg(v, 1, 3, wall == 1 and 45 or -45)
+		else
+			tile = 3
+			v[1] = v[1] - size + 0.5
+			turn(v, 1, 3, WALL_QUAD_TURN[wall] or 0)
+		end
+		p[c * 3 + 1], p[c * 3 + 2], p[c * 3 + 3] = v[1], v[2], v[3]
+	end
+	out[#out + 1] = {tile = tile, p = p, uv = {0, 0, 1, 0, 1, 1, 0, 1}}
+	return out
+end
+
 -- The quads for a node, or nil for one that is a cube and wants none.
 --
 -- drawtype and node_box are what nodedef.lua read; DRAWTYPE in that file says
--- what the numbers are. What comes back is the quads and whether they want
--- drawing from both sides, which single quads do and boxes do not.
-function M.for_node(def)
+-- what the numbers are. facedir, 0...23, is which way the node faces and wall,
+-- 0...7, is the wallmounted direction its param2 says; both may be nil for a
+-- node whose param2 is not known yet or does not turn it, which comes out as
+-- the shape of a node standing on the floor facing +Z.
+--
+-- What comes back is the quads and whether they want drawing from both sides,
+-- which single quads do and boxes do not.
+function M.for_node(def, facedir, wall)
 	local drawtype = def.drawtype
 	if drawtype == 12 then -- NDT_NODEBOX
 		local box = def.node_box
-		if not box or #box.boxes == 0 then
+		if not box then
+			return nil
+		end
+		if box.wall then
+			return M.wall_quads(box.wall, wall or 1), false
+		end
+		if #box.boxes == 0 then
 			return nil
 		end
 		local out = {}
 		for _, b in ipairs(box.boxes) do
 			M.box_quads(b, out)
 		end
-		return out, false
+		return M.turn_quads(out, facedir), false
 	end
 	if drawtype == 9 or drawtype == 17 then -- PLANTLIKE, PLANTLIKE_ROOTED
 		return M.plant_quads(def.visual_scale), true
 	end
-	if drawtype == 7 or drawtype == 14 then -- TORCHLIKE, FIRELIKE
+	if drawtype == 14 then -- FIRELIKE
 		return M.plant_quads(def.visual_scale), true
 	end
+	if drawtype == 7 then -- TORCHLIKE
+		return M.torch_quads(def.visual_scale, wall or 1), true
+	end
 	if drawtype == 8 then -- SIGNLIKE
-		return M.plant_quads(def.visual_scale), true
+		return M.sign_quads(def.visual_scale, wall or 1), true
 	end
 	if drawtype == 11 then -- RAILLIKE
 		return M.flat_quads(), true
