@@ -604,6 +604,51 @@ function M.new(magic, buildat, log, options)
 			"Techniques/UnlitAlphaMask.xml")
 	local box_model = magic.cache:GetResource("Model", "Models/Box.mdl")
 
+	-- The light an object is drawn in. Its texture goes on unlit -- the
+	-- entities of this game are drawn unlit in Luanti's own client too, and
+	-- their textures are full of holes -- so what stands in for the light is
+	-- a colour the shader multiplies the texture by, worked out the same way
+	-- the mesher works out a face's ambient: the sunlight colour times how
+	-- much of the sky the voxel the object is in sees, plus its lamplight.
+	-- Without this a mob is as bright at midnight as at noon.
+	local function object_color(x, y, z)
+		local p1 = param1_at(math.floor(x + 0.5), math.floor(y + 0.5),
+				math.floor(z + 0.5))
+		if not p1 then
+			return nil
+		end
+		local day = p1 % 16
+		local night = math.floor(p1 / 16)
+		local sky = (day > night and day - night or 0) / 15
+		local lamp = night / 15
+		local sun = sunlight_color(daylight)
+		-- A floor of a few percent, so that something in the pitch dark is a
+		-- silhouette rather than nothing at all
+		return magic.Color(
+				math.min(1, sun.r * sky + lamp + 0.03),
+				math.min(1, sun.g * sky + lamp + 0.03),
+				math.min(1, sun.b * sky + lamp + 0.03))
+	end
+
+	-- Setting a shader parameter costs a sandbox call, and there are a
+	-- hundred objects: only a step the eye can see is worth one.
+	local function light_object(entry, x, y, z)
+		if not entry.material then
+			return
+		end
+		local c = object_color(x, y, z)
+		if not c then
+			return
+		end
+		local key = math.floor(c.r * 32)..","..math.floor(c.g * 32)..","..
+				math.floor(c.b * 32)
+		if key == entry.light_key then
+			return
+		end
+		entry.light_key = key
+		entry.material:SetShaderParameter("MatDiffColor", c)
+	end
+
 	-- What an object is drawn as.
 	--
 	-- simplified: a box with the object's first texture on it, whatever its
@@ -643,6 +688,7 @@ function M.new(magic, buildat, log, options)
 		entry.node.position = magic.Vector3(obj.position[1],
 				obj.position[2] + cy, obj.position[3])
 		entry.node.rotation = magic.Quaternion(0, -(obj.yaw or 0), 0)
+		light_object(entry, obj.position[1], obj.position[2], obj.position[3])
 
 		if obj.visual_stale or not entry.textured then
 			obj.visual_stale = false
@@ -653,6 +699,8 @@ function M.new(magic, buildat, log, options)
 				material:SetTexture(0, magic.cache:GetResource("Texture2D",
 						name))
 				entry.model.material = material
+				entry.material = material
+				entry.light_key = nil
 				entry.textured = true
 			end
 		end
@@ -676,6 +724,8 @@ function M.new(magic, buildat, log, options)
 						obj.position[3])
 				entry.node.rotation = magic.Quaternion(0,
 						-(obj.yaw or 0), 0)
+				light_object(entry, obj.position[1], obj.position[2],
+						obj.position[3])
 			end
 		end
 	end
