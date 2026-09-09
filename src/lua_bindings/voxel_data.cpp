@@ -20,6 +20,7 @@
 #include <luabind/object.hpp>
 #include <luabind/iterator_policy.hpp>
 #include <cstring>
+#include <unordered_map>
 #define MODULE "lua_bindings"
 
 namespace pv = PolyVox;
@@ -38,7 +39,26 @@ enum PackField {
 
 // A table of ids that big is already unreasonable; the point of the limit is
 // that a broken map table cannot ask for an arbitrary allocation
-static const size_t PACK_MAP_MAX = 1 << 22;
+static const size_t PACK_MAP_MAX = 1 << 26;
+
+// Above this a map is a hash rather than an array, so that a key made of two
+// samples does not ask for an allocation the size of its range
+static const size_t PACK_MAP_DENSE_MAX = 1 << 22;
+
+// A second sample array, read in lockstep with the first: the value looked up
+// is first + second * scale. What wanted this is Luanti's param2, which
+// decides a voxel's colour or which way it faces, so what a voxel looks like
+// is a pair of samples rather than one.
+struct PackSecond
+{
+	ss_ data;
+	size_t sample_bytes = 1;
+	bool big_endian = true;
+	uint32_t shift = 0;
+	uint32_t mask = 0xffffffff;
+	int64_t scale = 1;
+	bool present = false;
+};
 
 struct PackSource
 {
@@ -56,7 +76,12 @@ struct PackSource
 	// map[sample] -> what gets written, or -1 for a sample the map does not
 	// mention. Empty means no mapping: the sample is the value.
 	sv_<int64_t> map;
+	// The same thing for keys that are too spread out to be an array, which
+	// is what combining two samples gives
+	std::unordered_map<int64_t, int64_t> map_sparse;
+	bool map_is_sparse = false;
 	int64_t map_default = -1;  // For samples the map does not mention
+	PackSecond second;
 };
 
 static double table_number(const luabind::object &t, const char *key,
@@ -164,7 +189,11 @@ static void parse_map(const luabind::object &map_o, PackSource &source)
 		if((size_t)k > highest)
 			highest = (size_t)k;
 	}
-	source.map.assign(highest + 1, -1);
+	// A dense array while the keys are close together, a hash when they are
+	// not: combining two samples spreads them over a range no array can hold
+	source.map_is_sparse = highest >= PACK_MAP_DENSE_MAX;
+	if(!source.map_is_sparse)
+		source.map.assign(highest + 1, -1);
 	for(luabind::iterator it(map_o), end; it != end; ++it){
 		luabind::object key = it.key();
 		if(luabind::type(key) != LUA_TNUMBER)
@@ -172,9 +201,68 @@ static void parse_map(const luabind::object &map_o, PackSource &source)
 		luabind::object value = *it;
 		if(luabind::type(value) != LUA_TNUMBER)
 			continue;
-		source.map[(size_t)luabind::object_cast<double>(key)] =
-				(int64_t)luabind::object_cast<double>(value);
+		int64_t k = (int64_t)luabind::object_cast<double>(key);
+		int64_t v = (int64_t)luabind::object_cast<double>(value);
+		if(source.map_is_sparse)
+			source.map_sparse[k] = v;
+		else
+			source.map[(size_t)k] = v;
 	}
+}
+
+// The value a map holds for a key, or -1 for one it does not mention
+static inline int64_t map_lookup(const PackSource &source, int64_t key)
+{
+	if(source.map_is_sparse){
+		auto it = source.map_sparse.find(key);
+		return it == source.map_sparse.end() ? -1 : it->second;
+	}
+	return (key >= 0 && (size_t)key < source.map.size()) ?
+			source.map[(size_t)key] : -1;
+}
+
+static void parse_second(const luabind::object &t, PackSource &source)
+{
+	luabind::object second_o = t["second"];
+	if(!second_o || luabind::type(second_o) != LUA_TTABLE)
+		return;
+	PackSecond &second = source.second;
+	luabind::object data_o = second_o["data"];
+	if(!data_o || luabind::type(data_o) != LUA_TSTRING)
+		throw Exception("pack_voxel_volume(): source.second.data is not a "
+				"string");
+	second.data = luabind::object_cast<ss_>(data_o);
+	{
+		PackSource tmp;
+		luabind::object format_o = second_o["format"];
+		parse_format(format_o && luabind::type(format_o) == LUA_TSTRING ?
+				luabind::object_cast<ss_>(format_o) : ss_("u8"), tmp);
+		second.sample_bytes = tmp.sample_bytes;
+		second.big_endian = tmp.big_endian;
+	}
+	second.shift = (uint32_t)table_number(second_o, "shift", 0);
+	if(second.shift > 31)
+		throw Exception("pack_voxel_volume(): source.second.shift is out of "
+				"range");
+	second.mask = second.sample_bytes >= 4 ? 0xffffffffUL :
+			((1UL << (second.sample_bytes * 8)) - 1);
+	{
+		luabind::object mask_o = second_o["mask"];
+		if(mask_o && luabind::type(mask_o) == LUA_TNUMBER)
+			second.mask = (uint32_t)luabind::object_cast<double>(mask_o);
+	}
+	second.scale = (int64_t)table_number(second_o, "scale", 1);
+	if(second.scale < 1)
+		throw Exception("pack_voxel_volume(): source.second.scale is not "
+				"positive");
+	// Read in lockstep, so it has to be as long as the first array
+	size_t samples = (size_t)source.source_size[0] *
+			(size_t)source.source_size[1] * (size_t)source.source_size[2];
+	if(second.data.size() < samples * second.sample_bytes)
+		throw Exception(ss_("pack_voxel_volume(): source.second.data holds ") +
+				itos(second.data.size()) + " bytes, source_size wants " +
+				itos(samples * second.sample_bytes));
+	second.present = true;
 }
 
 static void parse_source(const luabind::object &t, PackSource &source)
@@ -271,6 +359,7 @@ static void parse_source(const luabind::object &t, PackSource &source)
 		if(map_o && luabind::type(map_o) != LUA_TNIL)
 			parse_map(map_o, source);
 	}
+	parse_second(t, source);
 	{
 		luabind::object default_o = t["map_default"];
 		if(default_o && luabind::type(default_o) == LUA_TNUMBER)
@@ -329,10 +418,19 @@ static void apply_source(pv::RawVolume<VoxelInstance> &volume,
 						source.sample_bytes, source.big_endian);
 				sample = (sample >> source.shift) & source.mask;
 
-				int64_t value = sample;
-				if(!source.map.empty()){
-					value = sample < source.map.size() ?
-							source.map[sample] : -1;
+				int64_t key = sample;
+				if(source.second.present){
+					const PackSecond &sc = source.second;
+					uint32_t s2 = read_sample(
+							&sc.data[si * sc.sample_bytes],
+							sc.sample_bytes, sc.big_endian);
+					s2 = (s2 >> sc.shift) & sc.mask;
+					key += (int64_t)s2 * sc.scale;
+				}
+
+				int64_t value = key;
+				if(!source.map.empty() || source.map_is_sparse){
+					value = map_lookup(source, key);
 					if(value < 0)
 						value = source.map_default;
 					if(value < 0)
