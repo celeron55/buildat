@@ -121,6 +121,15 @@ local bad = serialize.reader(serialize.writer():wstring("a\255b"):data())
 assert(bad:sub(1, 1) == "a" and bad:sub(-1) == "b",
 		"serialize: a bad byte took the rest with it")
 
+-- base64, which is how a server older than protocol 48 announces the sha1 of
+-- a media file. The vector is the hash of the empty string, as
+-- base64_encode() writes it, padding left off the way Luanti leaves it off.
+assert(serialize.base64_decode("2jmj7l5rSw0yVb/vlWAYkK/YBwk") ==
+		"\218\057\163\238\094\107\075\013\050\085\191\239"..
+		"\149\096\024\144\175\216\007\009",
+		"serialize: base64_decode of a sha1")
+assert(serialize.base64_decode("YQ==") == "a", "serialize: base64_decode padded")
+
 print("serialize: ok")
 
 -- connection.lua
@@ -1059,11 +1068,19 @@ assert(#wsel == 2 and wsel[1].name == "label" and wsel[2].name == "button",
 --
 -- An item under two names: its own, and one the game renamed it away from
 
-local function item_wrapper(name, image)
+local function item_wrapper(name, image, protocol)
 	local w = serialize.writer()
 	w:u8(6):u8(itemdef.TYPE_CRAFT):string(name):string("A thing")
-	w:string(image):u8(0) -- inventory_image and its animation
-	w:string(""):u8(0) -- wield_image
+	-- An image carries an animation from protocol 51 on, and is a bare name
+	-- before that
+	w:string(image)
+	if protocol >= 51 then
+		w:u8(0)
+	end
+	w:string("")
+	if protocol >= 51 then
+		w:u8(0)
+	end
 	w:raw(string.rep("\0", 12)) -- wield_scale
 	w:s16(99):u8(0):u8(0) -- stack_max, usable, liquids_pointable
 	w:string("") -- no tool capabilities
@@ -1076,11 +1093,15 @@ local function item_wrapper(name, image)
 	return w:data()
 end
 
-local idw = serialize.writer()
-idw:u8(0):u16(1):string(item_wrapper("mcl_core:axe", "axe.png"))
-idw:u16(1):string("default:axe"):string("mcl_core:axe")
+local function item_payload(protocol)
+	local idw = serialize.writer()
+	idw:u8(0):u16(1):string(item_wrapper("mcl_core:axe", "axe.png", protocol))
+	idw:u16(1):string("default:axe"):string("mcl_core:axe")
+	return idw:data()
+end
+
 local item_defs, item_count, item_aliases =
-		itemdef.parse(serialize, idw:data(), log)
+		itemdef.parse(serialize, item_payload(52), log, 52)
 assert(item_count == 1, "itemdef: one item")
 assert(item_defs["mcl_core:axe"], "itemdef: the item itself")
 assert(item_defs["mcl_core:axe"].inventory_image == "axe.png",
@@ -1088,6 +1109,11 @@ assert(item_defs["mcl_core:axe"].inventory_image == "axe.png",
 assert(item_defs["default:axe"] == item_defs["mcl_core:axe"],
 		"itemdef: an alias is the item it means")
 assert(item_aliases["default:axe"] == "mcl_core:axe", "itemdef: the alias")
+
+-- The same item as a server older than protocol 51 writes it
+local old_defs = itemdef.parse(serialize, item_payload(47), log, 47)
+assert(old_defs["mcl_core:axe"].inventory_image == "axe.png",
+		"itemdef: an image with no animation after it")
 
 print("itemdef: ok")
 

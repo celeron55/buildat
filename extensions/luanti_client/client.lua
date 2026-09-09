@@ -408,6 +408,12 @@ function M.new(socket, options, log)
 
 	local handlers = {}
 
+	-- Definitions and media were zlib until protocol 48 and are zstd from
+	-- there on; see Client::handleCommand_NodeDef.
+	local function defs_compression(self)
+		return self.protocol_version >= 48 and "zstd" or "zlib"
+	end
+
 	handlers[TOCLIENT.HELLO] = function(r)
 		local serialization_version = r:u8()
 		r:u16() -- Compression modes; never implemented
@@ -471,7 +477,7 @@ function M.new(socket, options, log)
 	end
 
 	handlers[TOCLIENT.ITEMDEF] = function(r)
-		local data = buildat.decompress(r:longstring(), "zstd")
+		local data = buildat.decompress(r:longstring(), defs_compression(self))
 		got_itemdef = true
 		if self.on_itemdef then
 			self.on_itemdef(data)
@@ -483,7 +489,7 @@ function M.new(socket, options, log)
 	-- protocol 52 it is a long string with a flag after it; older servers put
 	-- the inventory in the rest of the packet.
 	handlers[TOCLIENT.INVENTORY] = function(r)
-		local data = r:longstring()
+		local data = self.protocol_version > 51 and r:longstring() or r:rest()
 		if self.on_inventory then
 			self.on_inventory(data)
 		end
@@ -628,7 +634,7 @@ function M.new(socket, options, log)
 	end
 
 	handlers[TOCLIENT.NODEDEF] = function(r)
-		local data = buildat.decompress(r:longstring(), "zstd")
+		local data = buildat.decompress(r:longstring(), defs_compression(self))
 		got_nodedef = true
 		if self.on_nodedef then
 			self.on_nodedef(data)
@@ -644,18 +650,31 @@ function M.new(socket, options, log)
 	-- of length-prefixed strings: it is a u32 count, then every length, then
 	-- every string's bytes.
 	handlers[TOCLIENT.ANNOUNCE_MEDIA] = function(r)
-		local nr = serialize.reader(buildat.decompress(r:longstring(), "zstd"))
-		local count = nr:u32()
-		local sizes = {}
-		for i = 1, count do
-			sizes[i] = nr:u16()
-		end
 		local files = {}
-		for i = 1, count do
-			files[i] = {name = nr:raw(sizes[i])}
-		end
-		for i = 1, count do
-			files[i].sha1 = r:raw(20)
+		local count
+		if self.protocol_version >= 48 then
+			local nr = serialize.reader(
+					buildat.decompress(r:longstring(), "zstd"))
+			count = nr:u32()
+			local sizes = {}
+			for i = 1, count do
+				sizes[i] = nr:u16()
+			end
+			for i = 1, count do
+				files[i] = {name = nr:raw(sizes[i])}
+			end
+			for i = 1, count do
+				files[i].sha1 = r:raw(20)
+			end
+		else
+			-- Below 48 the names and the hashes are a plain list of pairs,
+			-- and the hash is base64 rather than the 20 raw bytes
+			count = r:u16()
+			for i = 1, count do
+				local name = r:string()
+				files[i] = {name = name,
+						sha1 = serialize.base64_decode(r:string())}
+			end
 		end
 		-- Remote media servers, comma separated. Fetching over HTTP is not
 		-- something this client does; the server sends what we ask it for.
@@ -673,10 +692,12 @@ function M.new(socket, options, log)
 		local files = {}
 		for i = 1, num_files do
 			local name = r:string()
-			files[i] = {
-				name = name,
-				data = buildat.decompress(r:longstring(), "zstd"),
-			}
+			local data = r:longstring()
+			-- Below 48 the file goes over the wire as it is on disk
+			if self.protocol_version >= 48 then
+				data = buildat.decompress(data, "zstd")
+			end
+			files[i] = {name = name, data = data}
 		end
 		if self.on_media then
 			self.on_media(files, bunch_i, num_bunches)
@@ -789,7 +810,14 @@ function M.new(socket, options, log)
 	conn.on_data = function(data, channel)
 		local ok, err = pcall(handle_command, data, channel)
 		if not ok then
-			log:warning("Failed to handle a command: "..tostring(err))
+			-- Which command it was, because the traceback only names the
+			-- line inside the reader that ran out of packet
+			local command = #data >= 2 and
+					(data:byte(1) * 256 + data:byte(2)) or nil
+			log:warning("Failed to handle "..
+					(command and ((TOCLIENT_NAME[command] or "a command")..
+					string.format(" (0x%02x)", command)) or "a command")..
+					": "..tostring(err))
 		end
 	end
 
