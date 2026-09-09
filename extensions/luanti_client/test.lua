@@ -35,6 +35,8 @@ local nodedef = dofile(dir.."/nodedef.lua")
 local media = dofile(dir.."/media.lua")
 local shapes = dofile(dir.."/shapes.lua")
 local hud = dofile(dir.."/hud.lua")
+local b3dmesh = dofile(dir.."/b3dmesh.lua")
+local luanti_client = dofile(dir.."/client.lua")
 local sounds = dofile(dir.."/sounds.lua")
 local itemdef = dofile(dir.."/itemdef.lua")
 local nodemeta = dofile(dir.."/nodemeta.lua")
@@ -1753,5 +1755,97 @@ local n = quad_normal(top[1])
 assert(n[2] > 0, "objmesh: a face wound as .obj winds it points outwards")
 
 print("objmesh: ok")
+
+-- b3dmesh.lua
+--
+-- A .b3d built here by hand: one node holding one mesh of one triangle, with
+-- the node moved, so that both the reading and the transform are checked.
+-- Blitz3D is little-endian, which is the other way round from serialize.lua.
+do
+	local function le32(v)
+		v = v % 0x100000000
+		return string.char(v % 256, math.floor(v / 256) % 256,
+				math.floor(v / 0x10000) % 256, math.floor(v / 0x1000000))
+	end
+	local function lef32(v)
+		if v == 0 then
+			return string.char(0, 0, 0, 0)
+		end
+		local sign = 0
+		if v < 0 then
+			sign = 1
+			v = -v
+		end
+		local exp = 0
+		while v >= 2 do v = v / 2; exp = exp + 1 end
+		while v < 1 do v = v * 2; exp = exp - 1 end
+		local mant = math.floor((v - 1) * 0x800000 + 0.5)
+		local e = exp + 127
+		return string.char(mant % 256, math.floor(mant / 0x100) % 256,
+				(e % 2) * 128 + math.floor(mant / 0x10000),
+				sign * 128 + math.floor(e / 2))
+	end
+	local function chunk(tag, body)
+		return tag..le32(#body)..body
+	end
+
+	local vrts = chunk("VRTS", le32(0)..le32(1)..le32(2)..
+			lef32(0)..lef32(0)..lef32(0)..lef32(0)..lef32(0)..
+			lef32(1)..lef32(0)..lef32(0)..lef32(1)..lef32(0)..
+			lef32(0)..lef32(1)..lef32(0)..lef32(0)..lef32(1))
+	local tris = chunk("TRIS", le32(0)..le32(0)..le32(1)..le32(2))
+	local mesh = chunk("MESH", le32(0xffffffff)..vrts..tris)
+	local node = chunk("NODE", "root\0"..
+			lef32(0)..lef32(2)..lef32(0)..      -- position
+			lef32(1)..lef32(1)..lef32(1)..      -- scale
+			lef32(1)..lef32(0)..lef32(0)..lef32(0)..  -- rotation
+			mesh)
+	local body = le32(1)..node
+	local b3d = "BB3D"..le32(#body + 4)..body
+
+	local quads, groups, skipped = b3dmesh.parse(b3d)
+	assert(quads, "b3dmesh: the file parses")
+	assert(#quads == 1, "b3dmesh: one triangle came out as "..#quads.." quads")
+	assert(groups == 1 and skipped == 0, "b3dmesh: one group, nothing skipped")
+	local q = quads[1]
+	-- The node moved it two up, and the third corner is repeated
+	assert(q.p[1] == 0 and q.p[2] == 2 and q.p[3] == 0,
+			"b3dmesh: the node's position is applied")
+	assert(q.p[4] == 1 and q.p[5] == 2, "b3dmesh: the second corner")
+	assert(q.p[7] == 0 and q.p[8] == 3, "b3dmesh: the third corner")
+	assert(q.p[10] == q.p[7] and q.p[11] == q.p[8] and q.p[12] == q.p[9],
+			"b3dmesh: a triangle's last corner is doubled")
+	assert(q.uv[1] == 0 and q.uv[2] == 0 and q.uv[3] == 1 and q.uv[4] == 0,
+			"b3dmesh: the texture coordinates go through as they are")
+	assert(q.group == 1, "b3dmesh: the brush is the group")
+
+	-- A scale on the node reaches the corners
+	local scaled = b3dmesh.scale(b3dmesh.parse(b3d), 0.5)
+	assert(scaled[1].p[2] == 1, "b3dmesh: scale multiplies every corner")
+
+	-- Anything that is not a b3d comes back as nil and a reason rather than
+	-- an error: a model is not worth failing a world over
+	local nothing, why = b3dmesh.parse("not a model at all")
+	assert(nothing == nil and why, "b3dmesh: bytes that are not a b3d")
+end
+
+print("b3dmesh: ok")
+-- client.lua: the language code the server is told, out of a POSIX locale
+do
+	assert(luanti_client.language_code("fi_FI.UTF-8") == "fi",
+			"client: a locale with a country and an encoding")
+	assert(luanti_client.language_code("en_GB:en") == "en",
+			"client: a locale list")
+	assert(luanti_client.language_code("de") == "de", "client: bare")
+	assert(luanti_client.language_code("C") == "",
+			"client: C is no language at all")
+	assert(luanti_client.language_code("POSIX") == "", "client: nor POSIX")
+	assert(luanti_client.language_code(nil) == "",
+			"client: nothing set is no language")
+end
+
+print("client: ok")
+
+
 
 print("luanti_client/test.lua: ok")

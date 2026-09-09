@@ -31,7 +31,34 @@ local SER_FMT_VER_HIGHEST_READ = 29
 local CLIENT_PROTOCOL_VERSION_MIN = 37
 local LATEST_PROTOCOL_VERSION = 52
 local FORMSPEC_API_VERSION = 8
-local VERSION = {major = 5, minor = 15, patch = 0, hash = "buildat"}
+-- The Luanti version this claims to be, which is the newest one that speaks
+-- the protocol above: a game that branches on the version then takes the
+-- path this implements, where claiming an older one would send it down a
+-- path for a client that no longer exists. The string beside it is what
+-- Luanti puts its full version in, and a server shows it in a player list.
+local VERSION = {major = 5, minor = 17, patch = 0,
+		hash = "buildat luanti_client"}
+
+-- The language the player reads, which a game asks for through
+-- get_player_information().lang_code -- this game's craft guide, creative
+-- inventory and doc mod all do. Luanti sends the language its own UI is in;
+-- the nearest thing here is what the environment says.
+--
+-- What comes out is the two-letter code a Luanti mod expects, out of a POSIX
+-- locale name: "fi_FI.UTF-8" is "fi", "en_GB:en" is "en", and "C" or
+-- "POSIX" is no language at all rather than "c".
+function M.language_code(locale)
+	locale = tostring(locale or "")
+	if locale == "C" or locale == "POSIX" then
+		return ""
+	end
+	return (locale:match("^(%a%a)") or ""):lower()
+end
+
+local function environment_language()
+	return M.language_code(os.getenv("LANGUAGE") or os.getenv("LC_ALL") or
+			os.getenv("LC_MESSAGES") or os.getenv("LANG") or "")
+end
 
 local TOSERVER = {
 	INIT          = 0x02,
@@ -545,7 +572,8 @@ function M.new(socket, options, log)
 		-- v3f unused, u64 map seed, f1000 send interval, u32 sudo mechanisms
 		self.state = "authenticated"
 		status("Logged in")
-		send_command(TOSERVER.INIT2, serialize.writer():string(""):data())
+		send_command(TOSERVER.INIT2,
+				serialize.writer():string(environment_language()):data())
 	end
 
 	-- CLIENT_READY is what makes the server spawn the player, and it waits for
