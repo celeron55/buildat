@@ -108,6 +108,25 @@ static int table_ints(const luabind::object &t, const char *key, int *result,
 	return got;
 }
 
+// The same for the one thing given as fractions rather than as pixels: a
+// blit's clip rectangle
+static int table_numbers(const luabind::object &t, const char *key,
+		double *result, int count)
+{
+	luabind::object v = t[key];
+	if(!v || luabind::type(v) != LUA_TTABLE)
+		return 0;
+	int got = 0;
+	for(int i = 0; i < count; i++){
+		luabind::object e = v[i + 1];
+		if(!e || luabind::type(e) != LUA_TNUMBER)
+			break;
+		result[i] = luabind::object_cast<double>(e);
+		got++;
+	}
+	return got;
+}
+
 static uint8_t clamp_byte(int v)
 {
 	return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
@@ -201,8 +220,12 @@ static void blend_pixel(const uint8_t *src, uint8_t *dst, BlendMode mode)
 
 // dst[x0..x0+w, y0..y0+h] gets src's from-rectangle, scaled by nearest
 // neighbour, which is what pixel art wants. Anything outside dst is clipped.
+// clip, when given, is a rectangle of the destination outside which nothing
+// is written: {x0, y0, x1, y1} with x1 and y1 past the end. What wanted it is
+// Luanti's [lowpart, which draws only the bottom part of an overlay that has
+// been stretched over the whole image.
 static void blit(Canvas &dst, const Canvas &src, int from[4], int at[2],
-		int size[2], BlendMode mode)
+		int size[2], BlendMode mode, const int *clip = nullptr)
 {
 	if(size[0] <= 0 || size[1] <= 0 || from[2] <= 0 || from[3] <= 0)
 		return;
@@ -210,12 +233,16 @@ static void blit(Canvas &dst, const Canvas &src, int from[4], int at[2],
 		int y = at[1] + dy;
 		if(y < 0 || y >= dst.h)
 			continue;
+		if(clip && (y < clip[1] || y >= clip[3]))
+			continue;
 		int sy = from[1] + (int)((int64_t)dy * from[3] / size[1]);
 		if(sy < 0 || sy >= src.h)
 			continue;
 		for(int dx = 0; dx < size[0]; dx++){
 			int x = at[0] + dx;
 			if(x < 0 || x >= dst.w)
+				continue;
+			if(clip && (x < clip[0] || x >= clip[2]))
 				continue;
 			int sx = from[0] + (int)((int64_t)dx * from[2] / size[0]);
 			if(sx < 0 || sx >= src.w)
@@ -384,7 +411,21 @@ static void apply_op(magic::Context *context, Canvas &c,
 			size[0] = c.w;
 			size[1] = c.h;
 		}
-		blit(c, src, from, at, size, parse_blend(table_string(t, "blend")));
+		// A clip rectangle in fractions of the canvas, because what wants
+		// one -- an overlay stretched over the whole image, of which only a
+		// part is drawn -- does not know the canvas in pixels
+		double clip_f[4] = {0.0, 0.0, 1.0, 1.0};
+		int clip[4] = {0, 0, c.w, c.h};
+		const int *clip_p = nullptr;
+		if(table_numbers(t, "clip", clip_f, 4) == 4){
+			clip[0] = (int)std::floor(clip_f[0] * c.w + 0.5);
+			clip[1] = (int)std::floor(clip_f[1] * c.h + 0.5);
+			clip[2] = (int)std::floor(clip_f[2] * c.w + 0.5);
+			clip[3] = (int)std::floor(clip_f[3] * c.h + 0.5);
+			clip_p = clip;
+		}
+		blit(c, src, from, at, size, parse_blend(table_string(t, "blend")),
+				clip_p);
 		return;
 	}
 
@@ -452,6 +493,23 @@ static void apply_op(magic::Context *context, Canvas &c,
 		hue_saturation(c, table_number(t, "hue", 0),
 				table_number(t, "saturation", 0),
 				table_number(t, "lightness", 0));
+		return;
+	}
+	if(op == "chromakey"){
+		// Every pixel of one colour becomes fully transparent, which is what
+		// Luanti's [makealpha does: a texture drawn on a solid background
+		// with no alpha channel of its own says which colour the background
+		// was. The colour is compared as it is, because that is what a
+		// texture like that is drawn with -- one exact background colour.
+		int color[3] = {0, 0, 0};
+		table_ints(t, "color", color, 3);
+		uint8_t r = clamp_byte(color[0]);
+		uint8_t g = clamp_byte(color[1]);
+		uint8_t b = clamp_byte(color[2]);
+		for(size_t i = 0; i + 3 < c.data.size(); i += 4){
+			if(c.data[i] == r && c.data[i + 1] == g && c.data[i + 2] == b)
+				c.data[i + 3] = 0;
+		}
 		return;
 	}
 	if(op == "alpha"){

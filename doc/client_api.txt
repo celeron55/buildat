@@ -429,12 +429,14 @@ buildat.compose_image(args) -> width, height
               at = {0, 0},
               size = {16, 16},           -- scales, nearest neighbour
               fill = false,              -- or: over the whole canvas
+              clip = {0, 0.5, 1, 1},     -- fractions of the canvas
               blend = "over"},           -- over|set|and|multiply|screen
           {op = "fill", color = {r, g, b, a}, at =, size =, blend =},
           {op = "multiply", color = {r, g, b, a}},   -- per channel, 255 = 1
           {op = "colorize", color = {r, g, b, a}, ratio = 0..255},
           {op = "hsl", hue = 0, saturation = 0, lightness = 0},
           {op = "alpha", value = 255},   -- set the whole alpha channel
+          {op = "chromakey", color = {r, g, b}},  -- that colour turns clear
           {op = "transform", transform = 0..7},  -- the square's symmetries
           {op = "resize", size = {w, h}},
           {op = "crop", from = {x, y, w, h}, size = {w, h}},
@@ -459,6 +461,14 @@ buildat.compose_image(args) -> width, height
   which is what a sprite sheet or a stack of animation frames is. A zero for
   one side of the grid means "as many as makes the cells square", which is
   how many frames a strip holds without anybody having to count them.
+- clip is a rectangle of the canvas, in fractions of it, outside which a blit
+  writes nothing. It is fractions rather than pixels because what wants it --
+  an overlay stretched over the whole canvas of which only a part is drawn --
+  is written by someone who does not know how big the canvas is.
+- chromakey makes every pixel of exactly that colour fully transparent, which
+  is what a texture drawn over a solid background and saved without an alpha
+  channel needs; the comparison is exact, because such a texture has one
+  exact background colour.
 - colorize blends towards the colour by ratio and leaves fully transparent
   pixels alone; at ratio 255 it replaces the colour and multiplies the alpha.
 - shear puts the source's four corners at at, at+u, at+u+v and at+v: u is

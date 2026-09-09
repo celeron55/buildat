@@ -905,6 +905,49 @@ do
 	}) == nil, "texmod: [png needs somewhere to put the file")
 end
 
+
+-- [lowpart draws the bottom part of an overlay over the base, clipped in
+-- fractions of the canvas because the canvas size is not this file's business
+do
+	local ctx = {
+		resource = function(n) return n end,
+		compose = function(e) return "c_"..e end,
+	}
+	local ops = texmod.build("a.png^[lowpart:25:b.png", ctx)
+	assert(ops and #ops == 2, "texmod: [lowpart is a second blit")
+	assert(ops[2].src == "c_b.png" and ops[2].fill,
+			"texmod: the overlay is composed and stretched")
+	assert(ops[2].clip[2] == 0.75 and ops[2].clip[4] == 1,
+			"texmod: a quarter means the bottom quarter")
+	-- Nothing of it at zero, which is what an empty bar is
+	local empty = texmod.build("a.png^[lowpart:0:b.png", ctx)
+	assert(#empty == 1, "texmod: nothing of the overlay at zero percent")
+	assert(texmod.build("a.png^[lowpart:x:b.png", ctx) == nil,
+			"texmod: [lowpart needs a number")
+end
+
+-- [makealpha names the colour a texture was drawn over, which becomes
+-- transparent
+do
+	local ops = texmod.build("a.png^[makealpha:0,0,0", {
+		resource = function(n) return n end,
+		compose = function() return nil end,
+	})
+	assert(ops and #ops == 2 and ops[2].op == "chromakey",
+			"texmod: [makealpha is a chromakey")
+	assert(ops[2].color[1] == 0 and ops[2].color[3] == 0,
+			"texmod: the colour goes through")
+	local rgb = texmod.build("a.png^[makealpha:12,34,56", {
+		resource = function(n) return n end,
+		compose = function() return nil end,
+	})
+	assert(rgb[2].color[2] == 34, "texmod: three numbers, in order")
+	assert(texmod.build("a.png^[makealpha:1,2", {
+		resource = function(n) return n end,
+		compose = function() return nil end,
+	}) == nil, "texmod: [makealpha needs three numbers")
+end
+
 print("texmod: ok")
 
 --

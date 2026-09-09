@@ -222,11 +222,10 @@ it was written under, so nothing has to hold an image.
 
 What is implemented: chaining with "^", grouping with "(...)", [combine,
 [fill, [colorize, [multiply, [screen, [opacity, [brighten, [noalpha, [hsl,
-[transform, [resize, [mask, [verticalframe, [sheet and [png -- the last of
-which carries a whole PNG in the expression, base64, and is written out beside
-the composed textures under a hash of its own bytes. That is everything
-VoxeLibre's node definitions use except one [lowpart, and what devtest leans
-on. A modifier that is not
+[transform, [resize, [mask, [verticalframe, [sheet, [lowpart, [makealpha and
+[png -- the last of which carries a whole PNG in the expression, base64, and
+is written out beside the composed textures under a hash of its own bytes.
+That is every modifier the installed games were seen to use. A modifier that is not
 implemented is logged once with an example expression when the registry is
 built, because a node whose texture cannot be built is drawn as a placeholder
 and nothing else says why. Sixteen of Luanti's named

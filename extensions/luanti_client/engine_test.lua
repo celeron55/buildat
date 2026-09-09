@@ -441,7 +441,35 @@ local function check_compose_image()
 		end
 	end
 
-	assert(made == 17, "compose_image: made "..made.." images")
+	-- chromakey takes one exact colour out, which is what a texture saved
+	-- over a solid background needs; a colour that is only close stays
+	local keyed = compose("chromakey", {
+		ops = {
+			{op = "blit", src = SRC},
+			{op = "chromakey", color = {10, 20, 30}},
+		},
+	})
+	same(keyed, 2, 0, {10, 20, 30, 0}, "chromakey clears its colour")
+	same(keyed, 0, 0, {200, 100, 50, 255}, "chromakey leaves the rest")
+
+	-- A blit clipped to a rectangle given in fractions of the canvas: only
+	-- the bottom half of a stretched overlay reaches it
+	local low = compose("lowpart", {
+		size = {4, 4},
+		ops = {
+			{op = "fill", color = {0, 0, 0, 255}, blend = "set"},
+			{op = "blit", src = SRC, fill = true,
+					clip = {0, 0.5, 1, 1}, blend = "set"},
+		},
+	})
+	same(low, 0, 0, {0, 0, 0, 255}, "a clipped blit leaves the top alone")
+	same(low, 0, 1, {0, 0, 0, 255}, "and the row just above the clip")
+	-- The source is 4x2 stretched to 4x4, so both bottom rows come from its
+	-- own second row
+	same(low, 0, 2, {10, 20, 30, 255}, "a clipped blit writes the bottom")
+	same(low, 0, 3, {10, 20, 30, 255}, "all of the bottom")
+
+	assert(made == 19, "compose_image: made "..made.." images")
 end
 
 function M.self_test()
