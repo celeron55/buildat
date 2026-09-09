@@ -37,6 +37,17 @@ local DROP_DISTANCE = 260
 -- the server sends is the feet
 local EYE_HEIGHT = 1.625
 
+-- Nodes a second, and degrees of look per pixel of mouse movement
+--
+-- simplified: the camera flies, with nothing to stop it going through a wall.
+-- The server does not mind for as long as the player has the fly and noclip
+-- privileges; without them its movement checks pull the player back, which
+-- shows up as the camera being dragged. Walking means the player's collision
+-- box against the voxel data, which is its own piece of work.
+local MOVE_SPEED = 12
+local MOVE_SPEED_FAST = 40
+local MOUSE_SENSITIVITY = 0.15
+
 -- Media files are asked for in batches, so that one REQUEST_MEDIA does not
 -- turn into hundreds of split chunks in one go
 local MEDIA_PER_REQUEST = 200
@@ -50,6 +61,32 @@ local MEDIA_WAIT_S = 15
 -- a same-named texture do not collide.
 local MEDIA_ROOT = __buildat_get_path("cache").."/luanti_media"
 local media_root_added = false
+
+-- Luanti's day/night ratio, from its daynightratio.h: 0.175 at night, 1.0 in
+-- the day, with a ramp between 4375 and 6125 and the same one mirrored around
+-- 12000 for the evening.
+local DAYNIGHT_RAMP = {
+	{4375, 0.175}, {4625, 0.175}, {4875, 0.250}, {5125, 0.350},
+	{5375, 0.500}, {5625, 0.675}, {5875, 0.875}, {6125, 1.000},
+}
+
+local function daynight_ratio(time_of_day)
+	local t = time_of_day % 24000
+	if t > 12000 then
+		t = 24000 - t
+	end
+	if t <= DAYNIGHT_RAMP[2][1] then
+		return DAYNIGHT_RAMP[1][2]
+	end
+	for i = 2, #DAYNIGHT_RAMP do
+		if DAYNIGHT_RAMP[i][1] > t then
+			local a, b = DAYNIGHT_RAMP[i - 1], DAYNIGHT_RAMP[i]
+			local f = (t - a[1]) / (b[1] - a[1])
+			return a[2] + f * (b[2] - a[2])
+		end
+	end
+	return 1.0
+end
 
 local function labeled_edit(parent, label, value)
 	local text = parent:CreateChild("Text")
@@ -115,6 +152,10 @@ local function show_client(host, port, name, password)
 
 		client.on_block = function(block)
 			view:set_block(block)
+		end
+
+		client.on_node = function(x, y, z, param0, param1)
+			view:set_node(x, y, z, param0, param1)
 		end
 
 		-- The server's media, and what the node definitions make of it
@@ -204,6 +245,58 @@ local function show_client(host, port, name, password)
 					store:have_count(), store:missing_count())
 		end
 
+		-- Mouse look, so the cursor is out of the way and does not stop at the
+		-- edge of the window
+		magic.input:SetMouseVisible(false)
+
+		local last_daylight = nil
+
+		-- WASD on the horizontal plane whatever the camera is pitched at,
+		-- space and shift for height, shift also for a faster pace. What comes
+		-- out is where the client tells the server it is, so the server sends
+		-- the blocks around it: the position is both the camera's and the
+		-- player's.
+		--
+		-- The starting point is client.position every frame rather than a
+		-- position of our own, so that MOVE_PLAYER -- the server putting the
+		-- player somewhere, at the spawn or after its movement checks -- wins.
+		local function move(dtime)
+			local dmouse = magic.input:GetMouseMove()
+			local yaw = client.yaw + dmouse.x * MOUSE_SENSITIVITY
+			-- Luanti's pitch is positive looking up, and the mouse moving away
+			-- from the user is negative y
+			local pitch = client.pitch - dmouse.y * MOUSE_SENSITIVITY
+			if pitch > 89 then pitch = 89 end
+			if pitch < -89 then pitch = -89 end
+
+			local fast = magic.input:GetKeyDown(KEY_SHIFT)
+			local speed = (fast and MOVE_SPEED_FAST or MOVE_SPEED) * dtime
+			local yr = math.rad(yaw)
+			local fx, fz = math.sin(yr), math.cos(yr)
+			local p = client.position
+			local x, y, z = p.x, p.y, p.z
+			if magic.input:GetKeyDown(KEY_W) then
+				x, z = x + fx * speed, z + fz * speed
+			end
+			if magic.input:GetKeyDown(KEY_S) then
+				x, z = x - fx * speed, z - fz * speed
+			end
+			if magic.input:GetKeyDown(KEY_D) then
+				x, z = x + fz * speed, z - fx * speed
+			end
+			if magic.input:GetKeyDown(KEY_A) then
+				x, z = x - fz * speed, z + fx * speed
+			end
+			if magic.input:GetKeyDown(KEY_SPACE) then
+				y = y + speed
+			end
+			if magic.input:GetKeyDown(KEY_CTRL) then
+				y = y - speed
+			end
+			client:set_position(x, y, z, pitch, yaw)
+			view:set_camera(x, y + EYE_HEIGHT, z, pitch, yaw)
+		end
+
 		-- A plain subscription rather than root:SubscribeToStackEvent(), which
 		-- only fires while the UI element has focus; the world has to keep
 		-- streaming whatever the UI is doing. Unsubscribed by hand below.
@@ -211,11 +304,17 @@ local function show_client(host, port, name, password)
 				function(event_type, event_data)
 			local dtime = event_data:GetFloat("TimeStep")
 			client:update(dtime)
-			-- The camera is wherever the server says the player is; moving it
-			-- from here is M4
-			local p = client.position
-			view:set_camera(p.x, p.y + EYE_HEIGHT, p.z, client.pitch,
-					client.yaw)
+			move(dtime)
+			if client.time_of_day then
+				local daylight = daynight_ratio(client.time_of_day)
+				-- The ramp is smooth and the zone is not free to set, so only
+				-- a visible step is worth an update
+				if not last_daylight or
+						math.abs(daylight - last_daylight) > 0.01 then
+					last_daylight = daylight
+					view:set_daylight(daylight)
+				end
+			end
 			view:update(dtime, DROP_DISTANCE)
 
 			-- Media requests go out a batch a frame, and the registry is
@@ -240,6 +339,7 @@ local function show_client(host, port, name, password)
 		root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 			if event_data:GetInt("Key") == KEY_ESCAPE then
 				magic.UnsubscribeFromEvent("Update", update_cb)
+				magic.input:SetMouseVisible(true)
 				client:disconnect()
 				view:close()
 				uistack.main:pop(root)
