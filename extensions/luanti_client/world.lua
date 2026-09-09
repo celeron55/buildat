@@ -166,6 +166,15 @@ local LIGHT_RANGE_PER_LEVEL = 1.0
 -- light_source is one number -- and what gives light in one is mostly fire.
 local LIGHT_COLOR = {r = 1.0, g = 0.85, b = 0.65}
 
+-- A voxel's collision boxes, turned the way its facedir says
+local function turn_boxes(boxes, facedir)
+	local out = {}
+	for i, box in ipairs(boxes) do
+		out[i] = shapes.turn_box(box, facedir)
+	end
+	return out
+end
+
 local function block_key(x, y, z)
 	return x..","..y..","..z
 end
