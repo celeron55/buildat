@@ -101,27 +101,27 @@ function M.new(magic, buildat, log, options)
 	scene:CreateComponent("Octree")
 	self.scene = scene
 
-	do
-		local zone_node = scene:CreateChild("Zone")
-		local zone = zone_node:CreateComponent("Zone")
-		zone.boundingBox = magic.BoundingBox(-100000, 100000)
-		zone.ambientColor = magic.Color(0.45, 0.48, 0.55)
-		zone.fogColor = magic.Color(0.60, 0.72, 0.88)
-		zone.fogStart = far_clip * 0.7
-		zone.fogEnd = far_clip
-		zone.priority = -1000
-	end
+	-- Full daylight; set_daylight() scales these by the time of day
+	local AMBIENT = {r = 0.45, g = 0.48, b = 0.55}
+	local FOG = {r = 0.60, g = 0.72, b = 0.88}
 
-	do
-		local node = scene:CreateChild("Sun")
-		local light = node:CreateComponent("Light")
-		light.lightType = magic.LIGHT_DIRECTIONAL
-		light.color = magic.Color(1.0, 0.97, 0.90)
-		light.castShadows = false
-		-- Rotation rather than direction: SetDirection is a shortest-arc
-		-- rotation and would roll the light, which matters once it casts
-		node.rotation = magic.Quaternion(50, 30, 0)
-	end
+	local zone_node = scene:CreateChild("Zone")
+	local zone = zone_node:CreateComponent("Zone")
+	zone.boundingBox = magic.BoundingBox(-100000, 100000)
+	zone.ambientColor = magic.Color(AMBIENT.r, AMBIENT.g, AMBIENT.b)
+	zone.fogColor = magic.Color(FOG.r, FOG.g, FOG.b)
+	zone.fogStart = far_clip * 0.7
+	zone.fogEnd = far_clip
+	zone.priority = -1000
+
+	local sun_node = scene:CreateChild("Sun")
+	local sun = sun_node:CreateComponent("Light")
+	sun.lightType = magic.LIGHT_DIRECTIONAL
+	sun.color = magic.Color(1.0, 0.97, 0.90)
+	sun.castShadows = false
+	-- Rotation rather than direction: SetDirection is a shortest-arc rotation
+	-- and would roll the light, which matters once it casts
+	sun_node.rotation = magic.Quaternion(50, 30, 0)
 
 	local camera_node = scene:CreateChild("Camera")
 	local camera = camera_node:CreateComponent("Camera")
@@ -327,6 +327,50 @@ function M.new(magic, buildat, log, options)
 
 	function self:get_block(x, y, z)
 		return blocks[block_key(x, y, z)]
+	end
+
+	-- One node the server changed, in node coordinates. Patches the block's
+	-- parameter arrays in place; a node on a block's edge is part of the
+	-- neighbour's border, so that mesh goes out of date too.
+	function self:set_node(x, y, z, param0, param1)
+		local bx = math.floor(x / BLOCKSIZE)
+		local by = math.floor(y / BLOCKSIZE)
+		local bz = math.floor(z / BLOCKSIZE)
+		local key = block_key(bx, by, bz)
+		local block = blocks[key]
+		if not block then
+			return false -- Not a block we are drawing
+		end
+		local lx = x - bx * BLOCKSIZE
+		local ly = y - by * BLOCKSIZE
+		local lz = z - bz * BLOCKSIZE
+		local i = lx + ly * BLOCKSIZE + lz * BLOCKSIZE * BLOCKSIZE
+		block.param0 = block.param0:sub(1, i * 2)..
+				string.char(math.floor(param0 / 256) % 256, param0 % 256)..
+				block.param0:sub(i * 2 + 3)
+		block.param1 = block.param1:sub(1, i)..string.char(param1 % 256)..
+				block.param1:sub(i + 2)
+		mark_dirty(key)
+		for _, d in ipairs(NEIGHBOURS) do
+			-- Only the neighbour the node is up against sees it in its border
+			if (d[1] < 0 and lx == 0) or (d[1] > 0 and lx == BLOCKSIZE - 1) or
+					(d[2] < 0 and ly == 0) or
+					(d[2] > 0 and ly == BLOCKSIZE - 1) or
+					(d[3] < 0 and lz == 0) or
+					(d[3] > 0 and lz == BLOCKSIZE - 1) then
+				mark_dirty(block_key(bx + d[1], by + d[2], bz + d[3]))
+			end
+		end
+		return true
+	end
+
+	-- The zone's ambient and the sun, for a day/night factor of 0...1
+	function self:set_daylight(factor)
+		zone.ambientColor = magic.Color(AMBIENT.r * factor,
+				AMBIENT.g * factor, AMBIENT.b * factor)
+		zone.fogColor = magic.Color(FOG.r * factor, FOG.g * factor,
+				FOG.b * factor)
+		sun.brightness = factor
 	end
 
 	-- Builds the voxel registry from Luanti's node definitions.

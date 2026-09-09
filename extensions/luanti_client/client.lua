@@ -60,6 +60,8 @@ local TOCLIENT = {
 	AUTH_ACCEPT    = 0x03,
 	ACCESS_DENIED  = 0x0A,
 	BLOCKDATA      = 0x20,
+	ADDNODE        = 0x21,
+	REMOVENODE     = 0x22,
 	TIME_OF_DAY    = 0x29,
 	MOVE_PLAYER    = 0x34,
 	MEDIA          = 0x38,
@@ -208,6 +210,9 @@ function M.new(socket, options, log)
 			-- on_block(block) for each mapblock that arrives; see
 			-- parse_blockdata() for what a block holds
 			on_block = nil,
+			-- on_node(x, y, z, param0, param1, param2) for a single node the
+			-- server changed. param0 is CONTENT_AIR for a removal.
+			on_node = nil,
 			-- on_nodedef(data) with the decompressed NODEDEF payload;
 			-- nodedef.lua is what reads it
 			on_nodedef = nil,
@@ -435,6 +440,27 @@ function M.new(socket, options, log)
 			self.state = "ready"
 			status(string.format("Spawned at %.0f, %.0f, %.0f",
 					self.position.x, self.position.y, self.position.z))
+		end
+	end
+
+	-- One node changed. The position is a node position, not a block one, and
+	-- at serialization version 24 and up a node on the wire is
+	-- u16 param0 | u8 param1 | u8 param2.
+	handlers[TOCLIENT.ADDNODE] = function(r)
+		local x, y, z = r:v3s16()
+		local param0 = r:u16()
+		local param1 = r:u8()
+		local param2 = r:u8()
+		-- u8 keep_metadata follows; node metadata is not read here
+		if self.on_node then
+			self.on_node(x, y, z, param0, param1, param2)
+		end
+	end
+
+	handlers[TOCLIENT.REMOVENODE] = function(r)
+		local x, y, z = r:v3s16()
+		if self.on_node then
+			self.on_node(x, y, z, M.CONTENT_AIR, 0, 0)
 		end
 	end
 

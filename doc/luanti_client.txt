@@ -8,7 +8,12 @@ server: it does the client's side of Luanti's protocol.
 It asks for an address, a player name and a password, logs in, and shows the
 terrain around the player with the server's own textures.
 BUILDAT_LUANTI_ADDRESS sets the address the dialog starts with, which is what
-scripted runs (-c) use. Escape disconnects.
+scripted runs (-c) use.
+
+Controls: the mouse looks, WASD moves, space and ctrl go up and down, shift is
+faster, escape disconnects. The camera flies and nothing stops it going
+through a wall; a server that does not give the player the fly and noclip
+privileges will pull it back with its movement checks.
 
 A node is drawn as a cube with its own six textures when it is one of the
 Luanti draw types that is a cube (normal, glasslike, allfaces) and every one of
@@ -91,6 +96,11 @@ What is done
 - MOVE_PLAYER (where the server put us) and TIME_OF_DAY
 - The terrain on screen: a scene node per map block, meshed by buildat's voxel
   mesher, dropped again once it is far enough away
+- Mouse look and flying movement, with the blocks streaming in around the
+  camera and dropped again behind it
+- TIME_OF_DAY, through Luanti's own day/night curve, as the zone's ambient
+  light and the sun's brightness
+- ADDNODE and REMOVENODE, patched into the block and re-meshed
 - NODEDEF, and a voxel registry built from it
 - The media: ANNOUNCE_MEDIA, REQUEST_MEDIA and MEDIA, cached on disk by name
   and checked against the sha1 the server announced
@@ -101,7 +111,10 @@ and gives up rather than carrying a second parser.
 
 What is next
 ------------
-- The player: position and input, HP, breath
+- Walking rather than flying: the player's box against the voxel data, and
+  the movement constants the server sends
+- Digging and placing, and an inventory
+- HP, breath
 - Node draw types that are not cubes, and texture modifiers
 - Colour palettes: a node with paramtype2 "color" or "colorfacedir" has a
   greyscale texture that the game colours per node. MineClone's grass comes
