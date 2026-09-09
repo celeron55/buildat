@@ -1184,6 +1184,19 @@ for facedir = 0, 23 do
 	end
 end
 
+-- A box turns with the voxel: the back half of a stair is at +Z to begin
+-- with, and a quarter turn about Y puts it at +X
+local turned_box = shapes.turn_box({-0.5, 0, 0, 0.5, 0.5, 0.5}, 1)
+assert(math.abs(turned_box[1] - 0) < 1e-9 and
+		math.abs(turned_box[4] - 0.5) < 1e-9,
+		"shapes: a turned box runs from "..turned_box[1].." to "..
+		turned_box[4].." in x")
+assert(math.abs(turned_box[3] + 0.5) < 1e-9 and
+		math.abs(turned_box[6] - 0.5) < 1e-9, "shapes: and covers z")
+assert(math.abs(turned_box[2] - 0) < 1e-9 and
+		math.abs(turned_box[5] - 0.5) < 1e-9,
+		"shapes: a turn about Y leaves y alone")
+
 -- A wallmounted node box is made of the box for the wall it is on
 local wall_boxes = {
 	top = {-0.5, 0.4, -0.5, 0.5, 0.5, 0.5},
