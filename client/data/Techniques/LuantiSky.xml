@@ -1,6 +1,0 @@
-<!-- The sky of a Luanti world; see Shaders/GLSL/LuantiSky.glsl beside this
-     file. postopaque and no depth write is what keeps it behind the world; the
-     box is seen from the inside, so nothing is culled. -->
-<technique vs="LuantiSky" ps="LuantiSky">
-    <pass name="postopaque" depthwrite="false" cull="none" />
-</technique>

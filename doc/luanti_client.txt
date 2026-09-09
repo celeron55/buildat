@@ -50,7 +50,7 @@ Light: Luanti keeps two light values per node, the light it has when the sun
 is up and the light it gets from light sources alone. Those are what buildat's
 mesher calls skylight and lamplight, and it bakes them into the geometry's
 vertex colours along with ambient occlusion and a per-face brightness. The
-technique in client/data/Techniques/VoxelUnlit.xml draws that: the texture
+technique in res/VoxelUnlit.xml draws that: the texture
 times the zone's ambient colour times how much of the sky the surface sees,
 plus the lamplight. So the time of day is one colour on the zone and nothing
 is meshed again when the sun moves, and a cave is dark with its torches lit.
@@ -89,6 +89,11 @@ player.lua      The player's box: the keys, gravity, and collision against
                 the nodes
 shapes.lua      Luanti's node shapes, as the quads a voxel definition takes
 objmesh.lua     Wavefront .obj, as the quads a voxel's shape is made of
+res/            What the client itself ships: the placeholder textures, and
+                the shaders and techniques this world is drawn with. Urho3D
+                finds them because share_path/extensions is a resource dir,
+                and a technique names a shader with a path of its own so it
+                does not have to live in the one shader directory
 objects.lua     The things in the world that are not nodes: what the server
                 says they are and where
 itemdef.lua     ITEMDEF: what an item is, and what a tool can dig
