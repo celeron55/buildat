@@ -15,6 +15,7 @@ extern void init_voxel(lua_State *L);
 extern void init_atlas(lua_State *L);
 extern void init_mesh(lua_State *L);
 extern void init_voxel_volume(lua_State *L);
+extern void init_voxel_data(lua_State *L);
 extern void init_spatial_update_queue(lua_State *L);
 extern void init_misc_urho3d(lua_State *L);
 extern void init_network(lua_State *L);
@@ -32,6 +33,7 @@ void init(lua_State *L)
 	init_atlas(L);
 	init_mesh(L);
 	init_voxel_volume(L);
+	init_voxel_data(L);
 	init_spatial_update_queue(L);
 	init_misc_urho3d(L);
 	init_network(L);
