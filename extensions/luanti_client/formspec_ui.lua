@@ -33,6 +33,7 @@ local IGNORED = {
 	tooltip = true, field_enter_after_edit = true,
 	no_prepend = true, bgcolor = true,
 	scrollbaroptions = true, allow_close = true, position = true,
+	tableoptions = true,
 	anchor = true, padding = true, ["scroll_container_end"] = true,
 }
 
@@ -150,6 +151,30 @@ function M.new(magic, buildat, log, ctx)
 		return e
 	end
 
+	-- tablecolumns[type,opt=val,...;...] says what the columns of the tables
+	-- after it are. What matters here is which of them carry text and which
+	-- only say something about the row: a colour column colours the cells
+	-- after it and a tree column moves them to the right.
+	local function parse_columns(fields)
+		local cols = {}
+		for _, part in ipairs(fields) do
+			local bits = formspec.split(part, ",")
+			local col = {type = (bits[1] or "text"):match("^%s*(.-)%s*$"),
+					opts = {}}
+			for i = 2, #bits do
+				local k, v = bits[i]:match("^%s*([%w_]+)%s*=%s*(.*)$")
+				if k then
+					col.opts[k] = v
+				end
+			end
+			cols[#cols + 1] = col
+		end
+		if #cols == 0 then
+			cols[1] = {type = "text", opts = {}}
+		end
+		return cols
+	end
+
 	-- An item stack in a slot: what it looks like, and how many
 	local function draw_stack(parent, x, y, size, stack)
 		local resource = stack and ctx.item_image(stack.name)
@@ -262,7 +287,12 @@ function M.new(magic, buildat, log, ctx)
 	-- The window is positioned rather than aligned, because a click has to be
 	-- turned back into a position inside it and the sandbox does not hand out
 	-- an element's own position.
-	function self:show(root, elements, layout, screen_w, screen_h)
+	-- state is what has to live longer than one drawing of the form: how far
+	-- a table is scrolled. The caller keeps it and hands it back.
+	function self:show(root, elements, layout, screen_w, screen_h, state)
+		state = state or {}
+		state.scroll = state.scroll or {}
+		state.open = state.open or {}
 		local slots = {}
 		local buttons = {}
 		local fields = {}
@@ -325,6 +355,162 @@ function M.new(magic, buildat, log, ctx)
 			for k, v in pairs(by_type) do out[k] = v end
 			for k, v in pairs(by_name) do out[k] = v end
 			return out
+		end
+
+		-- The columns the tables after a tablecolumns[] have, and where the
+		-- tables ended up, for whoever handles a click in one
+		local columns = {{type = "text", opts = {}}}
+		local tables = {}
+
+		-- table[X,Y;W,H;name;cell,cell,...;selected] and its cousin
+		-- textlist[]: rows of text in a dark box, a cell per column.
+		--
+		-- A tree column makes the rows a tree: a row whose next row is
+		-- deeper is one that opens, its children are hidden until it is
+		-- clicked, and which ones are open is kept in the state the caller
+		-- holds. Luanti's own table does the opening client-side as well.
+		--
+		-- Luanti measures a column's width from what is in it; this counts
+		-- characters, which is close enough for the tables a game builds and
+		-- needs none of the font's metrics.
+		--
+		-- simplified: no image or custom colour columns, and no scrollbar to
+		-- drag -- the wheel is what scrolls. A cell that does not fit its
+		-- column is cut rather than shortened with an ellipsis.
+		local function draw_table(e, x, y, w, h)
+			local list = e.name == "table" and columns or
+					{{type = "text", opts = {}}}
+			local ncol = #list
+			local cells = {}
+			for _, c in ipairs(formspec.split(e.raw[4] or "", ",")) do
+				cells[#cells + 1] = formspec.strip_escapes(
+						formspec.unescape(c))
+			end
+			local name = e.fields[3]
+			local rows = {}
+			for i = 1, math.ceil(#cells / ncol) do
+				local row = {index = i}
+				for j = 1, ncol do
+					row[j] = cells[(i - 1) * ncol + j] or ""
+				end
+				rows[i] = row
+			end
+
+			-- What each column says about a row: its colour, how deep it is
+			-- in the tree
+			local color_col, tree_col = nil, nil
+			for j, col in ipairs(list) do
+				if col.type == "color" then
+					color_col = j
+				elseif col.type == "tree" or col.type == "indent" then
+					tree_col = j
+				end
+			end
+			for i, row in ipairs(rows) do
+				row.depth = tree_col and (tonumber(row[tree_col]) or 0) or 0
+				row.color = color_col and
+						markup_color("\27(c@"..row[color_col]..")") or nil
+			end
+			for i, row in ipairs(rows) do
+				row.opens = tree_col ~= nil and rows[i + 1] ~= nil and
+						rows[i + 1].depth > row.depth
+			end
+
+			-- Only what is open is on the screen
+			local open = state.open[name] or {}
+			state.open[name] = open
+			local shown = {}
+			local hidden_below = nil
+			for _, row in ipairs(rows) do
+				if hidden_below and row.depth > hidden_below then
+					-- A child of something that is closed
+				else
+					hidden_below = nil
+					shown[#shown + 1] = row
+					if row.opens and not open[row.index] then
+						hidden_below = row.depth
+					end
+				end
+			end
+
+			-- How wide each text column wants to be, by its longest cell
+			local CHAR_W = 6.5
+			local pad = 3
+			local text_cols = {}
+			local deepest = 0
+			for _, row in ipairs(shown) do
+				deepest = math.max(deepest, row.depth)
+			end
+			for j, col in ipairs(list) do
+				if j ~= color_col and j ~= tree_col then
+					local longest = 1
+					for _, row in ipairs(shown) do
+						longest = math.max(longest, #row[j])
+					end
+					local want = longest * CHAR_W + 12
+					if #text_cols == 0 then
+						-- The first column is where the tree's indent goes,
+						-- and a name pushed to the right needs the room
+						want = want + deepest * 14 + 12
+					end
+					text_cols[#text_cols + 1] = {j = j, want = want}
+				end
+			end
+			-- A column keeps the width it wants, as long as it leaves room
+			-- for the ones after it; the last one takes what is left and
+			-- what does not fit in it is cut. A single cell with a long line
+			-- in it must not be allowed to squeeze the columns before it
+			-- down to nothing, which is what sharing the width out in
+			-- proportion would do.
+			local avail = w - pad * 2
+			local left = avail
+			for k, tc in ipairs(text_cols) do
+				local for_the_rest = (#text_cols - k) * 40
+				tc.w = math.max(20, math.min(tc.want, left - for_the_rest))
+				left = left - tc.w
+			end
+
+			box(window, x, y, w, h, magic.Color(0.04, 0.04, 0.05, 0.92))
+			local row_h = 16
+			local visible = math.max(1, math.floor((h - pad * 2) / row_h))
+			local scroll = math.min(state.scroll[name] or 0,
+					math.max(0, #shown - visible))
+			local selected = tonumber(e.fields[5])
+			local on_screen = {}
+			for i = scroll + 1, math.min(#shown, scroll + visible) do
+				local row = shown[i]
+				local ry = y + pad + (i - scroll - 1) * row_h
+				if row.index == selected then
+					box(window, x + 1, ry, w - 2, row_h,
+							magic.Color(0.35, 0.62, 0.23, 0.95))
+				end
+				local indent = row.depth * 14
+				if row.opens then
+					label(window, x + pad + indent, ry, 12,
+							open[row.index] and "-" or "+", 12, row.color)
+				end
+				local cx = x + pad
+				for k, tc in ipairs(text_cols) do
+					-- The tree moves the row's own text to the right; the
+					-- columns after the first stay in their places
+					local tx = cx + (k == 1 and (indent + 12) or 0)
+					local room = tc.w - (tx - cx) - 4
+					local fits = math.max(0, math.floor(room / CHAR_W))
+					local text = row[tc.j]
+					if #text > fits then
+						text = text:sub(1, fits)
+					end
+					if text ~= "" then
+						label(window, tx, ry, room, text, 12, row.color)
+					end
+					cx = cx + tc.w
+				end
+				on_screen[#on_screen + 1] = {index = row.index, y = ry,
+						opens = row.opens}
+			end
+			tables[#tables + 1] = {name = name, x = x, y = y, w = w, h = h,
+					row_h = row_h, count = #shown, visible = visible,
+					scroll = scroll, rows = on_screen}
 		end
 
 		local function at(e, field_i)
@@ -436,6 +622,14 @@ function M.new(magic, buildat, log, ctx)
 							x = x, y = y, w = w, h = h,
 							exit = name:sub(-5) == "_exit"}
 				end
+			elseif name == "table" or name == "textlist" then
+				local x, y = at(e, 1)
+				local w, h = geometry(e, 2)
+				if x and w then
+					draw_table(e, x, y, w, h)
+				end
+			elseif name == "tablecolumns" then
+				columns = parse_columns(e.fields)
 			elseif name == "label" or name == "textarea" then
 				local x, y = at(e, 1)
 				local text = name == "label" and e.fields[2] or e.fields[5]
@@ -512,7 +706,7 @@ function M.new(magic, buildat, log, ctx)
 			end
 		end
 		return {window = window, origin = {ox, oy}, slots = slots,
-				buttons = buttons, fields = fields,
+				buttons = buttons, fields = fields, tables = tables,
 				close_on_enter = close_on_enter}
 	end
 
