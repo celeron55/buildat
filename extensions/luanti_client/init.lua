@@ -118,8 +118,11 @@ end
 -- The screen that shows what the client is doing, and drives it every frame
 local function show_client(host, port, name, password)
 	local root = uistack.main:push({desc="luanti_client"})
-	root.defaultStyle = magic.cache:GetResource(
+	-- Held rather than read back off the element: the sandbox hands out no
+	-- resource it did not just wrap
+	local style = magic.cache:GetResource(
 			"XMLFile", "__menu/res/main_style.xml")
+	root.defaultStyle = style
 
 	-- Text in the corner rather than a window: the world is behind it
 	local status_text = root:CreateChild("Text")
@@ -127,6 +130,20 @@ local function show_client(host, port, name, password)
 	status_text:SetAlignment(HA_LEFT, VA_TOP)
 	status_text:SetPosition(8, 8)
 	status_text.color = magic.Color(1.0, 1.0, 1.0)
+
+	-- What has been said, at the bottom of the screen where Luanti puts it.
+	-- Under the UI's own root rather than the element this extension was
+	-- given, because that one is only as big as what is in it and an
+	-- alignment inside it lands nowhere in particular; taken away again when
+	-- the client is left.
+	local chat_text = magic.ui.root:CreateChild("Text")
+	-- The style before SetStyleAuto, which is what reads it; the UI's root
+	-- has none of its own
+	chat_text.defaultStyle = style
+	chat_text:SetStyleAuto()
+	chat_text:SetAlignment(HA_LEFT, VA_BOTTOM)
+	chat_text:SetPosition(8, -34)
+	chat_text.color = magic.Color(1.0, 1.0, 0.9)
 
 	local lines = {"Luanti: "..host..":"..port}
 	local function add_line(text)
@@ -300,6 +317,11 @@ local function show_client(host, port, name, password)
 			return texmod.resolve(expr, texmod_ctx, extra)
 		end
 
+		-- What has been said, newest last, and the line being typed
+		local CHAT_LINES = 8
+		local chat = {}
+		local chat_input = nil
+
 		-- The forms the server sends, and the one on screen
 		local inventory_spec = nil
 		local prepend = ""
@@ -395,6 +417,18 @@ local function show_client(host, port, name, password)
 			item_defs = items
 			add_line(count.." item definitions")
 			plan_media()
+		end
+
+		client.on_chat = function(text, sender)
+			local line = formspec.strip_escapes(text)
+			if sender ~= "" then
+				line = "<"..formspec.strip_escapes(sender).."> "..line
+			end
+			chat[#chat + 1] = line
+			while #chat > CHAT_LINES do
+				table.remove(chat, 1)
+			end
+			chat_text.text = table.concat(chat, "\n")
 		end
 
 		client.on_inventory_formspec = function(spec)
@@ -691,13 +725,21 @@ local function show_client(host, port, name, password)
 				local def = node_def_at(pointed_under)
 				pointed = "pointing at "..(def and def.name or "?")
 			end
+			local condition = ""
+			if client.hp then
+				condition = string.format(" | %d hp", client.hp)
+				if client.breath and client.breath < 10 then
+					condition = condition..string.format(", %d breath",
+							client.breath)
+				end
+			end
 			status_text.text = table.concat(lines, "\n").."\n"..
 					string.format(
-					"%s | %.1f, %.1f, %.1f %s | %d: %s | %s"..
+					"%s%s | %.1f, %.1f, %.1f %s | %d: %s | %s"..
 					" | blocks: %d received,"..
 					" %d in scene, %d to mesh | %d us to hand over"..
 					" | media: %d files, %d to come",
-					client.state, avatar.x, avatar.y, avatar.z,
+					client.state, condition, avatar.x, avatar.y, avatar.z,
 					avatar.fly and "flying" or
 							(avatar.in_liquid and "swimming" or
 							(avatar.on_ground and "on ground" or "falling")),
@@ -726,9 +768,9 @@ local function show_client(host, port, name, password)
 		-- differing from where the player thinks it is means the server moved
 		-- us.
 		local function move(dtime)
-			-- A form takes the mouse and the keys; the player stands still
-			-- rather than walking blind behind it
-			if form then
+			-- A form or a chat line takes the mouse and the keys; the player
+			-- stands still rather than walking blind behind it
+			if form or chat_input then
 				client:set_position(avatar.x, avatar.y, avatar.z)
 				client:set_motion(0, 0, 0, 0)
 				return
@@ -829,6 +871,50 @@ local function show_client(host, port, name, password)
 			set_counters()
 		end)
 
+		-- The line the player types in. A line edit takes the keys while it
+		-- has focus, and a stack event handler does not fire while something
+		-- else has it, so enter arrives as the line edit's own TextFinished
+		-- rather than as a key.
+		local chat_input_cb = nil
+
+		local function close_chat()
+			if not chat_input then
+				return
+			end
+			if chat_input_cb then
+				magic.UnsubscribeFromEvent(chat_input, "TextFinished",
+						chat_input_cb)
+				chat_input_cb = nil
+			end
+			chat_input:Remove()
+			chat_input = nil
+			if not form then
+				magic.input:SetMouseVisible(false)
+			end
+		end
+
+		local function open_chat()
+			if chat_input then
+				return
+			end
+			chat_input = magic.ui.root:CreateChild("LineEdit")
+			chat_input.defaultStyle = style
+			chat_input:SetStyleAuto()
+			chat_input:SetAlignment(HA_LEFT, VA_BOTTOM)
+			chat_input:SetPosition(8, -8)
+			chat_input.fixedHeight = 24
+			chat_input.fixedWidth = 600
+			chat_input:SetText("")
+			chat_input:SetFocus(true)
+			magic.input:SetMouseVisible(true)
+			chat_input_cb = magic.SubscribeToEvent(chat_input, "TextFinished",
+					function()
+				local text = chat_input:GetText()
+				close_chat()
+				client:send_chat(text)
+			end)
+		end
+
 		-- The dig button. Urho3D's Input does not expose the button state to
 		-- the sandbox, so the two events are what says whether it is held.
 		local mouse_down_cb = magic.SubscribeToEvent("MouseButtonDown",
@@ -868,6 +954,12 @@ local function show_client(host, port, name, password)
 				avatar.fly = not avatar.fly
 				add_line(avatar.fly and "Flying" or "Walking")
 			end
+			-- T says something, which is Luanti's own key for it; a line
+			-- starting with a slash is a command
+			if key == KEY_T and not chat_input then
+				open_chat()
+				return
+			end
 			if key == KEY_I then
 				if form then
 					close_form()
@@ -883,6 +975,11 @@ local function show_client(host, port, name, password)
 				avatar.noclip = not avatar.noclip
 				add_line(avatar.noclip and "Through walls" or "Solid walls")
 			end
+			if chat_input then
+				-- The line edit has the keys; enter is what closes it, and
+				-- that arrives as TextFinished rather than here
+				return
+			end
 			if key == KEY_ESCAPE and form then
 				close_form()
 			elseif key == KEY_ESCAPE then
@@ -891,6 +988,8 @@ local function show_client(host, port, name, password)
 				magic.UnsubscribeFromEvent("MouseButtonUp", mouse_up_cb)
 				magic.UnsubscribeFromEvent("UIMouseClick", ui_click_cb)
 				close_form()
+				close_chat()
+				chat_text:Remove()
 				magic.input:SetMouseVisible(true)
 				client:disconnect()
 				view:close()

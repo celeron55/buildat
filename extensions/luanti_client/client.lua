@@ -35,6 +35,7 @@ local TOSERVER = {
 	PLAYERPOS     = 0x23,
 	GOTBLOCKS     = 0x24,
 	INVENTORY_ACTION = 0x31,
+	CHAT_MESSAGE  = 0x32,
 	INTERACT      = 0x39,
 	INVENTORY_FIELDS = 0x3c,
 	REQUEST_MEDIA = 0x40,
@@ -52,6 +53,7 @@ local TOSERVER_DELIVERY = {
 	[TOSERVER.PLAYERPOS]     = {0, false},
 	[TOSERVER.GOTBLOCKS]     = {2, true},
 	[TOSERVER.INVENTORY_ACTION] = {0, true},
+	[TOSERVER.CHAT_MESSAGE]  = {0, true},
 	[TOSERVER.INTERACT]      = {0, true},
 	[TOSERVER.INVENTORY_FIELDS] = {0, true},
 	[TOSERVER.REQUEST_MEDIA] = {1, true},
@@ -102,6 +104,9 @@ local TOCLIENT = {
 	MEDIA          = 0x38,
 	NODEDEF        = 0x3A,
 	ANNOUNCE_MEDIA = 0x3C,
+	CHAT_MESSAGE   = 0x2F,
+	HP             = 0x33,
+	BREATH         = 0x4E,
 	INVENTORY      = 0x27,
 	ITEMDEF        = 0x3D,
 	INVENTORY_FORMSPEC = 0x42,
@@ -289,6 +294,14 @@ function M.new(socket, options, log)
 			-- second, and the keys as Luanti's PlayerControl bits
 			speed = {x = 0, y = 0, z = 0},
 			keys = 0,
+			-- on_chat(text, sender, message_type) for every chat message,
+			-- the server's own included; a message with no sender is one
+			-- from the server rather than from a player
+			on_chat = nil,
+			-- How the player is doing, as the server last said: hit points
+			-- out of 20, and breath out of 10 while under water
+			hp = nil,
+			breath = nil,
 			-- The server's time of day, 0...23999, and how fast it runs
 			time_of_day = nil,
 			time_speed = 0,
@@ -491,6 +504,30 @@ function M.new(socket, options, log)
 		if self.on_detached_inventory then
 			self.on_detached_inventory(name, r:rest())
 		end
+	end
+
+	-- Chat, which is both what players say and what the server answers a
+	-- command with. The strings are wide ones; serialize.lua turns them into
+	-- UTF-8.
+	handlers[TOCLIENT.CHAT_MESSAGE] = function(r)
+		local version = r:u8()
+		if version ~= 1 then
+			return
+		end
+		local message_type = r:u8()
+		local sender = r:wstring()
+		local text = r:wstring()
+		if self.on_chat then
+			self.on_chat(text, sender, message_type)
+		end
+	end
+
+	handlers[TOCLIENT.HP] = function(r)
+		self.hp = r:u16()
+	end
+
+	handlers[TOCLIENT.BREATH] = function(r)
+		self.breath = r:u16()
 	end
 
 	handlers[TOCLIENT.NODEDEF] = function(r)
@@ -764,6 +801,16 @@ function M.new(socket, options, log)
 		send_command(TOSERVER.INVENTORY_ACTION,
 				"Move "..count.." "..from_inv.." "..from_list.." "..
 				(from_i - 1).." "..to_inv.." "..to_list.." "..(to_i - 1))
+	end
+
+	-- Says something, or runs a command when it starts with a slash. The
+	-- server answers a command with a chat message of its own.
+	function self:send_chat(text)
+		if text == "" then
+			return
+		end
+		send_command(TOSERVER.CHAT_MESSAGE,
+				serialize.writer():wstring(text):data())
 	end
 
 	-- Asks the server for media files by name. The list is usually far too big
