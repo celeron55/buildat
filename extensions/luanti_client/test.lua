@@ -26,6 +26,7 @@ local objects = dofile(dir.."/objects.lua")
 local nodedef = dofile(dir.."/nodedef.lua")
 local media = dofile(dir.."/media.lua")
 local shapes = dofile(dir.."/shapes.lua")
+local itemdef = dofile(dir.."/itemdef.lua")
 
 local function dump_name(s)
 	return "\""..s:gsub("[^%w%p ]", "?").."\""
@@ -998,6 +999,42 @@ local wsel, wssize = formspec.parse("size[3,4]\n	label[0,0;hi]\n"..
 assert(wssize[1] == 3, "formspec: size after a newline")
 assert(#wsel == 2 and wsel[1].name == "label" and wsel[2].name == "button",
 		"formspec: element names are trimmed, got \""..wsel[1].name.."\"")
+
+-- itemdef.lua
+--
+-- An item under two names: its own, and one the game renamed it away from
+
+local function item_wrapper(name, image)
+	local w = serialize.writer()
+	w:u8(6):u8(itemdef.TYPE_CRAFT):string(name):string("A thing")
+	w:string(image):u8(0) -- inventory_image and its animation
+	w:string(""):u8(0) -- wield_image
+	w:raw(string.rep("\0", 12)) -- wield_scale
+	w:s16(99):u8(0):u8(0) -- stack_max, usable, liquids_pointable
+	w:string("") -- no tool capabilities
+	w:u16(0) -- no groups
+	w:string("") -- node_placement_prediction
+	for _ = 1, 2 do
+		w:string(""):raw(string.rep("\0", 12)) -- a sound
+	end
+	w:f32(-1) -- range
+	return w:data()
+end
+
+local idw = serialize.writer()
+idw:u8(0):u16(1):string(item_wrapper("mcl_core:axe", "axe.png"))
+idw:u16(1):string("default:axe"):string("mcl_core:axe")
+local item_defs, item_count, item_aliases =
+		itemdef.parse(serialize, idw:data(), log)
+assert(item_count == 1, "itemdef: one item")
+assert(item_defs["mcl_core:axe"], "itemdef: the item itself")
+assert(item_defs["mcl_core:axe"].inventory_image == "axe.png",
+		"itemdef: the inventory image")
+assert(item_defs["default:axe"] == item_defs["mcl_core:axe"],
+		"itemdef: an alias is the item it means")
+assert(item_aliases["default:axe"] == "mcl_core:axe", "itemdef: the alias")
+
+print("itemdef: ok")
 
 -- shapes.lua
 --

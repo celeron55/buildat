@@ -100,10 +100,15 @@ local function read_item(serialize, r)
 	return def
 end
 
--- parse(serialize, data, log) -> {[name] = def}, count
+-- parse(serialize, data, log) -> {[name] = def}, count, {[name] = name}
 --
 -- data is the decompressed ITEMDEF payload. An item whose definition cannot
 -- be read is left out rather than stopping the rest.
+--
+-- The definitions are keyed by the item's aliases as well as by its own
+-- name: a game keeps the names it has renamed items away from and a server
+-- hands out stacks under either. The third value is the aliases themselves,
+-- for whatever wants to know that a name is one.
 function M.parse(serialize, data, log)
 	local r = serialize.reader(data)
 	local version = r:u8()
@@ -130,7 +135,24 @@ function M.parse(serialize, data, log)
 		log:warning("itemdef: "..failed.." of "..count..
 				" item definitions could not be read")
 	end
-	return items, count
+	-- An alias is another name for an item, which a server uses as readily
+	-- as the real one; the definition goes under both names so that nothing
+	-- else has to know about them
+	local aliases = {}
+	local ok, err = pcall(function()
+		for _ = 1, r:u16() do
+			local name = r:string()
+			local convert_to = r:string()
+			aliases[name] = convert_to
+			if items[convert_to] and not items[name] then
+				items[name] = items[convert_to]
+			end
+		end
+	end)
+	if not ok and log then
+		log:warning("itemdef: could not read the aliases: "..tostring(err))
+	end
+	return items, count, aliases
 end
 
 -- dig_time(node_groups, caps) -> seconds, or nil for a node these
