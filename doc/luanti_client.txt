@@ -407,6 +407,14 @@ being hit. It is added to the speed once and the physics then has it, so the
 vertical part is what gravity works off and the horizontal part decays at
 whatever the acceleration is.
 
+The things in the sky: SET_SUN, SET_MOON, SET_STARS and CLOUD_PARAMS. How
+wide the sun and the moon are drawn, how many stars there are and in what
+colour, and how much of the sky the clouds cover are all uniforms the shader
+takes rather than constants, so a game that turns the sun off or asks for ten
+thousand stars gets that. What is not drawn is the textures a game can give
+the sun and the moon, or the cloud height and speed: the shader draws a
+square of its own colour and one layer of cloud at its own height.
+
 What is next
 ------------
 - What a mob really looks like: Luanti draws a mesh for one, and this draws a
@@ -414,8 +422,6 @@ What is next
   formats Luanti's meshes come in. A box wearing a cow's texture reads as a
   cow. The meshes are .b3d.
 - Animations, nametags and attachments of the active objects
-- The sun, the moon, the stars and the clouds, which the server describes and
-  which are not drawn; the sky is its colours and nothing else
 - The HUD elements that are not images, text or statbars: a waypoint and an
   image waypoint want the camera to turn a world position into a screen one,
   a compass wants the yaw, a minimap wants a map, and an inventory element and

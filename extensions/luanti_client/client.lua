@@ -159,6 +159,10 @@ local TOCLIENT = {
 	FOV            = 0x36,
 	OVERRIDE_DAY_NIGHT_RATIO = 0x50,
 	PLAYER_SPEED   = 0x2B,
+	CLOUD_PARAMS   = 0x54,
+	SET_SUN        = 0x5A,
+	SET_MOON       = 0x5B,
+	SET_STARS      = 0x5C,
 	SRP_BYTES_S_B  = 0x60,
 }
 
@@ -375,6 +379,13 @@ function M.new(socket, options, log)
 			-- on_player_speed(x, y, z): a push the server gave the player,
 			-- in nodes a second, to add to whatever speed it already has
 			on_player_speed = nil,
+			-- The things in the sky the game describes, each with what its
+			-- own packet said: on_sun(sun), on_moon(moon), on_stars(stars)
+			-- and on_clouds(clouds)
+			on_sun = nil,
+			on_moon = nil,
+			on_stars = nil,
+			on_clouds = nil,
 			on_play_sound = nil,
 			on_stop_sound = nil,
 			on_fade_sound = nil,
@@ -804,6 +815,63 @@ function M.new(socket, options, log)
 	end
 
 	-- The objects that went away and the ones that arrived
+	-- What the sun, the moon and the stars look like. A game turns one off
+	-- as often as it changes one: a dimension with no sky has none of them.
+	handlers[TOCLIENT.SET_SUN] = function(r)
+		local sun = {}
+		sun.visible = r:u8() ~= 0
+		sun.texture = r:string()
+		sun.tonemap = r:string()
+		sun.sunrise = r:string()
+		sun.sunrise_visible = r:u8() ~= 0
+		sun.scale = r:f32()
+		if self.on_sun then
+			self.on_sun(sun)
+		end
+	end
+
+	handlers[TOCLIENT.SET_MOON] = function(r)
+		local moon = {}
+		moon.visible = r:u8() ~= 0
+		moon.texture = r:string()
+		moon.tonemap = r:string()
+		moon.scale = r:f32()
+		if self.on_moon then
+			self.on_moon(moon)
+		end
+	end
+
+	-- day_opacity came in 5.7 and the seed in 5.11, so an older server stops
+	-- after the scale
+	handlers[TOCLIENT.SET_STARS] = function(r)
+		local stars = {}
+		stars.visible = r:u8() ~= 0
+		stars.count = r:u32()
+		stars.color = read_color(r)
+		stars.scale = r:f32()
+		stars.day_opacity = 0
+		if r:remaining() >= 4 then
+			stars.day_opacity = r:f32()
+		end
+		if self.on_stars then
+			self.on_stars(stars)
+		end
+	end
+
+	-- color_shadow came in 5.9
+	handlers[TOCLIENT.CLOUD_PARAMS] = function(r)
+		local clouds = {}
+		clouds.density = r:f32()
+		clouds.color_bright = read_color(r)
+		clouds.color_ambient = read_color(r)
+		clouds.height = r:f32()
+		clouds.thickness = r:f32()
+		clouds.speed = {r:f32(), r:f32()}
+		if self.on_clouds then
+			self.on_clouds(clouds)
+		end
+	end
+
 	handlers[TOCLIENT.ACTIVE_OBJECT_REMOVE_ADD] = function(r)
 		for _ = 1, r:u16() do
 			local id = r:u16()

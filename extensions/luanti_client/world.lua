@@ -230,6 +230,39 @@ function M.new(magic, buildat, log, options)
 	scene:CreateComponent("Octree")
 	self.scene = scene
 
+	-- How wide the sun and the moon are drawn, on a plane one unit along
+	-- their direction, at the scale of one: the ratio Luanti draws them at.
+	-- A game's own scale multiplies these.
+	local SUN_HALF = 0.075
+	local MOON_HALF = 0.048
+	-- How many stars a game asks for by default, and how many of the star
+	-- grid's cells hold one at that count: the density was picked to look
+	-- right at Luanti's own default, so a game asking for more gets more in
+	-- proportion.
+	local STARS_DEFAULT = 1000
+	local STAR_DENSITY_DEFAULT = 0.004
+	-- The same for the clouds: how much of the sky is covered at the density
+	-- a game has unless it says otherwise
+	local CLOUD_DENSITY_DEFAULT = 0.4
+	local CLOUD_COVERAGE_DEFAULT = 0.34
+
+	-- What the game says is in the sky, out of SET_SUN, SET_MOON, SET_STARS
+	-- and CLOUD_PARAMS. What is here to begin with is what Luanti has before
+	-- a game says anything.
+	--
+	-- simplified: a game can give the sun and the moon textures of their own
+	-- and a colour for the stars' own tonemap, and none of that is drawn --
+	-- the shader draws a square of its own colour. What is honoured is
+	-- whether each is there at all, how big, how many, and what colour the
+	-- stars and the clouds are, which is what turns a dimension with no sky
+	-- into one.
+	local sky_bodies = {
+		sun = {visible = true, scale = 1},
+		moon = {visible = true, scale = 1},
+		stars = {visible = true, count = STARS_DEFAULT, scale = 1},
+		clouds = {density = CLOUD_DENSITY_DEFAULT},
+	}
+
 	-- What the sky looks like until the server says, and what it says; see
 	-- set_sky() below
 	local FOG = {r = 0.60, g = 0.72, b = 0.88}
@@ -1676,18 +1709,63 @@ function M.new(magic, buildat, log, options)
 			-- rather than the sky's: it is what dawn and dusk are
 			sky_material:SetShaderParameter("SunTint",
 					sky_color("sun_tint", 0.35 + brightness * 0.65))
-			-- Luanti's clouds are the daylight's own colour
-			sky_material:SetShaderParameter("CloudColor", magic.Color(
-					0.9 * brightness + 0.05, 0.92 * brightness + 0.05,
-					0.95 * brightness + 0.06))
-			-- The stars come out as the sky goes dark
-			sky_material:SetShaderParameter("StarFade",
-					math.max(0, math.min(1, (0.25 - brightness) * 6)))
+			-- Luanti's clouds are the daylight's own colour, unless the
+			-- game gave them one; either way they go dark with the day.
+			local cloud = sky_bodies.clouds.color_bright
+			if cloud then
+				sky_material:SetShaderParameter("CloudColor", magic.Color(
+						cloud[1] / 255 * brightness,
+						cloud[2] / 255 * brightness,
+						cloud[3] / 255 * brightness))
+			else
+				sky_material:SetShaderParameter("CloudColor", magic.Color(
+						0.9 * brightness + 0.05, 0.92 * brightness + 0.05,
+						0.95 * brightness + 0.06))
+			end
+			-- The stars come out as the sky goes dark, and a game can say
+			-- they are out in the day as well
+			local day_opacity = sky_bodies.stars.day_opacity or 0
+			sky_material:SetShaderParameter("StarFade", math.max(day_opacity,
+					math.max(0, math.min(1, (0.25 - brightness) * 6))))
+
+			-- What the game says is up there, and how much of it
+			local sun = sky_bodies.sun
+			local moon = sky_bodies.moon
+			local stars = sky_bodies.stars
+			sky_material:SetShaderParameter("SunSize",
+					sun.visible and SUN_HALF * (sun.scale or 1) or 0)
+			sky_material:SetShaderParameter("MoonSize",
+					moon.visible and MOON_HALF * (moon.scale or 1) or 0)
+			sky_material:SetShaderParameter("StarDensity",
+					stars.visible and STAR_DENSITY_DEFAULT *
+					(stars.count or STARS_DEFAULT) / STARS_DEFAULT or 0)
+			local star_color = stars.color or {133, 140, 158}
+			sky_material:SetShaderParameter("StarColor", magic.Color(
+					star_color[1] / 255, star_color[2] / 255,
+					star_color[3] / 255))
+			sky_material:SetShaderParameter("CloudCoverage",
+					(sky and sky.clouds == false) and 0 or
+					CLOUD_COVERAGE_DEFAULT *
+					(sky_bodies.clouds.density or CLOUD_DENSITY_DEFAULT) /
+					CLOUD_DENSITY_DEFAULT)
 		end
 	end
 
 	function self:set_sky(new_sky)
 		sky = new_sky
+		self:set_daylight(daylight, daylight_time)
+	end
+
+	-- What the game says is in the sky, each out of its own packet. The
+	-- fields are the ones client.lua read; what is not there is left as it
+	-- was, which is how Luanti treats them too.
+	function self:set_sky_body(which, what)
+		if not sky_bodies[which] or not what then
+			return
+		end
+		for key, value in pairs(what) do
+			sky_bodies[which][key] = value
+		end
 		self:set_daylight(daylight, daylight_time)
 	end
 

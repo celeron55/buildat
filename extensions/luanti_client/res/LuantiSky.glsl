@@ -23,15 +23,20 @@ uniform vec3 cSunDirection;
 uniform vec3 cSunTint;
 uniform vec3 cCloudColor;
 uniform float cStarFade;
+// What the game says is up there: half the width of the sun's and the moon's
+// squares, zero for one it has turned off; how many of the star grid's cells
+// hold a star, and what colour; and how much of the sky the clouds cover.
+uniform float cSunSize;
+uniform float cMoonSize;
+uniform float cStarDensity;
+uniform vec3 cStarColor;
+uniform float cCloudCoverage;
 
 // How far below the horizon the sky darkens into the ground haze
 const float HAZE_DEPTH = 0.25;
 
-// Half the width of the sun's square, on a plane one unit along its
-// direction, and how soft its edge is. The moon is the smaller of the two,
-// which is the ratio Luanti draws them at.
-const float SUN_HALF = 0.075;
-const float MOON_HALF = 0.048;
+// How soft the edge of the sun's or the moon's square is. How wide they are
+// is cSunSize and cMoonSize, which the game decides.
 const float BODY_EDGE = 0.004;
 const vec3 MOON_COLOR = vec3(0.86, 0.88, 0.94);
 // The sun's own colour, which it wears until it is low enough to take the
@@ -41,18 +46,16 @@ const vec3 SUN_COLOR = vec3(1.0, 0.97, 0.86);
 
 const float CLOUD_SCALE = 6.0;
 const float CLOUD_PIXELS = 11.0;
-const float CLOUD_COVERAGE = 0.34;
 const float CLOUD_LIT_STEP = 0.07;
 const vec2 CLOUD_WIND = vec2(0.010, 0.004);
 const float CLOUD_HORIZON = 0.16;
 const float CLOUD_FADE = 0.38;
 
 // The stars: one per cell of a grid laid over the direction, only some cells
-// holding one at all. Grey rather than white and few enough to read as stars:
-// at any greater density the night sky is white noise.
+// holding one at all -- how many is cStarDensity, out of how many stars the
+// game asked for. Few enough to read as stars: at any greater density the
+// night sky is white noise.
 const float STAR_GRID = 220.0;
-const float STAR_DENSITY = 0.004;
-const vec3 STAR_COLOR = vec3(0.52, 0.55, 0.62);
 
 float SkyHash(vec2 p)
 {
@@ -130,23 +133,23 @@ void PS()
 
     // The stars, behind everything else up there and only when the sky is
     // dark enough for them
-    if(cStarFade > 0.0 && d.y > -0.05){
+    if(cStarFade > 0.0 && cStarDensity > 0.0 && d.y > -0.05){
         vec2 cell = floor(vec2(d.x, d.z) / max(abs(d.y), 0.15) * STAR_GRID);
         float pick = SkyHash(cell);
-        if(pick < STAR_DENSITY){
+        if(pick < cStarDensity){
             float twinkle = 0.55 + 0.45 * SkyHash(cell + 7.0);
-            color += STAR_COLOR * twinkle * cStarFade *
+            color += cStarColor * twinkle * cStarFade *
                     smoothstep(-0.05, 0.15, d.y);
         }
     }
 
     // The clouds, on a plane overhead: dividing by d.y is what makes them lie
     // flat and crowd together towards the horizon instead of wrapping the dome
-    if(d.y > 0.0){
+    if(d.y > 0.0 && cCloudCoverage > 0.0){
         vec2 p = d.xz / max(d.y, CLOUD_HORIZON) * CLOUD_SCALE +
                 cElapsedTimePS * CLOUD_WIND;
         float density = CloudDensity(floor(p * CLOUD_PIXELS) / CLOUD_PIXELS);
-        float threshold = 1.0 - CLOUD_COVERAGE;
+        float threshold = 1.0 - cCloudCoverage;
         vec3 cloud = density > threshold + CLOUD_LIT_STEP ?
                 cCloudColor : cCloudColor * 0.72;
         float cover = step(threshold, density) *
@@ -158,9 +161,12 @@ void PS()
     // that are not behind them. The sun goes the colour of the tint as it
     // comes down to the horizon, which is where that colour belongs; higher
     // up it is its own.
-    vec3 sun_color = mix(SUN_COLOR, cSunTint * 1.6, low);
-    color = mix(color, sun_color, Body(d, sun, SUN_HALF));
-    color = mix(color, MOON_COLOR, Body(d, -sun, MOON_HALF));
+    if(cSunSize > 0.0){
+        vec3 sun_color = mix(SUN_COLOR, cSunTint * 1.6, low);
+        color = mix(color, sun_color, Body(d, sun, cSunSize));
+    }
+    if(cMoonSize > 0.0)
+        color = mix(color, MOON_COLOR, Body(d, -sun, cMoonSize));
 
     gl_FragColor = vec4(color, 1.0);
 }
