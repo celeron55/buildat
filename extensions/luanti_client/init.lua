@@ -146,6 +146,10 @@ local function split_address(address)
 	return host, tonumber(port)
 end
 
+-- Defined below; a session that ends before any of the game has arrived goes
+-- back to it rather than closing the client
+local show_connect_dialog
+
 -- The screen that shows what the client is doing, and drives it every frame
 local function show_client(host, port, name, password)
 	local root = uistack.main:push({desc="luanti_client"})
@@ -206,6 +210,12 @@ local function show_client(host, port, name, password)
 				far_clip = FAR_CLIP,
 				read_image = buildat.read_image,
 		})
+
+		-- Whether any of the game itself has arrived. A login that is refused
+		-- is refused before the definitions come, and there is then nothing
+		-- to go back to but the dialog the address was typed into; a session
+		-- that ends after the game has arrived ends the client.
+		local got_content = false
 
 		client.on_block = function(block)
 			view:set_block(block)
@@ -514,6 +524,7 @@ local function show_client(host, port, name, password)
 		end
 
 		client.on_nodedef = function(data)
+			got_content = true
 			local defs, count = nodedef.parse(luanti.serialize, data, log)
 			node_defs = defs
 			node_by_name = {}
@@ -562,6 +573,7 @@ local function show_client(host, port, name, password)
 		end
 
 		client.on_itemdef = function(data)
+			got_content = true
 			local items, count = itemdef.parse(luanti.serialize, data, log,
 					client.protocol_version)
 			item_defs = items
@@ -1684,7 +1696,14 @@ local function show_client(host, port, name, password)
 			log:info("Session ended: "..(text:gsub("\n", " ")))
 			leave()
 			ui_utils.show_message_dialog(text, function()
-				engine:Exit()
+				if got_content then
+					engine:Exit()
+				else
+					-- Nothing of the game ever arrived, so this was the
+					-- address, the name or the password: back to where they
+					-- are typed
+					show_connect_dialog(host..":"..port, name)
+				end
 			end)
 		end
 
@@ -1733,7 +1752,10 @@ local function show_client(host, port, name, password)
 	end)
 end
 
-local function show_connect_dialog()
+-- address and name are what to start the fields with; without them the
+-- environment's own defaults. What passes them is a session that ended before
+-- it got anywhere: whatever was wrong with them, they are what to fix.
+show_connect_dialog = function(address, name)
 	local root = uistack.main:push({desc="luanti_client connect"})
 	root.defaultStyle = magic.cache:GetResource(
 			"XMLFile", "__menu/res/main_style.xml")
@@ -1745,10 +1767,17 @@ local function show_connect_dialog()
 	title:SetStyleAuto()
 	title.text = "Connect to a Luanti server"
 
-	local address_edit = labeled_edit(window, "Address", DEFAULT_ADDRESS)
-	local name_edit = labeled_edit(window, "Player name", DEFAULT_NAME)
+	local address_edit = labeled_edit(window, "Address",
+			address or DEFAULT_ADDRESS)
+	local name_edit = labeled_edit(window, "Player name", name or DEFAULT_NAME)
 	local password_edit = labeled_edit(window, "Password", "")
-	address_edit:SetFocus(true)
+	-- The password is the field a second try is most likely about, and it is
+	-- the one that is not filled in
+	if address then
+		password_edit:SetFocus(true)
+	else
+		address_edit:SetFocus(true)
+	end
 
 	local function connect()
 		local host, port = split_address(address_edit:GetText())
