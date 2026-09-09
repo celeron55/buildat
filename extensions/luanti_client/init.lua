@@ -749,8 +749,15 @@ local function show_client(host, port, name, password)
 		-- What an item looks like: its own inventory image, or, for an item
 		-- that places a node, the top of that node. Both are texture
 		-- expressions.
+		-- The items nothing could be made of, named once each: what is
+		-- drawn for them is a marked square, and this is what says why
+		local imageless = {}
+
 		function item_image(item_name)
+			-- The name an alias means, so that what is looked for below is
+			-- the item itself
 			local def = item_defs and item_defs[item_name]
+			item_name = (def and def.name) or item_name
 			if def and def.inventory_image and def.inventory_image ~= "" then
 				return texmod.resolve(def.inventory_image, texmod_ctx)
 			end
@@ -758,8 +765,25 @@ local function show_client(host, port, name, password)
 			if node then
 				local expr = tile_expression(node, 1)
 				if expr then
-					return texmod.resolve(expr, texmod_ctx)
+					local resource = texmod.resolve(expr, texmod_ctx)
+					if resource then
+						return resource
+					end
+					if not imageless[item_name] then
+						imageless[item_name] = true
+						log:info("item: no image for \""..item_name..
+								"\", whose tile is \""..expr.."\"")
+					end
+					return nil
 				end
+			end
+			if not imageless[item_name] then
+				imageless[item_name] = true
+				log:info("item: no image for \""..item_name.."\": "..
+						(def and def.inventory_image ~= "" and
+						"inventory_image \""..def.inventory_image.."\"" or
+						(node and "a node with no tile" or
+						"no definition and no node")))
 			end
 			return nil
 		end
