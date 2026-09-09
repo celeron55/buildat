@@ -34,6 +34,7 @@ local TOSERVER = {
 	INIT2         = 0x11,
 	PLAYERPOS     = 0x23,
 	GOTBLOCKS     = 0x24,
+	INTERACT      = 0x39,
 	REQUEST_MEDIA = 0x40,
 	CLIENT_READY  = 0x43,
 	FIRST_SRP     = 0x50,
@@ -48,12 +49,21 @@ local TOSERVER_DELIVERY = {
 	[TOSERVER.INIT2]         = {1, true},
 	[TOSERVER.PLAYERPOS]     = {0, false},
 	[TOSERVER.GOTBLOCKS]     = {2, true},
+	[TOSERVER.INTERACT]      = {0, true},
 	[TOSERVER.REQUEST_MEDIA] = {1, true},
 	[TOSERVER.CLIENT_READY]  = {1, true},
 	[TOSERVER.FIRST_SRP]     = {1, true},
 	[TOSERVER.SRP_BYTES_A]   = {1, true},
 	[TOSERVER.SRP_BYTES_M]   = {1, true},
 }
+
+-- What TOSERVER_INTERACT can say, from Luanti's InteractAction
+M.INTERACT_START_DIGGING = 0
+M.INTERACT_STOP_DIGGING = 1
+M.INTERACT_DIGGING_COMPLETED = 2
+M.INTERACT_PLACE = 3
+M.INTERACT_USE = 4
+M.INTERACT_ACTIVATE = 5
 
 -- Luanti's PlayerControl bits, which PLAYERPOS carries; see
 -- PlayerControl::getKeysPressed() in its player.cpp
@@ -88,6 +98,7 @@ local TOCLIENT = {
 	MEDIA          = 0x38,
 	NODEDEF        = 0x3A,
 	ANNOUNCE_MEDIA = 0x3C,
+	INVENTORY      = 0x27,
 	ITEMDEF        = 0x3D,
 	SRP_BYTES_S_B  = 0x60,
 }
@@ -237,6 +248,12 @@ function M.new(socket, options, log)
 			-- on_nodedef(data) with the decompressed NODEDEF payload;
 			-- nodedef.lua is what reads it
 			on_nodedef = nil,
+			-- on_itemdef(data) with the decompressed ITEMDEF payload;
+			-- itemdef.lua is what reads it
+			on_itemdef = nil,
+			-- on_inventory(data) with the player's inventory as Luanti
+			-- serializes one; inventory.lua is what reads it
+			on_inventory = nil,
 			-- on_announce_media(files, remote_servers) and
 			-- on_media(files, bunch, bunches); media.lua is what keeps them
 			on_announce_media = nil,
@@ -396,10 +413,22 @@ function M.new(socket, options, log)
 	end
 
 	handlers[TOCLIENT.ITEMDEF] = function(r)
-		-- What an item is is of no use until there is an inventory to show;
-		-- the packet arriving is what CLIENT_READY waits for
+		local data = buildat.decompress(r:longstring(), "zstd")
 		got_itemdef = true
+		if self.on_itemdef then
+			self.on_itemdef(data)
+		end
 		maybe_send_client_ready()
+	end
+
+	-- The player's own inventory, whenever the server changes it. At
+	-- protocol 52 it is a long string with a flag after it; older servers put
+	-- the inventory in the rest of the packet.
+	handlers[TOCLIENT.INVENTORY] = function(r)
+		local data = r:longstring()
+		if self.on_inventory then
+			self.on_inventory(data)
+		end
 	end
 
 	handlers[TOCLIENT.NODEDEF] = function(r)
@@ -561,9 +590,10 @@ function M.new(socket, options, log)
 		status("Disconnected: "..tostring(reason))
 	end
 
-	local function send_playerpos()
+	-- Where we are and what we are doing, which is both what PLAYERPOS is
+	-- and what INTERACT carries on the end of itself
+	local function write_player_pos(w)
 		local p = self.position
-		local w = serialize.writer()
 		-- Positions go as hundredths of a BS unit, so nodes * 1000
 		w:v3s32(math.floor(p.x * BS * 100), math.floor(p.y * BS * 100),
 				math.floor(p.z * BS * 100))
@@ -578,7 +608,12 @@ function M.new(socket, options, log)
 		w:u8(0) -- Bits; the only one so far is an inverted camera
 		-- The two f32 movement fields after this are optional and the server
 		-- falls back to the keys when they are missing
-		send_command(TOSERVER.PLAYERPOS, w:data())
+		return w
+	end
+
+	local function send_playerpos()
+		send_command(TOSERVER.PLAYERPOS, write_player_pos(
+				serialize.writer()):data())
 	end
 
 	-- One packet holds a u8 count, so the acknowledgements go in batches; 32
@@ -610,6 +645,35 @@ function M.new(socket, options, log)
 			send_playerpos()
 		end
 		send_gotblocks()
+	end
+
+	-- Digging, placing and using, which all go as one command.
+	--
+	-- action is one of M.INTERACT_*, item is the hotbar slot the player is
+	-- wielding, and pointed is nil or {under = {x, y, z}, above = {x, y, z}}
+	-- for a node, or {object = id} for an active object. The server takes
+	-- the wield index from this, and its anticheat wants a START_DIGGING at
+	-- the same node before a DIGGING_COMPLETED, no sooner than the dig would
+	-- have taken.
+	function self:interact(action, item, pointed)
+		local pt = serialize.writer()
+		pt:u8(0) -- PointedThing version
+		if pointed and pointed.under then
+			pt:u8(1) -- POINTEDTHING_NODE
+			pt:v3s16(pointed.under[1], pointed.under[2], pointed.under[3])
+			pt:v3s16(pointed.above[1], pointed.above[2], pointed.above[3])
+		elseif pointed and pointed.object then
+			pt:u8(2) -- POINTEDTHING_OBJECT
+			pt:u16(pointed.object)
+		else
+			pt:u8(0) -- POINTEDTHING_NOTHING
+		end
+		local w = serialize.writer()
+		w:u8(action)
+		w:u16(item or 0)
+		w:longstring(pt:data())
+		write_player_pos(w)
+		send_command(TOSERVER.INTERACT, w:data())
 	end
 
 	-- Asks the server for media files by name. The list is usually far too big

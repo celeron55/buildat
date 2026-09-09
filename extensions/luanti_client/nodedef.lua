@@ -61,17 +61,7 @@ local function read_tiledef(r)
 		error("luanti_client/nodedef: TileDef version "..version)
 	end
 	local name = r:string()
-	-- Animation: the type decides what follows it
-	local animation_type = r:u8()
-	if animation_type == 1 then -- Vertical frames
-		r:u16()
-		r:u16()
-		r:f32()
-	elseif animation_type == 2 then -- 2D sheet
-		r:u8()
-		r:u8()
-		r:f32()
-	end
+	local animation = r:animation()
 	local flags = r:u16()
 	-- A tile with a colour of its own is not the one the node's paramtype2
 	-- and palette give the rest of them; "white" is how a game says a tile
@@ -86,7 +76,7 @@ local function read_tiledef(r)
 	if has_flag(flags, TILE_FLAG_HAS_ALIGN_STYLE) then
 		r:u8()
 	end
-	return {name = name, animated = animation_type ~= 0, color = color}
+	return {name = name, animated = animation.type ~= 0, color = color}
 end
 
 -- Luanti's LiquidType

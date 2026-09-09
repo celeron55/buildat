@@ -10,10 +10,14 @@ terrain around the player with the server's own textures.
 BUILDAT_LUANTI_ADDRESS sets the address the dialog starts with, which is what
 scripted runs (-c) use. BUILDAT_LUANTI_FORCE_DAY keeps the world at midday
 whatever the server's time is, for the same reason: a run of half a minute
-cannot wait for morning.
+cannot wait for morning. BUILDAT_LUANTI_NAME sets the player name the dialog
+starts with, so that a test run does not fight a session of your own for the
+same player.
 
 Controls: the mouse looks, WASD walks, space jumps, ctrl sneaks, shift is
-faster, K toggles flying, H toggles going through walls, escape disconnects.
+faster, 1 to 8 pick a hotbar slot, the left mouse button digs what is pointed
+at and the right one places what is wielded, K toggles flying, H toggles going
+through walls, escape disconnects.
 Flying and going through walls need the server to give the player the fly and
 noclip privileges; without them its movement checks pull the player back.
 
@@ -58,6 +62,8 @@ nodedef.lua     NODEDEF: what a node id is called, how it is drawn, its tiles
 media.lua       The server's media files, in cache/luanti_media/<server>/
 player.lua      The player's box: the keys, gravity, and collision against
                 the nodes
+itemdef.lua     ITEMDEF: what an item is, and what a tool can dig
+inventory.lua   TOCLIENT_INVENTORY: what the player is carrying
 texmod.lua      Luanti's texture modifier language, as compose_image()
                 operations
 world.lua       The scene: a node per map block, with buildat's voxel mesher
@@ -72,16 +78,18 @@ Checks
 ------
     $ lua extensions/luanti_client/test.lua
 
-covers serialize.lua, connection.lua, nodedef.lua, media.lua, player.lua and
-texmod.lua without an engine: the packet framing, numbers including f32, reliable packets arriving
+covers serialize.lua, connection.lua, nodedef.lua, media.lua, player.lua,
+texmod.lua and inventory.lua without an engine: the packet framing, numbers including f32, reliable packets arriving
 out of order or twice, acknowledgements, resending, splitting what is sent and
 reassembling what arrives, the peer id handshake, a NODEDEF packet built the
 way a server builds one and read back, which media names are usable as file
 names, and the player's box against a world made of a function -- falling to
 the ground, stopping at a wall, sliding along it, jumping onto a ledge,
 sinking in water and swimming out, flying, and getting out of a node it ended
-up inside, and the texture modifier language: what an expression parses to,
-which files it needs, and which operations each modifier becomes.
+up inside, the texture modifier language -- what an expression parses to,
+which files it needs, and which operations each modifier becomes -- and the
+inventory: quoted item names, empty slots, KeepList, and which tool
+capabilities a dig goes by.
 
     $ bin/buildat_client -m luanti_client
 
@@ -164,6 +172,14 @@ What is done
   plain dirt with a green edge on it
 - The media: ANNOUNCE_MEDIA, REQUEST_MEDIA and MEDIA, cached on disk by name
   and checked against the sha1 the server announced
+- ITEMDEF, including the tool capabilities, and TOCLIENT_INVENTORY
+- Pointing: a ray marched through the node data, with the face it came
+  through outlined
+- Digging: TOSERVER_INTERACT, with the dig time worked out from the node's
+  groups against the capabilities of what the player is wielding -- which
+  is what the server's own anticheat wants, since it refuses a dig that was
+  finished sooner than it should have been
+- Placing what is wielded, and the hotbar slot on the number keys
 
 Only serialization version 29 is read. It is what every current server writes;
 older ones compress the pieces of a mapblock separately and the client says so
@@ -171,7 +187,9 @@ and gives up rather than carrying a second parser.
 
 What is next
 ------------
-- Digging and placing, and an inventory
+- Formspecs, so that the inventory can be seen and moved around in. Until
+  there is one, the hotbar can only hold what digging drops into it, and on a
+  server in creative mode digging drops nothing, so there is nothing to place.
 - HP, breath
 - Node draw types that are not cubes: node boxes, meshes, plants, liquids
 - A node's colour out of its palette by paramtype2, rather than the one

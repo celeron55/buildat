@@ -154,6 +154,20 @@ function M.reader(data)
 		return self:raw(self:u32())
 	end
 
+	-- Luanti's TileAnimationParams, which is in both a tile definition and an
+	-- item's images. What follows the type is what the type says.
+	function r:animation()
+		local animation_type = self:u8()
+		if animation_type == 1 then -- Vertical frames
+			return {type = animation_type, aspect_w = self:u16(),
+					aspect_h = self:u16(), length = self:f32()}
+		elseif animation_type == 2 then -- A 2D sheet
+			return {type = animation_type, frames_w = self:u8(),
+					frames_h = self:u8(), length = self:f32()}
+		end
+		return {type = animation_type}
+	end
+
 	function r:skip(n)
 		self:raw(n)
 		return self

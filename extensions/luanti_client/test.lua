@@ -20,6 +20,7 @@ local serialize = dofile(dir.."/serialize.lua")
 local connection = dofile(dir.."/connection.lua")
 local player = dofile(dir.."/player.lua")
 local texmod = dofile(dir.."/texmod.lua")
+local inventory = dofile(dir.."/inventory.lua")
 local nodedef = dofile(dir.."/nodedef.lua")
 local media = dofile(dir.."/media.lua")
 
@@ -700,5 +701,84 @@ assert(texmod.resolve("a.png^[colorize:chartreuse", ctx) == nil,
 		"texmod: built an unknown colour")
 
 print("texmod: ok")
+
+--
+-- inventory.lua: what the player is carrying
+--
+
+local inv_data = table.concat({
+	"List main 5",
+	"Width 5",
+	"Item mcl_core:dirt 42",
+	"Empty",
+	'Item "a b:c" 3 7',
+	"Item mcl_tools:pick_iron 1 0 \"metadata\"",
+	"Item mcl_core:stone",
+	"EndInventoryList",
+	"List hand 1",
+	"Width 0",
+	"Item mcl_meshhand:hand",
+	"EndInventoryList",
+	"EndInventory",
+	"",
+}, "\n")
+
+local lists = inventory.parse(inv_data)
+assert(lists.main and lists.main.width == 5 and lists.main.size == 5,
+		"inventory: main width and size")
+assert(#lists.main.items == 5, "inventory: "..#lists.main.items.." slots")
+assert(lists.main.items[1].name == "mcl_core:dirt" and
+		lists.main.items[1].count == 42 and lists.main.items[1].wear == 0,
+		"inventory: the first stack")
+assert(lists.main.items[2] == nil, "inventory: an empty slot is a hole")
+-- A name with a space in it is written as a JSON string, and the count and
+-- the wear follow it
+assert(lists.main.items[3].name == "a b:c" and
+		lists.main.items[3].count == 3 and lists.main.items[3].wear == 7,
+		"inventory: a quoted name")
+assert(lists.main.items[4].name == "mcl_tools:pick_iron" and
+		lists.main.items[4].count == 1, "inventory: an item with metadata")
+-- A stack of one is written as the name alone
+assert(lists.main.items[5].name == "mcl_core:stone" and
+		lists.main.items[5].count == 1, "inventory: a bare name")
+assert(lists.hand.items[1].name == "mcl_meshhand:hand", "inventory: the hand")
+
+-- A game may leave the width at zero, and the size is still what the list
+-- says; this is what the player inventory of the test server looks like
+local no_width = inventory.parse(
+		"List main 3\nWidth 0\nEmpty\nEmpty\nEmpty\nEndInventoryList\n"..
+		"EndInventory\n")
+assert(no_width.main.size == 3 and no_width.main.width == 0 and
+		next(no_width.main.items) == nil, "inventory: an empty main list")
+
+-- KeepList means the list the client already had
+local kept = inventory.parse("List main 1\nWidth 1\nItem a:b\n"..
+		"EndInventoryList\nKeepList hand\nEndInventory\n", lists)
+assert(kept.main.items[1].name == "a:b", "inventory: the replaced list")
+assert(kept.hand == lists.hand, "inventory: KeepList kept the old one")
+-- Without a previous inventory there is nothing to keep, and the list is
+-- simply not there
+local nothing = inventory.parse("KeepList hand\nEndInventory\n")
+assert(nothing.hand == nil, "inventory: KeepList with nothing to keep")
+
+-- Which tool capabilities a dig goes by
+local items = {
+	[""] = {tool_capabilities = {groupcaps = {}, name = "empty"}},
+	["mcl_meshhand:hand"] = {tool_capabilities = {groupcaps = {},
+			name = "hand"}},
+	["mcl_tools:pick_iron"] = {tool_capabilities = {groupcaps = {},
+			name = "pick"}},
+	["mcl_core:dirt"] = {},
+}
+local caps = inventory.dig_capabilities(lists, 4, items)
+assert(caps.name == "pick", "inventory: the wielded tool's own capabilities")
+-- A stack of something that is not a tool falls through to the hand slot
+caps = inventory.dig_capabilities(lists, 1, items)
+assert(caps.name == "hand", "inventory: the hand slot's capabilities")
+-- An empty slot with no hand list falls through to the empty item
+caps = inventory.dig_capabilities({main = {items = {}}}, 1, items)
+assert(caps.name == "empty", "inventory: the empty item's capabilities")
+
+print("inventory: ok")
 
 print("luanti_client/test.lua: ok")

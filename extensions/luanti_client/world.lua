@@ -267,6 +267,9 @@ function M.new(magic, buildat, log, options)
 	-- arrived and everything but air is solid; see is_solid().
 	self.node_solid = nil
 	self.node_liquid = {}
+	-- id -> false for the nodes a pointing ray goes through; nil means the
+	-- definitions have not arrived and everything but air stops one
+	self.node_pointable = nil
 
 	local function mark_dirty(key)
 		if blocks[key] and not dirty[key] then
@@ -440,6 +443,110 @@ function M.new(magic, buildat, log, options)
 		return id ~= nil and self.node_liquid[id] == true
 	end
 
+	-- Whether a ray stops at a node. Air does not stop one and neither does
+	-- a node the game says is not pointable; a node whose block has not
+	-- arrived does not either, because pointing at nothing is better than
+	-- digging at a guess.
+	function self:is_pointable(x, y, z)
+		local id = self:node_at(x, y, z)
+		if id == nil or id == CONTENT_AIR or id == CONTENT_IGNORE then
+			return false
+		end
+		if self.node_pointable then
+			return self.node_pointable[id] ~= false
+		end
+		return true
+	end
+
+	-- What the camera is pointing at, up to range nodes away. Returns the
+	-- node the ray stopped in and the last empty node before it, which is
+	-- where a placed node would go, or nil for nothing in range.
+	--
+	-- Marching in steps a tenth of a node long and rounding to the nearest
+	-- integer, which is what games/digger does: a node is the cube around
+	-- its coordinate, so rounding is the whole test. A step that lands in the
+	-- same node as the last one is skipped rather than asked about twice.
+	local POINT_STEP = 0.1
+
+	function self:point_ray(range)
+		local p = camera_node.position
+		local d = camera_node.direction
+		local last = nil
+		for i = 1, math.floor(range / POINT_STEP) do
+			local x = math.floor(p.x + d.x * i * POINT_STEP + 0.5)
+			local y = math.floor(p.y + d.y * i * POINT_STEP + 0.5)
+			local z = math.floor(p.z + d.z * i * POINT_STEP + 0.5)
+			if not last or x ~= last[1] or y ~= last[2] or z ~= last[3] then
+				if self:is_pointable(x, y, z) then
+					return {x, y, z}, last
+				end
+				last = {x, y, z}
+			end
+		end
+		return nil
+	end
+
+	-- The outline of the face the ray came through, on the node it stopped
+	-- in. One flat outline that gets turned to whichever face it is, which is
+	-- what games/digger does; NoTextureVColMultiply darkens what is behind it
+	-- rather than drawing over it, so it reads on any texture.
+	local pointed_node = scene:CreateChild("Pointed")
+	do
+		local cg = pointed_node:CreateComponent("CustomGeometry")
+		cg:BeginGeometry(0, magic.TRIANGLE_LIST)
+		cg:SetNumGeometries(1)
+		local color = magic.Color(0.12, 0.36, 0.12)
+		local function face(x0, z0, x1, z1)
+			local y = 0.502 -- Just outside the node, so it does not z-fight
+			local corners = {
+				{x0, z1}, {x1, z1}, {x1, z0}, {x1, z0}, {x0, z0}, {x0, z1},
+			}
+			for _, c in ipairs(corners) do
+				cg:DefineVertex(magic.Vector3(c[1], y, c[2]))
+				cg:DefineColor(color)
+			end
+		end
+		local d = 0.502
+		local w = 1.0 / 16
+		face(-d, d - w, d, d)
+		face(-d, -d, d, -d + w)
+		face(d - w, -d + w, d, d - w)
+		face(-d, -d + w, -d + w, d - w)
+		cg:Commit()
+		local m = magic.Material.new()
+		m:SetTechnique(0, magic.cache:GetResource("Technique",
+				"Techniques/NoTextureVColMultiply.xml"))
+		cg:SetMaterial(0, m)
+		pointed_node.enabled = false
+	end
+
+	-- Shows the outline on a node, or hides it when there is nothing pointed
+	-- at. above is which way the face points.
+	function self:set_pointed(under, above)
+		if not under or not above then
+			pointed_node.enabled = false
+			return
+		end
+		pointed_node.position = magic.Vector3(under[1], under[2], under[3])
+		local dx = above[1] - under[1]
+		local dy = above[2] - under[2]
+		local dz = above[3] - under[3]
+		if dx > 0 then
+			pointed_node.rotation = magic.Quaternion(90, 0, -90)
+		elseif dx < 0 then
+			pointed_node.rotation = magic.Quaternion(90, 0, 90)
+		elseif dy > 0 then
+			pointed_node.rotation = magic.Quaternion(0, 0, 0)
+		elseif dy < 0 then
+			pointed_node.rotation = magic.Quaternion(0, 0, -180)
+		elseif dz > 0 then
+			pointed_node.rotation = magic.Quaternion(90, 0, 0)
+		else
+			pointed_node.rotation = magic.Quaternion(-90, 0, 0)
+		end
+		pointed_node.enabled = true
+	end
+
 	-- One node the server changed, in node coordinates. Patches the block's
 	-- parameter arrays in place; a node on a block's edge is part of the
 	-- neighbour's border, so that mesh goes out of date too.
@@ -505,8 +612,13 @@ function M.new(magic, buildat, log, options)
 		local cubes = 0
 		local solid = {}
 		local liquid = {}
+		local pointable = {}
 		for id, def in pairs(defs) do
 			solid[id] = def.walkable
+			-- Luanti's PointabilityType: 0 is not pointable, 1 is, and 2
+			-- stops a ray without being pointed at. Those two values are
+			-- that way round because they used to be a boolean.
+			pointable[id] = def.pointable ~= 0
 			liquid[id] = def.liquid_type ~= nil and
 					def.liquid_type ~= NODEDEF_LIQUID_NONE
 			local kind = CUBE_DRAWTYPES[def.drawtype]
@@ -534,6 +646,7 @@ function M.new(magic, buildat, log, options)
 		self.node_map = map
 		self.node_solid = solid
 		self.node_liquid = liquid
+		self.node_pointable = pointable
 		self:invalidate_all()
 		return cubes
 	end
@@ -550,11 +663,11 @@ function M.new(magic, buildat, log, options)
 	-- them, and drops what has gone further away than drop_distance nodes.
 	--
 	-- drop_distance may be nil, and has to be until the camera is where the
-	-- player is: a block the server sends is acknowledged as soon as it
-	-- arrives, and the server does not send an acknowledged block again, so
-	-- dropping it leaves a hole in the world for the rest of the session --
-	-- and the first blocks it sends are the ones around the player, which is
-	-- exactly where a hole is worst.
+	-- player is: a block the server sends before that is acknowledged as
+	-- soon as it arrives, and the server does not send an acknowledged block
+	-- again, so dropping it leaves a hole in the world for the rest of the
+	-- session -- and the first blocks it sends are the ones around the
+	-- player, which is exactly where a hole is worst.
 	function self:update(dtime, drop_distance)
 		local p = camera_node.position
 		if drop_distance then
@@ -633,9 +746,6 @@ function M.new(magic, buildat, log, options)
 		return dirty_count
 	end
 
-	-- The camera, in Luanti node coordinates. Luanti's yaw is degrees around
-	-- Y with 0 towards +Z, and its pitch is positive looking up; Urho3D's
-	-- euler pitch is positive looking down.
 	-- Where the camera is and which way it looks, in Luanti's terms: pitch is
 	-- degrees positive looking down and yaw is degrees counterclockwise from
 	-- +Z seen from above.
