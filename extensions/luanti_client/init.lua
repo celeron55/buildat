@@ -48,6 +48,10 @@ local MOUSE_SENSITIVITY = 0.15
 -- which is Luanti's own default
 local POINT_RANGE = 4
 
+-- How many of the player's main slots the hotbar shows. Luanti's own default,
+-- and what the number keys reach.
+local HOTBAR_SLOTS = 8
+
 -- Media files are asked for in batches, so that one REQUEST_MEDIA does not
 -- turn into hundreds of split chunks in one go
 local MEDIA_PER_REQUEST = 200
@@ -495,6 +499,18 @@ local function show_client(host, port, name, password)
 			end
 		end
 
+		-- The game changes the sky whenever it likes -- entering a biome, a
+		-- cave, the nether -- so only the first one is worth a line
+		local said_sky = false
+
+		client.on_sky = function(sky)
+			view:set_sky(sky)
+			if not said_sky then
+				said_sky = true
+				add_line("The sky is a \""..(sky.type or "?").."\" one")
+			end
+		end
+
 		client.on_chat = function(text, sender)
 			local line = formspec.strip_escapes(text)
 			if sender ~= "" then
@@ -674,6 +690,32 @@ local function show_client(host, port, name, password)
 		})
 
 		local held = nil
+
+		-- The hotbar and the health bar, remade when what they show changes
+		local hud = nil
+		local hud_key = nil
+
+		local function update_hud()
+			local list = inv and inv.main or nil
+			local key = tostring(wield_index).."/"..tostring(client.hp)
+			-- What is in the slots, as a string, so that the bar is only
+			-- built again when it would look different
+			for i = 1, HOTBAR_SLOTS do
+				local stack = list and list.items[i] or nil
+				key = key.."|"..(stack and
+						(stack.name.." "..stack.count) or "")
+			end
+			if key == hud_key then
+				return
+			end
+			hud_key = key
+			if hud then
+				hud:Remove()
+			end
+			local ui_root = magic.ui.root
+			hud = ui:hud(ui_root, list, HOTBAR_SLOTS, wield_index,
+					client.hp, 20, ui_root.width, ui_root.height)
+		end
 
 		local function close_form()
 			if not form then
@@ -917,6 +959,7 @@ local function show_client(host, port, name, password)
 				end
 			end
 			view:place_objects(world_objects)
+			update_hud()
 			if form and form_stale then
 				draw_form()
 			end
@@ -1074,6 +1117,10 @@ local function show_client(host, port, name, password)
 				close_form()
 				close_chat()
 				chat_text:Remove()
+				if hud then
+					hud:Remove()
+					hud = nil
+				end
 				magic.input:SetMouseVisible(true)
 				client:disconnect()
 				view:close()

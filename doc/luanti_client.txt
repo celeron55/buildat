@@ -195,6 +195,8 @@ What is done
 - Chat, both ways, and the player's hit points and breath
 - Active objects: other players, mobs and dropped items, where the server
   says they are, drawn as a box wearing the object's own texture
+- The sky's colours, out of SET_SKY, as what the world fades into
+- A hotbar and a health bar, out of the inventory and the hit points
 - Formspecs: the inventory form, the ones the server shows, and the prepend
   in front of them. Item slots with the item's own image in them, labels,
   images, buttons and fields; clicking a slot picks a stack up and puts it
@@ -235,9 +237,11 @@ What is next
   reads none of the model formats Luanti's meshes come in. A box wearing a
   cow's texture reads as a cow; a dropped item does not read as an item.
 - Animations, nametags and attachments of the active objects
-- The sky, the sun, the moon and the clouds, which the server describes and
-  which are a flat fog colour here
-- The HUD: the hotbar, the health bar, and what a game puts on the screen
+- The sun, the moon, the stars and the clouds, which the server describes and
+  which are not drawn; the sky is its colours and nothing else
+- The game's own HUD: this server sends a hundred HUD elements -- its hearts,
+  its bubbles, its armour bar, its crosshair -- and what is drawn instead is a
+  hotbar and a health bar of this client's own
 - param2: the colour a node takes out of a palette, and facedir, which is
   which tile goes on which face and which way a shape is turned
 - Node metadata, so that a chest's own slots are in its form

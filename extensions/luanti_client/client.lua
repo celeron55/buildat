@@ -104,6 +104,7 @@ local TOCLIENT = {
 	MEDIA          = 0x38,
 	NODEDEF        = 0x3A,
 	ANNOUNCE_MEDIA = 0x3C,
+	SET_SKY        = 0x4F,
 	ACTIVE_OBJECT_REMOVE_ADD = 0x31,
 	ACTIVE_OBJECT_MESSAGES = 0x32,
 	CHAT_MESSAGE   = 0x2F,
@@ -303,6 +304,10 @@ function M.new(socket, options, log)
 			on_object_add = nil,
 			on_object_remove = nil,
 			on_object_message = nil,
+			-- on_sky(sky) with what the game says the sky looks like; the
+			-- colours are {r, g, b} and which ones are there depends on the
+			-- type
+			on_sky = nil,
 			-- on_chat(text, sender, message_type) for every chat message,
 			-- the server's own included; a message with no sender is one
 			-- from the server rather than from a player
@@ -512,6 +517,45 @@ function M.new(socket, options, log)
 		r:skip(2) -- Used to be the length of what follows
 		if self.on_detached_inventory then
 			self.on_detached_inventory(name, r:rest())
+		end
+	end
+
+	-- What the sky looks like, which a game sets and changes.
+	--
+	-- Only the colours are read. A "regular" sky has a colour for the sky and
+	-- one for the horizon at each of day, dawn and night; anything else --
+	-- "skybox" with six textures, "plain" with one colour -- has the
+	-- background colour and that is all.
+	local function read_color(r)
+		local argb = r:u32()
+		return {math.floor(argb / 0x10000) % 0x100,
+				math.floor(argb / 0x100) % 0x100, argb % 0x100}
+	end
+
+	handlers[TOCLIENT.SET_SKY] = function(r)
+		local sky = {}
+		sky.bgcolor = read_color(r)
+		sky.type = r:string()
+		sky.clouds = r:u8() ~= 0
+		read_color(r) -- fog_sun_tint
+		read_color(r) -- fog_moon_tint
+		r:string() -- fog_tint_type
+		if sky.type == "skybox" then
+			sky.textures = {}
+			for _ = 1, r:u16() do
+				sky.textures[#sky.textures + 1] = r:string()
+			end
+		elseif sky.type == "regular" then
+			sky.day_sky = read_color(r)
+			sky.day_horizon = read_color(r)
+			sky.dawn_sky = read_color(r)
+			sky.dawn_horizon = read_color(r)
+			sky.night_sky = read_color(r)
+			sky.night_horizon = read_color(r)
+			sky.indoors = read_color(r)
+		end
+		if self.on_sky then
+			self.on_sky(sky)
 		end
 	end
 

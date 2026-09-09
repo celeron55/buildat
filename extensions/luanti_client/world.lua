@@ -152,7 +152,11 @@ function M.new(magic, buildat, log, options)
 	scene:CreateComponent("Octree")
 	self.scene = scene
 
+	-- What the sky looks like until the server says, and what it says; see
+	-- set_sky() below
 	local FOG = {r = 0.60, g = 0.72, b = 0.88}
+	local sky = nil
+	local daylight = 1.0
 
 	local zone_node = scene:CreateChild("Zone")
 	local zone = zone_node:CreateComponent("Zone")
@@ -706,9 +710,36 @@ function M.new(magic, buildat, log, options)
 	-- surface sees into its vertex colours, and the shader multiplies that by
 	-- the zone's ambient colour.
 	function self:set_daylight(factor)
+		daylight = factor
 		zone.ambientColor = sunlight_color(factor)
-		zone.fogColor = magic.Color(FOG.r * factor, FOG.g * factor,
-				FOG.b * factor)
+		-- What is behind the world, which the fog fades into. The game's own
+		-- horizon colour when it has said one, between its night and day
+		-- shades by how much daylight there is; the ramp bottoms out at
+		-- 0.175, so that is what counts as night.
+		local r, g, b = FOG.r * factor, FOG.g * factor, FOG.b * factor
+		if sky and sky.day_horizon and sky.night_horizon then
+			local t = (factor - 0.175) / (1 - 0.175)
+			t = t < 0 and 0 or (t > 1 and 1 or t)
+			r = (sky.night_horizon[1] + (sky.day_horizon[1] -
+					sky.night_horizon[1]) * t) / 255
+			g = (sky.night_horizon[2] + (sky.day_horizon[2] -
+					sky.night_horizon[2]) * t) / 255
+			b = (sky.night_horizon[3] + (sky.day_horizon[3] -
+					sky.night_horizon[3]) * t) / 255
+		elseif sky and sky.bgcolor then
+			r = sky.bgcolor[1] / 255 * factor
+			g = sky.bgcolor[2] / 255 * factor
+			b = sky.bgcolor[3] / 255 * factor
+		end
+		zone.fogColor = magic.Color(r, g, b)
+	end
+
+	-- What the game says the sky looks like; client.lua's on_sky hands this
+	-- over. Only the colours are used: the sun, the moon, the stars and a
+	-- skybox's six textures are not drawn.
+	function self:set_sky(new_sky)
+		sky = new_sky
+		self:set_daylight(daylight)
 	end
 
 	-- Builds the voxel registry from Luanti's node definitions.
