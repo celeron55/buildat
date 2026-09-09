@@ -64,11 +64,12 @@ torch is red and a soul torch is blue without anything here having to know
 what any of them are. Luanti has one number for this and paints every source
 the same; this is what the rendering latitude is for.
 
-A node is drawn as a cube with its own six textures when it is one of the
-Luanti draw types that is a cube (normal, glasslike, allfaces) and every one of
-those textures is a plain file name. Everything else -- plants, liquids, node
-boxes, meshes, rails, and anything whose texture is a modifier expression this
-does not reduce -- is one grey placeholder cube.
+A node is drawn as a cube with its own six textures when its draw type is a
+cube (normal, glasslike, allfaces, a liquid source), and as the quads of its
+own shape when it is not: a node box, a plant, a torch, a sign, a rail, a
+flowing liquid, or an .obj model. What is left is one grey placeholder cube --
+a node whose model is in a format objmesh.lua does not read, and one whose
+texture is a modifier expression texmod.lua does not reduce.
 
 The network dialog of extension/network asks about the address the first time;
 see doc/client_api.txt.
@@ -85,6 +86,7 @@ media.lua       The server's media files, in cache/luanti_media/<server>/
 player.lua      The player's box: the keys, gravity, and collision against
                 the nodes
 shapes.lua      Luanti's node shapes, as the quads a voxel definition takes
+objmesh.lua     Wavefront .obj, as the quads a voxel's shape is made of
 objects.lua     The things in the world that are not nodes: what the server
                 says they are and where
 itemdef.lua     ITEMDEF: what an item is, and what a tool can dig
@@ -269,8 +271,9 @@ What is done
   is what the server's own anticheat wants, since it refuses a dig that was
   finished sooner than it should have been
 - Placing what is wielded, and the hotbar slot on the number keys
-- Node shapes that are not cubes: node boxes as their boxes, and plants,
-  torches, fires, signs and rails as quads, through a shape in the voxel
+- Node shapes that are not cubes: node boxes as their boxes, plants, torches,
+  fires, signs and rails as quads, .obj models as their own geometry, and a
+  flowing liquid as a box with a lowered top, through a shape in the voxel
   registry that the mesher copies into the chunk
 - Chat, both ways, and the player's hit points and breath
 - Active objects: other players, mobs and dropped items, where the server
@@ -304,13 +307,23 @@ Node shapes: a node box is drawn as its boxes, and a plant, a torch, a fire, a
 sign and a rail as quads, through VoxelDefinition.shape -- a list of quads per
 voxel that buildat's mesher copies into the chunk's mesh, so a chunk full of
 fences costs what a chunk of cubes costs. shapes.lua builds those quads and
-the engine knows nothing about node boxes.
+the engine knows nothing about node boxes. A node whose draw type is a mesh
+gets the quads of its model, read out of the .obj by objmesh.lua, and is drawn
+from both sides because a node mesh is usually a shell whose inside is meant
+to be seen.
+
+A flowing liquid is a box with a lowered top, one voxel per level in param2
+through the same (definition, param2) machinery a facedir uses. A liquid at
+the top level keeps its cube, so a waterfall and the middle of a lake are
+cubes whose shared faces are culled.
 
 What that does not do yet: a connected node box does not look at its
-neighbours, so a fence is a post without its rails; a mesh node is drawn as
-its selection box, since Urho3D reads none of the model formats Luanti uses;
-and a turned node box's texture coordinates are the whole tile rather than
-the part of it Luanti works out from the box after the turn.
+neighbours, so a fence is a post without its rails; a node whose model is
+.b3d -- the chests and the shulkers -- falls back to the box the game says a
+ray hits; a flowing liquid's top is flat where Luanti slopes it from the
+neighbouring levels, so a slope reads as steps; and a turned node box's
+texture coordinates are the whole tile rather than the part of it Luanti works
+out from the box after the turn.
 
 What is next
 ------------
