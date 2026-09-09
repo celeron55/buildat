@@ -633,6 +633,21 @@ function M.new(magic, buildat, log, ctx)
 			return g[1] * layout.scale[1], g[2] * layout.scale[2]
 		end
 
+		-- A form the game gave no background of its own gets a dark grey one
+		-- over the whole of it. A form is drawn over the world, and text on
+		-- top of a sunlit hillside cannot be read.
+		local has_background = false
+		for _, e in ipairs(elements) do
+			if e.name == "background" or e.name == "background9" then
+				has_background = true
+				break
+			end
+		end
+		if not has_background then
+			box(window, 0, 0, layout.width, layout.height,
+					magic.Color(0.12, 0.12, 0.14, 0.94))
+		end
+
 		-- Luanti draws the backgrounds in a pass of their own, behind
 		-- everything else, whatever order they are in; a background that is
 		-- drawn in element order covers the slots that came before it.
