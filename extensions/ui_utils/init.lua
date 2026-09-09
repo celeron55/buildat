@@ -156,10 +156,16 @@ end
 
 local message_handle = nil
 
-function M.safe.show_message_dialog(message)
+-- on_close is optional and is called when the dialog goes away, however it
+-- goes: what wants it is a message that is the last thing before something
+-- else has to happen, like a client quitting after it says why.
+function M.safe.show_message_dialog(message, on_close)
 	-- Don't stack multiple dialogs
 	if message_handle then
 		message_handle.append(message)
+		-- The newest caller is the one whose message is at the bottom of the
+		-- dialog, so its on_close is the one that runs
+		message_handle.on_close = on_close or message_handle.on_close
 		return
 	end
 
@@ -180,6 +186,19 @@ function M.safe.show_message_dialog(message)
 	message_text.text = message
 	message_text:SetTextAlignment(HA_LEFT)
 
+	-- The window is as wide as the widest line: the style gives it a width of
+	-- its own and a message longer than that is otherwise cut off. A Text
+	-- knows how wide it turned out once it has text and a font.
+	local function fit_window()
+		-- The text's own width plus the window's layout border and the frame
+		-- its style draws
+		local wanted = message_text.width + 40
+		if wanted > window.minWidth then
+			window.minWidth = wanted
+		end
+	end
+	fit_window()
+
 	local ok_button = window:CreateChild("Button")
 	ok_button:SetStyleAuto()
 	ok_button:SetName("Button")
@@ -196,23 +215,32 @@ function M.safe.show_message_dialog(message)
 		append = function(text)
 			if #message_text.text < 1000 then
 				message_text.text = message_text.text.."\n"..text
+				fit_window()
 			end
 		end,
+		on_close = on_close,
 	}
+
+	local function close()
+		local closed = message_handle
+		uistack.main:pop(root)
+		message_handle = nil
+		if closed and closed.on_close then
+			closed.on_close()
+		end
+	end
 
 	magic.SubscribeToEvent(ok_button, "Released",
 	function(self, event_type, event_data)
 		log:info("show_message_dialog: ok_button clicked")
-		uistack.main:pop(root)
-		message_handle = nil
+		close()
 	end)
 
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 		local key = event_data:GetInt("Key")
 		if key == KEY_ESCAPE then
 			log:info("show_message_dialog: KEY_ESCAPE pressed")
-			uistack.main:pop(root)
-			message_handle = nil
+			close()
 		end
 	end)
 end

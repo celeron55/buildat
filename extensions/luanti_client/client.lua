@@ -208,6 +208,25 @@ local TOCLIENT_NAME = {
 	[0x64] = "SPAWN_PARTICLE_BATCH",
 }
 
+-- What the server means by the code in an ACCESS_DENIED, from Luanti's
+-- accessDeniedStrings[]. A denial that comes with a string of its own uses
+-- that instead; that is what reason 10 is for.
+local DENY_REASON = {
+	[0] = "invalid password",
+	[1] = "the client sent something the server did not expect",
+	[2] = "the server is in singleplayer mode",
+	[3] = "the client's version is not supported",
+	[4] = "the player name has disallowed characters in it",
+	[5] = "the player name is not allowed",
+	[6] = "too many users",
+	[7] = "empty passwords are disallowed",
+	[8] = "another client is connected with this name",
+	[9] = "internal server error",
+	[10] = "no reason given",
+	[11] = "the server is shutting down",
+	[12] = "the server hit an internal error",
+}
+
 local AUTH_MECHANISM = {
 	LEGACY_PASSWORD = 1,
 	SRP             = 2,
@@ -402,7 +421,30 @@ function M.new(socket, options, log)
 			status("The server offers no authentication this client can do "..
 					"(mechanisms "..mechanisms..")")
 			self.state = "failed"
+			fail("The server offers no way to log in\n"..
+					"that this client can do.\n"..
+					"(mechanisms "..mechanisms..")", true)
 		end
+	end
+
+	-- Why the session ended, in words, or nil while it has not. A denial and
+	-- the disconnection that follows it arrive together -- the server sends
+	-- ACCESS_DENIED and closes -- and the denial is the one worth showing,
+	-- which is what specific says. self:update() is what hands it over, once
+	-- everything that arrived has been looked at.
+	self.failure = nil
+	local failure_specific = false
+	local failure_told = false
+	-- When this client was made, which is what the silence is measured from
+	-- until the first datagram arrives
+	local started_us = buildat.get_time_us()
+
+	local function fail(text, specific)
+		if failure_specific and not specific then
+			return
+		end
+		self.failure = text
+		failure_specific = specific or failure_specific
 	end
 
 	-- Positions of blocks that have arrived and not been acknowledged yet
@@ -426,6 +468,9 @@ function M.new(socket, options, log)
 		if self.protocol_version < CLIENT_PROTOCOL_VERSION_MIN then
 			status("The server is too old for this client")
 			self.state = "failed"
+			fail("The server speaks protocol "..self.protocol_version..
+					",\nand this client needs "..
+					CLIENT_PROTOCOL_VERSION_MIN.." or newer.", true)
 			return
 		end
 		-- Only serialization version 29 is parsed; older mapblocks compress
@@ -435,6 +480,9 @@ function M.new(socket, options, log)
 					serialization_version..", this client reads "..
 					SER_FMT_VER_HIGHEST_READ)
 			self.state = "failed"
+			fail("The server serializes its map as version "..
+					serialization_version..",\nand this client reads only "..
+					SER_FMT_VER_HIGHEST_READ..".", true)
 			return
 		end
 		start_auth(auth_mechanisms)
@@ -451,11 +499,18 @@ function M.new(socket, options, log)
 		if not proof then
 			status("The server's SRP challenge failed the safety check")
 			self.state = "failed"
+			fail("The server's part of the login failed\n"..
+					"SRP's own safety check.\n"..
+					"Nothing was sent to it.", true)
 			return
 		end
 		send_command(TOSERVER.SRP_BYTES_M, serialize.writer():string(proof)
 				:data())
 		self.state = "srp_m_sent"
+		-- What the server says next is either AUTH_ACCEPT or a denial, and
+		-- an "invalid password" denial means this proof is what it did not
+		-- like: the line is here so that a log says how far the login got
+		status("Sent the password proof")
 	end
 
 	handlers[TOCLIENT.AUTH_ACCEPT] = function(r)
@@ -784,10 +839,32 @@ function M.new(socket, options, log)
 
 	handlers[TOCLIENT.ACCESS_DENIED] = function(r)
 		local reason = r:u8()
-		local message = r:remaining() > 0 and r:string() or ""
+		-- Only reason 10 carries a message of its own; for the rest the
+		-- server sends the code and nothing else, and Luanti's own client
+		-- is where the words live (accessDeniedStrings in
+		-- clientpackethandler.cpp)
+		local given = r:remaining() > 0 and r:string() or ""
+		local named = DENY_REASON[reason]
+		local message = given ~= "" and given or (named or "unknown reason")
 		self.state = "denied"
-		status("The server denied access (reason "..reason..
-				(message ~= "" and ": "..message or "")..")")
+		status("The server denied access: "..message..
+				" (reason "..reason..")")
+		-- One thing per line: the dialog this ends up in does not wrap. The
+		-- hints are for the two a player can do something about; a code
+		-- nothing here has a name for goes in as a number, because that is
+		-- then the only thing to go on.
+		local hint = nil
+		if given ~= "" then
+			hint = nil
+		elseif reason == 0 then
+			hint = "That name is registered with another password."
+		elseif reason == 8 then
+			hint = "Wait a minute and try again."
+		elseif not named then
+			hint = "(reason "..reason..")"
+		end
+		fail("The server denied access:\n"..message..
+				(hint and "\n"..hint or ""), true)
 	end
 
 	local function handle_command(data, channel)
@@ -826,6 +903,7 @@ function M.new(socket, options, log)
 	conn.on_disconnect = function(reason)
 		self.state = "disconnected"
 		status("Disconnected: "..tostring(reason))
+		fail("The connection to the server ended:\n"..tostring(reason))
 	end
 
 	-- Where we are and what we are doing, which is both what PLAYERPOS is
@@ -878,9 +956,39 @@ function M.new(socket, options, log)
 	-- how many are waiting.
 	local COMMAND_BUDGET_US = 4000
 
+	-- How long the server may say nothing at all before this gives up on it.
+	-- A live server acknowledges the position we send it several times a
+	-- second, so silence this long means the other end is gone -- and
+	-- without this, a client that connects to an address nothing answers
+	-- sits there for good, resending its INIT.
+	local SILENCE_LIMIT_S = 20
+
 	function self:update(dtime)
 		conn:update(dtime)
-		self.commands_waiting = conn:pump(COMMAND_BUDGET_US)
+		-- Once something has gone wrong there is nothing left to be smooth
+		-- for, and what is still in the queue is what says why
+		self.commands_waiting = conn:pump(
+				self.failure and 1000000000 or COMMAND_BUDGET_US)
+		-- Nothing from the other end for that long
+		if not self.failure then
+			local quiet = (buildat.get_time_us() -
+					(conn.last_receive_us or started_us)) / 1000000
+			if quiet >= SILENCE_LIMIT_S then
+				status("The server has said nothing for "..
+						math.floor(quiet).." seconds")
+				fail("The server has not answered for "..
+						math.floor(quiet).." seconds.\n"..
+						(self.state == "init_sent" and
+						"Is that the right address?" or
+						"The connection seems to be gone."), true)
+			end
+		end
+		if self.failure and not failure_told then
+			failure_told = true
+			if self.on_failed then
+				self.on_failed(self.failure)
+			end
+		end
 		if self.state ~= "ready" then
 			return
 		end
