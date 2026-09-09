@@ -22,6 +22,7 @@ Config::Config()
 	set_default("ui_scale", 0.0); // 0 = auto from short side / 1080
 	set_default("command_seq", "");
 	set_default("command_seq_enabled", false);
+	set_default("command_seq_stdin", false);
 }
 
 bool Config::check_paths()

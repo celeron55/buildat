@@ -441,6 +441,10 @@ struct CApp: public App, public magic::Application
 	int64_t m_command_wait_until_us = 0;
 	ss_ m_pending_screenshot;
 	bool m_command_seq_active = false;
+	// -c - : commands arrive from standard input while the client runs, and
+	// the run ends at end of input rather than when the list is used up
+	bool m_command_seq_stdin = false;
+	bool m_command_seq_stdin_eof = false;
 	bool m_command_seq_failed = false;
 	bool m_command_seq_extra_frame = false;
 
@@ -794,12 +798,18 @@ struct CApp: public App, public magic::Application
 			ss_ err;
 			if(!client::command_seq::parse(text, &m_commands, &err))
 				throw AppStartupError("command sequence: "+err);
+			m_command_seq_stdin =
+					g_client_config.get<bool>("command_seq_stdin");
 			m_command_seq_active = true;
 			client::command_seq::inhibit_real_input(true);
 			client::command_seq::show_window(GetSubsystem<magic::Graphics>(),
 					GetSubsystem<magic::Input>());
-			log_i(MODULE, "Command sequence: %zu commands, will exit when done",
-					m_commands.size());
+			if(m_command_seq_stdin)
+				log_i(MODULE, "Command sequence: reading stdin,"
+						" will exit at end of input");
+			else
+				log_i(MODULE, "Command sequence: %zu commands,"
+						" will exit when done", m_commands.size());
 		}
 	}
 
@@ -908,6 +918,28 @@ struct CApp: public App, public magic::Application
 		return ok;
 	}
 
+	// Whole lines that have arrived on standard input, parsed and appended.
+	// A line that does not parse is reported and skipped rather than ending
+	// the run: the other end is a person or a script that can try again.
+	void command_seq_pump_stdin()
+	{
+		sv_<ss_> lines;
+		bool eof = false;
+		client::command_seq::read_stdin_lines(&lines, &eof);
+		for(const ss_ &line : lines){
+			ss_ err;
+			sv_<client::command_seq::Command> parsed;
+			if(!client::command_seq::parse(line, &parsed, &err)){
+				log_w(MODULE, "command: %s", cs(err));
+				continue;
+			}
+			for(const client::command_seq::Command &c : parsed)
+				m_commands.push_back(c);
+		}
+		if(eof)
+			m_command_seq_stdin_eof = true;
+	}
+
 	void command_seq_tick()
 	{
 		using client::command_seq::Type;
@@ -915,6 +947,8 @@ struct CApp: public App, public magic::Application
 			return;
 		if(!m_pending_screenshot.empty())
 			return;
+		if(m_command_seq_stdin)
+			command_seq_pump_stdin();
 		int64_t now = get_timeofday_us();
 		if(m_command_wait_until_us > now)
 			return;
@@ -936,6 +970,7 @@ struct CApp: public App, public magic::Application
 			}
 			if(c.type == Type::Quit){
 				m_command_index = m_commands.size();
+				m_command_seq_stdin_eof = true;
 				break;
 			}
 			if(!command_seq_exec(c))
@@ -945,7 +980,8 @@ struct CApp: public App, public magic::Application
 
 		if(m_command_index >= m_commands.size() &&
 				m_pending_screenshot.empty() &&
-				m_command_wait_until_us <= now)
+				m_command_wait_until_us <= now &&
+				(!m_command_seq_stdin || m_command_seq_stdin_eof))
 			command_seq_finish();
 	}
 
