@@ -1242,6 +1242,14 @@ local function show_client(host, port, name, password)
 			view:play_sound(id, spec, server_key.."/"..file)
 		end
 
+		-- simplified: the field of view the client tells the server about
+		-- does not change with this, so a zoomed-in player is still sent the
+		-- blocks a 98-degree view needs. That is more blocks than it wants,
+		-- never fewer.
+		client.on_fov = function(fov, is_multiplier, transition_time)
+			view:set_fov(fov, is_multiplier, transition_time)
+		end
+
 		client.on_stop_sound = function(id)
 			view:stop_sound(id)
 		end
@@ -1918,6 +1926,7 @@ local function show_client(host, port, name, password)
 			end
 			view:place_objects(world_objects)
 			view:update_sounds(dtime)
+			view:update_fov(dtime)
 			update_hud()
 			if chat_wanted then
 				chat_wanted = false
