@@ -27,9 +27,11 @@ noclip privileges; without them its movement checks pull the player back.
 
 The player is a box 0.6 nodes across and 1.75 tall whose bottom is the
 position the server talks about, and it falls, jumps, walks into things and
-slides along them. A full node in the way has to be jumped over, which is what
-Luanti does too; a stair or a slab would not need it, but that needs the
-collision boxes out of the node definitions. What the player collides with is
+slides along them. What it walks into is the collision boxes out of the node
+definitions, turned the way the node's param2 says, so a slab is half a node
+high and a stair is two steps; anything up to Luanti's step height of 0.6 is
+walked onto without a jump and a whole node has to be jumped over, which is
+what Luanti asks for as well. What the player collides with is
 what the server says is walkable, and a node whose block has not arrived
 counts as solid, so the player stands still rather than falling through a
 world that has not loaded. The movement constants -- speeds, acceleration,

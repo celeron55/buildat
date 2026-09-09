@@ -237,12 +237,14 @@ local function read_node(r)
 	def.liquid_range = r:u8()
 	def.drowning = r:u8()
 	def.floodable = r:u8() ~= 0
-	-- The shape: what the node is made of, what a ray picks, and what the
-	-- player walks into. The first two are read -- a node whose shape is a
-	-- mesh has nothing in its node box, and then the selection box is the
-	-- best thing there is to draw -- and the collision box is left alone.
+	-- The shape, three times over: what the node is made of, what a ray
+	-- picks, and what the player walks into. A node whose shape is a mesh
+	-- has nothing in its node box, and then the selection box is the best
+	-- thing there is to draw; the collision box is what the player walks
+	-- into, and Luanti falls back to the node box when it is empty.
 	def.node_box = read_node_box(r)
 	def.selection_box = read_node_box(r)
+	def.collision_box = read_node_box(r)
 	return def
 end
 

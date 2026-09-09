@@ -21,6 +21,9 @@ local M = {}
 
 M.RADIUS = 0.3
 M.HEIGHT = 1.75
+-- Luanti's own step height: a player walks onto anything this much higher
+-- without jumping, which is what makes a stair or a slab walkable
+M.STEP_HEIGHT = 0.6
 -- Where the eyes are above the feet, which is what the camera follows
 M.EYE_HEIGHT = 1.625
 -- Luanti's movement defaults, which is what TOCLIENT_MOVEMENT carries and
@@ -40,6 +43,10 @@ M.DEFAULT_MOVEMENT = {
 	liquid_sink = 10,
 	gravity = 9.81,
 }
+
+-- What a voxel that is a whole cube is made of, in its own coordinates: the
+-- shorthand solid() returns true for
+local CUBE = {{-0.5, -0.5, -0.5, 0.5, 0.5, 0.5}}
 
 -- The box as an offset from the position, per axis (1 = x, 2 = y, 3 = z)
 local OFF_LO = {-M.RADIUS, 0, -M.RADIUS}
@@ -62,49 +69,89 @@ end
 
 -- Moves the box along one axis until something stops it. p is {x, y, z} and
 -- is changed in place; returns true if something stopped it.
-local function move_axis(p, axis, d, is_solid)
+--
+-- solid(x, y, z) says what is at a node position: false for nothing, true for
+-- the whole voxel, or the boxes it is made of, each {x0, y0, z0, x1, y1, z1}
+-- in the voxel's own -0.5...0.5 coordinates. A box the player is already
+-- inside of does not stop them, which is what lets somebody the server put
+-- inside a wall walk out of it.
+local function move_axis(p, axis, d, solid)
 	if d == 0 then
 		return false
 	end
-	-- The two axes the box does not move along, as the cells it covers there
+	-- The two axes the box does not move along, as the span it covers there
 	local a1, a2
 	for a = 1, 3 do
 		if a ~= axis then
 			if not a1 then a1 = a else a2 = a end
 		end
 	end
-	local u0, u1 = cell_lo(p[a1] + OFF_LO[a1]), cell_hi(p[a1] + OFF_HI[a1])
-	local v0, v1 = cell_lo(p[a2] + OFF_LO[a2]), cell_hi(p[a2] + OFF_HI[a2])
+	local lo1, hi1 = p[a1] + OFF_LO[a1], p[a1] + OFF_HI[a1]
+	local lo2, hi2 = p[a2] + OFF_LO[a2], p[a2] + OFF_HI[a2]
+	local u0, u1 = cell_lo(lo1), cell_hi(hi1)
+	local v0, v1 = cell_lo(lo2), cell_hi(hi2)
 
-	-- The cells the box moves into, nearest first
+	-- The cells the box moves through, nearest first. It starts at the cell
+	-- the moving edge is already in rather than the next one: a voxel made
+	-- of boxes can have one below the player's feet in the same cell as the
+	-- feet -- standing on a slab is exactly that -- and a box the player is
+	-- already past is skipped below anyway.
 	local from, to, step
 	if d > 0 then
-		from = cell_hi(p[axis] + OFF_HI[axis]) + 1
+		from = cell_hi(p[axis] + OFF_HI[axis])
 		to = cell_hi(p[axis] + d + OFF_HI[axis])
 		step = 1
 	else
-		from = cell_lo(p[axis] + OFF_LO[axis]) - 1
+		from = cell_lo(p[axis] + OFF_LO[axis])
 		to = cell_lo(p[axis] + d + OFF_LO[axis])
 		step = -1
 	end
 
+	-- Touching is not overlapping: a player standing exactly on a surface is
+	-- not inside it
+	local E = 1e-9
 	local q = {0, 0, 0}
-	q[a1], q[a2] = 0, 0
 	for c = from, to, step do
 		q[axis] = c
+		local stop = nil
 		for u = u0, u1 do
 			q[a1] = u
 			for v = v0, v1 do
 				q[a2] = v
-				if is_solid(q[1], q[2], q[3]) then
-					if d > 0 then
-						p[axis] = c - 0.5 - OFF_HI[axis]
-					else
-						p[axis] = c + 0.5 - OFF_LO[axis]
+				local what = solid(q[1], q[2], q[3])
+				if what then
+					local boxes = what == true and CUBE or what
+					for _, b in ipairs(boxes) do
+						-- The box where it is in the world
+						local b_lo1 = q[a1] + b[a1]
+						local b_hi1 = q[a1] + b[a1 + 3]
+						local b_lo2 = q[a2] + b[a2]
+						local b_hi2 = q[a2] + b[a2 + 3]
+						if b_hi1 > lo1 + E and b_lo1 < hi1 - E and
+								b_hi2 > lo2 + E and b_lo2 < hi2 - E then
+							local at
+							if d > 0 then
+								at = q[axis] + b[axis] - OFF_HI[axis]
+								if at >= p[axis] - E and
+										(not stop or at < stop) then
+									stop = at
+								end
+							else
+								at = q[axis] + b[axis + 3] - OFF_LO[axis]
+								if at <= p[axis] + E and
+										(not stop or at > stop) then
+									stop = at
+								end
+							end
+						end
 					end
-					return true
 				end
 			end
+		end
+		if stop and ((d > 0 and stop < p[axis] + d) or
+				(d < 0 and stop > p[axis] + d)) then
+			p[axis] = stop
+			return true
 		end
 	end
 	p[axis] = p[axis] + d
@@ -112,6 +159,37 @@ local function move_axis(p, axis, d, is_solid)
 end
 
 M.move_axis = move_axis
+
+-- One horizontal move, stepping up onto what is low enough to step onto: the
+-- move is tried again from a step up, and what the player then stands on is
+-- found by settling back down. Only from the ground, so a jump does not
+-- climb a wall.
+local function move_horizontal(p, axis, d, solid, on_ground)
+	local direct = {p[1], p[2], p[3]}
+	local hit = move_axis(direct, axis, d, solid)
+	local function take(q)
+		p[1], p[2], p[3] = q[1], q[2], q[3]
+	end
+	if not hit or not on_ground then
+		take(direct)
+		return hit
+	end
+	-- No room to rise, or still blocked up there: the plain move it is
+	local up = {p[1], p[2], p[3]}
+	if move_axis(up, 2, M.STEP_HEIGHT, solid) then
+		take(direct)
+		return true
+	end
+	if move_axis(up, axis, d, solid) then
+		take(direct)
+		return true
+	end
+	move_axis(up, 2, -M.STEP_HEIGHT, solid)
+	take(up)
+	return false
+end
+
+M.move_horizontal = move_horizontal
 
 local function never_solid()
 	return false
@@ -127,10 +205,11 @@ end
 
 -- new(is_solid, is_liquid)
 --
--- is_solid(x, y, z) says whether the node at those integer coordinates stops
--- the player. It is asked about nodes that may not have arrived, and should
--- say yes for those: standing still in a world that has not loaded is better
--- than falling through it.
+-- is_solid(x, y, z) says what stops the player at those integer coordinates:
+-- false for nothing, true for the whole voxel, or the boxes it is made of.
+-- It is asked about nodes that may not have arrived, and should say true for
+-- those: standing still in a world that has not loaded is better than falling
+-- through it.
 --
 -- is_liquid(x, y, z) says whether it is something to swim in. Optional.
 function M.new(is_solid, is_liquid)
@@ -247,15 +326,14 @@ function M.new(is_solid, is_liquid)
 		end
 
 		-- Then along each horizontal axis on its own, which is what makes a
-		-- walk into a wall at an angle slide along it
-		--
-		-- Nothing steps up: every node is a full cube here, and a full node
-		-- is something Luanti makes the player jump over too. Luanti's step
-		-- height of 0.6 is for the stairs and slabs whose collision boxes are
-		-- lower than a node, and those need the boxes read out of the node
-		-- definitions first.
-		local hit_x = move_axis(p, 1, self.vx * dtime, stops)
-		local hit_z = move_axis(p, 3, self.vz * dtime, stops)
+		-- walk into a wall at an angle slide along it. Anything up to a step
+		-- height is walked onto rather than into, so a stair or a slab does
+		-- not need a jump; a whole voxel does, which is what Luanti asks for
+		-- as well.
+		local hit_x = move_horizontal(p, 1, self.vx * dtime, stops,
+				self.on_ground)
+		local hit_z = move_horizontal(p, 3, self.vz * dtime, stops,
+				self.on_ground)
 		if hit_x then
 			self.vx = 0
 		end
