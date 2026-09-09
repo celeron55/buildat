@@ -28,7 +28,9 @@ Controls: the mouse looks, WASD walks, space jumps, ctrl sneaks, shift is
 faster, 1 to 8 pick a hotbar slot, the left mouse button digs what is pointed
 at and the right one places what is wielded, I opens the inventory, T says
 something (a line starting with a slash is a command), K toggles flying, H
-toggles going through walls, escape closes a form and then disconnects.
+toggles going through walls, F1 hides the hotbar, the health bar and the
+crosshair, F2 hides what has been said, F5 hides the lines of detail in the
+corner, escape closes a form and then disconnects.
 Flying and going through walls need the server to give the player the fly and
 noclip privileges; without them its movement checks pull the player back.
 
@@ -338,12 +340,7 @@ What is next
 - The game's own HUD: this server sends a hundred HUD elements -- its hearts,
   its bubbles, its armour bar, its crosshair -- and what is drawn instead is a
   hotbar and a health bar of this client's own
-- param2: the colour a node takes out of a palette, and facedir, which is
-  which tile goes on which face and which way a shape is turned
-- Node metadata, so that a chest's own slots are in its form
-- HP, breath
-- Node draw types that are not cubes: node boxes, meshes, plants, liquids
-- A node's colour out of its palette by paramtype2, rather than the one
-  colour in its definition, so that grass and foliage are the biome's shade
-- facedir and wallmounted: which tile goes on which face
-- Active objects, formspecs, the HUD, chat, sounds
+- The sounds the game plays, and the crack that grows over a node being dug
+- A connected node box, which is a shape that looks at its neighbours: a
+  fence with its rails, a pane in a run, and a flowing liquid's sloped
+  surface, which Luanti's own mesher works out the same way
