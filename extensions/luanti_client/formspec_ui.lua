@@ -44,10 +44,23 @@ local IGNORED = {
 --   or nil
 -- ctx.inventory(location, list_name) -> the list to draw in a list[] element,
 --   as inventory.lua's {size =, items = {...}}, or nil
+-- ctx.style is the UI style (an XMLFile) everything under the form inherits;
+--   without it a Text element has no font and draws nothing at all
 function M.new(magic, buildat, log, ctx)
 	local self = {}
 	local WHITE = "luanti_client/res/white.png"
 	local unknown = {}
+
+	-- Urho3D sorts an element's children by priority and the sort is not a
+	-- stable one, so siblings that all sit at the default priority are drawn
+	-- in whatever order the sort happens to leave them in -- a background
+	-- over the slots one run and under them the next. Every element gets the
+	-- priority its turn to be drawn is instead.
+	local depth = 0
+	local function next_priority()
+		depth = depth + 1
+		return depth
+	end
 
 	local function texture(name)
 		if not name or name == "" then
@@ -68,6 +81,7 @@ function M.new(magic, buildat, log, ctx)
 		e.size = magic.IntVector2(math.floor(w), math.floor(h))
 		e.texture = magic.cache:GetResource("Texture2D", WHITE)
 		e.color = color
+		e.priority = next_priority()
 		return e
 	end
 
@@ -99,13 +113,34 @@ function M.new(magic, buildat, log, ctx)
 		e:SetPosition(math.floor(x), math.floor(y))
 		e.size = magic.IntVector2(math.floor(w), math.floor(h))
 		e.texture = tex
+		e.priority = next_priority()
 		return e
+	end
+
+	-- Luanti's colour markup: \27(c@#rgb) and \27(c@#rrggbb) set the colour
+	-- of what follows. Only the first one is honoured -- a Text element is
+	-- one colour -- which is enough for a label a game has coloured.
+	local function markup_color(text)
+		local hex = text:match("\27%(c@#(%x%x%x%x%x%x)%)") or
+				text:match("\27%(c@#(%x%x%x)%)")
+		if not hex then
+			return nil
+		end
+		local function part(i, n)
+			local v = tonumber(hex:sub(i, i + n - 1), 16) / (n == 1 and 15 or 255)
+			return v
+		end
+		if #hex == 3 then
+			return magic.Color(part(1, 1), part(2, 1), part(3, 1))
+		end
+		return magic.Color(part(1, 2), part(3, 2), part(5, 2))
 	end
 
 	local function label(parent, x, y, w, text, size, color)
 		local e = parent:CreateChild("Text")
 		e:SetStyleAuto()
 		e.text = text
+		e.priority = next_priority()
 		e:SetFontSize(size)
 		e:SetPosition(math.floor(x), math.floor(y))
 		e.color = color or magic.Color(1, 1, 1)
@@ -125,6 +160,7 @@ function M.new(magic, buildat, log, ctx)
 			e.size = magic.IntVector2(math.floor(size * 0.8),
 					math.floor(size * 0.8))
 			e.texture = magic.cache:GetResource("Texture2D", resource)
+			e.priority = next_priority()
 		elseif stack then
 			-- Something is there but there is no image for it; a marked
 			-- square says so, and the name is in the tooltip line
@@ -184,6 +220,9 @@ function M.new(magic, buildat, log, ctx)
 	function self:hud(root, list, count, wield, hp, hp_max, screen_w,
 			screen_h)
 		local holder = root:CreateChild("UIElement")
+		if ctx.style then
+			holder.defaultStyle = ctx.style
+		end
 		local slot = math.floor(math.min(screen_w, screen_h) / 15)
 		local step = math.floor(slot * 1.1)
 		local width = step * count
@@ -230,9 +269,15 @@ function M.new(magic, buildat, log, ctx)
 
 		local ox = math.floor((screen_w - layout.width) / 2)
 		local oy = math.floor((screen_h - layout.height) / 2)
-		local window = root:CreateChild("BorderImage")
-		window.texture = magic.cache:GetResource("Texture2D", WHITE)
-		window.color = magic.Color(0.15, 0.15, 0.18, 0.92)
+		-- No backdrop of its own: what a form looks like is the backgrounds
+		-- it asks for, and a panel behind them darkens every one of them.
+		-- The element is still what catches the clicks.
+		local window = root:CreateChild("UIElement")
+		-- Inherited by everything under it, which is where the text in a
+		-- form gets its font
+		if ctx.style then
+			window.defaultStyle = ctx.style
+		end
 		window.size = magic.IntVector2(math.floor(layout.width),
 				math.floor(layout.height))
 		window:SetPosition(ox, oy)
@@ -240,6 +285,47 @@ function M.new(magic, buildat, log, ctx)
 		-- disabled element is not hit by a click: nothing is found under the
 		-- mouse and no click event is sent at all
 		window.enabled = true
+
+		-- style[name;k=v;...] and style_type[type;k=v;...]. Only the default
+		-- state is kept: hovered and pressed need an event this does not get.
+		local styles, type_styles = {}, {}
+		for _, e in ipairs(elements) do
+			if e.name == "style" or e.name == "style_type" then
+				local props = {}
+				for i = 2, #e.fields do
+					local k, v = e.fields[i]:match("^%s*([%w_]+)%s*=%s*(.*)$")
+					if k then
+						props[k] = v
+					end
+				end
+				local into = e.name == "style" and styles or type_styles
+				for target in tostring(e.fields[1] or ""):gmatch("[^,]+") do
+					local base, state = target:match("^%s*([^:%s]+):?(.*)$")
+					if base and (state == "" or state == "default") then
+						into[base] = into[base] or {}
+						for k, v in pairs(props) do
+							into[base][k] = v
+						end
+					end
+				end
+			end
+		end
+
+		-- What a named element of a given type is styled as
+		local function style_of(element_type, element_name)
+			local by_name = element_name and styles[element_name]
+			local by_type = type_styles[element_type]
+			if not by_name then
+				return by_type or {}
+			end
+			if not by_type then
+				return by_name
+			end
+			local out = {}
+			for k, v in pairs(by_type) do out[k] = v end
+			for k, v in pairs(by_name) do out[k] = v end
+			return out
+		end
 
 		local function at(e, field_i)
 			local pos = formspec.parse_v2(e.fields[field_i])
@@ -329,8 +415,16 @@ function M.new(magic, buildat, log, ctx)
 					local is_image = name:sub(1, 5) == "image"
 					local button_name = is_image and e.fields[4] or e.fields[3]
 					local text = is_image and e.fields[5] or e.fields[4]
-					if not (is_image and
-							image(window, x, y, w, h, e.fields[3])) then
+					local st = style_of(name, button_name)
+					local drawn = is_image and
+							image(window, x, y, w, h, e.fields[3])
+					-- A game that styles its buttons means them to look like
+					-- the image it gives, and a bordered box behind that is
+					-- not what it asked for
+					if not drawn and st.bgimg and st.bgimg ~= "" then
+						drawn = image(window, x, y, w, h, st.bgimg)
+					end
+					if not drawn and st.border ~= "false" then
 						box(window, x, y, w, h,
 								magic.Color(0.35, 0.35, 0.42, 0.9))
 					end
@@ -346,20 +440,34 @@ function M.new(magic, buildat, log, ctx)
 				local x, y = at(e, 1)
 				local text = name == "label" and e.fields[2] or e.fields[5]
 				if x and text then
+					local st = style_of(name, nil)
 					-- A label's y is the middle of its line
-					label(window, x, y - 8, nil, formspec.strip_escapes(text), 13)
+					label(window, x, y - 8, nil,
+							formspec.strip_escapes(text), 13,
+							markup_color(text) or
+									(st.textcolor and
+									markup_color("\27(c@"..st.textcolor..")")))
 				end
 			elseif name == "field" or name == "pwdfield" then
 				local x, y = at(e, 1)
 				local w, h = geometry(e, 2)
 				if x and w then
-					box(window, x, y, w, h, magic.Color(0.9, 0.9, 0.9, 0.9))
+					local st = style_of(name, e.fields[3])
+					local bg = st.bgcolor and
+							markup_color("\27(c@"..st.bgcolor..")")
+					if not (st.bgimg and st.bgimg ~= "" and
+							image(window, x, y, w, h, st.bgimg)) then
+						-- Luanti's own field is dark with light text in it
+						box(window, x, y, w, h,
+								bg or magic.Color(0.1, 0.1, 0.12, 0.9))
+					end
 					local value = e.fields[5] or ""
 					fields[#fields + 1] = {name = e.fields[3], value = value}
 					if value ~= "" then
 						label(window, x + 4, y + h / 2 - 7, w - 8,
 								formspec.strip_escapes(value), 12,
-								magic.Color(0.1, 0.1, 0.1))
+								st.textcolor and markup_color(
+										"\27(c@"..st.textcolor..")"))
 					end
 				end
 			elseif not unknown[name] then

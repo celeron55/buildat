@@ -471,6 +471,10 @@ local function show_client(host, port, name, password)
 				for _, missing in ipairs(store:plan(announced, wanted)) do
 					to_ask[#to_ask + 1] = missing
 				end
+				-- Planning counts a file that is already in the cache as had,
+				-- and then nothing will arrive to ask for a second look: what
+				-- was on disk resolves now or not at all
+				return texmod.resolve(name, texmod_ctx)
 			end
 			return nil
 		end
@@ -714,6 +718,7 @@ local function show_client(host, port, name, password)
 		local ui = formspec_ui.new(magic, buildat, log, {
 			texture = media_texture,
 			item_image = item_image,
+			style = style,
 			-- Where a list[] element's slots come from. A form can name the
 			-- player's own inventory, one the server has detached, or a
 			-- node's -- and node metadata is not read yet, so a chest's own
