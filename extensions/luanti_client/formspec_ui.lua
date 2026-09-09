@@ -293,9 +293,13 @@ function M.new(magic, buildat, log, ctx)
 		state = state or {}
 		state.scroll = state.scroll or {}
 		state.open = state.open or {}
+		state.check = state.check or {}
 		local slots = {}
 		local buttons = {}
 		local fields = {}
+		-- The things that are not buttons but send the form back all the
+		-- same: a tab of a tabheader, a checkbox
+		local taps = {}
 
 		local ox = math.floor((screen_w - layout.width) / 2)
 		local oy = math.floor((screen_h - layout.height) / 2)
@@ -410,6 +414,24 @@ function M.new(magic, buildat, log, ctx)
 				row.depth = tree_col and (tonumber(row[tree_col]) or 0) or 0
 				row.color = color_col and
 						markup_color("\27(c@"..row[color_col]..")") or nil
+				-- A cell may name its own colour in front of its text, as
+				-- "#rgb" or "#rrggbb"; "##" is one of those characters
+				-- rather than the start of a colour
+				for j = 1, ncol do
+					if j ~= color_col and j ~= tree_col then
+						local hex, rest = row[j]:match("^#(%x%x%x%x%x%x)(.*)$")
+						if not hex then
+							hex, rest = row[j]:match("^#(%x%x%x)([^%x].*)$")
+						end
+						if hex then
+							row.color = row.color or
+									markup_color("\27(c@#"..hex..")")
+							row[j] = rest
+						else
+							row[j] = row[j]:gsub("^##", "#")
+						end
+					end
+				end
 			end
 			for i, row in ipairs(rows) do
 				row.opens = tree_col ~= nil and rows[i + 1] ~= nil and
@@ -609,18 +631,102 @@ function M.new(magic, buildat, log, ctx)
 					-- not what it asked for
 					if not drawn and st.bgimg and st.bgimg ~= "" then
 						drawn = image(window, x, y, w, h, st.bgimg)
+						-- A styled button's image is nine-sliced too: the
+						-- middle is what stretches and the border of it
+						-- keeps its size, or the image comes out smeared
+						local border = drawn and
+								slice_border(st.bgimg_middle)
+						if border then
+							drawn.imageBorder = border
+							drawn.border = border
+						end
 					end
 					if not drawn and st.border ~= "false" then
 						box(window, x, y, w, h,
 								magic.Color(0.35, 0.35, 0.42, 0.9))
 					end
 					if text and text ~= "" then
-						label(window, x + 4, y + h / 2 - 8, w - 8,
-								formspec.strip_escapes(text), 12)
+						-- Luanti centres a button's text in it
+						local t = label(window, x + 4, y + h / 2 - 8, w - 8,
+								formspec.strip_escapes(text), 12,
+								st.textcolor and markup_color(
+										"\27(c@"..st.textcolor..")"))
+						t:SetTextAlignment(1) -- HA_CENTER
 					end
 					buttons[#buttons + 1] = {name = button_name,
 							x = x, y = y, w = w, h = h,
 							exit = name:sub(-5) == "_exit"}
+				end
+			elseif name == "tabheader" then
+				-- tabheader[X,Y;name;caption,...;current;...] and the newer
+				-- form with a W,H after the position. The tabs are drawn
+				-- across the form, the one that is on lighter than the rest.
+				--
+				-- simplified: a tab's width comes from counting the
+				-- characters of its caption rather than from the font, and
+				-- neither the transparent nor the border flag is honoured.
+				local x, y = at(e, 1)
+				local sized = formspec.parse_v2(e.fields[2]) ~= nil
+				local i0 = sized and 3 or 2
+				local w = sized and select(1, geometry(e, 2)) or layout.width
+				-- Luanti's own tab height, twice its button height, and its
+				-- y is the bottom of the tabs rather than the top: they sit
+				-- above whatever the form puts at the same y
+				local h = layout.imgsize * 15 / 13 * 0.35 * 2
+				y = y - h
+				local captions = {}
+				for _, c in ipairs(formspec.split(e.raw[i0 + 1] or "", ",")) do
+					captions[#captions + 1] = formspec.strip_escapes(
+							formspec.unescape(c))
+				end
+				local current = tonumber(e.fields[i0 + 2]) or 1
+				if x and #captions > 0 then
+					local tx = x
+					for i, caption in ipairs(captions) do
+						-- As wide as its own caption, which is what
+						-- Luanti's tab control does
+						local tw = #caption * 6.5 + 18
+						box(window, tx, y, tw - 2, h, i == current and
+								magic.Color(0.75, 0.75, 0.78, 0.95) or
+								magic.Color(0.35, 0.35, 0.4, 0.9))
+						local t = label(window, tx, y + h / 2 - 8, tw - 2,
+								caption, 12, i == current and
+								magic.Color(0.1, 0.1, 0.1) or nil)
+						t:SetTextAlignment(1) -- HA_CENTER
+						taps[#taps + 1] = {name = e.fields[i0],
+								value = tostring(i), x = tx, y = y,
+								w = tw - 2, h = h}
+						tx = tx + tw
+					end
+				end
+			elseif name == "checkbox" then
+				-- checkbox[X,Y;name;label;selected]. The state the player
+				-- clicked wins over the one the form was drawn with, so that
+				-- the tick moves before the server has answered.
+				local x, y = at(e, 1)
+				if x then
+					local on = state.check[e.fields[2]]
+					if on == nil then
+						on = e.fields[4] == "true"
+					end
+					local size = math.floor(layout.imgsize * 0.35)
+					-- A label's y is the middle of its line, and so is a
+					-- checkbox's
+					local cy = y - size / 2
+					box(window, x, cy, size, size,
+							magic.Color(0.1, 0.1, 0.12, 0.9))
+					if on then
+						box(window, x + 3, cy + 3, size - 6, size - 6,
+								magic.Color(0.85, 0.85, 0.9, 0.95))
+					end
+					local st = style_of(name, e.fields[2])
+					label(window, x + size + 6, y - 8, nil,
+							formspec.strip_escapes(e.fields[3] or ""), 13,
+							st.textcolor and markup_color(
+									"\27(c@"..st.textcolor..")"))
+					taps[#taps + 1] = {name = e.fields[2],
+							value = tostring(not on), x = x, y = cy,
+							w = size, h = size, check = true}
 				end
 			elseif name == "table" or name == "textlist" then
 				local x, y = at(e, 1)
@@ -707,6 +813,7 @@ function M.new(magic, buildat, log, ctx)
 		end
 		return {window = window, origin = {ox, oy}, slots = slots,
 				buttons = buttons, fields = fields, tables = tables,
+				taps = taps,
 				close_on_enter = close_on_enter}
 	end
 
