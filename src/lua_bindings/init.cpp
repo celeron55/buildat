@@ -19,6 +19,7 @@ extern void init_spatial_update_queue(lua_State *L);
 extern void init_misc_urho3d(lua_State *L);
 extern void init_network(lua_State *L);
 extern void init_crypto(lua_State *L);
+extern void init_compress(lua_State *L);
 
 void init(lua_State *L)
 {
@@ -35,6 +36,7 @@ void init(lua_State *L)
 	init_misc_urho3d(L);
 	init_network(L);
 	init_crypto(L);
+	init_compress(L);
 }
 
 } // namespace lua_bindingss

@@ -22,6 +22,12 @@ buildat.sha1(data) -> 20 bytes
 buildat.sha256(data) -> 32 bytes
 buildat.hex(data) -> string
 
+buildat.compress(data, format [, level]) -> string
+buildat.decompress(data [, format]) -> data, bytes_consumed
+- format is "zlib" or "zstd"; decompress defaults to "zlib"
+- bytes_consumed is how much of the front of data the stream took, which is what
+  says where the next one begins when streams are concatenated
+
 buildat.send_packet(name, data)
 
 buildat.sub_packet(name, function)
