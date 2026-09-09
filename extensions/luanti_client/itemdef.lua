@@ -58,14 +58,17 @@ local function read_tool_capabilities(serialize, data)
 	return caps
 end
 
--- An item's image: a name and an animation
-local function read_image(r)
+-- An item's image: a name, and from protocol 51 on an animation after it
+-- (ItemImageDef::serialize)
+local function read_image(r, protocol)
 	local name = r:string()
-	r:animation()
+	if protocol >= 51 then
+		r:animation()
+	end
 	return name
 end
 
-local function read_item(serialize, r)
+local function read_item(serialize, r, protocol)
 	local version = r:u8()
 	if version < ITEMDEF_VERSION then
 		error("luanti_client/itemdef: ItemDefinition version "..version)
@@ -74,8 +77,8 @@ local function read_item(serialize, r)
 	def.type = r:u8()
 	def.name = r:string()
 	def.description = r:string()
-	def.inventory_image = read_image(r)
-	def.wield_image = read_image(r)
+	def.inventory_image = read_image(r, protocol)
+	def.wield_image = read_image(r, protocol)
 	r:skip(12) -- wield_scale
 	def.stack_max = r:s16()
 	def.usable = r:u8() ~= 0
@@ -109,7 +112,7 @@ end
 -- name: a game keeps the names it has renamed items away from and a server
 -- hands out stacks under either. The third value is the aliases themselves,
 -- for whatever wants to know that a name is one.
-function M.parse(serialize, data, log)
+function M.parse(serialize, data, log, protocol)
 	local r = serialize.reader(data)
 	local version = r:u8()
 	if version ~= 0 then
@@ -120,7 +123,7 @@ function M.parse(serialize, data, log)
 	local failed = 0
 	for _ = 1, count do
 		local wrapper = serialize.reader(r:string())
-		local ok, def = pcall(read_item, serialize, wrapper)
+		local ok, def = pcall(read_item, serialize, wrapper, protocol)
 		if ok then
 			items[def.name] = def
 		else

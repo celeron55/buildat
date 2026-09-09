@@ -537,7 +537,8 @@ local function show_client(host, port, name, password)
 		end
 
 		client.on_itemdef = function(data)
-			local items, count = itemdef.parse(luanti.serialize, data, log)
+			local items, count = itemdef.parse(luanti.serialize, data, log,
+					client.protocol_version)
 			item_defs = items
 			add_line(count.." item definitions")
 			plan_media()

@@ -67,6 +67,36 @@ function M.utf16_units(s)
 	return units
 end
 
+-- Luanti's base64, which is what a server older than protocol 48 announces
+-- media hashes in. Standard alphabet, and the padding may be left off.
+local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local B64_VALUE = (function()
+	local out = {}
+	for i = 1, #B64 do
+		out[B64:sub(i, i)] = i - 1
+	end
+	return out
+end)()
+
+function M.base64_decode(s)
+	local out = {}
+	local acc, bits = 0, 0
+	for i = 1, #s do
+		local v = B64_VALUE[s:sub(i, i)]
+		if v then
+			acc = acc * 64 + v
+			bits = bits + 6
+			if bits >= 8 then
+				bits = bits - 8
+				local byte = math.floor(acc / 2 ^ bits)
+				out[#out + 1] = string.char(byte)
+				acc = acc - byte * 2 ^ bits
+			end
+		end
+	end
+	return table.concat(out)
+end
+
 function M.writer()
 	local parts = {}
 	local w = {}

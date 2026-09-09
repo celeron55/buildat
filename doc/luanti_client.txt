@@ -6,7 +6,14 @@ server: it does the client's side of Luanti's protocol.
     $ bin/buildat_client -m luanti_client
 
 It asks for an address, a player name and a password, logs in, and shows the
-terrain around the player with the server's own textures.
+terrain around the player with the server's own textures. Luanti 5.11.0 up to
+5.17.0 -- protocol 46 up to 52 -- are what it speaks; every one of them
+serializes mapblocks as version 29, which is the only version parsed here.
+What changed inside that range and is handled: definitions and media are zlib
+below protocol 48 and zstd from there on, the media announcement is a plain
+list of names and base64 hashes below 48, an item's image carries an
+animation only from 51 on, and the inventory is the rest of its packet below
+52.
 BUILDAT_LUANTI_ADDRESS sets the address the dialog starts with, which is what
 scripted runs (-c) use. BUILDAT_LUANTI_FORCE_DAY keeps the world at midday
 whatever the server's time is, for the same reason: a run of half a minute
