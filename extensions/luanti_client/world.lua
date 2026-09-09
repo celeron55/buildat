@@ -548,6 +548,13 @@ function M.new(magic, buildat, log, options)
 
 	-- Meshes the blocks nearest the camera first, up to MESH_PER_FRAME of
 	-- them, and drops what has gone further away than drop_distance nodes.
+	--
+	-- drop_distance may be nil, and has to be until the camera is where the
+	-- player is: a block the server sends is acknowledged as soon as it
+	-- arrives, and the server does not send an acknowledged block again, so
+	-- dropping it leaves a hole in the world for the rest of the session --
+	-- and the first blocks it sends are the ones around the player, which is
+	-- exactly where a hole is worst.
 	function self:update(dtime, drop_distance)
 		local p = camera_node.position
 		if drop_distance then
@@ -630,18 +637,18 @@ function M.new(magic, buildat, log, options)
 	-- Y with 0 towards +Z, and its pitch is positive looking up; Urho3D's
 	-- euler pitch is positive looking down.
 	-- Where the camera is and which way it looks, in Luanti's terms: pitch is
-	-- positive looking up and yaw is degrees counterclockwise from +Z seen
-	-- from above.
+	-- degrees positive looking down and yaw is degrees counterclockwise from
+	-- +Z seen from above.
 	--
-	-- Urho3D's pitch is positive looking down, and its yaw turns the other
-	-- way round -- clockwise from above, because it is left-handed where
-	-- Luanti's rotateXZBy() is right-handed -- so both are negated. Getting
-	-- the yaw's sense wrong is not just a mirrored view: the server sends
-	-- the blocks it thinks the player can see, so it would send the ones
-	-- behind them.
+	-- Urho3D's pitch is positive looking down too, so that one goes as it
+	-- is; its yaw turns the other way round -- clockwise from above, because
+	-- it is left-handed where Luanti's rotateXZBy() is right-handed -- so
+	-- that one is negated. Getting either sense wrong is not just a mirrored
+	-- view: the server sends the blocks it thinks the player can see, so it
+	-- would send the ones the player is looking away from.
 	function self:set_camera(x, y, z, pitch, yaw)
 		camera_node.position = magic.Vector3(x, y, z)
-		camera_node.rotation = magic.Quaternion(-(pitch or 0), -(yaw or 0), 0)
+		camera_node.rotation = magic.Quaternion(pitch or 0, -(yaw or 0), 0)
 	end
 
 	return self
