@@ -1186,6 +1186,63 @@ function M.new(magic, buildat, log, options)
 		pointed_node.enabled = false
 	end
 
+	-- The crack over the voxel being dug. Luanti draws it as a second layer
+	-- on the voxel's own tiles, which follows whatever shape it has; this is
+	-- a cube just outside the voxel wearing one frame of the crack texture,
+	-- which is the same picture on anything that is a cube.
+	--
+	-- simplified: so the crack on a stair or a torch is a cube around it.
+	-- The faithful way is a voxel per (definition, crack frame) through the
+	-- pair machinery, which is five more voxel types per definition -- and
+	-- the definitions are already two and a half thousand.
+	--
+	-- One node per frame, enabled one at a time, rather than one node whose
+	-- material is swapped: a Material lives only as long as something in the
+	-- engine holds it, and a StaticModel that has been handed one is such a
+	-- thing. Keeping materials in a Lua table and putting them back on the
+	-- model later reads the freed one.
+	local crack_nodes = {}
+	local crack_worn = nil
+
+	local function crack_node_for(resource)
+		local node = crack_nodes[resource]
+		if node then
+			return node
+		end
+		node = scene:CreateChild("Crack")
+		local model = node:CreateComponent("StaticModel")
+		model.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+		local material = magic.Material.new()
+		material:SetTechnique(0, magic.cache:GetResource("Technique",
+				"luanti_client/res/UnlitAlphaMask.xml"))
+		material:SetTexture(0, magic.cache:GetResource("Texture2D", resource))
+		model.material = material
+		-- Just outside the voxel, so the crack does not fight the face it is
+		-- drawn on for the depth buffer
+		node.scale = magic.Vector3(1.004, 1.004, 1.004)
+		node.enabled = false
+		crack_nodes[resource] = node
+		return node
+	end
+
+	-- set_crack(under, resource)
+	--
+	-- under is the voxel being dug and resource the texture of the frame the
+	-- dig has got to; either being nil takes the crack away.
+	function self:set_crack(under, resource)
+		if crack_worn and crack_worn ~= resource then
+			crack_nodes[crack_worn].enabled = false
+			crack_worn = nil
+		end
+		if not under or not resource then
+			return
+		end
+		local node = crack_node_for(resource)
+		node.position = magic.Vector3(under[1], under[2], under[3])
+		node.enabled = true
+		crack_worn = resource
+	end
+
 	--
 	-- The things in the world that are not nodes
 	--

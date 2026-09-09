@@ -62,7 +62,16 @@ local BUILTIN_TEXTURES = {
 	["unknown_node.png"] = "luanti_client/res/placeholder.png",
 	["unknown_item.png"] = "luanti_client/res/placeholder.png",
 	["unknown_object.png"] = "luanti_client/res/placeholder.png",
+	-- The crack that grows over a node being dug is the client's own, not
+	-- the game's: no server sends one. This is Luanti's, and res/LICENSE
+	-- says so.
+	["crack_anylength.png"] = "luanti_client/res/crack_anylength.png",
 }
+
+-- How many frames the crack strip holds is worked out from the image, which
+-- is what "anylength" in its name means; this is what to fall back on if it
+-- cannot be read, and is Luanti's own default.
+local CRACK_FRAMES_DEFAULT = 5
 
 -- What time it is, whatever the server says: how the sky at dawn or at night
 -- gets looked at without waiting for the world to turn, or asking a server for
@@ -902,6 +911,53 @@ local function show_client(host, port, name, password)
 		-- finds. Luanti's server wants a START_DIGGING at a node before a
 		-- DIGGING_COMPLETED for it, and no sooner than the dig would have
 		-- taken; the node then comes back as a REMOVENODE.
+		-- One frame of the crack, as a resource name: the strip cut into
+		-- frames by the same [verticalframe texmod.lua already does for an
+		-- animated tile. Cut once per frame index and kept.
+		local crack_frames = nil
+		local crack_resource = {}
+
+		local function crack_frame_count()
+			if crack_frames then
+				return crack_frames
+			end
+			crack_frames = CRACK_FRAMES_DEFAULT
+			local tex = magic.cache:GetResource("Texture2D",
+					BUILTIN_TEXTURES["crack_anylength.png"])
+			-- A strip of square frames, so how many there are is its shape
+			if tex and tex.width > 0 and tex.height > tex.width then
+				crack_frames = math.floor(tex.height / tex.width)
+			end
+			return crack_frames
+		end
+
+		local function crack_texture(index)
+			local resource = crack_resource[index]
+			if resource == nil then
+				resource = texmod.resolve("crack_anylength.png^[verticalframe:"..
+						crack_frame_count()..":"..index, texmod_ctx) or false
+				crack_resource[index] = resource
+			end
+			return resource or nil
+		end
+
+		-- How far into the dig the crack is, or nil when nothing is being
+		-- dug: Luanti walks the frames over the time the node takes.
+		local function update_crack()
+			if not dig or not dig.time or dig.time <= 0 or dig.done then
+				view:set_crack(nil, nil)
+				return
+			end
+			local frames = crack_frame_count()
+			local index = math.floor(dig.elapsed / dig.time * frames)
+			if index < 0 then
+				index = 0
+			elseif index > frames - 1 then
+				index = frames - 1
+			end
+			view:set_crack(dig.under, crack_texture(index))
+		end
+
 		local function update_dig(dtime)
 			if form then
 				-- A form has the mouse; nothing is pointed at behind it
@@ -912,6 +968,7 @@ local function show_client(host, port, name, password)
 							wield_index - 1)
 					dig = nil
 				end
+				update_crack()
 				return
 			end
 			pointed_under, pointed_above = view:point_ray(reach())
@@ -926,6 +983,7 @@ local function show_client(host, port, name, password)
 							wield_index - 1)
 					dig = nil
 				end
+				update_crack()
 				return
 			end
 			if not dig or dig.under[1] ~= pointed_under[1] or
@@ -944,9 +1002,11 @@ local function show_client(host, port, name, password)
 				client:interact(luanti.INTERACT_START_DIGGING,
 						wield_index - 1, {under = dig.under,
 						above = dig.above})
+				update_crack()
 				return
 			end
 			if dig.done then
+				update_crack()
 				return
 			end
 			dig.elapsed = dig.elapsed + dtime
@@ -956,6 +1016,7 @@ local function show_client(host, port, name, password)
 						above = dig.above})
 				dig.done = true
 			end
+			update_crack()
 		end
 
 		--
