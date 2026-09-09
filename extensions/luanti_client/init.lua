@@ -922,6 +922,7 @@ local function show_client(host, port, name, password)
 			end
 			form = {spec = spec, formname = formname or "", source = source,
 					state = {scroll = {}}}
+			held = nil
 			draw_form()
 			magic.input:SetMouseVisible(true)
 		end
@@ -937,7 +938,10 @@ local function show_client(host, port, name, password)
 		-- A click in a form: a slot picks a stack up and puts it down, and a
 		-- button sends the form's fields back with the button's own name
 		-- among them.
-		local function form_click(x, y)
+		-- button is which mouse button it was: Luanti's own inventory takes
+		-- and puts a whole stack with the left one, half of it or a single
+		-- item with the right, and ten with the middle.
+		local function form_click(x, y, button)
 			if not form or not form.drawn then
 				return
 			end
@@ -1008,14 +1012,44 @@ local function show_client(host, port, name, password)
 							" at "..lx..","..ly)
 					if not held then
 						if slot.stack then
-							held = slot
+							local have = slot.stack.count
+							local take = have
+							if button == MOUSEB_RIGHT then
+								take = math.ceil(have / 2)
+							elseif button == MOUSEB_MIDDLE then
+								take = math.min(10, have)
+							end
+							held = {location = slot.location,
+									list = slot.list, index = slot.index,
+									count = take}
+							-- The slot the stack came from is marked, which
+							-- is as much as there is of a stack on the
+							-- cursor.
+							--
+							-- simplified: Luanti draws what is held under
+							-- the mouse and follows it about. Doing that
+							-- wants the stack drawn every frame, and what
+							-- this needs is only to be able to see which
+							-- stack is in hand.
+							form.state.held = held
+							form_stale = true
 						end
 					else
-						client:send_inventory_move(
-								held.stack and held.stack.count or 1,
+						local move = held.count
+						if button == MOUSEB_RIGHT then
+							move = 1
+						elseif button == MOUSEB_MIDDLE then
+							move = math.min(10, held.count)
+						end
+						client:send_inventory_move(move,
 								held.location, held.list, held.index,
 								slot.location, slot.list, slot.index)
-						held = nil
+						held.count = held.count - move
+						if held.count <= 0 then
+							held = nil
+						end
+						form.state.held = held
+						form_stale = true
 					end
 					return
 				end
@@ -1379,12 +1413,11 @@ local function show_client(host, port, name, password)
 		-- Where a click landed, which MouseButtonDown does not say
 		local ui_click_cb = magic.SubscribeToEvent("UIMouseClick",
 				function(event_type, event_data)
-			if event_data:GetInt("Button") ~= MOUSEB_LEFT then
-				return
-			end
+			local button = event_data:GetInt("Button")
 			if form then
-				form_click(event_data:GetInt("X"), event_data:GetInt("Y"))
-			elseif chat_input then
+				form_click(event_data:GetInt("X"), event_data:GetInt("Y"),
+						button)
+			elseif chat_input and button == MOUSEB_LEFT then
 				chat_click(event_data:GetInt("X"), event_data:GetInt("Y"))
 			end
 		end)
