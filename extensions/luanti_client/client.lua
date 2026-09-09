@@ -19,6 +19,8 @@ local path = __buildat_extension_path("luanti_client")
 local serialize = dofile(path.."/serialize.lua")
 local connection = dofile(path.."/connection.lua")
 local srp = dofile(path.."/srp.lua")
+local nodemeta = dofile(path.."/nodemeta.lua")
+local inventory = dofile(path.."/inventory.lua")
 
 local M = {}
 
@@ -96,6 +98,7 @@ local TOCLIENT = {
 	AUTH_ACCEPT    = 0x03,
 	ACCESS_DENIED  = 0x0A,
 	BLOCKDATA      = 0x20,
+	NODEMETA_CHANGED = 0x59,
 	ADDNODE        = 0x21,
 	REMOVENODE     = 0x22,
 	TIME_OF_DAY    = 0x29,
@@ -235,7 +238,7 @@ local function parse_blockdata(data)
 		error("luanti_client: mapblock has content_width "..content_width..
 				" and params_width "..params_width..", expected 2 and 2")
 	end
-	return {
+	local block = {
 		x = x, y = y, z = z,
 		is_underground = flags % 2 == 1,
 		lighting_complete = lighting_complete,
@@ -243,6 +246,13 @@ local function parse_blockdata(data)
 		param1 = b:raw(NODECOUNT),
 		param2 = b:raw(NODECOUNT),
 	}
+	-- What hangs off the voxels in it: a chest's contents, a sign's text.
+	-- Keyed by the index into the block. A block whose metadata cannot be
+	-- read is still a block: the geometry is worth more than the chests.
+	local ok, meta = pcall(nodemeta.parse, b, inventory, false)
+	block.meta = ok and meta or {}
+	block.meta_error = (not ok) and tostring(meta) or nil
+	return block
 end
 
 -- new(socket, options, log): options.name, options.password and
@@ -261,6 +271,9 @@ function M.new(socket, options, log)
 			-- on_node(x, y, z, param0, param1, param2) for a single node the
 			-- server changed. param0 is CONTENT_AIR for a removal.
 			on_node = nil,
+			-- on_node_meta(entries) with the metadata a server changed,
+			-- keyed by "x,y,z"; see nodemeta.lua
+			on_node_meta = nil,
 			-- on_nodedef(data) with the decompressed NODEDEF payload;
 			-- nodedef.lua is what reads it
 			on_nodedef = nil,
@@ -732,6 +745,17 @@ function M.new(socket, options, log)
 		if self.on_block then
 			self.on_block(block)
 		end
+	end
+
+	-- The metadata of voxels a server has changed: one zlib frame holding the
+	-- same list a mapblock ends with, but with absolute positions.
+	handlers[TOCLIENT.NODEMETA_CHANGED] = function(r)
+		if not self.on_node_meta then
+			return
+		end
+		local raw = buildat.decompress(r:longstring(), "zlib")
+		local inner = serialize.reader(raw)
+		self.on_node_meta(nodemeta.parse(inner, inventory, true))
 	end
 
 	handlers[TOCLIENT.ACCESS_DENIED] = function(r)

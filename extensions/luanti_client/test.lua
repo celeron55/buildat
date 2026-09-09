@@ -27,6 +27,7 @@ local nodedef = dofile(dir.."/nodedef.lua")
 local media = dofile(dir.."/media.lua")
 local shapes = dofile(dir.."/shapes.lua")
 local itemdef = dofile(dir.."/itemdef.lua")
+local nodemeta = dofile(dir.."/nodemeta.lua")
 
 local function dump_name(s)
 	return "\""..s:gsub("[^%w%p ]", "?").."\""
@@ -1035,6 +1036,43 @@ assert(item_defs["default:axe"] == item_defs["mcl_core:axe"],
 assert(item_aliases["default:axe"] == "mcl_core:axe", "itemdef: the alias")
 
 print("itemdef: ok")
+
+-- nodemeta.lua
+--
+-- What hangs off a voxel: the fields and the inventory, with the inventory's
+-- text ending the entry rather than a length saying where it stops
+
+local mw = serialize.writer()
+mw:u8(2):u16(1) -- version, one entry
+mw:u16(5 + 2 * 16 + 3 * 256) -- the index of (5, 2, 3) in a block
+mw:u32(2) -- two fields
+mw:string("formspec"):longstring("size[8,9]"):u8(0)
+mw:string("infotext"):longstring("Chest"):u8(0)
+mw:raw("List main 3\nItem mcl_core:dirt 5\nEmpty\nItem mcl_core:stone\n"..
+		"EndInventoryList\nEndInventory\n")
+local metas = nodemeta.parse(serialize.reader(mw:data()), inventory, false)
+local entry = metas[5 + 2 * 16 + 3 * 256]
+assert(entry, "nodemeta: the entry is at the block index")
+assert(entry.fields.formspec == "size[8,9]", "nodemeta: a field")
+assert(entry.fields.infotext == "Chest", "nodemeta: the second field")
+assert(entry.lists.main.size == 3, "nodemeta: the list's size")
+assert(entry.lists.main.items[1].count == 5, "nodemeta: the first stack")
+assert(entry.lists.main.items[2] == nil, "nodemeta: the empty slot")
+assert(entry.lists.main.items[3].name == "mcl_core:stone",
+		"nodemeta: the stack after the empty one")
+
+-- Nothing at all is a version of zero, and no count follows it
+assert(next(nodemeta.parse(serialize.reader("\0"), inventory, false)) == nil,
+		"nodemeta: an empty list")
+
+-- The same list with absolute positions, which is how a change arrives
+local aw = serialize.writer()
+aw:u8(2):u16(1):s16(-3):s16(9):s16(-40):u32(0)
+aw:raw("EndInventory\n")
+local abs = nodemeta.parse(serialize.reader(aw:data()), inventory, true)
+assert(abs["-3,9,-40"], "nodemeta: an absolute position is its own key")
+
+print("nodemeta: ok")
 
 -- shapes.lua
 --

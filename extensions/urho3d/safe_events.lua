@@ -51,6 +51,16 @@ return {
 		Buttons = {variant = "Int", safe = "number"},
 		Qualifiers = {variant = "Int", safe = "number"},
 	},
+	-- The window's size or fullscreen state changed. What wants to know is
+	-- anything that put something on the GPU by hand: Urho3D can bring back
+	-- what it loaded from a file, and nothing else.
+	ScreenMode = {
+		Width = {variant = "Int", safe = "number"},
+		Height = {variant = "Int", safe = "number"},
+		Fullscreen = {variant = "Bool", safe = "boolean"},
+		Resizable = {variant = "Bool", safe = "boolean"},
+		Borderless = {variant = "Bool", safe = "boolean"},
+	},
 	HoverBegin = {
 	},
 	HoverEnd = {

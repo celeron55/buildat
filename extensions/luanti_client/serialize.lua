@@ -306,6 +306,19 @@ function M.reader(data)
 		return table.concat(out)
 	end
 
+	-- One line of a part of a packet that is text rather than fields -- an
+	-- inventory, node metadata -- without its newline. What is left when
+	-- there is no newline is the last line.
+	function r:line()
+		local at = data:find("\n", pos, true)
+		if not at then
+			return self:rest()
+		end
+		local s = data:sub(pos, at - 1)
+		pos = at + 1
+		return s
+	end
+
 	function r:skip(n)
 		self:raw(n)
 		return self
