@@ -157,6 +157,8 @@ local TOCLIENT = {
 	STOP_SOUND     = 0x40,
 	FADE_SOUND     = 0x55,
 	FOV            = 0x36,
+	OVERRIDE_DAY_NIGHT_RATIO = 0x50,
+	PLAYER_SPEED   = 0x2B,
 	SRP_BYTES_S_B  = 0x60,
 }
 
@@ -364,6 +366,15 @@ function M.new(socket, options, log)
 			-- multiple of the client's own, with zero meaning back to the
 			-- client's own
 			on_fov = nil,
+			-- What the server says the light is whatever the time is, out of
+			-- OVERRIDE_DAY_NIGHT_RATIO: 0...1, or nil for a server that has
+			-- stopped overriding it. A game sets this where the sky has
+			-- nothing to do with the light -- underground, in another
+			-- dimension, in a cutscene.
+			day_night_override = nil,
+			-- on_player_speed(x, y, z): a push the server gave the player,
+			-- in nodes a second, to add to whatever speed it already has
+			on_player_speed = nil,
 			on_play_sound = nil,
 			on_stop_sound = nil,
 			on_fade_sound = nil,
@@ -698,6 +709,21 @@ function M.new(socket, options, log)
 		if self.on_fov then
 			self.on_fov(fov, is_multiplier, transition_time)
 		end
+	end
+
+	handlers[TOCLIENT.PLAYER_SPEED] = function(r)
+		local x, y, z = r:v3f()
+		if self.on_player_speed then
+			self.on_player_speed(x / BS, y / BS, z / BS)
+		end
+	end
+
+	handlers[TOCLIENT.OVERRIDE_DAY_NIGHT_RATIO] = function(r)
+		local do_override = r:u8() ~= 0
+		-- In thousandths, which is Luanti's own unit for it
+		local ratio = r:u16()
+		self.day_night_override = do_override and
+				math.min(math.max(ratio / 1000, 0), 1) or nil
 	end
 
 	handlers[TOCLIENT.PLAY_SOUND] = function(r)
