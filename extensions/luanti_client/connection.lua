@@ -44,6 +44,12 @@ local RESEND_TIMEOUT = 0.5
 local PING_INTERVAL = 5.0
 -- What one datagram carries; Luanti's own default before MTU discovery
 local MAX_PACKET_SIZE = 512
+-- protocol id, peer id and channel
+local BASE_HEADER_SIZE = 7
+-- The type byte and the seqnum of a reliable packet
+local RELIABLE_HEADER_SIZE = 3
+-- The type byte, the split seqnum, the chunk count and the chunk number
+local SPLIT_HEADER_SIZE = 7
 
 local function seqnum_higher(totest, base)
 	if totest > base then
@@ -67,6 +73,7 @@ function M.new(socket, log)
 		channels[i] = {
 			next_outgoing_seqnum = M.SEQNUM_INITIAL,
 			next_incoming_seqnum = M.SEQNUM_INITIAL,
+			next_split_seqnum = 0,
 			incoming = {},   -- seqnum -> payload waiting for its turn
 			unacked = {},    -- seqnum -> {data=, age=}
 			splits = {},     -- seqnum -> {count=, got=, chunks={}}
@@ -79,9 +86,6 @@ function M.new(socket, log)
 		w:u32(M.PROTOCOL_ID):u16(self.peer_id):u8(channel):raw(packet)
 		local data = w:data()
 		if #data > MAX_PACKET_SIZE then
-			-- simplified: no outgoing split. Nothing the client sends during
-			-- login and play is this big; media requests would be, and this is
-			-- where PACKET_TYPE_SPLIT would go on the sending side too.
 			error("luanti_client/connection: packet of "..#data..
 					" bytes is too big to send")
 		end
@@ -104,19 +108,49 @@ function M.new(socket, log)
 	end
 
 	-- send(channel, reliable, data)
+	--
+	-- Payloads that do not fit one datagram go as PACKET_TYPE_SPLIT chunks,
+	-- each of which is a packet in its own right: a reliable send gets a
+	-- seqnum per chunk. REQUEST_MEDIA is the first thing the client sends that
+	-- needs this.
 	function self:send(channel, reliable, data)
-		local original = serialize.writer():u8(PACKET_TYPE_ORIGINAL):raw(data)
-				:data()
-		if not reliable then
-			return send_datagram(channel, original)
-		end
 		local c = channels[channel]
-		local seqnum = c.next_outgoing_seqnum
-		c.next_outgoing_seqnum = (seqnum + 1) % 65536
-		local packet = serialize.writer():u8(PACKET_TYPE_RELIABLE):u16(seqnum)
-				:raw(original):data()
-		c.unacked[seqnum] = {packet = packet, age = 0}
-		return send_datagram(channel, packet)
+		local chunk_size_max = MAX_PACKET_SIZE - BASE_HEADER_SIZE
+		if reliable then
+			chunk_size_max = chunk_size_max - RELIABLE_HEADER_SIZE
+		end
+		local packets = {}
+		if #data + 1 > chunk_size_max then
+			local split_seqnum = c.next_split_seqnum
+			c.next_split_seqnum = (split_seqnum + 1) % 65536
+			local payload_max = chunk_size_max - SPLIT_HEADER_SIZE
+			local count = math.ceil(#data / payload_max)
+			for i = 0, count - 1 do
+				packets[#packets + 1] = serialize.writer()
+						:u8(PACKET_TYPE_SPLIT):u16(split_seqnum)
+						:u16(count):u16(i)
+						:raw(data:sub(i * payload_max + 1,
+								(i + 1) * payload_max))
+						:data()
+			end
+		else
+			packets[1] = serialize.writer():u8(PACKET_TYPE_ORIGINAL):raw(data)
+					:data()
+		end
+		local ok = true
+		for _, packet in ipairs(packets) do
+			if reliable then
+				local seqnum = c.next_outgoing_seqnum
+				c.next_outgoing_seqnum = (seqnum + 1) % 65536
+				local wrapped = serialize.writer():u8(PACKET_TYPE_RELIABLE)
+						:u16(seqnum):raw(packet):data()
+				c.unacked[seqnum] = {packet = wrapped, age = 0}
+				ok = send_datagram(channel, wrapped) and ok
+			else
+				ok = send_datagram(channel, packet) and ok
+			end
+		end
+		return ok
 	end
 
 	function self:disconnect()
