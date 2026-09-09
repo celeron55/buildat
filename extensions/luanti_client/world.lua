@@ -838,28 +838,57 @@ function M.new(magic, buildat, log, options)
 	-- in. One flat outline that gets turned to whichever face it is, which is
 	-- what games/digger does; NoTextureVColMultiply darkens what is behind it
 	-- rather than drawing over it, so it reads on any texture.
+	-- What is pointed at: a frame around every face of the voxel, which
+	-- together read as the wire box Luanti draws around it. Two triangles
+	-- per side of each frame, in one geometry, and the whole thing is moved
+	-- to the voxel that is pointed at rather than built again.
+	--
+	-- simplified: the box is the voxel's cube, not its shape, so what is
+	-- outlined around a stair or a torch is the whole voxel. Luanti outlines
+	-- the selection box, which is what would have to be handed in here.
 	local pointed_node = scene:CreateChild("Pointed")
 	do
 		local cg = pointed_node:CreateComponent("CustomGeometry")
 		cg:BeginGeometry(0, magic.TRIANGLE_LIST)
 		cg:SetNumGeometries(1)
-		local color = magic.Color(0.12, 0.36, 0.12)
-		local function face(x0, z0, x1, z1)
-			local y = 0.502 -- Just outside the node, so it does not z-fight
+		local color = magic.Color(0.06, 0.06, 0.06)
+		-- Just outside the voxel, so the frame does not fight the face it is
+		-- drawn on for the depth buffer
+		local d = 0.502
+		local w = 1.0 / 16
+
+		-- One rectangle in a plane, given as the two axes it runs along and
+		-- the constant of the third. axis is 1, 2 or 3 for x, y or z.
+		local function quad(axis, at, a0, b0, a1, b1)
 			local corners = {
-				{x0, z1}, {x1, z1}, {x1, z0}, {x1, z0}, {x0, z0}, {x0, z1},
+				{a0, b1}, {a1, b1}, {a1, b0}, {a1, b0}, {a0, b0}, {a0, b1},
 			}
 			for _, c in ipairs(corners) do
-				cg:DefineVertex(magic.Vector3(c[1], y, c[2]))
+				local p = {}
+				if axis == 2 then
+					p = {c[1], at, c[2]}
+				elseif axis == 1 then
+					p = {at, c[1], c[2]}
+				else
+					p = {c[1], c[2], at}
+				end
+				cg:DefineVertex(magic.Vector3(p[1], p[2], p[3]))
 				cg:DefineColor(color)
 			end
 		end
-		local d = 0.502
-		local w = 1.0 / 16
-		face(-d, d - w, d, d)
-		face(-d, -d, d, -d + w)
-		face(d - w, -d + w, d, d - w)
-		face(-d, -d + w, -d + w, d - w)
+
+		-- The four bars of a frame in one plane
+		local function frame(axis, at)
+			quad(axis, at, -d, d - w, d, d)
+			quad(axis, at, -d, -d, d, -d + w)
+			quad(axis, at, d - w, -d + w, d, d - w)
+			quad(axis, at, -d, -d + w, -d + w, d - w)
+		end
+
+		for axis = 1, 3 do
+			frame(axis, d)
+			frame(axis, -d)
+		end
 		cg:Commit()
 		local m = magic.Material.new()
 		m:SetTechnique(0, magic.cache:GetResource("Technique",
@@ -1014,28 +1043,15 @@ function M.new(magic, buildat, log, options)
 
 	-- Shows the outline on a node, or hides it when there is nothing pointed
 	-- at. above is which way the face points.
+	-- Which voxel the frame is around. above is which side of it the ray
+	-- came in through, which the frame does not care about any more; it is
+	-- still taken so that "nothing is pointed at" is one call.
 	function self:set_pointed(under, above)
 		if not under or not above then
 			pointed_node.enabled = false
 			return
 		end
 		pointed_node.position = magic.Vector3(under[1], under[2], under[3])
-		local dx = above[1] - under[1]
-		local dy = above[2] - under[2]
-		local dz = above[3] - under[3]
-		if dx > 0 then
-			pointed_node.rotation = magic.Quaternion(90, 0, -90)
-		elseif dx < 0 then
-			pointed_node.rotation = magic.Quaternion(90, 0, 90)
-		elseif dy > 0 then
-			pointed_node.rotation = magic.Quaternion(0, 0, 0)
-		elseif dy < 0 then
-			pointed_node.rotation = magic.Quaternion(0, 0, -180)
-		elseif dz > 0 then
-			pointed_node.rotation = magic.Quaternion(90, 0, 0)
-		else
-			pointed_node.rotation = magic.Quaternion(-90, 0, 0)
-		end
 		pointed_node.enabled = true
 	end
 
