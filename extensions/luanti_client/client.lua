@@ -34,7 +34,9 @@ local TOSERVER = {
 	INIT2         = 0x11,
 	PLAYERPOS     = 0x23,
 	GOTBLOCKS     = 0x24,
+	INVENTORY_ACTION = 0x31,
 	INTERACT      = 0x39,
+	INVENTORY_FIELDS = 0x3c,
 	REQUEST_MEDIA = 0x40,
 	CLIENT_READY  = 0x43,
 	FIRST_SRP     = 0x50,
@@ -49,7 +51,9 @@ local TOSERVER_DELIVERY = {
 	[TOSERVER.INIT2]         = {1, true},
 	[TOSERVER.PLAYERPOS]     = {0, false},
 	[TOSERVER.GOTBLOCKS]     = {2, true},
+	[TOSERVER.INVENTORY_ACTION] = {0, true},
 	[TOSERVER.INTERACT]      = {0, true},
+	[TOSERVER.INVENTORY_FIELDS] = {0, true},
 	[TOSERVER.REQUEST_MEDIA] = {1, true},
 	[TOSERVER.CLIENT_READY]  = {1, true},
 	[TOSERVER.FIRST_SRP]     = {1, true},
@@ -100,6 +104,10 @@ local TOCLIENT = {
 	ANNOUNCE_MEDIA = 0x3C,
 	INVENTORY      = 0x27,
 	ITEMDEF        = 0x3D,
+	INVENTORY_FORMSPEC = 0x42,
+	DETACHED_INVENTORY = 0x43,
+	SHOW_FORMSPEC  = 0x44,
+	FORMSPEC_PREPEND = 0x61,
 	SRP_BYTES_S_B  = 0x60,
 }
 
@@ -254,6 +262,16 @@ function M.new(socket, options, log)
 			-- on_inventory(data) with the player's inventory as Luanti
 			-- serializes one; inventory.lua is what reads it
 			on_inventory = nil,
+			-- on_detached_inventory(name, data), with data nil when the
+			-- server drops the inventory
+			on_detached_inventory = nil,
+			-- The forms: on_inventory_formspec(spec) is the one the
+			-- inventory key opens, on_show_formspec(spec, formname) one the
+			-- server wants shown now, and on_formspec_prepend(spec) what
+			-- goes in front of both
+			on_inventory_formspec = nil,
+			on_show_formspec = nil,
+			on_formspec_prepend = nil,
 			-- on_announce_media(files, remote_servers) and
 			-- on_media(files, bunch, bunches); media.lua is what keeps them
 			on_announce_media = nil,
@@ -428,6 +446,50 @@ function M.new(socket, options, log)
 		local data = r:longstring()
 		if self.on_inventory then
 			self.on_inventory(data)
+		end
+	end
+
+	-- The form the inventory key opens, which a game replaces whenever it
+	-- likes: this one swaps in a creative inventory once it knows the player
+	-- is in creative mode.
+	handlers[TOCLIENT.INVENTORY_FORMSPEC] = function(r)
+		if self.on_inventory_formspec then
+			self.on_inventory_formspec(r:longstring())
+		end
+	end
+
+	-- What goes in front of every formspec the game sends, which is where it
+	-- puts the styling all of its forms share
+	handlers[TOCLIENT.FORMSPEC_PREPEND] = function(r)
+		if self.on_formspec_prepend then
+			self.on_formspec_prepend(r:string())
+		end
+	end
+
+	-- A form the server wants shown now, and the name to send its fields
+	-- back under
+	handlers[TOCLIENT.SHOW_FORMSPEC] = function(r)
+		local spec = r:longstring()
+		local name = r:string()
+		if self.on_show_formspec then
+			self.on_show_formspec(spec, name)
+		end
+	end
+
+	-- An inventory that is not the player's own: a creative list, a trash
+	-- can, whatever a game detaches. Same serialization as the player's.
+	handlers[TOCLIENT.DETACHED_INVENTORY] = function(r)
+		local name = r:string()
+		local keep = r:u8() ~= 0
+		if not keep then
+			if self.on_detached_inventory then
+				self.on_detached_inventory(name, nil)
+			end
+			return
+		end
+		r:skip(2) -- Used to be the length of what follows
+		if self.on_detached_inventory then
+			self.on_detached_inventory(name, r:rest())
 		end
 	end
 
@@ -674,6 +736,34 @@ function M.new(socket, options, log)
 		w:longstring(pt:data())
 		write_player_pos(w)
 		send_command(TOSERVER.INTERACT, w:data())
+	end
+
+	-- What a form sends back when a button is pressed: the name the form was
+	-- shown under, and the fields it holds. The button's own name is one of
+	-- them, which is how the server knows which was pressed.
+	function self:send_inventory_fields(formname, fields)
+		local w = serialize.writer()
+		w:string(formname)
+		local count = 0
+		for _, _ in pairs(fields) do
+			count = count + 1
+		end
+		w:u16(count)
+		for name, value in pairs(fields) do
+			w:string(name)
+			w:longstring(value)
+		end
+		send_command(TOSERVER.INVENTORY_FIELDS, w:data())
+	end
+
+	-- Moving a stack from one inventory slot to another. The command is
+	-- text, and the indices in it are zero-based; see IMoveAction::serialize
+	-- in Luanti's inventorymanager.h.
+	function self:send_inventory_move(count, from_inv, from_list, from_i,
+			to_inv, to_list, to_i)
+		send_command(TOSERVER.INVENTORY_ACTION,
+				"Move "..count.." "..from_inv.." "..from_list.." "..
+				(from_i - 1).." "..to_inv.." "..to_list.." "..(to_i - 1))
 	end
 
 	-- Asks the server for media files by name. The list is usually far too big

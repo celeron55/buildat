@@ -16,8 +16,9 @@ same player.
 
 Controls: the mouse looks, WASD walks, space jumps, ctrl sneaks, shift is
 faster, 1 to 8 pick a hotbar slot, the left mouse button digs what is pointed
-at and the right one places what is wielded, K toggles flying, H toggles going
-through walls, escape disconnects.
+at and the right one places what is wielded, I opens the inventory, K toggles
+flying, H toggles going through walls, escape closes a form and then
+disconnects.
 Flying and going through walls need the server to give the player the fly and
 noclip privileges; without them its movement checks pull the player back.
 
@@ -64,6 +65,8 @@ player.lua      The player's box: the keys, gravity, and collision against
                 the nodes
 itemdef.lua     ITEMDEF: what an item is, and what a tool can dig
 inventory.lua   TOCLIENT_INVENTORY: what the player is carrying
+formspec.lua    The elements of a formspec, and where they go
+formspec_ui.lua A formspec on the screen, as Urho3D UI elements
 texmod.lua      Luanti's texture modifier language, as compose_image()
                 operations
 world.lua       The scene: a node per map block, with buildat's voxel mesher
@@ -79,7 +82,7 @@ Checks
     $ lua extensions/luanti_client/test.lua
 
 covers serialize.lua, connection.lua, nodedef.lua, media.lua, player.lua,
-texmod.lua and inventory.lua without an engine: the packet framing, numbers including f32, reliable packets arriving
+texmod.lua, inventory.lua and formspec.lua without an engine: the packet framing, numbers including f32, reliable packets arriving
 out of order or twice, acknowledgements, resending, splitting what is sent and
 reassembling what arrives, the peer id handshake, a NODEDEF packet built the
 way a server builds one and read back, which media names are usable as file
@@ -88,8 +91,9 @@ the ground, stopping at a wall, sliding along it, jumping onto a ledge,
 sinking in water and swimming out, flying, and getting out of a node it ended
 up inside, the texture modifier language -- what an expression parses to,
 which files it needs, and which operations each modifier becomes -- and the
-inventory: quoted item names, empty slots, KeepList, and which tool
-capabilities a dig goes by.
+inventory -- quoted item names, empty slots, KeepList, and which tool
+capabilities a dig goes by -- and formspecs: the elements, escaped fields,
+nested containers, and the two coordinate systems.
 
     $ bin/buildat_client -m luanti_client
 
@@ -180,16 +184,28 @@ What is done
   is what the server's own anticheat wants, since it refuses a dig that was
   finished sooner than it should have been
 - Placing what is wielded, and the hotbar slot on the number keys
+- Formspecs: the inventory form, the ones the server shows, and the prepend
+  in front of them. Item slots with the item's own image in them, labels,
+  images, buttons and fields; clicking a slot picks a stack up and puts it
+  down, which goes back as an inventory action, and clicking a button sends
+  the form's fields. Detached inventories, which is what a creative list is.
 
 Only serialization version 29 is read. It is what every current server writes;
 older ones compress the pieces of a mapblock separately and the client says so
 and gives up rather than carrying a second parser.
 
+Formspecs: what a form asks for is mostly a texture in a box, so most of
+formspec_ui.lua is a BorderImage at a position. The units are inventory slots
+and how many pixels one of those is comes out of the screen size, the same way
+Luanti works it out; before formspec version 2 the units were a slot plus its
+spacing and a position had a fixed padding added, and both are implemented.
+Not implemented: editing a field, scroll containers, tabs, dropdowns,
+checkboxes, hypertext, the styles, and drawing an item that places a node as
+the little cube Luanti draws rather than as one of its tiles.
+
 What is next
 ------------
-- Formspecs, so that the inventory can be seen and moved around in. Until
-  there is one, the hotbar can only hold what digging drops into it, and on a
-  server in creative mode digging drops nothing, so there is nothing to place.
+- Node metadata, so that a chest's own slots are in its form
 - HP, breath
 - Node draw types that are not cubes: node boxes, meshes, plants, liquids
 - A node's colour out of its palette by paramtype2, rather than the one

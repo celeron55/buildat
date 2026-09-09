@@ -26,6 +26,8 @@ local player = dofile(path.."/player.lua")
 local texmod = dofile(path.."/texmod.lua")
 local itemdef = dofile(path.."/itemdef.lua")
 local inventory = dofile(path.."/inventory.lua")
+local formspec = dofile(path.."/formspec.lua")
+local formspec_ui = dofile(path.."/formspec_ui.lua")
 local M = {safe = nil}
 
 -- BUILDAT_LUANTI_ADDRESS is for scripted runs (bin/buildat_client -c ...),
@@ -171,6 +173,7 @@ local function show_client(host, port, name, password)
 		end
 
 		local node_defs = nil
+		local node_by_name = {}
 		local announced = nil
 		local to_ask = {}
 		local media_asked_at = nil
@@ -278,6 +281,22 @@ local function show_client(host, port, name, password)
 			return texmod.resolve(expr, texmod_ctx)
 		end
 
+		-- The forms the server sends, and the one on screen
+		local inventory_spec = nil
+		local prepend = ""
+		local detached = {}
+		local form = nil
+		local form_stale = false
+
+		-- Pointing, digging and placing
+		local item_defs = nil
+		local inv = nil
+		-- Which hotbar slot is wielded, one-based, as the number keys set it
+		local wield_index = 1
+		local pointed_under, pointed_above = nil, nil
+		local dig = nil
+		local digging = false
+
 		local function rebuild_registry()
 			registry_stale = false
 			if not node_defs then
@@ -292,9 +311,9 @@ local function show_client(host, port, name, password)
 		end
 
 		-- The announcement and the definitions arrive in that order today, but
-		-- the plan needs both, so either one arriving makes it
+		-- the plan needs all three, so any of them arriving makes it
 		local function plan_media()
-			if not (node_defs and announced) then
+			if not (node_defs and item_defs and announced) then
 				return
 			end
 			local wanted = {}
@@ -306,6 +325,13 @@ local function show_client(host, port, name, password)
 					end
 				end
 			end
+			-- What an item looks like in an inventory is its own texture,
+			-- and a form full of them is most of what a game's media is
+			for _, def in pairs(item_defs) do
+				if def.inventory_image ~= "" then
+					texmod.sources(def.inventory_image, wanted)
+				end
+			end
 			for _, name in ipairs(store:plan(announced, wanted)) do
 				to_ask[#to_ask + 1] = name
 			end
@@ -314,6 +340,10 @@ local function show_client(host, port, name, password)
 		client.on_nodedef = function(data)
 			local defs, count = nodedef.parse(luanti.serialize, data, log)
 			node_defs = defs
+			node_by_name = {}
+			for _, def in pairs(defs) do
+				node_by_name[def.name] = def
+			end
 			add_line(count.." node definitions")
 			registry_stale = true
 			plan_media()
@@ -341,24 +371,34 @@ local function show_client(host, port, name, password)
 			add_line("The game's movement constants arrived")
 		end
 
-		-- Pointing, digging and placing
-		local item_defs = nil
-		local inv = nil
-		-- Which hotbar slot is wielded, one-based, as the number keys set it
-		local wield_index = 1
-		local pointed_under, pointed_above = nil, nil
-		local dig = nil
-		local digging = false
-
 		client.on_itemdef = function(data)
 			local items, count = itemdef.parse(luanti.serialize, data, log)
 			item_defs = items
 			add_line(count.." item definitions")
+			plan_media()
+		end
+
+		client.on_inventory_formspec = function(spec)
+			inventory_spec = spec
+			if form and form.source == "inventory" then
+				form_stale = true
+			end
+		end
+
+		client.on_formspec_prepend = function(spec)
+			prepend = spec
+		end
+
+		client.on_detached_inventory = function(name, data)
+			detached[name] = data and inventory.parse(data, detached[name])
+					or nil
+			form_stale = true
 		end
 
 		client.on_inventory = function(data)
 			local first = inv == nil
 			inv = inventory.parse(data, inv)
+			form_stale = true
 			if first then
 				local names = {}
 				for name, list in pairs(inv) do
@@ -405,6 +445,17 @@ local function show_client(host, port, name, password)
 		-- DIGGING_COMPLETED for it, and no sooner than the dig would have
 		-- taken; the node then comes back as a REMOVENODE.
 		local function update_dig(dtime)
+			if form then
+				-- A form has the mouse; nothing is pointed at behind it
+				view:set_pointed(nil, nil)
+				pointed_under, pointed_above = nil, nil
+				if dig then
+					client:interact(luanti.INTERACT_STOP_DIGGING,
+							wield_index - 1)
+					dig = nil
+				end
+				return
+			end
 			pointed_under, pointed_above = view:point_ray(reach())
 			if not pointed_above then
 				pointed_under = nil
@@ -446,6 +497,147 @@ local function show_client(host, port, name, password)
 						wield_index - 1, {under = dig.under,
 						above = dig.above})
 				dig.done = true
+			end
+		end
+
+		--
+		-- Formspecs: the windows the server describes
+		--
+
+		-- What an item looks like: its own inventory image, or, for an item
+		-- that places a node, the top of that node. Both are texture
+		-- expressions.
+		local function item_image(item_name)
+			local def = item_defs and item_defs[item_name]
+			if def and def.inventory_image and def.inventory_image ~= "" then
+				return texmod.resolve(def.inventory_image, texmod_ctx)
+			end
+			local node = node_by_name[item_name]
+			if node then
+				local expr = tile_expression(node, 1)
+				if expr then
+					return texmod.resolve(expr, texmod_ctx)
+				end
+			end
+			return nil
+		end
+
+		local ui = formspec_ui.new(magic, buildat, log, {
+			texture = function(expr)
+				return texmod.resolve(expr, texmod_ctx)
+			end,
+			item_image = item_image,
+			-- Where a list[] element's slots come from. A form can name the
+			-- player's own inventory, one the server has detached, or a
+			-- node's -- and node metadata is not read yet, so a chest's own
+			-- slots come out empty.
+			inventory = function(location, list_name)
+				local lists = nil
+				if location == "current_player" or
+						location:sub(1, 7) == "player:" then
+					lists = inv
+				else
+					local name = location:match("^detached:(.*)$")
+					lists = name and detached[name] or nil
+				end
+				return lists and lists[list_name] or nil
+			end,
+		})
+
+		local held = nil
+
+		local function close_form()
+			if not form then
+				return
+			end
+			form.drawn.window:Remove()
+			form = nil
+			held = nil
+			magic.input:SetMouseVisible(false)
+		end
+
+		local function draw_form()
+			if form.drawn then
+				form.drawn.window:Remove()
+			end
+			local spec = form.spec
+			-- The prepend goes in front unless the form says not to
+			if not spec:find("no_prepend%[") then
+				spec = prepend..spec
+			end
+			local elements, size, real = formspec.parse(spec)
+			-- Under the UI's own root rather than the element the status
+			-- screen is in: a form is positioned in the coordinates a click
+			-- arrives in, and those are the root's, while the element this
+			-- extension was given is only as big as what is in it. close_form
+			-- is what takes it away again.
+			local ui_root = magic.ui.root
+			local w = ui_root.width
+			local h = ui_root.height
+			local layout = formspec.layout(size, real, w, h)
+			form.drawn = ui:show(ui_root, elements, layout, w, h)
+			form_stale = false
+		end
+
+		-- source says which form this is, which decides whether a new
+		-- inventory formspec replaces it
+		local function open_form(spec, formname, source)
+			close_form()
+			if not spec or spec == "" then
+				return
+			end
+			form = {spec = spec, formname = formname or "", source = source}
+			draw_form()
+			magic.input:SetMouseVisible(true)
+		end
+
+		client.on_show_formspec = function(spec, formname)
+			if spec == "" then
+				close_form()
+				return
+			end
+			open_form(spec, formname, "server")
+		end
+
+		-- A click in a form: a slot picks a stack up and puts it down, and a
+		-- button sends the form's fields back with the button's own name
+		-- among them.
+		local function form_click(x, y)
+			if not form or not form.drawn then
+				return
+			end
+			local lx = x - form.drawn.origin[1]
+			local ly = y - form.drawn.origin[2]
+			for _, b in ipairs(form.drawn.buttons) do
+				if lx >= b.x and lx < b.x + b.w and
+						ly >= b.y and ly < b.y + b.h then
+					local fields = {[b.name] = ""}
+					for _, f in ipairs(form.drawn.fields) do
+						fields[f.name] = f.value
+					end
+					client:send_inventory_fields(form.formname, fields)
+					if b.exit then
+						close_form()
+					end
+					return
+				end
+			end
+			for _, slot in ipairs(form.drawn.slots) do
+				if lx >= slot.x and lx < slot.x + slot.size and
+						ly >= slot.y and ly < slot.y + slot.size then
+					if not held then
+						if slot.stack then
+							held = slot
+						end
+					else
+						client:send_inventory_move(
+								held.stack and held.stack.count or 1,
+								held.location, held.list, held.index,
+								slot.location, slot.list, slot.index)
+						held = nil
+					end
+					return
+				end
 			end
 		end
 
@@ -515,6 +707,13 @@ local function show_client(host, port, name, password)
 		-- differing from where the player thinks it is means the server moved
 		-- us.
 		local function move(dtime)
+			-- A form takes the mouse and the keys; the player stands still
+			-- rather than walking blind behind it
+			if form then
+				client:set_position(avatar.x, avatar.y, avatar.z)
+				client:set_motion(0, 0, 0, 0)
+				return
+			end
 			local dmouse = magic.input:GetMouseMove()
 			-- Luanti's yaw grows counterclockwise seen from above, so the
 			-- mouse going right, which turns the player right, takes it down
@@ -573,6 +772,9 @@ local function show_client(host, port, name, password)
 			client:update(dtime)
 			move(dtime)
 			update_dig(dtime)
+			if form and form_stale then
+				draw_form()
+			end
 			if client.time_of_day then
 				local daylight = daynight_ratio(client.time_of_day)
 				-- The ramp is smooth and the zone is not free to set, so only
@@ -612,8 +814,19 @@ local function show_client(host, port, name, password)
 		-- the sandbox, so the two events are what says whether it is held.
 		local mouse_down_cb = magic.SubscribeToEvent("MouseButtonDown",
 				function(event_type, event_data)
+			if form then
+				return -- The click goes to the form; see UIMouseClick
+			end
 			if event_data:GetInt("Button") == MOUSEB_LEFT then
 				digging = true
+			end
+		end)
+
+		-- Where a click landed, which MouseButtonDown does not say
+		local ui_click_cb = magic.SubscribeToEvent("UIMouseClick",
+				function(event_type, event_data)
+			if form and event_data:GetInt("Button") == MOUSEB_LEFT then
+				form_click(event_data:GetInt("X"), event_data:GetInt("Y"))
 			end
 		end)
 		local mouse_up_cb = magic.SubscribeToEvent("MouseButtonUp",
@@ -621,7 +834,7 @@ local function show_client(host, port, name, password)
 			if event_data:GetInt("Button") == MOUSEB_LEFT then
 				digging = false
 			end
-			if event_data:GetInt("Button") == MOUSEB_RIGHT then
+			if event_data:GetInt("Button") == MOUSEB_RIGHT and not form then
 				-- On the way up rather than the way down, so that holding
 				-- the button does not place a stack of nodes at once
 				place()
@@ -636,6 +849,13 @@ local function show_client(host, port, name, password)
 				avatar.fly = not avatar.fly
 				add_line(avatar.fly and "Flying" or "Walking")
 			end
+			if key == KEY_I then
+				if form then
+					close_form()
+				else
+					open_form(inventory_spec, "", "inventory")
+				end
+			end
 			-- The number keys pick a hotbar slot, as they do in Luanti
 			if key >= KEY_1 and key <= KEY_8 then
 				wield_index = key - KEY_1 + 1
@@ -644,10 +864,14 @@ local function show_client(host, port, name, password)
 				avatar.noclip = not avatar.noclip
 				add_line(avatar.noclip and "Through walls" or "Solid walls")
 			end
-			if key == KEY_ESCAPE then
+			if key == KEY_ESCAPE and form then
+				close_form()
+			elseif key == KEY_ESCAPE then
 				magic.UnsubscribeFromEvent("Update", update_cb)
 				magic.UnsubscribeFromEvent("MouseButtonDown", mouse_down_cb)
 				magic.UnsubscribeFromEvent("MouseButtonUp", mouse_up_cb)
+				magic.UnsubscribeFromEvent("UIMouseClick", ui_click_cb)
+				close_form()
 				magic.input:SetMouseVisible(true)
 				client:disconnect()
 				view:close()
