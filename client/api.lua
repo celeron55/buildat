@@ -36,6 +36,7 @@ buildat.get_ui_scale      = __buildat_get_ui_scale
 buildat.font_sans         = "Fonts/Overpass-Regular.ttf"
 buildat.font_mono         = "Fonts/OverpassMono-Regular.ttf"
 buildat.SpatialUpdateQueue = __buildat_SpatialUpdateQueue
+buildat.pack_voxel_volume = __buildat_pack_voxel_volume
 
 buildat.safe.disconnect    = __buildat_disconnect
 buildat.safe.set_ui_scale  = __buildat_set_ui_scale
@@ -58,6 +59,9 @@ buildat.safe.createAtlasRegistry  = __buildat_createAtlasRegistry
 buildat.safe.Region        = __buildat_Region
 buildat.safe.VoxelInstance = __buildat_VoxelInstance
 buildat.safe.Volume        = __buildat_Volume
+-- pack_voxel_volume(args): packed samples -> a serialized volume, which
+-- set_voxel_geometry() and deserialize_volume() take. See doc/client_api.txt.
+buildat.safe.pack_voxel_volume        = __buildat_pack_voxel_volume
 buildat.safe.deserialize_volume       = __buildat_deserialize_volume
 buildat.safe.deserialize_volume_int32 = __buildat_deserialize_volume_int32
 buildat.safe.deserialize_volume_8bit  = __buildat_deserialize_volume_8bit

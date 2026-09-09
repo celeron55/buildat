@@ -327,3 +327,48 @@ do
 	voxel_reg:add_voxel(vdef)
 end
 
+
+Voxel data
+----------
+buildat.pack_voxel_volume(args) -> string
+- Packed samples in, a serialized volume out. What comes out is what
+  set_voxel_geometry() and buildat.deserialize_volume() take.
+- One strided box copy per source, with an optional value mapping. Somebody
+  else's voxel format goes in without a Lua call per voxel: a Luanti mapblock
+  and the one-voxel border it needs from its six neighbours is seven sources
+  and two fields in one call.
+
+  buildat.pack_voxel_volume{
+      region = {x0, y0, z0, x1, y1, z1}, -- inclusive corners
+      fill = 0,                          -- raw voxel value the rest gets
+      sources = {
+          {
+              data = <string>,           -- the packed samples
+              format = "u16be",          -- u8|u16be|u16le|u32be|u32le
+              source_size = {16, 16, 16},-- the sample array, in x, y, z
+              from = {0, 0, 0},          -- the box to copy, in samples
+              size = {16, 16, 16},       -- default: the rest of the source
+              at = {0, 0, 0},            -- where it lands, in region coords
+              order = "xyz",             -- which axis runs fastest, first
+              shift = 0,                 -- sample = (sample >> shift) & mask
+              mask = 0xffff,             -- default: all of the format's bits
+              map = <string|table|nil>,  -- sample -> value written
+              map_default = nil,         -- for samples the map does not have
+              field = "id",              -- id | skylight | raw
+          },
+      },
+  }
+
+- field says which part of a voxel a source writes: "id" the type id (bits
+  0..20), "skylight" bits 24..27, "raw" all 32 bits. Other bits are left alone,
+  so ids and light are two sources over the same box.
+- map is a table indexed by sample value, or a string with one byte per sample
+  value. A sample the map does not mention gets map_default, and with no
+  map_default the voxel is left as it was.
+- A source box that hangs over the edge of the region is clipped, which is what
+  a border slice from a neighbour that has not arrived yet needs.
+
+volume:serialize() -> string
+- The same thing a Volume built one set_voxel_at() at a time can hand to
+  set_voxel_geometry(). The slow, flexible path; pack_voxel_volume() is the
+  fast one.

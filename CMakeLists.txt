@@ -270,6 +270,7 @@ if(BUILD_CLIENT)
 		src/lua_bindings/atlas.cpp
 		src/lua_bindings/mesh.cpp
 		src/lua_bindings/voxel_volume.cpp
+		src/lua_bindings/voxel_data.cpp
 		src/lua_bindings/spatial_update_queue.cpp
 		src/lua_bindings/misc_urho3d.cpp
 		src/lua_bindings/network.cpp
