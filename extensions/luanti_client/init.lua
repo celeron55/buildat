@@ -52,6 +52,10 @@ local MOUSE_SENSITIVITY = 0.15
 -- which is Luanti's own default
 local POINT_RANGE = 4
 
+-- How long the dig button has to be held before it hits a pointed object
+-- again, which is Luanti's object_hit_delay
+local OBJECT_HIT_DELAY = 0.2
+
 -- How many of the player's main slots the hotbar shows. Luanti's own default,
 -- and what the number keys reach.
 -- The textures Luanti's own client ships rather than receiving: a game names
@@ -622,8 +626,14 @@ local function show_client(host, port, name, password)
 		-- Which hotbar slot is wielded, one-based, as the number keys set it
 		local wield_index = 1
 		local pointed_under, pointed_above = nil, nil
+		-- The id of the object the ray hit, when it got there before any
+		-- node did
+		local pointed_object = nil
 		local dig = nil
 		local digging = false
+		-- Time left before the held dig button hits a pointed object again;
+		-- Luanti's object_hit_delay
+		local hit_wait = 0
 
 		-- Building the registry is two and a half thousand definitions with a
 		-- texture expression each, and it happens while the world is already
@@ -806,6 +816,38 @@ local function show_client(host, port, name, password)
 		-- what that looks like is what it looks like in an inventory -- for
 		-- a node, the little isometric cube, which is what Luanti's
 		-- wielditem comes out as too.
+		-- The six tiles of the node an item is, in Luanti's tile order, or
+		-- nil for an item that is not a node or whose tiles are not all
+		-- there yet. This is what makes a dropped node a small cube of its
+		-- own textures rather than a picture of one.
+		local function item_tiles(item)
+			local item_name = item and item ~= "" and item:match("^(%S+)")
+			if not item_name then
+				return nil
+			end
+			local def = item_defs and item_defs[item_name]
+			item_name = (def and def.name) or item_name
+			if def and def.inventory_image and def.inventory_image ~= "" then
+				-- A game that drew its own picture for the item means it
+				return nil
+			end
+			local node = node_by_name[item_name]
+			-- Only a plain cube: a node box or a plant is drawn as its own
+			-- picture until an object can carry a real shape
+			if not node or node.drawtype ~= 0 then
+				return nil
+			end
+			local tiles = {}
+			for i = 1, 6 do
+				local resource = resolve_tile(node, i)
+				if not resource then
+					return nil
+				end
+				tiles[i] = resource
+			end
+			return tiles
+		end
+
 		local function object_resource(obj)
 			local props = obj.props
 			if not props then
@@ -817,8 +859,9 @@ local function show_client(host, port, name, password)
 				return name and item_image(name) or nil
 			end
 			if ITEM_VISUALS[props.visual] then
-				return of_item(textures and textures[1] ~= "" and
-						textures[1] or props.wield_item)
+				local item = textures and textures[1] ~= "" and
+						textures[1] or props.wield_item
+				return of_item(item), item_tiles(item)
 			end
 			if textures and textures[1] and textures[1] ~= "" then
 				return media_texture(textures[1])
@@ -1019,6 +1062,7 @@ local function show_client(host, port, name, password)
 				-- A form has the mouse; nothing is pointed at behind it
 				view:set_pointed(nil, nil)
 				pointed_under, pointed_above = nil, nil
+				pointed_object = nil
 				if dig then
 					client:interact(luanti.INTERACT_STOP_DIGGING,
 							wield_index - 1)
@@ -1027,11 +1071,54 @@ local function show_client(host, port, name, password)
 				update_crack()
 				return
 			end
-			pointed_under, pointed_above = view:point_ray(reach())
+			local node_t
+			pointed_under, pointed_above, node_t = view:point_ray(reach())
 			if not pointed_above then
 				pointed_under = nil
 			end
-			view:set_pointed(pointed_under, pointed_above)
+			-- An object in front of the node the ray would have stopped at
+			-- takes the pointing; one whose pointable is 2 takes it away
+			-- from the node without being pointed at itself
+			local obj_id, obj_t = view:point_objects(reach(), world_objects)
+			pointed_object = nil
+			if obj_t and (not pointed_under or obj_t < node_t) then
+				pointed_under, pointed_above = nil, nil
+				pointed_object = obj_id
+			end
+			if pointed_object then
+				local obj = world_objects[pointed_object]
+				local props = obj and obj.props
+				view:set_pointed_box({
+					obj.position[1] + props.selection_min[1],
+					obj.position[2] + props.selection_min[2],
+					obj.position[3] + props.selection_min[3],
+				}, {
+					obj.position[1] + props.selection_max[1],
+					obj.position[2] + props.selection_max[2],
+					obj.position[3] + props.selection_max[3],
+				})
+			else
+				view:set_pointed(pointed_under, pointed_above)
+			end
+
+			hit_wait = math.max(0, hit_wait - dtime)
+			if pointed_object then
+				-- Hitting an object rather than digging: one hit per press,
+				-- and no faster than the delay while the button is held,
+				-- which is what handlePointingAtObject() does
+				if dig then
+					client:interact(luanti.INTERACT_STOP_DIGGING,
+							wield_index - 1)
+					dig = nil
+				end
+				if digging and hit_wait <= 0 then
+					client:interact(luanti.INTERACT_START_DIGGING,
+							wield_index - 1, {object = pointed_object})
+					hit_wait = OBJECT_HIT_DELAY
+				end
+				update_crack()
+				return
+			end
 
 			if not digging or not pointed_under then
 				if dig then
@@ -1628,6 +1715,19 @@ local function show_client(host, port, name, password)
 			return nil
 		end
 
+		-- Whether a point in the form's own coordinates is still on the
+		-- form's window. A release or a click beyond it is what throws the
+		-- carried stack away, which is where Luanti's own inventory drops
+		-- one too.
+		local function on_form(lx, ly)
+			local window = form and form.drawn and form.drawn.window
+			if not window then
+				return false
+			end
+			local size = window.size
+			return lx >= 0 and ly >= 0 and lx < size.x and ly < size.y
+		end
+
 		-- Taking a stack out of a slot and putting it into one. Luanti's own
 		-- inventory takes and puts a whole stack with the left button, half
 		-- of it or a single item with the right, and ten with the middle.
@@ -1663,6 +1763,25 @@ local function show_client(host, port, name, password)
 					held.location, held.list, held.index,
 					slot.location, slot.list, slot.index)
 			held.count = held.count - move
+			if held.count <= 0 then
+				held = nil
+			end
+			form.state.held = held
+			form_stale = true
+		end
+
+		-- Throwing the carried stack away: what letting go of a drag
+		-- outside the slots means, and what a click outside them means when
+		-- a stack is already in hand. The game turns it into an item entity
+		-- in front of the player.
+		local function drop_held(button)
+			local drop = held.count
+			if button == MOUSEB_RIGHT then
+				drop = 1
+			end
+			client:send_inventory_drop(drop, held.location, held.list,
+					held.index)
+			held.count = held.count - drop
 			if held.count <= 0 then
 				held = nil
 			end
@@ -1749,12 +1868,17 @@ local function show_client(host, port, name, password)
 				else
 					take_from(slot, button)
 				end
+			elseif held and not on_form(lx, ly) then
+				drop_held(button)
 			end
 		end
 
 		-- What the wielded item is pointed at, in the shape interact()
 		-- takes, or nil for nothing at all
 		local function pointed_thing()
+			if pointed_object then
+				return {object = pointed_object}
+			end
 			if pointed_under and pointed_above then
 				return {under = pointed_under, above = pointed_above}
 			end
@@ -1778,6 +1902,13 @@ local function show_client(host, port, name, password)
 		-- there, or the thing is used on what was pointed at, and either way
 		-- what comes back is an ADDNODE or a formspec.
 		local function place()
+			if pointed_object then
+				-- Right-clicking an object is what runs a game's
+				-- on_rightclick for it
+				client:interact(luanti.INTERACT_PLACE, wield_index - 1,
+						{object = pointed_object})
+				return
+			end
 			if not pointed_under or not pointed_above then
 				return
 			end
@@ -1803,11 +1934,25 @@ local function show_client(host, port, name, password)
 			elseif pointed_under then
 				local def = node_def_at(pointed_under)
 				pointed = "pointing at "..(def and def.name or "?")
+			elseif pointed_object then
+				local obj = world_objects[pointed_object]
+				local props = obj and obj.props
+				pointed = "pointing at object "..pointed_object..
+						(props and props.visual ~= "" and
+						" ("..props.visual..")" or "")
 			end
 			-- What the pointed node says about itself, which is a game's own
 			-- label for it. Only a few lines: Luanti cuts it at six.
 			local info = ""
-			if pointed_under then
+			if pointed_object then
+				local obj = world_objects[pointed_object]
+				local props = obj and obj.props
+				local said = props and (props.infotext ~= "" and
+						props.infotext or props.nametag) or nil
+				if said and said ~= "" then
+					info = formspec.strip_escapes(said)
+				end
+			elseif pointed_under then
 				local meta = view:node_meta(pointed_under[1],
 						pointed_under[2], pointed_under[3])
 				local said = meta and meta.fields and
@@ -2045,7 +2190,7 @@ local function show_client(host, port, name, password)
 					view:set_object(obj, object_resource)
 				end
 			end
-			view:place_objects(world_objects)
+			view:place_objects(world_objects, dtime)
 			view:update_sounds(dtime)
 			view:update_fov(dtime)
 			update_hud()
@@ -2291,6 +2436,14 @@ local function show_client(host, port, name, password)
 							pointed_thing())
 				else
 					digging = true
+					if pointed_object then
+						-- The hit goes out on the way down rather than
+						-- waiting for the next frame's update_dig: a click
+						-- can be over before one runs
+						client:interact(luanti.INTERACT_START_DIGGING,
+								wield_index - 1, {object = pointed_object})
+						hit_wait = OBJECT_HIT_DELAY
+					end
 				end
 			end
 		end)
@@ -2346,25 +2499,29 @@ local function show_client(host, port, name, password)
 				function(event_type, event_data)
 			if event_data:GetInt("Button") == MOUSEB_LEFT then
 				digging = false
+				hit_wait = 0
 			end
 			-- Dragging a stack: the press picked it up (UIMouseClick fires
 			-- on the way down), and letting go over another slot puts it
-			-- there. Over the slot it came from, or over nothing, the stack
-			-- stays in hand -- which is a plain click, and what the next
-			-- click puts down.
+			-- there. Over the slot it came from the stack stays in hand --
+			-- which is a plain click, and what the next click puts down --
+			-- and outside the form's slots it is thrown away.
 			if form and form.drawn and held and mouse_at then
-				local slot = slot_at(mouse_at[1] - form.drawn.origin[1],
-						mouse_at[2] - form.drawn.origin[2])
+				local lx = mouse_at[1] - form.drawn.origin[1]
+				local ly = mouse_at[2] - form.drawn.origin[2]
+				local slot = slot_at(lx, ly)
 				if slot and not (slot.location == held.location and
 						slot.list == held.list and
 						slot.index == held.index) then
 					put_into(slot, event_data:GetInt("Button"))
+				elseif not slot and not on_form(lx, ly) then
+					drop_held(event_data:GetInt("Button"))
 				end
 			end
 			if event_data:GetInt("Button") == MOUSEB_RIGHT and not form then
 				-- On the way up rather than the way down, so that holding
 				-- the button does not place a stack of nodes at once
-				if pointed_under and pointed_above then
+				if pointed_object or (pointed_under and pointed_above) then
 					place()
 				else
 					-- Pointing at nothing: the item's secondary action,
@@ -2471,6 +2628,17 @@ local function show_client(host, port, name, password)
 			-- The number keys pick a hotbar slot, as they do in Luanti
 			if key >= KEY_1 and key <= KEY_8 then
 				wield_index = key - KEY_1 + 1
+			end
+			-- Q throws the wielded stack in front of the player, or one
+			-- item of it while sneaking, which is Luanti's own key and its
+			-- own rule
+			if key == KEY_Q and not form then
+				local held_stack = wielded()
+				if held_stack and held_stack.count > 0 then
+					local single = magic.input:GetKeyDown(KEY_CTRL)
+					client:send_inventory_drop(single and 1 or 0,
+							"current_player", "main", wield_index)
+				end
 			end
 			-- Luanti's own keys for what is on the screen
 			if key == KEY_F1 then

@@ -1187,12 +1187,78 @@ function M.new(magic, buildat, log, options)
 			local z = math.floor(p.z + d.z * i * POINT_STEP + 0.5)
 			if not last or x ~= last[1] or y ~= last[2] or z ~= last[3] then
 				if self:is_pointable(x, y, z) then
-					return {x, y, z}, last
+					return {x, y, z}, last, i * POINT_STEP
 				end
 				last = {x, y, z}
 			end
 		end
 		return nil
+	end
+
+	-- The nearest object the camera ray enters, up to range nodes away.
+	-- Returns its id and how far along the ray its box begins, or nil.
+	--
+	-- An object is pointed at by its selection box, which is in nodes and is
+	-- given around the object's own position. props.pointable is Luanti's
+	-- PointabilityType: 0 is not pointable, 1 is, and 2 stops the ray
+	-- without being pointed at itself -- so a 2 is tested for distance and
+	-- then reported as nothing.
+	--
+	-- The player's own object is skipped: it stands where the camera is, so
+	-- the ray starts inside its box and it would be pointed at all the
+	-- time. init.lua marks it is_self.
+	function self:point_objects(range, objects)
+		local p = camera_node.position
+		local d = camera_node.direction
+		local best_id, best_t, best_blocks = nil, range, false
+		for id, obj in pairs(objects) do
+			local props = obj.props
+			local pointable = props and props.pointable or 0
+			if obj.position and pointable ~= 0 and not obj.is_self and
+					props.is_visible ~= false and
+					props.selection_min and props.selection_max then
+				local lo = {
+					obj.position[1] + props.selection_min[1],
+					obj.position[2] + props.selection_min[2],
+					obj.position[3] + props.selection_min[3],
+				}
+				local hi = {
+					obj.position[1] + props.selection_max[1],
+					obj.position[2] + props.selection_max[2],
+					obj.position[3] + props.selection_max[3],
+				}
+				-- The slab test: the ray is inside the box between the
+				-- largest near crossing and the smallest far one
+				local origin = {p.x, p.y, p.z}
+				local dir = {d.x, d.y, d.z}
+				local t0, t1 = 0, range
+				for axis = 1, 3 do
+					if math.abs(dir[axis]) < 1e-9 then
+						if origin[axis] < lo[axis] or
+								origin[axis] > hi[axis] then
+							t0, t1 = 1, 0 -- Parallel and outside
+						end
+					else
+						local a = (lo[axis] - origin[axis]) / dir[axis]
+						local b = (hi[axis] - origin[axis]) / dir[axis]
+						if a > b then
+							a, b = b, a
+						end
+						t0 = math.max(t0, a)
+						t1 = math.min(t1, b)
+					end
+				end
+				if t0 <= t1 and t0 < best_t then
+					best_id = pointable == 1 and id or nil
+					best_t = t0
+					best_blocks = true
+				end
+			end
+		end
+		if not best_blocks then
+			return nil
+		end
+		return best_id, best_t
 	end
 
 	-- The outline of the face the ray came through, on the node it stopped
@@ -1358,7 +1424,7 @@ function M.new(magic, buildat, log, options)
 	-- Setting a shader parameter costs a sandbox call, and there are a
 	-- hundred objects: only a step the eye can see is worth one.
 	local function light_object(entry, x, y, z)
-		if not entry.material then
+		if not entry.material and not entry.materials then
 			return
 		end
 		local c = object_color(x, y, z)
@@ -1371,6 +1437,13 @@ function M.new(magic, buildat, log, options)
 			return
 		end
 		entry.light_key = key
+		if entry.materials then
+			-- A cube of tiles has one material per face
+			for _, material in ipairs(entry.materials) do
+				material:SetShaderParameter("MatDiffColor", c)
+			end
+			return
+		end
 		entry.material:SetShaderParameter("MatDiffColor", c)
 	end
 
@@ -1389,6 +1462,61 @@ function M.new(magic, buildat, log, options)
 		wielditem = true,
 	}
 
+	-- The six faces of a unit cube, each as two triangles with the tile's
+	-- own image on it: what a dropped node looks like in Luanti, where it is
+	-- a small cube of the node's tiles turning on the spot. The order is
+	-- Luanti's tile order -- +Y, -Y, +X, -X, +Z, -Z -- and each face is
+	-- given as its four corners in the order the uv corners go, so the
+	-- picture comes out the right way up.
+	local CUBE_FACES = {
+		{{-0.5, 0.5, -0.5}, {0.5, 0.5, -0.5}, {0.5, 0.5, 0.5},
+				{-0.5, 0.5, 0.5}},
+		{{-0.5, -0.5, 0.5}, {0.5, -0.5, 0.5}, {0.5, -0.5, -0.5},
+				{-0.5, -0.5, -0.5}},
+		{{0.5, 0.5, 0.5}, {0.5, 0.5, -0.5}, {0.5, -0.5, -0.5},
+				{0.5, -0.5, 0.5}},
+		{{-0.5, 0.5, -0.5}, {-0.5, 0.5, 0.5}, {-0.5, -0.5, 0.5},
+				{-0.5, -0.5, -0.5}},
+		{{0.5, 0.5, 0.5}, {-0.5, 0.5, 0.5}, {-0.5, -0.5, 0.5},
+				{0.5, -0.5, 0.5}},
+		{{-0.5, 0.5, -0.5}, {0.5, 0.5, -0.5}, {0.5, -0.5, -0.5},
+				{-0.5, -0.5, -0.5}},
+	}
+	local CUBE_UV = {{0, 0}, {1, 0}, {1, 1}, {0, 1}}
+
+	-- One geometry per face, so each can wear its own tile. The materials
+	-- are handed to the component and nothing else holds them, which is what
+	-- keeps them alive; see the crack above.
+	local function build_item_cube(node, tiles)
+		local cg = node:CreateComponent("CustomGeometry")
+		cg:SetNumGeometries(6)
+		for face = 1, 6 do
+			cg:BeginGeometry(face - 1, magic.TRIANGLE_LIST)
+			local corners = CUBE_FACES[face]
+			-- Both windings, so which way round a face was given does not
+			-- decide whether it is drawn: the frame outline above does the
+			-- same thing for the same reason
+			for _, i in ipairs({1, 2, 3, 1, 3, 4, 1, 3, 2, 1, 4, 3}) do
+				local p = corners[i]
+				cg:DefineVertex(magic.Vector3(p[1], p[2], p[3]))
+				cg:DefineTexCoord(magic.Vector2(CUBE_UV[i][1],
+						CUBE_UV[i][2]))
+			end
+		end
+		cg:Commit()
+		cg.castShadows = false
+		local materials = {}
+		for face = 1, 6 do
+			local material = magic.Material.new()
+			material:SetTechnique(0, object_technique)
+			material:SetTexture(0, magic.cache:GetResource("Texture2D",
+					tiles[face] or tiles[1] or texture))
+			cg:SetMaterial(face - 1, material)
+			materials[face] = material
+		end
+		return cg, materials
+	end
+
 	-- What an object is drawn as.
 	--
 	-- simplified: a sprite visual is a billboard and everything else is a
@@ -1404,18 +1532,27 @@ function M.new(magic, buildat, log, options)
 	-- there yet.
 	function self:set_object(obj, resource)
 		local props = obj.props
-		local sprite = props ~= nil and SPRITE_VISUALS[props.visual] or false
+		-- An item that is a node comes back with the six tiles it is drawn
+		-- with as well; then it is a small cube of them rather than a
+		-- picture of one
+		local own, tiles = resource(obj)
+		local cube = tiles ~= nil
+		local sprite = not cube and props ~= nil and
+				SPRITE_VISUALS[props.visual] or false
 		local entry = object_nodes[obj.id]
 		-- A visual that changed changes which component draws it
-		if entry and entry.sprite ~= sprite then
+		if entry and (entry.sprite ~= sprite or entry.cube ~= cube) then
 			scene:RemoveChild(entry.node)
 			entry = nil
 			object_nodes[obj.id] = nil
 		end
 		if not entry then
 			local node = scene:CreateChild("object_"..obj.id)
-			entry = {node = node, sprite = sprite}
-			if sprite then
+			entry = {node = node, sprite = sprite, cube = cube}
+			if cube then
+				entry.model, entry.materials = build_item_cube(node, tiles)
+				entry.textured = true
+			elseif sprite then
 				local set = node:CreateComponent("BillboardSet")
 				set.numBillboards = 1
 				-- Turned about Y only: a sprite that also leans back when
@@ -1449,7 +1586,25 @@ function M.new(magic, buildat, log, options)
 			cy = (props.collision_max[2] + props.collision_min[2]) / 2
 		end
 		entry.offset = cy
-		if sprite then
+		if cube then
+			-- Drawn at the size the object asked for rather than at what
+			-- it collides with, the same as a sprite. visual_size is what
+			-- Luanti scales the item mesh by, and a dropped node comes out
+			-- at about a third of a node, which is what its 0.4 is.
+			--
+			-- simplified: Luanti's own chain to a final size runs through
+			-- the wield mesh's own scale factors; this takes visual_size as
+			-- it is, which lands in the same place for a dropped node.
+			local v = props and props.visual_size or nil
+			entry.node.scale = magic.Vector3(
+					math.max(0.05, v and v[1] or 1),
+					math.max(0.05, v and v[2] or 1),
+					math.max(0.05, v and v[3] or v and v[1] or 1))
+			-- How fast it turns, in degrees a second; automatic_rotate is
+			-- radians a second
+			entry.spin = (props and props.automatic_rotate or 0) *
+					180 / math.pi
+		elseif sprite then
 			-- A billboard is sized by itself, and by what the object asked
 			-- for rather than by what it collides with: a dropped item's
 			-- collision box is a whole node and its picture is not
@@ -1464,19 +1619,24 @@ function M.new(magic, buildat, log, options)
 		end
 		entry.node.position = magic.Vector3(obj.position[1],
 				obj.position[2] + cy, obj.position[3])
-		entry.node.rotation = magic.Quaternion(0, -(obj.yaw or 0), 0)
 		entry.at_x, entry.at_y, entry.at_z = obj.position[1], obj.position[2],
 				obj.position[3]
-		entry.at_yaw = obj.yaw or 0
+		-- A cube of its own is turned by its spin below and by nothing else
+		if not entry.spin or entry.spin == 0 then
+			entry.node.rotation = magic.Quaternion(0, -(obj.yaw or 0), 0)
+			entry.at_yaw = obj.yaw or 0
+		end
 		entry.lit_at = daylight
 		light_object(entry, obj.position[1], obj.position[2], obj.position[3])
 
-		if obj.visual_stale or not entry.textured then
-			obj.visual_stale = false
+		-- Cleared whatever the object is drawn as: a cube's tiles go on
+		-- once, and a flag left set would rebuild it every frame
+		local was_stale = obj.visual_stale
+		obj.visual_stale = false
+		if not cube and (was_stale or not entry.textured) then
 			-- An object whose texture is not there yet wears the placeholder
 			-- rather than nothing: a box with no material at all is drawn
 			-- flat white, which reads as a hole in the world
-			local own = resource(obj)
 			local name = own or (not entry.material and texture)
 			if name then
 				local material = magic.Material.new()
@@ -1509,7 +1669,7 @@ function M.new(magic, buildat, log, options)
 	-- standing still at any one time, so what has not moved is left alone.
 	-- The light an object is drawn in only changes when it moves or when the
 	-- day does.
-	function self:place_objects(objects)
+	function self:place_objects(objects, dtime)
 		for id, obj in pairs(objects) do
 			local entry = object_nodes[id]
 			if entry and obj.position then
@@ -1523,7 +1683,14 @@ function M.new(magic, buildat, log, options)
 							y + (entry.offset or 0), z)
 					entry.lit_at = nil
 				end
-				if yaw ~= entry.at_yaw then
+				if entry.spin and entry.spin ~= 0 and dtime then
+					-- A dropped node turns on the spot; the server sends no
+					-- yaw for it, so this is the only thing that moves it
+					entry.at_yaw = (entry.at_yaw or 0) +
+							entry.spin * dtime
+					entry.node.rotation = magic.Quaternion(0,
+							entry.at_yaw % 360, 0)
+				elseif yaw ~= entry.at_yaw then
 					entry.at_yaw = yaw
 					entry.node.rotation = magic.Quaternion(0, -yaw, 0)
 				end
@@ -1553,7 +1720,27 @@ function M.new(magic, buildat, log, options)
 			pointed_node.enabled = false
 			return
 		end
+		pointed_node.scale = magic.Vector3(1, 1, 1)
 		pointed_node.position = magic.Vector3(under[1], under[2], under[3])
+		pointed_node.enabled = true
+	end
+
+	-- The same outline around an arbitrary box, given in world coordinates,
+	-- which is what a pointed object wants.
+	--
+	-- simplified: the frame is the voxel one scaled, so its bars are
+	-- thicker on a big box and thinner on a small one.
+	function self:set_pointed_box(min, max)
+		if not min or not max then
+			pointed_node.enabled = false
+			return
+		end
+		local sx = math.max(0.05, max[1] - min[1])
+		local sy = math.max(0.05, max[2] - min[2])
+		local sz = math.max(0.05, max[3] - min[3])
+		pointed_node.scale = magic.Vector3(sx, sy, sz)
+		pointed_node.position = magic.Vector3((min[1] + max[1]) / 2,
+				(min[2] + max[2]) / 2, (min[3] + max[3]) / 2)
 		pointed_node.enabled = true
 	end
 

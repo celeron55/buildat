@@ -1292,6 +1292,15 @@ function M.new(socket, options, log)
 				(from_i - 1).." "..to_inv.." "..to_list.." "..(to_i - 1))
 	end
 
+	-- Throwing a stack away, which the game turns into an item entity in
+	-- front of the player. Same text shape as the move above; a count of
+	-- zero is the whole stack. See IDropAction::serialize.
+	function self:send_inventory_drop(count, from_inv, from_list, from_i)
+		send_command(TOSERVER.INVENTORY_ACTION,
+				"Drop "..count.." "..from_inv.." "..from_list.." "..
+				(from_i - 1))
+	end
+
 	-- Says something, or runs a command when it starts with a slash. The
 	-- server answers a command with a chat message of its own.
 	function self:send_chat(text)
