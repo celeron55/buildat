@@ -332,9 +332,15 @@ namespace interface
 		// The engine hands it to the definition and the definition says what
 		// it means; see VoxelDefinition::variants.
 		VoxelField param;
-		// A colour multiplied into the vertex colour, as 0xRRGGBB or
-		// 0xAARRGGBB by its width. What wants it is a game whose voxels are
-		// colours rather than types.
+		// A colour multiplied into the vertex colour: 0xRRGGBB in the low 24
+		// bits of a field 24 or 32 bits wide. What wants it is a game whose
+		// voxels are colours rather than types.
+		//
+		// As with VoxelVariant::color, the vertex colour is light rather
+		// than albedo, so this tints the light a voxel receives and not its
+		// texture. For a game whose voxels are unlit colour that is the same
+		// thing; for one that wants a palette over a texture it is not. See
+		// local/voxel_data_model_plan.md.
 		VoxelField color;
 
 		// The voxel is one 32-bit word for now. Planes are the next step;

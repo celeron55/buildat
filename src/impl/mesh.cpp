@@ -772,9 +772,14 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		// has anything to say. The param is the one thing PolyVox does not
 		// carry through the extractor, so the voxel is looked up again.
 		const interface::VoxelVariant *variant = nullptr;
-		if(fmt.param.bound() && !voxel_def0->variants.empty()){
+		uint32_t voxel_color = 0xffffff;
+		if((fmt.param.bound() && !voxel_def0->variants.empty()) ||
+				fmt.color.bound()){
 			VoxelInstance back = face_back_voxel(volume, quad, n);
-			variant = voxel_def0->variant(fmt.param.get(back.data));
+			if(fmt.param.bound() && !voxel_def0->variants.empty())
+				variant = voxel_def0->variant(fmt.param.get(back.data));
+			if(fmt.color.bound())
+				voxel_color = fmt.color.get(back.data) & 0xffffffUL;
 		}
 		// Get texture coordinates (contained in AtlasSegmentCache)
 		const uint tile = variant ? (variant->tile_order[face_id] < 6 ?
@@ -854,10 +859,14 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			face_vertex_colors(volume, voxel_reg, fmt, quad, n, face_id,
 					corner_colors);
 		}
-		if(variant && variant->color != 0xffffff){
+		// The voxel's own colour, and then what its param says about it
+		if(voxel_color != 0xffffff || (variant &&
+				variant->color != 0xffffff)){
+			uint32_t tint = variant ?
+					modulate_color(voxel_color | 0xff000000UL,
+							variant->color) & 0xffffffUL : voxel_color;
 			for(size_t i = 0; i < 4; i++)
-				corner_colors[i] = modulate_color(corner_colors[i],
-						variant->color);
+				corner_colors[i] = modulate_color(corner_colors[i], tint);
 		}
 		// Go through indices of the face and mangle vertices according to them
 		// into the temporary vertex buffer
@@ -1202,6 +1211,10 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 								BOUNCE_COLOR.b_ * shade * (1.0f - sky_f) +
 										LAMP_COLOR.b_ * lamp_f * shade,
 								sky_f * shade).ToUInt();
+					}
+					if(fmt.color.bound()){
+						color = modulate_color(color,
+								fmt.color.get(v.data) & 0xffffffUL);
 					}
 					if(variant)
 						color = modulate_color(color, variant->color);

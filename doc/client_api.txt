@@ -415,7 +415,7 @@ every volume on its way anywhere, is bits under the old format.
       light_sky = {shift = 16, width = 4},
       light_lamp = {shift = 20, width = 4},
       param = {shift = 24, width = 8},    -- a definition's own rule reads it
-      color = nil,                        -- rgb or argb by its width
+      color = nil,                        -- 0xRRGGBB, width 24 or 32
   }
 
 - Those five are the roles the engine understands. A role left out is not
@@ -428,6 +428,10 @@ every volume on its way anywhere, is bits under the old format.
 - param is handed to the voxel's definition, which is what says what it
   means: which way the voxel faces, how high a liquid stands in it, which
   entry of a palette it wears.
+- color is 0xRRGGBB in the low 24 bits of a field 24 or 32 bits wide, and is
+  multiplied into the vertex colour. That colour is light rather than albedo,
+  so it tints the light a voxel receives and not its texture: right for a
+  game whose voxels are unlit colour, wrong for a palette over a texture.
 - The fields may not overlap and may not reach past the word. set_format()
   says which rule was broken.
 - voxel_reg:dump_format() writes the format out, for a log line.

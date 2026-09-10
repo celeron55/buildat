@@ -318,6 +318,13 @@ bool VoxelFormat::validate(ss_ *why) const
 	// VOXELTYPEID_MAX is not a mask -- it is a lower cap inside 21 bits --
 	// so the rule here is the field's width, and the registry is what
 	// refuses an id above the cap
+	// The colour role is 0xRRGGBB in the low 24 bits of its field, so it is
+	// that wide or 32 bits with the top byte unread. A palette index is not
+	// this: indexing a palette is a lookup the engine does not have, and a
+	// definition's variants are where a palette belongs.
+	if(color.bound() && color.width != 24 && color.width != 32)
+		return fail("color: width "+itos((int)color.width)+" is not 24 or 32");
+
 	if(id.bound() && id.width > 21)
 		return fail("id: width "+itos((int)id.width)+" > 21, the bits a "
 				"voxel type id has");
@@ -416,6 +423,11 @@ bool voxel_format_self_test()
 		assert(f.validate(&why));
 		assert(f.id_of(0) == 1);
 		assert(f.id_of(0xffffffff) == 1);
+		// A colour is 24 bits of RGB, in a field of 24 or 32
+		f.color = VoxelField{0, 0, 24};
+		assert(f.validate(&why));
+		f.color = VoxelField{0, 0, 16};
+		assert(!f.validate(&why));
 	}
 
 	// legacy() through the format is VoxelInstance's own hardcoded cut
