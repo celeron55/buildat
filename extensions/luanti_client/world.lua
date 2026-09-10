@@ -1616,40 +1616,92 @@ function M.new(magic, buildat, log, options)
 		return cg, materials
 	end
 
+	-- An object drawn as its own model: the quads objmesh or b3dmesh read,
+	-- one geometry per material so that each wears the texture the object
+	-- gave for that material. Both windings, like the item cube above, for
+	-- the same reason: a model's winding is not something to rely on.
+	local function build_object_mesh(node, quads, tiles)
+		local by_group = {}
+		local order = {}
+		for _, q in ipairs(quads) do
+			local g = q.group or 1
+			if not by_group[g] then
+				by_group[g] = {}
+				order[#order + 1] = g
+			end
+			local into = by_group[g]
+			into[#into + 1] = q
+		end
+		table.sort(order)
+		local cg = node:CreateComponent("CustomGeometry")
+		cg:SetNumGeometries(#order)
+		for i = 1, #order do
+			cg:BeginGeometry(i - 1, magic.TRIANGLE_LIST)
+			for _, q in ipairs(by_group[order[i]]) do
+				for _, c in ipairs({1, 2, 3, 1, 3, 4, 1, 3, 2, 1, 4, 3}) do
+					local o = (c - 1) * 3
+					cg:DefineVertex(magic.Vector3(q.p[o + 1], q.p[o + 2],
+							q.p[o + 3]))
+					cg:DefineTexCoord(magic.Vector2(q.uv[(c - 1) * 2 + 1],
+							q.uv[(c - 1) * 2 + 2]))
+				end
+			end
+		end
+		cg:Commit()
+		cg.castShadows = false
+		local materials = {}
+		for i = 1, #order do
+			local material = magic.Material.new()
+			material:SetTechnique(0, object_technique)
+			material:SetTexture(0, magic.cache:GetResource("Texture2D",
+					tiles[order[i]] or tiles[1] or texture))
+			cg:SetMaterial(i - 1, material)
+			materials[i] = material
+		end
+		return cg, materials
+	end
+
 	-- What an object is drawn as.
 	--
-	-- simplified: a sprite visual is a billboard and everything else is a
-	-- box with the object's first texture on it, whatever its visual says.
-	-- Luanti draws a mesh for a mob and a cube for a few things, and Urho3D
-	-- reads none of the model formats Luanti's meshes come in -- but a box
-	-- wearing a cow's texture reads as a cow, where nothing at all reads as
-	-- nothing at all. The upgrade path is a converter or a loader for the
-	-- meshes, which are .b3d.
+	-- simplified: an object whose visual is a mesh this can read is drawn as
+	-- that mesh in its rest pose -- BONE, KEYS and ANIM are not read, so a
+	-- mob stands still -- a sprite visual is a billboard, and everything
+	-- else is a box with the object's first texture on it. A box wearing a
+	-- cow's texture reads as a cow where nothing at all reads as nothing at
+	-- all, which is what the models Urho3D cannot read fall back to.
 	--
 	-- obj is what objects.lua parsed; resource(obj) says what it is drawn
 	-- wearing, as a resource name, or nil for an object whose texture is not
-	-- there yet.
+	-- there yet, and as the six tiles of a node or the quads of a model when
+	-- it is one of those.
 	function self:set_object(obj, resource)
 		local props = obj.props
 		-- An item that is a node comes back with the six tiles it is drawn
 		-- with as well; then it is a small cube of them rather than a
 		-- picture of one
-		local own, tiles = resource(obj)
+		local own, tiles, mesh = resource(obj)
 		local cube = tiles ~= nil
-		local sprite = not cube and props ~= nil and
+		local meshed = not cube and mesh ~= nil
+		local sprite = not cube and not meshed and props ~= nil and
 				SPRITE_VISUALS[props.visual] or false
 		local entry = object_nodes[obj.id]
 		-- A visual that changed changes which component draws it
-		if entry and (entry.sprite ~= sprite or entry.cube ~= cube) then
+		if entry and (entry.sprite ~= sprite or entry.cube ~= cube or
+				entry.meshed ~= meshed) then
 			scene:RemoveChild(entry.node)
 			entry = nil
 			object_nodes[obj.id] = nil
 		end
 		if not entry then
 			local node = scene:CreateChild("object_"..obj.id)
-			entry = {node = node, sprite = sprite, cube = cube}
+			entry = {node = node, sprite = sprite, cube = cube,
+					meshed = meshed}
 			if cube then
 				entry.model, entry.materials = build_item_cube(node, tiles)
+				entry.textured = true
+			elseif meshed then
+				entry.model, entry.materials = build_object_mesh(node,
+						mesh.quads, mesh.tiles)
 				entry.textured = true
 			elseif sprite then
 				local set = node:CreateComponent("BillboardSet")
@@ -1703,6 +1755,22 @@ function M.new(magic, buildat, log, options)
 			-- radians a second
 			entry.spin = (props and props.automatic_rotate or 0) *
 					180 / math.pi
+		elseif meshed then
+			-- A model is drawn at the size the object asked for, the same as
+			-- a sprite: what it collides with is not what it looks like.
+			--
+			-- An object's model is authored in Luanti's own scene units,
+			-- where a node is ten across, and visual_size scales it in those.
+			-- Everything here is in nodes, so the tenth is the conversion. A
+			-- node's "mesh" drawtype is the other way round -- authored one
+			-- unit to the node -- which is why shapes.lua does not do this.
+			local v = props and props.visual_size or nil
+			local to_nodes = 1 / 10
+			entry.node.scale = magic.Vector3(
+					math.max(0.005, (v and v[1] or 1) * to_nodes),
+					math.max(0.005, (v and v[2] or 1) * to_nodes),
+					math.max(0.005, (v and v[3] or v and v[1] or 1) *
+							to_nodes))
 		elseif sprite then
 			-- A billboard is sized by itself, and by what the object asked
 			-- for rather than by what it collides with: a dropped item's
@@ -1732,7 +1800,7 @@ function M.new(magic, buildat, log, options)
 		-- once, and a flag left set would rebuild it every frame
 		local was_stale = obj.visual_stale
 		obj.visual_stale = false
-		if not cube and (was_stale or not entry.textured) then
+		if not cube and not meshed and (was_stale or not entry.textured) then
 			-- An object whose texture is not there yet wears the placeholder
 			-- rather than nothing: a box with no material at all is drawn
 			-- flat white, which reads as a hole in the world
