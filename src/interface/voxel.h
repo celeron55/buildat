@@ -215,6 +215,122 @@ namespace interface
 		AtlasSegmentReference lod_textures[VOXELDEF_NUM_LOD][6];
 	};
 
+	// Where one of the engine's roles lives inside a voxel.
+	//
+	// width 0 means the role is not bound at all, which is not the same as a
+	// role that is always zero: a world with no light bound is not a dark
+	// world, it is one where nothing asks about light.
+	struct VoxelField
+	{
+		uint8_t plane = 0;
+		uint8_t shift = 0;
+		uint8_t width = 0;
+
+		// Not an aggregate: the members have initializers and this is C++11
+		VoxelField(){}
+		VoxelField(uint8_t plane, uint8_t shift, uint8_t width):
+			plane(plane), shift(shift), width(width){}
+
+		bool bound() const { return width != 0; }
+
+		uint32_t mask() const {
+			return width >= 32 ? 0xffffffffUL : ((1UL << width) - 1);
+		}
+
+		uint32_t get(uint32_t word) const {
+			return (word >> shift) & mask();
+		}
+
+		void set(uint32_t &word, uint32_t value) const {
+			uint32_t m = mask() << shift;
+			word = (word & ~m) | ((value << shift) & m);
+		}
+
+		bool operator==(const VoxelField &o) const {
+			return plane == o.plane && shift == o.shift && width == o.width;
+		}
+	};
+
+	// How a game cuts up a voxel: which bits are the type id, which are
+	// light, which are a parameter the definitions interpret, which are a
+	// colour, and what is left over for the game's own use.
+	//
+	// A format belongs to a VoxelRegistry, is set before the first voxel is
+	// added to it and never after, and travels to clients with it. So a
+	// volume plus its world's registry is self-describing, and nothing that
+	// takes a volume needs to take a format as well.
+	//
+	// The default is legacy(), which is the cut the engine had before this
+	// existed, bit for bit. A game that says nothing keeps it.
+	struct VoxelFormat
+	{
+		VoxelField id;
+		VoxelField light_sky;
+		VoxelField light_lamp;
+		// What a definition's own rule interprets: which way a voxel faces,
+		// how high a liquid stands in it, which entry of a palette it wears.
+		// The engine hands it to the definition and the definition says what
+		// it means; see VoxelDefinition::variants.
+		VoxelField param;
+		// A colour multiplied into the vertex colour, as 0xRRGGBB or
+		// 0xAARRGGBB by its width. What wants it is a game whose voxels are
+		// colours rather than types.
+		VoxelField color;
+
+		// The voxel is one 32-bit word for now. Planes are the next step;
+		// this is the field that becomes a list.
+		uint8_t plane_bits = 32;
+
+		static VoxelFormat legacy()
+		{
+			VoxelFormat f;
+			f.id = VoxelField{0, 0, 21};
+			f.light_sky = VoxelField{0, 24, 4};
+			f.light_lamp = VoxelField{0, 28, 4};
+			return f;
+		}
+
+		// Luanti's own cut, which fits the same word exactly: a 16-bit node
+		// id, param1 as two light nibbles, and param2.
+		static VoxelFormat luanti()
+		{
+			VoxelFormat f;
+			f.id = VoxelField{0, 0, 16};
+			f.light_sky = VoxelField{0, 16, 4};
+			f.light_lamp = VoxelField{0, 20, 4};
+			f.param = VoxelField{0, 24, 8};
+			return f;
+		}
+
+		// The type id of a voxel. A format with no id bound has exactly one
+		// voxel type -- what wants that is a painter, whose voxels are all
+		// the same kind of thing wearing a colour -- and it is type 1 rather
+		// than 0 because 0 is VOXELTYPEID_UNDEFINED, which means "nothing
+		// has generated this yet".
+		VoxelTypeId id_of(uint32_t word) const {
+			return id.bound() ? (VoxelTypeId)id.get(word) : 1;
+		}
+
+		// Both light roles as one field, for a caller that writes them
+		// together (pack_voxel_volume's "light"). Only when they are
+		// adjacent in the same plane with the sky light in the low bits,
+		// which is the only arrangement that can be one write.
+		bool light_pair(VoxelField *out) const;
+
+		// Every bound field is inside its plane, no two overlap, and the id
+		// fits VOXELTYPEID_MAX. why, when given, gets the first reason it
+		// did not.
+		bool validate(ss_ *why = nullptr) const;
+
+		ss_ dump() const;
+	};
+
+	// Asserts the invariants of VoxelField and VoxelFormat: the accessors
+	// round-trip, the built-in formats validate, malformed ones do not, and
+	// legacy() read through a format agrees with VoxelInstance's own
+	// hardcoded cut. Runs once, from createVoxelRegistry().
+	bool voxel_format_self_test();
+
 	struct VoxelInstance;
 
 	struct VoxelRegistry
