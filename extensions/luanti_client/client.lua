@@ -1368,6 +1368,27 @@ function M.new(socket, options, log)
 		send_command(TOSERVER.NODEMETA_FIELDS, w:data())
 	end
 
+	-- One line saying what the network and the map are doing, for a log from
+	-- a session that went wrong. What a stall looks like: blocks stops
+	-- climbing while unacked stays above zero on channel 2, which is where
+	-- the map goes -- or the incoming queue on a channel never empties,
+	-- which means a reliable packet went missing and everything behind it is
+	-- waiting.
+	function self:net_line()
+		local parts = {}
+		for channel, s in pairs(conn:stats()) do
+			if s.unacked > 0 or s.incoming > 0 or s.splits > 0 then
+				parts[#parts + 1] = string.format(
+						"ch%d unacked %d, early %d, splits %d, in %d, out %d",
+						channel, s.unacked, s.incoming, s.splits,
+						s.next_in, s.next_out)
+			end
+		end
+		return string.format("net: blocks %d, commands waiting %d%s%s",
+				self.blocks_received, self.commands_waiting,
+				#parts > 0 and " | " or "", table.concat(parts, " | "))
+	end
+
 	-- The blocks we no longer have, which is what makes the server send them
 	-- again: it keeps track of what it has sent and skips a block it thinks
 	-- we hold. What wants that is a node change, because the light around it

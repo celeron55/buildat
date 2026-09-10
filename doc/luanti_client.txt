@@ -464,6 +464,13 @@ to the box the game says a ray hits; and a turned node box's texture
 coordinates are the whole tile rather than the part of it Luanti works out
 from the box after the turn.
 
+The client logs a counter line every two seconds -- blocks received,
+commands waiting, and per channel what the reliable layer is holding -- so
+that a session which loaded badly can be diagnosed from its log afterwards.
+A stall behind an unacknowledged packet, a lost reliable packet with
+everything queued behind it, and a server that simply sends little look
+different in those numbers.
+
 The light of a node change is the server's arithmetic and not this client's.
 ADDNODE and REMOVENODE carry the new node's own light and nothing about what
 is around it, and Luanti's own client works the rest out itself, unspreading
@@ -474,7 +481,10 @@ makes the server send them again with the light it worked out; the stale ones
 are drawn until they arrive. Only a change that can move light at all is
 worth it: one where the light the node gives, or whether light passes through
 it, differs from what was there. So a rail replaced by air costs nothing and
-a torch or a wall costs a block or a few.
+a torch or a wall costs a block or a few. It is throttled as well -- within
+three blocks of the camera, eight a frame, twenty-four waiting at most --
+because asking for a block again takes a send away from the map that has not
+arrived yet, and on a busy server every nearby player's digging would ask.
 
 The HUD: a game puts its own things on the screen with HUDADD and changes
 them one field at a time with HUDCHANGE, and this draws the images, the text
