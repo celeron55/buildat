@@ -285,6 +285,10 @@ What is done
   is what the server's own anticheat wants, since it refuses a dig that was
   finished sooner than it should have been
 - Placing what is wielded, and the hotbar slot on the number keys
+- Items a game defines as usable: the left button sends INTERACT_USE with
+  whatever is pointed at, node or nothing, and digs nothing -- devtest's
+  chest_of_everything:bag opens its own inventory that way and its apple is
+  eaten. The right button pointed at nothing sends INTERACT_ACTIVATE
 - Node shapes that are not cubes: node boxes as their boxes, plants, torches,
   fires, signs and rails as quads, .obj models as their own geometry, and a
   flowing liquid as a box with a lowered top, through a shape in the voxel
