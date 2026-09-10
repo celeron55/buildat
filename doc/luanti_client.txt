@@ -306,7 +306,9 @@ What is done
   because the server did not grant it rather than leaving the player to
   wonder why they were pulled back
 - Active objects: other players, mobs and dropped items, where the server
-  says they are. An object whose visual is a mesh is drawn as that mesh --
+  says they are. Their textures are drawn without smoothing, like the voxel
+  atlas's: a Luanti game's textures are pixel art and interpolating them is
+  wrong at every size. An object whose visual is a mesh is drawn as that mesh --
   the .b3d and .obj readers the node meshes use, one geometry per material so
   each wears the texture the object gave for it -- in its rest pose, because
   the animation chunks are not read. A dropped node is a small cube of the
