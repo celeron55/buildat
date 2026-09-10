@@ -7,6 +7,8 @@ local dump = buildat.dump
 local cereal = require("buildat/extension/cereal")
 local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
+local ui_utils = require("buildat/extension/ui_utils")
+local uistack = require("buildat/extension/uistack")
 local voxelworld = require("buildat/module/voxelworld")
 local voxel_shading = require("buildat/module/voxel_shading")
 
@@ -229,6 +231,27 @@ local function enable_physics()
 	log:info("player physics enabled")
 end
 
+-- Free move: the camera goes where it is pointed, through anything, and
+-- nothing pulls it down. What it is for is looking at what the structures
+-- menu put up -- which is why placing one while it is on takes the camera to
+-- somewhere the whole thing can be seen from.
+local FREE_MOVE_SPEED = 22
+local free_move = false
+
+local function set_free_move(on)
+	free_move = on
+	local body = player_node:GetComponent("RigidBody")
+	if body then
+		body.useGravity = not on
+		body.linearVelocity = magic.Vector3(0, 0, 0)
+	end
+	if player_crouched then
+		player_shape:SetCapsule(PLAYER_WIDTH, PLAYER_HEIGHT)
+		player_crouched = false
+	end
+	log:info(on and "free move on" or "free move off")
+end
+
 -- Add a camera so we can look at the scene
 local camera_node = player_node:CreateChild("Camera")
 do
@@ -351,11 +374,150 @@ end
 -- Unfocus UI
 magic.ui:SetFocusElement(nil)
 
+-- The structures the server can put up, in the order the menu lists them.
+-- Placing one and then cutting a pillar out of it is the whole point of
+-- having them: building a cathedral by hand first is tedium, not a game.
+local STRUCTURES = {
+	{name = "chamber", label = "Chamber (roof too wide for rock)"},
+	{name = "cathedral", label = "Cathedral (pillars and a rock roof)"},
+	{name = "bridge", label = "Bridge (deck on piers)"},
+	{name = "mineshaft", label = "Mineshaft (timber props)"},
+}
+
+local structure_menu = nil
+
+local function place_structure(name, p)
+	local data = cereal.binary_output({
+		name = name,
+		p = {
+			x = math.floor(p.x + 0.5),
+			y = math.floor(p.y + 0.5),
+			z = math.floor(p.z + 0.5),
+		},
+	}, {"object",
+		{"name", "string"},
+		{"p", {"object",
+			{"x", "int32_t"},
+			{"y", "int32_t"},
+			{"z", "int32_t"},
+		}},
+	})
+	buildat.send_packet("main:place_structure", data)
+end
+
+-- Put the camera somewhere the whole of a box is in frame, looking at the
+-- middle of it: off one corner and above, far enough back for its size.
+local function overlook(lc, uc)
+	local cx = (lc.x + uc.x) / 2
+	local cy = (lc.y + uc.y) / 2
+	local cz = (lc.z + uc.z) / 2
+	local size = math.max(uc.x - lc.x, uc.y - lc.y, uc.z - lc.z) + 1
+	local d = size * 1.3 + 12
+	-- Off a corner and above, so three sides of the box are in frame. Which
+	-- corner is whichever leaves the camera in open air: standing inside a
+	-- tree shows a leaf and nothing else.
+	local CORNERS = {
+		{-0.62, -0.62}, {0.62, -0.62}, {0.62, 0.62}, {-0.62, 0.62},
+	}
+	local oy = 0.48
+	local ox, oz = CORNERS[1][1], CORNERS[1][2]
+	for _, c in ipairs(CORNERS) do
+		local p = magic.Vector3(cx + c[1] * d, cy + oy * d, cz + c[2] * d)
+		local clear = true
+		-- The camera itself and one voxel around it, since a solid voxel
+		-- next to the near clip plane fills the frame as well as one in it
+		for dx = -1, 1 do
+			for dy = -1, 1 do
+				for dz = -1, 1 do
+					local v = voxelworld.get_static_voxel(buildat.Vector3(
+							math.floor(p.x + 0.5) + dx,
+							math.floor(p.y + 0.5) + dy,
+							math.floor(p.z + 0.5) + dz))
+					local id = field_of(v, FIELD.id)
+					if id ~= M_AIR and id ~= 0 then
+						clear = false
+					end
+				end
+			end
+		end
+		if clear then
+			ox, oz = c[1], c[2]
+			break
+		end
+	end
+	player_node.position = magic.Vector3(cx + ox * d, cy + oy * d, cz + oz * d)
+	-- Yaw at the middle, and the pitch is whatever looking down at it takes
+	player_node.direction = magic.Vector3(-ox, 0, -oz)
+	local horiz = math.sqrt(ox * ox + oz * oz)
+	camera_node.rotation = magic.Quaternion(
+			math.deg(math.atan2(oy, horiz)), 0, 0)
+end
+
+buildat.sub_packet("main:structure_placed", function(data)
+	local values = cereal.binary_input(data, {"object",
+		{"lc", {"object",
+			{"x", "int32_t"}, {"y", "int32_t"}, {"z", "int32_t"},
+		}},
+		{"uc", {"object",
+			{"x", "int32_t"}, {"y", "int32_t"}, {"z", "int32_t"},
+		}},
+	})
+	-- Only in free move: standing inside what was just built is the other
+	-- way to experience it, and taking the camera away would spoil it
+	if free_move then
+		overlook(values.lc, values.uc)
+	end
+end)
+
+local function close_structure_menu()
+	if structure_menu then
+		uistack.main:pop(structure_menu.root)
+		structure_menu = nil
+		magic.input:SetMouseVisible(false)
+	end
+end
+
+-- Opened with B, and it takes the mouse back so the buttons can be clicked;
+-- arrows and enter work too, from ui_utils.
+local function open_structure_menu()
+	if structure_menu then
+		close_structure_menu()
+		return
+	end
+	-- On a uistack level of its own: that is what gives it the keyboard, and
+	-- what ui_utils' menus subscribe to their keys through
+	local root = uistack.main:push({desc = "structures"})
+	local menu = ui_utils.vertical_menu(root, {
+		on_key = function(key)
+			if key == magic.KEY_ESCAPE or key == magic.KEY_B then
+				close_structure_menu()
+				return true
+			end
+		end,
+	})
+	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+	for _, st in ipairs(STRUCTURES) do
+		menu:add(st.label, function()
+			-- Where the player stands, so a building goes up around them
+			place_structure(st.name, player_node:GetWorldPosition())
+			close_structure_menu()
+		end)
+	end
+	structure_menu = {root = root, menu = menu}
+	magic.input:SetMouseVisible(true)
+end
+
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	local key = event_data:GetInt("Key")
 	if key == magic.KEY_ESCAPE then
 		log:info("KEY_ESCAPE pressed")
 		buildat.disconnect()
+	end
+	if key == magic.KEY_B then
+		open_structure_menu()
+	end
+	if key == magic.KEY_TAB then
+		set_free_move(not free_move)
 	end
 	for i, m in ipairs(BUILD_MATERIALS) do
 		if key == m.key then
@@ -389,6 +551,9 @@ local function find_pointed_voxel(camera_node)
 end
 
 magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
+	if structure_menu then
+		return -- The menu has the mouse
+	end
 	local button = event_data:GetInt("Button")
 	log:info("MouseButtonDown: "..button)
 	if button == magic.MOUSEB_RIGHT then
@@ -495,9 +660,42 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		log:info("p="..camera_node:GetRotation():PitchAngle())]]
 
 		local body = player_node:GetComponent("RigidBody")
-		enable_physics()
+		if not free_move then
+			enable_physics()
+		end
 
-		do 
+		if free_move then
+			-- Straight along the camera, so looking down and holding W goes
+			-- down. Space and shift are up and down whatever it is pointed
+			-- at, which is what makes lining a shot up quick.
+			local wanted = magic.Vector3(0, 0, 0)
+			local dir = camera_node.worldDirection
+			local right = dir:CrossProduct(magic.Vector3(0, 1, 0))
+			if magic.input:GetKeyDown(magic.KEY_W) then
+				wanted = wanted + dir
+			end
+			if magic.input:GetKeyDown(magic.KEY_S) then
+				wanted = wanted - dir
+			end
+			if magic.input:GetKeyDown(magic.KEY_D) then
+				wanted = wanted - right
+			end
+			if magic.input:GetKeyDown(magic.KEY_A) then
+				wanted = wanted + right
+			end
+			if magic.input:GetKeyDown(magic.KEY_SPACE) then
+				wanted = wanted + magic.Vector3(0, 1, 0)
+			end
+			if magic.input:GetKeyDown(magic.KEY_SHIFT) then
+				wanted = wanted - magic.Vector3(0, 1, 0)
+			end
+			if wanted:Length() > 0.01 then
+				wanted = wanted:Normalized() * FREE_MOVE_SPEED
+			end
+			body.linearVelocity = wanted
+		end
+
+		if not free_move then 
 			local wanted_v = magic.Vector3(0, 0, 0) -- re. world
 			do
 				local wanted_v_re_body = magic.Vector3(0, 0, 0)
@@ -537,8 +735,8 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 			end
 		end
 
-		if magic.input:GetKeyDown(magic.KEY_SPACE) or
-				magic.input:GetKeyPress(magic.KEY_SPACE) then
+		if not free_move and (magic.input:GetKeyDown(magic.KEY_SPACE) or
+				magic.input:GetKeyPress(magic.KEY_SPACE)) then
 			if player_touches_ground and
 					math.abs(body.linearVelocity.y) < JUMP_SPEED then
 				local bv = body.linearVelocity
@@ -546,7 +744,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 				body.linearVelocity = bv
 			end
 		end
-		if magic.input:GetKeyDown(magic.KEY_SHIFT) then
+		if not free_move and magic.input:GetKeyDown(magic.KEY_SHIFT) then
 			enable_physics()
 			if not player_crouched then
 				player_shape:SetCapsule(PLAYER_WIDTH, PLAYER_HEIGHT/2)
@@ -566,7 +764,8 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		local line = "("..math.floor(p.x + 0.5)..", "..
 				math.floor(p.y + 0.5)..", "..math.floor(p.z + 0.5)..")"..
 				"  building: "..BUILD_MATERIALS[build_material].name..
-				" (1-4)"
+				" (1-4)  structures: B  free move: Tab"..
+				(free_move and " (on)" or "")
 		-- What the pointed voxel is and how close it is to failing, which
 		-- is the whole debug interface between digs
 		if pointed_voxel_p then

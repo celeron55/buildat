@@ -18,9 +18,13 @@
 #include <Texture2D.h>
 #include <Technique.h>
 #include <cereal/archives/portable_binary.hpp>
+#include <cereal/types/string.hpp>
 #include <cereal/types/unordered_map.hpp>
 #include <cereal/types/vector.hpp>
 #include <sstream>
+#include <deque>
+#include <unordered_set>
+#include <algorithm>
 #define MODULE "main"
 
 namespace magic = Urho3D;
@@ -344,6 +348,15 @@ struct Module: public interface::Module
 	bool m_spawn_ready = false;
 	float m_spawn_y = 0;
 
+	// Voxels whose support and load have to be worked out again, and the
+	// ones that have already been found to be failing. The set is what keeps
+	// a queue from filling up with the same position: a cave-in reaches the
+	// same voxel from several directions.
+	std::deque<pv::Vector3DInt32> m_dirty;
+	std::unordered_set<int64_t> m_dirty_set;
+	std::vector<pv::Vector3DInt32> m_falling;
+	std::unordered_set<int64_t> m_falling_set;
+
 	Module(interface::Server *server):
 		interface::Module(MODULE),
 		m_server(server)
@@ -363,7 +376,10 @@ struct Module: public interface::Module
 				"network:packet_received/main:place_voxel"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:dig_voxel"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:place_structure"));
 		m_server->sub_event(this, Event::t("worldgen:queue_modified"));
+		m_server->sub_event(this, Event::t("core:tick"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -377,8 +393,11 @@ struct Module: public interface::Module
 				on_place_voxel, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:dig_voxel",
 				on_dig_voxel, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:place_structure",
+				on_place_structure, network::Packet)
 		EVENT_TYPEN("worldgen:queue_modified",
 				on_worldgen_queue_modified, worldgen::QueueModifiedEvent);
+		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent);
 	}
 
 	// The six numbers after solid describe the surface; see interface/atlas.h.
@@ -649,6 +668,439 @@ struct Module: public interface::Module
 		send_spawn(event.recipient);
 	}
 
+
+	// The simulation
+	// --------------
+	//
+	// One queue of voxels whose support and load are out of date, walked with
+	// a budget per tick. Recomputing a voxel is a pure function of its
+	// neighbours, so a change spreads outward by whatever it actually
+	// changes: a dig into solid rock settles in a handful of voxels, and a
+	// dig that takes a roof away walks as far as the roof reached.
+	//
+	// Support goes down rather than up when what was holding it goes away,
+	// which the same relaxation handles by running to a fixed point: with no
+	// source left, each round takes another step off what is left, so the
+	// front dies out after at most SUPPORT_MAX rounds. That is why there is
+	// no separate take-it-back-out pass of the kind update_skylight() needs
+	// -- support is cheap to be wrong about for a tick, and light is not.
+	static const size_t SIM_PER_TICK = 2048;
+	static const size_t FALL_PER_TICK = 256;
+
+	static int64_t pos_key(const pv::Vector3DInt32 &p)
+	{
+		// The world is far smaller than 2^20 on any axis
+		return ((int64_t)(p.getX() & 0xfffff) << 40) |
+				((int64_t)(p.getY() & 0xfffff) << 20) |
+				(int64_t)(p.getZ() & 0xfffff);
+	}
+
+	void mark_dirty(const pv::Vector3DInt32 &p)
+	{
+		if(m_dirty_set.insert(pos_key(p)).second)
+			m_dirty.push_back(p);
+	}
+
+	// What has to be looked at again after the voxel at p changed: itself,
+	// the six around it -- support reaches sideways and up -- and the
+	// LOAD_DEPTH voxels under it, which are the ones carrying it.
+	void mark_changed(const pv::Vector3DInt32 &p)
+	{
+		static const int OFF[6][3] = {
+			{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1},
+		};
+		mark_dirty(p);
+		for(size_t k = 0; k < 6; k++)
+			mark_dirty(pv::Vector3DInt32(p.getX() + OFF[k][0],
+					p.getY() + OFF[k][1], p.getZ() + OFF[k][2]));
+		for(int i = 1; i <= LOAD_DEPTH; i++)
+			mark_dirty(pv::Vector3DInt32(p.getX(), p.getY() - i, p.getZ()));
+	}
+
+	void mark_falling(const pv::Vector3DInt32 &p)
+	{
+		if(m_falling_set.insert(pos_key(p)).second)
+			m_falling.push_back(p);
+	}
+
+	// How far the voxel at p is from something holding it up, 0 for nothing.
+	//
+	// A voxel standing on something supported is supported itself, whatever
+	// it is made of: a column carries straight down and does not span
+	// anything. Otherwise it reaches out sideways from its neighbours,
+	// losing one step per voxel and never further than its material's span,
+	// which is what decides how wide a tunnel a material will roof.
+	uint8_t compute_support(voxelworld::Instance *world,
+			const pv::Vector3DInt32 &p, const MaterialProps &m)
+	{
+		if(!m.diggable)
+			return SUPPORT_MAX; // Bedrock, and anything else immovable
+		VoxelInstance below = world->get_voxel(
+				pv::Vector3DInt32(p.getX(), p.getY() - 1, p.getZ()), true);
+		const MaterialProps &bm = material_of(id_of(below));
+		if(bm.structural && support_of(below) > 0)
+			return SUPPORT_MAX;
+		if(m.span == 0)
+			return 0;
+		static const int SIDE[4][2] = {{1,0}, {-1,0}, {0,1}, {0,-1}};
+		uint8_t best = 0;
+		for(size_t k = 0; k < 4; k++){
+			VoxelInstance n = world->get_voxel(pv::Vector3DInt32(
+					p.getX() + SIDE[k][0], p.getY(),
+					p.getZ() + SIDE[k][1]), true);
+			if(!material_of(id_of(n)).structural)
+				continue;
+			uint8_t s = support_of(n);
+			if(s > best)
+				best = s;
+		}
+		if(best == 0)
+			return 0;
+		uint8_t reach = best - 1;
+		return reach < m.span ? reach : m.span;
+	}
+
+	// The weight resting on the voxel at p: the column immediately above it,
+	// as far as LOAD_DEPTH. See LOAD_DEPTH for why it stops.
+	uint8_t compute_load(voxelworld::Instance *world,
+			const pv::Vector3DInt32 &p)
+	{
+		int carried = 0;
+		for(int i = 1; i <= LOAD_DEPTH; i++){
+			VoxelInstance v = world->get_voxel(
+					pv::Vector3DInt32(p.getX(), p.getY() + i, p.getZ()),
+					true);
+			const MaterialProps &m = material_of(id_of(v));
+			if(!m.structural)
+				break;
+			carried += m.density;
+			if(carried >= LOAD_MAX)
+				return LOAD_MAX;
+		}
+		return (uint8_t)carried;
+	}
+
+	// Work out one voxel again, write it if either number moved, and say
+	// whether anything around it has to be looked at as a result.
+	void update_voxel(voxelworld::Instance *world,
+			const pv::Vector3DInt32 &p)
+	{
+		VoxelInstance v = world->get_voxel(p, true);
+		interface::VoxelTypeId id = id_of(v);
+		if(id == interface::VOXELTYPEID_UNDEFINED)
+			return; // Not generated yet; whoever generates it computes both
+		const MaterialProps &m = material_of(id);
+		if(!m.structural)
+			return;
+		uint8_t support = compute_support(world, p, m);
+		uint8_t load = compute_load(world, p);
+		bool support_moved = support != support_of(v);
+		if(support_moved || load != load_of(v)){
+			VoxelInstance nv = v;
+			F_SUPPORT.set(nv.data, support);
+			F_LOAD.set(nv.data, load);
+			world->set_voxel(p, nv, true);
+		}
+		// A support that moved changes what the voxels around it can reach
+		if(support_moved){
+			static const int OFF[6][3] = {
+				{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1},
+			};
+			for(size_t k = 0; k < 6; k++)
+				mark_dirty(pv::Vector3DInt32(p.getX() + OFF[k][0],
+						p.getY() + OFF[k][1], p.getZ() + OFF[k][2]));
+		}
+		// Nothing holds it, or what does cannot carry what is on it
+		if(m.diggable && (support == 0 || load > m.capacity)){
+			log_t(MODULE, "fails: " PV3I_FORMAT " id=%i support=%i load=%i",
+					PV3I_PARAMS(p), (int)id, (int)support, (int)load);
+			mark_falling(p);
+		}
+	}
+
+	// Move what is falling down one voxel, or turn it to rubble where it
+	// stops. Lowest first, so a column comes down without opening a gap in
+	// the middle of itself.
+	size_t m_moved = 0;
+	size_t m_landed = 0;
+
+	void step_falling(voxelworld::Instance *world)
+	{
+		if(m_falling.empty())
+			return;
+		std::sort(m_falling.begin(), m_falling.end(),
+				[](const pv::Vector3DInt32 &a, const pv::Vector3DInt32 &b){
+			return a.getY() < b.getY();
+		});
+		size_t n = m_falling.size() < FALL_PER_TICK ?
+				m_falling.size() : FALL_PER_TICK;
+		std::vector<pv::Vector3DInt32> rest(m_falling.begin() + n,
+				m_falling.end());
+		std::vector<pv::Vector3DInt32> batch(m_falling.begin(),
+				m_falling.begin() + n);
+		m_falling = rest;
+		for(const pv::Vector3DInt32 &p : batch){
+			m_falling_set.erase(pos_key(p));
+			VoxelInstance v = world->get_voxel(p, true);
+			interface::VoxelTypeId id = id_of(v);
+			const MaterialProps &m = material_of(id);
+			// It may have been dug, or held up again, since it was queued
+			if(!m.structural || !m.diggable)
+				continue;
+			if(support_of(v) != 0 && load_of(v) <= m.capacity)
+				continue;
+			pv::Vector3DInt32 down(p.getX(), p.getY() - 1, p.getZ());
+			VoxelInstance bv = world->get_voxel(down, true);
+			interface::VoxelTypeId bid = id_of(bv);
+			if(bid == interface::VOXELTYPEID_UNDEFINED)
+				continue; // Falling out of the loaded world; leave it be
+			if(bid == M_AIR || bid == M_WATER){
+				// Down one. What it lands in is displaced rather than
+				// simulated: nothing here flows.
+				//
+				// Anything that comes apart falls as rubble, which spans
+				// nothing -- so a pile of it holds no roof up, which is what
+				// makes a cave-in carry on rather than plug itself. A
+				// material that is already loose keeps what it is: sand
+				// running into a tunnel is still sand.
+				VoxelInstance nv(m.span == 0 ? (uint32_t)id :
+						(uint32_t)M_RUBBLE);
+				F_SUPPORT.set(nv.data, 0);
+				world->set_voxel(down, nv, true);
+				world->set_voxel(p, VoxelInstance(M_AIR), true);
+				mark_changed(p);
+				mark_changed(down);
+				mark_falling(down);
+				m_moved++;
+			} else {
+				// It has come to rest on something. It keeps whatever it
+				// became on the way down.
+				m_landed++;
+			}
+		}
+	}
+
+	void on_tick(const interface::TickEvent &event)
+	{
+		if(m_dirty.empty() && m_falling.empty())
+			return;
+		size_t done = 0;
+		voxelworld::access(m_server, m_main_scene,
+				[&](voxelworld::Instance *world)
+		{
+			while(!m_dirty.empty() && done < SIM_PER_TICK){
+				pv::Vector3DInt32 p = m_dirty.front();
+				m_dirty.pop_front();
+				m_dirty_set.erase(pos_key(p));
+				update_voxel(world, p);
+				done++;
+			}
+			step_falling(world);
+		});
+		if(done >= SIM_PER_TICK || !m_falling.empty()){
+			log_v(MODULE, "sim: %zu done, %zu dirty, %zu falling, "
+					"%zu fell, %zu came to rest",
+					done, m_dirty.size(), m_falling.size(),
+					m_moved, m_landed);
+		}
+	}
+
+
+	// Structures
+	// ----------
+	//
+	// Finding out what happens when a pillar is cut should not start with an
+	// hour of bricklaying, so the game can put a building up for you. Each is
+	// a loop rather than a table of voxels: parametric, a few dozen lines,
+	// and no data to keep in step with the material ids.
+	//
+	// A structure carries its own air. A cathedral inside a hill is no use,
+	// so the footprint is cleared as it is written -- which is why this is
+	// set_voxel() per voxel and not Instance::merge_volume(), whose whole
+	// contract is that it does not overwrite what is already there.
+	//
+	// Everything is written first and only then handed to the simulation.
+	// Halfway through, a cathedral is an unsupported roof, and it would come
+	// down while it was being built.
+	struct Build
+	{
+		std::vector<std::pair<pv::Vector3DInt32, int>> voxels;
+
+		void box(int x0, int y0, int z0, int x1, int y1, int z1, int material)
+		{
+			for(int y = y0; y <= y1; y++)
+				for(int z = z0; z <= z1; z++)
+					for(int x = x0; x <= x1; x++)
+						voxels.push_back(
+								{pv::Vector3DInt32(x, y, z), material});
+		}
+	};
+
+	// A hollow room with a flat roof, wide enough that rock cannot span it:
+	// the middle of the roof has nothing to reach and comes down as soon as
+	// the simulation looks at it. The smallest thing that shows the rules
+	// working, and the one to place first when they change.
+	static void build_chamber(Build &b, const pv::Vector3DInt32 &o)
+	{
+		const int half = 7; // 15 across, and rock spans 6
+		const int height = 5;
+		const int x0 = o.getX(), y0 = o.getY(), z0 = o.getZ();
+		b.box(x0 - half, y0, z0 - half,
+				x0 + half, y0 + height, z0 + half, M_AIR);
+		b.box(x0 - half - 1, y0 - 1, z0 - half - 1,
+				x0 + half + 1, y0 - 1, z0 + half + 1, M_BRICK);
+		b.box(x0 - half - 1, y0 + height + 1, z0 - half - 1,
+				x0 + half + 1, y0 + height + 1, z0 + half + 1, M_ROCK);
+		for(int y = y0; y <= y0 + height; y++){
+			b.box(x0 - half - 1, y, z0 - half - 1,
+					x0 - half - 1, y, z0 + half + 1, M_ROCK);
+			b.box(x0 + half + 1, y, z0 - half - 1,
+					x0 + half + 1, y, z0 + half + 1, M_ROCK);
+			b.box(x0 - half - 1, y, z0 - half - 1,
+					x0 + half + 1, y, z0 - half - 1, M_ROCK);
+			b.box(x0 - half - 1, y, z0 + half + 1,
+					x0 + half + 1, y, z0 + half + 1, M_ROCK);
+		}
+	}
+
+	// A nave with a row of brick pillars down each side carrying a rock roof,
+	// and timber tie beams across between the pillars. The pillars are what
+	// hold it up: cut one and the roof over it has to reach the next one,
+	// which is further than rock spans.
+	static void build_cathedral(Build &b, const pv::Vector3DInt32 &o)
+	{
+		const int half_w = 6;   // 13 across inside
+		const int length = 28;
+		const int height = 10;
+		const int spacing = 4;  // pillars this far apart along the nave
+		const int x0 = o.getX(), y0 = o.getY(), z0 = o.getZ();
+		b.box(x0 - half_w - 1, y0, z0 - 1,
+				x0 + half_w + 1, y0 + height + 2, z0 + length + 1, M_AIR);
+		b.box(x0 - half_w - 1, y0 - 1, z0 - 1,
+				x0 + half_w + 1, y0 - 1, z0 + length + 1, M_BRICK);
+		for(int z = z0; z <= z0 + length; z += spacing){
+			for(int side = -1; side <= 1; side += 2){
+				int x = x0 + side * half_w;
+				b.box(x, y0, z, x, y0 + height, z, M_BRICK);
+			}
+			// A tie beam across, which is what a timber prop is for: long
+			// span, and it carries only the roof over the nave
+			b.box(x0 - half_w + 1, y0 + height, z,
+					x0 + half_w - 1, y0 + height, z, M_TIMBER);
+		}
+		b.box(x0 - half_w, y0 + height + 1, z0,
+				x0 + half_w, y0 + height + 1, z0 + length, M_ROCK);
+	}
+
+	// A deck on piers. Saw through a pier and the deck over it is left
+	// spanning twice the distance, which rock will not do.
+	static void build_bridge(Build &b, const pv::Vector3DInt32 &o)
+	{
+		const int length = 40;
+		const int half_w = 2;
+		const int spacing = 10;
+		const int depth = 12; // how far down the piers reach for ground
+		const int x0 = o.getX(), y0 = o.getY(), z0 = o.getZ();
+		b.box(x0 - half_w, y0 + 1, z0,
+				x0 + half_w, y0 + 4, z0 + length, M_AIR);
+		b.box(x0 - half_w, y0, z0, x0 + half_w, y0, z0 + length, M_ROCK);
+		// Parapets, so it reads as a bridge from on it
+		b.box(x0 - half_w, y0 + 1, z0,
+				x0 - half_w, y0 + 1, z0 + length, M_BRICK);
+		b.box(x0 + half_w, y0 + 1, z0,
+				x0 + half_w, y0 + 1, z0 + length, M_BRICK);
+		for(int z = z0; z <= z0 + length; z += spacing)
+			b.box(x0 - 1, y0 - depth, z, x0 + 1, y0 - 1, z, M_BRICK);
+	}
+
+	// A mineshaft: a corridor with a timber prop frame every few voxels,
+	// which is what the game teaches you to build by hand.
+	static void build_mineshaft(Build &b, const pv::Vector3DInt32 &o)
+	{
+		const int length = 40;
+		const int half_w = 2;   // 5 across, which dirt cannot roof alone
+		const int height = 3;
+		const int spacing = 3;
+		const int x0 = o.getX(), y0 = o.getY(), z0 = o.getZ();
+		b.box(x0 - half_w, y0, z0,
+				x0 + half_w, y0 + height, z0 + length, M_AIR);
+		for(int z = z0; z <= z0 + length; z += spacing){
+			b.box(x0 - half_w, y0, z, x0 - half_w, y0 + height, z, M_TIMBER);
+			b.box(x0 + half_w, y0, z, x0 + half_w, y0 + height, z, M_TIMBER);
+			b.box(x0 - half_w, y0 + height, z,
+					x0 + half_w, y0 + height, z, M_TIMBER);
+		}
+	}
+
+	void on_place_structure(const network::Packet &packet)
+	{
+		ss_ name;
+		pv::Vector3DInt32 p;
+		{
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(name, p);
+		}
+		Build b;
+		if(name == "chamber")
+			build_chamber(b, p);
+		else if(name == "cathedral")
+			build_cathedral(b, p);
+		else if(name == "bridge")
+			build_bridge(b, p);
+		else if(name == "mineshaft")
+			build_mineshaft(b, p);
+		else {
+			log_w(MODULE, "C%i: no structure called \"%s\"",
+					packet.sender, cs(name));
+			return;
+		}
+		log_i(MODULE, "C%i: %s at " PV3I_FORMAT ", %zu voxels",
+				packet.sender, cs(name), PV3I_PARAMS(p), b.voxels.size());
+
+		// simplified: the whole thing goes in on one tick. A cathedral is a
+		// few thousand set_voxel() calls, which is a hitch and not a stall,
+		// and it is a deliberate action rather than something that happens
+		// while playing. A budget over ticks is the upgrade path, and it
+		// would have to keep the simulation off the footprint until the last
+		// voxel is in.
+		voxelworld::access(m_server, m_main_scene,
+				[&](voxelworld::Instance *world)
+		{
+			for(auto &vp : b.voxels){
+				VoxelInstance v((uint32_t)vp.second);
+				// Held up until the simulation says otherwise, so that the
+				// building does not fall over as it is written
+				F_SUPPORT.set(v.data, SUPPORT_MAX);
+				world->set_voxel(vp.first, v, true);
+			}
+		});
+		// And now let it stand or fall as a whole
+		for(auto &vp : b.voxels)
+			mark_changed(vp.first);
+
+		// What it takes up, so that a client in free move can put itself
+		// somewhere the whole thing is in frame instead of the player having
+		// to fly around looking for it
+		pv::Vector3DInt32 lc = b.voxels[0].first, uc = b.voxels[0].first;
+		for(auto &vp : b.voxels){
+			lc.setX(std::min(lc.getX(), vp.first.getX()));
+			lc.setY(std::min(lc.getY(), vp.first.getY()));
+			lc.setZ(std::min(lc.getZ(), vp.first.getZ()));
+			uc.setX(std::max(uc.getX(), vp.first.getX()));
+			uc.setY(std::max(uc.getY(), vp.first.getY()));
+			uc.setZ(std::max(uc.getZ(), vp.first.getZ()));
+		}
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(lc, uc);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(packet.sender, "main:structure_placed", os.str());
+		});
+	}
+
 	void on_place_voxel(const network::Packet &packet)
 	{
 		pv::Vector3DInt32 voxel_p;
@@ -670,8 +1122,14 @@ struct Module: public interface::Module
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *instance)
 		{
-			instance->set_voxel(voxel_p, VoxelInstance(material));
+			VoxelInstance v((uint32_t)material);
+			// Something just placed is held up by whatever it was placed
+			// against until the simulation says otherwise, which keeps a
+			// prop from falling in the tick before it is looked at
+			F_SUPPORT.set(v.data, SUPPORT_MAX);
+			instance->set_voxel(voxel_p, v);
 		});
+		mark_changed(voxel_p);
 	}
 
 	void on_dig_voxel(const network::Packet &packet)
@@ -698,6 +1156,7 @@ struct Module: public interface::Module
 			}
 			instance->set_voxel(voxel_p, VoxelInstance(M_AIR));
 		});
+		mark_changed(voxel_p);
 	}
 
 	void on_worldgen_queue_modified(const worldgen::QueueModifiedEvent &event)
