@@ -1043,7 +1043,8 @@ function M.new(magic, buildat, log, ctx)
 				end
 			end
 		end
-		return {window = window, origin = {ox, oy}, slots = slots,
+		return {window = window, origin = {ox, oy},
+				size = {layout.width, layout.height}, slots = slots,
 				buttons = buttons, fields = fields, tables = tables,
 				taps = taps, tooltips = tooltips,
 				close_on_enter = close_on_enter}
