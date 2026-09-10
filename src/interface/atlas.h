@@ -89,7 +89,12 @@ namespace interface
 		uint id = ATLAS_UNDEFINED;
 		magic::IntVector2 segment_resolution;
 		magic::IntVector2 total_segments;
-		sv_<AtlasSegmentDefinition> segments;
+		// Mip levels, which stop where one segment is one texel; see
+		// upload_box() in impl/atlas.cpp
+		unsigned levels = 1;
+		// A deque, so that a pointer into it survives a segment being added
+		// while a worker thread is reading one; see impl/atlas.cpp
+		sd_<AtlasSegmentDefinition> segments;
 	};
 
 	struct AtlasCache
@@ -107,7 +112,9 @@ namespace interface
 		magic::SharedPtr<magic::Texture2D> spec_texture;
 		magic::IntVector2 segment_resolution;
 		magic::IntVector2 total_segments;
-		sv_<AtlasSegmentCache> segments;
+		unsigned levels = 1;
+		// A deque; see AtlasDefinition::segments
+		sd_<AtlasSegmentCache> segments;
 	};
 
 	struct AtlasRegistry
@@ -129,6 +136,13 @@ namespace interface
 
 		virtual const AtlasSegmentCache* get_texture(
 				const AtlasSegmentReference &ref) = 0;
+
+		// Whether an atlas carries the normal and surface maps derived from
+		// its segments' pixels. A game whose voxel shader samples neither
+		// says false and gets a third of the work per segment and a third of
+		// the memory. Say it before the first segment; a later change only
+		// applies to atlases created after it.
+		virtual void set_surface_maps(bool enabled) = 0;
 
 		virtual void update() = 0;
 	};

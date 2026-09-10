@@ -5,6 +5,7 @@
 #define MODULE "compress"
 
 #include "zlib.h"
+#include "zstd.h"
 
 namespace interface {
 
@@ -153,6 +154,47 @@ void decompress_zlib(std::istream &is, std::ostream &os)
 	}
 
 	inflateEnd(&z);
+}
+
+
+void compress_zstd(const ss_ &data_in, std::ostream &os, int level)
+{
+	size_t bound = ZSTD_compressBound(data_in.size());
+	ss_ buffer(bound, '\0');
+	size_t size = ZSTD_compress(&buffer[0], bound,
+			data_in.c_str(), data_in.size(), level);
+	if(ZSTD_isError(size))
+		throw Exception(ss_("compress_zstd: ") + ZSTD_getErrorName(size));
+	os.write(buffer.c_str(), size);
+}
+
+size_t decompress_zstd(const ss_ &data_in, std::ostream &os)
+{
+	ZSTD_DStream *stream = ZSTD_createDStream();
+	if(stream == nullptr)
+		throw Exception("decompress_zstd: ZSTD_createDStream failed");
+	const size_t bufsize = ZSTD_DStreamOutSize();
+	ss_ buffer(bufsize, '\0');
+	ZSTD_inBuffer input = {data_in.c_str(), data_in.size(), 0};
+	for(;;){
+		ZSTD_outBuffer output = {&buffer[0], bufsize, 0};
+		size_t ret = ZSTD_decompressStream(stream, &output, &input);
+		if(ZSTD_isError(ret)){
+			ss_ error = ZSTD_getErrorName(ret);
+			ZSTD_freeDStream(stream);
+			throw Exception("decompress_zstd: " + error);
+		}
+		if(output.pos)
+			os.write(buffer.c_str(), output.pos);
+		if(ret == 0)
+			break; // The frame ended
+		if(input.pos == input.size && output.pos == 0){
+			ZSTD_freeDStream(stream);
+			throw Exception("decompress_zstd: the frame is not complete");
+		}
+	}
+	ZSTD_freeDStream(stream);
+	return input.pos;
 }
 
 }

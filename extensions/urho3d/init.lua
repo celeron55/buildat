@@ -166,9 +166,28 @@ local function add_global_event_handler(event_type, cb_name, fn)
 		global_event_mux[event_type] = {}
 		local mux_name = "__buildat_mux_"..event_type
 		_G[mux_name] = function(event_type_thing, unsafe_event_data)
-			local list = global_event_mux[event_type]
+			-- A copy, because a handler is allowed to unsubscribe from
+			-- inside the event -- leaving a session on Escape does -- and
+			-- that would shorten the list being walked. One that has been
+			-- unsubscribed by an earlier handler is not called: it may have
+			-- been holding what it was about to touch.
+			local live = global_event_mux[event_type]
+			local list = {}
+			for i, entry in ipairs(live) do
+				list[i] = entry
+			end
 			for i = 1, #list do
-				list[i].fn(event_type_thing, unsafe_event_data)
+				local entry = list[i]
+				local still_there = false
+				for _, e in ipairs(live) do
+					if e == entry then
+						still_there = true
+						break
+					end
+				end
+				if still_there then
+					entry.fn(event_type_thing, unsafe_event_data)
+				end
 			end
 		end
 		urho_SubscribeToEvent(event_type, mux_name)

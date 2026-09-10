@@ -40,6 +40,34 @@ namespace interface
 	static constexpr EdgeMaterialId EDGEMATERIALID_GROUND = 1;
 	// Values at and above 10 are freely usable.
 
+	// One quad of a shape a voxel has instead of being a cube.
+	//
+	// The corners are in the voxel's own cube, which runs -0.5...0.5 on each
+	// axis, wound so that the quad faces the way its winding says. The
+	// texture coordinates are in the tile's own 0...1, with 0,0 at its top
+	// left, and the mesher maps them into wherever the atlas put that tile.
+	// tile is which of the voxel's six textures this quad wears.
+	//
+	// This is deliberately not a box, a mesh name or anything else with a
+	// shape of its own: a game that wants stairs, fences, plants, rails or a
+	// pane of glass builds the quads it wants and the mesher copies them.
+	struct VoxelQuad
+	{
+		float p[4][3] = {};
+		float uv[4][2] = {};
+		uint8_t tile = 0;
+		// When this quad is drawn at all:
+		//   0     always
+		//   1...6 only when the neighbour in that direction connects, the
+		//         faces in their usual order, so 1 is +Y and 6 is -Z
+		//   7     only when none of the six connects
+		// What wants it is a fence, which is a post plus a rail per
+		// direction that has something to reach, and a pane, which is a
+		// short post when it stands alone. See connect_group below for what
+		// "connects" means.
+		uint8_t connect_dir = 0;
+	};
+
 	struct VoxelDefinition
 	{
 		VoxelName name;
@@ -48,6 +76,12 @@ namespace interface
 		// These must be definitions (not references) because each client has to
 		// be able to construct their atlases from different texture sizes
 		AtlasSegmentDefinition textures[6];
+		// Quarter turns anticlockwise to give each face's texture inside the
+		// face, 0...3. What wants this is a voxel that faces a direction: the
+		// texture of the top of a turned cube is turned with it, and the same
+		// texture is shared with the cube that is not turned, so the turn
+		// belongs to the face rather than to the atlas segment.
+		uint8_t tile_turns[6] = {};
 		// Other properties
 		ss_ handler_module;
 		FaceDrawType face_draw_type = FaceDrawType::ON_EDGE;
@@ -61,11 +95,86 @@ namespace interface
 		// that and still hold a mesh of its own shape inside itself. What
 		// wants to know whether a voxel is free is this flag.
 		bool fully_empty = false;
+		// A shape of the voxel's own instead of a cube. Empty for a cube,
+		// which is what most voxels are and the fast path the voxel mesher
+		// exists for; a voxel with quads has them copied into the chunk's
+		// mesh, which costs about what its own faces would have.
+		//
+		// A voxel with a shape usually wants face_draw_type NEVER and
+		// edge_material_id EMPTY as well: the cube faces it would otherwise
+		// have are not what it looks like, and its neighbours should draw
+		// their faces against it.
+		sv_<VoxelQuad> shape;
+		// Draw the shape's quads from both sides. What wants it is a shape
+		// made of single quads -- a plant, a rail, a sign -- which is
+		// otherwise invisible from behind. A shape made of boxes does not.
+		bool shape_double_sided = false;
+		// The voxel's faces are alpha blended rather than opaque or alpha
+		// masked, so they belong in a pass drawn after the solid world and
+		// back to front: water, and glass a game gave an alpha to. The
+		// mesher puts them in a geometry of their own; what technique that
+		// gets is the game's business, as with the rest of the materials.
+		bool translucent = false;
+		// Which family of shapes this voxel's shape belongs to, or 0 for
+		// none. A shape's quad is not drawn when the neighbour it faces has
+		// the same group: that is what keeps the faces inside a body of water
+		// out of the mesh, where the cube case has edge_material_id for the
+		// same job. Water and lava are different groups, so the face between
+		// them is drawn.
+		//
+		// Only an axis-aligned quad on the voxel's own boundary is tested;
+		// the neighbour looked at is the one the quad's normal points into.
+		uint8_t shape_group = 0;
+		// A liquid, and where its surface stands inside the voxel:
+		// -0.5...0.5, which is 0.5 for a liquid drawn as a full cube. Two
+		// liquid voxels are the same liquid when their shape_group matches.
+		//
+		// A liquid that has a shape gets the top corners of that shape moved
+		// to the average of the surfaces around each corner, so that a
+		// sloping surface is continuous rather than stepped. That is Luanti's
+		// getCornerLevel, and it is the one thing here the mesher works out
+		// per voxel instead of per definition.
+		bool is_liquid = false;
+		float liquid_top = 0.5f;
+		// Which family of connecting voxels this one belongs to, 1...32, or
+		// 0 for one nothing reaches out to; and which families this one
+		// reaches out to, as a bit per family. A fence and its gates are one
+		// family, a wall another, panes and bars a third.
+		//
+		// The mesher looks at the six neighbours of a voxel whose shape has
+		// quads with a connect_dir and draws each of those quads only when
+		// its own direction connects. The cost of that is the same whatever
+		// the families are, and the mask is where the two ends meet: the
+		// game works out the families once, from whatever its own rules are,
+		// and the mesher only tests a bit.
+		uint8_t connect_group = 0;
+		uint32_t connect_mask = 0;
+		// A whole shape per neighbour mask, for a voxel that does not gain a
+		// piece per direction but changes altogether: a rail, which is one
+		// quad wearing one of four tiles turned one of four ways. When this
+		// is not empty it is used instead of `shape`.
+		//
+		// Masks 0...15 are the four horizontal connections, in Luanti's own
+		// bit order for them: +Z is 1, -Z is 2, -X is 4 and +X is 8. Masks
+		// 16...19 are for a voxel that has one of itself a step up in that
+		// direction -- +Z, -Z, -X, +X in that order -- which is what a rail
+		// climbing a slope is; they win over the flat ones.
+		//
+		// The quads of mask m are shape_masked[begin[m]...begin[m + 1] - 1],
+		// which is one vector and twenty-one offsets rather than twenty
+		// vectors: this struct is read by the mesher a definition at a time
+		// and wants to stay in cache.
+		sv_<VoxelQuad> shape_masked;
+		uint16_t shape_masked_begin[21] = {};
+		// Also connect to any neighbour that is solid, whatever family it is
+		// in. Luanti's connect_sides, which is how a fence reaches into the
+		// stone next to it.
+		//
+		// simplified: Luanti says which of the six sides may be reached that
+		// way and this is all of them.
+		bool connect_to_solid = false;
 		// TODO: Flag for whether all faces should be always drawn (in case the
 		//       textures contain holes)
-		// TODO: Some kind of property for defining whether this is a thing for
-		//       which adjacent voxels of the same thing type don't have faces,
-		//       and what thing type that is in this case
 	};
 
 	static constexpr size_t VOXELDEF_NUM_LOD = 3;
@@ -81,9 +190,28 @@ namespace interface
 		EdgeMaterialId edge_material_id = EDGEMATERIALID_EMPTY;
 		bool physically_solid = false;
 		bool fully_empty = false;
+		// Copied from the definition; see VoxelDefinition::shape
+		sv_<VoxelQuad> shape;
+		bool shape_double_sided = false;
+		bool translucent = false;
+		uint8_t shape_group = 0;
+		bool is_liquid = false;
+		float liquid_top = 0.5f;
+		uint8_t connect_group = 0;
+		uint32_t connect_mask = 0;
+		bool connect_to_solid = false;
+		// Copied from the definition; see VoxelDefinition::shape_masked
+		sv_<VoxelQuad> shape_masked;
+		uint16_t shape_masked_begin[21] = {};
+
+		uint8_t tile_turns[6] = {};
 
 		bool textures_valid = false;
 		AtlasSegmentReference textures[6];
+		// The LOD segments are only built for a volume that is actually
+		// meshed at a LOD: building one is a texture loaded, scaled and drawn
+		// into an atlas, and there are VOXELDEF_NUM_LOD of them per face
+		bool lod_textures_valid = false;
 		AtlasSegmentReference lod_textures[VOXELDEF_NUM_LOD][6];
 	};
 
@@ -101,11 +229,17 @@ namespace interface
 		virtual const VoxelDefinition* get(const VoxelTypeId &id) = 0;
 		virtual const VoxelDefinition* get(const VoxelName &name) = 0;
 
-		// atlas_reg may only be supplied when called from Urho3D main thread
+		// Every method is safe to call from a worker thread while the main
+		// thread adds voxels, and a pointer handed out stays valid; the
+		// contents of a definition do not change once it has been added.
+		//
+		// atlas_reg may only be supplied when called from Urho3D main thread.
+		// with_lod also builds the segments a LOD mesh samples, which is
+		// most of the cost of a voxel type's textures.
 		virtual const CachedVoxelDefinition* get_cached(const VoxelTypeId &id,
-				AtlasRegistry *atlas_reg = nullptr) = 0;
+				AtlasRegistry *atlas_reg = nullptr, bool with_lod = false) = 0;
 		virtual const CachedVoxelDefinition* get_cached(const VoxelInstance &v,
-				AtlasRegistry *atlas_reg = nullptr) = 0;
+				AtlasRegistry *atlas_reg = nullptr, bool with_lod = false) = 0;
 
 		virtual bool is_dirty() = 0;
 		virtual void clear_dirty() = 0;
@@ -136,6 +270,18 @@ namespace interface
 		uint8_t get_skylight() const {return (data>>24) & 0x0f; }
 		void set_skylight(uint8_t l){
 			data = (data & ~0x0f000000UL) | ((uint32_t)(l & 0x0f) << 24);
+		}
+
+		// Bits 28..31 hold lamplight: light that reaches the voxel from
+		// something other than the sky, which is a torch or a lava flow or
+		// whatever else a world has. Read the same way as skylight, and
+		// separate from it because the sky's contribution changes with the
+		// time of day and a lamp's does not: a shader that is handed both can
+		// move the sun without anything being meshed again.
+		static const uint8_t LAMPLIGHT_MAX = 15;
+		uint8_t get_lamplight() const {return (data>>28) & 0x0f; }
+		void set_lamplight(uint8_t l){
+			data = (data & ~0xf0000000UL) | ((uint32_t)(l & 0x0f) << 28);
 		}
 	};
 }

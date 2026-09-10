@@ -154,6 +154,7 @@ add_subdirectory("3rdparty/c55lib")
 add_subdirectory("3rdparty/smallsha1")
 add_subdirectory("3rdparty/polyvox")
 add_subdirectory("3rdparty/zlib")
+add_subdirectory("3rdparty/zstd")
 add_subdirectory("3rdparty/luabind-deboostified")
 
 include_directories("src")
@@ -163,6 +164,7 @@ include_directories("3rdparty/smallsha1")
 include_directories("3rdparty/polyvox/library/PolyVoxCore/include")
 include_directories("3rdparty/zlib")
 include_directories("${CMAKE_BINARY_DIR}/3rdparty/zlib")
+include_directories("3rdparty/zstd/lib")
 # SYSTEM gets rid of annoying warnings that we're not going to fix
 include_directories(SYSTEM "3rdparty/luabind-deboostified")
 
@@ -205,6 +207,8 @@ set(BUILDAT_CORE_SRCS
 	src/impl/tcpsocket.cpp
 	src/impl/module.cpp
 	src/impl/sha1.cpp
+	src/impl/sha256.cpp
+	src/impl/bignum.cpp
 	src/impl/packet_stream.cpp
 	src/impl/mesh.cpp
 	src/impl/atlas.cpp
@@ -236,6 +240,7 @@ target_link_libraries(${BUILDAT_CORE_NAME}
 	smallsha1
 	PolyVoxCore
 	zlib
+	zstd
 )
 if(WIN32)
 	target_link_libraries(${BUILDAT_CORE_NAME}
@@ -265,9 +270,13 @@ if(BUILD_CLIENT)
 		src/lua_bindings/atlas.cpp
 		src/lua_bindings/mesh.cpp
 		src/lua_bindings/voxel_volume.cpp
+		src/lua_bindings/voxel_data.cpp
+	src/lua_bindings/image.cpp
 		src/lua_bindings/spatial_update_queue.cpp
 		src/lua_bindings/misc_urho3d.cpp
 		src/lua_bindings/network.cpp
+		src/lua_bindings/crypto.cpp
+		src/lua_bindings/compress.cpp
 		src/lua_bindings/replicate.cpp
 	)
 
@@ -279,6 +288,7 @@ if(BUILD_CLIENT)
 		smallsha1
 		PolyVoxCore
 		zlib
+		zstd
 		luabind
 		Urho3D
 		${URHO3D_TOLUA_LIBRARY}

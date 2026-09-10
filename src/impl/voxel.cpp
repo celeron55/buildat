@@ -5,6 +5,7 @@
 #include "interface/voxel_cereal.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/vector.hpp>
+#include <mutex>
 #define MODULE "voxel"
 
 namespace std {
@@ -47,12 +48,17 @@ bool VoxelName::operator==(const VoxelName &other) const
 	);
 }
 
+// Voxel types are added on the main thread while worker threads mesh chunks
+// out of them, so every access goes through m_mutex, and the definitions live
+// in deques: a pointer handed out by get_cached() stays valid across an
+// add_voxel(), which is not true of a vector.
 struct CVoxelRegistry: public VoxelRegistry
 {
-	sv_<VoxelDefinition> m_defs;
-	sv_<CachedVoxelDefinition> m_cached_defs;
+	sd_<VoxelDefinition> m_defs;
+	sd_<CachedVoxelDefinition> m_cached_defs;
 	sm_<VoxelName, VoxelTypeId> m_name_to_id;
 	bool m_is_dirty = false;
+	std::mutex m_mutex;
 
 	CVoxelRegistry()
 	{
@@ -61,6 +67,7 @@ struct CVoxelRegistry: public VoxelRegistry
 
 	void clear()
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
 		m_defs.clear();
 		m_cached_defs.clear();
 		m_name_to_id.clear();
@@ -70,6 +77,7 @@ struct CVoxelRegistry: public VoxelRegistry
 
 	sv_<VoxelDefinition> get_all()
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
 		sv_<VoxelDefinition> result;
 		result.insert(result.end(), m_defs.begin()+1, m_defs.end());
 		return result;
@@ -77,6 +85,7 @@ struct CVoxelRegistry: public VoxelRegistry
 
 	VoxelTypeId add_voxel(const VoxelDefinition &def)
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
 		VoxelTypeId id = m_defs.size();
 		if(def.id != VOXELTYPEID_UNDEFINED && id != def.id)
 			throw Exception(ss_()+"add_voxel(): def.id="+itos(def.id)+
@@ -84,8 +93,6 @@ struct CVoxelRegistry: public VoxelRegistry
 		if(m_name_to_id.count(def.name) != 0)
 			throw Exception(ss_()+"add_voxel(): Already exists: "+
 					cs(def.name.dump()));
-		// NOTE: This invalidates all previous pointers to cache entries that
-		//       were given out
 		m_defs.resize(id + 1);
 		m_defs[id] = def;
 		m_defs[id].id = id;
@@ -98,6 +105,12 @@ struct CVoxelRegistry: public VoxelRegistry
 
 	const VoxelDefinition* get(const VoxelTypeId &id)
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return get_unlocked(id);
+	}
+
+	const VoxelDefinition* get_unlocked(const VoxelTypeId &id)
+	{
 		if(id >= m_defs.size()){
 			log_w(MODULE, "CVoxelRegistry::get(): id=%i not found", id);
 			return NULL;
@@ -107,6 +120,7 @@ struct CVoxelRegistry: public VoxelRegistry
 
 	const VoxelDefinition* get(const VoxelName &name)
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
 		auto it = m_name_to_id.find(name);
 		if(it == m_name_to_id.end()){
 			log_w(MODULE, "CVoxelRegistry::get(): name=%s not found",
@@ -114,12 +128,13 @@ struct CVoxelRegistry: public VoxelRegistry
 			return NULL;
 		}
 		VoxelTypeId id = it->second;
-		return get(id);
+		return get_unlocked(id);
 	}
 
 	const CachedVoxelDefinition* get_cached(const VoxelTypeId &id,
-			AtlasRegistry *atlas_reg)
+			AtlasRegistry *atlas_reg, bool with_lod)
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
 		if(id >= m_defs.size()){
 			log_w(MODULE, "CVoxelRegistry::get_cached(): id=%i not found", id);
 			return NULL;
@@ -137,22 +152,28 @@ struct CVoxelRegistry: public VoxelRegistry
 			update_cache_textures(cache, def, atlas_reg);
 			cache.textures_valid = true;
 		}
+		if(with_lod && !cache.lod_textures_valid && atlas_reg){
+			update_cache_lod_textures(cache, def, atlas_reg);
+			cache.lod_textures_valid = true;
+		}
 		return &cache;
 	}
 
 	const CachedVoxelDefinition* get_cached(const VoxelInstance &v,
-			AtlasRegistry *atlas_reg)
+			AtlasRegistry *atlas_reg, bool with_lod)
 	{
-		return get_cached(v.get_id(), atlas_reg);
+		return get_cached(v.get_id(), atlas_reg, with_lod);
 	}
 
 	bool is_dirty()
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
 		return m_is_dirty;
 	}
 
 	void clear_dirty()
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
 		m_is_dirty = false;
 	}
 
@@ -165,6 +186,20 @@ struct CVoxelRegistry: public VoxelRegistry
 		cache.edge_material_id = def.edge_material_id;
 		cache.physically_solid = def.physically_solid;
 		cache.fully_empty = def.fully_empty;
+		cache.shape = def.shape;
+		cache.shape_double_sided = def.shape_double_sided;
+		cache.translucent = def.translucent;
+		cache.shape_group = def.shape_group;
+		cache.is_liquid = def.is_liquid;
+		cache.liquid_top = def.liquid_top;
+		cache.connect_group = def.connect_group;
+		cache.connect_mask = def.connect_mask;
+		cache.connect_to_solid = def.connect_to_solid;
+		cache.shape_masked = def.shape_masked;
+		for(size_t i = 0; i < 21; i++)
+			cache.shape_masked_begin[i] = def.shape_masked_begin[i];
+		for(size_t i = 0; i < 6; i++)
+			cache.tile_turns[i] = def.tile_turns[i] & 3;
 		// Caller sets cache.valid = true
 	}
 
@@ -175,28 +210,34 @@ struct CVoxelRegistry: public VoxelRegistry
 		for(size_t i = 0; i<6; i++){
 			const AtlasSegmentDefinition &seg_def = def.textures[i];
 			if(seg_def.resource_name == ""){
-				AtlasSegmentReference seg_ref; // Use default values
-				cache.textures[i] = seg_ref;
-				for(size_t j = 0; j < VOXELDEF_NUM_LOD; j++){
-					cache.lod_textures[j][i] = seg_ref;
-				}
+				cache.textures[i] = AtlasSegmentReference(); // Default values
 			} else {
-				{
-					AtlasSegmentReference seg_ref =
-							atlas_reg->find_or_add_segment(seg_def);
-					cache.textures[i] = seg_ref;
-				}
-				for(size_t j = 0; j < VOXELDEF_NUM_LOD; j++){
-					int lod = 2 + j;
-					AtlasSegmentDefinition lod_seg_def = seg_def;
-					lod_seg_def.lod_simulation = lod;
-					AtlasSegmentReference lod_seg_ref =
-							atlas_reg->find_or_add_segment(lod_seg_def);
-					cache.lod_textures[j][i] = lod_seg_ref;
-				}
+				cache.textures[i] = atlas_reg->find_or_add_segment(seg_def);
 			}
 		}
 		// Caller sets cache.textures_valid = true
+	}
+
+	// The same for the segments a LOD mesh samples, which are a texture
+	// scaled and drawn into an atlas each: three times the work of the
+	// segments above, and nothing but a LOD volume ever looks at them.
+	void update_cache_lod_textures(CachedVoxelDefinition &cache,
+			const VoxelDefinition &def, AtlasRegistry *atlas_reg)
+	{
+		for(size_t i = 0; i<6; i++){
+			const AtlasSegmentDefinition &seg_def = def.textures[i];
+			for(size_t j = 0; j < VOXELDEF_NUM_LOD; j++){
+				if(seg_def.resource_name == ""){
+					cache.lod_textures[j][i] = AtlasSegmentReference();
+					continue;
+				}
+				AtlasSegmentDefinition lod_seg_def = seg_def;
+				lod_seg_def.lod_simulation = 2 + j;
+				cache.lod_textures[j][i] =
+						atlas_reg->find_or_add_segment(lod_seg_def);
+			}
+		}
+		// Caller sets cache.lod_textures_valid = true
 	}
 };
 

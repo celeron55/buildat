@@ -1483,9 +1483,17 @@ X11_SetWindowGrab(_THIS, SDL_Window * window, SDL_bool grabbed)
     oldstyle_fullscreen = X11_IsWindowLegacyFullscreen(_this, window);
 
     if (oldstyle_fullscreen || grabbed) {
-        /* Try to grab the mouse */
-        for (;;) {
-            int result =
+        /* Try to grab the mouse. A window that is not viewable yet answers
+           GrabNotViewable, which is a race of milliseconds, so it is worth
+           retrying; but something else on the desktop can be holding a grab
+           of its own -- a locked screen, an open menu -- and then this never
+           succeeds. Retrying forever, which is what this did, froze the whole
+           process for as long as that lasted. Upstream SDL gives up too.
+         */
+        int attempts;
+        int result = 0;
+        for (attempts = 0; attempts < 20; attempts++) {
+            result =
                 X11_XGrabPointer(display, data->xwindow, True, 0, GrabModeAsync,
                              GrabModeAsync, data->xwindow, None, CurrentTime);
             if (result == GrabSuccess) {
@@ -1494,21 +1502,25 @@ X11_SetWindowGrab(_THIS, SDL_Window * window, SDL_bool grabbed)
             SDL_Delay(50);
         }
 
-        /* Raise the window if we grab the mouse */
-        X11_XRaiseWindow(display, data->xwindow);
-
-        /* Now grab the keyboard */
-        if (SDL_GetHintBoolean(SDL_HINT_GRAB_KEYBOARD, SDL_FALSE)) {
-            grab_keyboard = SDL_TRUE;
+        if (result != GrabSuccess) {
+            SDL_SetError("The X server refused to let us grab the mouse");
         } else {
-            /* We need to do this with the old style override_redirect
-               fullscreen window otherwise we won't get keyboard focus.
-            */
-            grab_keyboard = oldstyle_fullscreen;
-        }
-        if (grab_keyboard) {
-            X11_XGrabKeyboard(display, data->xwindow, True, GrabModeAsync,
-                          GrabModeAsync, CurrentTime);
+            /* Raise the window if we grab the mouse */
+            X11_XRaiseWindow(display, data->xwindow);
+
+            /* Now grab the keyboard */
+            if (SDL_GetHintBoolean(SDL_HINT_GRAB_KEYBOARD, SDL_FALSE)) {
+                grab_keyboard = SDL_TRUE;
+            } else {
+                /* We need to do this with the old style override_redirect
+                   fullscreen window otherwise we won't get keyboard focus.
+                */
+                grab_keyboard = oldstyle_fullscreen;
+            }
+            if (grab_keyboard) {
+                X11_XGrabKeyboard(display, data->xwindow, True, GrabModeAsync,
+                              GrabModeAsync, CurrentTime);
+            }
         }
     } else {
         X11_XUngrabPointer(display, CurrentTime);

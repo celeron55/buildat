@@ -267,6 +267,20 @@ function M.define(dst, util)
 		},
 	})
 
+	-- A rectangle of two corners. What wants it is a particle's texture
+	-- frames, which are the parts of an image an animation runs through.
+	util.wc("Rect", {
+		unsafe_constructor = util.wrap_function(
+				{"number", "number", "number", "number"},
+		function(left, top, right, bottom)
+			return util.wrap_instance("Rect", Rect(left, top, right, bottom))
+		end),
+		properties = {
+			min = util.simple_property(dst.Vector2),
+			max = util.simple_property(dst.Vector2),
+		},
+	})
+
 	util.wc("Vector2", {
 		unsafe_constructor = util.wrap_function({"number", "number"},
 		function(x, y)
@@ -430,6 +444,11 @@ function M.define(dst, util)
 
 	util.wc("Drawable", {
 		inherited_from_by_wrapper = dst.Component,
+		properties = {
+			-- Urho3D has this on Drawable, so a billboard set has it as
+			-- much as a static model does
+			castShadows = util.simple_property("boolean"),
+		},
 	})
 
 	util.wc("CustomGeometry", {
@@ -443,6 +462,8 @@ function M.define(dst, util)
 					"DefineVertex", {}, {"CustomGeometry", "Vector3"}),
 			DefineNormal = util.self_function(
 					"DefineNormal", {}, {"CustomGeometry", "Vector3"}),
+			DefineTexCoord = util.self_function(
+					"DefineTexCoord", {}, {"CustomGeometry", "Vector2"}),
 			DefineColor = util.self_function(
 					"DefineColor", {}, {"CustomGeometry", "Color"}),
 			Commit = util.self_function(
@@ -553,6 +574,16 @@ function M.define(dst, util)
 
 	util.wc("Texture", {
 		inherited_from_by_wrapper = dst.Resource,
+		properties = {
+			-- Read-only in Urho3D, so writing one raises. What wanted them
+			-- is a HUD element whose size is a multiple of its own image's.
+			width = util.simple_property("number"),
+			height = util.simple_property("number"),
+			-- FILTER_NEAREST and the rest of Urho3D's TextureFilterMode.
+			-- What wants it is pixel art, which is what a Luanti game's
+			-- textures are: smoothing them is wrong at every size.
+			filterMode = util.simple_property("number"),
+		},
 	})
 
 	util.wc("Texture2D", {
@@ -566,11 +597,10 @@ function M.define(dst, util)
 		properties = {
 			lightType = util.simple_property("number"),
 			brightness = util.simple_property("number"),
-			castShadows = util.simple_property("boolean"),
 			shadowIntensity = util.simple_property("number"),
 			shadowBias = util.simple_property("BiasParameters"),
 			shadowCascade = util.simple_property("CascadeParameters"),
-			color = util.simple_property("Color"),
+			color = util.simple_property(dst.Color),
 			range = util.simple_property("number"),
 			fadeDistance = util.simple_property("number"),
 			fov = util.simple_property("number"),
@@ -608,8 +638,11 @@ function M.define(dst, util)
 		inherited_from_by_wrapper = dst.Resource,
 	})
 
+	-- Drawable, which is what Urho3D says it is; it used to say Octree here,
+	-- which gave it the octree's query methods and none of a drawable's
+	-- properties
 	util.wc("StaticModel", {
-		inherited_from_by_wrapper = dst.Octree,
+		inherited_from_by_wrapper = dst.Drawable,
 		instance = {
 			SetModel = util.self_function(
 					"SetModel", {}, {"StaticModel", "Model"}),
@@ -617,7 +650,6 @@ function M.define(dst, util)
 		properties = {
 			model = util.simple_property(dst.Model),
 			material = util.simple_property(dst.Material),
-			castShadows = util.simple_property("boolean"),
 		},
 	})
 
@@ -722,6 +754,19 @@ function M.define(dst, util)
 			Remove = util.self_function("Remove", {}, {"Node"}),
 			SetEnabled = util.self_function(
 					"SetEnabled", {}, {"Node", "boolean"}),
+			-- A copy of the node and its components, in the same parent.
+			-- Urho3D copies a component through its attributes, which is in
+			-- the engine: what wants this is geometry that costs a sandbox
+			-- call per vertex to build and is wanted more than once.
+			-- Attributes are all it copies, so a material made in Lua --
+			-- which has no resource name to refer to -- is not among them
+			-- and has to be set on the copy.
+			Clone = util.wrap_function({"Node", {"number", "__nil"}},
+				function(self, mode)
+					return util.wrap_instance("Node",
+							self:Clone(mode ~= nil and mode or LOCAL))
+				end
+			),
 		},
 		properties = {
 			scale = util.simple_property(dst.Vector3),
@@ -961,16 +1006,23 @@ function M.define(dst, util)
 			verticalAlignment = util.simple_property("number"),
 			height = util.simple_property("number"),
 			width = util.simple_property("number"),
-			size = util.simple_property("IntVector2"),
-			color = util.simple_property("Color"),
+			size = util.simple_property(dst.IntVector2),
+			color = util.simple_property(dst.Color),
 			minHeight = util.simple_property("number"),
 			minWidth = util.simple_property("number"),
-			minSize = util.simple_property("IntVector2"),
+			minSize = util.simple_property(dst.IntVector2),
 			fixedHeight = util.simple_property("number"),
 			fixedWidth = util.simple_property("number"),
-			fixedSize = util.simple_property("IntVector2"),
+			fixedSize = util.simple_property(dst.IntVector2),
 			defaultStyle = util.simple_property("XMLFile"),
 			selected = util.simple_property("boolean"),
+			-- Off by default in Urho3D: an element that is not enabled is
+			-- not hit by a click, so nothing under the mouse is found and
+			-- no click event is sent at all
+			enabled = util.simple_property("boolean"),
+			visible = util.simple_property("boolean"),
+			opacity = util.simple_property("number"),
+			priority = util.simple_property("number"),
 		},
 	})
 
@@ -992,6 +1044,12 @@ function M.define(dst, util)
 		properties = {
 			texture = util.simple_property("Texture"),
 			hoverOffset = util.simple_property(dst.IntVector2),
+			-- The border widths, which is what makes an image nine-sliced:
+			-- the corners keep their size and only the middle stretches
+			border = util.simple_property(dst.IntRect),
+			imageBorder = util.simple_property(dst.IntRect),
+			imageRect = util.simple_property(dst.IntRect),
+			tiled = util.simple_property("boolean"),
 		},
 	})
 
@@ -1009,6 +1067,10 @@ function M.define(dst, util)
 	util.wc("LineEdit", {
 		inherited_from_by_wrapper = dst.BorderImage,
 		properties = {
+			-- The character a password field shows instead of what was
+			-- typed, as its code point; 0 shows the text itself
+			echoCharacter = util.simple_property("number"),
+			maxLength = util.simple_property("number"),
 		},
 	})
 
@@ -1083,8 +1145,75 @@ function M.define(dst, util)
 		inherited_from_by_wrapper = dst.Texture,
 	})
 
+	-- What a ParticleEmitter emits, and the only way to say it: an effect
+	-- built here rather than loaded from a resource, because the description
+	-- comes over the network. EmitterType is 0 for a sphere and 1 for a box.
 	util.wc("ParticleEffect", {
 		inherited_from_by_wrapper = dst.Resource,
+		class = {
+			new = function()
+				return util.wrap_instance("ParticleEffect",
+						ParticleEffect:new())
+			end,
+		},
+		instance = {
+			AddColorTime = util.self_function("AddColorTime", {},
+					{"ParticleEffect", "Color", "number"}),
+			-- One frame of a texture animation: the part of the image, and
+			-- how many seconds into a particle's life it is shown from
+			AddTextureTime = util.self_function("AddTextureTime", {},
+					{"ParticleEffect", "Rect", "number"}),
+			-- The vector-valued fields are functions rather than properties
+			-- because tolua++ generates no setter for a property whose type
+			-- is a const reference: Urho3D's own binding registers
+			-- ("minDirection", getter, NULL). Assigning the property writes
+			-- nowhere and reads back what was assigned, so the effect keeps
+			-- Urho3D's defaults and every particle flies off in a random
+			-- direction at the default size. Every `const Vector3&` and
+			-- `const Vector2&` property in these bindings is like that.
+			SetEmitterSize = util.self_function("SetEmitterSize", {},
+					{"ParticleEffect", "Vector3"}),
+			SetMinDirection = util.self_function("SetMinDirection", {},
+					{"ParticleEffect", "Vector3"}),
+			SetMaxDirection = util.self_function("SetMaxDirection", {},
+					{"ParticleEffect", "Vector3"}),
+			SetConstantForce = util.self_function("SetConstantForce", {},
+					{"ParticleEffect", "Vector3"}),
+			SetMinParticleSize = util.self_function("SetMinParticleSize", {},
+					{"ParticleEffect", "Vector2"}),
+			SetMaxParticleSize = util.self_function("SetMaxParticleSize", {},
+					{"ParticleEffect", "Vector2"}),
+		},
+		properties = {
+			material = util.simple_property(dst.Material),
+			numParticles = util.simple_property("number"),
+			emitterType = util.simple_property("number"),
+			emitterSize = {get = util.simple_property(dst.Vector3).get},
+			minDirection = {get = util.simple_property(dst.Vector3).get},
+			maxDirection = {get = util.simple_property(dst.Vector3).get},
+			constantForce = {get = util.simple_property(dst.Vector3).get},
+			dampingForce = util.simple_property("number"),
+			activeTime = util.simple_property("number"),
+			inactiveTime = util.simple_property("number"),
+			minEmissionRate = util.simple_property("number"),
+			maxEmissionRate = util.simple_property("number"),
+			minParticleSize = {get = util.simple_property(dst.Vector2).get},
+			maxParticleSize = {get = util.simple_property(dst.Vector2).get},
+			minTimeToLive = util.simple_property("number"),
+			maxTimeToLive = util.simple_property("number"),
+			minVelocity = util.simple_property("number"),
+			maxVelocity = util.simple_property("number"),
+			minRotation = util.simple_property("number"),
+			maxRotation = util.simple_property("number"),
+			minRotationSpeed = util.simple_property("number"),
+			maxRotationSpeed = util.simple_property("number"),
+			sizeAdd = util.simple_property("number"),
+			sizeMul = util.simple_property("number"),
+			relative = util.simple_property("boolean"),
+			scaled = util.simple_property("boolean"),
+			sorted = util.simple_property("boolean"),
+			updateInvisible = util.simple_property("boolean"),
+		},
 	})
 
 	util.wc("Animation", {

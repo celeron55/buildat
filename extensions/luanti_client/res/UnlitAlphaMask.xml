@@ -1,0 +1,7 @@
+<!-- A texture as it is, with texels below half alpha discarded: what a thing
+     that is not part of the voxel world is drawn with. Luanti's own entities
+     are drawn unlit too, and their textures are full of holes.
+-->
+<technique vs="Unlit" ps="Unlit" psdefines="DIFFMAP ALPHAMASK">
+    <pass name="base" />
+</technique>

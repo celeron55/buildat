@@ -41,6 +41,12 @@ namespace command_seq
 	// One command per line. Empty lines and '#' comments are ignored.
 	bool parse(const ss_ &text, sv_<Command> *out, ss_ *error);
 
+	// Whatever whole lines standard input has for us, without waiting for
+	// them: the client goes on rendering and stays connected while the other
+	// end decides what to ask for next. A partial line is kept until the rest
+	// arrives. Sets *eof once there will be no more.
+	void read_stdin_lines(sv_<ss_> *out_lines, bool *eof);
+
 	ss_ dump_command(const Command &c);
 
 	// Drop real mouse and keyboard events while a sequence runs, so that

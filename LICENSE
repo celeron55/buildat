@@ -235,6 +235,10 @@ Zlib License:
 - 3rdparty/polyvox
 - 3rdparty/zlib
 
+BSD License (zstd is dual-licensed BSD / GPLv2; the BSD terms are the ones
+taken here):
+- 3rdparty/zstd
+
 SIL Open Font License 1.1:
 - client/data/Fonts/Overpass-Regular.ttf
 - client/data/Fonts/OverpassMono-Regular.ttf

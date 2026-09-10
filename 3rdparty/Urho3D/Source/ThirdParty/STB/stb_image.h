@@ -4606,7 +4606,13 @@ static unsigned char *stbi__do_png(stbi__png *p, int *x, int *y, int *n, int req
       }
       *x = p->s->img_x;
       *y = p->s->img_y;
-      if (n) *n = p->s->img_n;
+      // buildat: report the channel count the returned buffer actually has,
+      // not the count the file had. They differ when req_comp is 0 and the
+      // PNG carries a tRNS chunk: stb expands the colour key to an alpha
+      // channel (img_out_n = img_n + 1) while upstream still reports img_n,
+      // so a caller sizing its image from *n reads the buffer at the wrong
+      // stride. See doc/urho3d_fork.txt.
+      if (n) *n = p->s->img_out_n;
    }
    STBI_FREE(p->out);      p->out      = NULL;
    STBI_FREE(p->expanded); p->expanded = NULL;
