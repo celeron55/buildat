@@ -1720,12 +1720,11 @@ local function show_client(host, port, name, password)
 		-- carried stack away, which is where Luanti's own inventory drops
 		-- one too.
 		local function on_form(lx, ly)
-			local window = form and form.drawn and form.drawn.window
-			if not window then
+			local size = form and form.drawn and form.drawn.size
+			if not size then
 				return false
 			end
-			local size = window.size
-			return lx >= 0 and ly >= 0 and lx < size.x and ly < size.y
+			return lx >= 0 and ly >= 0 and lx < size[1] and ly < size[2]
 		end
 
 		-- Taking a stack out of a slot and putting it into one. Luanti's own
