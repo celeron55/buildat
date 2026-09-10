@@ -149,6 +149,23 @@ namespace interface
 		// and the mesher only tests a bit.
 		uint8_t connect_group = 0;
 		uint32_t connect_mask = 0;
+		// A whole shape per neighbour mask, for a voxel that does not gain a
+		// piece per direction but changes altogether: a rail, which is one
+		// quad wearing one of four tiles turned one of four ways. When this
+		// is not empty it is used instead of `shape`.
+		//
+		// Masks 0...15 are the four horizontal connections, in Luanti's own
+		// bit order for them: +Z is 1, -Z is 2, -X is 4 and +X is 8. Masks
+		// 16...19 are for a voxel that has one of itself a step up in that
+		// direction -- +Z, -Z, -X, +X in that order -- which is what a rail
+		// climbing a slope is; they win over the flat ones.
+		//
+		// The quads of mask m are shape_masked[begin[m]...begin[m + 1] - 1],
+		// which is one vector and twenty-one offsets rather than twenty
+		// vectors: this struct is read by the mesher a definition at a time
+		// and wants to stay in cache.
+		sv_<VoxelQuad> shape_masked;
+		uint16_t shape_masked_begin[21] = {};
 		// Also connect to any neighbour that is solid, whatever family it is
 		// in. Luanti's connect_sides, which is how a fence reaches into the
 		// stone next to it.
@@ -183,6 +200,9 @@ namespace interface
 		uint8_t connect_group = 0;
 		uint32_t connect_mask = 0;
 		bool connect_to_solid = false;
+		// Copied from the definition; see VoxelDefinition::shape_masked
+		sv_<VoxelQuad> shape_masked;
+		uint16_t shape_masked_begin[21] = {};
 
 		uint8_t tile_turns[6] = {};
 

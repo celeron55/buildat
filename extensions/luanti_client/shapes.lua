@@ -119,6 +119,54 @@ function M.flat_quads(out)
 	return out
 end
 
+-- A rail's tile and turn per mask of its four horizontal connections, which
+-- is Luanti's own rail_kinds table from its content_mapblock.cpp: a rail with
+-- nothing or one thing beside it is straight, two opposite ones straight, two
+-- beside each other a curve, three a junction and four a crossing. The tiles
+-- are the node's first four in that order, and what turns is the quad rather
+-- than the texture, which is what Luanti turns too.
+--
+-- The mask's bits are Luanti's own for this: +Z is 1, -Z is 2, -X is 4 and
+-- +X is 8. Indexed by the mask plus one, because Lua counts from one.
+local RAIL_KINDS = {
+	{1, 0}, {1, 0}, {1, 0}, {1, 0},
+	{1, 90}, {2, 180}, {2, 270}, {3, 180},
+	{1, 90}, {2, 90}, {2, 0}, {3, 0},
+	{1, 90}, {3, 90}, {3, 270}, {4, 0},
+}
+
+-- And the turn of a rail that climbs towards one of the four, in the order
+-- the masks 16...19 are in: +Z, -Z, -X, +X. Luanti's rail_slope_angle.
+local RAIL_SLOPE_TURNS = {0, 180, 90, -90}
+
+-- rail_shapes() -> a shape per mask, as [0...19] = {quad}
+--
+-- What a "shape per mask" is for is a voxel whose whole shape changes with
+-- what is around it rather than gaining a piece per direction: the mesher
+-- picks one of these per voxel. Masks 0...15 are the flat rails and 16...19
+-- the ones that climb; see VoxelDefinition.shape_masked.
+function M.rail_shapes()
+	local out = {}
+	for mask = 0, 15 do
+		local kind = RAIL_KINDS[mask + 1]
+		local quad = M.flat_quads()[1]
+		quad.tile = kind[1]
+		out[mask] = M.turn_quads_y({quad}, kind[2] / 90)
+	end
+	for i = 1, 4 do
+		-- The same quad with its +Z edge lifted by exactly one node, which
+		-- is the ramp Luanti draws, wearing the straight tile. One node
+		-- rather than "up to the top of the voxel", so that the raised end
+		-- meets the flat rail a step above it whatever the height a flat
+		-- rail floats at: they are the same quad, one node apart.
+		local quad = M.flat_quads()[1]
+		quad.p[2] = quad.p[2] + 1
+		quad.p[5] = quad.p[5] + 1
+		out[15 + i] = M.turn_quads_y({quad}, RAIL_SLOPE_TURNS[i] / 90)
+	end
+	return out
+end
+
 -- Which tile goes on which face, per facedir: FACEDIR_TILES[facedir + 1][i]
 -- is the tile our face i is drawn with. Taken from Luanti's own
 -- dir_to_tile[24][8] in mapblock_mesh.cpp, read at the six directions our
@@ -288,7 +336,8 @@ function M.turn_quads(quads, facedir)
 			turn_point(v, facedir)
 			p[c * 3 + 1], p[c * 3 + 2], p[c * 3 + 3] = v[1], v[2], v[3]
 		end
-		out[i] = {tile = q.tile, p = p, uv = q.uv}
+		out[i] = {tile = q.tile, p = p, uv = q.uv,
+				connect_dir = q.connect_dir}
 	end
 	return out
 end
@@ -342,7 +391,8 @@ function M.turn_quads_y(quads, quarters)
 			turn(v, 1, 3, quarters)
 			p[c * 3 + 1], p[c * 3 + 2], p[c * 3 + 3] = v[1], v[2], v[3]
 		end
-		out[i] = {tile = q.tile, p = p, uv = q.uv}
+		out[i] = {tile = q.tile, p = p, uv = q.uv,
+				connect_dir = q.connect_dir}
 	end
 	return out
 end
@@ -489,7 +539,11 @@ function M.for_node(def, facedir, wall, mesh_quads, liquid_top)
 		return M.sign_quads(def.visual_scale, wall or 1), true
 	end
 	if drawtype == 11 then -- RAILLIKE
-		return M.flat_quads(), true
+		-- A rail is one quad, but which tile it wears and which way it is
+		-- turned is what its neighbours say, so it is a shape per mask
+		-- rather than a shape. The flat quad is what a rail with nothing
+		-- around it comes to, and is what the masked shapes replace.
+		return M.flat_quads(), true, M.rail_shapes()
 	end
 	if drawtype == 16 then -- NDT_MESH
 		-- The model itself, when it is one of the formats objmesh.lua reads.
