@@ -209,6 +209,8 @@ void init_voxel(lua_State *L)
 					&VoxelDefinition::shape_double_sided)
 			.def_readwrite("translucent", &VoxelDefinition::translucent)
 			.def_readwrite("shape_group", &VoxelDefinition::shape_group)
+			.def_readwrite("is_liquid", &VoxelDefinition::is_liquid)
+			.def_readwrite("liquid_top", &VoxelDefinition::liquid_top)
 			.enum_("FaceDrawType")[
 				value("FACEDRAWTYPE_NEVER", (int)FaceDrawType::NEVER),
 				value("FACEDRAWTYPE_ALWAYS", (int)FaceDrawType::ALWAYS),

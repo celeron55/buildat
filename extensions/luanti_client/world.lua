@@ -597,6 +597,25 @@ function M.new(magic, buildat, log, options)
 		-- faces on a child node of the chunk and world.lua gives that one the
 		-- blended technique.
 		vdef.translucent = liquid_group ~= nil and liquid_group ~= 0
+		if vdef.translucent then
+			-- Where the surface stands, which is what the mesher averages
+			-- across the voxels around each corner: the top of the shape for
+			-- a flowing liquid, and the top of the voxel for a source, which
+			-- is what a neighbour's corner rises to.
+			vdef.is_liquid = true
+			local top = 0.5
+			if shape then
+				top = -0.5
+				for _, quad in ipairs(shape) do
+					for i = 2, 11, 3 do
+						if quad.p[i] > top then
+							top = quad.p[i]
+						end
+					end
+				end
+			end
+			vdef.liquid_top = top
+		end
 		if shape then
 			vdef.shape = shape
 			vdef.shape_double_sided = double_sided and true or false

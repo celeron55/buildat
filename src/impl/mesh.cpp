@@ -783,6 +783,54 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			translucent_result);
 }
 
+// How high a liquid's surface stands at one corner of a voxel: the average
+// of the surfaces of the up to four liquid columns that meet there. This is
+// Luanti's getCornerLevel, and what it is for is a surface that runs
+// continuously from one level to the next instead of stepping down.
+//
+// Two rules on top of the average, both Luanti's: a column with the same
+// liquid directly above it is full to the top of the voxel, because that is
+// a body of liquid rather than a surface; and a corner that two of the four
+// columns leave empty is at the bottom, which is what makes the edge of a
+// spill thin out rather than stand as a wall.
+static float liquid_corner_top(pv::RawVolume<VoxelInstance> &volume,
+		VoxelRegistry *voxel_reg, int x, int y, int z,
+		const interface::CachedVoxelDefinition *def, int dx, int dz)
+{
+	const int off[4][2] = {{0, 0}, {dx, 0}, {0, dz}, {dx, dz}};
+	float sum = 0.0f;
+	int count = 0;
+	int empty = 0;
+	for(size_t i = 0; i < 4; i++){
+		int cx = x + off[i][0];
+		int cz = z + off[i][1];
+		VoxelInstance av = volume.getVoxelAt(cx, y + 1, cz);
+		const interface::CachedVoxelDefinition *adef =
+				av.get_id() == interface::VOXELTYPEID_UNDEFINED ? nullptr :
+				voxel_reg->get_cached(av);
+		if(adef != nullptr && adef->is_liquid &&
+				adef->shape_group == def->shape_group)
+			return 0.5f;
+		VoxelInstance cv = volume.getVoxelAt(cx, y, cz);
+		const interface::CachedVoxelDefinition *cdef =
+				cv.get_id() == interface::VOXELTYPEID_UNDEFINED ? nullptr :
+				voxel_reg->get_cached(cv);
+		if(cdef == nullptr)
+			continue;
+		if(cdef->is_liquid && cdef->shape_group == def->shape_group){
+			sum += cdef->liquid_top;
+			count++;
+		} else if(cdef->fully_empty){
+			empty++;
+			if(empty >= 2)
+				return -0.5f;
+		}
+	}
+	if(count == 0)
+		return def->liquid_top;
+	return sum / count;
+}
+
 // The quads of the voxels that have a shape of their own, appended to the
 // same temporary geometry the cubes went into.
 //
@@ -829,6 +877,19 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 						VoxelInstance::SKYLIGHT_MAX;
 				float lamp_f = (float)v.get_lamplight() /
 						VoxelInstance::LAMPLIGHT_MAX;
+				// A liquid's four top corners, once per voxel rather than
+				// once per vertex that sits on one
+				const bool liquid_corners = def->is_liquid;
+				float corner[2][2] = {};
+				if(liquid_corners){
+					for(int ix = 0; ix < 2; ix++){
+						for(int iz = 0; iz < 2; iz++){
+							corner[ix][iz] = liquid_corner_top(volume,
+									voxel_reg, x, y, z, def,
+									ix == 0 ? -1 : 1, iz == 0 ? -1 : 1);
+						}
+					}
+				}
 				for(const interface::VoxelQuad &quad : def->shape){
 					uint tile = quad.tile < 6 ? quad.tile : 0;
 					AtlasSegmentReference seg_ref = def->textures[tile];
@@ -922,8 +983,16 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 							int c = WINDINGS[wi][i];
 							tg.vertex_data.Resize(tg.vertex_data.Size() + 1);
 							CustomGeometryVertex &tv = tg.vertex_data.Back();
+							float py = quad.p[c][1];
+							// A vertex on the liquid's own surface follows
+							// the corner it stands at
+							if(liquid_corners && std::fabs(
+									py - def->liquid_top) < 1e-4f){
+								py = corner[quad.p[c][0] >= 0.0f ? 1 : 0]
+										[quad.p[c][2] >= 0.0f ? 1 : 0];
+							}
 							tv.position_ = Vector3(cx + quad.p[c][0],
-									cy + quad.p[c][1], cz + quad.p[c][2]);
+									cy + py, cz + quad.p[c][2]);
 							tv.normal_ = wi == 0 ? n : -n;
 							tv.texCoord_ = Vector2(
 									aseg->coord0.x_ + quad.uv[c][0] *

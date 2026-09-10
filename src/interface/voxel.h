@@ -115,6 +115,17 @@ namespace interface
 		// Only an axis-aligned quad on the voxel's own boundary is tested;
 		// the neighbour looked at is the one the quad's normal points into.
 		uint8_t shape_group = 0;
+		// A liquid, and where its surface stands inside the voxel:
+		// -0.5...0.5, which is 0.5 for a liquid drawn as a full cube. Two
+		// liquid voxels are the same liquid when their shape_group matches.
+		//
+		// A liquid that has a shape gets the top corners of that shape moved
+		// to the average of the surfaces around each corner, so that a
+		// sloping surface is continuous rather than stepped. That is Luanti's
+		// getCornerLevel, and it is the one thing here the mesher works out
+		// per voxel instead of per definition.
+		bool is_liquid = false;
+		float liquid_top = 0.5f;
 		// TODO: Flag for whether all faces should be always drawn (in case the
 		//       textures contain holes)
 	};
@@ -137,6 +148,8 @@ namespace interface
 		bool shape_double_sided = false;
 		bool translucent = false;
 		uint8_t shape_group = 0;
+		bool is_liquid = false;
+		float liquid_top = 0.5f;
 
 		uint8_t tile_turns[6] = {};
 
