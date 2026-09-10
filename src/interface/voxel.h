@@ -380,6 +380,14 @@ namespace interface
 
 	VoxelRegistry* createVoxelRegistry();
 
+	// One voxel, as the engine's default format cuts it up.
+	//
+	// The accessors below are that format's bit ranges written out by hand,
+	// and they are only right for a world that kept it. Anything that reads
+	// a voxel of a world whose format the game chose goes through
+	// VoxelFormat instead -- get_format() on the world's registry -- and the
+	// mesher does. What is left using these is code that only ever sees the
+	// default cut: the sample games, and the modules built for them.
 	struct VoxelInstance
 	{
 		uint32_t data;
