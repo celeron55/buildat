@@ -2366,11 +2366,49 @@ function M.new(magic, buildat, log, options)
 		pointed_node.enabled = true
 	end
 
+	-- The blocks whose light a node change may have moved, waiting to be
+	-- asked for again; see set_node() below and refresh_wanted().
+	local refresh = {}
+
+	-- How far light reaches, which is how far from a change a block can be
+	-- and still be wrong. Luanti's LIGHT_SUN is 15 and a light loses one per
+	-- node, so this is the whole of it.
+	local LIGHT_REACH = 15
+
+	-- Whether a node changing from one id to another can move the light
+	-- around it: only a change in what a node gives or in what it lets
+	-- through can. A rail replaced by air is neither.
+	local function light_changed(from, to)
+		if from == to then
+			return false
+		end
+		local lights = self.node_light or {}
+		local through = self.node_light_through or {}
+		local from_light = lights[from] and lights[from].level or 0
+		local to_light = lights[to] and lights[to].level or 0
+		if from_light ~= to_light then
+			return true
+		end
+		-- A node the definitions do not cover is drawn as a placeholder
+		-- cube, which is what it blocks light as
+		local from_through = through[from]
+		local to_through = through[to]
+		if from_through == nil then from_through = false end
+		if to_through == nil then to_through = false end
+		return from_through ~= to_through
+	end
+
 	-- One node the server changed, in node coordinates. Patches the block's
 	-- parameter arrays in place; a node on a block's edge is part of the
 	-- neighbour's border, so that mesh goes out of date too.
 	-- param1 may be nil, which means the node became air and its light has
 	-- to be worked out here.
+	--
+	-- The light of everything *around* the node is the server's arithmetic
+	-- and not ours: Luanti's own client relights locally, and a block's
+	-- param1 here is a Lua string that a flood fill would rebuild once per
+	-- node. So the blocks whose light may have moved are asked for again
+	-- instead, and the stale ones are drawn until they arrive.
 	function self:set_node(x, y, z, param0, param1, param2)
 		param1 = param1 or removal_light(x, y, z)
 		param2 = param2 or 0
@@ -2386,6 +2424,9 @@ function M.new(magic, buildat, log, options)
 		local ly = y - by * BLOCKSIZE
 		local lz = z - bz * BLOCKSIZE
 		local i = lx + ly * BLOCKSIZE + lz * BLOCKSIZE * BLOCKSIZE
+		-- What was there, for the light: see light_changed() above
+		local was = block.param0:byte(i * 2 + 1) * 256 +
+				block.param0:byte(i * 2 + 2)
 		block.param0 = block.param0:sub(1, i * 2)..
 				string.char(math.floor(param0 / 256) % 256, param0 % 256)..
 				block.param0:sub(i * 2 + 3)
@@ -2415,7 +2456,42 @@ function M.new(magic, buildat, log, options)
 				mark_dirty(block_key(bx + d[1], by + d[2], bz + d[3]))
 			end
 		end
+		if light_changed(was, param0) then
+			-- This block, and every neighbour the light could reach into
+			refresh[key] = {bx, by, bz}
+			for _, d in ipairs(NEIGHBOURS) do
+				local near =
+						(d[1] < 0 and lx < LIGHT_REACH) or
+						(d[1] > 0 and lx >= BLOCKSIZE - LIGHT_REACH) or
+						(d[2] < 0 and ly < LIGHT_REACH) or
+						(d[2] > 0 and ly >= BLOCKSIZE - LIGHT_REACH) or
+						(d[3] < 0 and lz < LIGHT_REACH) or
+						(d[3] > 0 and lz >= BLOCKSIZE - LIGHT_REACH)
+				if near then
+					local nx, ny, nz = bx + d[1], by + d[2], bz + d[3]
+					local nkey = block_key(nx, ny, nz)
+					if blocks[nkey] then
+						refresh[nkey] = {nx, ny, nz}
+					end
+				end
+			end
+		end
 		return true
+	end
+
+	-- The blocks to ask the server for again, at most a handful at a time:
+	-- one node change can name seven blocks and a spree of them more than a
+	-- packet holds. What is left waits for the next call.
+	function self:refresh_wanted(limit)
+		local out = {}
+		for key, at in pairs(refresh) do
+			out[#out + 1] = at
+			refresh[key] = nil
+			if #out >= (limit or 16) then
+				break
+			end
+		end
+		return out
 	end
 
 	-- The colour of the sky, for a day/night factor of 0...1. This is the one
@@ -2722,6 +2798,11 @@ function M.new(magic, buildat, log, options)
 		}
 		local cubes = 0
 		local light_ids = {}
+		-- Air's own definition is not among the ones a server sends, so
+		-- seed it the way the node map above seeds it: light passes through
+		-- air, and everything not in here is taken to block it, which is
+		-- what a node drawn as the placeholder cube does.
+		local light_through = {[CONTENT_AIR] = true}
 		local collision = {}
 		local solid = {}
 		local liquid = {}
@@ -2761,6 +2842,10 @@ function M.new(magic, buildat, log, options)
 				light_ids[id] = {level = def.light_source,
 						color = light_color(resolve_tile(def, 1))}
 			end
+			-- Whether light travels through it, which with the light it
+			-- gives is what decides the light around it; see
+			-- light_changed()
+			light_through[id] = def.light_propagates and true or false
 			-- Luanti's PointabilityType: 0 is not pointable, 1 is, and 2
 			-- stops a ray without being pointed at. Those two values are
 			-- that way round because they used to be a boolean.
@@ -2895,6 +2980,7 @@ function M.new(magic, buildat, log, options)
 			self.atlas_reg = new_atlas_registry()
 			self.node_map = map
 			self.node_light = light_ids
+			self.node_light_through = light_through
 			self.node_collision = collision
 			self.node_solid = solid
 			self.node_liquid = liquid

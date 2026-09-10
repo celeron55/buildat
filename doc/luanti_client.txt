@@ -464,6 +464,18 @@ to the box the game says a ray hits; and a turned node box's texture
 coordinates are the whole tile rather than the part of it Luanti works out
 from the box after the turn.
 
+The light of a node change is the server's arithmetic and not this client's.
+ADDNODE and REMOVENODE carry the new node's own light and nothing about what
+is around it, and Luanti's own client works the rest out itself, unspreading
+and respreading each light bank. This one cannot do that cheaply -- a block's
+light is a Lua string that a flood fill would rebuild once per node -- so it
+tells the server it no longer has the blocks whose light may have moved, which
+makes the server send them again with the light it worked out; the stale ones
+are drawn until they arrive. Only a change that can move light at all is
+worth it: one where the light the node gives, or whether light passes through
+it, differs from what was there. So a rail replaced by air costs nothing and
+a torch or a wall costs a block or a few.
+
 The HUD: a game puts its own things on the screen with HUDADD and changes
 them one field at a time with HUDCHANGE, and this draws the images, the text
 and the statbars among them -- which on the two games tested is nearly all of
