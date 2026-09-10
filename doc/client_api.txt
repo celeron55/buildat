@@ -162,6 +162,11 @@ request. It is found in these files:
 
 File paths and other things are converted automatically.
 
+The client sends Urho3D's ExitRequested event when it is shutting down, for
+any reason and not only a closed window, so that a module can close what it
+opened: the Luanti client tells the server it is leaving there. It arrives
+before anything is torn down; a module that is already gone gets nothing.
+
 Additions to regular Urho3D:
 
 SubscribeToEvent(event_name, callback)

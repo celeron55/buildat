@@ -2631,6 +2631,7 @@ local function show_client(host, port, name, password)
 		-- Everything this session put on the screen or subscribed to, taken
 		-- back. What is left after it is the empty stack the connect dialog
 		-- was pushed on.
+		local exit_cb = nil
 		leave = function()
 			if left then
 				return
@@ -2643,6 +2644,10 @@ local function show_client(host, port, name, password)
 			magic.UnsubscribeFromEvent("UIMouseClick", ui_click_cb)
 			magic.UnsubscribeFromEvent("MouseWheel", mouse_wheel_cb)
 			magic.UnsubscribeFromEvent("ScreenMode", screen_mode_cb)
+			if exit_cb then
+				magic.UnsubscribeFromEvent("ExitRequested", exit_cb)
+				exit_cb = nil
+			end
 			close_form()
 			ui:drop_tooltip()
 			close_chat()
@@ -2674,6 +2679,16 @@ local function show_client(host, port, name, password)
 			view:close()
 			uistack.main:pop(root)
 		end
+
+		-- The client is going away: the window was closed, or a command
+		-- sequence ended, or something else asked the engine to exit. The
+		-- one thing that has to happen is the disconnect leave() sends --
+		-- Luanti's server keeps a player who vanishes without saying so
+		-- until it times out, and refuses the next client to use that name
+		-- meanwhile.
+		exit_cb = magic.SubscribeToEvent("ExitRequested", function()
+			leave()
+		end)
 
 		-- The server said no, or the connection went away. Whatever is on the
 		-- screen is no use any more, and a client that writes a line in the

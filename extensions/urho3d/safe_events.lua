@@ -9,6 +9,10 @@ return {
 	PostRenderUpdate = {
 		TimeStep = {variant = "Float", safe = "number"},
 	},
+	-- The client is going away: the window was closed, or something asked
+	-- the engine to exit. It carries nothing; what it is for is closing what
+	-- a module opened, such as telling a server that we are leaving.
+	ExitRequested = {},
 	KeyDown = {
 		Key = {variant = "Int", safe = "number"},
 		-- True when this is a key repeat rather than a fresh press

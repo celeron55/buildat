@@ -298,6 +298,10 @@ What is done
   flowing liquid as a box with a lowered top, through a shape in the voxel
   registry that the mesher copies into the chunk
 - Chat, both ways, and the player's hit points and breath
+- Leaving: the disconnect goes out when the client shuts down for any reason,
+  not only when escape was pressed. A player who vanishes without saying so
+  is kept by the server until it times out, and the next client to use that
+  name is refused meanwhile
 - PRIVILEGES, which is what lets the client say that flying was refused
   because the server did not grant it rather than leaving the player to
   wonder why they were pulled back
