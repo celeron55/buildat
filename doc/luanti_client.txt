@@ -314,7 +314,9 @@ What is done
 - Particles: ADD_PARTICLESPAWNER and DELETE_PARTICLESPAWNER, SPAWN_PARTICLE
   and the zstd batch of them a game sends a hundred at once in. A spawner is
   an Urho3D ParticleEmitter and a single particle is an emitter of one that
-  fires once
+  fires once. A spawner attached to an object has its positions relative to
+  that object and follows it, which is what a game's weather is: the rain of
+  VoxeLibre is a spawner attached to the player
 - Chat, both ways, and the player's hit points and breath
 - Leaving: the disconnect goes out when the client shuts down for any reason,
   not only when escape was pressed. A player who vanishes without saying so
@@ -566,10 +568,32 @@ takes a velocity as a direction and a speed and normalizes the direction, so
 a range of velocity *vectors* goes over as the box the direction is picked
 from plus the range of magnitudes that box holds (particles.speed_range).
 Without the second half every particle leaves at one node a second whatever
-the game asked for, which reads as all of them flying away from where they
-started. The speed a particle gets is then independent of its direction,
-which is the part that stays wrong: exact for a single particle, where the
-box is one vector.
+the game asked for. The speed a particle gets is then independent of its
+direction, which is the part that stays wrong: exact for a single particle,
+where the box is one vector.
+
+Sizes are the other unit that does not line up: Luanti's particle size is in
+the scene units its own client draws in, ten to the node -- the same as an
+object's visual_size -- so a rain drop's size of 4 is four tenths of a node
+across, and Urho3D's particle size is half of one side.
+
+Two things about the *lives* of emitters, both of which VoxeLibre's weather
+needs and neither of which is obvious:
+- The particles a spawner has already made outlive it, the way Luanti's do:
+  its particles are not owned by the spawner that made them. So a deleted
+  spawner stops emitting and its node goes away once the last particle it
+  made has expired.
+- A spawner that is added again with exactly the same description picks its
+  own emitter back up rather than getting a new one. mcl_weather deletes and
+  re-adds its rain spawner about twenty times a second, and one emitter per
+  add spends its life in fifty-millisecond bursts, which reads as almost no
+  rain at all.
+
+A particle's texture is filtered with nearest magnification and mipmapped
+minification (FILTER_NEAREST_ANISOTROPIC), which is what Luanti's own
+particle material asks for, rather than the plain nearest the world's
+textures get: a rain drop is one pixel wide in its image, and point sampling
+loses it altogether once it is drawn smaller than its texture.
 
 A particle's texture is animated the way a node's tile is -- a vertical strip
 or a sheet -- and that becomes Urho3D's texture frames: the part of the image
@@ -580,9 +604,8 @@ frame rather than looping, so the frames are laid out again and again until
 the longest life the particle can have is covered, up to a cap.
 
 Only protocol 42 and up, which is Luanti 5.6 and up: below that the tweens
-are not on the wire and a spawner is dropped rather than read wrong. A
-spawner attached to an object stays where the object was when it started, and
-a batch beyond 128 live single particles is dropped rather than queued.
+are not on the wire and a spawner is dropped rather than read wrong. A batch
+beyond 128 live single particles is dropped rather than queued.
 
 The clouds are a flat layer faked in the sky shader -- the view direction
 divided by its own y, which is what makes them crowd towards the horizon --

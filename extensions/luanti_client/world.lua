@@ -237,10 +237,23 @@ function M.new(magic, buildat, log, options)
 	-- same. The mode is on the texture rather than on the material, so
 	-- setting it once per use is setting it for good; it is cheap and there
 	-- is nowhere better.
-	local function game_texture(name)
+	-- filter is FILTER_NEAREST unless the caller says otherwise: a game's
+	-- textures are pixel art and interpolating them is wrong at every size.
+	-- The exception is a particle, which is drawn smaller than its own
+	-- texture and whose whole shape can be one pixel wide -- a rain drop is
+	-- -- so point sampling drops it altogether at a distance. Luanti's own
+	-- particle material says nearest magnification and *mipmapped*
+	-- minification, which is FILTER_NEAREST_ANISOTROPIC here: crisp up
+	-- close, and a thin thing that is far away goes dim rather than
+	-- disappearing.
+	--
+	-- The filter belongs to the texture rather than to the material, so a
+	-- file used both ways gets whichever was asked for last. Nothing in the
+	-- games looked at does that.
+	local function game_texture(name, filter)
 		local tex = magic.cache:GetResource("Texture2D", name)
 		if tex then
-			tex.filterMode = magic.FILTER_NEAREST
+			tex.filterMode = filter or magic.FILTER_NEAREST
 		end
 		return tex
 	end
@@ -2031,6 +2044,14 @@ function M.new(magic, buildat, log, options)
 	-- than one that does not turn up.
 	local SINGLE_PARTICLE_MAX = 128
 
+	-- The spawners that have been taken away and whose particles are living
+	-- out their lives; see set_particle_spawner(). Each holds an emitter's
+	-- pool of billboards, so there is a cap on how many are kept: at the
+	-- twenty a second VoxeLibre's rain churns through, this is a second and
+	-- a half of drops, which is about how long one takes to fall.
+	local dying_spawners = {}
+	local DYING_SPAWNERS_MAX = 32
+
 	-- One Urho3D emitter out of one Luanti particle description.
 	--
 	-- The two do not line up field for field, and this is where they are
@@ -2110,6 +2131,10 @@ function M.new(magic, buildat, log, options)
 		end
 	end
 
+	-- A particle's size crosses the wire in Luanti's scene units, where a
+	-- node is ten across; everything here is in nodes
+	local PARTICLE_SIZE_TO_NODES = 1 / 10
+
 	-- The effect is handed to the emitter by the caller, once it has set the
 	-- fields that differ between a spawner and a single particle: assigning
 	-- the same effect twice is a no-op in Urho3D, so everything has to be on
@@ -2119,7 +2144,7 @@ function M.new(magic, buildat, log, options)
 			animation)
 		local effect = magic.ParticleEffect.new()
 		local material = magic.Material.new()
-		local tex = game_texture(texture_name)
+		local tex = game_texture(texture_name, magic.FILTER_NEAREST_ANISOTROPIC)
 		material:SetTechnique(0, particle_technique)
 		material:SetTexture(0, tex)
 		effect.material = material
@@ -2137,19 +2162,27 @@ function M.new(magic, buildat, log, options)
 		particle_frames(effect, tex, animation, ttl_max)
 		effect.minTimeToLive = ttl_min
 		effect.maxTimeToLive = ttl_max
-		-- Luanti's size is the whole particle across; a billboard's is half
-		effect.minParticleSize = magic.Vector2(size_min / 2, size_min / 2)
-		effect.maxParticleSize = magic.Vector2(size_max / 2, size_max / 2)
+		-- Luanti's size is the whole particle across, in the scene units its
+		-- own client draws in -- ten to the node, the same as an object's
+		-- visual_size -- and a billboard's is half of one side. So a rain
+		-- drop's size of 4 is four tenths of a node, not four nodes.
+		local half = PARTICLE_SIZE_TO_NODES / 2
+		effect:SetMinParticleSize(magic.Vector2(size_min * half,
+				size_min * half))
+		effect:SetMaxParticleSize(magic.Vector2(size_max * half,
+				size_max * half))
 		-- The velocity: the box the direction is picked from, and the speeds
 		-- that box holds. Without the speeds every particle leaves at one
 		-- node a second whatever the game asked for, which reads as all of
 		-- them flying away from wherever they started.
-		effect.minDirection = magic.Vector3(vel_min[1], vel_min[2], vel_min[3])
-		effect.maxDirection = magic.Vector3(vel_max[1], vel_max[2], vel_max[3])
+		effect:SetMinDirection(magic.Vector3(vel_min[1], vel_min[2],
+				vel_min[3]))
+		effect:SetMaxDirection(magic.Vector3(vel_max[1], vel_max[2],
+				vel_max[3]))
 		local near, far = particles.speed_range(vel_min, vel_max)
 		effect.minVelocity = near
 		effect.maxVelocity = far
-		effect.constantForce = magic.Vector3(acc[1], acc[2], acc[3])
+		effect:SetConstantForce(magic.Vector3(acc[1], acc[2], acc[3]))
 		effect.dampingForce = 0
 		-- An active time with no inactive time after it is one burst and
 		-- then nothing, which is what a spawner with a time and a single
@@ -2165,12 +2198,54 @@ function M.new(magic, buildat, log, options)
 	-- texture string into a resource name, or nil for one that has not
 	-- arrived.
 	--
-	-- simplified: a spawner attached to an object stays where the object was
-	-- when it started, rather than following it.
+	-- What makes two spawners the same spawner: everything about them that
+	-- this draws. A game that takes its spawner away and adds it again --
+	-- VoxeLibre's weather does, twenty times a second -- gets the emitter it
+	-- had back rather than a new one, which is what keeps its rain falling
+	-- in a stream instead of in fifty-millisecond bursts.
+	local function spawner_signature(p, texture_name)
+		local n = {texture_name, p.amount, p.time, p.attached,
+				p.vertical and 1 or 0}
+		for _, range in ipairs({p.pos.start, p.vel.start, p.acc.start}) do
+			for i = 1, 3 do
+				n[#n + 1] = string.format("%g", range.min[i])
+				n[#n + 1] = string.format("%g", range.max[i])
+			end
+		end
+		for _, range in ipairs({p.exptime.start, p.size.start}) do
+			n[#n + 1] = string.format("%g", range.min)
+			n[#n + 1] = string.format("%g", range.max)
+		end
+		return table.concat(n, "/")
+	end
+
+	-- A spawner attached to an object has its positions relative to that
+	-- object and follows it, which is what update_particles() moves; the
+	-- weather of a game is a spawner attached to the player.
 	function self:set_particle_spawner(id, p, resolve)
 		local old = particle_nodes[id]
 		if old then
-			scene:RemoveChild(old.node)
+			-- The particles a spawner has already made outlive it, which is
+			-- what Luanti does: its own particles are not owned by the
+			-- spawner that made them. It matters more than it sounds --
+			-- VoxeLibre's weather takes its rain spawner away and adds it
+			-- again twenty times a second, so a client that drops the
+			-- particles with the spawner erases its own rain fifty
+			-- milliseconds after making it, which is why the sky was empty.
+			-- So the emitter stops emitting and the node goes when the last
+			-- particle it made has expired.
+			if old.emitter then
+				old.emitter.emitting = false
+			end
+			old.life = (old.ttl_max or 0) + 0.2
+			old.attached = nil
+			dying_spawners[#dying_spawners + 1] = old
+			-- A cap, because each of these holds a pool of billboards: the
+			-- oldest goes, which is the one whose particles are nearest the
+			-- end of their lives anyway
+			while #dying_spawners > DYING_SPAWNERS_MAX do
+				scene:RemoveChild(table.remove(dying_spawners, 1).node)
+			end
 			particle_nodes[id] = nil
 		end
 		if p == nil then
@@ -2183,10 +2258,28 @@ function M.new(magic, buildat, log, options)
 		local pos = particles.middle(p.pos.start)
 		local size = p.size.start
 		local exptime = p.exptime.start
+		-- The same spawner as one that was taken away a moment ago: pick its
+		-- emitter back up where it left off
+		local signature = spawner_signature(p, texture_name)
+		for i, e in ipairs(dying_spawners) do
+			if e.signature == signature then
+				table.remove(dying_spawners, i)
+				if e.emitter then
+					e.emitter.emitting = true
+				end
+				e.life = p.time > 0 and
+						(p.time + math.max(0.01, exptime.max) + 0.5) or nil
+				e.attached = p.attached ~= 0 and p.attached or nil
+				e.offset = pos
+				e.at_x, e.at_y, e.at_z = nil, nil, nil
+				particle_nodes[id] = e
+				return
+			end
+		end
 		local node = scene:CreateChild("particles_"..id)
 		node.position = magic.Vector3(pos[1], pos[2], pos[3])
 		local amount = math.max(1, math.min(p.amount, 1000))
-		local effect = particle_effect(texture_name,
+		local effect, material = particle_effect(texture_name,
 				amount, math.max(0.01, exptime.min),
 				math.max(0.01, exptime.max),
 				math.max(0.001, size.min), math.max(0.001, size.max),
@@ -2195,10 +2288,10 @@ function M.new(magic, buildat, log, options)
 		-- What the emitter box is: the position range, which the node sits
 		-- in the middle of
 		effect.emitterType = 1 -- EMITTER_BOX
-		effect.emitterSize = magic.Vector3(
+		effect:SetEmitterSize(magic.Vector3(
 				math.max(0, p.pos.start.max[1] - p.pos.start.min[1]),
 				math.max(0, p.pos.start.max[2] - p.pos.start.min[2]),
-				math.max(0, p.pos.start.max[3] - p.pos.start.min[3]))
+				math.max(0, p.pos.start.max[3] - p.pos.start.min[3])))
 		-- Luanti spawns amount particles over time seconds, and amount a
 		-- second when there is no time at all
 		local rate = p.time > 0 and amount / p.time or amount
@@ -2208,13 +2301,33 @@ function M.new(magic, buildat, log, options)
 		emitter.effect = effect
 		emitter.emitting = true
 		emitter.castShadows = false
+		-- Luanti's `vertical` particle is an upright quad turned to the
+		-- player about Y rather than one facing the camera, which is what
+		-- makes a rain drop look like a falling drop rather than a blob
+		if p.vertical then
+			emitter.faceCameraMode = magic.FC_ROTATE_Y
+		end
 		-- A spawner that ends takes itself away once the last particle it
 		-- made has expired; one with no time waits for the server
 		local life = nil
 		if p.time > 0 then
 			life = p.time + exptime.max + 0.5
 		end
-		particle_nodes[id] = {node = node, life = life}
+		-- Attached to an object: the position read above is an offset from
+		-- where that object is, and update_particles() keeps up with it
+		local attached = p.attached ~= nil and p.attached ~= 0 and
+				p.attached or nil
+		-- The effect and its material are kept here for as long as the
+		-- emitter is: both were made in Lua, and a Lua-made Urho3D object is
+		-- destroyed when the last Lua reference to it goes, whatever the
+		-- engine still holds. An emitter whose effect has been collected
+		-- reads freed memory: on this one it came out as Urho3D's defaults,
+		-- so every particle flew off in a random direction at the default
+		-- size instead of falling, which is what made rain invisible.
+		particle_nodes[id] = {node = node, life = life, attached = attached,
+				offset = pos, emitter = emitter, signature = signature,
+				effect = effect, material = material,
+				ttl_max = math.max(0.01, exptime.max)}
 	end
 
 	-- One particle the server picked itself: an emitter of one that fires
@@ -2230,31 +2343,79 @@ function M.new(magic, buildat, log, options)
 		local ttl = math.max(0.01, p.exptime)
 		local node = scene:CreateChild("particle")
 		node.position = magic.Vector3(p.pos[1], p.pos[2], p.pos[3])
-		local effect = particle_effect(texture_name, 1,
+		local effect, material = particle_effect(texture_name, 1,
 				ttl, ttl, math.max(0.001, p.size), math.max(0.001, p.size),
 				p.vel, p.vel, p.acc, 0.05, p.animation)
 		effect.emitterType = 0 -- EMITTER_SPHERE, of no size
-		effect.emitterSize = magic.Vector3(0, 0, 0)
+		effect:SetEmitterSize(magic.Vector3(0, 0, 0))
 		effect.minEmissionRate = 100
 		effect.maxEmissionRate = 100
 		local emitter = node:CreateComponent("ParticleEmitter")
 		emitter.effect = effect
 		emitter.emitting = true
 		emitter.castShadows = false
+		-- The effect and the material live as long as the emitter does; see
+		-- set_particle_spawner()
 		single_particles[#single_particles + 1] =
-				{node = node, life = ttl + 0.5}
+				{node = node, life = ttl + 0.5, effect = effect,
+				material = material}
 	end
 
 	-- Ages the emitters and takes away the ones that are done with. A
 	-- spawner with no time of its own is not aged: the server deletes it.
-	function self:update_particles(dtime)
+	-- objects is what the client has parsed, keyed by object id, so that a
+	-- spawner attached to one can be moved to where that one is now; it may
+	-- be nil for a caller that has none.
+	function self:update_particles(dtime, objects)
 		for id, entry in pairs(particle_nodes) do
+			if entry.attached then
+				local obj = objects and objects[entry.attached] or nil
+				local x, y, z = nil, nil, nil
+				if obj and obj.is_self then
+					-- The player's own object: the server sends no position
+					-- for it, and where the player is is where the camera is
+					local p = camera_node.position
+					x, y, z = p.x, p.y, p.z
+				elseif obj and obj.position then
+					x, y, z = obj.position[1], obj.position[2],
+							obj.position[3]
+				end
+				if not x and not entry.said_missing then
+					-- A spawner whose object the client does not know draws
+					-- where the offset alone puts it, which is somewhere
+					-- around the world's origin: worth one line rather than
+					-- being a mystery
+					entry.said_missing = true
+					log:warning("particles: spawner "..tostring(id)..
+							" is attached to object "..
+							tostring(entry.attached)..
+							", which is not one this client has")
+				end
+				if x and (x ~= entry.at_x or y ~= entry.at_y or
+						z ~= entry.at_z) then
+					entry.at_x, entry.at_y, entry.at_z = x, y, z
+					entry.node.position = magic.Vector3(
+							x + entry.offset[1], y + entry.offset[2],
+							z + entry.offset[3])
+				end
+			end
 			if entry.life then
 				entry.life = entry.life - dtime
 				if entry.life <= 0 then
 					scene:RemoveChild(entry.node)
 					particle_nodes[id] = nil
 				end
+			end
+		end
+		local d = 1
+		while d <= #dying_spawners do
+			local entry = dying_spawners[d]
+			entry.life = entry.life - dtime
+			if entry.life <= 0 then
+				scene:RemoveChild(entry.node)
+				table.remove(dying_spawners, d)
+			else
+				d = d + 1
 			end
 		end
 		local i = 1
@@ -2272,7 +2433,7 @@ function M.new(magic, buildat, log, options)
 
 	-- For the counters line
 	function self:particle_count()
-		local n = #single_particles
+		local n = #single_particles + #dying_spawners
 		for _, _ in pairs(particle_nodes) do
 			n = n + 1
 		end

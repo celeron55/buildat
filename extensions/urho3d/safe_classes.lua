@@ -1163,22 +1163,42 @@ function M.define(dst, util)
 			-- how many seconds into a particle's life it is shown from
 			AddTextureTime = util.self_function("AddTextureTime", {},
 					{"ParticleEffect", "Rect", "number"}),
+			-- The vector-valued fields are functions rather than properties
+			-- because tolua++ generates no setter for a property whose type
+			-- is a const reference: Urho3D's own binding registers
+			-- ("minDirection", getter, NULL). Assigning the property writes
+			-- nowhere and reads back what was assigned, so the effect keeps
+			-- Urho3D's defaults and every particle flies off in a random
+			-- direction at the default size. Every `const Vector3&` and
+			-- `const Vector2&` property in these bindings is like that.
+			SetEmitterSize = util.self_function("SetEmitterSize", {},
+					{"ParticleEffect", "Vector3"}),
+			SetMinDirection = util.self_function("SetMinDirection", {},
+					{"ParticleEffect", "Vector3"}),
+			SetMaxDirection = util.self_function("SetMaxDirection", {},
+					{"ParticleEffect", "Vector3"}),
+			SetConstantForce = util.self_function("SetConstantForce", {},
+					{"ParticleEffect", "Vector3"}),
+			SetMinParticleSize = util.self_function("SetMinParticleSize", {},
+					{"ParticleEffect", "Vector2"}),
+			SetMaxParticleSize = util.self_function("SetMaxParticleSize", {},
+					{"ParticleEffect", "Vector2"}),
 		},
 		properties = {
 			material = util.simple_property(dst.Material),
 			numParticles = util.simple_property("number"),
 			emitterType = util.simple_property("number"),
-			emitterSize = util.simple_property(dst.Vector3),
-			minDirection = util.simple_property(dst.Vector3),
-			maxDirection = util.simple_property(dst.Vector3),
-			constantForce = util.simple_property(dst.Vector3),
+			emitterSize = {get = util.simple_property(dst.Vector3).get},
+			minDirection = {get = util.simple_property(dst.Vector3).get},
+			maxDirection = {get = util.simple_property(dst.Vector3).get},
+			constantForce = {get = util.simple_property(dst.Vector3).get},
 			dampingForce = util.simple_property("number"),
 			activeTime = util.simple_property("number"),
 			inactiveTime = util.simple_property("number"),
 			minEmissionRate = util.simple_property("number"),
 			maxEmissionRate = util.simple_property("number"),
-			minParticleSize = util.simple_property(dst.Vector2),
-			maxParticleSize = util.simple_property(dst.Vector2),
+			minParticleSize = {get = util.simple_property(dst.Vector2).get},
+			maxParticleSize = {get = util.simple_property(dst.Vector2).get},
 			minTimeToLive = util.simple_property("number"),
 			maxTimeToLive = util.simple_property("number"),
 			minVelocity = util.simple_property("number"),
