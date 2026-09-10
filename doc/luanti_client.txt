@@ -375,6 +375,22 @@ What is done
   down, which goes back as an inventory action, and clicking a button sends
   the form's fields. Detached inventories, which is what a creative list is.
 
+  A game's own images in the UI -- a form's image[], the item picture in a
+  slot, the stack under the cursor, the HUD's images -- are drawn without
+  smoothing, the same as the world's textures: it is all pixel art and the
+  UI draws it at whatever size a form asked for.
+
+  Two things about a node's own form are worth naming, because a furnace
+  needs both. Its slots can be addressed as `current_name` or as `context`,
+  which Luanti treats as the same thing and games use interchangeably --
+  devtest's chest writes the first, VoxeLibre's furnace the second. And the
+  form *is* the string in the node's metadata, which a game rewrites as the
+  node works: a furnace's flame and its progress arrow are images whose
+  `[lowpart` is redrawn every tick. So when metadata for the node a form
+  came out of arrives, the string is read again and the form redrawn, which
+  is what Luanti's own client does by re-reading it every frame. The stack
+  in hand and the scroll survive that.
+
 Only serialization version 29 is read. It is what every current server writes;
 older ones compress the pieces of a mapblock separately and the client says so
 and gives up rather than carrying a second parser.
