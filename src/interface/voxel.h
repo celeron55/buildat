@@ -86,9 +86,17 @@ namespace interface
 		sv_<VoxelQuad> shape;
 		uint8_t tile_order[6] = {0, 1, 2, 3, 4, 5};
 		uint8_t tile_turns[6] = {};
-		// Multiplied into the vertex colour, 0xRRGGBB. What wants it is a
-		// palette: one texture, and the param says which entry of it tints
-		// this voxel.
+		// Multiplied into the vertex colour, 0xRRGGBB.
+		//
+		// The vertex colour is light, not albedo -- the mesher packs it as
+		// interface/mesh.h says -- so this tints the light a voxel receives
+		// and *not* its texture. What that is right for is a voxel that
+		// glows or sits in coloured shade. What it is not right for is a
+		// palette: a palette multiplies the texture, and the sky's own
+		// contribution to the lighting is a scalar here and cannot be
+		// tinted, so a palette entry would show in shade and vanish in
+		// sunlight. An albedo tint wants a channel of its own; see
+		// local/voxel_data_model_plan.md.
 		uint32_t color = 0xffffff;
 		// Where a liquid's surface stands in the voxel; see
 		// VoxelDefinition::liquid_top. Luanti's flowing liquids put their
