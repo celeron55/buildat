@@ -232,7 +232,10 @@ local function read_node(r)
 	def.damage_per_second = r:u32()
 	def.liquid_type = r:u8()
 	r:string() -- liquid_alternative_flowing
-	r:string() -- liquid_alternative_source
+	-- The source of this liquid, which is what says whether two liquid nodes
+	-- are the same liquid: a flowing water and a water source both name the
+	-- water source, and lava names lava
+	def.liquid_alternative_source = r:string()
 	def.liquid_viscosity = r:u8()
 	r:u8() -- liquid_renewable
 	def.liquid_range = r:u8()

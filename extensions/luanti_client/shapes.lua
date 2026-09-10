@@ -439,14 +439,16 @@ function M.for_node(def, facedir, wall, mesh_quads, liquid_top)
 		-- A box with a lowered top. box_quads takes the side textures from
 		-- the part of the tile the box covers, which is what Luanti's own
 		-- liquid sides do: the surface cuts the texture, it does not squash
-		-- it. Drawn from both sides so that the surface is there when the
-		-- camera is under it.
+		-- it. Not doubled: a blended quad drawn twice blends twice, which is
+		-- what made a flowing liquid read as opaque next to a source. The
+		-- alpha technique draws with culling off instead, so the surface is
+		-- still there when the camera is under it.
 		--
 		-- A liquid at the top level has no lowered top and gets no shape at
 		-- all -- see liquid_top() -- so it stays a cube whose faces against
 		-- the next one are culled, which is what a waterfall or the middle of
 		-- a lake is made of.
-		return M.box_quads({-0.5, -0.5, -0.5, 0.5, liquid_top, 0.5}, {}), true
+		return M.box_quads({-0.5, -0.5, -0.5, 0.5, liquid_top, 0.5}, {}), false
 	end
 	if drawtype == 9 or drawtype == 17 then -- PLANTLIKE, PLANTLIKE_ROOTED
 		return M.plant_quads(def.visual_scale), true

@@ -189,6 +189,7 @@ struct CVoxelRegistry: public VoxelRegistry
 		cache.shape = def.shape;
 		cache.shape_double_sided = def.shape_double_sided;
 		cache.translucent = def.translucent;
+		cache.shape_group = def.shape_group;
 		for(size_t i = 0; i < 6; i++)
 			cache.tile_turns[i] = def.tile_turns[i] & 3;
 		// Caller sets cache.valid = true

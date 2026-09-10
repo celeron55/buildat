@@ -348,14 +348,29 @@ A liquid is blended rather than alpha masked, so its faces are not in the
 chunk's own geometry at all: the voxel definition carries a "translucent"
 flag, the mesher puts those faces in a second geometry on a child node of the
 chunk, and res/VoxelUnlitAlpha.xml -- the same shader, with the cutoff
-replaced by a blend and no depth writing -- draws it. Urho3D sorts alpha
-drawables by distance, so the chunks' water sorts between chunks. simplified:
-faces within one chunk's water are not sorted against each other; per-triangle
-sorting or depth peeling is the upgrade path, and it rarely shows because a
-liquid's own edge material culls the faces between two of the same liquid,
-which leaves at most one surface along a ray inside a chunk. That edge
-material is also why the terrain under water is drawn: water culls against
-water and draws against everything else.
+replaced by a blend, no depth writing and no culling -- draws it. Urho3D sorts
+alpha drawables by distance, so the chunks' water sorts between chunks.
+simplified: faces within one chunk's water are not sorted against each other;
+per-triangle sorting or depth peeling is the upgrade path. It rarely shows,
+because along any ray there is at most one water surface:
+
+- Water culls against water. Each liquid family -- everything naming the same
+  liquid source, so a water source and a flowing water are one family and lava
+  is another -- gets an edge material of its own for its cubes, and a shape
+  group of its own for its shapes. A shape's quad against a neighbour of the
+  same group is a face inside a body of it, and is not drawn.
+- The face between water and something opaque belongs to the opaque voxel:
+  the lake bottom is drawn by the ground, not by the water over it, which is
+  Luanti's rule that the more solid of two nodes owns the face between them.
+  Without it every surface under water would be behind two blended layers.
+- Culling is off rather than the quads being doubled: a blended quad drawn
+  twice blends twice, and a doubled water surface reads as opaque. Off it is
+  still there when the camera is under it.
+
+What is left: the surface steps down where a flowing liquid's level drops,
+because a quad against a lower level of the same liquid is dropped with the
+rest of them. Corner heights averaged from the neighbouring levels, which is
+what Luanti does, make it continuous instead.
 
 What that does not do yet: a connected node box does not look at its
 neighbours, so a fence is a post without its rails; a node whose model is
