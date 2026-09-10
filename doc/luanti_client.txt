@@ -498,6 +498,14 @@ started. The speed a particle gets is then independent of its direction,
 which is the part that stays wrong: exact for a single particle, where the
 box is one vector.
 
+A particle's texture is animated the way a node's tile is -- a vertical strip
+or a sheet -- and that becomes Urho3D's texture frames: the part of the image
+each frame is and how many seconds into the particle's life it is shown from.
+How many frames a strip holds comes out of the image's own shape against the
+aspect the game gave, which is Luanti's arithmetic. Urho3D stops on the last
+frame rather than looping, so the frames are laid out again and again until
+the longest life the particle can have is covered, up to a cap.
+
 Only protocol 42 and up, which is Luanti 5.6 and up: below that the tweens
 are not on the wire and a spawner is dropped rather than read wrong. A
 spawner attached to an object stays where the object was when it started, and

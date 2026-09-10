@@ -1973,16 +1973,83 @@ function M.new(magic, buildat, log, options)
 	-- attractors. What that costs is a spawner that grows or shrinks over
 	-- its life, and particles that stop at the ground; the upgrade path is
 	-- either a manager of this client's own or more of Urho3D's own fields.
+	-- Luanti's tile animation on a particle, as Urho3D's texture frames: the
+	-- part of the image each frame is, and how many seconds into a
+	-- particle's life it is shown from. How many frames a vertical strip
+	-- holds comes out of the image's own shape against the aspect the game
+	-- gave, which is Luanti's own arithmetic.
+	--
+	-- Urho3D stops on the last frame rather than looping, so the frames are
+	-- laid out again and again until the longest life the particle can have
+	-- is covered. The cap is what keeps a one-frame-a-millisecond animation
+	-- on a minute-long particle from filling memory.
+	local PARTICLE_FRAMES_MAX = 64
+	local function particle_frames(effect, tex, animation, ttl)
+		if not tex or not animation or animation.type == 0 then
+			return
+		end
+		local frames = {}
+		local step = nil
+		if animation.type == 1 then
+			-- A vertical strip. One frame is as tall as the image is wide,
+			-- times the aspect the game asked for.
+			local aspect_w = animation.aspect_w or 1
+			local aspect_h = animation.aspect_h or 1
+			local frame_h = tex.width / aspect_w * aspect_h
+			local count = frame_h > 0 and
+					math.floor(tex.height / frame_h + 0.5) or 1
+			if count < 2 then
+				return
+			end
+			for i = 0, count - 1 do
+				frames[#frames + 1] = {0, i / count, 1, (i + 1) / count}
+			end
+			-- Luanti's length is the whole animation
+			step = (animation.length or 1) / count
+		elseif animation.type == 2 then
+			-- A sheet, left to right and then down, which is the order
+			-- Luanti numbers its frames in
+			local across = math.max(1, animation.frames_w or 1)
+			local down = math.max(1, animation.frames_h or 1)
+			if across * down < 2 then
+				return
+			end
+			for y = 0, down - 1 do
+				for x = 0, across - 1 do
+					frames[#frames + 1] = {x / across, y / down,
+							(x + 1) / across, (y + 1) / down}
+				end
+			end
+			-- And here it is the length of one frame
+			step = animation.length or 0.1
+		end
+		if not step or step <= 0 then
+			return
+		end
+		local at = 0
+		local i = 1
+		local added = 0
+		while at < ttl and added < PARTICLE_FRAMES_MAX do
+			local f = frames[i]
+			effect:AddTextureTime(magic.Rect(f[1], f[2], f[3], f[4]), at)
+			at = at + step
+			i = i % #frames + 1
+			added = added + 1
+		end
+	end
+
 	-- The effect is handed to the emitter by the caller, once it has set the
 	-- fields that differ between a spawner and a single particle: assigning
 	-- the same effect twice is a no-op in Urho3D, so everything has to be on
 	-- it before it goes on.
 	local function particle_effect(texture_name, amount, ttl_min,
-			ttl_max, size_min, size_max, vel_min, vel_max, acc, active_time)
+			ttl_max, size_min, size_max, vel_min, vel_max, acc, active_time,
+			animation)
 		local effect = magic.ParticleEffect.new()
 		local material = magic.Material.new()
+		local tex = game_texture(texture_name)
 		material:SetTechnique(0, particle_technique)
-		material:SetTexture(0, game_texture(texture_name))
+		material:SetTexture(0, tex)
 		effect.material = material
 		effect.numParticles = amount
 		effect.relative = false
@@ -1995,6 +2062,7 @@ function M.new(magic, buildat, log, options)
 		-- White, and only white: a particle with no colour frame at all
 		-- comes out as one anyway, but saying so is what keeps it that way
 		effect:AddColorTime(magic.Color(1, 1, 1, 1), 0)
+		particle_frames(effect, tex, animation, ttl_max)
 		effect.minTimeToLive = ttl_min
 		effect.maxTimeToLive = ttl_max
 		-- Luanti's size is the whole particle across; a billboard's is half
@@ -2051,7 +2119,7 @@ function M.new(magic, buildat, log, options)
 				math.max(0.01, exptime.max),
 				math.max(0.001, size.min), math.max(0.001, size.max),
 				p.vel.start.min, p.vel.start.max,
-				particles.middle(p.acc.start), p.time)
+				particles.middle(p.acc.start), p.time, p.animation)
 		-- What the emitter box is: the position range, which the node sits
 		-- in the middle of
 		effect.emitterType = 1 -- EMITTER_BOX
@@ -2092,7 +2160,7 @@ function M.new(magic, buildat, log, options)
 		node.position = magic.Vector3(p.pos[1], p.pos[2], p.pos[3])
 		local effect = particle_effect(texture_name, 1,
 				ttl, ttl, math.max(0.001, p.size), math.max(0.001, p.size),
-				p.vel, p.vel, p.acc, 0.05)
+				p.vel, p.vel, p.acc, 0.05, p.animation)
 		effect.emitterType = 0 -- EMITTER_SPHERE, of no size
 		effect.emitterSize = magic.Vector3(0, 0, 0)
 		effect.minEmissionRate = 100

@@ -267,6 +267,20 @@ function M.define(dst, util)
 		},
 	})
 
+	-- A rectangle of two corners. What wants it is a particle's texture
+	-- frames, which are the parts of an image an animation runs through.
+	util.wc("Rect", {
+		unsafe_constructor = util.wrap_function(
+				{"number", "number", "number", "number"},
+		function(left, top, right, bottom)
+			return util.wrap_instance("Rect", Rect(left, top, right, bottom))
+		end),
+		properties = {
+			min = util.simple_property(dst.Vector2),
+			max = util.simple_property(dst.Vector2),
+		},
+	})
+
 	util.wc("Vector2", {
 		unsafe_constructor = util.wrap_function({"number", "number"},
 		function(x, y)
@@ -1132,6 +1146,10 @@ function M.define(dst, util)
 		instance = {
 			AddColorTime = util.self_function("AddColorTime", {},
 					{"ParticleEffect", "Color", "number"}),
+			-- One frame of a texture animation: the part of the image, and
+			-- how many seconds into a particle's life it is shown from
+			AddTextureTime = util.self_function("AddTextureTime", {},
+					{"ParticleEffect", "Rect", "number"}),
 		},
 		properties = {
 			material = util.simple_property(dst.Material),
