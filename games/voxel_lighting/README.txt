@@ -476,12 +476,12 @@ Running
 -------
 
     $ bin/buildat_server -m ../games/voxel_lighting
-    $ bin/buildat_client -s localhost
+    $ bin/buildat -s localhost
 
 check.txt visits all six benchmarks and screenshots each, for comparing a
 rendering change against the previous run:
 
-    $ bin/buildat_client -s localhost -w 1600x900 \
+    $ bin/buildat -s localhost -w 1600x900 \
             -c @../games/voxel_lighting/check.txt
 
 -w gives the run a fixed window size without changing the remembered one, so
