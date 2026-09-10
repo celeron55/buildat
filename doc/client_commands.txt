@@ -17,6 +17,20 @@ remembers between runs. Use it for anything that compares images between runs.
 @path reads the commands from a file. Empty lines and lines starting with # are
 ignored.
 
+-c - reads standard input instead, a line at a time, as it arrives. The client
+keeps rendering and stays connected while there is nothing to read, and the run
+ends at end of input or at a quit command. This is what to use when the next
+command depends on what is on the screen: take a screenshot, look at it, then
+send the next command. A line that does not parse is reported and skipped
+rather than ending the run.
+
+    $ mkfifo /tmp/cmd; sleep 900 > /tmp/cmd &
+    $ bin/buildat_client -c - < /tmp/cmd &
+    $ echo 'screenshot /tmp/now.png' > /tmp/cmd
+
+The writer has to stay open -- the sleep above is what keeps it so -- because
+closing the last writer of a fifo is end of input.
+
 delay is wall-clock milliseconds of game time continuing to run. Use it to wait
 for startup, network, or for a held key to have an effect. Input is queued as
 SDL events at the start of the frame (before Urho3D Input::Update). Screenshots

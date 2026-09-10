@@ -3,6 +3,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <deque>
 #include <unordered_map>
 #include <set>
 #include <exception>
@@ -16,6 +17,10 @@ typedef unsigned int uint;
 typedef unsigned char uchar;
 typedef std::string ss_;
 template<typename T> using sv_ = std::vector<T>;
+// A deque never invalidates a reference to an element it already
+// holds when one is appended, which is what a container read by a
+// worker thread while the main thread grows it needs.
+template<typename T> using sd_ = std::deque<T>;
 template<typename T> using set_ = std::set<T>;
 template<typename T1, typename T2> using sm_ = std::unordered_map<T1, T2>;
 typedef const char cc_;

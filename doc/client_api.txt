@@ -3,6 +3,10 @@ Buildat Client API
 
 Lua code is run in two subtly different environments.
 
+Terminology: a *voxel* is one cell of a voxel volume, and a *node* is a scene
+node -- what a Scene holds and a component hangs off. Games that come from
+elsewhere may call a voxel a node (Luanti does); in buildat it is a voxel.
+
 
 Interface common to both environments
 =====================================
@@ -17,6 +21,16 @@ buildat.Logger(module_name) -> object
 	:info(message)
 	:verbose(message)
 	:debug(message)
+
+buildat.sha1(data) -> 20 bytes
+buildat.sha256(data) -> 32 bytes
+buildat.hex(data) -> string
+
+buildat.compress(data, format [, level]) -> string
+buildat.decompress(data [, format]) -> data, bytes_consumed
+- format is "zlib" or "zstd"; decompress defaults to "zlib"
+- bytes_consumed is how much of the front of data the stream took, which is what
+  says where the next one begins when streams are concatenated
 
 buildat.send_packet(name, data)
 
@@ -53,6 +67,24 @@ API specific to the extension environment:
 
 buildat.connect_server(address)
 - Address may include port in format "host:port" or "[host]:port"
+
+buildat.random_bytes(n) -> n bytes
+- From the platform's cryptographic random source; 1...1024 bytes
+
+buildat.bignum
+- Arbitrary-precision unsigned integers, for what is too slow or too fiddly to
+  do in Lua. Numbers are big-endian byte strings and come back with no leading
+  zero bytes ("" is zero).
+- add(a, b), mul(a, b), mod(a, m), sub_mod(a, b, m), mul_mod(a, b, m),
+  mod_exp(base, exponent, m)
+- What is built on these belongs in Lua; extensions/luanti_client/srp.lua is an
+  SRP-6a login written that way.
+
+buildat.add_resource_dir(path) -> bool
+- Puts a directory on Urho3D's resource search path, so files written there can
+  be asked of the resource cache by name. Only directories under the client's
+  cache path; a resource dir is readable by everything the client draws.
+- Urho3D's own Lua bindings do not expose AddResourceDir.
 
 buildat.extension_path(name)
 
@@ -130,6 +162,11 @@ request. It is found in these files:
 
 File paths and other things are converted automatically.
 
+The client sends Urho3D's ExitRequested event when it is shutting down, for
+any reason and not only a closed window, so that a module can close what it
+opened: the Luanti client tells the server it is leaving there. It arrives
+before anything is torn down; a module that is already gone gets nothing.
+
 Additions to regular Urho3D:
 
 SubscribeToEvent(event_name, callback)
@@ -173,6 +210,29 @@ replicate.main_scene
 - CreateNode and CreateComponent uses urho3d.LOCAL by default unlike native
   Urho3D. With urho3d.REPLICATED (native default) they will end up in the
   synchronized ID space and will be overridden by data coming from the server.
+- A property whose Urho3D type is a **const reference** -- `const Vector3&`,
+  `const Vector2&` -- has a getter and **no setter**: tolua++ generates
+  `tolua_variable("minDirection", getter, NULL)` for it. Assigning such a
+  property writes nowhere and reads back what was assigned, so it looks like
+  it worked. Where it matters the sandbox exposes the class's own setter
+  function instead: ParticleEffect has SetMinDirection, SetMaxDirection,
+  SetMinParticleSize, SetMaxParticleSize, SetConstantForce and
+  SetEmitterSize, and its matching properties are read-only. The other
+  const-reference properties in these bindings are things nobody assigns
+  (bounding boxes, frustums, world transforms); Zone's ambientColor and the
+  rest of the vector properties do have setters.
+- An Urho3D object made in Lua -- a Material, a ParticleEffect -- belongs to
+  Lua and is destroyed when the last Lua reference to it goes, whatever the
+  engine still holds it in. Keep a reference for as long as the component
+  using it lives. An emitter whose effect has been collected reads freed
+  memory, which on this machine came out as Urho3D's defaults: particles
+  scattered in random directions at the default size.
+- Node:Clone([mode]) is there as well, also LOCAL by default: a copy of the
+  node and its components in the same parent, made inside the engine. What
+  wants it is geometry that costs a sandbox call per vertex to build and is
+  wanted more than once. Urho3D copies a component through its attributes,
+  so a material made in Lua -- which has no resource name to be referred to
+  -- is not copied and has to be set on the copy.
 
 network
 -------
@@ -305,3 +365,175 @@ do
 	voxel_reg:add_voxel(vdef)
 end
 
+vdef.tile_turns is six quarter turns, one per face, of the texture inside its
+own face: {0, 0, 0, 0, 0, 0} for a voxel that does not turn one. What wants it
+is a voxel that faces a direction -- the top of a turned cube wears the same
+texture as the top of one that is not turned, turned with the voxel -- so the
+turn belongs to the face rather than to the atlas segment, which is shared.
+A shape's quads carry their own texture coordinates and are not affected.
+
+atlas_reg:set_surface_maps(false) says the game's voxel shader samples the
+diffuse atlas and nothing else. An atlas then carries neither the normal map
+nor the surface map derived from its segments' pixels, which is two thirds of
+what adding a texture to an atlas costs and two thirds of its memory. Say it
+before the first segment goes in; a later change only reaches atlases created
+after it.
+
+
+Voxel data
+----------
+buildat.pack_voxel_volume(args) -> string
+- Packed samples in, a serialized volume out. What comes out is what
+  set_voxel_geometry() and buildat.deserialize_volume() take.
+- One strided box copy per source, with an optional value mapping. Somebody
+  else's voxel format goes in without a Lua call per voxel: a Luanti mapblock
+  and the one-voxel border it needs from its six neighbours is seven sources
+  and two fields in one call.
+
+  buildat.pack_voxel_volume{
+      region = {x0, y0, z0, x1, y1, z1}, -- inclusive corners
+      fill = 0,                          -- raw voxel value the rest gets
+      sources = {
+          {
+              data = <string>,           -- the packed samples
+              format = "u16be",          -- u8|u16be|u16le|u32be|u32le
+              source_size = {16, 16, 16},-- the sample array, in x, y, z
+              from = {0, 0, 0},          -- the box to copy, in samples
+              size = {16, 16, 16},       -- default: the rest of the source
+              at = {0, 0, 0},            -- where it lands, in region coords
+              order = "xyz",             -- which axis runs fastest, first
+              shift = 0,                 -- sample = (sample >> shift) & mask
+              mask = 0xffff,             -- default: all of the format's bits
+              map = <string|table|nil>,  -- key -> value written
+              map_default = nil,         -- for keys the map does not have
+              map_id = nil,              -- compile this map once; see below
+              map_version = nil,         -- bump when the map changes
+              field = "id",              -- id|skylight|lamplight|light|raw
+              second = {                 -- optional; nil for one array
+                  data = <string>,       -- as long as the first array
+                  format = "u8",
+                  shift = 0,             -- (sample >> shift) & mask
+                  mask = 0xff,
+                  scale = 65536,         -- key = first + second * scale
+              },
+      },
+  }
+
+- field says which part of a voxel a source writes: "id" the type id (bits
+  0..20), "skylight" bits 24..27, "lamplight" bits 28..31, "light" both of
+  those in one write (bits 24..31, skylight in the low nibble), "raw" all 32
+  bits. Other bits are left alone, so ids and light are two sources over the
+  same box.
+- map is a table indexed by the key, or a string with one byte per key. A key
+  the map does not mention gets map_default, and with no map_default the voxel
+  is left as it was. Keys too far apart to be an array are held as a hash, so
+  a sparse table of large keys costs what it holds rather than what it spans.
+- map_id names a map so that it is compiled once instead of once per source.
+  A map of a few thousand keys costs more to compile than the box copy itself,
+  and a voxel world hands the same map to every source of every block. The
+  ids are the caller's to pick, small integers; map_version is what says the
+  map has changed, so bump it on every write to the table. A source with no
+  map_id compiles its map every time, which is what a one-off wants.
+- second is a second sample array read in lockstep with the first, at the same
+  index: the key looked up is first + second * scale. What wanted this is
+  Luanti's param2, which decides a voxel's colour or which way it faces, so
+  what a voxel looks like is a pair of samples rather than one -- one voxel id
+  per (type, param2) pair that actually turns up.
+- A source box that hangs over the edge of the region is clipped, which is what
+  a border slice from a neighbour that has not arrived yet needs.
+
+buildat.compose_image(args) -> width, height
+- Raster operations over an RGBA canvas, saved as a PNG. What wanted this is
+  Luanti's texture modifiers ("dirt.png^grass.png", "[colorize:#ff0000:128",
+  "[combine:32x32:0,0=a.png"), which are a small language over these
+  operations; the language itself belongs in the game's own code.
+
+  buildat.compose_image{
+      size = {16, 16},        -- the canvas; default: the first blit's
+      write = "<path>",       -- where the PNG goes; under the cache path only
+      ops = {
+          {op = "blit", src = "a.png",   -- a resource name
+              from = {0, 0, 16, 16},     -- default: the whole source
+              at = {0, 0},
+              size = {16, 16},           -- scales, nearest neighbour
+              fill = false,              -- or: over the whole canvas
+              clip = {0, 0.5, 1, 1},     -- fractions of the canvas
+              blend = "over"},           -- over|set|and|multiply|screen
+          {op = "fill", color = {r, g, b, a}, at =, size =, blend =},
+          {op = "multiply", color = {r, g, b, a}},   -- per channel, 255 = 1
+          {op = "colorize", color = {r, g, b, a}, ratio = 0..255},
+          {op = "hsl", hue = 0, saturation = 0, lightness = 0},
+          {op = "alpha", value = 255},   -- set the whole alpha channel
+          {op = "chromakey", color = {r, g, b}},  -- that colour turns clear
+          {op = "transform", transform = 0..7},  -- the square's symmetries
+          {op = "resize", size = {w, h}},
+          {op = "crop", from = {x, y, w, h}, size = {w, h}},
+          {op = "crop", grid = {cols, rows}, cell = {x, y}},
+          {op = "shear", src = "a.png",  -- onto a parallelogram
+              at = {x, y},               -- where the source's 0,0 goes
+              u = {dx, dy},              -- and its right edge
+              v = {dx, dy},              -- and its bottom edge
+              blend = "over"},
+      },
+  }
+
+- With no size, the first blit makes the canvas as big as it needs, which is
+  what a chain of overlays over a base image wants.
+- There is no way to keep an intermediate image: a nested expression is one
+  call per level with the inner results referenced by the name they were
+  written under, which doubles as a cache between runs.
+- transform is the eight symmetries of a square: 0 identity, 1...3 rotations
+  by 90 degrees counterclockwise, 4 flip x, 5...7 that flip and then those
+  rotations. An odd one swaps the width and the height.
+- crop with a grid cuts the canvas into cols by rows cells and keeps one,
+  which is what a sprite sheet or a stack of animation frames is. A zero for
+  one side of the grid means "as many as makes the cells square", which is
+  how many frames a strip holds without anybody having to count them.
+- clip is a rectangle of the canvas, in fractions of it, outside which a blit
+  writes nothing. It is fractions rather than pixels because what wants it --
+  an overlay stretched over the whole canvas of which only a part is drawn --
+  is written by someone who does not know how big the canvas is.
+- chromakey makes every pixel of exactly that colour fully transparent, which
+  is what a texture drawn over a solid background and saved without an alpha
+  channel needs; the comparison is exact, because such a texture has one
+  exact background colour.
+- colorize blends towards the colour by ratio and leaves fully transparent
+  pixels alone; at ratio 255 it replaces the colour and multiplies the alpha.
+- shear puts the source's four corners at at, at+u, at+u+v and at+v: u is
+  where its right edge goes and v where its bottom edge goes, so u = {w, 0}
+  and v = {0, h} is a plain scaled copy. It is worked out backwards, from
+  each destination pixel to the source pixel it holds, so the result has no
+  gaps whatever the edges are, and pixel centres decide it, so two
+  parallelograms sharing an edge cover the pixels along it once each. What
+  wanted this is the little isometric cube an inventory draws a voxel as:
+  three tiles, three parallelograms.
+
+buildat.read_image(resource_name) -> width, height, rgba
+- The pixels of an image, as one string of four bytes per pixel, row by row.
+  What wanted this is a colour palette: an image of a few dozen pixels that a
+  game indexes to say what colour something is drawn in.
+
+VoxelDefinition.shape
+- A shape of the voxel's own instead of a cube: an array of quads, each
+  {tile = 1...6, p = {12 numbers}, uv = {8 numbers}}. The corners are in the
+  voxel's own cube of -0.5...0.5 and the texture coordinates in the tile's own
+  0...1 with 0,0 at its top left. Empty for a cube, which is what most voxels
+  are and the fast path the voxel mesher exists for; a voxel with quads has
+  them copied into its chunk's mesh, which costs about what its own faces
+  would have -- rather than a scene node per stair.
+- Wind a quad's corners so that the right-handed cross product of its first
+  two edges points out of the shape; the mesher takes that as the normal too.
+  Corner order top left, top right, bottom right, bottom left as the face is
+  seen from outside does it.
+- VoxelDefinition.shape_double_sided draws the quads from both sides, which a
+  shape made of single quads -- a plant, a rail, a sign -- wants and a shape
+  made of boxes does not.
+- A voxel with a shape usually wants face_draw_type FACEDRAWTYPE_NEVER and
+  edge_material_id EDGEMATERIALID_EMPTY too: the cube faces it would
+  otherwise have are not what it looks like, and its neighbours should draw
+  their faces against it.
+
+volume:serialize() -> string
+- The same thing a Volume built one set_voxel_at() at a time can hand to
+  set_voxel_geometry(). The slow, flexible path; pack_voxel_volume() is the
+  fast one.

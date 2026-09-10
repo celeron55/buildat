@@ -5,6 +5,7 @@
 #include "interface/voxel.h"
 #include "interface/atlas_cereal.h"
 #include <cereal/types/string.hpp>
+#include <cereal/types/vector.hpp>
 
 namespace interface
 {
@@ -24,9 +25,19 @@ namespace interface
 	}
 
 	template<class Archive>
+			void serialize(Archive &archive, VoxelQuad &v)
+	{
+		for(size_t i = 0; i < 4; i++){
+			archive(v.p[i][0], v.p[i][1], v.p[i][2]);
+			archive(v.uv[i][0], v.uv[i][1]);
+		}
+		archive(v.tile, v.connect_dir);
+	}
+
+	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 2;
+		uint8_t version = 8;
 		archive(
 				version,
 				v.name,
@@ -36,8 +47,20 @@ namespace interface
 				v.face_draw_type,
 				v.edge_material_id,
 				v.physically_solid,
-				v.fully_empty
+				v.fully_empty,
+				v.shape,
+				v.shape_double_sided,
+				v.translucent,
+				v.shape_group,
+				v.is_liquid,
+				v.liquid_top,
+				v.connect_group,
+				v.connect_mask,
+				v.connect_to_solid,
+				v.shape_masked
 		);
+		for(size_t i = 0; i < 21; i++)
+			archive(v.shape_masked_begin[i]);
 	}
 
 	template<class Archive>

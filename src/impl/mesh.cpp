@@ -328,6 +328,16 @@ public:
 			materialToUse = back.get_id();
 			return true;
 		}
+		// A translucent voxel does not draw its face against an opaque one:
+		// that surface is the opaque voxel's own, drawn by it and seen
+		// through the water rather than under another blended layer of it.
+		// This is Luanti's rule that the more solid of two nodes owns the
+		// face between them.
+		if(back_def->translucent && !front_def->translucent &&
+				front_def->edge_material_id !=
+						interface::EDGEMATERIALID_EMPTY){
+			return false;
+		}
 		if(back_def->edge_material_id != front_def->edge_material_id){
 			materialToUse = back.get_id();
 			return true;
@@ -371,6 +381,14 @@ static bool face_owned_by_padding(pv::RawVolume<VoxelInstance> &volume,
 // neutral, which is what makes a cave read as grey while a face that is merely
 // shaded from the sun keeps the sky's blue.
 static const Color BOUNCE_COLOR(0.055f, 0.050f, 0.045f);
+
+// What a voxel's lamplight looks like at full strength. White, because a lamp
+// is as bright as a world says it is and its color belongs in the texture of
+// whatever is emitting it; a world that wants warmer torches gives them a
+// warmer texture. This is added to the vertex color's rgb, next to the bounce
+// term, so a shader following the contract in interface/mesh.h needs to know
+// nothing about it.
+static const Color LAMP_COLOR(1.0f, 1.0f, 1.0f);
 
 // Per-face brightness, for legibility rather than for physics: two faces of a
 // voxel that happen to receive the same light have no visible edge between
@@ -433,10 +451,10 @@ static void face_vertex_colors(pv::RawVolume<VoxelInstance> &volume,
 	};
 	const pv::Vector3DInt32 front_p = voxel_at(0.5f);
 	VoxelInstance front = volume.getVoxelAt(front_p);
-	uint8_t sky = front.get_id() == interface::VOXELTYPEID_UNDEFINED ?
-			volume.getVoxelAt(voxel_at(-0.5f)).get_skylight() :
-			front.get_skylight();
-	float sky_f = (float)sky / VoxelInstance::SKYLIGHT_MAX;
+	VoxelInstance lit = front.get_id() == interface::VOXELTYPEID_UNDEFINED ?
+			volume.getVoxelAt(voxel_at(-0.5f)) : front;
+	float sky_f = (float)lit.get_skylight() / VoxelInstance::SKYLIGHT_MAX;
+	float lamp_f = (float)lit.get_lamplight() / VoxelInstance::LAMPLIGHT_MAX;
 
 	// The two axes of the face's own plane, to step around it in
 	pv::Vector3DInt32 u(0, 1, 0), v(0, 0, 1);
@@ -466,12 +484,39 @@ static void face_vertex_colors(pv::RawVolume<VoxelInstance> &volume,
 		float sky_shade = ao * FACE_SHADE[face_id];
 		float bounce_shade = (1.0f - BOUNCE_AO + BOUNCE_AO * ao) *
 				FACE_SHADE[face_id] * (1.0f - sky_f);
+		float lamp_shade = lamp_f * sky_shade;
 		out[i] = Color(
-				BOUNCE_COLOR.r_ * bounce_shade,
-				BOUNCE_COLOR.g_ * bounce_shade,
-				BOUNCE_COLOR.b_ * bounce_shade,
+				BOUNCE_COLOR.r_ * bounce_shade + LAMP_COLOR.r_ * lamp_shade,
+				BOUNCE_COLOR.g_ * bounce_shade + LAMP_COLOR.g_ * lamp_shade,
+				BOUNCE_COLOR.b_ * bounce_shade + LAMP_COLOR.b_ * lamp_shade,
 				sky_f * sky_shade).ToUInt();
 	}
+}
+
+// The texture turned inside its own face, which is what
+// VoxelDefinition::tile_turns asks for. In the segment's own 0...1 space a
+// quarter turn is (s, t) -> (1 - t, s), which is what Luanti does to a tile
+// with a rotation -- it lets the coordinates go negative and leans on the
+// texture wrapping, where an atlas segment has to stay inside its own box.
+static void turn_txcoord(const AtlasSegmentCache *aseg, uint8_t turns,
+		CustomGeometryVertex &tg_vert)
+{
+	turns &= 3;
+	if(turns == 0)
+		return;
+	const float w = aseg->coord1.x_ - aseg->coord0.x_;
+	const float h = aseg->coord1.y_ - aseg->coord0.y_;
+	if(w == 0.0f || h == 0.0f)
+		return;
+	float s = (tg_vert.texCoord_.x_ - aseg->coord0.x_) / w;
+	float t = (tg_vert.texCoord_.y_ - aseg->coord0.y_) / h;
+	for(uint8_t i = 0; i < turns; i++){
+		const float s0 = s;
+		s = 1.0f - t;
+		t = s0;
+	}
+	tg_vert.texCoord_.x_ = aseg->coord0.x_ + s * w;
+	tg_vert.texCoord_.y_ = aseg->coord0.y_ + t * h;
 }
 
 void assign_txcoords(size_t pv_vertex_i1, const AtlasSegmentCache *aseg,
@@ -553,7 +598,7 @@ void assign_txcoords(size_t pv_vertex_i1, const AtlasSegmentCache *aseg,
 }
 
 void preload_textures(pv::RawVolume<VoxelInstance> &volume,
-		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg)
+		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg, bool with_lod)
 {
 	auto region = volume.getEnclosingRegion();
 	auto &lc = region.getLowerCorner();
@@ -564,7 +609,7 @@ void preload_textures(pv::RawVolume<VoxelInstance> &volume,
 			for(int x = lc.getX(); x <= uc.getX(); x++){
 				VoxelInstance v = volume.getVoxelAt(x, y, z);
 				const interface::CachedVoxelDefinition *def =
-						voxel_reg->get_cached(v, atlas_reg);
+						voxel_reg->get_cached(v, atlas_reg, with_lod);
 				if(!def)
 					throw Exception(ss_()+"Undefined voxel: "+itos(v.get_id()));
 			}
@@ -572,10 +617,17 @@ void preload_textures(pv::RawVolume<VoxelInstance> &volume,
 	}
 }
 
+static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
+		pv::RawVolume<VoxelInstance> &volume,
+		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+		bool use_skylight,
+		sm_<uint, TemporaryGeometry> *translucent_result);
+
 void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		pv::RawVolume<VoxelInstance> &volume,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
-		bool use_skylight)
+		bool use_skylight,
+		sm_<uint, TemporaryGeometry> *translucent_result)
 {
 	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
@@ -674,7 +726,10 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		}
 #else
 		// Get or create the appropriate temporary geometry for this atlas
-		TemporaryGeometry &tg = result[seg_ref.atlas_id];
+		sm_<uint, TemporaryGeometry> &into =
+				(translucent_result && voxel_def0->translucent) ?
+				*translucent_result : result;
+		TemporaryGeometry &tg = into[seg_ref.atlas_id];
 		if(tg.vertex_data.Empty()){
 			tg.atlas_id = seg_ref.atlas_id;
 			tg.has_colors = use_skylight;
@@ -718,9 +773,349 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			// Figure out texture coordinates
 			size_t pv_vertex_i1 = pv_vertex_i - pv_vertex_i0;
 			assign_txcoords(pv_vertex_i1, aseg, tg_vert);
+			turn_txcoord(aseg, voxel_def0->tile_turns[face_id], tg_vert);
 			tg_vert.color_ = corner_colors[pv_vertex_i1];
 		}
 #endif
+	}
+
+	generate_voxel_shapes(result, volume, voxel_reg, atlas_reg, use_skylight,
+			translucent_result);
+}
+
+// How high a liquid's surface stands at one corner of a voxel: the average
+// of the surfaces of the up to four liquid columns that meet there. This is
+// Luanti's getCornerLevel, and what it is for is a surface that runs
+// continuously from one level to the next instead of stepping down.
+//
+// Two rules on top of the average, both Luanti's: a column with the same
+// liquid directly above it is full to the top of the voxel, because that is
+// a body of liquid rather than a surface; and a corner that two of the four
+// columns leave empty is at the bottom, which is what makes the edge of a
+// spill thin out rather than stand as a wall.
+static float liquid_corner_top(pv::RawVolume<VoxelInstance> &volume,
+		VoxelRegistry *voxel_reg, int x, int y, int z,
+		const interface::CachedVoxelDefinition *def, int dx, int dz)
+{
+	const int off[4][2] = {{0, 0}, {dx, 0}, {0, dz}, {dx, dz}};
+	float sum = 0.0f;
+	int count = 0;
+	int empty = 0;
+	for(size_t i = 0; i < 4; i++){
+		int cx = x + off[i][0];
+		int cz = z + off[i][1];
+		VoxelInstance av = volume.getVoxelAt(cx, y + 1, cz);
+		const interface::CachedVoxelDefinition *adef =
+				av.get_id() == interface::VOXELTYPEID_UNDEFINED ? nullptr :
+				voxel_reg->get_cached(av);
+		if(adef != nullptr && adef->is_liquid &&
+				adef->shape_group == def->shape_group)
+			return 0.5f;
+		VoxelInstance cv = volume.getVoxelAt(cx, y, cz);
+		const interface::CachedVoxelDefinition *cdef =
+				cv.get_id() == interface::VOXELTYPEID_UNDEFINED ? nullptr :
+				voxel_reg->get_cached(cv);
+		if(cdef == nullptr)
+			continue;
+		if(cdef->is_liquid && cdef->shape_group == def->shape_group){
+			sum += cdef->liquid_top;
+			count++;
+		} else if(cdef->fully_empty){
+			empty++;
+			if(empty >= 2)
+				return -0.5f;
+		}
+	}
+	if(count == 0)
+		return def->liquid_top;
+	return sum / count;
+}
+
+// Which of the six directions a connecting voxel's neighbours connect in, as
+// a bit per face in the usual order. A shape's quad that names a direction is
+// drawn only when that bit is set, which is how a fence gets a rail towards
+// the fence next to it and no rail towards the air.
+//
+// Two voxels connect when the neighbour is in one of the families this one
+// reaches out to -- one bit of connect_mask per family -- or, for a voxel
+// that says so, when the neighbour is simply solid, which is how a fence
+// reaches into a wall of stone. What the families are is the game's business;
+// see interface/voxel.h.
+static bool connects_to(pv::RawVolume<VoxelInstance> &volume,
+		VoxelRegistry *voxel_reg, int x, int y, int z,
+		const interface::CachedVoxelDefinition *def)
+{
+	VoxelInstance nv = volume.getVoxelAt(x, y, z);
+	if(nv.get_id() == interface::VOXELTYPEID_UNDEFINED)
+		return false;
+	const interface::CachedVoxelDefinition *ndef = voxel_reg->get_cached(nv);
+	if(ndef == nullptr)
+		return false;
+	if(ndef->connect_group != 0 && ndef->connect_group <= 32 &&
+			(def->connect_mask & (1u << (ndef->connect_group - 1))) != 0)
+		return true;
+	if(def->connect_to_solid)
+		return ndef->physically_solid && ndef->shape.empty();
+	return false;
+}
+
+static uint connected_faces(pv::RawVolume<VoxelInstance> &volume,
+		VoxelRegistry *voxel_reg, int x, int y, int z,
+		const interface::CachedVoxelDefinition *def, uint *stepped_up)
+{
+	static const int FACE_DIR[6][3] = {
+		{0, 1, 0}, {0, -1, 0}, {1, 0, 0},
+		{-1, 0, 0}, {0, 0, 1}, {0, 0, -1},
+	};
+	uint faces = 0;
+	for(size_t i = 0; i < 6; i++){
+		if(connects_to(volume, voxel_reg, x + FACE_DIR[i][0],
+				y + FACE_DIR[i][1], z + FACE_DIR[i][2], def))
+			faces |= 1u << i;
+	}
+	if(stepped_up == nullptr)
+		return faces;
+	// A step up or down, for a voxel whose shape follows one: a rail runs
+	// into the rail on the slope above it and the one below it as much as
+	// into the one beside it, which is Luanti's own rule for them. The four
+	// horizontal directions only, in Luanti's own order: +Z, -Z, -X, +X.
+	static const int STEP_DIR[4][3] = {
+		{0, 0, 1}, {0, 0, -1}, {-1, 0, 0}, {1, 0, 0},
+	};
+	*stepped_up = 0;
+	for(size_t i = 0; i < 4; i++){
+		if(connects_to(volume, voxel_reg, x + STEP_DIR[i][0], y + 1,
+				z + STEP_DIR[i][2], def)){
+			*stepped_up |= 1u << i;
+			faces |= 1u << (i == 0 ? 4 : i == 1 ? 5 : i == 2 ? 3 : 2);
+		} else if(connects_to(volume, voxel_reg, x + STEP_DIR[i][0], y - 1,
+				z + STEP_DIR[i][2], def)){
+			faces |= 1u << (i == 0 ? 4 : i == 1 ? 5 : i == 2 ? 3 : 2);
+		}
+	}
+	return faces;
+}
+
+// The quads of the voxels that have a shape of their own, appended to the
+// same temporary geometry the cubes went into.
+//
+// A voxel's quads are copied as they are, with the voxel's position added and
+// the texture coordinates mapped into wherever the atlas put the tile. That
+// is the whole point of shapes living in the voxel registry: a chunk full of
+// stairs and fences costs what a chunk of cubes costs, where a scene node per
+// stair would not.
+//
+// Only the voxels inside the chunk are drawn. The padding belongs to the
+// neighbouring chunks, which draw it themselves; the padding is here so that
+// the cube faces can be culled against it.
+static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
+		pv::RawVolume<VoxelInstance> &volume,
+		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+		bool use_skylight,
+		sm_<uint, TemporaryGeometry> *translucent_result)
+{
+	const pv::Region &region = volume.getEnclosingRegion();
+	const pv::Vector3DInt32 lc = region.getLowerCorner();
+	const pv::Vector3DInt32 uc = region.getUpperCorner();
+	const float w = volume.getWidth() - 2;
+	const float h = volume.getHeight() - 2;
+	const float d = volume.getDepth() - 2;
+
+	for(int z = lc.getZ() + 1; z <= uc.getZ() - 1; z++){
+		for(int y = lc.getY() + 1; y <= uc.getY() - 1; y++){
+			for(int x = lc.getX() + 1; x <= uc.getX() - 1; x++){
+				VoxelInstance v = volume.getVoxelAt(x, y, z);
+				const interface::CachedVoxelDefinition *def =
+						voxel_reg->get_cached(v);
+				if(def == nullptr ||
+						(def->shape.empty() && def->shape_masked.empty()))
+					continue;
+				// Where this voxel's centre is in the chunk's own model
+				// coordinates; the same arithmetic the cube faces get
+				const float cx = (x - lc.getX()) - w / 2.0f - 0.5f;
+				const float cy = (y - lc.getY()) - h / 2.0f - 0.5f;
+				const float cz = (z - lc.getZ()) - d / 2.0f - 0.5f;
+				// A shaped voxel is lit by its own light rather than by the
+				// voxel in front of each face: there is no "in front" for an
+				// arbitrary quad, and a plant or a rail is lit by the air it
+				// stands in, which is the voxel it is in.
+				float sky_f = (float)v.get_skylight() /
+						VoxelInstance::SKYLIGHT_MAX;
+				float lamp_f = (float)v.get_lamplight() /
+						VoxelInstance::LAMPLIGHT_MAX;
+				// Which directions this voxel connects in, once per voxel
+				// rather than once per quad that asks. Only a voxel that
+				// reaches out at all pays for it.
+				// A voxel whose whole shape depends on what is around it --
+				// a rail -- keeps one shape per mask of the four horizontal
+				// connections, and four more for the slopes; the rest of
+				// the loop walks that instead of `shape`.
+				uint stepped_up = 0;
+				const bool masked = !def->shape_masked.empty();
+				const uint faces = (def->connect_mask != 0 ||
+						def->connect_to_solid || masked) ?
+						connected_faces(volume, voxel_reg, x, y, z, def,
+								masked ? &stepped_up : nullptr) : 0;
+				const interface::VoxelQuad *quads = def->shape.data();
+				size_t quad_from = 0;
+				size_t quad_to = def->shape.size();
+				if(masked){
+					// The four horizontal connections in Luanti's own bit
+					// order for them: +Z is 1, -Z is 2, -X is 4, +X is 8
+					uint m = ((faces >> 4) & 1) |
+							(((faces >> 5) & 1) << 1) |
+							(((faces >> 3) & 1) << 2) |
+							(((faces >> 2) & 1) << 3);
+					// A slope wins over the flat shapes, and the last
+					// direction that has one wins between slopes, which is
+					// what Luanti does with them
+					for(uint i = 0; i < 4; i++){
+						if(stepped_up & (1u << i))
+							m = 16 + i;
+					}
+					quads = def->shape_masked.data();
+					quad_from = def->shape_masked_begin[m];
+					quad_to = def->shape_masked_begin[m + 1];
+				}
+				// A liquid's four top corners, once per voxel rather than
+				// once per vertex that sits on one
+				const bool liquid_corners = def->is_liquid;
+				float corner[2][2] = {};
+				if(liquid_corners){
+					for(int ix = 0; ix < 2; ix++){
+						for(int iz = 0; iz < 2; iz++){
+							corner[ix][iz] = liquid_corner_top(volume,
+									voxel_reg, x, y, z, def,
+									ix == 0 ? -1 : 1, iz == 0 ? -1 : 1);
+						}
+					}
+				}
+				for(size_t quad_i = quad_from; quad_i < quad_to; quad_i++){
+					const interface::VoxelQuad &quad = quads[quad_i];
+					// A quad that belongs to one direction is drawn only
+					// when that direction connects, and one that belongs to
+					// standing alone only when none of them does
+					if(quad.connect_dir == 7){
+						if(faces != 0)
+							continue;
+					} else if(quad.connect_dir != 0 &&
+							!(faces & (1u << (quad.connect_dir - 1)))){
+						continue;
+					}
+					uint tile = quad.tile < 6 ? quad.tile : 0;
+					AtlasSegmentReference seg_ref = def->textures[tile];
+					if(seg_ref.atlas_id == interface::ATLAS_UNDEFINED)
+						continue;
+					const AtlasSegmentCache *aseg =
+							atlas_reg->get_texture(seg_ref);
+					if(aseg == nullptr)
+						continue;
+					// The quad's own normal, for the per-face brightness the
+					// cubes get
+					Vector3 e1(quad.p[1][0] - quad.p[0][0],
+							quad.p[1][1] - quad.p[0][1],
+							quad.p[1][2] - quad.p[0][2]);
+					Vector3 e2(quad.p[2][0] - quad.p[0][0],
+							quad.p[2][1] - quad.p[0][1],
+							quad.p[2][2] - quad.p[0][2]);
+					Vector3 n = e1.CrossProduct(e2).Normalized();
+					uint face_id = 0;
+					if(std::fabs(n.y_) >= std::fabs(n.x_) &&
+							std::fabs(n.y_) >= std::fabs(n.z_))
+						face_id = n.y_ >= 0 ? 0 : 1;
+					else if(std::fabs(n.x_) >= std::fabs(n.z_))
+						face_id = n.x_ >= 0 ? 2 : 3;
+					else
+						face_id = n.z_ >= 0 ? 4 : 5;
+					// A quad of a grouped shape against a neighbour of the
+					// same group is a face inside a body of it -- the water
+					// inside a lake -- and is not drawn. Only an
+					// axis-aligned quad is tested, and it is assumed to lie
+					// on the voxel's boundary in that direction; a shape
+					// whose quads do not is not what a group is for.
+					// simplified: a face against a *lower* level of the same
+					// liquid is dropped with the rest, which leaves a gap
+					// where the surface steps down. Corner heights, which
+					// make the surface continuous instead of stepped, are
+					// what remove both.
+					static const int FACE_AXIS[6] = {1, 1, 0, 0, 2, 2};
+					static const int FACE_DIR[6][3] = {
+						{0, 1, 0}, {0, -1, 0}, {1, 0, 0},
+						{-1, 0, 0}, {0, 0, 1}, {0, 0, -1},
+					};
+					if(def->shape_group != 0 &&
+							std::fabs(n.Data()[FACE_AXIS[face_id]]) > 0.99f){
+						VoxelInstance nv = volume.getVoxelAt(
+								x + FACE_DIR[face_id][0],
+								y + FACE_DIR[face_id][1],
+								z + FACE_DIR[face_id][2]);
+						const interface::CachedVoxelDefinition *ndef =
+								nv.get_id() == interface::VOXELTYPEID_UNDEFINED ?
+								nullptr : voxel_reg->get_cached(nv);
+						// The same group: a face inside a body of it. Or
+						// something opaque: the face is that voxel's own, as
+						// in IsQuadNeededByRegistry.
+						if(ndef != nullptr &&
+								(ndef->shape_group == def->shape_group ||
+								(def->translucent && !ndef->translucent &&
+								ndef->edge_material_id !=
+								interface::EDGEMATERIALID_EMPTY)))
+							continue;
+					}
+					sm_<uint, TemporaryGeometry> &into =
+							(translucent_result && def->translucent) ?
+							*translucent_result : result;
+					TemporaryGeometry &tg = into[seg_ref.atlas_id];
+					if(tg.vertex_data.Empty()){
+						tg.atlas_id = seg_ref.atlas_id;
+						tg.has_colors = use_skylight;
+					}
+					unsigned color = 0xffffffff;
+					if(use_skylight){
+						float shade = FACE_SHADE[face_id];
+						color = Color(
+								BOUNCE_COLOR.r_ * shade * (1.0f - sky_f) +
+										LAMP_COLOR.r_ * lamp_f * shade,
+								BOUNCE_COLOR.g_ * shade * (1.0f - sky_f) +
+										LAMP_COLOR.g_ * lamp_f * shade,
+								BOUNCE_COLOR.b_ * shade * (1.0f - sky_f) +
+										LAMP_COLOR.b_ * lamp_f * shade,
+								sky_f * shade).ToUInt();
+					}
+					// Two triangles, and the same two the other way round
+					// when the shape is drawn from both sides
+					static const int WINDINGS[2][6] = {
+						{0, 1, 2, 0, 2, 3},
+						{0, 2, 1, 0, 3, 2},
+					};
+					int windings = def->shape_double_sided ? 2 : 1;
+					for(int wi = 0; wi < windings; wi++){
+						for(int i = 0; i < 6; i++){
+							int c = WINDINGS[wi][i];
+							tg.vertex_data.Resize(tg.vertex_data.Size() + 1);
+							CustomGeometryVertex &tv = tg.vertex_data.Back();
+							float py = quad.p[c][1];
+							// A vertex on the liquid's own surface follows
+							// the corner it stands at
+							if(liquid_corners && std::fabs(
+									py - def->liquid_top) < 1e-4f){
+								py = corner[quad.p[c][0] >= 0.0f ? 1 : 0]
+										[quad.p[c][2] >= 0.0f ? 1 : 0];
+							}
+							tv.position_ = Vector3(cx + quad.p[c][0],
+									cy + py, cz + quad.p[c][2]);
+							tv.normal_ = wi == 0 ? n : -n;
+							tv.texCoord_ = Vector2(
+									aseg->coord0.x_ + quad.uv[c][0] *
+											(aseg->coord1.x_ - aseg->coord0.x_),
+									aseg->coord0.y_ + quad.uv[c][1] *
+											(aseg->coord1.y_ - aseg->coord0.y_));
+							tv.color_ = color;
+						}
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -1006,7 +1401,7 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 	up_<pv::RawVolume<VoxelInstance>> lod_volume = generate_voxel_lod_volume(
 			lod, volume_orig);
 
-	preload_textures(*lod_volume, voxel_reg, atlas_reg);
+	preload_textures(*lod_volume, voxel_reg, atlas_reg, true);
 
 	sm_<uint, TemporaryGeometry> temp_geoms;
 	generate_voxel_lod_geometry(

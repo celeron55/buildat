@@ -157,9 +157,13 @@ static void call_material_cb(const luabind::object &cb)
 	}
 }
 
+// A task holds the node weakly: the world it belongs to is free to drop a
+// chunk while the task for it is still in the queue, which is what happens
+// every time a chunk goes out of view or a world is closed. A raw pointer
+// there is a use-after-free in post().
 struct SetVoxelGeometryTask: public interface::thread_pool::Task
 {
-	Node *node;
+	WeakPtr<Node> node;
 	ss_ data;
 	sp_<VoxelRegistry> voxel_reg;
 	sp_<AtlasRegistry> atlas_reg;
@@ -168,6 +172,10 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 
 	up_<pv::RawVolume<VoxelInstance>> volume;
 	sm_<uint, interface::mesh::TemporaryGeometry> temp_geoms;
+	// The faces of the translucent voxels, which go on a child node of their
+	// own so that Urho3D sorts them against the other chunks' translucent
+	// geometry rather than against the opaque geometry they are mixed with.
+	sm_<uint, interface::mesh::TemporaryGeometry> alpha_geoms;
 
 	SetVoxelGeometryTask(Node *node, const ss_ &data,
 			sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
@@ -193,17 +201,38 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	{
 		generate_voxel_geometry(
 				temp_geoms, *volume, voxel_reg.get(), atlas_reg.get(),
-				use_skylight);
+				use_skylight, &alpha_geoms);
 		return true;
 	}
 	// Called repeatedly from main thread until returns true
 	bool post()
 	{
 		ScopeTimer timer("post geometry");
+		if(!node)
+			return true; // Dropped while this was in the queue
 		Context *context = node->GetContext();
 		CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
 		interface::mesh::set_voxel_geometry(
 				cg, context, temp_geoms, atlas_reg.get());
+		// The translucent faces, if the chunk has any. The child is a plain
+		// node at the chunk's own origin; it exists only so that its
+		// CustomGeometry is a drawable of its own, which is what lets Urho3D
+		// put it in the alpha pass and sort it by distance.
+		Node *alpha_node = node->GetChild("alpha");
+		if(alpha_geoms.empty()){
+			if(alpha_node)
+				alpha_node->Remove();
+		} else {
+			if(!alpha_node)
+				alpha_node = node->CreateChild("alpha", LOCAL);
+			CustomGeometry *acg =
+					alpha_node->GetOrCreateComponent<CustomGeometry>(LOCAL);
+			interface::mesh::set_voxel_geometry(
+					acg, context, alpha_geoms, atlas_reg.get());
+			acg->SetOccluder(false);
+			acg->SetCastShadows(false);
+			acg->SetZoneMask(magic::DEFAULT_ZONEMASK);
+		}
 		call_material_cb(material_cb);
 		cg->SetOccluder(true);
 		cg->SetCastShadows(true);
@@ -216,7 +245,7 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 {
 	int lod;
-	Node *node;
+	WeakPtr<Node> node;
 	ss_ data;
 	sp_<VoxelRegistry> voxel_reg;
 	sp_<AtlasRegistry> atlas_reg;
@@ -242,7 +271,7 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 		lod_volume = interface::mesh::generate_voxel_lod_volume(
 				lod, *volume_orig);
 		interface::mesh::preload_textures(
-				*lod_volume, voxel_reg.get(), atlas_reg.get());
+				*lod_volume, voxel_reg.get(), atlas_reg.get(), true);
 	}
 	// Called repeatedly from main thread until returns true
 	bool pre()
@@ -261,6 +290,8 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 	bool post()
 	{
 		ScopeTimer timer("post lod geometry");
+		if(!node)
+			return true; // Dropped while this was in the queue
 		Context *context = node->GetContext();
 		CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
 		interface::mesh::set_voxel_lod_geometry(
@@ -279,7 +310,7 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 
 struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 {
-	Node *node;
+	WeakPtr<Node> node;
 	ss_ data;
 	sp_<VoxelRegistry> voxel_reg;
 
@@ -316,6 +347,8 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 		post_step == 2 ? "post_physics 2" :
 		post_step == 3 ? "post physics 3" :
 		"post physics");
+		if(!node)
+			return true; // Dropped while this was in the queue
 		Context *context = node->GetContext();
 		switch(post_step){
 		case 1:
@@ -427,6 +460,10 @@ void clear_voxel_geometry(const luabind::object &node_o)
 	CustomGeometry *cg = node->GetComponent<CustomGeometry>();
 	if(cg)
 		node->RemoveComponent(cg);
+	// And the translucent geometry's own node, if the chunk had any
+	Node *alpha_node = node->GetChild("alpha");
+	if(alpha_node)
+		alpha_node->Remove();
 }
 
 void set_voxel_physics_boxes(const luabind::object &node_o,

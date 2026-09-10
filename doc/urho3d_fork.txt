@@ -61,3 +61,17 @@ not the OS gives it any focus, so injected keyboard and mouse events are not
 dropped by the no-focus early-out in HandleSDLEvent(). The client's command
 sequence mode uses it to run without raising its window or stealing focus from
 whatever the user is doing; see doc/client_commands.txt.
+
+PNG channel count with a tRNS chunk
+------------------------------------
+Source/ThirdParty/STB/stb_image.h
+
+stbi__do_png() reports the channel count the file had. With req_comp 0 and a
+PNG that carries a tRNS chunk -- transparency as a colour key rather than an
+alpha channel -- stb expands the key into a real alpha channel and returns a
+buffer of img_n + 1 channels while reporting img_n, so a caller that sizes its
+image from the reported count reads the buffer at the wrong stride. It now
+reports img_out_n, which is what the buffer holds. Image::GetImageData is the
+only caller in the tree and passes req_comp 0; a caller that asks for a
+specific count is unaffected, because the conversion just above sets
+img_out_n = req_comp.

@@ -1,0 +1,695 @@
+Luanti client
+=============
+extensions/luanti_client makes buildat_client talk to an unmodified Luanti
+server: it does the client's side of Luanti's protocol.
+
+    $ bin/buildat_client -m luanti_client
+
+It asks for an address, a player name and a password, logs in, and shows the
+terrain around the player with the server's own textures. Luanti 5.11.0 up to
+5.17.0 -- protocol 46 up to 52 -- are what it speaks; every one of them
+serializes mapblocks as version 29, which is the only version parsed here.
+What changed inside that range and is handled: definitions and media are zlib
+below protocol 48 and zstd from there on, the media announcement is a plain
+list of names and base64 hashes below 48, an item's image carries an
+animation only from 51 on, and the inventory is the rest of its packet below
+52.
+BUILDAT_LUANTI_ADDRESS sets the address the dialog starts with, which is what
+scripted runs (-c) use. BUILDAT_LUANTI_FORCE_DAY keeps the world at midday
+whatever the server's time is, for the same reason: a run of half a minute
+cannot wait for morning. BUILDAT_LUANTI_FORCE_TIME pins the time of day
+itself, as Luanti's 0...24000, which is how the sky at dawn or at night gets
+looked at without waiting or asking the server for the privilege of setting
+its clock. BUILDAT_LUANTI_NAME sets the player name the dialog
+starts with, so that a test run does not fight a session of your own for the
+same player.
+
+Controls: the mouse looks, WASD walks, space jumps, ctrl sneaks, shift is
+faster, 1 to 8 pick a hotbar slot, the left mouse button digs what is pointed
+at and the right one places what is wielded, I opens the inventory, T says
+something (a line starting with a slash is a command), K toggles flying, H
+toggles going through walls, F1 hides the hotbar, the health bar and the
+crosshair, F2 hides what has been said (which is in the top left corner under
+those lines, where a Luanti game expects it: what a game draws of its own is
+along the bottom), F5 hides the lines of detail in the corner, escape closes a form and then disconnects.
+Flying and going through walls need the server to give the player the fly and
+noclip privileges; without them its movement checks pull the player back.
+
+Where the player is comes from MOVE_PLAYER, and the client takes the server's
+word for it before anything else it does in a frame. That order matters more
+than it looks: the position the client reports is what the server sends
+mapblocks around, and a form on the screen stops the player walking
+(deliberately -- the mouse and the keys belong to the form). A server sends a
+player who joins dead a death screen in the same breath as the spawn position,
+so a client that only caught up with the server's position once the form
+closed would spend the whole session telling the server it was at the origin,
+and loading the world around the wrong place.
+
+The player is a box 0.6 nodes across and 1.75 tall whose bottom is the
+position the server talks about, and it falls, jumps, walks into things and
+slides along them. What it walks into is the collision boxes out of the node
+definitions, turned the way the node's param2 says, so a slab is half a node
+high and a stair is two steps; anything up to Luanti's step height of 0.6 is
+walked onto without a jump and a whole node has to be jumped over, which is
+what Luanti asks for as well. What the player collides with is
+what the server says is walkable, and a node whose block has not arrived
+counts as solid, so the player stands still rather than falling through a
+world that has not loaded. The movement constants -- speeds, acceleration,
+gravity -- are the ones the server sends in TOCLIENT_MOVEMENT.
+
+Light: Luanti keeps two light values per node, the light it has when the sun
+is up and the light it gets from light sources alone. Those are what buildat's
+mesher calls skylight and lamplight, and it bakes them into the geometry's
+vertex colours along with ambient occlusion and a per-face brightness. The
+technique in res/VoxelUnlit.xml draws that: the texture
+times the zone's ambient colour times how much of the sky the surface sees,
+plus the lamplight. So the time of day is one colour on the zone and nothing
+is meshed again when the sun moves, and a cave is dark with its torches lit.
+It also discards texels below half alpha, which is what makes the holes in a
+leaf or a pane of glass be holes.
+
+On top of that, a voxel whose definition gives light gets a real light in the
+scene -- the two dozen nearest the camera, each with a range and a brightness
+from its light level, and an additive light pass in the technique for them to
+reach the geometry. The colour is the average of the voxel's own first tile
+with the brightest channel brought up to one, so a torch is warm, a redstone
+torch is red and a soul torch is blue without anything here having to know
+what any of them are. Luanti has one number for this and paints every source
+the same; this is what the rendering latitude is for.
+
+A node is drawn as a cube with its own six textures when its draw type is a
+cube (normal, glasslike, allfaces, a liquid source), and as the quads of its
+own shape when it is not: a node box, a plant, a torch, a sign, a rail, a
+flowing liquid, or an .obj model. What is left is one grey placeholder cube --
+a node whose model is in a format objmesh.lua does not read, and one whose
+texture is a modifier expression texmod.lua does not reduce.
+
+The network dialog of extension/network asks about the address the first time;
+see doc/client_api.txt.
+
+What is where
+-------------
+serialize.lua   Luanti's big-endian numbers and length-prefixed strings
+connection.lua  The UDP transport: channels, reliable packets, acks, splits
+srp.lua         The client half of the SRP-6a login, on buildat.bignum
+client.lua      The commands: the login, the map blocks, and dispatch for the
+                rest
+nodedef.lua     NODEDEF: what a node id is called, how it is drawn, its tiles
+media.lua       The server's media files, in cache/luanti_media/<server>/
+player.lua      The player's box: the keys, gravity, and collision against
+                the nodes
+shapes.lua      Luanti's node shapes, as the quads a voxel definition takes
+objmesh.lua     Wavefront .obj, as the quads a voxel's shape is made of
+res/            What the client itself ships: the placeholder textures, and
+                the shaders and techniques this world is drawn with. Urho3D
+                finds them because share_path/extensions is a resource dir,
+                and a technique names a shader with a path of its own so it
+                does not have to live in the one shader directory
+objects.lua     The things in the world that are not nodes: what the server
+                says they are and where
+itemdef.lua     ITEMDEF: what an item is, and what a tool can dig
+inventory.lua   TOCLIENT_INVENTORY: what the player is carrying
+hud.lua         The HUD the server describes, and the flags that turn this
+                client's own off
+sounds.lua      PLAY_SOUND and friends, and the sound groups a game's media
+                falls into
+formspec.lua    The elements of a formspec, and where they go
+formspec_ui.lua A formspec on the screen, as Urho3D UI elements
+texmod.lua      Luanti's texture modifier language, as compose_image()
+                operations
+world.lua       The scene: a node per map block, with buildat's voxel mesher
+                on it, and the voxel registry the node definitions build
+engine_test.lua Checks of the engine primitives, run at boot
+init.lua        The connect dialog and the status screen
+
+The engine side of this is nothing Luanti-specific: sockets (extension/network),
+SHA-256 and bignum arithmetic (buildat.sha256, buildat.bignum).
+
+Checks
+------
+    $ lua extensions/luanti_client/test.lua
+
+covers serialize.lua, connection.lua, nodedef.lua, media.lua, player.lua,
+texmod.lua, inventory.lua, formspec.lua and objects.lua without an engine: the packet framing, numbers including f32, reliable packets arriving
+out of order or twice, acknowledgements, resending, splitting what is sent and
+reassembling what arrives, the peer id handshake, a NODEDEF packet built the
+way a server builds one and read back, which media names are usable as file
+names, and the player's box against a world made of a function -- falling to
+the ground, stopping at a wall, sliding along it, jumping onto a ledge,
+sinking in water and swimming out, flying, and getting out of a node it ended
+up inside, the texture modifier language -- what an expression parses to,
+which files it needs, and which operations each modifier becomes -- and the
+inventory -- quoted item names, empty slots, KeepList, and which tool
+capabilities a dig goes by -- and formspecs: the elements, escaped fields,
+nested containers, and the two coordinate systems -- and the active objects:
+an object's initialization data and its properties, the positions that arrive
+afterwards, and the messages this does not implement going past harmlessly.
+
+    $ bin/buildat_client -m luanti_client
+
+runs engine_test.lua at boot, which checks the engine primitives the extension
+leans on: buildat.compress / buildat.decompress, buildat.pack_voxel_volume
+and buildat.compose_image. The image checks compose PNGs and read them back
+through Urho3D, so the blending, the eight symmetries, the scaling and the
+colour arithmetic are checked pixel by pixel.
+
+srp.lua has self_test(), which init.lua runs at boot; its vectors come from
+util/srp_reference.py, which does SRP-6a separately in Python.
+
+Both login paths have been run against a real Luanti server: registering a new
+player (FIRST_SRP) and logging in as one the server knows (SRP), and the
+terrain of that server's world has been on screen with its own textures.
+
+How a session ends: escape leaves the world, and so does the server denying
+access or the connection going away. A denial and the disconnection that
+follows it arrive together -- the server sends TOCLIENT_ACCESS_DENIED and
+closes -- and the denial is the one that gets shown; the reason codes have no
+words on the wire, so the words come from Luanti's own client
+(accessDeniedStrings in clientpackethandler.cpp). A server that says nothing
+at all for twenty seconds counts as gone as well: a live one acknowledges the
+position we send it several times a second, and without that rule a client
+pointed at an address nothing answers would sit there resending its INIT.
+Whatever the reason, everything this session put on the screen is taken back,
+the reason goes in a dialog, and closing that dialog closes the client.
+
+Keeping the frame rate while the world loads: the world is semi-infinite, so
+blocks arrive for as long as the player walks and whatever loading costs is
+paid during play. Two budgets keep a burst of them from being one long frame:
+what the server sent is reassembled and acknowledged as it arrives but handed
+to the command handlers for 4 ms a frame (the counters say how many commands
+are waiting), and blocks are handed to the mesher for 4 ms a frame, nearest
+first. One command and one block always get through, so nothing can starve.
+What a block costs before the mesher's own thread sees it is on screen as
+"us to hand over".
+
+The counter line also says where the player is looking, in degrees down and
+degrees round. A command sequence can only move the look by relative pixels
+(mouse_move, 0.15 degrees each, pitch clamped to 89 either way), so aiming at
+something reproducibly means saturating the pitch and then coming back a
+counted number of pixels; the readout is what makes that checkable.
+
+Loading: until the game's definitions and its media are in there is nothing
+worth drawing -- a world of placeholders is not the game -- so a panel covers
+the screen and says how far along it is, and the voxel registry is built with
+50 ms of the frame rather than 4, because behind the panel there is nothing to
+keep smooth. MineClone's 2500 voxel types are then one build of about a
+second, and the whole cold load is the media transfer plus that.
+
+Media: everything the server announces and the cache does not have is asked
+for at once, which is what Luanti's own client does
+(ClientMediaDownloader::startConventionalTransfers). A game's media is mostly
+sounds, models and textures for things that are not nodes, so most of it is
+never drawn -- MineClone announces 3400 files -- but working out which files
+the definitions reach means walking every texture expression, and a file
+discovered after the registry was built costs a whole build again. The bytes
+are cheaper than the rebuilds: the registry is built once, when the
+announcement has arrived and the files it named have. A file the server never
+sends does not hold the rest back forever -- fifteen seconds with no media
+arriving is enough -- and what the announcement did not cover is still asked
+for when something wants to draw it.
+
+An item that places a voxel is drawn as the little isometric cube Luanti
+draws, when the voxel is a cube at all: the top tile and the two a viewer off
+the +X +Z corner would see, each sheared onto a parallelogram by
+compose_image's "shear", with the two sides darkened by asking for the tile
+with a [multiply on it. A nodebox, a plant or a mesh keeps its flat top tile
+instead -- what those look like is their own shape, and a cube would be a
+worse lie. Luanti renders the node with a camera to get this picture; three
+sheared tiles is what comes out of that without a render target, and it is
+composed and cached on disk like every other composed texture. Rendering to a
+texture is still the more general primitive and is on the list for whatever
+needs a picture a shear cannot draw.
+
+Texture modifiers: a texture name in a node definition is an expression --
+"default_dirt.png^mcl_dirt_grass_shadow.png",
+"mcl_core_glass.png^[multiply:red", "[combine:32x16:0,0=a.png:16,0=b.png".
+texmod.lua reads Luanti's language for these and turns an expression into
+buildat.compose_image() operations, which do the pixels and save a PNG beside
+the server's own files under a hash of the expression; the atlas then takes it
+by that name. A nested expression -- a group in parentheses, or one of
+[combine's pieces -- is composed on its own first and referred to by the name
+it was written under, so nothing has to hold an image.
+
+What is implemented: chaining with "^", grouping with "(...)", [combine,
+[fill, [colorize, [multiply, [screen, [opacity, [brighten, [noalpha, [hsl,
+[transform, [resize, [mask, [verticalframe, [sheet, [lowpart, [makealpha and
+[png -- the last of which carries a whole PNG in the expression, base64, and
+is written out beside the composed textures under a hash of its own bytes.
+That is every modifier the installed games were seen to use. A modifier that is not
+implemented is logged once with an example expression when the registry is
+built, because a node whose texture cannot be built is drawn as a placeholder
+and nothing else says why. Sixteen of Luanti's named
+colours are known, which is the wool and dye palette these expressions use;
+everything else has to be written as #rgb or #rrggbbaa. An expression that
+reaches something not implemented leaves the node without a texture, which
+draws as the placeholder.
+
+How the world sits: a buildat voxel and a Luanti node both occupy the cube
+centred on their integer coordinate, so Luanti node coordinates are Urho3D
+world coordinates one for one. A map block is 16^3 nodes and the mesher wants a
+one-voxel border to cull faces against, so a block goes in as an 18^3 volume:
+itself plus a slice off each of the six neighbours that have arrived. A
+neighbour arriving makes the block's mesh out of date; until it does, there is
+a seam. Packing a block's volume and handing it to the mesher costs the frame
+about 3 ms on a 2013 workstation, of which the packing itself is a few hundred
+microseconds; the meshing is on a worker thread. Four blocks a frame is the
+limit for that reason.
+
+What is done
+------------
+- The UDP transport, both directions, splits included
+- Registering and logging in, and the peer id and protocol version handshake
+- INIT2, and access denied messages
+- CLIENT_READY once ITEMDEF and NODEDEF have arrived, which is what makes the
+  server spawn the player, and then PLAYERPOS every 0.1 s
+- Map blocks: BLOCKDATA at serialization version 29, acknowledged with
+  GOTBLOCKS, which is what keeps the server sending more
+- MOVE_PLAYER (where the server put us) and TIME_OF_DAY
+- The terrain on screen: a scene node per map block, meshed by buildat's voxel
+  mesher, dropped again once it is far enough away
+- Mouse look and flying movement, with the blocks streaming in around the
+  camera and dropped again behind it
+- TIME_OF_DAY, through Luanti's own day/night curve and its sunlight colour,
+  as the zone's ambient colour
+- Per-node light, day and night, baked into the vertex colours, and the holes
+  in a texture discarded rather than drawn
+- ADDNODE and REMOVENODE, patched into the block and re-meshed
+- Walking: the player's box against the node data, with gravity, jumping,
+  sneaking, swimming, and flying and noclip as toggles
+- TOCLIENT_MOVEMENT, so the speeds and the gravity are the game's own
+- PLAYERPOS carries the speed and the keys, which is what the server's
+  movement checks and its animations of the player go by
+- NODEDEF, and a voxel registry built from it
+- Texture modifiers, composed into PNGs beside the server's media and cached
+  there between runs
+- Tile overlays and node colours: a tile is drawn in its own colour when it
+  has one and the node's otherwise, which is what makes a grass block's side
+  plain dirt with a green edge on it
+- The media: ANNOUNCE_MEDIA, REQUEST_MEDIA and MEDIA, cached on disk by name
+  and checked against the sha1 the server announced
+- ITEMDEF, including the tool capabilities, and TOCLIENT_INVENTORY
+- Pointing: a ray marched through the node data, with the node outlined
+  around its own selection box -- the node box when the definition gives no
+  selection box, and the whole voxel when it gives neither -- turned with the
+  node's param2 the same way its shape and its collision boxes are.
+  simplified: a node whose selection is several boxes gets the one box around
+  all of them, where Luanti draws each
+- Digging: TOSERVER_INTERACT, with the dig time worked out from the node's
+  groups against the capabilities of what the player is wielding -- which
+  is what the server's own anticheat wants, since it refuses a dig that was
+  finished sooner than it should have been
+- Placing what is wielded, and the hotbar slot on the number keys
+- Items a game defines as usable: the left button sends INTERACT_USE with
+  whatever is pointed at, node or nothing, and digs nothing -- devtest's
+  chest_of_everything:bag opens its own inventory that way and its apple is
+  eaten. The right button pointed at nothing sends INTERACT_ACTIVATE
+- Node shapes that are not cubes: node boxes as their boxes, plants, torches,
+  fires, signs and rails as quads, .obj models as their own geometry, and a
+  flowing liquid as a box with a lowered top, through a shape in the voxel
+  registry that the mesher copies into the chunk
+- Connected node boxes: a fence with its rails towards the fences and the
+  walls of stone next to it, and a pane in a run
+- Rails: which of the four tiles a rail wears and which way it is turned,
+  out of what is next to it, and the ramp one climbing a step is
+- Particles: ADD_PARTICLESPAWNER and DELETE_PARTICLESPAWNER, SPAWN_PARTICLE
+  and the zstd batch of them a game sends a hundred at once in. A spawner is
+  an Urho3D ParticleEmitter and a single particle is an emitter of one that
+  fires once. A spawner attached to an object has its positions relative to
+  that object and follows it, which is what a game's weather is: the rain of
+  VoxeLibre is a spawner attached to the player
+- Chat, both ways, and the player's hit points and breath
+- Leaving: the disconnect goes out when the client shuts down for any reason,
+  not only when escape was pressed. A player who vanishes without saying so
+  is kept by the server until it times out, and the next client to use that
+  name is refused meanwhile
+- PRIVILEGES, which is what lets the client say that flying was refused
+  because the server did not grant it rather than leaving the player to
+  wonder why they were pulled back
+- Active objects: other players, mobs and dropped items, where the server
+  says they are. Their textures are drawn without smoothing, like the voxel
+  atlas's: a Luanti game's textures are pixel art and interpolating them is
+  wrong at every size. An object whose visual is a mesh is drawn as that mesh --
+  the .b3d and .obj readers the node meshes use, one geometry per material so
+  each wears the texture the object gave for it -- in its rest pose, because
+  the animation chunks are not read. A dropped node is a small cube of the
+  node's six tiles, turning at the rate the object asked for, and everything
+  else is a box wearing the object's first texture, which reads as the thing
+  where nothing at all reads as nothing at all.
+
+  An object's model is authored in Luanti's own scene units, where a node is
+  ten across, and visual_size scales it in those; a node's "mesh" drawtype is
+  authored one unit to the node instead. That tenth is the only difference
+  between the two paths.
+
+  Two things keep a crowd of them from stopping the frame. An object that
+  arrives is read and remembered but its visual is built later, a few a frame
+  and at most one model read per frame, so a packetful of mobs coming into
+  range is spread out instead of being one long frame. And the first object
+  of a kind -- one model with one set of textures -- builds a template node
+  that is not drawn, and every other object of that kind is a copy of it,
+  which Urho3D makes inside the engine: building the geometry is a sandbox
+  call per vertex, which for a mob is a quarter of a second, and it now
+  happens once per kind rather than once per mob
+- Pointing at an object: the same ray against the object's selection box,
+  the nearest of the two winning, with its box outlined and its infotext or
+  nametag shown. The left button hits it (INTERACT_START_DIGGING with the
+  object pointed at, once per press and then no faster than the hit delay)
+  and the right button runs the game's on_rightclick for it
+- Dropping a stack: Q throws what is wielded, ctrl+Q one item of it, and a
+  stack dragged out of a formspec's slots goes the same way
+- The sky's colours, out of SET_SKY, as what the world fades into, and the
+  sun and the moon wearing the textures the game gives them: the sky shader
+  samples them inside the square each body covers, with the texture's own
+  alpha as the coverage, so a sun drawn as a disc in a square image is a disc
+  on the sky. A body the game gave no texture, or whose texture has not
+  arrived, keeps the shader's own colour. simplified: the tonemaps and the
+  sunrise texture are not drawn
+- A hotbar and a health bar, out of the inventory and the hit points
+- Formspecs: the inventory form, the ones the server shows, the ones a node
+  carries in its metadata -- a chest, a furnace -- which are opened here
+  rather than after a round trip to the server, the way Luanti's own client
+  does it, with their fields going back as NODEMETA_FIELDS and their slots
+  coming out of the node's own inventory; and the prepend in front of all of
+  them. Item slots with the item's own image in them, labels,
+  images, buttons and fields; clicking a slot picks a stack up and puts it
+  down, which goes back as an inventory action, and clicking a button sends
+  the form's fields. Detached inventories, which is what a creative list is.
+
+  A game's own images in the UI -- a form's image[], the item picture in a
+  slot, the stack under the cursor, the HUD's images -- are drawn without
+  smoothing, the same as the world's textures: it is all pixel art and the
+  UI draws it at whatever size a form asked for.
+
+  Two things about a node's own form are worth naming, because a furnace
+  needs both. Its slots can be addressed as `current_name` or as `context`,
+  which Luanti treats as the same thing and games use interchangeably --
+  devtest's chest writes the first, VoxeLibre's furnace the second. And the
+  form *is* the string in the node's metadata, which a game rewrites as the
+  node works: a furnace's flame and its progress arrow are images whose
+  `[lowpart` is redrawn every tick. So when metadata for the node a form
+  came out of arrives, the string is read again and the form redrawn, which
+  is what Luanti's own client does by re-reading it every frame. The stack
+  in hand and the scroll survive that.
+
+Only serialization version 29 is read. It is what every current server writes;
+older ones compress the pieces of a mapblock separately and the client says so
+and gives up rather than carrying a second parser.
+
+Formspecs: what a form asks for is mostly a texture in a box, so most of
+formspec_ui.lua is a BorderImage at a position. The units are inventory slots
+and how many pixels one of those is comes out of the screen size, the same way
+Luanti works it out; before formspec version 2 the units were a slot plus its
+spacing and a position had a fixed padding added, and both are implemented.
+Implemented as well: fields that can be typed into, tabs, checkboxes, tables
+and text lists, the styles a form asks for in its default state, tooltips
+over a named element or an area, and taking half a stack or one item at a
+time. Not implemented: scroll containers and scrollbars, dropdowns,
+hypertext, the hovered and pressed states of a style, dragging a stack, and
+drawing an item that places a node as the little cube Luanti draws rather
+than as one of its tiles.
+
+Node shapes: a node box is drawn as its boxes, and a plant, a torch, a fire, a
+sign and a rail as quads, through VoxelDefinition.shape -- a list of quads per
+voxel that buildat's mesher copies into the chunk's mesh, so a chunk full of
+fences costs what a chunk of cubes costs. shapes.lua builds those quads and
+the engine knows nothing about node boxes. A node whose draw type is a mesh
+gets the quads of its model, read out of the .obj by objmesh.lua, and is drawn
+from both sides because a node mesh is usually a shell whose inside is meant
+to be seen.
+
+A flowing liquid is a box with a lowered top, one voxel per level in param2
+through the same (definition, param2) machinery a facedir uses. A liquid at
+the top level keeps its cube, so a waterfall and the middle of a lake are
+cubes whose shared faces are culled.
+
+A liquid is blended rather than alpha masked, so its faces are not in the
+chunk's own geometry at all: the voxel definition carries a "translucent"
+flag, the mesher puts those faces in a second geometry on a child node of the
+chunk, and res/VoxelUnlitAlpha.xml -- the same shader, with the cutoff
+replaced by a blend, no depth writing and no culling -- draws it. Urho3D sorts
+alpha drawables by distance, so the chunks' water sorts between chunks.
+simplified: faces within one chunk's water are not sorted against each other;
+per-triangle sorting or depth peeling is the upgrade path. It rarely shows,
+because along any ray there is at most one water surface:
+
+- Water culls against water. Each liquid family -- everything naming the same
+  liquid source, so a water source and a flowing water are one family and lava
+  is another -- gets an edge material of its own for its cubes, and a shape
+  group of its own for its shapes. A shape's quad against a neighbour of the
+  same group is a face inside a body of it, and is not drawn.
+- The face between water and something opaque belongs to the opaque voxel:
+  the lake bottom is drawn by the ground, not by the water over it, which is
+  Luanti's rule that the more solid of two nodes owns the face between them.
+  Without it every surface under water would be behind two blended layers.
+- Culling is off rather than the quads being doubled: a blended quad drawn
+  twice blends twice, and a doubled water surface reads as opaque. Off it is
+  still there when the camera is under it.
+
+And being under it: a node carries a post_effect_color, which Luanti paints
+over the whole screen while the camera is inside that node. This draws it as
+a panel in front of the world and behind the rest of the UI, so the water is
+over the world and the sky and not over the hotbar. That colour is all the
+protocol gives for being in a liquid -- there is no per-liquid fog in it --
+and it is what makes water read as water from below rather than as a blue
+window. simplified: post_effect_color_shaded, which dims the tint by the
+light where the camera is, is not read.
+
+The surface runs continuously from one level to the next rather than stepping
+down: a liquid definition says where its surface stands inside the voxel, and
+the mesher moves the top corners of the shape to the average of the surfaces
+of the four columns that meet at each corner. That is Luanti's
+getCornerLevel, with its two rules -- a column with the same liquid above it
+is full to the top, and a corner two of the four columns leave empty drops to
+the bottom, which is what thins out the edge of a spill. It is the one thing
+in the voxel registry the mesher works out per voxel rather than per
+definition.
+
+A connected node box -- a fence, a wall, a pane in a run -- is drawn from the
+boxes it has per direction. Which of them a voxel wants depends on its
+neighbours, so it is the same shape pass that decides: each quad carries the
+direction it belongs to, or "only when nothing connects" for the boxes a
+lone pane stands as, and the mesher draws the ones whose direction is
+connected.
+
+A rail is the other shape that depends on its neighbours, and it depends on
+them altogether rather than gaining a piece per direction: it is one quad
+wearing one of four tiles -- straight, curved, junction, crossing -- turned
+one of four ways, and which of those is Luanti's own table of the sixteen
+masks of its four horizontal neighbours. So a rail definition carries a shape
+per mask instead of one shape, and the mesher picks. Four more masks are the
+rails that climb: a rail with one of its own a step up in some direction is a
+ramp towards it, and its raised edge is one node above its flat edge so that
+it meets the rail up there exactly. Rails connect by Luanti's
+connect_to_raillike group rather than by connects_to, so each of those groups
+is a family of its own.
+
+What connects is what Luanti says, turned into something the mesher can test.
+Luanti gives each node a list of the node *ids* it connects to; the mesher
+has voxel ids and one word to test, so the client works out families once per
+set of definitions -- two nodes are in the same family when exactly the same
+definitions reach out to them, which makes every wood's fence one family and
+every stone's wall another -- and a definition carries its own family and a
+bit per family it reaches out to. Thirty-two families, which is several times
+what a game with mods uses; a game with more gets the rest sharing the last
+one, and says so in the log. A node that says so also reaches into any solid
+neighbour, which is Luanti's connect_sides.
+
+What that does not do yet: the disconnected_<direction> boxes, which are
+rarer than the rest; the tags are not turned with a facedir, so a connected
+node box that also faces a direction has its rails pointing the way they were
+built; a node whose model is .b3d -- the chests and the shulkers -- falls back
+to the box the game says a ray hits; and a turned node box's texture
+coordinates are the whole tile rather than the part of it Luanti works out
+from the box after the turn.
+
+The client logs a counter line every two seconds -- blocks received,
+commands waiting, and per channel what the reliable layer is holding -- so
+that a session which loaded badly can be diagnosed from its log afterwards.
+It also logs a line for every frame that took more than three times the
+running mean, in Lua time or in handing blocks to the mesher, saying what
+else that frame was doing: the blocks it meshed and the worst single one, the
+param2 pairs it registered, and which server command cost the most, by name
+and size. A stutter is diagnosed from those lines rather than guessed at.
+A stall behind an unacknowledged packet, a lost reliable packet with
+everything queued behind it, and a server that simply sends little look
+different in those numbers.
+
+The light around a node change is worked out here, the way Luanti's own
+client works it out: ADDNODE and REMOVENODE carry the new node's own light and
+nothing about what is around it, so res/../light.lua takes away the light that
+came from what changed and spreads what is left back in, once per light bank.
+
+Luanti keeps two of those in param1 -- the light a node has when the sun is up
+and the light it gets from sources alone -- and they differ in one rule only:
+sunlight is the value 15, one more than any source can give, and it goes
+straight down undimmed through anything that lets it. So a node that starts or
+stops letting sunlight through takes the whole column below it with it.
+
+Two things make this cheap enough to do in Lua. It only runs when the change
+can move light at all -- when the light the node gives, or whether light passes
+through it, differs from what was there -- so a rail replaced by air costs
+nothing. And the writes are held until the flood is done and then go into each
+block in one pass, because a block's light is a string and rebuilding it once
+per node would be thousands of copies of four kilobytes. A placed or dug node
+looks at a few dozen nodes; a change that opens a shaft to the sky looks at a
+few hundred.
+
+What the flood cannot finish -- a node in a block we do not have, or the
+budget of six thousand nodes running out -- falls back to telling the server we
+no longer have that block, which makes it send the block again with the light
+it worked out itself. That is throttled: within three blocks of the camera,
+eight a frame, twenty-four waiting at most, because asking for a block again
+takes a send away from the map that has not arrived yet.
+
+The HUD: a game puts its own things on the screen with HUDADD and changes
+them one field at a time with HUDCHANGE, and this draws the images, the text
+and the statbars among them -- which on the two games tested is nearly all of
+them. Where an element goes is Luanti's own arithmetic: a position that is a
+fraction of the screen, an alignment saying which side of that point the
+element sits on, and an offset in pixels; an image's size is a multiple of
+its own or a percentage of the screen; a statbar counts in halves, so an odd
+value ends in half an icon cut on the side the icons march away from.
+
+HUD_SET_FLAGS is the other half of it, and it matters more than it looks: a
+game that draws its own hearts turns off the client's, and VoxeLibre does.
+So the hotbar, the health bar, the crosshair and the chat this client draws
+are all behind their flag. What a flag cannot do here is separate the hotbar
+from the health bar, which are one element.
+
+Sounds: a server names a sound *group* rather than a file -- a game ships
+three recordings of a footstep as "step.1.ogg", "step.2.ogg" and "step.3.ogg"
+and asks for "step" -- so the announced media is sorted into groups and one
+of the group is played at random, which is what Luanti does. A sound at a
+position is a node in the scene with a SoundSource3D on it and the listener
+rides the camera; a local one is a plain SoundSource. A sound attached to an
+object starts where the object is and follows it, which is what a mob's own
+noises want. FADE_SOUND moves the gain by its step a second and a sound faded
+to nothing stops.
+
+What that does not do yet: PLAY_SOUND's start_time is ignored, because
+seeking is not in the sandbox's SoundSource -- a game uses that for
+background music a player rejoins in the middle of.
+
+Particles are Urho3D's own emitters, and Luanti's description does not line
+up with one field for field. Luanti gives, per field, a tween of a range: a
+start range, an end range, and a way of moving between them over the
+spawner's life. Urho3D gives one emitter box, one box of directions, one
+constant force and one size range for the whole emitter. So the tween is
+dropped -- the starting range is what the whole spawner runs at -- and so are
+the bias inside a range, the collision flags, the glow, the drag, the jitter,
+the bounce and the attractors.
+
+One thing does not survive the trip and has to be worked out instead: Urho3D
+takes a velocity as a direction and a speed and normalizes the direction, so
+a range of velocity *vectors* goes over as the box the direction is picked
+from plus the range of magnitudes that box holds (particles.speed_range).
+Without the second half every particle leaves at one node a second whatever
+the game asked for. The speed a particle gets is then independent of its
+direction, which is the part that stays wrong: exact for a single particle,
+where the box is one vector.
+
+Sizes are the other unit that does not line up: Luanti's particle size is in
+the scene units its own client draws in, ten to the node -- the same as an
+object's visual_size -- so a rain drop's size of 4 is four tenths of a node
+across, and Urho3D's particle size is half of one side.
+
+Two things about the *lives* of emitters, both of which VoxeLibre's weather
+needs and neither of which is obvious:
+- The particles a spawner has already made outlive it, the way Luanti's do:
+  its particles are not owned by the spawner that made them. So a deleted
+  spawner stops emitting and its node goes away once the last particle it
+  made has expired.
+- A spawner that is added again with exactly the same description picks its
+  own emitter back up rather than getting a new one. mcl_weather deletes and
+  re-adds its rain spawner about twenty times a second, and one emitter per
+  add spends its life in fifty-millisecond bursts, which reads as almost no
+  rain at all.
+
+A particle's texture is filtered with nearest magnification and mipmapped
+minification (FILTER_NEAREST_ANISOTROPIC), which is what Luanti's own
+particle material asks for, rather than the plain nearest the world's
+textures get: a rain drop is one pixel wide in its image, and point sampling
+loses it altogether once it is drawn smaller than its texture.
+
+A particle's texture is animated the way a node's tile is -- a vertical strip
+or a sheet -- and that becomes Urho3D's texture frames: the part of the image
+each frame is and how many seconds into the particle's life it is shown from.
+How many frames a strip holds comes out of the image's own shape against the
+aspect the game gave, which is Luanti's arithmetic. Urho3D stops on the last
+frame rather than looping, so the frames are laid out again and again until
+the longest life the particle can have is covered, up to a cap.
+
+Only protocol 42 and up, which is Luanti 5.6 and up: below that the tweens
+are not on the wire and a spawner is dropped rather than read wrong. A batch
+beyond 128 live single particles is dropped rather than queued.
+
+The clouds are a flat layer faked in the sky shader -- the view direction
+divided by its own y, which is what makes them crowd towards the horizon --
+rather than a layer at a height. So of what CLOUD_PARAMS says, the density
+becomes how much of the sky they cover and the speed becomes how fast the
+layer drifts, through a factor picked so that Luanti's own default drifts at
+the rate the shader had baked in before a game could ask for anything: twice
+the speed is twice as fast, and that is what the field is for. The height and
+the thickness have nothing to become and are dropped. Drawing the real thing
+-- a slab of cloud at a height, which the player can fly above and through --
+is deliberately not done; see the plan.
+
+The crack that grows over a node being dug is the client's own texture rather
+than the game's -- no server sends one -- so res/crack_anylength.png is
+Luanti's, and res/LICENSE says so. The strip is cut into frames by the same
+[verticalframe modifier an animated tile uses, and how many frames there are
+is worked out from the image's shape, which is what "anylength" in its name
+means. Luanti draws the crack as a second layer on the node's own tiles;
+here it is a cube just outside the voxel, so the crack around a stair is a
+cube. One scene node per frame, enabled one at a time: a Material lives only
+as long as something in the engine holds it, and a StaticModel that has been
+handed one is such a thing.
+
+Active objects: an object whose visual is one of Luanti's sprite kinds --
+sprite, upright_sprite, item, wielditem -- is a billboard turned to the
+camera about Y, and everything else is a box wearing the object's first
+texture. The two item visuals put an item's name where a texture would be, so
+a dropped item wears the picture an inventory would draw for it, which for a
+node is the little isometric cube -- the same thing Luanti's wielditem comes
+out as. An upright_sprite turns to the camera here where Luanti turns it with
+the object's own yaw.
+
+The field of view: TOCLIENT_FOV asks for one in degrees or as a multiple of
+the client's own, over a transition time, which is what a game zooms with. It
+does not change what the client tells the server its view is, so a zoomed-in
+player is still sent the blocks a 72-degree view needs -- more than it wants,
+never fewer.
+
+What a node says about itself: a node's metadata can carry an "infotext",
+which is how a game labels a chest, a sign or a machine, and it is drawn under
+the chat while that node is pointed at -- where Luanti draws it, cut at six
+lines like Luanti cuts it, and taken away with the rest of the HUD by F1.
+
+Two more things a server says about the player: OVERRIDE_DAY_NIGHT_RATIO
+fixes what the light is whatever the time is, which is how a game lights
+another dimension -- the sun still goes where the time says, as it does in
+Luanti -- and BUILDAT_LUANTI_FORCE_DAY still wins over it, because a scripted
+run asked for daylight. PLAYER_SPEED is a push: an explosion, a jump pad,
+being hit. It is added to the speed once and the physics then has it, so the
+vertical part is what gravity works off and the horizontal part decays at
+whatever the acceleration is.
+
+The things in the sky: SET_SUN, SET_MOON, SET_STARS and CLOUD_PARAMS. How
+wide the sun and the moon are drawn, how many stars there are and in what
+colour, and how much of the sky the clouds cover are all uniforms the shader
+takes rather than constants, so a game that turns the sun off or asks for ten
+thousand stars gets that. What is not drawn is the textures a game can give
+the sun and the moon, or the cloud height and speed: the shader draws a
+square of its own colour and one layer of cloud at its own height.
+
+What is next
+------------
+- What a mob really looks like: Luanti draws a mesh for one, and this draws a
+  box wearing its first texture, because Urho3D reads none of the model
+  formats Luanti's meshes come in. A box wearing a cow's texture reads as a
+  cow. The meshes are .b3d.
+- Animations, nametags and attachments of the active objects
+- The HUD elements that are not images, text or statbars: a waypoint and an
+  image waypoint want the camera to turn a world position into a screen one,
+  a compass wants the yaw, a minimap wants a map, and an inventory element and
+  a hotbar element want the slots this client already draws its own way

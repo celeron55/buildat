@@ -1,0 +1,19 @@
+<!-- Voxel geometry drawn by its baked vertex-color light and blended by its
+     texture's alpha: water, and anything else a game gave a real alpha to.
+     The same shader as VoxelUnlit, with the cutoff replaced by a blend.
+
+     It writes no depth, so it cannot sort against itself within one drawable;
+     that is why the mesher puts these faces on a child node of their own,
+     which Urho3D then sorts back to front against the other chunks'. There
+     is no light pass: an additive pass over a blended one would double the
+     translucent surface's contribution.
+
+     Culling is off, which is what makes a water surface be there when the
+     camera is under it. It is also why a translucent shape must not be built
+     from doubled quads: a blended quad drawn twice blends twice and reads as
+     opaque.
+-->
+<technique vs="luanti_client/res/VoxelUnlit" ps="luanti_client/res/VoxelUnlit"
+        psdefines="TRANSLUCENT">
+    <pass name="alpha" blend="alpha" depthwrite="false" cull="none" />
+</technique>

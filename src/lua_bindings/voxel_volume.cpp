@@ -54,6 +54,11 @@ void voxelinstance_set_int32(VoxelInstance &v, int32_t d){
 
 typedef pv::RawVolume<VoxelInstance> CommonVolume;
 
+ss_ volume_serialize(const CommonVolume &volume)
+{
+	return interface::serialize_volume_simple(volume);
+}
+
 sp_<CommonVolume> deserialize_volume(
 		const luabind::object &buffer_o, lua_State *L)
 {
@@ -677,6 +682,7 @@ void init_voxel_volume(lua_State *L)
 					&voxelinstance_set_int32)
 			.def("get_id", &VoxelInstance::get_id)
 			.def("get_skylight", &VoxelInstance::get_skylight)
+			.def("get_lamplight", &VoxelInstance::get_lamplight)
 		,
 		class_<CommonVolume, bases<>, sp_<CommonVolume>>("__buildat_Volume")
 			.def(constructor<const pv::Region &>())
@@ -686,6 +692,10 @@ void init_voxel_volume(lua_State *L)
 					(int32_t, int32_t, int32_t, VoxelInstance))
 					&CommonVolume::setVoxelAt)
 			.def("get_enclosing_region", &CommonVolume::getEnclosingRegion)
+			// The slow, flexible way to build voxel data from Lua: set voxels
+			// one at a time and hand the result to set_voxel_geometry().
+			// buildat.pack_voxel_volume() is the fast way.
+			.def("serialize", &volume_serialize)
 		,
 		LUABIND_FUNC(deserialize_volume),
 		LUABIND_FUNC(deserialize_volume_int32),

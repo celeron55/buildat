@@ -14,11 +14,38 @@ buildat.local_server_port = __buildat_local_server_port
 buildat.local_server_running = __buildat_local_server_running
 buildat.extension_path    = __buildat_extension_path
 buildat.get_time_us       = __buildat_get_time_us
+buildat.sha1              = __buildat_sha1
+buildat.sha256            = __buildat_sha256
+buildat.hex               = __buildat_hex
+buildat.random_bytes      = __buildat_random_bytes
+-- compress(data, format [, level]) -> string, where format is "zlib" or "zstd"
+-- decompress(data [, format]) -> data, bytes_consumed
+buildat.compress          = __buildat_compress
+buildat.decompress        = __buildat_decompress
+-- Big-endian byte strings in, byte strings out
+buildat.bignum = {
+	add     = __buildat_bignum_add,
+	mul     = __buildat_bignum_mul,
+	mod     = __buildat_bignum_mod,
+	sub_mod = __buildat_bignum_sub_mod,
+	mul_mod = __buildat_bignum_mul_mod,
+	mod_exp = __buildat_bignum_mod_exp,
+}
 buildat.set_ui_scale      = __buildat_set_ui_scale
 buildat.get_ui_scale      = __buildat_get_ui_scale
 buildat.font_sans         = "Fonts/Overpass-Regular.ttf"
 buildat.font_mono         = "Fonts/OverpassMono-Regular.ttf"
 buildat.SpatialUpdateQueue = __buildat_SpatialUpdateQueue
+buildat.pack_voxel_volume = __buildat_pack_voxel_volume
+-- add_resource_dir(path) -> bool. Only under the cache path; Urho3D's own Lua
+-- bindings do not have this.
+buildat.add_resource_dir  = __buildat_add_resource_dir
+-- compose_image(args) -> w, h. Raster operations over an RGBA canvas, saved as
+-- a PNG under the cache path. See doc/client_api.txt.
+buildat.compose_image     = __buildat_compose_image
+-- read_image(resource_name) -> w, h, rgba. The pixels of an image, for
+-- whoever has to look at them rather than draw them.
+buildat.read_image        = __buildat_read_image
 
 buildat.safe.disconnect    = __buildat_disconnect
 buildat.safe.set_ui_scale  = __buildat_set_ui_scale
@@ -26,6 +53,11 @@ buildat.safe.get_ui_scale  = __buildat_get_ui_scale
 buildat.safe.font_sans     = buildat.font_sans
 buildat.safe.font_mono     = buildat.font_mono
 buildat.safe.get_time_us   = __buildat_get_time_us
+buildat.safe.sha1          = __buildat_sha1
+buildat.safe.sha256        = __buildat_sha256
+buildat.safe.hex           = __buildat_hex
+buildat.safe.compress      = __buildat_compress
+buildat.safe.decompress    = __buildat_decompress
 buildat.safe.profiler_block_begin = __buildat_profiler_block_begin
 buildat.safe.profiler_block_end   = __buildat_profiler_block_end
 buildat.safe.VoxelName            = __buildat_VoxelName
@@ -36,6 +68,9 @@ buildat.safe.createAtlasRegistry  = __buildat_createAtlasRegistry
 buildat.safe.Region        = __buildat_Region
 buildat.safe.VoxelInstance = __buildat_VoxelInstance
 buildat.safe.Volume        = __buildat_Volume
+-- pack_voxel_volume(args): packed samples -> a serialized volume, which
+-- set_voxel_geometry() and deserialize_volume() take. See doc/client_api.txt.
+buildat.safe.pack_voxel_volume        = __buildat_pack_voxel_volume
 buildat.safe.deserialize_volume       = __buildat_deserialize_volume
 buildat.safe.deserialize_volume_int32 = __buildat_deserialize_volume_int32
 buildat.safe.deserialize_volume_8bit  = __buildat_deserialize_volume_8bit

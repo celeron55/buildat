@@ -9,6 +9,10 @@ return {
 	PostRenderUpdate = {
 		TimeStep = {variant = "Float", safe = "number"},
 	},
+	-- The client is going away: the window was closed, or something asked
+	-- the engine to exit. It carries nothing; what it is for is closing what
+	-- a module opened, such as telling a server that we are leaving.
+	ExitRequested = {},
 	KeyDown = {
 		Key = {variant = "Int", safe = "number"},
 		-- True when this is a key repeat rather than a fresh press
@@ -27,6 +31,17 @@ return {
 		Buttons = {variant = "Int", safe = "number"},
 		Qualifiers = {variant = "Int", safe = "number"},
 	},
+	-- A click on the UI, which carries where it landed. MouseButtonDown does
+	-- not: the position of a click is the UI's business, and a game that has
+	-- put something on screen needs to know where in it the player clicked.
+	-- The element that was hit is deliberately not passed on.
+	UIMouseClick = {
+		X = {variant = "Int", safe = "number"},
+		Y = {variant = "Int", safe = "number"},
+		Button = {variant = "Int", safe = "number"},
+		Buttons = {variant = "Int", safe = "number"},
+		Qualifiers = {variant = "Int", safe = "number"},
+	},
 	MouseMove = {
 		X = {variant = "Int", safe = "number"},
 		Y = {variant = "Int", safe = "number"},
@@ -39,6 +54,16 @@ return {
 		Wheel = {variant = "Int", safe = "number"},
 		Buttons = {variant = "Int", safe = "number"},
 		Qualifiers = {variant = "Int", safe = "number"},
+	},
+	-- The window's size or fullscreen state changed. What wants to know is
+	-- anything that put something on the GPU by hand: Urho3D can bring back
+	-- what it loaded from a file, and nothing else.
+	ScreenMode = {
+		Width = {variant = "Int", safe = "number"},
+		Height = {variant = "Int", safe = "number"},
+		Fullscreen = {variant = "Bool", safe = "boolean"},
+		Resizable = {variant = "Bool", safe = "boolean"},
+		Borderless = {variant = "Bool", safe = "boolean"},
 	},
 	HoverBegin = {
 	},

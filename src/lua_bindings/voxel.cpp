@@ -64,6 +64,158 @@ void vdef_set_textures(VoxelDefinition &def, luabind::object value, lua_State *L
 	}
 }
 
+luabind::object vdef_get_tile_turns(const VoxelDefinition &def, lua_State *L)
+{
+	luabind::object result = luabind::newtable(L);
+	for(size_t i = 0; i < 6; i++)
+		result[i+1] = luabind::object(L, (int)def.tile_turns[i]);
+	return result;
+}
+
+void vdef_set_tile_turns(VoxelDefinition &def, luabind::object value,
+		lua_State *L)
+{
+	for(size_t i = 0; i < 6; i++){
+		luabind::object v = value[i+1];
+		def.tile_turns[i] = v && luabind::type(v) == LUA_TNUMBER ?
+				(uint8_t)(luabind::object_cast<int>(v) & 3) : 0;
+	}
+}
+
+// vdef.shape: an array of quads, each
+//   {tile = 1...6,
+//    p = {x0,y0,z0, x1,y1,z1, x2,y2,z2, x3,y3,z3},
+//    uv = {u0,v0, u1,v1, u2,v2, u3,v3}}
+// The corners are in the voxel's own cube of -0.5...0.5 and the texture
+// coordinates in the tile's own 0...1; see interface/voxel.h.
+static luabind::object quad_to_lua(const interface::VoxelQuad &q,
+		lua_State *L)
+{
+	luabind::object quad = luabind::newtable(L);
+	quad["tile"] = (int)q.tile + 1;
+	quad["connect_dir"] = (int)q.connect_dir;
+	luabind::object p = luabind::newtable(L);
+	luabind::object uv = luabind::newtable(L);
+	for(int c = 0; c < 4; c++){
+		for(int a = 0; a < 3; a++)
+			p[c * 3 + a + 1] = q.p[c][a];
+		for(int a = 0; a < 2; a++)
+			uv[c * 2 + a + 1] = q.uv[c][a];
+	}
+	quad["p"] = p;
+	quad["uv"] = uv;
+	return quad;
+}
+
+static luabind::object vdef_get_shape(const VoxelDefinition &def,
+		lua_State *L)
+{
+	luabind::object result = luabind::newtable(L);
+	for(size_t i = 0; i < def.shape.size(); i++)
+		result[i + 1] = quad_to_lua(def.shape[i], L);
+	return result;
+}
+
+static double quad_number(const luabind::object &t, int index)
+{
+	luabind::object v = t[index];
+	if(!v || luabind::type(v) != LUA_TNUMBER)
+		throw Exception(ss_()+"VoxelDefinition.shape: entry "+itos(index)+
+				" is not a number");
+	return luabind::object_cast<double>(v);
+}
+
+static interface::VoxelQuad quad_from_lua(const luabind::object &quad)
+{
+	luabind::object p = quad["p"];
+	luabind::object uv = quad["uv"];
+	if(!p || luabind::type(p) != LUA_TTABLE ||
+			!uv || luabind::type(uv) != LUA_TTABLE)
+		throw Exception("VoxelDefinition.shape: a quad wants p and uv");
+	interface::VoxelQuad q;
+	luabind::object tile = quad["tile"];
+	int tile_i = (tile && luabind::type(tile) == LUA_TNUMBER) ?
+			(int)luabind::object_cast<double>(tile) : 1;
+	if(tile_i < 1 || tile_i > 6)
+		throw Exception(ss_()+"VoxelDefinition.shape: tile "+
+				itos(tile_i)+" is not one of the six");
+	q.tile = (uint8_t)(tile_i - 1);
+	luabind::object dir = quad["connect_dir"];
+	int dir_i = (dir && luabind::type(dir) == LUA_TNUMBER) ?
+			(int)luabind::object_cast<double>(dir) : 0;
+	if(dir_i < 0 || dir_i > 7)
+		throw Exception(ss_()+"VoxelDefinition.shape: connect_dir "+
+				itos(dir_i)+" is not a face, zero or seven");
+	q.connect_dir = (uint8_t)dir_i;
+	for(int c = 0; c < 4; c++){
+		for(int a = 0; a < 3; a++)
+			q.p[c][a] = (float)quad_number(p, c * 3 + a + 1);
+		for(int a = 0; a < 2; a++)
+			q.uv[c][a] = (float)quad_number(uv, c * 2 + a + 1);
+	}
+	return q;
+}
+
+static void vdef_set_shape(VoxelDefinition &def, const luabind::object &value)
+{
+	def.shape.clear();
+	if(!value || luabind::type(value) != LUA_TTABLE)
+		return;
+	for(luabind::iterator it(value), end; it != end; ++it){
+		luabind::object quad = *it;
+		if(luabind::type(quad) != LUA_TTABLE)
+			throw Exception("VoxelDefinition.shape: a quad is not a table");
+		def.shape.push_back(quad_from_lua(quad));
+	}
+}
+
+// vdef.shape_masked: a shape per neighbour mask, as a table of arrays of
+// quads -- the same quads vdef.shape takes -- indexed 0...19. A mask with no
+// shape of its own can be left out. See interface/voxel.h for what the
+// indices mean.
+static luabind::object vdef_get_shape_masked(const VoxelDefinition &def,
+		lua_State *L)
+{
+	luabind::object result = luabind::newtable(L);
+	for(int m = 0; m < 20; m++){
+		size_t from = def.shape_masked_begin[m];
+		size_t to = def.shape_masked_begin[m + 1];
+		if(from >= to)
+			continue;
+		luabind::object list = luabind::newtable(L);
+		for(size_t i = from; i < to && i < def.shape_masked.size(); i++)
+			list[i - from + 1] = quad_to_lua(def.shape_masked[i], L);
+		result[m] = list;
+	}
+	return result;
+}
+
+static void vdef_set_shape_masked(VoxelDefinition &def,
+		const luabind::object &value)
+{
+	def.shape_masked.clear();
+	for(size_t i = 0; i < 21; i++)
+		def.shape_masked_begin[i] = 0;
+	if(!value || luabind::type(value) != LUA_TTABLE)
+		return;
+	for(int m = 0; m < 20; m++){
+		def.shape_masked_begin[m] = (uint16_t)def.shape_masked.size();
+		luabind::object list = value[m];
+		if(!list || luabind::type(list) != LUA_TTABLE)
+			continue;
+		for(size_t i = 1;; i++){
+			luabind::object quad = list[i];
+			if(!quad || luabind::type(quad) != LUA_TTABLE)
+				break;
+			if(def.shape_masked.size() >= 0xffff)
+				throw Exception("VoxelDefinition.shape_masked: too many "
+						"quads");
+			def.shape_masked.push_back(quad_from_lua(quad));
+		}
+	}
+	def.shape_masked_begin[20] = (uint16_t)def.shape_masked.size();
+}
+
 sp_<VoxelRegistry> createVoxelRegistry(lua_State *L)
 {
 	return sp_<VoxelRegistry>(
@@ -110,10 +262,25 @@ void init_voxel(lua_State *L)
 			.def_readwrite("name", &VoxelDefinition::name)
 			.def_readwrite("id", &VoxelDefinition::id)
 			.property("textures", &vdef_get_textures, &vdef_set_textures)
+			.property("tile_turns", &vdef_get_tile_turns,
+					&vdef_set_tile_turns)
 			.def_readwrite("face_draw_type", &VoxelDefinition::face_draw_type)
 			.def_readwrite("edge_material_id", &VoxelDefinition::edge_material_id)
 			.def_readwrite("physically_solid", &VoxelDefinition::physically_solid)
 			.def_readwrite("fully_empty", &VoxelDefinition::fully_empty)
+			.property("shape", &vdef_get_shape, &vdef_set_shape)
+			.property("shape_masked", &vdef_get_shape_masked,
+					&vdef_set_shape_masked)
+			.def_readwrite("shape_double_sided",
+					&VoxelDefinition::shape_double_sided)
+			.def_readwrite("translucent", &VoxelDefinition::translucent)
+			.def_readwrite("shape_group", &VoxelDefinition::shape_group)
+			.def_readwrite("is_liquid", &VoxelDefinition::is_liquid)
+			.def_readwrite("liquid_top", &VoxelDefinition::liquid_top)
+			.def_readwrite("connect_group", &VoxelDefinition::connect_group)
+			.def_readwrite("connect_mask", &VoxelDefinition::connect_mask)
+			.def_readwrite("connect_to_solid",
+					&VoxelDefinition::connect_to_solid)
 			.enum_("FaceDrawType")[
 				value("FACEDRAWTYPE_NEVER", (int)FaceDrawType::NEVER),
 				value("FACEDRAWTYPE_ALWAYS", (int)FaceDrawType::ALWAYS),

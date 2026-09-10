@@ -67,8 +67,11 @@ namespace interface
 		};
 #endif
 
+		// with_lod also builds the atlas segments a LOD mesh samples; see
+		// VoxelRegistry::get_cached()
 		void preload_textures(pv::RawVolume<VoxelInstance> &volume,
-				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg);
+				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+				bool with_lod = false);
 
 		// What a voxel shader is handed, which is the whole interface between
 		// this and a game's own rendering:
@@ -77,22 +80,42 @@ namespace interface
 		//   TU_SPECULAR  a surface map, not Urho's specular: roughness in r
 		//                and spec_strength, translucency and spots in gba
 		//   vertex color ambient = cAmbientColor.rgb * a + rgb, when
-		//                use_skylight; see BOUNCE_COLOR in impl/mesh.cpp
+		//                use_skylight. The alpha is how much of the sky the
+		//                surface sees and the rgb is the light that reaches
+		//                it regardless of the sky: bounced light, and the
+		//                voxel's lamplight. See BOUNCE_COLOR and LAMP_COLOR
+		//                in impl/mesh.cpp. cAmbientColor being the color of
+		//                the sky, a world moves the sun by setting it and
+		//                nothing has to be meshed again.
 		//   Roughness, Metallic  both 0; the maps carry these
 		// interface/atlas.h says what fills the two maps. No technique is set:
 		// a game picks one for its chunks in voxelworld.sub_material_update(),
 		// and skylit geometry stays invisible until it does. The reference
 		// implementation is PBRVoxel in games/voxel_lighting.
 
+		// A voxel whose definition has a shape contributes that shape's quads
+		// instead of cube faces; see VoxelDefinition::shape in
+		// interface/voxel.h. The LOD generators below do not do this, so a
+		// world that uses LOD loses its shaped voxels in the distance.
+		//
 		// Can be called from any thread
 		// use_skylight: light the geometry by VoxelInstance::get_skylight()
-		// of the voxel in front of each face, along with per-vertex ambient
-		// occlusion and a per-face brightness, written into vertex colors.
-		// Only worlds that actually fill those bits should ask for it.
+		// and get_lamplight() of the voxel in front of each face, along with
+		// per-vertex ambient occlusion and a per-face brightness, written
+		// into vertex colors. Only worlds that actually fill those bits
+		// should ask for it.
+		//
+		// translucent_result, when given, takes the faces of the voxels the
+		// registry says are translucent -- water, and glass a game gave an
+		// alpha to -- instead of the opaque result. They are a separate
+		// drawable so that they can be drawn after the solid world, and so
+		// that the renderer sorts them against the other chunks' by
+		// distance. Left out, everything goes in one geometry as before.
 		void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 				pv::RawVolume<VoxelInstance> &volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
-				bool use_skylight = false);
+				bool use_skylight = false,
+				sm_<uint, TemporaryGeometry> *translucent_result = nullptr);
 
 		void set_voxel_geometry(CustomGeometry *cg, Context *context,
 				const sm_<uint, TemporaryGeometry> &temp_geoms,

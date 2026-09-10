@@ -69,7 +69,8 @@ int main(int argc, char *argv[])
 			"  -u [scale]           UI scale (0 = auto from short side / 1080)\n"
 			"  -w [WxH]             Windowed at this size; not remembered\n"
 			"  -c [commands]        Run command sequence and exit\n"
-			"                       One command per line. @file reads a file.\n"
+			"                       One command per line. @file reads a file,\n"
+			"                       - reads standard input as it arrives.\n"
 			"                       See doc/client_commands.txt\n"
 			;
 
@@ -124,6 +125,16 @@ int main(int argc, char *argv[])
 		case 'c': {
 			ss_ arg = c55_optarg ? c55_optarg : "";
 			ss_ text;
+			// A single dash means standard input, read as it arrives rather
+			// than up front: what the next command should be is often
+			// something only a screenshot of the running client can say.
+			if(arg == "-" || arg == "@-"){
+				log_i(MODULE, "config.command_seq: from stdin");
+				config.set("command_seq", "");
+				config.set("command_seq_enabled", true);
+				config.set("command_seq_stdin", true);
+				break;
+			}
 			if(!arg.empty() && arg[0] == '@'){
 				ss_ path = arg.substr(1);
 				if(path.empty()){
