@@ -183,6 +183,27 @@ function M.new(socket, log)
 	-- gone or there are none left, and says how many are still waiting. One
 	-- is always handed over, so a payload that costs more than the whole
 	-- budget still gets through.
+	-- What the reliable layer is holding, per channel: how many of our own
+	-- packets are waiting for an acknowledgement, how many of the server's
+	-- have arrived early and are waiting for the ones before them, and how
+	-- many split payloads are half assembled. A stall shows up here as
+	-- unacked packets that do not clear or as an incoming queue that never
+	-- empties, and neither is visible from anywhere else.
+	function self:stats()
+		local out = {}
+		for channel = 0, M.CHANNEL_COUNT - 1 do
+			local c = channels[channel]
+			local unacked, incoming, splits = 0, 0, 0
+			for _ in pairs(c.unacked) do unacked = unacked + 1 end
+			for _ in pairs(c.incoming) do incoming = incoming + 1 end
+			for _ in pairs(c.splits) do splits = splits + 1 end
+			out[channel] = {unacked = unacked, incoming = incoming,
+					splits = splits, next_in = c.next_incoming_seqnum,
+					next_out = c.next_outgoing_seqnum}
+		end
+		return out
+	end
+
 	function self:pump(budget_us)
 		local t0 = buildat.get_time_us()
 		while pending_first <= pending_last do

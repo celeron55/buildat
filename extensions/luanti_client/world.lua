@@ -2369,6 +2369,19 @@ function M.new(magic, buildat, log, options)
 	-- The blocks whose light a node change may have moved, waiting to be
 	-- asked for again; see set_node() below and refresh_wanted().
 	local refresh = {}
+	-- Where the camera is, for deciding which of those are worth asking for
+	local camera_at = nil
+	-- How far away a block can be and still be worth a resend, in blocks.
+	-- Asking for a block again costs the server a send, and on a busy server
+	-- other players' digging is a constant stream of node changes: what is
+	-- gained is the light of what the player is looking at, and beyond a few
+	-- blocks that is not worth taking sends away from the map that has not
+	-- arrived yet.
+	local REFRESH_RANGE_BLOCKS = 3
+	-- And a cap on how many are ever waiting. A storm of changes -- a
+	-- thousand nodes at once, which a game's own bulk edits do -- leaves the
+	-- light stale rather than the world unsent.
+	local REFRESH_MAX = 24
 
 	-- How far light reaches, which is how far from a change a block can be
 	-- and still be wrong. Luanti's LIGHT_SUN is 15 and a light loses one per
@@ -2456,7 +2469,11 @@ function M.new(magic, buildat, log, options)
 				mark_dirty(block_key(bx + d[1], by + d[2], bz + d[3]))
 			end
 		end
-		if light_changed(was, param0) then
+		local waiting = 0
+		for _ in pairs(refresh) do
+			waiting = waiting + 1
+		end
+		if light_changed(was, param0) and waiting < REFRESH_MAX then
 			-- This block, and every neighbour the light could reach into
 			refresh[key] = {bx, by, bz}
 			for _, d in ipairs(NEIGHBOURS) do
@@ -2481,14 +2498,27 @@ function M.new(magic, buildat, log, options)
 
 	-- The blocks to ask the server for again, at most a handful at a time:
 	-- one node change can name seven blocks and a spree of them more than a
-	-- packet holds. What is left waits for the next call.
+	-- packet holds. What is left waits for the next call, and what is too
+	-- far from the camera is dropped rather than waited for.
 	function self:refresh_wanted(limit)
 		local out = {}
+		local cx, cy, cz = 0, 0, 0
+		if camera_at then
+			cx = math.floor(camera_at[1] / BLOCKSIZE)
+			cy = math.floor(camera_at[2] / BLOCKSIZE)
+			cz = math.floor(camera_at[3] / BLOCKSIZE)
+		end
 		for key, at in pairs(refresh) do
-			out[#out + 1] = at
 			refresh[key] = nil
-			if #out >= (limit or 16) then
-				break
+			local near = camera_at == nil or
+					(math.abs(at[1] - cx) <= REFRESH_RANGE_BLOCKS and
+					math.abs(at[2] - cy) <= REFRESH_RANGE_BLOCKS and
+					math.abs(at[3] - cz) <= REFRESH_RANGE_BLOCKS)
+			if near then
+				out[#out + 1] = at
+				if #out >= (limit or 8) then
+					break
+				end
 			end
 		end
 		return out
@@ -3159,6 +3189,9 @@ function M.new(magic, buildat, log, options)
 	function self:set_camera(x, y, z, pitch, yaw)
 		camera_node.position = magic.Vector3(x, y, z)
 		camera_node.rotation = magic.Quaternion(pitch or 0, -(yaw or 0), 0)
+		-- Kept for the light refresh, which only asks for blocks near enough
+		-- to be worth a resend; see refresh_wanted()
+		camera_at = {x, y, z}
 	end
 
 	return self

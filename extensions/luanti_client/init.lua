@@ -2282,10 +2282,21 @@ local function show_client(host, port, name, password)
 		-- A plain subscription rather than root:SubscribeToStackEvent(), which
 		-- only fires while the UI element has focus; the world has to keep
 		-- streaming whatever the UI is doing. Unsubscribed by leave().
+		-- How often the network and map counters go in the log. A session
+		-- that loaded badly is diagnosed from these afterwards and from
+		-- nothing else, so they are at info rather than verbose.
+		local NET_LINE_INTERVAL = 2.0
+		local net_line_timer = 0
+
 		local update_cb = magic.SubscribeToEvent("Update",
 				function(event_type, event_data)
 			local dtime = event_data:GetFloat("TimeStep")
 			client:update(dtime)
+			net_line_timer = net_line_timer + dtime
+			if net_line_timer >= NET_LINE_INTERVAL then
+				net_line_timer = 0
+				log:info(client:net_line())
+			end
 			-- The client may have found out during that update that the
 			-- session is over, and leave() has then taken the screen apart:
 			-- what is below here would put some of it back
