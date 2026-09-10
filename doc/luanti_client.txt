@@ -365,8 +365,8 @@ What is done
   arrived, keeps the shader's own colour. simplified: the tonemaps and the
   sunrise texture are not drawn
 - A hotbar and a health bar, out of the inventory and the hit points
-- A pause menu, which escape opens when nothing else is up: mute and unmute,
-  the key bindings as a list, and Exit. The bindings live in one table at the
+- A pause menu, which escape opens when nothing else is up: Continue
+  playing, mute and unmute, the key bindings as a list, and Exit. The bindings live in one table at the
   top of init.lua that both the movement code and that list read, so a key
   cannot be in the code and missing from the list; they are not saved or
   editable yet. Escape no longer ends the session by itself -- the menu's
