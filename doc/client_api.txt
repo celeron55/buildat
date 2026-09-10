@@ -277,7 +277,7 @@ Socket methods, as in LuaSocket:
 - close()
 
 See extensions/network_test for a working example:
-  $ bin/buildat_client -m network_test
+  $ bin/buildat -m network_test
 
 ui_utils
 --------

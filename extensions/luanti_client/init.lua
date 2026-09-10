@@ -2,10 +2,10 @@
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
--- A Luanti client for buildat_client: connect to an unmodified Luanti server
+-- A Luanti client for buildat: connect to an unmodified Luanti server
 -- and do the client's side of its protocol.
 --
---   $ bin/buildat_client -m luanti_client
+--   $ bin/buildat -m luanti_client
 --
 -- This is where it is at: the connection, the login and a status screen that
 -- says what the server sent. Rendering the world, formspecs, the HUD and input
@@ -35,7 +35,7 @@ local formspec_ui = dofile(path.."/formspec_ui.lua")
 local objects = dofile(path.."/objects.lua")
 local M = {safe = nil}
 
--- BUILDAT_LUANTI_ADDRESS is for scripted runs (bin/buildat_client -c ...),
+-- BUILDAT_LUANTI_ADDRESS is for scripted runs (bin/buildat -c ...),
 -- which cannot easily clear a text field
 local DEFAULT_ADDRESS = os.getenv("BUILDAT_LUANTI_ADDRESS") or "localhost:30000"
 local DEFAULT_NAME = os.getenv("BUILDAT_LUANTI_NAME") or "buildat"
@@ -150,6 +150,11 @@ local BINDINGS = {
 	{action = "place", name = "Right mouse", what = "Place, or use"},
 	{action = "wield", name = "Mouse wheel", what = "Pick a hotbar slot"},
 }
+
+-- Whether cancelling the connect dialog quits the client: it does when this
+-- extension is the client's whole reason for running, and does not when
+-- buildat's menu is underneath. See M.boot() and M.launch.
+local cancel_exits = true
 
 -- action -> the entry, for the code that asks "which key is this?"
 local BIND = {}
@@ -3210,6 +3215,10 @@ show_connect_dialog = function(address, name)
 		address_edit:SetFocus(true)
 	end
 
+	-- Set below, once the dialog's buttons are there; connect() and cancel()
+	-- both have to drop it
+	local escape_cb = nil
+
 	local function connect()
 		local host, port = split_address(address_edit:GetText())
 		local name = name_edit:GetText()
@@ -3217,24 +3226,71 @@ show_connect_dialog = function(address, name)
 			ui_utils.show_message_dialog("A player name is needed")
 			return
 		end
+		if escape_cb then
+			magic.UnsubscribeFromEvent("KeyDown", escape_cb)
+			escape_cb = nil
+		end
 		uistack.main:pop(root)
 		show_client(host, port, name, password_edit:GetText())
 	end
 
-	menu:add("Connect", connect)
-	menu:add("Cancel", function()
+	local function cancel()
+		if escape_cb then
+			magic.UnsubscribeFromEvent("KeyDown", escape_cb)
+			escape_cb = nil
+		end
 		uistack.main:pop(root)
-		engine:Exit()
+		-- Launched on its own there is nothing to go back to, so cancelling
+		-- is quitting; launched from buildat's menu, that menu is what is
+		-- underneath and cancelling belongs to it. See M.launch below.
+		if cancel_exits then
+			engine:Exit()
+		end
+	end
+
+	menu:add("Connect", connect)
+	menu:add("Cancel", cancel)
+
+	-- Escape cancels. A plain subscription rather than the stack's own,
+	-- because a LineEdit with the focus swallows the key and a stack handler
+	-- then never fires -- which left this dialog with no way back to the
+	-- menu but the mouse.
+	escape_cb = magic.SubscribeToEvent("KeyDown",
+			function(event_type, event_data)
+		if event_data:GetInt("Key") == KEY_ESCAPE then
+			cancel()
+		end
 	end)
 end
 
-function M.boot()
+local function self_tests()
 	srp.self_test()
 	log:info("srp: self-test ok")
 	engine_test.self_test()
 	log:info("engine primitives: self-test ok")
+end
+
+-- Launched as the client's whole reason for running: `buildat -m
+-- luanti_client`, where cancelling the dialog quits.
+function M.boot()
+	cancel_exits = true
+	self_tests()
 	show_connect_dialog()
 end
+
+-- What makes this extension one of the things buildat's own menu offers: a
+-- name to show, an icon, and what to do when it is picked. The menu keeps
+-- the list of extensions it offers; an extension says how to launch itself.
+-- See doc/design.txt, "Launchable extensions".
+M.launch = {
+	title = "Play on a Luanti server",
+	icon = "luanti_client/res/icon.png",
+	run = function()
+		cancel_exits = false
+		self_tests()
+		show_connect_dialog()
+	end,
+}
 
 return M
 -- vim: set noet ts=4 sw=4:

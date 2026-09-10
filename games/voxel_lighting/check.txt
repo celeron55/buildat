@@ -1,5 +1,5 @@
 # Client command sequence for a visual check. Run from Build/:
-#   bin/buildat_client -s localhost -w 1600x900 \
+#   bin/buildat -s localhost -w 1600x900 \
 #           -c @../games/voxel_lighting/check.txt
 #
 # -w fixes the window size for the run without touching the remembered one, so

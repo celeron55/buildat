@@ -18,10 +18,14 @@ local function button_menu_nav(root)
 	local items = {}
 	local selected = 1
 	local on_other_key = nil
+	local on_change = nil
 
 	local function apply()
 		for i, item in ipairs(items) do
 			item.button.selected = (i == selected)
+			if on_change then
+				on_change(item.button, i == selected, i)
+			end
 		end
 	end
 
@@ -67,11 +71,23 @@ local function button_menu_nav(root)
 		return self
 	end
 
+	-- What being the selected item looks like, for a menu whose buttons draw
+	-- more than their own style: an icon menu dims what is not selected. The
+	-- callback gets (button, selected, index) for every item whenever the
+	-- selection moves.
+	function nav:on_change(fn)
+		on_change = fn
+		apply()
+		return self
+	end
+
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 		local key = event_data:GetInt("Key")
-		if key == KEY_UP then
+		-- Left and right as well as up and down, because a menu can be a row
+		-- as well as a column and a player should not have to know which
+		if key == KEY_UP or key == KEY_LEFT then
 			select_i(selected - 1)
-		elseif key == KEY_DOWN then
+		elseif key == KEY_DOWN or key == KEY_RIGHT then
 			select_i(selected + 1)
 		elseif key == KEY_RETURN or key == KEY_RETURN2 or key == KEY_KP_ENTER then
 			if magic.input:GetKeyPress(key) and items[selected] then

@@ -1,9 +1,9 @@
 Luanti client
 =============
-extensions/luanti_client makes buildat_client talk to an unmodified Luanti
+extensions/luanti_client makes the buildat client talk to an unmodified Luanti
 server: it does the client's side of Luanti's protocol.
 
-    $ bin/buildat_client -m luanti_client
+    $ bin/buildat -m luanti_client
 
 It asks for an address, a player name and a password, logs in, and shows the
 terrain around the player with the server's own textures. Luanti 5.11.0 up to
@@ -145,7 +145,7 @@ nested containers, and the two coordinate systems -- and the active objects:
 an object's initialization data and its properties, the positions that arrive
 afterwards, and the messages this does not implement going past harmlessly.
 
-    $ bin/buildat_client -m luanti_client
+    $ bin/buildat -m luanti_client
 
 runs engine_test.lua at boot, which checks the engine primitives the extension
 leans on: buildat.compress / buildat.decompress, buildat.pack_voxel_volume
