@@ -216,7 +216,10 @@ local function read_node(r)
 	for _ = 1, r:u16() do
 		r:u16() -- connects_to ids
 	end
-	r:skip(4) -- post_effect_color
+	-- What Luanti paints over the whole screen while the camera is inside this
+	-- node, as ARGB: a weak blue for water, a strong orange for lava. The
+	-- alpha is how much of it there is, and zero means the node has none.
+	def.post_effect_color = {a = r:u8(), r = r:u8(), g = r:u8(), b = r:u8()}
 	def.leveled = r:u8()
 	r:u8() -- light_propagates
 	def.sunlight_propagates = r:u8() ~= 0

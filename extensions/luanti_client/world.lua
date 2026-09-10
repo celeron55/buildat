@@ -671,6 +671,9 @@ function M.new(magic, buildat, log, options)
 	-- arrived and everything but air is solid; see is_solid().
 	self.node_solid = nil
 	self.node_liquid = {}
+	-- The screen tint of the node the camera is in, per node id; see
+	-- post_effect_at(). Only the nodes that have one are in here.
+	self.node_post_effect = {}
 	-- id -> false for the nodes a pointing ray goes through; nil means the
 	-- definitions have not arrived and everything but air stops one
 	self.node_pointable = nil
@@ -1209,6 +1212,17 @@ function M.new(magic, buildat, log, options)
 	end
 
 	-- Whether a node is something to swim in
+	-- The colour to paint over the whole screen because the camera is in this
+	-- node, as Luanti's post_effect_color {a, r, g, b} in 0...255, or nil for
+	-- a node that has none. What this is for is being under water.
+	function self:post_effect_at(x, y, z)
+		local id = self:node_at(x, y, z)
+		if id == nil then
+			return nil
+		end
+		return self.node_post_effect[id]
+	end
+
 	function self:is_liquid(x, y, z)
 		local id = self:node_at(x, y, z)
 		return id ~= nil and self.node_liquid[id] == true
@@ -2116,6 +2130,7 @@ function M.new(magic, buildat, log, options)
 		local collision = {}
 		local solid = {}
 		local liquid = {}
+		local post_effect = {}
 		local pointable = {}
 		local new_param2_look = {}
 
@@ -2131,6 +2146,9 @@ function M.new(magic, buildat, log, options)
 			pointable[id] = def.pointable ~= 0
 			liquid[id] = def.liquid_type ~= nil and
 					def.liquid_type ~= NODEDEF_LIQUID_NONE
+			if def.post_effect_color and def.post_effect_color.a > 0 then
+				post_effect[id] = def.post_effect_color
+			end
 			local voxel = build_voxel(new_reg, def, resolve_tile, nil)
 			if voxel then
 				map[id] = voxel
@@ -2247,6 +2265,7 @@ function M.new(magic, buildat, log, options)
 			self.node_collision = collision
 			self.node_solid = solid
 			self.node_liquid = liquid
+			self.node_post_effect = post_effect
 			self.node_pointable = pointable
 			-- Everything a param2 meant is decided by these definitions too,
 			-- and the pairs were built into the registry that is going away

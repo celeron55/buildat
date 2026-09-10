@@ -420,7 +420,9 @@ local function write_node(name, drawtype, tile_names, flags, animation, opts)
 	w:u8(0) -- waving
 	w:u8(0) -- connect_sides
 	w:u16(0) -- connects_to
-	w:raw(string.rep("\0", 4)) -- post_effect_color
+	local pe = opts.post_effect_color
+	w:u8(pe and pe.a or 0):u8(pe and pe.r or 0)
+	w:u8(pe and pe.g or 0):u8(pe and pe.b or 0)
 	w:u8(0) -- leveled
 	w:u8(1) -- light_propagates
 	w:u8(opts.sunlight_propagates and 1 or 0)
@@ -457,7 +459,8 @@ local nodes = {
 	{11, write_node("test:water", 2, {"water.png", "water.png", "water.png",
 			"water.png", "water.png", "water.png"}, 1, "vertical",
 			{walkable = false, liquid_type = 2, drowning = 1,
-			liquid_source = "test:water", palette = "water_palette.png"})},
+			liquid_source = "test:water", palette = "water_palette.png",
+			post_effect_color = {a = 64, r = 100, g = 100, b = 200}})},
 	{13, write_node("test:torch", 7, {"torch.png", "torch.png", "torch.png",
 			"torch.png", "torch.png", "torch.png"}, 0, "sheet")},
 }
@@ -494,6 +497,9 @@ assert(defs[7].walkable and defs[7].diggable and not defs[7].climbable,
 assert(defs[11].walkable == false and defs[11].liquid_type == 2 and
 		defs[11].drowning == 1 and
 		defs[11].liquid_alternative_source == "test:water" and
+		defs[11].post_effect_color.a == 64 and
+		defs[11].post_effect_color.b == 200 and
+		defs[7].post_effect_color.a == 0 and
 		defs[11].palette_name == "water_palette.png",
 		"nodedef: liquid fields")
 assert(defs[7].color[1] == 255 and defs[7].color[3] == 253,
