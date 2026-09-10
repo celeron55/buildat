@@ -278,8 +278,12 @@ What is done
 - The media: ANNOUNCE_MEDIA, REQUEST_MEDIA and MEDIA, cached on disk by name
   and checked against the sha1 the server announced
 - ITEMDEF, including the tool capabilities, and TOCLIENT_INVENTORY
-- Pointing: a ray marched through the node data, with the face it came
-  through outlined
+- Pointing: a ray marched through the node data, with the node outlined
+  around its own selection box -- the node box when the definition gives no
+  selection box, and the whole voxel when it gives neither -- turned with the
+  node's param2 the same way its shape and its collision boxes are.
+  simplified: a node whose selection is several boxes gets the one box around
+  all of them, where Luanti draws each
 - Digging: TOSERVER_INTERACT, with the dig time worked out from the node's
   groups against the capabilities of what the player is wielding -- which
   is what the server's own anticheat wants, since it refuses a dig that was
