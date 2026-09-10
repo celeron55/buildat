@@ -585,6 +585,59 @@ function M.new(magic, buildat, log, options)
 		return n
 	end
 
+	-- Which family of connecting nodes each node id belongs to.
+	--
+	-- Luanti says this with node ids: a definition lists the ids it connects
+	-- to, and a fence's list holds every fence and gate in the game. The
+	-- mesher has voxel ids rather than node ids and one word to test, so the
+	-- ids are turned into families here, once per set of definitions: two
+	-- nodes are in the same family when exactly the same definitions reach
+	-- out to them, which is what makes every wood's fence one family and
+	-- every stone's wall another.
+	--
+	-- simplified: 32 families, because the mask the mesher tests is one
+	-- word. A game with more gets the rest sharing the last one, which draws
+	-- a connection that should not be there rather than dropping one, and
+	-- says so.
+	local CONNECT_GROUPS_MAX = 32
+	local function connect_families(defs)
+		-- Who reaches out to whom
+		local referrers = {}
+		for id, def in pairs(defs) do
+			for _, to in ipairs(def.connects_to or {}) do
+				local list = referrers[to]
+				if not list then
+					list = {}
+					referrers[to] = list
+				end
+				list[#list + 1] = id
+			end
+		end
+		local group_of = {}
+		local group_of_signature = {}
+		local count = 0
+		local overflowed = false
+		for id, list in pairs(referrers) do
+			table.sort(list)
+			local signature = table.concat(list, ",")
+			if not group_of_signature[signature] then
+				if count < CONNECT_GROUPS_MAX then
+					count = count + 1
+					group_of_signature[signature] = count
+				else
+					group_of_signature[signature] = CONNECT_GROUPS_MAX
+					overflowed = true
+				end
+			end
+			group_of[id] = group_of_signature[signature]
+		end
+		if overflowed then
+			log:warning("connected nodes: more than "..CONNECT_GROUPS_MAX..
+					" families of them; the rest share the last one")
+		end
+		return group_of
+	end
+
 	-- Which liquid family a node belongs to, as a small number, or 0 for a
 	-- node that is not a liquid. Two nodes are the same liquid when they name
 	-- the same source, which is how a water source and a flowing water are
@@ -620,9 +673,10 @@ function M.new(magic, buildat, log, options)
 	-- turns is nil or six quarter turns, one per face: how far the texture is
 	-- turned inside its own face. See VoxelDefinition.tile_turns.
 	-- liquid_group is nonzero for a liquid, one number per liquid family; see
-	-- liquid_group() below.
+	-- liquid_group() below. connect is {group, mask, solid} for a node other
+	-- nodes connect to or that connects to others; see connect_families().
 	local function add_cube(voxel_reg, name, resources, kind, shape,
-			double_sided, turns, liquid_group)
+			double_sided, turns, liquid_group, connect)
 		local vdef = buildat.VoxelDefinition()
 		vdef.name.block_name = name
 		vdef.handler_module = ""
@@ -662,6 +716,11 @@ function M.new(magic, buildat, log, options)
 					buildat.VoxelDefinition.EDGEMATERIALID_GROUND
 		end
 		vdef.physically_solid = true
+		if connect then
+			vdef.connect_group = connect.group or 0
+			vdef.connect_mask = connect.mask or 0
+			vdef.connect_to_solid = connect.solid and true or false
+		end
 		-- Which pass the faces go in. The mesher puts a translucent voxel's
 		-- faces on a child node of the chunk and world.lua gives that one the
 		-- blended technique.
@@ -2476,6 +2535,14 @@ function M.new(magic, buildat, log, options)
 			facedir, wall, liquid_top)
 		local kind = CUBE_DRAWTYPES[def.drawtype]
 		local group = liquid_group(def)
+		-- What the mesher needs to work out this voxel's connections per
+		-- voxel: which family it is in, which families it reaches out to,
+		-- and whether it also reaches into a solid neighbour
+		local connect = nil
+		if (def.connect_group or 0) ~= 0 or (def.connect_mask or 0) ~= 0 then
+			connect = {group = def.connect_group, mask = def.connect_mask,
+					solid = (def.connect_sides or 0) ~= 0}
+		end
 		local shape, double_sided = shapes.for_node(def, facedir, wall,
 				read_mesh and read_mesh(def) or nil, liquid_top)
 		local tiles = facedir and facedir ~= 0 and
@@ -2508,7 +2575,7 @@ function M.new(magic, buildat, log, options)
 				resources[i] = resources[i] or first
 			end
 			return add_cube(reg, name or def.name, resources, kind, shape,
-					double_sided, nil, group)
+					double_sided, nil, group, connect)
 		end
 		if not kind then
 			return nil
@@ -2526,7 +2593,7 @@ function M.new(magic, buildat, log, options)
 		local turns = facedir and facedir ~= 0 and
 				shapes.FACEDIR_TILE_TURNS[facedir + 1] or nil
 		return add_cube(reg, name or def.name, resources, kind, nil, nil,
-				turns, group)
+				turns, group, connect)
 	end
 
 	-- Builds the registry for a set of node definitions a slice at a time.
@@ -2554,7 +2621,26 @@ function M.new(magic, buildat, log, options)
 		local pointable = {}
 		local new_param2_look = {}
 
+		local connect_group_of = connect_families(defs)
+
 		local function one_definition(id, def)
+			-- Which family of connecting nodes this one is in and which it
+			-- reaches out to, as the mesher wants them: a number and a bit
+			-- per family. On the definition rather than passed along,
+			-- because the pair machinery builds voxels from it later too.
+			def.connect_group = connect_group_of[id] or 0
+			local bits = {}
+			for _, to in ipairs(def.connects_to or {}) do
+				local to_group = connect_group_of[to]
+				if to_group then
+					bits[to_group] = true
+				end
+			end
+			local mask = 0
+			for bit in pairs(bits) do
+				mask = mask + 2 ^ (bit - 1)
+			end
+			def.connect_mask = mask
 			solid[id] = def.walkable
 			if def.light_source and def.light_source > 0 then
 				light_ids[id] = {level = def.light_source,

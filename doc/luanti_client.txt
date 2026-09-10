@@ -297,6 +297,8 @@ What is done
   fires, signs and rails as quads, .obj models as their own geometry, and a
   flowing liquid as a box with a lowered top, through a shape in the voxel
   registry that the mesher copies into the chunk
+- Connected node boxes: a fence with its rails towards the fences and the
+  walls of stone next to it, and a pane in a run
 - Particles: ADD_PARTICLESPAWNER and DELETE_PARTICLESPAWNER, SPAWN_PARTICLE
   and the zstd batch of them a game sends a hundred at once in. A spawner is
   an Urho3D ParticleEmitter and a single particle is an emitter of one that
@@ -422,13 +424,31 @@ the bottom, which is what thins out the edge of a spill. It is the one thing
 in the voxel registry the mesher works out per voxel rather than per
 definition.
 
-What that does not do yet: a connected node box does not look at its
-neighbours, so a fence is a post without its rails; a node whose model is
-.b3d -- the chests and the shulkers -- falls back to the box the game says a
-ray hits; a flowing liquid's top is flat where Luanti slopes it from the
-neighbouring levels, so a slope reads as steps; and a turned node box's
-texture coordinates are the whole tile rather than the part of it Luanti works
-out from the box after the turn.
+A connected node box -- a fence, a wall, a pane in a run -- is drawn from the
+boxes it has per direction. Which of them a voxel wants depends on its
+neighbours, so it is the same shape pass that decides: each quad carries the
+direction it belongs to, or "only when nothing connects" for the boxes a
+lone pane stands as, and the mesher draws the ones whose direction is
+connected.
+
+What connects is what Luanti says, turned into something the mesher can test.
+Luanti gives each node a list of the node *ids* it connects to; the mesher
+has voxel ids and one word to test, so the client works out families once per
+set of definitions -- two nodes are in the same family when exactly the same
+definitions reach out to them, which makes every wood's fence one family and
+every stone's wall another -- and a definition carries its own family and a
+bit per family it reaches out to. Thirty-two families, which is several times
+what a game with mods uses; a game with more gets the rest sharing the last
+one, and says so in the log. A node that says so also reaches into any solid
+neighbour, which is Luanti's connect_sides.
+
+What that does not do yet: the disconnected_<direction> boxes, which are
+rarer than the rest; the tags are not turned with a facedir, so a connected
+node box that also faces a direction has its rails pointing the way they were
+built; a node whose model is .b3d -- the chests and the shulkers -- falls back
+to the box the game says a ray hits; and a turned node box's texture
+coordinates are the whole tile rather than the part of it Luanti works out
+from the box after the turn.
 
 The HUD: a game puts its own things on the screen with HUDADD and changes
 them one field at a time with HUDCHANGE, and this draws the images, the text
@@ -553,6 +573,3 @@ What is next
   image waypoint want the camera to turn a world position into a screen one,
   a compass wants the yaw, a minimap wants a map, and an inventory element and
   a hotbar element want the slots this client already draws its own way
-- A connected node box, which is a shape that looks at its neighbours: a
-  fence with its rails, a pane in a run, and a flowing liquid's sloped
-  surface, which Luanti's own mesher works out the same way

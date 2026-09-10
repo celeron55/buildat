@@ -426,12 +426,38 @@ function M.for_node(def, facedir, wall, mesh_quads, liquid_top)
 		if box.wall then
 			return M.wall_quads(box.wall, wall or 1), false
 		end
-		if #box.boxes == 0 then
-			return nil
-		end
 		local out = {}
 		for _, b in ipairs(box.boxes) do
 			M.box_quads(b, out)
+		end
+		-- A connected node box carries a set of boxes per direction and a
+		-- set for standing alone. Each of those gets its quads tagged with
+		-- when they are drawn, and the mesher decides that per voxel from
+		-- the neighbours it can see and this cannot.
+		--
+		-- simplified: the tags are not turned with a facedir, so a connected
+		-- node box that also faces a direction has its rails pointing the
+		-- way they were built. Nothing in the games looked at does both.
+		if box.connect then
+			for dir = 1, 6 do
+				local from = #out + 1
+				for _, b in ipairs(box.connect[dir] or {}) do
+					M.box_quads(b, out)
+				end
+				for i = from, #out do
+					out[i].connect_dir = dir
+				end
+			end
+			local from = #out + 1
+			for _, b in ipairs(box.alone or {}) do
+				M.box_quads(b, out)
+			end
+			for i = from, #out do
+				out[i].connect_dir = 7
+			end
+		end
+		if #out == 0 then
+			return nil
 		end
 		return M.turn_quads(out, facedir), false
 	end

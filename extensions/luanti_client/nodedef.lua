@@ -131,10 +131,15 @@ end
 -- wallmounted box's three boxes are kept in wall = {top, bottom, side} as
 -- well, because which of them a node wants is what its param2 says.
 --
--- simplified: which boxes a connected node really wants depends on its
--- neighbours, which is not known here, so a fence is a post without its
--- rails. The upgrade path is a shape that can be built per voxel rather than
--- per node type.
+-- A connected box keeps its per-direction boxes too, in
+-- connect = {[dir] = {boxes}} with dir in buildat's face order (1 is +Y and
+-- 6 is -Z), and the ones it has when it stands alone in alone = {boxes}.
+-- Which of them a voxel really wants is worked out per voxel by the mesher;
+-- shapes.lua is what tags the quads for it.
+--
+-- simplified: the disconnected_<direction> boxes and disconnected_sides are
+-- read past rather than kept. What uses them is rarer than the fences and
+-- panes that use the rest, and each would be another tag on a quad.
 local function read_node_box(r)
 	local version = r:u8()
 	if version < 6 then
@@ -143,6 +148,10 @@ local function read_node_box(r)
 	local box_type = r:u8()
 	local boxes = {}
 	local wall = nil
+	-- A connected box's per-direction boxes, and the ones it has when
+	-- nothing is connected to it
+	local connect = nil
+	local alone = nil
 	if box_type == M.NODEBOX_FIXED or box_type == M.NODEBOX_LEVELED then
 		read_boxes(r, boxes)
 	elseif box_type == M.NODEBOX_WALLMOUNTED then
@@ -150,13 +159,22 @@ local function read_node_box(r)
 		boxes[1] = wall.bottom
 	elseif box_type == M.NODEBOX_CONNECTED then
 		read_boxes(r, boxes) -- fixed
-		for _ = 1, 12 do
-			read_boxes(r, nil) -- connect_* and disconnected_*
+		-- Luanti's own order is top, bottom, front, left, back, right, and
+		-- its front is -Z; these are the same six in buildat's face order,
+		-- which is +Y, -Y, +X, -X, +Z, -Z.
+		local CONNECT_FACE = {1, 2, 6, 4, 5, 3}
+		connect = {}
+		for i = 1, 6 do
+			connect[CONNECT_FACE[i]] = read_boxes(r, {})
 		end
-		read_boxes(r, boxes) -- disconnected
+		for _ = 1, 6 do
+			read_boxes(r, nil) -- disconnected_<direction>
+		end
+		alone = read_boxes(r, {})
 		read_boxes(r, nil) -- disconnected_sides
 	end
-	return {type = box_type, boxes = boxes, wall = wall}
+	return {type = box_type, boxes = boxes, wall = wall,
+			connect = connect, alone = alone}
 end
 
 -- One node's wrapper. Read as far as the fields anything here uses; the
@@ -212,9 +230,16 @@ local function read_node(r)
 	-- The palette a "color" paramtype2 indexes, as a media name
 	def.palette_name = r:string()
 	def.waving = r:u8()
-	r:u8() -- connect_sides
+	-- Which of the node's sides may reach into a solid neighbour, as
+	-- Luanti's bitmask; nonzero means the node connects to solid faces at
+	-- all, which is what this uses it for
+	def.connect_sides = r:u8()
+	-- The nodes this one connects to, as node ids. Luanti's own rule is that
+	-- both ends have to name each other when both are connecting nodes, and
+	-- that a plain node is connected to when it declares usable faces.
+	def.connects_to = {}
 	for _ = 1, r:u16() do
-		r:u16() -- connects_to ids
+		def.connects_to[#def.connects_to + 1] = r:u16()
 	end
 	-- What Luanti paints over the whole screen while the camera is inside this
 	-- node, as ARGB: a weak blue for water, a strong orange for lava. The

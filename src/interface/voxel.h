@@ -56,6 +56,16 @@ namespace interface
 		float p[4][3] = {};
 		float uv[4][2] = {};
 		uint8_t tile = 0;
+		// When this quad is drawn at all:
+		//   0     always
+		//   1...6 only when the neighbour in that direction connects, the
+		//         faces in their usual order, so 1 is +Y and 6 is -Z
+		//   7     only when none of the six connects
+		// What wants it is a fence, which is a post plus a rail per
+		// direction that has something to reach, and a pane, which is a
+		// short post when it stands alone. See connect_group below for what
+		// "connects" means.
+		uint8_t connect_dir = 0;
 	};
 
 	struct VoxelDefinition
@@ -126,6 +136,26 @@ namespace interface
 		// per voxel instead of per definition.
 		bool is_liquid = false;
 		float liquid_top = 0.5f;
+		// Which family of connecting voxels this one belongs to, 1...32, or
+		// 0 for one nothing reaches out to; and which families this one
+		// reaches out to, as a bit per family. A fence and its gates are one
+		// family, a wall another, panes and bars a third.
+		//
+		// The mesher looks at the six neighbours of a voxel whose shape has
+		// quads with a connect_dir and draws each of those quads only when
+		// its own direction connects. The cost of that is the same whatever
+		// the families are, and the mask is where the two ends meet: the
+		// game works out the families once, from whatever its own rules are,
+		// and the mesher only tests a bit.
+		uint8_t connect_group = 0;
+		uint32_t connect_mask = 0;
+		// Also connect to any neighbour that is solid, whatever family it is
+		// in. Luanti's connect_sides, which is how a fence reaches into the
+		// stone next to it.
+		//
+		// simplified: Luanti says which of the six sides may be reached that
+		// way and this is all of them.
+		bool connect_to_solid = false;
 		// TODO: Flag for whether all faces should be always drawn (in case the
 		//       textures contain holes)
 	};
@@ -150,6 +180,9 @@ namespace interface
 		uint8_t shape_group = 0;
 		bool is_liquid = false;
 		float liquid_top = 0.5f;
+		uint8_t connect_group = 0;
+		uint32_t connect_mask = 0;
+		bool connect_to_solid = false;
 
 		uint8_t tile_turns[6] = {};
 
