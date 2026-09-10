@@ -914,6 +914,18 @@ local function show_client(host, port, name, password)
 			view:set_object(obj, object_resource)
 		end
 
+		-- Particles: the spawners a game leaves running -- smoke, fire,
+		-- rain -- and the single ones it fires off, which is what digging
+		-- and footsteps are. Both are drawn by the world; what this hands
+		-- over is how to turn a texture string into a resource.
+		client.on_particle_spawner = function(id, p)
+			view:set_particle_spawner(id, p, media_texture)
+		end
+
+		client.on_particle = function(p)
+			view:add_particle(p, media_texture)
+		end
+
 		client.on_object_remove = function(id)
 			world_objects[id] = nil
 			view:remove_object(id)
@@ -2067,6 +2079,7 @@ local function show_client(host, port, name, password)
 					" %d in scene, %d to mesh | %d us to hand over"..
 					" | %d commands waiting"..
 					" | %d param2 pairs | %d hud | %d sounds"..
+					" | %d particles"..
 					" | media: %d files, %d to come",
 					client.state, condition, avatar.x, avatar.y, avatar.z,
 					avatar.fly and "flying" or
@@ -2080,7 +2093,7 @@ local function show_client(host, port, name, password)
 					view:dirty_count(), view.last_mesh_us,
 					client.commands_waiting,
 					view:pair_voxel_count(), hud_count,
-					view:sound_count(),
+					view:sound_count(), view:particle_count(),
 					store:have_count(), store:missing_count())
 		end
 
@@ -2289,6 +2302,7 @@ local function show_client(host, port, name, password)
 				end
 			end
 			view:place_objects(world_objects, dtime)
+			view:update_particles(dtime)
 			view:update_sounds(dtime)
 			view:update_fov(dtime)
 			update_hud()
@@ -2779,10 +2793,17 @@ local function show_client(host, port, name, password)
 				avatar.noclip = not avatar.noclip
 				add_line(avatar.noclip and "Through walls" or "Solid walls")
 			end
-			if key == KEY_ESCAPE and form then
-				close_form()
-			elseif key == KEY_ESCAPE then
-				leave()
+			if key == KEY_ESCAPE then
+				-- Whatever is open takes escape for itself: closing that is
+				-- what a player means by it, and only an escape with
+				-- nothing open ends the session. The chat line has a key
+				-- handler of its own that closes it, so this only has to
+				-- keep out of the way while it is up.
+				if form then
+					close_form()
+				elseif not chat_input then
+					leave()
+				end
 			end
 		end)
 	end)

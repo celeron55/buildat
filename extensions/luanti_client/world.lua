@@ -21,6 +21,8 @@ local sounds_proto = dofile(__buildat_extension_path("luanti_client")..
 		"/sounds.lua")
 local shapes = dofile(__buildat_extension_path("luanti_client")..
 		"/shapes.lua")
+local particles = dofile(__buildat_extension_path("luanti_client")..
+		"/particles.lua")
 
 local M = {}
 
@@ -1546,6 +1548,10 @@ function M.new(magic, buildat, log, options)
 	local object_technique = magic.cache:GetResource("Technique",
 			"luanti_client/res/UnlitAlphaMask.xml")
 	local box_model = magic.cache:GetResource("Model", "Models/Box.mdl")
+	-- Particles are blended rather than cut out -- smoke and a spark are
+	-- soft-edged -- and unlit, like the objects. Urho3D ships the technique.
+	local particle_technique = magic.cache:GetResource("Technique",
+			"Techniques/DiffUnlitParticleAlpha.xml")
 
 	-- The light an object is drawn in. Its texture goes on unlit -- the
 	-- entities of this game are drawn unlit in Luanti's own client too, and
@@ -1870,6 +1876,196 @@ function M.new(magic, buildat, log, options)
 				entry.textured = own ~= nil
 			end
 		end
+	end
+
+	-- The particle emitters in the scene: the spawners by the id the server
+	-- deletes them by, and the single particles, each of which is an emitter
+	-- of one that fires once.
+	local particle_nodes = {}
+	local single_particles = {}
+	-- Enough for a game's digging and footsteps at once. A batch beyond this
+	-- is dropped rather than queued: a particle that turns up late is worse
+	-- than one that does not turn up.
+	local SINGLE_PARTICLE_MAX = 128
+
+	-- One Urho3D emitter out of one Luanti particle description.
+	--
+	-- The two do not line up field for field, and this is where they are
+	-- made to. Luanti gives, per field, a tween of a range: a start range
+	-- and an end range and a way of moving between them over the spawner's
+	-- life. Urho3D gives one emitter box, one box of directions, one
+	-- constant force and one size range for the whole emitter.
+	--
+	-- simplified: the tween is dropped -- the starting range is what the
+	-- whole spawner runs at -- and so are the bias inside a range, the
+	-- collision flags, the glow, the drag, the jitter, the bounce and the
+	-- attractors. What that costs is a spawner that grows or shrinks over
+	-- its life, and particles that stop at the ground; the upgrade path is
+	-- either a manager of this client's own or more of Urho3D's own fields.
+	-- The effect is handed to the emitter by the caller, once it has set the
+	-- fields that differ between a spawner and a single particle: assigning
+	-- the same effect twice is a no-op in Urho3D, so everything has to be on
+	-- it before it goes on.
+	local function particle_effect(texture_name, amount, ttl_min,
+			ttl_max, size_min, size_max, vel_min, vel_max, acc, active_time)
+		local effect = magic.ParticleEffect.new()
+		local material = magic.Material.new()
+		material:SetTechnique(0, particle_technique)
+		material:SetTexture(0, game_texture(texture_name))
+		effect.material = material
+		effect.numParticles = amount
+		effect.relative = false
+		effect.scaled = true
+		effect.sorted = true
+		-- A fresh emitter is not in view until it has a particle in it, and
+		-- Urho3D does not update an emitter that is out of view: without
+		-- this the first particle is never emitted and nothing is ever seen
+		effect.updateInvisible = true
+		-- White, and only white: a particle with no colour frame at all
+		-- comes out as one anyway, but saying so is what keeps it that way
+		effect:AddColorTime(magic.Color(1, 1, 1, 1), 0)
+		effect.minTimeToLive = ttl_min
+		effect.maxTimeToLive = ttl_max
+		-- Luanti's size is the whole particle across; a billboard's is half
+		effect.minParticleSize = magic.Vector2(size_min / 2, size_min / 2)
+		effect.maxParticleSize = magic.Vector2(size_max / 2, size_max / 2)
+		-- The velocity: the box the direction is picked from, and the speeds
+		-- that box holds. Without the speeds every particle leaves at one
+		-- node a second whatever the game asked for, which reads as all of
+		-- them flying away from wherever they started.
+		effect.minDirection = magic.Vector3(vel_min[1], vel_min[2], vel_min[3])
+		effect.maxDirection = magic.Vector3(vel_max[1], vel_max[2], vel_max[3])
+		local near, far = particles.speed_range(vel_min, vel_max)
+		effect.minVelocity = near
+		effect.maxVelocity = far
+		effect.constantForce = magic.Vector3(acc[1], acc[2], acc[3])
+		effect.dampingForce = 0
+		-- An active time with no inactive time after it is one burst and
+		-- then nothing, which is what a spawner with a time and a single
+		-- particle both are. Zero active time never stops, which is what a
+		-- spawner with no time is.
+		effect.activeTime = active_time
+		effect.inactiveTime = 0
+		return effect, material
+	end
+
+	-- set_particle_spawner(id, p, resolve): p nil takes the spawner away,
+	-- which is what DELETE_PARTICLESPAWNER does. resolve(name) turns a
+	-- texture string into a resource name, or nil for one that has not
+	-- arrived.
+	--
+	-- simplified: a spawner attached to an object stays where the object was
+	-- when it started, rather than following it.
+	function self:set_particle_spawner(id, p, resolve)
+		local old = particle_nodes[id]
+		if old then
+			scene:RemoveChild(old.node)
+			particle_nodes[id] = nil
+		end
+		if p == nil then
+			return
+		end
+		local texture_name = p.texture ~= "" and resolve(p.texture) or nil
+		if not texture_name then
+			return
+		end
+		local pos = particles.middle(p.pos.start)
+		local size = p.size.start
+		local exptime = p.exptime.start
+		local node = scene:CreateChild("particles_"..id)
+		node.position = magic.Vector3(pos[1], pos[2], pos[3])
+		local amount = math.max(1, math.min(p.amount, 1000))
+		local effect = particle_effect(texture_name,
+				amount, math.max(0.01, exptime.min),
+				math.max(0.01, exptime.max),
+				math.max(0.001, size.min), math.max(0.001, size.max),
+				p.vel.start.min, p.vel.start.max,
+				particles.middle(p.acc.start), p.time)
+		-- What the emitter box is: the position range, which the node sits
+		-- in the middle of
+		effect.emitterType = 1 -- EMITTER_BOX
+		effect.emitterSize = magic.Vector3(
+				math.max(0, p.pos.start.max[1] - p.pos.start.min[1]),
+				math.max(0, p.pos.start.max[2] - p.pos.start.min[2]),
+				math.max(0, p.pos.start.max[3] - p.pos.start.min[3]))
+		-- Luanti spawns amount particles over time seconds, and amount a
+		-- second when there is no time at all
+		local rate = p.time > 0 and amount / p.time or amount
+		effect.minEmissionRate = rate
+		effect.maxEmissionRate = rate
+		local emitter = node:CreateComponent("ParticleEmitter")
+		emitter.effect = effect
+		emitter.emitting = true
+		emitter.castShadows = false
+		-- A spawner that ends takes itself away once the last particle it
+		-- made has expired; one with no time waits for the server
+		local life = nil
+		if p.time > 0 then
+			life = p.time + exptime.max + 0.5
+		end
+		particle_nodes[id] = {node = node, life = life}
+	end
+
+	-- One particle the server picked itself: an emitter of one that fires
+	-- once and is taken away when it has expired.
+	function self:add_particle(p, resolve)
+		if #single_particles >= SINGLE_PARTICLE_MAX then
+			return
+		end
+		local texture_name = p.texture ~= "" and resolve(p.texture) or nil
+		if not texture_name then
+			return
+		end
+		local ttl = math.max(0.01, p.exptime)
+		local node = scene:CreateChild("particle")
+		node.position = magic.Vector3(p.pos[1], p.pos[2], p.pos[3])
+		local effect = particle_effect(texture_name, 1,
+				ttl, ttl, math.max(0.001, p.size), math.max(0.001, p.size),
+				p.vel, p.vel, p.acc, 0.05)
+		effect.emitterType = 0 -- EMITTER_SPHERE, of no size
+		effect.emitterSize = magic.Vector3(0, 0, 0)
+		effect.minEmissionRate = 100
+		effect.maxEmissionRate = 100
+		local emitter = node:CreateComponent("ParticleEmitter")
+		emitter.effect = effect
+		emitter.emitting = true
+		emitter.castShadows = false
+		single_particles[#single_particles + 1] =
+				{node = node, life = ttl + 0.5}
+	end
+
+	-- Ages the emitters and takes away the ones that are done with. A
+	-- spawner with no time of its own is not aged: the server deletes it.
+	function self:update_particles(dtime)
+		for id, entry in pairs(particle_nodes) do
+			if entry.life then
+				entry.life = entry.life - dtime
+				if entry.life <= 0 then
+					scene:RemoveChild(entry.node)
+					particle_nodes[id] = nil
+				end
+			end
+		end
+		local i = 1
+		while i <= #single_particles do
+			local entry = single_particles[i]
+			entry.life = entry.life - dtime
+			if entry.life <= 0 then
+				scene:RemoveChild(entry.node)
+				table.remove(single_particles, i)
+			else
+				i = i + 1
+			end
+		end
+	end
+
+	-- For the counters line
+	function self:particle_count()
+		local n = #single_particles
+		for _, _ in pairs(particle_nodes) do
+			n = n + 1
+		end
+		return n
 	end
 
 	function self:remove_object(id)

@@ -38,6 +38,7 @@ local hud = dofile(dir.."/hud.lua")
 local b3dmesh = dofile(dir.."/b3dmesh.lua")
 local luanti_client = dofile(dir.."/client.lua")
 local sounds = dofile(dir.."/sounds.lua")
+local particles = dofile(dir.."/particles.lua")
 local itemdef = dofile(dir.."/itemdef.lua")
 local nodemeta = dofile(dir.."/nodemeta.lua")
 local objmesh = dofile(dir.."/objmesh.lua")
@@ -1916,6 +1917,88 @@ do
 end
 
 print("client: ok")
+-- particles.lua: a spawner off the wire, and where its fields land
+do
+	-- The three shapes the format is built out of, written the way Luanti
+	-- writes them: a tween of a range of vectors is style, reps, offset, and
+	-- then two ranges, each of which is min, max and a bias.
+	local function v3f_range(w, min, max, bias)
+		w:v3f(min[1], min[2], min[3])
+		w:v3f(max[1], max[2], max[3])
+		w:f32(bias or 0)
+	end
+	local function f32_range(w, min, max, bias)
+		w:f32(min):f32(max):f32(bias or 0)
+	end
+	local w = serialize.writer()
+	w:u16(24) -- amount
+	w:f32(2.5) -- time
+	w:u8(0):u16(1):f32(0) -- pos: style, reps, offset
+	v3f_range(w, {1, 2, 3}, {3, 4, 5})
+	v3f_range(w, {0, 0, 0}, {0, 0, 0})
+	w:u8(0):u16(1):f32(0) -- vel
+	v3f_range(w, {-1, 0, -1}, {1, 2, 1})
+	v3f_range(w, {0, 0, 0}, {0, 0, 0})
+	w:u8(0):u16(1):f32(0) -- acc
+	v3f_range(w, {0, -9, 0}, {0, -9, 0})
+	v3f_range(w, {0, 0, 0}, {0, 0, 0})
+	w:u8(0):u16(1):f32(0) -- exptime
+	f32_range(w, 0.5, 1.5)
+	f32_range(w, 0, 0)
+	w:u8(0):u16(1):f32(0) -- size
+	f32_range(w, 1, 2)
+	f32_range(w, 0, 0)
+	w:u8(1) -- collisiondetection
+	w:longstring("smoke.png")
+	w:u32(4242) -- server id
+	w:u8(0) -- vertical
+	w:u8(1) -- collision_removal
+	w:u16(0) -- attached object
+	w:u8(0) -- no animation
+	w:u8(7) -- glow
+	w:u8(0) -- object_collision
+	w:u16(11):u8(2):u8(3) -- the optional node fields
+	local p = particles.parse_spawner(serialize.reader(w:data()), 46)
+	assert(p, "particles: a spawner reads")
+	assert(p.amount == 24 and math.abs(p.time - 2.5) < 1e-6,
+			"particles: amount and time")
+	assert(p.pos.start.min[1] == 1 and p.pos.start.max[3] == 5,
+			"particles: the position range")
+	assert(p.vel.start.min[1] == -1 and p.vel.start.max[2] == 2,
+			"particles: the velocity range")
+	assert(math.abs(particles.middle(p.acc.start)[2] + 9) < 1e-6,
+			"particles: the middle of the acceleration range")
+	assert(math.abs(particles.middle(p.size.start) - 1.5) < 1e-6,
+			"particles: the middle of a plain range")
+	assert(p.texture == "smoke.png" and p.server_id == 4242,
+			"particles: the texture and the id it is deleted by")
+	assert(p.glow == 7 and p.collision and p.collision_removal and
+			not p.vertical, "particles: the flags past the texture")
+	assert(p.node_param0 == 11 and p.node_tile == 3,
+			"particles: the optional node fields")
+	-- A server too old to have the tweens on the wire is dropped rather
+	-- than read wrong
+	assert(particles.parse_spawner(serialize.reader(w:data()), 41) == nil,
+			"particles: an older protocol is not read")
+
+	-- The speeds a box of velocity vectors holds, which is what Urho3D
+	-- wants instead of the box
+	local near, far = particles.speed_range({0, 0, 3}, {0, 0, 3})
+	assert(math.abs(near - 3) < 1e-6 and math.abs(far - 3) < 1e-6,
+			"particles: one velocity is one speed")
+	near, far = particles.speed_range({-1, -1, -1}, {1, 1, 1})
+	assert(near == 0 and math.abs(far - math.sqrt(3)) < 1e-6,
+			"particles: a box around the origin can hold a standstill")
+	near, far = particles.speed_range({1, 0, 0}, {2, 0, 0})
+	assert(math.abs(near - 1) < 1e-6 and math.abs(far - 2) < 1e-6,
+			"particles: a range along one axis is that range of speeds")
+	near, far = particles.speed_range({-2, 1, 0}, {-1, 2, 0})
+	assert(math.abs(near - math.sqrt(2)) < 1e-6 and
+			math.abs(far - math.sqrt(8)) < 1e-6,
+			"particles: neither end of a box need face the origin")
+end
+
+print("particles: ok")
 
 
 

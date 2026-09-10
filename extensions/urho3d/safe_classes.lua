@@ -1118,8 +1118,51 @@ function M.define(dst, util)
 		inherited_from_by_wrapper = dst.Texture,
 	})
 
+	-- What a ParticleEmitter emits, and the only way to say it: an effect
+	-- built here rather than loaded from a resource, because the description
+	-- comes over the network. EmitterType is 0 for a sphere and 1 for a box.
 	util.wc("ParticleEffect", {
 		inherited_from_by_wrapper = dst.Resource,
+		class = {
+			new = function()
+				return util.wrap_instance("ParticleEffect",
+						ParticleEffect:new())
+			end,
+		},
+		instance = {
+			AddColorTime = util.self_function("AddColorTime", {},
+					{"ParticleEffect", "Color", "number"}),
+		},
+		properties = {
+			material = util.simple_property(dst.Material),
+			numParticles = util.simple_property("number"),
+			emitterType = util.simple_property("number"),
+			emitterSize = util.simple_property(dst.Vector3),
+			minDirection = util.simple_property(dst.Vector3),
+			maxDirection = util.simple_property(dst.Vector3),
+			constantForce = util.simple_property(dst.Vector3),
+			dampingForce = util.simple_property("number"),
+			activeTime = util.simple_property("number"),
+			inactiveTime = util.simple_property("number"),
+			minEmissionRate = util.simple_property("number"),
+			maxEmissionRate = util.simple_property("number"),
+			minParticleSize = util.simple_property(dst.Vector2),
+			maxParticleSize = util.simple_property(dst.Vector2),
+			minTimeToLive = util.simple_property("number"),
+			maxTimeToLive = util.simple_property("number"),
+			minVelocity = util.simple_property("number"),
+			maxVelocity = util.simple_property("number"),
+			minRotation = util.simple_property("number"),
+			maxRotation = util.simple_property("number"),
+			minRotationSpeed = util.simple_property("number"),
+			maxRotationSpeed = util.simple_property("number"),
+			sizeAdd = util.simple_property("number"),
+			sizeMul = util.simple_property("number"),
+			relative = util.simple_property("boolean"),
+			scaled = util.simple_property("boolean"),
+			sorted = util.simple_property("boolean"),
+			updateInvisible = util.simple_property("boolean"),
+		},
 	})
 
 	util.wc("Animation", {
