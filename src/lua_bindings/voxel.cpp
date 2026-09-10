@@ -216,6 +216,51 @@ static void vdef_set_shape_masked(VoxelDefinition &def,
 	def.shape_masked_begin[20] = (uint16_t)def.shape_masked.size();
 }
 
+// voxel_reg:set_format{plane_bits = 32, id = {shift = 0, width = 16}, ...}
+//
+// The roles are id, light_sky, light_lamp, param and color; a role left out
+// is not bound. See VoxelFormat in interface/voxel.h and doc/client_api.txt.
+static interface::VoxelField field_from_lua(const luabind::object &t,
+		const char *name)
+{
+	luabind::object f = t[name];
+	if(!f || luabind::type(f) != LUA_TTABLE)
+		return interface::VoxelField();
+	auto number = [&](const char *key, double def){
+		luabind::object v = f[key];
+		if(!v || luabind::type(v) != LUA_TNUMBER)
+			return def;
+		return luabind::object_cast<double>(v);
+	};
+	return interface::VoxelField(
+			(uint8_t)number("plane", 0),
+			(uint8_t)number("shift", 0),
+			(uint8_t)number("width", 0));
+}
+
+static void vreg_set_format(VoxelRegistry &reg, const luabind::object &t)
+{
+	if(!t || luabind::type(t) != LUA_TTABLE)
+		throw Exception("set_format(): argument is not a table");
+	interface::VoxelFormat format;
+	{
+		luabind::object v = t["plane_bits"];
+		if(v && luabind::type(v) == LUA_TNUMBER)
+			format.plane_bits = (uint8_t)luabind::object_cast<double>(v);
+	}
+	format.id = field_from_lua(t, "id");
+	format.light_sky = field_from_lua(t, "light_sky");
+	format.light_lamp = field_from_lua(t, "light_lamp");
+	format.param = field_from_lua(t, "param");
+	format.color = field_from_lua(t, "color");
+	reg.set_format(format);
+}
+
+static ss_ vreg_dump_format(VoxelRegistry &reg)
+{
+	return reg.get_format().dump();
+}
+
 sp_<VoxelRegistry> createVoxelRegistry(lua_State *L)
 {
 	return sp_<VoxelRegistry>(
@@ -301,6 +346,8 @@ void init_voxel(lua_State *L)
 					&VoxelRegistry::serialize)
 			.def("deserialize", (void(VoxelRegistry::*) (const ss_ &))
 					&VoxelRegistry::deserialize)
+			.def("set_format", &vreg_set_format)
+			.def("dump_format", &vreg_dump_format)
 		,
 		def("__buildat_createVoxelRegistry", &createVoxelRegistry)
 	];

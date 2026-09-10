@@ -392,6 +392,7 @@ buildat.pack_voxel_volume(args) -> string
 
   buildat.pack_voxel_volume{
       region = {x0, y0, z0, x1, y1, z1}, -- inclusive corners
+      registry = <VoxelRegistry>,        -- optional; whose format applies
       fill = 0,                          -- raw voxel value the rest gets
       sources = {
           {
@@ -408,7 +409,7 @@ buildat.pack_voxel_volume(args) -> string
               map_default = nil,         -- for keys the map does not have
               map_id = nil,              -- compile this map once; see below
               map_version = nil,         -- bump when the map changes
-              field = "id",              -- id|skylight|lamplight|light|raw
+              field = "id",              -- a role of the voxel format
               second = {                 -- optional; nil for one array
                   data = <string>,       -- as long as the first array
                   format = "u8",
@@ -419,11 +420,16 @@ buildat.pack_voxel_volume(args) -> string
       },
   }
 
-- field says which part of a voxel a source writes: "id" the type id (bits
-  0..20), "skylight" bits 24..27, "lamplight" bits 28..31, "light" both of
-  those in one write (bits 24..31, skylight in the low nibble), "raw" all 32
-  bits. Other bits are left alone, so ids and light are two sources over the
-  same box.
+- field says which part of a voxel a source writes, by naming a role of the
+  voxel format rather than a bit range: "id", "skylight", "lamplight",
+  "light" (both light channels in one write, the sky light in the low bits),
+  "param", "color", or "raw" for the whole word. Where a role actually is
+  depends on the format, which comes from args.registry; without a registry
+  the default format applies, which is id in bits 0..20 and the two lights in
+  24..31. Other bits are left alone, so ids and light are two sources over
+  the same box.
+- A field naming a role the format does not bind is an error, as is "light"
+  in a format whose two light channels are not adjacent.
 - map is a table indexed by the key, or a string with one byte per key. A key
   the map does not mention gets map_default, and with no map_default the voxel
   is left as it was. Keys too far apart to be an array are held as a hash, so
