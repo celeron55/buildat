@@ -103,6 +103,14 @@ local MEDIA_WAIT_S = 15
 -- the files inside it are addressed as "<server>/<name>", so two servers with
 -- a same-named texture do not collide.
 local MEDIA_ROOT = __buildat_get_path("cache").."/luanti_media"
+
+-- What a form calls the inventory it is a form *of*: a chest writes
+-- list[current_name;main;...] and a furnace list[context;src;...]. Luanti
+-- treats the two as the same thing (guiFormSpecMenu.cpp: `location ==
+-- "context" || location == "current_name"`), and a game that uses only one
+-- of them is common enough that missing either means its slots cannot be
+-- filled at all.
+local FORM_OWN_INVENTORY = {["current_name"] = true, ["context"] = true}
 local media_root_added = false
 
 -- Luanti's day/night ratio, from its daynightratio.h: 0.175 at night, 1.0 in
@@ -1064,6 +1072,23 @@ local function show_client(host, port, name, password)
 		client.on_node_meta = function(entries)
 			view:set_node_meta(entries)
 			if form then
+				-- A node's form *is* the string in its metadata, and a game
+				-- rewrites that string as the node works: a furnace's flame
+				-- and its progress arrow are images whose [lowpart is
+				-- redrawn every tick. Luanti's own client re-reads the
+				-- string every frame (NodeMetadataFormSource); this one
+				-- re-reads it when the metadata arrives, which is when it
+				-- can have changed. The form's state -- the scroll, the
+				-- stack in hand -- is kept: only the layout is new.
+				if form.at then
+					local meta = view:node_meta(form.at[1], form.at[2],
+							form.at[3])
+					local spec = meta and meta.fields and
+							meta.fields.formspec
+					if spec and spec ~= "" then
+						form.spec = spec
+					end
+				end
 				form_stale = true
 			end
 		end
@@ -1417,10 +1442,11 @@ local function show_client(host, port, name, password)
 			-- off a voxel, which is what a chest's slots are.
 			inventory = function(location, list_name)
 				local lists = nil
-				if location == "current_name" and form and form.at then
+				if FORM_OWN_INVENTORY[location] and form and form.at then
 					-- The form's own inventory, which for a form a node
 					-- carries is that node's: a chest says
-					-- list[current_name;main;...]
+					-- list[current_name;main;...] and a furnace
+					-- list[context;src;...]
 					local meta = view:node_meta(form.at[1], form.at[2],
 							form.at[3])
 					lists = meta and meta.lists or nil
@@ -1831,8 +1857,12 @@ local function show_client(host, port, name, password)
 				held_element.size = magic.IntVector2(size, size)
 				local resource = item_image(held.name)
 				if resource then
-					held_element.texture = magic.cache:GetResource(
+					-- Pixel art, like everything else a game ships; see
+					-- formspec_ui.lua's game_texture()
+					local tex = magic.cache:GetResource(
 							"Texture2D", resource)
+					tex.filterMode = magic.FILTER_NEAREST
+					held_element.texture = tex
 				else
 					held_element.texture = magic.cache:GetResource(
 							"Texture2D", "luanti_client/res/white.png")
@@ -1879,10 +1909,10 @@ local function show_client(host, port, name, password)
 		end
 
 		-- What the server calls the inventory a slot is in. A form a node
-		-- carries says "current_name" for its own; an inventory action has
-		-- to name the node itself.
+		-- carries names its own inventory with one of FORM_OWN_INVENTORY's
+		-- two names; an inventory action has to name the node itself.
 		local function inv_location(location)
-			if location == "current_name" and form and form.at then
+			if FORM_OWN_INVENTORY[location] and form and form.at then
 				return "nodemeta:"..form.at[1]..","..form.at[2]..","..
 						form.at[3]
 			end

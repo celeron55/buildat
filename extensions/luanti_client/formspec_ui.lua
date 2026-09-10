@@ -64,6 +64,19 @@ function M.new(magic, buildat, log, ctx)
 		return depth
 	end
 
+	-- A game's own image, without smoothing: everything a Luanti game ships
+	-- is pixel art, and the UI draws it at whatever size the form asked for,
+	-- so interpolating it turns a furnace's flame and an item's picture into
+	-- a blur. The world's textures have said FILTER_NEAREST all along; these
+	-- are the same files.
+	local function game_texture(resource)
+		local tex = magic.cache:GetResource("Texture2D", resource)
+		if tex then
+			tex.filterMode = magic.FILTER_NEAREST
+		end
+		return tex
+	end
+
 	local function texture(name)
 		if not name or name == "" then
 			return nil
@@ -72,7 +85,7 @@ function M.new(magic, buildat, log, ctx)
 		if not resource then
 			return nil
 		end
-		return magic.cache:GetResource("Texture2D", resource)
+		return game_texture(resource)
 	end
 
 	-- A rectangle of one colour, which is what a box is and what stands in
@@ -185,7 +198,7 @@ function M.new(magic, buildat, log, ctx)
 					math.floor(y + size * 0.1))
 			e.size = magic.IntVector2(math.floor(size * 0.8),
 					math.floor(size * 0.8))
-			e.texture = magic.cache:GetResource("Texture2D", resource)
+			e.texture = game_texture(resource)
 			e.priority = next_priority()
 		elseif stack then
 			-- Something is there but there is no image for it; a marked
