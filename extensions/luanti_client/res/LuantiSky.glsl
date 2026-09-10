@@ -38,6 +38,10 @@ uniform float cCloudCoverage;
 // texture instead of a flat colour.
 uniform float cSunTextured;
 uniform float cMoonTextured;
+// How fast the cloud layer drifts, in this file's own units per second. The
+// game says nodes a second and the client fudges it, because these clouds
+// are not a layer at a height; see CLOUD_WIND below for what a node comes to.
+uniform vec2 cCloudWind;
 
 // How far below the horizon the sky darkens into the ground haze
 const float HAZE_DEPTH = 0.25;
@@ -54,7 +58,6 @@ const vec3 SUN_COLOR = vec3(1.0, 0.97, 0.86);
 const float CLOUD_SCALE = 6.0;
 const float CLOUD_PIXELS = 11.0;
 const float CLOUD_LIT_STEP = 0.07;
-const vec2 CLOUD_WIND = vec2(0.010, 0.004);
 const float CLOUD_HORIZON = 0.16;
 const float CLOUD_FADE = 0.38;
 
@@ -158,7 +161,7 @@ void PS()
     // flat and crowd together towards the horizon instead of wrapping the dome
     if(d.y > 0.0 && cCloudCoverage > 0.0){
         vec2 p = d.xz / max(d.y, CLOUD_HORIZON) * CLOUD_SCALE +
-                cElapsedTimePS * CLOUD_WIND;
+                cElapsedTimePS * cCloudWind;
         float density = CloudDensity(floor(p * CLOUD_PIXELS) / CLOUD_PIXELS);
         float threshold = 1.0 - cCloudCoverage;
         vec3 cloud = density > threshold + CLOUD_LIT_STEP ?

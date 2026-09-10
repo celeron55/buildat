@@ -483,6 +483,17 @@ are not on the wire and a spawner is dropped rather than read wrong. A
 spawner attached to an object stays where the object was when it started, and
 a batch beyond 128 live single particles is dropped rather than queued.
 
+The clouds are a flat layer faked in the sky shader -- the view direction
+divided by its own y, which is what makes them crowd towards the horizon --
+rather than a layer at a height. So of what CLOUD_PARAMS says, the density
+becomes how much of the sky they cover and the speed becomes how fast the
+layer drifts, through a factor picked so that Luanti's own default drifts at
+the rate the shader had baked in before a game could ask for anything: twice
+the speed is twice as fast, and that is what the field is for. The height and
+the thickness have nothing to become and are dropped. Drawing the real thing
+-- a slab of cloud at a height, which the player can fly above and through --
+is deliberately not done; see the plan.
+
 The crack that grows over a node being dug is the client's own texture rather
 than the game's -- no server sends one -- so res/crack_anylength.png is
 Luanti's, and res/LICENSE says so. The strip is cut into frames by the same
