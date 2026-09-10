@@ -340,6 +340,18 @@ namespace interface
 		virtual void clear() = 0;
 		virtual sv_<VoxelDefinition> get_all() = 0;
 
+		// How a voxel word is cut up; see VoxelFormat. The default is
+		// VoxelFormat::legacy().
+		//
+		// set_format() may only be called while the registry holds no voxel
+		// definitions, which in practice means before a world generates
+		// anything: everything saved in the world, and every volume on its
+		// way to a client, is bits under this format, and there is no
+		// migration for changing it underneath them. It throws on a format
+		// that does not validate and on one that arrives too late.
+		virtual const VoxelFormat& get_format() = 0;
+		virtual void set_format(const VoxelFormat &format) = 0;
+
 		virtual VoxelTypeId add_voxel(const VoxelDefinition &def) = 0;
 
 		virtual const VoxelDefinition* get(const VoxelTypeId &id) = 0;

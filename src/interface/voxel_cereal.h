@@ -68,5 +68,26 @@ namespace interface
 	{
 		archive(v.data);
 	}
+
+	template<class Archive>
+			void serialize(Archive &archive, VoxelField &v)
+	{
+		archive(v.plane, v.shift, v.width);
+	}
+
+	template<class Archive>
+			void serialize(Archive &archive, VoxelFormat &v)
+	{
+		uint8_t version = 1;
+		archive(
+				version,
+				v.plane_bits,
+				v.id,
+				v.light_sky,
+				v.light_lamp,
+				v.param,
+				v.color
+		);
+	}
 }
 // vim: set noet ts=4 sw=4:
