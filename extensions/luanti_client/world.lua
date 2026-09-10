@@ -120,8 +120,9 @@ end)()
 -- air that sees the full sky. A face against a neighbour that has not arrived
 -- is then lit as if it were out in the open, which is wrong in a cave but
 -- only until the neighbour comes, and a wrongly lit face reads better than
--- the black one that unlit air would give. Skylight is bits 24..27.
-local VOXEL_AIR_LIT = VOXEL_AIR + 15 * 0x1000000
+-- the black one that unlit air would give. This is a raw voxel word under
+-- the format base_registry() sets, where the skylight is bits 16..19.
+local VOXEL_AIR_LIT = VOXEL_AIR + 15 * 0x10000
 
 -- How a (voxel id, param2) pair is keyed: id + param2 * this, which is what
 -- pack_voxel_volume's paired lookup wants. Luanti's ids are 16 bits.
@@ -187,6 +188,78 @@ local function turn_boxes(boxes, facedir)
 		out[i] = shapes.turn_box(box, facedir)
 	end
 	return out
+end
+
+-- What a definition's param2 does to how its voxels are drawn, as the
+-- variants buildat's mesher indexes by the param: a shape turned one way,
+-- a cube's tiles moved to the faces they end up on, a liquid's surface at
+-- one of eight levels. One variant per distinct look, claiming the param2
+-- values that come to it -- so a facedir is twenty-four of them rather
+-- than two hundred and fifty-six, and none of them is a voxel type.
+--
+-- A param2 that comes to nothing different is left unclaimed and draws as
+-- the definition itself does, which is facing 0 with a full liquid.
+--
+-- The palette is not here: a palette entry tints the *texture*, and a
+-- variant's colour tints the light, so a colour still gets a voxel of its
+-- own with its own composed textures. See build_pair().
+local function build_variants(def, facing, liquid_range, mesh_quads)
+	if not facing and not liquid_range then
+		return nil
+	end
+	local list = {}
+	local by_key = {}
+	for p2 = 0, 255 do
+		local facedir = shapes.facedir_of(facing, p2)
+		-- A wallmounted shape wants the direction itself, not only the
+		-- facedir it comes to: which of its three boxes it is made of
+		-- depends on it
+		local wall = facing == "wallmounted" and p2 % 8 or nil
+		-- A liquid at the top level is a whole cube, which the voxel
+		-- itself already is
+		local ltop = liquid_range and
+				shapes.liquid_top(liquid_range, p2) or nil
+		if ltop and ltop >= 0.5 then
+			ltop = nil
+		end
+		if (facedir and facedir ~= 0) or ltop then
+			local key = tostring(facedir).."/"..tostring(wall).."/"..
+					tostring(ltop)
+			local var = by_key[key]
+			if not var then
+				var = {params = {}}
+				local shape = shapes.for_node(def, facedir, wall,
+						mesh_quads, ltop)
+				if shape then
+					var.shape = shape
+				elseif facedir and facedir ~= 0 then
+					-- A cube wears the same six textures in the order
+					-- the turn puts them in, each turned inside its own
+					-- face. The faces are 0...5 here and 1...6 there.
+					local tiles = shapes.FACEDIR_TILES[facedir + 1]
+					if tiles then
+						local order = {}
+						for i = 1, 6 do
+							order[i] = (tiles[i] or i) - 1
+						end
+						var.tile_order = order
+						var.tile_turns =
+								shapes.FACEDIR_TILE_TURNS[facedir + 1]
+					end
+				end
+				if ltop then
+					var.liquid_top = ltop
+				end
+				by_key[key] = var
+				list[#list + 1] = var
+			end
+			var.params[#var.params + 1] = p2
+		end
+	end
+	if #list == 0 then
+		return nil
+	end
+	return list
 end
 
 local function block_key(x, y, z)
@@ -713,7 +786,7 @@ function M.new(magic, buildat, log, options)
 	-- masked is a shape per neighbour mask instead of one shape, which is
 	-- what a rail wants; see VoxelDefinition.shape_masked.
 	local function add_cube(voxel_reg, name, resources, kind, shape,
-			double_sided, turns, liquid_group, connect, masked)
+			double_sided, turns, liquid_group, connect, masked, variants)
 		local vdef = buildat.VoxelDefinition()
 		vdef.name.block_name = name
 		vdef.handler_module = ""
@@ -798,6 +871,9 @@ function M.new(magic, buildat, log, options)
 						buildat.VoxelDefinition.EDGEMATERIALID_EMPTY
 			end
 		end
+		if variants then
+			vdef.variants = variants
+		end
 		return voxel_reg:add_voxel(vdef)
 	end
 
@@ -806,6 +882,18 @@ function M.new(magic, buildat, log, options)
 	-- it with one built from what the server says the nodes are.
 	local function base_registry()
 		local voxel_reg = buildat.createVoxelRegistry()
+		-- Luanti's own cut of a 32-bit node, which fits buildat's voxel
+		-- word exactly: a 16-bit node id, param1 as two light nibbles, and
+		-- param2. What the param buys is that a node's facing and a flowing
+		-- liquid's level reach the mesher as data instead of as a voxel type
+		-- per (definition, param2) pair; see build_variants().
+		voxel_reg:set_format{
+			plane_bits = 32,
+			id = {shift = 0, width = 16},
+			light_sky = {shift = 16, width = 4},
+			light_lamp = {shift = 20, width = 4},
+			param = {shift = 24, width = 8},
+		}
 		local vdef = buildat.VoxelDefinition()
 		vdef.name.block_name = "air"
 		vdef.handler_module = ""
@@ -869,18 +957,25 @@ function M.new(magic, buildat, log, options)
 	-- definitions have not arrived and everything but air stops one
 	self.node_pointable = nil
 
-	-- One voxel id per (definition, param2) pair, for the pairs that turn up
-	-- in a block that arrives. The map is keyed the way the paired lookup
+	-- One voxel id per (definition, palette colour), for the pairs that turn
+	-- up in a block that arrives. The map is keyed the way the paired lookup
 	-- wants; pair_voxel is keyed by what actually decides the look, so two
 	-- param2 values that pick the same palette colour share a voxel id.
+	--
+	-- A colour is the only thing param2 says that still costs a voxel type:
+	-- it tints the texture, and the tint has to be composed into one. The
+	-- rest -- which way a voxel faces, how high its liquid stands -- reaches
+	-- the mesher as the param itself; see build_variants().
 	self.pair_map = {}
 	self.pair_count = 0
 	local pair_voxel = {}
 	-- Bumped when the definitions change: every block has to be looked at
 	-- again, because what its param2 means has changed
 	local pair_epoch = 0
-	-- id -> {def =, step =, colors =, facing =} for the definitions whose
-	-- param2 changes what they look like; nil for everything else
+	-- id -> {def =, step =, colors =, variants =} for the definitions whose
+	-- param2 is a palette index; nil for everything else. What param2 says
+	-- about a voxel's shape does not come through here any more -- that is
+	-- what the definitions' variants carry -- so this is only about colour.
 	local param2_look = {}
 	-- Set by set_node_definitions(), which is what knows how to build one
 	local build_pair = nil
@@ -954,6 +1049,15 @@ function M.new(magic, buildat, log, options)
 				map_id = MAP_ID_PAIR, map_version = self.pair_map_version,
 			}
 		end
+		-- param2 itself, which the definitions interpret: which way a voxel
+		-- faces, how high its liquid stands. No map -- it goes in as it is.
+		if block.param2 then
+			sources[#sources + 1] = {
+				data = block.param2, format = "u8",
+				source_size = {BLOCKSIZE, BLOCKSIZE, BLOCKSIZE},
+				at = {0, 0, 0}, field = "param",
+			}
+		end
 		if self.use_skylight then
 			sources[#sources + 1] = {
 				data = block.param1, format = "u8",
@@ -998,6 +1102,14 @@ function M.new(magic, buildat, log, options)
 						map = self.pair_map,
 						map_id = MAP_ID_PAIR,
 						map_version = self.pair_map_version,
+					}
+				end
+				if n.param2 then
+					sources[#sources + 1] = {
+						data = n.param2, format = "u8",
+						source_size = {BLOCKSIZE, BLOCKSIZE, BLOCKSIZE},
+						from = from, size = size, at = at,
+						field = "param",
 					}
 				end
 				if self.use_skylight then
@@ -1183,6 +1295,8 @@ function M.new(magic, buildat, log, options)
 		local data = buildat.pack_voxel_volume{
 			region = {VOLUME_MIN, VOLUME_MIN, VOLUME_MIN,
 					VOLUME_MAX, VOLUME_MAX, VOLUME_MAX},
+			-- Whose format the field names mean; see base_registry()
+			registry = self.voxel_reg,
 			fill = VOXEL_AIR_LIT,
 			sources = volume_sources(block),
 		}
@@ -3040,12 +3154,12 @@ function M.new(magic, buildat, log, options)
 	-- keys them by it, and adding a second voxel under a name it already has
 	-- is an error. A pair's name carries what makes it different.
 	--
-	-- facedir and wall are which way the voxel faces, out of its param2: a
-	-- shape is turned by them and a cube's tiles are moved to the faces they
-	-- end up on. liquid_top is how high a flowing liquid's surface stands,
-	-- which is the other thing param2 says about what a voxel looks like.
+	-- variants is what the voxel's param2 does to it -- turned one way, its
+	-- liquid at one of eight levels -- as build_variants() worked it out.
+	-- The voxel itself is built facing 0, with its liquid full, which is what
+	-- a param2 that means nothing draws as.
 	local function build_voxel(reg, def, resolve_tile, override, name,
-			facedir, wall, liquid_top)
+			variants)
 		local kind = CUBE_DRAWTYPES[def.drawtype]
 		local group = liquid_group(def)
 		-- What the mesher needs to work out this voxel's connections per
@@ -3056,10 +3170,8 @@ function M.new(magic, buildat, log, options)
 			connect = {group = def.connect_group, mask = def.connect_mask,
 					solid = (def.connect_sides or 0) ~= 0}
 		end
-		local shape, double_sided, masked = shapes.for_node(def, facedir,
-				wall, read_mesh and read_mesh(def) or nil, liquid_top)
-		local tiles = facedir and facedir ~= 0 and
-				shapes.FACEDIR_TILES[facedir + 1] or nil
+		local shape, double_sided, masked = shapes.for_node(def, nil,
+				nil, read_mesh and read_mesh(def) or nil, nil)
 		if def.drawtype == DRAWTYPE_AIRLIKE then
 			return VOXEL_AIR
 		end
@@ -3104,25 +3216,20 @@ function M.new(magic, buildat, log, options)
 				resources[i] = resources[i] or first
 			end
 			return add_cube(reg, name or def.name, resources, kind, shape,
-					double_sided, nil, group, connect, masked)
+					double_sided, nil, group, connect, masked, variants)
 		end
 		if not kind then
 			return nil
 		end
 		local resources = {}
 		for i = 1, 6 do
-			-- tiles says which of the definition's tiles this face wears,
-			-- which is what a facedir comes to for a cube
-			resources[i] = resolve_tile(def, tiles and tiles[i] or i, override)
+			resources[i] = resolve_tile(def, i, override)
 			if not resources[i] then
 				return nil
 			end
 		end
-		-- And how far the texture is turned inside the face it ended up on
-		local turns = facedir and facedir ~= 0 and
-				shapes.FACEDIR_TILE_TURNS[facedir + 1] or nil
 		return add_cube(reg, name or def.name, resources, kind, nil, nil,
-				turns, group, connect)
+				nil, group, connect, nil, variants)
 	end
 
 	-- Builds the registry for a set of node definitions a slice at a time.
@@ -3203,7 +3310,16 @@ function M.new(magic, buildat, log, options)
 			if def.post_effect_color and def.post_effect_color.a > 0 then
 				post_effect[id] = def.post_effect_color
 			end
-			local voxel = build_voxel(new_reg, def, resolve_tile, nil)
+			local facing = FACING[def.param_type_2]
+			-- A flowing liquid's param2 says how high its surface stands.
+			-- The range is how many of the eight levels the liquid spends on
+			-- the top of a voxel.
+			local liquid_range = def.drawtype == DRAWTYPE_FLOWINGLIQUID and
+					(def.liquid_range or 8) or nil
+			local variants = build_variants(def, facing, liquid_range,
+					read_mesh and read_mesh(def) or nil)
+			local voxel = build_voxel(new_reg, def, resolve_tile, nil, nil,
+					variants)
 			if voxel then
 				map[id] = voxel
 				if voxel ~= VOXEL_AIR then
@@ -3214,7 +3330,8 @@ function M.new(magic, buildat, log, options)
 
 			-- A definition whose param2 is a palette index is drawn in one
 			-- colour per index, and which colour that is is only known once
-			-- a voxel with that param2 turns up: see register_pairs().
+			-- a voxel with that param2 turns up: see register_pairs(). This
+			-- is the one thing param2 says that a variant cannot carry.
 			local step = COLOR_STEP[def.param_type_2]
 			local colors = nil
 			if step and def.palette_name ~= "" and palette_colors then
@@ -3223,14 +3340,6 @@ function M.new(magic, buildat, log, options)
 					colors = nil
 				end
 			end
-			local facing = FACING[def.param_type_2]
-			-- A flowing liquid's param2 says how high its surface stands, so
-			-- it wants a voxel per level the same way a facedir wants one per
-			-- direction. The range is how many of the eight levels the liquid
-			-- spends on the top of a voxel.
-			local liquid_range = def.drawtype == DRAWTYPE_FLOWINGLIQUID and
-					(def.liquid_range or 8) or nil
-
 			-- What the player runs into. Luanti takes the collision box when
 			-- the definition has one and the node box otherwise; a voxel
 			-- whose boxes are not there at all is a whole cube, which is
@@ -3255,10 +3364,11 @@ function M.new(magic, buildat, log, options)
 				selection[id] = {boxes = sbox.boxes, facing = facing}
 			end
 
-			if voxel and (colors or facing or liquid_range) then
+			-- Only a palette needs a voxel per param2 now; the rest of what
+			-- param2 says is in the variants
+			if voxel and colors then
 				new_param2_look[id] = {def = def, step = step,
-						colors = colors, facing = facing,
-						liquid_range = liquid_range}
+						colors = colors, variants = variants}
 			end
 		end
 
@@ -3269,43 +3379,21 @@ function M.new(magic, buildat, log, options)
 		build_pair = function(entry, id, p2, key)
 			-- Luanti stretches a palette to 256 entries by repeating each
 			-- pixel, and indexes that with param2's high bits
-			local index = entry.colors and
-					math.floor((p2 - p2 % entry.step) *
-					#entry.colors / 256) + 1 or nil
-			local facedir = shapes.facedir_of(entry.facing, p2)
-			-- A wallmounted shape wants the direction itself, not only the
-			-- facedir it comes to: which of its three boxes it is made of
-			-- depends on it
-			local wall = entry.facing == "wallmounted" and p2 % 8 or nil
-			-- A liquid at the top level is a whole cube, which the id's own
-			-- voxel already is -- and one whose faces against the next one
-			-- are culled, which a shape's are not
-			local liquid_top = entry.liquid_range and
-					shapes.liquid_top(entry.liquid_range, p2) or nil
-			if liquid_top and liquid_top >= 0.5 then
-				liquid_top = nil
-			end
-			-- Two param2 values that come to the same colour, the same facing
-			-- and the same liquid level are the same voxel
-			local cache_key = id.."/"..tostring(index).."/"..
-					tostring(facedir).."/"..tostring(wall).."/"..
-					tostring(liquid_top)
-			-- Nothing different about it: the voxel the id already has, which
-			-- was built facing 0 and, if wallmounted, on the floor
+			local index = math.floor((p2 - p2 % entry.step) *
+					#entry.colors / 256) + 1
+			-- Two param2 values that come to the same colour are the same
+			-- voxel. What else their param2 says -- a facing, a liquid level
+			-- -- is in the variants and does not make a voxel of its own.
+			local cache_key = id.."/"..index
 			-- Whatever this writes, the map is not the one that was
 			-- compiled for the last block
 			self.pair_map_version = self.pair_map_version + 1
-			if not index and not liquid_top and
-					(not facedir or facedir == 0) then
-				self.pair_map[key] = self.node_map[id] or false
-				return
-			end
 			local voxel = pair_voxel[cache_key]
 			if voxel == nil then
 				voxel = build_voxel(self.voxel_reg, entry.def, resolve_tile,
-						index and entry.colors[index] or nil,
+						entry.colors[index],
 						entry.def.name.."^"..cache_key,
-						facedir, wall, liquid_top) or false
+						entry.variants) or false
 				pair_voxel[cache_key] = voxel
 			end
 			-- false for a pair whose textures are not there: remembered so
@@ -3522,6 +3610,86 @@ function M.new(magic, buildat, log, options)
 	end
 
 	return self
+end
+
+-- Checks build_variants(), which is where what Luanti's param2 means turns
+-- into the variants buildat's mesher indexes by the param. init.lua runs it at
+-- boot, next to the other self-tests.
+function M.self_test()
+	-- A cube that faces one of twenty-four directions. Every param2 but the
+	-- ones that come to facedir 0 is claimed, and each claimed one gets the
+	-- tile order and the turns its direction asks for.
+	local vs = build_variants({drawtype = 0}, "facedir", nil)
+	assert(vs, "a facedir cube got no variants")
+	assert(#vs == 23, "a facedir cube got "..#vs.." variants, not 23")
+	local claimed = {}
+	local total = 0
+	for _, v in ipairs(vs) do
+		assert(v.tile_order and v.tile_turns,
+				"a facedir variant has no tile order")
+		assert(not v.shape, "a facedir cube variant has a shape")
+		for _, p2 in ipairs(v.params) do
+			assert(not claimed[p2], "param2 "..p2.." is claimed twice")
+			claimed[p2] = v
+			total = total + 1
+		end
+	end
+	-- Luanti reads a facedir out of param2 as p2 % 32 % 24, so each of the
+	-- 24 directions is claimed by the param2 values that come to it, and the
+	-- ones that come to 0 are left for the definition itself
+	local unclaimed = 0
+	for p2 = 0, 255 do
+		if shapes.facedir_of("facedir", p2) == 0 then
+			assert(not claimed[p2], "param2 "..p2.." faces 0 and is claimed")
+			unclaimed = unclaimed + 1
+		else
+			assert(claimed[p2], "param2 "..p2.." faces "..
+					shapes.facedir_of("facedir", p2).." and is unclaimed")
+		end
+	end
+	assert(total + unclaimed == 256,
+			total.." + "..unclaimed.." param2 values, not 256")
+	-- The tile order is the faces 0...5, permuted; two directions that are
+	-- not the same do not get the same one
+	local seen = {}
+	for _, v in ipairs(vs) do
+		local key = table.concat(v.tile_order, ",").."/"..
+				table.concat(v.tile_turns, ",")
+		assert(not seen[key], "two facedirs come to the same tiles: "..key)
+		seen[key] = true
+		local used = {}
+		for i = 1, 6 do
+			local f = v.tile_order[i]
+			assert(f >= 0 and f <= 5, "tile order has face "..f)
+			assert(not used[f], "tile order wears face "..f.." twice")
+			used[f] = true
+		end
+	end
+
+	-- 4dir is the same thing with four directions, so three variants
+	local four = build_variants({drawtype = 0}, "4dir", nil)
+	assert(four and #four == 3, "4dir got "..tostring(four and #four).." variants")
+
+	-- A flowing liquid: one variant per level below the top, each a shape
+	-- rather than a cube, and the levels rise with param2
+	local liq = build_variants({drawtype = 10, liquid_range = 8}, nil, 8)
+	assert(liq, "a flowing liquid got no variants")
+	local tops = {}
+	for _, v in ipairs(liq) do
+		assert(v.liquid_top and v.liquid_top < 0.5,
+				"a liquid variant stands at "..tostring(v.liquid_top))
+		tops[#tops + 1] = v.liquid_top
+	end
+	assert(#liq >= 7, "a flowing liquid got "..#liq.." levels")
+	for i = 2, #tops do
+		assert(tops[i] > tops[i - 1],
+				"liquid levels are not in order: "..tops[i - 1].." then "..
+				tops[i])
+	end
+
+	-- Nothing to say about param2, nothing built
+	assert(build_variants({drawtype = 0}, nil, nil) == nil,
+			"a definition with no param2 meaning got variants")
 end
 
 M.BLOCKSIZE = BLOCKSIZE

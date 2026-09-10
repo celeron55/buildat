@@ -3268,6 +3268,8 @@ local function self_tests()
 	log:info("srp: self-test ok")
 	engine_test.self_test()
 	log:info("engine primitives: self-test ok")
+	world.self_test()
+	log:info("world: self-test ok")
 end
 
 -- Launched as the client's whole reason for running: `buildat -m
