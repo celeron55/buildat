@@ -419,8 +419,12 @@ local function write_node(name, drawtype, tile_names, flags, animation, opts)
 	w:u8(255):u8(254):u8(253) -- color
 	w:string(opts.palette or "")
 	w:u8(0) -- waving
-	w:u8(0) -- connect_sides
-	w:u16(0) -- connects_to
+	w:u8(opts.connect_sides or 0)
+	local connects_to = opts.connects_to or {}
+	w:u16(#connects_to)
+	for _, id in ipairs(connects_to) do
+		w:u16(id)
+	end
 	local pe = opts.post_effect_color
 	w:u8(pe and pe.a or 0):u8(pe and pe.r or 0)
 	w:u8(pe and pe.g or 0):u8(pe and pe.b or 0)
@@ -444,11 +448,48 @@ local function write_node(name, drawtype, tile_names, flags, animation, opts)
 	w:u8(0) -- liquid_range
 	w:u8(opts.drowning or 0)
 	w:u8(0) -- floodable
-	-- Everything after this is skipped by the parser, which is what lets it
-	-- read a newer ContentFeatures than it knows: node boxes, sounds, and the
-	-- fields added after them
-	w:raw(string.rep("\255", 40))
+	-- The three node boxes, and then the fields the parser stops before --
+	-- sounds and everything added after them -- which is what lets it read a
+	-- newer ContentFeatures than it knows. A node that does not care what
+	-- its boxes are gets bytes that read as a box type nothing knows, which
+	-- is what the parser makes of a newer one too.
+	if opts.write_boxes then
+		opts.write_boxes(w)
+	else
+		w:raw(string.rep("\255", 40))
+	end
 	return w:data()
+end
+
+-- The boxes of one node box, in Luanti's BS units
+local function write_boxes(w, boxes)
+	w:u16(#boxes)
+	for _, b in ipairs(boxes) do
+		for i = 1, 6 do
+			w:f32(b[i] * 10)
+		end
+	end
+end
+
+local function write_regular_box(w)
+	w:u8(6):u8(0) -- version, NODEBOX_REGULAR
+end
+
+-- A connected node box: the fixed boxes, one set per direction in Luanti's
+-- own order, then the disconnected ones. connect is keyed by that order's
+-- names.
+local function write_connected_box(w, fixed, connect, alone)
+	w:u8(6):u8(4) -- version, NODEBOX_CONNECTED
+	write_boxes(w, fixed)
+	for _, side in ipairs({"top", "bottom", "front", "left", "back",
+			"right"}) do
+		write_boxes(w, connect[side] or {})
+	end
+	for _ = 1, 6 do
+		write_boxes(w, {}) -- disconnected_<direction>
+	end
+	write_boxes(w, alone or {})
+	write_boxes(w, {}) -- disconnected_sides
 end
 
 local nodes = {
@@ -464,6 +505,19 @@ local nodes = {
 			post_effect_color = {a = 64, r = 100, g = 100, b = 200}})},
 	{13, write_node("test:torch", 7, {"torch.png", "torch.png", "torch.png",
 			"torch.png", "torch.png", "torch.png"}, 0, "sheet")},
+	-- A fence: a post, a rail towards whatever is to its right, and a stub
+	-- for standing alone
+	{15, write_node("test:fence", 12, {"fence.png", "fence.png", "fence.png",
+			"fence.png", "fence.png", "fence.png"}, 0, nil,
+			{connects_to = {15}, connect_sides = 63,
+			write_boxes = function(w)
+				write_connected_box(w,
+						{{-0.1, -0.5, -0.1, 0.1, 0.5, 0.1}},
+						{right = {{0.1, 0, -0.05, 0.5, 0.3, 0.05}}},
+						{{-0.2, -0.5, -0.2, 0.2, 0.0, 0.2}})
+				write_regular_box(w)
+				write_regular_box(w)
+			end})},
 }
 local inner = serialize.writer()
 for _, node in ipairs(nodes) do
@@ -505,6 +559,24 @@ assert(defs[11].walkable == false and defs[11].liquid_type == 2 and
 		"nodedef: liquid fields")
 assert(defs[7].color[1] == 255 and defs[7].color[3] == 253,
 		"nodedef: colour")
+-- A connected node box: what it connects to, whether it reaches into solid
+-- neighbours, and the boxes it has per direction
+assert(#defs[15].connects_to == 1 and defs[15].connects_to[1] == 15,
+		"nodedef: the ids a connected node connects to")
+assert(defs[15].connect_sides == 63, "nodedef: connect_sides")
+assert(defs[15].node_box.type == nodedef.NODEBOX_CONNECTED,
+		"nodedef: a connected node box says so")
+assert(#defs[15].node_box.boxes == 1,
+		"nodedef: a connected node box's fixed boxes")
+-- Luanti's "right" is +X, which is buildat's face 3
+assert(#defs[15].node_box.connect[3] == 1 and
+		math.abs(defs[15].node_box.connect[3][1][4] - 0.5) < 1e-6,
+		"nodedef: the boxes of one direction, in buildat's face order")
+assert(#defs[15].node_box.connect[1] == 0 and
+		#defs[15].node_box.connect[6] == 0,
+		"nodedef: a direction with no boxes of its own")
+assert(#defs[15].node_box.alone == 1,
+		"nodedef: the boxes for standing alone")
 -- test:grass has the flags that put a colour, a scale and an align style
 -- after the tile's name; the colour is the tile's own
 assert(defs[9].tiles[1].color and defs[9].tiles[1].color[1] == 255 and
@@ -1721,6 +1793,27 @@ assert(wlo[2] == -0.5 and math.abs(whi[2] - shapes.liquid_top(8, 4)) < 1e-9,
 		"shapes: a flowing liquid is a box with a lowered top")
 assert(shapes.for_node({drawtype = 3}, nil, nil, nil, nil) == nil,
 		"shapes: a flowing liquid with no level is a cube")
+
+-- A connected node box's quads carry which direction they belong to, so
+-- that the mesher can leave out the ones that reach into nothing
+do
+	local quads = shapes.for_node(defs[15])
+	assert(quads and #quads == 18,
+			"shapes: a connected box is its fixed, one direction and alone")
+	local per_dir = {}
+	for _, q in ipairs(quads) do
+		local d = q.connect_dir or 0
+		per_dir[d] = (per_dir[d] or 0) + 1
+	end
+	assert(per_dir[0] == 6, "shapes: the fixed boxes are always drawn")
+	assert(per_dir[3] == 6, "shapes: the +X boxes belong to +X")
+	assert(per_dir[7] == 6, "shapes: the alone boxes belong to standing alone")
+	-- And a box that is not connected at all carries no direction
+	local plain = shapes.for_node({drawtype = 12, node_box = {type = 1,
+			boxes = {{-0.5, -0.5, -0.5, 0.5, 0, 0.5}}}})
+	assert(plain and #plain == 6 and plain[1].connect_dir == nil,
+			"shapes: a plain node box is untagged")
+end
 
 print("shapes: ok")
 

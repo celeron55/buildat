@@ -192,6 +192,9 @@ struct CVoxelRegistry: public VoxelRegistry
 		cache.shape_group = def.shape_group;
 		cache.is_liquid = def.is_liquid;
 		cache.liquid_top = def.liquid_top;
+		cache.connect_group = def.connect_group;
+		cache.connect_mask = def.connect_mask;
+		cache.connect_to_solid = def.connect_to_solid;
 		for(size_t i = 0; i < 6; i++)
 			cache.tile_turns[i] = def.tile_turns[i] & 3;
 		// Caller sets cache.valid = true

@@ -96,6 +96,7 @@ static luabind::object vdef_get_shape(const VoxelDefinition &def,
 		const interface::VoxelQuad &q = def.shape[i];
 		luabind::object quad = luabind::newtable(L);
 		quad["tile"] = (int)q.tile + 1;
+		quad["connect_dir"] = (int)q.connect_dir;
 		luabind::object p = luabind::newtable(L);
 		luabind::object uv = luabind::newtable(L);
 		for(int c = 0; c < 4; c++){
@@ -142,6 +143,13 @@ static void vdef_set_shape(VoxelDefinition &def, const luabind::object &value)
 			throw Exception(ss_()+"VoxelDefinition.shape: tile "+
 					itos(tile_i)+" is not one of the six");
 		q.tile = (uint8_t)(tile_i - 1);
+		luabind::object dir = quad["connect_dir"];
+		int dir_i = (dir && luabind::type(dir) == LUA_TNUMBER) ?
+				(int)luabind::object_cast<double>(dir) : 0;
+		if(dir_i < 0 || dir_i > 7)
+			throw Exception(ss_()+"VoxelDefinition.shape: connect_dir "+
+					itos(dir_i)+" is not a face, zero or seven");
+		q.connect_dir = (uint8_t)dir_i;
 		for(int c = 0; c < 4; c++){
 			for(int a = 0; a < 3; a++)
 				q.p[c][a] = (float)quad_number(p, c * 3 + a + 1);
@@ -211,6 +219,10 @@ void init_voxel(lua_State *L)
 			.def_readwrite("shape_group", &VoxelDefinition::shape_group)
 			.def_readwrite("is_liquid", &VoxelDefinition::is_liquid)
 			.def_readwrite("liquid_top", &VoxelDefinition::liquid_top)
+			.def_readwrite("connect_group", &VoxelDefinition::connect_group)
+			.def_readwrite("connect_mask", &VoxelDefinition::connect_mask)
+			.def_readwrite("connect_to_solid",
+					&VoxelDefinition::connect_to_solid)
 			.enum_("FaceDrawType")[
 				value("FACEDRAWTYPE_NEVER", (int)FaceDrawType::NEVER),
 				value("FACEDRAWTYPE_ALWAYS", (int)FaceDrawType::ALWAYS),

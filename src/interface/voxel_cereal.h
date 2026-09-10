@@ -31,13 +31,13 @@ namespace interface
 			archive(v.p[i][0], v.p[i][1], v.p[i][2]);
 			archive(v.uv[i][0], v.uv[i][1]);
 		}
-		archive(v.tile);
+		archive(v.tile, v.connect_dir);
 	}
 
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 6;
+		uint8_t version = 7;
 		archive(
 				version,
 				v.name,
@@ -53,7 +53,10 @@ namespace interface
 				v.translucent,
 				v.shape_group,
 				v.is_liquid,
-				v.liquid_top
+				v.liquid_top,
+				v.connect_group,
+				v.connect_mask,
+				v.connect_to_solid
 		);
 	}
 

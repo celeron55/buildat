@@ -831,6 +831,46 @@ static float liquid_corner_top(pv::RawVolume<VoxelInstance> &volume,
 	return sum / count;
 }
 
+// Which of the six directions a connecting voxel's neighbours connect in, as
+// a bit per face in the usual order. A shape's quad that names a direction is
+// drawn only when that bit is set, which is how a fence gets a rail towards
+// the fence next to it and no rail towards the air.
+//
+// Two voxels connect when the neighbour is in one of the families this one
+// reaches out to -- one bit of connect_mask per family -- or, for a voxel
+// that says so, when the neighbour is simply solid, which is how a fence
+// reaches into a wall of stone. What the families are is the game's business;
+// see interface/voxel.h.
+static uint connected_faces(pv::RawVolume<VoxelInstance> &volume,
+		VoxelRegistry *voxel_reg, int x, int y, int z,
+		const interface::CachedVoxelDefinition *def)
+{
+	static const int FACE_DIR[6][3] = {
+		{0, 1, 0}, {0, -1, 0}, {1, 0, 0},
+		{-1, 0, 0}, {0, 0, 1}, {0, 0, -1},
+	};
+	uint faces = 0;
+	for(size_t i = 0; i < 6; i++){
+		VoxelInstance nv = volume.getVoxelAt(x + FACE_DIR[i][0],
+				y + FACE_DIR[i][1], z + FACE_DIR[i][2]);
+		if(nv.get_id() == interface::VOXELTYPEID_UNDEFINED)
+			continue;
+		const interface::CachedVoxelDefinition *ndef =
+				voxel_reg->get_cached(nv);
+		if(ndef == nullptr)
+			continue;
+		bool connects = false;
+		if(ndef->connect_group != 0 && ndef->connect_group <= 32)
+			connects = (def->connect_mask &
+					(1u << (ndef->connect_group - 1))) != 0;
+		if(!connects && def->connect_to_solid)
+			connects = ndef->physically_solid && ndef->shape.empty();
+		if(connects)
+			faces |= 1u << i;
+	}
+	return faces;
+}
+
 // The quads of the voxels that have a shape of their own, appended to the
 // same temporary geometry the cubes went into.
 //
@@ -877,6 +917,12 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 						VoxelInstance::SKYLIGHT_MAX;
 				float lamp_f = (float)v.get_lamplight() /
 						VoxelInstance::LAMPLIGHT_MAX;
+				// Which directions this voxel connects in, once per voxel
+				// rather than once per quad that asks. Only a voxel that
+				// reaches out at all pays for it.
+				const uint faces = (def->connect_mask != 0 ||
+						def->connect_to_solid) ?
+						connected_faces(volume, voxel_reg, x, y, z, def) : 0;
 				// A liquid's four top corners, once per voxel rather than
 				// once per vertex that sits on one
 				const bool liquid_corners = def->is_liquid;
@@ -891,6 +937,16 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 					}
 				}
 				for(const interface::VoxelQuad &quad : def->shape){
+					// A quad that belongs to one direction is drawn only
+					// when that direction connects, and one that belongs to
+					// standing alone only when none of them does
+					if(quad.connect_dir == 7){
+						if(faces != 0)
+							continue;
+					} else if(quad.connect_dir != 0 &&
+							!(faces & (1u << (quad.connect_dir - 1)))){
+						continue;
+					}
 					uint tile = quad.tile < 6 ? quad.tile : 0;
 					AtlasSegmentReference seg_ref = def->textures[tile];
 					if(seg_ref.atlas_id == interface::ATLAS_UNDEFINED)
