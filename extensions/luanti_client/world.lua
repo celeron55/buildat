@@ -271,6 +271,17 @@ function M.new(magic, buildat, log, options)
 	local STAR_DENSITY_DEFAULT = 0.004
 	-- The same for the clouds: how much of the sky is covered at the density
 	-- a game has unless it says otherwise
+	-- Luanti's own default cloud speed, in nodes a second, and what one node
+	-- a second is worth in the sky shader's own units.
+	--
+	-- simplified, and knowingly: these clouds are not a layer at a height --
+	-- the shader divides the view direction by its own y to fake a flat
+	-- plane -- so a speed in nodes a second has nothing exact to become. The
+	-- factor is picked so that the default below drifts at the rate the
+	-- shader had baked in before a game could ask for anything, which makes
+	-- a game asking for twice that twice as fast. See doc/luanti_client.txt.
+	local CLOUD_SPEED_DEFAULT = {0, -2}
+	local CLOUD_WIND_PER_NODE = 0.0054
 	local CLOUD_DENSITY_DEFAULT = 0.4
 	local CLOUD_COVERAGE_DEFAULT = 0.34
 
@@ -292,7 +303,8 @@ function M.new(magic, buildat, log, options)
 		sun = {visible = true, scale = 1},
 		moon = {visible = true, scale = 1},
 		stars = {visible = true, count = STARS_DEFAULT, scale = 1},
-		clouds = {density = CLOUD_DENSITY_DEFAULT},
+		clouds = {density = CLOUD_DENSITY_DEFAULT,
+				speed = CLOUD_SPEED_DEFAULT},
 	}
 
 	-- What the sky looks like until the server says, and what it says; see
@@ -2408,6 +2420,11 @@ function M.new(magic, buildat, log, options)
 			sky_material:SetShaderParameter("StarColor", magic.Color(
 					star_color[1] / 255, star_color[2] / 255,
 					star_color[3] / 255))
+			-- How fast they drift, which a game changes with the weather
+			local wind = sky_bodies.clouds.speed or CLOUD_SPEED_DEFAULT
+			sky_material:SetShaderParameter("CloudWind", magic.Vector2(
+					wind[1] * CLOUD_WIND_PER_NODE,
+					wind[2] * CLOUD_WIND_PER_NODE))
 			sky_material:SetShaderParameter("CloudCoverage",
 					(sky and sky.clouds == false) and 0 or
 					CLOUD_COVERAGE_DEFAULT *
