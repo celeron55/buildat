@@ -54,7 +54,9 @@ Play
 
     $ $wherever_buildat_is/Build/bin/buildat
 
-Local game or connect to a server.
+The launch menu: a local game, a server to connect to, or one of the
+extensions that can be launched on their own -- a Luanti client, so far.
+Arrows or the mouse to pick, enter to go.
 
 Debug keys, in any game:
 
@@ -75,7 +77,7 @@ Terminal 1:
 Terminal 2:
 
     $ $wherever_buildat_is/Build
-    $ bin/buildat_client -s localhost
+    $ bin/buildat -s localhost
 
 Client command sequence (CI / visual checks)
 --------------------------------------------
@@ -83,8 +85,8 @@ Client command sequence (CI / visual checks)
 The client can run a one-shot command script and exit. Screenshots, delays,
 and injected keyboard/mouse input:
 
-    $ bin/buildat_client -c $'delay 2000\nscreenshot /tmp/menu.png'
-    $ bin/buildat_client -c @commands.txt
+    $ bin/buildat -c $'delay 2000\nscreenshot /tmp/menu.png'
+    $ bin/buildat -c @commands.txt
 
 See [doc/client_commands.txt](doc/client_commands.txt).
 

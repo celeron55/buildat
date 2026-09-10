@@ -7,9 +7,9 @@ actually registers.
 Pass the sequence with -c. One command per line. When -c is given, the client
 exits after the sequence finishes (exit status 1 if a command fails).
 
-    $ bin/buildat_client -c $'delay 2000\nscreenshot /tmp/menu.png'
-    $ bin/buildat_client -c @commands.txt
-    $ bin/buildat_client -s localhost -c @commands.txt
+    $ bin/buildat -c $'delay 2000\nscreenshot /tmp/menu.png'
+    $ bin/buildat -c @commands.txt
+    $ bin/buildat -s localhost -c @commands.txt
 
 -w WxH runs windowed at a fixed size without changing the size the client
 remembers between runs. Use it for anything that compares images between runs.
@@ -25,7 +25,7 @@ send the next command. A line that does not parse is reported and skipped
 rather than ending the run.
 
     $ mkfifo /tmp/cmd; sleep 900 > /tmp/cmd &
-    $ bin/buildat_client -c - < /tmp/cmd &
+    $ bin/buildat -c - < /tmp/cmd &
     $ echo 'screenshot /tmp/now.png' > /tmp/cmd
 
 The writer has to stay open -- the sleep above is what keeps it so -- because

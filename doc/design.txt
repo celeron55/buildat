@@ -89,9 +89,37 @@ implement table "safe", which contains the safe interface.
 Extensions and modules use require "buildat/extension/<name>" to use extensions.
 
 The __menu extension is specially loaded automatically at client startup if no
-server address is provided on the command line. __menu can then connect to a
-server. When disconnecting from a server, the whole client window is closed and
+server address is provided on the command line, which is what running `buildat`
+with no arguments does. It is the launch menu: a local game, a remote server,
+and whatever launchable extensions it is told about. The screens behind its
+local-game and connect-to-server entries live in extensions/launch_menu, which
+is where they were written when a separate launcher binary ran a menu of its
+own. When disconnecting from a server, the whole client window is closed and
 reopened.
+
+Launchable extensions
+---------------------
+An extension that is a thing to launch rather than a library says so with a
+table:
+
+    M.launch = {
+        title = "Play on a Luanti server",  -- what the menu calls it
+        icon = "luanti_client/res/icon.png",  -- optional, 120x120
+        run = function() ... end,  -- what picking it does
+    }
+
+`run` is called with the launch menu underneath it on the UI stack, so it
+should push a screen of its own and come back rather than assuming it owns the
+client. An extension that can also be the client's whole reason for running --
+`buildat -m <name>` -- keeps an M.boot() for that case, and the two differ in
+what leaving the extension means: with the menu underneath, going back is going
+back to it; without, it is quitting.
+
+The launch menu keeps the list of extensions it offers (LAUNCHABLE in
+extensions/__menu/init.lua). It is a list rather than a search of the extension
+tree because finding out whether an extension is launchable means requiring it,
+and requiring every extension to build a menu would run all of their loading
+code.
 
 Network protocol
 ----------------

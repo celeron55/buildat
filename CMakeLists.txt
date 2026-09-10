@@ -191,7 +191,11 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib") # Static libs
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstack-protector-all")
 
 set(BUILDAT_CORE_NAME buildat_core)
-set(CLIENT_EXE_NAME buildat_client)
+# The client *is* buildat: it shows the launch menu, starts a local server for
+# a game and connects to a remote one. There used to be a separate `buildat`
+# launcher that did nothing but exec `buildat_client -m launch_menu`, and two
+# launch menus with it.
+set(CLIENT_EXE_NAME buildat)
 set(SERVER_EXE_NAME buildat_server)
 
 #
@@ -300,8 +304,6 @@ if(BUILD_CLIENT)
 	#	)
 	#endif()
 
-	add_executable(buildat src/launcher/main.cpp)
-	add_dependencies(buildat ${CLIENT_EXE_NAME})
 endif(BUILD_CLIENT)
 
 #

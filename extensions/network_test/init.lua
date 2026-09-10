@@ -4,7 +4,7 @@
 --
 -- A menu extension that exercises extension/network against one address:
 --
---   $ bin/buildat_client -m network_test -w 800x600
+--   $ bin/buildat -m network_test -w 800x600
 --
 -- With no arguments it opens a UDP socket to localhost:30001 (a Luanti
 -- server), sends one datagram and shows whatever comes back.
