@@ -372,6 +372,37 @@ texture as the top of one that is not turned, turned with the voxel -- so the
 turn belongs to the face rather than to the atlas segment, which is shared.
 A shape's quads carry their own texture coordinates and are not affected.
 
+vdef.variants says what a voxel's param does to how it is drawn, for a
+format that binds one. It is an array of variants, and a variant claims the
+param values it applies to:
+
+  vdef.variants = {
+      -- A cube that faces a direction: the same six textures in another
+      -- order, each turned inside its own face
+      {tile_order = {1, 2, 3, 4, 5, 0}, tile_turns = {0, 0, 1, 3, 2, 0},
+              params = {2, 6, 10}},
+      -- A palette entry, and a liquid standing a quarter of the way up
+      {shape = {}, color = 0x336699, liquid_top = 0.25, params = {1}},
+  }
+
+- params is the list of param values that pick this variant, 0...255, and is
+  the one field that is not optional: a variant nothing reaches is a mistake.
+  A param value no variant claims is drawn as if the param changed nothing.
+- tile_order[f] is which of the definition's own six textures face f wears,
+  0...5. A variant carries no textures of its own: a turned cube wears the
+  same ones in a different order, which is what keeps a voxel that faces
+  twenty-four ways from needing twenty-four voxel types.
+- shape replaces the definition's own quads, and is empty for a variant that
+  keeps them. tile_order and tile_turns are for cube faces; a shape's quads
+  carry their own texture coordinates, as always.
+- color is multiplied into the vertex colour, 0xRRGGBB. What wants it is a
+  palette: one texture, and the param says which entry tints this voxel.
+- liquid_top is where a liquid's surface stands in the voxel, which is what
+  Luanti's flowing liquids put in param2. The corner heights that make a
+  surface continuous read the neighbours' own params too.
+- Only a param up to 8 bits wide is looked up this way. A wider one is
+  storage for the game to read itself.
+
 voxel_reg:set_format{...} says how the game cuts up a voxel's 32 bits. The
 default is what buildat had before this existed -- the type id in bits 0...20
 and two 4-bit light levels in 24...31 -- and a game that says nothing keeps

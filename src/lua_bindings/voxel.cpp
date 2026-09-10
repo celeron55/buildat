@@ -261,6 +261,132 @@ static ss_ vreg_dump_format(VoxelRegistry &reg)
 	return reg.get_format().dump();
 }
 
+// vdef.variants: what the voxel's param does to how it is drawn, as an array
+// of variants. One is
+//
+//   {shape = {<quads>}, tile_order = {0,1,2,3,4,5}, tile_turns = {0,...},
+//    color = 0xffffff, liquid_top = 0.5, params = {0, 4, 8}}
+//
+// where params is which param values pick this variant. Everything is
+// optional: a variant with no shape wears the definition's own, and a param
+// value no variant claims is drawn as if the param changed nothing. See
+// VoxelVariant in interface/voxel.h.
+static void vdef_set_variants(VoxelDefinition &def,
+		const luabind::object &value)
+{
+	def.variants.clear();
+	for(size_t i = 0; i < 256; i++)
+		def.variant_of_param[i] = 0;
+	if(!value || luabind::type(value) != LUA_TTABLE)
+		return;
+	// Index 0 is what an unclaimed param gets, so it has to mean "nothing
+	// special": a variant of the definition's own shape and no tint
+	def.variants.push_back(interface::VoxelVariant());
+	for(luabind::iterator it(value), end; it != end; ++it){
+		luabind::object t = *it;
+		if(luabind::type(t) != LUA_TTABLE)
+			throw Exception("VoxelDefinition.variants: a variant is not a "
+					"table");
+		if(def.variants.size() >= 256)
+			throw Exception("VoxelDefinition.variants: too many variants");
+		interface::VoxelVariant var;
+		{
+			luabind::object shape = t["shape"];
+			if(shape && luabind::type(shape) == LUA_TTABLE){
+				for(luabind::iterator qi(shape), qend; qi != qend; ++qi){
+					luabind::object quad = *qi;
+					if(luabind::type(quad) != LUA_TTABLE)
+						throw Exception("VoxelDefinition.variants: a quad is "
+								"not a table");
+					var.shape.push_back(quad_from_lua(quad));
+				}
+			}
+		}
+		for(const char *key : {"tile_order", "tile_turns"}){
+			luabind::object list = t[key];
+			if(!list || luabind::type(list) != LUA_TTABLE)
+				continue;
+			for(size_t i = 0; i < 6; i++){
+				luabind::object v = list[i + 1];
+				if(!v || luabind::type(v) != LUA_TNUMBER)
+					continue;
+				uint8_t n = (uint8_t)luabind::object_cast<double>(v);
+				if(key[5] == 'o'){
+					if(n > 5)
+						throw Exception("VoxelDefinition.variants: "
+								"tile_order is not a face");
+					var.tile_order[i] = n;
+				} else {
+					var.tile_turns[i] = n;
+				}
+			}
+		}
+		{
+			luabind::object v = t["color"];
+			if(v && luabind::type(v) == LUA_TNUMBER)
+				var.color = (uint32_t)luabind::object_cast<double>(v)
+						& 0xffffffUL;
+		}
+		{
+			luabind::object v = t["liquid_top"];
+			if(v && luabind::type(v) == LUA_TNUMBER)
+				var.liquid_top = (float)luabind::object_cast<double>(v);
+		}
+		uint8_t index = (uint8_t)def.variants.size();
+		def.variants.push_back(var);
+		luabind::object params = t["params"];
+		if(!params || luabind::type(params) != LUA_TTABLE)
+			throw Exception("VoxelDefinition.variants: a variant has no "
+					"params");
+		for(luabind::iterator pi(params), pend; pi != pend; ++pi){
+			luabind::object v = *pi;
+			if(luabind::type(v) != LUA_TNUMBER)
+				throw Exception("VoxelDefinition.variants: a param is not a "
+						"number");
+			int param = (int)luabind::object_cast<double>(v);
+			if(param < 0 || param > 255)
+				throw Exception("VoxelDefinition.variants: param "+
+						itos(param)+" is out of range");
+			def.variant_of_param[param] = index;
+		}
+	}
+}
+
+static luabind::object vdef_get_variants(const VoxelDefinition &def,
+		lua_State *L)
+{
+	luabind::object result = luabind::newtable(L);
+	// Variant 0 is the engine's own "nothing special" entry and is not one
+	// the caller wrote
+	for(size_t i = 1; i < def.variants.size(); i++){
+		const interface::VoxelVariant &var = def.variants[i];
+		luabind::object t = luabind::newtable(L);
+		luabind::object shape = luabind::newtable(L);
+		for(size_t q = 0; q < var.shape.size(); q++)
+			shape[q + 1] = quad_to_lua(var.shape[q], L);
+		t["shape"] = shape;
+		luabind::object order = luabind::newtable(L);
+		luabind::object turns = luabind::newtable(L);
+		for(size_t f = 0; f < 6; f++){
+			order[f + 1] = (int)var.tile_order[f];
+			turns[f + 1] = (int)var.tile_turns[f];
+		}
+		t["tile_order"] = order;
+		t["tile_turns"] = turns;
+		t["color"] = (double)var.color;
+		t["liquid_top"] = var.liquid_top;
+		luabind::object params = luabind::newtable(L);
+		size_t n = 0;
+		for(size_t p = 0; p < 256; p++){
+			if(def.variant_of_param[p] == i)
+				params[++n] = (int)p;
+		}
+		t["params"] = params;
+		result[i] = t;
+	}
+	return result;
+}
+
 sp_<VoxelRegistry> createVoxelRegistry(lua_State *L)
 {
 	return sp_<VoxelRegistry>(
@@ -316,6 +442,7 @@ void init_voxel(lua_State *L)
 			.property("shape", &vdef_get_shape, &vdef_set_shape)
 			.property("shape_masked", &vdef_get_shape_masked,
 					&vdef_set_shape_masked)
+			.property("variants", &vdef_get_variants, &vdef_set_variants)
 			.def_readwrite("shape_double_sided",
 					&VoxelDefinition::shape_double_sided)
 			.def_readwrite("translucent", &VoxelDefinition::translucent)
