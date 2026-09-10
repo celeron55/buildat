@@ -2316,9 +2316,68 @@ local function show_client(host, port, name, password)
 		local NET_LINE_INTERVAL = 2.0
 		local net_line_timer = 0
 
+		-- Frame smoothness. A stutter is only worth a line when it is far
+		-- above what the session is otherwise doing, so the means follow the
+		-- session -- exponential, and slow enough that a spike does not move
+		-- them much -- and a frame several times over gets a line saying
+		-- what else it was doing. What to correlate with what is then in the
+		-- log rather than in a guess.
+		local SLOW_FRAME_FACTOR = 3
+		-- Under this nothing is a stutter, whatever the mean is: three times
+		-- half a millisecond is still a smooth frame
+		local SLOW_FRAME_FLOOR_US = 3000
+		-- And a burst of them says what one of them says, so they are rate
+		-- limited and counted instead
+		local SLOW_FRAME_INTERVAL = 0.2
+		local mean_lua_us = nil
+		local mean_hand_us = nil
+		local slow_frames = 0
+		local slow_frame_wait = 0
+
+		local function slow_frame_check(dtime, frame_t0)
+			local lua_us = buildat.get_time_us() - frame_t0
+			local hand_us = view.last_frame_mesh_us or 0
+			mean_lua_us = mean_lua_us and
+					mean_lua_us * 0.98 + lua_us * 0.02 or lua_us
+			mean_hand_us = mean_hand_us and
+					mean_hand_us * 0.98 + hand_us * 0.02 or hand_us
+			slow_frame_wait = slow_frame_wait - dtime
+			local slow = (hand_us > SLOW_FRAME_FLOOR_US and
+					hand_us > mean_hand_us * SLOW_FRAME_FACTOR) or
+					(lua_us > SLOW_FRAME_FLOOR_US and
+					lua_us > mean_lua_us * SLOW_FRAME_FACTOR)
+			if not slow then
+				return
+			end
+			slow_frames = slow_frames + 1
+			if slow_frame_wait > 0 then
+				return
+			end
+			slow_frame_wait = SLOW_FRAME_INTERVAL
+			log:info(string.format(
+					"slow frame %d: lua %.1f ms (mean %.1f), handover "..
+					"%.1f ms (mean %.1f), %d blocks meshed (worst %.1f ms)"..
+					", %d new param2 pairs, commands %.1f ms (%d of them, "..
+					"worst %s at %.1f ms), %d dirty, %d waiting, last "..
+					"frame %.0f ms%s",
+					slow_frames, lua_us / 1000, mean_lua_us / 1000,
+					hand_us / 1000, mean_hand_us / 1000,
+					view.last_frame_meshed or 0,
+					(view.worst_mesh_us or 0) / 1000,
+					view.last_frame_pairs or 0,
+					(client.last_command_us or 0) / 1000,
+					client.last_commands or 0,
+					tostring(client.worst_command),
+					(client.worst_command_us or 0) / 1000,
+					view:dirty_count(), client.commands_waiting,
+					dtime * 1000,
+					registry_step and ", registry building" or ""))
+		end
+
 		local update_cb = magic.SubscribeToEvent("Update",
 				function(event_type, event_data)
 			local dtime = event_data:GetFloat("TimeStep")
+			local frame_t0 = buildat.get_time_us()
 			client:update(dtime)
 			net_line_timer = net_line_timer + dtime
 			if net_line_timer >= NET_LINE_INTERVAL then
@@ -2430,6 +2489,7 @@ local function show_client(host, port, name, password)
 				loading_panel.height = magic.ui.root.height
 			end
 			set_counters()
+			slow_frame_check(dtime, frame_t0)
 		end)
 
 		-- The line the player types in: a dialog with a text field and the

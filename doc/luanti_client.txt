@@ -477,6 +477,11 @@ from the box after the turn.
 The client logs a counter line every two seconds -- blocks received,
 commands waiting, and per channel what the reliable layer is holding -- so
 that a session which loaded badly can be diagnosed from its log afterwards.
+It also logs a line for every frame that took more than three times the
+running mean, in Lua time or in handing blocks to the mesher, saying what
+else that frame was doing: the blocks it meshed and the worst single one, the
+param2 pairs it registered, and which server command cost the most, by name
+and size. A stutter is diagnosed from those lines rather than guessed at.
 A stall behind an unacknowledged packet, a lost reliable packet with
 everything queued behind it, and a server that simply sends little look
 different in those numbers.
