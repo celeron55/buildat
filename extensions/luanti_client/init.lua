@@ -3006,12 +3006,19 @@ local function show_client(host, port, name, password)
 		local sound_muted = false
 
 		local function pause_spec()
-			return "size[6,4.7]"..
+			-- Continuing is the first thing on it and the first thing a
+			-- player wants: escape does the same, but a menu whose only way
+			-- back to the game is a key nobody was told about is a menu that
+			-- traps people. button_exit closes the form by itself, which is
+			-- exactly what continuing is.
+			return "size[6,5.8]"..
 					"label[0.2,0.2;Paused]"..
-					"button[0.4,1.0;5.2,0.8;btn_sound;"..
+					"button_exit[0.4,1.0;5.2,0.8;btn_continue;"..
+					"Continue playing]"..
+					"button[0.4,2.1;5.2,0.8;btn_sound;"..
 					(sound_muted and "Unmute sound" or "Mute sound").."]"..
-					"button[0.4,2.1;5.2,0.8;btn_keys;Key bindings]"..
-					"button[0.4,3.2;5.2,0.8;btn_exit;Exit]"
+					"button[0.4,3.2;5.2,0.8;btn_keys;Key bindings]"..
+					"button[0.4,4.3;5.2,0.8;btn_exit;Exit]"
 		end
 
 		-- Every binding this client has, in two columns, out of the same
