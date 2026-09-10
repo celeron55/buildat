@@ -58,6 +58,7 @@ struct CVoxelRegistry: public VoxelRegistry
 	sd_<VoxelDefinition> m_defs;
 	sd_<CachedVoxelDefinition> m_cached_defs;
 	sm_<VoxelName, VoxelTypeId> m_name_to_id;
+	VoxelFormat m_format = VoxelFormat::legacy();
 	bool m_is_dirty = false;
 	std::mutex m_mutex;
 
@@ -74,6 +75,29 @@ struct CVoxelRegistry: public VoxelRegistry
 		m_name_to_id.clear();
 
 		m_defs.resize(1); // Id 0 is VOXELTYPEID_UNDEFINEDD
+	}
+
+	const VoxelFormat& get_format()
+	{
+		// Set before the first voxel and never after, so a reader on a
+		// worker thread does not have to take the lock for this
+		return m_format;
+	}
+
+	void set_format(const VoxelFormat &format)
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		ss_ why;
+		if(!format.validate(&why))
+			throw Exception(ss_()+"set_format(): "+why);
+		if(m_defs.size() > 1)
+			throw Exception(ss_()+"set_format(): "+
+					itos(m_defs.size() - 1)+" voxels have already been "
+					"added under "+m_format.dump());
+		m_format = format;
+		m_is_dirty = true;
+		log_v(MODULE, "CVoxelRegistry::set_format(): %s",
+				cs(m_format.dump()));
 	}
 
 	sv_<VoxelDefinition> get_all()
@@ -163,7 +187,7 @@ struct CVoxelRegistry: public VoxelRegistry
 	const CachedVoxelDefinition* get_cached(const VoxelInstance &v,
 			AtlasRegistry *atlas_reg, bool with_lod)
 	{
-		return get_cached(v.get_id(), atlas_reg, with_lod);
+		return get_cached(m_format.id_of(v.data), atlas_reg, with_lod);
 	}
 
 	bool is_dirty()
@@ -435,16 +459,25 @@ VoxelRegistry* createVoxelRegistry()
 void VoxelRegistry::serialize(std::ostream &os)
 {
 	sv_<VoxelDefinition> defs = get_all();
+	VoxelFormat format = get_format();
 	cereal::PortableBinaryOutputArchive archive(os);
-	archive(defs);
+	archive((uint8_t)1, format, defs);
 }
 
 void VoxelRegistry::deserialize(std::istream &is)
 {
+	uint8_t version = 0;
+	VoxelFormat format;
 	sv_<VoxelDefinition> defs;
 	cereal::PortableBinaryInputArchive archive(is);
-	archive(defs);
+	archive(version);
+	if(version != 1)
+		throw Exception(ss_()+"VoxelRegistry::deserialize(): version "+
+				itos(version)+" is not 1; the other end is a different "
+				"build of buildat");
+	archive(format, defs);
 	clear();
+	set_format(format);
 	for(auto &def : defs)
 		add_voxel(def);
 }
