@@ -693,6 +693,10 @@ function M.new(magic, buildat, log, options)
 	-- The screen tint of the node the camera is in, per node id; see
 	-- post_effect_at(). Only the nodes that have one are in here.
 	self.node_post_effect = {}
+	-- What the pointed-node outline goes around, per node id; see
+	-- selection_at(). A node that is not in here is outlined as a whole
+	-- voxel.
+	self.node_selection = {}
 	-- id -> false for the nodes a pointing ray goes through; nil means the
 	-- definitions have not arrived and everything but air stops one
 	self.node_pointable = nil
@@ -1230,7 +1234,6 @@ function M.new(magic, buildat, log, options)
 		return true
 	end
 
-	-- Whether a node is something to swim in
 	-- The colour to paint over the whole screen because the camera is in this
 	-- node, as Luanti's post_effect_color {a, r, g, b} in 0...255, or nil for
 	-- a node that has none. What this is for is being under water.
@@ -1242,6 +1245,7 @@ function M.new(magic, buildat, log, options)
 		return self.node_post_effect[id]
 	end
 
+	-- Whether a node is something to swim in
 	function self:is_liquid(x, y, z)
 		local id = self:node_at(x, y, z)
 		return id ~= nil and self.node_liquid[id] == true
@@ -1810,9 +1814,52 @@ function M.new(magic, buildat, log, options)
 	-- Which voxel the frame is around. above is which side of it the ray
 	-- came in through, which the frame does not care about any more; it is
 	-- still taken so that "nothing is pointed at" is one call.
+	-- The box to outline when a node is pointed at, in the node's own
+	-- -0.5...0.5 coordinates as {x0, y0, z0, x1, y1, z1}, or nil for a node
+	-- that is outlined as a whole voxel.
+	--
+	-- simplified: a node whose selection is several boxes -- a fence with its
+	-- rails, a plant with its stem -- gets the one box around all of them,
+	-- where Luanti draws each of them.
+	function self:selection_at(x, y, z)
+		local id = self:node_at(x, y, z)
+		local entry = id and self.node_selection and self.node_selection[id]
+		if not entry then
+			return nil
+		end
+		local boxes = entry.boxes
+		-- The boxes turn with the voxel, the same way its shape does
+		local facedir = entry.facing and shapes.facedir_of(
+				entry.facing, param2_at(x, y, z)) or nil
+		if facedir and facedir ~= 0 then
+			entry.turned = entry.turned or {}
+			if not entry.turned[facedir] then
+				entry.turned[facedir] = turn_boxes(entry.boxes, facedir)
+			end
+			boxes = entry.turned[facedir]
+		end
+		local out = {boxes[1][1], boxes[1][2], boxes[1][3],
+				boxes[1][4], boxes[1][5], boxes[1][6]}
+		for i = 2, #boxes do
+			local b = boxes[i]
+			for k = 1, 3 do
+				if b[k] < out[k] then out[k] = b[k] end
+				if b[k + 3] > out[k + 3] then out[k + 3] = b[k + 3] end
+			end
+		end
+		return out
+	end
+
 	function self:set_pointed(under, above)
 		if not under or not above then
 			pointed_node.enabled = false
+			return
+		end
+		local box = self:selection_at(under[1], under[2], under[3])
+		if box then
+			self:set_pointed_box(
+					{under[1] + box[1], under[2] + box[2], under[3] + box[3]},
+					{under[1] + box[4], under[2] + box[5], under[3] + box[6]})
 			return
 		end
 		pointed_node.scale = magic.Vector3(1, 1, 1)
@@ -2150,6 +2197,7 @@ function M.new(magic, buildat, log, options)
 		local solid = {}
 		local liquid = {}
 		local post_effect = {}
+		local selection = {}
 		local pointable = {}
 		local new_param2_look = {}
 
@@ -2206,6 +2254,18 @@ function M.new(magic, buildat, log, options)
 			end
 			if def.walkable and cbox and #cbox.boxes > 0 then
 				collision[id] = {boxes = cbox.boxes, facing = facing}
+			end
+
+			-- What the pointed-node outline goes around: Luanti's selection
+			-- box, and the node box when the definition gives none. A node
+			-- with neither is a whole voxel, which is what a node not in here
+			-- is outlined as.
+			local sbox = def.selection_box
+			if not sbox or #sbox.boxes == 0 then
+				sbox = def.node_box
+			end
+			if sbox and #sbox.boxes > 0 then
+				selection[id] = {boxes = sbox.boxes, facing = facing}
 			end
 
 			if voxel and (colors or facing or liquid_range) then
@@ -2285,6 +2345,7 @@ function M.new(magic, buildat, log, options)
 			self.node_solid = solid
 			self.node_liquid = liquid
 			self.node_post_effect = post_effect
+			self.node_selection = selection
 			self.node_pointable = pointable
 			-- Everything a param2 meant is decided by these definitions too,
 			-- and the pairs were built into the registry that is going away
