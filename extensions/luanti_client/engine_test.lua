@@ -225,6 +225,92 @@ local function check_pack_voxel_volume()
 			"paired id 2 is "..pv:get_voxel_at(2, 0, 0):get_id())
 end
 
+-- A voxel format is the game's own cut of the 32-bit voxel word, and every
+-- field name pack_voxel_volume() takes means a role of it rather than a bit
+-- range. The default format is the one buildat had before formats existed,
+-- and the assertion that matters is that reading through it gives what
+-- VoxelInstance's own accessors give.
+local function check_voxel_format()
+	local safe = buildat.safe
+
+	-- The default format: nothing said, nothing changed
+	local plain = safe.createVoxelRegistry()
+	local packed = buildat.pack_voxel_volume{
+		region = {0, 0, 0, 0, 0, 0},
+		sources = {
+			{data = string.char(0, 0, 4, 210), format = "u32be",
+					source_size = {1, 1, 1}, field = "id"},
+			{data = string.char(9), format = "u8", source_size = {1, 1, 1},
+					field = "skylight"},
+			{data = string.char(3), format = "u8", source_size = {1, 1, 1},
+					field = "lamplight"},
+		},
+	}
+	local v = safe.deserialize_volume(packed):get_voxel_at(0, 0, 0)
+	assert(v:get_id() == 1234, "default id is "..v:get_id())
+	assert(v:get_skylight() == 9, "default skylight is "..v:get_skylight())
+	assert(v:get_lamplight() == 3, "default lamplight is "..v:get_lamplight())
+
+	-- Luanti's own cut of the same word: a 16-bit id, param1 as two light
+	-- nibbles, and param2. Which is what this extension wants, and the point
+	-- of the whole exercise: param2 reaches the mesher instead of needing a
+	-- voxel id per (definition, param2) pair.
+	local luanti = safe.createVoxelRegistry()
+	luanti:set_format{
+		plane_bits = 32,
+		id = {shift = 0, width = 16},
+		light_sky = {shift = 16, width = 4},
+		light_lamp = {shift = 20, width = 4},
+		param = {shift = 24, width = 8},
+	}
+	local packed2 = buildat.pack_voxel_volume{
+		region = {0, 0, 0, 0, 0, 0},
+		registry = luanti,
+		sources = {
+			{data = string.char(0xab, 0xcd), format = "u16be",
+					source_size = {1, 1, 1}, field = "id"},
+			{data = string.char(7), format = "u8", source_size = {1, 1, 1},
+					field = "skylight"},
+			{data = string.char(9), format = "u8", source_size = {1, 1, 1},
+					field = "lamplight"},
+			{data = string.char(0x5e), format = "u8", source_size = {1, 1, 1},
+					field = "param"},
+		},
+	}
+	local v2 = safe.deserialize_volume(packed2):get_voxel_at(0, 0, 0)
+	-- get_id() and the light accessors read the default cut, so the word is
+	-- what has to be checked here
+	local word = v2.data % 4294967296
+	assert(word == 0xab * 256 + 0xcd + 7 * 65536 + 9 * 1048576 +
+			0x5e * 16777216, "luanti-format word is "..word)
+	assert(luanti:dump_format() ==
+			"VoxelFormat(32-bit, id=0...15, light_sky=16...19, "..
+			"light_lamp=20...23, param=24...31)",
+			"dump_format() says "..luanti:dump_format())
+
+	-- The default format binds no param, so asking to write one is an error
+	-- rather than bits landing somewhere unsaid
+	local ok = pcall(function()
+		buildat.pack_voxel_volume{
+			region = {0, 0, 0, 0, 0, 0},
+			registry = plain,
+			sources = {{data = string.char(1), format = "u8",
+					source_size = {1, 1, 1}, field = "param"}},
+		}
+	end)
+	assert(not ok, "writing an unbound param was allowed")
+
+	-- A format cannot arrive after the voxels it would reinterpret
+	local late = safe.createVoxelRegistry()
+	local def = safe.VoxelDefinition()
+	def.name.block_name = "engine_test:late"
+	late:add_voxel(def)
+	local ok2 = pcall(function()
+		late:set_format{id = {shift = 0, width = 16}}
+	end)
+	assert(not ok2, "set_format() after a voxel was allowed")
+end
+
 -- compose_image() writes a PNG, and Urho3D can read one back, so the pixels
 -- can actually be checked. The files go where the client's own temporary
 -- resources go, which is a resource dir, so they can be loaded by name.
@@ -494,6 +580,7 @@ end
 function M.self_test()
 	check_compress()
 	check_pack_voxel_volume()
+	check_voxel_format()
 	check_compose_image()
 end
 

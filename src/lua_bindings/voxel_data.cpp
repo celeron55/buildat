@@ -28,14 +28,43 @@ using interface::VoxelInstance;
 
 namespace lua_bindings {
 
-// Which part of a voxel a source writes
-enum PackField {
-	FIELD_ID,        // The type id, bits 0..20
-	FIELD_SKYLIGHT,  // Bits 24..27
-	FIELD_LAMPLIGHT, // Bits 28..31
-	FIELD_LIGHT,     // Both light channels at once, bits 24..31
-	FIELD_RAW,       // The whole 32 bits
-};
+// Which part of a voxel a source writes. A field names one of the roles the
+// voxel format binds -- see VoxelFormat in interface/voxel.h -- and where
+// that role actually is in the word is the format's business, not the
+// caller's. "raw" is the whole word and belongs to no role.
+static bool resolve_field(const ss_ &name, const interface::VoxelFormat &fmt,
+		interface::VoxelField &dst, bool &raw)
+{
+	raw = false;
+	if(name == "raw"){
+		raw = true;
+		dst = interface::VoxelField(0, 0, 32);
+		return true;
+	}
+	if(name == "id")
+		dst = fmt.id;
+	else if(name == "skylight")
+		dst = fmt.light_sky;
+	else if(name == "lamplight")
+		dst = fmt.light_lamp;
+	else if(name == "param")
+		dst = fmt.param;
+	else if(name == "color")
+		dst = fmt.color;
+	else if(name == "light"){
+		// Both light channels in one write, which only works when they are
+		// adjacent with the sky light in the low bits
+		if(!fmt.light_pair(&dst))
+			throw Exception("pack_voxel_volume(): field \"light\" needs the "
+					"two light channels adjacent in "+fmt.dump());
+		return true;
+	} else
+		return false;
+	if(!dst.bound())
+		throw Exception("pack_voxel_volume(): field \""+name+"\" is not "
+				"bound in "+fmt.dump());
+	return true;
+}
 
 // A table of ids that big is already unreasonable; the point of the limit is
 // that a broken map table cannot ask for an arbitrary allocation
@@ -94,7 +123,8 @@ struct PackSource
 	int stride[3] = {0, 0, 0};       // Samples to step per x, y, z; from order
 	uint32_t shift = 0;
 	uint32_t mask = 0xffffffff;
-	PackField field = FIELD_ID;
+	interface::VoxelField dst;      // Where in the voxel it is written
+	bool dst_raw = false;           // The whole word, no role
 	// No map means no mapping: the sample is the value
 	sp_<PackMap> map;
 	int64_t map_default = -1;  // For samples the map does not mention
@@ -308,7 +338,8 @@ static void parse_second(const luabind::object &t, PackSource &source)
 	second.present = true;
 }
 
-static void parse_source(const luabind::object &t, PackSource &source)
+static void parse_source(const luabind::object &t, PackSource &source,
+		const interface::VoxelFormat &fmt)
 {
 	if(luabind::type(t) != LUA_TTABLE)
 		throw Exception("pack_voxel_volume(): a source is not a table");
@@ -382,17 +413,7 @@ static void parse_source(const luabind::object &t, PackSource &source)
 		luabind::object field_o = t["field"];
 		ss_ field = field_o && luabind::type(field_o) == LUA_TSTRING ?
 				luabind::object_cast<ss_>(field_o) : ss_("id");
-		if(field == "id")
-			source.field = FIELD_ID;
-		else if(field == "skylight")
-			source.field = FIELD_SKYLIGHT;
-		else if(field == "lamplight")
-			source.field = FIELD_LAMPLIGHT;
-		else if(field == "light")
-			source.field = FIELD_LIGHT;
-		else if(field == "raw")
-			source.field = FIELD_RAW;
-		else
+		if(!resolve_field(field, fmt, source.dst, source.dst_raw))
 			throw Exception("pack_voxel_volume(): unknown field \"" + field +
 					"\"");
 	}
@@ -482,25 +503,10 @@ static void apply_source(pv::RawVolume<VoxelInstance> &volume,
 
 				VoxelInstance &v = volume.m_pData[
 						vx + vy * w + vz * w * h];
-				switch(source.field){
-				case FIELD_ID:
-					v.data = (v.data & ~0x001fffffUL) |
-							((uint32_t)value & 0x001fffffUL);
-					break;
-				case FIELD_SKYLIGHT:
-					v.set_skylight((uint8_t)value);
-					break;
-				case FIELD_LAMPLIGHT:
-					v.set_lamplight((uint8_t)value);
-					break;
-				case FIELD_LIGHT:
-					v.data = (v.data & ~0xff000000UL) |
-							(((uint32_t)value & 0xffUL) << 24);
-					break;
-				case FIELD_RAW:
+				if(source.dst_raw)
 					v.data = (uint32_t)value;
-					break;
-				}
+				else
+					source.dst.set(v.data, (uint32_t)value);
 			}
 		}
 	}
@@ -515,6 +521,23 @@ ss_ pack_voxel_volume(const luabind::object &args, lua_State *L)
 {
 	if(!args || luabind::type(args) != LUA_TTABLE)
 		throw Exception("pack_voxel_volume(): args is not a table");
+
+	// Which bits of a voxel a field name means. args.registry is the world's
+	// voxel registry, which is where its format lives; without one the
+	// default format applies, which is what every game had before formats
+	// existed.
+	interface::VoxelFormat format = interface::VoxelFormat::legacy();
+	{
+		luabind::object o = args["registry"];
+		if(o){
+			sp_<interface::VoxelRegistry> voxel_reg =
+					luabind::object_cast<sp_<interface::VoxelRegistry>>(o);
+			if(voxel_reg == nullptr)
+				throw Exception("pack_voxel_volume(): args.registry is not "
+						"a voxel registry");
+			format = voxel_reg->get_format();
+		}
+	}
 
 	luabind::object region_o = args["region"];
 	if(!region_o || luabind::type(region_o) != LUA_TTABLE)
@@ -536,7 +559,7 @@ ss_ pack_voxel_volume(const luabind::object &args, lua_State *L)
 	if(sources_o && luabind::type(sources_o) == LUA_TTABLE){
 		for(luabind::iterator it(sources_o), end; it != end; ++it){
 			PackSource source;
-			parse_source(*it, source);
+			parse_source(*it, source, format);
 			apply_source(volume, region, source);
 		}
 	}
