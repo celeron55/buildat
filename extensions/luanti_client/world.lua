@@ -53,11 +53,16 @@ local CONTENT_IGNORE = 127
 -- including the ones between two of them, because the texture is full of
 -- holes and what is behind a hole is the next leaf's face. The shader
 -- discards the holes.
+--
+-- A liquid is "liquid": it hides the face between two of itself, draws the
+-- face against everything else -- including the stone it sits in, which is
+-- visible through it -- and its faces are blended rather than cut out.
 local EDGEMATERIAL_GLASS = 10
+local EDGEMATERIAL_LIQUID = 11
 local CUBE_DRAWTYPES = {
 	[0] = "ground",  -- NDT_NORMAL
-	[2] = "ground",  -- NDT_LIQUID
-	[3] = "ground",  -- NDT_FLOWINGLIQUID
+	[2] = "liquid",  -- NDT_LIQUID
+	[3] = "liquid",  -- NDT_FLOWINGLIQUID
 	[4] = "glass",   -- NDT_GLASSLIKE
 	[5] = "allfaces",-- NDT_ALLFACES, leaves
 	[6] = "allfaces",-- NDT_ALLFACES_OPTIONAL
@@ -299,12 +304,13 @@ function M.new(magic, buildat, log, options)
 	-- directional light to reach.
 	local technique = magic.cache:GetResource("Technique",
 			"luanti_client/res/VoxelUnlit.xml")
+	local alpha_technique = magic.cache:GetResource("Technique",
+			"luanti_client/res/VoxelUnlitAlpha.xml")
 
 	-- The mesher sets no technique on skylit geometry -- only the game knows
 	-- which shader reads what it packed -- so every block's materials get
 	-- this one once they exist.
-	local function apply_technique(node)
-		local cg = node:GetComponent("CustomGeometry")
+	local function apply_to(cg, tech)
 		if not cg then
 			return
 		end
@@ -314,8 +320,19 @@ function M.new(magic, buildat, log, options)
 			if m == nil then
 				break
 			end
-			m:SetTechnique(0, technique)
+			m:SetTechnique(0, tech)
 			i = i + 1
+		end
+	end
+
+	local function apply_technique(node)
+		apply_to(node:GetComponent("CustomGeometry"), technique)
+		-- The mesher puts the translucent voxels' faces on a child node of
+		-- the chunk when there are any; those get the blended technique.
+		local alpha_node = node:GetChild("alpha")
+		if alpha_node then
+			apply_to(alpha_node:GetComponent("CustomGeometry"),
+					alpha_technique)
 		end
 	end
 
@@ -531,6 +548,8 @@ function M.new(magic, buildat, log, options)
 		end
 		if kind == "glass" then
 			vdef.edge_material_id = EDGEMATERIAL_GLASS
+		elseif kind == "liquid" then
+			vdef.edge_material_id = EDGEMATERIAL_LIQUID
 		elseif kind == "allfaces" then
 			vdef.face_draw_type =
 					buildat.VoxelDefinition.FACEDRAWTYPE_ALWAYS
@@ -541,6 +560,10 @@ function M.new(magic, buildat, log, options)
 					buildat.VoxelDefinition.EDGEMATERIALID_GROUND
 		end
 		vdef.physically_solid = true
+		-- Which pass the faces go in. The mesher puts a translucent voxel's
+		-- faces on a child node of the chunk and world.lua gives that one the
+		-- blended technique.
+		vdef.translucent = kind == "liquid"
 		if shape then
 			vdef.shape = shape
 			vdef.shape_double_sided = double_sided and true or false

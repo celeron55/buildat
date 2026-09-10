@@ -104,10 +104,18 @@ namespace interface
 		// per-vertex ambient occlusion and a per-face brightness, written
 		// into vertex colors. Only worlds that actually fill those bits
 		// should ask for it.
+		//
+		// translucent_result, when given, takes the faces of the voxels the
+		// registry says are translucent -- water, and glass a game gave an
+		// alpha to -- instead of the opaque result. They are a separate
+		// drawable so that they can be drawn after the solid world, and so
+		// that the renderer sorts them against the other chunks' by
+		// distance. Left out, everything goes in one geometry as before.
 		void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 				pv::RawVolume<VoxelInstance> &volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
-				bool use_skylight = false);
+				bool use_skylight = false,
+				sm_<uint, TemporaryGeometry> *translucent_result = nullptr);
 
 		void set_voxel_geometry(CustomGeometry *cg, Context *context,
 				const sm_<uint, TemporaryGeometry> &temp_geoms,

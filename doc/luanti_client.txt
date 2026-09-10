@@ -344,6 +344,19 @@ through the same (definition, param2) machinery a facedir uses. A liquid at
 the top level keeps its cube, so a waterfall and the middle of a lake are
 cubes whose shared faces are culled.
 
+A liquid is blended rather than alpha masked, so its faces are not in the
+chunk's own geometry at all: the voxel definition carries a "translucent"
+flag, the mesher puts those faces in a second geometry on a child node of the
+chunk, and res/VoxelUnlitAlpha.xml -- the same shader, with the cutoff
+replaced by a blend and no depth writing -- draws it. Urho3D sorts alpha
+drawables by distance, so the chunks' water sorts between chunks. simplified:
+faces within one chunk's water are not sorted against each other; per-triangle
+sorting or depth peeling is the upgrade path, and it rarely shows because a
+liquid's own edge material culls the faces between two of the same liquid,
+which leaves at most one surface along a ray inside a chunk. That edge
+material is also why the terrain under water is drawn: water culls against
+water and draws against everything else.
+
 What that does not do yet: a connected node box does not look at its
 neighbours, so a fence is a post without its rails; a node whose model is
 .b3d -- the chests and the shulkers -- falls back to the box the game says a

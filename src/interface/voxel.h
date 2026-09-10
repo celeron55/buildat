@@ -99,6 +99,12 @@ namespace interface
 		// made of single quads -- a plant, a rail, a sign -- which is
 		// otherwise invisible from behind. A shape made of boxes does not.
 		bool shape_double_sided = false;
+		// The voxel's faces are alpha blended rather than opaque or alpha
+		// masked, so they belong in a pass drawn after the solid world and
+		// back to front: water, and glass a game gave an alpha to. The
+		// mesher puts them in a geometry of their own; what technique that
+		// gets is the game's business, as with the rest of the materials.
+		bool translucent = false;
 		// TODO: Flag for whether all faces should be always drawn (in case the
 		//       textures contain holes)
 		// TODO: Some kind of property for defining whether this is a thing for
@@ -122,6 +128,7 @@ namespace interface
 		// Copied from the definition; see VoxelDefinition::shape
 		sv_<VoxelQuad> shape;
 		bool shape_double_sided = false;
+		bool translucent = false;
 
 		uint8_t tile_turns[6] = {};
 
