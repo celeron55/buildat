@@ -887,7 +887,10 @@ local function show_client(host, port, name, password)
 						tiles[i] = media_texture(textures[i])
 					end
 					if tiles[1] then
-						return tiles[1], nil, {quads = quads, tiles = tiles}
+						-- The name is what the world keys one built mesh by,
+						-- so that every mob of a kind is a copy of one
+						return tiles[1], nil, {quads = quads, tiles = tiles,
+								name = props.mesh}
 					end
 				end
 			end
@@ -895,6 +898,74 @@ local function show_client(host, port, name, password)
 				return media_texture(textures[1])
 			end
 			return of_item(props.wield_item)
+		end
+
+		-- Objects arrive a packetful at a time -- a crowd of mobs coming
+		-- into range was 3795 bytes and 613 ms of one frame -- and what
+		-- costs is not reading them but building each one's visual: the
+		-- model read, the geometry built, the textures resolved. So an
+		-- object that arrives is read and remembered here and its visual is
+		-- built by flush_objects() on a budget, a few a frame. Until then it
+		-- is not drawn.
+		local object_queue = {}
+		local object_head = 1
+		local object_queued = {}
+		local OBJECT_BUDGET_US = 3000
+
+		local function queue_object(id)
+			if object_queued[id] then
+				return
+			end
+			object_queued[id] = true
+			object_queue[#object_queue + 1] = id
+		end
+
+		-- Builds the visuals of the objects that are waiting, newest last,
+		-- until the budget is out or a model has been read: reading one is
+		-- tens of milliseconds of parsing with nothing to spread it over, so
+		-- one of those is a frame's worth on its own.
+		local function flush_objects()
+			if object_head > #object_queue then
+				return 0
+			end
+			local t0 = buildat.get_time_us()
+			local reads = meshes_read
+			local built = 0
+			while object_head <= #object_queue do
+				local id = object_queue[object_head]
+				object_head = object_head + 1
+				object_queued[id] = nil
+				local obj = world_objects[id]
+				-- Gone again, or the player's own: nothing to draw
+				if obj and not obj.is_self then
+					local t1 = buildat.get_time_us()
+					view:set_object(obj, object_resource)
+					built = built + 1
+					-- One object that costs a frame of its own is worth a
+					-- line: which it was, and whether its model had to be
+					-- read, is what says where the time went
+					local spent = buildat.get_time_us() - t1
+					if spent > 20000 then
+						log:info(string.format(
+								"slow object: %s (%s, %s) took %.1f ms%s",
+								tostring(obj.name or obj.id),
+								tostring((obj.props or {}).visual),
+								tostring((obj.props or {}).mesh),
+								spent / 1000,
+								meshes_read > reads and
+										", model read" or ""))
+					end
+				end
+				if meshes_read > reads or
+						buildat.get_time_us() - t0 >= OBJECT_BUDGET_US then
+					break
+				end
+			end
+			if object_head > #object_queue then
+				object_queue = {}
+				object_head = 1
+			end
+			return built
 		end
 
 		client.on_object_add = function(id, object_type, data)
@@ -911,7 +982,7 @@ local function show_client(host, port, name, password)
 				obj.is_self = true
 				return
 			end
-			view:set_object(obj, object_resource)
+			queue_object(id)
 		end
 
 		-- Particles: the spawners a game leaves running -- smoke, fire,
@@ -944,7 +1015,7 @@ local function show_client(host, port, name, password)
 				return
 			end
 			if obj.visual_stale and not obj.is_self then
-				view:set_object(obj, object_resource)
+				queue_object(id)
 			end
 		end
 
@@ -2334,6 +2405,9 @@ local function show_client(host, port, name, password)
 		local slow_frames = 0
 		local slow_frame_wait = 0
 
+		-- What flush_objects() built last frame, for the slow-frame line
+		local last_objects_built = 0
+
 		local function slow_frame_check(dtime, frame_t0)
 			local lua_us = buildat.get_time_us() - frame_t0
 			local hand_us = view.last_frame_mesh_us or 0
@@ -2357,7 +2431,8 @@ local function show_client(host, port, name, password)
 			log:info(string.format(
 					"slow frame %d: lua %.1f ms (mean %.1f), handover "..
 					"%.1f ms (mean %.1f), %d blocks meshed (worst %.1f ms)"..
-					", %d new param2 pairs, commands %.1f ms (%d of them, "..
+					", %d new param2 pairs, %d objects built, commands "..
+					"%.1f ms (%d of them, "..
 					"worst %s at %.1f ms), %d dirty, %d waiting, last "..
 					"frame %.0f ms%s",
 					slow_frames, lua_us / 1000, mean_lua_us / 1000,
@@ -2365,6 +2440,7 @@ local function show_client(host, port, name, password)
 					view.last_frame_meshed or 0,
 					(view.worst_mesh_us or 0) / 1000,
 					view.last_frame_pairs or 0,
+					last_objects_built,
 					(client.last_command_us or 0) / 1000,
 					client.last_commands or 0,
 					tostring(client.worst_command),
@@ -2394,12 +2470,13 @@ local function show_client(host, port, name, password)
 			update_tint()
 			update_dig(dtime)
 			objects.interpolate(world_objects, dtime)
-			for _, obj in pairs(world_objects) do
+			for id, obj in pairs(world_objects) do
 				if obj.visual_stale and not obj.is_self then
-					view:set_object(obj, object_resource)
+					queue_object(id)
 				end
 			end
 			view:place_objects(world_objects, dtime)
+			last_objects_built = flush_objects()
 			-- The blocks whose light a node change may have moved. The
 			-- server keeps track of what it has sent us, so saying we no
 			-- longer have one is what makes it send that one again -- with

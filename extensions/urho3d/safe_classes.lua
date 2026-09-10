@@ -754,6 +754,19 @@ function M.define(dst, util)
 			Remove = util.self_function("Remove", {}, {"Node"}),
 			SetEnabled = util.self_function(
 					"SetEnabled", {}, {"Node", "boolean"}),
+			-- A copy of the node and its components, in the same parent.
+			-- Urho3D copies a component through its attributes, which is in
+			-- the engine: what wants this is geometry that costs a sandbox
+			-- call per vertex to build and is wanted more than once.
+			-- Attributes are all it copies, so a material made in Lua --
+			-- which has no resource name to refer to -- is not among them
+			-- and has to be set on the copy.
+			Clone = util.wrap_function({"Node", {"number", "__nil"}},
+				function(self, mode)
+					return util.wrap_instance("Node",
+							self:Clone(mode ~= nil and mode or LOCAL))
+				end
+			),
 		},
 		properties = {
 			scale = util.simple_property(dst.Vector3),
