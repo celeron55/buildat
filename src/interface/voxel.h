@@ -148,6 +148,10 @@ namespace interface
 		virtual const VoxelDefinition* get(const VoxelTypeId &id) = 0;
 		virtual const VoxelDefinition* get(const VoxelName &name) = 0;
 
+		// Every method is safe to call from a worker thread while the main
+		// thread adds voxels, and a pointer handed out stays valid; the
+		// contents of a definition do not change once it has been added.
+		//
 		// atlas_reg may only be supplied when called from Urho3D main thread.
 		// with_lod also builds the segments a LOD mesh samples, which is
 		// most of the cost of a voxel type's textures.

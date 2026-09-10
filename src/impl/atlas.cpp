@@ -10,6 +10,7 @@
 #include <Vector3.h>
 #include <cmath>
 #include <cstring>
+#include <mutex>
 #define MODULE "atlas"
 
 namespace interface {
@@ -30,11 +31,16 @@ bool AtlasSegmentDefinition::operator==(const AtlasSegmentDefinition &other) con
 	);
 }
 
+// Segments are added on the main thread while worker threads mesh chunks that
+// read them, so every access goes through m_mutex, and the atlases live in
+// deques: a pointer handed out by get_texture() stays valid across an
+// add_segment(), which is not true of a vector.
 struct CAtlasRegistry: public AtlasRegistry
 {
 	magic::Context *m_context;
-	sv_<AtlasDefinition> m_defs;
-	sv_<AtlasCache> m_cache;
+	sd_<AtlasDefinition> m_defs;
+	sd_<AtlasCache> m_cache;
+	std::mutex m_mutex;
 	// Held rather than allocated per segment; see upload_box()
 	sv_<unsigned char> m_upload_buffer;
 	// See set_surface_maps()
@@ -47,6 +53,13 @@ struct CAtlasRegistry: public AtlasRegistry
 	}
 
 	const AtlasSegmentReference add_segment(
+			const AtlasSegmentDefinition &segment_def)
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return add_segment_unlocked(segment_def);
+	}
+
+	const AtlasSegmentReference add_segment_unlocked(
 			const AtlasSegmentDefinition &segment_def)
 	{
 		// Get Texture2D resource
@@ -181,6 +194,7 @@ struct CAtlasRegistry: public AtlasRegistry
 	const AtlasSegmentReference find_or_add_segment(
 			const AtlasSegmentDefinition &segment_def)
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
 		// Find an atlas that contains this segment; return reference if found
 		for(auto &atlas_def : m_defs){
 			for(uint seg_id = 0; seg_id<atlas_def.segments.size(); seg_id++){
@@ -194,10 +208,16 @@ struct CAtlasRegistry: public AtlasRegistry
 			}
 		}
 		// Segment was not found; add a new one
-		return add_segment(segment_def);
+		return add_segment_unlocked(segment_def);
 	}
 
 	const AtlasDefinition* get_atlas_definition(uint atlas_id)
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return get_atlas_definition_unlocked(atlas_id);
+	}
+
+	const AtlasDefinition* get_atlas_definition_unlocked(uint atlas_id)
 	{
 		if(atlas_id == ATLAS_UNDEFINED)
 			return nullptr;
@@ -209,7 +229,9 @@ struct CAtlasRegistry: public AtlasRegistry
 	const AtlasSegmentDefinition* get_segment_definition(
 			const AtlasSegmentReference &ref)
 	{
-		const AtlasDefinition *atlas = get_atlas_definition(ref.atlas_id);
+		std::lock_guard<std::mutex> lock(m_mutex);
+		const AtlasDefinition *atlas =
+				get_atlas_definition_unlocked(ref.atlas_id);
 		if(!atlas)
 			return nullptr;
 		if(ref.segment_id >= atlas->segments.size())
@@ -475,6 +497,12 @@ struct CAtlasRegistry: public AtlasRegistry
 
 	const AtlasCache* get_atlas_cache(uint atlas_id)
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return get_atlas_cache_unlocked(atlas_id);
+	}
+
+	const AtlasCache* get_atlas_cache_unlocked(uint atlas_id)
+	{
 		if(atlas_id == ATLAS_UNDEFINED)
 			return nullptr;
 		if(atlas_id >= m_cache.size()){
@@ -486,7 +514,8 @@ struct CAtlasRegistry: public AtlasRegistry
 
 	const AtlasSegmentCache* get_texture(const AtlasSegmentReference &ref)
 	{
-		const AtlasCache *cache = get_atlas_cache(ref.atlas_id);
+		std::lock_guard<std::mutex> lock(m_mutex);
+		const AtlasCache *cache = get_atlas_cache_unlocked(ref.atlas_id);
 		if(cache == nullptr)
 			return nullptr;
 		if(ref.segment_id >= cache->segments.size()){
@@ -499,11 +528,13 @@ struct CAtlasRegistry: public AtlasRegistry
 
 	void set_surface_maps(bool enabled)
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
 		m_surface_maps = enabled;
 	}
 
 	void update()
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
 		// Re-create textures if a device reset has destroyed them
 		for(uint atlas_id = ATLAS_UNDEFINED + 1;
 		atlas_id < m_cache.size(); atlas_id++){
