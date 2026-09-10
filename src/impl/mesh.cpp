@@ -328,6 +328,16 @@ public:
 			materialToUse = back.get_id();
 			return true;
 		}
+		// A translucent voxel does not draw its face against an opaque one:
+		// that surface is the opaque voxel's own, drawn by it and seen
+		// through the water rather than under another blended layer of it.
+		// This is Luanti's rule that the more solid of two nodes owns the
+		// face between them.
+		if(back_def->translucent && !front_def->translucent &&
+				front_def->edge_material_id !=
+						interface::EDGEMATERIALID_EMPTY){
+			return false;
+		}
 		if(back_def->edge_material_id != front_def->edge_material_id){
 			materialToUse = back.get_id();
 			return true;
@@ -828,14 +838,6 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 							atlas_reg->get_texture(seg_ref);
 					if(aseg == nullptr)
 						continue;
-					sm_<uint, TemporaryGeometry> &into =
-							(translucent_result && def->translucent) ?
-							*translucent_result : result;
-					TemporaryGeometry &tg = into[seg_ref.atlas_id];
-					if(tg.vertex_data.Empty()){
-						tg.atlas_id = seg_ref.atlas_id;
-						tg.has_colors = use_skylight;
-					}
 					// The quad's own normal, for the per-face brightness the
 					// cubes get
 					Vector3 e1(quad.p[1][0] - quad.p[0][0],
@@ -853,6 +855,49 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 						face_id = n.x_ >= 0 ? 2 : 3;
 					else
 						face_id = n.z_ >= 0 ? 4 : 5;
+					// A quad of a grouped shape against a neighbour of the
+					// same group is a face inside a body of it -- the water
+					// inside a lake -- and is not drawn. Only an
+					// axis-aligned quad is tested, and it is assumed to lie
+					// on the voxel's boundary in that direction; a shape
+					// whose quads do not is not what a group is for.
+					// simplified: a face against a *lower* level of the same
+					// liquid is dropped with the rest, which leaves a gap
+					// where the surface steps down. Corner heights, which
+					// make the surface continuous instead of stepped, are
+					// what remove both.
+					static const int FACE_AXIS[6] = {1, 1, 0, 0, 2, 2};
+					static const int FACE_DIR[6][3] = {
+						{0, 1, 0}, {0, -1, 0}, {1, 0, 0},
+						{-1, 0, 0}, {0, 0, 1}, {0, 0, -1},
+					};
+					if(def->shape_group != 0 &&
+							std::fabs(n.Data()[FACE_AXIS[face_id]]) > 0.99f){
+						VoxelInstance nv = volume.getVoxelAt(
+								x + FACE_DIR[face_id][0],
+								y + FACE_DIR[face_id][1],
+								z + FACE_DIR[face_id][2]);
+						const interface::CachedVoxelDefinition *ndef =
+								nv.get_id() == interface::VOXELTYPEID_UNDEFINED ?
+								nullptr : voxel_reg->get_cached(nv);
+						// The same group: a face inside a body of it. Or
+						// something opaque: the face is that voxel's own, as
+						// in IsQuadNeededByRegistry.
+						if(ndef != nullptr &&
+								(ndef->shape_group == def->shape_group ||
+								(def->translucent && !ndef->translucent &&
+								ndef->edge_material_id !=
+								interface::EDGEMATERIALID_EMPTY)))
+							continue;
+					}
+					sm_<uint, TemporaryGeometry> &into =
+							(translucent_result && def->translucent) ?
+							*translucent_result : result;
+					TemporaryGeometry &tg = into[seg_ref.atlas_id];
+					if(tg.vertex_data.Empty()){
+						tg.atlas_id = seg_ref.atlas_id;
+						tg.has_colors = use_skylight;
+					}
 					unsigned color = 0xffffffff;
 					if(use_skylight){
 						float shade = FACE_SHADE[face_id];

@@ -434,7 +434,8 @@ local function write_node(name, drawtype, tile_names, flags, animation, opts)
 	w:u8(0) -- rightclickable
 	w:u32(opts.damage_per_second or 0)
 	w:u8(opts.liquid_type or 0)
-	w:string(""):string("") -- liquid_alternative_flowing, _source
+	w:string("") -- liquid_alternative_flowing
+	w:string(opts.liquid_source or "")
 	w:u8(0) -- liquid_viscosity
 	w:u8(0) -- liquid_renewable
 	w:u8(0) -- liquid_range
@@ -456,7 +457,7 @@ local nodes = {
 	{11, write_node("test:water", 2, {"water.png", "water.png", "water.png",
 			"water.png", "water.png", "water.png"}, 1, "vertical",
 			{walkable = false, liquid_type = 2, drowning = 1,
-			palette = "water_palette.png"})},
+			liquid_source = "test:water", palette = "water_palette.png"})},
 	{13, write_node("test:torch", 7, {"torch.png", "torch.png", "torch.png",
 			"torch.png", "torch.png", "torch.png"}, 0, "sheet")},
 }
@@ -492,6 +493,7 @@ assert(defs[7].walkable and defs[7].diggable and not defs[7].climbable,
 		"nodedef: interaction fields of a solid node")
 assert(defs[11].walkable == false and defs[11].liquid_type == 2 and
 		defs[11].drowning == 1 and
+		defs[11].liquid_alternative_source == "test:water" and
 		defs[11].palette_name == "water_palette.png",
 		"nodedef: liquid fields")
 assert(defs[7].color[1] == 255 and defs[7].color[3] == 253,
@@ -1701,10 +1703,12 @@ assert(shapes.liquid_top(4, 3) == shapes.liquid_top(4, 4),
 		"shapes: a range of four puts levels 0...4 on the floor")
 assert(math.abs(shapes.liquid_top(4, 5) - (-0.5 + 1.5 / 4)) < 1e-9,
 		"shapes: a range of four spends its levels on the top of the voxel")
--- And the box it comes to is a box with a lowered top, drawn from both sides
+-- And the box it comes to is a box with a lowered top, with single quads:
+-- doubling them would blend the surface twice, and the alpha technique draws
+-- with culling off instead
 local water, water_both = shapes.for_node({drawtype = 3}, nil, nil, nil,
 		shapes.liquid_top(8, 4))
-assert(water_both, "shapes: a liquid is drawn from both sides")
+assert(not water_both, "shapes: a liquid's quads are not doubled")
 local wlo, whi = box_of(water)
 assert(wlo[2] == -0.5 and math.abs(whi[2] - shapes.liquid_top(8, 4)) < 1e-9,
 		"shapes: a flowing liquid is a box with a lowered top")

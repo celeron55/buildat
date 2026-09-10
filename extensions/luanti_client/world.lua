@@ -516,6 +516,32 @@ function M.new(magic, buildat, log, options)
 		return n
 	end
 
+	-- Which liquid family a node belongs to, as a small number, or 0 for a
+	-- node that is not a liquid. Two nodes are the same liquid when they name
+	-- the same source, which is how a water source and a flowing water are
+	-- the same water and lava is not. The numbers are kept across registry
+	-- rebuilds; there is a handful of them per game.
+	local liquid_groups = {}
+	local liquid_group_count = 0
+	local function liquid_group(def)
+		if def.liquid_type == nil or
+				def.liquid_type == NODEDEF_LIQUID_NONE then
+			return 0
+		end
+		local key = def.liquid_alternative_source
+		if key == nil or key == "" then
+			key = def.name
+		end
+		if not liquid_groups[key] then
+			-- The edge material is one byte and the groups start at 11, so
+			-- this cannot run away; a game with two hundred liquids gets the
+			-- last of them drawn as if it were the first.
+			liquid_group_count = (liquid_group_count % 200) + 1
+			liquid_groups[key] = liquid_group_count
+		end
+		return liquid_groups[key]
+	end
+
 	-- A voxel whose six faces are the given resource names, in buildat's face
 	-- order (+Y, -Y, +X, -X, +Z, -Z), which is also Luanti's tile order.
 	--
@@ -524,8 +550,10 @@ function M.new(magic, buildat, log, options)
 	-- theirs against it. shapes.lua is what builds those.
 	-- turns is nil or six quarter turns, one per face: how far the texture is
 	-- turned inside its own face. See VoxelDefinition.tile_turns.
+	-- liquid_group is nonzero for a liquid, one number per liquid family; see
+	-- liquid_group() below.
 	local function add_cube(voxel_reg, name, resources, kind, shape,
-			double_sided, turns)
+			double_sided, turns, liquid_group)
 		local vdef = buildat.VoxelDefinition()
 		vdef.name.block_name = name
 		vdef.handler_module = ""
@@ -546,10 +574,15 @@ function M.new(magic, buildat, log, options)
 		if turns then
 			vdef.tile_turns = turns
 		end
-		if kind == "glass" then
+		if liquid_group and liquid_group ~= 0 then
+			-- One edge material per liquid family, so water culls against
+			-- water and lava against lava while the face between them is
+			-- drawn -- and so is the terrain under either, because ground is
+			-- neither.
+			vdef.edge_material_id = EDGEMATERIAL_LIQUID + liquid_group - 1
+			vdef.shape_group = liquid_group
+		elseif kind == "glass" then
 			vdef.edge_material_id = EDGEMATERIAL_GLASS
-		elseif kind == "liquid" then
-			vdef.edge_material_id = EDGEMATERIAL_LIQUID
 		elseif kind == "allfaces" then
 			vdef.face_draw_type =
 					buildat.VoxelDefinition.FACEDRAWTYPE_ALWAYS
@@ -563,14 +596,20 @@ function M.new(magic, buildat, log, options)
 		-- Which pass the faces go in. The mesher puts a translucent voxel's
 		-- faces on a child node of the chunk and world.lua gives that one the
 		-- blended technique.
-		vdef.translucent = kind == "liquid"
+		vdef.translucent = liquid_group ~= nil and liquid_group ~= 0
 		if shape then
 			vdef.shape = shape
 			vdef.shape_double_sided = double_sided and true or false
 			vdef.face_draw_type =
 					buildat.VoxelDefinition.FACEDRAWTYPE_NEVER
-			vdef.edge_material_id =
-					buildat.VoxelDefinition.EDGEMATERIALID_EMPTY
+			-- A shaped voxel's neighbours draw their faces against it, which
+			-- is what EMPTY says. A liquid keeps its own edge material
+			-- instead: a lake's cubes must not draw their faces against the
+			-- shaped surface on top of them.
+			if not (liquid_group and liquid_group ~= 0) then
+				vdef.edge_material_id =
+						buildat.VoxelDefinition.EDGEMATERIALID_EMPTY
+			end
 		end
 		return voxel_reg:add_voxel(vdef)
 	end
@@ -2003,6 +2042,7 @@ function M.new(magic, buildat, log, options)
 	local function build_voxel(reg, def, resolve_tile, override, name,
 			facedir, wall, liquid_top)
 		local kind = CUBE_DRAWTYPES[def.drawtype]
+		local group = liquid_group(def)
 		local shape, double_sided = shapes.for_node(def, facedir, wall,
 				read_mesh and read_mesh(def) or nil, liquid_top)
 		local tiles = facedir and facedir ~= 0 and
@@ -2035,7 +2075,7 @@ function M.new(magic, buildat, log, options)
 				resources[i] = resources[i] or first
 			end
 			return add_cube(reg, name or def.name, resources, kind, shape,
-					double_sided)
+					double_sided, nil, group)
 		end
 		if not kind then
 			return nil
@@ -2053,7 +2093,7 @@ function M.new(magic, buildat, log, options)
 		local turns = facedir and facedir ~= 0 and
 				shapes.FACEDIR_TILE_TURNS[facedir + 1] or nil
 		return add_cube(reg, name or def.name, resources, kind, nil, nil,
-				turns)
+				turns, group)
 	end
 
 	-- Builds the registry for a set of node definitions a slice at a time.

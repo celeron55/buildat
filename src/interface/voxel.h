@@ -105,11 +105,18 @@ namespace interface
 		// mesher puts them in a geometry of their own; what technique that
 		// gets is the game's business, as with the rest of the materials.
 		bool translucent = false;
+		// Which family of shapes this voxel's shape belongs to, or 0 for
+		// none. A shape's quad is not drawn when the neighbour it faces has
+		// the same group: that is what keeps the faces inside a body of water
+		// out of the mesh, where the cube case has edge_material_id for the
+		// same job. Water and lava are different groups, so the face between
+		// them is drawn.
+		//
+		// Only an axis-aligned quad on the voxel's own boundary is tested;
+		// the neighbour looked at is the one the quad's normal points into.
+		uint8_t shape_group = 0;
 		// TODO: Flag for whether all faces should be always drawn (in case the
 		//       textures contain holes)
-		// TODO: Some kind of property for defining whether this is a thing for
-		//       which adjacent voxels of the same thing type don't have faces,
-		//       and what thing type that is in this case
 	};
 
 	static constexpr size_t VOXELDEF_NUM_LOD = 3;
@@ -129,6 +136,7 @@ namespace interface
 		sv_<VoxelQuad> shape;
 		bool shape_double_sided = false;
 		bool translucent = false;
+		uint8_t shape_group = 0;
 
 		uint8_t tile_turns[6] = {};
 
