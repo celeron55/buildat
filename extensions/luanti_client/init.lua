@@ -2302,6 +2302,15 @@ local function show_client(host, port, name, password)
 				end
 			end
 			view:place_objects(world_objects, dtime)
+			-- The blocks whose light a node change may have moved. The
+			-- server keeps track of what it has sent us, so saying we no
+			-- longer have one is what makes it send that one again -- with
+			-- the light it works out itself, which is not arithmetic this
+			-- client does. The stale block is drawn until it arrives.
+			local again = view:refresh_wanted(8)
+			if #again > 0 then
+				client:send_deleted_blocks(again)
+			end
 			view:update_particles(dtime)
 			view:update_sounds(dtime)
 			view:update_fov(dtime)

@@ -66,6 +66,7 @@ local TOSERVER = {
 	INIT2         = 0x11,
 	PLAYERPOS     = 0x23,
 	GOTBLOCKS     = 0x24,
+	DELETEDBLOCKS = 0x25,
 	INVENTORY_ACTION = 0x31,
 	CHAT_MESSAGE  = 0x32,
 	INTERACT      = 0x39,
@@ -85,6 +86,7 @@ local TOSERVER_DELIVERY = {
 	[TOSERVER.INIT2]         = {1, true},
 	[TOSERVER.PLAYERPOS]     = {0, false},
 	[TOSERVER.GOTBLOCKS]     = {2, true},
+	[TOSERVER.DELETEDBLOCKS] = {2, true},
 	[TOSERVER.INVENTORY_ACTION] = {0, true},
 	[TOSERVER.CHAT_MESSAGE]  = {0, true},
 	[TOSERVER.INTERACT]      = {0, true},
@@ -1364,6 +1366,21 @@ function M.new(socket, options, log)
 			w:longstring(value)
 		end
 		send_command(TOSERVER.NODEMETA_FIELDS, w:data())
+	end
+
+	-- The blocks we no longer have, which is what makes the server send them
+	-- again: it keeps track of what it has sent and skips a block it thinks
+	-- we hold. What wants that is a node change, because the light around it
+	-- is the server's arithmetic and not ours.
+	function self:send_deleted_blocks(blocks)
+		local w = serialize.writer()
+		local count = math.min(#blocks, 255)
+		w:u8(count)
+		for i = 1, count do
+			local b = blocks[i]
+			w:s16(b[1]):s16(b[2]):s16(b[3])
+		end
+		send_command(TOSERVER.DELETEDBLOCKS, w:data())
 	end
 
 	-- Moving a stack from one inventory slot to another. The command is
