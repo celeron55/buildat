@@ -23,6 +23,8 @@ local shapes = dofile(__buildat_extension_path("luanti_client")..
 		"/shapes.lua")
 local particles = dofile(__buildat_extension_path("luanti_client")..
 		"/particles.lua")
+local light_flood = dofile(__buildat_extension_path("luanti_client")..
+		"/light.lua")
 
 local M = {}
 
@@ -2383,11 +2385,6 @@ function M.new(magic, buildat, log, options)
 	-- light stale rather than the world unsent.
 	local REFRESH_MAX = 24
 
-	-- How far light reaches, which is how far from a change a block can be
-	-- and still be wrong. Luanti's LIGHT_SUN is 15 and a light loses one per
-	-- node, so this is the whole of it.
-	local LIGHT_REACH = 15
-
 	-- Whether a node changing from one id to another can move the light
 	-- around it: only a change in what a node gives or in what it lets
 	-- through can. A rail replaced by air is neither.
@@ -2411,17 +2408,133 @@ function M.new(magic, buildat, log, options)
 		return from_through ~= to_through
 	end
 
+	-- The light around a node change, worked out here rather than asked for
+	-- again; light.lua is the algorithm and this is what it reads and
+	-- writes. The writes are held until the flood is done and then go into
+	-- each block in one pass, because a block's param1 is a string and
+	-- rebuilding it once per node would be thousands of copies of four
+	-- kilobytes. The reads see the writes, so the flood sees its own work.
+	local light_writes = {}
+	local light_dirty = {}
+
+	local function light_index(x, y, z)
+		local bx = math.floor(x / BLOCKSIZE)
+		local by = math.floor(y / BLOCKSIZE)
+		local bz = math.floor(z / BLOCKSIZE)
+		return block_key(bx, by, bz),
+				(x - bx * BLOCKSIZE) +
+				(y - by * BLOCKSIZE) * BLOCKSIZE +
+				(z - bz * BLOCKSIZE) * BLOCKSIZE * BLOCKSIZE,
+				bx, by, bz
+	end
+
+	local light_access = {
+		node = function(x, y, z)
+			return self:node_at(x, y, z)
+		end,
+		light = function(x, y, z)
+			local key, i = light_index(x, y, z)
+			local writes = light_writes[key]
+			local p = writes and writes[i]
+			if p == nil then
+				p = param1_at(x, y, z)
+			end
+			if p == nil then
+				return nil
+			end
+			return p % 16, math.floor(p / 16)
+		end,
+		set_light = function(x, y, z, day, night)
+			local key, i, bx, by, bz = light_index(x, y, z)
+			if not blocks[key] then
+				return
+			end
+			local writes = light_writes[key]
+			if not writes then
+				writes = {}
+				light_writes[key] = writes
+			end
+			writes[i] = (day % 16) + (night % 16) * 16
+			light_dirty[key] = true
+			-- A node on a block's edge is in the neighbour's border, so
+			-- that mesh is out of date as well
+			local lx = x - bx * BLOCKSIZE
+			local ly = y - by * BLOCKSIZE
+			local lz = z - bz * BLOCKSIZE
+			for _, d in ipairs(NEIGHBOURS) do
+				if (d[1] < 0 and lx == 0) or
+						(d[1] > 0 and lx == BLOCKSIZE - 1) or
+						(d[2] < 0 and ly == 0) or
+						(d[2] > 0 and ly == BLOCKSIZE - 1) or
+						(d[3] < 0 and lz == 0) or
+						(d[3] > 0 and lz == BLOCKSIZE - 1) then
+					light_dirty[block_key(bx + d[1], by + d[2],
+							bz + d[3])] = true
+				end
+			end
+		end,
+		source = function(id)
+			local entry = self.node_light and self.node_light[id]
+			return entry and entry.level or 0
+		end,
+		through = function(id)
+			return (self.node_light_through or {})[id] == true
+		end,
+		sun_through = function(id)
+			return (self.node_sun_through or {})[id] == true
+		end,
+	}
+
+	-- The light of everything around one node that changed. What comes back
+	-- is whether anything was left unresolved -- a node in a block we do not
+	-- have, or the flood running out of budget -- which is when asking the
+	-- server for the block is still worth it.
+	local function flood_light(x, y, z, from_id, to_id, old_param1)
+		local visited, unresolved = light_flood.update(light_access,
+				x, y, z, from_id, to_id,
+				old_param1 % 16, math.floor(old_param1 / 16))
+		for key, writes in pairs(light_writes) do
+			local block = blocks[key]
+			if block then
+				-- One pass over the string per block: the pieces between
+				-- the writes, with the new bytes between them
+				local indices = {}
+				for i in pairs(writes) do
+					indices[#indices + 1] = i
+				end
+				table.sort(indices)
+				local parts = {}
+				local last = 0
+				for _, i in ipairs(indices) do
+					parts[#parts + 1] = block.param1:sub(last + 1, i)
+					parts[#parts + 1] = string.char(writes[i])
+					last = i + 1
+				end
+				parts[#parts + 1] = block.param1:sub(last + 1)
+				block.param1 = table.concat(parts)
+			end
+			light_writes[key] = nil
+		end
+		for key in pairs(light_dirty) do
+			if blocks[key] then
+				mark_dirty(key)
+			end
+			light_dirty[key] = nil
+		end
+		return visited, unresolved
+	end
+
 	-- One node the server changed, in node coordinates. Patches the block's
 	-- parameter arrays in place; a node on a block's edge is part of the
 	-- neighbour's border, so that mesh goes out of date too.
 	-- param1 may be nil, which means the node became air and its light has
 	-- to be worked out here.
 	--
-	-- The light of everything *around* the node is the server's arithmetic
-	-- and not ours: Luanti's own client relights locally, and a block's
-	-- param1 here is a Lua string that a flood fill would rebuild once per
-	-- node. So the blocks whose light may have moved are asked for again
-	-- instead, and the stale ones are drawn until they arrive.
+	-- The light of everything *around* the node is worked out here, the way
+	-- Luanti's own client works it out: take away the light that came from
+	-- what changed and spread what is left back in. See light.lua. What that
+	-- cannot finish -- a node in a block we do not have, or a flood that ran
+	-- out of budget -- falls back to asking the server for the block again.
 	function self:set_node(x, y, z, param0, param1, param2)
 		param1 = param1 or removal_light(x, y, z)
 		param2 = param2 or 0
@@ -2437,9 +2550,11 @@ function M.new(magic, buildat, log, options)
 		local ly = y - by * BLOCKSIZE
 		local lz = z - bz * BLOCKSIZE
 		local i = lx + ly * BLOCKSIZE + lz * BLOCKSIZE * BLOCKSIZE
-		-- What was there, for the light: see light_changed() above
+		-- What was there, for the light: see light_changed() and
+		-- flood_light() above
 		local was = block.param0:byte(i * 2 + 1) * 256 +
 				block.param0:byte(i * 2 + 2)
+		local was_param1 = block.param1:byte(i + 1) or 0
 		block.param0 = block.param0:sub(1, i * 2)..
 				string.char(math.floor(param0 / 256) % 256, param0 % 256)..
 				block.param0:sub(i * 2 + 3)
@@ -2469,27 +2584,20 @@ function M.new(magic, buildat, log, options)
 				mark_dirty(block_key(bx + d[1], by + d[2], bz + d[3]))
 			end
 		end
-		local waiting = 0
-		for _ in pairs(refresh) do
-			waiting = waiting + 1
-		end
-		if light_changed(was, param0) and waiting < REFRESH_MAX then
-			-- This block, and every neighbour the light could reach into
-			refresh[key] = {bx, by, bz}
-			for _, d in ipairs(NEIGHBOURS) do
-				local near =
-						(d[1] < 0 and lx < LIGHT_REACH) or
-						(d[1] > 0 and lx >= BLOCKSIZE - LIGHT_REACH) or
-						(d[2] < 0 and ly < LIGHT_REACH) or
-						(d[2] > 0 and ly >= BLOCKSIZE - LIGHT_REACH) or
-						(d[3] < 0 and lz < LIGHT_REACH) or
-						(d[3] > 0 and lz >= BLOCKSIZE - LIGHT_REACH)
-				if near then
-					local nx, ny, nz = bx + d[1], by + d[2], bz + d[3]
-					local nkey = block_key(nx, ny, nz)
-					if blocks[nkey] then
-						refresh[nkey] = {nx, ny, nz}
-					end
+		if light_changed(was, param0) then
+			local visited, unresolved = flood_light(x, y, z, was, param0,
+					was_param1)
+			self.last_light_visited = visited
+			if unresolved then
+				-- The flood ran into a block we do not have, or out of
+				-- budget: the server's own light is the way out, and it
+				-- sends a block again when we say we no longer have it
+				local waiting = 0
+				for _ in pairs(refresh) do
+					waiting = waiting + 1
+				end
+				if waiting < REFRESH_MAX then
+					refresh[key] = {bx, by, bz}
 				end
 			end
 		end
@@ -2829,10 +2937,11 @@ function M.new(magic, buildat, log, options)
 		local cubes = 0
 		local light_ids = {}
 		-- Air's own definition is not among the ones a server sends, so
-		-- seed it the way the node map above seeds it: light passes through
-		-- air, and everything not in here is taken to block it, which is
-		-- what a node drawn as the placeholder cube does.
+		-- seed it the way the node map above seeds it: light and sunlight
+		-- pass through air, and everything not in here is taken to block
+		-- them, which is what a node drawn as the placeholder cube does.
 		local light_through = {[CONTENT_AIR] = true}
+		local sun_through = {[CONTENT_AIR] = true}
 		local collision = {}
 		local solid = {}
 		local liquid = {}
@@ -2876,6 +2985,9 @@ function M.new(magic, buildat, log, options)
 			-- gives is what decides the light around it; see
 			-- light_changed()
 			light_through[id] = def.light_propagates and true or false
+			-- And whether the sun goes straight down through it, which is
+			-- the one rule that tells glass from air
+			sun_through[id] = def.sunlight_propagates and true or false
 			-- Luanti's PointabilityType: 0 is not pointable, 1 is, and 2
 			-- stops a ray without being pointed at. Those two values are
 			-- that way round because they used to be a boolean.
@@ -3011,6 +3123,7 @@ function M.new(magic, buildat, log, options)
 			self.node_map = map
 			self.node_light = light_ids
 			self.node_light_through = light_through
+			self.node_sun_through = sun_through
 			self.node_collision = collision
 			self.node_solid = solid
 			self.node_liquid = liquid

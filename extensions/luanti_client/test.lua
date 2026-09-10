@@ -39,6 +39,7 @@ local b3dmesh = dofile(dir.."/b3dmesh.lua")
 local luanti_client = dofile(dir.."/client.lua")
 local sounds = dofile(dir.."/sounds.lua")
 local particles = dofile(dir.."/particles.lua")
+local light = dofile(dir.."/light.lua")
 local itemdef = dofile(dir.."/itemdef.lua")
 local nodemeta = dofile(dir.."/nodemeta.lua")
 local objmesh = dofile(dir.."/objmesh.lua")
@@ -2139,6 +2140,187 @@ do
 end
 
 print("particles: ok")
+-- light.lua: the light around a node that changed, on a small world of its
+-- own. AIR lets everything through, STONE nothing, GLASS light but not
+-- sunlight, and TORCH gives 14.
+do
+	local AIR, STONE, GLASS, TORCH = 1, 2, 3, 4
+	local SOURCE = {[TORCH] = 14}
+	local THROUGH = {[AIR] = true, [GLASS] = true}
+	local SUN_THROUGH = {[AIR] = true}
+
+	-- A world of one column of open sky over a floor, as a table keyed by
+	-- "x,y,z": nodes, and the two light values per node.
+	local function world(nodes, lights)
+		local w = {nodes = nodes, lights = lights}
+		w.access = {
+			node = function(x, y, z) return w.nodes[x..","..y..","..z] end,
+			light = function(x, y, z)
+				local l = w.lights[x..","..y..","..z]
+				if not l then
+					return nil
+				end
+				return l[1], l[2]
+			end,
+			set_light = function(x, y, z, day, night)
+				w.lights[x..","..y..","..z] = {day, night}
+			end,
+			source = function(id) return SOURCE[id] or 0 end,
+			through = function(id) return THROUGH[id] == true end,
+			sun_through = function(id) return SUN_THROUGH[id] == true end,
+		}
+		return w
+	end
+
+	-- A flat world: air from y = 1 up, stone at y = 0, sunlit everywhere
+	local function flat(radius, height)
+		local nodes, lights = {}, {}
+		for x = -radius, radius do
+			for z = -radius, radius do
+				for y = 0, height do
+					local at = x..","..y..","..z
+					if y == 0 then
+						nodes[at] = STONE
+						lights[at] = {0, 0}
+					else
+						nodes[at] = AIR
+						lights[at] = {15, 0}
+					end
+				end
+			end
+		end
+		return world(nodes, lights)
+	end
+
+	-- A torch in the dark lights what is around it, by one less per node
+	do
+		local nodes, lights = {}, {}
+		for x = -6, 6 do
+			for y = -6, 6 do
+				for z = -6, 6 do
+					local at = x..","..y..","..z
+					nodes[at] = AIR
+					lights[at] = {0, 0}
+				end
+			end
+		end
+		local w = world(nodes, lights)
+		-- The server's own value for the node that changed goes in first,
+		-- the way ADDNODE carries it
+		w.nodes["0,0,0"] = TORCH
+		w.lights["0,0,0"] = {14, 14}
+		local visited, unresolved = light.update(w.access, 0, 0, 0, AIR,
+				TORCH, 0, 0)
+		assert(visited > 0, "light: a torch is looked at")
+		local function night(x, y, z)
+			local _, n = w.access.light(x, y, z)
+			return n
+		end
+		assert(night(1, 0, 0) == 13, "light: one node from a torch")
+		assert(night(3, 0, 0) == 11, "light: three nodes from a torch")
+		assert(night(0, 2, 2) == 10, "light: around a corner from a torch")
+		assert(night(6, 0, 0) == 8, "light: eight left six nodes out")
+		-- And the day bank got the same, because a source is in both
+		local day = w.access.light(2, 0, 0)
+		assert(day == 12, "light: a source lights the day bank too")
+		assert(unresolved, "light: the edge of the known world is unresolved")
+	end
+
+	-- Taking the torch away takes its light with it
+	do
+		local nodes, lights = {}, {}
+		for x = -6, 6 do
+			for y = -6, 6 do
+				for z = -6, 6 do
+					local at = x..","..y..","..z
+					nodes[at] = AIR
+					lights[at] = {0, 0}
+				end
+			end
+		end
+		local w = world(nodes, lights)
+		w.nodes["0,0,0"] = TORCH
+		w.lights["0,0,0"] = {14, 14}
+		light.update(w.access, 0, 0, 0, AIR, TORCH, 0, 0)
+		-- Now it is air again, and the server says the node itself is dark
+		w.nodes["0,0,0"] = AIR
+		w.lights["0,0,0"] = {0, 0}
+		light.update(w.access, 0, 0, 0, TORCH, AIR, 14, 14)
+		for _, at in ipairs({"1,0,0", "3,0,0", "0,2,2", "5,0,0"}) do
+			local l = w.lights[at]
+			assert(l[1] == 0 and l[2] == 0,
+					"light: a torch taken away leaves the dark at "..at)
+		end
+	end
+
+	-- A stone placed in the open sky shades the column under it, and taking
+	-- it away lets the sun back down
+	do
+		local w = flat(6, 8)
+		w.nodes["0,4,0"] = STONE
+		w.lights["0,4,0"] = {0, 0}
+		local _, unresolved = light.update(w.access, 0, 4, 0, AIR, STONE,
+				15, 0)
+		local function day(x, y, z)
+			return (w.access.light(x, y, z))
+		end
+		assert(day(0, 5, 0) == 15, "light: above the stone is still sunlit")
+		assert(day(0, 3, 0) < 15, "light: under the stone is not sunlit")
+		assert(day(0, 3, 0) == 14,
+				"light: and it is lit by the sunlight beside it instead")
+		-- One node of shade is lit from all four sides at every level, so
+		-- the whole column under it is one step down and no more
+		assert(day(0, 1, 0) == 14, "light: and so is the rest of the column")
+		assert(day(3, 3, 0) == 15, "light: three nodes away is sunlit")
+		-- And back
+		w.nodes["0,4,0"] = AIR
+		w.lights["0,4,0"] = {15, 0}
+		light.update(w.access, 0, 4, 0, STONE, AIR, 0, 0)
+		assert(day(0, 3, 0) == 15 and day(0, 1, 0) == 15,
+				"light: the sun comes back down the column")
+	end
+
+	-- A roof three by three is two nodes of shade at its middle, which is
+	-- what says the light spreads step by step rather than one step
+	do
+		local w = flat(6, 8)
+		for x = -1, 1 do
+			for z = -1, 1 do
+				w.nodes[x..",4,"..z] = STONE
+				w.lights[x..",4,"..z] = {0, 0}
+			end
+		end
+		-- One change at a time, the way they arrive
+		for x = -1, 1 do
+			for z = -1, 1 do
+				light.update(w.access, x, 4, z, AIR, STONE, 15, 0)
+			end
+		end
+		local function day(x, y, z)
+			return (w.access.light(x, y, z))
+		end
+		assert(day(2, 3, 0) == 15, "light: beside the roof is sunlit")
+		assert(day(1, 3, 0) == 14, "light: under its edge is one step down")
+		assert(day(0, 3, 0) == 13, "light: under its middle is two")
+		assert(day(0, 1, 0) == 13, "light: and so is the column under that")
+	end
+
+	-- Glass lets light through but not the sun, which is the pair of rules
+	-- that a single flag could not tell apart
+	do
+		local w = flat(6, 8)
+		w.nodes["0,4,0"] = GLASS
+		w.lights["0,4,0"] = {14, 0}
+		light.update(w.access, 0, 4, 0, AIR, GLASS, 15, 0)
+		local function day(x, y, z)
+			return (w.access.light(x, y, z))
+		end
+		assert(day(0, 3, 0) == 14,
+				"light: under glass is lit but not sunlit")
+	end
+
+	print("light: ok")
+end
 
 
 
