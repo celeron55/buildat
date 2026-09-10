@@ -5,6 +5,7 @@
 #include "interface/voxel_cereal.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/vector.hpp>
+#include <mutex>
 #define MODULE "voxel"
 
 namespace std {
@@ -47,12 +48,17 @@ bool VoxelName::operator==(const VoxelName &other) const
 	);
 }
 
+// Voxel types are added on the main thread while worker threads mesh chunks
+// out of them, so every access goes through m_mutex, and the definitions live
+// in deques: a pointer handed out by get_cached() stays valid across an
+// add_voxel(), which is not true of a vector.
 struct CVoxelRegistry: public VoxelRegistry
 {
-	sv_<VoxelDefinition> m_defs;
-	sv_<CachedVoxelDefinition> m_cached_defs;
+	sd_<VoxelDefinition> m_defs;
+	sd_<CachedVoxelDefinition> m_cached_defs;
 	sm_<VoxelName, VoxelTypeId> m_name_to_id;
 	bool m_is_dirty = false;
+	std::mutex m_mutex;
 
 	CVoxelRegistry()
 	{
@@ -61,6 +67,7 @@ struct CVoxelRegistry: public VoxelRegistry
 
 	void clear()
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
 		m_defs.clear();
 		m_cached_defs.clear();
 		m_name_to_id.clear();
@@ -70,6 +77,7 @@ struct CVoxelRegistry: public VoxelRegistry
 
 	sv_<VoxelDefinition> get_all()
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
 		sv_<VoxelDefinition> result;
 		result.insert(result.end(), m_defs.begin()+1, m_defs.end());
 		return result;
@@ -77,6 +85,7 @@ struct CVoxelRegistry: public VoxelRegistry
 
 	VoxelTypeId add_voxel(const VoxelDefinition &def)
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
 		VoxelTypeId id = m_defs.size();
 		if(def.id != VOXELTYPEID_UNDEFINED && id != def.id)
 			throw Exception(ss_()+"add_voxel(): def.id="+itos(def.id)+
@@ -84,8 +93,6 @@ struct CVoxelRegistry: public VoxelRegistry
 		if(m_name_to_id.count(def.name) != 0)
 			throw Exception(ss_()+"add_voxel(): Already exists: "+
 					cs(def.name.dump()));
-		// NOTE: This invalidates all previous pointers to cache entries that
-		//       were given out
 		m_defs.resize(id + 1);
 		m_defs[id] = def;
 		m_defs[id].id = id;
@@ -98,6 +105,12 @@ struct CVoxelRegistry: public VoxelRegistry
 
 	const VoxelDefinition* get(const VoxelTypeId &id)
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return get_unlocked(id);
+	}
+
+	const VoxelDefinition* get_unlocked(const VoxelTypeId &id)
+	{
 		if(id >= m_defs.size()){
 			log_w(MODULE, "CVoxelRegistry::get(): id=%i not found", id);
 			return NULL;
@@ -107,6 +120,7 @@ struct CVoxelRegistry: public VoxelRegistry
 
 	const VoxelDefinition* get(const VoxelName &name)
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
 		auto it = m_name_to_id.find(name);
 		if(it == m_name_to_id.end()){
 			log_w(MODULE, "CVoxelRegistry::get(): name=%s not found",
@@ -114,12 +128,13 @@ struct CVoxelRegistry: public VoxelRegistry
 			return NULL;
 		}
 		VoxelTypeId id = it->second;
-		return get(id);
+		return get_unlocked(id);
 	}
 
 	const CachedVoxelDefinition* get_cached(const VoxelTypeId &id,
 			AtlasRegistry *atlas_reg, bool with_lod)
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
 		if(id >= m_defs.size()){
 			log_w(MODULE, "CVoxelRegistry::get_cached(): id=%i not found", id);
 			return NULL;
@@ -152,11 +167,13 @@ struct CVoxelRegistry: public VoxelRegistry
 
 	bool is_dirty()
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
 		return m_is_dirty;
 	}
 
 	void clear_dirty()
 	{
+		std::lock_guard<std::mutex> lock(m_mutex);
 		m_is_dirty = false;
 	}
 

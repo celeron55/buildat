@@ -92,7 +92,9 @@ namespace interface
 		// Mip levels, which stop where one segment is one texel; see
 		// upload_box() in impl/atlas.cpp
 		unsigned levels = 1;
-		sv_<AtlasSegmentDefinition> segments;
+		// A deque, so that a pointer into it survives a segment being added
+		// while a worker thread is reading one; see impl/atlas.cpp
+		sd_<AtlasSegmentDefinition> segments;
 	};
 
 	struct AtlasCache
@@ -111,7 +113,8 @@ namespace interface
 		magic::IntVector2 segment_resolution;
 		magic::IntVector2 total_segments;
 		unsigned levels = 1;
-		sv_<AtlasSegmentCache> segments;
+		// A deque; see AtlasDefinition::segments
+		sd_<AtlasSegmentCache> segments;
 	};
 
 	struct AtlasRegistry
