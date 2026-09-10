@@ -210,6 +210,12 @@ replicate.main_scene
 - CreateNode and CreateComponent uses urho3d.LOCAL by default unlike native
   Urho3D. With urho3d.REPLICATED (native default) they will end up in the
   synchronized ID space and will be overridden by data coming from the server.
+- Node:Clone([mode]) is there as well, also LOCAL by default: a copy of the
+  node and its components in the same parent, made inside the engine. What
+  wants it is geometry that costs a sandbox call per vertex to build and is
+  wanted more than once. Urho3D copies a component through its attributes,
+  so a material made in Lua -- which has no resource name to be referred to
+  -- is not copied and has to be set on the copy.
 
 network
 -------

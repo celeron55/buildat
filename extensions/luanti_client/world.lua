@@ -1824,6 +1824,34 @@ function M.new(magic, buildat, log, options)
 		return cg, materials
 	end
 
+	-- The template node of one kind of object mesh: mesh name and textures
+	-- -> a node that is not drawn, holding the geometry and its materials.
+	--
+	-- Every vertex of an object's mesh is a sandbox call
+	-- (CustomGeometry:DefineVertex), which for a mob of a few thousand quads
+	-- is a quarter of a second -- measured on VoxeLibre: a skeleton took 250
+	-- ms, and every skeleton in the world paid it again. So the first of a
+	-- kind is built once and the rest are clones of it, which Urho3D copies
+	-- inside the engine. The materials are shared with the template, which
+	-- is also what keeps them alive: a Material made in Lua lives only while
+	-- something in the engine holds it.
+	local object_templates = {}
+
+	local function object_template(mesh)
+		local key = (mesh.name or "?").."|"..
+				table.concat(mesh.tiles or {}, "|")
+		local entry = object_templates[key]
+		if not entry then
+			local node = scene:CreateChild("object_template")
+			node.enabled = false
+			local cg, materials = build_object_mesh(node, mesh.quads,
+					mesh.tiles)
+			entry = {node = node, materials = materials}
+			object_templates[key] = entry
+		end
+		return entry
+	end
+
 	-- What an object is drawn as.
 	--
 	-- simplified: an object whose visual is a mesh this can read is drawn as
@@ -1856,15 +1884,26 @@ function M.new(magic, buildat, log, options)
 			object_nodes[obj.id] = nil
 		end
 		if not entry then
-			local node = scene:CreateChild("object_"..obj.id)
+			-- A mesh is a copy of its kind's template, which carries the
+			-- geometry and the materials already; everything else is built
+			-- on a node of its own
+			local template = meshed and object_template(mesh) or nil
+			local node = template and template.node:Clone() or
+					scene:CreateChild("object_"..obj.id)
 			entry = {node = node, sprite = sprite, cube = cube,
 					meshed = meshed}
-			if cube then
-				entry.model, entry.materials = build_item_cube(node, tiles)
+			if template then
+				node.enabled = true
 				entry.textured = true
-			elseif meshed then
-				entry.model, entry.materials = build_object_mesh(node,
-						mesh.quads, mesh.tiles)
+				entry.materials = template.materials
+				entry.model = node:GetComponent("CustomGeometry")
+				-- The clone's own materials: a Material made in Lua has no
+				-- resource name, so it is not an attribute Urho3D can copy
+				for i = 1, #template.materials do
+					entry.model:SetMaterial(i - 1, template.materials[i])
+				end
+			elseif cube then
+				entry.model, entry.materials = build_item_cube(node, tiles)
 				entry.textured = true
 			elseif sprite then
 				local set = node:CreateComponent("BillboardSet")
