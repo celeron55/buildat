@@ -471,20 +471,32 @@ A stall behind an unacknowledged packet, a lost reliable packet with
 everything queued behind it, and a server that simply sends little look
 different in those numbers.
 
-The light of a node change is the server's arithmetic and not this client's.
-ADDNODE and REMOVENODE carry the new node's own light and nothing about what
-is around it, and Luanti's own client works the rest out itself, unspreading
-and respreading each light bank. This one cannot do that cheaply -- a block's
-light is a Lua string that a flood fill would rebuild once per node -- so it
-tells the server it no longer has the blocks whose light may have moved, which
-makes the server send them again with the light it worked out; the stale ones
-are drawn until they arrive. Only a change that can move light at all is
-worth it: one where the light the node gives, or whether light passes through
-it, differs from what was there. So a rail replaced by air costs nothing and
-a torch or a wall costs a block or a few. It is throttled as well -- within
-three blocks of the camera, eight a frame, twenty-four waiting at most --
-because asking for a block again takes a send away from the map that has not
-arrived yet, and on a busy server every nearby player's digging would ask.
+The light around a node change is worked out here, the way Luanti's own
+client works it out: ADDNODE and REMOVENODE carry the new node's own light and
+nothing about what is around it, so res/../light.lua takes away the light that
+came from what changed and spreads what is left back in, once per light bank.
+
+Luanti keeps two of those in param1 -- the light a node has when the sun is up
+and the light it gets from sources alone -- and they differ in one rule only:
+sunlight is the value 15, one more than any source can give, and it goes
+straight down undimmed through anything that lets it. So a node that starts or
+stops letting sunlight through takes the whole column below it with it.
+
+Two things make this cheap enough to do in Lua. It only runs when the change
+can move light at all -- when the light the node gives, or whether light passes
+through it, differs from what was there -- so a rail replaced by air costs
+nothing. And the writes are held until the flood is done and then go into each
+block in one pass, because a block's light is a string and rebuilding it once
+per node would be thousands of copies of four kilobytes. A placed or dug node
+looks at a few dozen nodes; a change that opens a shaft to the sky looks at a
+few hundred.
+
+What the flood cannot finish -- a node in a block we do not have, or the
+budget of six thousand nodes running out -- falls back to telling the server we
+no longer have that block, which makes it send the block again with the light
+it worked out itself. That is throttled: within three blocks of the camera,
+eight a frame, twenty-four waiting at most, because asking for a block again
+takes a send away from the map that has not arrived yet.
 
 The HUD: a game puts its own things on the screen with HUDADD and changes
 them one field at a time with HUDCHANGE, and this draws the images, the text
