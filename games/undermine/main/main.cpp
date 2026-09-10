@@ -67,12 +67,13 @@ static const int BEDROCK_TOP = -60;
 // undermine's own cut of a voxel word, which is the point of the game
 // existing. See local/undermine_plan.md.
 //
-//   id       0...5    up to 63 materials; there are ten and it will grow
-//   sky      6...9    light, as voxelworld maintains it
-//   param   10...17   the load a voxel carries, bound as the engine's param
+//   id       0...7    up to 255 materials; there are twelve, and nature and
+//                     everything else it will grow have room
+//   sky      8...11    light, as voxelworld maintains it
+//   param   12...19   the load a voxel carries, bound as the engine's param
 //                     role so that the mesher can read it without the game
 //                     spending a second field on a copy of it
-//   support 18...21   how far this voxel is from something holding it up
+//   support 20...23   how far this voxel is from something holding it up
 //
 // No lamp light. Nothing in this world bakes light into a voxel except the
 // sky: a lamp here is a real light in the scene, which is what the player's
@@ -83,16 +84,53 @@ static const int BEDROCK_TOP = -60;
 //
 // support is not a role: the engine knows nothing about it, which is what
 // the design note means by a game's simulation fields being its own
-// business. Bits 22...31 are spare.
-static const interface::VoxelField F_SUPPORT(0, 18, 4);
+// business. Bits 24...31 are spare, which is exactly the eight the plan's
+// phase 3 wants for moisture and not one more.
+// One source of truth for the layout: the format is built out of these, and
+// the simulation reads and writes through them.
+static const interface::VoxelField F_ID(0, 0, 8);
+static const interface::VoxelField F_LIGHT_SKY(0, 8, 4);
+static const interface::VoxelField F_LOAD(0, 12, 8);
+static const interface::VoxelField F_SUPPORT(0, 20, 4);
 
 static interface::VoxelFormat undermine_format()
 {
 	interface::VoxelFormat f;
-	f.id = interface::VoxelField(0, 0, 6);
-	f.light_sky = interface::VoxelField(0, 6, 4);
-	f.param = interface::VoxelField(0, 10, 8);
+	f.id = F_ID;
+	f.light_sky = F_LIGHT_SKY;
+	// The load is the engine's param role, so that the mesher can read it
+	f.param = F_LOAD;
 	return f;
+}
+
+static const uint8_t SUPPORT_MAX = 15;
+static const uint8_t LOAD_MAX = 255;
+
+// How far up a voxel is asked to carry.
+//
+// simplified: the weight on a voxel is the column immediately above it and
+// no further, so nothing carries the whole mountain and a prop's failure
+// depends on what is locally above it. That is what makes the number local
+// enough to work out anywhere, including at generation time, and stable
+// enough that digging far overhead does not change it. The upgrade path, if
+// a game wants the real thing, is a load that accumulates down the column
+// without a limit -- which means the whole column has to be recomputed
+// whenever anything in it changes.
+static const int LOAD_DEPTH = 32;
+
+static interface::VoxelTypeId id_of(const VoxelInstance &v)
+{
+	return (interface::VoxelTypeId)F_ID.get(v.data);
+}
+
+static uint8_t support_of(const VoxelInstance &v)
+{
+	return (uint8_t)F_SUPPORT.get(v.data);
+}
+
+static uint8_t load_of(const VoxelInstance &v)
+{
+	return (uint8_t)F_LOAD.get(v.data);
 }
 
 // The materials. Ids are assigned in this order by add_voxel() below, and
@@ -108,6 +146,8 @@ enum Material {
 	M_TIMBER,
 	M_BRICK,
 	M_WATER,
+	M_TRUNK,
+	M_LEAVES,
 	M_COUNT
 };
 
@@ -142,6 +182,14 @@ static const MaterialProps MATERIAL[M_COUNT] = {
 	{true,  true,   8, 1,  30},   // timber
 	{true,  true,   3, 4, 255},   // brick
 	{false, false,  0, 0,   0},   // water
+	// A standing tree is held up by the ground under it like anything else,
+	// so cutting through the trunk drops what is above the cut
+	{true,  true,   6, 1,  25},   // trunk
+	// Leaves hang off the trunk rather than standing on anything, which is
+	// what the span is for: a canopy two voxels out from the trunk holds,
+	// and comes down with the trunk. Weightless, so a tree does not crush
+	// itself, and nothing crushes leaves.
+	{true,  true,   3, 0, 255},   // leaves
 };
 
 static const MaterialProps& material_of(interface::VoxelTypeId id)
@@ -205,6 +253,75 @@ struct Worldgen: public worldgen::GeneratorInterface
 							m = M_AIR;
 						}
 						volume.setVoxelAt(p, VoxelInstance(m));
+					}
+				}
+			}
+
+			// Trees, for something to look at above ground -- and for
+			// something whose trunk can be cut through, which the support
+			// rule makes an event rather than a decoration
+			auto extent = uc - lc + pv::Vector3DInt32(1, 1, 1);
+			int area = extent.getX() * extent.getZ();
+			auto pr = interface::PseudoRandom(13241);
+			for(int i = 0; i < area / 100; i++){
+				int x = pr.range(lc.getX(), uc.getX());
+				int z = pr.range(lc.getZ(), uc.getZ());
+				size_t ni = (z - lc.getZ()) * d + (x - lc.getX());
+				int y = (int)(noise.result[ni] + 11.0);
+				if(y < lc.getY() - 5 || y > uc.getY() - 5)
+					continue;
+				// The trunk would start in a pond
+				if(y <= WATER_LEVEL + 1)
+					continue;
+				for(int y1 = y; y1 < y + 4; y1++)
+					volume.setVoxelAt(pv::Vector3DInt32(x, y1, z),
+							VoxelInstance(M_TRUNK));
+				for(int x1 = x - 2; x1 <= x + 2; x1++){
+					for(int y1 = y + 3; y1 <= y + 7; y1++){
+						for(int z1 = z - 2; z1 <= z + 2; z1++){
+							pv::Vector3DInt32 p(x1, y1, z1);
+							if(id_of(volume.getVoxelAt(p)) == M_TRUNK)
+								continue;
+							volume.setVoxelAt(p, VoxelInstance(M_LEAVES));
+						}
+					}
+				}
+			}
+
+			// What the simulation starts from. Generated terrain is a
+			// heightfield standing on bedrock, so every solid voxel of it is
+			// held up -- there are no overhangs to work out -- and the one
+			// number that has to be computed is the weight each voxel
+			// carries. Both are exact here except within LOAD_DEPTH of the
+			// top of the volume, where the column above is in a section this
+			// generator cannot see; digging near one fixes it locally.
+			for(int z = lc.getZ(); z <= uc.getZ(); z++){
+				for(int x = lc.getX(); x <= uc.getX(); x++){
+					// The densities of the LOAD_DEPTH voxels above the one
+					// being written, as a ring: what leaves the window is
+					// subtracted rather than the whole column being summed
+					// again per voxel
+					int window[LOAD_DEPTH] = {};
+					int carried = 0;
+					int depth = 0;
+					for(int y = uc.getY(); y >= lc.getY(); y--){
+						pv::Vector3DInt32 p(x, y, z);
+						VoxelInstance v = volume.getVoxelAt(p);
+						const MaterialProps &m = material_of(id_of(v));
+						if(!m.structural){
+							carried = 0;
+							depth = 0;
+							continue;
+						}
+						F_SUPPORT.set(v.data, SUPPORT_MAX);
+						F_LOAD.set(v.data, carried > LOAD_MAX ?
+								LOAD_MAX : carried);
+						volume.setVoxelAt(p, v);
+						int &slot = window[depth % LOAD_DEPTH];
+						carried -= slot;
+						slot = m.density;
+						carried += slot;
+						depth++;
 					}
 				}
 			}
@@ -376,6 +493,12 @@ struct Module: public interface::Module
 			// dug shore leaves a hole in the water rather than draining it.
 			add_voxel(voxel_reg, "water", "main/water.png", true, false, false,
 					0.28f, 1.0f, 6.0f, 0.0f, 0.05f);
+			add_voxel(voxel_reg, "trunk", "main/tree.png", true, true, false,
+					0.85f, 0.35f, 2.0f, 0.0f, 0.0f, 0.0f,
+					"main/tree_top.png");
+			add_voxel(voxel_reg, "leaves", "main/leaves.png",
+					true, true, false,
+					0.95f, 1.0f, 1.5f, 0.11f, 0.03f);
 
 			world->set_skylight_enabled(true);
 		});

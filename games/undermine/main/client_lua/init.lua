@@ -113,10 +113,10 @@ end
 -- *default* cut, hardcoded in the bindings, and under this format they would
 -- read the load and the support as part of the id.
 local FIELD = {
-	id      = {shift = 0,  width = 6},
-	light   = {shift = 6,  width = 4},
-	load    = {shift = 10, width = 8},
-	support = {shift = 18, width = 4},
+	id      = {shift = 0,  width = 8},
+	light   = {shift = 8,  width = 4},
+	load    = {shift = 12, width = 8},
+	support = {shift = 20, width = 4},
 }
 
 local function field_of(v, f)
@@ -126,7 +126,7 @@ end
 -- In the order main.cpp adds them, which is what the ids are
 local MATERIAL = {
 	"air", "bedrock", "rock", "dirt", "grass", "sand", "rubble",
-	"timber", "brick", "water",
+	"timber", "brick", "water", "trunk", "leaves",
 }
 local M_AIR = 1
 
