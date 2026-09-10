@@ -418,17 +418,23 @@ function M.new(magic, buildat, log, options)
 
 	local sounds = {}
 
+	-- A scene node per object, kept by id. Declared here rather than with
+	-- the rest of the object code below because a sound attached to an
+	-- object follows it, and the sounds are above that.
+	local object_nodes = {}
+
 	-- play_sound(id, spec, resource)
 	--
 	-- spec is what sounds.lua read out of PLAY_SOUND and resource the name
 	-- of one file of the group it asked for -- picking which one is the
 	-- caller's, because which files there are is the media's business.
 	--
-	-- simplified: a sound attached to an object plays where the object was
-	-- when it started rather than following it, and start_time is ignored,
-	-- because seeking is not in the sandbox's SoundSource. A game uses the
-	-- first for a mob's noises, which are short, and the second for
-	-- background music a player rejoins in the middle of.
+	-- A sound attached to an object starts where the object is and follows
+	-- it, which is what a mob's own noises want.
+	--
+	-- simplified: start_time is ignored, because seeking is not in the
+	-- sandbox's SoundSource. A game uses it for background music a player
+	-- rejoins in the middle of.
 	function self:play_sound(id, spec, resource)
 		local sound = magic.cache:GetResource("Sound", resource)
 		if not sound then
@@ -437,11 +443,22 @@ function M.new(magic, buildat, log, options)
 		sound.looped = spec.loop and true or false
 		local node = scene:CreateChild("sound_"..tostring(id))
 		local source
+		-- A sound attached to an object starts where the object is and
+		-- follows it; one at a position stays there; one that is neither is
+		-- in the player's own head and has no position at all.
+		local follows = spec.location == sounds_proto.OBJECT and
+				spec.object_id ~= 0 and spec.object_id or nil
 		if spec.location == sounds_proto.LOCAL then
 			source = node:CreateComponent("SoundSource")
 		else
-			node.position = magic.Vector3(spec.pos[1], spec.pos[2],
-					spec.pos[3])
+			local at = follows and object_nodes[follows]
+			if at and at.at_x then
+				node.position = magic.Vector3(at.at_x,
+						at.at_y + (at.offset or 0), at.at_z)
+			else
+				node.position = magic.Vector3(spec.pos[1], spec.pos[2],
+						spec.pos[3])
+			end
 			source = node:CreateComponent("SoundSource3D")
 			source.nearDistance = SOUND_NEAR
 			source.farDistance = SOUND_FAR
@@ -451,7 +468,7 @@ function M.new(magic, buildat, log, options)
 		-- A fade on the packet means it starts silent and comes up to the
 		-- gain it asked for
 		local entry = {node = node, source = source, gain = gain,
-				started = false}
+				started = false, object_id = follows}
 		if spec.fade and spec.fade > 0 then
 			entry.target = gain
 			entry.step = spec.fade
@@ -494,6 +511,19 @@ function M.new(magic, buildat, log, options)
 	-- The fades, and the nodes of the sounds that have finished
 	function self:update_sounds(dtime)
 		for id, entry in pairs(sounds) do
+			-- A sound attached to an object goes where the object goes: a
+			-- mob's own noises come from the mob rather than from where it
+			-- was when it made them
+			local follow = entry.object_id and object_nodes[entry.object_id]
+			if follow and follow.at_x and
+					(follow.at_x ~= entry.at_x or
+					follow.at_y ~= entry.at_y or
+					follow.at_z ~= entry.at_z) then
+				entry.at_x, entry.at_y, entry.at_z =
+						follow.at_x, follow.at_y, follow.at_z
+				entry.node.position = magic.Vector3(follow.at_x,
+						follow.at_y + (follow.offset or 0), follow.at_z)
+			end
 			if entry.target then
 				local gain, done = sounds_proto.fade_step(entry.gain,
 						entry.target, entry.step, dtime)
@@ -1497,8 +1527,6 @@ function M.new(magic, buildat, log, options)
 	-- The things in the world that are not nodes
 	--
 
-	-- A scene node per object, kept by id
-	local object_nodes = {}
 	local object_technique = magic.cache:GetResource("Technique",
 			"luanti_client/res/UnlitAlphaMask.xml")
 	local box_model = magic.cache:GetResource("Model", "Models/Box.mdl")

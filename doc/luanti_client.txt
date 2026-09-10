@@ -444,13 +444,14 @@ three recordings of a footstep as "step.1.ogg", "step.2.ogg" and "step.3.ogg"
 and asks for "step" -- so the announced media is sorted into groups and one
 of the group is played at random, which is what Luanti does. A sound at a
 position is a node in the scene with a SoundSource3D on it and the listener
-rides the camera; a local one is a plain SoundSource. FADE_SOUND moves the
-gain by its step a second and a sound faded to nothing stops.
+rides the camera; a local one is a plain SoundSource. A sound attached to an
+object starts where the object is and follows it, which is what a mob's own
+noises want. FADE_SOUND moves the gain by its step a second and a sound faded
+to nothing stops.
 
-What that does not do yet: a sound attached to an object plays where the
-object was when it started rather than following it, and PLAY_SOUND's
-start_time is ignored, because seeking is not in the sandbox's SoundSource --
-a game uses that for background music a player rejoins in the middle of.
+What that does not do yet: PLAY_SOUND's start_time is ignored, because
+seeking is not in the sandbox's SoundSource -- a game uses that for
+background music a player rejoins in the middle of.
 
 The crack that grows over a node being dug is the client's own texture rather
 than the game's -- no server sends one -- so res/crack_anylength.png is
