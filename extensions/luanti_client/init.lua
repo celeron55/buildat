@@ -977,6 +977,8 @@ local function show_client(host, port, name, password)
 			end
 			obj.id = id
 			world_objects[id] = obj
+			log:verbose("object add "..id.." player="..
+					tostring(obj.is_player).." name="..tostring(obj.name))
 			-- The local player is drawn by nobody: the camera is inside it
 			if obj.is_player and obj.name == name then
 				obj.is_self = true
@@ -2486,7 +2488,7 @@ local function show_client(host, port, name, password)
 			if #again > 0 then
 				client:send_deleted_blocks(again)
 			end
-			view:update_particles(dtime)
+			view:update_particles(dtime, world_objects)
 			view:update_sounds(dtime)
 			view:update_fov(dtime)
 			update_hud()

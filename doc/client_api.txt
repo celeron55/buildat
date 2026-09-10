@@ -210,6 +210,23 @@ replicate.main_scene
 - CreateNode and CreateComponent uses urho3d.LOCAL by default unlike native
   Urho3D. With urho3d.REPLICATED (native default) they will end up in the
   synchronized ID space and will be overridden by data coming from the server.
+- A property whose Urho3D type is a **const reference** -- `const Vector3&`,
+  `const Vector2&` -- has a getter and **no setter**: tolua++ generates
+  `tolua_variable("minDirection", getter, NULL)` for it. Assigning such a
+  property writes nowhere and reads back what was assigned, so it looks like
+  it worked. Where it matters the sandbox exposes the class's own setter
+  function instead: ParticleEffect has SetMinDirection, SetMaxDirection,
+  SetMinParticleSize, SetMaxParticleSize, SetConstantForce and
+  SetEmitterSize, and its matching properties are read-only. The other
+  const-reference properties in these bindings are things nobody assigns
+  (bounding boxes, frustums, world transforms); Zone's ambientColor and the
+  rest of the vector properties do have setters.
+- An Urho3D object made in Lua -- a Material, a ParticleEffect -- belongs to
+  Lua and is destroyed when the last Lua reference to it goes, whatever the
+  engine still holds it in. Keep a reference for as long as the component
+  using it lives. An emitter whose effect has been collected reads freed
+  memory, which on this machine came out as Urho3D's defaults: particles
+  scattered in random directions at the default size.
 - Node:Clone([mode]) is there as well, also LOCAL by default: a copy of the
   node and its components in the same parent, made inside the engine. What
   wants it is geometry that costs a sandbox call per vertex to build and is
