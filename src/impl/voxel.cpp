@@ -6,6 +6,7 @@
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/vector.hpp>
 #include <mutex>
+#include <cassert>
 #define MODULE "voxel"
 
 namespace std {
@@ -241,8 +242,193 @@ struct CVoxelRegistry: public VoxelRegistry
 	}
 };
 
+bool VoxelFormat::light_pair(VoxelField *out) const
+{
+	if(!light_sky.bound() || !light_lamp.bound())
+		return false;
+	if(light_sky.plane != light_lamp.plane)
+		return false;
+	if(light_sky.shift + light_sky.width != light_lamp.shift)
+		return false;
+	if(out){
+		*out = VoxelField{light_sky.plane, light_sky.shift,
+				(uint8_t)(light_sky.width + light_lamp.width)};
+	}
+	return true;
+}
+
+bool VoxelFormat::validate(ss_ *why) const
+{
+	auto fail = [&](const ss_ &s){
+		if(why)
+			*why = s;
+		return false;
+	};
+
+	if(plane_bits != 8 && plane_bits != 16 && plane_bits != 32)
+		return fail("plane_bits must be 8, 16 or 32, not "+
+				itos((int)plane_bits));
+
+	struct Named { cc_ *name; const VoxelField &f; };
+	const Named fields[] = {
+		{"id", id}, {"light_sky", light_sky}, {"light_lamp", light_lamp},
+		{"param", param}, {"color", color},
+	};
+
+	for(const Named &n : fields){
+		if(!n.f.bound())
+			continue;
+		if(n.f.plane != 0)
+			return fail(ss_(n.name)+": there is only plane 0 for now");
+		if(n.f.width > 32)
+			return fail(ss_(n.name)+": width "+itos((int)n.f.width)+" > 32");
+		if((int)n.f.shift + (int)n.f.width > (int)plane_bits)
+			return fail(ss_(n.name)+": bits "+itos((int)n.f.shift)+"..."+
+					itos((int)n.f.shift + (int)n.f.width - 1)+" reach past the "+
+					itos((int)plane_bits)+"-bit plane");
+	}
+
+	// VOXELTYPEID_MAX is not a mask -- it is a lower cap inside 21 bits --
+	// so the rule here is the field's width, and the registry is what
+	// refuses an id above the cap
+	if(id.bound() && id.width > 21)
+		return fail("id: width "+itos((int)id.width)+" > 21, the bits a "
+				"voxel type id has");
+
+	for(size_t i = 0; i < sizeof fields / sizeof fields[0]; i++){
+		for(size_t j = i + 1; j < sizeof fields / sizeof fields[0]; j++){
+			const Named &a = fields[i], &b = fields[j];
+			if(!a.f.bound() || !b.f.bound())
+				continue;
+			if(a.f.plane != b.f.plane)
+				continue;
+			if((a.f.mask() << a.f.shift) & (b.f.mask() << b.f.shift))
+				return fail(ss_(a.name)+" and "+b.name+" overlap");
+		}
+	}
+
+	// Nothing to look up and nothing to wear: there would be no way to draw
+	// a voxel of this format at all.
+	if(!id.bound() && !color.bound())
+		return fail("neither id nor color is bound");
+
+	return true;
+}
+
+ss_ VoxelFormat::dump() const
+{
+	std::ostringstream os(std::ios::binary);
+	os<<"VoxelFormat("<<(int)plane_bits<<"-bit";
+	auto one = [&](cc_ *name, const VoxelField &f){
+		if(!f.bound())
+			return;
+		os<<", "<<name<<"="<<(int)f.shift<<"..."
+				<<(int)(f.shift + f.width - 1);
+	};
+	one("id", id);
+	one("light_sky", light_sky);
+	one("light_lamp", light_lamp);
+	one("param", param);
+	one("color", color);
+	os<<")";
+	return os.str();
+}
+
+bool voxel_format_self_test()
+{
+	// A field reads back what was written to it, and leaves the rest alone
+	for(uint8_t width : {1, 4, 8, 16, 21, 32}){
+		for(uint8_t shift = 0; shift + width <= 32; shift++){
+			VoxelField f{0, shift, width};
+			uint32_t word = 0xdeadbeef;
+			uint32_t untouched = word & ~(f.mask() << shift);
+			uint32_t value = f.mask() & 0x5a5a5a5a;
+			f.set(word, value);
+			assert(f.get(word) == value);
+			assert((word & ~(f.mask() << shift)) == untouched);
+			// A value too large for the field is cut, not spilled
+			f.set(word, 0xffffffff);
+			assert(f.get(word) == f.mask());
+			assert((word & ~(f.mask() << shift)) == untouched);
+		}
+	}
+
+	ss_ why;
+	assert(VoxelFormat::legacy().validate(&why));
+	assert(VoxelFormat::luanti().validate(&why));
+
+	// The ways a format can be wrong
+	{
+		VoxelFormat f = VoxelFormat::legacy();
+		f.param = f.id; // overlaps
+		assert(!f.validate(&why));
+	}
+	{
+		VoxelFormat f = VoxelFormat::legacy();
+		f.param = VoxelField{0, 28, 8}; // past the end of the plane
+		assert(!f.validate(&why));
+	}
+	{
+		VoxelFormat f;
+		f.id = VoxelField{0, 0, 32}; // wider than a voxel type id
+		assert(!f.validate(&why));
+	}
+	{
+		VoxelFormat f;
+		f.id = VoxelField{0, 0, 21}; // the widest one there is
+		assert(f.validate(&why));
+	}
+	{
+		VoxelFormat f; // nothing bound
+		assert(!f.validate(&why));
+	}
+	{
+		// A painter: one implicit type, and a colour
+		VoxelFormat f;
+		f.color = VoxelField{0, 0, 32};
+		assert(f.validate(&why));
+		assert(f.id_of(0) == 1);
+		assert(f.id_of(0xffffffff) == 1);
+	}
+
+	// legacy() through the format is VoxelInstance's own hardcoded cut
+	{
+		VoxelFormat f = VoxelFormat::legacy();
+		for(uint32_t word : {0u, 0xffffffffu, 0x12345678u, 0xdeadbeefu,
+				0x000fffffu, 0xf0f0f0f0u, 0x00000001u, 0x0badf00du}){
+			VoxelInstance v(word);
+			assert(f.id_of(word) == v.get_id());
+			assert(f.light_sky.get(word) == v.get_skylight());
+			assert(f.light_lamp.get(word) == v.get_lamplight());
+		}
+		VoxelField both;
+		assert(f.light_pair(&both));
+		assert(both.shift == 24 && both.width == 8);
+	}
+
+	// Luanti's cut fills the word with no room left over
+	{
+		VoxelFormat f = VoxelFormat::luanti();
+		uint32_t word = 0;
+		f.id.set(word, 0xabcd);
+		f.light_sky.set(word, 7);
+		f.light_lamp.set(word, 9);
+		f.param.set(word, 0x5e);
+		assert(f.id_of(word) == 0xabcd);
+		assert(f.light_sky.get(word) == 7);
+		assert(f.light_lamp.get(word) == 9);
+		assert(f.param.get(word) == 0x5e);
+	}
+
+	return true;
+}
+
 VoxelRegistry* createVoxelRegistry()
 {
+	// Cheap, once per process, and it is the only place every build passes
+	// through before a voxel exists
+	static const bool tested = voxel_format_self_test();
+	(void)tested;
 	return new CVoxelRegistry();
 }
 
