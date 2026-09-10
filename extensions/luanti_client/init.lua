@@ -238,6 +238,16 @@ local function show_client(host, port, name, password)
 	loading_text:SetTextAlignment(HA_CENTER)
 	loading_text.text = "Connecting to "..host..":"..port
 
+	-- Luanti paints a node's post_effect_color over the whole screen while the
+	-- camera is inside it, which is what being under water looks like. In
+	-- front of the world and behind the rest of the UI: the hotbar and the
+	-- chat are not under the water.
+	local tint_panel = magic.ui.root:CreateChild("BorderImage")
+	tint_panel.texture = magic.cache:GetResource(
+			"Texture2D", "luanti_client/res/white.png")
+	tint_panel.priority = -900
+	tint_panel.visible = false
+
 	-- What the node being pointed at says about itself: its metadata's
 	-- infotext, which is how a game labels a chest, a sign or a machine.
 	-- Luanti draws it under the chat, a few lines at most, and takes it away
@@ -2025,6 +2035,27 @@ local function show_client(host, port, name, password)
 		-- doing. client.position is what we told the server last frame, so it
 		-- differing from where the player thinks it is means the server moved
 		-- us.
+		-- The tint of the node the camera is in, and only that node: Luanti
+		-- takes it from the one the eye is in and blends nothing else in.
+		-- simplified: post_effect_color_shaded, which dims the tint with the
+		-- light where the camera is, is not read; the tint is the colour as
+		-- given.
+		local function update_tint()
+			local pe = view:post_effect_at(
+					math.floor(avatar.x + 0.5),
+					math.floor(avatar.y + player.EYE_HEIGHT + 0.5),
+					math.floor(avatar.z + 0.5))
+			if pe == nil then
+				tint_panel.visible = false
+				return
+			end
+			tint_panel.visible = true
+			tint_panel.width = magic.ui.root.width
+			tint_panel.height = magic.ui.root.height
+			tint_panel.color = magic.Color(pe.r / 255, pe.g / 255,
+					pe.b / 255, pe.a / 255)
+		end
+
 		local function move(dtime)
 			-- A form or a chat line takes the mouse and the keys; the player
 			-- stands still rather than walking blind behind it
@@ -2182,6 +2213,7 @@ local function show_client(host, port, name, password)
 				return
 			end
 			move(dtime)
+			update_tint()
 			update_dig(dtime)
 			objects.interpolate(world_objects, dtime)
 			for _, obj in pairs(world_objects) do
@@ -2551,6 +2583,7 @@ local function show_client(host, port, name, password)
 			close_chat()
 			chat_text:Remove()
 			info_text:Remove()
+			tint_panel:Remove()
 			status_text:Remove()
 			if loading_panel then
 				loading_panel:Remove()

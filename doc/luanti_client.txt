@@ -367,6 +367,15 @@ because along any ray there is at most one water surface:
   twice blends twice, and a doubled water surface reads as opaque. Off it is
   still there when the camera is under it.
 
+And being under it: a node carries a post_effect_color, which Luanti paints
+over the whole screen while the camera is inside that node. This draws it as
+a panel in front of the world and behind the rest of the UI, so the water is
+over the world and the sky and not over the hotbar. That colour is all the
+protocol gives for being in a liquid -- there is no per-liquid fog in it --
+and it is what makes water read as water from below rather than as a blue
+window. simplified: post_effect_color_shaded, which dims the tint by the
+light where the camera is, is not read.
+
 What is left: the surface steps down where a flowing liquid's level drops,
 because a quad against a lower level of the same liquid is dropped with the
 rest of them. Corner heights averaged from the neighbouring levels, which is
