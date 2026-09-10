@@ -25,6 +25,7 @@
 #include <deque>
 #include <unordered_set>
 #include <algorithm>
+#include <chrono>
 #define MODULE "main"
 
 namespace magic = Urho3D;
@@ -979,6 +980,7 @@ struct Module: public interface::Module
 	{
 		if(m_dirty.empty() && m_falling.empty())
 			return;
+		auto t0 = std::chrono::steady_clock::now();
 		size_t done = 0;
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *world)
@@ -993,10 +995,12 @@ struct Module: public interface::Module
 			step_falling(world);
 		});
 		if(done >= SIM_PER_TICK || !m_falling.empty()){
-			log_v(MODULE, "sim: %zu done, %zu dirty, %zu falling, "
+			log_v(MODULE, "sim: %zu done in %i us, %zu dirty, %zu falling, "
 					"%zu fell, %zu came to rest",
-					done, m_dirty.size(), m_falling.size(),
-					m_moved, m_landed);
+					done, (int)std::chrono::duration_cast<
+							std::chrono::microseconds>(
+							std::chrono::steady_clock::now() - t0).count(),
+					m_dirty.size(), m_falling.size(), m_moved, m_landed);
 		}
 	}
 
