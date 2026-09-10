@@ -74,6 +74,7 @@ local CUBE_DRAWTYPES = {
 }
 local DRAWTYPE_AIRLIKE = 1
 local DRAWTYPE_FLOWINGLIQUID = 3
+local DRAWTYPE_RAILLIKE = 11
 -- nodedef.lua's M.LIQUID_NONE, which is what a node that is not a liquid has
 local NODEDEF_LIQUID_NONE = 0
 
@@ -631,6 +632,25 @@ function M.new(magic, buildat, log, options)
 			end
 			group_of[id] = group_of_signature[signature]
 		end
+		-- A rail is its own kind of family: Luanti has rails connect by the
+		-- connect_to_raillike group rather than by connects_to, and every
+		-- rail in a group connects to every other one in it.
+		for id, def in pairs(defs) do
+			if def.drawtype == DRAWTYPE_RAILLIKE and not group_of[id] then
+				local signature = "rail:"..tostring(
+						(def.groups or {}).connect_to_raillike or def.name)
+				if not group_of_signature[signature] then
+					if count < CONNECT_GROUPS_MAX then
+						count = count + 1
+						group_of_signature[signature] = count
+					else
+						group_of_signature[signature] = CONNECT_GROUPS_MAX
+						overflowed = true
+					end
+				end
+				group_of[id] = group_of_signature[signature]
+			end
+		end
 		if overflowed then
 			log:warning("connected nodes: more than "..CONNECT_GROUPS_MAX..
 					" families of them; the rest share the last one")
@@ -675,8 +695,10 @@ function M.new(magic, buildat, log, options)
 	-- liquid_group is nonzero for a liquid, one number per liquid family; see
 	-- liquid_group() below. connect is {group, mask, solid} for a node other
 	-- nodes connect to or that connects to others; see connect_families().
+	-- masked is a shape per neighbour mask instead of one shape, which is
+	-- what a rail wants; see VoxelDefinition.shape_masked.
 	local function add_cube(voxel_reg, name, resources, kind, shape,
-			double_sided, turns, liquid_group, connect)
+			double_sided, turns, liquid_group, connect, masked)
 		local vdef = buildat.VoxelDefinition()
 		vdef.name.block_name = name
 		vdef.handler_module = ""
@@ -746,6 +768,9 @@ function M.new(magic, buildat, log, options)
 		end
 		if shape then
 			vdef.shape = shape
+			if masked then
+				vdef.shape_masked = masked
+			end
 			vdef.shape_double_sided = double_sided and true or false
 			vdef.face_draw_type =
 					buildat.VoxelDefinition.FACEDRAWTYPE_NEVER
@@ -2611,8 +2636,8 @@ function M.new(magic, buildat, log, options)
 			connect = {group = def.connect_group, mask = def.connect_mask,
 					solid = (def.connect_sides or 0) ~= 0}
 		end
-		local shape, double_sided = shapes.for_node(def, facedir, wall,
-				read_mesh and read_mesh(def) or nil, liquid_top)
+		local shape, double_sided, masked = shapes.for_node(def, facedir,
+				wall, read_mesh and read_mesh(def) or nil, liquid_top)
 		local tiles = facedir and facedir ~= 0 and
 				shapes.FACEDIR_TILES[facedir + 1] or nil
 		if def.drawtype == DRAWTYPE_AIRLIKE then
@@ -2635,6 +2660,22 @@ function M.new(magic, buildat, log, options)
 					end
 				end
 			end
+			-- A shape per mask wears more tiles than the one shape does: a
+			-- rail's straight, curve, junction and crossing are four of them
+			if masked then
+				for m = 0, 19 do
+					for _, quad in ipairs(masked[m] or {}) do
+						local i = quad.tile
+						if not resources[i] then
+							resources[i] = resolve_tile(def, i, override) or
+									resolve_tile(def, 1, override)
+							if not resources[i] then
+								return nil
+							end
+						end
+					end
+				end
+			end
 			local first = nil
 			for i = 1, 6 do
 				first = first or resources[i]
@@ -2643,7 +2684,7 @@ function M.new(magic, buildat, log, options)
 				resources[i] = resources[i] or first
 			end
 			return add_cube(reg, name or def.name, resources, kind, shape,
-					double_sided, nil, group, connect)
+					double_sided, nil, group, connect, masked)
 		end
 		if not kind then
 			return nil
@@ -2703,6 +2744,12 @@ function M.new(magic, buildat, log, options)
 				if to_group then
 					bits[to_group] = true
 				end
+			end
+			-- A rail connects to its own family, which is what its group
+			-- number is; nothing lists a rail in a connects_to
+			if def.drawtype == DRAWTYPE_RAILLIKE and
+					def.connect_group ~= 0 then
+				bits[def.connect_group] = true
 			end
 			local mask = 0
 			for bit in pairs(bits) do

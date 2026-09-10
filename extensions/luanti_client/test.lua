@@ -1813,6 +1813,53 @@ do
 			boxes = {{-0.5, -0.5, -0.5, 0.5, 0, 0.5}}}})
 	assert(plain and #plain == 6 and plain[1].connect_dir == nil,
 			"shapes: a plain node box is untagged")
+	-- And a turned box keeps its tags
+	local turned = shapes.turn_quads(quads, 1)
+	local tagged = 0
+	for _, q in ipairs(turned) do
+		if q.connect_dir == 3 then
+			tagged = tagged + 1
+		end
+	end
+	assert(tagged == 6, "shapes: a turn keeps the tags")
+end
+
+-- A rail: one quad per mask of the four horizontal neighbours, wearing one of
+-- the node's first four tiles, plus the four it climbs a step with
+do
+	local rails = shapes.rail_shapes()
+	local function only(mask)
+		assert(#rails[mask] == 1, "shapes: a rail is one quad")
+		return rails[mask][1]
+	end
+	assert(only(0).tile == 1, "shapes: a lone rail is straight")
+	assert(only(3).tile == 1, "shapes: two opposite are straight")
+	assert(only(5).tile == 2, "shapes: two beside each other curve")
+	assert(only(7).tile == 3, "shapes: three are a junction")
+	assert(only(15).tile == 4, "shapes: four are a crossing")
+	-- The quad is flat and just off the floor until it climbs, and then two
+	-- of its corners are at the top of the voxel
+	local flat = only(0)
+	assert(flat.p[2] < -0.4 and flat.p[11] < -0.4, "shapes: a rail lies flat")
+	local up = only(16)
+	assert(math.abs(up.p[2] - (flat.p[2] + 1)) < 1e-9 and
+			math.abs(up.p[5] - (flat.p[5] + 1)) < 1e-9,
+			"shapes: a climbing rail's far edge is one node up, so that it "..
+			"meets the flat rail above it")
+	assert(math.abs(up.p[8] - flat.p[8]) < 1e-9,
+			"shapes: and its near edge is where a flat rail's is")
+	assert(only(19).tile == 1, "shapes: a climbing rail is straight")
+	-- And the four climb in four different directions
+	local corners = {}
+	for i = 16, 19 do
+		local q = only(i)
+		corners[q.p[1]..","..q.p[3]] = true
+	end
+	local kinds = 0
+	for _ in pairs(corners) do
+		kinds = kinds + 1
+	end
+	assert(kinds == 4, "shapes: the four climbing rails face four ways")
 end
 
 print("shapes: ok")

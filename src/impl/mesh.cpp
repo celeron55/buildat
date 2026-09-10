@@ -841,9 +841,27 @@ static float liquid_corner_top(pv::RawVolume<VoxelInstance> &volume,
 // that says so, when the neighbour is simply solid, which is how a fence
 // reaches into a wall of stone. What the families are is the game's business;
 // see interface/voxel.h.
-static uint connected_faces(pv::RawVolume<VoxelInstance> &volume,
+static bool connects_to(pv::RawVolume<VoxelInstance> &volume,
 		VoxelRegistry *voxel_reg, int x, int y, int z,
 		const interface::CachedVoxelDefinition *def)
+{
+	VoxelInstance nv = volume.getVoxelAt(x, y, z);
+	if(nv.get_id() == interface::VOXELTYPEID_UNDEFINED)
+		return false;
+	const interface::CachedVoxelDefinition *ndef = voxel_reg->get_cached(nv);
+	if(ndef == nullptr)
+		return false;
+	if(ndef->connect_group != 0 && ndef->connect_group <= 32 &&
+			(def->connect_mask & (1u << (ndef->connect_group - 1))) != 0)
+		return true;
+	if(def->connect_to_solid)
+		return ndef->physically_solid && ndef->shape.empty();
+	return false;
+}
+
+static uint connected_faces(pv::RawVolume<VoxelInstance> &volume,
+		VoxelRegistry *voxel_reg, int x, int y, int z,
+		const interface::CachedVoxelDefinition *def, uint *stepped_up)
 {
 	static const int FACE_DIR[6][3] = {
 		{0, 1, 0}, {0, -1, 0}, {1, 0, 0},
@@ -851,22 +869,29 @@ static uint connected_faces(pv::RawVolume<VoxelInstance> &volume,
 	};
 	uint faces = 0;
 	for(size_t i = 0; i < 6; i++){
-		VoxelInstance nv = volume.getVoxelAt(x + FACE_DIR[i][0],
-				y + FACE_DIR[i][1], z + FACE_DIR[i][2]);
-		if(nv.get_id() == interface::VOXELTYPEID_UNDEFINED)
-			continue;
-		const interface::CachedVoxelDefinition *ndef =
-				voxel_reg->get_cached(nv);
-		if(ndef == nullptr)
-			continue;
-		bool connects = false;
-		if(ndef->connect_group != 0 && ndef->connect_group <= 32)
-			connects = (def->connect_mask &
-					(1u << (ndef->connect_group - 1))) != 0;
-		if(!connects && def->connect_to_solid)
-			connects = ndef->physically_solid && ndef->shape.empty();
-		if(connects)
+		if(connects_to(volume, voxel_reg, x + FACE_DIR[i][0],
+				y + FACE_DIR[i][1], z + FACE_DIR[i][2], def))
 			faces |= 1u << i;
+	}
+	if(stepped_up == nullptr)
+		return faces;
+	// A step up or down, for a voxel whose shape follows one: a rail runs
+	// into the rail on the slope above it and the one below it as much as
+	// into the one beside it, which is Luanti's own rule for them. The four
+	// horizontal directions only, in Luanti's own order: +Z, -Z, -X, +X.
+	static const int STEP_DIR[4][3] = {
+		{0, 0, 1}, {0, 0, -1}, {-1, 0, 0}, {1, 0, 0},
+	};
+	*stepped_up = 0;
+	for(size_t i = 0; i < 4; i++){
+		if(connects_to(volume, voxel_reg, x + STEP_DIR[i][0], y + 1,
+				z + STEP_DIR[i][2], def)){
+			*stepped_up |= 1u << i;
+			faces |= 1u << (i == 0 ? 4 : i == 1 ? 5 : i == 2 ? 3 : 2);
+		} else if(connects_to(volume, voxel_reg, x + STEP_DIR[i][0], y - 1,
+				z + STEP_DIR[i][2], def)){
+			faces |= 1u << (i == 0 ? 4 : i == 1 ? 5 : i == 2 ? 3 : 2);
+		}
 	}
 	return faces;
 }
@@ -902,7 +927,8 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 				VoxelInstance v = volume.getVoxelAt(x, y, z);
 				const interface::CachedVoxelDefinition *def =
 						voxel_reg->get_cached(v);
-				if(def == nullptr || def->shape.empty())
+				if(def == nullptr ||
+						(def->shape.empty() && def->shape_masked.empty()))
 					continue;
 				// Where this voxel's centre is in the chunk's own model
 				// coordinates; the same arithmetic the cube faces get
@@ -920,9 +946,37 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 				// Which directions this voxel connects in, once per voxel
 				// rather than once per quad that asks. Only a voxel that
 				// reaches out at all pays for it.
+				// A voxel whose whole shape depends on what is around it --
+				// a rail -- keeps one shape per mask of the four horizontal
+				// connections, and four more for the slopes; the rest of
+				// the loop walks that instead of `shape`.
+				uint stepped_up = 0;
+				const bool masked = !def->shape_masked.empty();
 				const uint faces = (def->connect_mask != 0 ||
-						def->connect_to_solid) ?
-						connected_faces(volume, voxel_reg, x, y, z, def) : 0;
+						def->connect_to_solid || masked) ?
+						connected_faces(volume, voxel_reg, x, y, z, def,
+								masked ? &stepped_up : nullptr) : 0;
+				const interface::VoxelQuad *quads = def->shape.data();
+				size_t quad_from = 0;
+				size_t quad_to = def->shape.size();
+				if(masked){
+					// The four horizontal connections in Luanti's own bit
+					// order for them: +Z is 1, -Z is 2, -X is 4, +X is 8
+					uint m = ((faces >> 4) & 1) |
+							(((faces >> 5) & 1) << 1) |
+							(((faces >> 3) & 1) << 2) |
+							(((faces >> 2) & 1) << 3);
+					// A slope wins over the flat shapes, and the last
+					// direction that has one wins between slopes, which is
+					// what Luanti does with them
+					for(uint i = 0; i < 4; i++){
+						if(stepped_up & (1u << i))
+							m = 16 + i;
+					}
+					quads = def->shape_masked.data();
+					quad_from = def->shape_masked_begin[m];
+					quad_to = def->shape_masked_begin[m + 1];
+				}
 				// A liquid's four top corners, once per voxel rather than
 				// once per vertex that sits on one
 				const bool liquid_corners = def->is_liquid;
@@ -936,7 +990,8 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 						}
 					}
 				}
-				for(const interface::VoxelQuad &quad : def->shape){
+				for(size_t quad_i = quad_from; quad_i < quad_to; quad_i++){
+					const interface::VoxelQuad &quad = quads[quad_i];
 					// A quad that belongs to one direction is drawn only
 					// when that direction connects, and one that belongs to
 					// standing alone only when none of them does

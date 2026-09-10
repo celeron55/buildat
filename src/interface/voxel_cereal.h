@@ -37,7 +37,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 7;
+		uint8_t version = 8;
 		archive(
 				version,
 				v.name,
@@ -56,8 +56,11 @@ namespace interface
 				v.liquid_top,
 				v.connect_group,
 				v.connect_mask,
-				v.connect_to_solid
+				v.connect_to_solid,
+				v.shape_masked
 		);
+		for(size_t i = 0; i < 21; i++)
+			archive(v.shape_masked_begin[i]);
 	}
 
 	template<class Archive>

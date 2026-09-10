@@ -299,6 +299,8 @@ What is done
   registry that the mesher copies into the chunk
 - Connected node boxes: a fence with its rails towards the fences and the
   walls of stone next to it, and a pane in a run
+- Rails: which of the four tiles a rail wears and which way it is turned,
+  out of what is next to it, and the ramp one climbing a step is
 - Particles: ADD_PARTICLESPAWNER and DELETE_PARTICLESPAWNER, SPAWN_PARTICLE
   and the zstd batch of them a game sends a hundred at once in. A spawner is
   an Urho3D ParticleEmitter and a single particle is an emitter of one that
@@ -430,6 +432,18 @@ neighbours, so it is the same shape pass that decides: each quad carries the
 direction it belongs to, or "only when nothing connects" for the boxes a
 lone pane stands as, and the mesher draws the ones whose direction is
 connected.
+
+A rail is the other shape that depends on its neighbours, and it depends on
+them altogether rather than gaining a piece per direction: it is one quad
+wearing one of four tiles -- straight, curved, junction, crossing -- turned
+one of four ways, and which of those is Luanti's own table of the sixteen
+masks of its four horizontal neighbours. So a rail definition carries a shape
+per mask instead of one shape, and the mesher picks. Four more masks are the
+rails that climb: a rail with one of its own a step up in some direction is a
+ramp towards it, and its raised edge is one node above its flat edge so that
+it meets the rail up there exactly. Rails connect by Luanti's
+connect_to_raillike group rather than by connects_to, so each of those groups
+is a family of its own.
 
 What connects is what Luanti says, turned into something the mesher can test.
 Luanti gives each node a list of the node *ids* it connects to; the mesher
