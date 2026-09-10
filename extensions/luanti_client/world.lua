@@ -1188,6 +1188,12 @@ function M.new(magic, buildat, log, options)
 				self.atlas_reg, self.use_skylight,
 				function() apply_technique(node) end)
 		self.last_mesh_us = buildat.get_time_us() - t0
+		-- The worst single block of the frame, for the slow-frame line: one
+		-- block that costs ten times what the others do is a different
+		-- problem from eight that each cost their share
+		if self.last_mesh_us > (self.worst_mesh_us or 0) then
+			self.worst_mesh_us = self.last_mesh_us
+		end
 	end
 
 	-- A block that arrived from the server. Its own mesh and its neighbours'
@@ -3231,6 +3237,8 @@ function M.new(magic, buildat, log, options)
 		-- frame costs more than the meshing does
 		local meshed = 0
 		local t0 = buildat.get_time_us()
+		self.worst_mesh_us = 0
+		local pairs_before = self:pair_voxel_count()
 		while meshed < MESH_PER_FRAME do
 			if meshed > 0 and buildat.get_time_us() - t0 >= MESH_BUDGET_US then
 				break
@@ -3254,6 +3262,12 @@ function M.new(magic, buildat, log, options)
 			mesh_block(best_key)
 			meshed = meshed + 1
 		end
+		-- What the frame spent handing blocks over, and what it cost beyond
+		-- the meshing itself: a voxel pair registered here builds an atlas
+		-- segment and uploads a texture, which is a spike of its own
+		self.last_frame_mesh_us = buildat.get_time_us() - t0
+		self.last_frame_meshed = meshed
+		self.last_frame_pairs = self:pair_voxel_count() - pairs_before
 		return meshed
 	end
 

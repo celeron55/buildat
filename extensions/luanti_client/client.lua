@@ -439,6 +439,10 @@ function M.new(socket, options, log)
 			time_of_day = nil,
 			time_speed = 0,
 			blocks_received = 0,
+			-- Counters for the slow-frame line; see update() below
+			commands_handled = 0,
+			last_command_us = 0,
+			last_commands = 0,
 			-- Assembled commands that did not fit in a frame's budget
 			commands_waiting = 0,
 	}
@@ -1169,6 +1173,8 @@ function M.new(socket, options, log)
 	end
 
 	local function handle_command(data, channel)
+		self.commands_handled = self.commands_handled + 1
+		local t0 = buildat.get_time_us()
 		local r = serialize.reader(data)
 		local command = r:u16()
 		local handler = handlers[command]
@@ -1184,6 +1190,17 @@ function M.new(socket, options, log)
 		end
 		if self.on_command then
 			self.on_command(command, data)
+		end
+		-- The worst command of the frame, by name, for the slow-frame line:
+		-- one command costing a fifth of a second is a different problem
+		-- from fifty costing their share, and which one it was is the whole
+		-- question
+		local spent = buildat.get_time_us() - t0
+		if spent > (self.worst_command_us or 0) then
+			self.worst_command_us = spent
+			self.worst_command = (TOCLIENT_NAME[command] or
+					string.format("0x%02x", command))..
+					" ("..#data.." bytes)"
 		end
 	end
 
@@ -1268,8 +1285,16 @@ function M.new(socket, options, log)
 		conn:update(dtime)
 		-- Once something has gone wrong there is nothing left to be smooth
 		-- for, and what is still in the queue is what says why
+		local t0 = buildat.get_time_us()
+		local handled_before = self.commands_handled
+		self.worst_command_us = 0
+		self.worst_command = nil
 		self.commands_waiting = conn:pump(
 				self.failure and 1000000000 or COMMAND_BUDGET_US)
+		-- What this frame spent on what the server said, for the slow-frame
+		-- line in init.lua: a spike is either this or the meshing
+		self.last_command_us = buildat.get_time_us() - t0
+		self.last_commands = self.commands_handled - handled_before
 		-- Nothing from the other end for that long
 		if not self.failure then
 			local quiet = (buildat.get_time_us() -
