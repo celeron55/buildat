@@ -32,6 +32,16 @@ local LAUNCHABLE = {
 
 local DIM = 0.55
 
+-- One entry is this wide, which is what centring the row of them needs to be
+-- arithmetic rather than a guess: a vertical layout stretches its children to
+-- its own width, so a row left to itself is as wide as the menu and its icons
+-- sit at the left of it while everything else is centred.
+local ENTRY_WIDTH = 190
+local ENTRY_SPACING = 24
+-- The icon plus the label under it, which is what the row has to be tall
+-- enough for; a row with nothing laying it out does not work it out itself
+local ENTRY_HEIGHT = 160
+
 function M.boot()
 	local root = uistack.main:push("boot")
 
@@ -42,11 +52,27 @@ function M.boot()
 	layout:SetStyleAuto()
 	layout:SetName("Layout")
 	layout:SetLayout(LM_VERTICAL, 16, magic.IntRect(20, 20, 20, 20))
+	-- HA_LEFT, because the UI stack's own element is a horizontal layout and
+	-- refuses anything else -- with a warning on every boot. Centring the
+	-- whole menu on the screen would mean giving that element a different
+	-- layout; centring what is *inside* the menu is what the logo and the
+	-- row of entries below do.
 	layout:SetAlignment(HA_LEFT, VA_CENTER)
 
-	local logo = layout:CreateChild("Sprite")
-	logo:SetTexture(magic.cache:GetResource("Texture2D", "buildat_logo.png"))
+	-- The logo, centred over the rest. It needs an element of its own to be
+	-- centred in: a child of a layout does not get its horizontal alignment
+	-- honoured -- Urho3D's UIElement::GetLayoutChildPosition() only reads it
+	-- to decide which border to apply -- so the holder is what the layout
+	-- stretches to the full width, and the logo centres inside that.
+	local logo_holder = layout:CreateChild("UIElement")
+	logo_holder:SetFixedHeight(160)
+	-- A BorderImage rather than a Sprite: a Sprite works out its own screen
+	-- position from a hotspot and a transform, so an alignment does not
+	-- centre it, while a BorderImage is a plain element with a texture on it
+	local logo = logo_holder:CreateChild("BorderImage")
+	logo.texture = magic.cache:GetResource("Texture2D", "buildat_logo.png")
 	logo:SetFixedSize(160, 160)
+	logo:SetAlignment(HA_CENTER, VA_TOP)
 
 	local title = layout:CreateChild("Text")
 	title:SetStyleAuto()
@@ -57,8 +83,15 @@ function M.boot()
 
 	-- The entries side by side, because there are several of them
 	local row = layout:CreateChild("UIElement")
-	row:SetLayout(LM_HORIZONTAL, 24, magic.IntRect(0, 0, 0, 0))
-	row:SetAlignment(HA_CENTER, VA_TOP)
+	-- HA_LEFT rather than HA_CENTER: inside a layout the alignment only says
+	-- which border to apply, and the row is made exactly as wide as its
+	-- entries below, so the left border is what lines it up with the rest
+	row:SetAlignment(HA_LEFT, VA_TOP)
+	-- No layout on it: the entries are placed by hand below. A horizontal
+	-- layout re-applies its children's own alignments, and a button whose
+	-- style gives it any alignment but the left is then a warning from
+	-- Urho3D on every boot -- for a row of three fixed-width things, saying
+	-- where they go is less machinery than arguing with the layout.
 	-- An element Urho3D has not been told is enabled is not hit by a click,
 	-- and neither is anything inside it
 	row.enabled = true
@@ -71,6 +104,8 @@ function M.boot()
 		button:SetStyleAuto()
 		button:SetName("Button")
 		button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
+		button:SetFixedWidth(ENTRY_WIDTH)
+		button:SetAlignment(HA_LEFT, VA_TOP)
 		local button_image = button:CreateChild("Sprite")
 		button_image:SetName("ButtonImage")
 		local tex = icon and
@@ -121,6 +156,16 @@ function M.boot()
 			add(launch.icon, launch.title or name, launch.run)
 		end
 	end
+
+	-- Now that the entries are known: each in its place, and the row exactly
+	-- as wide as they are, so that the layout's own border lines it up with
+	-- the title above
+	for i, item in ipairs(items) do
+		item.button:SetPosition((i - 1) * (ENTRY_WIDTH + ENTRY_SPACING), 0)
+	end
+	row:SetFixedWidth(#items * ENTRY_WIDTH +
+			math.max(0, #items - 1) * ENTRY_SPACING)
+	row:SetFixedHeight(ENTRY_HEIGHT)
 
 	-- launch_menu's keyboard selection, which is worth having here: up and
 	-- down, left and right, enter, and the mouse moving the same selection

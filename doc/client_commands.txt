@@ -93,7 +93,7 @@ quit
 
 Example
 -------
-Wait for the launcher, screenshot it, click a point, wait, screenshot again:
+Wait for the launch menu, screenshot it, click a point, wait, screenshot again:
 
     delay 2000
     screenshot /tmp/buildat_menu.png
