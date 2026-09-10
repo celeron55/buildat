@@ -469,7 +469,26 @@ local function check_compose_image()
 	same(low, 0, 2, {10, 20, 30, 255}, "a clipped blit writes the bottom")
 	same(low, 0, 3, {10, 20, 30, 255}, "all of the bottom")
 
-	assert(made == 19, "compose_image: made "..made.." images")
+	-- An 8-bit RGB PNG with a tRNS chunk: transparency as a colour key
+	-- rather than an alpha channel. stb_image expands the key into a real
+	-- alpha channel, and the vendored copy is patched to report the channel
+	-- count the buffer then has -- without that patch the image is read at
+	-- the wrong stride and comes out as coloured stripes. See
+	-- doc/urho3d_fork.txt.
+	local trns = compose("trns", {ops = {
+		{op = "blit", src = "luanti_client/res/trns_test.png"},
+	}})
+	assert(trns.width == 2 and trns.height == 2,
+			"compose_image: the tRNS source is "..trns.width.."x"..
+			trns.height)
+	same(trns, 0, 0, {200, 100, 50, 255}, "a tRNS PNG's opaque colour")
+	same(trns, 1, 1, {200, 100, 50, 255}, "its other opaque texel")
+	local keyed_out = pixel(trns, 1, 0)
+	assert(keyed_out[4] == 0,
+			"compose_image: a tRNS PNG's keyed colour has alpha "..
+			keyed_out[4])
+
+	assert(made == 20, "compose_image: made "..made.." images")
 end
 
 function M.self_test()
