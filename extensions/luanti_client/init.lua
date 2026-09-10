@@ -111,6 +111,51 @@ local MEDIA_ROOT = __buildat_get_path("cache").."/luanti_media"
 -- of them is common enough that missing either means its slots cannot be
 -- filled at all.
 local FORM_OWN_INVENTORY = {["current_name"] = true, ["context"] = true}
+
+-- The keys, in one place. move() and the key handler read this table and the
+-- pause menu's "Key bindings" dialog lists it, so a binding cannot be in the
+-- code and missing from the list -- which is the whole point of the table
+-- rather than of the dialog. `name` is what the dialog shows, because a key
+-- constant is not something to put in front of a player.
+--
+-- Not saved to disk and not editable yet: a list that is right is worth more
+-- than one that can be changed and then lies.
+local BINDINGS = {
+	{action = "forward", key = KEY_W, name = "W", what = "Walk forward"},
+	{action = "back", key = KEY_S, name = "S", what = "Walk back"},
+	{action = "left", key = KEY_A, name = "A", what = "Walk left"},
+	{action = "right", key = KEY_D, name = "D", what = "Walk right"},
+	{action = "jump", key = KEY_SPACE, name = "Space", what = "Jump"},
+	{action = "sneak", key = KEY_CTRL, name = "Ctrl", what = "Sneak"},
+	{action = "fast", key = KEY_SHIFT, name = "Shift", what = "Move fast"},
+	{action = "fly", key = KEY_K, name = "K", what = "Fly on and off"},
+	{action = "noclip", key = KEY_H, name = "H",
+			what = "Through walls on and off"},
+	{action = "chat", key = KEY_T, name = "T", what = "Say something"},
+	{action = "inventory", key = KEY_I, name = "I", what = "Inventory"},
+	{action = "drop", key = KEY_Q, name = "Q",
+			what = "Drop what is held - with Ctrl one of it"},
+	{action = "hotbar", first = KEY_1, last = KEY_8, name = "1 - 8",
+			what = "Pick a hotbar slot"},
+	{action = "hud", key = KEY_F1, name = "F1", what = "The HUD on and off"},
+	{action = "chatlog", key = KEY_F2, name = "F2",
+			what = "The chat on and off"},
+	{action = "debug", key = KEY_F5, name = "F5",
+			what = "The debug line on and off"},
+	{action = "menu", key = KEY_ESCAPE, name = "Escape",
+			what = "Close what is open - or this menu"},
+	-- Listed for the player's sake; the code for these is the mouse
+	-- handling rather than a key lookup
+	{action = "dig", name = "Left mouse", what = "Dig, or hit"},
+	{action = "place", name = "Right mouse", what = "Place, or use"},
+	{action = "wield", name = "Mouse wheel", what = "Pick a hotbar slot"},
+}
+
+-- action -> the entry, for the code that asks "which key is this?"
+local BIND = {}
+for _, b in ipairs(BINDINGS) do
+	BIND[b.action] = b
+end
 local media_root_added = false
 
 -- Luanti's day/night ratio, from its daynightratio.h: 0.175 at night, 1.0 in
@@ -200,6 +245,8 @@ local function show_client(host, port, name, password)
 	status_text:SetAlignment(HA_LEFT, VA_TOP)
 	status_text:SetPosition(8, 8)
 	status_text.color = magic.Color(1.0, 1.0, 1.0)
+	-- Hidden until F5 asks for it; see show_debug below
+	status_text.visible = false
 
 	-- What has been said, at the bottom of the screen where Luanti puts it.
 	-- Under the UI's own root rather than the element this extension was
@@ -287,9 +334,14 @@ local function show_client(host, port, name, password)
 	-- What F1, F2 and F5 turn on and off, which are the keys Luanti uses for
 	-- them: the player's own HUD and the crosshair, what has been said, and
 	-- the lines of detail in the corner.
+	--
+	-- The debug lines start hidden: a player who opens this wants to play,
+	-- not to diagnose, and F5 brings them up whenever they are wanted --
+	-- which the pause menu's key list says. A scripted run that wants to
+	-- read them presses F5 like anyone else.
 	local show_hud = true
 	local show_chat = true
-	local show_debug = true
+	local show_debug = false
 
 	local lines = {"Luanti: "..host..":"..port}
 	local function add_line(text)
@@ -632,6 +684,11 @@ local function show_client(host, port, name, password)
 		-- Assigned below, next to the rest of the chat dialog; the frame
 		-- update is what puts it up
 		local open_chat
+		-- The pause menu, and the opener for a form this client draws for
+		-- itself; both are defined further down, where their pieces are in
+		-- scope
+		local open_pause_menu
+		local open_local_form
 
 		-- The forms the server sends, and the one on screen
 		local inventory_spec = nil
@@ -1041,16 +1098,23 @@ local function show_client(host, port, name, password)
 			end
 		end
 
-		client.on_chat = function(text, sender)
-			local line = formspec.strip_escapes(text)
-			if sender ~= "" then
-				line = "<"..formspec.strip_escapes(sender).."> "..line
-			end
+		-- A line in the chat log, which is where the player looks. What
+		-- this client has to say for itself goes here rather than into the
+		-- debug lines in the corner, because those start hidden.
+		local function add_chat(line)
 			chat[#chat + 1] = line
 			while #chat > CHAT_LINES do
 				table.remove(chat, 1)
 			end
 			chat_text.text = table.concat(chat, "\n")
+		end
+
+		client.on_chat = function(text, sender)
+			local line = formspec.strip_escapes(text)
+			if sender ~= "" then
+				line = "<"..formspec.strip_escapes(sender).."> "..line
+			end
+			add_chat(line)
 		end
 
 		client.on_inventory_formspec = function(spec)
@@ -1684,6 +1748,12 @@ local function show_client(host, port, name, password)
 		-- form, and to the node when the form came out of the node's own
 		-- metadata, which is what a chest's or a furnace's buttons want.
 		local function send_form_fields(fields)
+			if form.local_fields then
+				-- A form of this client's own -- the pause menu, the key
+				-- list -- whose buttons are nobody else's business
+				form.local_fields(fields)
+				return
+			end
 			if form.at then
 				client:send_nodemeta_fields(form.at[1], form.at[2],
 						form.at[3], form.formname, fields)
@@ -1805,6 +1875,17 @@ local function show_client(host, port, name, password)
 			held = nil
 			draw_form()
 			magic.input:SetMouseVisible(true)
+		end
+
+		-- A form this client draws for itself: the fields its buttons make
+		-- go to handler instead of to the server. It is otherwise an
+		-- ordinary form, so escape closes it and the inventory key replaces
+		-- it, both of which are what a player expects.
+		open_local_form = function(spec, handler)
+			open_form(spec, "", "client")
+			if form then
+				form.local_fields = handler
+			end
 		end
 
 		client.on_show_formspec = function(spec, formname)
@@ -2293,24 +2374,27 @@ local function show_client(host, port, name, password)
 			-- Where forward is, in world coordinates, for that yaw
 			local yr = math.rad(yaw)
 			local fx, fz = -math.sin(yr), math.cos(yr)
+			local down = function(action)
+				return magic.input:GetKeyDown(BIND[action].key)
+			end
 			local wish = {x = 0, z = 0,
-					jump = magic.input:GetKeyDown(KEY_SPACE),
-					sneak = magic.input:GetKeyDown(KEY_CTRL),
-					fast = magic.input:GetKeyDown(KEY_SHIFT)}
+					jump = down("jump"),
+					sneak = down("sneak"),
+					fast = down("fast")}
 			local keys = 0
-			if magic.input:GetKeyDown(KEY_W) then
+			if down("forward") then
 				wish.x, wish.z = wish.x + fx, wish.z + fz
 				keys = keys + luanti.KEY_UP
 			end
-			if magic.input:GetKeyDown(KEY_S) then
+			if down("back") then
 				wish.x, wish.z = wish.x - fx, wish.z - fz
 				keys = keys + luanti.KEY_DOWN
 			end
-			if magic.input:GetKeyDown(KEY_D) then
+			if down("right") then
 				wish.x, wish.z = wish.x + fz, wish.z - fx
 				keys = keys + luanti.KEY_RIGHT
 			end
-			if magic.input:GetKeyDown(KEY_A) then
+			if down("left") then
 				wish.x, wish.z = wish.x - fz, wish.z + fx
 				keys = keys + luanti.KEY_LEFT
 			end
@@ -2913,6 +2997,70 @@ local function show_client(host, port, name, password)
 			uistack.main:pop(root)
 		end
 
+		-- The pause menu, and the key list it opens. Both are formspecs
+		-- drawn by this client's own formspec code rather than dialogs built
+		-- by hand: the only thing that differs from a game's form is where
+		-- the buttons go, and a local form's fields reach a function here
+		-- instead of the server. Escape closes whichever of the two is up,
+		-- because that is what close_form already does.
+		local sound_muted = false
+
+		local function pause_spec()
+			return "size[6,4.7]"..
+					"label[0.2,0.2;Paused]"..
+					"button[0.4,1.0;5.2,0.8;btn_sound;"..
+					(sound_muted and "Unmute sound" or "Mute sound").."]"..
+					"button[0.4,2.1;5.2,0.8;btn_keys;Key bindings]"..
+					"button[0.4,3.2;5.2,0.8;btn_exit;Exit]"
+		end
+
+		-- Every binding this client has, in two columns, out of the same
+		-- table the code reads. A label's text is split on commas and
+		-- semicolons by the formspec grammar, so BINDINGS keeps them out.
+		local function keys_spec()
+			local half = math.ceil(#BINDINGS / 2)
+			local out = {"size[12,"..tostring(1.5 + half * 0.6).."]",
+					"label[0.2,0.2;Key bindings]"}
+			for i, b in ipairs(BINDINGS) do
+				local first = i <= half
+				local x = first and 0.3 or 6.2
+				local row = first and (i - 1) or (i - half - 1)
+				local y = 0.9 + row * 0.6
+				out[#out + 1] = "label["..x..","..y..";"..b.name.."]"
+				out[#out + 1] = "label["..(x + 1.8)..","..y..";"..
+						b.what.."]"
+			end
+			out[#out + 1] = "button[4.8,"..tostring(0.7 + half * 0.6)..
+					";2.4,0.8;btn_back;Back]"
+			return table.concat(out)
+		end
+
+		local menu_fields
+
+		menu_fields = function(fields)
+			if fields.btn_sound then
+				sound_muted = not sound_muted
+				magic.audio:SetMasterGain(SOUND_MASTER,
+						sound_muted and 0 or 1)
+				-- The label says which way it goes next, so the menu is
+				-- drawn again rather than left saying the wrong thing
+				open_local_form(pause_spec(), menu_fields)
+			elseif fields.btn_keys then
+				open_local_form(keys_spec(), menu_fields)
+			elseif fields.btn_back then
+				open_local_form(pause_spec(), menu_fields)
+			elseif fields.btn_exit then
+				-- The disconnect goes out and the window closes, which is
+				-- the same path the window's own close button takes
+				leave()
+				engine:Exit()
+			end
+		end
+
+		open_pause_menu = function()
+			open_local_form(pause_spec(), menu_fields)
+		end
+
 		-- The client is going away: the window was closed, or a command
 		-- sequence ended, or something else asked the engine to exit. The
 		-- one thing that has to happen is the disconnect leave() sends --
@@ -2951,28 +3099,29 @@ local function show_client(host, port, name, password)
 				-- line edit has the focus.
 				return
 			end
-			-- Luanti's own keys for these. A server that does not give the
-			-- player the fly and noclip privileges pulls them back.
-			if key == KEY_K then
+			-- Luanti's own keys for these, out of BINDINGS at the top of
+			-- this file. A server that does not give the player the fly and
+			-- noclip privileges pulls them back.
+			if key == BIND.fly.key then
 				-- The server's own movement check pulls a player without
 				-- the privilege back; saying so is the whole difference
 				-- between that and the world feeling broken.
 				if not avatar.fly and client.privileges and
 						not client.privileges.fly then
-					add_line("Flying: the server has not given you the "..
+					add_chat("Flying: the server has not given you the "..
 							"\"fly\" privilege")
 					return
 				end
 				avatar.fly = not avatar.fly
-				add_line(avatar.fly and "Flying" or "Walking")
+				add_chat(avatar.fly and "Flying" or "Walking")
 			end
 			-- T says something, which is Luanti's own key for it; a line
 			-- starting with a slash is a command
-			if key == KEY_T and not chat_input then
+			if key == BIND.chat.key and not chat_input then
 				chat_wanted = true
 				return
 			end
-			if key == KEY_I then
+			if key == BIND.inventory.key then
 				if form then
 					close_form(true)
 				else
@@ -2980,46 +3129,47 @@ local function show_client(host, port, name, password)
 				end
 			end
 			-- The number keys pick a hotbar slot, as they do in Luanti
-			if key >= KEY_1 and key <= KEY_8 then
-				wield_index = key - KEY_1 + 1
+			if key >= BIND.hotbar.first and key <= BIND.hotbar.last then
+				wield_index = key - BIND.hotbar.first + 1
 			end
 			-- Q throws the wielded stack in front of the player, or one
 			-- item of it while sneaking, which is Luanti's own key and its
 			-- own rule
-			if key == KEY_Q and not form then
+			if key == BIND.drop.key and not form then
 				local held_stack = wielded()
 				if held_stack and held_stack.count > 0 then
-					local single = magic.input:GetKeyDown(KEY_CTRL)
+					local single = magic.input:GetKeyDown(BIND.sneak.key)
 					client:send_inventory_drop(single and 1 or 0,
 							"current_player", "main", wield_index)
 				end
 			end
 			-- Luanti's own keys for what is on the screen
-			if key == KEY_F1 then
+			if key == BIND.hud.key then
 				show_hud = not show_hud
 				update_hud()
 			end
-			if key == KEY_F2 then
+			if key == BIND.chatlog.key then
 				show_chat = not show_chat
 			end
-			if key == KEY_F5 then
+			if key == BIND.debug.key then
 				show_debug = not show_debug
 				status_text.visible = show_debug
 			end
-			if key == KEY_H then
+			if key == BIND.noclip.key then
 				avatar.noclip = not avatar.noclip
-				add_line(avatar.noclip and "Through walls" or "Solid walls")
+				add_chat(avatar.noclip and "Through walls" or "Solid walls")
 			end
-			if key == KEY_ESCAPE then
+			if key == BIND.menu.key then
 				-- Whatever is open takes escape for itself: closing that is
-				-- what a player means by it, and only an escape with
-				-- nothing open ends the session. The chat line has a key
-				-- handler of its own that closes it, so this only has to
-				-- keep out of the way while it is up.
+				-- what a player means by it. With nothing open it is the
+				-- pause menu, which is where leaving lives now -- escape no
+				-- longer ends the session by itself. The chat line has a
+				-- key handler of its own that closes it, so this only has
+				-- to keep out of the way while it is up.
 				if form then
 					close_form(true)
 				elseif not chat_input then
-					leave()
+					open_pause_menu()
 				end
 			end
 		end)
