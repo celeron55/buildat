@@ -216,6 +216,11 @@ function M.new(magic, buildat, log, options)
 	-- source shines in. Handed in rather than taken from buildat because it
 	-- is not part of the sandbox's own interface.
 	local read_image = options.read_image
+	-- options.media_texture(name) -> the resource name of one of the game's
+	-- own textures, or nil for one that has not arrived. The sky's sun and
+	-- moon are the ones here that want it, and their names can be texture
+	-- expressions like any other.
+	local media_texture = options.media_texture
 
 	local self = {}
 
@@ -255,10 +260,14 @@ function M.new(magic, buildat, log, options)
 	-- and CLOUD_PARAMS. What is here to begin with is what Luanti has before
 	-- a game says anything.
 	--
-	-- simplified: a game can give the sun and the moon textures of their own
-	-- and a colour for the stars' own tonemap, and none of that is drawn --
-	-- the shader draws a square of its own colour. What is honoured is
-	-- whether each is there at all, how big, how many, and what colour the
+	-- The sun and the moon wear the textures the game gives them, on the
+	-- shader's two texture units.
+	--
+	-- simplified: the sunrise texture, the tonemaps and the stars' own colour
+	-- ramp are not drawn -- a tonemap is a colour grade of the body and the
+	-- sunrise is a band of its own along the horizon, which the shader paints
+	-- from the sky colours instead. What is honoured is the textures, whether
+	-- each body is there at all, how big, how many, and what colour the
 	-- stars and the clouds are, which is what turns a dimension with no sky
 	-- into one.
 	local sky_bodies = {
@@ -2129,6 +2138,28 @@ function M.new(magic, buildat, log, options)
 			local sun = sky_bodies.sun
 			local moon = sky_bodies.moon
 			local stars = sky_bodies.stars
+			-- The textures, if the game gave any and the media has arrived.
+			-- A body whose texture is not there wears the shader's own
+			-- colour until it is: the sky is drawn from the first frame and
+			-- the media comes later.
+			local sun_texture = sun.visible and sun.texture and
+					sun.texture ~= "" and media_texture and
+					media_texture(sun.texture) or nil
+			local moon_texture = moon.visible and moon.texture and
+					moon.texture ~= "" and media_texture and
+					media_texture(moon.texture) or nil
+			if sun_texture then
+				sky_material:SetTexture(0, magic.cache:GetResource(
+						"Texture2D", sun_texture))
+			end
+			if moon_texture then
+				sky_material:SetTexture(1, magic.cache:GetResource(
+						"Texture2D", moon_texture))
+			end
+			sky_material:SetShaderParameter("SunTextured",
+					sun_texture and 1 or 0)
+			sky_material:SetShaderParameter("MoonTextured",
+					moon_texture and 1 or 0)
 			sky_material:SetShaderParameter("SunSize",
 					sun.visible and SUN_HALF * (sun.scale or 1) or 0)
 			sky_material:SetShaderParameter("MoonSize",

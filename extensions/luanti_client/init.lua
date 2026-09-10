@@ -309,12 +309,18 @@ local function show_client(host, port, name, password)
 		-- out of exists; world.new wants the function now, so what it gets
 		-- is a wrapper around whatever this holds by then
 		local read_mesh
+		-- Assigned with the rest of the media handling, further down; the
+		-- palettes and the sky's own textures both want a texture asked for
+		local media_texture
 
 		local view = world.new(magic, buildat.safe, log, {
 				far_clip = FAR_CLIP,
 				read_image = buildat.read_image,
 				read_mesh = function(def)
 					return read_mesh and read_mesh(def) or nil
+				end,
+				media_texture = function(name)
+					return media_texture and media_texture(name) or nil
 				end,
 		})
 
@@ -509,10 +515,6 @@ local function show_client(host, port, name, password)
 			end
 			return texmod.resolve(expr, texmod_ctx, extra)
 		end
-
-		-- Assigned further down, with the rest of the media handling; the
-		-- palette below is one of the things that wants a texture asked for
-		local media_texture
 
 		-- A palette is an image a game indexes by param2 to say what colour a
 		-- voxel is drawn in; Luanti stretches it to 256 entries by repeating

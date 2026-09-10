@@ -13,6 +13,7 @@
 // overhead, thinning into the sky towards the horizon.
 
 #include "Uniforms.glsl"
+#include "Samplers.glsl"
 #include "Transform.glsl"
 
 varying vec3 vTexCoord;
@@ -31,6 +32,12 @@ uniform float cMoonSize;
 uniform float cStarDensity;
 uniform vec3 cStarColor;
 uniform float cCloudCoverage;
+// Whether the game gave the sun or the moon a texture of its own. When it
+// did, sDiffMap holds the sun's and sNormalMap the moon's -- two units
+// because a material has no third one this needs -- and the square is that
+// texture instead of a flat colour.
+uniform float cSunTextured;
+uniform float cMoonTextured;
 
 // How far below the horizon the sky darkens into the ground haze
 const float HAZE_DEPTH = 0.25;
@@ -82,18 +89,22 @@ float CloudDensity(vec2 p)
 }
 
 // A square of the given half width around a direction, for the sun and the
-// moon; 0 outside it
-float Body(vec3 d, vec3 towards_body, float half_width)
+// moon: how much of the pixel is inside it in x, and where inside it the
+// pixel is in yz, as 0...1 across the square, for a body that wears a
+// texture. 0 coverage outside it.
+vec3 Body(vec3 d, vec3 towards_body, float half_width)
 {
     float towards = dot(d, towards_body);
     if(towards <= 0.0)
-        return 0.0;
+        return vec3(0.0, 0.0, 0.0);
     vec3 su = normalize(cross(towards_body, vec3(0.0, 1.0, 0.0)));
     vec3 sv = cross(su, towards_body);
     vec3 onPlane = d / towards;
-    vec2 uv = abs(vec2(dot(onPlane, su), dot(onPlane, sv)));
-    return 1.0 - smoothstep(half_width - BODY_EDGE, half_width + BODY_EDGE,
-            max(uv.x, uv.y));
+    vec2 at = vec2(dot(onPlane, su), dot(onPlane, sv));
+    vec2 uv = abs(at);
+    float cover = 1.0 - smoothstep(half_width - BODY_EDGE,
+            half_width + BODY_EDGE, max(uv.x, uv.y));
+    return vec3(cover, at / (half_width * 2.0) + 0.5);
 }
 
 void VS()
@@ -162,11 +173,29 @@ void PS()
     // comes down to the horizon, which is where that colour belongs; higher
     // up it is its own.
     if(cSunSize > 0.0){
+        vec3 body = Body(d, sun, cSunSize);
         vec3 sun_color = mix(SUN_COLOR, cSunTint * 1.6, low);
-        color = mix(color, sun_color, Body(d, sun, cSunSize));
+        float cover = body.x;
+        if(cSunTextured > 0.5){
+            // The texture's own colours, and its alpha as the coverage: a
+            // sun drawn as a disc in a square image is a disc here too
+            vec4 tex = texture2D(sDiffMap, vec2(body.y, 1.0 - body.z));
+            sun_color = tex.rgb;
+            cover *= tex.a;
+        }
+        color = mix(color, sun_color, cover);
     }
-    if(cMoonSize > 0.0)
-        color = mix(color, MOON_COLOR, Body(d, -sun, cMoonSize));
+    if(cMoonSize > 0.0){
+        vec3 body = Body(d, -sun, cMoonSize);
+        vec3 moon_color = MOON_COLOR;
+        float cover = body.x;
+        if(cMoonTextured > 0.5){
+            vec4 tex = texture2D(sNormalMap, vec2(body.y, 1.0 - body.z));
+            moon_color = tex.rgb;
+            cover *= tex.a;
+        }
+        color = mix(color, moon_color, cover);
+    }
 
     gl_FragColor = vec4(color, 1.0);
 }

@@ -325,7 +325,13 @@ What is done
   and the right button runs the game's on_rightclick for it
 - Dropping a stack: Q throws what is wielded, ctrl+Q one item of it, and a
   stack dragged out of a formspec's slots goes the same way
-- The sky's colours, out of SET_SKY, as what the world fades into
+- The sky's colours, out of SET_SKY, as what the world fades into, and the
+  sun and the moon wearing the textures the game gives them: the sky shader
+  samples them inside the square each body covers, with the texture's own
+  alpha as the coverage, so a sun drawn as a disc in a square image is a disc
+  on the sky. A body the game gave no texture, or whose texture has not
+  arrived, keeps the shader's own colour. simplified: the tonemaps and the
+  sunrise texture are not drawn
 - A hotbar and a health bar, out of the inventory and the hit points
 - Formspecs: the inventory form, the ones the server shows, the ones a node
   carries in its metadata -- a chest, a furnace -- which are opened here
