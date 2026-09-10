@@ -1752,6 +1752,27 @@ local function show_client(host, port, name, password)
 			end
 		end
 
+		-- What the wielded item is pointed at, in the shape interact()
+		-- takes, or nil for nothing at all
+		local function pointed_thing()
+			if pointed_under and pointed_above then
+				return {under = pointed_under, above = pointed_above}
+			end
+			return nil
+		end
+
+		-- An item a game defines as usable does something of its own when
+		-- the left button is pressed, and what is pointed at is the
+		-- server's business rather than a dig: devtest's
+		-- chest_of_everything:bag opens its own inventory, basenodes:apple
+		-- is eaten. Luanti's rule is in src/client/game.cpp: a usable item
+		-- takes the dig button, pointed at a node or at nothing.
+		local function held_usable()
+			local held = wielded()
+			local def = held and item_defs and item_defs[held.name]
+			return def and def.usable or false
+		end
+
 		-- Putting the wielded item where the ray came through the node it
 		-- stopped at. What that means is the server's business: a node goes
 		-- there, or the thing is used on what was pointed at, and either way
@@ -2263,7 +2284,14 @@ local function show_client(host, port, name, password)
 				return -- The click goes to the form; see UIMouseClick
 			end
 			if event_data:GetInt("Button") == MOUSEB_LEFT then
-				digging = true
+				if held_usable() then
+					-- Once per press, which is what wasKeyPressed() gives
+					-- Luanti: a held button must not eat the whole stack
+					client:interact(luanti.INTERACT_USE, wield_index - 1,
+							pointed_thing())
+				else
+					digging = true
+				end
 			end
 		end)
 
@@ -2336,7 +2364,14 @@ local function show_client(host, port, name, password)
 			if event_data:GetInt("Button") == MOUSEB_RIGHT and not form then
 				-- On the way up rather than the way down, so that holding
 				-- the button does not place a stack of nodes at once
-				place()
+				if pointed_under and pointed_above then
+					place()
+				else
+					-- Pointing at nothing: the item's secondary action,
+					-- which is what handlePointingAtNothing() sends
+					client:interact(luanti.INTERACT_ACTIVATE,
+							wield_index - 1)
+				end
 			end
 		end)
 
