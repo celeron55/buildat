@@ -980,6 +980,16 @@ function M.define(dst, util)
 			SetPosition = util.self_function(
 					"SetPosition", {}, {"UIElement", "number", "number"}),
 			SetStyleAuto = util.self_function("SetStyleAuto", {}, {"UIElement"}),
+			-- A size that is both the minimum and the maximum, which is what
+			-- a layout leaves alone. Functions rather than the fixedWidth /
+			-- fixedHeight / fixedSize properties, which have no setter in
+			-- the bindings; see the note by them below.
+			SetFixedWidth = util.self_function("SetFixedWidth", {},
+					{"UIElement", "number"}),
+			SetFixedHeight = util.self_function("SetFixedHeight", {},
+					{"UIElement", "number"}),
+			SetFixedSize = util.self_function("SetFixedSize", {},
+					{"UIElement", "number", "number"}),
 			SetVisible = util.self_function("SetVisible", {},
 					{"UIElement", "boolean"}),
 			SetLayout = util.wrap_function({"UIElement", "number",
@@ -1002,6 +1012,12 @@ function M.define(dst, util)
 			GetText = util.self_function("GetText", {"string"}, {"UIElement"}),
 		},
 		properties = {
+			-- Where the element is in its parent. Note that this is an
+			-- offset from whatever the alignment anchors it to, not a
+			-- corner: a centred element sits at 0,0. screenPosition is the
+			-- resolved place, and read-only in the bindings.
+			position = util.simple_property(dst.IntVector2),
+			screenPosition = {get = util.simple_property(dst.IntVector2).get},
 			horizontalAlignment = util.simple_property("number"),
 			verticalAlignment = util.simple_property("number"),
 			height = util.simple_property("number"),
@@ -1011,9 +1027,14 @@ function M.define(dst, util)
 			minHeight = util.simple_property("number"),
 			minWidth = util.simple_property("number"),
 			minSize = util.simple_property(dst.IntVector2),
-			fixedHeight = util.simple_property("number"),
-			fixedWidth = util.simple_property("number"),
-			fixedSize = util.simple_property(dst.IntVector2),
+			-- Read-only, and not because Urho3D says so: tolua++ generates
+			-- no setter for these (the generated binding is
+			-- tolua_variable("fixedWidth", getter, NULL)), so assigning
+			-- them wrote nowhere and read back what was assigned. Use
+			-- SetFixedWidth / SetFixedHeight / SetFixedSize below.
+			fixedHeight = {get = util.simple_property("number").get},
+			fixedWidth = {get = util.simple_property("number").get},
+			fixedSize = {get = util.simple_property(dst.IntVector2).get},
 			defaultStyle = util.simple_property("XMLFile"),
 			selected = util.simple_property("boolean"),
 			-- Off by default in Urho3D: an element that is not enabled is

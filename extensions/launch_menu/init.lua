@@ -62,7 +62,9 @@ local function make_game_button(parent, name, size)
 	text:SetStyleAuto()
 	text.text = name
 	if text.width > 0 then
-		text.fixedWidth = text.width
+		-- So the size beside it does not squeeze the name: a function
+		-- because the fixedWidth property has no setter in the bindings
+		text:SetFixedWidth(text.width)
 	end
 	local size_text = button:CreateChild("Text")
 	size_text:SetStyleAuto()
@@ -311,7 +313,24 @@ local function show_local_game()
 	end)
 end
 
+-- The two things this extension knows how to do, for the launch menu to put
+-- in front of a player: the list of local games, and connecting to a remote
+-- server. Both push a screen of their own and come back on their own.
+M.show_local_game = show_local_game
+M.show_connect_to_server = show_connect_to_server
+
+-- Kept so that `-m launch_menu` still starts something: the launch menu
+-- itself is extensions/__menu, which is what the client boots by default.
+-- Required here rather than at the top, because that one requires this one.
 function M.boot()
+	require("buildat/extension/__menu").boot()
+end
+
+-- The vertical-menu version of the launch menu, which is what the `buildat`
+-- launcher binary used to run. Kept because it is a working menu with
+-- keyboard selection and no icons to load, and it is one call away if the
+-- icon menu ever needs replacing.
+function M.boot_plain()
 	local root = uistack.main:push("boot")
 
 	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
