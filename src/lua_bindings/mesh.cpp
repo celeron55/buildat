@@ -269,7 +269,7 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 		up_<pv::RawVolume<VoxelInstance>> volume_orig =
 				interface::deserialize_volume(data);
 		lod_volume = interface::mesh::generate_voxel_lod_volume(
-				lod, *volume_orig);
+				lod, *volume_orig, voxel_reg.get());
 		interface::mesh::preload_textures(
 				*lod_volume, voxel_reg.get(), atlas_reg.get(), true);
 	}

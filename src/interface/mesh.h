@@ -132,8 +132,11 @@ namespace interface
 		// Voxel LOD geometry generation (lod=1 -> 1:1, lod=3 -> 1:3)
 
 		// Can be called from any thread
+		// voxel_reg is only read for its voxel format: which bits of a voxel
+		// are the type id the downsampling picks by
 		up_<pv::RawVolume<VoxelInstance>> generate_voxel_lod_volume(
-				int lod, pv::RawVolume<VoxelInstance>&volume_orig);
+				int lod, pv::RawVolume<VoxelInstance>&volume_orig,
+				VoxelRegistry *voxel_reg);
 
 		// Can be called from any thread
 		void generate_voxel_lod_geometry(int lod,
