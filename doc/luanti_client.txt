@@ -35,6 +35,16 @@ along the bottom), F5 hides the lines of detail in the corner, escape closes a f
 Flying and going through walls need the server to give the player the fly and
 noclip privileges; without them its movement checks pull the player back.
 
+Where the player is comes from MOVE_PLAYER, and the client takes the server's
+word for it before anything else it does in a frame. That order matters more
+than it looks: the position the client reports is what the server sends
+mapblocks around, and a form on the screen stops the player walking
+(deliberately -- the mouse and the keys belong to the form). A server sends a
+player who joins dead a death screen in the same breath as the spawn position,
+so a client that only caught up with the server's position once the form
+closed would spend the whole session telling the server it was at the origin,
+and loading the world around the wrong place.
+
 The player is a box 0.6 nodes across and 1.75 tall whose bottom is the
 position the server talks about, and it falls, jumps, walks into things and
 slides along them. What it walks into is the collision boxes out of the node

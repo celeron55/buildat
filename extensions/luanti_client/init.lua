@@ -1581,17 +1581,6 @@ local function show_client(host, port, name, password)
 			end
 		end
 
-		local function close_form()
-			if not form then
-				return
-			end
-			clear_field_hooks()
-			form.drawn.window:Remove()
-			form = nil
-			held = nil
-			magic.input:SetMouseVisible(false)
-		end
-
 		-- Where a form's fields go: to the player when the server showed the
 		-- form, and to the node when the form came out of the node's own
 		-- metadata, which is what a chest's or a furnace's buttons want.
@@ -1614,6 +1603,30 @@ local function show_client(host, port, name, password)
 			return out
 		end
 
+		-- quit says the *player* closed the form -- an exit button, escape,
+		-- the inventory key -- which Luanti's own client tells the server
+		-- about by sending the fields with quit set. A game acts on that: the
+		-- death screen's respawn is "the player closed __builtin:death", and
+		-- without it a client can press Respawn all day and stay dead.
+		--
+		-- A form the server closed or replaced is not the player closing it,
+		-- and gets no quit.
+		local function close_form(quit)
+			if not form then
+				return
+			end
+			if quit then
+				local fields = form_fields()
+				fields.quit = "true"
+				send_form_fields(fields)
+			end
+			clear_field_hooks()
+			form.drawn.window:Remove()
+			form = nil
+			held = nil
+			magic.input:SetMouseVisible(false)
+		end
+
 		-- Pressing enter in a field sends the form the way a button does,
 		-- with which field it was as one of the fields; Luanti's own client
 		-- calls them key_enter and key_enter_field.
@@ -1621,10 +1634,14 @@ local function show_client(host, port, name, password)
 			local fields = form_fields()
 			fields.key_enter = "true"
 			fields.key_enter_field = name
+			local closes = form.drawn.close_on_enter[name] ~= false
+			if closes then
+				fields.quit = "true"
+			end
 			log:verbose("form: enter in \""..tostring(name).."\"")
 			send_form_fields(fields)
-			if form.drawn.close_on_enter[name] ~= false then
-				close_form()
+			if closes then
+				close_form(false)
 			end
 		end
 
@@ -1668,7 +1685,7 @@ local function show_client(host, port, name, password)
 				form_key_cb = magic.SubscribeToEvent("KeyDown",
 						function(event_type, event_data)
 							if event_data:GetInt("Key") == KEY_ESCAPE then
-								close_form()
+								close_form(true)
 							end
 						end)
 			end
@@ -1877,11 +1894,15 @@ local function show_client(host, port, name, password)
 						ly >= b.y and ly < b.y + b.h then
 					local fields = form_fields()
 					fields[b.name] = ""
+					if b.exit then
+						fields.quit = "true"
+					end
 					log:verbose("form: button \""..tostring(b.name)..
-							"\" at "..lx..","..ly)
+							"\" at "..lx..","..ly..
+							(b.exit and " (exit)" or ""))
 					send_form_fields(fields)
 					if b.exit then
-						close_form()
+						close_form(false)
 					end
 					return
 				end
@@ -2137,6 +2158,18 @@ local function show_client(host, port, name, password)
 		end
 
 		local function move(dtime)
+			-- Where the server put us wins over where we think we are, and
+			-- this has to happen before anything else: MOVE_PLAYER is the
+			-- only thing that says where the player starts, and until the
+			-- avatar has heard it we would be telling the server we are at
+			-- the origin. That is what the server sends blocks around, so a
+			-- form that is up from the first frame -- a death screen, which
+			-- is what a server sends a player who joins dead -- would leave
+			-- the whole session loading the wrong part of the world.
+			local p = client.position
+			if p.x ~= avatar.x or p.y ~= avatar.y or p.z ~= avatar.z then
+				avatar:set_position(p.x, p.y, p.z)
+			end
 			-- A form or a chat line takes the mouse and the keys; the player
 			-- stands still rather than walking blind behind it
 			if form or chat_input then
@@ -2153,11 +2186,6 @@ local function show_client(host, port, name, password)
 			local pitch = client.pitch + dmouse.y * MOUSE_SENSITIVITY
 			if pitch > 89 then pitch = 89 end
 			if pitch < -89 then pitch = -89 end
-
-			local p = client.position
-			if p.x ~= avatar.x or p.y ~= avatar.y or p.z ~= avatar.z then
-				avatar:set_position(p.x, p.y, p.z)
-			end
 
 			-- Where forward is, in world coordinates, for that yaw
 			local yr = math.rad(yaw)
@@ -2777,7 +2805,7 @@ local function show_client(host, port, name, password)
 			end
 			if key == KEY_I then
 				if form then
-					close_form()
+					close_form(true)
 				else
 					open_form(inventory_spec, "", "inventory")
 				end
@@ -2820,7 +2848,7 @@ local function show_client(host, port, name, password)
 				-- handler of its own that closes it, so this only has to
 				-- keep out of the way while it is up.
 				if form then
-					close_form()
+					close_form(true)
 				elseif not chat_input then
 					leave()
 				end
