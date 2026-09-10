@@ -68,6 +68,7 @@ local TOSERVER = {
 	INVENTORY_ACTION = 0x31,
 	CHAT_MESSAGE  = 0x32,
 	INTERACT      = 0x39,
+	NODEMETA_FIELDS = 0x3b,
 	INVENTORY_FIELDS = 0x3c,
 	REQUEST_MEDIA = 0x40,
 	CLIENT_READY  = 0x43,
@@ -86,6 +87,7 @@ local TOSERVER_DELIVERY = {
 	[TOSERVER.INVENTORY_ACTION] = {0, true},
 	[TOSERVER.CHAT_MESSAGE]  = {0, true},
 	[TOSERVER.INTERACT]      = {0, true},
+	[TOSERVER.NODEMETA_FIELDS] = {0, true},
 	[TOSERVER.INVENTORY_FIELDS] = {0, true},
 	[TOSERVER.REQUEST_MEDIA] = {1, true},
 	[TOSERVER.CLIENT_READY]  = {1, true},
@@ -155,6 +157,7 @@ local TOCLIENT = {
 	HUD_SET_PARAM  = 0x4D,
 	PLAY_SOUND     = 0x3F,
 	STOP_SOUND     = 0x40,
+	PRIVILEGES     = 0x41,
 	FADE_SOUND     = 0x55,
 	FOV            = 0x36,
 	OVERRIDE_DAY_NIGHT_RATIO = 0x50,
@@ -636,6 +639,20 @@ function M.new(socket, options, log)
 	handlers[TOCLIENT.INVENTORY_FORMSPEC] = function(r)
 		if self.on_inventory_formspec then
 			self.on_inventory_formspec(r:longstring())
+		end
+	end
+
+	-- What the server lets this player do. What this is for is saying why
+	-- something was refused: a client that flies without the privilege is
+	-- pulled back by the server's own movement check and nothing says why.
+	handlers[TOCLIENT.PRIVILEGES] = function(r)
+		local privs = {}
+		for _ = 1, r:u16() do
+			privs[r:string()] = true
+		end
+		self.privileges = privs
+		if self.on_privileges then
+			self.on_privileges(privs)
 		end
 	end
 
@@ -1280,6 +1297,26 @@ function M.new(socket, options, log)
 			w:longstring(value)
 		end
 		send_command(TOSERVER.INVENTORY_FIELDS, w:data())
+	end
+
+	-- The same, for a form that came out of a node's own metadata rather
+	-- than from the server showing one: the node's position goes in front,
+	-- and the server runs the node's on_receive_fields instead of the
+	-- player's.
+	function self:send_nodemeta_fields(x, y, z, formname, fields)
+		local w = serialize.writer()
+		w:s16(x):s16(y):s16(z)
+		w:string(formname)
+		local count = 0
+		for _, _ in pairs(fields) do
+			count = count + 1
+		end
+		w:u16(count)
+		for name, value in pairs(fields) do
+			w:string(name)
+			w:longstring(value)
+		end
+		send_command(TOSERVER.NODEMETA_FIELDS, w:data())
 	end
 
 	-- Moving a stack from one inventory slot to another. The command is
