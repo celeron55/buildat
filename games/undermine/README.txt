@@ -9,9 +9,13 @@ The mine, for now
 -----------------
 
 The world is generated the way digger's is -- fbm noise, a grass surface over
-dirt over rock, ponds in the hollows with sand shores -- with bedrock at the
-bottom as the one thing that cannot be dug and the thing support ultimately
-comes from. There are no trees: this game happens underground.
+dirt over rock, ponds in the hollows with sand shores, trees scattered over
+it -- with bedrock at the bottom as the one thing that cannot be dug and the
+thing support ultimately comes from.
+
+A tree is scenery that the same rules apply to: its trunk stands on the
+ground and its leaves hang off the trunk, so cutting through a trunk drops
+what is above the cut.
 
 Left button digs, right button places, and keys 1 to 4 pick what it places:
 rock, timber, brick, dirt. The line under the position says what the pointed
@@ -29,9 +33,10 @@ Why this game exists
 It is the sample game for a voxel format a game chooses for itself. Its
 voxels are cut up like this:
 
-    id 0...5, light_sky 6...9, param 10...17, support 18...21
+    id 0...7, light_sky 8...11, param 12...19, support 20...23
 
--- six bits of material id, four of skylight, and then two fields of its own:
+-- eight bits of material id, with room for the nature and everything else a
+game like this grows, four of skylight, and then two fields of its own:
 the load a voxel carries and how far it is from something holding it up. The
 load is bound as the engine's `param` role, so that the mesher can read it
 without the game spending a second field on a copy, which is what the stress
@@ -51,7 +56,10 @@ When not specified separately:
 - CC BY-SA 3.0 2014 Perttu Ahola <celeron55@gmail.com>
 
 main/client_data/grass.png
+main/client_data/leaves.png
 main/client_data/dirt.png
+main/client_data/tree.png
+main/client_data/tree_top.png
 main/client_data/rock.png
 - CC BY-SA 3.0 2013 PilzAdam <pilzadam@minetest.net>
 
