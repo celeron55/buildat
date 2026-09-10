@@ -873,6 +873,22 @@ local function show_client(host, port, name, password)
 						textures[1] or props.wield_item
 				return of_item(item), item_tiles(item)
 			end
+			-- An object drawn as its own model: the quads out of the .b3d
+			-- or .obj, and one texture per material. A model this cannot
+			-- read, or whose first texture has not arrived, falls back to
+			-- the box below.
+			if props.visual == "mesh" and props.mesh and props.mesh ~= "" then
+				local quads = read_mesh({mesh = props.mesh, visual_scale = 1})
+				if quads then
+					local tiles = {}
+					for i = 1, #(textures or {}) do
+						tiles[i] = media_texture(textures[i])
+					end
+					if tiles[1] then
+						return tiles[1], nil, {quads = quads, tiles = tiles}
+					end
+				end
+			end
 			if textures and textures[1] and textures[1] ~= "" then
 				return media_texture(textures[1])
 			end

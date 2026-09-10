@@ -302,9 +302,18 @@ What is done
   because the server did not grant it rather than leaving the player to
   wonder why they were pulled back
 - Active objects: other players, mobs and dropped items, where the server
-  says they are, drawn as a box wearing the object's own texture. A dropped
-  node is a small cube of the node's six tiles, turning at the rate the
-  object asked for
+  says they are. An object whose visual is a mesh is drawn as that mesh --
+  the .b3d and .obj readers the node meshes use, one geometry per material so
+  each wears the texture the object gave for it -- in its rest pose, because
+  the animation chunks are not read. A dropped node is a small cube of the
+  node's six tiles, turning at the rate the object asked for, and everything
+  else is a box wearing the object's first texture, which reads as the thing
+  where nothing at all reads as nothing at all.
+
+  An object's model is authored in Luanti's own scene units, where a node is
+  ten across, and visual_size scales it in those; a node's "mesh" drawtype is
+  authored one unit to the node instead. That tenth is the only difference
+  between the two paths
 - Pointing at an object: the same ray against the object's selection box,
   the nearest of the two winning, with its box outlined and its infotext or
   nametag shown. The left button hits it (INTERACT_START_DIGGING with the
