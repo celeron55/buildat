@@ -100,6 +100,9 @@ def brick():
 
 
 def main():
+    # The stress view tints this rather than a material's own texture, so
+    # that what is on screen is the gradient and nothing else
+    solid("white.png", (1.0, 1.0, 1.0), 0.0, 0)
     # Nearly black and strongly speckled: the one thing in the world that
     # cannot be dug, and it should look like it
     solid("bedrock.png", (0.13, 0.13, 0.15), 0.16, 3)

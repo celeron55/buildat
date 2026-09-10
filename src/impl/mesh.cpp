@@ -501,6 +501,16 @@ static VoxelInstance face_back_voxel(pv::RawVolume<VoxelInstance> &volume,
 // A voxel's own colour multiplied into the light the mesher worked out. The
 // packing is Urho3D's Color::ToUInt(), which is red in the low byte; the
 // alpha is how much of the sky the surface sees and is left alone.
+// A colour on its own, as the vertex format wants it: red in the low byte,
+// and no sky at all in the alpha. What that says to a voxel shader is "this
+// surface looks like this whatever the sky is doing", which is what a colour
+// with no light behind it means -- see the vertex colour's split in
+// interface/mesh.h.
+static unsigned plain_color(uint32_t rgb)
+{
+	return ((rgb & 0xff) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 0xff);
+}
+
 static unsigned modulate_color(unsigned lit, uint32_t rgb)
 {
 	if(rgb == 0xffffff)
@@ -865,8 +875,14 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			uint32_t tint = variant ?
 					modulate_color(voxel_color | 0xff000000UL,
 							variant->color) & 0xffffffUL : voxel_color;
-			for(size_t i = 0; i < 4; i++)
-				corner_colors[i] = modulate_color(corner_colors[i], tint);
+			for(size_t i = 0; i < 4; i++){
+				corner_colors[i] = use_skylight ?
+						modulate_color(corner_colors[i], tint) :
+						plain_color(tint);
+			}
+			// Whatever the light is doing, these vertices now carry
+			// something that has to reach the shader
+			tg.has_colors = true;
 		}
 		// Go through indices of the face and mangle vertices according to them
 		// into the temporary vertex buffer
@@ -1212,12 +1228,19 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 										LAMP_COLOR.b_ * lamp_f * shade,
 								sky_f * shade).ToUInt();
 					}
-					if(fmt.color.bound()){
-						color = modulate_color(color,
-								fmt.color.get(v.data) & 0xffffffUL);
+					uint32_t tint = 0xffffff;
+					if(fmt.color.bound())
+						tint = fmt.color.get(v.data) & 0xffffffUL;
+					if(variant){
+						tint = modulate_color(tint | 0xff000000UL,
+								variant->color) & 0xffffffUL;
 					}
-					if(variant)
-						color = modulate_color(color, variant->color);
+					if(tint != 0xffffff){
+						color = use_skylight ?
+								modulate_color(color, tint) :
+								plain_color(tint);
+						tg.has_colors = true;
+					}
 					// Two triangles, and the same two the other way round
 					// when the shape is drawn from both sides
 					static const int WINDINGS[2][6] = {
