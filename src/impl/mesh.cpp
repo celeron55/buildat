@@ -29,6 +29,52 @@ namespace magic = Urho3D;
 namespace pv = PolyVox;
 
 using interface::VoxelInstance;
+using interface::VoxelRegistry;
+
+// The voxel format's fields, read out of the registry once per chunk instead
+// of once per voxel; see VoxelFormat in interface/voxel.h. A format is set
+// before the first voxel is added and never after, so nothing here needs the
+// registry's lock and a copy of it stays true for as long as a mesh job.
+struct VoxelFmt
+{
+	interface::VoxelField id, light_sky, light_lamp, param, color;
+	float sky_div = 1.0f;
+	float lamp_div = 1.0f;
+
+	VoxelFmt(){}
+	VoxelFmt(VoxelRegistry *voxel_reg)
+	{
+		const interface::VoxelFormat &f = voxel_reg->get_format();
+		id = f.id;
+		light_sky = f.light_sky;
+		light_lamp = f.light_lamp;
+		param = f.param;
+		color = f.color;
+		sky_div = light_sky.bound() ? (float)light_sky.mask() : 1.0f;
+		lamp_div = light_lamp.bound() ? (float)light_lamp.mask() : 1.0f;
+	}
+
+	interface::VoxelTypeId id_of(const VoxelInstance &v) const
+	{
+		return id.bound() ? (interface::VoxelTypeId)id.get(v.data) : 1;
+	}
+	// Nothing has generated this voxel yet. A format with no id bound has one
+	// voxel type and no way to say that, so nothing is undefined there.
+	bool undefined(const VoxelInstance &v) const
+	{
+		return id_of(v) == interface::VOXELTYPEID_UNDEFINED;
+	}
+	float sky_f(const VoxelInstance &v) const
+	{
+		return light_sky.bound() ?
+				(float)light_sky.get(v.data) / sky_div : 0.0f;
+	}
+	float lamp_f(const VoxelInstance &v) const
+	{
+		return light_lamp.bound() ?
+				(float)light_lamp.get(v.data) / lamp_div : 0.0f;
+	}
+};
 
 // Just do this; Urho3D's stuff doesn't really clash with anything in buildat
 using namespace Urho3D;
@@ -123,6 +169,7 @@ Model* create_8bit_voxel_physics_model(Context *context,
 		throw Exception("Negative dimension");
 	if(w * h * d != (int)source_data.size())
 		throw Exception("Mismatched data size");
+	const VoxelFmt fmt(voxel_reg);
 	pv::RawVolume<VoxelInstance> volume(pv::Region(
 			pv::Vector3DInt32(-1, -1, -1),
 			pv::Vector3DInt32(w, h, d)));
@@ -134,8 +181,10 @@ Model* create_8bit_voxel_physics_model(Context *context,
 						z == d || y == h || x == w){
 					volume.setVoxelAt(x, y, z, VoxelInstance(0));
 				} else {
-					char c = source_data[i++];
-					volume.setVoxelAt(x, y, z, VoxelInstance(c));
+					uint8_t c = (uint8_t)source_data[i++];
+					VoxelInstance v(0);
+					fmt.id.set(v.data, c);
+					volume.setVoxelAt(x, y, z, v);
 				}
 			}
 		}
@@ -155,6 +204,7 @@ void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 	pv::RawVolume<VoxelInstance> volume(pv::Region(
 			pv::Vector3DInt32(-1, -1, -1),
 			pv::Vector3DInt32(w, h, d)));
+	const VoxelFmt fmt(voxel_reg);
 	size_t i = 0;
 	for(int z = -1; z <= d; z++){
 		for(int y = -1; y <= h; y++){
@@ -162,7 +212,7 @@ void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 				VoxelInstance v(0);
 				if(!(z == -1 || y == -1 || x == -1 ||
 						z == d || y == h || x == w))
-					v = VoxelInstance(source_data[i++]);
+					fmt.id.set(v.data, (uint8_t)source_data[i++]);
 				// 8 bit data has no room for a light value, and this is a
 				// model standing on its own rather than a piece of a world
 				// that could light it, so it is lit as if it were out in the
@@ -171,7 +221,7 @@ void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 				// what is left is the reflection, and every texel of the
 				// derived normal map then reflects the sky in its own
 				// direction, which comes out as speckle.
-				v.set_skylight(VoxelInstance::SKYLIGHT_MAX);
+				fmt.light_sky.set(v.data, fmt.light_sky.mask());
 				volume.setVoxelAt(x, y, z, v);
 			}
 		}
@@ -184,10 +234,11 @@ template<typename VoxelType>
 		class IsQuadNeededByRegistryPhysics
 {
 	interface::VoxelRegistry *m_voxel_reg;
+	VoxelFmt m_fmt;
 	// NOTE: The voxel type id is used directly as PolyVox material value
 public:
 	IsQuadNeededByRegistryPhysics(interface::VoxelRegistry *voxel_reg):
-		m_voxel_reg(voxel_reg)
+		m_voxel_reg(voxel_reg), m_fmt(voxel_reg)
 	{}
 	IsQuadNeededByRegistryPhysics(): // PolyVox wants this
 		m_voxel_reg(nullptr)
@@ -201,9 +252,11 @@ public:
 		const interface::CachedVoxelDefinition *front_def =
 				m_voxel_reg->get_cached(front);
 		if(!back_def)
-			throw Exception(ss_()+"Undefined voxel: back="+itos(back.get_id()));
+			throw Exception(ss_()+"Undefined voxel: back="+
+					itos(m_fmt.id_of(back)));
 		if(!front_def)
-			throw Exception(ss_()+"Undefined voxel: front="+itos(front.get_id()));
+			throw Exception(ss_()+"Undefined voxel: front="+
+					itos(m_fmt.id_of(front)));
 		if(!back_def || !back_def->physically_solid)
 			return false;
 		if(!front_def || !front_def->physically_solid){
@@ -293,10 +346,11 @@ template<typename VoxelType>
 		class IsQuadNeededByRegistry
 {
 	interface::VoxelRegistry *m_voxel_reg;
+	VoxelFmt m_fmt;
 	// NOTE: The voxel type id is used directly as PolyVox material value
 public:
 	IsQuadNeededByRegistry(interface::VoxelRegistry *voxel_reg):
-		m_voxel_reg(voxel_reg)
+		m_voxel_reg(voxel_reg), m_fmt(voxel_reg)
 	{}
 	IsQuadNeededByRegistry(): // PolyVox wants this
 		m_voxel_reg(nullptr)
@@ -310,9 +364,11 @@ public:
 		const interface::CachedVoxelDefinition *front_def =
 				m_voxel_reg->get_cached(front);
 		if(!back_def)
-			throw Exception(ss_()+"Undefined voxel: back="+itos(back.get_id()));
+			throw Exception(ss_()+"Undefined voxel: back="+
+					itos(m_fmt.id_of(back)));
 		if(!front_def)
-			throw Exception(ss_()+"Undefined voxel: front="+itos(front.get_id()));
+			throw Exception(ss_()+"Undefined voxel: front="+
+					itos(m_fmt.id_of(front)));
 		/*if(!back_def){
 			return false;
 		}*/
@@ -320,12 +376,12 @@ public:
 			return false;
 		}
 		else if(back_def->face_draw_type == interface::FaceDrawType::ALWAYS){
-			materialToUse = back.get_id();
+			materialToUse = m_fmt.id_of(back);
 			return true;
 		}
 		// interface::FaceDrawType::ON_EDGE
 		if(!front_def){
-			materialToUse = back.get_id();
+			materialToUse = m_fmt.id_of(back);
 			return true;
 		}
 		// A translucent voxel does not draw its face against an opaque one:
@@ -339,7 +395,7 @@ public:
 			return false;
 		}
 		if(back_def->edge_material_id != front_def->edge_material_id){
-			materialToUse = back.get_id();
+			materialToUse = m_fmt.id_of(back);
 			return true;
 		}
 		return false;
@@ -413,10 +469,11 @@ static const float AO_LEVELS[4] = {1.0f, 0.72f, 0.52f, 0.38f};
 static const float BOUNCE_AO = 0.70f;
 
 static bool occludes(pv::RawVolume<VoxelInstance> &volume,
-		VoxelRegistry *voxel_reg, const pv::Vector3DInt32 &p)
+		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
+		const pv::Vector3DInt32 &p)
 {
 	VoxelInstance v = volume.getVoxelAt(p);
-	if(v.get_id() == interface::VOXELTYPEID_UNDEFINED)
+	if(fmt.undefined(v))
 		return false; // Unfilled chunk padding; assume open
 	const interface::CachedVoxelDefinition *def = voxel_reg->get_cached(v);
 	if(def == nullptr)
@@ -434,7 +491,8 @@ static bool occludes(pv::RawVolume<VoxelInstance> &volume,
 // side undefined. Those faces fall back to the skylight of the solid voxel,
 // which the world stores as a per-voxel approximation for exactly this case.
 static void face_vertex_colors(pv::RawVolume<VoxelInstance> &volume,
-		VoxelRegistry *voxel_reg, const pv::Vector3DFloat *quad,
+		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
+		const pv::Vector3DFloat *quad,
 		const pv::Vector3DFloat &n, uint face_id, unsigned out[4])
 {
 	pv::Vector3DFloat centre(0, 0, 0);
@@ -451,10 +509,10 @@ static void face_vertex_colors(pv::RawVolume<VoxelInstance> &volume,
 	};
 	const pv::Vector3DInt32 front_p = voxel_at(0.5f);
 	VoxelInstance front = volume.getVoxelAt(front_p);
-	VoxelInstance lit = front.get_id() == interface::VOXELTYPEID_UNDEFINED ?
+	VoxelInstance lit = fmt.undefined(front) ?
 			volume.getVoxelAt(voxel_at(-0.5f)) : front;
-	float sky_f = (float)lit.get_skylight() / VoxelInstance::SKYLIGHT_MAX;
-	float lamp_f = (float)lit.get_lamplight() / VoxelInstance::LAMPLIGHT_MAX;
+	float sky_f = fmt.sky_f(lit);
+	float lamp_f = fmt.lamp_f(lit);
 
 	// The two axes of the face's own plane, to step around it in
 	pv::Vector3DInt32 u(0, 1, 0), v(0, 0, 1);
@@ -475,11 +533,11 @@ static void face_vertex_colors(pv::RawVolume<VoxelInstance> &volume,
 		pv::Vector3DFloat d = quad[i] - centre;
 		pv::Vector3DInt32 du = u * along(d, u);
 		pv::Vector3DInt32 dv = v * along(d, v);
-		bool s1 = occludes(volume, voxel_reg, front_p + du);
-		bool s2 = occludes(volume, voxel_reg, front_p + dv);
+		bool s1 = occludes(volume, voxel_reg, fmt, front_p + du);
+		bool s2 = occludes(volume, voxel_reg, fmt, front_p + dv);
 		// Two solid sides bury the corner whatever is diagonally behind it
 		int occluders = (s1 && s2) ? 3 : (s1 ? 1 : 0) + (s2 ? 1 : 0) +
-				(occludes(volume, voxel_reg, front_p + du + dv) ? 1 : 0);
+				(occludes(volume, voxel_reg, fmt, front_p + du + dv) ? 1 : 0);
 		float ao = AO_LEVELS[occluders];
 		float sky_shade = ao * FACE_SHADE[face_id];
 		float bounce_shade = (1.0f - BOUNCE_AO + BOUNCE_AO * ao) *
@@ -600,6 +658,7 @@ void assign_txcoords(size_t pv_vertex_i1, const AtlasSegmentCache *aseg,
 void preload_textures(pv::RawVolume<VoxelInstance> &volume,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg, bool with_lod)
 {
+	const VoxelFmt fmt(voxel_reg);
 	auto region = volume.getEnclosingRegion();
 	auto &lc = region.getLowerCorner();
 	auto &uc = region.getUpperCorner();
@@ -611,7 +670,8 @@ void preload_textures(pv::RawVolume<VoxelInstance> &volume,
 				const interface::CachedVoxelDefinition *def =
 						voxel_reg->get_cached(v, atlas_reg, with_lod);
 				if(!def)
-					throw Exception(ss_()+"Undefined voxel: "+itos(v.get_id()));
+					throw Exception(ss_()+"Undefined voxel: "+
+							itos(fmt.id_of(v)));
 			}
 		}
 	}
@@ -619,7 +679,8 @@ void preload_textures(pv::RawVolume<VoxelInstance> &volume,
 
 static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 		pv::RawVolume<VoxelInstance> &volume,
-		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
+		AtlasRegistry *atlas_reg,
 		bool use_skylight,
 		sm_<uint, TemporaryGeometry> *translucent_result);
 
@@ -629,6 +690,7 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		bool use_skylight,
 		sm_<uint, TemporaryGeometry> *translucent_result)
 {
+	const VoxelFmt fmt(voxel_reg);
 	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
 	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
@@ -749,7 +811,7 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff
 		};
 		if(use_skylight){
-			face_vertex_colors(volume, voxel_reg, quad, n, face_id,
+			face_vertex_colors(volume, voxel_reg, fmt, quad, n, face_id,
 					corner_colors);
 		}
 		// Go through indices of the face and mangle vertices according to them
@@ -779,8 +841,8 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 #endif
 	}
 
-	generate_voxel_shapes(result, volume, voxel_reg, atlas_reg, use_skylight,
-			translucent_result);
+	generate_voxel_shapes(result, volume, voxel_reg, fmt, atlas_reg,
+			use_skylight, translucent_result);
 }
 
 // How high a liquid's surface stands at one corner of a voxel: the average
@@ -794,7 +856,7 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 // columns leave empty is at the bottom, which is what makes the edge of a
 // spill thin out rather than stand as a wall.
 static float liquid_corner_top(pv::RawVolume<VoxelInstance> &volume,
-		VoxelRegistry *voxel_reg, int x, int y, int z,
+		VoxelRegistry *voxel_reg, const VoxelFmt &fmt, int x, int y, int z,
 		const interface::CachedVoxelDefinition *def, int dx, int dz)
 {
 	const int off[4][2] = {{0, 0}, {dx, 0}, {0, dz}, {dx, dz}};
@@ -806,15 +868,13 @@ static float liquid_corner_top(pv::RawVolume<VoxelInstance> &volume,
 		int cz = z + off[i][1];
 		VoxelInstance av = volume.getVoxelAt(cx, y + 1, cz);
 		const interface::CachedVoxelDefinition *adef =
-				av.get_id() == interface::VOXELTYPEID_UNDEFINED ? nullptr :
-				voxel_reg->get_cached(av);
+				fmt.undefined(av) ? nullptr : voxel_reg->get_cached(av);
 		if(adef != nullptr && adef->is_liquid &&
 				adef->shape_group == def->shape_group)
 			return 0.5f;
 		VoxelInstance cv = volume.getVoxelAt(cx, y, cz);
 		const interface::CachedVoxelDefinition *cdef =
-				cv.get_id() == interface::VOXELTYPEID_UNDEFINED ? nullptr :
-				voxel_reg->get_cached(cv);
+				fmt.undefined(cv) ? nullptr : voxel_reg->get_cached(cv);
 		if(cdef == nullptr)
 			continue;
 		if(cdef->is_liquid && cdef->shape_group == def->shape_group){
@@ -842,11 +902,11 @@ static float liquid_corner_top(pv::RawVolume<VoxelInstance> &volume,
 // reaches into a wall of stone. What the families are is the game's business;
 // see interface/voxel.h.
 static bool connects_to(pv::RawVolume<VoxelInstance> &volume,
-		VoxelRegistry *voxel_reg, int x, int y, int z,
+		VoxelRegistry *voxel_reg, const VoxelFmt &fmt, int x, int y, int z,
 		const interface::CachedVoxelDefinition *def)
 {
 	VoxelInstance nv = volume.getVoxelAt(x, y, z);
-	if(nv.get_id() == interface::VOXELTYPEID_UNDEFINED)
+	if(fmt.undefined(nv))
 		return false;
 	const interface::CachedVoxelDefinition *ndef = voxel_reg->get_cached(nv);
 	if(ndef == nullptr)
@@ -860,7 +920,7 @@ static bool connects_to(pv::RawVolume<VoxelInstance> &volume,
 }
 
 static uint connected_faces(pv::RawVolume<VoxelInstance> &volume,
-		VoxelRegistry *voxel_reg, int x, int y, int z,
+		VoxelRegistry *voxel_reg, const VoxelFmt &fmt, int x, int y, int z,
 		const interface::CachedVoxelDefinition *def, uint *stepped_up)
 {
 	static const int FACE_DIR[6][3] = {
@@ -869,7 +929,7 @@ static uint connected_faces(pv::RawVolume<VoxelInstance> &volume,
 	};
 	uint faces = 0;
 	for(size_t i = 0; i < 6; i++){
-		if(connects_to(volume, voxel_reg, x + FACE_DIR[i][0],
+		if(connects_to(volume, voxel_reg, fmt, x + FACE_DIR[i][0],
 				y + FACE_DIR[i][1], z + FACE_DIR[i][2], def))
 			faces |= 1u << i;
 	}
@@ -884,11 +944,11 @@ static uint connected_faces(pv::RawVolume<VoxelInstance> &volume,
 	};
 	*stepped_up = 0;
 	for(size_t i = 0; i < 4; i++){
-		if(connects_to(volume, voxel_reg, x + STEP_DIR[i][0], y + 1,
+		if(connects_to(volume, voxel_reg, fmt, x + STEP_DIR[i][0], y + 1,
 				z + STEP_DIR[i][2], def)){
 			*stepped_up |= 1u << i;
 			faces |= 1u << (i == 0 ? 4 : i == 1 ? 5 : i == 2 ? 3 : 2);
-		} else if(connects_to(volume, voxel_reg, x + STEP_DIR[i][0], y - 1,
+		} else if(connects_to(volume, voxel_reg, fmt, x + STEP_DIR[i][0], y - 1,
 				z + STEP_DIR[i][2], def)){
 			faces |= 1u << (i == 0 ? 4 : i == 1 ? 5 : i == 2 ? 3 : 2);
 		}
@@ -910,7 +970,8 @@ static uint connected_faces(pv::RawVolume<VoxelInstance> &volume,
 // the cube faces can be culled against it.
 static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 		pv::RawVolume<VoxelInstance> &volume,
-		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
+		AtlasRegistry *atlas_reg,
 		bool use_skylight,
 		sm_<uint, TemporaryGeometry> *translucent_result)
 {
@@ -939,10 +1000,8 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 				// voxel in front of each face: there is no "in front" for an
 				// arbitrary quad, and a plant or a rail is lit by the air it
 				// stands in, which is the voxel it is in.
-				float sky_f = (float)v.get_skylight() /
-						VoxelInstance::SKYLIGHT_MAX;
-				float lamp_f = (float)v.get_lamplight() /
-						VoxelInstance::LAMPLIGHT_MAX;
+				float sky_f = fmt.sky_f(v);
+				float lamp_f = fmt.lamp_f(v);
 				// Which directions this voxel connects in, once per voxel
 				// rather than once per quad that asks. Only a voxel that
 				// reaches out at all pays for it.
@@ -954,7 +1013,7 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 				const bool masked = !def->shape_masked.empty();
 				const uint faces = (def->connect_mask != 0 ||
 						def->connect_to_solid || masked) ?
-						connected_faces(volume, voxel_reg, x, y, z, def,
+						connected_faces(volume, voxel_reg, fmt, x, y, z, def,
 								masked ? &stepped_up : nullptr) : 0;
 				const interface::VoxelQuad *quads = def->shape.data();
 				size_t quad_from = 0;
@@ -985,7 +1044,7 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 					for(int ix = 0; ix < 2; ix++){
 						for(int iz = 0; iz < 2; iz++){
 							corner[ix][iz] = liquid_corner_top(volume,
-									voxel_reg, x, y, z, def,
+									voxel_reg, fmt, x, y, z, def,
 									ix == 0 ? -1 : 1, iz == 0 ? -1 : 1);
 						}
 					}
@@ -1050,8 +1109,8 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 								y + FACE_DIR[face_id][1],
 								z + FACE_DIR[face_id][2]);
 						const interface::CachedVoxelDefinition *ndef =
-								nv.get_id() == interface::VOXELTYPEID_UNDEFINED ?
-								nullptr : voxel_reg->get_cached(nv);
+								fmt.undefined(nv) ? nullptr :
+								voxel_reg->get_cached(nv);
 						// The same group: a face inside a body of it. Or
 						// something opaque: the face is that voxel's own, as
 						// in IsQuadNeededByRegistry.
@@ -1187,8 +1246,10 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 }
 
 up_<pv::RawVolume<VoxelInstance>> generate_voxel_lod_volume(
-		int lod, pv::RawVolume<VoxelInstance>&volume_orig)
+		int lod, pv::RawVolume<VoxelInstance>&volume_orig,
+		VoxelRegistry *voxel_reg)
 {
+	const VoxelFmt fmt(voxel_reg);
 	pv::Region region_orig = volume_orig.getEnclosingRegion();
 	auto &lc_orig = region_orig.getLowerCorner();
 	auto &uc_orig = region_orig.getUpperCorner();
@@ -1215,11 +1276,11 @@ up_<pv::RawVolume<VoxelInstance>> generate_voxel_lod_volume(
 							if(!region_orig.containsPoint(p_orig))
 								continue;
 							VoxelInstance v1 = volume_orig.getVoxelAt(p_orig);
-							if(v1.get_id() == interface::VOXELTYPEID_UNDEFINED)
+							if(fmt.undefined(v1))
 								continue;
 							// TODO: Prioritize voxel types better
 							// Higher is probably more interesting
-							if(v1.get_id() > v_orig.get_id())
+							if(fmt.id_of(v1) > fmt.id_of(v_orig))
 								v_orig = v1;
 						}
 					}
@@ -1238,6 +1299,7 @@ void generate_voxel_lod_geometry(int lod,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 		bool use_skylight)
 {
+	const VoxelFmt fmt(voxel_reg);
 	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
 	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
@@ -1312,7 +1374,7 @@ void generate_voxel_lod_geometry(int lod,
 			0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff
 		};
 		if(use_skylight){
-			face_vertex_colors(lod_volume, voxel_reg, quad, n, face_id,
+			face_vertex_colors(lod_volume, voxel_reg, fmt, quad, n, face_id,
 					corner_colors);
 		}
 		// Go through indices of the face and mangle vertices according to them
@@ -1399,7 +1461,7 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 		bool use_skylight)
 {
 	up_<pv::RawVolume<VoxelInstance>> lod_volume = generate_voxel_lod_volume(
-			lod, volume_orig);
+			lod, volume_orig, voxel_reg);
 
 	preload_textures(*lod_volume, voxel_reg, atlas_reg, true);
 
@@ -1415,6 +1477,7 @@ void generate_voxel_physics_boxes(
 		pv::RawVolume<VoxelInstance> &volume_orig,
 		VoxelRegistry *voxel_reg)
 {
+	const VoxelFmt fmt(voxel_reg);
 	int w = volume_orig.getWidth() - 2;
 	int h = volume_orig.getHeight() - 2;
 	int d = volume_orig.getDepth() - 2;
@@ -1432,7 +1495,8 @@ void generate_voxel_physics_boxes(
 				const interface::CachedVoxelDefinition *def =
 						voxel_reg->get_cached(v_orig);
 				if(!def){
-					throw Exception(ss_()+"Undefined voxel: "+itos(v_orig.get_id()));
+					throw Exception(ss_()+"Undefined voxel: "+
+							itos(fmt.id_of(v_orig)));
 				}
 				uint8_t v = (def && def->physically_solid);
 				volume.setVoxelAt(x, y, z, v);
