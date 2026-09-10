@@ -733,6 +733,20 @@ struct CInstance: public voxelworld::Instance
 		return (uint8_t)sky_field().mask();
 	}
 
+	// The voxel's type, through the format the game chose. Not
+	// VoxelInstance::get_id(), which is the default format's bit range and
+	// would read a game's own light, parameter and simulation bits as part
+	// of the id.
+	interface::VoxelTypeId get_id(const VoxelInstance &v)
+	{
+		return m_voxel_reg->get_format().id_of(v.data);
+	}
+
+	bool is_undefined(const VoxelInstance &v)
+	{
+		return get_id(v) == interface::VOXELTYPEID_UNDEFINED;
+	}
+
 	uint8_t get_sky(const VoxelInstance &v)
 	{
 		return (uint8_t)sky_field().get(v.data);
@@ -1076,11 +1090,10 @@ struct CInstance: public voxelworld::Instance
 			for(int x = lc.getX(); x <= uc.getX(); x++,
 					src.movePositiveX(), dst.movePositiveX()){
 				VoxelInstance nv = src.getVoxel();
-				if(nv.get_id() == interface::VOXELTYPEID_UNDEFINED)
+				if(is_undefined(nv))
 					continue;
 				VoxelInstance old = dst.getVoxel();
-				bool old_undefined =
-						(old.get_id() == interface::VOXELTYPEID_UNDEFINED);
+				bool old_undefined = is_undefined(old);
 				if(!old_undefined){
 					// Anything already standing here wins
 					if(!voxel_is_fully_empty(old))
@@ -1201,7 +1214,7 @@ struct CInstance: public voxelworld::Instance
 	// voxel is not free for something else to take.
 	bool voxel_is_fully_empty(const VoxelInstance &v)
 	{
-		if(v.get_id() == interface::VOXELTYPEID_UNDEFINED)
+		if(is_undefined(v))
 			return false;
 		const interface::CachedVoxelDefinition *def =
 				m_voxel_reg->get_cached(v);
@@ -1212,7 +1225,7 @@ struct CInstance: public voxelworld::Instance
 
 	bool voxel_transmits_light(const VoxelInstance &v)
 	{
-		if(v.get_id() == interface::VOXELTYPEID_UNDEFINED)
+		if(is_undefined(v))
 			return false;
 		const interface::CachedVoxelDefinition *def =
 				m_voxel_reg->get_cached(v);
@@ -1341,7 +1354,7 @@ struct CInstance: public voxelworld::Instance
 
 	bool transmits_light(const VoxelInstance &v)
 	{
-		uint32_t id = v.get_id();
+		uint32_t id = get_id(v);
 		if(id >= m_light_transmits.size())
 			m_light_transmits.resize(id + 1, 2);
 		uint8_t &t = m_light_transmits[id];
