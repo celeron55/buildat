@@ -297,6 +297,10 @@ What is done
   fires, signs and rails as quads, .obj models as their own geometry, and a
   flowing liquid as a box with a lowered top, through a shape in the voxel
   registry that the mesher copies into the chunk
+- Particles: ADD_PARTICLESPAWNER and DELETE_PARTICLESPAWNER, SPAWN_PARTICLE
+  and the zstd batch of them a game sends a hundred at once in. A spawner is
+  an Urho3D ParticleEmitter and a single particle is an emitter of one that
+  fires once
 - Chat, both ways, and the player's hit points and breath
 - Leaving: the disconnect goes out when the client shuts down for any reason,
   not only when escape was pressed. A player who vanishes without saying so
@@ -454,6 +458,30 @@ to nothing stops.
 What that does not do yet: PLAY_SOUND's start_time is ignored, because
 seeking is not in the sandbox's SoundSource -- a game uses that for
 background music a player rejoins in the middle of.
+
+Particles are Urho3D's own emitters, and Luanti's description does not line
+up with one field for field. Luanti gives, per field, a tween of a range: a
+start range, an end range, and a way of moving between them over the
+spawner's life. Urho3D gives one emitter box, one box of directions, one
+constant force and one size range for the whole emitter. So the tween is
+dropped -- the starting range is what the whole spawner runs at -- and so are
+the bias inside a range, the collision flags, the glow, the drag, the jitter,
+the bounce and the attractors.
+
+One thing does not survive the trip and has to be worked out instead: Urho3D
+takes a velocity as a direction and a speed and normalizes the direction, so
+a range of velocity *vectors* goes over as the box the direction is picked
+from plus the range of magnitudes that box holds (particles.speed_range).
+Without the second half every particle leaves at one node a second whatever
+the game asked for, which reads as all of them flying away from where they
+started. The speed a particle gets is then independent of its direction,
+which is the part that stays wrong: exact for a single particle, where the
+box is one vector.
+
+Only protocol 42 and up, which is Luanti 5.6 and up: below that the tweens
+are not on the wire and a spawner is dropped rather than read wrong. A
+spawner attached to an object stays where the object was when it started, and
+a batch beyond 128 live single particles is dropped rather than queued.
 
 The crack that grows over a node being dug is the client's own texture rather
 than the game's -- no server sends one -- so res/crack_anylength.png is

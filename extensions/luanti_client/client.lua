@@ -23,6 +23,7 @@ local nodemeta = dofile(path.."/nodemeta.lua")
 local inventory = dofile(path.."/inventory.lua")
 local hud = dofile(path.."/hud.lua")
 local sounds = dofile(path.."/sounds.lua")
+local particles = dofile(path.."/particles.lua")
 
 local M = {}
 
@@ -158,6 +159,10 @@ local TOCLIENT = {
 	PLAY_SOUND     = 0x3F,
 	STOP_SOUND     = 0x40,
 	PRIVILEGES     = 0x41,
+	SPAWN_PARTICLE = 0x46,
+	ADD_PARTICLESPAWNER = 0x47,
+	DELETE_PARTICLESPAWNER = 0x53,
+	SPAWN_PARTICLE_BATCH = 0x64,
 	FADE_SOUND     = 0x55,
 	FOV            = 0x36,
 	OVERRIDE_DAY_NIGHT_RATIO = 0x50,
@@ -752,6 +757,48 @@ function M.new(socket, options, log)
 		local ratio = r:u16()
 		self.day_night_override = do_override and
 				math.min(math.max(ratio / 1000, 0), 1) or nil
+	end
+
+	-- Particles. A spawner is a description the client runs itself until the
+	-- server deletes it or its time is up; a single particle is one of them
+	-- already picked. SPAWN_PARTICLE_BATCH is a zstd frame of length-prefixed
+	-- single particles, which is how a game sends a hundred of them at once.
+	handlers[TOCLIENT.ADD_PARTICLESPAWNER] = function(r)
+		local p, why = particles.parse_spawner(r, self.protocol_version)
+		if not p then
+			log:verbose("particles: spawner dropped: "..tostring(why))
+			return
+		end
+		if self.on_particle_spawner then
+			self.on_particle_spawner(p.server_id, p)
+		end
+	end
+
+	handlers[TOCLIENT.DELETE_PARTICLESPAWNER] = function(r)
+		local id = r:u32()
+		if self.on_particle_spawner then
+			self.on_particle_spawner(id, nil)
+		end
+	end
+
+	handlers[TOCLIENT.SPAWN_PARTICLE] = function(r)
+		if self.on_particle then
+			self.on_particle(particles.parse_particle(r,
+					self.protocol_version))
+		end
+	end
+
+	handlers[TOCLIENT.SPAWN_PARTICLE_BATCH] = function(r)
+		if not self.on_particle then
+			return
+		end
+		local inner = serialize.reader(
+				buildat.decompress(r:longstring(), "zstd"))
+		while inner:remaining() >= 4 do
+			local one = serialize.reader(inner:longstring())
+			self.on_particle(particles.parse_particle(one,
+					self.protocol_version))
+		end
 	end
 
 	handlers[TOCLIENT.PLAY_SOUND] = function(r)
