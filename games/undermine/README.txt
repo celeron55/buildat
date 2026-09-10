@@ -21,6 +21,45 @@ Left button digs, right button places, and keys 1 to 4 pick what it places:
 rock, timber, brick, dirt. The line under the position says what the pointed
 voxel is made of and what the simulation thinks of it.
 
+B opens a menu of structures the server will put up where you stand: a
+chamber whose roof is wider than rock will span, a cathedral on pillars, a
+bridge on piers, a mineshaft with timber props. Finding out what happens when
+a pillar is cut should not start with an hour of bricklaying.
+
+Tab is a free camera: it goes where it is pointed, through anything, and
+nothing pulls it down. Turn it on before placing a structure and the camera
+takes itself somewhere the whole thing is in frame.
+
+The rules
+---------
+
+Three, and they are all the physics there is.
+
+Support is how far a voxel is from something holding it up. Bedrock has all of
+it; a voxel standing on something supported has all of it too, because a
+column carries straight down; and a voxel with nothing under it reaches out
+sideways from its neighbours, losing one step per voxel and never further than
+its material's span. Nothing left to reach means it fails. That is a
+distance-from-the-nearest-wall rule rather than statics, and it is the right
+kind of wrong: a tunnel wider than twice the material's span caves in the
+middle, which is legible from inside the tunnel.
+
+Load is the weight resting on a voxel: the column immediately above it, as far
+as LOAD_DEPTH. Over its material's capacity and it fails. That is what makes a
+prop under thirty voxels of rock snap and a brick pillar under the same rock
+hold.
+
+What fails falls: down one voxel a tick, as rubble -- which spans nothing, so a
+pile of it holds no roof up and a cave-in carries on rather than plugging
+itself. A material that is already loose keeps what it is, so sand running
+into a tunnel is still sand.
+
+The whole thing is one queue of voxels whose numbers are out of date, walked
+with a budget per tick, so a change costs what it actually reaches: a dig into
+solid rock settles in a handful of voxels, and a dig that takes a roof away
+walks as far as the roof reached. It is the same shape as voxelworld's own
+skylight flood, which is where it was copied from.
+
 Materials carry three numbers the simulation reads: span, how far the
 material reaches out over nothing before it fails; density, what a voxel of
 it weighs; and capacity, how much weight it carries before it is crushed.
