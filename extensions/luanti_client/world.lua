@@ -224,6 +224,22 @@ function M.new(magic, buildat, log, options)
 
 	local self = {}
 
+	-- One of the game's own textures, drawn without smoothing. A Luanti
+	-- game's textures are pixel art and interpolating them is wrong at every
+	-- size: the voxel atlas already says so in the engine (see
+	-- SetFilterMode in src/impl/atlas.cpp) and everything else a game's
+	-- texture goes on -- an object, a dropped item, the sun -- wants the
+	-- same. The mode is on the texture rather than on the material, so
+	-- setting it once per use is setting it for good; it is cheap and there
+	-- is nowhere better.
+	local function game_texture(name)
+		local tex = magic.cache:GetResource("Texture2D", name)
+		if tex then
+			tex.filterMode = magic.FILTER_NEAREST
+		end
+		return tex
+	end
+
 	-- The colour of full sunlight for a day/night factor of 0...1, which is
 	-- Luanti's own get_sunlight_color(): a little blue is left at night and a
 	-- little is added in the day, so a shadowed face reads cool rather than
@@ -1495,7 +1511,7 @@ function M.new(magic, buildat, log, options)
 		local material = magic.Material.new()
 		material:SetTechnique(0, magic.cache:GetResource("Technique",
 				"luanti_client/res/UnlitAlphaMask.xml"))
-		material:SetTexture(0, magic.cache:GetResource("Texture2D", resource))
+		material:SetTexture(0, game_texture(resource))
 		model.material = material
 		-- Just outside the voxel, so the crack does not fight the face it is
 		-- drawn on for the depth buffer
@@ -1645,7 +1661,7 @@ function M.new(magic, buildat, log, options)
 		for face = 1, 6 do
 			local material = magic.Material.new()
 			material:SetTechnique(0, object_technique)
-			material:SetTexture(0, magic.cache:GetResource("Texture2D",
+			material:SetTexture(0, game_texture(
 					tiles[face] or tiles[1] or texture))
 			cg:SetMaterial(face - 1, material)
 			materials[face] = material
@@ -1690,7 +1706,7 @@ function M.new(magic, buildat, log, options)
 		for i = 1, #order do
 			local material = magic.Material.new()
 			material:SetTechnique(0, object_technique)
-			material:SetTexture(0, magic.cache:GetResource("Texture2D",
+			material:SetTexture(0, game_texture(
 					tiles[order[i]] or tiles[1] or texture))
 			cg:SetMaterial(i - 1, material)
 			materials[i] = material
@@ -1845,8 +1861,7 @@ function M.new(magic, buildat, log, options)
 			if name then
 				local material = magic.Material.new()
 				material:SetTechnique(0, object_technique)
-				material:SetTexture(0, magic.cache:GetResource("Texture2D",
-						name))
+				material:SetTexture(0, game_texture(name))
 				entry.model.material = material
 				entry.material = material
 				entry.light_key = nil
@@ -2177,12 +2192,10 @@ function M.new(magic, buildat, log, options)
 					moon.texture ~= "" and media_texture and
 					media_texture(moon.texture) or nil
 			if sun_texture then
-				sky_material:SetTexture(0, magic.cache:GetResource(
-						"Texture2D", sun_texture))
+				sky_material:SetTexture(0, game_texture(sun_texture))
 			end
 			if moon_texture then
-				sky_material:SetTexture(1, magic.cache:GetResource(
-						"Texture2D", moon_texture))
+				sky_material:SetTexture(1, game_texture(moon_texture))
 			end
 			sky_material:SetShaderParameter("SunTextured",
 					sun_texture and 1 or 0)

@@ -565,6 +565,10 @@ function M.define(dst, util)
 			-- is a HUD element whose size is a multiple of its own image's.
 			width = util.simple_property("number"),
 			height = util.simple_property("number"),
+			-- FILTER_NEAREST and the rest of Urho3D's TextureFilterMode.
+			-- What wants it is pixel art, which is what a Luanti game's
+			-- textures are: smoothing them is wrong at every size.
+			filterMode = util.simple_property("number"),
 		},
 	})
 
