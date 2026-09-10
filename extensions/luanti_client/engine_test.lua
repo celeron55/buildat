@@ -311,6 +311,61 @@ local function check_voxel_format()
 	assert(not ok2, "set_format() after a voxel was allowed")
 end
 
+-- A definition's variants are what its param means: a shape, a tile order, a
+-- tint, a liquid level per param value. They travel with the registry, so the
+-- round trip through serialize/deserialize is what a client actually gets.
+local function check_voxel_variants()
+	local safe = buildat.safe
+	local reg = safe.createVoxelRegistry()
+	reg:set_format{
+		id = {shift = 0, width = 16},
+		param = {shift = 24, width = 8},
+	}
+	local def = safe.VoxelDefinition()
+	def.name.block_name = "engine_test:facing"
+	def.variants = {
+		-- A turned cube: the same six textures in another order
+		-- The faces are 0...5, so this is the six textures rotated by one
+		{tile_order = {1, 2, 3, 4, 5, 0}, tile_turns = {0, 0, 1, 3, 2, 0},
+				params = {0, 4, 8}},
+		-- A palette entry, and a liquid standing lower than full
+		{color = 0x336699, liquid_top = 0.25, params = {1}},
+	}
+	reg:add_voxel(def)
+
+	-- What the definition holds now, read back through the same property
+	local got = def.variants
+	assert(got[1] and got[2] and not got[3], "there are not two variants")
+	assert(got[1].tile_order[1] == 1 and got[1].tile_order[6] == 0,
+			"tile_order is "..got[1].tile_order[1]..".."..got[1].tile_order[6])
+	assert(got[1].tile_turns[4] == 3,
+			"tile_turns[4] is "..got[1].tile_turns[4])
+	assert(#got[1].params == 3 and got[1].params[2] == 4,
+			"variant 1 claims "..#got[1].params.." params")
+	assert(got[2].color == 0x336699, "colour is "..got[2].color)
+	assert(math.abs(got[2].liquid_top - 0.25) < 1e-6,
+			"liquid_top is "..got[2].liquid_top)
+	assert(#got[2].params == 1 and got[2].params[1] == 1,
+			"variant 2 claims "..#got[2].params.." params")
+
+	-- And what a client gets: the registry's own round trip, which is how
+	-- both the format and the variants reach one
+	local other = safe.createVoxelRegistry()
+	other:deserialize(reg:serialize())
+	assert(other:dump_format() == reg:dump_format(),
+			"the format did not travel: "..other:dump_format())
+	assert(other:serialize() == reg:serialize(),
+			"the definitions did not survive the round trip")
+
+	-- A variant nobody can reach is a mistake worth catching
+	local def2 = safe.VoxelDefinition()
+	def2.name.block_name = "engine_test:noparams"
+	local ok = pcall(function()
+		def2.variants = {{color = 0x112233}}
+	end)
+	assert(not ok, "a variant with no params was allowed")
+end
+
 -- compose_image() writes a PNG, and Urho3D can read one back, so the pixels
 -- can actually be checked. The files go where the client's own temporary
 -- resources go, which is a resource dir, so they can be loaded by name.
@@ -581,6 +636,7 @@ function M.self_test()
 	check_compress()
 	check_pack_voxel_volume()
 	check_voxel_format()
+	check_voxel_variants()
 	check_compose_image()
 end
 

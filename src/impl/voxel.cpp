@@ -212,6 +212,9 @@ struct CVoxelRegistry: public VoxelRegistry
 		cache.physically_solid = def.physically_solid;
 		cache.fully_empty = def.fully_empty;
 		cache.shape = def.shape;
+		cache.variants = def.variants;
+		for(size_t i = 0; i < 256; i++)
+			cache.variant_of_param[i] = def.variant_of_param[i];
 		cache.shape_double_sided = def.shape_double_sided;
 		cache.translucent = def.translucent;
 		cache.shape_group = def.shape_group;

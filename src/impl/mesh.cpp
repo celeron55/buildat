@@ -481,6 +481,36 @@ static bool occludes(pv::RawVolume<VoxelInstance> &volume,
 	return def->edge_material_id != interface::EDGEMATERIALID_EMPTY;
 }
 
+// The voxel a face belongs to: half a voxel behind the face's centre, against
+// the normal. The same arithmetic as face_owned_by_padding(), and what wants
+// it is the face's own param, which PolyVox does not carry through.
+static VoxelInstance face_back_voxel(pv::RawVolume<VoxelInstance> &volume,
+		const pv::Vector3DFloat *quad, const pv::Vector3DFloat &n)
+{
+	pv::Vector3DFloat centre(0, 0, 0);
+	for(size_t i = 0; i < 4; i++)
+		centre += quad[i];
+	centre /= 4.0f;
+	const pv::Vector3DInt32 vlc = volume.getEnclosingRegion().getLowerCorner();
+	return volume.getVoxelAt(
+			vlc.getX() + (int)std::floor(centre.getX() - n.getX()*0.5f + 0.5f),
+			vlc.getY() + (int)std::floor(centre.getY() - n.getY()*0.5f + 0.5f),
+			vlc.getZ() + (int)std::floor(centre.getZ() - n.getZ()*0.5f + 0.5f));
+}
+
+// A voxel's own colour multiplied into the light the mesher worked out. The
+// packing is Urho3D's Color::ToUInt(), which is red in the low byte; the
+// alpha is how much of the sky the surface sees and is left alone.
+static unsigned modulate_color(unsigned lit, uint32_t rgb)
+{
+	if(rgb == 0xffffff)
+		return lit;
+	unsigned r = (lit & 0xff) * ((rgb >> 16) & 0xff) / 255;
+	unsigned g = ((lit >> 8) & 0xff) * ((rgb >> 8) & 0xff) / 255;
+	unsigned b = ((lit >> 16) & 0xff) * (rgb & 0xff) / 255;
+	return (lit & 0xff000000UL) | (b << 16) | (g << 8) | r;
+}
+
 // One color per corner of a quad. PolyVox vertex positions are region-relative
 // and sit on voxel corners, so the average of a quad's four corners is the face
 // center; half a voxel along the normal lands in the voxel the face looks into,
@@ -730,8 +760,26 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			face_id = 4;
 		else if(n.getZ() < 0)
 			face_id = 5;
+		pv::Vector3DFloat quad[4] = {
+			pv_vertices[pv_vertex_i0 + 0].position,
+			pv_vertices[pv_vertex_i0 + 1].position,
+			pv_vertices[pv_vertex_i0 + 2].position,
+			pv_vertices[pv_vertex_i0 + 3].position,
+		};
+		if(face_owned_by_padding(volume, quad, n))
+			continue;
+		// What this voxel's param says about drawing it, if its definition
+		// has anything to say. The param is the one thing PolyVox does not
+		// carry through the extractor, so the voxel is looked up again.
+		const interface::VoxelVariant *variant = nullptr;
+		if(fmt.param.bound() && !voxel_def0->variants.empty()){
+			VoxelInstance back = face_back_voxel(volume, quad, n);
+			variant = voxel_def0->variant(fmt.param.get(back.data));
+		}
 		// Get texture coordinates (contained in AtlasSegmentCache)
-		AtlasSegmentReference seg_ref = voxel_def0->textures[face_id];
+		const uint tile = variant ? (variant->tile_order[face_id] < 6 ?
+				variant->tile_order[face_id] : face_id) : face_id;
+		AtlasSegmentReference seg_ref = voxel_def0->textures[tile];
 		if(seg_ref.atlas_id == interface::ATLAS_UNDEFINED){
 			// This is usually intentional for invisible voxels
 			//log_t(MODULE, "Voxel %i face %i atlas undefined", voxel_id0, face_id);
@@ -799,20 +847,17 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			// memory, so let's do only one big memory allocation
 			tg.vertex_data.Reserve(pv_vertices.size() / 4 * 6);
 		}
-		pv::Vector3DFloat quad[4] = {
-			pv_vertices[pv_vertex_i0 + 0].position,
-			pv_vertices[pv_vertex_i0 + 1].position,
-			pv_vertices[pv_vertex_i0 + 2].position,
-			pv_vertices[pv_vertex_i0 + 3].position,
-		};
-		if(face_owned_by_padding(volume, quad, n))
-			continue;
 		unsigned corner_colors[4] = {
 			0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff
 		};
 		if(use_skylight){
 			face_vertex_colors(volume, voxel_reg, fmt, quad, n, face_id,
 					corner_colors);
+		}
+		if(variant && variant->color != 0xffffff){
+			for(size_t i = 0; i < 4; i++)
+				corner_colors[i] = modulate_color(corner_colors[i],
+						variant->color);
 		}
 		// Go through indices of the face and mangle vertices according to them
 		// into the temporary vertex buffer
@@ -835,7 +880,8 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			// Figure out texture coordinates
 			size_t pv_vertex_i1 = pv_vertex_i - pv_vertex_i0;
 			assign_txcoords(pv_vertex_i1, aseg, tg_vert);
-			turn_txcoord(aseg, voxel_def0->tile_turns[face_id], tg_vert);
+			turn_txcoord(aseg, variant ? variant->tile_turns[face_id] :
+					voxel_def0->tile_turns[face_id], tg_vert);
 			tg_vert.color_ = corner_colors[pv_vertex_i1];
 		}
 #endif
@@ -857,7 +903,8 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 // spill thin out rather than stand as a wall.
 static float liquid_corner_top(pv::RawVolume<VoxelInstance> &volume,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt, int x, int y, int z,
-		const interface::CachedVoxelDefinition *def, int dx, int dz)
+		const interface::CachedVoxelDefinition *def, float def_top,
+		int dx, int dz)
 {
 	const int off[4][2] = {{0, 0}, {dx, 0}, {0, dz}, {dx, dz}};
 	float sum = 0.0f;
@@ -878,7 +925,12 @@ static float liquid_corner_top(pv::RawVolume<VoxelInstance> &volume,
 		if(cdef == nullptr)
 			continue;
 		if(cdef->is_liquid && cdef->shape_group == def->shape_group){
-			sum += cdef->liquid_top;
+			// How high this column stands is its own param's business, the
+			// same as the voxel being meshed: Luanti puts a flowing liquid's
+			// level in param2
+			const interface::VoxelVariant *cvar = fmt.param.bound() ?
+					cdef->variant(fmt.param.get(cv.data)) : nullptr;
+			sum += cvar ? cvar->liquid_top : cdef->liquid_top;
 			count++;
 		} else if(cdef->fully_empty){
 			empty++;
@@ -887,7 +939,7 @@ static float liquid_corner_top(pv::RawVolume<VoxelInstance> &volume,
 		}
 	}
 	if(count == 0)
-		return def->liquid_top;
+		return def_top;
 	return sum / count;
 }
 
@@ -988,9 +1040,19 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 				VoxelInstance v = volume.getVoxelAt(x, y, z);
 				const interface::CachedVoxelDefinition *def =
 						voxel_reg->get_cached(v);
-				if(def == nullptr ||
-						(def->shape.empty() && def->shape_masked.empty()))
+				if(def == nullptr)
 					continue;
+				// What this voxel's param says about drawing it: a shape of
+				// its own, a colour, how high its liquid stands
+				const interface::VoxelVariant *variant = fmt.param.bound() ?
+						def->variant(fmt.param.get(v.data)) : nullptr;
+				const sv_<interface::VoxelQuad> &own_shape =
+						(variant && !variant->shape.empty()) ?
+						variant->shape : def->shape;
+				if(own_shape.empty() && def->shape_masked.empty())
+					continue;
+				const float liquid_top = variant ?
+						variant->liquid_top : def->liquid_top;
 				// Where this voxel's centre is in the chunk's own model
 				// coordinates; the same arithmetic the cube faces get
 				const float cx = (x - lc.getX()) - w / 2.0f - 0.5f;
@@ -1015,9 +1077,9 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 						def->connect_to_solid || masked) ?
 						connected_faces(volume, voxel_reg, fmt, x, y, z, def,
 								masked ? &stepped_up : nullptr) : 0;
-				const interface::VoxelQuad *quads = def->shape.data();
+				const interface::VoxelQuad *quads = own_shape.data();
 				size_t quad_from = 0;
-				size_t quad_to = def->shape.size();
+				size_t quad_to = own_shape.size();
 				if(masked){
 					// The four horizontal connections in Luanti's own bit
 					// order for them: +Z is 1, -Z is 2, -X is 4, +X is 8
@@ -1044,7 +1106,7 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 					for(int ix = 0; ix < 2; ix++){
 						for(int iz = 0; iz < 2; iz++){
 							corner[ix][iz] = liquid_corner_top(volume,
-									voxel_reg, fmt, x, y, z, def,
+									voxel_reg, fmt, x, y, z, def, liquid_top,
 									ix == 0 ? -1 : 1, iz == 0 ? -1 : 1);
 						}
 					}
@@ -1141,6 +1203,8 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 										LAMP_COLOR.b_ * lamp_f * shade,
 								sky_f * shade).ToUInt();
 					}
+					if(variant)
+						color = modulate_color(color, variant->color);
 					// Two triangles, and the same two the other way round
 					// when the shape is drawn from both sides
 					static const int WINDINGS[2][6] = {
@@ -1157,7 +1221,7 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 							// A vertex on the liquid's own surface follows
 							// the corner it stands at
 							if(liquid_corners && std::fabs(
-									py - def->liquid_top) < 1e-4f){
+									py - liquid_top) < 1e-4f){
 								py = corner[quad.p[c][0] >= 0.0f ? 1 : 0]
 										[quad.p[c][2] >= 0.0f ? 1 : 0];
 							}

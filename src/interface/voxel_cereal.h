@@ -35,9 +35,18 @@ namespace interface
 	}
 
 	template<class Archive>
+			void serialize(Archive &archive, VoxelVariant &v)
+	{
+		uint8_t version = 1;
+		archive(version, v.shape, v.color, v.liquid_top);
+		for(size_t i = 0; i < 6; i++)
+			archive(v.tile_order[i], v.tile_turns[i]);
+	}
+
+	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 8;
+		uint8_t version = 9;
 		archive(
 				version,
 				v.name,
@@ -61,6 +70,11 @@ namespace interface
 		);
 		for(size_t i = 0; i < 21; i++)
 			archive(v.shape_masked_begin[i]);
+		archive(v.variants);
+		if(!v.variants.empty()){
+			for(size_t i = 0; i < 256; i++)
+				archive(v.variant_of_param[i]);
+		}
 	}
 
 	template<class Archive>

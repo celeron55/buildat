@@ -68,6 +68,34 @@ namespace interface
 		uint8_t connect_dir = 0;
 	};
 
+	// What a voxel's param changes about how it is drawn.
+	//
+	// The engine hands a definition the param and the definition answers with
+	// one of these; what the param *means* is the game's business, and the
+	// engine's job stops at "look it up and draw that". This is what keeps a
+	// voxel that faces one of twenty-four directions, or wears one of eight
+	// palette colours, from needing a voxel type of its own for every case.
+	//
+	// A variant carries no textures. It permutes the definition's own six --
+	// tile_order[f] is which of them face f wears -- because a turned cube
+	// wears the same textures as an unturned one, in a different order.
+	struct VoxelVariant
+	{
+		// Quads of the voxel's own instead of the definition's; empty for
+		// the definition's own shape. See VoxelDefinition::shape.
+		sv_<VoxelQuad> shape;
+		uint8_t tile_order[6] = {0, 1, 2, 3, 4, 5};
+		uint8_t tile_turns[6] = {};
+		// Multiplied into the vertex colour, 0xRRGGBB. What wants it is a
+		// palette: one texture, and the param says which entry of it tints
+		// this voxel.
+		uint32_t color = 0xffffff;
+		// Where a liquid's surface stands in the voxel; see
+		// VoxelDefinition::liquid_top. Luanti's flowing liquids put their
+		// level in param2.
+		float liquid_top = 0.5f;
+	};
+
 	struct VoxelDefinition
 	{
 		VoxelName name;
@@ -173,6 +201,18 @@ namespace interface
 		// simplified: Luanti says which of the six sides may be reached that
 		// way and this is all of them.
 		bool connect_to_solid = false;
+		// What the voxel's param does to how it is drawn, if anything. Empty
+		// means the param is ignored here, which is the common case and the
+		// one the mesher hoists out of its inner loop.
+		//
+		// variant_of_param maps a param value to an entry of variants, so
+		// that the twenty-four turns of a facedir are twenty-four variants
+		// behind two hundred and fifty-six bytes of index rather than two
+		// hundred and fifty-six variants. Only a param up to 8 bits wide is
+		// looked up this way; a wider one is storage for the game to read
+		// itself, not something the mesher indexes.
+		sv_<VoxelVariant> variants;
+		uint8_t variant_of_param[256] = {};
 		// TODO: Flag for whether all faces should be always drawn (in case the
 		//       textures contain holes)
 	};
@@ -203,8 +243,20 @@ namespace interface
 		// Copied from the definition; see VoxelDefinition::shape_masked
 		sv_<VoxelQuad> shape_masked;
 		uint16_t shape_masked_begin[21] = {};
+		// Copied from the definition; see VoxelDefinition::variants
+		sv_<VoxelVariant> variants;
+		uint8_t variant_of_param[256] = {};
 
 		uint8_t tile_turns[6] = {};
+
+		// What a param value says about drawing this voxel, or nullptr when
+		// the param changes nothing about it
+		const VoxelVariant* variant(uint32_t param) const {
+			if(variants.empty())
+				return nullptr;
+			size_t i = variant_of_param[param & 0xff];
+			return i < variants.size() ? &variants[i] : nullptr;
+		}
 
 		bool textures_valid = false;
 		AtlasSegmentReference textures[6];
