@@ -24,6 +24,7 @@
 #include <LuaScript.h>
 #include <CoreEvents.h>
 #include <Input.h>
+#include <InputEvents.h> // E_EXITREQUESTED
 #include <ResourceCache.h>
 #include <Graphics.h>
 #include <GraphicsEvents.h> // E_SCREENMODE
@@ -575,6 +576,13 @@ struct CApp: public App, public magic::Application
 	void shutdown()
 	{
 		log_v(MODULE, "shutdown()");
+		// Whatever is running has one last chance to close what it opened.
+		// A network client that vanishes without saying goodbye is left on
+		// the server until it times out, and the next client to connect
+		// under the same name is refused; Urho3D sends this event when the
+		// window is closed and nowhere else, so the paths that exit without
+		// the window -- a command sequence ending, an error -- send it here.
+		SendEvent(magic::E_EXITREQUESTED);
 		stop_local_server();
 
 		magic::Graphics *g = GetSubsystem<magic::Graphics>();
