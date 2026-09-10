@@ -422,6 +422,11 @@ every volume on its way anywhere, is bits under the old format.
   bound, which is not the same as one that is always zero: a world with no
   light bound is not dark, it is one where nothing asks about light. Bits no
   role covers are the game's own.
+- Bind the light the world actually fills and no more. light_lamp is for a
+  world that works out the light a voxel gets from something other than the
+  sky and stores it per voxel, which is what a Luanti server does; a game
+  whose lamps are lights in the scene wants only light_sky, and the shader
+  lights the geometry from the lamps.
 - id is what the registry is indexed by, at most 21 bits wide. With no id
   bound there is one voxel type, which is what a game whose voxels are
   colours rather than types wants.

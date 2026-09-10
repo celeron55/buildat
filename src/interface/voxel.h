@@ -325,6 +325,16 @@ namespace interface
 	struct VoxelFormat
 	{
 		VoxelField id;
+		// What use_skylight reads. A game binds the light it actually
+		// fills and no more.
+		//
+		// light_lamp is for a world that computes the light a voxel gets
+		// from something other than the sky and stores it per voxel, which
+		// is what a Luanti server does and sends to its clients. A game
+		// whose lamps are lights in the scene does not want it: the shader
+		// lights the geometry from those, nothing writes the field, and
+		// binding it spends bits on zeroes. Of the games in this tree only
+		// the Luanti client binds it.
 		VoxelField light_sky;
 		VoxelField light_lamp;
 		// What a definition's own rule interprets: which way a voxel faces,
