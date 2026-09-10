@@ -439,6 +439,100 @@ struct Module: public interface::Module
 		reg->add_voxel(vdef);
 	}
 
+	// The stress view
+	// ---------------
+	//
+	// A second registry, with the same voxel format and different
+	// definitions: every material wears sixteen bands of a gradient instead
+	// of its texture, and which band a voxel gets is its own load against
+	// its own material's capacity.
+	//
+	// It costs no storage at all, which is the whole trick. The load is
+	// bound as the engine's `param` role, so the mesher already has it per
+	// voxel; a definition's variants are indexed by that param; and
+	// variant_of_param is per definition, so the normalisation by capacity
+	// -- the thing that makes a stress number mean anything -- falls out of
+	// the table rather than being computed anywhere.
+	//
+	// The client meshes with this instead of the playing registry and turns
+	// skylight off while it does, so the vertex colour is the band and
+	// nothing else. In the playing registry no definition has variants at
+	// all, so the mesher hoists the param out of its loop and normal play
+	// pays nothing for any of this.
+	static const size_t STRESS_BANDS = 16;
+
+	// Green through yellow to red: nothing is carrying anything, through
+	// carrying what it can.
+	static uint32_t stress_color(size_t band)
+	{
+		float t = (float)band / (float)(STRESS_BANDS - 1);
+		float r = t < 0.5f ? t * 2.0f : 1.0f;
+		float g = t < 0.5f ? 1.0f : (1.0f - t) * 2.0f;
+		uint32_t ri = (uint32_t)(r * 255.0f + 0.5f);
+		uint32_t gi = (uint32_t)(g * 255.0f + 0.5f);
+		return (ri << 16) | (gi << 8) | 0x18;
+	}
+
+	void build_stress_registry(interface::VoxelRegistry *reg)
+	{
+		reg->set_format(undermine_format());
+		// Air first, as in the playing registry: the ids have to agree,
+		// because they are what the voxels in the world hold
+		add_voxel(reg, "air", "", false, false, true);
+		static const char *NAME[] = {
+			"", "", "bedrock", "rock", "dirt", "grass", "sand", "rubble",
+			"timber", "brick", "water", "trunk", "leaves",
+		};
+		for(int id = M_BEDROCK; id < M_COUNT; id++){
+			const MaterialProps &m = MATERIAL[id];
+			if(!m.structural){
+				// Water, and anything else the rules do not touch, keeps
+				// what it looks like
+				add_voxel(reg, NAME[id], "main/water.png",
+						true, false, false, 0.28f, 1.0f, 6.0f, 0.0f, 0.05f);
+				continue;
+			}
+			interface::VoxelDefinition vdef;
+			vdef.name.block_name = ss_("stress_") + NAME[id];
+			vdef.handler_module = "";
+			for(size_t i = 0; i < 6; i++){
+				interface::AtlasSegmentDefinition &seg = vdef.textures[i];
+				seg.resource_name = "main/white.png";
+				seg.total_segments = magic::IntVector2(1, 1);
+				seg.select_segment = magic::IntVector2(0, 0);
+				seg.roughness = 1.0f;
+				seg.spec_strength = 0.0f;
+				seg.bumpiness = 0.0f;
+			}
+			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
+			vdef.physically_solid = true;
+			for(size_t band = 0; band < STRESS_BANDS; band++){
+				interface::VoxelVariant var;
+				var.color = stress_color(band);
+				vdef.variants.push_back(var);
+			}
+			// Which band a load falls in, against what this material can
+			// carry. A capacity of 0 would divide by nothing; the materials
+			// that have one are not structural and never reach here.
+			for(size_t load = 0; load < 256; load++){
+				size_t band = m.capacity > 0 ?
+						load * STRESS_BANDS / (m.capacity + 1) : 0;
+				vdef.variant_of_param[load] = (uint8_t)(
+						band < STRESS_BANDS ? band : STRESS_BANDS - 1);
+			}
+			reg->add_voxel(vdef);
+		}
+	}
+
+	void send_stress_registry(network::PeerInfo::Id peer)
+	{
+		sp_<interface::VoxelRegistry> reg(interface::createVoxelRegistry());
+		build_stress_registry(reg.get());
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "main:stress_registry", reg->serialize());
+		});
+	}
+
 	void on_start()
 	{
 		main_context::access(m_server, [&](main_context::Interface *imc){
@@ -665,6 +759,7 @@ struct Module: public interface::Module
 			inetwork->send(event.recipient, "main:worldgen_queue_size",
 					itos(queue_size));
 		});
+		send_stress_registry(event.recipient);
 		send_spawn(event.recipient);
 	}
 

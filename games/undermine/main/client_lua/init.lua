@@ -453,6 +453,63 @@ local function overlook(lc, uc)
 			math.deg(math.atan2(oy, horiz)), 0, 0)
 end
 
+-- The stress view: the same voxels meshed out of a registry whose materials
+-- wear a gradient by how close they are to failing. The server builds it and
+-- sends it; see build_stress_registry() in main.cpp for why it costs no
+-- storage.
+local stress_reg = nil
+local play_reg = nil
+local stress_view = false
+
+buildat.sub_packet("main:stress_registry", function(data)
+	stress_reg = buildat.createVoxelRegistry()
+	stress_reg:deserialize(data)
+	log:info("stress registry: "..stress_reg:dump_format())
+end)
+
+-- While the stress view is on, the chunks are drawn by their vertex colour
+-- and nothing else: no texture, no light, no reflection. Registered after
+-- voxel_shading's own material callback, so this is the one that wins.
+local STRESS_TECHNIQUE = "Techniques/NoTextureUnlitVCol.xml"
+
+voxelworld.sub_material_update(function(node)
+	if not stress_view then
+		return
+	end
+	local cg = node:GetComponent("CustomGeometry")
+	if not cg then
+		return
+	end
+	local i = 0
+	while true do
+		local m = cg:GetMaterial(i)
+		if m == nil then
+			break
+		end
+		m:SetTechnique(0, magic.cache:GetResource("Technique",
+				STRESS_TECHNIQUE))
+		i = i + 1
+	end
+end)
+
+local function set_stress_view(on)
+	if on and not stress_reg then
+		log:warning("stress view: the registry has not arrived")
+		return
+	end
+	if on == stress_view then
+		return
+	end
+	stress_view = on
+	play_reg = play_reg or voxelworld.get_voxel_registry()
+	voxelworld.set_voxel_registry(on and stress_reg or play_reg)
+	-- The vertex colour is the band, so nothing else may be in it: with
+	-- skylight on, a stress view of a dark mine is a dark mine
+	voxelworld.use_skylight = not on
+	voxelworld.remesh_all()
+	log:info(on and "stress view on" or "stress view off")
+end
+
 buildat.sub_packet("main:structure_placed", function(data)
 	local values = cereal.binary_input(data, {"object",
 		{"lc", {"object",
@@ -518,6 +575,9 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	end
 	if key == magic.KEY_TAB then
 		set_free_move(not free_move)
+	end
+	if key == magic.KEY_V then
+		set_stress_view(not stress_view)
 	end
 	for i, m in ipairs(BUILD_MATERIALS) do
 		if key == m.key then
@@ -765,7 +825,8 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 				math.floor(p.y + 0.5)..", "..math.floor(p.z + 0.5)..")"..
 				"  building: "..BUILD_MATERIALS[build_material].name..
 				" (1-4)  structures: B  free move: Tab"..
-				(free_move and " (on)" or "")
+				(free_move and " (on)" or "").."  stress: V"..
+				(stress_view and " (on)" or "")
 		-- What the pointed voxel is and how close it is to failing, which
 		-- is the whole debug interface between digs
 		if pointed_voxel_p then

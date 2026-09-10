@@ -30,6 +30,11 @@ Tab is a free camera: it goes where it is pointed, through anything, and
 nothing pulls it down. Turn it on before placing a structure and the camera
 takes itself somewhere the whole thing is in frame.
 
+V is the stress view: the same voxels drawn as a gradient from green to red
+by how close each one is to failing, against its own material's capacity. It
+costs no storage at all, and how is worth reading if you are here for the
+voxel format -- see build_stress_registry() in main/main.cpp.
+
 The rules
 ---------
 
