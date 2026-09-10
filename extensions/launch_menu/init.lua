@@ -62,7 +62,9 @@ local function make_game_button(parent, name, size)
 	text:SetStyleAuto()
 	text.text = name
 	if text.width > 0 then
-		text.fixedWidth = text.width
+		-- So the size beside it does not squeeze the name: a function
+		-- because the fixedWidth property has no setter in the bindings
+		text:SetFixedWidth(text.width)
 	end
 	local size_text = button:CreateChild("Text")
 	size_text:SetStyleAuto()
