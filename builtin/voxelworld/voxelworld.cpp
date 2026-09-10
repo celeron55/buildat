@@ -216,7 +216,6 @@ static const int LIGHT_OFF[6][3] = {
 	{1,0,0}, {-1,0,0}, {0,0,1}, {0,0,-1}, {0,1,0}, {0,-1,0}
 };
 static const size_t LIGHT_DOWN = 5;
-static const uint8_t SKYLIGHT_MAX = VoxelInstance::SKYLIGHT_MAX;
 
 struct CInstance: public voxelworld::Instance
 {
@@ -720,6 +719,30 @@ struct CInstance: public voxelworld::Instance
 		return m_voxel_reg.get();
 	}
 
+	// Which bits of a voxel the sky light is in, which is the game's to
+	// decide; see VoxelFormat in interface/voxel.h. A game sets its format
+	// through get_voxel_reg()->set_format() before it generates anything,
+	// so this is read rather than cached.
+	const interface::VoxelField& sky_field()
+	{
+		return m_voxel_reg->get_format().light_sky;
+	}
+
+	uint8_t sky_max()
+	{
+		return (uint8_t)sky_field().mask();
+	}
+
+	uint8_t get_sky(const VoxelInstance &v)
+	{
+		return (uint8_t)sky_field().get(v.data);
+	}
+
+	void set_sky(VoxelInstance &v, uint8_t level)
+	{
+		sky_field().set(v.data, level);
+	}
+
 	void add_commit_hook(up_<CommitHook> hook)
 	{
 		m_commit_hooks.push_back(std::move(hook));
@@ -951,13 +974,13 @@ struct CInstance: public voxelworld::Instance
 			bool old_transparent = voxel_transmits_light(old);
 			if(old_transparent != voxel_transmits_light(v)){
 				m_skylight_seeds.push_back(SkylightSeed{
-						p, old.get_skylight(), old_transparent});
+						p, get_sky(old), old_transparent});
 			}
 			// Once skylight is on those bits belong to voxelworld, so they
 			// are carried over from the voxel that was there; a caller writing
 			// a plain voxel would otherwise wipe the light out of one whose
 			// transparency did not change, and nothing would put it back
-			nv.set_skylight(old.get_skylight());
+			set_sky(nv, get_sky(old));
 		}
 
 		buf.volume->setVoxelAt(voxel_p, nv);
@@ -1072,9 +1095,9 @@ struct CInstance: public voxelworld::Instance
 					if(old_transparent != voxel_transmits_light(nv)){
 						m_skylight_seeds.push_back(SkylightSeed{
 								pv::Vector3DInt32(x, y, z),
-								old.get_skylight(), old_transparent});
+								get_sky(old), old_transparent});
 					}
-					nv.set_skylight(old.get_skylight());
+					set_sky(nv, get_sky(old));
 				}
 
 				dst.setVoxel(nv);
@@ -1296,7 +1319,7 @@ struct CInstance: public voxelworld::Instance
 			pv::Vector3DInt32 n(p.getX() + LIGHT_OFF[k][0],
 					p.getY() + LIGHT_OFF[k][1], p.getZ() + LIGHT_OFF[k][2]);
 			VoxelInstance nv = light_get(n);
-			if(transmits_light(nv) || nv.get_skylight() >= level)
+			if(transmits_light(nv) || get_sky(nv) >= level)
 				continue;
 			light_set(n, nv, level);
 		}
@@ -1308,7 +1331,7 @@ struct CInstance: public voxelworld::Instance
 		ChunkBuffer *buf = light_buffer(chunk_p);
 		if(buf == nullptr)
 			return;
-		v.set_skylight(level);
+		set_sky(v, level);
 		buf->volume->setVoxelAt(light_local_p(p, chunk_p), v);
 		if(!buf->dirty){
 			buf->dirty = true;
@@ -1361,7 +1384,7 @@ struct CInstance: public voxelworld::Instance
 				blockers.push_back(seed.p);
 			} else if(!seed.was_transparent && now_transparent){
 				// It is dark and has to be filled from around it
-				uint8_t l = is_below_open_sky(seed.p) ? SKYLIGHT_MAX : 0;
+				uint8_t l = is_below_open_sky(seed.p) ? sky_max() : 0;
 				light_set(seed.p, v, l);
 				if(l > 0){
 					spread.push_back(LightNode{seed.p, l});
@@ -1375,8 +1398,8 @@ struct CInstance: public voxelworld::Instance
 					VoxelInstance nv = light_get(n);
 					if(!transmits_light(nv))
 						continue;
-					if(nv.get_skylight() > 0)
-						spread.push_back(LightNode{n, nv.get_skylight()});
+					if(get_sky(nv) > 0)
+						spread.push_back(LightNode{n, get_sky(nv)});
 				}
 			}
 		}
@@ -1400,11 +1423,11 @@ struct CInstance: public voxelworld::Instance
 					blockers.push_back(n);
 					continue;
 				}
-				uint8_t nl = nv.get_skylight();
+				uint8_t nl = get_sky(nv);
 				if(nl == 0)
 					continue;
 				bool lit_from_above = (k == LIGHT_DOWN &&
-						node.level == SKYLIGHT_MAX && nl == SKYLIGHT_MAX);
+						node.level == sky_max() && nl == sky_max());
 				if(nl < node.level || lit_from_above){
 					light_set(n, nv, 0);
 					unlight.push_back(LightNode{n, nl});
@@ -1426,7 +1449,7 @@ struct CInstance: public voxelworld::Instance
 			VoxelInstance v = light_get(node.p);
 			if(!transmits_light(v))
 				continue;
-			node.level = v.get_skylight();
+			node.level = get_sky(v);
 			if(node.level == 0)
 				continue;
 			for(size_t k = 0; k < 6; k++){
@@ -1436,14 +1459,14 @@ struct CInstance: public voxelworld::Instance
 						node.p.getZ() + LIGHT_OFF[k][2]);
 				VoxelInstance nv = light_get(n);
 				if(!transmits_light(nv)){
-					if(nv.get_skylight() < node.level)
+					if(get_sky(nv) < node.level)
 						light_set(n, nv, node.level);
 					continue;
 				}
 				uint8_t target = (k == LIGHT_DOWN &&
-						node.level == SKYLIGHT_MAX) ?
-						SKYLIGHT_MAX : node.level - 1;
-				if(target > nv.get_skylight()){
+						node.level == sky_max()) ?
+						sky_max() : node.level - 1;
+				if(target > get_sky(nv)){
 					light_set(n, nv, target);
 					spread.push_back(LightNode{n, target});
 				}
@@ -1473,10 +1496,10 @@ struct CInstance: public voxelworld::Instance
 						p.getX() + LIGHT_OFF[k][0],
 						p.getY() + LIGHT_OFF[k][1],
 						p.getZ() + LIGHT_OFF[k][2]));
-				if(transmits_light(nv) && nv.get_skylight() > best)
-					best = nv.get_skylight();
+				if(transmits_light(nv) && get_sky(nv) > best)
+					best = get_sky(nv);
 			}
-			if(v.get_skylight() != best)
+			if(get_sky(v) != best)
 				light_set(p, v, best);
 		}
 
@@ -1585,6 +1608,9 @@ struct CInstance: public voxelworld::Instance
 
 	void set_skylight_enabled(bool enabled)
 	{
+		if(enabled && !sky_field().bound())
+			throw Exception(ss_()+"set_skylight_enabled(): there is nowhere "
+					"to put it in "+m_voxel_reg->get_format().dump());
 		m_skylight_enabled = enabled;
 	}
 
