@@ -295,7 +295,16 @@ What is done
   registry that the mesher copies into the chunk
 - Chat, both ways, and the player's hit points and breath
 - Active objects: other players, mobs and dropped items, where the server
-  says they are, drawn as a box wearing the object's own texture
+  says they are, drawn as a box wearing the object's own texture. A dropped
+  node is a small cube of the node's six tiles, turning at the rate the
+  object asked for
+- Pointing at an object: the same ray against the object's selection box,
+  the nearest of the two winning, with its box outlined and its infotext or
+  nametag shown. The left button hits it (INTERACT_START_DIGGING with the
+  object pointed at, once per press and then no faster than the hit delay)
+  and the right button runs the game's on_rightclick for it
+- Dropping a stack: Q throws what is wielded, ctrl+Q one item of it, and a
+  stack dragged out of a formspec's slots goes the same way
 - The sky's colours, out of SET_SKY, as what the world fades into
 - A hotbar and a health bar, out of the inventory and the hit points
 - Formspecs: the inventory form, the ones the server shows, and the prepend

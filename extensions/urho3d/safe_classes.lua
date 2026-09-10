@@ -448,6 +448,8 @@ function M.define(dst, util)
 					"DefineVertex", {}, {"CustomGeometry", "Vector3"}),
 			DefineNormal = util.self_function(
 					"DefineNormal", {}, {"CustomGeometry", "Vector3"}),
+			DefineTexCoord = util.self_function(
+					"DefineTexCoord", {}, {"CustomGeometry", "Vector2"}),
 			DefineColor = util.self_function(
 					"DefineColor", {}, {"CustomGeometry", "Color"}),
 			Commit = util.self_function(
