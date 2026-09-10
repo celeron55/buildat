@@ -1314,7 +1314,14 @@ local function show_client(host, port, name, password)
 			-- off a voxel, which is what a chest's slots are.
 			inventory = function(location, list_name)
 				local lists = nil
-				if location == "current_player" or
+				if location == "current_name" and form and form.at then
+					-- The form's own inventory, which for a form a node
+					-- carries is that node's: a chest says
+					-- list[current_name;main;...]
+					local meta = view:node_meta(form.at[1], form.at[2],
+							form.at[3])
+					lists = meta and meta.lists or nil
+				elseif location == "current_player" or
 						location:sub(1, 7) == "player:" then
 					lists = inv
 				else
@@ -1555,6 +1562,18 @@ local function show_client(host, port, name, password)
 			magic.input:SetMouseVisible(false)
 		end
 
+		-- Where a form's fields go: to the player when the server showed the
+		-- form, and to the node when the form came out of the node's own
+		-- metadata, which is what a chest's or a furnace's buttons want.
+		local function send_form_fields(fields)
+			if form.at then
+				client:send_nodemeta_fields(form.at[1], form.at[2],
+						form.at[3], form.formname, fields)
+			else
+				client:send_inventory_fields(form.formname, fields)
+			end
+		end
+
 		-- The fields a form has, as they are now: what was typed into a
 		-- field rather than what the server put in it
 		local function form_fields()
@@ -1573,7 +1592,7 @@ local function show_client(host, port, name, password)
 			fields.key_enter = "true"
 			fields.key_enter_field = name
 			log:verbose("form: enter in \""..tostring(name).."\"")
-			client:send_inventory_fields(form.formname, fields)
+			send_form_fields(fields)
 			if form.drawn.close_on_enter[name] ~= false then
 				close_form()
 			end
@@ -1628,13 +1647,15 @@ local function show_client(host, port, name, password)
 
 		-- source says which form this is, which decides whether a new
 		-- inventory formspec replaces it
-		local function open_form(spec, formname, source)
+		-- at is the node the form came out of, for a form a node carries;
+		-- nil for one the server showed.
+		local function open_form(spec, formname, source, at)
 			close_form()
 			if not spec or spec == "" then
 				return
 			end
 			form = {spec = spec, formname = formname or "", source = source,
-					state = {scroll = {}}}
+					at = at, state = {scroll = {}}}
 			held = nil
 			draw_form()
 			magic.input:SetMouseVisible(true)
@@ -1737,6 +1758,17 @@ local function show_client(host, port, name, password)
 			return lx >= 0 and ly >= 0 and lx < size[1] and ly < size[2]
 		end
 
+		-- What the server calls the inventory a slot is in. A form a node
+		-- carries says "current_name" for its own; an inventory action has
+		-- to name the node itself.
+		local function inv_location(location)
+			if location == "current_name" and form and form.at then
+				return "nodemeta:"..form.at[1]..","..form.at[2]..","..
+						form.at[3]
+			end
+			return location
+		end
+
 		-- Taking a stack out of a slot and putting it into one. Luanti's own
 		-- inventory takes and puts a whole stack with the left button, half
 		-- of it or a single item with the right, and ten with the middle.
@@ -1769,8 +1801,8 @@ local function show_client(host, port, name, password)
 				move = math.min(10, held.count)
 			end
 			client:send_inventory_move(move,
-					held.location, held.list, held.index,
-					slot.location, slot.list, slot.index)
+					inv_location(held.location), held.list, held.index,
+					inv_location(slot.location), slot.list, slot.index)
 			held.count = held.count - move
 			if held.count <= 0 then
 				held = nil
@@ -1788,8 +1820,8 @@ local function show_client(host, port, name, password)
 			if button == MOUSEB_RIGHT then
 				drop = 1
 			end
-			client:send_inventory_drop(drop, held.location, held.list,
-					held.index)
+			client:send_inventory_drop(drop, inv_location(held.location),
+					held.list, held.index)
 			held.count = held.count - drop
 			if held.count <= 0 then
 				held = nil
@@ -1817,7 +1849,7 @@ local function show_client(host, port, name, password)
 					fields[b.name] = ""
 					log:verbose("form: button \""..tostring(b.name)..
 							"\" at "..lx..","..ly)
-					client:send_inventory_fields(form.formname, fields)
+					send_form_fields(fields)
 					if b.exit then
 						close_form()
 					end
@@ -1837,7 +1869,7 @@ local function show_client(host, port, name, password)
 					end
 					log:verbose("form: \""..tostring(t.name).."\" = "..
 							t.value)
-					client:send_inventory_fields(form.formname, fields)
+					send_form_fields(fields)
 					return
 				end
 			end
@@ -1860,8 +1892,7 @@ local function show_client(host, port, name, password)
 							fields[t.name] = "CHG:"..r.index
 							log:verbose("form: table \""..tostring(t.name)..
 									"\" row "..r.index)
-							client:send_inventory_fields(form.formname,
-									fields)
+							send_form_fields(fields)
 							return
 						end
 					end
@@ -1919,6 +1950,24 @@ local function show_client(host, port, name, password)
 				return
 			end
 			if not pointed_under or not pointed_above then
+				return
+			end
+			-- A node that carries a formspec in its metadata -- a chest, a
+			-- furnace, a sign being written -- opens it here rather than
+			-- after a round trip to the server, which is what Luanti's own
+			-- client does. The server still hears about the click when the
+			-- node is rightclickable, because that is what runs the game's
+			-- own on_rightclick.
+			local meta = view:node_meta(pointed_under[1], pointed_under[2],
+					pointed_under[3])
+			local spec = meta and meta.fields and meta.fields.formspec
+			if spec and spec ~= "" then
+				local def = node_def_at(pointed_under)
+				if def and def.rightclickable then
+					client:interact(luanti.INTERACT_PLACE, wield_index - 1,
+							{under = pointed_under, above = pointed_above})
+				end
+				open_form(spec, "", "nodemeta", pointed_under)
 				return
 			end
 			client:interact(luanti.INTERACT_PLACE, wield_index - 1,
@@ -2641,6 +2690,15 @@ local function show_client(host, port, name, password)
 			-- Luanti's own keys for these. A server that does not give the
 			-- player the fly and noclip privileges pulls them back.
 			if key == KEY_K then
+				-- The server's own movement check pulls a player without
+				-- the privilege back; saying so is the whole difference
+				-- between that and the world feeling broken.
+				if not avatar.fly and client.privileges and
+						not client.privileges.fly then
+					add_line("Flying: the server has not given you the "..
+							"\"fly\" privilege")
+					return
+				end
 				avatar.fly = not avatar.fly
 				add_line(avatar.fly and "Flying" or "Walking")
 			end

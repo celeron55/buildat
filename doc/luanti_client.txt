@@ -298,6 +298,9 @@ What is done
   flowing liquid as a box with a lowered top, through a shape in the voxel
   registry that the mesher copies into the chunk
 - Chat, both ways, and the player's hit points and breath
+- PRIVILEGES, which is what lets the client say that flying was refused
+  because the server did not grant it rather than leaving the player to
+  wonder why they were pulled back
 - Active objects: other players, mobs and dropped items, where the server
   says they are, drawn as a box wearing the object's own texture. A dropped
   node is a small cube of the node's six tiles, turning at the rate the
@@ -311,8 +314,12 @@ What is done
   stack dragged out of a formspec's slots goes the same way
 - The sky's colours, out of SET_SKY, as what the world fades into
 - A hotbar and a health bar, out of the inventory and the hit points
-- Formspecs: the inventory form, the ones the server shows, and the prepend
-  in front of them. Item slots with the item's own image in them, labels,
+- Formspecs: the inventory form, the ones the server shows, the ones a node
+  carries in its metadata -- a chest, a furnace -- which are opened here
+  rather than after a round trip to the server, the way Luanti's own client
+  does it, with their fields going back as NODEMETA_FIELDS and their slots
+  coming out of the node's own inventory; and the prepend in front of all of
+  them. Item slots with the item's own image in them, labels,
   images, buttons and fields; clicking a slot picks a stack up and puts it
   down, which goes back as an inventory action, and clicking a button sends
   the form's fields. Detached inventories, which is what a creative list is.
