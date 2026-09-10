@@ -610,12 +610,14 @@ void preload_textures(pv::RawVolume<VoxelInstance> &volume,
 static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 		pv::RawVolume<VoxelInstance> &volume,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
-		bool use_skylight);
+		bool use_skylight,
+		sm_<uint, TemporaryGeometry> *translucent_result);
 
 void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		pv::RawVolume<VoxelInstance> &volume,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
-		bool use_skylight)
+		bool use_skylight,
+		sm_<uint, TemporaryGeometry> *translucent_result)
 {
 	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
@@ -714,7 +716,10 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		}
 #else
 		// Get or create the appropriate temporary geometry for this atlas
-		TemporaryGeometry &tg = result[seg_ref.atlas_id];
+		sm_<uint, TemporaryGeometry> &into =
+				(translucent_result && voxel_def0->translucent) ?
+				*translucent_result : result;
+		TemporaryGeometry &tg = into[seg_ref.atlas_id];
 		if(tg.vertex_data.Empty()){
 			tg.atlas_id = seg_ref.atlas_id;
 			tg.has_colors = use_skylight;
@@ -764,7 +769,8 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 #endif
 	}
 
-	generate_voxel_shapes(result, volume, voxel_reg, atlas_reg, use_skylight);
+	generate_voxel_shapes(result, volume, voxel_reg, atlas_reg, use_skylight,
+			translucent_result);
 }
 
 // The quads of the voxels that have a shape of their own, appended to the
@@ -782,7 +788,8 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 		pv::RawVolume<VoxelInstance> &volume,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
-		bool use_skylight)
+		bool use_skylight,
+		sm_<uint, TemporaryGeometry> *translucent_result)
 {
 	const pv::Region &region = volume.getEnclosingRegion();
 	const pv::Vector3DInt32 lc = region.getLowerCorner();
@@ -821,7 +828,10 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 							atlas_reg->get_texture(seg_ref);
 					if(aseg == nullptr)
 						continue;
-					TemporaryGeometry &tg = result[seg_ref.atlas_id];
+					sm_<uint, TemporaryGeometry> &into =
+							(translucent_result && def->translucent) ?
+							*translucent_result : result;
+					TemporaryGeometry &tg = into[seg_ref.atlas_id];
 					if(tg.vertex_data.Empty()){
 						tg.atlas_id = seg_ref.atlas_id;
 						tg.has_colors = use_skylight;

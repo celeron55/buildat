@@ -45,10 +45,21 @@ void VS()
 void PS()
 {
     vec4 diffColor = cMatDiffColor * texture2D(sDiffMap, vTexCoord);
-    if (diffColor.a < 0.5)
-        discard;
+    #ifndef TRANSLUCENT
+        if (diffColor.a < 0.5)
+            discard;
+    #endif
 
     vec3 ambient = cAmbientColor.rgb * vColor.a + vColor.rgb;
     float fogFactor = GetFogFactor(vWorldPos.w);
-    gl_FragColor = vec4(GetFog(diffColor.rgb * ambient, fogFactor), 1.0);
+    #ifdef TRANSLUCENT
+        // The alpha is kept and blended instead of being a cutoff, and the
+        // fog is applied to the color the same way. The blend is against
+        // whatever is already in the buffer, so the pass writes no depth and
+        // Urho3D sorts the drawables back to front for it.
+        gl_FragColor = vec4(GetFog(diffColor.rgb * ambient, fogFactor),
+                diffColor.a);
+    #else
+        gl_FragColor = vec4(GetFog(diffColor.rgb * ambient, fogFactor), 1.0);
+    #endif
 }
