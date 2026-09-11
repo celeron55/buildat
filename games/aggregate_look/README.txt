@@ -24,6 +24,13 @@ The format binds tint, wetness, grain and gloss -- which is all four surface
 modifiers there is room for -- plus sag_top, and the client switches
 voxel_shading to PBRVoxelModifiers, the reference consumption of them.
 
+**There is no voxel type id in this world.** Every voxel carries how much of
+it is rock and how much is sand, two bits each, and the registry's look
+rules pick the definition from a threshold over those: rock first, then
+sand, then air for everything left. The one id role bound is written as 1
+everywhere, because that is how voxelworld tells a generated voxel from one
+nothing has got to yet, and it says nothing about what the voxel is.
+
 What it answered is written up in local/aggregate_plan.md. The short of it:
 the tint, the wetness and the sag read at a glance; the grain does not, and
 the threshold between two base looks carries nearly all of the signal.

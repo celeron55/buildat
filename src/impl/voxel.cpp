@@ -1,6 +1,7 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/voxel.h"
+#include "interface/voxel_selector.h"
 #include "core/log.h"
 #include "interface/voxel_cereal.h"
 #include <cereal/archives/portable_binary.hpp>
@@ -59,6 +60,8 @@ struct CVoxelRegistry: public VoxelRegistry
 	sd_<CachedVoxelDefinition> m_cached_defs;
 	sm_<VoxelName, VoxelTypeId> m_name_to_id;
 	VoxelFormat m_format = VoxelFormat::legacy();
+	// How a voxel's definition is found; the default is the id role
+	VoxelSelector m_look;
 	bool m_is_dirty = false;
 	std::mutex m_mutex;
 
@@ -98,6 +101,25 @@ struct CVoxelRegistry: public VoxelRegistry
 		m_is_dirty = true;
 		log_v(MODULE, "CVoxelRegistry::set_format(): %s",
 				cs(m_format.dump()));
+	}
+
+	const VoxelSelector& get_look_selector()
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return m_look;
+	}
+
+	void set_look_selector(const VoxelSelector &selector)
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		ss_ why;
+		if(!selector.validate(m_defs.size(), &why))
+			throw Exception(ss_()+"set_look_selector(): "+why);
+		m_look = selector;
+		m_is_dirty = true;
+		log_v(MODULE, "CVoxelRegistry::set_look_selector(): kind=%i rules=%zu "
+				"fallback=%i", (int)m_look.kind, m_look.rules.size(),
+				(int)m_look.fallback);
 	}
 
 	sv_<VoxelDefinition> get_all()
@@ -187,7 +209,12 @@ struct CVoxelRegistry: public VoxelRegistry
 	const CachedVoxelDefinition* get_cached(const VoxelInstance &v,
 			AtlasRegistry *atlas_reg, bool with_lod)
 	{
-		return get_cached(m_format.id_of(v.data), atlas_reg, with_lod);
+		VoxelTypeId id;
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			id = m_look.id_of(v.data, m_format);
+		}
+		return get_cached(id, atlas_reg, with_lod);
 	}
 
 	bool is_dirty()
@@ -414,6 +441,112 @@ ss_ VoxelFormat::dump() const
 	return os.str();
 }
 
+bool VoxelSelector::validate(size_t count, ss_ *why) const
+{
+	auto fail = [&](const ss_ &s){
+		if(why)
+			*why = s;
+		return false;
+	};
+	if(kind != RULES)
+		return true;
+	if(rules.empty())
+		return fail("a rule selector with no rules selects nothing");
+	for(size_t i = 0; i < rules.size(); i++){
+		if(rules[i].result >= count)
+			return fail("rule "+itos(i)+" points at voxel "+
+					itos(rules[i].result)+", of which there are "+
+					itos(count));
+		// A rule with no clauses claims everything left, so nothing after it
+		// can ever be reached
+		if(rules[i].clauses.empty() && i + 1 < rules.size())
+			return fail("rule "+itos(i)+" claims everything, so the "+
+					itos(rules.size() - i - 1)+" after it are unreachable");
+	}
+	if(fallback >= count)
+		return fail("the fallback is voxel "+itos(fallback)+", of which "
+				"there are "+itos(count));
+	return true;
+}
+
+bool voxel_selector_self_test()
+{
+	// FIELD is the format's own id role, whatever the selector holds
+	{
+		VoxelFormat f = VoxelFormat::luanti();
+		VoxelSelector s;
+		uint32_t word = 0;
+		f.id.set(word, 1234);
+		assert(s.id_of(word, f) == 1234);
+	}
+
+	// RULES: first match wins, an empty clause list claims what is left
+	{
+		VoxelFormat f;
+		f.id = VoxelField(0, 0, 4); // bound, and deliberately not read
+		VoxelField rock(0, 4, 8), sand(0, 12, 8);
+		VoxelSelector s;
+		s.kind = VoxelSelector::RULES;
+		s.fallback = 9;
+		{
+			VoxelRule r; // mostly rock
+			r.clauses.push_back(VoxelRuleClause(rock, 128, 255));
+			r.result = 1;
+			s.rules.push_back(r);
+		}
+		{
+			VoxelRule r; // some of each
+			r.clauses.push_back(VoxelRuleClause(rock, 32, 127));
+			r.clauses.push_back(VoxelRuleClause(sand, 32, 255));
+			r.result = 2;
+			s.rules.push_back(r);
+		}
+		{
+			VoxelRule r; // anything left
+			r.result = 3;
+			s.rules.push_back(r);
+		}
+		auto word_of = [&](uint32_t r, uint32_t sa){
+			uint32_t w = 0;
+			rock.set(w, r);
+			sand.set(w, sa);
+			return w;
+		};
+		assert(s.id_of(word_of(200, 0), f) == 1);
+		assert(s.id_of(word_of(200, 200), f) == 1); // the first match, not the best
+		assert(s.id_of(word_of(64, 64), f) == 2);
+		assert(s.id_of(word_of(64, 0), f) == 3);    // the second rule's other clause
+		assert(s.id_of(word_of(0, 0), f) == 3);
+
+		ss_ why;
+		assert(s.validate(10, &why));
+		// The rule that claims everything has to be the last one
+		VoxelSelector bad = s;
+		std::swap(bad.rules[0], bad.rules[2]);
+		assert(!bad.validate(10, &why));
+		// And every rule has to point at a voxel that exists
+		bad = s;
+		bad.rules[0].result = 99;
+		assert(!bad.validate(10, &why));
+	}
+
+	// A clause on a field nothing bound never holds, so a rule wearing one
+	// is dead rather than always true
+	{
+		VoxelFormat f = VoxelFormat::legacy();
+		VoxelSelector s;
+		s.kind = VoxelSelector::RULES;
+		s.fallback = 7;
+		VoxelRule r;
+		r.clauses.push_back(VoxelRuleClause(VoxelField(), 0, 0));
+		r.result = 1;
+		s.rules.push_back(r);
+		assert(s.id_of(0, f) == 7);
+	}
+
+	return true;
+}
+
 bool voxel_format_self_test()
 {
 	// A field reads back what was written to it, and leaves the rest alone
@@ -540,7 +673,8 @@ VoxelRegistry* createVoxelRegistry()
 {
 	// Cheap, once per process, and it is the only place every build passes
 	// through before a voxel exists
-	static const bool tested = voxel_format_self_test();
+	static const bool tested = voxel_format_self_test() &&
+			voxel_selector_self_test();
 	(void)tested;
 	return new CVoxelRegistry();
 }
@@ -549,8 +683,9 @@ void VoxelRegistry::serialize(std::ostream &os)
 {
 	sv_<VoxelDefinition> defs = get_all();
 	VoxelFormat format = get_format();
+	VoxelSelector look = get_look_selector();
 	cereal::PortableBinaryOutputArchive archive(os);
-	archive((uint8_t)1, format, defs);
+	archive((uint8_t)2, format, defs, look);
 }
 
 void VoxelRegistry::deserialize(std::istream &is)
@@ -558,17 +693,20 @@ void VoxelRegistry::deserialize(std::istream &is)
 	uint8_t version = 0;
 	VoxelFormat format;
 	sv_<VoxelDefinition> defs;
+	VoxelSelector look;
 	cereal::PortableBinaryInputArchive archive(is);
 	archive(version);
-	if(version != 1)
+	if(version != 2)
 		throw Exception(ss_()+"VoxelRegistry::deserialize(): version "+
-				itos(version)+" is not 1; the other end is a different "
+				itos(version)+" is not 2; the other end is a different "
 				"build of buildat");
-	archive(format, defs);
+	archive(format, defs, look);
 	clear();
 	set_format(format);
 	for(auto &def : defs)
 		add_voxel(def);
+	// After the definitions, because the selector points at them
+	set_look_selector(look);
 }
 
 ss_ VoxelRegistry::serialize()

@@ -468,6 +468,46 @@ every volume on its way anywhere, is bits under the old format.
 - The fields may not overlap and may not reach past the word. set_format()
   says which rule was broken.
 - voxel_reg:dump_format() writes the format out, for a log line.
+
+voxel_reg:set_look_rules{...} says how a voxel's *definition* is found, for a
+world whose voxels have no type id at all. The default, and what every game
+in this tree does, is the id role of the format: a shift, a mask and an
+index. Rules are the other way.
+
+  voxel_reg:set_look_rules{
+      fallback = 1,                      -- what no rule claims
+      rules = {
+          {result = 2, when = {{field = "wetness", lo = 8}}},
+          {result = 3, when = {
+              {field = {shift = 28, width = 2}, lo = 2},
+              {field = "gloss", hi = 3},
+          }},
+          {result = 4},                  -- everything left
+      },
+  }
+
+- An ordered list; the first rule all of whose clauses hold says which
+  definition the voxel wears. A rule with no `when` claims everything left,
+  so nothing after it is reachable and set_look_rules() says so.
+- A clause is a field and a range, both ends included. lo defaults to 0 and
+  hi to the field's whole range, so a clause with one of them is "at least"
+  or "at most". field is a role name or a table {shift = ..., width = ...}
+  for a field of the game's own that no role covers.
+- The definition is still where every property lives -- what is drawn,
+  whether the physics collides with it, whether light passes. A selector
+  only changes how the definition is found, so nothing that asks a question
+  of a voxel has to know which kind is in use. A world wanting a finer
+  distinction in one property than another writes the rules that make it
+  and points them at definitions that differ in that property alone.
+- Unlike the format this may be set at any time, and a world that changes it
+  has to have everything meshed again. What it may not do is point at a
+  definition the registry does not have.
+- The id role, where it is bound, still says whether a voxel has been
+  generated at all -- id 0 is "nothing has got here yet" whatever the rules
+  make of the rest of the word.
+- It travels with the registry, as the format does. games/aggregate_look is
+  a world that uses it: two rules over two fields, and no voxel id stored
+  anywhere.
 - The format travels with the registry, so a client that deserializes one
   gets the world's cut along with its definitions.
 

@@ -419,6 +419,61 @@ local function check_voxel_modifiers()
 	assert(not ok, "a fifth surface modifier was allowed")
 end
 
+-- Look rules: which definition a voxel wears, for a world with no voxel type
+-- id. The default is the id role, which is what the other checks here get.
+local function check_voxel_look_rules()
+	local safe = buildat.safe
+	local reg = safe.createVoxelRegistry()
+	reg:set_format{
+		id = {shift = 0, width = 4},
+		light_sky = {shift = 4, width = 4},
+		wetness = {shift = 8, width = 4},
+	}
+	for _, name in ipairs({"air", "rock", "sand"}) do
+		local def = safe.VoxelDefinition()
+		def.name.block_name = "engine_test:"..name
+		reg:add_voxel(def)
+	end
+
+	-- Rock where the game's own field says so, sand where the role does,
+	-- air for everything left
+	reg:set_look_rules{
+		fallback = 1,
+		rules = {
+			{result = 2, when = {{field = {shift = 12, width = 2}, lo = 2}}},
+			{result = 3, when = {{field = "wetness", lo = 8}}},
+		},
+	}
+
+	-- And a client gets it with the rest of the registry
+	local other = safe.createVoxelRegistry()
+	other:deserialize(reg:serialize())
+	assert(other:serialize() == reg:serialize(),
+			"the look rules did not survive the round trip")
+
+	-- A rule that claims everything has to be the last one
+	local ok = pcall(function()
+		reg:set_look_rules{
+			rules = {{result = 2}, {result = 3, when = {{field = "wetness"}}}},
+		}
+	end)
+	assert(not ok, "an unreachable rule was allowed")
+
+	-- And a rule cannot point at a voxel that is not there
+	local ok2 = pcall(function()
+		reg:set_look_rules{rules = {{result = 99}}}
+	end)
+	assert(not ok2, "a rule pointing at nothing was allowed")
+
+	-- A clause naming something that is not a role is a typo, not a field
+	local ok3 = pcall(function()
+		reg:set_look_rules{
+			rules = {{result = 2, when = {{field = "wetnes", lo = 1}}}},
+		}
+	end)
+	assert(not ok3, "a clause on a misspelled role was allowed")
+end
+
 -- compose_image() writes a PNG, and Urho3D can read one back, so the pixels
 -- can actually be checked. The files go where the client's own temporary
 -- resources go, which is a resource dir, so they can be loaded by name.
@@ -691,6 +746,7 @@ function M.self_test()
 	check_voxel_format()
 	check_voxel_variants()
 	check_voxel_modifiers()
+	check_voxel_look_rules()
 	check_compose_image()
 end
 

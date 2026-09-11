@@ -488,6 +488,7 @@ namespace interface
 	bool voxel_format_self_test();
 
 	struct VoxelInstance;
+	struct VoxelSelector;
 
 	struct VoxelRegistry
 	{
@@ -507,6 +508,18 @@ namespace interface
 		// that does not validate and on one that arrives too late.
 		virtual const VoxelFormat& get_format() = 0;
 		virtual void set_format(const VoxelFormat &format) = 0;
+
+		// How a voxel's definition is found; see VoxelSelector in
+		// interface/voxel_selector.h. The default is the id role of the
+		// format, which is what every game in this tree does.
+		//
+		// Unlike the format this may be set at any time, and a world that
+		// changes it has to have everything meshed again -- the same as
+		// changing a definition. What it may not do is point at a
+		// definition the registry does not have, which is what it is
+		// checked for.
+		virtual const VoxelSelector& get_look_selector() = 0;
+		virtual void set_look_selector(const VoxelSelector &selector) = 0;
 
 		virtual VoxelTypeId add_voxel(const VoxelDefinition &def) = 0;
 

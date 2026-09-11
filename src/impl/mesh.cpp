@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/mesh.h"
 #include "interface/voxel.h"
+#include "interface/voxel_selector.h"
 #include "core/log.h"
 #include <PolyVoxCore/SimpleVolume.h>
 #include <PolyVoxCore/SurfaceMesh.h>
@@ -56,11 +57,17 @@ struct VoxelFmt
 	float tint_div = 1.0f;
 	interface::VoxelField sag_top, sag_bottom;
 	float sag_top_div = 1.0f, sag_bottom_div = 1.0f;
+	// The whole format and the look selector, for the questions that are not
+	// one field; read once per chunk with the rest
+	interface::VoxelFormat format;
+	interface::VoxelSelector look;
 
 	VoxelFmt(){}
 	VoxelFmt(VoxelRegistry *voxel_reg)
 	{
 		const interface::VoxelFormat &f = voxel_reg->get_format();
+		format = f;
+		look = voxel_reg->get_look_selector();
 		id = f.id;
 		light_sky = f.light_sky;
 		light_lamp = f.light_lamp;
@@ -113,6 +120,14 @@ struct VoxelFmt
 	interface::VoxelTypeId id_of(const VoxelInstance &v) const
 	{
 		return id.bound() ? (interface::VoxelTypeId)id.get(v.data) : 1;
+	}
+	// Which definition this voxel wears, which is the id role for a world
+	// that has one and a threshold over fields for a world that does not.
+	// What goes into PolyVox's per-face material, so that the geometry pass
+	// finds the same definition the face-culling pass did.
+	interface::VoxelTypeId look_id(const VoxelInstance &v) const
+	{
+		return look.id_of(v.data, format);
 	}
 	// Nothing has generated this voxel yet. A format with no id bound has one
 	// voxel type and no way to say that, so nothing is undefined there.
@@ -432,12 +447,12 @@ public:
 			return false;
 		}
 		else if(back_def->face_draw_type == interface::FaceDrawType::ALWAYS){
-			materialToUse = m_fmt.id_of(back);
+			materialToUse = m_fmt.look_id(back);
 			return true;
 		}
 		// interface::FaceDrawType::ON_EDGE
 		if(!front_def){
-			materialToUse = m_fmt.id_of(back);
+			materialToUse = m_fmt.look_id(back);
 			return true;
 		}
 		// A translucent voxel does not draw its face against an opaque one:
@@ -451,7 +466,7 @@ public:
 			return false;
 		}
 		if(back_def->edge_material_id != front_def->edge_material_id){
-			materialToUse = m_fmt.id_of(back);
+			materialToUse = m_fmt.look_id(back);
 			return true;
 		}
 		return false;
@@ -1601,7 +1616,11 @@ up_<pv::RawVolume<VoxelInstance>> generate_voxel_lod_volume(
 								continue;
 							// TODO: Prioritize voxel types better
 							// Higher is probably more interesting
-							if(fmt.id_of(v1) > fmt.id_of(v_orig))
+							// Which definition it wears rather than which
+							// id it holds: a world with no id role has the
+							// same one everywhere, and this is picking what
+							// a block of voxels looks like from far away
+							if(fmt.look_id(v1) > fmt.look_id(v_orig))
 								v_orig = v1;
 						}
 					}

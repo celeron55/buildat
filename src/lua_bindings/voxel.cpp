@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "core/log.h"
 #include "interface/voxel.h"
+#include "interface/voxel_selector.h"
 #include "lua_bindings/util.h"
 #include "lua_bindings/luabind_util.h"
 #include "lua_bindings/sandbox_util.h"
@@ -286,6 +287,105 @@ static void vreg_set_format(VoxelRegistry &reg, const luabind::object &t)
 	reg.set_format(format);
 }
 
+// voxel_reg:set_look_rules{fallback = 1, rules = {
+//     {result = 3, when = {{field = "wetness", lo = 8, hi = 15}}}, ...}}
+//
+// How a voxel's definition is found, for a world whose voxels have no type
+// id: an ordered list of rules, first match wins. A rule with no `when`
+// claims everything left. field names one of the format's roles, or is a
+// table {shift = ..., width = ...} for a field of the game's own that no
+// role covers. lo and hi both default to the whole range, so a clause with
+// only one of them is "at least" or "at most". See VoxelSelector in
+// interface/voxel_selector.h.
+static interface::VoxelField clause_field_from_lua(
+		const interface::VoxelFormat &format, const luabind::object &v)
+{
+	if(!v)
+		throw Exception("set_look_rules(): a clause has no field");
+	if(luabind::type(v) == LUA_TTABLE){
+		auto number = [&](const char *key, double def){
+			luabind::object f = v[key];
+			if(!f || luabind::type(f) != LUA_TNUMBER)
+				return def;
+			return luabind::object_cast<double>(f);
+		};
+		return interface::VoxelField(
+				(uint8_t)number("plane", 0),
+				(uint8_t)number("shift", 0),
+				(uint8_t)number("width", 0));
+	}
+	if(luabind::type(v) != LUA_TSTRING)
+		throw Exception("set_look_rules(): a clause's field is neither a "
+				"role name nor a table");
+	ss_ name = luabind::object_cast<ss_>(v);
+	struct Named { cc_ *name; const interface::VoxelField &f; };
+	const Named fields[] = {
+		{"id", format.id}, {"light_sky", format.light_sky},
+		{"light_lamp", format.light_lamp}, {"param", format.param},
+		{"color", format.color}, {"tint", format.tint},
+		{"wetness", format.wetness}, {"grain", format.grain},
+		{"gloss", format.gloss}, {"speckle", format.speckle},
+		{"emission", format.emission}, {"sag_top", format.sag_top},
+		{"sag_bottom", format.sag_bottom},
+	};
+	for(const Named &n : fields){
+		if(name == n.name)
+			return n.f;
+	}
+	throw Exception(ss_()+"set_look_rules(): \""+name+"\" is not a role");
+}
+
+static void vreg_set_look_rules(VoxelRegistry &reg, const luabind::object &t)
+{
+	if(!t || luabind::type(t) != LUA_TTABLE)
+		throw Exception("set_look_rules(): argument is not a table");
+	const interface::VoxelFormat &format = reg.get_format();
+	interface::VoxelSelector selector;
+	selector.kind = interface::VoxelSelector::RULES;
+	{
+		luabind::object v = t["fallback"];
+		if(v && luabind::type(v) == LUA_TNUMBER)
+			selector.fallback = (interface::VoxelTypeId)
+					luabind::object_cast<double>(v);
+	}
+	luabind::object rules = t["rules"];
+	if(!rules || luabind::type(rules) != LUA_TTABLE)
+		throw Exception("set_look_rules(): there are no rules");
+	for(size_t i = 1;; i++){
+		luabind::object rt = rules[i];
+		if(!rt || luabind::type(rt) != LUA_TTABLE)
+			break;
+		interface::VoxelRule rule;
+		luabind::object result = rt["result"];
+		if(!result || luabind::type(result) != LUA_TNUMBER)
+			throw Exception(ss_()+"set_look_rules(): rule "+itos(i)+
+					" has no result");
+		rule.result = (interface::VoxelTypeId)
+				luabind::object_cast<double>(result);
+		luabind::object when = rt["when"];
+		if(when && luabind::type(when) == LUA_TTABLE){
+			for(size_t j = 1;; j++){
+				luabind::object ct = when[j];
+				if(!ct || luabind::type(ct) != LUA_TTABLE)
+					break;
+				auto number = [&](const char *key, double def){
+					luabind::object f = ct[key];
+					if(!f || luabind::type(f) != LUA_TNUMBER)
+						return def;
+					return luabind::object_cast<double>(f);
+				};
+				interface::VoxelField field =
+						clause_field_from_lua(format, ct["field"]);
+				rule.clauses.push_back(interface::VoxelRuleClause(field,
+						(uint32_t)number("lo", 0),
+						(uint32_t)number("hi", (double)field.mask())));
+			}
+		}
+		selector.rules.push_back(rule);
+	}
+	reg.set_look_selector(selector);
+}
+
 static ss_ vreg_dump_format(VoxelRegistry &reg)
 {
 	return reg.get_format().dump();
@@ -506,6 +606,7 @@ void init_voxel(lua_State *L)
 			.def("deserialize", (void(VoxelRegistry::*) (const ss_ &))
 					&VoxelRegistry::deserialize)
 			.def("set_format", &vreg_set_format)
+			.def("set_look_rules", &vreg_set_look_rules)
 			.def("dump_format", &vreg_dump_format)
 		,
 		def("__buildat_createVoxelRegistry", &createVoxelRegistry)
