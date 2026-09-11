@@ -18,6 +18,7 @@ namespace magic = Urho3D;
 namespace pv = PolyVox;
 
 using interface::VoxelInstance;
+using interface::VoxelVolume;
 using interface::VoxelRegistry;
 using interface::AtlasRegistry;
 using namespace Urho3D;
@@ -52,7 +53,7 @@ void voxelinstance_set_int32(VoxelInstance &v, int32_t d){
 	v.data = (uint32_t)d;
 }
 
-typedef pv::RawVolume<VoxelInstance> CommonVolume;
+typedef VoxelVolume CommonVolume;
 
 ss_ volume_serialize(const CommonVolume &volume)
 {

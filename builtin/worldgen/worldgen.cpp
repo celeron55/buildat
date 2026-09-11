@@ -258,17 +258,11 @@ struct Module: public interface::Module, public Interface
 			log_v(MODULE, "Generating section " PV3I_FORMAT " (scene %p)",
 					PV3I_PARAMS(task.section_p), task.scene_ref);
 
-			// Undefined is what a generator leaves where it puts nothing, so
-			// it is what the volume starts as; RawVolume does not initialize
-			// a VoxelInstance by itself
-			pv::RawVolume<VoxelInstance> volume(region);
-			const VoxelInstance undefined(interface::VOXELTYPEID_UNDEFINED);
-			auto lc = region.getLowerCorner();
-			auto uc = region.getUpperCorner();
-			for(int z = lc.getZ(); z <= uc.getZ(); z++)
-				for(int y = lc.getY(); y <= uc.getY(); y++)
-					for(int x = lc.getX(); x <= uc.getX(); x++)
-						volume.setVoxelAt(x, y, z, undefined);
+			// Undefined is what a generator leaves where it puts nothing,
+			// and it is what a volume starts as: every plane of a new one
+			// reads as zero, which is VOXELTYPEID_UNDEFINED, without any of
+			// them being allocated
+			VoxelVolume volume(region);
 
 			task.generator->generate(task.scene_ref, task.section_p, volume);
 

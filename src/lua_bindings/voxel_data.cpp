@@ -25,6 +25,7 @@
 
 namespace pv = PolyVox;
 using interface::VoxelInstance;
+using interface::VoxelVolume;
 
 namespace lua_bindings {
 
@@ -450,10 +451,10 @@ static uint32_t read_sample(const char *p, size_t bytes, bool big_endian)
 	}
 }
 
-// Copies one source's box into the volume. The volume's data is written
-// directly: pv::RawVolume stores x + y*w + z*w*h, so a row of the box is a run
-// of consecutive voxels and only the source side needs strides.
-static void apply_source(pv::RawVolume<VoxelInstance> &volume,
+// Copies one source's box into the volume, a voxel at a time through the
+// volume's own accessors -- which is where the strides on the source side
+// stop mattering to anything but the source.
+static void apply_source(VoxelVolume &volume,
 		const pv::Region &region, const PackSource &source)
 {
 	const int w = region.getWidthInVoxels();
@@ -501,12 +502,17 @@ static void apply_source(pv::RawVolume<VoxelInstance> &volume,
 						continue; // A sample nothing maps leaves the voxel be
 				}
 
-				VoxelInstance &v = volume.m_pData[
-						vx + vy * w + vz * w * h];
-				if(source.dst_raw)
-					v.data = (uint32_t)value;
-				else
+				const int ax = vx + lc.getX();
+				const int ay = vy + lc.getY();
+				const int az = vz + lc.getZ();
+				if(source.dst_raw){
+					volume.setVoxelAt(ax, ay, az,
+							VoxelInstance((uint32_t)value));
+				} else {
+					VoxelInstance v = volume.getVoxelAt(ax, ay, az);
 					source.dst.set(v.data, (uint32_t)value);
+					volume.setVoxelAt(ax, ay, az, v);
+				}
 			}
 		}
 	}
@@ -550,10 +556,8 @@ ss_ pack_voxel_volume(const luabind::object &args, lua_State *L)
 	pv::Region region(pv::Vector3DInt32(c[0], c[1], c[2]),
 			pv::Vector3DInt32(c[3], c[4], c[5]));
 
-	pv::RawVolume<VoxelInstance> volume(region);
-	VoxelInstance fill((uint32_t)table_number(args, "fill", 0));
-	for(size_t i = 0; i < volume.m_dataSize; i++)
-		volume.m_pData[i] = fill;
+	VoxelVolume volume(region);
+	volume.fill(VoxelInstance((uint32_t)table_number(args, "fill", 0)));
 
 	luabind::object sources_o = args["sources"];
 	if(sources_o && luabind::type(sources_o) == LUA_TTABLE){

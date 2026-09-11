@@ -23,6 +23,7 @@ namespace magic = Urho3D;
 namespace pv = PolyVox;
 
 using interface::VoxelInstance;
+using interface::VoxelVolume;
 using interface::VoxelRegistry;
 using interface::AtlasRegistry;
 using namespace Urho3D;
@@ -170,7 +171,7 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	bool use_skylight;
 	luabind::object material_cb;
 
-	up_<pv::RawVolume<VoxelInstance>> volume;
+	up_<VoxelVolume> volume;
 	sm_<uint, interface::mesh::TemporaryGeometry> temp_geoms;
 	// The faces of the translucent voxels, which go on a child node of their
 	// own so that Urho3D sorts them against the other chunks' translucent
@@ -252,7 +253,7 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 	bool use_skylight;
 	luabind::object material_cb;
 
-	up_<pv::RawVolume<VoxelInstance>> lod_volume;
+	up_<VoxelVolume> lod_volume;
 	sm_<uint, interface::mesh::TemporaryGeometry> temp_geoms;
 
 	SetVoxelLodGeometryTask(int lod, Node *node, const ss_ &data,
@@ -266,7 +267,7 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 		// NOTE: Do the pre-processing here so that the calling code can
 		//       meaasure how long its execution takes
 		// NOTE: Could be split in three calls
-		up_<pv::RawVolume<VoxelInstance>> volume_orig =
+		up_<VoxelVolume> volume_orig =
 				interface::deserialize_volume(data);
 		lod_volume = interface::mesh::generate_voxel_lod_volume(
 				lod, *volume_orig, voxel_reg.get());
@@ -344,7 +345,7 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 	ss_ data;
 	sp_<VoxelRegistry> voxel_reg;
 
-	up_<pv::RawVolume<VoxelInstance>> volume;
+	up_<VoxelVolume> volume;
 	sv_<interface::mesh::TemporaryBox> result_boxes;
 
 	SetPhysicsBoxesTask(Node *node, const ss_ &data,

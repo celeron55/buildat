@@ -25,6 +25,7 @@ namespace pv = PolyVox;
 
 using interface::Event;
 using interface::VoxelInstance;
+using interface::VoxelVolume;
 using main_context::SceneReference;
 
 namespace main {
@@ -106,7 +107,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 
 	void generate(SceneReference scene_ref,
 			const pv::Vector3DInt16 &section_p,
-			pv::RawVolume<VoxelInstance> &volume)
+			VoxelVolume &volume)
 	{
 		{
 			const pv::Region region = volume.getEnclosingRegion();
