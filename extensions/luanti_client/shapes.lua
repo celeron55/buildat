@@ -526,8 +526,22 @@ function M.for_node(def, facedir, wall, mesh_quads, liquid_top)
 		-- a lake is made of.
 		return M.box_quads({-0.5, -0.5, -0.5, 0.5, liquid_top, 0.5}, {}), false
 	end
-	if drawtype == 9 or drawtype == 17 then -- PLANTLIKE, PLANTLIKE_ROOTED
+	if drawtype == 9 then -- PLANTLIKE
 		return M.plant_quads(def.visual_scale), true
+	end
+	if drawtype == 17 then -- PLANTLIKE_ROOTED
+		-- Luanti draws this as a cube of the node's own tiles -- the sea bed
+		-- under a kelp, the ground under a plant -- with the plant standing
+		-- on top of it out of special_tiles[1].
+		--
+		-- simplified: the cube, and no plant. Drawing both wants the shape's
+		-- quads to wear a seventh texture, and a voxel's quads can only wear
+		-- its own six; see the note in tmp/luanti_voxels_plan.md for the
+		-- three ways out. Until then this is the right half to keep: a sea
+		-- bed that is a sea bed with nothing growing on it reads as the
+		-- world with something missing, where crossed quads of sea bed read
+		-- as the world being broken.
+		return nil, false
 	end
 	if drawtype == 14 then -- FIRELIKE
 		return M.plant_quads(def.visual_scale), true
