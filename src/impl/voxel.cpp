@@ -215,6 +215,9 @@ struct CVoxelRegistry: public VoxelRegistry
 		cache.variants = def.variants;
 		for(size_t i = 0; i < 256; i++)
 			cache.variant_of_param[i] = def.variant_of_param[i];
+		cache.tint_ramp[0] = def.tint_ramp[0];
+		cache.tint_ramp[1] = def.tint_ramp[1];
+		cache.sag_extent = def.sag_extent;
 		cache.shape_double_sided = def.shape_double_sided;
 		cache.translucent = def.translucent;
 		cache.shape_group = def.shape_group;
@@ -284,6 +287,24 @@ bool VoxelFormat::light_pair(VoxelField *out) const
 	return true;
 }
 
+size_t VoxelFormat::surface_modifiers(
+		VoxelField out[VOXEL_SURFACE_MODIFIERS]) const
+{
+	const VoxelField *all[] = {&tint, &wetness, &grain, &gloss, &speckle,
+			&emission};
+	size_t n = 0;
+	for(size_t i = 0; i < sizeof all / sizeof all[0]; i++){
+		if(!all[i]->bound())
+			continue;
+		if(n < VOXEL_SURFACE_MODIFIERS)
+			out[n] = *all[i];
+		n++;
+	}
+	for(size_t i = n; i < VOXEL_SURFACE_MODIFIERS; i++)
+		out[i] = VoxelField();
+	return n < VOXEL_SURFACE_MODIFIERS ? n : VOXEL_SURFACE_MODIFIERS;
+}
+
 bool VoxelFormat::validate(ss_ *why) const
 {
 	auto fail = [&](const ss_ &s){
@@ -300,6 +321,9 @@ bool VoxelFormat::validate(ss_ *why) const
 	const Named fields[] = {
 		{"id", id}, {"light_sky", light_sky}, {"light_lamp", light_lamp},
 		{"param", param}, {"color", color},
+		{"tint", tint}, {"wetness", wetness}, {"grain", grain},
+		{"gloss", gloss}, {"speckle", speckle}, {"emission", emission},
+		{"sag_top", sag_top}, {"sag_bottom", sag_bottom},
 	};
 
 	for(const Named &n : fields){
@@ -341,6 +365,20 @@ bool VoxelFormat::validate(ss_ *why) const
 		}
 	}
 
+	// Four is what the vertex has room for; a fifth would have nowhere to
+	// go and the game would find out by not seeing it
+	{
+		size_t n = 0;
+		const VoxelField *surface[] = {&tint, &wetness, &grain, &gloss,
+				&speckle, &emission};
+		for(size_t i = 0; i < sizeof surface / sizeof surface[0]; i++)
+			if(surface[i]->bound())
+				n++;
+		if(n > VOXEL_SURFACE_MODIFIERS)
+			return fail("at most "+itos((int)VOXEL_SURFACE_MODIFIERS)+
+					" surface modifiers can be bound at once, not "+itos((int)n));
+	}
+
 	// Nothing to look up and nothing to wear: there would be no way to draw
 	// a voxel of this format at all.
 	if(!id.bound() && !color.bound())
@@ -364,6 +402,14 @@ ss_ VoxelFormat::dump() const
 	one("light_lamp", light_lamp);
 	one("param", param);
 	one("color", color);
+	one("tint", tint);
+	one("wetness", wetness);
+	one("grain", grain);
+	one("gloss", gloss);
+	one("speckle", speckle);
+	one("emission", emission);
+	one("sag_top", sag_top);
+	one("sag_bottom", sag_bottom);
 	os<<")";
 	return os.str();
 }
@@ -427,6 +473,34 @@ bool voxel_format_self_test()
 		f.color = VoxelField{0, 0, 24};
 		assert(f.validate(&why));
 		f.color = VoxelField{0, 0, 16};
+		assert(!f.validate(&why));
+	}
+
+	// The modifiers: at most four surface ones, in role order, and the
+	// geometry ones do not count against that
+	{
+		VoxelFormat f;
+		f.id = VoxelField{0, 0, 8};
+		f.gloss = VoxelField{0, 8, 4};
+		f.tint = VoxelField{0, 12, 4};
+		assert(f.validate(&why));
+		VoxelField slots[VOXEL_SURFACE_MODIFIERS];
+		assert(f.surface_modifiers(slots) == 2);
+		// Role order, not the order they were written here
+		assert(slots[0] == f.tint);
+		assert(slots[1] == f.gloss);
+		assert(!slots[2].bound());
+
+		f.sag_top = VoxelField{0, 16, 4};
+		f.sag_bottom = VoxelField{0, 20, 4};
+		assert(f.validate(&why));
+		assert(f.surface_modifiers(slots) == 2);
+
+		f.wetness = VoxelField{0, 24, 2};
+		f.grain = VoxelField{0, 26, 2};
+		assert(f.validate(&why));
+		assert(f.surface_modifiers(slots) == 4);
+		f.speckle = VoxelField{0, 28, 2}; // a fifth has nowhere to go
 		assert(!f.validate(&why));
 	}
 

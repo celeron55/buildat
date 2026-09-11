@@ -92,7 +92,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelFormat &v)
 	{
-		uint8_t version = 1;
+		uint8_t version = 2;
 		archive(
 				version,
 				v.plane_bits,
@@ -102,6 +102,21 @@ namespace interface
 				v.param,
 				v.color
 		);
+		// Version 1 had no modifier roles. The version is written from this
+		// function and read back into it, so this branch is "2 or newer" on
+		// the way in and always taken on the way out.
+		if(version >= 2){
+			archive(
+					v.tint,
+					v.wetness,
+					v.grain,
+					v.gloss,
+					v.speckle,
+					v.emission,
+					v.sag_top,
+					v.sag_bottom
+			);
+		}
 	}
 }
 // vim: set noet ts=4 sw=4:

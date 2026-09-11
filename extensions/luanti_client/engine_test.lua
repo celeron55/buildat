@@ -366,6 +366,59 @@ local function check_voxel_variants()
 	assert(not ok, "a variant with no params was allowed")
 end
 
+-- The modifier roles: fields the mesher reads to change how a voxel is drawn
+-- without a definition of its own. What can be checked without looking at a
+-- screen is which formats are accepted, what the format says it is, and that
+-- the definitions' own parameters reach a client.
+local function check_voxel_modifiers()
+	local safe = buildat.safe
+	local reg = safe.createVoxelRegistry()
+	reg:set_format{
+		id = {shift = 0, width = 8},
+		light_sky = {shift = 8, width = 4},
+		tint = {shift = 12, width = 4},
+		wetness = {shift = 16, width = 4},
+		sag_top = {shift = 20, width = 4},
+	}
+	assert(reg:dump_format() ==
+			"VoxelFormat(32-bit, id=0...7, light_sky=8...11, tint=12...15, "..
+			"wetness=16...19, sag_top=20...23)",
+			"dump_format() says "..reg:dump_format())
+
+	local def = safe.VoxelDefinition()
+	def.name.block_name = "engine_test:damp"
+	-- Dry at tint 0 and soaked at the top of the field
+	def.tint_ramp = {0xffffff, 0x807060}
+	def.sag_extent = 0.25
+	reg:add_voxel(def)
+	assert(def.tint_ramp[1] == 0xffffff and def.tint_ramp[2] == 0x807060,
+			"tint_ramp is "..def.tint_ramp[1]..", "..def.tint_ramp[2])
+	assert(math.abs(def.sag_extent - 0.25) < 1e-6,
+			"sag_extent is "..def.sag_extent)
+
+	-- Both travel to a client with the rest of the registry
+	local other = safe.createVoxelRegistry()
+	other:deserialize(reg:serialize())
+	assert(other:dump_format() == reg:dump_format(),
+			"the format did not travel: "..other:dump_format())
+	assert(other:serialize() == reg:serialize(),
+			"the definitions did not survive the round trip")
+
+	-- Only four surface modifiers reach the shader, so a fifth is refused
+	-- rather than silently dropped. The two sag roles are not among them.
+	local ok = pcall(function()
+		safe.createVoxelRegistry():set_format{
+			id = {shift = 0, width = 8},
+			tint = {shift = 8, width = 2},
+			wetness = {shift = 10, width = 2},
+			grain = {shift = 12, width = 2},
+			gloss = {shift = 14, width = 2},
+			speckle = {shift = 16, width = 2},
+		}
+	end)
+	assert(not ok, "a fifth surface modifier was allowed")
+end
+
 -- compose_image() writes a PNG, and Urho3D can read one back, so the pixels
 -- can actually be checked. The files go where the client's own temporary
 -- resources go, which is a resource dir, so they can be loaded by name.
@@ -637,6 +690,7 @@ function M.self_test()
 	check_pack_voxel_volume()
 	check_voxel_format()
 	check_voxel_variants()
+	check_voxel_modifiers()
 	check_compose_image()
 end
 

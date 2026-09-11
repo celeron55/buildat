@@ -221,6 +221,27 @@ namespace interface
 		// itself, not something the mesher indexes.
 		sv_<VoxelVariant> variants;
 		uint8_t variant_of_param[256] = {};
+		// The two ends of the colour the tint modifier moves between, each
+		// 0xRRGGBB: tint 0 is the first and a full tint is the second.
+		//
+		// This is a ramp rather than a per-voxel colour because a colour
+		// would eat three of the four scalars that reach the shader, and one
+		// scalar along a ramp the definition holds covers a palette, wet
+		// dirt darkening and a mixture's own colour alike. A definition that
+		// leaves both ends white is not tinted whatever the field says.
+		//
+		// As with VoxelVariant::color the vertex colour is light rather than
+		// albedo, so this tints the light the voxel receives.
+		uint32_t tint_ramp[2] = {0xffffff, 0xffffff};
+		// How far a full-value sag modifier moves a face, in voxels. 0 for a
+		// voxel that does not sag, which is most of them.
+		//
+		// What the sag itself means is the game's: a liquid's surface
+		// standing partway down its voxel, a floor giving under a load,
+		// snow lying shallow. The mesher only moves the face and averages
+		// the sag of the voxels that meet at each corner, so that a sagging
+		// surface runs continuously instead of stepping.
+		float sag_extent = 0.0f;
 		// TODO: Flag for whether all faces should be always drawn (in case the
 		//       textures contain holes)
 	};
@@ -254,6 +275,9 @@ namespace interface
 		// Copied from the definition; see VoxelDefinition::variants
 		sv_<VoxelVariant> variants;
 		uint8_t variant_of_param[256] = {};
+		// Copied from the definition
+		uint32_t tint_ramp[2] = {0xffffff, 0xffffff};
+		float sag_extent = 0.0f;
 
 		uint8_t tile_turns[6] = {};
 
@@ -311,6 +335,12 @@ namespace interface
 		}
 	};
 
+	// How many surface modifiers reach the shader at once; see VoxelFormat.
+	// Four, because that is what fits in the one thing a voxel vertex has
+	// spare -- CustomGeometryVertex's tangent, which the voxel mesher has
+	// never written and an axis-aligned face does not need.
+	static constexpr size_t VOXEL_SURFACE_MODIFIERS = 4;
+
 	// How a game cuts up a voxel: which bits are the type id, which are
 	// light, which are a parameter the definitions interpret, which are a
 	// colour, and what is left over for the game's own use.
@@ -353,6 +383,39 @@ namespace interface
 		// local/voxel_data_model_plan.md.
 		VoxelField color;
 
+		// Modifiers: fields the mesher reads to change how a voxel is drawn
+		// without a definition of its own. Where a role above says what a
+		// voxel *is*, a modifier says how much of something it has, as a
+		// value the mesher normalises against the field's own width -- so a
+		// 4-bit field and an 8-bit one both run 0...1 and a game can widen
+		// one without touching its shader.
+		//
+		// The surface modifiers are the first four bound of tint, wetness,
+		// grain, gloss, speckle and emission, in that order. They reach the
+		// shader as four scalars in a slot of the vertex and nowhere else:
+		// the engine promises the four numbers and their order, and what
+		// they look like is the game's shader's business. Only tint has a
+		// meaning to the engine, because it is the one that changes the
+		// vertex colour rather than being carried through.
+		//
+		// The order being fixed rather than the order they were bound in is
+		// what makes the slots the same in two worlds that bind the same
+		// roles, and what keeps a Lua table's iteration order out of a
+		// shader contract.
+		VoxelField tint;
+		VoxelField wetness;
+		VoxelField grain;
+		VoxelField gloss;
+		VoxelField speckle;
+		VoxelField emission;
+		// The geometry modifiers: how far the top and the bottom faces of a
+		// voxel move into it, scaled by the definition's sag_extent. These
+		// are not carried to the shader -- they move vertices, which is
+		// something the mesher has to do because a corner is shared by four
+		// voxels and only the mesher can see all four.
+		VoxelField sag_top;
+		VoxelField sag_bottom;
+
 		// The voxel is one 32-bit word for now. Planes are the next step;
 		// this is the field that becomes a list.
 		uint8_t plane_bits = 32;
@@ -392,6 +455,16 @@ namespace interface
 		// adjacent in the same plane with the sky light in the low bits,
 		// which is the only arrangement that can be one write.
 		bool light_pair(VoxelField *out) const;
+
+		// The bound surface modifiers in role order, which is the order a
+		// shader sees them in. Fills out[] with them and returns how many;
+		// the rest are left unbound.
+		size_t surface_modifiers(VoxelField out[VOXEL_SURFACE_MODIFIERS]) const;
+
+		bool any_surface_modifier() const {
+			VoxelField slots[VOXEL_SURFACE_MODIFIERS];
+			return surface_modifiers(slots) != 0;
+		}
 
 		// Every bound field is inside its plane, no two overlap, and the id
 		// fits VOXELTYPEID_MAX. why, when given, gets the first reason it

@@ -62,6 +62,10 @@ namespace interface
 			uint atlas_id = 0;
 			// Set when the generator wrote skylight into vertex colors
 			bool has_colors = false;
+			// Set when the generator wrote the voxel format's surface
+			// modifiers into the vertex tangent; see VoxelFormat in
+			// interface/voxel.h
+			bool has_tangents = false;
 			// CustomGeometry can't handle an index buffer
 			PODVector<CustomGeometryVertex> vertex_data;
 		};
@@ -87,6 +91,14 @@ namespace interface
 		//                in impl/mesh.cpp. cAmbientColor being the color of
 		//                the sky, a world moves the sun by setting it and
 		//                nothing has to be meshed again.
+		//   vertex tangent  the voxel format's surface modifiers, one per
+		//                component and 0...1 each, when the world binds any.
+		//                Which modifier is in which component is the format's
+		//                own order -- tint, wetness, grain, gloss, speckle,
+		//                emission, the bound ones packed towards x -- and a
+		//                shader knows its own world's. There is no tangent
+		//                to lose: a voxel face is axis-aligned, so a shader
+		//                that wants one derives it from the normal.
 		//   Roughness, Metallic  both 0; the maps carry these
 		// interface/atlas.h says what fills the two maps. No technique is set:
 		// a game picks one for its chunks in voxelworld.sub_material_update(),

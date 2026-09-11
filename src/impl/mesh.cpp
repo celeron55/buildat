@@ -40,6 +40,22 @@ struct VoxelFmt
 	interface::VoxelField id, light_sky, light_lamp, param, color;
 	float sky_div = 1.0f;
 	float lamp_div = 1.0f;
+	// The surface modifiers in the order a shader sees them, and what each
+	// one's own width divides by to come out 0...1. n_surface of them are
+	// bound; the rest read as zero.
+	interface::VoxelField surface[interface::VOXEL_SURFACE_MODIFIERS];
+	float surface_div[interface::VOXEL_SURFACE_MODIFIERS] = {
+		1.0f, 1.0f, 1.0f, 1.0f
+	};
+	size_t n_surface = 0;
+	// The tint, which is also surface[0] when it is bound -- it is the
+	// first of the surface roles, so it takes the first slot. The engine
+	// reads it as well as carrying it, because it is the one modifier that
+	// changes the vertex colour instead of only reaching the shader.
+	interface::VoxelField tint;
+	float tint_div = 1.0f;
+	interface::VoxelField sag_top, sag_bottom;
+	float sag_top_div = 1.0f, sag_bottom_div = 1.0f;
 
 	VoxelFmt(){}
 	VoxelFmt(VoxelRegistry *voxel_reg)
@@ -52,6 +68,46 @@ struct VoxelFmt
 		color = f.color;
 		sky_div = light_sky.bound() ? (float)light_sky.mask() : 1.0f;
 		lamp_div = light_lamp.bound() ? (float)light_lamp.mask() : 1.0f;
+		n_surface = f.surface_modifiers(surface);
+		for(size_t i = 0; i < n_surface; i++)
+			surface_div[i] = (float)surface[i].mask();
+		tint = f.tint;
+		tint_div = tint.bound() ? (float)tint.mask() : 1.0f;
+		sag_top = f.sag_top;
+		sag_bottom = f.sag_bottom;
+		sag_top_div = sag_top.bound() ? (float)sag_top.mask() : 1.0f;
+		sag_bottom_div = sag_bottom.bound() ? (float)sag_bottom.mask() : 1.0f;
+	}
+
+	// Anything about a voxel other than its id and its light that the mesher
+	// has to look the voxel up again for. Hoisted: a world that binds none
+	// of this does not pay for the lookup.
+	bool any_modifier() const
+	{
+		return n_surface != 0 || sag_top.bound() || sag_bottom.bound();
+	}
+	// The four scalars a shader is handed, 0...1 each
+	void surface_of(const VoxelInstance &v, float out[
+			interface::VOXEL_SURFACE_MODIFIERS]) const
+	{
+		for(size_t i = 0; i < interface::VOXEL_SURFACE_MODIFIERS; i++){
+			out[i] = i < n_surface ?
+					(float)surface[i].get(v.data) / surface_div[i] : 0.0f;
+		}
+	}
+	float tint_f(const VoxelInstance &v) const
+	{
+		return tint.bound() ? (float)tint.get(v.data) / tint_div : 0.0f;
+	}
+	float sag_top_f(const VoxelInstance &v) const
+	{
+		return sag_top.bound() ?
+				(float)sag_top.get(v.data) / sag_top_div : 0.0f;
+	}
+	float sag_bottom_f(const VoxelInstance &v) const
+	{
+		return sag_bottom.bound() ?
+				(float)sag_bottom.get(v.data) / sag_bottom_div : 0.0f;
 	}
 
 	interface::VoxelTypeId id_of(const VoxelInstance &v) const
@@ -484,7 +540,8 @@ static bool occludes(pv::RawVolume<VoxelInstance> &volume,
 // The voxel a face belongs to: half a voxel behind the face's centre, against
 // the normal. The same arithmetic as face_owned_by_padding(), and what wants
 // it is the face's own param, which PolyVox does not carry through.
-static VoxelInstance face_back_voxel(pv::RawVolume<VoxelInstance> &volume,
+// Where the voxel a face belongs to is, in the volume's own coordinates
+static pv::Vector3DInt32 face_back_pos(pv::RawVolume<VoxelInstance> &volume,
 		const pv::Vector3DFloat *quad, const pv::Vector3DFloat &n)
 {
 	pv::Vector3DFloat centre(0, 0, 0);
@@ -492,10 +549,48 @@ static VoxelInstance face_back_voxel(pv::RawVolume<VoxelInstance> &volume,
 		centre += quad[i];
 	centre /= 4.0f;
 	const pv::Vector3DInt32 vlc = volume.getEnclosingRegion().getLowerCorner();
-	return volume.getVoxelAt(
+	return pv::Vector3DInt32(
 			vlc.getX() + (int)std::floor(centre.getX() - n.getX()*0.5f + 0.5f),
 			vlc.getY() + (int)std::floor(centre.getY() - n.getY()*0.5f + 0.5f),
 			vlc.getZ() + (int)std::floor(centre.getZ() - n.getZ()*0.5f + 0.5f));
+}
+
+static VoxelInstance face_back_voxel(pv::RawVolume<VoxelInstance> &volume,
+		const pv::Vector3DFloat *quad, const pv::Vector3DFloat &n)
+{
+	return volume.getVoxelAt(face_back_pos(volume, quad, n));
+}
+
+// How far a face has moved at one corner: the average sag of the up to four
+// voxels that meet there and sag at all. x and z are the low corner of that
+// two by two, y is the row of voxels the corner is the top or the bottom of,
+// and all three are the volume's own coordinates.
+//
+// A voxel whose definition has no sag_extent is left out of the average
+// rather than counted as zero, which is what makes a single sagging voxel
+// sag all of its face instead of only its middle. The same rule is what
+// liquid_corner_top() applies to columns that are not the same liquid.
+static float sag_at_corner(pv::RawVolume<VoxelInstance> &volume,
+		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
+		int x, int y, int z, bool top)
+{
+	float sum = 0.0f;
+	int n = 0;
+	for(int ix = 0; ix < 2; ix++){
+		for(int iz = 0; iz < 2; iz++){
+			VoxelInstance v = volume.getVoxelAt(x + ix, y, z + iz);
+			if(fmt.undefined(v))
+				continue;
+			const interface::CachedVoxelDefinition *def =
+					voxel_reg->get_cached(v);
+			if(def == nullptr || def->sag_extent == 0.0f)
+				continue;
+			sum += def->sag_extent *
+					(top ? fmt.sag_top_f(v) : fmt.sag_bottom_f(v));
+			n++;
+		}
+	}
+	return n == 0 ? 0.0f : sum / (float)n;
 }
 
 // A voxel's own colour multiplied into the light the mesher worked out. The
@@ -521,6 +616,29 @@ static uint32_t mul_rgb(uint32_t a, uint32_t b)
 	uint32_t g = ((a >> 8) & 0xff) * ((b >> 8) & 0xff) / 255;
 	uint32_t bl = (a & 0xff) * (b & 0xff) / 255;
 	return (r << 16) | (g << 8) | bl;
+}
+
+// The colour a tint modifier of t picks out of a definition's ramp, plain
+// 0xRRGGBB. A definition that left both ends white is not tinted, whatever
+// its field says, which is what lets one format serve a world where only
+// some of the voxels care.
+static uint32_t tint_ramp_color(const interface::CachedVoxelDefinition *def,
+		float t)
+{
+	const uint32_t a = def->tint_ramp[0], b = def->tint_ramp[1];
+	if(a == 0xffffff && b == 0xffffff)
+		return 0xffffff;
+	if(t < 0.0f)
+		t = 0.0f;
+	else if(t > 1.0f)
+		t = 1.0f;
+	uint32_t out = 0;
+	for(int shift = 16; shift >= 0; shift -= 8){
+		float ca = (float)((a >> shift) & 0xff);
+		float cb = (float)((b >> shift) & 0xff);
+		out |= (uint32_t)(ca + (cb - ca) * t + 0.5f) << shift;
+	}
+	return out;
 }
 
 // A plain 0xRRGGBB tint multiplied into a colour that is already packed for
@@ -798,13 +916,26 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		// carry through the extractor, so the voxel is looked up again.
 		const interface::VoxelVariant *variant = nullptr;
 		uint32_t voxel_color = 0xffffff;
+		// The surface modifiers of the voxel behind this face, which every
+		// vertex of it carries to the shader
+		float mods[interface::VOXEL_SURFACE_MODIFIERS] = {};
 		if((fmt.param.bound() && !voxel_def0->variants.empty()) ||
-				fmt.color.bound()){
+				fmt.color.bound() || fmt.n_surface != 0){
 			VoxelInstance back = face_back_voxel(volume, quad, n);
 			if(fmt.param.bound() && !voxel_def0->variants.empty())
 				variant = voxel_def0->variant(fmt.param.get(back.data));
 			if(fmt.color.bound())
 				voxel_color = fmt.color.get(back.data) & 0xffffffUL;
+			if(fmt.n_surface != 0){
+				fmt.surface_of(back, mods);
+				// The tint is the one modifier the engine reads as well as
+				// carries: the field says how far along the definition's
+				// own ramp this voxel is
+				if(fmt.tint.bound()){
+					voxel_color = mul_rgb(voxel_color,
+							tint_ramp_color(voxel_def0, fmt.tint_f(back)));
+				}
+			}
 		}
 		// Get texture coordinates (contained in AtlasSegmentCache)
 		const uint tile = variant ? (variant->tile_order[face_id] < 6 ?
@@ -873,6 +1004,7 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		if(tg.vertex_data.Empty()){
 			tg.atlas_id = seg_ref.atlas_id;
 			tg.has_colors = use_skylight;
+			tg.has_tangents = fmt.n_surface != 0;
 			// It can't get larger than this and will only exist temporarily in
 			// memory, so let's do only one big memory allocation
 			tg.vertex_data.Reserve(pv_vertices.size() / 4 * 6);
@@ -899,6 +1031,32 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			// something that has to reach the shader
 			tg.has_colors = true;
 		}
+		// How far each corner of the face has moved, when the world has a
+		// sag bound and anything around here sags. A corner is shared by
+		// four voxels and they agree on it, which is what keeps a sagging
+		// surface continuous across a voxel boundary.
+		float sag[4] = {};
+		if(fmt.sag_top.bound() || fmt.sag_bottom.bound()){
+			const pv::Vector3DInt32 bp = face_back_pos(volume, quad, n);
+			const pv::Vector3DInt32 vlc =
+					volume.getEnclosingRegion().getLowerCorner();
+			for(size_t i = 0; i < 4; i++){
+				// The corners sit half a voxel out from the centres, so the
+				// two by two that meets this one starts at the floor of it
+				const int cx = vlc.getX() + (int)std::floor(quad[i].getX());
+				const int cz = vlc.getZ() + (int)std::floor(quad[i].getZ());
+				const float cy = (float)vlc.getY() + quad[i].getY();
+				if(cy > (float)bp.getY()){
+					// The top of the voxel this face belongs to: down
+					sag[i] = -sag_at_corner(volume, voxel_reg, fmt,
+							cx, bp.getY(), cz, true);
+				} else {
+					// Its bottom: up, into the voxel
+					sag[i] = sag_at_corner(volume, voxel_reg, fmt,
+							cx, bp.getY(), cz, false);
+				}
+			}
+		}
 		// Go through indices of the face and mangle vertices according to them
 		// into the temporary vertex buffer
 		size_t pv_index_i0 = pv_face_i * 6;
@@ -913,6 +1071,7 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			CustomGeometryVertex &tg_vert = tg.vertex_data.Back();
 			tg_vert.position_.x_ = pv_vert.position.getX() - w/2.0f - 0.5f;
 			tg_vert.position_.y_ = pv_vert.position.getY() - h/2.0f - 0.5f;
+			tg_vert.position_.y_ += sag[pv_vertex_i - pv_vertex_i0];
 			tg_vert.position_.z_ = pv_vert.position.getZ() - d/2.0f - 0.5f;
 			tg_vert.normal_.x_ = pv_vert.normal.getX();
 			tg_vert.normal_.y_ = pv_vert.normal.getY();
@@ -923,6 +1082,10 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			turn_txcoord(aseg, variant ? variant->tile_turns[face_id] :
 					voxel_def0->tile_turns[face_id], tg_vert);
 			tg_vert.color_ = corner_colors[pv_vertex_i1];
+			if(fmt.n_surface != 0){
+				tg_vert.tangent_ = Vector4(mods[0], mods[1], mods[2],
+						mods[3]);
+			}
 		}
 #endif
 	}
@@ -1093,6 +1256,11 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 					continue;
 				const float liquid_top = variant ?
 						variant->liquid_top : def->liquid_top;
+				// The surface modifiers of this voxel, carried by every
+				// vertex of every quad of its shape
+				float mods[interface::VOXEL_SURFACE_MODIFIERS] = {};
+				if(fmt.n_surface != 0)
+					fmt.surface_of(v, mods);
 				// Where this voxel's centre is in the chunk's own model
 				// coordinates; the same arithmetic the cube faces get
 				const float cx = (x - lc.getX()) - w / 2.0f - 0.5f;
@@ -1230,6 +1398,7 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 					if(tg.vertex_data.Empty()){
 						tg.atlas_id = seg_ref.atlas_id;
 						tg.has_colors = use_skylight;
+						tg.has_tangents = fmt.n_surface != 0;
 					}
 					unsigned color = 0xffffffff;
 					if(use_skylight){
@@ -1246,6 +1415,9 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 					uint32_t tint = 0xffffff;
 					if(fmt.color.bound())
 						tint = fmt.color.get(v.data) & 0xffffffUL;
+					if(fmt.tint.bound())
+						tint = mul_rgb(tint,
+								tint_ramp_color(def, fmt.tint_f(v)));
 					if(variant)
 						tint = mul_rgb(tint, variant->color);
 					if(tint != 0xffffff){
@@ -1283,6 +1455,10 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 									aseg->coord0.y_ + quad.uv[c][1] *
 											(aseg->coord1.y_ - aseg->coord0.y_));
 							tv.color_ = color;
+							if(fmt.n_surface != 0){
+								tv.tangent_ = Vector4(mods[0], mods[1],
+										mods[2], mods[3]);
+							}
 						}
 					}
 				}
@@ -1312,7 +1488,7 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 		if(atlas_cache->texture == nullptr)
 			throw Exception("atlas_cache->texture == nullptr");
 		cg->DefineGeometry(cg_i, TRIANGLE_LIST, tg.vertex_data.Size(),
-				true, tg.has_colors, true, false);
+				true, tg.has_colors, true, tg.has_tangents);
 		PODVector<CustomGeometryVertex> &cg_vertices = cg_all_vertices[cg_i];
 		cg_vertices = tg.vertex_data;
 		Material *material = new Material(context);
@@ -1540,7 +1716,7 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 		if(atlas_cache->texture == nullptr)
 			throw Exception("atlas_cache->texture == nullptr");
 		cg->DefineGeometry(cg_i, TRIANGLE_LIST, tg.vertex_data.Size(),
-				true, tg.has_colors, true, false);
+				true, tg.has_colors, true, tg.has_tangents);
 		PODVector<CustomGeometryVertex> &cg_vertices = cg_all_vertices[cg_i];
 		cg_vertices = tg.vertex_data;
 		Material *material = new Material(context);
