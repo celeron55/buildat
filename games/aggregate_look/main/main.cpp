@@ -11,6 +11,7 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/voxel.h"
+#include "interface/voxel_selector.h"
 #include <Scene.h>
 #include <Context.h>
 #define MODULE "main"
@@ -40,10 +41,32 @@ using namespace Urho3D;
 static const int VOLUME_SIZE = 64;
 static const int FLOOR_TOP = 8;
 
-static const uint8_t AIR_ID = 1;
-static const uint8_t FLOOR_ID = 2;
-static const uint8_t ROCK_ID = 3;
-static const uint8_t SAND_ID = 4;
+// The only id in this world, written into every voxel so that voxelworld can
+// tell a generated voxel from one nothing has got to yet. It says nothing
+// about what the voxel is: that comes out of the rock and sand fractions
+// through the registry's look rules, which is the thing aggregate needs and
+// this is the first world to use.
+static const uint8_t PRESENT_ID = 1;
+
+// The definitions the look rules choose between. They are still voxel types
+// as far as the registry is concerned -- a definition is where every
+// property lives -- but nothing stores one.
+static const uint8_t AIR_DEF = 1;
+static const uint8_t ROCK_DEF = 2;
+static const uint8_t SAND_DEF = 3;
+
+// The game's own fields, which no engine role covers: how much of a voxel is
+// rock and how much is sand. Two bits each, because what reads on screen is
+// which side of a threshold a mixture is on and not where in the range it
+// sits -- which is this spike's own answer, applied.
+static const interface::VoxelField F_ROCK(0, 28, 2);
+static const interface::VoxelField F_SAND(0, 30, 2);
+
+// A fraction of a voxel, in the two bits each of these gets: four levels,
+// which is all a threshold needs
+static const int FRACTION_MAX = 3;
+// Over this much of a voxel and it is that material
+static const int FRACTION_THRESHOLD = 2;
 
 // The samples stand in a wall facing the camera: ten columns of a row run
 // along x, the rows are stacked in y, and all of them sit at one z. A grid
@@ -60,7 +83,8 @@ static const int GRID_Z0 = 34;
 // A sample: what the fields of every voxel in one block are set to
 struct Sample
 {
-	uint8_t id = AIR_ID;
+	int rock = 0;
+	int sand = 0;
 	int tint = 0;
 	int wetness = 0;
 	int grain = 0;
@@ -87,18 +111,26 @@ static Sample sample_at(int row, int col)
 		int i = (int)(v * 15.0f + 0.5f);
 		return i < 0 ? 0 : (i > 15 ? 15 : i);
 	};
+	auto frac = [](float v){
+		int i = (int)(v * (float)FRACTION_MAX + 0.5f);
+		return i < 0 ? 0 : (i > FRACTION_MAX ? FRACTION_MAX : i);
+	};
 	Sample s;
+	// Every row but the two mixture ones is sand
+	s.sand = FRACTION_MAX;
 	switch(row){
 	case 0:
-		s.id = SAND_ID;
 		s.sag_top = q(f);
 		break;
 	case 1:
 	case 2:
-		// The sand fraction runs 0...1; the base is whichever material has
-		// more than half of the voxel, and the grain says how much sand is
-		// in it whichever way the threshold went
-		s.id = f < 0.5f ? ROCK_ID : SAND_ID;
+		// The sand fraction runs 0...1 and the rock's is what is left. No
+		// id is written: which of the two definitions the voxel wears comes
+		// out of the look rules, which are a threshold over these. The
+		// grain says how much sand is in it whichever way the threshold
+		// went.
+		s.rock = frac(1.0f - f);
+		s.sand = frac(f);
 		s.grain = q(f);
 		if(row == 2){
 			s.tint = 15;
@@ -106,12 +138,10 @@ static Sample sample_at(int row, int col)
 		}
 		break;
 	case 3:
-		s.id = SAND_ID;
 		s.tint = q(f);
 		s.wetness = q(f);
 		break;
 	case 4:
-		s.id = SAND_ID;
 		s.gloss = q(f);
 		break;
 	}
@@ -122,13 +152,15 @@ static Sample sample_at(int row, int col)
 static uint32_t word_of(const interface::VoxelFormat &f, const Sample &s)
 {
 	uint32_t word = 0;
-	f.id.set(word, s.id);
+	f.id.set(word, PRESENT_ID);
 	f.light_sky.set(word, f.light_sky.mask());
 	f.tint.set(word, s.tint);
 	f.wetness.set(word, s.wetness);
 	f.grain.set(word, s.grain);
 	f.gloss.set(word, s.gloss);
 	f.sag_top.set(word, s.sag_top);
+	F_ROCK.set(word, s.rock);
+	F_SAND.set(word, s.sand);
 	return word;
 }
 
@@ -147,6 +179,32 @@ static interface::VoxelFormat look_format()
 	return f;
 }
 
+// The look rules: which definition a voxel wears, as a threshold over the
+// fractions rather than a type id to look up. Rock first, so a voxel that is
+// half of each reads as the one that holds a structure up; then sand; then
+// everything left, which is air.
+static interface::VoxelSelector look_selector()
+{
+	interface::VoxelSelector s;
+	s.kind = interface::VoxelSelector::RULES;
+	s.fallback = AIR_DEF;
+	{
+		interface::VoxelRule r;
+		r.clauses.push_back(interface::VoxelRuleClause(
+				F_ROCK, FRACTION_THRESHOLD, FRACTION_MAX));
+		r.result = ROCK_DEF;
+		s.rules.push_back(r);
+	}
+	{
+		interface::VoxelRule r;
+		r.clauses.push_back(interface::VoxelRuleClause(
+				F_SAND, FRACTION_THRESHOLD, FRACTION_MAX));
+		r.result = SAND_DEF;
+		s.rules.push_back(r);
+	}
+	return s;
+}
+
 struct Worldgen: public worldgen::GeneratorInterface
 {
 	interface::VoxelFormat m_format = look_format();
@@ -162,7 +220,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 		Sample air;
 		const uint32_t air_word = word_of(m_format, air);
 		Sample floor;
-		floor.id = FLOOR_ID;
+		floor.rock = FRACTION_MAX;
 		const uint32_t floor_word = word_of(m_format, floor);
 
 		for(int z = lc.getZ(); z <= uc.getZ(); z++){
@@ -281,15 +339,15 @@ struct Module: public interface::Module
 					get_instance(m_main_scene);
 			interface::VoxelRegistry *reg = world->get_voxel_reg();
 			reg->set_format(look_format());
-			add_voxel(reg, "air", "", false);                    // id 1
-			add_voxel(reg, "floor", "main/white.png", true);     // id 2
-			// The tint darkens a material as it takes water, which is the
-			// one thing a light tint is honestly right for. A sag of a full
-			// field takes most of a voxel, so that it can be seen at all.
+			add_voxel(reg, "air", "", false);                    // AIR_DEF
+			// The tint darkens a material as it takes water. A sag of a
+			// full field takes most of a voxel, so that it can be seen.
 			add_voxel(reg, "rock", "main/rock.png", true,
-					0xffffff, 0x6a7280, 0.8f);                   // id 3
+					0xffffff, 0x6a7280, 0.8f);                   // ROCK_DEF
 			add_voxel(reg, "sand", "main/sand.png", true,
-					0xffffff, 0x8a7550, 0.8f);                   // id 4
+					0xffffff, 0x8a7550, 0.8f);                   // SAND_DEF
+			// After the definitions, because the rules point at them
+			reg->set_look_selector(look_selector());
 
 			world->set_skylight_enabled(true);
 			log_v(MODULE, "aggregate_look: %s",

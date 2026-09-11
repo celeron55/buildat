@@ -3,6 +3,7 @@
 #pragma once
 #include "core/types.h"
 #include "interface/voxel.h"
+#include "interface/voxel_selector.h"
 #include "interface/atlas_cereal.h"
 #include <cereal/types/string.hpp>
 #include <cereal/types/vector.hpp>
@@ -92,6 +93,24 @@ namespace interface
 			void serialize(Archive &archive, VoxelField &v)
 	{
 		archive(v.plane, v.shift, v.width);
+	}
+
+	template<class Archive>
+			void serialize(Archive &archive, VoxelRuleClause &v)
+	{
+		archive(v.field, v.lo, v.hi);
+	}
+
+	template<class Archive>
+			void serialize(Archive &archive, VoxelRule &v)
+	{
+		archive(v.clauses, v.result);
+	}
+
+	template<class Archive>
+			void serialize(Archive &archive, VoxelSelector &v)
+	{
+		archive(v.kind, v.rules, v.fallback);
 	}
 
 	template<class Archive>
