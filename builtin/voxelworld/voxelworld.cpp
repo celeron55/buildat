@@ -40,6 +40,7 @@ namespace magic = Urho3D;
 namespace pv = PolyVox;
 using namespace Urho3D;
 using interface::VoxelInstance;
+using interface::VoxelVolume;
 using interface::container_coord;
 using interface::container_coord16;
 
@@ -48,7 +49,7 @@ namespace voxelworld {
 struct ChunkBuffer
 {
 	pv::Vector3DInt32 chunk_p; // For logging
-	up_<pv::RawVolume<VoxelInstance>> volume;
+	up_<VoxelVolume> volume;
 	bool dirty = false; // If false, buffer has only been read from so far
 	int64_t last_accessed_us = 0;
 
@@ -362,7 +363,7 @@ struct CInstance: public voxelworld::Instance
 				const Variant &var = n->GetVar(StringHash("buildat_voxel_data"));
 				const PODVector<unsigned char> &rawbuf = var.GetBuffer();
 				ss_ data((const char*)&rawbuf[0], rawbuf.Size());
-				up_<pv::RawVolume<VoxelInstance>> volume =
+				up_<VoxelVolume> volume =
 						interface::deserialize_volume(data);
 				// Update collision shape
 				interface::mesh::set_voxel_physics_boxes(n, context, *volume,
@@ -565,18 +566,12 @@ struct CInstance: public voxelworld::Instance
 		//       make proper meshes without gaps
 		// TODO: Is this needed anymore?
 		pv::Region region(-1, -1, -1, w, h, d);
-		sp_<pv::RawVolume<VoxelInstance>> volume(
-				new pv::RawVolume<VoxelInstance>(region));
+		sp_<VoxelVolume> volume(
+				new VoxelVolume(region));
 
-		auto lc = region.getLowerCorner();
-		auto uc = region.getUpperCorner();
-		for(int z = lc.getZ(); z <= uc.getZ(); z++){
-			for(int y = lc.getY(); y <= uc.getY(); y++){
-				for(int x = lc.getX(); x <= uc.getX(); x++){
-					volume->setVoxelAt(x, y, z, VoxelInstance(0));
-				}
-			}
-		}
+		// Every plane of a new volume reads as zero and none of them is
+		// allocated, so a chunk of nothing but VOXELTYPEID_UNDEFINED costs
+		// its planes nothing at all
 
 		run_commit_hooks_in_thread(chunk_p, *volume);
 
@@ -662,7 +657,7 @@ struct CInstance: public voxelworld::Instance
 	// modify the volume
 	void run_commit_hooks_in_thread(
 			const pv::Vector3DInt32 &chunk_p,
-			pv::RawVolume<VoxelInstance> &volume)
+			VoxelVolume &volume)
 	{
 		for(up_<CommitHook> &hook : m_commit_hooks)
 			hook->in_thread(this, chunk_p, volume);
@@ -911,7 +906,7 @@ struct CInstance: public voxelworld::Instance
 			const Variant &var = n->GetVar(StringHash("buildat_voxel_data"));
 			const PODVector<unsigned char> &buf = var.GetBuffer();
 			ss_ data((const char*)&buf[0], buf.Size());
-			up_<pv::RawVolume<VoxelInstance>> volume =
+			up_<VoxelVolume> volume =
 					interface::deserialize_volume(data);
 
 			pv::Vector3DInt32 voxel_p(
@@ -1017,7 +1012,7 @@ struct CInstance: public voxelworld::Instance
 	// priorities are. This is chunk by chunk rather than voxel by voxel
 	// through set_voxel(): a section is a quarter of a million voxels, and
 	// all of this is done while holding the module.
-	void merge_volume(const pv::RawVolume<VoxelInstance> &volume,
+	void merge_volume(const VoxelVolume &volume,
 			bool create_missing_sections)
 	{
 		const pv::Region region = volume.getEnclosingRegion();
@@ -1075,9 +1070,9 @@ struct CInstance: public voxelworld::Instance
 			// coordinates every time. Luanti's VoxelManipulator walks its
 			// own index the same way, and for a whole section of voxels the
 			// difference is the bulk of the work.
-			pv::RawVolume<VoxelInstance>::Sampler src(
-					const_cast<pv::RawVolume<VoxelInstance>*>(&volume));
-			pv::RawVolume<VoxelInstance>::Sampler dst(buf.volume.get());
+			VoxelVolume::Sampler src(
+					const_cast<VoxelVolume*>(&volume));
+			VoxelVolume::Sampler dst(buf.volume.get());
 
 			bool chunk_written = false;
 			for(int z = lc.getZ(); z <= uc.getZ(); z++){
@@ -1177,7 +1172,7 @@ struct CInstance: public voxelworld::Instance
 	// edge leaves the neighbour's copy of it stale until that neighbour is
 	// committed in turn.
 	void fill_chunk_padding(const pv::Vector3DInt32 &chunk_p,
-			pv::RawVolume<VoxelInstance> &volume)
+			VoxelVolume &volume)
 	{
 		const pv::Region &region = volume.getEnclosingRegion();
 		auto lc = region.getLowerCorner();

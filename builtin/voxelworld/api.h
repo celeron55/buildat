@@ -5,6 +5,7 @@
 #include "interface/server.h"
 #include "interface/module.h"
 #include "interface/voxel.h"
+#include "interface/voxel_volume.h"
 #include <PolyVoxCore/Vector.h>
 #include <PolyVoxCore/Region.h>
 #include <PolyVoxCore/RawVolume.h>
@@ -27,6 +28,8 @@ namespace voxelworld
 {
 	namespace magic = Urho3D;
 	namespace pv = PolyVox;
+
+	using interface::VoxelVolume;
 	using interface::VoxelInstance;
 	using main_context::SceneReference;
 
@@ -63,7 +66,7 @@ namespace voxelworld
 		virtual ~CommitHook(){}
 		virtual void in_thread(voxelworld::Instance *world,
 				const pv::Vector3DInt32 &chunk_p,
-				pv::RawVolume<VoxelInstance> &volume){}
+				VoxelVolume &volume){}
 		virtual void in_scene(voxelworld::Instance *world,
 				const pv::Vector3DInt32 &chunk_p, magic::Node *n){}
 	};
@@ -115,7 +118,7 @@ namespace voxelworld
 		// (EDGEMATERIALID_EMPTY) may still hold a mesh of its own, and counts
 		// as something standing there.
 		virtual void merge_volume(
-				const pv::RawVolume<VoxelInstance> &volume,
+				const VoxelVolume &volume,
 				bool create_missing_sections) = 0;
 
 		// Maintain VoxelInstance::get_skylight() of every voxel in the world.

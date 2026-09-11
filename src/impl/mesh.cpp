@@ -241,7 +241,7 @@ Model* create_8bit_voxel_physics_model(Context *context,
 	if(w * h * d != (int)source_data.size())
 		throw Exception("Mismatched data size");
 	const VoxelFmt fmt(voxel_reg);
-	pv::RawVolume<VoxelInstance> volume(pv::Region(
+	VoxelVolume volume(pv::Region(
 			pv::Vector3DInt32(-1, -1, -1),
 			pv::Vector3DInt32(w, h, d)));
 	size_t i = 0;
@@ -272,7 +272,7 @@ void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 		throw Exception("Negative dimension");
 	if(w * h * d != (int)source_data.size())
 		throw Exception("Mismatched data size");
-	pv::RawVolume<VoxelInstance> volume(pv::Region(
+	VoxelVolume volume(pv::Region(
 			pv::Vector3DInt32(-1, -1, -1),
 			pv::Vector3DInt32(w, h, d)));
 	const VoxelFmt fmt(voxel_reg);
@@ -343,12 +343,12 @@ public:
 // Volume should be padded by one voxel on each edge
 // Returns nullptr if there is no geometry
 Model* create_voxel_physics_model(Context *context,
-		pv::RawVolume<VoxelInstance> &volume,
+		VoxelVolume &volume,
 		VoxelRegistry *voxel_reg)
 {
 	IsQuadNeededByRegistryPhysics<VoxelInstance> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
-	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
+	pv::CubicSurfaceExtractorWithNormals<VoxelVolume,
 				IsQuadNeededByRegistryPhysics<VoxelInstance>>
 			surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh, iqn);
 	surfaceExtractor.execute();
@@ -478,7 +478,7 @@ public:
 // draws for its own voxel. Drawing both leaves a doubled, z-fighting layer
 // along every chunk boundary, so faces owned by the padding are dropped. The
 // face belongs to the voxel half a voxel behind it, against the normal.
-static bool face_owned_by_padding(pv::RawVolume<VoxelInstance> &volume,
+static bool face_owned_by_padding(VoxelVolume &volume,
 		const pv::Vector3DFloat *quad, const pv::Vector3DFloat &n)
 {
 	pv::Vector3DFloat centre(0, 0, 0);
@@ -539,7 +539,7 @@ static const float AO_LEVELS[4] = {1.0f, 0.72f, 0.52f, 0.38f};
 // are the brightest thing in it.
 static const float BOUNCE_AO = 0.70f;
 
-static bool occludes(pv::RawVolume<VoxelInstance> &volume,
+static bool occludes(VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
 		const pv::Vector3DInt32 &p)
 {
@@ -556,7 +556,7 @@ static bool occludes(pv::RawVolume<VoxelInstance> &volume,
 // the normal. The same arithmetic as face_owned_by_padding(), and what wants
 // it is the face's own param, which PolyVox does not carry through.
 // Where the voxel a face belongs to is, in the volume's own coordinates
-static pv::Vector3DInt32 face_back_pos(pv::RawVolume<VoxelInstance> &volume,
+static pv::Vector3DInt32 face_back_pos(VoxelVolume &volume,
 		const pv::Vector3DFloat *quad, const pv::Vector3DFloat &n)
 {
 	pv::Vector3DFloat centre(0, 0, 0);
@@ -570,7 +570,7 @@ static pv::Vector3DInt32 face_back_pos(pv::RawVolume<VoxelInstance> &volume,
 			vlc.getZ() + (int)std::floor(centre.getZ() - n.getZ()*0.5f + 0.5f));
 }
 
-static VoxelInstance face_back_voxel(pv::RawVolume<VoxelInstance> &volume,
+static VoxelInstance face_back_voxel(VoxelVolume &volume,
 		const pv::Vector3DFloat *quad, const pv::Vector3DFloat &n)
 {
 	return volume.getVoxelAt(face_back_pos(volume, quad, n));
@@ -592,7 +592,7 @@ static VoxelInstance face_back_voxel(pv::RawVolume<VoxelInstance> &volume,
 // between two voxels of the same stuff. That is Luanti's rule for a liquid
 // with the same liquid above it, which is the same situation. The bottom is
 // the same the other way up.
-static float sag_at_corner(pv::RawVolume<VoxelInstance> &volume,
+static float sag_at_corner(VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
 		int x, int y, int z, bool top)
 {
@@ -705,7 +705,7 @@ static unsigned modulate_color(unsigned lit, uint32_t rgb)
 // next to it. It cannot always: a neighbour that is not in memory leaves its
 // side undefined. Those faces fall back to the skylight of the solid voxel,
 // which the world stores as a per-voxel approximation for exactly this case.
-static void face_vertex_colors(pv::RawVolume<VoxelInstance> &volume,
+static void face_vertex_colors(VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
 		const pv::Vector3DFloat *quad,
 		const pv::Vector3DFloat &n, uint face_id, unsigned out[4])
@@ -870,7 +870,7 @@ void assign_txcoords(size_t pv_vertex_i1, const AtlasSegmentCache *aseg,
 	}
 }
 
-void preload_textures(pv::RawVolume<VoxelInstance> &volume,
+void preload_textures(VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg, bool with_lod)
 {
 	const VoxelFmt fmt(voxel_reg);
@@ -893,14 +893,14 @@ void preload_textures(pv::RawVolume<VoxelInstance> &volume,
 }
 
 static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
-		pv::RawVolume<VoxelInstance> &volume,
+		VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
 		AtlasRegistry *atlas_reg,
 		bool use_skylight,
 		sm_<uint, TemporaryGeometry> *translucent_result);
 
 void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
-		pv::RawVolume<VoxelInstance> &volume,
+		VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 		bool use_skylight,
 		sm_<uint, TemporaryGeometry> *translucent_result)
@@ -908,7 +908,7 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 	const VoxelFmt fmt(voxel_reg);
 	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
-	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
+	pv::CubicSurfaceExtractorWithNormals<VoxelVolume,
 				IsQuadNeededByRegistry<VoxelInstance>>
 			surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh, iqn);
 	surfaceExtractor.execute();
@@ -1149,7 +1149,7 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 // a body of liquid rather than a surface; and a corner that two of the four
 // columns leave empty is at the bottom, which is what makes the edge of a
 // spill thin out rather than stand as a wall.
-static float liquid_corner_top(pv::RawVolume<VoxelInstance> &volume,
+static float liquid_corner_top(VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt, int x, int y, int z,
 		const interface::CachedVoxelDefinition *def, float def_top,
 		int dx, int dz)
@@ -1201,7 +1201,7 @@ static float liquid_corner_top(pv::RawVolume<VoxelInstance> &volume,
 // that says so, when the neighbour is simply solid, which is how a fence
 // reaches into a wall of stone. What the families are is the game's business;
 // see interface/voxel.h.
-static bool connects_to(pv::RawVolume<VoxelInstance> &volume,
+static bool connects_to(VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt, int x, int y, int z,
 		const interface::CachedVoxelDefinition *def)
 {
@@ -1219,7 +1219,7 @@ static bool connects_to(pv::RawVolume<VoxelInstance> &volume,
 	return false;
 }
 
-static uint connected_faces(pv::RawVolume<VoxelInstance> &volume,
+static uint connected_faces(VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt, int x, int y, int z,
 		const interface::CachedVoxelDefinition *def, uint *stepped_up)
 {
@@ -1269,7 +1269,7 @@ static uint connected_faces(pv::RawVolume<VoxelInstance> &volume,
 // neighbouring chunks, which draw it themselves; the padding is here so that
 // the cube faces can be culled against it.
 static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
-		pv::RawVolume<VoxelInstance> &volume,
+		VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
 		AtlasRegistry *atlas_reg,
 		bool use_skylight,
@@ -1568,7 +1568,7 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 // Set custom geometry from voxel volume, using a voxel registry
 // Volume should be padded by one voxel on each edge
 void set_voxel_geometry(CustomGeometry *cg, Context *context,
-		pv::RawVolume<VoxelInstance> &volume,
+		VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 		bool use_skylight)
 {
@@ -1581,8 +1581,8 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 	set_voxel_geometry(cg, context, temp_geoms, atlas_reg);
 }
 
-up_<pv::RawVolume<VoxelInstance>> generate_voxel_lod_volume(
-		int lod, pv::RawVolume<VoxelInstance>&volume_orig,
+up_<VoxelVolume> generate_voxel_lod_volume(
+		int lod, VoxelVolume&volume_orig,
 		VoxelRegistry *voxel_reg)
 {
 	const VoxelFmt fmt(voxel_reg);
@@ -1595,8 +1595,8 @@ up_<pv::RawVolume<VoxelInstance>> generate_voxel_lod_volume(
 	auto &lc = region.getLowerCorner();
 	auto &uc = region.getUpperCorner();
 
-	up_<pv::RawVolume<VoxelInstance>> volume(
-			new pv::RawVolume<VoxelInstance>(region));
+	up_<VoxelVolume> volume(
+			new VoxelVolume(region));
 	for(int z = lc.getZ(); z <= uc.getZ(); z++){
 		for(int y = lc.getY(); y <= uc.getY(); y++){
 			for(int x = lc.getX(); x <= uc.getX(); x++){
@@ -1635,14 +1635,14 @@ up_<pv::RawVolume<VoxelInstance>> generate_voxel_lod_volume(
 // Can be called from any thread
 void generate_voxel_lod_geometry(int lod,
 		sm_<uint, TemporaryGeometry> &result,
-		pv::RawVolume<VoxelInstance> &lod_volume,
+		VoxelVolume &lod_volume,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 		bool use_skylight)
 {
 	const VoxelFmt fmt(voxel_reg);
 	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
-	pv::CubicSurfaceExtractorWithNormals<pv::RawVolume<VoxelInstance>,
+	pv::CubicSurfaceExtractorWithNormals<VoxelVolume,
 				IsQuadNeededByRegistry<VoxelInstance>>
 			surfaceExtractor(&lod_volume, lod_volume.getEnclosingRegion(), &pv_mesh, iqn);
 	surfaceExtractor.execute();
@@ -1796,11 +1796,11 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 // Set custom geometry from voxel volume, using a voxel registry
 // Volume should be padded by one voxel on each edge
 void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
-		pv::RawVolume<VoxelInstance> &volume_orig,
+		VoxelVolume &volume_orig,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 		bool use_skylight)
 {
-	up_<pv::RawVolume<VoxelInstance>> lod_volume = generate_voxel_lod_volume(
+	up_<VoxelVolume> lod_volume = generate_voxel_lod_volume(
 			lod, volume_orig, voxel_reg);
 
 	preload_textures(*lod_volume, voxel_reg, atlas_reg, true);
@@ -1814,7 +1814,7 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 
 void generate_voxel_physics_boxes(
 		sv_<TemporaryBox> &result_boxes,
-		pv::RawVolume<VoxelInstance> &volume_orig,
+		VoxelVolume &volume_orig,
 		VoxelRegistry *voxel_reg)
 {
 	const VoxelFmt fmt(voxel_reg);
@@ -2008,7 +2008,7 @@ void set_voxel_physics_boxes(Node *node, Context *context,
 }
 
 void set_voxel_physics_boxes(Node *node, Context *context,
-		pv::RawVolume<VoxelInstance> &volume,
+		VoxelVolume &volume,
 		VoxelRegistry *voxel_reg)
 {
 	sv_<TemporaryBox> result_boxes;

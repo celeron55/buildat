@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/voxel.h"
 #include "interface/voxel_selector.h"
+#include "interface/voxel_volume.h"
 #include "core/log.h"
 #include "interface/voxel_cereal.h"
 #include <cereal/archives/portable_binary.hpp>
@@ -733,7 +734,7 @@ VoxelRegistry* createVoxelRegistry()
 	// Cheap, once per process, and it is the only place every build passes
 	// through before a voxel exists
 	static const bool tested = voxel_format_self_test() &&
-			voxel_selector_self_test();
+			voxel_selector_self_test() && voxel_volume_self_test();
 	(void)tested;
 	return new CVoxelRegistry();
 }
