@@ -52,6 +52,9 @@ local player_touches_ground = false
 local player_crouched = false
 local physics_enabled = false
 local spawn_received = false
+-- Free move is set far below; it is declared here because the physics hold
+-- has to know about it
+local free_move = false
 
 local pointed_voxel_p = nil
 local pointed_voxel_p_above = nil
@@ -264,8 +267,14 @@ end
 -- Only the chunk matters here, not whether there is a solid voxel below --
 -- jumping and standing at a ledge are not this. The hold is capped so that
 -- genuinely unloaded space does not lock the player in the air forever.
+--
+-- Past the cap the hold gives up until the chunk actually turns up: out at
+-- the edge of what the world has sent, the chunk never arrives, and a hold
+-- that only reset its timer would freeze the player for two seconds out of
+-- every two seconds, forever.
 local PHYSICS_HOLD_MAX = 2.0
 local physics_held = 0
+local physics_gave_up = false
 
 local function floor_chunk_ready()
 	local p = player_node:GetWorldPosition()
@@ -278,16 +287,27 @@ local function floor_chunk_ready()
 end
 
 local function hold_physics_while_floor_rebuilds(dt)
-	if not physics_enabled then
-		return
-	end
 	local body = player_node:GetComponent("RigidBody")
 	if not body then
 		return
 	end
-	if floor_chunk_ready() or physics_held > PHYSICS_HOLD_MAX then
+	-- Free move is the way out of anywhere, including out past the edge of
+	-- the world, so nothing here may hold it
+	if not physics_enabled or free_move then
 		if physics_held > 0 then
 			physics_held = 0
+			body.mass = PLAYER_MASS
+		end
+		return
+	end
+	local ready = floor_chunk_ready()
+	if ready then
+		physics_gave_up = false
+	end
+	if ready or physics_held > PHYSICS_HOLD_MAX or physics_gave_up then
+		if physics_held > 0 then
+			physics_held = 0
+			physics_gave_up = not ready
 			body.mass = PLAYER_MASS
 		end
 		return
@@ -323,7 +343,6 @@ end
 -- menu put up -- which is why placing one while it is on takes the camera to
 -- somewhere the whole thing can be seen from.
 local FREE_MOVE_SPEED = 22
-local free_move = false
 
 -- Whether the capsule at this height is clear of the terrain: its bottom,
 -- middle and top, which is as much as a one-voxel-wide capsule can be in.
