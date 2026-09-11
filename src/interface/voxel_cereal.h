@@ -47,7 +47,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 11;
+		uint8_t version = 12;
 		archive(
 				version,
 				v.name,
@@ -86,6 +86,11 @@ namespace interface
 		// any pays one byte.
 		if(version >= 11){
 			archive(v.extra_textures);
+		}
+		// Version 12 added the flag that says a shape stands in the voxel
+		// above its own
+		if(version >= 12){
+			archive(v.shape_lit_from_above);
 		}
 	}
 

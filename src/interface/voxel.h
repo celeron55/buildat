@@ -155,6 +155,13 @@ namespace interface
 		// made of single quads -- a plant, a rail, a sign -- which is
 		// otherwise invisible from behind. A shape made of boxes does not.
 		bool shape_double_sided = false;
+		// The shape fills its own voxel and stands in the one above it: a
+		// rooted plant, whose cube is the ground and whose plant is drawn
+		// into the space over it. A shaped voxel is otherwise lit by its own
+		// light, which for a voxel that is solid ground is not the light
+		// anything on it is under; this takes the light of the voxel above
+		// for the whole shape instead.
+		bool shape_lit_from_above = false;
 		// The voxel's faces are alpha blended rather than opaque or alpha
 		// masked, so they belong in a pass drawn after the solid world and
 		// back to front: water, and glass a game gave an alpha to. The
@@ -274,6 +281,7 @@ namespace interface
 		// Copied from the definition; see VoxelDefinition::shape
 		sv_<VoxelQuad> shape;
 		bool shape_double_sided = false;
+		bool shape_lit_from_above = false;
 		bool translucent = false;
 		uint8_t shape_group = 0;
 		bool is_liquid = false;
