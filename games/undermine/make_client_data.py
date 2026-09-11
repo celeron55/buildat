@@ -10,7 +10,6 @@
 # What each texture has to do is say what the material *does* -- bedrock is
 # not diggable, timber holds a span, brick carries weight -- from across a
 # dark tunnel, so each is one clear pattern rather than a detailed surface.
-import math
 import os
 import struct
 import zlib
@@ -100,45 +99,6 @@ def brick():
     write_png("brick.png", rows)
 
 
-# A creak: what a ceiling does before it comes down. Stick-slip, which is
-# what wood and rock actually do under load -- a low tone that catches and
-# releases rather than a smooth one -- so it is a rasp with a slow tremolo
-# over it and a bit of noise for grit. 16-bit mono, which is what Urho3D's
-# WAV loader wants.
-CREAK_RATE = 22050
-CREAK_LEN = 0.75
-CREAK_BASE = 72.0     # Hz; low enough to read as a big thing moving
-
-
-def make_creak():
-    n = int(CREAK_RATE * CREAK_LEN)
-    samples = []
-    phase = 0.0
-    for i in range(n):
-        t = i / CREAK_RATE
-        # Slides down a little as it goes, the way something settling does
-        f = CREAK_BASE * (1.0 - 0.18 * t / CREAK_LEN)
-        phase += f / CREAK_RATE
-        # A sawtooth, which has the harmonics a rasp needs where a sine has
-        # none
-        saw = (phase % 1.0) * 2.0 - 1.0
-        # Stick-slip: it grips and lets go a few times a second
-        grip = 0.55 + 0.45 * math.sin(t * 2.0 * math.pi * 7.0) ** 2
-        grit = (noise(i, 0, 31) - 0.5) * 0.30
-        # In quickly, out slowly
-        env = min(1.0, t / 0.04) * max(0.0, 1.0 - t / CREAK_LEN) ** 1.6
-        v = (saw * grip + grit) * env * 0.55
-        samples.append(max(-32767, min(32767, int(v * 32767))))
-    data = struct.pack("<%dh" % len(samples), *samples)
-    header = (b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVE" +
-            b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, CREAK_RATE,
-                    CREAK_RATE * 2, 2, 16) +
-            b"data" + struct.pack("<I", len(data)))
-    with open(os.path.join(OUT, "creak.wav"), "wb") as f:
-        f.write(header + data)
-    print("creak.wav")
-
-
 def main():
     # The stress view tints this rather than a material's own texture, so
     # that what is on screen is the gradient and nothing else
@@ -159,7 +119,6 @@ def main():
     solid("wet_dirt.png", (0.15, 0.115, 0.10), 0.06, 13)
     timber()
     brick()
-    make_creak()
 
 
 main()
