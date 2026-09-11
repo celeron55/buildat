@@ -1326,8 +1326,15 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 				// voxel in front of each face: there is no "in front" for an
 				// arbitrary quad, and a plant or a rail is lit by the air it
 				// stands in, which is the voxel it is in.
-				float sky_f = fmt.sky_f(v);
-				float lamp_f = fmt.lamp_f(v);
+				//
+				// Unless the shape fills its voxel and stands in the one
+				// above it -- a rooted plant -- in which case its own voxel
+				// is solid ground and carries no light worth having; see
+				// VoxelDefinition::shape_lit_from_above.
+				const VoxelSample lv = def->shape_lit_from_above ?
+						volume.sample_at(x, y + 1, z) : v;
+				float sky_f = fmt.sky_f(lv);
+				float lamp_f = fmt.lamp_f(lv);
 				// Which directions this voxel connects in, once per voxel
 				// rather than once per quad that asks. Only a voxel that
 				// reaches out at all pays for it.

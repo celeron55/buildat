@@ -911,6 +911,10 @@ function M.new(magic, buildat, log, options)
 				vdef.edge_material_id =
 						buildat.VoxelDefinition.EDGEMATERIALID_EMPTY
 			end
+			-- And such a shape is lit by the voxel it stands in rather than
+			-- by its own, which is solid ground: a plant on the sea bed is
+			-- under the water above it, not in the open.
+			vdef.shape_lit_from_above = solid_base and true or false
 		end
 		if variants then
 			vdef.variants = variants
