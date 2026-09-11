@@ -23,6 +23,7 @@
 #include <cereal/types/vector.hpp>
 #include <sstream>
 #include <deque>
+#include <unordered_map>
 #include <unordered_set>
 #include <algorithm>
 #include <chrono>
@@ -396,6 +397,18 @@ struct Module: public interface::Module
 	std::unordered_set<int64_t> m_dirty_set;
 	std::vector<pv::Vector3DInt32> m_falling;
 	std::unordered_set<int64_t> m_falling_set;
+
+	// What the relaxation has worked out but not written into the world yet.
+	//
+	// A voxel's support walks down through every intermediate value on its
+	// way to the answer -- 15, then 6, then 5 -- and writing each one costs
+	// a chunk re-serialized, sent and remeshed, for a number that is about
+	// to change again. So the relaxation reads and writes here and the world
+	// gets one write per voxel, once the front has passed.
+	// Keyed by position, and carrying the position, so that flushing does not
+	// have to take a key apart again
+	struct Pending { pv::Vector3DInt32 p; VoxelInstance v; };
+	std::unordered_map<int64_t, Pending> m_scratch;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -883,6 +896,18 @@ struct Module: public interface::Module
 			m_falling.push_back(p);
 	}
 
+	// The voxel at p as the simulation currently understands it: what the
+	// relaxation has worked out, or what the world holds if it has not been
+	// touched.
+	VoxelInstance peek(voxelworld::Instance *world,
+			const pv::Vector3DInt32 &p)
+	{
+		auto it = m_scratch.find(pos_key(p));
+		if(it != m_scratch.end())
+			return it->second.v;
+		return world->get_voxel(p, true);
+	}
+
 	// How far the voxel at p is from something holding it up, 0 for nothing.
 	//
 	// A voxel standing on something supported is supported itself, whatever
@@ -895,8 +920,8 @@ struct Module: public interface::Module
 	{
 		if(!m.diggable)
 			return SUPPORT_MAX; // Bedrock, and anything else immovable
-		VoxelInstance below = world->get_voxel(
-				pv::Vector3DInt32(p.getX(), p.getY() - 1, p.getZ()), true);
+		VoxelInstance below = peek(world,
+				pv::Vector3DInt32(p.getX(), p.getY() - 1, p.getZ()));
 		const MaterialProps &bm = material_of(id_of(below));
 		if(bm.structural && support_of(below) > 0)
 			return SUPPORT_MAX;
@@ -905,9 +930,9 @@ struct Module: public interface::Module
 		static const int SIDE[4][2] = {{1,0}, {-1,0}, {0,1}, {0,-1}};
 		uint8_t best = 0;
 		for(size_t k = 0; k < 4; k++){
-			VoxelInstance n = world->get_voxel(pv::Vector3DInt32(
+			VoxelInstance n = peek(world, pv::Vector3DInt32(
 					p.getX() + SIDE[k][0], p.getY(),
-					p.getZ() + SIDE[k][1]), true);
+					p.getZ() + SIDE[k][1]));
 			if(!material_of(id_of(n)).structural)
 				continue;
 			uint8_t s = support_of(n);
@@ -927,9 +952,8 @@ struct Module: public interface::Module
 	{
 		int carried = 0;
 		for(int i = 1; i <= LOAD_DEPTH; i++){
-			VoxelInstance v = world->get_voxel(
-					pv::Vector3DInt32(p.getX(), p.getY() + i, p.getZ()),
-					true);
+			VoxelInstance v = peek(world,
+					pv::Vector3DInt32(p.getX(), p.getY() + i, p.getZ()));
 			const MaterialProps &m = material_of(id_of(v));
 			if(!m.structural)
 				break;
@@ -945,7 +969,7 @@ struct Module: public interface::Module
 	void update_voxel(voxelworld::Instance *world,
 			const pv::Vector3DInt32 &p)
 	{
-		VoxelInstance v = world->get_voxel(p, true);
+		VoxelInstance v = peek(world, p);
 		interface::VoxelTypeId id = id_of(v);
 		if(id == interface::VOXELTYPEID_UNDEFINED)
 			return; // Not generated yet; whoever generates it computes both
@@ -959,7 +983,7 @@ struct Module: public interface::Module
 		if(support_moved || band != band_of(v)){
 			VoxelInstance nv = v;
 			set_state(nv, support, band);
-			world->set_voxel(p, nv, true);
+			m_scratch[pos_key(p)] = Pending{p, nv};
 		}
 		// A support that moved changes what the voxels around it can reach
 		if(support_moved){
@@ -1044,6 +1068,23 @@ struct Module: public interface::Module
 		}
 	}
 
+	// Everything the relaxation worked out, into the world in one go.
+	//
+	// simplified: the whole scratch goes at once rather than on a budget. It
+	// is one set_voxel() per voxel the front passed over, which is the work
+	// that used to happen several times each.
+	void flush_scratch(voxelworld::Instance *world)
+	{
+		if(m_scratch.empty())
+			return;
+		for(auto &e : m_scratch)
+			world->set_voxel(e.second.p, e.second.v, true);
+		m_wrote += m_scratch.size();
+		m_scratch.clear();
+	}
+
+	size_t m_wrote = 0;
+
 	void on_tick(const interface::TickEvent &event)
 	{
 		if(m_dirty.empty() && m_falling.empty())
@@ -1060,15 +1101,21 @@ struct Module: public interface::Module
 				update_voxel(world, p);
 				done++;
 			}
+			// Into the world once the front has passed, or when something
+			// is about to move and the relaxation's answers are needed
+			if(m_dirty.empty() || !m_falling.empty() ||
+					m_scratch.size() > 8192)
+				flush_scratch(world);
 			step_falling(world);
 		});
 		if(done >= SIM_PER_TICK || !m_falling.empty()){
-			log_v(MODULE, "sim: %zu done in %i us, %zu dirty, %zu falling, "
-					"%zu fell, %zu came to rest",
+			log_v(MODULE, "sim: %zu done in %i us, %zu dirty, %zu pending, "
+					"%zu falling, %zu fell, %zu came to rest, %zu written",
 					done, (int)std::chrono::duration_cast<
 							std::chrono::microseconds>(
 							std::chrono::steady_clock::now() - t0).count(),
-					m_dirty.size(), m_falling.size(), m_moved, m_landed);
+					m_dirty.size(), m_scratch.size(), m_falling.size(),
+					m_moved, m_landed, m_wrote);
 		}
 	}
 
