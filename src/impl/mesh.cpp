@@ -1617,6 +1617,11 @@ up_<VoxelVolume> generate_voxel_lod_volume(
 		for(int y = lc.getY(); y <= uc.getY(); y++){
 			for(int x = lc.getX(); x <= uc.getX(); x++){
 				VoxelSample v_orig;
+				// The light of the block is the brightest light in it, not
+				// the light of the voxel that won the look. A block with any
+				// air in it is a block a face is lit through, and the voxel
+				// that wins is a solid one with no light in it at all.
+				uint8_t max_sky = 0, max_lamp = 0;
 				for(int x1 = 0; x1 < lod; x1++){
 					for(int y1 = 0; y1 < lod; y1++){
 						for(int z1 = 0; z1 < lod; z1++){
@@ -1638,9 +1643,21 @@ up_<VoxelVolume> generate_voxel_lod_volume(
 							// a block of voxels looks like from far away
 							if(fmt.look_id(v1) > fmt.look_id(v_orig))
 								v_orig = v1;
+							if(fmt.light_sky.bound()){
+								uint8_t l = fmt.light_sky.get(v1);
+								if(l > max_sky) max_sky = l;
+							}
+							if(fmt.light_lamp.bound()){
+								uint8_t l = fmt.light_lamp.get(v1);
+								if(l > max_lamp) max_lamp = l;
+							}
 						}
 					}
 				}
+				if(fmt.light_sky.bound())
+					fmt.light_sky.set(v_orig, max_sky);
+				if(fmt.light_lamp.bound())
+					fmt.light_lamp.set(v_orig, max_lamp);
 				volume->set_sample_at(x, y, z, v_orig);
 			}
 		}
@@ -1715,6 +1732,12 @@ void generate_voxel_lod_geometry(int lod,
 		if(tg.vertex_data.Empty()){
 			tg.atlas_id = seg_ref.atlas_id;
 			tg.has_colors = use_skylight;
+			// A world that binds surface modifiers is drawn with a technique
+			// that reads them out of the tangent. Without this the LOD
+			// geometry has no tangent stream for that technique to read and
+			// is not drawn at all -- which is what a world ending in a dome
+			// a few chunks out looks like.
+			tg.has_tangents = fmt.n_surface != 0;
 			// It can't get larger than this and will only exist temporarily in
 			// memory, so let's do only one big memory allocation
 			tg.vertex_data.Reserve(pv_vertices.size() / 4 * 6);
@@ -1727,6 +1750,17 @@ void generate_voxel_lod_geometry(int lod,
 		};
 		if(face_owned_by_padding(lod_volume, quad, n))
 			continue;
+		// The surface modifiers of the voxel behind the face; see
+		// generate_voxel_geometry(), which reads them the same way
+		float mods[interface::VOXEL_SURFACE_MODIFIERS] = {};
+		if(fmt.n_surface != 0){
+			VoxelSample back = face_back_voxel(lod_volume, quad, n);
+			fmt.surface_of(back, mods);
+			if(fmt.tint.bound()){
+				mods[0] = pack_tint565(
+						tint_ramp_color(voxel_def0, fmt.tint_f(back)));
+			}
+		}
 		unsigned corner_colors[4] = {
 			0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff
 		};
@@ -1759,6 +1793,10 @@ void generate_voxel_lod_geometry(int lod,
 			size_t pv_vertex_i1 = pv_vertex_i - pv_vertex_i0;
 			assign_txcoords(pv_vertex_i1, aseg, tg_vert);
 			tg_vert.color_ = corner_colors[pv_vertex_i1];
+			if(fmt.n_surface != 0){
+				tg_vert.tangent_ = Vector4(mods[0], mods[1], mods[2],
+						mods[3]);
+			}
 		}
 	}
 }
