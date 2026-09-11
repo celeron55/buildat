@@ -543,6 +543,13 @@ local function show_client(host, port, name, password)
 						string.format("#%02x%02x%02x", color[1], color[2],
 						color[3])..")"
 			end
+			-- Index 7 and over is one of the node's special tiles, which is
+			-- where Luanti keeps the parts of a node that are not one of
+			-- its six faces: the plant of a rooted plant, and a liquid's
+			-- own animated textures. They have no overlays.
+			if i > 6 then
+				return layer(def.special and def.special[i - 6])
+			end
 			local base = layer(def.tiles[i])
 			if not base then
 				return nil
@@ -573,7 +580,7 @@ local function show_client(host, port, name, password)
 			if not expr then
 				return nil
 			end
-			local tile = def.tiles[i]
+			local tile = i > 6 and def.special[i - 6] or def.tiles[i]
 			local extra = nil
 			if tile.animation and tile.animation.type == 1 then
 				extra = FIRST_FRAME
