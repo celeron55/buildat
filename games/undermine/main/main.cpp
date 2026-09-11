@@ -76,6 +76,7 @@ static const int BEDROCK_TOP = -60;
 //   id      0...7    up to 255 materials; there are twelve, and nature and
 //                    everything else it will grow have room
 //   sky     8...11   light, as voxelworld maintains it
+//   moisture 20...23 how near this voxel is to water, 0 for dry
 //   param  12...19   both of the simulation's numbers, packed:
 //                      high nibble  how much of what this voxel can carry is
 //                                   already on it, 0...15
@@ -109,6 +110,11 @@ static const int BEDROCK_TOP = -60;
 static const interface::VoxelField F_ID(0, 0, 8);
 static const interface::VoxelField F_LIGHT_SKY(0, 8, 4);
 static const interface::VoxelField F_PARAM(0, 12, 8);
+// Added after the game was already playable, and it cost nothing at all to
+// add: moisture is the game's own business rather than one of the engine's
+// roles, so the format below did not change and neither did anything the
+// engine does. Bits 24...31 are still spare.
+static const interface::VoxelField F_MOISTURE(0, 20, 4);
 
 static interface::VoxelFormat undermine_format()
 {
@@ -126,6 +132,11 @@ static const uint8_t LOAD_MAX = 255;
 // How many steps of "how loaded is it" fit in the nibble, and so how many
 // bands a view has
 static const uint8_t BAND_MAX = 15;
+// How far water reaches into what is porous. A distance rather than a
+// wetness: a voxel next to water is at the maximum and each step away is one
+// less, so water appearing wets what is around it and water going away dries
+// it, both by the same relaxation and with no timers anywhere.
+static const uint8_t MOISTURE_MAX = 5;
 
 // How far up a voxel is asked to carry.
 //
@@ -142,6 +153,11 @@ static const int LOAD_DEPTH = 32;
 static interface::VoxelTypeId id_of(const VoxelInstance &v)
 {
 	return (interface::VoxelTypeId)F_ID.get(v.data);
+}
+
+static uint8_t moisture_of(const VoxelInstance &v)
+{
+	return (uint8_t)F_MOISTURE.get(v.data);
 }
 
 static uint8_t support_of(const VoxelInstance &v)
@@ -186,6 +202,7 @@ enum Material {
 	M_WATER,
 	M_TRUNK,
 	M_LEAVES,
+	M_WET_DIRT,
 	M_COUNT
 };
 
@@ -204,6 +221,8 @@ enum Material {
 // something that was already a loose heap is still that heap, which is why
 // dirt falls as dirt and sand as sand rather than everything turning into
 // the same grey pile.
+// porous says whether water gets into it, and so whether it turns into
+// something wetter. What that something is, is wet_of.
 struct MaterialProps
 {
 	bool structural;
@@ -212,29 +231,37 @@ struct MaterialProps
 	uint8_t density;
 	uint8_t capacity;
 	int falls_as;
+	bool porous;
+	int wet_of;   // what it becomes when wet, or 0 for nothing
+	int dry_of;   // what it goes back to when it dries, or 0
 };
 
 static const MaterialProps MATERIAL[M_COUNT] = {
-	{false, false,  0, 0,   0, 0},           // (0 is VOXELTYPEID_UNDEFINED)
-	{false, false,  0, 0,   0, 0},           // air
-	{true,  false, 15, 0, 255, M_BEDROCK},   // bedrock; never falls
-	{true,  true,   6, 3, 200, M_RUBBLE},    // rock
-	{true,  true,   2, 2,  60, M_DIRT},      // dirt: a loose heap of dirt
-	// Turf that has come off and landed is dirt, not turf
-	{true,  true,   2, 2,  60, M_DIRT},      // grass
-	{true,  true,   0, 2,  40, M_SAND},      // sand
-	{true,  true,   0, 2,  50, M_RUBBLE},    // rubble
-	{true,  true,   8, 1,  30, M_TIMBER},    // timber
-	{true,  true,   3, 4, 255, M_RUBBLE},    // brick
-	{false, false,  0, 0,   0, 0},           // water
+	{false, false,  0, 0,   0, 0, false, 0, 0},  // (0 is UNDEFINED)
+	{false, false,  0, 0,   0, 0, false, 0, 0},  // air
+	{true,  false, 15, 0, 255, M_BEDROCK, false, 0, 0},  // bedrock
+	{true,  true,   6, 3, 200, M_RUBBLE, false, 0, 0},   // rock
+	{true,  true,   2, 2,  60, M_DIRT, true, M_WET_DIRT, 0}, // dirt
+	// Turf that has come off and landed is dirt, not turf; turf that has
+	// been under water is not turf either
+	{true,  true,   2, 2,  60, M_DIRT, true, M_WET_DIRT, 0}, // grass
+	{true,  true,   0, 2,  40, M_SAND, true, 0, 0},      // sand
+	{true,  true,   0, 2,  50, M_RUBBLE, true, 0, 0},    // rubble
+	{true,  true,   8, 1,  30, M_TIMBER, false, 0, 0},   // timber
+	{true,  true,   3, 4, 255, M_RUBBLE, false, 0, 0},   // brick
+	{false, false,  0, 0,   0, 0, false, 0, 0},  // water
 	// A standing tree is held up by the ground under it like anything else,
 	// so cutting through the trunk drops what is above the cut
-	{true,  true,   6, 1,  25, M_TRUNK},     // trunk
+	{true,  true,   6, 1,  25, M_TRUNK, false, 0, 0},    // trunk
 	// Leaves hang off the trunk rather than standing on anything, which is
 	// what the span is for: a canopy two voxels out from the trunk holds,
 	// and comes down with the trunk. Weightless, so a tree does not crush
 	// itself, and nothing crushes leaves.
-	{true,  true,   3, 0, 255, M_LEAVES},    // leaves
+	{true,  true,   3, 0, 255, M_LEAVES, false, 0, 0},   // leaves
+	// Dirt that has taken water: it holds nothing out over a gap and carries
+	// half of what dry dirt does, which is what makes digging under a pond a
+	// bad idea
+	{true,  true,   0, 2,  30, M_WET_DIRT, true, 0, M_DIRT}, // wet dirt
 };
 
 static const MaterialProps& material_of(interface::VoxelTypeId id)
@@ -555,7 +582,7 @@ struct Module: public interface::Module
 		add_voxel(reg, "air", "", false, false, true);
 		static const char *NAME[] = {
 			"", "", "bedrock", "rock", "dirt", "grass", "sand", "rubble",
-			"timber", "brick", "water", "trunk", "leaves",
+			"timber", "brick", "water", "trunk", "leaves", "wet_dirt",
 		};
 		for(int id = M_BEDROCK; id < M_COUNT; id++){
 			const MaterialProps &m = MATERIAL[id];
@@ -690,6 +717,9 @@ struct Module: public interface::Module
 			add_voxel(voxel_reg, "leaves", "main/leaves.png",
 					true, true, false,
 					0.95f, 1.0f, 1.5f, 0.11f, 0.03f);
+			add_voxel(voxel_reg, "wet_dirt", "main/wet_dirt.png",
+					true, true, false,
+					0.80f, 0.45f, 0.6f, 0.0f, 0.0f, 0.04f);
 
 			world->set_skylight_enabled(true);
 		});
@@ -945,6 +975,36 @@ struct Module: public interface::Module
 		return reach < m.span ? reach : m.span;
 	}
 
+	// How near the voxel at p is to water: MOISTURE_MAX next to it, one less
+	// per step through anything porous, 0 anywhere water cannot reach. The
+	// same shape of relaxation as the support, and it dries by running back
+	// down when the water goes away.
+	uint8_t compute_moisture(voxelworld::Instance *world,
+			const pv::Vector3DInt32 &p, const MaterialProps &m)
+	{
+		if(!m.porous)
+			return 0;
+		static const int OFF[6][3] = {
+			{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1},
+		};
+		uint8_t best = 0;
+		for(size_t k = 0; k < 6; k++){
+			VoxelInstance n = peek(world, pv::Vector3DInt32(
+					p.getX() + OFF[k][0], p.getY() + OFF[k][1],
+					p.getZ() + OFF[k][2]));
+			interface::VoxelTypeId nid = id_of(n);
+			if(nid == M_WATER)
+				return MOISTURE_MAX;
+			const MaterialProps &nm = material_of(nid);
+			if(!nm.porous)
+				continue;
+			uint8_t through = moisture_of(n);
+			if(through > 1 && (uint8_t)(through - 1) > best)
+				best = through - 1;
+		}
+		return best;
+	}
+
 	// The weight resting on the voxel at p: the column immediately above it,
 	// as far as LOAD_DEPTH. See LOAD_DEPTH for why it stops.
 	uint8_t compute_load(voxelworld::Instance *world,
@@ -976,17 +1036,37 @@ struct Module: public interface::Module
 		const MaterialProps &m = material_of(id);
 		if(!m.structural)
 			return;
-		uint8_t support = compute_support(world, p, m);
+		// What water has done to it, and what that makes it. A material
+		// change is the only way the mesher can see this -- both nibbles of
+		// the param are spoken for -- and it is the right way round anyway:
+		// wet dirt is a different thing from dirt, with its own numbers.
+		uint8_t moisture = compute_moisture(world, p, m);
+		interface::VoxelTypeId want = id;
+		if(moisture > 0 && m.wet_of != 0)
+			want = (interface::VoxelTypeId)m.wet_of;
+		else if(moisture == 0 && m.dry_of != 0)
+			want = (interface::VoxelTypeId)m.dry_of;
+		const MaterialProps &wm = material_of(want);
+
+		uint8_t support = compute_support(world, p, wm);
 		uint8_t load = compute_load(world, p);
-		uint8_t band = load_band(load, m.capacity);
+		uint8_t band = load_band(load, wm.capacity);
 		bool support_moved = support != support_of(v);
-		if(support_moved || band != band_of(v)){
+		bool wetness_moved = moisture != moisture_of(v) || want != id;
+		if(want != id){
+			log_t(MODULE, "wet: " PV3I_FORMAT " %i -> %i (moisture %i)",
+					PV3I_PARAMS(p), (int)id, (int)want, (int)moisture);
+		}
+		if(support_moved || wetness_moved || band != band_of(v)){
 			VoxelInstance nv = v;
+			F_ID.set(nv.data, want);
+			F_MOISTURE.set(nv.data, moisture);
 			set_state(nv, support, band);
 			m_scratch[pos_key(p)] = Pending{p, nv};
 		}
-		// A support that moved changes what the voxels around it can reach
-		if(support_moved){
+		// A support that moved changes what the voxels around it can reach,
+		// and so does water arriving or leaving
+		if(support_moved || wetness_moved){
 			static const int OFF[6][3] = {
 				{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1},
 			};
@@ -995,7 +1075,7 @@ struct Module: public interface::Module
 						p.getY() + OFF[k][1], p.getZ() + OFF[k][2]));
 		}
 		// Nothing holds it, or what does cannot carry what is on it
-		if(m.diggable && (support == 0 || load > m.capacity)){
+		if(wm.diggable && (support == 0 || load > wm.capacity)){
 			log_t(MODULE, "fails: " PV3I_FORMAT " id=%i support=%i load=%i",
 					PV3I_PARAMS(p), (int)id, (int)support, (int)load);
 			mark_falling(p);
@@ -1324,8 +1404,12 @@ struct Module: public interface::Module
 			cereal::PortableBinaryInputArchive ar(is);
 			ar(voxel_p, material);
 		}
+		// Water is placeable even though the rules do not treat it as
+		// structural: pouring some next to dirt is how you find out what
+		// water does to dirt, which is most of what there is to find out.
 		if(material <= M_AIR || material >= M_COUNT ||
-				!material_of(material).structural){
+				(!material_of(material).structural &&
+						material != M_WATER)){
 			log_w(MODULE, "C%i: on_place_voxel(): material %i is not one to "
 					"build with", packet.sender, material);
 			return;

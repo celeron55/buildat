@@ -139,7 +139,7 @@ end
 -- In the order main.cpp adds them, which is what the ids are
 local MATERIAL = {
 	"air", "bedrock", "rock", "dirt", "grass", "sand", "rubble",
-	"timber", "brick", "water", "trunk", "leaves",
+	"timber", "brick", "water", "trunk", "leaves", "wet dirt",
 }
 local M_AIR = 1
 
@@ -151,6 +151,8 @@ local BUILD_MATERIALS = {
 	{key = magic.KEY_2, id = 8, name = "timber"},
 	{key = magic.KEY_3, id = 9, name = "brick"},
 	{key = magic.KEY_4, id = 4, name = "dirt"},
+	-- Not something to build with: something to pour next to dirt and watch
+	{key = magic.KEY_5, id = 10, name = "water"},
 }
 local build_material = 1
 
@@ -909,7 +911,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		local line = "("..math.floor(p.x + 0.5)..", "..
 				math.floor(p.y + 0.5)..", "..math.floor(p.z + 0.5)..")"..
 				"  building: "..BUILD_MATERIALS[build_material].name..
-				" (1-4)  structures: B  free move: Tab"..
+				" (1-5)  structures: B  free move: Tab"..
 				(free_move and " (on)" or "").."  view: V"..
 				(view_mode ~= 0 and " ("..VIEW_NAMES[view_mode]..")" or "")
 		-- What the pointed voxel is and how close it is to failing, which
