@@ -939,6 +939,106 @@ struct CInstance: public voxelworld::Instance
 				new NodeVolumeUpdated(m_scene_ref, node_id, true, chunk_p));
 	}
 
+	// The buffer a voxel is in and where in it, or nullptr. What set_voxel(),
+	// set_sample() and get_sample() all start with; each of them used to
+	// carry its own copy of this.
+	ChunkBuffer* buffer_for(const pv::Vector3DInt32 &p,
+			pv::Vector3DInt32 *voxel_p_out, bool disable_warnings,
+			const char *what)
+	{
+		pv::Vector3DInt32 chunk_p = container_coord(p, m_chunk_size_voxels);
+		pv::Vector3DInt16 section_p =
+				container_coord16(chunk_p, m_section_size_chunks);
+		Section *section = get_section(section_p);
+		if(section == nullptr){
+			log_(disable_warnings ? CORE_DEBUG : CORE_WARNING,
+					MODULE, "%s() p=" PV3I_FORMAT ": No section "
+					PV3I_FORMAT " for chunk " PV3I_FORMAT,
+					what, PV3I_PARAMS(p), PV3I_PARAMS(section_p),
+					PV3I_PARAMS(chunk_p));
+			return nullptr;
+		}
+
+		maintain_maximum_buffer_limit();
+
+		ChunkBuffer &buf = section->get_buffer(chunk_p, m_server,
+				&m_total_buffers_loaded);
+		if(!buf.volume){
+			log_(disable_warnings ? CORE_DEBUG : CORE_WARNING,
+					MODULE, "%s() p=" PV3I_FORMAT ": Couldn't get buffer "
+					"volume for chunk " PV3I_FORMAT " in section "
+					PV3I_FORMAT, what, PV3I_PARAMS(p), PV3I_PARAMS(chunk_p),
+					PV3I_PARAMS(section_p));
+			return nullptr;
+		}
+		*voxel_p_out = pv::Vector3DInt32(
+				p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX(),
+				p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY(),
+				p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ()
+		);
+
+		auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
+				m_sections_with_loaded_buffers.end(), section,
+				std::greater<Section*>());
+		if(it == m_sections_with_loaded_buffers.end() || *it != section)
+			m_sections_with_loaded_buffers.insert(it, section);
+
+		return &buf;
+	}
+
+	void mark_buffer_dirty(ChunkBuffer &buf)
+	{
+		if(!buf.dirty){
+			buf.dirty = true;
+			m_total_buffers_dirty++;
+		}
+	}
+
+	void set_sample(const pv::Vector3DInt32 &p,
+			const interface::VoxelSample &v, bool disable_warnings)
+	{
+		pv::Vector3DInt32 voxel_p;
+		ChunkBuffer *buf = buffer_for(p, &voxel_p, disable_warnings,
+				"set_sample");
+		if(buf == nullptr)
+			return;
+		// A chunk written before the world had these planes, or one that
+		// has never had anything but the first written into it, takes them
+		// on here. The size test is what keeps this off the hot path.
+		const sv_<interface::VoxelPlane> &planes =
+				m_voxel_reg->get_format().planes;
+		if(buf->volume->planes().size() != planes.size())
+			buf->volume->add_planes(planes);
+
+		interface::VoxelSample nv = v;
+		if(m_skylight_enabled){
+			VoxelInstance old = buf->volume->getVoxelAt(voxel_p);
+			VoxelInstance first(nv.planes[0]);
+			bool old_transparent = voxel_transmits_light(old);
+			if(old_transparent != voxel_transmits_light(first)){
+				m_skylight_seeds.push_back(SkylightSeed{
+						p, get_sky(old), old_transparent});
+			}
+			set_sky(first, get_sky(old));
+			nv.planes[0] = first.data;
+		}
+
+		buf->volume->set_sample_at(voxel_p.getX(), voxel_p.getY(),
+				voxel_p.getZ(), nv);
+		mark_buffer_dirty(*buf);
+	}
+
+	interface::VoxelSample get_sample(const pv::Vector3DInt32 &p,
+			bool disable_warnings)
+	{
+		pv::Vector3DInt32 voxel_p;
+		ChunkBuffer *buf = buffer_for(p, &voxel_p, disable_warnings,
+				"get_sample");
+		if(buf == nullptr)
+			return interface::VoxelSample();
+		return buf->volume->sample_at(voxel_p);
+	}
+
 	void set_voxel(const pv::Vector3DInt32 &p, const interface::VoxelInstance &v,
 			bool disable_warnings)
 	{

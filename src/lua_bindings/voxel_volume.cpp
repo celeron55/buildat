@@ -696,6 +696,17 @@ void init_voxel_volume(lua_State *L)
 			.def("set_voxel_at", (bool (CommonVolume::*)
 					(int32_t, int32_t, int32_t, VoxelInstance))
 					&CommonVolume::setVoxelAt)
+			// One plane of a voxel, for a world whose voxels are more than
+			// one; get_voxel_at() is the first plane, as it always was.
+			// The value is a plain number rather than a VoxelInstance,
+			// because a plane other than the first is the game's own bits
+			// and the engine's roles are not in it.
+			.def("get_plane_at", (uint32_t (CommonVolume::*)
+					(uint8_t, int32_t, int32_t, int32_t) const)
+					&CommonVolume::plane_at)
+			.def("set_plane_at", (void (CommonVolume::*)
+					(uint8_t, int32_t, int32_t, int32_t, uint32_t))
+					&CommonVolume::set_plane_at)
 			.def("get_enclosing_region", &CommonVolume::getEnclosingRegion)
 			// The slow, flexible way to build voxel data from Lua: set voxels
 			// one at a time and hand the result to set_voxel_geometry().

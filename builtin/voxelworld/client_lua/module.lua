@@ -626,6 +626,27 @@ function M.get_static_voxel(p)
 	return v
 end
 
+-- One plane of a voxel, for a world whose voxels are more than one plane.
+-- get_static_voxel() is the first plane, as it always was; this is how a
+-- game reads its own, and the value is a plain number because a plane other
+-- than the first holds no role the engine knows about.
+function M.get_static_voxel_plane(p, plane)
+	p = buildat.Vector3(p):round()
+	local chunk_p, in_chunk_p = M.get_chunk_position(p)
+	if chunk_p == nil then
+		return 0
+	end
+	local node = M.get_static_node(chunk_p)
+	if node == nil then
+		return 0
+	end
+	local volume = M.get_volume(node)
+	if volume == nil then
+		return 0
+	end
+	return volume:get_plane_at(plane, in_chunk_p.x, in_chunk_p.y, in_chunk_p.z)
+end
+
 -- TODO
 -- NOTE: This does not synchronize the voxel to the server, because games have
 --       to implement their own mechanisms for disallowing cheating
