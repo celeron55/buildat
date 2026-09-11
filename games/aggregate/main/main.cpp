@@ -207,6 +207,54 @@ struct MaterialProps
 	bool porous;
 };
 
+// Fill, in 255ths of a voxel, which is the unit the water field is already
+// in: a solid fraction of 15 is a full voxel, so a fraction converts by 17.
+//
+// **A fraction is solid volume, not heap volume.** A voxel of loose sand at
+// 9 is nine fifteenths solid and six fifteenths void, and that void is where
+// water goes. So how much water a mixture can hold is not a property of the
+// material at all -- it is what is left of the voxel.
+static const int FILL_FULL = 255;
+
+static int solid_fill(const Mix &m)
+{
+	return 17 * ((int)m.rock + m.sand + m.fibre + m.binder);
+}
+
+// How much of the voxel is neither solid nor water
+static int void_fill(const Mix &m)
+{
+	int v = FILL_FULL - solid_fill(m);
+	return v < 0 ? 0 : v;
+}
+
+// How much more water would go in
+static int water_room(const Mix &m)
+{
+	int r = void_fill(m) - (int)m.water;
+	return r < 0 ? 0 : r;
+}
+
+// How wet it is, as how much of the void is taken, 0...15. What the tint and
+// the wetness modifiers carry, and what takes a mixture's capacity away --
+// so a material with little void is soaked by a little water, which is why
+// soil gives long before gravel does.
+static uint8_t saturation(const Mix &m)
+{
+	const int v = void_fill(m);
+	if(v <= 0)
+		return 0;
+	int s = 15 * (int)m.water / v;
+	return (uint8_t)(s > 15 ? 15 : s);
+}
+
+// Whether water can get into it at all. Anything bonded is closed: a stone
+// wall holds water out, and a timber hull floats.
+static bool takes_water(const Mix &m)
+{
+	return m.bond < 12 && water_room(m) > 0;
+}
+
 // How far a mixture reaches out over nothing.
 //
 // Two things decide it: what is holding the solid together, which is `bond`
@@ -240,8 +288,10 @@ static uint8_t mix_capacity(const Mix &m)
 			3 * (int)m.fibre;
 	if(c > 255)
 		c = 255;
-	// Half of it, at saturation
-	c -= c * (int)m.water / (2 * WATER_MAX);
+	// Half of it, at saturation -- and saturation is how much of the *void*
+	// the water has taken, not how much of the voxel, so a material with
+	// little room in it gives way to a little water
+	c -= c * (int)saturation(m) / 30;
 	return (uint8_t)(c < 0 ? 0 : c);
 }
 
@@ -282,7 +332,7 @@ static void set_mix(interface::VoxelSample &v, const Mix &m)
 	F_BOND.set(v, m.bond);
 	F_LIFE.set(v, m.life);
 	// How wet it looks, which the mesher reads and nothing else does
-	const uint8_t wet = (uint8_t)((int)m.water * 15 / WATER_MAX);
+	const uint8_t wet = saturation(m);
 	F_TINT.set(v, wet);
 	F_WETNESS.set(v, wet);
 }
@@ -530,6 +580,16 @@ struct Worldgen: public worldgen::GeneratorInterface
 									MIX_SAND : MIX_TURF;
 						} else if(y <= WATER_LEVEL){
 							m = MIX_WATER;
+						}
+						// Ground at or under the water line starts
+						// saturated. Not a detail: without it the first
+						// thing that disturbs a pond is the pond draining
+						// into its own bed, because the bed is dry and has
+						// room. It is also what makes digging under water a
+						// bad idea, saturated ground carrying half of what
+						// dry ground does.
+						if(y <= WATER_LEVEL && m.solid() > 0){
+							m.water = (uint8_t)void_fill(m);
 						}
 						volume.set_sample_at(p.getX(), p.getY(), p.getZ(),
 								mix_voxel(m));
@@ -1245,43 +1305,104 @@ struct Module: public interface::Module
 		return reach < m.span ? reach : m.span;
 	}
 
-	// How much water has got into the voxel at p: full next to standing
-	// water, less by a step through each porous voxel it has to come
-	// through, none where water cannot reach. The same shape of relaxation
-	// as the support, and it dries by running back down when the water goes
-	// away.
+	// Water, moved rather than assumed
+	// -------------------------------
 	//
-	// simplified: this does not conserve. Water is not moved from anywhere;
-	// a voxel next to a pond simply becomes wet, which is humidity rather
-	// than flow. Phase 2 replaces it with migration that moves a quantity
-	// through the void a mixture has, and this function is what it replaces.
-	static const uint8_t DAMP_STEPS = 5;
-	static const uint8_t DAMP_STEP = WATER_MAX / DAMP_STEPS;
+	// Where phase 1 had a relaxation that made a voxel near a pond *look*
+	// wet without taking the water from anywhere, this moves a quantity and
+	// conserves it: what soaks into a bank comes out of the pond.
+	//
+	// Two rules, in order, and both are local:
+	//
+	//   down      into whatever room is under it
+	//   sideways  towards the lower of two neighbours, half the difference,
+	//             which is what levels a surface without oscillating
+	//
+	// simplified: **water does not climb.** Pressure wants a head, and a
+	// head wants either a field with room above "full" to carry it or a
+	// walk up the column to find one; neither fits in the eight bits this
+	// game gives water, and both want measuring before they are written.
+	// So a flooded shaft fills from the bottom and stops at the level it is
+	// poured to. What that costs is the plan's "water climbs and seeps up
+	// from below"; what it buys is a rule that cannot run away.
+	//
+	// Nothing here sweeps a volume: it rides the same dirty set the support
+	// does, so the work is proportional to where water is actually moving.
+	// A sweep is what the plan expected and it is not needed yet.
 
-	uint8_t compute_damp(voxelworld::Instance *world,
-			const pv::Vector3DInt32 &p, const MaterialProps &m)
+	// The least that is worth moving. Without it two neighbours a drop
+	// apart trade that drop back and forth forever and the dirty set never
+	// empties.
+	static const int WATER_QUANTUM = 4;
+
+	// Move water out of p if it has anywhere to go. mix is updated in place;
+	// the neighbours are written straight into the scratch, so the next
+	// voxel the relaxation looks at sees them.
+	bool migrate_water(voxelworld::Instance *world,
+			const pv::Vector3DInt32 &p, Mix &mix)
 	{
-		if(!m.porous)
-			return 0;
-		static const int OFF[6][3] = {
-			{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1},
-		};
-		uint8_t best = 0;
-		for(size_t k = 0; k < 6; k++){
-			interface::VoxelSample n = peek(world, pv::Vector3DInt32(
-					p.getX() + OFF[k][0], p.getY() + OFF[k][1],
-					p.getZ() + OFF[k][2]));
-			const Mix nm = mix_of(n);
-			// Standing water: anything porous against it is saturated
-			if(nm.solid() < 2 && nm.water >= WATER_MAX / 2)
-				return WATER_MAX;
-			if(!props_of(nm).porous)
-				continue;
-			if(nm.water > DAMP_STEP &&
-					(uint8_t)(nm.water - DAMP_STEP) > best)
-				best = (uint8_t)(nm.water - DAMP_STEP);
+		if(mix.water < WATER_QUANTUM)
+			return false;
+		bool moved = false;
+
+		// Down first, and as much as will go
+		{
+			const pv::Vector3DInt32 down(p.getX(), p.getY() - 1, p.getZ());
+			interface::VoxelSample bv = peek(world, down);
+			if(is_generated(bv)){
+				Mix bmix = mix_of(bv);
+				const int room = takes_water(bmix) ? water_room(bmix) : 0;
+				const int move = (int)mix.water < room ? (int)mix.water : room;
+				if(move >= WATER_QUANTUM){
+					mix.water -= (uint8_t)move;
+					bmix.water += (uint8_t)move;
+					write_mix(bv, down, bmix);
+					moved = true;
+				}
+			}
 		}
-		return best;
+		if(mix.water < WATER_QUANTUM)
+			return moved;
+
+		// Then level sideways. Half the difference, which settles rather
+		// than sloshes.
+		static const int SIDE[4][2] = {{1,0}, {-1,0}, {0,1}, {0,-1}};
+		for(size_t k = 0; k < 4; k++){
+			const pv::Vector3DInt32 n(p.getX() + SIDE[k][0], p.getY(),
+					p.getZ() + SIDE[k][1]);
+			interface::VoxelSample nv = peek(world, n);
+			if(!is_generated(nv))
+				continue;
+			Mix nmix = mix_of(nv);
+			if(!takes_water(nmix))
+				continue;
+			const int diff = (int)mix.water - (int)nmix.water;
+			if(diff < WATER_QUANTUM * 2)
+				continue;
+			int move = diff / 2;
+			const int room = water_room(nmix);
+			if(move > room)
+				move = room;
+			if(move < WATER_QUANTUM)
+				continue;
+			mix.water -= (uint8_t)move;
+			nmix.water += (uint8_t)move;
+			write_mix(nv, n, nmix);
+			moved = true;
+			if(mix.water < WATER_QUANTUM)
+				break;
+		}
+		return moved;
+	}
+
+	// A neighbour the migration changed: into the scratch, and dirty, so
+	// that the water carries on moving next time round
+	void write_mix(interface::VoxelSample v, const pv::Vector3DInt32 &p,
+			const Mix &m)
+	{
+		set_mix(v, m);
+		m_scratch[pos_key(p)] = Pending{p, v};
+		mark_dirty(p);
 	}
 
 	// The weight resting on the voxel at p: the column immediately above it,
@@ -1312,19 +1433,30 @@ struct Module: public interface::Module
 		if(!is_generated(v))
 			return; // Not generated yet; whoever generates it computes both
 		Mix mix = mix_of(v);
+		const uint8_t water_was = mix.water;
+
+		// Water first, and before the structural test: a voxel of water is
+		// not structural and would otherwise never be looked at again. Where
+		// undermine turned dirt into a wet_dirt material so that the mesher
+		// could see the difference, here the water is simply part of what
+		// the voxel is made of -- the tint darkens it and the capacity
+		// drops, and no material changed into another one.
+		migrate_water(world, p, mix);
+		const bool wetness_moved = mix.water != water_was;
+
 		MaterialProps m = props_of(mix);
-		if(!m.structural)
+		if(!m.structural){
+			if(wetness_moved){
+				interface::VoxelSample nv = v;
+				set_mix(nv, mix);
+				// Nothing structural: no load on it and none of it on
+				// anything else, which is what a band of 0 says
+				set_state(nv, 0, 0);
+				m_scratch[pos_key(p)] = Pending{p, nv};
+				mark_dirty(pv::Vector3DInt32(p.getX(), p.getY() + 1,
+						p.getZ()));
+			}
 			return;
-		// What water has got into it. Where undermine turned dirt into a
-		// wet_dirt material so that the mesher could see the difference,
-		// here the water is simply part of what the voxel is made of: the
-		// tint darkens it, the capacity drops, the span goes, and no
-		// material changed into another one.
-		const uint8_t damp = compute_damp(world, p, m);
-		const bool wetness_moved = damp != mix.water;
-		if(wetness_moved){
-			mix.water = damp;
-			m = props_of(mix);
 		}
 
 		uint8_t support = compute_support(world, p, m);
