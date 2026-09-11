@@ -1519,7 +1519,13 @@ struct Module: public interface::Module
 					column_ready = false;
 					return;
 				}
-				if(props_of(mix_of(v)).structural){
+				// Something to stand on, not merely something that is not
+				// air: in a mixture world a canopy is structural, and a
+				// spawn column with a tree in it would put the player on
+				// the leaves and carve the tunnel through the tree. Half a
+				// voxel of solid is ground; leaves are three fifteenths.
+				const Mix m = mix_of(v);
+				if(props_of(m).structural && m.solid() >= 8){
 					surface_y = y;
 					return;
 				}
@@ -1533,8 +1539,14 @@ struct Module: public interface::Module
 			return;
 		}
 		carve_spawn_tunnel(surface_y);
-		// Voxel n is a 1x1x1 cube centered at n; stand on its top face.
-		m_spawn_y = (float)surface_y + 0.5f + PLAYER_HEIGHT / 2.0f + 0.05f;
+		// Voxel n is a 1x1x1 cube centered at n; stand on its top face --
+		// and a voxel and a half over it rather than on it. Five
+		// centimetres of clearance is inside Bullet's own collision margin,
+		// so the player began in resting contact from the first frame,
+		// against a chunk shape that may not have been built yet. A short
+		// fall makes a real contact and does not care when the floor
+		// arrives.
+		m_spawn_y = (float)surface_y + 0.5f + PLAYER_HEIGHT / 2.0f + 1.5f;
 		m_spawn_ready = true;
 		log_i(MODULE, "Spawn at (%i, %.2f, %i) (terrain y=%i)",
 				SPAWN_X, m_spawn_y, SPAWN_Z, surface_y);

@@ -335,12 +335,54 @@ end
 local FREE_MOVE_SPEED = 22
 local free_move = false
 
+-- Whether the capsule at this height is clear of the terrain: its bottom,
+-- middle and top, which is as much as a one-voxel-wide capsule can be in.
+local function player_clear_at(y)
+	local p = player_node.position
+	local x, z = math.floor(p.x + 0.5), math.floor(p.z + 0.5)
+	for _, dy in ipairs({-PLAYER_HEIGHT / 2 + 0.1, 0, PLAYER_HEIGHT / 2 - 0.1}) do
+		if occupied_at(buildat.Vector3(x, math.floor(y + dy + 0.5), z)) then
+			return false
+		end
+	end
+	return true
+end
+
+-- The saved collision mask, while free move has it turned off
+local free_move_mask = nil
+
 local function set_free_move(on)
 	free_move = on
 	local body = player_node:GetComponent("RigidBody")
 	if body then
 		body.useGravity = not on
 		body.linearVelocity = magic.Vector3(0, 0, 0)
+		-- Free move goes through anything. Without this it is not the
+		-- escape hatch it is meant to be: a player already stuck inside the
+		-- terrain stays stuck, and flying is blocked by what it flies into.
+		if on then
+			if free_move_mask == nil then
+				free_move_mask = body.collisionMask
+			end
+			body.collisionMask = 0
+		elseif free_move_mask ~= nil then
+			-- Coming back out inside something would be the very thing this
+			-- is here to get out of, so find the nearest place above where
+			-- the capsule fits first
+			local p = player_node.position
+			if not player_clear_at(p.y) then
+				for i = 1, 64 do
+					if player_clear_at(p.y + i) then
+						player_node.position =
+								magic.Vector3(p.x, p.y + i, p.z)
+						log:info("free move off: moved up "..i.." to clear")
+						break
+					end
+				end
+			end
+			body.collisionMask = free_move_mask
+			free_move_mask = nil
+		end
 	end
 	if player_crouched then
 		player_shape:SetCapsule(PLAYER_WIDTH, PLAYER_HEIGHT)
