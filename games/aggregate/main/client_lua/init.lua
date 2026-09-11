@@ -216,16 +216,6 @@ voxel_shading.use_modifiers(true)
 
 voxel_shading.create_skybox(scene, SUN_DIR)
 
--- What the creak comes out of, and when it is allowed to; see update_creak().
--- No audio device is not an error: the game is playable without it.
-local creak_sound = nil
-local creak_src = nil
-local creak_check_t = 0
-local creak_quiet_t = 0
-if magic.audio then
-	creak_sound = magic.cache:GetResource("Sound", "main/creak.wav")
-end
-
 -- Add a node that the player can use to walk around with
 local player_node = scene:CreateChild("Player")
 local player_shape = player_node:CreateComponent("CollisionShape")
@@ -389,12 +379,6 @@ local function set_free_move(on)
 		player_crouched = false
 	end
 	log:info(on and "free move on" or "free move off")
-end
-
-if creak_sound then
-	creak_src = player_node:CreateComponent("SoundSource")
-	creak_src.soundType = magic.SOUND_EFFECT
-	creak_src.gain = 0.7
 end
 
 -- Add a camera so we can look at the scene
@@ -624,38 +608,6 @@ local function overlook(lc, uc)
 	local horiz = math.sqrt(ox * ox + oz * oz)
 	camera_node.rotation = magic.Quaternion(
 			math.deg(math.atan2(oy, horiz)), 0, 0)
-end
-
--- A creak when what is over your head is about to go: support 1 is the last
--- value before nothing holds it, and load near capacity is the other way to
--- fail. It is the whole warning the game gives, and it is what turns the
--- support rule into something a player learns without being told.
-local CREAK_CHECK_INTERVAL = 0.4
-local CREAK_COOLDOWN = 2.5
-local CREAK_HEIGHT = 4          -- how far overhead is worth worrying about
-local function update_creak(dt)
-	creak_quiet_t = creak_quiet_t - dt
-	creak_check_t = creak_check_t - dt
-	if creak_check_t > 0 or creak_quiet_t > 0 or not creak_src then
-		return
-	end
-	creak_check_t = CREAK_CHECK_INTERVAL
-	local p = player_node:GetWorldPosition()
-	local x = math.floor(p.x + 0.5)
-	local y = math.floor(p.y + 0.5)
-	local z = math.floor(p.z + 0.5)
-	for dy = 1, CREAK_HEIGHT do
-		local here, v = occupied_at(buildat.Vector3(x, y + dy, z))
-		if here then
-			-- The first solid thing overhead is the one that would land on
-			-- you; what is above that is its problem
-			if support_of(v) <= 1 then
-				creak_src:Play(creak_sound)
-				creak_quiet_t = CREAK_COOLDOWN
-			end
-			break
-		end
-	end
 end
 
 -- The views: the same voxels meshed out of a registry whose materials wear a
@@ -1065,8 +1017,6 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 				player_crouched = false
 			end
 		end
-
-		update_creak(dt)
 
 		local p = player_node:GetWorldPosition()
 		local line = "("..math.floor(p.x + 0.5)..", "..
