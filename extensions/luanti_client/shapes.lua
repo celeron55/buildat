@@ -80,6 +80,28 @@ function M.plant_quads(scale, out)
 	return out
 end
 
+-- A plantlike_rooted node: a cube of the node's own tiles -- the sea bed
+-- under a kelp, the ground under a plant -- with the plant standing on top
+-- of it, out of the node's first special tile. The plant is drawn in the
+-- node *above* this one, which is where Luanti draws it and where there is
+-- room for it: inside the cube it would be inside something opaque.
+--
+-- The plant's quads wear tile 7, which is the definition's first extra
+-- texture; see VoxelDefinition::extra_textures.
+function M.rooted_quads(scale, out)
+	out = out or {}
+	M.box_quads({-0.5, -0.5, -0.5, 0.5, 0.5, 0.5}, out)
+	local top = 0.5 + (scale or 1) * 1.0
+	local d = 0.5
+	out[#out + 1] = {tile = 7,
+			p = {-d, top, -d, d, top, d, d, 0.5, d, -d, 0.5, -d},
+			uv = {0, 0, 1, 0, 1, 1, 0, 1}}
+	out[#out + 1] = {tile = 7,
+			p = {-d, top, d, d, top, -d, d, 0.5, -d, -d, 0.5, d},
+			uv = {0, 0, 1, 0, 1, 1, 0, 1}}
+	return out
+end
+
 -- Luanti's LIQUID_LEVEL_MASK and LIQUID_LEVEL_MAX: the level a flowing
 -- liquid carries in its param2, 0...7.
 local LIQUID_LEVELS = 8
@@ -530,18 +552,11 @@ function M.for_node(def, facedir, wall, mesh_quads, liquid_top)
 		return M.plant_quads(def.visual_scale), true
 	end
 	if drawtype == 17 then -- PLANTLIKE_ROOTED
-		-- Luanti draws this as a cube of the node's own tiles -- the sea bed
-		-- under a kelp, the ground under a plant -- with the plant standing
-		-- on top of it out of special_tiles[1].
-		--
-		-- simplified: the cube, and no plant. Drawing both wants the shape's
-		-- quads to wear a seventh texture, and a voxel's quads can only wear
-		-- its own six; see the note in tmp/luanti_voxels_plan.md for the
-		-- three ways out. Until then this is the right half to keep: a sea
-		-- bed that is a sea bed with nothing growing on it reads as the
-		-- world with something missing, where crossed quads of sea bed read
-		-- as the world being broken.
-		return nil, false
+		-- The cube and the plant standing on it; see rooted_quads(). The
+		-- shape is double sided for the plant's sake, which costs the
+		-- cube's faces nothing that matters since they are against
+		-- something.
+		return M.rooted_quads(def.visual_scale), true
 	end
 	if drawtype == 14 then -- FIRELIKE
 		return M.plant_quads(def.visual_scale), true

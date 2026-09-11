@@ -1387,8 +1387,18 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 							!(faces & (1u << (quad.connect_dir - 1)))){
 						continue;
 					}
-					uint tile = quad.tile < 6 ? quad.tile : 0;
-					AtlasSegmentReference seg_ref = def->textures[tile];
+					// 0...5 is one of the voxel's faces and 6 and over is
+					// one of its extra textures; see
+					// VoxelDefinition::extra_textures
+					AtlasSegmentReference seg_ref;
+					if(quad.tile < 6){
+						seg_ref = def->textures[quad.tile];
+					} else {
+						const size_t i = quad.tile - 6;
+						if(i >= def->extra_textures.size())
+							continue;
+						seg_ref = def->extra_textures[i];
+					}
 					if(seg_ref.atlas_id == interface::ATLAS_UNDEFINED)
 						continue;
 					const AtlasSegmentCache *aseg =

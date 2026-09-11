@@ -47,7 +47,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 10;
+		uint8_t version = 11;
 		archive(
 				version,
 				v.name,
@@ -80,6 +80,12 @@ namespace interface
 		// below for why this branch reads as "10 or newer" and writes always
 		if(version >= 10){
 			archive(v.tint_ramp[0], v.tint_ramp[1], v.sag_extent);
+		}
+		// Version 11 added the textures a shape's quads can wear beyond the
+		// six faces. A count and then that many, so a definition without
+		// any pays one byte.
+		if(version >= 11){
+			archive(v.extra_textures);
 		}
 	}
 

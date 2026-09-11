@@ -112,6 +112,16 @@ namespace interface
 		// These must be definitions (not references) because each client has to
 		// be able to construct their atlases from different texture sizes
 		AtlasSegmentDefinition textures[6];
+		// Textures a quad of the voxel's own shape can wear instead of one
+		// of the six. A quad's tile is 0...5 for a face texture and 6 and
+		// over for one of these, so a shape that is more than one thing --
+		// a plant standing in a cube of ground, wearing the ground's
+		// texture and its own -- has somewhere to put the rest of them.
+		//
+		// Empty for nearly every voxel, and an empty vector costs nothing;
+		// the six stay an array so that the cube mesher's inner loop is
+		// unchanged and pays no indirection.
+		sv_<AtlasSegmentDefinition> extra_textures;
 		// Quarter turns anticlockwise to give each face's texture inside the
 		// face, 0...3. What wants this is a voxel that faces a direction: the
 		// texture of the top of a turned cube is turned with it, and the same
@@ -294,6 +304,9 @@ namespace interface
 
 		bool textures_valid = false;
 		AtlasSegmentReference textures[6];
+		// See VoxelDefinition::extra_textures. Built with the six, and
+		// there are no LOD segments for them: a LOD mesh draws cubes.
+		sv_<AtlasSegmentReference> extra_textures;
 		// The LOD segments are only built for a volume that is actually
 		// meshed at a LOD: building one is a texture loaded, scaled and drawn
 		// into an atlas, and there are VOXELDEF_NUM_LOD of them per face

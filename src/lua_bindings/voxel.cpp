@@ -65,6 +65,31 @@ void vdef_set_textures(VoxelDefinition &def, luabind::object value, lua_State *L
 	}
 }
 
+// vdef.extra_textures = {seg, ...}: the textures a shape's quads can wear
+// beyond the six faces, indexed from 1 in Lua and addressed as tile 6 and
+// over in a quad. See VoxelDefinition::extra_textures.
+luabind::object vdef_get_extra_textures(const VoxelDefinition &def,
+		lua_State *L)
+{
+	luabind::object result = luabind::newtable(L);
+	for(size_t i = 0; i < def.extra_textures.size(); i++)
+		result[i+1] = luabind::object(L, def.extra_textures[i]);
+	return result;
+}
+
+void vdef_set_extra_textures(VoxelDefinition &def, luabind::object value,
+		lua_State *L)
+{
+	def.extra_textures.clear();
+	for(size_t i = 1;; i++){
+		luabind::object o = value[i];
+		if(!o)
+			break;
+		def.extra_textures.push_back(
+				luabind::object_cast<AtlasSegmentDefinition>(o));
+	}
+}
+
 luabind::object vdef_get_tile_turns(const VoxelDefinition &def, lua_State *L)
 {
 	luabind::object result = luabind::newtable(L);
@@ -158,9 +183,12 @@ static interface::VoxelQuad quad_from_lua(const luabind::object &quad)
 	luabind::object tile = quad["tile"];
 	int tile_i = (tile && luabind::type(tile) == LUA_TNUMBER) ?
 			(int)luabind::object_cast<double>(tile) : 1;
-	if(tile_i < 1 || tile_i > 6)
+	// 1...6 are the voxel's own faces and 7 and over are its extra
+	// textures, which is what a shape that is more than one thing wants;
+	// see VoxelDefinition::extra_textures
+	if(tile_i < 1 || tile_i > 256)
 		throw Exception(ss_()+"VoxelDefinition.shape: tile "+
-				itos(tile_i)+" is not one of the six");
+				itos(tile_i)+" is not a face or an extra texture");
 	q.tile = (uint8_t)(tile_i - 1);
 	luabind::object dir = quad["connect_dir"];
 	int dir_i = (dir && luabind::type(dir) == LUA_TNUMBER) ?
@@ -588,6 +616,8 @@ void init_voxel(lua_State *L)
 			.def_readwrite("name", &VoxelDefinition::name)
 			.def_readwrite("id", &VoxelDefinition::id)
 			.property("textures", &vdef_get_textures, &vdef_set_textures)
+			.property("extra_textures", &vdef_get_extra_textures,
+					&vdef_set_extra_textures)
 			.property("tile_turns", &vdef_get_tile_turns,
 					&vdef_set_tile_turns)
 			.def_readwrite("face_draw_type", &VoxelDefinition::face_draw_type)

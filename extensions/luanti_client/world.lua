@@ -790,6 +790,12 @@ function M.new(magic, buildat, log, options)
 	-- what a rail wants; see VoxelDefinition.shape_masked.
 	-- blend is the node's own use_texture_alpha = "blend": see
 	-- NODEDEF_ALPHAMODE_BLEND
+	-- How many of the definitions built wear a texture beyond their six.
+	-- Logged when a registry is done: it is the one number that says the
+	-- rooted plants and the liquids' own tiles got through, and a game
+	-- where it is zero is a game where they did not.
+	local extras_built = 0
+
 	local function add_cube(voxel_reg, name, resources, kind, shape,
 			double_sided, turns, liquid_group, connect, masked, variants,
 			blend)
@@ -810,6 +816,26 @@ function M.new(magic, buildat, log, options)
 			textures[i] = seg
 		end
 		vdef.textures = textures
+		-- Anything past the six is a texture a shape's quads wear of their
+		-- own: the plant standing in a rooted plant's cube of ground. The
+		-- list is what the quads address as tile 7 and over.
+		local extras = {}
+		local i = 7
+		while resources[i] do
+			local seg = buildat.AtlasSegmentDefinition()
+			seg.resource_name = resources[i]
+			seg.total_segments = magic.IntVector2(1, 1)
+			seg.select_segment = magic.IntVector2(0, 0)
+			seg.roughness = 0.95
+			seg.spec_strength = 0.2
+			seg.bumpiness = 0.3
+			extras[#extras + 1] = seg
+			i = i + 1
+		end
+		if #extras > 0 then
+			vdef.extra_textures = extras
+			extras_built = extras_built + 1
+		end
 		if turns then
 			vdef.tile_turns = turns
 		end
@@ -3183,6 +3209,23 @@ function M.new(magic, buildat, log, options)
 			connect = {group = def.connect_group, mask = def.connect_mask,
 					solid = (def.connect_sides or 0) ~= 0}
 		end
+		-- Luanti draws a liquid from its *special* tiles and not from its
+		-- six: special 1 is the still texture and special 2 the flowing
+		-- one, which is why water drawn from the ordinary tiles wears its
+		-- still texture everywhere. A liquid with no special tile of its
+		-- own falls back to the face, which is what resolve_face does.
+		local liquid_face = nil
+		if group ~= 0 then
+			liquid_face = def.drawtype == DRAWTYPE_FLOWINGLIQUID and
+					{7, 7, 8, 8, 8, 8} or {7, 7, 7, 7, 7, 7}
+		end
+		local function resolve_face(d, i, o)
+			if liquid_face and i <= 6 then
+				return resolve_tile(d, liquid_face[i], o) or
+						resolve_tile(d, i, o)
+			end
+			return resolve_tile(d, i, o)
+		end
 		local shape, double_sided, masked = shapes.for_node(def, nil,
 				nil, read_mesh and read_mesh(def) or nil, nil)
 		if def.drawtype == DRAWTYPE_AIRLIKE then
@@ -3198,8 +3241,8 @@ function M.new(magic, buildat, log, options)
 					-- A shape can name a tile the definition does not give:
 					-- a torch has three, a sign one. Luanti falls back to
 					-- the first as well.
-					resources[i] = resolve_tile(def, i, override) or
-							resolve_tile(def, 1, override)
+					resources[i] = resolve_face(def, i, override) or
+							resolve_face(def, 1, override)
 					if not resources[i] then
 						return nil
 					end
@@ -3212,8 +3255,8 @@ function M.new(magic, buildat, log, options)
 					for _, quad in ipairs(masked[m] or {}) do
 						local i = quad.tile
 						if not resources[i] then
-							resources[i] = resolve_tile(def, i, override) or
-									resolve_tile(def, 1, override)
+							resources[i] = resolve_face(def, i, override) or
+									resolve_face(def, 1, override)
 							if not resources[i] then
 								return nil
 							end
@@ -3237,7 +3280,7 @@ function M.new(magic, buildat, log, options)
 		end
 		local resources = {}
 		for i = 1, 6 do
-			resources[i] = resolve_tile(def, i, override)
+			resources[i] = resolve_face(def, i, override)
 			if not resources[i] then
 				return nil
 			end
@@ -3263,6 +3306,7 @@ function M.new(magic, buildat, log, options)
 			[CONTENT_IGNORE] = VOXEL_AIR,
 		}
 		local cubes = 0
+		extras_built = 0
 		local light_ids = {}
 		-- Air's own definition is not among the ones a server sends, so
 		-- seed it the way the node map above seeds it: light and sunlight
@@ -3461,6 +3505,8 @@ function M.new(magic, buildat, log, options)
 			while true do
 				local id, def = next(defs, at)
 				if id == nil then
+					log:info(extras_built.." voxel types wear a texture "..
+							"beyond their six faces")
 					done = true
 					commit()
 					return true, cubes

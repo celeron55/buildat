@@ -282,6 +282,14 @@ struct CVoxelRegistry: public VoxelRegistry
 				cache.textures[i] = atlas_reg->find_or_add_segment(seg_def);
 			}
 		}
+		// And the ones a shape's quads wear beyond the six faces
+		cache.extra_textures.resize(def.extra_textures.size());
+		for(size_t i = 0; i < def.extra_textures.size(); i++){
+			const AtlasSegmentDefinition &seg_def = def.extra_textures[i];
+			cache.extra_textures[i] = seg_def.resource_name == "" ?
+					AtlasSegmentReference() :
+					atlas_reg->find_or_add_segment(seg_def);
+		}
 		// Caller sets cache.textures_valid = true
 	}
 
