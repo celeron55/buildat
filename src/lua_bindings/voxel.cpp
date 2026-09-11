@@ -72,6 +72,27 @@ luabind::object vdef_get_tile_turns(const VoxelDefinition &def, lua_State *L)
 	return result;
 }
 
+// vdef.tint_ramp = {0x808080, 0xffffff}: the two ends of the colour the
+// tint modifier moves between. See VoxelDefinition::tint_ramp.
+luabind::object vdef_get_tint_ramp(const VoxelDefinition &def, lua_State *L)
+{
+	luabind::object result = luabind::newtable(L);
+	for(size_t i = 0; i < 2; i++)
+		result[i+1] = luabind::object(L, (double)def.tint_ramp[i]);
+	return result;
+}
+
+void vdef_set_tint_ramp(VoxelDefinition &def, luabind::object value,
+		lua_State *L)
+{
+	for(size_t i = 0; i < 2; i++){
+		luabind::object v = value ? value[i+1] : luabind::object();
+		def.tint_ramp[i] = v && luabind::type(v) == LUA_TNUMBER ?
+				((uint32_t)luabind::object_cast<double>(v) & 0xffffffUL) :
+				0xffffffUL;
+	}
+}
+
 void vdef_set_tile_turns(VoxelDefinition &def, luabind::object value,
 		lua_State *L)
 {
@@ -218,8 +239,9 @@ static void vdef_set_shape_masked(VoxelDefinition &def,
 
 // voxel_reg:set_format{plane_bits = 32, id = {shift = 0, width = 16}, ...}
 //
-// The roles are id, light_sky, light_lamp, param and color; a role left out
-// is not bound. See VoxelFormat in interface/voxel.h and doc/client_api.txt.
+// The roles are id, light_sky, light_lamp, param and color, plus the
+// modifiers tint, wetness, grain, gloss, speckle, emission, sag_top and
+// sag_bottom; a role left out is not bound. See VoxelFormat in interface/voxel.h and doc/client_api.txt.
 static interface::VoxelField field_from_lua(const luabind::object &t,
 		const char *name)
 {
@@ -253,6 +275,14 @@ static void vreg_set_format(VoxelRegistry &reg, const luabind::object &t)
 	format.light_lamp = field_from_lua(t, "light_lamp");
 	format.param = field_from_lua(t, "param");
 	format.color = field_from_lua(t, "color");
+	format.tint = field_from_lua(t, "tint");
+	format.wetness = field_from_lua(t, "wetness");
+	format.grain = field_from_lua(t, "grain");
+	format.gloss = field_from_lua(t, "gloss");
+	format.speckle = field_from_lua(t, "speckle");
+	format.emission = field_from_lua(t, "emission");
+	format.sag_top = field_from_lua(t, "sag_top");
+	format.sag_bottom = field_from_lua(t, "sag_bottom");
 	reg.set_format(format);
 }
 
@@ -443,6 +473,8 @@ void init_voxel(lua_State *L)
 			.property("shape_masked", &vdef_get_shape_masked,
 					&vdef_set_shape_masked)
 			.property("variants", &vdef_get_variants, &vdef_set_variants)
+			.property("tint_ramp", &vdef_get_tint_ramp, &vdef_set_tint_ramp)
+			.def_readwrite("sag_extent", &VoxelDefinition::sag_extent)
 			.def_readwrite("shape_double_sided",
 					&VoxelDefinition::shape_double_sided)
 			.def_readwrite("translucent", &VoxelDefinition::translucent)

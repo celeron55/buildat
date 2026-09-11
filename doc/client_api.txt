@@ -416,6 +416,10 @@ every volume on its way anywhere, is bits under the old format.
       light_lamp = {shift = 20, width = 4},
       param = {shift = 24, width = 8},    -- a definition's own rule reads it
       color = nil,                        -- 0xRRGGBB, width 24 or 32
+      -- and the modifiers, none of them bound by default:
+      tint = nil, wetness = nil, grain = nil, gloss = nil,
+      speckle = nil, emission = nil,      -- surface, at most four at once
+      sag_top = nil, sag_bottom = nil,    -- geometry
   }
 
 - Those five are the roles the engine understands. A role left out is not
@@ -437,6 +441,27 @@ every volume on its way anywhere, is bits under the old format.
   multiplied into the vertex colour. That colour is light rather than albedo,
   so it tints the light a voxel receives and not its texture: right for a
   game whose voxels are unlit colour, wrong for a palette over a texture.
+- The modifiers say how much of something a voxel has, where a role says
+  what it is. Each is normalised against its own field's width, so a 4-bit
+  field and an 8-bit one both run 0...1 and a game can widen one without
+  touching its shader.
+- The surface modifiers reach the shader as four numbers in the vertex
+  tangent and nowhere else; the engine promises the four and their order and
+  the game's shader decides what they look like. The order is tint, wetness,
+  grain, gloss, speckle, emission, with the bound ones packed towards x --
+  fixed rather than the order they were written, so that two worlds binding
+  the same roles hand their shaders the same thing. At most four may be
+  bound; a fifth is refused.
+- tint is the one the engine reads as well as carries: it moves the voxel's
+  colour along vdef.tint_ramp = {0xRRGGBB, 0xRRGGBB}, the first end at 0 and
+  the second at full. A definition that leaves both ends white is not
+  tinted whatever the field says. As with everything else that reaches the
+  vertex colour this tints the light rather than the texture.
+- sag_top and sag_bottom move a voxel's top and bottom faces into it, by up
+  to vdef.sag_extent voxels. The mesher averages the sag of the voxels that
+  meet at each corner, so a sagging surface runs continuously instead of
+  stepping; what the sag means -- a liquid's level, a floor giving under a
+  load, shallow snow -- is the game's.
 - The fields may not overlap and may not reach past the word. set_format()
   says which rule was broken.
 - voxel_reg:dump_format() writes the format out, for a log line.
