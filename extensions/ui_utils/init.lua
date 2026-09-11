@@ -140,6 +140,16 @@ end
 -- :add("Label", action) creates a button; :add(button, action) registers one.
 function M.safe.vertical_menu(root, options)
 	options = options or {}
+	-- SetStyleAuto() below needs a style to find, and a root that has none
+	-- gives an unstyled window with invisible text -- which reads as a blank
+	-- vertical bar. Every caller in this tree sets this first; do it here so
+	-- that a caller which forgets gets a menu rather than a bar, the same way
+	-- show_message_dialog() and show_notification() already do. A root that
+	-- has its own style keeps it.
+	if not root.defaultStyle then
+		root.defaultStyle = magic.cache:GetResource("XMLFile",
+				options.style or "__menu/res/main_style.xml")
+	end
 	local window = root:CreateChild("Window")
 	window:SetStyleAuto()
 	window:SetLayout(LM_VERTICAL, options.spacing or 10,

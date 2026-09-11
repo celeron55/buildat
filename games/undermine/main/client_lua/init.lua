@@ -393,10 +393,10 @@ magic.ui:SetFocusElement(nil)
 -- Placing one and then cutting a pillar out of it is the whole point of
 -- having them: building a cathedral by hand first is tedium, not a game.
 local STRUCTURES = {
-	{name = "chamber", label = "Chamber (roof too wide for rock)"},
-	{name = "cathedral", label = "Cathedral (pillars and a rock roof)"},
-	{name = "bridge", label = "Bridge (deck on piers)"},
-	{name = "mineshaft", label = "Mineshaft (timber props)"},
+	{name = "chamber", label = "Chamber - too wide to roof"},
+	{name = "cathedral", label = "Cathedral - pillars and roof"},
+	{name = "bridge", label = "Bridge - deck on piers"},
+	{name = "mineshaft", label = "Mineshaft - timber props"},
 }
 
 local structure_menu = nil
@@ -593,6 +593,8 @@ local function open_structure_menu()
 	-- what ui_utils' menus subscribe to their keys through
 	local root = uistack.main:push({desc = "structures"})
 	local menu = ui_utils.vertical_menu(root, {
+		-- Wide enough for the longest label; the window follows its buttons
+		min_width = 330,
 		on_key = function(key)
 			if key == magic.KEY_ESCAPE or key == magic.KEY_B then
 				close_structure_menu()
@@ -614,6 +616,12 @@ end
 
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	local key = event_data:GetInt("Key")
+	-- While the menu is up it has the keyboard, and its own handler is what
+	-- closes it. Without this, escape would disconnect the client from
+	-- inside a menu, which is not what anyone means by escape.
+	if structure_menu then
+		return
+	end
 	if key == magic.KEY_ESCAPE then
 		log:info("KEY_ESCAPE pressed")
 		buildat.disconnect()
@@ -773,11 +781,19 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		end
 
 		if free_move then
-			-- Straight along the camera, so looking down and holding W goes
-			-- down. Space and shift are up and down whatever it is pointed
-			-- at, which is what makes lining a shot up quick.
+			-- Level, along the horizontal part of where the camera looks, so
+			-- that looking down at something and holding W flies over it
+			-- instead of into it. Space and shift are what go up and down.
 			local wanted = magic.Vector3(0, 0, 0)
-			local dir = camera_node.worldDirection
+			local d = camera_node.worldDirection
+			local dir = magic.Vector3(d.x, 0, d.z)
+			if dir:Length() < 0.001 then
+				-- Straight up or straight down: the camera says nothing
+				-- about which way forward is, so the body's yaw does
+				local u = player_node.direction
+				dir = magic.Vector3(u.x, 0, u.z)
+			end
+			dir = dir:Normalized()
 			local right = dir:CrossProduct(magic.Vector3(0, 1, 0))
 			if magic.input:GetKeyDown(magic.KEY_W) then
 				wanted = wanted + dir
