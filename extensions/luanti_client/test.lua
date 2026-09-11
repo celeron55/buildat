@@ -1727,6 +1727,14 @@ for face = 1, 6 do
 			"shapes: an upside-down voxel's face "..face.." is not turned")
 end
 
+-- A rooted plant's shape is a full cube with the plant on top of it, and it
+-- says so: a neighbouring liquid must cull its face against the cube instead
+-- of drawing a water surface around the plant's base
+local rooted = shapes.for_node({drawtype = 17, visual_scale = 1})
+assert(rooted.solid_base, "shapes: a rooted plant's shape fills its voxel")
+assert(#rooted == 8, "shapes: a rooted plant is a cube and two quads, not "..
+		#rooted)
+
 -- A box turns with the voxel: the back half of a stair is at +Z to begin
 -- with, and a quarter turn about Y puts it at +X
 local turned_box = shapes.turn_box({-0.5, 0, 0, 0.5, 0.5, 0.5}, 1)

@@ -904,8 +904,10 @@ function M.new(magic, buildat, log, options)
 			-- A shaped voxel's neighbours draw their faces against it, which
 			-- is what EMPTY says. A liquid keeps its own edge material
 			-- instead: a lake's cubes must not draw their faces against the
-			-- shaped surface on top of them.
-			if not (liquid_group and liquid_group ~= 0) then
+			-- shaped surface on top of them. So does a shape that fills the
+			-- voxel anyway; see rooted_quads().
+			if not (liquid_group and liquid_group ~= 0) and
+					not shape.solid_base then
 				vdef.edge_material_id =
 						buildat.VoxelDefinition.EDGEMATERIALID_EMPTY
 			end
