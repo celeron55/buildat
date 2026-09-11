@@ -61,6 +61,14 @@ And what undermine has no answer to at all:
   ground stays damp instead of draining into the bottom of the world.
   Anything with set binder in it is closed to water, so brick and concrete
   keep it out and wood does not.
+- **A heap carries what it is packed to.** Capacity is what the material
+  would carry solid, scaled by how near the voxel is to its own packing
+  limit, so a spoonful of leaf mould lying in a voxel carries almost
+  nothing where before it carried half of what soil does. And a heap with
+  no bond sinks into whatever room is under it, which is the other end of
+  the same transfer that pushes material out of an overfull voxel -- so
+  what a rotted tree leaves becomes part of the ground instead of standing
+  on it.
 - **A heap cannot be packed past its own limit.** Rounded mineral grains
   leave about a third of the space between them however hard they are
   pressed, which is why sand and gravel hold water even when fully
@@ -107,9 +115,10 @@ Tab is a free camera: it goes where it is pointed, through anything, and
 nothing pulls it down. Turn it on before placing a structure and the camera
 takes itself somewhere the whole thing is in frame.
 
-G goes to a place worth testing at -- the one so far is the pool site at
-(-79, 62, 167), a hollow in the dramatic terrain where water can be poured
-and watched. See PLACES in main/client_lua/init.lua.
+G goes to the next place worth testing at: the pool site at (-79, 62, 167),
+a hollow where water can be poured and watched, and an overlook the spawn
+and anything built there is in frame from. See PLACES in
+main/client_lua/init.lua.
 
 V cycles the views: off, load, support, danger. The same voxels are drawn as
 a gradient from green to red -- how much of what a voxel can carry is on it,
