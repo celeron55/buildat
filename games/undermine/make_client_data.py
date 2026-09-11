@@ -151,6 +151,12 @@ def main():
     # Coarse and mixed, from a 2x2 blob: what everything becomes after it
     # falls
     solid("rubble.png", (0.42, 0.38, 0.34), 0.30, 7, blob=2)
+    # Dirt that has taken water: darker and a little bluer, so that a wet
+    # patch reads as one from across a tunnel
+    # Half the brightness of dry dirt rather than a different brown: under a
+    # lit sky the hue of a texture washes out and only the value survives,
+    # so darkness is what reads as wet from across a tunnel
+    solid("wet_dirt.png", (0.15, 0.115, 0.10), 0.06, 13)
     timber()
     brick()
     make_creak()

@@ -17,8 +17,8 @@ A tree is scenery that the same rules apply to: its trunk stands on the
 ground and its leaves hang off the trunk, so cutting through a trunk drops
 what is above the cut.
 
-Left button digs, right button places, and keys 1 to 4 pick what it places:
-rock, timber, brick, dirt. The line under the position says what the pointed
+Left button digs, right button places, and keys 1 to 5 pick what it places:
+rock, timber, brick, dirt, water. The line under the position says what the pointed
 voxel is made of and what the simulation thinks of it.
 
 B opens a menu of structures the server will put up where you stand: a
@@ -59,6 +59,13 @@ as LOAD_DEPTH. Over its material's capacity and it fails. That is what makes a
 prop under thirty voxels of rock snap and a brick pillar under the same rock
 hold.
 
+Water gets into what is porous. Moisture is how near a voxel is to water --
+full next to it, one less per step away -- and dirt that has taken any of it
+is wet dirt, which holds nothing out over a gap and carries half of what dry
+dirt does. So digging under a pond floods and then collapses, and pouring
+water next to a wall is a way to find that out on purpose. Take the water
+away and the moisture runs back down and it dries.
+
 What fails falls: down one voxel a tick, and becomes what its material falls
 as. Rock and brick come apart into rubble, which spans nothing, so a pile of
 it holds no roof up and a cave-in carries on rather than plugging itself. The
@@ -83,7 +90,7 @@ Why this game exists
 It is the sample game for a voxel format a game chooses for itself. Its
 voxels are cut up like this:
 
-    id 0...7, light_sky 8...11, param 12...19
+    id 0...7, light_sky 8...11, param 12...19, moisture 20...23
 
 -- eight bits of material id, with room for the nature and everything else a
 game like this grows, four of skylight, and eight for the simulation: how
@@ -103,7 +110,16 @@ engine's lamp-light role is for a world whose server bakes that per voxel and
 sends it, which is what a Luanti server does.
 
 The engine knows the param is there and hands it to a definition; what the
-two nibbles in it mean is entirely the game's, which is the point.
+two nibbles in it mean is entirely the game's, which is the point. Moisture
+is not a role at all -- the engine neither knows nor cares -- and adding it
+after the game was already playable changed the format not at all.
+
+What it did need was a material: both nibbles of the param were spoken for,
+and a definition's variants are indexed by the param, so the only way for
+the mesher to see wetness was for wet dirt to be its own material with its
+own texture and its own numbers. Which is the better answer anyway -- wet
+dirt is a different thing from dirt -- but it is worth knowing that the wall
+was the param and not the width of the word. Eight bits are still spare.
 
 Licenses of textures and other media
 ------------------------------------
