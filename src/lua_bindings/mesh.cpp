@@ -382,24 +382,40 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 			return true; // Dropped while this was in the queue
 		Context *context = node->GetContext();
 		switch(post_step){
-		case 1:
+		case 1: {
 			// The boxes come from VoxelDefinition::physically_solid, so from
 			// the voxel ids: a write that changed only a game's own
 			// per-voxel fields cannot have changed them. When they are the
 			// same as last time there is nothing to do, and skipping is not
-			// just an optimisation -- step 2 below releases the body from
-			// the physics world and step 3 puts it back a frame or more
-			// later, and anything standing on the chunk falls through in
-			// between.
-			if(node->GetVar(StringHash(PHYSICS_READY_VAR)).GetBool() &&
-					node_already_has_boxes(node, result_boxes))
+			// just an optimisation -- the split below releases the body from
+			// the physics world and puts it back a frame or more later, and
+			// anything standing on the chunk falls through in between.
+			const bool was_live =
+					node->GetVar(StringHash(PHYSICS_READY_VAR)).GetBool();
+			if(was_live && node_already_has_boxes(node, result_boxes))
 				return true;
-			// From here the collision is coming apart and going back
-			// together, and for the next step or two there is none.
-			// Anything standing on this chunk wants to know.
-			node->SetVar(StringHash(PHYSICS_READY_VAR), Variant(false));
 			node->GetOrCreateComponent<RigidBody>(LOCAL);
+			if(was_live){
+				// A chunk that already carries someone is rebuilt in one
+				// step and never leaves the physics world. The split is
+				// what costs a player the floor, and a world that
+				// simulates -- water moving, wood dying, rot -- rebuilds
+				// the chunk you are standing on all the time, which is why
+				// a game like that falls through far more than a static
+				// one does. The price is the two times below added
+				// together in one frame, on the one chunk that changed.
+				set_voxel_physics_boxes(node, context, result_boxes, false);
+				RigidBody *body = node->GetComponent<RigidBody>();
+				if(body)
+					body->OnSetEnabled();
+				return true;
+			}
+			// A chunk with no collision yet has nothing to fall through, so
+			// the first build stays split: it is both of those times again,
+			// and it happens for every chunk of a world as it loads.
+			node->SetVar(StringHash(PHYSICS_READY_VAR), Variant(false));
 			break;
+		}
 		case 2:
 #ifdef DEBUG_CORE_TIMING
 			log_v(MODULE, "num boxes: %zu", result_boxes.size());
