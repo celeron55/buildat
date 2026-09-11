@@ -404,6 +404,29 @@ local function check_voxel_modifiers()
 	assert(other:serialize() == reg:serialize(),
 			"the definitions did not survive the round trip")
 
+	-- A plane of a module's own, and a field inside it
+	local planed = safe.createVoxelRegistry()
+	planed:set_format{
+		id = {shift = 0, width = 16},
+		light_sky = {shift = 16, width = 4},
+		planes = {{name = "engine_test:heat", bits = 8}},
+		tint = {plane = 1, shift = 0, width = 4},
+	}
+	assert(planed:dump_format() ==
+			"VoxelFormat(32-bit + engine_test:heat:8-bit, id=0...15, "..
+			"light_sky=16...19, tint=0...3)",
+			"dump_format() says "..planed:dump_format())
+
+	-- A field cannot reach past its own plane, which is not the first one's
+	local ok0 = pcall(function()
+		safe.createVoxelRegistry():set_format{
+			id = {shift = 0, width = 16},
+			planes = {{name = "engine_test:heat", bits = 8}},
+			tint = {plane = 1, shift = 4, width = 8},
+		}
+	end)
+	assert(not ok0, "a field reaching past its plane was allowed")
+
 	-- Only four surface modifiers reach the shader, so a fifth is refused
 	-- rather than silently dropped. The two sag roles are not among them.
 	local ok = pcall(function()

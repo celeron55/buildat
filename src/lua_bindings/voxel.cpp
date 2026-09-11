@@ -267,13 +267,33 @@ static void vreg_set_format(VoxelRegistry &reg, const luabind::object &t)
 		throw Exception("set_format(): argument is not a table");
 	interface::VoxelFormat format;
 	{
-		// plane_bits is the width of the game's own first plane, which is
-		// the only one a format written in Lua has for now
+		// plane_bits is the width of the game's own first plane
 		luabind::object v = t["plane_bits"];
 		if(v && luabind::type(v) == LUA_TNUMBER){
 			format.planes.clear();
 			format.planes.push_back(interface::VoxelPlane("",
 					(uint8_t)luabind::object_cast<double>(v)));
+		}
+	}
+	{
+		// planes = {{name = "mod:heat", bits = 8}, ...}: the planes after
+		// the game's own. A field of one names it by index in `plane`.
+		luabind::object v = t["planes"];
+		if(v && luabind::type(v) == LUA_TTABLE){
+			for(size_t i = 1;; i++){
+				luabind::object pt = v[i];
+				if(!pt || luabind::type(pt) != LUA_TTABLE)
+					break;
+				luabind::object name = pt["name"];
+				luabind::object bits = pt["bits"];
+				if(!name || luabind::type(name) != LUA_TSTRING)
+					throw Exception(ss_()+"set_format(): plane "+itos(i)+
+							" has no name");
+				format.planes.push_back(interface::VoxelPlane(
+						luabind::object_cast<ss_>(name),
+						bits && luabind::type(bits) == LUA_TNUMBER ?
+						(uint8_t)luabind::object_cast<double>(bits) : 8));
+			}
 		}
 	}
 	format.id = field_from_lua(t, "id");
