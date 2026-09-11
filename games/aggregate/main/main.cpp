@@ -115,6 +115,10 @@ static const interface::VoxelField F_TINT(0, 6, 4);
 static const interface::VoxelField F_WETNESS(0, 10, 4);
 static const interface::VoxelField F_SUPPORT(0, 14, 4);
 static const interface::VoxelField F_BAND(0, 18, 4);
+// How far below the top of the voxel what is in it reaches, 0...15. Only
+// something the mesher reads: a voxel holding a tenth of a voxel of water is
+// a puddle and not a cube of water, and this is what tells it so.
+static const interface::VoxelField F_SAG(0, 22, 4);
 
 static const interface::VoxelField F_ROCK(P_MIX, 0, 4);
 static const interface::VoxelField F_SAND(P_MIX, 4, 4);
@@ -139,6 +143,10 @@ static interface::VoxelFormat aggregate_format()
 	// the shader to put a sheen on.
 	f.tint = F_TINT;
 	f.wetness = F_WETNESS;
+	// And where the top face of a part-full voxel is. Whether a voxel sags
+	// at all is its definition's sag_extent, so this costs the solids
+	// nothing; water is the one that has a level.
+	f.sag_top = F_SAG;
 	f.planes.push_back(interface::VoxelPlane("aggregate:mix", 32));
 	return f;
 }
@@ -280,6 +288,54 @@ static uint8_t saturation(const Mix &m)
 		return 0;
 	int s = 15 * (int)m.water / v;
 	return (uint8_t)(s > 15 ? 15 : s);
+}
+
+// How much water crosses a boundary in one step, in the same 255ths.
+//
+// How much room there is on the other side was already here; this is how
+// fast water gets there, and without it a voxel of water is inside the
+// ground in one tick -- which is why nothing pools.
+//
+// Where the number comes from is the composition itself: rock, sand and
+// binder are size classes, and **the finest material present sets the
+// rate**, because the smallest pores throttle the flow. A little clay in
+// gravel ruins its drainage, which no average would give -- so this is a
+// harmonic mean, which is dominated by its smallest term rather than
+// averaging it away. Free water has no solid in it and nothing throttles
+// it, so it falls as fast as there is room for.
+//
+// Below WATER_QUANTUM the flow is nothing at all rather than slow, which is
+// what makes clay perch whatever is over it.
+//
+// simplified: compaction does not slow it yet. The same solid packed into
+// less room is less permeable -- a trampled path holds water where the
+// field beside it does not -- and the hook for it is that packing shows up
+// in void_fill(); scaling by void against what the mixture would have loose
+// is the upgrade, once the numbers it moves have been played with.
+static const int COND_FREE = 255 * 30;  // Air and open water: not throttled
+static const int COND_ROCK = 96;    // gravel, and it behaves like a drain
+static const int COND_SAND = 32;
+static const int COND_FIBRE = 24;
+static const int COND_BINDER = 2;   // clay, and set binder is watertight
+
+static int conductivity(const Mix &m)
+{
+	const int solid = (int)m.rock + m.sand + m.fibre + m.binder;
+	if(solid <= 0)
+		return COND_FREE;
+	// A mass of binder that has set has no pores at all, which is the same
+	// thing takes_water() says and is said here too so that the rate has no
+	// hole in it: concrete and fired brick are watertight however coarse
+	// whatever else is in them is
+	if(m.binder >= 12)
+		return 0;
+	const int SCALE = 4096;
+	const int inv =
+			(int)m.rock * SCALE / COND_ROCK +
+			(int)m.sand * SCALE / COND_SAND +
+			(int)m.fibre * SCALE / COND_FIBRE +
+			(int)m.binder * SCALE / COND_BINDER;
+	return solid * SCALE / inv;
 }
 
 // Whether water can get into it at all. What closes a mixture is not its
@@ -439,6 +495,9 @@ static void set_mix(interface::VoxelSample &v, const Mix &m)
 	const uint8_t wet = saturation(m);
 	F_TINT.set(v, wet);
 	F_WETNESS.set(v, wet);
+	// How far from full it is, which is how far its surface is down
+	const int empty = FILL_FULL - solid_fill(m) - (int)m.water;
+	F_SAG.set(v, empty <= 0 ? 0 : (uint32_t)(empty * 15 / FILL_FULL));
 }
 
 // A voxel of one recipe, generated and with nothing worked out about it yet
@@ -827,6 +886,21 @@ struct Module: public interface::Module
 	// alive, and dead fibre lying wet. See step_slow().
 	std::vector<pv::Vector3DInt32> m_slow;
 	std::unordered_set<int64_t> m_slow_set;
+	// Voxels whose water has somewhere to go, held over to the next tick.
+	//
+	// Water is the one thing here with a *rate*, and a rate needs a clock.
+	// The relaxation has none: a voxel that moves water dirties its
+	// neighbours, they dirty it back, and it is looked at hundreds of times
+	// within one tick -- which is how a voxel of water was inside the
+	// ground before it had finished being placed. So anything a water move
+	// makes dirty goes here instead, and this queue is emptied into the
+	// dirty one once per tick. That, and nothing else, is what makes a tick
+	// a step.
+	std::deque<pv::Vector3DInt32> m_water_next;
+	std::unordered_set<int64_t> m_water_next_set;
+	// Ticks since the module started, which is what the flow rates are per
+	int64_t m_tick = 0;
+	static const int TICKS_PER_SECOND = 30; // The server's own tick rate
 
 	// What the relaxation has worked out but not written into the world yet.
 	//
@@ -891,7 +965,8 @@ struct Module: public interface::Module
 			bool fully_empty, float roughness = 0.9f, float spec_strength = 1.0f,
 			float bumpiness = 1.0f, float translucency = 0.0f,
 			float spots = 0.0f, float static_spots = 0.0f,
-			const ss_ &top_texture = "", uint32_t soaked = 0xffffff)
+			const ss_ &top_texture = "", uint32_t soaked = 0xffffff,
+			float sag_extent = 0.0f)
 	{
 		interface::VoxelDefinition vdef;
 		vdef.name.block_name = name;
@@ -923,6 +998,11 @@ struct Module: public interface::Module
 		// along it this voxel is
 		vdef.tint_ramp[0] = 0xffffff;
 		vdef.tint_ramp[1] = soaked;
+		// How far a full sag moves the top face. Only water has one: a
+		// voxel with a tenth of a voxel of water in it is a film on the
+		// ground, and drawing it as a cube is what made pouring water look
+		// like building with it.
+		vdef.sag_extent = sag_extent;
 		reg->add_voxel(vdef);
 	}
 
@@ -1118,7 +1198,7 @@ struct Module: public interface::Module
 			// a dug shore leaves a hole in the water rather than draining
 			// it; that is phase 2.
 			add_voxel(voxel_reg, "water", "main/water.png", true, false, false,
-					0.28f, 1.0f, 6.0f, 0.0f, 0.05f);
+					0.28f, 1.0f, 6.0f, 0.0f, 0.05f, 0.0f, "", 0xffffff, 1.0f);
 			add_voxel(voxel_reg, "bedrock", "main/bedrock.png",
 					true, true, false,
 					0.98f, 0.10f, 0.7f, 0.0f, 0.0f, 0.02f);
@@ -1216,6 +1296,39 @@ struct Module: public interface::Module
 								(int)band);
 					}
 				}
+			}
+
+			// Conductivity is the whole of how fast water moves and it is
+			// read off the composition, so a recipe change can quietly
+			// reorder it. Coarse drains, fine perches, and free water is
+			// not throttled at all; the values are logged because they are
+			// what the pooling is tuned against.
+			{
+				static const struct { const char *name; const Mix &mix; }
+						ORDER[] = {
+					{"water", MIX_WATER},
+					{"gravel", MIX_GRAVEL},
+					{"sand", MIX_SAND},
+					{"turf", MIX_TURF},
+					{"soil", MIX_SOIL},
+				};
+				int prev = -1;
+				for(const auto &c : ORDER){
+					const int k = conductivity(c.mix);
+					log_v(MODULE, "conductivity: %s %i/255 per step",
+							c.name, k);
+					if(prev >= 0 && k > prev){
+						log_w(MODULE, "conductivity: %s passes water faster "
+								"than what is coarser than it (%i)",
+								c.name, k);
+					}
+					prev = k;
+				}
+				// Brick is not in that order because it is not porous at
+				// all: it is packed solid, so there is no void for water
+				// to be in and the rate never comes up
+				if(takes_water(MIX_BRICK))
+					log_w(MODULE, "conductivity: brick takes water");
 			}
 
 			world->set_skylight_enabled(true);
@@ -1411,6 +1524,14 @@ struct Module: public interface::Module
 			mark_dirty(pv::Vector3DInt32(p.getX(), p.getY() - i, p.getZ()));
 	}
 
+	void mark_water_next(const pv::Vector3DInt32 &p)
+	{
+		if(m_dirty_set.count(pos_key(p)))
+			return; // Already going to be looked at
+		if(m_water_next_set.insert(pos_key(p)).second)
+			m_water_next.push_back(p);
+	}
+
 	void mark_slow(const pv::Vector3DInt32 &p)
 	{
 		if(m_slow_set.insert(pos_key(p)).second)
@@ -1547,6 +1668,31 @@ struct Module: public interface::Module
 	// empties.
 	static const int WATER_QUANTUM = 4;
 
+	// What crosses between two voxels in this tick: the tighter of them,
+	// because a boundary is only as open as its worse side.
+	//
+	// conductivity() is per second and most of it is slower than the
+	// quantum per tick -- turf passes 7 of 255 a second, which is a quarter
+	// of a unit a tick and would round to nothing. So a boundary that
+	// cannot move the quantum every tick moves it less often instead: it
+	// opens on the ticks where the running total crosses another quantum,
+	// which averages to exactly the rate and needs no per-voxel
+	// accumulator.
+	int flow_limit(const Mix &a, const Mix &b) const
+	{
+		const int ka = conductivity(a), kb = conductivity(b);
+		const int k = ka < kb ? ka : kb;
+		if(k <= 0)
+			return 0;
+		const int64_t now = m_tick * k / TICKS_PER_SECOND;
+		const int64_t before = (m_tick - 1) * k / TICKS_PER_SECOND;
+		const int64_t d = now - before;
+		if(d >= WATER_QUANTUM)
+			return (int)d;
+		return (now / WATER_QUANTUM != before / WATER_QUANTUM) ?
+				WATER_QUANTUM : 0;
+	}
+
 	// Move water out of p if it has anywhere to go. mix is updated in place;
 	// the neighbours are written straight into the scratch, so the next
 	// voxel the relaxation looks at sees them.
@@ -1570,11 +1716,17 @@ struct Module: public interface::Module
 				const int room = takes_water(bmix) ? water_room(bmix) : 0;
 				// Only what is not held against gravity
 				const int free = loose_water(mix);
-				const int move = free < room ? free : room;
+				int move = free < room ? free : room;
+				// And no faster than the tighter of the two lets water
+				// through, which is what makes it soak in rather than
+				// vanish
+				const int cond = flow_limit(mix, bmix);
+				if(move > cond)
+					move = cond;
 				if(move >= WATER_QUANTUM){
 					mix.water -= (uint8_t)move;
 					bmix.water += (uint8_t)move;
-					write_mix(bv, down, bmix);
+					write_mix(bv, down, bmix, true);
 					moved = true;
 				}
 			}
@@ -1605,11 +1757,14 @@ struct Module: public interface::Module
 			const int room = water_room(nmix);
 			if(move > room)
 				move = room;
+			const int cond = flow_limit(mix, nmix);
+			if(move > cond)
+				move = cond;
 			if(move < WATER_QUANTUM)
 				continue;
 			mix.water -= (uint8_t)move;
 			nmix.water += (uint8_t)move;
-			write_mix(nv, n, nmix);
+			write_mix(nv, n, nmix, true);
 			moved = true;
 			if(mix.water < WATER_QUANTUM)
 				break;
@@ -1682,11 +1837,14 @@ struct Module: public interface::Module
 	// A neighbour the migration changed: into the scratch, and dirty, so
 	// that the water carries on moving next time round
 	void write_mix(interface::VoxelSample v, const pv::Vector3DInt32 &p,
-			const Mix &m)
+			const Mix &m, bool next_tick = false)
 	{
 		set_mix(v, m);
 		m_scratch[pos_key(p)] = Pending{p, v};
-		mark_dirty(p);
+		if(next_tick)
+			mark_water_next(p);
+		else
+			mark_dirty(p);
 	}
 
 	// The weight resting on the voxel at p: the column immediately above it,
@@ -1754,8 +1912,13 @@ struct Module: public interface::Module
 				// anything else, which is what a band of 0 says
 				set_state(nv, 0, 0);
 				m_scratch[pos_key(p)] = Pending{p, nv};
-				mark_dirty(pv::Vector3DInt32(p.getX(), p.getY() + 1,
-						p.getZ()));
+				const pv::Vector3DInt32 up(p.getX(), p.getY() + 1, p.getZ());
+				if(solid_moved || life_moved)
+					mark_dirty(up);
+				else
+					mark_water_next(up);
+				if(wetness_moved)
+					mark_water_next(p);
 			}
 			return;
 		}
@@ -1777,9 +1940,20 @@ struct Module: public interface::Module
 			static const int OFF[6][3] = {
 				{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1},
 			};
-			for(size_t k = 0; k < 6; k++)
-				mark_dirty(pv::Vector3DInt32(p.getX() + OFF[k][0],
-						p.getY() + OFF[k][1], p.getZ() + OFF[k][2]));
+			// Water that moved is next tick's business, so that a voxel
+			// gets one step per tick and not one per visit; anything else
+			// that moved is wanted at once
+			const bool now = support_moved || solid_moved || life_moved;
+			for(size_t k = 0; k < 6; k++){
+				const pv::Vector3DInt32 n(p.getX() + OFF[k][0],
+						p.getY() + OFF[k][1], p.getZ() + OFF[k][2]);
+				if(now)
+					mark_dirty(n);
+				else
+					mark_water_next(n);
+			}
+			if(wetness_moved)
+				mark_water_next(p); // It may still have somewhere to send it
 		}
 		// Anything with something slow to do says so here, and the queue is
 		// what gives it a clock; see step_slow()
@@ -1950,6 +2124,12 @@ struct Module: public interface::Module
 
 	void on_tick(const interface::TickEvent &event)
 	{
+		m_tick++;
+		// What last tick's water moves left for this one
+		for(const pv::Vector3DInt32 &p : m_water_next)
+			mark_dirty(p);
+		m_water_next.clear();
+		m_water_next_set.clear();
 		if(m_dirty.empty() && m_falling.empty() && m_slow.empty())
 			return;
 		auto t0 = std::chrono::steady_clock::now();
