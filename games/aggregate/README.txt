@@ -37,6 +37,36 @@ What is different under the hood, in one list:
 - A view mode is three definitions and three rules rather than sixteen
   variants on each of twelve materials.
 
+And what undermine has no answer to at all:
+
+- **A fraction is solid volume, not heap volume.** A voxel of loose sand at
+  nine fifteenths is six fifteenths void, and that void is the only place
+  water can be. So saturation is how much of the *void* is taken: soil has
+  little room and is soaked by a little water where gravel takes four times
+  as much before it gives.
+- **Water moves and is conserved.** Down into whatever room is under it,
+  then sideways, and held against gravity up to what the mixture's
+  capillarity holds -- only what is over that runs off, which is why damp
+  ground stays damp instead of draining into the bottom of the world.
+  Anything with set binder in it is closed to water, so brick and concrete
+  keep it out and wood does not.
+- **A heap cannot be packed past its own limit.** Rounded mineral grains
+  leave about a third of the space between them however hard they are
+  pressed, which is why sand and gravel hold water even when fully
+  compacted. Bond raises the limit, because material held together is a
+  piece of something rather than a heap of it -- so when bond goes away a
+  collapse *bulks*, and the rubble takes up more room than the rock did.
+- **The wood cycle.** Life is how far living wood is from water it can
+  drink, so a tree standing in wet soil is alive and cutting its trunk
+  browns everything above the cut. Wood does not come back to life. Dead
+  fibre lying wet rots -- a fibre becomes a binder, which is composting --
+  and binder in sand is soil. A fallen tree becomes ground.
+
+What it deliberately cannot say: how finely divided a material is. A log and
+a heap of sawdust are the same fibre at a different bond, and fluffy sand
+and packed sand are the same sand. The look spike says to take that loss --
+they look the same in life too, which is why sand is dangerous.
+
 The mine, for now
 -----------------
 
