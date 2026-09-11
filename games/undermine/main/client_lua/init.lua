@@ -218,11 +218,10 @@ local function floor_has_collision()
 	if not chunk_p then
 		return false
 	end
-	local node = voxelworld.get_static_node(chunk_p)
-	if not node then
-		return false
-	end
-	return node:GetComponent("RigidBody") ~= nil
+	-- Not "does the chunk node have a RigidBody": that is true from the
+	-- moment the client starts building the collision, which is before there
+	-- is any of it. See voxelworld.chunk_has_physics().
+	return voxelworld.chunk_has_physics(chunk_p)
 end
 
 local function enable_physics()

@@ -477,6 +477,23 @@ function M.remesh_all()
 	return n
 end
 
+-- Whether this chunk's collision is actually there: the shapes are built and
+-- the body is in the physics world.
+--
+-- Not the same as the chunk node having a RigidBody component. That is
+-- created before the shapes exist and two main-thread steps before the body
+-- is put in the world -- the steps are split because two of them are
+-- expensive -- so a RigidBody on its own is the earliest moment at which
+-- there is nothing to stand on. Anything that waits for solid ground before
+-- letting a player fall has to wait for this instead.
+function M.chunk_has_physics(chunk_p)
+	local node = M.get_static_node(chunk_p)
+	if not node then
+		return false
+	end
+	return node:GetVar("buildat_physics_ready"):GetBool()
+end
+
 function M.get_static_node_cache(chunk_p)
 	local ztable = static_node_cache[chunk_p.z]
 	if not ztable then
