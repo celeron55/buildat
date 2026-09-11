@@ -19,6 +19,24 @@ not, a timber prop holds a ceiling until too much weight stands on it, and
 anything with nothing holding it together holds nothing. Dig badly and the
 mine comes down on you.
 
+What is different under the hood, in one list:
+
+- **No voxel type id.** The registry's look rules pick a definition out of
+  the fractions: thirteen base looks from sixteen ordered thresholds. The id
+  role is bound to two bits that say only whether a voxel has been generated
+  at all, which is what voxelworld needs and nothing else.
+- **Span, capacity, density and porosity are derived** from what a voxel is
+  made of, where undermine looked them up in a table by material.
+- **Falling breaks the bond** instead of turning what fell into rubble, so
+  soil that falls is still soil and merely holds nothing up. Rock that falls
+  is gravel, because that is what unbonded rock is.
+- **Wet is water in the mixture**, not a wet_dirt material: it darkens
+  through the tint modifier and takes half the capacity away.
+- **Turf is soil with something alive in it** and leaves are living fibre
+  with no mineral under it, which is the same two fields saying two things.
+- A view mode is three definitions and three rules rather than sixteen
+  variants on each of twelve materials.
+
 The mine, for now
 -----------------
 

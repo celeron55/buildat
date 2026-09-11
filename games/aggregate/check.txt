@@ -1,0 +1,24 @@
+# Client command sequence for a visual check. Run from Build/:
+#   bin/buildat -s localhost -w 1280x720 -c @../games/aggregate/check.txt
+#
+# The first shot is late on purpose. voxel_shading marches rays to work out
+# how much of the sky each direction can see, and until that settles the
+# glossy specks of a surface reflect a sky they cannot actually see -- so a
+# tunnel is full of glints for the first half minute and clean after it.
+# Twenty seconds is not enough; thirty is. Anything compared against
+# games/undermine has to be taken at the same point for the same reason.
+delay 32000
+screenshot ../tmp/aggregate_check/1_spawn_tunnel.png
+# Dig out of the tunnel and look at what the layers are made of
+keypress V
+delay 1500
+screenshot ../tmp/aggregate_check/2_load_view.png
+keypress V
+delay 1500
+screenshot ../tmp/aggregate_check/3_support_view.png
+keypress V
+delay 1500
+screenshot ../tmp/aggregate_check/4_danger_view.png
+keypress V
+delay 1000
+screenshot ../tmp/aggregate_check/5_back_to_play.png
