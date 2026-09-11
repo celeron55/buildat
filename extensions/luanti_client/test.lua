@@ -457,8 +457,24 @@ local function write_node(name, drawtype, tile_names, flags, animation, opts)
 	if opts.write_boxes then
 		opts.write_boxes(w)
 	else
-		w:raw(string.rep("\255", 40))
+		-- Three regular boxes: node, selection and collision. Not filler.
+		-- A reader cannot skip a node box whose type it does not know --
+		-- the type is what says how much of it there is -- so everything
+		-- after the boxes depends on these being real.
+		w:u8(6):u8(0)
+		w:u8(6):u8(0)
+		w:u8(6):u8(0)
 	end
+	-- What comes after the boxes, and which the reader has to get past to
+	-- reach the alpha mode: three sounds, two legacy flags, the dig
+	-- prediction and the maximum level
+	for _ = 1, 3 do
+		w:string(""):f32(1):f32(1):f32(0)
+	end
+	w:u8(0):u8(0)      -- legacy_facedir_simple, legacy_wallmounted
+	w:string("")       -- node_dig_prediction
+	w:u8(0)            -- leveled_max
+	w:u8(opts.alpha_mode or 2) -- ALPHAMODE_OPAQUE unless the test says
 	return w:data()
 end
 
@@ -504,6 +520,10 @@ local nodes = {
 			{walkable = false, liquid_type = 2, drowning = 1,
 			liquid_source = "test:water", palette = "water_palette.png",
 			post_effect_color = {a = 64, r = 100, g = 100, b = 200}})},
+	-- A node the game asked to be blended rather than masked
+	{14, write_node("test:glass", 0, {"glass.png", "glass.png", "glass.png",
+			"glass.png", "glass.png", "glass.png"}, 0, nil,
+			{alpha_mode = 0})},
 	{13, write_node("test:torch", 7, {"torch.png", "torch.png", "torch.png",
 			"torch.png", "torch.png", "torch.png"}, 0, "sheet")},
 	-- A fence: a post, a rail towards whatever is to its right, and a stub
@@ -534,6 +554,12 @@ assert(defs[7].name == "test:stone", "nodedef: name is "..
 assert(defs[7].drawtype == 0 and defs[9].drawtype == 0 and
 		defs[11].drawtype == 2 and defs[13].drawtype == 7,
 		"nodedef: wrong draw types")
+-- The alpha mode, which is past the boxes and past three sounds: without
+-- reading it, glass a game gave a real alpha to is alpha masked
+assert(defs[7].alpha_mode == 2, "nodedef: alpha_mode is "..
+		tostring(defs[7].alpha_mode))
+assert(defs[14].alpha_mode == 0, "nodedef: blended alpha_mode is "..
+		tostring(defs[14] and defs[14].alpha_mode))
 assert(defs[7].groups.cracky == 3 and
 		defs[7].groups.oddly_breakable_by_hand == -1, "nodedef: groups")
 -- The flags on test:grass add a colour, a scale and an align style after the
