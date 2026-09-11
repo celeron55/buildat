@@ -115,14 +115,25 @@ end
 -- *default* cut, hardcoded in the bindings, and under this format they would
 -- read the load and the support as part of the id.
 local FIELD = {
-	id      = {shift = 0,  width = 8},
-	light   = {shift = 8,  width = 4},
-	load    = {shift = 12, width = 8},
-	support = {shift = 20, width = 4},
+	id    = {shift = 0,  width = 8},
+	light = {shift = 8,  width = 4},
+	param = {shift = 12, width = 8},
 }
 
 local function field_of(v, f)
 	return math.floor(v.data / 2 ^ f.shift) % 2 ^ f.width
+end
+
+-- The param carries both of the simulation's numbers; see the layout at the
+-- top of main.cpp. Support is how far the voxel is from something holding it
+-- up, and the band is how much of what it can carry is already on it, both
+-- 0...15.
+local function support_of(v)
+	return field_of(v, FIELD.param) % 16
+end
+
+local function band_of(v)
+	return math.floor(field_of(v, FIELD.param) / 16)
 end
 
 -- In the order main.cpp adds them, which is what the ids are
@@ -492,7 +503,7 @@ local function update_creak(dt)
 		if id ~= M_AIR and id ~= 0 then
 			-- The first solid thing overhead is the one that would land on
 			-- you; what is above that is its problem
-			if field_of(v, FIELD.support) <= 1 then
+			if support_of(v) <= 1 then
 				creak_src:Play(creak_sound)
 				creak_quiet_t = CREAK_COOLDOWN
 			end
@@ -501,27 +512,34 @@ local function update_creak(dt)
 	end
 end
 
--- The stress view: the same voxels meshed out of a registry whose materials
--- wear a gradient by how close they are to failing. The server builds it and
--- sends it; see build_stress_registry() in main.cpp for why it costs no
--- storage.
-local stress_reg = nil
+-- The views: the same voxels meshed out of a registry whose materials wear a
+-- gradient instead of their texture, by how close they are to failing. The
+-- server builds one per mode and sends them; see build_view_registry() in
+-- main.cpp for why they cost no storage. Mode 0 is off.
+local VIEW_NAMES = {"load", "support", "danger"}
+local view_regs = {}
 local play_reg = nil
-local stress_view = false
+local view_mode = 0
 
-buildat.sub_packet("main:stress_registry", function(data)
-	stress_reg = buildat.createVoxelRegistry()
-	stress_reg:deserialize(data)
-	log:info("stress registry: "..stress_reg:dump_format())
+buildat.sub_packet("main:view_registry", function(data)
+	local values = cereal.binary_input(data, {"object",
+		{"mode", "int32_t"},
+		{"data", "string"},
+	})
+	local reg = buildat.createVoxelRegistry()
+	reg:deserialize(values.data)
+	view_regs[values.mode + 1] = reg
+	log:info("view registry "..(VIEW_NAMES[values.mode + 1] or
+			values.mode)..": "..reg:dump_format())
 end)
 
--- While the stress view is on, the chunks are drawn by their vertex colour
+-- While a view is on, the chunks are drawn by their vertex colour
 -- and nothing else: no texture, no light, no reflection. Registered after
 -- voxel_shading's own material callback, so this is the one that wins.
-local STRESS_TECHNIQUE = "Techniques/NoTextureUnlitVCol.xml"
+local VIEW_TECHNIQUE = "Techniques/NoTextureUnlitVCol.xml"
 
 voxelworld.sub_material_update(function(node)
-	if not stress_view then
+	if view_mode == 0 then
 		return
 	end
 	local cg = node:GetComponent("CustomGeometry")
@@ -535,27 +553,27 @@ voxelworld.sub_material_update(function(node)
 			break
 		end
 		m:SetTechnique(0, magic.cache:GetResource("Technique",
-				STRESS_TECHNIQUE))
+				VIEW_TECHNIQUE))
 		i = i + 1
 	end
 end)
 
-local function set_stress_view(on)
-	if on and not stress_reg then
-		log:warning("stress view: the registry has not arrived")
+local function set_view_mode(mode)
+	if mode == view_mode then
 		return
 	end
-	if on == stress_view then
+	if mode ~= 0 and not view_regs[mode] then
+		log:warning("view: registry "..mode.." has not arrived")
 		return
 	end
-	stress_view = on
+	view_mode = mode
 	play_reg = play_reg or voxelworld.get_voxel_registry()
-	voxelworld.set_voxel_registry(on and stress_reg or play_reg)
+	voxelworld.set_voxel_registry(mode ~= 0 and view_regs[mode] or play_reg)
 	-- The vertex colour is the band, so nothing else may be in it: with
-	-- skylight on, a stress view of a dark mine is a dark mine
-	voxelworld.use_skylight = not on
+	-- skylight on, a view of a dark mine is a dark mine
+	voxelworld.use_skylight = (mode == 0)
 	voxelworld.remesh_all()
-	log:info(on and "stress view on" or "stress view off")
+	log:info("view: "..(mode == 0 and "off" or VIEW_NAMES[mode]))
 end
 
 buildat.sub_packet("main:structure_placed", function(data)
@@ -633,7 +651,8 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		set_free_move(not free_move)
 	end
 	if key == magic.KEY_V then
-		set_stress_view(not stress_view)
+		-- Off, load, support, danger, off...
+		set_view_mode((view_mode + 1) % (#VIEW_NAMES + 1))
 	end
 	for i, m in ipairs(BUILD_MATERIALS) do
 		if key == m.key then
@@ -891,16 +910,16 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 				math.floor(p.y + 0.5)..", "..math.floor(p.z + 0.5)..")"..
 				"  building: "..BUILD_MATERIALS[build_material].name..
 				" (1-4)  structures: B  free move: Tab"..
-				(free_move and " (on)" or "").."  stress: V"..
-				(stress_view and " (on)" or "")
+				(free_move and " (on)" or "").."  view: V"..
+				(view_mode ~= 0 and " ("..VIEW_NAMES[view_mode]..")" or "")
 		-- What the pointed voxel is and how close it is to failing, which
 		-- is the whole debug interface between digs
 		if pointed_voxel_p then
 			local v = voxelworld.get_static_voxel(pointed_voxel_p)
 			local id = field_of(v, FIELD.id)
 			line = line.."\n"..(MATERIAL[id] or ("id "..id))..
-					"  support "..field_of(v, FIELD.support)..
-					"  load "..field_of(v, FIELD.load)..
+					"  support "..support_of(v).."/15"..
+					"  load "..band_of(v).."/15"..
 					"  light "..field_of(v, FIELD.light)
 		end
 		misc_text:SetText(line)

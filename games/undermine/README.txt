@@ -30,10 +30,12 @@ Tab is a free camera: it goes where it is pointed, through anything, and
 nothing pulls it down. Turn it on before placing a structure and the camera
 takes itself somewhere the whole thing is in frame.
 
-V is the stress view: the same voxels drawn as a gradient from green to red
-by how close each one is to failing, against its own material's capacity. It
-costs no storage at all, and how is worth reading if you are here for the
-voxel format -- see build_stress_registry() in main/main.cpp.
+V cycles the views: off, load, support, danger. The same voxels are drawn as
+a gradient from green to red -- how much of what a voxel can carry is on it,
+how far it is from something holding it up, or the worse of the two. All
+three cost no storage at all, and how is worth reading if you are here for
+the voxel format: the param carries both numbers and each view's registry
+decodes them its own way. See build_view_registry() in main/main.cpp.
 
 When the first solid thing over your head has one step of support left, it
 creaks. That is the whole warning the game gives.
@@ -80,22 +82,27 @@ Why this game exists
 It is the sample game for a voxel format a game chooses for itself. Its
 voxels are cut up like this:
 
-    id 0...7, light_sky 8...11, param 12...19, support 20...23
+    id 0...7, light_sky 8...11, param 12...19
 
 -- eight bits of material id, with room for the nature and everything else a
-game like this grows, four of skylight, and then two fields of its own:
-the load a voxel carries and how far it is from something holding it up. The
-load is bound as the engine's `param` role, so that the mesher can read it
-without the game spending a second field on a copy, which is what the stress
-view will use.
+game like this grows, four of skylight, and eight for the simulation: how
+much of what a voxel can carry is already on it in one nibble, and how far it
+is from something holding it up in the other.
+
+One field rather than two, and bound as the engine's `param` role, because
+the role is the only thing the mesher can read and the views need both
+numbers. The load is kept as a fraction of the voxel's own capacity rather
+than as a weight, which is the normalisation a view wants anyway and is what
+lets one nibble do; nothing needs the weight itself, since it is worked out
+from the column whenever the rules ask. Twenty bits of thirty-two are spent.
 
 No lamp light. A lamp here is a light in the scene, which is what the
 player's own lamp is, and the shader lights the geometry from it; the
 engine's lamp-light role is for a world whose server bakes that per voxel and
 sends it, which is what a Luanti server does.
 
-Nothing in the engine knows what `support` means. That is the point: it is
-four bits of the word the game reads and writes itself.
+The engine knows the param is there and hands it to a definition; what the
+two nibbles in it mean is entirely the game's, which is the point.
 
 Licenses of textures and other media
 ------------------------------------
