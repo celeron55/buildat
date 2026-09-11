@@ -146,6 +146,20 @@ namespace voxelworld
 		virtual VoxelInstance get_voxel(const pv::Vector3DInt32 &p,
 				bool disable_warnings = false) = 0;
 
+		// The same, for a world whose voxels are more than one plane: a
+		// sample is every plane of a voxel read or written together. A
+		// chunk takes on the world's planes the first time one is written
+		// into it.
+		//
+		// set_voxel() writes the first plane and leaves the rest of a
+		// voxel alone, which is what it has always meant and what a game
+		// with one plane wants; set_sample() writes all of them.
+		virtual void set_sample(const pv::Vector3DInt32 &p,
+				const interface::VoxelSample &v,
+				bool disable_warnings = false) = 0;
+		virtual interface::VoxelSample get_sample(const pv::Vector3DInt32 &p,
+				bool disable_warnings = false) = 0;
+
 		// NOTE: There is no interface in here for directly accessing chunk
 		// volumes of static nodes, because it is so much more hassly and was
 		// tested to improve speed only by 53% compared to the current very

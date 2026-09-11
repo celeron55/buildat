@@ -479,7 +479,12 @@ every volume on its way anywhere, is bits under the old format.
   world, where the number of fields is the number of materials. A plane
   nothing has written costs a chunk nothing at all.
 - A field says which plane it is in: {plane = 1, shift = 0, width = 4}.
-  plane defaults to 0, the game's own. Each plane is 8, 16 or 32 bits, the
+  plane defaults to 0, the game's own.
+- Reading one: volume:get_plane_at(plane, x, y, z) and its setter, and
+  voxelworld.get_static_voxel_plane(p, plane) on the client. Both hand back a
+  plain number, because a plane other than the first holds the game's own
+  bits and none of the engine's roles. get_voxel_at() and get_static_voxel()
+  are the first plane, as they always were. Each plane is 8, 16 or 32 bits, the
   first has no name and the rest must have one, and there are at most eight.
 - The fields may not overlap and may not reach past the word. set_format()
   says which rule was broken.
