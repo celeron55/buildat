@@ -210,10 +210,18 @@ struct CVoxelRegistry: public VoxelRegistry
 	const CachedVoxelDefinition* get_cached(const VoxelInstance &v,
 			AtlasRegistry *atlas_reg, bool with_lod)
 	{
+		VoxelSample sample;
+		sample.planes[0] = v.data;
+		return get_cached(sample, atlas_reg, with_lod);
+	}
+
+	const CachedVoxelDefinition* get_cached(const VoxelSample &v,
+			AtlasRegistry *atlas_reg, bool with_lod)
+	{
 		VoxelTypeId id;
 		{
 			std::lock_guard<std::mutex> lock(m_mutex);
-			id = m_look.id_of(v.data, m_format);
+			id = m_look.id_of(v, m_format);
 		}
 		return get_cached(id, atlas_reg, with_lod);
 	}
@@ -496,7 +504,7 @@ bool voxel_selector_self_test()
 	{
 		VoxelFormat f = VoxelFormat::luanti();
 		VoxelSelector s;
-		uint32_t word = 0;
+		VoxelSample word;
 		f.id.set(word, 1234);
 		assert(s.id_of(word, f) == 1234);
 	}
@@ -528,7 +536,7 @@ bool voxel_selector_self_test()
 			s.rules.push_back(r);
 		}
 		auto word_of = [&](uint32_t r, uint32_t sa){
-			uint32_t w = 0;
+			VoxelSample w;
 			rock.set(w, r);
 			sand.set(w, sa);
 			return w;
@@ -562,7 +570,7 @@ bool voxel_selector_self_test()
 		r.clauses.push_back(VoxelRuleClause(VoxelField(), 0, 0));
 		r.result = 1;
 		s.rules.push_back(r);
-		assert(s.id_of(0, f) == 7);
+		assert(s.id_of(VoxelSample(), f) == 7);
 	}
 
 	return true;

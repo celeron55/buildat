@@ -113,6 +113,30 @@ void VoxelVolume::set_plane_at(uint8_t plane, int32_t x, int32_t y, int32_t z,
 	}
 }
 
+void VoxelVolume::add_planes(const sv_<VoxelPlane> &planes)
+{
+	for(size_t i = 0; i < planes.size(); i++){
+		bool found = false;
+		for(size_t j = 0; j < m_planes.size(); j++){
+			if(m_planes[j].name != planes[i].name)
+				continue;
+			if(m_planes[j].bits != planes[i].bits)
+				throw Exception(ss_()+"VoxelVolume::add_planes(): \""+
+						planes[i].name+"\" is "+itos((int)m_planes[j].bits)+
+						" bits here and "+itos((int)planes[i].bits)+" there");
+			found = true;
+			break;
+		}
+		if(found)
+			continue;
+		if(m_planes.size() >= VOXEL_MAX_PLANES)
+			throw Exception(ss_()+"VoxelVolume::add_planes(): a volume has "
+					"at most "+itos((int)VOXEL_MAX_PLANES)+" planes");
+		m_planes.push_back(planes[i]);
+		m_data.resize(m_planes.size());
+	}
+}
+
 void VoxelVolume::fill(VoxelInstance v)
 {
 	if(v.data == 0){
@@ -256,6 +280,22 @@ bool voxel_volume_self_test()
 	// And a write outside it is dropped rather than landing on a neighbour
 	vol.setVoxelAt(-2, 1, 2, VoxelInstance(0xffffffff));
 	assert(vol.getVoxelAt(3, 1, 2).data == 0);
+
+	// A plane the volume did not have is appended without disturbing what
+	// is in it, and one it already has is left alone
+	{
+		VoxelVolume old(region);
+		old.setVoxelAt(0, 0, 0, VoxelInstance(0x11223344));
+		old.add_planes(planes);
+		assert(old.planes().size() == 3);
+		assert(old.getVoxelAt(0, 0, 0).data == 0x11223344);
+		assert(old.plane_at(2, 0, 0, 0) == 0);
+		old.set_plane_at(2, 0, 0, 0, 0x9999);
+		assert(old.plane_at(2, 0, 0, 0) == 0x9999);
+		old.add_planes(planes);
+		assert(old.planes().size() == 3);
+		assert(old.plane_at(2, 0, 0, 0) == 0x9999);
+	}
 
 	// A sampler walks plane 0 without working the index out each time, and
 	// agrees with the accessors about what is where

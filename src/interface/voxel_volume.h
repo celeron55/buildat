@@ -105,6 +105,17 @@ namespace interface
 			return setVoxelAt(p.getX(), p.getY(), p.getZ(), v);
 		}
 
+		// Any of these the volume does not have already, appended by name
+		// and materialised on their first write like the rest. What wants
+		// it is a volume that was stored before a plane existed and is now
+		// in a world that has it -- which is what happens the moment a
+		// module asks for a field of its own.
+		//
+		// A plane the volume has and the list does not is left alone, so a
+		// world with a module disabled does not cost the player that
+		// module's data.
+		void add_planes(const sv_<VoxelPlane> &planes);
+
 		// Every voxel of plane 0 set to one word. What a caller that is
 		// about to write the whole volume starts with.
 		void fill(VoxelInstance v);
@@ -160,6 +171,38 @@ namespace interface
 		// One entry per plane; empty means nothing has written it
 		sv_<sv_<uint8_t>> m_data;
 		int32_t m_w = 0, m_h = 0, m_d = 0;
+	};
+
+	// A volume seen as samples rather than as words, for PolyVox.
+	//
+	// The cube extractor asks the volume for voxels and hands them to the
+	// face-culling callback, and what that callback has to decide from is
+	// every plane of the voxel and not only the first -- a world whose
+	// materials are a plane of their own answers "is there a face here" out
+	// of that plane. So the type the extractor is given is this, and
+	// VoxelVolume's own getVoxelAt stays the word it has always been.
+	class VoxelSampleView
+	{
+	public:
+		typedef VoxelSample VoxelType;
+
+		// Declared and constructed by the extractor, and never used
+		struct Sampler
+		{
+			Sampler(){}
+			Sampler(VoxelSampleView*){}
+		};
+
+		VoxelSampleView(){}
+		VoxelSampleView(VoxelVolume *volume): m_volume(volume){}
+
+		VoxelSample getVoxelAt(int32_t x, int32_t y, int32_t z) const
+		{
+			return m_volume ? m_volume->sample_at(x, y, z) : VoxelSample();
+		}
+
+	private:
+		VoxelVolume *m_volume = nullptr;
 	};
 
 	// Asserts what a VoxelVolume does: the region and the layout, a plane

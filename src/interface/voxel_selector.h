@@ -46,10 +46,10 @@ namespace interface
 		VoxelRuleClause(const VoxelField &field, uint32_t lo, uint32_t hi):
 			field(field), lo(lo), hi(hi){}
 
-		bool holds(uint32_t word) const {
+		bool holds(const VoxelSample &sample) const {
 			if(!field.bound())
 				return false;
-			uint32_t v = field.get(word);
+			uint32_t v = field.get(sample);
 			return v >= lo && v <= hi;
 		}
 	};
@@ -62,9 +62,9 @@ namespace interface
 		// Which definition a voxel matching this rule wears
 		VoxelTypeId result = VOXELTYPEID_UNDEFINED;
 
-		bool holds(uint32_t word) const {
+		bool holds(const VoxelSample &sample) const {
 			for(const VoxelRuleClause &c : clauses){
-				if(!c.holds(word))
+				if(!c.holds(sample))
 					return false;
 			}
 			return true;
@@ -85,11 +85,12 @@ namespace interface
 
 		// Which definition this voxel wears. format is the world's, which is
 		// where the id role lives for the FIELD kind.
-		VoxelTypeId id_of(uint32_t word, const VoxelFormat &format) const {
+		VoxelTypeId id_of(const VoxelSample &sample,
+				const VoxelFormat &format) const {
 			if(kind != RULES)
-				return format.id_of(word);
+				return format.id_of(sample.planes[format.id.plane]);
 			for(const VoxelRule &r : rules){
-				if(r.holds(word))
+				if(r.holds(sample))
 					return r.result;
 			}
 			return fallback;

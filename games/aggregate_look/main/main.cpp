@@ -57,17 +57,21 @@ static const uint8_t ROCK_DEF = 2;
 static const uint8_t SAND_DEF = 3;
 
 // The game's own fields, which no engine role covers: how much of a voxel is
-// rock and how much is sand. Two bits each, because what reads on screen is
-// which side of a threshold a mixture is on and not where in the range it
-// sits -- which is this spike's own answer, applied.
-static const interface::VoxelField F_ROCK(0, 28, 2);
-static const interface::VoxelField F_SAND(0, 30, 2);
+// rock and how much is sand. Four bits each, in a plane of their own rather
+// than in whatever is left of the first one -- which is what a mixture world
+// wants, and is why planes exist. A chunk that has never had a mixture
+// written into it does not carry the plane at all.
+static const uint8_t MATERIAL_PLANE = 1;
+static const interface::VoxelField F_ROCK(MATERIAL_PLANE, 0, 4);
+static const interface::VoxelField F_SAND(MATERIAL_PLANE, 4, 4);
 
-// A fraction of a voxel, in the two bits each of these gets: four levels,
-// which is all a threshold needs
-static const int FRACTION_MAX = 3;
+// A fraction of a voxel, in the four bits each of these gets. What reads on
+// screen is which side of a threshold a mixture is on and not where in the
+// range it sits -- this spike's own answer -- so the levels are for the
+// arithmetic and not for the eye.
+static const int FRACTION_MAX = 15;
 // Over this much of a voxel and it is that material
-static const int FRACTION_THRESHOLD = 2;
+static const int FRACTION_THRESHOLD = 8;
 
 // The samples stand in a wall facing the camera: ten columns of a row run
 // along x, the rows are stacked in y, and all of them sit at one z. A grid
@@ -149,20 +153,22 @@ static Sample sample_at(int row, int col)
 	return s;
 }
 
-// The voxel word of a sample, under the format below
-static uint32_t word_of(const interface::VoxelFormat &f, const Sample &s)
+// A sample's voxel, under the format below: the word of the first plane and
+// the fractions of the second
+static interface::VoxelSample voxel_of(const interface::VoxelFormat &f,
+		const Sample &s)
 {
-	uint32_t word = 0;
-	f.id.set(word, PRESENT_ID);
-	f.light_sky.set(word, f.light_sky.mask());
-	f.tint.set(word, s.tint);
-	f.wetness.set(word, s.wetness);
-	f.grain.set(word, s.grain);
-	f.gloss.set(word, s.gloss);
-	f.sag_top.set(word, s.sag_top);
-	F_ROCK.set(word, s.rock);
-	F_SAND.set(word, s.sand);
-	return word;
+	interface::VoxelSample v;
+	f.id.set(v, PRESENT_ID);
+	f.light_sky.set(v, f.light_sky.mask());
+	f.tint.set(v, s.tint);
+	f.wetness.set(v, s.wetness);
+	f.grain.set(v, s.grain);
+	f.gloss.set(v, s.gloss);
+	f.sag_top.set(v, s.sag_top);
+	F_ROCK.set(v, s.rock);
+	F_SAND.set(v, s.sand);
+	return v;
 }
 
 static interface::VoxelFormat look_format()
@@ -177,6 +183,9 @@ static interface::VoxelFormat look_format()
 	f.grain = VoxelField(0, 16, 4);
 	f.gloss = VoxelField(0, 20, 4);
 	f.sag_top = VoxelField(0, 24, 4);
+	// A second plane, eight bits, for the fractions. Nothing binds a role
+	// to it: the rules below read it, and the game writes it.
+	f.planes.push_back(interface::VoxelPlane("aggregate:material", 8));
 	return f;
 }
 
@@ -218,25 +227,29 @@ struct Worldgen: public worldgen::GeneratorInterface
 		auto lc = region.getLowerCorner();
 		auto uc = region.getUpperCorner();
 
+		// The volume comes with the plane the engine's roles are in; the
+		// fractions are this game's own and it asks for their plane here
+		volume.add_planes(m_format.planes);
+
 		Sample air;
-		const uint32_t air_word = word_of(m_format, air);
+		const interface::VoxelSample air_v = voxel_of(m_format, air);
 		Sample floor;
 		floor.rock = FRACTION_MAX;
-		const uint32_t floor_word = word_of(m_format, floor);
+		const interface::VoxelSample floor_v = voxel_of(m_format, floor);
 
 		for(int z = lc.getZ(); z <= uc.getZ(); z++){
 			for(int y = lc.getY(); y <= uc.getY(); y++){
 				for(int x = lc.getX(); x <= uc.getX(); x++){
-					uint32_t word = y < FLOOR_TOP ? floor_word : air_word;
-					volume.setVoxelAt(pv::Vector3DInt32(x, y, z),
-							VoxelInstance(word));
+					volume.set_sample_at(x, y, z,
+							y < FLOOR_TOP ? floor_v : air_v);
 				}
 			}
 		}
 
 		for(int row = 0; row < ROWS; row++){
 			for(int col = 0; col < COLUMNS; col++){
-				const uint32_t word = word_of(m_format, sample_at(row, col));
+				const interface::VoxelSample v =
+						voxel_of(m_format, sample_at(row, col));
 				const int x0 = GRID_X0 + col * SAMPLE_STEP_X;
 				const int y0 = GRID_Y0 + row * SAMPLE_STEP_Y;
 				for(int dz = 0; dz < SAMPLE_S; dz++){
@@ -246,7 +259,8 @@ struct Worldgen: public worldgen::GeneratorInterface
 									GRID_Z0 + dz);
 							if(!region.containsPoint(p))
 								continue;
-							volume.setVoxelAt(p, VoxelInstance(word));
+							volume.set_sample_at(p.getX(), p.getY(),
+									p.getZ(), v);
 						}
 					}
 				}
