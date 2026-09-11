@@ -570,6 +570,13 @@ static VoxelInstance face_back_voxel(pv::RawVolume<VoxelInstance> &volume,
 // rather than counted as zero, which is what makes a single sagging voxel
 // sag all of its face instead of only its middle. The same rule is what
 // liquid_corner_top() applies to columns that are not the same liquid.
+//
+// A voxel with something over it does not sag at its top however much its
+// field says, and counts as zero rather than being left out: what is under a
+// floor is not a surface, and a face that sank there would open a gap
+// between two voxels of the same stuff. That is Luanti's rule for a liquid
+// with the same liquid above it, which is the same situation. The bottom is
+// the same the other way up.
 static float sag_at_corner(pv::RawVolume<VoxelInstance> &volume,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
 		int x, int y, int z, bool top)
@@ -585,9 +592,15 @@ static float sag_at_corner(pv::RawVolume<VoxelInstance> &volume,
 					voxel_reg->get_cached(v);
 			if(def == nullptr || def->sag_extent == 0.0f)
 				continue;
+			n++;
+			VoxelInstance over = volume.getVoxelAt(x + ix,
+					y + (top ? 1 : -1), z + iz);
+			const interface::CachedVoxelDefinition *over_def =
+					fmt.undefined(over) ? nullptr : voxel_reg->get_cached(over);
+			if(over_def != nullptr && !over_def->fully_empty)
+				continue;
 			sum += def->sag_extent *
 					(top ? fmt.sag_top_f(v) : fmt.sag_bottom_f(v));
-			n++;
 		}
 	}
 	return n == 0 ? 0.0f : sum / (float)n;
@@ -639,6 +652,20 @@ static uint32_t tint_ramp_color(const interface::CachedVoxelDefinition *def,
 		out |= (uint32_t)(ca + (cb - ca) * t + 0.5f) << shift;
 	}
 	return out;
+}
+
+// The tint colour as one number a vertex can carry, 5-6-5. Not 8-8-8: the
+// four corners of a face carry the same value and the rasterizer interpolates
+// it anyway, and a 24-bit integer is at the edge of what a 32-bit float
+// interpolates back exactly, where a 16-bit one has three decimal digits to
+// spare. Sixteen or thirty-two levels per channel is plenty for a ramp
+// between two colours.
+static float pack_tint565(uint32_t rgb)
+{
+	uint32_t r = ((rgb >> 16) & 0xff) >> 3;
+	uint32_t g = ((rgb >> 8) & 0xff) >> 2;
+	uint32_t b = (rgb & 0xff) >> 3;
+	return (float)((r << 11) | (g << 5) | b);
 }
 
 // A plain 0xRRGGBB tint multiplied into a colour that is already packed for
@@ -928,11 +955,14 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 				voxel_color = fmt.color.get(back.data) & 0xffffffUL;
 			if(fmt.n_surface != 0){
 				fmt.surface_of(back, mods);
-				// The tint is the one modifier the engine reads as well as
-				// carries: the field says how far along the definition's
-				// own ramp this voxel is
+				// The tint is the one modifier that is a colour rather than
+				// a scalar: the field says how far along the definition's
+				// own ramp this voxel is, and the ramp's answer travels in
+				// the slot the tint took. It is an albedo tint, so the
+				// shader is what applies it -- the vertex colour is light,
+				// and a tint of the light vanishes in sunlight.
 				if(fmt.tint.bound()){
-					voxel_color = mul_rgb(voxel_color,
+					mods[0] = pack_tint565(
 							tint_ramp_color(voxel_def0, fmt.tint_f(back)));
 				}
 			}
@@ -1259,8 +1289,13 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 				// The surface modifiers of this voxel, carried by every
 				// vertex of every quad of its shape
 				float mods[interface::VOXEL_SURFACE_MODIFIERS] = {};
-				if(fmt.n_surface != 0)
+				if(fmt.n_surface != 0){
 					fmt.surface_of(v, mods);
+					if(fmt.tint.bound()){
+						mods[0] = pack_tint565(
+								tint_ramp_color(def, fmt.tint_f(v)));
+					}
+				}
 				// Where this voxel's centre is in the chunk's own model
 				// coordinates; the same arithmetic the cube faces get
 				const float cx = (x - lc.getX()) - w / 2.0f - 0.5f;
@@ -1415,9 +1450,6 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 					uint32_t tint = 0xffffff;
 					if(fmt.color.bound())
 						tint = fmt.color.get(v.data) & 0xffffffUL;
-					if(fmt.tint.bound())
-						tint = mul_rgb(tint,
-								tint_ramp_color(def, fmt.tint_f(v)));
 					if(variant)
 						tint = mul_rgb(tint, variant->color);
 					if(tint != 0xffffff){

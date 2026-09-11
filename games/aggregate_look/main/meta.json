@@ -1,0 +1,12 @@
+{
+	"dependencies": [
+		{"module": "network"},
+		{"module": "client_lua"},
+		{"module": "client_data"},
+		{"module": "main_context"},
+		{"module": "replicate"},
+		{"module": "voxelworld"},
+		{"module": "voxel_shading"},
+		{"module": "worldgen"}
+	]
+}

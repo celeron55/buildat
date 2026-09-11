@@ -92,7 +92,10 @@ namespace interface
 		//                the sky, a world moves the sun by setting it and
 		//                nothing has to be meshed again.
 		//   vertex tangent  the voxel format's surface modifiers, one per
-		//                component and 0...1 each, when the world binds any.
+		//                component, when the world binds any. 0...1 each,
+		//                except the tint, whose component carries the colour
+		//                its ramp picked packed 5-6-5 and which the shader
+		//                multiplies into the albedo.
 		//                Which modifier is in which component is the format's
 		//                own order -- tint, wetness, grain, gloss, speckle,
 		//                emission, the bound ones packed towards x -- and a
