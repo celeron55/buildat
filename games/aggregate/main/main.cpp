@@ -186,12 +186,18 @@ static const Mix MIX_BEDROCK (15,   0,   0,   0,    0,  15,   0);
 static const Mix MIX_STONE   (14,   0,   0,   0,    0,  12,   0);
 static const Mix MIX_GRAVEL  ( 8,   2,   0,   0,    0,   0,   0);
 static const Mix MIX_SAND    ( 0,  10,   0,   0,    0,   0,   0);
-static const Mix MIX_SOIL    ( 0,   8,   1,   4,    0,   8,   0);
+// Soil has no fibre in it, and that is not an oversight: the organic matter
+// in soil is what fibre *became*, which is binder. Leaving a trace of fibre
+// in it meant every soil voxel in the world had something left to rot, and
+// the whole map quietly composted itself.
+static const Mix MIX_SOIL    ( 0,   8,   0,   5,    0,   8,   0);
 static const Mix MIX_TURF    ( 0,   8,   2,   3,    0,   8,  12);
 static const Mix MIX_BRICK   (10,   3,   0,   2,    0,  15,   0);
 static const Mix MIX_TIMBER  ( 0,   0,   9,   4,    0,  14,   0);
-static const Mix MIX_TRUNK   ( 0,   0,   9,   4,    0,  14,  15);
-static const Mix MIX_LEAVES  ( 0,   0,   2,   1,    0,  12,  15);
+// Alive, and drinking: a tree that started dry would be a dead tree by the
+// time anything looked at it
+static const Mix MIX_TRUNK   ( 0,   0,   9,   4,    8,  14,  15);
+static const Mix MIX_LEAVES  ( 0,   0,   2,   1,    8,  12,  15);
 
 // What the simulation reads about a voxel. Where undermine looked this up in
 // a table by material id, it is worked out here from the mixture -- which is
@@ -238,6 +244,29 @@ static int water_room(const Mix &m)
 {
 	int r = void_fill(m) - (int)m.water;
 	return r < 0 ? 0 : r;
+}
+
+// How much water a mixture holds against gravity, in the same 255ths.
+//
+// Wet sand does not drain to nothing and neither does soil: water is held in
+// the small spaces between grains by capillarity, and only what is over that
+// runs off. This is what makes a world of damp ground stable -- without it
+// every voxel drains into the one below it forever and the whole map ends up
+// as a water table with dust on top.
+//
+// It scales with how much solid there is to hold it, so free water -- a
+// voxel with nothing in it -- holds nothing and falls as it should.
+static int held_water(const Mix &m)
+{
+	const int solid = (int)m.rock + m.sand + m.fibre + m.binder;
+	return void_fill(m) * solid / (2 * FRACTION_MAX);
+}
+
+// What is free to move: what is over what the mixture holds
+static int loose_water(const Mix &m)
+{
+	const int l = (int)m.water - held_water(m);
+	return l > 0 ? l : 0;
 }
 
 // How wet it is, as how much of the void is taken, 0...15. What the tint and
@@ -421,29 +450,6 @@ static interface::VoxelSample mix_voxel(const Mix &m)
 	return v;
 }
 
-// What the player builds with, by the number the client sends. An index
-// rather than a material id, because there are no material ids: the client
-// says "the second thing on the list" and this is the list.
-enum BuildMaterial {
-	B_STONE = 1,
-	B_TIMBER,
-	B_BRICK,
-	B_SOIL,
-	B_WATER,
-	B_COUNT
-};
-
-static const Mix& build_mix(int32_t which)
-{
-	switch(which){
-	case B_TIMBER: return MIX_TIMBER;
-	case B_BRICK: return MIX_BRICK;
-	case B_SOIL: return MIX_SOIL;
-	case B_WATER: return MIX_WATER;
-	default: return MIX_STONE;
-	}
-}
-
 static const uint8_t SUPPORT_MAX = 15;
 static const uint8_t LOAD_MAX = 255;
 // How many steps of "how loaded is it" fit in the nibble. One less than
@@ -498,6 +504,48 @@ static uint8_t load_band(uint32_t load, uint8_t capacity)
 			((uint32_t)capacity + 1);
 	return (uint8_t)(band > BAND_MAX ? BAND_MAX : band);
 }
+
+// The same, held up until the simulation says otherwise -- which is what
+// anything just built wants, so that a prop does not fall in the tick before
+// anything looks at it.
+//
+// The band is 0 for anything that is not structural, and that is not a
+// detail: a band of 0 is how everything else tells a solid voxel from air
+// without adding the fractions up, the client's pointing included. A
+// structure carries its own air, and air written with a band made the air
+// inside a building something you had to dig through before you could dig
+// the building.
+static interface::VoxelSample placed_voxel(const Mix &m)
+{
+	interface::VoxelSample v = mix_voxel(m);
+	if(props_of(m).structural)
+		set_state(v, SUPPORT_MAX, 1);
+	return v;
+}
+
+// What the player builds with, by the number the client sends. An index
+// rather than a material id, because there are no material ids: the client
+// says "the second thing on the list" and this is the list.
+enum BuildMaterial {
+	B_STONE = 1,
+	B_TIMBER,
+	B_BRICK,
+	B_SOIL,
+	B_WATER,
+	B_COUNT
+};
+
+static const Mix& build_mix(int32_t which)
+{
+	switch(which){
+	case B_TIMBER: return MIX_TIMBER;
+	case B_BRICK: return MIX_BRICK;
+	case B_SOIL: return MIX_SOIL;
+	case B_WATER: return MIX_WATER;
+	default: return MIX_STONE;
+	}
+}
+
 
 // The base looks. Not materials: these are the definitions the look rules
 // choose between, and the only thing they carry is how a voxel of that
@@ -572,9 +620,9 @@ static interface::VoxelSelector look_selector()
 	// ground, and living fibre with nothing else in it is a canopy. Getting
 	// that the wrong way round drew the whole surface of the world as
 	// leaves, which is what the check at the end of on_start() is for.
-	rule(s, L_TRUNK,  F_FIBRE, 4, 15, &F_LIFE, 8, 15);
-	rule(s, L_TURF,   F_SAND, 4, 15, &F_BINDER, 2, 15, &F_LIFE, 4, 15);
-	rule(s, L_LEAVES, F_FIBRE, 1, 15, &F_LIFE, 8, 15);
+	rule(s, L_TRUNK,  F_FIBRE, 4, 15, &F_LIFE, 1, 15);
+	rule(s, L_TURF,   F_SAND, 4, 15, &F_BINDER, 2, 15, &F_LIFE, 1, 15);
+	rule(s, L_LEAVES, F_FIBRE, 1, 15, &F_LIFE, 1, 15);
 	rule(s, L_TIMBER, F_FIBRE, 4, 15, &F_BOND, 8, 15);
 	rule(s, L_MULCH,  F_FIBRE, 4, 15);
 	// Mineral, bonded and loose
@@ -656,7 +704,13 @@ struct Worldgen: public worldgen::GeneratorInterface
 						} else if(y <= WATER_LEVEL){
 							m = MIX_WATER;
 						}
-						// Ground at or under the water line starts
+						// The ground holds water everywhere, a quarter of
+						// what it has room for, which is what the trees
+						// drink and what makes soil read as soil rather
+						// than as dust.
+						if(m.solid() > 0)
+							m.water = (uint8_t)(void_fill(m) / 4);
+						// And ground at or under the water line is
 						// saturated. Not a detail: without it the first
 						// thing that disturbs a pond is the pond draining
 						// into its own bed, because the bed is dry and has
@@ -769,6 +823,10 @@ struct Module: public interface::Module
 	std::unordered_set<int64_t> m_dirty_set;
 	std::vector<pv::Vector3DInt32> m_falling;
 	std::unordered_set<int64_t> m_falling_set;
+	// Voxels with something slow to do: wood without water to keep it
+	// alive, and dead fibre lying wet. See step_slow().
+	std::vector<pv::Vector3DInt32> m_slow;
+	std::unordered_set<int64_t> m_slow_set;
 
 	// What the relaxation has worked out but not written into the world yet.
 	//
@@ -1145,6 +1203,18 @@ struct Module: public interface::Module
 						log_w(MODULE, "packing: %s holds more water than it "
 								"has room for", c.name);
 					}
+					// Only something structural carries a band. Everything
+					// else reads a band of 0 as "nothing here", the
+					// client's pointing included, so air with a band on it
+					// is air you have to dig through.
+					const bool structural = props_of(c.mix).structural;
+					const uint8_t band = band_of(placed_voxel(c.mix));
+					if(structural != (band != 0)){
+						log_w(MODULE, "state: placed %s is %s and has band "
+								"%i", c.name,
+								structural ? "structural" : "not structural",
+								(int)band);
+					}
 				}
 			}
 
@@ -1341,6 +1411,12 @@ struct Module: public interface::Module
 			mark_dirty(pv::Vector3DInt32(p.getX(), p.getY() - i, p.getZ()));
 	}
 
+	void mark_slow(const pv::Vector3DInt32 &p)
+	{
+		if(m_slow_set.insert(pos_key(p)).second)
+			m_slow.push_back(p);
+	}
+
 	void mark_falling(const pv::Vector3DInt32 &p)
 	{
 		if(m_falling_set.insert(pos_key(p)).second)
@@ -1396,6 +1472,51 @@ struct Module: public interface::Module
 		return reach < m.span ? reach : m.span;
 	}
 
+	// How alive the wood at p is: 15 where it touches water it can drink,
+	// one less per voxel further from it, 0 for dead.
+	//
+	// The same relaxation as the support, and for the same reason -- whether
+	// a leaf is part of a living tree is a question about the way back to
+	// the ground, which no voxel can answer on its own. A tree is alive
+	// because its roots stand in wet soil and every part of it is a step
+	// from something that is.
+	//
+	// It only ever goes down. Wood does not come back to life, so a felled
+	// trunk lying in a wet field stays dead, and cutting through a trunk
+	// browns everything above the cut.
+	//
+	// simplified: this settles as fast as the support does, so a canopy
+	// browns the moment the trunk is cut rather than over the following
+	// minute. Slowing it down wants a clock, and the clock this game has --
+	// the slow queue -- is spent on the rot.
+	uint8_t compute_life(voxelworld::Instance *world,
+			const pv::Vector3DInt32 &p, const Mix &mix)
+	{
+		if(mix.fibre == 0 || mix.life == 0)
+			return 0;
+		static const int OFF[6][3] = {
+			{0,-1,0}, {1,0,0}, {-1,0,0}, {0,0,1}, {0,0,-1}, {0,1,0},
+		};
+		uint8_t best = 0;
+		for(size_t k = 0; k < 6; k++){
+			interface::VoxelSample nv = peek(world, pv::Vector3DInt32(
+					p.getX() + OFF[k][0], p.getY() + OFF[k][1],
+					p.getZ() + OFF[k][2]));
+			if(!is_generated(nv))
+				continue;
+			const Mix nmix = mix_of(nv);
+			if(nmix.life == 0){
+				// Ground it can drink from
+				if(nmix.water > 0 && nmix.solid() > 0)
+					return LIFE_MAX;
+				continue;
+			}
+			if(nmix.life - 1 > best)
+				best = (uint8_t)(nmix.life - 1);
+		}
+		return best < mix.life ? best : mix.life;
+	}
+
 	// Water, moved rather than assumed
 	// -------------------------------
 	//
@@ -1434,6 +1555,10 @@ struct Module: public interface::Module
 	{
 		if(mix.water < WATER_QUANTUM)
 			return false;
+		// Living tissue holds what it has drawn: a tree is a pump, and
+		// without this one it empties itself into the ground it stands in
+		if(mix.life > 0)
+			return false;
 		bool moved = false;
 
 		// Down first, and as much as will go
@@ -1443,7 +1568,9 @@ struct Module: public interface::Module
 			if(is_generated(bv)){
 				Mix bmix = mix_of(bv);
 				const int room = takes_water(bmix) ? water_room(bmix) : 0;
-				const int move = (int)mix.water < room ? (int)mix.water : room;
+				// Only what is not held against gravity
+				const int free = loose_water(mix);
+				const int move = free < room ? free : room;
 				if(move >= WATER_QUANTUM){
 					mix.water -= (uint8_t)move;
 					bmix.water += (uint8_t)move;
@@ -1467,7 +1594,11 @@ struct Module: public interface::Module
 			Mix nmix = mix_of(nv);
 			if(!takes_water(nmix))
 				continue;
-			const int diff = (int)mix.water - (int)nmix.water;
+			// Sideways, what is over what each of them holds: two materials
+			// side by side settle at their own capacities rather than at
+			// the same number, which is what stops water sloshing between a
+			// sand bank and a soil one forever
+			const int diff = loose_water(mix) - loose_water(nmix);
 			if(diff < WATER_QUANTUM * 2)
 				continue;
 			int move = diff / 2;
@@ -1515,9 +1646,13 @@ struct Module: public interface::Module
 			if(!is_generated(nv))
 				continue;
 			Mix nmix = mix_of(nv);
-			// Into a heap or into nothing, not into something standing:
-			// a piece of stone is not where loose material goes
-			if(nmix.bond >= 12)
+			// Into a heap or into nothing, and not into anything that is
+			// holding itself together. Loose material does not bore into a
+			// hillside, and -- the part that matters -- taking the bond off
+			// a receiver would drop *its* limit, make it overfull in turn,
+			// and unbond the world one voxel at a time. That is what this
+			// did before the test was this narrow.
+			if(nmix.solid() > 0 && nmix.bond >= 4)
 				continue;
 			int room = solid_room(nmix, band_of(nv));
 			while(over > 0 && room > 0){
@@ -1525,8 +1660,6 @@ struct Module: public interface::Module
 				if(which < 0)
 					break;
 				give_solid_unit(nmix, which);
-				// What it was holding together is not holding this
-				nmix.bond = 0;
 				over--;
 				room--;
 				moved = true;
@@ -1603,9 +1736,18 @@ struct Module: public interface::Module
 				mix.rock != mix_was.rock || mix.sand != mix_was.sand ||
 				mix.fibre != mix_was.fibre || mix.binder != mix_was.binder;
 
+		// How far this is from water it can drink, for anything living
+		const uint8_t life = compute_life(world, p, mix);
+		const bool life_moved = life != mix.life;
+		if(life_moved){
+			mix.life = life;
+			if(life == 0)
+				m_died++;
+		}
+
 		MaterialProps m = props_of(mix);
 		if(!m.structural){
-			if(wetness_moved || solid_moved){
+			if(wetness_moved || solid_moved || life_moved){
 				interface::VoxelSample nv = v;
 				set_mix(nv, mix);
 				// Nothing structural: no load on it and none of it on
@@ -1622,7 +1764,8 @@ struct Module: public interface::Module
 		uint8_t load = compute_load(world, p);
 		uint8_t band = load_band(load, m.capacity);
 		bool support_moved = support != support_of(v);
-		if(support_moved || wetness_moved || solid_moved || band != band_of(v)){
+		if(support_moved || wetness_moved || solid_moved || life_moved ||
+				band != band_of(v)){
 			interface::VoxelSample nv = v;
 			set_mix(nv, mix);
 			set_state(nv, support, band);
@@ -1630,7 +1773,7 @@ struct Module: public interface::Module
 		}
 		// A support that moved changes what the voxels around it can reach,
 		// and so does water arriving or leaving
-		if(support_moved || wetness_moved || solid_moved){
+		if(support_moved || wetness_moved || solid_moved || life_moved){
 			static const int OFF[6][3] = {
 				{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1},
 			};
@@ -1638,6 +1781,11 @@ struct Module: public interface::Module
 				mark_dirty(pv::Vector3DInt32(p.getX() + OFF[k][0],
 						p.getY() + OFF[k][1], p.getZ() + OFF[k][2]));
 		}
+		// Anything with something slow to do says so here, and the queue is
+		// what gives it a clock; see step_slow()
+		// Dead fibre lying wet has something slow to do
+		if(mix.fibre > 0 && mix.life == 0 && mix.water > 0)
+			mark_slow(p);
 		// Nothing holds it, or what does cannot carry what is on it
 		if(m.diggable && (support == 0 || load > m.capacity)){
 			log_t(MODULE, "fails: " PV3I_FORMAT " support=%i load=%i",
@@ -1651,6 +1799,8 @@ struct Module: public interface::Module
 	// the middle of itself.
 	size_t m_moved = 0;
 	size_t m_landed = 0;
+	size_t m_died = 0;
+	size_t m_rotted = 0;
 
 	void step_falling(voxelworld::Instance *world)
 	{
@@ -1714,6 +1864,73 @@ struct Module: public interface::Module
 		}
 	}
 
+	// The wood cycle
+	// --------------
+	//
+	// Three rules, and the whole of what five materials buy that four could
+	// not:
+	//
+	//   a live voxel draws water up from the one below it, so a tree pulls
+	//   from the ground through its trunk to its leaves;
+	//   wood that cannot get water dies, a step at a time;
+	//   dead fibre lying wet rots, and rotting is fibre becoming binder --
+	//   which is composting, and is where soil comes from.
+	//
+	// **These need a clock and they do not get a sweep.** What they get is
+	// a queue a voxel puts itself in while it still has something to do:
+	// a thirsty live voxel is worth looking at fifteen more times and then
+	// never again, and a wet dead one as many times as it has fibre. So the
+	// work each rule can ever cost is bounded by its own progress, and a
+	// forest that is neither drying nor rotting costs nothing at all.
+	static const size_t SLOW_PER_TICK = 24;
+	void step_slow(voxelworld::Instance *world)
+	{
+		if(m_slow.empty())
+			return;
+		size_t n = m_slow.size() < SLOW_PER_TICK ? m_slow.size() :
+				SLOW_PER_TICK;
+		std::vector<pv::Vector3DInt32> batch(m_slow.begin(),
+				m_slow.begin() + n);
+		m_slow.erase(m_slow.begin(), m_slow.begin() + n);
+		for(const pv::Vector3DInt32 &p : batch){
+			m_slow_set.erase(pos_key(p));
+			interface::VoxelSample v = peek(world, p);
+			if(!is_generated(v))
+				continue;
+			Mix mix = mix_of(v);
+			bool changed = false;
+			// Whether anything the look rules or the simulation read moved.
+			// A live voxel sipping its own water changes neither, and there
+			// is no point handing a chunk back to the mesher for it.
+			bool looks_changed = false;
+
+			if(mix.fibre > 0 && mix.water > 0 && mix.life == 0){
+				// Rotting: one fibre becomes one binder, which is what soil
+				// is made of and where it comes from. The one rule in this
+				// game that takes time rather than settling, which is why
+				// it is the one on the slow queue.
+				mix.fibre--;
+				mix.binder++;
+				m_rotted++;
+				// What is rotting is not holding anything together
+				if(mix.bond > 0)
+					mix.bond--;
+				changed = true;
+				looks_changed = true;
+				if(mix.fibre > 0)
+					mark_slow(p);
+			}
+
+			if(changed){
+				interface::VoxelSample nv = v;
+				set_mix(nv, mix);
+				m_scratch[pos_key(p)] = Pending{p, nv};
+				if(looks_changed)
+					mark_dirty(p);
+			}
+		}
+	}
+
 	// Everything the relaxation worked out, into the world in one go.
 	//
 	// simplified: the whole scratch goes at once rather than on a budget. It
@@ -1733,7 +1950,7 @@ struct Module: public interface::Module
 
 	void on_tick(const interface::TickEvent &event)
 	{
-		if(m_dirty.empty() && m_falling.empty())
+		if(m_dirty.empty() && m_falling.empty() && m_slow.empty())
 			return;
 		auto t0 = std::chrono::steady_clock::now();
 		size_t done = 0;
@@ -1753,15 +1970,18 @@ struct Module: public interface::Module
 					m_scratch.size() > 8192)
 				flush_scratch(world);
 			step_falling(world);
+			step_slow(world);
 		});
-		if(done >= SIM_PER_TICK || !m_falling.empty()){
+		if(done >= SIM_PER_TICK || !m_falling.empty() || !m_slow.empty()){
 			log_v(MODULE, "sim: %zu done in %i us, %zu dirty, %zu pending, "
-					"%zu falling, %zu fell, %zu came to rest, %zu written",
+					"%zu falling, %zu fell, %zu came to rest, %zu slow, "
+					"%zu died, %zu rotted, %zu written",
 					done, (int)std::chrono::duration_cast<
 							std::chrono::microseconds>(
 							std::chrono::steady_clock::now() - t0).count(),
 					m_dirty.size(), m_scratch.size(), m_falling.size(),
-					m_moved, m_landed, m_wrote);
+					m_moved, m_landed, m_slow.size(), m_died, m_rotted,
+					m_wrote);
 		}
 	}
 
@@ -1928,13 +2148,8 @@ struct Module: public interface::Module
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *world)
 		{
-			for(auto &vp : b.voxels){
-				interface::VoxelSample v = mix_voxel(vp.second);
-				// Held up until the simulation says otherwise, so that the
-				// building does not fall over as it is written
-				set_state(v, SUPPORT_MAX, 1);
-				world->set_sample(vp.first, v, true);
-			}
+			for(auto &vp : b.voxels)
+				world->set_sample(vp.first, placed_voxel(vp.second), true);
 		});
 		// And now let it stand or fall as a whole
 		for(auto &vp : b.voxels)
@@ -1985,12 +2200,8 @@ struct Module: public interface::Module
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *instance)
 		{
-			interface::VoxelSample v = mix_voxel(build_mix(material));
-			// Something just placed is held up by whatever it was placed
-			// against until the simulation says otherwise, which keeps a
-			// prop from falling in the tick before it is looked at
-			set_state(v, SUPPORT_MAX, 1);
-			instance->set_sample(voxel_p, v);
+			instance->set_sample(voxel_p,
+					placed_voxel(build_mix(material)));
 		});
 		mark_changed(voxel_p);
 	}
