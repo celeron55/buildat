@@ -66,6 +66,8 @@ struct CState: public State
 	// In actuality the whole client application has to be recreated because
 	// otherwise unwanted Lua state remains.
 	bool m_connected = false;
+	// Set once the connection is gone; see lost_connection()
+	bool m_disconnected = false;
 	sm_<ss_, std::function<void(const ss_ &, const ss_ &)>> m_packet_handlers;
 
 	CState(sp_<app::App> app):
@@ -83,10 +85,27 @@ struct CState: public State
 
 	void update()
 	{
+		if(m_disconnected)
+			return;
 		if(m_socket->wait_data(0)){
 			read_socket();
 			handle_socket_buffer();
 		}
+	}
+
+	// The server is gone. There is nothing to reconnect to and no way to put
+	// the client back in the menu -- leaving a game leaves the client, the
+	// same as buildat.disconnect() does; see l_disconnect() in app.cpp.
+	// Without this the socket stays readable at end of file and every frame
+	// reads zero bytes and says so, forever.
+	void lost_connection(const ss_ &reason)
+	{
+		if(m_disconnected)
+			return;
+		m_disconnected = true;
+		log_w(MODULE, "Disconnected from server: %s", cs(reason));
+		if(m_app)
+			m_app->shutdown();
 	}
 
 	bool connect_host_port(const ss_ &address, const ss_ &port, ss_ *error)
@@ -189,10 +208,14 @@ struct CState: public State
 		int fd = m_socket->fd();
 		char buf[100000];
 		ssize_t r = recv(fd, buf, 100000, 0);
-		if(r == -1)
-			throw Exception(ss_()+"Receive failed: "+strerror(errno));
+		if(r == -1){
+			if(errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
+				return;
+			lost_connection(ss_()+"receive failed: "+strerror(errno));
+			return;
+		}
 		if(r == 0){
-			log_w(MODULE, "Peer disconnected");
+			lost_connection("the server closed the connection");
 			return;
 		}
 		log_d(MODULE, "Received %zu bytes", r);
