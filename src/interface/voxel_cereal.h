@@ -114,22 +114,31 @@ namespace interface
 	}
 
 	template<class Archive>
+			void serialize(Archive &archive, VoxelPlane &v)
+	{
+		archive(v.name, v.bits);
+	}
+
+	template<class Archive>
 			void serialize(Archive &archive, VoxelFormat &v)
 	{
-		uint8_t version = 2;
+		uint8_t version = 3;
 		archive(
 				version,
-				v.plane_bits,
+				v.planes,
 				v.id,
 				v.light_sky,
 				v.light_lamp,
 				v.param,
 				v.color
 		);
-		// Version 1 had no modifier roles. The version is written from this
+		// Version 1 had no modifier roles and one plane of a fixed width.
+		// Version 2 is not read: nothing on either side of a wire or a save
+		// carried it for long enough to matter, and the plane list is not a
+		// field that can be defaulted. The version is written from this
 		// function and read back into it, so this branch is "2 or newer" on
 		// the way in and always taken on the way out.
-		if(version >= 2){
+		if(version >= 3){
 			archive(
 					v.tint,
 					v.wetness,

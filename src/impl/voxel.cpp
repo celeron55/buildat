@@ -340,9 +340,25 @@ bool VoxelFormat::validate(ss_ *why) const
 		return false;
 	};
 
-	if(plane_bits != 8 && plane_bits != 16 && plane_bits != 32)
-		return fail("plane_bits must be 8, 16 or 32, not "+
-				itos((int)plane_bits));
+	if(planes.empty())
+		return fail("a format has to have at least one plane");
+	if(planes.size() > VOXEL_MAX_PLANES)
+		return fail("a format has at most "+itos((int)VOXEL_MAX_PLANES)+
+				" planes, not "+itos(planes.size()));
+	for(size_t i = 0; i < planes.size(); i++){
+		const VoxelPlane &p = planes[i];
+		if(p.bits != 8 && p.bits != 16 && p.bits != 32)
+			return fail("plane "+itos(i)+": bits must be 8, 16 or 32, not "+
+					itos((int)p.bits));
+		if(i == 0 && !p.name.empty())
+			return fail("the first plane is the game's own and has no name");
+		if(i != 0 && p.name.empty())
+			return fail("plane "+itos(i)+" has no name");
+		for(size_t j = 0; j < i; j++){
+			if(planes[j].name == p.name)
+				return fail("two planes are both named \""+p.name+"\"");
+		}
+	}
 
 	struct Named { cc_ *name; const VoxelField &f; };
 	const Named fields[] = {
@@ -356,14 +372,16 @@ bool VoxelFormat::validate(ss_ *why) const
 	for(const Named &n : fields){
 		if(!n.f.bound())
 			continue;
-		if(n.f.plane != 0)
-			return fail(ss_(n.name)+": there is only plane 0 for now");
+		if(n.f.plane >= planes.size())
+			return fail(ss_(n.name)+": there is no plane "+
+					itos((int)n.f.plane));
 		if(n.f.width > 32)
 			return fail(ss_(n.name)+": width "+itos((int)n.f.width)+" > 32");
-		if((int)n.f.shift + (int)n.f.width > (int)plane_bits)
+		const int bits = (int)plane_bits(n.f.plane);
+		if((int)n.f.shift + (int)n.f.width > bits)
 			return fail(ss_(n.name)+": bits "+itos((int)n.f.shift)+"..."+
 					itos((int)n.f.shift + (int)n.f.width - 1)+" reach past the "+
-					itos((int)plane_bits)+"-bit plane");
+					itos(bits)+"-bit plane "+itos((int)n.f.plane));
 	}
 
 	// VOXELTYPEID_MAX is not a mask -- it is a lower cap inside 21 bits --
@@ -417,7 +435,9 @@ bool VoxelFormat::validate(ss_ *why) const
 ss_ VoxelFormat::dump() const
 {
 	std::ostringstream os(std::ios::binary);
-	os<<"VoxelFormat("<<(int)plane_bits<<"-bit";
+	os<<"VoxelFormat("<<(int)plane_bits(0)<<"-bit";
+	for(size_t i = 1; i < planes.size(); i++)
+		os<<" + "<<planes[i].name<<":"<<(int)planes[i].bits<<"-bit";
 	auto one = [&](cc_ *name, const VoxelField &f){
 		if(!f.bound())
 			return;
@@ -607,6 +627,45 @@ bool voxel_format_self_test()
 		assert(f.validate(&why));
 		f.color = VoxelField{0, 0, 16};
 		assert(!f.validate(&why));
+	}
+
+	// Planes: a format has one 32-bit one unless it says otherwise, a named
+	// one belongs to a module, and a field lives inside its own plane
+	{
+		VoxelFormat f = VoxelFormat::legacy();
+		assert(f.plane_count() == 1);
+		assert(f.plane_bits(0) == 32);
+		assert(f.plane_of_name("mod:heat") == -1);
+
+		f.planes.push_back(VoxelPlane("mod:heat", 8));
+		assert(f.validate(&why));
+		assert(f.plane_of_name("mod:heat") == 1);
+		// A field of the new plane is checked against its width, not the
+		// first plane's
+		f.param = VoxelField(1, 0, 8);
+		assert(f.validate(&why));
+		f.param = VoxelField(1, 4, 8);
+		assert(!f.validate(&why));
+		f.param = VoxelField(1, 0, 8);
+		// And it no longer overlaps anything in plane 0
+		f.param = VoxelField(1, 0, 8);
+		assert(f.validate(&why));
+
+		// A voxel's planes are read together
+		VoxelSample v;
+		f.id.set(v, 12345);
+		f.param.set(v, 200);
+		assert(f.id.get(v) == 12345);
+		assert(f.param.get(v) == 200);
+		assert(v.planes[0] != 0 && v.planes[1] == 200);
+
+		// Only the first plane is the game's own, and a name is once
+		f.planes.push_back(VoxelPlane("", 8));
+		assert(!f.validate(&why));
+		f.planes.back().name = "mod:heat";
+		assert(!f.validate(&why));
+		f.planes.back().name = "mod:wear";
+		assert(f.validate(&why));
 	}
 
 	// The modifiers: at most four surface ones, in role order, and the

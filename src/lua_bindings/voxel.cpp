@@ -267,9 +267,14 @@ static void vreg_set_format(VoxelRegistry &reg, const luabind::object &t)
 		throw Exception("set_format(): argument is not a table");
 	interface::VoxelFormat format;
 	{
+		// plane_bits is the width of the game's own first plane, which is
+		// the only one a format written in Lua has for now
 		luabind::object v = t["plane_bits"];
-		if(v && luabind::type(v) == LUA_TNUMBER)
-			format.plane_bits = (uint8_t)luabind::object_cast<double>(v);
+		if(v && luabind::type(v) == LUA_TNUMBER){
+			format.planes.clear();
+			format.planes.push_back(interface::VoxelPlane("",
+					(uint8_t)luabind::object_cast<double>(v)));
+		}
 	}
 	format.id = field_from_lua(t, "id");
 	format.light_sky = field_from_lua(t, "light_sky");

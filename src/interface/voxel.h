@@ -301,6 +301,37 @@ namespace interface
 		AtlasSegmentReference lod_textures[VOXELDEF_NUM_LOD][6];
 	};
 
+	// The most planes a format can have. Small on purpose: a voxel's planes
+	// are read together into a VoxelSample, which is on the stack of every
+	// loop that asks a question of a voxel, and a world with eight fields
+	// that do not fit in one word each is not the shape this is for.
+	static constexpr size_t VOXEL_MAX_PLANES = 8;
+
+	// One array over a chunk, holding the same bits of every voxel in it.
+	// bits is 8, 16 or 32; name is empty for the game's own first plane and
+	// is what a module's own field is found by.
+	struct VoxelPlane
+	{
+		ss_ name;
+		uint8_t bits = 32;
+
+		VoxelPlane(){}
+		VoxelPlane(const ss_ &name, uint8_t bits): name(name), bits(bits){}
+
+		bool operator==(const VoxelPlane &o) const {
+			return name == o.name && bits == o.bits;
+		}
+	};
+
+	// One voxel's planes, read together. What a loop that asks several
+	// questions of one voxel works from: the planes are separate arrays, so
+	// reading one field at a time from a volume is several indexings where
+	// this is one.
+	struct VoxelSample
+	{
+		uint32_t planes[VOXEL_MAX_PLANES] = {};
+	};
+
 	// Where one of the engine's roles lives inside a voxel.
 	//
 	// width 0 means the role is not bound at all, which is not the same as a
@@ -325,6 +356,15 @@ namespace interface
 
 		uint32_t get(uint32_t word) const {
 			return (word >> shift) & mask();
+		}
+
+		// The same, out of a voxel's whole set of planes
+		uint32_t get(const VoxelSample &v) const {
+			return get(v.planes[plane]);
+		}
+
+		void set(VoxelSample &v, uint32_t value) const {
+			set(v.planes[plane], value);
 		}
 
 		void set(uint32_t &word, uint32_t value) const {
@@ -423,9 +463,35 @@ namespace interface
 		VoxelField sag_top;
 		VoxelField sag_bottom;
 
-		// The voxel is one 32-bit word for now. Planes are the next step;
-		// this is the field that becomes a list.
-		uint8_t plane_bits = 32;
+		// What the voxel's bits are stored in. A plane is one array over a
+		// whole chunk, holding the same bits of every voxel in it -- so a
+		// world's voxels are several arrays and not one array of words,
+		// which is what lets a chunk hold a field only once something
+		// writes it, lets a simulation sweep a field without a call per
+		// voxel, and lets a field be added without asking the game for room
+		// in a word it has already spent.
+		//
+		// A format has one 32-bit plane unless it says otherwise, which is
+		// every game in this tree and is the same bits in the same order as
+		// before planes existed.
+		//
+		// A named plane is one a module asked for by name; the first is the
+		// game's own and has no name.
+		sv_<VoxelPlane> planes = {VoxelPlane()};
+
+		// How wide plane p is, and how many there are
+		uint8_t plane_bits(uint8_t plane = 0) const {
+			return plane < planes.size() ? planes[plane].bits : 0;
+		}
+		size_t plane_count() const { return planes.size(); }
+		// Which plane has this name, or -1
+		int plane_of_name(const ss_ &name) const {
+			for(size_t i = 0; i < planes.size(); i++){
+				if(planes[i].name == name)
+					return (int)i;
+			}
+			return -1;
+		}
 
 		static VoxelFormat legacy()
 		{
