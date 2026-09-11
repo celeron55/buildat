@@ -59,10 +59,11 @@ as LOAD_DEPTH. Over its material's capacity and it fails. That is what makes a
 prop under thirty voxels of rock snap and a brick pillar under the same rock
 hold.
 
-What fails falls: down one voxel a tick, as rubble -- which spans nothing, so a
-pile of it holds no roof up and a cave-in carries on rather than plugging
-itself. A material that is already loose keeps what it is, so sand running
-into a tunnel is still sand.
+What fails falls: down one voxel a tick, and becomes what its material falls
+as. Rock and brick come apart into rubble, which spans nothing, so a pile of
+it holds no roof up and a cave-in carries on rather than plugging itself. The
+materials that are already loose heaps stay themselves -- dirt falls as dirt
+and sand as sand -- and turf that has come off and landed is dirt, not turf.
 
 The whole thing is one queue of voxels whose numbers are out of date, walked
 with a budget per tick, so a change costs what it actually reaches: a dig into
