@@ -393,6 +393,10 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 			if(node->GetVar(StringHash(PHYSICS_READY_VAR)).GetBool() &&
 					node_already_has_boxes(node, result_boxes))
 				return true;
+			// From here the collision is coming apart and going back
+			// together, and for the next step or two there is none.
+			// Anything standing on this chunk wants to know.
+			node->SetVar(StringHash(PHYSICS_READY_VAR), Variant(false));
 			node->GetOrCreateComponent<RigidBody>(LOCAL);
 			break;
 		case 2:

@@ -1599,11 +1599,31 @@ void generate_voxel_physics_boxes(
 	auto &lc = region.getLowerCorner();
 	auto &uc = region.getUpperCorner();
 
-	// Create a new volume which only holds the solidity of the voxels
+	// Create a new volume which only holds the solidity of the voxels.
+	//
+	// The padding is left out of it. A chunk volume carries one voxel of its
+	// neighbours on each side so that faces can be culled against them, but
+	// collision is not like drawing: the neighbour has its own body covering
+	// those voxels, so including them gives every chunk boundary two
+	// overlapping sets of boxes -- which is what Bullet's "static-static
+	// collision" warning is about.
+	//
+	// The part that matters more: with the padding in, a chunk's box list
+	// changes whenever a *neighbour* changes, so the collision is rebuilt
+	// over and over while a world loads, and each rebuild takes the body out
+	// of the physics world for a frame or more. Without it, the list depends
+	// only on the chunk's own voxels and a neighbour arriving changes
+	// nothing.
 	pv::RawVolume<uint8_t> volume(region);
 	for(int z = lc.getZ(); z <= uc.getZ(); z++){
 		for(int y = lc.getY(); y <= uc.getY(); y++){
 			for(int x = lc.getX(); x <= uc.getX(); x++){
+				if(x == lc.getX() || x == uc.getX() ||
+						y == lc.getY() || y == uc.getY() ||
+						z == lc.getZ() || z == uc.getZ()){
+					volume.setVoxelAt(x, y, z, 0);
+					continue;
+				}
 				VoxelInstance v_orig = volume_orig.getVoxelAt(x, y, z);
 				const interface::CachedVoxelDefinition *def =
 						voxel_reg->get_cached(v_orig);
