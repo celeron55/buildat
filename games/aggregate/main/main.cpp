@@ -361,19 +361,93 @@ static bool takes_water(const Mix &m)
 // something rather than a heap of it, and a piece can be solid through.
 // Load raises it a little too, which is compaction -- the same solid in less
 // room -- and is the step before anything has to be pushed out.
+// The size classes, coarsest first, and how much of a voxel a heap of each
+// fills on its own: rounded mineral grains leave about a third of the space
+// between them however hard they are pressed, fibre packs better, and a
+// binder that has set fills what it is in.
+enum SolidClass { SC_ROCK = 0, SC_SAND, SC_FIBRE, SC_BINDER, SC_COUNT };
+static const int CLASS_PACKING[SC_COUNT] = {10, 10, 13, 15};
+
+static int class_amount(const Mix &m, int c)
+{
+	return (int)(&m.rock)[c];
+}
+
+// What a heap of one class packs to here. Bond closes the gap to
+// solid-through, because material held together is a piece of something
+// rather than a heap of it, and load packs it down a little more, which is
+// compaction.
+static int class_packing(const Mix &m, int c, uint8_t band)
+{
+	int p = CLASS_PACKING[c] +
+			(FRACTION_MAX - CLASS_PACKING[c]) * (int)m.bond / BOND_MAX +
+			(int)band / 8;
+	return p > FRACTION_MAX ? FRACTION_MAX : p;
+}
+
+// How much solid a mixture holds before it has to give some up.
+//
+// **Grading**: a fine material fits between the grains of a coarse one, so
+// the classes are walked coarsest first and each one only has to fit in the
+// space the coarser ones have not taken -- not in the space they have not
+// *reached*, which is the difference between a heap and a graded mix. That
+// is why soil (sand and binder) is denser than sand, why concrete is denser
+// than the gravel in it, and why a spoonful of leaf mould can disappear
+// into a sand bank instead of lying on top of it.
+//
+// The number is the most solid this mixture could hold *at these
+// proportions*: the composition scaled up until one class no longer fits.
+// How much of one particular material would go in is room_for_class(),
+// which is what a transfer asks, since a transfer moves one material.
 static int packed_limit(const Mix &m, uint8_t band)
 {
-	const int solid = (int)m.rock + m.sand + m.fibre + m.binder;
-	if(solid <= 0)
+	const int total = (int)m.rock + m.sand + m.fibre + m.binder;
+	if(total <= 0)
 		return FRACTION_MAX;
-	// The materials' own packing, weighted by how much of each there is
-	const int loose = (10 * ((int)m.rock + m.sand) + 13 * (int)m.fibre +
-			15 * (int)m.binder) / solid;
-	// Bond closes the gap to solid-through
-	int limit = loose + (FRACTION_MAX - loose) * (int)m.bond / BOND_MAX;
-	// And the weight on it packs it down by up to one fifteenth more
-	limit += (int)band / 8;
+	int f_x256 = -1; // How far the composition scales before a class jams
+	int coarser = 0;
+	for(int c = 0; c < SC_COUNT; c++){
+		const int a = class_amount(m, c);
+		if(a <= 0)
+			continue;
+		// Its own heap needs this much of the voxel, and the coarser
+		// classes have taken `coarser` of it
+		const int denom = FRACTION_MAX * a / class_packing(m, c, band) +
+				coarser;
+		if(denom > 0){
+			const int f = FRACTION_MAX * 256 / denom;
+			if(f_x256 < 0 || f < f_x256)
+				f_x256 = f;
+		}
+		coarser += a;
+	}
+	if(f_x256 < 0)
+		return FRACTION_MAX;
+	const int limit = total * f_x256 / 256;
 	return limit > FRACTION_MAX ? FRACTION_MAX : limit;
+}
+
+// How much more of one class would go in: what its own heap has room for,
+// and what the classes finer than it still need the room for.
+static int room_for_class(const Mix &m, uint8_t band, int c)
+{
+	int coarser = 0;
+	for(int i = 0; i < c; i++)
+		coarser += class_amount(m, i);
+	int room = (FRACTION_MAX - coarser) * class_packing(m, c, band) /
+			FRACTION_MAX - class_amount(m, c);
+	int above = coarser + class_amount(m, c);
+	for(int i = c + 1; i < SC_COUNT; i++){
+		const int a = class_amount(m, i);
+		if(a > 0){
+			const int need = FRACTION_MAX * a / class_packing(m, i, band);
+			const int slack = FRACTION_MAX - above - need;
+			if(slack < room)
+				room = slack;
+		}
+		above += a;
+	}
+	return room > 0 ? room : 0;
 }
 
 // How much of the solid has nowhere to be, in fifteenths
@@ -384,28 +458,25 @@ static int excess_solid(const Mix &m, uint8_t band)
 	return over > 0 ? over : 0;
 }
 
-// How much more solid would go in
-static int solid_room(const Mix &m, uint8_t band)
-{
-	const int solid = (int)m.rock + m.sand + m.fibre + m.binder;
-	const int room = packed_limit(m, band) - solid;
-	return room > 0 ? room : 0;
-}
-
 // Take one fifteenth of solid out of a mixture, from whatever there is most
 // of, and say what it was. Fractions are small numbers and this is how they
 // move: a whole unit of the material that dominates, rather than a rounded
 // share of each, which would quantise to nothing.
-static int take_solid_unit(Mix &m)
+static int dominant_solid(const Mix &m)
 {
-	uint8_t *most = &m.rock;
+	const uint8_t *most = &m.rock;
 	if(m.sand > *most) most = &m.sand;
 	if(m.fibre > *most) most = &m.fibre;
 	if(m.binder > *most) most = &m.binder;
-	if(*most == 0)
+	return *most == 0 ? -1 : (int)(most - &m.rock);
+}
+static int take_solid_unit(Mix &m)
+{
+	const int which = dominant_solid(m);
+	if(which < 0)
 		return -1;
-	(*most)--;
-	return (int)(most - &m.rock);
+	(&m.rock)[which]--;
+	return which;
 }
 
 static void give_solid_unit(Mix &m, int which)
@@ -1336,6 +1407,21 @@ struct Module: public interface::Module
 					}
 					prev = k;
 				}
+				// Grading, which is the whole reason the classes are walked
+				// coarsest first: a heap of sand is full of sand and still
+				// has the space between its grains for something finer,
+				// and that is what lets leaf mould sink into a sand bank
+				// and turn it into soil rather than lie on top of it.
+				if(room_for_class(MIX_SAND, 0, SC_SAND) != 0)
+					log_w(MODULE, "grading: sand takes more sand");
+				if(room_for_class(MIX_SAND, 0, SC_BINDER) <= 0)
+					log_w(MODULE, "grading: sand takes no binder");
+				// And the graded mix is denser than the heap it is made of:
+				// sand packs to ten fifteenths and soil, which is that sand
+				// with binder between its grains, to more than that
+				if(packed_limit(MIX_SOIL, 0) <= packed_limit(MIX_SAND, 0))
+					log_w(MODULE, "grading: soil packs no denser than sand");
+
 				// Brick is not in that order because it is not porous at
 				// all: it is packed solid, so there is no void for water
 				// to be in and the rate never comes up
@@ -1821,14 +1907,17 @@ struct Module: public interface::Module
 			// did before the test was this narrow.
 			if(nmix.solid() > 0 && nmix.bond >= 4)
 				continue;
-			int room = solid_room(nmix, band_of(nv));
-			while(over > 0 && room > 0){
-				const int which = take_solid_unit(mix);
-				if(which < 0)
+			// What goes across is one material, so what is asked is the
+			// room for *that* material: a sand bank that is full of sand
+			// still has the space between its grains for something finer
+			while(over > 0){
+				const int which = dominant_solid(mix);
+				if(which < 0 ||
+						room_for_class(nmix, band_of(nv), which) <= 0)
 					break;
+				take_solid_unit(mix);
 				give_solid_unit(nmix, which);
 				over--;
-				room--;
 				moved = true;
 			}
 			if(moved){
@@ -1875,16 +1964,14 @@ struct Module: public interface::Module
 		Mix nmix = mix_of(nv);
 		if(nmix.solid() <= 0 || nmix.bond >= 4)
 			return false;
-		int room = solid_room(nmix, band_of(nv));
-		if(room <= 0)
-			return false;
 		bool moved = false;
-		while(room > 0 && mix.solid() > 0){
-			const int which = take_solid_unit(mix);
-			if(which < 0)
+		while(mix.solid() > 0){
+			const int which = dominant_solid(mix);
+			if(which < 0 ||
+					room_for_class(nmix, band_of(nv), which) <= 0)
 				break;
+			take_solid_unit(mix);
 			give_solid_unit(nmix, which);
-			room--;
 			moved = true;
 		}
 		if(moved){

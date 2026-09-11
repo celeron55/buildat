@@ -69,12 +69,17 @@ And what undermine has no answer to at all:
   the same transfer that pushes material out of an overfull voxel -- so
   what a rotted tree leaves becomes part of the ground instead of standing
   on it.
-- **A heap cannot be packed past its own limit.** Rounded mineral grains
-  leave about a third of the space between them however hard they are
-  pressed, which is why sand and gravel hold water even when fully
-  compacted. Bond raises the limit, because material held together is a
-  piece of something rather than a heap of it -- so when bond goes away a
-  collapse *bulks*, and the rubble takes up more room than the rock did.
+- **A heap cannot be packed past its own limit, and a graded mix can.**
+  Rounded mineral grains leave about a third of the space between them
+  however hard they are pressed, which is why sand and gravel hold water
+  even when fully compacted -- but a finer material fits between those
+  grains, so sand full of sand still has room for binder. That is why soil
+  is denser than the sand it is made of and concrete denser than its
+  gravel, and it is what lets what a rotted tree leaves sink into a sand
+  bank and turn it into soil. Bond raises the limit too, because material
+  held together is a piece of something rather than a heap of it -- so when
+  bond goes away a collapse *bulks*, and the rubble takes up more room than
+  the rock did.
 - **The wood cycle.** Life is how far living wood is from water it can
   drink, so a tree standing in wet soil is alive and cutting its trunk
   browns everything above the cut. Wood does not come back to life. Dead
