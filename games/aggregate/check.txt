@@ -7,18 +7,49 @@
 # tunnel is full of glints for the first half minute and clean after it.
 # Twenty seconds is not enough; thirty is. Anything compared against
 # games/undermine has to be taken at the same point for the same reason.
-delay 32000
+delay 30000
 screenshot ../tmp/aggregate_check/1_spawn_tunnel.png
-# Dig out of the tunnel and look at what the layers are made of
-keypress V
-delay 1500
-screenshot ../tmp/aggregate_check/2_load_view.png
-keypress V
-delay 1500
-screenshot ../tmp/aggregate_check/3_support_view.png
-keypress V
-delay 1500
-screenshot ../tmp/aggregate_check/4_danger_view.png
-keypress V
+
+# Dig the ceiling. One voxel: the dig has a cooldown and this is about
+# whether digging works at all, not about bringing the roof down.
+mouse_move 0 -120
+delay 400
+mouse_down left
+delay 2500
+mouse_up left
 delay 1000
-screenshot ../tmp/aggregate_check/5_back_to_play.png
+screenshot ../tmp/aggregate_check/2_dug.png
+mouse_move 0 120
+delay 500
+
+# A chamber, which is wider than stone will span, so its roof comes down as
+# soon as the simulation looks at it. The free camera frames what it puts up.
+keypress TAB
+delay 500
+keypress B
+delay 1500
+mouse_pos 640 321
+delay 400
+mouse_down left
+delay 300
+mouse_up left
+delay 12000
+screenshot ../tmp/aggregate_check/3_chamber.png
+
+# From above, and then the three views over it
+mouse_move 0 300
+delay 300
+keydown SPACE
+delay 2500
+keyup SPACE
+delay 1500
+screenshot ../tmp/aggregate_check/4_above.png
+keypress V
+delay 2500
+screenshot ../tmp/aggregate_check/5_load.png
+keypress V
+delay 2000
+screenshot ../tmp/aggregate_check/6_support.png
+keypress V
+delay 2000
+screenshot ../tmp/aggregate_check/7_danger.png
