@@ -5,6 +5,7 @@
 #include "interface/server.h"
 #include "interface/module.h"
 #include "interface/voxel.h"
+#include "interface/voxel_volume.h"
 #include <PolyVoxCore/Vector.h>
 #include <PolyVoxCore/RawVolume.h>
 #include <functional>
@@ -18,6 +19,8 @@ namespace main_context
 namespace worldgen
 {
 	namespace pv = PolyVox;
+
+	using interface::VoxelVolume;
 	using main_context::SceneReference;
 
 	struct QueueModifiedEvent: public interface::Event::Private
@@ -53,7 +56,7 @@ namespace worldgen
 		// whatever generates the section it belongs to.
 		virtual void generate(SceneReference scene_ref,
 				const pv::Vector3DInt16 &section_p,
-				pv::RawVolume<interface::VoxelInstance> &volume) = 0;
+				interface::VoxelVolume &volume) = 0;
 	};
 
 	struct Instance

@@ -225,6 +225,278 @@ local function check_pack_voxel_volume()
 			"paired id 2 is "..pv:get_voxel_at(2, 0, 0):get_id())
 end
 
+-- A voxel format is the game's own cut of the 32-bit voxel word, and every
+-- field name pack_voxel_volume() takes means a role of it rather than a bit
+-- range. The default format is the one buildat had before formats existed,
+-- and the assertion that matters is that reading through it gives what
+-- VoxelInstance's own accessors give.
+local function check_voxel_format()
+	local safe = buildat.safe
+
+	-- The default format: nothing said, nothing changed
+	local plain = safe.createVoxelRegistry()
+	local packed = buildat.pack_voxel_volume{
+		region = {0, 0, 0, 0, 0, 0},
+		sources = {
+			{data = string.char(0, 0, 4, 210), format = "u32be",
+					source_size = {1, 1, 1}, field = "id"},
+			{data = string.char(9), format = "u8", source_size = {1, 1, 1},
+					field = "skylight"},
+			{data = string.char(3), format = "u8", source_size = {1, 1, 1},
+					field = "lamplight"},
+		},
+	}
+	local v = safe.deserialize_volume(packed):get_voxel_at(0, 0, 0)
+	assert(v:get_id() == 1234, "default id is "..v:get_id())
+	assert(v:get_skylight() == 9, "default skylight is "..v:get_skylight())
+	assert(v:get_lamplight() == 3, "default lamplight is "..v:get_lamplight())
+
+	-- Luanti's own cut of the same word: a 16-bit id, param1 as two light
+	-- nibbles, and param2. Which is what this extension wants, and the point
+	-- of the whole exercise: param2 reaches the mesher instead of needing a
+	-- voxel id per (definition, param2) pair.
+	local luanti = safe.createVoxelRegistry()
+	luanti:set_format{
+		plane_bits = 32,
+		id = {shift = 0, width = 16},
+		light_sky = {shift = 16, width = 4},
+		light_lamp = {shift = 20, width = 4},
+		param = {shift = 24, width = 8},
+	}
+	local packed2 = buildat.pack_voxel_volume{
+		region = {0, 0, 0, 0, 0, 0},
+		registry = luanti,
+		sources = {
+			{data = string.char(0xab, 0xcd), format = "u16be",
+					source_size = {1, 1, 1}, field = "id"},
+			{data = string.char(7), format = "u8", source_size = {1, 1, 1},
+					field = "skylight"},
+			{data = string.char(9), format = "u8", source_size = {1, 1, 1},
+					field = "lamplight"},
+			{data = string.char(0x5e), format = "u8", source_size = {1, 1, 1},
+					field = "param"},
+		},
+	}
+	local v2 = safe.deserialize_volume(packed2):get_voxel_at(0, 0, 0)
+	-- get_id() and the light accessors read the default cut, so the word is
+	-- what has to be checked here
+	local word = v2.data % 4294967296
+	assert(word == 0xab * 256 + 0xcd + 7 * 65536 + 9 * 1048576 +
+			0x5e * 16777216, "luanti-format word is "..word)
+	assert(luanti:dump_format() ==
+			"VoxelFormat(32-bit, id=0...15, light_sky=16...19, "..
+			"light_lamp=20...23, param=24...31)",
+			"dump_format() says "..luanti:dump_format())
+
+	-- The default format binds no param, so asking to write one is an error
+	-- rather than bits landing somewhere unsaid
+	local ok = pcall(function()
+		buildat.pack_voxel_volume{
+			region = {0, 0, 0, 0, 0, 0},
+			registry = plain,
+			sources = {{data = string.char(1), format = "u8",
+					source_size = {1, 1, 1}, field = "param"}},
+		}
+	end)
+	assert(not ok, "writing an unbound param was allowed")
+
+	-- A format cannot arrive after the voxels it would reinterpret
+	local late = safe.createVoxelRegistry()
+	local def = safe.VoxelDefinition()
+	def.name.block_name = "engine_test:late"
+	late:add_voxel(def)
+	local ok2 = pcall(function()
+		late:set_format{id = {shift = 0, width = 16}}
+	end)
+	assert(not ok2, "set_format() after a voxel was allowed")
+end
+
+-- A definition's variants are what its param means: a shape, a tile order, a
+-- tint, a liquid level per param value. They travel with the registry, so the
+-- round trip through serialize/deserialize is what a client actually gets.
+local function check_voxel_variants()
+	local safe = buildat.safe
+	local reg = safe.createVoxelRegistry()
+	reg:set_format{
+		id = {shift = 0, width = 16},
+		param = {shift = 24, width = 8},
+	}
+	local def = safe.VoxelDefinition()
+	def.name.block_name = "engine_test:facing"
+	def.variants = {
+		-- A turned cube: the same six textures in another order
+		-- The faces are 0...5, so this is the six textures rotated by one
+		{tile_order = {1, 2, 3, 4, 5, 0}, tile_turns = {0, 0, 1, 3, 2, 0},
+				params = {0, 4, 8}},
+		-- A palette entry, and a liquid standing lower than full
+		{color = 0x336699, liquid_top = 0.25, params = {1}},
+	}
+	reg:add_voxel(def)
+
+	-- What the definition holds now, read back through the same property
+	local got = def.variants
+	assert(got[1] and got[2] and not got[3], "there are not two variants")
+	assert(got[1].tile_order[1] == 1 and got[1].tile_order[6] == 0,
+			"tile_order is "..got[1].tile_order[1]..".."..got[1].tile_order[6])
+	assert(got[1].tile_turns[4] == 3,
+			"tile_turns[4] is "..got[1].tile_turns[4])
+	assert(#got[1].params == 3 and got[1].params[2] == 4,
+			"variant 1 claims "..#got[1].params.." params")
+	assert(got[2].color == 0x336699, "colour is "..got[2].color)
+	assert(math.abs(got[2].liquid_top - 0.25) < 1e-6,
+			"liquid_top is "..got[2].liquid_top)
+	assert(#got[2].params == 1 and got[2].params[1] == 1,
+			"variant 2 claims "..#got[2].params.." params")
+
+	-- And what a client gets: the registry's own round trip, which is how
+	-- both the format and the variants reach one
+	local other = safe.createVoxelRegistry()
+	other:deserialize(reg:serialize())
+	assert(other:dump_format() == reg:dump_format(),
+			"the format did not travel: "..other:dump_format())
+	assert(other:serialize() == reg:serialize(),
+			"the definitions did not survive the round trip")
+
+	-- A variant nobody can reach is a mistake worth catching
+	local def2 = safe.VoxelDefinition()
+	def2.name.block_name = "engine_test:noparams"
+	local ok = pcall(function()
+		def2.variants = {{color = 0x112233}}
+	end)
+	assert(not ok, "a variant with no params was allowed")
+end
+
+-- The modifier roles: fields the mesher reads to change how a voxel is drawn
+-- without a definition of its own. What can be checked without looking at a
+-- screen is which formats are accepted, what the format says it is, and that
+-- the definitions' own parameters reach a client.
+local function check_voxel_modifiers()
+	local safe = buildat.safe
+	local reg = safe.createVoxelRegistry()
+	reg:set_format{
+		id = {shift = 0, width = 8},
+		light_sky = {shift = 8, width = 4},
+		tint = {shift = 12, width = 4},
+		wetness = {shift = 16, width = 4},
+		sag_top = {shift = 20, width = 4},
+	}
+	assert(reg:dump_format() ==
+			"VoxelFormat(32-bit, id=0...7, light_sky=8...11, tint=12...15, "..
+			"wetness=16...19, sag_top=20...23)",
+			"dump_format() says "..reg:dump_format())
+
+	local def = safe.VoxelDefinition()
+	def.name.block_name = "engine_test:damp"
+	-- Dry at tint 0 and soaked at the top of the field
+	def.tint_ramp = {0xffffff, 0x807060}
+	def.sag_extent = 0.25
+	reg:add_voxel(def)
+	assert(def.tint_ramp[1] == 0xffffff and def.tint_ramp[2] == 0x807060,
+			"tint_ramp is "..def.tint_ramp[1]..", "..def.tint_ramp[2])
+	assert(math.abs(def.sag_extent - 0.25) < 1e-6,
+			"sag_extent is "..def.sag_extent)
+
+	-- Both travel to a client with the rest of the registry
+	local other = safe.createVoxelRegistry()
+	other:deserialize(reg:serialize())
+	assert(other:dump_format() == reg:dump_format(),
+			"the format did not travel: "..other:dump_format())
+	assert(other:serialize() == reg:serialize(),
+			"the definitions did not survive the round trip")
+
+	-- A plane of a module's own, and a field inside it
+	local planed = safe.createVoxelRegistry()
+	planed:set_format{
+		id = {shift = 0, width = 16},
+		light_sky = {shift = 16, width = 4},
+		planes = {{name = "engine_test:heat", bits = 8}},
+		tint = {plane = 1, shift = 0, width = 4},
+	}
+	assert(planed:dump_format() ==
+			"VoxelFormat(32-bit + engine_test:heat:8-bit, id=0...15, "..
+			"light_sky=16...19, tint=0...3)",
+			"dump_format() says "..planed:dump_format())
+
+	-- A field cannot reach past its own plane, which is not the first one's
+	local ok0 = pcall(function()
+		safe.createVoxelRegistry():set_format{
+			id = {shift = 0, width = 16},
+			planes = {{name = "engine_test:heat", bits = 8}},
+			tint = {plane = 1, shift = 4, width = 8},
+		}
+	end)
+	assert(not ok0, "a field reaching past its plane was allowed")
+
+	-- Only four surface modifiers reach the shader, so a fifth is refused
+	-- rather than silently dropped. The two sag roles are not among them.
+	local ok = pcall(function()
+		safe.createVoxelRegistry():set_format{
+			id = {shift = 0, width = 8},
+			tint = {shift = 8, width = 2},
+			wetness = {shift = 10, width = 2},
+			grain = {shift = 12, width = 2},
+			gloss = {shift = 14, width = 2},
+			speckle = {shift = 16, width = 2},
+		}
+	end)
+	assert(not ok, "a fifth surface modifier was allowed")
+end
+
+-- Look rules: which definition a voxel wears, for a world with no voxel type
+-- id. The default is the id role, which is what the other checks here get.
+local function check_voxel_look_rules()
+	local safe = buildat.safe
+	local reg = safe.createVoxelRegistry()
+	reg:set_format{
+		id = {shift = 0, width = 4},
+		light_sky = {shift = 4, width = 4},
+		wetness = {shift = 8, width = 4},
+	}
+	for _, name in ipairs({"air", "rock", "sand"}) do
+		local def = safe.VoxelDefinition()
+		def.name.block_name = "engine_test:"..name
+		reg:add_voxel(def)
+	end
+
+	-- Rock where the game's own field says so, sand where the role does,
+	-- air for everything left
+	reg:set_look_rules{
+		fallback = 1,
+		rules = {
+			{result = 2, when = {{field = {shift = 12, width = 2}, lo = 2}}},
+			{result = 3, when = {{field = "wetness", lo = 8}}},
+		},
+	}
+
+	-- And a client gets it with the rest of the registry
+	local other = safe.createVoxelRegistry()
+	other:deserialize(reg:serialize())
+	assert(other:serialize() == reg:serialize(),
+			"the look rules did not survive the round trip")
+
+	-- A rule that claims everything has to be the last one
+	local ok = pcall(function()
+		reg:set_look_rules{
+			rules = {{result = 2}, {result = 3, when = {{field = "wetness"}}}},
+		}
+	end)
+	assert(not ok, "an unreachable rule was allowed")
+
+	-- And a rule cannot point at a voxel that is not there
+	local ok2 = pcall(function()
+		reg:set_look_rules{rules = {{result = 99}}}
+	end)
+	assert(not ok2, "a rule pointing at nothing was allowed")
+
+	-- A clause naming something that is not a role is a typo, not a field
+	local ok3 = pcall(function()
+		reg:set_look_rules{
+			rules = {{result = 2, when = {{field = "wetnes", lo = 1}}}},
+		}
+	end)
+	assert(not ok3, "a clause on a misspelled role was allowed")
+end
+
 -- compose_image() writes a PNG, and Urho3D can read one back, so the pixels
 -- can actually be checked. The files go where the client's own temporary
 -- resources go, which is a resource dir, so they can be loaded by name.
@@ -494,6 +766,10 @@ end
 function M.self_test()
 	check_compress()
 	check_pack_voxel_volume()
+	check_voxel_format()
+	check_voxel_variants()
+	check_voxel_modifiers()
+	check_voxel_look_rules()
 	check_compose_image()
 end
 

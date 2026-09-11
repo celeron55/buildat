@@ -372,6 +372,166 @@ texture as the top of one that is not turned, turned with the voxel -- so the
 turn belongs to the face rather than to the atlas segment, which is shared.
 A shape's quads carry their own texture coordinates and are not affected.
 
+vdef.variants says what a voxel's param does to how it is drawn, for a
+format that binds one. It is an array of variants, and a variant claims the
+param values it applies to:
+
+  vdef.variants = {
+      -- A cube that faces a direction: the same six textures in another
+      -- order, each turned inside its own face
+      {tile_order = {1, 2, 3, 4, 5, 0}, tile_turns = {0, 0, 1, 3, 2, 0},
+              params = {2, 6, 10}},
+      -- A palette entry, and a liquid standing a quarter of the way up
+      {shape = {}, color = 0x336699, liquid_top = 0.25, params = {1}},
+  }
+
+- params is the list of param values that pick this variant, 0...255, and is
+  the one field that is not optional: a variant nothing reaches is a mistake.
+  A param value no variant claims is drawn as if the param changed nothing.
+- tile_order[f] is which of the definition's own six textures face f wears,
+  0...5. A variant carries no textures of its own: a turned cube wears the
+  same ones in a different order, which is what keeps a voxel that faces
+  twenty-four ways from needing twenty-four voxel types.
+- shape replaces the definition's own quads, and is empty for a variant that
+  keeps them. tile_order and tile_turns are for cube faces; a shape's quads
+  carry their own texture coordinates, as always.
+- color is multiplied into the vertex colour, 0xRRGGBB. What wants it is a
+  palette: one texture, and the param says which entry tints this voxel.
+- liquid_top is where a liquid's surface stands in the voxel, which is what
+  Luanti's flowing liquids put in param2. The corner heights that make a
+  surface continuous read the neighbours' own params too.
+- Only a param up to 8 bits wide is looked up this way. A wider one is
+  storage for the game to read itself.
+
+voxel_reg:set_format{...} says how the game cuts up a voxel's 32 bits. The
+default is what buildat had before this existed -- the type id in bits 0...20
+and two 4-bit light levels in 24...31 -- and a game that says nothing keeps
+it. Say it before the first voxel is added: everything already stored, and
+every volume on its way anywhere, is bits under the old format.
+
+  voxel_reg:set_format{
+      plane_bits = 32,                    -- the game's own plane's width
+      id = {shift = 0, width = 16},       -- indexes the registry
+      light_sky = {shift = 16, width = 4},
+      light_lamp = {shift = 20, width = 4},
+      param = {shift = 24, width = 8},    -- a definition's own rule reads it
+      color = nil,                        -- 0xRRGGBB, width 24 or 32
+      -- and the modifiers, none of them bound by default:
+      tint = nil, wetness = nil, grain = nil, gloss = nil,
+      speckle = nil, emission = nil,      -- surface, at most four at once
+      sag_top = nil, sag_bottom = nil,    -- geometry
+      planes = {                          -- planes after the game's own
+          {name = "mymod:heat", bits = 8},
+      },
+  }
+
+- Those five are the roles the engine understands. A role left out is not
+  bound, which is not the same as one that is always zero: a world with no
+  light bound is not dark, it is one where nothing asks about light. Bits no
+  role covers are the game's own.
+- Bind the light the world actually fills and no more. light_lamp is for a
+  world that works out the light a voxel gets from something other than the
+  sky and stores it per voxel, which is what a Luanti server does; a game
+  whose lamps are lights in the scene wants only light_sky, and the shader
+  lights the geometry from the lamps.
+- id is what the registry is indexed by, at most 21 bits wide. With no id
+  bound there is one voxel type, which is what a game whose voxels are
+  colours rather than types wants.
+- param is handed to the voxel's definition, which is what says what it
+  means: which way the voxel faces, how high a liquid stands in it, which
+  entry of a palette it wears.
+- color is 0xRRGGBB in the low 24 bits of a field 24 or 32 bits wide, and is
+  multiplied into the vertex colour. That colour is light rather than albedo,
+  so it tints the light a voxel receives and not its texture: right for a
+  game whose voxels are unlit colour, wrong for a palette over a texture.
+- The modifiers say how much of something a voxel has, where a role says
+  what it is. Each is normalised against its own field's width, so a 4-bit
+  field and an 8-bit one both run 0...1 and a game can widen one without
+  touching its shader.
+- The surface modifiers reach the shader as four numbers in the vertex
+  tangent and nowhere else; the engine promises the four and their order and
+  the game's shader decides what they look like. The order is tint, wetness,
+  grain, gloss, speckle, emission, with the bound ones packed towards x --
+  fixed rather than the order they were written, so that two worlds binding
+  the same roles hand their shaders the same thing. At most four may be
+  bound; a fifth is refused.
+- tint is the one that is a colour rather than a scalar: it picks a colour
+  out of vdef.tint_ramp = {0xRRGGBB, 0xRRGGBB}, the first end at 0 and the
+  second at full, and its slot carries that colour packed 5-6-5 instead of a
+  number between 0 and 1. A definition that leaves both ends white is not
+  tinted whatever the field says. It is an albedo tint and the shader is
+  what applies it: the vertex colour is light, and a tint of the light shows
+  in shade and vanishes in sunlight, which is not what tinting a material
+  means.
+- sag_top and sag_bottom move a voxel's top and bottom faces into it, by up
+  to vdef.sag_extent voxels. The mesher averages the sag of the voxels that
+  meet at each corner, so a sagging surface runs continuously instead of
+  stepping; what the sag means -- a liquid's level, a floor giving under a
+  load, shallow snow -- is the game's.
+- A voxel's bits are stored **a plane at a time**: a plane is one array over
+  a chunk holding the same bits of every voxel in it, so a world's voxels
+  are several arrays rather than one array of words. A format has one
+  32-bit plane unless it says otherwise, which is what every game here has
+  and is the same bits in the same order as before planes existed.
+- What a second plane is for: a field a simulation sweeps, which it then
+  reads a byte per voxel of instead of four; a field a module keeps without
+  asking the game for room in a word it has already spent; and a mixture
+  world, where the number of fields is the number of materials. A plane
+  nothing has written costs a chunk nothing at all.
+- A field says which plane it is in: {plane = 1, shift = 0, width = 4}.
+  plane defaults to 0, the game's own.
+- Reading one: volume:get_plane_at(plane, x, y, z) and its setter, and
+  voxelworld.get_static_voxel_plane(p, plane) on the client. Both hand back a
+  plain number, because a plane other than the first holds the game's own
+  bits and none of the engine's roles. get_voxel_at() and get_static_voxel()
+  are the first plane, as they always were. Each plane is 8, 16 or 32 bits, the
+  first has no name and the rest must have one, and there are at most eight.
+- The fields may not overlap and may not reach past the word. set_format()
+  says which rule was broken.
+- voxel_reg:dump_format() writes the format out, for a log line.
+
+voxel_reg:set_look_rules{...} says how a voxel's *definition* is found, for a
+world whose voxels have no type id at all. The default, and what every game
+in this tree does, is the id role of the format: a shift, a mask and an
+index. Rules are the other way.
+
+  voxel_reg:set_look_rules{
+      fallback = 1,                      -- what no rule claims
+      rules = {
+          {result = 2, when = {{field = "wetness", lo = 8}}},
+          {result = 3, when = {
+              {field = {shift = 28, width = 2}, lo = 2},
+              {field = "gloss", hi = 3},
+          }},
+          {result = 4},                  -- everything left
+      },
+  }
+
+- An ordered list; the first rule all of whose clauses hold says which
+  definition the voxel wears. A rule with no `when` claims everything left,
+  so nothing after it is reachable and set_look_rules() says so.
+- A clause is a field and a range, both ends included. lo defaults to 0 and
+  hi to the field's whole range, so a clause with one of them is "at least"
+  or "at most". field is a role name or a table {shift = ..., width = ...}
+  for a field of the game's own that no role covers.
+- The definition is still where every property lives -- what is drawn,
+  whether the physics collides with it, whether light passes. A selector
+  only changes how the definition is found, so nothing that asks a question
+  of a voxel has to know which kind is in use. A world wanting a finer
+  distinction in one property than another writes the rules that make it
+  and points them at definitions that differ in that property alone.
+- Unlike the format this may be set at any time, and a world that changes it
+  has to have everything meshed again. What it may not do is point at a
+  definition the registry does not have.
+- The id role, where it is bound, still says whether a voxel has been
+  generated at all -- id 0 is "nothing has got here yet" whatever the rules
+  make of the rest of the word.
+- It travels with the registry, as the format does. games/aggregate_look is
+  a world that uses it: two rules over two fields, and no voxel id stored
+  anywhere.
+- The format travels with the registry, so a client that deserializes one
+  gets the world's cut along with its definitions.
+
 atlas_reg:set_surface_maps(false) says the game's voxel shader samples the
 diffuse atlas and nothing else. An atlas then carries neither the normal map
 nor the surface map derived from its segments' pixels, which is two thirds of
@@ -392,6 +552,7 @@ buildat.pack_voxel_volume(args) -> string
 
   buildat.pack_voxel_volume{
       region = {x0, y0, z0, x1, y1, z1}, -- inclusive corners
+      registry = <VoxelRegistry>,        -- optional; whose format applies
       fill = 0,                          -- raw voxel value the rest gets
       sources = {
           {
@@ -408,7 +569,7 @@ buildat.pack_voxel_volume(args) -> string
               map_default = nil,         -- for keys the map does not have
               map_id = nil,              -- compile this map once; see below
               map_version = nil,         -- bump when the map changes
-              field = "id",              -- id|skylight|lamplight|light|raw
+              field = "id",              -- a role of the voxel format
               second = {                 -- optional; nil for one array
                   data = <string>,       -- as long as the first array
                   format = "u8",
@@ -419,11 +580,16 @@ buildat.pack_voxel_volume(args) -> string
       },
   }
 
-- field says which part of a voxel a source writes: "id" the type id (bits
-  0..20), "skylight" bits 24..27, "lamplight" bits 28..31, "light" both of
-  those in one write (bits 24..31, skylight in the low nibble), "raw" all 32
-  bits. Other bits are left alone, so ids and light are two sources over the
-  same box.
+- field says which part of a voxel a source writes, by naming a role of the
+  voxel format rather than a bit range: "id", "skylight", "lamplight",
+  "light" (both light channels in one write, the sky light in the low bits),
+  "param", "color", or "raw" for the whole word. Where a role actually is
+  depends on the format, which comes from args.registry; without a registry
+  the default format applies, which is id in bits 0..20 and the two lights in
+  24..31. Other bits are left alone, so ids and light are two sources over
+  the same box.
+- A field naming a role the format does not bind is an error, as is "light"
+  in a format whose two light channels are not adjacent.
 - map is a table indexed by the key, or a string with one byte per key. A key
   the map does not mention gets map_default, and with no map_default the voxel
   is left as it was. Keys too far apart to be an array are held as a hash, so

@@ -279,8 +279,33 @@ local function read_node(r)
 	def.node_box = read_node_box(r)
 	def.selection_box = read_node_box(r)
 	def.collision_box = read_node_box(r)
+
+	-- Three sounds, each a name and three floats, and two legacy flags.
+	-- Read and dropped: what is wanted is what comes after them.
+	for _ = 1, 3 do
+		r:string()   -- name
+		r:f32()      -- gain
+		r:f32()      -- pitch
+		r:f32()      -- fade
+	end
+	r:u8()  -- legacy_facedir_simple
+	r:u8()  -- legacy_wallmounted
+	r:string() -- node_dig_prediction
+	r:u8()  -- leveled_max
+
+	-- How the node's own texture alpha is meant to be used. Luanti's
+	-- AlphaMode: 0 blend, 1 clip, 2 opaque, 3 what an old server sends for
+	-- opaque. Without this, glass a game gave a real alpha to is alpha
+	-- masked -- every texel either solid or gone -- where the game meant it
+	-- to be seen through.
+	def.alpha_mode = r:u8()
 	return def
 end
+
+-- What a node's alpha mode says about which pass it belongs in. Blended
+-- geometry is drawn after the solid world and back to front, which is what
+-- the water already does; see VoxelDefinition::translucent.
+M.ALPHAMODE_BLEND = 0
 
 -- parse(data) -> {[id] = def}, count
 --

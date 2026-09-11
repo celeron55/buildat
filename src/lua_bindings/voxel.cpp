@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "core/log.h"
 #include "interface/voxel.h"
+#include "interface/voxel_selector.h"
 #include "lua_bindings/util.h"
 #include "lua_bindings/luabind_util.h"
 #include "lua_bindings/sandbox_util.h"
@@ -64,12 +65,58 @@ void vdef_set_textures(VoxelDefinition &def, luabind::object value, lua_State *L
 	}
 }
 
+// vdef.extra_textures = {seg, ...}: the textures a shape's quads can wear
+// beyond the six faces, indexed from 1 in Lua and addressed as tile 6 and
+// over in a quad. See VoxelDefinition::extra_textures.
+luabind::object vdef_get_extra_textures(const VoxelDefinition &def,
+		lua_State *L)
+{
+	luabind::object result = luabind::newtable(L);
+	for(size_t i = 0; i < def.extra_textures.size(); i++)
+		result[i+1] = luabind::object(L, def.extra_textures[i]);
+	return result;
+}
+
+void vdef_set_extra_textures(VoxelDefinition &def, luabind::object value,
+		lua_State *L)
+{
+	def.extra_textures.clear();
+	for(size_t i = 1;; i++){
+		luabind::object o = value[i];
+		if(!o)
+			break;
+		def.extra_textures.push_back(
+				luabind::object_cast<AtlasSegmentDefinition>(o));
+	}
+}
+
 luabind::object vdef_get_tile_turns(const VoxelDefinition &def, lua_State *L)
 {
 	luabind::object result = luabind::newtable(L);
 	for(size_t i = 0; i < 6; i++)
 		result[i+1] = luabind::object(L, (int)def.tile_turns[i]);
 	return result;
+}
+
+// vdef.tint_ramp = {0x808080, 0xffffff}: the two ends of the colour the
+// tint modifier moves between. See VoxelDefinition::tint_ramp.
+luabind::object vdef_get_tint_ramp(const VoxelDefinition &def, lua_State *L)
+{
+	luabind::object result = luabind::newtable(L);
+	for(size_t i = 0; i < 2; i++)
+		result[i+1] = luabind::object(L, (double)def.tint_ramp[i]);
+	return result;
+}
+
+void vdef_set_tint_ramp(VoxelDefinition &def, luabind::object value,
+		lua_State *L)
+{
+	for(size_t i = 0; i < 2; i++){
+		luabind::object v = value ? value[i+1] : luabind::object();
+		def.tint_ramp[i] = v && luabind::type(v) == LUA_TNUMBER ?
+				((uint32_t)luabind::object_cast<double>(v) & 0xffffffUL) :
+				0xffffffUL;
+	}
 }
 
 void vdef_set_tile_turns(VoxelDefinition &def, luabind::object value,
@@ -136,9 +183,12 @@ static interface::VoxelQuad quad_from_lua(const luabind::object &quad)
 	luabind::object tile = quad["tile"];
 	int tile_i = (tile && luabind::type(tile) == LUA_TNUMBER) ?
 			(int)luabind::object_cast<double>(tile) : 1;
-	if(tile_i < 1 || tile_i > 6)
+	// 1...6 are the voxel's own faces and 7 and over are its extra
+	// textures, which is what a shape that is more than one thing wants;
+	// see VoxelDefinition::extra_textures
+	if(tile_i < 1 || tile_i > 256)
 		throw Exception(ss_()+"VoxelDefinition.shape: tile "+
-				itos(tile_i)+" is not one of the six");
+				itos(tile_i)+" is not a face or an extra texture");
 	q.tile = (uint8_t)(tile_i - 1);
 	luabind::object dir = quad["connect_dir"];
 	int dir_i = (dir && luabind::type(dir) == LUA_TNUMBER) ?
@@ -216,6 +266,310 @@ static void vdef_set_shape_masked(VoxelDefinition &def,
 	def.shape_masked_begin[20] = (uint16_t)def.shape_masked.size();
 }
 
+// voxel_reg:set_format{plane_bits = 32, id = {shift = 0, width = 16}, ...}
+//
+// The roles are id, light_sky, light_lamp, param and color, plus the
+// modifiers tint, wetness, grain, gloss, speckle, emission, sag_top and
+// sag_bottom; a role left out is not bound. See VoxelFormat in interface/voxel.h and doc/client_api.txt.
+static interface::VoxelField field_from_lua(const luabind::object &t,
+		const char *name)
+{
+	luabind::object f = t[name];
+	if(!f || luabind::type(f) != LUA_TTABLE)
+		return interface::VoxelField();
+	auto number = [&](const char *key, double def){
+		luabind::object v = f[key];
+		if(!v || luabind::type(v) != LUA_TNUMBER)
+			return def;
+		return luabind::object_cast<double>(v);
+	};
+	return interface::VoxelField(
+			(uint8_t)number("plane", 0),
+			(uint8_t)number("shift", 0),
+			(uint8_t)number("width", 0));
+}
+
+static void vreg_set_format(VoxelRegistry &reg, const luabind::object &t)
+{
+	if(!t || luabind::type(t) != LUA_TTABLE)
+		throw Exception("set_format(): argument is not a table");
+	interface::VoxelFormat format;
+	{
+		// plane_bits is the width of the game's own first plane
+		luabind::object v = t["plane_bits"];
+		if(v && luabind::type(v) == LUA_TNUMBER){
+			format.planes.clear();
+			format.planes.push_back(interface::VoxelPlane("",
+					(uint8_t)luabind::object_cast<double>(v)));
+		}
+	}
+	{
+		// planes = {{name = "mod:heat", bits = 8}, ...}: the planes after
+		// the game's own. A field of one names it by index in `plane`.
+		luabind::object v = t["planes"];
+		if(v && luabind::type(v) == LUA_TTABLE){
+			for(size_t i = 1;; i++){
+				luabind::object pt = v[i];
+				if(!pt || luabind::type(pt) != LUA_TTABLE)
+					break;
+				luabind::object name = pt["name"];
+				luabind::object bits = pt["bits"];
+				if(!name || luabind::type(name) != LUA_TSTRING)
+					throw Exception(ss_()+"set_format(): plane "+itos(i)+
+							" has no name");
+				format.planes.push_back(interface::VoxelPlane(
+						luabind::object_cast<ss_>(name),
+						bits && luabind::type(bits) == LUA_TNUMBER ?
+						(uint8_t)luabind::object_cast<double>(bits) : 8));
+			}
+		}
+	}
+	format.id = field_from_lua(t, "id");
+	format.light_sky = field_from_lua(t, "light_sky");
+	format.light_lamp = field_from_lua(t, "light_lamp");
+	format.param = field_from_lua(t, "param");
+	format.color = field_from_lua(t, "color");
+	format.tint = field_from_lua(t, "tint");
+	format.wetness = field_from_lua(t, "wetness");
+	format.grain = field_from_lua(t, "grain");
+	format.gloss = field_from_lua(t, "gloss");
+	format.speckle = field_from_lua(t, "speckle");
+	format.emission = field_from_lua(t, "emission");
+	format.sag_top = field_from_lua(t, "sag_top");
+	format.sag_bottom = field_from_lua(t, "sag_bottom");
+	reg.set_format(format);
+}
+
+// voxel_reg:set_look_rules{fallback = 1, rules = {
+//     {result = 3, when = {{field = "wetness", lo = 8, hi = 15}}}, ...}}
+//
+// How a voxel's definition is found, for a world whose voxels have no type
+// id: an ordered list of rules, first match wins. A rule with no `when`
+// claims everything left. field names one of the format's roles, or is a
+// table {shift = ..., width = ...} for a field of the game's own that no
+// role covers. lo and hi both default to the whole range, so a clause with
+// only one of them is "at least" or "at most". See VoxelSelector in
+// interface/voxel_selector.h.
+static interface::VoxelField clause_field_from_lua(
+		const interface::VoxelFormat &format, const luabind::object &v)
+{
+	if(!v)
+		throw Exception("set_look_rules(): a clause has no field");
+	if(luabind::type(v) == LUA_TTABLE){
+		auto number = [&](const char *key, double def){
+			luabind::object f = v[key];
+			if(!f || luabind::type(f) != LUA_TNUMBER)
+				return def;
+			return luabind::object_cast<double>(f);
+		};
+		return interface::VoxelField(
+				(uint8_t)number("plane", 0),
+				(uint8_t)number("shift", 0),
+				(uint8_t)number("width", 0));
+	}
+	if(luabind::type(v) != LUA_TSTRING)
+		throw Exception("set_look_rules(): a clause's field is neither a "
+				"role name nor a table");
+	ss_ name = luabind::object_cast<ss_>(v);
+	struct Named { cc_ *name; const interface::VoxelField &f; };
+	const Named fields[] = {
+		{"id", format.id}, {"light_sky", format.light_sky},
+		{"light_lamp", format.light_lamp}, {"param", format.param},
+		{"color", format.color}, {"tint", format.tint},
+		{"wetness", format.wetness}, {"grain", format.grain},
+		{"gloss", format.gloss}, {"speckle", format.speckle},
+		{"emission", format.emission}, {"sag_top", format.sag_top},
+		{"sag_bottom", format.sag_bottom},
+	};
+	for(const Named &n : fields){
+		if(name == n.name)
+			return n.f;
+	}
+	throw Exception(ss_()+"set_look_rules(): \""+name+"\" is not a role");
+}
+
+static void vreg_set_look_rules(VoxelRegistry &reg, const luabind::object &t)
+{
+	if(!t || luabind::type(t) != LUA_TTABLE)
+		throw Exception("set_look_rules(): argument is not a table");
+	const interface::VoxelFormat &format = reg.get_format();
+	interface::VoxelSelector selector;
+	selector.kind = interface::VoxelSelector::RULES;
+	{
+		luabind::object v = t["fallback"];
+		if(v && luabind::type(v) == LUA_TNUMBER)
+			selector.fallback = (interface::VoxelTypeId)
+					luabind::object_cast<double>(v);
+	}
+	luabind::object rules = t["rules"];
+	if(!rules || luabind::type(rules) != LUA_TTABLE)
+		throw Exception("set_look_rules(): there are no rules");
+	for(size_t i = 1;; i++){
+		luabind::object rt = rules[i];
+		if(!rt || luabind::type(rt) != LUA_TTABLE)
+			break;
+		interface::VoxelRule rule;
+		luabind::object result = rt["result"];
+		if(!result || luabind::type(result) != LUA_TNUMBER)
+			throw Exception(ss_()+"set_look_rules(): rule "+itos(i)+
+					" has no result");
+		rule.result = (interface::VoxelTypeId)
+				luabind::object_cast<double>(result);
+		luabind::object when = rt["when"];
+		if(when && luabind::type(when) == LUA_TTABLE){
+			for(size_t j = 1;; j++){
+				luabind::object ct = when[j];
+				if(!ct || luabind::type(ct) != LUA_TTABLE)
+					break;
+				auto number = [&](const char *key, double def){
+					luabind::object f = ct[key];
+					if(!f || luabind::type(f) != LUA_TNUMBER)
+						return def;
+					return luabind::object_cast<double>(f);
+				};
+				interface::VoxelField field =
+						clause_field_from_lua(format, ct["field"]);
+				rule.clauses.push_back(interface::VoxelRuleClause(field,
+						(uint32_t)number("lo", 0),
+						(uint32_t)number("hi", (double)field.mask())));
+			}
+		}
+		selector.rules.push_back(rule);
+	}
+	reg.set_look_selector(selector);
+}
+
+static ss_ vreg_dump_format(VoxelRegistry &reg)
+{
+	return reg.get_format().dump();
+}
+
+// vdef.variants: what the voxel's param does to how it is drawn, as an array
+// of variants. One is
+//
+//   {shape = {<quads>}, tile_order = {0,1,2,3,4,5}, tile_turns = {0,...},
+//    color = 0xffffff, liquid_top = 0.5, params = {0, 4, 8}}
+//
+// where params is which param values pick this variant. Everything is
+// optional: a variant with no shape wears the definition's own, and a param
+// value no variant claims is drawn as if the param changed nothing. See
+// VoxelVariant in interface/voxel.h.
+static void vdef_set_variants(VoxelDefinition &def,
+		const luabind::object &value)
+{
+	def.variants.clear();
+	for(size_t i = 0; i < 256; i++)
+		def.variant_of_param[i] = 0;
+	if(!value || luabind::type(value) != LUA_TTABLE)
+		return;
+	// Index 0 is what an unclaimed param gets, so it has to mean "nothing
+	// special": a variant of the definition's own shape and no tint
+	def.variants.push_back(interface::VoxelVariant());
+	for(luabind::iterator it(value), end; it != end; ++it){
+		luabind::object t = *it;
+		if(luabind::type(t) != LUA_TTABLE)
+			throw Exception("VoxelDefinition.variants: a variant is not a "
+					"table");
+		if(def.variants.size() >= 256)
+			throw Exception("VoxelDefinition.variants: too many variants");
+		interface::VoxelVariant var;
+		{
+			luabind::object shape = t["shape"];
+			if(shape && luabind::type(shape) == LUA_TTABLE){
+				for(luabind::iterator qi(shape), qend; qi != qend; ++qi){
+					luabind::object quad = *qi;
+					if(luabind::type(quad) != LUA_TTABLE)
+						throw Exception("VoxelDefinition.variants: a quad is "
+								"not a table");
+					var.shape.push_back(quad_from_lua(quad));
+				}
+			}
+		}
+		for(const char *key : {"tile_order", "tile_turns"}){
+			luabind::object list = t[key];
+			if(!list || luabind::type(list) != LUA_TTABLE)
+				continue;
+			for(size_t i = 0; i < 6; i++){
+				luabind::object v = list[i + 1];
+				if(!v || luabind::type(v) != LUA_TNUMBER)
+					continue;
+				uint8_t n = (uint8_t)luabind::object_cast<double>(v);
+				if(key[5] == 'o'){
+					if(n > 5)
+						throw Exception("VoxelDefinition.variants: "
+								"tile_order is not a face");
+					var.tile_order[i] = n;
+				} else {
+					var.tile_turns[i] = n;
+				}
+			}
+		}
+		{
+			luabind::object v = t["color"];
+			if(v && luabind::type(v) == LUA_TNUMBER)
+				var.color = (uint32_t)luabind::object_cast<double>(v)
+						& 0xffffffUL;
+		}
+		{
+			luabind::object v = t["liquid_top"];
+			if(v && luabind::type(v) == LUA_TNUMBER)
+				var.liquid_top = (float)luabind::object_cast<double>(v);
+		}
+		uint8_t index = (uint8_t)def.variants.size();
+		def.variants.push_back(var);
+		luabind::object params = t["params"];
+		if(!params || luabind::type(params) != LUA_TTABLE)
+			throw Exception("VoxelDefinition.variants: a variant has no "
+					"params");
+		for(luabind::iterator pi(params), pend; pi != pend; ++pi){
+			luabind::object v = *pi;
+			if(luabind::type(v) != LUA_TNUMBER)
+				throw Exception("VoxelDefinition.variants: a param is not a "
+						"number");
+			int param = (int)luabind::object_cast<double>(v);
+			if(param < 0 || param > 255)
+				throw Exception("VoxelDefinition.variants: param "+
+						itos(param)+" is out of range");
+			def.variant_of_param[param] = index;
+		}
+	}
+}
+
+static luabind::object vdef_get_variants(const VoxelDefinition &def,
+		lua_State *L)
+{
+	luabind::object result = luabind::newtable(L);
+	// Variant 0 is the engine's own "nothing special" entry and is not one
+	// the caller wrote
+	for(size_t i = 1; i < def.variants.size(); i++){
+		const interface::VoxelVariant &var = def.variants[i];
+		luabind::object t = luabind::newtable(L);
+		luabind::object shape = luabind::newtable(L);
+		for(size_t q = 0; q < var.shape.size(); q++)
+			shape[q + 1] = quad_to_lua(var.shape[q], L);
+		t["shape"] = shape;
+		luabind::object order = luabind::newtable(L);
+		luabind::object turns = luabind::newtable(L);
+		for(size_t f = 0; f < 6; f++){
+			order[f + 1] = (int)var.tile_order[f];
+			turns[f + 1] = (int)var.tile_turns[f];
+		}
+		t["tile_order"] = order;
+		t["tile_turns"] = turns;
+		t["color"] = (double)var.color;
+		t["liquid_top"] = var.liquid_top;
+		luabind::object params = luabind::newtable(L);
+		size_t n = 0;
+		for(size_t p = 0; p < 256; p++){
+			if(def.variant_of_param[p] == i)
+				params[++n] = (int)p;
+		}
+		t["params"] = params;
+		result[i] = t;
+	}
+	return result;
+}
+
 sp_<VoxelRegistry> createVoxelRegistry(lua_State *L)
 {
 	return sp_<VoxelRegistry>(
@@ -262,6 +616,8 @@ void init_voxel(lua_State *L)
 			.def_readwrite("name", &VoxelDefinition::name)
 			.def_readwrite("id", &VoxelDefinition::id)
 			.property("textures", &vdef_get_textures, &vdef_set_textures)
+			.property("extra_textures", &vdef_get_extra_textures,
+					&vdef_set_extra_textures)
 			.property("tile_turns", &vdef_get_tile_turns,
 					&vdef_set_tile_turns)
 			.def_readwrite("face_draw_type", &VoxelDefinition::face_draw_type)
@@ -271,8 +627,13 @@ void init_voxel(lua_State *L)
 			.property("shape", &vdef_get_shape, &vdef_set_shape)
 			.property("shape_masked", &vdef_get_shape_masked,
 					&vdef_set_shape_masked)
+			.property("variants", &vdef_get_variants, &vdef_set_variants)
+			.property("tint_ramp", &vdef_get_tint_ramp, &vdef_set_tint_ramp)
+			.def_readwrite("sag_extent", &VoxelDefinition::sag_extent)
 			.def_readwrite("shape_double_sided",
 					&VoxelDefinition::shape_double_sided)
+			.def_readwrite("shape_lit_from_above",
+					&VoxelDefinition::shape_lit_from_above)
 			.def_readwrite("translucent", &VoxelDefinition::translucent)
 			.def_readwrite("shape_group", &VoxelDefinition::shape_group)
 			.def_readwrite("is_liquid", &VoxelDefinition::is_liquid)
@@ -301,6 +662,9 @@ void init_voxel(lua_State *L)
 					&VoxelRegistry::serialize)
 			.def("deserialize", (void(VoxelRegistry::*) (const ss_ &))
 					&VoxelRegistry::deserialize)
+			.def("set_format", &vreg_set_format)
+			.def("set_look_rules", &vreg_set_look_rules)
+			.def("dump_format", &vreg_dump_format)
 		,
 		def("__buildat_createVoxelRegistry", &createVoxelRegistry)
 	];

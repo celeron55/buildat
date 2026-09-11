@@ -5,6 +5,7 @@
 #include "interface/server.h"
 #include "interface/module.h"
 #include "interface/voxel.h"
+#include "interface/voxel_volume.h"
 #include <PolyVoxCore/Vector.h>
 #include <PolyVoxCore/Region.h>
 #include <PolyVoxCore/RawVolume.h>
@@ -27,6 +28,8 @@ namespace voxelworld
 {
 	namespace magic = Urho3D;
 	namespace pv = PolyVox;
+
+	using interface::VoxelVolume;
 	using interface::VoxelInstance;
 	using main_context::SceneReference;
 
@@ -63,7 +66,7 @@ namespace voxelworld
 		virtual ~CommitHook(){}
 		virtual void in_thread(voxelworld::Instance *world,
 				const pv::Vector3DInt32 &chunk_p,
-				pv::RawVolume<VoxelInstance> &volume){}
+				VoxelVolume &volume){}
 		virtual void in_scene(voxelworld::Instance *world,
 				const pv::Vector3DInt32 &chunk_p, magic::Node *n){}
 	};
@@ -115,7 +118,7 @@ namespace voxelworld
 		// (EDGEMATERIALID_EMPTY) may still hold a mesh of its own, and counts
 		// as something standing there.
 		virtual void merge_volume(
-				const pv::RawVolume<VoxelInstance> &volume,
+				const VoxelVolume &volume,
 				bool create_missing_sections) = 0;
 
 		// Maintain VoxelInstance::get_skylight() of every voxel in the world.
@@ -141,6 +144,20 @@ namespace voxelworld
 		virtual void commit() = 0;
 
 		virtual VoxelInstance get_voxel(const pv::Vector3DInt32 &p,
+				bool disable_warnings = false) = 0;
+
+		// The same, for a world whose voxels are more than one plane: a
+		// sample is every plane of a voxel read or written together. A
+		// chunk takes on the world's planes the first time one is written
+		// into it.
+		//
+		// set_voxel() writes the first plane and leaves the rest of a
+		// voxel alone, which is what it has always meant and what a game
+		// with one plane wants; set_sample() writes all of them.
+		virtual void set_sample(const pv::Vector3DInt32 &p,
+				const interface::VoxelSample &v,
+				bool disable_warnings = false) = 0;
+		virtual interface::VoxelSample get_sample(const pv::Vector3DInt32 &p,
 				bool disable_warnings = false) = 0;
 
 		// NOTE: There is no interface in here for directly accessing chunk

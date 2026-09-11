@@ -40,6 +40,7 @@ namespace magic = Urho3D;
 namespace pv = PolyVox;
 using namespace Urho3D;
 using interface::VoxelInstance;
+using interface::VoxelVolume;
 using interface::container_coord;
 using interface::container_coord16;
 
@@ -48,7 +49,7 @@ namespace voxelworld {
 struct ChunkBuffer
 {
 	pv::Vector3DInt32 chunk_p; // For logging
-	up_<pv::RawVolume<VoxelInstance>> volume;
+	up_<VoxelVolume> volume;
 	bool dirty = false; // If false, buffer has only been read from so far
 	int64_t last_accessed_us = 0;
 
@@ -216,7 +217,6 @@ static const int LIGHT_OFF[6][3] = {
 	{1,0,0}, {-1,0,0}, {0,0,1}, {0,0,-1}, {0,1,0}, {0,-1,0}
 };
 static const size_t LIGHT_DOWN = 5;
-static const uint8_t SKYLIGHT_MAX = VoxelInstance::SKYLIGHT_MAX;
 
 struct CInstance: public voxelworld::Instance
 {
@@ -363,7 +363,7 @@ struct CInstance: public voxelworld::Instance
 				const Variant &var = n->GetVar(StringHash("buildat_voxel_data"));
 				const PODVector<unsigned char> &rawbuf = var.GetBuffer();
 				ss_ data((const char*)&rawbuf[0], rawbuf.Size());
-				up_<pv::RawVolume<VoxelInstance>> volume =
+				up_<VoxelVolume> volume =
 						interface::deserialize_volume(data);
 				// Update collision shape
 				interface::mesh::set_voxel_physics_boxes(n, context, *volume,
@@ -566,18 +566,12 @@ struct CInstance: public voxelworld::Instance
 		//       make proper meshes without gaps
 		// TODO: Is this needed anymore?
 		pv::Region region(-1, -1, -1, w, h, d);
-		sp_<pv::RawVolume<VoxelInstance>> volume(
-				new pv::RawVolume<VoxelInstance>(region));
+		sp_<VoxelVolume> volume(
+				new VoxelVolume(region));
 
-		auto lc = region.getLowerCorner();
-		auto uc = region.getUpperCorner();
-		for(int z = lc.getZ(); z <= uc.getZ(); z++){
-			for(int y = lc.getY(); y <= uc.getY(); y++){
-				for(int x = lc.getX(); x <= uc.getX(); x++){
-					volume->setVoxelAt(x, y, z, VoxelInstance(0));
-				}
-			}
-		}
+		// Every plane of a new volume reads as zero and none of them is
+		// allocated, so a chunk of nothing but VOXELTYPEID_UNDEFINED costs
+		// its planes nothing at all
 
 		run_commit_hooks_in_thread(chunk_p, *volume);
 
@@ -663,7 +657,7 @@ struct CInstance: public voxelworld::Instance
 	// modify the volume
 	void run_commit_hooks_in_thread(
 			const pv::Vector3DInt32 &chunk_p,
-			pv::RawVolume<VoxelInstance> &volume)
+			VoxelVolume &volume)
 	{
 		for(up_<CommitHook> &hook : m_commit_hooks)
 			hook->in_thread(this, chunk_p, volume);
@@ -718,6 +712,52 @@ struct CInstance: public voxelworld::Instance
 	interface::VoxelRegistry* get_voxel_reg()
 	{
 		return m_voxel_reg.get();
+	}
+
+	// Which bits of a voxel the sky light is in, which is the game's to
+	// decide; see VoxelFormat in interface/voxel.h. A game sets its format
+	// through get_voxel_reg()->set_format() before it generates anything,
+	// so this is read rather than cached.
+	const interface::VoxelField& sky_field()
+	{
+		return m_voxel_reg->get_format().light_sky;
+	}
+
+	uint8_t sky_max()
+	{
+		return (uint8_t)sky_field().mask();
+	}
+
+	// The voxel's type, through the format the game chose. Not
+	// VoxelInstance::get_id(), which is the default format's bit range and
+	// would read a game's own light, parameter and simulation bits as part
+	// of the id.
+	interface::VoxelTypeId get_id(const VoxelInstance &v)
+	{
+		return m_voxel_reg->get_format().id_of(v.data);
+	}
+
+	// One plane's word as a whole voxel, for a world that has only the one
+	static interface::VoxelSample sample_of(const VoxelInstance &v)
+	{
+		interface::VoxelSample s;
+		s.planes[0] = v.data;
+		return s;
+	}
+
+	bool is_undefined(const VoxelInstance &v)
+	{
+		return get_id(v) == interface::VOXELTYPEID_UNDEFINED;
+	}
+
+	uint8_t get_sky(const VoxelInstance &v)
+	{
+		return (uint8_t)sky_field().get(v.data);
+	}
+
+	void set_sky(VoxelInstance &v, uint8_t level)
+	{
+		sky_field().set(v.data, level);
 	}
 
 	void add_commit_hook(up_<CommitHook> hook)
@@ -874,7 +914,7 @@ struct CInstance: public voxelworld::Instance
 			const Variant &var = n->GetVar(StringHash("buildat_voxel_data"));
 			const PODVector<unsigned char> &buf = var.GetBuffer();
 			ss_ data((const char*)&buf[0], buf.Size());
-			up_<pv::RawVolume<VoxelInstance>> volume =
+			up_<VoxelVolume> volume =
 					interface::deserialize_volume(data);
 
 			pv::Vector3DInt32 voxel_p(
@@ -905,6 +945,107 @@ struct CInstance: public voxelworld::Instance
 
 		m_server->emit_event("voxelworld:node_volume_updated",
 				new NodeVolumeUpdated(m_scene_ref, node_id, true, chunk_p));
+	}
+
+	// The buffer a voxel is in and where in it, or nullptr. What set_voxel(),
+	// set_sample() and get_sample() all start with; each of them used to
+	// carry its own copy of this.
+	ChunkBuffer* buffer_for(const pv::Vector3DInt32 &p,
+			pv::Vector3DInt32 *voxel_p_out, bool disable_warnings,
+			const char *what)
+	{
+		pv::Vector3DInt32 chunk_p = container_coord(p, m_chunk_size_voxels);
+		pv::Vector3DInt16 section_p =
+				container_coord16(chunk_p, m_section_size_chunks);
+		Section *section = get_section(section_p);
+		if(section == nullptr){
+			log_(disable_warnings ? CORE_DEBUG : CORE_WARNING,
+					MODULE, "%s() p=" PV3I_FORMAT ": No section "
+					PV3I_FORMAT " for chunk " PV3I_FORMAT,
+					what, PV3I_PARAMS(p), PV3I_PARAMS(section_p),
+					PV3I_PARAMS(chunk_p));
+			return nullptr;
+		}
+
+		maintain_maximum_buffer_limit();
+
+		ChunkBuffer &buf = section->get_buffer(chunk_p, m_server,
+				&m_total_buffers_loaded);
+		if(!buf.volume){
+			log_(disable_warnings ? CORE_DEBUG : CORE_WARNING,
+					MODULE, "%s() p=" PV3I_FORMAT ": Couldn't get buffer "
+					"volume for chunk " PV3I_FORMAT " in section "
+					PV3I_FORMAT, what, PV3I_PARAMS(p), PV3I_PARAMS(chunk_p),
+					PV3I_PARAMS(section_p));
+			return nullptr;
+		}
+		*voxel_p_out = pv::Vector3DInt32(
+				p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX(),
+				p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY(),
+				p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ()
+		);
+
+		auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
+				m_sections_with_loaded_buffers.end(), section,
+				std::greater<Section*>());
+		if(it == m_sections_with_loaded_buffers.end() || *it != section)
+			m_sections_with_loaded_buffers.insert(it, section);
+
+		return &buf;
+	}
+
+	void mark_buffer_dirty(ChunkBuffer &buf)
+	{
+		if(!buf.dirty){
+			buf.dirty = true;
+			m_total_buffers_dirty++;
+		}
+	}
+
+	void set_sample(const pv::Vector3DInt32 &p,
+			const interface::VoxelSample &v, bool disable_warnings)
+	{
+		pv::Vector3DInt32 voxel_p;
+		ChunkBuffer *buf = buffer_for(p, &voxel_p, disable_warnings,
+				"set_sample");
+		if(buf == nullptr)
+			return;
+		// A chunk written before the world had these planes, or one that
+		// has never had anything but the first written into it, takes them
+		// on here. The size test is what keeps this off the hot path.
+		const sv_<interface::VoxelPlane> &planes =
+				m_voxel_reg->get_format().planes;
+		if(buf->volume->planes().size() != planes.size())
+			buf->volume->add_planes(planes);
+
+		interface::VoxelSample nv = v;
+		if(m_skylight_enabled){
+			interface::VoxelSample old = buf->volume->sample_at(voxel_p);
+			VoxelInstance old_first(old.planes[0]);
+			VoxelInstance first(nv.planes[0]);
+			bool old_transparent = voxel_transmits_light(old);
+			if(old_transparent != voxel_transmits_light(nv)){
+				m_skylight_seeds.push_back(SkylightSeed{
+						p, get_sky(old_first), old_transparent});
+			}
+			set_sky(first, get_sky(old_first));
+			nv.planes[0] = first.data;
+		}
+
+		buf->volume->set_sample_at(voxel_p.getX(), voxel_p.getY(),
+				voxel_p.getZ(), nv);
+		mark_buffer_dirty(*buf);
+	}
+
+	interface::VoxelSample get_sample(const pv::Vector3DInt32 &p,
+			bool disable_warnings)
+	{
+		pv::Vector3DInt32 voxel_p;
+		ChunkBuffer *buf = buffer_for(p, &voxel_p, disable_warnings,
+				"get_sample");
+		if(buf == nullptr)
+			return interface::VoxelSample();
+		return buf->volume->sample_at(voxel_p);
 	}
 
 	void set_voxel(const pv::Vector3DInt32 &p, const interface::VoxelInstance &v,
@@ -947,17 +1088,23 @@ struct CInstance: public voxelworld::Instance
 		);
 		VoxelInstance nv = v;
 		if(m_skylight_enabled){
-			VoxelInstance old = buf.volume->getVoxelAt(voxel_p);
+			// The whole voxel, because which definition it wears can depend
+			// on any of its planes; only the first one is being written
+			interface::VoxelSample old = buf.volume->sample_at(voxel_p);
+			interface::VoxelSample now = old;
+			now.planes[0] = v.data;
+			VoxelInstance old_first(old.planes[0]);
 			bool old_transparent = voxel_transmits_light(old);
-			if(old_transparent != voxel_transmits_light(v)){
+			if(old_transparent != voxel_transmits_light(now)){
 				m_skylight_seeds.push_back(SkylightSeed{
-						p, old.get_skylight(), old_transparent});
+						p, get_sky(old_first), old_transparent});
 			}
 			// Once skylight is on those bits belong to voxelworld, so they
-			// are carried over from the voxel that was there; a caller writing
-			// a plain voxel would otherwise wipe the light out of one whose
-			// transparency did not change, and nothing would put it back
-			nv.set_skylight(old.get_skylight());
+			// are carried over from the voxel that was there; a caller
+			// writing a plain voxel would otherwise wipe the light out of
+			// one whose transparency did not change, and nothing would put
+			// it back
+			set_sky(nv, get_sky(old_first));
 		}
 
 		buf.volume->setVoxelAt(voxel_p, nv);
@@ -980,7 +1127,7 @@ struct CInstance: public voxelworld::Instance
 	// priorities are. This is chunk by chunk rather than voxel by voxel
 	// through set_voxel(): a section is a quarter of a million voxels, and
 	// all of this is done while holding the module.
-	void merge_volume(const pv::RawVolume<VoxelInstance> &volume,
+	void merge_volume(const VoxelVolume &volume,
 			bool create_missing_sections)
 	{
 		const pv::Region region = volume.getEnclosingRegion();
@@ -1016,6 +1163,13 @@ struct CInstance: public voxelworld::Instance
 				continue;
 			}
 
+			// Whatever planes the incoming volume has, the chunk gets --
+			// which is how a field a generator writes reaches storage
+			// without voxelworld being told about it
+			buf.volume->add_planes(volume.planes());
+			const size_t num_extra_planes = volume.planes().size() > 1 ?
+					volume.planes().size() - 1 : 0;
+
 			pv::Region chunk_region = get_chunk_region_voxels(chunk_p);
 			pv::Vector3DInt32 lc = chunk_region.getLowerCorner();
 			pv::Vector3DInt32 uc = chunk_region.getUpperCorner();
@@ -1038,9 +1192,9 @@ struct CInstance: public voxelworld::Instance
 			// coordinates every time. Luanti's VoxelManipulator walks its
 			// own index the same way, and for a whole section of voxels the
 			// difference is the bulk of the work.
-			pv::RawVolume<VoxelInstance>::Sampler src(
-					const_cast<pv::RawVolume<VoxelInstance>*>(&volume));
-			pv::RawVolume<VoxelInstance>::Sampler dst(buf.volume.get());
+			VoxelVolume::Sampler src(
+					const_cast<VoxelVolume*>(&volume));
+			VoxelVolume::Sampler dst(buf.volume.get());
 
 			bool chunk_written = false;
 			for(int z = lc.getZ(); z <= uc.getZ(); z++){
@@ -1053,31 +1207,49 @@ struct CInstance: public voxelworld::Instance
 			for(int x = lc.getX(); x <= uc.getX(); x++,
 					src.movePositiveX(), dst.movePositiveX()){
 				VoxelInstance nv = src.getVoxel();
-				if(nv.get_id() == interface::VOXELTYPEID_UNDEFINED)
+				if(is_undefined(nv))
 					continue;
 				VoxelInstance old = dst.getVoxel();
-				bool old_undefined =
-						(old.get_id() == interface::VOXELTYPEID_UNDEFINED);
+				bool old_undefined = is_undefined(old);
+				// Which definition a voxel wears can depend on any of its
+				// planes, so the questions below are asked of the whole
+				// voxel and not of the word the sampler walks
+				interface::VoxelSample src_v = num_extra_planes == 0 ?
+						sample_of(nv) : volume.sample_at(x, y, z);
+				interface::VoxelSample dst_v = num_extra_planes == 0 ?
+						sample_of(old) : buf.volume->sample_at(
+						x - chunk_off.getX(), y - chunk_off.getY(),
+						z - chunk_off.getZ());
 				if(!old_undefined){
 					// Anything already standing here wins
-					if(!voxel_is_fully_empty(old))
+					if(!voxel_is_fully_empty(dst_v))
 						continue;
 					// Empty stays empty unless something is put in it
-					if(voxel_is_fully_empty(nv))
+					if(voxel_is_fully_empty(src_v))
 						continue;
 				}
 
 				if(m_skylight_enabled){
-					bool old_transparent = voxel_transmits_light(old);
-					if(old_transparent != voxel_transmits_light(nv)){
+					bool old_transparent = voxel_transmits_light(dst_v);
+					if(old_transparent != voxel_transmits_light(src_v)){
 						m_skylight_seeds.push_back(SkylightSeed{
 								pv::Vector3DInt32(x, y, z),
-								old.get_skylight(), old_transparent});
+								get_sky(old), old_transparent});
 					}
-					nv.set_skylight(old.get_skylight());
+					set_sky(nv, get_sky(old));
 				}
 
 				dst.setVoxel(nv);
+				// The sampler is plane 0; anything else the volume carries
+				// is copied by position. Only a world that has more than
+				// one plane pays for this.
+				for(size_t pi = 1; pi <= num_extra_planes; pi++){
+					buf.volume->set_plane_at((uint8_t)pi,
+							x - chunk_off.getX(),
+							y - chunk_off.getY(),
+							z - chunk_off.getZ(),
+							volume.plane_at((uint8_t)pi, x, y, z));
+				}
 				chunk_written = true;
 				num_written++;
 			}
@@ -1141,7 +1313,7 @@ struct CInstance: public voxelworld::Instance
 	// edge leaves the neighbour's copy of it stale until that neighbour is
 	// committed in turn.
 	void fill_chunk_padding(const pv::Vector3DInt32 &chunk_p,
-			pv::RawVolume<VoxelInstance> &volume)
+			VoxelVolume &volume)
 	{
 		const pv::Region &region = volume.getEnclosingRegion();
 		auto lc = region.getLowerCorner();
@@ -1176,9 +1348,9 @@ struct CInstance: public voxelworld::Instance
 	// voxel_transmits_light(): a voxel can leave the faces against it
 	// undrawn and still hold a mesh of its own inside itself, and such a
 	// voxel is not free for something else to take.
-	bool voxel_is_fully_empty(const VoxelInstance &v)
+	bool voxel_is_fully_empty(const interface::VoxelSample &v)
 	{
-		if(v.get_id() == interface::VOXELTYPEID_UNDEFINED)
+		if(is_undefined(VoxelInstance(v.planes[0])))
 			return false;
 		const interface::CachedVoxelDefinition *def =
 				m_voxel_reg->get_cached(v);
@@ -1187,9 +1359,9 @@ struct CInstance: public voxelworld::Instance
 		return def->fully_empty;
 	}
 
-	bool voxel_transmits_light(const VoxelInstance &v)
+	bool voxel_transmits_light(const interface::VoxelSample &v)
 	{
-		if(v.get_id() == interface::VOXELTYPEID_UNDEFINED)
+		if(is_undefined(VoxelInstance(v.planes[0])))
 			return false;
 		const interface::CachedVoxelDefinition *def =
 				m_voxel_reg->get_cached(v);
@@ -1296,7 +1468,7 @@ struct CInstance: public voxelworld::Instance
 			pv::Vector3DInt32 n(p.getX() + LIGHT_OFF[k][0],
 					p.getY() + LIGHT_OFF[k][1], p.getZ() + LIGHT_OFF[k][2]);
 			VoxelInstance nv = light_get(n);
-			if(transmits_light(nv) || nv.get_skylight() >= level)
+			if(transmits_light_at(n) || get_sky(nv) >= level)
 				continue;
 			light_set(n, nv, level);
 		}
@@ -1308,7 +1480,7 @@ struct CInstance: public voxelworld::Instance
 		ChunkBuffer *buf = light_buffer(chunk_p);
 		if(buf == nullptr)
 			return;
-		v.set_skylight(level);
+		set_sky(v, level);
 		buf->volume->setVoxelAt(light_local_p(p, chunk_p), v);
 		if(!buf->dirty){
 			buf->dirty = true;
@@ -1316,15 +1488,27 @@ struct CInstance: public voxelworld::Instance
 		}
 	}
 
-	bool transmits_light(const VoxelInstance &v)
+	// Whether light passes through the voxel at p.
+	//
+	// By position rather than by value, and without the cache-by-id it used
+	// to have, because **a voxel is its planes**: which definition it wears
+	// can depend on any of them, and the first plane's id role says only
+	// whether the voxel has been generated in a world whose looks come from
+	// rules. What is left is the registry's own cached-definition array,
+	// which is an index and a mutex.
+	//
+	// simplified: that mutex is now taken once per voxel of a light flood
+	// where the cache made it once per id. If a flood ever shows up in a
+	// profile, the fix is a per-flood memo keyed on the planes the rules
+	// actually read.
+	bool transmits_light_at(const pv::Vector3DInt32 &p)
 	{
-		uint32_t id = v.get_id();
-		if(id >= m_light_transmits.size())
-			m_light_transmits.resize(id + 1, 2);
-		uint8_t &t = m_light_transmits[id];
-		if(t == 2)
-			t = voxel_transmits_light(v) ? 1 : 0;
-		return t == 1;
+		pv::Vector3DInt32 chunk_p = container_coord(p, m_chunk_size_voxels);
+		ChunkBuffer *buf = light_buffer(chunk_p);
+		if(buf == nullptr)
+			return false;
+		return voxel_transmits_light(
+				buf->volume->sample_at(light_local_p(p, chunk_p)));
 	}
 
 	// Bring the skylight up to date after the voxels in m_skylight_seeds
@@ -1354,14 +1538,14 @@ struct CInstance: public voxelworld::Instance
 
 		for(const SkylightSeed &seed : seeds){
 			VoxelInstance v = light_get(seed.p);
-			bool now_transparent = transmits_light(v);
+			bool now_transparent = transmits_light_at(seed.p);
 			if(seed.was_transparent && !now_transparent){
 				// It took its light with it
 				unlight.push_back(LightNode{seed.p, seed.old_level});
 				blockers.push_back(seed.p);
 			} else if(!seed.was_transparent && now_transparent){
 				// It is dark and has to be filled from around it
-				uint8_t l = is_below_open_sky(seed.p) ? SKYLIGHT_MAX : 0;
+				uint8_t l = is_below_open_sky(seed.p) ? sky_max() : 0;
 				light_set(seed.p, v, l);
 				if(l > 0){
 					spread.push_back(LightNode{seed.p, l});
@@ -1373,10 +1557,10 @@ struct CInstance: public voxelworld::Instance
 							seed.p.getY() + LIGHT_OFF[k][1],
 							seed.p.getZ() + LIGHT_OFF[k][2]);
 					VoxelInstance nv = light_get(n);
-					if(!transmits_light(nv))
+					if(!transmits_light_at(n))
 						continue;
-					if(nv.get_skylight() > 0)
-						spread.push_back(LightNode{n, nv.get_skylight()});
+					if(get_sky(nv) > 0)
+						spread.push_back(LightNode{n, get_sky(nv)});
 				}
 			}
 		}
@@ -1395,16 +1579,16 @@ struct CInstance: public voxelworld::Instance
 						node.p.getY() + LIGHT_OFF[k][1],
 						node.p.getZ() + LIGHT_OFF[k][2]);
 				VoxelInstance nv = light_get(n);
-				if(!transmits_light(nv)){
+				if(!transmits_light_at(n)){
 					// It may have been holding the light that is going away
 					blockers.push_back(n);
 					continue;
 				}
-				uint8_t nl = nv.get_skylight();
+				uint8_t nl = get_sky(nv);
 				if(nl == 0)
 					continue;
 				bool lit_from_above = (k == LIGHT_DOWN &&
-						node.level == SKYLIGHT_MAX && nl == SKYLIGHT_MAX);
+						node.level == sky_max() && nl == sky_max());
 				if(nl < node.level || lit_from_above){
 					light_set(n, nv, 0);
 					unlight.push_back(LightNode{n, nl});
@@ -1424,9 +1608,9 @@ struct CInstance: public voxelworld::Instance
 			// after it was queued, and spreading the level it used to have
 			// would put light back where it was just taken from.
 			VoxelInstance v = light_get(node.p);
-			if(!transmits_light(v))
+			if(!transmits_light_at(node.p))
 				continue;
-			node.level = v.get_skylight();
+			node.level = get_sky(v);
 			if(node.level == 0)
 				continue;
 			for(size_t k = 0; k < 6; k++){
@@ -1435,15 +1619,15 @@ struct CInstance: public voxelworld::Instance
 						node.p.getY() + LIGHT_OFF[k][1],
 						node.p.getZ() + LIGHT_OFF[k][2]);
 				VoxelInstance nv = light_get(n);
-				if(!transmits_light(nv)){
-					if(nv.get_skylight() < node.level)
+				if(!transmits_light_at(n)){
+					if(get_sky(nv) < node.level)
 						light_set(n, nv, node.level);
 					continue;
 				}
 				uint8_t target = (k == LIGHT_DOWN &&
-						node.level == SKYLIGHT_MAX) ?
-						SKYLIGHT_MAX : node.level - 1;
-				if(target > nv.get_skylight()){
+						node.level == sky_max()) ?
+						sky_max() : node.level - 1;
+				if(target > get_sky(nv)){
 					light_set(n, nv, target);
 					spread.push_back(LightNode{n, target});
 				}
@@ -1465,18 +1649,19 @@ struct CInstance: public voxelworld::Instance
 		size_t n_blockers = blockers.size();
 		for(const pv::Vector3DInt32 &p : blockers){
 			VoxelInstance v = light_get(p);
-			if(transmits_light(v))
+			if(transmits_light_at(p))
 				continue;
 			uint8_t best = 0;
 			for(size_t k = 0; k < 6; k++){
-				VoxelInstance nv = light_get(pv::Vector3DInt32(
+				pv::Vector3DInt32 np(
 						p.getX() + LIGHT_OFF[k][0],
 						p.getY() + LIGHT_OFF[k][1],
-						p.getZ() + LIGHT_OFF[k][2]));
-				if(transmits_light(nv) && nv.get_skylight() > best)
-					best = nv.get_skylight();
+						p.getZ() + LIGHT_OFF[k][2]);
+				VoxelInstance nv = light_get(np);
+				if(transmits_light_at(np) && get_sky(nv) > best)
+					best = get_sky(nv);
 			}
-			if(v.get_skylight() != best)
+			if(get_sky(v) != best)
 				light_set(p, v, best);
 		}
 
@@ -1585,6 +1770,9 @@ struct CInstance: public voxelworld::Instance
 
 	void set_skylight_enabled(bool enabled)
 	{
+		if(enabled && !sky_field().bound())
+			throw Exception(ss_()+"set_skylight_enabled(): there is nowhere "
+					"to put it in "+m_voxel_reg->get_format().dump());
 		m_skylight_enabled = enabled;
 	}
 
