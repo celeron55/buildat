@@ -21,7 +21,8 @@
 //
 //   VOXELNORMALMAP  the tangent frame is built from the derivatives of the
 //       world position and the texture coordinate rather than from a vertex
-//       attribute, because the voxel mesher writes no tangents
+//       attribute, because the voxel mesher writes no tangent -- the vertex's
+//       tangent slot carries the surface modifiers instead, when there are any
 //   VOXELIBL  reflections of the zone cube map, specular only. The diffuse
 //       half of image based lighting is left out: the skylight in the vertex
 //       color is already the scene's ambient diffuse, and adding an
@@ -38,6 +39,11 @@
 //       moment. Worked out per pixel from world position and time rather than
 //       stored, so the specks come and go the way leaves in wind do, and a
 //       surface with no animated normal map can still sparkle.
+//   VOXELMODIFIERS  the voxel format's surface modifiers, which the mesher
+//       wrote into the vertex tangent: an albedo tint, and wetness, grain and
+//       gloss changing the albedo, the roughness and how much of the texture's
+//       relief is kept. Off by default, because a world that binds no modifier
+//       has nothing in the tangent; see PBRVoxelModifiers.xml.
 //   VOXELTRANSLUCENCY  light reaching a surface from behind and coming through
 //       it at those spots, tinted by the surface's own color. This is why a
 //       leaf against the sun reads yellow-green and not as the blue of the sky
@@ -66,6 +72,9 @@
 #endif
 varying vec3 vNormal;
 varying vec4 vWorldPos;
+#ifdef VOXELMODIFIERS
+    varying vec4 vSurface;
+#endif
 #ifdef PERPIXEL
     #ifdef SHADOW
         #ifndef GL_ES
@@ -101,6 +110,12 @@ void VS()
     gl_Position = GetClipPos(worldPos);
     vNormal = GetWorldNormal(modelMatrix);
     vWorldPos = vec4(worldPos, GetDepth(gl_Position));
+
+    #ifdef VOXELMODIFIERS
+        // The voxel format's surface modifiers, which the mesher wrote into
+        // the tangent. Not transformed: they are numbers, not a direction.
+        vSurface = iTangent;
+    #endif
 
 
     #if defined(NORMALMAP) || defined(DIRBILLBOARD)
@@ -352,6 +367,36 @@ void PS()
     #endif
 
 
+    #ifdef VOXELMODIFIERS
+        // simplified: the four slots are read as tint, wetness, grain and
+        // gloss, which is the first four of the engine's surface roles in
+        // its own order. A world that binds exactly those gets this; one
+        // that binds a different set -- speckle, emission, or only two of
+        // these -- gets the slots shifted and has to write its own shader,
+        // which is what a game does anyway once it knows what it wants its
+        // materials to look like. The upgrade path is a uniform naming the
+        // role in each slot, at the cost of a branch per slot.
+        float mTint = vSurface.x;
+        float mWetness = vSurface.y;
+        float mGrain = vSurface.z;
+        float mGloss = vSurface.w;
+
+        // The tint is a colour rather than a scalar, packed 5-6-5; see
+        // VoxelFormat::tint in interface/voxel.h. It multiplies the albedo,
+        // which is the whole reason it travels here instead of in the vertex
+        // colour: the vertex colour is light.
+        float tintPacked = floor(mTint + 0.5);
+        float tintR = floor(tintPacked / 2048.0);
+        float tintG = floor((tintPacked - tintR * 2048.0) / 32.0);
+        float tintB = tintPacked - tintR * 2048.0 - tintG * 32.0;
+        diffColor.rgb *= vec3(tintR / 31.0, tintG / 63.0, tintB / 31.0);
+
+        // Wet darkens and sharpens: water fills the pores of a surface, so
+        // less light scatters back out of it and more reflects off the film
+        // on top. Both are what a wet pavement does.
+        diffColor.rgb *= 1.0 - 0.45 * mWetness;
+    #endif
+
     // How much of a spot this pixel is. Used twice: to gloss the surface here,
     // and to let light through it in the lighting below.
     float surfaceSpots = 0.0;
@@ -377,6 +422,15 @@ void PS()
         float roughness = cRoughness;
         float metalness = cMetallic;
         float specStrength = 1.0;
+    #endif
+
+    #ifdef VOXELMODIFIERS
+        // Wetness and the binder both smooth a surface; the binder also
+        // gives it something to shine with, where a wet surface shines with
+        // the water on it
+        roughness *= 1.0 - 0.55 * mWetness - 0.45 * mGloss;
+        specStrength = mix(specStrength, 1.0,
+            max(0.7 * mWetness, 0.8 * mGloss));
     #endif
 
     roughness *= roughness;
@@ -416,6 +470,18 @@ void PS()
         float invMax = inversesqrt(max(dot(tangentU, tangentU),
             dot(tangentV, tangentV)));
         vec3 nn = DecodeNormal(texture2D(sNormalMap, vTexCoord.xy));
+        #ifdef VOXELMODIFIERS
+            // Grain is how fine the material is. A coarse surface keeps the
+            // relief its texture's normal map has; a fine one -- sand, flour
+            // -- has relief far below a texel and reads as flat, so the
+            // normal is pulled towards the face's own.
+            //
+            // Not renormalized: the frame below is not orthonormal, so
+            // normalizing here changes the shading of every surface and not
+            // only of a grainy one -- which showed up as glints on a world
+            // that had bound no grain at all.
+            nn.xy *= 1.0 - 0.8 * mGrain;
+        #endif
         vec3 normal = normalize(mat3(tangentU * invMax, tangentV * invMax,
             geomNormal) * nn);
     #else

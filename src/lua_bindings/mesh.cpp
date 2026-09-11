@@ -23,6 +23,7 @@ namespace magic = Urho3D;
 namespace pv = PolyVox;
 
 using interface::VoxelInstance;
+using interface::VoxelVolume;
 using interface::VoxelRegistry;
 using interface::AtlasRegistry;
 using namespace Urho3D;
@@ -170,7 +171,7 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	bool use_skylight;
 	luabind::object material_cb;
 
-	up_<pv::RawVolume<VoxelInstance>> volume;
+	up_<VoxelVolume> volume;
 	sm_<uint, interface::mesh::TemporaryGeometry> temp_geoms;
 	// The faces of the translucent voxels, which go on a child node of their
 	// own so that Urho3D sorts them against the other chunks' translucent
@@ -252,7 +253,7 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 	bool use_skylight;
 	luabind::object material_cb;
 
-	up_<pv::RawVolume<VoxelInstance>> lod_volume;
+	up_<VoxelVolume> lod_volume;
 	sm_<uint, interface::mesh::TemporaryGeometry> temp_geoms;
 
 	SetVoxelLodGeometryTask(int lod, Node *node, const ss_ &data,
@@ -266,10 +267,10 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 		// NOTE: Do the pre-processing here so that the calling code can
 		//       meaasure how long its execution takes
 		// NOTE: Could be split in three calls
-		up_<pv::RawVolume<VoxelInstance>> volume_orig =
+		up_<VoxelVolume> volume_orig =
 				interface::deserialize_volume(data);
 		lod_volume = interface::mesh::generate_voxel_lod_volume(
-				lod, *volume_orig);
+				lod, *volume_orig, voxel_reg.get());
 		interface::mesh::preload_textures(
 				*lod_volume, voxel_reg.get(), atlas_reg.get(), true);
 	}
@@ -308,13 +309,43 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 	}
 };
 
+// Whether a node's collision shapes are already exactly these boxes.
+//
+// The shapes themselves are the previous state, so nothing has to be stored
+// to answer this: set_voxel_physics_boxes() reuses them in order, so the
+// order agrees. What it is for is below -- rebuilding shapes takes the body
+// out of the physics world for a frame, and not rebuilding is the only way
+// to not do that.
+static bool node_already_has_boxes(Node *node,
+		const sv_<interface::mesh::TemporaryBox> &boxes)
+{
+	PODVector<CollisionShape*> shapes;
+	node->GetComponents<CollisionShape>(shapes);
+	if(shapes.Size() != boxes.size())
+		return false;
+	for(size_t i = 0; i < boxes.size(); i++){
+		if(shapes[i]->GetSize() != boxes[i].size)
+			return false;
+		if(shapes[i]->GetPosition() != boxes[i].position)
+			return false;
+	}
+	return true;
+}
+
+// Set on a chunk node once its collision is actually there: the shapes are
+// built and the body is in the physics world. A RigidBody component on its
+// own is not that -- it is created two steps earlier -- so anything waiting
+// for solid ground has to wait for this. See voxelworld's
+// chunk_has_physics() in client_lua.
+static const char *PHYSICS_READY_VAR = "buildat_physics_ready";
+
 struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 {
 	WeakPtr<Node> node;
 	ss_ data;
 	sp_<VoxelRegistry> voxel_reg;
 
-	up_<pv::RawVolume<VoxelInstance>> volume;
+	up_<VoxelVolume> volume;
 	sv_<interface::mesh::TemporaryBox> result_boxes;
 
 	SetPhysicsBoxesTask(Node *node, const ss_ &data,
@@ -351,9 +382,40 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 			return true; // Dropped while this was in the queue
 		Context *context = node->GetContext();
 		switch(post_step){
-		case 1:
+		case 1: {
+			// The boxes come from VoxelDefinition::physically_solid, so from
+			// the voxel ids: a write that changed only a game's own
+			// per-voxel fields cannot have changed them. When they are the
+			// same as last time there is nothing to do, and skipping is not
+			// just an optimisation -- the split below releases the body from
+			// the physics world and puts it back a frame or more later, and
+			// anything standing on the chunk falls through in between.
+			const bool was_live =
+					node->GetVar(StringHash(PHYSICS_READY_VAR)).GetBool();
+			if(was_live && node_already_has_boxes(node, result_boxes))
+				return true;
 			node->GetOrCreateComponent<RigidBody>(LOCAL);
+			if(was_live){
+				// A chunk that already carries someone is rebuilt in one
+				// step and never leaves the physics world. The split is
+				// what costs a player the floor, and a world that
+				// simulates -- water moving, wood dying, rot -- rebuilds
+				// the chunk you are standing on all the time, which is why
+				// a game like that falls through far more than a static
+				// one does. The price is the two times below added
+				// together in one frame, on the one chunk that changed.
+				set_voxel_physics_boxes(node, context, result_boxes, false);
+				RigidBody *body = node->GetComponent<RigidBody>();
+				if(body)
+					body->OnSetEnabled();
+				return true;
+			}
+			// A chunk with no collision yet has nothing to fall through, so
+			// the first build stays split: it is both of those times again,
+			// and it happens for every chunk of a world as it loads.
+			node->SetVar(StringHash(PHYSICS_READY_VAR), Variant(false));
 			break;
+		}
 		case 2:
 #ifdef DEBUG_CORE_TIMING
 			log_v(MODULE, "num boxes: %zu", result_boxes.size());
@@ -376,6 +438,8 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 				RigidBody *body = node->GetComponent<RigidBody>();
 				if(body)
 					body->OnSetEnabled();
+				// Only now is there anything to stand on
+				node->SetVar(StringHash(PHYSICS_READY_VAR), Variant(true));
 			}
 			return true;
 		}
@@ -507,6 +571,7 @@ void clear_voxel_physics_boxes(const luabind::object &node_o)
 	RigidBody *body = node->GetComponent<RigidBody>();
 	if(body)
 		node->RemoveComponent(body);
+	node->SetVar(StringHash(PHYSICS_READY_VAR), Variant(false));
 
 	PODVector<CollisionShape*> previous_shapes;
 	node->GetComponents<CollisionShape>(previous_shapes);

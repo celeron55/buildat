@@ -5,6 +5,7 @@
 #include "lua_bindings/sandbox_util.h"
 #include "client/app.h"
 #include "interface/voxel_volume.h"
+#include "interface/voxel_selector.h"
 #include "interface/thread_pool.h"
 #include <c55/os.h>
 #include <tolua++.h>
@@ -18,6 +19,7 @@ namespace magic = Urho3D;
 namespace pv = PolyVox;
 
 using interface::VoxelInstance;
+using interface::VoxelVolume;
 using interface::VoxelRegistry;
 using interface::AtlasRegistry;
 using namespace Urho3D;
@@ -52,7 +54,7 @@ void voxelinstance_set_int32(VoxelInstance &v, int32_t d){
 	v.data = (uint32_t)d;
 }
 
-typedef pv::RawVolume<VoxelInstance> CommonVolume;
+typedef VoxelVolume CommonVolume;
 
 ss_ volume_serialize(const CommonVolume &volume)
 {
@@ -324,6 +326,13 @@ static void march_rays(RayJob &job)
 
 	RayVolumeSet volume_set(job);
 
+	// Which bits of a voxel are the id and the sky light, per the world's
+	// own voxel format, and which definition a voxel wears -- which is the
+	// id role in a world that has one and a threshold over its planes in a
+	// world that does not. Read once; neither changes while a job runs.
+	const interface::VoxelFormat &fmt = job.voxel_reg->get_format();
+	const interface::VoxelSelector look = job.voxel_reg->get_look_selector();
+
 	// physically_solid per voxel id, filled as ids turn up. Unknown ids stop a
 	// ray: an id with no definition is not something to see the sky through.
 	sv_<int8_t> solid_cache;
@@ -400,11 +409,14 @@ static void march_rays(RayJob &job)
 				break;
 			}
 
-			VoxelInstance v = volume->getVoxelAt(
+			// The whole voxel, not the first plane's word: what stops a
+			// ray is whether the definition it wears is solid, and which
+			// definition that is can depend on any of its planes
+			interface::VoxelSample v = volume->sample_at(
 					vx - chunk_p.getX() * volume_set.chunk_size.getX(),
 					vy - chunk_p.getY() * volume_set.chunk_size.getY(),
 					vz - chunk_p.getZ() * volume_set.chunk_size.getZ());
-			interface::VoxelTypeId id = v.get_id();
+			interface::VoxelTypeId id = look.id_of(v, fmt);
 
 			if((size_t)id >= solid_cache.size())
 				solid_cache.resize((size_t)id + 1, -1);
@@ -420,7 +432,7 @@ static void march_rays(RayJob &job)
 				break;
 			}
 
-			skylight = v.get_skylight();
+			skylight = (int)fmt.light_sky.get(v);
 			if(job.stop_skylight > 0 && skylight >= job.stop_skylight){
 				status = VOXEL_RAY_SKYLIGHT;
 				break;
@@ -691,6 +703,17 @@ void init_voxel_volume(lua_State *L)
 			.def("set_voxel_at", (bool (CommonVolume::*)
 					(int32_t, int32_t, int32_t, VoxelInstance))
 					&CommonVolume::setVoxelAt)
+			// One plane of a voxel, for a world whose voxels are more than
+			// one; get_voxel_at() is the first plane, as it always was.
+			// The value is a plain number rather than a VoxelInstance,
+			// because a plane other than the first is the game's own bits
+			// and the engine's roles are not in it.
+			.def("get_plane_at", (uint32_t (CommonVolume::*)
+					(uint8_t, int32_t, int32_t, int32_t) const)
+					&CommonVolume::plane_at)
+			.def("set_plane_at", (void (CommonVolume::*)
+					(uint8_t, int32_t, int32_t, int32_t, uint32_t))
+					&CommonVolume::set_plane_at)
 			.def("get_enclosing_region", &CommonVolume::getEnclosingRegion)
 			// The slow, flexible way to build voxel data from Lua: set voxels
 			// one at a time and hand the result to set_voxel_geometry().

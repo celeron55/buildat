@@ -171,11 +171,56 @@ local function floor_has_collision()
 	if not chunk_p then
 		return false
 	end
-	local node = voxelworld.get_static_node(chunk_p)
-	if not node then
-		return false
+	-- Not "does the chunk node have a RigidBody": that is true from the
+	-- moment the client starts building the collision, which is before there
+	-- is any of it. See voxelworld.chunk_has_physics().
+	return voxelworld.chunk_has_physics(chunk_p)
+end
+
+-- The client takes a chunk's collision apart and puts it back a step or two
+-- later, so while a chunk is being rebuilt there is nothing to stand on. It
+-- happens most while a world loads. Freeze rather than fall: a floor that is
+-- missing for two frames is not a floor that is missing.
+--
+-- Only the chunk matters here, not whether there is a solid voxel below --
+-- jumping and standing at a ledge are not this. The hold is capped so that
+-- genuinely unloaded space does not lock the player in the air forever.
+local PHYSICS_HOLD_MAX = 2.0
+local physics_held = 0
+
+local function floor_chunk_ready()
+	local p = player_node:GetWorldPosition()
+	local floor = magic.Vector3(p.x, p.y - PLAYER_HEIGHT / 2 - 0.25, p.z)
+	local chunk_p = voxelworld.get_chunk_position(floor)
+	if not chunk_p then
+		return true
 	end
-	return node:GetComponent("RigidBody") ~= nil
+	return voxelworld.chunk_has_physics(chunk_p)
+end
+
+local function hold_physics_while_floor_rebuilds(dt)
+	if not physics_enabled then
+		return
+	end
+	local body = player_node:GetComponent("RigidBody")
+	if not body then
+		return
+	end
+	if floor_chunk_ready() or physics_held > PHYSICS_HOLD_MAX then
+		if physics_held > 0 then
+			physics_held = 0
+			body.mass = PLAYER_MASS
+		end
+		return
+	end
+	if physics_held == 0 then
+		log:info("player held: the floor chunk is being rebuilt")
+		body.mass = 0
+		local bv = body.linearVelocity
+		bv.y = 0
+		body.linearVelocity = bv
+	end
+	physics_held = physics_held + dt
 end
 
 local function enable_physics()
@@ -453,6 +498,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 
 		local body = player_node:GetComponent("RigidBody")
 		enable_physics()
+		hold_physics_while_floor_rebuilds(dt)
 
 		do 
 			local wanted_v = magic.Vector3(0, 0, 0) -- re. world

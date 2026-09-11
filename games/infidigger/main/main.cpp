@@ -26,6 +26,7 @@ namespace pv = PolyVox;
 
 using interface::Event;
 using interface::VoxelInstance;
+using interface::VoxelVolume;
 using main_context::SceneReference;
 
 namespace main {
@@ -47,7 +48,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 	// else in it is left undefined for that section's own generation.
 	void generate(SceneReference scene_ref,
 			const pv::Vector3DInt16 &section_p,
-			pv::RawVolume<VoxelInstance> &volume)
+			VoxelVolume &volume)
 	{
 		const pv::Region padded = volume.getEnclosingRegion();
 		pv::Vector3DInt32 pad = get_padding_voxels();
@@ -133,7 +134,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 	}
 
 	// A tree at the very top of a section reaches past even the padding
-	static void set_if_inside(pv::RawVolume<VoxelInstance> &volume,
+	static void set_if_inside(VoxelVolume &volume,
 			const pv::Vector3DInt32 &p, const VoxelInstance &v)
 	{
 		if(!volume.getEnclosingRegion().containsPoint(p))

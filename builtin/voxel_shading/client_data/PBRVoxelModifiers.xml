@@ -1,0 +1,16 @@
+<!-- PBRVoxel plus VOXELMODIFIERS: the same shader, reading the voxel format's
+     surface modifiers out of the vertex tangent. A world whose format binds
+     none of them has nothing there, so this is a technique of its own rather
+     than a define on the one every game uses.
+
+     The reference reads the four slots as tint, wetness, grain and gloss,
+     which is the first four surface roles in the engine's own order; see the
+     note in PBRVoxel.glsl. Switched on with voxel_shading.use_modifiers(). -->
+<technique vs="voxel_shading/PBRVoxel" ps="voxel_shading/PBRVoxel"
+        psdefines="DIFFMAP PBR METALLIC VOXELNORMALMAP VOXELIBL VOXELSPOTS VOXELTRANSLUCENCY VOXELMODIFIERS"
+        vsdefines="VOXELMODIFIERS">
+    <pass name="base" />
+    <pass name="light" depthtest="equal" depthwrite="false" blend="add" />
+    <pass name="depth" vs="Depth" ps="Depth" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" />
+</technique>

@@ -3,6 +3,7 @@
 #pragma once
 #include "core/types.h"
 #include "interface/voxel.h"
+#include "interface/voxel_volume.h"
 #include <PolyVoxCore/RawVolume.h>
 #include <CustomGeometry.h>
 
@@ -43,7 +44,7 @@ namespace interface
 		// Volume should be padded by one voxel on each edge
 		// NOTE: volume is non-const due to PolyVox deficiency
 		Model* create_voxel_physics_model(Context *context,
-				pv::RawVolume<VoxelInstance> &volume,
+				VoxelVolume &volume,
 				VoxelRegistry *voxel_reg);
 
 		// Voxel geometry generation
@@ -62,6 +63,10 @@ namespace interface
 			uint atlas_id = 0;
 			// Set when the generator wrote skylight into vertex colors
 			bool has_colors = false;
+			// Set when the generator wrote the voxel format's surface
+			// modifiers into the vertex tangent; see VoxelFormat in
+			// interface/voxel.h
+			bool has_tangents = false;
 			// CustomGeometry can't handle an index buffer
 			PODVector<CustomGeometryVertex> vertex_data;
 		};
@@ -69,7 +74,7 @@ namespace interface
 
 		// with_lod also builds the atlas segments a LOD mesh samples; see
 		// VoxelRegistry::get_cached()
-		void preload_textures(pv::RawVolume<VoxelInstance> &volume,
+		void preload_textures(VoxelVolume &volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 				bool with_lod = false);
 
@@ -87,6 +92,17 @@ namespace interface
 		//                in impl/mesh.cpp. cAmbientColor being the color of
 		//                the sky, a world moves the sun by setting it and
 		//                nothing has to be meshed again.
+		//   vertex tangent  the voxel format's surface modifiers, one per
+		//                component, when the world binds any. 0...1 each,
+		//                except the tint, whose component carries the colour
+		//                its ramp picked packed 5-6-5 and which the shader
+		//                multiplies into the albedo.
+		//                Which modifier is in which component is the format's
+		//                own order -- tint, wetness, grain, gloss, speckle,
+		//                emission, the bound ones packed towards x -- and a
+		//                shader knows its own world's. There is no tangent
+		//                to lose: a voxel face is axis-aligned, so a shader
+		//                that wants one derives it from the normal.
 		//   Roughness, Metallic  both 0; the maps carry these
 		// interface/atlas.h says what fills the two maps. No technique is set:
 		// a game picks one for its chunks in voxelworld.sub_material_update(),
@@ -112,7 +128,7 @@ namespace interface
 		// that the renderer sorts them against the other chunks' by
 		// distance. Left out, everything goes in one geometry as before.
 		void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
-				pv::RawVolume<VoxelInstance> &volume,
+				VoxelVolume &volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 				bool use_skylight = false,
 				sm_<uint, TemporaryGeometry> *translucent_result = nullptr);
@@ -125,20 +141,23 @@ namespace interface
 		// Volume should be padded by one voxel on each edge
 		// NOTE: volume is non-const due to PolyVox deficiency
 		void set_voxel_geometry(CustomGeometry *cg, Context *context,
-				pv::RawVolume<VoxelInstance> &volume,
+				VoxelVolume &volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 				bool use_skylight = false);
 
 		// Voxel LOD geometry generation (lod=1 -> 1:1, lod=3 -> 1:3)
 
 		// Can be called from any thread
-		up_<pv::RawVolume<VoxelInstance>> generate_voxel_lod_volume(
-				int lod, pv::RawVolume<VoxelInstance>&volume_orig);
+		// voxel_reg is only read for its voxel format: which bits of a voxel
+		// are the type id the downsampling picks by
+		up_<VoxelVolume> generate_voxel_lod_volume(
+				int lod, VoxelVolume&volume_orig,
+				VoxelRegistry *voxel_reg);
 
 		// Can be called from any thread
 		void generate_voxel_lod_geometry(int lod,
 				sm_<uint, TemporaryGeometry> &result,
-				pv::RawVolume<VoxelInstance> &lod_volume,
+				VoxelVolume &lod_volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 				bool use_skylight = false);
 
@@ -147,7 +166,7 @@ namespace interface
 				AtlasRegistry *atlas_reg);
 
 		void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
-				pv::RawVolume<VoxelInstance> &volume_orig,
+				VoxelVolume &volume_orig,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 				bool use_skylight = false);
 
@@ -162,14 +181,14 @@ namespace interface
 		// Can be called from any thread
 		void generate_voxel_physics_boxes(
 				sv_<TemporaryBox> &result_boxes,
-				pv::RawVolume<VoxelInstance> &volume,
+				VoxelVolume &volume,
 				VoxelRegistry *voxel_reg);
 
 		void set_voxel_physics_boxes(Node *node, Context *context,
 				const sv_<TemporaryBox> &boxes, bool do_update_mass);
 
 		void set_voxel_physics_boxes(Node *node, Context *context,
-				pv::RawVolume<VoxelInstance> &volume,
+				VoxelVolume &volume,
 				VoxelRegistry *voxel_reg);
 	}
 }

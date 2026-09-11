@@ -70,6 +70,10 @@ local material_update_cbs = {} -- function(node)
 
 -- TODO: Implement unload by timeout
 local node_volume_cache = {} -- {node_id: {volume:, last_access_us:}}
+-- Set up by sub_events(), which is what runs once the world is there
+local node_update_queue = nil
+-- Defined further down, next to remesh_all(), and used before that
+local queue_modified_node_update
 
 -- NOTE: node can be nil, meaning that it was cached to be nil
 local static_node_cache = {} -- {z: {y: {x: {node:, fetched:}}}} (chunk_p)
@@ -119,7 +123,7 @@ buildat.sub_packet("voxelworld:ready", function(data)
 end)
 
 function sub_events()
-	local node_update_queue = buildat.SpatialUpdateQueue()
+	node_update_queue = buildat.SpatialUpdateQueue()
 
 	local function queue_initial_node_update(node)
 		node_update_queue:put(node:GetWorldPosition(),
@@ -136,20 +140,6 @@ function sub_events()
 		})
 	end
 
-	local function queue_modified_node_update(node)
-		node_update_queue:put(node:GetWorldPosition(),
-				MODIFIED_GEOMETRY_NEAR_WEIGHT, M.camera_far_clip * 1.2,
-				nil, nil, {
-			type = "geometry",
-			current_lod = 0,
-			node_id = node:GetID(),
-		})
-		node_update_queue:put(node:GetWorldPosition(),
-				MODIFIED_PHYSICS_NEAR_WEIGHT, M.physics_distance, nil, nil, {
-			type = "physics",
-			node_id = node:GetID(),
-		})
-	end
 
 	buildat.sub_packet("voxelworld:node_volume_updated", function(data)
 		local values = cereal.binary_input(data, {"object",
@@ -436,6 +426,74 @@ function M.get_chunk_position(voxel_p)
 	return chunk_p, in_chunk_p
 end
 
+function queue_modified_node_update(node)
+	if not node_update_queue then
+		return
+	end
+	node_update_queue:put(node:GetWorldPosition(),
+			MODIFIED_GEOMETRY_NEAR_WEIGHT, M.camera_far_clip * 1.2,
+			nil, nil, {
+		type = "geometry",
+		current_lod = 0,
+		node_id = node:GetID(),
+	})
+	node_update_queue:put(node:GetWorldPosition(),
+			MODIFIED_PHYSICS_NEAR_WEIGHT, M.physics_distance, nil, nil, {
+		type = "physics",
+		node_id = node:GetID(),
+	})
+end
+
+-- Which registry the chunks are meshed with.
+--
+-- What wants to change it is a game that draws its world a second way out of
+-- the same voxels -- a stress view, a heat map -- as a registry of its own
+-- with the same voxel format and different definitions. Follow it with
+-- remesh_all(); what a voxel looks like has changed even though the voxel has
+-- not.
+function M.set_voxel_registry(reg)
+	voxel_reg = reg
+end
+
+function M.get_voxel_registry_used()
+	return voxel_reg
+end
+
+-- Every chunk that is loaded, queued for a new mesh. The queue is spatial, so
+-- what the camera is looking at is rebuilt first and the rest follows.
+function M.remesh_all()
+	local n = 0
+	for _, ztable in pairs(static_node_cache) do
+		for _, ytable in pairs(ztable) do
+			for _, cache in pairs(ytable) do
+				if cache.node then
+					queue_modified_node_update(cache.node)
+					n = n + 1
+				end
+			end
+		end
+	end
+	log:info("voxelworld.remesh_all(): "..n.." chunks")
+	return n
+end
+
+-- Whether this chunk's collision is actually there: the shapes are built and
+-- the body is in the physics world.
+--
+-- Not the same as the chunk node having a RigidBody component. That is
+-- created before the shapes exist and two main-thread steps before the body
+-- is put in the world -- the steps are split because two of them are
+-- expensive -- so a RigidBody on its own is the earliest moment at which
+-- there is nothing to stand on. Anything that waits for solid ground before
+-- letting a player fall has to wait for this instead.
+function M.chunk_has_physics(chunk_p)
+	local node = M.get_static_node(chunk_p)
+	if not node then
+		return false
+	end
+	return node:GetVar("buildat_physics_ready"):GetBool()
+end
+
 function M.get_static_node_cache(chunk_p)
 	local ztable = static_node_cache[chunk_p.z]
 	if not ztable then
@@ -566,6 +624,27 @@ function M.get_static_voxel(p)
 	local v = volume:get_voxel_at(in_chunk_p.x, in_chunk_p.y, in_chunk_p.z)
 	log:trace("get_static_voxel(): v="..dump(v))
 	return v
+end
+
+-- One plane of a voxel, for a world whose voxels are more than one plane.
+-- get_static_voxel() is the first plane, as it always was; this is how a
+-- game reads its own, and the value is a plain number because a plane other
+-- than the first holds no role the engine knows about.
+function M.get_static_voxel_plane(p, plane)
+	p = buildat.Vector3(p):round()
+	local chunk_p, in_chunk_p = M.get_chunk_position(p)
+	if chunk_p == nil then
+		return 0
+	end
+	local node = M.get_static_node(chunk_p)
+	if node == nil then
+		return 0
+	end
+	local volume = M.get_volume(node)
+	if volume == nil then
+		return 0
+	end
+	return volume:get_plane_at(plane, in_chunk_p.x, in_chunk_p.y, in_chunk_p.z)
 end
 
 -- TODO
