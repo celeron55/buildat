@@ -452,11 +452,14 @@ every volume on its way anywhere, is bits under the old format.
   fixed rather than the order they were written, so that two worlds binding
   the same roles hand their shaders the same thing. At most four may be
   bound; a fifth is refused.
-- tint is the one the engine reads as well as carries: it moves the voxel's
-  colour along vdef.tint_ramp = {0xRRGGBB, 0xRRGGBB}, the first end at 0 and
-  the second at full. A definition that leaves both ends white is not
-  tinted whatever the field says. As with everything else that reaches the
-  vertex colour this tints the light rather than the texture.
+- tint is the one that is a colour rather than a scalar: it picks a colour
+  out of vdef.tint_ramp = {0xRRGGBB, 0xRRGGBB}, the first end at 0 and the
+  second at full, and its slot carries that colour packed 5-6-5 instead of a
+  number between 0 and 1. A definition that leaves both ends white is not
+  tinted whatever the field says. It is an albedo tint and the shader is
+  what applies it: the vertex colour is light, and a tint of the light shows
+  in shade and vanishes in sunlight, which is not what tinting a material
+  means.
 - sag_top and sag_bottom move a voxel's top and bottom faces into it, by up
   to vdef.sag_extent voxels. The mesher averages the sag of the voxels that
   meet at each corner, so a sagging surface runs continuously instead of

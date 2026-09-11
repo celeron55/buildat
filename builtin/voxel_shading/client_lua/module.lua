@@ -29,6 +29,12 @@ M.sky_cubemap = "voxel_shading/VoxelSky.xml"
 
 local TECHNIQUE = magic.cache:GetResource("Technique",
 		"voxel_shading/PBRVoxel.xml")
+-- The same shader reading the voxel format's surface modifiers out of the
+-- vertex tangent; see PBRVoxelModifiers.xml. A world that binds no modifier
+-- has nothing in the tangent, so this is opt-in.
+local TECHNIQUE_MODIFIERS = magic.cache:GetResource("Technique",
+		"voxel_shading/PBRVoxelModifiers.xml")
+local use_modifiers = false
 
 -- How much of the sky the camera can see, per direction, as a cube of 6x6
 -- values per face: 216 numbers, which the shader samples along a pixel's
@@ -206,9 +212,17 @@ end
 -- data, and the shader then sees full skylight, which is what an object out in
 -- the open should get.
 function M.apply_to_node(node)
+	local technique = use_modifiers and TECHNIQUE_MODIFIERS or TECHNIQUE
 	each_material(node, function(m)
-		m:SetTechnique(0, TECHNIQUE)
+		m:SetTechnique(0, technique)
 	end)
+end
+
+-- Read the voxel format's surface modifiers, for a world whose format binds
+-- any. Set it before the first chunk arrives; what is already drawn keeps the
+-- technique it was given.
+function M.use_modifiers(enable)
+	use_modifiers = enable and true or false
 end
 
 voxelworld.sub_material_update(M.apply_to_node)

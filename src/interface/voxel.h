@@ -222,7 +222,9 @@ namespace interface
 		sv_<VoxelVariant> variants;
 		uint8_t variant_of_param[256] = {};
 		// The two ends of the colour the tint modifier moves between, each
-		// 0xRRGGBB: tint 0 is the first and a full tint is the second.
+		// 0xRRGGBB: tint 0 is the first and a full tint is the second. The
+		// colour multiplies the texture, and the shader is what applies it;
+		// see VoxelFormat::tint.
 		//
 		// This is a ramp rather than a per-voxel colour because a colour
 		// would eat three of the four scalars that reach the shader, and one
@@ -392,11 +394,16 @@ namespace interface
 		//
 		// The surface modifiers are the first four bound of tint, wetness,
 		// grain, gloss, speckle and emission, in that order. They reach the
-		// shader as four scalars in a slot of the vertex and nowhere else:
-		// the engine promises the four numbers and their order, and what
-		// they look like is the game's shader's business. Only tint has a
-		// meaning to the engine, because it is the one that changes the
-		// vertex colour rather than being carried through.
+		// shader as four numbers in a slot of the vertex and nowhere else:
+		// the engine promises the four and their order, and what they look
+		// like is the game's shader's business.
+		//
+		// Three of them are scalars. The tint is the exception: it is an
+		// albedo tint, so what its slot carries is the colour the field
+		// picked out of the definition's tint_ramp, packed 5-6-5. It has to
+		// be albedo and it has to go this way round, because the vertex
+		// colour is light -- a tint of the light shows in shade and vanishes
+		// in sunlight, which is not what tinting a material means.
 		//
 		// The order being fixed rather than the order they were bound in is
 		// what makes the slots the same in two worlds that bind the same

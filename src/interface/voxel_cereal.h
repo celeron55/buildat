@@ -46,7 +46,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 9;
+		uint8_t version = 10;
 		archive(
 				version,
 				v.name,
@@ -74,6 +74,11 @@ namespace interface
 		if(!v.variants.empty()){
 			for(size_t i = 0; i < 256; i++)
 				archive(v.variant_of_param[i]);
+		}
+		// Version 9 had no modifier parameters; see the note on VoxelFormat
+		// below for why this branch reads as "10 or newer" and writes always
+		if(version >= 10){
+			archive(v.tint_ramp[0], v.tint_ramp[1], v.sag_extent);
 		}
 	}
 

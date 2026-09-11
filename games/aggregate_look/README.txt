@@ -1,0 +1,36 @@
+aggregate_look
+==============
+
+The look spike of local/aggregate_plan.md: a wall of samples with their voxel
+fields set by hand, to find out whether a mixture of materials reads on
+screen before anything is built that stores one.
+
+Fifty samples, ten columns by five rows, standing at one z so that the grid
+is read like a chart rather than walked through. Bottom row first, because
+that is the order the camera sees them in:
+
+  sag_top 0 -> full             the geometry modifier: how far the top face
+                                sinks into the voxel
+  rock -> sand, dry             the base look chosen by a threshold over the
+                                sand fraction, with grain saying how much
+                                sand is in it either side of the threshold
+  rock -> sand, soaked          the same, wet
+  tint + wetness, dry -> soaked the albedo tint along the definition's ramp,
+                                and the wetness the shader darkens with
+  gloss (binder) 0 -> full
+
+Nothing is simulated and nothing is derived: the worldgen writes the fields.
+The format binds tint, wetness, grain and gloss -- which is all four surface
+modifiers there is room for -- plus sag_top, and the client switches
+voxel_shading to PBRVoxelModifiers, the reference consumption of them.
+
+What it answered is written up in local/aggregate_plan.md. The short of it:
+the tint, the wetness and the sag read at a glance; the grain does not, and
+the threshold between two base looks carries nearly all of the signal.
+
+Run it:
+
+    bin/buildat_server -m ../games/aggregate_look
+    bin/buildat -s localhost -w 1600x900 -c @../games/aggregate_look/check.txt
+
+Tab is free move, so a sample can be walked up to.
