@@ -308,6 +308,36 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 	}
 };
 
+// Whether a node's collision shapes are already exactly these boxes.
+//
+// The shapes themselves are the previous state, so nothing has to be stored
+// to answer this: set_voxel_physics_boxes() reuses them in order, so the
+// order agrees. What it is for is below -- rebuilding shapes takes the body
+// out of the physics world for a frame, and not rebuilding is the only way
+// to not do that.
+static bool node_already_has_boxes(Node *node,
+		const sv_<interface::mesh::TemporaryBox> &boxes)
+{
+	PODVector<CollisionShape*> shapes;
+	node->GetComponents<CollisionShape>(shapes);
+	if(shapes.Size() != boxes.size())
+		return false;
+	for(size_t i = 0; i < boxes.size(); i++){
+		if(shapes[i]->GetSize() != boxes[i].size)
+			return false;
+		if(shapes[i]->GetPosition() != boxes[i].position)
+			return false;
+	}
+	return true;
+}
+
+// Set on a chunk node once its collision is actually there: the shapes are
+// built and the body is in the physics world. A RigidBody component on its
+// own is not that -- it is created two steps earlier -- so anything waiting
+// for solid ground has to wait for this. See voxelworld's
+// chunk_has_physics() in client_lua.
+static const char *PHYSICS_READY_VAR = "buildat_physics_ready";
+
 struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 {
 	WeakPtr<Node> node;
@@ -352,6 +382,17 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 		Context *context = node->GetContext();
 		switch(post_step){
 		case 1:
+			// The boxes come from VoxelDefinition::physically_solid, so from
+			// the voxel ids: a write that changed only a game's own
+			// per-voxel fields cannot have changed them. When they are the
+			// same as last time there is nothing to do, and skipping is not
+			// just an optimisation -- step 2 below releases the body from
+			// the physics world and step 3 puts it back a frame or more
+			// later, and anything standing on the chunk falls through in
+			// between.
+			if(node->GetVar(StringHash(PHYSICS_READY_VAR)).GetBool() &&
+					node_already_has_boxes(node, result_boxes))
+				return true;
 			node->GetOrCreateComponent<RigidBody>(LOCAL);
 			break;
 		case 2:
@@ -376,6 +417,8 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 				RigidBody *body = node->GetComponent<RigidBody>();
 				if(body)
 					body->OnSetEnabled();
+				// Only now is there anything to stand on
+				node->SetVar(StringHash(PHYSICS_READY_VAR), Variant(true));
 			}
 			return true;
 		}
@@ -507,6 +550,7 @@ void clear_voxel_physics_boxes(const luabind::object &node_o)
 	RigidBody *body = node->GetComponent<RigidBody>();
 	if(body)
 		node->RemoveComponent(body);
+	node->SetVar(StringHash(PHYSICS_READY_VAR), Variant(false));
 
 	PODVector<CollisionShape*> previous_shapes;
 	node->GetComponents<CollisionShape>(previous_shapes);
