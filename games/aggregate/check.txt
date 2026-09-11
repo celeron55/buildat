@@ -62,3 +62,22 @@ screenshot ../tmp/aggregate_check/6_support.png
 keypress V
 delay 2000
 screenshot ../tmp/aggregate_check/7_danger.png
+
+# Water poured under the open sky, and the same water 45 seconds later: it
+# soaks in and what is left dries. What is being looked at is that the puddle
+# is smaller in 9 than in 8 -- evaporation is a unit of 255 every 8 seconds
+# per voxel, so a shallow pour is most of the way gone by the second shot,
+# and the server says "evaporation: N units" while it happens.
+keypress 5
+delay 500
+mouse_move 0 1500
+delay 500
+mouse_click right
+delay 600
+mouse_click right
+delay 600
+mouse_click right
+delay 3000
+screenshot ../tmp/aggregate_check/8_poured.png
+delay 45000
+screenshot ../tmp/aggregate_check/9_dried.png
