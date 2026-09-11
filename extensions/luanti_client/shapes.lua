@@ -86,11 +86,16 @@ end
 -- node *above* this one, which is where Luanti draws it and where there is
 -- room for it: inside the cube it would be inside something opaque.
 --
+-- Only the plant is in here. The cube is the voxel's own six faces, drawn
+-- by the mesher as any solid voxel's are, so that it is lit, occluded and
+-- culled exactly like the ground it is part of -- a shape gets one flat
+-- light for the whole voxel, and a sea bed drawn that way is visibly
+-- brighter than the sand next to it.
+--
 -- The plant's quads wear tile 7, which is the definition's first extra
 -- texture; see VoxelDefinition::extra_textures.
 function M.rooted_quads(scale, out)
 	out = out or {}
-	M.box_quads({-0.5, -0.5, -0.5, 0.5, 0.5, 0.5}, out)
 	local top = 0.5 + (scale or 1) * 1.0
 	local d = 0.5
 	out[#out + 1] = {tile = 7,

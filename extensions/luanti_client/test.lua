@@ -1739,8 +1739,11 @@ for k in pairs(rooted) do
 	assert(type(k) == "number", "shapes: a shape carries a non-quad key "..
 			tostring(k))
 end
-assert(#rooted == 8, "shapes: a rooted plant is a cube and two quads, not "..
-		#rooted)
+assert(#rooted == 2, "shapes: a rooted plant is two quads -- its cube is the "..
+		"voxel's own faces -- not "..#rooted)
+for _, q in ipairs(rooted) do
+	assert(q.tile == 7, "shapes: a rooted plant's quads wear the extra tile")
+end
 
 -- A box turns with the voxel: the back half of a stair is at +Z to begin
 -- with, and a quarter turn about Y puts it at +X
