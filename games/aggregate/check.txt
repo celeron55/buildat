@@ -34,13 +34,22 @@ mouse_down left
 delay 300
 mouse_up left
 delay 12000
+# The overlook place, which the spawn and anything built there is in frame
+# from. The camera the menu takes itself to is off a corner of the structure
+# and can end up inside a tree; this is a fixed point that does not.
+keypress G
+delay 5000
+keydown G
+delay 200
+keyup G
+delay 8000
 screenshot ../tmp/aggregate_check/3_chamber.png
 
 # From above, and then the three views over it
 mouse_move 0 300
 delay 300
 keydown SPACE
-delay 2500
+delay 800
 keyup SPACE
 delay 1500
 screenshot ../tmp/aggregate_check/4_above.png

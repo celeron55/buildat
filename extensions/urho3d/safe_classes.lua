@@ -518,6 +518,12 @@ function M.define(dst, util)
 			linearDamping = util.simple_property("number"),
 			angularDamping = util.simple_property("number"),
 			useGravity = util.simple_property("boolean"),
+			-- Which layers this body is in and which it collides with.
+			-- What wants them from a game is a free camera: a body that
+			-- collides with nothing goes through the terrain, which is the
+			-- escape hatch from every way of ending up inside it.
+			collisionLayer = util.simple_property("number"),
+			collisionMask = util.simple_property("number"),
 		},
 	})
 
