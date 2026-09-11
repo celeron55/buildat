@@ -99,6 +99,10 @@ function M.rooted_quads(scale, out)
 	out[#out + 1] = {tile = 7,
 			p = {-d, top, d, d, top, -d, d, 0.5, -d, -d, 0.5, d},
 			uv = {0, 0, 1, 0, 1, 1, 0, 1}}
+	-- The shape's own cube fills the voxel, so a neighbour must draw its face
+	-- against this one as it would against ground. Without it a kelp on the
+	-- sea bed has a water surface drawn around its base.
+	out.solid_base = true
 	return out
 end
 
