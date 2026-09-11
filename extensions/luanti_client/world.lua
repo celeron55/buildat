@@ -899,8 +899,13 @@ function M.new(magic, buildat, log, options)
 				vdef.shape_masked = masked
 			end
 			vdef.shape_double_sided = double_sided and true or false
-			vdef.face_draw_type =
-					buildat.VoxelDefinition.FACEDRAWTYPE_NEVER
+			-- A shape whose voxel is solid ground keeps its six faces: they
+			-- are the ground, and the shape standing on them is only what
+			-- grows out of it
+			if not solid_base then
+				vdef.face_draw_type =
+						buildat.VoxelDefinition.FACEDRAWTYPE_NEVER
+			end
 			-- A shaped voxel's neighbours draw their faces against it, which
 			-- is what EMPTY says. A liquid keeps its own edge material
 			-- instead: a lake's cubes must not draw their faces against the
@@ -3267,6 +3272,18 @@ function M.new(magic, buildat, log, options)
 								return nil
 							end
 						end
+					end
+				end
+			end
+			-- A shape that keeps its faces needs all six of them; the rest
+			-- take whatever the shape's own tiles gave, as Luanti falls back
+			-- to the first tile as well
+			if solid_base then
+				for i = 1, 6 do
+					resources[i] = resources[i] or resolve_face(def, i,
+							override)
+					if not resources[i] then
+						return nil
 					end
 				end
 			end
