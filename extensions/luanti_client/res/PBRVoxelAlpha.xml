@@ -1,0 +1,11 @@
+<!-- PBRVoxel for the faces the mesher put on the chunk's "alpha" child: water,
+     and anything else with a real alpha. The same shader, blended instead of
+     cut out, and with culling off so that a water surface is there from under
+     it -- see VoxelUnlitAlpha.xml, which is the same trade in the unlit path.
+
+     One pass: an additive light pass over a blended one would draw the
+     translucent surface's light twice. -->
+<technique vs="luanti_client/res/PBRVoxel" ps="luanti_client/res/PBRVoxel"
+        psdefines="DIFFMAP PBR METALLIC VOXELNORMALMAP VOXELIBL VOXELSPOTS VOXELTRANSLUCENCY">
+    <pass name="alpha" blend="alpha" depthwrite="false" cull="none" />
+</technique>
