@@ -198,6 +198,11 @@ enum Material {
 // Timber spans far and carries little, brick spans little and carries a
 // mountain: that pair is most of the game. A material with span 0 holds
 // nothing up but itself, and one with structural false takes no part at all.
+// falls_as is what a voxel of this becomes once it has come apart and is on
+// its way down. Something that was holding a shape up and stops is rubble;
+// something that was already a loose heap is still that heap, which is why
+// dirt falls as dirt and sand as sand rather than everything turning into
+// the same grey pile.
 struct MaterialProps
 {
 	bool structural;
@@ -205,28 +210,30 @@ struct MaterialProps
 	uint8_t span;
 	uint8_t density;
 	uint8_t capacity;
+	int falls_as;
 };
 
 static const MaterialProps MATERIAL[M_COUNT] = {
-	{false, false,  0, 0,   0},   // (id 0 is VOXELTYPEID_UNDEFINED)
-	{false, false,  0, 0,   0},   // air
-	{true,  false, 15, 0, 255},   // bedrock
-	{true,  true,   6, 3, 200},   // rock
-	{true,  true,   2, 2,  60},   // dirt
-	{true,  true,   2, 2,  60},   // grass: dirt with a green top
-	{true,  true,   0, 2,  40},   // sand
-	{true,  true,   0, 2,  50},   // rubble
-	{true,  true,   8, 1,  30},   // timber
-	{true,  true,   3, 4, 255},   // brick
-	{false, false,  0, 0,   0},   // water
+	{false, false,  0, 0,   0, 0},           // (0 is VOXELTYPEID_UNDEFINED)
+	{false, false,  0, 0,   0, 0},           // air
+	{true,  false, 15, 0, 255, M_BEDROCK},   // bedrock; never falls
+	{true,  true,   6, 3, 200, M_RUBBLE},    // rock
+	{true,  true,   2, 2,  60, M_DIRT},      // dirt: a loose heap of dirt
+	// Turf that has come off and landed is dirt, not turf
+	{true,  true,   2, 2,  60, M_DIRT},      // grass
+	{true,  true,   0, 2,  40, M_SAND},      // sand
+	{true,  true,   0, 2,  50, M_RUBBLE},    // rubble
+	{true,  true,   8, 1,  30, M_TIMBER},    // timber
+	{true,  true,   3, 4, 255, M_RUBBLE},    // brick
+	{false, false,  0, 0,   0, 0},           // water
 	// A standing tree is held up by the ground under it like anything else,
 	// so cutting through the trunk drops what is above the cut
-	{true,  true,   6, 1,  25},   // trunk
+	{true,  true,   6, 1,  25, M_TRUNK},     // trunk
 	// Leaves hang off the trunk rather than standing on anything, which is
 	// what the span is for: a canopy two voxels out from the trunk holds,
 	// and comes down with the trunk. Weightless, so a tree does not crush
 	// itself, and nothing crushes leaves.
-	{true,  true,   3, 0, 255},   // leaves
+	{true,  true,   3, 0, 255, M_LEAVES},    // leaves
 };
 
 static const MaterialProps& material_of(interface::VoxelTypeId id)
@@ -1015,13 +1022,13 @@ struct Module: public interface::Module
 				// Down one. What it lands in is displaced rather than
 				// simulated: nothing here flows.
 				//
-				// Anything that comes apart falls as rubble, which spans
-				// nothing -- so a pile of it holds no roof up, which is what
-				// makes a cave-in carry on rather than plug itself. A
-				// material that is already loose keeps what it is: sand
-				// running into a tunnel is still sand.
-				VoxelInstance nv(m.span == 0 ? (uint32_t)id :
-						(uint32_t)M_RUBBLE);
+				// What it becomes on the way down; see MaterialProps.
+				// Rubble spans nothing, so a pile of it holds no roof up,
+				// which is what makes a cave-in carry on rather than plug
+				// itself -- and the materials that are already loose heaps
+				// stay themselves.
+				VoxelInstance nv((uint32_t)(m.falls_as != 0 ?
+						m.falls_as : (int)id));
 				set_state(nv, 0, 0);
 				world->set_voxel(down, nv, true);
 				world->set_voxel(p, VoxelInstance(M_AIR), true);
