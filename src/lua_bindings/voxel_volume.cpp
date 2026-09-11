@@ -5,6 +5,7 @@
 #include "lua_bindings/sandbox_util.h"
 #include "client/app.h"
 #include "interface/voxel_volume.h"
+#include "interface/voxel_selector.h"
 #include "interface/thread_pool.h"
 #include <c55/os.h>
 #include <tolua++.h>
@@ -326,8 +327,11 @@ static void march_rays(RayJob &job)
 	RayVolumeSet volume_set(job);
 
 	// Which bits of a voxel are the id and the sky light, per the world's
-	// own voxel format; see VoxelFormat in interface/voxel.h
+	// own voxel format, and which definition a voxel wears -- which is the
+	// id role in a world that has one and a threshold over its planes in a
+	// world that does not. Read once; neither changes while a job runs.
 	const interface::VoxelFormat &fmt = job.voxel_reg->get_format();
+	const interface::VoxelSelector look = job.voxel_reg->get_look_selector();
 
 	// physically_solid per voxel id, filled as ids turn up. Unknown ids stop a
 	// ray: an id with no definition is not something to see the sky through.
@@ -405,11 +409,14 @@ static void march_rays(RayJob &job)
 				break;
 			}
 
-			VoxelInstance v = volume->getVoxelAt(
+			// The whole voxel, not the first plane's word: what stops a
+			// ray is whether the definition it wears is solid, and which
+			// definition that is can depend on any of its planes
+			interface::VoxelSample v = volume->sample_at(
 					vx - chunk_p.getX() * volume_set.chunk_size.getX(),
 					vy - chunk_p.getY() * volume_set.chunk_size.getY(),
 					vz - chunk_p.getZ() * volume_set.chunk_size.getZ());
-			interface::VoxelTypeId id = fmt.id_of(v.data);
+			interface::VoxelTypeId id = look.id_of(v, fmt);
 
 			if((size_t)id >= solid_cache.size())
 				solid_cache.resize((size_t)id + 1, -1);
@@ -425,7 +432,7 @@ static void march_rays(RayJob &job)
 				break;
 			}
 
-			skylight = (int)fmt.light_sky.get(v.data);
+			skylight = (int)fmt.light_sky.get(v);
 			if(job.stop_skylight > 0 && skylight >= job.stop_skylight){
 				status = VOXEL_RAY_SKYLIGHT;
 				break;

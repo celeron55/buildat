@@ -475,8 +475,12 @@ void PS()
             // relief its texture's normal map has; a fine one -- sand, flour
             // -- has relief far below a texel and reads as flat, so the
             // normal is pulled towards the face's own.
+            //
+            // Not renormalized: the frame below is not orthonormal, so
+            // normalizing here changes the shading of every surface and not
+            // only of a grainy one -- which showed up as glints on a world
+            // that had bound no grain at all.
             nn.xy *= 1.0 - 0.8 * mGrain;
-            nn = normalize(nn);
         #endif
         vec3 normal = normalize(mat3(tangentU * invMax, tangentV * invMax,
             geomNormal) * nn);
