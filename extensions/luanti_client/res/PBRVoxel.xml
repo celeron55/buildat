@@ -1,0 +1,17 @@
+<!-- The world drawn with PBRVoxel.glsl beside this file: the atlas's normal
+     and surface maps, reflections of the sky cube map dimmed by how much sky
+     the camera can see that way, and the baked voxel light as the ambient.
+     What the connect dialog's "Enable PBR" turns on.
+
+     ALPHAMASK because a Luanti texture is a cutout -- a plant, a rail, a
+     ladder -- and this is the technique those faces get too.
+
+     No VOXELMODIFIERS: the voxel format this client builds binds no surface
+     modifier, so the vertex tangent carries nothing to read. -->
+<technique vs="luanti_client/res/PBRVoxel" ps="luanti_client/res/PBRVoxel"
+        psdefines="DIFFMAP ALPHAMASK PBR METALLIC VOXELNORMALMAP VOXELIBL VOXELSPOTS VOXELTRANSLUCENCY">
+    <pass name="base" />
+    <pass name="light" depthtest="equal" depthwrite="false" blend="add" />
+    <pass name="depth" vs="Depth" ps="Depth" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" />
+</technique>

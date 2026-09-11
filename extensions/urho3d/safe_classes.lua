@@ -889,7 +889,8 @@ function M.define(dst, util)
 					"ToggleEnabled", {}, {"RenderPath", "string"}),
 			SetShaderParameter = util.wrap_function(
 				{"RenderPath", "string",
-					{"number", "boolean", "Vector2", "Color", "Variant"}},
+					{"number", "boolean", "Vector2", "Vector3", "Color",
+						"Variant"}},
 				function(self, name, value)
 					self:SetShaderParameter(name, Variant(value))
 				end
@@ -1093,6 +1094,15 @@ function M.define(dst, util)
 		inherited_from_by_wrapper = dst.BorderImage,
 		properties = {
 			pressedOffset = util.simple_property(dst.IntVector2),
+		},
+	})
+
+	-- A box that is ticked or not. The style sheet draws it; the element
+	-- carries the state.
+	util.wc("CheckBox", {
+		inherited_from_by_wrapper = dst.BorderImage,
+		properties = {
+			checked = util.simple_property("boolean"),
 		},
 	})
 

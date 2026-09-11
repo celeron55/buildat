@@ -25,6 +25,8 @@ local particles = dofile(__buildat_extension_path("luanti_client")..
 		"/particles.lua")
 local light_flood = dofile(__buildat_extension_path("luanti_client")..
 		"/light.lua")
+local skyvis = dofile(__buildat_extension_path("luanti_client")..
+		"/skyvis.lua")
 
 local M = {}
 
@@ -302,8 +304,15 @@ function M.new(magic, buildat, log, options)
 	-- moon are the ones here that want it, and their names can be texture
 	-- expressions like any other.
 	local media_texture = options.media_texture
+	-- Whether the world is drawn with res/PBRVoxel -- normal and surface
+	-- maps, reflections of the sky, the sun as a real light -- instead of
+	-- the Luanti-native VoxelUnlit. Chosen in the connect dialog and fixed
+	-- for the session: the atlas's surface maps have to be on from the first
+	-- texture it builds, and they are two thirds of what adding one costs.
+	local pbr = options.pbr and true or false
 
 	local self = {}
+	self.pbr = pbr
 
 	-- One of the game's own textures, drawn without smoothing. A Luanti
 	-- game's textures are pixel art and interpolating them is wrong at every
@@ -432,11 +441,23 @@ function M.new(magic, buildat, log, options)
 
 	-- No light in the scene: the mesher bakes the light into the vertex
 	-- colours and VoxelUnlit reads it from there, so there is nothing for a
-	-- directional light to reach.
-	local technique = magic.cache:GetResource("Technique",
+	-- directional light to reach. The PBR path reads the same vertex colours
+	-- as its ambient, so that is true of it as well -- what it adds on top is
+	-- the sky it reflects.
+	local technique = magic.cache:GetResource("Technique", pbr and
+			"luanti_client/res/PBRVoxel.xml" or
 			"luanti_client/res/VoxelUnlit.xml")
-	local alpha_technique = magic.cache:GetResource("Technique",
+	local alpha_technique = magic.cache:GetResource("Technique", pbr and
+			"luanti_client/res/PBRVoxelAlpha.xml" or
 			"luanti_client/res/VoxelUnlitAlpha.xml")
+	if pbr then
+		-- What the reflections are of: one static noon gradient, multiplied
+		-- in the shader by the colour the sky is now, so a sunset and being
+		-- under water follow without anything being rebaked. See set_sky_tint
+		-- below and the note on cSkyColor in res/PBRVoxel.glsl.
+		zone.zoneTexture = magic.cache:GetResource("TextureCube",
+				"luanti_client/res/VoxelSky.xml")
+	end
 
 	-- The mesher sets no technique on skylit geometry -- only the game knows
 	-- which shader reads what it packed -- so every block's materials get
@@ -963,12 +984,14 @@ function M.new(magic, buildat, log, options)
 	-- On self rather than in a local: set_node_definitions() replaces both,
 	-- and mesh_block() has to use whichever is current
 	self.voxel_reg = base_registry()
-	-- The voxel shader here samples the diffuse atlas and nothing else, and
-	-- deriving the normal and surface maps of a texture is two thirds of what
-	-- adding one to an atlas costs
 	local function new_atlas_registry()
 		local reg = buildat.createAtlasRegistry()
-		reg:set_surface_maps(false)
+		-- The PBR shader samples the normal and surface maps the registry
+		-- derives from each texture; the unlit one samples the diffuse atlas
+		-- and nothing else, and deriving the other two is two thirds of what
+		-- adding a texture to an atlas costs. That loading time is what the
+		-- connect dialog's checkbox spends.
+		reg:set_surface_maps(pbr)
 		return reg
 	end
 
@@ -1326,6 +1349,9 @@ function M.new(magic, buildat, log, options)
 		end
 	end
 
+	-- Defined with the rest of the sky-visibility cache below, which is after
+	-- this because it packs a block the same way this does
+	local vis_volumes_drop
 	local function mesh_block(key)
 		local block = blocks[key]
 		if not block then
@@ -1360,6 +1386,9 @@ function M.new(magic, buildat, log, options)
 				lights_stale = true
 			end
 		end
+		-- The sky-visibility cache holds a copy of this block's voxels; it
+		-- is rebuilt from the block the next time it is wanted
+		vis_volumes_drop(key)
 		local node = block.node
 		buildat.set_voxel_geometry(node, data, self.voxel_reg,
 				self.atlas_reg, self.use_skylight,
@@ -1371,6 +1400,111 @@ function M.new(magic, buildat, log, options)
 		if self.last_mesh_us > (self.worst_mesh_us or 0) then
 			self.worst_mesh_us = self.last_mesh_us
 		end
+	end
+
+	-- The voxel data the sky-visibility marching walks through, when the PBR
+	-- path is on: a Volume per block near the camera, which is data this
+	-- client does not otherwise keep -- it packs a block, hands it to the
+	-- mesher and forgets it. Packing it again and deserializing is the way in.
+	--
+	-- Built a few blocks a frame rather than a set at a time. A ray that
+	-- leaves the volumes it was given keeps the skylight of the last air it
+	-- was in, so a block that is not built yet reads as whatever is around it
+	-- rather than as a wall: the answers start open and tighten as the cache
+	-- fills, which is the right way round for a player walking into a cave.
+	local VIS_MARGIN = 32              -- Voxels around the camera
+	local VIS_BUILD_PER_CALL = 8
+	local vis_volumes = {}             -- key -> {x=, y=, z=, volume=}
+	local vis_list = {}                -- The same entries, as collect wants
+	local vis_chunk_size = {x = BLOCKSIZE, y = BLOCKSIZE, z = BLOCKSIZE}
+
+	-- No border: the marching steps from block to block through the list, so
+	-- the slice of a neighbour the mesher needs is somebody else's copy here
+	local function vis_volume_of(block)
+		return buildat.deserialize_volume(buildat.pack_voxel_volume{
+			region = {0, 0, 0, BLOCKSIZE - 1, BLOCKSIZE - 1, BLOCKSIZE - 1},
+			registry = self.voxel_reg,
+			fill = VOXEL_AIR_LIT,
+			sources = volume_sources(block),
+		})
+	end
+
+	-- A block whose voxels have changed: the copy here is stale
+	vis_volumes_drop = function(key)
+		vis_volumes[key] = nil
+	end
+
+	local function collect_vis_volumes(origin)
+		local r = math.ceil(VIS_MARGIN / BLOCKSIZE)
+		local cx = math.floor(origin.x / BLOCKSIZE)
+		local cy = math.floor(origin.y / BLOCKSIZE)
+		local cz = math.floor(origin.z / BLOCKSIZE)
+		local wanted = {}
+		local n = 0
+		local built = 0
+		for z = cz - r, cz + r do
+			for y = cy - r, cy + r do
+				for x = cx - r, cx + r do
+					local key = block_key(x, y, z)
+					local block = blocks[key]
+					if block then
+						wanted[key] = true
+						local entry = vis_volumes[key]
+						if entry == nil and built < VIS_BUILD_PER_CALL then
+							entry = {x = x, y = y, z = z,
+									volume = vis_volume_of(block)}
+							vis_volumes[key] = entry
+							built = built + 1
+						end
+						if entry then
+							n = n + 1
+							vis_list[n] = entry
+						end
+					end
+				end
+			end
+		end
+		for i = #vis_list, n + 1, -1 do
+			vis_list[i] = nil
+		end
+		-- What has gone out of range, or been dropped, or been replaced
+		for key, _ in pairs(vis_volumes) do
+			if not wanted[key] then
+				vis_volumes[key] = nil
+			end
+		end
+		if n == 0 then
+			return nil
+		end
+		return {chunk_size = vis_chunk_size, registry = self.voxel_reg,
+				volumes = vis_list}
+	end
+
+	-- Only with the PBR path: nothing else reads it, and it is a worker
+	-- thread's worth of ray marching a frame
+	local vis = pbr and skyvis.new(magic, buildat, collect_vis_volumes) or nil
+	-- Where the camera was last frame, to tell a step from a teleport
+	local vis_at = nil
+
+	local function update_sky_visibility()
+		if not vis then return end
+		local p = camera_node.position
+		-- A teleport, or the first frame: march the whole cube at once rather
+		-- than easing towards it over the next second, so that what is on
+		-- screen straight after is settled
+		local moved = vis_at and math.max(math.abs(p.x - vis_at[1]),
+				math.abs(p.y - vis_at[2]), math.abs(p.z - vis_at[3])) or nil
+		vis_at = {p.x, p.y, p.z}
+		vis:update(p, (moved ~= nil and moved < 8) and 1 or nil)
+	end
+
+	-- For the counters: how much sky the shader is being told there is
+	-- straight up, and how many blocks' voxels that answer was marched
+	-- through. nil when the PBR path is off, which is what says not to show
+	-- the counter at all.
+	function self:sky_visibility()
+		if not vis then return nil end
+		return vis:value_of(skyvis.cell_of(0, 1, 0)), #vis_list
 	end
 
 	-- A block that arrived from the server. Its own mesh and its neighbours'
@@ -3092,6 +3226,15 @@ function M.new(magic, buildat, log, options)
 		-- the sky is drawn with, so the two meet
 		zone.fogColor = horizon
 
+		-- What the PBR path's reflections are worth now: the cube map beside
+		-- the shader is one static noon gradient and this is the colour it is
+		-- multiplied by, so a sunset reflects orange and a night reflects
+		-- almost nothing. The sky's own top colour, which is most of what a
+		-- surface pointed upwards reflects.
+		if vis then
+			vis:set_param("SkyColor", magic.Vector3(top.r, top.g, top.b))
+		end
+
 		if sky_material then
 			local sx, sy, sz = sun_direction(daylight_time)
 			sky_material:SetShaderParameter("SkyTop", top)
@@ -3583,6 +3726,7 @@ function M.new(magic, buildat, log, options)
 			lights_stale = false
 			place_lights()
 		end
+		update_sky_visibility()
 		if drop_distance then
 			local limit = drop_distance / BLOCKSIZE
 			for key, block in pairs(blocks) do

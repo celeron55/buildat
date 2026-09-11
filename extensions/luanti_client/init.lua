@@ -232,7 +232,9 @@ end
 local show_connect_dialog
 
 -- The screen that shows what the client is doing, and drives it every frame
-local function show_client(host, port, name, password)
+-- pbr: whether to draw the world with the PBR shader; see the connect
+-- dialog, where it is chosen, and world.lua for what it changes
+local function show_client(host, port, name, password, pbr)
 	local root = uistack.main:push({desc="luanti_client"})
 	-- Held rather than read back off the element: the sandbox hands out no
 	-- resource it did not just wrap
@@ -380,6 +382,7 @@ local function show_client(host, port, name, password)
 
 		local view = world.new(magic, buildat.safe, log, {
 				far_clip = FAR_CLIP,
+				pbr = pbr,
 				read_image = buildat.read_image,
 				read_mesh = function(def)
 					return read_mesh and read_mesh(def) or nil
@@ -2285,6 +2288,14 @@ local function show_client(host, port, name, password)
 							client.breath)
 				end
 			end
+			-- Only with the PBR path, which is the only thing that marches
+			-- the sky: how much sky it has found straight up, and over how
+			-- many blocks of voxels. A cave that still reads 1.00 is the
+			-- marching not getting the data.
+			local sky_vis, sky_blocks = view:sky_visibility()
+			local reflections = sky_vis and string.format(
+					" | sky %.2f up over %d blocks", sky_vis, sky_blocks) or ""
+
 			-- Two lines rather than one: one line of this does not fit on a
 			-- screen and what runs off the edge is the half that changes
 			status_text.text = table.concat(lines, "\n").."\n"..
@@ -2297,7 +2308,7 @@ local function show_client(host, port, name, password)
 					" | %d commands waiting"..
 					" | %d param2 pairs | %d hud | %d sounds"..
 					" | %d particles"..
-					" | media: %d files, %d to come",
+					" | media: %d files, %d to come%s",
 					client.state, condition, avatar.x, avatar.y, avatar.z,
 					avatar.fly and "flying" or
 							(avatar.in_liquid and "swimming" or
@@ -2311,7 +2322,7 @@ local function show_client(host, port, name, password)
 					client.commands_waiting,
 					view:pair_voxel_count(), hud_count,
 					view:sound_count(), view:particle_count(),
-					store:have_count(), store:missing_count())
+					store:have_count(), store:missing_count(), reflections)
 		end
 
 		-- Mouse look, so the cursor is out of the way and does not stop at the
@@ -3214,6 +3225,19 @@ show_connect_dialog = function(address, name)
 			address or DEFAULT_ADDRESS)
 	local name_edit = labeled_edit(window, "Player name", name or DEFAULT_NAME)
 	local password_edit = labeled_edit(window, "Password", "")
+
+	-- Picked before anything loads and fixed for the session: the atlas's
+	-- normal and surface maps have to be on from the first texture it builds,
+	-- and building them is most of what the media takes. What it buys is in
+	-- res/PBRVoxel.xml.
+	local pbr_row = window:CreateChild("UIElement")
+	pbr_row:SetLayout(LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
+	pbr_row.minHeight = 24
+	local pbr_check = pbr_row:CreateChild("CheckBox")
+	pbr_check:SetStyleAuto()
+	local pbr_label = pbr_row:CreateChild("Text")
+	pbr_label:SetStyleAuto()
+	pbr_label.text = "Enable PBR (slower to load)"
 	-- The password is the field a second try is most likely about, and it is
 	-- the one that is not filled in
 	if address then
@@ -3238,7 +3262,8 @@ show_connect_dialog = function(address, name)
 			escape_cb = nil
 		end
 		uistack.main:pop(root)
-		show_client(host, port, name, password_edit:GetText())
+		show_client(host, port, name, password_edit:GetText(),
+				pbr_check.checked)
 	end
 
 	local function cancel()
