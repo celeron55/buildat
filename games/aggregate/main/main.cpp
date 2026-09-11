@@ -1827,12 +1827,22 @@ struct Module: public interface::Module
 	// opens on the ticks where the running total crosses another quantum,
 	// which averages to exactly the rate and needs no per-voxel
 	// accumulator.
+	// How much faster bone-dry material drinks than saturated material does.
+	// Dry pores pull water in by suction and the pull falls away as they
+	// fill, leaving the saturated rate: that is why a shower soaks into a dry
+	// field and stands on a wet one. Scaling the *rate* cannot change where
+	// the water ends up, only how fast it gets there, so this has nothing to
+	// run away with.
+	static const int SUCTION_DRY = 4;
+
 	int flow_limit(const Mix &a, const Mix &b) const
 	{
 		const int ka = conductivity(a), kb = conductivity(b);
-		const int k = ka < kb ? ka : kb;
+		int k = ka < kb ? ka : kb;
 		if(k <= 0)
 			return 0;
+		// The receiver's own dryness, since it is the one doing the drinking
+		k = k * (15 + (15 - (int)saturation(b)) * (SUCTION_DRY - 1)) / 15;
 		const int64_t now = m_tick * k / TICKS_PER_SECOND;
 		const int64_t before = (m_tick - 1) * k / TICKS_PER_SECOND;
 		const int64_t d = now - before;
