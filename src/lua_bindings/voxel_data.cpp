@@ -506,12 +506,17 @@ static void apply_source(VoxelVolume &volume,
 				const int ay = vy + lc.getY();
 				const int az = vz + lc.getZ();
 				if(source.dst_raw){
+					// raw is the whole of the first plane; see
+					// doc/client_api.txt
 					volume.setVoxelAt(ax, ay, az,
 							VoxelInstance((uint32_t)value));
 				} else {
-					VoxelInstance v = volume.getVoxelAt(ax, ay, az);
-					source.dst.set(v.data, (uint32_t)value);
-					volume.setVoxelAt(ax, ay, az, v);
+					// Into the field's own plane, which is not always the
+					// first one
+					uint32_t w = volume.plane_at(source.dst.plane,
+							ax, ay, az);
+					source.dst.set(w, (uint32_t)value);
+					volume.set_plane_at(source.dst.plane, ax, ay, az, w);
 				}
 			}
 		}
@@ -556,7 +561,9 @@ ss_ pack_voxel_volume(const luabind::object &args, lua_State *L)
 	pv::Region region(pv::Vector3DInt32(c[0], c[1], c[2]),
 			pv::Vector3DInt32(c[3], c[4], c[5]));
 
-	VoxelVolume volume(region);
+	// The registry's planes, so that a source writing a field of a plane
+	// other than the first has somewhere to put it
+	VoxelVolume volume(region, format.planes);
 	volume.fill(VoxelInstance((uint32_t)table_number(args, "fill", 0)));
 
 	luabind::object sources_o = args["sources"];

@@ -410,7 +410,7 @@ it. Say it before the first voxel is added: everything already stored, and
 every volume on its way anywhere, is bits under the old format.
 
   voxel_reg:set_format{
-      plane_bits = 32,                    -- the voxel is one 32-bit word
+      plane_bits = 32,                    -- the game's own plane's width
       id = {shift = 0, width = 16},       -- indexes the registry
       light_sky = {shift = 16, width = 4},
       light_lamp = {shift = 20, width = 4},
@@ -420,6 +420,9 @@ every volume on its way anywhere, is bits under the old format.
       tint = nil, wetness = nil, grain = nil, gloss = nil,
       speckle = nil, emission = nil,      -- surface, at most four at once
       sag_top = nil, sag_bottom = nil,    -- geometry
+      planes = {                          -- planes after the game's own
+          {name = "mymod:heat", bits = 8},
+      },
   }
 
 - Those five are the roles the engine understands. A role left out is not
@@ -465,6 +468,19 @@ every volume on its way anywhere, is bits under the old format.
   meet at each corner, so a sagging surface runs continuously instead of
   stepping; what the sag means -- a liquid's level, a floor giving under a
   load, shallow snow -- is the game's.
+- A voxel's bits are stored **a plane at a time**: a plane is one array over
+  a chunk holding the same bits of every voxel in it, so a world's voxels
+  are several arrays rather than one array of words. A format has one
+  32-bit plane unless it says otherwise, which is what every game here has
+  and is the same bits in the same order as before planes existed.
+- What a second plane is for: a field a simulation sweeps, which it then
+  reads a byte per voxel of instead of four; a field a module keeps without
+  asking the game for room in a word it has already spent; and a mixture
+  world, where the number of fields is the number of materials. A plane
+  nothing has written costs a chunk nothing at all.
+- A field says which plane it is in: {plane = 1, shift = 0, width = 4}.
+  plane defaults to 0, the game's own. Each plane is 8, 16 or 32 bits, the
+  first has no name and the rest must have one, and there are at most eight.
 - The fields may not overlap and may not reach past the word. set_format()
   says which rule was broken.
 - voxel_reg:dump_format() writes the format out, for a log line.
