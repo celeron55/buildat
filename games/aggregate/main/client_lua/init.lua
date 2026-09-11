@@ -487,6 +487,22 @@ local STRUCTURES = {
 	{name = "mineshaft", label = "Mineshaft - timber props"},
 }
 
+-- Places worth getting to quickly while testing. G goes to the next one, a
+-- couple of voxels up so the player falls onto the ground rather than
+-- spawning inside it.
+local PLACES = {
+	{name = "pooling site", p = {-79, 62, 167}},
+}
+local place_i = 0
+
+local function go_to_next_place()
+	if #PLACES == 0 then return end
+	place_i = place_i % #PLACES + 1
+	local pl = PLACES[place_i]
+	player_node.position = magic.Vector3(pl.p[1], pl.p[2] + 3, pl.p[3])
+	log:info("Went to "..pl.name.." ("..pl.p[1]..", "..pl.p[2]..", "..pl.p[3]..")")
+end
+
 local structure_menu = nil
 
 local function place_structure(name, p)
@@ -721,6 +737,9 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	if key == magic.KEY_B then
 		open_structure_menu()
 	end
+	if key == magic.KEY_G then
+		go_to_next_place()
+	end
 	if key == magic.KEY_TAB then
 		set_free_move(not free_move)
 	end
@@ -765,6 +784,21 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	log:info("MouseButtonDown: "..button)
 	if button == magic.MOUSEB_RIGHT then
 		local p = pointed_voxel_p_above
+		-- Water with nothing in reach goes in front of you instead, a voxel
+		-- off the ground. Pouring it is the one thing you do at nothing in
+		-- particular, and aiming at a surface first is how a puddle ends up
+		-- being poured one voxel at a time onto a wall.
+		if not p and BUILD_MATERIALS[build_material].name == "water" then
+			local c = player_node.position
+			local d = camera_node.worldDirection
+			local h = math.sqrt(d.x * d.x + d.z * d.z)
+			if h > 0.01 then
+				p = buildat.Vector3(
+						math.floor(c.x + d.x / h * 2 + 0.5),
+						math.floor(c.y - PLAYER_HEIGHT / 2 + 0.5) + 1,
+						math.floor(c.z + d.z / h * 2 + 0.5))
+			end
+		end
 		if p then
 			local data = cereal.binary_output({
 				p = {

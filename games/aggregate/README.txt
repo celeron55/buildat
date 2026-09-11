@@ -44,6 +44,17 @@ And what undermine has no answer to at all:
   water can be. So saturation is how much of the *void* is taken: soil has
   little room and is soaked by a little water where gravel takes four times
   as much before it gives.
+- **Water has a rate, not only an amount.** How fast it crosses a boundary
+  is read off the composition, because rock, sand and binder are size
+  classes and the finest material present throttles the flow -- a little
+  clay in gravel ruins its drainage. So a bucket poured on turf pools and
+  soaks away over half a minute, where without a rate it was inside the
+  ground before the next frame. A tick is the step: a voxel moves water
+  once per tick however many times the relaxation looks at it.
+- **A part-full voxel is drawn part full.** Water is the one thing with a
+  level, and the sag_top geometry modifier puts its top face where its
+  contents reach, so a film of water on the ground is a film and not a cube
+  of water.
 - **Water moves and is conserved.** Down into whatever room is under it,
   then sideways, and held against gravity up to what the mixture's
   capillarity holds -- only what is over that runs off, which is why damp
@@ -83,6 +94,10 @@ Left button digs, right button places, and keys 1 to 5 pick what it places:
 rock, timber, brick, dirt, water. The line under the position says what the pointed
 voxel is made of and what the simulation thinks of it.
 
+Water is the one thing you pour at nothing in particular, so with water
+selected and nothing in reach, right button puts it a couple of voxels in
+front of you rather than doing nothing.
+
 B opens a menu of structures the server will put up where you stand: a
 chamber whose roof is wider than rock will span, a cathedral on pillars, a
 bridge on piers, a mineshaft with timber props. Finding out what happens when
@@ -91,6 +106,10 @@ a pillar is cut should not start with an hour of bricklaying.
 Tab is a free camera: it goes where it is pointed, through anything, and
 nothing pulls it down. Turn it on before placing a structure and the camera
 takes itself somewhere the whole thing is in frame.
+
+G goes to a place worth testing at -- the one so far is the pool site at
+(-79, 62, 167), a hollow in the dramatic terrain where water can be poured
+and watched. See PLACES in main/client_lua/init.lua.
 
 V cycles the views: off, load, support, danger. The same voxels are drawn as
 a gradient from green to red -- how much of what a voxel can carry is on it,
