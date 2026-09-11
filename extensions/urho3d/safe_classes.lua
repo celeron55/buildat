@@ -1035,7 +1035,12 @@ function M.define(dst, util)
 			fixedHeight = {get = util.simple_property("number").get},
 			fixedWidth = {get = util.simple_property("number").get},
 			fixedSize = {get = util.simple_property(dst.IntVector2).get},
-			defaultStyle = util.simple_property("XMLFile"),
+			-- "__nil" because an element that has not been given a style
+			-- reads back nil, and a property that can be unset has to say so
+			-- or reading it throws. The same is true of every other
+			-- object-typed property here that a game might read before
+			-- setting it.
+			defaultStyle = util.simple_property({dst.XMLFile, "__nil"}),
 			selected = util.simple_property("boolean"),
 			-- Off by default in Urho3D: an element that is not enabled is
 			-- not hit by a click, so nothing under the mouse is found and
