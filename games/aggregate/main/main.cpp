@@ -175,14 +175,19 @@ struct Mix
 // generator and a structure can say "timber" and mean something the look
 // rules will agree with.
 //                            rock sand fibr bind water bond life
+// Every one of these has to be something that can stand still: packed at or
+// under its own limit, with its water fitting in what is left. The check at
+// the end of on_start() says so, and it is what the numbers here were tuned
+// against -- a recipe that is overfull pushes solid into its neighbours the
+// moment the simulation looks at it, and a world made of it never settles.
 static const Mix MIX_AIR;
 static const Mix MIX_WATER   (  0,   0,   0,   0,  255,   0,   0);
 static const Mix MIX_BEDROCK (15,   0,   0,   0,    0,  15,   0);
-static const Mix MIX_STONE   (15,   0,   0,   0,    0,  12,   0);
-static const Mix MIX_GRAVEL  (12,   2,   0,   0,    0,   0,   0);
-static const Mix MIX_SAND    ( 0,  12,   0,   0,    0,   0,   0);
-static const Mix MIX_SOIL    ( 0,   9,   1,   4,    0,   8,   0);
-static const Mix MIX_TURF    ( 0,   9,   2,   4,    0,   8,  12);
+static const Mix MIX_STONE   (14,   0,   0,   0,    0,  12,   0);
+static const Mix MIX_GRAVEL  ( 8,   2,   0,   0,    0,   0,   0);
+static const Mix MIX_SAND    ( 0,  10,   0,   0,    0,   0,   0);
+static const Mix MIX_SOIL    ( 0,   8,   1,   4,    0,   8,   0);
+static const Mix MIX_TURF    ( 0,   8,   2,   3,    0,   8,  12);
 static const Mix MIX_BRICK   (10,   3,   0,   2,    0,  15,   0);
 static const Mix MIX_TIMBER  ( 0,   0,   9,   4,    0,  14,   0);
 static const Mix MIX_TRUNK   ( 0,   0,   9,   4,    0,  14,  15);
@@ -248,11 +253,81 @@ static uint8_t saturation(const Mix &m)
 	return (uint8_t)(s > 15 ? 15 : s);
 }
 
-// Whether water can get into it at all. Anything bonded is closed: a stone
-// wall holds water out, and a timber hull floats.
+// Whether water can get into it at all. What closes a mixture is not its
+// bond but its binder: a mass of the stuff that has set has no pores, which
+// is what makes concrete and fired brick watertight. Everything else with
+// room in it has room water can reach -- wood included, which is why a wet
+// beam is heavier than a dry one.
 static bool takes_water(const Mix &m)
 {
-	return m.bond < 12 && water_room(m) > 0;
+	return m.binder < 12 && water_room(m) > 0;
+}
+
+// How much solid a mixture holds before it has to give some up, in the same
+// fifteenths the fractions are in.
+//
+// A heap of loose grains cannot be packed past its own limit, and the limit
+// is the material's: rounded mineral grains leave about a third of the space
+// between them however hard they are pressed, which is why **sand and gravel
+// hold water even when fully compacted**. Fibre packs better, and a binder
+// that has set fills what it is in.
+//
+// What raises the limit is bond: material held together is a piece of
+// something rather than a heap of it, and a piece can be solid through.
+// Load raises it a little too, which is compaction -- the same solid in less
+// room -- and is the step before anything has to be pushed out.
+static int packed_limit(const Mix &m, uint8_t band)
+{
+	const int solid = (int)m.rock + m.sand + m.fibre + m.binder;
+	if(solid <= 0)
+		return FRACTION_MAX;
+	// The materials' own packing, weighted by how much of each there is
+	const int loose = (10 * ((int)m.rock + m.sand) + 13 * (int)m.fibre +
+			15 * (int)m.binder) / solid;
+	// Bond closes the gap to solid-through
+	int limit = loose + (FRACTION_MAX - loose) * (int)m.bond / BOND_MAX;
+	// And the weight on it packs it down by up to one fifteenth more
+	limit += (int)band / 8;
+	return limit > FRACTION_MAX ? FRACTION_MAX : limit;
+}
+
+// How much of the solid has nowhere to be, in fifteenths
+static int excess_solid(const Mix &m, uint8_t band)
+{
+	const int solid = (int)m.rock + m.sand + m.fibre + m.binder;
+	const int over = solid - packed_limit(m, band);
+	return over > 0 ? over : 0;
+}
+
+// How much more solid would go in
+static int solid_room(const Mix &m, uint8_t band)
+{
+	const int solid = (int)m.rock + m.sand + m.fibre + m.binder;
+	const int room = packed_limit(m, band) - solid;
+	return room > 0 ? room : 0;
+}
+
+// Take one fifteenth of solid out of a mixture, from whatever there is most
+// of, and say what it was. Fractions are small numbers and this is how they
+// move: a whole unit of the material that dominates, rather than a rounded
+// share of each, which would quantise to nothing.
+static int take_solid_unit(Mix &m)
+{
+	uint8_t *most = &m.rock;
+	if(m.sand > *most) most = &m.sand;
+	if(m.fibre > *most) most = &m.fibre;
+	if(m.binder > *most) most = &m.binder;
+	if(*most == 0)
+		return -1;
+	(*most)--;
+	return (int)(most - &m.rock);
+}
+
+static void give_solid_unit(Mix &m, int which)
+{
+	uint8_t *f = &m.rock + which;
+	if(*f < FRACTION_MAX)
+		(*f)++;
 }
 
 // How far a mixture reaches out over nothing.
@@ -1054,6 +1129,22 @@ struct Module: public interface::Module
 						log_w(MODULE, "look rules: %s reads as %i and not "
 								"%i", c.name, (int)got, (int)c.want);
 					}
+					// A recipe has to be something that can stand still.
+					// One that is packed past its own limit pushes solid
+					// into its neighbours the moment the simulation looks
+					// at it, and a world made of it never settles.
+					const int over = excess_solid(c.mix, 0);
+					if(over > 0){
+						log_w(MODULE, "packing: %s is %i fifteenths past "
+								"what it can hold (%i of %i)", c.name, over,
+								(int)c.mix.rock + c.mix.sand + c.mix.fibre +
+								c.mix.binder, packed_limit(c.mix, 0));
+					}
+					// And its water has to fit in what is left
+					if((int)c.mix.water > void_fill(c.mix)){
+						log_w(MODULE, "packing: %s holds more water than it "
+								"has room for", c.name);
+					}
 				}
 			}
 
@@ -1395,6 +1486,66 @@ struct Module: public interface::Module
 		return moved;
 	}
 
+	// Solid that has nowhere to be, pushed into a neighbour that has room.
+	//
+	// What makes this happen is bond going away: material that was a piece
+	// of something and is now a heap of it cannot be as dense, so a collapse
+	// bulks -- the rubble takes up more room than the rock did, which is
+	// what a real cave-in does and what keeps one from tidily plugging the
+	// hole it came out of.
+	//
+	// Down first, then sideways, then up, which is the order a heap settles
+	// in. Water is pushed out of the way as the room for it shrinks; there
+	// is nowhere for it to go but up, and that is what squeezing saturated
+	// ground does.
+	bool migrate_solid(voxelworld::Instance *world,
+			const pv::Vector3DInt32 &p, Mix &mix, uint8_t band)
+	{
+		int over = excess_solid(mix, band);
+		if(over <= 0)
+			return false;
+		static const int OFF[6][3] = {
+			{0,-1,0}, {1,0,0}, {-1,0,0}, {0,0,1}, {0,0,-1}, {0,1,0},
+		};
+		bool moved = false;
+		for(size_t k = 0; k < 6 && over > 0; k++){
+			const pv::Vector3DInt32 n(p.getX() + OFF[k][0],
+					p.getY() + OFF[k][1], p.getZ() + OFF[k][2]);
+			interface::VoxelSample nv = peek(world, n);
+			if(!is_generated(nv))
+				continue;
+			Mix nmix = mix_of(nv);
+			// Into a heap or into nothing, not into something standing:
+			// a piece of stone is not where loose material goes
+			if(nmix.bond >= 12)
+				continue;
+			int room = solid_room(nmix, band_of(nv));
+			while(over > 0 && room > 0){
+				const int which = take_solid_unit(mix);
+				if(which < 0)
+					break;
+				give_solid_unit(nmix, which);
+				// What it was holding together is not holding this
+				nmix.bond = 0;
+				over--;
+				room--;
+				moved = true;
+			}
+			if(moved){
+				// The room for water just shrank; what does not fit goes
+				// back up the way it came
+				const int spill = (int)nmix.water - void_fill(nmix);
+				if(spill > 0){
+					nmix.water -= (uint8_t)spill;
+					if(water_room(mix) >= spill)
+						mix.water += (uint8_t)spill;
+				}
+				write_mix(nv, n, nmix);
+			}
+		}
+		return moved;
+	}
+
 	// A neighbour the migration changed: into the scratch, and dirty, so
 	// that the water carries on moving next time round
 	void write_mix(interface::VoxelSample v, const pv::Vector3DInt32 &p,
@@ -1441,12 +1592,20 @@ struct Module: public interface::Module
 		// could see the difference, here the water is simply part of what
 		// the voxel is made of -- the tint darkens it and the capacity
 		// drops, and no material changed into another one.
+		const Mix mix_was = mix;
 		migrate_water(world, p, mix);
+		// Solid that has nowhere to be, which is what a heap that used to
+		// be a piece of something has. band_of(v) is last tick's, which is
+		// what the load was when the bond went.
+		migrate_solid(world, p, mix, band_of(v));
 		const bool wetness_moved = mix.water != water_was;
+		const bool solid_moved =
+				mix.rock != mix_was.rock || mix.sand != mix_was.sand ||
+				mix.fibre != mix_was.fibre || mix.binder != mix_was.binder;
 
 		MaterialProps m = props_of(mix);
 		if(!m.structural){
-			if(wetness_moved){
+			if(wetness_moved || solid_moved){
 				interface::VoxelSample nv = v;
 				set_mix(nv, mix);
 				// Nothing structural: no load on it and none of it on
@@ -1463,7 +1622,7 @@ struct Module: public interface::Module
 		uint8_t load = compute_load(world, p);
 		uint8_t band = load_band(load, m.capacity);
 		bool support_moved = support != support_of(v);
-		if(support_moved || wetness_moved || band != band_of(v)){
+		if(support_moved || wetness_moved || solid_moved || band != band_of(v)){
 			interface::VoxelSample nv = v;
 			set_mix(nv, mix);
 			set_state(nv, support, band);
@@ -1471,7 +1630,7 @@ struct Module: public interface::Module
 		}
 		// A support that moved changes what the voxels around it can reach,
 		// and so does water arriving or leaving
-		if(support_moved || wetness_moved){
+		if(support_moved || wetness_moved || solid_moved){
 			static const int OFF[6][3] = {
 				{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1},
 			};
