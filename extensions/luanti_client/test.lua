@@ -1730,8 +1730,15 @@ end
 -- A rooted plant's shape is a full cube with the plant on top of it, and it
 -- says so: a neighbouring liquid must cull its face against the cube instead
 -- of drawing a water surface around the plant's base
-local rooted = shapes.for_node({drawtype = 17, visual_scale = 1})
-assert(rooted.solid_base, "shapes: a rooted plant's shape fills its voxel")
+local rooted, _, _, rooted_solid =
+		shapes.for_node({drawtype = 17, visual_scale = 1})
+assert(rooted_solid, "shapes: a rooted plant's shape fills its voxel")
+-- And the shape itself is a plain list of quads: the mesher's setter walks
+-- every key of it and throws on anything that is not a quad
+for k in pairs(rooted) do
+	assert(type(k) == "number", "shapes: a shape carries a non-quad key "..
+			tostring(k))
+end
 assert(#rooted == 8, "shapes: a rooted plant is a cube and two quads, not "..
 		#rooted)
 

@@ -798,7 +798,7 @@ function M.new(magic, buildat, log, options)
 
 	local function add_cube(voxel_reg, name, resources, kind, shape,
 			double_sided, turns, liquid_group, connect, masked, variants,
-			blend)
+			blend, solid_base)
 		local vdef = buildat.VoxelDefinition()
 		vdef.name.block_name = name
 		vdef.handler_module = ""
@@ -907,7 +907,7 @@ function M.new(magic, buildat, log, options)
 			-- shaped surface on top of them. So does a shape that fills the
 			-- voxel anyway; see rooted_quads().
 			if not (liquid_group and liquid_group ~= 0) and
-					not shape.solid_base then
+					not solid_base then
 				vdef.edge_material_id =
 						buildat.VoxelDefinition.EDGEMATERIALID_EMPTY
 			end
@@ -3228,8 +3228,8 @@ function M.new(magic, buildat, log, options)
 			end
 			return resolve_tile(d, i, o)
 		end
-		local shape, double_sided, masked = shapes.for_node(def, nil,
-				nil, read_mesh and read_mesh(def) or nil, nil)
+		local shape, double_sided, masked, solid_base = shapes.for_node(def,
+				nil, nil, read_mesh and read_mesh(def) or nil, nil)
 		if def.drawtype == DRAWTYPE_AIRLIKE then
 			return VOXEL_AIR
 		end
@@ -3275,7 +3275,7 @@ function M.new(magic, buildat, log, options)
 			end
 			return add_cube(reg, name or def.name, resources, kind, shape,
 					double_sided, nil, group, connect, masked, variants,
-					def.alpha_mode == NODEDEF_ALPHAMODE_BLEND)
+					def.alpha_mode == NODEDEF_ALPHAMODE_BLEND, solid_base)
 		end
 		if not kind then
 			return nil
