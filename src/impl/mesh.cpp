@@ -30,6 +30,8 @@ namespace magic = Urho3D;
 namespace pv = PolyVox;
 
 using interface::VoxelInstance;
+using interface::VoxelSample;
+using interface::VoxelSampleView;
 using interface::VoxelRegistry;
 
 // The voxel format's fields, read out of the registry once per chunk instead
@@ -94,56 +96,56 @@ struct VoxelFmt
 		return n_surface != 0 || sag_top.bound() || sag_bottom.bound();
 	}
 	// The four scalars a shader is handed, 0...1 each
-	void surface_of(const VoxelInstance &v, float out[
+	void surface_of(const VoxelSample &v, float out[
 			interface::VOXEL_SURFACE_MODIFIERS]) const
 	{
 		for(size_t i = 0; i < interface::VOXEL_SURFACE_MODIFIERS; i++){
 			out[i] = i < n_surface ?
-					(float)surface[i].get(v.data) / surface_div[i] : 0.0f;
+					(float)surface[i].get(v) / surface_div[i] : 0.0f;
 		}
 	}
-	float tint_f(const VoxelInstance &v) const
+	float tint_f(const VoxelSample &v) const
 	{
-		return tint.bound() ? (float)tint.get(v.data) / tint_div : 0.0f;
+		return tint.bound() ? (float)tint.get(v) / tint_div : 0.0f;
 	}
-	float sag_top_f(const VoxelInstance &v) const
+	float sag_top_f(const VoxelSample &v) const
 	{
 		return sag_top.bound() ?
-				(float)sag_top.get(v.data) / sag_top_div : 0.0f;
+				(float)sag_top.get(v) / sag_top_div : 0.0f;
 	}
-	float sag_bottom_f(const VoxelInstance &v) const
+	float sag_bottom_f(const VoxelSample &v) const
 	{
 		return sag_bottom.bound() ?
-				(float)sag_bottom.get(v.data) / sag_bottom_div : 0.0f;
+				(float)sag_bottom.get(v) / sag_bottom_div : 0.0f;
 	}
 
-	interface::VoxelTypeId id_of(const VoxelInstance &v) const
+	interface::VoxelTypeId id_of(const VoxelSample &v) const
 	{
-		return id.bound() ? (interface::VoxelTypeId)id.get(v.data) : 1;
+		return id.bound() ? (interface::VoxelTypeId)id.get(v) : 1;
 	}
 	// Which definition this voxel wears, which is the id role for a world
 	// that has one and a threshold over fields for a world that does not.
 	// What goes into PolyVox's per-face material, so that the geometry pass
 	// finds the same definition the face-culling pass did.
-	interface::VoxelTypeId look_id(const VoxelInstance &v) const
+	interface::VoxelTypeId look_id(const VoxelSample &v) const
 	{
-		return look.id_of(v.data, format);
+		return look.id_of(v, format);
 	}
 	// Nothing has generated this voxel yet. A format with no id bound has one
 	// voxel type and no way to say that, so nothing is undefined there.
-	bool undefined(const VoxelInstance &v) const
+	bool undefined(const VoxelSample &v) const
 	{
 		return id_of(v) == interface::VOXELTYPEID_UNDEFINED;
 	}
-	float sky_f(const VoxelInstance &v) const
+	float sky_f(const VoxelSample &v) const
 	{
 		return light_sky.bound() ?
-				(float)light_sky.get(v.data) / sky_div : 0.0f;
+				(float)light_sky.get(v) / sky_div : 0.0f;
 	}
-	float lamp_f(const VoxelInstance &v) const
+	float lamp_f(const VoxelSample &v) const
 	{
 		return light_lamp.bound() ?
-				(float)light_lamp.get(v.data) / lamp_div : 0.0f;
+				(float)light_lamp.get(v) / lamp_div : 0.0f;
 	}
 };
 
@@ -250,12 +252,12 @@ Model* create_8bit_voxel_physics_model(Context *context,
 			for(int x = -1; x <= w; x++){
 				if(z == -1 || y == -1 || x == -1 ||
 						z == d || y == h || x == w){
-					volume.setVoxelAt(x, y, z, VoxelInstance(0));
+					volume.set_sample_at(x, y, z, VoxelSample());
 				} else {
 					uint8_t c = (uint8_t)source_data[i++];
-					VoxelInstance v(0);
-					fmt.id.set(v.data, c);
-					volume.setVoxelAt(x, y, z, v);
+					VoxelSample v;
+					fmt.id.set(v, c);
+					volume.set_sample_at(x, y, z, v);
 				}
 			}
 		}
@@ -280,10 +282,10 @@ void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 	for(int z = -1; z <= d; z++){
 		for(int y = -1; y <= h; y++){
 			for(int x = -1; x <= w; x++){
-				VoxelInstance v(0);
+				VoxelSample v;
 				if(!(z == -1 || y == -1 || x == -1 ||
 						z == d || y == h || x == w))
-					fmt.id.set(v.data, (uint8_t)source_data[i++]);
+					fmt.id.set(v, (uint8_t)source_data[i++]);
 				// 8 bit data has no room for a light value, and this is a
 				// model standing on its own rather than a piece of a world
 				// that could light it, so it is lit as if it were out in the
@@ -292,8 +294,8 @@ void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 				// what is left is the reflection, and every texel of the
 				// derived normal map then reflects the sky in its own
 				// direction, which comes out as speckle.
-				fmt.light_sky.set(v.data, fmt.light_sky.mask());
-				volume.setVoxelAt(x, y, z, v);
+				fmt.light_sky.set(v, fmt.light_sky.mask());
+				volume.set_sample_at(x, y, z, v);
 			}
 		}
 	}
@@ -346,11 +348,14 @@ Model* create_voxel_physics_model(Context *context,
 		VoxelVolume &volume,
 		VoxelRegistry *voxel_reg)
 {
-	IsQuadNeededByRegistryPhysics<VoxelInstance> iqn(voxel_reg);
+	IsQuadNeededByRegistryPhysics<VoxelSample> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
-	pv::CubicSurfaceExtractorWithNormals<VoxelVolume,
-				IsQuadNeededByRegistryPhysics<VoxelInstance>>
-			surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh, iqn);
+	// The extractor sees the volume as samples: what says whether there is a
+	// face here can be any plane of a voxel and not only the first
+	VoxelSampleView view(&volume);
+	pv::CubicSurfaceExtractorWithNormals<VoxelSampleView,
+				IsQuadNeededByRegistryPhysics<VoxelSample>>
+			surfaceExtractor(&view, volume.getEnclosingRegion(), &pv_mesh, iqn);
 	surfaceExtractor.execute();
 
 	const sv_<uint32_t> &pv_indices = pv_mesh.getIndices();
@@ -543,7 +548,7 @@ static bool occludes(VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
 		const pv::Vector3DInt32 &p)
 {
-	VoxelInstance v = volume.getVoxelAt(p);
+	VoxelSample v = volume.sample_at(p);
 	if(fmt.undefined(v))
 		return false; // Unfilled chunk padding; assume open
 	const interface::CachedVoxelDefinition *def = voxel_reg->get_cached(v);
@@ -570,10 +575,10 @@ static pv::Vector3DInt32 face_back_pos(VoxelVolume &volume,
 			vlc.getZ() + (int)std::floor(centre.getZ() - n.getZ()*0.5f + 0.5f));
 }
 
-static VoxelInstance face_back_voxel(VoxelVolume &volume,
+static VoxelSample face_back_voxel(VoxelVolume &volume,
 		const pv::Vector3DFloat *quad, const pv::Vector3DFloat &n)
 {
-	return volume.getVoxelAt(face_back_pos(volume, quad, n));
+	return volume.sample_at(face_back_pos(volume, quad, n));
 }
 
 // How far a face has moved at one corner: the average sag of the up to four
@@ -600,7 +605,7 @@ static float sag_at_corner(VoxelVolume &volume,
 	int n = 0;
 	for(int ix = 0; ix < 2; ix++){
 		for(int iz = 0; iz < 2; iz++){
-			VoxelInstance v = volume.getVoxelAt(x + ix, y, z + iz);
+			VoxelSample v = volume.sample_at(x + ix, y, z + iz);
 			if(fmt.undefined(v))
 				continue;
 			const interface::CachedVoxelDefinition *def =
@@ -608,7 +613,7 @@ static float sag_at_corner(VoxelVolume &volume,
 			if(def == nullptr || def->sag_extent == 0.0f)
 				continue;
 			n++;
-			VoxelInstance over = volume.getVoxelAt(x + ix,
+			VoxelSample over = volume.sample_at(x + ix,
 					y + (top ? 1 : -1), z + iz);
 			const interface::CachedVoxelDefinition *over_def =
 					fmt.undefined(over) ? nullptr : voxel_reg->get_cached(over);
@@ -723,9 +728,9 @@ static void face_vertex_colors(VoxelVolume &volume,
 				vlc.getZ() + (int)std::floor(centre.getZ() + n.getZ()*s + 0.5f));
 	};
 	const pv::Vector3DInt32 front_p = voxel_at(0.5f);
-	VoxelInstance front = volume.getVoxelAt(front_p);
-	VoxelInstance lit = fmt.undefined(front) ?
-			volume.getVoxelAt(voxel_at(-0.5f)) : front;
+	VoxelSample front = volume.sample_at(front_p);
+	VoxelSample lit = fmt.undefined(front) ?
+			volume.sample_at(voxel_at(-0.5f)) : front;
 	float sky_f = fmt.sky_f(lit);
 	float lamp_f = fmt.lamp_f(lit);
 
@@ -881,7 +886,7 @@ void preload_textures(VoxelVolume &volume,
 	for(int z = lc.getZ(); z <= uc.getZ(); z++){
 		for(int y = lc.getY(); y <= uc.getY(); y++){
 			for(int x = lc.getX(); x <= uc.getX(); x++){
-				VoxelInstance v = volume.getVoxelAt(x, y, z);
+				VoxelSample v = volume.sample_at(x, y, z);
 				const interface::CachedVoxelDefinition *def =
 						voxel_reg->get_cached(v, atlas_reg, with_lod);
 				if(!def)
@@ -906,11 +911,12 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		sm_<uint, TemporaryGeometry> *translucent_result)
 {
 	const VoxelFmt fmt(voxel_reg);
-	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg);
+	IsQuadNeededByRegistry<VoxelSample> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
-	pv::CubicSurfaceExtractorWithNormals<VoxelVolume,
-				IsQuadNeededByRegistry<VoxelInstance>>
-			surfaceExtractor(&volume, volume.getEnclosingRegion(), &pv_mesh, iqn);
+	VoxelSampleView view(&volume);
+	pv::CubicSurfaceExtractorWithNormals<VoxelSampleView,
+				IsQuadNeededByRegistry<VoxelSample>>
+			surfaceExtractor(&view, volume.getEnclosingRegion(), &pv_mesh, iqn);
 	surfaceExtractor.execute();
 
 	const sv_<uint32_t> &pv_indices = pv_mesh.getIndices();
@@ -963,11 +969,11 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		float mods[interface::VOXEL_SURFACE_MODIFIERS] = {};
 		if((fmt.param.bound() && !voxel_def0->variants.empty()) ||
 				fmt.color.bound() || fmt.n_surface != 0){
-			VoxelInstance back = face_back_voxel(volume, quad, n);
+			VoxelSample back = face_back_voxel(volume, quad, n);
 			if(fmt.param.bound() && !voxel_def0->variants.empty())
-				variant = voxel_def0->variant(fmt.param.get(back.data));
+				variant = voxel_def0->variant(fmt.param.get(back));
 			if(fmt.color.bound())
-				voxel_color = fmt.color.get(back.data) & 0xffffffUL;
+				voxel_color = fmt.color.get(back) & 0xffffffUL;
 			if(fmt.n_surface != 0){
 				fmt.surface_of(back, mods);
 				// The tint is the one modifier that is a colour rather than
@@ -1161,13 +1167,13 @@ static float liquid_corner_top(VoxelVolume &volume,
 	for(size_t i = 0; i < 4; i++){
 		int cx = x + off[i][0];
 		int cz = z + off[i][1];
-		VoxelInstance av = volume.getVoxelAt(cx, y + 1, cz);
+		VoxelSample av = volume.sample_at(cx, y + 1, cz);
 		const interface::CachedVoxelDefinition *adef =
 				fmt.undefined(av) ? nullptr : voxel_reg->get_cached(av);
 		if(adef != nullptr && adef->is_liquid &&
 				adef->shape_group == def->shape_group)
 			return 0.5f;
-		VoxelInstance cv = volume.getVoxelAt(cx, y, cz);
+		VoxelSample cv = volume.sample_at(cx, y, cz);
 		const interface::CachedVoxelDefinition *cdef =
 				fmt.undefined(cv) ? nullptr : voxel_reg->get_cached(cv);
 		if(cdef == nullptr)
@@ -1177,7 +1183,7 @@ static float liquid_corner_top(VoxelVolume &volume,
 			// same as the voxel being meshed: Luanti puts a flowing liquid's
 			// level in param2
 			const interface::VoxelVariant *cvar = fmt.param.bound() ?
-					cdef->variant(fmt.param.get(cv.data)) : nullptr;
+					cdef->variant(fmt.param.get(cv)) : nullptr;
 			sum += cvar ? cvar->liquid_top : cdef->liquid_top;
 			count++;
 		} else if(cdef->fully_empty){
@@ -1205,7 +1211,7 @@ static bool connects_to(VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt, int x, int y, int z,
 		const interface::CachedVoxelDefinition *def)
 {
-	VoxelInstance nv = volume.getVoxelAt(x, y, z);
+	VoxelSample nv = volume.sample_at(x, y, z);
 	if(fmt.undefined(nv))
 		return false;
 	const interface::CachedVoxelDefinition *ndef = voxel_reg->get_cached(nv);
@@ -1285,7 +1291,7 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 	for(int z = lc.getZ() + 1; z <= uc.getZ() - 1; z++){
 		for(int y = lc.getY() + 1; y <= uc.getY() - 1; y++){
 			for(int x = lc.getX() + 1; x <= uc.getX() - 1; x++){
-				VoxelInstance v = volume.getVoxelAt(x, y, z);
+				VoxelSample v = volume.sample_at(x, y, z);
 				const interface::CachedVoxelDefinition *def =
 						voxel_reg->get_cached(v);
 				if(def == nullptr)
@@ -1293,7 +1299,7 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 				// What this voxel's param says about drawing it: a shape of
 				// its own, a colour, how high its liquid stands
 				const interface::VoxelVariant *variant = fmt.param.bound() ?
-						def->variant(fmt.param.get(v.data)) : nullptr;
+						def->variant(fmt.param.get(v)) : nullptr;
 				const sv_<interface::VoxelQuad> &own_shape =
 						(variant && !variant->shape.empty()) ?
 						variant->shape : def->shape;
@@ -1424,7 +1430,7 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 					};
 					if(def->shape_group != 0 &&
 							std::fabs(n.Data()[FACE_AXIS[face_id]]) > 0.99f){
-						VoxelInstance nv = volume.getVoxelAt(
+						VoxelSample nv = volume.sample_at(
 								x + FACE_DIR[face_id][0],
 								y + FACE_DIR[face_id][1],
 								z + FACE_DIR[face_id][2]);
@@ -1464,7 +1470,7 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 					}
 					uint32_t tint = 0xffffff;
 					if(fmt.color.bound())
-						tint = fmt.color.get(v.data) & 0xffffffUL;
+						tint = fmt.color.get(v) & 0xffffffUL;
 					if(variant)
 						tint = mul_rgb(tint, variant->color);
 					if(tint != 0xffffff){
@@ -1600,7 +1606,7 @@ up_<VoxelVolume> generate_voxel_lod_volume(
 	for(int z = lc.getZ(); z <= uc.getZ(); z++){
 		for(int y = lc.getY(); y <= uc.getY(); y++){
 			for(int x = lc.getX(); x <= uc.getX(); x++){
-				VoxelInstance v_orig(interface::VOXELTYPEID_UNDEFINED);
+				VoxelSample v_orig;
 				for(int x1 = 0; x1 < lod; x1++){
 					for(int y1 = 0; y1 < lod; y1++){
 						for(int z1 = 0; z1 < lod; z1++){
@@ -1611,7 +1617,7 @@ up_<VoxelVolume> generate_voxel_lod_volume(
 							);
 							if(!region_orig.containsPoint(p_orig))
 								continue;
-							VoxelInstance v1 = volume_orig.getVoxelAt(p_orig);
+							VoxelSample v1 = volume_orig.sample_at(p_orig);
 							if(fmt.undefined(v1))
 								continue;
 							// TODO: Prioritize voxel types better
@@ -1625,7 +1631,7 @@ up_<VoxelVolume> generate_voxel_lod_volume(
 						}
 					}
 				}
-				volume->setVoxelAt(x, y, z, v_orig);
+				volume->set_sample_at(x, y, z, v_orig);
 			}
 		}
 	}
@@ -1640,11 +1646,12 @@ void generate_voxel_lod_geometry(int lod,
 		bool use_skylight)
 {
 	const VoxelFmt fmt(voxel_reg);
-	IsQuadNeededByRegistry<VoxelInstance> iqn(voxel_reg);
+	IsQuadNeededByRegistry<VoxelSample> iqn(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
-	pv::CubicSurfaceExtractorWithNormals<VoxelVolume,
-				IsQuadNeededByRegistry<VoxelInstance>>
-			surfaceExtractor(&lod_volume, lod_volume.getEnclosingRegion(), &pv_mesh, iqn);
+	VoxelSampleView lod_view(&lod_volume);
+	pv::CubicSurfaceExtractorWithNormals<VoxelSampleView,
+				IsQuadNeededByRegistry<VoxelSample>>
+			surfaceExtractor(&lod_view, lod_volume.getEnclosingRegion(), &pv_mesh, iqn);
 	surfaceExtractor.execute();
 
 	const sv_<uint32_t> &pv_indices = pv_mesh.getIndices();
@@ -1851,7 +1858,7 @@ void generate_voxel_physics_boxes(
 					volume.setVoxelAt(x, y, z, 0);
 					continue;
 				}
-				VoxelInstance v_orig = volume_orig.getVoxelAt(x, y, z);
+				VoxelSample v_orig = volume_orig.sample_at(x, y, z);
 				const interface::CachedVoxelDefinition *def =
 						voxel_reg->get_cached(v_orig);
 				if(!def){

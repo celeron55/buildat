@@ -601,6 +601,8 @@ namespace interface
 		// most of the cost of a voxel type's textures.
 		virtual const CachedVoxelDefinition* get_cached(const VoxelTypeId &id,
 				AtlasRegistry *atlas_reg = nullptr, bool with_lod = false) = 0;
+		virtual const CachedVoxelDefinition* get_cached(const VoxelSample &v,
+				AtlasRegistry *atlas_reg = nullptr, bool with_lod = false) = 0;
 		virtual const CachedVoxelDefinition* get_cached(const VoxelInstance &v,
 				AtlasRegistry *atlas_reg = nullptr, bool with_lod = false) = 0;
 

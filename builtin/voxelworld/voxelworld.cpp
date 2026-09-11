@@ -1048,6 +1048,13 @@ struct CInstance: public voxelworld::Instance
 				continue;
 			}
 
+			// Whatever planes the incoming volume has, the chunk gets --
+			// which is how a field a generator writes reaches storage
+			// without voxelworld being told about it
+			buf.volume->add_planes(volume.planes());
+			const size_t num_extra_planes = volume.planes().size() > 1 ?
+					volume.planes().size() - 1 : 0;
+
 			pv::Region chunk_region = get_chunk_region_voxels(chunk_p);
 			pv::Vector3DInt32 lc = chunk_region.getLowerCorner();
 			pv::Vector3DInt32 uc = chunk_region.getUpperCorner();
@@ -1109,6 +1116,16 @@ struct CInstance: public voxelworld::Instance
 				}
 
 				dst.setVoxel(nv);
+				// The sampler is plane 0; anything else the volume carries
+				// is copied by position. Only a world that has more than
+				// one plane pays for this.
+				for(size_t pi = 1; pi <= num_extra_planes; pi++){
+					buf.volume->set_plane_at((uint8_t)pi,
+							x - chunk_off.getX(),
+							y - chunk_off.getY(),
+							z - chunk_off.getZ(),
+							volume.plane_at((uint8_t)pi, x, y, z));
+				}
 				chunk_written = true;
 				num_written++;
 			}
