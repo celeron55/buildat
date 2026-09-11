@@ -99,10 +99,6 @@ function M.rooted_quads(scale, out)
 	out[#out + 1] = {tile = 7,
 			p = {-d, top, d, d, top, -d, d, 0.5, -d, -d, 0.5, d},
 			uv = {0, 0, 1, 0, 1, 1, 0, 1}}
-	-- The shape's own cube fills the voxel, so a neighbour must draw its face
-	-- against this one as it would against ground. Without it a kelp on the
-	-- sea bed has a water surface drawn around its base.
-	out.solid_base = true
 	return out
 end
 
@@ -560,7 +556,12 @@ function M.for_node(def, facedir, wall, mesh_quads, liquid_top)
 		-- shape is double sided for the plant's sake, which costs the
 		-- cube's faces nothing that matters since they are against
 		-- something.
-		return M.rooted_quads(def.visual_scale), true
+		--
+		-- The fourth value says that the shape's own cube fills the voxel,
+		-- so a neighbour draws its face against this one as it would
+		-- against ground. Without it a kelp on the sea bed has a water
+		-- surface drawn around its base.
+		return M.rooted_quads(def.visual_scale), true, nil, true
 	end
 	if drawtype == 14 then -- FIRELIKE
 		return M.plant_quads(def.visual_scale), true
