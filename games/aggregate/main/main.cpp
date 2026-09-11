@@ -9,6 +9,7 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/voxel.h"
+#include "interface/voxel_selector.h"
 #include "interface/noise.h"
 #include "interface/voxel_volume.h"
 #include <Scene.h>
@@ -73,70 +74,258 @@ static const int BEDROCK_TOP = -60;
 
 // This game's own cut of a voxel. See local/aggregate_game_plan.md.
 //
-//   id      0...7    up to 255 materials; there are twelve, and nature and
-//                    everything else it will grow have room
-//   sky     8...11   light, as voxelworld maintains it
-//   moisture 20...23 how near this voxel is to water, 0 for dry
-//   param  12...19   both of the simulation's numbers, packed:
-//                      high nibble  how much of what this voxel can carry is
-//                                   already on it, 0...15
-//                      low nibble   how far it is from something holding it
-//                                   up, 0...15
+// Two planes. The first is the engine's, and holds what the engine reads
+// plus the two numbers the simulation keeps; the second is this game's, and
+// holds what a voxel is made of.
 //
-// One field rather than two, and bound as the engine's `param` role, because
-// the role is the only thing the mesher can read -- and the views need both
-// numbers. A view is then a registry whose definitions decode these eight
-// bits its own way: the high nibble, the low nibble, or the worse of the
-// two. See build_view_registry().
+//   plane 0
+//     id       0...1    not a material id: there are no material ids here.
+//                       One bit that says a voxel has been generated at
+//                       all, which is what voxelworld means by
+//                       VOXELTYPEID_UNDEFINED and the only thing it needs
+//     sky      2...5    light, as voxelworld maintains it
+//     tint     6...9    the albedo tint, driven by how wet it is
+//     wetness 10...13   the same number again, for the shader
+//     support 14...17   how far this voxel is from something holding it up
+//     band    18...21   how much of what it can carry is on it, 1...15;
+//                       0 means "nothing structural here", which is what
+//                       the view registries key on
 //
-// The load is stored as a fraction of the voxel's own capacity rather than
-// as a weight, which is the normalisation a view needs anyway and is what
-// lets one nibble do. Nothing needs the weight itself: compute_load() works
-// it out from the column whenever the rules ask.
+//   plane 1, "aggregate:mix"
+//     rock     0...3    coarse mineral
+//     sand     4...7    fine mineral
+//     fibre    8...11   structural organic matter: wood, leaf, root
+//     binder  12...15   lignin, humus, clay, cement -- what holds a mixture
+//                       together, and what rot turns fibre into
+//     water   16...23   the only fluid; air is the absence of everything
+//     bond    24...27   how continuous the solid is. Not a material: a
+//                       plank and a heap of sawdust are the same mixture
+//     life    28...31   whether the fibre here is alive. Not a material
+//                       either: nothing moves when wood dies
 //
-// No lamp light. Nothing in this world bakes light into a voxel except the
-// sky: a lamp here is a real light in the scene, which is what the player's
-// own lamp already is, and the shader lights the geometry from it. The role
-// exists for a world whose *server* computed the lamp light per voxel and
-// sends it -- which is what a Luanti server does -- and binding it here
-// would spend four bits on a field nothing writes.
-//
-// support is not a role: the engine knows nothing about it, which is what
-// the design note means by a game's simulation fields being its own
-// business. Bits 24...31 are spare, which is exactly the eight the plan's
-// phase 3 wants for moisture and not one more.
-// One source of truth for the layout: the format is built out of these, and
-// the simulation reads and writes through them.
-static const interface::VoxelField F_ID(0, 0, 8);
-static const interface::VoxelField F_LIGHT_SKY(0, 8, 4);
-static const interface::VoxelField F_PARAM(0, 12, 8);
-// Added after the game was already playable, and it cost nothing at all to
-// add: moisture is the game's own business rather than one of the engine's
-// roles, so the format below did not change and neither did anything the
-// engine does. Bits 24...31 are still spare.
-static const interface::VoxelField F_MOISTURE(0, 20, 4);
+// What a voxel *looks* like is not stored anywhere. The registry's look
+// rules pick a definition out of the fractions, and every property the
+// engine asks -- what is drawn, what is solid, what light passes -- comes
+// off the definition they picked. See look_selector().
+static const uint8_t P_MIX = 1;
+
+static const interface::VoxelField F_ID(0, 0, 2);
+static const interface::VoxelField F_LIGHT_SKY(0, 2, 4);
+static const interface::VoxelField F_TINT(0, 6, 4);
+static const interface::VoxelField F_WETNESS(0, 10, 4);
+static const interface::VoxelField F_SUPPORT(0, 14, 4);
+static const interface::VoxelField F_BAND(0, 18, 4);
+
+static const interface::VoxelField F_ROCK(P_MIX, 0, 4);
+static const interface::VoxelField F_SAND(P_MIX, 4, 4);
+static const interface::VoxelField F_FIBRE(P_MIX, 8, 4);
+static const interface::VoxelField F_BINDER(P_MIX, 12, 4);
+static const interface::VoxelField F_WATER(P_MIX, 16, 8);
+static const interface::VoxelField F_BOND(P_MIX, 24, 4);
+static const interface::VoxelField F_LIFE(P_MIX, 28, 4);
+
+// Written into every voxel the generator touches, air included, because
+// voxelworld tells a generated voxel from one nothing has reached by the id
+// role and nothing else. It says nothing about what the voxel is.
+static const uint8_t PRESENT_ID = 1;
 
 static interface::VoxelFormat aggregate_format()
 {
 	interface::VoxelFormat f;
 	f.id = F_ID;
 	f.light_sky = F_LIGHT_SKY;
-	// The simulation's own state is the param role, so that the mesher can
-	// read it and the views can be made out of it
-	f.param = F_PARAM;
+	// The two modifiers the look spike found read at a glance. The tint is
+	// how wet a material looks and the wetness is the same number again for
+	// the shader to put a sheen on.
+	f.tint = F_TINT;
+	f.wetness = F_WETNESS;
+	f.planes.push_back(interface::VoxelPlane("aggregate:mix", 32));
 	return f;
+}
+
+// A fraction of a voxel, full at FRACTION_MAX. What a fraction measures is
+// the *solid volume* the material takes up, so a voxel of loose sand at 9 is
+// six fifteenths void -- which is where water goes, and is what phase 2 is
+// about.
+static const uint8_t FRACTION_MAX = 15;
+static const uint8_t WATER_MAX = 255;
+static const uint8_t BOND_MAX = 15;
+static const uint8_t LIFE_MAX = 15;
+
+// What a voxel is made of, and the two states that are not materials
+struct Mix
+{
+	uint8_t rock, sand, fibre, binder, water, bond, life;
+
+	Mix(): rock(0), sand(0), fibre(0), binder(0), water(0), bond(0), life(0){}
+	Mix(uint8_t rock, uint8_t sand, uint8_t fibre, uint8_t binder,
+			uint8_t water, uint8_t bond, uint8_t life):
+		rock(rock), sand(sand), fibre(fibre), binder(binder), water(water),
+		bond(bond), life(life){}
+
+	// How much of the voxel is solid at all
+	uint8_t solid() const
+	{
+		int t = (int)rock + sand + fibre + binder;
+		return (uint8_t)(t > FRACTION_MAX ? FRACTION_MAX : t);
+	}
+};
+
+// The recipes. Not materials and not ids: names for mixtures, so that a
+// generator and a structure can say "timber" and mean something the look
+// rules will agree with.
+//                            rock sand fibr bind water bond life
+static const Mix MIX_AIR;
+static const Mix MIX_WATER   (  0,   0,   0,   0,  255,   0,   0);
+static const Mix MIX_BEDROCK (15,   0,   0,   0,    0,  15,   0);
+static const Mix MIX_STONE   (15,   0,   0,   0,    0,  12,   0);
+static const Mix MIX_GRAVEL  (12,   2,   0,   0,    0,   0,   0);
+static const Mix MIX_SAND    ( 0,  12,   0,   0,    0,   0,   0);
+static const Mix MIX_SOIL    ( 0,   9,   1,   4,    0,   8,   0);
+static const Mix MIX_TURF    ( 0,   9,   2,   4,    0,   8,  12);
+static const Mix MIX_BRICK   (10,   3,   0,   2,    0,  15,   0);
+static const Mix MIX_TIMBER  ( 0,   0,   9,   4,    0,  14,   0);
+static const Mix MIX_TRUNK   ( 0,   0,   9,   4,    0,  14,  15);
+static const Mix MIX_LEAVES  ( 0,   0,   2,   1,    0,  12,  15);
+
+// What the simulation reads about a voxel. Where undermine looked this up in
+// a table by material id, it is worked out here from the mixture -- which is
+// the whole point of the game, and costs a handful of multiplies per voxel.
+//
+//   span      how far it reaches out over nothing before it fails, which is
+//             what decides how wide a tunnel it will roof
+//   density   what one voxel of it weighs, in the same units as capacity
+//   capacity  how much weight it carries before it is crushed
+//   porous    whether water gets into it
+struct MaterialProps
+{
+	bool structural;
+	bool diggable;
+	uint8_t span;
+	uint8_t density;
+	uint8_t capacity;
+	bool porous;
+};
+
+// How far a mixture reaches out over nothing.
+//
+// Two things decide it: what is holding the solid together, which is `bond`
+// -- a heap of the same stuff spans nothing at all -- and what the solid is,
+// since fibre is strong in tension where rock is strong in compression. Live
+// tissue holds itself up as well, which is what lets a canopy hang.
+static uint8_t mix_span(const Mix &m)
+{
+	int stuff = 2 * (int)m.fibre + 2 * (int)m.binder + 3 * (int)m.rock / 2;
+	int span = (int)m.bond * stuff / 40 + (int)m.life / 8;
+	return (uint8_t)(span > 15 ? 15 : (span < 0 ? 0 : span));
+}
+
+// What a voxel of it weighs. Rock is the heavy one, fibre the light one, and
+// water is carried along with whatever is holding it.
+static uint8_t mix_density(const Mix &m)
+{
+	int d = (3 * (int)m.rock + 2 * (int)m.sand + 3 * (int)m.binder +
+			(int)m.fibre) / FRACTION_MAX + 2 * (int)m.water / WATER_MAX;
+	return (uint8_t)(d > 15 ? 15 : d);
+}
+
+// How much weight it carries before it is crushed. Unlike the span this does
+// not need bond: a heap of loose sand carries what stands on it perfectly
+// well, it just cannot reach out over a hole. What does take it away is
+// water -- saturated sand gives, which is the sandcastle rule and is why
+// digging under a pond is a bad idea.
+static uint8_t mix_capacity(const Mix &m)
+{
+	int c = 17 * (int)m.rock + 10 * (int)m.binder + 3 * (int)m.sand +
+			3 * (int)m.fibre;
+	if(c > 255)
+		c = 255;
+	// Half of it, at saturation
+	c -= c * (int)m.water / (2 * WATER_MAX);
+	return (uint8_t)(c < 0 ? 0 : c);
+}
+
+static MaterialProps props_of(const Mix &m)
+{
+	MaterialProps p;
+	const uint8_t solid = m.solid();
+	// Water on its own is walked into rather than stood on, as it was
+	p.structural = solid >= 2;
+	// The one thing that cannot be dug is rock that is both pure and whole,
+	// which is what the bottom of the world is made of. A property of the
+	// mixture rather than a flag on a material.
+	p.diggable = !(m.rock >= 12 && m.bond >= BOND_MAX);
+	p.span = mix_span(m);
+	p.density = mix_density(m);
+	p.capacity = mix_capacity(m);
+	// Anything loose enough to have voids between its grains
+	p.porous = m.bond < 12 && solid > 0;
+	return p;
+}
+
+static Mix mix_of(const interface::VoxelSample &v)
+{
+	return Mix(
+			(uint8_t)F_ROCK.get(v), (uint8_t)F_SAND.get(v),
+			(uint8_t)F_FIBRE.get(v), (uint8_t)F_BINDER.get(v),
+			(uint8_t)F_WATER.get(v), (uint8_t)F_BOND.get(v),
+			(uint8_t)F_LIFE.get(v));
+}
+
+static void set_mix(interface::VoxelSample &v, const Mix &m)
+{
+	F_ROCK.set(v, m.rock);
+	F_SAND.set(v, m.sand);
+	F_FIBRE.set(v, m.fibre);
+	F_BINDER.set(v, m.binder);
+	F_WATER.set(v, m.water);
+	F_BOND.set(v, m.bond);
+	F_LIFE.set(v, m.life);
+	// How wet it looks, which the mesher reads and nothing else does
+	const uint8_t wet = (uint8_t)((int)m.water * 15 / WATER_MAX);
+	F_TINT.set(v, wet);
+	F_WETNESS.set(v, wet);
+}
+
+// A voxel of one recipe, generated and with nothing worked out about it yet
+static interface::VoxelSample mix_voxel(const Mix &m)
+{
+	interface::VoxelSample v;
+	F_ID.set(v, PRESENT_ID);
+	set_mix(v, m);
+	return v;
+}
+
+// What the player builds with, by the number the client sends. An index
+// rather than a material id, because there are no material ids: the client
+// says "the second thing on the list" and this is the list.
+enum BuildMaterial {
+	B_STONE = 1,
+	B_TIMBER,
+	B_BRICK,
+	B_SOIL,
+	B_WATER,
+	B_COUNT
+};
+
+static const Mix& build_mix(int32_t which)
+{
+	switch(which){
+	case B_TIMBER: return MIX_TIMBER;
+	case B_BRICK: return MIX_BRICK;
+	case B_SOIL: return MIX_SOIL;
+	case B_WATER: return MIX_WATER;
+	default: return MIX_STONE;
+	}
 }
 
 static const uint8_t SUPPORT_MAX = 15;
 static const uint8_t LOAD_MAX = 255;
-// How many steps of "how loaded is it" fit in the nibble, and so how many
-// bands a view has
+// How many steps of "how loaded is it" fit in the nibble. One less than
+// sixteen because 0 is reserved for "nothing structural here", which is how
+// a view registry tells a solid voxel from air without being able to add up
+// the fractions in a rule.
 static const uint8_t BAND_MAX = 15;
-// How far water reaches into what is porous. A distance rather than a
-// wetness: a voxel next to water is at the maximum and each step away is one
-// less, so water appearing wets what is around it and water going away dries
-// it, both by the same relaxation and with no timers anywhere.
-static const uint8_t MOISTURE_MAX = 5;
 
 // How far up a voxel is asked to carry.
 //
@@ -150,123 +339,135 @@ static const uint8_t MOISTURE_MAX = 5;
 // whenever anything in it changes.
 static const int LOAD_DEPTH = 32;
 
-static interface::VoxelTypeId id_of(const VoxelInstance &v)
+static bool is_generated(const interface::VoxelSample &v)
 {
-	return (interface::VoxelTypeId)F_ID.get(v.data);
+	return F_ID.get(v) != interface::VOXELTYPEID_UNDEFINED;
 }
 
-static uint8_t moisture_of(const VoxelInstance &v)
+static uint8_t support_of(const interface::VoxelSample &v)
 {
-	return (uint8_t)F_MOISTURE.get(v.data);
+	return (uint8_t)F_SUPPORT.get(v);
 }
 
-static uint8_t support_of(const VoxelInstance &v)
+// How much of what this voxel can carry is already on it, 1...15, or 0 for
+// a voxel that is not structural at all
+static uint8_t band_of(const interface::VoxelSample &v)
 {
-	return (uint8_t)(F_PARAM.get(v.data) & 0x0f);
+	return (uint8_t)F_BAND.get(v);
 }
 
-// How much of what this voxel can carry is already on it, 0...15
-static uint8_t band_of(const VoxelInstance &v)
+static void set_state(interface::VoxelSample &v, uint8_t support, uint8_t band)
 {
-	return (uint8_t)(F_PARAM.get(v.data) >> 4);
+	F_SUPPORT.set(v, support);
+	F_BAND.set(v, band);
 }
 
-static void set_state(VoxelInstance &v, uint8_t support, uint8_t band)
-{
-	F_PARAM.set(v.data, (uint32_t)((band & 0x0f) << 4) | (support & 0x0f));
-}
-
-// A weight, as the fraction of a capacity that a nibble can hold. Rounded
-// down, so a band of 15 means "at or over what it can carry" only when the
-// weight really is; the rules test the weight itself and not this.
+// A weight, as the fraction of a capacity that a nibble can hold, 1...15.
+// Rounded down, so a band of 15 means "at or over what it can carry" only
+// when the weight really is; the rules test the weight itself and not this.
 static uint8_t load_band(uint32_t load, uint8_t capacity)
 {
 	if(capacity == 0)
-		return 0;
-	uint32_t band = load * (BAND_MAX + 1) / ((uint32_t)capacity + 1);
+		return 1;
+	uint32_t band = 1 + load * (uint32_t)(BAND_MAX - 1) /
+			((uint32_t)capacity + 1);
 	return (uint8_t)(band > BAND_MAX ? BAND_MAX : band);
 }
 
-// The materials. Ids are assigned in this order by add_voxel() below, and
-// nothing may be inserted in the middle: a saved world holds these numbers.
-enum Material {
-	M_AIR = 1,
-	M_BEDROCK,
-	M_ROCK,
-	M_DIRT,
-	M_GRASS,
-	M_SAND,
-	M_RUBBLE,
-	M_TIMBER,
-	M_BRICK,
-	M_WATER,
-	M_TRUNK,
-	M_LEAVES,
-	M_WET_DIRT,
-	M_COUNT
+// The base looks. Not materials: these are the definitions the look rules
+// choose between, and the only thing they carry is how a voxel of that
+// mixture is drawn and what the engine makes of it. Added in this order.
+enum Look {
+	L_AIR = 1,
+	L_WATER,
+	L_BEDROCK,
+	L_STONE,
+	L_GRAVEL,
+	L_SAND,
+	L_SOIL,
+	L_TURF,
+	L_BRICK,
+	L_TIMBER,
+	L_TRUNK,
+	L_LEAVES,
+	L_MULCH,
+	L_COUNT
 };
 
-// What the simulation reads about a material.
+// Which of them a voxel wears, as an ordered list of thresholds over the
+// fractions. First match wins, so the order is the design:
 //
-//   span      how far it reaches out over nothing before it fails, which is
-//             what decides how wide a tunnel it will roof
-//   density   what one voxel of it weighs, in the same units as capacity
-//   capacity  how much weight it carries before it is crushed
+// - water is looked at first, so a bit of wood in a lot of water is dirty
+//   water and not a soggy plank;
+// - what is alive is looked at before what is not, so that a thin canopy of
+//   living fibre is leaves where the same fibre dead is mulch -- which is
+//   the whole reason `life` is stored;
+// - the last few rules are one per material, and they are what a voxel with
+//   a trace of something in it falls through to.
 //
-// Timber spans far and carries little, brick spans little and carries a
-// mountain: that pair is most of the game. A material with span 0 holds
-// nothing up but itself, and one with structural false takes no part at all.
-// falls_as is what a voxel of this becomes once it has come apart and is on
-// its way down. Something that was holding a shape up and stops is rubble;
-// something that was already a loose heap is still that heap, which is why
-// dirt falls as dirt and sand as sand rather than everything turning into
-// the same grey pile.
-// porous says whether water gets into it, and so whether it turns into
-// something wetter. What that something is, is wet_of.
-struct MaterialProps
+// A clause is a range over one field, and a rule is clauses ANDed, so an
+// "or" is written as two rules with the same result. That is what the last
+// group is.
+static void rule(interface::VoxelSelector &s, uint8_t result,
+		const interface::VoxelField &f0, uint32_t lo0, uint32_t hi0,
+		const interface::VoxelField *f1 = nullptr,
+		uint32_t lo1 = 0, uint32_t hi1 = 0,
+		const interface::VoxelField *f2 = nullptr,
+		uint32_t lo2 = 0, uint32_t hi2 = 0)
 {
-	bool structural;
-	bool diggable;
-	uint8_t span;
-	uint8_t density;
-	uint8_t capacity;
-	int falls_as;
-	bool porous;
-	int wet_of;   // what it becomes when wet, or 0 for nothing
-	int dry_of;   // what it goes back to when it dries, or 0
-};
+	interface::VoxelRule r;
+	r.clauses.push_back(interface::VoxelRuleClause(f0, lo0, hi0));
+	if(f1)
+		r.clauses.push_back(interface::VoxelRuleClause(*f1, lo1, hi1));
+	if(f2)
+		r.clauses.push_back(interface::VoxelRuleClause(*f2, lo2, hi2));
+	r.result = result;
+	s.rules.push_back(r);
+}
 
-static const MaterialProps MATERIAL[M_COUNT] = {
-	{false, false,  0, 0,   0, 0, false, 0, 0},  // (0 is UNDEFINED)
-	{false, false,  0, 0,   0, 0, false, 0, 0},  // air
-	{true,  false, 15, 0, 255, M_BEDROCK, false, 0, 0},  // bedrock
-	{true,  true,   6, 3, 200, M_RUBBLE, false, 0, 0},   // rock
-	{true,  true,   2, 2,  60, M_DIRT, true, M_WET_DIRT, 0}, // dirt
-	// Turf that has come off and landed is dirt, not turf; turf that has
-	// been under water is not turf either
-	{true,  true,   2, 2,  60, M_DIRT, true, M_WET_DIRT, 0}, // grass
-	{true,  true,   0, 2,  40, M_SAND, true, 0, 0},      // sand
-	{true,  true,   0, 2,  50, M_RUBBLE, true, 0, 0},    // rubble
-	{true,  true,   8, 1,  30, M_TIMBER, false, 0, 0},   // timber
-	{true,  true,   3, 4, 255, M_RUBBLE, false, 0, 0},   // brick
-	{false, false,  0, 0,   0, 0, false, 0, 0},  // water
-	// A standing tree is held up by the ground under it like anything else,
-	// so cutting through the trunk drops what is above the cut
-	{true,  true,   6, 1,  25, M_TRUNK, false, 0, 0},    // trunk
-	// Leaves hang off the trunk rather than standing on anything, which is
-	// what the span is for: a canopy two voxels out from the trunk holds,
-	// and comes down with the trunk. Weightless, so a tree does not crush
-	// itself, and nothing crushes leaves.
-	{true,  true,   3, 0, 255, M_LEAVES, false, 0, 0},   // leaves
-	// Dirt that has taken water: it holds nothing out over a gap and carries
-	// half of what dry dirt does, which is what makes digging under a pond a
-	// bad idea
-	{true,  true,   0, 2,  30, M_WET_DIRT, true, 0, M_DIRT}, // wet dirt
-};
-
-static const MaterialProps& material_of(interface::VoxelTypeId id)
+static interface::VoxelSelector look_selector()
 {
-	return MATERIAL[id < M_COUNT ? id : 0];
+	interface::VoxelSelector s;
+	s.kind = interface::VoxelSelector::RULES;
+	s.fallback = L_AIR;
+
+	// Water, and nothing much in it
+	{
+		interface::VoxelRule r;
+		r.clauses.push_back(interface::VoxelRuleClause(F_WATER, 128, 255));
+		r.clauses.push_back(interface::VoxelRuleClause(F_ROCK, 0, 1));
+		r.clauses.push_back(interface::VoxelRuleClause(F_SAND, 0, 1));
+		r.clauses.push_back(interface::VoxelRuleClause(F_FIBRE, 0, 1));
+		r.clauses.push_back(interface::VoxelRuleClause(F_BINDER, 0, 1));
+		r.result = L_WATER;
+		s.rules.push_back(r);
+	}
+	// Wood, alive and dead. Turf comes before leaves and not after: living
+	// fibre with mineral under it in the same voxel is the top of the
+	// ground, and living fibre with nothing else in it is a canopy. Getting
+	// that the wrong way round drew the whole surface of the world as
+	// leaves, which is what the check at the end of on_start() is for.
+	rule(s, L_TRUNK,  F_FIBRE, 4, 15, &F_LIFE, 8, 15);
+	rule(s, L_TURF,   F_SAND, 4, 15, &F_BINDER, 2, 15, &F_LIFE, 4, 15);
+	rule(s, L_LEAVES, F_FIBRE, 1, 15, &F_LIFE, 8, 15);
+	rule(s, L_TIMBER, F_FIBRE, 4, 15, &F_BOND, 8, 15);
+	rule(s, L_MULCH,  F_FIBRE, 4, 15);
+	// Mineral, bonded and loose
+	rule(s, L_BEDROCK, F_ROCK, 12, 15, &F_BOND, 15, 15);
+	rule(s, L_BRICK,   F_ROCK, 4, 15, &F_BINDER, 2, 15, &F_BOND, 12, 15);
+	rule(s, L_STONE,   F_ROCK, 8, 15, &F_BOND, 8, 15);
+	rule(s, L_GRAVEL,  F_ROCK, 8, 15);
+	// Soil is sand with binder in it; turf is soil with something growing on
+	// it, and is above with the rest of what is alive
+	rule(s, L_SOIL, F_SAND, 4, 15, &F_BINDER, 2, 15);
+	rule(s, L_SAND, F_SAND, 4, 15);
+	// A trace of anything, which is what is left
+	rule(s, L_GRAVEL, F_ROCK, 1, 15);
+	rule(s, L_MULCH,  F_FIBRE, 1, 15);
+	rule(s, L_SOIL,   F_BINDER, 1, 15);
+	rule(s, L_SAND,   F_SAND, 1, 15);
+	rule(s, L_WATER,  F_WATER, 32, 255);
+	return s;
 }
 
 struct Worldgen: public worldgen::GeneratorInterface
@@ -283,6 +484,10 @@ struct Worldgen: public worldgen::GeneratorInterface
 
 			log_t(MODULE, "on_generation_request(): lc: (%i, %i, %i)",
 					lc.getX(), lc.getY(), lc.getZ());
+			// The volume arrives with the engine's plane; the mixture is
+			// this game's own and it asks for its plane here
+			volume.add_planes(aggregate_format().planes);
+
 			log_t(MODULE, "on_generation_request(): uc: (%i, %i, %i)",
 					uc.getX(), uc.getY(), uc.getZ());
 
@@ -306,25 +511,28 @@ struct Worldgen: public worldgen::GeneratorInterface
 					const int surface = (int)(a + 11.0);
 					for(int y = lc.getY(); y <= uc.getY(); y++){
 						pv::Vector3DInt32 p(x, y, z);
-						int m;
+						// Layers of mixture rather than layers of material.
+						// There is no dirt to place: soil is where binder
+						// meets sand, and what is under it is the same sand
+						// with less in it.
+						Mix m;
 						if(y <= BEDROCK_TOP){
-							m = M_BEDROCK;
+							m = MIX_BEDROCK;
 						} else if(y < a + 5){
-							m = M_ROCK;
+							m = MIX_STONE;
 						} else if(y < a + 10){
-							m = M_DIRT;
+							m = MIX_SOIL;
 						} else if(y < a + 11){
-							// A shore is sand rather than grass: it is what
+							// A shore is sand rather than turf: it is what
 							// gives the ponds an edge that behaves
 							// differently when it is dug
 							m = (surface <= WATER_LEVEL + 1) ?
-									M_SAND : M_GRASS;
+									MIX_SAND : MIX_TURF;
 						} else if(y <= WATER_LEVEL){
-							m = M_WATER;
-						} else {
-							m = M_AIR;
+							m = MIX_WATER;
 						}
-						volume.setVoxelAt(p, VoxelInstance(m));
+						volume.set_sample_at(p.getX(), p.getY(), p.getZ(),
+								mix_voxel(m));
 					}
 				}
 			}
@@ -346,15 +554,18 @@ struct Worldgen: public worldgen::GeneratorInterface
 				if(y <= WATER_LEVEL + 1)
 					continue;
 				for(int y1 = y; y1 < y + 4; y1++)
-					volume.setVoxelAt(pv::Vector3DInt32(x, y1, z),
-							VoxelInstance(M_TRUNK));
+					volume.set_sample_at(x, y1, z, mix_voxel(MIX_TRUNK));
 				for(int x1 = x - 2; x1 <= x + 2; x1++){
 					for(int y1 = y + 3; y1 <= y + 7; y1++){
 						for(int z1 = z - 2; z1 <= z + 2; z1++){
-							pv::Vector3DInt32 p(x1, y1, z1);
-							if(id_of(volume.getVoxelAt(p)) == M_TRUNK)
+							// Leaves are the same fibre as the trunk, thin
+							// and alive; the trunk is where there is enough
+							// of it to be wood
+							Mix at = mix_of(volume.sample_at(x1, y1, z1));
+							if(at.fibre >= 4)
 								continue;
-							volume.setVoxelAt(p, VoxelInstance(M_LEAVES));
+							volume.set_sample_at(x1, y1, z1,
+									mix_voxel(MIX_LEAVES));
 						}
 					}
 				}
@@ -377,9 +588,8 @@ struct Worldgen: public worldgen::GeneratorInterface
 					int carried = 0;
 					int depth = 0;
 					for(int y = uc.getY(); y >= lc.getY(); y--){
-						pv::Vector3DInt32 p(x, y, z);
-						VoxelInstance v = volume.getVoxelAt(p);
-						const MaterialProps &m = material_of(id_of(v));
+						interface::VoxelSample v = volume.sample_at(x, y, z);
+						const MaterialProps m = props_of(mix_of(v));
 						if(!m.structural){
 							carried = 0;
 							depth = 0;
@@ -388,7 +598,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 						set_state(v, SUPPORT_MAX,
 								load_band(carried > LOAD_MAX ?
 										LOAD_MAX : carried, m.capacity));
-						volume.setVoxelAt(p, v);
+						volume.set_sample_at(x, y, z, v);
 						int &slot = window[depth % LOAD_DEPTH];
 						carried -= slot;
 						slot = m.density;
@@ -434,7 +644,7 @@ struct Module: public interface::Module
 	// gets one write per voxel, once the front has passed.
 	// Keyed by position, and carrying the position, so that flushing does not
 	// have to take a key apart again
-	struct Pending { pv::Vector3DInt32 p; VoxelInstance v; };
+	struct Pending { pv::Vector3DInt32 p; interface::VoxelSample v; };
 	std::unordered_map<int64_t, Pending> m_scratch;
 
 	Module(interface::Server *server):
@@ -488,7 +698,7 @@ struct Module: public interface::Module
 			bool fully_empty, float roughness = 0.9f, float spec_strength = 1.0f,
 			float bumpiness = 1.0f, float translucency = 0.0f,
 			float spots = 0.0f, float static_spots = 0.0f,
-			const ss_ &top_texture = "")
+			const ss_ &top_texture = "", uint32_t soaked = 0xffffff)
 	{
 		interface::VoxelDefinition vdef;
 		vdef.name.block_name = name;
@@ -516,30 +726,31 @@ struct Module: public interface::Module
 				interface::EDGEMATERIALID_EMPTY;
 		vdef.physically_solid = solid;
 		vdef.fully_empty = fully_empty;
+		// Dry at one end and soaked at the other; the tint field says where
+		// along it this voxel is
+		vdef.tint_ramp[0] = 0xffffff;
+		vdef.tint_ramp[1] = soaked;
 		reg->add_voxel(vdef);
 	}
 
 	// The views
 	// ---------
 	//
-	// A view is a registry with the same voxel format and different
-	// definitions: every material wears sixteen bands of a gradient instead
-	// of its texture, and which band a voxel gets is decoded from the param
-	// -- which carries both of the simulation's numbers, see the layout at
-	// the top of this file.
+	// A view is a registry over the same voxels with three definitions and
+	// three rules: air, water, and one gradient that everything structural
+	// wears. The rules are what tell those three apart, and the band a
+	// voxel gets is its `param` -- which in a view is the simulation's two
+	// numbers, bound as a role so that a definition's variants index it.
 	//
-	// It costs no storage at all, which is the trick worth knowing. The
-	// param is a role, so the mesher already has it per voxel; a
-	// definition's variants are indexed by it; and variant_of_param is per
-	// definition, so anything that depends on the material -- which is all
-	// of the normalisation -- falls out of the table rather than being
-	// computed anywhere.
+	// It costs no storage at all, which is the trick worth knowing, and
+	// under look rules it costs almost no definitions either: undermine
+	// needed sixteen variants on every one of its twelve materials, and
+	// this needs sixteen on one. Nothing about a voxel changes and nothing
+	// is re-sent; switching a view is a registry and a remesh.
 	//
 	// The client meshes with one of these instead of the playing registry
 	// and turns skylight off while it does, so the vertex colour is the band
-	// and nothing else. In the playing registry no definition has variants
-	// at all, so the mesher hoists the param out of its loop and normal play
-	// pays nothing for any of this.
+	// and nothing else.
 	static const size_t VIEW_BANDS = 16;
 
 	enum ViewMode {
@@ -560,8 +771,23 @@ struct Module: public interface::Module
 		return (ri << 16) | (gi << 8) | 0x18;
 	}
 
-	// What this view makes of a voxel whose param says this. Both nibbles are
-	// 0...15 already, so a view is nothing but a choice between them.
+	// The two numbers the simulation keeps, as one field. They are adjacent
+	// on purpose: a view binds this as the `param` role, and a definition's
+	// variants are indexed by it, so one definition wears sixteen colours
+	// and which one a voxel gets falls out of a table rather than being
+	// computed anywhere. The band is the high nibble and the support the
+	// low one.
+	static interface::VoxelFormat view_format()
+	{
+		interface::VoxelFormat f;
+		f.id = F_ID;
+		f.light_sky = F_LIGHT_SKY;
+		f.param = interface::VoxelField(0, 14, 8);
+		f.planes.push_back(interface::VoxelPlane("aggregate:mix", 32));
+		return f;
+	}
+
+	// Which band a voxel whose param says this belongs in
 	static size_t view_band(int mode, uint8_t param)
 	{
 		size_t load = param >> 4;
@@ -576,25 +802,16 @@ struct Module: public interface::Module
 
 	void build_view_registry(interface::VoxelRegistry *reg, int mode)
 	{
-		reg->set_format(aggregate_format());
-		// Air first, as in the playing registry: the ids have to agree,
-		// because they are what the voxels in the world hold
+		reg->set_format(view_format());
+		// 1: air and 2: water, so that a view leaves alone what the
+		// simulation has nothing to say about
 		add_voxel(reg, "air", "", false, false, true);
-		static const char *NAME[] = {
-			"", "", "bedrock", "rock", "dirt", "grass", "sand", "rubble",
-			"timber", "brick", "water", "trunk", "leaves", "wet_dirt",
-		};
-		for(int id = M_BEDROCK; id < M_COUNT; id++){
-			const MaterialProps &m = MATERIAL[id];
-			if(!m.structural){
-				// Water, and anything else the rules do not touch, keeps
-				// what it looks like
-				add_voxel(reg, NAME[id], "main/water.png",
-						true, false, false, 0.28f, 1.0f, 6.0f, 0.0f, 0.05f);
-				continue;
-			}
+		add_voxel(reg, "water", "main/water.png", true, false, false,
+				0.28f, 1.0f, 6.0f, 0.0f, 0.05f);
+		// 3: everything else, in sixteen bands of a gradient
+		{
 			interface::VoxelDefinition vdef;
-			vdef.name.block_name = ss_("view_") + NAME[id];
+			vdef.name.block_name = "view_band";
 			vdef.handler_module = "";
 			for(size_t i = 0; i < 6; i++){
 				interface::AtlasSegmentDefinition &seg = vdef.textures[i];
@@ -619,6 +836,17 @@ struct Module: public interface::Module
 			}
 			reg->add_voxel(vdef);
 		}
+
+		// And three rules to tell the three apart. A voxel that is not
+		// structural has a band of 0, which is what says so without a rule
+		// having to add up the fractions -- see load_band().
+		const uint8_t VIEW_AIR = 1, VIEW_WATER = 2, VIEW_SOLID = 3;
+		interface::VoxelSelector s;
+		s.kind = interface::VoxelSelector::RULES;
+		s.fallback = VIEW_SOLID;
+		rule(s, VIEW_WATER, F_BAND, 0, 0, &F_WATER, 128, 255);
+		rule(s, VIEW_AIR, F_BAND, 0, 0);
+		reg->set_look_selector(s);
 	}
 
 	void send_view_registries(network::PeerInfo::Id peer)
@@ -683,43 +911,91 @@ struct Module: public interface::Module
 			log_i(MODULE, "Voxel format: %s",
 					cs(voxel_reg->get_format().dump()));
 
-			// In Material's order, and nothing may be inserted in the
-			// middle. The six numbers after solid describe the surface; see
-			// interface/atlas.h.
+			// In Look's order, and nothing may be inserted in the middle:
+			// the look rules point at these by number. The six numbers
+			// after solid describe the surface; see interface/atlas.h.
+			//
+			// The tint ramps are how wet a material looks. The first end is
+			// dry and the second is soaked, and the mesher moves along it
+			// with the tint field -- which is where undermine's wet_dirt
+			// material went.
 			add_voxel(voxel_reg, "air", "", false, false, true);
+			// Walked into rather than stood on: the player sinks to the pond
+			// floor and can dig or climb out. Nothing simulates flow yet, so
+			// a dug shore leaves a hole in the water rather than draining
+			// it; that is phase 2.
+			add_voxel(voxel_reg, "water", "main/water.png", true, false, false,
+					0.28f, 1.0f, 6.0f, 0.0f, 0.05f);
 			add_voxel(voxel_reg, "bedrock", "main/bedrock.png",
 					true, true, false,
 					0.98f, 0.10f, 0.7f, 0.0f, 0.0f, 0.02f);
-			add_voxel(voxel_reg, "rock", "main/rock.png", true, true, false,
+			add_voxel(voxel_reg, "stone", "main/rock.png", true, true, false,
 					0.95f, 0.15f, 0.5f, 0.0f, 0.0f, 0.04f);
-			add_voxel(voxel_reg, "dirt", "main/dirt.png", true, true, false,
-					0.98f, 0.15f, 0.6f, 0.0f, 0.0f, 0.04f);
-			add_voxel(voxel_reg, "grass", "main/grass.png", true, true, false,
-					0.90f, 1.0f, 0.75f, 0.06f, 0.012f);
+			// Rock with nothing holding it together. undermine's rubble, and
+			// it wears that texture, but here it is what unbonded rock *is*
+			// rather than a material a falling one turns into.
+			add_voxel(voxel_reg, "gravel", "main/rubble.png",
+					true, true, false,
+					0.97f, 0.20f, 1.1f, 0.0f, 0.0f, 0.05f, "", 0xd8d0c8);
 			add_voxel(voxel_reg, "sand", "main/sand.png", true, true, false,
-					0.96f, 0.25f, 0.45f, 0.0f, 0.0f, 0.03f);
-			add_voxel(voxel_reg, "rubble", "main/rubble.png",
-					true, true, false,
-					0.97f, 0.20f, 1.1f, 0.0f, 0.0f, 0.05f);
-			add_voxel(voxel_reg, "timber", "main/timber.png",
-					true, true, false,
-					0.85f, 0.35f, 1.4f, 0.0f, 0.0f, 0.0f);
+					0.96f, 0.25f, 0.45f, 0.0f, 0.0f, 0.03f, "", 0xa89880);
+			add_voxel(voxel_reg, "soil", "main/dirt.png", true, true, false,
+					0.98f, 0.15f, 0.6f, 0.0f, 0.0f, 0.04f, "", 0x907058);
+			add_voxel(voxel_reg, "turf", "main/grass.png", true, true, false,
+					0.90f, 1.0f, 0.75f, 0.06f, 0.012f, 0.0f, "", 0xa0a090);
 			add_voxel(voxel_reg, "brick", "main/brick.png", true, true, false,
 					0.92f, 0.30f, 0.9f, 0.0f, 0.0f, 0.02f);
-			// Walked into rather than stood on: the player sinks to the pond
-			// floor and can dig or climb out. Nothing simulates flow, so a
-			// dug shore leaves a hole in the water rather than draining it.
-			add_voxel(voxel_reg, "water", "main/water.png", true, false, false,
-					0.28f, 1.0f, 6.0f, 0.0f, 0.05f);
+			add_voxel(voxel_reg, "timber", "main/timber.png",
+					true, true, false,
+					0.85f, 0.35f, 1.4f, 0.0f, 0.0f, 0.0f, "", 0xa08868);
 			add_voxel(voxel_reg, "trunk", "main/tree.png", true, true, false,
 					0.85f, 0.35f, 2.0f, 0.0f, 0.0f, 0.0f,
 					"main/tree_top.png");
 			add_voxel(voxel_reg, "leaves", "main/leaves.png",
 					true, true, false,
 					0.95f, 1.0f, 1.5f, 0.11f, 0.03f);
-			add_voxel(voxel_reg, "wet_dirt", "main/wet_dirt.png",
+			// Fibre with nothing holding it together: sawdust, mulch, a
+			// rotted-through beam. It wears what undermine drew wet dirt
+			// with, which is about the right colour for it.
+			add_voxel(voxel_reg, "mulch", "main/wet_dirt.png",
 					true, true, false,
 					0.80f, 0.45f, 0.6f, 0.0f, 0.0f, 0.04f);
+
+			// And what says which of them a voxel wears
+			voxel_reg->set_look_selector(look_selector());
+
+			// Every recipe reads back as the look it is named for. The
+			// rules are ordered and their clauses are ANDed, which is easy
+			// to get subtly wrong, and this is what says so at startup
+			// rather than after a screenshot.
+			{
+				static const struct { const char *name; const Mix &mix;
+						uint8_t want; } CHECK[] = {
+					{"air", MIX_AIR, L_AIR},
+					{"water", MIX_WATER, L_WATER},
+					{"bedrock", MIX_BEDROCK, L_BEDROCK},
+					{"stone", MIX_STONE, L_STONE},
+					{"gravel", MIX_GRAVEL, L_GRAVEL},
+					{"sand", MIX_SAND, L_SAND},
+					{"soil", MIX_SOIL, L_SOIL},
+					{"turf", MIX_TURF, L_TURF},
+					{"brick", MIX_BRICK, L_BRICK},
+					{"timber", MIX_TIMBER, L_TIMBER},
+					{"trunk", MIX_TRUNK, L_TRUNK},
+					{"leaves", MIX_LEAVES, L_LEAVES},
+				};
+				const interface::VoxelSelector &sel =
+						voxel_reg->get_look_selector();
+				const interface::VoxelFormat &fmt = voxel_reg->get_format();
+				for(const auto &c : CHECK){
+					interface::VoxelSample v = mix_voxel(c.mix);
+					interface::VoxelTypeId got = sel.id_of(v, fmt);
+					if(got != c.want){
+						log_w(MODULE, "look rules: %s reads as %i and not "
+								"%i", c.name, (int)got, (int)c.want);
+					}
+				}
+			}
 
 			world->set_skylight_enabled(true);
 		});
@@ -763,9 +1039,9 @@ struct Module: public interface::Module
 				for(int dz = -half_w; dz <= half_w; dz++){
 					int z = SPAWN_Z + dz;
 					for(int dy = 1; dy <= height; dy++){
-						world->set_voxel(
+						world->set_sample(
 								pv::Vector3DInt32(x, floor_y + dy, z),
-								VoxelInstance(M_AIR), true);
+								mix_voxel(MIX_AIR), true);
 					}
 				}
 			}
@@ -804,20 +1080,14 @@ struct Module: public interface::Module
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *world)
 		{
-			const interface::VoxelFormat &fmt =
-					world->get_voxel_reg()->get_format();
 			for(int y = SPAWN_Y_MAX; y >= SPAWN_Y_MIN; y--){
-				VoxelInstance v = world->get_voxel(
+				interface::VoxelSample v = world->get_sample(
 						pv::Vector3DInt32(SPAWN_X, y, SPAWN_Z), true);
-				// Through the format, not VoxelInstance::get_id(), which is
-				// the default cut and would read this game's light and load
-				// as part of the id
-				interface::VoxelTypeId id = fmt.id_of(v.data);
-				if(id == interface::VOXELTYPEID_UNDEFINED){
+				if(!is_generated(v)){
 					column_ready = false;
 					return;
 				}
-				if(material_of(id).structural){
+				if(props_of(mix_of(v)).structural){
 					surface_y = y;
 					return;
 				}
@@ -929,13 +1199,13 @@ struct Module: public interface::Module
 	// The voxel at p as the simulation currently understands it: what the
 	// relaxation has worked out, or what the world holds if it has not been
 	// touched.
-	VoxelInstance peek(voxelworld::Instance *world,
+	interface::VoxelSample peek(voxelworld::Instance *world,
 			const pv::Vector3DInt32 &p)
 	{
 		auto it = m_scratch.find(pos_key(p));
 		if(it != m_scratch.end())
 			return it->second.v;
-		return world->get_voxel(p, true);
+		return world->get_sample(p, true);
 	}
 
 	// How far the voxel at p is from something holding it up, 0 for nothing.
@@ -950,9 +1220,9 @@ struct Module: public interface::Module
 	{
 		if(!m.diggable)
 			return SUPPORT_MAX; // Bedrock, and anything else immovable
-		VoxelInstance below = peek(world,
+		interface::VoxelSample below = peek(world,
 				pv::Vector3DInt32(p.getX(), p.getY() - 1, p.getZ()));
-		const MaterialProps &bm = material_of(id_of(below));
+		const MaterialProps bm = props_of(mix_of(below));
 		if(bm.structural && support_of(below) > 0)
 			return SUPPORT_MAX;
 		if(m.span == 0)
@@ -960,10 +1230,10 @@ struct Module: public interface::Module
 		static const int SIDE[4][2] = {{1,0}, {-1,0}, {0,1}, {0,-1}};
 		uint8_t best = 0;
 		for(size_t k = 0; k < 4; k++){
-			VoxelInstance n = peek(world, pv::Vector3DInt32(
+			interface::VoxelSample n = peek(world, pv::Vector3DInt32(
 					p.getX() + SIDE[k][0], p.getY(),
 					p.getZ() + SIDE[k][1]));
-			if(!material_of(id_of(n)).structural)
+			if(!props_of(mix_of(n)).structural)
 				continue;
 			uint8_t s = support_of(n);
 			if(s > best)
@@ -975,11 +1245,20 @@ struct Module: public interface::Module
 		return reach < m.span ? reach : m.span;
 	}
 
-	// How near the voxel at p is to water: MOISTURE_MAX next to it, one less
-	// per step through anything porous, 0 anywhere water cannot reach. The
-	// same shape of relaxation as the support, and it dries by running back
-	// down when the water goes away.
-	uint8_t compute_moisture(voxelworld::Instance *world,
+	// How much water has got into the voxel at p: full next to standing
+	// water, less by a step through each porous voxel it has to come
+	// through, none where water cannot reach. The same shape of relaxation
+	// as the support, and it dries by running back down when the water goes
+	// away.
+	//
+	// simplified: this does not conserve. Water is not moved from anywhere;
+	// a voxel next to a pond simply becomes wet, which is humidity rather
+	// than flow. Phase 2 replaces it with migration that moves a quantity
+	// through the void a mixture has, and this function is what it replaces.
+	static const uint8_t DAMP_STEPS = 5;
+	static const uint8_t DAMP_STEP = WATER_MAX / DAMP_STEPS;
+
+	uint8_t compute_damp(voxelworld::Instance *world,
 			const pv::Vector3DInt32 &p, const MaterialProps &m)
 	{
 		if(!m.porous)
@@ -989,18 +1268,18 @@ struct Module: public interface::Module
 		};
 		uint8_t best = 0;
 		for(size_t k = 0; k < 6; k++){
-			VoxelInstance n = peek(world, pv::Vector3DInt32(
+			interface::VoxelSample n = peek(world, pv::Vector3DInt32(
 					p.getX() + OFF[k][0], p.getY() + OFF[k][1],
 					p.getZ() + OFF[k][2]));
-			interface::VoxelTypeId nid = id_of(n);
-			if(nid == M_WATER)
-				return MOISTURE_MAX;
-			const MaterialProps &nm = material_of(nid);
-			if(!nm.porous)
+			const Mix nm = mix_of(n);
+			// Standing water: anything porous against it is saturated
+			if(nm.solid() < 2 && nm.water >= WATER_MAX / 2)
+				return WATER_MAX;
+			if(!props_of(nm).porous)
 				continue;
-			uint8_t through = moisture_of(n);
-			if(through > 1 && (uint8_t)(through - 1) > best)
-				best = through - 1;
+			if(nm.water > DAMP_STEP &&
+					(uint8_t)(nm.water - DAMP_STEP) > best)
+				best = (uint8_t)(nm.water - DAMP_STEP);
 		}
 		return best;
 	}
@@ -1012,9 +1291,9 @@ struct Module: public interface::Module
 	{
 		int carried = 0;
 		for(int i = 1; i <= LOAD_DEPTH; i++){
-			VoxelInstance v = peek(world,
+			interface::VoxelSample v = peek(world,
 					pv::Vector3DInt32(p.getX(), p.getY() + i, p.getZ()));
-			const MaterialProps &m = material_of(id_of(v));
+			const MaterialProps m = props_of(mix_of(v));
 			if(!m.structural)
 				break;
 			carried += m.density;
@@ -1029,38 +1308,32 @@ struct Module: public interface::Module
 	void update_voxel(voxelworld::Instance *world,
 			const pv::Vector3DInt32 &p)
 	{
-		VoxelInstance v = peek(world, p);
-		interface::VoxelTypeId id = id_of(v);
-		if(id == interface::VOXELTYPEID_UNDEFINED)
+		interface::VoxelSample v = peek(world, p);
+		if(!is_generated(v))
 			return; // Not generated yet; whoever generates it computes both
-		const MaterialProps &m = material_of(id);
+		Mix mix = mix_of(v);
+		MaterialProps m = props_of(mix);
 		if(!m.structural)
 			return;
-		// What water has done to it, and what that makes it. A material
-		// change is the only way the mesher can see this -- both nibbles of
-		// the param are spoken for -- and it is the right way round anyway:
-		// wet dirt is a different thing from dirt, with its own numbers.
-		uint8_t moisture = compute_moisture(world, p, m);
-		interface::VoxelTypeId want = id;
-		if(moisture > 0 && m.wet_of != 0)
-			want = (interface::VoxelTypeId)m.wet_of;
-		else if(moisture == 0 && m.dry_of != 0)
-			want = (interface::VoxelTypeId)m.dry_of;
-		const MaterialProps &wm = material_of(want);
-
-		uint8_t support = compute_support(world, p, wm);
-		uint8_t load = compute_load(world, p);
-		uint8_t band = load_band(load, wm.capacity);
-		bool support_moved = support != support_of(v);
-		bool wetness_moved = moisture != moisture_of(v) || want != id;
-		if(want != id){
-			log_t(MODULE, "wet: " PV3I_FORMAT " %i -> %i (moisture %i)",
-					PV3I_PARAMS(p), (int)id, (int)want, (int)moisture);
+		// What water has got into it. Where undermine turned dirt into a
+		// wet_dirt material so that the mesher could see the difference,
+		// here the water is simply part of what the voxel is made of: the
+		// tint darkens it, the capacity drops, the span goes, and no
+		// material changed into another one.
+		const uint8_t damp = compute_damp(world, p, m);
+		const bool wetness_moved = damp != mix.water;
+		if(wetness_moved){
+			mix.water = damp;
+			m = props_of(mix);
 		}
+
+		uint8_t support = compute_support(world, p, m);
+		uint8_t load = compute_load(world, p);
+		uint8_t band = load_band(load, m.capacity);
+		bool support_moved = support != support_of(v);
 		if(support_moved || wetness_moved || band != band_of(v)){
-			VoxelInstance nv = v;
-			F_ID.set(nv.data, want);
-			F_MOISTURE.set(nv.data, moisture);
+			interface::VoxelSample nv = v;
+			set_mix(nv, mix);
 			set_state(nv, support, band);
 			m_scratch[pos_key(p)] = Pending{p, nv};
 		}
@@ -1075,9 +1348,9 @@ struct Module: public interface::Module
 						p.getY() + OFF[k][1], p.getZ() + OFF[k][2]));
 		}
 		// Nothing holds it, or what does cannot carry what is on it
-		if(wm.diggable && (support == 0 || load > wm.capacity)){
-			log_t(MODULE, "fails: " PV3I_FORMAT " id=%i support=%i load=%i",
-					PV3I_PARAMS(p), (int)id, (int)support, (int)load);
+		if(m.diggable && (support == 0 || load > m.capacity)){
+			log_t(MODULE, "fails: " PV3I_FORMAT " support=%i load=%i",
+					PV3I_PARAMS(p), (int)support, (int)load);
 			mark_falling(p);
 		}
 	}
@@ -1105,37 +1378,39 @@ struct Module: public interface::Module
 		m_falling = rest;
 		for(const pv::Vector3DInt32 &p : batch){
 			m_falling_set.erase(pos_key(p));
-			VoxelInstance v = world->get_voxel(p, true);
-			interface::VoxelTypeId id = id_of(v);
-			const MaterialProps &m = material_of(id);
+			interface::VoxelSample v = world->get_sample(p, true);
+			Mix mix = mix_of(v);
+			const MaterialProps m = props_of(mix);
 			// It may have been dug, or held up again, since it was queued
 			if(!m.structural || !m.diggable)
 				continue;
-			// The weight itself, not the band: the band is a sixteenth of a
+			// The weight itself, not the band: the band is a fifteenth of a
 			// capacity coarse and this is the test that decides whether
 			// something comes down
 			if(support_of(v) != 0 &&
 					compute_load(world, p) <= m.capacity)
 				continue;
 			pv::Vector3DInt32 down(p.getX(), p.getY() - 1, p.getZ());
-			VoxelInstance bv = world->get_voxel(down, true);
-			interface::VoxelTypeId bid = id_of(bv);
-			if(bid == interface::VOXELTYPEID_UNDEFINED)
+			interface::VoxelSample bv = world->get_sample(down, true);
+			if(!is_generated(bv))
 				continue; // Falling out of the loaded world; leave it be
-			if(bid == M_AIR || bid == M_WATER){
+			if(!props_of(mix_of(bv)).structural){
 				// Down one. What it lands in is displaced rather than
 				// simulated: nothing here flows.
 				//
-				// What it becomes on the way down; see MaterialProps.
-				// Rubble spans nothing, so a pile of it holds no roof up,
-				// which is what makes a cave-in carry on rather than plug
-				// itself -- and the materials that are already loose heaps
-				// stay themselves.
-				VoxelInstance nv((uint32_t)(m.falls_as != 0 ?
-						m.falls_as : (int)id));
-				set_state(nv, 0, 0);
-				world->set_voxel(down, nv, true);
-				world->set_voxel(p, VoxelInstance(M_AIR), true);
+				// **Falling breaks the bond.** Where undermine turned
+				// whatever fell into a rubble material, here the mixture is
+				// unchanged and only the thing that was holding it together
+				// is gone -- so soil that falls is still soil and merely
+				// holds nothing up, which is what a heap of it should do,
+				// and rock that falls is gravel because that is what
+				// unbonded rock is.
+				mix.bond = 0;
+				interface::VoxelSample nv = v;
+				set_mix(nv, mix);
+				set_state(nv, 0, 1);
+				world->set_sample(down, nv, true);
+				world->set_sample(p, mix_voxel(MIX_AIR), true);
 				mark_changed(p);
 				mark_changed(down);
 				mark_falling(down);
@@ -1151,14 +1426,14 @@ struct Module: public interface::Module
 	// Everything the relaxation worked out, into the world in one go.
 	//
 	// simplified: the whole scratch goes at once rather than on a budget. It
-	// is one set_voxel() per voxel the front passed over, which is the work
+	// is one set_sample() per voxel the front passed over, which is the work
 	// that used to happen several times each.
 	void flush_scratch(voxelworld::Instance *world)
 	{
 		if(m_scratch.empty())
 			return;
 		for(auto &e : m_scratch)
-			world->set_voxel(e.second.p, e.second.v, true);
+			world->set_sample(e.second.p, e.second.v, true);
 		m_wrote += m_scratch.size();
 		m_scratch.clear();
 	}
@@ -1218,9 +1493,10 @@ struct Module: public interface::Module
 	// down while it was being built.
 	struct Build
 	{
-		std::vector<std::pair<pv::Vector3DInt32, int>> voxels;
+		std::vector<std::pair<pv::Vector3DInt32, Mix>> voxels;
 
-		void box(int x0, int y0, int z0, int x1, int y1, int z1, int material)
+		void box(int x0, int y0, int z0, int x1, int y1, int z1,
+				const Mix &material)
 		{
 			for(int y = y0; y <= y1; y++)
 				for(int z = z0; z <= z1; z++)
@@ -1240,20 +1516,20 @@ struct Module: public interface::Module
 		const int height = 5;
 		const int x0 = o.getX(), y0 = o.getY(), z0 = o.getZ();
 		b.box(x0 - half, y0, z0 - half,
-				x0 + half, y0 + height, z0 + half, M_AIR);
+				x0 + half, y0 + height, z0 + half, MIX_AIR);
 		b.box(x0 - half - 1, y0 - 1, z0 - half - 1,
-				x0 + half + 1, y0 - 1, z0 + half + 1, M_BRICK);
+				x0 + half + 1, y0 - 1, z0 + half + 1, MIX_BRICK);
 		b.box(x0 - half - 1, y0 + height + 1, z0 - half - 1,
-				x0 + half + 1, y0 + height + 1, z0 + half + 1, M_ROCK);
+				x0 + half + 1, y0 + height + 1, z0 + half + 1, MIX_STONE);
 		for(int y = y0; y <= y0 + height; y++){
 			b.box(x0 - half - 1, y, z0 - half - 1,
-					x0 - half - 1, y, z0 + half + 1, M_ROCK);
+					x0 - half - 1, y, z0 + half + 1, MIX_STONE);
 			b.box(x0 + half + 1, y, z0 - half - 1,
-					x0 + half + 1, y, z0 + half + 1, M_ROCK);
+					x0 + half + 1, y, z0 + half + 1, MIX_STONE);
 			b.box(x0 - half - 1, y, z0 - half - 1,
-					x0 + half + 1, y, z0 - half - 1, M_ROCK);
+					x0 + half + 1, y, z0 - half - 1, MIX_STONE);
 			b.box(x0 - half - 1, y, z0 + half + 1,
-					x0 + half + 1, y, z0 + half + 1, M_ROCK);
+					x0 + half + 1, y, z0 + half + 1, MIX_STONE);
 		}
 	}
 
@@ -1269,21 +1545,21 @@ struct Module: public interface::Module
 		const int spacing = 4;  // pillars this far apart along the nave
 		const int x0 = o.getX(), y0 = o.getY(), z0 = o.getZ();
 		b.box(x0 - half_w - 1, y0, z0 - 1,
-				x0 + half_w + 1, y0 + height + 2, z0 + length + 1, M_AIR);
+				x0 + half_w + 1, y0 + height + 2, z0 + length + 1, MIX_AIR);
 		b.box(x0 - half_w - 1, y0 - 1, z0 - 1,
-				x0 + half_w + 1, y0 - 1, z0 + length + 1, M_BRICK);
+				x0 + half_w + 1, y0 - 1, z0 + length + 1, MIX_BRICK);
 		for(int z = z0; z <= z0 + length; z += spacing){
 			for(int side = -1; side <= 1; side += 2){
 				int x = x0 + side * half_w;
-				b.box(x, y0, z, x, y0 + height, z, M_BRICK);
+				b.box(x, y0, z, x, y0 + height, z, MIX_BRICK);
 			}
 			// A tie beam across, which is what a timber prop is for: long
 			// span, and it carries only the roof over the nave
 			b.box(x0 - half_w + 1, y0 + height, z,
-					x0 + half_w - 1, y0 + height, z, M_TIMBER);
+					x0 + half_w - 1, y0 + height, z, MIX_TIMBER);
 		}
 		b.box(x0 - half_w, y0 + height + 1, z0,
-				x0 + half_w, y0 + height + 1, z0 + length, M_ROCK);
+				x0 + half_w, y0 + height + 1, z0 + length, MIX_STONE);
 	}
 
 	// A deck on piers. Saw through a pier and the deck over it is left
@@ -1296,15 +1572,15 @@ struct Module: public interface::Module
 		const int depth = 12; // how far down the piers reach for ground
 		const int x0 = o.getX(), y0 = o.getY(), z0 = o.getZ();
 		b.box(x0 - half_w, y0 + 1, z0,
-				x0 + half_w, y0 + 4, z0 + length, M_AIR);
-		b.box(x0 - half_w, y0, z0, x0 + half_w, y0, z0 + length, M_ROCK);
+				x0 + half_w, y0 + 4, z0 + length, MIX_AIR);
+		b.box(x0 - half_w, y0, z0, x0 + half_w, y0, z0 + length, MIX_STONE);
 		// Parapets, so it reads as a bridge from on it
 		b.box(x0 - half_w, y0 + 1, z0,
-				x0 - half_w, y0 + 1, z0 + length, M_BRICK);
+				x0 - half_w, y0 + 1, z0 + length, MIX_BRICK);
 		b.box(x0 + half_w, y0 + 1, z0,
-				x0 + half_w, y0 + 1, z0 + length, M_BRICK);
+				x0 + half_w, y0 + 1, z0 + length, MIX_BRICK);
 		for(int z = z0; z <= z0 + length; z += spacing)
-			b.box(x0 - 1, y0 - depth, z, x0 + 1, y0 - 1, z, M_BRICK);
+			b.box(x0 - 1, y0 - depth, z, x0 + 1, y0 - 1, z, MIX_BRICK);
 	}
 
 	// A mineshaft: a corridor with a timber prop frame every few voxels,
@@ -1317,12 +1593,12 @@ struct Module: public interface::Module
 		const int spacing = 3;
 		const int x0 = o.getX(), y0 = o.getY(), z0 = o.getZ();
 		b.box(x0 - half_w, y0, z0,
-				x0 + half_w, y0 + height, z0 + length, M_AIR);
+				x0 + half_w, y0 + height, z0 + length, MIX_AIR);
 		for(int z = z0; z <= z0 + length; z += spacing){
-			b.box(x0 - half_w, y0, z, x0 - half_w, y0 + height, z, M_TIMBER);
-			b.box(x0 + half_w, y0, z, x0 + half_w, y0 + height, z, M_TIMBER);
+			b.box(x0 - half_w, y0, z, x0 - half_w, y0 + height, z, MIX_TIMBER);
+			b.box(x0 + half_w, y0, z, x0 + half_w, y0 + height, z, MIX_TIMBER);
 			b.box(x0 - half_w, y0 + height, z,
-					x0 + half_w, y0 + height, z, M_TIMBER);
+					x0 + half_w, y0 + height, z, MIX_TIMBER);
 		}
 	}
 
@@ -1362,11 +1638,11 @@ struct Module: public interface::Module
 				[&](voxelworld::Instance *world)
 		{
 			for(auto &vp : b.voxels){
-				VoxelInstance v((uint32_t)vp.second);
+				interface::VoxelSample v = mix_voxel(vp.second);
 				// Held up until the simulation says otherwise, so that the
 				// building does not fall over as it is written
-				set_state(v, SUPPORT_MAX, 0);
-				world->set_voxel(vp.first, v, true);
+				set_state(v, SUPPORT_MAX, 1);
+				world->set_sample(vp.first, v, true);
 			}
 		});
 		// And now let it stand or fall as a whole
@@ -1398,18 +1674,16 @@ struct Module: public interface::Module
 	void on_place_voxel(const network::Packet &packet)
 	{
 		pv::Vector3DInt32 voxel_p;
-		int32_t material = M_ROCK;
+		int32_t material = B_STONE;
 		{
 			std::istringstream is(packet.data, std::ios::binary);
 			cereal::PortableBinaryInputArchive ar(is);
 			ar(voxel_p, material);
 		}
 		// Water is placeable even though the rules do not treat it as
-		// structural: pouring some next to dirt is how you find out what
-		// water does to dirt, which is most of what there is to find out.
-		if(material <= M_AIR || material >= M_COUNT ||
-				(!material_of(material).structural &&
-						material != M_WATER)){
+		// structural: pouring some next to soil is how you find out what
+		// water does to soil, which is most of what there is to find out.
+		if(material < B_STONE || material >= B_COUNT){
 			log_w(MODULE, "C%i: on_place_voxel(): material %i is not one to "
 					"build with", packet.sender, material);
 			return;
@@ -1420,12 +1694,12 @@ struct Module: public interface::Module
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *instance)
 		{
-			VoxelInstance v((uint32_t)material);
+			interface::VoxelSample v = mix_voxel(build_mix(material));
 			// Something just placed is held up by whatever it was placed
 			// against until the simulation says otherwise, which keeps a
 			// prop from falling in the tick before it is looked at
-			set_state(v, SUPPORT_MAX, 0);
-			instance->set_voxel(voxel_p, v);
+			set_state(v, SUPPORT_MAX, 1);
+			instance->set_sample(voxel_p, v);
 		});
 		mark_changed(voxel_p);
 	}
@@ -1444,15 +1718,13 @@ struct Module: public interface::Module
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *instance)
 		{
-			const interface::VoxelFormat &fmt =
-					instance->get_voxel_reg()->get_format();
-			VoxelInstance old = instance->get_voxel(voxel_p, true);
-			if(!material_of(fmt.id_of(old.data)).diggable){
+			interface::VoxelSample old = instance->get_sample(voxel_p, true);
+			if(!props_of(mix_of(old)).diggable){
 				log_v(MODULE, "C%i: on_dig_voxel(): not diggable",
 						packet.sender);
 				return;
 			}
-			instance->set_voxel(voxel_p, VoxelInstance(M_AIR));
+			instance->set_sample(voxel_p, mix_voxel(MIX_AIR));
 		});
 		mark_changed(voxel_p);
 	}

@@ -115,44 +115,69 @@ end
 -- *default* cut, hardcoded in the bindings, and under this format they would
 -- read the load and the support as part of the id.
 local FIELD = {
-	id    = {shift = 0,  width = 8},
-	light = {shift = 8,  width = 4},
-	param = {shift = 12, width = 8},
+	id      = {shift = 0,  width = 2},
+	light   = {shift = 2,  width = 4},
+	tint    = {shift = 6,  width = 4},
+	wetness = {shift = 10, width = 4},
+	support = {shift = 14, width = 4},
+	band    = {shift = 18, width = 4},
 }
 
-local function field_of(v, f)
-	return math.floor(v.data / 2 ^ f.shift) % 2 ^ f.width
+-- The second plane, which is what a voxel is made of. Read with
+-- voxelworld.get_static_voxel_plane(); there is no voxel type id anywhere,
+-- so this is the only thing that says what a voxel is.
+local P_MIX = 1
+local MIX = {
+	rock   = {shift = 0,  width = 4},
+	sand   = {shift = 4,  width = 4},
+	fibre  = {shift = 8,  width = 4},
+	binder = {shift = 12, width = 4},
+	water  = {shift = 16, width = 8},
+	bond   = {shift = 24, width = 4},
+	life   = {shift = 28, width = 4},
+}
+
+local function word_field(word, f)
+	return math.floor(word / 2 ^ f.shift) % 2 ^ f.width
 end
 
--- The param carries both of the simulation's numbers; see the layout at the
--- top of main.cpp. Support is how far the voxel is from something holding it
--- up, and the band is how much of what it can carry is already on it, both
--- 0...15.
+local function field_of(v, f)
+	return word_field(v.data, f)
+end
+
+-- How far the voxel is from something holding it up, and how much of what it
+-- can carry is already on it. The band is 1...15 for anything structural and
+-- 0 for anything that is not, which is what tells a solid voxel from air
+-- without having to add the fractions up.
 local function support_of(v)
-	return field_of(v, FIELD.param) % 16
+	return field_of(v, FIELD.support)
 end
 
 local function band_of(v)
-	return math.floor(field_of(v, FIELD.param) / 16)
+	return field_of(v, FIELD.band)
 end
 
--- In the order main.cpp adds them, which is what the ids are
-local MATERIAL = {
-	"air", "bedrock", "rock", "dirt", "grass", "sand", "rubble",
-	"timber", "brick", "water", "trunk", "leaves", "wet dirt",
-}
-local M_AIR = 1
+-- Is there anything here at all: something structural, or standing water.
+-- What used to be "the id is not air".
+local function occupied_at(p)
+	local v = voxelworld.get_static_voxel(p)
+	if band_of(v) ~= 0 then
+		return true, v
+	end
+	local mix = voxelworld.get_static_voxel_plane(p, P_MIX)
+	return word_field(mix, MIX.water) >= 128, v
+end
 
--- What the right button places, and the keys that pick it. Rock is what a
--- mine is made of, timber props a ceiling, brick carries a load; dirt is
--- there to backfill with.
+-- What the right button places, and the keys that pick it. The number is an
+-- index into main.cpp's own list, not a material id: there are no material
+-- ids in this game.
 local BUILD_MATERIALS = {
-	{key = magic.KEY_1, id = 3, name = "rock"},
-	{key = magic.KEY_2, id = 8, name = "timber"},
-	{key = magic.KEY_3, id = 9, name = "brick"},
-	{key = magic.KEY_4, id = 4, name = "dirt"},
-	-- Not something to build with: something to pour next to dirt and watch
-	{key = magic.KEY_5, id = 10, name = "water"},
+	{key = magic.KEY_1, id = 1, name = "stone"},
+	{key = magic.KEY_2, id = 2, name = "timber"},
+	{key = magic.KEY_3, id = 3, name = "brick"},
+	{key = magic.KEY_4, id = 4, name = "soil"},
+	-- Not something to build with: something to pour next to soil and watch
+	{key = magic.KEY_5, id = 5, name = "water"},
 }
 local build_material = 1
 
@@ -184,6 +209,10 @@ do
 	light.brightness = SUN_BRIGHTNESS
 	light.color = magic.Color(1.0, 0.96, 0.88)
 end
+
+-- The format binds tint and wetness, and the reference shader is what draws
+-- them: a soaked material is darker and shinier than a dry one
+voxel_shading.use_modifiers(true)
 
 voxel_shading.create_skybox(scene, SUN_DIR)
 
@@ -503,12 +532,10 @@ local function overlook(lc, uc)
 		for dx = -1, 1 do
 			for dy = -1, 1 do
 				for dz = -1, 1 do
-					local v = voxelworld.get_static_voxel(buildat.Vector3(
+					if occupied_at(buildat.Vector3(
 							math.floor(p.x + 0.5) + dx,
 							math.floor(p.y + 0.5) + dy,
-							math.floor(p.z + 0.5) + dz))
-					local id = field_of(v, FIELD.id)
-					if id ~= M_AIR and id ~= 0 then
+							math.floor(p.z + 0.5) + dz)) then
 						clear = false
 					end
 				end
@@ -546,9 +573,8 @@ local function update_creak(dt)
 	local y = math.floor(p.y + 0.5)
 	local z = math.floor(p.z + 0.5)
 	for dy = 1, CREAK_HEIGHT do
-		local v = voxelworld.get_static_voxel(buildat.Vector3(x, y + dy, z))
-		local id = field_of(v, FIELD.id)
-		if id ~= M_AIR and id ~= 0 then
+		local here, v = occupied_at(buildat.Vector3(x, y + dy, z))
+		if here then
 			-- The first solid thing overhead is the one that would land on
 			-- you; what is above that is its problem
 			if support_of(v) <= 1 then
@@ -722,9 +748,7 @@ local function find_pointed_voxel(camera_node)
 	for i = 1, math.floor(max_d / d_per_step) do
 		local p = (p0 + dir * i * d_per_step):round()
 		if p ~= last_p then
-			local v = voxelworld.get_static_voxel(p)
-			local id = field_of(v, FIELD.id)
-			if id ~= M_AIR and id ~= 0 then
+			if occupied_at(p) then
 				return p, last_p
 			end
 			last_p = p
@@ -965,9 +989,28 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		-- is the whole debug interface between digs
 		if pointed_voxel_p then
 			local v = voxelworld.get_static_voxel(pointed_voxel_p)
-			local id = field_of(v, FIELD.id)
-			line = line.."\n"..(MATERIAL[id] or ("id "..id))..
-					"  support "..support_of(v).."/15"..
+			local mix = voxelworld.get_static_voxel_plane(
+					pointed_voxel_p, P_MIX)
+			-- What it is made of, which is the whole of what it is: there
+			-- is no material name to look up
+			local made = ""
+			for _, n in ipairs({"rock", "sand", "fibre", "binder"}) do
+				local q = word_field(mix, MIX[n])
+				if q > 0 then
+					made = made..n.." "..q.."  "
+				end
+			end
+			local water = word_field(mix, MIX.water)
+			if water > 0 then
+				made = made.."water "..math.floor(water * 100 / 255).."%  "
+			end
+			if made == "" then
+				made = "air  "
+			end
+			line = line.."\n"..made..
+					"bond "..word_field(mix, MIX.bond).."/15"..
+					(word_field(mix, MIX.life) > 0 and "  live" or "")..
+					"\nsupport "..support_of(v).."/15"..
 					"  load "..band_of(v).."/15"..
 					"  light "..field_of(v, FIELD.light)
 		end
