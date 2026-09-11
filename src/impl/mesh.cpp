@@ -511,6 +511,21 @@ static unsigned plain_color(uint32_t rgb)
 	return ((rgb & 0xff) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 0xff);
 }
 
+// Two colours multiplied, both plain 0xRRGGBB. What wants this is combining
+// the tints a voxel has before any of them is packed for a vertex: packing
+// swaps the byte order, so combining packed colours with the function below
+// swaps it twice and comes out with red and blue exchanged.
+static uint32_t mul_rgb(uint32_t a, uint32_t b)
+{
+	uint32_t r = ((a >> 16) & 0xff) * ((b >> 16) & 0xff) / 255;
+	uint32_t g = ((a >> 8) & 0xff) * ((b >> 8) & 0xff) / 255;
+	uint32_t bl = (a & 0xff) * (b & 0xff) / 255;
+	return (r << 16) | (g << 8) | bl;
+}
+
+// A plain 0xRRGGBB tint multiplied into a colour that is already packed for
+// a vertex -- the light the mesher worked out. The alpha is how much of the
+// sky the surface sees and is left alone.
 static unsigned modulate_color(unsigned lit, uint32_t rgb)
 {
 	if(rgb == 0xffffff)
@@ -869,12 +884,12 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			face_vertex_colors(volume, voxel_reg, fmt, quad, n, face_id,
 					corner_colors);
 		}
-		// The voxel's own colour, and then what its param says about it
+		// The voxel's own colour, and then what its param says about it,
+		// combined before either is packed
 		if(voxel_color != 0xffffff || (variant &&
 				variant->color != 0xffffff)){
 			uint32_t tint = variant ?
-					modulate_color(voxel_color | 0xff000000UL,
-							variant->color) & 0xffffffUL : voxel_color;
+					mul_rgb(voxel_color, variant->color) : voxel_color;
 			for(size_t i = 0; i < 4; i++){
 				corner_colors[i] = use_skylight ?
 						modulate_color(corner_colors[i], tint) :
@@ -1231,10 +1246,8 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 					uint32_t tint = 0xffffff;
 					if(fmt.color.bound())
 						tint = fmt.color.get(v.data) & 0xffffffUL;
-					if(variant){
-						tint = modulate_color(tint | 0xff000000UL,
-								variant->color) & 0xffffffUL;
-					}
+					if(variant)
+						tint = mul_rgb(tint, variant->color);
 					if(tint != 0xffffff){
 						color = use_skylight ?
 								modulate_color(color, tint) :

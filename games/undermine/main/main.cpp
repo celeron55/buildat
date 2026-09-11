@@ -72,13 +72,25 @@ static const int BEDROCK_TOP = -60;
 // undermine's own cut of a voxel word, which is the point of the game
 // existing. See local/undermine_plan.md.
 //
-//   id       0...7    up to 255 materials; there are twelve, and nature and
-//                     everything else it will grow have room
-//   sky      8...11    light, as voxelworld maintains it
-//   param   12...19   the load a voxel carries, bound as the engine's param
-//                     role so that the mesher can read it without the game
-//                     spending a second field on a copy of it
-//   support 20...23   how far this voxel is from something holding it up
+//   id      0...7    up to 255 materials; there are twelve, and nature and
+//                    everything else it will grow have room
+//   sky     8...11   light, as voxelworld maintains it
+//   param  12...19   both of the simulation's numbers, packed:
+//                      high nibble  how much of what this voxel can carry is
+//                                   already on it, 0...15
+//                      low nibble   how far it is from something holding it
+//                                   up, 0...15
+//
+// One field rather than two, and bound as the engine's `param` role, because
+// the role is the only thing the mesher can read -- and the views need both
+// numbers. A view is then a registry whose definitions decode these eight
+// bits its own way: the high nibble, the low nibble, or the worse of the
+// two. See build_view_registry().
+//
+// The load is stored as a fraction of the voxel's own capacity rather than
+// as a weight, which is the normalisation a view needs anyway and is what
+// lets one nibble do. Nothing needs the weight itself: compute_load() works
+// it out from the column whenever the rules ask.
 //
 // No lamp light. Nothing in this world bakes light into a voxel except the
 // sky: a lamp here is a real light in the scene, which is what the player's
@@ -95,21 +107,24 @@ static const int BEDROCK_TOP = -60;
 // the simulation reads and writes through them.
 static const interface::VoxelField F_ID(0, 0, 8);
 static const interface::VoxelField F_LIGHT_SKY(0, 8, 4);
-static const interface::VoxelField F_LOAD(0, 12, 8);
-static const interface::VoxelField F_SUPPORT(0, 20, 4);
+static const interface::VoxelField F_PARAM(0, 12, 8);
 
 static interface::VoxelFormat undermine_format()
 {
 	interface::VoxelFormat f;
 	f.id = F_ID;
 	f.light_sky = F_LIGHT_SKY;
-	// The load is the engine's param role, so that the mesher can read it
-	f.param = F_LOAD;
+	// The simulation's own state is the param role, so that the mesher can
+	// read it and the views can be made out of it
+	f.param = F_PARAM;
 	return f;
 }
 
 static const uint8_t SUPPORT_MAX = 15;
 static const uint8_t LOAD_MAX = 255;
+// How many steps of "how loaded is it" fit in the nibble, and so how many
+// bands a view has
+static const uint8_t BAND_MAX = 15;
 
 // How far up a voxel is asked to carry.
 //
@@ -130,12 +145,29 @@ static interface::VoxelTypeId id_of(const VoxelInstance &v)
 
 static uint8_t support_of(const VoxelInstance &v)
 {
-	return (uint8_t)F_SUPPORT.get(v.data);
+	return (uint8_t)(F_PARAM.get(v.data) & 0x0f);
 }
 
-static uint8_t load_of(const VoxelInstance &v)
+// How much of what this voxel can carry is already on it, 0...15
+static uint8_t band_of(const VoxelInstance &v)
 {
-	return (uint8_t)F_LOAD.get(v.data);
+	return (uint8_t)(F_PARAM.get(v.data) >> 4);
+}
+
+static void set_state(VoxelInstance &v, uint8_t support, uint8_t band)
+{
+	F_PARAM.set(v.data, (uint32_t)((band & 0x0f) << 4) | (support & 0x0f));
+}
+
+// A weight, as the fraction of a capacity that a nibble can hold. Rounded
+// down, so a band of 15 means "at or over what it can carry" only when the
+// weight really is; the rules test the weight itself and not this.
+static uint8_t load_band(uint32_t load, uint8_t capacity)
+{
+	if(capacity == 0)
+		return 0;
+	uint32_t band = load * (BAND_MAX + 1) / ((uint32_t)capacity + 1);
+	return (uint8_t)(band > BAND_MAX ? BAND_MAX : band);
 }
 
 // The materials. Ids are assigned in this order by add_voxel() below, and
@@ -318,9 +350,9 @@ struct Worldgen: public worldgen::GeneratorInterface
 							depth = 0;
 							continue;
 						}
-						F_SUPPORT.set(v.data, SUPPORT_MAX);
-						F_LOAD.set(v.data, carried > LOAD_MAX ?
-								LOAD_MAX : carried);
+						set_state(v, SUPPORT_MAX,
+								load_band(carried > LOAD_MAX ?
+										LOAD_MAX : carried, m.capacity));
 						volume.setVoxelAt(p, v);
 						int &slot = window[depth % LOAD_DEPTH];
 						carried -= slot;
@@ -440,33 +472,40 @@ struct Module: public interface::Module
 		reg->add_voxel(vdef);
 	}
 
-	// The stress view
-	// ---------------
+	// The views
+	// ---------
 	//
-	// A second registry, with the same voxel format and different
+	// A view is a registry with the same voxel format and different
 	// definitions: every material wears sixteen bands of a gradient instead
-	// of its texture, and which band a voxel gets is its own load against
-	// its own material's capacity.
+	// of its texture, and which band a voxel gets is decoded from the param
+	// -- which carries both of the simulation's numbers, see the layout at
+	// the top of this file.
 	//
-	// It costs no storage at all, which is the whole trick. The load is
-	// bound as the engine's `param` role, so the mesher already has it per
-	// voxel; a definition's variants are indexed by that param; and
-	// variant_of_param is per definition, so the normalisation by capacity
-	// -- the thing that makes a stress number mean anything -- falls out of
-	// the table rather than being computed anywhere.
+	// It costs no storage at all, which is the trick worth knowing. The
+	// param is a role, so the mesher already has it per voxel; a
+	// definition's variants are indexed by it; and variant_of_param is per
+	// definition, so anything that depends on the material -- which is all
+	// of the normalisation -- falls out of the table rather than being
+	// computed anywhere.
 	//
-	// The client meshes with this instead of the playing registry and turns
-	// skylight off while it does, so the vertex colour is the band and
-	// nothing else. In the playing registry no definition has variants at
-	// all, so the mesher hoists the param out of its loop and normal play
+	// The client meshes with one of these instead of the playing registry
+	// and turns skylight off while it does, so the vertex colour is the band
+	// and nothing else. In the playing registry no definition has variants
+	// at all, so the mesher hoists the param out of its loop and normal play
 	// pays nothing for any of this.
-	static const size_t STRESS_BANDS = 16;
+	static const size_t VIEW_BANDS = 16;
 
-	// Green through yellow to red: nothing is carrying anything, through
-	// carrying what it can.
-	static uint32_t stress_color(size_t band)
+	enum ViewMode {
+		VIEW_LOAD = 0,   // how much of what it can carry is on it
+		VIEW_SUPPORT,    // how far it is from something holding it up
+		VIEW_DANGER,     // the worse of the two
+		VIEW_COUNT
+	};
+
+	// Green through yellow to red: nothing the matter, through about to go.
+	static uint32_t band_color(size_t band)
 	{
-		float t = (float)band / (float)(STRESS_BANDS - 1);
+		float t = (float)band / (float)(VIEW_BANDS - 1);
 		float r = t < 0.5f ? t * 2.0f : 1.0f;
 		float g = t < 0.5f ? 1.0f : (1.0f - t) * 2.0f;
 		uint32_t ri = (uint32_t)(r * 255.0f + 0.5f);
@@ -474,7 +513,21 @@ struct Module: public interface::Module
 		return (ri << 16) | (gi << 8) | 0x18;
 	}
 
-	void build_stress_registry(interface::VoxelRegistry *reg)
+	// What this view makes of a voxel whose param says this. Both nibbles are
+	// 0...15 already, so a view is nothing but a choice between them.
+	static size_t view_band(int mode, uint8_t param)
+	{
+		size_t load = param >> 4;
+		size_t support = param & 0x0f;
+		size_t from_support = SUPPORT_MAX - support;
+		switch(mode){
+		case VIEW_SUPPORT: return from_support;
+		case VIEW_DANGER: return load > from_support ? load : from_support;
+		default: return load;
+		}
+	}
+
+	void build_view_registry(interface::VoxelRegistry *reg, int mode)
 	{
 		reg->set_format(undermine_format());
 		// Air first, as in the playing registry: the ids have to agree,
@@ -494,7 +547,7 @@ struct Module: public interface::Module
 				continue;
 			}
 			interface::VoxelDefinition vdef;
-			vdef.name.block_name = ss_("stress_") + NAME[id];
+			vdef.name.block_name = ss_("view_") + NAME[id];
 			vdef.handler_module = "";
 			for(size_t i = 0; i < 6; i++){
 				interface::AtlasSegmentDefinition &seg = vdef.textures[i];
@@ -507,31 +560,35 @@ struct Module: public interface::Module
 			}
 			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
 			vdef.physically_solid = true;
-			for(size_t band = 0; band < STRESS_BANDS; band++){
+			for(size_t band = 0; band < VIEW_BANDS; band++){
 				interface::VoxelVariant var;
-				var.color = stress_color(band);
+				var.color = band_color(band);
 				vdef.variants.push_back(var);
 			}
-			// Which band a load falls in, against what this material can
-			// carry. A capacity of 0 would divide by nothing; the materials
-			// that have one are not structural and never reach here.
-			for(size_t load = 0; load < 256; load++){
-				size_t band = m.capacity > 0 ?
-						load * STRESS_BANDS / (m.capacity + 1) : 0;
-				vdef.variant_of_param[load] = (uint8_t)(
-						band < STRESS_BANDS ? band : STRESS_BANDS - 1);
+			for(size_t param = 0; param < 256; param++){
+				size_t band = view_band(mode, (uint8_t)param);
+				vdef.variant_of_param[param] = (uint8_t)(
+						band < VIEW_BANDS ? band : VIEW_BANDS - 1);
 			}
 			reg->add_voxel(vdef);
 		}
 	}
 
-	void send_stress_registry(network::PeerInfo::Id peer)
+	void send_view_registries(network::PeerInfo::Id peer)
 	{
-		sp_<interface::VoxelRegistry> reg(interface::createVoxelRegistry());
-		build_stress_registry(reg.get());
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, "main:stress_registry", reg->serialize());
-		});
+		for(int mode = 0; mode < VIEW_COUNT; mode++){
+			sp_<interface::VoxelRegistry> reg(
+					interface::createVoxelRegistry());
+			build_view_registry(reg.get(), mode);
+			std::ostringstream os(std::ios::binary);
+			{
+				cereal::PortableBinaryOutputArchive ar(os);
+				ar((int32_t)mode, reg->serialize());
+			}
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(peer, "main:view_registry", os.str());
+			});
+		}
 	}
 
 	void on_start()
@@ -760,7 +817,7 @@ struct Module: public interface::Module
 			inetwork->send(event.recipient, "main:worldgen_queue_size",
 					itos(queue_size));
 		});
-		send_stress_registry(event.recipient);
+		send_view_registries(event.recipient);
 		send_spawn(event.recipient);
 	}
 
@@ -890,11 +947,11 @@ struct Module: public interface::Module
 			return;
 		uint8_t support = compute_support(world, p, m);
 		uint8_t load = compute_load(world, p);
+		uint8_t band = load_band(load, m.capacity);
 		bool support_moved = support != support_of(v);
-		if(support_moved || load != load_of(v)){
+		if(support_moved || band != band_of(v)){
 			VoxelInstance nv = v;
-			F_SUPPORT.set(nv.data, support);
-			F_LOAD.set(nv.data, load);
+			set_state(nv, support, band);
 			world->set_voxel(p, nv, true);
 		}
 		// A support that moved changes what the voxels around it can reach
@@ -943,7 +1000,11 @@ struct Module: public interface::Module
 			// It may have been dug, or held up again, since it was queued
 			if(!m.structural || !m.diggable)
 				continue;
-			if(support_of(v) != 0 && load_of(v) <= m.capacity)
+			// The weight itself, not the band: the band is a sixteenth of a
+			// capacity coarse and this is the test that decides whether
+			// something comes down
+			if(support_of(v) != 0 &&
+					compute_load(world, p) <= m.capacity)
 				continue;
 			pv::Vector3DInt32 down(p.getX(), p.getY() - 1, p.getZ());
 			VoxelInstance bv = world->get_voxel(down, true);
@@ -961,7 +1022,7 @@ struct Module: public interface::Module
 				// running into a tunnel is still sand.
 				VoxelInstance nv(m.span == 0 ? (uint32_t)id :
 						(uint32_t)M_RUBBLE);
-				F_SUPPORT.set(nv.data, 0);
+				set_state(nv, 0, 0);
 				world->set_voxel(down, nv, true);
 				world->set_voxel(p, VoxelInstance(M_AIR), true);
 				mark_changed(p);
@@ -1170,7 +1231,7 @@ struct Module: public interface::Module
 				VoxelInstance v((uint32_t)vp.second);
 				// Held up until the simulation says otherwise, so that the
 				// building does not fall over as it is written
-				F_SUPPORT.set(v.data, SUPPORT_MAX);
+				set_state(v, SUPPORT_MAX, 0);
 				world->set_voxel(vp.first, v, true);
 			}
 		});
@@ -1225,7 +1286,7 @@ struct Module: public interface::Module
 			// Something just placed is held up by whatever it was placed
 			// against until the simulation says otherwise, which keeps a
 			// prop from falling in the tick before it is looked at
-			F_SUPPORT.set(v.data, SUPPORT_MAX);
+			set_state(v, SUPPORT_MAX, 0);
 			instance->set_voxel(voxel_p, v);
 		});
 		mark_changed(voxel_p);
