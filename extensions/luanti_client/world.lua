@@ -79,6 +79,9 @@ local DRAWTYPE_FLOWINGLIQUID = 3
 local DRAWTYPE_RAILLIKE = 11
 -- nodedef.lua's M.LIQUID_NONE, which is what a node that is not a liquid has
 local NODEDEF_LIQUID_NONE = 0
+-- nodedef.lua's M.ALPHAMODE_BLEND: the game asked for this node's texture
+-- alpha to be blended rather than used as a mask
+local NODEDEF_ALPHAMODE_BLEND = 0
 
 -- How long a frame may spend handing blocks to the mesher, and how many it
 -- may hand over however fast they go. Meshing itself is on a worker thread,
@@ -785,8 +788,11 @@ function M.new(magic, buildat, log, options)
 	-- nodes connect to or that connects to others; see connect_families().
 	-- masked is a shape per neighbour mask instead of one shape, which is
 	-- what a rail wants; see VoxelDefinition.shape_masked.
+	-- blend is the node's own use_texture_alpha = "blend": see
+	-- NODEDEF_ALPHAMODE_BLEND
 	local function add_cube(voxel_reg, name, resources, kind, shape,
-			double_sided, turns, liquid_group, connect, masked, variants)
+			double_sided, turns, liquid_group, connect, masked, variants,
+			blend)
 		local vdef = buildat.VoxelDefinition()
 		vdef.name.block_name = name
 		vdef.handler_module = ""
@@ -834,8 +840,15 @@ function M.new(magic, buildat, log, options)
 		-- Which pass the faces go in. The mesher puts a translucent voxel's
 		-- faces on a child node of the chunk and world.lua gives that one the
 		-- blended technique.
-		vdef.translucent = liquid_group ~= nil and liquid_group ~= 0
-		if vdef.translucent then
+		--
+		-- A liquid always, and anything the game asked to be blended rather
+		-- than alpha masked: that is what use_texture_alpha = "blend" means,
+		-- and without reading it framed glass and panes are drawn with every
+		-- texel either solid or gone where the game meant them to be seen
+		-- through.
+		vdef.translucent = (liquid_group ~= nil and liquid_group ~= 0) or
+				blend == true
+		if liquid_group ~= nil and liquid_group ~= 0 then
 			-- Where the surface stands, which is what the mesher averages
 			-- across the voxels around each corner: the top of the shape for
 			-- a flowing liquid, and the top of the voxel for a source, which
@@ -3216,7 +3229,8 @@ function M.new(magic, buildat, log, options)
 				resources[i] = resources[i] or first
 			end
 			return add_cube(reg, name or def.name, resources, kind, shape,
-					double_sided, nil, group, connect, masked, variants)
+					double_sided, nil, group, connect, masked, variants,
+					def.alpha_mode == NODEDEF_ALPHAMODE_BLEND)
 		end
 		if not kind then
 			return nil
@@ -3229,7 +3243,8 @@ function M.new(magic, buildat, log, options)
 			end
 		end
 		return add_cube(reg, name or def.name, resources, kind, nil, nil,
-				nil, group, connect, nil, variants)
+				nil, group, connect, nil, variants,
+				def.alpha_mode == NODEDEF_ALPHAMODE_BLEND)
 	end
 
 	-- Builds the registry for a set of node definitions a slice at a time.
