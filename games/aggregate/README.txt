@@ -56,8 +56,12 @@ And what undermine has no answer to at all:
   contents reach, so a film of water on the ground is a film and not a cube
   of water.
 - **Water moves and is conserved.** Down into whatever room is under it,
-  then sideways, and held against gravity up to what the mixture's
-  capillarity holds -- only what is over that runs off, which is why damp
+  then sideways, then up -- the last being capillary rise, which is why the
+  ground over a water table is damp and a pond has a damp shore. Rise is
+  diffusion towards field capacity rather than pressure: it moves water
+  from whichever holds more of its own capacity to whichever holds less and
+  never past that capacity, so it comes to rest where a head would not.
+  Water is held against gravity up to what the mixture's capillarity holds -- only what is over that runs off, which is why damp
   ground stays damp instead of draining into the bottom of the world.
   Anything with set binder in it is closed to water, so brick and concrete
   keep it out and wood does not.

@@ -1867,6 +1867,49 @@ struct Module: public interface::Module
 			if(mix.water < WATER_QUANTUM)
 				break;
 		}
+
+		// And up, which is capillary rise: water climbs into fine material
+		// above a wet layer, which is why the ground over a water table is
+		// damp and why a pond has a damp shore rather than a dry one.
+		//
+		// This is not pressure and wants no head. It is diffusion towards
+		// field capacity: it moves water from the one holding more of its
+		// own capacity to the one holding less, it never pushes the
+		// receiver past that capacity, and it stops when they are even. So
+		// unlike a head it has a fixed point, which is the whole reason it
+		// is allowed where pressure is not.
+		{
+			const pv::Vector3DInt32 up(p.getX(), p.getY() + 1, p.getZ());
+			interface::VoxelSample uv = peek(world, up);
+			if(is_generated(uv)){
+				Mix umix = mix_of(uv);
+				const int hb = held_water(umix);
+				if(takes_water(umix) && (int)umix.water < hb){
+					const int ha = held_water(mix);
+					// What evens out the two as fractions of what each
+					// holds against gravity
+					int move = ((int)mix.water * hb -
+							(int)umix.water * ha) / (ha + hb);
+					const int fill = hb - (int)umix.water;
+					if(move > fill)
+						move = fill; // Never above what it can hold up there
+					const int room = water_room(umix);
+					if(move > room)
+						move = room;
+					const int cond = flow_limit(mix, umix);
+					if(move > cond)
+						move = cond;
+					if(move > (int)mix.water)
+						move = (int)mix.water;
+					if(move >= WATER_QUANTUM){
+						mix.water -= (uint8_t)move;
+						umix.water += (uint8_t)move;
+						write_mix(uv, up, umix, true);
+						moved = true;
+					}
+				}
+			}
+		}
 		return moved;
 	}
 
