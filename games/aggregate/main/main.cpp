@@ -448,6 +448,18 @@ static uint8_t mix_capacity(const Mix &m)
 			3 * (int)m.fibre;
 	if(c > 255)
 		c = 255;
+	// And only if it is actually packed. The sum above is how much material
+	// there is and says nothing about how much of the voxel it is, so a
+	// spoonful of leaf mould lying in a voxel carried as if it were a solid
+	// piece of leaf mould. What a heap carries is what it would carry
+	// packed, scaled by how near its own packing limit it is -- so the
+	// recipes, which are all at their limit, are unchanged, and compacted
+	// ground is stronger than loose ground, which is why it is compacted.
+	const int limit = packed_limit(m, 0);
+	if(limit > 0){
+		const int solid = (int)m.rock + m.sand + m.fibre + m.binder;
+		c = c * (solid < limit ? solid : limit) / limit;
+	}
 	// Half of it, at saturation -- and saturation is how much of the *void*
 	// the water has taken, not how much of the voxel, so a material with
 	// little room in it gives way to a little water
@@ -1834,6 +1846,60 @@ struct Module: public interface::Module
 		return moved;
 	}
 
+	// A heap with nothing holding it together sinks into whatever room is
+	// under it.
+	//
+	// migrate_solid() moves what a voxel cannot hold; this moves what the
+	// voxel under it has room for, which is the same transfer read from the
+	// other end and is the half that was missing. Without it a spoonful of
+	// leaf mould stands on the ground as a cube of its own rather than
+	// becoming part of the ground -- and rot makes spoonfuls of leaf mould
+	// out of every leaf in the world.
+	//
+	// Into something, not into nothing: a heap over air falls, and falling
+	// is a different rule that moves the whole voxel. Not into anything
+	// bonded either, for the reason migrate_solid gives.
+	//
+	// It settles: every unit moved fills the receiver and nothing raises
+	// the receiver's limit, so the loop ends when the room is gone or the
+	// heap is.
+	bool sink_solid(voxelworld::Instance *world,
+			const pv::Vector3DInt32 &p, Mix &mix)
+	{
+		if(mix.bond > 0 || mix.solid() <= 0)
+			return false;
+		const pv::Vector3DInt32 down(p.getX(), p.getY() - 1, p.getZ());
+		interface::VoxelSample nv = peek(world, down);
+		if(!is_generated(nv))
+			return false;
+		Mix nmix = mix_of(nv);
+		if(nmix.solid() <= 0 || nmix.bond >= 4)
+			return false;
+		int room = solid_room(nmix, band_of(nv));
+		if(room <= 0)
+			return false;
+		bool moved = false;
+		while(room > 0 && mix.solid() > 0){
+			const int which = take_solid_unit(mix);
+			if(which < 0)
+				break;
+			give_solid_unit(nmix, which);
+			room--;
+			moved = true;
+		}
+		if(moved){
+			// The room for water down there just shrank
+			const int spill = (int)nmix.water - void_fill(nmix);
+			if(spill > 0){
+				nmix.water -= (uint8_t)spill;
+				if(water_room(mix) >= spill)
+					mix.water += (uint8_t)spill;
+			}
+			write_mix(nv, down, nmix);
+		}
+		return moved;
+	}
+
 	// A neighbour the migration changed: into the scratch, and dirty, so
 	// that the water carries on moving next time round
 	void write_mix(interface::VoxelSample v, const pv::Vector3DInt32 &p,
@@ -1889,6 +1955,9 @@ struct Module: public interface::Module
 		// be a piece of something has. band_of(v) is last tick's, which is
 		// what the load was when the bond went.
 		migrate_solid(world, p, mix, band_of(v));
+		// And the other end of the same transfer: a heap sinking into the
+		// room under it
+		sink_solid(world, p, mix);
 		const bool wetness_moved = mix.water != water_was;
 		const bool solid_moved =
 				mix.rock != mix_was.rock || mix.sand != mix_was.sand ||

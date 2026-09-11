@@ -487,11 +487,17 @@ local STRUCTURES = {
 	{name = "mineshaft", label = "Mineshaft - timber props"},
 }
 
--- Places worth getting to quickly while testing. G goes to the next one, a
--- couple of voxels up so the player falls onto the ground rather than
--- spawning inside it.
+-- Places worth getting to quickly while testing. G goes to the next one.
+-- A place with a look is a viewpoint: it turns free move on, because
+-- standing in the air is the whole point of it and gravity would drop you
+-- into whatever is underneath -- a pond, in the case of the one below. A
+-- place without one is somewhere to stand, and you arrive a couple of
+-- voxels up so you land on the ground rather than inside it.
 local PLACES = {
 	{name = "pooling site", p = {-79, 62, 167}},
+	-- Far enough from the spawn to see a structure put up there whole,
+	-- which is where the B menu puts one if you have not moved
+	{name = "spawn overlook", p = {27, 71, 292}, look = {-32, 0, -35}},
 }
 local place_i = 0
 
@@ -499,7 +505,15 @@ local function go_to_next_place()
 	if #PLACES == 0 then return end
 	place_i = place_i % #PLACES + 1
 	local pl = PLACES[place_i]
-	player_node.position = magic.Vector3(pl.p[1], pl.p[2] + 3, pl.p[3])
+	if pl.look then
+		set_free_move(true)
+		player_node.position = magic.Vector3(pl.p[1], pl.p[2], pl.p[3])
+		player_node.direction =
+				magic.Vector3(pl.look[1], pl.look[2], pl.look[3])
+		camera_node.rotation = magic.Quaternion(20, 0, 0) -- Looking down a bit
+	else
+		player_node.position = magic.Vector3(pl.p[1], pl.p[2] + 3, pl.p[3])
+	end
 	log:info("Went to "..pl.name.." ("..pl.p[1]..", "..pl.p[2]..", "..pl.p[3]..")")
 end
 
