@@ -328,6 +328,15 @@ function Safe.UnsubscribeFromEvent(sub_event_type, cb_name)
 	remove_global_event_handler(sub_event_type, cb_name)
 end
 
+-- A scene drawn into a texture instead of into the window, for a thumbnail:
+-- see l_render_scene_to_texture() in src/lua_bindings/misc_urho3d.cpp for what
+-- the texture does and does not do.
+Safe.render_scene_to_texture = wrap_function({"Scene", "Node", "number",
+		"number"}, function(scene, camera_node, w, h)
+	return wrap_instance("Texture2D", __buildat_render_scene_to_texture(
+			scene, camera_node, w, h))
+end)
+
 --
 -- Unsafe interface
 --

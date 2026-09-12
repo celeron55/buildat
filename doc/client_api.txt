@@ -178,6 +178,21 @@ SubscribeToEvent(object, event_name, callback)
 - Return value: Name of the generated global callback which can be unusbscbribed
   from Urho3D via UnsubscribeFromEvent(event_name, callback_name).
 
+render_scene_to_texture(scene, camera_node, w, h) -> Texture2D
+- A scene drawn into a texture instead of into the window. What wants it is a
+  thumbnail: a voxel volume or a model seen on its own, on a button, which is
+  what the structures menu in games/aggregate wears.
+- The camera node needs a Camera component. The texture keeps updating every
+  frame, so geometry built asynchronously -- set_voxel_geometry() -- appears
+  when it arrives without anything asking for another update.
+- One function rather than RenderSurface and its update modes, because a
+  thumbnail is all anyone has needed. Neither the texture nor its viewport is
+  ever freed; the upgrade path, for a live mirror or a portal, is to expose
+  RenderSurface properly.
+- The scene is drawn with its own viewport and no postprocessing, so a scene
+  lit for the main viewport's HDR tonemapping comes out blown out. Light a
+  thumbnail scene for the low dynamic range it is.
+
 replicate
 ---------
 Interface to server->client synchronized (replicated) scenes.
