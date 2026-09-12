@@ -88,6 +88,17 @@ buildat.bignum
 - What is built on these belongs in Lua; extensions/luanti_client/srp.lua is an
   SRP-6a login written that way.
 
+buildat.list_preferences() -> {name, ...}
+buildat.get_preference(name) -> number or boolean, nil for an unknown name
+buildat.set_preference(name, value) -> true, or false and why
+- The preferences under "Client preferences" below. The C++ side is the
+  authority: set_preference() parses and range checks a value through the same
+  code -o goes through, applies what takes effect now -- the sound gain, the
+  frame limiter, vsync and MSAA, the render scale -- and persists the rest.
+- Extension environment only, and deliberately: a preference is the user's,
+  and a server's sandboxed Lua has no business writing it.
+- extensions/__menu/preferences.lua is the screen over these.
+
 buildat.add_resource_dir(path) -> bool
 - Puts a directory on Urho3D's resource search path, so files written there can
   be asked of the resource cache by name. Only directories under the client's
@@ -250,6 +261,11 @@ is refused in the sandbox. Games have "Effect", "Music", "Ambient" and
 Shadow quality, texture and material quality, filtering, FOV and draw distance
 are deliberately not here: each one changes what the game looks like or what a
 player can see, and the game is the one that should say.
+
+The launch menu has a page of them, in extensions/__menu/preferences.lua. It
+is a page of widgets over buildat.get_preference() and set_preference() and
+knows nothing about the file, which is why the C++ side is the authority for
+them in the first place.
 
 replicate
 ---------

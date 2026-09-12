@@ -1059,6 +1059,9 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(set_ui_scale)
 		DEF_BUILDAT_FUNC(get_ui_scale)
 		DEF_BUILDAT_FUNC(get_preferred_render_scale)
+		DEF_BUILDAT_FUNC(get_preference)
+		DEF_BUILDAT_FUNC(set_preference)
+		DEF_BUILDAT_FUNC(list_preferences)
 
 		// Create a scene that will be synchronized from the server
 		m_scene = new magic::Scene(context_);
@@ -1684,6 +1687,28 @@ struct CApp: public App, public magic::Application
 	// every sound in every game, under whatever mixing the game does of its
 	// own. The sandbox refuses "Master" to sandboxed code, which is what
 	// makes this enforcement rather than a default.
+	// What a changed preference does now rather than at the next start. Each
+	// one is applied only when it actually changed: setting a screen mode
+	// that is already the screen mode still costs a mode change.
+	void apply_changed_preferences(const app::Options &before)
+	{
+		const GraphicsOptions &g = m_options.graphics;
+		const GraphicsOptions &b = before.graphics;
+		if(m_options.sound_volume != before.sound_volume ||
+				m_options.sound_mute != before.sound_mute)
+			apply_sound_preferences();
+		if(g.max_fps != b.max_fps){
+			if(magic::Engine *e = GetSubsystem<magic::Engine>())
+				e->SetMaxFps(g.max_fps);
+		}
+		if(g.vsync != b.vsync || g.multisampling != b.multisampling){
+			if(magic::Graphics *gr = GetSubsystem<magic::Graphics>())
+				m_options.graphics.apply(gr);
+		}
+		if(g.render_scale != b.render_scale)
+			apply_preferred_viewports();
+	}
+
 	void apply_sound_preferences()
 	{
 		magic::Audio *audio = GetSubsystem<magic::Audio>();
@@ -1877,6 +1902,89 @@ struct CApp: public App, public magic::Application
 		CApp *self = (CApp*)lua_touserdata(L, -1);
 		lua_pop(L, 1);
 		lua_pushnumber(L, self->m_options.graphics.render_scale);
+		return 1;
+	}
+
+	// The preferences a screen can show and change. Their values live in
+	// app::Options and the C++ side is what parses, range checks and
+	// persists them, so a screen is a page of widgets over these two calls
+	// and knows nothing about the file.
+	static const char** preference_names()
+	{
+		static const char *names[7] = {"render_scale", "vsync", "max_fps",
+				"multisampling", "sound_volume", "sound_mute", nullptr};
+		return names;
+	}
+
+	// get_preference(name) -> number or boolean, or nil for a name there is
+	// no preference by
+	static int l_get_preference(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		const ss_ name = luaL_checkstring(L, 1);
+		const app::Options &o = self->m_options;
+		if(name == "render_scale")
+			lua_pushnumber(L, o.graphics.render_scale);
+		else if(name == "vsync")
+			lua_pushboolean(L, o.graphics.vsync);
+		else if(name == "max_fps")
+			lua_pushinteger(L, o.graphics.max_fps);
+		else if(name == "multisampling")
+			lua_pushinteger(L, o.graphics.multisampling);
+		else if(name == "sound_volume")
+			lua_pushnumber(L, o.sound_volume);
+		else if(name == "sound_mute")
+			lua_pushboolean(L, o.sound_mute);
+		else
+			lua_pushnil(L);
+		return 1;
+	}
+
+	// set_preference(name, value) -> true, or false and why
+	//
+	// Through the same parser -o and the preferences file go through, so a
+	// range check is written once and a screen cannot set something a flag
+	// could not. What it changes takes effect now and is persisted, unless
+	// this run was told not to remember anything -- a -o run, a -c run --
+	// in which case it still takes effect and save_preferences() declines.
+	static int l_set_preference(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		const ss_ name = luaL_checkstring(L, 1);
+		ss_ value;
+		if(lua_isboolean(L, 2))
+			value = lua_toboolean(L, 2) ? "1" : "0";
+		else
+			value = luaL_checkstring(L, 2);
+
+		app::Options parsed = self->m_options;
+		ss_ err;
+		if(!app::parse_preference_options(name+"="+value, &parsed, &err)){
+			lua_pushboolean(L, 0);
+			lua_pushstring(L, err.c_str());
+			return 2;
+		}
+		const app::Options before = self->m_options;
+		self->m_options = parsed;
+		self->apply_changed_preferences(before);
+		save_preferences(self->m_options);
+		lua_pushboolean(L, 1);
+		return 1;
+	}
+
+	// list_preferences() -> {name, ...}
+	static int l_list_preferences(lua_State *L)
+	{
+		const char **names = preference_names();
+		lua_newtable(L);
+		for(int i = 0; names[i]; i++){
+			lua_pushstring(L, names[i]);
+			lua_rawseti(L, -2, i + 1);
+		}
 		return 1;
 	}
 

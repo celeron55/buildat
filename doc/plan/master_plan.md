@@ -177,13 +177,8 @@ none of them is on anyone's critical path -- which is exactly what makes them
 the right thing to pick up when the current branch is blocked on an answer,
 or when a round has just landed and the next has not started.
 
-- **A client preferences screen.** `doc/plan/client_preferences_plan.md` builds
-  the preferences and makes every game honour them, but nothing sets them
-  except a file and `-o`. `extensions/__menu` is Lua and already draws menus,
-  so a page of sliders and checkboxes is a small job -- it only needs a Lua
-  call that writes a preference and persists it, which is why the C++ side is
-  the authority for them in the first place. Wanting one is not the same as
-  needing one: a preference nobody can find is still honoured by every game.
+Empty at the moment: the client preferences screen that was here is built;
+see `doc/plan/master_plan_history.md`.
 
 ## Think about later
 

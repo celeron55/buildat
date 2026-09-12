@@ -1013,3 +1013,30 @@ already read in. The volume is capped at Luanti's own 4096000.
 so that `find_nodes_in_area_under_air` -- the one whose indexing runs down a
 column rather than along the array -- has something to be right about. In a
 void world it was right by finding nothing.
+
+## The client preferences screen -- BUILT
+
+`doc/plan/client_preferences_plan.md` built the preferences and made every
+game honour them, but nothing set them except a file and `-o`. The launch
+menu has a page of them now.
+
+Three calls in the extension environment -- `list_preferences()`,
+`get_preference(name)`, `set_preference(name, value)` -- and the C++ side
+stays the authority: `set_preference()` goes through the same
+`parse_preference_options()` that `-o` and the preferences file go through,
+so a range check is written once and a screen cannot set something a flag
+could not. What takes effect now does: the sound gain, the frame limiter,
+vsync and MSAA, the render scale, each applied only when it actually
+changed, since setting a screen mode that is already the screen mode still
+costs a mode change. The rest is persisted by the `save_preferences()` that
+already declines for a `-o` run, a `-c` run and a `-w` size.
+
+Deliberately in the extension environment and not the sandbox: a preference
+is the user's, and a server's Lua has no business writing it.
+
+The screen itself is one button per preference, cycling the values worth
+offering. Cycling rather than a slider because the menu's keyboard
+navigation moves up and down a list of buttons and a slider inside one would
+need a second kind of focus for one screen's sake. A value that came from a
+hand-edited file or from `-o` and is not in the list shows as the nearest
+one and cycles on from there.
