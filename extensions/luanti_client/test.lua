@@ -28,6 +28,9 @@ local serialize = dofile(dir.."/serialize.lua")
 local connection = dofile(dir.."/connection.lua")
 local player = dofile(dir.."/player.lua")
 local texmod = dofile(dir.."/texmod.lua")
+-- Its own checks run when it loads; loading it here is what runs them outside
+-- a client
+dofile(dir.."/surface.lua")
 local inventory = dofile(dir.."/inventory.lua")
 local formspec = dofile(dir.."/formspec.lua")
 local objects = dofile(dir.."/objects.lua")

@@ -14,6 +14,17 @@ below protocol 48 and zstd from there on, the media announcement is a plain
 list of names and base64 hashes below 48, an item's image carries an
 animation only from 51 on, and the inventory is the rest of its packet below
 52.
+The day passes rather than arrives. The server says what time it is every few
+seconds; the client carries the clock on between those at the speed the server
+gave with it, the way Luanti's own does in Environment::stepTimeOfDay, or the
+sun would step across the sky. And the sky itself is eased rather than set:
+which set of colours a sky is drawn from -- night, dawn or day -- changes at a
+step there as here, and what keeps that from reading as one is that the sky is
+always on its way to the target rather than at it. A change too big to be the
+day moving, which is a game setting its clock or a sky arriving, is taken at
+once instead. That is Luanti's Sky::update() in shape, with the share of the
+way worked out from the frame's own length rather than fixed per frame.
+
 BUILDAT_LUANTI_ADDRESS sets the address the dialog starts with, which is what
 scripted runs (-c) use. BUILDAT_LUANTI_FORCE_DAY keeps the world at midday
 whatever the server's time is, for the same reason: a run of half a minute
@@ -22,7 +33,9 @@ itself, as Luanti's 0...24000, which is how the sky at dawn or at night gets
 looked at without waiting or asking the server for the privilege of setting
 its clock. BUILDAT_LUANTI_NAME sets the player name the dialog
 starts with, so that a test run does not fight a session of your own for the
-same player.
+same player. BUILDAT_LUANTI_PBR, set to anything non-empty, starts the dialog
+with the PBR checkbox ticked, so that a scripted run does not have to click it
+by pixel coordinates and a miss cannot be mistaken for the shader failing.
 
 Controls: the mouse looks, WASD walks, space jumps, ctrl sneaks, shift is
 faster, 1 to 8 pick a hotbar slot, the left mouse button digs what is pointed
@@ -69,10 +82,13 @@ It also discards texels below half alpha, which is what makes the holes in a
 leaf or a pane of glass be holes.
 
 The connect dialog's "Enable PBR" draws the same world with res/PBRVoxel.xml
-instead: the normal and surface maps the atlas derives from each texture, and
-reflections of a sky cube map. The vertex colours are its ambient, exactly as
-above, so a cave is as dark either way and nothing is meshed differently; what
-is added on top is the specular. Two things keep that specular honest. The
+instead: the normal and surface maps the atlas derives from each texture,
+reflections of a sky cube map, and the sun. What each surface is made of is
+guessed in surface.lua from the node's draw type, its groups, its name and
+whether it waves -- water is glossy and its highlights move, leaves let light
+through from behind, dirt is matte and bumpy, sand and snow have standing
+facets -- because a Luanti node definition says nothing about any of it. Two
+things keep the specular honest. The
 cube map beside the shader is one static noon gradient and is multiplied by the
 colour the sky is at this moment, so a sunset reflects orange and a night
 reflects almost nothing without anything being rebaked. And skyvis.lua marches
@@ -82,11 +98,121 @@ shader dims the cube map by: the mouth of a tunnel reflects sky while its walls
 do not. The counter line says what it has found straight up and over how many
 blocks of voxels, which is the quickest way to see it is working at all.
 
+The frame is rendered in HDR and tone mapped, which is what lets the sun be
+the sun: in a frame that clips at one, a sun strong enough to put a real
+shadow on the ground flattens every lit surface to white, and one weak enough
+not to do that has neither a visible colour nor a visible shadow. With the
+curve in, the sun is about fifty times the sky -- roughly what it is -- so a
+lit surface takes the sun's own warm colour instead of a mixture with the
+sky's, and the same curve lifts the shadows, so a shadow under full skylight
+reads as shade rather than as a hole. games/voxel_lighting arrived at the same
+numbers for the same reasons.
+
+Where the sun and the moon are for the purpose of casting a shadow is stepped
+rather than smooth -- a degree and a half of sun at a time, about five seconds
+at Luanti's own clock speed. A shadow map is rasterized afresh every frame and
+a light that has turned between two of them rasterizes it differently, so the
+edges crawl; holding the direction still for a step at a time trades that for
+a small jump, which is much easier not to see. Only the direction is stepped:
+whether a body is up, how bright it is and what colour it is all stay smooth.
+
+The sun is in the scene only while it is above the horizon: it fades in
+between 05:00 and 06:00 and out between 18:00 and 19:00, and the moon -- the
+same light from the other side of the sky at a fiftieth of it, cold, and with
+a shadow map of its own -- does the opposite, on a day of its own that is a
+little longer than the sun's night. It is going by 04:30 and gone by 05:30,
+with the sun then half up, and does not come back until 18:30. That leaves it
+nine hours at full against the sun's twelve, which is one more way of saying
+which of the two is the dim one.
+A directional light does not know about the horizon, so one left on at night
+lights the undersides of everything, and its specular, which is the sparkle a
+surface asks for on water, on snow and on ore, is then the brightest thing in
+a night frame and is coming from the wrong side of the sky. The clocks above
+are where the fade is shaped; the line itself is enforced separately, from
+where the body actually is, so that neither can shine from under the world
+whatever the clock says.
+
+A cloud in the sun is drawn past white, so that the tone curve leaves it white
+rather than at about nine tenths, which reads as grey. That is ramped with the
+sun's own hour at each end of the day and is only given to the clouds the
+game's own colour says are white ones: a game that asks for grey clouds, which
+is how VoxeLibre says it is raining, is taken at its word and left where it
+was. The vanilla path does not do it at all, having no tone curve to survive.
+
+For the half hour either side of the sun crossing the horizon, at each end of
+the day, the sun's light goes towards the colour the game paints the horizon
+band with -- weighted towards the crossing itself, so that it comes on gently
+at the edge of the window and a sun a quarter of an hour off the horizon is
+already red rather than a warm white -- and the clouds go most of the way
+towards the sun's: at that hour
+the sun is the only thing lighting them and it is lighting them from
+underneath, which is what makes a sunrise a sunrise rather than a sky that has
+got brighter. Outside that window neither is tinted at all.
+
+Both go out entirely when the game hides them, which is the plainest thing it
+can say: VoxeLibre turns the sun, the moon and the stars off together the
+moment the weather turns, before it darkens a single colour, and a dimension
+with no sky turns them off for good. Something that cannot be seen casts no
+light, and what is left is the sky, which is what an overcast day is lit by.
+
+Short of that they are dimmed by the weather, because a directional light does
+not know there is a layer of cloud between it and the ground while the ambient
+does --
+a game darkens the sky colours it sends when the weather turns, and the direct
+light is then the only thing left insisting it is a clear day. Two things say
+overcast and a game uses one or the other: the cloud density, of which only
+what is above Luanti's own 0.4 is weather, since every game gets that whether
+it asks or not; and the cloud colour, which is how VoxeLibre says it -- it
+never touches the density and paints its clouds #FFF0F0 for a clear sky,
+#5D5D5F for rain and #3D3D3F for a thunderstorm. Full overcast leaves the sun
+a fifth of itself, which is a day with no shadows in it.
+
+There is a floor under it while the sun is down. The sky is the only ambient
+there is here, and a game's night sky can be black -- VoxeLibre paints one --
+which left a moon shadow with nothing in it at all once the moon started
+casting them. The floor is the moon's own cold colour at little enough that
+what the moon lights is still the brighter.
+
+The ambient on this path is the sky rather than the colour of sunlight, and
+the shader's ambient is that times how much sky the vertex sees plus the lamp
+light baked into the vertex colour. That alone is three tints: open ground
+blue-white, under an overhang the same blue but dimmer, a cave only the warm
+light of its torches. The sky is desaturated and dimmed on the way in, because
+the colour a game gives is the colour of the zenith and a surface sees the
+whole dome -- the pale band along the horizon and the glare around the sun as
+much as the blue overhead.
+
+The sun is a real directional light with a shadow map, and what keeps it from
+lighting the world twice is the light curve. Node lighting on this path is
+remapped to answer one question -- am I underground -- and nothing else: full
+through a leaf canopy, nothing in rock, a smooth band in a doorway. The shader
+gates the sun by it, so a canopy is darkened by the shadow map, which is what
+a shadow map is good at, and a cave has no sun to shadow. The shadow map is
+two cascades over 24 and 96 nodes at 1024x1024, single-tap: biased for
+performance, because there are no graphics settings beyond this checkbox.
+Water, glass and ice cast no shadow, so a glass roof lets full sun through.
+
 It is off by default because the surface maps are most of what adding a texture
 to the atlas costs, and that loading time is the honest price of it. It is
 chosen before anything loads and fixed for the session for the same reason: the
-maps have to be on from the first texture the atlas builds. Not in it: sun
-shadows, which is a step of its own on top.
+maps have to be on from the first texture the atlas builds.
+
+An object is drawn unlit -- Luanti draws its entities unlit too, and their
+textures are full of holes -- so what stands in for the light is a colour the
+shader multiplies the texture by. How that is worked out follows whichever
+path is running, because an object has to agree with the voxel it is standing
+on: on the vanilla path it is the sunlight colour times how much sky the voxel
+it is in sees, which is what the mesher bakes into a face; on the PBR path it
+is that path's own ambient plus a share of the sun, so a mob goes dark at
+night and warm at dusk along with the ground.
+
+The ceiling of that is shadows. An unlit thing has no normal, so it cannot be
+shadowed and one number has to serve both a mob in the open and a mob under a
+tree; what is picked lands between the two. Drawing objects lit instead --
+real normals, the real sun, the shadow map -- is the upgrade, and it is a
+larger one than it looks: there is no lit alpha-masked technique to hand, the
+sprites a game draws as flat quads turned to the camera would light oddly, and
+every entity in every game would have to be looked at again.
 
 On top of that, a voxel whose definition gives light gets a real light in the
 scene -- the two dozen nearest the camera, each with a range and a brightness
@@ -121,12 +247,19 @@ player.lua      The player's box: the keys, gravity, and collision against
 shapes.lua      Luanti's node shapes, as the quads a voxel definition takes
 skyvis.lua      How much sky the camera can see each way, for the PBR path's
                 reflections; ported from builtin/voxel_shading's module.lua
+surface.lua     What a node's surface is made of, guessed from its definition:
+                the six numbers per texture segment the atlas turns into
+                normal and spec maps
 objmesh.lua     Wavefront .obj, as the quads a voxel's shape is made of
 res/            What the client itself ships: the placeholder textures, and
                 the shaders and techniques this world is drawn with. Urho3D
                 finds them because share_path/extensions is a resource dir,
                 and a technique names a shader with a path of its own so it
-                does not have to live in the one shader directory
+                does not have to live in the one shader directory.
+                PBRVoxel.glsl is a fork of builtin/voxel_shading's and is not
+                kept in step with it: a good half of what is in it is an art
+                style, and a world made of Luanti's plants wants different
+                numbers from the sample game's. Both files say so at the top
 objects.lua     The things in the world that are not nodes: what the server
                 says they are and where
 itemdef.lua     ITEMDEF: what an item is, and what a tool can dig
@@ -658,11 +791,19 @@ beyond 128 live single particles is dropped rather than queued.
 The clouds are a flat layer faked in the sky shader -- the view direction
 divided by its own y, which is what makes them crowd towards the horizon --
 rather than a layer at a height. So of what CLOUD_PARAMS says, the density
-becomes how much of the sky they cover and the speed becomes how fast the
-layer drifts, through a factor picked so that Luanti's own default drifts at
+becomes how much of the sky they cover -- which it already is: Luanti fills a
+cloud cell where its own noise falls below the density, the shader here fills
+where its noise rises above one minus the coverage, and since both are value
+noise of much the same shape and both are even about a half, the quantile
+carries straight across and the two clients cover the sky to within two parts
+in a hundred of each other -- and the speed becomes how fast the layer drifts,
+through a factor picked so that Luanti's own default drifts at
 the rate the shader had baked in before a game could ask for anything: twice
-the speed is twice as fast, and that is what the field is for. The height and
-the thickness have nothing to become and are dropped. Drawing the real thing
+the speed is twice as fast, and that is what the field is for. The cloud
+colour's alpha is how opaque the layer is drawn, which is what Luanti does
+with it, and the edge of a cloud is thin rather than a darker grey, so it
+blends into the sky. The height and the thickness have nothing to become and
+are dropped. Drawing the real thing
 -- a slab of cloud at a height, which the player can fly above and through --
 is deliberately not done; see the plan.
 
@@ -713,6 +854,12 @@ takes rather than constants, so a game that turns the sun off or asks for ten
 thousand stars gets that. What is not drawn is the textures a game can give
 the sun and the moon, or the cloud height and speed: the shader draws a
 square of its own colour and one layer of cloud at its own height.
+
+The stars are one per cell of a grid laid on the faces of a cube around the
+viewer -- which keeps a cell about the same size wherever it points, where a
+grid over a plane overhead crowds them at the horizon -- and that cube turns
+with the day, about the axis the sun goes round and by the same angle, which
+is what Luanti turns its own star mesh by. So they rise and set.
 
 What is next
 ------------

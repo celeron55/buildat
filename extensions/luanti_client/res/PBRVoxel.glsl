@@ -1,7 +1,38 @@
-// Forked from builtin/voxel_shading's PBRVoxel.glsl, which a Luanti client
-// cannot use: builtin/ is not on a client's resource path and there is no
-// buildat server to deliver it. One change of its own, cSkyColor below; keep
-// the two files in step when either is touched.
+// A fork of builtin/voxel_shading's PBRVoxel.glsl, and no longer a copy of it.
+//
+// It started as one because a Luanti client cannot use the built-in shader:
+// builtin/ is not on a client's resource path and there is no buildat server
+// to deliver it. What keeps the two apart now is that a good deal of what is
+// in here is an art style rather than a mechanism -- how far a spot turns, how
+// narrowly a leaf passes light through itself -- and this client's worlds and
+// games/voxel_lighting's are not the same worlds. Tuning one of them through a
+// shared file retunes the other, which is how voxel_lighting's rock quietly
+// lost its speckle.
+//
+// So the two are not kept in step. A fix to the machinery is worth carrying
+// across by hand; a number that decides how something looks is not. What
+// differs today, and why:
+//
+//   cSkyColor           Only here. The colour the sky is at this moment, which
+//                       the client pushes so that reflections follow the sky
+//                       it paints without a cube map being rebaked.
+//   SPOT_TILT           0.06 here, 0.45 there. A Luanti game's ground is
+//                       plants the whole way across and every one of them can
+//                       hold a spot, so the sparkle has to gather tightly
+//                       around the light or it reads as glitter over a field.
+//                       voxel_lighting's few surfaces are sparsely spotted and
+//                       a wide turn is what makes them catch anything at all.
+//   TRANSMISSION_FOCUS  A thirty-second power here against a sixth there, for
+//                       the same reason: a canopy of Luanti leaves glowing
+//                       over a quarter of the sky stops reading as the sun
+//                       behind it.
+//   spotGloss           Ramped on sharply here, linear there. With plants this
+//                       dense, the half open cells -- most of them at any
+//                       moment -- are a sheen that follows the light.
+//
+// STATIC_SPOT_TILT is the same number in both and wants to stay that way: a
+// facet is a chip of rock either way, and narrowing it does not gather the
+// speckle anywhere, it only takes it off the sand.
 //
 // Copied from CoreData/Shaders/GLSL/PBRLitSolid.glsl (Urho3D 1.7.1). Two
 // changes, both about how voxel skylight reaches the ambient term:
@@ -19,8 +50,12 @@
 // the neutral grey of bounced light where it is not. Ambient occlusion and a
 // per-face brightness are already folded into both terms by the mesher.
 //
-// Direct light is deliberately left alone. The sun is shadow mapped, so
-// attenuating it by skylight as well would darken shadowed faces twice.
+// Direct light is deliberately left alone, unless VOXELSUNGATE is defined:
+// with it, the directional light is multiplied by the vertex color's alpha, so
+// that a world whose light value says "underground" gets no sun. That is for a
+// world whose light curve is built for it -- see PBR_LIGHT_MAP in the Luanti
+// client's world.lua; without such a curve it would darken shadowed faces
+// twice, which is why it is off by default.
 //
 // On top of that, two things the stock PBR shaders do differently:
 //
@@ -88,6 +123,11 @@ varying vec4 vWorldPos;
             varying highp vec4 vShadowPos[NUMCASCADES];
         #endif
     #endif
+    #ifdef VOXELSUNGATE
+        // How much of the sky this vertex sees, which on the light pass is
+        // what says whether the sun can reach it at all; see below
+        varying float vSkyVisibility;
+    #endif
     #ifdef SPOTLIGHT
         varying vec4 vSpotPos;
     #endif
@@ -135,6 +175,10 @@ void VS()
     #ifdef PERPIXEL
         // Per-pixel forward lighting
         vec4 projWorldPos = vec4(worldPos, 1.0);
+
+        #ifdef VOXELSUNGATE
+            vSkyVisibility = iColor.a;
+        #endif
 
         #ifdef SHADOW
             // Shadow projection: transform from world space to shadow space
@@ -232,12 +276,27 @@ void VS()
     // a smooth gradient with no sun drawn in it, so a sharper reflection of it
     // looks no different from a blurred one. A turned normal moves the direct
     // sunlight's own highlight instead, which is the bright thing in the scene.
-    const float SPOT_TILT = 0.45;
+    //
+    // It is also what decides how far from the light the sparkle reaches. A
+    // spot turned this far catches the sun from anywhere within that angle of
+    // the mirror direction, so a large one puts glints over a whole field
+    // rather than in the band where the light is actually being reflected.
+    const float SPOT_TILT = 0.06;
     // Bigger than the moving ones: a facet is a chip of rock, not a leaf.
     // Taken from the world position for the same reason as those, that a map
     // lives in one voxel face and would repeat every voxel.
     const float STATIC_SPOT_CELLS = 6.0;     // Cells per voxel, per axis
+    // Left where it was when the moving kind was narrowed: a facet is a chip
+    // of rock that is flat and stays turned, not a leaf that has caught the
+    // light for a moment, and narrowing it takes the speckle off sand and
+    // gravel rather than gathering it anywhere.
     const float STATIC_SPOT_TILT = 0.35;
+    // How narrowly the light through a surface is aimed at the camera. Light
+    // coming through a leaf is light going the way it was already going, so it
+    // is seen looking back along it and not from the side: at the width a
+    // sixth power gives, a canopy glows over a quarter of the sky and the glow
+    // stops reading as the sun behind it.
+    const float TRANSMISSION_FOCUS = 32.0;
     const float TRANSMISSION_RATE = 0.03;    // Cycles per second, mean
     const vec3 TRANSMISSION_WIND = vec3(0.35, 0.0, -0.2);
 
@@ -425,11 +484,19 @@ void PS()
             surfaceSpots = GetSurfaceSpots(vWorldPos.xyz, surfaceSrc.a);
             staticSpots = GetStaticSpots(vWorldPos.xyz,
                 texture2D(sNormalMap, vTexCoord.xy).a);
+            // A spot is glossy because it is a leaf or a facet that has
+            // turned, and one that has half turned is a smaller turn rather
+            // than a wider, duller highlight: the fade belongs in the tilt,
+            // which carries it below. Ramping the gloss on sharply instead is
+            // what keeps the half open cells -- which at any moment are most
+            // of them -- from being a broad sheen that follows the light
+            // across a whole field.
             float spotMask = max(surfaceSpots, staticSpots);
-            roughness = mix(roughness, SPOT_ROUGHNESS, spotMask);
+            float spotGloss = spotMask * spotMask * spotMask;
+            roughness = mix(roughness, SPOT_ROUGHNESS, spotGloss);
             // Full strength however matte the rest is, so that rock can be
             // dull everywhere except at its facets
-            specStrength = mix(specStrength, 1.0, spotMask);
+            specStrength = mix(specStrength, 1.0, spotGloss);
         #endif
     #else
         float roughness = cRoughness;
@@ -553,6 +620,20 @@ void PS()
         #else
             lightColor = cLightColor.rgb;
         #endif
+
+        #if defined(DIRLIGHT) && defined(VOXELSUNGATE)
+            // The sun does not reach underground, and nothing else in the
+            // scene knows that: a shadow map cannot tell a cave from a leaf
+            // canopy, because in both cases the sky is blocked by geometry
+            // that is being drawn. So the world's own light value is the
+            // gate, and it is built for exactly this -- see PBR_LIGHT_MAP in
+            // world.lua, which holds at full through a canopy and falls to
+            // nothing in rock. Under a tree the sun is at full here and the
+            // shadow map does the darkening; in a cave there is no sun to
+            // shadow.
+            lightColor *= vSkyVisibility;
+        #endif
+
         vec3 toCamera = normalize(cCameraPosPS - vWorldPos.xyz);
         vec3 lightVec = normalize(lightDir);
         float ndl = clamp((dot(normal, lightVec)), M_EPSILON, 1.0);
@@ -585,7 +666,8 @@ void PS()
             vec3 transmitted = mix(vec3(1.0), diffColor.rgb,
                 TRANSMISSION_TINT);
             float backNdl = max(0.0, -dot(normal, lightVec));
-            float forward = pow(max(0.0, dot(-lightVec, toCamera)), 6.0);
+            float forward = pow(max(0.0, dot(-lightVec, toCamera)),
+                TRANSMISSION_FOCUS);
             // A material with no spots at all is translucent all over
             #ifdef VOXELSPOTS
                 float through = surfaceSrc.a > 0.0 ? surfaceSpots : 1.0;

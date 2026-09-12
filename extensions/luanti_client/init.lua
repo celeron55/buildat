@@ -39,6 +39,10 @@ local M = {safe = nil}
 -- which cannot easily clear a text field
 local DEFAULT_ADDRESS = os.getenv("BUILDAT_LUANTI_ADDRESS") or "localhost:30000"
 local DEFAULT_NAME = os.getenv("BUILDAT_LUANTI_NAME") or "buildat"
+-- The PBR checkbox's starting state. A scripted run has to hit the box by
+-- pixel coordinates otherwise, and a miss looks like the shader not working
+-- rather than like a missed click.
+local DEFAULT_PBR = (os.getenv("BUILDAT_LUANTI_PBR") or "") ~= ""
 
 -- How far the camera sees, and how far out blocks are kept, in nodes. The
 -- client asks the server for blocks by the same distance; see
@@ -83,11 +87,6 @@ local CRACK_FRAMES_DEFAULT = 5
 -- the privilege of setting its clock. BUILDAT_LUANTI_FORCE_DAY, in
 -- daynight_ratio() below, is the same kind of thing for the light.
 local FORCE_TIME = tonumber(os.getenv("BUILDAT_LUANTI_FORCE_TIME") or "")
-
--- How far the day has to move before the sky is worked out again, in
--- Luanti's own units of 1/24000th of a day: a full turn of the sun is 360
--- degrees over 24000, so this is about half a degree.
-local SKY_STEP = 30
 
 local HOTBAR_SLOTS = 8
 
@@ -2329,8 +2328,6 @@ local function show_client(host, port, name, password, pbr)
 		-- edge of the window
 		magic.input:SetMouseVisible(false)
 
-		local last_daylight = nil
-		local last_time_of_day = 0
 
 		-- WASD on the horizontal plane whatever the camera is pitched at,
 		-- space to jump, ctrl to sneak, shift for a faster pace, and K to
@@ -2638,25 +2635,18 @@ local function show_client(host, port, name, password, pbr)
 			end
 			update_tooltip(dtime)
 			update_held_image()
-			local time_of_day = FORCE_TIME or client.time_of_day
+			-- The clock the client carries on between the server's word for
+			-- it, so that the day passes rather than arrives every few
+			-- seconds; see client.lua's update(). Handing it over every
+			-- frame costs nothing -- the world only records it, and draws
+			-- the sky from it in its own update.
+			local time_of_day = FORCE_TIME or client.time_of_day_f
 			if time_of_day then
 				-- A server can say what the light is whatever the time is,
 				-- which is how a game lights another dimension; the sun
 				-- still goes where the time says, as it does in Luanti.
-				local daylight = daynight_ratio(time_of_day,
-						client.day_night_override)
-				-- The ramp is smooth and the zone is not free to set, so
-				-- only a visible step is worth an update. The time itself
-				-- matters as well as the light it comes to: it is where the
-				-- sun is in the sky.
-				if not last_daylight or
-						math.abs(daylight - last_daylight) > 0.01 or
-						math.abs(time_of_day - last_time_of_day) >
-								SKY_STEP then
-					last_daylight = daylight
-					last_time_of_day = time_of_day
-					view:set_daylight(daylight, time_of_day)
-				end
+				view:set_daylight(daynight_ratio(time_of_day,
+						client.day_night_override), time_of_day)
 			end
 			-- Nothing is dropped until the server has said where the player
 			-- is: until then the camera is at the origin and everything that
@@ -3238,6 +3228,7 @@ show_connect_dialog = function(address, name)
 	local pbr_label = pbr_row:CreateChild("Text")
 	pbr_label:SetStyleAuto()
 	pbr_label.text = "Enable PBR (slower to load)"
+	pbr_check.checked = DEFAULT_PBR
 	-- The password is the field a second try is most likely about, and it is
 	-- the one that is not filled in
 	if address then

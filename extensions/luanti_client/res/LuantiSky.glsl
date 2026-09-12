@@ -28,10 +28,13 @@ uniform float cStarFade;
 // squares, zero for one it has turned off; how many of the star grid's cells
 // hold a star, and what colour; and how much of the sky the clouds cover.
 uniform float cSunSize;
+uniform float cSunOverexposure;
 uniform float cMoonSize;
 uniform float cStarDensity;
 uniform vec3 cStarColor;
 uniform float cCloudCoverage;
+// How opaque the layer is, which is the alpha the game gave its cloud colour
+uniform float cCloudAlpha;
 // Whether the game gave the sun or the moon a texture of its own. When it
 // did, sDiffMap holds the sun's and sNormalMap the moon's -- two units
 // because a material has no third one this needs -- and the square is that
@@ -54,18 +57,60 @@ const vec3 MOON_COLOR = vec3(0.86, 0.88, 0.94);
 // tint the horizon is painted with: a sun the colour of dawn at midday is
 // what the tint alone gives
 const vec3 SUN_COLOR = vec3(1.0, 0.97, 0.86);
+// How far past white the sun's disc is drawn. The sun is brighter than
+// anything else in the frame by orders of magnitude and it has to be said
+// somehow: on the vanilla path the frame clips at one, so the disc is pushed
+// a little past it and its core comes out white with the texture's own colour
+// left at the edges; on the PBR path the frame is tone mapped and this is a
+// real multiplier, which is also what makes the bloom around it. Set from
+// world.lua. Scaled back to nothing as the sun comes down to the horizon,
+// because a low sun is a dim one and its colour is the point of it.
 
 const float CLOUD_SCALE = 6.0;
 const float CLOUD_PIXELS = 11.0;
-const float CLOUD_LIT_STEP = 0.07;
+// How wide the thin edge of a cloud is, in the noise's own units: the cells
+// that used to be drawn a darker grey are these, and they are drawn thin
+// instead. It starts at the threshold rather than straddling it, so that the
+// sky the clouds cover is still the sky the threshold says they cover.
+const float CLOUD_EDGE = 0.07;
 const float CLOUD_HORIZON = 0.16;
 const float CLOUD_FADE = 0.38;
 
-// The stars: one per cell of a grid laid over the direction, only some cells
-// holding one at all -- how many is cStarDensity, out of how many stars the
-// game asked for. Few enough to read as stars: at any greater density the
-// night sky is white noise.
-const float STAR_GRID = 220.0;
+// The stars: one per cell of a grid laid over the sky, only some cells holding
+// one at all -- how many is cStarDensity, out of how many stars the game asked
+// for. Few enough to read as stars: at any greater density the night sky is
+// white noise.
+//
+// The grid is on the faces of a cube around the viewer rather than on a plane
+// overhead, which keeps a cell about the same size wherever it is; a plane
+// crowds them at the horizon and thins them at the zenith. Six faces of
+// 2 x STAR_GRID cells is about 250 thousand of them, so the density a game of
+// a thousand stars comes to puts a thousand in the sky.
+const float STAR_GRID = 102.0;
+// How bright a star is drawn, against the colour the game gave them. Less than
+// the colour says, because the moon is the bright thing in a night sky and a
+// star drawn at its own colour comes out brighter than the moon does.
+const float STAR_BRIGHTNESS = 0.65;
+
+// Which cell of that a direction falls in: the face it points at, and where on
+// the face it lands
+vec3 StarCell(vec3 s)
+{
+    vec3 a = abs(s);
+    vec2 uv;
+    float face;
+    if(a.x >= a.y && a.x >= a.z){
+        uv = s.yz / a.x;
+        face = s.x > 0.0 ? 0.0 : 1.0;
+    } else if(a.y >= a.z){
+        uv = s.xz / a.y;
+        face = s.y > 0.0 ? 2.0 : 3.0;
+    } else {
+        uv = s.xy / a.z;
+        face = s.z > 0.0 ? 4.0 : 5.0;
+    }
+    return vec3(floor(uv * STAR_GRID), face);
+}
 
 float SkyHash(vec2 p)
 {
@@ -148,11 +193,18 @@ void PS()
     // The stars, behind everything else up there and only when the sky is
     // dark enough for them
     if(cStarFade > 0.0 && cStarDensity > 0.0 && d.y > -0.05){
-        vec2 cell = floor(vec2(d.x, d.z) / max(abs(d.y), 0.15) * STAR_GRID);
-        float pick = SkyHash(cell);
+        // Turned with the day, about the axis the sun goes round and by the
+        // same angle: Luanti turns its star mesh by 2 pi (wicked time - 1/4)
+        // about Z, and the sun's own direction is the cosine and sine of
+        // that, so it is the rotation. Stars rise and set with it.
+        vec3 turned = vec3(d.x * sun.x + d.y * sun.y,
+            d.y * sun.x - d.x * sun.y, d.z);
+        vec3 cell = StarCell(turned);
+        vec2 key = cell.xy + cell.z * 71.0;
+        float pick = SkyHash(key);
         if(pick < cStarDensity){
-            float twinkle = 0.55 + 0.45 * SkyHash(cell + 7.0);
-            color += cStarColor * twinkle * cStarFade *
+            float twinkle = 0.55 + 0.45 * SkyHash(key + 7.0);
+            color += cStarColor * twinkle * cStarFade * STAR_BRIGHTNESS *
                     smoothstep(-0.05, 0.15, d.y);
         }
     }
@@ -164,11 +216,16 @@ void PS()
                 cElapsedTimePS * cCloudWind;
         float density = CloudDensity(floor(p * CLOUD_PIXELS) / CLOUD_PIXELS);
         float threshold = 1.0 - cCloudCoverage;
-        vec3 cloud = density > threshold + CLOUD_LIT_STEP ?
-                cCloudColor : cCloudColor * 0.72;
-        float cover = step(threshold, density) *
+        // How much of a cloud this cell is: solid well past the threshold,
+        // sky well short of it, and thinning across CLOUD_EDGE in between, so
+        // that the edge of a cloud blends into the sky rather than being a
+        // darker cloud. What the whole layer is worth on top of that is the
+        // alpha the game gave its cloud colour, which is what Luanti draws
+        // its own clouds with.
+        float into = clamp((density - threshold) / CLOUD_EDGE, 0.0, 1.0);
+        float cover = into * cCloudAlpha *
                 smoothstep(CLOUD_HORIZON, CLOUD_FADE, d.y);
-        color = mix(color, cloud, cover);
+        color = mix(color, cCloudColor, cover);
     }
 
     // The sun and the moon, over the clouds: they are the two things up there
@@ -186,6 +243,7 @@ void PS()
             sun_color = tex.rgb;
             cover *= tex.a;
         }
+        sun_color *= mix(cSunOverexposure, 1.0, low);
         color = mix(color, sun_color, cover);
     }
     if(cMoonSize > 0.0){
