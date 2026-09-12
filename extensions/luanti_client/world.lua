@@ -572,9 +572,12 @@ function M.new(magic, buildat, log, options)
 	-- light that switches off in one frame is a light that pops.
 	local HORIZON_FADE = 0.05    -- sine of the angle, so about three degrees
 
+	local function clamp01(v)
+		return v < 0 and 0 or (v > 1 and 1 or v)
+	end
+
 	local function above_horizon(sine_of_elevation)
-		local t = sine_of_elevation / HORIZON_FADE
-		return t < 0 and 0 or (t > 1 and 1 or t)
+		return clamp01(sine_of_elevation / HORIZON_FADE)
 	end
 
 	-- 0 before the rise, 1 between the rise and the set, 0 after it, and the
@@ -3464,6 +3467,65 @@ function M.new(magic, buildat, log, options)
 		return factor ^ 2.2
 	end
 
+	-- How much of the sun and the moon the clouds keep. A directional light
+	-- does not know there is a layer of cloud between it and the ground; the
+	-- ambient does, because a game darkens the sky colours it sends when the
+	-- weather turns, and only the direct light is left saying it is a clear
+	-- day.
+	--
+	-- Two things say overcast and a game uses one or the other. Density is
+	-- how much of the sky is cloud, and 0.4 is what every game gets whether
+	-- or not it asks, so only what is above that is weather. The other is the
+	-- colour: VoxeLibre never touches the density and says it with the cloud
+	-- colour instead, #FFF0F0 for a clear sky against #5D5D5F for rain and
+	-- #3D3D3F for a thunderstorm. Reading both is what makes this work on a
+	-- game that has not been looked at.
+	local CLOUD_DIM = 0.8          -- what a full overcast takes from the sun
+	local CLOUD_SHADE_GAIN = 1.3   -- a cloud need not be black to be opaque
+
+	local function cloud_cover_of(density, color_bright)
+		-- Whether there is a layer there at all, which is what the colour
+		-- has to be weighed by: a black cloud that covers nothing shades
+		-- nothing
+		local have = clamp01(density / CLOUD_DENSITY_DEFAULT)
+		local dense = clamp01((density - CLOUD_DENSITY_DEFAULT) /
+				(1 - CLOUD_DENSITY_DEFAULT))
+		local shade = 0
+		local c = color_bright
+		if c then
+			local luma = (0.2126 * c[1] + 0.7152 * c[2] + 0.0722 * c[3]) / 255
+			shade = clamp01((1 - luma) * CLOUD_SHADE_GAIN * have)
+		end
+		-- Two ways of covering the sky, neither of which excuses the other
+		return 1 - (1 - dense) * (1 - shade)
+	end
+
+	-- What the weather has to come out as, checked at load against what a
+	-- VoxeLibre server actually sends: it leaves the density at Luanti's own
+	-- 0.4 throughout and says the weather in the colour alone.
+	do
+		local clear = cloud_cover_of(0.4, {255, 240, 240})
+		local rain = cloud_cover_of(0.4, {93, 93, 95})
+		local thunder = cloud_cover_of(0.4, {61, 61, 63})
+		assert(clear < 0.1, "a clear sky keeps the sun")
+		assert(rain > 0.6 and rain < thunder, "rain takes most of it")
+		assert(thunder > 0.9, "a thunderstorm takes nearly all of it")
+		-- And a game that says it the other way, with the density
+		assert(cloud_cover_of(1.0, {255, 255, 255}) > 0.9,
+				"a sky full of cloud covers it whatever colour the cloud is")
+		assert(cloud_cover_of(0.0, {0, 0, 0}) == 0,
+				"a cloud that is not there covers nothing")
+	end
+
+	local function cloud_cover()
+		if sky and sky.clouds == false then
+			return 0
+		end
+		local clouds = sky_bodies.clouds or {}
+		return cloud_cover_of(clouds.density or CLOUD_DENSITY_DEFAULT,
+				clouds.color_bright)
+	end
+
 	-- What the sun shines with now: its own colour, going the colour of the
 	-- horizon as it comes down to it, which is the handover the sky shader
 	-- does to the disc. Zero at night, when the light left is the sky's.
@@ -3561,14 +3623,17 @@ function M.new(magic, buildat, log, options)
 			-- everything and puts the night's sparkle on the wrong side of
 			-- the sky.
 			local sx, sy, sz = sun_direction(daylight_time)
-			local up = sun_amount(daylight_time) * above_horizon(sy)
+			local through_cloud = 1 - CLOUD_DIM * cloud_cover()
+			local up = sun_amount(daylight_time) * above_horizon(sy) *
+					through_cloud
 			sun_node.enabled = up > 0
 			if up > 0 then
 				sun_node.direction = magic.Vector3(-sx, -sy, -sz)
 				sun_light.brightness = SUN_BRIGHTNESS * up
 				sun_light.color = sun_light_color(daylight_time)
 			end
-			local moon_up = moon_amount(daylight_time) * above_horizon(-sy)
+			local moon_up = moon_amount(daylight_time) * above_horizon(-sy) *
+					through_cloud
 			moon_node.enabled = moon_up > 0
 			if moon_up > 0 then
 				moon_node.direction = magic.Vector3(sx, sy, sz)
