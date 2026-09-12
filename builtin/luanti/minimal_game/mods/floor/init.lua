@@ -92,6 +92,18 @@ core.register_node("floor:water_flowing", {
 	groups = {water = 3, liquid = 3},
 })
 
+-- A plant rooted in the cube it stands in, which is drawn as ground with
+-- the plant in the voxel above -- and lit by that voxel's light and not the
+-- ground's own
+core.register_node("floor:rooted", {
+	description = "Rooted Plant",
+	drawtype = "plantlike_rooted",
+	tiles = {"floor_stone.png"},
+	special_tiles = {{name = "floor_plant.png"}},
+	paramtype = "light",
+	groups = {snappy = 3},
+})
+
 local HALF = 12   -- a 25x25 floor, which is one voxelworld section across
 local Y = 0
 
@@ -142,6 +154,11 @@ for x = -8, -4 do
 		core.set_node({x = x, y = Y + 1, z = z},
 				{name = rim and "floor:stone" or "floor:water_source"})
 	end
+end
+
+-- Rooted plants set into the floor itself, so the cube reads as ground
+for x = -8, -4, 2 do
+	core.set_node({x = x, y = Y, z = 8}, {name = "floor:rooted"})
 end
 
 -- And a run of flowing water down the levels, for the sloped surface the

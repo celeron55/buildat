@@ -724,11 +724,16 @@ struct Module: public interface::Module, public luanti::Interface
 	// Luanti's plantlike: two quads crossing at the middle of the voxel,
 	// drawn from both sides. visual_scale makes it wider and taller, rooted
 	// at the bottom of the voxel, which is what Luanti does with it.
-	static void add_plant_quads(sv_<interface::VoxelQuad> &out, float scale)
+	//
+	// base is where the plant stands: the floor of its own voxel for
+	// plantlike, and the top of it for plantlike_rooted, whose plant is
+	// drawn into the space above the cube it is rooted in.
+	static void add_plant_quads(sv_<interface::VoxelQuad> &out, float scale,
+			float base = -0.5f, uint8_t tile = 0)
 	{
 		const float r = 0.5f * scale;
-		const float y0 = -0.5f;
-		const float y1 = -0.5f + scale;
+		const float y0 = base;
+		const float y1 = base + scale;
 		auto quad = [&](float ax, float az, float bx, float bz){
 			interface::VoxelQuad q;
 			const float p[4][3] = {{ax, y0, az}, {bx, y0, bz},
@@ -740,7 +745,7 @@ struct Module: public interface::Module, public luanti::Interface
 				q.uv[i][0] = uv[i][0];
 				q.uv[i][1] = uv[i][1];
 			}
-			q.tile = 0;
+			q.tile = tile;
 			out.push_back(q);
 		};
 		quad(-r, -r, r, r);
@@ -868,6 +873,21 @@ struct Module: public interface::Module, public luanti::Interface
 	// shipped. Anything with a texture modifier in it -- ^ for an overlay,
 	// [ for a generator, ( for a grouping -- has to be composed, and the
 	// client is what composes it, which is the rest of M3.
+	// One texture of a definition, with the surface numbers every node of a
+	// Luanti game gets until the nodedef carries its own
+	static interface::AtlasSegmentDefinition make_segment(const ss_ &texture)
+	{
+		interface::AtlasSegmentDefinition seg;
+		seg.resource_name = texture;
+		seg.total_segments = magic::IntVector2(
+				texture.empty() ? 0 : 1, texture.empty() ? 0 : 1);
+		seg.select_segment = magic::IntVector2(0, 0);
+		seg.roughness = 0.95f;
+		seg.spec_strength = 0.15f;
+		seg.bumpiness = 0.0f;
+		return seg;
+	}
+
 	bool plain_media_name(const ss_ &tile)
 	{
 		if(tile.empty())
@@ -909,6 +929,7 @@ struct Module: public interface::Module, public luanti::Interface
 			bool has_tiles = table_six_strings(L, "tiles", tiles);
 			sv_<float> boxes;
 			table_numbers(L, "node_box", boxes);
+			ss_ overlay_tile = table_string(L, "overlay_tile");
 			ss_ liquid_group = table_string(L, "liquid_group");
 			int liquid_range = (int)table_number(L, "liquid_range",
 					LIQUID_LEVELS);
@@ -919,6 +940,10 @@ struct Module: public interface::Module, public luanti::Interface
 			// which and in what order.
 			sv_<interface::VoxelQuad> shape;
 			bool double_sided = false;
+			bool lit_from_above = false;
+			// The shape is drawn as well as the voxel's cube faces, not
+			// instead of them
+			bool shape_over_cube = false;
 			if(drawtype == "nodebox" && boxes.size() >= 6){
 				for(size_t b = 0; b + 5 < boxes.size(); b += 6){
 					add_box_quads(shape, boxes[b], boxes[b + 1], boxes[b + 2],
@@ -927,6 +952,18 @@ struct Module: public interface::Module, public luanti::Interface
 			} else if(drawtype == "plantlike"){
 				add_plant_quads(shape, visual_scale > 0.0f ? visual_scale : 1.0f);
 				double_sided = true;
+			} else if(drawtype == "plantlike_rooted"){
+				// The plant stands in the voxel above the one it is rooted
+				// in, and the cube it is rooted in is ground drawn by the
+				// cube path -- so this shape is over the cube rather than
+				// instead of it, and the plant takes the light of the voxel
+				// it stands in and not the ground's own. That is what
+				// shape_lit_from_above is for.
+				add_plant_quads(shape,
+						visual_scale > 0.0f ? visual_scale : 1.0f, 0.5f, 6);
+				double_sided = true;
+				lit_from_above = true;
+				shape_over_cube = true;
 			} else if(!liquid_group.empty()){
 				// A full voxel of it. The faces inside a body of the same
 				// liquid are dropped by the shape group, and the surface is
@@ -967,6 +1004,17 @@ struct Module: public interface::Module, public luanti::Interface
 					any_fallback = true;
 				}
 			}
+			// The plant of a rooted plant: a texture the cube it stands in
+			// does not have, and the first of the definition's extra ones
+			ss_ overlay_texture;
+			if(!overlay_tile.empty() && !fallback.empty()){
+				if(plain_media_name(overlay_tile)){
+					overlay_texture = media_resource_name(overlay_tile);
+				} else {
+					overlay_texture = fallback;
+					any_fallback = true;
+				}
+			}
 			if(any_fallback && !fallback.empty()){
 				textures.push_back(name);
 				n_fallback++;
@@ -980,17 +1028,13 @@ struct Module: public interface::Module, public luanti::Interface
 			vdef.name.rotation_primary = 0;
 			vdef.name.rotation_secondary = 0;
 			vdef.handler_module = "";
-			for(size_t f = 0; f < 6; f++){
-				interface::AtlasSegmentDefinition &seg = vdef.textures[f];
-				const ss_ &texture = face_textures[f];
-				seg.resource_name = texture;
-				seg.total_segments = magic::IntVector2(
-						texture.empty() ? 0 : 1, texture.empty() ? 0 : 1);
-				seg.select_segment = magic::IntVector2(0, 0);
-				seg.roughness = 0.95f;
-				seg.spec_strength = 0.15f;
-				seg.bumpiness = 0.0f;
-			}
+			for(size_t f = 0; f < 6; f++)
+				vdef.textures[f] = make_segment(face_textures[f]);
+			// The textures a shape's quads can wear beyond the six faces: a
+			// rooted plant's plant, which is nothing the cube it stands in
+			// has. Quad tile 6 is the first of these.
+			if(!overlay_texture.empty())
+				vdef.extra_textures.push_back(make_segment(overlay_texture));
 			// Which faces are drawn, as far as the edge material carries
 			// Luanti's rules:
 			//  - airlike is nothing at all, and nothing draws a face
@@ -1018,12 +1062,15 @@ struct Module: public interface::Module, public luanti::Interface
 			vdef.physically_solid = walkable && !empty;
 			vdef.fully_empty = empty;
 			if(!shape.empty()){
-				// A shaped voxel draws its shape and not cube faces, and its
-				// neighbours draw theirs against it
 				vdef.shape = shape;
 				vdef.shape_double_sided = double_sided;
-				vdef.face_draw_type = interface::FaceDrawType::NEVER;
-				vdef.edge_material_id = interface::EDGEMATERIALID_EMPTY;
+				vdef.shape_lit_from_above = lit_from_above;
+				if(!shape_over_cube){
+					// A shaped voxel draws its shape and not cube faces, and
+					// its neighbours draw theirs against it
+					vdef.face_draw_type = interface::FaceDrawType::NEVER;
+					vdef.edge_material_id = interface::EDGEMATERIALID_EMPTY;
+				}
 				n_shaped++;
 			}
 			if(!liquid_group.empty()){
