@@ -101,6 +101,18 @@ them, and `-DPORTABLE=FALSE` puts them where the platform says (see Build).
 See [doc/client_api.txt](doc/client_api.txt) for what a game does to honour
 `render_scale`, and what the client does not get to decide.
 
+Saves
+-----
+
+A game can persist its world. `games/digger` does: it opens or creates the
+save `user/games/digger/saves/world`, and what you dig is there next time.
+Delete that directory to start over. Every other game generates and forgets,
+which is what they did before saves existed -- persistence is opt-in, and an
+arena game whose world is gone when the match ends should not have one.
+
+Behind it is a key-to-blob store per save, in one vendored SQLite database,
+namespaced per module. See `builtin/storage/api.h`.
+
 Server and client
 -----------------
 

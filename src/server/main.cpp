@@ -202,6 +202,12 @@ int main(int argc, char *argv[])
 				break;
 		}
 
+		// Whatever a module is holding gets one last chance to reach the
+		// disk. Synchronous, because the main loop is over and a queued
+		// event would never be handled; before the module threads stop,
+		// because a module's work happens in one.
+		state->emit_event_synchronously(interface::Event("core:shutdown"));
+
 		state->thread_request_stop();
 		state->thread_join();
 	} catch(server::ServerShutdownRequest &e){
