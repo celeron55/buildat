@@ -27,6 +27,7 @@ namespace command_seq
 		MouseWheel,
 		Text,
 		Quit,
+		Look,
 	};
 
 	struct Command
@@ -36,6 +37,11 @@ namespace command_seq
 		int x = 0;
 		int y = 0;
 		ss_ s;
+		// Look only: where the camera is to point, in degrees. yaw is
+		// measured from +Z towards +X and pitch is positive upwards, which
+		// is what a direction vector (x, y, z) comes out as.
+		double yaw = 0.0;
+		double pitch = 0.0;
 	};
 
 	// One command per line. Empty lines and '#' comments are ignored.

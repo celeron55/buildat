@@ -40,7 +40,9 @@ swap.
 The OS mouse is never captured or grabbed in -c mode, even if the game calls
 SetMouseVisible(false). Use mouse_move for look (GetMouseMove); that is
 relative and does not use a cursor position. mouse_pos is for a visible UI
-cursor.
+cursor. look does the same pushing for you and waits for the camera to arrive,
+which is what to use when the aim is what the shot is of rather than the
+turning.
 
 Real mouse and keyboard events are dropped for the duration of the sequence, so
 neither the physical mouse nor typing aimed at another window can perturb a
@@ -85,6 +87,26 @@ mouse_click <button>
 mouse_wheel <delta>
     Wheel ticks. Positive is away from the user.
 
+look <yaw> <pitch>
+look_dir <x> <y> <z>
+    Aim the camera and wait until it is aimed. Degrees: yaw from +Z towards
+    +X, pitch positive upwards; look_dir takes a direction and works out the
+    same two angles.
+
+    Nothing here knows what game is running. The camera is turned by injecting
+    mouse movement and watching what the camera of viewport 0 does about it:
+    how far a pixel turns it, and which way round, is measured from what the
+    last frame's push actually did, so a game with its own sensitivity or its
+    mouse look inverted is aimed as well as any other. A push that changes
+    nothing is tried the other way before it is believed.
+
+    The command ends when the camera is there, which is usually three or four
+    frames. An axis that has moved and then stops answering in both directions
+    is against a limit the game keeps -- a pitch clamp, most of the time -- and
+    the command ends with a warning naming where it stopped. A camera that
+    never moves at all, or a viewport with no camera on it, is not a game this
+    can aim: the sequence fails and the client exits non-zero.
+
 text <string>
     SDL text input (UI text fields). Rest of the line is the string.
 
@@ -101,6 +123,12 @@ Wait for the launch menu, screenshot it, click a point, wait, screenshot again:
     mouse_click left
     delay 1000
     screenshot /tmp/buildat_after_click.png
+
+Take the same shot every run, whatever the camera was left pointing at:
+
+    delay 3000
+    look 275 -15
+    screenshot /tmp/buildat_view.png
 
 Hold W for half a second while connected to a local server:
 
