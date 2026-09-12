@@ -1317,8 +1317,20 @@ function M.define(dst, util)
 
 	util.wc("Audio", {
 		instance = {
-			SetMasterGain = util.self_function(
-					"SetMasterGain", {}, {"Audio", "string", "number"}),
+			-- Urho3D multiplies a type's gain by the "Master" one, so the
+			-- master is the user's volume preference and not a game's to
+			-- write. "Effect", "Music", "Ambient" and "Voice" are what a
+			-- game's own mixing is for, and they multiply under it.
+			SetMasterGain = util.wrap_function(
+					{"Audio", "string", "number"},
+					function(self, type_name, gain)
+						if type_name == "Master" then
+							error("Audio:SetMasterGain(\"Master\") is the"..
+									" client's volume preference; use a sound"..
+									" type such as \"Effect\" or \"Music\"")
+						end
+						self:SetMasterGain(type_name, gain)
+					end),
 			Play = util.self_function("Play", {"boolean"}, {"Audio"}),
 			Stop = util.self_function("Stop", {}, {"Audio"}),
 		},

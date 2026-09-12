@@ -11,6 +11,11 @@ project(buildat)
 set(BUILD_SERVER TRUE CACHE BOOL "Build server")
 set(BUILD_CLIENT TRUE CACHE BOOL "Build client")
 set(DEBUG_LOG_TIMING FALSE CACHE BOOL "Output log messages of interesting but floody time measurements")
+# Where the cache and the user's own things live. TRUE keeps both beside the
+# program, in <buildat>/cache and <buildat>/user: what development wants, and
+# the default. FALSE puts them where the platform says, which is what an
+# installed copy wants. See local/world_persistence_plan.md.
+set(PORTABLE TRUE CACHE BOOL "Keep cache/ and user/ beside the program")
 
 #
 # Urho3D dependency (bundled in 3rdparty/Urho3D)
@@ -155,6 +160,7 @@ add_subdirectory("3rdparty/smallsha1")
 add_subdirectory("3rdparty/polyvox")
 add_subdirectory("3rdparty/zlib")
 add_subdirectory("3rdparty/zstd")
+add_subdirectory("3rdparty/sqlite")
 add_subdirectory("3rdparty/luabind-deboostified")
 
 include_directories("src")
@@ -165,6 +171,7 @@ include_directories("3rdparty/polyvox/library/PolyVoxCore/include")
 include_directories("3rdparty/zlib")
 include_directories("${CMAKE_BINARY_DIR}/3rdparty/zlib")
 include_directories("3rdparty/zstd/lib")
+include_directories("3rdparty/sqlite/src")
 # SYSTEM gets rid of annoying warnings that we're not going to fix
 include_directories(SYSTEM "3rdparty/luabind-deboostified")
 
@@ -238,7 +245,13 @@ else()
 	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/linux/os.cpp)
 	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/linux/fs.cpp)
 endif()
-add_library(${BUILDAT_CORE_NAME} SHARED ${BUILDAT_CORE_SRCS})
+if(PORTABLE)
+	add_definitions(-DBUILDAT_PORTABLE)
+endif()
+# sqlite's objects rather than a library: builtin/storage is a runtime-compiled
+# module and cannot link one, so buildat_core is what exports sqlite3_* to it.
+add_library(${BUILDAT_CORE_NAME} SHARED ${BUILDAT_CORE_SRCS}
+	$<TARGET_OBJECTS:sqlite>)
 target_link_libraries(${BUILDAT_CORE_NAME}
 	c55lib
 	smallsha1
@@ -246,6 +259,13 @@ target_link_libraries(${BUILDAT_CORE_NAME}
 	zlib
 	zstd
 )
+if(NOT WIN32)
+	find_package(Threads REQUIRED)
+	target_link_libraries(${BUILDAT_CORE_NAME}
+		${CMAKE_THREAD_LIBS_INIT}
+		${CMAKE_DL_LIBS}
+	)
+endif()
 if(WIN32)
 	target_link_libraries(${BUILDAT_CORE_NAME}
 		wsock32
@@ -384,6 +404,11 @@ if(WIN32)
 
 		install(DIRECTORY "${CMAKE_SOURCE_DIR}/3rdparty/cereal/include" DESTINATION "${DST_SHARE}/3rdparty/cereal")
 		install(DIRECTORY "${CMAKE_SOURCE_DIR}/3rdparty/polyvox/library/PolyvoxCore/include" DESTINATION "${DST_SHARE}/3rdparty/polyvox/library/PolyvoxCore")
+		# The header only: builtin/storage is compiled at run time and
+		# includes it, but the code is already in buildat_core
+		install(FILES "${CMAKE_SOURCE_DIR}/3rdparty/sqlite/src/sqlite3.h"
+				"${CMAKE_SOURCE_DIR}/3rdparty/sqlite/src/sqlite3ext.h"
+				DESTINATION "${DST_SHARE}/3rdparty/sqlite/src")
 		install(DIRECTORY "${URHO3D_HOME}/Source" DESTINATION "${DST_SHARE}/Urho3D")
 		install(FILES "${URHO3D_BUILD_DIR}/include/Urho3D/Urho3D.h" DESTINATION "${DST_SHARE}/Urho3D/Build/include/Urho3D")
 

@@ -14,6 +14,15 @@ exits after the sequence finishes (exit status 1 if a command fails).
 -w WxH runs windowed at a fixed size without changing the size the client
 remembers between runs. Use it for anything that compares images between runs.
 
+-c ignores user/preferences.json entirely and runs on the built-in defaults,
+so a preference someone left at render_scale=0.5 can never change what a
+screenshot looks like, and a run never writes the file. A -c run is also muted
+unless -o says otherwise: nothing captures audio, and a driven run playing a
+game's music through whoever's speakers is a small recurring annoyance with no
+upside. -o still wins, which is how a preference itself gets tested:
+
+    $ bin/buildat -s localhost -w 1600x900 -o render_scale=0.5 -c @check.txt
+
 @path reads the commands from a file. Empty lines and lines starting with # are
 ignored.
 

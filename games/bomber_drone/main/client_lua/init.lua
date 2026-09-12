@@ -219,13 +219,16 @@ local function layout_viewports()
 	local half = math.floor(w / 2)
 	viewports[1]:SetRect(magic.IntRect(0, 0, half, h))
 	viewports[2]:SetRect(magic.IntRect(half, 0, w, h))
+	-- Declarative: this is what is on the screen now, at whatever the user's
+	-- render scale is. The rects are read again here, so a new layout has to
+	-- say so rather than being noticed
+	magic.set_preferred_viewports(viewports)
 end
 
 do
 	local function add_viewport(index, camera)
 		local viewport = magic.Viewport:new(scene, camera)
 		viewports[index + 1] = viewport
-		magic.renderer:SetViewport(index, viewport)
 		local rp = viewport.renderPath:Clone()
 		rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/BloomHDR.xml"))
 		rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/Tonemap.xml"))
@@ -236,10 +239,10 @@ do
 		rp:SetShaderParameter("TonemapExposureBias", EXPOSURE_BIAS)
 		viewport.renderPath = rp
 	end
-	magic.renderer.numViewports = 2
 	magic.renderer.HDRRendering = true
 	add_viewport(0, chase_camera)
 	add_viewport(1, nose_camera)
+	-- Puts both on the screen, since it is what sets their rects
 	layout_viewports()
 end
 

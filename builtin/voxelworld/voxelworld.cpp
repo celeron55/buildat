@@ -1,6 +1,7 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "voxelworld/api.h"
+#include "storage/api.h"
 #include "network/api.h"
 #include "client_file/api.h"
 #include "replicate/api.h"
@@ -278,6 +279,16 @@ struct CInstance: public voxelworld::Instance
 	};
 	std::vector<SkylightSeed> m_skylight_seeds;
 
+	// The world region's own sections have not been created yet; see the
+	// constructor
+	bool m_initial_sections_pending = true;
+
+	// Persistence. Null until a game calls set_save(); a world that never
+	// does is generated and forgotten, which is what every game did before
+	// this existed and what an arena game wants.
+	storage::Store *m_store = nullptr;
+	ss_ m_world_name;
+
 	CInstance(interface::Server *server, SceneReference scene_ref,
 			const pv::Region &region, bool physics_enabled):
 		m_server(server),
@@ -294,17 +305,12 @@ struct CInstance: public voxelworld::Instance
 			m_atlas_reg.reset(interface::createAtlasRegistry(context));
 		});
 
-		// TODO: Load from disk or something
-
-		auto lc = region.getLowerCorner();
-		auto uc = region.getUpperCorner();
-		for(int z = lc.getZ(); z <= uc.getZ(); z++){
-			for(int y = lc.getY(); y <= uc.getY(); y++){
-				for(int x = lc.getX(); x <= uc.getX(); x++){
-					load_or_generate_section(pv::Vector3DInt16(x, y, z));
-				}
-			}
-		}
+		// The region's sections are created on the first tick and not here.
+		// A game creates the world, registers its voxels and calls
+		// set_save() in one core:start, in that order, and a section that
+		// comes out of a save must not be generated -- so nothing may be
+		// loaded before the game has had the chance to say whether there is
+		// a save to look in.
 
 		// Find peers that already are on the scene and iniitalize them
 		sv_<replicate::PeerId> peers;
@@ -322,6 +328,19 @@ struct CInstance: public voxelworld::Instance
 	{
 	}
 
+	void create_initial_sections()
+	{
+		auto lc = m_section_region.getLowerCorner();
+		auto uc = m_section_region.getUpperCorner();
+		for(int z = lc.getZ(); z <= uc.getZ(); z++){
+			for(int y = lc.getY(); y <= uc.getY(); y++){
+				for(int x = lc.getX(); x <= uc.getX(); x++){
+					load_or_generate_section(pv::Vector3DInt16(x, y, z));
+				}
+			}
+		}
+	}
+
 	void event(const Event::Type &type, const Event::Private *p)
 	{
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
@@ -337,6 +356,11 @@ struct CInstance: public voxelworld::Instance
 
 	void on_tick(const interface::TickEvent &event)
 	{
+		if(m_initial_sections_pending){
+			m_initial_sections_pending = false;
+			create_initial_sections();
+		}
+
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			Scene *scene = imc->find_scene(m_scene_ref);
 			if(!scene){
@@ -515,7 +539,11 @@ struct CInstance: public voxelworld::Instance
 		return section;
 	}
 
-	void create_chunk_node(Scene *scene, Section &section, int x, int y, int z)
+	// saved_data is a chunk read back out of a save: the same bytes this
+	// wrote there, which are the same bytes replication sends, so nothing
+	// about the on-disk format was designed -- it is the volume format.
+	void create_chunk_node(Scene *scene, Section &section, int x, int y, int z,
+			const ss_ *saved_data = nullptr)
 	{
 		Context *context = scene->GetContext();
 
@@ -573,9 +601,13 @@ struct CInstance: public voxelworld::Instance
 		// allocated, so a chunk of nothing but VOXELTYPEID_UNDEFINED costs
 		// its planes nothing at all
 
-		run_commit_hooks_in_thread(chunk_p, *volume);
+		// A loaded chunk has had the in_thread hooks run on it already, on
+		// the way in to the save
+		if(!saved_data)
+			run_commit_hooks_in_thread(chunk_p, *volume);
 
-		ss_ data = interface::serialize_volume_compressed(*volume);
+		ss_ data = saved_data ? *saved_data :
+				interface::serialize_volume_compressed(*volume);
 		n->SetVar(StringHash("buildat_voxel_data"), Variant(
 				PODVector<uint8_t>((const uint8_t*)data.c_str(), data.size())));
 
@@ -607,8 +639,18 @@ struct CInstance: public voxelworld::Instance
 		});
 	}
 
+	// One chunk, one row. The section is the load and unload unit, but the
+	// chunk is what a node holds and what the volume format describes, so a
+	// key per chunk means no container format had to be invented for the
+	// eight of them.
+	ss_ chunk_key(const pv::Vector3DInt32 &chunk_p)
+	{
+		return m_world_name+"/"+itos(chunk_p.getX())+","+
+				itos(chunk_p.getY())+","+itos(chunk_p.getZ());
+	}
+
 	// Somehow get the section's static nodes and possible other nodes, either
-	// by loading from disk or by creating new ones
+	// by loading from the save or by creating new ones
 	void load_section(Section &section)
 	{
 		if(section.loaded)
@@ -617,10 +659,103 @@ struct CInstance: public voxelworld::Instance
 		pv::Vector3DInt16 section_p = section.section_p;
 		log_d(MODULE, "Loading section " PV3I_FORMAT, PV3I_PARAMS(section_p));
 
-		// TODO: If found on disk, load nodes from there
-		// TODO: If not found on disk, create new static nodes
-		// Always create new nodes for now
+		if(m_store && load_saved_section(section))
+			return;
 		create_section(section);
+	}
+
+	// True if the whole section was in the save. All or nothing: a section
+	// with some of its chunks saved and some not would have to be both loaded
+	// and generated, and generation is by section.
+	bool load_saved_section(Section &section)
+	{
+		auto lc = section.contained_chunks.getLowerCorner();
+		auto uc = section.contained_chunks.getUpperCorner();
+		sv_<ss_> chunks;
+		chunks.reserve(section.num_chunks);
+		for(int z = 0; z <= uc.getZ() - lc.getZ(); z++){
+			for(int y = 0; y <= uc.getY() - lc.getY(); y++){
+				for(int x = 0; x <= uc.getX() - lc.getX(); x++){
+					pv::Vector3DInt32 chunk_p(
+							lc.getX() + x, lc.getY() + y, lc.getZ() + z);
+					ss_ data;
+					if(!m_store->get(chunk_key(chunk_p), data))
+						return false;
+					chunks.push_back(data);
+				}
+			}
+		}
+		log_v(MODULE, "Loading section " PV3I_FORMAT " from the save",
+				PV3I_PARAMS(section.section_p));
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			Scene *scene = imc->check_scene(m_scene_ref);
+			size_t i = 0;
+			for(int z = 0; z <= uc.getZ() - lc.getZ(); z++){
+				for(int y = 0; y <= uc.getY() - lc.getY(); y++){
+					for(int x = 0; x <= uc.getX() - lc.getX(); x++){
+						create_chunk_node(scene, section, x, y, z,
+								&chunks[i++]);
+					}
+				}
+			}
+		});
+		// It came out of the save the way the generator left it, and running
+		// the generator over it again would undo whatever has been built
+		// there since
+		section.generated = true;
+		return true;
+	}
+
+	// Writes the section's chunks as one transaction. Called when a section
+	// is unloaded and when the world is saved as a whole; both are moments
+	// where the data is about to stop being reachable.
+	//
+	// simplified: every chunk of the section is written, whether it changed
+	// or not. The upgrade path is a modified flag per section, set where a
+	// buffer is marked dirty -- worth having once a game streams a large
+	// world into a save, and pointless before that.
+	void save_section(Section &section)
+	{
+		if(!m_store || !section.loaded)
+			return;
+		sv_<ss_> keys;
+		sv_<ss_> values;
+		keys.reserve(section.num_chunks);
+		values.reserve(section.num_chunks);
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			Scene *scene = imc->check_scene(m_scene_ref);
+			auto lc = section.contained_chunks.getLowerCorner();
+			auto uc = section.contained_chunks.getUpperCorner();
+			for(int z = lc.getZ(); z <= uc.getZ(); z++){
+				for(int y = lc.getY(); y <= uc.getY(); y++){
+					for(int x = lc.getX(); x <= uc.getX(); x++){
+						uint id = section.node_ids->getVoxelAt(x, y, z);
+						if(!id)
+							continue;
+						Node *n = scene->GetNode(id);
+						if(!n)
+							continue;
+						const Variant &var =
+								n->GetVar(StringHash("buildat_voxel_data"));
+						const PODVector<unsigned char> &buf = var.GetBuffer();
+						if(buf.Size() == 0)
+							continue;
+						keys.push_back(chunk_key(pv::Vector3DInt32(x, y, z)));
+						values.push_back(
+								ss_((const char*)&buf[0], buf.Size()));
+					}
+				}
+			}
+		});
+		if(keys.empty())
+			return;
+		// One transaction: a row at a time outside one is the classic slow
+		// save, and it is also what leaves half a section on disk after a
+		// crash
+		m_store->batch([&](){
+			for(size_t i = 0; i < keys.size(); i++)
+				m_store->set(keys[i], values[i]);
+		});
 	}
 
 	// Generate the section; requires static nodes to already exist
@@ -829,6 +964,13 @@ struct CInstance: public voxelworld::Instance
 
 		log_v(MODULE, "Unloading section " PV3I_FORMAT, PV3I_PARAMS(section_p));
 
+		if(m_store){
+			// What the nodes hold is what has been committed; the buffers
+			// below are dropped without one
+			commit();
+			save_section(*section);
+		}
+
 		for(ChunkBuffer &buf : section->chunk_buffers){
 			if(!buf.volume)
 				continue;
@@ -876,6 +1018,62 @@ struct CInstance: public voxelworld::Instance
 	{
 		Section *section = get_section(section_p);
 		return section && section->loaded;
+	}
+
+	ss_ registry_key(){ return m_world_name+"/registry"; }
+
+	void set_save(storage::Save *save, const ss_ &world_name)
+	{
+		if(!save){
+			m_store = nullptr;
+			m_world_name = "";
+			return;
+		}
+		m_store = save->store("voxelworld");
+		m_world_name = world_name;
+		ss_ data;
+		if(m_store->get(registry_key(), data)){
+			// The numbering a save was written under is the numbering it is
+			// read under, whatever the game has registered since. That is
+			// what makes a save self-describing, and it settles voxel id
+			// stability for every game at once.
+			//
+			// simplified: a type the game registered that the save does not
+			// have is dropped rather than appended, so a game whose voxel
+			// list has grown since the save was written has to register the
+			// new ones after this call. The upgrade path is a merge that
+			// keeps the saved ids and numbers new types after them.
+			m_voxel_reg->deserialize(data);
+			log_v(MODULE, "World \"%s\": voxel registry read from the save",
+					cs(world_name));
+		} else {
+			save_registry();
+			log_v(MODULE, "World \"%s\": voxel registry written to the save",
+					cs(world_name));
+		}
+	}
+
+	void save_registry()
+	{
+		if(!m_store)
+			return;
+		m_store->set(registry_key(), m_voxel_reg->serialize());
+	}
+
+	void save()
+	{
+		if(!m_store)
+			return;
+		commit();
+		save_registry();
+		size_t n = 0;
+		for(auto &sector_pair : m_sections){
+			for(auto &section_pair : sector_pair.second){
+				save_section(section_pair.second);
+				n++;
+			}
+		}
+		log_v(MODULE, "World \"%s\": saved %zu sections", cs(m_world_name), n);
 	}
 
 	void set_voxel_direct(const pv::Vector3DInt32 &p,
@@ -1864,6 +2062,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 		// NOTE: These also apply to CInstances
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:unload"));
+		m_server->sub_event(this, Event::t("core:shutdown"));
 		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("replicate:peer_joined_scene"));
@@ -1878,6 +2077,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 	{
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_VOIDN("core:unload", on_unload)
+		EVENT_VOIDN("core:shutdown", on_shutdown)
 		EVENT_VOIDN("core:continue", on_continue)
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 		EVENT_TYPEN("replicate:peer_joined_scene", on_peer_joined_scene,
@@ -1914,6 +2114,15 @@ struct Module: public interface::Module, public voxelworld::Interface
 		// Remove everything else
 		n->RemoveAllComponents();
 		n->Remove();
+	}
+
+	// The server is going away. A world with a save gets one last flush; one
+	// without is unchanged by this, which is every game that has not asked
+	// for persistence.
+	void on_shutdown()
+	{
+		for(auto &pair : m_instances)
+			pair.second->save();
 	}
 
 	void on_unload()
