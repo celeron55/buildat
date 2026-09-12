@@ -87,6 +87,10 @@ const float CLOUD_FADE = 0.38;
 // 2 x STAR_GRID cells is about 250 thousand of them, so the density a game of
 // a thousand stars comes to puts a thousand in the sky.
 const float STAR_GRID = 102.0;
+// How bright a star is drawn, against the colour the game gave them. Less than
+// the colour says, because the moon is the bright thing in a night sky and a
+// star drawn at its own colour comes out brighter than the moon does.
+const float STAR_BRIGHTNESS = 0.65;
 
 // Which cell of that a direction falls in: the face it points at, and where on
 // the face it lands
@@ -200,7 +204,7 @@ void PS()
         float pick = SkyHash(key);
         if(pick < cStarDensity){
             float twinkle = 0.55 + 0.45 * SkyHash(key + 7.0);
-            color += cStarColor * twinkle * cStarFade *
+            color += cStarColor * twinkle * cStarFade * STAR_BRIGHTNESS *
                     smoothstep(-0.05, 0.15, d.y);
         }
     }
