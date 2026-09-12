@@ -262,7 +262,20 @@ struct Module: public interface::Module, public luanti::Interface
 		if(m_step_accum < STEP_S)
 			return;
 		m_step_accum = 0.0f;
+		step_environment();
 		flush_node_writes();
+	}
+
+	// One Luanti step: the clock now, the globalsteps and core.after later
+	void step_environment()
+	{
+		char buf[64];
+		snprintf(buf, sizeof buf, "core.__step(%f)", (double)STEP_S);
+		try {
+			run_chunk_string(buf, "step");
+		} catch(Exception &e){
+			log_w(MODULE, "step: %s", e.what());
+		}
 	}
 
 	// The map
