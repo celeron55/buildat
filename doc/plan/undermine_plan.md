@@ -13,8 +13,6 @@ a gap, dirt does not, a timber prop holds a ceiling until too much weight
 stands on it, and rubble holds nothing. Dig badly and the mine caves in on
 you.
 
-Kept out of git (`/local`) with the other plans.
-
 ## Why this game and not another
 
 It is the consumer the voxel data model does not have. Stage 1 of

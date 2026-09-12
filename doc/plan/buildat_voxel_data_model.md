@@ -5,9 +5,6 @@ long time inside luanti_client, written down at the engine's level, because
 the Luanti client is *one sample point* for what buildat has to support and
 not the thing that should decide the shape of it.
 
-Kept out of git (`/local`) on purpose: committing it would read as a
-decision.
-
 ## What exists today
 
 A voxel is one `uint32_t` (`interface::VoxelInstance`), cut by the engine:

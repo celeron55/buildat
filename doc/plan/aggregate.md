@@ -52,8 +52,6 @@ deliberately, is grain size: fluffy sand and packed sand are one sand
 fraction, and the look spike says to take that loss, since they look the
 same in life too, which is why sand is dangerous.
 
-Kept out of git (`/local`) with the other design notes.
-
 ## Why it is a second game and not undermine's next phase
 
 **undermine is frozen as of this decision** -- see the master plan -- and

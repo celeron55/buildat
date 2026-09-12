@@ -4,7 +4,8 @@ The executable half of `doc/plan/buildat_voxel_data_model.md`: the interfaces,
 the order, and the migrations. Read the design note first for *why*; this
 file is only *what changes, in what order, and what breaks*.
 
-Kept out of git (`/local`) like the note, until it is decided.
+**Stage 1 shipped**; stage 2 is blocked on a sizing question and stage 3 is
+not scheduled. See "Order against the master plan" at the end.
 
 ## The one decision that shrinks the whole diff
 
@@ -326,7 +327,8 @@ Listed so they are not mistaken for part of the work:
 
 ## Order against the master plan
 
-Stage 1 is step 4 of `doc/plan/master_plan.md` and can start the day the merge
-lands. Stage 2 is the same step continued, and the honest thing to say is
-that stage 1 is a week's shape of work and stage 2 depends on which of the
-three PolyVox answers holds. Stage 3 is not step 4.
+**Stage 1 shipped** -- the format in the registry, the roles, the planes
+machinery -- and what it turned out to be is in
+`doc/plan/voxel_data_model_history.md`. Stage 2 depends on which of the three
+PolyVox answers holds and on something asking for a second plane, which is
+`games/aggregate` and is frozen. Stage 3 is not scheduled at all.

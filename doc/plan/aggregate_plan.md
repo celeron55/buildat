@@ -4,8 +4,6 @@ The executable half of `doc/plan/aggregate.md`: what gets built, in what order,
 and how each step is known to work. Read the design note first for *why*;
 this file is *what, when, and what breaks*.
 
-Kept out of git (`/local`) with the other plans.
-
 ## Scope, and what "done" means
 
 Done, for a first playable: a world made of mixtures with no material ids in

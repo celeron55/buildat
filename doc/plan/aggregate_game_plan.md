@@ -13,8 +13,6 @@ so everything here is the game.
 
 Read `doc/plan/aggregate.md` for why a mixture model at all.
 
-Kept out of git (`/local`) with the other plans.
-
 ## The parity target, and why it comes first
 
 **Phase 1 is undermine, played again on mixtures.** The same terrain, the
