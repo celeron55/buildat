@@ -106,6 +106,20 @@ core.register_node("floor:rooted", {
 	groups = {snappy = 3},
 })
 
+-- A node that faces a direction, for the twenty-four turns a facedir
+-- permutes a cube's six textures into. Three tiles, expanded the way Luanti
+-- expands fewer than six: the last one over the rest.
+core.register_node("floor:facing", {
+	description = "Facing Block",
+	tiles = {
+		"floor_face_top.png",
+		"floor_face_bottom.png",
+		"floor_face_side.png",
+	},
+	paramtype2 = "facedir",
+	groups = {cracky = 3},
+})
+
 local HALF = 12   -- a 25x25 floor, which is one voxelworld section across
 local Y = 0
 
@@ -156,6 +170,14 @@ for x = -8, -4 do
 		core.set_node({x = x, y = Y + 1, z = z},
 				{name = rim and "floor:stone" or "floor:water_source"})
 	end
+end
+
+-- All twenty-four facedirs in a row, so a screenshot says whether the tables
+-- are right: the red top and its white corner give the axis and the turn,
+-- and the arrow on the sides gives the rest
+for i = 0, 23 do
+	core.set_node({x = -2 + i % 6, y = Y + 1, z = 7 + math.floor(i / 6)},
+			{name = "floor:facing", param2 = i})
 end
 
 -- Rooted plants set into the floor itself, so the cube reads as ground

@@ -376,6 +376,15 @@ end
 -- or a param, and the shape a neighbour decides is the mesher's connect_dir
 -- and the shape a param decides is a VoxelVariant; neither is a list of
 -- boxes the server can hand over on its own.
+-- Which way a node's param2 says it faces. The colour* kinds put a palette
+-- index in the high bits and the direction in the same low ones, so they are
+-- the same thing as far as this is concerned.
+local FACING_OF_PARAMTYPE2 = {
+	facedir = "facedir", colorfacedir = "facedir",
+	["4dir"] = "4dir", color4dir = "4dir",
+	wallmounted = "wallmounted", colorwallmounted = "wallmounted",
+}
+
 local function node_boxes(def)
 	local nb = def and def.node_box
 	if type(nb) ~= "table" or nb.type ~= "fixed" then
@@ -456,6 +465,7 @@ function core.__voxel_defs()
 			-- panes are drawn with every texel either solid or gone, where
 			-- the game meant them to be seen through.
 			alpha_blend = (def and def.use_texture_alpha == "blend") or false,
+			facing = def and FACING_OF_PARAMTYPE2[def.paramtype2] or nil,
 		}
 	end
 	return out

@@ -95,6 +95,113 @@ static ss_ node_texture_name(const ss_ &name)
 }
 
 
+// Which way a node faces, out of its param2.
+//
+// Luanti's own dir_to_tile[24][8] from mapblock_mesh.cpp, read at the
+// six directions buildat's faces are in -- +Y, -Y, +X, -X, +Z, -Z, which
+// is the order Luanti keeps its tiles in too. Taken from
+// extensions/luanti_client/shapes.lua, which read them out first and
+// checks them in its engine_test.lua.
+//
+// This is what VoxelVariant::tile_order and tile_turns are for: the
+// twenty-four turns of a facedir are twenty-four variants over one
+// definition's six textures, rather than a voxel type per rotation.
+// Which of the six tiles each face wears, per facedir
+static const uint8_t FACEDIR_TILES[24][6] = {
+	{0, 1, 2, 3, 4, 5},
+	{0, 1, 4, 5, 3, 2},
+	{0, 1, 3, 2, 5, 4},
+	{0, 1, 5, 4, 2, 3},
+	{5, 4, 2, 3, 0, 1},
+	{2, 3, 4, 5, 0, 1},
+	{4, 5, 3, 2, 0, 1},
+	{3, 2, 5, 4, 0, 1},
+	{4, 5, 2, 3, 1, 0},
+	{3, 2, 4, 5, 1, 0},
+	{5, 4, 3, 2, 1, 0},
+	{2, 3, 5, 4, 1, 0},
+	{3, 2, 0, 1, 4, 5},
+	{5, 4, 0, 1, 3, 2},
+	{2, 3, 0, 1, 5, 4},
+	{4, 5, 0, 1, 2, 3},
+	{2, 3, 1, 0, 4, 5},
+	{4, 5, 1, 0, 3, 2},
+	{3, 2, 1, 0, 5, 4},
+	{5, 4, 1, 0, 2, 3},
+	{1, 0, 3, 2, 4, 5},
+	{1, 0, 5, 4, 3, 2},
+	{1, 0, 2, 3, 5, 4},
+	{1, 0, 4, 5, 2, 3},
+};
+
+// How far that tile is turned inside its face, in quarter turns
+static const uint8_t FACEDIR_TURNS[24][6] = {
+	{0, 0, 0, 0, 0, 0},
+	{3, 1, 0, 0, 0, 0},
+	{2, 2, 0, 0, 0, 0},
+	{1, 3, 0, 0, 0, 0},
+	{0, 2, 3, 1, 2, 0},
+	{0, 2, 3, 1, 1, 1},
+	{0, 2, 3, 1, 0, 2},
+	{0, 2, 3, 1, 3, 3},
+	{2, 0, 1, 3, 2, 0},
+	{2, 0, 1, 3, 3, 3},
+	{2, 0, 1, 3, 0, 2},
+	{2, 0, 1, 3, 1, 1},
+	{3, 3, 3, 3, 1, 3},
+	{3, 3, 2, 0, 1, 3},
+	{3, 3, 1, 1, 1, 3},
+	{3, 3, 0, 2, 1, 3},
+	{1, 1, 1, 1, 3, 1},
+	{1, 1, 2, 0, 3, 1},
+	{1, 1, 3, 3, 3, 1},
+	{1, 1, 0, 2, 3, 1},
+	{2, 2, 2, 2, 2, 2},
+	{3, 1, 2, 2, 2, 2},
+	{0, 0, 2, 2, 2, 2},
+	{1, 3, 2, 2, 2, 2},
+};
+
+// A wallmounted direction is a facedir too; Luanti's own
+// wallmounted_to_facedir[]. 6 and 7 are the two spare states, which are
+// the ceiling and the floor turned a quarter.
+static const uint8_t WALLMOUNTED_FACEDIR[8] = {20, 0, 17, 15, 8, 6, 21, 1};
+
+// How many variants a kind of facing needs, and which one a param2 picks.
+// The colour* kinds put a palette index in the high bits and the
+// direction in the same low ones, so they are the same lookup; see
+// Luanti's MapNode::getFaceDir.
+static size_t facing_variant_count(const ss_ &facing)
+{
+	if(facing == "facedir")
+		return 24;
+	if(facing == "4dir")
+		return 4;
+	if(facing == "wallmounted")
+		return 8;
+	return 0;
+}
+
+static uint8_t facing_variant_of_param(const ss_ &facing, uint8_t param)
+{
+	if(facing == "facedir")
+		return (uint8_t)((param & 0x1f) % 24);
+	if(facing == "4dir")
+		return (uint8_t)(param & 0x03);
+	if(facing == "wallmounted")
+		return (uint8_t)(param & 0x07);
+	return 0;
+}
+
+// The facedir a variant of this kind stands for
+static uint8_t facing_facedir(const ss_ &facing, size_t variant)
+{
+	if(facing == "wallmounted")
+		return WALLMOUNTED_FACEDIR[variant & 7];
+	return (uint8_t)(variant % 24);
+}
+
+
 // The Lua state's own log lines land here, so a mod's core.log() is a buildat
 // log line with the mod's level
 static void log_from_lua(const ss_ &level, const ss_ &text)
@@ -806,6 +913,38 @@ struct Module: public interface::Module, public luanti::Interface
 					assert(flipped[i].p[c][j] == box[i].p[c][j]);
 			}
 		}
+		// The facedir tables: every row a permutation of the six faces, with
+		// opposite faces still opposite -- which is what a rotation of a cube
+		// can do and nothing else is. A transcription error shows up here
+		// rather than as a chest with two lids.
+		for(size_t d = 0; d < 24; d++){
+			bool seen[6] = {};
+			for(size_t f = 0; f < 6; f++){
+				assert(FACEDIR_TILES[d][f] < 6);
+				assert(!seen[FACEDIR_TILES[d][f]]);
+				seen[FACEDIR_TILES[d][f]] = true;
+				assert(FACEDIR_TURNS[d][f] < 4);
+			}
+			// Faces 0 and 1 are opposite, and so are 2 and 3 and 4 and 5
+			for(size_t f = 0; f < 6; f += 2)
+				assert((FACEDIR_TILES[d][f] ^ 1) == FACEDIR_TILES[d][f + 1]);
+		}
+		// Facedir 0 changes nothing
+		for(size_t f = 0; f < 6; f++){
+			assert(FACEDIR_TILES[0][f] == f);
+			assert(FACEDIR_TURNS[0][f] == 0);
+		}
+		// A wallmounted direction is one of the twenty-four, and the two
+		// that stand up are the ones a floor and a ceiling node get
+		for(size_t i = 0; i < 8; i++)
+			assert(WALLMOUNTED_FACEDIR[i] < 24);
+		assert(facing_facedir("wallmounted", 1) == 0); // Floor: unturned
+		assert(facing_variant_count("facedir") == 24);
+		assert(facing_variant_count("4dir") == 4);
+		assert(facing_variant_count("") == 0);
+		assert(facing_variant_of_param("facedir", 31) == 7); // 31 % 24
+		assert(facing_variant_of_param("4dir", 0xfe) == 2);
+
 		// The plant is two quads that cross, standing on the voxel's floor
 		sv_<interface::VoxelQuad> plant;
 		add_plant_quads(plant, 1.0f);
@@ -914,6 +1053,7 @@ struct Module: public interface::Module, public luanti::Interface
 		size_t n_fallback = 0;
 		size_t n_shaped = 0;
 		size_t n_liquid = 0;
+		size_t n_facing_nodes = 0;
 		for(size_t i = 1; i <= n; i++){
 			lua_rawgeti(L, -1, (int)i);
 			if(!lua_istable(L, -1)){
@@ -931,6 +1071,7 @@ struct Module: public interface::Module, public luanti::Interface
 			bool has_tiles = table_six_strings(L, "tiles", tiles);
 			sv_<float> boxes;
 			table_numbers(L, "node_box", boxes);
+			ss_ facing = table_string(L, "facing");
 			ss_ overlay_tile = table_string(L, "overlay_tile");
 			ss_ liquid_group = table_string(L, "liquid_group");
 			int liquid_range = (int)table_number(L, "liquid_range",
@@ -971,6 +1112,21 @@ struct Module: public interface::Module, public luanti::Interface
 				// liquid are dropped by the shape group, and the surface is
 				// levelled by the variants below.
 				add_box_quads(shape, -0.5f, -0.5f, -0.5f, 0.5f, 0.5f, 0.5f);
+			}
+
+			// Which way the node faces, which is also param2: one variant
+			// per direction, each permuting the definition's own six
+			// textures rather than being a voxel type of its own.
+			sv_<interface::VoxelVariant> facing_variants;
+			const size_t n_facing = facing_variant_count(facing);
+			for(size_t i = 0; i < n_facing; i++){
+				interface::VoxelVariant var;
+				const uint8_t d = facing_facedir(facing, i);
+				for(size_t f = 0; f < 6; f++){
+					var.tile_order[f] = FACEDIR_TILES[d][f];
+					var.tile_turns[f] = FACEDIR_TURNS[d][f];
+				}
+				facing_variants.push_back(var);
 			}
 
 			// A flowing liquid carries its level in param2, which is what
@@ -1075,6 +1231,14 @@ struct Module: public interface::Module, public luanti::Interface
 				}
 				n_shaped++;
 			}
+			if(!facing_variants.empty()){
+				vdef.variants = facing_variants;
+				for(size_t p = 0; p < 256; p++){
+					vdef.variant_of_param[p] =
+							facing_variant_of_param(facing, (uint8_t)p);
+				}
+				n_facing_nodes++;
+			}
 			if(!liquid_group.empty()){
 				vdef.is_liquid = true;
 				vdef.shape_group = liquid_shape_group(liquid_group);
@@ -1101,9 +1265,10 @@ struct Module: public interface::Module, public luanti::Interface
 
 		serve_node_textures(textures);
 		log_i(MODULE, "%zu node types in the voxel registry: %zu have a shape "
-				"of their own, %zu of those are liquids, %zu wear a generated "
-				"colour because a tile is a texture modifier or was not "
-				"shipped", n, n_shaped, n_liquid, n_fallback);
+				"of their own, %zu of those are liquids, %zu turn with their "
+				"param2, %zu wear a generated colour because a tile is a "
+				"texture modifier or was not shipped",
+				n, n_shaped, n_liquid, n_facing_nodes, n_fallback);
 	}
 
 	// The game's own media, named the way Luanti names it: by basename and
