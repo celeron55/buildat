@@ -20,6 +20,7 @@
 #include "network/api.h"
 #include "replicate/api.h"
 #include "client_file/api.h"
+#include "storage/api.h"
 #include <cstdlib>
 #include <fstream>
 #define MODULE "main"
@@ -178,14 +179,12 @@ struct Module: public interface::Module
 		ss_ world_name;
 		ss_ world_path;
 
-		// A game by name, with a world directory of its own: what the visual
-		// check runs, and what anyone wanting the bundled game wants.
+		// A game by name: what the visual check runs, and what anyone wanting
+		// the bundled game wants.
 		const char *wanted_game = getenv("BUILDAT_LUANTI_GAME");
 		if(wanted_game && wanted_game[0]){
 			gameid = wanted_game;
 			world_name = gameid+"_world";
-			world_path = luanti_path()+"/worlds/"+world_name;
-			interface::fs::create_directories(world_path);
 		} else {
 			sv_<World> worlds = list_worlds();
 			if(worlds.empty()){
@@ -206,9 +205,13 @@ struct Module: public interface::Module
 					return;
 				}
 			}
+			// The Luanti world is read for the one thing it knows that
+			// nothing else does -- which game it wants -- and for nothing
+			// else. What is run is a buildat save of the same name; when
+			// the importer exists (M7) it is what fills that save from this
+			// directory's map.sqlite.
 			gameid = chosen->gameid;
 			world_name = chosen->name;
-			world_path = chosen->path;
 		}
 
 		ss_ game_path = find_game(gameid);
@@ -217,8 +220,28 @@ struct Module: public interface::Module
 					", which is not in "+luanti_path()+"/games");
 			return;
 		}
-		log_i(MODULE, "Running world %s (game %s)",
-				cs(world_name), cs(gameid));
+
+		// The world runs in a buildat save and never in a Luanti world
+		// directory. Nothing here writes to user/luanti at any point: a
+		// Luanti world is read, or imported, and that is all. It has to be
+		// this way round rather than by being careful, because the writes do
+		// not come from here -- devtest's testnodes mod writes a PNG through
+		// core.get_worldpath() while it loads.
+		storage::Save *save = nullptr;
+		storage::access(m_server, [&](storage::Interface *istorage){
+			save = istorage->open(world_name);
+			if(!save)
+				save = istorage->create(world_name);
+		});
+		if(!save){
+			m_server->shutdown(1, "Could not open or create the save "+
+					world_name);
+			return;
+		}
+		world_path = save->path();
+
+		log_i(MODULE, "Running world %s (game %s) in %s",
+				cs(world_name), cs(gameid), cs(world_path));
 		luanti::access(m_server, [&](luanti::Interface *i){
 			i->run_game(game_path, world_path);
 		});
