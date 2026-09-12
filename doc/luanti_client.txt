@@ -22,7 +22,9 @@ itself, as Luanti's 0...24000, which is how the sky at dawn or at night gets
 looked at without waiting or asking the server for the privilege of setting
 its clock. BUILDAT_LUANTI_NAME sets the player name the dialog
 starts with, so that a test run does not fight a session of your own for the
-same player.
+same player. BUILDAT_LUANTI_PBR, set to anything non-empty, starts the dialog
+with the PBR checkbox ticked, so that a scripted run does not have to click it
+by pixel coordinates and a miss cannot be mistaken for the shader failing.
 
 Controls: the mouse looks, WASD walks, space jumps, ctrl sneaks, shift is
 faster, 1 to 8 pick a hotbar slot, the left mouse button digs what is pointed
@@ -69,10 +71,13 @@ It also discards texels below half alpha, which is what makes the holes in a
 leaf or a pane of glass be holes.
 
 The connect dialog's "Enable PBR" draws the same world with res/PBRVoxel.xml
-instead: the normal and surface maps the atlas derives from each texture, and
-reflections of a sky cube map. The vertex colours are its ambient, exactly as
-above, so a cave is as dark either way and nothing is meshed differently; what
-is added on top is the specular. Two things keep that specular honest. The
+instead: the normal and surface maps the atlas derives from each texture,
+reflections of a sky cube map, and the sun. What each surface is made of is
+guessed in surface.lua from the node's draw type, its groups, its name and
+whether it waves -- water is glossy and its highlights move, leaves let light
+through from behind, dirt is matte and bumpy, sand and snow have standing
+facets -- because a Luanti node definition says nothing about any of it. Two
+things keep the specular honest. The
 cube map beside the shader is one static noon gradient and is multiplied by the
 colour the sky is at this moment, so a sunset reflects orange and a night
 reflects almost nothing without anything being rebaked. And skyvis.lua marches
@@ -82,11 +87,26 @@ shader dims the cube map by: the mouth of a tunnel reflects sky while its walls
 do not. The counter line says what it has found straight up and over how many
 blocks of voxels, which is the quickest way to see it is working at all.
 
+The ambient on this path is the sky's own colour rather than the colour of
+sunlight, and the shader's ambient is that times how much sky the vertex sees
+plus the lamp light baked into the vertex colour. That alone is three tints:
+open ground blue-white, under an overhang the same blue but dimmer, a cave
+only the warm light of its torches.
+
+The sun is a real directional light with a shadow map, and what keeps it from
+lighting the world twice is the light curve. Node lighting on this path is
+remapped to answer one question -- am I underground -- and nothing else: full
+through a leaf canopy, nothing in rock, a smooth band in a doorway. The shader
+gates the sun by it, so a canopy is darkened by the shadow map, which is what
+a shadow map is good at, and a cave has no sun to shadow. The shadow map is
+two cascades over 24 and 96 nodes at 1024x1024, single-tap: biased for
+performance, because there are no graphics settings beyond this checkbox.
+Water, glass and ice cast no shadow, so a glass roof lets full sun through.
+
 It is off by default because the surface maps are most of what adding a texture
 to the atlas costs, and that loading time is the honest price of it. It is
 chosen before anything loads and fixed for the session for the same reason: the
-maps have to be on from the first texture the atlas builds. Not in it: sun
-shadows, which is a step of its own on top.
+maps have to be on from the first texture the atlas builds.
 
 On top of that, a voxel whose definition gives light gets a real light in the
 scene -- the two dozen nearest the camera, each with a range and a brightness
@@ -121,6 +141,9 @@ player.lua      The player's box: the keys, gravity, and collision against
 shapes.lua      Luanti's node shapes, as the quads a voxel definition takes
 skyvis.lua      How much sky the camera can see each way, for the PBR path's
                 reflections; ported from builtin/voxel_shading's module.lua
+surface.lua     What a node's surface is made of, guessed from its definition:
+                the six numbers per texture segment the atlas turns into
+                normal and spec maps
 objmesh.lua     Wavefront .obj, as the quads a voxel's shape is made of
 res/            What the client itself ships: the placeholder textures, and
                 the shaders and techniques this world is drawn with. Urho3D

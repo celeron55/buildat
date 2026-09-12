@@ -19,8 +19,12 @@
 // the neutral grey of bounced light where it is not. Ambient occlusion and a
 // per-face brightness are already folded into both terms by the mesher.
 //
-// Direct light is deliberately left alone. The sun is shadow mapped, so
-// attenuating it by skylight as well would darken shadowed faces twice.
+// Direct light is deliberately left alone, unless VOXELSUNGATE is defined:
+// with it, the directional light is multiplied by the vertex color's alpha, so
+// that a world whose light value says "underground" gets no sun. That is for a
+// world whose light curve is built for it -- see PBR_LIGHT_MAP in the Luanti
+// client's world.lua; without such a curve it would darken shadowed faces
+// twice, which is why it is off by default.
 //
 // On top of that, two things the stock PBR shaders do differently:
 //
@@ -88,6 +92,11 @@ varying vec4 vWorldPos;
             varying highp vec4 vShadowPos[NUMCASCADES];
         #endif
     #endif
+    #ifdef VOXELSUNGATE
+        // How much of the sky this vertex sees, which on the light pass is
+        // what says whether the sun can reach it at all; see below
+        varying float vSkyVisibility;
+    #endif
     #ifdef SPOTLIGHT
         varying vec4 vSpotPos;
     #endif
@@ -135,6 +144,10 @@ void VS()
     #ifdef PERPIXEL
         // Per-pixel forward lighting
         vec4 projWorldPos = vec4(worldPos, 1.0);
+
+        #ifdef VOXELSUNGATE
+            vSkyVisibility = iColor.a;
+        #endif
 
         #ifdef SHADOW
             // Shadow projection: transform from world space to shadow space
@@ -553,6 +566,20 @@ void PS()
         #else
             lightColor = cLightColor.rgb;
         #endif
+
+        #if defined(DIRLIGHT) && defined(VOXELSUNGATE)
+            // The sun does not reach underground, and nothing else in the
+            // scene knows that: a shadow map cannot tell a cave from a leaf
+            // canopy, because in both cases the sky is blocked by geometry
+            // that is being drawn. So the world's own light value is the
+            // gate, and it is built for exactly this -- see PBR_LIGHT_MAP in
+            // world.lua, which holds at full through a canopy and falls to
+            // nothing in rock. Under a tree the sun is at full here and the
+            // shadow map does the darkening; in a cave there is no sun to
+            // shadow.
+            lightColor *= vSkyVisibility;
+        #endif
+
         vec3 toCamera = normalize(cCameraPosPS - vWorldPos.xyz);
         vec3 lightVec = normalize(lightDir);
         float ndl = clamp((dot(normal, lightVec)), M_EPSILON, 1.0);
