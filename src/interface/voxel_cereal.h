@@ -47,7 +47,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 12;
+		uint8_t version = 13;
 		archive(
 				version,
 				v.name,
@@ -91,6 +91,10 @@ namespace interface
 		// above its own
 		if(version >= 12){
 			archive(v.shape_lit_from_above);
+		}
+		// Version 13 split "light gets past this" out of the edge material
+		if(version >= 13){
+			archive(v.transmits_light);
 		}
 	}
 

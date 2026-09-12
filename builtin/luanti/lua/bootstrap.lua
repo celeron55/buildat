@@ -398,17 +398,17 @@ function core.__voxel_defs()
 		local name = core.__content_names[id]
 		local def = name and core.registered_nodes[name] or nil
 		local drawtype = def and def.drawtype or "normal"
-		-- A voxel is invisible to the mesher exactly when light goes through
-		-- it: buildat's EDGEMATERIALID_EMPTY is one test and the mesher uses
-		-- it for both. Luanti splits them, so this is the conservative half
-		-- of the split until M3 brings the real drawtypes.
-		local transparent = (drawtype == "airlike") or
+		-- Whether light gets past this node, which in Luanti is a separate
+		-- thing from whether it is drawn: glass has faces and lets the sun
+		-- through. buildat used to have one test for both; see
+		-- VoxelDefinition::transmits_light.
+		local sunlight = (drawtype == "airlike") or
 				(def and def.sunlight_propagates) or false
 		out[id] = {
 			id = id,
 			name = name or ("unknown_" .. id),
 			drawtype = drawtype,
-			transparent = transparent and true or false,
+			sunlight = sunlight and true or false,
 			-- Only airlike is nothing at all standing there; a glass pane
 			-- that light passes through is still something
 			empty = (drawtype == "airlike"),

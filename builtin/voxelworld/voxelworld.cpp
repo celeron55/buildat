@@ -2005,7 +2005,11 @@ struct CInstance: public voxelworld::Instance
 				m_voxel_reg->get_cached(v);
 		if(def == nullptr)
 			return false;
-		return def->edge_material_id == interface::EDGEMATERIALID_EMPTY;
+		// Two ways light gets past a voxel: nothing is there, or something
+		// is and the sky is seen through it anyway. See
+		// VoxelDefinition::transmits_light.
+		return def->edge_material_id == interface::EDGEMATERIALID_EMPTY ||
+				def->transmits_light;
 	}
 
 	// Voxels in the topmost row of the world see the open sky

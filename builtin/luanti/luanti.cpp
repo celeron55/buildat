@@ -231,6 +231,10 @@ struct Module: public interface::Module, public luanti::Interface
 	// The media file names the game shipped, so that a tile naming one can
 	// be handed to the client as it is
 	set_<ss_> m_served_media;
+	// See glass_edge_material()
+	sm_<ss_, interface::EdgeMaterialId> m_glass_edge_materials;
+	uint32_t m_next_glass_edge_material = 10;
+	bool m_glass_edge_materials_exhausted = false;
 
 	// The write-behind buffer. core.set_node writes here and voxelworld sees
 	// it once per Luanti step, inside a single access() -- one commit covers
@@ -779,6 +783,31 @@ struct Module: public interface::Module, public luanti::Interface
 		}
 	}
 
+	// An edge material of its own for each kind of glass, so that the mesher
+	// draws a face between glass and anything else and not between two of
+	// the same glass -- which is what Luanti's glasslike is.
+	//
+	// simplified: 10 to 255 is what an EdgeMaterialId leaves free, so a game
+	// with more than 246 glasslike node types shares the last one and its
+	// panes merge into each other. Nothing that big has turned up; the
+	// upgrade path is a wider EdgeMaterialId, which is an engine change.
+	interface::EdgeMaterialId glass_edge_material(const ss_ &name)
+	{
+		auto it = m_glass_edge_materials.find(name);
+		if(it != m_glass_edge_materials.end())
+			return it->second;
+		interface::EdgeMaterialId id = 255;
+		if(m_next_glass_edge_material < 255){
+			id = (interface::EdgeMaterialId)m_next_glass_edge_material++;
+		} else if(!m_glass_edge_materials_exhausted){
+			m_glass_edge_materials_exhausted = true;
+			log_w(MODULE, "More than 246 glasslike node types; the rest share "
+					"an edge material and their faces merge into each other");
+		}
+		m_glass_edge_materials[name] = id;
+		return id;
+	}
+
 	// A tile the client can load as it stands: a plain file name the game
 	// shipped. Anything with a texture modifier in it -- ^ for an overlay,
 	// [ for a generator, ( for a grouping -- has to be composed, and the
@@ -814,7 +843,7 @@ struct Module: public interface::Module, public luanti::Interface
 				continue;
 			}
 			ss_ name = table_string(L, "name");
-			bool transparent = table_boolean(L, "transparent");
+			bool sunlight = table_boolean(L, "sunlight");
 			bool empty = table_boolean(L, "empty");
 			bool walkable = table_boolean(L, "walkable");
 			ss_ drawtype = table_string(L, "drawtype");
@@ -882,13 +911,30 @@ struct Module: public interface::Module, public luanti::Interface
 				seg.spec_strength = 0.15f;
 				seg.bumpiness = 0.0f;
 			}
-			// EDGEMATERIALID_EMPTY is one test doing two jobs in buildat: a
-			// face is drawn against it and light passes through it. Luanti
-			// splits them; this is the half that is safe until the drawtypes
-			// arrive with M3.
-			vdef.edge_material_id = transparent ?
-					interface::EDGEMATERIALID_EMPTY :
-					interface::EDGEMATERIALID_GROUND;
+			// Which faces are drawn, as far as the edge material carries
+			// Luanti's rules:
+			//  - airlike is nothing at all, and nothing draws a face
+			//    against it
+			//  - glasslike gets an edge material of its own, so a face is
+			//    drawn against anything except more of the same glass --
+			//    a pane of it is a pane and a wall of it is a wall
+			//  - allfaces draws every face, even between two of its own
+			//    kind, which is what makes a tree's leaves look like leaves
+			//  - everything else draws a face wherever the material changes
+			//
+			// Whether light gets past is a separate question now, and
+			// transmits_light below is the answer to it.
+			vdef.edge_material_id = interface::EDGEMATERIALID_GROUND;
+			if(empty){
+				vdef.edge_material_id = interface::EDGEMATERIALID_EMPTY;
+			} else if(drawtype.compare(0, 9, "glasslike") == 0){
+				vdef.edge_material_id = glass_edge_material(name);
+			} else if(drawtype == "allfaces" ||
+					drawtype == "allfaces_optional"){
+				vdef.face_draw_type = interface::FaceDrawType::ALWAYS;
+			}
+			// An empty voxel already transmits light by being empty
+			vdef.transmits_light = sunlight && !empty;
 			vdef.physically_solid = walkable && !empty;
 			vdef.fully_empty = empty;
 			if(!shape.empty()){

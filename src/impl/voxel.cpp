@@ -247,6 +247,7 @@ struct CVoxelRegistry: public VoxelRegistry
 		cache.edge_material_id = def.edge_material_id;
 		cache.physically_solid = def.physically_solid;
 		cache.fully_empty = def.fully_empty;
+		cache.transmits_light = def.transmits_light;
 		cache.shape = def.shape;
 		cache.variants = def.variants;
 		for(size_t i = 0; i < 256; i++)

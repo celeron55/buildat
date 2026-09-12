@@ -579,25 +579,45 @@ two things M1 disproved about the build, are in
   390 node types wear their real tiles. The other 111 keep the generated flat
   colour, and which 111 is the measurement that sizes what is left:
 
-  **Two drawtypes are built too:** `nodebox` of type `fixed` and
+  **Two drawtypes are built as shapes:** `nodebox` of type `fixed` and
   `plantlike`, as `VoxelQuad`s the server puts in the definition -- the first
   thing in this tree to build one. A box's faces show the part of the node's
   texture they cover, the way Luanti's `makeCuboid` does, so a slab is not a
-  whole texture squeezed into half a voxel. devtest: 39 of 390. The bundled
-  `minimal_game` has one of each so the visual check shows them.
+  whole texture squeezed into half a voxel. devtest: 39 of 390.
+
+  **And four more are built as cubes that are drawn differently**, which is
+  what they are: `glasslike` and its framed variants get an edge material of
+  their own per node type, so a face is drawn against anything except more of
+  the same glass; `allfaces` and `allfaces_optional` get
+  `FaceDrawType::ALWAYS`, so a clump of leaves draws its inside faces too.
+  devtest: another 40 node types, and they were invisible before -- glass
+  took `EDGEMATERIALID_EMPTY` to let light through, which also stopped
+  anything drawing a face against it.
+
+  That is the split this plan called for: `VoxelDefinition::transmits_light`
+  says light gets past a voxel that is nevertheless something, and the edge
+  material is left to say only which faces are drawn. It is an addition
+  rather than a substitution -- an empty voxel still transmits light by being
+  empty -- so a game that says nothing keeps the behaviour it had.
+
+  The bundled `minimal_game` has one node of each of the four so the visual
+  check shows them without a Luanti installation.
 
   **What is left, in the order it matters:**
   - **The texture modifiers.** A tile with `^`, `[` or `(` in it is composed,
     and the client is what composes it -- `buildat.compose_image`, the way
     `extensions/luanti_client`'s `resolve_tile` does. Until then those nodes
     wear a flat colour, which is honest and is not what devtest looks like.
-  - **The rest of the drawtypes**: the liquids, `glasslike_framed`,
-    `torchlike`, `signlike`, `raillike`, `firelike`, `fencelike`, and the
-    node box kinds that are not `fixed` -- `connected` is the mesher's
-    `connect_dir` and `wallmounted` and `leveled` are a `VoxelVariant` on the
-    param, so neither is a list of boxes the server hands over as it stands.
-    `mesh` stays client-side or waits; see "Which mesher draws the
-    drawtypes".
+  - **The rest of the drawtypes.** By what devtest has of them: the liquids
+    (23 node types), which want `is_liquid`, `shape_group`, `translucent` and
+    `liquid_top`; `plantlike_rooted` (7), which is `shape_lit_from_above`
+    exactly; `glasslike_framed`'s frame (5, drawn as a plain cube for now);
+    `torchlike` (3), `signlike` (3), `raillike` (1), `firelike` (1),
+    `fencelike` (1); and the node box kinds that are not `fixed` --
+    `connected` is the mesher's `connect_dir` and `wallmounted` and `leveled`
+    are a `VoxelVariant` on the param, so neither is a list of boxes the
+    server hands over as it stands. `mesh` (18) stays client-side or waits;
+    see "Which mesher draws the drawtypes".
   - **Palettes**, one voxel type per used index, registered at load.
   - **The client fork.** What is on screen now is
     `games/luanti_launcher`'s viewer, which is a camera and a HUD line. The
@@ -917,10 +937,6 @@ What M2 settled about the shape, and what is still true of it:
 
 ## Simplified, and the upgrade path
 
-- **`EDGEMATERIALID_EMPTY` is one test doing two jobs** in buildat -- a face
-  is drawn against it and light passes through it -- and Luanti splits them.
-  Until the drawtypes arrive with M3, a node is transparent if it is airlike
-  or `sunlight_propagates`.
 
 ## Risks
 
