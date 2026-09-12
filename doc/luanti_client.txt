@@ -178,7 +178,11 @@ res/            What the client itself ships: the placeholder textures, and
                 the shaders and techniques this world is drawn with. Urho3D
                 finds them because share_path/extensions is a resource dir,
                 and a technique names a shader with a path of its own so it
-                does not have to live in the one shader directory
+                does not have to live in the one shader directory.
+                PBRVoxel.glsl is a fork of builtin/voxel_shading's and is not
+                kept in step with it: a good half of what is in it is an art
+                style, and a world made of Luanti's plants wants different
+                numbers from the sample game's. Both files say so at the top
 objects.lua     The things in the world that are not nodes: what the server
                 says they are and where
 itemdef.lua     ITEMDEF: what an item is, and what a tool can dig
