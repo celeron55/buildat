@@ -37,6 +37,17 @@ buildat.get_ui_scale      = __buildat_get_ui_scale
 -- at. magic.set_preferred_viewports() applies it; this is for a game that
 -- wants to know. 1.0 means no scaling at all.
 buildat.get_preferred_render_scale = __buildat_get_preferred_render_scale
+-- The preferences the user sets once and every game honours. The C++ side is
+-- the authority: it parses and range checks a value through the same code -o
+-- goes through, applies what takes effect now, and persists the rest. A
+-- screen over these is a page of widgets that knows nothing about the file.
+--
+-- list_preferences() -> {name, ...}
+-- get_preference(name) -> number or boolean, nil for a name there is none by
+-- set_preference(name, value) -> true, or false and why
+buildat.list_preferences  = __buildat_list_preferences
+buildat.get_preference    = __buildat_get_preference
+buildat.set_preference    = __buildat_set_preference
 buildat.font_sans         = "Fonts/Overpass-Regular.ttf"
 buildat.font_mono         = "Fonts/OverpassMono-Regular.ttf"
 buildat.SpatialUpdateQueue = __buildat_SpatialUpdateQueue

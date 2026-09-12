@@ -16,6 +16,7 @@ local magic = require("buildat/extension/urho3d").safe
 local uistack = require("buildat/extension/uistack")
 local ui_utils = require("buildat/extension/ui_utils").safe
 local launch_menu = require("buildat/extension/launch_menu")
+local preferences = dofile(buildat.extension_path("__menu").."/preferences.lua")
 local M = {safe = nil}
 
 -- The extensions this menu offers as things to launch, in the order they are
@@ -141,6 +142,8 @@ function M.boot()
 			launch_menu.show_local_game)
 	add("__menu/res/icon_network.png", "Connect to server",
 			launch_menu.show_connect_to_server)
+	-- What the user sets once and every game honours
+	add("__menu/res/icon_preferences.png", "Preferences", preferences.show)
 
 	-- And an entry for every extension that says it can be launched
 	for _, name in ipairs(LAUNCHABLE) do
