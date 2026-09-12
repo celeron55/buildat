@@ -412,6 +412,30 @@ registry the server already sends, so they replicate, they land in a save with
 everything else, and the module's client does no meshing at all -- which is
 most of what made `world.lua` 4200 lines.
 
+**What a `VoxelQuad` has to be, read out of `generate_voxel_shapes()`
+(`src/impl/mesh.cpp:1277`) since nothing in the tree builds one yet:**
+
+- **The winding makes the normal.** The mesher takes
+  `(p[1]-p[0]) x (p[2]-p[0])` and normalises it, so the four corners go
+  counter-clockwise seen from the side the quad faces. It emits 0,1,2 and
+  0,2,3, and `shape_double_sided` adds 0,2,1 and 0,3,2 with the normal
+  negated.
+- **The corners are in the voxel's own -0.5...0.5 cube**, which is where
+  Luanti's node boxes already are, so a `node_box` arrives as it was written.
+- **`uv` is 0...1 in the tile, 0,0 at its top left**, and the mesher maps it
+  into wherever the atlas put that tile. A box face showing the part of the
+  node's texture it covers -- Luanti's `makeCuboid` -- is the box's own
+  extents on the two axes of that face, and it is worth doing: without it a
+  slab wears the whole texture squeezed into it.
+- **`tile` is 0...5 for one of the six faces and 6 and over for an entry of
+  `extra_textures`**, so a shape that is more than one material has somewhere
+  to put the rest.
+- **The face order is +Y, -Y, +X, -X, +Z, -Z**, which is Luanti's tile order
+  (top, bottom, right, left, back, front) exactly.
+- **A shaped voxel usually wants `face_draw_type` NEVER and
+  `edge_material_id` EMPTY**, or it draws cube faces as well as its shape and
+  its neighbours do not draw theirs against it.
+
 The named exception is **drawtype `mesh`**: an arbitrary .b3d or .obj is
 triangles with skinning, not quads in a unit cube, and `b3dmesh.lua` /
 `objmesh.lua` exist in the extension for it. It stays client-side, or it waits.
