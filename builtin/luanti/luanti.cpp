@@ -70,6 +70,14 @@ static void node_colour(const ss_ &name, uint8_t rgb[3])
 	rgb[2] = 30 + ((h >> 16) & 0x6f);
 }
 
+// A media file's name as the client knows it. The module's own namespace,
+// because these are somebody else's file names and they land beside every
+// other module's.
+static ss_ media_resource_name(const ss_ &file_name)
+{
+	return "luanti/"+file_name;
+}
+
 static ss_ node_texture_name(const ss_ &name)
 {
 	uint32_t h = 2166136261u;
@@ -217,6 +225,9 @@ struct Module: public interface::Module, public luanti::Interface
 	// is not the map -- the clock so far.
 	storage::Save *m_save = nullptr;
 	storage::Store *m_store = nullptr;
+	// The media file names the game shipped, so that a tile naming one can
+	// be handed to the client as it is
+	set_<ss_> m_served_media;
 
 	// The write-behind buffer. core.set_node writes here and voxelworld sees
 	// it once per Luanti step, inside a single access() -- one commit covers
@@ -613,6 +624,19 @@ struct Module: public interface::Module, public luanti::Interface
 
 	// core.__voxel_defs() -> add_voxel(), in id order, with a solid colour
 	// each until M3 brings the real tiles
+	// A tile the client can load as it stands: a plain file name the game
+	// shipped. Anything with a texture modifier in it -- ^ for an overlay,
+	// [ for a generator, ( for a grouping -- has to be composed, and the
+	// client is what composes it, which is the rest of M3.
+	bool plain_media_name(const ss_ &tile)
+	{
+		if(tile.empty())
+			return false;
+		if(tile.find_first_of("^[(&") != ss_::npos)
+			return false;
+		return m_served_media.count(tile) != 0;
+	}
+
 	void build_voxel_registry(interface::VoxelRegistry *reg)
 	{
 		lua_State *L = m_lua;
@@ -626,6 +650,7 @@ struct Module: public interface::Module, public luanti::Interface
 		}
 		size_t n = lua_objlen(L, -1);
 		sv_<ss_> textures;
+		size_t n_fallback = 0;
 		for(size_t i = 1; i <= n; i++){
 			lua_rawgeti(L, -1, (int)i);
 			if(!lua_istable(L, -1)){
@@ -636,11 +661,32 @@ struct Module: public interface::Module, public luanti::Interface
 			bool transparent = table_boolean(L, "transparent");
 			bool empty = table_boolean(L, "empty");
 			bool walkable = table_boolean(L, "walkable");
+			ss_ tiles[6];
+			bool has_tiles = table_six_strings(L, "tiles", tiles);
 			lua_pop(L, 1);
 
-			ss_ texture = empty ? "" : node_texture_name(name);
-			if(!texture.empty())
+			// The generated flat colour, for a node whose tiles the client
+			// cannot load as they stand -- a texture modifier, or a name the
+			// game did not ship. It is what every node wore before the
+			// game's own media was served, and it stays until the client
+			// resolves modifiers itself.
+			ss_ fallback = empty ? "" : node_texture_name(name);
+			ss_ face_textures[6];
+			bool any_fallback = false;
+			for(size_t f = 0; f < 6; f++){
+				if(empty)
+					continue;
+				if(has_tiles && plain_media_name(tiles[f])){
+					face_textures[f] = media_resource_name(tiles[f]);
+				} else {
+					face_textures[f] = fallback;
+					any_fallback = true;
+				}
+			}
+			if(any_fallback && !fallback.empty()){
 				textures.push_back(name);
+				n_fallback++;
+			}
 
 			interface::VoxelDefinition vdef;
 			vdef.name.block_name = name;
@@ -652,6 +698,7 @@ struct Module: public interface::Module, public luanti::Interface
 			vdef.handler_module = "";
 			for(size_t f = 0; f < 6; f++){
 				interface::AtlasSegmentDefinition &seg = vdef.textures[f];
+				const ss_ &texture = face_textures[f];
 				seg.resource_name = texture;
 				seg.total_segments = magic::IntVector2(
 						texture.empty() ? 0 : 1, texture.empty() ? 0 : 1);
@@ -674,12 +721,75 @@ struct Module: public interface::Module, public luanti::Interface
 		lua_settop(L, base);
 
 		serve_node_textures(textures);
-		log_i(MODULE, "%zu node types in the voxel registry", n);
+		log_i(MODULE, "%zu node types in the voxel registry, %zu of them "
+				"wearing a generated colour because a tile is a texture "
+				"modifier or was not shipped", n, n_fallback);
+	}
+
+	// The game's own media, named the way Luanti names it: by basename and
+	// nothing else, because a tile string says "default_stone.png" and says
+	// nothing about where it came from. A clash between two mods is the
+	// game's to avoid, which is the deal Luanti gives them too.
+	//
+	// Only textures so far. Sounds, models and translations go the same way
+	// when the things that consume them exist -- M4 and M5.
+	void serve_game_media(const ss_ &game_path)
+	{
+		sv_<ss_> dirs;
+		collect_dirs_named(game_path+"/mods", "textures", dirs, 0);
+		sm_<ss_, ss_> files;
+		for(const ss_ &dir : dirs)
+			collect_files(dir, files, 0);
+		client_file::access(m_server, [&](client_file::Interface *i){
+			for(const auto &pair : files)
+				i->add_file_path(media_resource_name(pair.first), pair.second);
+		});
+		for(const auto &pair : files)
+			m_served_media.insert(pair.first);
+		log_i(MODULE, "%zu media files from %zu directories under %s",
+				files.size(), dirs.size(), cs(game_path+"/mods"));
+	}
+
+	// A mod is a directory with a textures/ in it, and a modpack is a
+	// directory of those, so this goes a few levels deep and no further
+	void collect_dirs_named(const ss_ &path, const ss_ &wanted,
+			sv_<ss_> &out, int depth)
+	{
+		if(depth > 3)
+			return;
+		for(const interface::fs::Node &n : interface::fs::list_directory(path)){
+			if(!n.is_directory || n.name == "." || n.name == "..")
+				continue;
+			if(n.name == wanted)
+				out.push_back(path+"/"+n.name);
+			else
+				collect_dirs_named(path+"/"+n.name, wanted, out, depth + 1);
+		}
+	}
+
+	// The first one under a name wins, which is what Luanti does with a
+	// clash as well
+	void collect_files(const ss_ &dir, sm_<ss_, ss_> &files, int depth)
+	{
+		if(depth > 4)
+			return;
+		for(const interface::fs::Node &n : interface::fs::list_directory(dir)){
+			if(n.name == "." || n.name == "..")
+				continue;
+			if(n.is_directory){
+				collect_files(dir+"/"+n.name, files, depth + 1);
+				continue;
+			}
+			if(files.count(n.name))
+				continue;
+			files[n.name] = dir+"/"+n.name;
+		}
 	}
 
 	// One flat PNG per node, generated and handed to client_file rather than
 	// written to disk: there is no file behind these and there should not be
-	// one. M3 replaces them with the game's own media.
+	// one. What still uses one is a node whose tile the client cannot load
+	// as it stands.
 	void serve_node_textures(const sv_<ss_> &names)
 	{
 		sm_<ss_, ss_> files;
@@ -728,6 +838,28 @@ struct Module: public interface::Module, public luanti::Interface
 		bool v = lua_toboolean(L, -1);
 		lua_pop(L, 1);
 		return v;
+	}
+
+	// An array of six strings under key, or false when it is not there
+	bool table_six_strings(lua_State *L, const char *key, ss_ out[6])
+	{
+		lua_getfield(L, -1, key);
+		if(!lua_istable(L, -1)){
+			lua_pop(L, 1);
+			return false;
+		}
+		bool ok = true;
+		for(size_t i = 0; i < 6; i++){
+			lua_rawgeti(L, -1, (int)i + 1);
+			cc_ *v = lua_tostring(L, -1);
+			if(v)
+				out[i] = v;
+			else
+				ok = false;
+			lua_pop(L, 1);
+		}
+		lua_pop(L, 1);
+		return ok;
 	}
 
 	// The two C functions the map goes through
@@ -867,6 +999,10 @@ struct Module: public interface::Module, public luanti::Interface
 		load_clock();
 
 		run_chunk_file(module_path()+"/lua/modloader.lua");
+
+		// The game's own media before the registry, because what a node's
+		// tiles can be depends on which files were actually shipped
+		serve_game_media(game_path);
 
 		// The registry, the world and the light, in that order: the ids the
 		// mods asked for while loading are the ids the definitions are built

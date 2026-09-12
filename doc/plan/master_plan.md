@@ -60,9 +60,12 @@ be.
 
 The order of work, which is one line of it rather than parallel branches:
 
-1. **M3 -- it looks like the game.** The big one. Drawtypes through buildat's
-   own mesher, media, and the client resolving textures into its own atlas.
-   `init.lua`'s three-way split is the largest unexamined piece of it.
+1. **M3 -- it looks like the game.** The big one, and started: the game's
+   media is served and a node whose tile is a plain shipped file name wears
+   it, which is 279 of devtest's 390 node types. What is left is the texture
+   modifiers, the drawtypes through buildat's own mesher, palettes, and the
+   client fork -- whose `init.lua` three-way split is the largest unexamined
+   piece of the milestone. The module plan's M3 entry has the order.
 2. **M4, M5, M6, M7** after, in the module plan's own order.
 
 Done since this list was written, all in `doc/plan/master_plan_history.md`:

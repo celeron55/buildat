@@ -536,16 +536,36 @@ buildat_client sees a floor a mod placed. What each turned out to be, and the
 two things M1 disproved about the build, are in
 `doc/plan/luanti_module_history.md`.
 
-- **M3 -- it looks like the game. The fork's shape is settled (2026-09-12).**
+- **M3 -- it looks like the game. The fork's shape is settled (2026-09-12);
+  the media and the plain tiles are built (2026-09-13).**
   Nodedefs to `VoxelRegistry` with texmod strings for texture names, media
   over client_file, drawtypes through **buildat's own mesher** (settled
   2026-09-12, see below), and the client resolving textures into its own
   atlas. Success is devtest's `testnodes` mod looking like it does in Luanti.
 
-  How the client half is forked, what survives the move to voxelworld, and
-  who resolves textures are in "The protocol, and the client" above. What is
-  still unexamined there is `init.lua`: 3321 lines splitting three ways, and
-  the largest unknown left in the milestone.
+  **Built so far:** every mod's `textures/` goes to `client_file` under the
+  basename, which is how Luanti names media and what a tile string says; and
+  a node whose tile is a plain shipped file name gets it on that face, in
+  Luanti's own tile order, which is buildat's own tile order -- so they map
+  one to one, and the shorthand of fewer than six copies the last over the
+  rest as Luanti does. devtest: 417 files from 20 directories, and 279 of its
+  390 node types wear their real tiles. The other 111 keep the generated flat
+  colour, and which 111 is the measurement that sizes what is left:
+
+  **What is left, in the order it matters:**
+  - **The texture modifiers.** A tile with `^`, `[` or `(` in it is composed,
+    and the client is what composes it -- `buildat.compose_image`, the way
+    `extensions/luanti_client`'s `resolve_tile` does. Until then those nodes
+    wear a flat colour, which is honest and is not what devtest looks like.
+  - **The drawtypes**, as `VoxelDefinition::shape` quads built server-side;
+    see "Which mesher draws the drawtypes" above. Everything is a cube today.
+  - **Palettes**, one voxel type per used index, registered at load.
+  - **The client fork.** What is on screen now is
+    `games/luanti_launcher`'s viewer, which is a camera and a HUD line. The
+    client half is `init.lua` splitting three ways -- 3321 lines, and the
+    largest unknown left in the milestone. How the fork is made, what
+    survives the move to voxelworld, and who resolves textures are in "The
+    protocol, and the client" above.
 - **M4 -- it plays.** Digging and placing, inventory, item definitions,
   craft, formspecs. Success is digging a node in devtest and getting it.
 - **M5 -- it lives.** ABMs, LBMs, entities, `core.after`. Success is
