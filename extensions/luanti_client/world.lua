@@ -522,14 +522,33 @@ function M.new(magic, buildat, log, options)
 	-- single-tap filter.
 	local SHADOW_NEAR = 24    -- nodes; the first cascade
 	local SHADOW_FAR = 96     -- and the second, which is the shadow distance
-	-- What a lit face gets from the sun, against the sky's own colour as the
-	-- ambient. The number is large because Urho's PBR divides direct light by
-	-- pi, the albedo it multiplies is well under 1, and nothing tone maps
-	-- afterwards: measured on a grass field, a brightness of 6 put about as
-	-- much light on a lit face as the ambient already had, which is a sun
-	-- nobody can see and a shadow nobody can see either. This lands a lit
-	-- face at about two and a half times a shadowed one.
+	-- What a lit face gets from the sun, against the sky as the ambient. The
+	-- number is large because Urho's PBR divides direct light by pi, the
+	-- albedo it multiplies is well under 1, and nothing tone maps afterwards:
+	-- measured on a grass field, a brightness of 6 put about as much light on
+	-- a lit face as the ambient already had, which is a sun nobody can see
+	-- and a shadow nobody can see either. This lands a lit face at about two
+	-- and a half times a shadowed one.
 	local SUN_BRIGHTNESS = 18.0
+
+	-- What the sky is worth as a light, against that. Two numbers, because
+	-- the sky's own colour is the wrong one to light a world with: it is the
+	-- colour of the zenith, and a surface sees the whole dome -- the pale
+	-- band along the horizon and the glare around the sun as much as the blue
+	-- overhead -- so what reaches it is far less blue than what is up there.
+	-- And at full strength the sky puts nearly as much light on a sunlit face
+	-- as the sun does, which reads as a world under water.
+	local AMBIENT_DESATURATE = 0.55
+	local AMBIENT_FROM_SKY = 0.7
+
+	local function ambient_from_sky(sky)
+		local luma = 0.2126 * sky.r + 0.7152 * sky.g + 0.0722 * sky.b
+		local k = AMBIENT_DESATURATE
+		return magic.Color(
+				(sky.r * (1 - k) + luma * k) * AMBIENT_FROM_SKY,
+				(sky.g * (1 - k) + luma * k) * AMBIENT_FROM_SKY,
+				(sky.b * (1 - k) + luma * k) * AMBIENT_FROM_SKY)
+	end
 	local sun_node = nil
 	local sun_light = nil
 	if pbr then
@@ -3283,6 +3302,13 @@ function M.new(magic, buildat, log, options)
 		return math.cos(a), math.sin(a), 0
 	end
 
+	-- The sun's own colour at noon, which is warm. Luanti's
+	-- sunlight_color() is the colour of the sun and the sky together,
+	-- because together is the only way Luanti has them; on the PBR path the
+	-- sky is a light of its own, so what is left for the sun is what the sun
+	-- is. The same numbers res/LuantiSky.glsl draws the disc with.
+	local SUN_COLOR = {1.0, 0.97, 0.86}
+
 	-- One of the game's colours, or Luanti's default for it, as 0...1
 	local function sky_color(name, brightness)
 		local c = (sky and sky[name]) or SKY_DEFAULT[name]
@@ -3299,6 +3325,20 @@ function M.new(magic, buildat, log, options)
 	-- bottoms out at comes to about 0.02.
 	local function brightness_of(factor)
 		return factor ^ 2.2
+	end
+
+	-- What the sun shines with now: its own colour, going the colour of the
+	-- horizon as it comes down to it, which is the handover the sky shader
+	-- does to the disc. Zero at night, when the light left is the sky's.
+	local function sun_light_color(factor, time_of_day)
+		local _, sy = sun_direction(time_of_day)
+		local low = 1 - math.abs(sy) * 2.5
+		low = low < 0 and 0 or (low > 1 and 1 or low)
+		local tint = sky_color("sun_tint", 1)
+		return magic.Color(
+				(SUN_COLOR[1] * (1 - low) + tint.r * low) * factor,
+				(SUN_COLOR[2] * (1 - low) + tint.g * low) * factor,
+				(SUN_COLOR[3] * (1 - low) + tint.b * low) * factor)
 	end
 
 	function self:set_daylight(factor, time_of_day)
@@ -3347,7 +3387,7 @@ function M.new(magic, buildat, log, options)
 		-- cave is only the warm rgb the torches baked in. That is the three
 		-- tints -- sun, shade, cave -- and it costs this one line.
 		if pbr then
-			zone.ambientColor = top
+			zone.ambientColor = ambient_from_sky(top)
 		end
 
 		-- What the PBR path's reflections are worth now: the cube map beside
@@ -3365,7 +3405,7 @@ function M.new(magic, buildat, log, options)
 			-- moon that is up there, dim and blue, through the same gate.
 			local sx, sy, sz = sun_direction(daylight_time)
 			sun_node.direction = magic.Vector3(-sx, -sy, -sz)
-			sun_light.color = sunlight_color(factor)
+			sun_light.color = sun_light_color(factor, daylight_time)
 		end
 
 		if sky_material then
