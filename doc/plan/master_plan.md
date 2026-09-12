@@ -85,6 +85,47 @@ the C side inside one `access()`; and the mapgen seam is where `voxelworld`'s
 region calls get decided, deferred until there is something to measure them
 against.
 
+## Maintenance -- do this daily
+
+**Go through the plans and move what is finished out of them.** A session
+adds to a plan every time it settles something, and none of it removes
+anything, so a plan drifts from "what to do" towards "what happened" without
+anyone deciding that it should. This file was 1034 lines of which thirteen
+sections were finished work before the first pass; it is 196 now.
+
+Daily because it is minutes at that cadence and a day's work once it has been
+skipped for a month -- and because a plan nobody trusts to be current stops
+being read, which costs far more than the tidying.
+
+**Commit before starting.** The pass deletes things, and the judgement calls
+in it are made quickly. Git holding the previous state is what makes that
+safe.
+
+**What stays in a plan:** clear principles, rules, implementation steps,
+tests, benchmarks, goals, what is deliberately *not* being implemented,
+prioritisations, open questions, gotchas and findings -- as long as each one
+bears on something upcoming, in progress or open. A decision written down so
+that it is not re-argued stays even when the work it governed is done, which
+is why `builtin/luanti`'s settled list is still in its plan.
+
+**What moves to `<name>_history.md` beside it:** long series of DONE and
+BUILT items, the blow-by-blow of how something was built, and anything whose
+only remaining value is the reasoning behind a finished decision. Nothing in
+a history file is a to-do, and each one says so at the top. Leave a stub
+where a section was, naming what it was and where it went.
+
+**Two failure modes worth looking for while in there**, because both have
+happened:
+
+- **A status that contradicts its own sub-plan.** This file said the Luanti
+  PBR round was "Not started" while `luanti_voxels_plan.md` section 7c said
+  BUILT, with a full account of what it turned out to be. The ordering
+  document is the one that goes stale, because it is written from memory;
+  the sub-plan is written from the work. When they disagree, the sub-plan is
+  right about *status* and this file is right about *order*.
+- **A reference broken by a move.** "See the section below", a section
+  number, a plan path. Grep for them after moving anything.
+
 ## Frozen
 
 Kept compiling and working as the engine changes, and nothing more. Each one
