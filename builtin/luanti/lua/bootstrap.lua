@@ -348,6 +348,44 @@ local function tile_names(def)
 	return out
 end
 
+-- A nodebox's boxes, flattened to six numbers each, in Luanti's own
+-- -0.5...0.5 voxel coordinates -- which are buildat's own, so they travel as
+-- they were written.
+--
+-- Only "fixed". The connected, wallmounted and leveled kinds want neighbours
+-- or a param, and the shape a neighbour decides is the mesher's connect_dir
+-- and the shape a param decides is a VoxelVariant; neither is a list of
+-- boxes the server can hand over on its own.
+local function node_boxes(def)
+	local nb = def and def.node_box
+	if type(nb) ~= "table" or nb.type ~= "fixed" then
+		return nil
+	end
+	local fixed = nb.fixed
+	if type(fixed) ~= "table" then
+		return nil
+	end
+	-- One box is six numbers; several is a list of those
+	if type(fixed[1]) == "number" then
+		fixed = {fixed}
+	end
+	local out = {}
+	for _, box in ipairs(fixed) do
+		if type(box) == "table" and #box >= 6 then
+			for i = 1, 6 do
+				if type(box[i]) ~= "number" then
+					return nil
+				end
+				out[#out + 1] = box[i]
+			end
+		end
+	end
+	if #out == 0 then
+		return nil
+	end
+	return out
+end
+
 function core.__voxel_defs()
 	local max_id = 0
 	for id in pairs(core.__content_names) do
@@ -377,6 +415,8 @@ function core.__voxel_defs()
 			walkable = (def == nil) or (def.walkable ~= false),
 			light_source = (def and def.light_source) or 0,
 			tiles = tile_names(def),
+			node_box = (drawtype == "nodebox") and node_boxes(def) or nil,
+			visual_scale = (def and def.visual_scale) or 1.0,
 		}
 	end
 	return out
