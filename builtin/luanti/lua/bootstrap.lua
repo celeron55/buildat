@@ -242,11 +242,6 @@ local next_content_id = 0
 
 local function reserve_content_id(name, id)
 	if id == nil then
-		-- Luanti hands these out from zero and jumps over its own three,
-		-- which sit at the top of the first byte
-		while next_content_id >= 125 and next_content_id <= 127 do
-			next_content_id = next_content_id + 1
-		end
 		id = next_content_id
 		next_content_id = next_content_id + 1
 	end
@@ -254,12 +249,22 @@ local function reserve_content_id(name, id)
 	core.__content_names[id] = name
 end
 
--- Luanti's three, at the numbers Luanti gives them: a world written by one
--- engine and read by the other has to agree about what air is. The rest are
--- handed out in registration order, as Luanti does.
-reserve_content_id("unknown", 125)
-reserve_content_id("air", 126)
-reserve_content_id("ignore", 127)
+-- A content id here is a buildat VoxelRegistry id, not a number copied from
+-- Luanti: the ids are allocated by whichever engine is running the game, and
+-- here this module is that engine. devtest's own content_ids.lua only ever
+-- asserts relations between them, never a literal.
+--
+-- So the three constants land where the registry already puts them:
+-- VOXELTYPEID_UNDEFINED is 0 and means "nothing has generated this yet",
+-- which is exactly ignore; add_voxel() then hands out 1, 2, 3... in the order
+-- the definitions are built, which is content id order.
+core.CONTENT_IGNORE = 0
+core.CONTENT_UNKNOWN = 1
+core.CONTENT_AIR = 2
+reserve_content_id("ignore", core.CONTENT_IGNORE)
+reserve_content_id("unknown", core.CONTENT_UNKNOWN)
+reserve_content_id("air", core.CONTENT_AIR)
+next_content_id = 3
 
 function core.register_item_raw(def)
 	local name = def.name
@@ -301,6 +306,48 @@ function core.get_name_from_content_id(id)
 		error("get_name_from_content_id(): not a content id: " .. tostring(id))
 	end
 	return core.__content_names[id] or "unknown"
+end
+
+-- Every node that has an id, from 1 upwards, flattened to what the module's
+-- C++ needs to build a VoxelDefinition. Called once, after the mods have
+-- loaded: add_voxel() takes a finished definition and hands out ids in call
+-- order, so the definitions have to be built in one pass in id order, and
+-- doing it at the end is also what makes core.override_item and
+-- core.unregister_item non-issues -- only the final registered_nodes is ever
+-- looked at.
+--
+-- Id 0 is ignore, which is VOXELTYPEID_UNDEFINED and has no definition.
+function core.__voxel_defs()
+	local max_id = 0
+	for id in pairs(core.__content_names) do
+		if id > max_id then
+			max_id = id
+		end
+	end
+	local out = {}
+	for id = 1, max_id do
+		local name = core.__content_names[id]
+		local def = name and core.registered_nodes[name] or nil
+		local drawtype = def and def.drawtype or "normal"
+		-- A voxel is invisible to the mesher exactly when light goes through
+		-- it: buildat's EDGEMATERIALID_EMPTY is one test and the mesher uses
+		-- it for both. Luanti splits them, so this is the conservative half
+		-- of the split until M3 brings the real drawtypes.
+		local transparent = (drawtype == "airlike") or
+				(def and def.sunlight_propagates) or false
+		out[id] = {
+			id = id,
+			name = name or ("unknown_" .. id),
+			drawtype = drawtype,
+			transparent = transparent and true or false,
+			-- Only airlike is nothing at all standing there; a glass pane
+			-- that light passes through is still something
+			empty = (drawtype == "airlike"),
+			walkable = (def == nil) or (def.walkable ~= false),
+			light_source = (def and def.light_source) or 0,
+		}
+	end
+	return out
 end
 
 --
@@ -560,6 +607,143 @@ stub("place_schematic_on_vmanip", nil)
 stub("serialize_schematic", nil)
 
 --
+-- The map
+--
+-- These come after the stub list on purpose: they are the names it turns off
+-- until the milestone that answers them, and this is that milestone for the
+-- read and the write. Everything goes through two C functions, and what they
+-- talk to is a write-behind buffer in the module that voxelworld sees once
+-- per Luanti step. See local/luanti_module_plan.md, "set_node is buffered".
+
+local __set_node = __luanti_set_node
+local __get_node = __luanti_get_node
+
+local function to_pos(pos)
+	-- Luanti rounds, it does not truncate: -0.4 is 0 and not 0
+	return math.floor(pos.x + 0.5), math.floor(pos.y + 0.5),
+			math.floor(pos.z + 0.5)
+end
+
+-- Luanti takes a node as a name or as a table with one, and fills in the two
+-- params from the definition when they are not given
+local function to_node(node)
+	if type(node) == "string" then
+		node = {name = node}
+	end
+	local name = node.name
+	if name == nil then
+		error("set_node(): the node has no name")
+	end
+	return core.get_content_id(name), node.param1 or 0, node.param2 or 0
+end
+
+function core.get_node(pos)
+	local x, y, z = to_pos(pos)
+	local id, param1, param2 = __get_node(x, y, z)
+	return {
+		name = core.get_name_from_content_id(id),
+		param1 = param1,
+		param2 = param2,
+	}
+end
+
+-- nil where the map is not loaded. Ignore is what voxelworld says for a
+-- section that has not been generated, which is the same statement.
+function core.get_node_or_nil(pos)
+	local x, y, z = to_pos(pos)
+	local id, param1, param2 = __get_node(x, y, z)
+	if id == core.CONTENT_IGNORE then
+		return nil
+	end
+	return {
+		name = core.get_name_from_content_id(id),
+		param1 = param1,
+		param2 = param2,
+	}
+end
+
+core.get_node_raw = function(x, y, z)
+	local id, param1, param2 = __get_node(
+			math.floor(x + 0.5), math.floor(y + 0.5), math.floor(z + 0.5))
+	return id, param1, param2, id ~= core.CONTENT_IGNORE
+end
+
+-- The bare write, without the callbacks. set_node and add_node are the same
+-- call in Luanti; swap_node is this one, by definition.
+function core.swap_node(pos, node)
+	local x, y, z = to_pos(pos)
+	local id, param1, param2 = to_node(node)
+	__set_node(x, y, z, id, param1, param2)
+	return true
+end
+
+function core.set_node(pos, node)
+	local x, y, z = to_pos(pos)
+	local id, param1, param2 = to_node(node)
+	-- What was there gets its on_destruct, what arrives gets its
+	-- on_construct: a mod that keeps state per node is written around these
+	-- two and would leak without them. Node metadata and timers are M4, so
+	-- nothing is dropped here that exists yet.
+	local oldnode = core.get_node(pos)
+	local olddef = core.registered_nodes[oldnode.name]
+	if olddef and olddef.on_destruct then
+		olddef.on_destruct(pos)
+	end
+	__set_node(x, y, z, id, param1, param2)
+	local newdef = core.registered_nodes[core.get_name_from_content_id(id)]
+	if newdef and newdef.on_construct then
+		newdef.on_construct(pos)
+	end
+	if olddef and olddef.after_destruct then
+		olddef.after_destruct(pos, oldnode)
+	end
+	return true
+end
+
+core.add_node = core.set_node
+
+function core.remove_node(pos)
+	return core.set_node(pos, {name = "air"})
+end
+
+function core.bulk_set_node(positions, node)
+	local id, param1, param2 = to_node(node)
+	for i = 1, #positions do
+		local x, y, z = to_pos(positions[i])
+		__set_node(x, y, z, id, param1, param2)
+	end
+	return true
+end
+
+function core.bulk_swap_node(positions, node)
+	return core.bulk_set_node(positions, node)
+end
+
+-- The light voxelworld propagates, which the voxel word carries in the same
+-- bits Luanti's param1 does. Time of day is M2's clock; until it is there,
+-- the sky is at full strength.
+function core.get_natural_light(pos, timeofday)
+	local x, y, z = to_pos(pos)
+	local _, param1 = __get_node(x, y, z)
+	return math.floor(param1 % 16)
+end
+
+function core.get_artificial_light(param1)
+	return math.floor(param1 / 16) % 16
+end
+
+function core.get_node_light(pos, timeofday)
+	local x, y, z = to_pos(pos)
+	local id, param1 = __get_node(x, y, z)
+	if id == core.CONTENT_IGNORE then
+		return nil
+	end
+	local day = math.floor(param1 % 16)
+	local night = math.floor(param1 / 16) % 16
+	return day > night and day or night
+end
+
+--
 -- The classes a mod builds while it loads: ItemStack and the generators
 --
 
@@ -567,5 +751,6 @@ dofile(module_path .. "/lua/classes.lua")
 dofile(module_path .. "/lua/colorspec.lua")
 dofile(module_path .. "/lua/png.lua")
 dofile(module_path .. "/lua/misc.lua")
+dofile(module_path .. "/lua/check_map.lua")
 
 -- vim: set noet ts=4 sw=4:
