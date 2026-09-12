@@ -535,6 +535,38 @@ function M.new(magic, buildat, log, options)
 	-- that the tone curve leaves it white and the bloom finds it
 	local SUN_DISC_OVEREXPOSURE = 6.0
 
+	-- What the moon is worth, in the same units. Not a measurement of
+	-- anything -- real moonlight is a millionth of sunlight and would render
+	-- as nothing -- but a night that is lit from where the moon is, dimly and
+	-- coldly, rather than one that is lit from under the world by a sun that
+	-- has set.
+	local MOON_BRIGHTNESS = 1.0
+	local MOON_COLOR = {0.55, 0.68, 1.0}
+
+	-- When the sun is in the scene and when the moon is, in Luanti's
+	-- 0...24000. Below the horizon a directional light shines up through the
+	-- world, and its specular -- the sparkle surface.lua asks for on water,
+	-- on snow and on ore -- is then the brightest thing in a night frame and
+	-- is coming from the wrong side of the sky. So the sun is taken out of
+	-- the scene for the night and the moon is put in, each fading over the
+	-- hour on either side of when the sun is level with the horizon.
+	local SUN_RISE = 5000     -- nothing before this
+	local SUN_UP = 6000       -- full sun from here
+	local SUN_SET = 18000     -- full sun until here
+	local SUN_DOWN = 19000    -- nothing after this
+
+	local function sun_amount(time_of_day)
+		local t = (time_of_day or 12000) % 24000
+		if t <= SUN_RISE or t >= SUN_DOWN then
+			return 0
+		elseif t < SUN_UP then
+			return (t - SUN_RISE) / (SUN_UP - SUN_RISE)
+		elseif t <= SUN_SET then
+			return 1
+		end
+		return (SUN_DOWN - t) / (SUN_DOWN - SUN_SET)
+	end
+
 	-- What the sky is worth as a light, against that. Two numbers, because
 	-- the sky's own colour is the wrong one to light a world with: it is the
 	-- colour of the zenith, and a surface sees the whole dome -- the pale
@@ -553,6 +585,8 @@ function M.new(magic, buildat, log, options)
 	end
 	local sun_node = nil
 	local sun_light = nil
+	local moon_node = nil
+	local moon_light = nil
 	if pbr then
 		sun_node = scene:CreateChild("Sun")
 		sun_light = sun_node:CreateComponent("Light")
@@ -568,6 +602,20 @@ function M.new(magic, buildat, log, options)
 		sun_light.shadowBias = magic.BiasParameters(0.00005, 0.8, 0.002)
 		sun_light.shadowCascade = magic.CascadeParameters(
 				SHADOW_NEAR, SHADOW_FAR, 0, 0, 0.8)
+		-- The moon, which is the same light from the other side of the sky.
+		-- No shadow map of its own: at this brightness a moon shadow is
+		-- below what the frame can show, and the pair of them overlap for
+		-- the hour either side of dusk and dawn, where two shadow maps is
+		-- twice the cost of one for nothing anybody can see.
+		moon_node = scene:CreateChild("Moon")
+		moon_light = moon_node:CreateComponent("Light")
+		moon_light.lightType = magic.LIGHT_DIRECTIONAL
+		moon_light.castShadows = false
+		moon_light.brightness = MOON_BRIGHTNESS
+		moon_light.specularIntensity = 1.0
+		moon_light.color = magic.Color(MOON_COLOR[1], MOON_COLOR[2],
+				MOON_COLOR[3])
+
 		-- Past the far cascade the world is ambient-lit, which at that range
 		-- reads as haze rather than as a missing shadow
 		magic.renderer.shadowMapSize = 1024
@@ -3359,15 +3407,15 @@ function M.new(magic, buildat, log, options)
 	-- What the sun shines with now: its own colour, going the colour of the
 	-- horizon as it comes down to it, which is the handover the sky shader
 	-- does to the disc. Zero at night, when the light left is the sky's.
-	local function sun_light_color(factor, time_of_day)
+	local function sun_light_color(time_of_day)
 		local _, sy = sun_direction(time_of_day)
 		local low = 1 - math.abs(sy) * 2.5
 		low = low < 0 and 0 or (low > 1 and 1 or low)
 		local tint = sky_color("sun_tint", 1)
 		return magic.Color(
-				(SUN_COLOR[1] * (1 - low) + tint.r * low) * factor,
-				(SUN_COLOR[2] * (1 - low) + tint.g * low) * factor,
-				(SUN_COLOR[3] * (1 - low) + tint.b * low) * factor)
+				SUN_COLOR[1] * (1 - low) + tint.r * low,
+				SUN_COLOR[2] * (1 - low) + tint.g * low,
+				SUN_COLOR[3] * (1 - low) + tint.b * low)
 	end
 
 	function self:set_daylight(factor, time_of_day)
@@ -3430,11 +3478,25 @@ function M.new(magic, buildat, log, options)
 
 		if sun_light then
 			-- The light travels the other way from the body it comes from,
-			-- and sun_direction() covers the whole day: after dusk it is the
-			-- moon that is up there, dim and blue, through the same gate.
+			-- and the moon is opposite the sun, so one direction gives both.
+			-- Whichever of the two is under the world is taken out of the
+			-- scene rather than dimmed: a directional light does not know
+			-- about the horizon, and one below it lights the undersides of
+			-- everything and puts the night's sparkle on the wrong side of
+			-- the sky.
 			local sx, sy, sz = sun_direction(daylight_time)
-			sun_node.direction = magic.Vector3(-sx, -sy, -sz)
-			sun_light.color = sun_light_color(factor, daylight_time)
+			local up = sun_amount(daylight_time)
+			sun_node.enabled = up > 0
+			if up > 0 then
+				sun_node.direction = magic.Vector3(-sx, -sy, -sz)
+				sun_light.brightness = SUN_BRIGHTNESS * up
+				sun_light.color = sun_light_color(daylight_time)
+			end
+			moon_node.enabled = up < 1
+			if up < 1 then
+				moon_node.direction = magic.Vector3(sx, sy, sz)
+				moon_light.brightness = MOON_BRIGHTNESS * (1 - up)
+			end
 		end
 
 		if sky_material then
