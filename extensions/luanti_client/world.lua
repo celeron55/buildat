@@ -2308,9 +2308,31 @@ function M.new(magic, buildat, log, options)
 	-- entities of this game are drawn unlit in Luanti's own client too, and
 	-- their textures are full of holes -- so what stands in for the light is
 	-- a colour the shader multiplies the texture by, worked out the same way
-	-- the mesher works out a face's ambient: the sunlight colour times how
-	-- much of the sky the voxel the object is in sees, plus its lamplight.
-	-- Without this a mob is as bright at midnight as at noon.
+	-- the voxel around it is lit. Without this a mob is as bright at midnight
+	-- as at noon.
+	--
+	-- Which way that is worked out depends on the path, because the two light
+	-- a voxel differently and an object beside one has to agree with it. The
+	-- vanilla path bakes the sunlight colour into the vertices and that is
+	-- all there is; the PBR path has a sky for an ambient and a sun of its
+	-- own on top, so an object gets both. There is no normal to take a real
+	-- share of the sun by -- that is what unlit means -- so it gets a fixed
+	-- one, which is what a thing standing in the sun shows on average.
+	-- How much of the sun an object shows. One number has to serve for both
+	-- a mob in the open and one under a tree, because an unlit thing has no
+	-- normal to shadow: measured on the ground it stands on, sunlit grass
+	-- renders at about twelve times the same grass in a shadow, and what is
+	-- picked here lands an object between the two. It is the number to move
+	-- if mobs read as glowing in a wood or as cut out in a field.
+	local OBJECT_SUN = 1.0
+	-- What something in the pitch dark is worth, so that it is a silhouette
+	-- rather than nothing. Small, because the ambient it is added to is small
+	-- at night and a mob that glows is worse than one that is hard to see.
+	local OBJECT_DARK_FLOOR = 0.01
+	-- What the sun is worth to an object now: its colour and how much of it
+	-- there is, kept by apply_daylight() because that is where it is known
+	local object_sun = nil
+
 	local function object_color(x, y, z)
 		local p1 = param1_at(math.floor(x + 0.5), math.floor(y + 0.5),
 				math.floor(z + 0.5))
@@ -2321,9 +2343,26 @@ function M.new(magic, buildat, log, options)
 		local night = math.floor(p1 / 16)
 		local sky = (day > night and day - night or 0) / 15
 		local lamp = night / 15
-		local sun = sunlight_color(daylight)
 		-- A floor of a few percent, so that something in the pitch dark is a
 		-- silhouette rather than nothing at all
+		if pbr then
+			local amb = zone.ambientColor
+			local sun = object_sun
+			local sr, sg, sb = 0, 0, 0
+			if sun then
+				sr = sun.r * sun.a * OBJECT_SUN
+				sg = sun.g * sun.a * OBJECT_SUN
+				sb = sun.b * sun.a * OBJECT_SUN
+			end
+			-- Not clipped at one: the frame is tone mapped and a voxel in
+			-- the sun is well past it, so an object beside one has to be able
+			-- to be as well
+			return magic.Color(
+					(amb.r + sr) * sky + lamp + OBJECT_DARK_FLOOR,
+					(amb.g + sg) * sky + lamp + OBJECT_DARK_FLOOR,
+					(amb.b + sb) * sky + lamp + OBJECT_DARK_FLOOR)
+		end
+		local sun = sunlight_color(daylight)
 		return magic.Color(
 				math.min(1, sun.r * sky + lamp + 0.03),
 				math.min(1, sun.g * sky + lamp + 0.03),
@@ -3830,10 +3869,11 @@ function M.new(magic, buildat, log, options)
 			local up = sun_amount(daylight_time) * above_horizon(smooth_sy) *
 					through_cloud * body_is_up(sky_bodies.sun)
 			sun_node.enabled = up > 0
+			local sun_color = sun_light_color(daylight_time)
 			if up > 0 then
 				sun_node.direction = magic.Vector3(-sx, -sy, -sz)
 				sun_light.brightness = SUN_BRIGHTNESS * up
-				sun_light.color = sun_light_color(daylight_time)
+				sun_light.color = sun_color
 			end
 			local moon_up = moon_amount(daylight_time) *
 					above_horizon(-smooth_sy) * through_cloud *
@@ -3843,6 +3883,12 @@ function M.new(magic, buildat, log, options)
 				moon_node.direction = magic.Vector3(sx, sy, sz)
 				moon_light.brightness = MOON_BRIGHTNESS * moon_up
 			end
+			-- What the two are worth to something drawn unlit, which has no
+			-- normal to take a share of them by: the colour of whichever is
+			-- up, and in the alpha how much of it there is, the moon counted
+			-- at what it is worth against the sun
+			object_sun = magic.Color(sun_color.r, sun_color.g, sun_color.b,
+					up + moon_up * MOON_BRIGHTNESS / SUN_BRIGHTNESS)
 		end
 
 		if sky_material then
