@@ -579,11 +579,23 @@ two things M1 disproved about the build, are in
   390 node types wear their real tiles. The other 111 keep the generated flat
   colour, and which 111 is the measurement that sizes what is left:
 
-  **Two drawtypes are built as shapes:** `nodebox` of type `fixed` and
-  `plantlike`, as `VoxelQuad`s the server puts in the definition -- the first
-  thing in this tree to build one. A box's faces show the part of the node's
-  texture they cover, the way Luanti's `makeCuboid` does, so a slab is not a
-  whole texture squeezed into half a voxel. devtest: 39 of 390.
+  **Three drawtypes are built as shapes:** `nodebox` of type `fixed`,
+  `plantlike`, and the liquids -- `VoxelQuad`s the server puts in the
+  definition, the first thing in this tree to build one. A box's faces show
+  the part of the node's texture they cover, the way Luanti's `makeCuboid`
+  does, so a slab is not a whole texture squeezed into half a voxel.
+
+  A liquid is a full box with a `shape_group` of its own, so the mesher drops
+  the faces inside a body of it; a source and its flowing form share the
+  group because they both name the source. A flowing liquid's eight param2
+  levels are eight `VoxelVariant`s, each a box with its own `liquid_top`, and
+  the engine's `liquid_corner_top` averages the four columns around each
+  corner -- Luanti's `getCornerLevel` -- so a slope is a slope and not a
+  flight of steps. It wears its `special_tiles` rather than its `tiles`:
+  the first is the surface, the second the sides, and `tiles` is what the
+  item looks like in a hand.
+
+  devtest: 122 of 390 node types have a shape, 83 of them liquids.
 
   **And four more are built as cubes that are drawn differently**, which is
   what they are: `glasslike` and its framed variants get an edge material of
@@ -608,10 +620,19 @@ two things M1 disproved about the build, are in
     and the client is what composes it -- `buildat.compose_image`, the way
     `extensions/luanti_client`'s `resolve_tile` does. Until then those nodes
     wear a flat colour, which is honest and is not what devtest looks like.
-  - **The rest of the drawtypes.** By what devtest has of them: the liquids
-    (23 node types), which want `is_liquid`, `shape_group`, `translucent` and
-    `liquid_top`; `plantlike_rooted` (7), which is `shape_lit_from_above`
-    exactly; `glasslike_framed`'s frame (5, drawn as a plain cube for now);
+  - **A blended pass, which is what makes water water.** A liquid is drawn
+    in the opaque pass today. `VoxelDefinition::translucent` exists and the
+    mesher already puts such faces on a child node of the chunk so Urho3D
+    sorts them -- but nothing gives that child a technique, so a blended
+    liquid would be invisible rather than see-through. What it wants is a
+    blended technique in `builtin/voxel_shading` and `apply_to_node()`
+    reaching the child; `each_material()` only looks at the node's own
+    `CustomGeometry`. That also covers `use_texture_alpha = "blend"` on
+    framed glass and panes, which are alpha-masked now where the game meant
+    them to be seen through.
+  - **The rest of the drawtypes.** By what devtest has of them:
+    `plantlike_rooted` (7), which is `shape_lit_from_above` exactly;
+    `glasslike_framed`'s frame (5, drawn as a plain cube for now);
     `torchlike` (3), `signlike` (3), `raillike` (1), `firelike` (1),
     `fencelike` (1); and the node box kinds that are not `fixed` --
     `connected` is the mesher's `connect_dir` and `wallmounted` and `leveled`

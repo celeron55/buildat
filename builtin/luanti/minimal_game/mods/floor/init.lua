@@ -55,6 +55,43 @@ core.register_node("floor:leaves", {
 	groups = {snappy = 3},
 })
 
+-- A liquid and its flowing form, which name the same source and are
+-- therefore the same liquid to the mesher
+core.register_node("floor:water_source", {
+	description = "Water",
+	drawtype = "liquid",
+	tiles = {"floor_water.png"},
+	special_tiles = {
+		{name = "floor_water.png", backface_culling = false},
+		{name = "floor_water.png", backface_culling = true},
+	},
+	paramtype = "light",
+	walkable = false,
+	pointable = false,
+	liquidtype = "source",
+	liquid_alternative_flowing = "floor:water_flowing",
+	liquid_alternative_source = "floor:water_source",
+	groups = {water = 3, liquid = 3},
+})
+
+core.register_node("floor:water_flowing", {
+	description = "Flowing Water",
+	drawtype = "flowingliquid",
+	tiles = {"floor_water.png"},
+	special_tiles = {
+		{name = "floor_water.png", backface_culling = false},
+		{name = "floor_water.png", backface_culling = false},
+	},
+	paramtype = "light",
+	paramtype2 = "flowingliquid",
+	walkable = false,
+	pointable = false,
+	liquidtype = "flowing",
+	liquid_alternative_flowing = "floor:water_flowing",
+	liquid_alternative_source = "floor:water_source",
+	groups = {water = 3, liquid = 3},
+})
+
 local HALF = 12   -- a 25x25 floor, which is one voxelworld section across
 local Y = 0
 
@@ -95,6 +132,23 @@ for x = 1, 3 do
 			core.set_node({x = x, y = Y + y, z = z}, {name = "floor:leaves"})
 		end
 	end
+end
+
+-- A walled pool of sources, for the surface a body of liquid has and the
+-- faces it does not draw inside itself
+for x = -8, -4 do
+	for z = -2, 2 do
+		local rim = (x == -8 or x == -4 or z == -2 or z == 2)
+		core.set_node({x = x, y = Y + 1, z = z},
+				{name = rim and "floor:stone" or "floor:water_source"})
+	end
+end
+
+-- And a run of flowing water down the levels, for the sloped surface the
+-- corner averaging makes of them
+for i = 0, 4 do
+	core.set_node({x = -8 + i, y = Y + 1, z = 5},
+			{name = "floor:water_flowing", param2 = 7 - i})
 end
 
 core.log("action", "floor: placed a " .. (HALF * 2 + 1) .. "x" ..

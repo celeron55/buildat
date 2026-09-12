@@ -235,6 +235,10 @@ struct Module: public interface::Module, public luanti::Interface
 	sm_<ss_, interface::EdgeMaterialId> m_glass_edge_materials;
 	uint32_t m_next_glass_edge_material = 10;
 	bool m_glass_edge_materials_exhausted = false;
+	// See liquid_shape_group()
+	sm_<ss_, uint8_t> m_liquid_shape_groups;
+	uint32_t m_next_liquid_shape_group = 1;
+	bool m_liquid_shape_groups_exhausted = false;
 
 	// The write-behind buffer. core.set_node writes here and voxelworld sees
 	// it once per Luanti step, inside a single access() -- one commit covers
@@ -691,6 +695,32 @@ struct Module: public interface::Module, public luanti::Interface
 				x0, y1, z0, ux0, 1-uy1,  x1, y1, z0, ux1, 1-uy1);
 	}
 
+	// Luanti's eight liquid levels, and how high the surface of one stands
+	// in its own voxel. A liquid whose range is shorter than eight spends
+	// its levels on the top of the voxel and everything below them is the
+	// floor, which is Luanti's own arithmetic.
+	//
+	// The top level is the top of the voxel: that is what a node with the
+	// same liquid above it or a source beside it comes to, and a node at the
+	// top level is nearly always one of those. Between levels the mesher
+	// averages the four columns around each corner -- Luanti's
+	// getCornerLevel, which the engine already does for anything marked
+	// is_liquid -- so a slope is a slope and not a flight of steps.
+	static const int LIQUID_LEVELS = 8;
+
+	static float liquid_level_top(int level, int range)
+	{
+		if(level >= LIQUID_LEVELS - 1)
+			return 0.5f;
+		if(range < 1)
+			range = 1;
+		if(range > LIQUID_LEVELS)
+			range = LIQUID_LEVELS;
+		const int floor_levels = LIQUID_LEVELS - range;
+		level = (level <= floor_levels) ? 0 : level - floor_levels;
+		return -0.5f + ((float)level + 0.5f) / (float)range;
+	}
+
 	// Luanti's plantlike: two quads crossing at the middle of the voxel,
 	// drawn from both sides. visual_scale makes it wider and taller, rooted
 	// at the bottom of the voxel, which is what Luanti does with it.
@@ -808,6 +838,32 @@ struct Module: public interface::Module, public luanti::Interface
 		return id;
 	}
 
+	// One shape group per liquid, so that the mesher drops the faces inside
+	// a body of it -- the water in the middle of a lake -- and keeps the
+	// ones against everything else. A source and its flowing form share a
+	// group because they both name the source.
+	//
+	// simplified: 1 to 255 is what a shape group has, and 0 means "not
+	// grouped", so a game with more than 255 distinct liquids shares the
+	// last one and two of its liquids stop drawing the surface between
+	// them. Nothing that big has turned up.
+	uint8_t liquid_shape_group(const ss_ &group)
+	{
+		auto it = m_liquid_shape_groups.find(group);
+		if(it != m_liquid_shape_groups.end())
+			return it->second;
+		uint8_t id = 255;
+		if(m_next_liquid_shape_group < 255){
+			id = (uint8_t)m_next_liquid_shape_group++;
+		} else if(!m_liquid_shape_groups_exhausted){
+			m_liquid_shape_groups_exhausted = true;
+			log_w(MODULE, "More than 254 liquids; the rest share a shape "
+					"group and draw no surface between each other");
+		}
+		m_liquid_shape_groups[group] = id;
+		return id;
+	}
+
 	// A tile the client can load as it stands: a plain file name the game
 	// shipped. Anything with a texture modifier in it -- ^ for an overlay,
 	// [ for a generator, ( for a grouping -- has to be composed, and the
@@ -836,6 +892,7 @@ struct Module: public interface::Module, public luanti::Interface
 		sv_<ss_> textures;
 		size_t n_fallback = 0;
 		size_t n_shaped = 0;
+		size_t n_liquid = 0;
 		for(size_t i = 1; i <= n; i++){
 			lua_rawgeti(L, -1, (int)i);
 			if(!lua_istable(L, -1)){
@@ -852,6 +909,9 @@ struct Module: public interface::Module, public luanti::Interface
 			bool has_tiles = table_six_strings(L, "tiles", tiles);
 			sv_<float> boxes;
 			table_numbers(L, "node_box", boxes);
+			ss_ liquid_group = table_string(L, "liquid_group");
+			int liquid_range = (int)table_number(L, "liquid_range",
+					LIQUID_LEVELS);
 			lua_pop(L, 1);
 
 			// The shape, where the drawtype is one this builds. Everything
@@ -867,6 +927,26 @@ struct Module: public interface::Module, public luanti::Interface
 			} else if(drawtype == "plantlike"){
 				add_plant_quads(shape, visual_scale > 0.0f ? visual_scale : 1.0f);
 				double_sided = true;
+			} else if(!liquid_group.empty()){
+				// A full voxel of it. The faces inside a body of the same
+				// liquid are dropped by the shape group, and the surface is
+				// levelled by the variants below.
+				add_box_quads(shape, -0.5f, -0.5f, -0.5f, 0.5f, 0.5f, 0.5f);
+			}
+
+			// A flowing liquid carries its level in param2, which is what
+			// VoxelVariant is for: one per level, each a box with its own
+			// top, and the mesher averages the four columns around each
+			// corner so that the surface between them is continuous.
+			sv_<interface::VoxelVariant> liquid_variants;
+			if(drawtype == "flowingliquid" && !liquid_group.empty()){
+				liquid_variants.resize(LIQUID_LEVELS);
+				for(int level = 0; level < LIQUID_LEVELS; level++){
+					interface::VoxelVariant &var = liquid_variants[level];
+					var.liquid_top = liquid_level_top(level, liquid_range);
+					add_box_quads(var.shape, -0.5f, -0.5f, -0.5f,
+							0.5f, var.liquid_top, 0.5f);
+				}
 			}
 
 			// The generated flat colour, for a node whose tiles the client
@@ -946,15 +1026,35 @@ struct Module: public interface::Module, public luanti::Interface
 				vdef.edge_material_id = interface::EDGEMATERIALID_EMPTY;
 				n_shaped++;
 			}
+			if(!liquid_group.empty()){
+				vdef.is_liquid = true;
+				vdef.shape_group = liquid_shape_group(liquid_group);
+				vdef.liquid_top = 0.5f;
+				vdef.variants = liquid_variants;
+				// param2's low three bits are the level; the rest of it is
+				// flags this does not draw
+				if(!liquid_variants.empty()){
+					for(size_t p = 0; p < 256; p++)
+						vdef.variant_of_param[p] = (uint8_t)(p % LIQUID_LEVELS);
+				}
+				n_liquid++;
+				// simplified: drawn in the opaque pass. VoxelDefinition has
+				// `translucent` and the mesher puts such faces on a child
+				// node of the chunk for Urho3D to sort -- but nothing gives
+				// that child a technique, so a blended liquid would be
+				// invisible rather than see-through. The upgrade path is a
+				// blended technique in builtin/voxel_shading and applying it
+				// to the child; see the M3 entry in the module plan.
+			}
 			reg->add_voxel(vdef);
 		}
 		lua_settop(L, base);
 
 		serve_node_textures(textures);
 		log_i(MODULE, "%zu node types in the voxel registry: %zu have a shape "
-				"of their own, %zu wear a generated colour because a tile is "
-				"a texture modifier or was not shipped",
-				n, n_shaped, n_fallback);
+				"of their own, %zu of those are liquids, %zu wear a generated "
+				"colour because a tile is a texture modifier or was not "
+				"shipped", n, n_shaped, n_liquid, n_fallback);
 	}
 
 	// The game's own media, named the way Luanti names it: by basename and

@@ -62,10 +62,11 @@ The order of work, which is one line of it rather than parallel branches:
 
 1. **M3 -- it looks like the game.** The big one, and started: the game's
    media is served and a node whose tile is a plain shipped file name wears
-   it (279 of devtest's 390 node types); `nodebox` and `plantlike` are built
-   as shapes through buildat's own mesher (39 of 390); and `glasslike` and
-   `allfaces` are drawn at all now that "light gets past this" is a flag of
-   its own rather than the edge material (another 40). What is left is
+   it (279 of devtest's 390 node types); `nodebox`, `plantlike` and the
+   liquids are built as shapes through buildat's own mesher (122 of 390,
+   83 of them liquids); and `glasslike` and `allfaces` are drawn at all now
+   that "light gets past this" is a flag of its own rather than the edge
+   material (another 40). What is left is
    the texture modifiers, the rest of the drawtypes, palettes, and the client
    fork -- whose `init.lua` three-way split is the largest unexamined piece
    of the milestone. The module plan's M3 entry has the order.
