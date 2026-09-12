@@ -68,6 +68,26 @@ is meshed again when the sun moves, and a cave is dark with its torches lit.
 It also discards texels below half alpha, which is what makes the holes in a
 leaf or a pane of glass be holes.
 
+The connect dialog's "Enable PBR" draws the same world with res/PBRVoxel.xml
+instead: the normal and surface maps the atlas derives from each texture, and
+reflections of a sky cube map. The vertex colours are its ambient, exactly as
+above, so a cave is as dark either way and nothing is meshed differently; what
+is added on top is the specular. Two things keep that specular honest. The
+cube map beside the shader is one static noon gradient and is multiplied by the
+colour the sky is at this moment, so a sunset reflects orange and a night
+reflects almost nothing without anything being rebaked. And skyvis.lua marches
+rays through the voxels around the camera -- 216 directions, a few hundred rays
+a frame on a worker thread -- for how much sky can be seen each way, which the
+shader dims the cube map by: the mouth of a tunnel reflects sky while its walls
+do not. The counter line says what it has found straight up and over how many
+blocks of voxels, which is the quickest way to see it is working at all.
+
+It is off by default because the surface maps are most of what adding a texture
+to the atlas costs, and that loading time is the honest price of it. It is
+chosen before anything loads and fixed for the session for the same reason: the
+maps have to be on from the first texture the atlas builds. Not in it: sun
+shadows, which is a step of its own on top.
+
 On top of that, a voxel whose definition gives light gets a real light in the
 scene -- the two dozen nearest the camera, each with a range and a brightness
 from its light level, and an additive light pass in the technique for them to
@@ -99,6 +119,8 @@ media.lua       The server's media files, in cache/luanti_media/<server>/
 player.lua      The player's box: the keys, gravity, and collision against
                 the nodes
 shapes.lua      Luanti's node shapes, as the quads a voxel definition takes
+skyvis.lua      How much sky the camera can see each way, for the PBR path's
+                reflections; ported from builtin/voxel_shading's module.lua
 objmesh.lua     Wavefront .obj, as the quads a voxel's shape is made of
 res/            What the client itself ships: the placeholder textures, and
                 the shaders and techniques this world is drawn with. Urho3D
