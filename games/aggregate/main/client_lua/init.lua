@@ -635,6 +635,57 @@ end
 -- waits for a round trip when the menu goes up.
 local structure_shapes = {}
 
+-- A thumbnail of one structure: its own scene, its own camera, and the
+-- volume framed in it, rendered into a texture the menu button wears. A
+-- scene of its own rather than a view mask, because "on its own" is then
+-- true by construction and there is no terrain to leave out.
+--
+-- The main viewport tonemaps an HDR frame and this one does not, so the
+-- light here is a plain low-dynamic-range light and not the world's sun.
+local THUMB_SIZE = 96
+local THUMB_SUN = 2.2
+
+local function make_thumbnail(sh)
+	local tscene = magic.Scene.new()
+	tscene:CreateComponent("Octree")
+	local zone = tscene:CreateChild("zone"):CreateComponent("Zone")
+	zone.boundingBox = magic.BoundingBox(-1000, 1000)
+	zone.ambientColor = SKY_AMBIENT
+	zone.fogColor = magic.Color(0.60, 0.72, 0.88)
+	zone.fogStart = 1000
+	zone.fogEnd = 1001
+	zone.override = true
+	zone.zoneTexture = magic.cache:GetResource("TextureCube",
+			voxel_shading.sky_cubemap)
+	local light_node = tscene:CreateChild("light")
+	light_node.direction = magic.Vector3(SUN_DIR.x, SUN_DIR.y, SUN_DIR.z)
+	local light = light_node:CreateComponent("Light")
+	light.lightType = magic.LIGHT_DIRECTIONAL
+	light.castShadows = false
+	light.brightness = THUMB_SUN
+	light.color = magic.Color(1.0, 0.96, 0.88)
+
+	-- The node sits at the origin, so the box is centred there too; the
+	-- camera is off a corner and above, far enough back for its size, the
+	-- same sum overlook() does
+	local node = tscene:CreateChild("structure")
+	buildat.set_voxel_geometry(node, sh.data,
+			voxelworld.get_voxel_registry(), voxelworld.get_atlas_registry(),
+			false, function()
+				voxel_shading.apply_to_node(node)
+			end)
+	local size = math.max(sh.uc.x - sh.lc.x, sh.uc.y - sh.lc.y,
+			sh.uc.z - sh.lc.z) + 1
+	local d = size * 1.3 + 6
+	local cam_node = tscene:CreateChild("camera")
+	local camera = cam_node:CreateComponent("Camera")
+	camera.farClip = 1000
+	cam_node.position = magic.Vector3(-0.62 * d, 0.55 * d, -0.62 * d)
+	cam_node:LookAt(magic.Vector3(0, 0, 0))
+	return magic.render_scene_to_texture(tscene, cam_node,
+			THUMB_SIZE, THUMB_SIZE)
+end
+
 buildat.sub_packet("main:structure_shape", function(data)
 	local values = cereal.binary_input(data, {"object",
 		{"name", "string"},
@@ -647,20 +698,24 @@ buildat.sub_packet("main:structure_shape", function(data)
 		{"data", "string"},
 	})
 	structure_shapes[values.name] = values
-	-- Meshed now rather than when it is chosen: a preview built at the
-	-- moment the menu closes queues behind whatever chunks are being meshed,
-	-- which around a moving camera is a wait. The node is kept disabled and
-	-- reused; nothing simulates it and it costs a hidden drawable.
-	local node = scene:CreateChild("preview_"..values.name)
-	node.enabled = false
-	values.node = node
-	-- Without skylight: a volume standing on its own has none to read, and
-	-- the vertex colours would come out black
-	buildat.set_voxel_geometry(node, values.data,
-			voxelworld.get_voxel_registry(), voxelworld.get_atlas_registry(),
-			false, function()
-				voxel_shading.apply_to_node(node)
-			end)
+	-- Meshed as soon as the voxel registry is there rather than when the
+	-- structure is chosen: a preview built at the moment the menu closes
+	-- queues behind whatever chunks are being meshed, which around a moving
+	-- camera is a wait. The node is kept disabled and reused; nothing
+	-- simulates it and it costs a hidden drawable.
+	voxelworld.sub_ready(function()
+		local node = scene:CreateChild("preview_"..values.name)
+		node.enabled = false
+		values.node = node
+		-- Without skylight: a volume standing on its own has none to read,
+		-- and the vertex colours would come out black
+		buildat.set_voxel_geometry(node, values.data,
+				voxelworld.get_voxel_registry(),
+				voxelworld.get_atlas_registry(), false, function()
+					voxel_shading.apply_to_node(node)
+				end)
+		values.thumbnail = make_thumbnail(values)
+	end)
 	log:info("shape of "..values.name..": ("..
 			(values.uc.x - values.lc.x + 1)..", "..
 			(values.uc.y - values.lc.y + 1)..", "..
@@ -721,6 +776,16 @@ local function placement_origin(sh, x, y, z)
 	}
 end
 
+-- What that has to hold, whatever the builder's origin sits at inside the
+-- box: the box ends up centred on the X/Z and standing on the Y
+do
+	local sh = {lc = {x = -8, y = -1, z = -2}, uc = {x = 8, y = 6, z = 30}}
+	local o = placement_origin(sh, 100, 50, 200)
+	assert(o.x + (sh.lc.x + sh.uc.x) / 2 == 100, "placement_origin: x")
+	assert(o.y + sh.lc.y == 50, "placement_origin: y")
+	assert(o.z + (sh.lc.z + sh.uc.z) / 2 == 200, "placement_origin: z")
+end
+
 local function update_placement()
 	local sh = placement.shape
 	placement.y = ground_at(placement.x, placement.z, placement.y)
@@ -752,7 +817,7 @@ end
 
 local function start_placement(name)
 	local sh = structure_shapes[name]
-	if not sh then
+	if not sh or not sh.node then
 		log:warning("placement: the shape of "..name.." has not arrived")
 		return
 	end
@@ -888,10 +953,33 @@ local function open_structure_menu()
 	})
 	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	for _, st in ipairs(STRUCTURES) do
-		menu:add(st.label, function()
+		local action = function()
 			close_structure_menu()
 			start_placement(st.name)
-		end)
+		end
+		local sh = structure_shapes[st.name]
+		-- Until a thumbnail exists the button is the label alone, which is
+		-- what the menu was before there were any
+		if not sh or not sh.thumbnail then
+			menu:add(st.label, action)
+		else
+			local button = menu.window:CreateChild("Button")
+			button:SetStyleAuto()
+			button:SetName("Button")
+			button:SetLayout(magic.LM_HORIZONTAL, 10,
+					magic.IntRect(6, 6, 6, 6))
+			button.minHeight = THUMB_SIZE + 12
+			button.minWidth = 330
+			local image = button:CreateChild("BorderImage")
+			image.texture = sh.thumbnail
+			image.minWidth = THUMB_SIZE
+			image.minHeight = THUMB_SIZE
+			local text = button:CreateChild("Text")
+			text:SetName("ButtonText")
+			text:SetStyleAuto()
+			text.text = st.label
+			menu:add(button, action)
+		end
 	end
 	structure_menu = {root = root, menu = menu}
 	magic.input:SetMouseVisible(true)

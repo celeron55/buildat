@@ -10,6 +10,13 @@
 #include <Scene.h>
 #include <Profiler.h>
 #include <ResourceCache.h>
+#include <Camera.h>
+#include <Graphics.h>
+#include <Node.h>
+#include <Renderer.h>
+#include <RenderSurface.h>
+#include <Texture2D.h>
+#include <Viewport.h>
 #define MODULE "lua_bindings"
 
 namespace magic = Urho3D;
@@ -99,6 +106,57 @@ static int l_add_resource_dir(lua_State *L)
 	return 1;
 }
 
+// render_scene_to_texture(scene: Scene, camera_node: Node, w, h) -> Texture2D
+//
+// A scene drawn into a texture instead of into the window. What wants it is a
+// thumbnail: a model or a voxel volume seen on its own, on a button.
+//
+// One function rather than RenderSurface, its update modes and the texture
+// formats, because a thumbnail is all anyone has needed; exposing the surface
+// properly is what a live mirror or a portal would want.
+//
+// simplified: the surface updates every frame for as long as the texture
+// lives, and neither is ever freed. A thumbnail's scene is a few thousand
+// voxels at 96x96, so this is cheap, and it is what makes a texture correct
+// after geometry that was built asynchronously arrives. The upgrade path is
+// a manual update mode and a call to queue one.
+static int l_render_scene_to_texture(lua_State *L)
+{
+	tolua_Error tolua_err;
+	GET_TOLUA_STUFF(scene, 1, Scene);
+	GET_TOLUA_STUFF(camera_node, 2, Node);
+	int w = lua_tointeger(L, 3);
+	int h = lua_tointeger(L, 4);
+	if(w <= 0 || h <= 0 || w > 4096 || h > 4096)
+		return luaL_error(L, "render_scene_to_texture(): %ix%i is not a "
+				"sensible size", w, h);
+	Camera *camera = camera_node->GetComponent<Camera>();
+	if(camera == nullptr)
+		return luaL_error(L, "render_scene_to_texture(): the node has no "
+				"Camera component");
+
+	Context *context = scene->GetContext();
+	SharedPtr<Texture2D> texture(new Texture2D(context));
+	texture->SetSize(w, h, Graphics::GetRGBFormat(), TEXTURE_RENDERTARGET);
+	texture->SetFilterMode(FILTER_BILINEAR);
+	RenderSurface *surface = texture->GetRenderSurface();
+	if(surface == nullptr)
+		return luaL_error(L, "render_scene_to_texture(): the texture has no "
+				"render surface");
+	surface->SetViewport(0, new Viewport(context, scene, camera));
+	surface->SetUpdateMode(SURFACE_UPDATEALWAYS);
+
+	// Held by a reference that is never released, because what goes to Lua is
+	// a raw pointer and nothing else holds one. Deliberately leaked rather
+	// than kept in a container: a container of SharedPtr destroyed at exit
+	// tears a viewport down after Urho3D's context is gone, which is a crash
+	// on the way out.
+	texture->AddRef();
+
+	tolua_pushusertype(L, (void*)texture.Get(), "Texture2D");
+	return 1;
+}
+
 void init_misc_urho3d(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
@@ -108,6 +166,7 @@ void init_misc_urho3d(lua_State *L)
 	DEF_BUILDAT_FUNC(profiler_block_begin);
 	DEF_BUILDAT_FUNC(profiler_block_end);
 	DEF_BUILDAT_FUNC(add_resource_dir);
+	DEF_BUILDAT_FUNC(render_scene_to_texture);
 }
 
 } // namespace lua_bindingss
