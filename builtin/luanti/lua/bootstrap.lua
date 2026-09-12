@@ -466,6 +466,10 @@ function core.__voxel_defs()
 			-- the game meant them to be seen through.
 			alpha_blend = (def and def.use_texture_alpha == "blend") or false,
 			facing = def and FACING_OF_PARAMTYPE2[def.paramtype2] or nil,
+			-- Which rails this one reaches: Luanti's connect_to_raillike,
+			-- an id from core.raillike_group(). Rails of the same id join.
+			raillike_group = (drawtype == "raillike") and
+					((def and def.connect_to_raillike) or 0) or nil,
 		}
 	end
 	return out

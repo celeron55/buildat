@@ -250,6 +250,27 @@ static int wall_quad_turn(size_t wall)
 	}
 }
 
+// A rail's tile and turn per mask of its four horizontal connections, which
+// is Luanti's own rail_kinds table from content_mapblock.cpp: a rail with
+// nothing or one thing beside it is straight, two opposite ones straight, two
+// beside each other a curve, three a junction and four a crossing. The tiles
+// are the node's first four in that order, and what turns is the quad rather
+// than the texture, which is what Luanti turns too.
+//
+// The mask's bits are Luanti's own for this: +Z is 1, -Z is 2, -X is 4 and
+// +X is 8. Taken from extensions/luanti_client/shapes.lua.
+struct RailKind { uint8_t tile; int degrees; };
+static const RailKind RAIL_KINDS[16] = {
+	{0, 0}, {0, 0}, {0, 0}, {0, 0},
+	{0, 90}, {1, 180}, {1, 270}, {2, 180},
+	{0, 90}, {1, 90}, {1, 0}, {2, 0},
+	{0, 90}, {2, 90}, {2, 270}, {3, 0},
+};
+
+// And the turn of a rail that climbs towards one of the four, in the order
+// the masks 16...19 are in: +Z, -Z, -X, +X. Luanti's rail_slope_angle.
+static const int RAIL_SLOPE_TURNS[4] = {0, 180, 90, -90};
+
 // One family for every fence, because a fence reaches any other fence
 // whatever kind it is -- which is Luanti's rule for them. Rails will want one
 // per raillike group when they arrive; see connect_group in
@@ -437,6 +458,10 @@ struct Module: public interface::Module, public luanti::Interface
 	sm_<ss_, interface::EdgeMaterialId> m_glass_edge_materials;
 	uint32_t m_next_glass_edge_material = 10;
 	bool m_glass_edge_materials_exhausted = false;
+	// See rail_connect_group()
+	sm_<int, uint8_t> m_rail_connect_groups;
+	uint32_t m_next_rail_connect_group = FENCE_CONNECT_GROUP + 1;
+	bool m_rail_connect_groups_exhausted = false;
 	// See liquid_shape_group()
 	sm_<ss_, uint8_t> m_liquid_shape_groups;
 	uint32_t m_next_liquid_shape_group = 1;
@@ -1052,6 +1077,60 @@ struct Module: public interface::Module, public luanti::Interface
 		}
 	}
 
+	// One quad just off the floor, which is what a rail or anything else
+	// painted on the ground is
+	static void add_flat_quad(sv_<interface::VoxelQuad> &out, uint8_t tile)
+	{
+		const float y = -0.5f + 1.0f / 16.0f;
+		const float d = 0.5f;
+		const float p[4][3] = {
+			{-d, y, d}, {d, y, d}, {d, y, -d}, {-d, y, -d},
+		};
+		push_quad(out, p, tile);
+	}
+
+	// A shape per mask of a rail's four horizontal connections: sixteen flat
+	// ones and four that climb. What a "shape per mask" is for is a voxel
+	// whose whole shape changes with what is around it rather than gaining a
+	// piece per direction, and the mesher picks one of these per voxel; see
+	// VoxelDefinition::shape_masked, which had no user before this.
+	static void add_rail_shapes(sv_<interface::VoxelQuad> &out,
+			uint16_t begin[21])
+	{
+		for(size_t mask = 0; mask < 16; mask++){
+			begin[mask] = (uint16_t)out.size();
+			const size_t first = out.size();
+			add_flat_quad(out, RAIL_KINDS[mask].tile);
+			turn_quads_y(out, first, RAIL_KINDS[mask].degrees / 90);
+		}
+		for(size_t i = 0; i < 4; i++){
+			begin[16 + i] = (uint16_t)out.size();
+			const size_t first = out.size();
+			add_flat_quad(out, 0);
+			// The +Z edge lifted by exactly one node, which is the ramp
+			// Luanti draws. One node rather than "up to the top of the
+			// voxel", so that the raised end meets the flat rail a step
+			// above it whatever height a flat rail floats at: they are the
+			// same quad, one node apart.
+			out[first].p[0][1] += 1.0f;
+			out[first].p[1][1] += 1.0f;
+			turn_quads_y(out, first, RAIL_SLOPE_TURNS[i] / 90);
+		}
+		begin[20] = (uint16_t)out.size();
+	}
+
+	// The quads from first onwards, turned about Y in place
+	static void turn_quads_y(sv_<interface::VoxelQuad> &out, size_t first,
+			int quarters)
+	{
+		if(((quarters % 4) + 4) % 4 == 0)
+			return;
+		for(size_t i = first; i < out.size(); i++){
+			for(size_t c = 0; c < 4; c++)
+				turn_quarters(out[i].p[c], 0, 2, quarters);
+		}
+	}
+
 	// Four corners and a tile, with the texture filling the quad
 	static void push_quad(sv_<interface::VoxelQuad> &out, const float p[4][3],
 			uint8_t tile)
@@ -1226,6 +1305,36 @@ struct Module: public interface::Module, public luanti::Interface
 			assert(seen[1] == 0 && seen[2] == 0); // Nothing up or down
 		}
 
+		// A rail is one quad per mask, twenty of them, and the offsets say
+		// where each begins. The flat ones lie just off the floor; the four
+		// that climb have two corners a node higher than the rest.
+		{
+			sv_<interface::VoxelQuad> rails;
+			uint16_t begin[21] = {};
+			add_rail_shapes(rails, begin);
+			assert(rails.size() == 20);
+			assert(begin[0] == 0 && begin[20] == 20);
+			for(size_t m = 0; m < 20; m++){
+				assert(begin[m + 1] == begin[m] + 1);
+				const interface::VoxelQuad &q = rails[begin[m]];
+				assert(q.tile < 4);
+				int high = 0;
+				for(size_t c = 0; c < 4; c++){
+					// A turn about Y leaves x and z inside the voxel
+					assert(q.p[c][0] >= -0.5f && q.p[c][0] <= 0.5f);
+					assert(q.p[c][2] >= -0.5f && q.p[c][2] <= 0.5f);
+					if(q.p[c][1] > 0.0f)
+						high++;
+				}
+				assert(high == (m >= 16 ? 2 : 0));
+			}
+			// Nothing beside it and everything beside it are the two Luanti
+			// draws with its first and fourth tiles
+			assert(rails[begin[0]].tile == 0);
+			assert(rails[begin[15]].tile == 3);
+
+		}
+
 		// A sign lies flat against the surface it is on, so its quad has a
 		// normal along one axis and sits just off the boundary in that
 		// direction. A torch leans, so its normal has no zero component in
@@ -1315,6 +1424,26 @@ struct Module: public interface::Module, public luanti::Interface
 		return id;
 	}
 
+	// One family per raillike group, because a rail reaches the rails of its
+	// own group and no others. Fences have group 1; a connect group is five
+	// bits of a thirty-two bit mask, so there are thirty-one left.
+	uint8_t rail_connect_group(int raillike_group)
+	{
+		auto it = m_rail_connect_groups.find(raillike_group);
+		if(it != m_rail_connect_groups.end())
+			return it->second;
+		uint8_t id = 32;
+		if(m_next_rail_connect_group <= 32){
+			id = (uint8_t)m_next_rail_connect_group++;
+		} else if(!m_rail_connect_groups_exhausted){
+			m_rail_connect_groups_exhausted = true;
+			log_w(MODULE, "More than 31 raillike groups; the rest share one "
+					"and their rails connect to each other");
+		}
+		m_rail_connect_groups[raillike_group] = id;
+		return id;
+	}
+
 	// A tile the client can load as it stands: a plain file name the game
 	// shipped. Anything with a texture modifier in it -- ^ for an overlay,
 	// [ for a generator, ( for a grouping -- has to be composed, and the
@@ -1380,6 +1509,7 @@ struct Module: public interface::Module, public luanti::Interface
 			ss_ facing = table_string(L, "facing");
 			ss_ overlay_tile = table_string(L, "overlay_tile");
 			ss_ liquid_group = table_string(L, "liquid_group");
+			int raillike_group = (int)table_number(L, "raillike_group", 0);
 			int liquid_range = (int)table_number(L, "liquid_range",
 					LIQUID_LEVELS);
 			lua_pop(L, 1);
@@ -1398,6 +1528,10 @@ struct Module: public interface::Module, public luanti::Interface
 			uint8_t connect_group = 0;
 			uint32_t connect_mask = 0;
 			bool connect_to_solid = false;
+			// A shape per mask of which neighbours the voxel reaches; see
+			// VoxelDefinition::shape_masked
+			sv_<interface::VoxelQuad> masked_shape;
+			uint16_t masked_begin[21] = {};
 			// The shape is drawn as well as the voxel's cube faces, not
 			// instead of them
 			bool shape_over_cube = false;
@@ -1409,6 +1543,14 @@ struct Module: public interface::Module, public luanti::Interface
 			} else if(drawtype == "plantlike"){
 				add_plant_quads(shape, visual_scale > 0.0f ? visual_scale : 1.0f);
 				double_sided = true;
+			} else if(drawtype == "raillike"){
+				// One quad, and which tile it wears and which way it is
+				// turned is what its neighbours say -- so it is a shape per
+				// mask rather than a shape. A rail reaches other rails of
+				// its own raillike group and nothing else.
+				add_rail_shapes(masked_shape, masked_begin);
+				connect_group = rail_connect_group(raillike_group);
+				connect_mask = 1u << (connect_group - 1);
 			} else if(drawtype == "fencelike"){
 				// A post and a pair of bars per direction that has
 				// something to reach. It reaches other fences, whatever
@@ -1571,7 +1713,12 @@ struct Module: public interface::Module, public luanti::Interface
 			vdef.transmits_light = sunlight && !empty;
 			vdef.physically_solid = walkable && !empty;
 			vdef.fully_empty = empty;
-			if(!shape.empty()){
+			if(!masked_shape.empty()){
+				vdef.shape_masked = masked_shape;
+				for(size_t i = 0; i < 21; i++)
+					vdef.shape_masked_begin[i] = masked_begin[i];
+			}
+			if(!shape.empty() || !masked_shape.empty()){
 				vdef.shape = shape;
 				vdef.shape_double_sided = double_sided;
 				vdef.shape_lit_from_above = lit_from_above;
