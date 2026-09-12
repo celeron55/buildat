@@ -317,6 +317,37 @@ end
 -- looked at.
 --
 -- Id 0 is ignore, which is VOXELTYPEID_UNDEFINED and has no definition.
+-- Luanti's tiles are +Y, -Y, +X, -X, +Z, -Z and buildat's six textures are
+-- the same six in the same order, so they map one to one. Fewer than six
+-- copies the last one over the rest, which is what Luanti does.
+--
+-- What comes out is the tile *string*, texture modifiers and all: the server
+-- decides which voxel types exist and the client decides what their pixels
+-- are. See doc/plan/luanti_module_plan.md, "Who resolves textures".
+local function tile_names(def)
+	local tiles = def and (def.tiles or def.tile_images)
+	if type(tiles) ~= "table" then
+		return nil
+	end
+	local out = {}
+	local last = nil
+	for i = 1, 6 do
+		local t = tiles[i]
+		if type(t) == "table" then
+			t = t.name or t.image
+		end
+		if type(t) ~= "string" then
+			t = last
+		end
+		if t == nil then
+			return nil
+		end
+		out[i] = t
+		last = t
+	end
+	return out
+end
+
 function core.__voxel_defs()
 	local max_id = 0
 	for id in pairs(core.__content_names) do
@@ -345,6 +376,7 @@ function core.__voxel_defs()
 			empty = (drawtype == "airlike"),
 			walkable = (def == nil) or (def.walkable ~= false),
 			light_source = (def and def.light_source) or 0,
+			tiles = tile_names(def),
 		}
 	end
 	return out
