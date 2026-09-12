@@ -28,9 +28,14 @@ Buildat Linux How-To
 Install dependencies
 ----------------------
 
-	$ # Dependencies for Urho3D
-	$ sudo apt-get install libx11-dev libxrandr-dev libasound2-dev libgl1-mesa-dev
-	$ sudo yum install libX11-devel libXrandr-devel alsa-lib-devel
+	$ # A compiler and cmake, plus the X, sound and GL headers Urho3D needs
+	$ sudo apt-get install build-essential cmake \
+	        libx11-dev libxrandr-dev libasound2-dev libgl1-mesa-dev
+	$ sudo dnf install gcc-c++ cmake \
+	        libX11-devel libXrandr-devel alsa-lib-devel mesa-libGL-devel
+
+The server also needs a C++ compiler at run time, not just at build time: it
+compiles game modules as it loads them. It looks for `c++` in PATH.
 
 Build
 -------
@@ -42,8 +47,12 @@ required for the module interface.
     $ cd $wherever_buildat_is
     $ mkdir Build  # Capital B is a good idea so it stays out of the way in tabcomplete
     $ cd Build
-    $ cmake .. -DCMAKE_BUILD_TYPE=Debug  # Add -DURHO3D_64BIT=true on 64-bit systems
+    $ cmake .. -DCMAKE_BUILD_TYPE=Debug
     $ make -j4
+
+The bundled Urho3D is built by a sub-build that uses every core regardless of
+the `-j` given here, which is where the `-j0 forced in submake` warning comes
+from.
 
 You can use -DBUILD_SERVER=false or -DBUILD_CLIENT=false if you don't need the
 server or the client, respectively.

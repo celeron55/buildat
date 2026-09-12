@@ -68,6 +68,69 @@ static const float UI_SNAP_OVER = 0.12f;
 static const int MIN_WINDOW_W = 640;
 static const int MIN_WINDOW_H = 360;
 
+// The look command. How far off the camera may be left, how far it is allowed
+// to be asked to turn in one frame, how much of a turn counts as having moved
+// at all, how many frames of not moving mean the game does not do mouse look,
+// and how many frames of trying mean it is not going to arrive. The first
+// guess is only what the first step is taken with; the second step onwards
+// uses what the first one actually did.
+static const float LOOK_TOLERANCE_DEG = 0.4f;
+static const float LOOK_MAX_STEP_DEG = 60.0f;
+static const float LOOK_MOVED_DEG = 0.002f;
+static const float LOOK_FIRST_GUESS_DEG_PER_PX = 0.15f;
+static const int LOOK_FLIP_FRAMES = 4;
+static const int LOOK_STILL_FRAMES = 30;
+static const int LOOK_MAX_FRAMES = 300;
+
+// One axis of the aiming loop: what it has learned about how a pixel of mouse
+// movement turns this game's camera, and whether the camera has stopped
+// answering it. Learning the sign from what a push actually did is what lets
+// this work on a game whose mouse look runs the other way; a push that changes
+// nothing, tried in both directions, is an axis against a limit of its own.
+struct LookAxis
+{
+	float deg_per_px = LOOK_FIRST_GUESS_DEG_PER_PX;
+	int pushed = 0;
+	int stall = 0;
+	int flips = 0;
+	bool stuck = false;
+	bool moved_ever = false;
+
+	// A new look command on the same client: what the axis has learned about
+	// the game is still true, so only what is about this one command is
+	// cleared. The second aim of a run then costs no frames finding the sign
+	// again.
+	void restart()
+	{
+		pushed = 0;
+		stall = 0;
+		flips = 0;
+		stuck = false;
+	}
+
+	void observe(float delta)
+	{
+		if(pushed == 0)
+			return;
+		if(fabsf(delta) > LOOK_MOVED_DEG){
+			deg_per_px = delta / (float)pushed;
+			stall = 0;
+			flips = 0;
+			stuck = false;
+			moved_ever = true;
+			return;
+		}
+		// Not at once: a push takes a frame or two to come back around
+		// through SDL and the game's own update
+		if(++stall < LOOK_FLIP_FRAMES)
+			return;
+		stall = 0;
+		deg_per_px = -deg_per_px;
+		if(++flips >= 2)
+			stuck = true;
+	}
+};
+
 extern client::Config g_client_config;
 extern volatile sig_atomic_t g_shutdown_signal;
 
@@ -448,6 +511,22 @@ struct CApp: public App, public magic::Application
 	bool m_command_seq_stdin_eof = false;
 	bool m_command_seq_failed = false;
 	bool m_command_seq_extra_frame = false;
+
+	// The look command, which aims the camera by injecting mouse movement
+	// and watching what the camera does about it. Nothing here knows what
+	// game is running: how far a pixel turns the camera, and which way, is
+	// measured from the last frame's injection rather than assumed.
+	// What the command log line has already been written for, so that a
+	// command that takes several frames is announced once
+	int m_command_logged_index = -1;
+	bool m_look_running = false;
+	LookAxis m_look_x;
+	LookAxis m_look_y;
+	float m_look_last_yaw = 0.0f;
+	float m_look_last_pitch = 0.0f;
+	bool m_look_had_angles = false;
+	int m_look_frames = 0;
+	int m_look_no_camera_frames = 0;
 
 	magic::SharedPtr<magic::Scene> m_scene;
 	magic::SharedPtr<magic::Node> m_camera_node;
@@ -883,6 +962,167 @@ struct CApp: public App, public magic::Application
 			client::command_seq::absorb_mouse_move_suppression(input);
 	}
 
+	// Where the camera of the first viewport points: yaw from +Z towards +X
+	// and pitch upwards, both in degrees. False when there is no camera --
+	// a game that has not made one yet, or a menu.
+	bool camera_angles(float *yaw, float *pitch)
+	{
+		auto *renderer = GetSubsystem<magic::Renderer>();
+		if(!renderer || renderer->GetNumViewports() < 1)
+			return false;
+		magic::Viewport *viewport = renderer->GetViewport(0);
+		if(!viewport)
+			return false;
+		magic::Camera *camera = viewport->GetCamera();
+		if(!camera || !camera->GetNode())
+			return false;
+		magic::Vector3 d = camera->GetNode()->GetWorldDirection();
+		if(d.LengthSquared() < 1e-12f)
+			return false;
+		d.Normalize();
+		*yaw = magic::Atan2(d.x_, d.z_);
+		*pitch = magic::Asin(d.y_);
+		return true;
+	}
+
+	static float wrap_degrees(float a)
+	{
+		while(a > 180.0f)
+			a -= 360.0f;
+		while(a < -180.0f)
+			a += 360.0f;
+		return a;
+	}
+
+	// How many pixels to ask for on one axis this frame. Never more than a
+	// LOOK_MAX_STEP_DEG turn, because a game that smooths its mouse look
+	// rings if it is asked to cross the sky at once, and never zero while
+	// there is still an error to close, because a rounded-down step would
+	// stall the loop short of the target.
+	static int look_step_px(float err, float deg_per_px, float tolerance)
+	{
+		if(fabsf(err) <= tolerance)
+			return 0;
+		if(fabsf(deg_per_px) < 1e-6f)
+			return err > 0.0f ? 1 : -1;
+		float px = err / deg_per_px;
+		float limit = LOOK_MAX_STEP_DEG / fabsf(deg_per_px);
+		if(px > limit)
+			px = limit;
+		if(px < -limit)
+			px = -limit;
+		int i = (int)(px >= 0.0f ? px + 0.5f : px - 0.5f);
+		if(i == 0)
+			i = px >= 0.0f ? 1 : -1;
+		return i;
+	}
+
+	// One frame of the look command. True when the camera has arrived; on
+	// failure it calls command_seq_fail(), which shuts the client down.
+	bool command_seq_look(const client::command_seq::Command &c)
+	{
+		float yaw = 0.0f, pitch = 0.0f;
+		bool have = camera_angles(&yaw, &pitch);
+
+		if(!m_look_running){
+			m_look_running = true;
+			m_look_frames = 0;
+			m_look_no_camera_frames = 0;
+			m_look_had_angles = false;
+			m_look_x.restart();
+			m_look_y.restart();
+		}
+
+		if(!have){
+			// Nothing to steer by. A game that has not made its camera yet
+			// gets a few frames; one that never does is not aimable.
+			if(++m_look_no_camera_frames >= LOOK_STILL_FRAMES){
+				m_look_running = false;
+				command_seq_fail("look: there is no camera on viewport 0");
+				return false;
+			}
+			m_look_had_angles = false;
+			return false;
+		}
+		m_look_no_camera_frames = 0;
+
+		// What the last frame's push did, which is the only thing here that
+		// knows anything about the game running
+		if(m_look_had_angles){
+			m_look_x.observe(wrap_degrees(yaw - m_look_last_yaw));
+			m_look_y.observe(pitch - m_look_last_pitch);
+		}
+
+		if(m_look_x.stuck && m_look_y.stuck &&
+				!m_look_x.moved_ever && !m_look_y.moved_ever){
+			m_look_running = false;
+			command_seq_fail(ss_()+"look: the camera does not follow the "
+					"mouse; it stayed at yaw "+ftos(yaw)+" pitch "+
+					ftos(pitch)+" however it was pushed");
+			return false;
+		}
+
+		// A game whose mouse look is coarse cannot be aimed finer than one
+		// pixel of it, so the tolerance gives way to that rather than the
+		// loop hunting for something it cannot hit
+		float tol_x = fmaxf(LOOK_TOLERANCE_DEG,
+				0.75f * fabsf(m_look_x.deg_per_px));
+		float tol_y = fmaxf(LOOK_TOLERANCE_DEG,
+				0.75f * fabsf(m_look_y.deg_per_px));
+		float err_yaw = wrap_degrees((float)c.yaw - yaw);
+		float err_pitch = (float)c.pitch - pitch;
+		// An axis that has moved and then stopped answering in either
+		// direction is against a limit the game keeps -- a pitch clamp, most
+		// of the time -- and is as arrived as it is going to get
+		bool done_x = fabsf(err_yaw) <= tol_x || m_look_x.stuck;
+		bool done_y = fabsf(err_pitch) <= tol_y || m_look_y.stuck;
+		if(done_x && done_y){
+			m_look_running = false;
+			if(fabsf(err_yaw) > tol_x || fabsf(err_pitch) > tol_y)
+				log_w(MODULE, "look: the camera stops at yaw %.1f pitch %.1f; "
+						"asked for yaw %.1f pitch %.1f",
+						yaw, pitch, (float)c.yaw, (float)c.pitch);
+			else
+				log_v(MODULE, "look: arrived at yaw %.1f pitch %.1f in %i "
+						"frames", yaw, pitch, m_look_frames);
+			return true;
+		}
+
+		m_look_x.pushed = m_look_x.stuck ? 0 :
+				look_step_px(err_yaw, m_look_x.deg_per_px, tol_x);
+		m_look_y.pushed = m_look_y.stuck ? 0 :
+				look_step_px(err_pitch, m_look_y.deg_per_px, tol_y);
+		m_look_last_yaw = yaw;
+		m_look_last_pitch = pitch;
+		m_look_had_angles = true;
+
+		log_v(MODULE, "look: at yaw %.2f pitch %.2f, pushing %i,%i at "
+				"%.4f,%.4f deg/px", yaw, pitch,
+				m_look_x.pushed, m_look_y.pushed,
+				m_look_x.deg_per_px, m_look_y.deg_per_px);
+
+		if(m_look_x.pushed != 0 || m_look_y.pushed != 0){
+			ss_ err;
+			if(!client::command_seq::inject_mouse_move(
+					GetSubsystem<magic::Input>(),
+					m_look_x.pushed, m_look_y.pushed, &err)){
+				m_look_running = false;
+				command_seq_fail(err);
+				return false;
+			}
+		}
+
+		if(++m_look_frames >= LOOK_MAX_FRAMES){
+			m_look_running = false;
+			command_seq_fail(ss_()+"look: the camera did not arrive in "+
+					itos(LOOK_MAX_FRAMES)+" frames; it is at yaw "+
+					ftos(yaw)+" pitch "+ftos(pitch)+" and was asked for yaw "+
+					ftos((float)c.yaw)+" pitch "+ftos((float)c.pitch));
+			return false;
+		}
+		return false;
+	}
+
 	bool command_seq_exec(const client::command_seq::Command &c)
 	{
 		using client::command_seq::Type;
@@ -926,6 +1166,7 @@ struct CApp: public App, public magic::Application
 		case Type::Quit:
 		case Type::Delay:
 		case Type::Screenshot:
+		case Type::Look:
 			return true;
 		}
 		if(!ok)
@@ -971,8 +1212,11 @@ struct CApp: public App, public magic::Application
 		while(m_command_index < m_commands.size()){
 			const client::command_seq::Command &c =
 					m_commands[m_command_index];
-			log_i(MODULE, "command: %s",
-					cs(client::command_seq::dump_command(c)));
+			if(m_command_logged_index != (int)m_command_index){
+				m_command_logged_index = (int)m_command_index;
+				log_i(MODULE, "command: %s",
+						cs(client::command_seq::dump_command(c)));
+			}
 			if(c.type == Type::Delay){
 				m_command_wait_until_us = now + c.n * 1000;
 				m_command_index++;
@@ -982,6 +1226,14 @@ struct CApp: public App, public magic::Application
 				m_pending_screenshot = c.s;
 				m_command_index++;
 				return;
+			}
+			if(c.type == Type::Look){
+				// One step a frame, so that what the last one did can be
+				// seen before the next one is decided
+				if(!command_seq_look(c))
+					return;
+				m_command_index++;
+				continue;
 			}
 			if(c.type == Type::Quit){
 				m_command_index = m_commands.size();
