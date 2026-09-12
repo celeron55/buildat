@@ -602,6 +602,23 @@ function M.new(magic, buildat, log, options)
 		return up_between(time_of_day, SUN_RISE, SUN_UP, SUN_SET, SUN_DOWN)
 	end
 
+	-- The half hour either side of the sun crossing the horizon, at each end
+	-- of the day, as 0 outside and 1 at the crossing itself. This is the
+	-- window dawn and dusk happen in: what the sun is red in, and what the
+	-- clouds take their colour from. Smooth at both ends, because a tint that
+	-- switches on is a tint you notice switching on.
+	local RED_HALF_WIDTH = 500
+
+	local function low_sun(time_of_day)
+		local t = (time_of_day or 12000) % 24000
+		local d = math.min(math.abs(t - SUN_RISE), math.abs(t - SUN_DOWN))
+		local u = 1 - d / RED_HALF_WIDTH
+		if u <= 0 then
+			return 0
+		end
+		return u * u * (3 - 2 * u)
+	end
+
 	-- What is up while the day is not: the same shape, read the other way
 	-- round, so that the four numbers above say when the moon is out rather
 	-- than being the sun's turned inside out
@@ -623,6 +640,18 @@ function M.new(magic, buildat, log, options)
 				"the sun has the sky to itself once the moon is gone")
 		assert(sun_amount(SUN_DOWN) == 0 and moon_amount(SUN_DOWN) > 0.4,
 				"the moon is up by the time the sun is gone")
+		-- Dawn and dusk are a window around the crossings and nowhere else
+		assert(low_sun(SUN_RISE) == 1 and low_sun(SUN_DOWN) == 1,
+				"reddest as the sun crosses")
+		assert(low_sun(SUN_RISE - RED_HALF_WIDTH) == 0 and
+				low_sun(SUN_RISE + RED_HALF_WIDTH) == 0 and
+				low_sun(SUN_DOWN - RED_HALF_WIDTH) == 0 and
+				low_sun(SUN_DOWN + RED_HALF_WIDTH) == 0,
+				"and back to nothing half an hour either side")
+		assert(low_sun(12000) == 0 and low_sun(0) == 0,
+				"nothing of it at noon or at midnight")
+		assert(low_sun(SUN_RISE - 250) > 0.4 and low_sun(SUN_RISE - 250) < 0.6,
+				"and the way across it in between")
 	end
 
 	-- What the sky is worth as a light, against that. Two numbers, because
@@ -3450,7 +3479,12 @@ function M.new(magic, buildat, log, options)
 	-- How much of the horizon's own tint the light takes when the sun is down
 	-- among it. Not all of it: sun_tint is the colour a band of sky is
 	-- painted, which is deeper than the light that paints it.
-	local SUN_TINT_SHARE = 0.5
+	local SUN_TINT_SHARE = 0.6
+	-- And how much of the sun's colour the clouds take while it is down
+	-- there. More than the light itself takes, because a cloud at dawn is
+	-- lit by nothing else and the sun is lighting it from below, where the
+	-- ground is lit by the sky as well.
+	local CLOUD_SUN_TINT = 0.75
 
 	-- One of the game's colours, or Luanti's default for it, as 0...1
 	local function sky_color(name, brightness)
@@ -3540,14 +3574,11 @@ function M.new(magic, buildat, log, options)
 	end
 
 	-- What the sun shines with now: its own colour, going the colour of the
-	-- horizon as it comes down to it, which is the handover the sky shader
-	-- does to the disc. Zero at night, when the light left is the sky's.
+	-- horizon over the hour it is crossing it, which is where that colour
+	-- belongs and is the same handover the sky shader does to the disc.
 	local function sun_light_color(time_of_day)
-		local _, sy = sun_direction(time_of_day)
-		local low = 1 - math.abs(sy) * 2.5
-		low = low < 0 and 0 or (low > 1 and 1 or low)
 		local tint = sky_color("sun_tint", 1)
-		low = low * SUN_TINT_SHARE
+		local low = low_sun(time_of_day) * SUN_TINT_SHARE
 		return magic.Color(
 				SUN_COLOR[1] * (1 - low) + tint.r * low,
 				SUN_COLOR[2] * (1 - low) + tint.g * low,
@@ -3665,17 +3696,27 @@ function M.new(magic, buildat, log, options)
 			sky_material:SetShaderParameter("SunTint",
 					sky_color("sun_tint", 0.35 + brightness * 0.65))
 			-- Luanti's clouds are the daylight's own colour, unless the
-			-- game gave them one; either way they go dark with the day.
+			-- game gave them one; either way they go dark with the day. And
+			-- over the hour the sun spends crossing the horizon they take its
+			-- colour, because at that hour the sun is what is lighting them
+			-- and it is lighting them from underneath: that is what makes a
+			-- sunrise a sunrise rather than a sky that has got brighter.
+			local sun_now = sun_light_color(daylight_time)
+			local lit = low_sun(daylight_time) * CLOUD_SUN_TINT
+			local function cloud_channel(own, from_sun)
+				return (own * (1 - lit) + from_sun * lit) * brightness
+			end
 			local cloud = sky_bodies.clouds.color_bright
 			if cloud then
 				sky_material:SetShaderParameter("CloudColor", magic.Color(
-						cloud[1] / 255 * brightness,
-						cloud[2] / 255 * brightness,
-						cloud[3] / 255 * brightness))
+						cloud_channel(cloud[1] / 255, sun_now.r),
+						cloud_channel(cloud[2] / 255, sun_now.g),
+						cloud_channel(cloud[3] / 255, sun_now.b)))
 			else
 				sky_material:SetShaderParameter("CloudColor", magic.Color(
-						0.9 * brightness + 0.05, 0.92 * brightness + 0.05,
-						0.95 * brightness + 0.06))
+						cloud_channel(0.9, sun_now.r) + 0.05,
+						cloud_channel(0.92, sun_now.g) + 0.05,
+						cloud_channel(0.95, sun_now.b) + 0.06))
 			end
 			-- The stars come out as the sky goes dark, and a game can say
 			-- they are out in the day as well
