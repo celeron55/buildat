@@ -142,6 +142,42 @@ function core.__check_map_read()
 			math.abs(near.z - (AREA_MIN.z + 1)) > 1 then
 		error("check_map: find_node_near came back with a far one")
 	end
+	-- Digging and placing, which are the builtin's own node_dig and
+	-- item_place with nobody doing them. What is checked here is what they
+	-- do to the map; that the callbacks around them run is checked in
+	-- builtin/luanti/minimal_game, because a registered definition refuses
+	-- new keys -- register.lua sets __newindex to ignore them, on purpose --
+	-- so a callback has to be declared where the node is registered.
+	do
+		local p = {x = CHECK_POS.x + 4, y = CHECK_POS.y, z = CHECK_POS.z}
+		-- The node under it is what item_place_node places against, and it
+		-- has to be something rather than the void
+		core.set_node({x = p.x, y = p.y - 1, z = p.z}, {name = check_name})
+		core.set_node(p, {name = "air"})
+
+		if not core.place_node(p, {name = check_name}) then
+			error("check_map: place_node said no")
+		end
+		if core.get_node(p).name ~= check_name then
+			error("check_map: place_node left " .. core.get_node(p).name)
+		end
+
+		if not core.dig_node(p) then
+			error("check_map: dig_node said no")
+		end
+		if core.get_node(p).name ~= "air" then
+			error("check_map: dig_node left " .. core.get_node(p).name)
+		end
+
+		core.swap_node(p, {name = check_name})
+		if core.get_node(p).name ~= check_name then
+			error("check_map: swap_node left " .. core.get_node(p).name)
+		end
+
+		core.set_node(p, {name = "air"})
+		core.set_node({x = p.x, y = p.y - 1, z = p.z}, {name = "air"})
+	end
+
 	-- Nothing matches a name that is not there
 	local none = core.find_nodes_in_area(AREA_MIN, AREA_MAX,
 			{"check_map:nothing"})

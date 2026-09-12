@@ -803,6 +803,38 @@ function core.swap_node(pos, node)
 	return true
 end
 
+--
+-- Node metadata
+--
+-- A metadata object per position, which is what a chest's contents, a sign's
+-- text and anything else a node remembers live in. The builtin reaches for
+-- one on every dig of a node whose definition has an after_dig_node, so this
+-- is what makes those callbacks work at all.
+--
+-- simplified: in memory, so it is gone when the server stops. Putting it in
+-- the save is step 5c of doc/plan/world_persistence_plan.md -- "with M4, not
+-- before it" -- and until then a chest remembers what is in it for as long
+-- as the server runs and no longer. Worth knowing before building on it.
+
+local node_meta = {}
+
+local function pos_key(x, y, z)
+	return x .. "," .. y .. "," .. z
+end
+
+function core.get_meta(pos)
+	local x, y, z = to_pos(pos)
+	local key = pos_key(x, y, z)
+	local meta = node_meta[key]
+	if meta == nil then
+		meta = core.__new_metadata({})
+		node_meta[key] = meta
+	end
+	return meta
+end
+
+core.get_node_metadata = core.get_meta
+
 function core.set_node(pos, node)
 	local x, y, z = to_pos(pos)
 	local id, param1, param2 = to_node(node)
@@ -816,6 +848,9 @@ function core.set_node(pos, node)
 		olddef.on_destruct(pos)
 	end
 	__set_node(x, y, z, id, param1, param2)
+	-- "Any existing metadata is deleted", which is what separates set_node
+	-- from swap_node; see core.get_meta()
+	node_meta[pos_key(x, y, z)] = nil
 	local newdef = core.registered_nodes[core.get_name_from_content_id(id)]
 	if newdef and newdef.on_construct then
 		newdef.on_construct(pos)
@@ -956,6 +991,91 @@ function core.find_node_near(pos, radius, nodenames, search_center)
 		end
 	end
 	return nil
+end
+
+-- add_node is set_node under another name, which is what it is in Luanti too
+core.add_node = core.set_node
+
+function core.remove_node(pos)
+	return core.set_node(pos, {name = "air"})
+end
+
+-- What set_node would clear and this keeps: no on_destruct, no on_construct,
+-- and the metadata and the node timer left where they are. What wants it is
+-- a node changing its own appearance -- a furnace lighting up -- where a
+-- construct and a destruct would throw away the state the change is about.
+function core.swap_node(pos, node)
+	local x, y, z = to_pos(pos)
+	local id, param1, param2 = to_node(node)
+	__set_node(x, y, z, id, param1, param2)
+	return true
+end
+
+function core.bulk_set_node(positions, node)
+	for _, pos in ipairs(positions) do
+		core.set_node(pos, node)
+	end
+	return true
+end
+
+function core.bulk_swap_node(positions, node)
+	for _, pos in ipairs(positions) do
+		core.swap_node(pos, node)
+	end
+	return true
+end
+
+--
+-- Digging, placing and punching, with nobody doing them
+--
+-- The three things a player's actions come to, and what a mod calls when it
+-- wants the same thing to happen without one. Luanti's own l_dig_node,
+-- l_place_node and l_punch_node: each makes the pointed thing a player's
+-- action would have made, hands it to the vendored builtin with a nil actor,
+-- and lets that run the callbacks. So `on_dig`, `can_dig`, `after_dig_node`,
+-- `on_construct`, `after_place_node`, the drop list and the registered
+-- on_dignodes and on_placenodes are the builtin's own and behave as they do
+-- in Luanti, rather than being written again here.
+--
+-- simplified: what a dig drops goes nowhere, because an item entity is an
+-- object and objects are M5. core.handle_node_drops() computes the drops and
+-- hands them to core.add_item(), which is still a stub that says so.
+
+local function pointed_at(pos)
+	return {
+		type = "node",
+		above = {x = pos.x, y = pos.y, z = pos.z},
+		under = {x = pos.x, y = pos.y - 1, z = pos.z},
+	}
+end
+
+function core.dig_node(pos)
+	local node = core.get_node(pos)
+	if node.name == "ignore" then
+		return false
+	end
+	return core.node_dig(pos, node, nil) and true or false
+end
+
+function core.punch_node(pos)
+	local node = core.get_node(pos)
+	if node.name == "ignore" then
+		return false
+	end
+	core.node_punch(pos, node, nil, pointed_at(pos))
+	return true
+end
+
+function core.place_node(pos, node, placer)
+	local name = type(node) == "string" and node or node.name
+	if name == nil then
+		error("place_node(): the node has no name")
+	end
+	local param2 = type(node) == "table" and node.param2 or nil
+	-- Luanti places it as an item so that a node with an on_place of its own
+	-- gets it, which is how a mod makes placing one node put down another
+	core.item_place(ItemStack(name), placer, pointed_at(pos), param2)
+	return true
 end
 
 -- Returns positions, counts -- or a table of name to positions when grouped
