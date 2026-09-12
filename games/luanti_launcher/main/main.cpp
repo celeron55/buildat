@@ -177,7 +177,6 @@ struct Module: public interface::Module
 	{
 		ss_ gameid;
 		ss_ world_name;
-		ss_ world_path;
 
 		// A game by name: what the visual check runs, and what anyone wanting
 		// the bundled game wants.
@@ -238,17 +237,10 @@ struct Module: public interface::Module
 					world_name);
 			return;
 		}
-		// A subdirectory of the save rather than the save's own root: a
-		// Luanti mod writing through core.get_worldpath() must not be able
-		// to land on save.sqlite or on anything else of ours that it does
-		// not expect to be there.
-		world_path = save->path()+"/luanti";
-		interface::fs::create_directories(world_path);
-
 		log_i(MODULE, "Running world %s (game %s) in %s",
-				cs(world_name), cs(gameid), cs(world_path));
+				cs(world_name), cs(gameid), cs(save->path()));
 		luanti::access(m_server, [&](luanti::Interface *i){
-			i->run_game(game_path, world_path);
+			i->run_game(game_path, save);
 		});
 	}
 };

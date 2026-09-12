@@ -13,6 +13,7 @@
 // core table holds -- is in lua/ beside this file, where it can be read.
 #include "luanti/api.h"
 #include "voxelworld/api.h"
+#include "storage/api.h"
 #include "main_context/api.h"
 #include "client_file/api.h"
 #include "core/log.h"
@@ -26,6 +27,7 @@
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
+#include <cereal/archives/portable_binary.hpp>
 extern "C" {
 #include <Lua/lua.h>
 #include <Lua/lualib.h>
@@ -210,6 +212,11 @@ struct Module: public interface::Module, public luanti::Interface
 	// light, so it is what owns them. The launcher is told about the scene by
 	// luanti:game_loaded.
 	SceneReference m_scene = nullptr;
+	// The save the world is. Opened by whoever called run_game(), and theirs
+	// to close; the store is this module's own namespace in it, holding what
+	// is not the map -- the clock so far.
+	storage::Save *m_save = nullptr;
+	storage::Store *m_store = nullptr;
 
 	// The write-behind buffer. core.set_node writes here and voxelworld sees
 	// it once per Luanti step, inside a single access() -- one commit covers
@@ -240,6 +247,7 @@ struct Module: public interface::Module, public luanti::Interface
 	{
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:unload"));
+		m_server->sub_event(this, Event::t("core:shutdown"));
 		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("core:tick"));
 	}
@@ -248,6 +256,7 @@ struct Module: public interface::Module, public luanti::Interface
 	{
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_VOIDN("core:unload", on_unload)
+		EVENT_VOIDN("core:shutdown", on_shutdown)
 		EVENT_VOIDN("core:continue", on_continue)
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 	}
@@ -255,6 +264,92 @@ struct Module: public interface::Module, public luanti::Interface
 	void on_start(){}
 	void on_unload(){}
 	void on_continue(){}
+
+	// The last node writes and the clock. voxelworld has a core:shutdown
+	// handler of its own and may have run it already -- subscribers are
+	// called in the order the modules were loaded -- so this asks the world
+	// to save rather than trusting that it has not saved yet. Asking twice
+	// costs nothing: a section that has not changed is not written.
+	void on_shutdown()
+	{
+		if(!m_game_running)
+			return;
+		flush_node_writes();
+		save_clock();
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
+			world->save();
+		});
+	}
+
+	// The clock, in the save's object store beside the map: a world put down
+	// at dusk is picked up at dusk. Luanti keeps the same three numbers in
+	// its env_meta.txt.
+	//
+	// simplified: written at shutdown and not before, so a server that is
+	// killed loses the day it was on. Luanti writes its own every 5.3
+	// seconds with the map; the upgrade path is to do the same, once
+	// anything else here is worth a periodic checkpoint.
+	void load_clock()
+	{
+		if(!m_store)
+			return;
+		ss_ data;
+		if(!m_store->get("clock", data))
+			return;
+		double time_of_day = 0.5, game_time = 0.0;
+		int32_t day_count = 0;
+		{
+			std::istringstream is(data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			uint8_t version = 0;
+			ar(version);
+			if(version != 1){
+				log_w(MODULE, "The save's clock is version %i and this build "
+						"writes 1; the world starts at noon", (int)version);
+				return;
+			}
+			ar(time_of_day, game_time, day_count);
+		}
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__set_clock");
+		lua_pushnumber(L, time_of_day);
+		lua_pushnumber(L, game_time);
+		lua_pushnumber(L, day_count);
+		if(lua_pcall(L, 3, 0, 0) != 0)
+			log_w(MODULE, "__set_clock(): %s", lua_tostring(L, -1));
+		lua_settop(L, base);
+		log_v(MODULE, "Clock read from the save: day %i, time %.4f, "
+				"%.0f seconds played", (int)day_count, time_of_day, game_time);
+	}
+
+	void save_clock()
+	{
+		if(!m_store || !m_lua)
+			return;
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__get_clock");
+		if(lua_pcall(L, 0, 3, 0) != 0){
+			log_w(MODULE, "__get_clock(): %s", lua_tostring(L, -1));
+			lua_settop(L, base);
+			return;
+		}
+		double time_of_day = lua_tonumber(L, -3);
+		double game_time = lua_tonumber(L, -2);
+		int32_t day_count = (int32_t)lua_tonumber(L, -1);
+		lua_settop(L, base);
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar((uint8_t)1, time_of_day, game_time, day_count);
+		}
+		m_store->set("clock", os.str());
+		log_v(MODULE, "Clock written to the save: day %i, time %.4f, "
+				"%.0f seconds played", (int)day_count, time_of_day, game_time);
+	}
 
 	void on_tick(const interface::TickEvent &event)
 	{
@@ -443,6 +538,12 @@ struct Module: public interface::Module, public luanti::Interface
 			// hand anywhere in this module because of this line.
 			reg->set_format(interface::VoxelFormat::luanti());
 			build_voxel_registry(reg);
+			// After the registry and before anything asks for a section: the
+			// save stores node names and the run owns the numbering, so the
+			// content ids the mods asked for while loading are the ids this
+			// run uses whatever a previous one did. See
+			// doc/plan/world_persistence_plan.md.
+			world->set_save(m_save, "main");
 			// The light is voxelworld's, so core.get_node_light is a read
 			// and not a second store
 			world->set_skylight_enabled(true);
@@ -636,10 +737,22 @@ struct Module: public interface::Module, public luanti::Interface
 
 	// Interface
 
-	void run_game(const ss_ &game_path, const ss_ &world_path)
+	void run_game(const ss_ &game_path, storage::Save *save)
 	{
 		if(m_game_running)
 			throw Exception("luanti: run_game() called twice");
+		if(!save)
+			throw Exception("luanti: run_game() without a save; the world is "
+					"the save");
+		m_save = save;
+		m_store = save->store("luanti");
+		// A directory of the save's rather than the save's own root, so that
+		// a mod writing through core.get_worldpath() cannot land on
+		// save.sqlite or on anything else of ours it does not expect to be
+		// there. devtest's testnodes mod writes a PNG through it while it
+		// loads, so this is not hypothetical.
+		ss_ world_path = save->path()+"/luanti";
+		interface::fs::create_directories(world_path);
 		log_i(MODULE, "run_game(): game=%s world=%s",
 				cs(game_path), cs(world_path));
 
@@ -669,6 +782,10 @@ struct Module: public interface::Module, public luanti::Interface
 		for(const auto &pair : m_pending_lua)
 			run_chunk_string(pair.first, pair.second);
 		m_pending_lua.clear();
+		// Before the mods load, because a mod can ask the time while it
+		// does, and after the builtin, because that is where the clock is
+		load_clock();
+
 		run_chunk_file(module_path()+"/lua/modloader.lua");
 
 		// The registry, the world and the light, in that order: the ids the

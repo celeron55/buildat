@@ -16,10 +16,14 @@ local AREA_MAX = {x = 14, y = 14, z = 14}
 local check_name = nil
 
 -- The clock is pure Lua and needs no flush, so it is checked here rather than
--- in a file of its own
+-- in a file of its own.
+--
+-- Everything here is relative to where the clock stands and the whole of it
+-- is put back afterwards, because the clock comes out of the save now: a
+-- check that started from zero would fail on the second run, and one that
+-- left the day it rolled behind would age a world by a day every start.
 local function check_clock()
-	local t0 = core.get_timeofday()
-	local g0 = core.get_gametime()
+	local t0, g0, d0 = core.__get_clock()
 	core.set_timeofday(0.25)
 	if math.abs(core.get_timeofday() - 0.25) > 1e-6 then
 		error("check_map: set_timeofday did not take")
@@ -32,14 +36,17 @@ local function check_clock()
 		error("check_map: a whole day did not come back to the same hour: " ..
 				tostring(core.get_timeofday()))
 	end
-	if core.get_day_count() ~= 1 then
+	if core.get_day_count() ~= d0 + 1 then
 		error("check_map: the day did not roll: " ..
-				tostring(core.get_day_count()))
+				tostring(core.get_day_count()) .. " from " .. tostring(d0))
 	end
 	if core.get_gametime() <= g0 then
 		error("check_map: game time did not advance")
 	end
-	core.set_timeofday(t0)
+	core.__set_clock(t0, g0, d0)
+	if core.get_day_count() ~= d0 then
+		error("check_map: the clock did not go back where it was")
+	end
 end
 
 -- A node that is really in the world rather than a hole in it, so that what
