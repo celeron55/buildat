@@ -320,6 +320,61 @@ whole:
   inputs become buildat packets instead of protocol commands. It is the
   largest unexamined piece of the fork.
 
+### OPEN: what a module's client half is allowed to do (2026-09-13)
+
+**The texture modifiers are blocked on this and nothing else.** Everything
+around them is worked out:
+
+- the server names a tile with a modifier in it something of its own and
+  sends the expression beside the registry, since a modifier is not a file;
+- `texmod.lua` (550 lines, in the "copied verbatim" column above) turns
+  Luanti's modifier language into `buildat.compose_image` operations, and
+  `M.resolve(expr, ctx)` is the whole interface: `ctx.resource(name)` maps a
+  media name to a resource and `ctx.compose(expr, ops, size)` writes one;
+- `client_file` already serves a module's `client_lua/*` as
+  `<module>/<file>`, so the module can ship its client half;
+- `buildat.add_resource_dir()` already refuses a path outside the cache, and
+  `buildat.compose_image()` already refuses to write outside it
+  (`src/lua_bindings/image.cpp:582`).
+
+**What stops it: both of those are on the unsafe `buildat` table, and a
+module's client Lua runs in the sandbox**, which sees only `buildat.safe`.
+`extensions/luanti_client` can call them because an extension is not
+sandboxed. A module cannot, and the plan has already ruled out the module
+leaning on an extension -- an extension is installed with the client, and a
+server could then not ship a fix to its own presentation code (see "How the
+fork is made").
+
+So the question is **what of the image and cache-path primitives belongs in
+the sandbox, and under what confinement**. Sandboxed client Lua is
+server-supplied code, so this is a trust boundary and not a convenience.
+Three shapes, and this is a decision rather than a discovery:
+
+1. **Put `compose_image` and `add_resource_dir` in `buildat.safe` as they
+   are.** Both already confine themselves to the cache path, so the new
+   power is "write files under the cache and make them loadable", which a
+   server can already do through `client_file` -- it ships whatever files it
+   likes into the same cache. The argument against is that the confinement
+   currently lives in two functions and would then be load-bearing for the
+   sandbox rather than a sanity check, and a third function added later
+   without it would be a hole.
+2. **One call instead: a module's own composed-texture directory.** Say
+   `buildat.safe.module_resource_dir()` -- creates `<cache>/modules/<the
+   calling module>/`, adds it as a resource dir, returns the path -- and a
+   `compose_image` that only writes under a directory obtained that way. The
+   confinement is then one place and per module, and a module cannot write
+   over another's. More engine code, and it needs the sandbox to know which
+   module is calling, which it does not today.
+3. **Neither: the server composes and ships PNGs.** Rejected already, in
+   "Who resolves textures" -- it forfeits client-side texture size,
+   filtering and texture packs, costs more bandwidth than the sources, and
+   cannot do the runtime cases (crack overlays, animated tiles, palette
+   colorize) at all. Recorded here so it is not re-proposed.
+
+Nothing else in M3 is waiting on this: the drawtypes, the media and the
+blended pass are built, and the client fork's other pieces -- input, camera,
+the HUD, formspecs -- do not need it.
+
 ### How the fork is made (settled 2026-09-12)
 
 **Not by splitting the extension first.** `world.lua` is one closure --
@@ -637,10 +692,11 @@ two things M1 disproved about the build, are in
   check shows them without a Luanti installation.
 
   **What is left, in the order it matters:**
-  - **The texture modifiers.** A tile with `^`, `[` or `(` in it is composed,
-    and the client is what composes it -- `buildat.compose_image`, the way
-    `extensions/luanti_client`'s `resolve_tile` does. Until then those nodes
-    wear a flat colour, which is honest and is not what devtest looks like.
+  - **The texture modifiers. BLOCKED, see below.** A tile with `^`, `[` or
+    `(` in it is composed, and the client is what composes it --
+    `buildat.compose_image`, the way `extensions/luanti_client`'s
+    `resolve_tile` does. Until then those nodes wear a flat colour, which is
+    honest and is not what devtest looks like. 112 of devtest's 390.
   - **The rest of the drawtypes.** By what devtest has of them:
     `glasslike_framed`'s frame (5, drawn as a plain cube for now);
     `torchlike` (3), `signlike` (3), `raillike` (1), `firelike` (1),
