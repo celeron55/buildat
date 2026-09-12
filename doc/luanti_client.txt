@@ -113,8 +113,15 @@ are where the fade is shaped; the line itself is enforced separately, from
 where the body actually is, so that neither can shine from under the world
 whatever the clock says.
 
-Both are dimmed by the weather, because a directional light does not know
-there is a layer of cloud between it and the ground while the ambient does --
+Both go out entirely when the game hides them, which is the plainest thing it
+can say: VoxeLibre turns the sun, the moon and the stars off together the
+moment the weather turns, before it darkens a single colour, and a dimension
+with no sky turns them off for good. Something that cannot be seen casts no
+light, and what is left is the sky, which is what an overcast day is lit by.
+
+Short of that they are dimmed by the weather, because a directional light does
+not know there is a layer of cloud between it and the ground while the ambient
+does --
 a game darkens the sky colours it sends when the weather turns, and the direct
 light is then the only thing left insisting it is a clear day. Two things say
 overcast and a game uses one or the other: the cloud density, of which only

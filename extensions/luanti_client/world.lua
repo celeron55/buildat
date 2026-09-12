@@ -3526,6 +3526,16 @@ function M.new(magic, buildat, log, options)
 				clouds.color_bright)
 	end
 
+	-- A game that hides a body has said the plainest thing it can say about
+	-- it: VoxeLibre turns the sun, the moon and the stars off together when
+	-- the weather turns, before it darkens a single colour, and a dimension
+	-- with no sky turns them off for good. Something that cannot be seen
+	-- casts no light, so this is a gate rather than a dimming; what is left
+	-- is the sky, which is what an overcast day is lit by.
+	local function body_is_up(body)
+		return (body and body.visible ~= false) and 1 or 0
+	end
+
 	-- What the sun shines with now: its own colour, going the colour of the
 	-- horizon as it comes down to it, which is the handover the sky shader
 	-- does to the disc. Zero at night, when the light left is the sky's.
@@ -3625,7 +3635,7 @@ function M.new(magic, buildat, log, options)
 			local sx, sy, sz = sun_direction(daylight_time)
 			local through_cloud = 1 - CLOUD_DIM * cloud_cover()
 			local up = sun_amount(daylight_time) * above_horizon(sy) *
-					through_cloud
+					through_cloud * body_is_up(sky_bodies.sun)
 			sun_node.enabled = up > 0
 			if up > 0 then
 				sun_node.direction = magic.Vector3(-sx, -sy, -sz)
@@ -3633,7 +3643,7 @@ function M.new(magic, buildat, log, options)
 				sun_light.color = sun_light_color(daylight_time)
 			end
 			local moon_up = moon_amount(daylight_time) * above_horizon(-sy) *
-					through_cloud
+					through_cloud * body_is_up(sky_bodies.moon)
 			moon_node.enabled = moon_up > 0
 			if moon_up > 0 then
 				moon_node.direction = magic.Vector3(sx, sy, sz)
