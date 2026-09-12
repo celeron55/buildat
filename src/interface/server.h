@@ -91,6 +91,11 @@ namespace interface
 
 		virtual const ServerConfig& get_config() = 0;
 
+		// The last path component of -m: "minigame" for
+		// -m ../games/minigame. It namespaces what the server keeps under the
+		// user path, so that one game cannot name another's saves.
+		virtual ss_ get_game_id() = 0;
+
 		virtual void access_thread_pool(std::function<void(
 				interface::thread_pool::ThreadPool*pool)> cb) = 0;
 	};

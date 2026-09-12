@@ -4,6 +4,7 @@
 #include "main_context/api.h"
 #include "replicate/api.h"
 #include "voxelworld/api.h"
+#include "storage/api.h"
 #include "worldgen/api.h"
 #include "interface/module.h"
 #include "interface/server.h"
@@ -181,6 +182,8 @@ struct Module: public interface::Module
 	interface::Server *m_server;
 
 	SceneReference m_main_scene;
+	// Owned by builtin/storage, which closes it when it unloads
+	storage::Save *m_save = nullptr;
 
 	static const int SPAWN_X = -5;
 	static const int SPAWN_Z = 257;
@@ -297,6 +300,20 @@ struct Module: public interface::Module
 			ivoxelworld->create_instance(m_main_scene, region);
 		});
 
+		// One save, one world in it. open() and create() are separate calls
+		// so that a typo cannot silently start a new game, so open-or-create
+		// is these two lines, here, where they are visible. The save is not
+		// closed on the way out: voxelworld unloads before storage does and
+		// writes its last sections through it.
+		storage::access(m_server, [&](storage::Interface *istorage)
+		{
+			m_save = istorage->open("world");
+			if(!m_save)
+				m_save = istorage->create("world");
+			if(!m_save)
+				log_e(MODULE, "Could not open or create the save");
+		});
+
 		// Define voxels on core:start (woxelworld will restore them on reload)
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
@@ -323,6 +340,13 @@ struct Module: public interface::Module
 			// dug shore leaves a hole in the water rather than draining it.
 			add_voxel(voxel_reg, "water", "main/water.png", true, false, false,
 					0.28f, 1.0f, 6.0f, 0.0f, 0.05f);           // id 7
+
+			// After the voxels are defined and before anything asks for a
+			// section: a save that already has a registry replaces the one
+			// just built, ids and all, and sections that are in the save are
+			// loaded instead of generated.
+			if(m_save)
+				world->set_save(m_save, "main");
 
 			// Skylight, which is what the voxel shading reads to tell a cave
 			// apart from a shadow. Enabled after the voxels are defined, as

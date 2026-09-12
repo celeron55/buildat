@@ -482,6 +482,12 @@ struct CState: public State, public interface::Server
 		m_compiler->include_directories.push_back(
 				g_server_config.get<ss_>("interface_path")+
 				"/../../3rdparty/polyvox/library/PolyVoxCore/include");
+		// Only builtin/storage includes sqlite3.h; everything else goes
+		// through its api.h. The symbols come from buildat_core, which the
+		// server already has open, so no module links anything for this.
+		m_compiler->include_directories.push_back(
+				g_server_config.get<ss_>("interface_path")+
+				"/../../3rdparty/sqlite/src");
 		m_compiler->include_directories.push_back(
 				g_server_config.get<ss_>("share_path")+"/builtin");
 
@@ -1231,6 +1237,11 @@ struct CState: public State, public interface::Server
 		emit_event(event, false);
 	}
 
+	void emit_event_synchronously(Event event)
+	{
+		emit_event(event, true);
+	}
+
 	void handle_events()
 	{
 		// Get modified modules and push events to queue
@@ -1326,6 +1337,21 @@ struct CState: public State, public interface::Server
 		if(it == m_file_paths.end())
 			return "";
 		return it->second;
+	}
+
+	ss_ get_game_id()
+	{
+		// Trailing slashes and "." are what a shell's tab completion leaves
+		// behind, so strip them before taking the last component
+		ss_ path = m_modules_path;
+		while(!path.empty() && (path[path.size()-1] == '/' ||
+				path[path.size()-1] == '\\'))
+			path.resize(path.size() - 1);
+		size_t sep = path.find_last_of("/\\");
+		ss_ name = (sep == ss_::npos) ? path : path.substr(sep + 1);
+		if(name.empty() || name == "." || name == "..")
+			return "unnamed";
+		return name;
 	}
 
 	const interface::ServerConfig& get_config()
