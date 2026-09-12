@@ -167,6 +167,12 @@ never touches the density and paints its clouds #FFF0F0 for a clear sky,
 #5D5D5F for rain and #3D3D3F for a thunderstorm. Full overcast leaves the sun
 a fifth of itself, which is a day with no shadows in it.
 
+There is a floor under it while the sun is down. The sky is the only ambient
+there is here, and a game's night sky can be black -- VoxeLibre paints one --
+which left a moon shadow with nothing in it at all once the moon started
+casting them. The floor is the moon's own cold colour at little enough that
+what the moon lights is still the brighter.
+
 The ambient on this path is the sky rather than the colour of sunlight, and
 the shader's ambient is that times how much sky the vertex sees plus the lamp
 light baked into the vertex colour. That alone is three tints: open ground
