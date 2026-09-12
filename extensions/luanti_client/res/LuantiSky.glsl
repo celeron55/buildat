@@ -33,6 +33,8 @@ uniform float cMoonSize;
 uniform float cStarDensity;
 uniform vec3 cStarColor;
 uniform float cCloudCoverage;
+// How opaque the layer is, which is the alpha the game gave its cloud colour
+uniform float cCloudAlpha;
 // Whether the game gave the sun or the moon a texture of its own. When it
 // did, sDiffMap holds the sun's and sNormalMap the moon's -- two units
 // because a material has no third one this needs -- and the square is that
@@ -66,7 +68,11 @@ const vec3 SUN_COLOR = vec3(1.0, 0.97, 0.86);
 
 const float CLOUD_SCALE = 6.0;
 const float CLOUD_PIXELS = 11.0;
-const float CLOUD_LIT_STEP = 0.07;
+// How wide the thin edge of a cloud is, in the noise's own units: the cells
+// that used to be drawn a darker grey are these, and they are drawn thin
+// instead. It starts at the threshold rather than straddling it, so that the
+// sky the clouds cover is still the sky the threshold says they cover.
+const float CLOUD_EDGE = 0.07;
 const float CLOUD_HORIZON = 0.16;
 const float CLOUD_FADE = 0.38;
 
@@ -173,11 +179,16 @@ void PS()
                 cElapsedTimePS * cCloudWind;
         float density = CloudDensity(floor(p * CLOUD_PIXELS) / CLOUD_PIXELS);
         float threshold = 1.0 - cCloudCoverage;
-        vec3 cloud = density > threshold + CLOUD_LIT_STEP ?
-                cCloudColor : cCloudColor * 0.72;
-        float cover = step(threshold, density) *
+        // How much of a cloud this cell is: solid well past the threshold,
+        // sky well short of it, and thinning across CLOUD_EDGE in between, so
+        // that the edge of a cloud blends into the sky rather than being a
+        // darker cloud. What the whole layer is worth on top of that is the
+        // alpha the game gave its cloud colour, which is what Luanti draws
+        // its own clouds with.
+        float into = clamp((density - threshold) / CLOUD_EDGE, 0.0, 1.0);
+        float cover = into * cCloudAlpha *
                 smoothstep(CLOUD_HORIZON, CLOUD_FADE, d.y);
-        color = mix(color, cloud, cover);
+        color = mix(color, cCloudColor, cover);
     }
 
     // The sun and the moon, over the clouds: they are the two things up there

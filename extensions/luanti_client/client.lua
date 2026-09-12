@@ -850,10 +850,15 @@ function M.new(socket, options, log)
 	-- one for the horizon at each of day, dawn and night; anything else --
 	-- "skybox" with six textures, "plain" with one colour -- has the
 	-- background colour and that is all.
+	-- {r, g, b, a}, each 0...255. The alpha is on the wire for every colour
+	-- and means something for some of them -- a cloud's is how opaque the
+	-- layer is -- so it is handed on; a caller that does not want it reads
+	-- the first three.
 	local function read_color(r)
 		local argb = r:u32()
 		return {math.floor(argb / 0x10000) % 0x100,
-				math.floor(argb / 0x100) % 0x100, argb % 0x100}
+				math.floor(argb / 0x100) % 0x100, argb % 0x100,
+				math.floor(argb / 0x1000000) % 0x100}
 	end
 
 	handlers[TOCLIENT.SET_SKY] = function(r)

@@ -433,6 +433,10 @@ function M.new(magic, buildat, log, options)
 	local CLOUD_SPEED_DEFAULT = {0, -2}
 	local CLOUD_WIND_PER_NODE = 0.0054
 	local CLOUD_DENSITY_DEFAULT = 0.4
+	-- Luanti's own default cloud colour is 229 of 255 opaque, and a game that
+	-- names a colour without an alpha gets a full one; either way the layer
+	-- is drawn at what the colour says rather than solid
+	local CLOUD_ALPHA_DEFAULT = 229 / 255
 
 	-- What the game says is in the sky, out of SET_SUN, SET_MOON, SET_STARS
 	-- and CLOUD_PARAMS. What is here to begin with is what Luanti has before
@@ -3738,6 +3742,10 @@ function M.new(magic, buildat, log, options)
 			-- sky. What was here before scaled the density by 0.85 first,
 			-- which at Luanti's own default covered a sixth of the sky where
 			-- Luanti covers a quarter.
+			local cloud_color = sky_bodies.clouds.color_bright
+			sky_material:SetShaderParameter("CloudAlpha",
+					(cloud_color and cloud_color[4] and
+					cloud_color[4] / 255) or CLOUD_ALPHA_DEFAULT)
 			sky_material:SetShaderParameter("CloudCoverage",
 					(sky and sky.clouds == false) and 0 or
 					(sky_bodies.clouds.density or CLOUD_DENSITY_DEFAULT))
