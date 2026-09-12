@@ -153,6 +153,17 @@ core.register_node("floor:torch", {
 	groups = {snappy = 3},
 })
 
+-- A post that is always there and a pair of bars towards each direction
+-- that has something to reach: another fence, or anything solid
+core.register_node("floor:fence", {
+	description = "Fence",
+	drawtype = "fencelike",
+	tiles = {"floor_face_side.png"},
+	paramtype = "light",
+	sunlight_propagates = true,
+	groups = {cracky = 3},
+})
+
 local HALF = 12   -- a 25x25 floor, which is one voxelworld section across
 local Y = 0
 
@@ -226,6 +237,16 @@ for i = 0, 5 do
 	core.set_node({x = -2 + i, y = Y + 2, z = 2},
 			{name = "floor:torch", param2 = i})
 end
+
+-- A fence with a corner in it and one post standing alone, so a screenshot
+-- says which bars are drawn and which are not
+for x = -8, -5 do
+	core.set_node({x = x, y = Y + 1, z = -8}, {name = "floor:fence"})
+end
+for z = -7, -5 do
+	core.set_node({x = -8, y = Y + 1, z = z}, {name = "floor:fence"})
+end
+core.set_node({x = -4, y = Y + 1, z = -6}, {name = "floor:fence"})
 
 -- Rooted plants set into the floor itself, so the cube reads as ground
 for x = -8, -4, 2 do

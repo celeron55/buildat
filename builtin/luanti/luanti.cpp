@@ -250,6 +250,12 @@ static int wall_quad_turn(size_t wall)
 	}
 }
 
+// One family for every fence, because a fence reaches any other fence
+// whatever kind it is -- which is Luanti's rule for them. Rails will want one
+// per raillike group when they arrive; see connect_group in
+// interface/voxel.h, which has thirty-two.
+static const uint8_t FENCE_CONNECT_GROUP = 1;
+
 // A wallmounted direction is a facedir too; Luanti's own
 // wallmounted_to_facedir[]. 6 and 7 are the two spare states, which are
 // the ceiling and the floor turned a quarter.
@@ -1009,6 +1015,43 @@ struct Module: public interface::Module, public luanti::Interface
 			add_sign_quads(out, scale, wall);
 	}
 
+	// A post in the middle and a pair of bars towards each direction that
+	// has something to reach: Luanti's drawFencelikeNode, at its own
+	// measurements -- an eighth for the post, a sixteenth for the bars, and
+	// the bars a quarter of the way up and down from the middle.
+	//
+	// The bars carry connect_dir, so the mesher draws each pair only when
+	// that direction connects. That is what connect_dir is for and it had no
+	// user; the header names a fence as the case.
+	static void add_fence_quads(sv_<interface::VoxelQuad> &out)
+	{
+		const float post = 1.0f / 8.0f;
+		const float bar = 1.0f / 16.0f;
+		const float h = 1.0f / 4.0f;
+		add_box_quads(out, -post, -0.5f, -post, post, 0.5f, post);
+		// The four horizontal faces, in the mesher's own order: +X, -X, +Z,
+		// -Z, which are faces 2 to 5 and therefore connect_dir 3 to 6
+		for(size_t f = 2; f < 6; f++){
+			const bool along_x = (f < 4);
+			const float sign = (f % 2 == 0) ? 1.0f : -1.0f;
+			const float near_end = post * sign;
+			const float far_end = 0.5f * sign;
+			for(int level = 0; level < 2; level++){
+				const float y = (level == 0 ? h : -h);
+				const size_t first = out.size();
+				if(along_x){
+					add_box_quads(out, near_end, y - bar, -bar,
+							far_end, y + bar, bar);
+				} else {
+					add_box_quads(out, -bar, y - bar, near_end,
+							bar, y + bar, far_end);
+				}
+				for(size_t i = first; i < out.size(); i++)
+					out[i].connect_dir = (uint8_t)(f + 1);
+			}
+		}
+	}
+
 	// Four corners and a tile, with the texture filling the quad
 	static void push_quad(sv_<interface::VoxelQuad> &out, const float p[4][3],
 			uint8_t tile)
@@ -1154,6 +1197,34 @@ struct Module: public interface::Module, public luanti::Interface
 		assert(facing_variant_count("") == 0);
 		assert(facing_variant_of_param("facedir", 31) == 7); // 31 % 24
 		assert(facing_variant_of_param("4dir", 0xfe) == 2);
+
+		// A fence is a post that is always drawn and four pairs of bars that
+		// are drawn only when their direction connects, which is what
+		// connect_dir says
+		{
+			sv_<interface::VoxelQuad> fence;
+			add_fence_quads(fence);
+			// One post and eight bars, six quads each
+			assert(fence.size() == 9 * 6);
+			size_t always = 0;
+			uint8_t seen[7] = {};
+			for(const interface::VoxelQuad &q : fence){
+				assert(q.connect_dir < 7);
+				if(q.connect_dir == 0)
+					always++;
+				else
+					seen[q.connect_dir]++;
+				for(size_t c = 0; c < 4; c++){
+					for(size_t j = 0; j < 3; j++){
+						assert(q.p[c][j] >= -0.5f && q.p[c][j] <= 0.5f);
+					}
+				}
+			}
+			assert(always == 6);           // The post
+			for(size_t d = 3; d <= 6; d++)
+				assert(seen[d] == 12);     // Two bars each way
+			assert(seen[1] == 0 && seen[2] == 0); // Nothing up or down
+		}
 
 		// A sign lies flat against the surface it is on, so its quad has a
 		// normal along one axis and sits just off the boundary in that
@@ -1322,6 +1393,11 @@ struct Module: public interface::Module, public luanti::Interface
 			// "torchlike" or "signlike": a shape that is built per
 			// wallmounted direction rather than turned
 			ss_ wall_shape;
+			// Which family this reaches out to, and which families it
+			// reaches; see connect_dir in interface/voxel.h
+			uint8_t connect_group = 0;
+			uint32_t connect_mask = 0;
+			bool connect_to_solid = false;
 			// The shape is drawn as well as the voxel's cube faces, not
 			// instead of them
 			bool shape_over_cube = false;
@@ -1333,6 +1409,14 @@ struct Module: public interface::Module, public luanti::Interface
 			} else if(drawtype == "plantlike"){
 				add_plant_quads(shape, visual_scale > 0.0f ? visual_scale : 1.0f);
 				double_sided = true;
+			} else if(drawtype == "fencelike"){
+				// A post and a pair of bars per direction that has
+				// something to reach. It reaches other fences, whatever
+				// kind, and anything solid -- which is Luanti's rule.
+				add_fence_quads(shape);
+				connect_group = FENCE_CONNECT_GROUP;
+				connect_mask = 1u << (FENCE_CONNECT_GROUP - 1);
+				connect_to_solid = true;
 			} else if(drawtype == "firelike"){
 				// Luanti's fire is quads leaning against whatever is around
 				// it; crossed quads are what it comes to when nothing is,
@@ -1499,6 +1583,9 @@ struct Module: public interface::Module, public luanti::Interface
 				}
 				n_shaped++;
 			}
+			vdef.connect_group = connect_group;
+			vdef.connect_mask = connect_mask;
+			vdef.connect_to_solid = connect_to_solid;
 			if(!facing_variants.empty()){
 				vdef.variants = facing_variants;
 				for(size_t p = 0; p < 256; p++){
