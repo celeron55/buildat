@@ -1028,6 +1028,8 @@ struct Module: public interface::Module
 				"network:packet_received/main:dig_voxel"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:place_structure"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:request_structure_shape"));
 		m_server->sub_event(this, Event::t("worldgen:queue_modified"));
 		m_server->sub_event(this, Event::t("core:tick"));
 	}
@@ -1045,6 +1047,8 @@ struct Module: public interface::Module
 				on_dig_voxel, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:place_structure",
 				on_place_structure, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:request_structure_shape",
+				on_request_structure_shape, network::Packet)
 		EVENT_TYPEN("worldgen:queue_modified",
 				on_worldgen_queue_modified, worldgen::QueueModifiedEvent);
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent);
@@ -2617,6 +2621,92 @@ struct Module: public interface::Module
 		}
 	}
 
+	// Which builder a name means. Both putting a structure into the world
+	// and sending its shape to a client go through this, so there is one
+	// list of names and not two.
+	static bool build_structure(Build &b, const ss_ &name,
+			const pv::Vector3DInt32 &o)
+	{
+		if(name == "chamber")
+			build_chamber(b, o);
+		else if(name == "cathedral")
+			build_cathedral(b, o);
+		else if(name == "bridge")
+			build_bridge(b, o);
+		else if(name == "mineshaft")
+			build_mineshaft(b, o);
+		else
+			return false;
+		return true;
+	}
+
+	// What a build takes up, air included: a structure clears its own
+	// footprint, and the box that has to be clear is the box it occupies.
+	static void bounds_of(const Build &b, pv::Vector3DInt32 &lc,
+			pv::Vector3DInt32 &uc)
+	{
+		lc = uc = b.voxels[0].first;
+		for(auto &vp : b.voxels){
+			lc.setX(std::min(lc.getX(), vp.first.getX()));
+			lc.setY(std::min(lc.getY(), vp.first.getY()));
+			lc.setZ(std::min(lc.getZ(), vp.first.getZ()));
+			uc.setX(std::max(uc.getX(), vp.first.getX()));
+			uc.setY(std::max(uc.getY(), vp.first.getY()));
+			uc.setZ(std::max(uc.getZ(), vp.first.getZ()));
+		}
+	}
+
+	// The shape of a structure, built at the origin and serialized as a
+	// volume. The client draws it as a preview and as a thumbnail; building
+	// it at a zero origin is what lets the client work out for itself where
+	// to put the thing, since the box then says where the builder's origin
+	// sits inside it.
+	void on_request_structure_shape(const network::Packet &packet)
+	{
+		ss_ name;
+		{
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(name);
+		}
+		Build b;
+		if(!build_structure(b, name, pv::Vector3DInt32(0, 0, 0))){
+			log_w(MODULE, "C%i: no structure called \"%s\"",
+					packet.sender, cs(name));
+			return;
+		}
+		pv::Vector3DInt32 lc, uc;
+		bounds_of(b, lc, uc);
+
+		// One voxel of air around the box, which is what the mesher needs in
+		// order to draw the faces at its edge -- the same padding a chunk
+		// carries
+		const pv::Vector3DInt32 one(1, 1, 1);
+		VoxelVolume volume(pv::Region(lc - one, uc + one),
+				aggregate_format().planes);
+		const interface::VoxelSample air = mix_voxel(MIX_AIR);
+		for(int z = lc.getZ() - 1; z <= uc.getZ() + 1; z++)
+		for(int y = lc.getY() - 1; y <= uc.getY() + 1; y++)
+		for(int x = lc.getX() - 1; x <= uc.getX() + 1; x++)
+			volume.set_sample_at(x, y, z, air);
+		for(auto &vp : b.voxels)
+			volume.set_sample_at(vp.first.getX(), vp.first.getY(),
+					vp.first.getZ(), placed_voxel(vp.second));
+
+		ss_ data = interface::serialize_volume_compressed(volume);
+		log_i(MODULE, "C%i: shape of %s: " PV3I_FORMAT "..." PV3I_FORMAT
+				", %zu bytes", packet.sender, cs(name), PV3I_PARAMS(lc),
+				PV3I_PARAMS(uc), data.size());
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(name, lc, uc, data);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(packet.sender, "main:structure_shape", os.str());
+		});
+	}
+
 	void on_place_structure(const network::Packet &packet)
 	{
 		ss_ name;
@@ -2627,15 +2717,7 @@ struct Module: public interface::Module
 			ar(name, p);
 		}
 		Build b;
-		if(name == "chamber")
-			build_chamber(b, p);
-		else if(name == "cathedral")
-			build_cathedral(b, p);
-		else if(name == "bridge")
-			build_bridge(b, p);
-		else if(name == "mineshaft")
-			build_mineshaft(b, p);
-		else {
+		if(!build_structure(b, name, p)){
 			log_w(MODULE, "C%i: no structure called \"%s\"",
 					packet.sender, cs(name));
 			return;
@@ -2662,15 +2744,8 @@ struct Module: public interface::Module
 		// What it takes up, so that a client in free move can put itself
 		// somewhere the whole thing is in frame instead of the player having
 		// to fly around looking for it
-		pv::Vector3DInt32 lc = b.voxels[0].first, uc = b.voxels[0].first;
-		for(auto &vp : b.voxels){
-			lc.setX(std::min(lc.getX(), vp.first.getX()));
-			lc.setY(std::min(lc.getY(), vp.first.getY()));
-			lc.setZ(std::min(lc.getZ(), vp.first.getZ()));
-			uc.setX(std::max(uc.getX(), vp.first.getX()));
-			uc.setY(std::max(uc.getY(), vp.first.getY()));
-			uc.setZ(std::max(uc.getZ(), vp.first.getZ()));
-		}
+		pv::Vector3DInt32 lc, uc;
+		bounds_of(b, lc, uc);
 		std::ostringstream os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(os);
