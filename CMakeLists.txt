@@ -14,7 +14,7 @@ set(DEBUG_LOG_TIMING FALSE CACHE BOOL "Output log messages of interesting but fl
 # Where the cache and the user's own things live. TRUE keeps both beside the
 # program, in <buildat>/cache and <buildat>/user: what development wants, and
 # the default. FALSE puts them where the platform says, which is what an
-# installed copy wants. See local/world_persistence_plan.md.
+# installed copy wants. See doc/plan/world_persistence_plan.md.
 set(PORTABLE TRUE CACHE BOOL "Keep cache/ and user/ beside the program")
 
 #

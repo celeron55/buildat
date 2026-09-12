@@ -386,7 +386,7 @@ PathDefinition server_paths[] = {
 		"/cache/rccpp_build",
 		"/write.test",
 		"RCC++ build directory"},
-	// Saves go here; see local/world_persistence_plan.md
+	// Saves go here; see doc/plan/world_persistence_plan.md
 	{PD_WRITE, "user_path",
 		"/user",
 		"/write.test",
@@ -445,7 +445,7 @@ PathDefinition client_paths[] = {
 		"/write.test",
 		"Cache directory"},
 	// What the user made, chose or downloaded deliberately, as against what
-	// the program can recreate by itself. See local/world_persistence_plan.md;
+	// the program can recreate by itself. See doc/plan/world_persistence_plan.md;
 	// the platform paths and -DPORTABLE come with the saves.
 	{PD_WRITE, "user_path",
 		"/user",

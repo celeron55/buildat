@@ -20,6 +20,9 @@ Further reading:
 * [doc/client_commands.txt](doc/client_commands.txt)
 * [doc/luanti_client.txt](doc/luanti_client.txt) -- playing on a real Luanti server
 * [doc/luanti_module.txt](doc/luanti_module.txt) -- running a Luanti game inside buildat_server
+* [doc/plan/master_plan.md](doc/plan/master_plan.md) -- what is being built, in
+  what order, and the reasoning behind each decision. The other files in
+  `doc/plan/` are the detail it points at.
 * [doc/todo.txt](doc/todo.txt)
 
 Buildat Linux How-To

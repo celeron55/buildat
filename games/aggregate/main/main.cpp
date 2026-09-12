@@ -72,7 +72,7 @@ static const int WATER_LEVEL = 25;
 // where support ultimately comes from.
 static const int BEDROCK_TOP = -60;
 
-// This game's own cut of a voxel. See local/aggregate_game_plan.md.
+// This game's own cut of a voxel. See doc/plan/aggregate_game_plan.md.
 //
 // Two planes. The first is the engine's, and holds what the engine reads
 // plus the two numbers the simulation keeps; the second is this game's, and

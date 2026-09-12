@@ -7,7 +7,7 @@ protocol anywhere. The game logic is Luanti's; everything around it is
 buildat's. The other end of the telescope from extensions/luanti_client, which
 speaks the real protocol to a real Luanti server.
 
-The plan this is being built to is local/luanti_module_plan.md, which has the
+The plan this is being built to is doc/plan/luanti_module_plan.md, which has the
 milestones and the reasoning. What is written down here is what exists.
 
 Where the content lives
@@ -18,7 +18,7 @@ Those are buildat's own directories on purpose: nothing here reads the content
 of a real Luanti installation, and nothing here can write to one. A game is a
 directory with a game.conf; a world is a directory with a world.mt naming its
 gameid. (The user path, not the cache: a game somebody installed and a world
-they have played are things they chose. See local/world_persistence_plan.md.)
+they have played are things they chose. See doc/plan/world_persistence_plan.md.)
 
 buildat ships one Luanti game of its own, builtin/luanti/minimal_game: one
 mod, two node types and a floor made of them. It needs nothing installed and

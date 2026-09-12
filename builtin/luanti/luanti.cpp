@@ -4,7 +4,7 @@
 // A Luanti game's own Lua -- its builtin layer and a game's mods -- running
 // inside buildat_server. Luanti's network protocol is nowhere in this; the
 // game logic is Luanti's and everything around it is buildat's. See
-// doc/luanti_module.txt and local/luanti_module_plan.md.
+// doc/luanti_module.txt and doc/plan/luanti_module_plan.md.
 //
 // This file is deliberately thin. Lua 5.1 comes with io and os, so reading
 // files, splitting paths and running chunks all happen in Lua; the only
