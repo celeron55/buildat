@@ -688,14 +688,27 @@ function M.new(magic, buildat, log, options)
 	-- overhead -- so what reaches it is far less blue than what is up there.
 	local AMBIENT_DESATURATE = 0.55
 	local AMBIENT_FROM_SKY = 0.6
+	-- And a floor under it while the sun is down. The sky is the only ambient
+	-- there is on this path, and a game's night sky can be black -- VoxeLibre
+	-- paints one -- which leaves a moon shadow with nothing in it at all now
+	-- that the moon casts one. This is what is in it: the moon's own cold
+	-- colour, at little enough that what the moon lights is still brighter
+	-- than what it does not.
+	local AMBIENT_NIGHT_FLOOR = 0.015
+	local AMBIENT_NIGHT_COLOR = {0.55, 0.68, 1.0}
 
-	local function ambient_from_sky(sky)
+	-- night is 1 while the sun is down and 0 while it is up, across its own
+	-- hour at each end
+	local function ambient_from_sky(sky, night)
 		local luma = 0.2126 * sky.r + 0.7152 * sky.g + 0.0722 * sky.b
 		local k = AMBIENT_DESATURATE
-		return magic.Color(
-				(sky.r * (1 - k) + luma * k) * AMBIENT_FROM_SKY,
-				(sky.g * (1 - k) + luma * k) * AMBIENT_FROM_SKY,
-				(sky.b * (1 - k) + luma * k) * AMBIENT_FROM_SKY)
+		local floor = AMBIENT_NIGHT_FLOOR * (night or 0)
+		local function channel(v, i)
+			return math.max((v * (1 - k) + luma * k) * AMBIENT_FROM_SKY,
+					AMBIENT_NIGHT_COLOR[i] * floor)
+		end
+		return magic.Color(channel(sky.r, 1), channel(sky.g, 2),
+				channel(sky.b, 3))
 	end
 	local sun_node = nil
 	local sun_light = nil
@@ -3787,7 +3800,8 @@ function M.new(magic, buildat, log, options)
 		-- cave is only the warm rgb the torches baked in. That is the three
 		-- tints -- sun, shade, cave -- and it costs this one line.
 		if pbr then
-			zone.ambientColor = ambient_from_sky(top)
+			zone.ambientColor = ambient_from_sky(top,
+					1 - sun_amount(daylight_time))
 		end
 
 		-- What the PBR path's reflections are worth now: the cube map beside
