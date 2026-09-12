@@ -34,6 +34,10 @@ local TECHNIQUE = magic.cache:GetResource("Technique",
 -- has nothing in the tangent, so this is opt-in.
 local TECHNIQUE_MODIFIERS = magic.cache:GetResource("Technique",
 		"voxel_shading/PBRVoxelModifiers.xml")
+-- For the faces the mesher put on a chunk's "alpha" child: the same shader
+-- blended rather than cut out. See PBRVoxelAlpha.xml.
+local TECHNIQUE_ALPHA = magic.cache:GetResource("Technique",
+		"voxel_shading/PBRVoxelAlpha.xml")
 local use_modifiers = false
 
 -- How much of the sky the camera can see, per direction, as a cube of 6x6
@@ -193,8 +197,7 @@ local sky_vis_dirty = false
 -- M.set_specular_emphasis().
 local spec_emphasis = 1.0
 
-local function each_material(node, cb)
-	local cg = node:GetComponent("CustomGeometry")
+local function each_material_of(cg, cb)
 	if not cg then return end
 	local i = 0
 	while true do
@@ -203,6 +206,10 @@ local function each_material(node, cb)
 		cb(m)
 		i = i + 1
 	end
+end
+
+local function each_material(node, cb)
+	each_material_of(node:GetComponent("CustomGeometry"), cb)
 end
 
 -- Draw a node's voxel geometry with this module's shader. Called for every
@@ -216,6 +223,19 @@ function M.apply_to_node(node)
 	each_material(node, function(m)
 		m:SetTechnique(0, technique)
 	end)
+	-- The faces of the world's translucent voxels, which the mesher puts on a
+	-- child node of their own so that Urho3D sorts them against the other
+	-- chunks' translucent geometry rather than against the opaque geometry
+	-- they are mixed with. Without a technique they are invisible rather than
+	-- see-through, so a world with water in it needs this whether or not it
+	-- knows about the child.
+	local alpha_node = node:GetChild("alpha")
+	if alpha_node then
+		each_material_of(alpha_node:GetComponent("CustomGeometry"),
+				function(m)
+			m:SetTechnique(0, TECHNIQUE_ALPHA)
+		end)
+	end
 end
 
 -- Read the voxel format's surface modifiers, for a world whose format binds

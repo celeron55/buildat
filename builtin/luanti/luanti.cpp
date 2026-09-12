@@ -921,6 +921,7 @@ struct Module: public interface::Module, public luanti::Interface
 			}
 			ss_ name = table_string(L, "name");
 			bool sunlight = table_boolean(L, "sunlight");
+			bool alpha_blend = table_boolean(L, "alpha_blend");
 			bool empty = table_boolean(L, "empty");
 			bool walkable = table_boolean(L, "walkable");
 			ss_ drawtype = table_string(L, "drawtype");
@@ -1085,14 +1086,14 @@ struct Module: public interface::Module, public luanti::Interface
 						vdef.variant_of_param[p] = (uint8_t)(p % LIQUID_LEVELS);
 				}
 				n_liquid++;
-				// simplified: drawn in the opaque pass. VoxelDefinition has
-				// `translucent` and the mesher puts such faces on a child
-				// node of the chunk for Urho3D to sort -- but nothing gives
-				// that child a technique, so a blended liquid would be
-				// invisible rather than see-through. The upgrade path is a
-				// blended technique in builtin/voxel_shading and applying it
-				// to the child; see the M3 entry in the module plan.
 			}
+			// Which pass the faces go in. The mesher puts a translucent
+			// voxel's faces on a child node of the chunk and
+			// builtin/voxel_shading gives that one the blended technique.
+			//
+			// A liquid always, and anything the game asked to be blended
+			// rather than alpha masked.
+			vdef.translucent = alpha_blend || !liquid_group.empty();
 			reg->add_voxel(vdef);
 		}
 		lua_settop(L, base);
