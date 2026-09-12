@@ -612,6 +612,23 @@ function M.new(magic, buildat, log, options)
 		return up_between(time_of_day, SUN_RISE, SUN_UP, SUN_SET, SUN_DOWN)
 	end
 
+	-- Where the sun is for the purpose of casting a shadow, which is not
+	-- quite where it is. A shadow map is rasterized afresh every frame, and a
+	-- light that has turned a little between two of them rasterizes it
+	-- differently, so the edges crawl -- which is what a sun that moves as
+	-- smoothly as this one now does made visible. Holding the direction still
+	-- for a step at a time trades the crawl for a small jump, which is far
+	-- easier not to see. The step is in Luanti's own units of the day, so it
+	-- is a fixed angle of sun however fast the game's clock runs: a hundred
+	-- of them is a degree and a half, and about five seconds at Luanti's own
+	-- default speed.
+	local SUN_STEP = 100
+
+	local function stepped_time(time_of_day)
+		local t = time_of_day or 12000
+		return math.floor(t / SUN_STEP + 0.5) * SUN_STEP
+	end
+
 	-- The half hour either side of the sun crossing the horizon, at each end
 	-- of the day, as 0 outside and 1 at the crossing itself. This is the
 	-- window dawn and dusk happen in: what the sun is red in, and what the
@@ -3505,7 +3522,10 @@ function M.new(magic, buildat, log, options)
 	-- How far past white a cloud in full sun is drawn, and the band of the
 	-- game's own cloud colour over which that is given: a white cloud gets
 	-- all of it, a rain cloud none, and nothing in between jumps
-	local CLOUD_DAY_GAIN = 2.0
+	-- Enough room to come out white rather than grey, and not so much that a
+	-- cloud is as bright as the sun is: the disc is drawn at six times its
+	-- colour, and after the tone curve this lands about a tenth under it
+	local CLOUD_DAY_GAIN = 1.4
 	local CLOUD_WHITE_LOW = 0.5
 	local CLOUD_WHITE_HIGH = 0.9
 
@@ -3787,9 +3807,13 @@ function M.new(magic, buildat, log, options)
 			-- about the horizon, and one below it lights the undersides of
 			-- everything and puts the night's sparkle on the wrong side of
 			-- the sky.
-			local sx, sy, sz = sun_direction(daylight_time)
+			-- Where they are is stepped; whether they are up, how bright
+			-- and what colour is not, so nothing about the light itself
+			-- steps, only the direction the shadow is cast from
+			local sx, sy, sz = sun_direction(stepped_time(daylight_time))
+			local _, smooth_sy = sun_direction(daylight_time)
 			local through_cloud = 1 - CLOUD_DIM * cloud_cover()
-			local up = sun_amount(daylight_time) * above_horizon(sy) *
+			local up = sun_amount(daylight_time) * above_horizon(smooth_sy) *
 					through_cloud * body_is_up(sky_bodies.sun)
 			sun_node.enabled = up > 0
 			if up > 0 then
@@ -3797,8 +3821,9 @@ function M.new(magic, buildat, log, options)
 				sun_light.brightness = SUN_BRIGHTNESS * up
 				sun_light.color = sun_light_color(daylight_time)
 			end
-			local moon_up = moon_amount(daylight_time) * above_horizon(-sy) *
-					through_cloud * body_is_up(sky_bodies.moon)
+			local moon_up = moon_amount(daylight_time) *
+					above_horizon(-smooth_sy) * through_cloud *
+					body_is_up(sky_bodies.moon)
 			moon_node.enabled = moon_up > 0
 			if moon_up > 0 then
 				moon_node.direction = magic.Vector3(sx, sy, sz)
