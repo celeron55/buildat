@@ -49,10 +49,13 @@ struct Module: public interface::Module
 		EVENT_VOIDN("core:start", on_start)
 	}
 
+	// Under the user path, not the cache: a Luanti game the user installed
+	// and a world they have played are things they chose, and the cache is
+	// what the program can recreate by itself. See
+	// local/world_persistence_plan.md.
 	ss_ luanti_path()
 	{
-		ss_ rccpp = m_server->get_config().get<ss_>("rccpp_build_path");
-		return interface::fs::strip_file_name(rccpp)+"/luanti";
+		return m_server->get_config().get<ss_>("user_path")+"/luanti";
 	}
 
 	// world.mt's gameid, or "" for a directory that has no world.mt
