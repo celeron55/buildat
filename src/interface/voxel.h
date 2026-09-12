@@ -141,6 +141,19 @@ namespace interface
 		// that and still hold a mesh of its own shape inside itself. What
 		// wants to know whether a voxel is free is this flag.
 		bool fully_empty = false;
+		// Light passes through this voxel although it is something. A voxel
+		// whose edge material is EDGEMATERIALID_EMPTY already transmits
+		// light -- nothing is there -- and this is the other case: glass, a
+		// pane, a plant, anything the sky is seen through and which is still
+		// drawn.
+		//
+		// It exists because the edge material is one test doing two jobs:
+		// whether a face is drawn against this voxel, and whether light gets
+		// past it. Luanti splits them -- a glasslike node has faces and
+		// sunlight_propagates -- and this is that split, added rather than
+		// substituted so that a game that says nothing keeps the behaviour
+		// it had.
+		bool transmits_light = false;
 		// A shape of the voxel's own instead of a cube. Empty for a cube,
 		// which is what most voxels are and the fast path the voxel mesher
 		// exists for; a voxel with quads has them copied into the chunk's
@@ -278,6 +291,8 @@ namespace interface
 		EdgeMaterialId edge_material_id = EDGEMATERIALID_EMPTY;
 		bool physically_solid = false;
 		bool fully_empty = false;
+		// Copied from the definition; see VoxelDefinition::transmits_light
+		bool transmits_light = false;
 		// Copied from the definition; see VoxelDefinition::shape
 		sv_<VoxelQuad> shape;
 		bool shape_double_sided = false;

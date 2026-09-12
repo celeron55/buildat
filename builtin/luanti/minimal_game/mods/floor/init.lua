@@ -40,6 +40,21 @@ core.register_node("floor:plant", {
 	groups = {snappy = 3},
 })
 
+core.register_node("floor:glass", {
+	description = "Glass",
+	drawtype = "glasslike",
+	tiles = {"floor_glass.png"},
+	sunlight_propagates = true,
+	groups = {cracky = 3},
+})
+
+core.register_node("floor:leaves", {
+	description = "Leaves",
+	drawtype = "allfaces",
+	tiles = {"floor_leaves.png"},
+	groups = {snappy = 3},
+})
+
 local HALF = 12   -- a 25x25 floor, which is one voxelworld section across
 local Y = 0
 
@@ -58,11 +73,28 @@ for y = 1, 4 do
 	core.set_node({x = 0, y = Y + y, z = 0}, {name = "floor:marker"})
 end
 
--- A row of slabs and a row of plants along +X, beside the marker wall and
--- out of the tower's shadow, so that a screenshot shows what they are
+-- One row per drawtype the module builds, along +X beside the marker wall and
+-- out of the tower's shadow, so that a screenshot shows what each one is
 for x = 1, 6 do
 	core.set_node({x = x, y = Y + 1, z = -2}, {name = "floor:slab"})
 	core.set_node({x = x, y = Y + 1, z = -4}, {name = "floor:plant"})
+end
+
+-- A pane two high, for the faces glass draws against air and does not draw
+-- against more of itself
+for x = 1, 6 do
+	for y = 1, 2 do
+		core.set_node({x = x, y = Y + y, z = -6}, {name = "floor:glass"})
+	end
+end
+
+-- A clump, for the faces leaves draw even against their own kind
+for x = 1, 3 do
+	for y = 1, 2 do
+		for z = -9, -8 do
+			core.set_node({x = x, y = Y + y, z = z}, {name = "floor:leaves"})
+		end
+	end
 end
 
 core.log("action", "floor: placed a " .. (HALF * 2 + 1) .. "x" ..
