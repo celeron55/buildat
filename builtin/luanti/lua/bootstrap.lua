@@ -882,9 +882,9 @@ end
 -- time_speed is how many game seconds a real second is, 72 by default, which
 -- is a 20 minute day.
 --
--- simplified: not persisted yet. It belongs in the save beside the map, and
--- the save is the launcher's to open; until then a world starts at the same
--- hour every time.
+-- It is kept in the save's object store, beside the map; the module reads it
+-- before the mods load and writes it at shutdown, through the two functions
+-- at the end of this section.
 
 local time_of_day = 0.5     -- 0..1, noon
 local game_time = 0.0       -- seconds since the world was made
@@ -923,6 +923,18 @@ function core.__step(dtime)
 		time_of_day = time_of_day - 1.0
 		day_count = day_count + 1
 	end
+end
+
+-- What the module reads out of the clock and puts back into it. Three numbers
+-- rather than a table, because that is all the clock is.
+function core.__get_clock()
+	return time_of_day, game_time, day_count
+end
+
+function core.__set_clock(tod, gt, dc)
+	time_of_day = tod % 1.0
+	game_time = gt
+	day_count = dc
 end
 
 --

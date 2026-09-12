@@ -907,3 +907,28 @@ comparison of two generated ones.
 
 Riding along: `games/digger` uses the ids `add_voxel()` returns instead of
 the literals 1 to 7 with `// id 1` comments keeping them in step.
+
+## Third round, step 2: builtin/luanti keeps its world and its clock in a save -- BUILT
+
+`doc/plan/world_persistence_plan.md` step 5a. `run_game()` takes the
+`storage::Save*` instead of a world path and derives `<save>/luanti/` from
+it, so "the world is the save" is what the interface says rather than
+something the launcher has to get right. `create_world()` hands the save to
+`voxelworld` between building the registry and lighting the world. The clock
+goes into the module's own store in the save, read before the mods load --
+a mod can ask the time while it loads -- and written at `core:shutdown`.
+
+Two things it turned up:
+
+- **The module asks the world to save after flushing its node writes.**
+  `core:shutdown` reaches subscribers in module load order, so voxelworld's
+  own handler may have run already and the writes still in the buffer would
+  never land. Asking twice costs nothing now that a section is written only
+  when it changed.
+- **A check that ages the world is a check that breaks what it checks.**
+  `check_map.lua`'s clock check rolled the day forward and put only the hour
+  back, which was invisible while the clock reset every start. It is
+  relative to where the clock stands now, and puts the whole of it back.
+
+devtest: 390 node types, a 14.7 KB name table, 28 sections read back with
+none generated, and the clock down to the fourth decimal.

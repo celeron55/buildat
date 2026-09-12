@@ -60,20 +60,17 @@ be.
 
 The order of work, which is one line of it rather than parallel branches:
 
-1. **`builtin/luanti`: the world and the clock persist.** Step 5a of
-   `doc/plan/world_persistence_plan.md`. This is what step 4 was built for --
-   the module's Lua content ids are allocated while the mods load, so a save
-   that dictated the numbering would desynchronise the two halves silently.
-2. **`client_file`, items 1 to 3 of section 14.** Before M3 points it at a
+1. **`client_file`, items 1 to 3 of section 14.** Before M3 points it at a
    Luanti game's whole asset tree: serve a path-backed file from disk rather
    than from memory, announce in one packet, bunch the sends.
-3. **M3 -- it looks like the game.** The big one. Drawtypes through buildat's
+2. **M3 -- it looks like the game.** The big one. Drawtypes through buildat's
    own mesher, media, and the client resolving textures into its own atlas.
    `init.lua`'s three-way split is the largest unexamined piece of it.
-4. **M4, M5, M6, M7** after, in the module plan's own order.
+3. **M4, M5, M6, M7** after, in the module plan's own order.
 
-Step 4 of the persistence plan is done -- voxelworld's name table, format tag
-and modified flag; see `doc/plan/master_plan_history.md`.
+Steps 4 and 5a of the persistence plan are done -- voxelworld's name table,
+format tag and modified flag, and `builtin/luanti` keeping its world and its
+clock in a save. See `doc/plan/master_plan_history.md`.
 
 Two loose ends inside the module, neither blocking: the region reads are
 written in Lua and pay an `access_module()` per voxel, so the loop belongs on

@@ -870,8 +870,6 @@ What M2 settled about the shape, and what is still true of it:
   is drawn against it and light passes through it -- and Luanti splits them.
   Until the drawtypes arrive with M3, a node is transparent if it is airlike
   or `sunlight_propagates`.
-- **The clock is not persisted.** It waits on step 5a of
-  `doc/plan/world_persistence_plan.md`.
 
 ## Risks
 

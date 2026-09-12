@@ -126,9 +126,16 @@ The interface
 
     struct Interface
     {
-        virtual void run_game(const ss_ &game_path, const ss_ &world_path) = 0;
+        virtual void run_game(const ss_ &game_path, storage::Save *save) = 0;
         virtual void load_lua(const ss_ &chunk, const ss_ &chunkname) = 0;
     };
+
+The world is the save. The map, the clock and everything else the world is go
+into the save the caller opened and keeps open; a Luanti world directory is
+read for which game it wants, or imported, and is never written to.
+core.get_worldpath() is <save>/luanti/ rather than the save's own root, so
+that a mod writing through it -- which is normal, and which games depend on
+-- cannot land on save.sqlite.
 
 load_lua() is the whole extension story: a buildat module hands Lua into the
 Luanti environment and that Lua does whatever the Luanti API allows.

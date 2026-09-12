@@ -410,13 +410,27 @@ byte-identical over all 865 rows -- and, for step 4, the round trip under
 5. `builtin/luanti` uses it. Written as one step originally, which hid that
    it is one thing and three later things:
 
-   - **5a. The world and the clock persist.** `voxelworld::set_save()` from
-     the module, and the clock -- `time_of_day`, `game_time`, `day_count` --
-     into the save's object store. This is the only part that touches voxel
-     ids, and so the only part that waits for step 4: the module's Lua
-     content ids are allocated while the mods load and the `VoxelRegistry`
-     is built from them, so a save that dictated the numbering would
-     desynchronise the two halves silently.
+   - **5a. The world and the clock persist. BUILT 2026-09-13.**
+     `run_game()` takes the save rather than a world path and derives
+     `<save>/luanti/` from it, `create_world()` calls
+     `voxelworld::set_save()` between building the registry and lighting the
+     world, and the clock -- `time_of_day`, `game_time`, `day_count` -- goes
+     into the module's own store in the save, read before the mods load and
+     written at `core:shutdown`.
+
+     Two things it turned up. The module's shutdown handler asks the world
+     to save after flushing its node writes, because subscribers are called
+     in module load order and voxelworld's own handler may already have run;
+     asking twice costs nothing now that a section is written only when it
+     changed. And `check_map.lua`'s clock check had to become relative and
+     put the clock back where it found it -- it rolled the day forward, and
+     a check that ages the world by a day on every start is a check that
+     breaks the thing it is checking.
+
+     simplified: the clock is written at shutdown and not before, so a
+     server that is killed loses the day it was on. Luanti writes its own
+     every 5.3 seconds with the map; the upgrade path is to do the same,
+     once anything else here is worth a periodic checkpoint.
    - **5b. Mod storage into the object store.** The code path exists
      (`bootstrap.lua`) and writes serialized-Lua files under
      `<save>/luanti/mod_storage/`, which works; moving it into the store is
@@ -432,4 +446,5 @@ byte-identical over all 865 rows -- and, for step 4, the round trip under
    `save.sqlite`.
 6. The Luanti importer, which is its own milestone in the module plan.
 
-Step 5a is next, and it is the only part that waited for step 4.
+5b to 5d and 6 are what is left, and each waits on a milestone of the module
+plan rather than on anything here.
