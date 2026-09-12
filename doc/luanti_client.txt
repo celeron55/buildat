@@ -99,8 +99,12 @@ numbers for the same reasons.
 
 The sun is in the scene only while it is above the horizon: it fades in
 between 05:00 and 06:00 and out between 18:00 and 19:00, and the moon -- the
-same light from the other side of the sky at a tenth of it, cold, and with a
-shadow map of its own -- does the opposite.
+same light from the other side of the sky at a fiftieth of it, cold, and with
+a shadow map of its own -- does the opposite, on a day of its own that is a
+little longer than the sun's night. It is going by 04:30 and gone by 05:30,
+with the sun then half up, and does not come back until 18:30. That leaves it
+nine hours at full against the sun's twelve, which is one more way of saying
+which of the two is the dim one.
 A directional light does not know about the horizon, so one left on at night
 lights the undersides of everything, and its specular, which is the sparkle a
 surface asks for on water, on snow and on ore, is then the brightest thing in

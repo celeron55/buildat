@@ -537,10 +537,10 @@ function M.new(magic, buildat, log, options)
 
 	-- What the moon is worth, in the same units. Not a measurement of
 	-- anything -- real moonlight is a millionth of sunlight and would render
-	-- as nothing -- but a night lit from where the moon is, coldly and far
-	-- enough above the sky's own light that the moon casts a shadow and a wet
-	-- or glassy surface glints under it. A tenth of the sun.
-	local MOON_BRIGHTNESS = 5.0
+	-- as nothing -- but a night lit from where the moon is, coldly, and far
+	-- enough above the sky's own light that the moon casts a shadow. A
+	-- fiftieth of the sun.
+	local MOON_BRIGHTNESS = 1.0
 	local MOON_COLOR = {0.55, 0.68, 1.0}
 
 	-- When the sun is in the scene and when the moon is, in Luanti's
@@ -555,16 +555,54 @@ function M.new(magic, buildat, log, options)
 	local SUN_SET = 18000     -- full sun until here
 	local SUN_DOWN = 19000    -- nothing after this
 
-	local function sun_amount(time_of_day)
+	-- The moon's day is a little longer than the sun's night: it is going
+	-- before the sun arrives and does not come back until the sun is well
+	-- gone. That leaves it nine hours at full against the sun's twelve, which
+	-- is one more way of saying which of the two is the dim one, and it means
+	-- that by the time the sun is making any real light the moon has stopped.
+	local MOON_FADE_OUT = 4500   -- the moon starts going here
+	local MOON_OUT = 5500        -- and is gone here, the sun then half up
+	local MOON_FADE_IN = 18500   -- and comes back from here
+	local MOON_IN = 19500        -- to full here
+
+	-- 0 before the rise, 1 between the rise and the set, 0 after it, and the
+	-- way across each ramp in between
+	local function up_between(time_of_day, rise_from, rise_to,
+			set_from, set_to)
 		local t = (time_of_day or 12000) % 24000
-		if t <= SUN_RISE or t >= SUN_DOWN then
+		if t <= rise_from or t >= set_to then
 			return 0
-		elseif t < SUN_UP then
-			return (t - SUN_RISE) / (SUN_UP - SUN_RISE)
-		elseif t <= SUN_SET then
+		elseif t < rise_to then
+			return (t - rise_from) / (rise_to - rise_from)
+		elseif t <= set_from then
 			return 1
 		end
-		return (SUN_DOWN - t) / (SUN_DOWN - SUN_SET)
+		return (set_to - t) / (set_to - set_from)
+	end
+
+	local function sun_amount(time_of_day)
+		return up_between(time_of_day, SUN_RISE, SUN_UP, SUN_SET, SUN_DOWN)
+	end
+
+	-- What is up while the day is not: the same shape, read the other way
+	-- round, so that the four numbers above say when the moon is out rather
+	-- than being the sun's turned inside out
+	local function moon_amount(time_of_day)
+		return 1 - up_between(time_of_day, MOON_FADE_OUT, MOON_OUT,
+				MOON_FADE_IN, MOON_IN)
+	end
+
+	-- What the schedule has to hold, checked at load: the two never leave the
+	-- sky empty between them, and the moon is out of the way by the time the
+	-- sun is worth anything.
+	do
+		assert(sun_amount(12000) == 1 and moon_amount(12000) == 0, "noon")
+		assert(sun_amount(0) == 0 and moon_amount(0) == 1, "midnight")
+		assert(moon_amount(SUN_RISE) > 0.4, "the moon is still up at sunrise")
+		assert(moon_amount(MOON_OUT) == 0 and sun_amount(MOON_OUT) > 0.4,
+				"the sun has the sky to itself once the moon is gone")
+		assert(sun_amount(SUN_DOWN) == 0 and moon_amount(SUN_DOWN) > 0.4,
+				"the moon is up by the time the sun is gone")
 	end
 
 	-- What the sky is worth as a light, against that. Two numbers, because
@@ -3501,10 +3539,11 @@ function M.new(magic, buildat, log, options)
 				sun_light.brightness = SUN_BRIGHTNESS * up
 				sun_light.color = sun_light_color(daylight_time)
 			end
-			moon_node.enabled = up < 1
-			if up < 1 then
+			local moon_up = moon_amount(daylight_time)
+			moon_node.enabled = moon_up > 0
+			if moon_up > 0 then
 				moon_node.direction = magic.Vector3(sx, sy, sz)
-				moon_light.brightness = MOON_BRIGHTNESS * (1 - up)
+				moon_light.brightness = MOON_BRIGHTNESS * moon_up
 			end
 		end
 
