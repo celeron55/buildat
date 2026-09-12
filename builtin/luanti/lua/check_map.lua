@@ -11,7 +11,36 @@
 
 local CHECK_POS = {x = 1, y = 2, z = 3}
 local EMPTY_POS = {x = 5, y = 6, z = 7}
+local AREA_MIN = {x = 10, y = 10, z = 10}
+local AREA_MAX = {x = 14, y = 14, z = 14}
 local check_name = nil
+
+-- The clock is pure Lua and needs no flush, so it is checked here rather than
+-- in a file of its own
+local function check_clock()
+	local t0 = core.get_timeofday()
+	local g0 = core.get_gametime()
+	core.set_timeofday(0.25)
+	if math.abs(core.get_timeofday() - 0.25) > 1e-6 then
+		error("check_map: set_timeofday did not take")
+	end
+	-- A day is 24*60*60 game seconds, and time_speed is how many of them a
+	-- real second is, so this is a whole day whatever the speed
+	local speed = tonumber(core.settings:get("time_speed")) or 72
+	core.__step(24 * 60 * 60 / speed)
+	if math.abs(core.get_timeofday() - 0.25) > 1e-3 then
+		error("check_map: a whole day did not come back to the same hour: " ..
+				tostring(core.get_timeofday()))
+	end
+	if core.get_day_count() ~= 1 then
+		error("check_map: the day did not roll: " ..
+				tostring(core.get_day_count()))
+	end
+	if core.get_gametime() <= g0 then
+		error("check_map: game time did not advance")
+	end
+	core.set_timeofday(t0)
+end
 
 -- A node that is really in the world rather than a hole in it, so that what
 -- comes back can be told apart from what an unwritten voxel reads as
@@ -48,6 +77,16 @@ function core.__check_map_write()
 	if now.param2 ~= 3 then
 		error("check_map: param2 came back as " .. tostring(now.param2))
 	end
+	-- A 2x1x2 patch for the region reads to find, one voxel above the floor
+	-- of the box they are asked about, so that a read that ignores its
+	-- bounds shows up as the wrong count
+	for x = AREA_MIN.x + 1, AREA_MIN.x + 2 do
+		for z = AREA_MIN.z + 1, AREA_MIN.z + 2 do
+			core.set_node({x = x, y = AREA_MIN.y + 1, z = z},
+					{name = check_name})
+		end
+	end
+	check_clock()
 	return true
 end
 
@@ -68,8 +107,44 @@ function core.__check_map_read()
 	if raw_id ~= id then
 		error("check_map: content id " .. id .. " came back as " .. raw_id)
 	end
+
+	-- The region reads, over what the write half put there
+	local found, counts = core.find_nodes_in_area(AREA_MIN, AREA_MAX,
+			{check_name})
+	if #found ~= 4 then
+		error("check_map: find_nodes_in_area found " .. #found ..
+				" of a patch of 4")
+	end
+	if counts[check_name] ~= 4 then
+		error("check_map: the counts say " .. tostring(counts[check_name]))
+	end
+	for _, p in ipairs(found) do
+		if p.y ~= AREA_MIN.y + 1 then
+			error("check_map: a position came back at y=" .. p.y)
+		end
+	end
+	local near = core.find_node_near(AREA_MIN, 4, {check_name})
+	if not near then
+		error("check_map: find_node_near found nothing")
+	end
+	if math.abs(near.x - (AREA_MIN.x + 1)) > 1 or
+			math.abs(near.z - (AREA_MIN.z + 1)) > 1 then
+		error("check_map: find_node_near came back with a far one")
+	end
+	-- Nothing matches a name that is not there
+	local none = core.find_nodes_in_area(AREA_MIN, AREA_MAX, {"air"})
+	if #none ~= 0 then
+		error("check_map: found " .. #none .. " air in a void world")
+	end
+
 	core.set_node(CHECK_POS, {name = "air"})
-	core.log("verbose", "check_map: " .. check_name .. " survived the flush")
+	for x = AREA_MIN.x + 1, AREA_MIN.x + 2 do
+		for z = AREA_MIN.z + 1, AREA_MIN.z + 2 do
+			core.set_node({x = x, y = AREA_MIN.y + 1, z = z}, {name = "air"})
+		end
+	end
+	core.log("verbose", "check_map: " .. check_name ..
+			" survived the flush, and the region reads found it")
 end
 
 -- vim: set noet ts=4 sw=4:

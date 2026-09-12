@@ -743,6 +743,188 @@ function core.get_node_light(pos, timeofday)
 	return day > night and day or night
 end
 
+-- The region reads: the same seam over a box instead of a voxel.
+--
+-- simplified: a voxel at a time through the same two C functions, so a big
+-- box is a lot of small reads. The upgrade path is one C call that reads a
+-- region out of voxelworld, which is what VoxelManip wants anyway; the
+-- shapes of these functions do not change when it arrives.
+
+local function name_matcher(nodenames)
+	if type(nodenames) == "string" then
+		nodenames = {nodenames}
+	end
+	local plain = {}
+	local groups = {}
+	for _, n in ipairs(nodenames) do
+		local g = string.match(n, "^group:(.*)$")
+		if g then
+			groups[#groups + 1] = g
+		else
+			plain[n] = true
+		end
+	end
+	return function(name)
+		if plain[name] then
+			return true
+		end
+		for _, g in ipairs(groups) do
+			if core.get_item_group(name, g) ~= 0 then
+				return true
+			end
+		end
+		return false
+	end
+end
+
+-- Luanti sorts by distance and returns the nearest; search_center adds pos
+-- itself as the first thing looked at
+function core.find_node_near(pos, radius, nodenames, search_center)
+	local matches = name_matcher(nodenames)
+	local x, y, z = to_pos(pos)
+	if search_center then
+		local id = __get_node(x, y, z)
+		if matches(core.get_name_from_content_id(id)) then
+			return {x = x, y = y, z = z}
+		end
+	end
+	-- Shells outwards, so the first hit is the nearest one
+	for r = 1, radius do
+		for dx = -r, r do
+			for dy = -r, r do
+				for dz = -r, r do
+					if math.max(math.abs(dx), math.abs(dy), math.abs(dz)) == r then
+						local id = __get_node(x + dx, y + dy, z + dz)
+						if matches(core.get_name_from_content_id(id)) then
+							return {x = x + dx, y = y + dy, z = z + dz}
+						end
+					end
+				end
+			end
+		end
+	end
+	return nil
+end
+
+-- Returns positions, counts -- or a table of name to positions when grouped
+function core.find_nodes_in_area(minp, maxp, nodenames, grouped)
+	local matches = name_matcher(nodenames)
+	local x0, y0, z0 = to_pos(minp)
+	local x1, y1, z1 = to_pos(maxp)
+	if x1 < x0 or y1 < y0 or z1 < z0 then
+		return grouped and {} or {}, {}
+	end
+	local positions = {}
+	local counts = {}
+	local by_name = {}
+	for z = z0, z1 do
+		for y = y0, y1 do
+			for x = x0, x1 do
+				local id = __get_node(x, y, z)
+				local name = core.get_name_from_content_id(id)
+				if matches(name) then
+					local p = {x = x, y = y, z = z}
+					if grouped then
+						local list = by_name[name]
+						if not list then
+							list = {}
+							by_name[name] = list
+						end
+						list[#list + 1] = p
+					else
+						positions[#positions + 1] = p
+						counts[name] = (counts[name] or 0) + 1
+					end
+				end
+			end
+		end
+	end
+	if grouped then
+		-- Luanti gives an empty list for every name that was asked for
+		if type(nodenames) == "string" then
+			nodenames = {nodenames}
+		end
+		for _, n in ipairs(nodenames) do
+			if by_name[n] == nil and not string.match(n, "^group:") then
+				by_name[n] = {}
+			end
+		end
+		return by_name
+	end
+	return positions, counts
+end
+
+function core.find_nodes_in_area_under_air(minp, maxp, nodenames)
+	local matches = name_matcher(nodenames)
+	local x0, y0, z0 = to_pos(minp)
+	local x1, y1, z1 = to_pos(maxp)
+	local positions = {}
+	for z = z0, z1 do
+		for x = x0, x1 do
+			-- Downwards, so the node above is the one just looked at
+			local above_name = nil
+			for y = y1, y0, -1 do
+				local name = core.get_name_from_content_id(__get_node(x, y, z))
+				if above_name == "air" and matches(name) then
+					positions[#positions + 1] = {x = x, y = y, z = z}
+				end
+				above_name = name
+			end
+		end
+	end
+	return positions
+end
+
+--
+-- The clock
+--
+-- Luanti's own, stepped with the environment rather than read off the wall:
+-- time_speed is how many game seconds a real second is, 72 by default, which
+-- is a 20 minute day.
+--
+-- simplified: not persisted yet. It belongs in the save beside the map, and
+-- the save is the launcher's to open; until then a world starts at the same
+-- hour every time.
+
+local time_of_day = 0.5     -- 0..1, noon
+local game_time = 0.0       -- seconds since the world was made
+local day_count = 0
+
+function core.get_timeofday()
+	return time_of_day
+end
+
+function core.set_timeofday(new_time)
+	if type(new_time) ~= "number" then
+		error("set_timeofday(): not a number: " .. tostring(new_time))
+	end
+	time_of_day = new_time % 1.0
+end
+
+core.set_time_of_day = core.set_timeofday
+
+function core.get_gametime()
+	return math.floor(game_time)
+end
+
+function core.get_day_count()
+	return day_count
+end
+
+-- One Luanti step. The module calls this at Luanti's own rate rather than
+-- buildat's, because a mod's globalstep dtime and core.after's resolution are
+-- written against dedicated_server_step.
+function core.__step(dtime)
+	game_time = game_time + dtime
+	local speed = tonumber(core.settings:get("time_speed")) or 72
+	local day_seconds = 24 * 60 * 60
+	time_of_day = time_of_day + dtime * speed / day_seconds
+	while time_of_day >= 1.0 do
+		time_of_day = time_of_day - 1.0
+		day_count = day_count + 1
+	end
+end
+
 --
 -- The classes a mod builds while it loads: ItemStack and the generators
 --
