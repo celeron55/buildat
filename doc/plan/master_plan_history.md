@@ -932,3 +932,52 @@ Two things it turned up:
 
 devtest: 390 node types, a 14.7 KB name table, 28 sections read back with
 none generated, and the clock down to the fourth decimal.
+
+## 14. client_file, for a Luanti-sized media set -- items 1, 2, 3 and 5 BUILT
+
+`builtin/luanti` M3 is the first thing that points `client_file` at somebody
+else's asset tree, and the sizes are not the ones it was written for.
+Measured: devtest is 425 files and 652 KB, which is nothing; a real game is
+hundreds of megabytes -- 572 MB for one server, 155 and 95 for two others, in
+this machine's own `cache/luanti_media`. Luanti serves VoxeLibre to a room
+full of players without trouble, so the target was **parity with what Luanti
+already does**, not invention, and the four things it did that `client_file`
+did not were read out of its `src/server.cpp`.
+
+1. **A path-backed file is read from disk when it is sent.**
+   `add_file_path()` used to read the whole file into `FileInfo::content` and
+   keep it for the life of the server -- while also storing the path it had
+   just read it from. It now keeps the hash and the path, which is what
+   Luanti's `m_media` holds, and the bytes are read in `on_request_files`.
+   The difference between a 572 MB game costing 572 MB of resident memory and
+   costing none of it.
+2. **One announce packet instead of one per file.** `core:announce_files`
+   carries every name and hash, the way `TOCLIENT_ANNOUNCE_MEDIA` does; a few
+   thousand packets at connect become one. The client answers with one
+   `core:request_files` naming everything it does not have cached.
+3. **The sends are bunched**, to 5000 bytes a packet -- Luanti's own number,
+   and `sendRequestedMedia` says why: too many packets on one side,
+   over-large split packets on the other. devtest's files average 1.5 KB, so
+   most of them were smaller than the overhead carrying them. A file bigger
+   than a bunch goes on its own, whole.
+5. **The file watch is behind `watch_client_files`, off by default**, with
+   `-w` to turn it on. It is an inotify watch per directory and it is what
+   makes a game's client Lua editable while a client is running, which is
+   worth having while developing and is not something a production server
+   wants at all.
+
+`core:request_file` and `core:file_content` are gone, and so is
+`update_file_content()` on the interface, which nothing called: there is one
+request packet and one content packet now, and `add_file_content()` already
+replaced a file by name.
+
+The server no longer hashes what it reads off disk before sending it. The
+client checks the hash anyway -- it has to, since a file can change between
+the announce and the request -- and hashing every file again on every request
+is what a large game would have paid for the courtesy.
+
+The check is a run: the minimal Luanti game with the client's `cache/remote`
+emptied announces 19 files in one packet, the client asks for all 19 in one
+packet, and they arrive; connecting again reports 19 of 19 cached and asks
+for nothing. devtest announces 404 files in one packet. The floor and the
+marker are on screen either way.

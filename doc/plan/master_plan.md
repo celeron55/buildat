@@ -31,8 +31,8 @@ The documents:
   game honours: undersampling, vsync, the frame limiter, MSAA, and the sound
   volume and mute. Includes how a preference reaches a viewport a game made
   itself.
-- Section 14 of this file -- what `builtin/client_file` needs before it can
-  serve a Luanti game's media set.
+- Section 14 of this file -- the one thing `builtin/client_file` still wants
+  before it is level with Luanti: compression.
 - `doc/plan/master_plan_history.md` -- the steps this file has finished,
   kept for the reasoning rather than the diff.
 
@@ -60,17 +60,16 @@ be.
 
 The order of work, which is one line of it rather than parallel branches:
 
-1. **`client_file`, items 1 to 3 of section 14.** Before M3 points it at a
-   Luanti game's whole asset tree: serve a path-backed file from disk rather
-   than from memory, announce in one packet, bunch the sends.
-2. **M3 -- it looks like the game.** The big one. Drawtypes through buildat's
+1. **M3 -- it looks like the game.** The big one. Drawtypes through buildat's
    own mesher, media, and the client resolving textures into its own atlas.
    `init.lua`'s three-way split is the largest unexamined piece of it.
-3. **M4, M5, M6, M7** after, in the module plan's own order.
+2. **M4, M5, M6, M7** after, in the module plan's own order.
 
-Steps 4 and 5a of the persistence plan are done -- voxelworld's name table,
-format tag and modified flag, and `builtin/luanti` keeping its world and its
-clock in a save. See `doc/plan/master_plan_history.md`.
+Done since this list was written, all in `doc/plan/master_plan_history.md`:
+steps 4 and 5a of the persistence plan -- voxelworld's name table, format tag
+and modified flag, and `builtin/luanti` keeping its world and its clock in a
+save -- and items 1, 2, 3 and 5 of section 14, which is what `client_file`
+needed before M3 points it at a Luanti game's whole asset tree.
 
 Two loose ends inside the module, neither blocking: the region reads are
 written in Lua and pay an `access_module()` per voxel, so the loop belongs on
@@ -146,54 +145,16 @@ own:
   aggregate or in digger, but the fault was always intermittent and a harness
   is not proof. Section 4b of the history has the diagnosis.
 
-## 14. client_file, for a Luanti-sized media set (2026-09-12) -- PLANNED
+## 14. client_file, for a Luanti-sized media set -- one item left
 
-`builtin/luanti` M3 is the first thing that points `client_file` at somebody
-else's asset tree, and the sizes are not the ones it was written for.
-Measured: devtest is 425 files and 652 KB, which is nothing; a real game is
-hundreds of megabytes -- 572 MB for one server, 155 and 95 for two others, in
-this machine's own `cache/luanti_media`. Luanti serves VoxeLibre to a room
-full of players without trouble, so the target here is **parity with what
-Luanti already does**, not invention. Read out of `src/server.cpp`, it does
-four things `client_file` does not.
-
-Needed by M3:
-
-1. **Serve a path-backed file from disk instead of from memory.**
-   `add_file_path()` reads the whole file into `FileInfo::content` and keeps
-   it for the life of the server -- while also storing the path it just read
-   it from. Luanti's `m_media` holds path and sha1 and calls
-   `fs::ReadFile(m.path, ...)` at send time. About five lines in
-   `on_request_file`, and it is the difference between a 572 MB game costing
-   572 MB of resident memory and costing nothing. A file added by content
-   (`add_file_content`, which is what the module's generated node colours
-   use) has no path and keeps its bytes, correctly.
-2. **One announce packet instead of one per file.** Connect currently sends a
-   `core:announce_file` per file; Luanti sends a single
-   `TOCLIENT_ANNOUNCE_MEDIA` carrying a count and then every name and sha1.
-   A few thousand packets become one. A format change on both sides.
-3. **Bunch the sends.** One packet per file today. Luanti packs to about 5 KB
-   per bunch and says why in `sendRequestedMedia`: too many packets on one
-   side, over-large split packets on the other. devtest's files average 1.5
-   KB, so most of them are smaller than the overhead carrying them. Only
-   worth doing after 1 and 2.
-
-Wanted later, and not optional in the long run:
+Items 1, 2, 3 and 5 are built; see `doc/plan/master_plan_history.md`. What is
+left is the one that was never about size:
 
 4. **Compress the payload.** Luanti does it for protocol 48 and up. The gain
    on PNG and OGG is small -- they are compressed already -- and it is real
    on models and translation files. The reason to do it anyway is that
    buildat will be compared with Luanti, and missing a feature this basic is
    not defendable. zlib and zstd are already bound.
-
-And one that is not about size:
-
-5. **The file watch goes behind a setting that defaults to off.**
-   `add_file_path()` registers an inotify watch on every file's directory, so
-   that editing a game's client Lua updates a running client. That is worth
-   having while developing and it is what the feature is for -- but it does
-   not scale to a large game, and it is not something a production server
-   wants at all. A setting, off by default, on for development.
 
 **Not changed: the gate.** `client_file:files_transmitted` fires only when a
 client has everything, and games wait on it before showing the world. Luanti
