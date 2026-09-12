@@ -1,29 +1,22 @@
 # Plan: client preferences
 
-Written 2026-09-12. **Built 2026-09-12** on branch `client-preferences`, in
-the four steps at the end. What follows is the plan as it was written; the
-notes below say where the build differs from it.
+**Built 2026-09-12** on branch `client-preferences`. Nothing here is open
+except the screen that sets them, which is a bonus item in
+`doc/plan/master_plan.md`. What the file is for now is the fence it was built
+around and the list of what deliberately stays out, both of which govern
+whatever gets added next.
 
-**What the build settled, and what it did not:**
+Three things about the build that are not obvious from the plan below:
 
-- The UI sprite won. `BorderImage` on the UI root at priority -10000,
+- **The UI sprite won.** A `BorderImage` on the UI root at priority -10000,
   disabled so it takes no input, sized in UI coordinates rather than window
   pixels because the UI scale has already divided those down. No second
   viewport was needed.
-- `user_path` arrived here rather than with the saves, because
-  `preferences.json` has to live somewhere and `cache_path/window.json` was
-  the wrong place. Only the path itself: it defaults to `<root>/user` beside
-  `<root>/cache`, with `-D` to override. `-DPORTABLE` and the platform paths
-  are still `doc/plan/world_persistence_plan.md` step 1, and nothing has been
-  moved out of the cache yet.
-- The file is read through the same parser as `-o`, so the range checks are
-  written once. A missing field keeps its default; a field that is present
-  and out of range drops the whole set back to the defaults and says so.
-- `-o` and `-c` both stop the file being written, the way `-w` already did.
-  Nothing that came from the command line is remembered.
-- Not migrated: a `cache/window.json` from before this is not read, so the
-  remembered window size is picked afresh once.
-- `max_fps` defaults to 200, which is Urho3D's own desktop default, so
+- **The saved file is read through the same parser as `-o`**, so the range
+  checks are written once. A missing field keeps its default; a field that is
+  present and out of range drops the whole set back to the defaults and says
+  so.
+- **`max_fps` defaults to 200**, which is Urho3D's own desktop default, so
   leaving it alone changes nothing.
 
 Preferences the user sets once and every game honours, whatever it is:
@@ -333,23 +326,6 @@ Collected because each one is a way this can go wrong quietly:
 - **The launch menu's own 3D scene** -- `extensions/__menu` is the one place
   where opting out is probably right, and with a cooperative call opting out
   is simply not calling it.
-
-## Order
-
-1. The preference fields, the `preferences.json` round trip, the `-o`
-   parse, the `-c` rule, and the self-check. No rendering change yet:
-   `vsync`, `max_fps`, `multisampling`, `sound_volume` and `sound_mute`
-   become settable, and the sandbox wrapper starts refusing `"Master"`.
-   That is a whole, testable step, and it is the one that delivers the
-   sound preferences complete.
-2. `set_preferred_viewports()` and `get_preferred_render_scale()`: the C
-   functions, the sandbox wrappers, the offscreen texture, the UI sprite,
-   the 1.0 bypass, resize handling.
-3. Convert the eleven games and `extensions/luanti_client`, one line each,
-   and look at all of them at 0.5 and at 1.0.
-4. Docs: `doc/client_api.txt` for the two calls, for what "preferred" means,
-   and for what happens to a game that does not use them, `doc/client_commands.txt` for the `-c` rule,
-   `README.md` for `-o`, and the `preferences.json` line.
 
 Not in this plan: the screen that sets any of it. See "Bonuses" in
 `doc/plan/master_plan.md`.

@@ -1,10 +1,12 @@
 # Plan: saves, paths and an object store
 
-Written 2026-09-12. **Steps 1 to 3 built 2026-09-12** on branch `saves`.
-Steps 4 and 5 belong to `builtin/luanti`. What follows is the plan as it was
-written; the notes below say where the build differs from it.
+Steps 1 to 3 are built (2026-09-12, branch `saves`): the paths, the sqlite
+object store, and `voxelworld` reading its sections back. `games/digger`
+keeps its world in `user/games/digger/saves/world`. Step 4 -- what a save
+says about its voxels -- is the next piece of work in the third round, and
+steps 5 and 6 belong to `builtin/luanti`.
 
-**What the build settled:**
+**How it ended up working, where that is not obvious from the plan below:**
 
 - **A row per chunk, not per section.** A section is the load and unload
   unit, but a chunk is what a scene node holds and what
@@ -12,18 +14,18 @@ written; the notes below say where the build differs from it.
   no container format had to be invented for the eight of them. The key is
   still `(world, position)`: `"<world>/<cx>,<cy>,<cz>"`. A section loads all
   or nothing -- one missing chunk and the section is generated instead,
-  because generation is by section.
+  because generation is by section, and that is also why the modified flag in
+  step 4 is per section.
 - **`core:shutdown`.** There was no event for "the server is going away":
-  `core:unload` is a module-reload thing and nothing else reached the
-  modules after the main loop ended. It is emitted synchronously from
-  `src/server/main.cpp`, before the module threads stop, and it is what
-  gets the last sections written.
+  `core:unload` is a module-reload thing and nothing else reached the modules
+  after the main loop ended. It is emitted synchronously from
+  `src/server/main.cpp`, before the module threads stop, and it is what gets
+  the last sections written.
 - **The region's sections are created on the first tick**, not in
   `CInstance`'s constructor. A game needs one `core:start` to create the
   world, register its voxels and call `set_save()` in, in that order, and a
   section that comes out of a save must not be generated -- so nothing may
-  load before the game has said whether there is a save. Checked against
-  every voxel game; none of them noticed.
+  load before the game has said whether there is a save.
 - **sqlite is compiled into `buildat_core`**, as an object library rather
   than a static one. A static archive would have been dropped at link time,
   since nothing in buildat_core itself calls sqlite; the whole point is that
@@ -33,24 +35,6 @@ written; the notes below say where the build differs from it.
 - **`valid_name()` is on the interface**, because a save name becomes a
   directory name and that is a trust boundary. `remove()` only ever deletes
   under the one saves directory, and only a name that passed.
-- *simplified:* every chunk of a section is written when the section is
-  saved, changed or not; the upgrade path is a modified flag per section.
-- *simplified:* a voxel type the game registered that the save does not have
-  is dropped rather than appended when the saved registry is read back; the
-  upgrade path is a merge that keeps the saved ids and numbers new types
-  after them.
-- **`games/digger` is the one game with a save**, in
-  `user/games/digger/saves/world`. The check that it works: digger generated
-  108 sections into a save, a second run loaded all of them and generated
-  none, and the two saves came out byte-identical over all 865 rows.
-
-`voxelworld` does not persist anything. `load_section()` is two TODOs --
-"if found on disk, load nodes from there" -- and always calls
-`create_section()`; `Section::save_enabled` is declared and never read. Every
-world is regenerated on every run. `builtin/luanti` is what finally makes
-that untenable, since a Luanti game expects its world and its mods' data to
-still be there next time, but the feature belongs to the engine and every
-game gets it.
 
 ## What a save is
 
@@ -367,22 +351,14 @@ game.
 
 ## Order
 
-1. `user_path` in the config, the platform paths, `-DPORTABLE`, and moving
-   the three small things out of the cache. **DONE**, half of it on
-   `client-preferences` (the client's `user_path`, because
-   `preferences.json` had to live somewhere) and half here. `luanti/` and
-   `network_addresses.csv` moved; `luanti_media/`, `rccpp_build/`,
-   `remote/` and `tmp/` stayed. The check: an assert-based
-   self-check of the path selection -- portable against system, each
-   platform's environment variables present and absent, and `-D`/`-C`
-   overriding both.
-2. **DONE.** `3rdparty/sqlite` and `builtin/storage`: the save split, the store, one
-   table, WAL, `batch()`. Its check is a round trip -- create, write in a
-   batch, close, open, read back, list, remove -- which is small enough to
-   be an assert-based self-check in the module.
-3. **DONE.** `voxelworld` saving and loading sections, plus the registry. Checked by
-   the sample games: generate a world, save, restart, and the same world is
-   there.
+**1 to 3 are done** -- the paths and `-DPORTABLE`, the vendored sqlite and
+`builtin/storage`, and `voxelworld` saving and loading sections. Each left a
+check behind: an assert-based self-check of the path selection (the XDG
+variables present, absent and empty, and `-C`/`-D` winning over both), a
+round trip in `builtin/storage` over an in-memory database, and digger
+generating 108 sections into a save which a second run loaded without
+generating any -- the two saves byte-identical over all 865 rows.
+
 4. **The name table, the format tag and the modified flag.** What "What a
    save says about its voxels" describes: the save stores names and the
    running game owns the numbering, each chunk is tagged with the format it
