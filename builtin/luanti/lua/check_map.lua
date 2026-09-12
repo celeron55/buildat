@@ -91,6 +91,10 @@ function core.__check_map_write()
 		for z = AREA_MIN.z + 1, AREA_MIN.z + 2 do
 			core.set_node({x = x, y = AREA_MIN.y + 1, z = z},
 					{name = check_name})
+			-- Air above it, so that find_nodes_in_area_under_air has
+			-- something to be right about. The void reads as ignore, not as
+			-- air, so without this it would be right by finding nothing.
+			core.set_node({x = x, y = AREA_MIN.y + 2, z = z}, {name = "air"})
 		end
 	end
 	check_clock()
@@ -139,9 +143,30 @@ function core.__check_map_read()
 		error("check_map: find_node_near came back with a far one")
 	end
 	-- Nothing matches a name that is not there
-	local none = core.find_nodes_in_area(AREA_MIN, AREA_MAX, {"air"})
+	local none = core.find_nodes_in_area(AREA_MIN, AREA_MAX,
+			{"check_map:nothing"})
 	if #none ~= 0 then
-		error("check_map: found " .. #none .. " air in a void world")
+		error("check_map: found " .. #none .. " of a node that does not exist")
+	end
+	-- Every one of the patch is under one of the air voxels above it, and
+	-- this is the read whose indexing runs down a column rather than along
+	-- the array
+	local under = core.find_nodes_in_area_under_air(AREA_MIN, AREA_MAX,
+			{check_name})
+	if #under ~= 4 then
+		error("check_map: find_nodes_in_area_under_air found " .. #under ..
+				" of a patch of 4")
+	end
+	for _, p in ipairs(under) do
+		if p.y ~= AREA_MIN.y + 1 then
+			error("check_map: under_air came back at y=" .. p.y)
+		end
+	end
+	-- The air above it is not under air itself
+	local air_under = core.find_nodes_in_area_under_air(AREA_MIN, AREA_MAX,
+			{"air"})
+	if #air_under ~= 0 then
+		error("check_map: " .. #air_under .. " air voxels are under air")
 	end
 
 	core.set_node(CHECK_POS, {name = "air"})
