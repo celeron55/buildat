@@ -933,7 +933,7 @@ Two things it turned up:
 devtest: 390 node types, a 14.7 KB name table, 28 sections read back with
 none generated, and the clock down to the fourth decimal.
 
-## 14. client_file, for a Luanti-sized media set -- items 1, 2, 3 and 5 BUILT
+## 14. client_file, for a Luanti-sized media set -- BUILT
 
 `builtin/luanti` M3 is the first thing that points `client_file` at somebody
 else's asset tree, and the sizes are not the ones it was written for.
@@ -965,6 +965,17 @@ did not were read out of its `src/server.cpp`.
    makes a game's client Lua editable while a client is running, which is
    worth having while developing and is not something a production server
    wants at all.
+
+4. **The payload is compressed**, with a flag byte saying whether it is:
+   zstd on incompressible data is larger than the data, so the server sends
+   whichever of the two is smaller and says which it sent. Trying costs one
+   pass over the bytes. It covers the announce packet too, which is a few
+   thousand names and twenty-byte hashes and compresses well.
+
+   Measured on devtest, whose media is mostly PNG and therefore the case the
+   plan expected least from: 546 files, 290460 bytes over the wire for
+   409188 of content. 29 per cent, on the half of a game's media that is not
+   already compressed.
 
 `core:request_file` and `core:file_content` are gone, and so is
 `update_file_content()` on the interface, which nothing called: there is one

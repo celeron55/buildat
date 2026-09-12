@@ -31,8 +31,8 @@ The documents:
   game honours: undersampling, vsync, the frame limiter, MSAA, and the sound
   volume and mute. Includes how a preference reaches a viewport a game made
   itself.
-- Section 14 of this file -- the one thing `builtin/client_file` still wants
-  before it is level with Luanti: compression.
+- Section 14 of this file -- what `builtin/client_file` needed before it
+  could carry a Luanti game's media set. Finished.
 - `doc/plan/master_plan_history.md` -- the steps this file has finished,
   kept for the reasoning rather than the diff.
 
@@ -166,21 +166,9 @@ own:
   aggregate or in digger, but the fault was always intermittent and a harness
   is not proof. Section 4b of the history has the diagnosis.
 
-## 14. client_file, for a Luanti-sized media set -- one item left
+## 14. client_file, for a Luanti-sized media set -- DONE
 
-Items 1, 2, 3 and 5 are built; see `doc/plan/master_plan_history.md`. What is
-left is the one that was never about size:
-
-4. **Compress the payload.** Luanti does it for protocol 48 and up. The gain
-   on PNG and OGG is small -- they are compressed already -- and it is real
-   on models and translation files. The reason to do it anyway is that
-   buildat will be compared with Luanti, and missing a feature this basic is
-   not defendable. zlib and zstd are already bound.
-
-**Not changed: the gate.** `client_file:files_transmitted` fires only when a
-client has everything, and games wait on it before showing the world. Luanti
-gates too -- its "Media..." progress bar is the same wait -- so this is not
-where buildat is behind.
+All five items are built; see `doc/plan/master_plan_history.md`.
 
 ## Bonuses, for when everything else is stalled or done
 

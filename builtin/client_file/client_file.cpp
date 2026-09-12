@@ -8,6 +8,7 @@
 #include "interface/sha1.h"
 #include "interface/file_watch.h"
 #include "interface/fs.h"
+#include "interface/compress.h"
 #include "interface/thread.h"
 #include "interface/select_handler.h"
 #include "client_file/api.h"
@@ -41,6 +42,31 @@ struct FileInfo {
 // this goes on its own, whole.
 static const size_t FILE_BUNCH_SIZE = 5000;
 
+// A packet body, compressed when that is worth doing.
+//
+// The gain on a game's media is small -- PNG and OGG are compressed already
+// -- and it is real on models, translation files and the announce packet,
+// which is a few thousand names and hashes. Luanti compresses for protocol
+// 48 and up and buildat is compared with it, so this is not a feature to be
+// without.
+//
+// A flag byte says which it is, because zstd on incompressible data is
+// larger than the data: the smaller of the two is sent and the client is
+// told which it got. Trying costs one pass over the bytes and saves a game's
+// worth of bandwidth on the half of it that does compress.
+static const char PACKET_PLAIN = 0;
+static const char PACKET_ZSTD = 1;
+
+static ss_ pack_packet(const ss_ &body)
+{
+	std::ostringstream os(std::ios::binary);
+	interface::compress_zstd(body, os);
+	ss_ compressed = os.str();
+	if(compressed.size() + 1 >= body.size() + 1)
+		return ss_(1, PACKET_PLAIN) + body;
+	return ss_(1, PACKET_ZSTD) + compressed;
+}
+
 static bool read_whole_file(const ss_ &path, ss_ &content_out)
 {
 	std::ifstream f(path, std::ios::binary);
@@ -72,6 +98,10 @@ struct Module: public interface::Module, public client_file::Interface
 	interface::Server *m_server;
 	sm_<ss_, sp_<FileInfo>> m_files;
 	sp_<interface::FileWatch> m_watch;
+	// What one request's worth of bunches cost, for the log line that says
+	// whether compressing them was worth it
+	size_t m_bytes_sent = 0;
+	size_t m_bytes_raw = 0;
 	up_<interface::Thread> m_thread;
 
 	Module(interface::Server *server):
@@ -186,8 +216,9 @@ struct Module: public interface::Module, public client_file::Interface
 			cereal::PortableBinaryOutputArchive ar(os);
 			ar(files);
 		}
+		const ss_ packet = pack_packet(os.str());
 		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, "core:announce_files", os.str());
+			inetwork->send(peer, "core:announce_files", packet);
 		});
 	}
 
@@ -219,8 +250,12 @@ struct Module: public interface::Module, public client_file::Interface
 			cereal::PortableBinaryOutputArchive ar(os);
 			ar(bunch);
 		}
+		const ss_ body = os.str();
+		const ss_ packet = pack_packet(body);
+		m_bytes_sent += packet.size();
+		m_bytes_raw += body.size();
 		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, "core:file_contents", os.str());
+			inetwork->send(peer, "core:file_contents", packet);
 		});
 	}
 
@@ -277,6 +312,11 @@ struct Module: public interface::Module, public client_file::Interface
 			}
 		}
 		send_bunch(packet.sender, bunch);
+		log_v(MODULE, "%zu files to peer %zu: %zu bytes over the wire for "
+				"%zu of content", requested.size(), packet.sender,
+				m_bytes_sent, m_bytes_raw);
+		m_bytes_sent = 0;
+		m_bytes_raw = 0;
 	}
 
 	void on_all_files_transferred(const network::Packet &packet)

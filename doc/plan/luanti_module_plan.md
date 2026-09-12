@@ -278,11 +278,10 @@ game through `load_lua()` is not in Luanti's contract and can pick whatever
 strategy it likes for its own content.
 
 What it costs is on the transport rather than here, and `client_file` wanted
-four things before it could carry a game's whole asset tree. Three of them
-are built -- a file is read from disk when it is sent, the announce is one
-packet, and the sends are bunched; `doc/plan/master_plan_history.md` has what
-each turned out to be. The fourth, compression, is `doc/plan/master_plan.md`
-section 14.
+four things before it could carry a game's whole asset tree: a file read
+from disk when it is sent, one announce packet, bunched sends, and a
+compressed payload. All four are built;
+`doc/plan/master_plan_history.md` section 14 has what each turned out to be.
 
 ### What the extension actually is (read 2026-09-12)
 
