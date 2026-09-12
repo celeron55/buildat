@@ -211,8 +211,9 @@ region write that overwrites where `merge_volume()` refuses to -- **when the
 mapgen seam is written and can measure them**, and not before.
 
 The reason for waiting is that nothing is blocked without them: a loop inside
-one `access()` does the same work, and what a region call adds is a constant
-factor -- one clip per chunk rather than a `container_coord`, a section lookup
+one `access()` does the same work -- which is what
+`__luanti_get_region()` in this module now is -- and what a region call adds
+is a constant factor -- one clip per chunk rather than a `container_coord`, a section lookup
 and a buffer lookup per voxel. That factor is invisible at `set_node` scale
 and is the whole point at mapgen scale, where a section is 64^3 = 262,144
 voxels. Adding the API before there is something to measure it against would
@@ -857,15 +858,6 @@ What M2 settled about the shape, and what is still true of it:
 
 ## Simplified, and the upgrade path
 
-- **The region reads are written in Lua** over the two C functions, so a
-  5x5x5 box is **125 separate `access_module()` calls** -- 125 module-lock
-  acquisitions and 125 lock-hierarchy validations. The commit each one pays
-  on the way out is nearly free, because `commit_chunk_buffer` early-outs on
-  `!dirty` (`voxelworld.cpp:1877`) and `update_skylight()` returns at once
-  with an empty seed list. **So the cost is the Lua boundary, not
-  voxelworld**, and the fix is to move the loop to the C side inside one
-  `access()`: a change in this module, no engine change, 125 lock
-  acquisitions down to one. The next thing to do to those three functions.
 - **`EDGEMATERIALID_EMPTY` is one test doing two jobs** in buildat -- a face
   is drawn against it and light passes through it -- and Luanti splits them.
   Until the drawtypes arrive with M3, a node is transparent if it is airlike

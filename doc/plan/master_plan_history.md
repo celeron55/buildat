@@ -981,3 +981,24 @@ emptied announces 19 files in one packet, the client asks for all 19 in one
 packet, and they arrive; connecting again reports 19 of 19 cached and asks
 for nothing. devtest announces 404 files in one packet. The floor and the
 marker are on screen either way.
+
+## Third round, step 4: the Luanti module's region reads cross the boundary once -- BUILT
+
+`find_node_near`, `find_nodes_in_area` and `find_nodes_in_area_under_air`
+were written in Lua over the per-voxel `__luanti_get_node`, so a 5x5x5 box
+was 125 `access_module()` calls -- a module lock acquired and the lock
+hierarchy validated 125 times. The work inside `voxelworld` was nearly free
+by comparison: the commit each one paid for on the way out early-outs with
+nothing dirty. So the cost was the Lua boundary, and the fix was a
+`__luanti_get_region()` that reads the box inside one `access()` and hands
+Lua a flat array of content ids, x fastest.
+
+Only the ids: what asks for a box asks what is in it, and a table three times
+the size would be three times the garbage. The pending write buffer goes over
+the top of what `voxelworld` answered, which is the order `read_node()`
+already read in. The volume is capped at Luanti's own 4096000.
+
+`check_map.lua` grew the case that was missing: air written above the patch,
+so that `find_nodes_in_area_under_air` -- the one whose indexing runs down a
+column rather than along the array -- has something to be right about. In a
+void world it was right by finding nothing.

@@ -617,6 +617,7 @@ stub("serialize_schematic", nil)
 
 local __set_node = __luanti_set_node
 local __get_node = __luanti_get_node
+local __get_region = __luanti_get_region
 
 local function to_pos(pos)
 	-- Luanti rounds, it does not truncate: -0.4 is 0 and not 0
@@ -777,16 +778,43 @@ local function name_matcher(nodenames)
 	end
 end
 
+-- The box read the three functions below share: one engine call rather than
+-- one per voxel, since a read that crosses the Lua boundary costs a module
+-- lock and its hierarchy validated, and the work inside voxelworld is nearly
+-- free by comparison. The array is x fastest and then y and then z.
+--
+-- The name lookup is cached per content id, because a box is usually a
+-- handful of distinct nodes however large it is.
+local function region_names(x0, y0, z0, x1, y1, z1)
+	local ids = __get_region(x0, y0, z0, x1, y1, z1)
+	local names = {}
+	local name_of = {}
+	for i = 1, #ids do
+		local id = ids[i]
+		local name = name_of[id]
+		if name == nil then
+			name = core.get_name_from_content_id(id)
+			name_of[id] = name
+		end
+		names[i] = name
+	end
+	return names
+end
+
 -- Luanti sorts by distance and returns the nearest; search_center adds pos
 -- itself as the first thing looked at
 function core.find_node_near(pos, radius, nodenames, search_center)
 	local matches = name_matcher(nodenames)
 	local x, y, z = to_pos(pos)
-	if search_center then
-		local id = __get_node(x, y, z)
-		if matches(core.get_name_from_content_id(id)) then
-			return {x = x, y = y, z = z}
-		end
+	local names = region_names(x - radius, y - radius, z - radius,
+			x + radius, y + radius, z + radius)
+	local w = radius * 2 + 1
+	local function at(dx, dy, dz)
+		return names[(dx + radius) + (dy + radius) * w +
+				(dz + radius) * w * w + 1]
+	end
+	if search_center and matches(at(0, 0, 0)) then
+		return {x = x, y = y, z = z}
 	end
 	-- Shells outwards, so the first hit is the nearest one
 	for r = 1, radius do
@@ -794,8 +822,7 @@ function core.find_node_near(pos, radius, nodenames, search_center)
 			for dy = -r, r do
 				for dz = -r, r do
 					if math.max(math.abs(dx), math.abs(dy), math.abs(dz)) == r then
-						local id = __get_node(x + dx, y + dy, z + dz)
-						if matches(core.get_name_from_content_id(id)) then
+						if matches(at(dx, dy, dz)) then
 							return {x = x + dx, y = y + dy, z = z + dz}
 						end
 					end
@@ -817,11 +844,13 @@ function core.find_nodes_in_area(minp, maxp, nodenames, grouped)
 	local positions = {}
 	local counts = {}
 	local by_name = {}
+	local names = region_names(x0, y0, z0, x1, y1, z1)
+	local i = 0
 	for z = z0, z1 do
 		for y = y0, y1 do
 			for x = x0, x1 do
-				local id = __get_node(x, y, z)
-				local name = core.get_name_from_content_id(id)
+				i = i + 1
+				local name = names[i]
 				if matches(name) then
 					local p = {x = x, y = y, z = z}
 					if grouped then
@@ -859,12 +888,19 @@ function core.find_nodes_in_area_under_air(minp, maxp, nodenames)
 	local x0, y0, z0 = to_pos(minp)
 	local x1, y1, z1 = to_pos(maxp)
 	local positions = {}
+	if x1 < x0 or y1 < y0 or z1 < z0 then
+		return positions
+	end
+	local names = region_names(x0, y0, z0, x1, y1, z1)
+	local w = x1 - x0 + 1
+	local h = y1 - y0 + 1
 	for z = z0, z1 do
 		for x = x0, x1 do
 			-- Downwards, so the node above is the one just looked at
 			local above_name = nil
 			for y = y1, y0, -1 do
-				local name = core.get_name_from_content_id(__get_node(x, y, z))
+				local name = names[(x - x0) + (y - y0) * w +
+						(z - z0) * w * h + 1]
 				if above_name == "air" and matches(name) then
 					positions[#positions + 1] = {x = x, y = y, z = z}
 				end

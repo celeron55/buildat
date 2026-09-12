@@ -425,11 +425,9 @@ struct Module: public interface::Module, public luanti::Interface
 		m_node_writes[pos_key(x, y, z)] = node;
 	}
 
-	// simplified: a read that misses the buffer takes one voxelworld
-	// access(), which commits on the way out. commit() is cheap with nothing
-	// dirty, but it is not free, and a mod that reads a region a voxel at a
-	// time pays it per voxel. The upgrade path is the region read
-	// find_nodes_in_area wants anyway.
+	// A read that misses the buffer takes one voxelworld access(), which
+	// commits on the way out. commit() is cheap with nothing dirty, but it
+	// is not free; what reads a box reads it with read_region() below.
 	uint32_t read_node(int32_t x, int32_t y, int32_t z)
 	{
 		auto it = m_node_writes.find(pos_key(x, y, z));
@@ -442,6 +440,53 @@ struct Module: public interface::Module, public luanti::Interface
 			word = world->get_voxel(pv::Vector3DInt32(x, y, z), true).data;
 		});
 		return word;
+	}
+
+	// Luanti's own cap on how much map a call may look at in one go
+	// (MAX_WORKING_VOLUME). A mod asking for more than this has made a
+	// mistake, and quietly building a table of that many numbers is not the
+	// way to tell it so.
+	static const size_t MAX_REGION_VOXELS = 4096000;
+
+	// A box of voxel words in one access(), x fastest and then y and then z.
+	//
+	// This is what the region reads are for. Written a voxel at a time in
+	// Lua they took one access_module() each -- a module lock acquired and
+	// the lock hierarchy validated per voxel, 125 of them for a 5x5x5 box --
+	// and the work inside voxelworld was nearly free by comparison, since
+	// the commit on the way out early-outs with nothing dirty.
+	void read_region(int32_t x0, int32_t y0, int32_t z0,
+			int32_t x1, int32_t y1, int32_t z1, sv_<uint32_t> &out)
+	{
+		size_t w = (size_t)(x1 - x0 + 1);
+		size_t h = (size_t)(y1 - y0 + 1);
+		size_t d = (size_t)(z1 - z0 + 1);
+		out.assign(w * h * d, 0);
+		if(!m_scene)
+			return;
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
+			size_t i = 0;
+			for(int32_t z = z0; z <= z1; z++){
+				for(int32_t y = y0; y <= y1; y++){
+					for(int32_t x = x0; x <= x1; x++){
+						out[i++] = world->get_voxel(
+								pv::Vector3DInt32(x, y, z), true).data;
+					}
+				}
+			}
+		});
+		// What has been written and not flushed is not in voxelworld yet, so
+		// it goes over the top -- the same order read_node() reads in. The
+		// buffer is emptied every Luanti step, so sweeping it is cheaper
+		// than a lookup per voxel of the box.
+		for(const auto &pair : m_node_writes){
+			const PendingNode &n = pair.second;
+			if(n.x < x0 || n.x > x1 || n.y < y0 || n.y > y1 ||
+					n.z < z0 || n.z > z1)
+				continue;
+			out[(size_t)(n.x - x0) + (size_t)(n.y - y0) * w +
+					(size_t)(n.z - z0) * w * h] = n.word;
+		}
 	}
 
 	// Lua
@@ -735,6 +780,40 @@ struct Module: public interface::Module, public luanti::Interface
 		return 3;
 	}
 
+	// get_region(x0, y0, z0, x1, y1, z1) -> a flat array of content ids, x
+	// fastest and then y and then z. Only the ids: what asks for a box asks
+	// what is in it, and a table three times the size would be three times
+	// the garbage.
+	static int l_get_region(lua_State *L)
+	{
+		Module *self = module_of(L);
+		int32_t x0 = luaL_checkinteger(L, 1);
+		int32_t y0 = luaL_checkinteger(L, 2);
+		int32_t z0 = luaL_checkinteger(L, 3);
+		int32_t x1 = luaL_checkinteger(L, 4);
+		int32_t y1 = luaL_checkinteger(L, 5);
+		int32_t z1 = luaL_checkinteger(L, 6);
+		if(x1 < x0 || y1 < y0 || z1 < z0){
+			lua_newtable(L);
+			return 1;
+		}
+		double volume = (double)(x1 - x0 + 1) * (double)(y1 - y0 + 1) *
+				(double)(z1 - z0 + 1);
+		if(volume > (double)MAX_REGION_VOXELS){
+			return luaL_error(L, "get_region(): %.0f voxels is more than the "
+					"%d this reads at once", volume, (int)MAX_REGION_VOXELS);
+		}
+		sv_<uint32_t> words;
+		self->read_region(x0, y0, z0, x1, y1, z1, words);
+		const interface::VoxelFormat f = interface::VoxelFormat::luanti();
+		lua_createtable(L, (int)words.size(), 0);
+		for(size_t i = 0; i < words.size(); i++){
+			lua_pushinteger(L, (lua_Integer)f.id.get(words[i]));
+			lua_rawseti(L, -2, (int)i + 1);
+		}
+		return 1;
+	}
+
 	// Interface
 
 	void run_game(const ss_ &game_path, storage::Save *save)
@@ -768,6 +847,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_encode_png", l_encode_png);
 		set_global_cfunction("__luanti_set_node", l_set_node);
 		set_global_cfunction("__luanti_get_node", l_get_node);
+		set_global_cfunction("__luanti_get_region", l_get_region);
 		lua_pushlightuserdata(m_lua, (void*)this);
 		lua_setfield(m_lua, LUA_REGISTRYINDEX, "__luanti_module");
 		set_global_string("__luanti_module_path", module_path());

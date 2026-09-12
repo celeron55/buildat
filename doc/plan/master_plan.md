@@ -71,11 +71,9 @@ and modified flag, and `builtin/luanti` keeping its world and its clock in a
 save -- and items 1, 2, 3 and 5 of section 14, which is what `client_file`
 needed before M3 points it at a Luanti game's whole asset tree.
 
-Two loose ends inside the module, neither blocking: the region reads are
-written in Lua and pay an `access_module()` per voxel, so the loop belongs on
-the C side inside one `access()`; and the mapgen seam is where `voxelworld`'s
-region calls get decided, deferred until there is something to measure them
-against.
+One loose end inside the module, not blocking: the mapgen seam is where
+`voxelworld`'s own region calls get decided, deferred until there is
+something to measure them against. See "The region calls" in the module plan.
 
 ## Maintenance -- do this daily
 
