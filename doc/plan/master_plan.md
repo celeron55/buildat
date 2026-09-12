@@ -64,13 +64,24 @@ The order of work, which is one line of it rather than parallel branches:
    media is served and a node whose tile is a plain shipped file name wears
    it (279 of devtest's 390 node types); `nodebox`, `plantlike`,
    `plantlike_rooted` and the liquids are built as shapes through buildat's
-   own mesher (129 of 390, 83 of them liquids); and `glasslike` and
-   `allfaces` are drawn at all now
-   that "light gets past this" is a flag of its own rather than the edge
-   material (another 40). What is left is
-   the texture modifiers, the rest of the drawtypes, palettes, and the client
+   own mesher (129 of 390, 83 of them liquids); `glasslike` and `allfaces`
+   are drawn at all now that "light gets past this" is a flag of its own
+   rather than the edge material (another 40); and a liquid is blended,
+   which is a technique `builtin/voxel_shading` was missing for the child
+   node the mesher has always put translucent faces on. What is left is the
+   texture modifiers, the rest of the drawtypes, palettes, and the client
    fork -- whose `init.lua` three-way split is the largest unexamined piece
    of the milestone. The module plan's M3 entry has the order.
+
+   **The texture modifiers are blocked on an open question**, and they are
+   112 of devtest's 390 node types: a module's client Lua runs in the
+   sandbox and `buildat.compose_image` is not in it, so the module cannot
+   compose a tile the way `extensions/luanti_client` does -- and the plan
+   has already ruled out the module leaning on an extension. What of the
+   image and cache-path primitives belongs in the sandbox, and under what
+   confinement, is a trust-boundary decision; the three shapes it could take
+   are written out under "OPEN: what a module's client half is allowed to
+   do" in `doc/plan/luanti_module_plan.md`.
 2. **M4, M5, M6, M7** after, in the module plan's own order.
 
 Done since this list was written, all in `doc/plan/master_plan_history.md`:
