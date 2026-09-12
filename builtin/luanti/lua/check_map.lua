@@ -49,6 +49,29 @@ local function check_clock()
 	end
 end
 
+-- core.after, which is a mod's way of doing something later and is the thing
+-- every timer in a game is built on. It is a globalstep of the vendored
+-- builtin's own, so what this checks is the whole path: a step runs the
+-- registered globalsteps, after.lua's queue is one of them, and the callback
+-- comes back with the arguments it was given.
+--
+-- Nothing is registered here that outlives the check: after.lua's globalstep
+-- is already there and this only puts one job in its queue.
+local function check_after()
+	local fired, got = false, nil
+	core.after(0.05, function(a) fired, got = true, a end, "argument")
+	if fired then
+		error("check_map: core.after fired before a step")
+	end
+	core.__step(0.1)
+	if not fired then
+		error("check_map: core.after did not fire in a step")
+	end
+	if got ~= "argument" then
+		error("check_map: core.after lost its argument: " .. tostring(got))
+	end
+end
+
 -- A node that is really in the world rather than a hole in it, so that what
 -- comes back can be told apart from what an unwritten voxel reads as
 local function pick_node()
@@ -98,6 +121,7 @@ function core.__check_map_write()
 		end
 	end
 	check_clock()
+	check_after()
 	return true
 end
 

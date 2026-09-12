@@ -699,6 +699,36 @@ for _, name in ipairs(STUBS_NIL) do
 	stub(name, nil)
 end
 
+-- The ones Luanti always answers with a list, whether or not there is
+-- anything in it. A stub that says nil instead takes its caller down the
+-- moment it writes the ipairs() every one of these is written for: devtest's
+-- testhud does it in a globalstep, twelve times a second, and the error is
+-- in the mod rather than anywhere that says what is really missing.
+--
+-- A fresh table each call, because a caller may keep or add to what it is
+-- given and the next caller should not see that.
+local function stub_list(name)
+	core[name] = function()
+		if not stub_warned[name] then
+			stub_warned[name] = true
+			core.log("warning", "core." .. name .. "() is a stub")
+		end
+		return {}
+	end
+end
+
+for _, name in ipairs({
+	"get_connected_players", "get_objects_inside_radius",
+	"get_objects_in_area", "find_nodes_with_meta",
+}) do
+	stub_list(name)
+end
+
+-- And the two that are tables rather than functions: indexing a function is
+-- an error, so stubbing these as one would break a mod that only looks
+core.object_refs = {}
+core.luaentities = {}
+
 -- The few whose nil would take a caller down where an empty one will not
 -- The mapgen registrations are recorded rather than stubbed: the terrain is
 -- a milestone away, and when it arrives this is the data it wants. The
@@ -1195,7 +1225,36 @@ end
 -- One Luanti step. The module calls this at Luanti's own rate rather than
 -- buildat's, because a mod's globalstep dtime and core.after's resolution are
 -- written against dedicated_server_step.
+-- The globalsteps a mod registered, run once per Luanti step.
+--
+-- core.after is one of them: the vendored builtin/common/after.lua keeps its
+-- queue in a globalstep of its own, so this is what makes core.after fire at
+-- all -- and what every mod that does anything on a timer is written around.
+--
+-- A callback that errors is logged and the rest still run, where Luanti
+-- stops the server. One mod's bad frame should not stop the clock or the
+-- other mods here: the module already treats a failed step as a warning
+-- rather than the end, and this is the same posture one level down.
+local function run_globalsteps(dtime)
+	local callbacks = core.registered_globalsteps
+	if callbacks == nil then
+		return
+	end
+	for i = 1, #callbacks do
+		local callback = callbacks[i]
+		local origin = core.callback_origins and core.callback_origins[callback]
+		if origin then
+			core.set_last_run_mod(origin.mod)
+		end
+		local ok, err = pcall(callback, dtime)
+		if not ok then
+			core.log("error", "globalstep: " .. tostring(err))
+		end
+	end
+end
+
 function core.__step(dtime)
+	run_globalsteps(dtime)
 	game_time = game_time + dtime
 	local speed = tonumber(core.settings:get("time_speed")) or 72
 	local day_seconds = 24 * 60 * 60

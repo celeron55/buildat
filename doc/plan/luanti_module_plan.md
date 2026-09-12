@@ -795,8 +795,30 @@ two things M1 disproved about the build, are in
   afterwards and a check for one has to be where the node is registered --
   and `node_dig` reads a node's metadata whenever the def has an
   `after_dig_node`, whether or not anything ever wrote any.
-- **M5 -- it lives.** ABMs, LBMs, entities, `core.after`. Success is
-  `testabms` and `testentities` behaving.
+- **M5 -- it lives. The globalsteps and `core.after` run (2026-09-13).**
+  ABMs, LBMs, entities, `core.after`. Success is `testabms` and
+  `testentities` behaving.
+
+  **Built:** a Luanti step runs the registered globalsteps. `core.after` is
+  one of them -- the vendored `builtin/common/after.lua` keeps its queue in a
+  globalstep of its own -- so that is what makes it fire at all, and it is
+  what every mod that does anything on a timer is written around. A callback
+  that errors is logged and the rest still run, where Luanti stops the
+  server: one mod's bad frame should not stop the clock, which is the posture
+  the module already takes one level up.
+
+  Turning them on made devtest's `testhud` throw twelve times a second,
+  which was the honest thing to find: `core.get_connected_players()` was a
+  stub answering nil where Luanti always answers a list, so the `ipairs()`
+  every caller writes blew up, and the error named the mod rather than what
+  was really missing. The stubs that Luanti documents as always returning a
+  list return an empty one now, and `object_refs` and `luaentities` are
+  tables rather than functions, because indexing a function is an error and
+  a mod that only looks should not be broken by a stub.
+
+  **What is left:** ABMs and LBMs, which are timers over the map and can be
+  written on the globalsteps that now run; entities, which are what a dig's
+  drops need before they go anywhere; and the client half.
 - **M6 -- the launcher.** `games/luanti_launcher` as described.
 - **M7 -- an existing Luanti world opens.** The importer: read a Luanti world
   directory -- `map.sqlite`, `map_meta.txt`, `env_meta.txt`, the player and
