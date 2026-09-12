@@ -295,6 +295,13 @@ PathDefinition client_paths[] = {
 		"/cache",
 		"/write.test",
 		"Cache directory"},
+	// What the user made, chose or downloaded deliberately, as against what
+	// the program can recreate by itself. See local/world_persistence_plan.md;
+	// the platform paths and -DPORTABLE come with the saves.
+	{PD_WRITE, "user_path",
+		"/user",
+		"/write.test",
+		"User directory"},
 	{PD_END, "", "", "", ""},
 };
 
