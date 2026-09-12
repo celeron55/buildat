@@ -87,11 +87,24 @@ shader dims the cube map by: the mouth of a tunnel reflects sky while its walls
 do not. The counter line says what it has found straight up and over how many
 blocks of voxels, which is the quickest way to see it is working at all.
 
-The ambient on this path is the sky's own colour rather than the colour of
-sunlight, and the shader's ambient is that times how much sky the vertex sees
-plus the lamp light baked into the vertex colour. That alone is three tints:
-open ground blue-white, under an overhang the same blue but dimmer, a cave
-only the warm light of its torches.
+The frame is rendered in HDR and tone mapped, which is what lets the sun be
+the sun: in a frame that clips at one, a sun strong enough to put a real
+shadow on the ground flattens every lit surface to white, and one weak enough
+not to do that has neither a visible colour nor a visible shadow. With the
+curve in, the sun is about fifty times the sky -- roughly what it is -- so a
+lit surface takes the sun's own warm colour instead of a mixture with the
+sky's, and the same curve lifts the shadows, so a shadow under full skylight
+reads as shade rather than as a hole. games/voxel_lighting arrived at the same
+numbers for the same reasons.
+
+The ambient on this path is the sky rather than the colour of sunlight, and
+the shader's ambient is that times how much sky the vertex sees plus the lamp
+light baked into the vertex colour. That alone is three tints: open ground
+blue-white, under an overhang the same blue but dimmer, a cave only the warm
+light of its torches. The sky is desaturated and dimmed on the way in, because
+the colour a game gives is the colour of the zenith and a surface sees the
+whole dome -- the pale band along the horizon and the glare around the sun as
+much as the blue overhead.
 
 The sun is a real directional light with a shadow map, and what keeps it from
 lighting the world twice is the light curve. Node lighting on this path is
