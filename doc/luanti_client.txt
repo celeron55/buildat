@@ -108,6 +108,14 @@ sky's, and the same curve lifts the shadows, so a shadow under full skylight
 reads as shade rather than as a hole. games/voxel_lighting arrived at the same
 numbers for the same reasons.
 
+Where the sun and the moon are for the purpose of casting a shadow is stepped
+rather than smooth -- a degree and a half of sun at a time, about five seconds
+at Luanti's own clock speed. A shadow map is rasterized afresh every frame and
+a light that has turned between two of them rasterizes it differently, so the
+edges crawl; holding the direction still for a step at a time trades that for
+a small jump, which is much easier not to see. Only the direction is stepped:
+whether a body is up, how bright it is and what colour it is all stay smooth.
+
 The sun is in the scene only while it is above the horizon: it fades in
 between 05:00 and 06:00 and out between 18:00 and 19:00, and the moon -- the
 same light from the other side of the sky at a fiftieth of it, cold, and with
@@ -823,6 +831,12 @@ takes rather than constants, so a game that turns the sun off or asks for ten
 thousand stars gets that. What is not drawn is the textures a game can give
 the sun and the moon, or the cloud height and speed: the shader draws a
 square of its own colour and one layer of cloud at its own height.
+
+The stars are one per cell of a grid laid on the faces of a cube around the
+viewer -- which keeps a cell about the same size wherever it points, where a
+grid over a plane overhead crowds them at the horizon -- and that cube turns
+with the day, about the axis the sun goes round and by the same angle, which
+is what Luanti turns its own star mesh by. So they rise and set.
 
 What is next
 ------------
