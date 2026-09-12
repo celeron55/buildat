@@ -22,6 +22,14 @@ Config::Config()
 	set_default("network_port", "29500");
 
 	set_default("skip_compiling_modules", json::object());
+
+	// Whether client_file watches the files it serves and pushes an updated
+	// one to connected clients. That is what makes a game's client Lua
+	// editable while a client is running, and it is what the feature is for
+	// -- but it is an inotify watch per directory, which does not scale to a
+	// game whose media is a few hundred megabytes, and it is not something a
+	// production server wants at all. On for development, off otherwise.
+	set_default("watch_client_files", false);
 }
 
 bool Config::check_paths()

@@ -56,7 +56,7 @@ int main(int argc, char *argv[])
 
 	std::string module_path;
 
-	const char opts[100] = "hm:r:i:S:D:U:c:l:L:C:A:P:";
+	const char opts[100] = "hm:r:i:S:D:U:c:l:L:C:A:P:w";
 	const char usagefmt[1000] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
@@ -72,6 +72,8 @@ int main(int argc, char *argv[])
 			"  -C [module_name]     Skip compiling specified module\n"
 			"  -A [address]         Set listening address (default any4)\n"
 			"  -P [port]            Set network port (default 29500)\n"
+			"  -w                   Watch served files and push changes to\n"
+			"                       connected clients (for development)\n"
 			;
 
 	int c;
@@ -117,6 +119,9 @@ int main(int argc, char *argv[])
 		case 'P':
 			log_i(MODULE, "config.network_port: %s", c55_optarg);
 			config.set("network_port", c55_optarg);
+			break;
+		case 'w':
+			config.set("watch_client_files", true);
 			break;
 		case 'l':
 			log_set_max_level(atoi(c55_optarg));
