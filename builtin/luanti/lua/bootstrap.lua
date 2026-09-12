@@ -448,6 +448,10 @@ function core.__voxel_defs()
 			-- How many of the eight levels this liquid actually spends; a
 			-- shorter range puts them all at the top of the voxel
 			liquid_range = (def and def.liquid_range) or 8,
+			-- A rooted plant's plant, which is special_tiles[1]: the node's
+			-- own tiles are the cube it is rooted in
+			overlay_tile = (drawtype == "plantlike_rooted") and
+					tile_name_of((def and def.special_tiles or {})[1]) or nil,
 		}
 	end
 	return out

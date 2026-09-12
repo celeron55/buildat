@@ -579,8 +579,9 @@ two things M1 disproved about the build, are in
   390 node types wear their real tiles. The other 111 keep the generated flat
   colour, and which 111 is the measurement that sizes what is left:
 
-  **Three drawtypes are built as shapes:** `nodebox` of type `fixed`,
-  `plantlike`, and the liquids -- `VoxelQuad`s the server puts in the
+  **Four drawtypes are built as shapes:** `nodebox` of type `fixed`,
+  `plantlike`, `plantlike_rooted` and the liquids -- `VoxelQuad`s the
+  server puts in the
   definition, the first thing in this tree to build one. A box's faces show
   the part of the node's texture they cover, the way Luanti's `makeCuboid`
   does, so a slab is not a whole texture squeezed into half a voxel.
@@ -595,7 +596,14 @@ two things M1 disproved about the build, are in
   the first is the surface, the second the sides, and `tiles` is what the
   item looks like in a hand.
 
-  devtest: 122 of 390 node types have a shape, 83 of them liquids.
+  `plantlike_rooted` is the one whose shape is drawn *as well as* its cube
+  faces rather than instead of them: the cube is ground the cube path draws,
+  and the plant stands in the voxel above it wearing the first of the
+  definition's `extra_textures`, which is `special_tiles[1]`. It is lit by
+  the voxel it stands in and not by the ground it is rooted in -- which is
+  what `shape_lit_from_above` was built for, and had no user until now.
+
+  devtest: 129 of 390 node types have a shape, 83 of them liquids.
 
   **And four more are built as cubes that are drawn differently**, which is
   what they are: `glasslike` and its framed variants get an edge material of
@@ -631,7 +639,6 @@ two things M1 disproved about the build, are in
     framed glass and panes, which are alpha-masked now where the game meant
     them to be seen through.
   - **The rest of the drawtypes.** By what devtest has of them:
-    `plantlike_rooted` (7), which is `shape_lit_from_above` exactly;
     `glasslike_framed`'s frame (5, drawn as a plain cube for now);
     `torchlike` (3), `signlike` (3), `raillike` (1), `firelike` (1),
     `fencelike` (1); and the node box kinds that are not `fixed` --
