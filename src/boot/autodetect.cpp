@@ -45,7 +45,18 @@ static bool check_runnable(const ss_ &command)
 	if(m_valid_commands.count(command))
 		return true;
 
-	int exit_status = interface::process::shell_exec(command);
+	// Probing a path that does not exist is the normal case -- the compiler
+	// is looked for in a couple of places before PATH -- so neither the
+	// shell's complaint about it nor the version banner of the one that
+	// works is news. Only the shell_exec() on Linux runs the command through
+	// a shell; the Windows one hands it to CreateProcess, where a redirection
+	// would be an argument to the program instead.
+#ifndef _WIN32
+	ss_ run = command + " >/dev/null 2>&1";
+#else
+	ss_ run = command;
+#endif
+	int exit_status = interface::process::shell_exec(run);
 	if(exit_status != 0){
 		log_d(MODULE, "Command failed: [%s]", cs(command));
 		return false;
@@ -263,8 +274,14 @@ static bool detect_compiler_bin_paths(core::Config &config)
 {
 	sv_<ss_> roots;
 	generate_compiler_binary_dir_alternatives(roots);
-	return detect_paths(config, roots, compiler_bin_paths,
-			"Compiler binary directory");
+	if(!detect_paths(config, roots, compiler_bin_paths,
+			"Compiler binary directory"))
+		return false;
+	// Said out loud because the probe is silent now, and which compiler is
+	// going to build the runtime-compiled modules is worth knowing
+	log_i(MODULE, "Compiler command: [%s]",
+			cs(config.get<ss_>("compiler_command")));
+	return true;
 }
 
 // Client-only paths
