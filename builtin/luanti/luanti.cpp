@@ -213,6 +213,43 @@ static void turn_quads(const sv_<interface::VoxelQuad> &in, uint8_t d,
 	}
 }
 
+// One point turned a quarter at a time in the plane of two of its axes, and
+// the same by an arbitrary angle. Irrlicht's rotateXZBy and friends, which is
+// all Luanti's own node shapes turn by.
+static void turn_quarters(float v[3], int ia, int ib, int quarters)
+{
+	static const float SIN[4] = {0, 1, 0, -1};
+	static const float COS[4] = {1, 0, -1, 0};
+	const int i = ((quarters % 4) + 4) % 4;
+	const float a = v[ia], b = v[ib];
+	v[ia] = COS[i] * a - SIN[i] * b;
+	v[ib] = SIN[i] * a + COS[i] * b;
+}
+
+static void turn_degrees(float v[3], int ia, int ib, float deg)
+{
+	// Not M_PI: the module compile has Urho3D's own M_PI in scope
+	const float r = deg * 3.14159265358979323846f / 180.0f;
+	const float s = std::sin(r), c = std::cos(r);
+	const float a = v[ia], b = v[ib];
+	v[ia] = c * a - s * b;
+	v[ib] = s * a + c * b;
+}
+
+// How far the single quad of a sign or a torch is turned for each wall
+// direction, in quarters. It starts against +X; Luanti's drawSignlikeNode
+// and drawTorchlikeNode.
+static int wall_quad_turn(size_t wall)
+{
+	switch(wall){
+	case 2: return 0;
+	case 3: return 2;
+	case 4: return 1;
+	case 5: return -1;
+	default: return 0;
+	}
+}
+
 // A wallmounted direction is a facedir too; Luanti's own
 // wallmounted_to_facedir[]. 6 and 7 are the two spare states, which are
 // the ceiling and the floor turned a quarter.
@@ -911,6 +948,83 @@ struct Module: public interface::Module, public luanti::Interface
 		quad(-r, r, r, -r);
 	}
 
+	// One quad lying flat against the surface it is mounted on, which is what
+	// a sign is: Luanti's drawSignlikeNode. It starts against the +X wall and
+	// is turned to whichever wall the wallmounted direction names.
+	static void add_sign_quads(sv_<interface::VoxelQuad> &out, float scale,
+			size_t wall)
+	{
+		const float size = 0.5f * scale;
+		const float off = 0.5f - 1.0f / 16.0f;
+		float p[4][3] = {
+			{off, size, size}, {off, size, -size},
+			{off, -size, -size}, {off, -size, size},
+		};
+		for(size_t c = 0; c < 4; c++){
+			if(wall == 0)
+				turn_quarters(p[c], 0, 1, 1);       // Ceiling
+			else if(wall == 1)
+				turn_quarters(p[c], 0, 1, -1);      // Floor
+			else
+				turn_quarters(p[c], 0, 2, wall_quad_turn(wall));
+		}
+		push_quad(out, p, 0);
+	}
+
+	// One quad hanging off the wall at an angle, which is what a torch is:
+	// Luanti's drawTorchlikeNode. The tile is the definition's second for a
+	// ceiling and its third for a wall, as Luanti picks them.
+	static void add_torch_quads(sv_<interface::VoxelQuad> &out, float scale,
+			size_t wall)
+	{
+		const float size = 0.5f * scale;
+		uint8_t tile = 0;
+		float p[4][3] = {
+			{-size, size, 0}, {size, size, 0},
+			{size, -size, 0}, {-size, -size, 0},
+		};
+		for(size_t c = 0; c < 4; c++){
+			if(wall == 0 || wall == 6){             // Ceiling
+				tile = 1;
+				p[c][1] += 0.5f - size;
+				turn_degrees(p[c], 0, 2, wall == 0 ? -45.0f : 45.0f);
+			} else if(wall == 1 || wall == 7){      // Floor
+				p[c][1] += size - 0.5f;
+				turn_degrees(p[c], 0, 2, wall == 1 ? 45.0f : -45.0f);
+			} else {
+				tile = 2;
+				p[c][0] += 0.5f - size;
+				turn_quarters(p[c], 0, 2, wall_quad_turn(wall));
+			}
+		}
+		push_quad(out, p, tile);
+	}
+
+	static void add_wall_quads(const ss_ &kind,
+			sv_<interface::VoxelQuad> &out, float scale, size_t wall)
+	{
+		if(kind == "torchlike")
+			add_torch_quads(out, scale, wall);
+		else
+			add_sign_quads(out, scale, wall);
+	}
+
+	// Four corners and a tile, with the texture filling the quad
+	static void push_quad(sv_<interface::VoxelQuad> &out, const float p[4][3],
+			uint8_t tile)
+	{
+		static const float UV[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+		interface::VoxelQuad q;
+		for(size_t i = 0; i < 4; i++){
+			for(size_t j = 0; j < 3; j++)
+				q.p[i][j] = p[i][j];
+			q.uv[i][0] = UV[i][0];
+			q.uv[i][1] = UV[i][1];
+		}
+		q.tile = tile;
+		out.push_back(q);
+	}
+
 	// Asserts what add_box_quads() and add_plant_quads() build, because the
 	// winding is what makes the normal and a quad wound the wrong way is
 	// invisible rather than wrong-looking. Runs once, from run_game().
@@ -1040,6 +1154,31 @@ struct Module: public interface::Module, public luanti::Interface
 		assert(facing_variant_count("") == 0);
 		assert(facing_variant_of_param("facedir", 31) == 7); // 31 % 24
 		assert(facing_variant_of_param("4dir", 0xfe) == 2);
+
+		// A sign lies flat against the surface it is on, so its quad has a
+		// normal along one axis and sits just off the boundary in that
+		// direction. A torch leans, so its normal has no zero component in
+		// the plane it leans in.
+		for(size_t wall = 0; wall < 8; wall++){
+			sv_<interface::VoxelQuad> sign, torch;
+			add_sign_quads(sign, 1.0f, wall);
+			add_torch_quads(torch, 1.0f, wall);
+			assert(sign.size() == 1 && torch.size() == 1);
+			for(const sv_<interface::VoxelQuad> *qs : {&sign, &torch}){
+				for(size_t c = 0; c < 4; c++){
+					for(size_t j = 0; j < 3; j++){
+						// Inside the voxel, give or take the rounding a
+						// 45 degree turn leaves
+						assert((*qs)[0].p[c][j] > -0.71f &&
+								(*qs)[0].p[c][j] < 0.71f);
+					}
+				}
+			}
+			// A wall torch wears the definition's third tile, a ceiling one
+			// its second and a floor one its first; Luanti's own choice
+			assert(torch[0].tile == (wall <= 1 || wall >= 6 ?
+					(wall == 0 || wall == 6 ? 1 : 0) : 2));
+		}
 
 		// The plant is two quads that cross, standing on the voxel's floor
 		sv_<interface::VoxelQuad> plant;
@@ -1180,6 +1319,9 @@ struct Module: public interface::Module, public luanti::Interface
 			sv_<interface::VoxelQuad> shape;
 			bool double_sided = false;
 			bool lit_from_above = false;
+			// "torchlike" or "signlike": a shape that is built per
+			// wallmounted direction rather than turned
+			ss_ wall_shape;
 			// The shape is drawn as well as the voxel's cube faces, not
 			// instead of them
 			bool shape_over_cube = false;
@@ -1190,6 +1332,22 @@ struct Module: public interface::Module, public luanti::Interface
 				}
 			} else if(drawtype == "plantlike"){
 				add_plant_quads(shape, visual_scale > 0.0f ? visual_scale : 1.0f);
+				double_sided = true;
+			} else if(drawtype == "firelike"){
+				// Luanti's fire is quads leaning against whatever is around
+				// it; crossed quads are what it comes to when nothing is,
+				// and what the extension draws for it either way.
+				add_plant_quads(shape, visual_scale > 0.0f ? visual_scale : 1.0f);
+				double_sided = true;
+			} else if(drawtype == "torchlike" || drawtype == "signlike"){
+				// One quad, and which way it lies is the wallmounted
+				// direction rather than a rotation of one base shape -- a
+				// torch on the floor leans and a torch on a wall does not.
+				// So the shape is built per variant below; this is what a
+				// node whose param2 says nothing comes to.
+				wall_shape = drawtype;
+				add_wall_quads(wall_shape, shape,
+						visual_scale > 0.0f ? visual_scale : 1.0f, 1);
 				double_sided = true;
 			} else if(drawtype == "plantlike_rooted"){
 				// The plant stands in the voxel above the one it is rooted
@@ -1222,14 +1380,20 @@ struct Module: public interface::Module, public luanti::Interface
 					var.tile_order[f] = FACEDIR_TILES[d][f];
 					var.tile_turns[f] = FACEDIR_TURNS[d][f];
 				}
-				// A node that has a shape turns the shape too: a stair
-				// facing the other way is the same quads rotated, and the
-				// tile each quad names travels with it. Only for a shape
-				// that is the node's own cube -- a rooted plant's shape
-				// stands in the voxel above and turning it would take it
-				// sideways out of that voxel.
-				if(!shape.empty() && !shape_over_cube && d != 0)
+				if(!wall_shape.empty()){
+					// A torch or a sign: its own shape per wall, and the
+					// variant index is the wallmounted direction itself
+					add_wall_quads(wall_shape, var.shape,
+							visual_scale > 0.0f ? visual_scale : 1.0f, i);
+				} else if(!shape.empty() && !shape_over_cube && d != 0){
+					// A node that has a shape turns the shape too: a stair
+					// facing the other way is the same quads rotated, and
+					// the tile each quad names travels with it. Only for a
+					// shape that is the node's own cube -- a rooted plant's
+					// shape stands in the voxel above and turning it would
+					// take it sideways out of that voxel.
 					turn_quads(shape, d, var.shape);
+				}
 				facing_variants.push_back(var);
 			}
 

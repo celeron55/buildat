@@ -140,6 +140,19 @@ core.register_node("floor:facing", {
 	groups = {cracky = 3},
 })
 
+-- One quad, lying whichever way its wallmounted param2 says: a torch leans
+-- on the floor and lies flat on a wall, which is not one shape turned
+core.register_node("floor:torch", {
+	description = "Torch",
+	drawtype = "torchlike",
+	tiles = {"floor_torch.png"},
+	paramtype = "light",
+	paramtype2 = "wallmounted",
+	walkable = false,
+	sunlight_propagates = true,
+	groups = {snappy = 3},
+})
+
 local HALF = 12   -- a 25x25 floor, which is one voxelworld section across
 local Y = 0
 
@@ -205,6 +218,13 @@ end
 for i = 0, 3 do
 	core.set_node({x = -2 + i, y = Y + 1, z = 4},
 			{name = "floor:step", param2 = i})
+end
+
+-- A torch in each of the six wallmounted directions, standing free so that
+-- each one's lean is its own and not a wall's
+for i = 0, 5 do
+	core.set_node({x = -2 + i, y = Y + 2, z = 2},
+			{name = "floor:torch", param2 = i})
 end
 
 -- Rooted plants set into the floor itself, so the cube reads as ground
