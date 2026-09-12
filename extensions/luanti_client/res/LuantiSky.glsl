@@ -54,6 +54,14 @@ const vec3 MOON_COLOR = vec3(0.86, 0.88, 0.94);
 // tint the horizon is painted with: a sun the colour of dawn at midday is
 // what the tint alone gives
 const vec3 SUN_COLOR = vec3(1.0, 0.97, 0.86);
+// The sun is brighter than anything else in the frame by orders of
+// magnitude, and there is no tone mapping to say so, so the only way to say
+// it is to let the disc clip: what a game's sun texture is painted as, or
+// SUN_COLOR, multiplied past one and clamped. The core comes out white and
+// the texture's own colour is left at the edges, where it is not clipped.
+// Scaled back to nothing as the sun comes down to the horizon, because a low
+// sun is a dim one and its colour is the whole point of it.
+const float SUN_OVEREXPOSURE = 1.5;
 
 const float CLOUD_SCALE = 6.0;
 const float CLOUD_PIXELS = 11.0;
@@ -186,6 +194,8 @@ void PS()
             sun_color = tex.rgb;
             cover *= tex.a;
         }
+        sun_color = min(sun_color * mix(SUN_OVEREXPOSURE, 1.0, low),
+            vec3(1.0));
         color = mix(color, sun_color, cover);
     }
     if(cMoonSize > 0.0){
