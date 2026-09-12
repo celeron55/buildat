@@ -3479,7 +3479,14 @@ function M.new(magic, buildat, log, options)
 	-- How much of the horizon's own tint the light takes when the sun is down
 	-- among it. Not all of it: sun_tint is the colour a band of sky is
 	-- painted, which is deeper than the light that paints it.
-	local SUN_TINT_SHARE = 0.6
+	-- How much of the horizon's colour the light takes at the reddest of it.
+	-- The window above says when; this says how much, and it is weighted
+	-- towards the crossing itself -- squared from the far end -- so that it
+	-- comes on gently at the edge of the window and is most of the way there
+	-- by the quarter hour. A sun a quarter of an hour off the horizon is
+	-- already red, and a share that only rose with the window was still a
+	-- warm white there.
+	local SUN_TINT_SHARE = 0.9
 	-- And how much of the sun's colour the clouds take while it is down
 	-- there. More than the light itself takes, because a cloud at dawn is
 	-- lit by nothing else and the sun is lighting it from below, where the
@@ -3578,7 +3585,8 @@ function M.new(magic, buildat, log, options)
 	-- belongs and is the same handover the sky shader does to the disc.
 	local function sun_light_color(time_of_day)
 		local tint = sky_color("sun_tint", 1)
-		local low = low_sun(time_of_day) * SUN_TINT_SHARE
+		local low = low_sun(time_of_day)
+		low = (1 - (1 - low) * (1 - low)) * SUN_TINT_SHARE
 		return magic.Color(
 				SUN_COLOR[1] * (1 - low) + tint.r * low,
 				SUN_COLOR[2] * (1 - low) + tint.g * low,
@@ -3598,6 +3606,15 @@ function M.new(magic, buildat, log, options)
 		assert(math.abs(elevation(SUN_DOWN)) < 0.02, "the sun sets at 19:00")
 		assert(elevation(12000) > 0.9, "the sun is overhead at noon")
 		assert(elevation(0) < -0.9, "the sun is under the world at midnight")
+		-- And that a quarter of an hour off the horizon the light is red
+		-- rather than a warm white, which is the whole of what the window is
+		-- for
+		local setting = sun_light_color(SUN_DOWN - 250)
+		assert(setting.r - setting.b > 0.5, "a quarter hour from setting")
+		local rising = sun_light_color(SUN_RISE + 250)
+		assert(rising.r - rising.b > 0.5, "and a quarter hour after rising")
+		local noon = sun_light_color(12000)
+		assert(noon.r - noon.b < 0.15, "and its own colour the rest of the day")
 	end
 
 	function self:set_daylight(factor, time_of_day)

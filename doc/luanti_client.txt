@@ -115,7 +115,10 @@ whatever the clock says.
 
 For the half hour either side of the sun crossing the horizon, at each end of
 the day, the sun's light goes towards the colour the game paints the horizon
-band with and the clouds go most of the way towards the sun's: at that hour
+band with -- weighted towards the crossing itself, so that it comes on gently
+at the edge of the window and a sun a quarter of an hour off the horizon is
+already red rather than a warm white -- and the clouds go most of the way
+towards the sun's: at that hour
 the sun is the only thing lighting them and it is lighting them from
 underneath, which is what makes a sunrise a sunrise rather than a sky that has
 got brighter. Outside that window neither is tinted at all.
