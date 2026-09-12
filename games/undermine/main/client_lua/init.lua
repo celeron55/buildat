@@ -325,7 +325,7 @@ do
 
 	-- And this thing so the camera is shown on the screen
 	local viewport = magic.Viewport:new(scene, camera_node:GetComponent("Camera"))
-	magic.renderer:SetViewport(0, viewport)
+	magic.set_preferred_viewports({viewport})
 
 	magic.renderer.HDRRendering = true
 	local rp = viewport.renderPath:Clone()

@@ -7,6 +7,7 @@ namespace Urho3D {
 	class Context;
 	class Graphics;
 	class Scene;
+	class Viewport;
 }
 namespace client {
 	struct State;
@@ -89,6 +90,14 @@ namespace app
 		virtual void handle_packet(const ss_ &name, const ss_ &data) = 0;
 		virtual void file_updated_in_cache(const ss_ &file_name,
 				const ss_ &file_hash, const ss_ &cached_path) = 0;
+		// The viewports the user's graphics preferences apply to: they are
+		// drawn at the render_scale the user asked for, under a UI that
+		// stays at native resolution. An empty list is teardown. A game that
+		// uses Renderer::SetViewport() instead is drawn at native
+		// resolution and keeps working.
+		virtual void set_preferred_viewports(
+				const sv_<Urho3D::Viewport*> &viewports) = 0;
+		virtual float get_preferred_render_scale() = 0;
 		virtual Urho3D::Scene* get_scene() = 0;
 		virtual interface::thread_pool::ThreadPool* get_thread_pool() = 0;
 		virtual lua_State* get_lua() = 0;

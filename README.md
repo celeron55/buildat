@@ -73,6 +73,25 @@ Debug keys, in any game:
 * F9: on-screen profiler, render and resource stats
 * F10: sandbox test extension
 
+Preferences
+-----------
+
+What the user sets once and every game honours: `render_scale` (3D viewports
+drawn at a fraction of the window size, with the UI left at native
+resolution), `vsync`, `max_fps`, `multisampling`, `sound_volume` and
+`sound_mute`. They live in `user/preferences.json` beside the remembered
+window size, and there is no screen for them yet -- edit the file, or set them
+for one run with `-o`, which is not written back:
+
+    $ bin/buildat -o render_scale=0.5,vsync=0,sound_mute=1
+
+`user/` is where what the user made, chose or downloaded deliberately goes, as
+against `cache/`, which is what the program can recreate by itself. Both sit
+in the buildat directory; `-D` and `-C` move them.
+
+See [doc/client_api.txt](doc/client_api.txt) for what a game does to honour
+`render_scale`, and what the client does not get to decide.
+
 Server and client
 -----------------
 

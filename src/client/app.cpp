@@ -38,6 +38,9 @@
 #include <Camera.h>
 #include <Renderer.h>
 #include <Audio.h>
+#include <RenderSurface.h>
+#include <Texture2D.h>
+#include <BorderImage.h>
 #include <Octree.h>
 #include <FileSystem.h>
 #include <PhysicsWorld.h>
@@ -225,6 +228,47 @@ static void check_parse_preference_options()
 		throw Exception("parse_preference_options: took an unknown key");
 }
 
+// Rounded, and never zero: a window can be dragged small enough that a low
+// scale would otherwise ask for a zero-pixel texture.
+static int scaled_length(int px, float scale)
+{
+	int v = (int)(px * scale + 0.5f);
+	return v < 1 ? 1 : v;
+}
+
+// A viewport rect stays in window pixels from the game's point of view, so
+// this is the only place the scale is applied to one. IntRect::ZERO means the
+// whole target and has to stay that way.
+static magic::IntRect scaled_rect(const magic::IntRect &r, float scale)
+{
+	if(r == magic::IntRect::ZERO)
+		return r;
+	return magic::IntRect(
+			(int)(r.left_ * scale + 0.5f),
+			(int)(r.top_ * scale + 0.5f),
+			(int)(r.right_ * scale + 0.5f),
+			(int)(r.bottom_ * scale + 0.5f));
+}
+
+static void check_scaled_viewport_size()
+{
+	if(scaled_length(1280, 0.5f) != 640 || scaled_length(720, 0.5f) != 360)
+		throw Exception("scaled_length: even");
+	if(scaled_length(721, 0.5f) != 361)
+		throw Exception("scaled_length: rounding");
+	if(scaled_length(4, 0.1f) != 1)
+		throw Exception("scaled_length: minimum of one pixel");
+	if(scaled_length(1280, 1.5f) != 1920)
+		throw Exception("scaled_length: above one");
+	// games/bomber_drone's second viewport: the same factor, so the two
+	// halves still meet
+	magic::IntRect r = scaled_rect(magic::IntRect(0, 360, 1280, 720), 0.5f);
+	if(r.left_ != 0 || r.top_ != 180 || r.right_ != 640 || r.bottom_ != 360)
+		throw Exception("scaled_rect: rect");
+	if(scaled_rect(magic::IntRect::ZERO, 0.5f) != magic::IntRect::ZERO)
+		throw Exception("scaled_rect: whole target");
+}
+
 static bool desktop_size(int *w, int *h)
 {
 	if(!SDL_WasInit(SDL_INIT_VIDEO)){
@@ -407,9 +451,11 @@ static void resolve_preferences(app::Options *opt)
 		desk_w = 1920;
 		desk_h = 1080;
 	}
-	bool size_ok = false;
-	if(!opt->preferences_disabled)
-		size_ok = load_preferences(desk_w, desk_h, opt);
+	// -w says what the size is, so nothing else has to; -c reads no file at
+	// all, and then the size can only come from the default
+	bool size_ok = opt->graphics.size_forced;
+	if(!opt->preferences_disabled && load_preferences(desk_w, desk_h, opt))
+		size_ok = true;
 	if(!size_ok)
 		pick_default_window_size(desk_w, desk_h,
 				&opt->graphics.window_w, &opt->graphics.window_h);
@@ -671,6 +717,14 @@ struct CApp: public App, public magic::Application
 	magic::SharedPtr<magic::Scene> m_scene;
 	magic::SharedPtr<magic::Node> m_camera_node;
 
+	// What set_preferred_viewports() was last given, and the rects the game
+	// gave them in -- in window pixels, so that the scale can be applied
+	// again from scratch when the window changes size
+	sv_<magic::SharedPtr<magic::Viewport>> m_preferred_viewports;
+	sv_<magic::IntRect> m_preferred_rects;
+	magic::SharedPtr<magic::Texture2D> m_preferred_texture;
+	magic::SharedPtr<magic::BorderImage> m_preferred_image;
+
 	sp_<interface::thread_pool::ThreadPool> m_thread_pool;
 
 	CApp(magic::Context *context, const Options &options):
@@ -684,6 +738,7 @@ struct CApp: public App, public magic::Application
 		log_v(MODULE, "constructor()");
 		check_pick_default_window_size();
 		check_parse_preference_options();
+		check_scaled_viewport_size();
 		// A -c run is on the built-in defaults, and muted: nothing captures
 		// audio, and a driven run playing a game's music through the
 		// developer's speakers is a small recurring annoyance with no upside
@@ -1003,6 +1058,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(extension_path)
 		DEF_BUILDAT_FUNC(set_ui_scale)
 		DEF_BUILDAT_FUNC(get_ui_scale)
+		DEF_BUILDAT_FUNC(get_preferred_render_scale)
 
 		// Create a scene that will be synchronized from the server
 		m_scene = new magic::Scene(context_);
@@ -1514,6 +1570,115 @@ struct CApp: public App, public magic::Application
 		}
 	}
 
+	void set_preferred_viewports(const sv_<magic::Viewport*> &viewports)
+	{
+		m_preferred_viewports.clear();
+		m_preferred_rects.clear();
+		for(magic::Viewport *vp : viewports){
+			m_preferred_viewports.push_back(magic::SharedPtr<magic::Viewport>(vp));
+			m_preferred_rects.push_back(vp->GetRect());
+		}
+		apply_preferred_viewports();
+	}
+
+	float get_preferred_render_scale()
+	{
+		return m_options.graphics.render_scale;
+	}
+
+	// The user's render_scale reaching viewports the games made themselves:
+	// they go onto an offscreen texture of the asked-for size, and that
+	// texture is drawn under the UI. Urho3D draws the UI to the backbuffer
+	// after the viewports, so the UI is never undersampled.
+	void apply_preferred_viewports()
+	{
+		magic::Renderer *renderer = GetSubsystem<magic::Renderer>();
+		magic::Graphics *graphics = GetSubsystem<magic::Graphics>();
+		if(!renderer || !graphics)
+			return;
+		unsigned n = m_preferred_viewports.size();
+		float scale = m_options.graphics.render_scale;
+		// 1.0 is a bypass and not a scale of one: no texture, no blit, the
+		// frame the client draws when nothing asked for anything
+		if(scale > 0.999f && scale < 1.001f){
+			drop_preferred_texture();
+			renderer->SetNumViewports(n);
+			for(unsigned i = 0; i < n; i++){
+				m_preferred_viewports[i]->SetRect(m_preferred_rects[i]);
+				renderer->SetViewport(i, m_preferred_viewports[i]);
+			}
+			return;
+		}
+		if(n == 0){
+			// Teardown has to leave nothing behind: a stale texture under
+			// the UI is last frame's world, still on the screen
+			drop_preferred_texture();
+			renderer->SetNumViewports(0);
+			return;
+		}
+
+		int tw = scaled_length(graphics->GetWidth(), scale);
+		int th = scaled_length(graphics->GetHeight(), scale);
+		if(!m_preferred_texture || m_preferred_texture->GetWidth() != tw ||
+				m_preferred_texture->GetHeight() != th){
+			m_preferred_texture = new magic::Texture2D(context_);
+			m_preferred_texture->SetSize(tw, th,
+					magic::Graphics::GetRGBFormat(), magic::TEXTURE_RENDERTARGET);
+			m_preferred_texture->SetFilterMode(magic::FILTER_BILINEAR);
+		}
+		magic::RenderSurface *surface = m_preferred_texture->GetRenderSurface();
+		if(!surface){
+			log_w(MODULE, "set_preferred_viewports(): no render surface;"
+					" drawing at native resolution");
+			drop_preferred_texture();
+			renderer->SetNumViewports(n);
+			for(unsigned i = 0; i < n; i++)
+				renderer->SetViewport(i, m_preferred_viewports[i]);
+			return;
+		}
+		surface->SetNumViewports(n);
+		for(unsigned i = 0; i < n; i++){
+			m_preferred_viewports[i]->SetRect(
+					scaled_rect(m_preferred_rects[i], scale));
+			surface->SetViewport(i, m_preferred_viewports[i]);
+		}
+		surface->SetUpdateMode(magic::SURFACE_UPDATEALWAYS);
+		renderer->SetNumViewports(0);
+
+		magic::UI *ui = GetSubsystem<magic::UI>();
+		if(!ui)
+			return;
+		if(!m_preferred_image){
+			m_preferred_image = new magic::BorderImage(context_);
+			m_preferred_image->SetName("buildat_preferred_viewports");
+			// Under whatever UI the game has, and never in the way of it:
+			// a disabled element takes no input
+			m_preferred_image->SetPriority(-10000);
+			m_preferred_image->SetEnabled(false);
+			ui->GetRoot()->AddChild(m_preferred_image);
+		}
+		m_preferred_image->SetTexture(m_preferred_texture);
+		m_preferred_image->SetImageRect(magic::IntRect(0, 0, tw, th));
+		// UI coordinates, which the UI scale has already divided down
+		m_preferred_image->SetPosition(0, 0);
+		m_preferred_image->SetSize(ui->GetRoot()->GetSize());
+	}
+
+	void drop_preferred_texture()
+	{
+		if(m_preferred_image){
+			m_preferred_image->Remove();
+			m_preferred_image.Reset();
+		}
+		if(m_preferred_texture){
+			magic::RenderSurface *surface =
+					m_preferred_texture->GetRenderSurface();
+			if(surface)
+				surface->SetNumViewports(0);
+			m_preferred_texture.Reset();
+		}
+	}
+
 	// Urho3D multiplies a sound type's gain by the "Master" one
 	// (Audio::GetSoundSourceMasterGain()), so setting the master here scales
 	// every sound in every game, under whatever mixing the game does of its
@@ -1556,6 +1721,9 @@ struct CApp: public App, public magic::Application
 				m_options.graphics.fullscreen ? 1 : 0);
 		save_preferences(m_options);
 		apply_ui_scale();
+		// The offscreen texture is a fraction of the window, so a new window
+		// size is a new texture
+		apply_preferred_viewports();
 	}
 
 	void on_logmessage(magic::StringHash event_type, magic::VariantMap &event_data)
@@ -1699,6 +1867,16 @@ struct CApp: public App, public magic::Application
 		lua_pop(L, 1);
 		magic::UI *ui = self->GetSubsystem<magic::UI>();
 		lua_pushnumber(L, ui ? ui->GetScale() : 1.0);
+		return 1;
+	}
+
+	// get_preferred_render_scale() -> number
+	static int l_get_preferred_render_scale(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		lua_pushnumber(L, self->m_options.graphics.render_scale);
 		return 1;
 	}
 
