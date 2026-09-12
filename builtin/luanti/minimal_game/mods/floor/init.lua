@@ -31,6 +31,26 @@ core.register_node("floor:slab", {
 	groups = {cracky = 3},
 })
 
+-- A shape that is not symmetric, so that turning it is visible: a step
+core.register_node("floor:step", {
+	description = "Step",
+	drawtype = "nodebox",
+	node_box = {
+		type = "fixed",
+		fixed = {
+			{-0.5, -0.5, -0.5, 0.5, 0, 0.5},
+			{-0.5, 0, 0, 0.5, 0.5, 0.5},
+		},
+	},
+	tiles = {
+		"floor_face_top.png",
+		"floor_face_bottom.png",
+		"floor_face_side.png",
+	},
+	paramtype2 = "facedir",
+	groups = {cracky = 3},
+})
+
 core.register_node("floor:plant", {
 	description = "Plant",
 	drawtype = "plantlike",
@@ -178,6 +198,13 @@ end
 for i = 0, 23 do
 	core.set_node({x = -2 + i % 6, y = Y + 1, z = 7 + math.floor(i / 6)},
 			{name = "floor:facing", param2 = i})
+end
+
+-- The same step in the four ways a 4dir turns it, so a screenshot says
+-- whether a shape turns with its node
+for i = 0, 3 do
+	core.set_node({x = -2 + i, y = Y + 1, z = 4},
+			{name = "floor:step", param2 = i})
 end
 
 -- Rooted plants set into the floor itself, so the cube reads as ground
