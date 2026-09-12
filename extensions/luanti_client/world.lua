@@ -3645,39 +3645,115 @@ function M.new(magic, buildat, log, options)
 		assert(noon.r - noon.b < 0.15, "and its own colour the rest of the day")
 	end
 
-	function self:set_daylight(factor, time_of_day)
-		daylight = factor
-		daylight_time = time_of_day or daylight_time
+	-- Luanti eases the sky rather than setting it: Sky::update() keeps the
+	-- colours and the brightness it is drawing and moves each a fixed share
+	-- of the way to the target every frame, so a band changing under it comes
+	-- out as a minute of sunrise instead of a jump. The same thing here, with
+	-- the share worked out from the frame's own length so that it does not
+	-- depend on how fast the frames come, and with a jump too big to be the
+	-- day moving -- a game setting its clock, or a sky arriving -- taken at
+	-- once rather than eased, which is Luanti's rule as well.
+	local SKY_EASE_SECONDS = 0.8
+	local SKY_EASE_SNAP = 0.35
+
+	local sky_eased = {}
+
+	local function sky_share(dtime)
+		if dtime <= 0 then
+			return 1
+		end
+		-- 1 - e^-t/tau, but without exp: this is within a few per cent of it
+		-- over a frame and cannot overshoot
+		return clamp01(dtime / (SKY_EASE_SECONDS + dtime))
+	end
+
+	local function sky_ease(dtime, key, target)
+		local at = sky_eased[key]
+		if at == nil or math.abs(target - at) > SKY_EASE_SNAP then
+			sky_eased[key] = target
+			return target
+		end
+		at = at + (target - at) * sky_share(dtime)
+		sky_eased[key] = at
+		return at
+	end
+
+	-- The same for a colour, eased in the band's own full-strength colours
+	-- and scaled by the brightness afterwards, so that what is being eased is
+	-- which sky it is rather than how dark it is
+	local function sky_ease_color(dtime, key, target, brightness)
+		local at = sky_eased[key]
+		if at == nil or math.abs(target.r - at[1]) > SKY_EASE_SNAP or
+				math.abs(target.g - at[2]) > SKY_EASE_SNAP or
+				math.abs(target.b - at[3]) > SKY_EASE_SNAP then
+			at = {target.r, target.g, target.b}
+			sky_eased[key] = at
+		else
+			local k = sky_share(dtime)
+			at[1] = at[1] + (target.r - at[1]) * k
+			at[2] = at[2] + (target.g - at[2]) * k
+			at[3] = at[3] + (target.b - at[3]) * k
+		end
+		return magic.Color(at[1] * brightness, at[2] * brightness,
+				at[3] * brightness)
+	end
+
+	-- What the easing has to do, checked at load: arrive where it was sent,
+	-- take its time getting there, and not take its time over a jump that is
+	-- a game setting its clock rather than the day passing.
+	do
+		assert(sky_ease(0.1, "check", 0.5) == 0.5, "the first is where it is")
+		local half = sky_ease(SKY_EASE_SECONDS, "check", 0.7)
+		assert(half > 0.58 and half < 0.62,
+				"a tau of it is about half the way")
+		for _ = 1, 200 do
+			sky_ease(0.05, "check", 0.7)
+		end
+		assert(math.abs(sky_ease(0.05, "check", 0.7) - 0.7) < 0.001,
+				"and it arrives")
+		assert(sky_ease(0.05, "check", 0.0) == 0.0, "a jump is taken at once")
+		sky_eased.check = nil
+	end
+
+	local function apply_daylight(dtime)
+		local factor = daylight
 		if not pbr then
 			zone.ambientColor = sunlight_color(factor)
 		end
 
 		local brightness = brightness_of(factor)
 		-- Which set of colours, by the same bands Luanti's Sky::update()
-		-- uses: night, dawn, or the day's own.
+		-- uses: night, dawn, or the day's own. The set changes at a step,
+		-- there as here; what makes the change not read as one is that
+		-- nothing below is the target, it is where the sky has got to on its
+		-- way there. See sky_ease() above.
 		--
-		-- simplified: Luanti eases from one set to the next over a second or
-		-- so of its own frames rather than switching between them, and it
-		-- has a fourth set for a player who cannot see the sky at all. Here
-		-- the brightness is what carries dawn into day, and the set changes
-		-- when the band does.
+		-- simplified: Luanti has a fourth set for a player who cannot see the
+		-- sky at all, which is not read here.
 		local band = "day"
 		if brightness < 0.13 then
 			band = "night"
 		elseif brightness >= 0.20 and brightness < 0.35 then
 			band = "dawn"
 		end
-		local top = sky_color(band.."_sky", brightness)
-		local horizon = sky_color(band.."_horizon", brightness)
+		local top = sky_color(band.."_sky", 1)
+		local horizon = sky_color(band.."_horizon", 1)
 		if sky and sky.type == "skybox" then
 			-- A game that gave its own textures gets its bgcolor, which is
 			-- the one thing of its sky that is understood here
-			top = sky_color("bgcolor", brightness)
+			top = sky_color("bgcolor", 1)
 			horizon = top
 		elseif sky and not sky.day_sky and sky.bgcolor then
-			top = sky_color("bgcolor", brightness)
+			top = sky_color("bgcolor", 1)
 			horizon = top
 		end
+
+		-- Where the sky has actually got to, which is what everything below
+		-- is drawn from. The brightness the band is scaled by is eased too,
+		-- so a sunrise is a sunrise and not a set of colours being swapped.
+		brightness = sky_ease(dtime, "brightness", brightness)
+		top = sky_ease_color(dtime, "top", top, brightness)
+		horizon = sky_ease_color(dtime, "horizon", horizon, brightness)
 
 		-- What is behind the world, which the fog fades into: the horizon
 		-- the sky is drawn with, so the two meet
@@ -3856,9 +3932,16 @@ function M.new(magic, buildat, log, options)
 		end
 	end
 
+	-- What the light and the time are now. Nothing is drawn from here: the
+	-- sky is drawn every frame by apply_daylight(), easing towards whatever
+	-- this last said, which is what makes the day pass rather than step.
+	function self:set_daylight(factor, time_of_day)
+		daylight = factor
+		daylight_time = time_of_day or daylight_time
+	end
+
 	function self:set_sky(new_sky)
 		sky = new_sky
-		self:set_daylight(daylight, daylight_time)
 	end
 
 	-- What the game says is in the sky, each out of its own packet. The
@@ -3871,7 +3954,6 @@ function M.new(magic, buildat, log, options)
 		for key, value in pairs(what) do
 			sky_bodies[which][key] = value
 		end
-		self:set_daylight(daylight, daylight_time)
 	end
 
 	-- Builds the voxel registry from Luanti's node definitions.
@@ -4262,6 +4344,10 @@ function M.new(magic, buildat, log, options)
 	-- session -- and the first blocks it sends are the ones around the
 	-- player, which is exactly where a hole is worst.
 	function self:update(dtime, drop_distance)
+		-- Every frame, because easing towards a target is what it is for
+		if daylight then
+			apply_daylight(dtime)
+		end
 		local p = camera_node.position
 		-- Which lights are the nearest changes as the player walks, but not
 		-- so fast that it is worth working out every frame
