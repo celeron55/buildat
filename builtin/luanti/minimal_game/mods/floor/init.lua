@@ -164,6 +164,25 @@ core.register_node("floor:fence", {
 	groups = {cracky = 3},
 })
 
+-- One quad, and which of four tiles it wears and which way it is turned is
+-- what its neighbours say: a shape per mask of the four horizontal
+-- connections, which is what the mesher's shape_masked is for
+core.register_node("floor:rail", {
+	description = "Rail",
+	drawtype = "raillike",
+	tiles = {
+		"floor_rail_straight.png",
+		"floor_rail_curved.png",
+		"floor_rail_junction.png",
+		"floor_rail_crossing.png",
+	},
+	connect_to_raillike = 1,
+	paramtype = "light",
+	walkable = false,
+	sunlight_propagates = true,
+	groups = {cracky = 3},
+})
+
 local HALF = 12   -- a 25x25 floor, which is one voxelworld section across
 local Y = 0
 
@@ -247,6 +266,19 @@ for z = -7, -5 do
 	core.set_node({x = -8, y = Y + 1, z = z}, {name = "floor:fence"})
 end
 core.set_node({x = -4, y = Y + 1, z = -6}, {name = "floor:fence"})
+
+-- A rail run with a corner, a junction and a crossing in it, so a screenshot
+-- says whether each mask picks the tile and the turn Luanti picks
+for z = -8, -4 do
+	core.set_node({x = 8, y = Y + 1, z = z}, {name = "floor:rail"})
+end
+for x = 6, 10 do
+	core.set_node({x = x, y = Y + 1, z = -6}, {name = "floor:rail"})
+end
+for x = 6, 8 do
+	core.set_node({x = x, y = Y + 1, z = -9}, {name = "floor:rail"})
+end
+core.set_node({x = 6, y = Y + 1, z = -8}, {name = "floor:rail"})
 
 -- Rooted plants set into the floor itself, so the cube reads as ground
 for x = -8, -4, 2 do

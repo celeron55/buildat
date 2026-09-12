@@ -698,7 +698,15 @@ two things M1 disproved about the build, are in
   what `connect_dir` is for, the header names a fence as the case, and it
   had no user.
 
-  devtest: 143 of 390 node types have a shape, 83 of them liquids.
+  **`raillike`** is one quad, and which of four tiles it wears and which way
+  it is turned is what its neighbours say -- so it is a shape per mask of
+  the four horizontal connections rather than a shape: sixteen flat ones and
+  four that climb, which is what the mesher's `shape_masked` is for and it
+  had no user either. Luanti's own `rail_kinds` and `rail_slope_angle`
+  tables, by way of the extension. A rail reaches other rails of its own
+  `connect_to_raillike` group and nothing else.
+
+  devtest: 155 of 390 node types have a shape, 83 of them liquids.
 
   **And the blended pass, which is what makes water water.** A liquid, and
   anything a game asked to be blended rather than alpha masked with
@@ -737,17 +745,19 @@ two things M1 disproved about the build, are in
     `buildat.compose_image`, the way `extensions/luanti_client`'s
     `resolve_tile` does. Until then those nodes wear a flat colour, which is
     honest and is not what devtest looks like. 112 of devtest's 390.
-  - **The rest of the drawtypes.** By what devtest has of them:
-    `glasslike_framed`'s frame (5, drawn as a plain cube for now);
-    `raillike` (1), the last one left, which wants the mesher's
-    `shape_masked` -- a shape per mask of which of the four horizontal
-    neighbours a rail reaches, sixteen of them plus four slopes, each one
-    quad wearing one of the four rail tiles turned. That machinery has no
-    user either, and `connected` node boxes are the same `connect_dir` a
-    fence now uses, so the two come together. devtest has no `connected`
-    node box to check one against, though, which is a reason to wait for a
-    game that does. `mesh` (18) stays client-side or waits; see "Which
-    mesher draws the drawtypes".
+  - **The drawtypes that are left**, and there is not much: the frame of a
+    `glasslike_framed` (5 in devtest, drawn as a plain cube, which is what
+    it looks like without its frame); the node box kinds that are not
+    `fixed` -- `connected` is the same `connect_dir` a fence uses and
+    `wallmounted` and `leveled` are a `VoxelVariant` on the param, and
+    devtest has none of the three to check an implementation against, which
+    is a reason to wait for a game that does; and `mesh` (18), which stays
+    client-side or waits. See "Which mesher draws the drawtypes".
+
+    Every other drawtype is built, and with them every piece of the engine's
+    shape machinery that had no user: `VoxelQuad`, `shape_lit_from_above`,
+    `is_liquid` with the corner levels, `tile_order` and `tile_turns`,
+    `connect_dir`, and `shape_masked`.
   - **Palettes**, one voxel type per used index, registered at load.
   - **The client fork.** What is on screen now is
     `games/luanti_launcher`'s viewer, which is a camera and a HUD line. The
