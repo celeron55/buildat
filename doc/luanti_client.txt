@@ -113,6 +113,17 @@ are where the fade is shaped; the line itself is enforced separately, from
 where the body actually is, so that neither can shine from under the world
 whatever the clock says.
 
+Both are dimmed by the weather, because a directional light does not know
+there is a layer of cloud between it and the ground while the ambient does --
+a game darkens the sky colours it sends when the weather turns, and the direct
+light is then the only thing left insisting it is a clear day. Two things say
+overcast and a game uses one or the other: the cloud density, of which only
+what is above Luanti's own 0.4 is weather, since every game gets that whether
+it asks or not; and the cloud colour, which is how VoxeLibre says it -- it
+never touches the density and paints its clouds #FFF0F0 for a clear sky,
+#5D5D5F for rain and #3D3D3F for a thunderstorm. Full overcast leaves the sun
+a fifth of itself, which is a day with no shadows in it.
+
 The ambient on this path is the sky rather than the colour of sunlight, and
 the shader's ambient is that times how much sky the vertex sees plus the lamp
 light baked into the vertex colour. That alone is three tints: open ground
