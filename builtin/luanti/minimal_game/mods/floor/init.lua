@@ -6,6 +6,35 @@
 -- and the write-behind buffer does not reach voxelworld until the world
 -- exists a moment later.
 
+-- Mod storage, which is the one thing under the save that nothing had ever
+-- called. It is read on the first get_mod_storage() and written through on
+-- every set_string(), so what proves it is a value surviving a restart: this
+-- counts the runs and says which one this is, and complains if the count
+-- comes back as something that is not a number.
+--
+-- A check in the fixture rather than in lua/check_map.lua because
+-- get_mod_storage() needs a mod to be running: outside one there is no
+-- current modname and it has nothing to open.
+do
+	local storage = core.get_mod_storage()
+	if not storage then
+		error("floor: no mod storage")
+	end
+	local before = storage:get_string("runs")
+	local runs = tonumber(before) or 0
+	if before ~= "" and not tonumber(before) then
+		error("floor: mod storage gave back " .. tostring(before))
+	end
+	runs = runs + 1
+	storage:set_string("runs", tostring(runs))
+	-- Read back through the same object, which is what a mod does next
+	if storage:get_string("runs") ~= tostring(runs) then
+		error("floor: mod storage did not keep what was set")
+	end
+	core.log("action", "floor: this world has been opened " .. runs ..
+			(runs == 1 and " time" or " times"))
+end
+
 core.register_node("floor:stone", {
 	description = "Stone",
 	tiles = {"floor_stone.png"},
