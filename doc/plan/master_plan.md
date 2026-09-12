@@ -63,8 +63,9 @@ The order of work, which is one line of it rather than parallel branches:
 1. **M3 -- it looks like the game.** The big one, and started: the game's
    media is served and a node whose tile is a plain shipped file name wears
    it (279 of devtest's 390 node types); `nodebox`, `plantlike`,
-   `plantlike_rooted` and the liquids are built as shapes through buildat's
-   own mesher (129 of 390, 83 of them liquids); `glasslike` and `allfaces`
+   `plantlike_rooted`, `firelike`, `torchlike`, `signlike` and the liquids
+   are built as shapes through buildat's
+   own mesher (142 of 390, 83 of them liquids); `glasslike` and `allfaces`
    are drawn at all now that "light gets past this" is a flag of its own
    rather than the edge material (another 40); a node turns with its param2
    -- `facedir`, `4dir` and `wallmounted`, 56 of 390 -- through the

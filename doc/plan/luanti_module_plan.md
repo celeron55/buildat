@@ -682,7 +682,16 @@ two things M1 disproved about the build, are in
   shape is not turned at all: it stands in the voxel above its own, and
   rotating it would take it sideways out of that voxel.
 
-  devtest: 129 of 390 node types have a shape, 83 of them liquids.
+  **`firelike`, `torchlike` and `signlike`** are single quads.
+  `firelike` is the crossed pair a plant is. The other two are the one
+  drawtype family whose shape is *built* per wallmounted direction rather
+  than turned from one base: a torch on the floor leans and a torch on a
+  wall lies flat against it, and Luanti picks a different tile for each --
+  the definition's first on a floor, its second on a ceiling, its third on a
+  wall. `drawSignlikeNode` and `drawTorchlikeNode`, by way of the
+  extension's `sign_quads` and `torch_quads`.
+
+  devtest: 142 of 390 node types have a shape, 83 of them liquids.
 
   **And the blended pass, which is what makes water water.** A liquid, and
   anything a game asked to be blended rather than alpha masked with
@@ -723,12 +732,13 @@ two things M1 disproved about the build, are in
     honest and is not what devtest looks like. 112 of devtest's 390.
   - **The rest of the drawtypes.** By what devtest has of them:
     `glasslike_framed`'s frame (5, drawn as a plain cube for now);
-    `torchlike` (3), `signlike` (3), `raillike` (1), `firelike` (1),
-    `fencelike` (1); and the node box kinds that are not `fixed` --
-    `connected` is the mesher's `connect_dir` and `wallmounted` and `leveled`
-    are a `VoxelVariant` on the param, so neither is a list of boxes the
-    server hands over as it stands. `mesh` (18) stays client-side or waits;
-    see "Which mesher draws the drawtypes".
+    `raillike` (1) and `fencelike` (1), which are the two that want the
+    mesher's `shape_masked` and `connect_dir` -- a shape per mask of which
+    neighbours a node reaches, which is machinery that also has no user yet;
+    and the node box kinds that are not `fixed` -- `connected` is that same
+    `connect_dir`, and `wallmounted` and `leveled` are a `VoxelVariant` on
+    the param. `mesh` (18) stays client-side or waits; see "Which mesher
+    draws the drawtypes".
   - **Palettes**, one voxel type per used index, registered at load.
   - **The client fork.** What is on screen now is
     `games/luanti_launcher`'s viewer, which is a camera and a HUD line. The
