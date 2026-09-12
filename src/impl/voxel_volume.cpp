@@ -334,6 +334,90 @@ bool voxel_volume_self_test()
 			(size_t)(2 - -1) * 5 * 6;
 	assert(bytes[i] == 0xff);
 
+	// Migration: a world that has moved its fields around since the save was
+	// written
+	{
+		VoxelFormat a = VoxelFormat::luanti();
+		// Every role somewhere else, and a module's plane alongside
+		VoxelFormat b;
+		b.planes = {VoxelPlane(), VoxelPlane("test:mix", 8)};
+		b.id = VoxelField{0, 8, 16};
+		b.light_sky = VoxelField{0, 0, 4};
+		b.light_lamp = VoxelField{0, 4, 4};
+		b.param = VoxelField{0, 24, 8};
+		assert(a.validate() && b.validate());
+
+		pv::Region r(0, 0, 0, 3, 3, 3);
+		VoxelVolume from(r, a.planes);
+		uint32_t w = 0;
+		a.id.set(w, 0x1234);
+		a.light_sky.set(w, 11);
+		a.light_lamp.set(w, 5);
+		a.param.set(w, 0x9a);
+		from.setVoxelAt(1, 2, 3, VoxelInstance(w));
+
+		ss_ why;
+		up_<VoxelVolume> to = migrate_volume(from, a, b, &why);
+		assert(to);
+		VoxelSample got = to->sample_at(1, 2, 3);
+		assert(b.id.get(got) == 0x1234);
+		assert(b.light_sky.get(got) == 11);
+		assert(b.light_lamp.get(got) == 5);
+		assert(b.param.get(got) == 0x9a);
+		// The plane the world gained is not allocated by a migration that
+		// has nothing to put in it
+		assert(!to->plane_is_materialised(1));
+		// And the voxels nothing was written to are still nothing
+		assert(to->sample_at(0, 0, 0).planes[0] == 0);
+
+		// Bits no role of either format claims are the game's own and travel
+		// where they are. This is undermine's support field: a world that
+		// binds four bits of param and no more leaves 28...31 to the game.
+		VoxelFormat c = a, d = b;
+		c.param = VoxelField{0, 24, 4};
+		d.param = VoxelField{0, 24, 4};
+		assert(c.validate() && d.validate());
+		VoxelVolume from2(r, c.planes);
+		uint32_t w2 = 0;
+		c.id.set(w2, 7);
+		w2 |= 0xa0000000UL; // bits 28...31, which no role of either claims
+		from2.setVoxelAt(1, 1, 1, VoxelInstance(w2));
+		up_<VoxelVolume> to2 = migrate_volume(from2, c, d, &why);
+		assert(to2);
+		assert(d.id.get(to2->sample_at(1, 1, 1)) == 7);
+		assert((to2->getVoxelAt(1, 1, 1).data & 0xf0000000UL) == 0xa0000000UL);
+
+		// A width change is the game's migration, and there is no hook for
+		// one yet, so it is refused rather than guessed at
+		VoxelFormat e = a;
+		e.param = VoxelField{0, 24, 6};
+		assert(e.validate());
+		why = "";
+		assert(!migrate_volume(from, a, e, &why));
+		assert(why.find("param") != ss_::npos);
+	}
+
+	// Ids through a name table
+	{
+		VoxelFormat f = VoxelFormat::luanti();
+		pv::Region r(0, 0, 0, 3, 3, 3);
+		VoxelVolume vol(r, f.planes);
+		uint32_t w = 0;
+		f.id.set(w, 2);
+		f.param.set(w, 0x5e);
+		vol.setVoxelAt(0, 1, 2, VoxelInstance(w));
+		sv_<VoxelTypeId> map = {0, 1, 40};
+		remap_volume_ids(vol, f, map);
+		VoxelSample got = vol.sample_at(0, 1, 2);
+		assert(f.id.get(got) == 40);
+		// Nothing else in the word moved
+		assert(f.param.get(got) == 0x5e);
+		// A plane nothing wrote stays unallocated
+		VoxelVolume empty(r, f.planes);
+		remap_volume_ids(empty, f, map);
+		assert(!empty.plane_is_materialised(0));
+	}
+
 	return true;
 }
 
@@ -561,6 +645,167 @@ up_<VoxelVolume> deserialize_volume(const ss_ &data)
 		return volume;
 	}
 	return up_<VoxelVolume>();
+}
+
+// Migration: moving a chunk from the cut it was written in to the cut the
+// world is running now. See the note on migrate_volume() in the header; the
+// rule the whole thing follows is that the engine moves data and never
+// reinterprets it.
+
+static uint32_t plane_mask(uint8_t bits)
+{
+	return bits >= 32 ? 0xffffffffUL : ((1UL << bits) - 1);
+}
+
+up_<VoxelVolume> migrate_volume(const VoxelVolume &from,
+		const VoxelFormat &from_format, const VoxelFormat &to_format,
+		ss_ *why)
+{
+	auto fail = [&](const ss_ &s) -> up_<VoxelVolume> {
+		if(why)
+			*why = s;
+		return up_<VoxelVolume>();
+	};
+
+	const sv_<VoxelPlane> &fp = from.planes();
+	const sv_<VoxelPlane> &tp = to_format.planes;
+	if(fp != from_format.planes)
+		return fail("the chunk's planes are not the ones of the format it is "
+				"tagged with, so the tag is wrong or the save is damaged");
+
+	// Planes are matched by name, so a module's field follows its name
+	// wherever it moved to in the list. The game's own first plane has no
+	// name and matches the game's own first plane.
+	sv_<int> src_of_dst(tp.size(), -1);
+	for(size_t i = 0; i < tp.size(); i++){
+		int j = from_format.plane_of_name(tp[i].name);
+		if(j < 0)
+			continue;
+		// A named plane holds bits only the module that asked for it
+		// understands, so its width changing is not something the engine can
+		// move. The game's own plane is all roles and free bits, and both of
+		// those are handled below.
+		if(!tp[i].name.empty() && fp[j].bits != tp[i].bits)
+			return fail("the plane \""+tp[i].name+"\" is "+
+					itos((int)fp[j].bits)+" bits in the save and "+
+					itos((int)tp[i].bits)+" in this world");
+		src_of_dst[i] = (int)j;
+	}
+	for(size_t j = 0; j < fp.size(); j++){
+		if(to_format.plane_of_name(fp[j].name) < 0)
+			log_w(MODULE, "migrate_volume(): the save has a plane \"%s\" that "
+					"this world does not; it is dropped", cs(fp[j].name));
+	}
+
+	struct Move { VoxelField from, to; };
+	sv_<Move> moves;
+	uint32_t from_roles[VOXEL_MAX_PLANES] = {};
+	uint32_t to_roles[VOXEL_MAX_PLANES] = {};
+	for(const VoxelFormat::Role &r : VoxelFormat::roles()){
+		const VoxelField &a = from_format.*(r.field);
+		const VoxelField &b = to_format.*(r.field);
+		if(a.bound() && a.plane < VOXEL_MAX_PLANES)
+			from_roles[a.plane] |= a.mask() << a.shift;
+		if(b.bound() && b.plane < VOXEL_MAX_PLANES)
+			to_roles[b.plane] |= b.mask() << b.shift;
+		if(a.bound() && b.bound()){
+			if(a.width != b.width)
+				return fail(ss_("the ")+r.name+" field is "+
+						itos((int)a.width)+" bits in the save and "+
+						itos((int)b.width)+" in this world; what that "
+						"conversion is, only the game can say");
+			moves.push_back(Move{a, b});
+		} else if(a.bound()){
+			log_w(MODULE, "migrate_volume(): the save has a %s field and this "
+					"world does not; it is dropped", r.name);
+		}
+		// A role this world has and the save does not is left at zero, which
+		// is what a new field of a world that has been played means
+	}
+
+	// Bits no role of either format claims are the game's own -- undermine's
+	// support field is four of them -- so they travel where they are, as
+	// long as nothing has since claimed them
+	uint32_t keep[VOXEL_MAX_PLANES] = {};
+	sv_<bool> write(tp.size(), false);
+	for(size_t i = 0; i < tp.size(); i++){
+		int j = src_of_dst[i];
+		if(j < 0)
+			continue;
+		keep[i] = ~from_roles[j] & ~to_roles[i] &
+				plane_mask(fp[j].bits) & plane_mask(tp[i].bits);
+		if(keep[i] != 0 && from.plane_is_materialised((uint8_t)j))
+			write[i] = true;
+	}
+	for(const Move &m : moves){
+		if(from.plane_is_materialised(m.from.plane) &&
+				m.to.plane < write.size())
+			write[m.to.plane] = true;
+	}
+
+	up_<VoxelVolume> to(new VoxelVolume(from.getEnclosingRegion(), tp));
+	bool any = false;
+	for(size_t i = 0; i < write.size(); i++)
+		any = any || write[i];
+	// A plane nothing wrote in the save is a plane nothing wrote here: it
+	// stays unallocated rather than becoming an array of zeroes
+	if(!any)
+		return to;
+
+	const pv::Region &region = from.getEnclosingRegion();
+	const pv::Vector3DInt32 lc = region.getLowerCorner();
+	const pv::Vector3DInt32 uc = region.getUpperCorner();
+	for(int32_t z = lc.getZ(); z <= uc.getZ(); z++){
+		for(int32_t y = lc.getY(); y <= uc.getY(); y++){
+			for(int32_t x = lc.getX(); x <= uc.getX(); x++){
+				VoxelSample s = from.sample_at(x, y, z);
+				uint32_t d[VOXEL_MAX_PLANES] = {};
+				for(size_t i = 0; i < tp.size(); i++){
+					int j = src_of_dst[i];
+					if(j >= 0)
+						d[i] = s.planes[j] & keep[i];
+				}
+				for(const Move &m : moves){
+					m.to.set(d[m.to.plane],
+							m.from.get(s.planes[m.from.plane]));
+				}
+				for(size_t i = 0; i < tp.size(); i++){
+					if(write[i])
+						to->set_plane_at((uint8_t)i, x, y, z, d[i]);
+				}
+			}
+		}
+	}
+	return to;
+}
+
+void remap_volume_ids(VoxelVolume &volume, const VoxelFormat &format,
+		const sv_<VoxelTypeId> &map)
+{
+	const VoxelField &f = format.id;
+	if(!f.bound() || map.size() < 2)
+		return;
+	assert(map[0] == 0);
+	// Every id in a plane nothing wrote is 0, and 0 maps to 0
+	if(!volume.plane_is_materialised(f.plane))
+		return;
+	const pv::Region &region = volume.getEnclosingRegion();
+	const pv::Vector3DInt32 lc = region.getLowerCorner();
+	const pv::Vector3DInt32 uc = region.getUpperCorner();
+	for(int32_t z = lc.getZ(); z <= uc.getZ(); z++){
+		for(int32_t y = lc.getY(); y <= uc.getY(); y++){
+			for(int32_t x = lc.getX(); x <= uc.getX(); x++){
+				uint32_t w = volume.plane_at(f.plane, x, y, z);
+				uint32_t id = f.get(w);
+				// An id the table does not reach is one the save never
+				// wrote; leave it rather than turning it into something
+				if(id >= map.size() || map[id] == id)
+					continue;
+				f.set(w, map[id]);
+				volume.set_plane_at(f.plane, x, y, z, w);
+			}
+		}
+	}
 }
 
 // pv::RawVolume<int32_t>

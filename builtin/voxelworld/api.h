@@ -82,21 +82,33 @@ namespace voxelworld
 		// every game did before it existed: generate and forget.
 		//
 		// Call it after registering voxels and before asking for any
-		// section. If the save already has a registry for this world, that
-		// registry replaces the one the game just built, ids and all: the
-		// numbering a save was written under is the numbering it is read
-		// under. Sections already in the save are loaded instead of
+		// section. Sections already in the save are loaded instead of
 		// generated.
+		//
+		// The running game owns the voxel numbering and the save stores
+		// names: what a save holds is a name table, and loading translates
+		// its ids into the ones this run registered. So a game is free to
+		// register its types in another order, or to add and drop them,
+		// without a world it has saved meaning anything else than it did.
+		// Registering more types after this call is allowed; each reaches
+		// the save's table before anything holding it is written.
 		//
 		// The Save belongs to whoever opened it, and closing it while a
 		// world still points at it is a use-after-free. Pass nullptr to stop
 		// persisting first.
 		virtual void set_save(storage::Save *save, const ss_ &world_name) = 0;
 
-		// Write everything out now: the registry and every loaded section.
+		// Write out every section that has changed since it was read.
 		// Happens by itself when a section is unloaded and at shutdown, so
 		// this is for a game that wants a checkpoint of its own.
 		virtual void save() = 0;
+
+		// Voxel types the save holds that this game does not register. They
+		// are kept, drawn with the definitions the save carries and tinted,
+		// so an old world still looks like itself -- but the game no longer
+		// supports them, and this is how a game says so on screen instead of
+		// leaving someone to walk into it.
+		virtual sv_<interface::VoxelName> get_unknown_voxels() = 0;
 
 		virtual void add_commit_hook(up_<CommitHook> hook) = 0;
 

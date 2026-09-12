@@ -875,3 +875,35 @@ The plan's own header lists where the build differs from it, of which the
 two that matter are a row per chunk rather than per section, and a new
 `core:shutdown` event, since nothing reached the modules after the main loop
 ended.
+
+## Third round, step 1: voxelworld's name table, format tag and modified flag -- BUILT
+
+`doc/plan/world_persistence_plan.md` step 4, and it changed what an earlier
+step had settled: the save's `VoxelRegistry` used to *replace* the one the
+game had just built, so that "the numbering a save was written under is the
+numbering it is read under". That is backwards. The game is the only thing
+that can decide whether a name still means what it meant, so the running game
+owns the numbering and the save stores names -- which is what Luanti has done
+for years, per MapBlock, and one table per world is the same idea more
+cheaply.
+
+What it cost, beyond the table itself: a six-byte header on each chunk row
+carrying the format it was written in; `migrate_volume()` and
+`remap_volume_ids()` in `interface/voxel_volume.h`, which are where the rule
+that the engine moves data and never reinterprets it actually lives; a
+`VoxelFormat::roles()` list that `validate()` now shares, so a role added to
+the format cannot be forgotten by either; and a modified flag per section, so
+a run that only walks through a world writes nothing.
+
+The check was a reorder: digger's 108-section save read by a build whose
+registration order had two voxel types swapped. 2 of 7 names go through the
+table, no section is generated, all 108 are written back, and all 864 chunk
+blobs come out byte-identical under an in-memory numbering that is not the
+save's. What it also turned up is that digger's own generator is not
+deterministic between runs -- trees straddle section boundaries and
+`merge_volume()` refuses to overwrite, so which section generated first shows
+in the result. That is why the check is a round trip of one save and not a
+comparison of two generated ones.
+
+Riding along: `games/digger` uses the ids `add_voxel()` returns instead of
+the literals 1 to 7 with `// id 1` comments keeping them in step.

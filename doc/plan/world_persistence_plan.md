@@ -237,7 +237,53 @@ is in the first version rather than an optimisation later.
 `load_section()` gets its missing half: read the section if it is there,
 generate it if it is not.
 
-## What a save says about its voxels (settled 2026-09-12)
+## What a save says about its voxels (settled 2026-09-12, built 2026-09-13)
+
+**Built, where that is not obvious from the rules below:**
+
+- **The name table is per world, not per save.** A `VoxelRegistry` belongs to
+  a `voxelworld` instance, and "several voxel worlds on one server" is
+  already a design note, so two worlds in one save can have two numberings.
+  The rows are `<world>/names` and `<world>/formats` beside
+  `<world>/registry`.
+- **A chunk row is `"BVC"`, a version byte and a 16-bit format tag, then the
+  blob replication already produces.** A row that does not start with the
+  magic was written before there was a header, and is in the world's own
+  format by definition -- there was only ever the one. A cereal archive
+  begins with an endianness byte and never with `B`, so the two cannot be
+  read for each other.
+- **A save written before the name table existed is seeded from the registry
+  it carries**, which *is* the numbering its chunks are in. Without that, a
+  game that had since changed its registration order would read those ids as
+  something else, quietly. This is the one thing the old saved registry is
+  still authoritative about, and only because there was nothing else.
+- **The registry row is now for definitions, not numbering.** It is written
+  again whenever the game has registered something since, and read back only
+  to seed the table above and to draw a type the game has dropped.
+- **`update_id_maps()` runs before a section is read or written, not once.**
+  A game goes on registering voxel types after `set_save()` -- the Luanti
+  module allocates content ids while the mods load -- so a name that does not
+  resolve now may resolve later, and a type registered later still has to
+  reach the table before anything holding it is written. Both of its loops
+  normally do nothing.
+- **A chunk that had to be converted marks its section modified**, so the
+  save converges on the world's current format as sections are touched and
+  nothing that was not touched is rewritten.
+- **A refusal stops reading as well as writing.** `refuse_save()` logs what
+  it could not do and drops the store, so the world goes on generating and
+  what is on disk is left exactly as it was. A game that wrote a guess over
+  somebody's world could not take it back.
+- **The check:** digger's 108-section save, loaded by a build whose
+  registration order had two voxel types swapped. The log says 2 of 7 names
+  are read and written through the table, no section is generated, all 108
+  are written back -- and all 864 chunk blobs come out byte-identical to what
+  they were, under an in-memory numbering that is not the save's. Reverting
+  the swap gives a run that writes nothing at all. `migrate_volume()` and
+  `remap_volume_ids()` have their own asserts in `voxel_volume_self_test()`.
+
+**Not built: the game's own migration hook.** The engine refuses a width
+change and a named plane that changed, because that is the game's call and
+there is nowhere yet to hand it to. The shape it should have is below.
 
 **The running game owns the numbering; the save stores names.** An earlier
 draft of this file had it the other way round -- the save's registry replaced
@@ -351,21 +397,16 @@ game.
 
 ## Order
 
-**1 to 3 are done** -- the paths and `-DPORTABLE`, the vendored sqlite and
-`builtin/storage`, and `voxelworld` saving and loading sections. Each left a
-check behind: an assert-based self-check of the path selection (the XDG
-variables present, absent and empty, and `-C`/`-D` winning over both), a
-round trip in `builtin/storage` over an in-memory database, and digger
-generating 108 sections into a save which a second run loaded without
-generating any -- the two saves byte-identical over all 865 rows.
+**1 to 4 are done** -- the paths and `-DPORTABLE`, the vendored sqlite and
+`builtin/storage`, `voxelworld` saving and loading sections, and the name
+table, the format tag and the modified flag. Each left a check behind: an
+assert-based self-check of the path selection (the XDG variables present,
+absent and empty, and `-C`/`-D` winning over both), a round trip in
+`builtin/storage` over an in-memory database, digger generating 108 sections
+into a save which a second run loaded without generating any -- the two saves
+byte-identical over all 865 rows -- and, for step 4, the round trip under
+"What a save says about its voxels" below.
 
-4. **The name table, the format tag and the modified flag.** What "What a
-   save says about its voxels" describes: the save stores names and the
-   running game owns the numbering, each chunk is tagged with the format it
-   was written in, and a section is only written when something changed.
-   These are one piece of work because they change the same two functions --
-   `save_section()` and `load_saved_section()` -- and because the modified
-   flag is what keeps the other two affordable. It lands before 5a.
 5. `builtin/luanti` uses it. Written as one step originally, which hid that
    it is one thing and three later things:
 
@@ -391,6 +432,4 @@ generating any -- the two saves byte-identical over all 865 rows.
    `save.sqlite`.
 6. The Luanti importer, which is its own milestone in the module plan.
 
-Steps 1 and 2 are independent of everything in `builtin/luanti` and can land
-whenever. Step 3 is what the sample games notice. Step 4 is what makes a save
-survive the game changing under it.
+Step 5a is next, and it is the only part that waited for step 4.

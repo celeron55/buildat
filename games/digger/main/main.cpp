@@ -62,6 +62,25 @@ using namespace Urho3D;
 // hollows rather than a sea with islands in it.
 static const int WATER_LEVEL = 25;
 
+// The ids add_voxel() returned, instead of the literals 1 to 7 that used to
+// be written here with "// id 1" comments keeping them in step with the
+// registration order. The generator, the dig handler and the place handler
+// are all in this file, so one set of them reaches everything that needs one.
+//
+// Written once at core:start on the module's own thread, and read afterwards
+// from the generator's; worldgen is enabled after they are set, which is what
+// keeps the two apart.
+static struct VoxelIds
+{
+	interface::VoxelTypeId air = 0;
+	interface::VoxelTypeId rock = 0;
+	interface::VoxelTypeId dirt = 0;
+	interface::VoxelTypeId grass = 0;
+	interface::VoxelTypeId leaves = 0;
+	interface::VoxelTypeId tree = 0;
+	interface::VoxelTypeId water = 0;
+} g_ids;
+
 struct Worldgen: public worldgen::GeneratorInterface
 {
 	void generate(SceneReference scene_ref,
@@ -98,37 +117,37 @@ struct Worldgen: public worldgen::GeneratorInterface
 						pv::Vector3DInt32 p(x, y, z);
 						pv::Vector3DInt32 cp(-112, 20, 253);
 						if((p - cp).lengthSquared() < 30*30){
-							volume.setVoxelAt(p, VoxelInstance(1));
+							volume.setVoxelAt(p, VoxelInstance(g_ids.air));
 							continue;
 						}
 						if(y >= 2 && y <= 3 && z >= 256 && z <= 258 &&
 								x >= -112 && x <= -5){
-							volume.setVoxelAt(p, VoxelInstance(1));
+							volume.setVoxelAt(p, VoxelInstance(g_ids.air));
 							continue;
 						}
 						if(z > 37 && z < 50 && y > 20){
-							volume.setVoxelAt(p, VoxelInstance(1));
+							volume.setVoxelAt(p, VoxelInstance(g_ids.air));
 							continue;
 						}
 						if(x > 27 && x < 40 && y > 20){
-							volume.setVoxelAt(p, VoxelInstance(1));
+							volume.setVoxelAt(p, VoxelInstance(g_ids.air));
 							continue;
 						}
 						if(x > 18 && x < 25 && z >= 32 && z <= 37 &&
 								y > 20 && y < 25){
-							volume.setVoxelAt(p, VoxelInstance(1));
+							volume.setVoxelAt(p, VoxelInstance(g_ids.air));
 							continue;
 						}
 						if(y < a+5){
-							volume.setVoxelAt(p, VoxelInstance(2));
+							volume.setVoxelAt(p, VoxelInstance(g_ids.rock));
 						} else if(y < a+10){
-							volume.setVoxelAt(p, VoxelInstance(3));
+							volume.setVoxelAt(p, VoxelInstance(g_ids.dirt));
 						} else if(y < a+11){
-							volume.setVoxelAt(p, VoxelInstance(4));
+							volume.setVoxelAt(p, VoxelInstance(g_ids.grass));
 						} else if(y <= WATER_LEVEL){
-							volume.setVoxelAt(p, VoxelInstance(7));
+							volume.setVoxelAt(p, VoxelInstance(g_ids.water));
 						} else {
-							volume.setVoxelAt(p, VoxelInstance(1));
+							volume.setVoxelAt(p, VoxelInstance(g_ids.air));
 						}
 					}
 				}
@@ -161,14 +180,14 @@ struct Worldgen: public worldgen::GeneratorInterface
 
 				for(int y1 = y; y1<y+4; y1++){
 					pv::Vector3DInt32 p(x, y1, z);
-					volume.setVoxelAt(p, VoxelInstance(6));
+					volume.setVoxelAt(p, VoxelInstance(g_ids.tree));
 				}
 
 				for(int x1 = x-2; x1 <= x+2; x1++){
 					for(int y1 = y+3; y1 <= y+7; y1++){
 						for(int z1 = z-2; z1 <= z+2; z1++){
 							pv::Vector3DInt32 p(x1, y1, z1);
-							volume.setVoxelAt(p, VoxelInstance(5));
+							volume.setVoxelAt(p, VoxelInstance(g_ids.leaves));
 						}
 					}
 				}
@@ -234,7 +253,8 @@ struct Module: public interface::Module
 	// The six numbers after solid describe the surface; see interface/atlas.h.
 	// visible is the edge material: an invisible voxel is also one light
 	// passes through. top_texture, when given, goes on the +Y and -Y faces.
-	void add_voxel(interface::VoxelRegistry *reg, const ss_ &name,
+	interface::VoxelTypeId add_voxel(interface::VoxelRegistry *reg,
+			const ss_ &name,
 			const ss_ &texture, bool visible, bool solid,
 			bool fully_empty, float roughness = 0.9f, float spec_strength = 1.0f,
 			float bumpiness = 1.0f, float translucency = 0.0f,
@@ -267,7 +287,7 @@ struct Module: public interface::Module
 				interface::EDGEMATERIALID_EMPTY;
 		vdef.physically_solid = solid;
 		vdef.fully_empty = fully_empty;
-		reg->add_voxel(vdef);
+		return reg->add_voxel(vdef);
 	}
 
 	void on_start()
@@ -323,28 +343,34 @@ struct Module: public interface::Module
 			// roughness, spec_strength, bumpiness, translucency, spots,
 			// static_spots; see interface/atlas.h. The values are
 			// voxel_lighting's, which is where they were chosen.
-			add_voxel(voxel_reg, "air", "", false, false, true);     // id 1
-			add_voxel(voxel_reg, "rock", "main/rock.png", true, true, false,
-					0.95f, 0.15f, 0.5f, 0.0f, 0.0f, 0.04f);    // id 2
-			add_voxel(voxel_reg, "dirt", "main/dirt.png", true, true, false,
-					0.98f, 0.15f, 0.6f, 0.0f, 0.0f, 0.04f);    // id 3
-			add_voxel(voxel_reg, "grass", "main/grass.png", true, true, false,
-					0.90f, 1.0f, 0.75f, 0.06f, 0.012f);        // id 4
-			add_voxel(voxel_reg, "leaves", "main/leaves.png", true, true, false,
-					0.95f, 1.0f, 1.5f, 0.11f, 0.03f);          // id 5
-			add_voxel(voxel_reg, "tree", "main/tree.png", true, true, false,
+			g_ids.air = add_voxel(voxel_reg, "air", "", false, false, true);
+			g_ids.rock = add_voxel(voxel_reg, "rock", "main/rock.png",
+					true, true, false,
+					0.95f, 0.15f, 0.5f, 0.0f, 0.0f, 0.04f);
+			g_ids.dirt = add_voxel(voxel_reg, "dirt", "main/dirt.png",
+					true, true, false,
+					0.98f, 0.15f, 0.6f, 0.0f, 0.0f, 0.04f);
+			g_ids.grass = add_voxel(voxel_reg, "grass", "main/grass.png",
+					true, true, false,
+					0.90f, 1.0f, 0.75f, 0.06f, 0.012f);
+			g_ids.leaves = add_voxel(voxel_reg, "leaves", "main/leaves.png",
+					true, true, false,
+					0.95f, 1.0f, 1.5f, 0.11f, 0.03f);
+			g_ids.tree = add_voxel(voxel_reg, "tree", "main/tree.png",
+					true, true, false,
 					0.85f, 0.35f, 2.0f, 0.0f, 0.0f, 0.0f,
-					"main/tree_top.png");                      // id 6
+					"main/tree_top.png");
 			// Walked into rather than stood on: the player sinks to the lake
 			// floor and can dig or climb out. Nothing simulates flow, so a
 			// dug shore leaves a hole in the water rather than draining it.
-			add_voxel(voxel_reg, "water", "main/water.png", true, false, false,
-					0.28f, 1.0f, 6.0f, 0.0f, 0.05f);           // id 7
+			g_ids.water = add_voxel(voxel_reg, "water", "main/water.png",
+					true, false, false,
+					0.28f, 1.0f, 6.0f, 0.0f, 0.05f);
 
 			// After the voxels are defined and before anything asks for a
-			// section: a save that already has a registry replaces the one
-			// just built, ids and all, and sections that are in the save are
-			// loaded instead of generated.
+			// section: the save's name table is matched against what was
+			// just registered, and sections that are in the save are loaded
+			// instead of generated.
 			if(m_save)
 				world->set_save(m_save, "main");
 
@@ -395,7 +421,7 @@ struct Module: public interface::Module
 					for(int dy = 1; dy <= height; dy++){
 						world->set_voxel(
 								pv::Vector3DInt32(x, floor_y + dy, z),
-								VoxelInstance(1), true);
+								VoxelInstance(g_ids.air), true);
 					}
 				}
 			}
@@ -508,7 +534,7 @@ struct Module: public interface::Module
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *instance)
 		{
-			instance->set_voxel(voxel_p, VoxelInstance(2));
+			instance->set_voxel(voxel_p, VoxelInstance(g_ids.rock));
 		});
 	}
 
@@ -526,7 +552,7 @@ struct Module: public interface::Module
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *instance)
 		{
-			instance->set_voxel(voxel_p, VoxelInstance(1));
+			instance->set_voxel(voxel_p, VoxelInstance(g_ids.air));
 		});
 	}
 

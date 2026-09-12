@@ -514,6 +514,21 @@ namespace interface
 			return -1;
 		}
 
+		// Every engine role in one list, for code that has to treat them
+		// all the same way rather than by name. What wants it is a
+		// migration moving a saved chunk from the cut it was written in to
+		// the cut the game is running now; nothing else has needed it.
+		//
+		// The name is what a warning calls the role by. The order is the
+		// declaration order above and is not part of any format -- nothing
+		// is stored by it.
+		struct Role
+		{
+			const char *name;
+			VoxelField VoxelFormat::*field;
+		};
+		static const sv_<Role>& roles();
+
 		static VoxelFormat legacy()
 		{
 			VoxelFormat f;
@@ -559,6 +574,20 @@ namespace interface
 			VoxelField slots[VOXEL_SURFACE_MODIFIERS];
 			return surface_modifiers(slots) != 0;
 		}
+
+		// The same cut: the same planes, and every role in the same place.
+		// What asks is a save, deciding whether the chunks it holds are in
+		// the format the world is running now.
+		bool operator==(const VoxelFormat &o) const {
+			if(planes != o.planes)
+				return false;
+			for(const Role &r : roles()){
+				if(!(this->*(r.field) == o.*(r.field)))
+					return false;
+			}
+			return true;
+		}
+		bool operator!=(const VoxelFormat &o) const { return !(*this == o); }
 
 		// Every bound field is inside its plane, no two overlap, and the id
 		// fits VOXELTYPEID_MAX. why, when given, gets the first reason it

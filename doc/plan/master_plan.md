@@ -60,24 +60,20 @@ be.
 
 The order of work, which is one line of it rather than parallel branches:
 
-1. **voxelworld: the name table, the format tag and the modified flag.**
-   Step 4 of `doc/plan/world_persistence_plan.md`, written out there under "What
-   a save says about its voxels". The running game owns the voxel numbering
-   and the save stores names; each chunk carries the format it was written
-   in; a section is written only when something changed. One piece of work
-   because all three change the same two functions. Riding along: `games/digger`
-   should use the ids `add_voxel()` returns instead of writing 1 to 7
-   literally, which turns "safe" into "impossible to get wrong".
-2. **`builtin/luanti`: the world and the clock persist.** Step 5a there.
-   Waits for 1, and is the only thing that does -- it is the only part that
-   touches voxel ids.
-3. **`client_file`, items 1 to 3 of section 14.** Before M3 points it at a
+1. **`builtin/luanti`: the world and the clock persist.** Step 5a of
+   `doc/plan/world_persistence_plan.md`. This is what step 4 was built for --
+   the module's Lua content ids are allocated while the mods load, so a save
+   that dictated the numbering would desynchronise the two halves silently.
+2. **`client_file`, items 1 to 3 of section 14.** Before M3 points it at a
    Luanti game's whole asset tree: serve a path-backed file from disk rather
    than from memory, announce in one packet, bunch the sends.
-4. **M3 -- it looks like the game.** The big one. Drawtypes through buildat's
+3. **M3 -- it looks like the game.** The big one. Drawtypes through buildat's
    own mesher, media, and the client resolving textures into its own atlas.
    `init.lua`'s three-way split is the largest unexamined piece of it.
-5. **M4, M5, M6, M7** after, in the module plan's own order.
+4. **M4, M5, M6, M7** after, in the module plan's own order.
+
+Step 4 of the persistence plan is done -- voxelworld's name table, format tag
+and modified flag; see `doc/plan/master_plan_history.md`.
 
 Two loose ends inside the module, neither blocking: the region reads are
 written in Lua and pay an `access_module()` per voxel, so the loop belongs on
@@ -145,17 +141,13 @@ spent.
 
 ## Still open from finished work
 
-Two things that finished sections left behind, neither big enough for a
-section of its own:
+One thing a finished section left behind, not big enough for a section of its
+own:
 
 - **The client's chunk physics fix has not been played.** All three parts are
   built and the walking-digging-pouring harness does not fall through in
   aggregate or in digger, but the fault was always intermittent and a harness
   is not proof. Section 4b of the history has the diagnosis.
-- **`games/digger` writes voxel ids as literals** -- `VoxelInstance(1)`
-  through `VoxelInstance(7)`, with `// id 1` comments keeping them in step
-  with the `add_voxel()` calls. It should use the ids `add_voxel()` returns.
-  Rides along with step 1 of the third round.
 
 ## 14. client_file, for a Luanti-sized media set (2026-09-12) -- PLANNED
 
