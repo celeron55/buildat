@@ -565,6 +565,18 @@ function M.new(magic, buildat, log, options)
 	local MOON_FADE_IN = 18500   -- and comes back from here
 	local MOON_IN = 19500        -- to full here
 
+	-- Nothing above the horizon shines from under it. The clocks above are
+	-- where the fade is shaped; this is the line itself, taken from where the
+	-- body actually is, so that neither can light the undersides of the world
+	-- whatever the clock says. A couple of degrees of softness, because a
+	-- light that switches off in one frame is a light that pops.
+	local HORIZON_FADE = 0.05    -- sine of the angle, so about three degrees
+
+	local function above_horizon(sine_of_elevation)
+		local t = sine_of_elevation / HORIZON_FADE
+		return t < 0 and 0 or (t > 1 and 1 or t)
+	end
+
 	-- 0 before the rise, 1 between the rise and the set, 0 after it, and the
 	-- way across each ramp in between
 	local function up_between(time_of_day, rise_from, rise_to,
@@ -596,6 +608,8 @@ function M.new(magic, buildat, log, options)
 	-- sky empty between them, and the moon is out of the way by the time the
 	-- sun is worth anything.
 	do
+		assert(above_horizon(-1) == 0 and above_horizon(0) == 0 and
+				above_horizon(1) == 1, "the horizon line")
 		assert(sun_amount(12000) == 1 and moon_amount(12000) == 0, "noon")
 		assert(sun_amount(0) == 0 and moon_amount(0) == 1, "midnight")
 		assert(moon_amount(SUN_RISE) > 0.4, "the moon is still up at sunrise")
@@ -3465,6 +3479,21 @@ function M.new(magic, buildat, log, options)
 				SUN_COLOR[3] * (1 - low) + tint.b * low)
 	end
 
+	-- That the clock and the horizon agree, checked here rather than where
+	-- the clocks are written because sun_direction() is defined between the
+	-- two: the sun's ramp begins where the sun is level with the horizon and
+	-- ends where it is level again, so neither rule has to fight the other.
+	do
+		local function elevation(t)
+			local _, sy = sun_direction(t)
+			return sy
+		end
+		assert(math.abs(elevation(SUN_RISE)) < 0.02, "the sun rises at 05:00")
+		assert(math.abs(elevation(SUN_DOWN)) < 0.02, "the sun sets at 19:00")
+		assert(elevation(12000) > 0.9, "the sun is overhead at noon")
+		assert(elevation(0) < -0.9, "the sun is under the world at midnight")
+	end
+
 	function self:set_daylight(factor, time_of_day)
 		daylight = factor
 		daylight_time = time_of_day or daylight_time
@@ -3532,14 +3561,14 @@ function M.new(magic, buildat, log, options)
 			-- everything and puts the night's sparkle on the wrong side of
 			-- the sky.
 			local sx, sy, sz = sun_direction(daylight_time)
-			local up = sun_amount(daylight_time)
+			local up = sun_amount(daylight_time) * above_horizon(sy)
 			sun_node.enabled = up > 0
 			if up > 0 then
 				sun_node.direction = magic.Vector3(-sx, -sy, -sz)
 				sun_light.brightness = SUN_BRIGHTNESS * up
 				sun_light.color = sun_light_color(daylight_time)
 			end
-			local moon_up = moon_amount(daylight_time)
+			local moon_up = moon_amount(daylight_time) * above_horizon(-sy)
 			moon_node.enabled = moon_up > 0
 			if moon_up > 0 then
 				moon_node.direction = magic.Vector3(sx, sy, sz)
