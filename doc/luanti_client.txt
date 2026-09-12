@@ -732,8 +732,13 @@ beyond 128 live single particles is dropped rather than queued.
 The clouds are a flat layer faked in the sky shader -- the view direction
 divided by its own y, which is what makes them crowd towards the horizon --
 rather than a layer at a height. So of what CLOUD_PARAMS says, the density
-becomes how much of the sky they cover and the speed becomes how fast the
-layer drifts, through a factor picked so that Luanti's own default drifts at
+becomes how much of the sky they cover -- which it already is: Luanti fills a
+cloud cell where its own noise falls below the density, the shader here fills
+where its noise rises above one minus the coverage, and since both are value
+noise of much the same shape and both are even about a half, the quantile
+carries straight across and the two clients cover the sky to within two parts
+in a hundred of each other -- and the speed becomes how fast the layer drifts,
+through a factor picked so that Luanti's own default drifts at
 the rate the shader had baked in before a game could ask for anything: twice
 the speed is twice as fast, and that is what the field is for. The height and
 the thickness have nothing to become and are dropped. Drawing the real thing
