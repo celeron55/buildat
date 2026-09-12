@@ -668,11 +668,19 @@ two things M1 disproved about the build, are in
   taken from `extensions/luanti_client/shapes.lua` which read them out
   first. devtest: 56 node types.
 
-  simplified: a *shaped* node that turns does not turn its shape, only its
-  textures -- and the mesher takes a shape quad's tile from the quad and not
-  from `tile_order`, so for those the variants do nothing at all. Luanti's
-  `transformNodeBox` is what a turned node box wants; the extension's
-  `turn_quads` is the same thing already written.
+  **A shaped node turns its shape too**, which is Luanti's
+  `transformNodeBox`: a step facing the other way is the same quads rotated,
+  and the tile each quad names travels with it. The rotation matrices are
+  derived *from* the tile table rather than from Luanti's handedness
+  conventions -- the table says which local face ends up in which world
+  direction, and three of those give the columns -- so the two check each
+  other, and `check_shapes()` asserts each comes out a proper rotation.
+
+  simplified: the texture is not turned inside a shape's quad. `tile_turns`
+  does that for a cube's faces and the mesher does not apply it to a shape,
+  so a turned node box wears its textures straight. And a rooted plant's
+  shape is not turned at all: it stands in the voxel above its own, and
+  rotating it would take it sideways out of that voxel.
 
   devtest: 129 of 390 node types have a shape, 83 of them liquids.
 

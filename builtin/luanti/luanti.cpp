@@ -162,6 +162,57 @@ static const uint8_t FACEDIR_TURNS[24][6] = {
 	{1, 3, 2, 2, 2, 2},
 };
 
+// The rotation a facedir is, as a matrix, derived from the table above rather
+// than from Luanti's handedness conventions: FACEDIR_TILES[d][f] says world
+// face f wears the tile of local face s, which means the rotation takes the
+// local face s to the world direction of f. Three of those give the columns,
+// and check_shapes() asserts that what comes out is a proper rotation.
+//
+// out[r][c], so that out * v is the rotated v.
+static void facedir_matrix(uint8_t d, int out[3][3])
+{
+	// Face f points this way: +Y, -Y, +X, -X, +Z, -Z
+	static const int FACE_DIR[6][3] = {
+		{0, 1, 0}, {0, -1, 0}, {1, 0, 0},
+		{-1, 0, 0}, {0, 0, 1}, {0, 0, -1},
+	};
+	// Local face 2 is +X, 0 is +Y and 4 is +Z, so those three give the
+	// columns of the matrix
+	static const uint8_t AXIS_FACE[3] = {2, 0, 4};
+	for(size_t c = 0; c < 3; c++){
+		const uint8_t s = AXIS_FACE[c];
+		for(size_t f = 0; f < 6; f++){
+			if(FACEDIR_TILES[d][f] != s)
+				continue;
+			for(size_t r = 0; r < 3; r++)
+				out[r][c] = FACE_DIR[f][r];
+			break;
+		}
+	}
+}
+
+// A shape turned the way a facedir turns it. The quads keep the tiles they
+// name -- a quad's texture is the local face it was built on, and that
+// travels with it -- so only the corners move.
+//
+// simplified: the texture is not turned inside the quad. tile_turns is what
+// does that for a cube's faces and the mesher does not apply it to a shape's
+// quads, so a turned node box wears its textures straight.
+static void turn_quads(const sv_<interface::VoxelQuad> &in, uint8_t d,
+		sv_<interface::VoxelQuad> &out)
+{
+	int m[3][3] = {};
+	facedir_matrix(d, m);
+	out = in;
+	for(interface::VoxelQuad &q : out){
+		for(size_t i = 0; i < 4; i++){
+			const float x = q.p[i][0], y = q.p[i][1], z = q.p[i][2];
+			for(size_t r = 0; r < 3; r++)
+				q.p[i][r] = (float)(m[r][0] * x + m[r][1] * y + m[r][2] * z);
+		}
+	}
+}
+
 // A wallmounted direction is a facedir too; Luanti's own
 // wallmounted_to_facedir[]. 6 and 7 are the two spare states, which are
 // the ceiling and the floor turned a quarter.
@@ -934,6 +985,51 @@ struct Module: public interface::Module, public luanti::Interface
 			assert(FACEDIR_TILES[0][f] == f);
 			assert(FACEDIR_TURNS[0][f] == 0);
 		}
+		// Each facedir matrix is a proper rotation -- an orthonormal basis
+		// with determinant 1 -- and it takes each local face to the world
+		// face the table says wears its tile. Derived from the table, so
+		// this is the table checking itself against what a rotation can be.
+		for(size_t d = 0; d < 24; d++){
+			int m[3][3] = {};
+			facedir_matrix((uint8_t)d, m);
+			const int det =
+					m[0][0]*(m[1][1]*m[2][2] - m[1][2]*m[2][1]) -
+					m[0][1]*(m[1][0]*m[2][2] - m[1][2]*m[2][0]) +
+					m[0][2]*(m[1][0]*m[2][1] - m[1][1]*m[2][0]);
+			assert(det == 1);
+			for(size_t c = 0; c < 3; c++){
+				int len = 0;
+				for(size_t r = 0; r < 3; r++)
+					len += m[r][c] * m[r][c];
+				assert(len == 1);
+			}
+			// Facedir 0 turns nothing
+			if(d == 0){
+				for(size_t r = 0; r < 3; r++)
+					for(size_t c = 0; c < 3; c++)
+						assert(m[r][c] == (r == c ? 1 : 0));
+			}
+		}
+		// A box turned four quarters about any axis is the box it was
+		{
+			sv_<interface::VoxelQuad> a, b;
+			add_box_quads(a, -0.5f, -0.5f, -0.5f, 0.5f, 0.0f, 0.25f);
+			turn_quads(a, 0, b);
+			assert(b.size() == a.size());
+			for(size_t i = 0; i < a.size(); i++){
+				for(size_t c = 0; c < 4; c++){
+					for(size_t j = 0; j < 3; j++)
+						assert(a[i].p[c][j] == b[i].p[c][j]);
+				}
+			}
+			// Facedir 20 is the node stood on its head: y flips
+			turn_quads(a, 20, b);
+			for(size_t i = 0; i < a.size(); i++){
+				for(size_t c = 0; c < 4; c++)
+					assert(b[i].p[c][1] == -a[i].p[c][1]);
+			}
+		}
+
 		// A wallmounted direction is one of the twenty-four, and the two
 		// that stand up are the ones a floor and a ceiling node get
 		for(size_t i = 0; i < 8; i++)
@@ -1126,6 +1222,14 @@ struct Module: public interface::Module, public luanti::Interface
 					var.tile_order[f] = FACEDIR_TILES[d][f];
 					var.tile_turns[f] = FACEDIR_TURNS[d][f];
 				}
+				// A node that has a shape turns the shape too: a stair
+				// facing the other way is the same quads rotated, and the
+				// tile each quad names travels with it. Only for a shape
+				// that is the node's own cube -- a rooted plant's shape
+				// stands in the voxel above and turning it would take it
+				// sideways out of that voxel.
+				if(!shape.empty() && !shape_over_cube && d != 0)
+					turn_quads(shape, d, var.shape);
 				facing_variants.push_back(var);
 			}
 

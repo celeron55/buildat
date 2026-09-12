@@ -68,8 +68,8 @@ The order of work, which is one line of it rather than parallel branches:
    are drawn at all now that "light gets past this" is a flag of its own
    rather than the edge material (another 40); a node turns with its param2
    -- `facedir`, `4dir` and `wallmounted`, 56 of 390 -- through the
-   `tile_order` and `tile_turns` a `VoxelVariant` has always had; and a
-   liquid is blended,
+   `tile_order` and `tile_turns` a `VoxelVariant` has always had, with a
+   shaped node turning its shape as well; and a liquid is blended,
    which is a technique `builtin/voxel_shading` was missing for the child
    node the mesher has always put translucent faces on. What is left is the
    texture modifiers, the rest of the drawtypes, palettes, and the client
