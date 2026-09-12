@@ -179,7 +179,7 @@ do
 		magic.audio:SetMasterGain(magic.SOUND_MASTER, 0.7)
 	end
 	local viewport = magic.Viewport:new(scene, camera)
-	magic.renderer:SetViewport(0, viewport)
+	magic.set_preferred_viewports({viewport})
 end
 
 do

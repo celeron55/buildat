@@ -157,6 +157,31 @@ static int l_render_scene_to_texture(lua_State *L)
 	return 1;
 }
 
+// set_preferred_viewports({viewport, ...}). An empty table is teardown.
+// The engine draws these at the user's render_scale; see
+// CApp::apply_preferred_viewports() in src/client/app.cpp.
+static int l_set_preferred_viewports(lua_State *L)
+{
+	tolua_Error tolua_err;
+	if(!lua_istable(L, 1))
+		return luaL_error(L, "set_preferred_viewports(): expected a table");
+
+	sv_<Viewport*> viewports;
+	size_t n = lua_objlen(L, 1);
+	for(size_t i = 1; i <= n; i++){
+		lua_rawgeti(L, 1, i);
+		GET_TOLUA_STUFF(viewport, -1, Viewport);
+		lua_pop(L, 1);
+		viewports.push_back(viewport);
+	}
+
+	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
+	lua_pop(L, 1);
+	buildat_app->set_preferred_viewports(viewports);
+	return 0;
+}
+
 void init_misc_urho3d(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
@@ -167,6 +192,7 @@ void init_misc_urho3d(lua_State *L)
 	DEF_BUILDAT_FUNC(profiler_block_end);
 	DEF_BUILDAT_FUNC(add_resource_dir);
 	DEF_BUILDAT_FUNC(render_scene_to_texture);
+	DEF_BUILDAT_FUNC(set_preferred_viewports);
 }
 
 } // namespace lua_bindingss

@@ -5,7 +5,7 @@
 -- TCP and UDP sockets for scripts, with the user in the loop: the first
 -- connection or datagram to an address in a week needs the user to accept the
 -- address and name it. Answers are remembered in
--- cache/network_addresses.csv.
+-- user/network_addresses.csv.
 --
 --   local socket = require("buildat/extension/network")
 --   socket.udp_connect("localhost", 30001, function(sock, err)
@@ -34,7 +34,7 @@ local M = {safe = {}}
 
 local ACCEPTANCE_VALID_S = 7 * 24 * 3600
 
-local store_path = __buildat_get_path("cache").."/network_addresses.csv"
+local store_path = __buildat_get_path("user").."/network_addresses.csv"
 
 -- Addresses this session has already notified about
 local notified = {}
