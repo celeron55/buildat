@@ -605,6 +605,19 @@ two things M1 disproved about the build, are in
 
   devtest: 129 of 390 node types have a shape, 83 of them liquids.
 
+  **And the blended pass, which is what makes water water.** A liquid, and
+  anything a game asked to be blended rather than alpha masked with
+  `use_texture_alpha = "blend"`, is `VoxelDefinition::translucent`. The
+  mesher already put those faces on a child node of the chunk so that Urho3D
+  sorts them against the other chunks' translucent geometry rather than
+  against the opaque geometry they are mixed with -- but nothing gave that
+  child a technique, so it was invisible rather than see-through.
+  `builtin/voxel_shading` has `PBRVoxelAlpha.xml` now, the same shader
+  blended instead of cut out with culling off, and `apply_to_node()` reaches
+  the child. It is a builtin rather than the module's, because it is the
+  mesher's own child node and every game with water in it wants the same
+  thing.
+
   **And four more are built as cubes that are drawn differently**, which is
   what they are: `glasslike` and its framed variants get an edge material of
   their own per node type, so a face is drawn against anything except more of
@@ -628,16 +641,6 @@ two things M1 disproved about the build, are in
     and the client is what composes it -- `buildat.compose_image`, the way
     `extensions/luanti_client`'s `resolve_tile` does. Until then those nodes
     wear a flat colour, which is honest and is not what devtest looks like.
-  - **A blended pass, which is what makes water water.** A liquid is drawn
-    in the opaque pass today. `VoxelDefinition::translucent` exists and the
-    mesher already puts such faces on a child node of the chunk so Urho3D
-    sorts them -- but nothing gives that child a technique, so a blended
-    liquid would be invisible rather than see-through. What it wants is a
-    blended technique in `builtin/voxel_shading` and `apply_to_node()`
-    reaching the child; `each_material()` only looks at the node's own
-    `CustomGeometry`. That also covers `use_texture_alpha = "blend"` on
-    framed glass and panes, which are alpha-masked now where the game meant
-    them to be seen through.
   - **The rest of the drawtypes.** By what devtest has of them:
     `glasslike_framed`'s frame (5, drawn as a plain cube for now);
     `torchlike` (3), `signlike` (3), `raillike` (1), `firelike` (1),

@@ -452,6 +452,10 @@ function core.__voxel_defs()
 			-- own tiles are the cube it is rooted in
 			overlay_tile = (drawtype == "plantlike_rooted") and
 					tile_name_of((def and def.special_tiles or {})[1]) or nil,
+			-- Blended rather than alpha masked. Without it framed glass and
+			-- panes are drawn with every texel either solid or gone, where
+			-- the game meant them to be seen through.
+			alpha_blend = (def and def.use_texture_alpha == "blend") or false,
 		}
 	end
 	return out
