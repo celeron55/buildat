@@ -8,6 +8,7 @@
 #include "interface/packet_stream.h"
 #include "interface/sha1.h"
 #include "interface/fs.h"
+#include "interface/compress.h"
 #include "lua_bindings/replicate.h"
 #include <c55/string_util.h>
 #include <cereal/archives/portable_binary.hpp>
@@ -51,6 +52,22 @@ using magic::SmoothedTransform;
 extern client::Config g_client_config;
 
 namespace client {
+
+// A packet body the server may have compressed; see pack_packet() in
+// builtin/client_file. A flag byte says which it is, because zstd on
+// incompressible data is larger than the data, so the server sends whichever
+// of the two is smaller and says which it sent.
+static ss_ unpack_packet(const ss_ &data)
+{
+	if(data.empty())
+		return data;
+	if(data[0] == 0)
+		return data.substr(1);
+	std::ostringstream os(std::ios::binary);
+	interface::decompress_zstd(data.substr(1), os);
+	return os.str();
+}
+
 
 struct CState: public State
 {
@@ -270,7 +287,7 @@ void CState::setup_packet_handlers()
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
 		sv_<std::tuple<ss_, ss_>> files;
-		std::istringstream is(data, std::ios::binary);
+		std::istringstream is(unpack_packet(data), std::ios::binary);
 		{
 			cereal::PortableBinaryInputArchive ar(is);
 			ar(files);
@@ -342,7 +359,7 @@ void CState::setup_packet_handlers()
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
 		sv_<std::tuple<ss_, ss_, ss_>> files;
-		std::istringstream is(data, std::ios::binary);
+		std::istringstream is(unpack_packet(data), std::ios::binary);
 		{
 			cereal::PortableBinaryInputArchive ar(is);
 			ar(files);
