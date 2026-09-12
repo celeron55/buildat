@@ -7,6 +7,7 @@
 #include "interface/process.h"
 #include "interface/mutex.h"
 #include <fstream>
+#include <cstdlib> // getenv(), setenv()
 #define MODULE "boot"
 
 namespace boot {
@@ -65,6 +66,138 @@ static bool check_runnable(const ss_ &command)
 		m_valid_commands.insert(command);
 		return true;
 	}
+}
+
+// Where the user's own things and the cache go when they are not beside the
+// program. Always compiled, so that the self-check below runs in either build.
+//
+// The rule that sorts a path into one or the other: the cache is what the
+// program can recreate by itself; the user path is what the user made, chose
+// or fetched deliberately.
+
+static ss_ env_or(const char *name, const ss_ &fallback)
+{
+	const char *v = getenv(name);
+	if(v && v[0])
+		return v;
+	return fallback;
+}
+
+static ss_ home_path()
+{
+#ifdef _WIN32
+	return env_or("USERPROFILE", ".");
+#else
+	return env_or("HOME", ".");
+#endif
+}
+
+ss_ platform_user_path()
+{
+#if defined(_WIN32)
+	return env_or("APPDATA", home_path()+"/AppData/Roaming")+"/buildat";
+#elif defined(__APPLE__)
+	return home_path()+"/Library/Application Support/buildat";
+#else
+	return env_or("XDG_DATA_HOME", home_path()+"/.local/share")+"/buildat";
+#endif
+}
+
+ss_ platform_cache_path()
+{
+#if defined(_WIN32)
+	return env_or("LOCALAPPDATA", home_path()+"/AppData/Local")+"/buildat/cache";
+#elif defined(__APPLE__)
+	return home_path()+"/Library/Caches/buildat";
+#else
+	return env_or("XDG_CACHE_HOME", home_path()+"/.cache")+"/buildat";
+#endif
+}
+
+// A portable build keeps both beside the program, which is what the
+// root-relative defaults in the PathDefinition tables do. A system build puts
+// them where the platform says, and then they take no part in root detection:
+// whether there is a writable cache beside share/ says nothing about where
+// buildat's data belongs. A value that is already there came from -C or -D and
+// wins over both.
+static void set_platform_data_paths(core::Config &config)
+{
+#ifndef BUILDAT_PORTABLE
+	if(config.get<ss_>("cache_path").empty())
+		config.set("cache_path", platform_cache_path());
+	if(config.get<ss_>("user_path").empty())
+		config.set("user_path", platform_user_path());
+#else
+	(void)config;
+#endif
+}
+
+#ifndef _WIN32
+// Sets an environment variable and puts back what was there when it goes out
+// of scope, so that the check below can look at both cases
+struct ScopedEnv {
+	ss_ name;
+	bool had_old = false;
+	ss_ old;
+	ScopedEnv(const char *name_, const char *value): name(name_){
+		const char *v = getenv(name_);
+		if(v){
+			had_old = true;
+			old = v;
+		}
+		if(value)
+			setenv(name_, value, 1);
+		else
+			unsetenv(name_);
+	}
+	~ScopedEnv(){
+		if(had_old)
+			setenv(cs(name), cs(old), 1);
+		else
+			unsetenv(cs(name));
+	}
+};
+#endif
+
+static void check_platform_data_paths()
+{
+#if !defined(_WIN32) && !defined(__APPLE__)
+	{
+		ScopedEnv h("HOME", "/home/u");
+		ScopedEnv d("XDG_DATA_HOME", "/xdg/data");
+		ScopedEnv c("XDG_CACHE_HOME", "/xdg/cache");
+		if(platform_user_path() != "/xdg/data/buildat")
+			throw Exception("platform_user_path: XDG_DATA_HOME");
+		if(platform_cache_path() != "/xdg/cache/buildat")
+			throw Exception("platform_cache_path: XDG_CACHE_HOME");
+	}
+	{
+		ScopedEnv h("HOME", "/home/u");
+		ScopedEnv d("XDG_DATA_HOME", nullptr);
+		ScopedEnv c("XDG_CACHE_HOME", nullptr);
+		if(platform_user_path() != "/home/u/.local/share/buildat")
+			throw Exception("platform_user_path: fallback");
+		if(platform_cache_path() != "/home/u/.cache/buildat")
+			throw Exception("platform_cache_path: fallback");
+	}
+	{
+		// An empty variable is not a path, whatever the shell thinks
+		ScopedEnv h("HOME", "/home/u");
+		ScopedEnv d("XDG_DATA_HOME", "");
+		if(platform_user_path() != "/home/u/.local/share/buildat")
+			throw Exception("platform_user_path: empty XDG_DATA_HOME");
+	}
+#endif
+	// -C and -D win over whichever of the two builds this is
+	core::Config config;
+	config.set_default("cache_path", "");
+	config.set_default("user_path", "");
+	config.set("cache_path", "/given/cache");
+	config.set("user_path", "/given/user");
+	set_platform_data_paths(config);
+	if(config.get<ss_>("cache_path") != "/given/cache" ||
+			config.get<ss_>("user_path") != "/given/user")
+		throw Exception("set_platform_data_paths: overrode -C/-D");
 }
 
 enum PathDefinitionType {PD_END, PD_READ, PD_WRITE, PD_RUN};
@@ -249,11 +382,23 @@ PathDefinition server_paths[] = {
 		"/cache/rccpp_build",
 		"/write.test",
 		"RCC++ build directory"},
+	// Saves go here; see local/world_persistence_plan.md
+	{PD_WRITE, "user_path",
+		"/user",
+		"/write.test",
+		"User directory"},
 	{PD_END, "", "", "", ""},
 };
 
 static bool detect_buildat_server_paths(core::Config &config)
 {
+	set_platform_data_paths(config);
+#ifndef BUILDAT_PORTABLE
+	// The one thing the server keeps in the cache
+	if(config.get<ss_>("rccpp_build_path").empty())
+		config.set("rccpp_build_path",
+				config.get<ss_>("cache_path")+"/rccpp_build");
+#endif
 	sv_<ss_> roots;
 	generate_buildat_root_alternatives(roots);
 	return detect_paths(config, roots, server_paths, "Buildat server root");
@@ -307,6 +452,7 @@ PathDefinition client_paths[] = {
 
 static bool detect_buildat_client_paths(core::Config &config)
 {
+	set_platform_data_paths(config);
 	sv_<ss_> roots;
 	generate_buildat_root_alternatives(roots);
 	return detect_paths(config, roots, client_paths, "Buildat client root");
@@ -374,6 +520,8 @@ bool detect_server_paths(core::Config &config)
 {
 	bool ok = true;
 
+	check_platform_data_paths();
+
 	if(!detect_buildat_server_paths(config))
 		ok = false;
 	if(!detect_compiler_bin_paths(config))
@@ -387,6 +535,8 @@ bool detect_server_paths(core::Config &config)
 bool detect_client_paths(core::Config &config)
 {
 	bool ok = true;
+
+	check_platform_data_paths();
 
 	if(!detect_buildat_client_paths(config))
 		ok = false;

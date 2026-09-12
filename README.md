@@ -55,6 +55,14 @@ from.
 You can use -DBUILD_SERVER=false or -DBUILD_CLIENT=false if you don't need the
 server or the client, respectively.
 
+`-DPORTABLE=TRUE`, the default, keeps the cache and the user's own things
+beside the program, in `cache/` and `user/`. That is what development wants.
+`-DPORTABLE=FALSE` puts them where the platform says instead
+(`$XDG_DATA_HOME/buildat` and `$XDG_CACHE_HOME/buildat` on Linux,
+`%APPDATA%\buildat` and `%LOCALAPPDATA%\buildat\cache` on Windows,
+`~/Library/Application Support/buildat` and `~/Library/Caches/buildat` on
+macOS), which is what an installed copy wants. `-C` and `-D` override either.
+
 Optional: `-DURHO3D_LUAJIT=TRUE` builds the bundled LuaJIT instead of Lua.
 `URHO3D_HOME` still overrides the bundled tree if you need an external build.
 
@@ -86,8 +94,9 @@ for one run with `-o`, which is not written back:
     $ bin/buildat -o render_scale=0.5,vsync=0,sound_mute=1
 
 `user/` is where what the user made, chose or downloaded deliberately goes, as
-against `cache/`, which is what the program can recreate by itself. Both sit
-in the buildat directory; `-D` and `-C` move them.
+against `cache/`, which is what the program can recreate by itself. In the
+default portable build both sit in the buildat directory; `-D` and `-C` move
+them, and `-DPORTABLE=FALSE` puts them where the platform says (see Build).
 
 See [doc/client_api.txt](doc/client_api.txt) for what a game does to honour
 `render_scale`, and what the client does not get to decide.
