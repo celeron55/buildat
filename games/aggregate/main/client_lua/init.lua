@@ -629,6 +629,151 @@ local function overlook(lc, uc)
 			math.deg(math.atan2(oy, horiz)), 0, 0)
 end
 
+-- The shapes of the structures, as the server builds them at the origin: a
+-- serialized volume, and the box it occupies relative to the builder's own
+-- origin. Asked for at connect rather than at menu-open, so that nothing
+-- waits for a round trip when the menu goes up.
+local structure_shapes = {}
+
+buildat.sub_packet("main:structure_shape", function(data)
+	local values = cereal.binary_input(data, {"object",
+		{"name", "string"},
+		{"lc", {"object",
+			{"x", "int32_t"}, {"y", "int32_t"}, {"z", "int32_t"},
+		}},
+		{"uc", {"object",
+			{"x", "int32_t"}, {"y", "int32_t"}, {"z", "int32_t"},
+		}},
+		{"data", "string"},
+	})
+	structure_shapes[values.name] = values
+	-- Meshed now rather than when it is chosen: a preview built at the
+	-- moment the menu closes queues behind whatever chunks are being meshed,
+	-- which around a moving camera is a wait. The node is kept disabled and
+	-- reused; nothing simulates it and it costs a hidden drawable.
+	local node = scene:CreateChild("preview_"..values.name)
+	node.enabled = false
+	values.node = node
+	-- Without skylight: a volume standing on its own has none to read, and
+	-- the vertex colours would come out black
+	buildat.set_voxel_geometry(node, values.data,
+			voxelworld.get_voxel_registry(), voxelworld.get_atlas_registry(),
+			false, function()
+				voxel_shading.apply_to_node(node)
+			end)
+	log:info("shape of "..values.name..": ("..
+			(values.uc.x - values.lc.x + 1)..", "..
+			(values.uc.y - values.lc.y + 1)..", "..
+			(values.uc.z - values.lc.z + 1)..") voxels, "..
+			#values.data.." bytes")
+end)
+
+for _, st in ipairs(STRUCTURES) do
+	buildat.send_packet("main:request_structure_shape", cereal.binary_output(
+			{name = st.name}, {"object", {"name", "string"}}))
+end
+
+-- Placement mode
+-- --------------
+--
+-- The chosen structure is drawn where it would go, as an ordinary drawable
+-- in the main scene: nothing merges it into the world, nothing simulates it,
+-- and it depth-sorts where it stands. The mouse moves it over the terrain
+-- and the right button sends the place_structure the menu used to send by
+-- itself.
+local placement = nil
+-- The server answers a placement with the box it took up, and the handler
+-- takes the camera to it. That is for a building placed from where you
+-- stand; one placed by eye is already in frame.
+local suppress_overlook_once = false
+
+-- Fixed while placement mode is up: the camera sits 15 out on each of +X and
+-- +Z and 40 above, looking at what is selected.
+local PLACE_CAM = {x = 15, y = 40, z = 15}
+local PLACE_YAW = 225  -- The horizontal part of (-15, -40, -15)
+local PLACE_PITCH = math.deg(math.atan2(PLACE_CAM.y,
+		math.sqrt(PLACE_CAM.x * PLACE_CAM.x + PLACE_CAM.z * PLACE_CAM.z)))
+-- Voxels per mouse count, which is about what the look sensitivity is
+local PLACE_MOUSE_SPEED = 0.1
+
+-- The ground under an X/Z: the first thing from above that is occupied, and
+-- the building sits on top of it. Centre only -- a building over uneven
+-- ground reading as buried is what says to try the footprint's corners.
+local function ground_at(x, z, near_y)
+	-- Generous downwards, because the mouse can cross a cliff in a frame and
+	-- a search that ends above the ground would leave the building hanging
+	-- -- or, worse, keep it where it was and let it drift
+	for y = near_y + 60, near_y - 200, -1 do
+		if occupied_at(buildat.Vector3(x, y, z)) then
+			return y + 1
+		end
+	end
+	return near_y
+end
+
+-- Where the builder's origin has to go for the box to be centred on x/z with
+-- its bottom on y
+local function placement_origin(sh, x, y, z)
+	return {
+		x = x - math.floor((sh.lc.x + sh.uc.x) / 2),
+		y = y - sh.lc.y,
+		z = z - math.floor((sh.lc.z + sh.uc.z) / 2),
+	}
+end
+
+local function update_placement()
+	local sh = placement.shape
+	placement.y = ground_at(placement.x, placement.z, placement.y)
+	local o = placement_origin(sh, placement.x, placement.y, placement.z)
+	-- The mesh is centred on the volume, and the volume is the box with one
+	-- voxel of padding around it; see create_chunk_node() for the same sum
+	local w = sh.uc.x - sh.lc.x + 1
+	local h = sh.uc.y - sh.lc.y + 1
+	local d = sh.uc.z - sh.lc.z + 1
+	placement.node.position = magic.Vector3(
+			o.x + sh.lc.x + w / 2 - 0.5,
+			o.y + sh.lc.y + h / 2 - 0.5,
+			o.z + sh.lc.z + d / 2 - 0.5)
+	-- The camera follows the building and nothing else: the angle is fixed,
+	-- so what is on screen only ever slides
+	local cam = magic.Vector3(placement.x + PLACE_CAM.x,
+			placement.y + PLACE_CAM.y, placement.z + PLACE_CAM.z)
+	player_node.position = cam - camera_node.position
+	player_node.rotation = magic.Quaternion(0, PLACE_YAW, 0)
+	camera_node.rotation = magic.Quaternion(PLACE_PITCH, 0, 0)
+end
+
+local function end_placement()
+	if not placement then return end
+	placement.node.enabled = false
+	placement = nil
+	magic.input:GetMouseMove() -- Thrown away; see the Update handler
+end
+
+local function start_placement(name)
+	local sh = structure_shapes[name]
+	if not sh then
+		log:warning("placement: the shape of "..name.." has not arrived")
+		return
+	end
+	end_placement()
+	set_free_move(true)
+	local p = player_node:GetWorldPosition()
+	placement = {
+		name = name,
+		shape = sh,
+		node = sh.node,
+		x = math.floor(p.x + 0.5),
+		y = math.floor(p.y + 0.5),
+		z = math.floor(p.z + 0.5),
+	}
+	placement.fx, placement.fz = placement.x, placement.z
+	placement.node.enabled = true
+	update_placement()
+	pointed_voxel_visual_node.enabled = false
+	magic.input:SetMouseVisible(false)
+end
+
 -- The views: the same voxels meshed out of a registry whose materials wear a
 -- gradient instead of their texture, by how close they are to failing. The
 -- server builds one per mode and sends them; see build_view_registry() in
@@ -702,6 +847,10 @@ buildat.sub_packet("main:structure_placed", function(data)
 			{"x", "int32_t"}, {"y", "int32_t"}, {"z", "int32_t"},
 		}},
 	})
+	if suppress_overlook_once then
+		suppress_overlook_once = false
+		return
+	end
 	-- Only in free move: standing inside what was just built is the other
 	-- way to experience it, and taking the camera away would spoil it
 	if free_move then
@@ -740,9 +889,8 @@ local function open_structure_menu()
 	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	for _, st in ipairs(STRUCTURES) do
 		menu:add(st.label, function()
-			-- Where the player stands, so a building goes up around them
-			place_structure(st.name, player_node:GetWorldPosition())
 			close_structure_menu()
+			start_placement(st.name)
 		end)
 	end
 	structure_menu = {root = root, menu = menu}
@@ -755,6 +903,13 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	-- closes it. Without this, escape would disconnect the client from
 	-- inside a menu, which is not what anyone means by escape.
 	if structure_menu then
+		return
+	end
+	if placement then
+		-- Escape means "not this one" here, and not "disconnect"
+		if key == magic.KEY_ESCAPE then
+			end_placement()
+		end
 		return
 	end
 	if key == magic.KEY_ESCAPE then
@@ -809,6 +964,18 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	end
 	local button = event_data:GetInt("Button")
 	log:info("MouseButtonDown: "..button)
+	if placement then
+		if button == magic.MOUSEB_RIGHT then
+			local o = placement_origin(placement.shape,
+					placement.x, placement.y, placement.z)
+			suppress_overlook_once = true
+			place_structure(placement.name, magic.Vector3(o.x, o.y, o.z))
+		end
+		if button == magic.MOUSEB_RIGHT or button == magic.MOUSEB_LEFT then
+			end_placement()
+		end
+		return
+	end
 	if button == magic.MOUSEB_RIGHT then
 		local p = pointed_voxel_p_above
 		-- Water with nothing in reach goes in front of you instead, a voxel
@@ -880,7 +1047,9 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	-- dims the reflected sky under ground; see builtin/voxel_shading
 	voxel_shading.update(dt)
 
-	if camera_node then
+	-- Nothing is pointed at while a building is being placed: the marker
+	-- would sit inside the preview and the buttons mean something else
+	if camera_node and not placement then
 		local p, p_above = find_pointed_voxel(camera_node)
 		pointed_voxel_p = p
 		pointed_voxel_p_above = p_above
@@ -920,10 +1089,28 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 			player_node.position = magic.Vector3(0, 500, 0)
 		end
 
+		-- Read whether or not it is used: the delta accumulates either
+		-- way, and a frame that skips it would hand the whole sweep across
+		-- a menu to the frame after it
 		local dmouse = magic.input:GetMouseMove()
 		--log:info("dmouse: ("..dmouse.x..", "..dmouse.y..")")
-		camera_node:Pitch(dmouse.y * 0.1)
-		player_node:Yaw(dmouse.x * 0.1)
+		if placement then
+			-- Screen right and screen away, under the fixed yaw: moving the
+			-- mouse right has to move the building right on screen, which
+			-- is not a world axis
+			local yaw = math.rad(PLACE_YAW)
+			local rx, rz = math.cos(yaw), -math.sin(yaw)
+			local fx, fz = math.sin(yaw), math.cos(yaw)
+			local s = PLACE_MOUSE_SPEED
+			placement.fx = placement.fx + (dmouse.x * rx - dmouse.y * fx) * s
+			placement.fz = placement.fz + (dmouse.x * rz - dmouse.y * fz) * s
+			placement.x = math.floor(placement.fx + 0.5)
+			placement.z = math.floor(placement.fz + 0.5)
+			update_placement()
+		elseif not structure_menu then
+			camera_node:Pitch(dmouse.y * 0.1)
+			player_node:Yaw(dmouse.x * 0.1)
+		end
 		--[[log:info("y="..player_node:GetRotation():YawAngle())
 		log:info("p="..camera_node:GetRotation():PitchAngle())]]
 
@@ -933,7 +1120,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		end
 		hold_physics_while_floor_rebuilds(dt)
 
-		if free_move then
+		if free_move and not placement then
 			-- Level, along the horizontal part of where the camera looks, so
 			-- that looking down at something and holding W flies over it
 			-- instead of into it. Space and shift are what go up and down.
@@ -1044,6 +1231,10 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 				" (1-5)  structures: B  free move: Tab"..
 				(free_move and " (on)" or "").."  view: V"..
 				(view_mode ~= 0 and " ("..VIEW_NAMES[view_mode]..")" or "")
+		if placement then
+			line = "placing "..placement.name..
+					"  right click to place, escape to cancel"
+		end
 		-- What the pointed voxel is and how close it is to failing, which
 		-- is the whole debug interface between digs
 		if pointed_voxel_p then
