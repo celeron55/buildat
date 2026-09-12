@@ -324,6 +324,16 @@ end
 -- What comes out is the tile *string*, texture modifiers and all: the server
 -- decides which voxel types exist and the client decides what their pixels
 -- are. See doc/plan/luanti_module_plan.md, "Who resolves textures".
+local function tile_name_of(t)
+	if type(t) == "table" then
+		t = t.name or t.image
+	end
+	if type(t) == "string" then
+		return t
+	end
+	return nil
+end
+
 local function tile_names(def)
 	local tiles = def and (def.tiles or def.tile_images)
 	if type(tiles) ~= "table" then
@@ -332,13 +342,7 @@ local function tile_names(def)
 	local out = {}
 	local last = nil
 	for i = 1, 6 do
-		local t = tiles[i]
-		if type(t) == "table" then
-			t = t.name or t.image
-		end
-		if type(t) ~= "string" then
-			t = last
-		end
+		local t = tile_name_of(tiles[i]) or last
 		if t == nil then
 			return nil
 		end
@@ -346,6 +350,22 @@ local function tile_names(def)
 		last = t
 	end
 	return out
+end
+
+-- A liquid wears its special_tiles and not its tiles: the first is the
+-- surface and the second the sides, and `tiles` is what the item looks like
+-- in a hand. Same six faces in the same order as everything else.
+local function liquid_tiles(def)
+	local st = def and def.special_tiles
+	if type(st) ~= "table" then
+		return nil
+	end
+	local top = tile_name_of(st[1])
+	if top == nil then
+		return nil
+	end
+	local side = tile_name_of(st[2]) or top
+	return {top, top, side, side, side, side}
 end
 
 -- A nodebox's boxes, flattened to six numbers each, in Luanti's own
@@ -404,6 +424,8 @@ function core.__voxel_defs()
 		-- VoxelDefinition::transmits_light.
 		local sunlight = (drawtype == "airlike") or
 				(def and def.sunlight_propagates) or false
+		local is_liquid = (drawtype == "liquid") or
+				(drawtype == "flowingliquid")
 		out[id] = {
 			id = id,
 			name = name or ("unknown_" .. id),
@@ -414,9 +436,18 @@ function core.__voxel_defs()
 			empty = (drawtype == "airlike"),
 			walkable = (def == nil) or (def.walkable ~= false),
 			light_source = (def and def.light_source) or 0,
-			tiles = tile_names(def),
+			tiles = is_liquid and (liquid_tiles(def) or tile_names(def)) or
+					tile_names(def),
 			node_box = (drawtype == "nodebox") and node_boxes(def) or nil,
 			visual_scale = (def and def.visual_scale) or 1.0,
+			-- What says two liquid nodes are the same liquid: a water source
+			-- and a flowing water both name the source. Luanti pairs them
+			-- this way and so does the mesher's shape_group.
+			liquid_group = is_liquid and
+					((def and def.liquid_alternative_source) or name) or nil,
+			-- How many of the eight levels this liquid actually spends; a
+			-- shorter range puts them all at the top of the voxel
+			liquid_range = (def and def.liquid_range) or 8,
 		}
 	end
 	return out
