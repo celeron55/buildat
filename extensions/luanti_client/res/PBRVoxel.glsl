@@ -1,7 +1,38 @@
-// Forked from builtin/voxel_shading's PBRVoxel.glsl, which a Luanti client
-// cannot use: builtin/ is not on a client's resource path and there is no
-// buildat server to deliver it. One change of its own, cSkyColor below; keep
-// the two files in step when either is touched.
+// A fork of builtin/voxel_shading's PBRVoxel.glsl, and no longer a copy of it.
+//
+// It started as one because a Luanti client cannot use the built-in shader:
+// builtin/ is not on a client's resource path and there is no buildat server
+// to deliver it. What keeps the two apart now is that a good deal of what is
+// in here is an art style rather than a mechanism -- how far a spot turns, how
+// narrowly a leaf passes light through itself -- and this client's worlds and
+// games/voxel_lighting's are not the same worlds. Tuning one of them through a
+// shared file retunes the other, which is how voxel_lighting's rock quietly
+// lost its speckle.
+//
+// So the two are not kept in step. A fix to the machinery is worth carrying
+// across by hand; a number that decides how something looks is not. What
+// differs today, and why:
+//
+//   cSkyColor           Only here. The colour the sky is at this moment, which
+//                       the client pushes so that reflections follow the sky
+//                       it paints without a cube map being rebaked.
+//   SPOT_TILT           0.06 here, 0.45 there. A Luanti game's ground is
+//                       plants the whole way across and every one of them can
+//                       hold a spot, so the sparkle has to gather tightly
+//                       around the light or it reads as glitter over a field.
+//                       voxel_lighting's few surfaces are sparsely spotted and
+//                       a wide turn is what makes them catch anything at all.
+//   TRANSMISSION_FOCUS  A thirty-second power here against a sixth there, for
+//                       the same reason: a canopy of Luanti leaves glowing
+//                       over a quarter of the sky stops reading as the sun
+//                       behind it.
+//   spotGloss           Ramped on sharply here, linear there. With plants this
+//                       dense, the half open cells -- most of them at any
+//                       moment -- are a sheen that follows the light.
+//
+// STATIC_SPOT_TILT is the same number in both and wants to stay that way: a
+// facet is a chip of rock either way, and narrowing it does not gather the
+// speckle anywhere, it only takes it off the sand.
 //
 // Copied from CoreData/Shaders/GLSL/PBRLitSolid.glsl (Urho3D 1.7.1). Two
 // changes, both about how voxel skylight reaches the ambient term:
