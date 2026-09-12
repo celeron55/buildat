@@ -55,19 +55,23 @@ int main(int argc, char *argv[])
 
 	client::Config &config = g_client_config;
 
-	const char opts[100] = "hs:P:C:U:l:L:m:u:w:c:";
+	const char opts[100] = "hs:P:C:D:U:l:L:m:u:w:o:c:";
 	const char usagefmt[1000] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
 			"  -s [address]         Specify server address\n"
 			"  -P [share_path]      Specify share/ path\n"
 			"  -C [cache_path]      Specify cache/ path\n"
+			"  -D [user_path]       Specify user/ path\n"
 			"  -U [urho3d_path]     Specify Urho3D path\n"
 			"  -l [level number]    Set maximum log level (0...5)\n"
 			"  -L [log file path]   Append log to a specified file\n"
 			"  -m [name]            Choose menu extension name\n"
 			"  -u [scale]           UI scale (0 = auto from short side / 1080)\n"
 			"  -w [WxH]             Windowed at this size; not remembered\n"
+			"  -o [k=v,...]         Set preferences; not remembered. Keys:\n"
+			"                       render_scale, vsync, max_fps,\n"
+			"                       multisampling, sound_volume, sound_mute\n"
 			"  -c [commands]        Run command sequence and exit\n"
 			"                       One command per line. @file reads a file,\n"
 			"                       - reads standard input as it arrives.\n"
@@ -75,6 +79,7 @@ int main(int argc, char *argv[])
 			;
 
 	int forced_w = 0, forced_h = 0;
+	ss_ preference_overrides;
 
 	int c;
 	while((c = c55_getopt(argc, argv, opts)) != -1)
@@ -95,6 +100,10 @@ int main(int argc, char *argv[])
 		case 'C':
 			log_i(MODULE, "config.cache_path: %s", c55_optarg);
 			config.set("cache_path", c55_optarg);
+			break;
+		case 'D':
+			log_i(MODULE, "config.user_path: %s", c55_optarg);
+			config.set("user_path", c55_optarg);
 			break;
 		case 'U':
 			log_i(MODULE, "config.urho3d_path: %s", c55_optarg);
@@ -122,6 +131,24 @@ int main(int argc, char *argv[])
 			}
 			log_i(MODULE, "window size: %ix%i", forced_w, forced_h);
 			break;
+		case 'o': {
+			// Repeatable, and later items win, so that a wrapper script's -o
+			// can be overridden on the command line after it
+			ss_ items = c55_optarg ? c55_optarg : "";
+			ss_ merged = preference_overrides.empty() ? items :
+					preference_overrides + "," + items;
+			// Accepted here so that a typo is a usage error rather than a
+			// startup failure; applied in the app, on top of the saved file
+			app::Options probe;
+			ss_ err;
+			if(!app::parse_preference_options(merged, &probe, &err)){
+				fprintf(stderr, "-o: %s\n", err.c_str());
+				return 1;
+			}
+			log_i(MODULE, "preferences: %s", merged.c_str());
+			preference_overrides = merged;
+			break;
+		}
 		case 'c': {
 			ss_ arg = c55_optarg ? c55_optarg : "";
 			ss_ text;
@@ -182,6 +209,7 @@ int main(int argc, char *argv[])
 	}
 
 	app::Options app_options;
+	app_options.preference_overrides = preference_overrides;
 	if(forced_w > 0){
 		app_options.graphics.window_w = forced_w;
 		app_options.graphics.window_h = forced_h;
