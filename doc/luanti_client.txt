@@ -113,6 +113,13 @@ are where the fade is shaped; the line itself is enforced separately, from
 where the body actually is, so that neither can shine from under the world
 whatever the clock says.
 
+A cloud in the sun is drawn past white, so that the tone curve leaves it white
+rather than at about nine tenths, which reads as grey. That is ramped with the
+sun's own hour at each end of the day and is only given to the clouds the
+game's own colour says are white ones: a game that asks for grey clouds, which
+is how VoxeLibre says it is raining, is taken at its word and left where it
+was. The vanilla path does not do it at all, having no tone curve to survive.
+
 For the half hour either side of the sun crossing the horizon, at each end of
 the day, the sun's light goes towards the colour the game paints the horizon
 band with -- weighted towards the crossing itself, so that it comes on gently

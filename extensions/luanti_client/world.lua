@@ -579,6 +579,16 @@ function M.new(magic, buildat, log, options)
 		return v < 0 and 0 or (v > 1 and 1 or v)
 	end
 
+	-- 0 below low, 1 above high, and a smooth ride between them
+	local function smoothstep01(v, low, high)
+		local t = clamp01((v - low) / (high - low))
+		return t * t * (3 - 2 * t)
+	end
+
+	local function luminance(rgb)
+		return 0.2126 * rgb[1] + 0.7152 * rgb[2] + 0.0722 * rgb[3]
+	end
+
 	local function above_horizon(sine_of_elevation)
 		return clamp01(sine_of_elevation / HORIZON_FADE)
 	end
@@ -3492,6 +3502,12 @@ function M.new(magic, buildat, log, options)
 	-- lit by nothing else and the sun is lighting it from below, where the
 	-- ground is lit by the sky as well.
 	local CLOUD_SUN_TINT = 0.75
+	-- How far past white a cloud in full sun is drawn, and the band of the
+	-- game's own cloud colour over which that is given: a white cloud gets
+	-- all of it, a rain cloud none, and nothing in between jumps
+	local CLOUD_DAY_GAIN = 2.0
+	local CLOUD_WHITE_LOW = 0.5
+	local CLOUD_WHITE_HIGH = 0.9
 
 	-- One of the game's colours, or Luanti's default for it, as 0...1
 	local function sky_color(name, brightness)
@@ -3559,6 +3575,18 @@ function M.new(magic, buildat, log, options)
 				"a sky full of cloud covers it whatever colour the cloud is")
 		assert(cloud_cover_of(0.0, {0, 0, 0}) == 0,
 				"a cloud that is not there covers nothing")
+
+		-- And which of those the sun is allowed to whiten
+		local function white_of(c)
+			return smoothstep01(luminance({c[1] / 255, c[2] / 255,
+					c[3] / 255}), CLOUD_WHITE_LOW, CLOUD_WHITE_HIGH)
+		end
+		assert(white_of({255, 240, 240}) == 1, "a white cloud takes the sun")
+		assert(white_of({93, 93, 95}) == 0, "a rain cloud is left grey")
+		assert(white_of({61, 61, 63}) == 0, "and a thunderhead darker still")
+		assert(white_of({173, 173, 173}) > 0.1 and
+				white_of({173, 173, 173}) < 0.9,
+				"and what is between them is between them")
 	end
 
 	local function cloud_cover()
@@ -3720,20 +3748,38 @@ function M.new(magic, buildat, log, options)
 			-- sunrise a sunrise rather than a sky that has got brighter.
 			local sun_now = sun_light_color(daylight_time)
 			local lit = low_sun(daylight_time) * CLOUD_SUN_TINT
-			local function cloud_channel(own, from_sun)
-				return (own * (1 - lit) + from_sun * lit) * brightness
-			end
 			local cloud = sky_bodies.clouds.color_bright
+			local own = cloud and
+					{cloud[1] / 255, cloud[2] / 255, cloud[3] / 255} or
+					{0.9, 0.92, 0.95}
+			-- A cloud in the sun is not a light grey thing, it is a white
+			-- one, and on the PBR path the tone curve is between it and the
+			-- screen: a colour that arrives at one leaves it at about nine
+			-- tenths and reads as grey. So it is given some room to be
+			-- clipped out of, while the sun is up to do it -- ramped with the
+			-- sun's own hour at each end of the day -- and only as far as the
+			-- game's own colour says it is a white cloud. A game that wants
+			-- grey clouds, which is how VoxeLibre says it is raining, is
+			-- taken at its word and left alone.
+			local day = pbr and sun_amount(daylight_time) * above_horizon(sy) *
+					body_is_up(sky_bodies.sun) or 0
+			local white = smoothstep01(luminance(own), CLOUD_WHITE_LOW,
+					CLOUD_WHITE_HIGH)
+			local gain = 1 + (CLOUD_DAY_GAIN - 1) * day * white
+			local function cloud_channel(i, from_sun)
+				return (own[i] * (1 - lit) + from_sun * lit) *
+						brightness * gain
+			end
 			if cloud then
 				sky_material:SetShaderParameter("CloudColor", magic.Color(
-						cloud_channel(cloud[1] / 255, sun_now.r),
-						cloud_channel(cloud[2] / 255, sun_now.g),
-						cloud_channel(cloud[3] / 255, sun_now.b)))
+						cloud_channel(1, sun_now.r),
+						cloud_channel(2, sun_now.g),
+						cloud_channel(3, sun_now.b)))
 			else
 				sky_material:SetShaderParameter("CloudColor", magic.Color(
-						cloud_channel(0.9, sun_now.r) + 0.05,
-						cloud_channel(0.92, sun_now.g) + 0.05,
-						cloud_channel(0.95, sun_now.b) + 0.06))
+						cloud_channel(1, sun_now.r) + 0.05,
+						cloud_channel(2, sun_now.g) + 0.05,
+						cloud_channel(3, sun_now.b) + 0.06))
 			end
 			-- The stars come out as the sky goes dark, and a game can say
 			-- they are out in the day as well
