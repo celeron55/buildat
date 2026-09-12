@@ -969,6 +969,16 @@ struct Module: public interface::Module
 	// alive, and dead fibre lying wet. See step_slow().
 	std::vector<pv::Vector3DInt32> m_slow;
 	std::unordered_set<int64_t> m_slow_set;
+	// Voxels that see the sky and have water in them, each with the tick it
+	// is next allowed to lose some on. A queue of its own rather than a
+	// place on the slow one because evaporation is the only rule here whose
+	// rate has to be a rate per *voxel*: the slow queue's clock is how often
+	// a voxel comes up in it, which depends on how much else is in it, so a
+	// lone puddle on that queue would be gone in a frame. The due tick is
+	// the clock instead, and the queue is in order because every entry waits
+	// the same number of ticks.
+	std::deque<std::pair<int64_t, pv::Vector3DInt32>> m_evap;
+	std::unordered_set<int64_t> m_evap_set;
 	// Voxels whose water has somewhere to go, held over to the next tick.
 	//
 	// Water is the one thing here with a *rate*, and a rate needs a clock.
@@ -1648,6 +1658,35 @@ struct Module: public interface::Module
 			m_slow.push_back(p);
 	}
 
+	// Ticks a voxel waits between losing one unit of water to the air, and
+	// what one unit is. A unit is a 255th of a voxel, so open water goes at
+	// about a voxel in half an hour and a damp surface is dry in minutes --
+	// slow enough that a pond is a pond and fast enough that a world with
+	// no rain in it does not only ever get wetter.
+	static const int EVAP_TICKS = 240;
+
+	// Whether the sun reaches the surface of this voxel. The voxel's own
+	// skylight is no use for it: voxelworld gives a voxel that stops light
+	// a skylight of zero, and everything with water in it stops light, so
+	// asking the voxel itself answers no everywhere -- which is what it did,
+	// and why nothing evaporated the first time. It is the air above that
+	// carries the number, and being the surface under open air is what
+	// evaporation is anyway.
+	bool sees_sky(voxelworld::Instance *world, const pv::Vector3DInt32 &p)
+	{
+		const pv::Vector3DInt32 up(p.getX(), p.getY() + 1, p.getZ());
+		interface::VoxelSample uv = peek(world, up);
+		if(!is_generated(uv))
+			return false;
+		return F_LIGHT_SKY.get(uv) >= interface::VoxelInstance::SKYLIGHT_MAX;
+	}
+
+	void mark_evap(const pv::Vector3DInt32 &p)
+	{
+		if(m_evap_set.insert(pos_key(p)).second)
+			m_evap.push_back(std::make_pair(m_tick + EVAP_TICKS, p));
+	}
+
 	void mark_falling(const pv::Vector3DInt32 &p)
 	{
 		if(m_falling_set.insert(pos_key(p)).second)
@@ -1788,12 +1827,22 @@ struct Module: public interface::Module
 	// opens on the ticks where the running total crosses another quantum,
 	// which averages to exactly the rate and needs no per-voxel
 	// accumulator.
+	// How much faster bone-dry material drinks than saturated material does.
+	// Dry pores pull water in by suction and the pull falls away as they
+	// fill, leaving the saturated rate: that is why a shower soaks into a dry
+	// field and stands on a wet one. Scaling the *rate* cannot change where
+	// the water ends up, only how fast it gets there, so this has nothing to
+	// run away with.
+	static const int SUCTION_DRY = 4;
+
 	int flow_limit(const Mix &a, const Mix &b) const
 	{
 		const int ka = conductivity(a), kb = conductivity(b);
-		const int k = ka < kb ? ka : kb;
+		int k = ka < kb ? ka : kb;
 		if(k <= 0)
 			return 0;
+		// The receiver's own dryness, since it is the one doing the drinking
+		k = k * (15 + (15 - (int)saturation(b)) * (SUCTION_DRY - 1)) / 15;
 		const int64_t now = m_tick * k / TICKS_PER_SECOND;
 		const int64_t before = (m_tick - 1) * k / TICKS_PER_SECOND;
 		const int64_t d = now - before;
@@ -2114,6 +2163,12 @@ struct Module: public interface::Module
 				m_died++;
 		}
 
+		// Water under the open sky has something slow to do. Before the
+		// branch below, which returns: standing water is not structural, and
+		// a puddle is the first thing that should dry.
+		if(mix.water > 0 && mix.life == 0 && sees_sky(world, p))
+			mark_evap(p);
+
 		MaterialProps m = props_of(mix);
 		if(!m.structural){
 			if(wetness_moved || solid_moved || life_moved){
@@ -2316,6 +2371,62 @@ struct Module: public interface::Module
 		}
 	}
 
+	// Water lost to the air, from the voxels the sun reaches.
+	//
+	// Nothing here adds water -- there is no rain -- so without this the
+	// world only ever gets wetter: every pour ends up in the ground and
+	// stays there, and the damp a capillary rise pulls up never leaves. It
+	// is the other end of that rule, and between them the ground over a
+	// water table is damp and the ground away from one dries out.
+	//
+	// Only what sees the sky, which is a number voxelworld already keeps per
+	// voxel, so a cellar and a cave do not dry.
+	//
+	// Like everything else here it rides the dirty set rather than sweeping,
+	// so what dries is water the simulation has looked at: what was poured,
+	// dug into or walked past by a collapse. The generator's own ponds sit
+	// as they were generated until something touches them, which is the
+	// behaviour to keep -- a world that quietly drained its lakes while
+	// nobody was there would be worse, not better.
+	size_t m_evaporated = 0;
+
+	void step_evaporation(voxelworld::Instance *world)
+	{
+		const size_t before = m_evaporated;
+		while(!m_evap.empty() && m_evap.front().first <= m_tick){
+			const pv::Vector3DInt32 p = m_evap.front().second;
+			m_evap.pop_front();
+			m_evap_set.erase(pos_key(p));
+			interface::VoxelSample v = peek(world, p);
+			if(!is_generated(v))
+				continue;
+			if(!sees_sky(world, p))
+				continue; // Something was built over it since
+			Mix mix = mix_of(v);
+			if(mix.water == 0)
+				continue;
+			// Living tissue keeps what it has drawn, as it does against
+			// gravity in migrate_water(): a tree is not a puddle
+			if(mix.life > 0)
+				continue;
+			mix.water--;
+			m_evaporated++;
+			interface::VoxelSample nv = v;
+			set_mix(nv, mix);
+			m_scratch[pos_key(p)] = Pending{p, nv};
+			// The tint, the wetness and a water voxel's own level all come
+			// off the water, so this is a voxel that looks different
+			mark_dirty(p);
+			if(mix.water > 0)
+				mark_evap(p);
+		}
+		// Its own line: the sim's is only printed when the sim is busy, and
+		// drying happens in the quiet afterwards
+		if(m_evaporated != before)
+			log_v(MODULE, "evaporation: %zu units, %zu waiting",
+					m_evaporated - before, m_evap.size());
+	}
+
 	// Everything the relaxation worked out, into the world in one go.
 	//
 	// simplified: the whole scratch goes at once rather than on a budget. It
@@ -2341,7 +2452,8 @@ struct Module: public interface::Module
 			mark_dirty(p);
 		m_water_next.clear();
 		m_water_next_set.clear();
-		if(m_dirty.empty() && m_falling.empty() && m_slow.empty())
+		if(m_dirty.empty() && m_falling.empty() && m_slow.empty() &&
+				(m_evap.empty() || m_evap.front().first > m_tick))
 			return;
 		auto t0 = std::chrono::steady_clock::now();
 		size_t done = 0;
@@ -2362,17 +2474,18 @@ struct Module: public interface::Module
 				flush_scratch(world);
 			step_falling(world);
 			step_slow(world);
+			step_evaporation(world);
 		});
 		if(done >= SIM_PER_TICK || !m_falling.empty() || !m_slow.empty()){
 			log_v(MODULE, "sim: %zu done in %i us, %zu dirty, %zu pending, "
 					"%zu falling, %zu fell, %zu came to rest, %zu slow, "
-					"%zu died, %zu rotted, %zu written",
+					"%zu died, %zu rotted, %zu evaporated, %zu written",
 					done, (int)std::chrono::duration_cast<
 							std::chrono::microseconds>(
 							std::chrono::steady_clock::now() - t0).count(),
 					m_dirty.size(), m_scratch.size(), m_falling.size(),
 					m_moved, m_landed, m_slow.size(), m_died, m_rotted,
-					m_wrote);
+					m_evaporated, m_wrote);
 		}
 	}
 
