@@ -4,9 +4,11 @@
 
 -- mapnode.h
 -- Built-in Content IDs (for use with VoxelManip API)
-core.CONTENT_UNKNOWN = 125
-core.CONTENT_AIR     = 126
-core.CONTENT_IGNORE  = 127
+-- MODIFIED for buildat: content ids are allocated by whichever engine runs
+-- the game, and here builtin/luanti is that engine. lua/bootstrap.lua has
+-- already set these to the numbers its VoxelRegistry uses; leaving Luanti's
+-- own 125/126/127 here would overwrite them with numbers nothing else means.
+-- See local/luanti_module_plan.md, "the ids are the same number".
 
 -- emerge.h
 -- Block emerge status constants (for use with core.emerge_area)
