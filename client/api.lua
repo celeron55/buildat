@@ -33,6 +33,10 @@ buildat.bignum = {
 }
 buildat.set_ui_scale      = __buildat_set_ui_scale
 buildat.get_ui_scale      = __buildat_get_ui_scale
+-- The fraction of the window size the user asked 3D viewports to be rendered
+-- at. magic.set_preferred_viewports() applies it; this is for a game that
+-- wants to know. 1.0 means no scaling at all.
+buildat.get_preferred_render_scale = __buildat_get_preferred_render_scale
 buildat.font_sans         = "Fonts/Overpass-Regular.ttf"
 buildat.font_mono         = "Fonts/OverpassMono-Regular.ttf"
 buildat.SpatialUpdateQueue = __buildat_SpatialUpdateQueue
@@ -50,6 +54,7 @@ buildat.read_image        = __buildat_read_image
 buildat.safe.disconnect    = __buildat_disconnect
 buildat.safe.set_ui_scale  = __buildat_set_ui_scale
 buildat.safe.get_ui_scale  = __buildat_get_ui_scale
+buildat.safe.get_preferred_render_scale = __buildat_get_preferred_render_scale
 buildat.safe.font_sans     = buildat.font_sans
 buildat.safe.font_mono     = buildat.font_mono
 buildat.safe.get_time_us   = __buildat_get_time_us

@@ -337,6 +337,30 @@ Safe.render_scene_to_texture = wrap_function({"Scene", "Node", "number",
 			scene, camera_node, w, h))
 end)
 
+-- The viewports the user's graphics preferences are applied to, as against
+-- the raw renderer:SetViewport() ones which are drawn the way the game says
+-- and nothing else. Use this instead of renderer:SetViewport(): the engine
+-- draws the scene at the render_scale the user asked for, under a UI that
+-- stays at native resolution, and the viewport stays the game's own -- what
+-- it does to renderPath afterwards still works.
+--
+--     magic.set_preferred_viewports({viewport})            -- one view
+--     magic.set_preferred_viewports({vp_top, vp_bottom})   -- two
+--     magic.set_preferred_viewports({})                    -- teardown
+--
+-- A game that does not call this is drawn at native resolution and keeps
+-- working; the preference is a preference.
+function Safe.set_preferred_viewports(viewports)
+	if type(viewports) ~= 'table' then
+		error("set_preferred_viewports(): expected a table of Viewports")
+	end
+	local unsafe = {}
+	for i = 1, #viewports do
+		unsafe[i] = magic_sandbox.safe_to_unsafe(viewports[i], "Viewport")
+	end
+	__buildat_set_preferred_viewports(unsafe)
+end
+
 --
 -- Unsafe interface
 --

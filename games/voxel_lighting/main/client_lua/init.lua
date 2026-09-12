@@ -145,7 +145,7 @@ do
 	camera.fov = CAMERA_FOV
 
 	local viewport = magic.Viewport:new(scene, camera)
-	magic.renderer:SetViewport(0, viewport)
+	magic.set_preferred_viewports({viewport})
 
 	magic.renderer.HDRRendering = true
 	local rp = viewport.renderPath:Clone()

@@ -489,6 +489,12 @@ the images come out the same size whatever the window was left at last time.
 It also shoots both benchmark edits, so a run is: all seven views of the scene
 as generated, then three of them after the shaft and after the slab.
 
+The same run at -o render_scale=0.5 and at 1.0 is the check that the client's
+undersampling preference is doing what it should: the same scene, one softer,
+and the UI text equally sharp in both. This game is a good one for it because
+it renders in HDR with a tonemap appended to the render path, which is what
+the preference must not disturb.
+
 NOTE: the server reads client_lua and client_data once at startup, so restart
 it after editing init.lua, the shader or a cube map, or the client will be
 served the previous version. That goes for the voxel_shading module's files as
