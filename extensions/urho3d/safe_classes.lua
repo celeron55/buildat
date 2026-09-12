@@ -391,10 +391,16 @@ function M.define(dst, util)
 	})
 
 	util.wc("BiasParameters", {
-		unsafe_constructor = util.wrap_function({"number", "number"},
-		function(constant_bias, slope_scaled_bias)
+		-- The third one is Urho3D's normal offset, which moves the lookup
+		-- along the surface normal instead of along the light: it is what
+		-- keeps a large flat face out of its own shadow without pushing the
+		-- shadow off the foot of what casts it
+		unsafe_constructor = util.wrap_function(
+		{"number", "number", {"number", "__nil"}},
+		function(constant_bias, slope_scaled_bias, normal_offset)
 			return util.wrap_instance("BiasParameters",
-					BiasParameters(constant_bias, slope_scaled_bias))
+					BiasParameters(constant_bias, slope_scaled_bias,
+							normal_offset or 0.0))
 		end),
 	})
 
@@ -943,6 +949,12 @@ function M.define(dst, util)
 		properties = {
 			HDRRendering = util.simple_property("boolean"),
 			numViewports = util.simple_property("number"),
+			-- Shadows are a renderer-wide setting and not a light's: how big
+			-- the shadow map is, how it is filtered (Urho3D's ShadowQuality),
+			-- and whether any are drawn at all
+			shadowMapSize = util.simple_property("number"),
+			shadowQuality = util.simple_property("number"),
+			drawShadows = util.simple_property("boolean"),
 		},
 	})
 

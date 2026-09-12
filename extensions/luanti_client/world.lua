@@ -27,6 +27,8 @@ local light_flood = dofile(__buildat_extension_path("luanti_client")..
 		"/light.lua")
 local skyvis = dofile(__buildat_extension_path("luanti_client")..
 		"/skyvis.lua")
+local surface = dofile(__buildat_extension_path("luanti_client")..
+		"/surface.lua")
 
 local M = {}
 
@@ -120,6 +122,53 @@ local LIGHT_MAP = (function()
 	end
 	return table.concat(out)
 end)()
+
+-- The same, for the PBR path, whose skylight means something else.
+--
+-- There the sun is a real light with a shadow map, and the shadow map is what
+-- darkens what is under a tree. So node lighting is left to answer the one
+-- question a shadow map cannot -- "am I underground" -- and nothing else: the
+-- curve holds at full until the light has fallen far enough that it can only
+-- be rock overhead, and then drops away. A canopy reads 11..14 and stays fully
+-- lit; a cave reads 0..2 and goes dark; a doorway is the band between.
+--
+-- The knee is the tuning knob. Lower it and cave mouths brighten; raise it and
+-- overhangs start being darkened twice, once here and once by the shadow map.
+local PBR_SKY_KNEE_LOW = 2
+local PBR_SKY_KNEE_HIGH = 11
+
+local PBR_LIGHT_MAP = (function()
+	local out = {}
+	for p = 0, 255 do
+		local day = p % 16
+		local night = math.floor(p / 16)
+		local sky = day > night and day - night or 0
+		local t = (sky - PBR_SKY_KNEE_LOW) /
+				(PBR_SKY_KNEE_HIGH - PBR_SKY_KNEE_LOW)
+		t = t < 0 and 0 or (t > 1 and 1 or t)
+		local smooth = t * t * (3 - 2 * t)
+		out[p + 1] = string.char(night * 16 + math.floor(15 * smooth + 0.5))
+	end
+	return table.concat(out)
+end)()
+
+-- What the curve has to hold, checked at load: full sun outdoors, nothing in
+-- rock, and a canopy left for the shadow map to darken. The lamp nibble rides
+-- through untouched, because the two are separate lights.
+do
+	local function sky_of(day, night)
+		return string.byte(PBR_LIGHT_MAP, night * 16 + day + 1) % 16
+	end
+	local function lamp_of(day, night)
+		return math.floor(string.byte(PBR_LIGHT_MAP, night * 16 + day + 1) / 16)
+	end
+	assert(sky_of(15, 0) == 15, "pbr light curve: open sky")
+	assert(sky_of(PBR_SKY_KNEE_HIGH, 0) == 15, "pbr light curve: canopy")
+	assert(sky_of(PBR_SKY_KNEE_LOW, 0) == 0, "pbr light curve: rock")
+	assert(sky_of(0, 0) == 0, "pbr light curve: dark")
+	assert(sky_of(8, 8) == 0, "pbr light curve: lamp is not sky")
+	assert(lamp_of(15, 7) == 7, "pbr light curve: lamp nibble kept")
+end
 
 -- What the volume is before the block and its neighbours are copied into it:
 -- air that sees the full sky. A face against a neighbour that has not arrived
@@ -384,7 +433,10 @@ function M.new(magic, buildat, log, options)
 	local CLOUD_SPEED_DEFAULT = {0, -2}
 	local CLOUD_WIND_PER_NODE = 0.0054
 	local CLOUD_DENSITY_DEFAULT = 0.4
-	local CLOUD_COVERAGE_DEFAULT = 0.34
+	-- Luanti's own default cloud colour is 229 of 255 opaque, and a game that
+	-- names a colour without an alpha gets a full one; either way the layer
+	-- is drawn at what the colour says rather than solid
+	local CLOUD_ALPHA_DEFAULT = 229 / 255
 
 	-- What the game says is in the sky, out of SET_SUN, SET_MOON, SET_STARS
 	-- and CLOUD_PARAMS. What is here to begin with is what Luanti has before
@@ -459,6 +511,247 @@ function M.new(magic, buildat, log, options)
 				"luanti_client/res/VoxelSky.xml")
 	end
 
+	-- The sun, on the PBR path only. The vanilla path has no light in the
+	-- scene at all: the mesher bakes what a node is lit by into the vertex
+	-- colours, and a directional light on top of that would light everything
+	-- twice. The PBR path keeps the vertex colours as its ambient and adds
+	-- the sun, and what stops the double is the light curve: PBR_LIGHT_MAP
+	-- reads as "am I underground" and nothing else, and the shader gates the
+	-- sun by it. A leaf canopy is then darkened by the shadow map, which is
+	-- the thing a shadow map is good at and a baked light value is not.
+	--
+	-- Biased for performance, because there are no graphics settings beyond
+	-- the PBR checkbox: two cascades rather than four, a small map, and the
+	-- single-tap filter.
+	local SHADOW_NEAR = 24    -- nodes; the first cascade
+	local SHADOW_FAR = 96     -- and the second, which is the shadow distance
+	-- What a lit face gets from the sun, against the sky as the ambient. The
+	-- number is large because Urho's PBR direct lighting is normalized -- the
+	-- BRDF is divided by pi and so is the diffuse term inside it -- and
+	-- because the frame is tone mapped, so a sun well past white is what
+	-- white is for. games/voxel_lighting arrived at the same number for the
+	-- same reasons.
+	local SUN_BRIGHTNESS = 50.0
+	-- How far past the tone curve's middle the frame is exposed
+	local TONEMAP_EXPOSURE = 1.6
+	-- What the sun's disc is drawn at, in the same units: well past white, so
+	-- that the tone curve leaves it white and the bloom finds it
+	local SUN_DISC_OVEREXPOSURE = 6.0
+
+	-- What the moon is worth, in the same units. Not a measurement of
+	-- anything -- real moonlight is a millionth of sunlight and would render
+	-- as nothing -- but a night lit from where the moon is, coldly, and far
+	-- enough above the sky's own light that the moon casts a shadow. A
+	-- fiftieth of the sun.
+	local MOON_BRIGHTNESS = 1.0
+	local MOON_COLOR = {0.55, 0.68, 1.0}
+
+	-- When the sun is in the scene and when the moon is, in Luanti's
+	-- 0...24000. Below the horizon a directional light shines up through the
+	-- world, and its specular -- the sparkle surface.lua asks for on water,
+	-- on snow and on ore -- is then the brightest thing in a night frame and
+	-- is coming from the wrong side of the sky. So the sun is taken out of
+	-- the scene for the night and the moon is put in, each fading over the
+	-- hour on either side of when the sun is level with the horizon.
+	local SUN_RISE = 5000     -- nothing before this
+	local SUN_UP = 6000       -- full sun from here
+	local SUN_SET = 18000     -- full sun until here
+	local SUN_DOWN = 19000    -- nothing after this
+
+	-- The moon's day is a little longer than the sun's night: it is going
+	-- before the sun arrives and does not come back until the sun is well
+	-- gone. That leaves it nine hours at full against the sun's twelve, which
+	-- is one more way of saying which of the two is the dim one, and it means
+	-- that by the time the sun is making any real light the moon has stopped.
+	local MOON_FADE_OUT = 4500   -- the moon starts going here
+	local MOON_OUT = 5500        -- and is gone here, the sun then half up
+	local MOON_FADE_IN = 18500   -- and comes back from here
+	local MOON_IN = 19500        -- to full here
+
+	-- Nothing above the horizon shines from under it. The clocks above are
+	-- where the fade is shaped; this is the line itself, taken from where the
+	-- body actually is, so that neither can light the undersides of the world
+	-- whatever the clock says. A couple of degrees of softness, because a
+	-- light that switches off in one frame is a light that pops.
+	local HORIZON_FADE = 0.05    -- sine of the angle, so about three degrees
+
+	local function clamp01(v)
+		return v < 0 and 0 or (v > 1 and 1 or v)
+	end
+
+	-- 0 below low, 1 above high, and a smooth ride between them
+	local function smoothstep01(v, low, high)
+		local t = clamp01((v - low) / (high - low))
+		return t * t * (3 - 2 * t)
+	end
+
+	local function luminance(rgb)
+		return 0.2126 * rgb[1] + 0.7152 * rgb[2] + 0.0722 * rgb[3]
+	end
+
+	local function above_horizon(sine_of_elevation)
+		return clamp01(sine_of_elevation / HORIZON_FADE)
+	end
+
+	-- 0 before the rise, 1 between the rise and the set, 0 after it, and the
+	-- way across each ramp in between
+	local function up_between(time_of_day, rise_from, rise_to,
+			set_from, set_to)
+		local t = (time_of_day or 12000) % 24000
+		if t <= rise_from or t >= set_to then
+			return 0
+		elseif t < rise_to then
+			return (t - rise_from) / (rise_to - rise_from)
+		elseif t <= set_from then
+			return 1
+		end
+		return (set_to - t) / (set_to - set_from)
+	end
+
+	local function sun_amount(time_of_day)
+		return up_between(time_of_day, SUN_RISE, SUN_UP, SUN_SET, SUN_DOWN)
+	end
+
+	-- Where the sun is for the purpose of casting a shadow, which is not
+	-- quite where it is. A shadow map is rasterized afresh every frame, and a
+	-- light that has turned a little between two of them rasterizes it
+	-- differently, so the edges crawl -- which is what a sun that moves as
+	-- smoothly as this one now does made visible. Holding the direction still
+	-- for a step at a time trades the crawl for a small jump, which is far
+	-- easier not to see. The step is in Luanti's own units of the day, so it
+	-- is a fixed angle of sun however fast the game's clock runs: a hundred
+	-- of them is a degree and a half, and about five seconds at Luanti's own
+	-- default speed.
+	local SUN_STEP = 100
+
+	local function stepped_time(time_of_day)
+		local t = time_of_day or 12000
+		return math.floor(t / SUN_STEP + 0.5) * SUN_STEP
+	end
+
+	-- The half hour either side of the sun crossing the horizon, at each end
+	-- of the day, as 0 outside and 1 at the crossing itself. This is the
+	-- window dawn and dusk happen in: what the sun is red in, and what the
+	-- clouds take their colour from. Smooth at both ends, because a tint that
+	-- switches on is a tint you notice switching on.
+	local RED_HALF_WIDTH = 500
+
+	local function low_sun(time_of_day)
+		local t = (time_of_day or 12000) % 24000
+		local d = math.min(math.abs(t - SUN_RISE), math.abs(t - SUN_DOWN))
+		local u = 1 - d / RED_HALF_WIDTH
+		if u <= 0 then
+			return 0
+		end
+		return u * u * (3 - 2 * u)
+	end
+
+	-- What is up while the day is not: the same shape, read the other way
+	-- round, so that the four numbers above say when the moon is out rather
+	-- than being the sun's turned inside out
+	local function moon_amount(time_of_day)
+		return 1 - up_between(time_of_day, MOON_FADE_OUT, MOON_OUT,
+				MOON_FADE_IN, MOON_IN)
+	end
+
+	-- What the schedule has to hold, checked at load: the two never leave the
+	-- sky empty between them, and the moon is out of the way by the time the
+	-- sun is worth anything.
+	do
+		assert(above_horizon(-1) == 0 and above_horizon(0) == 0 and
+				above_horizon(1) == 1, "the horizon line")
+		assert(sun_amount(12000) == 1 and moon_amount(12000) == 0, "noon")
+		assert(sun_amount(0) == 0 and moon_amount(0) == 1, "midnight")
+		assert(moon_amount(SUN_RISE) > 0.4, "the moon is still up at sunrise")
+		assert(moon_amount(MOON_OUT) == 0 and sun_amount(MOON_OUT) > 0.4,
+				"the sun has the sky to itself once the moon is gone")
+		assert(sun_amount(SUN_DOWN) == 0 and moon_amount(SUN_DOWN) > 0.4,
+				"the moon is up by the time the sun is gone")
+		-- Dawn and dusk are a window around the crossings and nowhere else
+		assert(low_sun(SUN_RISE) == 1 and low_sun(SUN_DOWN) == 1,
+				"reddest as the sun crosses")
+		assert(low_sun(SUN_RISE - RED_HALF_WIDTH) == 0 and
+				low_sun(SUN_RISE + RED_HALF_WIDTH) == 0 and
+				low_sun(SUN_DOWN - RED_HALF_WIDTH) == 0 and
+				low_sun(SUN_DOWN + RED_HALF_WIDTH) == 0,
+				"and back to nothing half an hour either side")
+		assert(low_sun(12000) == 0 and low_sun(0) == 0,
+				"nothing of it at noon or at midnight")
+		assert(low_sun(SUN_RISE - 250) > 0.4 and low_sun(SUN_RISE - 250) < 0.6,
+				"and the way across it in between")
+	end
+
+	-- What the sky is worth as a light, against that. Two numbers, because
+	-- the sky's own colour is the wrong one to light a world with: it is the
+	-- colour of the zenith, and a surface sees the whole dome -- the pale
+	-- band along the horizon and the glare around the sun as much as the blue
+	-- overhead -- so what reaches it is far less blue than what is up there.
+	local AMBIENT_DESATURATE = 0.55
+	local AMBIENT_FROM_SKY = 0.6
+	-- And a floor under it while the sun is down. The sky is the only ambient
+	-- there is on this path, and a game's night sky can be black -- VoxeLibre
+	-- paints one -- which leaves a moon shadow with nothing in it at all now
+	-- that the moon casts one. This is what is in it: the moon's own cold
+	-- colour, at little enough that what the moon lights is still brighter
+	-- than what it does not.
+	local AMBIENT_NIGHT_FLOOR = 0.015
+	local AMBIENT_NIGHT_COLOR = {0.55, 0.68, 1.0}
+
+	-- night is 1 while the sun is down and 0 while it is up, across its own
+	-- hour at each end
+	local function ambient_from_sky(sky, night)
+		local luma = 0.2126 * sky.r + 0.7152 * sky.g + 0.0722 * sky.b
+		local k = AMBIENT_DESATURATE
+		local floor = AMBIENT_NIGHT_FLOOR * (night or 0)
+		local function channel(v, i)
+			return math.max((v * (1 - k) + luma * k) * AMBIENT_FROM_SKY,
+					AMBIENT_NIGHT_COLOR[i] * floor)
+		end
+		return magic.Color(channel(sky.r, 1), channel(sky.g, 2),
+				channel(sky.b, 3))
+	end
+	local sun_node = nil
+	local sun_light = nil
+	local moon_node = nil
+	local moon_light = nil
+	if pbr then
+		sun_node = scene:CreateChild("Sun")
+		sun_light = sun_node:CreateComponent("Light")
+		sun_light.lightType = magic.LIGHT_DIRECTIONAL
+		sun_light.castShadows = true
+		sun_light.brightness = SUN_BRIGHTNESS
+		sun_light.specularIntensity = 1.0
+		-- Voxel faces at a grazing sun angle are the classic shadow acne
+		-- case: a whole flat face falls inside one shadow texel and shadows
+		-- itself in stripes. A slope-scaled bias on top of the automatic one,
+		-- and a normal offset, which is the one that works on a face that is
+		-- flat and wide.
+		sun_light.shadowBias = magic.BiasParameters(0.00005, 0.8, 0.002)
+		sun_light.shadowCascade = magic.CascadeParameters(
+				SHADOW_NEAR, SHADOW_FAR, 0, 0, 0.8)
+		-- The moon, which is the same light from the other side of the sky,
+		-- with the same shadow map settings. The two are both in the scene
+		-- for the hour either side of dusk and dawn, which is two shadow maps
+		-- for that hour and one for the rest of the day.
+		moon_node = scene:CreateChild("Moon")
+		moon_light = moon_node:CreateComponent("Light")
+		moon_light.lightType = magic.LIGHT_DIRECTIONAL
+		moon_light.castShadows = true
+		moon_light.brightness = MOON_BRIGHTNESS
+		moon_light.specularIntensity = 1.0
+		moon_light.shadowBias = magic.BiasParameters(0.00005, 0.8, 0.002)
+		moon_light.shadowCascade = magic.CascadeParameters(
+				SHADOW_NEAR, SHADOW_FAR, 0, 0, 0.8)
+		moon_light.color = magic.Color(MOON_COLOR[1], MOON_COLOR[2],
+				MOON_COLOR[3])
+
+		-- Past the far cascade the world is ambient-lit, which at that range
+		-- reads as haze rather than as a missing shadow
+		magic.renderer.shadowMapSize = 1024
+		magic.renderer.shadowQuality = magic.SHADOWQUALITY_SIMPLE_16BIT
+		magic.renderer.drawShadows = true
+	end
+
 	-- The mesher sets no technique on skylit geometry -- only the game knows
 	-- which shader reads what it packed -- so every block's materials get
 	-- this one once they exist.
@@ -466,6 +759,10 @@ function M.new(magic, buildat, log, options)
 		if not cg then
 			return
 		end
+		-- Urho3D's drawables cast no shadow unless told to, one by one. On
+		-- the vanilla path there is no light to cast one from; on the PBR
+		-- path this is what puts the world in the sun's shadow map.
+		cg.castShadows = pbr
 		local i = 0
 		while true do
 			local m = cg:GetMaterial(i)
@@ -545,6 +842,33 @@ function M.new(magic, buildat, log, options)
 	local viewport = magic.Viewport:new(scene, camera)
 	self.viewport = viewport
 	magic.renderer:SetViewport(0, viewport)
+
+	-- On the PBR path the frame is rendered in HDR and tone mapped, the way
+	-- games/voxel_lighting does it. Nothing else makes the sun read as the
+	-- sun: in a frame that clips at one, a sun strong enough to put a real
+	-- shadow on the ground flattens every lit surface to white, and one weak
+	-- enough not to do that is a sun whose colour and whose shadow are both
+	-- invisible under the sky's. With the curve in, the sun can be fifty
+	-- times the sky, which is about what it is, and what a lit surface gets
+	-- is the sun's own colour rather than a mixture with the sky's; the same
+	-- curve lifts the shadows, so a shadow under full skylight reads as shade
+	-- rather than as a hole.
+	if pbr then
+		magic.renderer.HDRRendering = true
+		local rp = viewport.renderPath:Clone()
+		rp:Append(magic.cache:GetResource("XMLFile",
+				"PostProcess/BloomHDR.xml"))
+		rp:Append(magic.cache:GetResource("XMLFile",
+				"PostProcess/Tonemap.xml"))
+		rp:Append(magic.cache:GetResource("XMLFile",
+				"PostProcess/GammaCorrection.xml"))
+		-- Tonemap.xml ships with Reinhard on; Uncharted2 keeps more contrast
+		-- in the shadows, which on a world lit by one sun is most of it
+		rp:SetEnabled("TonemapReinhardEq3", false)
+		rp:SetEnabled("TonemapUncharted2", true)
+		rp:SetShaderParameter("TonemapExposureBias", TONEMAP_EXPOSURE)
+		viewport.renderPath = rp
+	end
 
 	-- The sounds the server asked for. A sound at a position is a node in
 	-- the scene and the listener rides the camera, which is what makes it
@@ -817,9 +1141,12 @@ function M.new(magic, buildat, log, options)
 	-- where it is zero is a game where they did not.
 	local extras_built = 0
 
+	-- surf is what surface.lua guessed the node is made of, or nil for the
+	-- placeholder and anything else with no definition behind it
 	local function add_cube(voxel_reg, name, resources, kind, shape,
 			double_sided, turns, liquid_group, connect, masked, variants,
-			blend, solid_base)
+			blend, solid_base, surf)
+		surf = surf or surface.for_node(nil)
 		local vdef = buildat.VoxelDefinition()
 		vdef.name.block_name = name
 		vdef.handler_module = ""
@@ -829,11 +1156,12 @@ function M.new(magic, buildat, log, options)
 			seg.resource_name = resources[i]
 			seg.total_segments = magic.IntVector2(1, 1)
 			seg.select_segment = magic.IntVector2(0, 0)
-			-- A game's textures are painted, not photographed; a wide, weak
-			-- highlight keeps them looking like what they are painted as
-			seg.roughness = 0.95
-			seg.spec_strength = 0.2
-			seg.bumpiness = 0.3
+			seg.roughness = surf.roughness
+			seg.spec_strength = surf.spec_strength
+			seg.bumpiness = surf.bumpiness
+			seg.translucency = surf.translucency
+			seg.spots = surf.spots
+			seg.static_spots = surf.static_spots
 			textures[i] = seg
 		end
 		vdef.textures = textures
@@ -847,9 +1175,12 @@ function M.new(magic, buildat, log, options)
 			seg.resource_name = resources[i]
 			seg.total_segments = magic.IntVector2(1, 1)
 			seg.select_segment = magic.IntVector2(0, 0)
-			seg.roughness = 0.95
-			seg.spec_strength = 0.2
-			seg.bumpiness = 0.3
+			seg.roughness = surf.roughness
+			seg.spec_strength = surf.spec_strength
+			seg.bumpiness = surf.bumpiness
+			seg.translucency = surf.translucency
+			seg.spots = surf.spots
+			seg.static_spots = surf.static_spots
 			extras[#extras + 1] = seg
 			i = i + 1
 		end
@@ -1011,6 +1342,11 @@ function M.new(magic, buildat, log, options)
 	-- in the same two maps. The ids are ours to pick; the versions say when a
 	-- map has changed. See doc/client_api.txt.
 	local MAP_ID_NODE, MAP_ID_PAIR, MAP_ID_LIGHT = 1, 2, 3
+	-- The PBR path's curve is a different table and so needs an id of its own;
+	-- the compiled maps are cached by id
+	local MAP_ID_LIGHT_PBR = 4
+	local light_map = pbr and PBR_LIGHT_MAP or LIGHT_MAP
+	local light_map_id = pbr and MAP_ID_LIGHT_PBR or MAP_ID_LIGHT
 	self.node_map_version = 1
 	self.pair_map_version = 1
 	self.use_skylight = true
@@ -1135,8 +1471,8 @@ function M.new(magic, buildat, log, options)
 			sources[#sources + 1] = {
 				data = block.param1, format = "u8",
 				source_size = {BLOCKSIZE, BLOCKSIZE, BLOCKSIZE},
-				at = {0, 0, 0}, map = LIGHT_MAP, field = "light",
-				map_id = MAP_ID_LIGHT, map_version = 1,
+				at = {0, 0, 0}, map = light_map, field = "light",
+				map_id = light_map_id, map_version = 1,
 			}
 		end
 		for _, d in ipairs(NEIGHBOURS) do
@@ -1190,8 +1526,8 @@ function M.new(magic, buildat, log, options)
 						data = n.param1, format = "u8",
 						source_size = {BLOCKSIZE, BLOCKSIZE, BLOCKSIZE},
 						from = from, size = size, at = at,
-						map = LIGHT_MAP, field = "light",
-						map_id = MAP_ID_LIGHT, map_version = 1,
+						map = light_map, field = "light",
+						map_id = light_map_id, map_version = 1,
 					}
 				end
 			end
@@ -1972,9 +2308,31 @@ function M.new(magic, buildat, log, options)
 	-- entities of this game are drawn unlit in Luanti's own client too, and
 	-- their textures are full of holes -- so what stands in for the light is
 	-- a colour the shader multiplies the texture by, worked out the same way
-	-- the mesher works out a face's ambient: the sunlight colour times how
-	-- much of the sky the voxel the object is in sees, plus its lamplight.
-	-- Without this a mob is as bright at midnight as at noon.
+	-- the voxel around it is lit. Without this a mob is as bright at midnight
+	-- as at noon.
+	--
+	-- Which way that is worked out depends on the path, because the two light
+	-- a voxel differently and an object beside one has to agree with it. The
+	-- vanilla path bakes the sunlight colour into the vertices and that is
+	-- all there is; the PBR path has a sky for an ambient and a sun of its
+	-- own on top, so an object gets both. There is no normal to take a real
+	-- share of the sun by -- that is what unlit means -- so it gets a fixed
+	-- one, which is what a thing standing in the sun shows on average.
+	-- How much of the sun an object shows. One number has to serve for both
+	-- a mob in the open and one under a tree, because an unlit thing has no
+	-- normal to shadow: measured on the ground it stands on, sunlit grass
+	-- renders at about twelve times the same grass in a shadow, and what is
+	-- picked here lands an object between the two. It is the number to move
+	-- if mobs read as glowing in a wood or as cut out in a field.
+	local OBJECT_SUN = 1.0
+	-- What something in the pitch dark is worth, so that it is a silhouette
+	-- rather than nothing. Small, because the ambient it is added to is small
+	-- at night and a mob that glows is worse than one that is hard to see.
+	local OBJECT_DARK_FLOOR = 0.01
+	-- What the sun is worth to an object now: its colour and how much of it
+	-- there is, kept by apply_daylight() because that is where it is known
+	local object_sun = nil
+
 	local function object_color(x, y, z)
 		local p1 = param1_at(math.floor(x + 0.5), math.floor(y + 0.5),
 				math.floor(z + 0.5))
@@ -1985,9 +2343,26 @@ function M.new(magic, buildat, log, options)
 		local night = math.floor(p1 / 16)
 		local sky = (day > night and day - night or 0) / 15
 		local lamp = night / 15
-		local sun = sunlight_color(daylight)
 		-- A floor of a few percent, so that something in the pitch dark is a
 		-- silhouette rather than nothing at all
+		if pbr then
+			local amb = zone.ambientColor
+			local sun = object_sun
+			local sr, sg, sb = 0, 0, 0
+			if sun then
+				sr = sun.r * sun.a * OBJECT_SUN
+				sg = sun.g * sun.a * OBJECT_SUN
+				sb = sun.b * sun.a * OBJECT_SUN
+			end
+			-- Not clipped at one: the frame is tone mapped and a voxel in
+			-- the sun is well past it, so an object beside one has to be able
+			-- to be as well
+			return magic.Color(
+					(amb.r + sr) * sky + lamp + OBJECT_DARK_FLOOR,
+					(amb.g + sg) * sky + lamp + OBJECT_DARK_FLOOR,
+					(amb.b + sb) * sky + lamp + OBJECT_DARK_FLOOR)
+		end
+		local sun = sunlight_color(daylight)
 		return magic.Color(
 				math.min(1, sun.r * sky + lamp + 0.03),
 				math.min(1, sun.g * sky + lamp + 0.03),
@@ -3172,6 +3547,40 @@ function M.new(magic, buildat, log, options)
 		return math.cos(a), math.sin(a), 0
 	end
 
+	-- The sun's own colour at noon. Luanti's sunlight_color() is the colour
+	-- of the sun and the sky together, because together is the only way
+	-- Luanti has them; on the PBR path the sky is a light of its own, so what
+	-- is left for the sun is what the sun is. Only a little warm: what makes
+	-- sunlight read as golden is the blue ambient beside it, and a light
+	-- warmer than this shows up undisguised in what a glint reflects.
+	-- games/voxel_lighting's sun is the same colour.
+	local SUN_COLOR = {1.0, 0.96, 0.88}
+	-- How much of the horizon's own tint the light takes when the sun is down
+	-- among it. Not all of it: sun_tint is the colour a band of sky is
+	-- painted, which is deeper than the light that paints it.
+	-- How much of the horizon's colour the light takes at the reddest of it.
+	-- The window above says when; this says how much, and it is weighted
+	-- towards the crossing itself -- squared from the far end -- so that it
+	-- comes on gently at the edge of the window and is most of the way there
+	-- by the quarter hour. A sun a quarter of an hour off the horizon is
+	-- already red, and a share that only rose with the window was still a
+	-- warm white there.
+	local SUN_TINT_SHARE = 0.9
+	-- And how much of the sun's colour the clouds take while it is down
+	-- there. More than the light itself takes, because a cloud at dawn is
+	-- lit by nothing else and the sun is lighting it from below, where the
+	-- ground is lit by the sky as well.
+	local CLOUD_SUN_TINT = 0.75
+	-- How far past white a cloud in full sun is drawn, and the band of the
+	-- game's own cloud colour over which that is given: a white cloud gets
+	-- all of it, a rain cloud none, and nothing in between jumps
+	-- Enough room to come out white rather than grey, and not so much that a
+	-- cloud is as bright as the sun is: the disc is drawn at six times its
+	-- colour, and after the tone curve this lands about a tenth under it
+	local CLOUD_DAY_GAIN = 1.4
+	local CLOUD_WHITE_LOW = 0.5
+	local CLOUD_WHITE_HIGH = 0.9
+
 	-- One of the game's colours, or Luanti's default for it, as 0...1
 	local function sky_color(name, brightness)
 		local c = (sky and sky[name]) or SKY_DEFAULT[name]
@@ -3190,41 +3599,249 @@ function M.new(magic, buildat, log, options)
 		return factor ^ 2.2
 	end
 
-	function self:set_daylight(factor, time_of_day)
-		daylight = factor
-		daylight_time = time_of_day or daylight_time
-		zone.ambientColor = sunlight_color(factor)
+	-- How much of the sun and the moon the clouds keep. A directional light
+	-- does not know there is a layer of cloud between it and the ground; the
+	-- ambient does, because a game darkens the sky colours it sends when the
+	-- weather turns, and only the direct light is left saying it is a clear
+	-- day.
+	--
+	-- Two things say overcast and a game uses one or the other. Density is
+	-- how much of the sky is cloud, and 0.4 is what every game gets whether
+	-- or not it asks, so only what is above that is weather. The other is the
+	-- colour: VoxeLibre never touches the density and says it with the cloud
+	-- colour instead, #FFF0F0 for a clear sky against #5D5D5F for rain and
+	-- #3D3D3F for a thunderstorm. Reading both is what makes this work on a
+	-- game that has not been looked at.
+	local CLOUD_DIM = 0.8          -- what a full overcast takes from the sun
+	local CLOUD_SHADE_GAIN = 1.3   -- a cloud need not be black to be opaque
+
+	local function cloud_cover_of(density, color_bright)
+		-- Whether there is a layer there at all, which is what the colour
+		-- has to be weighed by: a black cloud that covers nothing shades
+		-- nothing
+		local have = clamp01(density / CLOUD_DENSITY_DEFAULT)
+		local dense = clamp01((density - CLOUD_DENSITY_DEFAULT) /
+				(1 - CLOUD_DENSITY_DEFAULT))
+		local shade = 0
+		local c = color_bright
+		if c then
+			local luma = (0.2126 * c[1] + 0.7152 * c[2] + 0.0722 * c[3]) / 255
+			shade = clamp01((1 - luma) * CLOUD_SHADE_GAIN * have)
+		end
+		-- Two ways of covering the sky, neither of which excuses the other
+		return 1 - (1 - dense) * (1 - shade)
+	end
+
+	-- What the weather has to come out as, checked at load against what a
+	-- VoxeLibre server actually sends: it leaves the density at Luanti's own
+	-- 0.4 throughout and says the weather in the colour alone.
+	do
+		local clear = cloud_cover_of(0.4, {255, 240, 240})
+		local rain = cloud_cover_of(0.4, {93, 93, 95})
+		local thunder = cloud_cover_of(0.4, {61, 61, 63})
+		assert(clear < 0.1, "a clear sky keeps the sun")
+		assert(rain > 0.6 and rain < thunder, "rain takes most of it")
+		assert(thunder > 0.9, "a thunderstorm takes nearly all of it")
+		-- And a game that says it the other way, with the density
+		assert(cloud_cover_of(1.0, {255, 255, 255}) > 0.9,
+				"a sky full of cloud covers it whatever colour the cloud is")
+		assert(cloud_cover_of(0.0, {0, 0, 0}) == 0,
+				"a cloud that is not there covers nothing")
+
+		-- And which of those the sun is allowed to whiten
+		local function white_of(c)
+			return smoothstep01(luminance({c[1] / 255, c[2] / 255,
+					c[3] / 255}), CLOUD_WHITE_LOW, CLOUD_WHITE_HIGH)
+		end
+		assert(white_of({255, 240, 240}) == 1, "a white cloud takes the sun")
+		assert(white_of({93, 93, 95}) == 0, "a rain cloud is left grey")
+		assert(white_of({61, 61, 63}) == 0, "and a thunderhead darker still")
+		assert(white_of({173, 173, 173}) > 0.1 and
+				white_of({173, 173, 173}) < 0.9,
+				"and what is between them is between them")
+	end
+
+	local function cloud_cover()
+		if sky and sky.clouds == false then
+			return 0
+		end
+		local clouds = sky_bodies.clouds or {}
+		return cloud_cover_of(clouds.density or CLOUD_DENSITY_DEFAULT,
+				clouds.color_bright)
+	end
+
+	-- A game that hides a body has said the plainest thing it can say about
+	-- it: VoxeLibre turns the sun, the moon and the stars off together when
+	-- the weather turns, before it darkens a single colour, and a dimension
+	-- with no sky turns them off for good. Something that cannot be seen
+	-- casts no light, so this is a gate rather than a dimming; what is left
+	-- is the sky, which is what an overcast day is lit by.
+	local function body_is_up(body)
+		return (body and body.visible ~= false) and 1 or 0
+	end
+
+	-- What the sun shines with now: its own colour, going the colour of the
+	-- horizon over the hour it is crossing it, which is where that colour
+	-- belongs and is the same handover the sky shader does to the disc.
+	local function sun_light_color(time_of_day)
+		local tint = sky_color("sun_tint", 1)
+		local low = low_sun(time_of_day)
+		low = (1 - (1 - low) * (1 - low)) * SUN_TINT_SHARE
+		return magic.Color(
+				SUN_COLOR[1] * (1 - low) + tint.r * low,
+				SUN_COLOR[2] * (1 - low) + tint.g * low,
+				SUN_COLOR[3] * (1 - low) + tint.b * low)
+	end
+
+	-- That the clock and the horizon agree, checked here rather than where
+	-- the clocks are written because sun_direction() is defined between the
+	-- two: the sun's ramp begins where the sun is level with the horizon and
+	-- ends where it is level again, so neither rule has to fight the other.
+	do
+		local function elevation(t)
+			local _, sy = sun_direction(t)
+			return sy
+		end
+		assert(math.abs(elevation(SUN_RISE)) < 0.02, "the sun rises at 05:00")
+		assert(math.abs(elevation(SUN_DOWN)) < 0.02, "the sun sets at 19:00")
+		assert(elevation(12000) > 0.9, "the sun is overhead at noon")
+		assert(elevation(0) < -0.9, "the sun is under the world at midnight")
+		-- And that a quarter of an hour off the horizon the light is red
+		-- rather than a warm white, which is the whole of what the window is
+		-- for
+		local setting = sun_light_color(SUN_DOWN - 250)
+		assert(setting.r - setting.b > 0.5, "a quarter hour from setting")
+		local rising = sun_light_color(SUN_RISE + 250)
+		assert(rising.r - rising.b > 0.5, "and a quarter hour after rising")
+		local noon = sun_light_color(12000)
+		assert(noon.r - noon.b < 0.15, "and its own colour the rest of the day")
+	end
+
+	-- Luanti eases the sky rather than setting it: Sky::update() keeps the
+	-- colours and the brightness it is drawing and moves each a fixed share
+	-- of the way to the target every frame, so a band changing under it comes
+	-- out as a minute of sunrise instead of a jump. The same thing here, with
+	-- the share worked out from the frame's own length so that it does not
+	-- depend on how fast the frames come, and with a jump too big to be the
+	-- day moving -- a game setting its clock, or a sky arriving -- taken at
+	-- once rather than eased, which is Luanti's rule as well.
+	local SKY_EASE_SECONDS = 0.8
+	local SKY_EASE_SNAP = 0.35
+
+	local sky_eased = {}
+
+	local function sky_share(dtime)
+		if dtime <= 0 then
+			return 1
+		end
+		-- 1 - e^-t/tau, but without exp: this is within a few per cent of it
+		-- over a frame and cannot overshoot
+		return clamp01(dtime / (SKY_EASE_SECONDS + dtime))
+	end
+
+	local function sky_ease(dtime, key, target)
+		local at = sky_eased[key]
+		if at == nil or math.abs(target - at) > SKY_EASE_SNAP then
+			sky_eased[key] = target
+			return target
+		end
+		at = at + (target - at) * sky_share(dtime)
+		sky_eased[key] = at
+		return at
+	end
+
+	-- The same for a colour, eased in the band's own full-strength colours
+	-- and scaled by the brightness afterwards, so that what is being eased is
+	-- which sky it is rather than how dark it is
+	local function sky_ease_color(dtime, key, target, brightness)
+		local at = sky_eased[key]
+		if at == nil or math.abs(target.r - at[1]) > SKY_EASE_SNAP or
+				math.abs(target.g - at[2]) > SKY_EASE_SNAP or
+				math.abs(target.b - at[3]) > SKY_EASE_SNAP then
+			at = {target.r, target.g, target.b}
+			sky_eased[key] = at
+		else
+			local k = sky_share(dtime)
+			at[1] = at[1] + (target.r - at[1]) * k
+			at[2] = at[2] + (target.g - at[2]) * k
+			at[3] = at[3] + (target.b - at[3]) * k
+		end
+		return magic.Color(at[1] * brightness, at[2] * brightness,
+				at[3] * brightness)
+	end
+
+	-- What the easing has to do, checked at load: arrive where it was sent,
+	-- take its time getting there, and not take its time over a jump that is
+	-- a game setting its clock rather than the day passing.
+	do
+		assert(sky_ease(0.1, "check", 0.5) == 0.5, "the first is where it is")
+		local half = sky_ease(SKY_EASE_SECONDS, "check", 0.7)
+		assert(half > 0.58 and half < 0.62,
+				"a tau of it is about half the way")
+		for _ = 1, 200 do
+			sky_ease(0.05, "check", 0.7)
+		end
+		assert(math.abs(sky_ease(0.05, "check", 0.7) - 0.7) < 0.001,
+				"and it arrives")
+		assert(sky_ease(0.05, "check", 0.0) == 0.0, "a jump is taken at once")
+		sky_eased.check = nil
+	end
+
+	local function apply_daylight(dtime)
+		local factor = daylight
+		if not pbr then
+			zone.ambientColor = sunlight_color(factor)
+		end
 
 		local brightness = brightness_of(factor)
 		-- Which set of colours, by the same bands Luanti's Sky::update()
-		-- uses: night, dawn, or the day's own.
+		-- uses: night, dawn, or the day's own. The set changes at a step,
+		-- there as here; what makes the change not read as one is that
+		-- nothing below is the target, it is where the sky has got to on its
+		-- way there. See sky_ease() above.
 		--
-		-- simplified: Luanti eases from one set to the next over a second or
-		-- so of its own frames rather than switching between them, and it
-		-- has a fourth set for a player who cannot see the sky at all. Here
-		-- the brightness is what carries dawn into day, and the set changes
-		-- when the band does.
+		-- simplified: Luanti has a fourth set for a player who cannot see the
+		-- sky at all, which is not read here.
 		local band = "day"
 		if brightness < 0.13 then
 			band = "night"
 		elseif brightness >= 0.20 and brightness < 0.35 then
 			band = "dawn"
 		end
-		local top = sky_color(band.."_sky", brightness)
-		local horizon = sky_color(band.."_horizon", brightness)
+		local top = sky_color(band.."_sky", 1)
+		local horizon = sky_color(band.."_horizon", 1)
 		if sky and sky.type == "skybox" then
 			-- A game that gave its own textures gets its bgcolor, which is
 			-- the one thing of its sky that is understood here
-			top = sky_color("bgcolor", brightness)
+			top = sky_color("bgcolor", 1)
 			horizon = top
 		elseif sky and not sky.day_sky and sky.bgcolor then
-			top = sky_color("bgcolor", brightness)
+			top = sky_color("bgcolor", 1)
 			horizon = top
 		end
+
+		-- Where the sky has actually got to, which is what everything below
+		-- is drawn from. The brightness the band is scaled by is eased too,
+		-- so a sunrise is a sunrise and not a set of colours being swapped.
+		brightness = sky_ease(dtime, "brightness", brightness)
+		top = sky_ease_color(dtime, "top", top, brightness)
+		horizon = sky_ease_color(dtime, "horizon", horizon, brightness)
 
 		-- What is behind the world, which the fog fades into: the horizon
 		-- the sky is drawn with, so the two meet
 		zone.fogColor = horizon
+
+		-- On the PBR path the ambient light is the sky itself rather than the
+		-- colour of sunlight. The shader's ambient is
+		-- cAmbientColor.rgb * color.a + color.rgb, so what a surface gets is
+		-- the sky in proportion to how much of it it can see: open ground is
+		-- sky-blue-white, under an overhang is the same blue but dimmer, and a
+		-- cave is only the warm rgb the torches baked in. That is the three
+		-- tints -- sun, shade, cave -- and it costs this one line.
+		if pbr then
+			zone.ambientColor = ambient_from_sky(top,
+					1 - sun_amount(daylight_time))
+		end
 
 		-- What the PBR path's reflections are worth now: the cube map beside
 		-- the shader is one static noon gradient and this is the colour it is
@@ -3233,6 +3850,45 @@ function M.new(magic, buildat, log, options)
 		-- surface pointed upwards reflects.
 		if vis then
 			vis:set_param("SkyColor", magic.Vector3(top.r, top.g, top.b))
+		end
+
+		if sun_light then
+			-- The light travels the other way from the body it comes from,
+			-- and the moon is opposite the sun, so one direction gives both.
+			-- Whichever of the two is under the world is taken out of the
+			-- scene rather than dimmed: a directional light does not know
+			-- about the horizon, and one below it lights the undersides of
+			-- everything and puts the night's sparkle on the wrong side of
+			-- the sky.
+			-- Where they are is stepped; whether they are up, how bright
+			-- and what colour is not, so nothing about the light itself
+			-- steps, only the direction the shadow is cast from
+			local sx, sy, sz = sun_direction(stepped_time(daylight_time))
+			local _, smooth_sy = sun_direction(daylight_time)
+			local through_cloud = 1 - CLOUD_DIM * cloud_cover()
+			local up = sun_amount(daylight_time) * above_horizon(smooth_sy) *
+					through_cloud * body_is_up(sky_bodies.sun)
+			sun_node.enabled = up > 0
+			local sun_color = sun_light_color(daylight_time)
+			if up > 0 then
+				sun_node.direction = magic.Vector3(-sx, -sy, -sz)
+				sun_light.brightness = SUN_BRIGHTNESS * up
+				sun_light.color = sun_color
+			end
+			local moon_up = moon_amount(daylight_time) *
+					above_horizon(-smooth_sy) * through_cloud *
+					body_is_up(sky_bodies.moon)
+			moon_node.enabled = moon_up > 0
+			if moon_up > 0 then
+				moon_node.direction = magic.Vector3(sx, sy, sz)
+				moon_light.brightness = MOON_BRIGHTNESS * moon_up
+			end
+			-- What the two are worth to something drawn unlit, which has no
+			-- normal to take a share of them by: the colour of whichever is
+			-- up, and in the alpha how much of it there is, the moon counted
+			-- at what it is worth against the sun
+			object_sun = magic.Color(sun_color.r, sun_color.g, sun_color.b,
+					up + moon_up * MOON_BRIGHTNESS / SUN_BRIGHTNESS)
 		end
 
 		if sky_material then
@@ -3246,17 +3902,45 @@ function M.new(magic, buildat, log, options)
 			sky_material:SetShaderParameter("SunTint",
 					sky_color("sun_tint", 0.35 + brightness * 0.65))
 			-- Luanti's clouds are the daylight's own colour, unless the
-			-- game gave them one; either way they go dark with the day.
+			-- game gave them one; either way they go dark with the day. And
+			-- over the hour the sun spends crossing the horizon they take its
+			-- colour, because at that hour the sun is what is lighting them
+			-- and it is lighting them from underneath: that is what makes a
+			-- sunrise a sunrise rather than a sky that has got brighter.
+			local sun_now = sun_light_color(daylight_time)
+			local lit = low_sun(daylight_time) * CLOUD_SUN_TINT
 			local cloud = sky_bodies.clouds.color_bright
+			local own = cloud and
+					{cloud[1] / 255, cloud[2] / 255, cloud[3] / 255} or
+					{0.9, 0.92, 0.95}
+			-- A cloud in the sun is not a light grey thing, it is a white
+			-- one, and on the PBR path the tone curve is between it and the
+			-- screen: a colour that arrives at one leaves it at about nine
+			-- tenths and reads as grey. So it is given some room to be
+			-- clipped out of, while the sun is up to do it -- ramped with the
+			-- sun's own hour at each end of the day -- and only as far as the
+			-- game's own colour says it is a white cloud. A game that wants
+			-- grey clouds, which is how VoxeLibre says it is raining, is
+			-- taken at its word and left alone.
+			local day = pbr and sun_amount(daylight_time) * above_horizon(sy) *
+					body_is_up(sky_bodies.sun) or 0
+			local white = smoothstep01(luminance(own), CLOUD_WHITE_LOW,
+					CLOUD_WHITE_HIGH)
+			local gain = 1 + (CLOUD_DAY_GAIN - 1) * day * white
+			local function cloud_channel(i, from_sun)
+				return (own[i] * (1 - lit) + from_sun * lit) *
+						brightness * gain
+			end
 			if cloud then
 				sky_material:SetShaderParameter("CloudColor", magic.Color(
-						cloud[1] / 255 * brightness,
-						cloud[2] / 255 * brightness,
-						cloud[3] / 255 * brightness))
+						cloud_channel(1, sun_now.r),
+						cloud_channel(2, sun_now.g),
+						cloud_channel(3, sun_now.b)))
 			else
 				sky_material:SetShaderParameter("CloudColor", magic.Color(
-						0.9 * brightness + 0.05, 0.92 * brightness + 0.05,
-						0.95 * brightness + 0.06))
+						cloud_channel(1, sun_now.r) + 0.05,
+						cloud_channel(2, sun_now.g) + 0.05,
+						cloud_channel(3, sun_now.b) + 0.06))
 			end
 			-- The stars come out as the sky goes dark, and a game can say
 			-- they are out in the day as well
@@ -3288,6 +3972,12 @@ function M.new(magic, buildat, log, options)
 					sun_texture and 1 or 0)
 			sky_material:SetShaderParameter("MoonTextured",
 					moon_texture and 1 or 0)
+			-- How far past white the disc is drawn. On the PBR path the
+			-- frame is tone mapped, so this is a real multiplier and what
+			-- the bloom around the sun comes from; on the vanilla path the
+			-- frame clips at one and a little past it is all that is wanted.
+			sky_material:SetShaderParameter("SunOverexposure",
+					pbr and SUN_DISC_OVEREXPOSURE or 1.5)
 			sky_material:SetShaderParameter("SunSize",
 					sun.visible and SUN_HALF * (sun.scale or 1) or 0)
 			sky_material:SetShaderParameter("MoonSize",
@@ -3304,17 +3994,39 @@ function M.new(magic, buildat, log, options)
 			sky_material:SetShaderParameter("CloudWind", magic.Vector2(
 					wind[1] * CLOUD_WIND_PER_NODE,
 					wind[2] * CLOUD_WIND_PER_NODE))
+			-- The density goes to the shader as it came. Luanti fills a
+			-- cloud cell where its own 0...1 noise falls below the density,
+			-- so the number is a quantile of that noise; the shader beside
+			-- this file fills where its noise rises above one minus the
+			-- coverage, which is a quantile of its own. Both are value noise
+			-- of much the same shape and both are even about a half, so the
+			-- quantile carries straight across and the coverage is the
+			-- density. Sampled over two hundred thousand points, what
+			-- Luanti's client covers and what this one covers agree to within
+			-- two parts in a hundred the whole way from nothing to a full
+			-- sky. What was here before scaled the density by 0.85 first,
+			-- which at Luanti's own default covered a sixth of the sky where
+			-- Luanti covers a quarter.
+			local cloud_color = sky_bodies.clouds.color_bright
+			sky_material:SetShaderParameter("CloudAlpha",
+					(cloud_color and cloud_color[4] and
+					cloud_color[4] / 255) or CLOUD_ALPHA_DEFAULT)
 			sky_material:SetShaderParameter("CloudCoverage",
 					(sky and sky.clouds == false) and 0 or
-					CLOUD_COVERAGE_DEFAULT *
-					(sky_bodies.clouds.density or CLOUD_DENSITY_DEFAULT) /
-					CLOUD_DENSITY_DEFAULT)
+					(sky_bodies.clouds.density or CLOUD_DENSITY_DEFAULT))
 		end
+	end
+
+	-- What the light and the time are now. Nothing is drawn from here: the
+	-- sky is drawn every frame by apply_daylight(), easing towards whatever
+	-- this last said, which is what makes the day pass rather than step.
+	function self:set_daylight(factor, time_of_day)
+		daylight = factor
+		daylight_time = time_of_day or daylight_time
 	end
 
 	function self:set_sky(new_sky)
 		sky = new_sky
-		self:set_daylight(daylight, daylight_time)
 	end
 
 	-- What the game says is in the sky, each out of its own packet. The
@@ -3327,7 +4039,6 @@ function M.new(magic, buildat, log, options)
 		for key, value in pairs(what) do
 			sky_bodies[which][key] = value
 		end
-		self:set_daylight(daylight, daylight_time)
 	end
 
 	-- Builds the voxel registry from Luanti's node definitions.
@@ -3439,7 +4150,8 @@ function M.new(magic, buildat, log, options)
 			end
 			return add_cube(reg, name or def.name, resources, kind, shape,
 					double_sided, nil, group, connect, masked, variants,
-					def.alpha_mode == NODEDEF_ALPHAMODE_BLEND, solid_base)
+					def.alpha_mode == NODEDEF_ALPHAMODE_BLEND, solid_base,
+					surface.for_node(def))
 		end
 		if not kind then
 			return nil
@@ -3453,7 +4165,8 @@ function M.new(magic, buildat, log, options)
 		end
 		return add_cube(reg, name or def.name, resources, kind, nil, nil,
 				nil, group, connect, nil, variants,
-				def.alpha_mode == NODEDEF_ALPHAMODE_BLEND)
+				def.alpha_mode == NODEDEF_ALPHAMODE_BLEND, nil,
+				surface.for_node(def))
 	end
 
 	-- Builds the registry for a set of node definitions a slice at a time.
@@ -3716,6 +4429,10 @@ function M.new(magic, buildat, log, options)
 	-- session -- and the first blocks it sends are the ones around the
 	-- player, which is exactly where a hole is worst.
 	function self:update(dtime, drop_distance)
+		-- Every frame, because easing towards a target is what it is for
+		if daylight then
+			apply_daylight(dtime)
+		end
 		local p = camera_node.position
 		-- Which lights are the nearest changes as the player walks, but not
 		-- so fast that it is worth working out every frame
@@ -3805,6 +4522,10 @@ function M.new(magic, buildat, log, options)
 		-- Dropping the viewport rather than replacing it: there is nothing
 		-- else to show, and SetViewport() takes no nil
 		magic.renderer.numViewports = 0
+		-- HDR and the render path are the renderer's, not the viewport's, so
+		-- a world that has gone has to hand them back or the menu after it is
+		-- drawn through a tone curve with nothing to tone map
+		magic.renderer.HDRRendering = false
 	end
 
 	function self:block_count()
