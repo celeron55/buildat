@@ -13,6 +13,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 #include <climits>
 #include <fcntl.h>
 #include <unistd.h>
@@ -48,6 +49,19 @@ static bool parse_int(const ss_ &s, int *out)
 	if(v < (int64_t)INT_MIN || v > (int64_t)INT_MAX)
 		return false;
 	*out = (int)v;
+	return true;
+}
+
+static bool parse_f64(const ss_ &s, double *out)
+{
+	if(s.empty())
+		return false;
+	errno = 0;
+	char *end = nullptr;
+	double v = strtod(s.c_str(), &end);
+	if(errno || end == s.c_str() || *end != '\0' || v != v)
+		return false;
+	*out = v;
 	return true;
 }
 
@@ -105,6 +119,44 @@ static bool parse_xy(const ss_ &rest, int *x, int *y, ss_ *error)
 		*error = "Expected two integers";
 		return false;
 	}
+	return true;
+}
+
+// "10 -20" -> yaw, pitch in degrees
+static bool parse_angles(const ss_ &rest, double *yaw, double *pitch,
+		ss_ *error)
+{
+	c55::Strfnd f(rest);
+	ss_ a = trim_copy(f.next(" "));
+	ss_ b = trim_copy(f.next(""));
+	if(a.empty() || b.empty() || !parse_f64(a, yaw) || !parse_f64(b, pitch)){
+		*error = "Expected two numbers";
+		return false;
+	}
+	return true;
+}
+
+// "0 0 1" -> the same two angles: yaw from +Z towards +X, pitch upwards
+static bool parse_direction(const ss_ &rest, double *yaw, double *pitch,
+		ss_ *error)
+{
+	c55::Strfnd f(rest);
+	ss_ xs = trim_copy(f.next(" "));
+	ss_ ys = trim_copy(f.next(" "));
+	ss_ zs = trim_copy(f.next(""));
+	double x = 0, y = 0, z = 0;
+	if(xs.empty() || ys.empty() || zs.empty() ||
+			!parse_f64(xs, &x) || !parse_f64(ys, &y) || !parse_f64(zs, &z)){
+		*error = "Expected three numbers";
+		return false;
+	}
+	double len = sqrt(x * x + y * y + z * z);
+	if(len < 1e-9){
+		*error = "The direction has no length";
+		return false;
+	}
+	*yaw = atan2(x, z) * 180.0 / M_PI;
+	*pitch = asin(y / len) * 180.0 / M_PI;
 	return true;
 }
 
@@ -194,6 +246,14 @@ static bool parse_body(const ss_ &text, sv_<Command> *out, ss_ *error)
 			c.s = rest;
 			if(c.s.empty())
 				return fail("text <string>");
+		} else if(cmd == "look"){
+			c.type = Type::Look;
+			if(!parse_angles(rest, &c.yaw, &c.pitch, error))
+				return fail(*error+"; look <yaw> <pitch>, in degrees");
+		} else if(cmd == "look_dir"){
+			c.type = Type::Look;
+			if(!parse_direction(rest, &c.yaw, &c.pitch, error))
+				return fail(*error+"; look_dir <x> <y> <z>");
 		} else if(cmd == "quit"){
 			c.type = Type::Quit;
 			if(!rest.empty())
@@ -276,10 +336,12 @@ static void self_check()
 			"mouse_wheel 3\n"
 			"text hello\n"
 			"screenshot /tmp/x.png\n"
+			"look 10 -20\n"
+			"look_dir 1 0 0\n"
 			"quit\n";
 	if(!parse_body(sample, &cs, &err))
 		throw Exception(ss_()+"command_seq self_check parse: "+err);
-	if(cs.size() != 13)
+	if(cs.size() != 15)
 		throw Exception("command_seq self_check count "+itos(cs.size()));
 	if(cs[0].type != Type::Delay || cs[0].n != 100)
 		throw Exception("command_seq self_check delay");
@@ -287,6 +349,12 @@ static void self_check()
 		throw Exception("command_seq self_check mouse_move");
 	if(cs[6].x != SDL_BUTTON_LEFT || cs[8].x != SDL_BUTTON_RIGHT)
 		throw Exception("command_seq self_check buttons");
+	if(cs[12].type != Type::Look || cs[12].yaw != 10.0 || cs[12].pitch != -20.0)
+		throw Exception("command_seq self_check look");
+	// Straight along +X is a quarter turn from +Z, and level
+	if(cs[13].type != Type::Look || fabs(cs[13].yaw - 90.0) > 1e-9 ||
+			fabs(cs[13].pitch) > 1e-9)
+		throw Exception("command_seq self_check look_dir");
 	if(!parse_body("nope 1\n", &cs, &err) && err.find("unknown command") != ss_::npos)
 		return;
 	throw Exception("command_seq self_check unknown command");
@@ -342,6 +410,12 @@ ss_ dump_command(const Command &c)
 		return "text "+c.s;
 	case Type::Quit:
 		return "quit";
+	case Type::Look:
+		{
+			char buf[64];
+			snprintf(buf, sizeof buf, "look %g %g", c.yaw, c.pitch);
+			return buf;
+		}
 	}
 	return "?";
 }
