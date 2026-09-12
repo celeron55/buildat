@@ -99,7 +99,8 @@ numbers for the same reasons.
 
 The sun is in the scene only while it is above the horizon: it fades in
 between 05:00 and 06:00 and out between 18:00 and 19:00, and the moon -- the
-same light from the other side of the sky, dim and cold -- does the opposite.
+same light from the other side of the sky at a tenth of it, cold, and with a
+shadow map of its own -- does the opposite.
 A directional light does not know about the horizon, so one left on at night
 lights the undersides of everything, and its specular, which is the sparkle a
 surface asks for on water, on snow and on ore, is then the brightest thing in
