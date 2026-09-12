@@ -255,7 +255,11 @@ void VS()
     // Taken from the world position for the same reason as those, that a map
     // lives in one voxel face and would repeat every voxel.
     const float STATIC_SPOT_CELLS = 6.0;     // Cells per voxel, per axis
-    const float STATIC_SPOT_TILT = 0.15;
+    // Left where it was when the moving kind was narrowed: a facet is a chip
+    // of rock that is flat and stays turned, not a leaf that has caught the
+    // light for a moment, and narrowing it takes the speckle off sand and
+    // gravel rather than gathering it anywhere.
+    const float STATIC_SPOT_TILT = 0.35;
     // How narrowly the light through a surface is aimed at the camera. Light
     // coming through a leaf is light going the way it was already going, so it
     // is seen looking back along it and not from the side: at the width a
