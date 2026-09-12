@@ -691,7 +691,14 @@ two things M1 disproved about the build, are in
   wall. `drawSignlikeNode` and `drawTorchlikeNode`, by way of the
   extension's `sign_quads` and `torch_quads`.
 
-  devtest: 142 of 390 node types have a shape, 83 of them liquids.
+  **`fencelike`** is a post that is always drawn and a pair of bars towards
+  each direction that has something to reach -- another fence of any kind,
+  or anything solid, which is Luanti's rule. The bars carry `connect_dir`,
+  so the mesher draws each pair only when that direction connects: that is
+  what `connect_dir` is for, the header names a fence as the case, and it
+  had no user.
+
+  devtest: 143 of 390 node types have a shape, 83 of them liquids.
 
   **And the blended pass, which is what makes water water.** A liquid, and
   anything a game asked to be blended rather than alpha masked with
@@ -732,13 +739,15 @@ two things M1 disproved about the build, are in
     honest and is not what devtest looks like. 112 of devtest's 390.
   - **The rest of the drawtypes.** By what devtest has of them:
     `glasslike_framed`'s frame (5, drawn as a plain cube for now);
-    `raillike` (1) and `fencelike` (1), which are the two that want the
-    mesher's `shape_masked` and `connect_dir` -- a shape per mask of which
-    neighbours a node reaches, which is machinery that also has no user yet;
-    and the node box kinds that are not `fixed` -- `connected` is that same
-    `connect_dir`, and `wallmounted` and `leveled` are a `VoxelVariant` on
-    the param. `mesh` (18) stays client-side or waits; see "Which mesher
-    draws the drawtypes".
+    `raillike` (1), the last one left, which wants the mesher's
+    `shape_masked` -- a shape per mask of which of the four horizontal
+    neighbours a rail reaches, sixteen of them plus four slopes, each one
+    quad wearing one of the four rail tiles turned. That machinery has no
+    user either, and `connected` node boxes are the same `connect_dir` a
+    fence now uses, so the two come together. devtest has no `connected`
+    node box to check one against, though, which is a reason to wait for a
+    game that does. `mesh` (18) stays client-side or waits; see "Which
+    mesher draws the drawtypes".
   - **Palettes**, one voxel type per used index, registered at load.
   - **The client fork.** What is on screen now is
     `games/luanti_launcher`'s viewer, which is a camera and a HUD line. The
