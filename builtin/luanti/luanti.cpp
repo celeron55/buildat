@@ -191,12 +191,12 @@ struct Module: public interface::Module, public luanti::Interface
 		return m_server->get_module_path(MODULE);
 	}
 
-	// cache/luanti, derived from where the module cache already is: buildat's
-	// own directory, never the user's Luanti install
+	// core.get_cache_path(): buildat's own cache, never the user's Luanti
+	// install. The games and worlds themselves are under the user path; see
+	// games/luanti_launcher.
 	ss_ luanti_cache_path()
 	{
-		ss_ rccpp = m_server->get_config().get<ss_>("rccpp_build_path");
-		return interface::fs::strip_file_name(rccpp)+"/luanti";
+		return m_server->get_config().get<ss_>("cache_path")+"/luanti";
 	}
 
 	void run_chunk_file(const ss_ &path)
