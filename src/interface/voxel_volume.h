@@ -215,6 +215,39 @@ namespace interface
 	ss_ serialize_volume_compressed(const VoxelVolume &volume);
 	up_<VoxelVolume> deserialize_volume(const ss_ &data);
 
+	// Moving a saved chunk from the cut it was written in to the cut the
+	// world is running now.
+	//
+	// The rule is that the engine moves data and never reinterprets it:
+	//
+	//   same role, same width, somewhere else   moved
+	//   a role the world has and the save does not   left zero
+	//   a role the save has and the world does not   dropped, with a warning
+	//   a plane the save has and the world does not  dropped, with a warning
+	//   bits no role of either format claims         copied where they are
+	//   any width change                             refused
+	//
+	// The last row is the point of the whole thing. Loading a 4-bit field
+	// into a 3-bit one loses data and 4 bits into 5 is a choice -- scale, or
+	// zero-extend? -- that only the game can make, so the engine refuses
+	// rather than guessing. Returns null and fills why when it does; the
+	// game's own migration is what answers that case, and there is no hook
+	// for it yet.
+	//
+	// The id field moves like any other. What the ids *mean* across a format
+	// change is a different question with a different answer -- the save's
+	// name table -- and remap_volume_ids() is that part.
+	up_<VoxelVolume> migrate_volume(const VoxelVolume &from,
+			const VoxelFormat &from_format, const VoxelFormat &to_format,
+			ss_ *why);
+
+	// Rewrites every voxel's id field through map, which is indexed by the
+	// id as it is stored. An id past the end of map is left alone, and
+	// map[0] has to be 0 -- nothing has generated a voxel with id 0, and a
+	// plane nothing wrote is skipped on the strength of that.
+	void remap_volume_ids(VoxelVolume &volume, const VoxelFormat &format,
+			const sv_<VoxelTypeId> &map);
+
 	// pv::RawVolume<int32_t>
 	ss_ serialize_volume_simple(const pv::RawVolume<int32_t> &volume);
 	ss_ serialize_volume_compressed(const pv::RawVolume<int32_t> &volume);
