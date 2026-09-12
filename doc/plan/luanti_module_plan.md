@@ -579,13 +579,25 @@ two things M1 disproved about the build, are in
   390 node types wear their real tiles. The other 111 keep the generated flat
   colour, and which 111 is the measurement that sizes what is left:
 
+  **Two drawtypes are built too:** `nodebox` of type `fixed` and
+  `plantlike`, as `VoxelQuad`s the server puts in the definition -- the first
+  thing in this tree to build one. A box's faces show the part of the node's
+  texture they cover, the way Luanti's `makeCuboid` does, so a slab is not a
+  whole texture squeezed into half a voxel. devtest: 39 of 390. The bundled
+  `minimal_game` has one of each so the visual check shows them.
+
   **What is left, in the order it matters:**
   - **The texture modifiers.** A tile with `^`, `[` or `(` in it is composed,
     and the client is what composes it -- `buildat.compose_image`, the way
     `extensions/luanti_client`'s `resolve_tile` does. Until then those nodes
     wear a flat colour, which is honest and is not what devtest looks like.
-  - **The drawtypes**, as `VoxelDefinition::shape` quads built server-side;
-    see "Which mesher draws the drawtypes" above. Everything is a cube today.
+  - **The rest of the drawtypes**: the liquids, `glasslike_framed`,
+    `torchlike`, `signlike`, `raillike`, `firelike`, `fencelike`, and the
+    node box kinds that are not `fixed` -- `connected` is the mesher's
+    `connect_dir` and `wallmounted` and `leveled` are a `VoxelVariant` on the
+    param, so neither is a list of boxes the server hands over as it stands.
+    `mesh` stays client-side or waits; see "Which mesher draws the
+    drawtypes".
   - **Palettes**, one voxel type per used index, registered at load.
   - **The client fork.** What is on screen now is
     `games/luanti_launcher`'s viewer, which is a camera and a HUD line. The

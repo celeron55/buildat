@@ -27,6 +27,9 @@
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
+#include <algorithm>
+#include <cassert>
+#include <cmath>
 #include <cereal/archives/portable_binary.hpp>
 extern "C" {
 #include <Lua/lua.h>
@@ -624,6 +627,158 @@ struct Module: public interface::Module, public luanti::Interface
 
 	// core.__voxel_defs() -> add_voxel(), in id order, with a solid colour
 	// each until M3 brings the real tiles
+	// One box of a node box, as six quads in the voxel's own -0.5...0.5
+	// cube -- which is where Luanti's node boxes already are, so a box
+	// arrives as it was written.
+	//
+	// The corners of each face go counter-clockwise seen from outside it,
+	// because the mesher takes (p1-p0) x (p2-p0) for the normal. Each face
+	// shows the part of the node's texture it covers, the way Luanti's
+	// makeCuboid does: without that a slab wears the whole texture squeezed
+	// into it. See doc/plan/luanti_module_plan.md, "What a VoxelQuad has to
+	// be".
+	static void add_box_quads(sv_<interface::VoxelQuad> &out,
+			float x0, float y0, float z0, float x1, float y1, float z1)
+	{
+		if(x1 < x0) std::swap(x0, x1);
+		if(y1 < y0) std::swap(y0, y1);
+		if(z1 < z0) std::swap(z0, z1);
+		// The box's extents as fractions of the cube, which is what the
+		// texture is cut out by
+		const float ux0 = x0 + 0.5f, ux1 = x1 + 0.5f;
+		const float uy0 = y0 + 0.5f, uy1 = y1 + 0.5f;
+		const float uz0 = z0 + 0.5f, uz1 = z1 + 0.5f;
+		auto quad = [&](uint8_t tile,
+				float ax, float ay, float az, float au, float av,
+				float bx, float by, float bz, float bu, float bv,
+				float cx, float cy, float cz, float cu, float cv,
+				float dx, float dy, float dz, float du, float dv){
+			interface::VoxelQuad q;
+			const float p[4][3] = {{ax, ay, az}, {bx, by, bz},
+					{cx, cy, cz}, {dx, dy, dz}};
+			const float uv[4][2] = {{au, av}, {bu, bv}, {cu, cv}, {du, dv}};
+			for(size_t i = 0; i < 4; i++){
+				for(size_t j = 0; j < 3; j++)
+					q.p[i][j] = p[i][j];
+				q.uv[i][0] = uv[i][0];
+				q.uv[i][1] = uv[i][1];
+			}
+			q.tile = tile;
+			out.push_back(q);
+		};
+		// +Y, u along x and v against z, so the top reads the way it does on
+		// a full cube
+		quad(0, x0, y1, z1, ux0, 1-uz1,  x1, y1, z1, ux1, 1-uz1,
+				x1, y1, z0, ux1, 1-uz0,  x0, y1, z0, ux0, 1-uz0);
+		// -Y
+		quad(1, x0, y0, z0, ux0, uz0,    x1, y0, z0, ux1, uz0,
+				x1, y0, z1, ux1, uz1,    x0, y0, z1, ux0, uz1);
+		// +X
+		quad(2, x1, y0, z1, uz1, 1-uy0,  x1, y0, z0, uz0, 1-uy0,
+				x1, y1, z0, uz0, 1-uy1,  x1, y1, z1, uz1, 1-uy1);
+		// -X
+		quad(3, x0, y0, z0, 1-uz0, 1-uy0, x0, y0, z1, 1-uz1, 1-uy0,
+				x0, y1, z1, 1-uz1, 1-uy1, x0, y1, z0, 1-uz0, 1-uy1);
+		// +Z
+		quad(4, x0, y0, z1, 1-ux0, 1-uy0, x1, y0, z1, 1-ux1, 1-uy0,
+				x1, y1, z1, 1-ux1, 1-uy1, x0, y1, z1, 1-ux0, 1-uy1);
+		// -Z
+		quad(5, x1, y0, z0, ux1, 1-uy0,  x0, y0, z0, ux0, 1-uy0,
+				x0, y1, z0, ux0, 1-uy1,  x1, y1, z0, ux1, 1-uy1);
+	}
+
+	// Luanti's plantlike: two quads crossing at the middle of the voxel,
+	// drawn from both sides. visual_scale makes it wider and taller, rooted
+	// at the bottom of the voxel, which is what Luanti does with it.
+	static void add_plant_quads(sv_<interface::VoxelQuad> &out, float scale)
+	{
+		const float r = 0.5f * scale;
+		const float y0 = -0.5f;
+		const float y1 = -0.5f + scale;
+		auto quad = [&](float ax, float az, float bx, float bz){
+			interface::VoxelQuad q;
+			const float p[4][3] = {{ax, y0, az}, {bx, y0, bz},
+					{bx, y1, bz}, {ax, y1, az}};
+			const float uv[4][2] = {{0, 1}, {1, 1}, {1, 0}, {0, 0}};
+			for(size_t i = 0; i < 4; i++){
+				for(size_t j = 0; j < 3; j++)
+					q.p[i][j] = p[i][j];
+				q.uv[i][0] = uv[i][0];
+				q.uv[i][1] = uv[i][1];
+			}
+			q.tile = 0;
+			out.push_back(q);
+		};
+		quad(-r, -r, r, r);
+		quad(-r, r, r, -r);
+	}
+
+	// Asserts what add_box_quads() and add_plant_quads() build, because the
+	// winding is what makes the normal and a quad wound the wrong way is
+	// invisible rather than wrong-looking. Runs once, from run_game().
+	static void check_shapes()
+	{
+		auto normal_of = [](const interface::VoxelQuad &q, float n[3]){
+			float e1[3], e2[3];
+			for(size_t i = 0; i < 3; i++){
+				e1[i] = q.p[1][i] - q.p[0][i];
+				e2[i] = q.p[2][i] - q.p[0][i];
+			}
+			n[0] = e1[1]*e2[2] - e1[2]*e2[1];
+			n[1] = e1[2]*e2[0] - e1[0]*e2[2];
+			n[2] = e1[0]*e2[1] - e1[1]*e2[0];
+		};
+		sv_<interface::VoxelQuad> box;
+		add_box_quads(box, -0.5f, -0.5f, -0.5f, 0.5f, 0.0f, 0.5f);
+		assert(box.size() == 6);
+		// Face f faces the way face f of a cube faces
+		static const float WANT[6][3] = {
+			{0, 1, 0}, {0, -1, 0}, {1, 0, 0},
+			{-1, 0, 0}, {0, 0, 1}, {0, 0, -1},
+		};
+		for(size_t f = 0; f < 6; f++){
+			float n[3];
+			normal_of(box[f], n);
+			assert(box[f].tile == f);
+			for(size_t i = 0; i < 3; i++)
+				assert(n[i] * WANT[f][i] >= 0.0f);
+			float dot = n[0]*WANT[f][0] + n[1]*WANT[f][1] + n[2]*WANT[f][2];
+			assert(dot > 0.0f);
+			// Every corner is inside the cube and every uv inside the tile
+			for(size_t c = 0; c < 4; c++){
+				for(size_t i = 0; i < 3; i++)
+					assert(box[f].p[c][i] >= -0.5f && box[f].p[c][i] <= 0.5f);
+				for(size_t i = 0; i < 2; i++)
+					assert(box[f].uv[c][i] >= 0.0f && box[f].uv[c][i] <= 1.0f);
+			}
+		}
+		// A slab's top is at y=0 and its texture is the top half of the tile
+		// in the two axes it spans, not a squeezed whole one
+		assert(box[0].p[0][1] == 0.0f);
+		assert(box[2].uv[0][1] == 1.0f && box[2].uv[2][1] == 0.5f);
+		// A box given its corners the other way round is the same box
+		sv_<interface::VoxelQuad> flipped;
+		add_box_quads(flipped, 0.5f, 0.0f, 0.5f, -0.5f, -0.5f, -0.5f);
+		assert(flipped.size() == box.size());
+		for(size_t i = 0; i < box.size(); i++){
+			for(size_t c = 0; c < 4; c++){
+				for(size_t j = 0; j < 3; j++)
+					assert(flipped[i].p[c][j] == box[i].p[c][j]);
+			}
+		}
+		// The plant is two quads that cross, standing on the voxel's floor
+		sv_<interface::VoxelQuad> plant;
+		add_plant_quads(plant, 1.0f);
+		assert(plant.size() == 2);
+		for(const interface::VoxelQuad &q : plant){
+			float n[3];
+			normal_of(q, n);
+			assert(std::fabs(n[1]) < 1e-6f); // Upright
+			assert(n[0] != 0.0f || n[2] != 0.0f);
+			assert(q.p[0][1] == -0.5f && q.p[2][1] == 0.5f);
+		}
+	}
+
 	// A tile the client can load as it stands: a plain file name the game
 	// shipped. Anything with a texture modifier in it -- ^ for an overlay,
 	// [ for a generator, ( for a grouping -- has to be composed, and the
@@ -651,6 +806,7 @@ struct Module: public interface::Module, public luanti::Interface
 		size_t n = lua_objlen(L, -1);
 		sv_<ss_> textures;
 		size_t n_fallback = 0;
+		size_t n_shaped = 0;
 		for(size_t i = 1; i <= n; i++){
 			lua_rawgeti(L, -1, (int)i);
 			if(!lua_istable(L, -1)){
@@ -661,9 +817,28 @@ struct Module: public interface::Module, public luanti::Interface
 			bool transparent = table_boolean(L, "transparent");
 			bool empty = table_boolean(L, "empty");
 			bool walkable = table_boolean(L, "walkable");
+			ss_ drawtype = table_string(L, "drawtype");
+			float visual_scale = (float)table_number(L, "visual_scale", 1.0);
 			ss_ tiles[6];
 			bool has_tiles = table_six_strings(L, "tiles", tiles);
+			sv_<float> boxes;
+			table_numbers(L, "node_box", boxes);
 			lua_pop(L, 1);
+
+			// The shape, where the drawtype is one this builds. Everything
+			// else is still a cube; see the M3 entry in the module plan for
+			// which and in what order.
+			sv_<interface::VoxelQuad> shape;
+			bool double_sided = false;
+			if(drawtype == "nodebox" && boxes.size() >= 6){
+				for(size_t b = 0; b + 5 < boxes.size(); b += 6){
+					add_box_quads(shape, boxes[b], boxes[b + 1], boxes[b + 2],
+							boxes[b + 3], boxes[b + 4], boxes[b + 5]);
+				}
+			} else if(drawtype == "plantlike"){
+				add_plant_quads(shape, visual_scale > 0.0f ? visual_scale : 1.0f);
+				double_sided = true;
+			}
 
 			// The generated flat colour, for a node whose tiles the client
 			// cannot load as they stand -- a texture modifier, or a name the
@@ -716,14 +891,24 @@ struct Module: public interface::Module, public luanti::Interface
 					interface::EDGEMATERIALID_GROUND;
 			vdef.physically_solid = walkable && !empty;
 			vdef.fully_empty = empty;
+			if(!shape.empty()){
+				// A shaped voxel draws its shape and not cube faces, and its
+				// neighbours draw theirs against it
+				vdef.shape = shape;
+				vdef.shape_double_sided = double_sided;
+				vdef.face_draw_type = interface::FaceDrawType::NEVER;
+				vdef.edge_material_id = interface::EDGEMATERIALID_EMPTY;
+				n_shaped++;
+			}
 			reg->add_voxel(vdef);
 		}
 		lua_settop(L, base);
 
 		serve_node_textures(textures);
-		log_i(MODULE, "%zu node types in the voxel registry, %zu of them "
-				"wearing a generated colour because a tile is a texture "
-				"modifier or was not shipped", n, n_fallback);
+		log_i(MODULE, "%zu node types in the voxel registry: %zu have a shape "
+				"of their own, %zu wear a generated colour because a tile is "
+				"a texture modifier or was not shipped",
+				n, n_shaped, n_fallback);
 	}
 
 	// The game's own media, named the way Luanti names it: by basename and
@@ -838,6 +1023,33 @@ struct Module: public interface::Module, public luanti::Interface
 		bool v = lua_toboolean(L, -1);
 		lua_pop(L, 1);
 		return v;
+	}
+
+	double table_number(lua_State *L, const char *key, double def)
+	{
+		lua_getfield(L, -1, key);
+		double v = lua_isnumber(L, -1) ? lua_tonumber(L, -1) : def;
+		lua_pop(L, 1);
+		return v;
+	}
+
+	// An array of numbers under key; left empty when it is not there
+	void table_numbers(lua_State *L, const char *key, sv_<float> &out)
+	{
+		out.clear();
+		lua_getfield(L, -1, key);
+		if(!lua_istable(L, -1)){
+			lua_pop(L, 1);
+			return;
+		}
+		size_t n = lua_objlen(L, -1);
+		out.reserve(n);
+		for(size_t i = 1; i <= n; i++){
+			lua_rawgeti(L, -1, (int)i);
+			out.push_back((float)lua_tonumber(L, -1));
+			lua_pop(L, 1);
+		}
+		lua_pop(L, 1);
 	}
 
 	// An array of six strings under key, or false when it is not there
@@ -999,6 +1211,8 @@ struct Module: public interface::Module, public luanti::Interface
 		load_clock();
 
 		run_chunk_file(module_path()+"/lua/modloader.lua");
+
+		check_shapes();
 
 		// The game's own media before the registry, because what a node's
 		// tiles can be depends on which files were actually shipped

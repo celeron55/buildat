@@ -18,6 +18,28 @@ core.register_node("floor:marker", {
 	groups = {cracky = 3},
 })
 
+-- The two drawtypes the module builds shapes for, so that the visual check
+-- shows them without a Luanti installation
+core.register_node("floor:slab", {
+	description = "Slab",
+	drawtype = "nodebox",
+	node_box = {
+		type = "fixed",
+		fixed = {-0.5, -0.5, -0.5, 0.5, 0, 0.5},
+	},
+	tiles = {"floor_stone.png"},
+	groups = {cracky = 3},
+})
+
+core.register_node("floor:plant", {
+	description = "Plant",
+	drawtype = "plantlike",
+	tiles = {"floor_plant.png"},
+	walkable = false,
+	sunlight_propagates = true,
+	groups = {snappy = 3},
+})
+
 local HALF = 12   -- a 25x25 floor, which is one voxelworld section across
 local Y = 0
 
@@ -34,6 +56,13 @@ for x = 0, 6 do
 end
 for y = 1, 4 do
 	core.set_node({x = 0, y = Y + y, z = 0}, {name = "floor:marker"})
+end
+
+-- A row of slabs and a row of plants along +X, beside the marker wall and
+-- out of the tower's shadow, so that a screenshot shows what they are
+for x = 1, 6 do
+	core.set_node({x = x, y = Y + 1, z = -2}, {name = "floor:slab"})
+	core.set_node({x = x, y = Y + 1, z = -4}, {name = "floor:plant"})
 end
 
 core.log("action", "floor: placed a " .. (HALF * 2 + 1) .. "x" ..
