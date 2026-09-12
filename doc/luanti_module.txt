@@ -13,23 +13,38 @@ milestones and the reasoning. What is written down here is what exists.
 Where the content lives
 -----------------------
 
-Games are scanned from cache/luanti/games, worlds from cache/luanti/worlds.
+Games are scanned from user/luanti/games, worlds from user/luanti/worlds.
 Those are buildat's own directories on purpose: nothing here reads the content
 of a real Luanti installation, and nothing here can write to one. A game is a
 directory with a game.conf; a world is a directory with a world.mt naming its
-gameid.
+gameid. (The user path, not the cache: a game somebody installed and a world
+they have played are things they chose. See local/world_persistence_plan.md.)
 
-To try it:
+buildat ships one Luanti game of its own, builtin/luanti/minimal_game: one
+mod, two node types and a floor made of them. It needs nothing installed and
+it is what the visual check runs, since a fixture somebody has to install is
+a fixture that is different on every machine.
 
-    $ mkdir -p cache/luanti/games cache/luanti/worlds
-    $ cp -r ~/projects/luanti/games/devtest cache/luanti/games/devtest
-    $ mkdir cache/luanti/worlds/devtest_world
-    $ printf 'gameid = devtest\n' > cache/luanti/worlds/devtest_world/world.mt
+    $ cd Build
+    $ BUILDAT_LUANTI_GAME=minimal bin/buildat_server -m ../games/luanti_launcher
+    $ bin/buildat -s localhost           # in another terminal
+
+A real game, once there is one to point at:
+
+    $ mkdir -p user/luanti/games user/luanti/worlds
+    $ cp -r ~/projects/luanti/games/devtest user/luanti/games/devtest
+    $ mkdir user/luanti/worlds/devtest_world
+    $ printf 'gameid = devtest\n' > user/luanti/worlds/devtest_world/world.mt
     $ cd Build && bin/buildat_server -m ../games/luanti_launcher
 
-games/luanti_launcher runs the first world it finds, or the one
-BUILDAT_LUANTI_WORLD names. It extends nothing; it is what the module is
-tested against.
+games/luanti_launcher runs the first world it finds, the one
+BUILDAT_LUANTI_WORLD names, or the game BUILDAT_LUANTI_GAME names. It extends
+nothing; it is what the module is tested against.
+
+What you see is not the Luanti client. There is no player and no digging: the
+camera looks at the world from outside it and every node is a flat colour
+hashed from its name. That is M2 -- the nodes a mod placed are in voxelworld
+and on the screen. The real tiles, the drawtypes and the media are M3.
 
 The licence, and why this is allowed
 ------------------------------------
