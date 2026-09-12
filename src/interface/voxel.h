@@ -96,7 +96,7 @@ namespace interface
 		// contribution to the lighting is a scalar here and cannot be
 		// tinted, so a palette entry would show in shade and vanish in
 		// sunlight. An albedo tint wants a channel of its own; see
-		// local/voxel_data_model_plan.md.
+		// doc/plan/voxel_data_model_plan.md.
 		uint32_t color = 0xffffff;
 		// Where a liquid's surface stands in the voxel; see
 		// VoxelDefinition::liquid_top. Luanti's flowing liquids put their
@@ -443,7 +443,7 @@ namespace interface
 		// than albedo, so this tints the light a voxel receives and not its
 		// texture. For a game whose voxels are unlit colour that is the same
 		// thing; for one that wants a palette over a texture it is not. See
-		// local/voxel_data_model_plan.md.
+		// doc/plan/voxel_data_model_plan.md.
 		VoxelField color;
 
 		// Modifiers: fields the mesher reads to change how a voxel is drawn

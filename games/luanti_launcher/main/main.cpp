@@ -98,7 +98,7 @@ struct Module: public interface::Module
 	// Under the user path, not the cache: a Luanti game the user installed
 	// and a world they have played are things they chose, and the cache is
 	// what the program can recreate by itself. See
-	// local/world_persistence_plan.md.
+	// doc/plan/world_persistence_plan.md.
 	ss_ luanti_path()
 	{
 		return m_server->get_config().get<ss_>("user_path")+"/luanti";

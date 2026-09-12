@@ -8,4 +8,4 @@ SQLITE_SOURCE_ID
 SQLite is in the public domain. See https://sqlite.org/copyright.html.
 
 Only builtin/storage includes sqlite3.h; everything else goes through its
-api.h. See local/world_persistence_plan.md.
+api.h. See doc/plan/world_persistence_plan.md.

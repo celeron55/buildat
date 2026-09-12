@@ -499,7 +499,7 @@ end
 --
 -- Everything the environment, the objects, the world and the network are
 -- behind. A milestone moves names out of this list; see
--- local/luanti_module_plan.md for which milestone owns which.
+-- doc/plan/luanti_module_plan.md for which milestone owns which.
 --
 
 local stub_warned = {}
@@ -613,7 +613,7 @@ stub("serialize_schematic", nil)
 -- until the milestone that answers them, and this is that milestone for the
 -- read and the write. Everything goes through two C functions, and what they
 -- talk to is a write-behind buffer in the module that voxelworld sees once
--- per Luanti step. See local/luanti_module_plan.md, "set_node is buffered".
+-- per Luanti step. See doc/plan/luanti_module_plan.md, "set_node is buffered".
 
 local __set_node = __luanti_set_node
 local __get_node = __luanti_get_node

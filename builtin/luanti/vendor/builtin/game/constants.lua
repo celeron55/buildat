@@ -8,7 +8,7 @@
 -- the game, and here builtin/luanti is that engine. lua/bootstrap.lua has
 -- already set these to the numbers its VoxelRegistry uses; leaving Luanti's
 -- own 125/126/127 here would overwrite them with numbers nothing else means.
--- See local/luanti_module_plan.md, "the ids are the same number".
+-- See doc/plan/luanti_module_plan.md, "the ids are the same number".
 
 -- emerge.h
 -- Block emerge status constants (for use with core.emerge_area)
