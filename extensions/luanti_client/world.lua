@@ -537,10 +537,10 @@ function M.new(magic, buildat, log, options)
 
 	-- What the moon is worth, in the same units. Not a measurement of
 	-- anything -- real moonlight is a millionth of sunlight and would render
-	-- as nothing -- but a night that is lit from where the moon is, dimly and
-	-- coldly, rather than one that is lit from under the world by a sun that
-	-- has set.
-	local MOON_BRIGHTNESS = 1.0
+	-- as nothing -- but a night lit from where the moon is, coldly and far
+	-- enough above the sky's own light that the moon casts a shadow and a wet
+	-- or glassy surface glints under it. A tenth of the sun.
+	local MOON_BRIGHTNESS = 5.0
 	local MOON_COLOR = {0.55, 0.68, 1.0}
 
 	-- When the sun is in the scene and when the moon is, in Luanti's
@@ -602,17 +602,19 @@ function M.new(magic, buildat, log, options)
 		sun_light.shadowBias = magic.BiasParameters(0.00005, 0.8, 0.002)
 		sun_light.shadowCascade = magic.CascadeParameters(
 				SHADOW_NEAR, SHADOW_FAR, 0, 0, 0.8)
-		-- The moon, which is the same light from the other side of the sky.
-		-- No shadow map of its own: at this brightness a moon shadow is
-		-- below what the frame can show, and the pair of them overlap for
-		-- the hour either side of dusk and dawn, where two shadow maps is
-		-- twice the cost of one for nothing anybody can see.
+		-- The moon, which is the same light from the other side of the sky,
+		-- with the same shadow map settings. The two are both in the scene
+		-- for the hour either side of dusk and dawn, which is two shadow maps
+		-- for that hour and one for the rest of the day.
 		moon_node = scene:CreateChild("Moon")
 		moon_light = moon_node:CreateComponent("Light")
 		moon_light.lightType = magic.LIGHT_DIRECTIONAL
-		moon_light.castShadows = false
+		moon_light.castShadows = true
 		moon_light.brightness = MOON_BRIGHTNESS
 		moon_light.specularIntensity = 1.0
+		moon_light.shadowBias = magic.BiasParameters(0.00005, 0.8, 0.002)
+		moon_light.shadowCascade = magic.CascadeParameters(
+				SHADOW_NEAR, SHADOW_FAR, 0, 0, 0.8)
 		moon_light.color = magic.Color(MOON_COLOR[1], MOON_COLOR[2],
 				MOON_COLOR[3])
 
@@ -3379,12 +3381,18 @@ function M.new(magic, buildat, log, options)
 		return math.cos(a), math.sin(a), 0
 	end
 
-	-- The sun's own colour at noon, which is warm. Luanti's
-	-- sunlight_color() is the colour of the sun and the sky together,
-	-- because together is the only way Luanti has them; on the PBR path the
-	-- sky is a light of its own, so what is left for the sun is what the sun
-	-- is. The same numbers res/LuantiSky.glsl draws the disc with.
-	local SUN_COLOR = {1.0, 0.92, 0.78}
+	-- The sun's own colour at noon. Luanti's sunlight_color() is the colour
+	-- of the sun and the sky together, because together is the only way
+	-- Luanti has them; on the PBR path the sky is a light of its own, so what
+	-- is left for the sun is what the sun is. Only a little warm: what makes
+	-- sunlight read as golden is the blue ambient beside it, and a light
+	-- warmer than this shows up undisguised in what a glint reflects.
+	-- games/voxel_lighting's sun is the same colour.
+	local SUN_COLOR = {1.0, 0.96, 0.88}
+	-- How much of the horizon's own tint the light takes when the sun is down
+	-- among it. Not all of it: sun_tint is the colour a band of sky is
+	-- painted, which is deeper than the light that paints it.
+	local SUN_TINT_SHARE = 0.5
 
 	-- One of the game's colours, or Luanti's default for it, as 0...1
 	local function sky_color(name, brightness)
@@ -3412,6 +3420,7 @@ function M.new(magic, buildat, log, options)
 		local low = 1 - math.abs(sy) * 2.5
 		low = low < 0 and 0 or (low > 1 and 1 or low)
 		local tint = sky_color("sun_tint", 1)
+		low = low * SUN_TINT_SHARE
 		return magic.Color(
 				SUN_COLOR[1] * (1 - low) + tint.r * low,
 				SUN_COLOR[2] * (1 - low) + tint.g * low,
