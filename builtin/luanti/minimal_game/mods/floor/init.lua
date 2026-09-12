@@ -212,6 +212,22 @@ core.register_node("floor:rail", {
 	groups = {cracky = 3},
 })
 
+-- The callbacks a mod is written around, declared here because a registered
+-- definition refuses new keys: register.lua sets __newindex to ignore them,
+-- on purpose, so a callback cannot be bolted on afterwards and a check for
+-- one has to be where the node is registered.
+local probe = {placed = 0, dug = 0, constructed = 0, destructed = 0}
+
+core.register_node("floor:probe", {
+	description = "Probe",
+	tiles = {"floor_marker.png"},
+	groups = {cracky = 3},
+	on_construct = function() probe.constructed = probe.constructed + 1 end,
+	on_destruct = function() probe.destructed = probe.destructed + 1 end,
+	after_place_node = function() probe.placed = probe.placed + 1 end,
+	after_dig_node = function() probe.dug = probe.dug + 1 end,
+})
+
 local HALF = 12   -- a 25x25 floor, which is one voxelworld section across
 local Y = 0
 
@@ -319,6 +335,50 @@ end
 for i = 0, 4 do
 	core.set_node({x = -8 + i, y = Y + 1, z = 5},
 			{name = "floor:water_flowing", param2 = 7 - i})
+end
+
+-- Placing and digging with nobody doing them, and the callbacks that go with
+-- them: core.place_node() and core.dig_node() hand the work to the vendored
+-- builtin's item_place and node_dig, so what this proves is that the builtin
+-- reaches a definition's callbacks through this module's map.
+do
+	local p = {x = 10, y = Y + 1, z = 10}
+	core.set_node({x = p.x, y = p.y - 1, z = p.z}, {name = "floor:stone"})
+	core.set_node(p, {name = "air"})
+	probe.placed, probe.dug = 0, 0
+	probe.constructed, probe.destructed = 0, 0
+
+	if not core.place_node(p, {name = "floor:probe"}) then
+		error("floor: place_node said no")
+	end
+	if core.get_node(p).name ~= "floor:probe" then
+		error("floor: place_node left " .. core.get_node(p).name)
+	end
+	if probe.placed ~= 1 or probe.constructed ~= 1 then
+		error("floor: after_place_node " .. probe.placed ..
+				", on_construct " .. probe.constructed)
+	end
+
+	if not core.dig_node(p) then
+		error("floor: dig_node said no")
+	end
+	if core.get_node(p).name ~= "air" then
+		error("floor: dig_node left " .. core.get_node(p).name)
+	end
+	if probe.dug ~= 1 or probe.destructed ~= 1 then
+		error("floor: after_dig_node " .. probe.dug ..
+				", on_destruct " .. probe.destructed)
+	end
+
+	-- swap_node is the one that runs neither, which is what it is for
+	probe.constructed, probe.destructed = 0, 0
+	core.swap_node(p, {name = "floor:probe"})
+	if probe.constructed ~= 0 or probe.destructed ~= 0 then
+		error("floor: swap_node ran a callback")
+	end
+	core.set_node(p, {name = "air"})
+	core.set_node({x = p.x, y = p.y - 1, z = p.z}, {name = "air"})
+	core.log("action", "floor: place_node and dig_node run their callbacks")
 end
 
 core.log("action", "floor: placed a " .. (HALF * 2 + 1) .. "x" ..

@@ -764,8 +764,37 @@ two things M1 disproved about the build, are in
     largest unknown left in the milestone. How the fork is made, what
     survives the move to voxelworld, and who resolves textures are in "The
     protocol, and the client" above.
-- **M4 -- it plays.** Digging and placing, inventory, item definitions,
-  craft, formspecs. Success is digging a node in devtest and getting it.
+- **M4 -- it plays. The node half is built (2026-09-13).** Digging and
+  placing, inventory, item definitions, craft, formspecs. Success is digging
+  a node in devtest and getting it.
+
+  **Built:** `add_node`, `remove_node`, `swap_node`, `bulk_set_node`,
+  `bulk_swap_node`, and the three a player's actions come to --
+  `place_node`, `dig_node`, `punch_node`. Each makes the pointed thing a
+  player's action would have made, hands it to the vendored builtin with a
+  nil actor, and lets that run the callbacks: `can_dig`, `after_dig_node`,
+  `on_construct`, `on_destruct`, `after_place_node`, the drop list and the
+  registered `on_dignodes` and `on_placenodes` are the builtin's own and
+  behave as they do in Luanti rather than being written again. That is
+  Luanti's own `l_dig_node`, `l_place_node` and `l_punch_node`.
+
+  Node metadata came with them, because the builtin reaches for
+  `core.get_meta()` on every dig of a node whose definition has an
+  `after_dig_node`. In memory for now; the save is step 5c of
+  `doc/plan/world_persistence_plan.md`.
+
+  **What is left of M4:** the drops go nowhere, because an item entity is an
+  object and objects are M5 -- `handle_node_drops()` computes them and hands
+  them to `core.add_item()`, which still says it is a stub. Then inventories,
+  item definitions, craft and formspecs, and the client half that turns a
+  click into a dig.
+
+  Two things the check found, both Luanti's own behaviour rather than bugs
+  here: a registered definition refuses new keys -- `register.lua` sets
+  `__newindex` to ignore them, so a callback cannot be bolted onto a def
+  afterwards and a check for one has to be where the node is registered --
+  and `node_dig` reads a node's metadata whenever the def has an
+  `after_dig_node`, whether or not anything ever wrote any.
 - **M5 -- it lives.** ABMs, LBMs, entities, `core.after`. Success is
   `testabms` and `testentities` behaving.
 - **M6 -- the launcher.** `games/luanti_launcher` as described.

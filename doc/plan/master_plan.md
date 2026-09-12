@@ -86,7 +86,10 @@ The order of work, which is one line of it rather than parallel branches:
    confinement, is a trust-boundary decision; the three shapes it could take
    are written out under "OPEN: what a module's client half is allowed to
    do" in `doc/plan/luanti_module_plan.md`.
-2. **M4, M5, M6, M7** after, in the module plan's own order.
+2. **M4, M5, M6, M7** after, in the module plan's own order. M4's node half
+   -- `place_node`, `dig_node`, `punch_node` and the callbacks around them,
+   with node metadata -- is built ahead of that order, because it needed
+   nothing of M3 and M3's own remainder is the two blocked questions.
 
 Done since this list was written, all in `doc/plan/master_plan_history.md`:
 steps 4 and 5a of the persistence plan -- voxelworld's name table, format tag
