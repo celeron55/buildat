@@ -238,7 +238,12 @@ struct Module: public interface::Module
 					world_name);
 			return;
 		}
-		world_path = save->path();
+		// A subdirectory of the save rather than the save's own root: a
+		// Luanti mod writing through core.get_worldpath() must not be able
+		// to land on save.sqlite or on anything else of ours that it does
+		// not expect to be there.
+		world_path = save->path()+"/luanti";
+		interface::fs::create_directories(world_path);
 
 		log_i(MODULE, "Running world %s (game %s) in %s",
 				cs(world_name), cs(gameid), cs(world_path));
