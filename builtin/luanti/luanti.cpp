@@ -59,11 +59,13 @@ static void node_colour(const ss_ &name, uint8_t rgb[3])
 		h ^= (uint8_t)c;
 		h *= 16777619u;
 	}
-	// Away from the dark end and away from grey: a palette of flat colours
-	// reads as different blocks, a palette of muds does not
-	rgb[0] = 80 + (h & 0x7f);
-	rgb[1] = 80 + ((h >> 8) & 0x7f);
-	rgb[2] = 80 + ((h >> 16) & 0x7f);
+	// Kept well below white: these are albedo, and a game lighting a scene
+	// in HDR with a tone curve over it turns anything near white into a
+	// flat blown-out surface. 0.12 to 0.55 is roughly what the hand-drawn
+	// voxel textures in this tree sit at.
+	rgb[0] = 30 + (h & 0x6f);
+	rgb[1] = 30 + ((h >> 8) & 0x6f);
+	rgb[2] = 30 + ((h >> 16) & 0x6f);
 }
 
 static ss_ node_texture_name(const ss_ &name)
