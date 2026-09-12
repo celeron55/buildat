@@ -433,9 +433,17 @@ byte-identical over all 865 rows -- and, for step 4, the round trip under
      once anything else here is worth a periodic checkpoint.
    - **5b. Mod storage into the object store.** The code path exists
      (`bootstrap.lua`) and writes serialized-Lua files under
-     `<save>/luanti/mod_storage/`, which works; moving it into the store is
-     a small redirect when there is a reason. Untested so far -- nothing in
-     a devtest run has called it.
+     `<save>/luanti/mod_storage/`; moving it into the store is a small
+     redirect when there is a reason.
+
+     It was untested -- nothing in a devtest run had ever called it -- and
+     is not any more: `minimal_game`'s `floor` mod opens its storage while
+     it loads, counts the times the world has been opened and says which
+     one this is, so every run of the fixture proves a value written by the
+     last run came back. The check is in the fixture rather than in
+     `lua/check_map.lua` because `get_mod_storage()` needs a mod to be
+     running: outside one there is no current modname and it has nothing to
+     open. It works; the first run says one and the second says two.
    - **5c. Node metadata and inventories.** With M4, not before it.
    - **5d. Players.** With M5.
 
