@@ -28,6 +28,7 @@ uniform float cStarFade;
 // squares, zero for one it has turned off; how many of the star grid's cells
 // hold a star, and what colour; and how much of the sky the clouds cover.
 uniform float cSunSize;
+uniform float cSunOverexposure;
 uniform float cMoonSize;
 uniform float cStarDensity;
 uniform vec3 cStarColor;
@@ -54,14 +55,14 @@ const vec3 MOON_COLOR = vec3(0.86, 0.88, 0.94);
 // tint the horizon is painted with: a sun the colour of dawn at midday is
 // what the tint alone gives
 const vec3 SUN_COLOR = vec3(1.0, 0.97, 0.86);
-// The sun is brighter than anything else in the frame by orders of
-// magnitude, and there is no tone mapping to say so, so the only way to say
-// it is to let the disc clip: what a game's sun texture is painted as, or
-// SUN_COLOR, multiplied past one and clamped. The core comes out white and
-// the texture's own colour is left at the edges, where it is not clipped.
-// Scaled back to nothing as the sun comes down to the horizon, because a low
-// sun is a dim one and its colour is the whole point of it.
-const float SUN_OVEREXPOSURE = 1.5;
+// How far past white the sun's disc is drawn. The sun is brighter than
+// anything else in the frame by orders of magnitude and it has to be said
+// somehow: on the vanilla path the frame clips at one, so the disc is pushed
+// a little past it and its core comes out white with the texture's own colour
+// left at the edges; on the PBR path the frame is tone mapped and this is a
+// real multiplier, which is also what makes the bloom around it. Set from
+// world.lua. Scaled back to nothing as the sun comes down to the horizon,
+// because a low sun is a dim one and its colour is the point of it.
 
 const float CLOUD_SCALE = 6.0;
 const float CLOUD_PIXELS = 11.0;
@@ -194,8 +195,7 @@ void PS()
             sun_color = tex.rgb;
             cover *= tex.a;
         }
-        sun_color = min(sun_color * mix(SUN_OVEREXPOSURE, 1.0, low),
-            vec3(1.0));
+        sun_color *= mix(cSunOverexposure, 1.0, low);
         color = mix(color, sun_color, cover);
     }
     if(cMoonSize > 0.0){

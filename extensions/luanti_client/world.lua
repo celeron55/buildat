@@ -523,23 +523,25 @@ function M.new(magic, buildat, log, options)
 	local SHADOW_NEAR = 24    -- nodes; the first cascade
 	local SHADOW_FAR = 96     -- and the second, which is the shadow distance
 	-- What a lit face gets from the sun, against the sky as the ambient. The
-	-- number is large because Urho's PBR divides direct light by pi, the
-	-- albedo it multiplies is well under 1, and nothing tone maps afterwards:
-	-- measured on a grass field, a brightness of 6 put about as much light on
-	-- a lit face as the ambient already had, which is a sun nobody can see
-	-- and a shadow nobody can see either. This lands a lit face at about two
-	-- and a half times a shadowed one.
-	local SUN_BRIGHTNESS = 18.0
+	-- number is large because Urho's PBR direct lighting is normalized -- the
+	-- BRDF is divided by pi and so is the diffuse term inside it -- and
+	-- because the frame is tone mapped, so a sun well past white is what
+	-- white is for. games/voxel_lighting arrived at the same number for the
+	-- same reasons.
+	local SUN_BRIGHTNESS = 50.0
+	-- How far past the tone curve's middle the frame is exposed
+	local TONEMAP_EXPOSURE = 1.6
+	-- What the sun's disc is drawn at, in the same units: well past white, so
+	-- that the tone curve leaves it white and the bloom finds it
+	local SUN_DISC_OVEREXPOSURE = 6.0
 
 	-- What the sky is worth as a light, against that. Two numbers, because
 	-- the sky's own colour is the wrong one to light a world with: it is the
 	-- colour of the zenith, and a surface sees the whole dome -- the pale
 	-- band along the horizon and the glare around the sun as much as the blue
 	-- overhead -- so what reaches it is far less blue than what is up there.
-	-- And at full strength the sky puts nearly as much light on a sunlit face
-	-- as the sun does, which reads as a world under water.
 	local AMBIENT_DESATURATE = 0.55
-	local AMBIENT_FROM_SKY = 0.7
+	local AMBIENT_FROM_SKY = 0.6
 
 	local function ambient_from_sky(sky)
 		local luma = 0.2126 * sky.r + 0.7152 * sky.g + 0.0722 * sky.b
@@ -663,6 +665,33 @@ function M.new(magic, buildat, log, options)
 	local viewport = magic.Viewport:new(scene, camera)
 	self.viewport = viewport
 	magic.renderer:SetViewport(0, viewport)
+
+	-- On the PBR path the frame is rendered in HDR and tone mapped, the way
+	-- games/voxel_lighting does it. Nothing else makes the sun read as the
+	-- sun: in a frame that clips at one, a sun strong enough to put a real
+	-- shadow on the ground flattens every lit surface to white, and one weak
+	-- enough not to do that is a sun whose colour and whose shadow are both
+	-- invisible under the sky's. With the curve in, the sun can be fifty
+	-- times the sky, which is about what it is, and what a lit surface gets
+	-- is the sun's own colour rather than a mixture with the sky's; the same
+	-- curve lifts the shadows, so a shadow under full skylight reads as shade
+	-- rather than as a hole.
+	if pbr then
+		magic.renderer.HDRRendering = true
+		local rp = viewport.renderPath:Clone()
+		rp:Append(magic.cache:GetResource("XMLFile",
+				"PostProcess/BloomHDR.xml"))
+		rp:Append(magic.cache:GetResource("XMLFile",
+				"PostProcess/Tonemap.xml"))
+		rp:Append(magic.cache:GetResource("XMLFile",
+				"PostProcess/GammaCorrection.xml"))
+		-- Tonemap.xml ships with Reinhard on; Uncharted2 keeps more contrast
+		-- in the shadows, which on a world lit by one sun is most of it
+		rp:SetEnabled("TonemapReinhardEq3", false)
+		rp:SetEnabled("TonemapUncharted2", true)
+		rp:SetShaderParameter("TonemapExposureBias", TONEMAP_EXPOSURE)
+		viewport.renderPath = rp
+	end
 
 	-- The sounds the server asked for. A sound at a position is a node in
 	-- the scene and the listener rides the camera, which is what makes it
@@ -3307,7 +3336,7 @@ function M.new(magic, buildat, log, options)
 	-- because together is the only way Luanti has them; on the PBR path the
 	-- sky is a light of its own, so what is left for the sun is what the sun
 	-- is. The same numbers res/LuantiSky.glsl draws the disc with.
-	local SUN_COLOR = {1.0, 0.97, 0.86}
+	local SUN_COLOR = {1.0, 0.92, 0.78}
 
 	-- One of the game's colours, or Luanti's default for it, as 0...1
 	local function sky_color(name, brightness)
@@ -3461,6 +3490,12 @@ function M.new(magic, buildat, log, options)
 					sun_texture and 1 or 0)
 			sky_material:SetShaderParameter("MoonTextured",
 					moon_texture and 1 or 0)
+			-- How far past white the disc is drawn. On the PBR path the
+			-- frame is tone mapped, so this is a real multiplier and what
+			-- the bloom around the sun comes from; on the vanilla path the
+			-- frame clips at one and a little past it is all that is wanted.
+			sky_material:SetShaderParameter("SunOverexposure",
+					pbr and SUN_DISC_OVEREXPOSURE or 1.5)
 			sky_material:SetShaderParameter("SunSize",
 					sun.visible and SUN_HALF * (sun.scale or 1) or 0)
 			sky_material:SetShaderParameter("MoonSize",
@@ -3980,6 +4015,10 @@ function M.new(magic, buildat, log, options)
 		-- Dropping the viewport rather than replacing it: there is nothing
 		-- else to show, and SetViewport() takes no nil
 		magic.renderer.numViewports = 0
+		-- HDR and the render path are the renderer's, not the viewport's, so
+		-- a world that has gone has to hand them back or the menu after it is
+		-- drawn through a tone curve with nothing to tone map
+		magic.renderer.HDRRendering = false
 	end
 
 	function self:block_count()
