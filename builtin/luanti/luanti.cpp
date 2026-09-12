@@ -73,12 +73,13 @@ static void node_colour(const ss_ &name, uint8_t rgb[3])
 	rgb[2] = 30 + ((h >> 16) & 0x6f);
 }
 
-// A media file's name as the client knows it. The module's own namespace,
-// because these are somebody else's file names and they land beside every
-// other module's.
+// A media file's name as the client knows it. A namespace of its own, and
+// not the module's own "luanti/", because that is where client_file serves a
+// module's client_lua from: a game with a texture called module.lua would
+// otherwise land on top of this module's client half.
 static ss_ media_resource_name(const ss_ &file_name)
 {
-	return "luanti/"+file_name;
+	return "luanti_media/"+file_name;
 }
 
 static ss_ node_texture_name(const ss_ &name)
@@ -89,7 +90,7 @@ static ss_ node_texture_name(const ss_ &name)
 		h *= 16777619u;
 	}
 	char buf[32];
-	snprintf(buf, sizeof buf, "luanti/node_%08x.png", (unsigned)h);
+	snprintf(buf, sizeof buf, "luanti_gen/node_%08x.png", (unsigned)h);
 	return buf;
 }
 
