@@ -237,12 +237,18 @@ void VS()
     // spot turned this far catches the sun from anywhere within that angle of
     // the mirror direction, so a large one puts glints over a whole field
     // rather than in the band where the light is actually being reflected.
-    const float SPOT_TILT = 0.18;
+    const float SPOT_TILT = 0.06;
     // Bigger than the moving ones: a facet is a chip of rock, not a leaf.
     // Taken from the world position for the same reason as those, that a map
     // lives in one voxel face and would repeat every voxel.
     const float STATIC_SPOT_CELLS = 6.0;     // Cells per voxel, per axis
     const float STATIC_SPOT_TILT = 0.15;
+    // How narrowly the light through a surface is aimed at the camera. Light
+    // coming through a leaf is light going the way it was already going, so it
+    // is seen looking back along it and not from the side: at the width a
+    // sixth power gives, a canopy glows over a quarter of the sky and the glow
+    // stops reading as the sun behind it.
+    const float TRANSMISSION_FOCUS = 32.0;
     const float TRANSMISSION_RATE = 0.03;    // Cycles per second, mean
     const vec3 TRANSMISSION_WIND = vec3(0.35, 0.0, -0.2);
 
@@ -430,11 +436,19 @@ void PS()
             surfaceSpots = GetSurfaceSpots(vWorldPos.xyz, surfaceSrc.a);
             staticSpots = GetStaticSpots(vWorldPos.xyz,
                 texture2D(sNormalMap, vTexCoord.xy).a);
+            // A spot is glossy because it is a leaf or a facet that has
+            // turned, and one that has half turned is a smaller turn rather
+            // than a wider, duller highlight: the fade belongs in the tilt,
+            // which carries it below. Ramping the gloss on sharply instead is
+            // what keeps the half open cells -- which at any moment are most
+            // of them -- from being a broad sheen that follows the light
+            // across a whole field.
             float spotMask = max(surfaceSpots, staticSpots);
-            roughness = mix(roughness, SPOT_ROUGHNESS, spotMask);
+            float spotGloss = spotMask * spotMask * spotMask;
+            roughness = mix(roughness, SPOT_ROUGHNESS, spotGloss);
             // Full strength however matte the rest is, so that rock can be
             // dull everywhere except at its facets
-            specStrength = mix(specStrength, 1.0, spotMask);
+            specStrength = mix(specStrength, 1.0, spotGloss);
         #endif
     #else
         float roughness = cRoughness;
@@ -604,7 +618,8 @@ void PS()
             vec3 transmitted = mix(vec3(1.0), diffColor.rgb,
                 TRANSMISSION_TINT);
             float backNdl = max(0.0, -dot(normal, lightVec));
-            float forward = pow(max(0.0, dot(-lightVec, toCamera)), 6.0);
+            float forward = pow(max(0.0, dot(-lightVec, toCamera)),
+                TRANSMISSION_FOCUS);
             // A material with no spots at all is translucent all over
             #ifdef VOXELSPOTS
                 float through = surfaceSrc.a > 0.0 ? surfaceSpots : 1.0;
