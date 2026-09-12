@@ -658,6 +658,22 @@ two things M1 disproved about the build, are in
   the voxel it stands in and not by the ground it is rooted in -- which is
   what `shape_lit_from_above` was built for, and had no user until now.
 
+  **And a node turns with its param2.** `facedir`, `4dir` and `wallmounted`
+  -- and the `color*` kinds of each, which put a palette index in the high
+  bits and the direction in the same low ones -- are a `VoxelVariant` per
+  direction, permuting the definition's own six textures with `tile_order`
+  and turning each inside its face with `tile_turns`. That is what those two
+  fields were for and they had no user. The tables are Luanti's own
+  `dir_to_tile[24][8]` read at the six directions buildat's faces are in,
+  taken from `extensions/luanti_client/shapes.lua` which read them out
+  first. devtest: 56 node types.
+
+  simplified: a *shaped* node that turns does not turn its shape, only its
+  textures -- and the mesher takes a shape quad's tile from the quad and not
+  from `tile_order`, so for those the variants do nothing at all. Luanti's
+  `transformNodeBox` is what a turned node box wants; the extension's
+  `turn_quads` is the same thing already written.
+
   devtest: 129 of 390 node types have a shape, 83 of them liquids.
 
   **And the blended pass, which is what makes water water.** A liquid, and
