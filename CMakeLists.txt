@@ -11,6 +11,11 @@ project(buildat)
 set(BUILD_SERVER TRUE CACHE BOOL "Build server")
 set(BUILD_CLIENT TRUE CACHE BOOL "Build client")
 set(DEBUG_LOG_TIMING FALSE CACHE BOOL "Output log messages of interesting but floody time measurements")
+# Where the cache and the user's own things live. TRUE keeps both beside the
+# program, in <buildat>/cache and <buildat>/user: what development wants, and
+# the default. FALSE puts them where the platform says, which is what an
+# installed copy wants. See local/world_persistence_plan.md.
+set(PORTABLE TRUE CACHE BOOL "Keep cache/ and user/ beside the program")
 
 #
 # Urho3D dependency (bundled in 3rdparty/Urho3D)
@@ -237,6 +242,9 @@ else()
 	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/linux/debug.cpp)
 	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/linux/os.cpp)
 	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/linux/fs.cpp)
+endif()
+if(PORTABLE)
+	add_definitions(-DBUILDAT_PORTABLE)
 endif()
 add_library(${BUILDAT_CORE_NAME} SHARED ${BUILDAT_CORE_SRCS})
 target_link_libraries(${BUILDAT_CORE_NAME}
