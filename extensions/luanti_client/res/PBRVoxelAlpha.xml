@@ -3,9 +3,17 @@
      cut out, and with culling off so that a water surface is there from under
      it -- see VoxelUnlitAlpha.xml, which is the same trade in the unlit path.
 
-     One pass: an additive light pass over a blended one would draw the
-     translucent surface's light twice. -->
+     The blended pass is the ambient one; litalpha is the sun on top of it,
+     which is what puts a highlight on water. Urho3D runs the pair the way it
+     runs base and light on an opaque surface, so the light is added once and
+     not drawn twice.
+
+     No shadow pass, so water, glass and ice cast none. That is the right
+     default -- a transparent thing casting an opaque shadow looks worse than
+     it casting none -- and it does mean a glass roof lets full sun through. -->
 <technique vs="luanti_client/res/PBRVoxel" ps="luanti_client/res/PBRVoxel"
-        psdefines="DIFFMAP PBR METALLIC VOXELNORMALMAP VOXELIBL VOXELSPOTS VOXELTRANSLUCENCY">
+        vsdefines="VOXELSUNGATE"
+        psdefines="DIFFMAP PBR METALLIC VOXELNORMALMAP VOXELIBL VOXELSPOTS VOXELTRANSLUCENCY VOXELSUNGATE">
     <pass name="alpha" blend="alpha" depthwrite="false" cull="none" />
+    <pass name="litalpha" blend="addalpha" depthwrite="false" cull="none" />
 </technique>

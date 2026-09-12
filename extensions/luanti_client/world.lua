@@ -27,6 +27,8 @@ local light_flood = dofile(__buildat_extension_path("luanti_client")..
 		"/light.lua")
 local skyvis = dofile(__buildat_extension_path("luanti_client")..
 		"/skyvis.lua")
+local surface = dofile(__buildat_extension_path("luanti_client")..
+		"/surface.lua")
 
 local M = {}
 
@@ -120,6 +122,53 @@ local LIGHT_MAP = (function()
 	end
 	return table.concat(out)
 end)()
+
+-- The same, for the PBR path, whose skylight means something else.
+--
+-- There the sun is a real light with a shadow map, and the shadow map is what
+-- darkens what is under a tree. So node lighting is left to answer the one
+-- question a shadow map cannot -- "am I underground" -- and nothing else: the
+-- curve holds at full until the light has fallen far enough that it can only
+-- be rock overhead, and then drops away. A canopy reads 11..14 and stays fully
+-- lit; a cave reads 0..2 and goes dark; a doorway is the band between.
+--
+-- The knee is the tuning knob. Lower it and cave mouths brighten; raise it and
+-- overhangs start being darkened twice, once here and once by the shadow map.
+local PBR_SKY_KNEE_LOW = 2
+local PBR_SKY_KNEE_HIGH = 11
+
+local PBR_LIGHT_MAP = (function()
+	local out = {}
+	for p = 0, 255 do
+		local day = p % 16
+		local night = math.floor(p / 16)
+		local sky = day > night and day - night or 0
+		local t = (sky - PBR_SKY_KNEE_LOW) /
+				(PBR_SKY_KNEE_HIGH - PBR_SKY_KNEE_LOW)
+		t = t < 0 and 0 or (t > 1 and 1 or t)
+		local smooth = t * t * (3 - 2 * t)
+		out[p + 1] = string.char(night * 16 + math.floor(15 * smooth + 0.5))
+	end
+	return table.concat(out)
+end)()
+
+-- What the curve has to hold, checked at load: full sun outdoors, nothing in
+-- rock, and a canopy left for the shadow map to darken. The lamp nibble rides
+-- through untouched, because the two are separate lights.
+do
+	local function sky_of(day, night)
+		return string.byte(PBR_LIGHT_MAP, night * 16 + day + 1) % 16
+	end
+	local function lamp_of(day, night)
+		return math.floor(string.byte(PBR_LIGHT_MAP, night * 16 + day + 1) / 16)
+	end
+	assert(sky_of(15, 0) == 15, "pbr light curve: open sky")
+	assert(sky_of(PBR_SKY_KNEE_HIGH, 0) == 15, "pbr light curve: canopy")
+	assert(sky_of(PBR_SKY_KNEE_LOW, 0) == 0, "pbr light curve: rock")
+	assert(sky_of(0, 0) == 0, "pbr light curve: dark")
+	assert(sky_of(8, 8) == 0, "pbr light curve: lamp is not sky")
+	assert(lamp_of(15, 7) == 7, "pbr light curve: lamp nibble kept")
+end
 
 -- What the volume is before the block and its neighbours are copied into it:
 -- air that sees the full sky. A face against a neighbour that has not arrived
@@ -459,6 +508,52 @@ function M.new(magic, buildat, log, options)
 				"luanti_client/res/VoxelSky.xml")
 	end
 
+	-- The sun, on the PBR path only. The vanilla path has no light in the
+	-- scene at all: the mesher bakes what a node is lit by into the vertex
+	-- colours, and a directional light on top of that would light everything
+	-- twice. The PBR path keeps the vertex colours as its ambient and adds
+	-- the sun, and what stops the double is the light curve: PBR_LIGHT_MAP
+	-- reads as "am I underground" and nothing else, and the shader gates the
+	-- sun by it. A leaf canopy is then darkened by the shadow map, which is
+	-- the thing a shadow map is good at and a baked light value is not.
+	--
+	-- Biased for performance, because there are no graphics settings beyond
+	-- the PBR checkbox: two cascades rather than four, a small map, and the
+	-- single-tap filter.
+	local SHADOW_NEAR = 24    -- nodes; the first cascade
+	local SHADOW_FAR = 96     -- and the second, which is the shadow distance
+	-- What a lit face gets from the sun, against the sky's own colour as the
+	-- ambient. The number is large because Urho's PBR divides direct light by
+	-- pi, the albedo it multiplies is well under 1, and nothing tone maps
+	-- afterwards: measured on a grass field, a brightness of 6 put about as
+	-- much light on a lit face as the ambient already had, which is a sun
+	-- nobody can see and a shadow nobody can see either. This lands a lit
+	-- face at about two and a half times a shadowed one.
+	local SUN_BRIGHTNESS = 18.0
+	local sun_node = nil
+	local sun_light = nil
+	if pbr then
+		sun_node = scene:CreateChild("Sun")
+		sun_light = sun_node:CreateComponent("Light")
+		sun_light.lightType = magic.LIGHT_DIRECTIONAL
+		sun_light.castShadows = true
+		sun_light.brightness = SUN_BRIGHTNESS
+		sun_light.specularIntensity = 1.0
+		-- Voxel faces at a grazing sun angle are the classic shadow acne
+		-- case: a whole flat face falls inside one shadow texel and shadows
+		-- itself in stripes. A slope-scaled bias on top of the automatic one,
+		-- and a normal offset, which is the one that works on a face that is
+		-- flat and wide.
+		sun_light.shadowBias = magic.BiasParameters(0.00005, 0.8, 0.002)
+		sun_light.shadowCascade = magic.CascadeParameters(
+				SHADOW_NEAR, SHADOW_FAR, 0, 0, 0.8)
+		-- Past the far cascade the world is ambient-lit, which at that range
+		-- reads as haze rather than as a missing shadow
+		magic.renderer.shadowMapSize = 1024
+		magic.renderer.shadowQuality = magic.SHADOWQUALITY_SIMPLE_16BIT
+		magic.renderer.drawShadows = true
+	end
+
 	-- The mesher sets no technique on skylit geometry -- only the game knows
 	-- which shader reads what it packed -- so every block's materials get
 	-- this one once they exist.
@@ -466,6 +561,10 @@ function M.new(magic, buildat, log, options)
 		if not cg then
 			return
 		end
+		-- Urho3D's drawables cast no shadow unless told to, one by one. On
+		-- the vanilla path there is no light to cast one from; on the PBR
+		-- path this is what puts the world in the sun's shadow map.
+		cg.castShadows = pbr
 		local i = 0
 		while true do
 			local m = cg:GetMaterial(i)
@@ -817,9 +916,12 @@ function M.new(magic, buildat, log, options)
 	-- where it is zero is a game where they did not.
 	local extras_built = 0
 
+	-- surf is what surface.lua guessed the node is made of, or nil for the
+	-- placeholder and anything else with no definition behind it
 	local function add_cube(voxel_reg, name, resources, kind, shape,
 			double_sided, turns, liquid_group, connect, masked, variants,
-			blend, solid_base)
+			blend, solid_base, surf)
+		surf = surf or surface.for_node(nil)
 		local vdef = buildat.VoxelDefinition()
 		vdef.name.block_name = name
 		vdef.handler_module = ""
@@ -829,11 +931,12 @@ function M.new(magic, buildat, log, options)
 			seg.resource_name = resources[i]
 			seg.total_segments = magic.IntVector2(1, 1)
 			seg.select_segment = magic.IntVector2(0, 0)
-			-- A game's textures are painted, not photographed; a wide, weak
-			-- highlight keeps them looking like what they are painted as
-			seg.roughness = 0.95
-			seg.spec_strength = 0.2
-			seg.bumpiness = 0.3
+			seg.roughness = surf.roughness
+			seg.spec_strength = surf.spec_strength
+			seg.bumpiness = surf.bumpiness
+			seg.translucency = surf.translucency
+			seg.spots = surf.spots
+			seg.static_spots = surf.static_spots
 			textures[i] = seg
 		end
 		vdef.textures = textures
@@ -847,9 +950,12 @@ function M.new(magic, buildat, log, options)
 			seg.resource_name = resources[i]
 			seg.total_segments = magic.IntVector2(1, 1)
 			seg.select_segment = magic.IntVector2(0, 0)
-			seg.roughness = 0.95
-			seg.spec_strength = 0.2
-			seg.bumpiness = 0.3
+			seg.roughness = surf.roughness
+			seg.spec_strength = surf.spec_strength
+			seg.bumpiness = surf.bumpiness
+			seg.translucency = surf.translucency
+			seg.spots = surf.spots
+			seg.static_spots = surf.static_spots
 			extras[#extras + 1] = seg
 			i = i + 1
 		end
@@ -1011,6 +1117,11 @@ function M.new(magic, buildat, log, options)
 	-- in the same two maps. The ids are ours to pick; the versions say when a
 	-- map has changed. See doc/client_api.txt.
 	local MAP_ID_NODE, MAP_ID_PAIR, MAP_ID_LIGHT = 1, 2, 3
+	-- The PBR path's curve is a different table and so needs an id of its own;
+	-- the compiled maps are cached by id
+	local MAP_ID_LIGHT_PBR = 4
+	local light_map = pbr and PBR_LIGHT_MAP or LIGHT_MAP
+	local light_map_id = pbr and MAP_ID_LIGHT_PBR or MAP_ID_LIGHT
 	self.node_map_version = 1
 	self.pair_map_version = 1
 	self.use_skylight = true
@@ -1135,8 +1246,8 @@ function M.new(magic, buildat, log, options)
 			sources[#sources + 1] = {
 				data = block.param1, format = "u8",
 				source_size = {BLOCKSIZE, BLOCKSIZE, BLOCKSIZE},
-				at = {0, 0, 0}, map = LIGHT_MAP, field = "light",
-				map_id = MAP_ID_LIGHT, map_version = 1,
+				at = {0, 0, 0}, map = light_map, field = "light",
+				map_id = light_map_id, map_version = 1,
 			}
 		end
 		for _, d in ipairs(NEIGHBOURS) do
@@ -1190,8 +1301,8 @@ function M.new(magic, buildat, log, options)
 						data = n.param1, format = "u8",
 						source_size = {BLOCKSIZE, BLOCKSIZE, BLOCKSIZE},
 						from = from, size = size, at = at,
-						map = LIGHT_MAP, field = "light",
-						map_id = MAP_ID_LIGHT, map_version = 1,
+						map = light_map, field = "light",
+						map_id = light_map_id, map_version = 1,
 					}
 				end
 			end
@@ -3193,7 +3304,9 @@ function M.new(magic, buildat, log, options)
 	function self:set_daylight(factor, time_of_day)
 		daylight = factor
 		daylight_time = time_of_day or daylight_time
-		zone.ambientColor = sunlight_color(factor)
+		if not pbr then
+			zone.ambientColor = sunlight_color(factor)
+		end
 
 		local brightness = brightness_of(factor)
 		-- Which set of colours, by the same bands Luanti's Sky::update()
@@ -3226,6 +3339,17 @@ function M.new(magic, buildat, log, options)
 		-- the sky is drawn with, so the two meet
 		zone.fogColor = horizon
 
+		-- On the PBR path the ambient light is the sky itself rather than the
+		-- colour of sunlight. The shader's ambient is
+		-- cAmbientColor.rgb * color.a + color.rgb, so what a surface gets is
+		-- the sky in proportion to how much of it it can see: open ground is
+		-- sky-blue-white, under an overhang is the same blue but dimmer, and a
+		-- cave is only the warm rgb the torches baked in. That is the three
+		-- tints -- sun, shade, cave -- and it costs this one line.
+		if pbr then
+			zone.ambientColor = top
+		end
+
 		-- What the PBR path's reflections are worth now: the cube map beside
 		-- the shader is one static noon gradient and this is the colour it is
 		-- multiplied by, so a sunset reflects orange and a night reflects
@@ -3233,6 +3357,15 @@ function M.new(magic, buildat, log, options)
 		-- surface pointed upwards reflects.
 		if vis then
 			vis:set_param("SkyColor", magic.Vector3(top.r, top.g, top.b))
+		end
+
+		if sun_light then
+			-- The light travels the other way from the body it comes from,
+			-- and sun_direction() covers the whole day: after dusk it is the
+			-- moon that is up there, dim and blue, through the same gate.
+			local sx, sy, sz = sun_direction(daylight_time)
+			sun_node.direction = magic.Vector3(-sx, -sy, -sz)
+			sun_light.color = sunlight_color(factor)
 		end
 
 		if sky_material then
@@ -3439,7 +3572,8 @@ function M.new(magic, buildat, log, options)
 			end
 			return add_cube(reg, name or def.name, resources, kind, shape,
 					double_sided, nil, group, connect, masked, variants,
-					def.alpha_mode == NODEDEF_ALPHAMODE_BLEND, solid_base)
+					def.alpha_mode == NODEDEF_ALPHAMODE_BLEND, solid_base,
+					surface.for_node(def))
 		end
 		if not kind then
 			return nil
@@ -3453,7 +3587,8 @@ function M.new(magic, buildat, log, options)
 		end
 		return add_cube(reg, name or def.name, resources, kind, nil, nil,
 				nil, group, connect, nil, variants,
-				def.alpha_mode == NODEDEF_ALPHAMODE_BLEND)
+				def.alpha_mode == NODEDEF_ALPHAMODE_BLEND, nil,
+				surface.for_node(def))
 	end
 
 	-- Builds the registry for a set of node definitions a slice at a time.

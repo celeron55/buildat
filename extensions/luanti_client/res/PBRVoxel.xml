@@ -4,14 +4,21 @@
      What the connect dialog's "Enable PBR" turns on.
 
      ALPHAMASK because a Luanti texture is a cutout -- a plant, a rail, a
-     ladder -- and this is the technique those faces get too.
+     ladder -- and this is the technique those faces get too. The shadow pass
+     needs it as well, or a leaf casts the shadow of a solid cube.
+
+     VOXELSUNGATE gates the directional light by how much sky the vertex sees,
+     so that the sun does not shine in a cave; see PBRVoxel.glsl and
+     PBR_LIGHT_MAP in world.lua. The vertex shader needs the define too,
+     because the varying it carries is declared in both.
 
      No VOXELMODIFIERS: the voxel format this client builds binds no surface
      modifier, so the vertex tangent carries nothing to read. -->
 <technique vs="luanti_client/res/PBRVoxel" ps="luanti_client/res/PBRVoxel"
-        psdefines="DIFFMAP ALPHAMASK PBR METALLIC VOXELNORMALMAP VOXELIBL VOXELSPOTS VOXELTRANSLUCENCY">
+        vsdefines="VOXELSUNGATE"
+        psdefines="DIFFMAP ALPHAMASK PBR METALLIC VOXELNORMALMAP VOXELIBL VOXELSPOTS VOXELTRANSLUCENCY VOXELSUNGATE">
     <pass name="base" />
     <pass name="light" depthtest="equal" depthwrite="false" blend="add" />
     <pass name="depth" vs="Depth" ps="Depth" />
-    <pass name="shadow" vs="Shadow" ps="Shadow" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" psdefines="ALPHAMASK" />
 </technique>

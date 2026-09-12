@@ -39,6 +39,10 @@ local M = {safe = nil}
 -- which cannot easily clear a text field
 local DEFAULT_ADDRESS = os.getenv("BUILDAT_LUANTI_ADDRESS") or "localhost:30000"
 local DEFAULT_NAME = os.getenv("BUILDAT_LUANTI_NAME") or "buildat"
+-- The PBR checkbox's starting state. A scripted run has to hit the box by
+-- pixel coordinates otherwise, and a miss looks like the shader not working
+-- rather than like a missed click.
+local DEFAULT_PBR = (os.getenv("BUILDAT_LUANTI_PBR") or "") ~= ""
 
 -- How far the camera sees, and how far out blocks are kept, in nodes. The
 -- client asks the server for blocks by the same distance; see
@@ -3238,6 +3242,7 @@ show_connect_dialog = function(address, name)
 	local pbr_label = pbr_row:CreateChild("Text")
 	pbr_label:SetStyleAuto()
 	pbr_label.text = "Enable PBR (slower to load)"
+	pbr_check.checked = DEFAULT_PBR
 	-- The password is the field a second try is most likely about, and it is
 	-- the one that is not filled in
 	if address then
