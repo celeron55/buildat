@@ -197,6 +197,23 @@ to the atlas costs, and that loading time is the honest price of it. It is
 chosen before anything loads and fixed for the session for the same reason: the
 maps have to be on from the first texture the atlas builds.
 
+An object is drawn unlit -- Luanti draws its entities unlit too, and their
+textures are full of holes -- so what stands in for the light is a colour the
+shader multiplies the texture by. How that is worked out follows whichever
+path is running, because an object has to agree with the voxel it is standing
+on: on the vanilla path it is the sunlight colour times how much sky the voxel
+it is in sees, which is what the mesher bakes into a face; on the PBR path it
+is that path's own ambient plus a share of the sun, so a mob goes dark at
+night and warm at dusk along with the ground.
+
+The ceiling of that is shadows. An unlit thing has no normal, so it cannot be
+shadowed and one number has to serve both a mob in the open and a mob under a
+tree; what is picked lands between the two. Drawing objects lit instead --
+real normals, the real sun, the shadow map -- is the upgrade, and it is a
+larger one than it looks: there is no lit alpha-masked technique to hand, the
+sprites a game draws as flat quads turned to the camera would light oddly, and
+every entity in every game would have to be looked at again.
+
 On top of that, a voxel whose definition gives light gets a real light in the
 scene -- the two dozen nearest the camera, each with a range and a brightness
 from its light level, and an additive light pass in the technique for them to
