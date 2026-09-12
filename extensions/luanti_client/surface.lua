@@ -19,6 +19,14 @@
 --   spots          animated sparkle: moving highlights, for water
 --   static_spots   the same but standing still: facets in sand, snow, ore
 --
+-- The two spot fractions are how much of a surface is a spot at any one
+-- moment, and they want to be small: a spot reflects at full strength
+-- whatever the rest of the surface does, so a few per cent reads as a surface
+-- catching the light and a tenth of it reads as glitter paint. These are
+-- scaled to the numbers games/voxel_lighting arrived at, which is the same
+-- shader with the same constants behind it: grass 0.012, leaves 0.03, water
+-- 0.05, rock 0.04 standing still.
+--
 -- Not here: metalness. The spec map's four channels are full and cMetallic is
 -- per material, so metal nodes read as very glossy dielectrics.
 
@@ -54,16 +62,16 @@ local DEFAULT = {
 -- dozen patterns; the groups win where there are any.
 local BY_NAME = {
 	{"water", {roughness = 0.25, spec_strength = 0.9, bumpiness = 0,
-			spots = 0.10}},
+			spots = 0.05}},
 	{"lava", {roughness = 0.6, spec_strength = 0.3, bumpiness = 0.2}},
 	{"ice", {roughness = 0.10, spec_strength = 1.0, bumpiness = 0.1,
-			static_spots = 0.15}},
+			static_spots = 0.05}},
 	{"glass", {roughness = 0.10, spec_strength = 1.0, bumpiness = 0}},
 	{"crystal", {roughness = 0.15, spec_strength = 0.9, bumpiness = 0.1,
-			static_spots = 0.25}},
-	{"gem", {roughness = 0.15, spec_strength = 0.9, static_spots = 0.25}},
-	{"diamond", {roughness = 0.12, spec_strength = 1.0, static_spots = 0.3}},
-	{"mese", {roughness = 0.2, spec_strength = 0.8, static_spots = 0.25}},
+			static_spots = 0.06}},
+	{"gem", {roughness = 0.15, spec_strength = 0.9, static_spots = 0.06}},
+	{"diamond", {roughness = 0.12, spec_strength = 1.0, static_spots = 0.07}},
+	{"mese", {roughness = 0.2, spec_strength = 0.8, static_spots = 0.06}},
 	{"metal", {roughness = 0.35, spec_strength = 0.8, bumpiness = 0.1}},
 	{"steel", {roughness = 0.35, spec_strength = 0.8, bumpiness = 0.1}},
 	{"copper", {roughness = 0.40, spec_strength = 0.7, bumpiness = 0.1}},
@@ -71,10 +79,10 @@ local BY_NAME = {
 	{"tin", {roughness = 0.35, spec_strength = 0.8, bumpiness = 0.1}},
 	{"gold", {roughness = 0.30, spec_strength = 0.9, bumpiness = 0.1}},
 	{"snow", {roughness = 0.85, spec_strength = 0.35, bumpiness = 0.2,
-			static_spots = 0.30}},
+			static_spots = 0.06}},
 	{"sand", {roughness = 1.0, spec_strength = 0.15, bumpiness = 0.6,
-			static_spots = 0.20}},
-	{"ore", {static_spots = 0.20, spec_strength = 0.5, roughness = 0.6}},
+			static_spots = 0.04}},
+	{"ore", {static_spots = 0.05, spec_strength = 0.5, roughness = 0.6}},
 }
 
 local function copy(t)
@@ -106,7 +114,7 @@ function M.for_node(def)
 		-- A liquid's highlights move because the liquid does; lava is the one
 		-- that does not want them, and its name is what says so
 		out = copy({roughness = 0.25, spec_strength = 0.9, bumpiness = 0,
-				spots = 0.10})
+				spots = 0.05})
 	elseif drawtype == DRAWTYPE_PLANTLIKE or
 			drawtype == DRAWTYPE_PLANTLIKE_ROOTED or
 			drawtype == DRAWTYPE_ALLFACES or
@@ -114,12 +122,12 @@ function M.for_node(def)
 		-- Leaves and plants: lit from behind as much as from in front, which
 		-- is the whole of what makes a canopy read as a canopy
 		out = copy({roughness = 0.8, spec_strength = 0.25, bumpiness = 0.2,
-				translucency = 0.65, spots = 0.15})
+				translucency = 0.12, spots = 0.03})
 	elseif drawtype == DRAWTYPE_GLASSLIKE or
 			drawtype == DRAWTYPE_GLASSLIKE_FRAMED or
 			drawtype == DRAWTYPE_GLASSLIKE_FRAMED_OPTIONAL or blend then
 		out = copy({roughness = 0.10, spec_strength = 1.0, bumpiness = 0,
-				static_spots = 0.10})
+				static_spots = 0.03})
 	elseif group(def, "crumbly") > 0 then
 		-- Dirt, sand, gravel: matte, and rough enough that the texture's own
 		-- luminance is worth reading as relief
@@ -182,7 +190,7 @@ do
 	assert(water.spots > 0 and water.roughness < 0.4, "surface: water")
 	local leaves = M.for_node({name = "default:leaves", drawtype = 5,
 			waving = 2, groups = {snappy = 3}})
-	assert(leaves.translucency > 0.3, "surface: leaves")
+	assert(leaves.translucency > 0.05, "surface: leaves")
 	local dirt = M.for_node({name = "default:dirt", drawtype = 0,
 			groups = {crumbly = 3}})
 	assert(dirt.bumpiness > 0.5 and dirt.spec_strength < 0.2, "surface: dirt")

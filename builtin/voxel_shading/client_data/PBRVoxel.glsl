@@ -232,12 +232,20 @@ void VS()
     // a smooth gradient with no sun drawn in it, so a sharper reflection of it
     // looks no different from a blurred one. A turned normal moves the direct
     // sunlight's own highlight instead, which is the bright thing in the scene.
-    const float SPOT_TILT = 0.45;
+    //
+    // It is also what decides how far from the light the sparkle reaches. A
+    // spot turned this far catches the sun from anywhere within that angle of
+    // the mirror direction, so a large one puts glints over a whole field
+    // rather than in the band where the light is actually being reflected.
+    const float SPOT_TILT = 0.18;
     // Bigger than the moving ones: a facet is a chip of rock, not a leaf.
     // Taken from the world position for the same reason as those, that a map
     // lives in one voxel face and would repeat every voxel.
     const float STATIC_SPOT_CELLS = 6.0;     // Cells per voxel, per axis
-    const float STATIC_SPOT_TILT = 0.35;
+    const float STATIC_SPOT_TILT = 0.15;
+    // How far towards white a spot takes the light it reflects; see where it
+    // is used, in the light pass
+    const float SPOT_WHITEN = 0.85;
     const float TRANSMISSION_RATE = 0.03;    // Cycles per second, mean
     const vec3 TRANSMISSION_WIND = vec3(0.35, 0.0, -0.2);
 
@@ -565,6 +573,18 @@ void PS()
             // shadow map does the darkening; in a cave there is no sun to
             // shadow.
             lightColor *= vSkyVisibility;
+        #endif
+
+        #ifdef VOXELSPOTS
+            // A spot is a mirror, and a mirror image of something as bright
+            // as the sun saturates whatever sees it: a glint off water reads
+            // white, not the colour of the light. Nothing here is bright
+            // enough to clip on its own, so the spot's share of the light is
+            // taken towards white directly. Only where there is a spot, and
+            // only for that pixel's light; the surface around it keeps the
+            // sun's own colour, which is where that colour belongs.
+            lightColor = mix(lightColor, vec3(GetIntensity(lightColor)),
+                max(surfaceSpots, staticSpots) * SPOT_WHITEN);
         #endif
 
         vec3 toCamera = normalize(cCameraPosPS - vWorldPos.xyz);
