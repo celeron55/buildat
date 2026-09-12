@@ -108,7 +108,10 @@ which of the two is the dim one.
 A directional light does not know about the horizon, so one left on at night
 lights the undersides of everything, and its specular, which is the sparkle a
 surface asks for on water, on snow and on ore, is then the brightest thing in
-a night frame and is coming from the wrong side of the sky.
+a night frame and is coming from the wrong side of the sky. The clocks above
+are where the fade is shaped; the line itself is enforced separately, from
+where the body actually is, so that neither can shine from under the world
+whatever the clock says.
 
 The ambient on this path is the sky rather than the colour of sunlight, and
 the shader's ambient is that times how much sky the vertex sees plus the lamp
