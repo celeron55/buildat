@@ -14,6 +14,17 @@ below protocol 48 and zstd from there on, the media announcement is a plain
 list of names and base64 hashes below 48, an item's image carries an
 animation only from 51 on, and the inventory is the rest of its packet below
 52.
+The day passes rather than arrives. The server says what time it is every few
+seconds; the client carries the clock on between those at the speed the server
+gave with it, the way Luanti's own does in Environment::stepTimeOfDay, or the
+sun would step across the sky. And the sky itself is eased rather than set:
+which set of colours a sky is drawn from -- night, dawn or day -- changes at a
+step there as here, and what keeps that from reading as one is that the sky is
+always on its way to the target rather than at it. A change too big to be the
+day moving, which is a game setting its clock or a sky arriving, is taken at
+once instead. That is Luanti's Sky::update() in shape, with the share of the
+way worked out from the frame's own length rather than fixed per frame.
+
 BUILDAT_LUANTI_ADDRESS sets the address the dialog starts with, which is what
 scripted runs (-c) use. BUILDAT_LUANTI_FORCE_DAY keeps the world at midday
 whatever the server's time is, for the same reason: a run of half a minute

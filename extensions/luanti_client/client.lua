@@ -435,8 +435,12 @@ function M.new(socket, options, log)
 			-- out of 20, and breath out of 10 while under water
 			hp = nil,
 			breath = nil,
-			-- The server's time of day, 0...23999, and how fast it runs
+			-- The server's time of day, 0...23999, and how fast it runs.
+			-- time_of_day is the last thing the server said; time_of_day_f
+			-- is the same clock carried on between those, which is what
+			-- anything drawing the sky wants.
 			time_of_day = nil,
+			time_of_day_f = nil,
 			time_speed = 0,
 			blocks_received = 0,
 			-- Counters for the slow-frame line; see update() below
@@ -1123,6 +1127,7 @@ function M.new(socket, options, log)
 	handlers[TOCLIENT.TIME_OF_DAY] = function(r)
 		self.time_of_day = r:u16() % 24000
 		self.time_speed = r:f32()
+		self.time_of_day_f = self.time_of_day
 	end
 
 	handlers[TOCLIENT.BLOCKDATA] = function(r)
@@ -1287,6 +1292,15 @@ function M.new(socket, options, log)
 	local SILENCE_LIMIT_S = 20
 
 	function self:update(dtime)
+		-- The day goes on between the times the server says what it is.
+		-- Luanti's client does the same -- Environment::stepTimeOfDay -- and
+		-- for the same reason: the server sends the time every few seconds,
+		-- and a sky drawn from that alone steps across the sky rather than
+		-- crossing it. The server's word resets this whenever it arrives.
+		if self.time_of_day_f then
+			self.time_of_day_f = (self.time_of_day_f +
+					self.time_speed * 24000 / (24 * 3600) * dtime) % 24000
+		end
 		conn:update(dtime)
 		-- Once something has gone wrong there is nothing left to be smooth
 		-- for, and what is still in the queue is what says why
