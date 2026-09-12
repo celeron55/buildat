@@ -43,6 +43,7 @@ local light = dofile(dir.."/light.lua")
 local itemdef = dofile(dir.."/itemdef.lua")
 local nodemeta = dofile(dir.."/nodemeta.lua")
 local objmesh = dofile(dir.."/objmesh.lua")
+local skyvis = dofile(dir.."/skyvis.lua")
 
 local function dump_name(s)
 	return "\""..s:gsub("[^%w%p ]", "?").."\""
@@ -2366,6 +2367,204 @@ do
 	print("light: ok")
 end
 
+-- The sky visibility sweep, against a made-up world. What it pins is this
+-- file's own part -- which way a cell looks, and that the cell the sweep
+-- fills is the one the shader reads looking that same way -- and not the
+-- engine's marching, which is stubbed here to the rule
+-- src/lua_bindings/voxel_volume.cpp documents.
+do
+	local AIR, ROCK = 1, 2
+	local RAY_BLOCKED, RAY_NO_DATA, RAY_RANGE = 0, 1, 2
+	-- world(p) -> {id=, skylight=}, or nil where there is no data
+	local world = nil
+
+	local function ray_visibility(status, skylight, steps)
+		if status == RAY_BLOCKED then return 0.0 end
+		if steps <= 1 then return 1.0 end
+		if skylight < 0 then return 0.0 end
+		return skylight / 15
+	end
+
+	-- Steps voxel by voxel rather than by the binding's DDA, which is close
+	-- enough for a world made of slabs
+	local function cast_voxel_rays(args)
+		local vis = {}
+		local n = 0
+		for ri = args.first, args.first + args.count - 1 do
+			local base = (ri - 1) * 3
+			local dx = args.directions[base + 1]
+			local dy = args.directions[base + 2]
+			local dz = args.directions[base + 3]
+			if dx == nil then break end
+			n = n + 1
+			local len = math.sqrt(dx * dx + dy * dy + dz * dz)
+			local st, sky, steps = RAY_RANGE, -1, 0
+			for i = 1, args.max_steps do
+				steps = i
+				local v = world({
+					x = args.origin.x + dx / len * i,
+					y = args.origin.y + dy / len * i,
+					z = args.origin.z + dz / len * i,
+				})
+				if v == nil then st = RAY_NO_DATA break end
+				if v.id ~= AIR then st = RAY_BLOCKED break end
+				sky = v.skylight
+			end
+			vis[n] = ray_visibility(st, sky, steps)
+		end
+		local per_cell = args.rays_per_cell
+		assert(per_cell > 0 and n % per_cell == 0,
+				"skyvis: rays are not a whole number of cells")
+		local cells = {}
+		for c = 1, n / per_cell do
+			local sum = 0.0
+			for k = 1, per_cell do
+				sum = sum + vis[(c - 1) * per_cell + k]
+			end
+			cells[c] = sum / per_cell
+		end
+		return {count = #cells, visibility = cells}
+	end
+
+	local params = {}
+	local scene_pass = {type = 2,
+			SetShaderParameter = function(self, name, value)
+				params[name] = value
+			end}
+	local render_path = {
+		GetNumCommands = function() return 1 end,
+		GetCommand = function(self, i) return scene_pass end,
+		-- The real one only touches commands that already carry the name
+		SetShaderParameter = function(self, name, value)
+			if params[name] ~= nil then params[name] = value end
+		end,
+	}
+	local magic = {
+		renderer = {GetViewport = function() return {renderPath = render_path}
+				end},
+		CMD_SCENEPASS = 2,
+		VectorBuffer = {new = function() return {floats = {}} end},
+		Variant = function(buffer)
+			local copy = {}
+			for i, v in ipairs(buffer.floats) do copy[i] = v end
+			return copy
+		end,
+	}
+	local fake_buildat = {
+		write_floats = function(buffer, values)
+			local floats = {}
+			for i, v in ipairs(values) do floats[i] = v end
+			buffer.floats = floats
+		end,
+		cast_voxel_rays = cast_voxel_rays,
+		-- Ready on the second ask rather than the first, so the waiting path
+		-- is exercised and not only the lucky one
+		cast_voxel_rays_start = function(args)
+			return {out = cast_voxel_rays(args), polls = 0}
+		end,
+		cast_voxel_rays_collect = function(job)
+			job.polls = job.polls + 1
+			if job.polls < 2 then return nil end
+			return job.out
+		end,
+	}
+	local collected = 0
+	local vis = skyvis.new(magic, fake_buildat, function(origin)
+		collected = collected + 1
+		if world == nil then return nil end
+		return {chunk_size = {x = 16, y = 16, z = 16}, registry = {},
+				volumes = {{x = 0, y = 0, z = 0, volume = {}}}}
+	end)
+
+	-- GetSkyVisibility() out of res/PBRVoxel.glsl, written a second time: a
+	-- copy that agrees is the whole point of the check
+	local CELLS = 6
+	local function vis_at(vals, x, y, z)
+		local ax, ay, az = math.abs(x), math.abs(y), math.abs(z)
+		local m, u, v, face
+		if ax >= ay and ax >= az then
+			m, face, u, v = ax, (x >= 0 and 0 or 1), y, z
+		elseif ay >= az then
+			m, face, u, v = ay, (y >= 0 and 2 or 3), x, z
+		else
+			m, face, u, v = az, (z >= 0 and 4 or 5), x, y
+		end
+		local function grid(a)
+			return math.max(0.0, math.min(CELLS - 1.0,
+					(a / m + 1.0) * (CELLS / 2) - 0.5))
+		end
+		local fu, fv = grid(u), grid(v)
+		local c0, r0 = math.floor(fu), math.floor(fv)
+		local c1 = math.min(c0 + 1, CELLS - 1)
+		local r1 = math.min(r0 + 1, CELLS - 1)
+		local function cell(row, col)
+			return vals[face * CELLS * CELLS + row * CELLS + col + 1]
+		end
+		local tu, tv = fu - c0, fv - r0
+		local a = cell(r0, c0) + (cell(r0, c1) - cell(r0, c0)) * tu
+		local b = cell(r1, c0) + (cell(r1, c1) - cell(r1, c0)) * tu
+		return a + (b - a) * tv
+	end
+
+	local function sweep(w)
+		world = w
+		vis:update({x = 0.5, y = 0.5, z = 0.5}, nil) -- nil snaps
+		assert(#params.SkyVis == 216,
+				"skyvis: expected 216 values, got "..#params.SkyVis)
+		return params.SkyVis
+	end
+
+	local open = sweep(function(p) return {id = AIR, skylight = 15} end)
+	assert(vis_at(open, 0, 1, 0) > 0.9 and vis_at(open, 1, 0, 0) > 0.9,
+			"skyvis: open sky is not open")
+
+	local rock = sweep(function(p) return {id = ROCK, skylight = 0} end)
+	assert(vis_at(rock, 0, 1, 0) < 0.1 and vis_at(rock, -1, 0, 0) < 0.1,
+			"skyvis: solid rock reflects sky")
+
+	-- A world that has not arrived is not a cave
+	world = nil
+	vis:update({x = 0.5, y = 0.5, z = 0.5}, nil)
+	assert(vis_at(params.SkyVis, 0, 1, 0) > 0.9,
+			"skyvis: no voxel data should read as outdoors")
+	assert(not vis:has_volumes(), "skyvis: volumes out of nothing")
+
+	local ground = sweep(function(p)
+		if p.y < 0 then return {id = ROCK, skylight = 0} end
+		return {id = AIR, skylight = 15}
+	end)
+	assert(vis_at(ground, 0, 1, 0) > 0.9, "skyvis: the sky above is dark")
+	assert(vis_at(ground, 0, -1, 0) < 0.1, "skyvis: the ground reflects sky")
+
+	-- The mouth of a tunnel reflects the sky it can see and its walls do not,
+	-- which is what one value per face could not say
+	local tunnel = sweep(function(p)
+		if p.x > 8 then return {id = AIR, skylight = 15} end
+		if math.abs(p.y) > 2 or math.abs(p.z) > 2 then
+			return {id = ROCK, skylight = 0}
+		end
+		return {id = AIR, skylight = math.max(0, math.min(15,
+				(math.floor(p.x) - 4) * 8))}
+	end)
+	local out = vis_at(tunnel, 1, 0, 0)
+	local off = vis_at(tunnel, 1, 1, 0)
+	assert(out > 0.3, "skyvis: the mouth of the tunnel is dark: "..out)
+	assert(off < out * 0.7, "skyvis: rock beside the mouth is lit: "..off)
+
+	-- dt-driven updates ease rather than snap, and get there
+	world = function(p) return {id = ROCK, skylight = 0} end
+	for i = 1, 400 do vis:update({x = 0.5, y = 0.5, z = 0.5}, 1 / 60) end
+	local dark = vis_at(params.SkyVis, 0, 1, 0)
+	assert(dark < 0.05, "skyvis: the easing never got there: "..dark)
+
+	-- Set with the sky rather than per frame, and on the same passes
+	vis:set_param("SkyColor", "a colour")
+	vis:update({x = 0.5, y = 0.5, z = 0.5}, 1 / 60)
+	assert(params.SkyColor == "a colour",
+			"skyvis: the sky colour did not reach the scene pass")
+
+	print("skyvis: ok")
+end
 
 
 print("luanti_client/test.lua: ok")
