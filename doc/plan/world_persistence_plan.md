@@ -411,26 +411,9 @@ byte-identical over all 865 rows -- and, for step 4, the round trip under
    it is one thing and three later things:
 
    - **5a. The world and the clock persist. BUILT 2026-09-13.**
-     `run_game()` takes the save rather than a world path and derives
-     `<save>/luanti/` from it, `create_world()` calls
-     `voxelworld::set_save()` between building the registry and lighting the
-     world, and the clock -- `time_of_day`, `game_time`, `day_count` -- goes
-     into the module's own store in the save, read before the mods load and
-     written at `core:shutdown`.
-
-     Two things it turned up. The module's shutdown handler asks the world
-     to save after flushing its node writes, because subscribers are called
-     in module load order and voxelworld's own handler may already have run;
-     asking twice costs nothing now that a section is written only when it
-     changed. And `check_map.lua`'s clock check had to become relative and
-     put the clock back where it found it -- it rolled the day forward, and
-     a check that ages the world by a day on every start is a check that
-     breaks the thing it is checking.
-
-     simplified: the clock is written at shutdown and not before, so a
-     server that is killed loses the day it was on. Luanti writes its own
-     every 5.3 seconds with the map; the upgrade path is to do the same,
-     once anything else here is worth a periodic checkpoint.
+     `run_game()` takes the save, `create_world()` calls
+     `voxelworld::set_save()`, and the clock goes into the module's own
+     store. See `doc/plan/world_persistence_history.md`.
    - **5b. Mod storage into the object store.** The code path exists
      (`bootstrap.lua`) and writes serialized-Lua files under
      `<save>/luanti/mod_storage/`; moving it into the store is a small
@@ -444,48 +427,24 @@ byte-identical over all 865 rows -- and, for step 4, the round trip under
      `lua/check_map.lua` because `get_mod_storage()` needs a mod to be
      running: outside one there is no current modname and it has nothing to
      open. It works; the first run says one and the second says two.
-   - **5c. Node metadata and inventories. BUILT 2026-09-13.** What hangs off
-     a voxel -- a chest's contents, a sign's text -- goes into the module's
-     own store in the save beside the clock, written at `core:shutdown` and
-     read after the mods have loaded, because what it holds is item strings
-     and a mod's items have to be registered for one to mean anything. The
-     fields are strings and an inventory is lists of item strings, which is
-     what `ItemStack()` takes back.
+   - **5c. Node metadata and inventories. BUILT 2026-09-13.** What hangs
+     off a voxel goes into the module's own store, written at
+     `core:shutdown` and read after the mods have loaded.
 
-     The fixture checks it across runs the way mod storage is checked: a
-     probe in a corner of `minimal_game`'s floor counts the runs in its
-     metadata and holds one stone per run in its inventory, and every run
-     after the first checks what the last one left.
+     simplified, and it is the one that matters for what is next: **one blob
+     for the whole world**. Luanti keeps a block's metadata with the block
+     and writes it when the block is written; the upgrade path is the same
+     shape -- a blob per section, written when `voxelworld` writes that
+     section -- and it is what a map bigger than the sections a mod can
+     reach will need. See "The map" in `doc/plan/luanti_module_plan.md`.
+   - **5d. Players. BUILT 2026-09-13.** Where a player stood, their health,
+     breath, metadata and inventory lists, and the auth entries with them,
+     in the module's store beside the node metadata. Restored before
+     `on_joinplayer` runs, which is where Luanti has them come out of its
+     database too.
 
-     simplified: one blob for the whole world. Luanti keeps a block's
-     metadata with the block and writes it when the block is written; the
-     upgrade path is the same shape -- a blob per section, written when
-     voxelworld writes that section -- and it is what a map bigger than the
-     sections a mod can reach will need.
-   - **5d. Players. BUILT 2026-09-13.** What Luanti's player database holds
-     -- where a player stood, which way they looked, their health and
-     breath, what a mod wrote on their metadata and what their inventory
-     lists held -- goes into the module's store beside the node metadata,
-     keyed by the name the client connected under. It is written when a
-     player leaves and at shutdown, and read after the mods have loaded, for
-     the same reason the node metadata is: an inventory holds item strings.
-
-     The auth entries go with them, because a privilege a mod granted is as
-     much a part of a player as their health is, and `core.auth` had nowhere
-     to put one before.
-
-     A player is restored before `on_joinplayer` runs, which is where Luanti
-     has them come out of its database too.
-
-     The check is a round trip in `lua/entity.lua`
-     (`core.__check_players()`), run at every start: a player made for it is
-     written down and read back, and every field is compared. It is not a
-     live player because adding one would run every mod's join callback to
-     find that out.
-
-     simplified: written when a player leaves and at shutdown, not on a
-     timer, so a server that is killed loses what changed since. The clock
-     beside it names the same upgrade path.
+     Both are in `doc/plan/world_persistence_history.md`, with the checks
+     each left behind.
 
    Already done, and listed here because the original step 4 named it:
    `core.get_worldpath()` is `<save>/luanti/`, a directory of the save's
@@ -498,4 +457,6 @@ byte-identical over all 865 rows -- and, for step 4, the round trip under
    `map_meta.txt`, which has nowhere to go until there is a mapgen.
 
 5b and what is left of 6 are the remainder, and each waits on a milestone of
-the module plan rather than on anything here.
+the module plan rather than on anything here. The one thing in this plan
+that the next milestone *will* ask for is 5c's upgrade path: a metadata blob
+per section rather than one for the world.

@@ -189,10 +189,11 @@ media, which is where the client fork lands.
   of the C API is Lua beside the module. ItemStack, the inventory and the
   noise generators are written in Lua rather than vendored, marked where they
   are written, with the vendoring as their upgrade path.
- A Lua state, the vendored `builtin/`
-  loaded, devtest's mods loaded in dependency order, every
-  `core.register_*` accepted and recorded. Success is the server logging the
-  node and item counts devtest registers and not dying. No client involved.
+
+  What it was, as planned: a Lua state, the vendored `builtin/` loaded,
+  devtest's mods loaded in dependency order, every `core.register_*`
+  accepted and recorded. Success is the server logging the node and item
+  counts devtest registers and not dying. No client involved.
 - **M2 -- a world exists. PLANNED to an order of work (2026-09-12).**
   singlenode mapgen, `core.set_node` working against voxelworld, skylight
   running, the clock, and one solid colour per node. Success is a
@@ -408,3 +409,404 @@ turned out to be.
   `game_time` and `day_count`. A world opens at the hour it was left at.
 
 
+
+
+## M3 to M7 as they stood when the client half was finished (2026-09-13)
+
+Moved out of the plan's Milestones section, which now says only the status
+of each and what is left of it. This is the fuller account and the later
+one: the drawtypes and the engine machinery they gave a first user to, the
+client half piece by piece, the launcher's menu, and the importer. The two
+sections above it are earlier snapshots of M4 and M5 and of the importer,
+kept because each says what was known at the time.
+
+
+**M0 the testbed, M1 the environment boots, M2 a world exists -- all built
+2026-09-12.** devtest loads its 35 mods and registers 390 node types, and a
+buildat_client sees a floor a mod placed. What each turned out to be, and the
+two things M1 disproved about the build, are in
+`doc/plan/luanti_module_history.md`.
+
+- **M3 -- it looks like the game. The fork's shape is settled (2026-09-12);
+  the media and the plain tiles are built (2026-09-13).**
+  Nodedefs to `VoxelRegistry` with texmod strings for texture names, media
+  over client_file, drawtypes through **buildat's own mesher** (settled
+  2026-09-12, see below), and the client resolving textures into its own
+  atlas. Success is devtest's `testnodes` mod looking like it does in Luanti.
+
+  **Built so far:** every mod's `textures/` goes to `client_file` under the
+  basename, which is how Luanti names media and what a tile string says; and
+  a node whose tile is a plain shipped file name gets it on that face, in
+  Luanti's own tile order, which is buildat's own tile order -- so they map
+  one to one, and the shorthand of fewer than six copies the last over the
+  rest as Luanti does. devtest: 417 files from 20 directories, and 279 of its
+  390 node types wear their real tiles. The other 111 keep the generated flat
+  colour, and which 111 is the measurement that sizes what is left:
+
+  **Four drawtypes are built as shapes:** `nodebox` of type `fixed`,
+  `plantlike`, `plantlike_rooted` and the liquids -- `VoxelQuad`s the
+  server puts in the
+  definition, the first thing in this tree to build one. A box's faces show
+  the part of the node's texture they cover, the way Luanti's `makeCuboid`
+  does, so a slab is not a whole texture squeezed into half a voxel.
+
+  A liquid is a full box with a `shape_group` of its own, so the mesher drops
+  the faces inside a body of it; a source and its flowing form share the
+  group because they both name the source. A flowing liquid's eight param2
+  levels are eight `VoxelVariant`s, each a box with its own `liquid_top`, and
+  the engine's `liquid_corner_top` averages the four columns around each
+  corner -- Luanti's `getCornerLevel` -- so a slope is a slope and not a
+  flight of steps. It wears its `special_tiles` rather than its `tiles`:
+  the first is the surface, the second the sides, and `tiles` is what the
+  item looks like in a hand.
+
+  `plantlike_rooted` is the one whose shape is drawn *as well as* its cube
+  faces rather than instead of them: the cube is ground the cube path draws,
+  and the plant stands in the voxel above it wearing the first of the
+  definition's `extra_textures`, which is `special_tiles[1]`. It is lit by
+  the voxel it stands in and not by the ground it is rooted in -- which is
+  what `shape_lit_from_above` was built for, and had no user until now.
+
+  **And a node turns with its param2.** `facedir`, `4dir` and `wallmounted`
+  -- and the `color*` kinds of each, which put a palette index in the high
+  bits and the direction in the same low ones -- are a `VoxelVariant` per
+  direction, permuting the definition's own six textures with `tile_order`
+  and turning each inside its face with `tile_turns`. That is what those two
+  fields were for and they had no user. The tables are Luanti's own
+  `dir_to_tile[24][8]` read at the six directions buildat's faces are in,
+  taken from `extensions/luanti_client/shapes.lua` which read them out
+  first. devtest: 56 node types.
+
+  **A shaped node turns its shape too**, which is Luanti's
+  `transformNodeBox`: a step facing the other way is the same quads rotated,
+  and the tile each quad names travels with it. The rotation matrices are
+  derived *from* the tile table rather than from Luanti's handedness
+  conventions -- the table says which local face ends up in which world
+  direction, and three of those give the columns -- so the two check each
+  other, and `check_shapes()` asserts each comes out a proper rotation.
+
+  simplified: the texture is not turned inside a shape's quad. `tile_turns`
+  does that for a cube's faces and the mesher does not apply it to a shape,
+  so a turned node box wears its textures straight. And a rooted plant's
+  shape is not turned at all: it stands in the voxel above its own, and
+  rotating it would take it sideways out of that voxel.
+
+  **`firelike`, `torchlike` and `signlike`** are single quads.
+  `firelike` is the crossed pair a plant is. The other two are the one
+  drawtype family whose shape is *built* per wallmounted direction rather
+  than turned from one base: a torch on the floor leans and a torch on a
+  wall lies flat against it, and Luanti picks a different tile for each --
+  the definition's first on a floor, its second on a ceiling, its third on a
+  wall. `drawSignlikeNode` and `drawTorchlikeNode`, by way of the
+  extension's `sign_quads` and `torch_quads`.
+
+  **`fencelike`** is a post that is always drawn and a pair of bars towards
+  each direction that has something to reach -- another fence of any kind,
+  or anything solid, which is Luanti's rule. The bars carry `connect_dir`,
+  so the mesher draws each pair only when that direction connects: that is
+  what `connect_dir` is for, the header names a fence as the case, and it
+  had no user.
+
+  **`raillike`** is one quad, and which of four tiles it wears and which way
+  it is turned is what its neighbours say -- so it is a shape per mask of
+  the four horizontal connections rather than a shape: sixteen flat ones and
+  four that climb, which is what the mesher's `shape_masked` is for and it
+  had no user either. Luanti's own `rail_kinds` and `rail_slope_angle`
+  tables, by way of the extension. A rail reaches other rails of its own
+  `connect_to_raillike` group and nothing else.
+
+  devtest: 155 of 390 node types have a shape, 83 of them liquids.
+
+  **And the blended pass, which is what makes water water.** A liquid, and
+  anything a game asked to be blended rather than alpha masked with
+  `use_texture_alpha = "blend"`, is `VoxelDefinition::translucent`. The
+  mesher already put those faces on a child node of the chunk so that Urho3D
+  sorts them against the other chunks' translucent geometry rather than
+  against the opaque geometry they are mixed with -- but nothing gave that
+  child a technique, so it was invisible rather than see-through.
+  `builtin/voxel_shading` has `PBRVoxelAlpha.xml` now, the same shader
+  blended instead of cut out with culling off, and `apply_to_node()` reaches
+  the child. It is a builtin rather than the module's, because it is the
+  mesher's own child node and every game with water in it wants the same
+  thing.
+
+  **And four more are built as cubes that are drawn differently**, which is
+  what they are: `glasslike` and its framed variants get an edge material of
+  their own per node type, so a face is drawn against anything except more of
+  the same glass; `allfaces` and `allfaces_optional` get
+  `FaceDrawType::ALWAYS`, so a clump of leaves draws its inside faces too.
+  devtest: another 40 node types, and they were invisible before -- glass
+  took `EDGEMATERIALID_EMPTY` to let light through, which also stopped
+  anything drawing a face against it.
+
+  That is the split this plan called for: `VoxelDefinition::transmits_light`
+  says light gets past a voxel that is nevertheless something, and the edge
+  material is left to say only which faces are drawn. It is an addition
+  rather than a substitution -- an empty voxel still transmits light by being
+  empty -- so a game that says nothing keeps the behaviour it had.
+
+  The bundled `minimal_game` has one node of each of the four so the visual
+  check shows them without a Luanti installation.
+
+  **What is left, in the order it matters:**
+  - **The drawtypes that are left**, and there is not much: the frame of a
+    `glasslike_framed` (5 in devtest, drawn as a plain cube, which is what
+    it looks like without its frame); the node box kinds that are not
+    `fixed` -- `connected` is the same `connect_dir` a fence uses and
+    `wallmounted` and `leveled` are a `VoxelVariant` on the param, and
+    devtest has none of the three to check an implementation against, which
+    is a reason to wait for a game that does; and `mesh` (18), which stays
+    client-side or waits. See "Which mesher draws the drawtypes".
+
+    Every other drawtype is built, and with them every piece of the engine's
+    shape machinery that had no user: `VoxelQuad`, `shape_lit_from_above`,
+    `is_liquid` with the corner levels, `tile_order` and `tile_turns`,
+    `connect_dir`, and `shape_masked`.
+  - **Palettes**, one voxel type per used index, registered at load.
+  - **The client fork.** What is on screen now is
+    `games/luanti_launcher`'s viewer, which is a camera and a HUD line. The
+    client half is `init.lua` splitting three ways -- 3321 lines, and the
+    largest unknown left in the milestone. How the fork is made, what
+    survives the move to voxelworld, and who resolves textures are in "The
+    protocol, and the client" above.
+- **M4 -- it plays. The node half, the inventories and the recipes are built
+  (2026-09-13).** Digging and placing, inventory, item definitions, craft,
+  formspecs. Success is digging a node in devtest and getting it.
+
+  `place_node`, `dig_node` and `punch_node` hand the pointed thing to the
+  vendored builtin with a nil actor, so every callback around a dig is the
+  builtin's own; node metadata came with them, a position's inventory is
+  what a chest is, and `lua/craft.lua` answers `get_craft_result` for all
+  five kinds of recipe. What a dig drops is an item lying on the floor, once
+  M5's objects existed for it to be. `doc/plan/luanti_module_history.md` has
+  what each turned out to be.
+
+  **Built: a click is a dig (2026-09-13).** The first piece of the client
+  half, and the one M4 was waiting for. `games/luanti_launcher`'s client
+  marches a ray from the camera, draws a wireframe box around the node it
+  hits and sends that node's position on a left click; the launcher hands it
+  to `luanti::Interface::dig_node()`, so can_dig, after_dig_node, the drops
+  and every other callback around a dig are the vendored builtin's own.
+
+  **Built: the other button places and uses (2026-09-13).** A right click
+  sends the node pointed at and the empty voxel in front of it, and the
+  module hands both to `core.item_place()` -- the vendored builtin's own --
+  so the pointed node's `on_rightclick` wins if it has one and the player's
+  wielded item is placed otherwise. What is placed comes out of the
+  inventory, which is the loop M4 is named for closing: dig a node, get it,
+  put it back.
+
+  simplified: no sneaking, so a node with an `on_rightclick` cannot be built
+  against. Luanti's client sends whether the player was holding sneak, and
+  this is where that flag would go.
+
+  **Built: the digger is a player, and the drops are theirs (2026-09-13).**
+  The dig carries the name the client connected under, and
+  `core.handle_node_drops()` puts what it drops in that player's inventory
+  rather than on the floor. `core.dig_node(pos)` stays Luanti's own -- it
+  takes no digger, and it is the dig nobody did -- so the one with a digger
+  is `core.__dig_node(pos, digger)` beside it.
+
+  What it needed was `core.get_dig_params()`, which was a stub: a dig with
+  no digger never reaches it and a dig by a player does, so until it
+  answered, a click dug nothing. It is the walk over a tool's groupcaps from
+  Luanti's `src/tool.cpp`, with the cases it decides asserted at every
+  start.
+
+  Two things the engine needed for it, both because a client reasoning about
+  voxels could not: `VoxelRegistry:id_of(voxel)`, since `VoxelInstance`'s own
+  id is the legacy layout of the word and a Luanti world says otherwise --
+  its id is sixteen bits with the light above them -- and a `get_by_id` that
+  takes a number, since luabind will not bind a Lua number to the `const
+  VoxelTypeId&` the old binding wanted and the call had never been made from
+  Lua before.
+
+  **What checks it:** the client harness, which is what can click.
+
+      bin/buildat -s localhost -w 1024x768 -c "@script"
+
+  with a script that flies to the floor, screenshots, clicks and screenshots
+  again; the server says `main:dig (x, y, z): dug` and the second click
+  lands on a different node, which is the client's own map having caught up.
+
+  **Built: the client is sent the player's inventory (2026-09-13).** The
+  module sends it to that one client whenever it has changed -- an inventory
+  counts its own changes, so a step sends the ones that have -- and the
+  module's client half hands the lists to whoever is drawing.
+  `games/luanti_launcher` draws a line of text saying what the player is
+  carrying, which is what says that digging a node put the node somewhere.
+  The packet is what a formspec's `list[]` will read.
+
+  **Built: the formspecs (2026-09-13).** `core.show_formspec()` and
+  `core.close_formspec()` send the form to that one client;
+  `formspec.lua` and `formspec_ui.lua` are copied from
+  `extensions/luanti_client` and draw it, and what was pressed comes back as
+  `luanti:fields` into `core.registered_on_player_receive_fields`. A
+  player's `set_inventory_formspec()` is sent when it changes, so the
+  inventory key opens it without a round trip -- that is what `I` does in
+  `games/luanti_launcher`.
+
+  The four things `formspec_ui.new()`'s ctx asks for: the textures are the
+  composer the texture modifiers already are, the inventory is the packet
+  above, an item's image is the expression the server sends for each
+  registered item (`core.__item_images()`), and the style is `__menu`'s.
+
+  **Built: a stack is picked up and put down (2026-09-13).** A click on a
+  slot picks the stack up -- the whole of it with the left button, half with
+  the right -- and the next click puts it down, which is when the move is
+  sent: Luanti's own client does the same, so what is held is a drawing and
+  a highlight on the slot it came from. The server moves it, and what a form
+  shows is redrawn when the inventory comes back. The arithmetic -- merging,
+  swapping onto a different item, what does not fit going back -- is checked
+  at every start.
+
+  **Built: a chest (2026-09-13).** A node with a `formspec` in its metadata
+  opens it when it is right-clicked -- Luanti's own client does that itself,
+  and here the server does, because the node metadata is the server's. The
+  form remembers which node it is about, which is what `current_name` means
+  in one; the node's lists are sent to that client and kept up to date the
+  way the player's own are, the fields go to the node's `on_receive_fields`
+  rather than to the global callbacks, and a move touching a node asks its
+  `allow_metadata_inventory_move`/`_put`/`_take` first and tells its `on_`
+  half afterwards.
+
+  **What is left of M4:** a detached inventory, which is nobody's here and
+  draws empty. And what is picked up is what is put down: Luanti puts a
+  single item down with the right button and ten with the middle, which is a
+  count on the way down as well as on the way up.
+- **M5 -- it lives. Built 2026-09-13.** ABMs, LBMs, entities, `core.after`.
+  Success is `testabms` and `testentities` behaving.
+
+  The globalsteps run, and with them `core.after` and everything written on
+  a timer. ABMs and LBMs sweep the loaded sections, matching content ids in
+  the module rather than names in Lua. The objects are a position, a
+  velocity, an acceleration and a box, with a collision that answers the
+  `moveresult` the builtin's own entities assert on -- which is what makes
+  the dropped item and the falling node work. Node timers are the last of
+  the timers. `doc/plan/luanti_module_history.md` has the detail, including
+  the mutex that a step doing real work turned out to need.
+
+  **Built: the objects are on screen, wearing something (2026-09-13).**
+  The first version put a node per object in the module's own scene and let
+  `replicate` carry it, which answered whether `replicate` fits -- where an
+  object is, it carries -- but a material is a resource file and a Luanti
+  object's texture is not, so everything was a stone box.
+
+  So the objects are the client half's now. Where they are is broadcast
+  every step as a flat array of doubles; what they look like is broadcast
+  when it changes, and a client that connects later asks for the lot with
+  `luanti:get_object_props`. The client makes a node per object: a
+  `BillboardSet` for a sprite and `Models/Box.mdl` for a cube, both wearing
+  a material made at runtime with the composed texture on it, unlit --
+  because the light a voxel game needs is bright enough to turn a lit sprite
+  into a white blob.
+
+  What an item lying on the ground looks like is the expression its
+  inventory image is, which the item images already are: a dropped pickaxe
+  is the pickaxe.
+
+  simplified: one texture rather than six for a cube, and a mesh is a cube
+  wearing its first texture. Luanti's two mesh formats are read by
+  `b3dmesh.lua` and `objmesh.lua` in `extensions/luanti_client`, and putting
+  them in is a milestone of its own.
+
+  **Built: the players (2026-09-13).** A player is an object with somebody
+  on the other end of it: it is in the same table as the entities, so
+  everything that looks for objects finds it, and what is different is that
+  nothing here moves it -- where a player is is what their client says, a
+  few times a second. `games/luanti_launcher` makes one per connected
+  client, named after the peer, and the join and leave callbacks a mod
+  registers run on it. PlayerRef has what a mod asks of a player: the name,
+  the inventory Luanti gives one, the metadata, the hit points with the
+  hpchange callbacks and the difference they are told about, the look
+  angles, the wielded item, the hotbar, and the HUD and sky calls as
+  answers rather than as nothing.
+
+  Two things it needed that were missing entirely: the vendored builtin's
+  `core.registered_on_mods_loaded` callbacks were never run -- which is also
+  why the item registries never froze -- and `core.auth`, the row per player
+  the builtin's auth handler is written on, which is a table in memory here
+  because nothing asks a player for a password.
+
+  **What devtest's unittests say.** Reaching them is the point: the suite
+  waits for a player and then runs eighteen more tests. It is 44 of 50 now,
+  from 32 of 40 -- the player's hit points, metadata, position, hotbar and
+  guid, the protocol version, the vector properties, and the map tests that
+  needed somebody to stand in the world. The remaining six are the
+  simplifications the plan names, and the suite stops at
+  `test_mapgen_edges`, which wants a mapgen.
+
+  **What is left of M5:** what an object looks like -- a sprite, a mesh, the
+  item it is -- which is the forked client's, and the attachments and bones
+  a scene node does not carry.
+
+- **M6 -- the launcher. The menu is built (2026-09-13); the map is not.**
+  `games/luanti_launcher` as described above.
+
+  **The menu.** With no world chosen the server waits, and a client that
+  connects is sent `main/menu.lua` rather than the world view: it asks for
+  the list, draws it with `ui_utils.vertical_menu` and sends back either
+  "open this save" or "make one called this, playing that game". The scan is
+  the server's, because the server owns the filesystem. A save records the
+  gameid it needs as a key in its own store, written whenever it is run, so
+  the list says which game each save needs without opening any of them --
+  the two facts Luanti's menu made one. The saves are listed by when each
+  was last played.
+
+  `BUILDAT_LUANTI_GAME` and `BUILDAT_LUANTI_WORLD` still run a world at
+  start without a menu, which is what every check here does.
+
+  simplified: the twelve most recent saves, because `vertical_menu` does not
+  scroll and a list longer than the screen has saves nobody can reach. What
+  it wants is a scrolling list.
+
+  **What is left of M6: the map.** The world is 3x3x3 sections, which is why
+  the importer drops most of a real Luanti world, and a map that loads and
+  unloads around a player is what the mapgen seam was deferred until there
+  was something to measure.
+- **M7 -- an existing Luanti world opens. The map and the clock are read
+  (2026-09-13).** Read a Luanti world directory -- `map.sqlite`,
+  `map_meta.txt`, `env_meta.txt`, the player and mod storage databases --
+  and write a buildat save. One direction.
+
+  `builtin/luanti/mapblock.h` reads a MapBlock at serialization versions 25
+  to 29, which is every world written since 2013, and
+  `luanti::import_world()` puts the blocks into the running game's world and
+  the clock into its clock. `doc/plan/luanti_module_history.md` has the two
+  shapes the format has and how the reader was checked against Luanti.
+
+  What hangs off the nodes comes too, now that step 5c of the persistence
+  plan gives it somewhere to live: the metadata of every node that has any,
+  as its fields and its inventory lists.
+
+  What the mods remembered comes too: `mod_storage.sqlite`, per mod, into
+  the files this module keeps a mod's storage in. A value the save already
+  has is kept, so importing twice does not take a mod's memory back.
+
+  The players come too, now that a player is something the save holds (step
+  5d of the persistence plan): `players.sqlite` gives each name a position,
+  a look, health, breath, metadata and inventory lists, and what the save
+  already knows about a name is kept, so importing the same world twice does
+  not undo what has happened since the first time. Luanti's position is in
+  BS units -- nodes times ten -- and its angles are degrees.
+
+  **What is left of M7:** `map_meta.txt`, which is the seed and the mapgen
+  parameters and has nowhere to go until there is a mapgen; a world whose
+  players are one text file each under `players/` rather than a database;
+  and a block's node timers and static objects, which are walked past -- the
+  objects want a `static_save` that means something here first.
+
+  **The world is 3x3x3 sections**, so what fits is about 192 voxels a side
+  around the origin and the rest of a Luanti world is counted and dropped.
+  That is M6's map rather than the importer's problem; the importer clips
+  per block and says how many blocks it left outside.
+
+  **Not the other direction, and not a live format.** Writing Luanti's
+  format would mean bit-compatible `MapBlock` writes forever and would force
+  buildat's own world data into a pocket beside it -- and buildat's voxel
+  word is extended by *planes*, which a Luanti MapBlock has nowhere to put.
+  An exporter is the importer pointed backwards and can be written if anyone
+  ever asks. See `doc/plan/world_persistence_plan.md`.
+
+M1 to M3 is where the module's shape is decided; everything after is surface
+area, and surface area is the part that can be added forever.

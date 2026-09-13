@@ -31,6 +31,9 @@ The documents:
   game honours: undersampling, vsync, the frame limiter, MSAA, and the sound
   volume and mute. Includes how a preference reaches a viewport a game made
   itself.
+- `doc/plan/world_persistence_plan.md` -- saves, the user and cache paths,
+  and the sqlite object store modules keep their data in. Steps 1 to 5 are
+  built but for 5b.
 - Section 14 of this file -- what `builtin/client_file` needed before it
   could carry a Luanti game's media set. Finished.
 - `doc/plan/master_plan_history.md` -- the steps this file has finished,
@@ -40,11 +43,8 @@ Each plan whose work is largely done has a history file beside it, holding
 what was built and why it came out the way it did:
 `luanti_module_history.md`, `luanti_voxels_history.md`,
 `voxel_data_model_history.md`, `aggregate_history.md`,
-`aggregate_game_history.md`, `undermine_history.md`. Nothing in any of them
-is a to-do.
-- `doc/plan/world_persistence_plan.md` -- saves, the user and cache paths, and
-  the sqlite object store modules keep their data in. `voxelworld` persists
-  nothing today; this is where that stops being true.
+`aggregate_game_history.md`, `undermine_history.md`,
+`world_persistence_history.md`. Nothing in any of them is a to-do.
 
 ## What is next (2026-09-13, fourth round)
 
@@ -59,10 +59,15 @@ master, `saves` (PR #56) into that, `luanti-module` (PR #52) into that.
 **Where the module is.** Everything a Luanti game does on the server is
 built: the environment and the map (M2), digging and placing with the
 callbacks around them, node metadata, inventories and the recipes (M4), the
-globalsteps, `core.after`, ABMs, LBMs, the objects and the node timers (M5),
-and reading an existing Luanti world -- its map, what hangs off its nodes,
-its clock and what its mods remembered (M7). The module plan has what each
-turned out to be; `doc/plan/luanti_module_history.md` has the detail.
+globalsteps, `core.after`, ABMs, LBMs, the objects, the players and the node
+timers (M5), and reading an existing Luanti world -- its map, what hangs off
+its nodes, its clock, what its mods remembered and its players (M7).
+
+**And the client half is built** (2026-09-13): a game's textures, its
+formspecs and inventories, a chest, the objects wearing what they look like,
+and a menu to pick a save from. What is left of the module is a map bigger
+than 192 voxels a side, two drawtypes, and a handful of named shortcuts.
+`doc/plan/luanti_module_history.md` has what each turned out to be.
 
 **And it is checked against Luanti's own tests.** devtest ships a
 `unittests` mod of about fifty tests of the server API, and it runs inside
@@ -73,54 +78,37 @@ first thing to run after touching the API surface.
 
 What is left is, in order:
 
-1. **The client half.** Eight pieces of it are built as of 2026-09-13: a
-   click is a dig --
-   `games/luanti_launcher`'s viewer points at a node and the module digs it,
-   which is the shape the rest follows: the client decides what was pointed
-   at, the server decides what that means -- the digger is the player who
-   clicked, so what the dig drops is theirs, and the objects are on screen,
-   as a node per object in the module's scene, which every client is already
-   being sent, the player's inventory reaches their own client, and the
-   formspecs are drawn: a mod's window is on the screen and what was pressed
-   in it comes back, and a stack is picked up in one slot and put down in
-   another, the right button places what is wielded or uses what is pointed
-   at -- so a node dug is a node that can be put back -- a chest opens, with
-   its own slots, its own callbacks around a move and its own fields, and an
-   object wears its own texture: a dropped pickaxe is a pickaxe rather than
-   a box. What is left is Luanti's meshes, which are two file formats and a
-   milestone of their own, and a detached inventory, which is nobody's here
-   and draws empty.
-   The fork's shape is settled -- which files are copied, which are dropped,
-   and that `world.lua` loses a fifth of itself to `voxelworld` -- and
-   `init.lua`'s three-way split is the largest unexamined piece of it. See
-   "The protocol, and the client" in the module plan.
+1. **M6's map.** The world is 3x3x3 sections -- about 192 voxels a side --
+   so the importer drops most of a real Luanti world, devtest's unittest
+   suite stops at `test_mapgen_edges`, and `map_meta.txt`'s seed has nowhere
+   to go. A map that loads and unloads around a player is what the mapgen
+   seam was deferred until there was something to measure; there is now.
+   The first thing to settle is in `voxelworld` rather than in the module:
+   what the instance region means when the world is bigger than it, since
+   that region is also where the sky is. See "The map" under the module
+   plan's open questions.
+2. **The rest of M3's drawtypes**, which is the palettes and `mesh`. Both
+   have an open question of their own in the module plan -- how many voxel
+   types a palette costs, and whether a mesh node goes through the mesher or
+   is drawn client-side -- and neither is large once answered.
+3. **The leftovers**, each small and none blocking anything. They are under
+   "Bonuses" below, which is what that section is for; the module plan's
+   "Simplified, and the upgrade path" has the full list of what the module
+   does not do.
 
-   **The texture modifiers are built (2026-09-13)**: the question of what a
-   module's client half may do was answered -- `compose_image` and
-   `add_resource_dir` are in `buildat.safe` as they are, with the cache-path
-   rule now one function that both call and that leaves a self-test behind.
-   The module ships a client half that resolves the expressions through
-   `texmod.lua`, and devtest's generated colours went from 112 of 390 node
-   types to 2. See "what a module's client half is allowed to do" in the
-   module plan.
-2. **M6, the launcher and its map. The menu is built (2026-09-13).** A
-   client that connects before a world is chosen draws the list of saves and
-   the games they need, and picks one or makes one; a save records the
-   gameid it needs, so the two facts Luanti's menu made one are two. The map
-   is what is left, and it is the bigger half: the world is 3x3x3 sections
-   today, which is why the importer drops most of a real Luanti world, and a
-   map that loads and unloads around a player is what the mapgen seam was
-   deferred until there was something to measure. There is something to
-   measure now.
-3. **What is left of M7:** `map_meta.txt`'s seed and a block's node timers
-   and static objects. The seed wants a mapgen and the objects want a
-   `static_save` that means something. The player database is read
-   (2026-09-13), now that a player is something the save holds -- step 5d of
-   the persistence plan.
+What is *not* left: the client half, which was item 1 of this list for three
+rounds. The texture modifiers, the formspecs, the inventories, the chest,
+the objects wearing their own textures and the launcher's menu are all built
+as of 2026-09-13; `doc/plan/luanti_module_history.md` has what each turned
+out to be. The one thing the fork's plan expected that did not happen is
+that `init.lua` was never split -- the wiring was written fresh against the
+packets and the camera and input stayed the launcher's, which is where they
+belong.
 
 Done since the third round, all in `doc/plan/master_plan_history.md` or in
 the module's own history: M4's inventories and recipes, all of M5, M7's
-importer, and the preferences screen.
+importer, the whole client half, M6's menu, the players in the save, and the
+preferences screen.
 
 The loose end that was here is closed: `voxelworld` has `get_volume()` and
 `set_volume()`, built once there were three callers to measure them against.
@@ -181,9 +169,12 @@ spent.
 - **`games/aggregate`** (`doc/plan/aggregate_game_plan.md`). Phases 1 to 5
   built and playable.
 - **`extensions/luanti_client`** (`doc/plan/luanti_voxels_plan.md`). Parked,
-  not abandoned: it comes back once `builtin/luanti` reaches feature parity
-  and the client half is what needs doing, because at that point the module's
-  forked client and this one are the same problem.
+  not abandoned, and now also a parts bin: the module's client half took
+  `texmod.lua`, `formspec.lua`, `formspec_ui.lua` and `hud.lua` from it
+  verbatim, and `b3dmesh.lua` and `objmesh.lua` are what the meshes question
+  is about. Edits to a copied file belong in both, which each copy's header
+  says. What it still holds that nothing else has is the HUD, chat,
+  particles and sounds.
 
 ## Still open from finished work
 
@@ -206,8 +197,28 @@ none of them is on anyone's critical path -- which is exactly what makes them
 the right thing to pick up when the current branch is blocked on an answer,
 or when a round has just landed and the next has not started.
 
-Empty at the moment: the client preferences screen that was here is built;
-see `doc/plan/master_plan_history.md`.
+- **A detached inventory reaches the client** (`builtin/luanti`). It is
+  kept server-side already; what is missing is the packet and letting
+  `ctx.inventory` and a move reach it, which is the chest's path with a
+  different location. A `list[detached:...]` draws empty until then.
+- **Put a single item down** (`builtin/luanti`). Luanti puts one item down
+  with the right button and ten with the middle; what is picked up is what
+  is put down here. A count on the way down as well as up, in the packet
+  that already exists.
+- **A sneak flag** (`builtin/luanti`). Without it a node with an
+  `on_rightclick` cannot be built against. One boolean in `main:place` and
+  one argument to `core.item_place()`.
+- **A scrolling save list** (`games/luanti_launcher`). The menu shows the
+  twelve most recent saves because `ui_utils.vertical_menu` does not scroll.
+  Whatever is built for it belongs in `ui_utils`, since it is the same
+  widget every menu in this tree uses.
+- **An inventory image that is a cube** (`builtin/luanti`). An item that
+  places a node is drawn as one of its tiles; Luanti draws the little cube.
+  `compose_image` has the `shear` op and `extensions/luanti_client` has the
+  three-tile version to copy.
+
+The client preferences screen that was here is built; see
+`doc/plan/master_plan_history.md`.
 
 ## Think about later
 
