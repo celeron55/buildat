@@ -209,6 +209,52 @@ local function check_vmanip()
 	end
 end
 
+-- The mapgen's other half: the noise a Lua mapgen shapes its world with.
+-- What can be wrong here is that it answers a constant -- which is what the
+-- stub did before there was one -- or that the map and the single value
+-- disagree, which would make a mod's heightmap and its checks two different
+-- worlds.
+local function check_noise()
+	local np = {offset = 0, scale = 1, seed = 71, octaves = 3,
+			persistence = 0.6, spread = {x = 40, y = 40, z = 40}}
+	local n = PerlinNoise(np)
+	local a, b = n:get_2d({x = 0, y = 0}), n:get_2d({x = 137, y = -91})
+	if a == b then
+		error("check_map: the noise answers " .. tostring(a) ..
+				" everywhere")
+	end
+	if a ~= a or math.abs(a) > 1000 then
+		error("check_map: the noise answered " .. tostring(a))
+	end
+	-- The map is the same noise over a box, and its first value is the one
+	-- at the corner it starts from
+	local map = PerlinNoiseMap(np, {x = 4, y = 3, z = 1})
+	local flat = map:get_2d_map_flat({x = 0, y = 0})
+	if #flat ~= 12 then
+		error("check_map: a 4x3 noise map has " .. #flat .. " values")
+	end
+	if math.abs(flat[1] - a) > 0.05 then
+		error("check_map: the map says " .. tostring(flat[1]) ..
+				" where the value says " .. tostring(a))
+	end
+	-- And the nested form is the flat one in rows of x
+	local rows = map:get_2d_map({x = 0, y = 0})
+	if #rows ~= 3 or #rows[1] ~= 4 then
+		error("check_map: the nested noise map is " .. #rows .. " rows of " ..
+				tostring(#(rows[1] or {})))
+	end
+	if rows[1][1] ~= flat[1] or rows[2][1] ~= flat[5] then
+		error("check_map: the nested noise map is not the flat one")
+	end
+	-- Two seeds are two worlds
+	local other = PerlinNoise({offset = 0, scale = 1, seed = 72,
+			octaves = 3, persistence = 0.6,
+			spread = {x = 40, y = 40, z = 40}})
+	if other:get_2d({x = 0, y = 0}) == a then
+		error("check_map: the seed changes nothing")
+	end
+end
+
 function core.__check_map_read()
 	local node = core.get_node(CHECK_POS)
 	if node.name ~= check_name then
@@ -341,6 +387,7 @@ function core.__check_map_read()
 		core.set_node(p, {name = "air"})
 	end
 	check_vmanip()
+	check_noise()
 
 	core.log("verbose", "check_map: " .. check_name ..
 			" survived the flush, and the region reads found it")

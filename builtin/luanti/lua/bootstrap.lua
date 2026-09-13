@@ -948,7 +948,6 @@ local STUBS_NIL = {
 	"find_nodes_in_area_under_air", "find_nodes_with_meta",
 	"get_node_light", "get_natural_light", "get_artificial_light",
 	"place_node", "dig_node", "punch_node", "spawn_tree", "spawn_tree_on_vmanip",
-	"get_perlin", "get_perlin_map", "get_value_noise", "get_value_noise_map",
 	"get_mapgen_setting_noiseparams", "set_mapgen_setting_noiseparams",
 	"set_noiseparams", "get_noiseparams", "generate_ores", "generate_decorations",
 	"clear_objects", "load_area", "emerge_area", "delete_area",

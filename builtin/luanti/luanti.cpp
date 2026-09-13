@@ -29,6 +29,7 @@
 #include "interface/sha1.h"
 #include "interface/sha256.h"
 #include "interface/compress.h"
+#include "interface/noise.h"
 #include "luanti/mapblock.h"
 #include <sqlite3.h>
 #include <fstream>
@@ -3075,6 +3076,110 @@ struct Module: public interface::Module, public luanti::Interface
 	}
 
 	// set_node(x, y, z, id, param1, param2)
+	// The mapgen's noise, which is Luanti's own value noise: buildat
+	// vendored it for its own generators and this is the same code the Lua
+	// API is documented against. A mod's NoiseParams table, as the engine
+	// wants it.
+	static bool read_noise_params(lua_State *L, int idx,
+			interface::NoiseParams &np)
+	{
+		if(!lua_istable(L, idx))
+			return false;
+		auto number = [&](const char *name, float def){
+			lua_getfield(L, idx, name);
+			float v = lua_isnumber(L, -1) ? (float)lua_tonumber(L, -1) : def;
+			lua_pop(L, 1);
+			return v;
+		};
+		np.offset = number("offset", 0.0f);
+		np.scale = number("scale", 1.0f);
+		np.seed = (int)number("seed", 0.0f);
+		np.octaves = (int)number("octaves", 3.0f);
+		// Luanti calls it persistence and took "persist" before that
+		np.persist = number("persistence", number("persist", 0.6f));
+		np.spread = interface::v3f(100.0f, 100.0f, 100.0f);
+		lua_getfield(L, idx, "spread");
+		if(lua_istable(L, -1)){
+			const int t = lua_gettop(L);
+			auto axis = [&](const char *name, float def){
+				lua_getfield(L, t, name);
+				float v = lua_isnumber(L, -1) ? (float)lua_tonumber(L, -1) :
+						def;
+				lua_pop(L, 1);
+				return v;
+			};
+			np.spread.X = axis("x", 100.0f);
+			np.spread.Y = axis("y", np.spread.X);
+			np.spread.Z = axis("z", np.spread.X);
+		}
+		lua_pop(L, 1);
+		if(np.octaves < 1)
+			np.octaves = 1;
+		if(np.octaves > 16)
+			np.octaves = 16;
+		if(np.spread.X == 0.0f) np.spread.X = 1.0f;
+		if(np.spread.Y == 0.0f) np.spread.Y = 1.0f;
+		if(np.spread.Z == 0.0f) np.spread.Z = 1.0f;
+		return true;
+	}
+
+	// __luanti_noise_value(np, seed, x, y [, z]) -> one value of it
+	static int l_noise_value(lua_State *L)
+	{
+		interface::NoiseParams np;
+		if(!read_noise_params(L, 1, np))
+			return luaL_error(L, "noise: a NoiseParams table is wanted");
+		const int seed = (int)luaL_checkinteger(L, 2) + np.seed;
+		const float x = (float)luaL_checknumber(L, 3) / np.spread.X;
+		const float y = (float)luaL_checknumber(L, 4) / np.spread.Y;
+		float v;
+		if(lua_isnoneornil(L, 5)){
+			v = interface::noise2d_fbm(x, y, seed, np.octaves, np.persist);
+		} else {
+			const float z = (float)luaL_checknumber(L, 5) / np.spread.Z;
+			v = interface::noise3d_fbm(x, y, z, seed, np.octaves, np.persist);
+		}
+		lua_pushnumber(L, np.offset + v * np.scale);
+		return 1;
+	}
+
+	// __luanti_noise_map(np, seed, x, y, z, sx, sy, sz) -> a flat array, x
+	// fastest and then y and then z. sz of 0 is the two-dimensional map,
+	// where y is the second axis -- which is the world's z, the way
+	// Luanti's own 2D maps are laid out.
+	static int l_noise_map(lua_State *L)
+	{
+		interface::NoiseParams np;
+		if(!read_noise_params(L, 1, np))
+			return luaL_error(L, "noise: a NoiseParams table is wanted");
+		const int seed = (int)luaL_checkinteger(L, 2);
+		const float x = (float)luaL_checknumber(L, 3);
+		const float y = (float)luaL_checknumber(L, 4);
+		const float z = (float)luaL_checknumber(L, 5);
+		const int sx = (int)luaL_checkinteger(L, 6);
+		const int sy = (int)luaL_checkinteger(L, 7);
+		const int sz = (int)luaL_optinteger(L, 8, 0);
+		if(sx < 1 || sy < 1 || sz < 0)
+			return luaL_error(L, "noise: a map of %ix%ix%i", sx, sy, sz);
+		const double n = (double)sx * sy * (sz > 0 ? sz : 1);
+		if(n > 4.0 * 1024 * 1024)
+			return luaL_error(L, "noise: %.0f values is more than this makes "
+					"at once", n);
+		interface::Noise noise(&np, seed, sx, sy, sz > 0 ? sz : 1);
+		float *result;
+		if(sz > 0)
+			result = noise.fbmMap3D(x, y, z);
+		else
+			result = noise.fbmMap2D(x, y);
+		noise.transformNoiseMap();
+		lua_createtable(L, (int)n, 0);
+		for(int i = 0; i < (int)n; i++){
+			lua_pushnumber(L, result[i]);
+			lua_rawseti(L, -2, i + 1);
+		}
+		return 1;
+	}
+
 	// __luanti_get_region_data(x0, y0, z0, x1, y1, z1) -> ids, param1,
 	// param2: three flat arrays, x fastest and then y and then z, which is
 	// what VoxelArea indexes and what a VoxelManip holds.
@@ -4346,6 +4451,8 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_get_region", l_get_region);
 		set_global_cfunction("__luanti_get_region_data", l_get_region_data);
 		set_global_cfunction("__luanti_set_region_data", l_set_region_data);
+		set_global_cfunction("__luanti_noise_value", l_noise_value);
+		set_global_cfunction("__luanti_noise_map", l_noise_map);
 		set_global_cfunction("__luanti_active_boxes", l_active_boxes);
 		set_global_cfunction("__luanti_find_ids", l_find_ids);
 		set_global_cfunction("__luanti_show_objects", l_show_objects);
