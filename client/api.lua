@@ -106,6 +106,17 @@ buildat.safe.cast_voxel_rays_collect  = __buildat_cast_voxel_rays_collect
 -- write_floats(vector_buffer, values): the values into the buffer as floats,
 -- replacing what was in it
 buildat.safe.write_floats             = __buildat_write_floats
+-- add_resource_dir(path) and compose_image(args), in the sandbox as they
+-- are (decided 2026-09-13). What they give sandboxed code is "write files
+-- under the cache and make them loadable", which a server can already do
+-- through client_file -- it ships whatever files it likes into the same
+-- cache -- so this adds no power that was not already there. What it does
+-- do is make the cache-path check in each of them load-bearing rather than
+-- a sanity check: anything added beside them writes under the cache or it
+-- does not go in the sandbox. See doc/plan/luanti_module_plan.md, "what a
+-- module's client half is allowed to do".
+buildat.safe.add_resource_dir         = __buildat_add_resource_dir
+buildat.safe.compose_image            = __buildat_compose_image
 -- What stopped a ray cast by cast_voxel_rays(); see its comment in
 -- src/lua_bindings/voxel_volume.cpp
 buildat.safe.VOXEL_RAY = {
