@@ -897,6 +897,20 @@ two things M1 disproved about the build, are in
   and empties `core.luaentities`; and digging a stone leaves one
   `__builtin:item` holding `floor:stone` within two voxels of where it was.
 
+  **Built: node timers (2026-09-13).** A timer per position, which is what a
+  furnace burning down and a plant growing on its own are written on.
+  `core.get_node_timer(pos)` with `start`, `set`, `stop`, `is_started`,
+  `get_timeout` and `get_elapsed`; a timer that runs out is stopped before
+  its `on_timer` is called, so the callback is free to start it again, and
+  the same timeout comes back when it returns true. `set_node` drops the
+  timer with the metadata, because both were the old node's. In memory, with
+  the same ceiling and upgrade path as the metadata beside it.
+
+  That and the objects together are what `core.check_for_falling` needed:
+  `falling.lua` is the vendored builtin's own and has worked since the
+  objects did, so the fixture digs what holds a `falling_node` up and checks
+  that it comes down and is a node again where it lands.
+
   **What is left:** the client half, which is what would draw an object and
   is the same problem as the forked client's `init.lua` split.
 - **M6 -- the launcher.** `games/luanti_launcher` as described.

@@ -656,11 +656,11 @@ local STUBS_NIL = {
 	"clear_objects", "load_area", "emerge_area", "delete_area",
 	"line_of_sight", "raycast", "find_path", "transforming_liquid_add",
 	"get_node_max_level", "get_node_level", "set_node_level", "add_node_level",
-	"fix_light", "check_single_for_falling", "check_for_falling",
+	"fix_light",
 	"get_spawn_level", "get_heat", "get_humidity", "get_biome_data",
 	"get_biome_id", "get_biome_name", "get_mapgen_params",
 	"forceload_block", "forceload_free_block", "compare_block_status",
-	"get_node_timer", "get_meta", "get_node_metadata",
+	"get_meta", "get_node_metadata",
 	-- Time and the world (M2)
 	"get_timeofday", "set_timeofday", "get_gametime", "get_day_count",
 	"set_time_of_day",
@@ -868,6 +868,92 @@ end
 
 core.get_node_metadata = core.get_meta
 
+-- A timer per position, which is what a furnace burning down and a plant
+-- growing on its own are written on. Luanti keeps one per block and runs
+-- the ones whose block is loaded; here the world is loaded whole, so a
+-- timer runs wherever it is.
+--
+-- simplified: in memory beside the metadata above, and gone when the server
+-- stops, for the same reason and with the same upgrade path.
+
+local node_timers = {}
+
+local NodeTimerRef = {}
+NodeTimerRef.__index = NodeTimerRef
+
+function NodeTimerRef:set(timeout, elapsed)
+	if timeout == nil or timeout <= 0 then
+		node_timers[self.key] = nil
+		return
+	end
+	node_timers[self.key] = {
+		pos = self.pos,
+		timeout = timeout,
+		elapsed = elapsed or 0,
+	}
+end
+
+function NodeTimerRef:start(timeout)
+	self:set(timeout, 0)
+end
+
+function NodeTimerRef:stop()
+	node_timers[self.key] = nil
+end
+
+function NodeTimerRef:is_started()
+	return node_timers[self.key] ~= nil
+end
+
+function NodeTimerRef:get_timeout()
+	local t = node_timers[self.key]
+	return t and t.timeout or 0
+end
+
+function NodeTimerRef:get_elapsed()
+	local t = node_timers[self.key]
+	return t and t.elapsed or 0
+end
+
+function core.get_node_timer(pos)
+	local x, y, z = to_pos(pos)
+	return setmetatable({key = pos_key(x, y, z), pos = {x = x, y = y, z = z}},
+			NodeTimerRef)
+end
+
+-- A timer that has run out is stopped before its on_timer is called, so that
+-- the callback is free to start it again -- and it is restarted with the
+-- same timeout when the callback says true, which is Luanti's own rule.
+local function run_node_timers(dtime)
+	local due = nil
+	for key, t in pairs(node_timers) do
+		t.elapsed = t.elapsed + dtime
+		if t.elapsed >= t.timeout then
+			due = due or {}
+			due[#due + 1] = key
+		end
+	end
+	if due == nil then
+		return
+	end
+	for _, key in ipairs(due) do
+		local t = node_timers[key]
+		if t then
+			node_timers[key] = nil
+			local def = core.registered_nodes[core.get_node(t.pos).name]
+			if def and def.on_timer then
+				local ok, again = pcall(def.on_timer, t.pos, t.elapsed)
+				if not ok then
+					core.log("error", "on_timer: " .. tostring(again))
+				elseif again then
+					node_timers[key] = {pos = t.pos, timeout = t.timeout,
+							elapsed = 0}
+				end
+			end
+		end
+	end
+end
+
 function core.set_node(pos, node)
 	local x, y, z = to_pos(pos)
 	local id, param1, param2 = to_node(node)
@@ -882,8 +968,10 @@ function core.set_node(pos, node)
 	end
 	__set_node(x, y, z, id, param1, param2)
 	-- "Any existing metadata is deleted", which is what separates set_node
-	-- from swap_node; see core.get_meta()
+	-- from swap_node; see core.get_meta(). The timer goes with it: it was
+	-- the old node's.
 	node_meta[pos_key(x, y, z)] = nil
+	node_timers[pos_key(x, y, z)] = nil
 	local newdef = core.registered_nodes[core.get_name_from_content_id(id)]
 	if newdef and newdef.on_construct then
 		newdef.on_construct(pos)
@@ -1453,6 +1541,7 @@ end
 function core.__step(dtime)
 	run_globalsteps(dtime)
 	core.__step_objects(dtime)
+	run_node_timers(dtime)
 	if not lbms_run then
 		lbms_run = run_lbms()
 	end
