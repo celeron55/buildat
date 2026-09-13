@@ -593,6 +593,24 @@ real server, and here the server is `builtin/luanti` and the wire is
 buildat's own packets, the way `main:dig`, `main:place` and the inventory
 already are.
 
+**Built 2026-09-13, in that order:** the player walks (player.lua copied in
+as it is, against `voxelworld.get_static_voxel()` and the registry's
+`physically_solid`), the keys are one table the F5 line lists, the hotbar
+draws the first eight slots with the item in hand named above it, chat goes
+both ways, and the sun crosses the sky with the world's clock. Three things
+turned up on the way and are worth knowing: the client cannot be trusted to
+say where a player starts, so `luanti:player_pos` is the server's answer and
+the client says nothing until it has one; `core.get_player_privs` was a stub,
+which made every "/" command that asks for a privilege error and be said out
+loud instead; and text over a world needs `SetTextEffect`, which the Urho3D
+sandbox did not have.
+
+What is left is the HUD a game draws itself (the `hud_add` family, stubs in
+`lua/entity.lua`, with `client_lua/hud.lua` already copied across and
+unused), the health and breath bars, the `set_sky` family, and Luanti's
+day-night ratio, which scales the sky light a node carries so that a lit
+room goes dark at night.
+
 The order of work, in what a player notices first:
 
 1. **Movement.** `player.lua` (362 lines) is the box 0.6 across and 1.75

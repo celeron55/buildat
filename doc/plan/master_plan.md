@@ -136,31 +136,35 @@ map_meta.txt holds it, and a new one is v7. See "The mapgen, vendored" in
 
 What is left, in order of what it is worth:
 
-1. **The client is a camera, and it has to become a player.** The world
-   generates and is drawn; what is in front of it is a free-flying camera
-   that tells the server where it is, a crosshair, a title line and a line
-   naming what is carried. No box, no gravity, no collision, no hotbar, no
-   chat, no debug line, no key a player can look up, and a sky that does
-   not know what time it is.
+1. **The client is a player now; what is left is what a game draws on top.**
+   Built 2026-09-13: the player is Luanti's box, walking, falling, jumping
+   and stopped by what it runs into, with the camera at its eyes and the
+   server saying where it starts; the keys are one table that F5 lists
+   beside where the player is and what time it is; the first eight
+   inventory slots are a hotbar with the item in hand named above it, the
+   keys 1-8 and the wheel picking one; chat works both ways, with the "/"
+   commands the vendored builtin already had; and the sun crosses the sky
+   with the world's clock, dimming to a blue night. See "The client half,
+   second round" in `doc/plan/luanti_module_plan.md`.
 
-   `extensions/luanti_client/` has every one of these already, written
-   against Luanti's own protocol, and the parts worth copying are the ones
-   that know neither the protocol nor Urho3D -- the extension was written
-   that way and its `test.lua` checks them without a screen. In the order a
-   player notices them: movement (`player.lua`: the box, gravity, collision
-   one axis at a time, walk, sneak, fast, fly, noclip), the keys in one
-   table with a dialog that lists them, the HUD (hotbar and wielded item,
-   health and breath, the chat log, the F5 line of detail, and then what a
-   game puts there itself), chat, and what the world looks like -- the sun
-   and the sky following the world's clock, and the `set_sky` family a game
-   says its own sky with.
+   What is left of it:
 
-   Chat and the HUD are half server work: `chat_send_all`,
-   `chat_send_player`, `hud_add` and its family are stubs in
-   `builtin/luanti/lua/entity.lua`, so the packet between the halves is the
-   missing piece as much as the drawing is. See "The client half, second
-   round" in `doc/plan/luanti_module_plan.md`, which has the order of work
-   and what each file of the extension turns out to be.
+   1. **What a game puts on the screen itself**: `hud_add`, `hud_change`,
+      `hud_remove` and `hud_set_flags` are stubs in `lua/entity.lua`, so
+      devtest's hearts, its bubbles and its bars are nowhere. The reading
+      and the arithmetic are already copied into
+      `builtin/luanti/client_lua/hud.lua`, unused; what is missing is the
+      packet and the drawing, and `formspec_ui.lua` is what draws.
+   2. **Health and breath**, which are the client's own bars until a game
+      draws its own -- and the flags above are how a game says it does.
+   3. **The sky a game asks for**: `set_sky`, `set_sun`, `set_moon` and
+      `set_clouds` are stubs, and the cube map the reflections come from
+      is baked at noon whatever the hour.
+   4. **The day-night ratio**, which is Luanti's other half of the light:
+      the sky light a node carries is scaled by the time of day, so a room
+      lit through a window goes dark at night. Here the light is what the
+      mesher baked and only the sun dims.
+
 2. **The mapgen, stage 3c: the world a game registers.** Luanti's own
    mapgens generate worlds here as of 2026-09-13 -- a world whose
    `mg_name` says `v7` is v7, in `worldgen`'s thread -- but what they
