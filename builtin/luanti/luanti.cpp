@@ -590,8 +590,10 @@ struct Module: public interface::Module, public luanti::Interface
 	// The same for the players; a world nobody has been in stays that way
 	bool m_had_players = false;
 	// Which client a player is, so that what is sent to one has somewhere to
-	// go. Whoever names a player says which peer it is; see add_player().
+	// go, and which player a client is, for what comes back. Whoever names a
+	// player says which peer it is; see add_player().
 	sm_<ss_, size_t> m_player_peers;
+	sm_<size_t, ss_> m_peer_players;
 	bool m_game_running = false;
 	// What load_lua() was handed before run_game(), in the order it came
 	sv_<std::pair<ss_, ss_>> m_pending_lua;
@@ -664,6 +666,10 @@ struct Module: public interface::Module, public luanti::Interface
 		m_server->sub_event(this, Event::t("voxelworld:generation_request"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_texmods"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/luanti:get_item_images"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/luanti:fields"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -677,6 +683,10 @@ struct Module: public interface::Module, public luanti::Interface
 				voxelworld::GenerationRequest)
 		EVENT_TYPEN("network:packet_received/luanti:get_texmods",
 				on_get_texmods, network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:get_item_images",
+				on_get_item_images, network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:fields",
+				on_fields, network::Packet)
 	}
 
 	void on_start(){}
@@ -2751,6 +2761,14 @@ struct Module: public interface::Module, public luanti::Interface
 
 	void send_inventory(const ss_ &name, const sv_<ss_> &flat)
 	{
+		send_to_player(name, "luanti:inventory", flat);
+	}
+
+	// An array of strings to one player's client, or nowhere if that name is
+	// not on the other end of one
+	void send_to_player(const ss_ &name, const ss_ &packet_name,
+			const sv_<ss_> &flat)
+	{
 		auto it = m_player_peers.find(name);
 		if(it == m_player_peers.end())
 			return;
@@ -2760,8 +2778,127 @@ struct Module: public interface::Module, public luanti::Interface
 			ar(flat);
 		}
 		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(it->second, "luanti:inventory", os.str());
+			inetwork->send(it->second, packet_name, os.str());
 		});
+	}
+
+	// __luanti_show_formspec(player_name, formname, spec): the window a mod
+	// puts on a player's screen. An empty spec takes it away, which is what
+	// core.close_formspec() is. The client draws it and sends back what was
+	// pressed; see luanti:fields below.
+	static int l_show_formspec(lua_State *L)
+	{
+		Module *self = module_of(L);
+		sv_<ss_> flat;
+		for(int i = 1; i <= 3; i++){
+			size_t len = 0;
+			const char *p = luaL_checklstring(L, i, &len);
+			flat.push_back(ss_(p ? p : "", len));
+		}
+		ss_ name = flat[0];
+		flat.erase(flat.begin());
+		self->send_to_player(name, "luanti:formspec", flat);
+		return 0;
+	}
+
+	// __luanti_player_formspec(player_name, spec): the form the player's own
+	// inventory key opens, which is theirs until a mod changes it. Sent when
+	// it changes rather than when it is asked for, because a client that has
+	// it can open it without a round trip.
+	static int l_player_formspec(lua_State *L)
+	{
+		Module *self = module_of(L);
+		size_t name_len = 0, spec_len = 0;
+		const char *name_p = luaL_checklstring(L, 1, &name_len);
+		const char *spec_p = luaL_checklstring(L, 2, &spec_len);
+		sv_<ss_> flat;
+		flat.push_back(ss_(spec_p ? spec_p : "", spec_len));
+		self->send_to_player(ss_(name_p ? name_p : "", name_len),
+				"luanti:player_formspec", flat);
+		return 0;
+	}
+
+	// What the client sends back when a form's button is pressed: the form's
+	// name and then the fields, a name and a value each.
+	void on_fields(const network::Packet &packet)
+	{
+		auto who = m_peer_players.find(packet.sender);
+		if(who == m_peer_players.end())
+			return;
+		sv_<ss_> flat;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(flat);
+		} catch(std::exception &e){
+			log_w(MODULE, "luanti:fields: %s", e.what());
+			return;
+		}
+		if(flat.empty())
+			return;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__player_receive_fields");
+		lua_pushlstring(L, who->second.c_str(), who->second.size());
+		lua_pushlstring(L, flat[0].c_str(), flat[0].size());
+		lua_createtable(L, 0, (int)(flat.size() / 2));
+		for(size_t i = 1; i + 1 < flat.size(); i += 2){
+			lua_pushlstring(L, flat[i + 1].c_str(), flat[i + 1].size());
+			lua_setfield(L, -2, flat[i].c_str());
+		}
+		if(lua_pcall(L, 3, 0, 0) != 0){
+			log_w(MODULE, "__player_receive_fields(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+		}
+		lua_settop(L, base);
+	}
+
+	// What an item looks like, as the texture modifier expression the client
+	// composes: its inventory image, or the first tile of the node it
+	// places. Asked for the way the texmods are.
+	//
+	// simplified: one expression per item, so a node is drawn as one of its
+	// tiles rather than as the little cube Luanti draws. The upgrade path is
+	// sending the three tiles a cube shows and shearing them client-side,
+	// which extensions/luanti_client does.
+	void on_get_item_images(const network::Packet &packet)
+	{
+		sv_<ss_> flat;
+		{
+			interface::MutexScope ms(m_lua_mutex);
+			lua_State *L = m_lua;
+			int base = lua_gettop(L);
+			lua_getglobal(L, "core");
+			lua_getfield(L, -1, "__item_images");
+			if(lua_pcall(L, 0, 1, 0) != 0){
+				log_w(MODULE, "__item_images(): %s",
+						lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+				lua_settop(L, base);
+				return;
+			}
+			size_t n = lua_objlen(L, -1);
+			flat.reserve(n);
+			for(size_t i = 0; i < n; i++){
+				lua_rawgeti(L, -1, (int)i + 1);
+				size_t len = 0;
+				const char *p = lua_tolstring(L, -1, &len);
+				flat.push_back(ss_(p ? p : "", p ? len : 0));
+				lua_pop(L, 1);
+			}
+			lua_settop(L, base);
+		}
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(flat);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(packet.sender, "luanti:item_images", os.str());
+		});
+		log_v(MODULE, "C%zu: %zu item images", (size_t)packet.sender,
+				flat.size() / 2);
 	}
 
 	// __luanti_find_ids(x0,y0,z0,x1,y1,z1, {ids, ids, ...})
@@ -3475,6 +3612,8 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_find_ids", l_find_ids);
 		set_global_cfunction("__luanti_show_objects", l_show_objects);
 		set_global_cfunction("__luanti_send_inventory", l_send_inventory);
+		set_global_cfunction("__luanti_show_formspec", l_show_formspec);
+		set_global_cfunction("__luanti_player_formspec", l_player_formspec);
 		lua_pushlightuserdata(m_lua, (void*)this);
 		lua_setfield(m_lua, LUA_REGISTRYINDEX, "__luanti_module");
 		set_global_string("__luanti_module_path", module_path());
@@ -3577,6 +3716,7 @@ struct Module: public interface::Module, public luanti::Interface
 	void add_player(const ss_ &name, size_t peer)
 	{
 		m_player_peers[name] = peer;
+		m_peer_players[peer] = name;
 		node_action("core.__add_player(\""+lua_quoted(name)+"\") return true");
 	}
 
@@ -3584,7 +3724,11 @@ struct Module: public interface::Module, public luanti::Interface
 	{
 		node_action("core.__remove_player(\""+lua_quoted(name)+
 				"\") return true");
-		m_player_peers.erase(name);
+		auto it = m_player_peers.find(name);
+		if(it != m_player_peers.end()){
+			m_peer_players.erase(it->second);
+			m_player_peers.erase(it);
+		}
 	}
 
 	void set_player_pos(const ss_ &name, float x, float y, float z,
