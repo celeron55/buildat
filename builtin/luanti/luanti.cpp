@@ -13,6 +13,7 @@
 // core table holds -- is in lua/ beside this file, where it can be read.
 #include "luanti/api.h"
 #include "voxelworld/api.h"
+#include "worldgen/api.h"
 #include "storage/api.h"
 #include "main_context/api.h"
 #include "client_file/api.h"
@@ -70,6 +71,30 @@ namespace pv = PolyVox;
 namespace magic = Urho3D;
 
 namespace luanti {
+
+// What fills a section, in worldgen's own worker thread: no module is held
+// there, so everything it needs is given to it when the world is made.
+//
+// Today that is the one node a singlenode world is, which is what Luanti's
+// own MapgenSinglenode does. What goes here next is the vendored mapgen;
+// see "Mapgen stage 3: how it lands" in doc/plan/luanti_module_plan.md.
+struct MapgenGenerator: public worldgen::GeneratorInterface
+{
+	// The voxel word the world is filled with: the node id, and the
+	// sunlight, because this is a world with nothing in it and the sky
+	// reaches everywhere
+	uint32_t m_word;
+
+	MapgenGenerator(uint32_t word): m_word(word){}
+
+	void generate(main_context::SceneReference scene_ref,
+			const pv::Vector3DInt16 &section_p,
+			interface::VoxelVolume &volume)
+	{
+		volume.fill(interface::VoxelInstance(m_word));
+	}
+};
+
 
 using main_context::SceneReference;
 
@@ -705,7 +730,7 @@ struct Module: public interface::Module, public luanti::Interface
 		m_server->sub_event(this, Event::t("core:shutdown"));
 		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("core:tick"));
-		m_server->sub_event(this, Event::t("voxelworld:generation_request"));
+		m_server->sub_event(this, Event::t("worldgen:section_generated"));
 		m_server->sub_event(this, Event::t("voxelworld:section_loaded"));
 		m_server->sub_event(this, Event::t("voxelworld:section_unloaded"));
 		m_server->sub_event(this, Event::t(
@@ -727,8 +752,8 @@ struct Module: public interface::Module, public luanti::Interface
 		EVENT_VOIDN("core:shutdown", on_shutdown)
 		EVENT_VOIDN("core:continue", on_continue)
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
-		EVENT_TYPEN("voxelworld:generation_request", on_generation_request,
-				voxelworld::GenerationRequest)
+		EVENT_TYPEN("worldgen:section_generated", on_section_generated,
+				worldgen::SectionGenerated)
 		EVENT_TYPEN("voxelworld:section_loaded", on_section_loaded,
 				voxelworld::SectionLoaded)
 		EVENT_TYPEN("voxelworld:section_unloaded", on_section_unloaded,
@@ -1538,6 +1563,18 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_string("__luanti_section_size",
 				itos(m_section_size.getX()));
 
+		// The generator runs in worldgen's thread rather than here: what
+		// fills a section is a mod's Lua today and Luanti's own mapgen
+		// when it is vendored, and neither belongs on the thread the
+		// server steps on. It is created before the first section is
+		// asked for, which is the next line but one.
+		worldgen::access(m_server, [&](worldgen::Interface *iw){
+			iw->create_instance(m_scene);
+			worldgen::Instance *instance = iw->get_instance(m_scene);
+			instance->set_generator(new MapgenGenerator(singlenode_word()));
+			instance->enable();
+		});
+
 		// Singlenode is a node everywhere, and this is where it is put.
 		// Before the skylight is on: what the fill writes is a world of lit
 		// air, and every voxel of it changing from nothing to air with the
@@ -1628,21 +1665,29 @@ struct Module: public interface::Module, public luanti::Interface
 		world->merge_volume(vol, false);
 	}
 
-	void on_generation_request(const voxelworld::GenerationRequest &event)
+	// worldgen has filled a section and merged it into the world. The
+	// callbacks a mod registered run here, on the main thread, over terrain
+	// that is already in the map -- which is the same order Luanti gives
+	// them: its mapgen has written the chunk by the time they see it.
+	void on_section_generated(const worldgen::SectionGenerated &event)
 	{
 		if(!m_game_running || event.scene != m_scene)
 			return;
-		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
-			generate_section(world, event.section_p);
-		});
 		run_on_generated(event.section_p);
 	}
 
 	// The world create_instance() just made, filled before anything reads
-	// it. The generation requests for those sections are in this module's
-	// event queue and will arrive after run_game() has returned, which is
+	// it. The generation requests for those sections are answered in
+	// worldgen's thread and arrive after run_game() has returned, which is
 	// too late for a check -- or for a mod -- that looks at the map while
 	// the game starts.
+	//
+	// simplified: so these sections are filled twice, once here and once
+	// when the generator gets to them; merge_volume() keeps what is already
+	// there, so the second one changes nothing. It costs what generating
+	// the sections around the origin costs, which is nothing at singlenode
+	// and something once there is a real mapgen. The fix is a way to tell
+	// worldgen a section is already done.
 	void generate_world()
 	{
 		const pv::Vector3DInt32 p0(-SPAWN_RADIUS, -SPAWN_RADIUS, -SPAWN_RADIUS);
