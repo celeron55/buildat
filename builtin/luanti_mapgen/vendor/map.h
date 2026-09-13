@@ -25,10 +25,27 @@ public:
 	~MMVManip() override = default;
 	DISABLE_CLASS_COPY(MMVManip)
 
-	// Luanti reads the map into the manipulator here. What generates in
-	// this build is handed a volume that is already the area it is for.
+	// Luanti reads the map into the manipulator here, block by block, and
+	// clears the "no data" flag of everything it read. There is no map on
+	// this side -- what generates is handed the area it is for -- so this
+	// is the same thing over an empty world: every voxel of the area is
+	// "ignore" and is data, which is what makes a mapgen's writes stick.
 	void initialEmerge(v3s16 blockpos_min, v3s16 blockpos_max,
-			bool load_if_inexistent = true){}
+			bool load_if_inexistent = true)
+	{
+		emergeAll();
+	}
+
+	// The same over whatever area has been added, which is what this
+	// build's generator calls instead
+	void emergeAll()
+	{
+		const s32 volume = m_area.getVolume();
+		for(s32 i = 0; i < volume; i++){
+			m_data[i] = MapNode(CONTENT_IGNORE);
+			m_flags[i] = 0;
+		}
+	}
 
 	// And writes it back here, which is the translation into a voxelworld
 	// volume and happens outside the mapgen.

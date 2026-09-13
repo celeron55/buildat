@@ -34,6 +34,9 @@ namespace luanti_mapgen
 		// the sunlight, packed by whoever asked, because the format is the
 		// caller's business and not this module's
 		uint32_t singlenode_word = 0;
+		// How many voxels a section is, which is the chunk a generator is
+		// asked for one of at a time
+		int section_size = 64;
 		// The game's node ids by name, as the game registered them. A
 		// generator asks for "mapgen_stone" and gets what the game means by
 		// it, which is how Luanti's own mapgens are told what to build

@@ -162,9 +162,13 @@ public:
 		return getLightingFlags(n.getContent());
 	}
 
-	// A resolver with the definitions already in place is a resolver that
-	// runs now
+	// Luanti resolves these once the definitions are in; here they are in
+	// before any of this exists, but the resolve still waits: a manager
+	// registers a resolver from its own constructor, and calling a virtual
+	// on an object that is still being built is where that ends.
+	// resolvePending() is called once the managers are up.
 	void pendNodeResolve(NodeResolver *nr) const;
+	void resolvePending() const;
 	bool cancelNodeResolveCallback(NodeResolver *nr) const { return false; }
 
 	// What builtin/luanti hands over: the ids by name, and the few
@@ -173,6 +177,7 @@ public:
 			const ContentFeatures &f);
 
 private:
+	mutable std::vector<NodeResolver*> m_pending;
 	std::unordered_map<std::string, content_t> m_id_of_name;
 	std::vector<ContentFeatures> m_features;
 	ContentFeatures m_unknown;

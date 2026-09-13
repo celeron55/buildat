@@ -51,8 +51,12 @@ public:
 	bool enable_mapgen_debug_info = false;
 
 	u32 gen_notify_on = 0;
-	const std::set<u32> *gen_notify_on_deco_ids = nullptr;
-	const std::set<std::string> *gen_notify_on_custom = nullptr;
+	// Empty rather than null: the notifier keeps the pointers and reads
+	// through them
+	std::set<u32> m_no_deco_ids;
+	std::set<std::string> m_no_custom;
+	const std::set<u32> *gen_notify_on_deco_ids = &m_no_deco_ids;
+	const std::set<std::string> *gen_notify_on_custom = &m_no_custom;
 
 	BiomeGen *biomegen = nullptr;
 	BiomeManager *biomemgr = nullptr;
