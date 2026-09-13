@@ -305,6 +305,15 @@ struct CInstance: public voxelworld::Instance
 	// The world region's own sections have not been created yet; see the
 	// constructor
 	bool m_initial_sections_pending = true;
+	// How long the first sections wait for a game to say where it wants
+	// them. A game sets its load points in its own good time -- often one
+	// event after the world is made -- and the first tick can land in
+	// between; a world too big to fill has to wait for them rather than
+	// give up on the first tick it sees. At 30 Hz these are a tenth of a
+	// second and ten seconds.
+	int m_initial_sections_waited = 0;
+	static const int INITIAL_SECTIONS_WARN_TICKS = 3;
+	static const int INITIAL_SECTIONS_GIVE_UP_TICKS = 300;
 	static const int64_t MAX_INITIAL_SECTIONS = 4096;
 
 	// Streaming: the points the world is kept loaded around, and how much
@@ -421,7 +430,9 @@ struct CInstance: public voxelworld::Instance
 		});
 	}
 
-	void create_initial_sections()
+	// Returns false while it is still waiting for the game to say where it
+	// wants sections; see the tick.
+	bool create_initial_sections()
 	{
 		auto lc = m_section_region.getLowerCorner();
 		auto uc = m_section_region.getUpperCorner();
@@ -429,11 +440,22 @@ struct CInstance: public voxelworld::Instance
 				(uc.getY() - lc.getY() + 1) * (uc.getZ() - lc.getZ() + 1);
 		// The bounds of a world that streams are far larger than anything
 		// anyone wants loaded at once, and creating them would be the rest
-		// of the day. Say so instead of taking it.
-		if(num > MAX_INITIAL_SECTIONS)
+		// of the day. Such a world has to stream, so what this does is wait
+		// for the load points that make it stream -- and say so, and then
+		// give up, if they never come.
+		if(num > MAX_INITIAL_SECTIONS){
+			m_initial_sections_waited++;
+			if(m_initial_sections_waited == INITIAL_SECTIONS_WARN_TICKS)
+				log_w(MODULE, "The region is %s sections; waiting for "
+						"set_load_points(), because a world with bounds "
+						"bigger than it wants loaded has to stream",
+						cs(itos(num)));
+			if(m_initial_sections_waited < INITIAL_SECTIONS_GIVE_UP_TICKS)
+				return false;
 			throw Exception(ss_()+"voxelworld: the region is "+itos(num)+
 					" sections and nothing called set_load_points(); a world "
 					"with bounds bigger than it wants loaded has to stream");
+		}
 		for(int z = lc.getZ(); z <= uc.getZ(); z++){
 			for(int y = lc.getY(); y <= uc.getY(); y++){
 				for(int x = lc.getX(); x <= uc.getX(); x++){
@@ -441,6 +463,7 @@ struct CInstance: public voxelworld::Instance
 				}
 			}
 		}
+		return true;
 	}
 
 	// Streaming. One pass loads, generates or unloads a few sections at
@@ -727,11 +750,12 @@ struct CInstance: public voxelworld::Instance
 	void on_tick(const interface::TickEvent &event)
 	{
 		if(m_initial_sections_pending){
-			m_initial_sections_pending = false;
 			// A world that streams says where it wants sections; the region
 			// is then its bounds and its sky and not a thing to fill
-			if(!m_streaming)
-				create_initial_sections();
+			if(m_streaming)
+				m_initial_sections_pending = false;
+			else if(create_initial_sections())
+				m_initial_sections_pending = false;
 		}
 
 		// Every fourth tick: often enough that a running player stays ahead
