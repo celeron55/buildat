@@ -121,42 +121,37 @@ the client half rather than by the voxel mesher.
 
 What is left, in order of what it is worth:
 
-1. **The mapgen, stage 3c: the biomes, ores and decorations a game
-   registers.** Luanti's own mapgens generate worlds here as of
-   2026-09-13 -- a world whose `mg_name` says `v7` is v7 -- but what they
-   generate is the default biome, because `core.registered_biomes`,
-   `_ores` and `_decorations` are recorded in Lua and nothing translates
-   them into `BiomeManager` and its friends yet. That translation is what
-   makes a game's own world look like itself. One smaller thing goes with it:
-   sending the node properties a mapgen asks about instead of guessing
-   them -- a cave carving through a chest is the sign of it. Who owns the
-   light is settled: the mapgen does. See "Mapgen stage 3" in the module plan.
+1. **The mapgen, stage 3c: the world a game registers.** Luanti's own
+   mapgens generate worlds here as of 2026-09-13 -- a world whose
+   `mg_name` says `v7` is v7, in `worldgen`'s thread -- but what they
+   generate is the default biome, because the biome, ore and decoration
+   managers are empty. `core.registered_biomes`, `_ores` and
+   `_decorations` have been recorded on the Lua side since M2; translating
+   them into `BiomeManager`, `OreManager` and `DecorationManager` is what
+   makes a game's world look like that game's. In the managers' own
+   dependency order:
 
-   What is already built: the seam (a generator in `worldgen`'s worker
-   thread), the whole of `src/mapgen` vendored and compiling against a
-   shim, and all eight mapgens available by name.
-   Stage 2 is built too and a Lua mapgen makes terrain through it,
-   so what is left is the 9.5k lines of noise, biomes, ores, decorations,
-   schematics and the tree generator that a mainstream Luanti game's world
-   actually is -- a world that is *nearly* v7 is a world that is nothing,
-   which is why it is vendored rather than rewritten. See "Mapgen" in the
-   module plan.
+   1. **The node properties a mapgen asks about**, which is small and goes
+      first because the same crossing carries it: `is_ground_content`,
+      `liquid_type`, `floodable` and `walkable` per content id, instead of
+      the shim's guess that everything solid is ground.
+   2. **Biomes.** `BiomeManager` and a `Biome` per registration: the
+      nodes, the y range, the heat and humidity points.
+   3. **Ores.** `OreManager` and the ore kinds, which are the same shape
+      with a noise parameter set each.
+   4. **Decorations**, which want schematics and the tree generator with
+      them -- and a `.mts` file is not read yet, which is the one piece of
+      the vendoring that is stubbed.
 
-   Two things stage 2 measured are arguments for doing it in C++: a Lua
-   mapgen over a section costs about 600 ms, most of it a quarter of a
-   million voxels crossing the Lua boundary twice, and all of it ran on the
-   server's own thread until the seam moved it. A vendored mapgen writes
-   the volume with no Lua in the middle, in `worldgen`'s thread.
-
-   It goes in a module of its own, `builtin/luanti_mapgen`, because a
-   runtime-compiled module is a single translation unit and `builtin/luanti`
-   already takes ten seconds to compile.
-2. **The rest is minor and belongs to a later round.** glTF, an object drawn
-   as its own model, a detached inventory, a put-down count, the inventory
-   cube, a scrolling save list: each is an afternoon, none blocks a game
-   from running, and they are in "Bonuses" below for exactly that reason.
-   The module plan's "Simplified, and the upgrade path" is the full list of
-   what the module does not do.
+   See "Mapgen stage 3c" in the module plan, and
+   `doc/plan/luanti_module_history.md`, "The mapgen, vendored", for what
+   the stages below it turned out to be.
+2. **The rest is minor and belongs to a later round.** glTF, an object
+   drawn as its own model, a detached inventory, a put-down count, the
+   inventory cube, a scrolling save list: each is an afternoon, none
+   blocks a game from running, and they are in "Bonuses" below for exactly
+   that reason. The module plan's "Simplified, and the upgrade path" is
+   the full list of what the module does not do.
 
 **And the branch stack should merge before more lands on it.**
 `client-preferences` (PR #55) into master, `saves` (PR #56) into that,
