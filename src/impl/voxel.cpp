@@ -131,6 +131,12 @@ struct CVoxelRegistry: public VoxelRegistry
 		return result;
 	}
 
+	VoxelTypeId num_voxels()
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return m_defs.size() - 1;
+	}
+
 	VoxelTypeId add_voxel(const VoxelDefinition &def)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
