@@ -175,6 +175,19 @@ namespace interface
 		// substituted so that a game that says nothing keeps the behaviour
 		// it had.
 		bool transmits_light = false;
+		// How much light this voxel emits of its own, 0...15, for a world
+		// that maintains lamp light: a torch, a lava flow, a glowing
+		// mushroom. 0 for nearly everything.
+		//
+		// Only a world whose format binds light_lamp *and* asks for it to
+		// be maintained reads this; see set_light_maintained() in
+		// voxelworld/api.h. A game whose lamps are lights in the scene
+		// leaves it at zero and the shader does that work instead.
+		//
+		// Not serialized: the client does not need it -- what it draws is
+		// the light already stored in each voxel -- and keeping it off the
+		// wire means a save written before it existed still reads.
+		uint8_t light_source = 0;
 		// A shape of the voxel's own instead of a cube. Empty for a cube,
 		// which is what most voxels are and the fast path the voxel mesher
 		// exists for; a voxel with quads has them copied into the chunk's
@@ -314,6 +327,8 @@ namespace interface
 		bool fully_empty = false;
 		// Copied from the definition; see VoxelDefinition::transmits_light
 		bool transmits_light = false;
+		// Copied from the definition; see VoxelDefinition::light_source
+		uint8_t light_source = 0;
 		// Copied from the definition; see VoxelDefinition::shape
 		sv_<VoxelQuad> shape;
 		bool shape_double_sided = false;

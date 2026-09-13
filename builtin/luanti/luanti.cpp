@@ -3064,6 +3064,11 @@ struct Module: public interface::Module, public luanti::Interface
 			}
 			// An empty voxel already transmits light by being empty
 			vdef.transmits_light = sunlight && !empty;
+			// What the voxel glows with, which is what lamp light floods
+			// from; a Luanti game's mechanics read that light, so the
+			// number has to cross with the definition
+			vdef.light_source = (uint8_t)std::min(15.0,
+					std::max(0.0, table_number(L, "light_source", 0)));
 			vdef.physically_solid = walkable && !empty;
 			vdef.fully_empty = empty;
 			if(!masked_shape.empty()){
