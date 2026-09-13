@@ -146,6 +146,69 @@ function core.__check_map_write()
 	return true
 end
 
+-- The mapgen seam's map half: a VoxelManip round trip. What can be wrong
+-- here and nowhere else is the indexing -- the arrays are x fastest and then
+-- y and then z, which is what VoxelArea does its arithmetic in -- so the
+-- nodes written are at positions that are all different in every axis and a
+-- transposed index puts them somewhere this notices.
+local VM_MIN = {x = 20, y = 2, z = 24}
+local VM_MAX = {x = 25, y = 6, z = 27}
+local VM_AT = {x = 21, y = 3, z = 26}
+
+local function check_vmanip()
+	local vm = VoxelManip()
+	local emin, emax = vm:read_from_map(VM_MIN, VM_MAX)
+	if emin.x ~= VM_MIN.x or emax.z ~= VM_MAX.z then
+		error("check_map: the VoxelManip emerged (" .. emin.x .. "," ..
+				emin.y .. "," .. emin.z .. ")-(" .. emax.x .. "," ..
+				emax.y .. "," .. emax.z .. ")")
+	end
+	local data = vm:get_data()
+	local area = VoxelArea:new{MinEdge = emin, MaxEdge = emax}
+	local id = core.get_content_id(check_name)
+	data[area:index(VM_AT.x, VM_AT.y, VM_AT.z)] = id
+	vm:set_data(data)
+	local param2 = vm:get_param2_data()
+	param2[area:index(VM_AT.x, VM_AT.y, VM_AT.z)] = 3
+	vm:set_param2_data(param2)
+	vm:write_to_map()
+
+	local node = core.get_node(VM_AT)
+	if node.name ~= check_name then
+		error("check_map: the VoxelManip wrote " .. node.name .. " where " ..
+				check_name .. " was meant to go")
+	end
+	if node.param2 ~= 3 then
+		error("check_map: the VoxelManip lost param2: " ..
+				tostring(node.param2))
+	end
+	-- The same index read the other way round would land here
+	local swapped = core.get_node({x = VM_AT.z, y = VM_AT.y, z = VM_AT.x})
+	if swapped.name == check_name then
+		error("check_map: the VoxelManip index is transposed")
+	end
+
+	-- And back out through a second one, which is the read half
+	local vm2 = VoxelManip(VM_MIN, VM_MAX)
+	local d2 = vm2:get_data()
+	local a2 = VoxelArea:new{MinEdge = VM_MIN, MaxEdge = VM_MAX}
+	if d2[a2:index(VM_AT.x, VM_AT.y, VM_AT.z)] ~= id then
+		error("check_map: the VoxelManip read back " ..
+				tostring(d2[a2:index(VM_AT.x, VM_AT.y, VM_AT.z)]) ..
+				" instead of " .. id)
+	end
+	if vm2:get_node_at(VM_AT).name ~= check_name then
+		error("check_map: get_node_at answered " ..
+				vm2:get_node_at(VM_AT).name)
+	end
+	-- set_node_at and the write that carries it
+	vm2:set_node_at(VM_AT, {name = "air"})
+	vm2:write_to_map()
+	if core.get_node(VM_AT).name ~= "air" then
+		error("check_map: set_node_at left " .. core.get_node(VM_AT).name)
+	end
+end
+
 function core.__check_map_read()
 	local node = core.get_node(CHECK_POS)
 	if node.name ~= check_name then
@@ -277,6 +340,8 @@ function core.__check_map_read()
 	for _, p in ipairs(SEAM_CORNERS) do
 		core.set_node(p, {name = "air"})
 	end
+	check_vmanip()
+
 	core.log("verbose", "check_map: " .. check_name ..
 			" survived the flush, and the region reads found it")
 
