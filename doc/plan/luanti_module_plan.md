@@ -305,13 +305,69 @@ ores, then decorations, which want schematics and the tree generator.
 - **How faithful:** a world that *looks like* a Luanti world rather than
   one that reproduces upstream's terrain for a seed, so the noise is
   buildat's own vendored copy and the shim adapts Luanti's calls onto it.
-- **The light is the mapgen's.** `voxelworld`'s skylight floods from the
-  top of the region, thirty thousand voxels up, and never reaches; a
-  mapgen lights what it generates. What it costs is a dug hole that stays
-  dark.
+- **The light is the mapgen's**, and what keeps it right afterwards is
+  settled: see "Skylight over a streamed world" below.
 - **Settings answer nothing**, so a mapgen's own C++ defaults stand, with
   the flag set spelled out in the module -- caves, dungeons, light,
   decorations, biomes, ores.
+
+### Skylight over a streamed world (settled 2026-09-13)
+
+**The question nobody can answer is never asked.** "Does the sky reach
+here?" cannot be worked out without the column above, and in a world thirty
+thousand voxels tall that column is neither loaded nor generated. So the
+light stops being derived and becomes stored: the generator writes it, the
+save carries it, and everything after that is a local flood.
+
+**What a source is.** Two rules, side by side, needing no switch between
+them:
+
+- a voxel whose stored sunlight is already full is a source -- which is
+  what a mapgen leaves behind, and what buildat's own singlenode fill
+  already writes;
+- the top row of the world region is a source *when that section happens to
+  be loaded*, which is what `games/infidigger` and `games/bomber_drone`
+  rely on and what a Luanti-sized world never satisfies.
+
+**So producing correct lighting is the generator's contract.** A game whose
+generator does not has chosen its own artefacts.
+
+**Crossing a section boundary** is the whole of the hard part, and it has
+three cases:
+
+1. **The section is loaded**: propagate into it, which is what already
+   happens within one.
+2. **The section has never been generated** -- it is not in the save --
+   so stop. Light does not belong there yet; it arrives when the section is
+   generated, from the generator.
+3. **The section is in the save but not loaded**: mark it *stale* and stop.
+   The flag is per section and lives in the save beside `modified`; a
+   section loaded while stale re-floods its light from its loaded
+   neighbours' edges and its own sources, and clears the flag.
+
+   The alternative -- load it, relight it, write it back -- has a tail:
+   sunlight going down an open column does not attenuate, so one node
+   removed at the top of a shaft can pull in every section below it until
+   the shaft ends. Marking bounds the work to one section flood at a moment
+   that is already paying for a load.
+
+**Two consequences to build for.**
+
+- **The dark direction is the hard one.** A blocker placed in the light
+  means unlighting a region and re-spreading from its boundary; the flood
+  that exists today only spreads. "Stale" therefore means "may be wrong in
+  either direction".
+- **A section-sized re-flood is not the 262144-seed one.** Today's measures
+  about 140 ms because every voxel of a new section is a seed; a re-flood
+  starts from the boundary and from the stored sources, which is a far
+  smaller set.
+
+**And the layered worlds keep working.** Some Luanti games split the Y axis
+into a deep world, a surface world and a floatlands world thousands of
+voxels apart, and rely on nobody ever walking between them -- so the
+sections in between are never generated, which is case 2, and the flood
+stops at the edge. buildat's own answer to wanting three worlds is three
+worlds, but the Luanti way is not broken by this.
 
 ### The region calls (built 2026-09-13)
 
