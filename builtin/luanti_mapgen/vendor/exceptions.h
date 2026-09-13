@@ -6,9 +6,9 @@
 class BaseException: public std::exception
 {
 public:
-	BaseException(const std::string &s) throw(): m_s(s){}
-	~BaseException() throw(){}
-	virtual const char* what() const throw(){ return m_s.c_str(); }
+	BaseException(const std::string &s) noexcept: m_s(s){}
+	~BaseException() noexcept{}
+	const char* what() const noexcept override { return m_s.c_str(); }
 protected:
 	std::string m_s;
 };

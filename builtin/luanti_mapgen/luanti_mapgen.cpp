@@ -20,8 +20,15 @@
 
 // Luanti's own code and the shim under it, in one translation unit because
 // that is what a runtime-compiled module is. See vendor/README.txt.
+//
+// What is compiled so far is the bottom of the tree: the voxel manipulator
+// every mapgen writes into, the noise adapter, and the node definitions
+// they ask about. The generators themselves are vendored in but not yet
+// built -- vendor/README.txt says where the port stopped and what the next
+// missing piece is.
 #include "vendor/log.cpp"
 #include "vendor/nodedef.cpp"
+#include "vendor/noise.cpp"
 #include "vendor/voxel.cpp"
 
 namespace pv = PolyVox;
