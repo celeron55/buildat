@@ -710,6 +710,33 @@ function core.__game_check()
 				#back.items .. " items")
 	end
 	core.log("action", "floor: the four recipes and the one that is not")
+
+	-- What hangs off a voxel, across a restart: a probe in a corner of the
+	-- floor counts the runs in its metadata and holds one stone per run in
+	-- its inventory, and every run after the first checks what the last one
+	-- left. This is the fixture for step 5c of the persistence plan.
+	local keep = {x = -11, y = Y + 1, z = 11}
+	if core.get_node(keep).name ~= "floor:probe" then
+		-- set_node clears the metadata, so this happens once in a save
+		core.set_node(keep, {name = "floor:probe"})
+	end
+	local kept_meta = core.get_meta(keep)
+	local kept_inv = kept_meta:get_inventory()
+	local before = tonumber(kept_meta:get_string("runs")) or 0
+	if before > 0 then
+		local stack = kept_inv:get_stack("main", 1)
+		if stack:get_name() ~= "floor:stone" or
+				stack:get_count() ~= math.min(before, 99) then
+			error("floor: the metadata of " .. before .. " runs ago came " ..
+					"back as " .. stack:to_string())
+		end
+	end
+	kept_meta:set_string("runs", tostring(before + 1))
+	kept_inv:set_size("main", 1)
+	kept_inv:set_stack("main", 1,
+			"floor:stone " .. math.min(before + 1, 99))
+	core.log("action", "floor: the metadata in the corner is on run " ..
+			(before + 1))
 end
 
 core.log("action", "floor: placed a " .. (HALF * 2 + 1) .. "x" ..
