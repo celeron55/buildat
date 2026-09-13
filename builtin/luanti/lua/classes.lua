@@ -1,0 +1,1022 @@
+-- Buildat: builtin/luanti/lua/classes.lua
+-- http://www.apache.org/licenses/LICENSE-2.0
+-- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+--
+-- The globals Luanti's C API gives a mod that are classes rather than
+-- functions: ItemStack and the random and noise generators. A mod builds
+-- these while it is loading, so they have to be here before the first mod
+-- runs.
+--
+-- simplified: ItemStack is written in Lua rather than being Luanti's
+-- inventory.cpp behind a userdata. It holds a name, a count, a wear and a
+-- metadata table and does the arithmetic on them, which is what a mod
+-- loading needs and what most of them use at all. The ceiling is the
+-- itemstring format -- the quoted and escaped forms Luanti parses in C++ are
+-- not all read here -- and that inventories elsewhere do not share storage
+-- with a stack taken out of them. The upgrade path is the one the plan
+-- names: vendor inventory.cpp and tool.cpp at M4 and put this behind them.
+
+--
+-- Metadata, as an ItemStack carries it
+--
+
+local MetaData = {}
+MetaData.__index = MetaData
+
+local function new_metadata(fields)
+	return setmetatable({fields = fields or {}}, MetaData)
+end
+
+function MetaData:contains(key)
+	return self.fields[key] ~= nil
+end
+
+function MetaData:get(key)
+	return self.fields[key]
+end
+
+-- A value of "${other}" is what the other key holds, one step deep and no
+-- further: Luanti resolves a reference and a reference inside that, and
+-- leaves the third alone, so that two keys pointing at each other cannot
+-- loop. get_string() is where the resolving happens and the field itself is
+-- untouched.
+local function resolve_field(self, value, depth)
+	if depth <= 1 and type(value) == "string" and #value > 3 and
+			string.sub(value, 1, 2) == "${" and
+			string.sub(value, -1) == "}" then
+		local key = string.sub(value, 3, -2)
+		return resolve_field(self, self.fields[key] or "", depth + 1)
+	end
+	return value
+end
+
+function MetaData:get_string(key)
+	return resolve_field(self, self.fields[key] or "", 0)
+end
+
+function MetaData:set_string(key, value)
+	if value == nil or value == "" then
+		self.fields[key] = nil
+	else
+		self.fields[key] = tostring(value)
+	end
+end
+
+function MetaData:get_int(key)
+	return math.floor(tonumber(self:get_string(key)) or 0)
+end
+
+function MetaData:set_int(key, value)
+	self:set_string(key, string.format("%d", value))
+end
+
+function MetaData:get_float(key)
+	return tonumber(self:get_string(key)) or 0
+end
+
+function MetaData:set_float(key, value)
+	-- Every digit of it, which is what Luanti writes and what a mod that
+	-- compares two of them across a save expects: 0.3 is not "0.3"
+	self:set_string(key, string.format("%.17g", value))
+end
+
+function MetaData:get_keys()
+	local out = {}
+	for k, _ in pairs(self.fields) do
+		out[#out + 1] = k
+	end
+	return out
+end
+
+function MetaData:to_table()
+	local fields = {}
+	for k, v in pairs(self.fields) do
+		fields[k] = v
+	end
+	local t = {fields = fields}
+	if self.inventory then
+		t.inventory = self.inventory:get_lists()
+	end
+	return t
+end
+
+-- Only a node's metadata has one -- an item stack's does not, and answers
+-- with nothing rather than with an inventory nobody can reach. What makes
+-- one is core.get_meta(); see bootstrap.lua.
+function MetaData:get_inventory()
+	return self.inventory
+end
+
+function MetaData:from_table(t)
+	self.fields = {}
+	for k, v in pairs((t or {}).fields or {}) do
+		self.fields[k] = v
+	end
+	if self.inventory then
+		self.inventory:set_lists((t or {}).inventory or {})
+	end
+	return true
+end
+
+function MetaData:equals(other)
+	for k, v in pairs(self.fields) do
+		if other.fields[k] ~= v then
+			return false
+		end
+	end
+	for k, v in pairs(other.fields) do
+		if self.fields[k] ~= v then
+			return false
+		end
+	end
+	return true
+end
+
+function MetaData:set_tool_capabilities(caps)
+	if caps == nil then
+		self.fields.tool_capabilities = nil
+	else
+		self.fields.tool_capabilities = core.write_json({
+			tool_capabilities = caps})
+	end
+end
+
+-- Used by mod storage and by anything else that wants Luanti's metadata
+-- interface over a table of strings
+core.__new_metadata = new_metadata
+
+--
+-- ItemStack
+--
+
+local Stack = {}
+Stack.__index = Stack
+
+local function stack_definition(self)
+	return core.registered_items[self.name] or
+			core.registered_items["unknown"] or {}
+end
+
+-- "default:stone 3 100" and the plainer forms of it. The quoted name and the
+-- trailing metadata Luanti's C++ parser also reads are the ceiling above.
+-- Name, count and wear, split on single spaces the way Luanti reads them --
+-- so " 3" is three of the empty item and not one of an item called 3, and a
+-- name with something after it that is not a number keeps the name
+local function parse_itemstring(s)
+	if s == "" then
+		return "", 0, 0
+	end
+	local parts = {}
+	local start = 1
+	while true do
+		local i = string.find(s, " ", start, true)
+		if i == nil then
+			parts[#parts + 1] = string.sub(s, start)
+			break
+		end
+		parts[#parts + 1] = string.sub(s, start, i - 1)
+		start = i + 1
+	end
+	local name = parts[1] or ""
+	local count = parts[2] and (tonumber(parts[2]) or 1) or 1
+	local wear = parts[3] and (tonumber(parts[3]) or 0) or 0
+	return name, count, wear
+end
+
+local function new_stack(name, count, wear, meta_fields)
+	local self = setmetatable({}, Stack)
+	-- An alias is resolved when the stack is made, which is where Luanti
+	-- resolves it: a recipe whose output is an alias makes the item the
+	-- alias points at, and every name a mod compares against is the real one
+	self.name = (core.__aliases and core.__aliases[name]) or name or ""
+	self.count = count or 0
+	self.wear = wear or 0
+	self.meta = new_metadata(meta_fields)
+	if self.name == "" then
+		self.count = 0
+	end
+	return self
+end
+
+function ItemStack(from)
+	if from == nil then
+		return new_stack("", 0, 0)
+	end
+	if type(from) == "string" then
+		local name, count, wear = parse_itemstring(from)
+		return new_stack(name, count, wear)
+	end
+	if getmetatable(from) == Stack then
+		return new_stack(from.name, from.count, from.wear,
+				from.meta:to_table().fields)
+	end
+	if type(from) == "table" then
+		return new_stack(from.name, tonumber(from.count) or 1,
+				tonumber(from.wear) or 0,
+				(from.meta or from.metadata or {}).fields or from.meta)
+	end
+	error("ItemStack(): cannot make a stack of a " .. type(from))
+end
+
+function Stack:is_empty()
+	return self.count <= 0 or self.name == ""
+end
+
+function Stack:get_name()
+	return self.name
+end
+
+function Stack:set_name(name)
+	self.name = name or ""
+	if self.name == "" then
+		self.count = 0
+	end
+	return not self:is_empty()
+end
+
+function Stack:get_count()
+	return self.count
+end
+
+function Stack:set_count(count)
+	self.count = math.floor(tonumber(count) or 0)
+	if self.count <= 0 then
+		-- An empty stack is empty of everything, metadata included: Luanti
+		-- clears the lot, and a leftover that still carried a chest's
+		-- contents would not compare equal to nothing
+		self:clear()
+	end
+	return not self:is_empty()
+end
+
+function Stack:get_wear()
+	return self.wear
+end
+
+function Stack:set_wear(wear)
+	self.wear = math.max(0, math.min(65535, math.floor(tonumber(wear) or 0)))
+	if self.wear >= 65536 then
+		self:clear()
+		return false
+	end
+	return true
+end
+
+function Stack:get_meta()
+	return self.meta
+end
+
+-- Deprecated in Luanti and still called by old mods
+function Stack:get_metadata()
+	return self.meta:get_string("")
+end
+
+function Stack:set_metadata(value)
+	self.meta:set_string("", value)
+	return true
+end
+
+function Stack:get_description()
+	local def = stack_definition(self)
+	local d = self.meta:get_string("description")
+	if d ~= "" then
+		return d
+	end
+	return def.description or self.name
+end
+
+function Stack:get_short_description()
+	local d = self.meta:get_string("short_description")
+	if d ~= "" then
+		return d
+	end
+	local def = stack_definition(self)
+	if def.short_description then
+		return def.short_description
+	end
+	return (self:get_description():gsub("\n.*", ""))
+end
+
+function Stack:clear()
+	self.name = ""
+	self.count = 0
+	self.wear = 0
+	self.meta = new_metadata()
+end
+
+function Stack:replace(other)
+	local s = ItemStack(other)
+	self.name, self.count, self.wear, self.meta = s.name, s.count, s.wear, s.meta
+end
+
+function Stack:to_string()
+	if self:is_empty() then
+		return ""
+	end
+	local out = self.name
+	if self.count ~= 1 or self.wear ~= 0 then
+		out = out .. " " .. self.count
+	end
+	if self.wear ~= 0 then
+		out = out .. " " .. self.wear
+	end
+	return out
+end
+
+Stack.__tostring = Stack.to_string
+
+function Stack:to_table()
+	if self:is_empty() then
+		return nil
+	end
+	return {
+		name = self.name,
+		count = self.count,
+		wear = self.wear,
+		metadata = self.meta:get_string(""),
+		meta = self.meta:to_table().fields,
+	}
+end
+
+function Stack:get_stack_max()
+	local def = stack_definition(self)
+	return tonumber(def.stack_max) or 99
+end
+
+function Stack:get_free_space()
+	return self:get_stack_max() - self.count
+end
+
+function Stack:is_known()
+	return core.registered_items[self.name] ~= nil
+end
+
+function Stack:get_definition()
+	return stack_definition(self)
+end
+
+function Stack:get_tool_capabilities()
+	-- What the stack's own metadata says wins, which is how a tool is worn
+	-- down into a weaker one or handed out with better numbers
+	local raw = self.meta:get_string("tool_capabilities")
+	if raw ~= "" then
+		local parsed = core.parse_json(raw)
+		if type(parsed) == "table" and
+				type(parsed.tool_capabilities) == "table" then
+			return parsed.tool_capabilities
+		end
+	end
+	local def = stack_definition(self)
+	return def.tool_capabilities or
+			(core.registered_items[""] or {}).tool_capabilities or {}
+end
+
+function Stack:add_wear(amount)
+	if self:get_stack_max() ~= 1 then
+		return
+	end
+	self:set_wear(self.wear + (tonumber(amount) or 0))
+end
+
+function Stack:add_wear_by_uses(uses)
+	uses = tonumber(uses) or 0
+	if uses <= 0 then
+		return
+	end
+	self:add_wear(math.floor(65535 / uses))
+end
+
+function Stack:item_fits(other)
+	local s = ItemStack(other)
+	if s:is_empty() then
+		return true, nil
+	end
+	if self:is_empty() then
+		return s.count <= s:get_stack_max(), nil
+	end
+	if self.name ~= s.name or self.wear ~= s.wear or
+			not self.meta:equals(s.meta) then
+		return false, s
+	end
+	local room = self:get_free_space()
+	if s.count <= room then
+		return true, nil
+	end
+	local left = ItemStack(s)
+	left:set_count(s.count - room)
+	return false, left
+end
+
+function Stack:add_item(other)
+	local s = ItemStack(other)
+	if s:is_empty() then
+		return ItemStack()
+	end
+	if self:is_empty() then
+		local taken = math.min(s.count, s:get_stack_max())
+		self:replace(s)
+		self:set_count(taken)
+		local left = ItemStack(s)
+		left:set_count(s.count - taken)
+		return left
+	end
+	if self.name ~= s.name or self.wear ~= s.wear or
+			not self.meta:equals(s.meta) then
+		return s
+	end
+	local room = math.max(0, self:get_free_space())
+	local taken = math.min(room, s.count)
+	self:set_count(self.count + taken)
+	local left = ItemStack(s)
+	left:set_count(s.count - taken)
+	return left
+end
+
+function Stack:take_item(n)
+	n = math.floor(tonumber(n) or 1)
+	if n <= 0 or self:is_empty() then
+		return ItemStack()
+	end
+	n = math.min(n, self.count)
+	local taken = ItemStack(self)
+	taken:set_count(n)
+	self:set_count(self.count - n)
+	return taken
+end
+
+function Stack:peek_item(n)
+	n = math.floor(tonumber(n) or 1)
+	if n <= 0 or self:is_empty() then
+		return ItemStack()
+	end
+	local out = ItemStack(self)
+	out:set_count(math.min(n, self.count))
+	return out
+end
+
+function Stack:equals(other)
+	local s = ItemStack(other)
+	return self.name == s.name and self.count == s.count and
+			self.wear == s.wear and self.meta:equals(s.meta)
+end
+
+Stack.__eq = Stack.equals
+
+--
+-- Inventories
+--
+-- simplified: lists of ItemStacks in a table, with the same methods Luanti's
+-- InvRef has. What it does not have is Luanti's inventory-changed
+-- notifications to clients, because there are no clients yet; the
+-- allow_/on_ callbacks a detached inventory carries are kept and will be run
+-- by whatever drives them at M4.
+
+local Inv = {}
+Inv.__index = Inv
+
+function core.__new_inventory(location)
+	return setmetatable({lists = {}, widths = {}, gen = 0,
+			location = location or {type = "undefined"}}, Inv)
+end
+
+local function inv_list(self, listname)
+	return self.lists[listname]
+end
+
+-- Counts up on every change, so that whoever has to send an inventory
+-- somewhere can tell whether it is the one they sent last. The stacks in a
+-- list are taken from and added to in place, so it is the methods that are
+-- counted rather than the lists.
+local function changed(self)
+	self.gen = (self.gen or 0) + 1
+end
+
+function Inv:is_empty(listname)
+	for _, stack in ipairs(inv_list(self, listname) or {}) do
+		if not stack:is_empty() then
+			return false
+		end
+	end
+	return true
+end
+
+function Inv:get_size(listname)
+	local list = inv_list(self, listname)
+	return list and #list or 0
+end
+
+function Inv:set_size(listname, size)
+	size = math.floor(tonumber(size) or 0)
+	if size < 0 then
+		return false
+	end
+	local list = self.lists[listname] or {}
+	for i = #list + 1, size do
+		list[i] = ItemStack()
+	end
+	for i = #list, size + 1, -1 do
+		list[i] = nil
+	end
+	if size == 0 then
+		self.lists[listname] = nil
+	else
+		self.lists[listname] = list
+	end
+	changed(self)
+	return true
+end
+
+function Inv:get_width(listname)
+	return self.widths[listname] or 0
+end
+
+function Inv:set_width(listname, width)
+	width = math.floor(tonumber(width) or 0)
+	if width < 0 then
+		return false
+	end
+	self.widths[listname] = width
+	changed(self)
+	return true
+end
+
+function Inv:get_stack(listname, i)
+	local list = inv_list(self, listname)
+	if not list or not list[i] then
+		return ItemStack()
+	end
+	return ItemStack(list[i])
+end
+
+function Inv:set_stack(listname, i, stack)
+	local list = inv_list(self, listname)
+	if not list or not list[i] then
+		return false
+	end
+	list[i] = ItemStack(stack)
+	changed(self)
+	return true
+end
+
+function Inv:get_list(listname)
+	local list = inv_list(self, listname)
+	if not list then
+		return nil
+	end
+	local out = {}
+	for i, stack in ipairs(list) do
+		out[i] = ItemStack(stack)
+	end
+	return out
+end
+
+function Inv:set_list(listname, stacks)
+	local list = inv_list(self, listname)
+	if not list then
+		return
+	end
+	for i = 1, #list do
+		list[i] = ItemStack(stacks[i])
+	end
+	changed(self)
+end
+
+function Inv:get_lists()
+	local out = {}
+	for name, _ in pairs(self.lists) do
+		out[name] = self:get_list(name)
+	end
+	return out
+end
+
+-- The lists it is given are the lists it has afterwards, which is what
+-- Luanti's does: a name that was not there is made, with as many slots as
+-- the list handed in
+function Inv:set_lists(lists)
+	for name, stacks in pairs(lists) do
+		self:set_size(name, #stacks)
+		self:set_list(name, stacks)
+	end
+end
+
+function Inv:add_item(listname, stack)
+	local left = ItemStack(stack)
+	local list = inv_list(self, listname)
+	if not list then
+		return left
+	end
+	changed(self)
+	-- Into the stacks that already hold this item first, as Luanti does
+	for pass = 1, 2 do
+		for i = 1, #list do
+			if left:is_empty() then
+				return left
+			end
+			if (pass == 1) ~= list[i]:is_empty() then
+				left = list[i]:add_item(left)
+			end
+		end
+	end
+	return left
+end
+
+function Inv:room_for_item(listname, stack)
+	local probe = core.__new_inventory(self.location)
+	probe:set_size(listname, self:get_size(listname))
+	probe:set_list(listname, self:get_list(listname) or {})
+	return probe:add_item(listname, stack):is_empty()
+end
+
+function Inv:contains_item(listname, stack, match_meta)
+	local want = ItemStack(stack)
+	if want:is_empty() then
+		return true
+	end
+	local count = want:get_count()
+	for _, have in ipairs(inv_list(self, listname) or {}) do
+		if have:get_name() == want:get_name() and
+				(not match_meta or have:get_meta():equals(want:get_meta())) then
+			count = count - have:get_count()
+			if count <= 0 then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+-- From the end, which is the order Luanti takes them in, and what comes
+-- back is the first stack it took from with the rest counted onto it -- so
+-- it carries that stack's metadata however many stacks it came out of.
+-- With match_meta only the stacks whose metadata is the same as the one
+-- asked for are touched.
+function Inv:remove_item(listname, stack, match_meta)
+	local want = ItemStack(stack)
+	local taken = ItemStack()
+	local list = inv_list(self, listname)
+	if not list or want:is_empty() then
+		return taken
+	end
+	changed(self)
+	for i = #list, 1, -1 do
+		local have = list[i]
+		if have:get_name() == want:get_name() and
+				(not match_meta or have:get_meta():equals(want:get_meta())) then
+			local still = want:get_count() - taken:get_count()
+			local got = have:take_item(still)
+			local leftover = taken:add_item(got)
+			-- What would not go on the stack is counted onto it anyway,
+			-- which is how Luanti allows an oversized one out and what
+			-- makes the metadata of the first stack the answer's
+			taken:set_count(taken:get_count() + leftover:get_count())
+			if taken:get_count() >= want:get_count() then
+				break
+			end
+		end
+	end
+	return taken
+end
+
+function Inv:get_location()
+	return self.location
+end
+
+--
+-- Random and noise
+--
+-- PseudoRandom is Luanti's own generator and its numbers are part of what a
+-- world looks like, so it is the one written out exactly. PcgRandom is Lua's
+-- own randomness behind Luanti's interface, which is honest for anything that
+-- is not a map.
+--
+
+local Pseudo = {}
+Pseudo.__index = Pseudo
+
+-- Thirty-two bits of it, which is more than a double multiplies exactly, so
+-- the state goes round in two halves
+local function lcg32(state)
+	local a = 1103515245
+	local lo = state % 65536
+	local hi = math.floor(state / 65536)
+	return ((hi * a) % 65536 * 65536 + lo * a + 12345) % 4294967296
+end
+
+function PseudoRandom(seed)
+	return setmetatable({state = math.floor(seed or 0) % 4294967296}, Pseudo)
+end
+
+-- Luanti's own, exactly: the state is multiplied as an unsigned 32-bit
+-- number and then divided as a signed one, which is a quirk it keeps for
+-- the sake of the worlds already generated with it.
+function Pseudo:next(min, max)
+	self.state = lcg32(self.state)
+	local signed = self.state
+	if signed >= 2147483648 then
+		signed = signed - 4294967296
+	end
+	-- C truncates towards zero, and the result is read back as unsigned
+	local q = signed / 65536
+	q = q >= 0 and math.floor(q) or -math.floor(-q)
+	local value = (q % 4294967296) % 32768
+	if min == nil then
+		return value
+	end
+	max = max or 32767
+	if max < min then
+		error("PseudoRandom:next(): max < min")
+	end
+	if max - min == 32767 then
+		return min + value
+	end
+	if max - min > 6553 then
+		error("PseudoRandom:next(): range too large")
+	end
+	return min + (value % (max - min + 1))
+end
+
+function Pseudo:get_state()
+	local v = self.state
+	if v >= 2147483648 then
+		v = v - 4294967296
+	end
+	return v
+end
+
+local Pcg = {}
+Pcg.__index = Pcg
+
+-- simplified: not Luanti's PCG32, so the numbers a mod gets out of this are
+-- not the ones Luanti would give it. What it is instead is the generator
+-- above behind PcgRandom's interface, including a state string that goes
+-- out and comes back. Anything that is the map -- decorations, ores -- is
+-- mapgen's, and the mapgen is a milestone away; when it arrives this is the
+-- thing to write out exactly, in sixteen-bit limbs the way lcg32 above is.
+function PcgRandom(seed, sequence)
+	local self = setmetatable({}, Pcg)
+	self.rng = PseudoRandom(seed)
+	return self
+end
+
+function Pcg:next(min, max)
+	if min == nil then
+		return self.rng:next() * 65536 + self.rng:next() * 2
+	end
+	local span = max - min
+	if span <= 32767 then
+		return min + (self.rng:next() % (span + 1))
+	end
+	return min + (self.rng:next() * 32768 + self.rng:next()) % (span + 1)
+end
+
+function Pcg:rand_normal_dist(min, max, num_trials)
+	num_trials = num_trials or 6
+	local sum = 0
+	for _ = 1, num_trials do
+		sum = sum + self:next(min, max)
+	end
+	return math.floor(sum / num_trials + 0.5)
+end
+
+-- Luanti's is two 64-bit numbers as thirty-two hex digits. This one has
+-- thirty-two bits of state, so it goes in the last eight of them and the
+-- rest are zeroes -- which round-trips, which is what the interface is for.
+function Pcg:get_state()
+	return string.format("%024d%08x", 0, self.rng.state)
+end
+
+function Pcg:set_state(str)
+	if type(str) ~= "string" or #str ~= 32 then
+		error("PcgRandom:set_state(): expected 32 hex characters")
+	end
+	self.rng.state = tonumber(string.sub(str, 25), 16) or 0
+end
+
+function SecureRandom()
+	return {next_bytes = function(self, count)
+		local out = {}
+		for i = 1, (count or 1) do
+			out[i] = string.char(math.random(0, 255))
+		end
+		return table.concat(out)
+	end}
+end
+
+-- The mapgen's noise. It is buildat's own vendored copy of Luanti's value
+-- noise -- the same code the Lua API is documented against, which is what
+-- makes a mod's NoiseParams mean here what it means there.
+--
+-- Luanti calls the class PerlinNoise for what has been value noise for
+-- years; both names are the same thing and both are answered.
+--
+-- simplified: no lacunarity and no flags. buildat's copy doubles the
+-- frequency per octave and has no eased/absvalue switches, so a mod that
+-- sets either gets the default behaviour rather than an error. The upgrade
+-- path is the mapgen milestone that vendors the rest of src/mapgen.
+
+local function noise_params(np, ...)
+	if type(np) == "table" then
+		return np
+	end
+	-- The old positional form: core.get_perlin(seeddiff, octaves,
+	-- persistence, spread)
+	local octaves, persistence, spread = ...
+	return {
+		offset = 0,
+		scale = 1,
+		seed = np or 0,
+		octaves = octaves or 3,
+		persistence = persistence or 0.6,
+		spread = {x = spread or 100, y = spread or 100, z = spread or 100},
+	}
+end
+
+local Noise = {}
+Noise.__index = Noise
+
+local function new_noise(np, seed)
+	return setmetatable({np = np, seed = seed or 0}, Noise)
+end
+
+local function to_v(p, a, b, c)
+	if type(p) == "table" then
+		return p[a] or p[1] or 0, p[b] or p[2] or 0, p[c] or p[3] or 0
+	end
+	return 0, 0, 0
+end
+
+function Noise:get_2d(pos)
+	local x, y = to_v(pos, "x", "y", "z")
+	return __luanti_noise_value(self.np, self.seed, x, y)
+end
+
+function Noise:get_3d(pos)
+	local x, y, z = to_v(pos, "x", "y", "z")
+	return __luanti_noise_value(self.np, self.seed, x, y, z)
+end
+
+Noise.get2d = Noise.get_2d
+Noise.get3d = Noise.get_3d
+
+function PerlinNoise(np, ...)
+	return new_noise(noise_params(np, ...), 0)
+end
+
+ValueNoise = PerlinNoise
+
+local NoiseMap = {}
+NoiseMap.__index = NoiseMap
+
+local function new_noise_map(np, size, seed)
+	local sx, sy, sz = to_v(size, "x", "y", "z")
+	return setmetatable({np = np, seed = seed or 0,
+			sx = math.floor(sx), sy = math.floor(sy),
+			sz = math.floor(sz)}, NoiseMap)
+end
+
+-- The flat maps are the engine's own array: x fastest, and then the second
+-- axis, which for a 2D map is the world's z.
+function NoiseMap:get_2d_map_flat(pos, buffer)
+	local x, y = to_v(pos, "x", "y", "z")
+	self.flat = __luanti_noise_map(self.np, self.seed, x, y, 0,
+			self.sx, self.sy, 0)
+	return self.flat
+end
+
+function NoiseMap:get_3d_map_flat(pos, buffer)
+	local x, y, z = to_v(pos, "x", "y", "z")
+	self.flat = __luanti_noise_map(self.np, self.seed, x, y, z,
+			self.sx, self.sy, self.sz)
+	return self.flat
+end
+
+-- And the nested ones Luanti also answers: map[z][x] for two dimensions and
+-- map[x][y][z] for three, which is the order its own Lua API builds them in
+function NoiseMap:get_2d_map(pos)
+	local flat = self:get_2d_map_flat(pos)
+	local out = {}
+	local i = 1
+	for y = 1, self.sy do
+		local row = {}
+		for x = 1, self.sx do
+			row[x] = flat[i]
+			i = i + 1
+		end
+		out[y] = row
+	end
+	return out
+end
+
+function NoiseMap:get_3d_map(pos)
+	local flat = self:get_3d_map_flat(pos)
+	local out = {}
+	for x = 1, self.sx do
+		out[x] = {}
+		for y = 1, self.sy do
+			out[x][y] = {}
+		end
+	end
+	local i = 1
+	for z = 1, self.sz do
+		for y = 1, self.sy do
+			for x = 1, self.sx do
+				out[x][y][z] = flat[i]
+				i = i + 1
+			end
+		end
+	end
+	return out
+end
+
+function NoiseMap:calc_2d_map(pos)
+	self:get_2d_map_flat(pos)
+end
+
+function NoiseMap:calc_3d_map(pos)
+	self:get_3d_map_flat(pos)
+end
+
+-- One slice of what calc_3d_map() worked out, which is how a mod reads a
+-- big 3D map without holding all of it in Lua at once
+function NoiseMap:get_map_slice(slice_offset, slice_size, buffer)
+	local flat = self.flat or {}
+	local y0 = math.floor((slice_offset and slice_offset.y or 1)) - 1
+	local n = math.floor(slice_size and slice_size.y or 1)
+	local out = buffer or {}
+	local layer = self.sx * self.sz
+	local i = 1
+	for y = y0, y0 + n - 1 do
+		for k = 1, layer do
+			out[i] = flat[y * layer + k]
+			i = i + 1
+		end
+	end
+	return out
+end
+
+function PerlinNoiseMap(np, size)
+	return new_noise_map(noise_params(np), size, 0)
+end
+
+ValueNoiseMap = PerlinNoiseMap
+
+-- The same, seeded with the world's: what a mod means by core.get_perlin is
+-- noise that is this world's and not the same everywhere
+function core.get_perlin(np, ...)
+	return new_noise(noise_params(np, ...),
+			tonumber(__luanti_world_seed) or 0)
+end
+
+function core.get_perlin_map(np, size)
+	return new_noise_map(noise_params(np), size,
+			tonumber(__luanti_world_seed) or 0)
+end
+
+core.get_value_noise = core.get_perlin
+core.get_value_noise_map = core.get_perlin_map
+
+-- A settings file of a mod's own
+function Settings(path)
+	local values = {}
+	local f = io.open(path, "rb")
+	if f then
+		for line in f:read("*a"):gmatch("[^\r\n]+") do
+			local key, value = line:match("^%s*([^#=][^=]-)%s*=%s*(.-)%s*$")
+			if key then
+				values[key] = value
+			end
+		end
+		f:close()
+	end
+	local self = {}
+	function self:get(key) return values[key] end
+	function self:get_bool(key, default)
+		local v = values[key]
+		if v == nil then return default end
+		return v == "true"
+	end
+	function self:get_np_group(key) return nil end
+	function self:get_flags(key) return {} end
+	function self:set(key, value) values[key] = tostring(value) end
+	function self:set_bool(key, value) values[key] = tostring(value) end
+	function self:remove(key) values[key] = nil return true end
+	function self:get_names()
+		local out = {}
+		for k, _ in pairs(values) do out[#out + 1] = k end
+		return out
+	end
+	function self:has(key) return values[key] ~= nil end
+	function self:to_table()
+		local out = {}
+		for k, v in pairs(values) do out[k] = v end
+		return out
+	end
+	function self:write()
+		local lines = {}
+		for k, v in pairs(values) do lines[#lines + 1] = k .. " = " .. v end
+		return core.safe_file_write(path, table.concat(lines, "\n") .. "\n")
+	end
+	return self
+end
+
+-- vim: set noet ts=4 sw=4:

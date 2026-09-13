@@ -46,6 +46,34 @@ namespace voxelworld
 		{}
 	};
 
+	// A section has come into the world, or is about to leave it. What
+	// listens is a game that keeps something of its own per section -- what
+	// hangs off the nodes, the timers running in it -- and has to bring it
+	// back with the section and write it out with it.
+	//
+	// Loaded is emitted after the voxels are there and unloaded before they
+	// go; both reach the listener after voxelworld has let go of the
+	// section, so a listener may call back into it.
+	struct SectionLoaded: public interface::Event::Private
+	{
+		SceneReference scene;
+		pv::Vector3DInt16 section_p;
+
+		SectionLoaded(SceneReference scene,
+				const pv::Vector3DInt16 &section_p):
+			scene(scene), section_p(section_p){}
+	};
+
+	struct SectionUnloaded: public interface::Event::Private
+	{
+		SceneReference scene;
+		pv::Vector3DInt16 section_p;
+
+		SectionUnloaded(SceneReference scene,
+				const pv::Vector3DInt16 &section_p):
+			scene(scene), section_p(section_p){}
+	};
+
 	struct NodeVolumeUpdated: public interface::Event::Private
 	{
 		SceneReference scene;
@@ -57,6 +85,44 @@ namespace voxelworld
 				bool is_static_chunk, const pv::Vector3DInt32 &chunk_p):
 			scene(scene), node_id(node_id),
 			is_static_chunk(is_static_chunk), chunk_p(chunk_p)
+		{}
+	};
+
+	// Where the world is kept loaded: a point in voxels, and how far around
+	// it sections live. The radii are per point because a player needs a big
+	// one and a machine that only has to keep working needs the smallest one
+	// that does -- and because two players differ from each other: a client
+	// on a weaker computer wants less sent to it, and loading more than that
+	// client will look at is the server spending memory on nothing.
+	//
+	// A section pinned in place is a point with every radius zero.
+	struct LoadPoint
+	{
+		pv::Vector3DInt32 p; // In voxels
+		// Sections this far out are loaded if the save has them and left
+		// alone if it does not: what a player sees far away is the terrain
+		// that is already there, and new terrain appears closer in. This is
+		// also the radius a section has to leave before it is unloaded, so
+		// keeping it larger than the generate radius is what stops a player
+		// walking back and forth from generating the same section twice.
+		int16_t load_xz = 0;
+		int16_t load_y = 0;
+		// ... and this far out, generated as well. <= the load radii.
+		int16_t generate_xz = 0;
+		int16_t generate_y = 0;
+		// Whose point this is, if it is a client's, and zero if it is not.
+		// A peer's point is also where the world is sent to that peer from:
+		// how much it gets is the smaller of what its client asked for and
+		// this point's load radius, because the server cannot send what it
+		// does not keep. A peer with no point of its own gets everything.
+		size_t peer = 0;
+
+		LoadPoint(){}
+		LoadPoint(const pv::Vector3DInt32 &p,
+				int16_t load_xz, int16_t load_y,
+				int16_t generate_xz, int16_t generate_y, size_t peer = 0):
+			p(p), load_xz(load_xz), load_y(load_y),
+			generate_xz(generate_xz), generate_y(generate_y), peer(peer)
 		{}
 	};
 
@@ -82,21 +148,33 @@ namespace voxelworld
 		// every game did before it existed: generate and forget.
 		//
 		// Call it after registering voxels and before asking for any
-		// section. If the save already has a registry for this world, that
-		// registry replaces the one the game just built, ids and all: the
-		// numbering a save was written under is the numbering it is read
-		// under. Sections already in the save are loaded instead of
+		// section. Sections already in the save are loaded instead of
 		// generated.
+		//
+		// The running game owns the voxel numbering and the save stores
+		// names: what a save holds is a name table, and loading translates
+		// its ids into the ones this run registered. So a game is free to
+		// register its types in another order, or to add and drop them,
+		// without a world it has saved meaning anything else than it did.
+		// Registering more types after this call is allowed; each reaches
+		// the save's table before anything holding it is written.
 		//
 		// The Save belongs to whoever opened it, and closing it while a
 		// world still points at it is a use-after-free. Pass nullptr to stop
 		// persisting first.
 		virtual void set_save(storage::Save *save, const ss_ &world_name) = 0;
 
-		// Write everything out now: the registry and every loaded section.
+		// Write out every section that has changed since it was read.
 		// Happens by itself when a section is unloaded and at shutdown, so
 		// this is for a game that wants a checkpoint of its own.
 		virtual void save() = 0;
+
+		// Voxel types the save holds that this game does not register. They
+		// are kept, drawn with the definitions the save carries and tinted,
+		// so an old world still looks like itself -- but the game no longer
+		// supports them, and this is how a game says so on screen instead of
+		// leaving someone to walk into it.
+		virtual sv_<interface::VoxelName> get_unknown_voxels() = 0;
 
 		virtual void add_commit_hook(up_<CommitHook> hook) = 0;
 
@@ -113,6 +191,32 @@ namespace voxelworld
 		virtual void load_or_generate_section(
 				const pv::Vector3DInt16 &section_p) = 0;
 
+		// The points the world stays loaded around, replacing the previous
+		// set; call it whenever they move, it only remembers them. A few
+		// sections are loaded, generated or unloaded per pass after that, so
+		// that one tick never carries a whole world.
+		//
+		// Nothing outside the region given to create_instance() is loaded,
+		// which is what makes that region the world's bounds: a game that
+		// streams says how tall and how wide its world is by asking for it,
+		// and the sky is still at the top of it.
+		//
+		// A world that never calls this loads its whole region at the start
+		// and keeps it, which is what every game did before this existed.
+		virtual void set_load_points(const sv_<LoadPoint> &points) = 0;
+
+		// Every section that is loaded right now, in no particular order.
+		// What asks is a sweep -- an ABM, a fill, an importer clipping what
+		// it reads -- which would otherwise walk the bounds and skip what is
+		// not there; over a streamed world that walk is the cost.
+		virtual sv_<pv::Vector3DInt16> get_loaded_sections() = 0;
+
+		// How many sections one streaming pass may load, generate or unload;
+		// two by default. A game whose generator runs behind turns this down
+		// to nothing while its queue is long and back up when it drains --
+		// only the game can see that queue. Nothing else should touch it.
+		virtual void set_stream_budget(size_t sections_per_pass) = 0;
+
 		virtual void unload_section(const pv::Vector3DInt16 &section_p) = 0;
 
 		virtual bool is_section_loaded(const pv::Vector3DInt16 &section_p) = 0;
@@ -120,6 +224,27 @@ namespace voxelworld
 		virtual void set_voxel(const pv::Vector3DInt32 &p,
 				const VoxelInstance &v,
 				bool disable_warnings = false) = 0;
+
+		// The voxels of a region, in one read rather than one per voxel:
+		// what asks for this is a sweep, and a section is a quarter of a
+		// million voxels. The answer carries every plane the chunks it came
+		// from have.
+		//
+		// What is not there -- a section that is not loaded, a chunk nothing
+		// has written -- comes back as VOXELTYPEID_UNDEFINED, which is what
+		// get_voxel() answers for one.
+		virtual VoxelVolume get_volume(const pv::Region &region) = 0;
+
+		// The other direction, and the one merge_volume() below is not:
+		// every defined voxel of the volume is written, whatever was there.
+		// An importer, a VoxelManip and a mod putting a building down all
+		// mean this; a generator means merge_volume().
+		//
+		// A voxel that is undefined in the volume is skipped, so a caller
+		// can still leave holes, and create_missing_sections works the same
+		// way it does below.
+		virtual void set_volume(const VoxelVolume &volume,
+				bool create_missing_sections = false) = 0;
 
 		// Write a generated volume into the world, by priority per voxel: a
 		// voxel that has not been generated yet (VOXELTYPEID_UNDEFINED) takes
@@ -199,6 +324,12 @@ namespace voxelworld
 		// It is a parameter and not a setting because the initial sections are
 		// created here. The client has its own switch; see physics_distance in
 		// voxelworld's client_lua.
+		//
+		// The region is in sections, and is the world's bounds: nothing
+		// outside it is ever loaded, and the sky is above the top of it. A
+		// world that does not stream (see set_load_points()) also has every
+		// section of it loaded at the start, so a world that wants bounds
+		// bigger than it wants to load has to stream.
 		virtual void create_instance(SceneReference scene_ref,
 				const pv::Region &region, bool physics_enabled = false) = 0;
 		virtual void delete_instance(SceneReference scene_ref) = 0;

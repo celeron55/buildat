@@ -76,9 +76,11 @@ namespace interface
 	// voxel that faces one of twenty-four directions, or wears one of eight
 	// palette colours, from needing a voxel type of its own for every case.
 	//
-	// A variant carries no textures. It permutes the definition's own six --
-	// tile_order[f] is which of them face f wears -- because a turned cube
-	// wears the same textures as an unturned one, in a different order.
+	// A variant permutes the definition's own textures -- tile_order[f] is
+	// which of them face f wears -- because a turned cube wears the same
+	// textures as an unturned one, in a different order. It can also name
+	// textures of its own, which is what a palette needs; see
+	// VoxelVariant::textures.
 	struct VoxelVariant
 	{
 		// Quads of the voxel's own instead of the definition's; empty for
@@ -86,6 +88,25 @@ namespace interface
 		sv_<VoxelQuad> shape;
 		uint8_t tile_order[6] = {0, 1, 2, 3, 4, 5};
 		uint8_t tile_turns[6] = {};
+		// Textures of the variant's own, indexed the way a tile is
+		// everywhere else: 0...5 are the voxel's six faces and 6 and over
+		// are the definition's extra_textures. As many as the variant
+		// replaces and no more; empty for a variant that only turns, which
+		// is most of them, and an empty vector costs nothing.
+		//
+		// What wants them is a palette. A voxel that wears the colour its
+		// param names wears its own tiles through a modifier that
+		// multiplies them, and the colour is albedo rather than light, so
+		// it cannot be the vertex colour below. The atlas then grows with
+		// distinct tiles times palette entries and not with directions,
+		// because directions permute what a variant names and colours
+		// multiply it: eight colours of a facedir node are 192 variants and
+		// 48 textures.
+		sv_<AtlasSegmentDefinition> textures;
+		// The same, resolved into the atlas. Filled by the registry when it
+		// builds the cached definition, and empty in a definition a game
+		// hands over.
+		sv_<AtlasSegmentReference> texture_refs;
 		// Multiplied into the vertex colour, 0xRRGGBB.
 		//
 		// The vertex colour is light, not albedo -- the mesher packs it as
@@ -96,7 +117,7 @@ namespace interface
 		// contribution to the lighting is a scalar here and cannot be
 		// tinted, so a palette entry would show in shade and vanish in
 		// sunlight. An albedo tint wants a channel of its own; see
-		// local/voxel_data_model_plan.md.
+		// doc/plan/voxel_data_model_plan.md.
 		uint32_t color = 0xffffff;
 		// Where a liquid's surface stands in the voxel; see
 		// VoxelDefinition::liquid_top. Luanti's flowing liquids put their
@@ -141,6 +162,19 @@ namespace interface
 		// that and still hold a mesh of its own shape inside itself. What
 		// wants to know whether a voxel is free is this flag.
 		bool fully_empty = false;
+		// Light passes through this voxel although it is something. A voxel
+		// whose edge material is EDGEMATERIALID_EMPTY already transmits
+		// light -- nothing is there -- and this is the other case: glass, a
+		// pane, a plant, anything the sky is seen through and which is still
+		// drawn.
+		//
+		// It exists because the edge material is one test doing two jobs:
+		// whether a face is drawn against this voxel, and whether light gets
+		// past it. Luanti splits them -- a glasslike node has faces and
+		// sunlight_propagates -- and this is that split, added rather than
+		// substituted so that a game that says nothing keeps the behaviour
+		// it had.
+		bool transmits_light = false;
 		// A shape of the voxel's own instead of a cube. Empty for a cube,
 		// which is what most voxels are and the fast path the voxel mesher
 		// exists for; a voxel with quads has them copied into the chunk's
@@ -278,6 +312,8 @@ namespace interface
 		EdgeMaterialId edge_material_id = EDGEMATERIALID_EMPTY;
 		bool physically_solid = false;
 		bool fully_empty = false;
+		// Copied from the definition; see VoxelDefinition::transmits_light
+		bool transmits_light = false;
 		// Copied from the definition; see VoxelDefinition::shape
 		sv_<VoxelQuad> shape;
 		bool shape_double_sided = false;
@@ -443,7 +479,7 @@ namespace interface
 		// than albedo, so this tints the light a voxel receives and not its
 		// texture. For a game whose voxels are unlit colour that is the same
 		// thing; for one that wants a palette over a texture it is not. See
-		// local/voxel_data_model_plan.md.
+		// doc/plan/voxel_data_model_plan.md.
 		VoxelField color;
 
 		// Modifiers: fields the mesher reads to change how a voxel is drawn
@@ -514,6 +550,21 @@ namespace interface
 			return -1;
 		}
 
+		// Every engine role in one list, for code that has to treat them
+		// all the same way rather than by name. What wants it is a
+		// migration moving a saved chunk from the cut it was written in to
+		// the cut the game is running now; nothing else has needed it.
+		//
+		// The name is what a warning calls the role by. The order is the
+		// declaration order above and is not part of any format -- nothing
+		// is stored by it.
+		struct Role
+		{
+			const char *name;
+			VoxelField VoxelFormat::*field;
+		};
+		static const sv_<Role>& roles();
+
 		static VoxelFormat legacy()
 		{
 			VoxelFormat f;
@@ -560,6 +611,20 @@ namespace interface
 			return surface_modifiers(slots) != 0;
 		}
 
+		// The same cut: the same planes, and every role in the same place.
+		// What asks is a save, deciding whether the chunks it holds are in
+		// the format the world is running now.
+		bool operator==(const VoxelFormat &o) const {
+			if(planes != o.planes)
+				return false;
+			for(const Role &r : roles()){
+				if(!(this->*(r.field) == o.*(r.field)))
+					return false;
+			}
+			return true;
+		}
+		bool operator!=(const VoxelFormat &o) const { return !(*this == o); }
+
 		// Every bound field is inside its plane, no two overlap, and the id
 		// fits VOXELTYPEID_MAX. why, when given, gets the first reason it
 		// did not.
@@ -583,6 +648,11 @@ namespace interface
 
 		virtual void clear() = 0;
 		virtual sv_<VoxelDefinition> get_all() = 0;
+
+		// How many types are registered, so that walking the ids is a loop
+		// with an end rather than one that asks for the id after the last
+		// and reads the warning as its answer. Ids run 1..num_voxels().
+		virtual VoxelTypeId num_voxels() = 0;
 
 		// How a voxel word is cut up; see VoxelFormat. The default is
 		// VoxelFormat::legacy().

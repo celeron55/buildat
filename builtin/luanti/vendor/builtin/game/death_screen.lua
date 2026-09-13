@@ -1,0 +1,40 @@
+local F = core.formspec_escape
+local S = core.get_translator("__builtin")
+
+function core.show_death_screen(player, _reason)
+	local fs = {
+		"formspec_version[2]",
+		"size[14.25,7.275,true]",
+		"bgcolor[#320000b4;true]",
+		"style_type[label;halign=center;valign=center]",
+		"label[5.375,1.85;3.5,0.8;", F(S("You died")), "]",
+		"button_exit[5.375,3.725;3.5,0.8;btn_respawn;", F(S("Respawn")), "]",
+	}
+	core.show_formspec(player:get_player_name(), "__builtin:death", table.concat(fs, ""))
+end
+
+core.register_on_dieplayer(function(player, reason)
+	core.show_death_screen(player, reason)
+end)
+
+core.register_on_joinplayer(function(player)
+	if player:get_hp() == 0 then
+		core.show_death_screen(player, nil)
+	end
+end)
+
+core.register_on_player_receive_fields(function(player, formname, fields)
+	if formname == "__builtin:death" and fields.quit and player:get_hp() == 0 then
+		player:respawn()
+		core.log("action", player:get_player_name() .. " respawns at " ..
+				player:get_pos():to_string())
+		return
+	end
+
+	-- If a non-death formspec was closed while the player is dead,
+	-- re-show the death screen to prevent the "zombie state" (see #11523).
+	if formname ~= "__builtin:death" and fields.quit and player:get_hp() == 0 then
+		core.log("info", "Re-showing death screen to " .. player:get_player_name())
+		core.show_death_screen(player, nil)
+	end
+end)

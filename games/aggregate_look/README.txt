@@ -1,7 +1,7 @@
 aggregate_look
 ==============
 
-The look spike of local/aggregate_plan.md: a wall of samples with their voxel
+The look spike of doc/plan/aggregate_plan.md: a wall of samples with their voxel
 fields set by hand, to find out whether a mixture of materials reads on
 screen before anything is built that stores one.
 
@@ -31,7 +31,7 @@ sand, then air for everything left. The one id role bound is written as 1
 everywhere, because that is how voxelworld tells a generated voxel from one
 nothing has got to yet, and it says nothing about what the voxel is.
 
-What it answered is written up in local/aggregate_plan.md. The short of it:
+What it answered is written up in doc/plan/aggregate_plan.md. The short of it:
 the tint, the wetness and the sag read at a glance; the grain does not, and
 the threshold between two base looks carries nearly all of the signal.
 

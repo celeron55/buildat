@@ -88,11 +88,27 @@ buildat.bignum
 - What is built on these belongs in Lua; extensions/luanti_client/srp.lua is an
   SRP-6a login written that way.
 
+buildat.list_preferences() -> {name, ...}
+buildat.get_preference(name) -> number or boolean, nil for an unknown name
+buildat.set_preference(name, value) -> true, or false and why
+- The preferences under "Client preferences" below. The C++ side is the
+  authority: set_preference() parses and range checks a value through the same
+  code -o goes through, applies what takes effect now -- the sound gain, the
+  frame limiter, vsync and MSAA, the render scale -- and persists the rest.
+- Extension environment only, and deliberately: a preference is the user's,
+  and a server's sandboxed Lua has no business writing it.
+- extensions/__menu/preferences.lua is the screen over these.
+
 buildat.add_resource_dir(path) -> bool
 - Puts a directory on Urho3D's resource search path, so files written there can
   be asked of the resource cache by name. Only directories under the client's
   cache path; a resource dir is readable by everything the client draws.
 - Urho3D's own Lua bindings do not expose AddResourceDir.
+
+buildat.get_cache_path() -> string
+- The directory add_resource_dir() and compose_image() work under. It is here
+  because writing a file under the cache means knowing where the cache is; the
+  share and user paths stay out of the sandbox.
 
 buildat.extension_path(name)
 
@@ -250,6 +266,11 @@ is refused in the sandbox. Games have "Effect", "Music", "Ambient" and
 Shadow quality, texture and material quality, filtering, FOV and draw distance
 are deliberately not here: each one changes what the game looks like or what a
 player can see, and the game is the one that should say.
+
+The launch menu has a page of them, in extensions/__menu/preferences.lua. It
+is a page of widgets over buildat.get_preference() and set_preference() and
+knows nothing about the file, which is why the C++ side is the authority for
+them in the first place.
 
 replicate
 ---------
@@ -692,6 +713,7 @@ buildat.compose_image(args) -> width, height
       write = "<path>",       -- where the PNG goes; under the cache path only
       ops = {
           {op = "blit", src = "a.png",   -- a resource name
+              src_data = nil,            -- or the bytes of a file instead
               from = {0, 0, 16, 16},     -- default: the whole source
               at = {0, 0},
               size = {16, 16},           -- scales, nearest neighbour
@@ -718,6 +740,9 @@ buildat.compose_image(args) -> width, height
 
 - With no size, the first blit makes the canvas as big as it needs, which is
   what a chain of overlays over a base image wants.
+- A blit's source is a resource name or, with src_data, the bytes of an image
+  file the caller already has. What wants the second is Luanti's "[png:",
+  which carries a whole PNG base64-encoded in the expression itself.
 - There is no way to keep an intermediate image: a nested expression is one
   call per level with the inner results referenced by the name they were
   written under, which doubles as a cache between runs.

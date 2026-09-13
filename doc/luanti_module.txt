@@ -1,0 +1,148 @@
+builtin/luanti -- a Luanti game as a buildat module
+===================================================
+
+What it is: an unmodified Luanti *game* -- its mods, its nodes, its items, its
+callbacks -- running inside buildat_server, with none of Luanti's network
+protocol anywhere. The game logic is Luanti's; everything around it is
+buildat's. The other end of the telescope from extensions/luanti_client, which
+speaks the real protocol to a real Luanti server.
+
+The plan this is being built to is doc/plan/luanti_module_plan.md, which has the
+milestones and the reasoning. What is written down here is what exists.
+
+Where the content lives
+-----------------------
+
+Games are scanned from user/luanti/games, worlds from user/luanti/worlds.
+Those are buildat's own directories on purpose: nothing here reads the content
+of a real Luanti installation, and nothing here can write to one. A game is a
+directory with a game.conf; a world is a directory with a world.mt naming its
+gameid. (The user path, not the cache: a game somebody installed and a world
+they have played are things they chose. See doc/plan/world_persistence_plan.md.)
+
+buildat ships one Luanti game of its own, builtin/luanti/minimal_game: one
+mod, two node types and a floor made of them. It needs nothing installed and
+it is what the visual check runs, since a fixture somebody has to install is
+a fixture that is different on every machine.
+
+    $ cd Build
+    $ BUILDAT_LUANTI_GAME=minimal bin/buildat_server -m ../games/luanti_launcher
+    $ bin/buildat -s localhost           # in another terminal
+
+A real game, once there is one to point at:
+
+    $ mkdir -p user/luanti/games user/luanti/worlds
+    $ cp -r ~/projects/luanti/games/devtest user/luanti/games/devtest
+    $ mkdir user/luanti/worlds/devtest_world
+    $ printf 'gameid = devtest\n' > user/luanti/worlds/devtest_world/world.mt
+    $ cd Build && bin/buildat_server -m ../games/luanti_launcher
+
+games/luanti_launcher runs the first world it finds, the one
+BUILDAT_LUANTI_WORLD names, or the game BUILDAT_LUANTI_GAME names. It extends
+nothing; it is what the module is tested against.
+
+What you see is not the Luanti client. There is no player and no digging: the
+camera looks at the world from outside it and every node is a flat colour
+hashed from its name. That is M2 -- the nodes a mod placed are in voxelworld
+and on the screen. The real tiles, the drawtypes and the media are M3.
+
+The licence, and why this is allowed
+------------------------------------
+
+Luanti is LGPL-2.1-or-later and buildat is Apache-2.0. This works because a
+buildat module is dynamically linked at runtime -- src/server/rccpp.cpp
+compiles each one to its own -shared object and dlopens it -- so the vendored
+Luanti code lives in that object, which is LGPL, and buildat_server itself
+stays Apache and links none of it.
+
+What that obliges: builtin/luanti/ carries its own COPYING.LESSER, every
+vendored file keeps its licence header, the vendor tree is a directory of its
+own so the boundary is visible in a file listing, a modified vendored file
+says at the top which version it came from and what changed, and nothing under
+vendor/ is copied into buildat proper.
+
+What is vendored, and what is written
+-------------------------------------
+
+Vendored: Luanti's own builtin/*.lua -- init.lua and the common/ and game/
+trees it loads for a server. That is a large part of the API surface and it is
+already written. It is pinned at a commit, recorded in vendor/README.txt,
+rather than read out of whatever the user happens to have installed.
+
+Written against buildat: the C API underneath it. In Luanti that is 17.5k
+lines of lua_api/; here it is luanti.cpp and the Lua beside it, because the
+stateful half -- the environment, the map, objects, players, the network --
+is what the module is *for*, and vendoring Luanti's Server would produce
+Luanti with buildat bolted to the side.
+
+    luanti.cpp          The module. A Lua state, four functions Lua 5.1 does
+                        not have of its own -- a directory listing, the log,
+                        the clock, a PNG encoder -- and the order things are
+                        loaded in.
+    lua/bootstrap.lua   What the vendored builtin expects to find already
+                        registered: the core table, paths, settings, the
+                        content id allocator, mod storage, and the stub list.
+    lua/classes.lua     ItemStack, the inventory, and the random and noise
+                        generators: the globals a mod builds while it loads.
+    lua/colorspec.lua   Luanti's ColorSpec, names and all.
+    lua/misc.lua        base64 and the node position hash.
+    lua/png.lua         core.encode_png, including the colour reduction
+                        Luanti does and devtest checks for.
+    lua/modlist.lua     What a mod is and what order mods load in.
+    lua/modloader.lua   Finding the game's mods and running them.
+    lua/test.lua        The parts that are arithmetic rather than
+                        arrangement. Runs under plain lua, no engine:
+                        `lua builtin/luanti/lua/test.lua`.
+
+Lua 5.1 comes with io and os, so reading files, splitting paths and running
+chunks all happen in Lua. The Lua itself is Urho3D's, which buildat_server
+already links; the module needs no build step of its own, which the plan
+expected it to.
+
+Where it is
+-----------
+
+M1 of the plan: the environment boots. devtest loads -- 35 mods, 390 nodes, 26
+craftitems, 81 tools, 499 items, 26 aliases -- and its unittests mod, which
+runs while it loads and asserts as it goes, is satisfied. No client, no world,
+no map.
+
+What a mod calls that is not written yet answers as a stub that logs once and
+returns nothing, so a mod calling it does not take the server down. The list
+is at the bottom of lua/bootstrap.lua, grouped by the milestone that owns it,
+and it is the work queue. After devtest loads, what is still stubbed and
+actually called is the part the plan says is not in this at all: HTTP, IPC,
+the async environment, mod channels and SSCSM.
+
+Two things in it are Lua where Luanti has C++, and say so where they are
+written: ItemStack with its inventory, and the noise generators. The first is
+enough for a mod to load and for most of what mods do with a stack; the second
+answers zero, because terrain is a milestone away. Both name the upgrade path,
+which is to vendor Luanti's own inventory.cpp, tool.cpp and mapgen and put
+them behind the same interface.
+
+The interface
+-------------
+
+    struct Interface
+    {
+        virtual void run_game(const ss_ &game_path, storage::Save *save) = 0;
+        virtual void load_lua(const ss_ &chunk, const ss_ &chunkname) = 0;
+    };
+
+The world is the save. The map, the clock and everything else the world is go
+into the save the caller opened and keeps open; a Luanti world directory is
+read for which game it wants, or imported, and is never written to.
+core.get_worldpath() is <save>/luanti/ rather than the save's own root, so
+that a mod writing through it -- which is normal, and which games depend on
+-- cannot land on save.sqlite.
+
+load_lua() is the whole extension story: a buildat module hands Lua into the
+Luanti environment and that Lua does whatever the Luanti API allows.
+
+One ordering rule rather than a lifecycle: **whatever extends the environment
+is registered before the game runs**, and when it runs is the caller's
+business. A launcher chooses its world from a menu after boot because it
+extends nothing; a game that does extend a Luanti game already knows which one
+at init, so its load_lua() calls come first. load_lua() after run_game() is an
+error, because Luanti loads its mods once, in order.

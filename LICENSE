@@ -223,6 +223,22 @@ Code taken from elsewhere may use various permissive licenses.
 
 3. Files distributed under other licenses
 -----------------------------------------------------------------------------
+NOTICE, beside this file, names the same things with their copyright holders
+and says where each full license text is. Section 4(d) of the Apache License
+asks that NOTICE travels with any redistribution of Buildat.
+
+MIT License:
+- 3rdparty/Urho3D
+  Copyright (c) 2008-2017 the Urho3D project
+  Full license: 3rdparty/Urho3D/LICENSE
+  Urho3D carries further libraries of its own; their licenses are collected
+  in 3rdparty/Urho3D/Source/ThirdParty/LICENSES, and the fonts in its data
+  are under the SIL Open Font License
+  (3rdparty/Urho3D/bin/Data/Fonts/OFL.txt).
+- 3rdparty/luabind-deboostified
+  Copyright (c) 2003 Daniel Wallin and Arvid Norberg
+  Full license: 3rdparty/luabind-deboostified/LICENSE
+
 Simplified BSD License:
 - src/interface/noise.h
 - src/impl/noise.cpp
@@ -239,6 +255,28 @@ BSD License (zstd is dual-licensed BSD / GPLv2; the BSD terms are the ones
 taken here):
 - 3rdparty/zstd
 
+Public domain:
+- 3rdparty/sqlite
+  https://sqlite.org/copyright.html
+
+Apache 2.0, the same terms as the rest of Buildat; it is under 3rdparty
+because it is maintained apart:
+- 3rdparty/c55lib
+  Copyright 2014 Perttu Ahola <celeron55@gmail.com>
+
+LGPL 2.1 or later:
+- builtin/luanti/vendor
+  Luanti, copyright (C) 2010-2024 celeron55, Perttu Ahola
+  <celeron55@gmail.com> and contributors
+  Full license: builtin/luanti/COPYING.LESSER
+  Luanti states that license once, at the root of its own tree, and the Lua
+  files themselves carry no header; NOTICE reproduces the statement.
+  Where this came from, and how it stays out of buildat_server, which links
+  none of it: builtin/luanti/vendor/README.txt and doc/luanti_module.txt
+  One file in that tree is MIT instead and says so in its own header:
+  builtin/luanti/vendor/builtin/common/serialize.lua, from appgurueu's
+  modlib.
+
 SIL Open Font License 1.1:
 - client/data/Fonts/Overpass-Regular.ttf
 - client/data/Fonts/OverpassMono-Regular.ttf
@@ -248,4 +286,3 @@ SIL Open Font License 1.1:
 Creative Commons Attribution-ShareAlike 3.0 Unported:
 - client/data/buildat_logo.png
   Copyright Perttu Ahola <celeron55@gmail.com>
-

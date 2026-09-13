@@ -8,10 +8,13 @@
 #include "interface/packet_stream.h"
 #include "interface/sha1.h"
 #include "interface/fs.h"
+#include "interface/compress.h"
 #include "lua_bindings/replicate.h"
 #include <c55/string_util.h>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
+#include <cereal/types/vector.hpp>
+#include <cereal/types/tuple.hpp>
 #include <Node.h>
 #include <Scene.h>
 #include <MemoryBuffer.h>
@@ -49,6 +52,22 @@ using magic::SmoothedTransform;
 extern client::Config g_client_config;
 
 namespace client {
+
+// A packet body the server may have compressed; see pack_packet() in
+// builtin/client_file. A flag byte says which it is, because zstd on
+// incompressible data is larger than the data, so the server sends whichever
+// of the two is smaller and says which it sent.
+static ss_ unpack_packet(const ss_ &data)
+{
+	if(data.empty())
+		return data;
+	if(data[0] == 0)
+		return data.substr(1);
+	std::ostringstream os(std::ios::binary);
+	interface::decompress_zstd(data.substr(1), os);
+	return os.str();
+}
+
 
 struct CState: public State
 {
@@ -260,58 +279,67 @@ void CState::setup_packet_handlers()
 			m_app->run_script(data);
 	};
 
-	m_packet_handlers["core:announce_file"] =
+	// Every file the server has, in one packet: the whole set at connect, and
+	// one entry when a file changes while connected. What is not cached is
+	// asked for in one packet back, so that a game of a few thousand files is
+	// a handful of packets and not a few thousand.
+	m_packet_handlers["core:announce_files"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
-		ss_ file_name;
-		ss_ file_hash;
-		std::istringstream is(data, std::ios::binary);
+		sv_<std::tuple<ss_, ss_>> files;
+		std::istringstream is(unpack_packet(data), std::ios::binary);
 		{
 			cereal::PortableBinaryInputArchive ar(is);
-			ar(file_name);
-			ar(file_hash);
+			ar(files);
 		}
-		m_file_hashes[file_name] = file_hash;
-		ss_ file_hash_hex = interface::sha1::hex(file_hash);
-		log_v(MODULE, "Server announces file: %s %s",
-				cs(file_hash_hex), cs(file_name));
-		// Check if we already have this file
-		ss_ path = m_remote_cache_path+"/"+file_hash_hex;
-		std::ifstream ifs(path, std::ios::binary);
-		bool cached_is_ok = false;
-		if(ifs.good()){
-			std::string content((std::istreambuf_iterator<char>(ifs)),
-					std::istreambuf_iterator<char>());
-			ss_ content_hash = interface::sha1::calculate(content);
-			if(content_hash == file_hash){
-				// We have it; no need to ask this file
-				log_i(MODULE, "%s %s: cached",
-						cs(file_hash_hex), cs(file_name));
-				cached_is_ok = true;
+		log_v(MODULE, "Server announces %zu files", files.size());
+		sv_<std::tuple<ss_, ss_>> wanted;
+		for(const auto &pair : files){
+			const ss_ &file_name = std::get<0>(pair);
+			const ss_ &file_hash = std::get<1>(pair);
+			m_file_hashes[file_name] = file_hash;
+			ss_ file_hash_hex = interface::sha1::hex(file_hash);
+			// Check if we already have this file
+			ss_ path = m_remote_cache_path+"/"+file_hash_hex;
+			std::ifstream ifs(path, std::ios::binary);
+			bool cached_is_ok = false;
+			if(ifs.good()){
+				std::string content((std::istreambuf_iterator<char>(ifs)),
+						std::istreambuf_iterator<char>());
+				ss_ content_hash = interface::sha1::calculate(content);
+				if(content_hash == file_hash){
+					// We have it; no need to ask this file
+					log_d(MODULE, "%s %s: cached",
+							cs(file_hash_hex), cs(file_name));
+					cached_is_ok = true;
+				} else {
+					// Our copy is broken, re-request it
+					log_i(MODULE, "%s %s: Our copy is broken (has hash %s)",
+							cs(file_hash_hex), cs(file_name),
+							cs(interface::sha1::hex(content_hash)));
+				}
+			}
+			if(cached_is_ok){
+				// Let Lua resource wrapper know that this happened so it can
+				// update the copy made for Urho3D's resource cache
+				m_app->file_updated_in_cache(file_name, file_hash, path);
 			} else {
-				// Our copy is broken, re-request it
-				log_i(MODULE, "%s %s: Our copy is broken (has hash %s)",
-						cs(file_hash_hex), cs(file_name),
-						cs(interface::sha1::hex(content_hash)));
+				log_d(MODULE, "%s %s: requesting",
+						cs(file_hash_hex), cs(file_name));
+				wanted.push_back(pair);
+				m_waiting_files.insert(file_name);
 			}
 		}
-		if(cached_is_ok){
-			// Let Lua resource wrapper know that this happened so it can update
-			// the copy made for Urho3D's resource cache
-			m_app->file_updated_in_cache(file_name, file_hash, path);
-		} else {
-			// We don't have it; request this file
-			log_i(MODULE, "%s %s: requesting",
-					cs(file_hash_hex), cs(file_name));
-			std::ostringstream os(std::ios::binary);
-			{
-				cereal::PortableBinaryOutputArchive ar(os);
-				ar(file_name);
-				ar(file_hash);
-			}
-			send_packet("core:request_file", os.str());
-			m_waiting_files.insert(file_name);
+		log_i(MODULE, "%zu of %zu announced files are cached",
+				files.size() - wanted.size(), files.size());
+		if(wanted.empty())
+			return;
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(wanted);
 		}
+		send_packet("core:request_files", os.str());
 	};
 
 	m_packet_handlers["core:tell_after_all_files_transferred"] =
@@ -324,48 +352,55 @@ void CState::setup_packet_handlers()
 		}
 	};
 
-	m_packet_handlers["core:file_content"] =
+	// A bunch of files rather than one: the server packs them to a few
+	// kilobytes a packet, because most of a game's files are smaller than the
+	// overhead of carrying them one at a time.
+	m_packet_handlers["core:file_contents"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
-		ss_ file_name;
-		ss_ file_hash;
-		ss_ file_content;
-		std::istringstream is(data, std::ios::binary);
+		sv_<std::tuple<ss_, ss_, ss_>> files;
+		std::istringstream is(unpack_packet(data), std::ios::binary);
 		{
 			cereal::PortableBinaryInputArchive ar(is);
-			ar(file_name);
-			ar(file_hash);
-			ar(file_content);
+			ar(files);
 		}
-		if(m_waiting_files.count(file_name) == 0){
-			log_w(MODULE, "Received file was not requested: %s %s",
-					cs(interface::sha1::hex(file_hash)), cs(file_name));
-			return;
-		}
-		m_waiting_files.erase(file_name);
-		ss_ file_hash2 = interface::sha1::calculate(file_content);
-		if(file_hash != file_hash2){
-			log_w(MODULE, "Requested file differs in hash: \"%s\": "
-					"requested %s, actual %s", cs(file_name),
-					cs(interface::sha1::hex(file_hash)),
-					cs(interface::sha1::hex(file_hash2)));
-			return;
-		}
-		ss_ file_hash_hex = interface::sha1::hex(file_hash);
-		ss_ path = g_client_config.get<ss_>("cache_path")+"/remote/"+
-				file_hash_hex;
-		log_i(MODULE, "Saving %s to %s", cs(file_name), cs(path));
-		std::ofstream of(path, std::ios::binary);
-		of<<file_content;
-		if(m_tell_after_all_files_transferred_requested){
-			if(m_waiting_files.empty()){
-				send_packet("core:all_files_transferred", "");
-				m_tell_after_all_files_transferred_requested = false;
+		for(const auto &entry : files){
+			const ss_ &file_name = std::get<0>(entry);
+			const ss_ &file_hash = std::get<1>(entry);
+			const ss_ &file_content = std::get<2>(entry);
+			if(m_waiting_files.count(file_name) == 0){
+				log_w(MODULE, "Received file was not requested: %s %s",
+						cs(interface::sha1::hex(file_hash)), cs(file_name));
+				continue;
 			}
+			m_waiting_files.erase(file_name);
+			// The server does not hash what it reads off disk before sending
+			// it, so this is the check that a file is what it was announced
+			// as -- and it has to be here anyway, since a file can change
+			// between the announce and the request
+			ss_ file_hash2 = interface::sha1::calculate(file_content);
+			if(file_hash != file_hash2){
+				log_w(MODULE, "Requested file differs in hash: \"%s\": "
+						"requested %s, actual %s", cs(file_name),
+						cs(interface::sha1::hex(file_hash)),
+						cs(interface::sha1::hex(file_hash2)));
+				continue;
+			}
+			ss_ file_hash_hex = interface::sha1::hex(file_hash);
+			ss_ path = g_client_config.get<ss_>("cache_path")+"/remote/"+
+					file_hash_hex;
+			log_d(MODULE, "Saving %s to %s", cs(file_name), cs(path));
+			std::ofstream of(path, std::ios::binary);
+			of<<file_content;
+			// Let Lua resource wrapper know that this happened so it can
+			// update the copy made for Urho3D's resource cache
+			m_app->file_updated_in_cache(file_name, file_hash, path);
 		}
-		// Let Lua resource wrapper know that this happened so it can update
-		// the copy made for Urho3D's resource cache
-		m_app->file_updated_in_cache(file_name, file_hash, path);
+		if(m_tell_after_all_files_transferred_requested &&
+				m_waiting_files.empty()){
+			send_packet("core:all_files_transferred", "");
+			m_tell_after_all_files_transferred_requested = false;
+		}
 	};
 
 	m_packet_handlers["replicate:create_node"] =

@@ -131,6 +131,12 @@ struct CVoxelRegistry: public VoxelRegistry
 		return result;
 	}
 
+	VoxelTypeId num_voxels()
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return m_defs.size() - 1;
+	}
+
 	VoxelTypeId add_voxel(const VoxelDefinition &def)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
@@ -247,6 +253,7 @@ struct CVoxelRegistry: public VoxelRegistry
 		cache.edge_material_id = def.edge_material_id;
 		cache.physically_solid = def.physically_solid;
 		cache.fully_empty = def.fully_empty;
+		cache.transmits_light = def.transmits_light;
 		cache.shape = def.shape;
 		cache.variants = def.variants;
 		for(size_t i = 0; i < 256; i++)
@@ -290,6 +297,21 @@ struct CVoxelRegistry: public VoxelRegistry
 			cache.extra_textures[i] = seg_def.resource_name == "" ?
 					AtlasSegmentReference() :
 					atlas_reg->find_or_add_segment(seg_def);
+		}
+		// And the ones a variant wears instead of the definition's, which is
+		// how a palette entry gets its own tinted tiles; see
+		// VoxelVariant::textures
+		for(size_t vi = 0; vi < cache.variants.size() &&
+				vi < def.variants.size(); vi++){
+			const VoxelVariant &def_variant = def.variants[vi];
+			VoxelVariant &variant = cache.variants[vi];
+			variant.texture_refs.resize(def_variant.textures.size());
+			for(size_t i = 0; i < def_variant.textures.size(); i++){
+				const AtlasSegmentDefinition &seg_def = def_variant.textures[i];
+				variant.texture_refs[i] = seg_def.resource_name == "" ?
+						AtlasSegmentReference() :
+						atlas_reg->find_or_add_segment(seg_def);
+			}
 		}
 		// Caller sets cache.textures_valid = true
 	}
@@ -378,28 +400,25 @@ bool VoxelFormat::validate(ss_ *why) const
 		}
 	}
 
-	struct Named { cc_ *name; const VoxelField &f; };
-	const Named fields[] = {
-		{"id", id}, {"light_sky", light_sky}, {"light_lamp", light_lamp},
-		{"param", param}, {"color", color},
-		{"tint", tint}, {"wetness", wetness}, {"grain", grain},
-		{"gloss", gloss}, {"speckle", speckle}, {"emission", emission},
-		{"sag_top", sag_top}, {"sag_bottom", sag_bottom},
-	};
+	// One list of roles, in roles(), so that a role added to the format is
+	// validated here and migrated by migrate_volume() without a second list
+	// anywhere to keep in step with it
+	const sv_<Role> &fields = roles();
 
-	for(const Named &n : fields){
-		if(!n.f.bound())
+	for(const Role &n : fields){
+		const VoxelField &f = this->*(n.field);
+		if(!f.bound())
 			continue;
-		if(n.f.plane >= planes.size())
+		if(f.plane >= planes.size())
 			return fail(ss_(n.name)+": there is no plane "+
-					itos((int)n.f.plane));
-		if(n.f.width > 32)
-			return fail(ss_(n.name)+": width "+itos((int)n.f.width)+" > 32");
-		const int bits = (int)plane_bits(n.f.plane);
-		if((int)n.f.shift + (int)n.f.width > bits)
-			return fail(ss_(n.name)+": bits "+itos((int)n.f.shift)+"..."+
-					itos((int)n.f.shift + (int)n.f.width - 1)+" reach past the "+
-					itos(bits)+"-bit plane "+itos((int)n.f.plane));
+					itos((int)f.plane));
+		if(f.width > 32)
+			return fail(ss_(n.name)+": width "+itos((int)f.width)+" > 32");
+		const int bits = (int)plane_bits(f.plane);
+		if((int)f.shift + (int)f.width > bits)
+			return fail(ss_(n.name)+": bits "+itos((int)f.shift)+"..."+
+					itos((int)f.shift + (int)f.width - 1)+" reach past the "+
+					itos(bits)+"-bit plane "+itos((int)f.plane));
 	}
 
 	// VOXELTYPEID_MAX is not a mask -- it is a lower cap inside 21 bits --
@@ -416,15 +435,17 @@ bool VoxelFormat::validate(ss_ *why) const
 		return fail("id: width "+itos((int)id.width)+" > 21, the bits a "
 				"voxel type id has");
 
-	for(size_t i = 0; i < sizeof fields / sizeof fields[0]; i++){
-		for(size_t j = i + 1; j < sizeof fields / sizeof fields[0]; j++){
-			const Named &a = fields[i], &b = fields[j];
-			if(!a.f.bound() || !b.f.bound())
+	for(size_t i = 0; i < fields.size(); i++){
+		for(size_t j = i + 1; j < fields.size(); j++){
+			const VoxelField &a = this->*(fields[i].field);
+			const VoxelField &b = this->*(fields[j].field);
+			if(!a.bound() || !b.bound())
 				continue;
-			if(a.f.plane != b.f.plane)
+			if(a.plane != b.plane)
 				continue;
-			if((a.f.mask() << a.f.shift) & (b.f.mask() << b.f.shift))
-				return fail(ss_(a.name)+" and "+b.name+" overlap");
+			if((a.mask() << a.shift) & (b.mask() << b.shift))
+				return fail(ss_(fields[i].name)+" and "+fields[j].name+
+						" overlap");
 		}
 	}
 
@@ -583,6 +604,26 @@ bool voxel_selector_self_test()
 	}
 
 	return true;
+}
+
+const sv_<VoxelFormat::Role>& VoxelFormat::roles()
+{
+	static const sv_<Role> a = {
+		{"id", &VoxelFormat::id},
+		{"light_sky", &VoxelFormat::light_sky},
+		{"light_lamp", &VoxelFormat::light_lamp},
+		{"param", &VoxelFormat::param},
+		{"color", &VoxelFormat::color},
+		{"tint", &VoxelFormat::tint},
+		{"wetness", &VoxelFormat::wetness},
+		{"grain", &VoxelFormat::grain},
+		{"gloss", &VoxelFormat::gloss},
+		{"speckle", &VoxelFormat::speckle},
+		{"emission", &VoxelFormat::emission},
+		{"sag_top", &VoxelFormat::sag_top},
+		{"sag_bottom", &VoxelFormat::sag_bottom},
+	};
+	return a;
 }
 
 bool voxel_format_self_test()

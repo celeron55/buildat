@@ -30,7 +30,7 @@ namespace main
 
 using namespace Urho3D;
 
-// The look spike of local/aggregate_plan.md, step 2. A wall of samples with
+// The look spike of doc/plan/aggregate_plan.md, step 2. A wall of samples with
 // their fields set by hand: no simulation, no rules, nothing derived. The
 // question it exists to answer is whether a mixture reads on screen -- can
 // 70% rock / 30% sand be told from 30/70 at a glance -- and it is asked here,

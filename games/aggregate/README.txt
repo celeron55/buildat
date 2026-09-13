@@ -12,7 +12,7 @@ means the model underneath is the only variable, and what the mixture model
 costs and buys shows up as a diff rather than as an argument. Play both and
 notice nothing; then dig into what soil actually is.
 
-See local/aggregate_game_plan.md.
+See doc/plan/aggregate_game_plan.md.
 
 Digger's world, but it does not hold itself up. Rock spans a gap, soil does
 not, a timber prop holds a ceiling until too much weight stands on it, and

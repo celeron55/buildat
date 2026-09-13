@@ -72,7 +72,7 @@ static const int WATER_LEVEL = 25;
 static const int BEDROCK_TOP = -60;
 
 // undermine's own cut of a voxel word, which is the point of the game
-// existing. See local/undermine_plan.md.
+// existing. See doc/plan/undermine_plan.md.
 //
 //   id      0...7    up to 255 materials; there are twelve, and nature and
 //                    everything else it will grow have room

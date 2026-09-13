@@ -15,6 +15,12 @@ log:info("voxelworld loading")
 -- physics_distance small so no collision shapes are built at all.
 M.lod_distance = 80
 M.physics_distance = 100
+-- How much world this client wants sent to it, in voxels. Only the client
+-- knows what its computer can draw, and what it is not going to draw is the
+-- server's memory and this connection's bandwidth spent on nothing. The
+-- server sends the smaller of this and what it keeps loaded, so asking for
+-- more than the game has is not an error. Set it before the world arrives.
+M.send_distance = 1000
 
 local UPDATE_TIME_FRACTION = 0.10
 
@@ -111,6 +117,10 @@ buildat.sub_packet("voxelworld:init", function(data)
 	-- Clear caches
 	node_volume_cache = {}
 	static_node_cache = {}
+
+	-- What this client wants sent to it; see M.send_distance
+	buildat.send_packet("voxelworld:set_send_distance",
+			tostring(math.floor(M.send_distance)))
 end)
 
 buildat.sub_packet("voxelworld:voxel_registry", function(data)

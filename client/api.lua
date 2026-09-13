@@ -37,6 +37,17 @@ buildat.get_ui_scale      = __buildat_get_ui_scale
 -- at. magic.set_preferred_viewports() applies it; this is for a game that
 -- wants to know. 1.0 means no scaling at all.
 buildat.get_preferred_render_scale = __buildat_get_preferred_render_scale
+-- The preferences the user sets once and every game honours. The C++ side is
+-- the authority: it parses and range checks a value through the same code -o
+-- goes through, applies what takes effect now, and persists the rest. A
+-- screen over these is a page of widgets that knows nothing about the file.
+--
+-- list_preferences() -> {name, ...}
+-- get_preference(name) -> number or boolean, nil for a name there is none by
+-- set_preference(name, value) -> true, or false and why
+buildat.list_preferences  = __buildat_list_preferences
+buildat.get_preference    = __buildat_get_preference
+buildat.set_preference    = __buildat_set_preference
 buildat.font_sans         = "Fonts/Overpass-Regular.ttf"
 buildat.font_mono         = "Fonts/OverpassMono-Regular.ttf"
 buildat.SpatialUpdateQueue = __buildat_SpatialUpdateQueue
@@ -95,6 +106,23 @@ buildat.safe.cast_voxel_rays_collect  = __buildat_cast_voxel_rays_collect
 -- write_floats(vector_buffer, values): the values into the buffer as floats,
 -- replacing what was in it
 buildat.safe.write_floats             = __buildat_write_floats
+-- add_resource_dir(path) and compose_image(args), in the sandbox as they
+-- are (decided 2026-09-13). What they give sandboxed code is "write files
+-- under the cache and make them loadable", which a server can already do
+-- through client_file -- it ships whatever files it likes into the same
+-- cache -- so this adds no power that was not already there. What it does
+-- do is make the cache-path check in each of them load-bearing rather than
+-- a sanity check: anything added beside them writes under the cache or it
+-- does not go in the sandbox. See doc/plan/luanti_module_plan.md, "what a
+-- module's client half is allowed to do".
+buildat.safe.add_resource_dir         = __buildat_add_resource_dir
+buildat.safe.compose_image            = __buildat_compose_image
+-- get_cache_path() -> the directory those two work in. The share and user
+-- paths stay out of the sandbox; this is here because writing a file under
+-- the cache means knowing where the cache is.
+buildat.safe.get_cache_path           = function()
+	return __buildat_get_path("cache")
+end
 -- What stopped a ray cast by cast_voxel_rays(); see its comment in
 -- src/lua_bindings/voxel_volume.cpp
 buildat.safe.VOXEL_RAY = {
