@@ -596,6 +596,9 @@ struct Module: public interface::Module, public luanti::Interface
 	// on_generation_request(). Zero until the first section is generated,
 	// which is after the mods have loaded and named it.
 	uint32_t m_singlenode_word = 0;
+	// What the world's generator was built from, kept for the questions a
+	// mapgen can answer without generating: where the ground is
+	luanti_mapgen::Params m_mapgen_params;
 	// The texture modifier expressions the game's nodes are drawn with, by
 	// the resource name each is composed under. The client is what composes
 	// them; this is what it is sent when it asks.
@@ -1593,6 +1596,9 @@ struct Module: public interface::Module, public luanti::Interface
 		params.node_props = mapgen_node_props();
 		params.biomes = mapgen_biomes();
 		params.section_size = m_section_size.getX();
+		// Kept, because the spawn search asks the same mapgen where the
+		// ground is without generating anything; see l_spawn_level()
+		m_mapgen_params = params;
 		worldgen::GeneratorInterface *generator = nullptr;
 		luanti_mapgen::access(m_server, [&](luanti_mapgen::Interface *im){
 			generator = im->create_generator(params);
@@ -1902,20 +1908,25 @@ struct Module: public interface::Module, public luanti::Interface
 		run_on_generated(event.section_p);
 	}
 
-	// The world create_instance() just made, filled before anything reads
-	// it. The generation requests for those sections are answered in
-	// worldgen's thread and arrive after run_game() has returned, which is
-	// too late for a check -- or for a mod -- that looks at the map while
-	// the game starts.
+	// The world create_instance() just made, asked for before anything reads
+	// it, and -- in a singlenode world only -- filled here as well.
 	//
-	// simplified: so these sections are filled twice, once here and once
-	// when the generator gets to them; merge_volume() keeps what is already
-	// there, so the second one changes nothing. It costs what generating
-	// the sections around the origin costs, which is nothing at singlenode
-	// and something once there is a real mapgen. The fix is a way to tell
-	// worldgen a section is already done.
+	// The fill is what makes a singlenode world a world: nobody answers a
+	// generation request there, so without it the map is void rather than
+	// air. A world with a mapgen must not have it. Its air would be written
+	// into sections the generator has not reached yet, and air that is
+	// already in the map is terrain as far as anything else is concerned --
+	// which is how a v7 world came to have a room the size of this loop
+	// under its surface (2026-09-13, and see "What the first playtest of a
+	// generated world found" in doc/plan/luanti_module_plan.md).
+	//
+	// The sections are still asked for either way: worldgen answers in its
+	// own thread and the answers arrive after run_game() has returned, but
+	// asking early is what gets the ground near the origin on its way
+	// before a player is standing on it.
 	void generate_world()
 	{
+		const bool fill = (mapgen_name() == "singlenode");
 		const pv::Vector3DInt32 p0(-SPAWN_RADIUS, -SPAWN_RADIUS_Y,
 				-SPAWN_RADIUS);
 		const pv::Vector3DInt32 p1(SPAWN_RADIUS, SPAWN_RADIUS_Y,
@@ -1935,6 +1946,8 @@ struct Module: public interface::Module, public luanti::Interface
 				// for here
 				if(!world->is_section_loaded(section_p))
 					world->load_or_generate_section(section_p);
+				if(!fill)
+					continue;
 				// A section that has been generated already holds this
 				// node everywhere nothing else was built, so one voxel of
 				// it says whether the fill has been here -- and a section
@@ -1951,9 +1964,15 @@ struct Module: public interface::Module, public luanti::Interface
 				n++;
 			}
 		});
-		log_v(MODULE, "The world: %zu sections filled with one node in %i "
-				"ms, %zu already there", n,
-				(int)((interface::os::time_us() - t0) / 1000), already);
+		if(fill){
+			log_v(MODULE, "The world: %zu sections filled with one node in "
+					"%i ms, %zu already there", n,
+					(int)((interface::os::time_us() - t0) / 1000), already);
+		} else {
+			log_v(MODULE, "The world: the sections around the origin asked "
+					"for in %i ms; the mapgen fills them",
+					(int)((interface::os::time_us() - t0) / 1000));
+		}
 		// Outside the access: a mod's on_generated reads and writes the map
 		// through a VoxelManip, which is voxelworld again
 		for(const pv::Vector3DInt16 &section_p : generated)
@@ -4082,6 +4101,29 @@ struct Module: public interface::Module, public luanti::Interface
 		return 0;
 	}
 
+	// The level a player can stand at above (x, z), asked of the mapgen
+	// rather than of the map: Luanti's spawn search does the same thing,
+	// because at the moment a player joins the map around the origin is
+	// half generated and answers about the world as it was rather than as
+	// it will be. nil means the mapgen says this is no place to spawn -- a
+	// river, or a surface under water -- or that there is no mapgen to ask.
+	static int l_spawn_level(lua_State *L)
+	{
+		Module *self = module_of(L);
+		const int x = (int)luaL_checknumber(L, 1);
+		const int z = (int)luaL_checknumber(L, 2);
+		int level = 0;
+		bool ok = false;
+		luanti_mapgen::access(self->m_server,
+				[&](luanti_mapgen::Interface *im){
+			ok = im->spawn_level(self->m_mapgen_params, x, z, level);
+		});
+		if(!ok)
+			return 0;
+		lua_pushinteger(L, level);
+		return 1;
+	}
+
 	// Where the server says the player is: the spawn, a teleport, a mod
 	// moving them. Where the player walks is the client's own business and
 	// arrives as set_player_pos(); this is the other direction, and without
@@ -5208,6 +5250,7 @@ struct Module: public interface::Module, public luanti::Interface
 				l_show_object_props);
 		set_global_cfunction("__luanti_send_inventory", l_send_inventory);
 		set_global_cfunction("__luanti_send_player_pos", l_send_player_pos);
+		set_global_cfunction("__luanti_spawn_level", l_spawn_level);
 		set_global_cfunction("__luanti_send_chat", l_send_chat);
 		set_global_cfunction("__luanti_send_hud", l_send_hud);
 		set_global_cfunction("__luanti_send_day_night", l_send_day_night);

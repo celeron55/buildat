@@ -304,6 +304,22 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 		return pv::Vector3DInt32(PADDING, PADDING, PADDING);
 	}
 
+	// Out of the mapgen's noise, touching no map and generating nothing.
+	// Luanti's own spawn search asks this first and only then looks at the
+	// map; MAX_MAP_GENERATION_LIMIT is how a mapgen says "not here".
+	bool spawn_level(int x, int z, int &level_out)
+	{
+		if(!m_mapgen)
+			return false;
+		const int level = m_mapgen->getSpawnLevelAtPoint(
+				v2s16((s16)x, (s16)z));
+		if(level >= MAX_MAP_GENERATION_LIMIT ||
+				level <= -MAX_MAP_GENERATION_LIMIT)
+			return false;
+		level_out = level;
+		return true;
+	}
+
 	void generate(main_context::SceneReference scene_ref,
 			const pv::Vector3DInt16 &section_p,
 			interface::VoxelVolume &volume)
@@ -379,7 +395,10 @@ struct Module: public interface::Module, public luanti_mapgen::Interface
 		m_server(server)
 	{}
 
-	~Module(){}
+	~Module()
+	{
+		delete m_query;
+	}
 
 	void init()
 	{
@@ -415,6 +434,26 @@ struct Module: public interface::Module, public luanti_mapgen::Interface
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
+	}
+
+	// A generator of its own for the questions that are asked outside
+	// worldgen's thread, so that a spawn search and a generation cannot
+	// touch the same Mapgen at the same time. One is kept rather than made
+	// per question: a mapgen allocates its noise maps when it is built, and
+	// a spawn search asks thousands of times.
+	VendoredGenerator *m_query = nullptr;
+	ss_ m_query_key;
+
+	bool spawn_level(const Params &params, int x, int z, int &level_out)
+	{
+		const ss_ key = params.mgname+"/"+itos(params.seed)+"/"+
+				itos(params.water_level);
+		if(m_query == nullptr || key != m_query_key){
+			delete m_query;
+			m_query = new VendoredGenerator(params, params.section_size);
+			m_query_key = key;
+		}
+		return m_query->spawn_level(x, z, level_out);
 	}
 
 	// Interface

@@ -1092,9 +1092,18 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		set_mouse_in_world(not mouse_in_world)
 	elseif key == BIND.inventory.key then
 		-- Luanti's own inventory key, and what a game's inventory formspec
-		-- is for. The mouse has to be on the screen to click it.
+		-- is for. The mouse has to be on the screen to click a form -- but
+		-- only if one opened: a game that sets no inventory formspec draws
+		-- nothing, and taking the mouse away then leaves the player unable
+		-- to move with nothing to click on. The same key closes it again
+		-- and hands the mouse back.
+		local was_open = luanti.form_open()
 		luanti.open_player_inventory()
-		set_mouse_in_world(false)
+		if luanti.form_open() then
+			set_mouse_in_world(false)
+		elseif was_open then
+			set_mouse_in_world(true)
+		end
 	elseif key == BIND.fly.key then
 		player.fly = not player.fly
 		log:info(player.fly and "flying" or "walking")

@@ -1056,13 +1056,11 @@ local function snapshot_player(o)
 		fields[k] = v
 	end
 	return {
-		-- Only a position the player was really put at. One that was never
-		-- found -- the map could not say where the ground is when they
-		-- arrived -- would be written down as if it were theirs, and the
-		-- next time they joined they would be "restored" into the void at
-		-- the origin and fall out of the loaded world.
-		pos = o.spawn_known ~= false and
-				{x = o.pos.x, y = o.pos.y, z = o.pos.z} or nil,
+		-- Always where they are: the client is the player and a client is
+		-- always somewhere, so this is the position their client last
+		-- reported. Where a player who has never been here starts is the
+		-- spawn search's business and not this one's.
+		pos = {x = o.pos.x, y = o.pos.y, z = o.pos.z},
 		look = {h = o.look.h, v = o.look.v},
 		hp = o.hp,
 		breath = o.breath,
@@ -1559,6 +1557,24 @@ end
 -- the ground the map says is there. A world that has not generated around
 -- the origin yet has no answer, and then the origin is what is left -- the
 -- same place a player started before there was any terrain to stand on.
+-- How many points the search looks at before it gives up, and how far out
+-- it is allowed to walk. Luanti's numbers, except that its range limit is
+-- the mapgen's own.
+local SPAWN_TRIES = 4000
+local SPAWN_RANGE_MAX = 31000
+-- The candidate points are the same sequence in every world, so that a
+-- world always spawns a player in the same place: what makes one world's
+-- spawn differ from another's is which candidates its mapgen accepts.
+local SPAWN_SEQUENCE_SEED = 1337
+
+-- 0...span, out of a generator whose own range is 0...32767
+local function spawn_rand_to(pr, span)
+	if span <= 32767 then
+		return pr:next() % (span + 1)
+	end
+	return (pr:next() * 32768 + pr:next()) % (span + 1)
+end
+
 local function find_spawn_pos()
 	local static = core.settings:get("static_spawnpoint")
 	if static then
@@ -1569,15 +1585,23 @@ local function find_spawn_pos()
 		end
 		core.log("warning", "static_spawnpoint is not a position: " .. static)
 	end
-	-- The origin first, and then a few places around it: the ground at one
-	-- point can be below what is loaded -- an ocean trench, a deep valley --
-	-- and Luanti's own findSpawnPos tries other points for the same reason.
-	local TRIES = {{0, 0}, {16, 0}, {0, 16}, {-16, 0}, {0, -16},
-			{24, 24}, {-24, 24}, {24, -24}, {-24, -24}}
-	for _, at in ipairs(TRIES) do
-		local level = core.get_spawn_level(at[1], at[2])
+	-- Luanti's own search (Server::findSpawnPos): try a point, and if it is
+	-- no good try another one a little further out, so that a spawn lands
+	-- near the origin when the origin will do and walks outwards over an
+	-- ocean when it will not. The points are random there and pseudo-random
+	-- here, seeded from the world's own seed, so that a world always spawns
+	-- a player in the same place.
+	local pr = PseudoRandom(SPAWN_SEQUENCE_SEED)
+	for i = 0, SPAWN_TRIES - 1 do
+		local range = math.min(1 + i, SPAWN_RANGE_MAX)
+		local x, z = 0, 0
+		if i > 0 then
+			x = -range + spawn_rand_to(pr, range * 2)
+			z = -range + spawn_rand_to(pr, range * 2)
+		end
+		local level = core.get_spawn_level(x, z)
 		if level ~= nil then
-			return {x = at[1], y = level, z = at[2]}, true
+			return {x = x, y = level, z = z}, true
 		end
 	end
 	-- Nowhere to stand yet: the world around the origin has not been

@@ -90,6 +90,16 @@ namespace luanti_mapgen
 
 		// Which mapgens this build has. "singlenode" is always one of them.
 		virtual sv_<ss_> list_mapgens() = 0;
+
+		// The level a player can stand at above (x, z), out of the mapgen's
+		// own noise and generating nothing -- Luanti's
+		// Mapgen::getSpawnLevelAtPoint(), which is what its spawn search
+		// asks before it touches the map. False means the column is no
+		// place to spawn: a river, or a surface under water. The mapgen
+		// this asks is built once per (mapgen, seed) and kept, so a search
+		// of a few thousand points costs a few thousand noise samples.
+		virtual bool spawn_level(const Params &params, int x, int z,
+				int &level_out) = 0;
 	};
 
 	inline bool access(interface::Server *server,
