@@ -110,9 +110,15 @@ namespace luanti
 		// pointed node's on_rightclick wins if it has one and the player's
 		// wielded item is placed otherwise -- and what comes back is whether
 		// anything happened.
+		//
+		// sneak is whether the player was holding the key that means "build
+		// against this, do not use it", which is the only way to put a node
+		// down on top of a chest. It is remembered as the player's control
+		// state, which is where a mod reads it.
 		virtual bool place_node(int32_t under_x, int32_t under_y,
 				int32_t under_z, int32_t above_x, int32_t above_y,
-				int32_t above_z, const ss_ &player_name) = 0;
+				int32_t above_z, const ss_ &player_name,
+				bool sneak = false) = 0;
 
 		// The scene the map is in, or null until luanti:game_loaded
 		virtual SceneReference get_scene() = 0;

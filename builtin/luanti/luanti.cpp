@@ -4259,14 +4259,16 @@ struct Module: public interface::Module, public luanti::Interface
 	}
 
 	bool place_node(int32_t ux, int32_t uy, int32_t uz,
-			int32_t ax, int32_t ay, int32_t az, const ss_ &player_name)
+			int32_t ax, int32_t ay, int32_t az, const ss_ &player_name,
+			bool sneak)
 	{
 		if(player_name.empty())
 			return false;
 		return node_action("return core.__use_node(\""+
 				lua_quoted(player_name)+"\", "
 				"{x = "+itos(ux)+", y = "+itos(uy)+", z = "+itos(uz)+"}, "
-				"{x = "+itos(ax)+", y = "+itos(ay)+", z = "+itos(az)+"})");
+				"{x = "+itos(ax)+", y = "+itos(ay)+", z = "+itos(az)+"}, "+
+				(sneak ? "true" : "false")+")");
 	}
 
 	SceneReference get_scene()

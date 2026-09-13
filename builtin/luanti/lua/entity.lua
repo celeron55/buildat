@@ -596,13 +596,39 @@ function PlayerRef:set_physics_override(t)
 end
 
 function PlayerRef:get_player_control()
-	return {up = false, down = false, left = false, right = false,
-			jump = false, aux1 = false, sneak = false, dig = false,
-			place = false, LMB = false, RMB = false, zoom = false}
+	local o = state_of(self)
+	local c = o and o.control
+	if not c then
+		return {up = false, down = false, left = false, right = false,
+				jump = false, aux1 = false, sneak = false, dig = false,
+				place = false, LMB = false, RMB = false, zoom = false}
+	end
+	-- A copy: what a mod does to the table it is given is its own business
+	local out = {}
+	for k, v in pairs(c) do
+		out[k] = v
+	end
+	return out
 end
 
+-- Luanti's own bit order for the same thing; PlayerControl::getKeysPressed
+-- in src/player.cpp
+local CONTROL_BITS = {"up", "down", "left", "right", "jump", "aux1",
+		"sneak", "dig", "place", "zoom"}
+
 function PlayerRef:get_player_control_bits()
-	return 0
+	local o = state_of(self)
+	local c = o and o.control
+	if not c then
+		return 0
+	end
+	local bits = 0
+	for i = 1, #CONTROL_BITS do
+		if c[CONTROL_BITS[i]] then
+			bits = bits + 2 ^ (i - 1)
+		end
+	end
+	return bits
 end
 
 function PlayerRef:get_player_velocity()
@@ -878,17 +904,25 @@ end
 -- simplified: no sneaking, so a node with an on_rightclick cannot be built
 -- against. Luanti's client sends whether the player was holding sneak, and
 -- this would be that flag.
-function core.__use_node(playername, under, above)
+function core.__use_node(playername, under, above, sneak)
 	local id = players[playername]
 	local ref = id and core.object_refs[id]
 	if not ref then
 		return false
 	end
+	-- What the client was holding when it clicked. Luanti's own
+	-- item_place() reads it: a node with an on_rightclick is used when it
+	-- is not held and built against when it is, which is the only way to
+	-- put a node down on top of a chest.
+	local o = objects[id]
+	if o and o.control then
+		o.control.sneak = sneak and true or false
+	end
 	-- A node with a formspec in its metadata opens it, which is what
 	-- Luanti's own client does before it asks the server to place anything
 	local meta = core.get_meta(under)
 	local spec = meta and meta:get_string("formspec") or ""
-	if spec ~= "" then
+	if spec ~= "" and not sneak then
 		show_node_formspec(playername, under, spec)
 		return true
 	end
@@ -1219,6 +1253,14 @@ function core.__add_player(name)
 		physics = {speed = 1, jump = 1, gravity = 1},
 		inventory_formspec = "",
 		formspec_prepend = "",
+		-- What the client says it is holding down. Only sneak is ever set:
+		-- it is the one a mod reads, because Luanti's own item_place()
+		-- looks at it to decide between a node's on_rightclick and putting
+		-- something down against it. The rest are here so that the table is
+		-- the shape a mod expects.
+		control = {up = false, down = false, left = false, right = false,
+				jump = false, aux1 = false, sneak = false, dig = false,
+				place = false, LMB = false, RMB = false, zoom = false},
 	}
 	o.props.hp_max = 20
 	o.props.collisionbox = {-0.3, 0.0, -0.3, 0.3, 1.7, 0.3}

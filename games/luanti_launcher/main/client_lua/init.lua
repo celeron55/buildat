@@ -298,12 +298,17 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	-- The right button is Luanti's place-or-use: what it comes to is the
 	-- node's on_rightclick if it has one and the wielded item's on_place
 	-- otherwise, which is the server's to decide
+	-- Shift is Luanti's sneak: held, it means build against the node rather
+	-- than use it, which is the only way to put something on top of a chest
 	buildat.send_packet("main:place", cereal.binary_output({
 		under = voxel_packet_value(pointed_p),
 		above = voxel_packet_value(pointed_above or pointed_p),
+		sneak = (magic.input:GetKeyDown(magic.KEY_LSHIFT) or
+				magic.input:GetKeyDown(magic.KEY_RSHIFT)) and 1 or 0,
 	}, {"object",
 		{"under", VOXEL_PACKET_TYPE},
 		{"above", VOXEL_PACKET_TYPE},
+		{"sneak", "byte"},
 	}))
 end)
 

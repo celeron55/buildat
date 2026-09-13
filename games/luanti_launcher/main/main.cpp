@@ -178,10 +178,13 @@ struct Module: public interface::Module
 	void on_place(const network::Packet &packet)
 	{
 		pv::Vector3DInt32 under, above;
+		// Whether the player was holding the key that means "build against
+		// this rather than use it"; see place_node() in luanti/api.h
+		uint8_t sneak = 0;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
 			cereal::PortableBinaryInputArchive ar(is);
-			ar(under, above);
+			ar(under, above, sneak);
 		} catch(std::exception &e){
 			log_w(MODULE, "main:place: %s", e.what());
 			return;
@@ -190,7 +193,7 @@ struct Module: public interface::Module
 		luanti::access(m_server, [&](luanti::Interface *i){
 			placed = i->place_node(under.getX(), under.getY(), under.getZ(),
 					above.getX(), above.getY(), above.getZ(),
-					player_name_of(packet.sender));
+					player_name_of(packet.sender), sneak != 0);
 		});
 		log_v(MODULE, "C%i: main:place " PV3I_FORMAT ": %s", packet.sender,
 				PV3I_PARAMS(above), placed ? "placed" : "nothing");
