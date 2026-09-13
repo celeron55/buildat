@@ -1,0 +1,17 @@
+<!-- The same technique as PBRVoxel.xml beside it, with the sun gated by the
+     skylight the mesher packed into the vertex colors: a surface the sky
+     cannot reach gets no direct sunlight, however the shadow map feels
+     about it. A world whose light value means "how much sky is here" --
+     a Luanti world, or any world that maintains voxelworld's skylight --
+     wants this; one that keeps no skylight must not have it, because
+     every surface would read as underground and the sun would never
+     arrive. See VOXELSUNGATE in PBRVoxel.glsl, and use_sun_gate() in
+     this module's module.lua. -->
+<technique vs="voxel_shading/PBRVoxel" ps="voxel_shading/PBRVoxel"
+        vsdefines="VOXELSUNGATE"
+        psdefines="VOXELSUNGATE DIFFMAP PBR METALLIC VOXELNORMALMAP VOXELIBL VOXELSPOTS VOXELTRANSLUCENCY">
+    <pass name="base" />
+    <pass name="light" depthtest="equal" depthwrite="false" blend="add" />
+    <pass name="depth" vs="Depth" ps="Depth" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" />
+</technique>

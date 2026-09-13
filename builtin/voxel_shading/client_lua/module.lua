@@ -38,6 +38,18 @@ local TECHNIQUE_MODIFIERS = magic.cache:GetResource("Technique",
 -- blended rather than cut out. See PBRVoxelAlpha.xml.
 local TECHNIQUE_ALPHA = magic.cache:GetResource("Technique",
 		"voxel_shading/PBRVoxelAlpha.xml")
+
+-- The same three with the sun gated by the skylight in the vertex colors: a
+-- surface the sky cannot reach gets no direct sunlight. A world whose light
+-- value means "how much sky is here" wants this; see use_sun_gate().
+local TECHNIQUE_SUN = magic.cache:GetResource("Technique",
+		"voxel_shading/PBRVoxelSun.xml")
+local TECHNIQUE_SUN_MODIFIERS = magic.cache:GetResource("Technique",
+		"voxel_shading/PBRVoxelSunModifiers.xml")
+local TECHNIQUE_SUN_ALPHA = magic.cache:GetResource("Technique",
+		"voxel_shading/PBRVoxelSunAlpha.xml")
+
+local sun_gate = false
 local use_modifiers = false
 
 -- How much of the sky the camera can see, per direction, as a cube of 6x6
@@ -219,7 +231,12 @@ end
 -- data, and the shader then sees full skylight, which is what an object out in
 -- the open should get.
 function M.apply_to_node(node)
-	local technique = use_modifiers and TECHNIQUE_MODIFIERS or TECHNIQUE
+	local technique
+	if sun_gate then
+		technique = use_modifiers and TECHNIQUE_SUN_MODIFIERS or TECHNIQUE_SUN
+	else
+		technique = use_modifiers and TECHNIQUE_MODIFIERS or TECHNIQUE
+	end
 	each_material(node, function(m)
 		m:SetTechnique(0, technique)
 	end)
@@ -233,9 +250,22 @@ function M.apply_to_node(node)
 	if alpha_node then
 		each_material_of(alpha_node:GetComponent("CustomGeometry"),
 				function(m)
-			m:SetTechnique(0, TECHNIQUE_ALPHA)
+			m:SetTechnique(0, sun_gate and TECHNIQUE_SUN_ALPHA or
+					TECHNIQUE_ALPHA)
 		end)
 	end
+end
+
+-- Whether the sun is gated by the skylight the mesher packed into the vertex
+-- colours. A shadow map cannot tell a cave from a canopy -- in both the sky
+-- is blocked by geometry that is being drawn -- so the world's own light
+-- value is what says whether the sun reaches a surface at all. Turn it on in
+-- a world that maintains voxelworld's skylight, and leave it off in one that
+-- does not: there every surface reads as underground and the sun never
+-- arrives. Set it before the first chunk arrives; what is already drawn
+-- keeps the technique it was given.
+function M.use_sun_gate(enable)
+	sun_gate = enable and true or false
 end
 
 -- Read the voxel format's surface modifiers, for a world whose format binds

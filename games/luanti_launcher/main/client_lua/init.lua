@@ -31,6 +31,12 @@ voxelworld.lod_distance = 1000
 voxelworld.physics_distance = 1
 voxelworld.use_skylight = true
 
+-- A Luanti world's light value says how much sky reaches a voxel, so that is
+-- what says whether the sun reaches a surface: without this the sun lights
+-- the walls of a cave it cannot see into, because a shadow map cannot tell
+-- a cave from a canopy. See use_sun_gate() in builtin/voxel_shading.
+voxel_shading.use_sun_gate(true)
+
 -- Luanti's origin is where its mods build, so that is what the camera frames
 local LOOK_AT = {x = 0, y = 2, z = 0}
 local CAMERA_DISTANCE = 34
