@@ -82,13 +82,19 @@ namespace voxelworld
 		// ... and this far out, generated as well. <= the load radii.
 		int16_t generate_xz = 0;
 		int16_t generate_y = 0;
+		// Whose point this is, if it is a client's, and zero if it is not.
+		// A peer's point is also where the world is sent to that peer from:
+		// how much it gets is the smaller of what its client asked for and
+		// this point's load radius, because the server cannot send what it
+		// does not keep. A peer with no point of its own gets everything.
+		size_t peer = 0;
 
 		LoadPoint(){}
 		LoadPoint(const pv::Vector3DInt32 &p,
 				int16_t load_xz, int16_t load_y,
-				int16_t generate_xz, int16_t generate_y):
+				int16_t generate_xz, int16_t generate_y, size_t peer = 0):
 			p(p), load_xz(load_xz), load_y(load_y),
-			generate_xz(generate_xz), generate_y(generate_y)
+			generate_xz(generate_xz), generate_y(generate_y), peer(peer)
 		{}
 	};
 

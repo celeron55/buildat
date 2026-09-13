@@ -34,6 +34,7 @@
 #include <Geometry.h>
 #include <Zone.h>
 #include <deque>
+#include <mutex>
 #include <map>
 #include <algorithm>
 #define MODULE "voxelworld"
@@ -313,6 +314,21 @@ struct CInstance: public voxelworld::Instance
 	// Sections the save was asked for and does not have; see load_saved_only()
 	set_<uint64_t> m_save_misses;
 
+	// What the send filter answers from. replicate asks it from its own
+	// thread, so this much is behind a lock of its own -- a small one, and
+	// never held while reaching into another module.
+	std::mutex m_send_mutex;
+	// Chunk node id -> the chunk it holds. A node that is not in here is
+	// not this world's and the filter says nothing about it.
+	sm_<uint, pv::Vector3DInt32> m_chunk_node_chunk_p;
+	// The load point of each peer that has one of its own
+	sm_<replicate::PeerId, voxelworld::LoadPoint> m_peer_points;
+	// How much world each client asked for, in sections. A peer that never
+	// asked is not in here and gets everything its load point keeps.
+	sm_<replicate::PeerId, int> m_peer_send_radius;
+	// Where a peer was when replicate last reconsidered what it has
+	sm_<replicate::PeerId, pv::Vector3DInt16> m_peer_section;
+
 	// Persistence. Null until a game calls set_save(); a world that never
 	// does is generated and forgotten, which is what every game did before
 	// this existed and what an arena game wants.
@@ -373,6 +389,15 @@ struct CInstance: public voxelworld::Instance
 
 		check_streaming();
 
+		// Which chunks reach which peer. Nothing is filtered until a game
+		// gives its peers load points of their own; see peer_wants_node().
+		replicate::access(m_server, [&](replicate::Interface *irep){
+			irep->set_node_filter(m_scene_ref,
+					[this](replicate::PeerId peer, uint node_id){
+				return peer_wants_node(peer, node_id);
+			});
+		});
+
 		// Find peers that already are on the scene and iniitalize them
 		sv_<replicate::PeerId> peers;
 		replicate::access(m_server, [&](replicate::Interface *ireplicate){
@@ -387,6 +412,10 @@ struct CInstance: public voxelworld::Instance
 
 	~CInstance()
 	{
+		// The filter holds this; it must not outlive it
+		replicate::access(m_server, [&](replicate::Interface *irep){
+			irep->set_node_filter(m_scene_ref, nullptr);
+		});
 	}
 
 	void create_initial_sections()
@@ -451,6 +480,60 @@ struct CInstance: public voxelworld::Instance
 				return true;
 		}
 		return false;
+	}
+
+	// Which chunks a peer is sent: the ones its own load point keeps near
+	// it, as far out as its client asked for. replicate calls this from its
+	// own sync, so it reaches into nothing and holds only m_send_mutex.
+	//
+	// A node this world did not make, or a peer whose position nobody
+	// declared, is none of this filter's business and passes.
+	bool peer_wants_node(replicate::PeerId peer, uint node_id)
+	{
+		std::lock_guard<std::mutex> lock(m_send_mutex);
+		auto it = m_chunk_node_chunk_p.find(node_id);
+		if(it == m_chunk_node_chunk_p.end())
+			return true;
+		auto pit = m_peer_points.find(peer);
+		if(pit == m_peer_points.end())
+			return true;
+		const voxelworld::LoadPoint &lp = pit->second;
+		int radius = lp.load_xz;
+		auto rit = m_peer_send_radius.find(peer);
+		if(rit != m_peer_send_radius.end() && rit->second < radius)
+			radius = rit->second;
+		pv::Vector3DInt16 sp = container_coord16(it->second,
+				m_section_size_chunks);
+		pv::Vector3DInt16 c = section_of_voxel(lp.p);
+		return dist(sp.getX(), c.getX()) <= radius &&
+				dist(sp.getZ(), c.getZ()) <= radius &&
+				dist(sp.getY(), c.getY()) <= lp.load_y;
+	}
+
+	// The client says how much world it wants; what it gets is that or the
+	// load radius, whichever is smaller. Only the client knows what its
+	// computer can draw, and loading more than it will look at is the
+	// server's memory spent on nothing.
+	void on_set_send_distance(const network::Packet &packet)
+	{
+		if(!m_clients_initialized.count(packet.sender))
+			return;
+		int distance_voxels = atoi(packet.data.c_str());
+		if(distance_voxels < 0)
+			return;
+		int section_w = m_chunk_size_voxels.getX() *
+				m_section_size_chunks.getX();
+		// A section the point is anywhere in is one the client can see into
+		int radius = (distance_voxels + section_w - 1) / section_w;
+		log_v(MODULE, "C%zu: wants %i voxels of world, which is %i sections",
+				(size_t)packet.sender, distance_voxels, radius);
+		{
+			std::lock_guard<std::mutex> lock(m_send_mutex);
+			m_peer_send_radius[packet.sender] = radius;
+		}
+		replicate::access(m_server, [&](replicate::Interface *irep){
+			irep->refresh_peer_nodes(m_scene_ref, packet.sender);
+		});
 	}
 
 	void stream_pass()
@@ -630,6 +713,8 @@ struct CInstance: public voxelworld::Instance
 				replicate::PeerLeftScene);
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
 				client_file::FilesTransmitted)
+		EVENT_TYPEN("network:packet_received/voxelworld:set_send_distance",
+				on_set_send_distance, network::Packet)
 		/*EVENT_TYPEN("network:packet_received/voxelworld:get_section",
 				on_get_section, network::Packet)*/
 	}
@@ -747,6 +832,10 @@ struct CInstance: public voxelworld::Instance
 	void unload_node(Scene *scene, uint node_id)
 	{
 		log_d(MODULE, "Unloading node %i", node_id);
+		{
+			std::lock_guard<std::mutex> lock(m_send_mutex);
+			m_chunk_node_chunk_p.erase(node_id);
+		}
 		Node *n = scene->GetNode(node_id);
 		if(!n){
 			log_w(MODULE, "Cannot unload node %i: Not found in scene", node_id);
@@ -860,6 +949,11 @@ struct CInstance: public voxelworld::Instance
 		if(n->GetID() == 0)
 			throw Exception("Can't handle static node id=0");
 		section.node_ids->setVoxelAt(chunk_p, n->GetID());
+		{
+			// What the send filter answers from; see peer_wants_node()
+			std::lock_guard<std::mutex> lock(m_send_mutex);
+			m_chunk_node_chunk_p[n->GetID()] = chunk_p;
+		}
 
 		// Distinguish static voxel nodes from others
 		n->SetVar(StringHash("buildat_static"), Variant(true));
@@ -1378,6 +1472,30 @@ struct CInstance: public voxelworld::Instance
 	{
 		m_load_points = points;
 		m_streaming = true;
+		// A peer whose point moved into another section is sent another set
+		// of chunks, and replicate has no other way of knowing that it did
+		sv_<replicate::PeerId> moved;
+		{
+			std::lock_guard<std::mutex> lock(m_send_mutex);
+			m_peer_points.clear();
+			for(const voxelworld::LoadPoint &lp : points){
+				if(lp.peer == 0)
+					continue;
+				m_peer_points[lp.peer] = lp;
+				pv::Vector3DInt16 sp = section_of_voxel(lp.p);
+				auto it = m_peer_section.find(lp.peer);
+				if(it != m_peer_section.end() && it->second == sp)
+					continue;
+				m_peer_section[lp.peer] = sp;
+				moved.push_back(lp.peer);
+			}
+		}
+		if(moved.empty())
+			return;
+		replicate::access(m_server, [&](replicate::Interface *irep){
+			for(replicate::PeerId peer : moved)
+				irep->refresh_peer_nodes(m_scene_ref, peer);
+		});
 	}
 
 	sv_<pv::Vector3DInt16> get_loaded_sections()
@@ -2897,6 +3015,8 @@ struct Module: public interface::Module, public voxelworld::Interface
 		m_server->sub_event(this, Event::t("replicate:peer_left_scene"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t("main_context:scene_deleted"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/voxelworld:set_send_distance"));
 		/*m_server->sub_event(this, Event::t(
 					"network:packet_received/voxelworld:get_section"));*/
 	}

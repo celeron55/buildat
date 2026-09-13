@@ -390,9 +390,11 @@ struct Module: public interface::Module
 					GENERATE_RADIUS_XZ, RADIUS_Y));
 		}
 		for(auto &pair : m_player_voxel_p){
+			// Tagged with the peer, which is what makes it the point the
+			// world is sent to that client from
 			points.push_back(voxelworld::LoadPoint(pair.second,
 					LOAD_RADIUS_XZ, RADIUS_Y,
-					GENERATE_RADIUS_XZ, RADIUS_Y));
+					GENERATE_RADIUS_XZ, RADIUS_Y, pair.first));
 		}
 		// A pin is a point with no radius at all
 		for(uint64_t k : m_pinned_sections){
