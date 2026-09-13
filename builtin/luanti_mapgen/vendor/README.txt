@@ -27,50 +27,42 @@ Luanti's own, unchanged (upstream: git master, 2026-09):
 Where the port stopped (2026-09-13)
 -----------------------------------
 
-luanti_mapgen.cpp compiles the bottom of the tree: voxel.cpp with the shims
-under it, the noise adapter and the node definitions. Everything above is
-in the tree and not yet in that list of includes.
+luanti_mapgen.cpp compiles the bottom of the tree: the voxel manipulator,
+the serialization helpers, the noise adapter and the node definitions, all
+with the shims under them. What is left out of that list is the generators
+themselves and the four managers.
 
-The next piece is util/serialize.cpp, which mg_schematic wants. It needs
-three things:
+They are much closer than that sounds. With every .cpp in the list,
+`mapgen.cpp` and `objdef.cpp` compile clean; the 62 errors that remain are
+all in the managers and all of the same kind -- a shim that is missing a
+member. The ones the compiler named, in the order it named them:
 
- 1. `video::SColor`, Irrlicht's colour, which no shim has yet.
- 2. `core::clamp`, one line beside the vectors.
- 3. A name collision: this shim's `itos` and `ftos` against buildat's own
-    in core/types.h. Rename the shim's, or leave them out -- the mapgen
-    uses `itos` twice.
+    myrand_range(min, max)                  util/numeric.h
+    MapNode::rotateAlongYAxis()             mapnode.h
+    getNodeBlockPos(v3s16)                  util/numeric.h
+    NodeResolver::reset()                   nodedef.h
+    ServerMap forward-declared globally     voxelalgorithms.h says
+                                            voxalgo::ServerMap and means ::
+    v3s16 + v3f in cavegen.cpp:467 and 783  irr_v3d.h: the mixed-type
+                                            operator+ is there and still
+                                            does not match -- look at what
+                                            `of` and `rs` really are
 
-And one trap to know about: a header reached by two different paths --
-"util/string.h" and "util/util/../string.h" -- is included twice because
-`#pragma once` compares paths. The forwarding headers under util/util/ are
-what make that happen, so anything they reach needs an include guard rather
-than a pragma.
+mapgen.cpp cannot be compiled without mg_biome.cpp, because it names
+BiomeParamsOriginal's vtable; so the set goes in together or not at all,
+which is why the includes are where they are.
 
-After serialize comes mg_schematic's own two: `compress`/`decompress`,
-which buildat has as interface::compress_zlib, and MapNode::serializeBulk,
-which lives in Luanti's mapnode.cpp and is not vendored -- mapnode.h here
-is a shim.
+After the managers compile, what is left before a generated world:
 
-Shims, written here:
+ 1. A translation between MMVManip and interface::VoxelVolume, which is a
+    loop: both are flat arrays over a box in the same order, and a MapNode
+    is what VoxelFormat::luanti() binds.
+ 2. Filling a NodeDefManager from the content ids luanti_mapgen/api.h
+    already carries across, plus the few ContentFeatures fields a mapgen
+    reads -- which builtin/luanti has and does not send yet.
+ 3. A MapgenParams with the seed and the water level, and
+    Mapgen::createMapgen() behind create_generator().
 
-    irrlichttypes.h, irrlichttypes_bloated.h, irr_v3d.h, irr_v2d.h
-    map.h, mapblock.h, emerge.h, gamedef.h, server.h, profiler.h,
-    settings.h, voxelalgorithms.h
-    util/string.h, util/numeric.h, util/container.h, util/config.h,
-    util/directiontables.h
-    mapgen/*.h and util/util/*.h, which only forward to the file beside
-    them: a vendored file that includes "mapgen/mapgen.h" or
-    "util/string.h" has to find something, and a runtime-compiled module
-    gets no include directories of its own
-    irrlicht_changes/printing.h
-    mapnode.h
-    nodedef.h, nodedef.cpp
-    constants.h
-    exceptions.h
-    debug.h
-    log.h, log.cpp
-    porting.h
-    util/basic_macros.h
-
-A file that is Luanti's must stay Luanti's: if something does not compile,
-the shim is what changes.
+Two things that are known and not done: a .mts schematic file is not read
+(serialization.cpp says why), and Schematic::placeOnMap() has a ServerMap
+that does nothing, which is where a mod's core.place_schematic() will land.

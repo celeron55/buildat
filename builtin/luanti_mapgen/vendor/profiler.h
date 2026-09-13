@@ -2,8 +2,16 @@
 //
 // Luanti counts what its mapgen spends; buildat has its own timing and the
 // mapgen's own numbers go nowhere here.
-#pragma once
+#ifndef LUANTI_SHIM_PROFILER_H
+#define LUANTI_SHIM_PROFILER_H
 #include <string>
+
+enum ScopeProfilerType {
+	SPT_ADD,
+	SPT_AVG,
+	SPT_GRAPH_ADD,
+	SPT_MAX,
+};
 
 class Profiler
 {
@@ -13,6 +21,14 @@ public:
 };
 
 extern Profiler *g_profiler;
+
+// A scope timer that adds to the profiler, which is nothing here
+class ScopeProfiler
+{
+public:
+	ScopeProfiler(Profiler *p, const std::string &name,
+			ScopeProfilerType type = SPT_ADD, int prec = 0){}
+};
 
 // Luanti's scope timers, which are nothing here
 #define TimeTaker LuantiShimTimeTaker
@@ -24,3 +40,5 @@ public:
 	u32 stop(bool quiet = false){ return 0; }
 	u32 getTimerTime(){ return 0; }
 };
+
+#endif

@@ -7,7 +7,8 @@
 //
 // Vendoring the real one would bring itemdef.h, sound.h and tile.h with
 // it, and tile.h is the client.
-#pragma once
+#ifndef LUANTI_SHIM_NODEDEF_H
+#define LUANTI_SHIM_NODEDEF_H
 #include "irrlichttypes_bloated.h"
 #include "mapnode.h"
 #include <string>
@@ -106,6 +107,17 @@ public:
 	bool getIdsFromNrBacklog(std::vector<content_t> *result_out,
 			bool all_required = false, content_t c_fallback = CONTENT_IGNORE);
 
+	// A resolver copied into another object, which is what a manager does
+	// when it hands a definition out
+	void cloneTo(NodeResolver *res) const {
+		res->m_ndef = m_ndef;
+		res->m_nodenames = m_nodenames;
+		res->m_nnlistsizes = m_nnlistsizes;
+		res->m_nodenames_idx = m_nodenames_idx;
+		res->m_nnlistsizes_idx = m_nnlistsizes_idx;
+		res->m_resolve_done = m_resolve_done;
+	}
+
 	const NodeDefManager *m_ndef = nullptr;
 	std::vector<std::string> m_nodenames;
 	std::vector<size_t> m_nnlistsizes;
@@ -154,3 +166,5 @@ private:
 	std::vector<ContentFeatures> m_features;
 	ContentFeatures m_unknown;
 };
+
+#endif

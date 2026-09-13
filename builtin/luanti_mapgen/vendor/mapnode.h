@@ -1,7 +1,8 @@
 // A shim, not Luanti's: see README.txt. The numbers and the shape are
 // Luanti's own, and the shape is also buildat's: a voxel word under
 // VoxelFormat::luanti() is this struct's three fields in the same order.
-#pragma once
+#ifndef LUANTI_SHIM_MAPNODE_H
+#define LUANTI_SHIM_MAPNODE_H
 #include "irrlichttypes_bloated.h"
 
 // Luanti's three reserved content ids
@@ -25,6 +26,15 @@ struct ContentLightingFlags {
 	bool operator!=(const ContentLightingFlags &o) const {
 		return !(*this == o);
 	}
+};
+
+// How a node or a schematic is turned, which is Luanti's own enum
+enum Rotation {
+	ROTATE_0,
+	ROTATE_90,
+	ROTATE_180,
+	ROTATE_270,
+	ROTATE_RAND,
 };
 
 enum LightBank
@@ -61,6 +71,13 @@ struct alignas(u32) MapNode
 	u8 getParam2() const noexcept { return param2; }
 	void setParam2(u8 p) noexcept { param2 = p; }
 
+	// Luanti serializes a whole block of these at once; what needs it here
+	// is a schematic file, which this build does not read yet. See
+	// serialization.h.
+	static void deSerializeBulk(std::istream &is, int version,
+			MapNode *nodes, u32 nodecount, u8 content_width,
+			u8 params_width);
+
 	// The light in one bank, which is the nibble it is kept in
 	u8 getLight(LightBank bank, ContentLightingFlags f) const noexcept {
 		u8 stored = (bank == LIGHTBANK_DAY) ? (param1 & 0x0f) :
@@ -82,3 +99,5 @@ struct alignas(u32) MapNode
 			param1 = (param1 & 0x0f) | ((light & 0x0f) << 4);
 	}
 };
+
+#endif

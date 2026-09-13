@@ -2,7 +2,8 @@
 //
 // Luanti logs into streams; buildat logs with a level and a module name.
 // These are ostreams that end a line into buildat's log.
-#pragma once
+#ifndef LUANTI_SHIM_LOG_H
+#define LUANTI_SHIM_LOG_H
 #include "core/log.h"
 #include <sstream>
 #include <ostream>
@@ -57,3 +58,5 @@ extern LogStream dstream_;
 #define verbosestream luanti_shim_log::verbosestream_
 #define dstream luanti_shim_log::dstream_
 #define tracestream luanti_shim_log::verbosestream_
+
+#endif

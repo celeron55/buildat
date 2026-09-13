@@ -27,7 +27,11 @@
 // built -- vendor/README.txt says where the port stopped and what the next
 // missing piece is.
 #include "vendor/log.cpp"
+#include "vendor/globals.cpp"
+#include "vendor/util/serialize.cpp"
 #include "vendor/nodedef.cpp"
+#include "vendor/mapnode.cpp"
+#include "vendor/serialization.cpp"
 #include "vendor/noise.cpp"
 #include "vendor/voxel.cpp"
 

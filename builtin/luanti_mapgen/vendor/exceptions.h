@@ -1,5 +1,6 @@
 // A shim, not Luanti's: see README.txt.
-#pragma once
+#ifndef LUANTI_SHIM_EXCEPTIONS_H
+#define LUANTI_SHIM_EXCEPTIONS_H
 #include <exception>
 #include <string>
 
@@ -24,3 +25,5 @@ LUANTI_SHIM_EXCEPTION(SettingNotFoundException);
 LUANTI_SHIM_EXCEPTION(ItemNotFoundException);
 LUANTI_SHIM_EXCEPTION(ServerError);
 LUANTI_SHIM_EXCEPTION(ModError);
+
+#endif

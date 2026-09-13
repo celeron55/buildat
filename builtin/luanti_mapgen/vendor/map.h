@@ -7,7 +7,8 @@
 //
 // Map itself is never dereferenced by the mapgen -- it is passed around as
 // a pointer and handed to the MMVManip -- so it stays a declared type.
-#pragma once
+#ifndef LUANTI_SHIM_MAP_H
+#define LUANTI_SHIM_MAP_H
 #include "voxel.h"
 #include "util/basic_macros.h"
 #include <map>
@@ -39,3 +40,5 @@ public:
 protected:
 	Map *m_map = nullptr;
 };
+
+#endif

@@ -4,7 +4,8 @@
 // the light here and floods it as the map is written, so a second pass
 // would be work done twice. See "Mapgen stage 3" in
 // doc/plan/luanti_module_plan.md.
-#pragma once
+#ifndef LUANTI_SHIM_VOXELALGORITHMS_H
+#define LUANTI_SHIM_VOXELALGORITHMS_H
 #include "irrlichttypes_bloated.h"
 #include "voxel.h"
 
@@ -24,3 +25,5 @@ inline void propagateSunlight(MMVManip *vm, const VoxelArea &a,
 		bool inexistent_top_provides_sunlight, const NodeDefManager *ndef){}
 
 } // namespace voxalgo
+
+#endif

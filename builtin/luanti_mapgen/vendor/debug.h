@@ -2,7 +2,8 @@
 //
 // Luanti's assertions. A mapgen that trips one has a bug, and the server
 // says so and stops rather than generating something wrong.
-#pragma once
+#ifndef LUANTI_SHIM_DEBUG_H
+#define LUANTI_SHIM_DEBUG_H
 #include "exceptions.h"
 #include <cassert>
 #include <string>
@@ -13,3 +14,5 @@
 	((expr) ? FATAL_ERROR(msg) : (void)(0))
 #define sanity_check(expr) assert(expr)
 #define SANITY_CHECK(expr) assert(expr)
+
+#endif

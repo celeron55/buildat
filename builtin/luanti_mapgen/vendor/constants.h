@@ -1,5 +1,6 @@
 // A shim, not Luanti's: the numbers are Luanti's own. See README.txt.
-#pragma once
+#ifndef LUANTI_SHIM_CONSTANTS_H
+#define LUANTI_SHIM_CONSTANTS_H
 #include "irrlichttypes.h"
 
 // The size of a MapBlock, which is what Luanti's mapgens count in
@@ -13,3 +14,5 @@
 
 #define MYMIN(a, b) ((a) < (b) ? (a) : (b))
 #define MYMAX(a, b) ((a) > (b) ? (a) : (b))
+
+#endif

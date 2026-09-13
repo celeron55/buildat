@@ -1,5 +1,6 @@
 // A shim, not Luanti's: see README.txt.
-#pragma once
+#ifndef LUANTI_SHIM_IRR_V2D_H
+#define LUANTI_SHIM_IRR_V2D_H
 #include "irrlichttypes.h"
 
 namespace core {
@@ -27,3 +28,5 @@ public:
 typedef core::vector2d<s16> v2s16;
 typedef core::vector2d<s32> v2s32;
 typedef core::vector2d<f32> v2f;
+
+#endif

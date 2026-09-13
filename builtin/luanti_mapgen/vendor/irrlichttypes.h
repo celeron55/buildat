@@ -2,7 +2,8 @@
 //
 // Luanti's integer names, which come from Irrlicht. buildat does not use
 // them anywhere else, so they live here and nowhere else.
-#pragma once
+#ifndef LUANTI_SHIM_IRRLICHTTYPES_H
+#define LUANTI_SHIM_IRRLICHTTYPES_H
 #include <cstdint>
 #include <climits>
 #include <cstddef>
@@ -33,3 +34,5 @@ typedef double f64;
 #define U64_MAX UINT64_MAX
 
 typedef u16 content_t;
+
+#endif
