@@ -304,7 +304,10 @@ end
 --
 
 local DEFAULTS = {
-	["mg_name"] = "singlenode",
+	-- Luanti's own default for a world that does not name one. Which
+	-- mapgen a world is actually generated with is written into the save
+	-- the first time it is opened; see mapgen_name() in luanti.cpp.
+	["mg_name"] = "v7",
 	["water_level"] = "1",
 	["mapgen_limit"] = "31000",
 	["chunksize"] = "5",
@@ -612,8 +615,13 @@ local FACING_OF_PARAMTYPE2 = {
 -- What the mapgen is called in this world: Luanti keeps it in map_meta.txt
 -- and a buildat save in its world.mt, and either way it is a setting by the
 -- time anything here reads it.
+-- What the world's own settings say, and nothing if they do not say: a
+-- default is not an answer here, because which mapgen a world with no
+-- answer of its own gets depends on whether it has been played before.
+-- The module decides that and writes it into the save; see mapgen_name()
+-- in luanti.cpp.
 function core.__mapgen_name()
-	return core.settings:get("mg_name") or "singlenode"
+	return core.settings.values["mg_name"] or ""
 end
 
 -- Every name a mapgen can ask about: the nodes, and the aliases a game
