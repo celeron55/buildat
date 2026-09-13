@@ -475,12 +475,20 @@ local Inv = {}
 Inv.__index = Inv
 
 function core.__new_inventory(location)
-	return setmetatable({lists = {}, widths = {},
+	return setmetatable({lists = {}, widths = {}, gen = 0,
 			location = location or {type = "undefined"}}, Inv)
 end
 
 local function inv_list(self, listname)
 	return self.lists[listname]
+end
+
+-- Counts up on every change, so that whoever has to send an inventory
+-- somewhere can tell whether it is the one they sent last. The stacks in a
+-- list are taken from and added to in place, so it is the methods that are
+-- counted rather than the lists.
+local function changed(self)
+	self.gen = (self.gen or 0) + 1
 end
 
 function Inv:is_empty(listname)
@@ -514,6 +522,7 @@ function Inv:set_size(listname, size)
 	else
 		self.lists[listname] = list
 	end
+	changed(self)
 	return true
 end
 
@@ -527,6 +536,7 @@ function Inv:set_width(listname, width)
 		return false
 	end
 	self.widths[listname] = width
+	changed(self)
 	return true
 end
 
@@ -544,6 +554,7 @@ function Inv:set_stack(listname, i, stack)
 		return false
 	end
 	list[i] = ItemStack(stack)
+	changed(self)
 	return true
 end
 
@@ -567,6 +578,7 @@ function Inv:set_list(listname, stacks)
 	for i = 1, #list do
 		list[i] = ItemStack(stacks[i])
 	end
+	changed(self)
 end
 
 function Inv:get_lists()
@@ -593,6 +605,7 @@ function Inv:add_item(listname, stack)
 	if not list then
 		return left
 	end
+	changed(self)
 	-- Into the stacks that already hold this item first, as Luanti does
 	for pass = 1, 2 do
 		for i = 1, #list do
@@ -644,6 +657,7 @@ function Inv:remove_item(listname, stack, match_meta)
 	if not list or want:is_empty() then
 		return taken
 	end
+	changed(self)
 	for i = #list, 1, -1 do
 		local have = list[i]
 		if have:get_name() == want:get_name() and

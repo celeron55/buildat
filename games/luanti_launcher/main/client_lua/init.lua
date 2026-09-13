@@ -13,8 +13,9 @@ local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
 local voxel_shading = require("buildat/module/voxel_shading")
 -- The module's own client half: what a Luanti game's textures are made of,
--- when a tile is an expression rather than a file
-require("buildat/module/luanti")
+-- when a tile is an expression rather than a file, and what the player is
+-- carrying
+local luanti = require("buildat/module/luanti")
 
 local scene = replicate.main_scene
 
@@ -129,6 +130,26 @@ crosshair:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 20)
 crosshair.horizontalAlignment = magic.HA_CENTER
 crosshair.verticalAlignment = magic.VA_CENTER
 crosshair:SetPosition(0, 0)
+
+-- What the player is carrying, as a line of text. A formspec is what draws
+-- an inventory properly; this is what says that digging a node put the node
+-- somewhere, which is the thing worth seeing before there is one.
+local carrying_text = magic.ui.root:CreateChild("Text")
+carrying_text:SetText("")
+carrying_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 15)
+carrying_text.horizontalAlignment = magic.HA_CENTER
+carrying_text.verticalAlignment = magic.VA_BOTTOM
+carrying_text:SetPosition(0, -10)
+luanti.sub_inventory(function(lists)
+	local parts = {}
+	for _, item in ipairs(lists.main or {}) do
+		if item ~= "" then
+			parts[#parts + 1] = item
+		end
+	end
+	carrying_text:SetText(#parts == 0 and "carrying nothing" or
+			"carrying: " .. table.concat(parts, ", "))
+end)
 
 magic.ui:SetFocusElement(nil)
 

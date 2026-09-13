@@ -81,10 +81,15 @@ namespace luanti
 		// player is keyed by, the join and leave callbacks a mod registers
 		// run here, and core.get_connected_players() answers with them.
 		//
+		// The peer is which client it is, so that what a player is sent --
+		// their inventory, and the formspecs after it -- has somewhere to
+		// go. It is network::PeerInfo::Id, kept as a number here so that
+		// this header does not have to know about the network module.
+		//
 		// Where a player is is their client's to say; nothing here moves
 		// one. The angles are radians, horizontal measured the way
 		// core.get_look_horizontal() means it.
-		virtual void add_player(const ss_ &name) = 0;
+		virtual void add_player(const ss_ &name, size_t peer) = 0;
 		virtual void remove_player(const ss_ &name) = 0;
 		virtual void set_player_pos(const ss_ &name, float x, float y,
 				float z, float look_h, float look_v) = 0;

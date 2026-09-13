@@ -173,6 +173,47 @@ buildat.sub_packet("luanti:texmods", function(data)
 	end
 end)
 
+--
+-- What the player is carrying
+--
+-- The server sends this to one client -- the player's own -- whenever their
+-- inventory has changed. What draws it is whoever is drawing: a formspec
+-- once there is one, and the launcher's own line of text until then.
+
+-- list name -> an array of item strings, one per slot; an empty slot is ""
+M.inventory = {}
+
+local inventory_subs = {}
+
+-- sub_inventory(f) -> f(lists) every time the player's inventory changes,
+-- and once now if one has already arrived
+function M.sub_inventory(f)
+	inventory_subs[#inventory_subs + 1] = f
+	if next(M.inventory) then
+		f(M.inventory)
+	end
+end
+
+buildat.sub_packet("luanti:inventory", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	local lists = {}
+	local i = 1
+	while i + 1 <= #values do
+		local name = values[i]
+		local size = tonumber(values[i + 1]) or 0
+		local stacks = {}
+		for slot = 1, size do
+			stacks[slot] = values[i + 1 + slot] or ""
+		end
+		lists[name] = stacks
+		i = i + 2 + size
+	end
+	M.inventory = lists
+	for _, f in ipairs(inventory_subs) do
+		f(lists)
+	end
+end)
+
 -- Asked for rather than sent, because a packet that arrives before the
 -- script that subscribes to it has nowhere to go
 buildat.send_packet("luanti:get_texmods", "")

@@ -589,6 +589,9 @@ struct Module: public interface::Module, public luanti::Interface
 	bool m_had_node_meta = false;
 	// The same for the players; a world nobody has been in stays that way
 	bool m_had_players = false;
+	// Which client a player is, so that what is sent to one has somewhere to
+	// go. Whoever names a player says which peer it is; see add_player().
+	sm_<ss_, size_t> m_player_peers;
 	bool m_game_running = false;
 	// What load_lua() was handed before run_game(), in the order it came
 	sv_<std::pair<ss_, ss_>> m_pending_lua;
@@ -2720,6 +2723,47 @@ struct Module: public interface::Module, public luanti::Interface
 		});
 	}
 
+	// __luanti_send_inventory(player_name, {list, size, item, item, ...}):
+	// what a player is carrying, to their own client. The strings are flat
+	// -- a list's name, how many slots it has, and then that many item
+	// strings -- because that is what a cereal array of strings is, and
+	// because the client half reads them straight back into lists.
+	static int l_send_inventory(lua_State *L)
+	{
+		Module *self = module_of(L);
+		size_t name_len = 0;
+		const char *name_p = luaL_checklstring(L, 1, &name_len);
+		ss_ name(name_p ? name_p : "", name_len);
+		luaL_checktype(L, 2, LUA_TTABLE);
+		sv_<ss_> flat;
+		size_t n = lua_objlen(L, 2);
+		flat.reserve(n);
+		for(size_t i = 0; i < n; i++){
+			lua_rawgeti(L, 2, (int)i + 1);
+			size_t len = 0;
+			const char *p = lua_tolstring(L, -1, &len);
+			flat.push_back(ss_(p ? p : "", p ? len : 0));
+			lua_pop(L, 1);
+		}
+		self->send_inventory(name, flat);
+		return 0;
+	}
+
+	void send_inventory(const ss_ &name, const sv_<ss_> &flat)
+	{
+		auto it = m_player_peers.find(name);
+		if(it == m_player_peers.end())
+			return;
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(flat);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(it->second, "luanti:inventory", os.str());
+		});
+	}
+
 	// __luanti_find_ids(x0,y0,z0,x1,y1,z1, {ids, ids, ...})
 	//         -> {{x,y,z, x,y,z, ...}, ...}, one list per set of ids
 	//
@@ -3430,6 +3474,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_active_boxes", l_active_boxes);
 		set_global_cfunction("__luanti_find_ids", l_find_ids);
 		set_global_cfunction("__luanti_show_objects", l_show_objects);
+		set_global_cfunction("__luanti_send_inventory", l_send_inventory);
 		lua_pushlightuserdata(m_lua, (void*)this);
 		lua_setfield(m_lua, LUA_REGISTRYINDEX, "__luanti_module");
 		set_global_string("__luanti_module_path", module_path());
@@ -3529,8 +3574,9 @@ struct Module: public interface::Module, public luanti::Interface
 	// Luanti calls whoever is on the other end of one: the name is the
 	// caller's to choose and is what everything about the player is keyed
 	// by. The callbacks a mod registers for a join and a leave run here.
-	void add_player(const ss_ &name)
+	void add_player(const ss_ &name, size_t peer)
 	{
+		m_player_peers[name] = peer;
 		node_action("core.__add_player(\""+lua_quoted(name)+"\") return true");
 	}
 
@@ -3538,6 +3584,7 @@ struct Module: public interface::Module, public luanti::Interface
 	{
 		node_action("core.__remove_player(\""+lua_quoted(name)+
 				"\") return true");
+		m_player_peers.erase(name);
 	}
 
 	void set_player_pos(const ss_ &name, float x, float y, float z,
