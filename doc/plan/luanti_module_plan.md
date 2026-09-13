@@ -436,17 +436,19 @@ is the hole `dynamic_add_media` exists to plug.
 game through `load_lua()` is not in Luanti's contract and can pick whatever
 strategy it likes for its own content.
 
-**What the code does instead, and it is a bug (2026-09-13).**
-`serve_game_media()` collects each mod's `textures/` and nothing else.
-Luanti makes no distinction between a texture, a model and a sound: media is
-every file in a mod's `textures/`, `sounds/`, `models/` and `media/` whose
-extension is on a hardcoded whitelist, and all of it goes to the client.
-That a game's models are not used by its own client is the game's decision,
-not the contract. devtest ships 29 model files and 3 sounds that are never
-sent. The fix is the four directories and the whitelist -- `.png`, `.jpg`,
-`.tga`, `.obj`, `.b3d`, `.x`, `.gltf`, `.glb`, `.ogg` and the rest of
-Luanti's list -- and it is worth doing on its own, before anything that
-wants a model or a sound.
+**And all of it is sent (2026-09-13).** Luanti makes no distinction between
+a texture, a model and a sound: media is whatever sits in one of a mod's
+media directories and ends in an extension the client knows, and what the
+client makes of it is the game's business. So `serve_game_media()` collects
+every mod's `textures/`, `sounds/`, `media/`, `models/`, `locale/` and
+`fonts/` and the game's own `textures/` beside them -- Luanti's own list and
+Luanti's own order, `ServerModManager::getModsMediaPaths` -- and keeps what
+passes Luanti's whitelist: a name of `[A-Za-z0-9_.-]` ending in `.png`,
+`.jpg`, `.tga`, `.ogg`, `.x`, `.b3d`, `.obj`, `.gltf`, `.glb`, `.tr`,
+`.po`, `.mo`, `.ttf` or `.woff` (`Server::addMediaFile`). The first file
+under a name wins, which is what a clash does in Luanti too. devtest: 450
+files from 26 directories, of which 419 are the textures that used to be all
+of it, 25 are models, 4 are translations and 2 are sounds.
 
 What it costs is on the transport rather than here, and `client_file` wanted
 four things before it could carry a game's whole asset tree: a file read
@@ -820,10 +822,6 @@ shape of their own, 83 of those liquids; 56 turn with their param2.
   "The meshes: after the map".
 - **Palettes**: settled; see "The palettes: a variant wears its own
   textures". The first half of it is engine work in `VoxelVariant`.
-- **The media set is short.** `serve_game_media()` collects `textures/` and
-  nothing else, so devtest's 29 model files and 3 sounds are never sent.
-  That contradicts "What gets sent, and what does not" below, which is a
-  settled decision; see the note there.
 
 **M4 -- it plays. Built 2026-09-13.** Digging and placing with every
 callback around them, node metadata, inventories, the recipes, the

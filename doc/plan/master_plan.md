@@ -76,16 +76,7 @@ are each a simplification the plan names rather than a bug. See "devtest's own
 unittests as the oracle" in the module plan for how to run it -- it is the
 first thing to run after touching the API surface.
 
-**First, a bug worth fixing on its own.** `builtin/luanti` serves each mod's
-`textures/` and nothing else, so devtest's 29 models and 3 sounds never
-reach a client. Luanti makes no distinction between a texture, a model and a
-sound -- media is every file in four directories that passes an extension
-whitelist -- and the module plan's "What gets sent, and what does not" says
-so as a settled decision, which makes this the code contradicting the plan
-rather than a choice. Small, and it unblocks anything that wants a model or
-a sound.
-
-Then, in order:
+In order:
 
 1. **M6's map, and it starts in `voxelworld`.** The world is 3x3x3 sections
    -- about 192 voxels a side -- so the importer drops most of a real Luanti
@@ -135,8 +126,10 @@ belong.
 
 Done since the third round, all in `doc/plan/master_plan_history.md` or in
 the module's own history: M4's inventories and recipes, all of M5, M7's
-importer, the whole client half, M6's menu, the players in the save, and the
-preferences screen.
+importer, the whole client half, M6's menu, the players in the save, the
+preferences screen, and the media set -- a game's models, sounds and
+translations went nowhere until 2026-09-13, because only `textures/` was
+collected.
 
 The loose end that was here is closed: `voxelworld` has `get_volume()` and
 `set_volume()`, built once there were three callers to measure them against.
