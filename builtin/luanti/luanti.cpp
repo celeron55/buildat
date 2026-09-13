@@ -1992,6 +1992,7 @@ struct Module: public interface::Module, public luanti::Interface
 				sch.size_x = (int32_t)table_number(L, "size_x", 0);
 				sch.size_y = (int32_t)table_number(L, "size_y", 0);
 				sch.size_z = (int32_t)table_number(L, "size_z", 0);
+				read_string_list(L, "node_names", sch.node_names);
 				read_id_list(L, "ids", sch.ids);
 				read_int_list(L, "param1", sch.param1);
 				read_int_list(L, "param2", sch.param2);

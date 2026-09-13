@@ -137,6 +137,11 @@ namespace luanti_mapgen
 			ss_ file;
 			sm_<ss_, ss_> replacements;
 			int32_t size_x = 0, size_y = 0, size_z = 0;
+			// The names the schematic is made of, and one index into them
+			// per node -- which is the condensed form a .mts file holds, so
+			// that the vendored NodeResolver resolves an inline schematic
+			// exactly as it resolves one out of a file
+			sv_<ss_> node_names;
 			sv_<uint32_t> ids;
 			sv_<int32_t> param1;
 			sv_<int32_t> param2;

@@ -949,15 +949,25 @@ function core.__mapgen_decorations()
 			out.size_x = sch.size.x
 			out.size_y = sch.size.y
 			out.size_z = sch.size.z
+			-- The names, and one index into them per node: the condensed
+			-- form a .mts file holds, so that the other side resolves an
+			-- inline schematic through the same resolver a file goes
+			-- through -- which is what gives it the node definitions it
+			-- needs when it is placed
+			out.node_names = {}
 			out.ids = {}
 			out.param1 = {}
 			out.param2 = {}
+			local index_of = {}
 			for i, node in ipairs(sch.data) do
-				local id = id_of(node.name)
-				if id == nil then
-					id = ids["ignore"] or 0
+				local name = node.name or "air"
+				local index = index_of[name]
+				if index == nil then
+					out.node_names[#out.node_names + 1] = name
+					index = #out.node_names - 1
+					index_of[name] = index
 				end
-				out.ids[i] = id
+				out.ids[i] = index
 				-- Luanti's own defaults: always placed, and "force" is the
 				-- high bit of the same byte
 				out.param1[i] = node.prob or node.param1 or 127

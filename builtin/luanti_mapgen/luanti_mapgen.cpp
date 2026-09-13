@@ -580,7 +580,13 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 			sch->schemdata[0] = MapNode(CONTENT_AIR);
 			sch->slice_probs = new u8[1];
 			sch->slice_probs[0] = MTSCHEM_PROB_ALWAYS;
-			sch->reset(true);
+			// Through the resolver even with nothing to resolve, because
+			// that is what gives it the node definitions it is asked for
+			// when it is placed
+			sch->reset();
+			sch->m_nnlistsizes.push_back(0);
+			m_ndef.pendNodeResolve(sch);
+			m_ndef.resolvePending();
 			m_emerge->schemmgr->add(sch);
 			return sch;
 		}
@@ -593,6 +599,12 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 		}
 		sch->size = v3s16((s16)src.size_x, (s16)src.size_y, (s16)src.size_z);
 		sch->schemdata = new MapNode[n];
+		// The names first, in the condensed form a .mts file uses: a node's
+		// content is an index into them until the resolver unfolds it
+		sch->reset();
+		for(const ss_ &name : src.node_names)
+			sch->m_nodenames.push_back(name);
+		sch->m_nnlistsizes.push_back(sch->m_nodenames.size());
 		for(size_t i = 0; i < n; i++){
 			MapNode node((content_t)src.ids[i]);
 			// param1 is the probability a node is placed at all, and the
@@ -607,8 +619,8 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 			sch->slice_probs[y] = (u8)((size_t)y < src.yslice_prob.size() ?
 					src.yslice_prob[y] : MTSCHEM_PROB_ALWAYS);
 		}
-		// Already this game's own ids, so there is nothing to resolve
-		sch->reset(true);
+		m_ndef.pendNodeResolve(sch);
+		m_ndef.resolvePending();
 		m_emerge->schemmgr->add(sch);
 		return sch;
 	}
