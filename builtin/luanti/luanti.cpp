@@ -24,6 +24,7 @@
 #include "interface/fs.h"
 #include "interface/os.h"
 #include "interface/voxel.h"
+#include "interface/mutex.h"
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
@@ -437,6 +438,19 @@ struct Module: public interface::Module, public luanti::Interface
 {
 	interface::Server *m_server;
 	lua_State *m_lua = nullptr;
+	// Two of this module's handlers can be inside Lua at once: a queued
+	// core:tick runs on the module's own thread while core:shutdown is
+	// emitted synchronously from another, and the server does not serialise
+	// the two. One lua_State under two threads is a crash, and a step that
+	// does real work -- the ABM sweep -- is long enough to hit it every
+	// time. Everything that enters Lua takes this first.
+	//
+	// simplified: the engine is what should serialise a module's handlers,
+	// and then this would be unnecessary. It is one mutex here against a
+	// change to how every module is called; see ModuleThread::handle_event
+	// in src/server/state.cpp, which takes no lock where emit_event_sync
+	// takes the container's.
+	interface::Mutex m_lua_mutex;
 	bool m_game_running = false;
 	// What load_lua() was handed before run_game(), in the order it came
 	sv_<std::pair<ss_, ss_>> m_pending_lua;
@@ -451,6 +465,13 @@ struct Module: public interface::Module, public luanti::Interface
 	// is not the map -- the clock so far.
 	storage::Save *m_save = nullptr;
 	storage::Store *m_store = nullptr;
+	// The sections the world is made of. A section is voxelworld's load and
+	// unload unit and sixty-four voxels a side, and what wants to know is a
+	// sweep over the map -- an ABM -- which takes one at a time so that no
+	// one step reads more of the world than it can afford.
+	pv::Region m_section_region{
+			pv::Vector3DInt32(-1, -1, -1), pv::Vector3DInt32(1, 1, 1)};
+	pv::Vector3DInt16 m_section_size{0, 0, 0};
 	// The media file names the game shipped, so that a tile naming one can
 	// be handed to the client as it is
 	set_<ss_> m_served_media;
@@ -560,6 +581,7 @@ struct Module: public interface::Module, public luanti::Interface
 			ar(time_of_day, game_time, day_count);
 		}
 		lua_State *L = m_lua;
+		interface::MutexScope ms(m_lua_mutex);
 		int base = lua_gettop(L);
 		lua_getglobal(L, "core");
 		lua_getfield(L, -1, "__set_clock");
@@ -577,6 +599,7 @@ struct Module: public interface::Module, public luanti::Interface
 	{
 		if(!m_store || !m_lua)
 			return;
+		interface::MutexScope ms(m_lua_mutex);
 		lua_State *L = m_lua;
 		int base = lua_gettop(L);
 		lua_getglobal(L, "core");
@@ -755,6 +778,7 @@ struct Module: public interface::Module, public luanti::Interface
 
 	void run_chunk_file(const ss_ &path)
 	{
+		interface::MutexScope ms(m_lua_mutex);
 		lua_State *L = m_lua;
 		int base = lua_gettop(L);
 		lua_pushcfunction(L, l_traceback);
@@ -773,6 +797,7 @@ struct Module: public interface::Module, public luanti::Interface
 
 	void run_chunk_string(const ss_ &chunk, const ss_ &chunkname)
 	{
+		interface::MutexScope ms(m_lua_mutex);
 		lua_State *L = m_lua;
 		int base = lua_gettop(L);
 		lua_pushcfunction(L, l_traceback);
@@ -821,8 +846,7 @@ struct Module: public interface::Module, public luanti::Interface
 		// a mod can reach; a Luanti-sized map is M6's problem, together with
 		// the mapgen that would fill it.
 		voxelworld::access(m_server, [&](voxelworld::Interface *iv){
-			pv::Region region(-1, -1, -1, 1, 1, 1);
-			iv->create_instance(m_scene, region);
+			iv->create_instance(m_scene, m_section_region);
 		});
 
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
@@ -841,6 +865,7 @@ struct Module: public interface::Module, public luanti::Interface
 			// The light is voxelworld's, so core.get_node_light is a read
 			// and not a second store
 			world->set_skylight_enabled(true);
+			m_section_size = world->get_section_size_voxels();
 		});
 	}
 
@@ -1474,6 +1499,7 @@ struct Module: public interface::Module, public luanti::Interface
 
 	void build_voxel_registry(interface::VoxelRegistry *reg)
 	{
+		interface::MutexScope ms(m_lua_mutex);
 		lua_State *L = m_lua;
 		int base = lua_gettop(L);
 		lua_getglobal(L, "core");
@@ -1990,6 +2016,129 @@ struct Module: public interface::Module, public luanti::Interface
 	// fastest and then y and then z. Only the ids: what asks for a box asks
 	// what is in it, and a table three times the size would be three times
 	// the garbage.
+	// __luanti_active_boxes() -> the voxel box of every loaded section, as
+	// {x0,y0,z0,x1,y1,z1}. This is Luanti's active block list under another
+	// name: a sweep over the map -- an ABM -- runs where the map is loaded,
+	// and takes one section at a time because the whole world at once is
+	// more voxels than one region read is allowed.
+	static int l_active_boxes(lua_State *L)
+	{
+		Module *self = module_of(L);
+		const pv::Vector3DInt32 &p0 = self->m_section_region.getLowerCorner();
+		const pv::Vector3DInt32 &p1 = self->m_section_region.getUpperCorner();
+		const pv::Vector3DInt16 &size = self->m_section_size;
+		lua_newtable(L);
+		if(size.getX() <= 0 || !self->m_scene)
+			return 1;
+		int n = 0;
+		voxelworld::access(self->m_server, self->m_scene,
+				[&](voxelworld::Instance *world){
+			for(int32_t z = p0.getZ(); z <= p1.getZ(); z++)
+			for(int32_t y = p0.getY(); y <= p1.getY(); y++)
+			for(int32_t x = p0.getX(); x <= p1.getX(); x++){
+				pv::Vector3DInt16 section_p(x, y, z);
+				if(!world->is_section_loaded(section_p))
+					continue;
+				pv::Region r = world->get_section_region_voxels(section_p);
+				const int32_t v[6] = {
+					r.getLowerCorner().getX(), r.getLowerCorner().getY(),
+					r.getLowerCorner().getZ(), r.getUpperCorner().getX(),
+					r.getUpperCorner().getY(), r.getUpperCorner().getZ(),
+				};
+				lua_createtable(L, 6, 0);
+				for(int i = 0; i < 6; i++){
+					lua_pushinteger(L, v[i]);
+					lua_rawseti(L, -2, i + 1);
+				}
+				lua_rawseti(L, -2, ++n);
+			}
+		});
+		return 1;
+	}
+
+	// __luanti_find_ids(x0,y0,z0,x1,y1,z1, {ids, ids, ...})
+	//         -> {{x,y,z, x,y,z, ...}, ...}, one list per set of ids
+	//
+	// The same read as __luanti_get_region, with the match done here: what a
+	// sweep over the map wants is the handful of voxels that are of a kind,
+	// not a table of a quarter of a million names it then walks. Many sets
+	// at once because the read is what a sweep costs and every rule that is
+	// due can share one. Flat lists because three numbers per hit is cheaper
+	// than a table per hit, and the caller is the one loop that cares.
+	static int l_find_ids(lua_State *L)
+	{
+		Module *self = module_of(L);
+		int32_t x0 = luaL_checkinteger(L, 1);
+		int32_t y0 = luaL_checkinteger(L, 2);
+		int32_t z0 = luaL_checkinteger(L, 3);
+		int32_t x1 = luaL_checkinteger(L, 4);
+		int32_t y1 = luaL_checkinteger(L, 5);
+		int32_t z1 = luaL_checkinteger(L, 6);
+		luaL_checktype(L, 7, LUA_TTABLE);
+		size_t n_sets = lua_objlen(L, 7);
+		if(n_sets > 32)
+			return luaL_error(L, "find_ids(): at most 32 sets at a time");
+		lua_createtable(L, (int)n_sets, 0);
+		for(size_t si = 1; si <= n_sets; si++){
+			lua_newtable(L);
+			lua_rawseti(L, -2, (int)si);
+		}
+		if(n_sets == 0 || x1 < x0 || y1 < y0 || z1 < z0)
+			return 1;
+		double volume = (double)(x1 - x0 + 1) * (double)(y1 - y0 + 1) *
+				(double)(z1 - z0 + 1);
+		if(volume > (double)MAX_REGION_VOXELS){
+			return luaL_error(L, "find_ids(): %.0f voxels is more than the "
+					"%d this reads at once", volume, (int)MAX_REGION_VOXELS);
+		}
+		// A Luanti node id is 16 bits, so which sets an id is in is one word
+		// per id and the test in the loop is one load
+		sv_<uint32_t> in_sets(65536, 0);
+		bool any = false;
+		for(size_t si = 1; si <= n_sets; si++){
+			lua_rawgeti(L, 7, (int)si);
+			luaL_checktype(L, -1, LUA_TTABLE);
+			size_t n_ids = lua_objlen(L, -1);
+			for(size_t i = 1; i <= n_ids; i++){
+				lua_rawgeti(L, -1, (int)i);
+				lua_Integer id = lua_tointeger(L, -1);
+				lua_pop(L, 1);
+				if(id < 0 || id > 65535)
+					continue;
+				in_sets[id] |= 1u << (si - 1);
+				any = true;
+			}
+			lua_pop(L, 1);
+		}
+		if(!any)
+			return 1;
+		sv_<uint32_t> words;
+		self->read_region(x0, y0, z0, x1, y1, z1, words);
+		const interface::VoxelFormat f = interface::VoxelFormat::luanti();
+		int n[32] = {0};
+		size_t i = 0;
+		for(int32_t z = z0; z <= z1; z++)
+		for(int32_t y = y0; y <= y1; y++)
+		for(int32_t x = x0; x <= x1; x++, i++){
+			uint32_t sets = in_sets[f.id.get(words[i])];
+			while(sets){
+				int si = 0;
+				while(!(sets & (1u << si)))
+					si++;
+				sets &= ~(1u << si);
+				lua_rawgeti(L, -1, si + 1);
+				lua_pushinteger(L, x);
+				lua_rawseti(L, -2, ++n[si]);
+				lua_pushinteger(L, y);
+				lua_rawseti(L, -2, ++n[si]);
+				lua_pushinteger(L, z);
+				lua_rawseti(L, -2, ++n[si]);
+				lua_pop(L, 1);
+			}
+		}
+		return 1;
+	}
+
 	static int l_get_region(lua_State *L)
 	{
 		Module *self = module_of(L);
@@ -2054,6 +2203,8 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_set_node", l_set_node);
 		set_global_cfunction("__luanti_get_node", l_get_node);
 		set_global_cfunction("__luanti_get_region", l_get_region);
+		set_global_cfunction("__luanti_active_boxes", l_active_boxes);
+		set_global_cfunction("__luanti_find_ids", l_find_ids);
 		lua_pushlightuserdata(m_lua, (void*)this);
 		lua_setfield(m_lua, LUA_REGISTRYINDEX, "__luanti_module");
 		set_global_string("__luanti_module_path", module_path());

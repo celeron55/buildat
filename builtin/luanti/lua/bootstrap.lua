@@ -773,6 +773,10 @@ stub("serialize_schematic", nil)
 local __set_node = __luanti_set_node
 local __get_node = __luanti_get_node
 local __get_region = __luanti_get_region
+-- The loaded sections, as voxel boxes; see the ABMs further down
+local __active_boxes = __luanti_active_boxes
+-- The voxels of a kind in a box; see the ABMs further down
+local __find_ids = __luanti_find_ids
 
 local function to_pos(pos)
 	-- Luanti rounds, it does not truncate: -0.4 is 0 and not 0
@@ -1253,8 +1257,124 @@ local function run_globalsteps(dtime)
 	end
 end
 
+--
+-- ABMs
+--
+-- An ABM is a rule that runs on every node of a kind, forever: grass turns
+-- to dirt under something, a furnace burns, a leaf decays. Luanti runs them
+-- over the blocks that are active -- near a player -- and here over the
+-- sections that are loaded, which is the same idea and the same list under
+-- another name, since there are no players yet.
+--
+-- The registry freezes after the mods have loaded, so the timers are built
+-- on the first step rather than kept up to date with it.
+--
+-- The match is on content ids and happens in the module, so what crosses
+-- into Lua is the voxels a rule is about and not the section.
+--
+-- simplified: no time budget and no catch-up, and every loaded section is
+-- read for every rule that is due. Luanti spends at most a share of a step
+-- on ABMs, skips ahead when a block comes back after a long time away, and
+-- keeps a per-block list of which node kinds are in it so that most blocks
+-- are never read. All three are about a map bigger than the sections a mod
+-- can reach here; the upgrade path is M6's, with the map that wants them.
+
+local abm_timers = nil
+local abm_ids = nil
+
+-- Which content ids a rule is about, since the sweep matches ids and not
+-- names: a name list is turned into one of these once, because the node
+-- registry is frozen by the time anything steps.
+local function ids_matching(nodenames)
+	local matches = name_matcher(nodenames)
+	local ids = {}
+	for name, _ in pairs(core.registered_nodes) do
+		if matches(name) then
+			ids[#ids + 1] = core.get_content_id(name)
+		end
+	end
+	return ids
+end
+
+local function abm_neighbors_ok(abm, pos)
+	if abm.neighbors == nil or #abm.neighbors == 0 then
+		return true
+	end
+	return core.find_node_near(pos, 1, abm.neighbors) ~= nil
+end
+
+-- One rule over the voxels of its kind that one section turned out to hold
+local function run_abm(abm, hits)
+	local chance = abm.chance or 1
+	local min_y = abm.min_y or -32768
+	local max_y = abm.max_y or 32767
+	for i = 1, #hits, 3 do
+		local y = hits[i + 1]
+		if y >= min_y and y <= max_y and
+				(chance <= 1 or math.random(chance) == 1) then
+			local pos = {x = hits[i], y = y, z = hits[i + 2]}
+			if abm_neighbors_ok(abm, pos) then
+				core.set_last_run_mod(abm.mod_origin)
+				-- The two counts are how many objects are in the block and
+				-- around it; there are none yet
+				local ok, err = pcall(abm.action, pos, core.get_node(pos),
+						0, 0)
+				if not ok then
+					core.log("error", "abm " .. tostring(abm.label or "?") ..
+							": " .. tostring(err))
+				end
+			end
+		end
+	end
+end
+
+local function run_abms(dtime)
+	local abms = core.registered_abms
+	if abms == nil or #abms == 0 then
+		return
+	end
+	if abm_timers == nil then
+		abm_timers = {}
+		abm_ids = {}
+		for i = 1, #abms do
+			abm_timers[i] = 0
+			abm_ids[i] = ids_matching(abms[i].nodenames)
+		end
+	end
+	local due = nil
+	for i = 1, #abms do
+		abm_timers[i] = abm_timers[i] + dtime
+		if abm_timers[i] >= (abms[i].interval or 1) then
+			abm_timers[i] = 0
+			due = due or {}
+			due[#due + 1] = i
+		end
+	end
+	if due == nil then
+		return
+	end
+	-- One read per loaded section, shared by every rule that is due: the
+	-- read is what a sweep costs, so the number of rules should not be in
+	-- the price. 32 is what the module matches at once.
+	for _, box in ipairs(__active_boxes()) do
+		for first = 1, #due, 32 do
+			local last = math.min(first + 31, #due)
+			local batch = {}
+			for k = first, last do
+				batch[#batch + 1] = abm_ids[due[k]]
+			end
+			local found = __find_ids(box[1], box[2], box[3],
+					box[4], box[5], box[6], batch)
+			for k = first, last do
+				run_abm(abms[due[k]], found[k - first + 1])
+			end
+		end
+	end
+end
+
 function core.__step(dtime)
 	run_globalsteps(dtime)
+	run_abms(dtime)
 	game_time = game_time + dtime
 	local speed = tonumber(core.settings:get("time_speed")) or 72
 	local day_seconds = 24 * 60 * 60
