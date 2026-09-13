@@ -8,6 +8,12 @@ namespace interface
 	void compress_zlib(const ss_ &data_in, std::ostream &os, int level = 6);
 	void decompress_zlib(std::istream &is, std::ostream &os);
 
+	// The same deflate stream without zlib's header and checksum around it,
+	// which is Luanti's "raw_deflate" and what core.compress() calls it
+	void compress_deflate_raw(const ss_ &data_in, std::ostream &os,
+			int level = 6);
+	void decompress_deflate_raw(std::istream &is, std::ostream &os);
+
 	void compress_zstd(const ss_ &data_in, std::ostream &os, int level = 3);
 	// Decompresses the one zstd frame at the front of data_in and returns how
 	// many of its bytes that frame took. Concatenated frames are read by

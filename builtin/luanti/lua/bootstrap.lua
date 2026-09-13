@@ -49,6 +49,20 @@ end
 
 core.mkdir = __luanti_create_directories
 
+core.sha1 = __luanti_sha1
+core.sha256 = __luanti_sha256
+core.compress = __luanti_compress
+core.decompress = __luanti_decompress
+
+-- Everything that is not a letter, a digit or one of four marks, as two
+-- upper-case hex digits after a percent. Luanti's own rule, and a null byte
+-- goes through it like anything else.
+function core.urlencode(str)
+	return (string.gsub(tostring(str), "[^A-Za-z0-9%-%.%_%~]", function(c)
+		return string.format("%%%02X", string.byte(c))
+	end))
+end
+
 function core.safe_file_write(path, content)
 	local f = io.open(path, "wb")
 	if not f then
@@ -139,20 +153,29 @@ local function parse_conf(text)
 	return out
 end
 
-local settings_values = parse_conf(read_file(world_path .. "/world.mt"))
+local SettingsClass = {}
+SettingsClass.__index = SettingsClass
 
-local Settings = {}
-Settings.__index = Settings
+-- Luanti's Settings(filename) as well as core.settings: the same object over
+-- whatever file it was opened on, and the defaults behind the one the world
+-- is. A mod reads a game.conf or a mod.conf with this.
+function Settings(path)
+	return setmetatable({
+		values = parse_conf(read_file(path)),
+		path = path,
+		defaults = nil,
+	}, SettingsClass)
+end
 
-function Settings:get(key)
-	local v = settings_values[key]
-	if v == nil then
-		v = DEFAULTS[key]
+function SettingsClass:get(key)
+	local v = self.values[key]
+	if v == nil and self.defaults then
+		v = self.defaults[key]
 	end
 	return v
 end
 
-function Settings:get_bool(key, default)
+function SettingsClass:get_bool(key, default)
 	local v = self:get(key)
 	if v == nil or v == "" then
 		return default
@@ -160,67 +183,70 @@ function Settings:get_bool(key, default)
 	return v == "true"
 end
 
-function Settings:get_int(key, default)
+function SettingsClass:get_int(key, default)
 	return tonumber(self:get(key)) or default
 end
 
-function Settings:get_float(key, default)
+function SettingsClass:get_float(key, default)
 	return tonumber(self:get(key)) or default
 end
 
-function Settings:get_pos(key)
+function SettingsClass:get_pos(key)
 	return nil
 end
 
-function Settings:get_np_group(key)
+function SettingsClass:get_np_group(key)
 	return nil
 end
 
-function Settings:get_flags(key)
+function SettingsClass:get_flags(key)
 	return {}
 end
 
-function Settings:set(key, value)
-	settings_values[key] = tostring(value)
+function SettingsClass:set(key, value)
+	self.values[key] = tostring(value)
 end
 
-Settings.set_bool = Settings.set
+SettingsClass.set_bool = SettingsClass.set
 
-function Settings:remove(key)
-	settings_values[key] = nil
+function SettingsClass:remove(key)
+	self.values[key] = nil
 	return true
 end
 
-function Settings:get_names()
+function SettingsClass:get_names()
 	local out = {}
-	for k, _ in pairs(settings_values) do
+	for k, _ in pairs(self.values) do
 		out[#out + 1] = k
 	end
 	return out
 end
 
-function Settings:has(key)
+function SettingsClass:has(key)
 	return self:get(key) ~= nil
 end
 
-function Settings:write()
+function SettingsClass:write()
+	if self.path == nil then
+		return false
+	end
 	local lines = {}
-	for k, v in pairs(settings_values) do
+	for k, v in pairs(self.values) do
 		lines[#lines + 1] = k .. " = " .. v
 	end
-	return core.safe_file_write(world_path .. "/world.mt",
-			table.concat(lines, "\n") .. "\n")
+	return core.safe_file_write(self.path, table.concat(lines, "\n") .. "\n")
 end
 
-function Settings:to_table()
+function SettingsClass:to_table()
 	local out = {}
-	for k, v in pairs(settings_values) do
+	for k, v in pairs(self.values) do
 		out[k] = v
 	end
 	return out
 end
 
-core.settings = setmetatable({}, Settings)
+core.settings = Settings(world_path .. "/world.mt")
+core.settings.defaults = DEFAULTS
 
 function core.setting_get_pos(key)
 	return nil
@@ -519,10 +545,11 @@ function core.get_modnames(by_load_order)
 end
 
 function core.get_game_info()
+	local conf = parse_conf(read_file(game_path .. "/game.conf"))
 	return {
 		id = game_path:match("[^/]+$") or "",
-		title = "",
-		author = "",
+		title = conf.title or "",
+		author = conf.author or "",
 		path = game_path,
 	}
 end
@@ -707,7 +734,6 @@ local STUBS_NIL = {
 	"ipc_poll", "mod_channel_join", "register_async_dofile",
 	"register_mapgen_script", "register_sscsm", "do_async_callback",
 	"serialize_roundtrip", "get_globals_to_transfer",
-	"urlencode",
 }
 
 for _, name in ipairs(STUBS_NIL) do
