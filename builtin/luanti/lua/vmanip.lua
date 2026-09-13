@@ -292,10 +292,12 @@ function core.get_mapgen_setting(name)
 		return tostring(__luanti_world_seed)
 	end
 	if name == "mg_name" then
-		return "singlenode"
-	end
-	if name == "water_level" then
-		return "1"
+		-- What this world is actually generated with, which is written into
+		-- the save the first time it is opened. It said "singlenode" here
+		-- while that was all there was, and a game reads this to decide
+		-- what to register: VoxeLibre registers no biomes at all for a
+		-- singlenode world.
+		return core.__mapgen_name()
 	end
 	if name == "chunksize" then
 		return tostring(core.get_mapgen_chunksize().x)
@@ -311,11 +313,11 @@ function core.get_mapgen_params()
 	-- Deprecated in Luanti and still called; the fields are the ones it
 	-- answers with
 	return {
-		mgname = "singlenode",
+		mgname = core.__mapgen_name(),
 		seed = tonumber(__luanti_world_seed) or 0,
-		water_level = 1,
+		water_level = tonumber(core.settings:get("water_level")) or 1,
 		chunksize = core.get_mapgen_chunksize().x,
-		flags = "",
+		flags = core.settings:get("mg_flags") or "",
 	}
 end
 

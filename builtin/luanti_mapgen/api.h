@@ -77,6 +77,55 @@ namespace luanti_mapgen
 			float weight = 1.0f;
 		};
 		sv_<Biome> biomes;
+
+		// A noise as a mod wrote it, for the things a mapgen shapes with
+		// one. The flags are Luanti's own words -- "defaults", "eased",
+		// "absvalue" -- because parsing them is the vendored side's job.
+		struct NoiseParams
+		{
+			bool given = false;
+			float offset = 0.0f;
+			float scale = 1.0f;
+			float spread_x = 250.0f, spread_y = 250.0f, spread_z = 250.0f;
+			int32_t seed = 0;
+			int32_t octaves = 3;
+			float persist = 0.6f;
+			float lacunarity = 2.0f;
+			ss_ flags;
+		};
+
+		// An ore as the game registered it: the node names are already the
+		// ids they mean, and the biome names are still names, because which
+		// number a biome is depends on the order they crossed in.
+		struct Ore
+		{
+			ss_ name;
+			ss_ type = "scatter";
+			uint32_t c_ore = 0;
+			sv_<uint32_t> c_wherein;
+			int32_t clust_scarcity = 1;
+			int32_t clust_num_ores = 1;
+			int32_t clust_size = 0;
+			int32_t y_min = -31000;
+			int32_t y_max = 31000;
+			int32_t ore_param2 = 0;
+			ss_ flags;
+			float nthresh = 0.0f;
+			NoiseParams np;
+			sv_<ss_> biomes;
+			// A sheet's columns
+			int32_t column_height_min = 1;
+			int32_t column_height_max = 0;
+			float column_midpoint_factor = 0.5f;
+			// A puff's two surfaces
+			NoiseParams np_puff_top, np_puff_bottom;
+			// A vein
+			float random_factor = 1.0f;
+			// A stratum
+			NoiseParams np_stratum_thickness;
+			int32_t stratum_thickness = 8;
+		};
+		sv_<Ore> ores;
 	};
 
 	struct Interface

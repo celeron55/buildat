@@ -124,6 +124,66 @@ static void check_voxel_manipulator()
 			"and its order is voxelworld's");
 }
 
+// Luanti's own words for the shapes an ore comes in; its own l_mapgen.cpp
+// keeps the same table for the same purpose.
+static bool ore_type_of(const ss_ &name, OreType &out)
+{
+	if(name == "scatter") out = ORE_SCATTER;
+	else if(name == "sheet") out = ORE_SHEET;
+	else if(name == "puff") out = ORE_PUFF;
+	else if(name == "blob") out = ORE_BLOB;
+	else if(name == "vein") out = ORE_VEIN;
+	else if(name == "stratum") out = ORE_STRATUM;
+	else return false;
+	return true;
+}
+
+// A noise as it crossed, into the vendored NoiseParams the mapgen wants
+static void read_noise_params(const luanti_mapgen::Params::NoiseParams &src,
+		NoiseParams &out)
+{
+	out.offset = src.offset;
+	out.scale = src.scale;
+	out.spread = v3f(src.spread_x, src.spread_y, src.spread_z);
+	out.seed = src.seed;
+	out.octaves = (u16)src.octaves;
+	out.persist = src.persist;
+	out.lacunarity = src.lacunarity;
+	// Luanti parses these with flagdesc_noiseparams, which lives in the
+	// noise.cpp this build replaced; the words are the same three, and a
+	// "no" in front of one clears it. This build's noise reads none of them
+	// -- see the note at the top of vendor/noise.h -- so what this is for
+	// is that a mod's flags arrive as the mod wrote them.
+	out.flags = NOISE_FLAG_DEFAULTS;
+	ss_ word;
+	ss_ text = src.flags;
+	text.push_back(',');
+	for(char c : text){
+		if(c != ',' && c != ' ' && c != '\t'){
+			word.push_back(c);
+			continue;
+		}
+		if(word.empty())
+			continue;
+		bool off = false;
+		if(word.size() > 2 && word.compare(0, 2, "no") == 0){
+			off = true;
+			word = word.substr(2);
+		}
+		u32 bit = 0;
+		if(word == "defaults") bit = NOISE_FLAG_DEFAULTS;
+		else if(word == "eased") bit = NOISE_FLAG_EASED;
+		else if(word == "absvalue") bit = NOISE_FLAG_ABSVALUE;
+		if(bit != 0){
+			if(off)
+				out.flags &= ~bit;
+			else
+				out.flags |= bit;
+		}
+		word.clear();
+	}
+}
+
 // One of Luanti's own mapgens, generating into the volume worldgen hands
 // over. Everything it needs was given to it when the world was made: the
 // node ids by name, the seed and the parameters. Nothing here touches a
@@ -235,6 +295,99 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 			m_emerge->biomemgr->add(b);
 		}
 		log_v(MODULE, "%zu biomes", params.biomes.size());
+
+		// And the ores, which are the same crossing one layer down: a
+		// mapgen asks its OreManager for them after it has made the
+		// terrain, and without any the world is whatever the biomes said
+		// and nothing else in it. The biome names are looked up here
+		// because a biome's number is the order it was added in, which is
+		// the loop above.
+		size_t ores_added = 0;
+		for(const Params::Ore &src : params.ores){
+			OreType type;
+			if(!ore_type_of(src.type, type)){
+				log_w(MODULE, "Ore \"%s\": unknown ore_type \"%s\"",
+						cs(src.name), cs(src.type));
+				continue;
+			}
+			if(src.clust_scarcity <= 0 || src.clust_num_ores <= 0){
+				log_w(MODULE, "Ore \"%s\": clust_scarcity and "
+						"clust_num_ores have to be more than zero",
+						cs(src.name));
+				continue;
+			}
+			Ore *o = m_emerge->oremgr->create(type);
+			if(o == nullptr)
+				continue;
+			o->name = src.name;
+			o->c_ore = (content_t)src.c_ore;
+			for(uint32_t id : src.c_wherein)
+				o->c_wherein.push_back((content_t)id);
+			o->clust_scarcity = (u32)src.clust_scarcity;
+			o->clust_num_ores = (s16)src.clust_num_ores;
+			o->clust_size = (s16)src.clust_size;
+			o->y_min = (s16)src.y_min;
+			o->y_max = (s16)src.y_max;
+			o->ore_param2 = (u8)src.ore_param2;
+			o->nthresh = src.nthresh;
+			o->flags = readFlagString(src.flags, flagdesc_ore, nullptr);
+			if(src.np.given){
+				read_noise_params(src.np, o->np);
+				o->flags |= OREFLAG_USE_NOISE;
+			} else if(o->needs_noise){
+				log_w(MODULE, "Ore \"%s\" is a %s and has no noise_params; "
+						"the defaults are used", cs(src.name),
+						cs(src.type));
+			}
+			for(const ss_ &biome_name : src.biomes){
+				ObjDef *b = m_emerge->biomemgr->getByName(biome_name);
+				if(b == nullptr){
+					log_w(MODULE, "Ore \"%s\": no biome \"%s\"",
+							cs(src.name), cs(biome_name));
+					continue;
+				}
+				o->biomes.insert((biome_t)b->index);
+			}
+			switch(type){
+			case ORE_SHEET: {
+				OreSheet *os = (OreSheet *)o;
+				os->column_height_min = (u16)src.column_height_min;
+				os->column_height_max = (u16)(src.column_height_max > 0 ?
+						src.column_height_max : src.clust_size);
+				os->column_midpoint_factor = src.column_midpoint_factor;
+				break;
+			}
+			case ORE_PUFF: {
+				OrePuff *op = (OrePuff *)o;
+				read_noise_params(src.np_puff_top, op->np_puff_top);
+				read_noise_params(src.np_puff_bottom, op->np_puff_bottom);
+				break;
+			}
+			case ORE_VEIN: {
+				OreVein *ov = (OreVein *)o;
+				ov->random_factor = src.random_factor;
+				break;
+			}
+			case ORE_STRATUM: {
+				OreStratum *os = (OreStratum *)o;
+				if(src.np_stratum_thickness.given){
+					read_noise_params(src.np_stratum_thickness,
+							os->np_stratum_thickness);
+					o->flags |= OREFLAG_USE_NOISE2;
+				}
+				os->stratum_thickness = (u16)src.stratum_thickness;
+				break;
+			}
+			default:
+				break;
+			}
+			// Already resolved, like the biomes above
+			o->reset(true);
+			m_emerge->oremgr->add(o);
+			ores_added++;
+		}
+		if(!params.ores.empty())
+			log_v(MODULE, "%zu ores", ores_added);
 
 		// The managers registered their node names while they were built;
 		// now that they are, those can be looked up

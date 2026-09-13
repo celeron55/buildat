@@ -1602,6 +1602,7 @@ struct Module: public interface::Module, public luanti::Interface
 		params.content_ids = content_ids_by_name();
 		params.node_props = mapgen_node_props();
 		params.biomes = mapgen_biomes();
+		params.ores = mapgen_ores();
 		params.section_size = m_section_size.getX();
 		// Kept, because the spawn search asks the same mapgen where the
 		// ground is without generating anything; see l_spawn_level()
@@ -1779,6 +1780,109 @@ struct Module: public interface::Module, public luanti::Interface
 		}
 		lua_settop(L, base);
 		log_i(MODULE, "%zu biomes for the mapgen", out.size());
+		return out;
+	}
+
+	// A noise as a mod wrote it, off the table the Lua side built
+	luanti_mapgen::Params::NoiseParams read_np(lua_State *L,
+			const char *field)
+	{
+		luanti_mapgen::Params::NoiseParams np;
+		lua_getfield(L, -1, field);
+		if(lua_istable(L, -1)){
+			np.given = table_boolean(L, "given");
+			np.offset = (float)table_number(L, "offset", 0);
+			np.scale = (float)table_number(L, "scale", 1);
+			np.spread_x = (float)table_number(L, "spread_x", 250);
+			np.spread_y = (float)table_number(L, "spread_y", 250);
+			np.spread_z = (float)table_number(L, "spread_z", 250);
+			np.seed = (int32_t)table_number(L, "seed", 0);
+			np.octaves = (int32_t)table_number(L, "octaves", 3);
+			np.persist = (float)table_number(L, "persist", 0.6);
+			np.lacunarity = (float)table_number(L, "lacunarity", 2);
+			np.flags = table_string(L, "flags");
+		}
+		lua_pop(L, 1);
+		return np;
+	}
+
+	// The ores the game registered, in the shape luanti_mapgen builds its
+	// OreManager out of. The same crossing as the biomes, one layer down.
+	sv_<luanti_mapgen::Params::Ore> mapgen_ores()
+	{
+		sv_<luanti_mapgen::Params::Ore> out;
+		if(!m_lua)
+			return out;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__mapgen_ores");
+		if(lua_pcall(L, 0, 1, 0) != 0){
+			log_w(MODULE, "__mapgen_ores(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+			lua_settop(L, base);
+			return out;
+		}
+		const size_t n = lua_istable(L, -1) ? lua_objlen(L, -1) : 0;
+		for(size_t i = 1; i <= n; i++){
+			lua_rawgeti(L, -1, (int)i);
+			if(!lua_istable(L, -1)){
+				lua_pop(L, 1);
+				continue;
+			}
+			luanti_mapgen::Params::Ore o;
+			o.name = table_string(L, "name");
+			o.type = table_string(L, "type");
+			o.c_ore = (uint32_t)table_number(L, "c_ore", 0);
+			o.clust_scarcity = (int32_t)table_number(L, "clust_scarcity", 1);
+			o.clust_num_ores = (int32_t)table_number(L, "clust_num_ores", 1);
+			o.clust_size = (int32_t)table_number(L, "clust_size", 0);
+			o.y_min = (int32_t)table_number(L, "y_min", -31000);
+			o.y_max = (int32_t)table_number(L, "y_max", 31000);
+			o.ore_param2 = (int32_t)table_number(L, "ore_param2", 0);
+			o.flags = table_string(L, "flags");
+			o.nthresh = (float)table_number(L, "nthresh", 0);
+			o.column_height_min =
+					(int32_t)table_number(L, "column_height_min", 1);
+			o.column_height_max =
+					(int32_t)table_number(L, "column_height_max", 0);
+			o.column_midpoint_factor =
+					(float)table_number(L, "column_midpoint_factor", 0.5);
+			o.random_factor = (float)table_number(L, "random_factor", 1);
+			o.stratum_thickness =
+					(int32_t)table_number(L, "stratum_thickness", 8);
+			o.np = read_np(L, "np");
+			o.np_puff_top = read_np(L, "np_puff_top");
+			o.np_puff_bottom = read_np(L, "np_puff_bottom");
+			o.np_stratum_thickness = read_np(L, "np_stratum_thickness");
+			lua_getfield(L, -1, "c_wherein");
+			if(lua_istable(L, -1)){
+				const size_t m = lua_objlen(L, -1);
+				for(size_t j = 1; j <= m; j++){
+					lua_rawgeti(L, -1, (int)j);
+					o.c_wherein.push_back((uint32_t)lua_tonumber(L, -1));
+					lua_pop(L, 1);
+				}
+			}
+			lua_pop(L, 1);
+			lua_getfield(L, -1, "biomes");
+			if(lua_istable(L, -1)){
+				const size_t m = lua_objlen(L, -1);
+				for(size_t j = 1; j <= m; j++){
+					lua_rawgeti(L, -1, (int)j);
+					const char *p = lua_tostring(L, -1);
+					if(p)
+						o.biomes.push_back(ss_(p));
+					lua_pop(L, 1);
+				}
+			}
+			lua_pop(L, 1);
+			out.push_back(o);
+			lua_pop(L, 1);
+		}
+		lua_settop(L, base);
+		log_i(MODULE, "%zu ores for the mapgen", out.size());
 		return out;
 	}
 

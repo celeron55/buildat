@@ -805,6 +805,93 @@ function core.__mapgen_biomes()
 	return out
 end
 
+-- The ores a game registered, for the manager a mapgen asks after it has
+-- made the terrain. The node names are turned into ids here, the way the
+-- biomes' are; the biome names are left alone, because which number a biome
+-- is depends on the order they cross in and that is the other side's to
+-- know.
+function core.__mapgen_ores()
+	local ids = core.__content_ids_by_name()
+	local function id_of(name)
+		if name == nil or name == "" then
+			return nil
+		end
+		return ids[name]
+	end
+	-- A noise as a mod wrote it, with the fields Luanti's read_noiseparams
+	-- reads and its defaults where a mod left one out
+	local function np_of(np)
+		if type(np) ~= "table" then
+			return {given = false}
+		end
+		local spread = np.spread or {}
+		return {
+			given = true,
+			offset = np.offset or 0,
+			scale = np.scale or 1,
+			spread_x = spread.x or 250,
+			spread_y = spread.y or 250,
+			spread_z = spread.z or 250,
+			seed = np.seed or 0,
+			octaves = np.octaves or 3,
+			persist = np.persist or np.persistence or 0.6,
+			lacunarity = np.lacunarity or 2,
+			flags = np.flags or "defaults",
+		}
+	end
+	local out = {}
+	for _, o in pairs(core.registered_ores or {}) do
+		local c_ore = id_of(o.ore)
+		if c_ore == nil then
+			core.log("warning", "Ore \"" .. tostring(o.ore) ..
+					"\" is not a registered node; the ore is dropped")
+		else
+			local wherein = {}
+			local names = o.wherein
+			if type(names) == "string" then
+				names = {names}
+			end
+			for _, name in ipairs(names or {}) do
+				local id = id_of(name)
+				if id then
+					wherein[#wherein + 1] = id
+				end
+			end
+			local biomes = {}
+			for _, name in ipairs(o.biomes or {}) do
+				biomes[#biomes + 1] = name
+			end
+			out[#out + 1] = {
+				name = o.name or o.ore or "",
+				type = o.ore_type or "scatter",
+				c_ore = c_ore,
+				c_wherein = wherein,
+				clust_scarcity = o.clust_scarcity or 1,
+				clust_num_ores = o.clust_num_ores or 1,
+				clust_size = o.clust_size or 0,
+				-- height_min and height_max are what Luanti called these
+				-- before it called them y_min and y_max
+				y_min = o.y_min or o.height_min or -31000,
+				y_max = o.y_max or o.height_max or 31000,
+				ore_param2 = o.ore_param2 or 0,
+				flags = o.flags or "",
+				nthresh = o.noise_threshold or o.noise_threshhold or 0,
+				np = np_of(o.noise_params),
+				biomes = biomes,
+				column_height_min = o.column_height_min or 1,
+				column_height_max = o.column_height_max or 0,
+				column_midpoint_factor = o.column_midpoint_factor or 0.5,
+				np_puff_top = np_of(o.np_puff_top),
+				np_puff_bottom = np_of(o.np_puff_bottom),
+				random_factor = o.random_factor or 1,
+				np_stratum_thickness = np_of(o.np_stratum_thickness),
+				stratum_thickness = o.stratum_thickness or 8,
+			}
+		end
+	end
+	return out
+end
+
 -- Every name a mapgen can ask about: the nodes, and the aliases a game
 -- registers for them -- "mapgen_stone" is an alias and is what a vendored
 -- mapgen looks up.
@@ -1169,7 +1256,7 @@ local STUBS_NIL = {
 	"place_node", "dig_node", "punch_node", "spawn_tree", "spawn_tree_on_vmanip",
 	"get_mapgen_setting_noiseparams", "set_mapgen_setting_noiseparams",
 	"set_noiseparams", "get_noiseparams", "generate_ores", "generate_decorations",
-	"clear_objects", "load_area", "emerge_area", "delete_area",
+	"clear_objects", "delete_area",
 	"line_of_sight", "raycast", "find_path", "transforming_liquid_add",
 	"get_node_max_level", "get_node_level", "set_node_level", "add_node_level",
 	"fix_light",
@@ -1379,6 +1466,133 @@ function core.forceload_free_block(blockpos)
 	local x, y, z = to_pos(blockpos)
 	__luanti_forceload(x * 16, y * 16, z * 16, false)
 end
+
+-- The same two under names the vendored builtin does not take away, for
+-- emerge_area below: it keeps a section loaded while it waits for it and
+-- lets it go again, which is nothing to do with a mod's forceloads.
+core.__forceload_block_raw = core.forceload_block
+core.__forceload_free_block_raw = core.forceload_free_block
+
+-- Emerging an area: the map made sure of, block by block, and a callback
+-- when each one is there. Luanti's emerge threads do this; here what makes
+-- a section is worldgen's own thread, so what this does is ask for the
+-- sections and watch the map until they answer.
+--
+-- The callback is Luanti's: (blockpos, action, calls_remaining, param), with
+-- the actions out of constants.lua. A block outside the map's own limits is
+-- EMERGE_CANCELLED, which is what a mod asking about the edge is told.
+local emerge_requests = {}
+-- How long a block is waited for before it is called an error. Generating a
+-- section is tens of milliseconds; this is the runaway case.
+local EMERGE_TIMEOUT = 30
+
+local function emerge_blockpos_list(pos1, pos2)
+	local x1, y1, z1 = to_pos(pos1)
+	local x2, y2, z2 = to_pos(pos2)
+	local function blocks(a, b)
+		local lo = math.floor(math.min(a, b) / 16)
+		local hi = math.floor(math.max(a, b) / 16)
+		return lo, hi
+	end
+	local bx1, bx2 = blocks(x1, x2)
+	local by1, by2 = blocks(y1, y2)
+	local bz1, bz2 = blocks(z1, z2)
+	local out = {}
+	for z = bz1, bz2 do
+		for y = by1, by2 do
+			for x = bx1, bx2 do
+				-- A vector rather than a table: a mod compares the block
+				-- position it is given with one of its own, and only a
+				-- vector compares equal to a vector
+				out[#out + 1] = vector.new(x, y, z)
+			end
+		end
+	end
+	return out
+end
+
+local function emerge_in_bounds(blockpos)
+	local min_edge, max_edge = core.get_mapgen_edges()
+	local lo = {x = blockpos.x * 16, y = blockpos.y * 16, z = blockpos.z * 16}
+	local hi = {x = lo.x + 15, y = lo.y + 15, z = lo.z + 15}
+	return lo.x >= min_edge.x and lo.y >= min_edge.y and lo.z >= min_edge.z and
+			hi.x <= max_edge.x and hi.y <= max_edge.y and hi.z <= max_edge.z
+end
+
+function core.emerge_area(pos1, pos2, callback, param)
+	local blocks = emerge_blockpos_list(pos1, pos2)
+	if callback == nil then
+		-- Nobody to tell, so this is only "have these, please"
+		for _, bp in ipairs(blocks) do
+			if emerge_in_bounds(bp) then
+				core.__forceload_block_raw(bp)
+			end
+		end
+		return
+	end
+	emerge_requests[#emerge_requests + 1] = {
+		blocks = blocks,
+		next_i = 1,
+		asked = false,
+		waited = 0,
+		callback = callback,
+		param = param,
+	}
+end
+
+-- Luanti loads the area and returns once it is there; nothing here can wait
+-- for another thread, and a write into a section that is not loaded emerges
+-- it anyway (see flush_node_writes in luanti.cpp), so this asks and returns.
+function core.load_area(pos1, pos2)
+	core.emerge_area(pos1, pos2 or pos1, nil, nil)
+end
+
+local function step_emerge(dtime)
+	local i = 1
+	while i <= #emerge_requests do
+		local r = emerge_requests[i]
+		local bp = r.blocks[r.next_i]
+		local action = nil
+		if not emerge_in_bounds(bp) then
+			action = core.EMERGE_CANCELLED
+		else
+			if not r.asked then
+				r.asked = true
+				core.__forceload_block_raw(bp)
+			end
+			r.waited = r.waited + dtime
+			-- A block that is there reads as something; a section that has
+			-- not been generated reads as ignore everywhere
+			local name = core.get_node({x = bp.x * 16, y = bp.y * 16,
+					z = bp.z * 16}).name
+			if name ~= "ignore" then
+				action = core.EMERGE_GENERATED
+			elseif r.waited > EMERGE_TIMEOUT then
+				action = core.EMERGE_ERRORED
+			end
+		end
+		if action ~= nil then
+			if r.asked then
+				core.__forceload_free_block_raw(bp)
+			end
+			r.asked = false
+			r.waited = 0
+			r.next_i = r.next_i + 1
+			local left = #r.blocks - r.next_i + 1
+			local ok, err = pcall(r.callback, bp, action, left, r.param)
+			if not ok then
+				core.log("error", "emerge_area callback: " .. tostring(err))
+			end
+			if r.next_i > #r.blocks then
+				table.remove(emerge_requests, i)
+				i = i - 1
+			end
+		end
+		i = i + 1
+	end
+end
+
+core.__step_emerge = step_emerge
 
 function core.get_meta(pos)
 	local x, y, z = to_pos(pos)
@@ -2547,6 +2761,7 @@ function core.__step(dtime)
 	active_boxes_cache = nil
 	run_globalsteps(dtime)
 	core.__step_objects(dtime)
+	step_emerge(dtime)
 	run_node_timers(dtime)
 	if not lbms_run then
 		lbms_run = run_lbms()
