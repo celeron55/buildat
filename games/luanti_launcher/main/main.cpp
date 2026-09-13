@@ -67,6 +67,9 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:dig"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:where"));
+		m_server->sub_event(this, Event::t("network:client_disconnected"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -77,6 +80,48 @@ struct Module: public interface::Module
 				client_file::FilesTransmitted)
 		EVENT_TYPEN("network:packet_received/main:dig", on_dig,
 				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:where", on_where,
+				network::Packet)
+		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
+				network::OldClient)
+	}
+
+	// A Luanti player per client. The name is this game's to choose and the
+	// client does not send one, so it is the peer's number: what it is for
+	// is to be the key everything about the player hangs off, and a mod
+	// that prints it gets something it can tell apart.
+	static ss_ player_name_of(network::PeerInfo::Id peer)
+	{
+		return "client"+itos(peer);
+	}
+
+	void on_client_disconnected(const network::OldClient &old_client)
+	{
+		if(!m_scene)
+			return;
+		luanti::access(m_server, [&](luanti::Interface *i){
+			i->remove_player(player_name_of(old_client.info.id));
+		});
+	}
+
+	// Where the client's camera is, which is where its player is. It sends
+	// this a few times a second; nothing here moves a player otherwise.
+	void on_where(const network::Packet &packet)
+	{
+		double x = 0, y = 0, z = 0, look_h = 0, look_v = 0;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(x, y, z, look_h, look_v);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:where: %s", e.what());
+			return;
+		}
+		luanti::access(m_server, [&](luanti::Interface *i){
+			i->set_player_pos(player_name_of(packet.sender),
+					(float)x, (float)y, (float)z,
+					(float)look_h, (float)look_v);
+		});
 	}
 
 	// A click on the client, as the voxel it pointed at. What it means is
@@ -128,6 +173,9 @@ struct Module: public interface::Module
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, "core:run_script",
 					"buildat.run_script_file(\"main/init.lua\")");
+		});
+		luanti::access(m_server, [&](luanti::Interface *i){
+			i->add_player(player_name_of(peer));
 		});
 	}
 
@@ -282,6 +330,27 @@ struct Module: public interface::Module
 		}
 		log_i(MODULE, "Running world %s (game %s) in %s",
 				cs(world_name), cs(gameid), cs(save->path()));
+		// A file of Lua into the game's environment, before its mods load.
+		// What this is for is a game of one's own on top of a Luanti game
+		// -- which is what load_lua() is in the module's interface for --
+		// and, while there is no such game here, for looking into one that
+		// misbehaves.
+		const char *extra_lua = getenv("BUILDAT_LUANTI_LUA");
+		if(extra_lua && extra_lua[0]){
+			std::ifstream ifs(extra_lua, std::ios::binary);
+			if(!ifs.good()){
+				m_server->shutdown(1, ss_()+"Cannot read "+extra_lua);
+				return;
+			}
+			std::ostringstream os;
+			os<<ifs.rdbuf();
+			log_i(MODULE, "Loading %s into the Luanti environment",
+					extra_lua);
+			luanti::access(m_server, [&](luanti::Interface *i){
+				i->load_lua(os.str(), extra_lua);
+			});
+		}
+
 		// A Luanti world's own map, read into the save once. The world
 		// directory is opened read-only; what it says about which game it
 		// wants is what chose the game above.

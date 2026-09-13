@@ -75,6 +75,20 @@ namespace luanti
 		// memory back to what the Luanti world had.
 		virtual void import_world(const ss_ &luanti_world_path) = 0;
 
+		// A client arriving, leaving, and saying where it is. A player is
+		// what Luanti calls whoever is on the other end of a client: the
+		// name is the caller's to choose and is what everything about the
+		// player is keyed by, the join and leave callbacks a mod registers
+		// run here, and core.get_connected_players() answers with them.
+		//
+		// Where a player is is their client's to say; nothing here moves
+		// one. The angles are radians, horizontal measured the way
+		// core.get_look_horizontal() means it.
+		virtual void add_player(const ss_ &name) = 0;
+		virtual void remove_player(const ss_ &name) = 0;
+		virtual void set_player_pos(const ss_ &name, float x, float y,
+				float z, float look_h, float look_v) = 0;
+
 		// What a click comes to. The node is dug the way core.dig_node()
 		// digs one -- the pointed thing is handed to the vendored builtin
 		// with a nil actor, so can_dig, after_dig_node and the drops are
