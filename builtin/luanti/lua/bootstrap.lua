@@ -889,6 +889,44 @@ end
 
 core.get_node_metadata = core.get_meta
 
+-- What a Luanti world's mod_storage.sqlite holds, per mod, into the file
+-- this module keeps a mod's storage in. What the save already has wins: an
+-- import is a one-shot into a world that normally has none, and a second
+-- import should not take a mod's memory back to what the Luanti world had.
+function core.__import_mod_storage(modname, fields)
+	local dir = world_path .. "/mod_storage"
+	local path = dir .. "/" .. modname
+	local have = {}
+	local data = read_file(path)
+	if data then
+		local ok, loaded = pcall(core.deserialize, data, true)
+		if ok and type(loaded) == "table" then
+			have = loaded
+		end
+	end
+	local n = 0
+	for k, v in pairs(fields) do
+		if have[k] == nil then
+			have[k] = v
+			n = n + 1
+		end
+	end
+	if n == 0 then
+		return 0
+	end
+	core.mkdir(dir)
+	core.safe_file_write(path, core.serialize(have))
+	-- A mod that has already opened its storage this run is holding the
+	-- table, so put the values in there too
+	local open = mod_storages[modname]
+	if open then
+		for k, v in pairs(have) do
+			open.fields[k] = v
+		end
+	end
+	return n
+end
+
 -- What the module writes into the save and reads back out of it: every
 -- position that has anything, as fields and inventory lists of item strings.
 -- An inventory is stacks and a stack is an object, so what goes in is what

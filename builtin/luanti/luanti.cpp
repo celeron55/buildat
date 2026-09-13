@@ -2491,6 +2491,69 @@ struct Module: public interface::Module, public luanti::Interface
 				game_time);
 	}
 
+	// A Luanti world's mod_storage.sqlite: what its mods remember, per mod,
+	// into the files this module keeps a mod's storage in.
+	void import_mod_storage(const ss_ &luanti_world_path)
+	{
+		ss_ db_path = luanti_world_path+"/mod_storage.sqlite";
+		if(!interface::fs::path_exists(db_path))
+			return;
+		sqlite3 *db = nullptr;
+		if(sqlite3_open_v2(db_path.c_str(), &db, SQLITE_OPEN_READONLY,
+				nullptr) != SQLITE_OK){
+			log_w(MODULE, "import_world(): %s: %s", cs(db_path),
+					db ? sqlite3_errmsg(db) : "cannot open");
+			sqlite3_close(db);
+			return;
+		}
+		sqlite3_stmt *st = nullptr;
+		if(sqlite3_prepare_v2(db,
+				"SELECT modname, key, value FROM entries ORDER BY modname",
+				-1, &st, nullptr) != SQLITE_OK){
+			log_w(MODULE, "import_world(): %s: %s", cs(db_path),
+					sqlite3_errmsg(db));
+			sqlite3_close(db);
+			return;
+		}
+		// Per mod, because that is the unit the storage is a file of
+		sm_<ss_, sm_<ss_, ss_>> by_mod;
+		while(sqlite3_step(st) == SQLITE_ROW){
+			auto column = [&](int i){
+				const char *p = (const char*)sqlite3_column_blob(st, i);
+				int n = sqlite3_column_bytes(st, i);
+				return ss_(p ? p : "", (size_t)(n > 0 ? n : 0));
+			};
+			by_mod[column(0)][column(1)] = column(2);
+		}
+		sqlite3_finalize(st);
+		sqlite3_close(db);
+		if(by_mod.empty())
+			return;
+		size_t written = 0;
+		for(const auto &mod : by_mod){
+			interface::MutexScope ms(m_lua_mutex);
+			lua_State *L = m_lua;
+			int base = lua_gettop(L);
+			lua_getglobal(L, "core");
+			lua_getfield(L, -1, "__import_mod_storage");
+			lua_pushstring(L, mod.first.c_str());
+			lua_createtable(L, 0, (int)mod.second.size());
+			for(const auto &pair : mod.second){
+				lua_pushlstring(L, pair.second.c_str(), pair.second.size());
+				lua_setfield(L, -2, pair.first.c_str());
+			}
+			if(lua_pcall(L, 2, 1, 0) != 0){
+				log_w(MODULE, "__import_mod_storage(): %s",
+						lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+			} else {
+				written += (size_t)lua_tonumber(L, -1);
+			}
+			lua_settop(L, base);
+		}
+		log_i(MODULE, "import_world(): %zu values of %zu mods' storage",
+				written, by_mod.size());
+	}
+
 	// One node's metadata into the Lua table that holds it. The fields are
 	// strings and an inventory is item strings, which is the same shape the
 	// save keeps and the same function puts either back.
@@ -2550,6 +2613,7 @@ struct Module: public interface::Module, public luanti::Interface
 		if(!m_game_running)
 			throw Exception("luanti: import_world() before run_game()");
 		import_clock(luanti_world_path);
+		import_mod_storage(luanti_world_path);
 		ss_ db_path = luanti_world_path+"/map.sqlite";
 		if(!interface::fs::path_exists(db_path))
 			throw Exception("luanti: no map.sqlite in "+luanti_world_path);
