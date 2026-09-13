@@ -237,6 +237,13 @@ function core.__check_map_read()
 	end
 	core.log("verbose", "check_map: " .. check_name ..
 			" survived the flush, and the region reads found it")
+
+	-- What only the game can check: anything that has to be registered while
+	-- the mods load, since the registries freeze once they have. A game that
+	-- defines this gets called here, with the map flushed and readable.
+	if core.__game_check then
+		core.__game_check()
+	end
 end
 
 -- vim: set noet ts=4 sw=4:

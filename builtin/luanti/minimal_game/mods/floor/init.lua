@@ -228,6 +228,44 @@ core.register_node("floor:probe", {
 	after_dig_node = function() probe.dug = probe.dug + 1 end,
 })
 
+-- A rule that runs on every node of a kind forever, which is what a game's
+-- growing and burning and decaying are made of. Registered here because the
+-- registry freezes once the mods have loaded, so nothing outside a mod can
+-- add one; core.__game_check at the end of this file is what drives it.
+core.register_node("floor:seed", {
+	description = "Seed",
+	drawtype = "plantlike",
+	tiles = {"floor_plant.png"},
+	paramtype = "light",
+	walkable = false,
+	groups = {snappy = 3},
+})
+
+core.register_node("floor:sprout", {
+	description = "Sprout",
+	drawtype = "plantlike",
+	tiles = {"floor_plant.png"},
+	paramtype = "light",
+	walkable = false,
+	visual_scale = 1.4,
+	groups = {snappy = 3},
+})
+
+-- neighbors is the half that makes this more than a sweep over one name: a
+-- seed grows on the ground and one in the air stays a seed
+core.register_abm({
+	label = "floor: seeds sprout",
+	nodenames = {"floor:seed"},
+	neighbors = {"floor:stone"},
+	interval = 1,
+	chance = 1,
+	min_y = 1,
+	max_y = 1,
+	action = function(pos, node)
+		core.set_node(pos, {name = "floor:sprout"})
+	end,
+})
+
 local HALF = 12   -- a 25x25 floor, which is one voxelworld section across
 local Y = 0
 
@@ -379,6 +417,41 @@ do
 	core.set_node(p, {name = "air"})
 	core.set_node({x = p.x, y = p.y - 1, z = p.z}, {name = "air"})
 	core.log("action", "floor: place_node and dig_node run their callbacks")
+end
+
+-- Three seeds for the ABM, one for each half of what decides whether it
+-- runs: one on the floor, which grows; one off the edge of the floor, which
+-- has no floor:stone next to it; and one a voxel above the rule's max_y, on
+-- a block of its own so that it is only the height that stops it. All are
+-- placed here and looked at in core.__game_check, which lua/check_map.lua
+-- calls once the map has been flushed.
+local SEED_ON_FLOOR = {x = -10, y = Y + 1, z = -10}
+local SEED_IN_AIR = {x = 20, y = Y + 1, z = 20}
+local SEED_TOO_HIGH = {x = -9, y = Y + 2, z = -10}
+
+core.set_node(SEED_ON_FLOOR, {name = "floor:seed"})
+core.set_node(SEED_IN_AIR, {name = "floor:seed"})
+core.set_node({x = SEED_TOO_HIGH.x, y = SEED_TOO_HIGH.y - 1,
+		z = SEED_TOO_HIGH.z}, {name = "floor:stone"})
+core.set_node(SEED_TOO_HIGH, {name = "floor:seed"})
+
+function core.__game_check()
+	-- One step of the ABM's whole interval, so it runs exactly once
+	core.__step(1.0)
+	local grown = core.get_node(SEED_ON_FLOOR).name
+	if grown ~= "floor:sprout" then
+		error("floor: the abm left the seed on the floor as " .. grown)
+	end
+	local kept = core.get_node(SEED_IN_AIR).name
+	if kept ~= "floor:seed" then
+		error("floor: the abm grew a seed with no floor under it: " .. kept)
+	end
+	local high = core.get_node(SEED_TOO_HIGH).name
+	if high ~= "floor:seed" then
+		error("floor: the abm grew a seed above its max_y: " .. high)
+	end
+	core.log("action", "floor: the abm grew the one seed of three that its " ..
+			"neighbors and max_y allowed")
 end
 
 core.log("action", "floor: placed a " .. (HALF * 2 + 1) .. "x" ..

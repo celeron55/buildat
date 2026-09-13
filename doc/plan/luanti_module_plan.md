@@ -816,9 +816,48 @@ two things M1 disproved about the build, are in
   tables rather than functions, because indexing a function is an error and
   a mod that only looks should not be broken by a stub.
 
-  **What is left:** ABMs and LBMs, which are timers over the map and can be
-  written on the globalsteps that now run; entities, which are what a dig's
-  drops need before they go anywhere; and the client half.
+  **Built: ABMs (2026-09-13).** A rule that runs on every node of a kind,
+  forever, which is what a game's growing and burning and decaying are made
+  of. Per-rule interval accumulators in the step; the sweep is over the
+  sections that are loaded, which is Luanti's active block list under another
+  name since there are no players yet. `nodenames` (groups included),
+  `neighbors`, `chance`, `min_y` and `max_y` all decide, and the action is
+  called with the two object counts at zero.
+
+  The match is on content ids and happens in the module --
+  `__luanti_find_ids()` reads a box and returns the positions in it that are
+  of a kind, for up to 32 sets of ids at once -- so what crosses into Lua is
+  the handful of voxels a rule is about rather than the section. The first
+  cut read each section into a Lua table of names and matched there: a sweep
+  of a 3x3x3-section world took 3.8 seconds and devtest, where nine rules
+  each read every section, saturated a core. It is 0.35 seconds and a third
+  of a core through the module, and the rules no longer pay per rule.
+
+  A mutex around every entry into the module's Lua came out of this. Two of
+  the module's handlers can be inside Lua at once -- a queued `core:tick` on
+  the module thread while `core:shutdown` is emitted synchronously from
+  another, which `ModuleThread::handle_event` does not serialise against
+  `emit_event_sync` -- and one `lua_State` under two threads is a crash. It
+  was always there; a step that does real work is what made it happen every
+  time. The engine is where it should be fixed, and then the mutex can go.
+
+  What the fixture checks: `minimal_game` registers a rule that turns a seed
+  into a sprout, and three seeds -- one on the floor, one off the edge of it
+  and one above the rule's `max_y` -- of which exactly the first grows.
+  Registered in the game and not in `lua/check_map.lua` because the
+  registries freeze once the mods have loaded, which is what `core.__game_check`
+  is for: check_map calls the game's own check with the map flushed.
+
+  **simplified:** no time budget, no catch-up, and every loaded section is
+  read for every step that has a rule due. Luanti spends at most a share of a
+  step on ABMs, skips ahead when a block comes back after a long time away,
+  and keeps a per-block list of which node kinds are in it so that most
+  blocks are never read. All three are about a map bigger than the sections a
+  mod can reach here; they belong with M6's map.
+
+  **What is left:** LBMs, which are the same idea on a block being loaded;
+  entities, which are what a dig's drops need before they go anywhere; and
+  the client half.
 - **M6 -- the launcher.** `games/luanti_launcher` as described.
 - **M7 -- an existing Luanti world opens.** The importer: read a Luanti world
   directory -- `map.sqlite`, `map_meta.txt`, `env_meta.txt`, the player and
