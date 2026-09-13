@@ -3918,6 +3918,29 @@ struct Module: public interface::Module, public luanti::Interface
 		return 0;
 	}
 
+	// A line of chat to one player, or to everyone when the name is empty
+	static int l_send_chat(lua_State *L)
+	{
+		Module *self = module_of(L);
+		size_t name_len = 0, msg_len = 0;
+		const char *name_p = luaL_checklstring(L, 1, &name_len);
+		const char *msg_p = luaL_checklstring(L, 2, &msg_len);
+		ss_ name(name_p ? name_p : "", name_len);
+		sv_<ss_> flat{ss_(msg_p ? msg_p : "", msg_len)};
+		if(name.empty()){
+			// A copy, because a client that drops out while this is going
+			// out would otherwise change the map underneath it
+			sv_<ss_> names;
+			for(const auto &pair : self->m_player_peers)
+				names.push_back(pair.first);
+			for(const ss_ &n : names)
+				self->send_to_player(n, "luanti:chat", flat);
+		} else {
+			self->send_to_player(name, "luanti:chat", flat);
+		}
+		return 0;
+	}
+
 	void send_inventory(const ss_ &name, const sv_<ss_> &flat)
 	{
 		send_to_player(name, "luanti:inventory", flat);
@@ -4919,6 +4942,7 @@ struct Module: public interface::Module, public luanti::Interface
 				l_show_object_props);
 		set_global_cfunction("__luanti_send_inventory", l_send_inventory);
 		set_global_cfunction("__luanti_send_player_pos", l_send_player_pos);
+		set_global_cfunction("__luanti_send_chat", l_send_chat);
 		set_global_cfunction("__luanti_show_formspec", l_show_formspec);
 		set_global_cfunction("__luanti_player_formspec", l_player_formspec);
 		set_global_cfunction("__luanti_send_node_inventory",
@@ -5067,6 +5091,20 @@ struct Module: public interface::Module, public luanti::Interface
 				lua_quoted(name).c_str(), (double)x, (double)y, (double)z,
 				(double)look_h, (double)look_v);
 		node_action(buf);
+	}
+
+	// A line a player typed, handed to the callbacks the way Luanti's own
+	// server hands one over. The "/" commands are among those callbacks,
+	// registered by the vendored builtin.
+	void chat_message(const ss_ &player_name, const ss_ &message)
+	{
+		// Luanti's own limit on a chat line, and the reason for one here is
+		// that this comes off the network
+		static const size_t MAX_CHAT = 500;
+		ss_ line = message.size() > MAX_CHAT ?
+				message.substr(0, MAX_CHAT) : message;
+		node_action("core.__chat_message(\""+lua_quoted(player_name)+
+				"\", \""+lua_quoted(line)+"\") return true");
 	}
 
 	bool dig_node(int32_t x, int32_t y, int32_t z, const ss_ &player_name)

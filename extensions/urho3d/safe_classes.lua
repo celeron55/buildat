@@ -1078,9 +1078,15 @@ function M.define(dst, util)
 					"SetTextAlignment", {}, {"UIElement", "number"}),
 			SetFontSize = util.self_function(
 					"SetFontSize", {}, {"Text", "number"}),
+			-- A shadow or an outline under the letters, which is what makes
+			-- text over a world readable: a HUD over snow or sand is white
+			-- on white without it. effectColor is what it is drawn with.
+			SetTextEffect = util.self_function(
+					"SetTextEffect", {}, {"Text", "number"}),
 		},
 		properties = {
 			text = util.simple_property("string"),
+			effectColor = util.simple_property(dst.Color),
 		},
 	})
 

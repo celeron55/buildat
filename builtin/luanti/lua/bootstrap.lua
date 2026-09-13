@@ -313,6 +313,9 @@ local DEFAULTS = {
 	["chunksize"] = "5",
 	["map_generation_limit"] = "31000",
 	["time_speed"] = "72",
+	-- What core.format_chat_message() builds a said line out of, and it
+	-- errors on a format with no @name or @message in it
+	["chat_message_format"] = "<@name> @message",
 	["creative_mode"] = "false",
 	["enable_damage"] = "true",
 	["profiler.load"] = "false",
@@ -620,6 +623,49 @@ local FACING_OF_PARAMTYPE2 = {
 -- answer of its own gets depends on whether it has been played before.
 -- The module decides that and writes it into the save; see mapgen_name()
 -- in luanti.cpp.
+--
+-- Chat
+--
+-- What a mod says goes to a player's screen, and what a player types goes to
+-- the mods. Luanti's server carries both in C++; here the module carries the
+-- line and this is the Lua end of it.
+
+local __send_chat = __luanti_send_chat
+
+function core.chat_send_player(name, message)
+	if __send_chat then
+		__send_chat(tostring(name), tostring(message))
+	end
+end
+
+-- An empty name is everyone, which is what the module's end reads it as
+function core.chat_send_all(message)
+	if __send_chat then
+		__send_chat("", tostring(message))
+	end
+end
+
+-- What the module calls when a player has typed a line. Luanti's own server
+-- runs the on_chat_message callbacks and stops at the first that says it
+-- took the line -- the vendored builtin registers the one that runs a "/"
+-- command among them -- and what nobody takes is said to everybody.
+function core.__chat_message(name, message)
+	for _, cb in ipairs(core.registered_on_chat_messages or {}) do
+		local ok, handled = pcall(cb, name, message)
+		if not ok then
+			core.log("error", "on_chat_message: " .. tostring(handled))
+		elseif handled then
+			return true
+		end
+	end
+	local line = core.format_chat_message and
+			core.format_chat_message(name, message) or
+			("<" .. name .. "> " .. message)
+	core.log("action", "CHAT: " .. line)
+	core.chat_send_all(line)
+	return false
+end
+
 function core.__mapgen_name()
 	return core.settings.values["mg_name"] or ""
 end
@@ -998,7 +1044,7 @@ local STUBS_NIL = {
 	"register_craft_raw",
 	"get_hit_params", "get_tool_wear_after_use",
 	-- Chat, HUD, sound, particles (M4, M5)
-	"chat_send_all", "chat_send_player", "send_join_message",
+	"send_join_message",
 	"send_leave_message", "sound_play", "sound_stop", "sound_fade",
 	"add_particle", "add_particlespawner", "delete_particlespawner",
 	"hud_replace_builtin",
