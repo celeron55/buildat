@@ -34,6 +34,8 @@
 local objects = {}      -- id -> the object's own state
 local next_id = 1
 
+local __show_objects = __luanti_show_objects
+
 -- What an entity gets until its initial_properties and set_properties say
 -- otherwise. The names are Luanti's, and the ones nothing here reads are
 -- kept so that a mod's get_properties() answers with what it set.
@@ -465,6 +467,45 @@ local function step_object(o, dtime)
 	end
 end
 
+-- Where every object is and how big it is, once per step: the module puts a
+-- node in the scene for each, and the scene is what every client is already
+-- being sent. A box the size of the collision box, because what an object
+-- looks like is the client half's and this is what says where they are
+-- until then.
+-- Whether anything was on screen last time, so that a world with no objects
+-- in it -- which is most of a step -- does not cross into the module and
+-- out to the scene twenty times a second to say so
+local anything_shown = false
+
+local function show_objects()
+	local v = {}
+	for id, o in pairs(objects) do
+		local box = o.props.collisionbox or DEFAULT_PROPERTIES.collisionbox
+		if o.props.is_visible == false then
+			box = nil
+		end
+		if box then
+			-- The node is at the middle of the box and scaled to its size,
+			-- and a zero side would be a node nobody can see anyway
+			local sx = math.max(box[4] - box[1], 0.05)
+			local sy = math.max(box[5] - box[2], 0.05)
+			local sz = math.max(box[6] - box[3], 0.05)
+			v[#v + 1] = id
+			v[#v + 1] = o.pos.x + (box[1] + box[4]) / 2
+			v[#v + 1] = o.pos.y + (box[2] + box[5]) / 2
+			v[#v + 1] = o.pos.z + (box[3] + box[6]) / 2
+			v[#v + 1] = sx
+			v[#v + 1] = sy
+			v[#v + 1] = sz
+		end
+	end
+	if #v == 0 and not anything_shown then
+		return
+	end
+	anything_shown = #v > 0
+	__show_objects(v)
+end
+
 function core.__step_objects(dtime)
 	-- Over the ids taken first, because a step adds and removes objects
 	local ids = {}
@@ -478,6 +519,7 @@ function core.__step_objects(dtime)
 			step_object(o, dtime)
 		end
 	end
+	show_objects()
 end
 
 -- vim: set noet ts=4 sw=4:

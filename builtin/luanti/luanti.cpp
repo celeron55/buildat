@@ -46,6 +46,13 @@ extern "C" {
 // what comes out of it, so it is written rather than stubbed. Urho3D ships
 // stb_image_write but does not export it, so it is compiled in here; it is
 // one header and the only C++ in this file that is not glue.
+#include <Scene.h>
+#include <Node.h>
+#include <StaticModel.h>
+#include <Model.h>
+#include <Material.h>
+#include <ResourceCache.h>
+#include <Context.h>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STBI_WRITE_NO_STDIO
 #include <STB/stb_image_write.h>
@@ -547,6 +554,10 @@ struct Module: public interface::Module, public luanti::Interface
 	// three hundred thousand blocks asks Lua once per name and not once per
 	// node
 	sm_<ss_, std::pair<uint32_t, bool>> m_import_ids;
+	// The objects on screen: the scene node each one has, by the id
+	// lua/entity.lua gave it. Everything in the scene is replicated to the
+	// clients, so this is the whole of drawing an object.
+	sm_<int32_t, uint32_t> m_object_nodes;
 	// Whether the save has node metadata in it, so that a world that has
 	// none does not get a blob written for it every shutdown
 	bool m_had_node_meta = false;
@@ -2390,6 +2401,78 @@ struct Module: public interface::Module, public luanti::Interface
 		return 1;
 	}
 
+	// __luanti_show_objects{id, x, y, z, sx, sy, sz, ...}: where every
+	// object is and how big it is, once per step. A node per object in the
+	// module's scene, which is what every client is already being sent.
+	//
+	// simplified: a box the size of the object's collision box, because
+	// what an object looks like -- a sprite, a mesh, the item it is -- is
+	// the client half's, and this is what says where they are until then.
+	static int l_show_objects(lua_State *L)
+	{
+		Module *self = module_of(L);
+		luaL_checktype(L, 1, LUA_TTABLE);
+		size_t n = lua_objlen(L, 1);
+		sv_<double> v(n, 0.0);
+		for(size_t i = 0; i < n; i++){
+			lua_rawgeti(L, 1, (int)i + 1);
+			v[i] = lua_tonumber(L, -1);
+			lua_pop(L, 1);
+		}
+		self->show_objects(v);
+		return 0;
+	}
+
+	void show_objects(const sv_<double> &v)
+	{
+		if(!m_scene)
+			return;
+		const size_t STRIDE = 7;
+		set_<int32_t> seen;
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			magic::Scene *scene = imc->find_scene(m_scene);
+			if(!scene)
+				return;
+			magic::ResourceCache *cache =
+					imc->get_context()->GetSubsystem<magic::ResourceCache>();
+			for(size_t i = 0; i + STRIDE <= v.size(); i += STRIDE){
+				int32_t id = (int32_t)v[i];
+				seen.insert(id);
+				magic::Node *n = nullptr;
+				auto it = m_object_nodes.find(id);
+				if(it != m_object_nodes.end())
+					n = scene->GetNode(it->second);
+				if(!n){
+					n = scene->CreateChild("luanti_object");
+					magic::StaticModel *model =
+							n->CreateComponent<magic::StaticModel>();
+					model->SetModel(cache->GetResource<magic::Model>(
+							"Models/Box.mdl"));
+					model->SetMaterial(cache->GetResource<magic::Material>(
+							"Materials/Stone.xml"));
+					model->SetCastShadows(true);
+					m_object_nodes[id] = n->GetID();
+				}
+				n->SetPosition(magic::Vector3(
+						(float)v[i + 1], (float)v[i + 2], (float)v[i + 3]));
+				n->SetScale(magic::Vector3(
+						(float)v[i + 4], (float)v[i + 5], (float)v[i + 6]));
+			}
+			// What is not in the list any more has been removed
+			for(auto it = m_object_nodes.begin();
+					it != m_object_nodes.end();){
+				if(seen.count(it->first)){
+					it++;
+					continue;
+				}
+				magic::Node *n = scene->GetNode(it->second);
+				if(n)
+					n->Remove();
+				it = m_object_nodes.erase(it);
+			}
+		});
+	}
+
 	// __luanti_find_ids(x0,y0,z0,x1,y1,z1, {ids, ids, ...})
 	//         -> {{x,y,z, x,y,z, ...}, ...}, one list per set of ids
 	//
@@ -2929,6 +3012,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_get_region", l_get_region);
 		set_global_cfunction("__luanti_active_boxes", l_active_boxes);
 		set_global_cfunction("__luanti_find_ids", l_find_ids);
+		set_global_cfunction("__luanti_show_objects", l_show_objects);
 		lua_pushlightuserdata(m_lua, (void*)this);
 		lua_setfield(m_lua, LUA_REGISTRYINDEX, "__luanti_module");
 		set_global_string("__luanti_module_path", module_path());
