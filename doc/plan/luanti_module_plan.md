@@ -436,6 +436,18 @@ is the hole `dynamic_add_media` exists to plug.
 game through `load_lua()` is not in Luanti's contract and can pick whatever
 strategy it likes for its own content.
 
+**What the code does instead, and it is a bug (2026-09-13).**
+`serve_game_media()` collects each mod's `textures/` and nothing else.
+Luanti makes no distinction between a texture, a model and a sound: media is
+every file in a mod's `textures/`, `sounds/`, `models/` and `media/` whose
+extension is on a hardcoded whitelist, and all of it goes to the client.
+That a game's models are not used by its own client is the game's decision,
+not the contract. devtest ships 29 model files and 3 sounds that are never
+sent. The fix is the four directories and the whitelist -- `.png`, `.jpg`,
+`.tga`, `.obj`, `.b3d`, `.x`, `.gltf`, `.glb`, `.ogg` and the rest of
+Luanti's list -- and it is worth doing on its own, before anything that
+wants a model or a sound.
+
 What it costs is on the transport rather than here, and `client_file` wanted
 four things before it could carry a game's whole asset tree: a file read
 from disk when it is sent, one announce packet, bunched sends, and a
@@ -804,9 +816,14 @@ shape of their own, 83 of those liquids; 56 turn with their param2.
   `leveled` are a `VoxelVariant` on the param; devtest has none of the three
   to check an implementation against, which is a reason to wait for a game
   that does. See "Which mesher draws the drawtypes".
-- **`mesh`** (18 in devtest), which is its own piece of work: see "The
-  meshes" under the open questions.
-- **Palettes**: see "The palettes" under the open questions.
+- **`mesh`** (18 in devtest). Settled and deferred until after the map; see
+  "The meshes: after the map".
+- **Palettes**: settled; see "The palettes: a variant wears its own
+  textures". The first half of it is engine work in `VoxelVariant`.
+- **The media set is short.** `serve_game_media()` collects `textures/` and
+  nothing else, so devtest's 29 model files and 3 sounds are never sent.
+  That contradicts "What gets sent, and what does not" below, which is a
+  settled decision; see the note there.
 
 **M4 -- it plays. Built 2026-09-13.** Digging and placing with every
 callback around them, node metadata, inventories, the recipes, the
@@ -1257,57 +1274,81 @@ what the module does not do.
 - **The importer reads `players.sqlite` only**, not a world whose players
   are one text file each under `players/`.
 
-## Open questions
+## What the drawtypes that are left turned out to be
 
-What has to be decided before the work it belongs to can start. Each says
-what is known, so that answering it is a judgement and not a search.
+### The palettes: a variant wears its own textures (settled 2026-09-13)
 
-### The palettes (M3)
+A node with `paramtype2 = "color"` and its friends puts a palette index in
+the high bits of param2 and is drawn with the colour at that index. devtest
+has 19 such nodes; a real game uses them for grass and foliage, so they are
+not a corner.
 
-**The work:** a node with `paramtype2 = "color"` and friends puts a palette
-index in the high bits of param2 and the client tints the node's texture
-with the colour at that index. The plan says: one voxel type per used
-palette index, registered at load.
+**What is not available, and why.** The plan used to say "one voxel type per
+used palette index, registered at load". It cannot be done:
+`CVoxelRegistry::add_voxel()` assigns `id = m_defs.size()` and throws if the
+definition already carries a different one, so the registry id *is* the
+Luanti content id -- and the ABM sweep matches content ids directly because
+the two are the same number. There is no second discriminator to put a
+palette index in, and the Luanti voxel word has no spare bits either: 16 for
+the id, 4 and 4 for the light, 8 for the param is the whole 32.
 
-**What is known.** `VoxelVariant::color` is the wrong channel -- the header
-says so where it is declared: it multiplies the light a voxel receives
-rather than its texture, so a palette entry would show in shade and vanish
-in sunlight. An albedo tint wants a channel of its own; see
-`doc/plan/voxel_data_model_plan.md`. So the colour has to be in the texture,
-which means one composed texture and one voxel type per index -- and with
-the texture modifiers built, `tile^[multiply:#rrggbb` is exactly the
-expression for it, resolved client-side like every other tile.
+**And the two colour channels that already exist are the wrong ones.**
+`VoxelVariant::color` and `VoxelDefinition::tint_ramp` both multiply the
+*vertex* colour, which is light rather than albedo -- their own headers say
+what that costs: "a palette entry would show in shade and vanish in
+sunlight". `VoxelFormat::tint` *is* an albedo channel and is already carried
+to the shader packed 5-6-5, but binding it needs a field to put the index
+in, which the Luanti word does not have room for, and a palette rather than
+the two-endpoint ramp it reads.
 
-**What is not decided:** how many. devtest has 19 nodes with a palette, 9 of
-them `color` with the full 256 entries and the rest 8, 32 or 64. "One per
-*used* index" cannot be known at load -- what is used is whatever a mod
-writes into param2 later -- so registering at load means registering all of
-them: up to 256 voxel types and six atlas segments each for one node. Either
-that is affordable and the plan should say so after measuring, or the
-registration has to be lazy -- a voxel type made the first time a param2
-value is seen -- which is a different shape and touches the atlas.
-**Measuring one devtest palette node's worth of types and segments is the
-next step**, not writing either version.
+**So a variant names textures of its own.** That is finishing something the
+engine already half-says: `VoxelVariant`'s own header gives "a voxel that
+faces one of twenty-four directions, or **wears one of eight palette
+colours**" as the two cases variants exist for -- and then the next
+paragraph says a variant carries no textures and offers `color`, which the
+comment after it says is wrong for a palette. The colour index is already in
+param2 and param2 already maps to a variant; only the textures are missing.
 
-### The meshes (M3, M5)
+The tinted tiles are `<tile>^[multiply:#rrggbb`, which is a texture modifier
+expression -- so the client composes them through exactly the machinery the
+modifiers already built, and the server does not touch a pixel.
 
-**The work:** `visual = "mesh"` for an object and `drawtype = "mesh"` for a
-node. 18 node types in devtest, and the dropped item is the only object that
-matters today.
+**What it costs.** Directions permute and colours multiply, so the atlas
+grows with distinct tiles times palette entries and *not* with directions: a
+`colorfacedir` node with eight colours is 8 x 24 = 192 variants but only 8 x
+6 = 48 distinct textures. devtest's nine 256-entry `color` nodes are the
+worst case, and an atlas holds 4096 segments of 16x16 and spills into
+another when it fills, so they come to roughly half an atlas rather than to
+a wall.
 
-**What is known.** `extensions/luanti_client` has `b3dmesh.lua` and
-`objmesh.lua`, which read Luanti's two formats, and the fork rule says leaf
-files are copied verbatim. They were written against the extension's own
-drawing, so what they hand back has to be checked against what a module's
-client half can make of it -- a Urho3D `Model` built at runtime, which
-nothing in the sandbox does yet.
+**The first thing to settle when it is built:** a variant's `tile_order` is
+`uint8_t`, so it can name at most 256 textures, and six tiles times 256
+palette entries is 1536. Either the variant carries its own texture array or
+the definition's table grows and the index widens. Which one is a question
+for the mesher's inner loop, which is what reads it.
 
-**What is not decided:** whether a mesh node goes through the *mesher* --
-`VoxelQuad`s in the definition, like every other drawtype -- or is drawn
-client-side as a model per node, like an object. The first keeps one path
-and costs a mesh converted to quads at load; the second is what an object
-needs anyway. They are not the same piece of work and the answer decides
-which milestone it belongs to.
+
+### The meshes: after the map (settled 2026-09-13)
+
+`drawtype = "mesh"` for nodes and `visual = "mesh"` for objects. Deferred,
+not dropped, and the reason is what the formats turned out to be.
+
+**The two readers cover two thirds.** `objmesh.lua` and `b3dmesh.lua` in
+`extensions/luanti_client` each produce "the quads a voxel's shape is made
+of" -- they were written for the voxel mesher and say so, which answers what
+was an open question here: a mesh node goes through the mesher like every
+other shape, and `objmesh.lua`'s header makes the argument, that a chunk of
+lanterns then costs what a chunk of cubes costs. Of devtest's 30 `mesh = `
+references, 19 are `.obj` and one is `.b3d`. The rest -- five `.gltf`, two
+`.glb`, two `.x` -- are mostly its dedicated glTF test mod, and glTF is a
+third reader nobody has written.
+
+**Where they would be parsed is a free choice**, now that the client is sent
+the model files like any other media: server-side keeps a node's shape in
+the definition where every other drawtype's shape is, and client-side is
+where the extension does it and where an object's `CustomGeometry` would be
+built. Nothing forces it either way, so it is decided when it is written.
+
 
 ## Risks
 

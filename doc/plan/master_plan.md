@@ -76,7 +76,16 @@ are each a simplification the plan names rather than a bug. See "devtest's own
 unittests as the oracle" in the module plan for how to run it -- it is the
 first thing to run after touching the API surface.
 
-What is left is, in order:
+**First, a bug worth fixing on its own.** `builtin/luanti` serves each mod's
+`textures/` and nothing else, so devtest's 29 models and 3 sounds never
+reach a client. Luanti makes no distinction between a texture, a model and a
+sound -- media is every file in four directories that passes an extension
+whitelist -- and the module plan's "What gets sent, and what does not" says
+so as a settled decision, which makes this the code contradicting the plan
+rather than a choice. Small, and it unblocks anything that wants a model or
+a sound.
+
+Then, in order:
 
 1. **M6's map, and it starts in `voxelworld`.** The world is 3x3x3 sections
    -- about 192 voxels a side -- so the importer drops most of a real Luanti
@@ -98,10 +107,18 @@ What is left is, in order:
    The second half is the module's: a load point per player, an active range
    bounding the ABM and LBM sweeps, node metadata per section rather than
    one blob for the world, and node timers that stop with their section.
-2. **The rest of M3's drawtypes**, which is the palettes and `mesh`. Both
-   have an open question of their own in the module plan -- how many voxel
-   types a palette costs, and whether a mesh node goes through the mesher or
-   is drawn client-side -- and neither is large once answered.
+2. **The palettes**, which is settled (2026-09-13) and is engine work
+   first: `VoxelVariant` gains textures of its own, which finishes what its
+   own header already says variants are for -- "a voxel that faces one of
+   twenty-four directions, or wears one of eight palette colours". The
+   tinted tiles are texture modifier expressions, so the client composes
+   them through machinery that already exists. See "The palettes: a variant
+   wears its own textures" in the module plan.
+
+   **The meshes are settled and deferred** until after the map: the two
+   readers in `extensions/luanti_client` cover two thirds of devtest's mesh
+   nodes and were written for the voxel mesher, and the other third is glTF,
+   which is a reader nobody has written.
 3. **The leftovers**, each small and none blocking anything. They are under
    "Bonuses" below, which is what that section is for; the module plan's
    "Simplified, and the upgrade path" has the full list of what the module
