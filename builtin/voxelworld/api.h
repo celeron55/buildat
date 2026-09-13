@@ -328,6 +328,21 @@ namespace voxelworld
 			set_light_maintained(LIGHT_SKY, enabled);
 		}
 
+		// Work the light in these sections out again from what is in them
+		// and what is around them. A game that writes a region of terrain
+		// with no light in it -- a Luanti mod's mapgen does exactly that,
+		// and Luanti's own answer to it is VoxelManip:calc_lighting() --
+		// asks for this afterwards; without it the terrain it wrote is dark
+		// and stays dark, because a write carrying no light takes the light
+		// that was there and there was none.
+		//
+		// It is the same work a section that came back stale does: the
+		// light in the section is taken out and let back in from its faces
+		// and its own sources. Costly enough to be worth asking for rather
+		// than doing on every write -- a section is a quarter of a million
+		// voxels.
+		virtual void relight_region(const pv::Region &region) = 0;
+
 		virtual size_t num_buffers_loaded() = 0;
 
 		virtual void commit() = 0;

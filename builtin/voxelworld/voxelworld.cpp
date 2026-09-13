@@ -1756,6 +1756,29 @@ struct CInstance: public voxelworld::Instance
 			m_stale_dirty = true;
 	}
 
+	// See relight_region() in api.h: every section the region touches has
+	// its light taken out and let back in, now rather than when it is next
+	// loaded.
+	void relight_region(const pv::Region &region)
+	{
+		const pv::Vector3DInt16 lc = section_of_voxel(region.getLowerCorner());
+		const pv::Vector3DInt16 uc = section_of_voxel(region.getUpperCorner());
+		size_t n = 0;
+		for(int16_t z = lc.getZ(); z <= uc.getZ(); z++)
+		for(int16_t y = lc.getY(); y <= uc.getY(); y++)
+		for(int16_t x = lc.getX(); x <= uc.getX(); x++){
+			const pv::Vector3DInt16 section_p(x, y, z);
+			Section *section = get_section(section_p);
+			if(section == nullptr)
+				continue;
+			mark_section_stale(section_p);
+			relight_if_stale(*section);
+			n++;
+		}
+		if(n > 0)
+			log_d(MODULE, "relight_region(): %zu sections", n);
+	}
+
 	void load_stale_sections()
 	{
 		m_stale_sections.clear();

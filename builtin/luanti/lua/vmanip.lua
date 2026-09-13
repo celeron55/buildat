@@ -131,22 +131,52 @@ function VoxelManipRef:write_to_map(light)
 			self.emax.x, self.emax.y, self.emax.z,
 			self.ids, self.param1, self.param2)
 	self.modified = false
+	-- What calc_lighting() asked for, now that there is terrain to work it
+	-- out from. Luanti's own write_to_map(light) does the same thing when
+	-- it is not told otherwise.
+	local r = self.relight
+	if r == nil and light ~= false then
+		r = {x1 = self.emin.x, y1 = self.emin.y, z1 = self.emin.z,
+				x2 = self.emax.x, y2 = self.emax.y, z2 = self.emax.z}
+	end
+	if r ~= nil then
+		self.relight = nil
+		__luanti_relight(r.x1, r.y1, r.z1, r.x2, r.y2, r.z2)
+	end
 end
 
 function VoxelManipRef:was_modified()
 	return self.modified and true or false
 end
 
--- The light is voxelworld's: it floods from the sky as the map is written
--- and there is nowhere for a second answer to go. These are the calls a
--- mapgen mod makes anyway, so they are here and do nothing rather than
--- being missing and taking the mod down.
+-- The light is voxelworld's, which is what makes these two different from
+-- Luanti's: there the manipulator works the light out into its own param1
+-- and writes it with the rest, and here the world floods it once the
+-- terrain is in the map. So calc_lighting() records the box and the flood
+-- happens after write_to_map(), which is the only order in which there is
+-- terrain to work from.
 --
--- simplified: set_lighting() does write what it is told, because a mod that
--- fills a cave with its own value means it; calc_lighting() and
--- update_liquids() are voxelworld's job and the engine's.
+-- A mod that writes a chunk of its own terrain needs this: what it wrote
+-- carries no light, and a write with no light in it takes the light that
+-- was there -- which, where the mod has just replaced the mapgen's terrain,
+-- is nothing. VoxeLibre's world was black until this did something.
 function VoxelManipRef:calc_lighting(p1, p2, propagate_shadow)
+	if self.emin == nil then
+		return
+	end
+	if p1 ~= nil and p2 ~= nil then
+		local x1, y1, z1, x2, y2, z2 = sorted_box(p1, p2)
+		self.relight = {x1 = x1, y1 = y1, z1 = z1, x2 = x2, y2 = y2, z2 = z2}
+	else
+		self.relight = {x1 = self.emin.x, y1 = self.emin.y,
+				z1 = self.emin.z, x2 = self.emax.x, y2 = self.emax.y,
+				z2 = self.emax.z}
+	end
 end
+
+-- simplified: set_lighting() does write what it is told, because a mod that
+-- fills a cave with its own value means it; update_liquids() is
+-- voxelworld's job and the engine's.
 
 function VoxelManipRef:set_lighting(light, p1, p2)
 	if type(light) ~= "table" or self.emin == nil then
@@ -216,10 +246,21 @@ function core.get_mapgen_object(name)
 		end
 		return mapgen_vm, mapgen_vm.emin, mapgen_vm.emax
 	end
-	-- heightmap, biomemap, heatmap, humiditymap and gennotify are the
-	-- mapgen's own workings, and singlenode has none of them. Luanti
-	-- answers nil for an object the running mapgen does not produce, which
-	-- is what a mod checks for.
+	if name == "gennotify" then
+		-- Always a table, which is what Luanti answers: the mapgen reports
+		-- what it made into it, and a mod indexes it without asking whether
+		-- it is there -- VoxeLibre's mcl_mapgen_core does, and an answer of
+		-- nil took its whole generator down every chunk.
+		--
+		-- simplified: it is empty, because the mapgen does not report yet.
+		-- See core.set_gen_notify() in bootstrap.lua for what filling it
+		-- would take.
+		return {}
+	end
+	-- heightmap, biomemap, heatmap and humiditymap are the mapgen's own
+	-- workings, and singlenode has none of them. Luanti answers nil for an
+	-- object the running mapgen does not produce, which is what a mod
+	-- checks for.
 	return nil
 end
 

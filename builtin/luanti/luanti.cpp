@@ -4380,6 +4380,30 @@ struct Module: public interface::Module, public luanti::Interface
 		return 0;
 	}
 
+	// __luanti_relight(x0, y0, z0, x1, y1, z1): work the light out again in
+	// the sections this box touches. A mod's mapgen writes a chunk of
+	// terrain with no light in it and then asks Luanti to light it, which is
+	// VoxelManip:calc_lighting(); this is that call's other half.
+	static int l_relight(lua_State *L)
+	{
+		Module *self = module_of(L);
+		int32_t p[6];
+		for(int i = 0; i < 6; i++)
+			p[i] = (int32_t)luaL_checknumber(L, i + 1);
+		if(!self->m_scene || p[3] < p[0] || p[4] < p[1] || p[5] < p[2])
+			return 0;
+		// What is buffered is part of the map, and the light is worked out
+		// from what is in the map
+		self->flush_node_writes();
+		const pv::Region region(pv::Vector3DInt32(p[0], p[1], p[2]),
+				pv::Vector3DInt32(p[3], p[4], p[5]));
+		voxelworld::access(self->m_server, self->m_scene,
+				[&](voxelworld::Instance *world){
+			world->relight_region(region);
+		});
+		return 0;
+	}
+
 	// The level a player can stand at above (x, z), asked of the mapgen
 	// rather than of the map: Luanti's spawn search does the same thing,
 	// because at the moment a player joins the map around the origin is
@@ -5534,6 +5558,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_send_inventory", l_send_inventory);
 		set_global_cfunction("__luanti_send_player_pos", l_send_player_pos);
 		set_global_cfunction("__luanti_spawn_level", l_spawn_level);
+		set_global_cfunction("__luanti_relight", l_relight);
 		set_global_cfunction("__luanti_send_chat", l_send_chat);
 		set_global_cfunction("__luanti_send_hud", l_send_hud);
 		set_global_cfunction("__luanti_send_day_night", l_send_day_night);
