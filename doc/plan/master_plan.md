@@ -134,22 +134,22 @@ terrain did. A world's mapgen is written into the save now, the way
 map_meta.txt holds it, and a new one is v7. See "The mapgen, vendored" in
 `doc/plan/luanti_module_history.md`.
 
+**A world is made of the biomes a game registers (2026-09-13).** It used to
+be bare stone: `BiomeManager` held only the default biome it makes for
+itself, whose every node is `mapgen_stone`. The biomes cross to
+`luanti_mapgen` with their node names already resolved to ids, and the node
+properties a mapgen asks about cross with them, so devtest's world is sand
+under the water line and dirt with grass above it. Half of it was a second
+thing: a section's own terrain lost to the padding a neighbouring
+generator had written into it, which is terrain from before that mapgen's
+biomes ran -- `merge_volume()` takes the region the writer owns now, and
+inside it what the writer says goes. Which means anything writing terrain
+of its own waits for a generator to have been over that section, and
+`check_map` is the first such thing.
+
 What is left, in order of what it is worth:
 
-1. **A generated world is bare stone, because no biome a game registers
-   reaches the mapgen.** devtest registers `mapgen:grassland` -- dirt with
-   grass on top of dirt -- and `mapgen:grassland_ocean`, which is sand by
-   the water, and neither is anywhere in a generated world: what comes out
-   is `mapgen_stone` to the surface, which is `BiomeManager`'s own default
-   biome and the only one it holds. `core.registered_biomes` has been
-   recorded on the Lua side since M2 and nothing carries it across.
-
-   This is the second step of stage 3c below and is pulled out of it
-   because it is what a world looks like: the ores and the decorations
-   change what is in the ground, the biomes are the ground. The step
-   before it is small and belongs with it -- the node properties a mapgen
-   asks about, since the same crossing carries them.
-2. **The client is a player now; what is left is what a game draws on top.**
+1. **The client is a player now; what is left is what a game draws on top.**
    Built 2026-09-13: the player is Luanti's box, walking, falling, jumping
    and stopped by what it runs into, with the camera at its eyes and the
    server saying where it starts; the keys are one table that F5 lists
@@ -178,7 +178,7 @@ What is left, in order of what it is worth:
       lit through a window goes dark at night. Here the light is what the
       mesher baked and only the sun dims.
 
-3. **The mapgen, the rest of stage 3c: the ores and the decorations.** Luanti's own
+2. **The mapgen, the rest of stage 3c: the ores and the decorations.** Luanti's own
    mapgens generate worlds here as of 2026-09-13 -- a world whose
    `mg_name` says `v7` is v7, in `worldgen`'s thread -- but what they
    generate is the default biome, because the biome, ore and decoration
@@ -199,7 +199,7 @@ What is left, in order of what it is worth:
    See "Mapgen stage 3c" in the module plan, and
    `doc/plan/luanti_module_history.md`, "The mapgen, vendored", for what
    the stages below it turned out to be.
-4. **The light, which is `voxelworld`'s and not the module's.** A write
+3. **The light, which is `voxelworld`'s and not the module's.** A write
    that carries light keeps it as of 2026-09-13, so a generated world
    arrives lit and a dug hole fills from its mouth, and lamp light is a
    second field beside it: a game says which of the two it wants
@@ -216,7 +216,7 @@ What is left, in order of what it is worth:
    Luanti asks the mapgen instead of the map (`getSpawnLevelAtPoint`),
    which answers without generating anything; doing that here means asking
    `luanti_mapgen` across the thread its generator runs in.
-5. **The rest is minor and belongs to a later round.** glTF, an object
+4. **The rest is minor and belongs to a later round.** glTF, an object
    drawn as its own model, a detached inventory, a put-down count, the
    inventory cube, a scrolling save list: each is an afternoon, none
    blocks a game from running, and they are in "Bonuses" below for exactly

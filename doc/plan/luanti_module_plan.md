@@ -285,13 +285,16 @@ node with an id like any other here; and the `EmergeParams` a mapgen is
 built with belongs to the mapgen, which deletes it, along with the managers
 and the biome generator it owns.
 
-**A generated world is bare stone today, and that is this section's first
-item.** devtest registers `mapgen:grassland` and `mapgen:grassland_ocean`;
-what a world actually comes out as is `mapgen_stone` to the surface, because
-`BiomeManager` holds nothing but the default biome it makes for itself --
-every node of which is `mapgen_stone`. Nothing carries
-`core.registered_biomes` across, and the same crossing carries the node
-properties a mapgen asks about, so the two go together.
+**The biomes are built (2026-09-13), and the node properties with them.**
+`core.__mapgen_biomes()` hands over each registered biome with its node
+names already the ids they mean, and `core.__mapgen_node_props()` hands over
+what a mapgen asks about a node -- `is_ground_content`, `floodable`, the
+liquid type, what light does -- so the shim stops guessing. devtest's world
+is sand under the water line and dirt with grass above it. What it took
+besides the crossing: a section's own terrain has to win over the padding a
+neighbour's generator wrote into it, which is terrain from before that
+mapgen's biomes ran, so `voxelworld::merge_volume()` takes the region the
+writer owns.
 
 **What is left is what a game says its world is made of.** A mapgen asks its
 managers for the biomes, the ores and the decorations; `BiomeManager`,
