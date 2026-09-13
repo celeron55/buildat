@@ -65,8 +65,8 @@ its nodes, its clock, what its mods remembered and its players (M7).
 
 **And the client half is built** (2026-09-13): a game's textures, its
 formspecs and inventories, a chest, the objects wearing what they look like,
-and a menu to pick a save from. What is left of the module is a map bigger
-than 192 voxels a side, two drawtypes, and a handful of named shortcuts.
+and a menu to pick a save from. What is left of the module is two drawtypes
+and a handful of named shortcuts.
 `doc/plan/luanti_module_history.md` has what each turned out to be.
 
 **And it is checked against Luanti's own tests.** devtest ships a
@@ -76,29 +76,22 @@ are each a simplification the plan names rather than a bug. See "devtest's own
 unittests as the oracle" in the module plan for how to run it -- it is the
 first thing to run after touching the API surface.
 
+**M6's map is built (2026-09-13), and most of it was engine work.**
+`voxelworld` streams sections around load points -- a position and its own
+load and generate radii -- and `games/infidigger` and `games/bomber_drone`
+deleted their copy-pasted streamers, which was the check that the interface
+was the right one. A peer is sent only the chunks near its own point, as far
+out as its client asked for. The module puts a load point under every player
+and runs its ABMs, its node timers and its objects in Luanti's own
+active_block_range, which is one section; its world is the map's limits
+rather than 192 voxels a side. What is left of it is node metadata per
+section -- one blob for the world still works, and what it costs is memory
+that grows with where the players have been. See "The map, as it was built"
+in the module plan.
+
 In order:
 
-1. **M6's map, and it starts in `voxelworld`.** The world is 3x3x3 sections
-   -- about 192 voxels a side -- so the importer drops most of a real Luanti
-   world, devtest's unittest suite stops at `test_mapgen_edges`, and
-   `map_meta.txt`'s seed has nowhere to go. **How it streams is settled
-   (2026-09-13)**; see "The map, and how it streams" in the module plan for
-   the design and the order of work.
-
-   The first half is engine work with three callers, not Luanti work:
-   `voxelworld::Instance` grows load points -- a position and its own load
-   and generate radii, so that a player can have a big range and a machine
-   only enough to work, and so that two players can differ from each other
-   -- plus `get_loaded_sections()` and a per-peer send range, which is a
-   hole today rather than a refinement: every chunk goes to every peer.
-   `games/infidigger` and `games/bomber_drone` already stream server-side
-   with identical copy-pasted code and **delete their copies** when it
-   lands, which is the check that the interface is right.
-
-   The second half is the module's: a load point per player, an active range
-   bounding the ABM and LBM sweeps, node metadata per section rather than
-   one blob for the world, and node timers that stop with their section.
-2. **The palettes**, which is settled (2026-09-13) and is engine work
+1. **The palettes**, which is settled (2026-09-13) and is engine work
    first: `VoxelVariant` gains textures of its own, which finishes what its
    own header already says variants are for -- "a voxel that faces one of
    twenty-four directions, or wears one of eight palette colours". The
@@ -110,7 +103,7 @@ In order:
    readers in `extensions/luanti_client` cover two thirds of devtest's mesh
    nodes and were written for the voxel mesher, and the other third is glTF,
    which is a reader nobody has written.
-3. **The leftovers**, each small and none blocking anything. They are under
+2. **The leftovers**, each small and none blocking anything. They are under
    "Bonuses" below, which is what that section is for; the module plan's
    "Simplified, and the upgrade path" has the full list of what the module
    does not do.
@@ -127,9 +120,9 @@ belong.
 Done since the third round, all in `doc/plan/master_plan_history.md` or in
 the module's own history: M4's inventories and recipes, all of M5, M7's
 importer, the whole client half, M6's menu, the players in the save, the
-preferences screen, and the media set -- a game's models, sounds and
+preferences screen, the media set -- a game's models, sounds and
 translations went nowhere until 2026-09-13, because only `textures/` was
-collected.
+collected -- and M6's map, which streams.
 
 The loose end that was here is closed: `voxelworld` has `get_volume()` and
 `set_volume()`, built once there were three callers to measure them against.

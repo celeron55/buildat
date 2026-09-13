@@ -810,3 +810,117 @@ two things M1 disproved about the build, are in
 
 M1 to M3 is where the module's shape is decided; everything after is surface
 area, and surface area is the part that can be added forever.
+
+## The map, and how it streams (built 2026-09-13)
+
+Moved out of the plan, which had it as a settled design before it was code.
+Most of it turned out to be engine work with three callers rather than
+Luanti work, and the reasoning below is why the interface is the shape it
+is.
+
+**The world is 3x3x3 sections no longer.** It was about 192 voxels a side
+because `create_world()` asked `voxelworld` for that region and
+`generate_world()` filled it; sections now come and go around the players.
+Not a bigger fixed world -- the point of a Luanti world is that it goes on,
+and a fixed one only moves the wall further away.
+
+**What the instance region turned out to mean.** It was used in two places:
+the loop that creates the initial sections, and one line of the skylight
+that finds the top of the world. Sections outside it already loaded on
+demand, so nothing enforced a barrier at the edge. So it kept both of its
+meanings and residency became a layer on top: the region is the world's
+**bounds and its sky height**, nothing outside it is ever loaded, and a
+world that sets load points is not filled with it at the start. A Luanti
+world asks for the map's limits, 484 sections each way; `infidigger` and
+`bomber_drone` ask for as much as anyone will ever walk and three sections
+of height, which is what they always had.
+
+The consequence to remember: a section is lit by the sky only through the
+column above it, so a newly loaded section would be dark if anything above
+it were missing. Luanti answers that by lighting a block at generation time
+from the mapgen's own heightmap; that is the answer here too, when there is
+a mapgen. Until then the singlenode fill writes full sunlight into every
+voxel it makes, which is what `MapgenSinglenode` does for the same reason.
+
+**The streamer is `voxelworld`'s, not a game's.** `games/infidigger` and
+`games/bomber_drone` each streamed server-side with the same 150 lines, one
+copy-pasted from the other, and this module would have been the third copy.
+Both deleted their copies when the engine version landed, which was the
+check that the interface could express what they do: 268 lines out of the
+two games for 116 in.
+
+**A load point carries its own radii, and two of them.**
+
+    struct LoadPoint
+    {
+        pv::Vector3DInt32 p;              // in voxels
+        int16_t load_xz, load_y;          // in sections
+        int16_t generate_xz, generate_y;  // load_* >= generate_*
+        size_t peer;                      // whose it is, or zero
+    };
+
+Sections within the load radius are loaded if the save has them and left
+alone if it does not -- what a player sees far away is the terrain that is
+already there, and new terrain appears closer in. Within the generate
+radius they are generated as well. A loaded section outside every point's
+load radius is unloaded, so the gap between the two radii is also the
+hysteresis that stops a player walking back and forth over an edge from
+generating the same section twice. `load_section()` already split at exactly
+that line, so "load it if the save has it" was the existing function minus
+one call; what had to be added was a negative cache, because otherwise the
+load radius asks the save about every section it does not have, every pass.
+
+The radii are per point for two reasons rather than one. A player needs a
+big radius and a machine that only has to keep working needs the smallest
+one that does. And **two players need different radii from each other**: a
+client on a weaker computer wants less sent to it, and loading more than
+that client will look at is the server spending memory on nothing. A pinned
+section -- one somebody has dug in, in a game that does not save -- is a
+point with every radius zero, which fell out for free.
+
+**Luanti's three ranges, and where each of them went.**
+
+| Luanti's range | Where it went | Why |
+| --- | --- | --- |
+| `max_block_send_distance` (12 blocks) | `voxelworld`, per peer, declared by the client | only the client knows what its computer can take; the server caps it at the load radius, because it cannot send what it does not keep |
+| `max_block_generate_distance` (10) | a load point's generate radius | the engine owns the section lifecycle |
+| `active_block_range` (4 blocks, which is exactly one section) | `builtin/luanti` | `voxelworld` has no idea what an ABM is |
+
+**The per-peer send range was a hole, not a refinement.** Every chunk went
+to every peer on the scene; nobody noticed over 27 sections. The filtering
+itself belongs to `replicate`, which is what decides what a peer has:
+`set_node_filter()` answers per peer and per node, a node that stops being
+wanted is removed from that peer the way a deleted one is, and
+`refresh_peer_nodes()` is how a peer that moved gets asked about again.
+Without a filter every peer still gets every node. `voxelworld` answers the
+filter from the peer's own load point and the range its client asked for
+(`voxelworld:set_send_distance`, from `M.send_distance` in its client half),
+and it answers it behind a small lock of its own because `replicate` asks
+during its own sync. Measured on infidigger: a client that asks for 130
+voxels gets 571 chunk updates where one that asks for 1000 gets 8101.
+
+**What the module owed the streamer, and what each turned out to be.**
+
+- **`get_loaded_sections()`**, which the sweeps wanted anyway: they walked
+  the bounds and skipped what was not there, and over a streamed world that
+  walk is the cost.
+- **The active range.** `__active_boxes()` is now the loaded sections within
+  a section of a player rather than every loaded section, and the node
+  timers and the objects ask the same list. That one was not only a cost:
+  over a streamed world a furnace in a section nobody is near would fire,
+  read nothing where its node is and stop being a furnace. A world with
+  nobody in it is a world where nothing happens, in Luanti as well as here.
+- **Node metadata per section**, which is the one piece that is left; see
+  "The map, as it was built" in the plan.
+- **Node timers that stop with their section**, which the active range gave.
+
+The singlenode fill needed nothing: `on_generation_request()` already
+answered a `GenerationRequest` per section, which is the path every streamed
+section takes.
+
+**What a game says now.** `infidigger` and `bomber_drone` keep a set of
+pinned sections and a position per player, build the points once a tick when
+anything has changed, and turn the streamer's budget down to nothing while
+their generator's queue is long -- only the game can see that queue, so
+`set_stream_budget()` is how it says so. Everything else about streaming is
+gone from both of them.

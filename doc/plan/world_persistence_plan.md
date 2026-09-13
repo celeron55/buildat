@@ -431,15 +431,16 @@ byte-identical over all 865 rows -- and, for step 4, the round trip under
      off a voxel goes into the module's own store, written at
      `core:shutdown` and read after the mods have loaded.
 
-     simplified, and it is the one that matters for what is next: **one blob
-     for the whole world**. Luanti keeps a block's metadata with the block
-     and writes it when the block is written; the upgrade path is the same
-     shape -- a blob per section, written when `voxelworld` writes that
-     section -- and it is what a streamed map needs, since a section that
-     unloads and comes back has to bring what hangs off its nodes with it.
-     See "The map, and how it streams" in
-     `doc/plan/luanti_module_plan.md`, which is now settled and names this
-     as one of four things the module owes it.
+     simplified, and it is the piece of the streamed map that is still
+     open: **one blob for the whole world**. Luanti keeps a block's metadata
+     with the block and writes it when the block is written; the upgrade
+     path is the same shape -- a blob per section, written when
+     `voxelworld` writes that section, which wants a section-loaded
+     notification `voxelworld` does not have. The map streams as of
+     2026-09-13 and nothing is lost by a section unloading, because the
+     table is the world's and not the section's; what it costs is a table
+     that grows with everywhere the players have been. See "The map, as it
+     was built" in `doc/plan/luanti_module_plan.md`.
    - **5d. Players. BUILT 2026-09-13.** Where a player stood, their health,
      breath, metadata and inventory lists, and the auth entries with them,
      in the module's store beside the node metadata. Restored before
