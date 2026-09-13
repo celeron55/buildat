@@ -928,6 +928,22 @@ function core.__save_node_meta()
 	return core.serialize(out), n
 end
 
+-- What both the save and the importer put back: fields as strings and
+-- inventory lists as item strings, which is what ItemStack() takes.
+function core.__set_node_meta(pos, fields, lists)
+	local meta = core.get_meta(pos)
+	for k, v in pairs(fields or {}) do
+		meta.fields[k] = v
+	end
+	local inv = meta:get_inventory()
+	for name, stacks in pairs(lists or {}) do
+		inv:set_size(name, #stacks)
+		for i, str in ipairs(stacks) do
+			inv:set_stack(name, i, ItemStack(str))
+		end
+	end
+end
+
 function core.__load_node_meta(data)
 	local t = core.deserialize(data)
 	if type(t) ~= "table" then
@@ -937,18 +953,9 @@ function core.__load_node_meta(data)
 	for key, saved in pairs(t) do
 		local x, y, z = string.match(key, "^(-?%d+),(-?%d+),(-?%d+)$")
 		if x then
-			local meta = core.get_meta(
-					{x = tonumber(x), y = tonumber(y), z = tonumber(z)})
-			for k, v in pairs(saved.fields or {}) do
-				meta.fields[k] = v
-			end
-			local inv = meta:get_inventory()
-			for name, stacks in pairs(saved.inventory or {}) do
-				inv:set_size(name, #stacks)
-				for i, str in ipairs(stacks) do
-					inv:set_stack(name, i, ItemStack(str))
-				end
-			end
+			core.__set_node_meta(
+					{x = tonumber(x), y = tonumber(y), z = tonumber(z)},
+					saved.fields, saved.inventory)
 			n = n + 1
 		end
 	end
