@@ -963,11 +963,16 @@ two things M1 disproved about the build, are in
   blocks, 524800 nodes) matched name for name and count for count, as did a
   2011 world at version 25 (266 blocks, 1089536 nodes).
 
-  **What is left of M7:** `map_meta.txt` and `env_meta.txt`, which are the
-  seed and the clock; the player and mod storage databases; and a block's
-  node metadata, timers and static objects, which are walked past. The
-  metadata wants the save that step 5c of the persistence plan is about, and
-  the objects want a `static_save` that means something.
+  **Built: the clock.** `env_meta.txt` is lines of "key = value", and three
+  of them are the clock: `time_of_day` out of Luanti's 24000-unit day,
+  `game_time` and `day_count`. A world opens at the hour it was left at.
+
+  **What is left of M7:** `map_meta.txt`, which is the seed and the mapgen
+  parameters and has nowhere to go until there is a mapgen; the player and
+  mod storage databases; and a block's node metadata, timers and static
+  objects, which are walked past. The metadata wants the save that step 5c
+  of the persistence plan is about, and the objects want a `static_save`
+  that means something.
 
   **The world is 3x3x3 sections**, so what fits is about 192 voxels a side
   around the origin and the rest of a Luanti world is counted and dropped.

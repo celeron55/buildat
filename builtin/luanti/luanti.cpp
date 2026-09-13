@@ -2343,8 +2343,63 @@ struct Module: public interface::Module, public luanti::Interface
 		return id;
 	}
 
-	// Read the map of a Luanti world into this world, for as much of it as
-	// this world has room for.
+	// The clock a Luanti world was left at: env_meta.txt, which is lines of
+	// "key = value" and then EnvArgsEnd. Three of them are the clock and the
+	// rest is the object and LBM bookkeeping that has no meaning here yet.
+	void import_clock(const ss_ &luanti_world_path)
+	{
+		ss_ path = luanti_world_path+"/env_meta.txt";
+		std::ifstream ifs(path.c_str(), std::ios::binary);
+		if(!ifs.good()){
+			log_v(MODULE, "import_world(): no env_meta.txt; the clock stays "
+					"where it was");
+			return;
+		}
+		double time_of_day = -1, game_time = -1, day_count = -1;
+		ss_ line;
+		while(std::getline(ifs, line)){
+			if(!line.empty() && line[line.size() - 1] == '\r')
+				line.resize(line.size() - 1);
+			if(line == "EnvArgsEnd")
+				break;
+			size_t eq = line.find(" = ");
+			if(eq == ss_::npos)
+				continue;
+			ss_ key = line.substr(0, eq);
+			ss_ value = line.substr(eq + 3);
+			if(key == "time_of_day")
+				time_of_day = atof(value.c_str());
+			else if(key == "game_time")
+				game_time = atof(value.c_str());
+			else if(key == "day_count")
+				day_count = atof(value.c_str());
+		}
+		if(time_of_day < 0 && game_time < 0 && day_count < 0){
+			log_w(MODULE, "import_world(): %s says nothing about the clock",
+					cs(path));
+			return;
+		}
+		// Luanti's day is 24000 units long and this module's is one
+		double tod = time_of_day < 0 ? 0.5 : time_of_day / 24000.0;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__set_clock");
+		lua_pushnumber(L, tod);
+		lua_pushnumber(L, game_time < 0 ? 0 : game_time);
+		lua_pushnumber(L, day_count < 0 ? 0 : day_count);
+		if(lua_pcall(L, 3, 0, 0) != 0)
+			log_w(MODULE, "import_world(): __set_clock(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+		lua_settop(L, base);
+		log_i(MODULE, "import_world(): the clock it was left at: day %i, "
+				"time %.4f, %.0f seconds played", (int)day_count, tod,
+				game_time);
+	}
+
+	// Read a Luanti world into this one: the clock, and as much of the map
+	// as this world has room for.
 	//
 	// One direction and read-only: the Luanti world is never written to. A
 	// block that cannot be read is counted and skipped, because a world is
@@ -2358,10 +2413,11 @@ struct Module: public interface::Module, public luanti::Interface
 	// Metadata wants the save that step 5c of the persistence plan is about,
 	// and objects want a static_save that means something; both are named in
 	// mapblock.h where they are skipped.
-	void import_map(const ss_ &luanti_world_path)
+	void import_world(const ss_ &luanti_world_path)
 	{
 		if(!m_game_running)
-			throw Exception("luanti: import_map() before run_game()");
+			throw Exception("luanti: import_world() before run_game()");
+		import_clock(luanti_world_path);
 		ss_ db_path = luanti_world_path+"/map.sqlite";
 		if(!interface::fs::path_exists(db_path))
 			throw Exception("luanti: no map.sqlite in "+luanti_world_path);
@@ -2486,12 +2542,12 @@ struct Module: public interface::Module, public luanti::Interface
 		});
 		sqlite3_finalize(st);
 		sqlite3_close(db);
-		log_i(MODULE, "import_map(): %zu blocks of %s read into the world, "
+		log_i(MODULE, "import_world(): %zu blocks of %s read into the world, "
 				"%zu nodes; %zu blocks outside it, %zu it could not read",
 				blocks_read, cs(luanti_world_path), nodes_written,
 				blocks_outside, blocks_failed);
 		if(!first_error.empty())
-			log_w(MODULE, "import_map(): the first block it could not read: "
+			log_w(MODULE, "import_world(): the first block it could not read: "
 					"%s", cs(first_error));
 		// What arrived, which is the cheapest thing to compare against what
 		// Luanti says is in the same world
@@ -2508,7 +2564,7 @@ struct Module: public interface::Module, public luanti::Interface
 			top += (i ? ", " : "") + by_count[i].second + " " +
 					itos(by_count[i].first);
 		if(!top.empty())
-			log_i(MODULE, "import_map(): most of it is %s", cs(top));
+			log_i(MODULE, "import_world(): most of it is %s", cs(top));
 		if(!unknown_names.empty()){
 			ss_ names;
 			size_t n = 0;
@@ -2519,7 +2575,7 @@ struct Module: public interface::Module, public luanti::Interface
 				}
 				names += (n > 1 ? ", " : "") + name;
 			}
-			log_w(MODULE, "import_map(): %zu node names this game does not "
+			log_w(MODULE, "import_world(): %zu node names this game does not "
 					"register are drawn as unknown: %s",
 					unknown_names.size(), cs(names));
 		}

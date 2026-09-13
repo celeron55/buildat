@@ -253,7 +253,7 @@ struct Module: public interface::Module
 		luanti::access(m_server, [&](luanti::Interface *i){
 			i->run_game(game_path, save);
 			if(import_from && import_from[0])
-				i->import_map(import_from);
+				i->import_world(import_from);
 		});
 	}
 };

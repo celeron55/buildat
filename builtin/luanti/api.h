@@ -56,17 +56,17 @@ namespace luanti
 		// calls it. An error after run_game(), for the reason above.
 		virtual void load_lua(const ss_ &chunk, const ss_ &chunkname) = 0;
 
-		// Read the map of a Luanti world into the running game's world, for
-		// as much of it as that world has room for. One direction: the
-		// Luanti world directory is opened read-only and nothing is written
-		// back to it.
+		// Read a Luanti world into the running game's world: the clock it
+		// was left at, and as much of its map as this world has room for.
+		// One direction: the Luanti world directory is opened read-only and
+		// nothing is written back to it.
 		//
 		// After run_game(), because the nodes the blocks name have to be
 		// registered before anything can be said about them -- a name this
 		// game does not register becomes "unknown" and is counted. The
 		// nodes and their two params are what comes over; a block's
 		// metadata, timers and objects are not.
-		virtual void import_map(const ss_ &luanti_world_path) = 0;
+		virtual void import_world(const ss_ &luanti_world_path) = 0;
 
 		// The scene the map is in, or null until luanti:game_loaded
 		virtual SceneReference get_scene() = 0;
