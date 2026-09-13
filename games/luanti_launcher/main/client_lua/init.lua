@@ -287,6 +287,36 @@ do
 	end
 end
 
+-- What is in hand, drawn in front of the camera the way Luanti draws it: a
+-- cube wearing the item's own image, turned so that three of its faces show.
+--
+-- simplified: a cube for everything, and unlit. A craftitem is a flat
+-- picture in Luanti and a node is drawn as the node it places, with the
+-- light where the player stands; here it is one shape and always visible.
+local wield_node = camera_node:CreateChild("wielded")
+local wield_model = wield_node:CreateComponent("StaticModel")
+local wield_material = magic.Material.new()
+wield_material:SetTechnique(0, magic.cache:GetResource("Technique",
+		"Techniques/DiffUnlit.xml"))
+wield_model:SetModel(magic.cache:GetResource("Model", "Models/Box.mdl"))
+wield_model.material = wield_material
+-- Out past the near clip, which is a whole node away: a cube closer than
+-- that is not drawn at all
+wield_node.position = magic.Vector3(0.62, -0.46, 1.5)
+wield_node.rotation = magic.Quaternion(-18, 35, 8)
+wield_node.scale = magic.Vector3(0.20, 0.20, 0.20)
+wield_node.enabled = false
+
+local function draw_wielded(item_name)
+	local tex = item_name and game_texture(luanti.item_texture(item_name))
+	if tex == nil or not luanti.hud_flag("wielditem") then
+		wield_node.enabled = false
+		return
+	end
+	wield_material:SetTexture(magic.TU_DIFFUSE, tex)
+	wield_node.enabled = true
+end
+
 -- The name of what is in hand, above the slots: Luanti shows it when the
 -- player switches, and it is what says an empty-looking slot has something
 -- in it that has no image
@@ -319,6 +349,7 @@ local function draw_hotbar()
 	end
 	local name = parse_stack(hotbar_stacks[wield_index])
 	wielded_text:SetText(name or "")
+	draw_wielded(name)
 end
 
 luanti.sub_inventory(function(lists)
@@ -414,6 +445,11 @@ local function update_sky(dt)
 	zone.fogColor = blend(NIGHT_FOG, DAY_FOG, day)
 	sky_now.height = height
 	sky_now.day = day
+	-- What is in the player's hand is drawn unlit, so the daylight is put
+	-- on it by hand; without this it glows at midnight
+	local k = 0.28 + 0.72 * day
+	wield_material:SetShaderParameter("MatDiffColor",
+			magic.Color(k, k, k, 1.0))
 end
 
 luanti.sub_time(function(tod, speed)
