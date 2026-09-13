@@ -275,6 +275,11 @@ struct Module: public interface::Module, public Interface
 				world->merge_volume(volume, true);
 			});
 
+			// On the main thread, after the merge: what a game runs over
+			// terrain that has just appeared goes here
+			m_server->emit_event("worldgen:section_generated",
+					new SectionGenerated(task.scene_ref, task.section_p));
+
 			worldgen::access(m_server, task.scene_ref,
 					[&](worldgen::Instance *instance)
 			{

@@ -3,6 +3,7 @@
 		{"module": "main_context"},
 		{"module": "client_file"},
 		{"module": "voxelworld"},
+		{"module": "worldgen"},
 		{"module": "client_lua"}
 	]
 }
