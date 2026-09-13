@@ -934,14 +934,45 @@ two things M1 disproved about the build, are in
   **What is left:** the client half, which is what would draw an object and
   is the same problem as the forked client's `init.lua` split.
 - **M6 -- the launcher.** `games/luanti_launcher` as described.
-- **M7 -- an existing Luanti world opens.** The importer: read a Luanti world
-  directory -- `map.sqlite`, `map_meta.txt`, `env_meta.txt`, the player and
-  mod storage databases -- and write a buildat save. One direction. It needs
-  the MapBlock deserializer (versions 25 to 29, zlib and zstd, the
-  NameIdMapping, node metadata, static objects), which is exactly the leaf,
-  data-shaped C++ this plan already says to vendor, and it is read-only and
-  one-shot, so it may bail on anything it does not recognise rather than
-  being exact. After M3, because it needs the nodedefs to map names to ids.
+- **M7 -- an existing Luanti world opens. The map is read (2026-09-13).**
+  The importer: read a Luanti world directory -- `map.sqlite`,
+  `map_meta.txt`, `env_meta.txt`, the player and mod storage databases -- and
+  write a buildat save. One direction.
+
+  **Built: the map.** `builtin/luanti/mapblock.h` is the MapBlock reader,
+  serialization versions 25 to 29, which is every world written since 2013.
+  The two shapes are the whole of the version difference: at 25 to 28 a
+  block is two zlib streams with the name-id mapping at the back, behind the
+  static objects, and at 29 it is one zstd frame with the mapping in front.
+  Both schemas a `map.sqlite` has are read -- the older one keys a block by
+  one integer, the newer by three columns. `luanti::import_map()` reads the
+  blocks into the running game's world, clipped to what that world has room
+  for, and `games/luanti_launcher` calls it for `BUILDAT_LUANTI_IMPORT`.
+
+  Every block carries the name-id mapping it was written with, which is what
+  makes a world readable by a game that registers its nodes in another
+  order: the ids are translated through the names, through whatever alias
+  the game registers, and a name the game does not register becomes
+  "unknown" and is counted in a warning rather than making a hole.
+
+  **How it was checked.** `check_mapblock()` builds a block in each of the
+  two shapes and reads it back, which proves the reader against the spec it
+  was written from. That it agrees with Luanti was checked by importing real
+  worlds at versions 25, 28 and 29 and comparing the node histogram with an
+  independent decode of the same database: a fresh devtest world (343
+  blocks, 524800 nodes) matched name for name and count for count, as did a
+  2011 world at version 25 (266 blocks, 1089536 nodes).
+
+  **What is left of M7:** `map_meta.txt` and `env_meta.txt`, which are the
+  seed and the clock; the player and mod storage databases; and a block's
+  node metadata, timers and static objects, which are walked past. The
+  metadata wants the save that step 5c of the persistence plan is about, and
+  the objects want a `static_save` that means something.
+
+  **The world is 3x3x3 sections**, so what fits is about 192 voxels a side
+  around the origin and the rest of a Luanti world is counted and dropped.
+  That is M6's map rather than the importer's problem; the importer clips
+  per block and says how many blocks it left outside.
 
   **Not the other direction, and not a live format.** Writing Luanti's
   format would mean bit-compatible `MapBlock` writes forever and would force

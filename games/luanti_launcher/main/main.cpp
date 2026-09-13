@@ -183,7 +183,14 @@ struct Module: public interface::Module
 		const char *wanted_game = getenv("BUILDAT_LUANTI_GAME");
 		if(wanted_game && wanted_game[0]){
 			gameid = wanted_game;
-			world_name = gameid+"_world";
+			// Which save and which game it needs are two facts, and the
+			// menu M6 is about is where they stop pretending to be one.
+			// Until then the save is named after the game unless something
+			// says otherwise, which is what running two imports of the same
+			// game into two saves needs.
+			const char *wanted_save = getenv("BUILDAT_LUANTI_SAVE");
+			world_name = (wanted_save && wanted_save[0]) ? wanted_save :
+					gameid+"_world";
 		} else {
 			sv_<World> worlds = list_worlds();
 			if(worlds.empty()){
@@ -239,8 +246,14 @@ struct Module: public interface::Module
 		}
 		log_i(MODULE, "Running world %s (game %s) in %s",
 				cs(world_name), cs(gameid), cs(save->path()));
+		// A Luanti world's own map, read into the save once. The world
+		// directory is opened read-only; what it says about which game it
+		// wants is what chose the game above.
+		const char *import_from = getenv("BUILDAT_LUANTI_IMPORT");
 		luanti::access(m_server, [&](luanti::Interface *i){
 			i->run_game(game_path, save);
+			if(import_from && import_from[0])
+				i->import_map(import_from);
 		});
 	}
 };
