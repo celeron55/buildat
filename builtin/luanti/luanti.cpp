@@ -2980,6 +2980,39 @@ struct Module: public interface::Module, public luanti::Interface
 		m_pending_lua.push_back({chunk, chunkname});
 	}
 
+	// A chunk of Lua run for its answer, which is how core.dig_node()
+	// reaches a game's own click handler from outside Lua
+	bool node_action(const ss_ &chunk)
+	{
+		if(!m_game_running)
+			return false;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_pushcfunction(L, l_traceback);
+		if(luaL_loadbuffer(L, chunk.c_str(), chunk.size(), "node_action") != 0){
+			log_w(MODULE, "node_action(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+			lua_settop(L, base);
+			return false;
+		}
+		if(lua_pcall(L, 0, 1, base + 1) != 0){
+			log_w(MODULE, "node_action(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+			lua_settop(L, base);
+			return false;
+		}
+		bool ok = lua_toboolean(L, -1) != 0;
+		lua_settop(L, base);
+		return ok;
+	}
+
+	bool dig_node(int32_t x, int32_t y, int32_t z)
+	{
+		return node_action("return core.dig_node({x = "+itos(x)+
+				", y = "+itos(y)+", z = "+itos(z)+"})");
+	}
+
 	SceneReference get_scene()
 	{
 		return m_scene;

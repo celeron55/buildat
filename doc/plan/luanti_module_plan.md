@@ -784,8 +784,33 @@ two things M1 disproved about the build, are in
   M5's objects existed for it to be. `doc/plan/luanti_module_history.md` has
   what each turned out to be.
 
-  **What is left of M4:** formspecs, and the client half that turns a click
-  into a dig. Both are the client's.
+  **Built: a click is a dig (2026-09-13).** The first piece of the client
+  half, and the one M4 was waiting for. `games/luanti_launcher`'s client
+  marches a ray from the camera, draws a wireframe box around the node it
+  hits and sends that node's position on a left click; the launcher hands it
+  to `luanti::Interface::dig_node()`, which is `core.dig_node()` -- so
+  can_dig, after_dig_node, the drops and every other callback around a dig
+  are the vendored builtin's own. What a dig drops lands on the ground,
+  because there is no player to give it to.
+
+  Two things the engine needed for it, both because a client reasoning about
+  voxels could not: `VoxelRegistry:id_of(voxel)`, since `VoxelInstance`'s own
+  id is the legacy layout of the word and a Luanti world says otherwise --
+  its id is sixteen bits with the light above them -- and a `get_by_id` that
+  takes a number, since luabind will not bind a Lua number to the `const
+  VoxelTypeId&` the old binding wanted and the call had never been made from
+  Lua before.
+
+  **What checks it:** the client harness, which is what can click.
+
+      bin/buildat -s localhost -w 1024x768 -c "@script"
+
+  with a script that flies to the floor, screenshots, clicks and screenshots
+  again; the server says `main:dig (x, y, z): dug` and the second click
+  lands on a different node, which is the client's own map having caught up.
+
+  **What is left of M4:** formspecs, and the inventory a click would dig
+  into. Both are the client's.
 - **M5 -- it lives. Built 2026-09-13.** ABMs, LBMs, entities, `core.after`.
   Success is `testabms` and `testentities` behaving.
 

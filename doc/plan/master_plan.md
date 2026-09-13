@@ -74,8 +74,11 @@ first thing to run after touching the API surface.
 What is left is, in order:
 
 1. **The client half.** It is what M3, M4 and M5 each say is left of them:
-   nothing draws an object, a click is not a dig, and there are no
-   formspecs. `games/luanti_launcher`'s viewer is a camera and a HUD line.
+   nothing draws an object and there are no formspecs. A click is a dig as
+   of 2026-09-13 -- `games/luanti_launcher`'s viewer points at a node and
+   the module digs it -- which is the first piece of it and the shape the
+   rest follows: the client decides what was pointed at, the server decides
+   what that means.
    The fork's shape is settled -- which files are copied, which are dropped,
    and that `world.lua` loses a fifth of itself to `voxelworld` -- and
    `init.lua`'s three-way split is the largest unexamined piece of it. See
