@@ -25,6 +25,8 @@
 #include "interface/os.h"
 #include "interface/voxel.h"
 #include "interface/mutex.h"
+#include "luanti/mapblock.h"
+#include <sqlite3.h>
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
@@ -451,6 +453,10 @@ struct Module: public interface::Module, public luanti::Interface
 	// in src/server/state.cpp, which takes no lock where emit_event_sync
 	// takes the container's.
 	interface::Mutex m_lua_mutex;
+	// What the importer resolved a Luanti node name to, so that a world of
+	// three hundred thousand blocks asks Lua once per name and not once per
+	// node
+	sm_<ss_, std::pair<uint32_t, bool>> m_import_ids;
 	bool m_game_running = false;
 	// What load_lua() was handed before run_game(), in the order it came
 	sv_<std::pair<ss_, ss_>> m_pending_lua;
@@ -1175,6 +1181,143 @@ struct Module: public interface::Module, public luanti::Interface
 	// Asserts what add_box_quads() and add_plant_quads() build, because the
 	// winding is what makes the normal and a quad wound the wrong way is
 	// invisible rather than wrong-looking. Runs once, from run_game().
+	// The one runnable check the mapblock reader leaves behind: a block put
+	// together here in each of the two shapes the format has, and read back.
+	// It proves the reader against the spec it was written from; that it
+	// agrees with Luanti was checked by importing real worlds at versions
+	// 25, 28 and 29 and comparing what arrived with an independent decode of
+	// the same database. See doc/plan/luanti_module_plan.md, M7.
+	static void check_mapblock()
+	{
+		const size_t N = luanti_mapblock::NODECOUNT;
+		// What the check puts in and expects back
+		sv_<uint16_t> id(N, 0);
+		sv_<uint8_t> p1(N, 0), p2(N, 0);
+		for(size_t i = 0; i < N; i++){
+			id[i] = (uint16_t)(i % 300);
+			p1[i] = (uint8_t)(i % 251);
+			p2[i] = (uint8_t)(i % 253);
+		}
+		auto u8s = [](ss_ &os, uint32_t v){ os += (char)(v & 0xff); };
+		auto u16s = [&](ss_ &os, uint32_t v){
+			u8s(os, v >> 8); u8s(os, v);
+		};
+		auto u32s = [&](ss_ &os, uint32_t v){
+			u16s(os, v >> 16); u16s(os, v);
+		};
+		auto string16 = [&](ss_ &os, const ss_ &v){
+			u16s(os, (uint32_t)v.size());
+			os += v;
+		};
+		// Two names, one of them at an id that needs two bytes
+		auto nimap = [&](ss_ &os){
+			u8s(os, 0);
+			u16s(os, 2);
+			u16s(os, 7);
+			string16(os, "check:stone");
+			u16s(os, 299);
+			string16(os, "check:sand");
+		};
+		auto nodes = [&](ss_ &os){
+			for(size_t i = 0; i < N; i++)
+				u16s(os, id[i]);
+			for(size_t i = 0; i < N; i++)
+				u8s(os, p1[i]);
+			for(size_t i = 0; i < N; i++)
+				u8s(os, p2[i]);
+		};
+		auto check_block = [&](const luanti_mapblock::Block &b,
+				const char *what){
+			for(size_t i = 0; i < N; i++){
+				if(b.param0[i] != id[i] || b.param1[i] != p1[i] ||
+						b.param2[i] != p2[i])
+					throw Exception(ss_("check_mapblock: ")+what+" came back "
+							"wrong at "+itos(i));
+			}
+			if(b.names.size() != 2 || b.names.at(7) != "check:stone" ||
+					b.names.at(299) != "check:sand")
+				throw Exception(ss_("check_mapblock: ")+what+" lost its "
+						"name-id mapping");
+		};
+
+		// Version 29: one zstd frame, and what is wanted is in front of it
+		{
+			ss_ inside;
+			u8s(inside, 0x00);          // flags
+			u16s(inside, 0xffff);       // lighting_complete
+			u32s(inside, 12345);        // timestamp
+			nimap(inside);
+			u8s(inside, 2);             // content_width
+			u8s(inside, 2);             // params_width
+			nodes(inside);
+			inside += "and whatever else the frame holds";
+			ss_ data;
+			u8s(data, 29);
+			std::ostringstream os(std::ios::binary);
+			interface::compress_zstd(inside, os);
+			data += os.str();
+			luanti_mapblock::Block block;
+			luanti_mapblock::deserialize_block(data, block);
+			check_block(block, "the version 29 block");
+		}
+
+		// Version 25: two zlib streams, and the mapping at the back behind
+		// the static objects
+		{
+			ss_ data;
+			u8s(data, 25);
+			u8s(data, 0x00);            // flags
+			u8s(data, 2);               // content_width
+			u8s(data, 2);               // params_width
+			ss_ raw_nodes;
+			nodes(raw_nodes);
+			{
+				std::ostringstream os(std::ios::binary);
+				interface::compress_zlib(raw_nodes, os);
+				data += os.str();
+			}
+			{
+				std::ostringstream os(std::ios::binary);
+				interface::compress_zlib("the node metadata, skipped", os);
+				data += os.str();
+			}
+			// Static objects: one, to be walked past
+			u8s(data, 0);
+			u16s(data, 1);
+			u8s(data, 7);
+			for(int i = 0; i < 12; i++)
+				u8s(data, 0);
+			string16(data, "an object");
+			u32s(data, 12345);          // timestamp
+			nimap(data);
+			u8s(data, 0);               // node timers, unread
+			u16s(data, 0);
+			luanti_mapblock::Block block;
+			luanti_mapblock::deserialize_block(data, block);
+			check_block(block, "the version 25 block");
+		}
+
+		// The key a row has, which is three twelve-bit coordinates in one
+		// integer and has to survive the negative ones
+		const int coords[6] = {0, 1, -1, 2047, -2048, -3};
+		for(int i = 0; i < 6; i++){
+			for(int j = 0; j < 6; j++){
+				int64_t key = (int64_t)coords[j] * 0x1000000 +
+						(int64_t)coords[i] * 0x1000 + (int64_t)coords[i];
+				pv::Vector3DInt16 p =
+						luanti_mapblock::block_pos_of_key(key);
+				if(p.getX() != coords[i] || p.getY() != coords[i] ||
+						p.getZ() != coords[j])
+					throw Exception("check_mapblock: the block key of ("+
+							itos(coords[i])+", "+itos(coords[i])+", "+
+							itos(coords[j])+") came back as ("+
+							itos(p.getX())+", "+itos(p.getY())+", "+
+							itos(p.getZ())+")");
+			}
+		}
+		log_v(MODULE, "check_mapblock: both shapes of a block read back");
+	}
+
 	static void check_shapes()
 	{
 		auto normal_of = [](const interface::VoxelQuad &q, float n[3]){
@@ -2171,6 +2314,217 @@ struct Module: public interface::Module, public luanti::Interface
 
 	// Interface
 
+	// The id this run gave a Luanti node name, or the one "unknown" has.
+	// Asked of Lua, because the aliases and the content ids are its tables.
+	uint32_t import_content_id(const ss_ &name, bool &known)
+	{
+		auto it = m_import_ids.find(name);
+		if(it != m_import_ids.end()){
+			known = it->second.second;
+			return it->second.first;
+		}
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__content_id_or_unknown");
+		lua_pushstring(L, name.c_str());
+		uint32_t id = 0;
+		known = false;
+		if(lua_pcall(L, 1, 2, 0) != 0){
+			log_w(MODULE, "__content_id_or_unknown(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+		} else {
+			id = (uint32_t)lua_tonumber(L, -2);
+			known = lua_toboolean(L, -1) != 0;
+		}
+		lua_settop(L, base);
+		m_import_ids[name] = {id, known};
+		return id;
+	}
+
+	// Read the map of a Luanti world into this world, for as much of it as
+	// this world has room for.
+	//
+	// One direction and read-only: the Luanti world is never written to. A
+	// block that cannot be read is counted and skipped, because a world is
+	// worth having with a hole in it, and a name this game does not register
+	// becomes "unknown", which is a node you can see and dig rather than a
+	// hole.
+	//
+	// simplified: the nodes and nothing else. Node metadata, the timers and
+	// the static objects a block carries are walked past -- an imported
+	// world starts without its chests' contents and without its entities.
+	// Metadata wants the save that step 5c of the persistence plan is about,
+	// and objects want a static_save that means something; both are named in
+	// mapblock.h where they are skipped.
+	void import_map(const ss_ &luanti_world_path)
+	{
+		if(!m_game_running)
+			throw Exception("luanti: import_map() before run_game()");
+		ss_ db_path = luanti_world_path+"/map.sqlite";
+		if(!interface::fs::path_exists(db_path))
+			throw Exception("luanti: no map.sqlite in "+luanti_world_path);
+		sqlite3 *db = nullptr;
+		int rc = sqlite3_open_v2(db_path.c_str(), &db, SQLITE_OPEN_READONLY,
+				nullptr);
+		if(rc != SQLITE_OK){
+			ss_ err = db ? sqlite3_errmsg(db) : "cannot open";
+			sqlite3_close(db);
+			throw Exception("luanti: "+db_path+": "+err);
+		}
+		// Two schemas exist: the older one keys a block by one integer, the
+		// newer by three columns. Luanti reads both and so does this.
+		sqlite3_stmt *st = nullptr;
+		bool by_xyz = false;
+		rc = sqlite3_prepare_v2(db, "SELECT pos, data FROM blocks", -1, &st,
+				nullptr);
+		if(rc != SQLITE_OK){
+			by_xyz = true;
+			rc = sqlite3_prepare_v2(db, "SELECT x, y, z, data FROM blocks",
+					-1, &st, nullptr);
+		}
+		if(rc != SQLITE_OK){
+			ss_ err = sqlite3_errmsg(db);
+			sqlite3_close(db);
+			throw Exception("luanti: "+db_path+": "+err);
+		}
+		// What this world has room for. A block that reaches outside is
+		// clipped rather than dropped, so that the edge is where the world
+		// ends and not where a block boundary is.
+		const pv::Vector3DInt32 &s0 = m_section_region.getLowerCorner();
+		const pv::Vector3DInt32 &s1 = m_section_region.getUpperCorner();
+		const int32_t sx = m_section_size.getX(), sy = m_section_size.getY(),
+				sz = m_section_size.getZ();
+		const int32_t wx0 = s0.getX() * sx, wy0 = s0.getY() * sy,
+				wz0 = s0.getZ() * sz;
+		const int32_t wx1 = (s1.getX() + 1) * sx - 1,
+				wy1 = (s1.getY() + 1) * sy - 1,
+				wz1 = (s1.getZ() + 1) * sz - 1;
+		size_t blocks_read = 0, blocks_outside = 0, blocks_failed = 0;
+		size_t nodes_written = 0;
+		set_<ss_> unknown_names;
+		sm_<ss_, size_t> counts;
+		ss_ first_error;
+		const interface::VoxelFormat f = interface::VoxelFormat::luanti();
+		const int32_t BS = (int32_t)luanti_mapblock::BLOCK_SIDE;
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
+			while(sqlite3_step(st) == SQLITE_ROW){
+				pv::Vector3DInt16 bp;
+				if(by_xyz){
+					bp = pv::Vector3DInt16(
+							(int16_t)sqlite3_column_int(st, 0),
+							(int16_t)sqlite3_column_int(st, 1),
+							(int16_t)sqlite3_column_int(st, 2));
+				} else {
+					bp = luanti_mapblock::block_pos_of_key(
+							sqlite3_column_int64(st, 0));
+				}
+				const int data_column = by_xyz ? 3 : 1;
+				int32_t bx = (int32_t)bp.getX() * BS;
+				int32_t by = (int32_t)bp.getY() * BS;
+				int32_t bz = (int32_t)bp.getZ() * BS;
+				int32_t x0 = std::max(bx, wx0), x1 = std::min(bx + BS - 1, wx1);
+				int32_t y0 = std::max(by, wy0), y1 = std::min(by + BS - 1, wy1);
+				int32_t z0 = std::max(bz, wz0), z1 = std::min(bz + BS - 1, wz1);
+				if(x1 < x0 || y1 < y0 || z1 < z0){
+					blocks_outside++;
+					continue;
+				}
+				const void *blob = sqlite3_column_blob(st, data_column);
+				int blob_size = sqlite3_column_bytes(st, data_column);
+				luanti_mapblock::Block block;
+				try {
+					ss_ data((const char*)blob, (size_t)blob_size);
+					luanti_mapblock::deserialize_block(data, block);
+				} catch(std::exception &e){
+					blocks_failed++;
+					if(first_error.empty())
+						first_error = e.what();
+					continue;
+				}
+				// The ids are the block's own; every block carries the
+				// mapping it was written with
+				sm_<uint16_t, uint32_t> ids;
+				sm_<uint16_t, bool> is_ignore;
+				for(const auto &pair : block.names){
+					bool known = false;
+					ids[pair.first] = import_content_id(pair.second, known);
+					is_ignore[pair.first] = (pair.second == "ignore");
+					if(!known)
+						unknown_names.insert(pair.second);
+				}
+				sm_<uint16_t, const ss_*> names_by_id;
+				for(const auto &pair : block.names)
+					names_by_id[pair.first] = &pair.second;
+				pv::Vector3DInt16 section_p(
+						floordiv(x0, sx), floordiv(y0, sy), floordiv(z0, sz));
+				if(!world->is_section_loaded(section_p))
+					world->load_or_generate_section(section_p);
+				for(int32_t z = z0; z <= z1; z++)
+				for(int32_t y = y0; y <= y1; y++)
+				for(int32_t x = x0; x <= x1; x++){
+					size_t i = (size_t)(x - bx) +
+							(size_t)(y - by) * BS +
+							(size_t)(z - bz) * BS * BS;
+					uint16_t raw_id = block.param0[i];
+					auto it = ids.find(raw_id);
+					if(it == ids.end() || is_ignore[raw_id])
+						continue; // Not generated there, so nothing to write
+					uint32_t word = 0;
+					f.id.set(word, it->second);
+					f.light_sky.set(word, block.param1[i] & 0x0f);
+					f.light_lamp.set(word, (block.param1[i] >> 4) & 0x0f);
+					f.param.set(word, block.param2[i]);
+					world->set_voxel(pv::Vector3DInt32(x, y, z),
+							interface::VoxelInstance(word), true);
+					nodes_written++;
+					counts[*names_by_id[raw_id]]++;
+				}
+				blocks_read++;
+			}
+		});
+		sqlite3_finalize(st);
+		sqlite3_close(db);
+		log_i(MODULE, "import_map(): %zu blocks of %s read into the world, "
+				"%zu nodes; %zu blocks outside it, %zu it could not read",
+				blocks_read, cs(luanti_world_path), nodes_written,
+				blocks_outside, blocks_failed);
+		if(!first_error.empty())
+			log_w(MODULE, "import_map(): the first block it could not read: "
+					"%s", cs(first_error));
+		// What arrived, which is the cheapest thing to compare against what
+		// Luanti says is in the same world
+		sv_<std::pair<size_t, ss_>> by_count;
+		for(const auto &pair : counts)
+			by_count.push_back({pair.second, pair.first});
+		std::sort(by_count.begin(), by_count.end(),
+				[](const std::pair<size_t, ss_> &a,
+						const std::pair<size_t, ss_> &b){
+			return a.first > b.first;
+		});
+		ss_ top;
+		for(size_t i = 0; i < by_count.size() && i < 5; i++)
+			top += (i ? ", " : "") + by_count[i].second + " " +
+					itos(by_count[i].first);
+		if(!top.empty())
+			log_i(MODULE, "import_map(): most of it is %s", cs(top));
+		if(!unknown_names.empty()){
+			ss_ names;
+			size_t n = 0;
+			for(const ss_ &name : unknown_names){
+				if(n++ >= 8){
+					names += ", ...";
+					break;
+				}
+				names += (n > 1 ? ", " : "") + name;
+			}
+			log_w(MODULE, "import_map(): %zu node names this game does not "
+					"register are drawn as unknown: %s",
+					unknown_names.size(), cs(names));
+		}
+	}
+
 	void run_game(const ss_ &game_path, storage::Save *save)
 	{
 		if(m_game_running)
@@ -2226,6 +2580,7 @@ struct Module: public interface::Module, public luanti::Interface
 		run_chunk_file(module_path()+"/lua/modloader.lua");
 
 		check_shapes();
+		check_mapblock();
 
 		// The game's own media before the registry, because what a node's
 		// tiles can be depends on which files were actually shipped

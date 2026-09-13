@@ -301,6 +301,20 @@ function core.get_content_id(name)
 	return id
 end
 
+-- What the importer asks for every name a Luanti world's blocks carry: the
+-- id this run gave that node, through whatever alias the game registered,
+-- and whether the game knows it at all. A name it does not know comes back
+-- as "unknown", which is Luanti's own answer and is a node you can see and
+-- dig rather than a hole in the world.
+function core.__content_id_or_unknown(name)
+	name = core.__aliases[name] or name
+	local id = core.__content_ids[name]
+	if id ~= nil then
+		return id, true
+	end
+	return core.__content_ids["unknown"] or 0, false
+end
+
 function core.get_name_from_content_id(id)
 	if type(id) ~= "number" then
 		error("get_name_from_content_id(): not a content id: " .. tostring(id))
