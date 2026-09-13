@@ -23,9 +23,18 @@
 #include "storage/api.h"
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
+#include <cereal/archives/portable_binary.hpp>
+#include "interface/polyvox_cereal.h"
+#include <PolyVoxCore/Vector.h>
 #define MODULE "main"
 
 using interface::Event;
+
+namespace pv = PolyVox;
+
+#define PV3I_FORMAT "(%i, %i, %i)"
+#define PV3I_PARAMS(p) p.getX(), p.getY(), p.getZ()
 
 namespace luanti_launcher {
 
@@ -56,6 +65,8 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("luanti:game_loaded"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:dig"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -64,6 +75,31 @@ struct Module: public interface::Module
 		EVENT_TYPEN("luanti:game_loaded", on_game_loaded, luanti::GameLoaded)
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
 				client_file::FilesTransmitted)
+		EVENT_TYPEN("network:packet_received/main:dig", on_dig,
+				network::Packet)
+	}
+
+	// A click on the client, as the voxel it pointed at. What it means is
+	// the module's to decide: core.dig_node() hands the node to the
+	// vendored builtin, which is where can_dig, the drops and every
+	// callback around a dig live.
+	void on_dig(const network::Packet &packet)
+	{
+		pv::Vector3DInt32 voxel_p;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(voxel_p);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:dig: %s", e.what());
+			return;
+		}
+		bool dug = false;
+		luanti::access(m_server, [&](luanti::Interface *i){
+			dug = i->dig_node(voxel_p.getX(), voxel_p.getY(), voxel_p.getZ());
+		});
+		log_v(MODULE, "C%i: main:dig " PV3I_FORMAT ": %s", packet.sender,
+				PV3I_PARAMS(voxel_p), dug ? "dug" : "nothing");
 	}
 
 	void on_game_loaded(const luanti::GameLoaded &event)

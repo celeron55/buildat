@@ -444,6 +444,24 @@ static ss_ vreg_dump_format(VoxelRegistry &reg)
 	return reg.get_format().dump();
 }
 
+// Which type a voxel is under this registry's format, which is the only
+// thing that knows where the id is in the word. VoxelInstance's own id is
+// the legacy layout and is wrong for every world that says otherwise -- a
+// client asking what it is pointing at has to ask here.
+static uint32_t vreg_id_of(VoxelRegistry &reg, const interface::VoxelInstance &v)
+{
+	return reg.get_format().id_of(v.data);
+}
+
+// By value rather than through VoxelRegistry::get()'s const reference, which
+// luabind will not bind a Lua number to: a number is a temporary and there
+// is nothing for the reference to point at
+static const interface::VoxelDefinition* vreg_get_by_id(VoxelRegistry &reg,
+		uint32_t id)
+{
+	return reg.get((interface::VoxelTypeId)id);
+}
+
 // vdef.variants: what the voxel's param does to how it is drawn, as an array
 // of variants. One is
 //
@@ -654,8 +672,7 @@ void init_voxel(lua_State *L)
 		,
 		class_<VoxelRegistry, bases<>, sp_<VoxelRegistry>>("VoxelRegistry")
 			.def("add_voxel", &VoxelRegistry::add_voxel)
-			.def("get_by_id", (const VoxelDefinition*(VoxelRegistry::*)
-					(const VoxelTypeId&)) &VoxelRegistry::get)
+			.def("get_by_id", &vreg_get_by_id)
 			.def("get_by_name", (const VoxelDefinition*(VoxelRegistry::*)
 					(const VoxelName&)) &VoxelRegistry::get)
 			.def("serialize", (ss_(VoxelRegistry::*) ())
@@ -665,6 +682,7 @@ void init_voxel(lua_State *L)
 			.def("set_format", &vreg_set_format)
 			.def("set_look_rules", &vreg_set_look_rules)
 			.def("dump_format", &vreg_dump_format)
+			.def("id_of", &vreg_id_of)
 		,
 		def("__buildat_createVoxelRegistry", &createVoxelRegistry)
 	];

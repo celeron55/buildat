@@ -8,6 +8,7 @@
 -- look -- drawtypes, the real tiles, the media -- is M3.
 local log = buildat.Logger("luanti_launcher")
 local magic = require("buildat/extension/urho3d")
+local cereal = require("buildat/extension/cereal")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
 local voxel_shading = require("buildat/module/voxel_shading")
@@ -114,11 +115,18 @@ voxel_shading.set_camera(camera_node)
 magic.input:SetMouseVisible(true)
 
 local title_text = magic.ui.root:CreateChild("Text")
-title_text:SetText("luanti_launcher: Tab = free move")
+title_text:SetText("luanti_launcher: Tab = free move, click = dig")
 title_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 15)
 title_text.horizontalAlignment = magic.HA_CENTER
 title_text.verticalAlignment = magic.VA_TOP
 title_text:SetPosition(0, 10)
+local crosshair = magic.ui.root:CreateChild("Text")
+crosshair:SetText("+")
+crosshair:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 20)
+crosshair.horizontalAlignment = magic.HA_CENTER
+crosshair.verticalAlignment = magic.VA_CENTER
+crosshair:SetPosition(0, 0)
+
 magic.ui:SetFocusElement(nil)
 
 -- Mods load for several seconds before there is anything to draw, and what is
@@ -131,6 +139,116 @@ wait_text.verticalAlignment = magic.VA_CENTER
 wait_text:SetPosition(0, 0)
 voxelworld.sub_geometry_update(function(node)
 	wait_text:SetText("")
+end)
+
+--
+-- Pointing at a node, and digging it
+--
+-- The ray is marched here because the camera is here; what the node it hits
+-- means is the server's, and core.dig_node() is what it comes to. A voxel
+-- is something to point at when it is not the void (id 0) and something
+-- stands in it, which is what fully_empty says.
+
+local POINT_RANGE = 12
+local POINT_STEP = 0.1
+
+local pointed_p = nil
+local pointed_node = scene:CreateChild("pointed")
+do
+	-- Four thin strips around the top face, drawn on every face of the
+	-- voxel by the six turns below: a wireframe box, the way games/digger
+	-- draws one
+	local geometry = pointed_node:CreateComponent("CustomGeometry")
+	geometry:BeginGeometry(0, magic.TRIANGLE_LIST)
+	geometry:SetNumGeometries(1)
+	local c = magic.Color(0.10, 0.10, 0.10)
+	local function quad(a, b, cc, d)
+		for _, v in ipairs({a, b, cc, cc, d, a}) do
+			geometry:DefineVertex(v)
+			geometry:DefineColor(c)
+		end
+	end
+	local o = 0.504    -- Just outside the voxel, so it does not z-fight
+	local t = 1.0 / 16 -- How thick a strip is
+	-- One face's four strips, turned onto each of the six faces
+	local function face(turn)
+		local function v(x, y, z)
+			return magic.Vector3(turn(x, y, z))
+		end
+		quad(v(-o, o, o - t), v(o, o, o - t), v(o, o, o), v(-o, o, o))
+		quad(v(-o, o, -o), v(o, o, -o), v(o, o, -o + t), v(-o, o, -o + t))
+		quad(v(o - t, o, -o + t), v(o, o, -o + t), v(o, o, o - t),
+				v(o - t, o, o - t))
+		quad(v(-o, o, -o + t), v(-o + t, o, -o + t), v(-o + t, o, o - t),
+				v(-o, o, o - t))
+	end
+	face(function(x, y, z) return x, y, z end)
+	face(function(x, y, z) return x, -y, -z end)
+	face(function(x, y, z) return y, x, z end)
+	face(function(x, y, z) return -y, -x, z end)
+	face(function(x, y, z) return x, z, y end)
+	face(function(x, y, z) return x, -z, -y end)
+	geometry:Commit()
+	local material = magic.Material.new()
+	material:SetTechnique(0, magic.cache:GetResource("Technique",
+			"Techniques/NoTextureVColMultiply.xml"))
+	geometry:SetMaterial(0, material)
+	pointed_node.enabled = false
+end
+
+-- A voxel is something to point at when it is not the void and something
+-- stands in it. Which type it is has to be asked of the registry: a
+-- VoxelInstance's own id is the legacy layout of the word, and this world
+-- says otherwise -- Luanti's id is sixteen bits with the light above it.
+local function voxel_is_solid(v)
+	if v == nil then
+		return false
+	end
+	local reg = voxelworld.get_voxel_registry()
+	local id = reg:id_of(v)
+	if id == 0 then
+		return false
+	end
+	local def = reg:get_by_id(id)
+	return def ~= nil and not def.fully_empty
+end
+
+local function find_pointed_voxel()
+	local p0 = buildat.Vector3(camera_node.worldPosition)
+	local dir = buildat.Vector3(camera_node.worldDirection)
+	local last = nil
+	for i = 1, math.floor(POINT_RANGE / POINT_STEP) do
+		local p = (p0 + dir * (i * POINT_STEP)):round()
+		if p ~= last then
+			if voxel_is_solid(voxelworld.get_static_voxel(p)) then
+				return p
+			end
+			last = p
+		end
+	end
+	return nil
+end
+
+magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
+	if event_data:GetInt("Button") ~= magic.MOUSEB_LEFT then
+		return
+	end
+	if pointed_p == nil then
+		return
+	end
+	buildat.send_packet("main:dig", cereal.binary_output({
+		p = {
+			x = math.floor(pointed_p.x + 0.5),
+			y = math.floor(pointed_p.y + 0.5),
+			z = math.floor(pointed_p.z + 0.5),
+		},
+	}, {"object",
+		{"p", {"object",
+			{"x", "int32_t"},
+			{"y", "int32_t"},
+			{"z", "int32_t"},
+		}},
+	}))
 end)
 
 local function set_free_look(enable)
@@ -154,6 +272,15 @@ end)
 magic.SubscribeToEvent("Update", function(event_type, event_data)
 	local dt = event_data:GetFloat("TimeStep")
 	voxel_shading.update(dt)
+
+	pointed_p = find_pointed_voxel()
+	if pointed_p then
+		pointed_node.position = magic.Vector3.from_buildat(pointed_p)
+		pointed_node.enabled = true
+	else
+		pointed_node.enabled = false
+	end
+
 	if not free_look then
 		return
 	end
