@@ -41,6 +41,14 @@ buildat.unsub_packet(function)
 buildat.run_script_file(name)
 - Run script file gotten from server in sandbox environment
 
+buildat.get_preferred_render_scale() -> number
+- The fraction of the window size the user asked 3D viewports to be rendered
+  at. 1.0 means no scaling at all, which is the default.
+- magic.set_preferred_viewports() is what applies it; this is for a game that
+  wants to know, to show it on a settings screen of its own or to size
+  something of its own to match.
+- See "Client preferences" below.
+
 
 The extension environment
 =========================
@@ -192,6 +200,56 @@ render_scene_to_texture(scene, camera_node, w, h) -> Texture2D
 - The scene is drawn with its own viewport and no postprocessing, so a scene
   lit for the main viewport's HDR tonemapping comes out blown out. Light a
   thumbnail scene for the low dynamic range it is.
+
+set_preferred_viewports({viewport, ...})
+- The viewports the user's graphics preferences are applied to, as against the
+  raw renderer:SetViewport() ones, which are drawn the way the game says and
+  nothing else. That is what "preferred" means throughout this API: it honours
+  what the user asked for.
+- Use it instead of renderer:SetViewport(). The engine draws the scene at the
+  user's render_scale, under a UI that stays at native resolution, and the
+  viewport stays the game's own -- replacing renderPath afterwards, which most
+  games do, still works, and so does HDR.
+- The whole list at once, because Urho3D needs both a viewport per slot and a
+  count. An empty table is teardown: nothing is left on the screen.
+
+      magic.set_preferred_viewports({viewport})            -- one view
+      magic.set_preferred_viewports({vp_top, vp_bottom})   -- two
+      magic.set_preferred_viewports({})                    -- teardown
+
+- Declarative: this is what is on the screen now. A game that moves a viewport
+  rect -- games/bomber_drone splits the window in half -- calls it again after
+  setting the new rects, and the rects it reads are in window pixels whatever
+  the scale is, so nothing about screen-to-world maths or picking changes.
+- A game that does not call this is drawn at native resolution and keeps
+  working. The preference is a preference: the client owns how much the frame
+  costs, the game owns what is in it. That is the deal, not a gap to be closed
+  later.
+
+Client preferences
+------------------
+What the user sets once and every game honours: how much the frame costs and
+how loud it is, never what the art is. Kept in user/preferences.json, and
+overridden for one run by -o (see README.md).
+
+    render_scale    3D viewports drawn at this fraction of the window size;
+                    the UI stays at native resolution. 1.0 is a bypass.
+    vsync           present synchronised to the display
+    max_fps         frame limiter; 0 is unlimited
+    multisampling   MSAA samples: 1, 2, 4, 8 or 16
+    sound_volume    a gain every sound is multiplied by
+    sound_mute      that gain forced to zero
+
+render_scale is cooperative: it reaches a game's viewports only through
+set_preferred_viewports(), because a viewport belongs to the game that made
+it. The sound pair is enforced, because Urho3D already multiplies every sound
+type's gain by the "Master" one -- which is why Audio:SetMasterGain("Master")
+is refused in the sandbox. Games have "Effect", "Music", "Ambient" and
+"Voice", and their own mixing multiplies under the user's setting.
+
+Shadow quality, texture and material quality, filtering, FOV and draw distance
+are deliberately not here: each one changes what the game looks like or what a
+player can see, and the game is the one that should say.
 
 replicate
 ---------

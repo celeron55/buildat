@@ -841,7 +841,7 @@ function M.new(magic, buildat, log, options)
 	-- Lua collects garbage
 	local viewport = magic.Viewport:new(scene, camera)
 	self.viewport = viewport
-	magic.renderer:SetViewport(0, viewport)
+	magic.set_preferred_viewports({viewport})
 
 	-- On the PBR path the frame is rendered in HDR and tone mapped, the way
 	-- games/voxel_lighting does it. Nothing else makes the sun read as the
@@ -4520,8 +4520,8 @@ function M.new(magic, buildat, log, options)
 			object_nodes[id] = nil
 		end
 		-- Dropping the viewport rather than replacing it: there is nothing
-		-- else to show, and SetViewport() takes no nil
-		magic.renderer.numViewports = 0
+		-- else to show
+		magic.set_preferred_viewports({})
 		-- HDR and the render path are the renderer's, not the viewport's, so
 		-- a world that has gone has to hand them back or the menu after it is
 		-- drawn through a tone curve with nothing to tone map

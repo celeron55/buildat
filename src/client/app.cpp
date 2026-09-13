@@ -37,6 +37,10 @@
 #include <Viewport.h>
 #include <Camera.h>
 #include <Renderer.h>
+#include <Audio.h>
+#include <RenderSurface.h>
+#include <Texture2D.h>
+#include <BorderImage.h>
 #include <Octree.h>
 #include <FileSystem.h>
 #include <PhysicsWorld.h>
@@ -134,9 +138,135 @@ struct LookAxis
 extern client::Config g_client_config;
 extern volatile sig_atomic_t g_shutdown_signal;
 
-static ss_ window_state_path()
+static ss_ preferences_path()
 {
-	return g_client_config.get<ss_>("cache_path")+"/window.json";
+	return g_client_config.get<ss_>("user_path")+"/preferences.json";
+}
+
+namespace app {
+
+// Every preference -o and preferences.json can carry is listed here once, so
+// that the flag and the file cannot drift apart.
+bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
+{
+	size_t i = 0;
+	while(i < s.size()){
+		size_t comma = s.find(',', i);
+		if(comma == ss_::npos)
+			comma = s.size();
+		ss_ item = s.substr(i, comma - i);
+		i = comma + 1;
+		if(item.empty())
+			continue;
+		size_t eq = item.find('=');
+		if(eq == ss_::npos){
+			*error = "\""+item+"\": expected key=value";
+			return false;
+		}
+		ss_ key = item.substr(0, eq);
+		ss_ value = item.substr(eq + 1);
+		char *end = nullptr;
+		double v = strtod(value.c_str(), &end);
+		if(value.empty() || *end != '\0'){
+			*error = key+": \""+value+"\" is not a number";
+			return false;
+		}
+		bool in_range = true;
+		if(key == "render_scale"){
+			// Below 2 is undersampling, which is the point; above it is
+			// supersampling, which the same code path gives away for free
+			in_range = (v >= 0.1 && v <= 2.0);
+			opt->graphics.render_scale = (float)v;
+		} else if(key == "vsync"){
+			opt->graphics.vsync = (v != 0);
+		} else if(key == "max_fps"){
+			in_range = (v >= 0 && v <= 1000);
+			opt->graphics.max_fps = (int)v;
+		} else if(key == "multisampling"){
+			in_range = (v == 1 || v == 2 || v == 4 || v == 8 || v == 16);
+			opt->graphics.multisampling = (int)v;
+		} else if(key == "sound_volume"){
+			in_range = (v >= 0.0 && v <= 1.0);
+			opt->sound_volume = (float)v;
+		} else if(key == "sound_mute"){
+			opt->sound_mute = (v != 0);
+		} else {
+			*error = "unknown preference \""+key+"\"";
+			return false;
+		}
+		if(!in_range){
+			*error = key+": "+value+" is out of range";
+			return false;
+		}
+	}
+	return true;
+}
+
+}
+
+static void check_parse_preference_options()
+{
+	app::Options o;
+	ss_ err;
+	if(!app::parse_preference_options(
+			"render_scale=0.5,vsync=0,sound_mute=1", &o, &err))
+		throw Exception("parse_preference_options: "+err);
+	if(o.graphics.render_scale != 0.5f || o.graphics.vsync || !o.sound_mute)
+		throw Exception("parse_preference_options: wrong values");
+	// What an item does not name is left alone
+	if(o.graphics.max_fps != app::Options().graphics.max_fps)
+		throw Exception("parse_preference_options: clobbered max_fps");
+	if(app::parse_preference_options("render_scale", &o, &err))
+		throw Exception("parse_preference_options: took a bare key");
+	if(app::parse_preference_options("render_scale=0.5x", &o, &err))
+		throw Exception("parse_preference_options: took a non-number");
+	if(app::parse_preference_options("render_scale=9", &o, &err))
+		throw Exception("parse_preference_options: took an out-of-range value");
+	if(app::parse_preference_options("multisampling=3", &o, &err))
+		throw Exception("parse_preference_options: took a bad sample count");
+	if(app::parse_preference_options("nonesuch=1", &o, &err))
+		throw Exception("parse_preference_options: took an unknown key");
+}
+
+// Rounded, and never zero: a window can be dragged small enough that a low
+// scale would otherwise ask for a zero-pixel texture.
+static int scaled_length(int px, float scale)
+{
+	int v = (int)(px * scale + 0.5f);
+	return v < 1 ? 1 : v;
+}
+
+// A viewport rect stays in window pixels from the game's point of view, so
+// this is the only place the scale is applied to one. IntRect::ZERO means the
+// whole target and has to stay that way.
+static magic::IntRect scaled_rect(const magic::IntRect &r, float scale)
+{
+	if(r == magic::IntRect::ZERO)
+		return r;
+	return magic::IntRect(
+			(int)(r.left_ * scale + 0.5f),
+			(int)(r.top_ * scale + 0.5f),
+			(int)(r.right_ * scale + 0.5f),
+			(int)(r.bottom_ * scale + 0.5f));
+}
+
+static void check_scaled_viewport_size()
+{
+	if(scaled_length(1280, 0.5f) != 640 || scaled_length(720, 0.5f) != 360)
+		throw Exception("scaled_length: even");
+	if(scaled_length(721, 0.5f) != 361)
+		throw Exception("scaled_length: rounding");
+	if(scaled_length(4, 0.1f) != 1)
+		throw Exception("scaled_length: minimum of one pixel");
+	if(scaled_length(1280, 1.5f) != 1920)
+		throw Exception("scaled_length: above one");
+	// games/bomber_drone's second viewport: the same factor, so the two
+	// halves still meet
+	magic::IntRect r = scaled_rect(magic::IntRect(0, 360, 1280, 720), 0.5f);
+	if(r.left_ != 0 || r.top_ != 180 || r.right_ != 640 || r.bottom_ != 360)
+		throw Exception("scaled_rect: rect");
+	if(scaled_rect(magic::IntRect::ZERO, 0.5f) != magic::IntRect::ZERO)
+		throw Exception("scaled_rect: whole target");
 }
 
 static bool desktop_size(int *w, int *h)
@@ -225,12 +355,53 @@ static bool window_is_maximized(magic::Graphics *g)
 	return (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED) != 0;
 }
 
-static bool load_window_state(int desk_w, int desk_h, app::GraphicsOptions *opt)
+// Reads the saved preferences into *opt. A missing field keeps its default,
+// so a file written by an older build is read by a newer one; a field that is
+// present but out of range drops the whole set back to the defaults, because
+// a file that has been edited into nonsense is better answered with something
+// known than with half of it. The return value is about the window geometry
+// alone: it is the one thing that has somewhere else to come from.
+static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 {
 	json::json_error_t err;
-	json::Value o = json::load_file(window_state_path().c_str(), &err);
+	json::Value o = json::load_file(preferences_path().c_str(), &err);
 	if(!o.is_object())
 		return false;
+
+	ss_ pref_err;
+	const json::Value &jrs = o.get("render_scale");
+	const json::Value &jvs = o.get("vsync");
+	const json::Value &jmf = o.get("max_fps");
+	const json::Value &jms = o.get("multisampling");
+	const json::Value &jsv = o.get("sound_volume");
+	const json::Value &jsm = o.get("sound_mute");
+	// Through the same parser as -o, so that the range checks are written
+	// once and a hand-edited file is refused the same way a flag is
+	ss_ items;
+	if(jrs.is_number())
+		items += ss_()+(items.empty()?"":",")+"render_scale="+ftos(jrs.as_number());
+	if(jvs.is_boolean())
+		items += ss_()+(items.empty()?"":",")+"vsync="+(jvs.as_boolean()?"1":"0");
+	if(jmf.is_integer())
+		items += ss_()+(items.empty()?"":",")+"max_fps="+itos(jmf.as_integer());
+	if(jms.is_integer())
+		items += ss_()+(items.empty()?"":",")+"multisampling="+itos(jms.as_integer());
+	if(jsv.is_number())
+		items += ss_()+(items.empty()?"":",")+"sound_volume="+ftos(jsv.as_number());
+	if(jsm.is_boolean())
+		items += ss_()+(items.empty()?"":",")+"sound_mute="+(jsm.as_boolean()?"1":"0");
+	if(!items.empty()){
+		app::Options parsed = *opt;
+		if(!app::parse_preference_options(items, &parsed, &pref_err))
+			log_w(MODULE, "%s: %s; using defaults",
+					cs(preferences_path()), cs(pref_err));
+		else
+			*opt = parsed;
+	}
+
+	// -w said what the size is, so the file does not get to
+	if(opt->graphics.size_forced)
+		return true;
 	const json::Value &jw = o.get("width");
 	const json::Value &jh = o.get("height");
 	if(!jw.is_integer() || !jh.is_integer())
@@ -239,30 +410,40 @@ static bool load_window_state(int desk_w, int desk_h, app::GraphicsOptions *opt)
 	int rh = (int)jh.as_integer();
 	if(rw < MIN_WINDOW_W || rh < MIN_WINDOW_H || rw > desk_w || rh > desk_h)
 		return false;
-	opt->window_w = rw;
-	opt->window_h = rh;
+	opt->graphics.window_w = rw;
+	opt->graphics.window_h = rh;
 	const json::Value &jm = o.get("maximized");
 	const json::Value &jf = o.get("fullscreen");
-	opt->maximized = jm.is_boolean() && jm.as_boolean();
-	opt->fullscreen = jf.is_boolean() && jf.as_boolean();
+	opt->graphics.maximized = jm.is_boolean() && jm.as_boolean();
+	opt->graphics.fullscreen = jf.is_boolean() && jf.as_boolean();
 	return true;
 }
 
-static void save_window_state(const app::GraphicsOptions &opt)
+static void save_preferences(const app::Options &opt)
 {
-	if(opt.size_forced)
+	// Nothing that came from the command line is remembered: -w's size, -o's
+	// preferences, and a -c run's whole set of them
+	if(opt.preferences_disabled || !opt.preference_overrides.empty() ||
+			opt.graphics.size_forced)
 		return;
-	if(opt.window_w < MIN_WINDOW_W || opt.window_h < MIN_WINDOW_H)
+	if(opt.graphics.window_w < MIN_WINDOW_W ||
+			opt.graphics.window_h < MIN_WINDOW_H)
 		return;
 	json::Value o = json::object();
-	o.set("width", opt.window_w);
-	o.set("height", opt.window_h);
-	o.set("maximized", opt.maximized);
-	o.set("fullscreen", opt.fullscreen);
-	o.save_file(window_state_path().c_str());
+	o.set("width", opt.graphics.window_w);
+	o.set("height", opt.graphics.window_h);
+	o.set("maximized", opt.graphics.maximized);
+	o.set("fullscreen", opt.graphics.fullscreen);
+	o.set("render_scale", opt.graphics.render_scale);
+	o.set("vsync", opt.graphics.vsync);
+	o.set("max_fps", opt.graphics.max_fps);
+	o.set("multisampling", opt.graphics.multisampling);
+	o.set("sound_volume", opt.sound_volume);
+	o.set("sound_mute", opt.sound_mute);
+	o.save_file(preferences_path().c_str());
 }
 
-static void resolve_window_size(app::GraphicsOptions *opt)
+static void resolve_preferences(app::Options *opt)
 {
 	int desk_w = 0;
 	int desk_h = 0;
@@ -270,9 +451,14 @@ static void resolve_window_size(app::GraphicsOptions *opt)
 		desk_w = 1920;
 		desk_h = 1080;
 	}
-	if(load_window_state(desk_w, desk_h, opt))
-		return;
-	pick_default_window_size(desk_w, desk_h, &opt->window_w, &opt->window_h);
+	// -w says what the size is, so nothing else has to; -c reads no file at
+	// all, and then the size can only come from the default
+	bool size_ok = opt->graphics.size_forced;
+	if(!opt->preferences_disabled && load_preferences(desk_w, desk_h, opt))
+		size_ok = true;
+	if(!size_ok)
+		pick_default_window_size(desk_w, desk_h,
+				&opt->graphics.window_w, &opt->graphics.window_h);
 }
 
 static bool valid_game_name(const ss_ &name)
@@ -531,6 +717,14 @@ struct CApp: public App, public magic::Application
 	magic::SharedPtr<magic::Scene> m_scene;
 	magic::SharedPtr<magic::Node> m_camera_node;
 
+	// What set_preferred_viewports() was last given, and the rects the game
+	// gave them in -- in window pixels, so that the scale can be applied
+	// again from scratch when the window changes size
+	sv_<magic::SharedPtr<magic::Viewport>> m_preferred_viewports;
+	sv_<magic::IntRect> m_preferred_rects;
+	magic::SharedPtr<magic::Texture2D> m_preferred_texture;
+	magic::SharedPtr<magic::BorderImage> m_preferred_image;
+
 	sp_<interface::thread_pool::ThreadPool> m_thread_pool;
 
 	CApp(magic::Context *context, const Options &options):
@@ -543,13 +737,36 @@ struct CApp: public App, public magic::Application
 	{
 		log_v(MODULE, "constructor()");
 		check_pick_default_window_size();
-		if(m_options.graphics.window_w <= 0 || m_options.graphics.window_h <= 0){
-			resolve_window_size(&m_options.graphics);
+		check_parse_preference_options();
+		check_scaled_viewport_size();
+		// A -c run is on the built-in defaults, and muted: nothing captures
+		// audio, and a driven run playing a game's music through the
+		// developer's speakers is a small recurring annoyance with no upside
+		m_options.preferences_disabled =
+				g_client_config.get<bool>("command_seq_enabled");
+		if(m_options.preferences_disabled)
+			m_options.sound_mute = true;
+		resolve_preferences(&m_options);
+		if(!m_options.preference_overrides.empty()){
+			// Already accepted once in main(), where a bad -o is a usage
+			// error rather than a startup failure
+			ss_ err;
+			if(!parse_preference_options(m_options.preference_overrides,
+					&m_options, &err))
+				throw AppStartupError("-o: "+err);
 		}
 		if(m_options.graphics.size_forced){
 			m_options.graphics.fullscreen = false;
 			m_options.graphics.maximized = false;
 		}
+		log_v(MODULE, "preferences: render_scale=%s vsync=%i max_fps=%i"
+				" multisampling=%i sound_volume=%s sound_mute=%i",
+				cs(ftos(m_options.graphics.render_scale)),
+				m_options.graphics.vsync ? 1 : 0,
+				m_options.graphics.max_fps,
+				m_options.graphics.multisampling,
+				cs(ftos(m_options.sound_volume)),
+				m_options.sound_mute ? 1 : 0);
 		m_restore_maximized = m_options.graphics.maximized;
 		log_v(MODULE, "window size: %ix%i maximized=%i fullscreen=%i",
 				m_options.graphics.window_w, m_options.graphics.window_h,
@@ -669,7 +886,7 @@ struct CApp: public App, public magic::Application
 			m_options.graphics.fullscreen = g->GetFullscreen();
 			if(!m_options.graphics.fullscreen)
 				m_options.graphics.maximized = window_is_maximized(g);
-			save_window_state(m_options.graphics);
+			save_preferences(m_options);
 		}
 
 		magic::Engine *engine = GetSubsystem<magic::Engine>();
@@ -792,12 +1009,15 @@ struct CApp: public App, public magic::Application
 
 		apply_ui_scale();
 
+		GetSubsystem<magic::Engine>()->SetMaxFps(m_options.graphics.max_fps);
+		apply_sound_preferences();
+
 		if(!m_options.graphics.fullscreen && m_restore_maximized){
 			magic::Graphics *g = GetSubsystem<magic::Graphics>();
 			if(g){
 				g->Maximize();
 				m_options.graphics.maximized = true;
-				save_window_state(m_options.graphics);
+				save_preferences(m_options);
 			}
 			m_restore_maximized = false;
 		}
@@ -838,6 +1058,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(extension_path)
 		DEF_BUILDAT_FUNC(set_ui_scale)
 		DEF_BUILDAT_FUNC(get_ui_scale)
+		DEF_BUILDAT_FUNC(get_preferred_render_scale)
 
 		// Create a scene that will be synchronized from the server
 		m_scene = new magic::Scene(context_);
@@ -1349,6 +1570,129 @@ struct CApp: public App, public magic::Application
 		}
 	}
 
+	void set_preferred_viewports(const sv_<magic::Viewport*> &viewports)
+	{
+		m_preferred_viewports.clear();
+		m_preferred_rects.clear();
+		for(magic::Viewport *vp : viewports){
+			m_preferred_viewports.push_back(magic::SharedPtr<magic::Viewport>(vp));
+			m_preferred_rects.push_back(vp->GetRect());
+		}
+		apply_preferred_viewports();
+	}
+
+	float get_preferred_render_scale()
+	{
+		return m_options.graphics.render_scale;
+	}
+
+	// The user's render_scale reaching viewports the games made themselves:
+	// they go onto an offscreen texture of the asked-for size, and that
+	// texture is drawn under the UI. Urho3D draws the UI to the backbuffer
+	// after the viewports, so the UI is never undersampled.
+	void apply_preferred_viewports()
+	{
+		magic::Renderer *renderer = GetSubsystem<magic::Renderer>();
+		magic::Graphics *graphics = GetSubsystem<magic::Graphics>();
+		if(!renderer || !graphics)
+			return;
+		unsigned n = m_preferred_viewports.size();
+		float scale = m_options.graphics.render_scale;
+		// 1.0 is a bypass and not a scale of one: no texture, no blit, the
+		// frame the client draws when nothing asked for anything
+		if(scale > 0.999f && scale < 1.001f){
+			drop_preferred_texture();
+			renderer->SetNumViewports(n);
+			for(unsigned i = 0; i < n; i++){
+				m_preferred_viewports[i]->SetRect(m_preferred_rects[i]);
+				renderer->SetViewport(i, m_preferred_viewports[i]);
+			}
+			return;
+		}
+		if(n == 0){
+			// Teardown has to leave nothing behind: a stale texture under
+			// the UI is last frame's world, still on the screen
+			drop_preferred_texture();
+			renderer->SetNumViewports(0);
+			return;
+		}
+
+		int tw = scaled_length(graphics->GetWidth(), scale);
+		int th = scaled_length(graphics->GetHeight(), scale);
+		if(!m_preferred_texture || m_preferred_texture->GetWidth() != tw ||
+				m_preferred_texture->GetHeight() != th){
+			m_preferred_texture = new magic::Texture2D(context_);
+			m_preferred_texture->SetSize(tw, th,
+					magic::Graphics::GetRGBFormat(), magic::TEXTURE_RENDERTARGET);
+			m_preferred_texture->SetFilterMode(magic::FILTER_BILINEAR);
+		}
+		magic::RenderSurface *surface = m_preferred_texture->GetRenderSurface();
+		if(!surface){
+			log_w(MODULE, "set_preferred_viewports(): no render surface;"
+					" drawing at native resolution");
+			drop_preferred_texture();
+			renderer->SetNumViewports(n);
+			for(unsigned i = 0; i < n; i++)
+				renderer->SetViewport(i, m_preferred_viewports[i]);
+			return;
+		}
+		surface->SetNumViewports(n);
+		for(unsigned i = 0; i < n; i++){
+			m_preferred_viewports[i]->SetRect(
+					scaled_rect(m_preferred_rects[i], scale));
+			surface->SetViewport(i, m_preferred_viewports[i]);
+		}
+		surface->SetUpdateMode(magic::SURFACE_UPDATEALWAYS);
+		renderer->SetNumViewports(0);
+
+		magic::UI *ui = GetSubsystem<magic::UI>();
+		if(!ui)
+			return;
+		if(!m_preferred_image){
+			m_preferred_image = new magic::BorderImage(context_);
+			m_preferred_image->SetName("buildat_preferred_viewports");
+			// Under whatever UI the game has, and never in the way of it:
+			// a disabled element takes no input
+			m_preferred_image->SetPriority(-10000);
+			m_preferred_image->SetEnabled(false);
+			ui->GetRoot()->AddChild(m_preferred_image);
+		}
+		m_preferred_image->SetTexture(m_preferred_texture);
+		m_preferred_image->SetImageRect(magic::IntRect(0, 0, tw, th));
+		// UI coordinates, which the UI scale has already divided down
+		m_preferred_image->SetPosition(0, 0);
+		m_preferred_image->SetSize(ui->GetRoot()->GetSize());
+	}
+
+	void drop_preferred_texture()
+	{
+		if(m_preferred_image){
+			m_preferred_image->Remove();
+			m_preferred_image.Reset();
+		}
+		if(m_preferred_texture){
+			magic::RenderSurface *surface =
+					m_preferred_texture->GetRenderSurface();
+			if(surface)
+				surface->SetNumViewports(0);
+			m_preferred_texture.Reset();
+		}
+	}
+
+	// Urho3D multiplies a sound type's gain by the "Master" one
+	// (Audio::GetSoundSourceMasterGain()), so setting the master here scales
+	// every sound in every game, under whatever mixing the game does of its
+	// own. The sandbox refuses "Master" to sandboxed code, which is what
+	// makes this enforcement rather than a default.
+	void apply_sound_preferences()
+	{
+		magic::Audio *audio = GetSubsystem<magic::Audio>();
+		if(!audio)
+			return;
+		audio->SetMasterGain("Master",
+				m_options.sound_mute ? 0.0f : m_options.sound_volume);
+	}
+
 	void on_screenmode(magic::StringHash event_type, magic::VariantMap &event_data)
 	{
 		magic::Graphics *magic_graphics = GetSubsystem<magic::Graphics>();
@@ -1375,8 +1719,11 @@ struct CApp: public App, public magic::Application
 				m_options.graphics.window_w, m_options.graphics.window_h,
 				m_options.graphics.maximized ? 1 : 0,
 				m_options.graphics.fullscreen ? 1 : 0);
-		save_window_state(m_options.graphics);
+		save_preferences(m_options);
 		apply_ui_scale();
+		// The offscreen texture is a fraction of the window, so a new window
+		// size is a new texture
+		apply_preferred_viewports();
 	}
 
 	void on_logmessage(magic::StringHash event_type, magic::VariantMap &event_data)
@@ -1520,6 +1867,16 @@ struct CApp: public App, public magic::Application
 		lua_pop(L, 1);
 		magic::UI *ui = self->GetSubsystem<magic::UI>();
 		lua_pushnumber(L, ui ? ui->GetScale() : 1.0);
+		return 1;
+	}
+
+	// get_preferred_render_scale() -> number
+	static int l_get_preferred_render_scale(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		lua_pushnumber(L, self->m_options.graphics.render_scale);
 		return 1;
 	}
 
