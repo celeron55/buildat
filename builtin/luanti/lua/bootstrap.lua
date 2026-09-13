@@ -956,7 +956,7 @@ local STUBS_NIL = {
 	"fix_light",
 	"get_spawn_level", "get_heat", "get_humidity", "get_biome_data",
 	"get_biome_id", "get_biome_name",
-	"forceload_block", "forceload_free_block", "compare_block_status",
+	"compare_block_status",
 	"get_meta", "get_node_metadata",
 	-- Time and the world (M2)
 	"get_timeofday", "set_timeofday", "get_gametime", "get_day_count",
@@ -1146,6 +1146,21 @@ local function pos_key(x, y, z)
 	return x .. "," .. y .. "," .. z
 end
 
+-- Luanti's forceload, at the level the vendored builtin's
+-- forceloading.lua expects to find it: it takes these two away, does the
+-- bookkeeping and the persistence itself, and calls them back with a
+-- *block* position -- sixteen voxels, not one. The section that block is
+-- in is what is kept loaded here, because a section is what loads.
+function core.forceload_block(blockpos)
+	local x, y, z = to_pos(blockpos)
+	return __luanti_forceload(x * 16, y * 16, z * 16, true)
+end
+
+function core.forceload_free_block(blockpos)
+	local x, y, z = to_pos(blockpos)
+	__luanti_forceload(x * 16, y * 16, z * 16, false)
+end
+
 function core.get_meta(pos)
 	local x, y, z = to_pos(pos)
 	local key = pos_key(x, y, z)
@@ -1157,6 +1172,9 @@ function core.get_meta(pos)
 		-- well: a chest is a list in here
 		meta.inventory = core.__new_inventory(
 				{type = "node", pos = {x = x, y = y, z = z}})
+		-- Where it is, so that the section it belongs to can be worked out
+		-- without taking the key apart again; see core.__take_node_meta()
+		meta.pos = {x = x, y = y, z = z}
 		node_meta[key] = meta
 	end
 	return meta
@@ -1207,38 +1225,114 @@ end
 -- An inventory is stacks and a stack is an object, so what goes in is what
 -- ItemStack() takes back.
 --
--- simplified: one blob for the whole world, written at shutdown. Luanti
--- keeps a block's metadata with the block and writes it when the block is
--- written; the upgrade path is the same shape -- a blob per section,
--- written when voxelworld writes that section -- and it is what a map
--- bigger than the sections a mod can reach will need. See step 5c of
--- doc/plan/world_persistence_plan.md.
+-- A blob per section, written when voxelworld unloads that section and read
+-- when it loads it again, which is how Luanti keeps a block's metadata with
+-- the block. What is in memory is what the loaded sections hold.
+--
+-- See step 5c of doc/plan/world_persistence_plan.md.
 
+-- One metadata object as the save holds it, or nil for one that holds
+-- nothing: an inventory is stacks and a stack is an object, so what goes in
+-- is what ItemStack() takes back.
+local function save_one_meta(meta)
+	local fields = {}
+	local any = false
+	for k, v in pairs(meta.fields) do
+		fields[k] = v
+		any = true
+	end
+	local lists = {}
+	for name, stacks in pairs(meta.inventory:get_lists()) do
+		local as_strings = {}
+		for i, stack in ipairs(stacks) do
+			as_strings[i] = stack:to_string()
+		end
+		lists[name] = as_strings
+		any = true
+	end
+	if not any then
+		return nil
+	end
+	return {fields = fields, inventory = lists}
+end
+
+-- Everything in a box, and gone from memory: what a section that is leaving
+-- takes with it. The positions are on the metadata objects themselves, so
+-- this is arithmetic over the table rather than the keys taken apart.
+--
+-- simplified: over the whole table, once per section. A world with more
+-- metadata in it than a few thousand nodes wants an index per section, and
+-- the place to keep one is here.
+function core.__take_node_meta(x0, y0, z0, x1, y1, z1)
+	local out = {}
+	local n = 0
+	for key, meta in pairs(node_meta) do
+		local p = meta.pos
+		if p and p.x >= x0 and p.x <= x1 and p.y >= y0 and p.y <= y1 and
+				p.z >= z0 and p.z <= z1 then
+			local saved = save_one_meta(meta)
+			if saved then
+				out[key] = saved
+				n = n + 1
+			end
+			node_meta[key] = nil
+			-- The timers in it stop with it, the way Luanti's do; a
+			-- section that is not there is not running anything.
+			-- core.__drop_node_timer is where they live, further down.
+			core.__drop_node_timer(key)
+		end
+	end
+	if n == 0 then
+		return "", 0
+	end
+	return core.serialize(out), n
+end
+
+-- Everything there is, whatever section it is in. What still wants this is
+-- the migration below: a save written when the metadata was one blob for
+-- the whole world.
 function core.__save_node_meta()
 	local out = {}
 	local n = 0
 	for key, meta in pairs(node_meta) do
-		local fields = {}
-		local any = false
-		for k, v in pairs(meta.fields) do
-			fields[k] = v
-			any = true
-		end
-		local lists = {}
-		for name, stacks in pairs(meta.inventory:get_lists()) do
-			local as_strings = {}
-			for i, stack in ipairs(stacks) do
-				as_strings[i] = stack:to_string()
-			end
-			lists[name] = as_strings
-			any = true
-		end
-		if any then
-			out[key] = {fields = fields, inventory = lists}
+		local saved = save_one_meta(meta)
+		if saved then
+			out[key] = saved
 			n = n + 1
 		end
 	end
 	return core.serialize(out), n
+end
+
+-- The same, grouped by the section each position is in: what the one-blob
+-- save is turned into, once, the first time a world made by an older build
+-- is opened. The key is the section, as "x,y,z".
+function core.__regroup_node_meta(section_size)
+	local out = {}
+	local n = 0
+	for key, meta in pairs(node_meta) do
+		local saved = save_one_meta(meta)
+		local p = meta.pos
+		if saved and p then
+			local sx = math.floor(p.x / section_size)
+			local sy = math.floor(p.y / section_size)
+			local sz = math.floor(p.z / section_size)
+			local sk = sx .. "," .. sy .. "," .. sz
+			local group = out[sk]
+			if group == nil then
+				group = {}
+				out[sk] = group
+			end
+			group[key] = saved
+			n = n + 1
+		end
+	end
+	local flat = {}
+	for sk, group in pairs(out) do
+		flat[#flat + 1] = sk
+		flat[#flat + 1] = core.serialize(group)
+	end
+	return flat, n
 end
 
 -- What both the save and the importer put back: fields as strings and
@@ -1284,6 +1378,12 @@ end
 -- stops, for the same reason and with the same upgrade path.
 
 local node_timers = {}
+
+-- A section that has left takes its timers with it; see
+-- core.__take_node_meta(), which is where the metadata goes the same way
+function core.__drop_node_timer(key)
+	node_timers[key] = nil
+end
 
 local NodeTimerRef = {}
 NodeTimerRef.__index = NodeTimerRef

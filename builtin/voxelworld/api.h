@@ -46,6 +46,34 @@ namespace voxelworld
 		{}
 	};
 
+	// A section has come into the world, or is about to leave it. What
+	// listens is a game that keeps something of its own per section -- what
+	// hangs off the nodes, the timers running in it -- and has to bring it
+	// back with the section and write it out with it.
+	//
+	// Loaded is emitted after the voxels are there and unloaded before they
+	// go; both reach the listener after voxelworld has let go of the
+	// section, so a listener may call back into it.
+	struct SectionLoaded: public interface::Event::Private
+	{
+		SceneReference scene;
+		pv::Vector3DInt16 section_p;
+
+		SectionLoaded(SceneReference scene,
+				const pv::Vector3DInt16 &section_p):
+			scene(scene), section_p(section_p){}
+	};
+
+	struct SectionUnloaded: public interface::Event::Private
+	{
+		SceneReference scene;
+		pv::Vector3DInt16 section_p;
+
+		SectionUnloaded(SceneReference scene,
+				const pv::Vector3DInt16 &section_p):
+			scene(scene), section_p(section_p){}
+	};
+
 	struct NodeVolumeUpdated: public interface::Event::Private
 	{
 		SceneReference scene;
