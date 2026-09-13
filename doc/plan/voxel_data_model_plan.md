@@ -188,18 +188,23 @@ that binds one and maintains nothing keeps whatever it writes.
 
 1. **A write that carries light keeps it.** BUILT 2026-09-13.
 2. **`VoxelDefinition::light_source`**, and the module filling it from a
-   node's own -- devtest and VoxeLibre both have it in their definitions
-   already.
+   node's own. BUILT 2026-09-13.
 3. **`set_light_maintained(field, bool)`**, with the sky instantiation
-   behaving exactly as `set_skylight_enabled()` does today, and the three
-   games that call it moved over.
+   behaving exactly as `set_skylight_enabled()` did. BUILT 2026-09-13 --
+   the old call is a wrapper over the new one, so the games that had it
+   did not change.
 4. **Lamp light as the second instantiation**: emitters as sources, no free
-   fall. This is the one a Luanti game cannot do without.
+   fall. BUILT 2026-09-13. An emitter is a source whether or not light
+   gets past it, which is what a torch in a solid node needs; a read of a
+   node flushes the module's write buffer first, because the light in a
+   word that has not landed yet is the light the writer carried rather
+   than the light the flood gave it. `check_map` digs a room, puts the
+   brightest registered node in it and reads 13 beside a node that emits
+   14, less further out, and 0 once it is taken back.
 5. **The section boundary**: the stale flag in the save, marking on the way
    out, re-flooding on the way in.
 
-Steps 2 and 3 are a morning each, 4 is a day, 5 is a day. Nothing after 1
-is started.
+Step 5 is a day, and is all that is left.
 
 ## Adjacent: what a chunk publishes, and when
 
