@@ -282,8 +282,11 @@ struct CInstance: public voxelworld::Instance
 	// (as a sorted array in descending node_id order)
 	std::vector<QueuedNodePhysicsUpdate> m_nodes_needing_physics_update;
 
-	// Skylight. Off unless the world asks for it; see api.h.
-	bool m_skylight_enabled = false;
+	// The light fields this world maintains, and the changes each of them
+	// has to be brought up to date after. Off unless the world asks; see
+	// set_light_maintained() in api.h.
+	static const size_t NUM_LIGHT_FIELDS = 2;
+	bool m_light_maintained[NUM_LIGHT_FIELDS] = {false, false};
 	bool m_physics_enabled;
 	// The world region in sections, so that the top of it can be found. Light
 	// enters from above that; everything outside is a barrier.
@@ -297,7 +300,7 @@ struct CInstance: public voxelworld::Instance
 		uint8_t old_level;
 		bool was_transparent;
 	};
-	std::vector<SkylightSeed> m_skylight_seeds;
+	std::vector<SkylightSeed> m_light_seeds[NUM_LIGHT_FIELDS];
 
 	// The world region's own sections have not been created yet; see the
 	// constructor
@@ -1369,14 +1372,26 @@ struct CInstance: public voxelworld::Instance
 	// decide; see VoxelFormat in interface/voxel.h. A game sets its format
 	// through get_voxel_reg()->set_format() before it generates anything,
 	// so this is read rather than cached.
+	const interface::VoxelField& light_field(
+			voxelworld::Instance::LightField f = LIGHT_SKY)
+	{
+		const interface::VoxelFormat &fmt = m_voxel_reg->get_format();
+		return (f == LIGHT_LAMP) ? fmt.light_lamp : fmt.light_sky;
+	}
+
 	const interface::VoxelField& sky_field()
 	{
-		return m_voxel_reg->get_format().light_sky;
+		return light_field(LIGHT_SKY);
+	}
+
+	uint8_t light_max(voxelworld::Instance::LightField f = LIGHT_SKY)
+	{
+		return (uint8_t)light_field(f).mask();
 	}
 
 	uint8_t sky_max()
 	{
-		return (uint8_t)sky_field().mask();
+		return light_max(LIGHT_SKY);
 	}
 
 	// The voxel's type, through the format the game chose. Not
@@ -1401,14 +1416,26 @@ struct CInstance: public voxelworld::Instance
 		return get_id(v) == interface::VOXELTYPEID_UNDEFINED;
 	}
 
+	uint8_t get_light(const VoxelInstance &v,
+			voxelworld::Instance::LightField f = LIGHT_SKY)
+	{
+		return (uint8_t)light_field(f).get(v.data);
+	}
+
+	void set_light(VoxelInstance &v, uint8_t level,
+			voxelworld::Instance::LightField f = LIGHT_SKY)
+	{
+		light_field(f).set(v.data, level);
+	}
+
 	uint8_t get_sky(const VoxelInstance &v)
 	{
-		return (uint8_t)sky_field().get(v.data);
+		return get_light(v, LIGHT_SKY);
 	}
 
 	void set_sky(VoxelInstance &v, uint8_t level)
 	{
-		sky_field().set(v.data, level);
+		set_light(v, level, LIGHT_SKY);
 	}
 
 	void add_commit_hook(up_<CommitHook> hook)
@@ -2059,7 +2086,7 @@ struct CInstance: public voxelworld::Instance
 			buf->volume->add_planes(planes);
 
 		interface::VoxelSample nv = v;
-		if(m_skylight_enabled){
+		if(m_light_maintained[LIGHT_SKY]){
 			interface::VoxelSample old = buf->volume->sample_at(voxel_p);
 			VoxelInstance old_first(old.planes[0]);
 			VoxelInstance first(nv.planes[0]);
@@ -2071,7 +2098,7 @@ struct CInstance: public voxelworld::Instance
 			// set_voxel. See "the light is stored" in voxelworld's api.h.
 			if(get_sky(first) == 0){
 				if(old_transparent != voxel_transmits_light(nv)){
-					m_skylight_seeds.push_back(SkylightSeed{
+					m_light_seeds[LIGHT_SKY].push_back(SkylightSeed{
 							p, get_sky(old_first), old_transparent});
 				}
 				set_sky(first, get_sky(old_first));
@@ -2134,7 +2161,7 @@ struct CInstance: public voxelworld::Instance
 				p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ()
 		);
 		VoxelInstance nv = v;
-		if(m_skylight_enabled){
+		if(m_light_maintained[LIGHT_SKY]){
 			// The whole voxel, because which definition it wears can depend
 			// on any of its planes; only the first one is being written
 			interface::VoxelSample old = buf.volume->sample_at(voxel_p);
@@ -2151,7 +2178,7 @@ struct CInstance: public voxelworld::Instance
 			// it back, and the change is seeded so the flood can fix it.
 			if(get_sky(nv) == 0){
 				if(old_transparent != voxel_transmits_light(now)){
-					m_skylight_seeds.push_back(SkylightSeed{
+					m_light_seeds[LIGHT_SKY].push_back(SkylightSeed{
 							p, get_sky(old_first), old_transparent});
 				}
 				set_sky(nv, get_sky(old_first));
@@ -2387,13 +2414,13 @@ struct CInstance: public voxelworld::Instance
 						continue;
 				}
 
-				if(m_skylight_enabled && get_sky(nv) == 0){
+				if(m_light_maintained[LIGHT_SKY] && get_sky(nv) == 0){
 					// Light that came with the volume is kept and needs no
 					// seed; this is the generator's path and a generated
 					// world arrives lit. See set_voxel() above.
 					bool old_transparent = voxel_transmits_light(dst_v);
 					if(old_transparent != voxel_transmits_light(src_v)){
-						m_skylight_seeds.push_back(SkylightSeed{
+						m_light_seeds[LIGHT_SKY].push_back(SkylightSeed{
 								pv::Vector3DInt32(x, y, z),
 								get_sky(old), old_transparent});
 					}
@@ -2677,7 +2704,7 @@ struct CInstance: public voxelworld::Instance
 				buf->volume->sample_at(light_local_p(p, chunk_p)));
 	}
 
-	// Bring the skylight up to date after the voxels in m_skylight_seeds
+	// Bring the skylight up to date after the voxels in m_light_seeds[LIGHT_SKY]
 	// changed. Light is taken out of everything the changed voxels were
 	// lighting, and then spread back in from whatever still has light, so the
 	// work done is proportional to how far the change reaches rather than to
@@ -2688,8 +2715,8 @@ struct CInstance: public voxelworld::Instance
 	void update_skylight()
 	{
 		std::vector<SkylightSeed> seeds;
-		seeds.swap(m_skylight_seeds);
-		if(!m_skylight_enabled || seeds.empty())
+		seeds.swap(m_light_seeds[LIGHT_SKY]);
+		if(!m_light_maintained[LIGHT_SKY] || seeds.empty())
 			return;
 		auto t0 = std::chrono::steady_clock::now();
 		m_light_buf = nullptr;
@@ -2940,12 +2967,23 @@ struct CInstance: public voxelworld::Instance
 		return m_total_buffers_loaded;
 	}
 
-	void set_skylight_enabled(bool enabled)
+	void set_light_maintained(LightField field, bool maintained)
+	{
+		if(field == LIGHT_LAMP && maintained){
+			// Nothing floods it yet; see "The light: a field a game asks to
+			// have maintained" in doc/plan/voxel_data_model_plan.md
+			throw Exception("voxelworld: lamp light is not maintained by "
+					"this build");
+		}
+		set_skylight_enabled_impl(maintained);
+	}
+
+	void set_skylight_enabled_impl(bool enabled)
 	{
 		if(enabled && !sky_field().bound())
 			throw Exception(ss_()+"set_skylight_enabled(): there is nowhere "
 					"to put it in "+m_voxel_reg->get_format().dump());
-		m_skylight_enabled = enabled;
+		m_light_maintained[LIGHT_SKY] = enabled;
 	}
 
 	void commit()
