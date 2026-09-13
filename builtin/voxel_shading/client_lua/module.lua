@@ -663,6 +663,13 @@ function M.create_skybox(scene, sun_dir)
 			"voxel_shading/VoxelSkybox.xml"))
 	material:SetShaderParameter("SunDirection", magic.Vector3(
 			-sun_dir.x, -sun_dir.y, -sun_dir.z))
+	-- What the shader draws the sky as: the gradient's two ends and how much
+	-- of it is cloud. They have to be set here because a parameter a
+	-- material never sets reads as zero, which is a black sky; these are
+	-- what the sky was before a game could ask for one of its own.
+	material:SetShaderParameter("SkyZenith", magic.Vector3(0.13, 0.24, 0.58))
+	material:SetShaderParameter("SkyHorizon", magic.Vector3(0.55, 0.66, 0.84))
+	material:SetShaderParameter("CloudCover", 0.34)
 	skybox.material = material
 	skybox_material = material
 	return node
@@ -677,6 +684,29 @@ end
 -- baked with the sun where it was, so a reflection at night is a reflection
 -- of the day's sky. Dimming the light is most of the way there; a second
 -- cube map, or one rendered as the day goes, is the rest of it.
+-- The sky a game asked for: the colour overhead, the colour at the horizon
+-- and how much of it is cloud (0 for none). Anything nil is left as it is.
+-- What this does not touch is the cube map the reflections come from, which
+-- is baked -- see set_sun_direction().
+function M.set_sky_look(zenith, horizon, cloud_cover)
+	if not skybox_material then
+		return
+	end
+	if zenith then
+		skybox_material:SetShaderParameter("SkyZenith",
+				magic.Vector3(zenith.r or zenith[1] or 0,
+				zenith.g or zenith[2] or 0, zenith.b or zenith[3] or 0))
+	end
+	if horizon then
+		skybox_material:SetShaderParameter("SkyHorizon",
+				magic.Vector3(horizon.r or horizon[1] or 0,
+				horizon.g or horizon[2] or 0, horizon.b or horizon[3] or 0))
+	end
+	if cloud_cover then
+		skybox_material:SetShaderParameter("CloudCover", cloud_cover)
+	end
+end
+
 function M.set_sun_direction(dir)
 	if not skybox_material then
 		return

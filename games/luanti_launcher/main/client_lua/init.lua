@@ -109,6 +109,7 @@ local SUN_BRIGHTNESS = 50.0
 local MOON_BRIGHTNESS = 4.0
 local SUN_COLOR = magic.Color(1.0, 0.96, 0.88)
 local MOON_COLOR = magic.Color(0.55, 0.65, 1.0)
+-- Reassigned when a game says what its horizon is; see sub_sky below
 local DAY_FOG = magic.Color(0.60, 0.72, 0.88)
 local NIGHT_FOG = magic.Color(0.05, 0.07, 0.12)
 local SUN_DIR = {x = -0.6, y = -1.0, z = 0.8}
@@ -461,6 +462,24 @@ local function update_sky(dt)
 	wield_material:SetShaderParameter("MatDiffColor",
 			magic.Color(k, k, k, 1.0))
 end
+
+-- What the game says its sky is: the two ends of the gradient and how much
+-- of it is cloud. A game that says nothing keeps the sky voxel_shading
+-- draws, which is what create_skybox() set.
+luanti.sub_sky(function(sky)
+	local cover = nil
+	if sky.clouds == false then
+		cover = 0
+	elseif sky.density then
+		cover = math.max(0, math.min(1, sky.density))
+	end
+	voxel_shading.set_sky_look(sky.zenith, sky.horizon, cover)
+	-- The fog is the horizon seen through the world's air, so it follows
+	-- the horizon the game asked for
+	if sky.horizon then
+		DAY_FOG = magic.Color(sky.horizon.r, sky.horizon.g, sky.horizon.b)
+	end
+end)
 
 luanti.sub_time(function(tod, speed)
 	time_of_day = tod
