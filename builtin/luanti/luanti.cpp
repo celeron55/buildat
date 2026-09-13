@@ -988,6 +988,27 @@ struct Module: public interface::Module, public luanti::Interface
 		});
 	}
 
+	// The active range is a section around a player and nothing where there
+	// is none, which is what stops a furnace on the other side of the world
+	// from firing into a section nobody has loaded
+	void check_active_range()
+	{
+		sm_<ss_, pv::Vector3DInt32> saved;
+		saved.swap(m_player_pos);
+		assert(!is_section_active(pv::Vector3DInt16(0, 0, 0)));
+		m_player_pos["__check"] = pv::Vector3DInt32(0, 0, 0);
+		assert(is_section_active(pv::Vector3DInt16(0, 0, 0)));
+		assert(is_section_active(pv::Vector3DInt16(1, 0, -1)));
+		assert(!is_section_active(pv::Vector3DInt16(2, 0, 0)));
+		// A player one voxel the other side of a boundary is in the section
+		// that side of it, and the range goes with them
+		m_player_pos["__check"] = pv::Vector3DInt32(-1, 0, 0);
+		assert(is_section_active(pv::Vector3DInt16(-2, 0, 0)));
+		assert(!is_section_active(pv::Vector3DInt16(1, 0, 0)));
+		m_player_pos = saved;
+		log_v(MODULE, "check_active_range: the range is where the players are");
+	}
+
 	// Luanti's active_block_range: what is near a player is what steps.
 	// Nobody near it means nothing runs in it, which is Luanti's answer too
 	// -- a world with no players in it is a world where nothing happens.
@@ -1236,6 +1257,8 @@ struct Module: public interface::Module, public luanti::Interface
 			// and not a second store
 			world->set_skylight_enabled(true);
 		});
+
+		check_active_range();
 	}
 
 	// The client half asks for these once it has loaded, rather than being

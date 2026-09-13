@@ -1306,10 +1306,16 @@ end
 local function run_node_timers(dtime)
 	local due = nil
 	for key, t in pairs(node_timers) do
-		t.elapsed = t.elapsed + dtime
-		if t.elapsed >= t.timeout then
-			due = due or {}
-			due[#due + 1] = key
+		-- A timer waits where it is while nobody is near it, the way
+		-- Luanti's waits while its block is not loaded. Without this a
+		-- furnace in a section that has been unloaded would fire, read
+		-- nothing where its node is and stop being a furnace.
+		if core.__is_active(t.pos) then
+			t.elapsed = t.elapsed + dtime
+			if t.elapsed >= t.timeout then
+				due = due or {}
+				due[#due + 1] = key
+			end
 		end
 	end
 	if due == nil then
@@ -1907,6 +1913,31 @@ end
 local abm_timers = nil
 local abm_ids = nil
 
+-- The active range, asked for once a step: the loaded sections within a
+-- section of a player. Everything that runs where the map is -- an ABM, a
+-- node timer, an entity -- asks the same list, because they are active for
+-- the same reason and stop for the same one.
+local active_boxes_cache = nil
+
+function core.__active_boxes_now()
+	if active_boxes_cache == nil then
+		active_boxes_cache = __active_boxes()
+	end
+	return active_boxes_cache
+end
+
+function core.__is_active(pos)
+	local boxes = core.__active_boxes_now()
+	for i = 1, #boxes do
+		local b = boxes[i]
+		if pos.x >= b[1] and pos.y >= b[2] and pos.z >= b[3] and
+				pos.x <= b[4] and pos.y <= b[5] and pos.z <= b[6] then
+			return true
+		end
+	end
+	return false
+end
+
 -- Which content ids a rule is about, since the sweep matches ids and not
 -- names: a name list is turned into one of these once, because the node
 -- registry is frozen by the time anything steps.
@@ -1928,7 +1959,7 @@ local function abm_neighbors_ok(abm, pos)
 	return core.find_node_near(pos, 1, abm.neighbors) ~= nil
 end
 
--- Every loaded section, once, against a set of ids per rule: on_hits(k,
+-- Every active section, once, against a set of ids per rule: on_hits(k,
 -- hits) gets the flat x,y,z list of what the section held of set k. One read
 -- per section however many rules there are, because the read is what a sweep
 -- costs and the module matches 32 sets of ids at a time.
@@ -1936,7 +1967,7 @@ local function sweep_sections(id_sets, on_hits)
 	if #id_sets == 0 then
 		return 0
 	end
-	local boxes = __active_boxes()
+	local boxes = core.__active_boxes_now()
 	for _, box in ipairs(boxes) do
 		for first = 1, #id_sets, 32 do
 			local last = math.min(first + 31, #id_sets)
@@ -2076,6 +2107,8 @@ local function run_lbms()
 end
 
 function core.__step(dtime)
+	-- The map moves between steps and not during one
+	active_boxes_cache = nil
 	run_globalsteps(dtime)
 	core.__step_objects(dtime)
 	run_node_timers(dtime)
