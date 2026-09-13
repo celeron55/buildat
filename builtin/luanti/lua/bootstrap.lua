@@ -1303,6 +1303,32 @@ local function abm_neighbors_ok(abm, pos)
 	return core.find_node_near(pos, 1, abm.neighbors) ~= nil
 end
 
+-- Every loaded section, once, against a set of ids per rule: on_hits(k,
+-- hits) gets the flat x,y,z list of what the section held of set k. One read
+-- per section however many rules there are, because the read is what a sweep
+-- costs and the module matches 32 sets of ids at a time.
+local function sweep_sections(id_sets, on_hits)
+	if #id_sets == 0 then
+		return 0
+	end
+	local boxes = __active_boxes()
+	for _, box in ipairs(boxes) do
+		for first = 1, #id_sets, 32 do
+			local last = math.min(first + 31, #id_sets)
+			local batch = {}
+			for k = first, last do
+				batch[#batch + 1] = id_sets[k]
+			end
+			local found = __find_ids(box[1], box[2], box[3],
+					box[4], box[5], box[6], batch)
+			for k = first, last do
+				on_hits(k, found[k - first + 1])
+			end
+		end
+	end
+	return #boxes
+end
+
 -- One rule over the voxels of its kind that one section turned out to hold
 local function run_abm(abm, hits)
 	local chance = abm.chance or 1
@@ -1353,27 +1379,82 @@ local function run_abms(dtime)
 	if due == nil then
 		return
 	end
-	-- One read per loaded section, shared by every rule that is due: the
-	-- read is what a sweep costs, so the number of rules should not be in
-	-- the price. 32 is what the module matches at once.
-	for _, box in ipairs(__active_boxes()) do
-		for first = 1, #due, 32 do
-			local last = math.min(first + 31, #due)
-			local batch = {}
-			for k = first, last do
-				batch[#batch + 1] = abm_ids[due[k]]
-			end
-			local found = __find_ids(box[1], box[2], box[3],
-					box[4], box[5], box[6], batch)
-			for k = first, last do
-				run_abm(abms[due[k]], found[k - first + 1])
+	local sets = {}
+	for k = 1, #due do
+		sets[k] = abm_ids[due[k]]
+	end
+	sweep_sections(sets, function(k, hits)
+		run_abm(abms[due[k]], hits)
+	end)
+end
+
+--
+-- LBMs
+--
+-- The same idea on a section rather than on a timer: a rule that runs over
+-- the nodes of a kind when the part of the map they are in is loaded, which
+-- is how a game fixes up what it saved before it changed its mind about it.
+--
+-- simplified: the whole world is loaded before anything steps and nothing
+-- unloads it, so "on load" is once, at the first step, over every section --
+-- and run_at_every_load and Luanti's record of which blocks are older than
+-- which rule have nothing to be different about yet. Both belong with M6's
+-- map, which is where a section stops being loaded for the whole run.
+
+local lbms_run = false
+
+local function run_lbm(lbm, hits)
+	local positions = {}
+	for i = 1, #hits, 3 do
+		positions[#positions + 1] =
+				{x = hits[i], y = hits[i + 1], z = hits[i + 2]}
+	end
+	if #positions == 0 then
+		return
+	end
+	core.set_last_run_mod(lbm.mod_origin)
+	-- dtime_s is how long the block was away, and nothing here has been
+	local ok, err
+	if lbm.bulk_action then
+		ok, err = pcall(lbm.bulk_action, positions, 0)
+	else
+		ok = true
+		for _, pos in ipairs(positions) do
+			local ok1, err1 = pcall(lbm.action, pos, core.get_node(pos), 0)
+			if not ok1 then
+				ok, err = false, err1
+				break
 			end
 		end
 	end
+	if not ok then
+		core.log("error", "lbm " .. tostring(lbm.name or "?") .. ": " ..
+				tostring(err))
+	end
+end
+
+-- Returns whether this was the load: the first steps happen before the world
+-- has a section in it -- lua/check_map.lua steps the clock a whole day
+-- before anything is flushed -- and a sweep over nothing is not one.
+local function run_lbms()
+	local lbms = core.registered_lbms
+	if lbms == nil or #lbms == 0 then
+		return true
+	end
+	local sets = {}
+	for i = 1, #lbms do
+		sets[i] = ids_matching(lbms[i].nodenames)
+	end
+	return sweep_sections(sets, function(k, hits)
+		run_lbm(lbms[k], hits)
+	end) > 0
 end
 
 function core.__step(dtime)
 	run_globalsteps(dtime)
+	if not lbms_run then
+		lbms_run = run_lbms()
+	end
 	run_abms(dtime)
 	game_time = game_time + dtime
 	local speed = tonumber(core.settings:get("time_speed")) or 72
