@@ -103,12 +103,38 @@ nodes have a shape of their own. What is left is glTF, which is a reader
 nobody has written, and an object with `visual = "mesh"`, which is drawn by
 the client half rather than by the voxel mesher.
 
-What is left, in order:
+What is left, in order of what it is worth:
 
-1. **The leftovers**, each small and none blocking anything. They are under
-   "Bonuses" below, which is what that section is for; the module plan's
-   "Simplified, and the upgrade path" has the full list of what the module
-   does not do.
+1. **The mapgen, stage 2: `core.register_on_generated` and a VoxelManip.**
+   This is the one thing left that a game cannot work without. Every world
+   the module makes is air with what a mod placed in it -- no terrain, no
+   ores, no caves -- so a mainstream Luanti game loads, runs and looks at
+   nothing. The map streams now, which is what stage 2 was waiting for: a
+   generated world that cannot unload is a world with a wall around it.
+
+   It is also the seam stage 3 stands on. Stage 3 is vendoring `src/mapgen/`
+   -- 9.5k lines of noise, biomes, ores, decorations and schematics that
+   have to match Luanti exactly to be worth anything -- and pointing it at
+   the same `GenerationRequest` this stage exercises with something small
+   enough to read. See "Mapgen" in the module plan for the staging and why
+   it is vendored rather than rewritten.
+2. **Node metadata per section**, which is what M6's map left behind. One
+   blob for the world still works and loses nothing, but it grows with
+   everywhere the players have been and it is one large write at shutdown.
+   It wants a section-loaded notification from `voxelworld`, which does not
+   have one. See "The map, as it was built" in the module plan and step 5c
+   of `doc/plan/world_persistence_plan.md`.
+3. **The rest is minor and belongs to a later round.** glTF, an object drawn
+   as its own model, a detached inventory, a put-down count, the inventory
+   cube, a scrolling save list: each is an afternoon, none blocks a game
+   from running, and they are in "Bonuses" below for exactly that reason.
+   The module plan's "Simplified, and the upgrade path" is the full list of
+   what the module does not do.
+
+**And the branch stack should merge before more lands on it.**
+`client-preferences` (PR #55) into master, `saves` (PR #56) into that,
+`luanti-module` (PR #52) into that -- four rounds of work that every further
+change widens. Whose call that is is the reader's, not this file's.
 
 What is *not* left: the client half, which was item 1 of this list for three
 rounds. The texture modifiers, the formspecs, the inventories, the chest,
@@ -208,10 +234,12 @@ All five items are built; see `doc/plan/master_plan_history.md`.
 
 ## Bonuses, for when everything else is stalled or done
 
-Not a queue. These are understood well enough to start on any afternoon, and
-none of them is on anyone's critical path -- which is exactly what makes them
-the right thing to pick up when the current branch is blocked on an answer,
-or when a round has just landed and the next has not started.
+Not a queue, and deliberately after the mapgen (2026-09-13): none of them
+stops a game from running, and each is understood well enough to start on
+any afternoon. That is what makes them the right thing to pick up when the
+current branch is blocked on an answer, or when a round has just landed and
+the next has not started -- and the wrong thing to spend a round on while
+every world the module makes is still empty.
 
 - **A detached inventory reaches the client** (`builtin/luanti`). It is
   kept server-side already; what is missing is the packet and letting
@@ -225,6 +253,16 @@ or when a round has just landed and the next has not started.
   twelve most recent saves because `ui_utils.vertical_menu` does not scroll.
   Whatever is built for it belongs in `ui_utils`, since it is the same
   widget every menu in this tree uses.
+- **glTF, the mesh format nobody has a reader for** (`builtin/luanti`). Ten
+  of devtest's thirty mesh references are `.x`, `.gltf` or `.glb`, mostly
+  its dedicated glTF test mod, and a node naming one keeps its cube. The
+  other two formats are read in `builtin/luanti/lua/`; a third reader goes
+  beside them.
+- **An object drawn as its own model** (`builtin/luanti`). A `visual =
+  "mesh"` object is a cube wearing its first texture. The readers are in
+  the module now, but an object is drawn by the client half rather than by
+  the voxel mesher, so this is the same two files on that side -- which is
+  where `extensions/luanti_client` already has them.
 - **An inventory image that is a cube** (`builtin/luanti`). An item that
   places a node is drawn as one of its tiles; Luanti draws the little cube.
   `compose_image` has the `shear` op and `extensions/luanti_client` has the
