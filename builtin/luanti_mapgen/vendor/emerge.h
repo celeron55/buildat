@@ -44,7 +44,17 @@ class EmergeParams
 {
 public:
 	EmergeParams() = default;
-	~EmergeParams() = default;
+	// What Luanti's own destructor does: an EmergeParams is made per mapgen
+	// out of clones of the managers, and it deletes them. The Mapgen
+	// deletes the EmergeParams, so this is the end of the chain.
+	~EmergeParams()
+	{
+		delete biomegen;
+		delete biomemgr;
+		delete oremgr;
+		delete decomgr;
+		delete schemmgr;
+	}
 	DISABLE_CLASS_COPY(EmergeParams);
 
 	const NodeDefManager *ndef = nullptr;

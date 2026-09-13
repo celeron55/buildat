@@ -26,12 +26,16 @@ content_t NodeDefManager::getId(const std::string &name) const
 	return it->second;
 }
 
+// Found or not, rather than "not CONTENT_IGNORE": ignore is a node with an
+// id like any other here -- the id is zero -- and a caller asking for it by
+// name means it. The default biome names it as its cave liquid, which is how
+// a biome says it has none.
 bool NodeDefManager::getId(const std::string &name, content_t &result) const
 {
-	content_t c = getId(name);
-	if(c == CONTENT_IGNORE)
+	auto it = m_id_of_name.find(name);
+	if(it == m_id_of_name.end())
 		return false;
-	result = c;
+	result = it->second;
 	return true;
 }
 
@@ -44,8 +48,8 @@ bool NodeDefManager::getIds(const std::string &name,
 	// the groups over with the ids.
 	if(name.compare(0, 6, "group:") == 0)
 		return false;
-	content_t c = getId(name);
-	if(c == CONTENT_IGNORE)
+	content_t c = 0;
+	if(!getId(name, c))
 		return false;
 	result.push_back(c);
 	return true;

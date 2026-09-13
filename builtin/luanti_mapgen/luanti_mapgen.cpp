@@ -135,11 +135,11 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 	static const int PADDING = MAP_BLOCKSIZE;
 
 	NodeDefManager m_ndef;
-	EmergeParams m_emerge;
-	BiomeManager *m_biomemgr = nullptr;
-	OreManager *m_oremgr = nullptr;
-	DecorationManager *m_decomgr = nullptr;
-	SchematicManager *m_schemmgr = nullptr;
+	// The bundle the mapgen is built with, and which the mapgen deletes:
+	// Luanti's Mapgen destructor does that, and the EmergeParams takes the
+	// managers and the biome generator with it. So nothing here is a member
+	// by value and nothing here deletes them a second time.
+	EmergeParams *m_emerge = nullptr;
 	Server m_server;
 	MapgenParams *m_params = nullptr;
 	BiomeParams *m_bparams = nullptr;
@@ -150,6 +150,12 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 
 	VendoredGenerator(const Params &params, int section_size)
 	{
+		// A mapgen writes air and reads back what it wrote, and it does that
+		// through the constants in mapnode.h rather than through a name. So
+		// the three the module reserves have to be those three numbers.
+		check_reserved_id(params, "air", CONTENT_AIR);
+		check_reserved_id(params, "ignore", CONTENT_IGNORE);
+		check_reserved_id(params, "unknown", CONTENT_UNKNOWN);
 		for(const auto &pair : params.content_ids){
 			ContentFeatures f;
 			f.name = pair.first;
@@ -169,15 +175,12 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 		// The managers ask the server for the node definitions, and they
 		// ask while they are being built
 		m_server = Server(&m_ndef);
-		m_biomemgr = new BiomeManager(&m_server);
-		m_oremgr = new OreManager(&m_server);
-		m_decomgr = new DecorationManager(&m_server);
-		m_schemmgr = new SchematicManager(&m_server);
-		m_emerge.ndef = &m_ndef;
-		m_emerge.biomemgr = m_biomemgr;
-		m_emerge.oremgr = m_oremgr;
-		m_emerge.decomgr = m_decomgr;
-		m_emerge.schemmgr = m_schemmgr;
+		m_emerge = new EmergeParams();
+		m_emerge->ndef = &m_ndef;
+		m_emerge->biomemgr = new BiomeManager(&m_server);
+		m_emerge->oremgr = new OreManager(&m_server);
+		m_emerge->decomgr = new DecorationManager(&m_server);
+		m_emerge->schemmgr = new SchematicManager(&m_server);
 
 		// The managers registered their node names while they were built;
 		// now that they are, those can be looked up
@@ -203,27 +206,43 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 		m_bparams = BiomeManager::createBiomeParams(BIOMEGEN_ORIGINAL);
 		if(m_bparams){
 			m_bparams->seed = m_params->seed;
-			m_emerge.biomegen = m_biomemgr->createBiomeGen(
+			m_emerge->biomegen = m_emerge->biomemgr->createBiomeGen(
 					BIOMEGEN_ORIGINAL, m_bparams,
 					v3s16((s16)(m_chunk_blocks * MAP_BLOCKSIZE)));
 		}
 
-		m_mapgen = Mapgen::createMapgen(type, m_params, &m_emerge);
+		m_mapgen = Mapgen::createMapgen(type, m_params, m_emerge);
 		// And the mapgen's own names, which it registers as it is built
 		m_ndef.resolvePending();
 	}
 
 	~VendoredGenerator()
 	{
-		// The mapgen deletes the biome generator it was given; see
-		// MapgenBasic's destructor
-		delete m_mapgen;
+		// The mapgen owns the EmergeParams it was built with -- Luanti's
+		// own Mapgen destructor deletes it -- and the EmergeParams owns the
+		// managers and the biome generator. So deleting the mapgen deletes
+		// all of them, and there is something left here to delete only if
+		// there never was a mapgen.
+		if(m_mapgen)
+			delete m_mapgen;
+		else
+			delete m_emerge;
 		delete m_bparams;
 		delete m_params;
-		delete m_biomemgr;
-		delete m_oremgr;
-		delete m_decomgr;
-		delete m_schemmgr;
+	}
+
+	static void check_reserved_id(const Params &params, const ss_ &name,
+			content_t want)
+	{
+		auto it = params.content_ids.find(name);
+		if(it == params.content_ids.end())
+			throw Exception("luanti_mapgen: the game has no \""+name+"\"");
+		if(it->second != (uint32_t)want){
+			throw Exception("luanti_mapgen: \""+name+"\" is id "+
+					itos(it->second)+" and the vendored mapgens are built "
+					"for "+itos((int)want)+"; see CONTENT_AIR in "
+					"vendor/mapnode.h");
+		}
 	}
 
 	pv::Vector3DInt32 get_padding_voxels()
@@ -311,6 +330,33 @@ struct Module: public interface::Module, public luanti_mapgen::Interface
 	void init()
 	{
 		check_voxel_manipulator();
+		check_generator_lifetime();
+	}
+
+	// A generator built and thrown away, which is what a world that is
+	// opened and closed does. It is here because the ownership inside a
+	// vendored mapgen is not obvious -- the Mapgen deletes the EmergeParams
+	// it was built with, and that deletes the managers and the biome
+	// generator -- and getting it wrong aborts in free() at shutdown rather
+	// than anywhere near the mistake.
+	void check_generator_lifetime()
+	{
+		Params params;
+		params.mgname = "v7";
+		params.seed = 1234;
+		// The three reserved ids are the reserved ids; the rest are this
+		// check's own
+		params.content_ids["ignore"] = CONTENT_IGNORE;
+		params.content_ids["unknown"] = CONTENT_UNKNOWN;
+		params.content_ids["air"] = CONTENT_AIR;
+		params.content_ids["mapgen_stone"] = 3;
+		params.content_ids["mapgen_water_source"] = 4;
+		params.content_ids["mapgen_river_water_source"] = 5;
+		params.content_ids["mapgen_lava_source"] = 6;
+		params.content_ids["mapgen_cobble"] = 7;
+		delete create_generator(params);
+		log_v(MODULE, "check_generator_lifetime: a v7 generator was built "
+				"and deleted");
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)

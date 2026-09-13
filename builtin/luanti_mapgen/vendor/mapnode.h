@@ -7,10 +7,17 @@
 #include <string>
 #include <iosfwd>
 
-// Luanti's three reserved content ids
-#define CONTENT_UNKNOWN 125
-#define CONTENT_AIR 126
-#define CONTENT_IGNORE 127
+// The three reserved content ids. Luanti's own numbers are 125, 126 and 127;
+// these are the ids the module reserves instead -- a content id here is a
+// buildat VoxelRegistry id, and the registry hands out 0 for "nothing has
+// generated this yet", which is what ignore is. They have to be the same
+// numbers as core.CONTENT_IGNORE, core.CONTENT_UNKNOWN and core.CONTENT_AIR
+// in builtin/luanti/lua/bootstrap.lua, because a mapgen writes air itself
+// and the module reads what it wrote; VendoredGenerator's constructor
+// checks that they still are.
+#define CONTENT_IGNORE 0
+#define CONTENT_UNKNOWN 1
+#define CONTENT_AIR 2
 
 // What a node's light does, packed into a byte the way Luanti packs it
 struct ContentLightingFlags {

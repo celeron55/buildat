@@ -107,7 +107,16 @@ local function draw(saves, save_games)
 	magic.input:SetMouseVisible(true)
 end
 
+-- The world came up while the menu was still asking for the save list: the
+-- server was busy loading the game, so the answer it was asked for arrives
+-- after it says the menu is done with. Without this the list draws itself
+-- over the world the client is already in.
+local done = false
+
 buildat.sub_packet("main:saves", function(data)
+	if done then
+		return
+	end
 	local values = cereal.binary_input(data, {"array", "string"})
 	local n = tonumber(values[1]) or 0
 	local saves = {}
@@ -133,6 +142,7 @@ end)
 
 -- The world is up and main/init.lua is what draws from here on
 buildat.sub_packet("main:menu_done", function()
+	done = true
 	close()
 end)
 

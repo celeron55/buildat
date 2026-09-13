@@ -9,21 +9,37 @@
 --
 -- Run once at the end of run_game(); see create_world() in luanti.cpp.
 
-local CHECK_POS = {x = 1, y = 2, z = 3}
+-- Everything here happens this high up, which is above what any mapgen
+-- builds and below the map's own limit: a world with terrain in it is a
+-- world where the check's own nodes are written into ground that a
+-- generator is still filling in another thread, and a generated voxel wins
+-- over an empty one -- so the air this writes would stop being air under
+-- it. Up here what a generator produces is air, which is what the check
+-- wants anyway.
+--
+-- simplified: a game whose mapgen builds at twenty thousand fails this the
+-- way a game whose mapgen builds at two does today. The upgrade path is to
+-- wait for the sections the check uses to be generated before writing into
+-- them, which needs the check to span steps.
+local BASE_Y = 20000
+
+local CHECK_POS = {x = 1, y = BASE_Y + 2, z = 3}
+-- Down where a world is generated as soon as it is opened, because what
+-- this position is for is what a *generated* voxel of empty space reads as
 local EMPTY_POS = {x = 5, y = 6, z = 7}
-local AREA_MIN = {x = 10, y = 10, z = 10}
-local AREA_MAX = {x = 14, y = 14, z = 14}
+local AREA_MIN = {x = 10, y = BASE_Y + 10, z = 10}
+local AREA_MAX = {x = 14, y = BASE_Y + 14, z = 14}
 -- A box that crosses a chunk boundary (every 32 voxels) and a section
 -- boundary (every 64), because a region read is one read per chunk stitched
 -- together and the stitching is the part that can be wrong. Four corners of
 -- it get a node and the read has to find exactly those four.
-local SEAM_MIN = {x = 30, y = 2, z = 62}
-local SEAM_MAX = {x = 34, y = 2, z = 66}
+local SEAM_MIN = {x = 30, y = BASE_Y + 2, z = 62}
+local SEAM_MAX = {x = 34, y = BASE_Y + 2, z = 66}
 local SEAM_CORNERS = {
-	{x = 31, y = 2, z = 63},
-	{x = 32, y = 2, z = 63},
-	{x = 31, y = 2, z = 64},
-	{x = 32, y = 2, z = 64},
+	{x = 31, y = BASE_Y + 2, z = 63},
+	{x = 32, y = BASE_Y + 2, z = 63},
+	{x = 31, y = BASE_Y + 2, z = 64},
+	{x = 32, y = BASE_Y + 2, z = 64},
 }
 local check_name = nil
 
@@ -98,22 +114,17 @@ local function pick_node()
 	return names[1]
 end
 
+-- The box everything above is inside, which the module pins while the check
+-- runs: nothing else keeps a section up here loaded, and a section the
+-- streamer drops takes the check's own nodes with it.
+function core.__check_map_box()
+	return 0, BASE_Y, 0, 70, BASE_Y + 16, 70
+end
+
 function core.__check_map_write()
 	check_name = pick_node()
 	if not check_name then
 		return false
-	end
-	-- Singlenode is a node everywhere, which is what Luanti's own
-	-- MapgenSinglenode does: a voxel nobody has built in is air, and only
-	-- what is outside the world altogether is ignore.
-	local before = core.get_node(EMPTY_POS)
-	if before.name ~= "air" then
-		error("check_map: an unbuilt voxel reads as " .. before.name)
-	end
-	local outside = core.get_node({x = 0, y = 30000, z = 0})
-	if outside.name ~= "ignore" then
-		error("check_map: a voxel outside the world reads as " ..
-				outside.name)
 	end
 	core.set_node(CHECK_POS, {name = check_name, param2 = 3})
 	-- Visible immediately, out of the buffer: the on_placenode callbacks in
@@ -151,9 +162,9 @@ end
 -- y and then z, which is what VoxelArea does its arithmetic in -- so the
 -- nodes written are at positions that are all different in every axis and a
 -- transposed index puts them somewhere this notices.
-local VM_MIN = {x = 20, y = 2, z = 24}
-local VM_MAX = {x = 25, y = 6, z = 27}
-local VM_AT = {x = 21, y = 3, z = 26}
+local VM_MIN = {x = 20, y = BASE_Y + 2, z = 24}
+local VM_MAX = {x = 25, y = BASE_Y + 6, z = 27}
+local VM_AT = {x = 21, y = BASE_Y + 3, z = 26}
 
 local function check_vmanip()
 	local vm = VoxelManip()
@@ -246,6 +257,31 @@ local function check_noise()
 	if rows[1][1] ~= flat[1] or rows[2][1] ~= flat[5] then
 		error("check_map: the nested noise map is not the flat one")
 	end
+	-- One octave of it stays inside -1...1 and averages out to nothing,
+	-- which is what makes an offset an offset and a scale a scale. The
+	-- hash underneath overflows on purpose, and an overflow the compiler
+	-- is allowed to assume away biases every octave upwards -- a terrain
+	-- noise of offset 4 and scale 70 then answers 200 everywhere, which is
+	-- a world with no surface in it.
+	local one = PerlinNoise({offset = 0, scale = 1, seed = 91, octaves = 1,
+			persistence = 0.5, spread = {x = 32, y = 32, z = 32}})
+	local sum, lo, hi = 0, 1e9, -1e9
+	local n_samples = 400
+	for i = 1, n_samples do
+		local v = one:get_2d({x = i * 13.7, y = i * -7.3})
+		sum = sum + v
+		lo = math.min(lo, v)
+		hi = math.max(hi, v)
+	end
+	if lo < -1 or hi > 1 then
+		error("check_map: one octave of noise ran from " .. tostring(lo) ..
+				" to " .. tostring(hi))
+	end
+	if math.abs(sum / n_samples) > 0.15 then
+		error("check_map: one octave of noise averages " ..
+				tostring(sum / n_samples))
+	end
+
 	-- Two seeds are two worlds
 	local other = PerlinNoise({offset = 0, scale = 1, seed = 72,
 			octaves = 3, persistence = 0.6,
@@ -263,9 +299,9 @@ end
 --
 -- A game with no glowing node at all skips this, which is the same deal
 -- check_map gives a game with no node to write.
-local LIGHT_MIN = {x = 40, y = 2, z = 40}
-local LIGHT_MAX = {x = 46, y = 8, z = 46}
-local LIGHT_AT = {x = 43, y = 5, z = 43}
+local LIGHT_MIN = {x = 40, y = BASE_Y + 2, z = 40}
+local LIGHT_MAX = {x = 46, y = BASE_Y + 8, z = 46}
+local LIGHT_AT = {x = 43, y = BASE_Y + 5, z = 43}
 
 local function brightest_node()
 	local best, best_light = nil, 0
@@ -338,7 +374,29 @@ local function check_light()
 	end
 end
 
+-- What a voxel nobody has built in reads as. A singlenode world is air
+-- everywhere -- what Luanti's own MapgenSinglenode leaves, and what every
+-- mod that looks before it places is written against -- so that is where
+-- the claim is made; a world with a real mapgen has terrain there instead,
+-- and what it has is that mapgen's business. Either way a voxel outside
+-- the world altogether is ignore.
+local function check_unbuilt()
+	local mgname = core.settings:get("mg_name") or "singlenode"
+	if mgname == "singlenode" then
+		local before = core.get_node(EMPTY_POS)
+		if before.name ~= "air" then
+			error("check_map: an unbuilt voxel reads as " .. before.name)
+		end
+	end
+	local outside = core.get_node({x = 0, y = 30000, z = 0})
+	if outside.name ~= "ignore" then
+		error("check_map: a voxel outside the world reads as " ..
+				outside.name)
+	end
+end
+
 function core.__check_map_read()
+	check_unbuilt()
 	local node = core.get_node(CHECK_POS)
 	if node.name ~= check_name then
 		error("check_map: voxelworld answered with " .. node.name ..
