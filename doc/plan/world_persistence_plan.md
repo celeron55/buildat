@@ -462,7 +462,30 @@ byte-identical over all 865 rows -- and, for step 4, the round trip under
      upgrade path is the same shape -- a blob per section, written when
      voxelworld writes that section -- and it is what a map bigger than the
      sections a mod can reach will need.
-   - **5d. Players.** With M5.
+   - **5d. Players. BUILT 2026-09-13.** What Luanti's player database holds
+     -- where a player stood, which way they looked, their health and
+     breath, what a mod wrote on their metadata and what their inventory
+     lists held -- goes into the module's store beside the node metadata,
+     keyed by the name the client connected under. It is written when a
+     player leaves and at shutdown, and read after the mods have loaded, for
+     the same reason the node metadata is: an inventory holds item strings.
+
+     The auth entries go with them, because a privilege a mod granted is as
+     much a part of a player as their health is, and `core.auth` had nowhere
+     to put one before.
+
+     A player is restored before `on_joinplayer` runs, which is where Luanti
+     has them come out of its database too.
+
+     The check is a round trip in `lua/entity.lua`
+     (`core.__check_players()`), run at every start: a player made for it is
+     written down and read back, and every field is compared. It is not a
+     live player because adding one would run every mod's join callback to
+     find that out.
+
+     simplified: written when a player leaves and at shutdown, not on a
+     timer, so a server that is killed loses what changed since. The clock
+     beside it names the same upgrade path.
 
    Already done, and listed here because the original step 4 named it:
    `core.get_worldpath()` is `<save>/luanti/`, a directory of the save's
@@ -470,8 +493,9 @@ byte-identical over all 865 rows -- and, for step 4, the round trip under
    -- which is normal, and which games depend on -- cannot land on
    `save.sqlite`.
 6. The Luanti importer, which is its own milestone in the module plan. The
-   map, the node metadata hanging off it, the clock and the mods' storage
-   are read (2026-09-13); the player database is not.
+   map, the node metadata hanging off it, the clock, the mods' storage and
+   the player database are read (2026-09-13). What is left of it is
+   `map_meta.txt`, which has nowhere to go until there is a mapgen.
 
-5b, 5d and what is left of 6 are the remainder, and each waits on a
-milestone of the module plan rather than on anything here.
+5b and what is left of 6 are the remainder, and each waits on a milestone of
+the module plan rather than on anything here.

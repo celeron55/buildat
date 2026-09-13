@@ -785,11 +785,14 @@ end
 -- is who they say they are, which is what a buildat server already decided
 -- one layer down.
 --
--- simplified: it is gone when the server stops, so privileges a mod grants
--- do not outlive the run. Putting it in the save is step 5d of
--- doc/plan/world_persistence_plan.md, with the rest of what a player is.
+-- It goes into the save with the players, which is where a privilege a mod
+-- granted belongs: see core.__save_players() in lua/entity.lua.
 
 local auth_entries = {}
+
+-- What that reads and writes; it is beside the players rather than a blob of
+-- its own because one is what the other is about
+core.__auth_entries = auth_entries
 
 core.auth = {
 	read = function(name)

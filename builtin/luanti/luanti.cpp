@@ -587,6 +587,8 @@ struct Module: public interface::Module, public luanti::Interface
 	// Whether the save has node metadata in it, so that a world that has
 	// none does not get a blob written for it every shutdown
 	bool m_had_node_meta = false;
+	// The same for the players; a world nobody has been in stays that way
+	bool m_had_players = false;
 	bool m_game_running = false;
 	// What load_lua() was handed before run_game(), in the order it came
 	sv_<std::pair<ss_, ss_>> m_pending_lua;
@@ -690,6 +692,7 @@ struct Module: public interface::Module, public luanti::Interface
 		flush_node_writes();
 		save_clock();
 		save_node_meta();
+		save_players();
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
 			world->save();
 		});
@@ -791,6 +794,61 @@ struct Module: public interface::Module, public luanti::Interface
 		lua_settop(L, base);
 		m_had_node_meta = (n != 0);
 		log_v(MODULE, "Node metadata read from the save: %i positions", n);
+	}
+
+	// The players, in the save beside the node metadata and written the same
+	// way: what a player carries is item strings as well. lua/entity.lua says
+	// what one row is.
+	void save_players()
+	{
+		if(!m_store || !m_lua)
+			return;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__save_players");
+		if(lua_pcall(L, 0, 2, 0) != 0){
+			log_w(MODULE, "__save_players(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+			lua_settop(L, base);
+			return;
+		}
+		size_t len = 0;
+		const char *p = lua_tolstring(L, -2, &len);
+		ss_ data(p ? p : "", p ? len : 0);
+		int n = (int)lua_tonumber(L, -1);
+		lua_settop(L, base);
+		if(n == 0 && !m_had_players)
+			return; // Nothing to write and nothing there to clear
+		m_had_players = (n != 0);
+		m_store->set("players", data);
+		log_v(MODULE, "Players written to the save: %i", n);
+	}
+
+	void load_players()
+	{
+		if(!m_store || !m_lua)
+			return;
+		ss_ data;
+		if(!m_store->get("players", data))
+			return;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__load_players");
+		lua_pushlstring(L, data.c_str(), data.size());
+		if(lua_pcall(L, 1, 1, 0) != 0){
+			log_w(MODULE, "__load_players(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+			lua_settop(L, base);
+			return;
+		}
+		int n = (int)lua_tonumber(L, -1);
+		lua_settop(L, base);
+		m_had_players = (n != 0);
+		log_v(MODULE, "Players read from the save: %i", n);
 	}
 
 	void save_clock()
@@ -2863,6 +2921,175 @@ struct Module: public interface::Module, public luanti::Interface
 
 	// A Luanti world's mod_storage.sqlite: what its mods remember, per mod,
 	// into the files this module keeps a mod's storage in.
+	// A Luanti world's players.sqlite: where each player stood, which way
+	// they looked, their health and breath, what a mod wrote on them and
+	// what they carried. The save has somewhere to put one now -- step 5d of
+	// doc/plan/world_persistence_plan.md -- and this is the other half.
+	//
+	// simplified: the sqlite database only. Luanti still reads a world whose
+	// players are one text file each under players/, and writing that reader
+	// is worth it when a world that has one turns up.
+	void import_players(const ss_ &luanti_world_path)
+	{
+		ss_ db_path = luanti_world_path+"/players.sqlite";
+		if(!interface::fs::path_exists(db_path))
+			return;
+		sqlite3 *db = nullptr;
+		if(sqlite3_open_v2(db_path.c_str(), &db, SQLITE_OPEN_READONLY,
+				nullptr) != SQLITE_OK){
+			log_w(MODULE, "import_world(): %s: %s", cs(db_path),
+					db ? sqlite3_errmsg(db) : "cannot open");
+			sqlite3_close(db);
+			return;
+		}
+		struct Player {
+			double pitch = 0.0, yaw = 0.0;
+			double x = 0.0, y = 0.0, z = 0.0;
+			int hp = 20, breath = 10;
+			sm_<ss_, ss_> fields;
+			// The list's name, and the item string of each slot in it. The
+			// slots are kept by index because a database row says which one
+			// it is and an empty slot has no row at all.
+			sm_<ss_, sm_<int, ss_>> lists;
+			sm_<ss_, int> list_sizes;
+		};
+		sm_<ss_, Player> players;
+		auto query = [&](const char *sql,
+				const std::function<void(sqlite3_stmt*)> &row){
+			sqlite3_stmt *st = nullptr;
+			if(sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK){
+				log_w(MODULE, "import_world(): %s: %s", cs(db_path),
+						sqlite3_errmsg(db));
+				return;
+			}
+			while(sqlite3_step(st) == SQLITE_ROW)
+				row(st);
+			sqlite3_finalize(st);
+		};
+		auto text = [](sqlite3_stmt *st, int i){
+			const char *p = (const char*)sqlite3_column_blob(st, i);
+			int n = sqlite3_column_bytes(st, i);
+			return ss_(p ? p : "", (size_t)(n > 0 ? n : 0));
+		};
+		// Luanti keeps a player's position in BS units, which is nodes times
+		// ten, and their angles in degrees; a node and a radian is what
+		// everything on this side of the import is in.
+		query("SELECT name, pitch, yaw, posX, posY, posZ, hp, breath"
+				" FROM player", [&](sqlite3_stmt *st){
+			Player &p = players[text(st, 0)];
+			const double DEG_TO_RAD = 3.14159265358979323846 / 180.0;
+			p.pitch = sqlite3_column_double(st, 1) * DEG_TO_RAD;
+			p.yaw = sqlite3_column_double(st, 2) * DEG_TO_RAD;
+			p.x = sqlite3_column_double(st, 3) / 10.0;
+			p.y = sqlite3_column_double(st, 4) / 10.0;
+			p.z = sqlite3_column_double(st, 5) / 10.0;
+			p.hp = sqlite3_column_int(st, 6);
+			p.breath = sqlite3_column_int(st, 7);
+		});
+		if(players.empty()){
+			sqlite3_close(db);
+			return;
+		}
+		query("SELECT player, metadata, value FROM player_metadata",
+				[&](sqlite3_stmt *st){
+			auto it = players.find(text(st, 0));
+			if(it != players.end())
+				it->second.fields[text(st, 1)] = text(st, 2);
+		});
+		// inv_id is which list it is and inv_name what it is called; an
+		// unnamed one is "main", which is what Luanti's own default is
+		sm_<ss_, sm_<int, ss_>> list_names;
+		query("SELECT player, inv_id, inv_name, inv_size"
+				" FROM player_inventories", [&](sqlite3_stmt *st){
+			ss_ who = text(st, 0);
+			auto it = players.find(who);
+			if(it == players.end())
+				return;
+			ss_ name = text(st, 2);
+			if(name == "")
+				name = "main";
+			list_names[who][sqlite3_column_int(st, 1)] = name;
+			it->second.list_sizes[name] = sqlite3_column_int(st, 3);
+		});
+		query("SELECT player, inv_id, slot_id, item"
+				" FROM player_inventory_items", [&](sqlite3_stmt *st){
+			ss_ who = text(st, 0);
+			auto it = players.find(who);
+			if(it == players.end())
+				return;
+			auto names = list_names.find(who);
+			if(names == list_names.end())
+				return;
+			auto name = names->second.find(sqlite3_column_int(st, 1));
+			if(name == names->second.end())
+				return;
+			// Luanti counts a slot from zero and everything Lua-side counts
+			// from one
+			it->second.lists[name->second][sqlite3_column_int(st, 2) + 1] =
+					text(st, 3);
+		});
+		sqlite3_close(db);
+		size_t imported = 0;
+		for(const auto &pair : players){
+			interface::MutexScope ms(m_lua_mutex);
+			lua_State *L = m_lua;
+			int base = lua_gettop(L);
+			const Player &p = pair.second;
+			lua_getglobal(L, "core");
+			lua_getfield(L, -1, "__import_player");
+			lua_pushstring(L, pair.first.c_str());
+			lua_newtable(L);
+			auto set_number = [&](const char *key, double value){
+				lua_pushnumber(L, value);
+				lua_setfield(L, -2, key);
+			};
+			lua_newtable(L);
+			set_number("x", p.x);
+			set_number("y", p.y);
+			set_number("z", p.z);
+			lua_setfield(L, -2, "pos");
+			lua_newtable(L);
+			set_number("h", p.yaw);
+			set_number("v", p.pitch);
+			lua_setfield(L, -2, "look");
+			set_number("hp", p.hp);
+			set_number("breath", p.breath);
+			lua_createtable(L, 0, (int)p.fields.size());
+			for(const auto &f : p.fields){
+				lua_pushlstring(L, f.second.c_str(), f.second.size());
+				lua_setfield(L, -2, f.first.c_str());
+			}
+			lua_setfield(L, -2, "fields");
+			lua_createtable(L, 0, (int)p.list_sizes.size());
+			for(const auto &list : p.list_sizes){
+				int size = list.second;
+				lua_createtable(L, size, 0);
+				auto items = p.lists.find(list.first);
+				for(int i = 1; i <= size; i++){
+					ss_ item;
+					if(items != p.lists.end()){
+						auto slot = items->second.find(i);
+						if(slot != items->second.end())
+							item = slot->second;
+					}
+					lua_pushlstring(L, item.c_str(), item.size());
+					lua_rawseti(L, -2, i);
+				}
+				lua_setfield(L, -2, list.first.c_str());
+			}
+			lua_setfield(L, -2, "inventory");
+			if(lua_pcall(L, 2, 1, 0) != 0){
+				log_w(MODULE, "__import_player(): %s",
+						lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+			} else if(lua_toboolean(L, -1)){
+				imported++;
+			}
+			lua_settop(L, base);
+		}
+		log_i(MODULE, "import_world(): %zu of %zu players", imported,
+				players.size());
+	}
+
 	void import_mod_storage(const ss_ &luanti_world_path)
 	{
 		ss_ db_path = luanti_world_path+"/mod_storage.sqlite";
@@ -2984,6 +3211,7 @@ struct Module: public interface::Module, public luanti::Interface
 			throw Exception("luanti: import_world() before run_game()");
 		import_clock(luanti_world_path);
 		import_mod_storage(luanti_world_path);
+		import_players(luanti_world_path);
 		ss_ db_path = luanti_world_path+"/map.sqlite";
 		if(!interface::fs::path_exists(db_path))
 			throw Exception("luanti: no map.sqlite in "+luanti_world_path);
@@ -3225,6 +3453,8 @@ struct Module: public interface::Module, public luanti::Interface
 		// After the mods, because what the metadata holds is item strings
 		// and a mod's items have to be registered for one to mean anything
 		load_node_meta();
+		load_players();
+		run_chunk_string("core.__check_players()", "check_players");
 
 		check_shapes();
 		check_mapblock();

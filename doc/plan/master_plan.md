@@ -65,9 +65,9 @@ its clock and what its mods remembered (M7). The module plan has what each
 turned out to be; `doc/plan/luanti_module_history.md` has the detail.
 
 **And it is checked against Luanti's own tests.** devtest ships a
-`unittests` mod of about forty tests of the server API, and it runs inside
-the module: thirty-two pass, and the seven that do not are each a
-simplification the plan names rather than a bug. See "devtest's own
+`unittests` mod of about fifty tests of the server API, and it runs inside
+the module: forty-four pass with a client connected, and the six that do not
+are each a simplification the plan names rather than a bug. See "devtest's own
 unittests as the oracle" in the module plan for how to run it -- it is the
 first thing to run after touching the API surface.
 
@@ -101,10 +101,11 @@ What is left is, in order:
    importer drops most of a real Luanti world, and a map that loads and
    unloads around a player is what the mapgen seam was deferred until there
    was something to measure. There is something to measure now.
-3. **What is left of M7:** `map_meta.txt`'s seed, the player database, and a
-   block's node timers and static objects. The seed wants a mapgen, the
-   players want players, and the objects want a `static_save` that means
-   something.
+3. **What is left of M7:** `map_meta.txt`'s seed and a block's node timers
+   and static objects. The seed wants a mapgen and the objects want a
+   `static_save` that means something. The player database is read
+   (2026-09-13), now that a player is something the save holds -- step 5d of
+   the persistence plan.
 
 Done since the third round, all in `doc/plan/master_plan_history.md` or in
 the module's own history: M4's inventories and recipes, all of M5, M7's

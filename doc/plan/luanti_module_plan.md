@@ -903,11 +903,18 @@ two things M1 disproved about the build, are in
   the files this module keeps a mod's storage in. A value the save already
   has is kept, so importing twice does not take a mod's memory back.
 
+  The players come too, now that a player is something the save holds (step
+  5d of the persistence plan): `players.sqlite` gives each name a position,
+  a look, health, breath, metadata and inventory lists, and what the save
+  already knows about a name is kept, so importing the same world twice does
+  not undo what has happened since the first time. Luanti's position is in
+  BS units -- nodes times ten -- and its angles are degrees.
+
   **What is left of M7:** `map_meta.txt`, which is the seed and the mapgen
-  parameters and has nowhere to go until there is a mapgen; the player
-  database, which wants players; and a block's node timers and static
-  objects, which are walked past -- the objects want a `static_save` that
-  means something here first.
+  parameters and has nowhere to go until there is a mapgen; a world whose
+  players are one text file each under `players/` rather than a database;
+  and a block's node timers and static objects, which are walked past -- the
+  objects want a `static_save` that means something here first.
 
   **The world is 3x3x3 sections**, so what fits is about 192 voxels a side
   around the origin and the rest of a Luanti world is counted and dropped.

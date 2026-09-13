@@ -24,9 +24,8 @@
 --   the run, so static_save, get_staticdata and the dtime_s an on_activate
 --   is given have nothing to be different about yet. M6's map is where they
 --   start to.
--- * No players and no attachments, so collide_with_objects, the parent and
---   child of an attachment, and everything a player would point at are the
---   empty answer rather than an answer.
+-- * No attachments, so collide_with_objects and the parent and child of an
+--   attachment are the empty answer rather than an answer.
 -- * The collision is axis by axis against the voxels a box overlaps, with no
 --   stepping up and no sliding along a corner. An item lands on the floor
 --   and stays out of a wall, which is what the builtin's entities ask about.
@@ -674,6 +673,177 @@ function PlayerRef:get_eye_offset()
 	return {x = 0, y = 0, z = 0}, {x = 0, y = 0, z = 0}
 end
 
+--
+-- A player in the save
+--
+-- What Luanti's player database holds -- where a player is, which way they
+-- are looking, their health, their breath, what a mod wrote on them and what
+-- is in their inventory -- kept by name, so that it outlives both the
+-- client's connection and the run. Step 5d of
+-- doc/plan/world_persistence_plan.md.
+--
+-- simplified: written when a player leaves and at shutdown, not on a timer,
+-- so a server that is killed loses what changed since. The clock beside it in
+-- the save is written the same way and names the same upgrade path.
+
+local saved_players = {}
+
+local function snapshot_player(o)
+	local lists = {}
+	for list_name, stacks in pairs(o.inventory:get_lists()) do
+		local as_strings = {}
+		for i, stack in ipairs(stacks) do
+			as_strings[i] = stack:to_string()
+		end
+		lists[list_name] = as_strings
+	end
+	local fields = {}
+	for k, v in pairs(o.meta.fields) do
+		fields[k] = v
+	end
+	return {
+		pos = {x = o.pos.x, y = o.pos.y, z = o.pos.z},
+		look = {h = o.look.h, v = o.look.v},
+		hp = o.hp,
+		breath = o.breath,
+		wield_index = o.wield_index,
+		fields = fields,
+		inventory = lists,
+	}
+end
+
+-- The other direction, onto a player who has just been made. The inventory
+-- lists are item strings and the fields are strings, which is what the node
+-- metadata in the save is written as too.
+local function restore_player(o, saved)
+	if type(saved) ~= "table" then
+		return
+	end
+	if type(saved.pos) == "table" then
+		o.pos = {x = tonumber(saved.pos.x) or 0,
+				y = tonumber(saved.pos.y) or 0,
+				z = tonumber(saved.pos.z) or 0}
+	end
+	if type(saved.look) == "table" then
+		o.look = {h = tonumber(saved.look.h) or 0,
+				v = tonumber(saved.look.v) or 0}
+	end
+	o.hp = tonumber(saved.hp) or o.hp
+	o.breath = tonumber(saved.breath) or o.breath
+	o.wield_index = tonumber(saved.wield_index) or o.wield_index
+	for k, v in pairs(saved.fields or {}) do
+		o.meta.fields[k] = v
+	end
+	for list_name, stacks in pairs(saved.inventory or {}) do
+		o.inventory:set_size(list_name, #stacks)
+		for i, str in ipairs(stacks) do
+			o.inventory:set_stack(list_name, i, ItemStack(str))
+		end
+	end
+end
+
+-- The module calls these at shutdown and once the mods have loaded, the way
+-- it does the node metadata: what an inventory holds is item strings, and an
+-- item string means nothing until the mod that registered it is there.
+--
+-- The auth entries come along, because a privilege a mod granted is as much
+-- a part of a player as their health is, and bootstrap.lua keeps them in a
+-- table of its own.
+function core.__save_players()
+	local out = {}
+	local n = 0
+	for name, id in pairs(players) do
+		local o = objects[id]
+		if o then
+			saved_players[name] = snapshot_player(o)
+		end
+	end
+	for name, saved in pairs(saved_players) do
+		out[name] = saved
+		n = n + 1
+	end
+	return core.serialize({players = out, auth = core.__auth_entries}), n
+end
+
+function core.__load_players(data)
+	local t = core.deserialize(data)
+	if type(t) ~= "table" then
+		return 0
+	end
+	local n = 0
+	for name, saved in pairs(t.players or {}) do
+		saved_players[name] = saved
+		n = n + 1
+	end
+	for name, entry in pairs(t.auth or {}) do
+		core.__auth_entries[name] = entry
+	end
+	return n
+end
+
+-- The importer's way in: a player read out of a Luanti world's database.
+-- What the save already knows about that name is kept, the way a mod's
+-- storage is, so that importing the same world twice does not undo what has
+-- happened since the first time. Returns whether the row was taken.
+function core.__import_player(name, t)
+	if type(name) ~= "string" or name == "" or type(t) ~= "table" then
+		return false
+	end
+	if saved_players[name] or players[name] then
+		return false
+	end
+	saved_players[name] = {
+		pos = t.pos,
+		look = t.look,
+		hp = t.hp,
+		breath = t.breath,
+		wield_index = 1,
+		fields = t.fields or {},
+		inventory = t.inventory or {},
+	}
+	return true
+end
+
+-- The round trip, on a player made for it rather than on a live one: what
+-- can be wrong here is a value that does not survive being written down, and
+-- adding a real player would run every mod's join callback to find that out.
+function core.__check_players()
+	local made = function(fields)
+		return {
+			pos = {x = 0, y = 0, z = 0},
+			look = {h = 0, v = 0},
+			hp = 20,
+			breath = 10,
+			wield_index = 1,
+			meta = core.__new_metadata(fields or {}),
+			inventory = core.__new_inventory(
+					{type = "player", name = "__check"}),
+		}
+	end
+	local from = made({greeting = "hello"})
+	from.pos = {x = 1, y = -2, z = 3}
+	from.look = {h = 0.5, v = -0.25}
+	from.hp = 7
+	from.breath = 3
+	from.wield_index = 4
+	from.inventory:set_size("main", 2)
+	from.inventory:set_stack("main", 1, ItemStack("__check_item 3"))
+	local wrote = core.serialize(snapshot_player(from))
+	local to = made()
+	restore_player(to, core.deserialize(wrote))
+	assert(to.pos.x == 1 and to.pos.y == -2 and to.pos.z == 3,
+			"check_players: the position did not come back")
+	assert(to.look.h == 0.5 and to.look.v == -0.25,
+			"check_players: the look did not come back")
+	assert(to.hp == 7 and to.breath == 3 and to.wield_index == 4,
+			"check_players: hp, breath or the wielded slot did not come back")
+	assert(to.meta.fields.greeting == "hello",
+			"check_players: the metadata did not come back")
+	assert(to.inventory:get_stack("main", 1):to_string() == "__check_item 3",
+			"check_players: the inventory did not come back")
+	core.log("verbose", "check_players: a player survived being written down")
+end
+
 -- What the module calls when a client arrives and leaves. The name is the
 -- client's, and it is what everything about a player is keyed by.
 function core.__add_player(name)
@@ -715,6 +885,10 @@ function core.__add_player(name)
 	o.inventory:set_size("main", 32)
 	o.inventory:set_size("craft", 9)
 	o.inventory:set_size("craftpreview", 1)
+	-- What the last run left, before on_joinplayer runs: a mod's join
+	-- callback reads the player it is given, and in Luanti that player has
+	-- come out of the database by then
+	restore_player(o, saved_players[name])
 	-- Luanti's server makes the auth entry when a client logs in, and the
 	-- builtin's own join callback expects to find one: here whoever
 	-- connects is who they say they are -- a buildat server decided that
@@ -746,6 +920,10 @@ function core.__remove_player(name)
 		if not ok then
 			core.log("error", "on_leaveplayer: " .. tostring(err))
 		end
+	end
+	local o = objects[id]
+	if o then
+		saved_players[name] = snapshot_player(o)
 	end
 	players[name] = nil
 	objects[id] = nil
