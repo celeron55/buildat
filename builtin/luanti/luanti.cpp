@@ -5093,6 +5093,12 @@ struct Module: public interface::Module, public luanti::Interface
 		node_action(buf);
 	}
 
+	void set_wield_index(const ss_ &player_name, int index)
+	{
+		node_action("core.__set_wield_index(\""+lua_quoted(player_name)+
+				"\", "+itos(index)+") return true");
+	}
+
 	// A line a player typed, handed to the callbacks the way Luanti's own
 	// server hands one over. The "/" commands are among those callbacks,
 	// registered by the vendored builtin.

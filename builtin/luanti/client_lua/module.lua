@@ -452,6 +452,13 @@ end
 
 -- item name -> the expression it is drawn as; see core.__item_images()
 local item_images = {}
+
+-- What an item is drawn with, as a resource name, or nil when the game
+-- shipped no image for it. A formspec's slots go through the same lookup;
+-- this is here for what is drawn outside one, which is the hotbar.
+function M.item_texture(item_name)
+	return texture_of(item_images[item_name])
+end
 -- The ones that have no image, said once each
 local imageless = {}
 

@@ -65,6 +65,8 @@ local BINDINGS = {
 	{action = "fly", key = magic.KEY_K, name = "K", what = "Fly on and off"},
 	{action = "noclip", key = magic.KEY_H, name = "H",
 			what = "Through walls on and off"},
+	{action = "hotbar", first = magic.KEY_1, last = magic.KEY_8,
+			name = "1 - 8", what = "Pick a hotbar slot"},
 	{action = "chat", key = magic.KEY_T, name = "T",
 			what = "Say something - a line starting with / is a command"},
 	{action = "inventory", key = magic.KEY_I, name = "I", what = "Inventory"},
@@ -78,6 +80,7 @@ local BINDINGS = {
 	-- handling rather than a key lookup
 	{action = "dig", name = "Left mouse", what = "Dig"},
 	{action = "place", name = "Right mouse", what = "Place, or use"},
+	{action = "wield", name = "Mouse wheel", what = "Pick a hotbar slot"},
 }
 
 local BIND = {}
@@ -203,24 +206,131 @@ crosshair.horizontalAlignment = magic.HA_CENTER
 crosshair.verticalAlignment = magic.VA_CENTER
 crosshair:SetPosition(0, 0)
 
--- What the player is carrying, as a line of text. A formspec is what draws
--- an inventory properly; this is what says that digging a node put the node
--- somewhere, which is the thing worth seeing before there is one.
-local carrying_text = hud_text(15)
-carrying_text:SetText("")
-carrying_text.horizontalAlignment = magic.HA_CENTER
-carrying_text.verticalAlignment = magic.VA_BOTTOM
-carrying_text:SetPosition(0, -10)
-luanti.sub_inventory(function(lists)
-	local parts = {}
-	for _, item in ipairs(lists.main or {}) do
-		if item ~= "" then
-			parts[#parts + 1] = item
-		end
+--
+-- The hotbar
+--
+-- The first eight slots of the player's own inventory, along the bottom
+-- where Luanti puts them: what is in each, how many, and which one is in
+-- hand. The keys 1-8 and the wheel pick one, and the server is told --
+-- what is in hand is what a dig or a place asks it about.
+local HOTBAR_SLOTS = 8
+local SLOT = 44
+local SLOT_GAP = 4
+local WHITE = luanti.texture("[fill:1x1:#ffffffff")
+
+local hotbar = {}
+local hotbar_stacks = {}
+local wield_index = 1
+
+-- "basenodes:stone 7" -> the name and the count
+local function parse_stack(str)
+	if str == nil or str == "" then
+		return nil
 	end
-	carrying_text:SetText(#parts == 0 and "carrying nothing" or
-			"carrying: " .. table.concat(parts, ", "))
+	local name, count = string.match(str, "^([^ ]+) *(%d*)")
+	if name == nil or name == "" then
+		return nil
+	end
+	return name, tonumber(count) or 1
+end
+
+local function game_texture(resource)
+	if not resource then
+		return nil
+	end
+	local tex = magic.cache:GetResource("Texture2D", resource)
+	if tex then
+		-- A node's tile is sixteen pixels across and is drawn at forty:
+		-- anything but nearest turns it to soup
+		tex.filterMode = magic.FILTER_NEAREST
+	end
+	return tex
+end
+
+do
+	local width = HOTBAR_SLOTS * SLOT + (HOTBAR_SLOTS - 1) * SLOT_GAP
+	local white = game_texture(WHITE)
+	for i = 1, HOTBAR_SLOTS do
+		local frame = magic.ui.root:CreateChild("BorderImage")
+		if white then
+			frame.texture = white
+		end
+		frame.color = magic.Color(0.1, 0.1, 0.12, 0.55)
+		frame.size = magic.IntVector2(SLOT, SLOT)
+		frame.horizontalAlignment = magic.HA_CENTER
+		frame.verticalAlignment = magic.VA_BOTTOM
+		frame:SetPosition(math.floor(-width / 2 + (i - 1) *
+				(SLOT + SLOT_GAP)), -8)
+		local image = frame:CreateChild("BorderImage")
+		image:SetPosition(4, 4)
+		image.size = magic.IntVector2(SLOT - 8, SLOT - 8)
+		image.visible = false
+		local count = frame:CreateChild("Text")
+		count:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 12)
+		count:SetTextEffect(magic.TE_SHADOW)
+		count.effectColor = magic.Color(0, 0, 0, 0.9)
+		count.horizontalAlignment = magic.HA_RIGHT
+		count.verticalAlignment = magic.VA_BOTTOM
+		count:SetPosition(-3, -2)
+		hotbar[i] = {frame = frame, image = image, count = count}
+	end
+end
+
+-- The name of what is in hand, above the slots: Luanti shows it when the
+-- player switches, and it is what says an empty-looking slot has something
+-- in it that has no image
+local wielded_text = hud_text(14)
+wielded_text:SetText("")
+wielded_text.horizontalAlignment = magic.HA_CENTER
+wielded_text.verticalAlignment = magic.VA_BOTTOM
+wielded_text:SetPosition(0, -8 - SLOT - 6)
+
+local function draw_hotbar()
+	for i = 1, HOTBAR_SLOTS do
+		local slot = hotbar[i]
+		local name, count = parse_stack(hotbar_stacks[i])
+		local tex = name and game_texture(luanti.item_texture(name))
+		-- Assigned only when there is one: the sandbox takes a Texture and
+		-- not a nil, and an empty slot is an image that is not drawn
+		if tex then
+			slot.image.texture = tex
+		end
+		slot.image.visible = tex ~= nil
+		-- Something with no image of its own is still something: a box
+		-- says the slot is not empty
+		slot.frame.color = (name and tex == nil) and
+				magic.Color(0.5, 0.3, 0.5, 0.75) or
+				magic.Color(0.1, 0.1, 0.12, 0.55)
+		if i == wield_index then
+			slot.frame.color = magic.Color(0.9, 0.9, 0.7, 0.75)
+		end
+		slot.count:SetText((count and count > 1) and tostring(count) or "")
+	end
+	local name = parse_stack(hotbar_stacks[wield_index])
+	wielded_text:SetText(name or "")
+end
+
+luanti.sub_inventory(function(lists)
+	hotbar_stacks = lists.main or {}
+	draw_hotbar()
 end)
+
+local function set_wield(i)
+	if i < 1 then
+		i = HOTBAR_SLOTS
+	elseif i > HOTBAR_SLOTS then
+		i = 1
+	end
+	if i == wield_index then
+		return
+	end
+	wield_index = i
+	draw_hotbar()
+	buildat.send_packet("main:wield",
+			cereal.binary_output({tostring(i)}, {"array", "string"}))
+end
+
+draw_hotbar()
 
 magic.ui:SetFocusElement(nil)
 
@@ -337,7 +447,9 @@ local chat_text = hud_text(14)
 chat_text:SetText("")
 chat_text.horizontalAlignment = magic.HA_LEFT
 chat_text.verticalAlignment = magic.VA_BOTTOM
-chat_text:SetPosition(8, -34)
+-- Above the hotbar and the name of what is in hand, which are what is at
+-- the bottom of the screen
+chat_text:SetPosition(8, -(8 + SLOT + 26))
 chat_text.color = magic.Color(1.0, 1.0, 0.9)
 
 local chat_input = nil
@@ -535,6 +647,14 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	}))
 end)
 
+-- The wheel picks a hotbar slot, which is what it does in Luanti
+magic.SubscribeToEvent("MouseWheel", function(event_type, event_data)
+	if luanti.form_open() or chat_input then
+		return
+	end
+	set_wield(wield_index - event_data:GetInt("Wheel"))
+end)
+
 -- Where a click landed, which MouseButtonDown does not say. A form is the
 -- only thing here that cares.
 magic.SubscribeToEvent("UIMouseClick", function(event_type, event_data)
@@ -563,7 +683,9 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		set_mouse_in_world(false)
 		return
 	end
-	if key == BIND.chat.key then
+	if key >= magic.KEY_1 and key <= magic.KEY_8 then
+		set_wield(key - magic.KEY_1 + 1)
+	elseif key == BIND.chat.key then
 		chat_wanted = true
 	elseif key == BIND.mouse.key then
 		set_mouse_in_world(not mouse_in_world)
