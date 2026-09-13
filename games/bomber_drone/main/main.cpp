@@ -183,6 +183,12 @@ struct Module: public interface::Module
 	static const size_t STREAM_SECTIONS_PER_PASS = 2;
 
 	bool m_spawn_ready = false;
+	// The runway is built once every section it touches is loaded. A write
+	// into a section that is not there does nothing, and since the world
+	// started streaming those sections arrive a few at a time -- so the far
+	// end of the runway used to be written into nothing and lost.
+	bool m_runway_pending = false;
+	int m_runway_y = 0;
 	size_t m_sent_worldgen_queue = (size_t)-1;
 	float m_spawn_y = 0;
 	size_t m_worldgen_queue = 0;
@@ -428,6 +434,7 @@ struct Module: public interface::Module
 
 	void on_tick(const interface::TickEvent &event)
 	{
+		try_build_runway();
 		if(m_load_points_dirty)
 			update_load_points();
 		if(((m_queue_send_tick++) % 10) == 0)
@@ -450,6 +457,43 @@ struct Module: public interface::Module
 		});
 		log_v(MODULE, "Sent spawn (%.2f, %.2f, %.2f) to peer %zu",
 				x, y, z, peer);
+	}
+
+	// Every voxel the runway and its airspace touch, so that the sections
+	// can be asked for before anything is written into them and looked at
+	// again to see whether they have arrived.
+	template<typename F> void over_runway(int runway_y, F f)
+	{
+		for(int dx = -AIRSPACE_MARGIN; dx < RUNWAY_LENGTH + AIRSPACE_MARGIN;
+				dx++){
+			for(int dz = -RUNWAY_HALF_WIDTH - AIRSPACE_MARGIN;
+					dz <= RUNWAY_HALF_WIDTH + AIRSPACE_MARGIN; dz++){
+				const int x = SPAWN_X + dx;
+				const int z = SPAWN_Z + dz;
+				f(pv::Vector3DInt32(x, runway_y - 4, z));
+				f(pv::Vector3DInt32(x, runway_y, z));
+				f(pv::Vector3DInt32(x, runway_y + AIRSPACE_HEIGHT, z));
+			}
+		}
+	}
+
+	// Is there terrain in all of them yet? A section that exists is not the
+	// same as a section that has been generated: the generator writes the
+	// whole section when it is done and what it writes wins, so a runway
+	// laid before that is laid into nothing. An undefined voxel is how a
+	// section with nothing in it yet reads, which is the same test
+	// try_resolve_spawn() makes.
+	bool runway_ground_ready(voxelworld::Instance *world, int runway_y)
+	{
+		bool all = true;
+		over_runway(runway_y, [&](const pv::Vector3DInt32 &p){
+			if(!all)
+				return;
+			if(world->get_voxel(p, true).get_id() ==
+					interface::VOXELTYPEID_UNDEFINED)
+				all = false;
+		});
+		return all;
 	}
 
 	// The strip itself is rock, the ground under it dirt so a runway laid over
@@ -487,6 +531,25 @@ struct Module: public interface::Module
 	// Terrain ids: 2 rock, 3 dirt, 4 grass. Skip air (1), trees/leaves (5, 6).
 	// Unloaded voxels are UNDEFINED; skip them so spawn can resolve as soon
 	// as the surface section exists, while further sections still generate.
+	// The runway, once every section it touches has arrived. Until then
+	// there is nothing to write into: voxelworld says so in a warning and
+	// drops the write, which is how the far half of the runway went missing
+	// when the world started streaming.
+	void try_build_runway()
+	{
+		if(!m_runway_pending)
+			return;
+		voxelworld::access(m_server, m_main_scene,
+				[&](voxelworld::Instance *world)
+		{
+			if(!runway_ground_ready(world, m_runway_y))
+				return;
+			build_runway(world, m_runway_y);
+			m_runway_pending = false;
+			log_i(MODULE, "Runway built at y=%i", m_runway_y);
+		});
+	}
+
 	void try_resolve_spawn()
 	{
 		if(m_spawn_ready)
@@ -520,11 +583,18 @@ struct Module: public interface::Module
 			return;
 		if(surface_y < SPAWN_Y_MIN)
 			return;
+		// The sections it will be written into are asked for here and the
+		// strip itself is built once they are all loaded; see
+		// try_build_runway() on the tick.
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *world)
 		{
-			build_runway(world, surface_y);
+			over_runway(surface_y, [&](const pv::Vector3DInt32 &p){
+				pin_section_at_voxel(p);
+			});
 		});
+		m_runway_y = surface_y;
+		m_runway_pending = true;
 		// Voxel n is a 1x1x1 cube centered at n; sit on its top face
 		m_spawn_y = (float)surface_y + 0.5f + 0.4f;
 		m_spawn_ready = true;
