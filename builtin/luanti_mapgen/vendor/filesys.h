@@ -29,3 +29,11 @@ inline bool safeWriteToFile(const std::string &path,
 }
 
 } // namespace fs
+
+// An input stream on a file, which is how a schematic is read. Luanti's
+// returns the stream; a caller checks it with good().
+inline std::ifstream open_ifstream(const std::string &path,
+		bool warn_on_fail = true)
+{
+	return std::ifstream(path.c_str(), std::ios::binary);
+}

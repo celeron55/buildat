@@ -11,6 +11,8 @@
 #define LUANTI_SHIM_EMERGE_H
 #include "irrlichttypes_bloated.h"
 #include "mapgen.h"
+#include "map.h"
+#include "util/container.h"
 #include "util/basic_macros.h"
 #include <set>
 #include <string>
@@ -22,6 +24,21 @@ class OreManager;
 class DecorationManager;
 class SchematicManager;
 class EmergeManager;
+
+// What a mapgen is handed for one chunk: the manipulator to write into,
+// where it is and what seed it is a function of. Luanti's own, and the
+// module fills one in before it calls makeChunk().
+struct BlockMakeData {
+	MMVManip *vmanip = nullptr;
+	u64 seed = 0;
+	v3s16 blockpos_min;
+	v3s16 blockpos_max;
+	UniqueQueue<v3s16> transforming_liquid;
+	const NodeDefManager *nodedef = nullptr;
+
+	BlockMakeData() = default;
+	~BlockMakeData(){ delete vmanip; }
+};
 
 class EmergeParams
 {

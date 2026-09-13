@@ -107,6 +107,17 @@ public:
 	bool getIdsFromNrBacklog(std::vector<content_t> *result_out,
 			bool all_required = false, content_t c_fallback = CONTENT_IGNORE);
 
+	bool isResolveDone() const { return m_resolve_done; }
+
+	// Start again, which a manager does when it hands a definition back
+	void reset(bool resolve_done = false){
+		m_nodenames.clear();
+		m_nnlistsizes.clear();
+		m_nodenames_idx = 0;
+		m_nnlistsizes_idx = 0;
+		m_resolve_done = resolve_done;
+	}
+
 	// A resolver copied into another object, which is what a manager does
 	// when it hands a definition out
 	void cloneTo(NodeResolver *res) const {

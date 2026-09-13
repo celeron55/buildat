@@ -140,6 +140,10 @@ struct NoiseParams {
 	{}
 };
 
+// The raw lattice noise, which v6 reads directly
+using interface::noise2d;
+using interface::noise3d;
+
 // One value of the noise, which is what a mapgen asks for a single point
 float NoiseFractal2D(const NoiseParams *np, float x, float y, s32 seed);
 float NoiseFractal3D(const NoiseParams *np, float x, float y, float z,

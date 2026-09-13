@@ -4,6 +4,8 @@
 #ifndef LUANTI_SHIM_MAPNODE_H
 #define LUANTI_SHIM_MAPNODE_H
 #include "irrlichttypes_bloated.h"
+#include <string>
+#include <iosfwd>
 
 // Luanti's three reserved content ids
 #define CONTENT_UNKNOWN 125
@@ -71,12 +73,21 @@ struct alignas(u32) MapNode
 	u8 getParam2() const noexcept { return param2; }
 	void setParam2(u8 p) noexcept { param2 = p; }
 
+	// A node turned a quarter at a time around the vertical, which is how
+	// a schematic is placed one of four ways. What it means depends on the
+	// node's param2 kind; this is Luanti's own rule for facedir and
+	// wallmounted, and nothing for the rest.
+	void rotateAlongYAxis(const class NodeDefManager *nodemgr,
+			Rotation rot);
+
 	// Luanti serializes a whole block of these at once; what needs it here
 	// is a schematic file, which this build does not read yet. See
 	// serialization.h.
 	static void deSerializeBulk(std::istream &is, int version,
 			MapNode *nodes, u32 nodecount, u8 content_width,
 			u8 params_width);
+	static std::string serializeBulk(int version, const MapNode *nodes,
+			u32 nodecount, u8 content_width, u8 params_width);
 
 	// The light in one bank, which is the nibble it is kept in
 	u8 getLight(LightBank bank, ContentLightingFlags f) const noexcept {

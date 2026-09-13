@@ -37,6 +37,12 @@ public:
 		return vector3d(X - o.X, Y - o.Y, Z - o.Z);
 	}
 	vector3d operator-() const { return vector3d(-X, -Y, -Z); }
+	vector3d operator+(const T n) const {
+		return vector3d(X + n, Y + n, Z + n);
+	}
+	vector3d operator-(const T n) const {
+		return vector3d(X - n, Y - n, Z - n);
+	}
 	vector3d operator*(T n) const { return vector3d(X * n, Y * n, Z * n); }
 	vector3d operator*(const vector3d &o) const {
 		return vector3d(X * o.X, Y * o.Y, Z * o.Z);
