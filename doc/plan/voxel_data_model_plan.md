@@ -212,9 +212,17 @@ no light at all. A v7 section went from 262144 seeds and 130 ms to about
    brightest registered node in it and reads 13 beside a node that emits
    14, less further out, and 0 once it is taken back.
 5. **The section boundary**: the stale flag in the save, marking on the way
-   out, re-flooding on the way in.
+   out, re-flooding on the way in. BUILT 2026-09-13. A flood that reaches a
+   section which is not in memory marks it; the mark is per section, kept
+   with the world and written with it. A section that loads while marked
+   has the light taken out of it and let back in -- its faces and its own
+   sources seeded, the flood spreading inwards, the blockers taking the
+   brightest light beside them afterwards -- and a section a generator is
+   about to fill drops the mark. Checked by hand: a lid built in the
+   section above a probe takes it from 15 to 8; with the lower section let
+   go, the lid taken off and the section asked for again, it reads 15.
 
-Step 5 is a day, and is all that is left.
+The light is built.
 
 ## Adjacent: what a chunk publishes, and when
 

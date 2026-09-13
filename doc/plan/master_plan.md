@@ -147,6 +147,13 @@ inside it what the writer says goes. Which means anything writing terrain
 of its own waits for a generator to have been over that section, and
 `check_map` is the first such thing.
 
+**The light is built (2026-09-13).** A write that carries light keeps it, so
+a generated world arrives lit; lamp light is a second field beside the sky,
+each maintained only if a game asks; a volume write seeds its faces rather
+than its inside; and a flood that reaches a section which is not in memory
+marks it stale, to be re-flooded when it loads rather than pulled in.
+`doc/plan/voxel_data_model_plan.md` has what each step turned out to be.
+
 What is left, in order of what it is worth:
 
 1. **The client is a player now; what is left is what a game draws on top.**
@@ -206,24 +213,7 @@ What is left, in order of what it is worth:
    See "Mapgen stage 3c" in the module plan, and
    `doc/plan/luanti_module_history.md`, "The mapgen, vendored", for what
    the stages below it turned out to be.
-3. **The light, which is `voxelworld`'s and not the module's.** A write
-   that carries light keeps it as of 2026-09-13, so a generated world
-   arrives lit and a dug hole fills from its mouth, and lamp light is a
-   second field beside it: a game says which of the two it wants
-   maintained, a Luanti game says both. What is left is the section
-   boundary, where a flood that reaches a section which is in the save but
-   not loaded marks it stale rather than pulling it in. See "The light: a
-   field a game asks to have maintained" in
-   `doc/plan/voxel_data_model_plan.md`, which has the order of work.
-
-   What the devtest target left here: a player whose spawn the map cannot
-   answer for -- the ground at the origin is below what the spawn point
-   keeps loaded, which is a deep world or an ocean -- stands at the origin
-   until it can, and in a world where it never can, stands in the air.
-   Luanti asks the mapgen instead of the map (`getSpawnLevelAtPoint`),
-   which answers without generating anything; doing that here means asking
-   `luanti_mapgen` across the thread its generator runs in.
-4. **The rest is minor and belongs to a later round.** glTF, an object
+3. **The rest is minor and belongs to a later round.** glTF, an object
    drawn as its own model, a detached inventory, a put-down count, the
    inventory cube, a scrolling save list: each is an afternoon, none
    blocks a game from running, and they are in "Bonuses" below for exactly
