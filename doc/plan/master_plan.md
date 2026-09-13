@@ -119,34 +119,24 @@ nodes have a shape of their own. What is left is glTF, which is a reader
 nobody has written, and an object with `visual = "mesh"`, which is drawn by
 the client half rather than by the voxel mesher.
 
+**A new devtest world generates around the player and is drawn
+(2026-09-13).** Creating a world and opening it in the client puts a player
+on generated ground with the world around them, which was the target the
+mapgen work was for. Four things were in the way, and each was somewhere
+else: the noise hash multiplied in signed arithmetic, where it is meant to
+overflow, so every octave came out biased about one high and a terrain
+noise of offset 4 and scale 70 answered 200 everywhere -- v7 was solid rock
+and infidigger's own world was fuller than it was written to be; the
+vendored mapgens write air by id, and the ids in the shim's mapnode.h were
+Luanti's rather than the module's; `check_map` expected the void a
+singlenode world gave it; and a player was put at the origin whatever the
+terrain did. A world's mapgen is written into the save now, the way
+map_meta.txt holds it, and a new one is v7. See "The mapgen, vendored" in
+`doc/plan/luanti_module_history.md`.
+
 What is left, in order of what it is worth:
 
-1. **A new devtest world generates around the player, and the client draws
-   it.** This is what the mapgen work is for, and it is not reached.
-   Measured 2026-09-13, each with a save nobody had opened before:
-
-   - A world whose settings say nothing about a mapgen gets `singlenode`,
-     so a client connects and stands in a void. Luanti's own default for a
-     new world is `v7`; deciding what a new save here says is part of this
-     step.
-   - A world whose `world.mt` says `mg_name = v7` does generate v7 terrain
-     in `worldgen`'s thread -- and the server stops before the client is
-     let in. Two things are in the way. `check_map` runs at startup
-     against fixed positions and expects the void that singlenode gives
-     it, so in a generated world it fails on
-     `find_nodes_in_area_under_air found 0 of a patch of 4`; the check
-     has to make its own room wherever the terrain put it. And destroying
-     the generator aborts in a free() inside `~MapgenV7` ->
-     `~MapgenBasic`, which the shutdown walked into as soon as the check
-     failed -- something the vendored mapgen owns twice or does not own at
-     all.
-
-   Reached means: create a devtest world, open it in the client, and after
-   the tens of seconds the generating and meshing take, stand on ground
-   that is drawn. Both halves count -- a server that has generated
-   sections nobody meshes fails this as surely as a server that generates
-   nothing.
-2. **The mapgen, stage 3c: the world a game registers.** Luanti's own
+1. **The mapgen, stage 3c: the world a game registers.** Luanti's own
    mapgens generate worlds here as of 2026-09-13 -- a world whose
    `mg_name` says `v7` is v7, in `worldgen`'s thread -- but what they
    generate is the default biome, because the biome, ore and decoration
@@ -171,7 +161,7 @@ What is left, in order of what it is worth:
    See "Mapgen stage 3c" in the module plan, and
    `doc/plan/luanti_module_history.md`, "The mapgen, vendored", for what
    the stages below it turned out to be.
-3. **The light, which is `voxelworld`'s and not the module's.** A write
+2. **The light, which is `voxelworld`'s and not the module's.** A write
    that carries light keeps it as of 2026-09-13, so a generated world
    arrives lit and a dug hole fills from its mouth, and lamp light is a
    second field beside it: a game says which of the two it wants
@@ -180,7 +170,15 @@ What is left, in order of what it is worth:
    not loaded marks it stale rather than pulling it in. See "The light: a
    field a game asks to have maintained" in
    `doc/plan/voxel_data_model_plan.md`, which has the order of work.
-4. **The rest is minor and belongs to a later round.** glTF, an object
+
+   What the devtest target left here: a player whose spawn the map cannot
+   answer for -- the ground at the origin is below what the spawn point
+   keeps loaded, which is a deep world or an ocean -- stands at the origin
+   until it can, and in a world where it never can, stands in the air.
+   Luanti asks the mapgen instead of the map (`getSpawnLevelAtPoint`),
+   which answers without generating anything; doing that here means asking
+   `luanti_mapgen` across the thread its generator runs in.
+3. **The rest is minor and belongs to a later round.** glTF, an object
    drawn as its own model, a detached inventory, a put-down count, the
    inventory cube, a scrolling save list: each is an afternoon, none
    blocks a game from running, and they are in "Bonuses" below for exactly

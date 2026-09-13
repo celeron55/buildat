@@ -184,6 +184,16 @@ unlights what a new blocker was lighting and re-spreads from the boundary.
 A format that binds no light field cannot turn maintenance on, and a game
 that binds one and maintains nothing keeps whatever it writes.
 
+**And a volume write seeds its faces, not its inside (2026-09-13).** A
+generator hands over a whole region at once. A voxel inside it that had no
+light and is given none can neither lose light nor be reached by any --
+every neighbour that could reach it is part of the same write -- so only
+the faces of the volume, which are what touches the world that was already
+there, put a seed in. Light from outside enters over a face and floods
+inwards from there, which is what lights a section whose generator writes
+no light at all. A v7 section went from 262144 seeds and 130 ms to about
+700 and 7 ms, and that was what streaming cost per section.
+
 ### The order of work
 
 1. **A write that carries light keeps it.** BUILT 2026-09-13.
