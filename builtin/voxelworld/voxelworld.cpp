@@ -1274,6 +1274,12 @@ struct CInstance: public voxelworld::Instance
 		m_save_misses.erase(section_key(section.section_p));
 	}
 
+	bool is_section_generated(const pv::Vector3DInt16 &section_p)
+	{
+		Section *section = get_section(section_p);
+		return section != nullptr && section->loaded && section->generated;
+	}
+
 	// Generate the section; requires static nodes to already exist
 	void generate_section(Section &section)
 	{
@@ -2311,9 +2317,9 @@ struct CInstance: public voxelworld::Instance
 	// through set_voxel(): a section is a quarter of a million voxels, and
 	// all of this is done while holding the module.
 	void merge_volume(const VoxelVolume &volume,
-			bool create_missing_sections)
+			bool create_missing_sections, const pv::Region *owned)
 	{
-		write_volume(volume, create_missing_sections, false);
+		write_volume(volume, create_missing_sections, false, owned);
 	}
 
 	// The same walk that overwrites instead, which is what everything that
@@ -2329,7 +2335,8 @@ struct CInstance: public voxelworld::Instance
 	// decide. A voxel that is undefined in the volume is skipped either
 	// way, so a caller can leave holes.
 	void write_volume(const VoxelVolume &volume,
-			bool create_missing_sections, bool overwrite)
+			bool create_missing_sections, bool overwrite,
+			const pv::Region *owned = nullptr)
 	{
 		const pv::Region region = volume.getEnclosingRegion();
 		auto rlc = region.getLowerCorner();
@@ -2421,7 +2428,17 @@ struct CInstance: public voxelworld::Instance
 						sample_of(old) : buf.volume->sample_at(
 						x - chunk_off.getX(), y - chunk_off.getY(),
 						z - chunk_off.getZ());
-				if(!overwrite && !old_undefined){
+				// Inside what the writer owns, what it says goes; outside
+				// it -- a generator's padding reaching into a neighbour --
+				// the priorities below decide. See merge_volume() in api.h.
+				const bool writer_owns = overwrite || (owned != nullptr &&
+						x >= owned->getLowerCorner().getX() &&
+						x <= owned->getUpperCorner().getX() &&
+						y >= owned->getLowerCorner().getY() &&
+						y <= owned->getUpperCorner().getY() &&
+						z >= owned->getLowerCorner().getZ() &&
+						z <= owned->getUpperCorner().getZ());
+				if(!writer_owns && !old_undefined){
 					// Anything already standing here wins
 					if(!voxel_is_fully_empty(dst_v))
 						continue;

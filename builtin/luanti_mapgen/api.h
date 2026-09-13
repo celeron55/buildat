@@ -42,6 +42,41 @@ namespace luanti_mapgen
 		// it, which is how Luanti's own mapgens are told what to build
 		// with.
 		sm_<ss_, uint32_t> content_ids;
+
+		// What a mapgen asks about a node, which decides what a cave may
+		// carve through, what a liquid is and what floods. Without these
+		// the shim guesses that everything which is not air is solid
+		// ground.
+		struct NodeProps
+		{
+			bool walkable = true;
+			bool is_ground_content = true;
+			bool floodable = false;
+			bool light_propagates = false;
+			bool sunlight_propagates = false;
+			// Luanti's LiquidType: 0 none, 1 flowing, 2 source
+			int liquid_type = 0;
+		};
+		sm_<uint32_t, NodeProps> node_props;
+
+		// A biome as the game registered it, with every node name already
+		// turned into the id it means. Without any of these a world is the
+		// default biome, which is stone all the way up.
+		struct Biome
+		{
+			ss_ name;
+			uint32_t c_top = 0, c_filler = 0, c_stone = 0, c_water_top = 0,
+					c_water = 0, c_river_water = 0, c_riverbed = 0,
+					c_dust = 0, c_dungeon = 0, c_dungeon_alt = 0,
+					c_dungeon_stair = 0;
+			int32_t depth_top = 0, depth_filler = 0, depth_water_top = 0,
+					depth_riverbed = 0;
+			int32_t y_min = -31000, y_max = 31000;
+			float heat_point = 0.0f, humidity_point = 0.0f;
+			int32_t vertical_blend = 0;
+			float weight = 1.0f;
+		};
+		sv_<Biome> biomes;
 	};
 
 	struct Interface
