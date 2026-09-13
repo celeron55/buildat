@@ -306,27 +306,33 @@ once the mods have loaded, which is what makes that safe.
    flat. At that point each is a file that compiles against a shim that
    works.
 
-**Decisions taken, unless somebody says otherwise.** The vendored mapgen
-goes in the module's own tree (`builtin/luanti/vendor/mapgen/`), beside the
-vendored Lua builtin and for the same reason: it is Luanti's code, and this
-module is what makes Luanti's code work here. It is compiled with the module
--- which is runtime-compiled, so a first start pays for 9.5k lines once and
-the cache pays after that. Lighting stays `voxelworld`'s: Luanti's mapgen
-calculates its own and here that would be work done twice, so the
-generator's lighting pass is skipped. Settings are the mapgen's own C++
-defaults plus the world's seed; `map_meta.txt`'s per-world overrides are a
-later refinement.
+**Decided 2026-09-13.**
 
-**What is still open, and what it changes.**
+- **Where it lives:** the module's own tree,
+  `builtin/luanti/vendor/mapgen/`, beside the vendored Lua builtin and for
+  the same reason -- it is Luanti's code, and this module is what makes
+  Luanti's code work here. Compiled with the module, which is
+  runtime-compiled, so a first start pays for 9.5k lines once and the cache
+  pays after that.
+- **How faithful:** a world that *looks like* a Luanti world -- biomes,
+  caves, ores and decorations in the right places and the right shapes --
+  and not one that reproduces upstream's terrain for a given seed. So the
+  noise is the one buildat already carries (`src/interface/noise.h`), and
+  what the shim adds is an adapter: Luanti's mapgen calls `Noise::
+  perlinMap2D()` and reads `NoiseParams::lacunarity` and `::flags`, and the
+  adapter maps the first onto `fbmMap2D()` plus `transformNoiseMap()` and
+  accepts the other two without acting on them. One small file instead of
+  vendoring a second copy of 750 lines and keeping it in step with
+  upstream. A seed will not agree with Luanti's, and that is the trade.
+- **Lighting stays `voxelworld`'s.** Luanti's mapgen calculates its own,
+  which here would be work done twice, so the generator's lighting pass is
+  skipped.
+- **Settings** are the mapgen's own C++ defaults plus the world's seed;
+  `map_meta.txt`'s per-world overrides are a later refinement.
 
-- **How faithful does a world have to be?** Bit-for-bit with Luanti's v7
-  for the same seed is a much stronger claim than "a world that looks like
-  Luanti's". The noise buildat carries is an older snapshot without
-  lacunarity or flags, so the honest answer is that bit-for-bit needs the
-  current `noise.cpp` vendored as well. Worth deciding before 3b, because
-  it is the difference between vendoring one more file and not.
-- **Does anything want the other seven generators?** 3d is a day of work
-  for six worlds nobody has asked for yet.
+**Still open: does anything want the other seven generators?** 3d is a day
+of work for six worlds nobody has asked for yet, so it waits until somebody
+does.
 
 The staging is about order, not scope: a mainstream Luanti game is expected
 to produce its real terrain, and stage 3 is a milestone rather than a
