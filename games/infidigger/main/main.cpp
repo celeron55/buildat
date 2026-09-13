@@ -157,23 +157,31 @@ struct Module: public interface::Module
 
 	// chunk 32 * section 2; matches voxelworld defaults
 	static const int SECTION_SIZE_VOXELS = 64;
-	// Radius 5 fills a ~320-voxel view; Y is finite. Unload beyond 7.
-	static const int STREAM_RADIUS_XZ = 5;
-	static const int STREAM_UNLOAD_RADIUS_XZ = 7;
-	static const int STREAM_RADIUS_Y = 1;
-	static const int STREAM_Y_MIN = -1;
-	static const int STREAM_Y_MAX = 1;
+	// Radius 5 fills a ~320-voxel view; sections live until 7, so walking
+	// back and forth over the edge does not generate the same one twice.
+	// Three sections of world is all the height there is.
+	static const int GENERATE_RADIUS_XZ = 5;
+	static const int LOAD_RADIUS_XZ = 7;
+	static const int RADIUS_Y = 1;
+	static const int SECTION_Y_MIN = -1;
+	static const int SECTION_Y_MAX = 1;
+	// The generator runs in a thread and its queue says how far behind it
+	// is; the streamer waits instead of piling more on
 	static const size_t STREAM_QUEUE_SOFT_MAX = 12;
 	static const size_t STREAM_SECTIONS_PER_PASS = 2;
 
 	bool m_spawn_ready = false;
 	float m_spawn_y = 0;
 	size_t m_worldgen_queue = 0;
-	uint m_stream_tick = 0;
 
 	sm_<network::PeerInfo::Id, pv::Vector3DInt32> m_player_voxel_p;
-	set_<uint64_t> m_requested_sections;
+	// Sections somebody has dug or built in. Nothing here is saved, so a
+	// section that unloads loses what was done to it; these stay.
 	set_<uint64_t> m_pinned_sections;
+	// The points are pushed on the next tick rather than where they change:
+	// a dig changes them from inside voxelworld's own access, and a runway
+	// would push a thousand times for one set of sections.
+	bool m_load_points_dirty = true;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -278,10 +286,11 @@ struct Module: public interface::Module
 
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
-			// Spawn section only; stream_around() loads the rest on demand.
-			// PolyVox Region asserts upper >= lower, so an empty box is not
-			// possible.
-			pv::Region region(-1, 0, 4, -1, 0, 4);
+			// The world's bounds in sections: as wide as anyone will ever
+			// walk, three sections tall. Nothing is loaded until the load
+			// points below say where; the sky is above the top of this.
+			pv::Region region(-30000, SECTION_Y_MIN, -30000,
+					30000, SECTION_Y_MAX, 30000);
 			ivoxelworld->create_instance(m_main_scene, region);
 		});
 
@@ -320,12 +329,7 @@ struct Module: public interface::Module
 			instance->enable();
 		});
 
-		pv::Vector3DInt32 spawn_p(SPAWN_X, 20, SPAWN_Z);
-		m_requested_sections.insert(section_key(
-				interface::container_coord(spawn_p.getX(), SECTION_SIZE_VOXELS),
-				interface::container_coord(spawn_p.getY(), SECTION_SIZE_VOXELS),
-				interface::container_coord(spawn_p.getZ(), SECTION_SIZE_VOXELS)));
-		stream_around(spawn_p);
+		update_load_points();
 	}
 
 	void on_unload()
@@ -369,137 +373,52 @@ struct Module: public interface::Module
 
 	void pin_section_at_voxel(const pv::Vector3DInt32 &p)
 	{
-		m_pinned_sections.insert(section_key_at_voxel(p));
+		if(m_pinned_sections.insert(section_key_at_voxel(p)).second)
+			m_load_points_dirty = true;
 	}
 
-	void request_section(voxelworld::Instance *world,
-			const pv::Vector3DInt16 &section_p)
+	// Where the world stays loaded: every player, the spawn while there is
+	// nobody, and every section somebody has changed. voxelworld does the
+	// loading, the generating and the unloading from these.
+	void update_load_points()
 	{
-		if(section_p.getY() < STREAM_Y_MIN || section_p.getY() > STREAM_Y_MAX)
-			return;
-		uint64_t k = section_key(section_p.getX(), section_p.getY(),
-				section_p.getZ());
-		if(!m_requested_sections.insert(k).second)
-			return;
-		world->load_or_generate_section(section_p);
-	}
-
-	sv_<pv::Vector3DInt16> sections_to_request(const pv::Vector3DInt32 &voxel_p)
-	{
-		// Use m_worldgen_queue, not worldgen::access: generation holds that
-		// module for the whole section and would stall this thread's events.
-		size_t queued = m_worldgen_queue;
-		int sx = interface::container_coord(voxel_p.getX(), SECTION_SIZE_VOXELS);
-		int sy = interface::container_coord(voxel_p.getY(), SECTION_SIZE_VOXELS);
-		int sz = interface::container_coord(voxel_p.getZ(), SECTION_SIZE_VOXELS);
-
-		sv_<pv::Vector3DInt16> wanted;
-		for(int r = 0; r <= STREAM_RADIUS_XZ; r++){
-			if(queued >= STREAM_QUEUE_SOFT_MAX && r > 0)
-				break;
-			for(int dy = -STREAM_RADIUS_Y; dy <= STREAM_RADIUS_Y; dy++){
-				int y = sy + dy;
-				if(y < STREAM_Y_MIN || y > STREAM_Y_MAX)
-					continue;
-				for(int dz = -r; dz <= r; dz++){
-					for(int dx = -r; dx <= r; dx++){
-						if(r > 0 && dx != r && dx != -r &&
-								dz != r && dz != -r)
-							continue;
-						uint64_t k = section_key(sx + dx, y, sz + dz);
-						if(m_requested_sections.count(k))
-							continue;
-						wanted.push_back(pv::Vector3DInt16(sx + dx, y, sz + dz));
-						queued++;
-						if(wanted.size() >= STREAM_SECTIONS_PER_PASS)
-							return wanted;
-					}
-				}
-			}
-		}
-		return wanted;
-	}
-
-	void stream_around(const pv::Vector3DInt32 &voxel_p)
-	{
-		sv_<pv::Vector3DInt16> wanted = sections_to_request(voxel_p);
-		if(wanted.empty())
-			return;
-
-		voxelworld::access(m_server, m_main_scene,
-				[&](voxelworld::Instance *world)
-		{
-			for(const auto &p : wanted)
-				request_section(world, p);
-		});
-	}
-
-	void stream_players_or_spawn()
-	{
+		sv_<voxelworld::LoadPoint> points;
 		if(m_player_voxel_p.empty()){
-			stream_around(pv::Vector3DInt32(SPAWN_X, 20, SPAWN_Z));
-			return;
+			points.push_back(voxelworld::LoadPoint(
+					pv::Vector3DInt32(SPAWN_X, 20, SPAWN_Z),
+					LOAD_RADIUS_XZ, RADIUS_Y,
+					GENERATE_RADIUS_XZ, RADIUS_Y));
 		}
-		for(auto &pair : m_player_voxel_p)
-			stream_around(pair.second);
-	}
-
-	bool section_near_any_player(const pv::Vector3DInt16 &section_p)
-	{
-		auto near_p = [&](const pv::Vector3DInt32 &voxel_p){
-			int sx = interface::container_coord(voxel_p.getX(),
-					SECTION_SIZE_VOXELS);
-			int sz = interface::container_coord(voxel_p.getZ(),
-					SECTION_SIZE_VOXELS);
-			int dx = section_p.getX() - sx;
-			int dz = section_p.getZ() - sz;
-			if(dx < 0) dx = -dx;
-			if(dz < 0) dz = -dz;
-			// Y is only three layers; keep the whole column while XZ is near
-			// so climbing a hill does not drop in-flight underground generate.
-			return dx <= STREAM_UNLOAD_RADIUS_XZ &&
-					dz <= STREAM_UNLOAD_RADIUS_XZ;
-		};
-		if(m_player_voxel_p.empty())
-			return near_p(pv::Vector3DInt32(SPAWN_X, 20, SPAWN_Z));
 		for(auto &pair : m_player_voxel_p){
-			if(near_p(pair.second))
-				return true;
+			points.push_back(voxelworld::LoadPoint(pair.second,
+					LOAD_RADIUS_XZ, RADIUS_Y,
+					GENERATE_RADIUS_XZ, RADIUS_Y));
 		}
-		return false;
-	}
-
-	void unload_distant_sections()
-	{
-		sv_<uint64_t> drop;
-		for(uint64_t k : m_requested_sections){
-			if(m_pinned_sections.count(k))
-				continue;
-			pv::Vector3DInt16 p = section_from_key(k);
-			if(section_near_any_player(p))
-				continue;
-			drop.push_back(k);
-			if(drop.size() >= STREAM_SECTIONS_PER_PASS)
-				break;
+		// A pin is a point with no radius at all
+		for(uint64_t k : m_pinned_sections){
+			pv::Vector3DInt16 sp = section_from_key(k);
+			points.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(
+					sp.getX() * SECTION_SIZE_VOXELS,
+					sp.getY() * SECTION_SIZE_VOXELS,
+					sp.getZ() * SECTION_SIZE_VOXELS), 0, 0, 0, 0));
 		}
-		if(drop.empty())
-			return;
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *world)
 		{
-			for(uint64_t k : drop){
-				world->unload_section(section_from_key(k));
-				m_requested_sections.erase(k);
-			}
+			world->set_load_points(points);
+			// Backpressure: only this module can see how far behind the
+			// generator is, so it is the one that tells the streamer to wait
+			world->set_stream_budget(
+					m_worldgen_queue >= STREAM_QUEUE_SOFT_MAX ? 0 :
+					STREAM_SECTIONS_PER_PASS);
 		});
+		m_load_points_dirty = false;
 	}
 
 	void on_tick(const interface::TickEvent &event)
 	{
-		if(((m_stream_tick++) % 4) == 0){
-			stream_players_or_spawn();
-			unload_distant_sections();
-		}
+		if(m_load_points_dirty)
+			update_load_points();
 		try_resolve_spawn();
 	}
 
@@ -647,6 +566,7 @@ struct Module: public interface::Module
 	{
 		log_t(MODULE, "on_worldgen_queue_modified()");
 		m_worldgen_queue = event.queue_size;
+		m_load_points_dirty = true;
 		network::access(m_server, [&](network::Interface *inetwork){
 			sv_<network::PeerInfo::Id> peers = inetwork->list_peers();
 			for(auto &peer: peers){
@@ -668,12 +588,13 @@ struct Module: public interface::Module
 		m_player_voxel_p[packet.sender] = pv::Vector3DInt32(
 				(int32_t)std::floor(x), (int32_t)std::floor(y),
 				(int32_t)std::floor(z));
-		stream_around(m_player_voxel_p[packet.sender]);
+		m_load_points_dirty = true;
 	}
 
 	void on_client_disconnected(const network::OldClient &old_client)
 	{
 		m_player_voxel_p.erase(old_client.info.id);
+		m_load_points_dirty = true;
 	}
 };
 

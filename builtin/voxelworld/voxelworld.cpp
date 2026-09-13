@@ -301,6 +301,17 @@ struct CInstance: public voxelworld::Instance
 	// The world region's own sections have not been created yet; see the
 	// constructor
 	bool m_initial_sections_pending = true;
+	static const int64_t MAX_INITIAL_SECTIONS = 4096;
+
+	// Streaming: the points the world is kept loaded around, and how much
+	// one pass may do. Empty and off until a game sets load points; until
+	// then the world is its region and stays there.
+	sv_<voxelworld::LoadPoint> m_load_points;
+	bool m_streaming = false;
+	size_t m_stream_budget = 2;
+	uint m_stream_tick = 0;
+	// Sections the save was asked for and does not have; see load_saved_only()
+	set_<uint64_t> m_save_misses;
 
 	// Persistence. Null until a game calls set_save(); a world that never
 	// does is generated and forgotten, which is what every game did before
@@ -360,6 +371,8 @@ struct CInstance: public voxelworld::Instance
 		// loaded before the game has had the chance to say whether there is
 		// a save to look in.
 
+		check_streaming();
+
 		// Find peers that already are on the scene and iniitalize them
 		sv_<replicate::PeerId> peers;
 		replicate::access(m_server, [&](replicate::Interface *ireplicate){
@@ -380,6 +393,15 @@ struct CInstance: public voxelworld::Instance
 	{
 		auto lc = m_section_region.getLowerCorner();
 		auto uc = m_section_region.getUpperCorner();
+		int64_t num = (int64_t)(uc.getX() - lc.getX() + 1) *
+				(uc.getY() - lc.getY() + 1) * (uc.getZ() - lc.getZ() + 1);
+		// The bounds of a world that streams are far larger than anything
+		// anyone wants loaded at once, and creating them would be the rest
+		// of the day. Say so instead of taking it.
+		if(num > MAX_INITIAL_SECTIONS)
+			throw Exception(ss_()+"voxelworld: the region is "+itos(num)+
+					" sections and nothing called set_load_points(); a world "
+					"with bounds bigger than it wants loaded has to stream");
 		for(int z = lc.getZ(); z <= uc.getZ(); z++){
 			for(int y = lc.getY(); y <= uc.getY(); y++){
 				for(int x = lc.getX(); x <= uc.getX(); x++){
@@ -387,6 +409,216 @@ struct CInstance: public voxelworld::Instance
 				}
 			}
 		}
+	}
+
+	// Streaming. One pass loads, generates or unloads a few sections at
+	// most, nearest first, so that a player waiting for the ground under
+	// them does not wait for the horizon.
+
+	static uint64_t section_key(const pv::Vector3DInt16 &p)
+	{
+		return (uint64_t)(uint16_t)p.getX() |
+				((uint64_t)(uint16_t)p.getY() << 16) |
+				((uint64_t)(uint16_t)p.getZ() << 32);
+	}
+
+	pv::Vector3DInt16 section_of_voxel(const pv::Vector3DInt32 &p)
+	{
+		return container_coord16(
+				container_coord(p, m_chunk_size_voxels),
+				m_section_size_chunks);
+	}
+
+	bool is_in_bounds(const pv::Vector3DInt16 &sp)
+	{
+		auto lc = m_section_region.getLowerCorner();
+		auto uc = m_section_region.getUpperCorner();
+		return sp.getX() >= lc.getX() && sp.getX() <= uc.getX() &&
+				sp.getY() >= lc.getY() && sp.getY() <= uc.getY() &&
+				sp.getZ() >= lc.getZ() && sp.getZ() <= uc.getZ();
+	}
+
+	// Inside some point's load radius, which is what lets a section stay
+	static int dist(int a, int b){ return a > b ? a - b : b - a; }
+
+	bool is_wanted_loaded(const pv::Vector3DInt16 &sp)
+	{
+		for(const voxelworld::LoadPoint &lp : m_load_points){
+			pv::Vector3DInt16 c = section_of_voxel(lp.p);
+			if(dist(sp.getX(), c.getX()) <= lp.load_xz &&
+					dist(sp.getZ(), c.getZ()) <= lp.load_xz &&
+					dist(sp.getY(), c.getY()) <= lp.load_y)
+				return true;
+		}
+		return false;
+	}
+
+	void stream_pass()
+	{
+		size_t budget = m_stream_budget;
+		for(const voxelworld::LoadPoint &lp : m_load_points){
+			if(budget == 0)
+				return;
+			stream_around(lp, budget);
+		}
+		if(budget == 0)
+			return;
+		unload_distant_sections(budget);
+	}
+
+	// The sections of a box around c, ring by ring outward, so that the
+	// nearest section that is missing something is the one that gets it. The
+	// callback is given the ring it is on -- which is its distance in XZ --
+	// and stops the walk by returning false.
+	template<typename F>
+	static void for_each_section_around(const pv::Vector3DInt16 &c,
+			int load_xz, int load_y, F f)
+	{
+		for(int r = 0; r <= load_xz; r++){
+			for(int dy = -load_y; dy <= load_y; dy++){
+				for(int dz = -r; dz <= r; dz++){
+					for(int dx = -r; dx <= r; dx++){
+						// The ring and not the square: what is inside it was
+						// walked by a smaller r already
+						if(r > 0 && dx != r && dx != -r &&
+								dz != r && dz != -r)
+							continue;
+						if(!f(pv::Vector3DInt16(c.getX() + dx, c.getY() + dy,
+								c.getZ() + dz), r, dy))
+							return;
+					}
+				}
+			}
+		}
+	}
+
+	void stream_around(const voxelworld::LoadPoint &lp, size_t &budget)
+	{
+		for_each_section_around(section_of_voxel(lp.p), lp.load_xz, lp.load_y,
+				[&](const pv::Vector3DInt16 &sp, int r, int dy) -> bool
+		{
+			if(!is_in_bounds(sp))
+				return true;
+			bool generate = (r <= lp.generate_xz &&
+					dist(dy, 0) <= lp.generate_y);
+			if(!stream_section(sp, generate))
+				return true;
+			return --budget != 0;
+		});
+	}
+
+	// The rings cover the box exactly once, nearest first, and the ring a
+	// section is on is its distance -- which is what decides whether it is
+	// generated as well as loaded
+	static void check_streaming()
+	{
+		const int R = 3, RY = 1;
+		const pv::Vector3DInt16 c(10, -2, 7);
+		set_<uint64_t> seen;
+		int last_r = 0;
+		size_t n = 0;
+		for_each_section_around(c, R, RY,
+				[&](const pv::Vector3DInt16 &sp, int r, int dy) -> bool
+		{
+			bool fresh = seen.insert(section_key(sp)).second;
+			assert(fresh);
+			(void)fresh;
+			assert(r >= last_r);
+			last_r = r;
+			assert(r == std::max(dist(sp.getX(), c.getX()),
+					dist(sp.getZ(), c.getZ())));
+			assert(dy == sp.getY() - c.getY());
+			assert(dist(sp.getY(), c.getY()) <= RY);
+			n++;
+			return true;
+		});
+		assert(n == (size_t)(2*R+1) * (2*R+1) * (2*RY+1));
+		// And it stops where it is told
+		size_t stopped_after = 0;
+		for_each_section_around(c, R, RY,
+				[&](const pv::Vector3DInt16 &sp, int r, int dy) -> bool
+		{
+			return ++stopped_after < 5;
+		});
+		assert(stopped_after == 5);
+		log_v(MODULE, "check_streaming: the rings cover the box once");
+	}
+
+	// True if this section wanted something and got it
+	bool stream_section(const pv::Vector3DInt16 &sp, bool generate)
+	{
+		Section *section = get_section(sp);
+		if(section && section->loaded && (section->generated || !generate))
+			return false;
+		if(generate){
+			load_or_generate_section(sp);
+			return true;
+		}
+		return load_saved_only(sp);
+	}
+
+	// What the save already holds, without generating what it does not: the
+	// terrain a player sees far away is the terrain that is already there.
+	bool load_saved_only(const pv::Vector3DInt16 &sp)
+	{
+		if(!m_store)
+			return false;
+		// The save was asked once and does not have it; asking again every
+		// pass would be a query per section of the load radius per pass
+		if(m_save_misses.count(section_key(sp)))
+			return false;
+		Section &section = force_get_section(sp);
+		if(section.loaded)
+			return true;
+		if(load_saved_section(section)){
+			section.loaded = true;
+			return true;
+		}
+		m_save_misses.insert(section_key(sp));
+		forget_section(sp);
+		return false;
+	}
+
+	// Drop a section nothing was put in. Not unload_section(): there is
+	// nothing to write, no nodes to remove and no buffers to free.
+	void forget_section(const pv::Vector3DInt16 &sp)
+	{
+		Section *section = get_section(sp);
+		if(!section)
+			return;
+		m_last_used_sections.erase(
+				std::remove(m_last_used_sections.begin(),
+				m_last_used_sections.end(), section),
+				m_last_used_sections.end());
+		pv::Vector<2, int16_t> p_yz(sp.getY(), sp.getZ());
+		auto sector_it = m_sections.find(p_yz);
+		if(sector_it == m_sections.end())
+			return;
+		sector_it->second.erase(sp.getX());
+		if(sector_it->second.empty())
+			m_sections.erase(sector_it);
+	}
+
+	void unload_distant_sections(size_t &budget)
+	{
+		sv_<pv::Vector3DInt16> drop;
+		for(auto &sector : m_sections){
+			for(auto &pair : sector.second){
+				Section &section = pair.second;
+				if(!section.loaded)
+					continue;
+				if(is_wanted_loaded(section.section_p))
+					continue;
+				drop.push_back(section.section_p);
+				if(drop.size() >= budget)
+					break;
+			}
+			if(drop.size() >= budget)
+				break;
+		}
+		for(const pv::Vector3DInt16 &sp : drop)
+			unload_section(sp);
+		budget -= drop.size();
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -406,8 +638,16 @@ struct CInstance: public voxelworld::Instance
 	{
 		if(m_initial_sections_pending){
 			m_initial_sections_pending = false;
-			create_initial_sections();
+			// A world that streams says where it wants sections; the region
+			// is then its bounds and its sky and not a thing to fill
+			if(!m_streaming)
+				create_initial_sections();
 		}
+
+		// Every fourth tick: often enough that a running player stays ahead
+		// of the edge, seldom enough that the work is not the tick
+		if(m_streaming && ((m_stream_tick++) % 4) == 0)
+			stream_pass();
 
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			Scene *scene = imc->find_scene(m_scene_ref);
@@ -929,6 +1169,8 @@ struct CInstance: public voxelworld::Instance
 			save_registry();
 		});
 		section.modified = false;
+		// The save has it now, whatever the streamer was told earlier
+		m_save_misses.erase(section_key(section.section_p));
 	}
 
 	// Generate the section; requires static nodes to already exist
@@ -1130,6 +1372,29 @@ struct CInstance: public voxelworld::Instance
 			load_section(section);
 		if(!section.generated)
 			generate_section(section);
+	}
+
+	void set_load_points(const sv_<voxelworld::LoadPoint> &points)
+	{
+		m_load_points = points;
+		m_streaming = true;
+	}
+
+	sv_<pv::Vector3DInt16> get_loaded_sections()
+	{
+		sv_<pv::Vector3DInt16> result;
+		for(auto &sector : m_sections){
+			for(auto &pair : sector.second){
+				if(pair.second.loaded)
+					result.push_back(pair.second.section_p);
+			}
+		}
+		return result;
+	}
+
+	void set_stream_budget(size_t sections_per_pass)
+	{
+		m_stream_budget = sections_per_pass;
 	}
 
 	void unload_section(const pv::Vector3DInt16 &section_p)
