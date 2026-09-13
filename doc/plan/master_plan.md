@@ -221,9 +221,6 @@ or when a round has just landed and the next has not started.
   with the right button and ten with the middle; what is picked up is what
   is put down here. A count on the way down as well as up, in the packet
   that already exists.
-- **A sneak flag** (`builtin/luanti`). Without it a node with an
-  `on_rightclick` cannot be built against. One boolean in `main:place` and
-  one argument to `core.item_place()`.
 - **A scrolling save list** (`games/luanti_launcher`). The menu shows the
   twelve most recent saves because `ui_utils.vertical_menu` does not scroll.
   Whatever is built for it belongs in `ui_utils`, since it is the same

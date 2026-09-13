@@ -1154,9 +1154,6 @@ what the module does not do.
   with the right button and ten with the middle; that is a count on the way
   down as well as on the way up, in the same packet.
 - **A detached inventory draws empty.** See M4.
-- **No sneak flag**, so a node with an `on_rightclick` cannot be built
-  against. Luanti's client sends whether sneak was held; this is one boolean
-  in `main:place` and one argument to `core.item_place()`.
 - **A tool use costs 65535/uses of it**, not the arithmetic that makes one
   break after exactly `uses` digs whatever wear it started at.
 - **The texture is not turned inside a shape's quad.** `tile_turns` does
