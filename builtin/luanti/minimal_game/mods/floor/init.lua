@@ -567,6 +567,10 @@ function core.__game_check()
 	if faller:is_valid() or core.luaentities[1] ~= nil then
 		error("floor: the faller outlived its remove()")
 	end
+	-- One more left where it lands, so that a client has an object to look
+	-- at: what draws one is a node the module puts in the scene, and the
+	-- scene is what every client is already being sent
+	core.add_entity({x = 4, y = Y + 6, z = 4}, "floor:faller")
 	core.log("action", "floor: the faller fell " .. (start.y - p.y) ..
 			" and the floor stopped it in " .. self_.steps .. " steps")
 

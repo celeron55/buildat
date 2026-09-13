@@ -252,8 +252,13 @@ No Luanti protocol. Everything is a buildat packet, shaped for buildat:
   and is already tuned.
 - **Formspecs, HUD, chat, inventory, player state** are small cereal packets,
   one per kind.
-- **Entities**: buildat's `replicate` module is the natural home; whether it
-  fits Luanti's object semantics is an open question.
+- **Entities**: buildat's `replicate` module is the natural home, and it
+  fits as far as *where* an object is (answered 2026-09-13): the module puts
+  a node in its scene per object and moves it, and every client is already
+  being sent that scene, so a box appeared on screen for nothing but the
+  node. What it looks like is the open half -- Luanti's visuals are sprites,
+  meshes and the wielded item, and its objects have attachments and bones
+  that a scene node alone does not carry.
 
 The client half is `builtin/luanti/client_lua`, forked from
 `extensions/luanti_client`. The fork keeps the presentation and drops the
@@ -823,8 +828,16 @@ two things M1 disproved about the build, are in
   the timers. `doc/plan/luanti_module_history.md` has the detail, including
   the mutex that a step doing real work turned out to need.
 
-  **What is left of M5:** the client half, which is what would draw an
-  object and is the same problem as the forked client's `init.lua` split.
+  **Built: the objects are on screen (2026-09-13).** The module puts a node
+  in its scene per object and moves it with the object; the scene is what
+  every client is already being sent, so nothing on the client had to know
+  anything. A box the size of the object's collision box, which is what says
+  where they are until the client half says what they look like -- and it is
+  the answer to whether `replicate` fits: where an object is, it carries.
+
+  **What is left of M5:** what an object looks like -- a sprite, a mesh, the
+  item it is -- which is the forked client's, and the attachments and bones
+  a scene node does not carry.
 
 - **M6 -- the launcher.** `games/luanti_launcher` as described.
 - **M7 -- an existing Luanti world opens. The map and the clock are read
@@ -1207,9 +1220,11 @@ What M2 settled about the shape, and what is still true of it:
 - **The vendor tree is a maintenance surface.** Pulling a newer Luanti means
   re-applying whatever was modified. Keep the modifications few and marked,
   and record the upstream commit the tree came from.
-- **Entities over `replicate`** may not fit; Luanti's object model has
-  attachments, bones and per-object visuals that buildat's replication was
-  not designed for. This is the item most likely to need its own plan.
+- **Entities over `replicate`**: where an object is carries fine -- a node
+  per object in the scene, which is what draws them now -- but Luanti's
+  object model has attachments, bones and per-object visuals that buildat's
+  replication was not designed for. The visuals are the part most likely to
+  need their own plan.
 - **Performance.** Luanti's server is C++ doing per-block work; here the same
   work crosses a Lua boundary that Luanti's own C++ does not. devtest's
   `benchmarks` mod exists and should be run early rather than late.

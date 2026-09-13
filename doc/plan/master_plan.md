@@ -74,11 +74,13 @@ first thing to run after touching the API surface.
 What is left is, in order:
 
 1. **The client half.** It is what M3, M4 and M5 each say is left of them:
-   nothing draws an object and there are no formspecs. A click is a dig as
-   of 2026-09-13 -- `games/luanti_launcher`'s viewer points at a node and
-   the module digs it -- which is the first piece of it and the shape the
-   rest follows: the client decides what was pointed at, the server decides
-   what that means.
+   there are no formspecs, and an object is a box rather than what it looks
+   like. Two pieces of it are built as of 2026-09-13: a click is a dig --
+   `games/luanti_launcher`'s viewer points at a node and the module digs it,
+   which is the shape the rest follows: the client decides what was pointed
+   at, the server decides what that means -- and the objects are on screen,
+   as a node per object in the module's scene, which every client is already
+   being sent.
    The fork's shape is settled -- which files are copied, which are dropped,
    and that `world.lua` loses a fifth of itself to `voxelworld` -- and
    `init.lua`'s three-way split is the largest unexamined piece of it. See
