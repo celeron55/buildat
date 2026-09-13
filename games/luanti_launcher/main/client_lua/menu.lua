@@ -18,6 +18,9 @@ local uistack = require("buildat/extension/uistack")
 
 local root = nil
 local games = {}
+-- Which page of the save list is on the screen; the list is redrawn when it
+-- changes, which is what every other change to this menu does too
+local page = 1
 
 local function close()
 	if root then
@@ -38,7 +41,10 @@ end
 
 -- A save is a button; a new one is a name typed in and one button per game,
 -- which is the whole of "which game it needs" without a second screen.
-local function draw(saves, save_games)
+-- Declared first because a page button draws it again.
+local draw
+
+function draw(saves, save_games)
 	close()
 	root = uistack.main:push({desc = "luanti_launcher menu"})
 	local menu = ui_utils.vertical_menu(root, {min_width = 420})
@@ -48,16 +54,10 @@ local function draw(saves, save_games)
 	title:SetStyleAuto()
 	title:SetText("luanti_launcher: which save?")
 
-	-- simplified: the most recent few, because a vertical_menu does not
-	-- scroll and a list longer than the screen is a list with saves nobody
-	-- can reach. What it wants is a scrolling list; until then the server
-	-- sorts by when each was last played and BUILDAT_LUANTI_SAVE opens one
-	-- by name.
-	local SHOWN = 12
+	-- Every save, twelve at a time, newest first: the server sorts them by
+	-- when each was last played
+	local items = {}
 	for i, name in ipairs(saves) do
-		if i > SHOWN then
-			break
-		end
 		local gameid = save_games[i]
 		local known = false
 		for _, g in ipairs(games) do
@@ -72,18 +72,20 @@ local function draw(saves, save_games)
 			-- and saying so is more use than hiding it
 			label = label .. "  -- no such game"
 		end
-		menu:add(label, function()
+		items[#items + 1] = {label = label, action = function()
 			waiting("Opening " .. name .. "...")
 			buildat.send_packet("main:open",
 					cereal.binary_output({name}, {"array", "string"}))
-		end)
+		end}
 	end
-	if #saves > SHOWN then
-		local more = menu.window:CreateChild("Text")
-		more:SetStyleAuto()
-		more:SetText("and " .. (#saves - SHOWN) .. " older ones, which this" ..
-				" list cannot reach yet")
-	end
+	ui_utils.add_paged(menu, items, {
+		page = page,
+		per_page = 12,
+		redraw = function(new_page)
+			page = new_page
+			draw(saves, save_games)
+		end,
+	})
 
 	local new_text = menu.window:CreateChild("Text")
 	new_text:SetStyleAuto()
@@ -136,8 +138,12 @@ end)
 buildat.sub_packet("main:menu_error", function(data)
 	local message = cereal.binary_input(data, {"array", "string"})[1]
 	log:warning("menu: " .. tostring(message))
-	ui_utils.show_message_dialog(tostring(message))
-	buildat.send_packet("main:get_saves", "")
+	-- The list is asked for again once the dialog is gone, not while it is
+	-- up: the dialog is on top of the menu in the UI stack, and drawing the
+	-- menu again takes the menu's own root out from under it
+	ui_utils.show_message_dialog(tostring(message), function()
+		buildat.send_packet("main:get_saves", "")
+	end)
 end)
 
 -- The world is up and main/init.lua is what draws from here on

@@ -180,6 +180,48 @@ function M.safe.vertical_menu(root, options)
 	return menu
 end
 
+-- A list too long for the screen, a page at a time.
+--
+-- The items are the menu's own buttons, so the keyboard walks them like any
+-- others, and the page buttons ask the caller to draw the menu again --
+-- because what else is on the menu is the caller's business, and rebuilding
+-- it is what every menu in this tree already does when its contents change.
+--
+--   ui_utils.add_paged(menu, items, {
+--       page = page, per_page = 12,
+--       redraw = function(new_page) ... end,
+--   })
+--
+-- items are {label = , action = } or {label, action}. Returns how many
+-- pages there are and which one was drawn.
+function M.safe.add_paged(menu, items, options)
+	options = options or {}
+	local per_page = math.max(1, options.per_page or 12)
+	local pages = math.max(1, math.ceil(#items / per_page))
+	local page = math.max(1, math.min(options.page or 1, pages))
+	local first = (page - 1) * per_page + 1
+	local last = math.min(#items, first + per_page - 1)
+	for i = first, last do
+		local item = items[i]
+		menu:add(item.label or item[1], item.action or item[2])
+	end
+	if pages > 1 and options.redraw then
+		-- Which way round: the list is newest first everywhere this is
+		-- used, so the next page is older
+		if page > 1 then
+			menu:add((options.prev_label or "^ newer") ..
+					"   (page " .. (page - 1) .. " of " .. pages .. ")",
+					function() options.redraw(page - 1) end)
+		end
+		if page < pages then
+			menu:add((options.next_label or "v older") ..
+					"   (page " .. (page + 1) .. " of " .. pages .. ")",
+					function() options.redraw(page + 1) end)
+		end
+	end
+	return pages, page
+end
+
 local message_handle = nil
 
 -- on_close is optional and is called when the dialog goes away, however it
