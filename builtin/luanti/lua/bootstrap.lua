@@ -2294,20 +2294,11 @@ local function spawn_level_in_map(x, y, z, up)
 	return nil
 end
 
-function core.get_spawn_level(x, z)
-	x, z = math.floor(x + 0.5), math.floor(z + 0.5)
-	local from_mapgen = __luanti_spawn_level and __luanti_spawn_level(x, z)
-	if from_mapgen then
-		return spawn_level_in_map(x, from_mapgen, z, SPAWN_SEARCH_UP)
-	end
-	if core.__mapgen_name() ~= "singlenode" then
-		-- There is a mapgen and it said "not here", which is its answer to
-		-- give: a river, or a surface under water
-		return nil
-	end
-	-- No mapgen to ask -- a singlenode world, whose ground is whatever a
-	-- mod built. One column of the map, walked from the top so that what
-	-- is found is the surface and not the roof of the first cave.
+-- The map's answer for a whole column: the surface, walked from the top so
+-- that what is found is the ground and not the roof of the first cave. nil
+-- if the column has no ground in it, which for an ungenerated column is
+-- what it always says.
+local function spawn_level_in_column(x, z)
 	local names = region_names(x, SPAWN_SCAN_BOTTOM, z, x, SPAWN_SCAN_TOP, z)
 	local room = 0
 	for i = #names, 1, -1 do
@@ -2328,6 +2319,32 @@ function core.get_spawn_level(x, z)
 		end
 	end
 	return nil
+end
+
+function core.get_spawn_level(x, z)
+	x, z = math.floor(x + 0.5), math.floor(z + 0.5)
+	local from_mapgen = __luanti_spawn_level and __luanti_spawn_level(x, z)
+	if from_mapgen then
+		local level = spawn_level_in_map(x, from_mapgen, z, SPAWN_SEARCH_UP)
+		if level then
+			return level
+		end
+		-- The mapgen said where its own terrain is and the map does not
+		-- agree. A game that builds its world in core.register_on_generated
+		-- over what the mapgen made -- VoxeLibre does, and its ground can be
+		-- tens of nodes from v7's -- is that case, so the column itself is
+		-- asked. An ungenerated column answers nil and the search comes back
+		-- to it once there is something there.
+		return spawn_level_in_column(x, z)
+	end
+	if core.__mapgen_name() ~= "singlenode" then
+		-- There is a mapgen and it said "not here", which is its answer to
+		-- give: a river, or a surface under water
+		return nil
+	end
+	-- No mapgen to ask -- a singlenode world, whose ground is whatever a
+	-- mod built
+	return spawn_level_in_column(x, z)
 end
 
 -- Luanti sorts by distance and returns the nearest; search_center adds pos
