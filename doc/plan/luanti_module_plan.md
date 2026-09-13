@@ -814,6 +814,18 @@ two things M1 disproved about the build, are in
   to `luanti::Interface::dig_node()`, so can_dig, after_dig_node, the drops
   and every other callback around a dig are the vendored builtin's own.
 
+  **Built: the other button places and uses (2026-09-13).** A right click
+  sends the node pointed at and the empty voxel in front of it, and the
+  module hands both to `core.item_place()` -- the vendored builtin's own --
+  so the pointed node's `on_rightclick` wins if it has one and the player's
+  wielded item is placed otherwise. What is placed comes out of the
+  inventory, which is the loop M4 is named for closing: dig a node, get it,
+  put it back.
+
+  simplified: no sneaking, so a node with an `on_rightclick` cannot be built
+  against. Luanti's client sends whether the player was holding sneak, and
+  this is where that flag would go.
+
   **Built: the digger is a player, and the drops are theirs (2026-09-13).**
   The dig carries the name the client connected under, and
   `core.handle_node_drops()` puts what it drops in that player's inventory
