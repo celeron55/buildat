@@ -32,6 +32,7 @@
 #include "luanti/mapblock.h"
 #include <sqlite3.h>
 #include <fstream>
+#include <cstdlib>
 #include <sstream>
 #include <unordered_map>
 #include <algorithm>
@@ -645,6 +646,9 @@ struct Module: public interface::Module, public luanti::Interface
 	// the game loads and where a player with nowhere else to be spawns. It
 	// is what the world was in its entirety before it streamed.
 	static const int16_t SPAWN_RADIUS = 1;
+	// How many sections a streaming pass may take on, which goes down while
+	// a mod's mapgen is slow; see run_on_generated()
+	size_t m_stream_budget = 2;
 	// Where each player is, in voxels. Written by set_player_pos() a few
 	// times a second and read once a step; it is what the world streams
 	// around, and what says which sections are active.
@@ -764,6 +768,38 @@ struct Module: public interface::Module, public luanti::Interface
 	// killed loses the day it was on. Luanti writes its own every 5.3
 	// seconds with the map; the upgrade path is to do the same, once
 	// anything else here is worth a periodic checkpoint.
+	// The world's seed, which a mapgen is a function of. Luanti keeps it in
+	// map_meta.txt and makes one up when a world is created; here it is in
+	// the save beside the clock, and the importer takes the imported world's
+	// if it has one. What reads it is core.get_mapgen_setting("seed") and
+	// the block seed every on_generated is given.
+	int64_t m_seed = 0;
+
+	void load_seed()
+	{
+		ss_ data;
+		if(m_store && m_store->get("seed", data) && !data.empty()){
+			m_seed = strtoll(data.c_str(), nullptr, 10);
+		} else {
+			// Somewhere nobody has been before: the clock is what there is
+			// to be random with here, and a world is seeded once
+			m_seed = (int64_t)interface::os::time_us();
+			m_seed ^= (int64_t)(size_t)this;
+			if(m_store)
+				m_store->set("seed", itos(m_seed));
+		}
+		set_global_string("__luanti_world_seed", itos(m_seed));
+		log_v(MODULE, "The world's seed is %s", cs(itos(m_seed)));
+	}
+
+	void set_seed(int64_t seed)
+	{
+		m_seed = seed;
+		if(m_store)
+			m_store->set("seed", itos(m_seed));
+		set_global_string("__luanti_world_seed", itos(m_seed));
+	}
+
 	void load_clock()
 	{
 		if(!m_store)
@@ -1002,6 +1038,7 @@ struct Module: public interface::Module, public luanti::Interface
 		}
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
 			world->set_load_points(points);
+			world->set_stream_budget(m_stream_budget);
 		});
 	}
 
@@ -1121,6 +1158,11 @@ struct Module: public interface::Module, public luanti::Interface
 		out.assign(w * h * d, 0);
 		if(!m_scene)
 			return;
+		// What core.set_node has written and not yet flushed is part of the
+		// map as far as a mod is concerned -- Luanti's semantics are that a
+		// write is visible immediately -- and a region read goes to
+		// voxelworld, which has not been told yet
+		flush_node_writes();
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
 			// One read for the box rather than one per voxel: what asks for
 			// this is a sweep -- an ABM, a find_nodes_in_area -- and the
@@ -1260,6 +1302,10 @@ struct Module: public interface::Module, public luanti::Interface
 			world->set_save(m_save, "main");
 			m_section_size = world->get_section_size_voxels();
 		});
+		// A section is what this world generates at a time, which is what
+		// core.get_mapgen_chunksize() answers with
+		set_global_string("__luanti_section_size",
+				itos(m_section_size.getX()));
 
 		// Singlenode is a node everywhere, and this is where it is put.
 		// Before the skylight is on: what the fill writes is a world of lit
@@ -1354,6 +1400,7 @@ struct Module: public interface::Module, public luanti::Interface
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
 			generate_section(world, event.section_p);
 		});
+		run_on_generated(event.section_p);
 	}
 
 	// The world create_instance() just made, filled before anything reads
@@ -1366,6 +1413,7 @@ struct Module: public interface::Module, public luanti::Interface
 		const pv::Vector3DInt32 p0(-SPAWN_RADIUS, -SPAWN_RADIUS, -SPAWN_RADIUS);
 		const pv::Vector3DInt32 p1(SPAWN_RADIUS, SPAWN_RADIUS, SPAWN_RADIUS);
 		size_t n = 0, already = 0;
+		sv_<pv::Vector3DInt16> generated;
 		int64_t t0 = interface::os::time_us();
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
 			for(int32_t z = p0.getZ(); z <= p1.getZ(); z++)
@@ -1391,12 +1439,71 @@ struct Module: public interface::Module, public luanti::Interface
 					continue;
 				}
 				generate_section(world, section_p);
+				generated.push_back(section_p);
 				n++;
 			}
 		});
 		log_v(MODULE, "The world: %zu sections filled with one node in %i "
 				"ms, %zu already there", n,
 				(int)((interface::os::time_us() - t0) / 1000), already);
+		// Outside the access: a mod's on_generated reads and writes the map
+		// through a VoxelManip, which is voxelworld again
+		for(const pv::Vector3DInt16 &section_p : generated)
+			run_on_generated(section_p);
+	}
+
+	// A mod's core.register_on_generated, over the section that has just
+	// been filled. Luanti runs these after its mapgen has written a chunk
+	// and before the block is put in the map; here the fill is already in
+	// the map and a mod writes over it, which is the same order from a
+	// mod's point of view -- what it reads is the generated terrain and
+	// what it writes lands on top.
+	//
+	// Not inside a voxelworld access: what a mod does here is a VoxelManip,
+	// which reaches into voxelworld itself.
+	void run_on_generated(const pv::Vector3DInt16 &section_p)
+	{
+		if(!m_scene || m_section_size.getX() <= 0)
+			return;
+		const int32_t sx = m_section_size.getX(), sy = m_section_size.getY(),
+				sz = m_section_size.getZ();
+		const int32_t x0 = (int32_t)section_p.getX() * sx;
+		const int32_t y0 = (int32_t)section_p.getY() * sy;
+		const int32_t z0 = (int32_t)section_p.getZ() * sz;
+		char buf[256];
+		snprintf(buf, sizeof buf,
+				"core.__run_on_generated(%i, %i, %i, %i, %i, %i, %i)",
+				(int)x0, (int)y0, (int)z0,
+				(int)(x0 + sx - 1), (int)(y0 + sy - 1), (int)(z0 + sz - 1),
+				(int)block_seed(section_p));
+		// Timed because it is a mod's code over a quarter of a million
+		// voxels on the server's own thread: Luanti generates on an emerge
+		// thread of its own, and this module has one Lua state and no
+		// thread to put it on. A mapgen that takes longer than a step is
+		// what makes that a problem rather than a note.
+		const int64_t t0 = interface::os::time_us();
+		node_action(buf);
+		const int64_t took = interface::os::time_us() - t0;
+		if(took > 1000){
+			log_v(MODULE, "on_generated (%i, %i, %i): %i ms",
+					(int)section_p.getX(), (int)section_p.getY(),
+					(int)section_p.getZ(), (int)(took / 1000));
+		}
+		// A generator that takes longer than a step is one the streamer
+		// should ask less of: one section a pass instead of two, until it
+		// is quick again. This is what set_stream_budget() is for, and only
+		// this module can see how long its own mods took.
+		m_stream_budget = (took > (int64_t)(STEP_S * 1000000.0)) ? 1 : 2;
+	}
+
+	// Luanti's get_blockseed2, which is what a mapgen's randomness starts
+	// from: the world's seed and where the block is
+	int32_t block_seed(const pv::Vector3DInt16 &p)
+	{
+		return (int32_t)(uint32_t)((uint64_t)m_seed % 0x100000000ULL) +
+				(int32_t)p.getZ() * 38134234 +
+				(int32_t)p.getY() * 42123 +
+				(int32_t)p.getX() * 23;
 	}
 
 	// lua/check_map.lua, with the flush this module does between its two
@@ -2968,6 +3075,121 @@ struct Module: public interface::Module, public luanti::Interface
 	}
 
 	// set_node(x, y, z, id, param1, param2)
+	// __luanti_get_region_data(x0, y0, z0, x1, y1, z1) -> ids, param1,
+	// param2: three flat arrays, x fastest and then y and then z, which is
+	// what VoxelArea indexes and what a VoxelManip holds.
+	static int l_get_region_data(lua_State *L)
+	{
+		Module *self = module_of(L);
+		int32_t p[6];
+		for(int i = 0; i < 6; i++)
+			p[i] = luaL_checkinteger(L, i + 1);
+		if(p[3] < p[0] || p[4] < p[1] || p[5] < p[2]){
+			for(int i = 0; i < 3; i++)
+				lua_newtable(L);
+			return 3;
+		}
+		double volume = (double)(p[3] - p[0] + 1) * (double)(p[4] - p[1] + 1) *
+				(double)(p[5] - p[2] + 1);
+		if(volume > (double)MAX_REGION_VOXELS){
+			return luaL_error(L, "get_region_data(): %.0f voxels is more "
+					"than the %d this reads at once", volume,
+					(int)MAX_REGION_VOXELS);
+		}
+		sv_<uint32_t> words;
+		self->read_region(p[0], p[1], p[2], p[3], p[4], p[5], words);
+		const interface::VoxelFormat f = interface::VoxelFormat::luanti();
+		const int n = (int)words.size();
+		lua_createtable(L, n, 0);
+		lua_createtable(L, n, 0);
+		lua_createtable(L, n, 0);
+		for(int i = 0; i < n; i++){
+			const uint32_t word = words[i];
+			lua_pushinteger(L, (lua_Integer)f.id.get(word));
+			lua_rawseti(L, -4, i + 1);
+			lua_pushinteger(L, (lua_Integer)(f.light_sky.get(word) |
+					(f.light_lamp.get(word) << 4)));
+			lua_rawseti(L, -3, i + 1);
+			lua_pushinteger(L, (lua_Integer)f.param.get(word));
+			lua_rawseti(L, -2, i + 1);
+		}
+		return 3;
+	}
+
+	// __luanti_set_region_data(x0, y0, z0, x1, y1, z1, ids, param1, param2):
+	// the other direction, and one write rather than a quarter of a million.
+	// param1 and param2 may be nil, and then what is there is kept.
+	//
+	// A section the box reaches into that does not exist is created, because
+	// a VoxelManip writing where nobody has been is a mapgen doing its job.
+	static int l_set_region_data(lua_State *L)
+	{
+		Module *self = module_of(L);
+		int32_t p[6];
+		for(int i = 0; i < 6; i++)
+			p[i] = luaL_checkinteger(L, i + 1);
+		luaL_checktype(L, 7, LUA_TTABLE);
+		const bool has_p1 = !lua_isnoneornil(L, 8);
+		const bool has_p2 = !lua_isnoneornil(L, 9);
+		if(p[3] < p[0] || p[4] < p[1] || p[5] < p[2])
+			return 0;
+		const double volume = (double)(p[3] - p[0] + 1) *
+				(double)(p[4] - p[1] + 1) * (double)(p[5] - p[2] + 1);
+		if(volume > (double)MAX_REGION_VOXELS){
+			return luaL_error(L, "set_region_data(): %.0f voxels is more "
+					"than the %d this writes at once", volume,
+					(int)MAX_REGION_VOXELS);
+		}
+		if(!self->m_scene)
+			return 0;
+		// What is already buffered is part of the map; a region write that
+		// went in before it would be overwritten by the older value
+		self->flush_node_writes();
+		const interface::VoxelFormat f = interface::VoxelFormat::luanti();
+		// Read what is there first when the caller is only replacing some of
+		// the planes, so that the light and the param2 it left out survive
+		sv_<uint32_t> words;
+		if(!has_p1 || !has_p2)
+			self->read_region(p[0], p[1], p[2], p[3], p[4], p[5], words);
+		else
+			words.assign((size_t)volume, 0);
+		size_t i = 0;
+		for(size_t n = words.size(); i < n; i++){
+			lua_rawgeti(L, 7, (int)i + 1);
+			const lua_Integer id = lua_tointeger(L, -1);
+			lua_pop(L, 1);
+			uint32_t word = words[i];
+			f.id.set(word, (uint32_t)id & 0xffff);
+			if(has_p1){
+				lua_rawgeti(L, 8, (int)i + 1);
+				const uint32_t param1 = (uint32_t)lua_tointeger(L, -1);
+				lua_pop(L, 1);
+				f.light_sky.set(word, param1 & 0x0f);
+				f.light_lamp.set(word, (param1 >> 4) & 0x0f);
+			}
+			if(has_p2){
+				lua_rawgeti(L, 9, (int)i + 1);
+				const uint32_t param2 = (uint32_t)lua_tointeger(L, -1);
+				lua_pop(L, 1);
+				f.param.set(word, param2 & 0xff);
+			}
+			words[i] = word;
+		}
+		interface::VoxelVolume vol(pv::Region(
+				pv::Vector3DInt32(p[0], p[1], p[2]),
+				pv::Vector3DInt32(p[3], p[4], p[5])));
+		i = 0;
+		for(int32_t z = p[2]; z <= p[5]; z++)
+		for(int32_t y = p[1]; y <= p[4]; y++)
+		for(int32_t x = p[0]; x <= p[3]; x++, i++)
+			vol.setVoxelAt(x, y, z, interface::VoxelInstance(words[i]));
+		voxelworld::access(self->m_server, self->m_scene,
+				[&](voxelworld::Instance *world){
+			world->set_volume(vol, true);
+		});
+		return 0;
+	}
+
 	static int l_set_node(lua_State *L)
 	{
 		Module *self = module_of(L);
@@ -3871,11 +4093,40 @@ struct Module: public interface::Module, public luanti::Interface
 	// Metadata wants the save that step 5c of the persistence plan is about,
 	// and objects want a static_save that means something; both are named in
 	// mapblock.h where they are skipped.
+	// map_meta.txt: the seed, and the mapgen parameters a world was made
+	// with. Only the seed is taken -- the parameters are the mapgen's and
+	// there is no mapgen to give them to yet -- and a world without one
+	// keeps the seed this save was made with.
+	void import_map_meta(const ss_ &luanti_world_path)
+	{
+		std::ifstream ifs(luanti_world_path+"/map_meta.txt");
+		if(!ifs.good())
+			return;
+		ss_ line;
+		while(std::getline(ifs, line)){
+			size_t eq = line.find('=');
+			if(eq == ss_::npos)
+				continue;
+			ss_ key = line.substr(0, eq);
+			while(!key.empty() && (key.back() == ' ' || key.back() == '\t'))
+				key.pop_back();
+			if(key != "seed")
+				continue;
+			const ss_ value = line.substr(eq + 1);
+			const int64_t seed = strtoll(value.c_str(), nullptr, 10);
+			set_seed(seed);
+			log_i(MODULE, "The imported world's seed is %s",
+					cs(itos(seed)));
+			return;
+		}
+	}
+
 	void import_world(const ss_ &luanti_world_path)
 	{
 		if(!m_game_running)
 			throw Exception("luanti: import_world() before run_game()");
 		import_clock(luanti_world_path);
+		import_map_meta(luanti_world_path);
 		import_mod_storage(luanti_world_path);
 		import_players(luanti_world_path);
 		ss_ db_path = luanti_world_path+"/map.sqlite";
@@ -4093,6 +4344,8 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_set_node", l_set_node);
 		set_global_cfunction("__luanti_get_node", l_get_node);
 		set_global_cfunction("__luanti_get_region", l_get_region);
+		set_global_cfunction("__luanti_get_region_data", l_get_region_data);
+		set_global_cfunction("__luanti_set_region_data", l_set_region_data);
 		set_global_cfunction("__luanti_active_boxes", l_active_boxes);
 		set_global_cfunction("__luanti_find_ids", l_find_ids);
 		set_global_cfunction("__luanti_show_objects", l_show_objects);
@@ -4120,6 +4373,7 @@ struct Module: public interface::Module, public luanti::Interface
 		// Before the mods load, because a mod can ask the time while it
 		// does, and after the builtin, because that is where the clock is
 		load_clock();
+		load_seed();
 
 		run_chunk_file(module_path()+"/lua/modloader.lua");
 

@@ -201,6 +201,11 @@ end
 
 local mapgen_scripts_warned = false
 
+-- Which on_generated callbacks came out of a mapgen script, because that
+-- environment hands its callbacks the VoxelManip as their first argument
+-- and this one does not. See lua/vmanip.lua.
+core.__mapgen_env_callbacks = {}
+
 function core.register_mapgen_script(path)
 	if not mapgen_scripts_warned then
 		mapgen_scripts_warned = true
@@ -208,7 +213,20 @@ function core.register_mapgen_script(path)
 				.. "in the main environment, which has more in it than a "
 				.. "mapgen environment does")
 	end
-	dofile(path)
+	-- While the script runs, a callback it registers is noted as one of
+	-- that environment's. The registration itself is the vendored
+	-- builtin's, so this wraps it for as long as it takes.
+	local real = core.register_on_generated
+	core.register_on_generated = function(callback)
+		core.__mapgen_env_callbacks[callback] = true
+		return real(callback)
+	end
+	local ok, err = pcall(dofile, path)
+	core.register_on_generated = real
+	if not ok then
+		core.log("error", "register_mapgen_script(" .. tostring(path) ..
+				"): " .. tostring(err))
+	end
 end
 
 core.sha1 = __luanti_sha1
@@ -931,17 +949,14 @@ local STUBS_NIL = {
 	"get_node_light", "get_natural_light", "get_artificial_light",
 	"place_node", "dig_node", "punch_node", "spawn_tree", "spawn_tree_on_vmanip",
 	"get_perlin", "get_perlin_map", "get_value_noise", "get_value_noise_map",
-	"get_voxel_manip", "set_mapgen_params", "get_mapgen_params",
-	"get_mapgen_setting", "get_mapgen_setting_noiseparams",
-	"set_mapgen_setting", "set_mapgen_setting_noiseparams",
-	"get_mapgen_object", "get_mapgen_edges", "get_mapgen_chunksize",
+	"get_mapgen_setting_noiseparams", "set_mapgen_setting_noiseparams",
 	"set_noiseparams", "get_noiseparams", "generate_ores", "generate_decorations",
 	"clear_objects", "load_area", "emerge_area", "delete_area",
 	"line_of_sight", "raycast", "find_path", "transforming_liquid_add",
 	"get_node_max_level", "get_node_level", "set_node_level", "add_node_level",
 	"fix_light",
 	"get_spawn_level", "get_heat", "get_humidity", "get_biome_data",
-	"get_biome_id", "get_biome_name", "get_mapgen_params",
+	"get_biome_id", "get_biome_name",
 	"forceload_block", "forceload_free_block", "compare_block_status",
 	"get_meta", "get_node_metadata",
 	-- Time and the world (M2)
@@ -2166,6 +2181,7 @@ dofile(module_path .. "/lua/json.lua")
 dofile(module_path .. "/lua/objmesh.lua")
 dofile(module_path .. "/lua/b3dmesh.lua")
 dofile(module_path .. "/lua/mesh.lua")
+dofile(module_path .. "/lua/vmanip.lua")
 dofile(module_path .. "/lua/check_map.lua")
 
 -- vim: set noet ts=4 sw=4:
