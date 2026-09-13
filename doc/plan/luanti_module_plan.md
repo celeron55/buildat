@@ -634,9 +634,11 @@ server's. It does not need to:
 - **Facing and liquid level need no pairs**, because
   `VoxelFormat::luanti()` binds `param` and `VoxelVariant` interprets it.
   That was the point of binding `param` in the first place.
-- **Palettes are registered by the server at load**, one voxel type per used
-  palette index. The palette is in the nodedef, so the set is known, bounded
-  by 256, and enumerated once rather than discovered per block.
+- **Palettes are a variant per colour** (built 2026-09-13), not a voxel type
+  per colour: the registry id is the Luanti content id, so a second type per
+  colour cannot be registered at all. The palette is in the nodedef, so the
+  colours are known, bounded by 256 and enumerated once rather than
+  discovered per block; see "The palettes" below.
 
 ## The module interface
 
@@ -725,8 +727,8 @@ shape of their own, 83 of those liquids; 56 turn with their param2.
   that does. See "Which mesher draws the drawtypes".
 - **`mesh`** (18 in devtest). Settled and deferred until after the map; see
   "The meshes: after the map".
-- **Palettes**: settled; see "The palettes: a variant wears its own
-  textures". The first half of it is engine work in `VoxelVariant`.
+- **Palettes**: built 2026-09-13. Nineteen of devtest's nodes wear a
+  colour out of one; see "The palettes" below.
 
 **M4 -- it plays. Built 2026-09-13.** Digging and placing with every
 callback around them, node metadata, inventories, the recipes, the
@@ -1192,57 +1194,11 @@ what the module does not do.
 
 ## What the drawtypes that are left turned out to be
 
-### The palettes: a variant wears its own textures (settled 2026-09-13)
+### The palettes: built 2026-09-13
 
-A node with `paramtype2 = "color"` and its friends puts a palette index in
-the high bits of param2 and is drawn with the colour at that index. devtest
-has 19 such nodes; a real game uses them for grass and foliage, so they are
-not a corner.
-
-**What is not available, and why.** The plan used to say "one voxel type per
-used palette index, registered at load". It cannot be done:
-`CVoxelRegistry::add_voxel()` assigns `id = m_defs.size()` and throws if the
-definition already carries a different one, so the registry id *is* the
-Luanti content id -- and the ABM sweep matches content ids directly because
-the two are the same number. There is no second discriminator to put a
-palette index in, and the Luanti voxel word has no spare bits either: 16 for
-the id, 4 and 4 for the light, 8 for the param is the whole 32.
-
-**And the two colour channels that already exist are the wrong ones.**
-`VoxelVariant::color` and `VoxelDefinition::tint_ramp` both multiply the
-*vertex* colour, which is light rather than albedo -- their own headers say
-what that costs: "a palette entry would show in shade and vanish in
-sunlight". `VoxelFormat::tint` *is* an albedo channel and is already carried
-to the shader packed 5-6-5, but binding it needs a field to put the index
-in, which the Luanti word does not have room for, and a palette rather than
-the two-endpoint ramp it reads.
-
-**So a variant names textures of its own.** That is finishing something the
-engine already half-says: `VoxelVariant`'s own header gives "a voxel that
-faces one of twenty-four directions, or **wears one of eight palette
-colours**" as the two cases variants exist for -- and then the next
-paragraph says a variant carries no textures and offers `color`, which the
-comment after it says is wrong for a palette. The colour index is already in
-param2 and param2 already maps to a variant; only the textures are missing.
-
-The tinted tiles are `<tile>^[multiply:#rrggbb`, which is a texture modifier
-expression -- so the client composes them through exactly the machinery the
-modifiers already built, and the server does not touch a pixel.
-
-**What it costs.** Directions permute and colours multiply, so the atlas
-grows with distinct tiles times palette entries and *not* with directions: a
-`colorfacedir` node with eight colours is 8 x 24 = 192 variants but only 8 x
-6 = 48 distinct textures. devtest's nine 256-entry `color` nodes are the
-worst case, and an atlas holds 4096 segments of 16x16 and spills into
-another when it fills, so they come to roughly half an atlas rather than to
-a wall.
-
-**The first thing to settle when it is built:** a variant's `tile_order` is
-`uint8_t`, so it can name at most 256 textures, and six tiles times 256
-palette entries is 1536. Either the variant carries its own texture array or
-the definition's table grows and the index widens. Which one is a question
-for the mesher's inner loop, which is what reads it.
-
+`VoxelVariant` grows textures of its own and a palette entry is one; what
+each turned out to be is in `doc/plan/luanti_module_history.md`, "The
+palettes, and what a variant wears".
 
 ### The meshes: after the map (settled 2026-09-13)
 

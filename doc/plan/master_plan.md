@@ -76,6 +76,13 @@ are each a simplification the plan names rather than a bug. See "devtest's own
 unittests as the oracle" in the module plan for how to run it -- it is the
 first thing to run after touching the API surface.
 
+**The palettes are built (2026-09-13).** A `VoxelVariant` can wear textures
+of its own, and a palette entry is the node's tiles through a modifier that
+multiplies them -- so the client composes them through the machinery the
+texture modifiers already built. Nineteen of devtest's nodes wear one:
+4424 variants over them, 1383 textures composed in 440 ms. See "The
+palettes, and what a variant wears" in the module's history.
+
 **M6's map is built (2026-09-13), and most of it was engine work.**
 `voxelworld` streams sections around load points -- a position and its own
 load and generate radii -- and `games/infidigger` and `games/bomber_drone`
@@ -91,18 +98,11 @@ in the module plan.
 
 In order:
 
-1. **The palettes**, which is settled (2026-09-13) and is engine work
-   first: `VoxelVariant` gains textures of its own, which finishes what its
-   own header already says variants are for -- "a voxel that faces one of
-   twenty-four directions, or wears one of eight palette colours". The
-   tinted tiles are texture modifier expressions, so the client composes
-   them through machinery that already exists. See "The palettes: a variant
-   wears its own textures" in the module plan.
-
-   **The meshes are settled and deferred** until after the map: the two
-   readers in `extensions/luanti_client` cover two thirds of devtest's mesh
-   nodes and were written for the voxel mesher, and the other third is glTF,
-   which is a reader nobody has written.
+1. **The meshes**, which are settled and were deferred until after the map:
+   the two readers in `extensions/luanti_client` cover two thirds of
+   devtest's mesh nodes and were written for the voxel mesher, and the other
+   third is glTF, which is a reader nobody has written. See "The meshes:
+   after the map" in the module plan.
 2. **The leftovers**, each small and none blocking anything. They are under
    "Bonuses" below, which is what that section is for; the module plan's
    "Simplified, and the upgrade path" has the full list of what the module

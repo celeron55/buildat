@@ -924,3 +924,57 @@ anything has changed, and turn the streamer's budget down to nothing while
 their generator's queue is long -- only the game can see that queue, so
 `set_stream_budget()` is how it says so. Everything else about streaming is
 gone from both of them.
+
+## The palettes, and what a variant wears (built 2026-09-13)
+
+A node with `paramtype2 = "color"` and its friends puts a palette index in
+param2 and is drawn with the colour at that index. devtest has nineteen of
+them; a real game uses them for grass and foliage, so they are not a corner.
+
+**What was not available, and why.** The plan used to say "one voxel type
+per used palette index, registered at load". It cannot be done:
+`CVoxelRegistry::add_voxel()` assigns `id = m_defs.size()` and throws if the
+definition carries a different one, so the registry id *is* the Luanti
+content id -- and the ABM sweep matches content ids directly because the two
+are the same number. There is no second discriminator to put a palette index
+in, and the Luanti voxel word has no spare bits either: 16 for the id, 4 and
+4 for the light, 8 for the param is the whole 32.
+
+**And the two colour channels that already existed are the wrong ones.**
+`VoxelVariant::color` and `VoxelDefinition::tint_ramp` both multiply the
+*vertex* colour, which is light rather than albedo -- their own headers say
+what that costs: "a palette entry would show in shade and vanish in
+sunlight".
+
+**So a variant names textures of its own.** That finished something the
+engine already half-said: `VoxelVariant`'s header gives "a voxel that faces
+one of twenty-four directions, or wears one of eight palette colours" as the
+two cases variants exist for, and then said a variant carries no textures.
+It now carries `textures`, indexed the way a tile is everywhere else -- 0...5
+the six faces and 6 and over the definition's extra ones -- and as many as
+it replaces. The mesher takes a face's texture from the variant when it has
+one and from the definition otherwise, in the cube path and in the shape
+path both; the registry resolves them into the atlas beside the six.
+
+**What the module does with them.** It reads the palette image with
+Urho3D's own `Image` -- the pixels row by row, at most 256 of them -- and
+gives each colour the node's own tiles through `^[multiply:#rrggbb`, which
+is a texture modifier expression like any other: it goes to the client in
+the same `luanti:texmods` list every other composed tile does, and the
+server does not touch a pixel.
+
+Luanti stretches a palette over the 256 param2 values -- each pixel fills
+256/pixels of them -- so the colour changes only every step and the bits
+below it are the direction. A sane game ships exactly as many colours as the
+bits above the direction can count, which is why devtest's facedir palette
+is eight pixels and its 4dir palette sixty-four. `palette_slot_of_param()`
+is that rule and the checks beside it are what it leaves behind.
+
+**What it costs, measured.** Colours multiply the directions rather than
+permuting with them, so the atlas grows with distinct tiles times palette
+entries and not with directions: eight colours of a facedir node are 192
+variants but 48 textures. devtest ends up with 4424 variants over its
+nineteen nodes and 1383 composed textures, which the client composes in
+440 ms and keeps in its resource cache. A variant index is a byte, and a
+colour times a direction never overflows it because both come out of the
+same eight bits of param2.
