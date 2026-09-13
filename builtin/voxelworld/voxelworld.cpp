@@ -655,6 +655,8 @@ struct CInstance: public voxelworld::Instance
 			return true;
 		if(load_saved_section(section)){
 			section.loaded = true;
+			m_server->emit_event("voxelworld:section_loaded",
+					new SectionLoaded(m_scene_ref, sp));
 			return true;
 		}
 		m_save_misses.insert(section_key(sp));
@@ -1144,9 +1146,11 @@ struct CInstance: public voxelworld::Instance
 		pv::Vector3DInt16 section_p = section.section_p;
 		log_d(MODULE, "Loading section " PV3I_FORMAT, PV3I_PARAMS(section_p));
 
-		if(m_store && load_saved_section(section))
-			return;
-		create_section(section);
+		if(!m_store || !load_saved_section(section))
+			create_section(section);
+		// What a game keeps of its own per section comes back with it
+		m_server->emit_event("voxelworld:section_loaded",
+				new SectionLoaded(m_scene_ref, section_p));
 	}
 
 	// True if the whole section was in the save. All or nothing: a section
@@ -1522,6 +1526,11 @@ struct CInstance: public voxelworld::Instance
 			return;
 
 		log_v(MODULE, "Unloading section " PV3I_FORMAT, PV3I_PARAMS(section_p));
+
+		// Before the voxels go, so that a game writing something of its own
+		// out with the section still has the section to look at
+		m_server->emit_event("voxelworld:section_unloaded",
+				new SectionUnloaded(m_scene_ref, section_p));
 
 		if(m_store){
 			// What the nodes hold is what has been committed; the buffers

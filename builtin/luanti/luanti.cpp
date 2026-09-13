@@ -706,6 +706,8 @@ struct Module: public interface::Module, public luanti::Interface
 		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("voxelworld:generation_request"));
+		m_server->sub_event(this, Event::t("voxelworld:section_loaded"));
+		m_server->sub_event(this, Event::t("voxelworld:section_unloaded"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_texmods"));
 		m_server->sub_event(this, Event::t(
@@ -727,6 +729,10 @@ struct Module: public interface::Module, public luanti::Interface
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 		EVENT_TYPEN("voxelworld:generation_request", on_generation_request,
 				voxelworld::GenerationRequest)
+		EVENT_TYPEN("voxelworld:section_loaded", on_section_loaded,
+				voxelworld::SectionLoaded)
+		EVENT_TYPEN("voxelworld:section_unloaded", on_section_unloaded,
+				voxelworld::SectionUnloaded)
 		EVENT_TYPEN("network:packet_received/luanti:get_texmods",
 				on_get_texmods, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:get_item_images",
@@ -754,7 +760,7 @@ struct Module: public interface::Module, public luanti::Interface
 			return;
 		flush_node_writes();
 		save_clock();
-		save_node_meta();
+		save_loaded_sections_meta();
 		save_players();
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
 			world->save();
@@ -864,6 +870,172 @@ struct Module: public interface::Module, public luanti::Interface
 		m_had_node_meta = (n != 0);
 		m_store->set("node_meta", data);
 		log_v(MODULE, "Node metadata written to the save: %i positions", n);
+	}
+
+	// What hangs off the voxels of one section, in the save under a key of
+	// its own: a section that unloads takes its metadata with it and brings
+	// it back when it returns, which is how Luanti keeps a block's metadata
+	// with the block. See step 5c of doc/plan/world_persistence_plan.md.
+	ss_ section_meta_key(const pv::Vector3DInt16 &p)
+	{
+		return ss_()+"node_meta/"+itos(p.getX())+","+itos(p.getY())+","+
+				itos(p.getZ());
+	}
+
+	void save_section_meta(const pv::Vector3DInt16 &section_p)
+	{
+		if(!m_store || !m_lua || m_section_size.getX() <= 0)
+			return;
+		const int32_t sx = m_section_size.getX(), sy = m_section_size.getY(),
+				sz = m_section_size.getZ();
+		const int32_t x0 = (int32_t)section_p.getX() * sx;
+		const int32_t y0 = (int32_t)section_p.getY() * sy;
+		const int32_t z0 = (int32_t)section_p.getZ() * sz;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__take_node_meta");
+		lua_pushinteger(L, x0);
+		lua_pushinteger(L, y0);
+		lua_pushinteger(L, z0);
+		lua_pushinteger(L, x0 + sx - 1);
+		lua_pushinteger(L, y0 + sy - 1);
+		lua_pushinteger(L, z0 + sz - 1);
+		if(lua_pcall(L, 6, 2, 0) != 0){
+			log_w(MODULE, "__take_node_meta(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+			lua_settop(L, base);
+			return;
+		}
+		size_t len = 0;
+		const char *p = lua_tolstring(L, -2, &len);
+		const ss_ data(p ? p : "", p ? len : 0);
+		const int n = (int)lua_tonumber(L, -1);
+		lua_settop(L, base);
+		const ss_ key = section_meta_key(section_p);
+		if(n == 0){
+			// Nothing there, and what the save holds is older than that
+			ss_ old;
+			if(m_store->get(key, old))
+				m_store->set(key, "");
+			return;
+		}
+		m_store->set(key, data);
+		log_v(MODULE, "%i node metadata written with section (%i, %i, %i)", n,
+				(int)section_p.getX(), (int)section_p.getY(),
+				(int)section_p.getZ());
+	}
+
+	void load_section_meta(const pv::Vector3DInt16 &section_p)
+	{
+		if(!m_store || !m_lua)
+			return;
+		ss_ data;
+		if(!m_store->get(section_meta_key(section_p), data) || data.empty())
+			return;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__load_node_meta");
+		lua_pushlstring(L, data.c_str(), data.size());
+		if(lua_pcall(L, 1, 1, 0) != 0){
+			log_w(MODULE, "__load_node_meta(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+		}
+		lua_settop(L, base);
+	}
+
+	void on_section_loaded(const voxelworld::SectionLoaded &event)
+	{
+		if(!m_game_running || event.scene != m_scene)
+			return;
+		load_section_meta(event.section_p);
+	}
+
+	void on_section_unloaded(const voxelworld::SectionUnloaded &event)
+	{
+		if(!m_game_running || event.scene != m_scene)
+			return;
+		save_section_meta(event.section_p);
+	}
+
+	// Every section that is loaded, which is what a shutdown owes the save:
+	// the ones that have already gone wrote themselves out as they went.
+	void save_loaded_sections_meta()
+	{
+		if(!m_store || !m_scene)
+			return;
+		sv_<pv::Vector3DInt16> sections;
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
+			sections = world->get_loaded_sections();
+		});
+		for(const pv::Vector3DInt16 &section_p : sections)
+			save_section_meta(section_p);
+		log_v(MODULE, "Node metadata written for %zu sections",
+				sections.size());
+	}
+
+	// Everything the Lua half holds, grouped by the section each position
+	// is in and written; what is in memory is left there. What wants this
+	// is the importer -- a world it read metadata for is mostly sections
+	// nothing has loaded -- and the migration below.
+	size_t write_all_node_meta()
+	{
+		if(!m_store || !m_lua || m_section_size.getX() <= 0)
+			return 0;
+		sv_<ss_> flat;
+		int n = 0;
+		{
+			interface::MutexScope ms(m_lua_mutex);
+			lua_State *L = m_lua;
+			int base = lua_gettop(L);
+			lua_getglobal(L, "core");
+			lua_getfield(L, -1, "__regroup_node_meta");
+			lua_pushinteger(L, m_section_size.getX());
+			if(lua_pcall(L, 1, 2, 0) != 0){
+				log_w(MODULE, "__regroup_node_meta(): %s",
+						lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+				lua_settop(L, base);
+				return 0;
+			}
+			n = (int)lua_tonumber(L, -1);
+			if(lua_istable(L, -2)){
+				const size_t count = lua_objlen(L, -2);
+				for(size_t i = 1; i <= count; i++){
+					lua_rawgeti(L, -2, (int)i);
+					size_t len = 0;
+					const char *p = lua_tolstring(L, -1, &len);
+					flat.push_back(ss_(p ? p : "", p ? len : 0));
+					lua_pop(L, 1);
+				}
+			}
+			lua_settop(L, base);
+		}
+		for(size_t i = 0; i + 1 < flat.size(); i += 2)
+			m_store->set("node_meta/"+flat[i], flat[i + 1]);
+		log_v(MODULE, "%i node metadata over %zu sections", n,
+				flat.size() / 2);
+		return flat.size() / 2;
+	}
+
+	// A save written when the metadata was one blob for the whole world:
+	// read it, write it out per section, and only then drop the blob, so
+	// that a crash in the middle leaves the blob to be read again.
+	void migrate_node_meta()
+	{
+		if(!m_store || !m_lua)
+			return;
+		ss_ data;
+		if(!m_store->get("node_meta", data) || data.empty())
+			return;
+		log_i(MODULE, "The save's node metadata is one blob; writing it out "
+				"per section");
+		load_node_meta();
+		write_all_node_meta();
+		m_store->set("node_meta", "");
+		m_had_node_meta = false;
 	}
 
 	void load_node_meta()
@@ -1037,6 +1209,15 @@ struct Module: public interface::Module, public luanti::Interface
 					LOAD_RADIUS_XZ, LOAD_RADIUS_Y,
 					GENERATE_RADIUS_XZ, GENERATE_RADIUS_Y, peer));
 		}
+		// A forceloaded section is a point with no radius at all
+		for(uint64_t k : m_forceloaded){
+			const pv::Vector3DInt16 sp = section_from_key(k);
+			points.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(
+					(int32_t)sp.getX() * m_section_size.getX(),
+					(int32_t)sp.getY() * m_section_size.getY(),
+					(int32_t)sp.getZ() * m_section_size.getZ()),
+					0, 0, 0, 0));
+		}
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
 			world->set_load_points(points);
 			world->set_stream_budget(m_stream_budget);
@@ -1062,6 +1243,55 @@ struct Module: public interface::Module, public luanti::Interface
 		assert(!is_section_active(pv::Vector3DInt16(1, 0, 0)));
 		m_player_pos = saved;
 		log_v(MODULE, "check_active_range: the range is where the players are");
+	}
+
+	// Luanti's forceload: a block a mod wants kept whatever nobody is near
+	// it, which is a load point with no radius at all. Kept by section,
+	// because that is what loads and unloads here; a mod asking for a
+	// block gets the section it is in.
+	//
+	// simplified: not written to the save, so a forceload lasts as long as
+	// the server runs. Luanti keeps the ones that are not transient in
+	// force_loaded.txt; the upgrade path is the module's own store, which
+	// already holds the clock and the seed.
+	set_<uint64_t> m_forceloaded;
+
+	static uint64_t section_key(const pv::Vector3DInt16 &p)
+	{
+		return (uint64_t)(uint16_t)p.getX() |
+				((uint64_t)(uint16_t)p.getY() << 16) |
+				((uint64_t)(uint16_t)p.getZ() << 32);
+	}
+
+	static pv::Vector3DInt16 section_from_key(uint64_t k)
+	{
+		return pv::Vector3DInt16((int16_t)k, (int16_t)(k >> 16),
+				(int16_t)(k >> 32));
+	}
+
+	// __luanti_forceload(x, y, z, wanted) -> whether it is kept now
+	static int l_forceload(lua_State *L)
+	{
+		Module *self = module_of(L);
+		const int32_t x = (int32_t)luaL_checkinteger(L, 1);
+		const int32_t y = (int32_t)luaL_checkinteger(L, 2);
+		const int32_t z = (int32_t)luaL_checkinteger(L, 3);
+		const bool wanted = lua_toboolean(L, 4) != 0;
+		if(self->m_section_size.getX() <= 0){
+			lua_pushboolean(L, 0);
+			return 1;
+		}
+		const uint64_t key = section_key(
+				self->section_of(pv::Vector3DInt32(x, y, z)));
+		if(wanted)
+			self->m_forceloaded.insert(key);
+		else
+			self->m_forceloaded.erase(key);
+		log_v(MODULE, "forceload: %zu sections kept",
+				self->m_forceloaded.size());
+		// The points are pushed once a step; this only says what they are
+		lua_pushboolean(L, wanted ? 1 : 0);
+		return 1;
 	}
 
 	// Luanti's active_block_range: what is near a player is what steps.
@@ -1323,6 +1553,10 @@ struct Module: public interface::Module, public luanti::Interface
 		});
 
 		check_active_range();
+
+		// After the world, because a section is what the metadata is now
+		// written per and the section size comes from voxelworld
+		migrate_node_meta();
 	}
 
 	// The client half asks for these once it has loaded, rather than being
@@ -4373,6 +4607,11 @@ struct Module: public interface::Module, public luanti::Interface
 		});
 		sqlite3_finalize(st);
 		sqlite3_close(db);
+		// What it read metadata for is mostly sections nothing has loaded,
+		// and those are written out rather than waiting for an unload that
+		// will not come
+		if(meta_written != 0)
+			write_all_node_meta();
 		log_i(MODULE, "import_world(): %zu blocks of %s read into the world, "
 				"%zu nodes and %zu of them with metadata; %zu blocks outside "
 				"it, %zu it could not read",
@@ -4453,6 +4692,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_set_region_data", l_set_region_data);
 		set_global_cfunction("__luanti_noise_value", l_noise_value);
 		set_global_cfunction("__luanti_noise_map", l_noise_map);
+		set_global_cfunction("__luanti_forceload", l_forceload);
 		set_global_cfunction("__luanti_active_boxes", l_active_boxes);
 		set_global_cfunction("__luanti_find_ids", l_find_ids);
 		set_global_cfunction("__luanti_show_objects", l_show_objects);
@@ -4485,8 +4725,10 @@ struct Module: public interface::Module, public luanti::Interface
 		run_chunk_file(module_path()+"/lua/modloader.lua");
 
 		// After the mods, because what the metadata holds is item strings
-		// and a mod's items have to be registered for one to mean anything
-		load_node_meta();
+		// and a mod's items have to be registered for one to mean anything.
+		// The node metadata is not read here any more: it comes back with
+		// the section it is in, and migrate_node_meta() below is what an
+		// older save's one blob of it becomes.
 		load_players();
 		run_chunk_string("core.__check_players() "
 				"core.__check_inventory_move()", "check_players");
