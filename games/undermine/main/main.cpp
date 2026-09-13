@@ -288,7 +288,9 @@ struct Worldgen: public worldgen::GeneratorInterface
 					uc.getX(), uc.getY(), uc.getZ());
 
 			interface::v3f spread(160, 160, 160);
-			interface::NoiseParams np(0, 20, spread, 0, 7, 0.4);
+			// Retuned 2026-09-14 with digger's, which this is; see the note
+			// there about the noise hash
+			interface::NoiseParams np(47, 37, spread, 0, 7, 0.4);
 
 			int w = uc.getX() - lc.getX() + 1;
 			int d = uc.getZ() - lc.getZ() + 1;

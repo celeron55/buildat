@@ -99,7 +99,12 @@ struct Worldgen: public worldgen::GeneratorInterface
 					uc.getX(), uc.getY(), uc.getZ());
 
 			interface::v3f spread(160, 160, 160);
-			interface::NoiseParams np(0, 20, spread, 0, 7, 0.4);
+			// Retuned 2026-09-14: the noise hash used to multiply in signed
+			// arithmetic and came back biased and with about twice the
+			// swing, so the same numbers now give a terrain half as tall
+			// and lower down. The offset and the scale are what put the old
+			// ground back -- the spawn line below says where it landed.
+			interface::NoiseParams np(47, 37, spread, 0, 7, 0.4);
 
 			int w = uc.getX() - lc.getX() + 1;
 			int d = uc.getZ() - lc.getZ() + 1;

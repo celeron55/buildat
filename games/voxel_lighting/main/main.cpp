@@ -42,13 +42,20 @@ static const float VIEW_DIR_X = -1.0f;
 static const float VIEW_DIR_Y = -0.7f;
 static const float VIEW_DIR_Z = -1.0f;
 
-// Tuned so the surface keeps sky above it and rock below it across the volume
-static const float TERRAIN_AMPLITUDE = 9.0f;
+// Tuned so the surface keeps sky above it and rock below it across the volume.
+//
+// Retuned 2026-09-14, when the noise hash stopped multiplying in signed
+// arithmetic: the old one came back biased and with about two and a half
+// times the swing, so the same numbers that gave a surface at 19..45 gave one
+// at 7..17 -- a flatter scene, lower in the volume, with the pond left hanging
+// in the air above it. The amplitude and the offset are what put the same
+// surface back, which is what the check images are for.
+static const float TERRAIN_AMPLITUDE = 23.0f;
 
-// Shifts the terrain up or down in the volume. With the noise below, 0 puts
-// the surface at roughly y=19..44, averaging the middle of the volume. The
+// Shifts the terrain up or down in the volume. With the noise below, 19 puts
+// the surface at roughly y=19..45, averaging the middle of the volume. The
 // generator logs the range it actually got, so retune this by reading that.
-static const float GROUND_OFFSET = 0.0f;
+static const float GROUND_OFFSET = 19.0f;
 
 static const float CAVE_RADIUS = 3.5f;
 // A pond, for a surface smooth enough to reflect the sky where everything else

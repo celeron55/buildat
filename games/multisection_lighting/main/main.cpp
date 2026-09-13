@@ -67,12 +67,14 @@ static const float VIEW_DIR_X = -1.0f;
 static const float VIEW_DIR_Y = -0.7f;
 static const float VIEW_DIR_Z = -1.0f;
 
-// Tuned so the surface keeps sky above it and rock below it across the volume
-static const float TERRAIN_AMPLITUDE = 9.0f;
+// Tuned so the surface keeps sky above it and rock below it across the volume.
+// Retuned 2026-09-14 with voxel_lighting's, for the same reason: the noise
+// hash stopped coming back biased and with two and a half times the swing.
+static const float TERRAIN_AMPLITUDE = 23.0f;
 
-// Shifts the terrain within the scene, as in voxel_lighting, where 0 put the
-// surface at roughly scene y=19..44. SCENE_OFFSET_Y does the moving here.
-static const float GROUND_OFFSET = 0.0f;
+// Shifts the terrain within the scene, as in voxel_lighting, where 19 puts
+// the surface at roughly scene y=19..45. SCENE_OFFSET_Y does the moving here.
+static const float GROUND_OFFSET = 19.0f;
 
 static const float CAVE_RADIUS = 3.5f;
 static const float CAVE_LENGTH = 62.0f;
