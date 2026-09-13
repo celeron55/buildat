@@ -127,9 +127,10 @@ What is left, in order of what it is worth:
    generate is the default biome, because `core.registered_biomes`,
    `_ores` and `_decorations` are recorded in Lua and nothing translates
    them into `BiomeManager` and its friends yet. That translation is what
-   makes a game's own world look like itself. Two smaller things go with
-   it: who owns the light, and sending the node properties a mapgen asks
-   about instead of guessing them. See "Mapgen stage 3" in the module plan.
+   makes a game's own world look like itself. One smaller thing goes with it:
+   sending the node properties a mapgen asks about instead of guessing
+   them -- a cave carving through a chest is the sign of it. Who owns the
+   light is settled: the mapgen does. See "Mapgen stage 3" in the module plan.
 
    What is already built: the seam (a generator in `worldgen`'s worker
    thread), the whole of `src/mapgen` vendored and compiling against a

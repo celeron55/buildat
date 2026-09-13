@@ -344,11 +344,14 @@ once the mods have loaded, which is what makes that safe.
 
    What is left of stage 3 is polish rather than structure:
 
-   - **The world is dark and its nodes are the wrong colour.** The mapgen
-     lights what it generates and that light is copied across, but
-     `voxelworld`'s own skylight floods from the top of the region, which
-     is thirty thousand voxels up and never reaches. Deciding which of the
-     two owns the light is the next thing to settle.
+   - **The light is the mapgen's (settled and built 2026-09-13).**
+     `voxelworld`'s own skylight is off for a world that has a mapgen,
+     because it floods from the top of the region -- thirty thousand
+     voxels up -- and never reaches the ground; the mapgen lights what it
+     generates and that light is what the world wears. What it costs is
+     that a hole dug into one stays dark, since nothing relights it
+     afterwards; the upgrade path is voxelworld's skylight starting from
+     the top of each loaded column.
    - **What a mapgen asks about a node is answered by a guess.** The
      `ContentFeatures` the shim builds says every node that is not air is
      solid ground; the game's own answers -- `is_ground_content`,
