@@ -274,8 +274,11 @@ local function parse_stack(str)
 end
 
 local ui = nil
-local form = nil          -- {formname =, spec =, state =, drawn =}
+local form = nil          -- {formname =, spec =, at =, state =, drawn =}
 local player_spec = ""    -- what the player's own inventory key opens
+-- "x,y,z" -> the lists of the node the open form is about. One node, because
+-- one form is about one node; see core.__send_node_inventory.
+local node_inventory = {}
 
 local function make_ui()
 	if ui then
@@ -291,14 +294,22 @@ local function make_ui()
 			end
 			return resource
 		end,
-		-- Only the player's own inventory: a node's and a detached one are
-		-- what the server has no packet for yet
+		-- The player's own lists, or the node the form is about --
+		-- "current_name" and "context" are that node, and a nodemeta:
+		-- location names one outright. A detached inventory is nobody's
+		-- here and draws empty.
 		inventory = function(location, list_name)
-			if location ~= "current_player" and
-					string.sub(location, 1, 7) ~= "player:" then
-				return nil
+			local lists = nil
+			if location == "current_player" or
+					string.sub(location, 1, 7) == "player:" then
+				lists = M.inventory
+			elseif location == "current_name" or location == "context" then
+				lists = form and form.at and node_inventory[form.at] or nil
+			else
+				local at = string.match(location, "^nodemeta:(.*)$")
+				lists = at and node_inventory[at] or nil
 			end
-			local stacks = M.inventory[list_name]
+			local stacks = lists and lists[list_name]
 			if not stacks then
 				return nil
 			end
@@ -384,12 +395,13 @@ local function draw_form()
 	form.drawn = make_ui():show(root, elements, layout, w, h, form.state)
 end
 
-local function show_form(formname, spec)
+local function show_form(formname, spec, at)
 	close_form(false)
 	if spec == "" then
 		return
 	end
-	form = {formname = formname, spec = spec, state = {}}
+	form = {formname = formname, spec = spec, at = at ~= "" and at or nil,
+			state = {}}
 	draw_form()
 end
 
@@ -501,7 +513,32 @@ end)
 
 buildat.sub_packet("luanti:formspec", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
-	show_form(values[1] or "", values[2] or "")
+	show_form(values[1] or "", values[2] or "", values[3] or "")
+end)
+
+-- What is in the node the open form is about; the position leads
+buildat.sub_packet("luanti:node_inventory", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	local at = values[1]
+	if at == nil then
+		return
+	end
+	local lists = {}
+	local i = 2
+	while i + 1 <= #values do
+		local name = values[i]
+		local size = tonumber(values[i + 1]) or 0
+		local stacks = {}
+		for slot = 1, size do
+			stacks[slot] = values[i + 1 + slot] or ""
+		end
+		lists[name] = stacks
+		i = i + 2 + size
+	end
+	node_inventory = {[at] = lists}
+	if form then
+		draw_form()
+	end
 end)
 
 buildat.sub_packet("luanti:player_formspec", function(data)
