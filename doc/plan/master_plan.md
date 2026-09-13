@@ -160,23 +160,30 @@ What is left, in order of what it is worth:
    with the world's clock, dimming to a blue night. See "The client half,
    second round" in `doc/plan/luanti_module_plan.md`.
 
+   The HUD a game draws itself is built too (2026-09-13): `hud_add` and
+   its family keep a list per player and send it, the launcher draws text,
+   image and statbar elements where Luanti's own drawLuaElements puts
+   them, and the flags turn the client's own hotbar, crosshair and chat
+   off for a game that draws its own. The client's health and breath are
+   plain bars above the hotbar -- Luanti's hearts and bubbles are the
+   engine's own textures rather than a game's media -- and a camera in a
+   liquid tints the screen and closes the fog in.
+
    What is left of it:
 
-   1. **What a game puts on the screen itself**: `hud_add`, `hud_change`,
-      `hud_remove` and `hud_set_flags` are stubs in `lua/entity.lua`, so
-      devtest's hearts, its bubbles and its bars are nowhere. The reading
-      and the arithmetic are already copied into
-      `builtin/luanti/client_lua/hud.lua`, unused; what is missing is the
-      packet and the drawing, and `formspec_ui.lua` is what draws.
-   2. **Health and breath**, which are the client's own bars until a game
-      draws its own -- and the flags above are how a game says it does.
-   3. **The sky a game asks for**: `set_sky`, `set_sun`, `set_moon` and
+   1. **The sky a game asks for**: `set_sky`, `set_sun`, `set_moon` and
       `set_clouds` are stubs, and the cube map the reflections come from
       is baked at noon whatever the hour.
-   4. **The day-night ratio**, which is Luanti's other half of the light:
+   2. **The day-night ratio**, which is Luanti's other half of the light:
       the sky light a node carries is scaled by the time of day, so a room
       lit through a window goes dark at night. Here the light is what the
-      mesher baked and only the sun dims.
+      mesher baked and only the sun dims -- and the two lights are one
+      vertex colour by the time they reach the shader, so telling them
+      apart is a mesher change.
+   3. **A HUD element Luanti draws and this does not**: a waypoint, a
+      compass, a minimap, an inventory element, and the styles and colours
+      inside a line of text. Each is named once in the log when a game
+      asks for it.
 
 2. **The mapgen, the rest of stage 3c: the ores and the decorations.** Luanti's own
    mapgens generate worlds here as of 2026-09-13 -- a world whose
