@@ -7,8 +7,18 @@ compiles each one to its own shared object and dlopens it -- so the vendored
 code lives in that object and buildat_server itself links none of it. See
 COPYING.LESSER beside this file, and doc/luanti_module.txt.
 
-Nothing under this directory is copied into buildat proper, and every file
-keeps the licence header it came with.
+Nothing under this directory is copied into buildat proper.
+
+Luanti states its licence once, in the LICENSE.txt at the root of its own
+tree; these Lua files carry no header of their own. The statement, copied
+verbatim, is in buildat's NOTICE, and the full licence is in COPYING.LESSER.
+One file here is under other terms and does say so in itself:
+builtin/common/serialize.lua is MIT, from appgurueu's modlib
+(https://github.com/appgurueu/modlib, luon.lua).
+
+No Luanti media is here. Luanti's textures and sounds are CC BY-SA, with
+their authors listed in its LICENSE.txt; a client gets media from the server
+it plays on.
 
 Upstream: https://github.com/luanti-org/luanti
 Commit:   befadef82035f57a478de88e3f939f3e77e6e77c (2026-09-05)
