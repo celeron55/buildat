@@ -35,8 +35,23 @@ function MetaData:get(key)
 	return self.fields[key]
 end
 
+-- A value of "${other}" is what the other key holds, one step deep and no
+-- further: Luanti resolves a reference and a reference inside that, and
+-- leaves the third alone, so that two keys pointing at each other cannot
+-- loop. get_string() is where the resolving happens and the field itself is
+-- untouched.
+local function resolve_field(self, value, depth)
+	if depth <= 1 and type(value) == "string" and #value > 3 and
+			string.sub(value, 1, 2) == "${" and
+			string.sub(value, -1) == "}" then
+		local key = string.sub(value, 3, -2)
+		return resolve_field(self, self.fields[key] or "", depth + 1)
+	end
+	return value
+end
+
 function MetaData:get_string(key)
-	return self.fields[key] or ""
+	return resolve_field(self, self.fields[key] or "", 0)
 end
 
 function MetaData:set_string(key, value)
@@ -48,7 +63,7 @@ function MetaData:set_string(key, value)
 end
 
 function MetaData:get_int(key)
-	return math.floor(tonumber(self.fields[key]) or 0)
+	return math.floor(tonumber(self:get_string(key)) or 0)
 end
 
 function MetaData:set_int(key, value)
@@ -56,11 +71,13 @@ function MetaData:set_int(key, value)
 end
 
 function MetaData:get_float(key)
-	return tonumber(self.fields[key]) or 0
+	return tonumber(self:get_string(key)) or 0
 end
 
 function MetaData:set_float(key, value)
-	self:set_string(key, tostring(value))
+	-- Every digit of it, which is what Luanti writes and what a mod that
+	-- compares two of them across a save expects: 0.3 is not "0.3"
+	self:set_string(key, string.format("%.17g", value))
 end
 
 function MetaData:get_keys()
@@ -142,29 +159,36 @@ end
 
 -- "default:stone 3 100" and the plainer forms of it. The quoted name and the
 -- trailing metadata Luanti's C++ parser also reads are the ceiling above.
+-- Name, count and wear, split on single spaces the way Luanti reads them --
+-- so " 3" is three of the empty item and not one of an item called 3, and a
+-- name with something after it that is not a number keeps the name
 local function parse_itemstring(s)
-	local name, count, wear = nil, 1, 0
-	local rest = s:match("^%s*(.-)%s*$")
-	if rest == "" then
+	if s == "" then
 		return "", 0, 0
 	end
 	local parts = {}
-	for part in rest:gmatch("%S+") do
-		parts[#parts + 1] = part
+	local start = 1
+	while true do
+		local i = string.find(s, " ", start, true)
+		if i == nil then
+			parts[#parts + 1] = string.sub(s, start)
+			break
+		end
+		parts[#parts + 1] = string.sub(s, start, i - 1)
+		start = i + 1
 	end
-	name = parts[1]
-	if parts[2] then
-		count = tonumber(parts[2]) or 1
-	end
-	if parts[3] then
-		wear = tonumber(parts[3]) or 0
-	end
+	local name = parts[1] or ""
+	local count = parts[2] and (tonumber(parts[2]) or 1) or 1
+	local wear = parts[3] and (tonumber(parts[3]) or 0) or 0
 	return name, count, wear
 end
 
 local function new_stack(name, count, wear, meta_fields)
 	local self = setmetatable({}, Stack)
-	self.name = name or ""
+	-- An alias is resolved when the stack is made, which is where Luanti
+	-- resolves it: a recipe whose output is an alias makes the item the
+	-- alias points at, and every name a mod compares against is the real one
+	self.name = (core.__aliases and core.__aliases[name]) or name or ""
 	self.count = count or 0
 	self.wear = wear or 0
 	self.meta = new_metadata(meta_fields)
@@ -217,8 +241,10 @@ end
 function Stack:set_count(count)
 	self.count = math.floor(tonumber(count) or 0)
 	if self.count <= 0 then
-		self.name = ""
-		self.count = 0
+		-- An empty stack is empty of everything, metadata included: Luanti
+		-- clears the lot, and a leftover that still carried a chest's
+		-- contents would not compare equal to nothing
+		self:clear()
 	end
 	return not self:is_empty()
 end
@@ -330,6 +356,16 @@ function Stack:get_definition()
 end
 
 function Stack:get_tool_capabilities()
+	-- What the stack's own metadata says wins, which is how a tool is worn
+	-- down into a weaker one or handed out with better numbers
+	local raw = self.meta:get_string("tool_capabilities")
+	if raw ~= "" then
+		local parsed = core.parse_json(raw)
+		if type(parsed) == "table" and
+				type(parsed.tool_capabilities) == "table" then
+			return parsed.tool_capabilities
+		end
+	end
 	local def = stack_definition(self)
 	return def.tool_capabilities or
 			(core.registered_items[""] or {}).tool_capabilities or {}
@@ -358,7 +394,8 @@ function Stack:item_fits(other)
 	if self:is_empty() then
 		return s.count <= s:get_stack_max(), nil
 	end
-	if self.name ~= s.name or self.wear ~= s.wear then
+	if self.name ~= s.name or self.wear ~= s.wear or
+			not self.meta:equals(s.meta) then
 		return false, s
 	end
 	local room = self:get_free_space()
@@ -383,7 +420,8 @@ function Stack:add_item(other)
 		left:set_count(s.count - taken)
 		return left
 	end
-	if self.name ~= s.name or self.wear ~= s.wear then
+	if self.name ~= s.name or self.wear ~= s.wear or
+			not self.meta:equals(s.meta) then
 		return s
 	end
 	local room = math.max(0, self:get_free_space())
@@ -484,7 +522,11 @@ function Inv:get_width(listname)
 end
 
 function Inv:set_width(listname, width)
-	self.widths[listname] = math.floor(tonumber(width) or 0)
+	width = math.floor(tonumber(width) or 0)
+	if width < 0 then
+		return false
+	end
+	self.widths[listname] = width
 	return true
 end
 
@@ -535,11 +577,13 @@ function Inv:get_lists()
 	return out
 end
 
+-- The lists it is given are the lists it has afterwards, which is what
+-- Luanti's does: a name that was not there is made, with as many slots as
+-- the list handed in
 function Inv:set_lists(lists)
 	for name, stacks in pairs(lists) do
-		if self.lists[name] then
-			self:set_list(name, stacks)
-		end
+		self:set_size(name, #stacks)
+		self:set_list(name, stacks)
 	end
 end
 
@@ -588,26 +632,31 @@ function Inv:contains_item(listname, stack, match_meta)
 	return false
 end
 
-function Inv:remove_item(listname, stack)
+-- From the end, which is the order Luanti takes them in, and what comes
+-- back is the first stack it took from with the rest counted onto it -- so
+-- it carries that stack's metadata however many stacks it came out of.
+-- With match_meta only the stacks whose metadata is the same as the one
+-- asked for are touched.
+function Inv:remove_item(listname, stack, match_meta)
 	local want = ItemStack(stack)
 	local taken = ItemStack()
 	local list = inv_list(self, listname)
-	if not list then
+	if not list or want:is_empty() then
 		return taken
 	end
-	-- From the end, which is the order Luanti takes them in
 	for i = #list, 1, -1 do
-		if taken:get_count() >= want:get_count() then
-			break
-		end
-		if list[i]:get_name() == want:get_name() then
-			local n = math.min(list[i]:get_count(),
-					want:get_count() - taken:get_count())
-			local got = list[i]:take_item(n)
-			if taken:is_empty() then
-				taken = got
-			else
-				taken:set_count(taken:get_count() + got:get_count())
+		local have = list[i]
+		if have:get_name() == want:get_name() and
+				(not match_meta or have:get_meta():equals(want:get_meta())) then
+			local still = want:get_count() - taken:get_count()
+			local got = have:take_item(still)
+			local leftover = taken:add_item(got)
+			-- What would not go on the stack is counted onto it anyway,
+			-- which is how Luanti allows an oversized one out and what
+			-- makes the metadata of the first stack the answer's
+			taken:set_count(taken:get_count() + leftover:get_count())
+			if taken:get_count() >= want:get_count() then
+				break
 			end
 		end
 	end

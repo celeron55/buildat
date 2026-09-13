@@ -833,6 +833,48 @@ two things M1 disproved about the build, are in
 
 M1 to M3 is where the module's shape is decided; everything after is surface
 area, and surface area is the part that can be added forever.
+## devtest's own unittests as the oracle (2026-09-13)
+
+devtest ships a `unittests` mod -- around forty tests of the server API,
+written by Luanti's own developers -- and it runs inside this module. A
+save whose `world.mt` has `devtest_unittests_autostart = true` runs the lot
+at load and prints a PASS/FAIL line each. There is no better check of this
+half of the module, and it should be run whenever the API surface changes.
+
+    cd Build && BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=<a save> \
+        bin/buildat_server -m ../games/luanti_launcher -D ../user
+
+What it found, and what was built because of it: `core.sha1`, `core.sha256`,
+`core.compress`/`core.decompress` with Luanti's three methods,
+`core.urlencode`, `core.parse_json`/`core.write_json`, `Settings(filename)`,
+a `core.get_game_info()` that reads the game's title, an exactly-Luanti
+`PseudoRandom`, the metadata `${reference}` rule, alias resolution in
+`ItemStack`, metadata-aware stack merging, `Inventory:remove_item`'s
+reverse-and-oversize rule, and the recipe tables `get_all_craft_recipes`
+answers with. Thirty-two of thirty-nine pass.
+
+**What does not pass, and why it is not a bug to fix:**
+
+- `lint_json_files` lints the `.json` files Luanti ships in `builtin/`. This
+  module vendors the parts of `builtin/` it runs and not the main menu, so
+  there are none to lint.
+- `test_gennotify_api` is the mapgen's, and there is no mapgen.
+- `test_str_pack_unpack` wants `string.pack`, which is Lua 5.3's. The Lua
+  here is Urho3D's 5.1.
+- `test_mapgen_env`, `test_handle_async`,
+  `test_portable_metatable_registration` and `test_async_job_replacement`
+  are all one thing: Luanti runs mapgen scripts and async jobs in Lua states
+  of their own, and there is one state here. A job runs where it was asked
+  for, an async environment is a globals table rather than a state, and
+  there is no queue for a job to wait in or be cancelled from. The upgrade
+  path is a second Lua state; the seam is `core.do_async_callback`,
+  `core.register_async_dofile` and `core.register_mapgen_script`.
+
+The suite stops at `test_dynamic_media`, which is where it waits for a
+player to join. Everything after that in `unittests.run_all` -- the tests
+that want a player, and then the ones that want the map -- is what the
+client half unlocks.
+
 ## Settled, and why -- not to be re-decided
 
 Worked out in full before M2 became code, and they govern what comes after it

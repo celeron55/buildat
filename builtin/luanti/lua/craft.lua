@@ -214,6 +214,10 @@ local function try_recipe(recipe, method, stacks, names, width)
 		if def == nil or def.type ~= "tool" then
 			return nil
 		end
+		-- A tool can say it is not repairable, and then it is not
+		if core.get_item_group(worn[1]:get_name(), "disable_repair") ~= 0 then
+			return nil
+		end
 		local out = repair(worn[1], worn[2], recipe.additional_wear)
 		if out == nil then
 			return nil
@@ -286,40 +290,72 @@ end
 -- What a recipe looks like from the other end: given an output, the items
 -- that make it. Luanti answers with the last registered one, and with a
 -- width of 0 for anything that is not shaped.
+-- What a recipe's cell is called from the outside: the name it points at,
+-- since an alias is resolved when a recipe is registered and everything
+-- asking about one asks about the real item
+local function spec_name(spec)
+	if spec == nil or spec == "" or string.match(spec, "^group:") then
+		return spec
+	end
+	return alias_of(spec)
+end
+
+-- The pairs of item names a recipe swaps out, as Luanti hands them back
+local function replacement_pairs(recipe)
+	local out = {}
+	for _, pair in ipairs(recipe.replacements or {}) do
+		out[#out + 1] = {spec_name(pair[1]), spec_name(pair[2])}
+	end
+	if #out == 0 then
+		return nil
+	end
+	return out
+end
+
+-- What Luanti answers with: the method it is crafted by -- "normal" for both
+-- of the grid kinds -- and the time only where there is one
 local function recipe_to_table(recipe)
 	local kind = recipe.type or "shaped"
-	if kind == "shaped" then
-		local grid, w = rows_to_grid(recipe.recipe or {})
+	if kind == "shaped" or kind == "shapeless" then
 		local items = {}
-		if grid then
-			for y = 1, #grid do
-				for x = 1, w do
-					items[(y - 1) * w + x] = grid[y][x]
+		local w = 0
+		if kind == "shaped" then
+			local grid
+			grid, w = rows_to_grid(recipe.recipe or {})
+			if grid then
+				for y = 1, #grid do
+					for x = 1, w do
+						items[(y - 1) * w + x] = spec_name(grid[y][x])
+					end
 				end
+			end
+		else
+			for i, spec in ipairs(recipe.recipe or {}) do
+				items[i] = spec_name(spec)
 			end
 		end
 		return {method = "normal", width = w or 0, items = items,
-				output = recipe.output, type = "shaped"}
+				output = recipe.output, type = "normal",
+				replacements = replacement_pairs(recipe)}
 	end
-	if kind == "shapeless" then
-		local items = {}
-		for i, spec in ipairs(recipe.recipe or {}) do
-			items[i] = spec
-		end
-		return {method = "normal", width = 0, items = items,
-				output = recipe.output, type = "shapeless"}
-	end
-	return {method = kind, width = 0, items = {recipe.recipe},
-			output = recipe.output or "", type = kind}
+	return {method = kind, width = 0, items = {spec_name(recipe.recipe)},
+			output = recipe.output or "", type = kind,
+			replacements = replacement_pairs(recipe),
+			time = kind == "cooking" and (recipe.cooktime or 3) or
+					(recipe.burntime or 1)}
 end
 
 local function output_matches(recipe, wanted)
+	local want = ItemStack(wanted)
+	-- A fuel recipe makes nothing, so nothing is what it is looked up by
+	if want:is_empty() then
+		return (recipe.type or "shaped") == "fuel"
+	end
 	if recipe.output == nil then
 		return false
 	end
 	local out = ItemStack(recipe.output)
-	local want = ItemStack(wanted)
-	if out:is_empty() or want:is_empty() then
+	if out:is_empty() then
 		return false
 	end
 	return alias_of(out:get_name()) == alias_of(want:get_name())

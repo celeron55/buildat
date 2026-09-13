@@ -49,6 +49,154 @@ end
 
 core.mkdir = __luanti_create_directories
 
+--
+-- The environments Luanti has more than one of
+--
+-- A mapgen script runs in an environment per emerge thread, an async job in
+-- one per worker, and the IPC is the table they share with the main one.
+--
+-- simplified: there is one Lua state here, so a mapgen script runs in it,
+-- an async job runs where it was asked for, and the IPC is a table. What
+-- this gives up is the isolation -- a mapgen script here can see and change
+-- what the main environment has, which Luanti's cannot -- and the
+-- parallelism, which was never what a mod asks these for first. The upgrade
+-- path is a second Lua state, and the seam is exactly these three
+-- functions.
+
+local ipc_values = {}
+
+function core.ipc_get(key)
+	return ipc_values[key]
+end
+
+function core.ipc_set(key, value)
+	ipc_values[key] = value
+end
+
+function core.ipc_cas(key, old_value, new_value)
+	if ipc_values[key] ~= old_value then
+		return false
+	end
+	ipc_values[key] = new_value
+	return true
+end
+
+-- Nothing else is running, so what is there now is the whole answer and the
+-- timeout has nothing to wait for
+function core.ipc_poll(key, timeout)
+	return ipc_values[key] ~= nil
+end
+
+-- What the vendored builtin's core.handle_async() is written on: the job
+-- runs now and the callback comes on a later step, which is where Luanti's
+-- arrives and what a mod's ordering is written against.
+local next_async_id = 1
+
+local function pack_results(...)
+	return {n = select("#", ...), ...}
+end
+
+-- The environment an async job runs in. Luanti gives it a Lua state of its
+-- own with a smaller core table in it; this is a globals table of its own
+-- with the main one behind it, which is the same thing about writes -- what
+-- a job puts in a global stays in here -- and not the same thing about
+-- reads, since everything the main environment has is still visible through
+-- it. A mod that asks whether core.set_node is there will find it.
+--
+-- The core table an async environment sees is the main one with one thing
+-- taken off it: registering a portable metatable, which the vendored
+-- builtin keeps one registry of and refuses to let a name be registered
+-- into twice. Between two Lua states that refusal is right -- each has its
+-- own registry -- and with one state it turns a mod that registers the same
+-- metatable in both environments, which is the normal way to write one,
+-- into an error. So the async side of that registration goes nowhere.
+local async_env
+local async_core = setmetatable({
+	register_portable_metatable = function(name, mt) end,
+}, {__index = function(t, k)
+	return core[k]
+end})
+
+async_env = setmetatable({core = async_core, minetest = async_core},
+		{__index = _G})
+
+function core.register_async_dofile(path)
+	local chunk, err = loadfile(path)
+	if not chunk then
+		core.log("error", "register_async_dofile(): " .. tostring(err))
+		return
+	end
+	setfenv(chunk, async_env)
+	chunk()
+end
+
+-- One worker, which is this one: the jobs run where they were asked for
+function core.get_async_threading_capacity()
+	return 1
+end
+
+function core.do_async_callback(func, args, mod_origin)
+	local id = next_async_id
+	next_async_id = id + 1
+	local was = getfenv(func)
+	setfenv(func, async_env)
+	local r = pack_results(pcall(func, unpack(args, 1, args.n)))
+	setfenv(func, was)
+	core.after(0, function()
+		if not r[1] then
+			core.log("error", "async job " .. id .. ": " .. tostring(r[2]))
+			core.async_jobs[id] = nil
+			return
+		end
+		local retval = {n = r.n - 1}
+		for i = 2, r.n do
+			retval[i - 1] = r[i]
+		end
+		core.async_event_handler(id, retval)
+	end)
+	return id
+end
+
+-- The job has already run by the time anything could cancel it
+function core.cancel_async_callback(id)
+	return false
+end
+
+-- What crosses the boundary between environments. Here nothing crosses
+-- anything, so a value goes through as a copy of itself -- cycles and
+-- metatables and all, which is what the boundary promises. The registry of
+-- portable metatables is the vendored builtin's own and is left to it.
+local function deep_copy(value, seen)
+	if type(value) ~= "table" then
+		return value
+	end
+	if seen[value] then
+		return seen[value]
+	end
+	local out = setmetatable({}, getmetatable(value))
+	seen[value] = out
+	for k, v in pairs(value) do
+		out[deep_copy(k, seen)] = deep_copy(v, seen)
+	end
+	return out
+end
+
+function core.serialize_roundtrip(value)
+	return deep_copy(value, {})
+end
+
+local mapgen_scripts_warned = false
+
+function core.register_mapgen_script(path)
+	if not mapgen_scripts_warned then
+		mapgen_scripts_warned = true
+		core.log("warning", "core.register_mapgen_script(): the script runs "
+				.. "in the main environment, which has more in it than a "
+				.. "mapgen environment does")
+	end
+	dofile(path)
+end
+
 core.sha1 = __luanti_sha1
 core.sha256 = __luanti_sha256
 core.compress = __luanti_compress
@@ -730,10 +878,8 @@ local STUBS_NIL = {
 	"dynamic_add_media", "get_mod_data", "set_mod_data", "get_mod_data_path",
 	-- Not in this at all: HTTP, IPC, the async environment, mod channels,
 	-- SSCSM, translations beyond passing strings through
-	"request_http_api", "set_http_api_lua", "ipc_get", "ipc_set", "ipc_cas",
-	"ipc_poll", "mod_channel_join", "register_async_dofile",
-	"register_mapgen_script", "register_sscsm", "do_async_callback",
-	"serialize_roundtrip", "get_globals_to_transfer",
+	"request_http_api", "set_http_api_lua",
+	"mod_channel_join", "register_sscsm", "get_globals_to_transfer",
 }
 
 for _, name in ipairs(STUBS_NIL) do
@@ -1736,6 +1882,7 @@ dofile(module_path .. "/lua/png.lua")
 dofile(module_path .. "/lua/misc.lua")
 dofile(module_path .. "/lua/entity.lua")
 dofile(module_path .. "/lua/craft.lua")
+dofile(module_path .. "/lua/json.lua")
 dofile(module_path .. "/lua/check_map.lua")
 
 -- vim: set noet ts=4 sw=4:
