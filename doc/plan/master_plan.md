@@ -74,9 +74,8 @@ first thing to run after touching the API surface.
 What is left is, in order:
 
 1. **The client half.** It is what M3, M4 and M5 each say is left of them:
-   an object is a box rather than what it looks like, and a `list[]` that is
-   not the player's own draws empty. Six pieces of it are built as of
-   2026-09-13: a click is a dig --
+   an object is a box rather than what it looks like. Seven pieces of it are
+   built as of 2026-09-13: a click is a dig --
    `games/luanti_launcher`'s viewer points at a node and the module digs it,
    which is the shape the rest follows: the client decides what was pointed
    at, the server decides what that means -- the digger is the player who
@@ -85,10 +84,11 @@ What is left is, in order:
    being sent, the player's inventory reaches their own client, and the
    formspecs are drawn: a mod's window is on the screen and what was pressed
    in it comes back, and a stack is picked up in one slot and put down in
-   another, and the right button places what is wielded or uses what is
-   pointed at -- so a node dug is a node that can be put back. What is left
-   of that one is a chest's inventory rather than the player's, which wants
-   the allow_/on_ callbacks around a move.
+   another, the right button places what is wielded or uses what is pointed
+   at -- so a node dug is a node that can be put back -- and a chest opens,
+   with its own slots, its own callbacks around a move and its own fields.
+   What is left of that one is a detached inventory, which is nobody's here
+   and draws empty.
    The fork's shape is settled -- which files are copied, which are dropped,
    and that `world.lua` loses a fifth of itself to `voxelworld` -- and
    `init.lua`'s three-way split is the largest unexamined piece of it. See

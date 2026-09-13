@@ -2794,7 +2794,7 @@ struct Module: public interface::Module, public luanti::Interface
 	{
 		Module *self = module_of(L);
 		sv_<ss_> flat;
-		for(int i = 1; i <= 3; i++){
+		for(int i = 1; i <= 4; i++){
 			size_t len = 0;
 			const char *p = luaL_checklstring(L, i, &len);
 			flat.push_back(ss_(p ? p : "", len));
@@ -2802,6 +2802,31 @@ struct Module: public interface::Module, public luanti::Interface
 		ss_ name = flat[0];
 		flat.erase(flat.begin());
 		self->send_to_player(name, "luanti:formspec", flat);
+		return 0;
+	}
+
+	// __luanti_send_node_inventory(player_name, {pos, list, size, item, ...}):
+	// what is in the node the player's open form is about, to that one
+	// client. The position leads because it is what says which node the
+	// lists belong to; the rest is shaped the way a player's own lists are.
+	static int l_send_node_inventory(lua_State *L)
+	{
+		Module *self = module_of(L);
+		size_t name_len = 0;
+		const char *name_p = luaL_checklstring(L, 1, &name_len);
+		ss_ name(name_p ? name_p : "", name_len);
+		luaL_checktype(L, 2, LUA_TTABLE);
+		sv_<ss_> flat;
+		size_t n = lua_objlen(L, 2);
+		flat.reserve(n);
+		for(size_t i = 0; i < n; i++){
+			lua_rawgeti(L, 2, (int)i + 1);
+			size_t len = 0;
+			const char *p = lua_tolstring(L, -1, &len);
+			flat.push_back(ss_(p ? p : "", p ? len : 0));
+			lua_pop(L, 1);
+		}
+		self->send_to_player(name, "luanti:node_inventory", flat);
 		return 0;
 	}
 
@@ -3654,6 +3679,8 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_send_inventory", l_send_inventory);
 		set_global_cfunction("__luanti_show_formspec", l_show_formspec);
 		set_global_cfunction("__luanti_player_formspec", l_player_formspec);
+		set_global_cfunction("__luanti_send_node_inventory",
+				l_send_node_inventory);
 		lua_pushlightuserdata(m_lua, (void*)this);
 		lua_setfield(m_lua, LUA_REGISTRYINDEX, "__luanti_module");
 		set_global_string("__luanti_module_path", module_path());

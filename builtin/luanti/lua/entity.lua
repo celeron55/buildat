@@ -37,6 +37,7 @@ local __show_objects = __luanti_show_objects
 local __send_inventory = __luanti_send_inventory
 local __show_formspec = __luanti_show_formspec
 local __player_formspec = __luanti_player_formspec
+local __send_node_inventory = __luanti_send_node_inventory
 
 -- What an entity gets until its initial_properties and set_properties say
 -- otherwise. The names are Luanti's, and the ones nothing here reads are
@@ -784,6 +785,90 @@ function core.__load_players(data)
 	return n
 end
 
+--
+-- Formspecs
+--
+-- The window a mod puts on a player's screen: a string of elements the client
+-- draws and sends back what was pressed in. Nothing here knows what one looks
+-- like -- builtin/luanti/client_lua does.
+
+-- Which node a player's open form is about, when it is about one. Luanti
+-- calls it the form's context, and "current_name" in a formspec means it;
+-- the fields of such a form go to the node rather than to the global
+-- callbacks, and so do its inventory lists.
+local form_nodes = {}
+
+local function pos_string(pos)
+	return math.floor(pos.x) .. "," .. math.floor(pos.y) .. "," ..
+			math.floor(pos.z)
+end
+
+function core.show_formspec(playername, formname, formspec)
+	if type(playername) ~= "string" or type(formspec) ~= "string" then
+		return false
+	end
+	form_nodes[playername] = nil
+	__show_formspec(playername, tostring(formname or ""), formspec, "")
+	return true
+end
+
+-- The form a node carries in its own metadata, which is what a chest is.
+-- Luanti's client opens one itself; here the server does, because the node
+-- metadata is the server's.
+local function show_node_formspec(playername, pos, formspec)
+	form_nodes[playername] = {x = math.floor(pos.x), y = math.floor(pos.y),
+			z = math.floor(pos.z)}
+	__show_formspec(playername, "", formspec,
+			pos_string(form_nodes[playername]))
+end
+
+-- An empty formspec is "take it away", which is what Luanti's own protocol
+-- says too
+function core.close_formspec(playername, formname)
+	if type(playername) ~= "string" then
+		return false
+	end
+	form_nodes[playername] = nil
+	__show_formspec(playername, tostring(formname or ""), "", "")
+	return true
+end
+
+-- What comes back, as the module hands it over: the player it was, the form
+-- it was, and the fields. Luanti runs these in reverse registration order and
+-- stops at the first one that says it handled the form.
+function core.__player_receive_fields(playername, formname, fields)
+	local id = players[playername]
+	local ref = id and core.object_refs[id]
+	if not ref then
+		return
+	end
+	-- A form a node carries goes to that node, which is where Luanti sends
+	-- the fields of one too, and nowhere else
+	local at = form_nodes[playername]
+	if at then
+		local def = core.registered_nodes[core.get_node(at).name]
+		if def and def.on_receive_fields then
+			local ok, err = pcall(def.on_receive_fields, at, formname, fields,
+					ref)
+			if not ok then
+				core.log("error", "on_receive_fields: " .. tostring(err))
+			end
+		end
+		if fields.quit then
+			form_nodes[playername] = nil
+		end
+		return
+	end
+	for _, cb in ipairs(core.registered_on_player_receive_fields or {}) do
+		local ok, handled = pcall(cb, ref, formname, fields)
+		if not ok then
+			core.log("error", "on_player_receive_fields: " .. tostring(handled))
+		elseif handled then
+			return
+		end
+	end
+end
+
 -- What the other mouse button comes to: core.item_place(), which is the
 -- vendored builtin's own -- so the pointed node's on_rightclick wins if it
 -- has one and is not overridden, and the player's wielded item is placed
@@ -797,6 +882,14 @@ function core.__use_node(playername, under, above)
 	local ref = id and core.object_refs[id]
 	if not ref then
 		return false
+	end
+	-- A node with a formspec in its metadata opens it, which is what
+	-- Luanti's own client does before it asks the server to place anything
+	local meta = core.get_meta(under)
+	local spec = meta and meta:get_string("formspec") or ""
+	if spec ~= "" then
+		show_node_formspec(playername, under, spec)
+		return true
 	end
 	local pointed = {type = "node", under = under, above = above}
 	local wielded = ref:get_wielded_item()
@@ -823,12 +916,103 @@ end
 -- with more done about it; see "what is left of M4" in
 -- doc/plan/luanti_module_plan.md.
 
-local function inventory_at(ref, location)
+-- The inventory a formspec location names, and the node position if it is a
+-- node's. "current_name" and "context" are the node the open form is about.
+local function inventory_at(ref, playername, location)
 	if location == "current_player" or
 			string.sub(location, 1, 7) == "player:" then
-		return ref:get_inventory()
+		return ref:get_inventory(), nil
 	end
-	return nil
+	local pos = nil
+	if location == "current_name" or location == "context" then
+		pos = form_nodes[playername]
+	else
+		local x, y, z = string.match(location,
+				"^nodemeta:(-?%d+),(-?%d+),(-?%d+)$")
+		if x then
+			pos = {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
+		end
+	end
+	if not pos then
+		return nil, nil
+	end
+	local meta = core.get_meta(pos)
+	return meta and meta:get_inventory() or nil, pos
+end
+
+local function same_pos(a, b)
+	return a and b and a.x == b.x and a.y == b.y and a.z == b.z
+end
+
+-- How much of a move the nodes it touches allow. Luanti asks the node a
+-- stack leaves and the node it goes to; a number is a limit and anything
+-- below zero is none at all.
+local function allowed_count(ref, playername, from_pos, from_list, from_i,
+		to_pos, to_list, to_i, count, stack)
+	local function ask(f, ...)
+		if not f then
+			return count
+		end
+		local ok, n = pcall(f, ...)
+		if not ok then
+			core.log("error", "allow_metadata_inventory: " .. tostring(n))
+			return 0
+		end
+		if type(n) ~= "number" then
+			return count
+		end
+		if n < 0 then
+			-- Luanti's own "no limit"
+			return count
+		end
+		return math.min(count, n)
+	end
+	if same_pos(from_pos, to_pos) then
+		local def = core.registered_nodes[core.get_node(from_pos).name]
+		return ask(def and def.allow_metadata_inventory_move, from_pos,
+				from_list, from_i, to_list, to_i, count, ref)
+	end
+	if from_pos then
+		local def = core.registered_nodes[core.get_node(from_pos).name]
+		count = ask(def and def.allow_metadata_inventory_take, from_pos,
+				from_list, from_i, stack, ref)
+	end
+	if to_pos and count > 0 then
+		local def = core.registered_nodes[core.get_node(to_pos).name]
+		count = ask(def and def.allow_metadata_inventory_put, to_pos, to_list,
+				to_i, stack, ref)
+	end
+	return count
+end
+
+-- And what the nodes are told once it has happened
+local function moved(ref, from_pos, from_list, from_i, to_pos, to_list, to_i,
+		count, stack)
+	local function tell(f, ...)
+		if not f then
+			return
+		end
+		local ok, err = pcall(f, ...)
+		if not ok then
+			core.log("error", "on_metadata_inventory: " .. tostring(err))
+		end
+	end
+	if same_pos(from_pos, to_pos) then
+		local def = core.registered_nodes[core.get_node(from_pos).name]
+		tell(def and def.on_metadata_inventory_move, from_pos, from_list,
+				from_i, to_list, to_i, count, ref)
+		return
+	end
+	if from_pos then
+		local def = core.registered_nodes[core.get_node(from_pos).name]
+		tell(def and def.on_metadata_inventory_take, from_pos, from_list,
+				from_i, stack, ref)
+	end
+	if to_pos then
+		local def = core.registered_nodes[core.get_node(to_pos).name]
+		tell(def and def.on_metadata_inventory_put, to_pos, to_list, to_i,
+				stack, ref)
+	end
 end
 
 -- Returns whether anything moved. count of zero is the whole stack.
@@ -904,58 +1088,41 @@ function core.__inventory_action(playername, a)
 	if not ref or type(a) ~= "table" or a[1] ~= "move" then
 		return
 	end
-	local from_inv = inventory_at(ref, a[2] or "")
-	local to_inv = inventory_at(ref, a[5] or "")
+	local from_inv, from_pos = inventory_at(ref, playername, a[2] or "")
+	local to_inv, to_pos = inventory_at(ref, playername, a[5] or "")
 	if not from_inv or not to_inv then
 		core.log("verbose", "inventory action: " .. tostring(a[2]) .. " -> " ..
-				tostring(a[5]) .. " is not a player's own inventory")
+				tostring(a[5]) .. " is not an inventory this player has")
 		return
 	end
-	move_stack(from_inv, a[3] or "", tonumber(a[4]) or 0,
-			to_inv, a[6] or "", tonumber(a[7]) or 0, tonumber(a[8]) or 0)
-end
-
---
--- Formspecs
---
--- The window a mod puts on a player's screen: a string of elements the client
--- draws and sends back what was pressed in. Nothing here knows what one looks
--- like -- builtin/luanti/client_lua does.
-
-function core.show_formspec(playername, formname, formspec)
-	if type(playername) ~= "string" or type(formspec) ~= "string" then
-		return false
-	end
-	__show_formspec(playername, tostring(formname or ""), formspec)
-	return true
-end
-
--- An empty formspec is "take it away", which is what Luanti's own protocol
--- says too
-function core.close_formspec(playername, formname)
-	if type(playername) ~= "string" then
-		return false
-	end
-	__show_formspec(playername, tostring(formname or ""), "")
-	return true
-end
-
--- What comes back, as the module hands it over: the player it was, the form
--- it was, and the fields. Luanti runs these in reverse registration order and
--- stops at the first one that says it handled the form.
-function core.__player_receive_fields(playername, formname, fields)
-	local id = players[playername]
-	local ref = id and core.object_refs[id]
-	if not ref then
+	local from_list, from_i = a[3] or "", tonumber(a[4]) or 0
+	local to_list, to_i = a[6] or "", tonumber(a[7]) or 0
+	local count = tonumber(a[8]) or 0
+	local stack = from_inv:get_stack(from_list, from_i)
+	if stack:is_empty() then
 		return
 	end
-	for _, cb in ipairs(core.registered_on_player_receive_fields or {}) do
-		local ok, handled = pcall(cb, ref, formname, fields)
-		if not ok then
-			core.log("error", "on_player_receive_fields: " .. tostring(handled))
-		elseif handled then
+	if count <= 0 or count > stack:get_count() then
+		count = stack:get_count()
+	end
+	if from_pos or to_pos then
+		local moving = ItemStack(stack)
+		moving:set_count(count)
+		count = allowed_count(ref, playername, from_pos, from_list, from_i,
+				to_pos, to_list, to_i, count, moving)
+		if count <= 0 then
 			return
 		end
+	end
+	if not move_stack(from_inv, from_list, from_i, to_inv, to_list, to_i,
+			count) then
+		return
+	end
+	if from_pos or to_pos then
+		local moved_stack = ItemStack(stack)
+		moved_stack:set_count(count)
+		moved(ref, from_pos, from_list, from_i, to_pos, to_list, to_i, count,
+				moved_stack)
 	end
 end
 
@@ -1336,21 +1503,38 @@ end
 --
 -- The lists go over flat: a name, how many slots it has, and then that many
 -- item strings. What reads them is the module's client half.
+local function flatten_lists(inv, flat)
+	for list_name, stacks in pairs(inv:get_lists()) do
+		flat[#flat + 1] = list_name
+		flat[#flat + 1] = tostring(#stacks)
+		for _, stack in ipairs(stacks) do
+			flat[#flat + 1] = stack:to_string()
+		end
+	end
+	return flat
+end
+
 local function send_inventories()
 	for name, id in pairs(players) do
 		local o = objects[id]
 		local inv = o and o.inventory
 		if inv and inv.gen ~= o.sent_inventory_gen then
 			o.sent_inventory_gen = inv.gen
-			local flat = {}
-			for list_name, stacks in pairs(inv:get_lists()) do
-				flat[#flat + 1] = list_name
-				flat[#flat + 1] = tostring(#stacks)
-				for _, stack in ipairs(stacks) do
-					flat[#flat + 1] = stack:to_string()
-				end
+			__send_inventory(name, flatten_lists(inv, {}))
+		end
+		-- And the node the open form is about, which is a chest's slots.
+		-- What is drawn is only ever the one form's node, so one is enough.
+		local at = o and form_nodes[name]
+		local node_inv = at and core.get_meta(at):get_inventory() or nil
+		if node_inv then
+			local key = pos_string(at)
+			if o.sent_node_at ~= key or node_inv.gen ~= o.sent_node_gen then
+				o.sent_node_at = key
+				o.sent_node_gen = node_inv.gen
+				__send_node_inventory(name, flatten_lists(node_inv, {key}))
 			end
-			__send_inventory(name, flat)
+		elseif o then
+			o.sent_node_at = nil
 		end
 		-- The form the player's own inventory key opens, when a mod has
 		-- changed it. It is sent when it changes rather than when it is

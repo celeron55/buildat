@@ -886,12 +886,20 @@ two things M1 disproved about the build, are in
   swapping onto a different item, what does not fit going back -- is checked
   at every start.
 
-  **What is left of M4:** a `list[]` that is not the player's. A node's
-  inventory and a detached one want the `allow_`/`on_` callbacks around a
-  move, and the client has to be sent what is in them, so a chest's form
-  draws empty slots until then. And what is picked up is what is put down:
-  Luanti puts a single item down with the right button and ten with the
-  middle, which is a count on the way down as well as on the way up.
+  **Built: a chest (2026-09-13).** A node with a `formspec` in its metadata
+  opens it when it is right-clicked -- Luanti's own client does that itself,
+  and here the server does, because the node metadata is the server's. The
+  form remembers which node it is about, which is what `current_name` means
+  in one; the node's lists are sent to that client and kept up to date the
+  way the player's own are, the fields go to the node's `on_receive_fields`
+  rather than to the global callbacks, and a move touching a node asks its
+  `allow_metadata_inventory_move`/`_put`/`_take` first and tells its `on_`
+  half afterwards.
+
+  **What is left of M4:** a detached inventory, which is nobody's here and
+  draws empty. And what is picked up is what is put down: Luanti puts a
+  single item down with the right button and ten with the middle, which is a
+  count on the way down as well as on the way up.
 - **M5 -- it lives. Built 2026-09-13.** ABMs, LBMs, entities, `core.after`.
   Success is `testabms` and `testentities` behaving.
 
