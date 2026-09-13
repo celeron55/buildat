@@ -339,10 +339,6 @@ every world the module makes is still empty.
   with the right button and ten with the middle; what is picked up is what
   is put down here. A count on the way down as well as up, in the packet
   that already exists.
-- **A scrolling save list** (`games/luanti_launcher`). The menu shows the
-  twelve most recent saves because `ui_utils.vertical_menu` does not scroll.
-  Whatever is built for it belongs in `ui_utils`, since it is the same
-  widget every menu in this tree uses.
 - **glTF, the mesh format nobody has a reader for** (`builtin/luanti`). Ten
   of devtest's thirty mesh references are `.x`, `.gltf` or `.glb`, mostly
   its dedicated glTF test mod, and a node naming one keeps its cube. The
@@ -358,8 +354,11 @@ every world the module makes is still empty.
   `compose_image` has the `shear` op and `extensions/luanti_client` has the
   three-tile version to copy.
 
-The client preferences screen that was here is built; see
-`doc/plan/master_plan_history.md`.
+The client preferences screen that was here is built, and so is the save
+list: `ui_utils.add_paged()` puts a page of items on a menu and the two
+buttons that move between pages, and the launcher lists every save twelve
+to a page. See `doc/plan/master_plan_history.md` for the preferences
+screen.
 
 ## Think about later
 
