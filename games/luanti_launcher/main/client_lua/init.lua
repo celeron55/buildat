@@ -294,7 +294,7 @@ local wielded_text = hud_text(14)
 wielded_text:SetText("")
 wielded_text.horizontalAlignment = magic.HA_CENTER
 wielded_text.verticalAlignment = magic.VA_BOTTOM
-wielded_text:SetPosition(0, -8 - SLOT - 6)
+wielded_text:SetPosition(0, -(8 + SLOT + 30))
 
 local function draw_hotbar()
 	for i = 1, HOTBAR_SLOTS do
@@ -423,6 +423,60 @@ luanti.sub_time(function(tod, speed)
 end)
 
 --
+-- Under water
+--
+-- Luanti tints the screen and closes the fog in when the camera is in a
+-- liquid, which is the only thing that says you are swimming rather than
+-- walking. What counts as a liquid is the registry's own is_liquid, so a
+-- game's lava does this as much as its water does -- in that game's own
+-- colour, which is the liquid's own texture averaged out.
+local water_tint = magic.ui.root:CreateChild("BorderImage")
+water_tint.color = magic.Color(0.15, 0.35, 0.65, 0.35)
+water_tint.visible = false
+water_tint.priority = -500
+
+local UNDERWATER_FOG = 40
+
+local function voxel_liquid_at(p)
+	local v = voxelworld.get_static_voxel(p)
+	if v == nil then
+		return nil
+	end
+	local reg = voxelworld.get_voxel_registry()
+	local id = reg:id_of(v)
+	if id == 0 then
+		return nil
+	end
+	local def = reg:get_by_id(id)
+	if def == nil or not def.is_liquid then
+		return nil
+	end
+	return def
+end
+
+local underwater = false
+
+local function update_underwater(eye)
+	local def = voxel_liquid_at(eye)
+	local now = def ~= nil
+	if now == underwater then
+		return
+	end
+	underwater = now
+	water_tint.visible = now
+	if now then
+		water_tint.texture = game_texture(WHITE)
+		water_tint.size = magic.IntVector2(magic.ui.root.width,
+				magic.ui.root.height)
+		zone.fogStart = 2
+		zone.fogEnd = UNDERWATER_FOG
+	else
+		zone.fogStart = FAR_CLIP * 0.6
+		zone.fogEnd = FAR_CLIP
+	end
+end
+
+--
 -- The player
 --
 -- What stops the player is the registry's own physically_solid, so glass
@@ -529,9 +583,9 @@ local chat_text = hud_text(14)
 chat_text:SetText("")
 chat_text.horizontalAlignment = magic.HA_LEFT
 chat_text.verticalAlignment = magic.VA_BOTTOM
--- Above the hotbar and the name of what is in hand, which are what is at
--- the bottom of the screen
-chat_text:SetPosition(8, -(8 + SLOT + 26))
+-- Above the hotbar, the bars and the name of what is in hand, which are
+-- what is at the bottom of the screen
+chat_text:SetPosition(8, -(8 + SLOT + 52))
 chat_text.color = magic.Color(1.0, 1.0, 0.9)
 
 local chat_input = nil
@@ -723,7 +777,9 @@ end
 -- ships is drawn by the statbar elements above.
 local function draw_own_bars()
 	local stats = luanti.stats
-	local function bar(index, value, max, colour)
+	-- Just above the hotbar, which is where Luanti puts them: what the
+	-- player has on the left, how much breath is left on the right
+	local function bar(left, value, max, colour)
 		if max <= 0 then
 			return
 		end
@@ -734,7 +790,7 @@ local function draw_own_bars()
 		back.size = magic.IntVector2(w, h)
 		back.horizontalAlignment = magic.HA_CENTER
 		back.verticalAlignment = magic.VA_BOTTOM
-		back:SetPosition(-w - 12, -(8 + SLOT + 26 + index * (h + 3)))
+		back:SetPosition(left and (-w - 6) or 6, -(8 + SLOT + 4))
 		local fill = back:CreateChild("BorderImage")
 		fill.texture = game_texture(WHITE)
 		fill.color = colour
@@ -742,11 +798,12 @@ local function draw_own_bars()
 				math.max(0, math.floor(w * value / max)), h)
 	end
 	if luanti.hud_flag("healthbar") then
-		bar(0, stats.hp, stats.hp_max, magic.Color(0.85, 0.15, 0.15))
+		bar(true, stats.hp, stats.hp_max, magic.Color(0.85, 0.15, 0.15))
 	end
 	-- Luanti shows the breath only while the player is short of it
 	if luanti.hud_flag("breathbar") and stats.breath < stats.breath_max then
-		bar(1, stats.breath, stats.breath_max, magic.Color(0.3, 0.6, 1.0))
+		bar(false, stats.breath, stats.breath_max,
+				magic.Color(0.3, 0.6, 1.0))
 	end
 end
 
@@ -1085,6 +1142,8 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	camera_node.position = magic.Vector3(player.x,
 			player.y + player_physics.EYE_HEIGHT, player.z)
 	camera_node.rotation = magic.Quaternion(pitch, yaw, 0)
+	update_underwater(buildat.Vector3(player.x,
+			player.y + player_physics.EYE_HEIGHT, player.z))
 end)
 
 log:info("luanti_launcher client ready")
