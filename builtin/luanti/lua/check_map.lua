@@ -13,6 +13,18 @@ local CHECK_POS = {x = 1, y = 2, z = 3}
 local EMPTY_POS = {x = 5, y = 6, z = 7}
 local AREA_MIN = {x = 10, y = 10, z = 10}
 local AREA_MAX = {x = 14, y = 14, z = 14}
+-- A box that crosses a chunk boundary (every 32 voxels) and a section
+-- boundary (every 64), because a region read is one read per chunk stitched
+-- together and the stitching is the part that can be wrong. Four corners of
+-- it get a node and the read has to find exactly those four.
+local SEAM_MIN = {x = 30, y = 2, z = 62}
+local SEAM_MAX = {x = 34, y = 2, z = 66}
+local SEAM_CORNERS = {
+	{x = 31, y = 2, z = 63},
+	{x = 32, y = 2, z = 63},
+	{x = 31, y = 2, z = 64},
+	{x = 32, y = 2, z = 64},
+}
 local check_name = nil
 
 -- The clock is pure Lua and needs no flush, so it is checked here rather than
@@ -119,6 +131,9 @@ function core.__check_map_write()
 			-- air, so without this it would be right by finding nothing.
 			core.set_node({x = x, y = AREA_MIN.y + 2, z = z}, {name = "air"})
 		end
+	end
+	for _, p in ipairs(SEAM_CORNERS) do
+		core.set_node(p, {name = check_name})
 	end
 	check_clock()
 	check_after()
@@ -229,11 +244,34 @@ function core.__check_map_read()
 		error("check_map: " .. #air_under .. " air voxels are under air")
 	end
 
+	-- The four either side of a chunk and a section boundary, out of one
+	-- read that spans both
+	local seam = core.find_nodes_in_area(SEAM_MIN, SEAM_MAX, {check_name})
+	if #seam ~= #SEAM_CORNERS then
+		error("check_map: the read across a chunk and a section boundary " ..
+				"found " .. #seam .. " of " .. #SEAM_CORNERS)
+	end
+	for _, want in ipairs(SEAM_CORNERS) do
+		local got = false
+		for _, p in ipairs(seam) do
+			if p.x == want.x and p.y == want.y and p.z == want.z then
+				got = true
+			end
+		end
+		if not got then
+			error("check_map: the read across the boundaries lost (" ..
+					want.x .. "," .. want.y .. "," .. want.z .. ")")
+		end
+	end
+
 	core.set_node(CHECK_POS, {name = "air"})
 	for x = AREA_MIN.x + 1, AREA_MIN.x + 2 do
 		for z = AREA_MIN.z + 1, AREA_MIN.z + 2 do
 			core.set_node({x = x, y = AREA_MIN.y + 1, z = z}, {name = "air"})
 		end
+	end
+	for _, p in ipairs(SEAM_CORNERS) do
+		core.set_node(p, {name = "air"})
 	end
 	core.log("verbose", "check_map: " .. check_name ..
 			" survived the flush, and the region reads found it")

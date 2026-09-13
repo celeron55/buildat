@@ -891,12 +891,20 @@ struct Module: public interface::Module, public luanti::Interface
 		if(!m_scene)
 			return;
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
+			// One read for the box rather than one per voxel: what asks for
+			// this is a sweep -- an ABM, a find_nodes_in_area -- and the
+			// difference is a clip per chunk against a section and buffer
+			// lookup per voxel
+			interface::VoxelVolume vol = world->get_volume(pv::Region(
+					pv::Vector3DInt32(x0, y0, z0),
+					pv::Vector3DInt32(x1, y1, z1)));
+			interface::VoxelVolume::Sampler src(&vol);
 			size_t i = 0;
 			for(int32_t z = z0; z <= z1; z++){
 				for(int32_t y = y0; y <= y1; y++){
-					for(int32_t x = x0; x <= x1; x++){
-						out[i++] = world->get_voxel(
-								pv::Vector3DInt32(x, y, z), true).data;
+					src.setPosition(x0, y, z);
+					for(int32_t x = x0; x <= x1; x++, src.movePositiveX()){
+						out[i++] = src.getVoxel().data;
 					}
 				}
 			}
@@ -2799,10 +2807,13 @@ struct Module: public interface::Module, public luanti::Interface
 				sm_<uint16_t, const ss_*> names_by_id;
 				for(const auto &pair : block.names)
 					names_by_id[pair.first] = &pair.second;
-				pv::Vector3DInt16 section_p(
-						floordiv(x0, sx), floordiv(y0, sy), floordiv(z0, sz));
-				if(!world->is_section_loaded(section_p))
-					world->load_or_generate_section(section_p);
+				// The block as a volume and one write, rather than a
+				// section and buffer lookup per voxel. A voxel this leaves
+				// undefined -- an "ignore", which is Luanti for "nothing
+				// has generated this" -- is a hole set_volume() skips.
+				interface::VoxelVolume vol(pv::Region(
+						pv::Vector3DInt32(x0, y0, z0),
+						pv::Vector3DInt32(x1, y1, z1)));
 				for(int32_t z = z0; z <= z1; z++)
 				for(int32_t y = y0; y <= y1; y++)
 				for(int32_t x = x0; x <= x1; x++){
@@ -2818,11 +2829,11 @@ struct Module: public interface::Module, public luanti::Interface
 					f.light_sky.set(word, block.param1[i] & 0x0f);
 					f.light_lamp.set(word, (block.param1[i] >> 4) & 0x0f);
 					f.param.set(word, block.param2[i]);
-					world->set_voxel(pv::Vector3DInt32(x, y, z),
-							interface::VoxelInstance(word), true);
+					vol.setVoxelAt(x, y, z, interface::VoxelInstance(word));
 					nodes_written++;
 					counts[*names_by_id[raw_id]]++;
 				}
+				world->set_volume(vol, true);
 				// What hangs off the nodes: a chest's contents, a sign's
 				// text. Only for the part of the block that was written.
 				for(const auto &pair : block.meta){

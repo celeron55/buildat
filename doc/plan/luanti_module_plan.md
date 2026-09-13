@@ -204,32 +204,40 @@ The staging is about order, not scope: a mainstream Luanti game is expected
 to produce its real terrain, and stage 3 is a milestone rather than a
 separate career.
 
-### The region calls (deferred 2026-09-12)
+### The region calls (built 2026-09-13)
 
-`voxelworld` gets `get_volume()` and `set_volume()` -- a region read, and a
-region write that overwrites where `merge_volume()` refuses to -- **when the
-mapgen seam is written and can measure them**, and not before.
+`voxelworld` has `get_volume()` and `set_volume()`: a region read, and a
+region write that overwrites where `merge_volume()` refuses to. They were
+deferred until there was something to measure them against, and by the time
+they were built there were three callers waiting -- this module's region
+read, M5's ABM sweep, and M7's importer.
 
-The reason for waiting is that nothing is blocked without them: a loop inside
-one `access()` does the same work -- which is what
-`__luanti_get_region()` in this module now is -- and what a region call adds
-is a constant factor -- one clip per chunk rather than a `container_coord`, a section lookup
-and a buffer lookup per voxel. That factor is invisible at `set_node` scale
-and is the whole point at mapgen scale, where a section is 64^3 = 262,144
-voxels. Adding the API before there is something to measure it against would
-be arguing about the factor instead of measuring it.
+Both are chunk by chunk with a sampler per chunk, which is what
+`merge_volume()` already was; `set_volume()` and `merge_volume()` are the
+same walk with a flag, so that the difference between "overwrite" and
+"generator priority" is in the name rather than in a parameter. They are in
+terms of `VoxelVolume`, so a world of more than one plane keeps its planes.
 
-Who will want them, in the order they arrive: this seam (stages 2 and 3), M5's
-ABMs -- which sweep every loaded block on a timer looking for matching nodes,
-the heaviest region read in Luanti and one that runs forever rather than once
--- and M7's importer. Not M3 and not M4.
+**What it was worth**, measured against the same work through `get_voxel()`
+and `set_voxel()`:
 
-**The shape, when it is built:** in terms of `VoxelVolume`, which is already
-plane-aware (`src/interface/voxel_volume.h:75` takes a `sv_<VoxelPlane>`), so
-that `games/aggregate`'s planes come along rather than plane 0 alone. And
-named `set_volume()` beside `merge_volume()`, so that the difference between
-"overwrite" and "generator priority" is in the name rather than in a
-parameter.
+- the ABM sweep in devtest -- nine rules over twenty-seven loaded sections,
+  seven million voxels a second -- went from 30% of a core to 24.5%;
+- importing 343 mapblocks (524800 nodes) went from 243 ms to 193 ms;
+- `minimal_game`'s startup checks, which are region reads end to end, went
+  from 605 ms to 384 ms.
+
+So the constant factor is real but it is not what a sweep costs; what a
+sweep costs is reading a whole section to find the handful of voxels a rule
+is about. Luanti's answer to that is a per-block index of which node kinds
+are in it, and that is still the upgrade path -- see the ABMs in M5.
+
+**What checks them:** `lua/check_map.lua` writes four nodes either side of a
+chunk boundary and a section boundary and reads them back out of one region
+read, because a region read is one read per chunk stitched together and the
+stitching is the part that can be wrong. `set_volume()` is what the importer
+writes with, and what checks it is the node histogram of an imported world
+matching an independent decode of the same database.
 
 ## The protocol, and the client
 

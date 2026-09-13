@@ -104,9 +104,10 @@ Done since the third round, all in `doc/plan/master_plan_history.md` or in
 the module's own history: M4's inventories and recipes, all of M5, M7's
 importer, and the preferences screen.
 
-One loose end inside the module, not blocking: the mapgen seam is where
-`voxelworld`'s own region calls get decided. See "The region calls" in the
-module plan.
+The loose end that was here is closed: `voxelworld` has `get_volume()` and
+`set_volume()`, built once there were three callers to measure them against.
+See "The region calls" in the module plan for what they turned out to be
+worth.
 
 ## Maintenance -- do this daily
 
