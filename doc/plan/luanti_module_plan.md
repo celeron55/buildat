@@ -333,12 +333,18 @@ once the mods have loaded, which is what makes that safe.
    declares `-std=c++17` in its `meta.json`, which is how a module asks for
    its own flags; the rest of the tree stays C++11.
 
-   `vendor/README.txt` says which files are Luanti's and which are shims,
-   and where the next session starts: `util/serialize.cpp` wants Irrlicht's
-   colour type, `core::clamp` and a name that collides with buildat's own
-   `itos`, and after it `mg_schematic` wants zlib -- which buildat has as
-   `interface::compress_zlib` -- and `MapNode::serializeBulk`, which lives
-   in Luanti's `mapnode.cpp` and is a shim here.
+   With every vendored file in the compile, `mapgen.cpp` and `objdef.cpp`
+   compile clean and the four managers are at sixty-two errors, every one
+   of them a shim missing a member. `vendor/README.txt` lists the ones the
+   compiler named and what is left after them: the MMVManip-to-VoxelVolume
+   translation, filling the `NodeDefManager` from the content ids the
+   module already sends across, and a `MapgenParams` behind
+   `create_generator()`.
+
+   What is committed compiles the bottom of the tree only, because
+   `mapgen.cpp` names a vtable that lives in `mg_biome.cpp` and the set
+   therefore goes in together or not at all. The module builds, the server
+   starts, and the check passes.
 2. **3b: `mapgen_v7` with its own noise, and no managers.** Terrain,
    caves and nothing else. This is the point at which a world looks like a
    Luanti world.
