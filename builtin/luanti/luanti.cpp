@@ -4140,6 +4140,20 @@ struct Module: public interface::Module, public luanti::Interface
 		return 0;
 	}
 
+	// What the light should be for one player whatever the hour, or an
+	// empty string for "the clock decides"
+	static int l_send_day_night(lua_State *L)
+	{
+		Module *self = module_of(L);
+		size_t name_len = 0, v_len = 0;
+		const char *name_p = luaL_checklstring(L, 1, &name_len);
+		const char *v_p = luaL_checklstring(L, 2, &v_len);
+		sv_<ss_> flat{ss_(v_p ? v_p : "", v_len)};
+		self->send_to_player(ss_(name_p ? name_p : "", name_len),
+				"luanti:daynight", flat);
+		return 0;
+	}
+
 	// A line of chat to one player, or to everyone when the name is empty
 	static int l_send_chat(lua_State *L)
 	{
@@ -5166,6 +5180,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_send_player_pos", l_send_player_pos);
 		set_global_cfunction("__luanti_send_chat", l_send_chat);
 		set_global_cfunction("__luanti_send_hud", l_send_hud);
+		set_global_cfunction("__luanti_send_day_night", l_send_day_night);
 		set_global_cfunction("__luanti_send_time", l_send_time);
 		set_global_cfunction("__luanti_show_formspec", l_show_formspec);
 		set_global_cfunction("__luanti_player_formspec", l_player_formspec);

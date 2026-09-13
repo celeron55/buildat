@@ -705,7 +705,7 @@ end
 for _, name in ipairs({
 	"hud_set_hotbar_image",
 	"hud_set_hotbar_selected_image", "set_sky", "set_sun", "set_moon",
-	"set_stars", "set_clouds", "set_lighting", "override_day_night_ratio",
+	"set_stars", "set_clouds", "set_lighting",
 	"set_minimap_modes", "send_mapblock", "set_fov", "set_nametag_color",
 	"hud_set_hotbar_image_selected",
 }) do
@@ -763,6 +763,14 @@ local function hud_fields(def)
 		z_index = def.z_index and tostring(def.z_index) or nil,
 		style = def.style and tostring(def.style) or nil,
 	}
+end
+
+-- What a game said the light should be whatever the hour, or nothing
+local function send_day_night(o)
+	if o and o.player_name and __luanti_send_day_night then
+		__luanti_send_day_night(o.player_name,
+				o.day_night_ratio and tostring(o.day_night_ratio) or "")
+	end
 end
 
 local function send_hud(o, flat)
@@ -886,7 +894,27 @@ function PlayerRef:get_moon() return {visible = true} end
 function PlayerRef:get_stars() return {visible = true} end
 function PlayerRef:get_clouds() return {density = 0.4} end
 function PlayerRef:get_lighting() return {shadows = {intensity = 0}} end
-function PlayerRef:get_day_night_ratio() return nil end
+-- How much of the day's light the player gets whatever the hour: Luanti's
+-- own way for a game to say "this place is always dark" or "always bright",
+-- and nil gives the clock back. What it moves is the light, not the sun --
+-- the sun goes where the time says either way, which is what Luanti does.
+function PlayerRef:override_day_night_ratio(ratio)
+	local o = state_of(self)
+	if not o then
+		return
+	end
+	if ratio == nil then
+		o.day_night_ratio = nil
+	else
+		o.day_night_ratio = math.max(0, math.min(1, tonumber(ratio) or 1))
+	end
+	send_day_night(o)
+end
+
+function PlayerRef:get_day_night_ratio()
+	local o = state_of(self)
+	return o and o.day_night_ratio or nil
+end
 function PlayerRef:get_fov() return 0, false, 0 end
 function PlayerRef:get_eye_offset()
 	return {x = 0, y = 0, z = 0}, {x = 0, y = 0, z = 0}
@@ -1550,6 +1578,7 @@ function core.__add_player(name)
 	-- last time they joined, and what their life and breath are
 	send_whole_hud(o)
 	send_stats(o)
+	send_day_night(o)
 	-- Where the last run left them, or the spawn: either way it is the
 	-- server's answer and the client starts there. A player whose spawn the
 	-- map cannot answer for yet is not told anything -- a fallback position
