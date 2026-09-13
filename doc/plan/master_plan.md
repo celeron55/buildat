@@ -86,14 +86,14 @@ What is left is, in order:
    `init.lua`'s three-way split is the largest unexamined piece of it. See
    "The protocol, and the client" in the module plan.
 
-   **The texture modifiers are unblocked (2026-09-13)**: the question of what
-   a module's client half may do was answered -- `compose_image` and
+   **The texture modifiers are built (2026-09-13)**: the question of what a
+   module's client half may do was answered -- `compose_image` and
    `add_resource_dir` are in `buildat.safe` as they are, with the cache-path
    rule now one function that both call and that leaves a self-test behind.
-   They are 112 of devtest's 390 node types, and what is left of them is the
-   work itself: the server sending the modifier expressions beside the
-   registry, and the client half resolving them through `texmod.lua`. See
-   "what a module's client half is allowed to do" in the module plan.
+   The module ships a client half that resolves the expressions through
+   `texmod.lua`, and devtest's generated colours went from 112 of 390 node
+   types to 2. See "what a module's client half is allowed to do" in the
+   module plan.
 2. **M6, the launcher and its map.** The menu -- which save, and which game
    it needs -- is client work of a much smaller kind, and
    `ui_utils.vertical_menu` already draws that shape elsewhere. The map is

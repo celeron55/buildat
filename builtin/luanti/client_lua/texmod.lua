@@ -1,6 +1,12 @@
--- Buildat: extension/luanti_client/texmod.lua
+-- Buildat: builtin/luanti/client_lua/texmod.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+--
+-- Copied verbatim from extensions/luanti_client/texmod.lua, which is where
+-- it was written and where its own history is. It touches no file and no
+-- image -- it reads the language and hands back operations -- so it moves
+-- without changing; edit it there and copy it here, or the other way round,
+-- rather than letting the two drift.
 --
 -- Luanti's texture modifier language, turned into buildat.compose_image()
 -- operations.

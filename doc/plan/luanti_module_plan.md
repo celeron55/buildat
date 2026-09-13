@@ -357,9 +357,9 @@ whole:
 ### What a module's client half is allowed to do (settled 2026-09-13)
 
 **Answered: `compose_image` and `add_resource_dir` go into `buildat.safe` as
-they are.** With that, the texture modifiers are unblocked -- 112 of
-devtest's 390 node types -- and everything else around them was already
-worked out:
+they are.** With that the texture modifiers are built (2026-09-13): devtest's
+generated colours went from 112 to 2, and the client composes 131 textures
+into `cache/luanti_res/luanti_texmod/`. What it is made of:
 
 - the server names a tile with a modifier in it something of its own and
   sends the expression beside the registry, since a modifier is not a file;
@@ -369,6 +369,21 @@ worked out:
   media name to a resource and `ctx.compose(expr, ops, size)` writes one;
 - `client_file` already serves a module's `client_lua/*` as
   `<module>/<file>`, so the module can ship its client half.
+
+**How it runs.** The server names an expression `luanti_texmod/<hash>.png`
+and puts that name in the voxel definition; the client asks for the
+expressions with `luanti:get_texmods` and gets back name/expression pairs.
+It asks rather than being sent them because the definitions arrive before
+the module's client half has subscribed to anything -- and because they
+arrive first, the textures they name are not there yet, which one
+`voxelworld.remesh_all()` after composing settles. An expression that
+`texmod.lua` cannot build gets a flat colour of its own hash, so a tile is
+never a missing file.
+
+`[png:<base64>` carries a whole file in the expression, so a blit takes
+`src_data` (the bytes) as well as `src` (a resource name); the bytes are
+read length-first, since a PNG's second byte is already a zero. That was the
+last of devtest's 131 expressions.
 
 **What the decision costs, and what was done about it.** Both calls confine
 themselves to the cache path, so what sandboxed code gains is "write files
@@ -760,11 +775,6 @@ two things M1 disproved about the build, are in
   check shows them without a Luanti installation.
 
   **What is left, in the order it matters:**
-  - **The texture modifiers. BLOCKED, see below.** A tile with `^`, `[` or
-    `(` in it is composed, and the client is what composes it --
-    `buildat.compose_image`, the way `extensions/luanti_client`'s
-    `resolve_tile` does. Until then those nodes wear a flat colour, which is
-    honest and is not what devtest looks like. 112 of devtest's 390.
   - **The drawtypes that are left**, and there is not much: the frame of a
     `glasslike_framed` (5 in devtest, drawn as a plain cube, which is what
     it looks like without its frame); the node box kinds that are not

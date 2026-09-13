@@ -16,6 +16,7 @@
 #include "storage/api.h"
 #include "main_context/api.h"
 #include "client_file/api.h"
+#include "network/api.h"
 #include "core/log.h"
 #include "interface/module.h"
 #include "interface/server.h"
@@ -37,6 +38,8 @@
 #include <cassert>
 #include <cmath>
 #include <cereal/archives/portable_binary.hpp>
+#include <cereal/types/vector.hpp>
+#include <cereal/types/string.hpp>
 extern "C" {
 #include <Lua/lua.h>
 #include <Lua/lualib.h>
@@ -93,6 +96,21 @@ static void node_colour(const ss_ &name, uint8_t rgb[3])
 static ss_ media_resource_name(const ss_ &file_name)
 {
 	return "luanti_media/"+file_name;
+}
+
+// A tile that is a texture modifier gets a name of its own, by what it is:
+// the same expression in two node definitions is one texture. The client is
+// what composes it; see the texmods packet.
+static ss_ texmod_resource_name(const ss_ &expr)
+{
+	uint32_t h = 2166136261u;
+	for(char c : expr){
+		h ^= (uint8_t)c;
+		h *= 16777619u;
+	}
+	char buf[48];
+	snprintf(buf, sizeof buf, "luanti_texmod/%08x.png", h);
+	return buf;
 }
 
 static ss_ node_texture_name(const ss_ &name)
@@ -562,6 +580,10 @@ struct Module: public interface::Module, public luanti::Interface
 	// on_generation_request(). Zero until the first section is generated,
 	// which is after the mods have loaded and named it.
 	uint32_t m_singlenode_word = 0;
+	// The texture modifier expressions the game's nodes are drawn with, by
+	// the resource name each is composed under. The client is what composes
+	// them; this is what it is sent when it asks.
+	sm_<ss_, ss_> m_texmods;
 	// Whether the save has node metadata in it, so that a world that has
 	// none does not get a blob written for it every shutdown
 	bool m_had_node_meta = false;
@@ -635,6 +657,8 @@ struct Module: public interface::Module, public luanti::Interface
 		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("voxelworld:generation_request"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/luanti:get_texmods"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -646,6 +670,8 @@ struct Module: public interface::Module, public luanti::Interface
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 		EVENT_TYPEN("voxelworld:generation_request", on_generation_request,
 				voxelworld::GenerationRequest)
+		EVENT_TYPEN("network:packet_received/luanti:get_texmods",
+				on_get_texmods, network::Packet)
 	}
 
 	void on_start(){}
@@ -1058,6 +1084,29 @@ struct Module: public interface::Module, public luanti::Interface
 			// and not a second store
 			world->set_skylight_enabled(true);
 		});
+	}
+
+	// The client half asks for these once it has loaded, rather than being
+	// sent them when it connects: a packet that arrives before the script
+	// that subscribes to it has nowhere to go.
+	void on_get_texmods(const network::Packet &packet)
+	{
+		sv_<ss_> flat;
+		flat.reserve(m_texmods.size() * 2);
+		for(const auto &pair : m_texmods){
+			flat.push_back(pair.first);
+			flat.push_back(pair.second);
+		}
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(flat);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(packet.sender, "luanti:texmods", os.str());
+		});
+		log_v(MODULE, "C%zu: %zu texture modifiers", (size_t)packet.sender,
+				m_texmods.size());
 	}
 
 	// The mapgen, which at singlenode is one node everywhere: Luanti's own
@@ -1953,9 +2002,33 @@ struct Module: public interface::Module, public luanti::Interface
 	{
 		if(tile.empty())
 			return false;
-		if(tile.find_first_of("^[(&") != ss_::npos)
+		if(is_texmod(tile))
 			return false;
 		return m_served_media.count(tile) != 0;
+	}
+
+	// A tile that is not a file name but an expression over them: "^" for an
+	// overlay, "[" for a generator, "(" for a group. The client composes
+	// these; what is left for the flat colour is a plain name the game did
+	// not ship.
+	static bool is_texmod(const ss_ &tile)
+	{
+		return !tile.empty() && tile.find_first_of("^[(&") != ss_::npos;
+	}
+
+	// The resource name a tile is drawn under, and what the client has to
+	// compose to have it. Empty for a tile that is neither a file the game
+	// shipped nor an expression.
+	ss_ texture_of_tile(const ss_ &tile)
+	{
+		if(plain_media_name(tile))
+			return media_resource_name(tile);
+		if(is_texmod(tile)){
+			ss_ resource = texmod_resource_name(tile);
+			m_texmods[resource] = tile;
+			return resource;
+		}
+		return "";
 	}
 
 	void build_voxel_registry(interface::VoxelRegistry *reg)
@@ -2136,8 +2209,9 @@ struct Module: public interface::Module, public luanti::Interface
 			for(size_t f = 0; f < 6; f++){
 				if(empty)
 					continue;
-				if(has_tiles && plain_media_name(tiles[f])){
-					face_textures[f] = media_resource_name(tiles[f]);
+				ss_ texture = has_tiles ? texture_of_tile(tiles[f]) : "";
+				if(!texture.empty()){
+					face_textures[f] = texture;
 				} else {
 					face_textures[f] = fallback;
 					any_fallback = true;
@@ -2147,9 +2221,8 @@ struct Module: public interface::Module, public luanti::Interface
 			// does not have, and the first of the definition's extra ones
 			ss_ overlay_texture;
 			if(!overlay_tile.empty() && !fallback.empty()){
-				if(plain_media_name(overlay_tile)){
-					overlay_texture = media_resource_name(overlay_tile);
-				} else {
+				overlay_texture = texture_of_tile(overlay_tile);
+				if(overlay_texture.empty()){
 					overlay_texture = fallback;
 					any_fallback = true;
 				}

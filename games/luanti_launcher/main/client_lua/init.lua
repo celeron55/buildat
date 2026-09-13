@@ -12,6 +12,9 @@ local cereal = require("buildat/extension/cereal")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
 local voxel_shading = require("buildat/module/voxel_shading")
+-- The module's own client half: what a Luanti game's textures are made of,
+-- when a tile is an expression rather than a file
+require("buildat/module/luanti")
 
 local scene = replicate.main_scene
 
