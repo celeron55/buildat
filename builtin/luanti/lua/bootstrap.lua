@@ -941,7 +941,7 @@ local STUBS_NIL = {
 	"chat_send_all", "chat_send_player", "send_join_message",
 	"send_leave_message", "sound_play", "sound_stop", "sound_fade",
 	"add_particle", "add_particlespawner", "delete_particlespawner",
-	"show_formspec", "close_formspec", "hud_replace_builtin",
+	"hud_replace_builtin",
 	-- Auth and privileges (M4)
 	"get_password_hash", "check_password_entry", "notify_authentication_modified",
 	"set_player_privs", "get_player_privs", "auth_reload",
@@ -1549,6 +1549,44 @@ local function pointed_at(pos)
 		above = {x = pos.x, y = pos.y, z = pos.z},
 		under = {x = pos.x, y = pos.y - 1, z = pos.z},
 	}
+end
+
+-- core.__item_images() -> {item name, expression, item name, ...}
+--
+-- What each item looks like in an inventory, as the texture modifier
+-- expression the client composes: the item's inventory_image, or the first
+-- tile of the node it places. The client asks for these once, the way it
+-- asks for the node tiles' expressions.
+--
+-- simplified: one expression per item, so a node is drawn as one of its
+-- tiles rather than as the little cube Luanti draws. The upgrade path is
+-- sending the three tiles a cube shows and shearing them client-side, which
+-- extensions/luanti_client does.
+function core.__item_images()
+	local out = {}
+	local function add(name, expr)
+		if type(expr) == "string" and expr ~= "" then
+			out[#out + 1] = name
+			out[#out + 1] = expr
+		end
+	end
+	for name, def in pairs(core.registered_items) do
+		if name ~= "" then
+			local expr = def.inventory_image
+			if (expr == nil or expr == "") and def.tiles then
+				local tile = def.tiles[1]
+				if type(tile) == "table" then
+					tile = tile.name
+				end
+				expr = tile
+			end
+			if expr == nil or expr == "" then
+				expr = def.wield_image
+			end
+			add(name, expr)
+		end
+	end
+	return out
 end
 
 -- core.get_dig_params(groups, tool_capabilities, [wear])

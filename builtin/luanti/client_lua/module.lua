@@ -16,6 +16,7 @@
 -- texmod.lua reads the language and hands back compose_image() operations;
 -- everything here is the files.
 local log = buildat.Logger("luanti")
+local magic = require("buildat/extension/urho3d")
 local cereal = require("buildat/extension/cereal")
 local voxelworld = require("buildat/module/voxelworld")
 
@@ -140,6 +141,25 @@ local function compose(top_expr, top_resource)
 	return texmod.resolve(top_expr, ctx)
 end
 
+-- Any expression, composed under a name of its own: what the registry named
+-- is composed when the server says so, and this is for the ones that turn up
+-- later -- a formspec's background, an item's inventory image.
+local function texture_of(expr)
+	if expr == nil or expr == "" then
+		return nil
+	end
+	if composed[expr] then
+		return composed[expr]
+	end
+	local got = compose(expr, resource_of(expr))
+	if got then
+		added_dir()
+	end
+	return got
+end
+
+M.texture = texture_of
+
 buildat.sub_packet("luanti:texmods", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	local n = 0
@@ -214,9 +234,243 @@ buildat.sub_packet("luanti:inventory", function(data)
 	end
 end)
 
+--
+-- The formspecs
+--
+-- The window a mod puts on the player's screen. formspec.lua says what the
+-- elements are, formspec_ui.lua puts Urho3D elements there, and this is the
+-- wiring: what a texture and an item and a list are, what a click on the
+-- result means, and what goes back to the server.
+--
+-- simplified: nothing is picked up and put down. A slot is drawn and what is
+-- in it is drawn, and moving an item between slots is an inventory action the
+-- server has no packet for yet; buttons, fields, checkboxes and tabs are the
+-- half that works. See "what is left of M4" in doc/plan/luanti_module_plan.md.
+local ok_fs, err_fs, formspec = buildat.run_script_file("luanti/formspec.lua")
+if not ok_fs or type(formspec) ~= "table" then
+	error("luanti: could not load formspec.lua: " .. tostring(err_fs))
+end
+local ok_ui, err_ui, formspec_ui =
+		buildat.run_script_file("luanti/formspec_ui.lua")
+if not ok_ui or type(formspec_ui) ~= "table" then
+	error("luanti: could not load formspec_ui.lua: " .. tostring(err_ui))
+end
+
+-- item name -> the expression it is drawn as; see core.__item_images()
+local item_images = {}
+-- The ones that have no image, said once each
+local imageless = {}
+
+-- "basenodes:stone 7" -> {name = "basenodes:stone", count = 7}
+local function parse_stack(str)
+	if str == nil or str == "" then
+		return nil
+	end
+	local name, count = string.match(str, "^([^ ]+) *(%d*)")
+	if name == nil or name == "" then
+		return nil
+	end
+	return {name = name, count = tonumber(count) or 1}
+end
+
+local ui = nil
+local form = nil          -- {formname =, spec =, state =, drawn =}
+local player_spec = ""    -- what the player's own inventory key opens
+
+local function make_ui()
+	if ui then
+		return ui
+	end
+	ui = formspec_ui.new(magic, buildat, log, {
+		texture = texture_of,
+		item_image = function(item_name)
+			local resource = texture_of(item_images[item_name])
+			if not resource and not imageless[item_name] then
+				imageless[item_name] = true
+				log:info("item: no image for \"" .. item_name .. "\"")
+			end
+			return resource
+		end,
+		-- Only the player's own inventory: a node's and a detached one are
+		-- what the server has no packet for yet
+		inventory = function(location, list_name)
+			if location ~= "current_player" and
+					string.sub(location, 1, 7) ~= "player:" then
+				return nil
+			end
+			local stacks = M.inventory[list_name]
+			if not stacks then
+				return nil
+			end
+			local items = {}
+			for i, str in ipairs(stacks) do
+				items[i] = parse_stack(str)
+			end
+			return {size = #stacks, items = items}
+		end,
+		style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml"),
+		-- A plain white pixel, which a box or a tint is drawn with. Composed
+		-- rather than shipped: it is one operation and one file either way.
+		white = texture_of("[fill:1x1:#ffffffff"),
+	})
+	return ui
+end
+
+local function form_fields()
+	local out = {}
+	for _, f in ipairs(form and form.drawn and form.drawn.fields or {}) do
+		out[f.name] = f.edit and f.edit:GetText() or f.value
+	end
+	return out
+end
+
+local function send_fields(fields)
+	local flat = {form.formname}
+	for k, v in pairs(fields) do
+		flat[#flat + 1] = tostring(k)
+		flat[#flat + 1] = tostring(v)
+	end
+	buildat.send_packet("luanti:fields", cereal.binary_output(flat,
+			{"array", "string"}))
+end
+
+local function close_form(quit)
+	if not form then
+		return
+	end
+	-- quit says the player closed it -- an exit button, escape -- which a
+	-- game acts on: the death screen's respawn is "the player closed
+	-- __builtin:death". A form the server took away gets no quit.
+	if quit then
+		local fields = form_fields()
+		fields.quit = "true"
+		send_fields(fields)
+	end
+	if form.drawn then
+		form.drawn.window:Remove()
+	end
+	form = nil
+end
+
+local function draw_form()
+	if form.drawn then
+		form.drawn.window:Remove()
+		form.drawn = nil
+	end
+	local elements, size, real = formspec.parse(form.spec)
+	local root = magic.ui.root
+	local w, h = root.width, root.height
+	local layout = formspec.layout(size, real, w, h)
+	form.drawn = make_ui():show(root, elements, layout, w, h, form.state)
+end
+
+local function show_form(formname, spec)
+	close_form(false)
+	if spec == "" then
+		return
+	end
+	form = {formname = formname, spec = spec, state = {}}
+	draw_form()
+end
+
+-- form_open() -> whether a form is on the screen, so that whoever else is
+-- reading the mouse leaves it alone while one is
+function M.form_open()
+	return form ~= nil
+end
+
+-- What the player's own inventory key opens. Nothing here binds a key: which
+-- key that is belongs to the game, and this is what it calls.
+function M.open_player_inventory()
+	if form then
+		close_form(true)
+		return
+	end
+	if player_spec == "" then
+		log:info("no inventory formspec; the game has not set one")
+		return
+	end
+	show_form("", player_spec)
+end
+
+-- A click, from whoever is reading the mouse. Returns whether the form took
+-- it, so that a click that was not on one still digs.
+function M.click(x, y, button)
+	if not form or not form.drawn then
+		return false
+	end
+	local lx = x - form.drawn.origin[1]
+	local ly = y - form.drawn.origin[2]
+	local function inside(e)
+		return lx >= e.x and lx < e.x + e.w and ly >= e.y and ly < e.y + e.h
+	end
+	for _, b in ipairs(form.drawn.buttons) do
+		if inside(b) then
+			local fields = form_fields()
+			fields[b.name] = ""
+			if b.exit then
+				fields.quit = "true"
+			end
+			send_fields(fields)
+			if b.exit then
+				close_form(false)
+			end
+			return true
+		end
+	end
+	-- A tab or a checkbox: the form goes back with the new value in it, the
+	-- way Luanti's own client sends one
+	for _, t in ipairs(form.drawn.taps) do
+		if inside(t) then
+			local fields = form_fields()
+			fields[t.name] = t.value
+			if t.check then
+				form.state.check[t.name] = t.value == "true"
+				draw_form()
+			end
+			send_fields(fields)
+			return true
+		end
+	end
+	-- Everything else on the form swallows the click without meaning
+	-- anything, which is what keeps it from digging the node behind it
+	return lx >= 0 and ly >= 0 and lx < form.drawn.size[1] and
+			ly < form.drawn.size[2]
+end
+
+-- Escape closes it, which is the player closing it
+function M.key(key)
+	if form and key == magic.KEY_ESCAPE then
+		close_form(true)
+		return true
+	end
+	return false
+end
+
+buildat.sub_packet("luanti:formspec", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	show_form(values[1] or "", values[2] or "")
+end)
+
+buildat.sub_packet("luanti:player_formspec", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	player_spec = values[1] or ""
+end)
+
+buildat.sub_packet("luanti:item_images", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	local n = 0
+	for i = 1, #values - 1, 2 do
+		item_images[values[i]] = values[i + 1]
+		n = n + 1
+	end
+	log:info("luanti:item_images: " .. n .. " items")
+end)
+
 -- Asked for rather than sent, because a packet that arrives before the
 -- script that subscribes to it has nowhere to go
 buildat.send_packet("luanti:get_texmods", "")
+buildat.send_packet("luanti:get_item_images", "")
 
 return M
 -- vim: set noet ts=4 sw=4:

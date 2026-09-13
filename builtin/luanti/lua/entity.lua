@@ -35,6 +35,8 @@ local next_id = 1
 
 local __show_objects = __luanti_show_objects
 local __send_inventory = __luanti_send_inventory
+local __show_formspec = __luanti_show_formspec
+local __player_formspec = __luanti_player_formspec
 
 -- What an entity gets until its initial_properties and set_properties say
 -- otherwise. The names are Luanti's, and the ones nothing here reads are
@@ -782,6 +784,50 @@ function core.__load_players(data)
 	return n
 end
 
+--
+-- Formspecs
+--
+-- The window a mod puts on a player's screen: a string of elements the client
+-- draws and sends back what was pressed in. Nothing here knows what one looks
+-- like -- builtin/luanti/client_lua does.
+
+function core.show_formspec(playername, formname, formspec)
+	if type(playername) ~= "string" or type(formspec) ~= "string" then
+		return false
+	end
+	__show_formspec(playername, tostring(formname or ""), formspec)
+	return true
+end
+
+-- An empty formspec is "take it away", which is what Luanti's own protocol
+-- says too
+function core.close_formspec(playername, formname)
+	if type(playername) ~= "string" then
+		return false
+	end
+	__show_formspec(playername, tostring(formname or ""), "")
+	return true
+end
+
+-- What comes back, as the module hands it over: the player it was, the form
+-- it was, and the fields. Luanti runs these in reverse registration order and
+-- stops at the first one that says it handled the form.
+function core.__player_receive_fields(playername, formname, fields)
+	local id = players[playername]
+	local ref = id and core.object_refs[id]
+	if not ref then
+		return
+	end
+	for _, cb in ipairs(core.registered_on_player_receive_fields or {}) do
+		local ok, handled = pcall(cb, ref, formname, fields)
+		if not ok then
+			core.log("error", "on_player_receive_fields: " .. tostring(handled))
+		elseif handled then
+			return
+		end
+	end
+end
+
 -- The importer's way in: a player read out of a Luanti world's database.
 -- What the save already knows about that name is kept, the way a mod's
 -- storage is, so that importing the same world twice does not undo what has
@@ -1174,6 +1220,13 @@ local function send_inventories()
 				end
 			end
 			__send_inventory(name, flat)
+		end
+		-- The form the player's own inventory key opens, when a mod has
+		-- changed it. It is sent when it changes rather than when it is
+		-- asked for, so that opening it costs no round trip.
+		if o and o.inventory_formspec ~= o.sent_inventory_formspec then
+			o.sent_inventory_formspec = o.inventory_formspec
+			__player_formspec(name, o.inventory_formspec or "")
 		end
 	end
 end

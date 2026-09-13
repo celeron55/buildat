@@ -851,11 +851,27 @@ two things M1 disproved about the build, are in
   carrying, which is what says that digging a node put the node somewhere.
   The packet is what a formspec's `list[]` will read.
 
-  **What is left of M4:** formspecs. `extensions/luanti_client` has
-  `formspec.lua` and `formspec_ui.lua` ready to copy -- `M.new(magic,
-  buildat, log, ctx)` asks for four things, of which the textures and the
-  inventory now exist -- and what has to be written is the item images and
-  the input handling that `init.lua` does around them.
+  **Built: the formspecs (2026-09-13).** `core.show_formspec()` and
+  `core.close_formspec()` send the form to that one client;
+  `formspec.lua` and `formspec_ui.lua` are copied from
+  `extensions/luanti_client` and draw it, and what was pressed comes back as
+  `luanti:fields` into `core.registered_on_player_receive_fields`. A
+  player's `set_inventory_formspec()` is sent when it changes, so the
+  inventory key opens it without a round trip -- that is what `I` does in
+  `games/luanti_launcher`.
+
+  The four things `formspec_ui.new()`'s ctx asks for: the textures are the
+  composer the texture modifiers already are, the inventory is the packet
+  above, an item's image is the expression the server sends for each
+  registered item (`core.__item_images()`), and the style is `__menu`'s.
+
+  **What is left of M4:** picking a stack up and putting it down. A slot is
+  drawn and what is in it is drawn; moving an item between two is an
+  inventory action, which is a packet the other way and the allow_/on_
+  callbacks a detached inventory carries. With it go a node's inventory and
+  a detached one, which `ctx.inventory` answers nothing for: a chest's form
+  draws empty slots until a `list[]` can name something that is not the
+  player.
 - **M5 -- it lives. Built 2026-09-13.** ABMs, LBMs, entities, `core.after`.
   Success is `testabms` and `testentities` behaving.
 

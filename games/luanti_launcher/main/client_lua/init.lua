@@ -119,7 +119,7 @@ voxel_shading.set_camera(camera_node)
 magic.input:SetMouseVisible(true)
 
 local title_text = magic.ui.root:CreateChild("Text")
-title_text:SetText("luanti_launcher: Tab = free move, click = dig")
+title_text:SetText("luanti_launcher: Tab = free move, click = dig, I = inventory")
 title_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 15)
 title_text.horizontalAlignment = magic.HA_CENTER
 title_text.verticalAlignment = magic.VA_TOP
@@ -257,6 +257,12 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	if event_data:GetInt("Button") ~= magic.MOUSEB_LEFT then
 		return
 	end
+	-- A form on the screen is clicked through UIMouseClick below, which is
+	-- what says where the click landed; what is behind it is not what was
+	-- clicked on
+	if luanti.form_open() then
+		return
+	end
 	if pointed_p == nil then
 		return
 	end
@@ -275,6 +281,17 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	}))
 end)
 
+-- Where a click landed, which MouseButtonDown does not say. A form is the
+-- only thing here that cares.
+magic.SubscribeToEvent("UIMouseClick", function(event_type, event_data)
+	if not luanti.form_open() then
+		return
+	end
+	luanti.click(event_data:GetInt("X"), event_data:GetInt("Y"),
+			event_data:GetInt("Button") == magic.MOUSEB_RIGHT and "right" or
+			"left")
+end)
+
 local function set_free_look(enable)
 	free_look = enable
 	magic.input:SetMouseVisible(not free_look)
@@ -282,8 +299,18 @@ end
 
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	local key = event_data:GetInt("Key")
+	-- A form takes escape to close itself; what is left is this game's own
+	if luanti.key(key) then
+		set_free_look(false)
+		return
+	end
 	if key == magic.KEY_TAB then
 		set_free_look(not free_look)
+	elseif key == magic.KEY_I then
+		-- Luanti's own inventory key, and what a game's inventory formspec
+		-- is for. The mouse has to be there to click it.
+		luanti.open_player_inventory()
+		set_free_look(false)
 	elseif key == magic.KEY_ESCAPE then
 		if free_look then
 			set_free_look(false)
@@ -334,7 +361,8 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		pointed_node.enabled = false
 	end
 
-	if not free_look then
+	-- A form on the screen is what the mouse is for while it is there
+	if not free_look or luanti.form_open() then
 		return
 	end
 
