@@ -69,6 +69,14 @@ struct ChunkBuffer
 	bool unload_if_old(int64_t timeout_us){ // True if not loaded
 		if(!volume)
 			return true;
+		// A buffer that has changes in it has nowhere to put them: what
+		// writes them out is commit(), which runs at the end of the access
+		// that made them. Dropping it here would lose whatever was written
+		// into it -- which is what happened to a caller that wrote more
+		// buffers in one access() than the limit allows. It stays until it
+		// is committed, and the limit is exceeded until then.
+		if(dirty)
+			return false;
 		if(interface::os::time_us() < last_accessed_us + timeout_us)
 			return false;
 		log_t(MODULE, "Unloading chunk " PV3I_FORMAT, PV3I_PARAMS(chunk_p));
