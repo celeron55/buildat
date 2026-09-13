@@ -1151,6 +1151,9 @@ struct CInstance: public voxelworld::Instance
 
 		if(!m_store || !load_saved_section(section))
 			create_section(section);
+		// A section whose light went stale while it was away is flooded
+		// again from what is around it now
+		relight_if_stale(section);
 		// What a game keeps of its own per section comes back with it
 		m_server->emit_event("voxelworld:section_loaded",
 				new SectionLoaded(m_scene_ref, section_p));
@@ -1216,6 +1219,9 @@ struct CInstance: public voxelworld::Instance
 	// is what is read and written as a unit.
 	void save_section(Section &section)
 	{
+		// What the light reached while a section was away is written with
+		// the sections, since it is about them
+		save_stale_sections();
 		if(!m_store || !section.loaded || !section.modified)
 			return;
 		update_id_maps();
@@ -1280,11 +1286,96 @@ struct CInstance: public voxelworld::Instance
 		return section != nullptr && section->loaded && section->generated;
 	}
 
+	// A section that was marked stale while it was not in memory: take the
+	// light out of it and let it back in from its own sources and from the
+	// neighbours that are here now. Nothing is asked of the neighbours that
+	// are not -- what they hold marks this one stale again when they load.
+	//
+	// The whole section is walked, which is a quarter of a million voxels;
+	// it happens once per section per time the world's light moved while
+	// that section was away. Only its faces and the voxels that make their
+	// own light are seeded, because the flood spreads inwards from them --
+	// that is what a flood is for.
+	void relight_if_stale(Section &section)
+	{
+		const uint64_t key = section_key(section.section_p);
+		if(m_stale_sections.count(key) == 0)
+			return;
+		m_stale_sections.erase(key);
+		m_stale_dirty = true;
+		bool any = false;
+		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++)
+			any = any || m_light_maintained[f];
+		if(!any)
+			return;
+
+		pv::Region region = get_section_region_voxels(section.section_p);
+		const pv::Vector3DInt32 lc = region.getLowerCorner();
+		const pv::Vector3DInt32 uc = region.getUpperCorner();
+		sv_<pv::Vector3DInt32> blockers;
+		size_t seeded = 0;
+		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
+			const LightField lf = (LightField)f;
+			if(!m_light_maintained[lf])
+				continue;
+			m_light_running = lf;
+			m_light_buf = nullptr;
+			m_light_section = nullptr;
+			const bool first = blockers.empty();
+			for(int32_t z = lc.getZ(); z <= uc.getZ(); z++)
+			for(int32_t y = lc.getY(); y <= uc.getY(); y++)
+			for(int32_t x = lc.getX(); x <= uc.getX(); x++){
+				const pv::Vector3DInt32 p(x, y, z);
+				VoxelInstance v = light_get(p);
+				if(get_id(v) == interface::VOXELTYPEID_UNDEFINED)
+					continue;
+				if(flood_get(v) != 0)
+					light_set(p, v, 0);
+				if(!transmits_light_at(p)){
+					if(first && emitted_at(p) == 0)
+						blockers.push_back(p);
+					if(emitted_at(p) == 0)
+						continue;
+				}
+				const bool edge = (x == lc.getX() || x == uc.getX() ||
+						y == lc.getY() || y == uc.getY() ||
+						z == lc.getZ() || z == uc.getZ());
+				if(!edge && emitted_at(p) == 0)
+					continue;
+				// "It was a blocker and is not any more" is the shape the
+				// flood reads as "fill this one from what is around it",
+				// which is what every one of these wants
+				m_light_seeds[lf].push_back(SkylightSeed{p, 0, false});
+				seeded++;
+			}
+		}
+		if(seeded == 0)
+			return;
+		log_v(MODULE, "Section " PV3I_FORMAT ": light was stale, %zu seeds",
+				PV3I_PARAMS(section.section_p), seeded);
+		update_skylight();
+		// And what light does not pass through wears the brightest light
+		// beside it, the way the flood leaves the blockers it touched
+		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
+			if(!m_light_maintained[f])
+				continue;
+			m_light_running = (LightField)f;
+			m_light_buf = nullptr;
+			m_light_section = nullptr;
+			for(const pv::Vector3DInt32 &p : blockers)
+				light_blocker_from_neighbours(p);
+		}
+	}
+
 	// Generate the section; requires static nodes to already exist
 	void generate_section(Section &section)
 	{
 		if(section.generated)
 			return;
+		// What a generator writes is the light it writes; a stale mark from
+		// before it existed means nothing
+		if(m_stale_sections.erase(section_key(section.section_p)) > 0)
+			m_stale_dirty = true;
 		section.generated = true;
 		// Whatever the generator makes of it is not in the save, and a
 		// generator that writes nothing at all still ran
@@ -1624,6 +1715,60 @@ struct CInstance: public voxelworld::Instance
 	ss_ registry_key(){ return m_world_name+"/registry"; }
 	ss_ names_key(){ return m_world_name+"/names"; }
 	ss_ formats_key(){ return m_world_name+"/formats"; }
+	ss_ stale_key(){ return m_world_name+"/light_stale"; }
+
+	// Sections the light reached while they were not in memory. What they
+	// hold may be wrong in either direction -- a blocker put up next to
+	// them, or one taken away -- and they are re-flooded when they are
+	// loaded. Persisted, because a world that is closed and opened again
+	// has the same wrong light in it. See "Crossing a section boundary" in
+	// doc/plan/voxel_data_model_plan.md.
+	set_<uint64_t> m_stale_sections;
+	bool m_stale_dirty = false;
+
+	void mark_section_stale(const pv::Vector3DInt16 &section_p)
+	{
+		if(m_stale_sections.insert(section_key(section_p)).second)
+			m_stale_dirty = true;
+	}
+
+	void load_stale_sections()
+	{
+		m_stale_sections.clear();
+		m_stale_dirty = false;
+		if(!m_store)
+			return;
+		ss_ data;
+		if(!m_store->get(stale_key(), data))
+			return;
+		std::istringstream is(data, std::ios::binary);
+		cereal::PortableBinaryInputArchive ar(is);
+		uint8_t version = 0;
+		ar(version);
+		if(version != 1)
+			return;
+		sv_<uint64_t> keys;
+		ar(keys);
+		for(uint64_t k : keys)
+			m_stale_sections.insert(k);
+		if(!m_stale_sections.empty())
+			log_v(MODULE, "World \"%s\": %zu sections with stale light",
+					cs(m_world_name), m_stale_sections.size());
+	}
+
+	void save_stale_sections()
+	{
+		if(!m_store || !m_stale_dirty)
+			return;
+		sv_<uint64_t> keys(m_stale_sections.begin(), m_stale_sections.end());
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar((uint8_t)1, keys);
+		}
+		m_store->set(stale_key(), os.str());
+		m_stale_dirty = false;
+	}
 
 	void set_save(storage::Save *save, const ss_ &world_name)
 	{
@@ -1642,6 +1787,7 @@ struct CInstance: public voxelworld::Instance
 		m_world_name = world_name;
 		load_name_table();
 		load_format_table();
+		load_stale_sections();
 	}
 
 	// The save holds something this build must not overwrite: a chunk in a
@@ -1933,6 +2079,7 @@ struct CInstance: public voxelworld::Instance
 		if(!m_store)
 			return;
 		commit();
+		save_stale_sections();
 		size_t n = 0, total = 0;
 		for(auto &sector_pair : m_sections){
 			for(auto &section_pair : sector_pair.second){
@@ -2673,8 +2820,15 @@ struct CInstance: public voxelworld::Instance
 		Section *section = m_light_section;
 		if(section == nullptr || section_p != m_light_section_p){
 			section = get_section(section_p);
-			if(section == nullptr)
+			if(section == nullptr){
+				// The light reached a section that is not in memory. What
+				// it holds may now be wrong either way, so it is marked and
+				// re-flooded when it is loaded -- rather than pulled in
+				// here, which one node at the top of a shaft would do all
+				// the way down it.
+				mark_section_stale(section_p);
 				return nullptr;
+			}
 			auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
 					m_sections_with_loaded_buffers.end(), section,
 					std::greater<Section*>());
@@ -2755,6 +2909,28 @@ struct CInstance: public voxelworld::Instance
 		const interface::CachedVoxelDefinition *def =
 				m_voxel_reg->get_cached(v, nullptr, false);
 		return def ? def->light_source : 0;
+	}
+
+	// A voxel light does not pass through wears the brightest light beside
+	// it, which is what the mesher reads off a face; one that makes its own
+	// light keeps that whatever is around it.
+	void light_blocker_from_neighbours(const pv::Vector3DInt32 &p)
+	{
+		VoxelInstance v = light_get(p);
+		if(transmits_light_at(p))
+			return;
+		uint8_t best = emitted_at(p);
+		for(size_t k = 0; k < 6; k++){
+			pv::Vector3DInt32 np(
+					p.getX() + LIGHT_OFF[k][0],
+					p.getY() + LIGHT_OFF[k][1],
+					p.getZ() + LIGHT_OFF[k][2]);
+			VoxelInstance nv = light_get(np);
+			if(transmits_light_at(np) && flood_get(nv) > best)
+				best = flood_get(nv);
+		}
+		if(flood_get(v) != best)
+			light_set(p, v, best);
 	}
 
 	void light_bleed_into_blockers(const pv::Vector3DInt32 &p, uint8_t level)
@@ -2991,26 +3167,8 @@ struct CInstance: public voxelworld::Instance
 		blockers.erase(std::unique(blockers.begin(), blockers.end()),
 				blockers.end());
 		size_t n_blockers = blockers.size();
-		for(const pv::Vector3DInt32 &p : blockers){
-			VoxelInstance v = light_get(p);
-			if(transmits_light_at(p))
-				continue;
-			// A voxel that makes its own light keeps it whatever is
-			// around it; everything else wears the brightest light beside
-			// it, which is what the mesher reads off a face.
-			uint8_t best = emitted_at(p);
-			for(size_t k = 0; k < 6; k++){
-				pv::Vector3DInt32 np(
-						p.getX() + LIGHT_OFF[k][0],
-						p.getY() + LIGHT_OFF[k][1],
-						p.getZ() + LIGHT_OFF[k][2]);
-				VoxelInstance nv = light_get(np);
-				if(transmits_light_at(np) && flood_get(nv) > best)
-					best = flood_get(nv);
-			}
-			if(flood_get(v) != best)
-				light_set(p, v, best);
-		}
+		for(const pv::Vector3DInt32 &p : blockers)
+			light_blocker_from_neighbours(p);
 
 		log_v(MODULE, "update_skylight(): %zu seeds, %zu unlit, %zu spread, "
 				"%zu blockers in %i ms", seeds.size(), unlight.size(),
