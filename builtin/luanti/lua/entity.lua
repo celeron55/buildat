@@ -36,6 +36,7 @@ local next_id = 1
 local __show_objects = __luanti_show_objects
 local __show_object_props = __luanti_show_object_props
 local __send_inventory = __luanti_send_inventory
+local __send_player_pos = __luanti_send_player_pos
 local __show_formspec = __luanti_show_formspec
 local __player_formspec = __luanti_player_formspec
 local __send_node_inventory = __luanti_send_node_inventory
@@ -398,6 +399,24 @@ function PlayerRef:is_player()
 	return true
 end
 
+-- A player's client moves the player and says so; when the server moves one
+-- instead -- a spawn, a teleport, a mod putting them somewhere -- the client
+-- has to be told, or it walks on from where it thought it was.
+local function tell_the_client(o)
+	if o and o.player_name and __send_player_pos then
+		__send_player_pos(o.player_name, o.pos.x, o.pos.y, o.pos.z)
+	end
+end
+
+function PlayerRef:set_pos(pos)
+	ObjectRef.set_pos(self, pos)
+	tell_the_client(state_of(self))
+end
+
+function PlayerRef:move_to(pos, continuous)
+	self:set_pos(pos)
+end
+
 function PlayerRef:get_player_name()
 	local o = state_of(self)
 	return o and o.player_name or ""
@@ -422,6 +441,7 @@ function PlayerRef:add_pos(v)
 	if o then
 		o.pos = {x = o.pos.x + (v.x or 0), y = o.pos.y + (v.y or 0),
 				z = o.pos.z + (v.z or 0)}
+		tell_the_client(o)
 	end
 end
 
@@ -1356,6 +1376,15 @@ function core.__add_player(name)
 	end
 	if new_here and not o.spawn_known then
 		unplaced[name] = {x = o.pos.x, y = o.pos.y, z = o.pos.z}
+	end
+	-- Where the last run left them, or the spawn: either way it is the
+	-- server's answer and the client starts there. A player whose spawn the
+	-- map cannot answer for yet is not told anything -- a fallback position
+	-- would start their client walking from a place the server does not
+	-- believe in either -- and the placement below tells them once there is
+	-- ground to stand on.
+	if not new_here or o.spawn_known then
+		tell_the_client(o)
 	end
 	core.log("action", "Player " .. name .. " joined")
 	for _, cb in ipairs(core.registered_on_joinplayers or {}) do

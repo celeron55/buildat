@@ -2,10 +2,12 @@
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
--- A window onto a Luanti world running inside buildat_server. There is no
--- player and no digging: this is what M2 has to show, which is that the nodes
--- a mod placed are in voxelworld and on the screen. The Luanti client's own
--- look -- drawtypes, the real tiles, the media -- is M3.
+-- A window onto a Luanti world running inside buildat_server, and the player
+-- standing in it: the box walks, falls, climbs a step and is stopped by what
+-- it runs into, and the camera sits where its eyes are. The physics is
+-- player.lua, copied from extensions/luanti_client, which is also where its
+-- checks live; what is here is the keys, the camera and the world to ask
+-- about.
 local log = buildat.Logger("luanti_launcher")
 local magic = require("buildat/extension/urho3d")
 local cereal = require("buildat/extension/cereal")
@@ -36,8 +38,55 @@ local CAMERA_FOV = 45
 local FAR_CLIP = 400
 local VIEW_DIR = {x = -0.7, y = -0.55, z = -0.7}
 
-local MOVE_SPEED = 20
 local MOUSE_SENSITIVITY = 0.15
+
+-- The player's own physics, which knows neither the protocol nor Urho3D:
+-- see the header of player.lua
+local ok_player, err_player, player_physics =
+		buildat.run_script_file("main/player.lua")
+if not ok_player or type(player_physics) ~= "table" then
+	error("luanti_launcher: could not load player.lua: " .. tostring(err_player))
+end
+
+-- The keys, in one place, so that what the player is told and what the code
+-- reads cannot drift apart. Luanti's own defaults, and the F5 line below
+-- lists them. `name` is what a player is shown, because a key constant is
+-- not something to put in front of one.
+local BINDINGS = {
+	{action = "forward", key = magic.KEY_W, name = "W", what = "Walk forward"},
+	{action = "back", key = magic.KEY_S, name = "S", what = "Walk back"},
+	{action = "left", key = magic.KEY_A, name = "A", what = "Walk left"},
+	{action = "right", key = magic.KEY_D, name = "D", what = "Walk right"},
+	{action = "jump", key = magic.KEY_SPACE, name = "Space",
+			what = "Jump, and up while flying"},
+	{action = "sneak", key = magic.KEY_LSHIFT, name = "Shift",
+			what = "Sneak, and down while flying"},
+	{action = "fast", key = magic.KEY_LCTRL, name = "Ctrl", what = "Move fast"},
+	{action = "fly", key = magic.KEY_K, name = "K", what = "Fly on and off"},
+	{action = "noclip", key = magic.KEY_H, name = "H",
+			what = "Through walls on and off"},
+	{action = "inventory", key = magic.KEY_I, name = "I", what = "Inventory"},
+	{action = "mouse", key = magic.KEY_TAB, name = "Tab",
+			what = "The mouse in the world or on the screen"},
+	{action = "detail", key = magic.KEY_F5, name = "F5",
+			what = "The line of detail on and off"},
+	{action = "menu", key = magic.KEY_ESCAPE, name = "Escape",
+			what = "Close what is open - or leave"},
+	-- Listed for the player's sake; the code for these is the mouse
+	-- handling rather than a key lookup
+	{action = "dig", name = "Left mouse", what = "Dig"},
+	{action = "place", name = "Right mouse", what = "Place, or use"},
+}
+
+local BIND = {}
+for _, b in ipairs(BINDINGS) do
+	BIND[b.action] = b
+end
+
+local function key_down(action)
+	local b = BIND[action]
+	return b ~= nil and b.key ~= nil and magic.input:GetKeyDown(b.key)
+end
 
 -- The same PBR setup the lighting games use; games/voxel_lighting's README
 -- says why these numbers are what they are
@@ -59,7 +108,14 @@ local function angles_from_dir(d)
 end
 
 local yaw, pitch = angles_from_dir(VIEW_DIR)
-local free_look = false
+-- Whether the mouse turns the player's head or points at the screen. In the
+-- world while playing, on the screen while a form is open or Tab says so.
+local mouse_in_world = false
+
+local function set_mouse_in_world(enable)
+	mouse_in_world = enable
+	magic.input:SetMouseVisible(not enable)
+end
 
 do
 	local zone_node = scene:CreateChild("Zone")
@@ -123,8 +179,8 @@ voxel_shading.set_camera(camera_node)
 magic.input:SetMouseVisible(true)
 
 local title_text = magic.ui.root:CreateChild("Text")
-title_text:SetText("luanti_launcher: Tab = free move, left = dig, " ..
-		"right = place, I = inventory")
+title_text:SetText("luanti_launcher: WASD = walk, Space = jump, K = fly, " ..
+		"Tab = mouse, F5 = detail, left = dig, right = place")
 title_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 15)
 title_text.horizontalAlignment = magic.HA_CENTER
 title_text.verticalAlignment = magic.VA_TOP
@@ -169,6 +225,93 @@ wait_text:SetPosition(0, 0)
 voxelworld.sub_geometry_update(function(node)
 	wait_text:SetText("")
 end)
+
+--
+-- The player
+--
+-- What stops the player is the registry's own physically_solid, so glass
+-- stops them and a plant does not. A voxel that has not arrived stops them
+-- as well: standing still in a world that is still loading is better than
+-- falling through it.
+--
+-- simplified: a whole cube per solid voxel, so a slab or a stair is a full
+-- one to walk into. player.lua takes the boxes a voxel is made of instead,
+-- and the registry has them (VoxelDefinition::shape); what is missing is
+-- the physical boxes, which the mesher's shapes are not.
+local function node_stops(x, y, z)
+	local v = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
+	if v == nil then
+		return true
+	end
+	local reg = voxelworld.get_voxel_registry()
+	local id = reg:id_of(v)
+	if id == 0 then
+		return true
+	end
+	local def = reg:get_by_id(id)
+	return def == nil or def.physically_solid
+end
+
+local player = player_physics.new(node_stops)
+-- Nothing moves until the server says where the player is: what it answers
+-- with is the spawn, or where the last run left them, and a client that
+-- started walking from somewhere of its own would tell the server that
+-- instead. See M.sub_player_pos in the module's client half.
+local player_placed = false
+
+luanti.sub_player_pos(function(p)
+	player:set_position(p.x, p.y, p.z)
+	player.vx, player.vy, player.vz = 0, 0, 0
+	if not player_placed then
+		player_placed = true
+		set_mouse_in_world(true)
+	end
+	log:info("the server put the player at " ..
+			string.format("%.1f, %.1f, %.1f", p.x, p.y, p.z))
+end)
+
+-- What F5 shows: where the player is, what they are standing on and what
+-- the keys are. A player who wants to know why something is not happening
+-- looks here first.
+local detail_text = magic.ui.root:CreateChild("Text")
+detail_text:SetText("")
+detail_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 13)
+detail_text.horizontalAlignment = magic.HA_LEFT
+detail_text.verticalAlignment = magic.VA_TOP
+detail_text:SetPosition(8, 30)
+detail_text.visible = false
+
+local function binding_lines()
+	local parts = {}
+	for _, b in ipairs(BINDINGS) do
+		parts[#parts + 1] = b.name .. ": " .. b.what
+	end
+	return table.concat(parts, "\n")
+end
+
+local detail_timer = 0
+local function update_detail(dt)
+	if not detail_text.visible then
+		return
+	end
+	detail_timer = detail_timer + dt
+	if detail_timer < 0.25 then
+		return
+	end
+	detail_timer = 0
+	local mode = player.noclip and "noclip" or (player.fly and "flying" or
+			(player.on_ground and "on the ground" or "falling"))
+	local chunk_p = voxelworld.get_chunk_position(buildat.Vector3(
+			player.x, player.y, player.z))
+	detail_text:SetText(string.format(
+			"%.1f, %.1f, %.1f | %s | looking %.0f round, %.0f down\n" ..
+			"speed %.1f, %.1f, %.1f | chunk %d, %d, %d%s\n%s",
+			player.x, player.y, player.z, mode, yaw, pitch,
+			player.vx, player.vy, player.vz,
+			chunk_p.x, chunk_p.y, chunk_p.z,
+			voxelworld.chunk_has_physics(chunk_p) and "" or " (no physics)",
+			binding_lines()))
+end
 
 --
 -- Pointing at a node, and digging it
@@ -323,41 +466,45 @@ magic.SubscribeToEvent("UIMouseClick", function(event_type, event_data)
 			"left")
 end)
 
-local function set_free_look(enable)
-	free_look = enable
-	magic.input:SetMouseVisible(not free_look)
-end
-
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	local key = event_data:GetInt("Key")
 	-- A form takes escape to close itself; what is left is this game's own
 	if luanti.key(key) then
-		set_free_look(false)
+		set_mouse_in_world(false)
 		return
 	end
-	if key == magic.KEY_TAB then
-		set_free_look(not free_look)
-	elseif key == magic.KEY_I then
+	if key == BIND.mouse.key then
+		set_mouse_in_world(not mouse_in_world)
+	elseif key == BIND.inventory.key then
 		-- Luanti's own inventory key, and what a game's inventory formspec
-		-- is for. The mouse has to be there to click it.
+		-- is for. The mouse has to be on the screen to click it.
 		luanti.open_player_inventory()
-		set_free_look(false)
-	elseif key == magic.KEY_ESCAPE then
-		if free_look then
-			set_free_look(false)
+		set_mouse_in_world(false)
+	elseif key == BIND.fly.key then
+		player.fly = not player.fly
+		log:info(player.fly and "flying" or "walking")
+	elseif key == BIND.noclip.key then
+		player.noclip = not player.noclip
+		log:info(player.noclip and "through walls" or "solid walls")
+	elseif key == BIND.detail.key then
+		detail_text.visible = not detail_text.visible
+		detail_timer = 1
+	elseif key == BIND.menu.key then
+		if mouse_in_world then
+			set_mouse_in_world(false)
 		else
 			buildat.disconnect()
 		end
 	end
 end)
 
--- Where the camera is, a few times a second: the server puts its player
+-- Where the player is, a few times a second: the server moves its own player
 -- there, and a Luanti mod asking where the player is gets this.
 local WHERE_INTERVAL = 0.2
 local where_timer = 0
 
 local function send_where()
-	local p = camera_node.worldPosition
+	local p = {x = player.x, y = player.y, z = player.z}
 	-- Luanti measures the horizontal angle from +Z towards -X and the
 	-- vertical one positive upwards, which is what its get_look_dir()
 	-- unpacks; Urho's yaw goes the other way round
@@ -378,10 +525,12 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	local dt = event_data:GetFloat("TimeStep")
 	voxel_shading.update(dt)
 
-	where_timer = where_timer + dt
-	if where_timer >= WHERE_INTERVAL then
-		where_timer = 0
-		send_where()
+	if player_placed then
+		where_timer = where_timer + dt
+		if where_timer >= WHERE_INTERVAL then
+			where_timer = 0
+			send_where()
+		end
 	end
 
 	pointed_p, pointed_above = find_pointed_voxel()
@@ -392,38 +541,47 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		pointed_node.enabled = false
 	end
 
-	-- A form on the screen is what the mouse is for while it is there
-	if not free_look or luanti.form_open() then
+	update_detail(dt)
+
+	-- Until the server has said where the player is there is no player:
+	-- what is on the screen is the overview the camera started at
+	if not player_placed then
 		return
 	end
 
-	local dmouse = magic.input:GetMouseMove()
-	yaw = yaw + dmouse.x * MOUSE_SENSITIVITY
-	pitch = pitch + dmouse.y * MOUSE_SENSITIVITY
-	if pitch > 89 then pitch = 89 end
-	if pitch < -89 then pitch = -89 end
-
-	local yr = math.rad(yaw)
-	local forward = magic.Vector3(math.sin(yr), 0, math.cos(yr))
-	local right = magic.Vector3(math.cos(yr), 0, -math.sin(yr))
-
-	local speed = MOVE_SPEED * dt
-	local p = camera_node.position
-	local function move(v, s)
-		p = magic.Vector3(p.x + v.x*s, p.y + v.y*s, p.z + v.z*s)
-	end
-	if magic.input:GetKeyDown(magic.KEY_W) then move(forward, speed) end
-	if magic.input:GetKeyDown(magic.KEY_S) then move(forward, -speed) end
-	if magic.input:GetKeyDown(magic.KEY_D) then move(right, speed) end
-	if magic.input:GetKeyDown(magic.KEY_A) then move(right, -speed) end
-	if magic.input:GetKeyDown(magic.KEY_SPACE) then
-		p = magic.Vector3(p.x, p.y + speed, p.z)
-	end
-	if magic.input:GetKeyDown(magic.KEY_SHIFT) then
-		p = magic.Vector3(p.x, p.y - speed, p.z)
+	-- The mouse turns the head while it is in the world; while it is on the
+	-- screen -- a form is open, or Tab put it there -- it is the pointer
+	if mouse_in_world and not luanti.form_open() then
+		local dmouse = magic.input:GetMouseMove()
+		yaw = yaw + dmouse.x * MOUSE_SENSITIVITY
+		pitch = pitch + dmouse.y * MOUSE_SENSITIVITY
+		if pitch > 89 then pitch = 89 end
+		if pitch < -89 then pitch = -89 end
 	end
 
-	camera_node.position = p
+	-- What the keys ask for, in world coordinates: a direction of any
+	-- length, which player.lua turns into a speed
+	local wish = {x = 0, z = 0}
+	if mouse_in_world and not luanti.form_open() then
+		local yr = math.rad(yaw)
+		local fx, fz = math.sin(yr), math.cos(yr)
+		local function walk(x, z)
+			wish.x = wish.x + x
+			wish.z = wish.z + z
+		end
+		if key_down("forward") then walk(fx, fz) end
+		if key_down("back") then walk(-fx, -fz) end
+		if key_down("right") then walk(fz, -fx) end
+		if key_down("left") then walk(-fz, fx) end
+		wish.jump = key_down("jump")
+		wish.sneak = key_down("sneak")
+		wish.fast = key_down("fast")
+	end
+
+	player:update(dt, wish)
+
+	camera_node.position = magic.Vector3(player.x,
+			player.y + player_physics.EYE_HEIGHT, player.z)
 	camera_node.rotation = magic.Quaternion(pitch, yaw, 0)
 end)
 

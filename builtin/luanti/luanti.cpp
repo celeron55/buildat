@@ -3896,6 +3896,28 @@ struct Module: public interface::Module, public luanti::Interface
 		return 0;
 	}
 
+	// Where the server says the player is: the spawn, a teleport, a mod
+	// moving them. Where the player walks is the client's own business and
+	// arrives as set_player_pos(); this is the other direction, and without
+	// it a player who was somewhere else last time starts wherever their
+	// client felt like.
+	static int l_send_player_pos(lua_State *L)
+	{
+		Module *self = module_of(L);
+		size_t name_len = 0;
+		const char *name_p = luaL_checklstring(L, 1, &name_len);
+		ss_ name(name_p ? name_p : "", name_len);
+		sv_<ss_> flat;
+		for(int i = 2; i <= 4; i++){
+			char buf[32];
+			snprintf(buf, sizeof buf, "%.3f",
+					(double)luaL_checknumber(L, i));
+			flat.push_back(buf);
+		}
+		self->send_to_player(name, "luanti:player_pos", flat);
+		return 0;
+	}
+
 	void send_inventory(const ss_ &name, const sv_<ss_> &flat)
 	{
 		send_to_player(name, "luanti:inventory", flat);
@@ -4896,6 +4918,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_show_object_props",
 				l_show_object_props);
 		set_global_cfunction("__luanti_send_inventory", l_send_inventory);
+		set_global_cfunction("__luanti_send_player_pos", l_send_player_pos);
 		set_global_cfunction("__luanti_show_formspec", l_show_formspec);
 		set_global_cfunction("__luanti_player_formspec", l_player_formspec);
 		set_global_cfunction("__luanti_send_node_inventory",
