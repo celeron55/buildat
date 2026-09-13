@@ -78,15 +78,26 @@ first thing to run after touching the API surface.
 
 What is left is, in order:
 
-1. **M6's map.** The world is 3x3x3 sections -- about 192 voxels a side --
-   so the importer drops most of a real Luanti world, devtest's unittest
-   suite stops at `test_mapgen_edges`, and `map_meta.txt`'s seed has nowhere
-   to go. A map that loads and unloads around a player is what the mapgen
-   seam was deferred until there was something to measure; there is now.
-   The first thing to settle is in `voxelworld` rather than in the module:
-   what the instance region means when the world is bigger than it, since
-   that region is also where the sky is. See "The map" under the module
-   plan's open questions.
+1. **M6's map, and it starts in `voxelworld`.** The world is 3x3x3 sections
+   -- about 192 voxels a side -- so the importer drops most of a real Luanti
+   world, devtest's unittest suite stops at `test_mapgen_edges`, and
+   `map_meta.txt`'s seed has nowhere to go. **How it streams is settled
+   (2026-09-13)**; see "The map, and how it streams" in the module plan for
+   the design and the order of work.
+
+   The first half is engine work with three callers, not Luanti work:
+   `voxelworld::Instance` grows load points -- a position and its own load
+   and generate radii, so that a player can have a big range and a machine
+   only enough to work, and so that two players can differ from each other
+   -- plus `get_loaded_sections()` and a per-peer send range, which is a
+   hole today rather than a refinement: every chunk goes to every peer.
+   `games/infidigger` and `games/bomber_drone` already stream server-side
+   with identical copy-pasted code and **delete their copies** when it
+   lands, which is the check that the interface is right.
+
+   The second half is the module's: a load point per player, an active range
+   bounding the ABM and LBM sweeps, node metadata per section rather than
+   one blob for the world, and node timers that stop with their section.
 2. **The rest of M3's drawtypes**, which is the palettes and `mesh`. Both
    have an open question of their own in the module plan -- how many voxel
    types a palette costs, and whether a mesh node goes through the mesher or

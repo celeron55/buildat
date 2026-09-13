@@ -216,7 +216,8 @@ Staged, because the seam is where the bugs will be:
    it, and devtest is entirely usable this way. `voxelworld`'s
    `GenerationRequest` is subscribed to as well, which is what a section
    made after the world started goes through -- there are none today, and
-   it is the seam the next stage grows out of.
+   it is the seam the next stage grows out of, and the one every streamed
+   section will take. See "The map, and how it streams".
 2. **Then the Lua mapgen path**: `core.register_on_generated` with a working
    VoxelManip. The same seam, exercised by something small enough to read.
 3. **Then v7 and the rest**, which at that point is compiling code that
@@ -260,6 +261,130 @@ read, because a region read is one read per chunk stitched together and the
 stitching is the part that can be wrong. `set_volume()` is what the importer
 writes with, and what checks it is the node histogram of an imported world
 matching an independent decode of the same database.
+
+## The map, and how it streams (settled 2026-09-13)
+
+The world is 3x3x3 sections -- about 192 voxels a side around the origin --
+because `create_world()` asks `voxelworld` for that region and
+`generate_world()` fills it. That is why the importer counts and drops most
+of a real Luanti world, why devtest's unittest suite stops at
+`test_mapgen_edges`, and why `map_meta.txt`'s seed has nowhere to go.
+
+**Sections come and go around the players.** Not a bigger fixed world: the
+point of a Luanti world is that it goes on, and a fixed one only moves the
+wall further away.
+
+**What the instance region turns out to mean: almost nothing.** It is used
+in two places -- the loop that creates the initial sections, and one line of
+the skylight:
+
+    // Voxels in the topmost row of the world see the open sky
+    bool is_below_open_sky(const pv::Vector3DInt32 &p) {
+        return p.getY() == (m_section_region.getUpperCorner().getY() + 1)
+                * section_h - 1;
+    }
+
+Sections outside the region already load on demand -- this module does it
+for every node write that lands outside the 3x3x3 -- so nothing enforces a
+barrier at the edge; light simply does not flood into sections that are not
+loaded. So the region keeps both of its meanings and needs no change: it is
+the world's **bounds and its sky height**, and residency becomes a separate
+thing layered on top. A Luanti world asks for a region that is tall and
+narrow -- the full map height, a few sections across -- and streams the rest
+in around it.
+
+The consequence to remember: a section is lit by the sky only through the
+column above it, so a newly loaded section is dark until the sections above
+it are there. Luanti answers that by lighting a block at generation time
+from the mapgen's own heightmap; that is the answer here too, when there is
+a mapgen. Until then the singlenode fill carries full sunlight already.
+
+**The streamer is `voxelworld`'s, not a game's.** `games/infidigger` and
+`games/bomber_drone` each already stream server-side, with identical code --
+the same `STREAM_RADIUS_XZ`, `m_requested_sections`, `m_pinned_sections` and
+per-tick budget, one copy-pasted from the other. This module would be the
+third copy of about 150 lines. **Both games delete their copies when the
+engine version lands**, and that is the check that the interface is the
+right one: if it cannot express what those two do today, it is wrong.
+
+A pinned section falls out for free -- it is a load point with radius zero.
+
+**A load point carries its own radii, and two of them.** Luanti's own
+experience is three ranges, set in descending order, and it is worth taking:
+
+| Luanti's range | Where it goes here | Why |
+| --- | --- | --- |
+| `max_block_send_distance` (12) | `voxelworld`, **per peer**, declared by the client | only the client knows what its computer can take; the server caps it |
+| `max_block_generate_distance` (10) | a load point's generate radius | the engine owns the section lifecycle |
+| `active_block_range` (4) | **this module**, not the engine | `voxelworld` has no idea what an ABM is |
+
+So the point is:
+
+    struct LoadPoint
+    {
+        pv::Vector3DInt32 p;                 // in voxels
+        // Sections within this are loaded if the save has them and left
+        // alone if it does not: what a player sees far away is the terrain
+        // that is already there, and new terrain appears closer in.
+        int16_t load_xz, load_y;             // in sections
+        // ... and within this, generated as well.
+        int16_t generate_xz, generate_y;     // load_* >= generate_*
+    };
+
+    virtual void set_load_points(const sv_<LoadPoint> &points) = 0;
+
+The radii are per point on purpose, and for two reasons rather than one. A
+player needs a big radius and a machine that has to keep working needs only
+enough to work, which is the cheaper of the two. And **two players need
+different radii from each other**: a client on a weaker computer wants to be
+sent less, and loading more than that client cares about is the server
+spending memory and generation on something nobody will look at. The load
+radius of a player's point is therefore that player's own declared range,
+capped by a server maximum.
+
+`load_section()` already splits at exactly the line this needs -- it tries
+`load_saved_section()` and falls back to `create_section()`, with
+`generate_section()` a separate call -- so "load it if the save has it, do
+not generate" is the existing function minus one call.
+
+**The per-peer send range is a hole, not a refinement.** `voxelworld` sends
+`voxelworld:node_volume_updated` to every initialised peer and replicates
+every chunk node to everyone; there is no distance filter at all. Nobody
+notices at 27 sections. Streaming is what makes it matter, so it is part of
+this work and not a later optimisation. The client half already has
+`lod_distance` and `physics_distance` as its own preferences; what is
+missing is the client declaring a wanted range and the server taking the
+smaller of that and its own maximum.
+
+**What this module owes the streamer:**
+
+- **`get_loaded_sections()`**, which it needs anyway: the ABM sweep, the
+  world fill and the importer's clipping each scan the whole bounds today
+  and skip what is not loaded. Over a streamed world that scan is the cost.
+- **The active range**, computed from the player positions it already
+  receives, bounding which loaded sections the ABM and LBM sweeps touch and
+  which objects step. Without it the sweep cost grows with the world instead
+  of with the players -- and it was already 24.5% of a core over 27
+  sections.
+- **Node metadata per section.** It is one blob for the whole world today,
+  written at shutdown; a section that unloads and comes back has to bring
+  what hangs off its nodes with it. This is step 5c's named upgrade path in
+  `doc/plan/world_persistence_plan.md`.
+- **Node timers that stop with their section**, the way Luanti's do. They
+  run wherever they are here, which is only right while the world is
+  entirely loaded.
+
+The singlenode fill needs nothing: `on_generation_request()` already answers
+a `GenerationRequest` per section, which is the path every streamed section
+takes.
+
+**The order of work.** The engine first, because everything waits on it:
+`LoadPoint` and `set_load_points()`, then the two games deleting their
+copies, then `get_loaded_sections()`, then the per-peer send range. Then
+this module: a load point per player, the active range, the metadata per
+section, the timers. Nothing in it needs the mapgen -- a streamed singlenode
+world is what proves it.
+
 
 ## The protocol, and the client
 
@@ -722,8 +847,10 @@ does not scroll and a list longer than the screen has saves nobody can
 reach. What it wants is a scrolling list.
 
 - **What is left: the map.** The world is 3x3x3 sections, which is why the
-  importer drops most of a real Luanti world. See "The map" under the open
-  questions; it is the largest piece of work left in this plan.
+  importer drops most of a real Luanti world. How it streams is settled --
+  see "The map, and how it streams" -- and it is the largest piece of work
+  left in this plan. Most of the first half of it is `voxelworld`'s rather
+  than this module's.
 
 **M7 -- an existing Luanti world opens. Built 2026-09-13**, except the seed.
 `builtin/luanti/mapblock.h` reads a MapBlock at serialization versions 25 to
@@ -1134,52 +1261,6 @@ what the module does not do.
 
 What has to be decided before the work it belongs to can start. Each says
 what is known, so that answering it is a judgement and not a search.
-
-### The map (M6), and what a Luanti-sized world means for voxelworld
-
-**The work:** the world is 3x3x3 sections -- about 192 voxels a side around
-the origin -- because `create_world()` asks `voxelworld` for that region and
-`generate_world()` fills it. A Luanti world is +/-31000 nodes a side. This is
-why the importer counts and drops most of a real world, why `test_mapgen_edges`
-stops devtest's unittest suite, and why there is nowhere to put
-`map_meta.txt`'s seed.
-
-**What is already there.** `voxelworld::Instance` has
-`load_or_generate_section()`, `unload_section()` and `is_section_loaded()`,
-and the module already calls the first of those for a section a node write
-lands in, so sections outside the initial region are made on demand today.
-`GenerationRequest` is the event a generator answers and the module answers
-it with the singlenode fill. The mapgen staging above -- singlenode, then
-the Lua mapgen path, then the vendored C++ mapgens -- is unchanged and step
-1 is built.
-
-**What is not decided:**
-
-- **What the instance region means when the world is bigger than it.**
-  `create_instance(scene, region)` fixes it, and `voxelworld` uses it for
-  two things: which sections are made at the start, and where the sky is --
-  "light enters from above that; everything outside is a barrier". A world
-  that streams needs the second answered differently: either a sky plane
-  that follows the region as it grows, or a skylight that does not depend on
-  a world-sized box. **This is engine work in `voxelworld`, not module
-  work**, and it is the first thing to settle because everything else waits
-  on it.
-- **Who decides which sections are loaded.** A player moves and the sections
-  around them should come and go. `voxelworld`'s client already has
-  `lod_distance` and `physics_distance`; the server has no equivalent. Is
-  the loader a `voxelworld` feature every game gets, or the Luanti module's
-  own, driven by the player positions it already receives?
-- **What unloading costs the module.** ABMs and LBMs sweep "the loaded
-  sections", node metadata is one blob for the whole world, and node timers
-  run wherever they are. Each of those is written against a world that is
-  entirely loaded and each needs an answer when it is not. The metadata one
-  is already named in the persistence plan: a blob per section.
-
-**Suggested order**, if it is taken: settle the skylight question, give
-`voxelworld` a server-side load distance around a set of points, then the
-module drives it from the players, then the metadata per section, then the
-sweeps. Nothing here needs the mapgen; a streamed singlenode world is
-already the thing that proves it.
 
 ### The palettes (M3)
 

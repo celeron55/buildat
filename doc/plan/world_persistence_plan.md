@@ -435,8 +435,11 @@ byte-identical over all 865 rows -- and, for step 4, the round trip under
      for the whole world**. Luanti keeps a block's metadata with the block
      and writes it when the block is written; the upgrade path is the same
      shape -- a blob per section, written when `voxelworld` writes that
-     section -- and it is what a map bigger than the sections a mod can
-     reach will need. See "The map" in `doc/plan/luanti_module_plan.md`.
+     section -- and it is what a streamed map needs, since a section that
+     unloads and comes back has to bring what hangs off its nodes with it.
+     See "The map, and how it streams" in
+     `doc/plan/luanti_module_plan.md`, which is now settled and names this
+     as one of four things the module owes it.
    - **5d. Players. BUILT 2026-09-13.** Where a player stood, their health,
      breath, metadata and inventory lists, and the auth entries with them,
      in the module's store beside the node metadata. Restored before
