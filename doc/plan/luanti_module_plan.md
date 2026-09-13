@@ -218,10 +218,25 @@ Staged, because the seam is where the bugs will be:
    made after the world started goes through -- which is most of them now
    that the map streams, and which is the seam the next stage grows out of.
    See "The map, as it was built".
-2. **Then the Lua mapgen path**: `core.register_on_generated` with a working
-   VoxelManip. The same seam, exercised by something small enough to read.
+2. **The Lua mapgen path: `core.register_on_generated` with a working
+   VoxelManip. Built 2026-09-13.** A section that has been filled runs the
+   callbacks over the box it filled, and a mod writes terrain into it
+   through a VoxelManip that really reads and writes the map -- three flat
+   arrays read in one call and written in one, in the order `VoxelArea`
+   indexes. `core.get_mapgen_object("voxelmanip")` hands a callback the
+   section's own and writes back what the callback did to it. The noise a
+   mapgen shapes a world with is bound to buildat's vendored copy of
+   Luanti's value noise, so a mod's `NoiseParams` means here what it means
+   there. See "The mapgen seam" in `doc/plan/luanti_module_history.md`.
 3. **Then v7 and the rest**, which at that point is compiling code that
-   already works and pointing it at the seam.
+   already works and pointing it at the seam. Two things stage 2 measured
+   are arguments for doing it in C++ rather than in Lua: a Lua mapgen over
+   a section costs about 600 ms, of which 140 is the skylight and most of
+   the rest is a quarter of a million voxels crossing the Lua boundary
+   twice; and all of it is on the server's own thread, because this module
+   has one Lua state and no thread to put it on. Luanti has an emerge
+   thread. A vendored mapgen writes the volume without Lua in the middle,
+   and is the point at which an emerge thread of some kind is worth having.
 
 The staging is about order, not scope: a mainstream Luanti game is expected
 to produce its real terrain, and stage 3 is a milestone rather than a
@@ -1171,6 +1186,20 @@ what the module does not do.
   nothing while nobody is there. Here it costs an object that is stepped
   over and skipped. The upgrade path is Luanti's static objects, which want
   the same per-section write the metadata does.
+- **A VoxelManip does not emerge.** Luanti reads whole mapblocks around the
+  box asked for and hands back the corners it really read; here the box is
+  the box. A mod that uses the corners it is given -- which is the
+  documented way and what every mod does -- does not notice; what it costs
+  is that a write cannot straddle what was never read.
+- **A Lua mapgen runs on the server's own thread**, so a slow one is a slow
+  server: about 600 ms a section over devtest. The module turns
+  `voxelworld`'s stream budget down to one section a pass while its mapgen
+  is slow, which spreads it but does not remove it. Luanti generates on an
+  emerge thread; the upgrade path is stage 3's, where the generator is C++
+  and does not hold the one Lua state.
+- **The noise has no lacunarity and no flags**, because buildat's vendored
+  copy of Luanti's noise doubles the frequency per octave and has no eased
+  or absvalue switch. A mod that sets either gets the default.
 - **The importer loads every section it writes into** and lets the streamer
   unload them afterwards, so a large world peaks at the whole import in
   memory. It was the whole world before the map streamed, and the upgrade

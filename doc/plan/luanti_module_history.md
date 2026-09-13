@@ -1015,3 +1015,66 @@ The models devtest ships are small -- five quads for a pyramid -- except its
 two performance test nodes, which are 384 and 960 quads each and exist to be
 slow: a chunk of those is a chunk of a million quads, in Luanti as well as
 here.
+
+## The mapgen seam (stage 2 built 2026-09-13)
+
+Every world the module made was air with what a mod had placed in it. Stage
+2 of "Mapgen" in the plan is the seam a generator writes through, exercised
+by a Lua one; stage 3 is the vendored `src/mapgen/` pointed at the same
+seam.
+
+**Where the callbacks run.** A section that has been filled with the
+singlenode node runs `core.register_on_generated` over the box it filled,
+with the block seed Luanti's `get_blockseed2` makes of the world's seed and
+the section's position. Not inside a `voxelworld` access: what a mod does
+there is a VoxelManip, which reaches into `voxelworld` itself. Luanti runs
+its own callbacks after the mapgen has written a chunk and before the block
+is in the map; here the fill is already in the map and the mod writes over
+it, which is the same order from the mod's point of view.
+
+**What a VoxelManip is here.** The box in three flat arrays -- the content
+ids, param1 and param2 -- read in one call and written in one. The order is
+x fastest and then y and then z, which is exactly what `VoxelArea` does its
+arithmetic in and what `voxelworld`'s region reads already produced, so a
+mod's own index arithmetic goes straight through. That is what makes it
+affordable: a section is a quarter of a million voxels, and one at a time
+across the Lua boundary is a module lock each.
+
+`__luanti_set_region_data()` is the direction that did not exist. It writes
+one `VoxelVolume` through `set_volume()`, creates the sections the box
+reaches into, and flushes the write-behind buffer first -- and so does the
+read, because a mod that writes a node and then reads a region around it
+would otherwise not see its own write. That was a latent hole before there
+was a region write to notice it with.
+
+**The seed, which finally has somewhere to go.** `map_meta.txt`'s seed was
+one of the named leftovers of the importer. It is now in the save beside the
+clock, made once for a world that has none, taken from the imported world
+when there is one, and read by `core.get_mapgen_setting("seed")` and by
+every block seed. With it came `get_mapgen_params`, `get_mapgen_chunksize`
+-- in mapblocks, which is the unit Luanti answers it in, and a section is
+four of them -- and `get_mapgen_edges`, which is the region the module asks
+`voxelworld` for.
+
+**A mapgen script's callbacks take different arguments.** In Luanti's mapgen
+environment `on_generated` is handed the VoxelManip first. There is one Lua
+state here, so `core.register_mapgen_script()` notes which callbacks were
+registered while it ran and those are called that way. devtest's own
+`unittests` mod registers one, and it asserted its way through the wrong
+arguments twelve times a second before this.
+
+**The noise.** `PerlinNoise`, `PerlinNoiseMap` and `core.get_perlin`
+answered zero and an empty table. They are bound to `interface::Noise`,
+which is buildat's own vendored copy of Luanti's value noise -- the same
+code the Lua API is documented against. A single value and a map of them are
+the same noise, which the check beside the map seam asserts: a heightmap and
+the checks over it disagreeing would be two different worlds.
+
+**What it costs, measured.** A Lua mapgen over one section is about 600 ms,
+of which 140 is `voxelworld`'s skylight flooding a section whose every voxel
+changed; the rest is the arrays crossing the Lua boundary twice and the
+mod's own loop over a quarter of a million voxels. All of it is on the
+server's own thread. The module answers by turning the stream budget down to
+one section a pass while its mapgen is slow -- which is what
+`set_stream_budget()` was built for, and only the module can see how long
+its own mods took.

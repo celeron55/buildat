@@ -96,6 +96,15 @@ section -- one blob for the world still works, and what it costs is memory
 that grows with where the players have been. See "The map, as it was built"
 in the module plan.
 
+**The mapgen's seam is built (2026-09-13).** A section that has been filled
+runs `core.register_on_generated` over the box it filled, and a mod writes
+terrain into it through a VoxelManip that really reads and writes the map --
+three flat arrays in the order `VoxelArea` indexes. The noise a mapgen
+shapes a world with is bound to buildat's vendored copy of Luanti's, so a
+mod's `NoiseParams` means here what it means there, and `map_meta.txt`'s
+seed finally has somewhere to go: the save, beside the clock. See "The
+mapgen seam" in the module's history.
+
 **The meshes are built for .obj and .b3d (2026-09-13).** A mesh node is read
 while the registry is built and becomes the node's shape, so the quads
 travel in the definition like a nodebox's -- nineteen more of devtest's
@@ -105,19 +114,20 @@ the client half rather than by the voxel mesher.
 
 What is left, in order of what it is worth:
 
-1. **The mapgen, stage 2: `core.register_on_generated` and a VoxelManip.**
-   This is the one thing left that a game cannot work without. Every world
-   the module makes is air with what a mod placed in it -- no terrain, no
-   ores, no caves -- so a mainstream Luanti game loads, runs and looks at
-   nothing. The map streams now, which is what stage 2 was waiting for: a
-   generated world that cannot unload is a world with a wall around it.
+1. **The mapgen, stage 3: vendor `src/mapgen/` and point it at the seam.**
+   Stage 2 is built (2026-09-13) and a Lua mapgen makes terrain through it,
+   so what is left is the 9.5k lines of noise, biomes, ores, decorations,
+   schematics and the tree generator that a mainstream Luanti game's world
+   actually is -- a world that is *nearly* v7 is a world that is nothing,
+   which is why it is vendored rather than rewritten. See "Mapgen" in the
+   module plan.
 
-   It is also the seam stage 3 stands on. Stage 3 is vendoring `src/mapgen/`
-   -- 9.5k lines of noise, biomes, ores, decorations and schematics that
-   have to match Luanti exactly to be worth anything -- and pointing it at
-   the same `GenerationRequest` this stage exercises with something small
-   enough to read. See "Mapgen" in the module plan for the staging and why
-   it is vendored rather than rewritten.
+   Two things stage 2 measured are arguments for doing it in C++: a Lua
+   mapgen over a section costs about 600 ms, most of it a quarter of a
+   million voxels crossing the Lua boundary twice, and all of it runs on the
+   server's own thread. Luanti has an emerge thread; this module has one Lua
+   state and nowhere to put one. A vendored mapgen writes the volume with no
+   Lua in the middle.
 2. **Node metadata per section**, which is what M6's map left behind. One
    blob for the world still works and loses nothing, but it grows with
    everywhere the players have been and it is one large write at shutdown.
