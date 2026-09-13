@@ -176,7 +176,7 @@ struct Module: public interface::Module
 					"buildat.run_script_file(\"main/init.lua\")");
 		});
 		luanti::access(m_server, [&](luanti::Interface *i){
-			i->add_player(player_name_of(peer));
+			i->add_player(player_name_of(peer), peer);
 		});
 	}
 

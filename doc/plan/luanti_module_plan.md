@@ -843,8 +843,19 @@ two things M1 disproved about the build, are in
   again; the server says `main:dig (x, y, z): dug` and the second click
   lands on a different node, which is the client's own map having caught up.
 
-  **What is left of M4:** formspecs, and a client that shows the inventory a
-  click digs into. Both are the client's.
+  **Built: the client is sent the player's inventory (2026-09-13).** The
+  module sends it to that one client whenever it has changed -- an inventory
+  counts its own changes, so a step sends the ones that have -- and the
+  module's client half hands the lists to whoever is drawing.
+  `games/luanti_launcher` draws a line of text saying what the player is
+  carrying, which is what says that digging a node put the node somewhere.
+  The packet is what a formspec's `list[]` will read.
+
+  **What is left of M4:** formspecs. `extensions/luanti_client` has
+  `formspec.lua` and `formspec_ui.lua` ready to copy -- `M.new(magic,
+  buildat, log, ctx)` asks for four things, of which the textures and the
+  inventory now exist -- and what has to be written is the item images and
+  the input handling that `init.lua` does around them.
 - **M5 -- it lives. Built 2026-09-13.** ABMs, LBMs, entities, `core.after`.
   Success is `testabms` and `testentities` behaving.
 

@@ -81,7 +81,8 @@ What is left is, in order:
    at, the server decides what that means -- the digger is the player who
    clicked, so what the dig drops is theirs, and the objects are on screen,
    as a node per object in the module's scene, which every client is already
-   being sent. What is missing is a client that shows an inventory.
+   being sent, and the player's inventory reaches their own client, which
+   the launcher draws as a line of text saying what they are carrying.
    The fork's shape is settled -- which files are copied, which are dropped,
    and that `world.lua` loses a fifth of itself to `voxelworld` -- and
    `init.lua`'s three-way split is the largest unexamined piece of it. See

@@ -34,6 +34,7 @@ local objects = {}      -- id -> the object's own state
 local next_id = 1
 
 local __show_objects = __luanti_show_objects
+local __send_inventory = __luanti_send_inventory
 
 -- What an entity gets until its initial_properties and set_properties say
 -- otherwise. The names are Luanti's, and the ones nothing here reads are
@@ -1152,6 +1153,31 @@ local function show_objects()
 	__show_objects(v)
 end
 
+-- What a player is carrying, to their own client and nobody else's. The
+-- inventory counts its own changes, so this is the one that has changed since
+-- the last step rather than all of them every step.
+--
+-- The lists go over flat: a name, how many slots it has, and then that many
+-- item strings. What reads them is the module's client half.
+local function send_inventories()
+	for name, id in pairs(players) do
+		local o = objects[id]
+		local inv = o and o.inventory
+		if inv and inv.gen ~= o.sent_inventory_gen then
+			o.sent_inventory_gen = inv.gen
+			local flat = {}
+			for list_name, stacks in pairs(inv:get_lists()) do
+				flat[#flat + 1] = list_name
+				flat[#flat + 1] = tostring(#stacks)
+				for _, stack in ipairs(stacks) do
+					flat[#flat + 1] = stack:to_string()
+				end
+			end
+			__send_inventory(name, flat)
+		end
+	end
+end
+
 function core.__step_objects(dtime)
 	-- Over the ids taken first, because a step adds and removes objects
 	local ids = {}
@@ -1166,6 +1192,7 @@ function core.__step_objects(dtime)
 		end
 	end
 	show_objects()
+	send_inventories()
 end
 
 -- vim: set noet ts=4 sw=4:
