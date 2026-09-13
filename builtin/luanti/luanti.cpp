@@ -784,6 +784,8 @@ struct Module: public interface::Module, public luanti::Interface
 	// if it has one. What reads it is core.get_mapgen_setting("seed") and
 	// the block seed every on_generated is given.
 	int64_t m_seed = 0;
+	// Whether this save is one nobody has opened before; see load_seed()
+	bool m_world_is_new = false;
 
 	void load_seed()
 	{
@@ -791,6 +793,10 @@ struct Module: public interface::Module, public luanti::Interface
 		if(m_store && m_store->get("seed", data) && !data.empty()){
 			m_seed = strtoll(data.c_str(), nullptr, 10);
 		} else {
+			// The first thing a world is asked for is its seed, so a save
+			// with none is a save nobody has played yet. What that decides
+			// is what mapgen it gets; see mapgen_name().
+			m_world_is_new = true;
 			// Somewhere nobody has been before: the clock is what there is
 			// to be random with here, and a world is seeded once
 			m_seed = (int64_t)interface::os::time_us();
@@ -1667,19 +1673,39 @@ struct Module: public interface::Module, public luanti::Interface
 		return out;
 	}
 
-	// What the world's own settings call the mapgen; "singlenode" is what
-	// a world that says nothing gets, which is what it had before there
-	// were any others
+	// What the world's own settings call the mapgen. This is Luanti's
+	// map_meta.txt: the mapgen a world was made with belongs to the world
+	// and not to the configuration, so it is written into the save the
+	// first time and read from there afterwards -- otherwise a world grows
+	// a second kind of terrain the day the default changes.
+	//
+	// A save nobody has opened gets what the settings say and, failing
+	// that, what Luanti gives a new world: v7. A save that was played
+	// before any of this was written down gets what it was played with,
+	// which was singlenode.
 	ss_ mapgen_name()
 	{
+		ss_ stored;
+		if(m_store && m_store->get("mg_name", stored) && !stored.empty())
+			return stored;
+		ss_ out = mapgen_name_from_settings();
+		if(out.empty())
+			out = m_world_is_new ? "v7" : "singlenode";
+		if(m_store)
+			m_store->set("mg_name", out);
+		return out;
+	}
+
+	ss_ mapgen_name_from_settings()
+	{
 		if(!m_lua)
-			return "singlenode";
+			return "";
 		interface::MutexScope ms(m_lua_mutex);
 		lua_State *L = m_lua;
 		int base = lua_gettop(L);
 		lua_getglobal(L, "core");
 		lua_getfield(L, -1, "__mapgen_name");
-		ss_ out = "singlenode";
+		ss_ out;
 		if(lua_pcall(L, 0, 1, 0) == 0){
 			size_t len = 0;
 			const char *s = lua_tolstring(L, -1, &len);

@@ -2430,6 +2430,20 @@ struct CInstance: public voxelworld::Instance
 						continue;
 				}
 
+				// Only the faces of the volume touch what was already in
+				// the world: a voxel inside it that had no light and is
+				// given none can neither lose light nor be reached by any,
+				// because every neighbour that could reach it is part of
+				// the same write. So the inside of a generated section
+				// costs no seeds at all, and the light that does come from
+				// outside enters over the faces and floods inwards from
+				// there. A voxel that had light, or that makes its own,
+				// still seeds wherever it is.
+				const bool on_volume_face =
+						x == rlc.getX() || x == ruc.getX() ||
+						y == rlc.getY() || y == ruc.getY() ||
+						z == rlc.getZ() || z == ruc.getZ();
+
 				// Light that came with the volume is kept and needs no
 				// seed; this is the generator's path and a generated world
 				// arrives lit. See set_voxel() above.
@@ -2437,6 +2451,11 @@ struct CInstance: public voxelworld::Instance
 					const LightField lf = (LightField)f;
 					if(!m_light_maintained[lf] || get_light(nv, lf) != 0)
 						continue;
+					if(!on_volume_face && get_light(old, lf) == 0 &&
+							voxel_light_source(src_v) == 0){
+						set_light(nv, 0, lf);
+						continue;
+					}
 					bool old_transparent = voxel_transmits_light(dst_v);
 					if(old_transparent != voxel_transmits_light(src_v) ||
 							(lf == LIGHT_LAMP &&
