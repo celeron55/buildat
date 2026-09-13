@@ -49,6 +49,13 @@ extern "C" {
 #include <Lua/lualib.h>
 #include <Lua/lauxlib.h>
 }
+// LuaJIT's bit library, which Luanti's mods use as if it were part of the
+// language. Luanti loads this same file -- Mike Pall's Lua BitOp -- when it
+// is not running on LuaJIT, and the Lua here is Urho3D's 5.1, so it always
+// does. A module is one translation unit, so the implementation comes in
+// with the header.
+#include "vendor/bitop/bit.h"
+#include "vendor/bitop/bit.cpp"
 // Luanti's core.encode_png() is a real function of its API and devtest checks
 // what comes out of it, so it is written rather than stubbed. Urho3D ships
 // stb_image_write but does not export it, so it is compiled in here; it is
@@ -3798,9 +3805,15 @@ struct Module: public interface::Module, public luanti::Interface
 		if(sx < 1 || sy < 1 || sz < 0)
 			return luaL_error(L, "noise: a map of %ix%ix%i", sx, sy, sz);
 		const double n = (double)sx * sy * (sz > 0 ? sz : 1);
-		if(n > 4.0 * 1024 * 1024)
-			return luaL_error(L, "noise: %.0f values is more than this makes "
-					"at once", n);
+		// A cap so that a mod asking for a billion values says so rather
+		// than taking the server with it. VoxeLibre's mcl_end_island asks
+		// for 401 x 30 x 401 -- 4.8 million -- while it loads, which is what
+		// this has to be bigger than; Luanti caps it nowhere and pays the
+		// same memory. Lua's own formatter has no %.0f, so the number is
+		// made into a string here.
+		if(n > 16.0 * 1024 * 1024)
+			return luaL_error(L, "noise: %s values is more than this makes "
+					"at once", cs(itos((int64_t)n)));
 		interface::Noise noise(&np, seed, sx, sy, sz > 0 ? sz : 1);
 		float *result;
 		if(sz > 0)
@@ -5225,6 +5238,10 @@ struct Module: public interface::Module, public luanti::Interface
 		if(!m_lua)
 			throw Exception("luanti: cannot create a Lua state");
 		luaL_openlibs(m_lua);
+		// bit.band and its family, before any mod can ask for them
+		lua_pushcfunction(m_lua, luaopen_bit);
+		lua_pushstring(m_lua, "bit");
+		lua_call(m_lua, 1, 0);
 
 		set_global_cfunction("__luanti_log", l_log);
 		set_global_cfunction("__luanti_get_us_time", l_get_us_time);

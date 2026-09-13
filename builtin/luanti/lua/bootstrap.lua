@@ -303,7 +303,46 @@ end
 -- a dozen methods; this is the same shape in a table.
 --
 
-local DEFAULTS = {
+-- Luanti's engine defaults, which a mod reads without asking whether they
+-- are there: VoxeLibre divides movement_speed_crouch by movement_speed_walk
+-- while it loads. They live in defaultsettings.cpp there, and in
+-- builtin/settingtypes.txt as data -- which is what is vendored here, so
+-- that this list is not one to keep by hand.
+--
+-- The format is "name (Readable name) [context] type type_args", one setting
+-- a line, and the default is the first type argument. For the types whose
+-- default can contain spaces or be empty -- a string, a path, a noise
+-- parameter group -- it is the rest of the line.
+local function parse_settingtypes(text)
+	local out = {}
+	if not text then
+		return out
+	end
+	for line in text:gmatch("[^\r\n]+") do
+		local name, rest = line:match("^([%w_%.]+)%s+%b()%s+(.*)$")
+		if name and rest then
+			-- The optional context, which says who reads the setting
+			rest = rest:gsub("^%[%a+%]%s+", "")
+			local kind, args = rest:match("^([%w_]+)%s*(.*)$")
+			if kind then
+				if kind == "string" or kind == "path" or
+						kind == "filepath" or
+						kind:match("^noise_params") then
+					out[name] = args
+				else
+					out[name] = args:match("^(%S+)") or ""
+				end
+			end
+		end
+	end
+	return out
+end
+
+local DEFAULTS = parse_settingtypes(read_file(
+		module_path .. "/vendor/builtin/settingtypes.txt"))
+
+-- And what this build says instead, or as well
+local OWN_DEFAULTS = {
 	-- Luanti's own default for a world that does not name one. Which
 	-- mapgen a world is actually generated with is written into the save
 	-- the first time it is opened; see mapgen_name() in luanti.cpp.
@@ -326,6 +365,9 @@ local DEFAULTS = {
 	["default_privs"] = "interact, shout",
 	["name"] = "",
 }
+for k, v in pairs(OWN_DEFAULTS) do
+	DEFAULTS[k] = v
+end
 
 local function parse_conf(text)
 	local out = {}
