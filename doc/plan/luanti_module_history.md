@@ -1078,3 +1078,77 @@ server's own thread. The module answers by turning the stream budget down to
 one section a pass while its mapgen is slow -- which is what
 `set_stream_budget()` was built for, and only the module can see how long
 its own mods took.
+
+## The mapgen, vendored (stages 3a and 3b, built 2026-09-13)
+
+Luanti's `src/mapgen` runs inside buildat and generates worlds. What follows
+is what that took, moved out of the plan, which keeps only what is left.
+
+**A module of its own.** `builtin/luanti_mapgen` holds the vendored code and
+the shim under it, and `builtin/luanti` asks it for a generator. The reason
+is the compiler: a runtime-compiled module is a *single* translation unit --
+rccpp hands it one `.cpp` -- and `builtin/luanti` already took ten seconds
+to build. Nine and a half thousand lines of mapgen in the same unit would
+have taxed every edit to the file that changes most. The mapgen module
+builds in six seconds and only when its own files change. What crosses
+between them is what a generator is a function of and nothing else: which
+mapgen, the seed, the water level, the section size, and the game's node
+ids by name.
+
+**`builtin/worldgen` was already the seam.** Its
+`GeneratorInterface::generate()` runs in a worker thread with no module
+held, takes a padding so a tree at a section's edge is placed whole, and
+merges the result into the world -- which is exactly what a mapgen wants,
+and what two games already generate through. So the module creates a
+`worldgen` instance and hands it a generator;
+`worldgen:section_generated` is the event that did not exist, and it is
+what runs a mod's `core.register_on_generated` afterwards on the main
+thread.
+
+**The shim was the work, not the mapgen.** Of `nodedef.h`'s 864 lines the
+whole tree uses two calls on the manager and eight fields of a definition,
+so that one is a shim; vendoring the real one would have brought
+`itemdef.h`, `sound.h` and `tile.h`, and `tile.h` is the client. `voxel.h`
+is a vendoring, because `VoxelManipulator` needs only a `MapNode` and a
+vector type. `mapnode.h` is three fields, which is what
+`VoxelFormat::luanti()` already binds -- **the registry id is the Luanti
+content id**, and that is the fact the whole port rests on. `map.h` came
+down to one class that does nothing, `emerge.h` to the bundle of managers a
+`Mapgen` is constructed with, `settings.h` to something that answers
+nothing so the mapgen's own C++ defaults stand, and `voxelalgorithms.h` to
+saying the lighting is somebody else's. Irrlicht's integers, vectors, 4x4
+matrix and colour are a shim too: buildat uses none of them anywhere else.
+
+Two things about a runtime-compiled module shaped the rest. It gets no
+include directories of its own, so the shims sit beside the vendored files
+and a directory of forwarding headers answers `#include "mapgen/mapgen.h"`.
+And it is compiled as C++11, where Luanti's code is C++17 -- which
+`meta.json` fixes, because a module can name its own compiler flags.
+
+**Four things had to be right and were not:**
+
+- **The node resolve waits.** A manager registers its resolver from its own
+  constructor; resolving there calls a virtual on an object that is still
+  being built. Luanti defers for the same reason.
+- **The `Server` handed to the managers has to know the definitions**,
+  because they ask for them while being built.
+- **The generate notifier keeps the pointers it is given**, so they are
+  empty sets rather than null.
+- **An area added to a `VoxelManipulator` is flagged as holding no data.**
+  Luanti clears that flag when it reads the map into it; there is no map on
+  this side, so `emergeAll()` is that -- every voxel "ignore" and every
+  voxel data. Without it a mapgen's writes do not stick, and the difference
+  was zero voxels against two hundred and seventy thousand.
+
+**And the flags are spelled out.** Luanti reads `mg_flags` from its
+settings, whose default is caves, dungeons, light, decorations, biomes and
+ores; the settings here answer nothing, so the default is written in the
+module. Without it a world is bare terrain in the dark -- the light is one
+of the flags.
+
+**What it costs.** A section is 270k voxels and takes about half a second in
+worldgen's thread, which is off the server's own. The seed does not agree
+with upstream's, because the noise is buildat's older vendored copy of
+Luanti's and the shim adapts the calls onto it -- that was the trade taken
+when the question was asked: a world that looks like a Luanti world rather
+than one that reproduces a seed.
