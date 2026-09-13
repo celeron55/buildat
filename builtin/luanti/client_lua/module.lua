@@ -235,6 +235,142 @@ buildat.sub_packet("luanti:inventory", function(data)
 end)
 
 --
+-- The objects
+--
+-- Everything in a Luanti world that is not a node: the item a dig dropped,
+-- whatever a mod added. The server says where they are every step and what
+-- they look like when that changes; what makes something of it is here.
+--
+-- simplified: a cube or a flat sprite, both wearing one texture, and the
+-- plain box for everything else. Luanti's meshes are two file formats of
+-- their own and a milestone with them; see "what an object looks like" in
+-- doc/plan/luanti_module_plan.md.
+
+-- Where the objects go, which is the game's scene rather than this module's
+-- business. Nothing is drawn until a game says.
+local object_scene = nil
+-- id -> {node =, kind =, texture =}. The material is held by the component
+-- it was given to and is not kept here: see the comment in
+-- extensions/luanti_client/world.lua about what happens when it is.
+local object_nodes = {}
+-- id -> {kind =, texture =}, as the server last said
+local object_looks = {}
+
+function M.set_scene(scene)
+	object_scene = scene
+end
+
+local function object_texture(expr)
+	local resource = texture_of(expr)
+	if not resource then
+		return nil
+	end
+	local tex = magic.cache:GetResource("Texture2D", resource)
+	if tex then
+		-- A Luanti game's textures are pixel art; smoothing them is wrong
+		-- at every size
+		tex.filterMode = magic.FILTER_NEAREST
+	end
+	return tex
+end
+
+local function make_object_node(look)
+	local node = object_scene:CreateChild("luanti_object")
+	local tex = object_texture(look.texture)
+	if look.kind == "sprite" and tex then
+		local set = node:CreateComponent("BillboardSet")
+		set.numBillboards = 1
+		set.faceCameraMode = magic.FC_ROTATE_XYZ
+		set.sorted = true
+		local material = magic.Material.new()
+		-- Unlit and alpha-masked. A lit technique is wrong here: the light
+		-- a voxel game needs is bright enough that a sprite under it comes
+		-- out a white blob, and what a sprite wears is its own colours.
+		material:SetTechnique(0, magic.cache:GetResource("Technique",
+				"Techniques/DiffUnlitAlpha.xml"))
+		material:SetTexture(magic.TU_DIFFUSE, tex)
+		set.material = material
+		local b = set:GetBillboard(0)
+		if b then
+			b.size = magic.Vector2(0.5, 0.5)
+			b.enabled = true
+		end
+		set:Commit()
+		return node
+	end
+	local model = node:CreateComponent("StaticModel")
+	model.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+	if tex then
+		local material = magic.Material.new()
+		material:SetTechnique(0, magic.cache:GetResource("Technique",
+				"Techniques/DiffUnlitAlpha.xml"))
+		material:SetTexture(magic.TU_DIFFUSE, tex)
+		model.material = material
+	else
+		-- Nothing to wear: the box it was before anything said otherwise
+		model.material = magic.cache:GetResource("Material",
+				"Materials/Stone.xml")
+	end
+	model.castShadows = true
+	return node
+end
+
+-- A look that changed is a node made again: a billboard and a model are
+-- different components, and one object is not redrawn often enough for the
+-- difference to be worth keeping.
+local function object_node(id)
+	local have = object_nodes[id]
+	local look = object_looks[id] or {kind = "box", texture = ""}
+	if have and have.kind == look.kind and have.texture == look.texture then
+		return have.node
+	end
+	if have then
+		have.node:Remove()
+	end
+	local node = make_object_node(look)
+	object_nodes[id] = {node = node, kind = look.kind,
+			texture = look.texture}
+	return node
+end
+
+buildat.sub_packet("luanti:object_props", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	for i = 1, #values - 2, 3 do
+		object_looks[values[i]] = {kind = values[i + 1],
+				texture = values[i + 2]}
+	end
+end)
+
+buildat.sub_packet("luanti:objects", function(data)
+	if not object_scene then
+		return
+	end
+	local v = cereal.binary_input(data, {"array", "double"})
+	local seen = {}
+	local STRIDE = 8
+	local i = 1
+	while i + STRIDE - 1 <= #v do
+		local id = tostring(math.floor(v[i]))
+		seen[id] = true
+		local node = object_node(id)
+		node.position = magic.Vector3(v[i + 1], v[i + 2], v[i + 3])
+		node.scale = magic.Vector3(v[i + 4], v[i + 5], v[i + 6])
+		-- Luanti's rotation is radians and Urho's euler is degrees; a
+		-- billboard turns with the camera and does not care
+		node.rotation = magic.Quaternion(0, math.deg(v[i + 7]), 0)
+		i = i + STRIDE
+	end
+	-- What is not in the list any more has been removed
+	for id, have in pairs(object_nodes) do
+		if not seen[id] then
+			have.node:Remove()
+			object_nodes[id] = nil
+			object_looks[id] = nil
+		end
+	end
+end)
+
+--
 -- The formspecs
 --
 -- The window a mod puts on the player's screen. formspec.lua says what the
@@ -560,6 +696,7 @@ end)
 -- script that subscribes to it has nowhere to go
 buildat.send_packet("luanti:get_texmods", "")
 buildat.send_packet("luanti:get_item_images", "")
+buildat.send_packet("luanti:get_object_props", "")
 
 return M
 -- vim: set noet ts=4 sw=4:

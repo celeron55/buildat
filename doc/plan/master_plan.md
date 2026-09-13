@@ -73,9 +73,8 @@ first thing to run after touching the API surface.
 
 What is left is, in order:
 
-1. **The client half.** It is what M3, M4 and M5 each say is left of them:
-   an object is a box rather than what it looks like. Seven pieces of it are
-   built as of 2026-09-13: a click is a dig --
+1. **The client half.** Eight pieces of it are built as of 2026-09-13: a
+   click is a dig --
    `games/luanti_launcher`'s viewer points at a node and the module digs it,
    which is the shape the rest follows: the client decides what was pointed
    at, the server decides what that means -- the digger is the player who
@@ -85,9 +84,11 @@ What is left is, in order:
    formspecs are drawn: a mod's window is on the screen and what was pressed
    in it comes back, and a stack is picked up in one slot and put down in
    another, the right button places what is wielded or uses what is pointed
-   at -- so a node dug is a node that can be put back -- and a chest opens,
-   with its own slots, its own callbacks around a move and its own fields.
-   What is left of that one is a detached inventory, which is nobody's here
+   at -- so a node dug is a node that can be put back -- a chest opens, with
+   its own slots, its own callbacks around a move and its own fields, and an
+   object wears its own texture: a dropped pickaxe is a pickaxe rather than
+   a box. What is left is Luanti's meshes, which are two file formats and a
+   milestone of their own, and a detached inventory, which is nobody's here
    and draws empty.
    The fork's shape is settled -- which files are copied, which are dropped,
    and that `world.lua` loses a fifth of itself to `voxelworld` -- and

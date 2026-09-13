@@ -912,12 +912,29 @@ two things M1 disproved about the build, are in
   the timers. `doc/plan/luanti_module_history.md` has the detail, including
   the mutex that a step doing real work turned out to need.
 
-  **Built: the objects are on screen (2026-09-13).** The module puts a node
-  in its scene per object and moves it with the object; the scene is what
-  every client is already being sent, so nothing on the client had to know
-  anything. A box the size of the object's collision box, which is what says
-  where they are until the client half says what they look like -- and it is
-  the answer to whether `replicate` fits: where an object is, it carries.
+  **Built: the objects are on screen, wearing something (2026-09-13).**
+  The first version put a node per object in the module's own scene and let
+  `replicate` carry it, which answered whether `replicate` fits -- where an
+  object is, it carries -- but a material is a resource file and a Luanti
+  object's texture is not, so everything was a stone box.
+
+  So the objects are the client half's now. Where they are is broadcast
+  every step as a flat array of doubles; what they look like is broadcast
+  when it changes, and a client that connects later asks for the lot with
+  `luanti:get_object_props`. The client makes a node per object: a
+  `BillboardSet` for a sprite and `Models/Box.mdl` for a cube, both wearing
+  a material made at runtime with the composed texture on it, unlit --
+  because the light a voxel game needs is bright enough to turn a lit sprite
+  into a white blob.
+
+  What an item lying on the ground looks like is the expression its
+  inventory image is, which the item images already are: a dropped pickaxe
+  is the pickaxe.
+
+  simplified: one texture rather than six for a cube, and a mesh is a cube
+  wearing its first texture. Luanti's two mesh formats are read by
+  `b3dmesh.lua` and `objmesh.lua` in `extensions/luanti_client`, and putting
+  them in is a milestone of its own.
 
   **Built: the players (2026-09-13).** A player is an object with somebody
   on the other end of it: it is in the same table as the entities, so

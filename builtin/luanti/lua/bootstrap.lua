@@ -1562,6 +1562,30 @@ end
 -- tiles rather than as the little cube Luanti draws. The upgrade path is
 -- sending the three tiles a cube shows and shearing them client-side, which
 -- extensions/luanti_client does.
+-- The same for one item, which is what an object that is a dropped item
+-- wants; see appearance_of() in lua/entity.lua
+function core.__item_image_of(name)
+	local def = core.registered_items[name]
+	if def == nil then
+		return nil
+	end
+	local expr = def.inventory_image
+	if (expr == nil or expr == "") and def.tiles then
+		local tile = def.tiles[1]
+		if type(tile) == "table" then
+			tile = tile.name
+		end
+		expr = tile
+	end
+	if expr == nil or expr == "" then
+		expr = def.wield_image
+	end
+	if expr == nil or expr == "" then
+		return nil
+	end
+	return expr
+end
+
 function core.__item_images()
 	local out = {}
 	local function add(name, expr)

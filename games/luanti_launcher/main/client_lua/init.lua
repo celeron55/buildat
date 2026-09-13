@@ -19,6 +19,10 @@ local luanti = require("buildat/module/luanti")
 
 local scene = replicate.main_scene
 
+-- Where the module's client half puts the objects: a Luanti world's dropped
+-- items and entities are drawn by it, into whatever scene this game has
+luanti.set_scene(scene)
+
 -- Seen from outside itself, so nothing drops to a reduced LOD, and nothing
 -- here walks on anything
 voxelworld.lod_distance = 1000
