@@ -811,10 +811,21 @@ two things M1 disproved about the build, are in
   half, and the one M4 was waiting for. `games/luanti_launcher`'s client
   marches a ray from the camera, draws a wireframe box around the node it
   hits and sends that node's position on a left click; the launcher hands it
-  to `luanti::Interface::dig_node()`, which is `core.dig_node()` -- so
-  can_dig, after_dig_node, the drops and every other callback around a dig
-  are the vendored builtin's own. What a dig drops lands on the ground,
-  because there is no player to give it to.
+  to `luanti::Interface::dig_node()`, so can_dig, after_dig_node, the drops
+  and every other callback around a dig are the vendored builtin's own.
+
+  **Built: the digger is a player, and the drops are theirs (2026-09-13).**
+  The dig carries the name the client connected under, and
+  `core.handle_node_drops()` puts what it drops in that player's inventory
+  rather than on the floor. `core.dig_node(pos)` stays Luanti's own -- it
+  takes no digger, and it is the dig nobody did -- so the one with a digger
+  is `core.__dig_node(pos, digger)` beside it.
+
+  What it needed was `core.get_dig_params()`, which was a stub: a dig with
+  no digger never reaches it and a dig by a player does, so until it
+  answered, a click dug nothing. It is the walk over a tool's groupcaps from
+  Luanti's `src/tool.cpp`, with the cases it decides asserted at every
+  start.
 
   Two things the engine needed for it, both because a client reasoning about
   voxels could not: `VoxelRegistry:id_of(voxel)`, since `VoxelInstance`'s own
@@ -832,8 +843,8 @@ two things M1 disproved about the build, are in
   again; the server says `main:dig (x, y, z): dug` and the second click
   lands on a different node, which is the client's own map having caught up.
 
-  **What is left of M4:** formspecs, and the inventory a click would dig
-  into. Both are the client's.
+  **What is left of M4:** formspecs, and a client that shows the inventory a
+  click digs into. Both are the client's.
 - **M5 -- it lives. Built 2026-09-13.** ABMs, LBMs, entities, `core.after`.
   Success is `testabms` and `testentities` behaving.
 

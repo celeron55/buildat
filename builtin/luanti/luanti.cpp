@@ -3552,10 +3552,16 @@ struct Module: public interface::Module, public luanti::Interface
 		node_action(buf);
 	}
 
-	bool dig_node(int32_t x, int32_t y, int32_t z)
+	bool dig_node(int32_t x, int32_t y, int32_t z, const ss_ &player_name)
 	{
-		return node_action("return core.dig_node({x = "+itos(x)+
-				", y = "+itos(y)+", z = "+itos(z)+"})");
+		// The digger is who the drops go to: core.handle_node_drops() puts
+		// them in a player's inventory and on the ground for anyone else.
+		// An empty name is nobody, which is what it was before there were
+		// players.
+		ss_ digger = player_name.empty() ? ss_("nil") :
+				"core.get_player_by_name(\""+lua_quoted(player_name)+"\")";
+		return node_action("return core.__dig_node({x = "+itos(x)+
+				", y = "+itos(y)+", z = "+itos(z)+"}, "+digger+")");
 	}
 
 	SceneReference get_scene()

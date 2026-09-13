@@ -75,12 +75,13 @@ What is left is, in order:
 
 1. **The client half.** It is what M3, M4 and M5 each say is left of them:
    there are no formspecs, and an object is a box rather than what it looks
-   like. Two pieces of it are built as of 2026-09-13: a click is a dig --
+   like. Three pieces of it are built as of 2026-09-13: a click is a dig --
    `games/luanti_launcher`'s viewer points at a node and the module digs it,
    which is the shape the rest follows: the client decides what was pointed
-   at, the server decides what that means -- and the objects are on screen,
+   at, the server decides what that means -- the digger is the player who
+   clicked, so what the dig drops is theirs, and the objects are on screen,
    as a node per object in the module's scene, which every client is already
-   being sent.
+   being sent. What is missing is a client that shows an inventory.
    The fork's shape is settled -- which files are copied, which are dropped,
    and that `world.lua` loses a fifth of itself to `voxelworld` -- and
    `init.lua`'s three-way split is the largest unexamined piece of it. See

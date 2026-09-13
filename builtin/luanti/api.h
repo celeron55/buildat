@@ -90,13 +90,15 @@ namespace luanti
 				float z, float look_h, float look_v) = 0;
 
 		// What a click comes to. The node is dug the way core.dig_node()
-		// digs one -- the pointed thing is handed to the vendored builtin
-		// with a nil actor, so can_dig, after_dig_node and the drops are
-		// the builtin's own -- and the answer is whether anything happened.
+		// digs one -- the pointed thing is handed to the vendored builtin,
+		// so can_dig, after_dig_node and the drops are the builtin's own --
+		// and the answer is whether anything happened.
 		//
-		// There is no player yet, so there is nobody to give the drops to:
-		// what a dig drops lands on the ground.
-		virtual bool dig_node(int32_t x, int32_t y, int32_t z) = 0;
+		// The player is who dug it and who the drops go to; a name that is
+		// nobody's digs with no actor, and then what it drops lands on the
+		// ground.
+		virtual bool dig_node(int32_t x, int32_t y, int32_t z,
+				const ss_ &player_name) = 0;
 
 		// The scene the map is in, or null until luanti:game_loaded
 		virtual SceneReference get_scene() = 0;

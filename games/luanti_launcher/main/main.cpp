@@ -141,7 +141,8 @@ struct Module: public interface::Module
 		}
 		bool dug = false;
 		luanti::access(m_server, [&](luanti::Interface *i){
-			dug = i->dig_node(voxel_p.getX(), voxel_p.getY(), voxel_p.getZ());
+			dug = i->dig_node(voxel_p.getX(), voxel_p.getY(), voxel_p.getZ(),
+					player_name_of(packet.sender));
 		});
 		log_v(MODULE, "C%i: main:dig " PV3I_FORMAT ": %s", packet.sender,
 				PV3I_PARAMS(voxel_p), dug ? "dug" : "nothing");
