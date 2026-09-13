@@ -24,6 +24,9 @@ dofile(dir .. "/classes.lua")
 dofile(dir .. "/colorspec.lua")
 dofile(dir .. "/misc.lua")
 local modlist = dofile(dir .. "/modlist.lua")
+dofile(dir .. "/objmesh.lua")
+dofile(dir .. "/b3dmesh.lua")
+dofile(dir .. "/mesh.lua")
 
 local function check(name, f)
 	local ok, err = pcall(f)
@@ -183,6 +186,39 @@ check("conf parsing", function()
 	assert(t.empty == "")
 	local list = modlist.split_list(t.depends)
 	assert(#list == 3 and list[1] == "a" and list[3] == "c")
+end)
+
+-- What the module reads out of a "mesh" node's model: the readers
+-- themselves are checked in extensions/luanti_client/test.lua, where they
+-- were written, so this is the flattening -- a quad is twenty-one numbers,
+-- a material is the tile of the same number counted from zero, and
+-- visual_scale multiplies every corner.
+check("mesh quads", function()
+	local flat, skipped = core.__mesh_quads("thing.obj", [[
+v -0.5 -0.5 0.0
+v 0.5 -0.5 0.0
+v 0.5 0.5 0.0
+v -0.5 0.5 0.0
+vt 0.0 0.0
+vt 1.0 0.0
+vt 1.0 1.0
+vt 0.0 1.0
+usemtl first
+f 1/1 2/2 3/3 4/4
+usemtl second
+f 1/1 2/2 3/3
+f 1 2
+]], 2)
+	assert(#flat == 21 * 2, "two faces of twenty-one numbers, got " .. #flat)
+	assert(skipped == 1, "a two-corner face is not a face")
+	assert(flat[1] == 0, "the first material is tile zero")
+	assert(flat[22] == 1, "the second material is tile one")
+	assert(flat[2] == -1.0, "visual_scale multiplies a corner")
+	assert(flat[14] == 0.0 and flat[15] == 1.0,
+			"the texture coordinates follow the corners")
+	-- A format nothing here reads leaves the node its cube
+	assert(core.__mesh_quads("thing.gltf", "{}", 1) == nil)
+	assert(core.__mesh_quads("thing.obj", "", 1) == nil)
 end)
 
 print("builtin/luanti/lua/test.lua: ok")
