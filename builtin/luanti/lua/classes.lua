@@ -630,26 +630,65 @@ end
 local Pseudo = {}
 Pseudo.__index = Pseudo
 
-function PseudoRandom(seed)
-	return setmetatable({state = math.floor(seed or 0) % 2147483648}, Pseudo)
+-- Thirty-two bits of it, which is more than a double multiplies exactly, so
+-- the state goes round in two halves
+local function lcg32(state)
+	local a = 1103515245
+	local lo = state % 65536
+	local hi = math.floor(state / 65536)
+	return ((hi * a) % 65536 * 65536 + lo * a + 12345) % 4294967296
 end
 
+function PseudoRandom(seed)
+	return setmetatable({state = math.floor(seed or 0) % 4294967296}, Pseudo)
+end
+
+-- Luanti's own, exactly: the state is multiplied as an unsigned 32-bit
+-- number and then divided as a signed one, which is a quirk it keeps for
+-- the sake of the worlds already generated with it.
 function Pseudo:next(min, max)
-	self.state = (self.state * 1103515245 + 12345) % 2147483648
-	local value = math.floor(self.state / 65536) % 32768
+	self.state = lcg32(self.state)
+	local signed = self.state
+	if signed >= 2147483648 then
+		signed = signed - 4294967296
+	end
+	-- C truncates towards zero, and the result is read back as unsigned
+	local q = signed / 65536
+	q = q >= 0 and math.floor(q) or -math.floor(-q)
+	local value = (q % 4294967296) % 32768
 	if min == nil then
 		return value
 	end
 	max = max or 32767
+	if max < min then
+		error("PseudoRandom:next(): max < min")
+	end
 	if max - min == 32767 then
 		return min + value
 	end
+	if max - min > 6553 then
+		error("PseudoRandom:next(): range too large")
+	end
 	return min + (value % (max - min + 1))
+end
+
+function Pseudo:get_state()
+	local v = self.state
+	if v >= 2147483648 then
+		v = v - 4294967296
+	end
+	return v
 end
 
 local Pcg = {}
 Pcg.__index = Pcg
 
+-- simplified: not Luanti's PCG32, so the numbers a mod gets out of this are
+-- not the ones Luanti would give it. What it is instead is the generator
+-- above behind PcgRandom's interface, including a state string that goes
+-- out and comes back. Anything that is the map -- decorations, ores -- is
+-- mapgen's, and the mapgen is a milestone away; when it arrives this is the
+-- thing to write out exactly, in sixteen-bit limbs the way lcg32 above is.
 function PcgRandom(seed, sequence)
 	local self = setmetatable({}, Pcg)
 	self.rng = PseudoRandom(seed)
@@ -658,14 +697,13 @@ end
 
 function Pcg:next(min, max)
 	if min == nil then
-		return self.rng:next(0, 32767) * 65536 + self.rng:next(0, 65535)
+		return self.rng:next() * 65536 + self.rng:next() * 2
 	end
 	local span = max - min
 	if span <= 32767 then
-		return min + self.rng:next(0, span)
+		return min + (self.rng:next() % (span + 1))
 	end
-	return min + (self.rng:next(0, 32767) * 32768 + self.rng:next(0, 32767)) %
-			(span + 1)
+	return min + (self.rng:next() * 32768 + self.rng:next()) % (span + 1)
 end
 
 function Pcg:rand_normal_dist(min, max, num_trials)
@@ -677,11 +715,18 @@ function Pcg:rand_normal_dist(min, max, num_trials)
 	return math.floor(sum / num_trials + 0.5)
 end
 
+-- Luanti's is two 64-bit numbers as thirty-two hex digits. This one has
+-- thirty-two bits of state, so it goes in the last eight of them and the
+-- rest are zeroes -- which round-trips, which is what the interface is for.
 function Pcg:get_state()
-	return "0"
+	return string.format("%024d%08x", 0, self.rng.state)
 end
 
-function Pcg:set_state(s)
+function Pcg:set_state(str)
+	if type(str) ~= "string" or #str ~= 32 then
+		error("PcgRandom:set_state(): expected 32 hex characters")
+	end
+	self.rng.state = tonumber(string.sub(str, 25), 16) or 0
 end
 
 function SecureRandom()

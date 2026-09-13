@@ -25,6 +25,9 @@
 #include "interface/os.h"
 #include "interface/voxel.h"
 #include "interface/mutex.h"
+#include "interface/sha1.h"
+#include "interface/sha256.h"
+#include "interface/compress.h"
 #include "luanti/mapblock.h"
 #include <sqlite3.h>
 #include <fstream>
@@ -393,6 +396,93 @@ static void png_write_cb(void *context, void *data, int size)
 {
 	ss_ *out = (ss_*)context;
 	out->append((const char*)data, size);
+}
+
+// core.sha1(data, raw) and core.sha256(data, raw): the digest as hex unless
+// the raw bytes are asked for. Luanti has both and mods hash with them.
+static int l_sha1(lua_State *L)
+{
+	size_t n = 0;
+	const char *p = luaL_checklstring(L, 1, &n);
+	ss_ raw = interface::sha1::calculate(ss_(p, n));
+	if(lua_toboolean(L, 2)){
+		lua_pushlstring(L, raw.c_str(), raw.size());
+		return 1;
+	}
+	ss_ hex = interface::sha1::hex(raw);
+	lua_pushlstring(L, hex.c_str(), hex.size());
+	return 1;
+}
+
+static int l_sha256(lua_State *L)
+{
+	size_t n = 0;
+	const char *p = luaL_checklstring(L, 1, &n);
+	ss_ raw = interface::sha256::calculate(ss_(p, n));
+	if(lua_toboolean(L, 2)){
+		lua_pushlstring(L, raw.c_str(), raw.size());
+		return 1;
+	}
+	ss_ hex = interface::sha256::hex(raw);
+	lua_pushlstring(L, hex.c_str(), hex.size());
+	return 1;
+}
+
+// core.compress(data, method, level) and core.decompress(data, method), with
+// the three methods Luanti has: "deflate" is zlib's own framing,
+// "raw_deflate" the same stream without it, and "zstd" what a mapblock is in.
+static int l_compress(lua_State *L)
+{
+	size_t n = 0;
+	const char *p = luaL_checklstring(L, 1, &n);
+	ss_ data(p, n);
+	ss_ method = luaL_optstring(L, 2, "deflate");
+	int level = (int)luaL_optinteger(L, 3, method == "zstd" ? 3 : 6);
+	std::ostringstream os(std::ios::binary);
+	try {
+		if(method == "deflate")
+			interface::compress_zlib(data, os, level);
+		else if(method == "raw_deflate")
+			interface::compress_deflate_raw(data, os, level);
+		else if(method == "zstd")
+			interface::compress_zstd(data, os, level);
+		else
+			return luaL_error(L, "compress(): no such method: %s",
+					method.c_str());
+	} catch(std::exception &e){
+		return luaL_error(L, "compress(): %s", e.what());
+	}
+	ss_ out = os.str();
+	lua_pushlstring(L, out.c_str(), out.size());
+	return 1;
+}
+
+static int l_decompress(lua_State *L)
+{
+	size_t n = 0;
+	const char *p = luaL_checklstring(L, 1, &n);
+	ss_ data(p, n);
+	ss_ method = luaL_optstring(L, 2, "deflate");
+	std::ostringstream os(std::ios::binary);
+	try {
+		if(method == "zstd"){
+			interface::decompress_zstd(data, os);
+		} else {
+			std::istringstream is(data, std::ios::binary);
+			if(method == "deflate")
+				interface::decompress_zlib(is, os);
+			else if(method == "raw_deflate")
+				interface::decompress_deflate_raw(is, os);
+			else
+				return luaL_error(L, "decompress(): no such method: %s",
+						method.c_str());
+		}
+	} catch(std::exception &e){
+		return luaL_error(L, "decompress(): %s", e.what());
+	}
+	ss_ out = os.str();
+	lua_pushlstring(L, out.c_str(), out.size());
+	return 1;
 }
 
 static int l_encode_png(lua_State *L)
@@ -2819,6 +2909,10 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_list_dir", l_list_dir);
 		set_global_cfunction("__luanti_create_directories", l_create_directories);
 		set_global_cfunction("__luanti_encode_png", l_encode_png);
+		set_global_cfunction("__luanti_sha1", l_sha1);
+		set_global_cfunction("__luanti_sha256", l_sha256);
+		set_global_cfunction("__luanti_compress", l_compress);
+		set_global_cfunction("__luanti_decompress", l_decompress);
 		set_global_cfunction("__luanti_set_node", l_set_node);
 		set_global_cfunction("__luanti_get_node", l_get_node);
 		set_global_cfunction("__luanti_get_region", l_get_region);
