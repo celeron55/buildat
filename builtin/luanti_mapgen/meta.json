@@ -1,0 +1,6 @@
+{
+	"dependencies": [
+		{"module": "voxelworld"},
+		{"module": "worldgen"}
+	]
+}

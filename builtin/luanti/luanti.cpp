@@ -14,6 +14,7 @@
 #include "luanti/api.h"
 #include "voxelworld/api.h"
 #include "worldgen/api.h"
+#include "luanti_mapgen/api.h"
 #include "storage/api.h"
 #include "main_context/api.h"
 #include "client_file/api.h"
@@ -71,29 +72,6 @@ namespace pv = PolyVox;
 namespace magic = Urho3D;
 
 namespace luanti {
-
-// What fills a section, in worldgen's own worker thread: no module is held
-// there, so everything it needs is given to it when the world is made.
-//
-// Today that is the one node a singlenode world is, which is what Luanti's
-// own MapgenSinglenode does. What goes here next is the vendored mapgen;
-// see "Mapgen stage 3: how it lands" in doc/plan/luanti_module_plan.md.
-struct MapgenGenerator: public worldgen::GeneratorInterface
-{
-	// The voxel word the world is filled with: the node id, and the
-	// sunlight, because this is a world with nothing in it and the sky
-	// reaches everywhere
-	uint32_t m_word;
-
-	MapgenGenerator(uint32_t word): m_word(word){}
-
-	void generate(main_context::SceneReference scene_ref,
-			const pv::Vector3DInt16 &section_p,
-			interface::VoxelVolume &volume)
-	{
-		volume.fill(interface::VoxelInstance(m_word));
-	}
-};
 
 
 using main_context::SceneReference;
@@ -1568,10 +1546,23 @@ struct Module: public interface::Module, public luanti::Interface
 		// when it is vendored, and neither belongs on the thread the
 		// server steps on. It is created before the first section is
 		// asked for, which is the next line but one.
+		// What fills a section is builtin/luanti_mapgen's, which is where
+		// Luanti's own mapgens are vendored: this module hands over what a
+		// generator is a function of and gets one back.
+		luanti_mapgen::Params params;
+		params.mgname = "singlenode";
+		params.seed = m_seed;
+		params.singlenode_word = singlenode_word();
+		params.content_ids = content_ids_by_name();
+		worldgen::GeneratorInterface *generator = nullptr;
+		luanti_mapgen::access(m_server, [&](luanti_mapgen::Interface *im){
+			generator = im->create_generator(params);
+		});
 		worldgen::access(m_server, [&](worldgen::Interface *iw){
 			iw->create_instance(m_scene);
 			worldgen::Instance *instance = iw->get_instance(m_scene);
-			instance->set_generator(new MapgenGenerator(singlenode_word()));
+			if(generator)
+				instance->set_generator(generator);
 			instance->enable();
 		});
 
@@ -1617,6 +1608,37 @@ struct Module: public interface::Module, public luanti::Interface
 		});
 		log_v(MODULE, "C%zu: %zu texture modifiers", (size_t)packet.sender,
 				m_texmods.size());
+	}
+
+	// Every node name the game registered and the id it got, which is what
+	// a vendored mapgen is told to build with: it asks for "mapgen_stone"
+	// and the game's own aliases say what that is here.
+	//
+	// simplified: all of them, because the whole table is a few hundred
+	// short strings and which ones a mapgen wants depends on the mapgen.
+	sm_<ss_, uint32_t> content_ids_by_name()
+	{
+		sm_<ss_, uint32_t> out;
+		if(!m_lua)
+			return out;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__content_names");
+		if(lua_istable(L, -1)){
+			lua_pushnil(L);
+			while(lua_next(L, -2) != 0){
+				const lua_Integer id = lua_tointeger(L, -2);
+				size_t len = 0;
+				const char *name = lua_tolstring(L, -1, &len);
+				if(name && id >= 0)
+					out[ss_(name, len)] = (uint32_t)id;
+				lua_pop(L, 1);
+			}
+		}
+		lua_settop(L, base);
+		return out;
 	}
 
 	// The mapgen, which at singlenode is one node everywhere: Luanti's own
