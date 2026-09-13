@@ -688,6 +688,9 @@ struct Module: public interface::Module, public luanti::Interface
 	// Luanti steps at dedicated_server_step (0.09 s), buildat ticks at 30 Hz;
 	// a mod's globalstep dtime is written against the former
 	static constexpr float STEP_S = 0.09f;
+	// How often the clients are told what time it is
+	static constexpr float TIME_INTERVAL_S = 5.0f;
+	float m_time_accum = 0.0f;
 	float m_step_accum = 0.0f;
 
 	Module(interface::Server *server):
@@ -1166,6 +1169,13 @@ struct Module: public interface::Module, public luanti::Interface
 		update_load_points();
 		step_environment();
 		flush_node_writes();
+		// The clock, now and then: a client carries it on by itself between
+		// these, so this is a correction rather than a tick
+		m_time_accum += STEP_S;
+		if(m_time_accum >= TIME_INTERVAL_S){
+			m_time_accum = 0.0f;
+			run_chunk_string("core.__send_time()", "send_time");
+		}
 	}
 
 	// One Luanti step: the clock now, the globalsteps and core.after later
@@ -3918,6 +3928,27 @@ struct Module: public interface::Module, public luanti::Interface
 		return 0;
 	}
 
+	// What time it is in the world, to everyone: the time of day as a
+	// fraction of a day and how fast it runs, so a client can carry the
+	// clock on between one of these and the next
+	static int l_send_time(lua_State *L)
+	{
+		Module *self = module_of(L);
+		sv_<ss_> flat;
+		for(int i = 1; i <= 2; i++){
+			char buf[32];
+			snprintf(buf, sizeof buf, "%.6f",
+					(double)luaL_checknumber(L, i));
+			flat.push_back(buf);
+		}
+		sv_<ss_> names;
+		for(const auto &pair : self->m_player_peers)
+			names.push_back(pair.first);
+		for(const ss_ &n : names)
+			self->send_to_player(n, "luanti:time", flat);
+		return 0;
+	}
+
 	// A line of chat to one player, or to everyone when the name is empty
 	static int l_send_chat(lua_State *L)
 	{
@@ -4943,6 +4974,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_send_inventory", l_send_inventory);
 		set_global_cfunction("__luanti_send_player_pos", l_send_player_pos);
 		set_global_cfunction("__luanti_send_chat", l_send_chat);
+		set_global_cfunction("__luanti_send_time", l_send_time);
 		set_global_cfunction("__luanti_show_formspec", l_show_formspec);
 		set_global_cfunction("__luanti_player_formspec", l_player_formspec);
 		set_global_cfunction("__luanti_send_node_inventory",

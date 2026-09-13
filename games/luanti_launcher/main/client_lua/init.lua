@@ -94,9 +94,17 @@ local function key_down(action)
 end
 
 -- The same PBR setup the lighting games use; games/voxel_lighting's README
--- says why these numbers are what they are
+-- says why these numbers are what they are. These are what noon looks like;
+-- the sun moves with the world's clock, and night is the same sun dimmed
+-- and turned blue -- see update_sky() below.
 local SKY_AMBIENT = magic.Color(0.26, 0.33, 0.46)
+local NIGHT_AMBIENT = magic.Color(0.05, 0.06, 0.10)
 local SUN_BRIGHTNESS = 50.0
+local MOON_BRIGHTNESS = 4.0
+local SUN_COLOR = magic.Color(1.0, 0.96, 0.88)
+local MOON_COLOR = magic.Color(0.55, 0.65, 1.0)
+local DAY_FOG = magic.Color(0.60, 0.72, 0.88)
+local NIGHT_FOG = magic.Color(0.05, 0.07, 0.12)
 local SUN_DIR = {x = -0.6, y = -1.0, z = 0.8}
 local EXPOSURE_BIAS = 1.6
 
@@ -122,9 +130,12 @@ local function set_mouse_in_world(enable)
 	magic.input:SetMouseVisible(not enable)
 end
 
+local zone = nil
+local sun_light = nil
+
 do
 	local zone_node = scene:CreateChild("Zone")
-	local zone = zone_node:CreateComponent("Zone")
+	zone = zone_node:CreateComponent("Zone")
 	zone.boundingBox = magic.BoundingBox(-1000, 1000)
 	zone.ambientColor = SKY_AMBIENT
 	zone.fogColor = magic.Color(0.60, 0.72, 0.88)
@@ -138,14 +149,14 @@ do
 			voxel_shading.sky_cubemap)
 end
 
+local sun_node = scene:CreateChild("DirectionalLight")
 do
-	local node = scene:CreateChild("DirectionalLight")
-	node.direction = magic.Vector3(SUN_DIR.x, SUN_DIR.y, SUN_DIR.z)
-	local light = node:CreateComponent("Light")
-	light.lightType = magic.LIGHT_DIRECTIONAL
-	light.castShadows = true
-	light.brightness = SUN_BRIGHTNESS
-	light.color = magic.Color(1.0, 0.96, 0.88)
+	sun_node.direction = magic.Vector3(SUN_DIR.x, SUN_DIR.y, SUN_DIR.z)
+	sun_light = sun_node:CreateComponent("Light")
+	sun_light.lightType = magic.LIGHT_DIRECTIONAL
+	sun_light.castShadows = true
+	sun_light.brightness = SUN_BRIGHTNESS
+	sun_light.color = SUN_COLOR
 end
 
 voxel_shading.create_skybox(scene, SUN_DIR)
@@ -346,6 +357,72 @@ voxelworld.sub_geometry_update(function(node)
 end)
 
 --
+-- The sky, and what time it is
+--
+-- The server says what time it is every few seconds and the clock is
+-- carried on here in between, because a sky that jumps every five seconds is
+-- worse than one that drifts. Luanti's day is one whole unit: 0.25 is
+-- sunrise, 0.5 is noon, 0.75 is sunset.
+--
+-- simplified: the voxels' own light is what the mesher baked -- the sky
+-- light a node has -- so a wall lit by the sky stays as bright at midnight
+-- as it is at noon, dimmed only by the sun going away. Luanti's day-night
+-- ratio, which scales the sky light per node, is the upgrade path.
+local time_of_day = nil
+local time_speed = 72
+
+local function blend(a, b, t)
+	return magic.Color(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t,
+			a.b + (b.b - a.b) * t)
+end
+
+-- What the last sky update worked out, for the line of detail
+local sky_now = {height = 0, day = 0}
+
+local function update_sky(dt)
+	if time_of_day == nil then
+		return
+	end
+	-- A day is 24*60*60 game seconds and time_speed is how many of them a
+	-- real second is
+	time_of_day = (time_of_day + dt * time_speed / (24 * 60 * 60)) % 1.0
+
+	-- Where the sun is: up at noon, on the horizon at sunrise and sunset,
+	-- and under the world at night. Tilted out of the vertical plane so
+	-- that noon does not light every face of a cube the same way.
+	local a = (time_of_day - 0.25) * 2 * math.pi
+	local height = math.sin(a)
+	local up = {x = math.cos(a) * 0.9, y = height, z = 0.42}
+	-- The light travels the other way, which is what a Light's direction is
+	local dir = normalized({x = -up.x, y = -up.y, z = -up.z})
+	-- At night the moon is where the sun is not
+	local night = height < 0
+	if night then
+		dir = {x = -dir.x, y = -dir.y, z = -dir.z}
+	end
+	sun_node.direction = magic.Vector3(dir.x, dir.y, dir.z)
+	voxel_shading.set_sun_direction(night and
+			{x = -dir.x, y = -dir.y, z = -dir.z} or dir)
+
+	-- Dawn and dusk are the half hour either side of the horizon rather
+	-- than a switch
+	local day = math.max(0, math.min(1, (height + 0.15) / 0.3))
+	sun_light.brightness = MOON_BRIGHTNESS +
+			(SUN_BRIGHTNESS - MOON_BRIGHTNESS) * day
+	sun_light.color = blend(MOON_COLOR, SUN_COLOR, day)
+	zone.ambientColor = blend(NIGHT_AMBIENT, SKY_AMBIENT, day)
+	zone.fogColor = blend(NIGHT_FOG, DAY_FOG, day)
+	sky_now.height = height
+	sky_now.day = day
+end
+
+luanti.sub_time(function(tod, speed)
+	time_of_day = tod
+	time_speed = speed
+	update_sky(0)
+end)
+
+--
 -- The player
 --
 -- What stops the player is the registry's own physically_solid, so glass
@@ -423,11 +500,15 @@ local function update_detail(dt)
 			player.x, player.y, player.z))
 	detail_text:SetText(string.format(
 			"%.1f, %.1f, %.1f | %s | looking %.0f round, %.0f down\n" ..
-			"speed %.1f, %.1f, %.1f | chunk %d, %d, %d%s\n%s",
+			"speed %.1f, %.1f, %.1f | chunk %d, %d, %d%s\n" ..
+			"%02d:%02d | sun %.2f up, %.0f%% day\n%s",
 			player.x, player.y, player.z, mode, yaw, pitch,
 			player.vx, player.vy, player.vz,
 			chunk_p.x, chunk_p.y, chunk_p.z,
 			voxelworld.chunk_has_physics(chunk_p) and "" or " (no physics)",
+			math.floor((time_of_day or 0) * 24),
+			math.floor(((time_of_day or 0) * 24 % 1) * 60),
+			sky_now.height, sky_now.day * 100,
 			binding_lines()))
 end
 
@@ -738,6 +819,7 @@ end
 magic.SubscribeToEvent("Update", function(event_type, event_data)
 	local dt = event_data:GetFloat("TimeStep")
 	voxel_shading.update(dt)
+	update_sky(dt)
 
 	if player_placed then
 		where_timer = where_timer + dt

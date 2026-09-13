@@ -416,6 +416,33 @@ local ok_fs, err_fs, formspec = buildat.run_script_file("luanti/formspec.lua")
 if not ok_fs or type(formspec) ~= "table" then
 	error("luanti: could not load formspec.lua: " .. tostring(err_fs))
 end
+-- What time it is in the world, as the server last said: the fraction of a
+-- day and how many game seconds a real one is. The server says it every few
+-- seconds and whoever draws the sky carries it on in between, because a sky
+-- that jumps every five seconds is worse than one that drifts.
+M.time_of_day = nil
+M.time_speed = 72
+
+local time_subs = {}
+
+-- sub_time(f) -> f(time_of_day, time_speed) whenever the server says, and
+-- once now if it already has
+function M.sub_time(f)
+	time_subs[#time_subs + 1] = f
+	if M.time_of_day then
+		f(M.time_of_day, M.time_speed)
+	end
+end
+
+buildat.sub_packet("luanti:time", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	M.time_of_day = tonumber(values[1]) or 0
+	M.time_speed = tonumber(values[2]) or 72
+	for _, f in ipairs(time_subs) do
+		f(M.time_of_day, M.time_speed)
+	end
+end)
+
 -- What has been said, oldest first: a mod talking, a "/" command answering,
 -- or another player. The game draws it; what is here is keeping it.
 M.chat_lines = {}
