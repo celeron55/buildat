@@ -802,37 +802,178 @@ function SecureRandom()
 	end}
 end
 
--- The mapgen's noise is vendored at the milestone that needs a world; until
--- then a generator that answers zero is what keeps a mod that asks for one
--- loading.
+-- The mapgen's noise. It is buildat's own vendored copy of Luanti's value
+-- noise -- the same code the Lua API is documented against, which is what
+-- makes a mod's NoiseParams mean here what it means there.
+--
+-- Luanti calls the class PerlinNoise for what has been value noise for
+-- years; both names are the same thing and both are answered.
+--
+-- simplified: no lacunarity and no flags. buildat's copy doubles the
+-- frequency per octave and has no eased/absvalue switches, so a mod that
+-- sets either gets the default behaviour rather than an error. The upgrade
+-- path is the mapgen milestone that vendors the rest of src/mapgen.
+
+local function noise_params(np, ...)
+	if type(np) == "table" then
+		return np
+	end
+	-- The old positional form: core.get_perlin(seeddiff, octaves,
+	-- persistence, spread)
+	local octaves, persistence, spread = ...
+	return {
+		offset = 0,
+		scale = 1,
+		seed = np or 0,
+		octaves = octaves or 3,
+		persistence = persistence or 0.6,
+		spread = {x = spread or 100, y = spread or 100, z = spread or 100},
+	}
+end
+
 local Noise = {}
 Noise.__index = Noise
 
-local function new_noise()
-	return setmetatable({}, Noise)
+local function new_noise(np, seed)
+	return setmetatable({np = np, seed = seed or 0}, Noise)
 end
 
-function Noise:get_2d() return 0 end
-function Noise:get_3d() return 0 end
+local function to_v(p, a, b, c)
+	if type(p) == "table" then
+		return p[a] or p[1] or 0, p[b] or p[2] or 0, p[c] or p[3] or 0
+	end
+	return 0, 0, 0
+end
+
+function Noise:get_2d(pos)
+	local x, y = to_v(pos, "x", "y", "z")
+	return __luanti_noise_value(self.np, self.seed, x, y)
+end
+
+function Noise:get_3d(pos)
+	local x, y, z = to_v(pos, "x", "y", "z")
+	return __luanti_noise_value(self.np, self.seed, x, y, z)
+end
+
 Noise.get2d = Noise.get_2d
 Noise.get3d = Noise.get_3d
 
-function PerlinNoise() return new_noise() end
-function ValueNoise() return new_noise() end
+function PerlinNoise(np, ...)
+	return new_noise(noise_params(np, ...), 0)
+end
+
+ValueNoise = PerlinNoise
 
 local NoiseMap = {}
 NoiseMap.__index = NoiseMap
 
-function NoiseMap:get_2d_map() return {} end
-function NoiseMap:get_3d_map() return {} end
-function NoiseMap:get_2d_map_flat() return {} end
-function NoiseMap:get_3d_map_flat() return {} end
-function NoiseMap:calc_2d_map() end
-function NoiseMap:calc_3d_map() end
-function NoiseMap:get_map_slice() return {} end
+local function new_noise_map(np, size, seed)
+	local sx, sy, sz = to_v(size, "x", "y", "z")
+	return setmetatable({np = np, seed = seed or 0,
+			sx = math.floor(sx), sy = math.floor(sy),
+			sz = math.floor(sz)}, NoiseMap)
+end
 
-function PerlinNoiseMap() return setmetatable({}, NoiseMap) end
-function ValueNoiseMap() return setmetatable({}, NoiseMap) end
+-- The flat maps are the engine's own array: x fastest, and then the second
+-- axis, which for a 2D map is the world's z.
+function NoiseMap:get_2d_map_flat(pos, buffer)
+	local x, y = to_v(pos, "x", "y", "z")
+	self.flat = __luanti_noise_map(self.np, self.seed, x, y, 0,
+			self.sx, self.sy, 0)
+	return self.flat
+end
+
+function NoiseMap:get_3d_map_flat(pos, buffer)
+	local x, y, z = to_v(pos, "x", "y", "z")
+	self.flat = __luanti_noise_map(self.np, self.seed, x, y, z,
+			self.sx, self.sy, self.sz)
+	return self.flat
+end
+
+-- And the nested ones Luanti also answers: map[z][x] for two dimensions and
+-- map[x][y][z] for three, which is the order its own Lua API builds them in
+function NoiseMap:get_2d_map(pos)
+	local flat = self:get_2d_map_flat(pos)
+	local out = {}
+	local i = 1
+	for y = 1, self.sy do
+		local row = {}
+		for x = 1, self.sx do
+			row[x] = flat[i]
+			i = i + 1
+		end
+		out[y] = row
+	end
+	return out
+end
+
+function NoiseMap:get_3d_map(pos)
+	local flat = self:get_3d_map_flat(pos)
+	local out = {}
+	for x = 1, self.sx do
+		out[x] = {}
+		for y = 1, self.sy do
+			out[x][y] = {}
+		end
+	end
+	local i = 1
+	for z = 1, self.sz do
+		for y = 1, self.sy do
+			for x = 1, self.sx do
+				out[x][y][z] = flat[i]
+				i = i + 1
+			end
+		end
+	end
+	return out
+end
+
+function NoiseMap:calc_2d_map(pos)
+	self:get_2d_map_flat(pos)
+end
+
+function NoiseMap:calc_3d_map(pos)
+	self:get_3d_map_flat(pos)
+end
+
+-- One slice of what calc_3d_map() worked out, which is how a mod reads a
+-- big 3D map without holding all of it in Lua at once
+function NoiseMap:get_map_slice(slice_offset, slice_size, buffer)
+	local flat = self.flat or {}
+	local y0 = math.floor((slice_offset and slice_offset.y or 1)) - 1
+	local n = math.floor(slice_size and slice_size.y or 1)
+	local out = buffer or {}
+	local layer = self.sx * self.sz
+	local i = 1
+	for y = y0, y0 + n - 1 do
+		for k = 1, layer do
+			out[i] = flat[y * layer + k]
+			i = i + 1
+		end
+	end
+	return out
+end
+
+function PerlinNoiseMap(np, size)
+	return new_noise_map(noise_params(np), size, 0)
+end
+
+ValueNoiseMap = PerlinNoiseMap
+
+-- The same, seeded with the world's: what a mod means by core.get_perlin is
+-- noise that is this world's and not the same everywhere
+function core.get_perlin(np, ...)
+	return new_noise(noise_params(np, ...),
+			tonumber(__luanti_world_seed) or 0)
+end
+
+function core.get_perlin_map(np, size)
+	return new_noise_map(noise_params(np), size,
+			tonumber(__luanti_world_seed) or 0)
+end
+
+core.get_value_noise = core.get_perlin
+core.get_value_noise_map = core.get_perlin_map
 
 -- A settings file of a mod's own
 function Settings(path)
