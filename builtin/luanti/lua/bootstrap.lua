@@ -936,7 +936,7 @@ local STUBS_NIL = {
 	-- The players and the objects are in lua/entity.lua
 	-- Inventory, craft, metadata (M4); the recipes are in lua/craft.lua
 	"register_craft_raw",
-	"get_dig_params", "get_hit_params", "get_tool_wear_after_use",
+	"get_hit_params", "get_tool_wear_after_use",
 	-- Chat, HUD, sound, particles (M4, M5)
 	"chat_send_all", "chat_send_player", "send_join_message",
 	"send_leave_message", "sound_play", "sound_stop", "sound_fade",
@@ -1537,10 +1537,11 @@ end
 -- on_dignodes and on_placenodes are the builtin's own and behave as they do
 -- in Luanti, rather than being written again here.
 --
--- What a dig drops lands on the ground: core.handle_node_drops() hands the
--- drops to core.add_item(), which is the vendored builtin's own item entity
--- now that there are objects for it to be. With no digger there is no
--- inventory to put anything in, so everything a dig drops is spawned.
+-- Where a dig's drops go: core.handle_node_drops() puts them in the digger's
+-- inventory when the digger is a player, and hands the rest to
+-- core.add_item(), which is the vendored builtin's own item entity now that
+-- there are objects for it to be. With no digger there is no inventory to put
+-- anything in, so everything a dig drops is spawned.
 
 local function pointed_at(pos)
 	return {
@@ -1550,12 +1551,106 @@ local function pointed_at(pos)
 	}
 end
 
-function core.dig_node(pos)
+-- core.get_dig_params(groups, tool_capabilities, [wear])
+--
+-- How long a tool takes on a node and what the use costs it, which is what
+-- core.node_dig() asks before it digs anything -- so a dig by a player goes
+-- through here and a dig by nobody does not. Luanti's own is getDigParams()
+-- in src/tool.cpp and this is the same walk over the tool's groupcaps:
+-- the group that digs the node fastest wins, a tool whose maxlevel is more
+-- than one above the node's level is faster still, and dig_immediate is a
+-- fixed time that costs nothing.
+--
+-- simplified: a use costs 65535/uses of the tool, which is what Luanti did
+-- before it started spreading the remainder over a tool's life so that one
+-- breaks after exactly `uses` digs whatever wear it started at. The upgrade
+-- path is that arithmetic; nothing here depends on the difference.
+local function group_rating(groups, name)
+	local v = groups and groups[name]
+	return type(v) == "number" and v or 0
+end
+
+function core.get_dig_params(groups, tool_capabilities, wear)
+	local immediate = group_rating(groups, "dig_immediate")
+	if immediate == 2 then
+		return {diggable = true, time = 0.5, wear = 0}
+	elseif immediate == 3 then
+		return {diggable = true, time = 0, wear = 0}
+	end
+	local caps = type(tool_capabilities) == "table" and
+			tool_capabilities.groupcaps or nil
+	local level = group_rating(groups, "level")
+	local diggable = false
+	local best_time = 0
+	local best_wear = 0
+	for name, cap in pairs(caps or {}) do
+		local leveldiff = (tonumber(cap.maxlevel) or 1) - level
+		local rating = group_rating(groups, name)
+		local time = leveldiff >= 0 and cap.times and cap.times[rating] or nil
+		if time then
+			if leveldiff > 1 then
+				time = time / leveldiff
+			end
+			if not diggable or time < best_time then
+				diggable = true
+				best_time = time
+				-- A tool used above its level lasts longer, which is the
+				-- same three-to-the-leveldiff Luanti scales its uses by
+				local uses = (tonumber(cap.uses) or 0) * 3 ^ leveldiff
+				best_wear = uses > 0 and math.floor(65535 / uses) or 0
+			end
+		end
+	end
+	return {diggable = diggable, time = best_time, wear = best_wear}
+end
+
+-- What the numbers above come to, checked at every start because they are
+-- the difference between a node that can be dug and one that cannot
+do
+	local hand = {groupcaps = {cracky = {times = {[3] = 1.5}, uses = 0,
+			maxlevel = 1}}}
+	local pick = {groupcaps = {cracky = {times = {[1] = 4, [2] = 2, [3] = 1},
+			uses = 10, maxlevel = 3}}}
+	local dp = core.get_dig_params({dig_immediate = 2}, hand)
+	assert(dp.diggable and dp.time == 0.5 and dp.wear == 0,
+			"get_dig_params: dig_immediate 2")
+	assert(core.get_dig_params({dig_immediate = 3}, hand).time == 0,
+			"get_dig_params: dig_immediate 3")
+	dp = core.get_dig_params({cracky = 3}, hand)
+	assert(dp.diggable and dp.time == 1.5 and dp.wear == 0,
+			"get_dig_params: the hand on stone")
+	assert(not core.get_dig_params({snappy = 3}, hand).diggable,
+			"get_dig_params: a group the tool has nothing for")
+	assert(not core.get_dig_params({cracky = 1}, hand).diggable,
+			"get_dig_params: a rating the tool has no time for")
+	assert(not core.get_dig_params({cracky = 3, level = 2}, hand).diggable,
+			"get_dig_params: a node above the tool's level")
+	-- Two above the node's level: half the time and nine times the uses
+	dp = core.get_dig_params({cracky = 3, level = 1}, pick)
+	assert(dp.diggable and dp.time == 0.5 and
+			dp.wear == math.floor(65535 / 90), "get_dig_params: leveldiff 2")
+	-- One above it: the time as written, three times the uses
+	dp = core.get_dig_params({cracky = 2, level = 2}, pick)
+	assert(dp.diggable and dp.time == 2 and
+			dp.wear == math.floor(65535 / 30), "get_dig_params: leveldiff 1")
+	assert(not core.get_dig_params({cracky = 3}, {}).diggable,
+			"get_dig_params: a tool with no capabilities at all")
+end
+
+-- The same dig, by somebody. core.dig_node() is Luanti's own and takes no
+-- digger -- it is the dig nobody did -- and a click on a client is a dig
+-- somebody did, which is the difference between the drops landing on the
+-- ground and landing in their inventory.
+function core.__dig_node(pos, digger)
 	local node = core.get_node(pos)
 	if node.name == "ignore" then
 		return false
 	end
-	return core.node_dig(pos, node, nil) and true or false
+	return core.node_dig(pos, node, digger) and true or false
+end
+
+function core.dig_node(pos)
+	return core.__dig_node(pos, nil)
 end
 
 function core.punch_node(pos)
