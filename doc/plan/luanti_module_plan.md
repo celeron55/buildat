@@ -238,6 +238,30 @@ Staged, because the seam is where the bugs will be:
    thread. A vendored mapgen writes the volume without Lua in the middle,
    and is the point at which an emerge thread of some kind is worth having.
 
+   **What stage 3 is, surveyed 2026-09-13.** `src/mapgen/` is 9.5k lines
+   over sixteen files: `mapgen.cpp` (1166) and the eight generators, of
+   which v6 (1113), v7 (574) and carpathian (556) are the largest, plus
+   `cavegen` (912), `treegen` (888), `dungeongen` (658), and the four
+   managers -- biomes, ores, decorations and schematics -- at about 2k
+   together. What it includes outside itself is a short list: `map.h` for
+   `MMVManip`, `voxel.h` for the `VoxelManipulator` under it (512 lines),
+   `mapnode.h` (302), `nodedef.h`, `emerge.h`, `settings.h` and
+   `util/numeric.h`.
+
+   So the shim is the work, not the mapgen. Of `nodedef.h`'s 864 lines the
+   mapgen uses four calls -- `getId(name)`, `get(content)`,
+   `getLightingFlags()` and `pendNodeResolve()` -- and **the one thing that
+   already lines up is the important one**: this module's registry id *is*
+   the Luanti content id, which is what makes a vendored mapgen's output
+   mean anything here at all. `MMVManip` is a flat `MapNode` array over a
+   `VoxelArea`, which is what `interface::VoxelVolume` already is, so the
+   seam is a translation of one buffer into the other -- the same
+   translation `set_node` does, a whole section at a time.
+
+   buildat already carries Luanti's noise in `src/interface/noise.h`, an
+   older snapshot without lacunarity or flags; stage 3 wants the current
+   one, which is 750 lines and the same file.
+
 The staging is about order, not scope: a mainstream Luanti game is expected
 to produce its real terrain, and stage 3 is a milestone rather than a
 separate career.
