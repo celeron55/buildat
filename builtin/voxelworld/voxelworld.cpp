@@ -1266,7 +1266,8 @@ struct CInstance: public voxelworld::Instance
 	{
 		if(!load_saved_registry())
 			return;
-		for(interface::VoxelTypeId id = 1;; id++){
+		interface::VoxelTypeId num = m_saved_reg->num_voxels();
+		for(interface::VoxelTypeId id = 1; id <= num; id++){
 			const interface::VoxelDefinition *def = m_saved_reg->get(id);
 			if(!def)
 				break;
@@ -1370,7 +1371,8 @@ struct CInstance: public voxelworld::Instance
 		// that writing a chunk cannot come across a name the save has no id
 		// for. Appending in id order is what keeps the identity case the
 		// identity.
-		for(interface::VoxelTypeId id = m_names_synced_to + 1;; id++){
+		interface::VoxelTypeId num = m_voxel_reg->num_voxels();
+		for(interface::VoxelTypeId id = m_names_synced_to + 1; id <= num; id++){
 			const interface::VoxelDefinition *def = m_voxel_reg->get(id);
 			if(!def)
 				break;

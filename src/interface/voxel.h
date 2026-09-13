@@ -628,6 +628,11 @@ namespace interface
 		virtual void clear() = 0;
 		virtual sv_<VoxelDefinition> get_all() = 0;
 
+		// How many types are registered, so that walking the ids is a loop
+		// with an end rather than one that asks for the id after the last
+		// and reads the warning as its answer. Ids run 1..num_voxels().
+		virtual VoxelTypeId num_voxels() = 0;
+
 		// How a voxel word is cut up; see VoxelFormat. The default is
 		// VoxelFormat::legacy().
 		//
