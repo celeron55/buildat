@@ -1575,11 +1575,28 @@ struct Module: public interface::Module, public luanti::Interface
 		// knows.
 		generate_world();
 
+		// Who owns the light. voxelworld floods it from the top of the
+		// world region, which for a Luanti-sized map is thirty thousand
+		// voxels up: the flood never reaches the ground, so a generated
+		// world would be black. A mapgen lights what it generates as it
+		// goes -- that is what the MG_LIGHT flag is -- so where there is
+		// one, its light stands and voxelworld does not run its own.
+		//
+		// simplified: a hole dug into a mapgen world stays as dark as the
+		// rock around it, because nothing relights it afterwards. Luanti
+		// has its own lighting engine for that; the upgrade path here is
+		// voxelworld's skylight starting from the top of each loaded
+		// column rather than from the top of the region.
+		const bool own_light = (mapgen_name() != "singlenode");
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
-			// The light is voxelworld's, so core.get_node_light is a read
-			// and not a second store
-			world->set_skylight_enabled(true);
+			// The light is voxelworld's for a world nothing generates, so
+			// core.get_node_light is a read and not a second store
+			world->set_skylight_enabled(!own_light);
 		});
+		if(own_light){
+			log_i(MODULE, "The mapgen lights this world; voxelworld's own "
+					"skylight is off");
+		}
 
 		check_active_range();
 
