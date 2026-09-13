@@ -324,6 +324,21 @@ once the mods have loaded, which is what makes that safe.
    Then `mapgen.cpp` compiles, and `MapgenSinglenode` through it is the
    check that the translation is right before anything interesting is
    generated.
+
+   **Where it stands (2026-09-13).** The whole tree is vendored into
+   `builtin/luanti_mapgen/vendor/` and the shims above are written; what
+   compiles of it is `voxel.cpp`, the noise adapter and the node
+   definitions, with a check that a node written into the vendored
+   `VoxelManipulator` comes back in voxelworld's own order. The module
+   declares `-std=c++17` in its `meta.json`, which is how a module asks for
+   its own flags; the rest of the tree stays C++11.
+
+   `vendor/README.txt` says which files are Luanti's and which are shims,
+   and where the next session starts: `util/serialize.cpp` wants Irrlicht's
+   colour type, `core::clamp` and a name that collides with buildat's own
+   `itos`, and after it `mg_schematic` wants zlib -- which buildat has as
+   `interface::compress_zlib` -- and `MapNode::serializeBulk`, which lives
+   in Luanti's `mapnode.cpp` and is a shim here.
 2. **3b: `mapgen_v7` with its own noise, and no managers.** Terrain,
    caves and nothing else. This is the point at which a world looks like a
    Luanti world.
