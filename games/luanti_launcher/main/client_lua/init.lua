@@ -442,8 +442,12 @@ local function update_sky(dt)
 			{x = -dir.x, y = -dir.y, z = -dir.z} or dir)
 
 	-- Dawn and dusk are the half hour either side of the horizon rather
-	-- than a switch
+	-- than a switch -- unless the game says what the light is whatever the
+	-- hour, which is what a dimension of its own is made of
 	local day = math.max(0, math.min(1, (height + 0.15) / 0.3))
+	if luanti.day_night_override then
+		day = luanti.day_night_override
+	end
 	sun_light.brightness = MOON_BRIGHTNESS +
 			(SUN_BRIGHTNESS - MOON_BRIGHTNESS) * day
 	sun_light.color = blend(MOON_COLOR, SUN_COLOR, day)

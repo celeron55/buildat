@@ -499,6 +499,26 @@ function M.hud_flag(name)
 	return math.floor(M.hud_flags / bit) % 2 == 1
 end
 
+-- What a game said the light should be whatever the hour: Luanti's
+-- override_day_night_ratio, 0 for night and 1 for day, or nil for "the
+-- clock decides". The sun still goes where the time says.
+M.day_night_override = nil
+
+local day_night_subs = {}
+
+function M.sub_day_night(f)
+	day_night_subs[#day_night_subs + 1] = f
+	f(M.day_night_override)
+end
+
+buildat.sub_packet("luanti:daynight", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	M.day_night_override = tonumber(values[1] or "")
+	for _, f in ipairs(day_night_subs) do
+		f(M.day_night_override)
+	end
+end)
+
 -- What time it is in the world, as the server last said: the fraction of a
 -- day and how many game seconds a real one is. The server says it every few
 -- seconds and whoever draws the sky carries it on in between, because a sky
