@@ -670,6 +670,75 @@ function core.__mapgen_name()
 	return core.settings.values["mg_name"] or ""
 end
 
+-- What a mapgen asks about a node, by content id. Without these the shim on
+-- the other side guesses from the name -- everything that is not air is
+-- solid ground -- and a cave carved through a chest is what that guess
+-- costs. Flat, seven numbers a node, in the order luanti_mapgen reads them.
+function core.__mapgen_node_props()
+	local out = {}
+	for id, name in pairs(core.__content_names) do
+		local def = core.registered_nodes[name]
+		if def then
+			local liquid = 0
+			if def.liquidtype == "flowing" then
+				liquid = 1
+			elseif def.liquidtype == "source" then
+				liquid = 2
+			end
+			out[#out + 1] = id
+			out[#out + 1] = (def.walkable ~= false) and 1 or 0
+			out[#out + 1] = (def.is_ground_content ~= false) and 1 or 0
+			out[#out + 1] = def.floodable and 1 or 0
+			out[#out + 1] = def.light_propagates and 1 or 0
+			out[#out + 1] = def.sunlight_propagates and 1 or 0
+			out[#out + 1] = liquid
+		end
+	end
+	return out
+end
+
+-- The biomes a game registered, with every node name already turned into
+-- the id it means: what the mapgen builds its world out of. A biome with a
+-- node the game never registered gets "unknown" for it, the same way a mod
+-- asking for one does.
+function core.__mapgen_biomes()
+	local function id_of(name)
+		if name == nil or name == "" then
+			return 0
+		end
+		local id = core.__content_id_or_unknown(name)
+		return id
+	end
+	local out = {}
+	for _, b in pairs(core.registered_biomes or {}) do
+		out[#out + 1] = {
+			name = b.name or "",
+			c_top = id_of(b.node_top),
+			c_filler = id_of(b.node_filler),
+			c_stone = id_of(b.node_stone),
+			c_water_top = id_of(b.node_water_top),
+			c_water = id_of(b.node_water),
+			c_river_water = id_of(b.node_river_water),
+			c_riverbed = id_of(b.node_riverbed),
+			c_dust = id_of(b.node_dust),
+			c_dungeon = id_of(b.node_dungeon),
+			c_dungeon_alt = id_of(b.node_dungeon_alt),
+			c_dungeon_stair = id_of(b.node_dungeon_stair),
+			depth_top = b.depth_top or 0,
+			depth_filler = b.depth_filler or 0,
+			depth_water_top = b.depth_water_top or 0,
+			depth_riverbed = b.depth_riverbed or 0,
+			y_min = b.y_min or -31000,
+			y_max = b.y_max or 31000,
+			heat_point = b.heat_point or 0,
+			humidity_point = b.humidity_point or 0,
+			vertical_blend = b.vertical_blend or 0,
+			weight = b.weight or 1,
+		}
+	end
+	return out
+end
+
 -- Every name a mapgen can ask about: the nodes, and the aliases a game
 -- registers for them -- "mapgen_stone" is an alias and is what a vendored
 -- mapgen looks up.

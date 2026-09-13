@@ -221,6 +221,15 @@ namespace voxelworld
 
 		virtual bool is_section_loaded(const pv::Vector3DInt16 &section_p) = 0;
 
+		// Whether a generator has been over it. A section can be loaded and
+		// not generated -- a volume write created it to hold what crossed
+		// into it -- and what a generator writes when it does arrive is the
+		// section's own; see merge_volume()'s owned region. So anything
+		// that wants to write terrain of its own and have it stay waits for
+		// this.
+		virtual bool is_section_generated(
+				const pv::Vector3DInt16 &section_p) = 0;
+
 		virtual void set_voxel(const pv::Vector3DInt32 &p,
 				const VoxelInstance &v,
 				bool disable_warnings = false) = 0;
@@ -267,7 +276,8 @@ namespace voxelworld
 		// as something standing there.
 		virtual void merge_volume(
 				const VoxelVolume &volume,
-				bool create_missing_sections) = 0;
+				bool create_missing_sections,
+				const pv::Region *owned = nullptr) = 0;
 
 		// Maintain VoxelInstance::get_skylight() of every voxel in the world.
 		// Off by default; a world that does not want skylight pays nothing and

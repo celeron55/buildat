@@ -691,6 +691,15 @@ struct Module: public interface::Module, public luanti::Interface
 	// How often the clients are told what time it is
 	static constexpr float TIME_INTERVAL_S = 5.0f;
 	float m_time_accum = 0.0f;
+	// The map check, which waits for the sections it uses; see
+	// start_check_map()
+	bool m_check_map_pending = false;
+	float m_check_map_waited = 0.0f;
+	sv_<pv::Vector3DInt16> m_check_sections;
+	sv_<uint64_t> m_check_pinned;
+	// Sections a generator has been over and whose voxels have arrived;
+	// kept only while the check is waiting for its own
+	std::set<uint64_t> m_generated_sections;
 	float m_step_accum = 0.0f;
 
 	Module(interface::Server *server):
@@ -1167,6 +1176,7 @@ struct Module: public interface::Module, public luanti::Interface
 			return;
 		m_step_accum = 0.0f;
 		update_load_points();
+		check_map_when_ready(STEP_S);
 		step_environment();
 		flush_node_writes();
 		// The clock, now and then: a client carries it on by itself between
@@ -1574,6 +1584,8 @@ struct Module: public interface::Module, public luanti::Interface
 		params.seed = m_seed;
 		params.singlenode_word = singlenode_word();
 		params.content_ids = content_ids_by_name();
+		params.node_props = mapgen_node_props();
+		params.biomes = mapgen_biomes();
 		params.section_size = m_section_size.getX();
 		worldgen::GeneratorInterface *generator = nullptr;
 		luanti_mapgen::access(m_server, [&](luanti_mapgen::Interface *im){
@@ -1652,6 +1664,105 @@ struct Module: public interface::Module, public luanti::Interface
 	//
 	// simplified: all of them, because the whole table is a few hundred
 	// short strings and which ones a mapgen wants depends on the mapgen.
+	// What a mapgen asks about a node, seven numbers each: the id, then
+	// walkable, is_ground_content, floodable, light_propagates,
+	// sunlight_propagates and the liquid type. The same order
+	// core.__mapgen_node_props() writes them in.
+	sm_<uint32_t, luanti_mapgen::Params::NodeProps> mapgen_node_props()
+	{
+		sm_<uint32_t, luanti_mapgen::Params::NodeProps> out;
+		if(!m_lua)
+			return out;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__mapgen_node_props");
+		if(lua_pcall(L, 0, 1, 0) != 0){
+			log_w(MODULE, "__mapgen_node_props(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+			lua_settop(L, base);
+			return out;
+		}
+		const size_t n = lua_istable(L, -1) ? lua_objlen(L, -1) : 0;
+		for(size_t i = 1; i + 6 <= n; i += 7){
+			lua_Integer v[7];
+			for(int k = 0; k < 7; k++){
+				lua_rawgeti(L, -1, (int)(i + k));
+				v[k] = lua_tointeger(L, -1);
+				lua_pop(L, 1);
+			}
+			luanti_mapgen::Params::NodeProps p;
+			p.walkable = v[1] != 0;
+			p.is_ground_content = v[2] != 0;
+			p.floodable = v[3] != 0;
+			p.light_propagates = v[4] != 0;
+			p.sunlight_propagates = v[5] != 0;
+			p.liquid_type = (int)v[6];
+			out[(uint32_t)v[0]] = p;
+		}
+		lua_settop(L, base);
+		return out;
+	}
+
+	// The biomes a game registered, as core.__mapgen_biomes() builds them:
+	// one table each, with the node names already the ids they mean
+	sv_<luanti_mapgen::Params::Biome> mapgen_biomes()
+	{
+		sv_<luanti_mapgen::Params::Biome> out;
+		if(!m_lua)
+			return out;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__mapgen_biomes");
+		if(lua_pcall(L, 0, 1, 0) != 0){
+			log_w(MODULE, "__mapgen_biomes(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+			lua_settop(L, base);
+			return out;
+		}
+		const size_t n = lua_istable(L, -1) ? lua_objlen(L, -1) : 0;
+		for(size_t i = 1; i <= n; i++){
+			lua_rawgeti(L, -1, (int)i);
+			if(!lua_istable(L, -1)){
+				lua_pop(L, 1);
+				continue;
+			}
+			luanti_mapgen::Params::Biome b;
+			b.name = table_string(L, "name");
+			b.c_top = (uint32_t)table_number(L, "c_top", 0);
+			b.c_filler = (uint32_t)table_number(L, "c_filler", 0);
+			b.c_stone = (uint32_t)table_number(L, "c_stone", 0);
+			b.c_water_top = (uint32_t)table_number(L, "c_water_top", 0);
+			b.c_water = (uint32_t)table_number(L, "c_water", 0);
+			b.c_river_water = (uint32_t)table_number(L, "c_river_water", 0);
+			b.c_riverbed = (uint32_t)table_number(L, "c_riverbed", 0);
+			b.c_dust = (uint32_t)table_number(L, "c_dust", 0);
+			b.c_dungeon = (uint32_t)table_number(L, "c_dungeon", 0);
+			b.c_dungeon_alt = (uint32_t)table_number(L, "c_dungeon_alt", 0);
+			b.c_dungeon_stair =
+					(uint32_t)table_number(L, "c_dungeon_stair", 0);
+			b.depth_top = (int32_t)table_number(L, "depth_top", 0);
+			b.depth_filler = (int32_t)table_number(L, "depth_filler", 0);
+			b.depth_water_top =
+					(int32_t)table_number(L, "depth_water_top", 0);
+			b.depth_riverbed = (int32_t)table_number(L, "depth_riverbed", 0);
+			b.y_min = (int32_t)table_number(L, "y_min", -31000);
+			b.y_max = (int32_t)table_number(L, "y_max", 31000);
+			b.heat_point = (float)table_number(L, "heat_point", 0);
+			b.humidity_point = (float)table_number(L, "humidity_point", 0);
+			b.vertical_blend = (int32_t)table_number(L, "vertical_blend", 0);
+			b.weight = (float)table_number(L, "weight", 1);
+			out.push_back(b);
+			lua_pop(L, 1);
+		}
+		lua_settop(L, base);
+		log_i(MODULE, "%zu biomes for the mapgen", out.size());
+		return out;
+	}
+
 	sm_<ss_, uint32_t> content_ids_by_name()
 	{
 		sm_<ss_, uint32_t> out;
@@ -1778,6 +1889,8 @@ struct Module: public interface::Module, public luanti::Interface
 	// them: its mapgen has written the chunk by the time they see it.
 	void on_section_generated(const worldgen::SectionGenerated &event)
 	{
+		if(m_check_map_pending)
+			m_generated_sections.insert(section_key(event.section_p));
 		if(!m_game_running || event.scene != m_scene)
 			return;
 		run_on_generated(event.section_p);
@@ -1896,21 +2009,79 @@ struct Module: public interface::Module, public luanti::Interface
 	// lua/check_map.lua, with the flush this module does between its two
 	// halves: a round trip that never leaves the write-behind buffer would
 	// prove nothing about voxelworld.
-	void check_map_round_trip()
+	// The check works above where any mapgen builds, in sections that
+	// nothing else keeps: a player's point is elsewhere, the streamer
+	// unloads what no point holds, and a generator that arrives after the
+	// check has written its room owns that section and writes over it. So
+	// the sections are pinned the way a forceload pins one, asked for, and
+	// the round trip waits until a generator has been over every one of
+	// them -- which is what anything writing terrain of its own has to do.
+	void start_check_map()
 	{
-		// The check works above where any mapgen builds, in sections that
-		// nothing else keeps: a player's point is elsewhere and the
-		// streamer unloads what no point holds, which would take the
-		// check's own nodes with it between one half and the other. So they
-		// are pinned the way a forceload pins one, and let go afterwards --
-		// a section a mod had already pinned stays pinned.
-		sv_<uint64_t> pinned;
-		for(const pv::Vector3DInt16 &sp : check_map_sections()){
+		m_check_sections = check_map_sections();
+		for(const pv::Vector3DInt16 &sp : m_check_sections){
 			const uint64_t k = section_key(sp);
 			if(m_forceloaded.insert(k).second)
-				pinned.push_back(k);
+				m_check_pinned.push_back(k);
 		}
 		update_load_points();
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
+			for(const pv::Vector3DInt16 &sp : m_check_sections){
+				if(!world->is_section_loaded(sp))
+					world->load_or_generate_section(sp);
+			}
+		});
+		m_check_map_pending = true;
+		m_check_map_waited = 0.0f;
+	}
+
+	// Once a generator has been over all of them; see start_check_map()
+	void check_map_when_ready(float dtime)
+	{
+		if(!m_check_map_pending)
+			return;
+		m_check_map_waited += dtime;
+		// Every section a generator has actually been over, which is what
+		// on_section_generated() records. voxelworld calls a section
+		// generated as soon as it has asked for one, and the volume arrives
+		// later -- so waiting on that would have the check writing its room
+		// just before the generator wrote over it.
+		bool ready = true;
+		for(const pv::Vector3DInt16 &sp : m_check_sections){
+			if(m_generated_sections.count(section_key(sp)) == 0){
+				ready = false;
+				break;
+			}
+		}
+		if(!ready){
+			// A world whose generator never answers is a world this cannot
+			// check; it is said once and the check is dropped rather than
+			// waited for forever
+			if(m_check_map_waited < 20.0f)
+				return;
+			log_w(MODULE, "check_map: the sections it uses were not "
+					"generated in %.0f seconds; skipping the check",
+					(double)m_check_map_waited);
+			m_check_map_pending = false;
+			unpin_check_map();
+			return;
+		}
+		m_check_map_pending = false;
+		m_generated_sections.clear();
+		check_map_round_trip();
+		unpin_check_map();
+	}
+
+	void unpin_check_map()
+	{
+		for(uint64_t k : m_check_pinned)
+			m_forceloaded.erase(k);
+		m_check_pinned.clear();
+		update_load_points();
+	}
+
+	void check_map_round_trip()
+	{
 		run_chunk_string("if not core.__check_map_write() then\n"
 				"    core.log('verbose', 'check_map: no node to write')\n"
 				"    core.__check_map_read = function() end\n"
@@ -1920,9 +2091,6 @@ struct Module: public interface::Module, public luanti::Interface
 		// The check puts air back where it wrote; that has to land too, or
 		// the world starts with a block of cobble nobody asked for
 		flush_node_writes();
-		for(uint64_t k : pinned)
-			m_forceloaded.erase(k);
-		update_load_points();
 	}
 
 	// The sections core.__check_map_box() reaches into
@@ -5021,7 +5189,7 @@ struct Module: public interface::Module, public luanti::Interface
 		// mods asked for while loading are the ids the definitions are built
 		// under, and the definitions have to exist before anything is lit.
 		create_world();
-		check_map_round_trip();
+		start_check_map();
 
 		m_game_running = true;
 

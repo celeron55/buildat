@@ -159,13 +159,27 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 		for(const auto &pair : params.content_ids){
 			ContentFeatures f;
 			f.name = pair.first;
-			// What a mapgen asks about a node; the game's own answers are
-			// not sent across yet, so these are what a solid node is
-			f.walkable = (pair.first != "air" && pair.first != "ignore");
-			f.is_ground_content = f.walkable;
 			f.param_type = CPT_LIGHT;
-			f.light_propagates = !f.walkable;
-			f.sunlight_propagates = !f.walkable;
+			auto it = params.node_props.find(pair.second);
+			if(it != params.node_props.end()){
+				// What the game says about the node, which is what decides
+				// what a cave carves through and what a liquid is
+				const Params::NodeProps &p = it->second;
+				f.walkable = p.walkable;
+				f.is_ground_content = p.is_ground_content;
+				f.floodable = p.floodable;
+				f.light_propagates = p.light_propagates;
+				f.sunlight_propagates = p.sunlight_propagates;
+				f.liquid_type = (LiquidType)p.liquid_type;
+			} else {
+				// A name with no id of its own -- an alias, or a node the
+				// game never registered -- and then this is what a solid
+				// node looks like
+				f.walkable = (pair.first != "air" && pair.first != "ignore");
+				f.is_ground_content = f.walkable;
+				f.light_propagates = !f.walkable;
+				f.sunlight_propagates = !f.walkable;
+			}
 			m_ndef.set_content(pair.first, (content_t)pair.second, f);
 		}
 		m_chunk_blocks = section_size / MAP_BLOCKSIZE;
@@ -181,6 +195,46 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 		m_emerge->oremgr = new OreManager(&m_server);
 		m_emerge->decomgr = new DecorationManager(&m_server);
 		m_emerge->schemmgr = new SchematicManager(&m_server);
+
+		// The biomes the game registered, which is what a world is made of:
+		// without them every mapgen builds out of the default biome the
+		// manager makes for itself, and that is stone all the way up. The
+		// node names are already the ids they mean -- the module resolved
+		// them -- so these are not pended for resolution.
+		for(const Params::Biome &src : params.biomes){
+			Biome *b = new Biome();
+			b->name = src.name;
+			b->c_top = (content_t)src.c_top;
+			b->c_filler = (content_t)src.c_filler;
+			b->c_stone = (content_t)src.c_stone;
+			b->c_water_top = (content_t)src.c_water_top;
+			b->c_water = (content_t)src.c_water;
+			b->c_river_water = (content_t)src.c_river_water;
+			b->c_riverbed = (content_t)src.c_riverbed;
+			b->c_dust = (content_t)src.c_dust;
+			b->c_dungeon = (content_t)src.c_dungeon;
+			b->c_dungeon_alt = (content_t)src.c_dungeon_alt;
+			b->c_dungeon_stair = (content_t)src.c_dungeon_stair;
+			// One entry always, because a cave that floods reads the first
+			// of these without looking at how many there are; ignore is
+			// what "this biome has no cave liquid of its own" means
+			b->c_cave_liquid.push_back(CONTENT_IGNORE);
+			b->depth_top = (s16)src.depth_top;
+			b->depth_filler = (s16)src.depth_filler;
+			b->depth_water_top = (s16)src.depth_water_top;
+			b->depth_riverbed = (s16)src.depth_riverbed;
+			b->min_pos.Y = (s16)src.y_min;
+			b->max_pos.Y = (s16)src.y_max;
+			b->heat_point = src.heat_point;
+			b->humidity_point = src.humidity_point;
+			b->vertical_blend = (s16)src.vertical_blend;
+			b->weight = src.weight;
+			// A biome that is already resolved says so, or the manager
+			// waits for a resolution that never comes
+			b->reset(true);
+			m_emerge->biomemgr->add(b);
+		}
+		log_v(MODULE, "%zu biomes", params.biomes.size());
 
 		// The managers registered their node names while they were built;
 		// now that they are, those can be looked up
