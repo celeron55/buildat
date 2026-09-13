@@ -120,6 +120,13 @@ namespace luanti
 				int32_t above_z, const ss_ &player_name,
 				bool sneak = false) = 0;
 
+		// A line a player typed. What it comes to is the on_chat_message
+		// callbacks -- the vendored builtin registers the one that runs a
+		// "/" command among them -- and a line nobody takes is said to
+		// everyone, which is what Luanti's own server does with it.
+		virtual void chat_message(const ss_ &player_name,
+				const ss_ &message) = 0;
+
 		// The scene the map is in, or null until luanti:game_loaded
 		virtual SceneReference get_scene() = 0;
 	};

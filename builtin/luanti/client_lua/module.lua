@@ -416,6 +416,34 @@ local ok_fs, err_fs, formspec = buildat.run_script_file("luanti/formspec.lua")
 if not ok_fs or type(formspec) ~= "table" then
 	error("luanti: could not load formspec.lua: " .. tostring(err_fs))
 end
+-- What has been said, oldest first: a mod talking, a "/" command answering,
+-- or another player. The game draws it; what is here is keeping it.
+M.chat_lines = {}
+
+local chat_subs = {}
+
+-- sub_chat(f) -> f(line, lines) for every line said from now on
+function M.sub_chat(f)
+	chat_subs[#chat_subs + 1] = f
+end
+
+buildat.sub_packet("luanti:chat", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	-- Luanti wraps a translated line in escape sequences -- the translation
+	-- context, the arguments, the colours -- and what is left once they are
+	-- taken out is the English the game shipped. Translating them properly
+	-- is a job for whoever brings the .tr files across.
+	local line = formspec.strip_escapes(values[1] or "")
+	M.chat_lines[#M.chat_lines + 1] = line
+	-- A log nobody trims grows for as long as the session lasts
+	while #M.chat_lines > 200 do
+		table.remove(M.chat_lines, 1)
+	end
+	for _, f in ipairs(chat_subs) do
+		f(line, M.chat_lines)
+	end
+end)
+
 local ok_ui, err_ui, formspec_ui =
 		buildat.run_script_file("luanti/formspec_ui.lua")
 if not ok_ui or type(formspec_ui) ~= "table" then

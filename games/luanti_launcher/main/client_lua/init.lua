@@ -65,6 +65,8 @@ local BINDINGS = {
 	{action = "fly", key = magic.KEY_K, name = "K", what = "Fly on and off"},
 	{action = "noclip", key = magic.KEY_H, name = "H",
 			what = "Through walls on and off"},
+	{action = "chat", key = magic.KEY_T, name = "T",
+			what = "Say something - a line starting with / is a command"},
 	{action = "inventory", key = magic.KEY_I, name = "I", what = "Inventory"},
 	{action = "mouse", key = magic.KEY_TAB, name = "Tab",
 			what = "The mouse in the world or on the screen"},
@@ -178,16 +180,25 @@ voxel_shading.set_camera(camera_node)
 
 magic.input:SetMouseVisible(true)
 
-local title_text = magic.ui.root:CreateChild("Text")
+-- Every line of the HUD is drawn over a world that may be snow, sand or a
+-- dark cave, so all of them carry a shadow; without it a white world takes
+-- white text with it.
+local function hud_text(size)
+	local t = magic.ui.root:CreateChild("Text")
+	t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), size or 15)
+	t:SetTextEffect(magic.TE_SHADOW)
+	t.effectColor = magic.Color(0, 0, 0, 0.85)
+	return t
+end
+
+local title_text = hud_text(15)
 title_text:SetText("luanti_launcher: WASD = walk, Space = jump, K = fly, " ..
 		"Tab = mouse, F5 = detail, left = dig, right = place")
-title_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 15)
 title_text.horizontalAlignment = magic.HA_CENTER
 title_text.verticalAlignment = magic.VA_TOP
 title_text:SetPosition(0, 10)
-local crosshair = magic.ui.root:CreateChild("Text")
+local crosshair = hud_text(20)
 crosshair:SetText("+")
-crosshair:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 20)
 crosshair.horizontalAlignment = magic.HA_CENTER
 crosshair.verticalAlignment = magic.VA_CENTER
 crosshair:SetPosition(0, 0)
@@ -195,9 +206,8 @@ crosshair:SetPosition(0, 0)
 -- What the player is carrying, as a line of text. A formspec is what draws
 -- an inventory properly; this is what says that digging a node put the node
 -- somewhere, which is the thing worth seeing before there is one.
-local carrying_text = magic.ui.root:CreateChild("Text")
+local carrying_text = hud_text(15)
 carrying_text:SetText("")
-carrying_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 15)
 carrying_text.horizontalAlignment = magic.HA_CENTER
 carrying_text.verticalAlignment = magic.VA_BOTTOM
 carrying_text:SetPosition(0, -10)
@@ -216,9 +226,8 @@ magic.ui:SetFocusElement(nil)
 
 -- Mods load for several seconds before there is anything to draw, and what is
 -- on the screen until then is sky
-local wait_text = magic.ui.root:CreateChild("Text")
+local wait_text = hud_text(24)
 wait_text:SetText("Loading the world...")
-wait_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 24)
 wait_text.horizontalAlignment = magic.HA_CENTER
 wait_text.verticalAlignment = magic.VA_CENTER
 wait_text:SetPosition(0, 0)
@@ -273,9 +282,8 @@ end)
 -- What F5 shows: where the player is, what they are standing on and what
 -- the keys are. A player who wants to know why something is not happening
 -- looks here first.
-local detail_text = magic.ui.root:CreateChild("Text")
+local detail_text = hud_text(13)
 detail_text:SetText("")
-detail_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 13)
 detail_text.horizontalAlignment = magic.HA_LEFT
 detail_text.verticalAlignment = magic.VA_TOP
 detail_text:SetPosition(8, 30)
@@ -311,6 +319,78 @@ local function update_detail(dt)
 			chunk_p.x, chunk_p.y, chunk_p.z,
 			voxelworld.chunk_has_physics(chunk_p) and "" or " (no physics)",
 			binding_lines()))
+end
+
+--
+-- Chat
+--
+-- What has been said is at the bottom left, above what the player is
+-- carrying; T opens a line to say something of one's own, and a line that
+-- starts with "/" is a command the game answers. Both ends of it are the
+-- server's: the module runs the callbacks, the vendored builtin runs the
+-- commands, and what comes back arrives as luanti:chat.
+local CHAT_LINES = 8
+local CHAT_STYLE = magic.cache:GetResource("XMLFile",
+		"__menu/res/main_style.xml")
+
+local chat_text = hud_text(14)
+chat_text:SetText("")
+chat_text.horizontalAlignment = magic.HA_LEFT
+chat_text.verticalAlignment = magic.VA_BOTTOM
+chat_text:SetPosition(8, -34)
+chat_text.color = magic.Color(1.0, 1.0, 0.9)
+
+local chat_input = nil
+-- The key that opens the line arrives as text as well, and the line edit
+-- would get it: the field goes up on the next frame instead, when that text
+-- has gone nowhere. Copied from the extension, which found this out.
+local chat_wanted = false
+
+luanti.sub_chat(function(line, lines)
+	local first = math.max(1, #lines - CHAT_LINES + 1)
+	local shown = {}
+	for i = first, #lines do
+		shown[#shown + 1] = lines[i]
+	end
+	chat_text:SetText(table.concat(shown, "\n"))
+end)
+
+local function close_chat()
+	if chat_input then
+		chat_input:Remove()
+		chat_input = nil
+		magic.ui:SetFocusElement(nil)
+	end
+end
+
+local function open_chat()
+	if chat_input then
+		return
+	end
+	chat_input = magic.ui.root:CreateChild("LineEdit")
+	chat_input.defaultStyle = CHAT_STYLE
+	chat_input:SetStyleAuto()
+	chat_input.horizontalAlignment = magic.HA_LEFT
+	chat_input.verticalAlignment = magic.VA_BOTTOM
+	chat_input.size = magic.IntVector2(
+			math.min(560, magic.ui.root.width - 16), 26)
+	chat_input:SetPosition(8, -8)
+	chat_input.enabled = true
+	chat_input:SetText("")
+	chat_input:SetFocus(true)
+end
+
+local function send_chat()
+	if not chat_input then
+		return
+	end
+	local text = chat_input:GetText()
+	close_chat()
+	if text == nil or text == "" then
+		return
+	end
+	buildat.send_packet("main:chat",
+			cereal.binary_output({text}, {"array", "string"}))
 end
 
 --
@@ -469,11 +549,23 @@ end)
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	local key = event_data:GetInt("Key")
 	-- A form takes escape to close itself; what is left is this game's own
+	-- While a line is being typed the keys are that line's, which is why
+	-- this is before everything else
+	if chat_input then
+		if key == magic.KEY_RETURN or key == magic.KEY_KP_ENTER then
+			send_chat()
+		elseif key == BIND.menu.key then
+			close_chat()
+		end
+		return
+	end
 	if luanti.key(key) then
 		set_mouse_in_world(false)
 		return
 	end
-	if key == BIND.mouse.key then
+	if key == BIND.chat.key then
+		chat_wanted = true
+	elseif key == BIND.mouse.key then
 		set_mouse_in_world(not mouse_in_world)
 	elseif key == BIND.inventory.key then
 		-- Luanti's own inventory key, and what a game's inventory formspec
@@ -549,9 +641,17 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		return
 	end
 
+	if chat_wanted then
+		chat_wanted = false
+		open_chat()
+	end
+
 	-- The mouse turns the head while it is in the world; while it is on the
-	-- screen -- a form is open, or Tab put it there -- it is the pointer
-	if mouse_in_world and not luanti.form_open() then
+	-- screen -- a form is open, a line is being typed, or Tab put it there
+	-- -- it is the pointer
+	local playing = mouse_in_world and not luanti.form_open() and
+			chat_input == nil
+	if playing then
 		local dmouse = magic.input:GetMouseMove()
 		yaw = yaw + dmouse.x * MOUSE_SENSITIVITY
 		pitch = pitch + dmouse.y * MOUSE_SENSITIVITY
@@ -562,7 +662,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	-- What the keys ask for, in world coordinates: a direction of any
 	-- length, which player.lua turns into a speed
 	local wish = {x = 0, z = 0}
-	if mouse_in_world and not luanti.form_open() then
+	if playing then
 		local yr = math.rad(yaw)
 		local fx, fz = math.sin(yr), math.cos(yr)
 		local function walk(x, z)
