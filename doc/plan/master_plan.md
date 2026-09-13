@@ -60,9 +60,16 @@ master, `saves` (PR #56) into that, `luanti-module` (PR #52) into that.
 built: the environment and the map (M2), digging and placing with the
 callbacks around them, node metadata, inventories and the recipes (M4), the
 globalsteps, `core.after`, ABMs, LBMs, the objects and the node timers (M5),
-and reading an existing Luanti world's map and clock (M7). The module plan
-has what each turned out to be; `doc/plan/luanti_module_history.md` has the
-detail.
+and reading an existing Luanti world -- its map, what hangs off its nodes,
+its clock and what its mods remembered (M7). The module plan has what each
+turned out to be; `doc/plan/luanti_module_history.md` has the detail.
+
+**And it is checked against Luanti's own tests.** devtest ships a
+`unittests` mod of about forty tests of the server API, and it runs inside
+the module: thirty-two pass, and the seven that do not are each a
+simplification the plan names rather than a bug. See "devtest's own
+unittests as the oracle" in the module plan for how to run it -- it is the
+first thing to run after touching the API surface.
 
 What is left is, in order:
 
