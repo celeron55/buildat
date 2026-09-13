@@ -96,14 +96,16 @@ section -- one blob for the world still works, and what it costs is memory
 that grows with where the players have been. See "The map, as it was built"
 in the module plan.
 
-In order:
+**The meshes are built for .obj and .b3d (2026-09-13).** A mesh node is read
+while the registry is built and becomes the node's shape, so the quads
+travel in the definition like a nodebox's -- nineteen more of devtest's
+nodes have a shape of their own. What is left is glTF, which is a reader
+nobody has written, and an object with `visual = "mesh"`, which is drawn by
+the client half rather than by the voxel mesher.
 
-1. **The meshes**, which are settled and were deferred until after the map:
-   the two readers in `extensions/luanti_client` cover two thirds of
-   devtest's mesh nodes and were written for the voxel mesher, and the other
-   third is glTF, which is a reader nobody has written. See "The meshes:
-   after the map" in the module plan.
-2. **The leftovers**, each small and none blocking anything. They are under
+What is left, in order:
+
+1. **The leftovers**, each small and none blocking anything. They are under
    "Bonuses" below, which is what that section is for; the module plan's
    "Simplified, and the upgrade path" has the full list of what the module
    does not do.

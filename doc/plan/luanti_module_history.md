@@ -978,3 +978,40 @@ nineteen nodes and 1383 composed textures, which the client composes in
 440 ms and keeps in its resource cache. A variant index is a byte, and a
 colour times a direction never overflows it because both come out of the
 same eight bits of param2.
+
+## The meshes, where they are read (built 2026-09-13)
+
+`drawtype = "mesh"` names a model file. The question the plan left open was
+where it is parsed, and the answer turned out to be "where every other
+drawtype's shape is decided": while the registry is built, so that the quads
+travel to the client in the definition like a nodebox's and the voxel mesher
+copies them into the chunk. A chunk of lanterns then costs what a chunk of
+cubes costs, which is the argument `objmesh.lua`'s own header makes.
+
+**The readers were already written.** `objmesh.lua` and `b3dmesh.lua` in
+`extensions/luanti_client` each produce "the quads a voxel's shape is made
+of" in the node's own -0.5...0.5 cube, which is exactly what
+`VoxelDefinition::shape` holds -- they were written against this mesher and
+say so. They touch no files and depend on nothing of the client's, so they
+were copied into `builtin/luanti/lua/` beside the rest of the module's Lua,
+the way the client half was forked out of the same extension. Their own
+checks stay where they were written; what the copy added --
+`core.__mesh_quads()`, which flattens a quad into the twenty-one numbers the
+module reads and turns a material into a tile -- is checked in
+`builtin/luanti/lua/test.lua`.
+
+**What a material means.** A mesh's materials are numbered from one and a
+node's tiles from zero here, so material *n* wears tile *n-1*, capped at the
+sixth. That is Luanti's own rule for putting a node's tiles on a mesh.
+`visual_scale` multiplies every corner, which is what a game asking for a
+mesh bigger than its cube means.
+
+**What it covers, and what it costs.** Twenty of devtest's thirty mesh
+references are `.obj` and one is `.b3d`; the rest are `.x`, `.gltf` and
+`.glb`, mostly its dedicated glTF test mod, and a node naming one of those
+keeps the cube it had. Nineteen more nodes have a shape of their own.
+
+The models devtest ships are small -- five quads for a pyramid -- except its
+two performance test nodes, which are 384 and 960 quads each and exist to be
+slow: a chunk of those is a chunk of a million quads, in Luanti as well as
+here.

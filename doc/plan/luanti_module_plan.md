@@ -725,8 +725,8 @@ shape of their own, 83 of those liquids; 56 turn with their param2.
   `leveled` are a `VoxelVariant` on the param; devtest has none of the three
   to check an implementation against, which is a reason to wait for a game
   that does. See "Which mesher draws the drawtypes".
-- **`mesh`** (18 in devtest). Settled and deferred until after the map; see
-  "The meshes: after the map".
+- **`mesh`** (18 in devtest). Built 2026-09-13 for .obj and .b3d; see "The
+  meshes" below.
 - **Palettes**: built 2026-09-13. Nineteen of devtest's nodes wear a
   colour out of one; see "The palettes" below.
 
@@ -1200,27 +1200,22 @@ what the module does not do.
 each turned out to be is in `doc/plan/luanti_module_history.md`, "The
 palettes, and what a variant wears".
 
-### The meshes: after the map (settled 2026-09-13)
+### The meshes: built 2026-09-13
 
-`drawtype = "mesh"` for nodes and `visual = "mesh"` for objects. Deferred,
-not dropped, and the reason is what the formats turned out to be.
+`drawtype = "mesh"` is read while the registry is built and becomes the
+node's shape, so the quads travel in the definition like a nodebox's. The
+readers are `objmesh.lua` and `b3dmesh.lua`, copied out of
+`extensions/luanti_client` where they were written against this same mesher;
+`doc/plan/luanti_module_history.md`, "The meshes, where they are read", has
+what that turned out to be.
 
-**The two readers cover two thirds.** `objmesh.lua` and `b3dmesh.lua` in
-`extensions/luanti_client` each produce "the quads a voxel's shape is made
-of" -- they were written for the voxel mesher and say so, which answers what
-was an open question here: a mesh node goes through the mesher like every
-other shape, and `objmesh.lua`'s header makes the argument, that a chunk of
-lanterns then costs what a chunk of cubes costs. Of devtest's 30 `mesh = `
-references, 19 are `.obj` and one is `.b3d`. The rest -- five `.gltf`, two
-`.glb`, two `.x` -- are mostly its dedicated glTF test mod, and glTF is a
-third reader nobody has written.
-
-**Where they would be parsed is a free choice**, now that the client is sent
-the model files like any other media: server-side keeps a node's shape in
-the definition where every other drawtype's shape is, and client-side is
-where the extension does it and where an object's `CustomGeometry` would be
-built. Nothing forces it either way, so it is decided when it is written.
-
+**What is left of it.** A node naming a `.x`, a `.gltf` or a `.glb` keeps
+the cube it had -- ten of devtest's thirty mesh references, mostly its
+dedicated glTF test mod -- because glTF is a third reader nobody has
+written. And an object with `visual = "mesh"` is still a cube wearing its
+first texture: an object is drawn by the client half rather than by the
+voxel mesher, so it wants the readers on that side as well, which is where
+the extension has them.
 
 ## Risks
 
