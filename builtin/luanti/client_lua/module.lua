@@ -316,6 +316,26 @@ local function make_ui()
 	return ui
 end
 
+-- How much of a stack a click picks up: the whole of it with the left
+-- button, half with the right, the way Luanti's own inventory does.
+--
+-- simplified: what is picked up is what is put down. Luanti puts a single
+-- item down with the right button and ten with the middle, which is a count
+-- on the way down as well as on the way up.
+local function take_count(stack, button)
+	if button == "right" then
+		return math.ceil(stack.count / 2)
+	end
+	return stack.count
+end
+
+local function send_action(held, slot)
+	buildat.send_packet("luanti:inv_action", cereal.binary_output({
+		"move", held.location, held.list, tostring(held.index),
+		slot.location, slot.list, tostring(slot.index), tostring(held.count),
+	}, {"array", "string"}))
+end
+
 local function form_fields()
 	local out = {}
 	for _, f in ipairs(form and form.drawn and form.drawn.fields or {}) do
@@ -432,6 +452,30 @@ function M.click(x, y, button)
 			return true
 		end
 	end
+	-- A slot: the stack in it is picked up, or what is held is put down in
+	-- it. The move itself is the server's; what is held here is a drawing
+	-- and the highlight formspec_ui puts on the slot it came from.
+	for _, slot in ipairs(form.drawn.slots) do
+		if lx >= slot.x and lx < slot.x + slot.size and
+				ly >= slot.y and ly < slot.y + slot.size then
+			if form.state.held then
+				send_action(form.state.held, slot)
+				form.state.held = nil
+			elseif slot.stack then
+				form.state.held = {location = slot.location, list = slot.list,
+						index = slot.index,
+						count = take_count(slot.stack, button)}
+			end
+			draw_form()
+			return true
+		end
+	end
+	-- Somewhere else on the form: what is held is put back down where it
+	-- came from, which is nothing happening at all
+	if form.state.held then
+		form.state.held = nil
+		draw_form()
+	end
 	-- Everything else on the form swallows the click without meaning
 	-- anything, which is what keeps it from digging the node behind it
 	return lx >= 0 and ly >= 0 and lx < form.drawn.size[1] and
@@ -446,6 +490,14 @@ function M.key(key)
 	end
 	return false
 end
+
+-- The move was the server's to make, so what a form shows is stale until the
+-- inventory comes back
+M.sub_inventory(function()
+	if form then
+		draw_form()
+	end
+end)
 
 buildat.sub_packet("luanti:formspec", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})

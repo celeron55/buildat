@@ -670,6 +670,8 @@ struct Module: public interface::Module, public luanti::Interface
 				"network:packet_received/luanti:get_item_images"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:fields"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/luanti:inv_action"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -687,6 +689,8 @@ struct Module: public interface::Module, public luanti::Interface
 				on_get_item_images, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:fields",
 				on_fields, network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:inv_action",
+				on_inv_action, network::Packet)
 	}
 
 	void on_start(){}
@@ -2855,6 +2859,42 @@ struct Module: public interface::Module, public luanti::Interface
 		lua_settop(L, base);
 	}
 
+	// A stack picked up in one slot and put down in another. The strings are
+	// what the move is; lua/entity.lua says what they mean.
+	void on_inv_action(const network::Packet &packet)
+	{
+		auto who = m_peer_players.find(packet.sender);
+		if(who == m_peer_players.end())
+			return;
+		sv_<ss_> flat;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(flat);
+		} catch(std::exception &e){
+			log_w(MODULE, "luanti:inv_action: %s", e.what());
+			return;
+		}
+		if(flat.empty())
+			return;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__inventory_action");
+		lua_pushlstring(L, who->second.c_str(), who->second.size());
+		lua_createtable(L, (int)flat.size(), 0);
+		for(size_t i = 0; i < flat.size(); i++){
+			lua_pushlstring(L, flat[i].c_str(), flat[i].size());
+			lua_rawseti(L, -2, (int)i + 1);
+		}
+		if(lua_pcall(L, 2, 0, 0) != 0){
+			log_w(MODULE, "__inventory_action(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+		}
+		lua_settop(L, base);
+	}
+
 	// What an item looks like, as the texture modifier expression the client
 	// composes: its inventory image, or the first tile of the node it
 	// places. Asked for the way the texmods are.
@@ -3638,7 +3678,8 @@ struct Module: public interface::Module, public luanti::Interface
 		// and a mod's items have to be registered for one to mean anything
 		load_node_meta();
 		load_players();
-		run_chunk_string("core.__check_players()", "check_players");
+		run_chunk_string("core.__check_players() "
+				"core.__check_inventory_move()", "check_players");
 
 		check_shapes();
 		check_mapblock();

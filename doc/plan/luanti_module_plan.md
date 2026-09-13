@@ -865,13 +865,21 @@ two things M1 disproved about the build, are in
   above, an item's image is the expression the server sends for each
   registered item (`core.__item_images()`), and the style is `__menu`'s.
 
-  **What is left of M4:** picking a stack up and putting it down. A slot is
-  drawn and what is in it is drawn; moving an item between two is an
-  inventory action, which is a packet the other way and the allow_/on_
-  callbacks a detached inventory carries. With it go a node's inventory and
-  a detached one, which `ctx.inventory` answers nothing for: a chest's form
-  draws empty slots until a `list[]` can name something that is not the
-  player.
+  **Built: a stack is picked up and put down (2026-09-13).** A click on a
+  slot picks the stack up -- the whole of it with the left button, half with
+  the right -- and the next click puts it down, which is when the move is
+  sent: Luanti's own client does the same, so what is held is a drawing and
+  a highlight on the slot it came from. The server moves it, and what a form
+  shows is redrawn when the inventory comes back. The arithmetic -- merging,
+  swapping onto a different item, what does not fit going back -- is checked
+  at every start.
+
+  **What is left of M4:** a `list[]` that is not the player's. A node's
+  inventory and a detached one want the `allow_`/`on_` callbacks around a
+  move, and the client has to be sent what is in them, so a chest's form
+  draws empty slots until then. And what is picked up is what is put down:
+  Luanti puts a single item down with the right button and ten with the
+  middle, which is a count on the way down as well as on the way up.
 - **M5 -- it lives. Built 2026-09-13.** ABMs, LBMs, entities, `core.after`.
   Success is `testabms` and `testentities` behaving.
 
