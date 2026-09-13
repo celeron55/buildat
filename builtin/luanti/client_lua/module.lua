@@ -499,6 +499,51 @@ function M.hud_flag(name)
 	return math.floor(M.hud_flags / bit) % 2 == 1
 end
 
+-- The sky the game says it has: the colour overhead, the colour at the
+-- horizon, and whether there are clouds and how thick. Whoever draws the sky
+-- subscribes; see set_sky() in the module's lua/entity.lua for what a mod
+-- can say and what of it crosses.
+M.sky = nil
+
+local sky_subs = {}
+
+function M.sub_sky(f)
+	sky_subs[#sky_subs + 1] = f
+	if M.sky then
+		f(M.sky)
+	end
+end
+
+buildat.sub_packet("luanti:sky", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	local e = {}
+	for i = 1, #values - 1, 2 do
+		e[values[i]] = values[i + 1]
+	end
+	local function rgb(s)
+		if s == nil then
+			return nil
+		end
+		local r, g, b = string.match(s, "^([^,]*),([^,]*),(.*)$")
+		if r == nil then
+			return nil
+		end
+		return {r = tonumber(r) or 0, g = tonumber(g) or 0,
+				b = tonumber(b) or 0}
+	end
+	M.sky = {
+		type = e.type or "regular",
+		zenith = rgb(e.zenith),
+		horizon = rgb(e.horizon),
+		clouds = e.clouds ~= "0",
+		density = tonumber(e.density or ""),
+		cloud_color = rgb(e.cloud_color),
+	}
+	for _, f in ipairs(sky_subs) do
+		f(M.sky)
+	end
+end)
+
 -- What a game said the light should be whatever the hour: Luanti's
 -- override_day_night_ratio, 0 for night and 1 for day, or nil for "the
 -- clock decides". The sun still goes where the time says.
