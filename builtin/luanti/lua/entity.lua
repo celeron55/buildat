@@ -785,6 +785,111 @@ function core.__load_players(data)
 end
 
 --
+-- An inventory action
+--
+-- What picking a stack up in one slot and putting it down in another comes
+-- to. Luanti's own client sends the move when the stack is put down rather
+-- than when it is picked up, so this is one message and the client's "held"
+-- is only a drawing.
+--
+-- simplified: the player's own inventory. A node's and a detached one want
+-- the allow_/on_ callbacks around them first, and those are the same message
+-- with more done about it; see "what is left of M4" in
+-- doc/plan/luanti_module_plan.md.
+
+local function inventory_at(ref, location)
+	if location == "current_player" or
+			string.sub(location, 1, 7) == "player:" then
+		return ref:get_inventory()
+	end
+	return nil
+end
+
+-- Returns whether anything moved. count of zero is the whole stack.
+local function move_stack(from_inv, from_list, from_i, to_inv, to_list, to_i,
+		count)
+	if from_inv == to_inv and from_list == to_list and from_i == to_i then
+		return false
+	end
+	local src = from_inv:get_stack(from_list, from_i)
+	if src:is_empty() then
+		return false
+	end
+	if count <= 0 or count > src:get_count() then
+		count = src:get_count()
+	end
+	local taken = src:take_item(count)
+	local dst = to_inv:get_stack(to_list, to_i)
+	local leftover = dst:add_item(taken)
+	if leftover:get_count() == taken:get_count() and src:is_empty() and
+			not dst:is_empty() then
+		-- Nothing fitted and the whole source stack was moving: the two slots
+		-- swap, which is what Luanti does with a stack put down on a
+		-- different item
+		from_inv:set_stack(from_list, from_i, dst)
+		to_inv:set_stack(to_list, to_i, taken)
+		return true
+	end
+	-- What did not fit goes back where it came from
+	src:add_item(leftover)
+	from_inv:set_stack(from_list, from_i, src)
+	to_inv:set_stack(to_list, to_i, dst)
+	return true
+end
+
+-- The round trip is the client's; what can be wrong here is the arithmetic,
+-- which is checked at every start
+function core.__check_inventory_move()
+	local inv = core.__new_inventory({type = "player", name = "__check"})
+	inv:set_size("main", 4)
+	inv:set_stack("main", 1, ItemStack("__check_item 10"))
+	inv:set_stack("main", 2, ItemStack("__check_other 1"))
+	local function count_at(i)
+		local s = inv:get_stack("main", i)
+		return s:get_name(), s:get_count()
+	end
+	assert(move_stack(inv, "main", 1, inv, "main", 3, 4),
+			"inventory move: half a stack onto an empty slot")
+	local _, n = count_at(1)
+	assert(n == 6, "inventory move: the source keeps the rest")
+	local name3, n3 = count_at(3)
+	assert(name3 == "__check_item" and n3 == 4,
+			"inventory move: the destination gets what was taken")
+	assert(move_stack(inv, "main", 3, inv, "main", 1, 0),
+			"inventory move: onto the same item")
+	local _, n1 = count_at(1)
+	assert(n1 == 10 and inv:get_stack("main", 3):is_empty(),
+			"inventory move: the same item merges")
+	assert(move_stack(inv, "main", 1, inv, "main", 2, 0),
+			"inventory move: onto a different item")
+	local name1 = count_at(1)
+	local name2, n2 = count_at(2)
+	assert(name1 == "__check_other" and name2 == "__check_item" and n2 == 10,
+			"inventory move: a different item swaps")
+	assert(not move_stack(inv, "main", 2, inv, "main", 2, 0),
+			"inventory move: onto itself is nothing")
+	core.log("verbose", "check_inventory_move: the slots add up")
+end
+
+-- What the client sends when a stack is put down: the move, as strings.
+function core.__inventory_action(playername, a)
+	local id = players[playername]
+	local ref = id and core.object_refs[id]
+	if not ref or type(a) ~= "table" or a[1] ~= "move" then
+		return
+	end
+	local from_inv = inventory_at(ref, a[2] or "")
+	local to_inv = inventory_at(ref, a[5] or "")
+	if not from_inv or not to_inv then
+		core.log("verbose", "inventory action: " .. tostring(a[2]) .. " -> " ..
+				tostring(a[5]) .. " is not a player's own inventory")
+		return
+	end
+	move_stack(from_inv, a[3] or "", tonumber(a[4]) or 0,
+			to_inv, a[6] or "", tonumber(a[7]) or 0, tonumber(a[8]) or 0)
+end
+
+--
 -- Formspecs
 --
 -- The window a mod puts on a player's screen: a string of elements the client
