@@ -444,7 +444,24 @@ byte-identical over all 865 rows -- and, for step 4, the round trip under
      `lua/check_map.lua` because `get_mod_storage()` needs a mod to be
      running: outside one there is no current modname and it has nothing to
      open. It works; the first run says one and the second says two.
-   - **5c. Node metadata and inventories.** With M4, not before it.
+   - **5c. Node metadata and inventories. BUILT 2026-09-13.** What hangs off
+     a voxel -- a chest's contents, a sign's text -- goes into the module's
+     own store in the save beside the clock, written at `core:shutdown` and
+     read after the mods have loaded, because what it holds is item strings
+     and a mod's items have to be registered for one to mean anything. The
+     fields are strings and an inventory is lists of item strings, which is
+     what `ItemStack()` takes back.
+
+     The fixture checks it across runs the way mod storage is checked: a
+     probe in a corner of `minimal_game`'s floor counts the runs in its
+     metadata and holds one stone per run in its inventory, and every run
+     after the first checks what the last one left.
+
+     simplified: one blob for the whole world. Luanti keeps a block's
+     metadata with the block and writes it when the block is written; the
+     upgrade path is the same shape -- a blob per section, written when
+     voxelworld writes that section -- and it is what a map bigger than the
+     sections a mod can reach will need.
    - **5d. Players.** With M5.
 
    Already done, and listed here because the original step 4 named it:
@@ -452,7 +469,9 @@ byte-identical over all 865 rows -- and, for step 4, the round trip under
    rather than the save's own root, so that a Luanti mod writing through it
    -- which is normal, and which games depend on -- cannot land on
    `save.sqlite`.
-6. The Luanti importer, which is its own milestone in the module plan.
+6. The Luanti importer, which is its own milestone in the module plan. Its
+   map and clock are read (2026-09-13); the player and mod storage
+   databases and a block's node metadata are not.
 
-5b to 5d and 6 are what is left, and each waits on a milestone of the module
-plan rather than on anything here.
+5b, 5d and what is left of 6 are the remainder, and each waits on a
+milestone of the module plan rather than on anything here.

@@ -457,6 +457,9 @@ struct Module: public interface::Module, public luanti::Interface
 	// three hundred thousand blocks asks Lua once per name and not once per
 	// node
 	sm_<ss_, std::pair<uint32_t, bool>> m_import_ids;
+	// Whether the save has node metadata in it, so that a world that has
+	// none does not get a blob written for it every shutdown
+	bool m_had_node_meta = false;
 	bool m_game_running = false;
 	// What load_lua() was handed before run_game(), in the order it came
 	sv_<std::pair<ss_, ss_>> m_pending_lua;
@@ -552,6 +555,7 @@ struct Module: public interface::Module, public luanti::Interface
 			return;
 		flush_node_writes();
 		save_clock();
+		save_node_meta();
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
 			world->save();
 		});
@@ -599,6 +603,60 @@ struct Module: public interface::Module, public luanti::Interface
 		lua_settop(L, base);
 		log_v(MODULE, "Clock read from the save: day %i, time %.4f, "
 				"%.0f seconds played", (int)day_count, time_of_day, game_time);
+	}
+
+	// Step 5c of doc/plan/world_persistence_plan.md: what hangs off the
+	// voxels -- a chest's contents, a sign's text -- goes into the save
+	// beside the clock. One blob, because the world is the sections a mod
+	// can reach; lua/bootstrap.lua names the upgrade path where it builds it.
+	void save_node_meta()
+	{
+		if(!m_store || !m_lua)
+			return;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__save_node_meta");
+		if(lua_pcall(L, 0, 2, 0) != 0){
+			log_w(MODULE, "__save_node_meta(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+			lua_settop(L, base);
+			return;
+		}
+		ss_ data = lua_tostring(L, -2) ? lua_tostring(L, -2) : "";
+		int n = (int)lua_tonumber(L, -1);
+		lua_settop(L, base);
+		if(n == 0 && !m_had_node_meta)
+			return; // Nothing to write and nothing there to clear
+		m_had_node_meta = (n != 0);
+		m_store->set("node_meta", data);
+		log_v(MODULE, "Node metadata written to the save: %i positions", n);
+	}
+
+	void load_node_meta()
+	{
+		if(!m_store || !m_lua)
+			return;
+		ss_ data;
+		if(!m_store->get("node_meta", data))
+			return;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__load_node_meta");
+		lua_pushlstring(L, data.c_str(), data.size());
+		if(lua_pcall(L, 1, 1, 0) != 0){
+			log_w(MODULE, "__load_node_meta(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+			lua_settop(L, base);
+			return;
+		}
+		int n = (int)lua_tonumber(L, -1);
+		lua_settop(L, base);
+		m_had_node_meta = (n != 0);
+		log_v(MODULE, "Node metadata read from the save: %i positions", n);
 	}
 
 	void save_clock()
@@ -2634,6 +2692,10 @@ struct Module: public interface::Module, public luanti::Interface
 		load_clock();
 
 		run_chunk_file(module_path()+"/lua/modloader.lua");
+
+		// After the mods, because what the metadata holds is item strings
+		// and a mod's items have to be registered for one to mean anything
+		load_node_meta();
 
 		check_shapes();
 		check_mapblock();

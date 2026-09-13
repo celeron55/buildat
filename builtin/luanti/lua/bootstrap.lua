@@ -889,6 +889,72 @@ end
 
 core.get_node_metadata = core.get_meta
 
+-- What the module writes into the save and reads back out of it: every
+-- position that has anything, as fields and inventory lists of item strings.
+-- An inventory is stacks and a stack is an object, so what goes in is what
+-- ItemStack() takes back.
+--
+-- simplified: one blob for the whole world, written at shutdown. Luanti
+-- keeps a block's metadata with the block and writes it when the block is
+-- written; the upgrade path is the same shape -- a blob per section,
+-- written when voxelworld writes that section -- and it is what a map
+-- bigger than the sections a mod can reach will need. See step 5c of
+-- doc/plan/world_persistence_plan.md.
+
+function core.__save_node_meta()
+	local out = {}
+	local n = 0
+	for key, meta in pairs(node_meta) do
+		local fields = {}
+		local any = false
+		for k, v in pairs(meta.fields) do
+			fields[k] = v
+			any = true
+		end
+		local lists = {}
+		for name, stacks in pairs(meta.inventory:get_lists()) do
+			local as_strings = {}
+			for i, stack in ipairs(stacks) do
+				as_strings[i] = stack:to_string()
+			end
+			lists[name] = as_strings
+			any = true
+		end
+		if any then
+			out[key] = {fields = fields, inventory = lists}
+			n = n + 1
+		end
+	end
+	return core.serialize(out), n
+end
+
+function core.__load_node_meta(data)
+	local t = core.deserialize(data)
+	if type(t) ~= "table" then
+		return 0
+	end
+	local n = 0
+	for key, saved in pairs(t) do
+		local x, y, z = string.match(key, "^(-?%d+),(-?%d+),(-?%d+)$")
+		if x then
+			local meta = core.get_meta(
+					{x = tonumber(x), y = tonumber(y), z = tonumber(z)})
+			for k, v in pairs(saved.fields or {}) do
+				meta.fields[k] = v
+			end
+			local inv = meta:get_inventory()
+			for name, stacks in pairs(saved.inventory or {}) do
+				inv:set_size(name, #stacks)
+				for i, str in ipairs(stacks) do
+					inv:set_stack(name, i, ItemStack(str))
+				end
+			end
+			n = n + 1
+		end
+	end
+	return n
+end
+
 -- A timer per position, which is what a furnace burning down and a plant
 -- growing on its own are written on. Luanti keeps one per block and runs
 -- the ones whose block is loaded; here the world is loaded whole, so a
