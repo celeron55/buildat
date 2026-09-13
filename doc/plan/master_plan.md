@@ -121,10 +121,19 @@ the client half rather than by the voxel mesher.
 
 What is left, in order of what it is worth:
 
-1. **The mapgen, stage 3: vendor `src/mapgen/` and point it at the seam.**
-   The seam is built (2026-09-13): sections are filled by a generator in
-   `worldgen`'s worker thread, and what is left is the shim that lets
-   Luanti's own mapgen be that generator.
+1. **The mapgen, stage 3c: the biomes, ores and decorations a game
+   registers.** Luanti's own mapgens generate worlds here as of
+   2026-09-13 -- a world whose `mg_name` says `v7` is v7 -- but what they
+   generate is the default biome, because `core.registered_biomes`,
+   `_ores` and `_decorations` are recorded in Lua and nothing translates
+   them into `BiomeManager` and its friends yet. That translation is what
+   makes a game's own world look like itself. Two smaller things go with
+   it: who owns the light, and sending the node properties a mapgen asks
+   about instead of guessing them. See "Mapgen stage 3" in the module plan.
+
+   What is already built: the seam (a generator in `worldgen`'s worker
+   thread), the whole of `src/mapgen` vendored and compiling against a
+   shim, and all eight mapgens available by name.
    Stage 2 is built too and a Lua mapgen makes terrain through it,
    so what is left is the 9.5k lines of noise, biomes, ores, decorations,
    schematics and the tree generator that a mainstream Luanti game's world
