@@ -416,6 +416,89 @@ local ok_fs, err_fs, formspec = buildat.run_script_file("luanti/formspec.lua")
 if not ok_fs or type(formspec) ~= "table" then
 	error("luanti: could not load formspec.lua: " .. tostring(err_fs))
 end
+-- The HUD a game draws itself: an element per id, under the names Luanti's
+-- own HUDADD carries -- pos, align, dir and the rest -- and the flags
+-- saying which of the client's own the game wants drawn. Whoever is drawing
+-- subscribes; what is here is keeping them.
+M.hud_elements = {}
+M.hud_flags = 511
+-- How much life and breath the player has, which is what the client's own
+-- bars draw; a game that draws its own turns those off with the flags
+M.stats = {hp = 20, hp_max = 20, breath = 11, breath_max = 11}
+
+local hud_subs = {}
+
+-- sub_hud(f) -> f(elements, flags) every time the game changes what is on
+-- the screen, and once now
+function M.sub_hud(f)
+	hud_subs[#hud_subs + 1] = f
+	f(M.hud_elements, M.hud_flags)
+end
+
+local function hud_changed()
+	for _, f in ipairs(hud_subs) do
+		f(M.hud_elements, M.hud_flags)
+	end
+end
+
+buildat.sub_packet("luanti:hud", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	local op = values[1]
+	if op == "clear" then
+		M.hud_elements = {}
+	elseif op == "add" then
+		local id = tonumber(values[2])
+		local e = {}
+		for i = 3, #values - 1, 2 do
+			e[values[i]] = values[i + 1]
+		end
+		if id then
+			M.hud_elements[id] = e
+		end
+	elseif op == "change" then
+		local id = tonumber(values[2])
+		local e = id and M.hud_elements[id]
+		if e then
+			e[values[3]] = values[4]
+		end
+	elseif op == "remove" then
+		local id = tonumber(values[2])
+		if id then
+			M.hud_elements[id] = nil
+		end
+	elseif op == "flags" then
+		M.hud_flags = tonumber(values[2]) or M.hud_flags
+	elseif op == "stats" then
+		M.stats = {
+			hp = tonumber(values[2]) or 0,
+			hp_max = tonumber(values[3]) or 20,
+			breath = tonumber(values[4]) or 11,
+			breath_max = tonumber(values[5]) or 11,
+		}
+	end
+	hud_changed()
+end)
+
+-- Luanti wraps a translated line in escape sequences; this takes them out.
+-- The chat log goes through it already, and so does anything else drawing
+-- text a game wrote.
+function M.strip_escapes(text)
+	return formspec.strip_escapes(text or "")
+end
+
+-- Whether a flag is set in what the game asked for; the names are Luanti's
+-- HUD_FLAG_* and hud.lua has the numbers
+function M.hud_flag(name)
+	local FLAG = {hotbar = 1, healthbar = 2, crosshair = 4, wielditem = 8,
+			breathbar = 16, minimap = 32, minimap_radar = 64,
+			basic_debug = 128, chat = 256}
+	local bit = FLAG[name]
+	if bit == nil then
+		return true
+	end
+	return math.floor(M.hud_flags / bit) % 2 == 1
+end
+
 -- What time it is in the world, as the server last said: the fraction of a
 -- day and how many game seconds a real one is. The server says it every few
 -- seconds and whoever draws the sky carries it on in between, because a sky

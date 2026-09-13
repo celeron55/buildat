@@ -4117,6 +4117,29 @@ struct Module: public interface::Module, public luanti::Interface
 		return 0;
 	}
 
+	// One change to a player's own HUD: what a game adds, changes and takes
+	// away, as the flat list of strings lua/entity.lua builds
+	static int l_send_hud(lua_State *L)
+	{
+		Module *self = module_of(L);
+		size_t name_len = 0;
+		const char *name_p = luaL_checklstring(L, 1, &name_len);
+		ss_ name(name_p ? name_p : "", name_len);
+		luaL_checktype(L, 2, LUA_TTABLE);
+		sv_<ss_> flat;
+		const size_t n = lua_objlen(L, 2);
+		flat.reserve(n);
+		for(size_t i = 0; i < n; i++){
+			lua_rawgeti(L, 2, (int)i + 1);
+			size_t len = 0;
+			const char *p = lua_tolstring(L, -1, &len);
+			flat.push_back(ss_(p ? p : "", p ? len : 0));
+			lua_pop(L, 1);
+		}
+		self->send_to_player(name, "luanti:hud", flat);
+		return 0;
+	}
+
 	// A line of chat to one player, or to everyone when the name is empty
 	static int l_send_chat(lua_State *L)
 	{
@@ -5142,6 +5165,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_send_inventory", l_send_inventory);
 		set_global_cfunction("__luanti_send_player_pos", l_send_player_pos);
 		set_global_cfunction("__luanti_send_chat", l_send_chat);
+		set_global_cfunction("__luanti_send_hud", l_send_hud);
 		set_global_cfunction("__luanti_send_time", l_send_time);
 		set_global_cfunction("__luanti_show_formspec", l_show_formspec);
 		set_global_cfunction("__luanti_player_formspec", l_player_formspec);
