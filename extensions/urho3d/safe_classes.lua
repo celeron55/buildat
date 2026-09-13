@@ -993,6 +993,10 @@ function M.define(dst, util)
 				end
 			),
 			Remove = util.self_function("Remove", {}, {"UIElement"}),
+			-- Everything under it at once, which is what redrawing a screen
+			-- full of elements from scratch wants
+			RemoveAllChildren = util.self_function(
+					"RemoveAllChildren", {}, {"UIElement"}),
 			SetName = util.self_function("SetName", {}, {"UIElement", "string"}),
 			SetText = util.self_function("SetText", {}, {"UIElement", "string"}),
 			SetFont = util.self_function("SetFont", {}, {"UIElement", "Font"}),

@@ -37,6 +37,20 @@ local __show_objects = __luanti_show_objects
 local __show_object_props = __luanti_show_object_props
 local __send_inventory = __luanti_send_inventory
 local __send_player_pos = __luanti_send_player_pos
+
+-- The client's own bars: how much life and breath the player has. Luanti
+-- sends these as their own packets and draws hearts and bubbles for them;
+-- what a game draws instead is the HUD elements above, and the healthbar
+-- and breathbar flags are how it says so.
+local function send_stats(o)
+	if o and o.player_name and __luanti_send_hud then
+		__luanti_send_hud(o.player_name, {"stats",
+				tostring(o.hp or 0),
+				tostring((o.props and o.props.hp_max) or 20),
+				tostring(o.breath or 11), "11"})
+	end
+end
+
 local __show_formspec = __luanti_show_formspec
 local __player_formspec = __luanti_player_formspec
 local __send_node_inventory = __luanti_send_node_inventory
@@ -485,6 +499,7 @@ function PlayerRef:set_hp(hp, reason)
 	end
 	local was = o.hp
 	o.hp = math.max(0, math.min(was + change, hp_max))
+	send_stats(o)
 	if o.hp == 0 and was > 0 then
 		for _, cb in ipairs(core.registered_on_dieplayers or {}) do
 			cb(self, t)
@@ -598,6 +613,7 @@ function PlayerRef:set_breath(b)
 	local o = state_of(self)
 	if o then
 		o.breath = math.max(0, math.floor(tonumber(b) or 0))
+		send_stats(o)
 	end
 end
 
@@ -683,11 +699,11 @@ function PlayerRef:set_formspec_prepend(spec)
 	end
 end
 
--- What a HUD and a sky are is the client's, and there is no client half yet:
+-- What a sky is is the client's, and there is no client half for one yet:
 -- these keep nothing and answer with nothing, rather than being missing and
 -- taking a mod down on the line that sets one
 for _, name in ipairs({
-	"hud_remove", "hud_change", "hud_set_flags", "hud_set_hotbar_image",
+	"hud_set_hotbar_image",
 	"hud_set_hotbar_selected_image", "set_sky", "set_sun", "set_moon",
 	"set_stars", "set_clouds", "set_lighting", "override_day_night_ratio",
 	"set_minimap_modes", "send_mapblock", "set_fov", "set_nametag_color",
@@ -696,12 +712,164 @@ for _, name in ipairs({
 	PlayerRef[name] = function() end
 end
 
-function PlayerRef:hud_add() return nil end
-function PlayerRef:hud_get() return nil end
+--
+-- The HUD a game draws itself
+--
+-- Luanti's HUD is a list of elements per player -- an image, a line of
+-- text, a bar of icons -- that the server adds, changes and takes away, and
+-- a set of flags saying which of the client's own the game wants drawn.
+-- What goes over the wire here is the element as a flat list of strings,
+-- under the names Luanti's own HUDADD carries rather than the ones a mod
+-- writes: pos, align, dir and the rest. The client half keeps them and
+-- whoever is drawing draws them.
+
+local HUD_FLAG = {
+	hotbar = 1, healthbar = 2, crosshair = 4, wielditem = 8, breathbar = 16,
+	minimap = 32, minimap_radar = 64, basic_debug = 128, chat = 256,
+}
+local HUD_FLAGS_ALL = 511
+
+local function v2_string(v)
+	if type(v) ~= "table" then
+		return nil
+	end
+	return tostring(v.x or 0) .. "," .. tostring(v.y or 0)
+end
+
+local function v3_string(v)
+	if type(v) ~= "table" then
+		return nil
+	end
+	return tostring(v.x or 0) .. "," .. tostring(v.y or 0) .. "," ..
+			tostring(v.z or 0)
+end
+
+-- A mod's element as the names the wire carries; nil is left out
+local function hud_fields(def)
+	return {
+		type = tostring(def.type or def.hud_elem_type or "text"),
+		pos = v2_string(def.position),
+		name = def.name and tostring(def.name) or nil,
+		scale = v2_string(def.scale),
+		text = def.text and tostring(def.text) or nil,
+		text2 = def.text2 and tostring(def.text2) or nil,
+		number = def.number and tostring(def.number) or nil,
+		item = def.item and tostring(def.item) or nil,
+		dir = def.direction and tostring(def.direction) or nil,
+		align = v2_string(def.alignment),
+		offset = v2_string(def.offset),
+		world_pos = v3_string(def.world_pos),
+		size = v2_string(def.size),
+		z_index = def.z_index and tostring(def.z_index) or nil,
+		style = def.style and tostring(def.style) or nil,
+	}
+end
+
+local function send_hud(o, flat)
+	if o and o.player_name and __luanti_send_hud then
+		__luanti_send_hud(o.player_name, flat)
+	end
+end
+
+-- What a client that arrives is told: every element the game had already
+-- added for this player, and the flags
+local function send_whole_hud(o)
+	if not o then
+		return
+	end
+	send_hud(o, {"clear"})
+	for id, def in pairs(o.hud or {}) do
+		local flat = {"add", tostring(id)}
+		for k, v in pairs(hud_fields(def)) do
+			flat[#flat + 1] = k
+			flat[#flat + 1] = v
+		end
+		send_hud(o, flat)
+	end
+	send_hud(o, {"flags", tostring(o.hud_flags or HUD_FLAGS_ALL)})
+end
+
+function PlayerRef:hud_add(def)
+	local o = state_of(self)
+	if not o or type(def) ~= "table" then
+		return nil
+	end
+	o.hud = o.hud or {}
+	o.hud_next = (o.hud_next or 0) + 1
+	local id = o.hud_next
+	o.hud[id] = table.copy(def)
+	local flat = {"add", tostring(id)}
+	for k, v in pairs(hud_fields(def)) do
+		flat[#flat + 1] = k
+		flat[#flat + 1] = v
+	end
+	send_hud(o, flat)
+	return id
+end
+
+function PlayerRef:hud_remove(id)
+	local o = state_of(self)
+	if not o or o.hud == nil or o.hud[id] == nil then
+		return
+	end
+	o.hud[id] = nil
+	send_hud(o, {"remove", tostring(id)})
+end
+
+function PlayerRef:hud_change(id, stat, value)
+	local o = state_of(self)
+	local def = o and o.hud and o.hud[id]
+	if not def then
+		return nil
+	end
+	-- A mod names the field the way it wrote it in the definition, and the
+	-- wire carries Luanti's own name for it
+	local WIRE = {position = "pos", alignment = "align", direction = "dir",
+			hud_elem_type = "type"}
+	def[stat] = value
+	local key = WIRE[stat] or stat
+	local fields = hud_fields(def)
+	local v = fields[key]
+	if v == nil then
+		return nil
+	end
+	send_hud(o, {"change", tostring(id), key, v})
+	return id
+end
+
+function PlayerRef:hud_get(id)
+	local o = state_of(self)
+	return o and o.hud and o.hud[id] or nil
+end
+
+function PlayerRef:hud_set_flags(flags)
+	local o = state_of(self)
+	if not o or type(flags) ~= "table" then
+		return
+	end
+	local value = o.hud_flags or HUD_FLAGS_ALL
+	for name, bit in pairs(HUD_FLAG) do
+		if flags[name] ~= nil then
+			local has = math.floor(value / bit) % 2 == 1
+			if flags[name] and not has then
+				value = value + bit
+			elseif not flags[name] and has then
+				value = value - bit
+			end
+		end
+	end
+	o.hud_flags = value
+	send_hud(o, {"flags", tostring(value)})
+end
+
 function PlayerRef:hud_get_flags()
-	return {hotbar = true, healthbar = true, crosshair = true,
-			wielditem = true, breathbar = true, minimap = true,
-			minimap_radar = true, basic_debug = true, chat = true}
+	local o = state_of(self)
+	local value = (o and o.hud_flags) or HUD_FLAGS_ALL
+	local out = {}
+	for name, bit in pairs(HUD_FLAG) do
+		out[name] = math.floor(value / bit) % 2 == 1
+	end
+	return out
 end
 function PlayerRef:hud_get_hotbar_image() return "" end
 function PlayerRef:hud_get_hotbar_selected_image() return "" end
@@ -1377,6 +1545,11 @@ function core.__add_player(name)
 	if new_here and not o.spawn_known then
 		unplaced[name] = {x = o.pos.x, y = o.pos.y, z = o.pos.z}
 	end
+	-- A client that arrives is told the HUD the game had already put on it,
+	-- which for a player who was here before is everything a mod added the
+	-- last time they joined, and what their life and breath are
+	send_whole_hud(o)
+	send_stats(o)
 	-- Where the last run left them, or the spawn: either way it is the
 	-- server's answer and the client starts there. A player whose spawn the
 	-- map cannot answer for yet is not told anything -- a fallback position

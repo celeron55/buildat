@@ -512,6 +512,7 @@ local function update_detail(dt)
 			binding_lines()))
 end
 
+
 --
 -- Chat
 --
@@ -585,6 +586,203 @@ local function send_chat()
 	buildat.send_packet("main:chat",
 			cereal.binary_output({text}, {"array", "string"}))
 end
+
+--
+-- The HUD a game draws itself
+--
+-- Luanti's own elements: an image, a line of text, a bar of icons. Where
+-- they go is `pos` as a fraction of the screen plus `offset` in pixels,
+-- with `align` saying which corner of the element lands there -- which is
+-- Luanti's drawLuaElements, and what a game's hearts and bars are made of.
+--
+-- simplified: text, image and statbar. A waypoint, a compass, a minimap and
+-- an inventory element are not drawn; each is named once in the log so that
+-- a game asking for one says so rather than silently missing it.
+local hud_root = magic.ui.root:CreateChild("UIElement")
+hud_root:SetPosition(0, 0)
+local hud_missing = {}
+
+local function parse_v2(str, dx, dy)
+	if type(str) ~= "string" then
+		return dx, dy
+	end
+	local x, y = string.match(str, "^([^,]*),(.*)$")
+	return tonumber(x) or dx, tonumber(y) or dy
+end
+
+local function hud_place(element, e, w, h)
+	local px, py = parse_v2(e.pos, 0, 0)
+	local ox, oy = parse_v2(e.offset, 0, 0)
+	local ax, ay = parse_v2(e.align, 0, 0)
+	element:SetPosition(
+			math.floor(px * magic.ui.root.width + ox -
+					(ax + 1) * 0.5 * w),
+			math.floor(py * magic.ui.root.height + oy -
+					(ay + 1) * 0.5 * h))
+end
+
+local function hud_colour(number)
+	local n = tonumber(number)
+	if n == nil or n == 0 then
+		return magic.Color(1, 1, 1)
+	end
+	return magic.Color(
+			math.floor(n / 65536) % 256 / 255,
+			math.floor(n / 256) % 256 / 255,
+			n % 256 / 255)
+end
+
+local function draw_hud_text(e)
+	local t = hud_root:CreateChild("Text")
+	t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 15)
+	t:SetTextEffect(magic.TE_SHADOW)
+	t.effectColor = magic.Color(0, 0, 0, 0.85)
+	t:SetText(luanti.strip_escapes(e.text or ""))
+	t.color = hud_colour(e.number)
+	hud_place(t, e, t.width, t.height)
+end
+
+local function draw_hud_image(e)
+	local resource = luanti.texture(e.text or "")
+	local tex = resource and game_texture(resource)
+	if not tex then
+		if not hud_missing[e.text or ""] then
+			hud_missing[e.text or ""] = true
+			log:info("the game's HUD wants an image called \"" ..
+					tostring(e.text) .. "\", which is not there")
+		end
+		return
+	end
+	local sx, sy = parse_v2(e.scale, 1, 1)
+	-- A negative scale is a fraction of the screen rather than of the image,
+	-- which is how Luanti's own scale works
+	local w = sx < 0 and (-sx * 0.01 * magic.ui.root.width) or
+			(tex.width * sx)
+	local h = sy < 0 and (-sy * 0.01 * magic.ui.root.height) or
+			(tex.height * sy)
+	local img = hud_root:CreateChild("BorderImage")
+	img.texture = tex
+	img.size = magic.IntVector2(math.floor(w), math.floor(h))
+	hud_place(img, e, w, h)
+end
+
+-- A row of icons, each one either whole or half: hearts, bubbles, a bar of
+-- armour. number is the value in halves and item is how many halves the bar
+-- holds; text2 is the icon a game draws for what is missing.
+local function draw_hud_statbar(e)
+	local resource = luanti.texture(e.text or "")
+	local tex = resource and game_texture(resource)
+	if not tex then
+		return
+	end
+	local value = math.floor(tonumber(e.number) or 0)
+	local total = math.floor(tonumber(e.item) or value)
+	local sw, sh = parse_v2(e.size, 0, 0)
+	local w = sw > 0 and sw or tex.width
+	local h = sh > 0 and sh or tex.height
+	-- Luanti's dir: 0 right, 1 left, 2 down, 3 up
+	local dir = math.floor(tonumber(e.dir) or 0)
+	local bg = e.text2 and game_texture(luanti.texture(e.text2))
+	local whole = math.floor(total / 2)
+	local row = hud_root:CreateChild("UIElement")
+	local count = 0
+	for i = 1, whole do
+		local filled = value >= i * 2
+		local half = (not filled) and value == i * 2 - 1
+		local tex_i = filled and tex or (half and tex or bg)
+		if tex_i then
+			local icon = row:CreateChild("BorderImage")
+			icon.texture = tex_i
+			icon.size = magic.IntVector2(math.floor(half and w / 2 or w),
+					math.floor(h))
+			if half then
+				-- The left half of the icon, which is Luanti's own half
+				icon.imageRect = magic.IntRect(0, 0,
+						math.floor(tex_i.width / 2), tex_i.height)
+			end
+			local step = (i - 1)
+			local x, y = step * w, 0
+			if dir == 1 then x = -step * w
+			elseif dir == 2 then x, y = 0, step * h
+			elseif dir == 3 then x, y = 0, -step * h end
+			icon:SetPosition(math.floor(x), math.floor(y))
+			count = count + 1
+		end
+	end
+	local total_w = (dir <= 1) and whole * w or w
+	local total_h = (dir <= 1) and h or whole * h
+	row.size = magic.IntVector2(math.floor(total_w), math.floor(total_h))
+	hud_place(row, e, total_w, total_h)
+end
+
+-- The client's own bars, which a game turns off with the healthbar and
+-- breathbar flags when it draws its own.
+--
+-- simplified: a bar rather than Luanti's hearts and bubbles, because those
+-- are the engine's own textures and a game does not ship them; what a game
+-- ships is drawn by the statbar elements above.
+local function draw_own_bars()
+	local stats = luanti.stats
+	local function bar(index, value, max, colour)
+		if max <= 0 then
+			return
+		end
+		local w, h = 120, 8
+		local back = hud_root:CreateChild("BorderImage")
+		back.texture = game_texture(WHITE)
+		back.color = magic.Color(0, 0, 0, 0.5)
+		back.size = magic.IntVector2(w, h)
+		back.horizontalAlignment = magic.HA_CENTER
+		back.verticalAlignment = magic.VA_BOTTOM
+		back:SetPosition(-w - 12, -(8 + SLOT + 26 + index * (h + 3)))
+		local fill = back:CreateChild("BorderImage")
+		fill.texture = game_texture(WHITE)
+		fill.color = colour
+		fill.size = magic.IntVector2(
+				math.max(0, math.floor(w * value / max)), h)
+	end
+	if luanti.hud_flag("healthbar") then
+		bar(0, stats.hp, stats.hp_max, magic.Color(0.85, 0.15, 0.15))
+	end
+	-- Luanti shows the breath only while the player is short of it
+	if luanti.hud_flag("breathbar") and stats.breath < stats.breath_max then
+		bar(1, stats.breath, stats.breath_max, magic.Color(0.3, 0.6, 1.0))
+	end
+end
+
+local function draw_hud(elements, flags)
+	hud_root:RemoveAllChildren()
+	-- As big as the screen, because an element aligned to the centre or the
+	-- bottom is aligned inside this and an element of no size puts every
+	-- one of them in the top left corner
+	hud_root.size = magic.IntVector2(magic.ui.root.width,
+			magic.ui.root.height)
+	draw_own_bars()
+	-- The game can take the client's own away, and what it draws instead is
+	-- these elements; see luanti.hud_flag()
+	crosshair.visible = luanti.hud_flag("crosshair")
+	chat_text.visible = luanti.hud_flag("chat")
+	for _, slot in ipairs(hotbar) do
+		slot.frame.visible = luanti.hud_flag("hotbar")
+	end
+	wielded_text.visible = luanti.hud_flag("hotbar")
+	for id, e in pairs(elements) do
+		local kind = e.type or "text"
+		if kind == "text" then
+			draw_hud_text(e)
+		elseif kind == "image" then
+			draw_hud_image(e)
+		elseif kind == "statbar" then
+			draw_hud_statbar(e)
+		elseif not hud_missing[kind] then
+			hud_missing[kind] = true
+			log:info("the game asked for a \"" .. kind ..
+					"\" HUD element, which is not drawn")
+		end
+	end
+end
+
+luanti.sub_hud(draw_hud)
 
 --
 -- Pointing at a node, and digging it
