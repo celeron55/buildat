@@ -122,7 +122,10 @@ the client half rather than by the voxel mesher.
 What is left, in order of what it is worth:
 
 1. **The mapgen, stage 3: vendor `src/mapgen/` and point it at the seam.**
-   Stage 2 is built (2026-09-13) and a Lua mapgen makes terrain through it,
+   The seam is built (2026-09-13): sections are filled by a generator in
+   `worldgen`'s worker thread, and what is left is the shim that lets
+   Luanti's own mapgen be that generator.
+   Stage 2 is built too and a Lua mapgen makes terrain through it,
    so what is left is the 9.5k lines of noise, biomes, ores, decorations,
    schematics and the tree generator that a mainstream Luanti game's world
    actually is -- a world that is *nearly* v7 is a world that is nothing,

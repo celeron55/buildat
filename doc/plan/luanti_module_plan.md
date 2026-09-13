@@ -288,11 +288,18 @@ once the mods have loaded, which is what makes that safe.
 
 **Staged, because the shim is the part that can be wrong.**
 
-1. **3a: the shim, with `MapgenSinglenode` or `MapgenFlat` through it.**
-   Vendor `mapgen.cpp`, `voxel.h`'s `VoxelManipulator`, `mapnode.h` and a
-   `NodeDefManager` slice; run one trivial generator in the worldgen thread
-   and see a flat world come out. Nothing about terrain is interesting here
-   and everything about the seam is.
+1. **3a: the seam itself. Built 2026-09-13, half of it.** The module
+   creates a `worldgen` instance and fills its sections through a
+   `GeneratorInterface` in worldgen's thread; `worldgen:section_generated`
+   is what runs `core.register_on_generated` afterwards on the main
+   thread. What the generator holds is given to it when the world is made,
+   which is the rule the thread imposes and the shape the vendored mapgen
+   needs. The generator's body is still the singlenode fill.
+
+   What is left of 3a is the shim under that body: `mapgen.cpp`,
+   `voxel.h`'s `VoxelManipulator`, `mapnode.h` and a `NodeDefManager`
+   slice, with `MapgenSinglenode` running through it. Nothing about terrain
+   is interesting there and everything about the translation is.
 2. **3b: `mapgen_v7` with its own noise, and no managers.** Terrain,
    caves and nothing else. This is the point at which a world looks like a
    Luanti world.
