@@ -1353,16 +1353,20 @@ struct Module: public interface::Module, public luanti::Interface
 		m_node_writes[pos_key(x, y, z)] = node;
 	}
 
-	// A read that misses the buffer takes one voxelworld access(), which
-	// commits on the way out. commit() is cheap with nothing dirty, but it
-	// is not free; what reads a box reads it with read_region() below.
+	// A read takes one voxelworld access(), which commits on the way out.
+	// commit() is cheap with nothing dirty, but it is not free; what reads a
+	// box reads it with read_region() below.
 	uint32_t read_node(int32_t x, int32_t y, int32_t z)
 	{
-		auto it = m_node_writes.find(pos_key(x, y, z));
-		if(it != m_node_writes.end())
-			return it->second.word;
 		if(!m_scene)
 			return 0;
+		// A buffered write answers with the word that went in, and the light
+		// in that word is the light the writer happened to carry -- not the
+		// light voxelworld's flood gives it once the write lands. A mod that
+		// places a lamp and asks what the room is lit by has to see the
+		// flood, so the buffer goes in first. It costs one flush per burst
+		// of writes rather than one per read.
+		flush_node_writes();
 		uint32_t word = 0;
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
 			word = world->get_voxel(pv::Vector3DInt32(x, y, z), true).data;
@@ -1585,7 +1589,15 @@ struct Module: public interface::Module, public luanti::Interface
 		// means it. So a hole dug into a mountain fills from the daylight
 		// around its mouth, the way it does in Luanti.
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
-			world->set_skylight_enabled(true);
+			world->set_light_maintained(
+					voxelworld::Instance::LIGHT_SKY, true);
+			// And the light a node makes of its own, which a Luanti game's
+			// mechanics are written against: what spawns where, what grows
+			// underground, what a mod reads out of core.get_node_light().
+			// A game whose lamps are lights in the scene would leave this
+			// off; a Luanti game cannot.
+			world->set_light_maintained(
+					voxelworld::Instance::LIGHT_LAMP, true);
 		});
 
 		check_active_range();
@@ -2860,6 +2872,10 @@ struct Module: public interface::Module, public luanti::Interface
 			int raillike_group = (int)table_number(L, "raillike_group", 0);
 			int liquid_range = (int)table_number(L, "liquid_range",
 					LIQUID_LEVELS);
+			// What the node glows with, which is what lamp light floods
+			// from; a Luanti game's mechanics read that light
+			const uint8_t light_source = (uint8_t)std::min(15.0,
+					std::max(0.0, table_number(L, "light_source", 0)));
 			lua_pop(L, 1);
 
 			// The shape, where the drawtype is one this builds. Everything
@@ -3064,11 +3080,7 @@ struct Module: public interface::Module, public luanti::Interface
 			}
 			// An empty voxel already transmits light by being empty
 			vdef.transmits_light = sunlight && !empty;
-			// What the voxel glows with, which is what lamp light floods
-			// from; a Luanti game's mechanics read that light, so the
-			// number has to cross with the definition
-			vdef.light_source = (uint8_t)std::min(15.0,
-					std::max(0.0, table_number(L, "light_source", 0)));
+			vdef.light_source = light_source;
 			vdef.physically_solid = walkable && !empty;
 			vdef.fully_empty = empty;
 			if(!masked_shape.empty()){
