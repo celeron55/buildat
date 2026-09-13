@@ -120,6 +120,11 @@ namespace luanti
 				int32_t above_z, const ss_ &player_name,
 				bool sneak = false) = 0;
 
+		// Which hotbar slot the player is holding, one-based. It is the
+		// client's to say -- the keys and the wheel are there -- and the
+		// server reads it whenever a dig or a place asks what is in hand.
+		virtual void set_wield_index(const ss_ &player_name, int index) = 0;
+
 		// A line a player typed. What it comes to is the on_chat_message
 		// callbacks -- the vendored builtin registers the one that runs a
 		// "/" command among them -- and a line nobody takes is said to

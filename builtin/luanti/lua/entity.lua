@@ -1432,6 +1432,26 @@ function core.__set_player_pos(name, x, y, z, look_h, look_v)
 	end
 end
 
+-- Which slot the player is holding, as their client says. A mod reads it
+-- through get_wield_index() and everything that asks what is in hand -- a
+-- dig, a place, a craft -- goes through the same number.
+function core.__set_wield_index(name, i)
+	local id = players[name]
+	local o = id and objects[id]
+	if not o then
+		return
+	end
+	local size = o.inventory and o.inventory:get_size("main") or 0
+	i = math.floor(tonumber(i) or 1)
+	if i < 1 then
+		i = 1
+	end
+	if size > 0 and i > size then
+		i = size
+	end
+	o.wield_index = i
+end
+
 function core.get_connected_players()
 	local out = {}
 	for _, id in pairs(players) do

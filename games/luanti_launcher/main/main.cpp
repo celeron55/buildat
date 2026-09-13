@@ -85,6 +85,8 @@ struct Module: public interface::Module
 				"network:packet_received/main:where"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:chat"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:wield"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
 	}
 
@@ -105,6 +107,8 @@ struct Module: public interface::Module
 		EVENT_TYPEN("network:packet_received/main:create", on_create,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:chat", on_chat,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:wield", on_wield,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:where", on_where,
 				network::Packet)
@@ -169,6 +173,30 @@ struct Module: public interface::Module
 		const ss_ &message = values[0];
 		luanti::access(m_server, [&](luanti::Interface *i){
 			i->chat_message(player_name_of(packet.sender), message);
+		});
+	}
+
+	// Which hotbar slot the player is holding. The keys and the wheel are
+	// the client's, and what is in hand is what the next dig or place asks
+	// the module about.
+	void on_wield(const network::Packet &packet)
+	{
+		sv_<ss_> values;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(values);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:wield: %s", e.what());
+			return;
+		}
+		if(values.empty())
+			return;
+		const int index = atoi(values[0].c_str());
+		if(index < 1 || index > 32)
+			return;
+		luanti::access(m_server, [&](luanti::Interface *i){
+			i->set_wield_index(player_name_of(packet.sender), index);
 		});
 	}
 
