@@ -604,12 +604,36 @@ struct Module: public interface::Module, public luanti::Interface
 	// is not the map -- the clock so far.
 	storage::Save *m_save = nullptr;
 	storage::Store *m_store = nullptr;
-	// The sections the world is made of. A section is voxelworld's load and
-	// unload unit and sixty-four voxels a side, and what wants to know is a
-	// sweep over the map -- an ABM -- which takes one at a time so that no
-	// one step reads more of the world than it can afford.
+	// The world's bounds in sections. A section is voxelworld's load and
+	// unload unit and sixty-four voxels a side; Luanti's map limit is 31000
+	// voxels in every direction, which is this many of them. Nothing outside
+	// is ever loaded and the sky is above the top of it -- what is loaded is
+	// what the load points below keep, which is far less.
+	static const int32_t MAP_LIMIT_SECTIONS = 484;
 	pv::Region m_section_region{
-			pv::Vector3DInt32(-1, -1, -1), pv::Vector3DInt32(1, 1, 1)};
+			pv::Vector3DInt32(-MAP_LIMIT_SECTIONS, -MAP_LIMIT_SECTIONS,
+					-MAP_LIMIT_SECTIONS),
+			pv::Vector3DInt32(MAP_LIMIT_SECTIONS, MAP_LIMIT_SECTIONS,
+					MAP_LIMIT_SECTIONS)};
+	// Luanti's three ranges, in the same descending order and for the same
+	// reasons, in sections rather than its blocks of sixteen voxels:
+	// max_block_send_distance (12 blocks) is the client's own and capped by
+	// the load radius, max_block_generate_distance (10) is what is filled,
+	// and active_block_range (4 blocks, which is exactly one section) is
+	// what the ABM and LBM sweeps touch.
+	static const int16_t LOAD_RADIUS_XZ = 3;
+	static const int16_t LOAD_RADIUS_Y = 2;
+	static const int16_t GENERATE_RADIUS_XZ = 2;
+	static const int16_t GENERATE_RADIUS_Y = 1;
+	static const int32_t ACTIVE_RADIUS = 1;
+	// The world around the origin, which is where a mod puts things while
+	// the game loads and where a player with nowhere else to be spawns. It
+	// is what the world was in its entirety before it streamed.
+	static const int16_t SPAWN_RADIUS = 1;
+	// Where each player is, in voxels. Written by set_player_pos() a few
+	// times a second and read once a step; it is what the world streams
+	// around, and what says which sections are active.
+	sm_<ss_, pv::Vector3DInt32> m_player_pos;
 	pv::Vector3DInt16 m_section_size{0, 0, 0};
 	// The media file names the game shipped, so that a tile naming one can
 	// be handed to the client as it is
@@ -904,6 +928,7 @@ struct Module: public interface::Module, public luanti::Interface
 		if(m_step_accum < STEP_S)
 			return;
 		m_step_accum = 0.0f;
+		update_load_points();
 		step_environment();
 		flush_node_writes();
 	}
@@ -927,6 +952,55 @@ struct Module: public interface::Module, public luanti::Interface
 	static int32_t floordiv(int32_t a, int32_t b)
 	{
 		return (a >= 0) ? (a / b) : -((-a + b - 1) / b);
+	}
+
+	pv::Vector3DInt16 section_of(const pv::Vector3DInt32 &p)
+	{
+		if(m_section_size.getX() <= 0)
+			return pv::Vector3DInt16(0, 0, 0);
+		return pv::Vector3DInt16(
+				(int16_t)floordiv(p.getX(), m_section_size.getX()),
+				(int16_t)floordiv(p.getY(), m_section_size.getY()),
+				(int16_t)floordiv(p.getZ(), m_section_size.getZ()));
+	}
+
+	// Where the world stays loaded: every player, and the origin whether or
+	// not anybody is there. A player's point is tagged with their peer,
+	// which is what makes it the point the world is sent to them from.
+	void update_load_points()
+	{
+		if(!m_scene)
+			return;
+		sv_<voxelworld::LoadPoint> points;
+		points.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(0, 0, 0),
+				SPAWN_RADIUS, SPAWN_RADIUS, SPAWN_RADIUS, SPAWN_RADIUS));
+		for(const auto &pair : m_player_pos){
+			size_t peer = 0;
+			auto it = m_player_peers.find(pair.first);
+			if(it != m_player_peers.end())
+				peer = it->second;
+			points.push_back(voxelworld::LoadPoint(pair.second,
+					LOAD_RADIUS_XZ, LOAD_RADIUS_Y,
+					GENERATE_RADIUS_XZ, GENERATE_RADIUS_Y, peer));
+		}
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
+			world->set_load_points(points);
+		});
+	}
+
+	// Luanti's active_block_range: what is near a player is what steps.
+	// Nobody near it means nothing runs in it, which is Luanti's answer too
+	// -- a world with no players in it is a world where nothing happens.
+	bool is_section_active(const pv::Vector3DInt16 &section_p)
+	{
+		for(const auto &pair : m_player_pos){
+			pv::Vector3DInt16 c = section_of(pair.second);
+			if(std::abs((int32_t)section_p.getX() - c.getX()) <= ACTIVE_RADIUS &&
+					std::abs((int32_t)section_p.getY() - c.getY()) <= ACTIVE_RADIUS &&
+					std::abs((int32_t)section_p.getZ() - c.getZ()) <= ACTIVE_RADIUS)
+				return true;
+		}
+		return false;
 	}
 
 	void flush_node_writes()
@@ -1123,12 +1197,15 @@ struct Module: public interface::Module, public luanti::Interface
 		});
 
 		// Singlenode: nothing generates anything, so the world is void and
-		// the only nodes in it are the ones a mod places. The region is what
-		// a mod can reach; a Luanti-sized map is M6's problem, together with
-		// the mapgen that would fill it.
+		// the only nodes in it are the ones a mod places. The region is the
+		// map's limits; what is loaded of it is what the load points keep.
 		voxelworld::access(m_server, [&](voxelworld::Interface *iv){
 			iv->create_instance(m_scene, m_section_region);
 		});
+
+		// Before voxelworld's first tick, which is when a world that has
+		// said nothing gets its whole region created
+		update_load_points();
 
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
 			interface::VoxelRegistry *reg = world->get_voxel_reg();
@@ -1246,8 +1323,8 @@ struct Module: public interface::Module, public luanti::Interface
 	// the game starts.
 	void generate_world()
 	{
-		const pv::Vector3DInt32 &p0 = m_section_region.getLowerCorner();
-		const pv::Vector3DInt32 &p1 = m_section_region.getUpperCorner();
+		const pv::Vector3DInt32 p0(-SPAWN_RADIUS, -SPAWN_RADIUS, -SPAWN_RADIUS);
+		const pv::Vector3DInt32 p1(SPAWN_RADIUS, SPAWN_RADIUS, SPAWN_RADIUS);
 		size_t n = 0, already = 0;
 		int64_t t0 = interface::os::time_us();
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
@@ -2679,8 +2756,6 @@ struct Module: public interface::Module, public luanti::Interface
 	static int l_active_boxes(lua_State *L)
 	{
 		Module *self = module_of(L);
-		const pv::Vector3DInt32 &p0 = self->m_section_region.getLowerCorner();
-		const pv::Vector3DInt32 &p1 = self->m_section_region.getUpperCorner();
 		const pv::Vector3DInt16 &size = self->m_section_size;
 		lua_newtable(L);
 		if(size.getX() <= 0 || !self->m_scene)
@@ -2688,11 +2763,9 @@ struct Module: public interface::Module, public luanti::Interface
 		int n = 0;
 		voxelworld::access(self->m_server, self->m_scene,
 				[&](voxelworld::Instance *world){
-			for(int32_t z = p0.getZ(); z <= p1.getZ(); z++)
-			for(int32_t y = p0.getY(); y <= p1.getY(); y++)
-			for(int32_t x = p0.getX(); x <= p1.getX(); x++){
-				pv::Vector3DInt16 section_p(x, y, z);
-				if(!world->is_section_loaded(section_p))
+			for(const pv::Vector3DInt16 &section_p :
+					world->get_loaded_sections()){
+				if(!self->is_section_active(section_p))
 					continue;
 				pv::Region r = world->get_section_region_voxels(section_p);
 				const int32_t v[6] = {
@@ -3872,6 +3945,11 @@ struct Module: public interface::Module, public luanti::Interface
 	{
 		m_player_peers[name] = peer;
 		m_peer_players[peer] = name;
+		// At the origin until the client says otherwise, which is where a
+		// player is put anyway and what keeps the world around them loaded
+		// from the moment they are one
+		if(!m_player_pos.count(name))
+			m_player_pos[name] = pv::Vector3DInt32(0, 0, 0);
 		node_action("core.__add_player(\""+lua_quoted(name)+"\") return true");
 	}
 
@@ -3884,11 +3962,18 @@ struct Module: public interface::Module, public luanti::Interface
 			m_peer_players.erase(it->second);
 			m_player_peers.erase(it);
 		}
+		// The world stops being kept loaded around where they were
+		m_player_pos.erase(name);
 	}
 
 	void set_player_pos(const ss_ &name, float x, float y, float z,
 			float look_h, float look_v)
 	{
+		// What the world streams around and what is active near; the step
+		// reads it, so this only writes it down
+		m_player_pos[name] = pv::Vector3DInt32(
+				(int32_t)std::floor(x), (int32_t)std::floor(y),
+				(int32_t)std::floor(z));
 		char buf[256];
 		snprintf(buf, sizeof buf,
 				"core.__set_player_pos(\"%s\", %f, %f, %f, %f, %f) "

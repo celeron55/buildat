@@ -1886,9 +1886,10 @@ end
 --
 -- An ABM is a rule that runs on every node of a kind, forever: grass turns
 -- to dirt under something, a furnace burns, a leaf decays. Luanti runs them
--- over the blocks that are active -- near a player -- and here over the
--- sections that are loaded, which is the same idea and the same list under
--- another name, since there are no players yet.
+-- over the blocks that are active -- near a player -- and so does this:
+-- __active_boxes() is the loaded sections within a section of a player,
+-- which is Luanti's own active_block_range of four blocks. A world with
+-- nobody in it is a world where nothing happens, there as well as here.
 --
 -- The registry freezes after the mods have loaded, so the timers are built
 -- on the first step rather than kept up to date with it.
@@ -1896,12 +1897,12 @@ end
 -- The match is on content ids and happens in the module, so what crosses
 -- into Lua is the voxels a rule is about and not the section.
 --
--- simplified: no time budget and no catch-up, and every loaded section is
+-- simplified: no time budget and no catch-up, and every active section is
 -- read for every rule that is due. Luanti spends at most a share of a step
 -- on ABMs, skips ahead when a block comes back after a long time away, and
 -- keeps a per-block list of which node kinds are in it so that most blocks
--- are never read. All three are about a map bigger than the sections a mod
--- can reach here; the upgrade path is M6's, with the map that wants them.
+-- are never read. The active range is what keeps the cost bounded by the
+-- players instead of by the world; the other three are still upgrades.
 
 local abm_timers = nil
 local abm_ids = nil
