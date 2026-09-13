@@ -76,13 +76,27 @@ function MetaData:to_table()
 	for k, v in pairs(self.fields) do
 		fields[k] = v
 	end
-	return {fields = fields}
+	local t = {fields = fields}
+	if self.inventory then
+		t.inventory = self.inventory:get_lists()
+	end
+	return t
+end
+
+-- Only a node's metadata has one -- an item stack's does not, and answers
+-- with nothing rather than with an inventory nobody can reach. What makes
+-- one is core.get_meta(); see bootstrap.lua.
+function MetaData:get_inventory()
+	return self.inventory
 end
 
 function MetaData:from_table(t)
 	self.fields = {}
 	for k, v in pairs((t or {}).fields or {}) do
 		self.fields[k] = v
+	end
+	if self.inventory then
+		self.inventory:set_lists((t or {}).inventory or {})
 	end
 	return true
 end

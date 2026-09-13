@@ -616,6 +616,9 @@ function core.get_inventory(location)
 	if location.type == "detached" then
 		return core.__detached_inventories[location.name]
 	end
+	if location.type == "node" and location.pos then
+		return core.get_meta(location.pos):get_inventory()
+	end
 	return nil
 end
 
@@ -667,9 +670,8 @@ local STUBS_NIL = {
 	-- Players (M5); the objects are in lua/entity.lua
 	"get_player_by_name", "get_connected_players", "get_player_information",
 	"get_player_window_information",
-	-- Inventory, craft, metadata (M4)
-	"get_craft_result", "get_craft_recipe",
-	"get_all_craft_recipes", "register_craft_raw", "clear_craft",
+	-- Inventory, craft, metadata (M4); the recipes are in lua/craft.lua
+	"register_craft_raw",
 	"get_dig_params", "get_hit_params", "get_tool_wear_after_use",
 	-- Chat, HUD, sound, particles (M4, M5)
 	"chat_send_all", "chat_send_player", "send_join_message",
@@ -861,6 +863,11 @@ function core.get_meta(pos)
 	local meta = node_meta[key]
 	if meta == nil then
 		meta = core.__new_metadata({})
+		-- A node's metadata carries an inventory and an item stack's does
+		-- not, which is the whole difference between the two in Luanti as
+		-- well: a chest is a list in here
+		meta.inventory = core.__new_inventory(
+				{type = "node", pos = {x = x, y = y, z = z}})
 		node_meta[key] = meta
 	end
 	return meta
@@ -1577,6 +1584,7 @@ dofile(module_path .. "/lua/colorspec.lua")
 dofile(module_path .. "/lua/png.lua")
 dofile(module_path .. "/lua/misc.lua")
 dofile(module_path .. "/lua/entity.lua")
+dofile(module_path .. "/lua/craft.lua")
 dofile(module_path .. "/lua/check_map.lua")
 
 -- vim: set noet ts=4 sw=4:

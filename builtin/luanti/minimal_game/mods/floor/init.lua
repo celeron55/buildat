@@ -287,6 +287,32 @@ core.register_lbm({
 	end,
 })
 
+-- Four recipes, one of each kind that does not need a tool to be worn: what
+-- the check asks core.get_craft_result() for
+core.register_craft({
+	output = "floor:marker 4",
+	recipe = {{"floor:stone", "floor:stone"}},
+})
+
+core.register_craft({
+	type = "shapeless",
+	output = "floor:sand",
+	recipe = {"floor:stone", "floor:marker"},
+})
+
+core.register_craft({
+	type = "cooking",
+	output = "floor:glass",
+	recipe = "floor:sand",
+	cooktime = 4,
+})
+
+core.register_craft({
+	type = "fuel",
+	recipe = "floor:plant",
+	burntime = 7,
+})
+
 -- A node that falls when what holds it up is dug away, which is the
 -- vendored builtin's own entity turning into a node and back again
 core.register_node("floor:sand", {
@@ -610,6 +636,80 @@ function core.__game_check()
 	end
 	core.set_node(under, {name = "floor:stone"})
 	core.log("action", "floor: the sand fell one voxel and became a node again")
+
+	-- A node's metadata carries an inventory, which is what a chest is
+	local chest = {x = 10, y = Y + 1, z = -6}
+	core.set_node(chest, {name = "floor:probe"})
+	local inv = core.get_meta(chest):get_inventory()
+	inv:set_size("main", 4)
+	local over = inv:add_item("main", "floor:stone 5")
+	if not over:is_empty() then
+		error("floor: the inventory would not take the stones: " ..
+				over:to_string())
+	end
+	if inv:get_stack("main", 1):get_count() ~= 5 then
+		error("floor: the inventory holds " ..
+				inv:get_stack("main", 1):to_string())
+	end
+	if core.get_inventory({type = "node", pos = chest}) ~= inv then
+		error("floor: the node's inventory is not the one by location")
+	end
+	-- and set_node takes it with the rest of the metadata
+	core.set_node(chest, {name = "air"})
+	if not core.get_meta(chest):get_inventory():is_empty("main") then
+		error("floor: the inventory outlived the node")
+	end
+	core.log("action", "floor: the node's inventory held what it was given")
+
+	-- The recipes. A shaped pattern sits anywhere in the grid, a shapeless
+	-- one is a multiset, and cooking and fuel are one item each.
+	local function grid(items)
+		return core.get_craft_result({method = "normal", width = 3,
+				items = items})
+	end
+	local made, left = grid({"floor:stone", "floor:stone", "",
+			"", "", "", "", "", ""})
+	if made.item:to_string() ~= "floor:marker 4" then
+		error("floor: the shaped recipe made " .. made.item:to_string())
+	end
+	if not left.items[1]:is_empty() or not left.items[2]:is_empty() then
+		error("floor: the craft did not take the stones it used")
+	end
+	-- The same two stones, two rows down and one along
+	local moved = grid({"", "", "", "", "floor:stone", "floor:stone",
+			"", "", ""})
+	if moved.item:to_string() ~= "floor:marker 4" then
+		error("floor: the pattern did not match where it was put: " ..
+				moved.item:to_string())
+	end
+	local shapeless = grid({"floor:marker", "", "", "", "floor:stone", "",
+			"", "", ""})
+	if shapeless.item:to_string() ~= "floor:sand" then
+		error("floor: the shapeless recipe made " ..
+				shapeless.item:to_string())
+	end
+	local nothing = grid({"floor:stone", "", "", "", "", "", "", "", ""})
+	if not nothing.item:is_empty() then
+		error("floor: one stone made " .. nothing.item:to_string())
+	end
+	local cooked = core.get_craft_result({method = "cooking", width = 1,
+			items = {"floor:sand"}})
+	if cooked.item:to_string() ~= "floor:glass" or cooked.time ~= 4 then
+		error("floor: cooking sand made " .. cooked.item:to_string() ..
+				" in " .. tostring(cooked.time))
+	end
+	local burnt = core.get_craft_result({method = "fuel", width = 1,
+			items = {"floor:plant"}})
+	if not burnt.item:is_empty() or burnt.time ~= 7 then
+		error("floor: the plant burned for " .. tostring(burnt.time))
+	end
+	local back = core.get_craft_recipe("floor:marker")
+	if back.width ~= 2 or #back.items ~= 2 or
+			back.items[1] ~= "floor:stone" then
+		error("floor: the recipe came back " .. back.width .. " wide with " ..
+				#back.items .. " items")
+	end
+	core.log("action", "floor: the four recipes and the one that is not")
 end
 
 core.log("action", "floor: placed a " .. (HALF * 2 + 1) .. "x" ..

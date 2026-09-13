@@ -783,11 +783,31 @@ two things M1 disproved about the build, are in
   `after_dig_node`. In memory for now; the save is step 5c of
   `doc/plan/world_persistence_plan.md`.
 
-  **What is left of M4:** the drops go nowhere, because an item entity is an
-  object and objects are M5 -- `handle_node_drops()` computes them and hands
-  them to `core.add_item()`, which still says it is a stub. Then inventories,
-  item definitions, craft and formspecs, and the client half that turns a
-  click into a dig.
+  **Built: node inventories (2026-09-13).** The inventory class and the
+  detached ones were already there; what was missing is the one a position
+  has. `core.get_meta(pos):get_inventory()` and
+  `core.get_inventory({type = "node", pos = ...})` are the same inventory,
+  which is what a chest is, and `set_node` takes it with the rest of the
+  metadata because it was the old node's. An item stack's metadata has none,
+  which is the difference between the two in Luanti as well.
+
+  **Built: the recipes (2026-09-13).** `core.register_craft` recorded what a
+  mod wrote and nothing read it; `lua/craft.lua` is the half that is C++ in
+  Luanti. All five kinds: shaped, whose pattern is trimmed of its empty
+  border so that it matches wherever in the grid it sits; shapeless, which
+  is a multiset and tries the plain names before the groups so that a group
+  does not eat the item a name was going to match; cooking and fuel, which
+  are one item each; and toolrepair, whose two worn tools make one with
+  their uses added. `get_craft_result` answers with the output and the
+  decremented input, and `get_craft_recipe`, `get_all_craft_recipes` and
+  `clear_craft` stop being stubs.
+
+  simplified: no crafting hash, so a craft walks every recipe. devtest has
+  around 200 and nothing crafts in a loop; the upgrade path is the table
+  Luanti keys by the first item.
+
+  **What is left of M4:** formspecs, and the client half that turns a click
+  into a dig. Both are the client's.
 
   Two things the check found, both Luanti's own behaviour rather than bugs
   here: a registered definition refuses new keys -- `register.lua` sets
