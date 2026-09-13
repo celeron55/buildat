@@ -924,6 +924,11 @@ half of the module, and it should be run whenever the API surface changes.
     cd Build && BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=<a save> \
         bin/buildat_server -m ../games/luanti_launcher -D ../user
 
+A client has to be connected for the whole of it to run: the suite waits for
+a player before its last eighteen tests, and the launcher makes one when a
+client arrives. Start the server, connect `bin/buildat -s localhost` and
+leave it there. It is 44 of 50 with one, and 32 of 40 without.
+
 What it found, and what was built because of it: `core.sha1`, `core.sha256`,
 `core.compress`/`core.decompress` with Luanti's three methods,
 `core.urlencode`, `core.parse_json`/`core.write_json`, `Settings(filename)`,
@@ -931,7 +936,10 @@ a `core.get_game_info()` that reads the game's title, an exactly-Luanti
 `PseudoRandom`, the metadata `${reference}` rule, alias resolution in
 `ItemStack`, metadata-aware stack merging, `Inventory:remove_item`'s
 reverse-and-oversize rule, and the recipe tables `get_all_craft_recipes`
-answers with. Thirty-two of thirty-nine pass.
+answers with, an async job that can be cancelled before it calls back --
+which is what had stopped the suite from ever reaching its player half,
+since a job calling back twice resumed the runner's coroutine out of turn --
+and the players themselves.
 
 **What does not pass, and why it is not a bug to fix:**
 
@@ -950,10 +958,12 @@ answers with. Thirty-two of thirty-nine pass.
   path is a second Lua state; the seam is `core.do_async_callback`,
   `core.register_async_dofile` and `core.register_mapgen_script`.
 
-The suite stops at `test_dynamic_media`, which is where it waits for a
-player to join. Everything after that in `unittests.run_all` -- the tests
-that want a player, and then the ones that want the map -- is what the
-client half unlocks.
+- `test_async_job_replacement` passes now that a job can be cancelled, but
+  what it is really about -- a queue deep enough for a job to wait in -- is
+  the same second Lua state.
+
+The suite stops at `test_mapgen_edges`, which asks how far the map goes and
+is the mapgen's question. What is past it is the rest of the map tests.
 
 ## Settled, and why -- not to be re-decided
 
