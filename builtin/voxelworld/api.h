@@ -298,7 +298,25 @@ namespace voxelworld
 		// simplified: transparency is that one test, so glass would have to
 		// be a light barrier or a hole in the terrain. A voxel definition
 		// flag of its own is the upgrade path.
-		virtual void set_skylight_enabled(bool enabled) = 0;
+		// Which light this is about. A game binds the fields it fills (see
+		// VoxelFormat) and asks for the ones it wants kept up to date here;
+		// the two are separate questions and both are opt-in.
+		//
+		// LIGHT_SKY is the sky's, and every game in this tree that has a sky
+		// asks for it. LIGHT_LAMP is light a voxel emits of its own --
+		// VoxelDefinition::light_source -- which a Luanti game's mechanics
+		// read (mob spawning, crops) and a game whose lamps are lights in
+		// the scene does not want at all: the shader does that work and the
+		// field would be bits spent on zeroes.
+		enum LightField { LIGHT_SKY, LIGHT_LAMP };
+
+		virtual void set_light_maintained(LightField field,
+				bool maintained) = 0;
+
+		// The sky's, which is what nearly every caller means
+		void set_skylight_enabled(bool enabled){
+			set_light_maintained(LIGHT_SKY, enabled);
+		}
 
 		virtual size_t num_buffers_loaded() = 0;
 
