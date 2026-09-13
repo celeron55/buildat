@@ -76,9 +76,11 @@ namespace interface
 	// voxel that faces one of twenty-four directions, or wears one of eight
 	// palette colours, from needing a voxel type of its own for every case.
 	//
-	// A variant carries no textures. It permutes the definition's own six --
-	// tile_order[f] is which of them face f wears -- because a turned cube
-	// wears the same textures as an unturned one, in a different order.
+	// A variant permutes the definition's own textures -- tile_order[f] is
+	// which of them face f wears -- because a turned cube wears the same
+	// textures as an unturned one, in a different order. It can also name
+	// textures of its own, which is what a palette needs; see
+	// VoxelVariant::textures.
 	struct VoxelVariant
 	{
 		// Quads of the voxel's own instead of the definition's; empty for
@@ -86,6 +88,25 @@ namespace interface
 		sv_<VoxelQuad> shape;
 		uint8_t tile_order[6] = {0, 1, 2, 3, 4, 5};
 		uint8_t tile_turns[6] = {};
+		// Textures of the variant's own, indexed the way a tile is
+		// everywhere else: 0...5 are the voxel's six faces and 6 and over
+		// are the definition's extra_textures. As many as the variant
+		// replaces and no more; empty for a variant that only turns, which
+		// is most of them, and an empty vector costs nothing.
+		//
+		// What wants them is a palette. A voxel that wears the colour its
+		// param names wears its own tiles through a modifier that
+		// multiplies them, and the colour is albedo rather than light, so
+		// it cannot be the vertex colour below. The atlas then grows with
+		// distinct tiles times palette entries and not with directions,
+		// because directions permute what a variant names and colours
+		// multiply it: eight colours of a facedir node are 192 variants and
+		// 48 textures.
+		sv_<AtlasSegmentDefinition> textures;
+		// The same, resolved into the atlas. Filled by the registry when it
+		// builds the cached definition, and empty in a definition a game
+		// hands over.
+		sv_<AtlasSegmentReference> texture_refs;
 		// Multiplied into the vertex colour, 0xRRGGBB.
 		//
 		// The vertex colour is light, not albedo -- the mesher packs it as

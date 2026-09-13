@@ -38,8 +38,8 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelVariant &v)
 	{
-		uint8_t version = 1;
-		archive(version, v.shape, v.color, v.liquid_top);
+		uint8_t version = 2;
+		archive(version, v.shape, v.color, v.liquid_top, v.textures);
 		for(size_t i = 0; i < 6; i++)
 			archive(v.tile_order[i], v.tile_turns[i]);
 	}
