@@ -869,8 +869,36 @@ two things M1 disproved about the build, are in
   older than which rule have nothing to be different about yet. Both belong
   with M6's map, where a section stops being loaded for the whole run.
 
-  **What is left:** entities, which are what a dig's drops need before they
-  go anywhere; and the client half.
+  **Built: the objects (2026-09-13).** Everything in a Luanti world that is
+  not a node. `core.register_entity` was already the vendored builtin's;
+  `lua/entity.lua` is the other half, which in Luanti is C++: `add_entity`,
+  the luaentity as a per-object copy of the prototype, ObjectRef, the step
+  that moves an object and tells it what it ran into, and
+  `get_objects_inside_radius` / `get_objects_in_area`, which stop being
+  stubs. An object is a position, a velocity, an acceleration and a box.
+
+  The collision is axis by axis against the voxels the box overlaps, with no
+  stepping up and no sliding along a corner, and it answers with the
+  `moveresult` the builtin's own entities assert on -- `collides`,
+  `touching_ground` and the collisions with the node each was against. That
+  is what makes `__builtin:item` work, and with it `core.add_item`, and with
+  that M4's loose end: what a dig drops is now an item lying on the floor
+  rather than a list nothing is done with.
+
+  **simplified:** nothing draws them, nothing saves them, and there are no
+  players and no attachments. The client half of the module is what would
+  show an object; `static_save`, `get_staticdata` and the `dtime_s` an
+  `on_activate` is given have nothing to be different about while the world
+  is loaded whole for the run, which is M6's map again.
+
+  What the fixture checks: an entity that falls from six voxels up comes to
+  rest exactly on the floor -- box bottom against the top of the node -- and
+  its `on_step` saw `touching_ground`; `remove()` makes the handle invalid
+  and empties `core.luaentities`; and digging a stone leaves one
+  `__builtin:item` holding `floor:stone` within two voxels of where it was.
+
+  **What is left:** the client half, which is what would draw an object and
+  is the same problem as the forked client's `init.lua` split.
 - **M6 -- the launcher.** `games/luanti_launcher` as described.
 - **M7 -- an existing Luanti world opens.** The importer: read a Luanti world
   directory -- `map.sqlite`, `map_meta.txt`, `env_meta.txt`, the player and
