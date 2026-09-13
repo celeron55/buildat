@@ -558,6 +558,10 @@ struct Module: public interface::Module, public luanti::Interface
 	// lua/entity.lua gave it. Everything in the scene is replicated to the
 	// clients, so this is the whole of drawing an object.
 	sm_<int32_t, uint32_t> m_object_nodes;
+	// The voxel a generated section is filled with; see
+	// on_generation_request(). Zero until the first section is generated,
+	// which is after the mods have loaded and named it.
+	uint32_t m_singlenode_word = 0;
 	// Whether the save has node metadata in it, so that a world that has
 	// none does not get a blob written for it every shutdown
 	bool m_had_node_meta = false;
@@ -630,6 +634,7 @@ struct Module: public interface::Module, public luanti::Interface
 		m_server->sub_event(this, Event::t("core:shutdown"));
 		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("core:tick"));
+		m_server->sub_event(this, Event::t("voxelworld:generation_request"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -639,6 +644,8 @@ struct Module: public interface::Module, public luanti::Interface
 		EVENT_VOIDN("core:shutdown", on_shutdown)
 		EVENT_VOIDN("core:continue", on_continue)
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
+		EVENT_TYPEN("voxelworld:generation_request", on_generation_request,
+				voxelworld::GenerationRequest)
 	}
 
 	void on_start(){}
@@ -1035,11 +1042,120 @@ struct Module: public interface::Module, public luanti::Interface
 			// run uses whatever a previous one did. See
 			// doc/plan/world_persistence_plan.md.
 			world->set_save(m_save, "main");
+			m_section_size = world->get_section_size_voxels();
+		});
+
+		// Singlenode is a node everywhere, and this is where it is put.
+		// Before the skylight is on: what the fill writes is a world of lit
+		// air, and every voxel of it changing from nothing to air with the
+		// light running would be a skylight seed -- seven million of them,
+		// and eight seconds of startup to settle what the fill already
+		// knows.
+		generate_world();
+
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
 			// The light is voxelworld's, so core.get_node_light is a read
 			// and not a second store
 			world->set_skylight_enabled(true);
-			m_section_size = world->get_section_size_voxels();
 		});
+	}
+
+	// The mapgen, which at singlenode is one node everywhere: Luanti's own
+	// MapgenSinglenode fills a generated block with whatever
+	// "mapgen_singlenode" names, or with air when a game does not name one,
+	// and sets the sunlight. So a generated section here is air as well --
+	// what a mod reads out of a part of the world nobody has built in is
+	// "air" and not "ignore", which is what every mod that looks before it
+	// places is written against.
+	//
+	// merge_volume() and not set_volume(): this is a generator, and the
+	// priorities in voxelworld's api.h are exactly what a generator wants --
+	// anything a mod has already put there stays.
+	//
+	// simplified: the section is filled at once rather than a chunk at a
+	// time as voxelworld asks, because a singlenode section is one word
+	// repeated and the whole of it costs a few milliseconds. A real mapgen
+	// is the milestone where that stops being true.
+	uint32_t singlenode_word()
+	{
+		if(m_singlenode_word == 0){
+			bool known = false;
+			uint32_t id = import_content_id("mapgen_singlenode", known);
+			if(!known)
+				id = import_content_id("air", known);
+			const interface::VoxelFormat f = interface::VoxelFormat::luanti();
+			uint32_t word = 0;
+			f.id.set(word, id);
+			// Lit, because a world with nothing in it is a world the sky
+			// reaches everywhere in -- and because this is written before
+			// voxelworld's skylight is turned on, so nothing else will put
+			// the light there. Luanti's MapgenSinglenode sets the same
+			// sunlight for the same reason.
+			f.light_sky.set(word, f.light_sky.mask());
+			m_singlenode_word = word;
+		}
+		return m_singlenode_word;
+	}
+
+	void generate_section(voxelworld::Instance *world,
+			const pv::Vector3DInt16 &section_p)
+	{
+		pv::Region region = world->get_section_region_voxels(section_p);
+		interface::VoxelVolume vol(region);
+		vol.fill(interface::VoxelInstance(singlenode_word()));
+		world->merge_volume(vol, false);
+	}
+
+	void on_generation_request(const voxelworld::GenerationRequest &event)
+	{
+		if(!m_game_running || event.scene != m_scene)
+			return;
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
+			generate_section(world, event.section_p);
+		});
+	}
+
+	// The world create_instance() just made, filled before anything reads
+	// it. The generation requests for those sections are in this module's
+	// event queue and will arrive after run_game() has returned, which is
+	// too late for a check -- or for a mod -- that looks at the map while
+	// the game starts.
+	void generate_world()
+	{
+		const pv::Vector3DInt32 &p0 = m_section_region.getLowerCorner();
+		const pv::Vector3DInt32 &p1 = m_section_region.getUpperCorner();
+		size_t n = 0, already = 0;
+		int64_t t0 = interface::os::time_us();
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
+			for(int32_t z = p0.getZ(); z <= p1.getZ(); z++)
+			for(int32_t y = p0.getY(); y <= p1.getY(); y++)
+			for(int32_t x = p0.getX(); x <= p1.getX(); x++){
+				pv::Vector3DInt16 section_p(x, y, z);
+				// voxelworld makes the region's sections on its first tick
+				// rather than when the instance is created, so that a game
+				// has its chance to name a save first; that has happened by
+				// now, and what is read next is the map, so they are asked
+				// for here
+				if(!world->is_section_loaded(section_p))
+					world->load_or_generate_section(section_p);
+				// A section that has been generated already holds this
+				// node everywhere nothing else was built, so one voxel of
+				// it says whether the fill has been here -- and a section
+				// out of a save is not walked again for nothing. A save
+				// from before there was a fill reads as undefined and gets
+				// one, which is the migration.
+				pv::Region r = world->get_section_region_voxels(section_p);
+				if(world->get_voxel(r.getLowerCorner(), true).data != 0){
+					already++;
+					continue;
+				}
+				generate_section(world, section_p);
+				n++;
+			}
+		});
+		log_v(MODULE, "The world: %zu sections filled with one node in %i "
+				"ms, %zu already there", n,
+				(int)((interface::os::time_us() - t0) / 1000), already);
 	}
 
 	// lua/check_map.lua, with the flush this module does between its two
