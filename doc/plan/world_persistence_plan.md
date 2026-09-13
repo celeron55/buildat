@@ -469,9 +469,9 @@ byte-identical over all 865 rows -- and, for step 4, the round trip under
    rather than the save's own root, so that a Luanti mod writing through it
    -- which is normal, and which games depend on -- cannot land on
    `save.sqlite`.
-6. The Luanti importer, which is its own milestone in the module plan. Its
-   map and clock are read (2026-09-13); the player and mod storage
-   databases and a block's node metadata are not.
+6. The Luanti importer, which is its own milestone in the module plan. The
+   map, the node metadata hanging off it, the clock and the mods' storage
+   are read (2026-09-13); the player database is not.
 
 5b, 5d and what is left of 6 are the remainder, and each waits on a
 milestone of the module plan rather than on anything here.

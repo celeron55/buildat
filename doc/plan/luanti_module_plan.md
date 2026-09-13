@@ -809,11 +809,15 @@ two things M1 disproved about the build, are in
   plan gives it somewhere to live: the metadata of every node that has any,
   as its fields and its inventory lists.
 
+  What the mods remembered comes too: `mod_storage.sqlite`, per mod, into
+  the files this module keeps a mod's storage in. A value the save already
+  has is kept, so importing twice does not take a mod's memory back.
+
   **What is left of M7:** `map_meta.txt`, which is the seed and the mapgen
-  parameters and has nowhere to go until there is a mapgen; the player and
-  mod storage databases; and a block's node timers and static objects, which
-  are walked past -- the objects want a `static_save` that means something
-  here first.
+  parameters and has nowhere to go until there is a mapgen; the player
+  database, which wants players; and a block's node timers and static
+  objects, which are walked past -- the objects want a `static_save` that
+  means something here first.
 
   **The world is 3x3x3 sections**, so what fits is about 192 voxels a side
   around the origin and the rest of a Luanti world is counted and dropped.
