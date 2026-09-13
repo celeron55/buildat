@@ -574,6 +574,67 @@ composing and shipping PNGs was rejected in "Who resolves textures" -- it
 forfeits client-side texture size, filtering and texture packs, costs more
 bandwidth than the sources, and cannot do the runtime cases at all.
 
+### The client half, second round: a player rather than a camera (open)
+
+The client half draws a Luanti world -- the drawtypes, the tiles, the
+palettes, the meshes, the formspecs, the inventories, the objects -- and
+what it does *not* have is a player. `games/luanti_launcher/main/client_lua/init.lua`
+flies a free camera, tells the server where it is four times a second
+(`main:where`), draws a crosshair, a title line and what the player is
+carrying, and that is the whole of it: no box, no gravity, no collision, no
+hotbar, no chat, no debug line, no key the player can look up.
+
+`extensions/luanti_client/` already has all of it, written against Luanti's
+own protocol. **What copies cleanly is what knows neither the protocol nor
+Urho3D**, which is most of the interesting parts -- the extension was
+written that way on purpose and its `test.lua` checks them without a screen.
+What does not copy is the wire: the extension reads Luanti packets from a
+real server, and here the server is `builtin/luanti` and the wire is
+buildat's own packets, the way `main:dig`, `main:place` and the inventory
+already are.
+
+The order of work, in what a player notices first:
+
+1. **Movement.** `player.lua` (362 lines) is the box 0.6 across and 1.75
+   tall, gravity, axis-at-a-time collision, and the walk, sneak, fast, fly
+   and noclip modes -- against an "is the node at this integer coordinate
+   solid?" accessor, which is `voxelworld.get_static_voxel()` here. The
+   camera hangs off the player's eyes; `main:where` keeps saying where the
+   player is, so the server side does not change. The movement checks come
+   across with the file.
+2. **The keys in one table.** `BINDINGS` in the extension's `init.lua` is
+   the list, and the pause menu's "Key bindings" dialog reads the same
+   table, so a binding cannot be in the code and missing from the list.
+   Today Tab, I and Escape are spelled out in the key handler and named in
+   a string at the top of the screen.
+3. **The HUD.** In this order: the hotbar with the wielded item and the
+   1-8 keys, the health and breath bars, the chat log, and the F5 line of
+   detail (where the player is, what they are looking at, how many chunks
+   are meshed and waiting -- the extension's is one `string.format` and
+   says what to put in it). Then what a *game* puts on the screen:
+   `hud_add`, `hud_change`, `hud_remove`, `hud_set_flags` are stubs in
+   `lua/entity.lua`, so this is server work as well as client work -- the
+   packet is the missing half, and `hud.lua` (the reading and the
+   arithmetic) and `formspec_ui.lua` (elements into Urho3D elements) are
+   what draws it.
+4. **Chat.** `chat_send_all` and `chat_send_player` are stubs, so nothing a
+   mod says reaches anyone. The vendored builtin already has the chat
+   commands and the `/`-handling, which means what is missing is the two
+   packets -- T opens a line, the server answers -- and the log on the
+   screen, which is the same element the HUD step puts there.
+5. **What the world looks like.** The sun is a constant here and the sky is
+   a fixed cube map, while the world has a clock: time of day drives the
+   sun's direction and the sky's colours, and `set_sky`, `set_sun`,
+   `set_moon` and `set_clouds` are stubs a game uses to say what its sky
+   is. The sky-visibility term that makes a tunnel mouth reflect sky while
+   its walls do not is already in `builtin/voxel_shading` and the launcher
+   already calls it; the extension's `skyvis.lua` is the same code and is
+   not needed twice.
+
+**What this is not:** it is not the extension moved into the launcher. The
+extension stays what it is -- a client for a real Luanti server -- and each
+file that comes across is a file that had no protocol in it to begin with.
+
 ### How the fork is made (settled 2026-09-12)
 
 **Not by splitting the extension first.** `world.lua` is one closure --

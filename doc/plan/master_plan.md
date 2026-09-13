@@ -136,7 +136,32 @@ map_meta.txt holds it, and a new one is v7. See "The mapgen, vendored" in
 
 What is left, in order of what it is worth:
 
-1. **The mapgen, stage 3c: the world a game registers.** Luanti's own
+1. **The client is a camera, and it has to become a player.** The world
+   generates and is drawn; what is in front of it is a free-flying camera
+   that tells the server where it is, a crosshair, a title line and a line
+   naming what is carried. No box, no gravity, no collision, no hotbar, no
+   chat, no debug line, no key a player can look up, and a sky that does
+   not know what time it is.
+
+   `extensions/luanti_client/` has every one of these already, written
+   against Luanti's own protocol, and the parts worth copying are the ones
+   that know neither the protocol nor Urho3D -- the extension was written
+   that way and its `test.lua` checks them without a screen. In the order a
+   player notices them: movement (`player.lua`: the box, gravity, collision
+   one axis at a time, walk, sneak, fast, fly, noclip), the keys in one
+   table with a dialog that lists them, the HUD (hotbar and wielded item,
+   health and breath, the chat log, the F5 line of detail, and then what a
+   game puts there itself), chat, and what the world looks like -- the sun
+   and the sky following the world's clock, and the `set_sky` family a game
+   says its own sky with.
+
+   Chat and the HUD are half server work: `chat_send_all`,
+   `chat_send_player`, `hud_add` and its family are stubs in
+   `builtin/luanti/lua/entity.lua`, so the packet between the halves is the
+   missing piece as much as the drawing is. See "The client half, second
+   round" in `doc/plan/luanti_module_plan.md`, which has the order of work
+   and what each file of the extension turns out to be.
+2. **The mapgen, stage 3c: the world a game registers.** Luanti's own
    mapgens generate worlds here as of 2026-09-13 -- a world whose
    `mg_name` says `v7` is v7, in `worldgen`'s thread -- but what they
    generate is the default biome, because the biome, ore and decoration
@@ -161,7 +186,7 @@ What is left, in order of what it is worth:
    See "Mapgen stage 3c" in the module plan, and
    `doc/plan/luanti_module_history.md`, "The mapgen, vendored", for what
    the stages below it turned out to be.
-2. **The light, which is `voxelworld`'s and not the module's.** A write
+3. **The light, which is `voxelworld`'s and not the module's.** A write
    that carries light keeps it as of 2026-09-13, so a generated world
    arrives lit and a dug hole fills from its mouth, and lamp light is a
    second field beside it: a game says which of the two it wants
@@ -178,7 +203,7 @@ What is left, in order of what it is worth:
    Luanti asks the mapgen instead of the map (`getSpawnLevelAtPoint`),
    which answers without generating anything; doing that here means asking
    `luanti_mapgen` across the thread its generator runs in.
-3. **The rest is minor and belongs to a later round.** glTF, an object
+4. **The rest is minor and belongs to a later round.** glTF, an object
    drawn as its own model, a detached inventory, a put-down count, the
    inventory cube, a scrolling save list: each is an afternoon, none
    blocks a game from running, and they are in "Bonuses" below for exactly
@@ -190,10 +215,11 @@ What is left, in order of what it is worth:
 `luanti-module` (PR #52) into that -- four rounds of work that every further
 change widens. Whose call that is is the reader's, not this file's.
 
-What is *not* left: the client half, which was item 1 of this list for three
-rounds. The texture modifiers, the formspecs, the inventories, the chest,
-the objects wearing their own textures and the launcher's menu are all built
-as of 2026-09-13; `doc/plan/luanti_module_history.md` has what each turned
+What is *not* left of the client half is the *look* of a Luanti world, which
+was item 1 of this list for three rounds -- item 1 above is the player in
+front of it, which is the other half of the same screen. The texture
+modifiers, the formspecs, the inventories, the chest, the objects wearing
+their own textures and the launcher's menu are all built as of 2026-09-13; `doc/plan/luanti_module_history.md` has what each turned
 out to be. The one thing the fork's plan expected that did not happen is
 that `init.lua` was never split -- the wiring was written fresh against the
 packets and the camera and input stayed the launcher's, which is where they
