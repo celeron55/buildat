@@ -117,6 +117,12 @@ buildat.safe.write_floats             = __buildat_write_floats
 -- module's client half is allowed to do".
 buildat.safe.add_resource_dir         = __buildat_add_resource_dir
 buildat.safe.compose_image            = __buildat_compose_image
+-- get_cache_path() -> the directory those two work in. The share and user
+-- paths stay out of the sandbox; this is here because writing a file under
+-- the cache means knowing where the cache is.
+buildat.safe.get_cache_path           = function()
+	return __buildat_get_path("cache")
+end
 -- What stopped a ray cast by cast_voxel_rays(); see its comment in
 -- src/lua_bindings/voxel_volume.cpp
 buildat.safe.VOXEL_RAY = {

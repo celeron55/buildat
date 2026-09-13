@@ -26,6 +26,7 @@
 #include <luabind/iterator_policy.hpp>
 #include <Context.h>
 #include <Image.h>
+#include <MemoryBuffer.h>
 #include <ResourceCache.h>
 #include <Scene.h>
 #include <Color.h>
@@ -89,6 +90,22 @@ static ss_ table_string(const luabind::object &t, const char *key)
 	return luabind::object_cast<ss_>(v);
 }
 
+// The same, for a string that is bytes rather than text: the conversion above
+// goes through const char* and a PNG's second byte is already a zero.
+static ss_ table_bytes(const luabind::object &t, const char *key)
+{
+	luabind::object v = t[key];
+	if(!v || luabind::type(v) != LUA_TSTRING)
+		return "";
+	lua_State *L = v.interpreter();
+	v.push(L);
+	size_t len = 0;
+	const char *p = lua_tolstring(L, -1, &len);
+	ss_ result(p, len);
+	lua_pop(L, 1);
+	return result;
+}
+
 // An array of numbers, as the caller writes a position, a size, a rectangle or
 // a colour. Returns how many entries were there.
 static int table_ints(const luabind::object &t, const char *key, int *result,
@@ -132,15 +149,10 @@ static uint8_t clamp_byte(int v)
 	return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
 }
 
-// One source image, as RGBA. Urho3D's images come in whatever the file had, so
-// they are read through GetPixel() rather than out of the buffer.
-static void load_source(magic::Context *context, const ss_ &name,
-		Canvas &dst)
+// An image as RGBA. Urho3D's images come in whatever the file had, so they are
+// read through GetPixel() rather than out of the buffer.
+static void copy_image(magic::Image *img, Canvas &dst)
 {
-	auto *cache = context->GetSubsystem<magic::ResourceCache>();
-	magic::Image *img = cache->GetResource<magic::Image>(name.c_str());
-	if(img == nullptr)
-		throw Exception("compose_image(): could not load \""+name+"\"");
 	dst.reset(img->GetWidth(), img->GetHeight());
 	for(int y = 0; y < dst.h; y++){
 		for(int x = 0; x < dst.w; x++){
@@ -152,6 +164,28 @@ static void load_source(magic::Context *context, const ss_ &name,
 			p[3] = clamp_byte((int)(c.a_ * 255.0f + 0.5f));
 		}
 	}
+}
+
+static void load_source(magic::Context *context, const ss_ &name,
+		Canvas &dst)
+{
+	auto *cache = context->GetSubsystem<magic::ResourceCache>();
+	magic::Image *img = cache->GetResource<magic::Image>(name.c_str());
+	if(img == nullptr)
+		throw Exception("compose_image(): could not load \""+name+"\"");
+	copy_image(img, dst);
+}
+
+// An image the caller has the bytes of rather than a name for. What wants this
+// is Luanti's "[png:<base64>", which carries a whole file in the expression.
+static void load_source_data(magic::Context *context, const ss_ &data,
+		Canvas &dst)
+{
+	magic::MemoryBuffer buf(data.c_str(), data.size());
+	magic::SharedPtr<magic::Image> img(new magic::Image(context));
+	if(!img->Load(buf))
+		throw Exception("compose_image(): src_data is not an image");
+	copy_image(img, dst);
 }
 
 enum BlendMode {
@@ -386,10 +420,14 @@ static void apply_op(magic::Context *context, Canvas &c,
 
 	if(op == "blit"){
 		ss_ src_name = table_string(t, "src");
-		if(src_name == "")
+		ss_ src_data = table_bytes(t, "src_data");
+		if(src_name == "" && src_data == "")
 			throw Exception("compose_image(): blit has no src");
 		Canvas src;
-		load_source(context, src_name, src);
+		if(src_name != "")
+			load_source(context, src_name, src);
+		else
+			load_source_data(context, src_data, src);
 		int from[4] = {0, 0, src.w, src.h};
 		table_ints(t, "from", from, 4);
 		int at[2] = {0, 0};
@@ -584,6 +622,12 @@ static int l_compose_image(lua_State *L)
 				g_client_config.get<ss_>("cache_path")))
 			throw Exception("compose_image(): \""+path+
 					"\" is not under the cache path");
+		// The directory the file goes in, made if it is not there. Sandboxed
+		// code has no way to make one and every caller would otherwise need
+		// one made for it; it is under the cache like the file itself.
+		size_t slash = path.find_last_of('/');
+		if(slash != ss_::npos && slash > 0)
+			interface::fs::create_directories(path.substr(0, slash));
 
 		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 		app::App *buildat_app = (app::App*)lua_touserdata(L, -1);

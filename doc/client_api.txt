@@ -105,6 +105,11 @@ buildat.add_resource_dir(path) -> bool
   cache path; a resource dir is readable by everything the client draws.
 - Urho3D's own Lua bindings do not expose AddResourceDir.
 
+buildat.get_cache_path() -> string
+- The directory add_resource_dir() and compose_image() work under. It is here
+  because writing a file under the cache means knowing where the cache is; the
+  share and user paths stay out of the sandbox.
+
 buildat.extension_path(name)
 
 
@@ -708,6 +713,7 @@ buildat.compose_image(args) -> width, height
       write = "<path>",       -- where the PNG goes; under the cache path only
       ops = {
           {op = "blit", src = "a.png",   -- a resource name
+              src_data = nil,            -- or the bytes of a file instead
               from = {0, 0, 16, 16},     -- default: the whole source
               at = {0, 0},
               size = {16, 16},           -- scales, nearest neighbour
@@ -734,6 +740,9 @@ buildat.compose_image(args) -> width, height
 
 - With no size, the first blit makes the canvas as big as it needs, which is
   what a chain of overlays over a base image wants.
+- A blit's source is a resource name or, with src_data, the bytes of an image
+  file the caller already has. What wants the second is Luanti's "[png:",
+  which carries a whole PNG base64-encoded in the expression itself.
 - There is no way to keep an intermediate image: a nested expression is one
   call per level with the inner results referenced by the name they were
   written under, which doubles as a cache between runs.
