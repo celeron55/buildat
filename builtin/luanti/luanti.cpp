@@ -1603,6 +1603,7 @@ struct Module: public interface::Module, public luanti::Interface
 		params.node_props = mapgen_node_props();
 		params.biomes = mapgen_biomes();
 		params.ores = mapgen_ores();
+		params.decorations = mapgen_decorations();
 		params.section_size = m_section_size.getX();
 		// Kept, because the spawn search asks the same mapgen where the
 		// ground is without generating anything; see l_spawn_level()
@@ -1883,6 +1884,137 @@ struct Module: public interface::Module, public luanti::Interface
 		}
 		lua_settop(L, base);
 		log_i(MODULE, "%zu ores for the mapgen", out.size());
+		return out;
+	}
+
+	// A list of numbers off a table field, for the id lists a decoration and
+	// an ore cross with
+	static void read_id_list(lua_State *L, const char *field,
+			sv_<uint32_t> &out)
+	{
+		lua_getfield(L, -1, field);
+		if(lua_istable(L, -1)){
+			const size_t n = lua_objlen(L, -1);
+			for(size_t i = 1; i <= n; i++){
+				lua_rawgeti(L, -1, (int)i);
+				out.push_back((uint32_t)lua_tonumber(L, -1));
+				lua_pop(L, 1);
+			}
+		}
+		lua_pop(L, 1);
+	}
+
+	static void read_int_list(lua_State *L, const char *field,
+			sv_<int32_t> &out)
+	{
+		lua_getfield(L, -1, field);
+		if(lua_istable(L, -1)){
+			const size_t n = lua_objlen(L, -1);
+			for(size_t i = 1; i <= n; i++){
+				lua_rawgeti(L, -1, (int)i);
+				out.push_back((int32_t)lua_tonumber(L, -1));
+				lua_pop(L, 1);
+			}
+		}
+		lua_pop(L, 1);
+	}
+
+	static void read_string_list(lua_State *L, const char *field,
+			sv_<ss_> &out)
+	{
+		lua_getfield(L, -1, field);
+		if(lua_istable(L, -1)){
+			const size_t n = lua_objlen(L, -1);
+			for(size_t i = 1; i <= n; i++){
+				lua_rawgeti(L, -1, (int)i);
+				const char *p = lua_tostring(L, -1);
+				if(p)
+					out.push_back(ss_(p));
+				lua_pop(L, 1);
+			}
+		}
+		lua_pop(L, 1);
+	}
+
+	// The decorations the game registered, in the shape luanti_mapgen builds
+	// its DecorationManager out of
+	sv_<luanti_mapgen::Params::Decoration> mapgen_decorations()
+	{
+		sv_<luanti_mapgen::Params::Decoration> out;
+		if(!m_lua)
+			return out;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__mapgen_decorations");
+		if(lua_pcall(L, 0, 1, 0) != 0){
+			log_w(MODULE, "__mapgen_decorations(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+			lua_settop(L, base);
+			return out;
+		}
+		const size_t n = lua_istable(L, -1) ? lua_objlen(L, -1) : 0;
+		for(size_t i = 1; i <= n; i++){
+			lua_rawgeti(L, -1, (int)i);
+			if(!lua_istable(L, -1)){
+				lua_pop(L, 1);
+				continue;
+			}
+			luanti_mapgen::Params::Decoration d;
+			d.name = table_string(L, "name");
+			d.type = table_string(L, "type");
+			d.sidelen = (int32_t)table_number(L, "sidelen", 8);
+			d.fill_ratio = (float)table_number(L, "fill_ratio", 0.02);
+			d.y_min = (int32_t)table_number(L, "y_min", -31000);
+			d.y_max = (int32_t)table_number(L, "y_max", 31000);
+			d.flags = table_string(L, "flags");
+			d.nspawnby = (int32_t)table_number(L, "nspawnby", -1);
+			d.place_offset_y = (int32_t)table_number(L, "place_offset_y", 0);
+			d.check_offset = (int32_t)table_number(L, "check_offset", -1);
+			d.deco_height = (int32_t)table_number(L, "deco_height", 1);
+			d.deco_height_max =
+					(int32_t)table_number(L, "deco_height_max", 0);
+			d.deco_param2 = (int32_t)table_number(L, "deco_param2", 0);
+			d.deco_param2_max =
+					(int32_t)table_number(L, "deco_param2_max", 0);
+			d.rotation = table_string(L, "rotation");
+			d.np = read_np(L, "np");
+			read_id_list(L, "c_place_on", d.c_place_on);
+			read_id_list(L, "c_spawnby", d.c_spawnby);
+			read_id_list(L, "c_decos", d.c_decos);
+			read_string_list(L, "biomes", d.biomes);
+			lua_getfield(L, -1, "schematic");
+			if(lua_istable(L, -1)){
+				luanti_mapgen::Params::Schematic &sch = d.schematic;
+				sch.given = table_boolean(L, "given");
+				sch.file = table_string(L, "file");
+				sch.size_x = (int32_t)table_number(L, "size_x", 0);
+				sch.size_y = (int32_t)table_number(L, "size_y", 0);
+				sch.size_z = (int32_t)table_number(L, "size_z", 0);
+				read_id_list(L, "ids", sch.ids);
+				read_int_list(L, "param1", sch.param1);
+				read_int_list(L, "param2", sch.param2);
+				read_int_list(L, "yslice_prob", sch.yslice_prob);
+				lua_getfield(L, -1, "replacements");
+				if(lua_istable(L, -1)){
+					lua_pushnil(L);
+					while(lua_next(L, -2) != 0){
+						const char *k = lua_tostring(L, -2);
+						const char *v = lua_tostring(L, -1);
+						if(k && v)
+							sch.replacements[ss_(k)] = ss_(v);
+						lua_pop(L, 1);
+					}
+				}
+				lua_pop(L, 1);
+			}
+			lua_pop(L, 1);
+			out.push_back(d);
+			lua_pop(L, 1);
+		}
+		lua_settop(L, base);
+		log_i(MODULE, "%zu decorations for the mapgen", out.size());
 		return out;
 	}
 

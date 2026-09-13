@@ -126,6 +126,52 @@ namespace luanti_mapgen
 			int32_t stratum_thickness = 8;
 		};
 		sv_<Ore> ores;
+
+		// A schematic: either a .mts file, which the vendored reader opens,
+		// or the same thing as a mod wrote it in Lua -- the ids and the
+		// probabilities flat, in the order x fastest and then y and then z,
+		// which is what a schematic holds.
+		struct Schematic
+		{
+			bool given = false;
+			ss_ file;
+			sm_<ss_, ss_> replacements;
+			int32_t size_x = 0, size_y = 0, size_z = 0;
+			sv_<uint32_t> ids;
+			sv_<int32_t> param1;
+			sv_<int32_t> param2;
+			sv_<int32_t> yslice_prob;
+		};
+
+		// A decoration as the game registered it. The node names are ids
+		// already; the biome names are names, as an ore's are.
+		struct Decoration
+		{
+			ss_ name;
+			ss_ type = "simple";
+			sv_<uint32_t> c_place_on;
+			int32_t sidelen = 8;
+			float fill_ratio = 0.02f;
+			int32_t y_min = -31000;
+			int32_t y_max = 31000;
+			ss_ flags;
+			NoiseParams np;
+			sv_<ss_> biomes;
+			sv_<uint32_t> c_spawnby;
+			int32_t nspawnby = -1;
+			int32_t place_offset_y = 0;
+			int32_t check_offset = -1;
+			// simple
+			sv_<uint32_t> c_decos;
+			int32_t deco_height = 1;
+			int32_t deco_height_max = 0;
+			int32_t deco_param2 = 0;
+			int32_t deco_param2_max = 0;
+			// schematic
+			ss_ rotation = "0";
+			Schematic schematic;
+		};
+		sv_<Decoration> decorations;
 	};
 
 	struct Interface

@@ -184,6 +184,24 @@ static void read_noise_params(const luanti_mapgen::Params::NoiseParams &src,
 	}
 }
 
+static bool deco_type_of(const ss_ &name, DecorationType &out)
+{
+	if(name == "simple") out = DECO_SIMPLE;
+	else if(name == "schematic") out = DECO_SCHEMATIC;
+	else if(name == "lsystem") out = DECO_LSYSTEM;
+	else return false;
+	return true;
+}
+
+static Rotation rotation_of(const ss_ &name)
+{
+	if(name == "90") return ROTATE_90;
+	if(name == "180") return ROTATE_180;
+	if(name == "270") return ROTATE_270;
+	if(name == "random") return ROTATE_RAND;
+	return ROTATE_0;
+}
+
 // One of Luanti's own mapgens, generating into the volume worldgen hands
 // over. Everything it needs was given to it when the world was made: the
 // node ids by name, the seed and the parameters. Nothing here touches a
@@ -389,6 +407,90 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 		if(!params.ores.empty())
 			log_v(MODULE, "%zu ores", ores_added);
 
+		// And the decorations, which are what a world has growing on it.
+		// A schematic comes either as a .mts file the vendored reader opens
+		// or as the arrays a mod wrote in Lua; either way what it holds are
+		// this game's own ids, so nothing is pended for resolution.
+		size_t decos_added = 0;
+		for(const Params::Decoration &src : params.decorations){
+			DecorationType type;
+			if(!deco_type_of(src.type, type)){
+				log_w(MODULE, "Decoration \"%s\": unknown deco_type \"%s\"",
+						cs(src.name), cs(src.type));
+				continue;
+			}
+			if(src.sidelen <= 0){
+				log_w(MODULE, "Decoration \"%s\": sidelen has to be more "
+						"than zero", cs(src.name));
+				continue;
+			}
+			Decoration *d = m_emerge->decomgr->create(type);
+			if(d == nullptr)
+				continue;
+			d->name = src.name;
+			for(uint32_t id : src.c_place_on)
+				d->c_place_on.push_back((content_t)id);
+			d->sidelen = (s16)src.sidelen;
+			d->fill_ratio = src.fill_ratio;
+			d->y_min = (s16)src.y_min;
+			d->y_max = (s16)src.y_max;
+			d->nspawnby = (s16)src.nspawnby;
+			d->place_offset_y = (s16)src.place_offset_y;
+			d->check_offset = (s16)src.check_offset;
+			for(uint32_t id : src.c_spawnby)
+				d->c_spawnby.push_back((content_t)id);
+			d->flags = readFlagString(src.flags, flagdesc_deco, nullptr);
+			if(src.np.given){
+				read_noise_params(src.np, d->np);
+				d->flags |= DECO_USE_NOISE;
+			}
+			for(const ss_ &biome_name : src.biomes){
+				ObjDef *b = m_emerge->biomemgr->getByName(biome_name);
+				if(b == nullptr){
+					log_w(MODULE, "Decoration \"%s\": no biome \"%s\"",
+							cs(src.name), cs(biome_name));
+					continue;
+				}
+				d->biomes.insert((biome_t)b->index);
+			}
+			bool ok = true;
+			if(type == DECO_SIMPLE){
+				DecoSimple *ds = (DecoSimple *)d;
+				for(uint32_t id : src.c_decos)
+					ds->c_decos.push_back((content_t)id);
+				ds->deco_height = (s16)src.deco_height;
+				ds->deco_height_max = (s16)src.deco_height_max;
+				ds->deco_param2 = (u8)src.deco_param2;
+				ds->deco_param2_max = (u8)src.deco_param2_max;
+				if(ds->c_decos.empty() || ds->deco_height <= 0){
+					log_w(MODULE, "Decoration \"%s\": nothing to place, or "
+							"a height of none", cs(src.name));
+					ok = false;
+				}
+			} else if(type == DECO_SCHEMATIC){
+				DecoSchematic *dsch = (DecoSchematic *)d;
+				dsch->rotation = rotation_of(src.rotation);
+				dsch->schematic = make_schematic(src.schematic, src.name);
+				if(dsch->schematic == nullptr)
+					ok = false;
+			} else {
+				// An L-system tree, which wants the tree generator's own
+				// definition; nothing crosses for it yet
+				log_w(MODULE, "Decoration \"%s\": an lsystem decoration is "
+						"not built by this module", cs(src.name));
+				ok = false;
+			}
+			if(!ok){
+				delete d;
+				continue;
+			}
+			d->reset(true);
+			m_emerge->decomgr->add(d);
+			decos_added++;
+		}
+		if(!params.decorations.empty())
+			log_v(MODULE, "%zu decorations", decos_added);
+
 		// The managers registered their node names while they were built;
 		// now that they are, those can be looked up
 		m_ndef.resolvePending();
@@ -436,6 +538,79 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 			delete m_emerge;
 		delete m_bparams;
 		delete m_params;
+	}
+
+	// A schematic, out of a .mts file or out of the arrays a mod wrote in
+	// Lua. It belongs to the SchematicManager, which the EmergeParams owns,
+	// so it is registered there rather than deleted here.
+	Schematic *make_schematic(const luanti_mapgen::Params::Schematic &src,
+			const ss_ &deco_name)
+	{
+		if(!src.given){
+			log_w(MODULE, "Decoration \"%s\": no schematic",
+					cs(deco_name));
+			return nullptr;
+		}
+		Schematic *sch = SchematicManager::create(SCHEMATIC_NORMAL);
+		sch->name = deco_name;
+		if(!src.file.empty()){
+			StringMap replace;
+			for(const auto &pair : src.replacements)
+				replace[pair.first] = pair.second;
+			if(!sch->loadSchematicFromFile(src.file, &m_ndef,
+					replace.empty() ? nullptr : &replace)){
+				log_w(MODULE, "Decoration \"%s\": cannot read schematic %s",
+						cs(deco_name), cs(src.file));
+				delete sch;
+				return nullptr;
+			}
+			m_ndef.resolvePending();
+			m_emerge->schemmgr->add(sch);
+			return sch;
+		}
+		const size_t n = (size_t)src.size_x * src.size_y * src.size_z;
+		// A schematic of no size at all is a real thing to register: a mod
+		// that builds its own structure registers an empty one for the
+		// handle and the gennotify, and VoxeLibre's mcl_structures does it
+		// two dozen times. It places nothing, which is what it is for.
+		if(n == 0 && src.ids.empty()){
+			sch->size = v3s16((s16)src.size_x, (s16)src.size_y,
+					(s16)src.size_z);
+			sch->schemdata = new MapNode[1];
+			sch->schemdata[0] = MapNode(CONTENT_AIR);
+			sch->slice_probs = new u8[1];
+			sch->slice_probs[0] = MTSCHEM_PROB_ALWAYS;
+			sch->reset(true);
+			m_emerge->schemmgr->add(sch);
+			return sch;
+		}
+		if(n == 0 || src.ids.size() != n){
+			log_w(MODULE, "Decoration \"%s\": a schematic of %ix%ix%i with "
+					"%zu nodes in it", cs(deco_name), (int)src.size_x,
+					(int)src.size_y, (int)src.size_z, src.ids.size());
+			delete sch;
+			return nullptr;
+		}
+		sch->size = v3s16((s16)src.size_x, (s16)src.size_y, (s16)src.size_z);
+		sch->schemdata = new MapNode[n];
+		for(size_t i = 0; i < n; i++){
+			MapNode node((content_t)src.ids[i]);
+			// param1 is the probability a node is placed at all, and the
+			// high bit is Luanti's "place me even over something"
+			node.param1 = (u8)(i < src.param1.size() ?
+					src.param1[i] : MTSCHEM_PROB_ALWAYS);
+			node.param2 = (u8)(i < src.param2.size() ? src.param2[i] : 0);
+			sch->schemdata[i] = node;
+		}
+		sch->slice_probs = new u8[src.size_y];
+		for(int32_t y = 0; y < src.size_y; y++){
+			sch->slice_probs[y] = (u8)((size_t)y < src.yslice_prob.size() ?
+					src.yslice_prob[y] : MTSCHEM_PROB_ALWAYS);
+		}
+		// Already this game's own ids, so there is nothing to resolve
+		sch->reset(true);
+		m_emerge->schemmgr->add(sch);
+		return sch;
 	}
 
 	static void check_reserved_id(const Params &params, const ss_ &name,

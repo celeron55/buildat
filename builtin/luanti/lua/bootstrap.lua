@@ -892,6 +892,207 @@ function core.__mapgen_ores()
 	return out
 end
 
+-- The decorations a game registered: what grows on the terrain once the
+-- biomes and the ores are done with it. A schematic is either a .mts file,
+-- which the other side's vendored reader opens, or the arrays a mod wrote in
+-- Lua, which cross as ids and probabilities.
+function core.__mapgen_decorations()
+	local ids = core.__content_ids_by_name()
+	local function id_of(name)
+		if name == nil or name == "" then
+			return nil
+		end
+		return ids[name]
+	end
+	local function id_list(names)
+		if type(names) == "string" then
+			names = {names}
+		end
+		local out = {}
+		for _, name in ipairs(names or {}) do
+			local id = id_of(name)
+			if id then
+				out[#out + 1] = id
+			end
+		end
+		return out
+	end
+	local function np_of(np)
+		if type(np) ~= "table" then
+			return {given = false}
+		end
+		local spread = np.spread or {}
+		return {
+			given = true,
+			offset = np.offset or 0,
+			scale = np.scale or 1,
+			spread_x = spread.x or 250,
+			spread_y = spread.y or 250,
+			spread_z = spread.z or 250,
+			seed = np.seed or 0,
+			octaves = np.octaves or 3,
+			persist = np.persist or np.persistence or 0.6,
+			lacunarity = np.lacunarity or 2,
+			flags = np.flags or "defaults",
+		}
+	end
+	-- A schematic as a mod gave it: a file name, a table of its own, or a
+	-- handle we do not keep. Luanti's node data is x fastest and then y and
+	-- then z, which is the order a mod writes its "data" array in.
+	local function schematic_of(sch, replacements)
+		local out = {given = false}
+		if type(sch) == "string" then
+			out.given = true
+			out.file = sch
+		elseif type(sch) == "table" and sch.size and sch.data then
+			out.given = true
+			out.size_x = sch.size.x
+			out.size_y = sch.size.y
+			out.size_z = sch.size.z
+			out.ids = {}
+			out.param1 = {}
+			out.param2 = {}
+			for i, node in ipairs(sch.data) do
+				local id = id_of(node.name)
+				if id == nil then
+					id = ids["ignore"] or 0
+				end
+				out.ids[i] = id
+				-- Luanti's own defaults: always placed, and "force" is the
+				-- high bit of the same byte
+				out.param1[i] = node.prob or node.param1 or 127
+				out.param2[i] = node.param2 or 0
+			end
+			out.yslice_prob = {}
+			for _, slice in ipairs(sch.yslice_prob or {}) do
+				if slice.ypos ~= nil then
+					out.yslice_prob[slice.ypos + 1] = slice.prob or 127
+				end
+			end
+		end
+		out.replacements = {}
+		for from, to in pairs(replacements or {}) do
+			out.replacements[tostring(from)] = tostring(to)
+		end
+		return out
+	end
+	local out = {}
+	for _, d in pairs(core.registered_decorations or {}) do
+		out[#out + 1] = {
+			name = d.name or "",
+			type = d.deco_type or "simple",
+			c_place_on = id_list(d.place_on),
+			sidelen = d.sidelen or 8,
+			fill_ratio = d.fill_ratio or 0.02,
+			y_min = d.y_min or d.height_min or -31000,
+			y_max = d.y_max or d.height_max or 31000,
+			flags = d.flags or "",
+			np = np_of(d.noise_params),
+			biomes = d.biomes or {},
+			c_spawnby = id_list(d.spawn_by),
+			nspawnby = d.num_spawn_by or -1,
+			place_offset_y = d.place_offset_y or 0,
+			check_offset = d.check_offset or -1,
+			c_decos = id_list(d.decoration),
+			deco_height = d.height or 1,
+			deco_height_max = d.height_max or 0,
+			deco_param2 = d.param2 or 0,
+			deco_param2_max = d.param2_max or 0,
+			rotation = tostring(d.rotation or "0"),
+			schematic = schematic_of(d.schematic, d.replacements),
+		}
+	end
+	return out
+end
+
+-- What the mapgen is asked to report about what it made. Luanti keeps the
+-- flags and the two id sets on its EmergeManager and the mapgen fills a
+-- table with where each thing landed; here the bookkeeping is kept and the
+-- reporting is not done, so a mod that asks is answered and a mod that
+-- waits to hear where its decorations went waits forever.
+--
+-- simplified: the mapgen does not report. What it would take is the
+-- gennotify list out of the vendored Mapgen after it has run -- it is
+-- filled whether or not anyone asked -- and a packet back from
+-- luanti_mapgen's thread; see "Mapgen stage 3c" in
+-- doc/plan/luanti_module_plan.md.
+local GENNOTIFY_FLAGS = {"dungeon", "temple", "cave_begin", "cave_end",
+		"large_cave_begin", "large_cave_end", "decoration", "custom"}
+local gennotify_on = {}
+local gennotify_deco_ids = {}
+local gennotify_custom_ids = {}
+local gennotify_warned = false
+
+function core.set_gen_notify(flags, deco_ids, custom_ids)
+	if type(flags) == "string" then
+		-- The written form: "decoration,custom" and "nodungeon" to turn one
+		-- off, which is how Luanti's flag strings read everywhere
+		local as_table = {}
+		for word in flags:gmatch("[^%s,]+") do
+			local off = word:match("^no(.*)$")
+			if off then
+				as_table[off] = false
+			else
+				as_table[word] = true
+			end
+		end
+		flags = as_table
+	end
+	if type(flags) == "table" then
+		for _, name in ipairs(GENNOTIFY_FLAGS) do
+			if flags[name] ~= nil then
+				gennotify_on[name] = flags[name] and true or false
+			end
+		end
+	end
+	for _, id in ipairs(deco_ids or {}) do
+		gennotify_deco_ids[id] = true
+	end
+	for _, id in ipairs(custom_ids or {}) do
+		gennotify_custom_ids[id] = true
+	end
+	-- Luanti drops the ids when the flag they are for goes off
+	if not gennotify_on["decoration"] then
+		gennotify_deco_ids = {}
+	end
+	if not gennotify_on["custom"] then
+		gennotify_custom_ids = {}
+	end
+	if not gennotify_warned then
+		gennotify_warned = true
+		core.log("warning", "core.set_gen_notify() is remembered and the "
+				.. "mapgen does not report: nothing arrives in a "
+				.. "register_on_generated's minp/maxp gennotify")
+	end
+end
+
+function core.get_gen_notify()
+	local names = {}
+	for _, name in ipairs(GENNOTIFY_FLAGS) do
+		if gennotify_on[name] then
+			names[#names + 1] = name
+		end
+	end
+	local decos, customs = {}, {}
+	for id in pairs(gennotify_deco_ids) do
+		decos[#decos + 1] = id
+	end
+	for id in pairs(gennotify_custom_ids) do
+		customs[#customs + 1] = id
+	end
+	table.sort(decos)
+	table.sort(customs)
+	return table.concat(names, ","), decos, customs
+end
+
+-- Which decoration a name is, for a mod that wants to hear about its own
+-- when a chunk is generated. Luanti answers the handle its register call
+-- returned, which here is the order it was registered in -- and the order
+-- it crosses in, so the number means the same thing on both sides.
+function core.get_decoration_id(name)
+	return core.__mapgen_handles.decoration[name]
+end
+
 -- Every name a mapgen can ask about: the nodes, and the aliases a game
 -- registers for them -- "mapgen_stone" is an alias and is what a vendored
 -- mapgen looks up.
@@ -1333,15 +1534,27 @@ core.registered_biomes = {}
 core.registered_ores = {}
 core.registered_decorations = {}
 
+-- What a registration answered with, by the name the definition carried:
+-- Luanti hands back a handle and a mod asks for it again by name later, as
+-- VoxeLibre's mapgen mod does for every decoration it wants to hear about.
+core.__mapgen_handles = {biome = {}, ore = {}, decoration = {}}
+
 local function recording_registration(kind)
 	local list = core["registered_" .. kind .. "s"]
+	local handles = core.__mapgen_handles[kind]
 	core["register_" .. kind] = function(def)
 		list[#list + 1] = def
+		if def.name ~= nil and def.name ~= "" then
+			handles[def.name] = #list
+		end
 		return #list
 	end
 	core["clear_registered_" .. kind .. "s"] = function()
 		for i = #list, 1, -1 do
 			list[i] = nil
+		end
+		for k in pairs(handles) do
+			handles[k] = nil
 		end
 	end
 end
