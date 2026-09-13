@@ -1763,12 +1763,119 @@ struct CInstance: public voxelworld::Instance
 			m_sections_with_loaded_buffers.insert(it, section);
 	}
 
+	// The voxels of a region in one read, chunk by chunk rather than voxel
+	// by voxel through get_voxel(): what a caller of this is doing is a
+	// sweep, and a section is a quarter of a million voxels.
+	//
+	// What is not there -- a section that is not loaded, a chunk nothing has
+	// written -- is left undefined, which is what get_voxel() answers for
+	// one and what the volume already holds.
+	VoxelVolume get_volume(const pv::Region &region)
+	{
+		const pv::Vector3DInt32 rlc = region.getLowerCorner();
+		const pv::Vector3DInt32 ruc = region.getUpperCorner();
+		VoxelVolume out(region);
+		if(ruc.getX() < rlc.getX() || ruc.getY() < rlc.getY() ||
+				ruc.getZ() < rlc.getZ())
+			return out;
+		pv::Vector3DInt32 chunk_lc = container_coord(rlc, m_chunk_size_voxels);
+		pv::Vector3DInt32 chunk_uc = container_coord(ruc, m_chunk_size_voxels);
+
+		for(int cz = chunk_lc.getZ(); cz <= chunk_uc.getZ(); cz++){
+		for(int cy = chunk_lc.getY(); cy <= chunk_uc.getY(); cy++){
+		for(int cx = chunk_lc.getX(); cx <= chunk_uc.getX(); cx++){
+			pv::Vector3DInt32 chunk_p(cx, cy, cz);
+			pv::Vector3DInt16 section_p =
+					container_coord16(chunk_p, m_section_size_chunks);
+			Section *section = get_section(section_p);
+			if(section == nullptr || !section->loaded)
+				continue;
+			ChunkBuffer &buf = section->get_buffer(chunk_p, m_server,
+					&m_total_buffers_loaded);
+			if(!buf.volume)
+				continue;
+
+			// Whatever planes the chunk has, the answer gets: a caller
+			// reading a world of more than one plane is reading all of it
+			out.add_planes(buf.volume->planes());
+			const size_t num_extra_planes = buf.volume->planes().size() > 1 ?
+					buf.volume->planes().size() - 1 : 0;
+
+			pv::Region chunk_region = get_chunk_region_voxels(chunk_p);
+			pv::Vector3DInt32 lc = chunk_region.getLowerCorner();
+			pv::Vector3DInt32 uc = chunk_region.getUpperCorner();
+			if(lc.getX() < rlc.getX()) lc.setX(rlc.getX());
+			if(lc.getY() < rlc.getY()) lc.setY(rlc.getY());
+			if(lc.getZ() < rlc.getZ()) lc.setZ(rlc.getZ());
+			if(uc.getX() > ruc.getX()) uc.setX(ruc.getX());
+			if(uc.getY() > ruc.getY()) uc.setY(ruc.getY());
+			if(uc.getZ() > ruc.getZ()) uc.setZ(ruc.getZ());
+
+			pv::Vector3DInt32 chunk_off(
+					chunk_p.getX() * m_chunk_size_voxels.getX(),
+					chunk_p.getY() * m_chunk_size_voxels.getY(),
+					chunk_p.getZ() * m_chunk_size_voxels.getZ());
+
+			VoxelVolume::Sampler src(buf.volume.get());
+			VoxelVolume::Sampler dst(&out);
+			for(int z = lc.getZ(); z <= uc.getZ(); z++){
+			for(int y = lc.getY(); y <= uc.getY(); y++){
+				src.setPosition(
+						lc.getX() - chunk_off.getX(),
+						y - chunk_off.getY(),
+						z - chunk_off.getZ());
+				dst.setPosition(lc.getX(), y, z);
+			for(int x = lc.getX(); x <= uc.getX(); x++,
+					src.movePositiveX(), dst.movePositiveX()){
+				dst.setVoxel(src.getVoxel());
+				for(size_t pi = 1; pi <= num_extra_planes; pi++){
+					out.set_plane_at((uint8_t)pi, x, y, z,
+							buf.volume->plane_at((uint8_t)pi,
+							x - chunk_off.getX(), y - chunk_off.getY(),
+							z - chunk_off.getZ()));
+				}
+			}
+			}
+			}
+
+			auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
+					m_sections_with_loaded_buffers.end(), section,
+					std::greater<Section*>());
+			if(it == m_sections_with_loaded_buffers.end() || *it != section)
+				m_sections_with_loaded_buffers.insert(it, section);
+		}
+		}
+		}
+
+		// Buffers were loaded above; keep to the limit once, not per voxel
+		maintain_maximum_buffer_limit();
+		return out;
+	}
+
 	// See the comment on Instance::merge_volume() in api.h for what the
 	// priorities are. This is chunk by chunk rather than voxel by voxel
 	// through set_voxel(): a section is a quarter of a million voxels, and
 	// all of this is done while holding the module.
 	void merge_volume(const VoxelVolume &volume,
 			bool create_missing_sections)
+	{
+		write_volume(volume, create_missing_sections, false);
+	}
+
+	// The same walk that overwrites instead, which is what everything that
+	// is not a generator wants: an importer, a VoxelManip, a mod putting a
+	// building down.
+	void set_volume(const VoxelVolume &volume, bool create_missing_sections)
+	{
+		write_volume(volume, create_missing_sections, true);
+	}
+
+	// overwrite tells the two apart: with it every defined voxel of the
+	// volume is written, and without it the generator priorities in api.h
+	// decide. A voxel that is undefined in the volume is skipped either
+	// way, so a caller can leave holes.
+	void write_volume(const VoxelVolume &volume,
+			bool create_missing_sections, bool overwrite)
 	{
 		const pv::Region region = volume.getEnclosingRegion();
 		auto rlc = region.getLowerCorner();
@@ -1860,7 +1967,7 @@ struct CInstance: public voxelworld::Instance
 						sample_of(old) : buf.volume->sample_at(
 						x - chunk_off.getX(), y - chunk_off.getY(),
 						z - chunk_off.getZ());
-				if(!old_undefined){
+				if(!overwrite && !old_undefined){
 					// Anything already standing here wins
 					if(!voxel_is_fully_empty(dst_v))
 						continue;
@@ -1916,7 +2023,8 @@ struct CInstance: public voxelworld::Instance
 		// Buffers were loaded above; keep to the limit once, not per voxel
 		maintain_maximum_buffer_limit();
 
-		log_d(MODULE, "merge_volume(): %zu voxels written", num_written);
+		log_d(MODULE, "%s: %zu voxels written",
+				overwrite ? "set_volume()" : "merge_volume()", num_written);
 	}
 
 	// Read a voxel without loading anything or touching any bookkeeping, so

@@ -133,6 +133,27 @@ namespace voxelworld
 				const VoxelInstance &v,
 				bool disable_warnings = false) = 0;
 
+		// The voxels of a region, in one read rather than one per voxel:
+		// what asks for this is a sweep, and a section is a quarter of a
+		// million voxels. The answer carries every plane the chunks it came
+		// from have.
+		//
+		// What is not there -- a section that is not loaded, a chunk nothing
+		// has written -- comes back as VOXELTYPEID_UNDEFINED, which is what
+		// get_voxel() answers for one.
+		virtual VoxelVolume get_volume(const pv::Region &region) = 0;
+
+		// The other direction, and the one merge_volume() below is not:
+		// every defined voxel of the volume is written, whatever was there.
+		// An importer, a VoxelManip and a mod putting a building down all
+		// mean this; a generator means merge_volume().
+		//
+		// A voxel that is undefined in the volume is skipped, so a caller
+		// can still leave holes, and create_missing_sections works the same
+		// way it does below.
+		virtual void set_volume(const VoxelVolume &volume,
+				bool create_missing_sections = false) = 0;
+
 		// Write a generated volume into the world, by priority per voxel: a
 		// voxel that has not been generated yet (VOXELTYPEID_UNDEFINED) takes
 		// anything, an empty one takes anything that is not empty, and one
