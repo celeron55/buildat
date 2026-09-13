@@ -1224,6 +1224,68 @@ function core.__check_players()
 	core.log("verbose", "check_players: a player survived being written down")
 end
 
+-- Where a player who has never been here starts. Luanti's own findSpawnPos
+-- takes the game's static_spawnpoint if it has one and otherwise stands the
+-- player on the ground the mapgen says is there; this does the same with
+-- the ground the map says is there. A world that has not generated around
+-- the origin yet has no answer, and then the origin is what is left -- the
+-- same place a player started before there was any terrain to stand on.
+local function find_spawn_pos()
+	local static = core.settings:get("static_spawnpoint")
+	if static then
+		local x, y, z = string.match(static,
+				"^%s*([%d.-]+)%s*,%s*([%d.-]+)%s*,%s*([%d.-]+)%s*$")
+		if x then
+			return {x = tonumber(x), y = tonumber(y), z = tonumber(z)}, true
+		end
+		core.log("warning", "static_spawnpoint is not a position: " .. static)
+	end
+	local level = core.get_spawn_level(0, 0)
+	if level == nil then
+		return {x = 0, y = 0, z = 0}, false
+	end
+	return {x = 0, y = level, z = 0}, true
+end
+
+-- A player who arrives before the world around the spawn has been generated
+-- cannot be put on the ground, because the map has no ground to answer with
+-- yet. They start where a player with nowhere to be always started, and
+-- this stands them on the surface as soon as there is one -- unless they
+-- have moved in the meantime, in which case where they are is where they
+-- want to be.
+local unplaced = {}
+local unplaced_timer = 0
+
+local function place_the_unplaced(dtime)
+	if next(unplaced) == nil then
+		return
+	end
+	unplaced_timer = unplaced_timer + dtime
+	if unplaced_timer < 1 then
+		return
+	end
+	unplaced_timer = 0
+	local level = core.get_spawn_level(0, 0)
+	for name, was in pairs(unplaced) do
+		local player = core.get_player_by_name(name)
+		if player == nil then
+			unplaced[name] = nil
+		else
+			local pos = player:get_pos()
+			if math.abs(pos.x - was.x) > 0.5 or
+					math.abs(pos.y - was.y) > 0.5 or
+					math.abs(pos.z - was.z) > 0.5 then
+				unplaced[name] = nil
+			elseif level ~= nil then
+				player:set_pos({x = was.x, y = level, z = was.z})
+				unplaced[name] = nil
+				core.log("action", "Player " .. name ..
+						" was put on the ground at y=" .. level)
+			end
+		end
+	end
+end
+
 -- What the module calls when a client arrives and leaves. The name is the
 -- client's, and it is what everything about a player is keyed by.
 function core.__add_player(name)
@@ -1276,6 +1338,10 @@ function core.__add_player(name)
 	-- What the last run left, before on_joinplayer runs: a mod's join
 	-- callback reads the player it is given, and in Luanti that player has
 	-- come out of the database by then
+	local new_here = saved_players[name] == nil
+	if new_here then
+		o.pos, o.spawn_known = find_spawn_pos()
+	end
 	restore_player(o, saved_players[name])
 	-- Luanti's server makes the auth entry when a client logs in, and the
 	-- builtin's own join callback expects to find one: here whoever
@@ -1287,6 +1353,9 @@ function core.__add_player(name)
 		if ok and entry == nil then
 			pcall(handler.create_auth, name, "")
 		end
+	end
+	if new_here and not o.spawn_known then
+		unplaced[name] = {x = o.pos.x, y = o.pos.y, z = o.pos.z}
 	end
 	core.log("action", "Player " .. name .. " joined")
 	for _, cb in ipairs(core.registered_on_joinplayers or {}) do
@@ -1657,6 +1726,7 @@ local function send_inventories()
 end
 
 function core.__step_objects(dtime)
+	place_the_unplaced(dtime)
 	-- Over the ids taken first, because a step adds and removes objects
 	local ids = {}
 	for id, _ in pairs(objects) do

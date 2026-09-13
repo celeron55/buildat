@@ -1862,6 +1862,19 @@ struct Module: public interface::Module, public luanti::Interface
 	// prove nothing about voxelworld.
 	void check_map_round_trip()
 	{
+		// The check works above where any mapgen builds, in sections that
+		// nothing else keeps: a player's point is elsewhere and the
+		// streamer unloads what no point holds, which would take the
+		// check's own nodes with it between one half and the other. So they
+		// are pinned the way a forceload pins one, and let go afterwards --
+		// a section a mod had already pinned stays pinned.
+		sv_<uint64_t> pinned;
+		for(const pv::Vector3DInt16 &sp : check_map_sections()){
+			const uint64_t k = section_key(sp);
+			if(m_forceloaded.insert(k).second)
+				pinned.push_back(k);
+		}
+		update_load_points();
 		run_chunk_string("if not core.__check_map_write() then\n"
 				"    core.log('verbose', 'check_map: no node to write')\n"
 				"    core.__check_map_read = function() end\n"
@@ -1871,6 +1884,43 @@ struct Module: public interface::Module, public luanti::Interface
 		// The check puts air back where it wrote; that has to land too, or
 		// the world starts with a block of cobble nobody asked for
 		flush_node_writes();
+		for(uint64_t k : pinned)
+			m_forceloaded.erase(k);
+		update_load_points();
+	}
+
+	// The sections core.__check_map_box() reaches into
+	sv_<pv::Vector3DInt16> check_map_sections()
+	{
+		sv_<pv::Vector3DInt16> out;
+		if(!m_lua || m_section_size.getX() <= 0)
+			return out;
+		int32_t b[6] = {};
+		{
+			interface::MutexScope ms(m_lua_mutex);
+			lua_State *L = m_lua;
+			int base = lua_gettop(L);
+			lua_getglobal(L, "core");
+			lua_getfield(L, -1, "__check_map_box");
+			if(lua_pcall(L, 0, 6, 0) != 0){
+				log_w(MODULE, "__check_map_box(): %s",
+						lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+				lua_settop(L, base);
+				return out;
+			}
+			for(int i = 0; i < 6; i++)
+				b[i] = (int32_t)lua_tonumber(L, -6 + i);
+			lua_settop(L, base);
+		}
+		const pv::Vector3DInt16 p0 = section_of(
+				pv::Vector3DInt32(b[0], b[1], b[2]));
+		const pv::Vector3DInt16 p1 = section_of(
+				pv::Vector3DInt32(b[3], b[4], b[5]));
+		for(int16_t z = p0.getZ(); z <= p1.getZ(); z++)
+		for(int16_t y = p0.getY(); y <= p1.getY(); y++)
+		for(int16_t x = p0.getX(); x <= p1.getX(); x++)
+			out.push_back(pv::Vector3DInt16(x, y, z));
+		return out;
 	}
 
 	// core.__voxel_defs() -> add_voxel(), in id order, with a solid colour

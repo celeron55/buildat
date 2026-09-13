@@ -978,7 +978,7 @@ local STUBS_NIL = {
 	"line_of_sight", "raycast", "find_path", "transforming_liquid_add",
 	"get_node_max_level", "get_node_level", "set_node_level", "add_node_level",
 	"fix_light",
-	"get_spawn_level", "get_heat", "get_humidity", "get_biome_data",
+	"get_heat", "get_humidity", "get_biome_data",
 	"get_biome_id", "get_biome_name",
 	"compare_block_status",
 	"get_meta", "get_node_metadata",
@@ -1617,6 +1617,47 @@ local function region_names(x0, y0, z0, x1, y1, z1)
 		names[i] = name
 	end
 	return names
+end
+
+-- Where the ground is at a point, which is what a player who has never been
+-- here starts on top of. Luanti asks the mapgen, which can answer for a
+-- part of the world that has not been generated; this asks the map, which
+-- answers for a part that has. Both answer nil for a point nobody can stand
+-- at, and that is what the callers are written against.
+--
+-- simplified: a column of the map rather than the generator's own
+-- getSpawnLevelAtPoint. The upgrade path is a call into luanti_mapgen,
+-- which owns the generator -- and it runs in worldgen's thread, which is
+-- why it is not one call away.
+local SPAWN_SCAN_BOTTOM = -64
+local SPAWN_SCAN_TOP = 320
+-- How much room a player needs above the ground to stand in it
+local SPAWN_HEADROOM = 2
+
+function core.get_spawn_level(x, z)
+	x, z = math.floor(x + 0.5), math.floor(z + 0.5)
+	local names = region_names(x, SPAWN_SCAN_BOTTOM, z, x, SPAWN_SCAN_TOP, z)
+	-- One column, bottom to top; walked from the top so that what is found
+	-- is the surface and not the roof of the first cave
+	local room = 0
+	for i = #names, 1, -1 do
+		local name = names[i]
+		local def = core.registered_nodes[name]
+		if name == "ignore" or def == nil then
+			-- Not generated, so nothing can be said about what is under it
+			room = 0
+		elseif def.walkable == false or name == "air" then
+			room = room + 1
+		else
+			if room >= SPAWN_HEADROOM then
+				-- The voxel above this one: index i is at
+				-- SPAWN_SCAN_BOTTOM + i - 1, so this is standing on it
+				return SPAWN_SCAN_BOTTOM + i
+			end
+			room = 0
+		end
+	end
+	return nil
 end
 
 -- Luanti sorts by distance and returns the nearest; search_center adds pos
