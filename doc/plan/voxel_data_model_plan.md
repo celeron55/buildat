@@ -106,6 +106,101 @@ per voxel on the cube path, which today is PolyVox's output taken as it
 comes. The shape path already displaces (that is `liquid_corner_top`), so
 the model is there; the cube path is where the work is.
 
+## The light: a field a game asks to have maintained (settled 2026-09-13)
+
+`voxelworld` maintains one light field today, the sky's, behind
+`set_skylight_enabled(bool)`, and it derives where the sky is from the top
+row of the world region. Both halves of that break once a world is bigger
+than what is loaded, and neither is what a game with its own light wants.
+What follows is settled; what is built of it says so.
+
+**The light is stored, not derived.** "Does the sky reach here?" cannot be
+answered without the column above, and in a world thirty thousand voxels
+tall that column is neither loaded nor generated. So the light lives in the
+voxel, the save carries it, and the generator's contract is to produce it
+correctly. Everything after generation is a local flood.
+
+**A source is any of these**, and they need no switch between them:
+
+- a voxel that already holds full light -- what a generator leaves behind;
+- the top row of the world region, while that section is loaded -- which is
+  what `games/infidigger` and `games/bomber_drone` have always used and
+  what a Luanti-sized world never satisfies;
+- for lamp light, a voxel whose definition emits (`VoxelDefinition::
+  light_source`, which does not exist yet).
+
+**A write that carries light means it. BUILT 2026-09-13.** With maintenance
+on, `set_voxel()` used to overwrite the light bits of every write with the
+light that was already there, so a generator could not hand over a lit
+world. Now a write carrying light keeps it and is not seeded; a write
+carrying none takes the light that was there and seeds the flood, which is
+every ordinary `set_node`. Measured over a v7 section: generation went from
+262144 seeds and 140 ms to 9 seeds and 2 ms, and a dug hole still fills
+from the daylight around it.
+
+This also makes "who owns the light" a property of each write rather than a
+global switch: a game that lights its own world hands it over, and one that
+wants `voxelworld` to work it out writes dark voxels and pays the flood.
+
+**Two fields, each maintained only if asked.** The format already says "a
+game binds the light it actually fills and no more"; the maintenance should
+be as opt-in as the storage. `light_sky` is for anything with a sky.
+`light_lamp` is for a game whose *mechanics* read it -- in a Luanti game
+mob spawning, crop growth and more are written against it, so it is not
+optional there -- while a buildat-native game, or a Luanti game rebuilt for
+buildat, turns it off and pays nothing: its lamps are lights in the scene
+and the shader does the work.
+
+So `set_skylight_enabled(bool)` becomes `set_light_maintained(field, bool)`
+over the two fields, and the rules ride with the field rather than being
+parameters:
+
+| | sky | lamp |
+| --- | --- | --- |
+| sources | stored full light; the region's top row while loaded | stored light; a voxel whose definition emits |
+| downwards | full strength falls without losing any | attenuates like every other direction |
+| sideways and up | one step per voxel | one step per voxel |
+
+**Crossing a section boundary** is the rest of it, and is the same for both
+fields:
+
+1. **The section is loaded**: propagate into it.
+2. **It has never been generated** -- not in the save -- then stop. The
+   light arrives when the section is generated, from the generator.
+3. **It is in the save but not loaded**: mark it *stale*, persisted per
+   section beside `modified`, and stop. A section loaded while stale
+   re-floods from its loaded neighbours' edges and its own sources, then
+   clears the flag.
+
+   Not "load it, relight it, write it back": sunlight down an open column
+   does not attenuate, so one node removed at the top of a shaft would pull
+   in every section beneath it until the shaft ends.
+
+**The dark direction is the hard one** and is already written: the flood
+unlights what a new blocker was lighting and re-spreads from the boundary.
+"Stale" therefore means "may be wrong in either direction".
+
+**What this leaves for a game that wants no light at all:** nothing to do.
+A format that binds no light field cannot turn maintenance on, and a game
+that binds one and maintains nothing keeps whatever it writes.
+
+### The order of work
+
+1. **A write that carries light keeps it.** BUILT 2026-09-13.
+2. **`VoxelDefinition::light_source`**, and the module filling it from a
+   node's own -- devtest and VoxeLibre both have it in their definitions
+   already.
+3. **`set_light_maintained(field, bool)`**, with the sky instantiation
+   behaving exactly as `set_skylight_enabled()` does today, and the three
+   games that call it moved over.
+4. **Lamp light as the second instantiation**: emitters as sources, no free
+   fall. This is the one a Luanti game cannot do without.
+5. **The section boundary**: the stale flag in the save, marking on the way
+   out, re-flooding on the way in.
+
+Steps 2 and 3 are a morning each, 4 is a day, 5 is a day. Nothing after 1
+is started.
+
 ## Adjacent: what a chunk publishes, and when
 
 Not part of the data model, and the thing the data model kept being blamed

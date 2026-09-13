@@ -275,10 +275,23 @@ namespace voxelworld
 		// date by set_voxel(), including through generation, and is settled
 		// before commit() meshes anything.
 		//
-		// Light enters from above the top of the world region at full
-		// strength, falls through anything that transmits light without
-		// losing any, and spreads sideways and upwards losing one step per
-		// voxel. A voxel transmits light if its edge material is
+		// Light enters from two places, and needs no switch between them:
+		// from above the top of the world region, when that section is
+		// loaded; and from any voxel that already holds light, because the
+		// light is stored in the voxel and the save carries it. The second
+		// is what a world taller than anything that will ever be loaded at
+		// once needs -- its region top is thirty thousand voxels up and is
+		// never there -- and it makes producing correct light the
+		// generator's contract.
+		//
+		// So a voxel written with light of its own keeps it: that is a
+		// generator saying what the sky reaches where it has just built.
+		// One written without takes the light that was there, and the
+		// change is what the flood works from.
+		//
+		// Light falls through anything that transmits light without losing
+		// any, and spreads sideways and upwards losing one step per voxel.
+		// A voxel transmits light if its edge material is
 		// EDGEMATERIALID_EMPTY, which is the same test the mesher uses to
 		// decide whether a face is drawn against it.
 		//

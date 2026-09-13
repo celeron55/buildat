@@ -2064,11 +2064,18 @@ struct CInstance: public voxelworld::Instance
 			VoxelInstance old_first(old.planes[0]);
 			VoxelInstance first(nv.planes[0]);
 			bool old_transparent = voxel_transmits_light(old);
-			if(old_transparent != voxel_transmits_light(nv)){
-				m_skylight_seeds.push_back(SkylightSeed{
-						p, get_sky(old_first), old_transparent});
+			// A write that carries light means it: a generator knows what
+			// the sky reaches in the world it just made, and that light is
+			// the map's from then on. A write that carries none takes the
+			// light that was there and is seeded, which is every ordinary
+			// set_voxel. See "the light is stored" in voxelworld's api.h.
+			if(get_sky(first) == 0){
+				if(old_transparent != voxel_transmits_light(nv)){
+					m_skylight_seeds.push_back(SkylightSeed{
+							p, get_sky(old_first), old_transparent});
+				}
+				set_sky(first, get_sky(old_first));
 			}
-			set_sky(first, get_sky(old_first));
 			nv.planes[0] = first.data;
 		}
 
@@ -2135,16 +2142,20 @@ struct CInstance: public voxelworld::Instance
 			now.planes[0] = v.data;
 			VoxelInstance old_first(old.planes[0]);
 			bool old_transparent = voxel_transmits_light(old);
-			if(old_transparent != voxel_transmits_light(now)){
-				m_skylight_seeds.push_back(SkylightSeed{
-						p, get_sky(old_first), old_transparent});
+			// A voxel written with light of its own keeps it: that is a
+			// generator saying what the sky reaches where it has just
+			// built. Written without, the light is voxelworld's -- it is
+			// carried over from the voxel that was there, because a caller
+			// writing a plain voxel would otherwise wipe out the light of
+			// one whose transparency did not change and nothing would put
+			// it back, and the change is seeded so the flood can fix it.
+			if(get_sky(nv) == 0){
+				if(old_transparent != voxel_transmits_light(now)){
+					m_skylight_seeds.push_back(SkylightSeed{
+							p, get_sky(old_first), old_transparent});
+				}
+				set_sky(nv, get_sky(old_first));
 			}
-			// Once skylight is on those bits belong to voxelworld, so they
-			// are carried over from the voxel that was there; a caller
-			// writing a plain voxel would otherwise wipe the light out of
-			// one whose transparency did not change, and nothing would put
-			// it back
-			set_sky(nv, get_sky(old_first));
 		}
 
 		buf.volume->setVoxelAt(voxel_p, nv);
@@ -2376,7 +2387,10 @@ struct CInstance: public voxelworld::Instance
 						continue;
 				}
 
-				if(m_skylight_enabled){
+				if(m_skylight_enabled && get_sky(nv) == 0){
+					// Light that came with the volume is kept and needs no
+					// seed; this is the generator's path and a generated
+					// world arrives lit. See set_voxel() above.
 					bool old_transparent = voxel_transmits_light(dst_v);
 					if(old_transparent != voxel_transmits_light(src_v)){
 						m_skylight_seeds.push_back(SkylightSeed{
@@ -2696,8 +2710,13 @@ struct CInstance: public voxelworld::Instance
 				unlight.push_back(LightNode{seed.p, seed.old_level});
 				blockers.push_back(seed.p);
 			} else if(!seed.was_transparent && now_transparent){
-				// It is dark and has to be filled from around it
-				uint8_t l = is_below_open_sky(seed.p) ? sky_max() : 0;
+				// It has to be filled from around it, unless it already
+				// holds light -- a voxel the generator lit is a source,
+				// which is what makes the sky reach the ground in a world
+				// whose region top is thirty thousand voxels up and never
+				// loaded
+				uint8_t l = is_below_open_sky(seed.p) ? sky_max() :
+						get_sky(v);
 				light_set(seed.p, v, l);
 				if(l > 0){
 					spread.push_back(LightNode{seed.p, l});

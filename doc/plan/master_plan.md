@@ -146,7 +146,15 @@ What is left, in order of what it is worth:
    See "Mapgen stage 3c" in the module plan, and
    `doc/plan/luanti_module_history.md`, "The mapgen, vendored", for what
    the stages below it turned out to be.
-2. **The rest is minor and belongs to a later round.** glTF, an object
+2. **The light, which is `voxelworld`'s and not the module's.** A write
+   that carries light keeps it as of 2026-09-13, so a generated world
+   arrives lit and a dug hole fills from its mouth. What is left is lamp
+   light -- which a Luanti game's mechanics read, and a buildat-native game
+   turns off -- and the section boundary, where a flood that reaches a
+   section which is in the save but not loaded marks it stale rather than
+   pulling it in. See "The light: a field a game asks to have maintained"
+   in `doc/plan/voxel_data_model_plan.md`, which has the order of work.
+3. **The rest is minor and belongs to a later round.** glTF, an object
    drawn as its own model, a detached inventory, a put-down count, the
    inventory cube, a scrolling save list: each is an afternoon, none
    blocks a game from running, and they are in "Bonuses" below for exactly
