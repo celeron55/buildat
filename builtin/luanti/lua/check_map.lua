@@ -255,6 +255,89 @@ local function check_noise()
 	end
 end
 
+-- The light a node makes of its own, which a Luanti game's mechanics read:
+-- what spawns where, what grows underground, what core.get_node_light()
+-- answers. voxelworld floods it and this is the round trip -- a room with
+-- nothing in it is dark, a torch in it lights the walls around it and dims
+-- with distance, and taking the torch away makes it dark again.
+--
+-- A game with no glowing node at all skips this, which is the same deal
+-- check_map gives a game with no node to write.
+local LIGHT_MIN = {x = 40, y = 2, z = 40}
+local LIGHT_MAX = {x = 46, y = 8, z = 46}
+local LIGHT_AT = {x = 43, y = 5, z = 43}
+
+local function brightest_node()
+	local best, best_light = nil, 0
+	for name, def in pairs(core.registered_nodes) do
+		local l = def.light_source or 0
+		local liquid = def.drawtype == "liquid" or
+				def.drawtype == "flowingliquid"
+		if l > best_light and name ~= "ignore" and not liquid then
+			best, best_light = name, l
+		end
+	end
+	return best, best_light
+end
+
+local function check_light()
+	local lamp, level = brightest_node()
+	if not lamp or level < 3 then
+		core.log("verbose", "check_map: no node that makes light")
+		return
+	end
+	local wall = check_name
+	-- A solid box, hollowed out: somewhere the sky does not reach
+	for x = LIGHT_MIN.x, LIGHT_MAX.x do
+		for y = LIGHT_MIN.y, LIGHT_MAX.y do
+			for z = LIGHT_MIN.z, LIGHT_MAX.z do
+				local edge = (x == LIGHT_MIN.x or x == LIGHT_MAX.x or
+						y == LIGHT_MIN.y or y == LIGHT_MAX.y or
+						z == LIGHT_MIN.z or z == LIGHT_MAX.z)
+				core.set_node({x = x, y = y, z = z},
+						{name = edge and wall or "air"})
+			end
+		end
+	end
+
+	local beside = {x = LIGHT_AT.x + 1, y = LIGHT_AT.y, z = LIGHT_AT.z}
+	local further = {x = LIGHT_AT.x + 2, y = LIGHT_AT.y + 1, z = LIGHT_AT.z}
+	local dark = core.get_node_light(beside)
+	if dark == nil or dark > 0 then
+		error("check_map: a room with nothing in it is lit: " ..
+				tostring(dark))
+	end
+
+	core.set_node(LIGHT_AT, {name = lamp})
+	local near = core.get_node_light(beside)
+	local far = core.get_node_light(further)
+	if near == nil or near < level - 1 then
+		error("check_map: " .. lamp .. " lights " .. level ..
+				" and its neighbour has " .. tostring(near))
+	end
+	if far == nil or far >= near or far == 0 then
+		error("check_map: the light does not dim with distance: " ..
+				tostring(near) .. " then " .. tostring(far))
+	end
+
+	-- And taking it away takes the light with it, which is the direction
+	-- that needs the unlighting pass rather than the spreading one
+	core.set_node(LIGHT_AT, {name = "air"})
+	local after = core.get_node_light(beside)
+	if after ~= 0 then
+		error("check_map: the light stayed after the lamp went: " ..
+				tostring(after))
+	end
+
+	for x = LIGHT_MIN.x, LIGHT_MAX.x do
+		for y = LIGHT_MIN.y, LIGHT_MAX.y do
+			for z = LIGHT_MIN.z, LIGHT_MAX.z do
+				core.set_node({x = x, y = y, z = z}, {name = "air"})
+			end
+		end
+	end
+end
+
 function core.__check_map_read()
 	local node = core.get_node(CHECK_POS)
 	if node.name ~= check_name then
@@ -388,6 +471,7 @@ function core.__check_map_read()
 	end
 	check_vmanip()
 	check_noise()
+	check_light()
 
 	core.log("verbose", "check_map: " .. check_name ..
 			" survived the flush, and the region reads found it")

@@ -2096,12 +2096,20 @@ struct CInstance: public voxelworld::Instance
 			// the map's from then on. A write that carries none takes the
 			// light that was there and is seeded, which is every ordinary
 			// set_voxel. See "the light is stored" in voxelworld's api.h.
-			if(get_sky(first) == 0){
-				if(old_transparent != voxel_transmits_light(nv)){
-					m_light_seeds[LIGHT_SKY].push_back(SkylightSeed{
-							p, get_sky(old_first), old_transparent});
+			const bool now_transparent = voxel_transmits_light(nv);
+			for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
+				const LightField lf = (LightField)f;
+				if(!m_light_maintained[lf])
+					continue;
+				if(get_light(first, lf) != 0)
+					continue;
+				if(old_transparent != now_transparent ||
+						(lf == LIGHT_LAMP &&
+						voxel_light_source(old) != voxel_light_source(nv))){
+					m_light_seeds[lf].push_back(SkylightSeed{
+							p, get_light(old_first, lf), old_transparent});
 				}
-				set_sky(first, get_sky(old_first));
+				set_light(first, get_light(old_first, lf), lf);
 			}
 			nv.planes[0] = first.data;
 		}
@@ -2176,12 +2184,20 @@ struct CInstance: public voxelworld::Instance
 			// writing a plain voxel would otherwise wipe out the light of
 			// one whose transparency did not change and nothing would put
 			// it back, and the change is seeded so the flood can fix it.
-			if(get_sky(nv) == 0){
-				if(old_transparent != voxel_transmits_light(now)){
-					m_light_seeds[LIGHT_SKY].push_back(SkylightSeed{
-							p, get_sky(old_first), old_transparent});
+			const bool now_transparent = voxel_transmits_light(now);
+			for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
+				const LightField lf = (LightField)f;
+				if(!m_light_maintained[lf])
+					continue;
+				if(get_light(nv, lf) != 0)
+					continue;
+				if(old_transparent != now_transparent ||
+						(lf == LIGHT_LAMP &&
+						voxel_light_source(old) != voxel_light_source(now))){
+					m_light_seeds[lf].push_back(SkylightSeed{
+							p, get_light(old_first, lf), old_transparent});
 				}
-				set_sky(nv, get_sky(old_first));
+				set_light(nv, get_light(old_first, lf), lf);
 			}
 		}
 
@@ -2414,17 +2430,23 @@ struct CInstance: public voxelworld::Instance
 						continue;
 				}
 
-				if(m_light_maintained[LIGHT_SKY] && get_sky(nv) == 0){
-					// Light that came with the volume is kept and needs no
-					// seed; this is the generator's path and a generated
-					// world arrives lit. See set_voxel() above.
+				// Light that came with the volume is kept and needs no
+				// seed; this is the generator's path and a generated world
+				// arrives lit. See set_voxel() above.
+				for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
+					const LightField lf = (LightField)f;
+					if(!m_light_maintained[lf] || get_light(nv, lf) != 0)
+						continue;
 					bool old_transparent = voxel_transmits_light(dst_v);
-					if(old_transparent != voxel_transmits_light(src_v)){
-						m_light_seeds[LIGHT_SKY].push_back(SkylightSeed{
+					if(old_transparent != voxel_transmits_light(src_v) ||
+							(lf == LIGHT_LAMP &&
+							voxel_light_source(dst_v) !=
+							voxel_light_source(src_v))){
+						m_light_seeds[lf].push_back(SkylightSeed{
 								pv::Vector3DInt32(x, y, z),
-								get_sky(old), old_transparent});
+								get_light(old, lf), old_transparent});
 					}
-					set_sky(nv, get_sky(old));
+					set_light(nv, get_light(old, lf), lf);
 				}
 
 				dst.setVoxel(nv);
@@ -2548,6 +2570,17 @@ struct CInstance: public voxelworld::Instance
 		return def->fully_empty;
 	}
 
+	// What a voxel makes of its own light, by value. Only asked while lamp
+	// light is maintained, so a world without it pays nothing.
+	uint8_t voxel_light_source(const interface::VoxelSample &v)
+	{
+		if(is_undefined(VoxelInstance(v.planes[0])))
+			return 0;
+		const interface::CachedVoxelDefinition *def =
+				m_voxel_reg->get_cached(v);
+		return def ? def->light_source : 0;
+	}
+
 	bool voxel_transmits_light(const interface::VoxelSample &v)
 	{
 		if(is_undefined(VoxelInstance(v.planes[0])))
@@ -2655,13 +2688,46 @@ struct CInstance: public voxelworld::Instance
 	// pushing each new light value into the blocking neighbours of the voxel
 	// that got it. Only ever raises one, so it is right on its own as long as
 	// no light went away; update_skylight() recomputes the few that did.
+	// Which light the flood below is maintaining. One field is brought up
+	// to date at a time, so this is set for the run rather than threaded
+	// through every helper of it.
+	LightField m_light_running = LIGHT_SKY;
+
+	uint8_t flood_get(const VoxelInstance &v)
+	{
+		return get_light(v, m_light_running);
+	}
+
+	void flood_set(VoxelInstance &v, uint8_t level)
+	{
+		set_light(v, level, m_light_running);
+	}
+
+	uint8_t flood_max()
+	{
+		return light_max(m_light_running);
+	}
+
+	// Light a voxel makes of its own, which is what lamp light floods from:
+	// a torch, a lava flow. The sky has no emitters -- its source is the
+	// open sky above the world and the light already stored in a voxel.
+	uint8_t emitted_at(const pv::Vector3DInt32 &p)
+	{
+		if(m_light_running != LIGHT_LAMP)
+			return 0;
+		VoxelInstance v = light_get(p);
+		const interface::CachedVoxelDefinition *def =
+				m_voxel_reg->get_cached(v, nullptr, false);
+		return def ? def->light_source : 0;
+	}
+
 	void light_bleed_into_blockers(const pv::Vector3DInt32 &p, uint8_t level)
 	{
 		for(size_t k = 0; k < 6; k++){
 			pv::Vector3DInt32 n(p.getX() + LIGHT_OFF[k][0],
 					p.getY() + LIGHT_OFF[k][1], p.getZ() + LIGHT_OFF[k][2]);
 			VoxelInstance nv = light_get(n);
-			if(transmits_light_at(n) || get_sky(nv) >= level)
+			if(transmits_light_at(n) || flood_get(nv) >= level)
 				continue;
 			light_set(n, nv, level);
 		}
@@ -2673,7 +2739,7 @@ struct CInstance: public voxelworld::Instance
 		ChunkBuffer *buf = light_buffer(chunk_p);
 		if(buf == nullptr)
 			return;
-		set_sky(v, level);
+		flood_set(v, level);
 		buf->volume->setVoxelAt(light_local_p(p, chunk_p), v);
 		if(!buf->dirty){
 			buf->dirty = true;
@@ -2712,12 +2778,20 @@ struct CInstance: public voxelworld::Instance
 	// crosses chunk and section boundaries by itself; a section that is not in
 	// memory reads as undefined and stops the light, which keeps an edit next
 	// to the edge of the loaded world from running away.
+	// Every light the world maintains, each in turn
 	void update_skylight()
 	{
+		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++)
+			update_light((LightField)f);
+	}
+
+	void update_light(LightField field)
+	{
 		std::vector<SkylightSeed> seeds;
-		seeds.swap(m_light_seeds[LIGHT_SKY]);
-		if(!m_light_maintained[LIGHT_SKY] || seeds.empty())
+		seeds.swap(m_light_seeds[field]);
+		if(!m_light_maintained[field] || seeds.empty())
 			return;
+		m_light_running = field;
 		auto t0 = std::chrono::steady_clock::now();
 		m_light_buf = nullptr;
 		m_light_section = nullptr;
@@ -2736,14 +2810,27 @@ struct CInstance: public voxelworld::Instance
 				// It took its light with it
 				unlight.push_back(LightNode{seed.p, seed.old_level});
 				blockers.push_back(seed.p);
+				// Unless what arrived makes its own light. A torch is a
+				// solid node that nothing sees through and it still lights
+				// the room: an emitter is a source whether or not light
+				// passes through it.
+				const uint8_t emitted = emitted_at(seed.p);
+				if(emitted > 0){
+					light_set(seed.p, v, emitted);
+					spread.push_back(LightNode{seed.p, emitted});
+				}
 			} else if(!seed.was_transparent && now_transparent){
-				// It has to be filled from around it, unless it already
-				// holds light -- a voxel the generator lit is a source,
-				// which is what makes the sky reach the ground in a world
-				// whose region top is thirty thousand voxels up and never
-				// loaded
-				uint8_t l = is_below_open_sky(seed.p) ? sky_max() :
-						get_sky(v);
+				// It has to be filled from around it, unless it is a source
+				// itself: the open sky above the world, a voxel that makes
+				// its own light, or one the generator lit -- which is what
+				// makes the sky reach the ground in a world whose region
+				// top is thirty thousand voxels up and never loaded
+				uint8_t l = flood_get(v);
+				if(field == LIGHT_SKY && is_below_open_sky(seed.p))
+					l = flood_max();
+				const uint8_t emitted = emitted_at(seed.p);
+				if(emitted > l)
+					l = emitted;
 				light_set(seed.p, v, l);
 				if(l > 0){
 					spread.push_back(LightNode{seed.p, l});
@@ -2757,8 +2844,23 @@ struct CInstance: public voxelworld::Instance
 					VoxelInstance nv = light_get(n);
 					if(!transmits_light_at(n))
 						continue;
-					if(get_sky(nv) > 0)
-						spread.push_back(LightNode{n, get_sky(nv)});
+					if(flood_get(nv) > 0)
+						spread.push_back(LightNode{n, flood_get(nv)});
+				}
+			} else {
+				// Transparency did not change, so what changed is what the
+				// voxel makes of its own light: a torch put down or taken
+				// away. More than it holds makes it a source; less means
+				// the light it was giving has to be taken back.
+				const uint8_t emitted = emitted_at(seed.p);
+				const uint8_t held = flood_get(v);
+				if(emitted > held){
+					light_set(seed.p, v, emitted);
+					spread.push_back(LightNode{seed.p, emitted});
+					light_bleed_into_blockers(seed.p, emitted);
+				} else if(seed.old_level > 0 && emitted < seed.old_level){
+					light_set(seed.p, v, 0);
+					unlight.push_back(LightNode{seed.p, seed.old_level});
 				}
 			}
 		}
@@ -2782,11 +2884,12 @@ struct CInstance: public voxelworld::Instance
 					blockers.push_back(n);
 					continue;
 				}
-				uint8_t nl = get_sky(nv);
+				uint8_t nl = flood_get(nv);
 				if(nl == 0)
 					continue;
-				bool lit_from_above = (k == LIGHT_DOWN &&
-						node.level == sky_max() && nl == sky_max());
+				bool lit_from_above = (field == LIGHT_SKY &&
+						k == LIGHT_DOWN && node.level == flood_max() &&
+						nl == flood_max());
 				if(nl < node.level || lit_from_above){
 					light_set(n, nv, 0);
 					unlight.push_back(LightNode{n, nl});
@@ -2806,9 +2909,16 @@ struct CInstance: public voxelworld::Instance
 			// after it was queued, and spreading the level it used to have
 			// would put light back where it was just taken from.
 			VoxelInstance v = light_get(node.p);
-			if(!transmits_light_at(node.p))
+			const uint8_t emitted = emitted_at(node.p);
+			// A voxel light does not pass through spreads nothing, unless
+			// it is making the light itself
+			if(!transmits_light_at(node.p) && emitted == 0)
 				continue;
-			node.level = get_sky(v);
+			node.level = flood_get(v);
+			if(emitted > node.level){
+				node.level = emitted;
+				light_set(node.p, v, node.level);
+			}
 			if(node.level == 0)
 				continue;
 			for(size_t k = 0; k < 6; k++){
@@ -2818,14 +2928,14 @@ struct CInstance: public voxelworld::Instance
 						node.p.getZ() + LIGHT_OFF[k][2]);
 				VoxelInstance nv = light_get(n);
 				if(!transmits_light_at(n)){
-					if(get_sky(nv) < node.level)
+					if(flood_get(nv) < node.level)
 						light_set(n, nv, node.level);
 					continue;
 				}
-				uint8_t target = (k == LIGHT_DOWN &&
-						node.level == sky_max()) ?
-						sky_max() : node.level - 1;
-				if(target > get_sky(nv)){
+				uint8_t target = (field == LIGHT_SKY &&
+						k == LIGHT_DOWN && node.level == flood_max()) ?
+						flood_max() : node.level - 1;
+				if(target > flood_get(nv)){
 					light_set(n, nv, target);
 					spread.push_back(LightNode{n, target});
 				}
@@ -2849,17 +2959,20 @@ struct CInstance: public voxelworld::Instance
 			VoxelInstance v = light_get(p);
 			if(transmits_light_at(p))
 				continue;
-			uint8_t best = 0;
+			// A voxel that makes its own light keeps it whatever is
+			// around it; everything else wears the brightest light beside
+			// it, which is what the mesher reads off a face.
+			uint8_t best = emitted_at(p);
 			for(size_t k = 0; k < 6; k++){
 				pv::Vector3DInt32 np(
 						p.getX() + LIGHT_OFF[k][0],
 						p.getY() + LIGHT_OFF[k][1],
 						p.getZ() + LIGHT_OFF[k][2]);
 				VoxelInstance nv = light_get(np);
-				if(transmits_light_at(np) && get_sky(nv) > best)
-					best = get_sky(nv);
+				if(transmits_light_at(np) && flood_get(nv) > best)
+					best = flood_get(nv);
 			}
-			if(get_sky(v) != best)
+			if(flood_get(v) != best)
 				light_set(p, v, best);
 		}
 
@@ -2969,11 +3082,14 @@ struct CInstance: public voxelworld::Instance
 
 	void set_light_maintained(LightField field, bool maintained)
 	{
-		if(field == LIGHT_LAMP && maintained){
-			// Nothing floods it yet; see "The light: a field a game asks to
-			// have maintained" in doc/plan/voxel_data_model_plan.md
-			throw Exception("voxelworld: lamp light is not maintained by "
-					"this build");
+		if(maintained && !light_field(field).bound()){
+			throw Exception(ss_()+"voxelworld: this world's format has "
+					"nowhere to put "+(field == LIGHT_LAMP ? "lamp" : "sky")+
+					" light");
+		}
+		if(field == LIGHT_LAMP){
+			m_light_maintained[LIGHT_LAMP] = maintained;
+			return;
 		}
 		set_skylight_enabled_impl(maintained);
 	}
