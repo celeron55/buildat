@@ -56,7 +56,7 @@ int main(int argc, char *argv[])
 
 	std::string module_path;
 
-	const char opts[100] = "hm:r:i:S:U:c:l:L:C:A:P:";
+	const char opts[100] = "hm:r:i:S:D:U:c:l:L:C:A:P:";
 	const char usagefmt[1000] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
@@ -64,6 +64,7 @@ int main(int argc, char *argv[])
 			"  -r [rccpp_build_path]Specify runtime compiled C++ build path\n"
 			"  -i [interface_path]  Specify path to interface headers\n"
 			"  -S [share_path]      Specify path to share/\n"
+			"  -D [user_path]       Specify user/ path (saves live here)\n"
 			"  -U [urho3d_path]     Specify Urho3D path\n"
 			"  -c [command]         Set compiler command\n"
 			"  -l [integer]         Set maximum log level (0...5)\n"
@@ -96,6 +97,10 @@ int main(int argc, char *argv[])
 		case 'S':
 			log_i(MODULE, "config.share_path: %s", c55_optarg);
 			config.set("share_path", c55_optarg);
+			break;
+		case 'D':
+			log_i(MODULE, "config.user_path: %s", c55_optarg);
+			config.set("user_path", c55_optarg);
 			break;
 		case 'U':
 			log_i(MODULE, "config.urho3d_path: %s", c55_optarg);
@@ -196,6 +201,12 @@ int main(int argc, char *argv[])
 			if(state->is_shutdown_requested(&exit_status, &shutdown_reason))
 				break;
 		}
+
+		// Whatever a module is holding gets one last chance to reach the
+		// disk. Synchronous, because the main loop is over and a queued
+		// event would never be handled; before the module threads stop,
+		// because a module's work happens in one.
+		state->emit_event_synchronously(interface::Event("core:shutdown"));
 
 		state->thread_request_stop();
 		state->thread_join();

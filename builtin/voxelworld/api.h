@@ -6,6 +6,7 @@
 #include "interface/module.h"
 #include "interface/voxel.h"
 #include "interface/voxel_volume.h"
+#include "storage/api.h"
 #include <PolyVoxCore/Vector.h>
 #include <PolyVoxCore/Region.h>
 #include <PolyVoxCore/RawVolume.h>
@@ -74,6 +75,28 @@ namespace voxelworld
 	struct Instance
 	{
 		virtual interface::VoxelRegistry* get_voxel_reg() = 0;
+
+		// Persist this world in a save, under a name of its own -- a save
+		// holds zero, one or many worlds, so the name is what separates
+		// them. Until this is called nothing is persisted, which is what
+		// every game did before it existed: generate and forget.
+		//
+		// Call it after registering voxels and before asking for any
+		// section. If the save already has a registry for this world, that
+		// registry replaces the one the game just built, ids and all: the
+		// numbering a save was written under is the numbering it is read
+		// under. Sections already in the save are loaded instead of
+		// generated.
+		//
+		// The Save belongs to whoever opened it, and closing it while a
+		// world still points at it is a use-after-free. Pass nullptr to stop
+		// persisting first.
+		virtual void set_save(storage::Save *save, const ss_ &world_name) = 0;
+
+		// Write everything out now: the registry and every loaded section.
+		// Happens by itself when a section is unloaded and at shutdown, so
+		// this is for a game that wants a checkpoint of its own.
+		virtual void save() = 0;
 
 		virtual void add_commit_hook(up_<CommitHook> hook) = 0;
 
