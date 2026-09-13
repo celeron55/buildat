@@ -55,6 +55,8 @@ extern "C" {
 #include <Model.h>
 #include <Material.h>
 #include <ResourceCache.h>
+#include <Image.h>
+#include <MemoryBuffer.h>
 #include <Context.h>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STBI_WRITE_NO_STDIO
@@ -337,6 +339,19 @@ static uint8_t facing_variant_of_param(const ss_ &facing, uint8_t param)
 	if(facing == "wallmounted")
 		return (uint8_t)(param & 0x07);
 	return 0;
+}
+
+// Which colour a param2 picks out of a palette of this many colours.
+// Luanti stretches a palette over the 256 param2 values -- each pixel fills
+// 256/pixels of them -- so the colour changes only every step, and the bits
+// below it are the direction. A sane game ships exactly as many colours as
+// the bits above the direction can count, and then this is those bits.
+static size_t palette_slot_of_param(size_t slots, uint8_t param)
+{
+	if(slots <= 1)
+		return 0;
+	size_t slot = (size_t)param / (256 / slots);
+	return slot < slots ? slot : slots - 1;
 }
 
 // The facedir a variant of this kind stands for
@@ -635,9 +650,11 @@ struct Module: public interface::Module, public luanti::Interface
 	// around, and what says which sections are active.
 	sm_<ss_, pv::Vector3DInt32> m_player_pos;
 	pv::Vector3DInt16 m_section_size{0, 0, 0};
-	// The media file names the game shipped, so that a tile naming one can
-	// be handed to the client as it is
-	set_<ss_> m_served_media;
+	// The media the game shipped, name -> path: a tile naming one can be
+	// handed to the client as it is, and a palette has to be read here
+	sm_<ss_, ss_> m_served_media;
+	// The colours of each palette that has been read, by file name
+	sm_<ss_, sv_<uint32_t>> m_palettes;
 	// See glass_edge_material()
 	sm_<ss_, interface::EdgeMaterialId> m_glass_edge_materials;
 	uint32_t m_next_glass_edge_material = 10;
@@ -1987,6 +2004,26 @@ struct Module: public interface::Module, public luanti::Interface
 		assert(facing_variant_of_param("facedir", 31) == 7); // 31 % 24
 		assert(facing_variant_of_param("4dir", 0xfe) == 2);
 
+		// A palette is stretched over the 256 param2 values, so a colour
+		// covers as many of them as the directions under it: devtest's
+		// facedir palette is eight colours and its facedir is five bits.
+		assert(palette_slot_of_param(8, 0) == 0);
+		assert(palette_slot_of_param(8, 31) == 0);
+		assert(palette_slot_of_param(8, 32) == 1);
+		assert(palette_slot_of_param(8, 255) == 7);
+		assert(palette_slot_of_param(64, 4) == 1);   // color4dir
+		assert(palette_slot_of_param(32, 8) == 1);   // colorwallmounted
+		assert(palette_slot_of_param(256, 137) == 137); // color
+		assert(palette_slot_of_param(1, 255) == 0);
+		// And a variant index stays inside the byte that indexes them: a
+		// colour times a direction is never more than the param itself
+		assert(palette_slot_of_param(8, 255) * 24 +
+				facing_variant_of_param("facedir", 255) < 256);
+		assert(palette_slot_of_param(64, 255) * 4 +
+				facing_variant_of_param("4dir", 255) < 256);
+		assert(palette_slot_of_param(32, 255) * 8 +
+				facing_variant_of_param("wallmounted", 255) < 256);
+
 		// A fence is a post that is always drawn and four pairs of bars that
 		// are drawn only when their direction connects, which is what
 		// connect_dir says
@@ -2173,6 +2210,65 @@ struct Module: public interface::Module, public luanti::Interface
 		return seg;
 	}
 
+	// The colours in a palette image, row by row and at most 256 of them,
+	// which is the order Luanti reads one in. A node with a palette wears
+	// the colour its param2 picks; Luanti stretches the palette over the
+	// 256 param values, so an eight-colour palette changes every
+	// thirty-two, and that stretching is done where the variants are built.
+	//
+	// Read here and not on the client because what the client is sent is a
+	// texture name, and the name is the tile through a modifier that
+	// multiplies it by one of these.
+	const sv_<uint32_t>& palette_colours(const ss_ &name)
+	{
+		auto cached = m_palettes.find(name);
+		if(cached != m_palettes.end())
+			return cached->second;
+		sv_<uint32_t> &out = m_palettes[name];
+		auto it = m_served_media.find(name);
+		if(it == m_served_media.end()){
+			log_w(MODULE, "palette \"%s\" was not shipped", cs(name));
+			return out;
+		}
+		std::ifstream ifs(it->second, std::ios::binary);
+		std::ostringstream os;
+		os<<ifs.rdbuf();
+		const ss_ data = os.str();
+		if(data.empty()){
+			log_w(MODULE, "palette \"%s\" is empty", cs(name));
+			return out;
+		}
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			magic::Image img(imc->get_context());
+			magic::MemoryBuffer buf(data.c_str(), (unsigned)data.size());
+			if(!img.Load(buf)){
+				log_w(MODULE, "palette \"%s\" did not load", cs(name));
+				return;
+			}
+			const int w = img.GetWidth(), h = img.GetHeight();
+			for(int y = 0; y < h && (int)out.size() < 256; y++){
+				for(int x = 0; x < w && (int)out.size() < 256; x++){
+					magic::Color c = img.GetPixel(x, y);
+					out.push_back(
+							((uint32_t)(c.r_ * 255.0f + 0.5f) << 16) |
+							((uint32_t)(c.g_ * 255.0f + 0.5f) << 8) |
+							(uint32_t)(c.b_ * 255.0f + 0.5f));
+				}
+			}
+		});
+		log_v(MODULE, "palette \"%s\": %zu colours", cs(name), out.size());
+		return out;
+	}
+
+	// "#rrggbb", which is what a texture modifier takes
+	static ss_ hex_colour(uint32_t rgb)
+	{
+		char buf[8];
+		snprintf(buf, sizeof buf, "#%02x%02x%02x",
+				(rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff);
+		return ss_(buf);
+	}
+
 	bool plain_media_name(const ss_ &tile)
 	{
 		if(tile.empty())
@@ -2224,6 +2320,8 @@ struct Module: public interface::Module, public luanti::Interface
 		size_t n_shaped = 0;
 		size_t n_liquid = 0;
 		size_t n_facing_nodes = 0;
+		size_t n_palette_nodes = 0;
+		size_t n_palette_variants = 0;
 		for(size_t i = 1; i <= n; i++){
 			lua_rawgeti(L, -1, (int)i);
 			if(!lua_istable(L, -1)){
@@ -2244,6 +2342,7 @@ struct Module: public interface::Module, public luanti::Interface
 			ss_ facing = table_string(L, "facing");
 			ss_ overlay_tile = table_string(L, "overlay_tile");
 			ss_ liquid_group = table_string(L, "liquid_group");
+			ss_ palette = table_string(L, "palette");
 			int raillike_group = (int)table_number(L, "raillike_group", 0);
 			int liquid_range = (int)table_number(L, "liquid_range",
 					LIQUID_LEVELS);
@@ -2476,6 +2575,72 @@ struct Module: public interface::Module, public luanti::Interface
 				}
 				n_facing_nodes++;
 			}
+			// A palette: the node wears the colour its param2 picks, as its
+			// own tiles through a modifier that multiplies them. Colours
+			// multiply the directions rather than permuting with them, so
+			// this is the facing variants once per colour -- eight colours
+			// of a facedir node are 192 variants but 48 textures.
+			//
+			// A node whose tiles were not shipped wears a generated flat
+			// colour and is left alone: there is no image for a modifier to
+			// be applied to.
+			if(!palette.empty() && !any_fallback){
+				const sv_<uint32_t> &colours = palette_colours(palette);
+				sv_<interface::VoxelVariant> base = vdef.variants;
+				if(base.empty())
+					base.push_back(interface::VoxelVariant());
+				const size_t n_dirs = base.size();
+				// Luanti stretches a palette over the 256 param2 values, so
+				// what a param picks is the pixel at param * pixels / 256 --
+				// which is also what leaves the direction bits alone,
+				// because a sane palette has exactly as many colours as the
+				// bits above the direction can count
+				size_t slots = colours.size();
+				if(slots > 256 / n_dirs)
+					slots = 256 / n_dirs;
+				if(slots > 0){
+					sv_<interface::VoxelVariant> coloured;
+					coloured.reserve(slots * n_dirs);
+					for(size_t c = 0; c < slots; c++){
+						// The tile through a modifier that multiplies it,
+						// which is an expression like any other: the client
+						// composes it and what the definition carries is the
+						// name it composes it under
+						const ss_ mul = "^[multiply:" + hex_colour(
+								colours[c * colours.size() / slots]);
+						ss_ tinted[7];
+						for(size_t f = 0; f < 6; f++){
+							if(has_tiles && !tiles[f].empty())
+								tinted[f] = texture_of_tile(tiles[f] + mul);
+						}
+						if(!overlay_tile.empty())
+							tinted[6] = texture_of_tile(overlay_tile + mul);
+						for(size_t i = 0; i < n_dirs; i++){
+							interface::VoxelVariant var = base[i];
+							for(size_t f = 0; f < 6; f++){
+								var.textures.push_back(tinted[f].empty() ?
+										interface::AtlasSegmentDefinition() :
+										make_segment(tinted[f]));
+							}
+							if(!tinted[6].empty()){
+								var.textures.push_back(
+										make_segment(tinted[6]));
+							}
+							coloured.push_back(var);
+						}
+					}
+					vdef.variants = coloured;
+					for(size_t p = 0; p < 256; p++){
+						const size_t c = palette_slot_of_param(slots,
+								(uint8_t)p);
+						vdef.variant_of_param[p] = (uint8_t)(c * n_dirs +
+								(n_dirs > 1 ? facing_variant_of_param(
+								facing, (uint8_t)p) : 0));
+					}
+					n_palette_nodes++;
+					n_palette_variants += coloured.size();
+				}
+			}
 			if(!liquid_group.empty()){
 				vdef.is_liquid = true;
 				vdef.shape_group = liquid_shape_group(liquid_group);
@@ -2503,9 +2668,11 @@ struct Module: public interface::Module, public luanti::Interface
 		serve_node_textures(textures);
 		log_i(MODULE, "%zu node types in the voxel registry: %zu have a shape "
 				"of their own, %zu of those are liquids, %zu turn with their "
-				"param2, %zu wear a generated colour because a tile is a "
+				"param2, %zu wear a colour out of a palette (%zu variants), "
+				"%zu wear a generated colour because a tile is a "
 				"texture modifier or was not shipped",
-				n, n_shaped, n_liquid, n_facing_nodes, n_fallback);
+				n, n_shaped, n_liquid, n_facing_nodes, n_palette_nodes,
+				n_palette_variants, n_fallback);
 	}
 
 	// The game's own media, named the way Luanti names it: by basename and
@@ -2535,7 +2702,7 @@ struct Module: public interface::Module, public luanti::Interface
 				i->add_file_path(media_resource_name(pair.first), pair.second);
 		});
 		for(const auto &pair : files)
-			m_served_media.insert(pair.first);
+			m_served_media[pair.first] = pair.second;
 		log_i(MODULE, "%zu media files from %zu directories under %s",
 				files.size(), dirs.size(), cs(game_path));
 	}

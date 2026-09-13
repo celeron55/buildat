@@ -298,6 +298,21 @@ struct CVoxelRegistry: public VoxelRegistry
 					AtlasSegmentReference() :
 					atlas_reg->find_or_add_segment(seg_def);
 		}
+		// And the ones a variant wears instead of the definition's, which is
+		// how a palette entry gets its own tinted tiles; see
+		// VoxelVariant::textures
+		for(size_t vi = 0; vi < cache.variants.size() &&
+				vi < def.variants.size(); vi++){
+			const VoxelVariant &def_variant = def.variants[vi];
+			VoxelVariant &variant = cache.variants[vi];
+			variant.texture_refs.resize(def_variant.textures.size());
+			for(size_t i = 0; i < def_variant.textures.size(); i++){
+				const AtlasSegmentDefinition &seg_def = def_variant.textures[i];
+				variant.texture_refs[i] = seg_def.resource_name == "" ?
+						AtlasSegmentReference() :
+						atlas_reg->find_or_add_segment(seg_def);
+			}
+		}
 		// Caller sets cache.textures_valid = true
 	}
 

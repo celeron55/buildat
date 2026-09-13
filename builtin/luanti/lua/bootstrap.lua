@@ -589,6 +589,13 @@ local FACING_OF_PARAMTYPE2 = {
 	wallmounted = "wallmounted", colorwallmounted = "wallmounted",
 }
 
+-- And which of them take their colour out of a palette. Luanti ignores a
+-- palette on any other node, so this is also what says whether to read one.
+local PALETTED_PARAMTYPE2 = {
+	color = true, colorfacedir = true, color4dir = true,
+	colorwallmounted = true, colordegrotate = true,
+}
+
 local function node_boxes(def)
 	local nb = def and def.node_box
 	if type(nb) ~= "table" or nb.type ~= "fixed" then
@@ -670,6 +677,10 @@ function core.__voxel_defs()
 			-- the game meant them to be seen through.
 			alpha_blend = (def and def.use_texture_alpha == "blend") or false,
 			facing = def and FACING_OF_PARAMTYPE2[def.paramtype2] or nil,
+			-- The palette its param2 picks a colour from, if it has one:
+			-- the module reads the image and gives each colour a variant
+			palette = (def and def.palette and
+					PALETTED_PARAMTYPE2[def.paramtype2]) and def.palette or nil,
 			-- Which rails this one reaches: Luanti's connect_to_raillike,
 			-- an id from core.raillike_group(). Rails of the same id join.
 			raillike_group = (drawtype == "raillike") and

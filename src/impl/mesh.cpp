@@ -991,7 +991,11 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		// Get texture coordinates (contained in AtlasSegmentCache)
 		const uint tile = variant ? (variant->tile_order[face_id] < 6 ?
 				variant->tile_order[face_id] : face_id) : face_id;
-		AtlasSegmentReference seg_ref = voxel_def0->textures[tile];
+		// A variant that names textures of its own wears those; see
+		// VoxelVariant::textures, which a palette entry is made of
+		AtlasSegmentReference seg_ref =
+				(variant && tile < variant->texture_refs.size()) ?
+				variant->texture_refs[tile] : voxel_def0->textures[tile];
 		if(seg_ref.atlas_id == interface::ATLAS_UNDEFINED){
 			// This is usually intentional for invisible voxels
 			//log_t(MODULE, "Voxel %i face %i atlas undefined", voxel_id0, face_id);
@@ -1398,7 +1402,11 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 					// one of its extra textures; see
 					// VoxelDefinition::extra_textures
 					AtlasSegmentReference seg_ref;
-					if(quad.tile < 6){
+					if(variant && quad.tile < variant->texture_refs.size()){
+						// The variant's own, which is a palette entry's
+						// tinted tile; see VoxelVariant::textures
+						seg_ref = variant->texture_refs[quad.tile];
+					} else if(quad.tile < 6){
 						seg_ref = def->textures[quad.tile];
 					} else {
 						const size_t i = quad.tile - 6;
