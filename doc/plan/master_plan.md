@@ -103,13 +103,15 @@ What is left is, in order:
    `texmod.lua`, and devtest's generated colours went from 112 of 390 node
    types to 2. See "what a module's client half is allowed to do" in the
    module plan.
-2. **M6, the launcher and its map.** The menu -- which save, and which game
-   it needs -- is client work of a much smaller kind, and
-   `ui_utils.vertical_menu` already draws that shape elsewhere. The map is
-   the bigger half: the world is 3x3x3 sections today, which is why the
-   importer drops most of a real Luanti world, and a map that loads and
-   unloads around a player is what the mapgen seam was deferred until there
-   was something to measure. There is something to measure now.
+2. **M6, the launcher and its map. The menu is built (2026-09-13).** A
+   client that connects before a world is chosen draws the list of saves and
+   the games they need, and picks one or makes one; a save records the
+   gameid it needs, so the two facts Luanti's menu made one are two. The map
+   is what is left, and it is the bigger half: the world is 3x3x3 sections
+   today, which is why the importer drops most of a real Luanti world, and a
+   map that loads and unloads around a player is what the mapgen seam was
+   deferred until there was something to measure. There is something to
+   measure now.
 3. **What is left of M7:** `map_meta.txt`'s seed and a block's node timers
    and static objects. The seed wants a mapgen and the objects want a
    `static_save` that means something. The player database is read

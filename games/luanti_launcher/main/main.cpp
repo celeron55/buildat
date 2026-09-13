@@ -24,7 +24,10 @@
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 #include <cereal/archives/portable_binary.hpp>
+#include <cereal/types/vector.hpp>
+#include <cereal/types/string.hpp>
 #include "interface/polyvox_cereal.h"
 #include <PolyVoxCore/Vector.h>
 #define MODULE "main"
@@ -59,6 +62,9 @@ struct Module: public interface::Module
 	// does.
 	luanti::SceneReference m_scene = nullptr;
 	sv_<network::PeerInfo::Id> m_waiting_peers;
+	// A world runs once: what a second choice would be is a second Luanti
+	// environment in one server, which is not what the module is
+	bool m_starting = false;
 
 	void init()
 	{
@@ -69,6 +75,12 @@ struct Module: public interface::Module
 				"network:packet_received/main:dig"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:place"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:get_saves"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:open"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:create"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:where"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
@@ -83,6 +95,12 @@ struct Module: public interface::Module
 		EVENT_TYPEN("network:packet_received/main:dig", on_dig,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:place", on_place,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:get_saves", on_get_saves,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:open", on_open,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:create", on_create,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:where", on_where,
 				network::Packet)
@@ -191,9 +209,171 @@ struct Module: public interface::Module
 	{
 		if(!m_scene){
 			m_waiting_peers.push_back(event.recipient);
+			// Nothing to look at yet, so what the client draws is the menu:
+			// which save, and which game it needs. A world that was chosen
+			// before this client arrived is already on its way up, and the
+			// menu says so rather than offering another.
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(event.recipient, "core:run_script",
+						"buildat.run_script_file(\"main/menu.lua\")");
+			});
 			return;
 		}
 		show_world_to(event.recipient);
+	}
+
+	// The two lists the menu is: every save this game has, with the Luanti
+	// game each one says it needs, and every Luanti game there is to choose
+	// from. Flat, with the number of saves leading, because that is what one
+	// array of strings can carry.
+	void on_get_saves(const network::Packet &packet)
+	{
+		sv_<ss_> flat;
+		sv_<ss_> saves;
+		storage::access(m_server, [&](storage::Interface *istorage){
+			sv_<storage::SaveInfo> infos = istorage->list();
+			// The one played last is the one most likely wanted next
+			std::sort(infos.begin(), infos.end(),
+					[](const storage::SaveInfo &a, const storage::SaveInfo &b){
+				return a.modified_us > b.modified_us;
+			});
+			for(const storage::SaveInfo &info : infos)
+				saves.push_back(info.name);
+		});
+		flat.push_back(itos(saves.size()));
+		for(const ss_ &name : saves){
+			flat.push_back(name);
+			flat.push_back(gameid_of_save(name));
+		}
+		for(const ss_ &id : list_games())
+			flat.push_back(id);
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(flat);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(packet.sender, "main:saves", os.str());
+		});
+	}
+
+	// A save records which Luanti game it needs, as a key in the save rather
+	// than in a world.mt: which save and which game it needs were always two
+	// facts pretending to be one.
+	ss_ gameid_of_save(const ss_ &name)
+	{
+		ss_ gameid;
+		storage::access(m_server, [&](storage::Interface *istorage){
+			storage::Save *save = istorage->open(name);
+			if(!save)
+				return;
+			save->store("main")->get("gameid", gameid);
+			istorage->close(save);
+		});
+		return gameid;
+	}
+
+	sv_<ss_> list_games()
+	{
+		sv_<ss_> out;
+		ss_ dir = luanti_path()+"/games";
+		for(const interface::fs::Node &n : interface::fs::list_directory(dir)){
+			if(!n.is_directory || n.name == "." || n.name == "..")
+				continue;
+			if(interface::fs::path_exists(dir+"/"+n.name+"/game.conf"))
+				out.push_back(n.name);
+		}
+		// The one buildat ships, so that there is something to choose
+		// without a Luanti installation
+		if(interface::fs::path_exists(bundled_game_path()+"/game.conf"))
+			out.push_back("minimal");
+		std::sort(out.begin(), out.end());
+		return out;
+	}
+
+	// Opening one that is there, and making one that is not. Split on
+	// purpose: a typo in a name cannot silently start a new game instead of
+	// opening the old one.
+	void on_open(const network::Packet &packet)
+	{
+		sv_<ss_> values;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(values);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:open: %s", e.what());
+			return;
+		}
+		if(values.empty())
+			return;
+		ss_ name = values[0];
+		ss_ gameid = gameid_of_save(name);
+		if(gameid == ""){
+			menu_error(packet.sender, "The save "+name+" does not say which"
+					" game it needs");
+			return;
+		}
+		start_world(gameid, name, packet.sender);
+	}
+
+	void on_create(const network::Packet &packet)
+	{
+		sv_<ss_> values;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(values);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:create: %s", e.what());
+			return;
+		}
+		if(values.size() < 2)
+			return;
+		ss_ name = values[0], gameid = values[1];
+		bool valid = false;
+		storage::access(m_server, [&](storage::Interface *istorage){
+			valid = istorage->valid_name(name);
+		});
+		if(!valid){
+			menu_error(packet.sender, "\""+name+"\" is not a name a save can"
+					" have");
+			return;
+		}
+		if(find_game(gameid).empty()){
+			menu_error(packet.sender, "There is no game called "+gameid);
+			return;
+		}
+		storage::Save *save = nullptr;
+		storage::access(m_server, [&](storage::Interface *istorage){
+			save = istorage->create(name);
+			if(save){
+				save->store("main")->set("gameid", gameid);
+				istorage->close(save);
+			}
+		});
+		if(!save){
+			menu_error(packet.sender, "There is already a save called "+name);
+			return;
+		}
+		start_world(gameid, name, packet.sender);
+	}
+
+	void menu_error(network::PeerInfo::Id peer, const ss_ &message)
+	{
+		log_w(MODULE, "%s", cs(message));
+		if(peer == 0)
+			return;
+		sv_<ss_> values;
+		values.push_back(message);
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(values);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "main:menu_error", os.str());
+		});
 	}
 
 	void show_world_to(network::PeerInfo::Id peer)
@@ -202,6 +382,9 @@ struct Module: public interface::Module
 			ireplicate->assign_scene_to_peer(m_scene, peer);
 		});
 		network::access(m_server, [&](network::Interface *inetwork){
+			// The menu takes itself away first: it is a script of its own
+			// and has no other way of knowing that it is done with
+			inetwork->send(peer, "main:menu_done", "");
 			inetwork->send(peer, "core:run_script",
 					"buildat.run_script_file(\"main/init.lua\")");
 		});
@@ -288,6 +471,8 @@ struct Module: public interface::Module
 		return "";
 	}
 
+	// Without one of these the game waits for a menu choice; with one it
+	// runs what the environment says, which is what every check here does.
 	void on_start()
 	{
 		ss_ gameid;
@@ -296,51 +481,59 @@ struct Module: public interface::Module
 		// A game by name: what the visual check runs, and what anyone wanting
 		// the bundled game wants.
 		const char *wanted_game = getenv("BUILDAT_LUANTI_GAME");
+		const char *wanted_world = getenv("BUILDAT_LUANTI_WORLD");
 		if(wanted_game && wanted_game[0]){
 			gameid = wanted_game;
-			// Which save and which game it needs are two facts, and the
-			// menu M6 is about is where they stop pretending to be one.
-			// Until then the save is named after the game unless something
-			// says otherwise, which is what running two imports of the same
-			// game into two saves needs.
+			// The save is named after the game unless something says
+			// otherwise, which is what running two imports of the same game
+			// into two saves needs.
 			const char *wanted_save = getenv("BUILDAT_LUANTI_SAVE");
 			world_name = (wanted_save && wanted_save[0]) ? wanted_save :
 					gameid+"_world";
-		} else {
-			sv_<World> worlds = list_worlds();
-			if(worlds.empty()){
-				m_server->shutdown(1, "No worlds in "+luanti_path()+"/worlds;"
-						" try BUILDAT_LUANTI_GAME=minimal");
+		} else if(wanted_world && wanted_world[0]){
+			// A Luanti world directory, read for the one thing it knows that
+			// nothing else does -- which game it wants. What is run is a
+			// buildat save of the same name.
+			for(const World &w : list_worlds()){
+				if(w.name == wanted_world){
+					gameid = w.gameid;
+					world_name = w.name;
+				}
+			}
+			if(gameid == ""){
+				m_server->shutdown(1, ss_()+"No world called "+wanted_world);
 				return;
 			}
-			const char *wanted = getenv("BUILDAT_LUANTI_WORLD");
-			const World *chosen = &worlds[0];
-			if(wanted){
-				chosen = nullptr;
-				for(const World &w : worlds){
-					if(w.name == wanted)
-						chosen = &w;
-				}
-				if(!chosen){
-					m_server->shutdown(1, ss_()+"No world called "+wanted);
-					return;
-				}
-			}
-			// The Luanti world is read for the one thing it knows that
-			// nothing else does -- which game it wants -- and for nothing
-			// else. What is run is a buildat save of the same name; when
-			// the importer exists (M7) it is what fills that save from this
-			// directory's map.sqlite.
-			gameid = chosen->gameid;
-			world_name = chosen->name;
-		}
-
-		ss_ game_path = find_game(gameid);
-		if(game_path.empty()){
-			m_server->shutdown(1, "World "+world_name+" wants game "+gameid+
-					", which is not in "+luanti_path()+"/games");
+		} else {
+			// Whoever connects picks; see on_get_saves()
+			log_i(MODULE, "Waiting for a save to be chosen");
 			return;
 		}
+		start_world(gameid, world_name, 0);
+	}
+
+	// Runs the game in the save, or says why it cannot. peer is who asked,
+	// for the saying; zero is nobody, and then a failure is fatal because
+	// nothing was there to ask.
+	void start_world(const ss_ &gameid, const ss_ &world_name,
+			network::PeerInfo::Id peer)
+	{
+		if(m_starting){
+			menu_error(peer, "A world is already starting");
+			return;
+		}
+		ss_ game_path = find_game(gameid);
+		if(game_path.empty()){
+			ss_ message = "World "+world_name+" wants game "+gameid+
+					", which is not in "+luanti_path()+"/games";
+			if(peer == 0){
+				m_server->shutdown(1, message);
+				return;
+			}
+			menu_error(peer, message);
+			return;
+		}
+		m_starting = true;
 
 		// The world runs in a buildat save and never in a Luanti world
 		// directory. Nothing here writes to user/luanti at any point: a
@@ -355,10 +548,18 @@ struct Module: public interface::Module
 				save = istorage->create(world_name);
 		});
 		if(!save){
-			m_server->shutdown(1, "Could not open or create the save "+
-					world_name);
+			ss_ message = "Could not open or create the save "+world_name;
+			m_starting = false;
+			if(peer == 0){
+				m_server->shutdown(1, message);
+				return;
+			}
+			menu_error(peer, message);
 			return;
 		}
+		// Which game a save needs is the save's to remember, so that the
+		// menu can say it without opening the game
+		save->store("main")->set("gameid", gameid);
 		log_i(MODULE, "Running world %s (game %s) in %s",
 				cs(world_name), cs(gameid), cs(save->path()));
 		// A file of Lua into the game's environment, before its mods load.

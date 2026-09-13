@@ -966,7 +966,30 @@ two things M1 disproved about the build, are in
   item it is -- which is the forked client's, and the attachments and bones
   a scene node does not carry.
 
-- **M6 -- the launcher.** `games/luanti_launcher` as described.
+- **M6 -- the launcher. The menu is built (2026-09-13); the map is not.**
+  `games/luanti_launcher` as described above.
+
+  **The menu.** With no world chosen the server waits, and a client that
+  connects is sent `main/menu.lua` rather than the world view: it asks for
+  the list, draws it with `ui_utils.vertical_menu` and sends back either
+  "open this save" or "make one called this, playing that game". The scan is
+  the server's, because the server owns the filesystem. A save records the
+  gameid it needs as a key in its own store, written whenever it is run, so
+  the list says which game each save needs without opening any of them --
+  the two facts Luanti's menu made one. The saves are listed by when each
+  was last played.
+
+  `BUILDAT_LUANTI_GAME` and `BUILDAT_LUANTI_WORLD` still run a world at
+  start without a menu, which is what every check here does.
+
+  simplified: the twelve most recent saves, because `vertical_menu` does not
+  scroll and a list longer than the screen has saves nobody can reach. What
+  it wants is a scrolling list.
+
+  **What is left of M6: the map.** The world is 3x3x3 sections, which is why
+  the importer drops most of a real Luanti world, and a map that loads and
+  unloads around a player is what the mapgen seam was deferred until there
+  was something to measure.
 - **M7 -- an existing Luanti world opens. The map and the clock are read
   (2026-09-13).** Read a Luanti world directory -- `map.sqlite`,
   `map_meta.txt`, `env_meta.txt`, the player and mod storage databases --
