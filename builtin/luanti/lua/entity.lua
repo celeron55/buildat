@@ -34,6 +34,7 @@ local objects = {}      -- id -> the object's own state
 local next_id = 1
 
 local __show_objects = __luanti_show_objects
+local __show_object_props = __luanti_show_object_props
 local __send_inventory = __luanti_send_inventory
 local __show_formspec = __luanti_show_formspec
 local __player_formspec = __luanti_player_formspec
@@ -1468,8 +1469,58 @@ end
 -- out to the scene twenty times a second to say so
 local anything_shown = false
 
+-- What an object looks like, as much of it as the client half draws: a shape
+-- and one texture. Luanti's visuals are more than these three, and the ones
+-- that are not here fall back to the plain box they were before.
+--
+-- simplified: one texture rather than six for a cube, and a mesh is a cube
+-- wearing its first texture. The upgrade path is the shapes themselves --
+-- b3dmesh.lua and objmesh.lua in extensions/luanti_client read the two
+-- formats Luanti ships -- and it is a milestone of its own.
+local function appearance_of(o)
+	local props = o.props
+	local visual = props.visual or "sprite"
+	local textures = props.textures or {}
+	if visual == "cube" then
+		return "cube", textures[1] or ""
+	end
+	if visual == "mesh" then
+		return "cube", textures[1] or ""
+	end
+	if visual == "sprite" or visual == "upright_sprite" then
+		return "sprite", textures[1] or ""
+	end
+	if visual == "wielditem" or visual == "item" then
+		-- What the item looks like in an inventory is what it looks like
+		-- lying on the ground, which is the same expression
+		local name = props.wield_item or ""
+		if name == "" then
+			return "box", ""
+		end
+		return "sprite", core.__item_image_of(name) or ""
+	end
+	return "box", ""
+end
+
+-- id -> {kind, texture} as last sent, so that what is sent is what has
+-- changed -- and so that a client that connects later can be told the lot
+local sent_appearance = {}
+
+-- Every object's look, flat, for a client that has just arrived: the props
+-- are sent when they change and a client that was not there missed them.
+function core.__object_appearances()
+	local out = {}
+	for id, look in pairs(sent_appearance) do
+		out[#out + 1] = tostring(id)
+		out[#out + 1] = look[1]
+		out[#out + 1] = look[2]
+	end
+	return out
+end
+
 local function show_objects()
 	local v = {}
+	local props_changed = {}
 	for id, o in pairs(objects) do
 		local box = o.props.collisionbox or DEFAULT_PROPERTIES.collisionbox
 		if o.props.is_visible == false then
@@ -1488,7 +1539,24 @@ local function show_objects()
 			v[#v + 1] = sx
 			v[#v + 1] = sy
 			v[#v + 1] = sz
+			v[#v + 1] = o.rot and o.rot.y or 0
+			local kind, texture = appearance_of(o)
+			local was = sent_appearance[id]
+			if not was or was[1] ~= kind or was[2] ~= texture then
+				sent_appearance[id] = {kind, texture}
+				props_changed[#props_changed + 1] = tostring(id)
+				props_changed[#props_changed + 1] = kind
+				props_changed[#props_changed + 1] = texture
+			end
 		end
+	end
+	for id, _ in pairs(sent_appearance) do
+		if objects[id] == nil then
+			sent_appearance[id] = nil
+		end
+	end
+	if #props_changed > 0 then
+		__show_object_props(props_changed)
 	end
 	if #v == 0 and not anything_shown then
 		return

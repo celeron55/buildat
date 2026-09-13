@@ -572,10 +572,6 @@ struct Module: public interface::Module, public luanti::Interface
 	// three hundred thousand blocks asks Lua once per name and not once per
 	// node
 	sm_<ss_, std::pair<uint32_t, bool>> m_import_ids;
-	// The objects on screen: the scene node each one has, by the id
-	// lua/entity.lua gave it. Everything in the scene is replicated to the
-	// clients, so this is the whole of drawing an object.
-	sm_<int32_t, uint32_t> m_object_nodes;
 	// The voxel a generated section is filled with; see
 	// on_generation_request(). Zero until the first section is generated,
 	// which is after the mods have loaded and named it.
@@ -669,6 +665,8 @@ struct Module: public interface::Module, public luanti::Interface
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_item_images"));
 		m_server->sub_event(this, Event::t(
+				"network:packet_received/luanti:get_object_props"));
+		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:fields"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:inv_action"));
@@ -687,6 +685,8 @@ struct Module: public interface::Module, public luanti::Interface
 				on_get_texmods, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:get_item_images",
 				on_get_item_images, network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:get_object_props",
+				on_get_object_props, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:fields",
 				on_fields, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:inv_action",
@@ -2665,13 +2665,10 @@ struct Module: public interface::Module, public luanti::Interface
 		return 1;
 	}
 
-	// __luanti_show_objects{id, x, y, z, sx, sy, sz, ...}: where every
-	// object is and how big it is, once per step. A node per object in the
-	// module's scene, which is what every client is already being sent.
-	//
-	// simplified: a box the size of the object's collision box, because
-	// what an object looks like -- a sprite, a mesh, the item it is -- is
-	// the client half's, and this is what says where they are until then.
+	// __luanti_show_objects{id, x, y, z, sx, sy, sz, yaw, ...}: where every
+	// object is and how big it is, once per step, to every client. What one
+	// looks like is the client half's, and __luanti_show_object_props says
+	// which look it wears; this is only where they are.
 	static int l_show_objects(lua_State *L)
 	{
 		Module *self = module_of(L);
@@ -2687,54 +2684,50 @@ struct Module: public interface::Module, public luanti::Interface
 		return 0;
 	}
 
+	// __luanti_show_object_props{id, kind, texture, ...}: what an object
+	// looks like, sent when it changes rather than every step. kind is the
+	// shape the client half draws; see appearance_of() in lua/entity.lua.
+	static int l_show_object_props(lua_State *L)
+	{
+		Module *self = module_of(L);
+		luaL_checktype(L, 1, LUA_TTABLE);
+		sv_<ss_> flat;
+		size_t n = lua_objlen(L, 1);
+		flat.reserve(n);
+		for(size_t i = 0; i < n; i++){
+			lua_rawgeti(L, 1, (int)i + 1);
+			size_t len = 0;
+			const char *p = lua_tolstring(L, -1, &len);
+			flat.push_back(ss_(p ? p : "", p ? len : 0));
+			lua_pop(L, 1);
+		}
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(flat);
+		}
+		self->broadcast("luanti:object_props", os.str());
+		return 0;
+	}
+
+	// To every client there is: what the objects look like and where they
+	// are is everybody's, unlike an inventory or a form
+	void broadcast(const ss_ &name, const ss_ &data)
+	{
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(network::PeerInfo::Id peer : inetwork->list_peers())
+				inetwork->send(peer, name, data);
+		});
+	}
+
 	void show_objects(const sv_<double> &v)
 	{
-		if(!m_scene)
-			return;
-		const size_t STRIDE = 7;
-		set_<int32_t> seen;
-		main_context::access(m_server, [&](main_context::Interface *imc){
-			magic::Scene *scene = imc->find_scene(m_scene);
-			if(!scene)
-				return;
-			magic::ResourceCache *cache =
-					imc->get_context()->GetSubsystem<magic::ResourceCache>();
-			for(size_t i = 0; i + STRIDE <= v.size(); i += STRIDE){
-				int32_t id = (int32_t)v[i];
-				seen.insert(id);
-				magic::Node *n = nullptr;
-				auto it = m_object_nodes.find(id);
-				if(it != m_object_nodes.end())
-					n = scene->GetNode(it->second);
-				if(!n){
-					n = scene->CreateChild("luanti_object");
-					magic::StaticModel *model =
-							n->CreateComponent<magic::StaticModel>();
-					model->SetModel(cache->GetResource<magic::Model>(
-							"Models/Box.mdl"));
-					model->SetMaterial(cache->GetResource<magic::Material>(
-							"Materials/Stone.xml"));
-					model->SetCastShadows(true);
-					m_object_nodes[id] = n->GetID();
-				}
-				n->SetPosition(magic::Vector3(
-						(float)v[i + 1], (float)v[i + 2], (float)v[i + 3]));
-				n->SetScale(magic::Vector3(
-						(float)v[i + 4], (float)v[i + 5], (float)v[i + 6]));
-			}
-			// What is not in the list any more has been removed
-			for(auto it = m_object_nodes.begin();
-					it != m_object_nodes.end();){
-				if(seen.count(it->first)){
-					it++;
-					continue;
-				}
-				magic::Node *n = scene->GetNode(it->second);
-				if(n)
-					n->Remove();
-				it = m_object_nodes.erase(it);
-			}
-		});
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(v);
+		}
+		broadcast("luanti:objects", os.str());
 	}
 
 	// __luanti_send_inventory(player_name, {list, size, item, item, ...}):
@@ -2918,6 +2911,51 @@ struct Module: public interface::Module, public luanti::Interface
 					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
 		}
 		lua_settop(L, base);
+	}
+
+	// Every object's look, for a client that has just arrived: the props are
+	// sent when they change and a client that was not there missed them.
+	void on_get_object_props(const network::Packet &packet)
+	{
+		sv_<ss_> flat = string_list_from_lua("__object_appearances");
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(flat);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(packet.sender, "luanti:object_props", os.str());
+		});
+		log_v(MODULE, "C%zu: %zu object looks", (size_t)packet.sender,
+				flat.size() / 3);
+	}
+
+	// A core.__<name>() that answers with an array of strings, as a vector
+	sv_<ss_> string_list_from_lua(const char *name)
+	{
+		sv_<ss_> flat;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, name);
+		if(lua_pcall(L, 0, 1, 0) != 0){
+			log_w(MODULE, "%s(): %s", name,
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+			lua_settop(L, base);
+			return flat;
+		}
+		size_t n = lua_objlen(L, -1);
+		flat.reserve(n);
+		for(size_t i = 0; i < n; i++){
+			lua_rawgeti(L, -1, (int)i + 1);
+			size_t len = 0;
+			const char *p = lua_tolstring(L, -1, &len);
+			flat.push_back(ss_(p ? p : "", p ? len : 0));
+			lua_pop(L, 1);
+		}
+		lua_settop(L, base);
+		return flat;
 	}
 
 	// What an item looks like, as the texture modifier expression the client
@@ -3676,6 +3714,8 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_active_boxes", l_active_boxes);
 		set_global_cfunction("__luanti_find_ids", l_find_ids);
 		set_global_cfunction("__luanti_show_objects", l_show_objects);
+		set_global_cfunction("__luanti_show_object_props",
+				l_show_object_props);
 		set_global_cfunction("__luanti_send_inventory", l_send_inventory);
 		set_global_cfunction("__luanti_show_formspec", l_show_formspec);
 		set_global_cfunction("__luanti_player_formspec", l_player_formspec);
