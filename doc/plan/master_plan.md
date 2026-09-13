@@ -134,10 +134,13 @@ What is left, in order of what it is worth:
 
    Two things stage 2 measured are arguments for doing it in C++: a Lua
    mapgen over a section costs about 600 ms, most of it a quarter of a
-   million voxels crossing the Lua boundary twice, and all of it runs on the
-   server's own thread. Luanti has an emerge thread; this module has one Lua
-   state and nowhere to put one. A vendored mapgen writes the volume with no
-   Lua in the middle.
+   million voxels crossing the Lua boundary twice, and all of it ran on the
+   server's own thread until the seam moved it. A vendored mapgen writes
+   the volume with no Lua in the middle, in `worldgen`'s thread.
+
+   It goes in a module of its own, `builtin/luanti_mapgen`, because a
+   runtime-compiled module is a single translation unit and `builtin/luanti`
+   already takes ten seconds to compile.
 2. **The rest is minor and belongs to a later round.** glTF, an object drawn
    as its own model, a detached inventory, a put-down count, the inventory
    cube, a scrolling save list: each is an afternoon, none blocks a game

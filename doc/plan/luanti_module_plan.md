@@ -339,12 +339,21 @@ once the mods have loaded, which is what makes that safe.
 
 **Decided 2026-09-13.**
 
-- **Where it lives:** the module's own tree,
-  `builtin/luanti/vendor/mapgen/`, beside the vendored Lua builtin and for
-  the same reason -- it is Luanti's code, and this module is what makes
-  Luanti's code work here. Compiled with the module, which is
-  runtime-compiled, so a first start pays for 9.5k lines once and the cache
-  pays after that.
+- **Where it lives: a module of its own, `builtin/luanti_mapgen`**
+  (decided 2026-09-13, after measuring). A runtime-compiled module is a
+  *single* translation unit -- rccpp hands the compiler one `.cpp` -- and
+  `builtin/luanti` already takes 9.7 seconds to compile. Vendoring 9.5k
+  lines into it would mean every edit to `luanti.cpp` pays for the mapgen
+  again, which is the wrong tax to put on the module that is edited most.
+  A module of its own compiles once and stays cached.
+
+  What crosses between them: the luanti module hands over the world's seed,
+  the mapgen parameters and the content ids by name -- and later the
+  biomes, ores and decorations the mods registered -- and gets back
+  something that is a `worldgen::GeneratorInterface`. The luanti module
+  keeps owning `worldgen`, the scene and the callbacks; the mapgen module
+  owns nothing but the vendored code and the shim under it, which is also
+  what keeps Luanti's C++ out of the module that does everything else.
 - **How faithful:** a world that *looks like* a Luanti world -- biomes,
   caves, ores and decorations in the right places and the right shapes --
   and not one that reproduces upstream's terrain for a given seed. So the
