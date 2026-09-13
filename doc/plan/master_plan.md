@@ -188,11 +188,11 @@ What is left, in order of what it is worth:
       colour's alpha and the lamp part in its rgb, and the shader adds
       `cAmbientColor * alpha + rgb`. So dimming the zone's ambient at
       night -- which the launcher does -- *is* Luanti's ratio: what the
-      sky lit goes dark and what a lamp lit does not. What is missing
-      beside it is a game saying how dark its own night is, which is
-      `override_day_night_ratio`, a stub in `lua/entity.lua`. And the sun
-      is gated by that same light now (2026-09-13), so a surface the sky
-      cannot reach gets none of it.
+      sky lit goes dark and what a lamp lit does not. A game saying how
+      dark its own night is -- `override_day_night_ratio` -- is built
+      (2026-09-13), and so is the sun being gated by that same light, so
+      a surface the sky cannot reach gets none of it. Nothing is left of
+      this item.
    3. **A HUD element Luanti draws and this does not**: a waypoint, a
       compass, a minimap, an inventory element, and the styles and colours
       inside a line of text. Each is named once in the log when a game
