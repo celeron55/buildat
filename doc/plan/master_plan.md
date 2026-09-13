@@ -174,7 +174,9 @@ What is left, in order of what it is worth:
    off for a game that draws its own. The client's health and breath are
    plain bars above the hotbar -- Luanti's hearts and bubbles are the
    engine's own textures rather than a game's media -- and a camera in a
-   liquid tints the screen and closes the fog in.
+   liquid tints the screen and closes the fog in. What is in the player's
+   hand is a cube in front of the camera wearing the item's image, tinted
+   by the daylight.
 
    What is left of it:
 
