@@ -183,12 +183,16 @@ What is left, in order of what it is worth:
    1. **The sky a game asks for**: `set_sky`, `set_sun`, `set_moon` and
       `set_clouds` are stubs, and the cube map the reflections come from
       is baked at noon whatever the hour.
-   2. **The day-night ratio**, which is Luanti's other half of the light:
-      the sky light a node carries is scaled by the time of day, so a room
-      lit through a window goes dark at night. Here the light is what the
-      mesher baked and only the sun dims -- and the two lights are one
-      vertex colour by the time they reach the shader, so telling them
-      apart is a mesher change.
+   2. **The day-night ratio is already there**, which was worth finding
+      out: the mesher puts the sky part of a voxel's light in the vertex
+      colour's alpha and the lamp part in its rgb, and the shader adds
+      `cAmbientColor * alpha + rgb`. So dimming the zone's ambient at
+      night -- which the launcher does -- *is* Luanti's ratio: what the
+      sky lit goes dark and what a lamp lit does not. What is missing
+      beside it is a game saying how dark its own night is, which is
+      `override_day_night_ratio`, a stub in `lua/entity.lua`. And the sun
+      is gated by that same light now (2026-09-13), so a surface the sky
+      cannot reach gets none of it.
    3. **A HUD element Luanti draws and this does not**: a waypoint, a
       compass, a minimap, an inventory element, and the styles and colours
       inside a line of text. Each is named once in the log when a game
