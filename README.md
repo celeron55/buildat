@@ -53,10 +53,6 @@ required for the module interface.
     $ cmake .. -DCMAKE_BUILD_TYPE=Debug
     $ make -j4
 
-The bundled Urho3D is built by a sub-build that uses every core regardless of
-the `-j` given here, which is where the `-j0 forced in submake` warning comes
-from.
-
 You can use -DBUILD_SERVER=false or -DBUILD_CLIENT=false if you don't need the
 server or the client, respectively.
 

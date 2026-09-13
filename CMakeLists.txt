@@ -109,11 +109,19 @@ if(URHO3D_HOME_ABS STREQUAL URHO3D_BUNDLED_HOME_ABS)
 	if(NOT URHO3D_CONFIGURE_RESULT EQUAL 0)
 		message(FATAL_ERROR "Failed to configure bundled Urho3D")
 	endif()
+	# $(MAKE) hands the sub-build the parent make's jobserver, so the engine
+	# builds with the -j the user gave and not with one of its own. Other
+	# generators have no jobserver to inherit; --parallel without a number is
+	# the best they can do.
+	if(CMAKE_GENERATOR MATCHES "Makefiles")
+		set(URHO3D_BUILD_COMMAND $(MAKE))
+	else()
+		set(URHO3D_BUILD_COMMAND ${CMAKE_COMMAND} --build "${URHO3D_BUILD_DIR}" --parallel)
+	endif()
 	add_custom_target(urho3d_build
-		COMMAND ${CMAKE_COMMAND} --build "${URHO3D_BUILD_DIR}" --parallel
+		COMMAND ${URHO3D_BUILD_COMMAND}
 		WORKING_DIRECTORY "${URHO3D_BUILD_DIR}"
 		COMMENT "Building bundled Urho3D"
-		VERBATIM
 	)
 endif()
 
