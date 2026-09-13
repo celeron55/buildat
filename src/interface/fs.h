@@ -20,6 +20,17 @@ namespace interface
 
 		ss_ get_absolute_path(const ss_ &path);
 
+		// Whether path is dir itself or something under it, both taken as
+		// absolute paths with "." and ".." collapsed. What asks is code
+		// that has been given a path by somebody it does not trust -- the
+		// client's image and resource calls, which sandboxed game code can
+		// reach -- so a name that merely starts with the directory's is not
+		// inside it.
+		//
+		// Lexical, so a symlink under dir that points elsewhere is still
+		// "inside": what this keeps out is a path, not a filesystem.
+		bool is_inside_path(const ss_ &path, const ss_ &dir);
+
 		bool path_exists(const ss_ &path);
 
 		bool copy_file(const ss_ &from, const ss_ &to);

@@ -4,6 +4,8 @@
 #include <c55/filesys.h>
 #include <c55/string_util.h>
 #include <fstream>
+#include "core/log.h"
+#define MODULE "fs"
 #ifdef _WIN32
 	#include "ports/windows_minimal.h"
 #else
@@ -91,7 +93,11 @@ ss_ get_absolute_path(const ss_ &path0)
 		} else if(part == "."){
 			// Nop
 		} else if(part == ".."){
-			path_parts.pop_back();
+			// A path that climbs past the root stays at the root, which is
+			// what every filesystem answers and what keeps this from
+			// walking off the front of the list
+			if(!path_parts.empty())
+				path_parts.pop_back();
 		} else {
 			path_parts.push_back(part);
 		}
@@ -115,6 +121,66 @@ ss_ get_absolute_path(const ss_ &path0)
 bool path_exists(const ss_ &path)
 {
 	return c55fs::PathExists(path);
+}
+
+static bool is_inside_path_unchecked(const ss_ &path0, const ss_ &dir0)
+{
+	ss_ path = get_absolute_path(path0);
+	ss_ dir = get_absolute_path(dir0);
+	if(dir.empty())
+		return false;
+	// A directory of its own counts as inside itself; anything else has to
+	// be under it and not merely start with its name, or "/cache_evil"
+	// would pass for "/cache"
+	if(path == dir)
+		return true;
+	if(path.size() <= dir.size())
+		return false;
+	if(path.substr(0, dir.size()) != dir)
+		return false;
+	return path[dir.size()] == '/' || dir[dir.size() - 1] == '/';
+}
+
+// The one runnable check this leaves behind. It decides what sandboxed code
+// is allowed to write to, so what it is checked for is the paths that look
+// like they are inside and are not.
+static bool is_inside_path_self_test()
+{
+	struct Case { const char *path; const char *dir; bool want; };
+	static const Case cases[] = {
+		{"/cache/a", "/cache", true},
+		{"/cache", "/cache", true},
+		{"/cache/", "/cache", true},
+		{"/cache/a/b/c.png", "/cache", true},
+		{"/cache/a/../b", "/cache", true},
+		{"/cache/a", "/cache/", true},
+		{"/cache_evil/a", "/cache", false},
+		{"/cacheevil", "/cache", false},
+		{"/cache/../etc/passwd", "/cache", false},
+		{"/cache/a/../../etc", "/cache", false},
+		{"/etc/passwd", "/cache", false},
+		{"/", "/cache", false},
+		{"/cache/a", "", false},
+	};
+	for(const Case &c : cases){
+		bool got = is_inside_path_unchecked(c.path, c.dir);
+		if(got != c.want){
+			log_w(MODULE, "is_inside_path(\"%s\", \"%s\") is %s and should "
+					"be %s", c.path, c.dir, got ? "true" : "false",
+					c.want ? "true" : "false");
+			return false;
+		}
+	}
+	return true;
+}
+
+bool is_inside_path(const ss_ &path0, const ss_ &dir0)
+{
+	// Cheap, once per process, and every caller passes through here
+	static const bool tested = is_inside_path_self_test();
+	if(!tested)
+		return false; // Nothing is inside anything if the rule is broken
+	return is_inside_path_unchecked(path0, dir0);
 }
 
 bool copy_file(const ss_ &from, const ss_ &to)

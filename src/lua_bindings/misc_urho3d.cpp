@@ -82,9 +82,8 @@ static int l_profiler_block_end(lua_State *L)
 static int l_add_resource_dir(lua_State *L)
 {
 	ss_ path = interface::fs::get_absolute_path(lua_checkcppstring(L, 1));
-	ss_ cache_path = interface::fs::get_absolute_path(
-			g_client_config.get<ss_>("cache_path"));
-	if(path.substr(0, cache_path.size()) != cache_path)
+	if(!interface::fs::is_inside_path(path,
+			g_client_config.get<ss_>("cache_path")))
 		return luaL_error(L, "add_resource_dir(): \"%s\" is not under the "
 				"cache path", path.c_str());
 	if(!interface::fs::path_exists(path))

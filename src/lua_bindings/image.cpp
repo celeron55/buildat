@@ -580,9 +580,8 @@ static int l_compose_image(lua_State *L)
 		if(write == "")
 			throw Exception("compose_image(): args.write is missing");
 		ss_ path = interface::fs::get_absolute_path(write);
-		ss_ cache_path = interface::fs::get_absolute_path(
-				g_client_config.get<ss_>("cache_path"));
-		if(path.substr(0, cache_path.size()) != cache_path)
+		if(!interface::fs::is_inside_path(path,
+				g_client_config.get<ss_>("cache_path")))
 			throw Exception("compose_image(): \""+path+
 					"\" is not under the cache path");
 
