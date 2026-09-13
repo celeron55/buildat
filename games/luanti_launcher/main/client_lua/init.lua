@@ -269,9 +269,38 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	end
 end)
 
+-- Where the camera is, a few times a second: the server puts its player
+-- there, and a Luanti mod asking where the player is gets this.
+local WHERE_INTERVAL = 0.2
+local where_timer = 0
+
+local function send_where()
+	local p = camera_node.worldPosition
+	-- Luanti measures the horizontal angle from +Z towards -X and the
+	-- vertical one positive upwards, which is what its get_look_dir()
+	-- unpacks; Urho's yaw goes the other way round
+	buildat.send_packet("main:where", cereal.binary_output({
+		x = p.x, y = p.y, z = p.z,
+		look_h = math.rad(-yaw),
+		look_v = math.rad(-pitch),
+	}, {"object",
+		{"x", "double"},
+		{"y", "double"},
+		{"z", "double"},
+		{"look_h", "double"},
+		{"look_v", "double"},
+	}))
+end
+
 magic.SubscribeToEvent("Update", function(event_type, event_data)
 	local dt = event_data:GetFloat("TimeStep")
 	voxel_shading.update(dt)
+
+	where_timer = where_timer + dt
+	if where_timer >= WHERE_INTERVAL then
+		where_timer = 0
+		send_where()
+	end
 
 	pointed_p = find_pointed_voxel()
 	if pointed_p then

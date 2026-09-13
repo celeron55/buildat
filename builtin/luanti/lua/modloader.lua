@@ -36,6 +36,17 @@ do
 	end
 	core.__current_modname = nil
 
+	-- What a mod does once every other mod has registered what it has:
+	-- Luanti runs these after the last init.lua and before anything steps,
+	-- and the vendored builtin's own -- the one that freezes the item and
+	-- node registries -- is among them.
+	for _, cb in ipairs(core.registered_on_mods_loaded or {}) do
+		local ok, err = pcall(cb)
+		if not ok then
+			core.log("error", "on_mods_loaded: " .. tostring(err))
+		end
+	end
+
 	local function count(t)
 		local n = 0
 		for _ in pairs(t or {}) do

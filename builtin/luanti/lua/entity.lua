@@ -66,6 +66,14 @@ local function vec(v)
 	return {x = v.x or 0, y = v.y or 0, z = v.z or 0}
 end
 
+-- What the API hands back: a vector with its metatable, because a mod calls
+-- methods on what it is given -- pos:round(), pos:offset(0, 5, 0). The
+-- vendored builtin is what has vector, so this is a call and not a copy of
+-- one made while this file loaded.
+local function out_vec(v)
+	return vector.new(v.x, v.y, v.z)
+end
+
 --
 -- ObjectRef
 --
@@ -85,7 +93,7 @@ end
 
 function ObjectRef:get_pos()
 	local o = state_of(self)
-	return o and vec(o.pos) or nil
+	return o and out_vec(o.pos) or nil
 end
 
 function ObjectRef:set_pos(pos)
@@ -101,7 +109,7 @@ end
 
 function ObjectRef:get_velocity()
 	local o = state_of(self)
-	return o and vec(o.vel) or nil
+	return o and out_vec(o.vel) or nil
 end
 
 function ObjectRef:set_velocity(vel)
@@ -121,7 +129,7 @@ end
 
 function ObjectRef:get_acceleration()
 	local o = state_of(self)
-	return o and vec(o.acc) or nil
+	return o and out_vec(o.acc) or nil
 end
 
 function ObjectRef:set_acceleration(acc)
@@ -133,7 +141,7 @@ end
 
 function ObjectRef:get_rotation()
 	local o = state_of(self)
-	return o and vec(o.rot) or nil
+	return o and out_vec(o.rot) or nil
 end
 
 function ObjectRef:set_rotation(rot)
@@ -156,9 +164,16 @@ function ObjectRef:set_yaw(yaw)
 end
 
 function ObjectRef:get_properties()
+	-- With the metatables, because a property can be a vector and a mod
+	-- reading one back expects what it put in
 	local o = state_of(self)
-	return o and table.copy(o.props) or nil
+	return o and table.copy_with_metatables(o.props) or nil
 end
+
+-- The properties Luanti keeps as vectors rather than as whatever table a
+-- mod handed over: a mod setting one from a plain table reads a vector back
+local PROPERTY_VECTOR2 = {spritediv = true, initial_sprite_basepos = true}
+local PROPERTY_VECTOR3 = {visual_size = true}
 
 function ObjectRef:set_properties(props)
 	local o = state_of(self)
@@ -166,6 +181,11 @@ function ObjectRef:set_properties(props)
 		return
 	end
 	for k, v in pairs(props) do
+		if PROPERTY_VECTOR2[k] and type(v) == "table" then
+			v = vector2.new(v.x or v[1] or 0, v.y or v[2] or 0)
+		elseif PROPERTY_VECTOR3[k] and type(v) == "table" then
+			v = vector.new(v.x or v[1] or 0, v.y or v[2] or 0, v.z or v[3] or 0)
+		end
 		o.props[k] = v
 	end
 	if props.hp_max and o.hp > props.hp_max then
@@ -347,6 +367,449 @@ function core.get_objects_in_area(min_pos, max_pos)
 end
 
 --
+-- Players
+--
+-- A player is an object with somebody on the other end of it: it is in the
+-- same table as the entities, so everything that looks for objects finds it,
+-- and what is different is that nothing here moves it -- where a player is
+-- is what their client says.
+--
+-- simplified: no physics, no privileges, no chat and no HUD. The client
+-- half is what would draw a HUD or open a formspec, and the HUD calls here
+-- keep what they are told so that a mod reading them back gets what it set.
+-- Damage is what a mod does with set_hp; nothing else takes hit points off
+-- a player, because nothing else knows where the player has walked.
+
+local players = {}      -- name -> the object's id
+
+-- Everything an object has, and the rest below
+local PlayerRef = setmetatable({}, {__index = ObjectRef})
+PlayerRef.__index = PlayerRef
+
+-- Every object by the name that outlives a restart; a player's is their
+-- name, which is what Luanti uses and what a mod stores
+core.objects_by_guid = {}
+
+function PlayerRef:is_player()
+	return true
+end
+
+function PlayerRef:get_player_name()
+	local o = state_of(self)
+	return o and o.player_name or ""
+end
+
+function PlayerRef:get_guid()
+	return self:get_player_name()
+end
+
+function PlayerRef:get_meta()
+	local o = state_of(self)
+	return o and o.meta or nil
+end
+
+function PlayerRef:get_inventory()
+	local o = state_of(self)
+	return o and o.inventory or nil
+end
+
+function PlayerRef:add_pos(v)
+	local o = state_of(self)
+	if o then
+		o.pos = {x = o.pos.x + (v.x or 0), y = o.pos.y + (v.y or 0),
+				z = o.pos.z + (v.z or 0)}
+	end
+end
+
+-- Luanti builds the reason out of what the caller passed and says where the
+-- change came from, and the registered callbacks see the difference before
+-- the hit points move -- the difference itself, which is not clamped to the
+-- range the hit points end up in.
+--
+-- The callbacks are not run in a pcall here, which is the one place in this
+-- module where that is so: whoever called set_hp() is a mod, the callback
+-- is a mod's, and an error between two of them belongs to the caller rather
+-- than to the module.
+function PlayerRef:set_hp(hp, reason)
+	local o = state_of(self)
+	if not o then
+		return
+	end
+	local t = {}
+	for k, v in pairs(type(reason) == "table" and reason or {}) do
+		t[k] = v
+	end
+	if type(reason) == "string" then
+		t.type = reason
+	end
+	t.type = t.type or "set_hp"
+	t.from = t.from or "mod"
+	local hp_max = o.props.hp_max or 20
+	local change = math.floor(tonumber(hp) or 0) - o.hp
+	-- Kept inside a 32-bit integer, so that asking for the smallest number
+	-- there is does not become one smaller still
+	change = math.max(-2147483648, math.min(2147483647, change))
+	-- Damage does nothing to somebody who is already dead
+	if o.hp <= 0 and change < 0 then
+		return
+	end
+	if core.registered_on_player_hpchange then
+		local modified = core.registered_on_player_hpchange(self, change, t)
+		if type(modified) == "number" then
+			change = modified
+		end
+	end
+	local was = o.hp
+	o.hp = math.max(0, math.min(was + change, hp_max))
+	if o.hp == 0 and was > 0 then
+		for _, cb in ipairs(core.registered_on_dieplayers or {}) do
+			cb(self, t)
+		end
+	end
+end
+
+function PlayerRef:get_hp()
+	local o = state_of(self)
+	return o and o.hp or 0
+end
+
+function PlayerRef:get_look_dir()
+	local o = state_of(self)
+	if not o then
+		return vector.new(0, 0, 1)
+	end
+	local h, v = o.look.h, o.look.v
+	return vector.new(-math.sin(h) * math.cos(v), math.sin(v),
+			math.cos(h) * math.cos(v))
+end
+
+function PlayerRef:get_look_horizontal()
+	local o = state_of(self)
+	return o and o.look.h or 0
+end
+
+function PlayerRef:set_look_horizontal(h)
+	local o = state_of(self)
+	if o then
+		o.look.h = h
+	end
+end
+
+function PlayerRef:get_look_vertical()
+	local o = state_of(self)
+	return o and o.look.v or 0
+end
+
+function PlayerRef:set_look_vertical(v)
+	local o = state_of(self)
+	if o then
+		o.look.v = v
+	end
+end
+
+PlayerRef.get_look_yaw = PlayerRef.get_look_horizontal
+PlayerRef.set_look_yaw = PlayerRef.set_look_horizontal
+PlayerRef.get_look_pitch = PlayerRef.get_look_vertical
+PlayerRef.set_look_pitch = PlayerRef.set_look_vertical
+
+function PlayerRef:get_wield_index()
+	local o = state_of(self)
+	return o and o.wield_index or 1
+end
+
+function PlayerRef:set_wield_index(i)
+	local o = state_of(self)
+	if o then
+		o.wield_index = math.max(1, math.floor(tonumber(i) or 1))
+	end
+end
+
+function PlayerRef:get_wield_list()
+	return "main"
+end
+
+function PlayerRef:get_wielded_item()
+	local o = state_of(self)
+	if not o then
+		return ItemStack()
+	end
+	return o.inventory:get_stack("main", o.wield_index)
+end
+
+function PlayerRef:set_wielded_item(item)
+	local o = state_of(self)
+	if not o then
+		return false
+	end
+	o.inventory:set_stack("main", o.wield_index, ItemStack(item))
+	return true
+end
+
+-- The hotbar is as long as the list behind it, which is what Luanti clamps
+-- it to and what a mod setting it expects to read back
+function PlayerRef:hud_set_hotbar_itemcount(n)
+	local o = state_of(self)
+	if not o then
+		return false
+	end
+	n = math.floor(tonumber(n) or 0)
+	if n < 1 then
+		return false
+	end
+	o.hotbar = math.min(n, o.inventory:get_size("main"))
+	return true
+end
+
+function PlayerRef:hud_get_hotbar_itemcount()
+	local o = state_of(self)
+	return o and o.hotbar or 0
+end
+
+function PlayerRef:get_breath()
+	local o = state_of(self)
+	return o and o.breath or 0
+end
+
+function PlayerRef:set_breath(b)
+	local o = state_of(self)
+	if o then
+		o.breath = math.max(0, math.floor(tonumber(b) or 0))
+	end
+end
+
+function PlayerRef:get_physics_override()
+	local o = state_of(self)
+	return o and table.copy(o.physics) or nil
+end
+
+function PlayerRef:set_physics_override(t)
+	local o = state_of(self)
+	if o and type(t) == "table" then
+		for k, v in pairs(t) do
+			o.physics[k] = v
+		end
+	end
+end
+
+function PlayerRef:get_player_control()
+	return {up = false, down = false, left = false, right = false,
+			jump = false, aux1 = false, sneak = false, dig = false,
+			place = false, LMB = false, RMB = false, zoom = false}
+end
+
+function PlayerRef:get_player_control_bits()
+	return 0
+end
+
+function PlayerRef:get_player_velocity()
+	return self:get_velocity()
+end
+
+function PlayerRef:add_player_velocity(v)
+	self:add_velocity(v)
+end
+
+function PlayerRef:get_inventory_formspec()
+	local o = state_of(self)
+	return o and o.inventory_formspec or ""
+end
+
+function PlayerRef:set_inventory_formspec(spec)
+	local o = state_of(self)
+	if o then
+		o.inventory_formspec = tostring(spec or "")
+	end
+end
+
+function PlayerRef:get_formspec_prepend()
+	local o = state_of(self)
+	return o and o.formspec_prepend or ""
+end
+
+function PlayerRef:set_formspec_prepend(spec)
+	local o = state_of(self)
+	if o then
+		o.formspec_prepend = tostring(spec or "")
+	end
+end
+
+-- What a HUD and a sky are is the client's, and there is no client half yet:
+-- these keep nothing and answer with nothing, rather than being missing and
+-- taking a mod down on the line that sets one
+for _, name in ipairs({
+	"hud_remove", "hud_change", "hud_set_flags", "hud_set_hotbar_image",
+	"hud_set_hotbar_selected_image", "set_sky", "set_sun", "set_moon",
+	"set_stars", "set_clouds", "set_lighting", "override_day_night_ratio",
+	"set_minimap_modes", "send_mapblock", "set_fov", "set_nametag_color",
+	"hud_set_hotbar_image_selected",
+}) do
+	PlayerRef[name] = function() end
+end
+
+function PlayerRef:hud_add() return nil end
+function PlayerRef:hud_get() return nil end
+function PlayerRef:hud_get_flags()
+	return {hotbar = true, healthbar = true, crosshair = true,
+			wielditem = true, breathbar = true, minimap = true,
+			minimap_radar = true, basic_debug = true, chat = true}
+end
+function PlayerRef:hud_get_hotbar_image() return "" end
+function PlayerRef:hud_get_hotbar_selected_image() return "" end
+function PlayerRef:get_sky(as_table)
+	if as_table then
+		return {base_color = nil, type = "regular", textures = {},
+				clouds = true}
+	end
+	return nil, "regular", {}, true
+end
+function PlayerRef:get_sky_color() return {} end
+function PlayerRef:get_sun() return {visible = true} end
+function PlayerRef:get_moon() return {visible = true} end
+function PlayerRef:get_stars() return {visible = true} end
+function PlayerRef:get_clouds() return {density = 0.4} end
+function PlayerRef:get_lighting() return {shadows = {intensity = 0}} end
+function PlayerRef:get_day_night_ratio() return nil end
+function PlayerRef:get_fov() return 0, false, 0 end
+function PlayerRef:get_eye_offset()
+	return {x = 0, y = 0, z = 0}, {x = 0, y = 0, z = 0}
+end
+
+-- What the module calls when a client arrives and leaves. The name is the
+-- client's, and it is what everything about a player is keyed by.
+function core.__add_player(name)
+	if players[name] then
+		return
+	end
+	local id = next_id
+	next_id = id + 1
+	local ref = setmetatable({__id = id}, PlayerRef)
+	local o = {
+		id = id,
+		ref = ref,
+		pos = {x = 0, y = 0, z = 0},
+		vel = {x = 0, y = 0, z = 0},
+		acc = {x = 0, y = 0, z = 0},
+		rot = {x = 0, y = 0, z = 0},
+		props = table.copy(DEFAULT_PROPERTIES),
+		armor_groups = {},
+		hp = 20,
+		player_name = name,
+		meta = core.__new_metadata({}),
+		inventory = core.__new_inventory({type = "player", name = name}),
+		look = {h = 0, v = 0},
+		wield_index = 1,
+		hotbar = 8,
+		breath = 10,
+		physics = {speed = 1, jump = 1, gravity = 1},
+		inventory_formspec = "",
+		formspec_prepend = "",
+	}
+	o.props.hp_max = 20
+	o.props.collisionbox = {-0.3, 0.0, -0.3, 0.3, 1.7, 0.3}
+	objects[id] = o
+	core.object_refs[id] = ref
+	core.objects_by_guid[name] = ref
+	players[name] = id
+	-- The lists Luanti gives a player, so that a mod can put something in
+	-- one without making it first
+	o.inventory:set_size("main", 32)
+	o.inventory:set_size("craft", 9)
+	o.inventory:set_size("craftpreview", 1)
+	-- Luanti's server makes the auth entry when a client logs in, and the
+	-- builtin's own join callback expects to find one: here whoever
+	-- connects is who they say they are -- a buildat server decided that
+	-- one layer down -- so the entry is made with an empty password.
+	local handler = core.get_auth_handler and core.get_auth_handler()
+	if handler and handler.get_auth and handler.create_auth then
+		local ok, entry = pcall(handler.get_auth, name)
+		if ok and entry == nil then
+			pcall(handler.create_auth, name, "")
+		end
+	end
+	core.log("action", "Player " .. name .. " joined")
+	for _, cb in ipairs(core.registered_on_joinplayers or {}) do
+		local ok, err = pcall(cb, ref, nil)
+		if not ok then
+			core.log("error", "on_joinplayer: " .. tostring(err))
+		end
+	end
+end
+
+function core.__remove_player(name)
+	local id = players[name]
+	if id == nil then
+		return
+	end
+	local ref = core.object_refs[id]
+	for _, cb in ipairs(core.registered_on_leaveplayers or {}) do
+		local ok, err = pcall(cb, ref, false)
+		if not ok then
+			core.log("error", "on_leaveplayer: " .. tostring(err))
+		end
+	end
+	players[name] = nil
+	objects[id] = nil
+	core.object_refs[id] = nil
+	core.objects_by_guid[name] = nil
+	core.log("action", "Player " .. name .. " left")
+end
+
+-- Where a player is and which way they are looking is their client's to say
+function core.__set_player_pos(name, x, y, z, look_h, look_v)
+	local id = players[name]
+	local o = id and objects[id]
+	if not o then
+		return
+	end
+	o.pos = {x = x, y = y, z = z}
+	if look_h then
+		o.look.h = look_h
+		o.look.v = look_v or 0
+	end
+end
+
+function core.get_connected_players()
+	local out = {}
+	for _, id in pairs(players) do
+		local o = objects[id]
+		if o then
+			out[#out + 1] = o.ref
+		end
+	end
+	return out
+end
+
+function core.get_player_by_name(name)
+	local id = players[name]
+	local o = id and objects[id]
+	return o and o.ref or nil
+end
+
+-- What the client on the other end is. Nothing here speaks Luanti's
+-- protocol, so the version is zero and a mod that asks decides what to do
+-- about that -- devtest's own media test reads it and skips itself.
+function core.get_player_information(name)
+	if players[name] == nil then
+		return nil
+	end
+	return {
+		address = "",
+		ip_version = 4,
+		connection_uptime = 0,
+		protocol_version = 0,
+		formspec_version = 0,
+		lang_code = "",
+		version_string = "buildat",
+		min_rtt = 0, max_rtt = 0, avg_rtt = 0,
+		min_jitter = 0, max_jitter = 0, avg_jitter = 0,
+	}
+end
+
+function core.get_player_window_information(name)
+	return nil
+end
+
+--
 -- The step
 --
 
@@ -433,6 +896,11 @@ local function move_axis(o, i, d, box, result)
 end
 
 local function step_object(o, dtime)
+	-- Where a player is is their client's to say, and nothing here has an
+	-- opinion about it
+	if o.player_name then
+		return
+	end
 	local props = o.props
 	o.vel = {
 		x = o.vel.x + o.acc.x * dtime,

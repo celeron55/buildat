@@ -135,6 +135,12 @@ function core.get_async_threading_capacity()
 	return 1
 end
 
+-- Which jobs have run and are waiting to call back, so that cancelling one
+-- means something: the job itself has already run -- there is nowhere else
+-- to run it -- and what a cancel stops is the callback, which is what a
+-- caller cancelling one is trying to stop.
+local async_pending = {}
+
 function core.do_async_callback(func, args, mod_origin)
 	local id = next_async_id
 	next_async_id = id + 1
@@ -142,7 +148,12 @@ function core.do_async_callback(func, args, mod_origin)
 	setfenv(func, async_env)
 	local r = pack_results(pcall(func, unpack(args, 1, args.n)))
 	setfenv(func, was)
+	async_pending[id] = true
 	core.after(0, function()
+		if not async_pending[id] then
+			return -- Cancelled while it waited for this step
+		end
+		async_pending[id] = nil
 		if not r[1] then
 			core.log("error", "async job " .. id .. ": " .. tostring(r[2]))
 			core.async_jobs[id] = nil
@@ -157,9 +168,12 @@ function core.do_async_callback(func, args, mod_origin)
 	return id
 end
 
--- The job has already run by the time anything could cancel it
 function core.cancel_async_callback(id)
-	return false
+	if not async_pending[id] then
+		return false -- It has called back already
+	end
+	async_pending[id] = nil
+	return true
 end
 
 -- What crosses the boundary between environments. Here nothing crosses
@@ -285,6 +299,8 @@ local DEFAULTS = {
 	["language"] = "",
 	["debug_log_level"] = "action",
 	["secure.enable_security"] = "false",
+	["default_privs"] = "interact, shout",
+	["name"] = "",
 }
 
 local function parse_conf(text)
@@ -760,6 +776,64 @@ function core.get_mod_storage()
 end
 
 --
+-- The auth database
+--
+-- What the vendored builtin's auth handler is written on: a row per player
+-- with a password, the privileges they have and when they last logged in.
+-- In Luanti it is a table in the world's auth.sqlite; here it is a table in
+-- memory, because nothing asks a player for a password -- whoever connects
+-- is who they say they are, which is what a buildat server already decided
+-- one layer down.
+--
+-- simplified: it is gone when the server stops, so privileges a mod grants
+-- do not outlive the run. Putting it in the save is step 5d of
+-- doc/plan/world_persistence_plan.md, with the rest of what a player is.
+
+local auth_entries = {}
+
+core.auth = {
+	read = function(name)
+		local e = auth_entries[name]
+		if e == nil then
+			return nil
+		end
+		return {name = e.name, password = e.password,
+				privileges = e.privileges, last_login = e.last_login}
+	end,
+	save = function(entry)
+		if type(entry) ~= "table" or type(entry.name) ~= "string" then
+			return false
+		end
+		auth_entries[entry.name] = entry
+		return true
+	end,
+	create = function(entry)
+		if type(entry) ~= "table" or type(entry.name) ~= "string" then
+			return false
+		end
+		auth_entries[entry.name] = entry
+		return true
+	end,
+	delete = function(name)
+		if auth_entries[name] == nil then
+			return false
+		end
+		auth_entries[name] = nil
+		return true
+	end,
+	list_names = function()
+		local out = {}
+		for name, _ in pairs(auth_entries) do
+			out[#out + 1] = name
+		end
+		return out
+	end,
+	reload = function()
+		return true
+	end,
+}
+
+--
 -- Recorded, not implemented
 --
 -- Registrations whose effect is a milestone away but whose data is what that
@@ -856,9 +930,7 @@ local STUBS_NIL = {
 	-- Time and the world (M2)
 	"get_timeofday", "set_timeofday", "get_gametime", "get_day_count",
 	"set_time_of_day",
-	-- Players (M5); the objects are in lua/entity.lua
-	"get_player_by_name", "get_connected_players", "get_player_information",
-	"get_player_window_information",
+	-- The players and the objects are in lua/entity.lua
 	-- Inventory, craft, metadata (M4); the recipes are in lua/craft.lua
 	"register_craft_raw",
 	"get_dig_params", "get_hit_params", "get_tool_wear_after_use",
@@ -905,7 +977,7 @@ local function stub_list(name)
 end
 
 for _, name in ipairs({
-	"get_connected_players", "find_nodes_with_meta",
+	"find_nodes_with_meta",
 }) do
 	stub_list(name)
 end

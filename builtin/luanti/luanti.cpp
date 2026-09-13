@@ -3180,6 +3180,21 @@ struct Module: public interface::Module, public luanti::Interface
 		m_pending_lua.push_back({chunk, chunkname});
 	}
 
+	// A string that is going into a chunk of Lua as a quoted one. What the
+	// caller hands over is a name from the network, and a chunk is code.
+	static ss_ lua_quoted(const ss_ &s)
+	{
+		ss_ out;
+		for(char c : s){
+			if(c == '"' || c == '\\')
+				out += '\\';
+			if(c == '\n' || c == '\r')
+				continue;
+			out += c;
+		}
+		return out;
+	}
+
 	// A chunk of Lua run for its answer, which is how core.dig_node()
 	// reaches a game's own click handler from outside Lua
 	bool node_action(const ss_ &chunk)
@@ -3205,6 +3220,33 @@ struct Module: public interface::Module, public luanti::Interface
 		bool ok = lua_toboolean(L, -1) != 0;
 		lua_settop(L, base);
 		return ok;
+	}
+
+	// A client arrives and leaves, and says where it is. A player is what
+	// Luanti calls whoever is on the other end of one: the name is the
+	// caller's to choose and is what everything about the player is keyed
+	// by. The callbacks a mod registers for a join and a leave run here.
+	void add_player(const ss_ &name)
+	{
+		node_action("core.__add_player(\""+lua_quoted(name)+"\") return true");
+	}
+
+	void remove_player(const ss_ &name)
+	{
+		node_action("core.__remove_player(\""+lua_quoted(name)+
+				"\") return true");
+	}
+
+	void set_player_pos(const ss_ &name, float x, float y, float z,
+			float look_h, float look_v)
+	{
+		char buf[256];
+		snprintf(buf, sizeof buf,
+				"core.__set_player_pos(\"%s\", %f, %f, %f, %f, %f) "
+				"return true",
+				lua_quoted(name).c_str(), (double)x, (double)y, (double)z,
+				(double)look_h, (double)look_v);
+		node_action(buf);
 	}
 
 	bool dig_node(int32_t x, int32_t y, int32_t z)
