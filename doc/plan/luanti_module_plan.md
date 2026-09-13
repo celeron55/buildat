@@ -764,208 +764,46 @@ two things M1 disproved about the build, are in
     largest unknown left in the milestone. How the fork is made, what
     survives the move to voxelworld, and who resolves textures are in "The
     protocol, and the client" above.
-- **M4 -- it plays. The node half is built (2026-09-13).** Digging and
-  placing, inventory, item definitions, craft, formspecs. Success is digging
-  a node in devtest and getting it.
+- **M4 -- it plays. The node half, the inventories and the recipes are built
+  (2026-09-13).** Digging and placing, inventory, item definitions, craft,
+  formspecs. Success is digging a node in devtest and getting it.
 
-  **Built:** `add_node`, `remove_node`, `swap_node`, `bulk_set_node`,
-  `bulk_swap_node`, and the three a player's actions come to --
-  `place_node`, `dig_node`, `punch_node`. Each makes the pointed thing a
-  player's action would have made, hands it to the vendored builtin with a
-  nil actor, and lets that run the callbacks: `can_dig`, `after_dig_node`,
-  `on_construct`, `on_destruct`, `after_place_node`, the drop list and the
-  registered `on_dignodes` and `on_placenodes` are the builtin's own and
-  behave as they do in Luanti rather than being written again. That is
-  Luanti's own `l_dig_node`, `l_place_node` and `l_punch_node`.
-
-  Node metadata came with them, because the builtin reaches for
-  `core.get_meta()` on every dig of a node whose definition has an
-  `after_dig_node`. In memory for now; the save is step 5c of
-  `doc/plan/world_persistence_plan.md`.
-
-  **Built: node inventories (2026-09-13).** The inventory class and the
-  detached ones were already there; what was missing is the one a position
-  has. `core.get_meta(pos):get_inventory()` and
-  `core.get_inventory({type = "node", pos = ...})` are the same inventory,
-  which is what a chest is, and `set_node` takes it with the rest of the
-  metadata because it was the old node's. An item stack's metadata has none,
-  which is the difference between the two in Luanti as well.
-
-  **Built: the recipes (2026-09-13).** `core.register_craft` recorded what a
-  mod wrote and nothing read it; `lua/craft.lua` is the half that is C++ in
-  Luanti. All five kinds: shaped, whose pattern is trimmed of its empty
-  border so that it matches wherever in the grid it sits; shapeless, which
-  is a multiset and tries the plain names before the groups so that a group
-  does not eat the item a name was going to match; cooking and fuel, which
-  are one item each; and toolrepair, whose two worn tools make one with
-  their uses added. `get_craft_result` answers with the output and the
-  decremented input, and `get_craft_recipe`, `get_all_craft_recipes` and
-  `clear_craft` stop being stubs.
-
-  simplified: no crafting hash, so a craft walks every recipe. devtest has
-  around 200 and nothing crafts in a loop; the upgrade path is the table
-  Luanti keys by the first item.
+  `place_node`, `dig_node` and `punch_node` hand the pointed thing to the
+  vendored builtin with a nil actor, so every callback around a dig is the
+  builtin's own; node metadata came with them, a position's inventory is
+  what a chest is, and `lua/craft.lua` answers `get_craft_result` for all
+  five kinds of recipe. What a dig drops is an item lying on the floor, once
+  M5's objects existed for it to be. `doc/plan/luanti_module_history.md` has
+  what each turned out to be.
 
   **What is left of M4:** formspecs, and the client half that turns a click
   into a dig. Both are the client's.
+- **M5 -- it lives. Built 2026-09-13.** ABMs, LBMs, entities, `core.after`.
+  Success is `testabms` and `testentities` behaving.
 
-  Two things the check found, both Luanti's own behaviour rather than bugs
-  here: a registered definition refuses new keys -- `register.lua` sets
-  `__newindex` to ignore them, so a callback cannot be bolted onto a def
-  afterwards and a check for one has to be where the node is registered --
-  and `node_dig` reads a node's metadata whenever the def has an
-  `after_dig_node`, whether or not anything ever wrote any.
-- **M5 -- it lives. The globalsteps and `core.after` run (2026-09-13).**
-  ABMs, LBMs, entities, `core.after`. Success is `testabms` and
-  `testentities` behaving.
+  The globalsteps run, and with them `core.after` and everything written on
+  a timer. ABMs and LBMs sweep the loaded sections, matching content ids in
+  the module rather than names in Lua. The objects are a position, a
+  velocity, an acceleration and a box, with a collision that answers the
+  `moveresult` the builtin's own entities assert on -- which is what makes
+  the dropped item and the falling node work. Node timers are the last of
+  the timers. `doc/plan/luanti_module_history.md` has the detail, including
+  the mutex that a step doing real work turned out to need.
 
-  **Built:** a Luanti step runs the registered globalsteps. `core.after` is
-  one of them -- the vendored `builtin/common/after.lua` keeps its queue in a
-  globalstep of its own -- so that is what makes it fire at all, and it is
-  what every mod that does anything on a timer is written around. A callback
-  that errors is logged and the rest still run, where Luanti stops the
-  server: one mod's bad frame should not stop the clock, which is the posture
-  the module already takes one level up.
+  **What is left of M5:** the client half, which is what would draw an
+  object and is the same problem as the forked client's `init.lua` split.
 
-  Turning them on made devtest's `testhud` throw twelve times a second,
-  which was the honest thing to find: `core.get_connected_players()` was a
-  stub answering nil where Luanti always answers a list, so the `ipairs()`
-  every caller writes blew up, and the error named the mod rather than what
-  was really missing. The stubs that Luanti documents as always returning a
-  list return an empty one now, and `object_refs` and `luaentities` are
-  tables rather than functions, because indexing a function is an error and
-  a mod that only looks should not be broken by a stub.
-
-  **Built: ABMs (2026-09-13).** A rule that runs on every node of a kind,
-  forever, which is what a game's growing and burning and decaying are made
-  of. Per-rule interval accumulators in the step; the sweep is over the
-  sections that are loaded, which is Luanti's active block list under another
-  name since there are no players yet. `nodenames` (groups included),
-  `neighbors`, `chance`, `min_y` and `max_y` all decide, and the action is
-  called with the two object counts at zero.
-
-  The match is on content ids and happens in the module --
-  `__luanti_find_ids()` reads a box and returns the positions in it that are
-  of a kind, for up to 32 sets of ids at once -- so what crosses into Lua is
-  the handful of voxels a rule is about rather than the section. The first
-  cut read each section into a Lua table of names and matched there: a sweep
-  of a 3x3x3-section world took 3.8 seconds and devtest, where nine rules
-  each read every section, saturated a core. It is 0.35 seconds and a third
-  of a core through the module, and the rules no longer pay per rule.
-
-  A mutex around every entry into the module's Lua came out of this. Two of
-  the module's handlers can be inside Lua at once -- a queued `core:tick` on
-  the module thread while `core:shutdown` is emitted synchronously from
-  another, which `ModuleThread::handle_event` does not serialise against
-  `emit_event_sync` -- and one `lua_State` under two threads is a crash. It
-  was always there; a step that does real work is what made it happen every
-  time. The engine is where it should be fixed, and then the mutex can go.
-
-  What the fixture checks: `minimal_game` registers a rule that turns a seed
-  into a sprout, and three seeds -- one on the floor, one off the edge of it
-  and one above the rule's `max_y` -- of which exactly the first grows.
-  Registered in the game and not in `lua/check_map.lua` because the
-  registries freeze once the mods have loaded, which is what `core.__game_check`
-  is for: check_map calls the game's own check with the map flushed.
-
-  **simplified:** no time budget, no catch-up, and every loaded section is
-  read for every step that has a rule due. Luanti spends at most a share of a
-  step on ABMs, skips ahead when a block comes back after a long time away,
-  and keeps a per-block list of which node kinds are in it so that most
-  blocks are never read. All three are about a map bigger than the sections a
-  mod can reach here; they belong with M6's map.
-
-  **Built: LBMs (2026-09-13).** The same idea on a section rather than on a
-  timer, over the same sweep: a rule that runs over the nodes of a kind when
-  the part of the map they are in is loaded, which is how a game fixes up
-  what it saved before it changed its mind about it. `action` and
-  `bulk_action` both. devtest has none, so what checks it is `minimal_game`,
-  where an LBM counts the six torches the fixture places and the check asks
-  for all six.
-
-  **simplified:** the whole world is loaded before anything steps and nothing
-  unloads it, so "on load" is once, at the first step that has a section to
-  look at -- and `run_at_every_load` and Luanti's record of which blocks are
-  older than which rule have nothing to be different about yet. Both belong
-  with M6's map, where a section stops being loaded for the whole run.
-
-  **Built: the objects (2026-09-13).** Everything in a Luanti world that is
-  not a node. `core.register_entity` was already the vendored builtin's;
-  `lua/entity.lua` is the other half, which in Luanti is C++: `add_entity`,
-  the luaentity as a per-object copy of the prototype, ObjectRef, the step
-  that moves an object and tells it what it ran into, and
-  `get_objects_inside_radius` / `get_objects_in_area`, which stop being
-  stubs. An object is a position, a velocity, an acceleration and a box.
-
-  The collision is axis by axis against the voxels the box overlaps, with no
-  stepping up and no sliding along a corner, and it answers with the
-  `moveresult` the builtin's own entities assert on -- `collides`,
-  `touching_ground` and the collisions with the node each was against. That
-  is what makes `__builtin:item` work, and with it `core.add_item`, and with
-  that M4's loose end: what a dig drops is now an item lying on the floor
-  rather than a list nothing is done with.
-
-  **simplified:** nothing draws them, nothing saves them, and there are no
-  players and no attachments. The client half of the module is what would
-  show an object; `static_save`, `get_staticdata` and the `dtime_s` an
-  `on_activate` is given have nothing to be different about while the world
-  is loaded whole for the run, which is M6's map again.
-
-  What the fixture checks: an entity that falls from six voxels up comes to
-  rest exactly on the floor -- box bottom against the top of the node -- and
-  its `on_step` saw `touching_ground`; `remove()` makes the handle invalid
-  and empties `core.luaentities`; and digging a stone leaves one
-  `__builtin:item` holding `floor:stone` within two voxels of where it was.
-
-  **Built: node timers (2026-09-13).** A timer per position, which is what a
-  furnace burning down and a plant growing on its own are written on.
-  `core.get_node_timer(pos)` with `start`, `set`, `stop`, `is_started`,
-  `get_timeout` and `get_elapsed`; a timer that runs out is stopped before
-  its `on_timer` is called, so the callback is free to start it again, and
-  the same timeout comes back when it returns true. `set_node` drops the
-  timer with the metadata, because both were the old node's. In memory, with
-  the same ceiling and upgrade path as the metadata beside it.
-
-  That and the objects together are what `core.check_for_falling` needed:
-  `falling.lua` is the vendored builtin's own and has worked since the
-  objects did, so the fixture digs what holds a `falling_node` up and checks
-  that it comes down and is a node again where it lands.
-
-  **What is left:** the client half, which is what would draw an object and
-  is the same problem as the forked client's `init.lua` split.
 - **M6 -- the launcher.** `games/luanti_launcher` as described.
-- **M7 -- an existing Luanti world opens. The map is read (2026-09-13).**
-  The importer: read a Luanti world directory -- `map.sqlite`,
-  `map_meta.txt`, `env_meta.txt`, the player and mod storage databases -- and
-  write a buildat save. One direction.
+- **M7 -- an existing Luanti world opens. The map and the clock are read
+  (2026-09-13).** Read a Luanti world directory -- `map.sqlite`,
+  `map_meta.txt`, `env_meta.txt`, the player and mod storage databases --
+  and write a buildat save. One direction.
 
-  **Built: the map.** `builtin/luanti/mapblock.h` is the MapBlock reader,
-  serialization versions 25 to 29, which is every world written since 2013.
-  The two shapes are the whole of the version difference: at 25 to 28 a
-  block is two zlib streams with the name-id mapping at the back, behind the
-  static objects, and at 29 it is one zstd frame with the mapping in front.
-  Both schemas a `map.sqlite` has are read -- the older one keys a block by
-  one integer, the newer by three columns. `luanti::import_map()` reads the
-  blocks into the running game's world, clipped to what that world has room
-  for, and `games/luanti_launcher` calls it for `BUILDAT_LUANTI_IMPORT`.
-
-  Every block carries the name-id mapping it was written with, which is what
-  makes a world readable by a game that registers its nodes in another
-  order: the ids are translated through the names, through whatever alias
-  the game registers, and a name the game does not register becomes
-  "unknown" and is counted in a warning rather than making a hole.
-
-  **How it was checked.** `check_mapblock()` builds a block in each of the
-  two shapes and reads it back, which proves the reader against the spec it
-  was written from. That it agrees with Luanti was checked by importing real
-  worlds at versions 25, 28 and 29 and comparing the node histogram with an
-  independent decode of the same database: a fresh devtest world (343
-  blocks, 524800 nodes) matched name for name and count for count, as did a
-  2011 world at version 25 (266 blocks, 1089536 nodes).
-
-  **Built: the clock.** `env_meta.txt` is lines of "key = value", and three
-  of them are the clock: `time_of_day` out of Luanti's 24000-unit day,
-  `game_time` and `day_count`. A world opens at the hour it was left at.
+  `builtin/luanti/mapblock.h` reads a MapBlock at serialization versions 25
+  to 29, which is every world written since 2013, and
+  `luanti::import_world()` puts the blocks into the running game's world and
+  the clock into its clock. `doc/plan/luanti_module_history.md` has the two
+  shapes the format has and how the reader was checked against Luanti.
 
   **What is left of M7:** `map_meta.txt`, which is the seed and the mapgen
   parameters and has nowhere to go until there is a mapgen; the player and

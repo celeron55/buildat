@@ -46,7 +46,7 @@ is a to-do.
   the sqlite object store modules keep their data in. `voxelworld` persists
   nothing today; this is where that stops being true.
 
-## What is next (2026-09-12, third round)
+## What is next (2026-09-13, fourth round)
 
 **The focus is `builtin/luanti` until further notice.** Everything else
 unfinished is frozen -- `undermine`, `aggregate` and
@@ -54,52 +54,52 @@ unfinished is frozen -- `undermine`, `aggregate` and
 
 The second round is done. `build-check` merged (PR #54), and the other three
 are a stack waiting to merge bottom-up: `client-preferences` (PR #55) into
-master, `saves` (PR #56) into that, `luanti-module` (PR #52) into that. M2 is
-built; sections 10, 12 and 13 of the history say what each one turned out to
-be.
+master, `saves` (PR #56) into that, `luanti-module` (PR #52) into that.
 
-The order of work, which is one line of it rather than parallel branches:
+**Where the module is.** Everything a Luanti game does on the server is
+built: the environment and the map (M2), digging and placing with the
+callbacks around them, node metadata, inventories and the recipes (M4), the
+globalsteps, `core.after`, ABMs, LBMs, the objects and the node timers (M5),
+and reading an existing Luanti world's map and clock (M7). The module plan
+has what each turned out to be; `doc/plan/luanti_module_history.md` has the
+detail.
 
-1. **M3 -- it looks like the game.** The big one, and started: the game's
-   media is served and a node whose tile is a plain shipped file name wears
-   it (279 of devtest's 390 node types); `nodebox`, `plantlike`,
-   `plantlike_rooted`, `firelike`, `torchlike`, `signlike`, `fencelike`,
-   `raillike` and the liquids are built as shapes through buildat's
-   own mesher (155 of 390, 83 of them liquids); `glasslike` and `allfaces`
-   are drawn at all now that "light gets past this" is a flag of its own
-   rather than the edge material (another 40); a node turns with its param2
-   -- `facedir`, `4dir` and `wallmounted`, 56 of 390 -- through the
-   `tile_order` and `tile_turns` a `VoxelVariant` has always had, with a
-   shaped node turning its shape as well; and a liquid is blended,
-   which is a technique `builtin/voxel_shading` was missing for the child
-   node the mesher has always put translucent faces on. What is left is the
-   texture modifiers, the rest of the drawtypes, palettes, and the client
-   fork -- whose `init.lua` three-way split is the largest unexamined piece
-   of the milestone. The module plan's M3 entry has the order.
+What is left is, in order:
 
-   **The texture modifiers are blocked on an open question**, and they are
-   112 of devtest's 390 node types: a module's client Lua runs in the
-   sandbox and `buildat.compose_image` is not in it, so the module cannot
-   compose a tile the way `extensions/luanti_client` does -- and the plan
-   has already ruled out the module leaning on an extension. What of the
-   image and cache-path primitives belongs in the sandbox, and under what
-   confinement, is a trust-boundary decision; the three shapes it could take
-   are written out under "OPEN: what a module's client half is allowed to
-   do" in `doc/plan/luanti_module_plan.md`.
-2. **M4, M5, M6, M7** after, in the module plan's own order. M4's node half
-   -- `place_node`, `dig_node`, `punch_node` and the callbacks around them,
-   with node metadata -- is built ahead of that order, because it needed
-   nothing of M3 and M3's own remainder is the two blocked questions.
+1. **The client half.** It is what M3, M4 and M5 each say is left of them:
+   nothing draws an object, a click is not a dig, and there are no
+   formspecs. `games/luanti_launcher`'s viewer is a camera and a HUD line.
+   The fork's shape is settled -- which files are copied, which are dropped,
+   and that `world.lua` loses a fifth of itself to `voxelworld` -- and
+   `init.lua`'s three-way split is the largest unexamined piece of it. See
+   "The protocol, and the client" in the module plan.
 
-Done since this list was written, all in `doc/plan/master_plan_history.md`:
-steps 4 and 5a of the persistence plan -- voxelworld's name table, format tag
-and modified flag, and `builtin/luanti` keeping its world and its clock in a
-save -- and items 1, 2, 3 and 5 of section 14, which is what `client_file`
-needed before M3 points it at a Luanti game's whole asset tree.
+   **The texture modifiers are blocked on an open question** and are 112 of
+   devtest's 390 node types: a module's client Lua runs in the sandbox and
+   `buildat.compose_image` is not in it. What of the image and cache-path
+   primitives belongs in the sandbox, and under what confinement, is a
+   trust-boundary decision; the three shapes it could take are under "OPEN:
+   what a module's client half is allowed to do" in the module plan. Nothing
+   else in the client half waits on it.
+2. **M6, the launcher and its map.** The menu -- which save, and which game
+   it needs -- is client work of a much smaller kind, and
+   `ui_utils.vertical_menu` already draws that shape elsewhere. The map is
+   the bigger half: the world is 3x3x3 sections today, which is why the
+   importer drops most of a real Luanti world, and a map that loads and
+   unloads around a player is what the mapgen seam was deferred until there
+   was something to measure. There is something to measure now.
+3. **What is left of M7:** `map_meta.txt`'s seed, the player and mod storage
+   databases, and a block's node metadata, timers and static objects. The
+   metadata wants step 5c of the persistence plan; the objects want a
+   `static_save` that means something.
+
+Done since the third round, all in `doc/plan/master_plan_history.md` or in
+the module's own history: M4's inventories and recipes, all of M5, M7's
+importer, and the preferences screen.
 
 One loose end inside the module, not blocking: the mapgen seam is where
-`voxelworld`'s own region calls get decided, deferred until there is
-something to measure them against. See "The region calls" in the module plan.
+`voxelworld`'s own region calls get decided. See "The region calls" in the
+module plan.
 
 ## Maintenance -- do this daily
 
