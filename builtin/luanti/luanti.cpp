@@ -2413,12 +2413,20 @@ struct Module: public interface::Module, public luanti::Interface
 	// nothing about where it came from. A clash between two mods is the
 	// game's to avoid, which is the deal Luanti gives them too.
 	//
-	// Only textures so far. Sounds, models and translations go the same way
-	// when the things that consume them exist -- M4 and M5.
+	// Luanti draws no line between a texture, a model, a sound and a
+	// translation: whatever sits under a mod's media directories and ends in
+	// an extension on the whitelist is media and goes to the client. What
+	// the client makes of it is the game's business, not the server's.
 	void serve_game_media(const ss_ &game_path)
 	{
+		// Luanti's directories, in Luanti's order (src/server/mods.cpp)
+		static const sv_<ss_> wanted = {"textures", "sounds", "media",
+				"models", "locale", "fonts"};
 		sv_<ss_> dirs;
-		collect_dirs_named(game_path+"/mods", "textures", dirs, 0);
+		// The game's own textures/, beside its mods' (src/server.cpp)
+		if(interface::fs::path_exists(game_path+"/textures"))
+			dirs.push_back(game_path+"/textures");
+		collect_dirs_named(game_path+"/mods", wanted, dirs, 0);
 		sm_<ss_, ss_> files;
 		for(const ss_ &dir : dirs)
 			collect_files(dir, files, 0);
@@ -2429,12 +2437,12 @@ struct Module: public interface::Module, public luanti::Interface
 		for(const auto &pair : files)
 			m_served_media.insert(pair.first);
 		log_i(MODULE, "%zu media files from %zu directories under %s",
-				files.size(), dirs.size(), cs(game_path+"/mods"));
+				files.size(), dirs.size(), cs(game_path));
 	}
 
-	// A mod is a directory with a textures/ in it, and a modpack is a
-	// directory of those, so this goes a few levels deep and no further
-	void collect_dirs_named(const ss_ &path, const ss_ &wanted,
+	// A mod is a directory with a textures/ or a models/ in it, and a modpack
+	// is a directory of those, so this goes a few levels deep and no further
+	void collect_dirs_named(const ss_ &path, const sv_<ss_> &wanted,
 			sv_<ss_> &out, int depth)
 	{
 		if(depth > 3)
@@ -2442,11 +2450,49 @@ struct Module: public interface::Module, public luanti::Interface
 		for(const interface::fs::Node &n : interface::fs::list_directory(path)){
 			if(!n.is_directory || n.name == "." || n.name == "..")
 				continue;
-			if(n.name == wanted)
+			if(std::find(wanted.begin(), wanted.end(), n.name) != wanted.end())
 				out.push_back(path+"/"+n.name);
 			else
 				collect_dirs_named(path+"/"+n.name, wanted, out, depth + 1);
 		}
+	}
+
+	// Luanti's media whitelist: a plain name, and an extension the client
+	// knows what to do with (Server::addMediaFile in src/server.cpp)
+	static bool is_media_name(const ss_ &name)
+	{
+		if(name.find_first_not_of("abcdefghijklmnopqrstuvwxyz"
+				"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") != ss_::npos)
+			return false;
+		static const char *exts[] = {
+			"png", "jpg", "tga",
+			"ogg",
+			"x", "b3d", "obj", "gltf", "glb",
+			"tr", "po", "mo", // translations
+			"ttf", "woff", // fonts
+			nullptr
+		};
+		for(const char **ext = exts; *ext; ext++)
+			if(interface::fs::check_file_extension(cs(name), *ext))
+				return true;
+		return false;
+	}
+
+	static void check_media_names()
+	{
+		assert(is_media_name("default_stone.png"));
+		assert(is_media_name("gltf_frog.gltf"));
+		assert(is_media_name("default_cobble.x"));
+		assert(is_media_name("soundstuff_mono.ogg"));
+		// A mod's code, its documentation and its stray files stay home
+		assert(!is_media_name("init.lua"));
+		assert(!is_media_name("README.txt"));
+		assert(!is_media_name("model.blend"));
+		// An extension is not a name, and a name is not a path
+		assert(!is_media_name("png"));
+		assert(!is_media_name("a name with spaces.png"));
+		assert(!is_media_name("../outside.png"));
+		log_v(MODULE, "check_media_names: the whitelist holds");
 	}
 
 	// The first one under a name wins, which is what Luanti does with a
@@ -2462,7 +2508,7 @@ struct Module: public interface::Module, public luanti::Interface
 				collect_files(dir+"/"+n.name, files, depth + 1);
 				continue;
 			}
-			if(files.count(n.name))
+			if(files.count(n.name) || !is_media_name(n.name))
 				continue;
 			files[n.name] = dir+"/"+n.name;
 		}
@@ -3750,6 +3796,7 @@ struct Module: public interface::Module, public luanti::Interface
 
 		check_shapes();
 		check_mapblock();
+		check_media_names();
 
 		// The game's own media before the registry, because what a node's
 		// tiles can be depends on which files were actually shipped
