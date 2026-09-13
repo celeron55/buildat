@@ -296,10 +296,34 @@ once the mods have loaded, which is what makes that safe.
    which is the rule the thread imposes and the shape the vendored mapgen
    needs. The generator's body is still the singlenode fill.
 
-   What is left of 3a is the shim under that body: `mapgen.cpp`,
-   `voxel.h`'s `VoxelManipulator`, `mapnode.h` and a `NodeDefManager`
-   slice, with `MapgenSinglenode` running through it. Nothing about terrain
-   is interesting there and everything about the translation is.
+   What is left of 3a is the shim under that body, and it was sized
+   2026-09-13 by reading what the mapgen tree actually touches:
+
+   - **`nodedef.h` is a shim, not a vendoring.** Of its 864 lines the whole
+     mapgen tree uses `NodeDefManager::getId(name)`, `::get(content)` and
+     the node resolver, and of `ContentFeatures` exactly eight fields:
+     `walkable` (9 uses), `is_ground_content` (5), `isLiquid()` (3), `name`
+     (2), `drawtype` (2), `param_type`, `liquid_type`, `floodable`, plus
+     `getLightingFlags()`. That is a thirty-line struct answered from this
+     module's own registry, which is already frozen by the time a world is
+     made. Vendoring the real one would drag in `itemdef.h`, `sound.h` and
+     `tile.h`, which is the client.
+   - **`voxel.h` is a vendoring**, because `VoxelManipulator` and
+     `VoxelArea` are 512 lines that need only `MapNode` and a vector type.
+     `MMVManip` derives from it and is what every mapgen writes into.
+   - **`mapnode.h` is a shim**: content, param1, param2 and the handful of
+     methods above, which is what `VoxelFormat::luanti()` already binds.
+   - **A vector and integer-type header** for `v3s16`, `v3f`, `u16` and the
+     rest of Irrlicht's names, which buildat does not use anywhere else.
+   - **`noise.h` is the adapter** decided above: Luanti's calls onto
+     buildat's own copy.
+   - **`settings.h`, `emerge.h`, `gamedef.h`, `log.h`, `profiler.h`** are
+     stubs of a few lines each -- what the mapgen reads out of them is
+     `MapgenParams`, which the module builds itself.
+
+   Then `mapgen.cpp` compiles, and `MapgenSinglenode` through it is the
+   check that the translation is right before anything interesting is
+   generated.
 2. **3b: `mapgen_v7` with its own noise, and no managers.** Terrain,
    caves and nothing else. This is the point at which a world looks like a
    Luanti world.
