@@ -262,6 +262,72 @@ Staged, because the seam is where the bugs will be:
    older snapshot without lacunarity or flags; stage 3 wants the current
    one, which is 750 lines and the same file.
 
+### Mapgen stage 3: how it lands (2026-09-13)
+
+**`builtin/worldgen` is the seam, and it already exists.** Its
+`GeneratorInterface::generate(scene, section_p, volume)` runs *in a worker
+thread with no module held*, takes a padding so that a tree at the edge of a
+section can be placed whole, and merges what it produced into the world
+afterwards. That is exactly the shape a vendored mapgen wants, and it is
+what `games/infidigger` and `games/bomber_drone` already generate through.
+So the module creates a `worldgen` instance for its scene and hands it a
+generator that is Luanti's `Mapgen` in a shim -- and the 600 ms a Lua mapgen
+spends on the server's own thread stops being the server's problem.
+
+**What the shim is.** `MMVManip` is a flat `MapNode` array over a
+`VoxelArea`, and `interface::VoxelVolume` is a flat voxel word array over a
+`pv::Region`; a `MapNode` is content, param1 and param2, which is exactly
+what `VoxelFormat::luanti()` binds. So the translation is a loop, and it is
+the same translation `set_node` already does. Of `nodedef.h` the mapgen uses
+four calls, and **the registry id is already the Luanti content id**.
+
+Nothing in the generator may touch a module, so what it needs is snapshotted
+when the world is created: the content ids by name, the few node properties
+the mapgen reads, the mapgen parameters and the seed. The registry is frozen
+once the mods have loaded, which is what makes that safe.
+
+**Staged, because the shim is the part that can be wrong.**
+
+1. **3a: the shim, with `MapgenSinglenode` or `MapgenFlat` through it.**
+   Vendor `mapgen.cpp`, `voxel.h`'s `VoxelManipulator`, `mapnode.h` and a
+   `NodeDefManager` slice; run one trivial generator in the worldgen thread
+   and see a flat world come out. Nothing about terrain is interesting here
+   and everything about the seam is.
+2. **3b: `mapgen_v7` with its own noise, and no managers.** Terrain,
+   caves and nothing else. This is the point at which a world looks like a
+   Luanti world.
+3. **3c: the managers -- biomes, then ores, then decorations with
+   schematics and the tree generator.** These are what a *game* registers:
+   `core.registered_biomes`, `_ores` and `_decorations` are recorded in Lua
+   already and have been since M2, so this step is the translation of those
+   tables into `BiomeManager`, `OreManager` and `DecorationManager`. It is
+   the biggest of the four and the one a game's own look depends on.
+4. **3d: the other generators** -- v5, v6, valleys, carpathian, fractal,
+   flat. At that point each is a file that compiles against a shim that
+   works.
+
+**Decisions taken, unless somebody says otherwise.** The vendored mapgen
+goes in the module's own tree (`builtin/luanti/vendor/mapgen/`), beside the
+vendored Lua builtin and for the same reason: it is Luanti's code, and this
+module is what makes Luanti's code work here. It is compiled with the module
+-- which is runtime-compiled, so a first start pays for 9.5k lines once and
+the cache pays after that. Lighting stays `voxelworld`'s: Luanti's mapgen
+calculates its own and here that would be work done twice, so the
+generator's lighting pass is skipped. Settings are the mapgen's own C++
+defaults plus the world's seed; `map_meta.txt`'s per-world overrides are a
+later refinement.
+
+**What is still open, and what it changes.**
+
+- **How faithful does a world have to be?** Bit-for-bit with Luanti's v7
+  for the same seed is a much stronger claim than "a world that looks like
+  Luanti's". The noise buildat carries is an older snapshot without
+  lacunarity or flags, so the honest answer is that bit-for-bit needs the
+  current `noise.cpp` vendored as well. Worth deciding before 3b, because
+  it is the difference between vendoring one more file and not.
+- **Does anything want the other seven generators?** 3d is a day of work
+  for six worlds nobody has asked for yet.
+
 The staging is about order, not scope: a mainstream Luanti game is expected
 to produce its real terrain, and stage 3 is a milestone rather than a
 separate career.
@@ -313,17 +379,15 @@ three sections it was. What each turned out to be, and why the interface is
 shaped the way it is, is in `doc/plan/luanti_module_history.md`, "The map,
 and how it streams".
 
-**What is left of it: node metadata per section.** It is one blob for the
-whole world, written at shutdown and read at start. Nothing is lost by a
-section unloading -- the table is the world's and not the section's -- so
-what this costs is a table that grows with everywhere the players have been,
-and one large write at the end. Luanti keeps a block's metadata with the
-block and writes it when the block is written; the upgrade path is the same
-shape, a blob per section written when voxelworld writes that section, and
-it wants a section-loaded and section-unloaded notification from
-`voxelworld`, which does not have one. See step 5c of
-`doc/plan/world_persistence_plan.md`, and the note in `lua/bootstrap.lua`
-where the blob is built.
+**And what hangs off the voxels goes with them (2026-09-13).** Node metadata
+is a blob per section, written when `voxelworld` says the section is about
+to go and read back when it says the section is there --
+`voxelworld:section_loaded` and `voxelworld:section_unloaded`, which are the
+two events anything keeping something of its own per section wants. The
+timers in a section leave with it too. `core.forceload_block()` works, which
+is how a mod keeps a section loaded where nobody is standing; the vendored
+builtin does the bookkeeping and the persistence and hands the engine a
+block position.
 
 **And the map is still singlenode.** Streaming is what a mapgen needs to
 exist at all -- a generated world that cannot unload is a world with a wall
@@ -1198,12 +1262,10 @@ what the module does not do.
 - **The texture is not turned inside a shape's quad.** `tile_turns` does
   that for a cube's faces and the mesher does not apply it to a shape, so a
   turned node box wears its textures straight.
-- **The node metadata is one blob for the whole world**, written at
-  shutdown. Luanti keeps a block's metadata with the block; the upgrade path
-  is the same shape -- a blob per section, written when `voxelworld` writes
-  that section -- and it wants a section-loaded notification `voxelworld`
-  does not have. Nothing is lost by a section unloading: what it costs is a
-  table that grows with everywhere the players have been.
+- **A section's metadata is taken out of one table over the whole world**,
+  once per unload, rather than kept in an index per section. A world with
+  more than a few thousand nodes carrying something wants the index; the
+  place to keep one is beside the table in `lua/bootstrap.lua`.
 - **An object outside the active range stays in the world and stops
   moving.** Luanti takes it out of the world entirely and writes it into the
   block it was in, so a world with a thousand wandering mobs in it costs

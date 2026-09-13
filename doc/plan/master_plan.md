@@ -96,6 +96,13 @@ section -- one blob for the world still works, and what it costs is memory
 that grows with where the players have been. See "The map, as it was built"
 in the module plan.
 
+**Node metadata goes with its section (2026-09-13)**, which is what M6's map
+left behind: a blob per section written when `voxelworld` says the section
+is about to go and read back when it says the section is there. The two
+events that needed -- `voxelworld:section_loaded` and `section_unloaded` --
+are what anything keeping something of its own per section wants.
+`core.forceload_block()` works with them.
+
 **The mapgen's seam is built (2026-09-13).** A section that has been filled
 runs `core.register_on_generated` over the box it filled, and a mod writes
 terrain into it through a VoxelManip that really reads and writes the map --
@@ -128,13 +135,7 @@ What is left, in order of what it is worth:
    server's own thread. Luanti has an emerge thread; this module has one Lua
    state and nowhere to put one. A vendored mapgen writes the volume with no
    Lua in the middle.
-2. **Node metadata per section**, which is what M6's map left behind. One
-   blob for the world still works and loses nothing, but it grows with
-   everywhere the players have been and it is one large write at shutdown.
-   It wants a section-loaded notification from `voxelworld`, which does not
-   have one. See "The map, as it was built" in the module plan and step 5c
-   of `doc/plan/world_persistence_plan.md`.
-3. **The rest is minor and belongs to a later round.** glTF, an object drawn
+2. **The rest is minor and belongs to a later round.** glTF, an object drawn
    as its own model, a detached inventory, a put-down count, the inventory
    cube, a scrolling save list: each is an afternoon, none blocks a game
    from running, and they are in "Bonuses" below for exactly that reason.
