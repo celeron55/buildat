@@ -180,9 +180,17 @@ What is left, in order of what it is worth:
 
    What is left of it:
 
-   1. **The sky a game asks for**: `set_sky`, `set_sun`, `set_moon` and
-      `set_clouds` are stubs, and the cube map the reflections come from
-      is baked at noon whatever the hour.
+   1. **The sky a game asks for** is carried but not drawn. `set_sky` and
+      `set_clouds` are kept per player and sent (2026-09-13), the skybox's
+      colours and cloud amount are shader parameters now, and the launcher
+      sets them from what the game said -- and none of it shows, because
+      **the launcher's sky is not drawn by that skybox**: it is a smooth
+      fog-coloured gradient with none of the shader's clouds in it, while
+      the same shader and the same `create_skybox()` call draw
+      infidigger's sky and change with its parameters. Finding what hides
+      it is the next thing. Left after that: `set_sun`, `set_moon` and
+      `set_stars`, which are still stubs, and the cube map the
+      reflections come from, which is baked at noon whatever the hour.
    2. **The day-night ratio is already there**, which was worth finding
       out: the mesher puts the sky part of a voxel's light in the vertex
       colour's alpha and the lamp part in its rgb, and the shader adds
