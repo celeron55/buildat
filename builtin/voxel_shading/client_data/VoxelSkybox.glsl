@@ -13,6 +13,16 @@ varying vec3 vTexCoord;
 
 uniform vec3 cSunDirection;
 
+// The two ends of the gradient, and how much of the sky is cloud. They are
+// parameters rather than constants because a game says what its own sky is
+// -- Luanti's set_sky and set_clouds -- and create_skybox() sets them to the
+// values below, which are what this sky was drawn as before any game asked.
+// A material that sets none of them gets black, so nothing may leave them
+// out.
+uniform vec3 cSkyZenith;
+uniform vec3 cSkyHorizon;
+uniform float cCloudCover;
+
 // Kept equal to ZENITH, HORIZON and GROUND in make_client_data.py
 const vec3 ZENITH = vec3(0.13, 0.24, 0.58);
 const vec3 HORIZON = vec3(0.55, 0.66, 0.84);
@@ -87,8 +97,8 @@ void PS()
     vec3 sun = normalize(cSunDirection);
 
     vec3 color = d.y < 0.0 ?
-            mix(HORIZON, HAZE, min(1.0, -d.y / HAZE_DEPTH)) :
-            mix(HORIZON, ZENITH, sqrt(d.y));
+            mix(cSkyHorizon, HAZE, min(1.0, -d.y / HAZE_DEPTH)) :
+            mix(cSkyHorizon, cSkyZenith, sqrt(d.y));
 
     // Clouds, on a plane overhead: dividing by d.y is what makes them lie flat
     // and crowd together towards the horizon instead of wrapping the dome
@@ -98,7 +108,7 @@ void PS()
         // One value per square, so the edges land on the grid rather than
         // wherever the noise happened to cross the threshold
         float density = CloudDensity(floor(p * CLOUD_PIXELS) / CLOUD_PIXELS);
-        float threshold = 1.0 - CLOUD_COVERAGE;
+        float threshold = 1.0 - cCloudCover;
         // Two tones: the thicker middle of a cloud and the squares around it
         vec3 cloud = density > threshold + CLOUD_LIT_STEP ?
                 CLOUD_LIT : CLOUD_SHADED;
