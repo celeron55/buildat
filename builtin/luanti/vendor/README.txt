@@ -12,9 +12,16 @@ Nothing under this directory is copied into buildat proper.
 Luanti states its licence once, in the LICENSE.txt at the root of its own
 tree; these Lua files carry no header of their own. The statement, copied
 verbatim, is in buildat's NOTICE, and the full licence is in COPYING.LESSER.
-One file here is under other terms and does say so in itself:
+Two files here are under other terms and say so in themselves:
 builtin/common/serialize.lua is MIT, from appgurueu's modlib
-(https://github.com/appgurueu/modlib, luon.lua).
+(https://github.com/appgurueu/modlib, luon.lua), and bitop/ is Lua BitOp
+1.0.2, MIT, by Mike Pall (http://bitop.luajit.org/) -- which Luanti carries
+in lib/bitop and loads when it is not running on LuaJIT, and which this
+module loads always, the Lua here being Urho3D's 5.1.
+
+builtin/settingtypes.txt is Luanti's own and is here as data: it is where the
+engine's default settings are read from, so that they need not be kept by
+hand.
 
 No Luanti media is here. Luanti's textures and sounds are CC BY-SA, with
 their authors listed in its LICENSE.txt; a client gets media from the server
