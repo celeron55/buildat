@@ -2,6 +2,7 @@
 	"dependencies": [
 		{"module": "main_context"},
 		{"module": "client_file"},
-		{"module": "voxelworld"}
+		{"module": "voxelworld"},
+		{"module": "client_lua"}
 	]
 }
