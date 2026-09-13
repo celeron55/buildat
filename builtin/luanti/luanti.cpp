@@ -1250,10 +1250,10 @@ struct Module: public interface::Module, public luanti::Interface
 	// because that is what loads and unloads here; a mod asking for a
 	// block gets the section it is in.
 	//
-	// simplified: not written to the save, so a forceload lasts as long as
-	// the server runs. Luanti keeps the ones that are not transient in
-	// force_loaded.txt; the upgrade path is the module's own store, which
-	// already holds the clock and the seed.
+	// Nothing here is written down, and nothing needs to be: the vendored
+	// builtin's forceloading.lua keeps the ones that are not transient in
+	// force_loaded.txt beside the world and asks for them again when it
+	// loads, which is where Luanti keeps them too.
 	set_<uint64_t> m_forceloaded;
 
 	static uint64_t section_key(const pv::Vector3DInt16 &p)
