@@ -266,6 +266,22 @@ core.register_abm({
 	end,
 })
 
+-- The same idea when the map is loaded rather than on a timer: this one
+-- only looks, and counts what it was given, because what the check is about
+-- is that it ran over the right nodes at all.
+local lbm = {seen = 0, wrong = 0}
+
+core.register_lbm({
+	name = "floor:count_torches",
+	nodenames = {"floor:torch"},
+	action = function(pos, node)
+		lbm.seen = lbm.seen + 1
+		if node.name ~= "floor:torch" then
+			lbm.wrong = lbm.wrong + 1
+		end
+	end,
+})
+
 local HALF = 12   -- a 25x25 floor, which is one voxelworld section across
 local Y = 0
 
@@ -335,6 +351,7 @@ end
 
 -- A torch in each of the six wallmounted directions, standing free so that
 -- each one's lean is its own and not a wall's
+local TORCHES = 6
 for i = 0, 5 do
 	core.set_node({x = -2 + i, y = Y + 2, z = 2},
 			{name = "floor:torch", param2 = i})
@@ -452,6 +469,14 @@ function core.__game_check()
 	end
 	core.log("action", "floor: the abm grew the one seed of three that its " ..
 			"neighbors and max_y allowed")
+
+	-- The same step is the one the map was loaded for, so the lbm has run
+	if lbm.seen ~= TORCHES or lbm.wrong ~= 0 then
+		error("floor: the lbm saw " .. lbm.seen .. " of " .. TORCHES ..
+				" torches, " .. lbm.wrong .. " of them something else")
+	end
+	core.log("action", "floor: the lbm ran over all " .. TORCHES ..
+			" torches when the map was loaded")
 end
 
 core.log("action", "floor: placed a " .. (HALF * 2 + 1) .. "x" ..

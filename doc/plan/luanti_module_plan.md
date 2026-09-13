@@ -855,9 +855,22 @@ two things M1 disproved about the build, are in
   blocks are never read. All three are about a map bigger than the sections a
   mod can reach here; they belong with M6's map.
 
-  **What is left:** LBMs, which are the same idea on a block being loaded;
-  entities, which are what a dig's drops need before they go anywhere; and
-  the client half.
+  **Built: LBMs (2026-09-13).** The same idea on a section rather than on a
+  timer, over the same sweep: a rule that runs over the nodes of a kind when
+  the part of the map they are in is loaded, which is how a game fixes up
+  what it saved before it changed its mind about it. `action` and
+  `bulk_action` both. devtest has none, so what checks it is `minimal_game`,
+  where an LBM counts the six torches the fixture places and the check asks
+  for all six.
+
+  **simplified:** the whole world is loaded before anything steps and nothing
+  unloads it, so "on load" is once, at the first step that has a section to
+  look at -- and `run_at_every_load` and Luanti's record of which blocks are
+  older than which rule have nothing to be different about yet. Both belong
+  with M6's map, where a section stops being loaded for the whole run.
+
+  **What is left:** entities, which are what a dig's drops need before they
+  go anywhere; and the client half.
 - **M6 -- the launcher.** `games/luanti_launcher` as described.
 - **M7 -- an existing Luanti world opens.** The importer: read a Luanti world
   directory -- `map.sqlite`, `map_meta.txt`, `env_meta.txt`, the player and
