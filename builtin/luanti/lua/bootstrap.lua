@@ -664,10 +664,9 @@ local STUBS_NIL = {
 	-- Time and the world (M2)
 	"get_timeofday", "set_timeofday", "get_gametime", "get_day_count",
 	"set_time_of_day",
-	-- Objects and players (M5)
-	"add_entity", "add_item", "get_player_by_name", "get_objects_inside_radius",
-	"get_objects_in_area", "get_connected_players", "get_player_information",
-	"get_player_window_information", "object_refs", "luaentities",
+	-- Players (M5); the objects are in lua/entity.lua
+	"get_player_by_name", "get_connected_players", "get_player_information",
+	"get_player_window_information",
 	-- Inventory, craft, metadata (M4)
 	"get_craft_result", "get_craft_recipe",
 	"get_all_craft_recipes", "register_craft_raw", "clear_craft",
@@ -718,14 +717,14 @@ local function stub_list(name)
 end
 
 for _, name in ipairs({
-	"get_connected_players", "get_objects_inside_radius",
-	"get_objects_in_area", "find_nodes_with_meta",
+	"get_connected_players", "find_nodes_with_meta",
 }) do
 	stub_list(name)
 end
 
--- And the two that are tables rather than functions: indexing a function is
--- an error, so stubbing these as one would break a mod that only looks
+-- The two an object is in, which lua/entity.lua fills: tables rather than
+-- functions, because indexing a function is an error and a mod that only
+-- looks should not be broken by what it finds
 core.object_refs = {}
 core.luaentities = {}
 
@@ -1071,9 +1070,10 @@ end
 -- on_dignodes and on_placenodes are the builtin's own and behave as they do
 -- in Luanti, rather than being written again here.
 --
--- simplified: what a dig drops goes nowhere, because an item entity is an
--- object and objects are M5. core.handle_node_drops() computes the drops and
--- hands them to core.add_item(), which is still a stub that says so.
+-- What a dig drops lands on the ground: core.handle_node_drops() hands the
+-- drops to core.add_item(), which is the vendored builtin's own item entity
+-- now that there are objects for it to be. With no digger there is no
+-- inventory to put anything in, so everything a dig drops is spawned.
 
 local function pointed_at(pos)
 	return {
@@ -1452,6 +1452,7 @@ end
 
 function core.__step(dtime)
 	run_globalsteps(dtime)
+	core.__step_objects(dtime)
 	if not lbms_run then
 		lbms_run = run_lbms()
 	end
@@ -1486,6 +1487,7 @@ dofile(module_path .. "/lua/classes.lua")
 dofile(module_path .. "/lua/colorspec.lua")
 dofile(module_path .. "/lua/png.lua")
 dofile(module_path .. "/lua/misc.lua")
+dofile(module_path .. "/lua/entity.lua")
 dofile(module_path .. "/lua/check_map.lua")
 
 -- vim: set noet ts=4 sw=4:

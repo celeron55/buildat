@@ -282,6 +282,29 @@ core.register_lbm({
 	end,
 })
 
+-- An object, which is everything in a world that is not a node: this one
+-- falls, and what the check is about is that the step moved it and the floor
+-- stopped it.
+core.register_entity("floor:faller", {
+	initial_properties = {
+		physical = true,
+		collisionbox = {-0.3, -0.3, -0.3, 0.3, 0.3, 0.3},
+		visual = "sprite",
+		textures = {"floor_marker.png"},
+	},
+	on_activate = function(self, staticdata, dtime_s)
+		self.steps = 0
+		self.landed = false
+		self.object:set_acceleration({x = 0, y = -10, z = 0})
+	end,
+	on_step = function(self, dtime, moveresult)
+		self.steps = self.steps + 1
+		if moveresult and moveresult.touching_ground then
+			self.landed = true
+		end
+	end,
+})
+
 local HALF = 12   -- a 25x25 floor, which is one voxelworld section across
 local Y = 0
 
@@ -477,6 +500,57 @@ function core.__game_check()
 	end
 	core.log("action", "floor: the lbm ran over all " .. TORCHES ..
 			" torches when the map was loaded")
+
+	-- An object falls and the floor stops it. The box is 0.3 down from the
+	-- middle and the floor's top is at 0.5, so that is where it comes to
+	-- rest.
+	local start = {x = 0, y = Y + 6, z = -6}
+	local faller = core.add_entity(start, "floor:faller")
+	if not faller then
+		error("floor: add_entity gave nothing back")
+	end
+	for _ = 1, 40 do
+		core.__step(0.1)
+	end
+	local self_ = faller:get_luaentity()
+	local p = faller:get_pos()
+	if not self_.landed then
+		error("floor: the faller never touched the ground; it is at y=" ..
+				tostring(p.y))
+	end
+	if math.abs(p.y - (Y + 0.5 + 0.3)) > 0.01 then
+		error("floor: the faller came to rest at y=" .. tostring(p.y))
+	end
+	if p.x ~= start.x or p.z ~= start.z then
+		error("floor: the faller moved sideways")
+	end
+	faller:remove()
+	if faller:is_valid() or core.luaentities[1] ~= nil then
+		error("floor: the faller outlived its remove()")
+	end
+	core.log("action", "floor: the faller fell " .. (start.y - p.y) ..
+			" and the floor stopped it in " .. self_.steps .. " steps")
+
+	-- And what a dig drops is an object: the builtin's own item entity,
+	-- which is what core.add_item() makes
+	local dug = {x = 5, y = Y + 1, z = -6}
+	core.set_node(dug, {name = "floor:stone"})
+	if not core.dig_node(dug) then
+		error("floor: dig_node said no to the stone it was given")
+	end
+	local dropped = core.get_objects_inside_radius(dug, 2)
+	if #dropped ~= 1 then
+		error("floor: the dig dropped " .. #dropped .. " objects")
+	end
+	local item = dropped[1]:get_luaentity()
+	if item.name ~= "__builtin:item" then
+		error("floor: the dig dropped a " .. tostring(item.name))
+	end
+	if not string.match(tostring(item.itemstring), "^floor:stone") then
+		error("floor: the dropped item is " .. tostring(item.itemstring))
+	end
+	dropped[1]:remove()
+	core.log("action", "floor: the dig dropped " .. item.itemstring)
 end
 
 core.log("action", "floor: placed a " .. (HALF * 2 + 1) .. "x" ..
