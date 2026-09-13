@@ -676,6 +676,9 @@ function core.__voxel_defs()
 			-- panes are drawn with every texel either solid or gone, where
 			-- the game meant them to be seen through.
 			alpha_blend = (def and def.use_texture_alpha == "blend") or false,
+			-- The model a "mesh" node is made of; the module reads it and
+			-- the quads become the node's shape
+			mesh = (drawtype == "mesh") and def and def.mesh or nil,
 			facing = def and FACING_OF_PARAMTYPE2[def.paramtype2] or nil,
 			-- The palette its param2 picks a colour from, if it has one:
 			-- the module reads the image and gives each colour a variant
@@ -2160,6 +2163,9 @@ dofile(module_path .. "/lua/misc.lua")
 dofile(module_path .. "/lua/entity.lua")
 dofile(module_path .. "/lua/craft.lua")
 dofile(module_path .. "/lua/json.lua")
+dofile(module_path .. "/lua/objmesh.lua")
+dofile(module_path .. "/lua/b3dmesh.lua")
+dofile(module_path .. "/lua/mesh.lua")
 dofile(module_path .. "/lua/check_map.lua")
 
 -- vim: set noet ts=4 sw=4:

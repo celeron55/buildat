@@ -2260,6 +2260,73 @@ struct Module: public interface::Module, public luanti::Interface
 		return out;
 	}
 
+	// The quads a "mesh" node is made of, read out of the model file the
+	// game shipped. lua/mesh.lua picks the reader by extension; a format
+	// nothing reads comes back empty and the node keeps its cube.
+	//
+	// Read here rather than on the client because a node's shape belongs in
+	// its definition, where every other drawtype's shape is: the client is
+	// sent quads and does not care where they came from.
+	sv_<interface::VoxelQuad> mesh_quads(const ss_ &name, float scale)
+	{
+		sv_<interface::VoxelQuad> out;
+		auto it = m_served_media.find(name);
+		if(it == m_served_media.end()){
+			log_v(MODULE, "mesh \"%s\" was not shipped", cs(name));
+			return out;
+		}
+		std::ifstream ifs(it->second, std::ios::binary);
+		std::ostringstream os;
+		os<<ifs.rdbuf();
+		const ss_ data = os.str();
+		if(data.empty())
+			return out;
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__mesh_quads");
+		lua_pushlstring(L, name.c_str(), name.size());
+		lua_pushlstring(L, data.c_str(), data.size());
+		lua_pushnumber(L, scale);
+		if(lua_pcall(L, 3, 2, 0) != 0){
+			log_w(MODULE, "__mesh_quads(\"%s\"): %s", cs(name),
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+			lua_settop(L, base);
+			return out;
+		}
+		const int skipped = (int)lua_tonumber(L, -1);
+		if(!lua_istable(L, -2)){
+			lua_settop(L, base);
+			return out;
+		}
+		// Twenty-one numbers a quad: the tile, four corners and four
+		// texture coordinates
+		const size_t n = lua_objlen(L, -2);
+		out.reserve(n / 21);
+		for(size_t i = 0; i + 20 < n; i += 21){
+			interface::VoxelQuad quad;
+			double v[21];
+			for(size_t j = 0; j < 21; j++){
+				lua_rawgeti(L, -2, (int)(i + j + 1));
+				v[j] = lua_tonumber(L, -1);
+				lua_pop(L, 1);
+			}
+			quad.tile = (uint8_t)v[0];
+			for(size_t c = 0; c < 4; c++){
+				for(size_t k = 0; k < 3; k++)
+					quad.p[c][k] = (float)v[1 + c * 3 + k];
+				for(size_t k = 0; k < 2; k++)
+					quad.uv[c][k] = (float)v[13 + c * 2 + k];
+			}
+			out.push_back(quad);
+		}
+		lua_settop(L, base);
+		log_v(MODULE, "mesh \"%s\": %zu quads%s", cs(name), out.size(),
+				skipped > 0 ? cs(ss_()+", "+itos(skipped)+
+				" faces are neither triangles nor quads") : "");
+		return out;
+	}
+
 	// "#rrggbb", which is what a texture modifier takes
 	static ss_ hex_colour(uint32_t rgb)
 	{
@@ -2343,6 +2410,7 @@ struct Module: public interface::Module, public luanti::Interface
 			ss_ overlay_tile = table_string(L, "overlay_tile");
 			ss_ liquid_group = table_string(L, "liquid_group");
 			ss_ palette = table_string(L, "palette");
+			ss_ mesh = table_string(L, "mesh");
 			int raillike_group = (int)table_number(L, "raillike_group", 0);
 			int liquid_range = (int)table_number(L, "liquid_range",
 					LIQUID_LEVELS);
@@ -2369,7 +2437,12 @@ struct Module: public interface::Module, public luanti::Interface
 			// The shape is drawn as well as the voxel's cube faces, not
 			// instead of them
 			bool shape_over_cube = false;
-			if(drawtype == "nodebox" && boxes.size() >= 6){
+			if(drawtype == "mesh" && !mesh.empty()){
+				// The model's own quads, in the node's own cube. A format
+				// nothing here reads leaves the node the cube it had.
+				shape = mesh_quads(mesh,
+						visual_scale > 0.0f ? visual_scale : 1.0f);
+			} else if(drawtype == "nodebox" && boxes.size() >= 6){
 				for(size_t b = 0; b + 5 < boxes.size(); b += 6){
 					add_box_quads(shape, boxes[b], boxes[b + 1], boxes[b + 2],
 							boxes[b + 3], boxes[b + 4], boxes[b + 5]);
