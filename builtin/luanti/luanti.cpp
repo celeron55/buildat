@@ -650,6 +650,11 @@ struct Module: public interface::Module, public luanti::Interface
 	// the game loads and where a player with nowhere else to be spawns. It
 	// is what the world was in its entirety before it streamed.
 	static const int16_t SPAWN_RADIUS = 1;
+	// Taller than it is wide, because what the spawn needs is the ground
+	// under the origin and a mapgen can put that a long way down -- an ocean
+	// trench, a deep valley. A column too short is a player left in the air
+	// at the origin with nothing under them to stand on.
+	static const int16_t SPAWN_RADIUS_Y = 2;
 	// How many sections a streaming pass may take on, which goes down while
 	// a mod's mapgen is slow; see run_on_generated()
 	size_t m_stream_budget = 2;
@@ -1228,7 +1233,8 @@ struct Module: public interface::Module, public luanti::Interface
 			return;
 		sv_<voxelworld::LoadPoint> points;
 		points.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(0, 0, 0),
-				SPAWN_RADIUS, SPAWN_RADIUS, SPAWN_RADIUS, SPAWN_RADIUS));
+				SPAWN_RADIUS, SPAWN_RADIUS_Y,
+				SPAWN_RADIUS, SPAWN_RADIUS_Y));
 		for(const auto &pair : m_player_pos){
 			size_t peer = 0;
 			auto it = m_player_peers.find(pair.first);
@@ -1910,8 +1916,10 @@ struct Module: public interface::Module, public luanti::Interface
 	// worldgen a section is already done.
 	void generate_world()
 	{
-		const pv::Vector3DInt32 p0(-SPAWN_RADIUS, -SPAWN_RADIUS, -SPAWN_RADIUS);
-		const pv::Vector3DInt32 p1(SPAWN_RADIUS, SPAWN_RADIUS, SPAWN_RADIUS);
+		const pv::Vector3DInt32 p0(-SPAWN_RADIUS, -SPAWN_RADIUS_Y,
+				-SPAWN_RADIUS);
+		const pv::Vector3DInt32 p1(SPAWN_RADIUS, SPAWN_RADIUS_Y,
+				SPAWN_RADIUS);
 		size_t n = 0, already = 0;
 		sv_<pv::Vector3DInt16> generated;
 		int64_t t0 = interface::os::time_us();
@@ -4154,6 +4162,28 @@ struct Module: public interface::Module, public luanti::Interface
 		return 0;
 	}
 
+	// The sky one player is under, as the flat key/value list
+	// lua/entity.lua builds
+	static int l_send_sky(lua_State *L)
+	{
+		Module *self = module_of(L);
+		size_t name_len = 0;
+		const char *name_p = luaL_checklstring(L, 1, &name_len);
+		luaL_checktype(L, 2, LUA_TTABLE);
+		sv_<ss_> flat;
+		const size_t n = lua_objlen(L, 2);
+		for(size_t i = 0; i < n; i++){
+			lua_rawgeti(L, 2, (int)i + 1);
+			size_t len = 0;
+			const char *p = lua_tolstring(L, -1, &len);
+			flat.push_back(ss_(p ? p : "", p ? len : 0));
+			lua_pop(L, 1);
+		}
+		self->send_to_player(ss_(name_p ? name_p : "", name_len),
+				"luanti:sky", flat);
+		return 0;
+	}
+
 	// A line of chat to one player, or to everyone when the name is empty
 	static int l_send_chat(lua_State *L)
 	{
@@ -5181,6 +5211,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_send_chat", l_send_chat);
 		set_global_cfunction("__luanti_send_hud", l_send_hud);
 		set_global_cfunction("__luanti_send_day_night", l_send_day_night);
+		set_global_cfunction("__luanti_send_sky", l_send_sky);
 		set_global_cfunction("__luanti_send_time", l_send_time);
 		set_global_cfunction("__luanti_show_formspec", l_show_formspec);
 		set_global_cfunction("__luanti_player_formspec", l_player_formspec);

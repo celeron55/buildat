@@ -699,17 +699,131 @@ function PlayerRef:set_formspec_prepend(spec)
 	end
 end
 
--- What a sky is is the client's, and there is no client half for one yet:
--- these keep nothing and answer with nothing, rather than being missing and
--- taking a mod down on the line that sets one
+-- What is still the client's alone, and kept nowhere: these answer with
+-- nothing rather than being missing and taking a mod down on the line that
+-- sets one
 for _, name in ipairs({
 	"hud_set_hotbar_image",
-	"hud_set_hotbar_selected_image", "set_sky", "set_sun", "set_moon",
-	"set_stars", "set_clouds", "set_lighting",
+	"hud_set_hotbar_selected_image", "set_sun", "set_moon",
+	"set_stars", "set_lighting",
 	"set_minimap_modes", "send_mapblock", "set_fov", "set_nametag_color",
 	"hud_set_hotbar_image_selected",
 }) do
 	PlayerRef[name] = function() end
+end
+
+--
+-- The sky a game says it has
+--
+-- Luanti's set_sky and set_clouds. What crosses to the client is what a sky
+-- is made of here: the colour overhead, the colour at the horizon and how
+-- much of the sky is cloud. The rest of what a mod can say -- a skybox's six
+-- textures, the sun's own texture, the stars -- is kept and answered but not
+-- drawn.
+local SKY_DEFAULT_DAY = "#8cb2e0"
+local SKY_DEFAULT_ZENITH = "#215edb"
+
+-- "#rrggbb", a table or a name, as three numbers between zero and one
+local function sky_rgb(spec)
+	if spec == nil then
+		return nil
+	end
+	local t = core.colorspec_to_table and core.colorspec_to_table(spec)
+	if t == nil then
+		return nil
+	end
+	return string.format("%.4f,%.4f,%.4f", (t.r or 0) / 255,
+			(t.g or 0) / 255, (t.b or 0) / 255)
+end
+
+local function send_sky(o)
+	if not o or not o.player_name or not __luanti_send_sky then
+		return
+	end
+	local sky = o.sky or {}
+	local clouds = o.clouds_params or {}
+	local sky_color = sky.sky_color or {}
+	local flat = {}
+	local function put(k, v)
+		if v ~= nil then
+			flat[#flat + 1] = k
+			flat[#flat + 1] = tostring(v)
+		end
+	end
+	put("type", sky.type or "regular")
+	-- A plain sky is one colour everywhere, which is what base_color means
+	-- when the type says plain; a regular one has the two ends of a gradient
+	if (sky.type or "regular") == "plain" then
+		local c = sky_rgb(sky.base_color) or sky_rgb(SKY_DEFAULT_DAY)
+		put("zenith", c)
+		put("horizon", c)
+	else
+		put("zenith", sky_rgb(sky_color.day_sky) or
+				sky_rgb(SKY_DEFAULT_ZENITH))
+		put("horizon", sky_rgb(sky_color.day_horizon) or
+				sky_rgb(SKY_DEFAULT_DAY))
+	end
+	-- Luanti's clouds are on unless a sky says otherwise, and how much of
+	-- the sky they cover is their density
+	local on = sky.clouds
+	if on == nil then
+		on = true
+	end
+	put("clouds", on and "1" or "0")
+	put("density", clouds.density)
+	put("cloud_color", sky_rgb(clouds.color))
+	__luanti_send_sky(o.player_name, flat)
+end
+
+-- set_sky(params) and Luanti's older set_sky(bgcolor, type, textures,
+-- clouds), which is still what a good many mods call
+function PlayerRef:set_sky(params, sky_type, textures, clouds)
+	local o = state_of(self)
+	if not o then
+		return
+	end
+	if type(params) ~= "table" or sky_type ~= nil then
+		params = {base_color = params, type = sky_type,
+				textures = textures, clouds = clouds}
+	end
+	o.sky = table.copy(params)
+	send_sky(o)
+end
+
+function PlayerRef:get_sky(as_table)
+	local o = state_of(self)
+	local sky = (o and o.sky) or {}
+	if as_table then
+		return {base_color = sky.base_color, type = sky.type or "regular",
+				textures = sky.textures or {},
+				clouds = sky.clouds ~= false,
+				sky_color = sky.sky_color}
+	end
+	return sky.base_color, sky.type or "regular", sky.textures or {},
+			sky.clouds ~= false
+end
+
+function PlayerRef:get_sky_color()
+	local o = state_of(self)
+	return ((o and o.sky) or {}).sky_color or {}
+end
+
+function PlayerRef:set_clouds(params)
+	local o = state_of(self)
+	if not o or type(params) ~= "table" then
+		return
+	end
+	o.clouds_params = table.copy(params)
+	send_sky(o)
+end
+
+function PlayerRef:get_clouds()
+	local o = state_of(self)
+	local c = (o and o.clouds_params) or {}
+	return {density = c.density or 0.4, color = c.color or "#fff0f0e5",
+			ambient = c.ambient or "#000000", height = c.height or 120,
+			thickness = c.thickness or 16,
+			speed = c.speed or {x = 0, z = -2}}
 end
 
 --
@@ -881,18 +995,11 @@ function PlayerRef:hud_get_flags()
 end
 function PlayerRef:hud_get_hotbar_image() return "" end
 function PlayerRef:hud_get_hotbar_selected_image() return "" end
-function PlayerRef:get_sky(as_table)
-	if as_table then
-		return {base_color = nil, type = "regular", textures = {},
-				clouds = true}
-	end
-	return nil, "regular", {}, true
-end
-function PlayerRef:get_sky_color() return {} end
+
 function PlayerRef:get_sun() return {visible = true} end
 function PlayerRef:get_moon() return {visible = true} end
 function PlayerRef:get_stars() return {visible = true} end
-function PlayerRef:get_clouds() return {density = 0.4} end
+
 function PlayerRef:get_lighting() return {shadows = {intensity = 0}} end
 -- How much of the day's light the player gets whatever the hour: Luanti's
 -- own way for a game to say "this place is always dark" or "always bright",
@@ -949,7 +1056,13 @@ local function snapshot_player(o)
 		fields[k] = v
 	end
 	return {
-		pos = {x = o.pos.x, y = o.pos.y, z = o.pos.z},
+		-- Only a position the player was really put at. One that was never
+		-- found -- the map could not say where the ground is when they
+		-- arrived -- would be written down as if it were theirs, and the
+		-- next time they joined they would be "restored" into the void at
+		-- the origin and fall out of the loaded world.
+		pos = o.spawn_known ~= false and
+				{x = o.pos.x, y = o.pos.y, z = o.pos.z} or nil,
 		look = {h = o.look.h, v = o.look.v},
 		hp = o.hp,
 		breath = o.breath,
@@ -1456,11 +1569,21 @@ local function find_spawn_pos()
 		end
 		core.log("warning", "static_spawnpoint is not a position: " .. static)
 	end
-	local level = core.get_spawn_level(0, 0)
-	if level == nil then
-		return {x = 0, y = 0, z = 0}, false
+	-- The origin first, and then a few places around it: the ground at one
+	-- point can be below what is loaded -- an ocean trench, a deep valley --
+	-- and Luanti's own findSpawnPos tries other points for the same reason.
+	local TRIES = {{0, 0}, {16, 0}, {0, 16}, {-16, 0}, {0, -16},
+			{24, 24}, {-24, 24}, {24, -24}, {-24, -24}}
+	for _, at in ipairs(TRIES) do
+		local level = core.get_spawn_level(at[1], at[2])
+		if level ~= nil then
+			return {x = at[1], y = level, z = at[2]}, true
+		end
 	end
-	return {x = 0, y = level, z = 0}, true
+	-- Nowhere to stand yet: the world around the origin has not been
+	-- generated deep enough to say. The player waits at the origin and is
+	-- put down as soon as it can; see the placement in __step_objects().
+	return {x = 0, y = 0, z = 0}, false
 end
 
 -- A player who arrives before the world around the spawn has been generated
@@ -1481,7 +1604,7 @@ local function place_the_unplaced(dtime)
 		return
 	end
 	unplaced_timer = 0
-	local level = core.get_spawn_level(0, 0)
+	local spawn, known = find_spawn_pos()
 	for name, was in pairs(unplaced) do
 		local player = core.get_player_by_name(name)
 		if player == nil then
@@ -1492,11 +1615,16 @@ local function place_the_unplaced(dtime)
 					math.abs(pos.y - was.y) > 0.5 or
 					math.abs(pos.z - was.z) > 0.5 then
 				unplaced[name] = nil
-			elseif level ~= nil then
-				player:set_pos({x = was.x, y = level, z = was.z})
+			elseif known then
+				player:set_pos(spawn)
+				local o = state_of(player)
+				if o then
+					o.spawn_known = true
+				end
 				unplaced[name] = nil
-				core.log("action", "Player " .. name ..
-						" was put on the ground at y=" .. level)
+				core.log("action", string.format(
+						"Player %s was put on the ground at %.0f, %.0f, %.0f",
+						name, spawn.x, spawn.y, spawn.z))
 			end
 		end
 	end
@@ -1579,6 +1707,7 @@ function core.__add_player(name)
 	send_whole_hud(o)
 	send_stats(o)
 	send_day_night(o)
+	send_sky(o)
 	-- Where the last run left them, or the spawn: either way it is the
 	-- server's answer and the client starts there. A player whose spawn the
 	-- map cannot answer for yet is not told anything -- a fallback position

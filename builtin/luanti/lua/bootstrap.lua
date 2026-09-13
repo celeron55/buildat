@@ -1758,7 +1758,7 @@ end
 -- getSpawnLevelAtPoint. The upgrade path is a call into luanti_mapgen,
 -- which owns the generator -- and it runs in worldgen's thread, which is
 -- why it is not one call away.
-local SPAWN_SCAN_BOTTOM = -64
+local SPAWN_SCAN_BOTTOM = -256
 local SPAWN_SCAN_TOP = 320
 -- How much room a player needs above the ground to stand in it
 local SPAWN_HEADROOM = 2
