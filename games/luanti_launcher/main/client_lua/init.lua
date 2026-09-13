@@ -119,7 +119,8 @@ voxel_shading.set_camera(camera_node)
 magic.input:SetMouseVisible(true)
 
 local title_text = magic.ui.root:CreateChild("Text")
-title_text:SetText("luanti_launcher: Tab = free move, click = dig, I = inventory")
+title_text:SetText("luanti_launcher: Tab = free move, left = dig, " ..
+		"right = place, I = inventory")
 title_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 15)
 title_text.horizontalAlignment = magic.HA_CENTER
 title_text.verticalAlignment = magic.VA_TOP
@@ -177,6 +178,7 @@ local POINT_RANGE = 12
 local POINT_STEP = 0.1
 
 local pointed_p = nil
+local pointed_above = nil
 local pointed_node = scene:CreateChild("pointed")
 do
 	-- Four thin strips around the top face, drawn on every face of the
@@ -237,6 +239,8 @@ local function voxel_is_solid(v)
 	return def ~= nil and not def.fully_empty
 end
 
+-- The voxel the ray hit, and the last empty one before it -- which is where
+-- a node is placed and what Luanti calls the "above" of a pointed thing
 local function find_pointed_voxel()
 	local p0 = buildat.Vector3(camera_node.worldPosition)
 	local dir = buildat.Vector3(camera_node.worldDirection)
@@ -245,16 +249,31 @@ local function find_pointed_voxel()
 		local p = (p0 + dir * (i * POINT_STEP)):round()
 		if p ~= last then
 			if voxel_is_solid(voxelworld.get_static_voxel(p)) then
-				return p
+				return p, last or p
 			end
 			last = p
 		end
 	end
-	return nil
+	return nil, nil
 end
 
+local function voxel_packet_value(p)
+	return {
+		x = math.floor(p.x + 0.5),
+		y = math.floor(p.y + 0.5),
+		z = math.floor(p.z + 0.5),
+	}
+end
+
+local VOXEL_PACKET_TYPE = {"object",
+	{"x", "int32_t"},
+	{"y", "int32_t"},
+	{"z", "int32_t"},
+}
+
 magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
-	if event_data:GetInt("Button") ~= magic.MOUSEB_LEFT then
+	local button = event_data:GetInt("Button")
+	if button ~= magic.MOUSEB_LEFT and button ~= magic.MOUSEB_RIGHT then
 		return
 	end
 	-- A form on the screen is clicked through UIMouseClick below, which is
@@ -266,18 +285,21 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	if pointed_p == nil then
 		return
 	end
-	buildat.send_packet("main:dig", cereal.binary_output({
-		p = {
-			x = math.floor(pointed_p.x + 0.5),
-			y = math.floor(pointed_p.y + 0.5),
-			z = math.floor(pointed_p.z + 0.5),
-		},
+	if button == magic.MOUSEB_LEFT then
+		buildat.send_packet("main:dig", cereal.binary_output({
+			p = voxel_packet_value(pointed_p),
+		}, {"object", {"p", VOXEL_PACKET_TYPE}}))
+		return
+	end
+	-- The right button is Luanti's place-or-use: what it comes to is the
+	-- node's on_rightclick if it has one and the wielded item's on_place
+	-- otherwise, which is the server's to decide
+	buildat.send_packet("main:place", cereal.binary_output({
+		under = voxel_packet_value(pointed_p),
+		above = voxel_packet_value(pointed_above or pointed_p),
 	}, {"object",
-		{"p", {"object",
-			{"x", "int32_t"},
-			{"y", "int32_t"},
-			{"z", "int32_t"},
-		}},
+		{"under", VOXEL_PACKET_TYPE},
+		{"above", VOXEL_PACKET_TYPE},
 	}))
 end)
 
@@ -353,7 +375,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		send_where()
 	end
 
-	pointed_p = find_pointed_voxel()
+	pointed_p, pointed_above = find_pointed_voxel()
 	if pointed_p then
 		pointed_node.position = magic.Vector3.from_buildat(pointed_p)
 		pointed_node.enabled = true

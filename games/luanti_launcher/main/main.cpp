@@ -68,6 +68,8 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:dig"));
 		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:place"));
+		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:where"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
 	}
@@ -79,6 +81,8 @@ struct Module: public interface::Module
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
 				client_file::FilesTransmitted)
 		EVENT_TYPEN("network:packet_received/main:dig", on_dig,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:place", on_place,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:where", on_where,
 				network::Packet)
@@ -146,6 +150,32 @@ struct Module: public interface::Module
 		});
 		log_v(MODULE, "C%i: main:dig " PV3I_FORMAT ": %s", packet.sender,
 				PV3I_PARAMS(voxel_p), dug ? "dug" : "nothing");
+	}
+
+	// The other button. Luanti calls it place, and what it comes to is the
+	// pointed node's on_rightclick if it has one and the wielded item's
+	// on_place otherwise; which of the two is the module's to decide. under
+	// is the node pointed at and above is the empty voxel in front of it,
+	// which is where a node goes.
+	void on_place(const network::Packet &packet)
+	{
+		pv::Vector3DInt32 under, above;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(under, above);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:place: %s", e.what());
+			return;
+		}
+		bool placed = false;
+		luanti::access(m_server, [&](luanti::Interface *i){
+			placed = i->place_node(under.getX(), under.getY(), under.getZ(),
+					above.getX(), above.getY(), above.getZ(),
+					player_name_of(packet.sender));
+		});
+		log_v(MODULE, "C%i: main:place " PV3I_FORMAT ": %s", packet.sender,
+				PV3I_PARAMS(above), placed ? "placed" : "nothing");
 	}
 
 	void on_game_loaded(const luanti::GameLoaded &event)

@@ -105,6 +105,15 @@ namespace luanti
 		virtual bool dig_node(int32_t x, int32_t y, int32_t z,
 				const ss_ &player_name) = 0;
 
+		// The other button. under is the node pointed at and above the empty
+		// voxel in front of it; what it comes to is core.item_place(), so the
+		// pointed node's on_rightclick wins if it has one and the player's
+		// wielded item is placed otherwise -- and what comes back is whether
+		// anything happened.
+		virtual bool place_node(int32_t under_x, int32_t under_y,
+				int32_t under_z, int32_t above_x, int32_t above_y,
+				int32_t above_z, const ss_ &player_name) = 0;
+
 		// The scene the map is in, or null until luanti:game_loaded
 		virtual SceneReference get_scene() = 0;
 	};

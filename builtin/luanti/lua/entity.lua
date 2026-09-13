@@ -784,6 +784,32 @@ function core.__load_players(data)
 	return n
 end
 
+-- What the other mouse button comes to: core.item_place(), which is the
+-- vendored builtin's own -- so the pointed node's on_rightclick wins if it
+-- has one and is not overridden, and the player's wielded item is placed
+-- otherwise. Returns whether anything happened.
+--
+-- simplified: no sneaking, so a node with an on_rightclick cannot be built
+-- against. Luanti's client sends whether the player was holding sneak, and
+-- this would be that flag.
+function core.__use_node(playername, under, above)
+	local id = players[playername]
+	local ref = id and core.object_refs[id]
+	if not ref then
+		return false
+	end
+	local pointed = {type = "node", under = under, above = above}
+	local wielded = ref:get_wielded_item()
+	local before = wielded:to_string()
+	local left = core.item_place(wielded, ref, pointed)
+	if left ~= nil then
+		ref:set_wielded_item(left)
+		return left:to_string() ~= before
+	end
+	-- An on_rightclick that returned nothing still did something
+	return true
+end
+
 --
 -- An inventory action
 --
