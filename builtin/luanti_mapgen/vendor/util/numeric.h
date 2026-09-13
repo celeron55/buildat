@@ -3,6 +3,7 @@
 #define LUANTI_SHIM_UTIL_NUMERIC_H
 #include "../irrlichttypes_bloated.h"
 #include "basic_macros.h"
+#include "../constants.h"
 #include <cmath>
 #include <algorithm>
 #include <cstdlib>
@@ -95,6 +96,26 @@ inline void set_bits(u32 *x, u32 pos, u32 len, u32 val)
 inline int myrand()
 {
 	return rand();
+}
+
+inline int myrand_range(int min, int max)
+{
+	if(max < min)
+		return min;
+	return min + (rand() % (max - min + 1));
+}
+
+inline float myrand_range(float min, float max)
+{
+	if(max < min)
+		return min;
+	return min + (max - min) * ((float)rand() / (float)RAND_MAX);
+}
+
+// The block a node is in, which is Luanti's own unit of sixteen
+inline v3s16 getNodeBlockPos(const v3s16 &p)
+{
+	return getContainerPos(p, (s16)16);
 }
 
 inline void myrand_bytes(void *out, size_t len)

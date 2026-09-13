@@ -13,6 +13,7 @@
 #include "noise.h"
 #include <string>
 #include <map>
+#include <optional>
 
 class Settings
 {
@@ -75,7 +76,9 @@ public:
 		return true;
 	}
 	bool setV3F(const std::string &name, const v3f &value){ return true; }
-	bool getV3FNoEx(const std::string &name, v3f &value) const {
+	// Luanti's own answers an optional, which is what a mapgen checks
+	bool getV3FNoEx(const std::string &name,
+			std::optional<v3f> &value) const {
 		return false;
 	}
 	// Luanti hands a flag table as a default, which is nothing to store

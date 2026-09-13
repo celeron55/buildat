@@ -2,6 +2,13 @@
 #ifndef LUANTI_SHIM_CONSTANTS_H
 #define LUANTI_SHIM_CONSTANTS_H
 #include "irrlichttypes.h"
+#include <cmath>
+
+// Urho3D has an M_PI of its own in a namespace, and the vendored code wants
+// the plain one
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 // The size of a MapBlock, which is what Luanti's mapgens count in
 #define MAP_BLOCKSIZE 16

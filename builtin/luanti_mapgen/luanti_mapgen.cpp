@@ -34,6 +34,23 @@
 #include "vendor/serialization.cpp"
 #include "vendor/noise.cpp"
 #include "vendor/voxel.cpp"
+#include "vendor/objdef.cpp"
+#include "vendor/mapgen.cpp"
+#include "vendor/mg_biome.cpp"
+#include "vendor/mg_ore.cpp"
+#include "vendor/mg_decoration.cpp"
+#include "vendor/mg_schematic.cpp"
+#include "vendor/cavegen.cpp"
+#include "vendor/dungeongen.cpp"
+#include "vendor/treegen.cpp"
+#include "vendor/mapgen_singlenode.cpp"
+#include "vendor/mapgen_v5.cpp"
+#include "vendor/mapgen_v6.cpp"
+#include "vendor/mapgen_v7.cpp"
+#include "vendor/mapgen_flat.cpp"
+#include "vendor/mapgen_fractal.cpp"
+#include "vendor/mapgen_valleys.cpp"
+#include "vendor/mapgen_carpathian.cpp"
 
 namespace pv = PolyVox;
 

@@ -11,10 +11,11 @@
 
 class MMVManip;
 class NodeDefManager;
+class ServerMap;
 
 namespace voxalgo {
 
-inline void blit_back_with_light(class ServerMap *map, MMVManip *vm,
+inline void blit_back_with_light(::ServerMap *map, MMVManip *vm,
 		void *modified_blocks){}
 
 // The two the mapgen calls directly, and both are voxelworld's job
