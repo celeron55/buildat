@@ -3744,6 +3744,23 @@ struct Module: public interface::Module, public luanti::Interface
 	// translation: whatever sits under a mod's media directories and ends in
 	// an extension on the whitelist is media and goes to the client. What
 	// the client makes of it is the game's business, not the server's.
+	// Luanti's own textures -- the heart, the bubble, the blank tile a HUD
+	// draws on, the crack over a node being dug. They are the engine's
+	// rather than a game's, so Luanti's client has them built in and never
+	// sends them; here the client is buildat's and gets everything from the
+	// server, so they are served like any other media if the user has put
+	// them where this looks.
+	//
+	// Not vendored: Luanti's textures are CC BY-SA with their authors listed
+	// in its LICENSE.txt, and nothing here copies them into the tree. What
+	// the user does is put the pack in buildat's own directory, which is the
+	// same rule the games follow -- see games/luanti_launcher.
+	ss_ base_textures_path()
+	{
+		return m_server->get_config().get<ss_>("user_path")+
+				"/luanti/textures/base/pack";
+	}
+
 	void serve_game_media(const ss_ &game_path)
 	{
 		// Luanti's directories, in Luanti's order (src/server/mods.cpp)
@@ -3754,6 +3771,18 @@ struct Module: public interface::Module, public luanti::Interface
 		if(interface::fs::path_exists(game_path+"/textures"))
 			dirs.push_back(game_path+"/textures");
 		collect_dirs_named(game_path+"/mods", wanted, dirs, 0);
+		// Last, so that the first-one-wins rule below leaves a game's own
+		// version of a name in front of the engine's
+		const ss_ base_path = base_textures_path();
+		if(interface::fs::path_exists(base_path)){
+			dirs.push_back(base_path);
+		} else {
+			log_w(MODULE, "No Luanti base textures at %s: a game's HUD asks "
+					"for the engine's own textures -- blank.png, heart.png, "
+					"bubble.png -- and they are not served. Copy Luanti's "
+					"textures/base/pack there to have them.",
+					cs(base_path));
+		}
 		sm_<ss_, ss_> files;
 		for(const ss_ &dir : dirs)
 			collect_files(dir, files, 0);
