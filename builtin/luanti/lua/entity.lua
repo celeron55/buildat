@@ -1623,7 +1623,17 @@ function core.__step_objects(dtime)
 	table.sort(ids)
 	for _, id in ipairs(ids) do
 		local o = objects[id]
-		if o then
+		-- Where a player is is their client's to say, and everything else
+		-- steps while it is in the active range -- which is where a player
+		-- is, so a player is always in one. Luanti takes an entity out of
+		-- the world entirely when its block stops being active and puts it
+		-- back when the block returns.
+		--
+		-- simplified: it stays in the world here and only stops moving, so
+		-- nothing is written into the section it is in and nothing has to
+		-- be read back out of it. What that costs is an entity per object
+		-- forever; Luanti's static objects are the upgrade path.
+		if o and (o.player_name or core.__is_active(o.pos)) then
 			step_object(o, dtime)
 		end
 	end
