@@ -617,6 +617,10 @@ function M.update(dt)
 	push_sky_vis()
 end
 
+-- The skybox's material, kept so that a game with a clock can move the sun
+-- across it; see M.set_sun_direction() below
+local skybox_material = nil
+
 -- The sky the world stands under, drawn by VoxelSkybox.glsl in the same
 -- gradient the cube map is baked in. sun_dir points the way the light travels,
 -- as a Light's direction does, so the sun itself is the other way.
@@ -630,7 +634,25 @@ function M.create_skybox(scene, sun_dir)
 	material:SetShaderParameter("SunDirection", magic.Vector3(
 			-sun_dir.x, -sun_dir.y, -sun_dir.z))
 	skybox.material = material
+	skybox_material = material
 	return node
+end
+
+-- Where the sun is now, for a game whose sky follows a clock. The direction
+-- is the one a Light has -- the way the light travels -- so the sun itself is
+-- the other way, which is what the skybox is told. A game that never calls
+-- this keeps the sun create_skybox() was given.
+--
+-- What this does not move is the cube map the reflections come from: it is
+-- baked with the sun where it was, so a reflection at night is a reflection
+-- of the day's sky. Dimming the light is most of the way there; a second
+-- cube map, or one rendered as the day goes, is the rest of it.
+function M.set_sun_direction(dir)
+	if not skybox_material then
+		return
+	end
+	skybox_material:SetShaderParameter("SunDirection",
+			magic.Vector3(-dir.x, -dir.y, -dir.z))
 end
 
 function M.set_camera(new_camera_node)

@@ -828,8 +828,14 @@ function core.get_game_info()
 	}
 end
 
+-- Whose world this is. Luanti means by it "the client started this server
+-- itself", and what turns on it is which privileges a player arrives with:
+-- the singleplayer gets everything a game marked give_to_singleplayer --
+-- fly, fast, noclip, settime and the rest -- and a hosted server hands out
+-- default_privs and nothing more. A world opened through the launcher is
+-- somebody's own world, so this is true unless the world says otherwise.
 function core.is_singleplayer()
-	return false
+	return core.settings:get_bool("singleplayer", true)
 end
 
 function core.request_insecure_environment()
@@ -1050,7 +1056,7 @@ local STUBS_NIL = {
 	"hud_replace_builtin",
 	-- Auth and privileges (M4)
 	"get_password_hash", "check_password_entry", "notify_authentication_modified",
-	"set_player_privs", "get_player_privs", "auth_reload",
+	"set_player_privs", "auth_reload",
 	"kick_player", "disconnect_player", "ban_player", "unban_player_or_ip",
 	"get_ban_list", "get_ban_description",
 	-- The server itself
@@ -2375,6 +2381,37 @@ end
 
 -- What the module reads out of the clock and puts back into it. Three numbers
 -- rather than a table, because that is all the clock is.
+-- What a player is allowed to do. Luanti's server asks the auth handler and
+-- hands back what it holds; the handler is the vendored builtin's own, and
+-- it is the one that adds the singleplayer's extras and the admin's. A name
+-- with no entry has no privileges, which is what Luanti answers too.
+--
+-- Somebody playing their own world can do anything in it, which is what
+-- Luanti's own singleplayer means by the term -- its server hands out every
+-- privilege there, rather than the give_to_singleplayer ones, which is why
+-- /time works in singleplayer and not on a server. See is_singleplayer().
+function core.get_player_privs(name)
+	if core.is_singleplayer() then
+		local all = {}
+		for priv, _ in pairs(core.registered_privileges or {}) do
+			all[priv] = true
+		end
+		return all
+	end
+	local handler = core.get_auth_handler and core.get_auth_handler()
+	local entry = handler and handler.get_auth and handler.get_auth(name)
+	return (entry and entry.privileges) or {}
+end
+
+-- What the module sends the clients every few seconds; they carry the clock
+-- on themselves in between, which is what keeps the sky moving smoothly
+function core.__send_time()
+	if __luanti_send_time then
+		__luanti_send_time(time_of_day,
+				tonumber(core.settings:get("time_speed")) or 72)
+	end
+end
+
 function core.__get_clock()
 	return time_of_day, game_time, day_count
 end
