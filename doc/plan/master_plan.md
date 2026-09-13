@@ -136,7 +136,20 @@ map_meta.txt holds it, and a new one is v7. See "The mapgen, vendored" in
 
 What is left, in order of what it is worth:
 
-1. **The client is a player now; what is left is what a game draws on top.**
+1. **A generated world is bare stone, because no biome a game registers
+   reaches the mapgen.** devtest registers `mapgen:grassland` -- dirt with
+   grass on top of dirt -- and `mapgen:grassland_ocean`, which is sand by
+   the water, and neither is anywhere in a generated world: what comes out
+   is `mapgen_stone` to the surface, which is `BiomeManager`'s own default
+   biome and the only one it holds. `core.registered_biomes` has been
+   recorded on the Lua side since M2 and nothing carries it across.
+
+   This is the second step of stage 3c below and is pulled out of it
+   because it is what a world looks like: the ores and the decorations
+   change what is in the ground, the biomes are the ground. The step
+   before it is small and belongs with it -- the node properties a mapgen
+   asks about, since the same crossing carries them.
+2. **The client is a player now; what is left is what a game draws on top.**
    Built 2026-09-13: the player is Luanti's box, walking, falling, jumping
    and stopped by what it runs into, with the camera at its eyes and the
    server saying where it starts; the keys are one table that F5 lists
@@ -165,7 +178,7 @@ What is left, in order of what it is worth:
       lit through a window goes dark at night. Here the light is what the
       mesher baked and only the sun dims.
 
-2. **The mapgen, stage 3c: the world a game registers.** Luanti's own
+3. **The mapgen, the rest of stage 3c: the ores and the decorations.** Luanti's own
    mapgens generate worlds here as of 2026-09-13 -- a world whose
    `mg_name` says `v7` is v7, in `worldgen`'s thread -- but what they
    generate is the default biome, because the biome, ore and decoration
@@ -175,22 +188,18 @@ What is left, in order of what it is worth:
    makes a game's world look like that game's. In the managers' own
    dependency order:
 
-   1. **The node properties a mapgen asks about**, which is small and goes
-      first because the same crossing carries it: `is_ground_content`,
-      `liquid_type`, `floodable` and `walkable` per content id, instead of
-      the shim's guess that everything solid is ground.
-   2. **Biomes.** `BiomeManager` and a `Biome` per registration: the
-      nodes, the y range, the heat and humidity points.
-   3. **Ores.** `OreManager` and the ore kinds, which are the same shape
+   1. **The node properties a mapgen asks about** and **the biomes** are
+      item 1 above.
+   2. **Ores.** `OreManager` and the ore kinds, which are the same shape
       with a noise parameter set each.
-   4. **Decorations**, which want schematics and the tree generator with
+   3. **Decorations**, which want schematics and the tree generator with
       them -- and a `.mts` file is not read yet, which is the one piece of
       the vendoring that is stubbed.
 
    See "Mapgen stage 3c" in the module plan, and
    `doc/plan/luanti_module_history.md`, "The mapgen, vendored", for what
    the stages below it turned out to be.
-3. **The light, which is `voxelworld`'s and not the module's.** A write
+4. **The light, which is `voxelworld`'s and not the module's.** A write
    that carries light keeps it as of 2026-09-13, so a generated world
    arrives lit and a dug hole fills from its mouth, and lamp light is a
    second field beside it: a game says which of the two it wants
@@ -207,7 +216,7 @@ What is left, in order of what it is worth:
    Luanti asks the mapgen instead of the map (`getSpawnLevelAtPoint`),
    which answers without generating anything; doing that here means asking
    `luanti_mapgen` across the thread its generator runs in.
-4. **The rest is minor and belongs to a later round.** glTF, an object
+5. **The rest is minor and belongs to a later round.** glTF, an object
    drawn as its own model, a detached inventory, a put-down count, the
    inventory cube, a scrolling save list: each is an afternoon, none
    blocks a game from running, and they are in "Bonuses" below for exactly
