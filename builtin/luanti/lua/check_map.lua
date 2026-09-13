@@ -103,11 +103,17 @@ function core.__check_map_write()
 	if not check_name then
 		return false
 	end
-	-- Ignore is what voxelworld says for a voxel nothing has written, and
-	-- Luanti says the same word for the same thing
+	-- Singlenode is a node everywhere, which is what Luanti's own
+	-- MapgenSinglenode does: a voxel nobody has built in is air, and only
+	-- what is outside the world altogether is ignore.
 	local before = core.get_node(EMPTY_POS)
-	if before.name ~= "ignore" then
-		error("check_map: an unwritten voxel reads as " .. before.name)
+	if before.name ~= "air" then
+		error("check_map: an unbuilt voxel reads as " .. before.name)
+	end
+	local outside = core.get_node({x = 0, y = 30000, z = 0})
+	if outside.name ~= "ignore" then
+		error("check_map: a voxel outside the world reads as " ..
+				outside.name)
 	end
 	core.set_node(CHECK_POS, {name = check_name, param2 = 3})
 	-- Visible immediately, out of the buffer: the on_placenode callbacks in
@@ -237,12 +243,10 @@ function core.__check_map_read()
 			error("check_map: under_air came back at y=" .. p.y)
 		end
 	end
-	-- The air above it is not under air itself
-	local air_under = core.find_nodes_in_area_under_air(AREA_MIN, AREA_MAX,
-			{"air"})
-	if #air_under ~= 0 then
-		error("check_map: " .. #air_under .. " air voxels are under air")
-	end
+	-- Nothing is said here about air under air: singlenode fills the world
+	-- with it, so most of the box is exactly that. What the count above is
+	-- for -- that the read keeps to the box it was given -- is what the
+	-- patch of four proves.
 
 	-- The four either side of a chunk and a section boundary, out of one
 	-- read that spans both

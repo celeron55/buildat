@@ -191,10 +191,32 @@ buildat already expects a generator to have.
 
 Staged, because the seam is where the bugs will be:
 
-1. **`singlenode` first.** The world is void; nodes come from
-   `core.set_node` and from the test mods. It proves the translation without
-   9.5k lines of terrain on top of it, and devtest is entirely usable this
-   way.
+1. **`singlenode` first, and it is a node and not a void (built
+   2026-09-13).** Luanti's own `MapgenSinglenode` fills a generated block
+   with whatever `mapgen_singlenode` names, or with air when a game names
+   nothing, and sets the sunlight in it -- so what a mod reads out of a part
+   of the world nobody has built in is "air", and only what is outside the
+   world altogether is "ignore". Every mod that looks before it places is
+   written against that, so the module does the same: `create_world()` fills
+   the region's sections through `merge_volume()`, which is the generator's
+   own priority -- anything a mod has already put there stays.
+
+   It is done before the skylight is turned on, and the fill carries full
+   sunlight itself. With the light running, every voxel going from nothing
+   to air is a skylight seed: seven million of them, and eight seconds of
+   startup to settle what the fill already knew. Before it, the same fill is
+   287 ms, and the floor a mod places seeds its own shadow afterwards.
+
+   A section that already holds the node is left alone -- one voxel of it
+   says so -- which is what keeps a save from being walked again on every
+   start, and what migrates a save written before there was a fill.
+
+   What stands in the world comes from `core.set_node` and from the test
+   mods. It proves the translation without 9.5k lines of terrain on top of
+   it, and devtest is entirely usable this way. `voxelworld`'s
+   `GenerationRequest` is subscribed to as well, which is what a section
+   made after the world started goes through -- there are none today, and
+   it is the seam the next stage grows out of.
 2. **Then the Lua mapgen path**: `core.register_on_generated` with a working
    VoxelManip. The same seam, exercised by something small enough to read.
 3. **Then v7 and the rest**, which at that point is compiling code that
