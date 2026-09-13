@@ -805,12 +805,15 @@ two things M1 disproved about the build, are in
   the clock into its clock. `doc/plan/luanti_module_history.md` has the two
   shapes the format has and how the reader was checked against Luanti.
 
+  What hangs off the nodes comes too, now that step 5c of the persistence
+  plan gives it somewhere to live: the metadata of every node that has any,
+  as its fields and its inventory lists.
+
   **What is left of M7:** `map_meta.txt`, which is the seed and the mapgen
   parameters and has nowhere to go until there is a mapgen; the player and
-  mod storage databases; and a block's node metadata, timers and static
-  objects, which are walked past. The metadata wants the save that step 5c
-  of the persistence plan is about, and the objects want a `static_save`
-  that means something.
+  mod storage databases; and a block's node timers and static objects, which
+  are walked past -- the objects want a `static_save` that means something
+  here first.
 
   **The world is 3x3x3 sections**, so what fits is about 192 voxels a side
   around the origin and the rest of a Luanti world is counted and dropped.

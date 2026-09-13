@@ -89,9 +89,8 @@ What is left is, in order:
    unloads around a player is what the mapgen seam was deferred until there
    was something to measure. There is something to measure now.
 3. **What is left of M7:** `map_meta.txt`'s seed, the player and mod storage
-   databases, and a block's node metadata, timers and static objects. The
-   metadata wants step 5c of the persistence plan; the objects want a
-   `static_save` that means something.
+   databases, and a block's node timers and static objects. The objects want
+   a `static_save` that means something.
 
 Done since the third round, all in `doc/plan/master_plan_history.md` or in
 the module's own history: M4's inventories and recipes, all of M5, M7's

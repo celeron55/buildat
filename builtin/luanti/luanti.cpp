@@ -1284,6 +1284,27 @@ struct Module: public interface::Module, public luanti::Interface
 			for(size_t i = 0; i < N; i++)
 				u8s(os, p2[i]);
 		};
+		// One node with something hanging off it: a field and a two-slot
+		// inventory with one thing in it
+		auto node_metadata = [&](){
+			ss_ os;
+			u8s(os, 2);                 // version
+			u16s(os, 1);                // one node has any
+			u16s(os, 258);              // x=2, y=0, z=1
+			u32s(os, 1);                // one field
+			string16(os, "infotext");
+			u16s(os, 0);                // a field's length is four bytes
+			u16s(os, 11);
+			os += "a sign says";
+			u8s(os, 0);                 // not private
+			os += "List main 2\n";
+			os += "Width 0\n";
+			os += "Item check:stone 5\n";
+			os += "Empty\n";
+			os += "EndInventoryList\n";
+			os += "EndInventory\n";
+			return os;
+		};
 		auto check_block = [&](const luanti_mapblock::Block &b,
 				const char *what){
 			for(size_t i = 0; i < N; i++){
@@ -1296,6 +1317,19 @@ struct Module: public interface::Module, public luanti::Interface
 					b.names.at(299) != "check:sand")
 				throw Exception(ss_("check_mapblock: ")+what+" lost its "
 						"name-id mapping");
+			if(b.meta.size() != 1 || b.meta.count(258) == 0)
+				throw Exception(ss_("check_mapblock: ")+what+" came back "
+						"with "+itos(b.meta.size())+" nodes of metadata");
+			const luanti_mapblock::NodeMeta &m = b.meta.at(258);
+			if(m.fields.size() != 1 ||
+					m.fields.at("infotext") != "a sign says")
+				throw Exception(ss_("check_mapblock: ")+what+" lost the "
+						"field hanging off a node");
+			if(m.lists.size() != 1 || m.lists.at("main").size() != 2 ||
+					m.lists.at("main")[0] != "check:stone 5" ||
+					!m.lists.at("main")[1].empty())
+				throw Exception(ss_("check_mapblock: ")+what+" lost the "
+						"inventory hanging off a node");
 		};
 
 		// Version 29: one zstd frame, and what is wanted is in front of it
@@ -1308,6 +1342,7 @@ struct Module: public interface::Module, public luanti::Interface
 			u8s(inside, 2);             // content_width
 			u8s(inside, 2);             // params_width
 			nodes(inside);
+			inside += node_metadata();
 			inside += "and whatever else the frame holds";
 			ss_ data;
 			u8s(data, 29);
@@ -1336,7 +1371,7 @@ struct Module: public interface::Module, public luanti::Interface
 			}
 			{
 				std::ostringstream os(std::ios::binary);
-				interface::compress_zlib("the node metadata, skipped", os);
+				interface::compress_zlib(node_metadata(), os);
 				data += os.str();
 			}
 			// Static objects: one, to be walked past
@@ -2456,6 +2491,45 @@ struct Module: public interface::Module, public luanti::Interface
 				game_time);
 	}
 
+	// One node's metadata into the Lua table that holds it. The fields are
+	// strings and an inventory is item strings, which is the same shape the
+	// save keeps and the same function puts either back.
+	void import_node_meta(int32_t x, int32_t y, int32_t z,
+			const luanti_mapblock::NodeMeta &meta)
+	{
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__set_node_meta");
+		lua_createtable(L, 0, 3);
+		lua_pushinteger(L, x);
+		lua_setfield(L, -2, "x");
+		lua_pushinteger(L, y);
+		lua_setfield(L, -2, "y");
+		lua_pushinteger(L, z);
+		lua_setfield(L, -2, "z");
+		lua_createtable(L, 0, (int)meta.fields.size());
+		for(const auto &pair : meta.fields){
+			lua_pushlstring(L, pair.second.c_str(), pair.second.size());
+			lua_setfield(L, -2, pair.first.c_str());
+		}
+		lua_createtable(L, 0, (int)meta.lists.size());
+		for(const auto &pair : meta.lists){
+			lua_createtable(L, (int)pair.second.size(), 0);
+			for(size_t i = 0; i < pair.second.size(); i++){
+				lua_pushlstring(L, pair.second[i].c_str(),
+						pair.second[i].size());
+				lua_rawseti(L, -2, (int)i + 1);
+			}
+			lua_setfield(L, -2, pair.first.c_str());
+		}
+		if(lua_pcall(L, 3, 0, 0) != 0)
+			log_w(MODULE, "__set_node_meta(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+		lua_settop(L, base);
+	}
+
 	// Read a Luanti world into this one: the clock, and as much of the map
 	// as this world has room for.
 	//
@@ -2516,7 +2590,7 @@ struct Module: public interface::Module, public luanti::Interface
 				wy1 = (s1.getY() + 1) * sy - 1,
 				wz1 = (s1.getZ() + 1) * sz - 1;
 		size_t blocks_read = 0, blocks_outside = 0, blocks_failed = 0;
-		size_t nodes_written = 0;
+		size_t nodes_written = 0, meta_written = 0;
 		set_<ss_> unknown_names;
 		sm_<ss_, size_t> counts;
 		ss_ first_error;
@@ -2595,15 +2669,28 @@ struct Module: public interface::Module, public luanti::Interface
 					nodes_written++;
 					counts[*names_by_id[raw_id]]++;
 				}
+				// What hangs off the nodes: a chest's contents, a sign's
+				// text. Only for the part of the block that was written.
+				for(const auto &pair : block.meta){
+					int32_t mx = bx + (pair.first & 15);
+					int32_t my = by + ((pair.first >> 4) & 15);
+					int32_t mz = bz + ((pair.first >> 8) & 15);
+					if(mx < x0 || mx > x1 || my < y0 || my > y1 ||
+							mz < z0 || mz > z1)
+						continue;
+					import_node_meta(mx, my, mz, pair.second);
+					meta_written++;
+				}
 				blocks_read++;
 			}
 		});
 		sqlite3_finalize(st);
 		sqlite3_close(db);
 		log_i(MODULE, "import_world(): %zu blocks of %s read into the world, "
-				"%zu nodes; %zu blocks outside it, %zu it could not read",
+				"%zu nodes and %zu of them with metadata; %zu blocks outside "
+				"it, %zu it could not read",
 				blocks_read, cs(luanti_world_path), nodes_written,
-				blocks_outside, blocks_failed);
+				meta_written, blocks_outside, blocks_failed);
 		if(!first_error.empty())
 			log_w(MODULE, "import_world(): the first block it could not read: "
 					"%s", cs(first_error));
