@@ -68,6 +68,11 @@ struct Module: public interface::Module, public replicate::Interface
 
 	sv_<Event> m_events_to_emit_after_next_sync;
 
+	// Per scene: which nodes a peer gets. Empty means every node, which is
+	// what every scene did before there was a filter.
+	sm_<main_context::SceneReference,
+			std::function<bool(PeerId, uint)>> m_node_filters;
+
 	Module(interface::Server *server):
 		interface::Module(MODULE),
 		m_server(server)
@@ -226,6 +231,38 @@ struct Module: public interface::Module, public replicate::Interface
 		});
 	}
 
+	// Whether this peer gets this node at all; see set_node_filter()
+	bool peer_wants_node(PeerId peer, uint node_id)
+	{
+		auto peer_it = m_peers.find(peer);
+		if(peer_it == m_peers.end())
+			return true;
+		auto it = m_node_filters.find(peer_it->second.scene_ref);
+		if(it == m_node_filters.end() || !it->second)
+			return true;
+		return it->second(peer, node_id);
+	}
+
+	// The peer had this node and should not any more: the packet a deleted
+	// node sends, and the replication states taken off the node and its
+	// components so that nothing points into the state about to be erased.
+	void drop_node_from_peer(PeerId peer, Node *node, uint node_id,
+			magic::SceneReplicationState &scene_state)
+	{
+		log_d(MODULE, "drop_node_from_peer(): peer=%zu, node_id=%zu",
+				peer, node_id);
+		magic::Connection *conn = (magic::Connection*)&scene_state;
+		node->CleanupConnection(conn);
+		auto &components = node->GetComponents();
+		for(uint i = 0; i < components.Size(); i++)
+			components[i]->CleanupConnection(conn);
+		magic::VectorBuffer buf;
+		buf.WriteNetID(node_id);
+		send_to_peer(peer, "replicate:remove_node", buf);
+		scene_state.nodeStates_.Erase(node_id);
+		scene_state.dirtyNodes_.Erase(node_id);
+	}
+
 	void sync_node(PeerId peer,
 			uint node_id, magic::HashSet<uint> &nodes_to_process,
 			magic::Scene *scene, magic::SceneReplicationState &scene_state)
@@ -238,6 +275,11 @@ struct Module: public interface::Module, public replicate::Interface
 			// New node
 			Node *n = scene->GetNode(node_id);
 			if(n){
+				// Out of this peer's range: it gets it if it comes into one
+				if(!peer_wants_node(peer, node_id)){
+					scene_state.dirtyNodes_.Erase(node_id);
+					return;
+				}
 				sync_create_node(peer, n, nodes_to_process, scene, scene_state);
 			} else {
 				// Was already deleted
@@ -255,6 +297,8 @@ struct Module: public interface::Module, public replicate::Interface
 				send_to_peer(peer, "replicate:remove_node", buf);
 				scene_state.nodeStates_.Erase(node_id);
 				scene_state.dirtyNodes_.Erase(node_id);
+			} else if(!peer_wants_node(peer, node_id)){
+				drop_node_from_peer(peer, n, node_id, scene_state);
 			} else {
 				sync_existing_node(peer, n, node_state, nodes_to_process,
 						scene, scene_state);
@@ -558,6 +602,42 @@ struct Module: public interface::Module, public replicate::Interface
 			}
 		}
 		return result;
+	}
+
+	void set_node_filter(main_context::SceneReference scene_ref,
+			std::function<bool(PeerId, uint)> filter)
+	{
+		if(filter)
+			m_node_filters[scene_ref] = filter;
+		else
+			m_node_filters.erase(scene_ref);
+	}
+
+	// Every node of the scene goes back into the peer's dirty set, so that
+	// the next sync asks the filter about each of them: the ones it has and
+	// should not, and the ones it should have and does not.
+	void refresh_peer_nodes(
+			main_context::SceneReference scene_ref, PeerId peer)
+	{
+		auto peer_it = m_peers.find(peer);
+		if(peer_it == m_peers.end() || peer_it->second.scene_ref != scene_ref)
+			return;
+		PeerState &ps = peer_it->second;
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			magic::Scene *scene = imc->find_scene(scene_ref);
+			if(!scene){
+				log_w(MODULE, "refresh_peer_nodes(): Scene %p not found",
+						scene_ref);
+				return;
+			}
+			magic::PODVector<Node*> children;
+			scene->GetChildren(children, true);
+			for(uint i = 0; i < children.Size(); i++){
+				uint id = children[i]->GetID();
+				if(id < magic::FIRST_LOCAL_ID)
+					ps.scene_state.dirtyNodes_.Insert(id);
+			}
+		});
 	}
 
 	void emit_after_next_sync(Event event)
