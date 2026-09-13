@@ -2050,6 +2050,11 @@ struct CApp: public App, public magic::Application
 			lua_pushlstring(L, path.c_str(), path.size());
 			return 1;
 		}
+		if(name == "user"){
+			ss_ path = g_client_config.get<ss_>("user_path");
+			lua_pushlstring(L, path.c_str(), path.size());
+			return 1;
+		}
 		if(name == "tmp"){
 			ss_ path = g_client_config.get<ss_>("cache_path")+"/tmp";
 			lua_pushlstring(L, path.c_str(), path.size());
