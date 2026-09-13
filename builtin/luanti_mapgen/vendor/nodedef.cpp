@@ -60,9 +60,16 @@ const ContentFeatures& NodeDefManager::get(content_t c) const
 
 void NodeDefManager::pendNodeResolve(NodeResolver *nr) const
 {
-	// The definitions are all here already, so there is nothing to wait for
 	nr->m_ndef = this;
-	nr->nodeResolveInternal();
+	m_pending.push_back(nr);
+}
+
+void NodeDefManager::resolvePending() const
+{
+	std::vector<NodeResolver*> pending;
+	pending.swap(m_pending);
+	for(NodeResolver *nr : pending)
+		nr->nodeResolveInternal();
 }
 
 void NodeResolver::nodeResolveInternal()

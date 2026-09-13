@@ -609,6 +609,30 @@ local FACING_OF_PARAMTYPE2 = {
 
 -- And which of them take their colour out of a palette. Luanti ignores a
 -- palette on any other node, so this is also what says whether to read one.
+-- What the mapgen is called in this world: Luanti keeps it in map_meta.txt
+-- and a buildat save in its world.mt, and either way it is a setting by the
+-- time anything here reads it.
+function core.__mapgen_name()
+	return core.settings:get("mg_name") or "singlenode"
+end
+
+-- Every name a mapgen can ask about: the nodes, and the aliases a game
+-- registers for them -- "mapgen_stone" is an alias and is what a vendored
+-- mapgen looks up.
+function core.__content_ids_by_name()
+	local out = {}
+	for id, name in pairs(core.__content_names) do
+		out[name] = id
+	end
+	for alias, target in pairs(core.registered_aliases or {}) do
+		local id = out[target]
+		if id then
+			out[alias] = id
+		end
+	end
+	return out
+end
+
 local PALETTED_PARAMTYPE2 = {
 	color = true, colorfacedir = true, color4dir = true,
 	colorwallmounted = true, colordegrotate = true,

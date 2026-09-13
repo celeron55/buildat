@@ -1550,10 +1550,11 @@ struct Module: public interface::Module, public luanti::Interface
 		// Luanti's own mapgens are vendored: this module hands over what a
 		// generator is a function of and gets one back.
 		luanti_mapgen::Params params;
-		params.mgname = "singlenode";
+		params.mgname = mapgen_name();
 		params.seed = m_seed;
 		params.singlenode_word = singlenode_word();
 		params.content_ids = content_ids_by_name();
+		params.section_size = m_section_size.getX();
 		worldgen::GeneratorInterface *generator = nullptr;
 		luanti_mapgen::access(m_server, [&](luanti_mapgen::Interface *im){
 			generator = im->create_generator(params);
@@ -1625,17 +1626,46 @@ struct Module: public interface::Module, public luanti::Interface
 		lua_State *L = m_lua;
 		int base = lua_gettop(L);
 		lua_getglobal(L, "core");
-		lua_getfield(L, -1, "__content_names");
+		lua_getfield(L, -1, "__content_ids_by_name");
+		if(lua_pcall(L, 0, 1, 0) != 0){
+			log_w(MODULE, "__content_ids_by_name(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+			lua_settop(L, base);
+			return out;
+		}
 		if(lua_istable(L, -1)){
 			lua_pushnil(L);
 			while(lua_next(L, -2) != 0){
-				const lua_Integer id = lua_tointeger(L, -2);
 				size_t len = 0;
-				const char *name = lua_tolstring(L, -1, &len);
+				const char *name = lua_tolstring(L, -2, &len);
+				const lua_Integer id = lua_tointeger(L, -1);
 				if(name && id >= 0)
 					out[ss_(name, len)] = (uint32_t)id;
 				lua_pop(L, 1);
 			}
+		}
+		lua_settop(L, base);
+		return out;
+	}
+
+	// What the world's own settings call the mapgen; "singlenode" is what
+	// a world that says nothing gets, which is what it had before there
+	// were any others
+	ss_ mapgen_name()
+	{
+		if(!m_lua)
+			return "singlenode";
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__mapgen_name");
+		ss_ out = "singlenode";
+		if(lua_pcall(L, 0, 1, 0) == 0){
+			size_t len = 0;
+			const char *s = lua_tolstring(L, -1, &len);
+			if(s && len)
+				out = ss_(s, len);
 		}
 		lua_settop(L, base);
 		return out;
