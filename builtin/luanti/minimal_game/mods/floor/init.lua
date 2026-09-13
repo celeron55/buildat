@@ -216,7 +216,7 @@ core.register_node("floor:rail", {
 -- definition refuses new keys: register.lua sets __newindex to ignore them,
 -- on purpose, so a callback cannot be bolted on afterwards and a check for
 -- one has to be where the node is registered.
-local probe = {placed = 0, dug = 0, constructed = 0, destructed = 0}
+local probe = {placed = 0, dug = 0, constructed = 0, destructed = 0, timer = 0}
 
 core.register_node("floor:probe", {
 	description = "Probe",
@@ -226,6 +226,11 @@ core.register_node("floor:probe", {
 	on_destruct = function() probe.destructed = probe.destructed + 1 end,
 	after_place_node = function() probe.placed = probe.placed + 1 end,
 	after_dig_node = function() probe.dug = probe.dug + 1 end,
+	-- true asks for the same timeout again, which is what a furnace does
+	on_timer = function(pos, elapsed)
+		probe.timer = probe.timer + 1
+		return true
+	end,
 })
 
 -- A rule that runs on every node of a kind forever, which is what a game's
@@ -280,6 +285,14 @@ core.register_lbm({
 			lbm.wrong = lbm.wrong + 1
 		end
 	end,
+})
+
+-- A node that falls when what holds it up is dug away, which is the
+-- vendored builtin's own entity turning into a node and back again
+core.register_node("floor:sand", {
+	description = "Sand",
+	tiles = {"floor_stone.png"},
+	groups = {crumbly = 3, falling_node = 1},
 })
 
 -- An object, which is everything in a world that is not a node: this one
@@ -551,6 +564,52 @@ function core.__game_check()
 	end
 	dropped[1]:remove()
 	core.log("action", "floor: the dig dropped " .. item.itemstring)
+
+	-- A node timer, which is what a furnace burning down is written on
+	local tp = {x = 6, y = Y + 1, z = -6}
+	core.set_node(tp, {name = "floor:probe"})
+	probe.timer = 0
+	core.get_node_timer(tp):start(0.5)
+	if not core.get_node_timer(tp):is_started() then
+		error("floor: the timer did not start")
+	end
+	core.__step(0.6)
+	if probe.timer ~= 1 then
+		error("floor: the timer ran " .. probe.timer .. " times, wanted 1")
+	end
+	-- on_timer said true, so the same timeout is set again
+	core.__step(0.6)
+	if probe.timer ~= 2 then
+		error("floor: the timer did not come back: " .. probe.timer)
+	end
+	core.get_node_timer(tp):stop()
+	core.__step(0.6)
+	if probe.timer ~= 2 then
+		error("floor: the timer ran after it was stopped")
+	end
+	core.set_node(tp, {name = "air"})
+	core.log("action", "floor: the node timer ran, came back and stopped")
+
+	-- A node that falls: the dig takes what held it up, the builtin turns it
+	-- into an entity, and the entity puts it back as a node where it lands
+	local under = {x = 8, y = Y + 1, z = -6}
+	local sand = {x = 8, y = Y + 2, z = -6}
+	core.set_node(under, {name = "floor:stone"})
+	core.set_node(sand, {name = "floor:sand"})
+	if not core.dig_node(under) then
+		error("floor: dig_node said no to what held the sand up")
+	end
+	for _ = 1, 40 do
+		core.__step(0.1)
+	end
+	if core.get_node(sand).name ~= "air" then
+		error("floor: the sand stayed up at " .. core.get_node(sand).name)
+	end
+	if core.get_node(under).name ~= "floor:sand" then
+		error("floor: the sand landed as " .. core.get_node(under).name)
+	end
+	core.set_node(under, {name = "floor:stone"})
+	core.log("action", "floor: the sand fell one voxel and became a node again")
 end
 
 core.log("action", "floor: placed a " .. (HALF * 2 + 1) .. "x" ..
