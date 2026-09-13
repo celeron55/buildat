@@ -7,7 +7,8 @@
 // It is a plain struct here rather than something an EmergeManager hands
 // out, because this module builds one itself out of what builtin/luanti
 // sent over.
-#pragma once
+#ifndef LUANTI_SHIM_EMERGE_H
+#define LUANTI_SHIM_EMERGE_H
 #include "irrlichttypes_bloated.h"
 #include "mapgen.h"
 #include "util/basic_macros.h"
@@ -62,3 +63,5 @@ public:
 	OreManager* getWritableOreManager(){ return nullptr; }
 	SchematicManager* getWritableSchematicManager(){ return nullptr; }
 };
+
+#endif

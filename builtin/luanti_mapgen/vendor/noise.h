@@ -12,7 +12,8 @@
 // therefore looks like a Luanti world rather than reproducing one: the same
 // seed does not give the same terrain as upstream. See "Mapgen stage 3" in
 // doc/plan/luanti_module_plan.md.
-#pragma once
+#ifndef LUANTI_SHIM_NOISE_H
+#define LUANTI_SHIM_NOISE_H
 #include "irrlichttypes_bloated.h"
 #include "exceptions.h"
 #include "interface/noise.h"
@@ -199,3 +200,5 @@ private:
 	interface::Noise *m_noise = nullptr;
 	void rebuild();
 };
+
+#endif

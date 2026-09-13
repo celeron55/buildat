@@ -1,5 +1,6 @@
 // A shim, not Luanti's: the tables are Luanti's own. See ../README.txt.
-#pragma once
+#ifndef LUANTI_SHIM_UTIL_DIRECTIONTABLES_H
+#define LUANTI_SHIM_UTIL_DIRECTIONTABLES_H
 #include "../irrlichttypes_bloated.h"
 
 // The six directions, in Luanti's own order
@@ -28,3 +29,5 @@ const v3s16 g_4dirs[4] = {
 	v3s16( 0, 0,-1),
 	v3s16(-1, 0, 0),
 };
+
+#endif

@@ -1,7 +1,8 @@
 // A shim, not Luanti's: see README.txt.
 //
 // Luanti prints a vector into a log stream; this is that, and nothing else.
-#pragma once
+#ifndef LUANTI_SHIM_IRRLICHT_CHANGES_PRINTING_H
+#define LUANTI_SHIM_IRRLICHT_CHANGES_PRINTING_H
 #include "../irr_v3d.h"
 #include "../irr_v2d.h"
 #include <ostream>
@@ -17,3 +18,5 @@ std::ostream& operator<<(std::ostream &os, const core::vector2d<T> &v)
 {
 	return os<<"("<<v.X<<","<<v.Y<<")";
 }
+
+#endif

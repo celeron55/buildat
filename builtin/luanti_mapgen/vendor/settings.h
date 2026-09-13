@@ -5,7 +5,8 @@
 // the mapgen's own constructor are what this build generates with. The
 // world's own overrides are a later refinement; see "Mapgen stage 3" in
 // doc/plan/luanti_module_plan.md.
-#pragma once
+#ifndef LUANTI_SHIM_SETTINGS_H
+#define LUANTI_SHIM_SETTINGS_H
 #include "irrlichttypes_bloated.h"
 #include "util/string.h"
 #include "exceptions.h"
@@ -70,8 +71,19 @@ public:
 	bool setU64(const std::string &name, u64 value){ return true; }
 	bool setBool(const std::string &name, bool value){ return true; }
 	bool setFlagStr(const std::string &name, u32 flags,
-			const FlagDesc *flagdesc, u32 flagmask){ return true; }
+			const FlagDesc *flagdesc, u32 flagmask = 0xffffffff){
+		return true;
+	}
+	bool setV3F(const std::string &name, const v3f &value){ return true; }
+	bool getV3FNoEx(const std::string &name, v3f &value) const {
+		return false;
+	}
+	// Luanti hands a flag table as a default, which is nothing to store
+	bool setDefault(const std::string &name, const FlagDesc *flagdesc,
+			u32 flags){ return true; }
 	bool remove(const std::string &name){ return false; }
 };
 
 extern Settings *g_settings;
+
+#endif

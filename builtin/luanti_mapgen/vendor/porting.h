@@ -2,7 +2,8 @@
 //
 // What the vendored code wants out of Luanti's platform layer, which here
 // is nothing: buildat has its own and the mapgen does not use it.
-#pragma once
+#ifndef LUANTI_SHIM_PORTING_H
+#define LUANTI_SHIM_PORTING_H
 #include "irrlichttypes.h"
 #include <string>
 
@@ -11,3 +12,5 @@ namespace porting {
 	inline void TrackFreedMemory(size_t bytes = 0){ (void)bytes; }
 	
 }
+
+#endif
