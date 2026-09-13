@@ -200,6 +200,36 @@ end)
 -- inventory has changed. What draws it is whoever is drawing: a formspec
 -- once there is one, and the launcher's own line of text until then.
 
+-- Where the server put the player: the spawn the first time, where the last
+-- run left them after that, and a teleport whenever a mod moves them. The
+-- player's own walking is the game's -- it is the one with the camera and
+-- the keys -- so this is only the times the server decides.
+M.player_pos = nil
+
+local player_pos_subs = {}
+
+-- sub_player_pos(f) -> f({x, y, z}) every time the server puts the player
+-- somewhere, and once now if it already has
+function M.sub_player_pos(f)
+	player_pos_subs[#player_pos_subs + 1] = f
+	if M.player_pos then
+		f(M.player_pos)
+	end
+end
+
+buildat.sub_packet("luanti:player_pos", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	local p = {
+		x = tonumber(values[1]) or 0,
+		y = tonumber(values[2]) or 0,
+		z = tonumber(values[3]) or 0,
+	}
+	M.player_pos = p
+	for _, f in ipairs(player_pos_subs) do
+		f(p)
+	end
+end)
+
 -- list name -> an array of item strings, one per slot; an empty slot is ""
 M.inventory = {}
 
