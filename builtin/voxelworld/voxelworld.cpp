@@ -992,8 +992,16 @@ struct CInstance: public voxelworld::Instance
 		int d = m_chunk_size_voxels.getZ();
 
 		// This makes sure the node will be found when searched from the octree,
-		// both on the server and the client
+		// both on the server and the client. It is a marker and nothing else:
+		// a zone mask of zero is what keeps it out of the renderer's zone
+		// assignment, and that matters because what a drawable was last in is
+		// cached on the drawable itself as a plain pointer. A chunk's node is
+		// unloaded while the drawables around it stay, and Urho3D only clears
+		// that pointer in the drawables its box still covers, so one that has
+		// moved out since keeps a pointer into freed memory and the renderer
+		// follows it on a worker thread.
 		Zone *node_zone = n->CreateComponent<Zone>();
+		node_zone->SetZoneMask(0);
 		node_zone->SetPriority(-1000);
 		node_zone->SetBoundingBox(BoundingBox(
 				Vector3(-w/2, -h/2, -d/2), Vector3(w/2, h/2, d/2)));
