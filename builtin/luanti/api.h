@@ -50,6 +50,18 @@ namespace luanti
 		// Whatever extends the environment is registered before this is
 		// called: Luanti loads its mods once, in order, and a late arrival
 		// would be a different kind of thing entirely.
+		// What the server is doing while a game loads, as a line of text at
+		// a time: the game, each mod with its number out of the total, the
+		// registry, the world. Registered before run_game(), because that
+		// is what takes the minutes and does not return until it is done.
+		//
+		// It is called on the server's own thread from inside run_game();
+		// buildat's network::send() writes to the socket there and then, so
+		// a packet sent from the handler reaches a client whose own thread
+		// is still running.
+		virtual void set_progress_handler(
+				std::function<void(const ss_ &)> handler) = 0;
+
 		virtual void run_game(const ss_ &game_path, storage::Save *save) = 0;
 
 		// What a Luanti world is made out of: its seed, which mapgen made it

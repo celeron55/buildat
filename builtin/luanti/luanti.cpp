@@ -595,6 +595,8 @@ struct Module: public interface::Module, public luanti::Interface
 	// in src/server/state.cpp, which takes no lock where emit_event_sync
 	// takes the container's.
 	interface::Mutex m_lua_mutex;
+	// What the server is doing while a game loads; see set_progress_handler()
+	std::function<void(const ss_ &)> m_progress;
 	// What the importer resolved a Luanti node name to, so that a world of
 	// three hundred thousand blocks asks Lua once per name and not once per
 	// node
@@ -6010,6 +6012,27 @@ struct Module: public interface::Module, public luanti::Interface
 			log_i(MODULE, "The imported world is made with %s", cs(taken));
 	}
 
+	void set_progress_handler(std::function<void(const ss_ &)> handler)
+	{
+		m_progress = handler;
+	}
+
+	void progress(const ss_ &line)
+	{
+		if(m_progress)
+			m_progress(line);
+	}
+
+	// __luanti_progress(text): the mod loader saying which mod it is on
+	static int l_progress(lua_State *L)
+	{
+		Module *self = module_of(L);
+		size_t len = 0;
+		const char *p = luaL_checklstring(L, 1, &len);
+		self->progress(ss_(p ? p : "", len));
+		return 0;
+	}
+
 	void run_game(const ss_ &game_path, storage::Save *save)
 	{
 		if(m_game_running)
@@ -6028,6 +6051,7 @@ struct Module: public interface::Module, public luanti::Interface
 		interface::fs::create_directories(world_path);
 		log_i(MODULE, "run_game(): game=%s world=%s",
 				cs(game_path), cs(world_path));
+		progress("Loading "+game_path.substr(game_path.find_last_of('/') + 1));
 
 		m_lua = luaL_newstate();
 		if(!m_lua)
@@ -6076,6 +6100,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_player_formspec", l_player_formspec);
 		set_global_cfunction("__luanti_send_node_inventory",
 				l_send_node_inventory);
+		set_global_cfunction("__luanti_progress", l_progress);
 		lua_pushlightuserdata(m_lua, (void*)this);
 		lua_setfield(m_lua, LUA_REGISTRYINDEX, "__luanti_module");
 		set_global_string("__luanti_module_path", module_path());
@@ -6112,11 +6137,13 @@ struct Module: public interface::Module, public luanti::Interface
 
 		// The game's own media before the registry, because what a node's
 		// tiles can be depends on which files were actually shipped
+		progress("Serving the media");
 		serve_game_media(game_path);
 
 		// The registry, the world and the light, in that order: the ids the
 		// mods asked for while loading are the ids the definitions are built
 		// under, and the definitions have to exist before anything is lit.
+		progress("Building the world");
 		create_world();
 		start_check_map();
 

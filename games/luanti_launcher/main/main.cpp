@@ -699,6 +699,26 @@ struct Module: public interface::Module
 		// wants is what chose the game above.
 		const char *import_from = getenv("BUILDAT_LUANTI_IMPORT");
 		luanti::access(m_server, [&](luanti::Interface *i){
+			// What the server is doing, to whoever is waiting for the world:
+			// a game of 220 mods takes minutes, and "Creating <name>..."
+			// left on the screen for that long looks hung. The handler runs
+			// on this thread from inside run_game(), and a packet sent from
+			// it reaches the client because network::send() writes to the
+			// socket there and then.
+			i->set_progress_handler([this, peer](const ss_ &line){
+				if(peer == 0)
+					return;
+				sv_<ss_> values{line};
+				std::ostringstream os(std::ios::binary);
+				{
+					cereal::PortableBinaryOutputArchive ar(os);
+					ar(values);
+				}
+				const ss_ data = os.str();
+				network::access(m_server, [&](network::Interface *inetwork){
+					inetwork->send(peer, "main:progress", data);
+				});
+			});
 			// What the world is made out of goes in before it is made; the
 			// rest of it is read once the game's nodes are registered
 			if(import_from && import_from[0])

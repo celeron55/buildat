@@ -26,7 +26,14 @@ do
 
 	core.log("action", "Loading " .. #ordered .. " mods from " .. game_path)
 	local t0 = core.get_us_time()
-	for _, mod in ipairs(ordered) do
+	for i, mod in ipairs(ordered) do
+		-- Whoever is waiting for the world hears which mod this is on:
+		-- 220 of them take minutes and a screen that says nothing looks
+		-- hung. Not a percentage -- how long the rest will take is not
+		-- known -- and not the log, which is what a terminal is for.
+		if __luanti_progress then
+			__luanti_progress(i .. "/" .. #ordered .. " " .. mod.name)
+		end
 		core.__current_modname = mod.name
 		local chunk, err = loadfile(mod.path .. "/init.lua")
 		if not chunk then

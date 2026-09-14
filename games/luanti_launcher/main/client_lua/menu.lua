@@ -17,6 +17,10 @@ local ui_utils = require("buildat/extension/ui_utils")
 local uistack = require("buildat/extension/uistack")
 
 local root = nil
+-- The one line the waiting screen shows, kept so that the next thing to say
+-- is a text change rather than a screen built again: what the server says
+-- while a game loads is one line per mod, and a game has a couple of hundred
+local waiting_text = nil
 local games = {}
 -- Which page of the save list is on the screen; the list is redrawn when it
 -- changes, which is what every other change to this menu does too
@@ -27,6 +31,7 @@ local function close()
 		uistack.main:pop(root)
 		root = nil
 	end
+	waiting_text = nil
 end
 
 local function waiting(message)
@@ -37,6 +42,7 @@ local function waiting(message)
 	local text = menu.window:CreateChild("Text")
 	text:SetStyleAuto()
 	text:SetText(message)
+	waiting_text = text
 end
 
 -- A save is a button; a new one is a name typed in and one button per game,
@@ -135,6 +141,25 @@ buildat.sub_packet("main:saves", function(data)
 	draw(saves, save_games)
 end)
 
+-- What the server is doing while the game loads: 220 mods take minutes and
+-- a line that says "Creating <name>..." for all of them looks hung. The
+-- server names each mod as it loads it; see set_progress_handler() in
+-- builtin/luanti/api.h.
+buildat.sub_packet("main:progress", function(data)
+	if done then
+		return
+	end
+	local line = cereal.binary_input(data, {"array", "string"})[1]
+	if line == nil then
+		return
+	end
+	if waiting_text then
+		waiting_text:SetText(line)
+	else
+		waiting(line)
+	end
+end)
+
 buildat.sub_packet("main:menu_error", function(data)
 	local message = cereal.binary_input(data, {"array", "string"})[1]
 	log:warning("menu: " .. tostring(message))
@@ -149,6 +174,7 @@ end)
 -- The world is up and main/init.lua is what draws from here on
 buildat.sub_packet("main:menu_done", function()
 	done = true
+	waiting_text = nil
 	close()
 end)
 
