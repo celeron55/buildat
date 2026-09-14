@@ -447,8 +447,12 @@ end
 local wield_node = camera_node:CreateChild("wielded")
 local wield_model = wield_node:CreateComponent("StaticModel")
 local wield_material = magic.Material.new()
+-- Cut out by the picture's own alpha rather than opaque, because an item's
+-- picture is a cutout: a plant, a tool, a sapling. Drawn opaque the holes in
+-- it are black, and drawn blended a picture that is mostly holes is a ghost.
+-- See builtin/luanti's client_data, which is where the technique is.
 wield_material:SetTechnique(0, magic.cache:GetResource("Technique",
-		"Techniques/DiffUnlit.xml"))
+		"luanti/UnlitAlphaMask.xml"))
 wield_model:SetModel(magic.cache:GetResource("Model", "Models/Box.mdl"))
 wield_model.material = wield_material
 -- Where a hand is: nearer than the player's own collision box is wide, so
@@ -460,9 +464,19 @@ wield_model.material = wield_material
 -- manager of its own with the depth buffer cleared. This one is a child of
 -- the camera node in the world's own scene, so what it has to clear is the
 -- world's near plane.
-wield_node.position = magic.Vector3(0.103, -0.077, 0.25)
+--
+-- The three numbers below were measured at a 45 degree field of view and
+-- mean a place on the screen rather than a place in the world, so they
+-- follow the camera: a wider view maps the same offset to a smaller part of
+-- the frame, and the hand would walk towards the middle of the screen and
+-- shrink. CAMERA_FOV is 72 now, which is Luanti's own.
+local WIELD_TUNED_FOV = 45
+local wield_k = math.tan(math.rad(CAMERA_FOV / 2)) /
+		math.tan(math.rad(WIELD_TUNED_FOV / 2))
+wield_node.position = magic.Vector3(0.103 * wield_k, -0.077 * wield_k, 0.25)
 wield_node.rotation = magic.Quaternion(-18, 35, 8)
-wield_node.scale = magic.Vector3(0.033, 0.033, 0.033)
+wield_node.scale = magic.Vector3(0.033 * wield_k, 0.033 * wield_k,
+		0.033 * wield_k)
 wield_node.enabled = false
 
 local function draw_wielded(item_name)
