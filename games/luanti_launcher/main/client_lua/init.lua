@@ -339,7 +339,11 @@ wield_node.scale = magic.Vector3(0.20, 0.20, 0.20)
 wield_node.enabled = false
 
 local function draw_wielded(item_name)
-	local tex = item_name and game_texture(luanti.item_texture(item_name))
+	-- One face of it and not the whole picture: a node's item image is the
+	-- little cube an inventory draws, and a cube wearing a picture of a cube
+	-- is not what the hand holds
+	local tex = item_name and
+			game_texture(luanti.item_face_texture(item_name))
 	if tex == nil or not luanti.hud_flag("wielditem") then
 		wield_node.enabled = false
 		return

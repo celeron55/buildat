@@ -144,6 +144,8 @@ end
 -- Any expression, composed under a name of its own: what the registry named
 -- is composed when the server says so, and this is for the ones that turn up
 -- later -- a formspec's background, an item's inventory image.
+local cube_texture
+
 local function texture_of(expr)
 	if expr == nil or expr == "" then
 		return nil
@@ -151,11 +153,82 @@ local function texture_of(expr)
 	if composed[expr] then
 		return composed[expr]
 	end
+	if string.sub(expr, 1, 6) == "\1cube\1" then
+		return cube_texture(expr)
+	end
 	local got = compose(expr, resource_of(expr))
 	if got then
 		added_dir()
 	end
 	return got
+end
+
+-- How big the little cube an inventory draws a node as is composed. It is
+-- scaled to the slot afterwards, so this only decides how much of the
+-- texture's detail survives; nine times a unit, because that is what
+-- Luanti's own geometry is in.
+local CUBE_UNIT = 8
+local CUBE_SIZE = 9 * CUBE_UNIT
+-- What the server sends instead of one expression when an item places a
+-- node that is a cube: the marker and then the three faces a viewer sees,
+-- the sides already carrying the multiply that darkens them. See
+-- core.__item_image_of() in the module's lua/bootstrap.lua.
+local CUBE_MARK = "\1cube\1"
+
+-- Luanti's own geometry, from createInventoryCubeImage() in
+-- src/client/imagesource.cpp: on a canvas of nine units the cube is eight
+-- wide and nine tall, a face's horizontal edge runs four across and two
+-- down, and a side face's vertical edge runs five down. Being taller than it
+-- is wide is the point -- a cube that fills a square canvas reads as
+-- squashed. Taken from extensions/luanti_client, which worked them out.
+local CUBE_FACES = {
+	{at = {4.5 * CUBE_UNIT, 0},
+			u = {4 * CUBE_UNIT, 2 * CUBE_UNIT},
+			v = {-4 * CUBE_UNIT, 2 * CUBE_UNIT}},
+	{at = {0.5 * CUBE_UNIT, 2 * CUBE_UNIT},
+			u = {4 * CUBE_UNIT, 2 * CUBE_UNIT}, v = {0, 5 * CUBE_UNIT}},
+	{at = {4.5 * CUBE_UNIT, 4 * CUBE_UNIT},
+			u = {4 * CUBE_UNIT, -2 * CUBE_UNIT}, v = {0, 5 * CUBE_UNIT}},
+}
+
+-- The three tiles sheared into the cube Luanti draws, or nil if one of them
+-- could not be composed. Luanti renders the node with a camera; three
+-- sheared tiles is the picture that comes out of that, without a render
+-- target.
+function cube_texture(expr)
+	if composed[expr] then
+		return composed[expr]
+	end
+	local faces = {}
+	for part in string.gmatch(string.sub(expr, #CUBE_MARK + 1), "[^\1]+") do
+		faces[#faces + 1] = part
+	end
+	if #faces ~= 3 then
+		return nil
+	end
+	local ops = {}
+	for i, face in ipairs(CUBE_FACES) do
+		local resource = texture_of(faces[i])
+		if resource == nil then
+			return nil
+		end
+		ops[#ops + 1] = {op = "shear", src = resource, at = face.at,
+				u = face.u, v = face.v}
+	end
+	local resource = resource_of(expr)
+	local okc, errc = pcall(buildat.compose_image, {
+		size = {CUBE_SIZE, CUBE_SIZE},
+		ops = ops,
+		write = path_of(resource),
+	})
+	if not okc then
+		log:warning("the inventory cube could not be composed: " ..
+				tostring(errc))
+		return nil
+	end
+	added_dir()
+	composed[expr] = resource
+	return resource
 end
 
 M.texture = texture_of
@@ -662,6 +735,18 @@ local item_images = {}
 -- this is here for what is drawn outside one, which is the hotbar.
 function M.item_texture(item_name)
 	return texture_of(item_images[item_name])
+end
+
+-- One face of it, for whoever paints the item onto a shape of their own
+-- rather than into a slot: the little cube's top for a node that is drawn as
+-- one, because a cube wearing a picture of a cube is not what the hand
+-- holds, and the item's own picture for everything else.
+function M.item_face_texture(item_name)
+	local expr = item_images[item_name]
+	if expr ~= nil and string.sub(expr, 1, #CUBE_MARK) == CUBE_MARK then
+		expr = string.match(string.sub(expr, #CUBE_MARK + 1), "^[^\1]+")
+	end
+	return texture_of(expr)
 end
 -- The ones that have no image, said once each
 local imageless = {}

@@ -2470,28 +2470,83 @@ end
 -- tile of the node it places. The client asks for these once, the way it
 -- asks for the node tiles' expressions.
 --
--- simplified: one expression per item, so a node is drawn as one of its
--- tiles rather than as the little cube Luanti draws. The upgrade path is
--- sending the three tiles a cube shows and shearing them client-side, which
--- extensions/luanti_client does.
+-- A node that is a cube is drawn as the little cube Luanti draws: the three
+-- faces a viewer sees, sheared by the client. What crosses for one is the
+-- marker "\1cube\1" and then the three expressions, the sides already
+-- carrying the multiply that darkens them.
+--
+-- simplified: a node that is not a plain cube -- a nodebox, a plant, a mesh
+-- -- is one of its tiles, flat. What those look like is their own shape, and
+-- a flat tile is a better lie than a cube would be.
 -- The same for one item, which is what an object that is a dropped item
 -- wants; see appearance_of() in lua/entity.lua
+-- Which drawtypes an inventory draws as a cube. The names are Luanti's own
+-- and a node that says nothing is "normal".
+local CUBE_DRAWTYPES = {
+	normal = true, liquid = true, flowingliquid = true, glasslike = true,
+	allfaces = true, allfaces_optional = true, glasslike_framed = true,
+	glasslike_framed_optional = true,
+}
+
+-- One of a node's tiles as the expression it is, with Luanti's own rule for
+-- a list shorter than six: the last one stands for the rest
+local function tile_of(def, i)
+	local tiles = def.tiles or def.tile_images
+	if type(tiles) ~= "table" or #tiles == 0 then
+		return nil
+	end
+	local tile = tiles[math.min(i, #tiles)]
+	if type(tile) == "table" then
+		tile = tile.name or tile.image
+	end
+	if type(tile) ~= "string" or tile == "" then
+		return nil
+	end
+	return tile
+end
+
+-- The tiles are +Y, -Y, +X, -X, +Z, -Z: the top and the two faces that point
+-- at a viewer standing off the +X +Z corner. The shades are Luanti's --
+-- 214/256 and 171/256 of the top's own brightness, which as a multiply is
+-- #d5d5d5 and #aaaaaa -- and they go on the tile rather than on the canvas,
+-- because a multiply over the canvas would darken what is already drawn on
+-- it.
+local function cube_expr(def)
+	if not CUBE_DRAWTYPES[def.drawtype or "normal"] then
+		return nil
+	end
+	local top, left, right = tile_of(def, 1), tile_of(def, 5), tile_of(def, 3)
+	if top == nil or left == nil or right == nil then
+		return nil
+	end
+	return "\1cube\1" .. top .. "\1" .. left .. "^[multiply:#d5d5d5" ..
+			"\1" .. right .. "^[multiply:#aaaaaa"
+end
+
+-- What one item is drawn as: its own picture, the little cube if it places
+-- one, its first tile, or what it looks like in a hand
+local function item_image_expr(def)
+	local expr = def.inventory_image
+	if expr ~= nil and expr ~= "" then
+		return expr
+	end
+	expr = cube_expr(def)
+	if expr ~= nil then
+		return expr
+	end
+	expr = tile_of(def, 1)
+	if expr ~= nil and expr ~= "" then
+		return expr
+	end
+	return def.wield_image
+end
+
 function core.__item_image_of(name)
 	local def = core.registered_items[name]
 	if def == nil then
 		return nil
 	end
-	local expr = def.inventory_image
-	if (expr == nil or expr == "") and def.tiles then
-		local tile = def.tiles[1]
-		if type(tile) == "table" then
-			tile = tile.name
-		end
-		expr = tile
-	end
-	if expr == nil or expr == "" then
-		expr = def.wield_image
-	end
+	local expr = item_image_expr(def)
 	if expr == nil or expr == "" then
 		return nil
 	end
@@ -2508,18 +2563,7 @@ function core.__item_images()
 	end
 	for name, def in pairs(core.registered_items) do
 		if name ~= "" then
-			local expr = def.inventory_image
-			if (expr == nil or expr == "") and def.tiles then
-				local tile = def.tiles[1]
-				if type(tile) == "table" then
-					tile = tile.name
-				end
-				expr = tile
-			end
-			if expr == nil or expr == "" then
-				expr = def.wield_image
-			end
-			add(name, expr)
+			add(name, item_image_expr(def))
 		end
 	end
 	return out
