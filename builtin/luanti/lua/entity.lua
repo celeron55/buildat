@@ -1399,6 +1399,42 @@ function core.__use_node(playername, under, above, sneak)
 	return true
 end
 
+-- What the drop key comes to: the item's own on_drop, which is Luanti's
+-- core.item_drop unless the game says otherwise -- it spawns the item as an
+-- object and throws it a little way in front of the player. count is how
+-- many of the stack go, and nothing is one of them.
+--
+-- What could not be dropped stays in hand: add_item() failing is the world
+-- being full rather than the player having thrown something away.
+function core.__drop_wielded(playername, count)
+	local id = players[playername]
+	local ref = id and core.object_refs[id]
+	if not ref then
+		return false
+	end
+	local inv = ref:get_inventory()
+	local index = ref:get_wield_index()
+	local stack = inv:get_stack("main", index)
+	if stack:is_empty() then
+		return false
+	end
+	count = tonumber(count) or 0
+	local dropped = stack:take_item(count > 0 and count or stack:get_count())
+	local def = core.registered_items[dropped:get_name()]
+	local on_drop = def and def.on_drop or core.item_drop
+	local left = on_drop(dropped, ref, ref:get_pos())
+	-- Nothing at all came back from an on_drop of the game's own, which
+	-- means it did not take the stack
+	if left == nil then
+		left = dropped
+	end
+	if not left:is_empty() then
+		stack:add_item(left)
+	end
+	inv:set_stack("main", index, stack)
+	return true
+end
+
 --
 -- An inventory action
 --

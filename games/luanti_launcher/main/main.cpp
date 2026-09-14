@@ -89,6 +89,8 @@ struct Module: public interface::Module
 				"network:packet_received/main:chat"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:wield"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:drop"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
 	}
 
@@ -113,6 +115,8 @@ struct Module: public interface::Module
 		EVENT_TYPEN("network:packet_received/main:chat", on_chat,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:wield", on_wield,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:drop", on_drop,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:where", on_where,
 				network::Packet)
@@ -202,6 +206,29 @@ struct Module: public interface::Module
 		luanti::access(m_server, [&](luanti::Interface *i){
 			i->set_wield_index(player_name_of(packet.sender), index);
 		});
+	}
+
+	// The drop key. The count is how many of the held stack go and zero is
+	// all of them, which is what Luanti's Q and Ctrl-Q are.
+	void on_drop(const network::Packet &packet)
+	{
+		sv_<ss_> values;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(values);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:drop: %s", e.what());
+			return;
+		}
+		const int count = values.empty() ? 0 : atoi(values[0].c_str());
+		bool dropped = false;
+		luanti::access(m_server, [&](luanti::Interface *i){
+			dropped = i->drop_wielded(player_name_of(packet.sender),
+					count < 0 ? 0 : count);
+		});
+		log_v(MODULE, "C%i: main:drop %i: %s", packet.sender, count,
+				dropped ? "dropped" : "nothing");
 	}
 
 	// A click on the client, as the voxel it pointed at. What it means is

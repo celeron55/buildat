@@ -76,6 +76,8 @@ local BINDINGS = {
 	{action = "chat", key = magic.KEY_T, name = "T",
 			what = "Say something - a line starting with / is a command"},
 	{action = "inventory", key = magic.KEY_I, name = "I", what = "Inventory"},
+	{action = "drop", key = magic.KEY_Q, name = "Q",
+			what = "Drop what is held - with Ctrl, one of it"},
 	{action = "mouse", key = magic.KEY_TAB, name = "Tab",
 			what = "The mouse in the world or on the screen"},
 	{action = "detail", key = magic.KEY_F5, name = "F5",
@@ -1692,7 +1694,15 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		chat_wanted = true
 	elseif key == BIND.mouse.key then
 		set_mouse_in_world(not mouse_in_world)
-	elseif key == BIND.inventory.key then
+	elseif key == BIND.drop.key then
+		-- Luanti's own drop key: the whole stack, and one of it with the
+		-- key that means "one" everywhere else here. The server takes it
+		-- out of the inventory, so nothing is drawn until it says so.
+		local one = magic.input:GetKeyDown(magic.KEY_LCTRL) or
+				magic.input:GetKeyDown(magic.KEY_RCTRL)
+		buildat.send_packet("main:drop", cereal.binary_output(
+				{one and "1" or "0"}, {"array", "string"}))
+		elseif key == BIND.inventory.key then
 		-- Luanti's own inventory key, and what a game's inventory formspec
 		-- is for. The mouse has to be on the screen to click a form -- but
 		-- only if one opened: a game that sets no inventory formspec draws

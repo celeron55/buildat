@@ -140,6 +140,11 @@ namespace luanti
 				int32_t above_z, const ss_ &player_name,
 				bool sneak = false) = 0;
 
+		// The drop key: what the player is holding goes into the world as
+		// an object. count is how many of the stack go, and zero is all of
+		// them -- the item's own on_drop is what does it.
+		virtual bool drop_wielded(const ss_ &player_name, int count) = 0;
+
 		// Which hotbar slot the player is holding, one-based. It is the
 		// client's to say -- the keys and the wheel are there -- and the
 		// server reads it whenever a dig or a place asks what is in hand.

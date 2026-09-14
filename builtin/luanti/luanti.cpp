@@ -6076,6 +6076,14 @@ struct Module: public interface::Module, public luanti::Interface
 		node_action(buf);
 	}
 
+	bool drop_wielded(const ss_ &player_name, int count)
+	{
+		if(player_name.empty())
+			return false;
+		return node_action("return core.__drop_wielded(\""+
+				lua_quoted(player_name)+"\", "+itos(count)+")");
+	}
+
 	void set_wield_index(const ss_ &player_name, int index)
 	{
 		node_action("core.__set_wield_index(\""+lua_quoted(player_name)+
