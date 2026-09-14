@@ -68,13 +68,27 @@ static const float VIEW_DIR_Y = -0.7f;
 static const float VIEW_DIR_Z = -1.0f;
 
 // Tuned so the surface keeps sky above it and rock below it across the volume.
-// Retuned 2026-09-14 with voxel_lighting's, for the same reason: the noise
-// hash stopped coming back biased and with two and a half times the swing.
-static const float TERRAIN_AMPLITUDE = 23.0f;
+// Retuned twice with voxel_lighting's and for the same reasons -- the noise
+// hash, and then the shape the hash gives: the cave has to break out of a
+// hillside, and with the old numbers the mouth stood on flat ground and the
+// shaft's cap landed on the mouth. See voxel_lighting's own main.cpp, where
+// the four knobs and the search that set them are written down.
+static const float TERRAIN_AMPLITUDE = 22.0f;
 
-// Shifts the terrain within the scene, as in voxel_lighting, where 19 puts
-// the surface at roughly scene y=19..45. SCENE_OFFSET_Y does the moving here.
-static const float GROUND_OFFSET = 19.0f;
+// Shifts the terrain within the scene, as in voxel_lighting, where 15 puts
+// the surface at roughly scene y=18..45. SCENE_OFFSET_Y does the moving here.
+static const float GROUND_OFFSET = 15.0f;
+
+// Which field the terrain is, and how far in from the far corner of the scene
+// the cave's mouth sits. Both are voxel_lighting's, because this is the same
+// scene spread over several sections.
+static const int TERRAIN_SEED = 17;
+static const int CAVE_MOUTH_INSET = 14;
+
+// How far from the mouth's own column a tree has to stand; voxel_lighting's
+// again, and for the same reason: a canopy in the doorway hides what both
+// cave cameras are pointed at.
+static const int TREE_MOUTH_CLEARANCE = 7;
 
 static const float CAVE_RADIUS = 3.5f;
 static const float CAVE_LENGTH = 62.0f;
@@ -162,7 +176,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 			interface::NoiseParams np(0, TERRAIN_AMPLITUDE, spread, 0, 5, 0.4);
 			// Sampled at scene coordinates, so the terrain under the cave is
 			// the terrain voxel_lighting's cave was carved into
-			interface::Noise noise(&np, 3, nw, nd);
+			interface::Noise noise(&np, TERRAIN_SEED, nw, nd);
 			noise.fbmMap2D(nx0 - SCENE_OFFSET_X + spread.X/2,
 					nz0 - SCENE_OFFSET_Z + spread.Z/2);
 			noise.transformNoiseMap();
@@ -177,7 +191,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 
 			// TUNING: pick a cave mouth whose cave stays under the terrain
 			if(section_p == pv::Vector3DInt16(0, 0, 0)){
-				interface::Noise wn(&np, 3, WORLD_SIZE, WORLD_SIZE);
+				interface::Noise wn(&np, TERRAIN_SEED, WORLD_SIZE, WORLD_SIZE);
 				wn.fbmMap2D(spread.X/2, spread.Z/2);
 				wn.transformNoiseMap();
 				auto wnoise = [&](int x, int z){
@@ -243,6 +257,23 @@ struct Worldgen: public worldgen::GeneratorInterface
 				}
 			}
 
+			// Where the cave's mouth will be, before anything is planted:
+			// nothing may grow in the doorway. The same arithmetic as the
+			// cave's own below, on the scene box rather than on a section.
+			int mouth_x, mouth_z;
+			{
+				float mca = std::cos(CAVE_YAW_DEGREES * 3.14159265f / 180.0f);
+				float msa = std::sin(CAVE_YAW_DEGREES * 3.14159265f / 180.0f);
+				float mcx = SCENE_OFFSET_X + SCENE_SIZE / 2.0f;
+				float mcz = SCENE_OFFSET_Z + SCENE_SIZE / 2.0f;
+				float mox = (SCENE_OFFSET_X + SCENE_SIZE - 1 -
+						CAVE_MOUTH_INSET) - mcx;
+				float moz = (SCENE_OFFSET_Z + SCENE_SIZE - 1 -
+						CAVE_MOUTH_INSET) - mcz;
+				mouth_x = (int)std::floor(mcx + mox * mca + moz * msa + 0.5f);
+				mouth_z = (int)std::floor(mcz - mox * msa + moz * mca + 0.5f);
+			}
+
 			// Trees, for something that casts a shadow with a shape to it.
 			// One per cell of a grid laid over the world, placed by a random
 			// number seeded from the cell, so that a tree lands in the same
@@ -258,6 +289,11 @@ struct Worldgen: public worldgen::GeneratorInterface
 				int x = cx * TREE_CELL + pr.range(0, TREE_CELL - 1);
 				int z = cz * TREE_CELL + pr.range(0, TREE_CELL - 1);
 				if(!have_column(x, z))
+					continue;
+				// A canopy is five voxels across, so this keeps the whole of
+				// it out of the mouth rather than only its trunk
+				if(std::abs(x - mouth_x) <= TREE_MOUTH_CLEARANCE &&
+						std::abs(z - mouth_z) <= TREE_MOUTH_CLEARANCE)
 					continue;
 				int y = (int)(surface_at(x, z) + 11.0f);
 
@@ -289,16 +325,14 @@ struct Worldgen: public worldgen::GeneratorInterface
 			auto rot_z = [&](float x, float z){ return -x * sa + z * ca; };
 			float centre_x = SCENE_OFFSET_X + SCENE_SIZE / 2.0f;
 			float centre_z = SCENE_OFFSET_Z + SCENE_SIZE / 2.0f;
-			float ox = (SCENE_OFFSET_X + SCENE_SIZE - 1 - 10) - centre_x;
-			float oz = (SCENE_OFFSET_Z + SCENE_SIZE - 1 - 10) - centre_z;
-			int mouth_x = (int)std::floor(centre_x + rot_x(ox, oz) + 0.5f);
-			int mouth_z = (int)std::floor(centre_z + rot_z(ox, oz) + 0.5f);
+			// mouth_x and mouth_z are the ones worked out above the trees,
+			// which had to know where the doorway is before planting any
 
 			// Every section carves the whole cave and clips it, so every one
 			// of them needs the ground height at the mouth, which is only in
 			// the noise map of the sections the mouth is over. One extra
 			// sample of the same noise gives it to all of them.
-			interface::Noise mouth_noise(&np, 3, 1, 1);
+			interface::Noise mouth_noise(&np, TERRAIN_SEED, 1, 1);
 			mouth_noise.fbmMap2D(mouth_x - SCENE_OFFSET_X + spread.X/2,
 					mouth_z - SCENE_OFFSET_Z + spread.Z/2);
 			mouth_noise.transformNoiseMap();

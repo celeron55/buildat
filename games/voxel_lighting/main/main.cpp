@@ -44,18 +44,47 @@ static const float VIEW_DIR_Z = -1.0f;
 
 // Tuned so the surface keeps sky above it and rock below it across the volume.
 //
-// Retuned 2026-09-14, when the noise hash stopped multiplying in signed
-// arithmetic: the old one came back biased and with about two and a half
-// times the swing, so the same numbers that gave a surface at 19..45 gave one
-// at 7..17 -- a flatter scene, lower in the volume, with the pond left hanging
-// in the air above it. The amplitude and the offset are what put the same
-// surface back, which is what the check images are for.
-static const float TERRAIN_AMPLITUDE = 23.0f;
+// Retuned twice. First on 2026-09-14, when the noise hash stopped multiplying
+// in signed arithmetic: the same numbers that gave a surface at 19..45 gave
+// one at 7..17, and the amplitude and offset put the band back. That was not
+// enough -- the band was right and the *shape* was not, and the scene is
+// about a shape: the cave has to break out of a hillside, both because a
+// mouth in flat ground is a hole in a floor and because the gradient is what
+// these scenes exist to photograph. With the field the fixed hash gives, the
+// mouth stood on flat ground (eight voxels along the cave the ground rose by
+// one) and the shaft that should break out well up the slope came out *below*
+// the mouth, so its cap sat on the mouth instead of up the hill.
+//
+// So the seed and the mouth's own corner are knobs here now, and the four of
+// them were searched together rather than derived: the field is
+// interface::Noise, which __luanti_noise_map() hands to Lua, so a probe can
+// try thousands of sets against what the scene needs -- a surface inside the
+// volume, a mouth part way up it, a cave that stays in the volume to its end,
+// a pond with a rim just above its water line, and ground that climbs at the
+// mouth. These are what came out: a surface at 18..45 where it used to be
+// 19..45, the ground climbing eight voxels over the first eight of the cave,
+// and the shaft breaking out thirteen voxels above the mouth.
+static const float TERRAIN_AMPLITUDE = 22.0f;
 
-// Shifts the terrain up or down in the volume. With the noise below, 19 puts
-// the surface at roughly y=19..45, averaging the middle of the volume. The
+// Shifts the terrain up or down in the volume. With the noise below, 15 puts
+// the surface at roughly y=18..45, averaging the middle of the volume. The
 // generator logs the range it actually got, so retune this by reading that.
-static const float GROUND_OFFSET = 19.0f;
+static const float GROUND_OFFSET = 15.0f;
+
+// Which field the terrain is. One number of a different field is one scene of
+// a different shape, and the shape is what is being chosen here; see above.
+static const int TERRAIN_SEED = 17;
+
+// How far in from the far corner of the volume the cave's mouth sits, before
+// the whole cave is rotated about the middle. It decides which part of the
+// hill the mouth lands in, so it is searched with the terrain rather than set
+// once.
+static const int CAVE_MOUTH_INSET = 14;
+
+// How far from the mouth's own column a tree has to stand. A canopy is five
+// voxels across and both cave cameras look at the mouth, so one growing in
+// the doorway hides what the picture is of.
+static const int TREE_MOUTH_CLEARANCE = 7;
 
 static const float CAVE_RADIUS = 3.5f;
 // A pond, for a surface smooth enough to reflect the sky where everything else
@@ -133,7 +162,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 			// Digger's amplitude is set for its own much longer wavelength;
 			// at this one it would swing the surface across the whole volume.
 			interface::NoiseParams np(0, TERRAIN_AMPLITUDE, spread, 0, 5, 0.4);
-			interface::Noise noise(&np, 3, w, d);
+			interface::Noise noise(&np, TERRAIN_SEED, w, d);
 			noise.fbmMap2D(lc.getX() + spread.X/2, lc.getZ() + spread.Z/2);
 			noise.transformNoiseMap();
 
@@ -193,15 +222,38 @@ struct Worldgen: public worldgen::GeneratorInterface
 				}
 			}
 
+			// Where the cave's mouth will be. Worked out before anything is
+			// planted, because nothing may grow in the doorway: the tree
+			// that does hides the thing both cave cameras are pointed at.
+			float ca = std::cos(CAVE_YAW_DEGREES * 3.14159265f / 180.0f);
+			float sa = std::sin(CAVE_YAW_DEGREES * 3.14159265f / 180.0f);
+			auto rot_x = [&](float x, float z){ return x * ca + z * sa; };
+			auto rot_z = [&](float x, float z){ return -x * sa + z * ca; };
+			float centre_x = lc.getX() + VOLUME_SIZE / 2.0f;
+			float centre_z = lc.getZ() + VOLUME_SIZE / 2.0f;
+			float ox = (uc.getX() - CAVE_MOUTH_INSET) - centre_x;
+			float oz = (uc.getZ() - CAVE_MOUTH_INSET) - centre_z;
+			int mouth_x = (int)std::floor(centre_x + rot_x(ox, oz) + 0.5f);
+			int mouth_z = (int)std::floor(centre_z + rot_z(ox, oz) + 0.5f);
+			// surface_at() indexes the noise map, so it must stay in the region
+			if(mouth_x < lc.getX()) mouth_x = lc.getX();
+			if(mouth_x > uc.getX()) mouth_x = uc.getX();
+			if(mouth_z < lc.getZ()) mouth_z = lc.getZ();
+			if(mouth_z > uc.getZ()) mouth_z = uc.getZ();
+
 			// Trees, for something that casts a shadow with a shape to it.
 			// Digger's density is a forest; here it would hide the terrain.
-			// Seed picked by eye: keeps the cave mouth clear of canopy
 			auto pr = interface::PseudoRandom(777);
 			for(int i = 0; i < w * d / 400; i++){
 				int x = pr.range(lc.getX() + 3, uc.getX() - 3);
 				int z = pr.range(lc.getZ() + 3, uc.getZ() - 3);
 				int y = (int)(surface_at(x, z) + 11.0f);
 				if(y < lc.getY() || y > uc.getY() - 8)
+					continue;
+				// A canopy is five voxels across, so this keeps the whole of
+				// it out of the mouth rather than only its trunk
+				if(std::abs(x - mouth_x) <= TREE_MOUTH_CLEARANCE &&
+						std::abs(z - mouth_z) <= TREE_MOUTH_CLEARANCE)
 					continue;
 
 				for(int y1 = y; y1 < y + 4; y1++)
@@ -284,28 +336,10 @@ struct Worldgen: public worldgen::GeneratorInterface
 			// of a sealed pocket. Both the axis and its starting point are
 			// rotated about the centre of the volume, so the whole cave turns
 			// rather than just pivoting at the mouth.
-			float ca = std::cos(CAVE_YAW_DEGREES * 3.14159265f / 180.0f);
-			float sa = std::sin(CAVE_YAW_DEGREES * 3.14159265f / 180.0f);
-			auto rot_x = [&](float x, float z){ return x * ca + z * sa; };
-			auto rot_z = [&](float x, float z){ return -x * sa + z * ca; };
-
-			float centre_x = lc.getX() + VOLUME_SIZE / 2.0f;
-			float centre_z = lc.getZ() + VOLUME_SIZE / 2.0f;
-
 			float rdx = rot_x(VIEW_DIR_X, VIEW_DIR_Z);
 			float rdz = rot_z(VIEW_DIR_X, VIEW_DIR_Z);
 			float dl = std::sqrt(rdx*rdx + VIEW_DIR_Y*VIEW_DIR_Y + rdz*rdz);
 			float dx = rdx / dl, dy = VIEW_DIR_Y / dl, dz = rdz / dl;
-
-			float ox = (uc.getX() - 10) - centre_x;
-			float oz = (uc.getZ() - 10) - centre_z;
-			int mouth_x = (int)std::floor(centre_x + rot_x(ox, oz) + 0.5f);
-			int mouth_z = (int)std::floor(centre_z + rot_z(ox, oz) + 0.5f);
-			// surface_at() indexes the noise map, so it must stay in the region
-			if(mouth_x < lc.getX()) mouth_x = lc.getX();
-			if(mouth_x > uc.getX()) mouth_x = uc.getX();
-			if(mouth_z < lc.getZ()) mouth_z = lc.getZ();
-			if(mouth_z > uc.getZ()) mouth_z = uc.getZ();
 
 			float sx = mouth_x;
 			float sz = mouth_z;
