@@ -3385,9 +3385,25 @@ struct CInstance: public voxelworld::Instance
 				m_total_buffers_dirty,
 				m_sections_with_loaded_buffers.size());
 		const size_t was_dirty = m_total_buffers_dirty;
+		// Said while it is still going and not only when it is over: a
+		// commit that never returns is what a hang looks like from the
+		// outside, and a line per second saying how far it has got is what
+		// tells that apart from a commit that is merely long.
+		static const int64_t SAY_EVERY_US = 1000000;
+		int64_t say_at = t0 + SAY_EVERY_US;
+		size_t written = 0;
 		for(Section *section : m_sections_with_loaded_buffers){
 			for(size_t i = 0; i < section->chunk_buffers.size(); i++){
+				if(section->chunk_buffers[i].dirty)
+					written++;
 				commit_chunk_buffer(section, i);
+				const int64_t now = interface::os::time_us();
+				if(now >= say_at){
+					say_at = now + SAY_EVERY_US;
+					log_w(MODULE, "commit(): %zu of %zu dirty buffers "
+							"written after %.1f s", written, was_dirty,
+							(now - t0) / 1e6);
+				}
 			}
 		}
 		// This runs at the end of every access into voxelworld -- see
