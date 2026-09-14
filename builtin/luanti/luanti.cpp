@@ -353,6 +353,54 @@ static uint8_t facing_variant_of_param(const ss_ &facing, uint8_t param)
 	return 0;
 }
 
+// One picture placed into a "[combine:WxH:x,y=file:x,y=file" expression
+struct CombinePlace
+{
+	int x = 0, y = 0;
+	ss_ name;
+};
+
+// What that expression says, or false if it is not one: no nesting, and
+// what is placed is a file name rather than a modifier of its own. See
+// palette_image(), which is the only thing that needs a modifier composed
+// on this side at all.
+static bool parse_combine(const ss_ &expr, int &w_out, int &h_out,
+		sv_<CombinePlace> &out)
+{
+	static const ss_ COMBINE = "[combine:";
+	if(expr.compare(0, COMBINE.size(), COMBINE) != 0)
+		return false;
+	sv_<ss_> parts;
+	for(size_t at = COMBINE.size(); at <= expr.size(); ){
+		size_t end = expr.find(':', at);
+		if(end == ss_::npos)
+			end = expr.size();
+		parts.push_back(expr.substr(at, end - at));
+		at = end + 1;
+	}
+	int w = 0, h = 0;
+	if(parts.empty() || sscanf(cs(parts[0]), "%dx%d", &w, &h) != 2 ||
+			w <= 0 || h <= 0 || w > 1024 || h > 1024)
+		return false;
+	sv_<CombinePlace> places;
+	for(size_t i = 1; i < parts.size(); i++){
+		CombinePlace place;
+		int file_at = 0;
+		if(sscanf(cs(parts[i]), "%d,%d=%n", &place.x, &place.y,
+				&file_at) < 2 || file_at <= 0 ||
+				(size_t)file_at >= parts[i].size())
+			return false;
+		place.name = parts[i].substr(file_at);
+		places.push_back(place);
+	}
+	if(places.empty())
+		return false;
+	out = places;
+	w_out = w;
+	h_out = h;
+	return true;
+}
+
 // Which colour a param2 picks out of a palette of this many colours.
 // Luanti stretches a palette over the 256 param2 values -- each pixel fills
 // 256/pixels of them -- so the colour changes only every step, and the bits
@@ -3213,6 +3261,32 @@ struct Module: public interface::Module, public luanti::Interface
 		assert(palette_slot_of_param(32, 255) * 8 +
 				facing_variant_of_param("wallmounted", 255) < 256);
 
+		// A palette named as a "[combine" expression is the picture it
+		// places, cut to the size it names
+		{
+			int w = 0, h = 0;
+			sv_<CombinePlace> places;
+			assert(parse_combine(
+					"[combine:16x2:0,0=mcl_core_palette_foliage.png",
+					w, h, places));
+			assert(w == 16 && h == 2);
+			assert(places.size() == 1);
+			assert(places[0].x == 0 && places[0].y == 0);
+			assert(places[0].name == "mcl_core_palette_foliage.png");
+			places.clear();
+			assert(parse_combine("[combine:4x4:0,0=a.png:1,2=b.png",
+					w, h, places));
+			assert(places.size() == 2);
+			assert(places[1].x == 1 && places[1].y == 2 &&
+					places[1].name == "b.png");
+			places.clear();
+			assert(!parse_combine("mcl_core_palette_grass.png", w, h, places));
+			assert(!parse_combine("[multiply:#ff0000", w, h, places));
+			assert(!parse_combine("[combine:16x2", w, h, places));
+			assert(!parse_combine("[combine:16x2:0,0=", w, h, places));
+			assert(!parse_combine("[combine:0x0:0,0=a.png", w, h, places));
+		}
+
 		// A fence is a post that is always drawn and four pairs of bars that
 		// are drawn only when their direction connects, which is what
 		// connect_dir says
@@ -3408,32 +3482,81 @@ struct Module: public interface::Module, public luanti::Interface
 	// Read here and not on the client because what the client is sent is a
 	// texture name, and the name is the tile through a modifier that
 	// multiplies it by one of these.
-	const sv_<uint32_t>& palette_colours(const ss_ &name)
+	// One shipped image, loaded. False and a warning if the game never sent
+	// it or it is not a picture.
+	bool load_media_image(const ss_ &name, magic::Image &img)
 	{
-		auto cached = m_palettes.find(name);
-		if(cached != m_palettes.end())
-			return cached->second;
-		sv_<uint32_t> &out = m_palettes[name];
 		auto it = m_served_media.find(name);
 		if(it == m_served_media.end()){
-			log_w(MODULE, "palette \"%s\" was not shipped", cs(name));
-			return out;
+			log_w(MODULE, "image \"%s\" was not shipped", cs(name));
+			return false;
 		}
 		std::ifstream ifs(it->second, std::ios::binary);
 		std::ostringstream os;
 		os<<ifs.rdbuf();
 		const ss_ data = os.str();
 		if(data.empty()){
-			log_w(MODULE, "palette \"%s\" is empty", cs(name));
-			return out;
+			log_w(MODULE, "image \"%s\" is empty", cs(name));
+			return false;
 		}
+		magic::MemoryBuffer buf(data.c_str(), (unsigned)data.size());
+		if(!img.Load(buf)){
+			log_w(MODULE, "image \"%s\" did not load", cs(name));
+			return false;
+		}
+		return true;
+	}
+
+	// A palette is usually a file, but a game may name it as a texture
+	// modifier instead, which Luanti composes through the same pipeline as
+	// any other texture: VoxeLibre's vines ask for
+	// "[combine:16x2:0,0=mcl_core_palette_foliage.png", which is that
+	// palette's first two rows and nothing else.
+	//
+	// simplified: [combine and no other modifier, and what it places has to
+	// be a file rather than a modifier of its own. Anything further warns
+	// and the node goes without its palette; the upgrade is the client's own
+	// texmod.lua evaluated over an Image rather than over a texture.
+	bool palette_image(const ss_ &name, magic::Image &img)
+	{
+		if(name.empty() || name[0] != '[')
+			return load_media_image(name, img);
+		int w = 0, h = 0;
+		sv_<CombinePlace> places;
+		if(!parse_combine(name, w, h, places)){
+			log_w(MODULE, "palette \"%s\" is not a modifier this composes",
+					cs(name));
+			return false;
+		}
+		img.SetSize(w, h, 4);
+		img.Clear(magic::Color(0, 0, 0, 0));
+		for(const CombinePlace &place : places){
+			magic::Image piece(img.GetContext());
+			if(!load_media_image(place.name, piece))
+				return false;
+			for(int y = 0; y < piece.GetHeight(); y++){
+				for(int x = 0; x < piece.GetWidth(); x++){
+					if(place.x + x >= w || place.y + y >= h ||
+							place.x + x < 0 || place.y + y < 0)
+						continue;
+					img.SetPixel(place.x + x, place.y + y,
+							piece.GetPixel(x, y));
+				}
+			}
+		}
+		return true;
+	}
+
+	const sv_<uint32_t>& palette_colours(const ss_ &name)
+	{
+		auto cached = m_palettes.find(name);
+		if(cached != m_palettes.end())
+			return cached->second;
+		sv_<uint32_t> &out = m_palettes[name];
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			magic::Image img(imc->get_context());
-			magic::MemoryBuffer buf(data.c_str(), (unsigned)data.size());
-			if(!img.Load(buf)){
-				log_w(MODULE, "palette \"%s\" did not load", cs(name));
+			if(!palette_image(name, img))
 				return;
-			}
 			const int w = img.GetWidth(), h = img.GetHeight();
 			for(int y = 0; y < h && (int)out.size() < 256; y++){
 				for(int x = 0; x < w && (int)out.size() < 256; x++){
