@@ -117,6 +117,22 @@ check("itemstack", function()
 	local t = ItemStack("test:tool")
 	t:add_wear_by_uses(10)
 	assert(t:get_wear() == 6553, "one use of ten")
+
+	-- A tool is used up after exactly the uses it has and not before,
+	-- whatever the wear range does not divide evenly into: 130 is Luanti's
+	-- own example of that
+	local function uses_until_gone(uses)
+		local s = ItemStack("test:tool")
+		local n = 0
+		while not s:is_empty() and n < 70000 do
+			s:add_wear_by_uses(uses)
+			n = n + 1
+		end
+		return n
+	end
+	assert(uses_until_gone(1) == 1, "a tool of one use")
+	assert(uses_until_gone(10) == 10, "a tool of ten uses")
+	assert(uses_until_gone(130) == 130, "a tool of a hundred and thirty")
 end)
 
 check("inventory", function()

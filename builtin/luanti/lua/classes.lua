@@ -255,10 +255,6 @@ end
 
 function Stack:set_wear(wear)
 	self.wear = math.max(0, math.min(65535, math.floor(tonumber(wear) or 0)))
-	if self.wear >= 65536 then
-		self:clear()
-		return false
-	end
 	return true
 end
 
@@ -375,15 +371,41 @@ function Stack:add_wear(amount)
 	if self:get_stack_max() ~= 1 then
 		return
 	end
-	self:set_wear(self.wear + (tonumber(amount) or 0))
+	amount = math.floor(tonumber(amount) or 0)
+	-- Wear that would run past the end of the range is a tool that has been
+	-- used up, which is Luanti's own rule and the only way one breaks
+	if amount > 0 and self.wear > 65535 - amount then
+		self:clear()
+		return
+	end
+	self:set_wear(self.wear + amount)
+end
+
+-- How much of a tool one use costs: Luanti's own calculateResultWear() in
+-- src/tool.cpp. The wear range is cut into as many blocks as the tool has
+-- uses, and because 65536 rarely divides evenly some blocks are one bigger
+-- than the rest; the bigger ones are spent last, so a tool breaks after
+-- exactly `uses` uses whatever wear it started at. Luanti's own example is
+-- 130 uses: 114 blocks of 504 and 16 of 505, which is 65536 exactly.
+function core.__result_wear(uses, initial_wear)
+	uses = math.floor(tonumber(uses) or 0)
+	initial_wear = math.floor(tonumber(initial_wear) or 0)
+	if uses <= 0 then
+		return 0
+	end
+	local wear_normal = math.floor(65536 / uses)
+	local blocks_oversize = 65536 % uses
+	if blocks_oversize > 0 then
+		local blocks_normal = uses - blocks_oversize
+		if initial_wear >= blocks_normal * wear_normal then
+			return wear_normal + 1
+		end
+	end
+	return wear_normal
 end
 
 function Stack:add_wear_by_uses(uses)
-	uses = tonumber(uses) or 0
-	if uses <= 0 then
-		return
-	end
-	self:add_wear(math.floor(65535 / uses))
+	self:add_wear(core.__result_wear(uses, self.wear))
 end
 
 function Stack:item_fits(other)

@@ -2579,24 +2579,24 @@ end
 -- than one above the node's level is faster still, and dig_immediate is a
 -- fixed time that costs nothing.
 --
--- simplified: a use costs 65535/uses of the tool, which is what Luanti did
--- before it started spreading the remainder over a tool's life so that one
--- breaks after exactly `uses` digs whatever wear it started at. The upgrade
--- path is that arithmetic; nothing here depends on the difference.
 local function group_rating(groups, name)
 	local v = groups and groups[name]
 	return type(v) == "number" and v or 0
 end
 
 function core.get_dig_params(groups, tool_capabilities, wear)
-	local immediate = group_rating(groups, "dig_immediate")
-	if immediate == 2 then
-		return {diggable = true, time = 0.5, wear = 0}
-	elseif immediate == 3 then
-		return {diggable = true, time = 0, wear = 0}
-	end
 	local caps = type(tool_capabilities) == "table" and
 			tool_capabilities.groupcaps or nil
+	-- The fixed time is the group's own unless the tool says what it does
+	-- about dig_immediate, which is Luanti's order
+	if not (caps and caps.dig_immediate) then
+		local immediate = group_rating(groups, "dig_immediate")
+		if immediate == 2 then
+			return {diggable = true, time = 0.5, wear = 0}
+		elseif immediate == 3 then
+			return {diggable = true, time = 0, wear = 0}
+		end
+	end
 	local level = group_rating(groups, "level")
 	local diggable = false
 	local best_time = 0
@@ -2613,46 +2613,16 @@ function core.get_dig_params(groups, tool_capabilities, wear)
 				diggable = true
 				best_time = time
 				-- A tool used above its level lasts longer, which is the
-				-- same three-to-the-leveldiff Luanti scales its uses by
-				local uses = (tonumber(cap.uses) or 0) * 3 ^ leveldiff
-				best_wear = uses > 0 and math.floor(65535 / uses) or 0
+				-- same three-to-the-leveldiff Luanti scales its uses by,
+				-- and no tool has more uses than the wear range has room
+				-- for
+				local uses = math.min(65535,
+						(tonumber(cap.uses) or 0) * 3 ^ leveldiff)
+				best_wear = core.__result_wear(uses, wear)
 			end
 		end
 	end
 	return {diggable = diggable, time = best_time, wear = best_wear}
-end
-
--- What the numbers above come to, checked at every start because they are
--- the difference between a node that can be dug and one that cannot
-do
-	local hand = {groupcaps = {cracky = {times = {[3] = 1.5}, uses = 0,
-			maxlevel = 1}}}
-	local pick = {groupcaps = {cracky = {times = {[1] = 4, [2] = 2, [3] = 1},
-			uses = 10, maxlevel = 3}}}
-	local dp = core.get_dig_params({dig_immediate = 2}, hand)
-	assert(dp.diggable and dp.time == 0.5 and dp.wear == 0,
-			"get_dig_params: dig_immediate 2")
-	assert(core.get_dig_params({dig_immediate = 3}, hand).time == 0,
-			"get_dig_params: dig_immediate 3")
-	dp = core.get_dig_params({cracky = 3}, hand)
-	assert(dp.diggable and dp.time == 1.5 and dp.wear == 0,
-			"get_dig_params: the hand on stone")
-	assert(not core.get_dig_params({snappy = 3}, hand).diggable,
-			"get_dig_params: a group the tool has nothing for")
-	assert(not core.get_dig_params({cracky = 1}, hand).diggable,
-			"get_dig_params: a rating the tool has no time for")
-	assert(not core.get_dig_params({cracky = 3, level = 2}, hand).diggable,
-			"get_dig_params: a node above the tool's level")
-	-- Two above the node's level: half the time and nine times the uses
-	dp = core.get_dig_params({cracky = 3, level = 1}, pick)
-	assert(dp.diggable and dp.time == 0.5 and
-			dp.wear == math.floor(65535 / 90), "get_dig_params: leveldiff 2")
-	-- One above it: the time as written, three times the uses
-	dp = core.get_dig_params({cracky = 2, level = 2}, pick)
-	assert(dp.diggable and dp.time == 2 and
-			dp.wear == math.floor(65535 / 30), "get_dig_params: leveldiff 1")
-	assert(not core.get_dig_params({cracky = 3}, {}).diggable,
-			"get_dig_params: a tool with no capabilities at all")
 end
 
 -- The same dig, by somebody. core.dig_node() is Luanti's own and takes no
@@ -3136,5 +3106,53 @@ dofile(module_path .. "/lua/b3dmesh.lua")
 dofile(module_path .. "/lua/mesh.lua")
 dofile(module_path .. "/lua/vmanip.lua")
 dofile(module_path .. "/lua/check_map.lua")
+
+-- What core.get_dig_params() comes to, checked at every start because it is
+-- the difference between a node that can be dug and one that cannot. Here
+-- rather than beside it, because the wear arithmetic it leans on is
+-- ItemStack's and lives in lua/classes.lua.
+do
+	local hand = {groupcaps = {cracky = {times = {[3] = 1.5}, uses = 0,
+			maxlevel = 1}}}
+	local pick = {groupcaps = {cracky = {times = {[1] = 4, [2] = 2, [3] = 1},
+			uses = 10, maxlevel = 3}}}
+	local dp = core.get_dig_params({dig_immediate = 2}, hand)
+	assert(dp.diggable and dp.time == 0.5 and dp.wear == 0,
+			"get_dig_params: dig_immediate 2")
+	assert(core.get_dig_params({dig_immediate = 3}, hand).time == 0,
+			"get_dig_params: dig_immediate 3")
+	dp = core.get_dig_params({cracky = 3}, hand)
+	assert(dp.diggable and dp.time == 1.5 and dp.wear == 0,
+			"get_dig_params: the hand on stone")
+	assert(not core.get_dig_params({snappy = 3}, hand).diggable,
+			"get_dig_params: a group the tool has nothing for")
+	assert(not core.get_dig_params({cracky = 1}, hand).diggable,
+			"get_dig_params: a rating the tool has no time for")
+	assert(not core.get_dig_params({cracky = 3, level = 2}, hand).diggable,
+			"get_dig_params: a node above the tool's level")
+	-- Two above the node's level: half the time and nine times the uses
+	dp = core.get_dig_params({cracky = 3, level = 1}, pick)
+	assert(dp.diggable and dp.time == 0.5 and
+			dp.wear == math.floor(65536 / 90), "get_dig_params: leveldiff 2")
+	-- One above it: the time as written, three times the uses
+	dp = core.get_dig_params({cracky = 2, level = 2}, pick)
+	assert(dp.diggable and dp.time == 2 and
+			dp.wear == math.floor(65536 / 30), "get_dig_params: leveldiff 1")
+	-- And a tool lasts exactly as long as it says it does, which is what
+	-- the blocks the wear range is cut into are for. 130 is Luanti's own
+	-- example, because 65536 does not divide by it.
+	for _, uses in ipairs({1, 10, 90, 128, 130, 1000}) do
+		local wear, n = 0, 0
+		while wear <= 65535 and n < 70000 do
+			wear = wear + core.__result_wear(uses, wear)
+			n = n + 1
+		end
+		assert(n == uses, "result_wear: " .. uses ..
+				" uses came to " .. n)
+	end
+	assert(not core.get_dig_params({cracky = 3}, {}).diggable,
+			"get_dig_params: a tool with no capabilities at all")
+end
+
 
 -- vim: set noet ts=4 sw=4:
