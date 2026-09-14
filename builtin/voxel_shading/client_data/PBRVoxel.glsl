@@ -228,6 +228,13 @@ void VS()
     // when nothing sets it, so voxel_shading pushes it every frame.
     uniform float cSpecEmphasis;
 
+    // How much light is on the sky the cube map holds. The cube map is baked
+    // at noon, so a reflection at night is a reflection of the day's sky;
+    // dimming it is most of the way to the right thing, and a second cube
+    // map or one rendered as the day goes is the rest. One is the daylight
+    // it was baked in, and voxel_shading pushes it beside the emphasis.
+    uniform float cSkyLight;
+
     const float TRANSMISSION_CELLS = 16.0;   // Cells per voxel, per axis
     // A material whose own roughness is already below this cannot glint, so
     // water is given a duller base than a still pond would have
@@ -669,7 +676,7 @@ void PS()
             // how much is visible along the reflection: the cube map answers
             // for the direction, the vertex color for the place.
             finalColor.rgb += cube * EnvBRDFApprox(specColor, roughness, ndv) *
-                vSkyVisibility * cSpecEmphasis;
+                vSkyVisibility * cSpecEmphasis * cSkyLight;
         #endif
 
         #ifdef ENVCUBEMAP

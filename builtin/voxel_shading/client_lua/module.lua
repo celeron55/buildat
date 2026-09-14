@@ -208,6 +208,8 @@ local sky_vis_dirty = false
 -- benchmarks turn it up to look at the reflections themselves. See
 -- M.set_specular_emphasis().
 local spec_emphasis = 1.0
+-- How much light is on the sky the reflections come from; see M.set_sky_light()
+local sky_light = 1.0
 
 local function each_material_of(cg, cb)
 	if not cg then return end
@@ -568,12 +570,14 @@ local function push_sky_vis()
 			if command ~= nil and command.type == magic.CMD_SCENEPASS then
 				command:SetShaderParameter("SkyVis", sky_vis_param)
 				command:SetShaderParameter("SpecEmphasis", spec_emphasis)
+				command:SetShaderParameter("SkyLight", sky_light)
 			end
 		end
 		return
 	end
 	render_path:SetShaderParameter("SkyVis", sky_vis_param)
 	render_path:SetShaderParameter("SpecEmphasis", spec_emphasis)
+	render_path:SetShaderParameter("SkyLight", sky_light)
 end
 
 -- How much to multiply the reflected sky by, 1 being what a game renders.
@@ -585,6 +589,21 @@ end
 -- a change did anything. Turned up, the same change is tens of values and can
 -- be measured. It scales the reflection alone, so what it exaggerates is
 -- exactly what this module decides and nothing else.
+-- How much light is on the sky a surface reflects: one is the daylight the
+-- cube map was baked in, and a game with a clock turns it down as its night
+-- comes. Without it a pond at midnight mirrors a bright blue sky.
+--
+-- simplified: the reflection dims but stays the colour it was baked. What
+-- the rest of it would take is a second cube map for the night, or one
+-- rendered as the day goes; see M.set_sun_direction().
+function M.set_sky_light(k)
+	if k == nil then
+		return
+	end
+	sky_light = math.max(0, k)
+	declare_countdown = 0
+end
+
 function M.set_specular_emphasis(v)
 	spec_emphasis = v
 	-- Straight away rather than at the next declaring walk, so a key that

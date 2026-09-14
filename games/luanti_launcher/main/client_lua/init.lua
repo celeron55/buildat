@@ -495,6 +495,9 @@ local function apply_sky_of_hour()
 
 	-- The clouds are white because the sun is on them, so they go with it
 	voxel_shading.set_cloud_light(0.16 + 0.84 * t)
+	-- And so does what a pond mirrors: the cube map it comes from is baked
+	-- at noon, so without this the water is a bright blue sky at midnight
+	voxel_shading.set_sky_light(0.10 + 0.90 * t)
 end
 
 local function update_sky(dt)
@@ -874,14 +877,39 @@ local function hud_colour(number)
 			n % 256 / 255)
 end
 
+-- A line of text, in as many pieces as it has colours in it: a game writes
+-- core.colorize() into a HUD line and Luanti draws each piece in its own
+-- colour. One piece is the common case and is one Text like any other.
+--
+-- simplified: the style field -- bold, italic, monospace -- is not read.
+-- Everything here is drawn in the one monospace font the client has, and
+-- bold and italic want font files it does not ship.
 local function draw_hud_text(e)
-	local t = hud_root:CreateChild("Text")
-	t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 15)
-	t:SetTextEffect(magic.TE_SHADOW)
-	t.effectColor = magic.Color(0, 0, 0, 0.85)
-	t:SetText(luanti.strip_escapes(e.text or ""))
-	t.color = hud_colour(e.number)
-	hud_place(t, e, t.width, t.height)
+	local base = hud_colour(e.number)
+	local block = hud_root:CreateChild("UIElement")
+	local font = magic.cache:GetResource("Font", buildat.font_mono)
+	local w, h = 0, 0
+	local line_h = 0
+	for line in (tostring(e.text or "") .. "\n"):gmatch("([^\n]*)\n") do
+		local x = 0
+		for _, piece in ipairs(luanti.text_segments(line)) do
+			local t = block:CreateChild("Text")
+			t:SetFont(font, 15)
+			t:SetTextEffect(magic.TE_SHADOW)
+			t.effectColor = magic.Color(0, 0, 0, 0.85)
+			t:SetText(luanti.strip_escapes(piece.text))
+			t.color = piece.color and
+					magic.Color(piece.color.r, piece.color.g, piece.color.b) or
+					base
+			t:SetPosition(math.floor(x), math.floor(h))
+			x = x + t.width
+			line_h = math.max(line_h, t.height)
+		end
+		w = math.max(w, x)
+		h = h + (line_h > 0 and line_h or 15)
+	end
+	block.size = magic.IntVector2(math.floor(w), math.floor(h))
+	hud_place(block, e, w, h)
 end
 
 local function draw_hud_image(e)

@@ -486,6 +486,14 @@ function M.strip_escapes(text)
 	return formspec.strip_escapes(text or "")
 end
 
+-- A line of a game's text as the pieces it is drawn in, each with the colour
+-- the markup in it asked for: {{text =, color = {r, g, b} or nil}, ...}.
+-- Whoever draws text with colour in it goes through this instead of
+-- strip_escapes(); see core.colorize() on the other side.
+function M.text_segments(text)
+	return formspec.split_colors(text or "")
+end
+
 -- Whether a flag is set in what the game asked for; the names are Luanti's
 -- HUD_FLAG_* and hud.lua has the numbers
 function M.hud_flag(name)

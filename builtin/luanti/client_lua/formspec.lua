@@ -81,6 +81,91 @@ end
 
 M.strip_escapes = strip_escapes
 
+-- The colours Luanti's own markup names by word rather than by number.
+--
+-- simplified: the ones a mod actually writes. Luanti takes the whole CSS
+-- list; a name that is not here is drawn in whatever colour the line
+-- already had, which is what a client that did not understand it would do.
+local COLOR_NAMES = {
+	white = "#ffffff", black = "#000000", red = "#ff0000",
+	green = "#008000", lime = "#00ff00", blue = "#0000ff",
+	yellow = "#ffff00", cyan = "#00ffff", aqua = "#00ffff",
+	magenta = "#ff00ff", fuchsia = "#ff00ff", orange = "#ffa500",
+	pink = "#ffc0cb", purple = "#800080", brown = "#a52a2a",
+	gray = "#808080", grey = "#808080", silver = "#c0c0c0",
+	gold = "#ffd700", darkgray = "#a9a9a9", darkgrey = "#a9a9a9",
+	lightgray = "#d3d3d3", lightgrey = "#d3d3d3",
+}
+
+-- "#rgb", "#rrggbb", "#rrggbbaa" or a name, as three numbers between zero
+-- and one; nil for anything else
+local function color_of(spec)
+	spec = COLOR_NAMES[string.lower(spec or "")] or spec or ""
+	local hex = string.match(spec, "^#(%x+)$")
+	if hex == nil then
+		return nil
+	end
+	if #hex == 3 or #hex == 4 then
+		hex = string.gsub(string.sub(hex, 1, 3), "(%x)", "%1%1")
+	end
+	if #hex ~= 6 and #hex ~= 8 then
+		return nil
+	end
+	return {
+		r = tonumber(string.sub(hex, 1, 2), 16) / 255,
+		g = tonumber(string.sub(hex, 3, 4), 16) / 255,
+		b = tonumber(string.sub(hex, 5, 6), 16) / 255,
+	}
+end
+
+M.color_of = color_of
+
+-- A line as the pieces it is drawn in: Luanti's own colour markup says where
+-- a colour starts and every piece runs until the next one. A string with no
+-- markup in it is one piece with no colour of its own, which is the common
+-- case and costs one table.
+--
+-- The escape is \27 and then either (word@argument) or a single letter; a
+-- "c" is a colour and a "b" is a background colour, which nothing here
+-- draws. What is not markup at all is text.
+function M.split_colors(s)
+	s = s or ""
+	if string.find(s, "\27", 1, true) == nil then
+		return {{text = s}}
+	end
+	local out = {}
+	local color = nil
+	local at = 1
+	while at <= #s do
+		local e = string.find(s, "\27", at, true)
+		if e == nil then
+			break
+		end
+		if e > at then
+			out[#out + 1] = {text = string.sub(s, at, e - 1), color = color}
+		end
+		local rest = string.sub(s, e + 1)
+		local body = string.match(rest, "^(%b())")
+		if body then
+			at = e + 1 + #body
+			local word, arg = string.match(body, "^%((%a+)@(.*)%)$")
+			if word == "c" then
+				color = color_of(arg) or color
+			end
+		else
+			-- A single letter, which is a translation marker and not ours
+			at = e + 2
+		end
+	end
+	if at <= #s then
+		out[#out + 1] = {text = string.sub(s, at), color = color}
+	end
+	if #out == 0 then
+		out[#out + 1] = {text = ""}
+	end
+	return out
+end
+
 local function unescape(s)
 	return (s:gsub("\\(.)", "%1"))
 end
