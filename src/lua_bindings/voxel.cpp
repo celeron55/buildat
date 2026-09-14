@@ -673,6 +673,7 @@ void init_voxel(lua_State *L)
 		,
 		class_<VoxelRegistry, bases<>, sp_<VoxelRegistry>>("VoxelRegistry")
 			.def("add_voxel", &VoxelRegistry::add_voxel)
+			.def("get_count", &VoxelRegistry::get_count)
 			.def("get_by_id", &vreg_get_by_id)
 			.def("get_by_name", (const VoxelDefinition*(VoxelRegistry::*)
 					(const VoxelName&)) &VoxelRegistry::get)

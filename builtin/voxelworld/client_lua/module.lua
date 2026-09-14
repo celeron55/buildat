@@ -521,6 +521,29 @@ function M.get_voxel_registry_used()
 	return voxel_reg
 end
 
+-- What a line of detail wants to know about the world: how many chunks this
+-- client holds, how many are waiting for a mesh, and how many voxel types
+-- the registry it was sent has. A count that is not the server's is a fault
+-- with a name; see doc/plan/luanti_module_plan.md, "The numbers before the
+-- pixels".
+function M.counts()
+	local chunks = 0
+	for _, ztable in pairs(static_node_cache) do
+		for _, ytable in pairs(ztable) do
+			for _, cache in pairs(ytable) do
+				if cache.node then
+					chunks = chunks + 1
+				end
+			end
+		end
+	end
+	return {
+		chunks = chunks,
+		to_mesh = node_update_queue and node_update_queue:get_length() or 0,
+		voxel_types = voxel_reg and voxel_reg:get_count() or 0,
+	}
+end
+
 -- Every chunk that is loaded, queued for a new mesh. The queue is spatial, so
 -- what the camera is looking at is rebuilt first and the rest follows.
 function M.remesh_all()

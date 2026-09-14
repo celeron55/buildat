@@ -679,6 +679,11 @@ namespace interface
 
 		virtual void clear() = 0;
 		virtual sv_<VoxelDefinition> get_all() = 0;
+		// How many voxel types there are, without copying any of them. What
+		// asks is a line of detail on a screen: a client whose count is not
+		// the server's has a registry fault and nothing else is worth
+		// looking at yet.
+		virtual size_t get_count() = 0;
 
 		// How many types are registered, so that walking the ids is a loop
 		// with an end rather than one that asks for the id after the last

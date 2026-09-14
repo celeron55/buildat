@@ -984,10 +984,20 @@ local function update_detail(dt)
 			(player.on_ground and "on the ground" or "falling"))
 	local chunk_p = voxelworld.get_chunk_position(buildat.Vector3(
 			player.x, player.y, player.z))
+	-- The counted facts, in the words extensions/luanti_client's debug line
+	-- uses them in: the two clients reach the same world by entirely
+	-- different routes, and a count that differs between them names the
+	-- fault where a picture that differs only asks a question. See
+	-- doc/plan/luanti_module_plan.md, "The numbers before the pixels".
+	local c = luanti.counts()
+	local w = voxelworld.counts()
 	detail_text:SetText(string.format(
 			"%.1f, %.1f, %.1f | %s | looking %.0f round, %.0f down\n" ..
 			"speed %.1f, %.1f, %.1f | chunk %d, %d, %d%s\n" ..
-			"%02d:%02d | sun %.2f up, %.0f%% day\n%s",
+			"%02d:%02d | sun %.2f up, %.0f%% day\n" ..
+			"%d node definitions | %d item images | %d composed\n" ..
+			"%d meshes | %d objects | %d hud | " ..
+			"blocks: %d in scene, %d to mesh\n%s",
 			player.x, player.y, player.z, mode, yaw, pitch,
 			player.vx, player.vy, player.vz,
 			chunk_p.x, chunk_p.y, chunk_p.z,
@@ -995,6 +1005,9 @@ local function update_detail(dt)
 			math.floor((time_of_day or 0) * 24),
 			math.floor(((time_of_day or 0) * 24 % 1) * 60),
 			sky_now.height, sky_now.day * 100,
+			w.voxel_types, c.items, c.composed,
+			c.meshes, c.objects, c.hud,
+			w.chunks, w.to_mesh,
 			binding_lines()))
 end
 

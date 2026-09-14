@@ -1707,6 +1707,41 @@ end
 
 -- What the tooltip under the mouse says, which is the item's own short
 -- description or the first line of its long one
+-- The quantities a line of detail wants, in the words
+-- extensions/luanti_client's own debug line uses, so that the two can be
+-- diffed number by number rather than looked at. See
+-- doc/plan/luanti_module_plan.md, "The numbers before the pixels": a count
+-- that differs is a fault with a name, where a picture that differs is a
+-- question.
+function M.counts()
+	local objects, hud, items, meshes, texmods = 0, 0, 0, 0, 0
+	for _ in pairs(object_nodes) do
+		objects = objects + 1
+	end
+	for _ in pairs(M.hud_elements) do
+		hud = hud + 1
+	end
+	for _ in pairs(item_images) do
+		items = items + 1
+	end
+	-- A mesh that is still being asked for is false rather than a table,
+	-- and is not one this client has
+	for _, model in pairs(models) do
+		if model then
+			meshes = meshes + 1
+		end
+	end
+	-- Texture expressions this client composed itself. The reference says
+	-- zero for VoxeLibre, so anything else here means the two ends disagree
+	-- about what a tile string is, which is a more interesting fault than a
+	-- wrong colour.
+	for _ in pairs(composed) do
+		texmods = texmods + 1
+	end
+	return {objects = objects, hud = hud, items = items, meshes = meshes,
+			composed = texmods}
+end
+
 function M.item_description(item_name)
 	local props = item_props[item_name]
 	return props and props.description or nil

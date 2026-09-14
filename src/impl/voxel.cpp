@@ -131,6 +131,14 @@ struct CVoxelRegistry: public VoxelRegistry
 		return result;
 	}
 
+	// Without id 0, which is VOXELTYPEID_UNDEFINED and not a type anything
+	// registered
+	size_t get_count()
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return m_defs.size() - 1;
+	}
+
 	VoxelTypeId num_voxels()
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
