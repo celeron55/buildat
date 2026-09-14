@@ -13,9 +13,8 @@
 // world readable by a game that registers its nodes in another order.
 //
 // What hangs off the nodes comes too: the metadata of every node that has
-// any, as its fields and its inventory lists. The static objects a block
-// holds are walked past -- an imported world starts without its entities,
-// which want a static_save that means something here first.
+// any, as its fields and its inventory lists; the timer on a node that has
+// one; and the entities the block was holding when it was written.
 //
 // The two shapes, which is the whole of the version difference here:
 //
@@ -23,11 +22,12 @@
 //           | zlib(nodes) | zlib(metadata) | static objects | timestamp
 //           | name-id mapping | node timers
 //   29      version | zstd( flags | lighting_complete | timestamp
-//           | name-id mapping | widths | nodes | metadata | ... )
+//           | name-id mapping | widths | nodes | metadata | static objects
+//           | node timers )
 //
-// So at 29 everything wanted is in front and the rest of the frame is left
-// unread; below it the name-id mapping is at the back and the two streams
-// and the static objects in between have to be walked past.
+// So at 29 it is one frame in order; below it the name-id mapping is at the
+// back, with the two compressed streams and the static objects in front of
+// it and the timers behind.
 #pragma once
 #include "core/types.h"
 #include "interface/compress.h"
@@ -50,6 +50,26 @@ namespace luanti_mapblock
 		sm_<ss_, sv_<ss_>> lists;
 	};
 
+	// The timer on a node that has one: how long it runs for and how far it
+	// has got, both in seconds
+	struct NodeTimer
+	{
+		float timeout = 0.0f;
+		float elapsed = 0.0f;
+	};
+
+	// One of the entities a block was holding. The position is in nodes --
+	// the format writes thousandths of a BS, which is ten nodes -- and what
+	// is in the data depends on the type: 7 is Luanti's LuaEntity, which is
+	// what a mod's entity is, and the rest are the engine's own from before
+	// that existed.
+	struct StaticObject
+	{
+		uint8_t type = 0;
+		float x = 0.0f, y = 0.0f, z = 0.0f;
+		ss_ data;
+	};
+
 	struct Block
 	{
 		uint16_t param0[NODECOUNT];
@@ -60,6 +80,10 @@ namespace luanti_mapblock
 		// Keyed by the index into the block, which is what the format keys
 		// it by: x + 16*y + 256*z
 		sm_<uint16_t, NodeMeta> meta;
+		// The same key, for the nodes that carry a timer
+		sm_<uint16_t, NodeTimer> timers;
+		// And what the block was holding, in the order it was written
+		sv_<StaticObject> objects;
 	};
 
 	// A cursor over a string, big-endian, that throws rather than reading
@@ -229,16 +253,47 @@ namespace luanti_mapblock
 		}
 	}
 
-	// Static objects: what a block holds of the world's entities. Walked
-	// past rather than read; see the header.
-	static void skip_static_objects(Reader &r)
+	// A thousandth of a BS as the nodes it is: what the format writes a
+	// position in, and BS is ten nodes
+	static float f1000_nodes(uint32_t raw)
+	{
+		return (float)(int32_t)raw / 1000.0f / 10.0f;
+	}
+
+	// Static objects: what a block was holding of the world's entities
+	static void read_static_objects(Reader &r, Block &block)
 	{
 		r.u8(); // version
 		uint16_t count = r.u16();
 		for(uint16_t i = 0; i < count; i++){
-			r.u8();       // type
-			r.skip(12);   // position, as three 1/1000ths
-			r.string16(); // the object's own data
+			StaticObject o;
+			o.type = r.u8();
+			o.x = f1000_nodes(r.u32());
+			o.y = f1000_nodes(r.u32());
+			o.z = f1000_nodes(r.u32());
+			o.data = r.string16();
+			block.objects.push_back(o);
+		}
+	}
+
+	// The timers, which are the last thing in a block: a length for one of
+	// them, how many there are, and then each one's place in the block and
+	// its two times in thousandths of a second
+	static void read_node_timers(Reader &r, Block &block)
+	{
+		if(r.p >= r.s.size())
+			return; // A block written without any
+		const uint8_t length = r.u8();
+		if(length != 2 + 4 + 4)
+			throw Exception("mapblock: a node timer is "+itos(length)+
+					" bytes, and this reads ten");
+		uint16_t count = r.u16();
+		for(uint16_t i = 0; i < count; i++){
+			uint16_t index = r.u16();
+			NodeTimer t;
+			t.timeout = (float)(int32_t)r.u32() / 1000.0f;
+			t.elapsed = (float)(int32_t)r.u32() / 1000.0f;
+			block.timers[index] = t;
 		}
 	}
 
@@ -281,6 +336,8 @@ namespace luanti_mapblock
 			uint8_t params_width = r.u8();
 			read_nodes(r, block, content_width, params_width);
 			read_node_metadata(r, block);
+			read_static_objects(r, block);
+			read_node_timers(r, block);
 			return;
 		}
 		Reader r(data);
@@ -302,9 +359,10 @@ namespace luanti_mapblock
 			Reader meta(raw);
 			read_node_metadata(meta, block);
 		}
-		skip_static_objects(r);
+		read_static_objects(r, block);
 		r.u32(); // timestamp
 		read_name_id_mapping(r, block);
+		read_node_timers(r, block);
 	}
 
 	// What a map.sqlite row's key is: three twelve-bit coordinates, offset

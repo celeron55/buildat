@@ -585,13 +585,21 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 		m_params->chunksize = v3s16(m_chunk_blocks);
 		m_params->seed = (u64)params.seed;
 		m_params->water_level = (s16)params.water_level;
-		// Luanti reads these out of mg_flags, whose default is all of them.
-		// The settings here answer nothing, so the default is spelled out:
-		// without it a world is bare terrain in the dark -- no caves, no
+		// Which of the things a mapgen makes it is told to make. A world
+		// that names none gets all of them, which is Luanti's own default:
+		// without them a world is bare terrain in the dark -- no caves, no
 		// ores, no decorations, and no light, because the light is one of
 		// the flags.
 		m_params->flags = MG_CAVES | MG_DUNGEONS | MG_LIGHT |
 				MG_DECORATIONS | MG_BIOMES | MG_ORES;
+		if(!params.mg_flags.empty()){
+			u32 mask = 0;
+			const u32 named = readFlagString(params.mg_flags, flagdesc_mapgen,
+					&mask);
+			m_params->flags = (m_params->flags & ~mask) | named;
+			log_v(MODULE, "mg_flags \"%s\" -> %i",
+					cs(params.mg_flags), (int)m_params->flags);
+		}
 
 		// The biomes a mapgen asks about as it goes. Luanti's own
 		// EmergeManager makes this the same way, out of the parameters the

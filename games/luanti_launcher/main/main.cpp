@@ -645,6 +645,10 @@ struct Module: public interface::Module
 		// wants is what chose the game above.
 		const char *import_from = getenv("BUILDAT_LUANTI_IMPORT");
 		luanti::access(m_server, [&](luanti::Interface *i){
+			// What the world is made out of goes in before it is made; the
+			// rest of it is read once the game's nodes are registered
+			if(import_from && import_from[0])
+				i->import_world_settings(import_from, save);
 			i->run_game(game_path, save);
 			if(import_from && import_from[0])
 				i->import_world(import_from);

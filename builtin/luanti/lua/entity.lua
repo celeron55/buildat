@@ -351,10 +351,16 @@ function core.add_entity(pos, name, staticdata)
 		hp = 1,
 	}
 	objects[id] = o
-	-- The luaentity is the prototype's own table copied per object, which is
-	-- what makes self.whatever a field of this one and not of every one
-	local le = table.copy(proto)
-	le.name = name
+	-- The luaentity is a table of its own with the prototype as its
+	-- metatable, which is what Luanti's own luaentity_Add does: what a mod
+	-- sets on self belongs to this entity, and everything else is found
+	-- through the prototype -- including what the prototype inherits from a
+	-- class of its own, which is how every mob mod is written. A copy of
+	-- the prototype would lose exactly that.
+	if rawget(proto, "__index") == nil then
+		proto.__index = proto
+	end
+	local le = setmetatable({}, proto)
 	le.object = ref
 	o.le = le
 	core.luaentities[id] = le
@@ -374,6 +380,17 @@ function core.add_entity(pos, name, staticdata)
 		return nil
 	end
 	return ref
+end
+
+-- One of the entities an imported world was holding, with the state its own
+-- on_activate wrote. A game that does not register it says so once per kind
+-- rather than per entity, which is the importer's to count, so this only
+-- says whether it was made.
+function core.__import_entity(x, y, z, name, staticdata)
+	if core.registered_entities[name] == nil then
+		return false
+	end
+	return core.add_entity({x = x, y = y, z = z}, name, staticdata) ~= nil
 end
 
 function core.add_item(pos, item)

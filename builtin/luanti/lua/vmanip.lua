@@ -366,6 +366,12 @@ function core.get_mapgen_setting(name)
 	if name == "chunksize" then
 		return tostring(core.get_mapgen_chunksize().x)
 	end
+	if name == "water_level" and __luanti_water_level then
+		-- The world's own, which is what it was made with: a save keeps it
+		-- the way Luanti's map_meta.txt does, and the settings are only
+		-- where it comes from the first time
+		return tostring(__luanti_water_level)
+	end
 	return core.settings:get("mg" .. name) or core.settings:get(name)
 end
 
@@ -379,7 +385,8 @@ function core.get_mapgen_params()
 	return {
 		mgname = core.__mapgen_name(),
 		seed = tonumber(__luanti_world_seed) or 0,
-		water_level = tonumber(core.settings:get("water_level")) or 1,
+		water_level = tonumber(__luanti_water_level) or
+				tonumber(core.settings:get("water_level")) or 1,
 		chunksize = core.get_mapgen_chunksize().x,
 		flags = core.settings:get("mg_flags") or "",
 	}

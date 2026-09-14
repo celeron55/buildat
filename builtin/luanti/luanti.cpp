@@ -823,7 +823,11 @@ struct Module: public interface::Module, public luanti::Interface
 	{
 		ss_ data;
 		if(m_store && m_store->get("seed", data) && !data.empty()){
-			m_seed = strtoll(data.c_str(), nullptr, 10);
+			// Unsigned, because Luanti's is: a world's seed is a u64 there
+			// and half of them do not fit in the signed one this keeps. The
+			// bits are what a mapgen is a function of, so they are what is
+			// kept.
+			m_seed = (int64_t)strtoull(data.c_str(), nullptr, 10);
 		} else {
 			// The first thing a world is asked for is its seed, so a save
 			// with none is a save nobody has played yet. What that decides
@@ -1619,6 +1623,11 @@ struct Module: public interface::Module, public luanti::Interface
 		params.ores = mapgen_ores();
 		params.decorations = mapgen_decorations();
 		params.section_size = m_section_size.getX();
+		params.water_level = mapgen_water_level();
+		params.mg_flags = mapgen_flags();
+		// What a mod asks for as get_mapgen_setting("water_level"): the
+		// world's own, which is not always what the settings say
+		set_global_string("__luanti_water_level", itos(params.water_level));
 		mapgen_gen_notify(params.gen_notify_flags, params.gen_notify_deco_ids);
 		if(!params.gen_notify_flags.empty())
 			log_v(MODULE, "gennotify: \"%s\", %zu decoration ids",
@@ -2126,6 +2135,64 @@ struct Module: public interface::Module, public luanti::Interface
 			out = m_world_is_new ? "v7" : "singlenode";
 		if(m_store)
 			m_store->set("mg_name", out);
+		return out;
+	}
+
+	// Where the water line is, which every mapgen builds around. Luanti
+	// keeps it in map_meta.txt beside the mapgen's name, so it is the
+	// world's and not the configuration's: the save's own if it has one,
+	// then what the game's settings say, and then Luanti's default.
+	int mapgen_water_level()
+	{
+		ss_ stored;
+		if(m_store && m_store->get("water_level", stored) && !stored.empty())
+			return atoi(stored.c_str());
+		ss_ from_settings = setting_string("water_level");
+		const int out = from_settings.empty() ? 1 :
+				atoi(from_settings.c_str());
+		if(m_store)
+			m_store->set("water_level", itos(out));
+		return out;
+	}
+
+	// And which of the things a mapgen makes it is told to make: caves,
+	// dungeons, the light, the decorations, the biomes, the ores. Luanti's
+	// own words, and the same place as the water level.
+	ss_ mapgen_flags()
+	{
+		ss_ stored;
+		if(m_store && m_store->get("mg_flags", stored) && !stored.empty())
+			return stored;
+		ss_ out = setting_string("mg_flags");
+		if(out.empty())
+			out = "caves,dungeons,light,decorations,biomes,ores";
+		if(m_store)
+			m_store->set("mg_flags", out);
+		return out;
+	}
+
+	// One of the world's settings as Lua has it, which is world.mt over the
+	// defaults the vendored settingtypes.txt carries
+	ss_ setting_string(const ss_ &name)
+	{
+		if(!m_lua)
+			return "";
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "settings");
+		lua_getfield(L, -1, "get");
+		lua_pushvalue(L, -2);
+		lua_pushlstring(L, name.c_str(), name.size());
+		ss_ out;
+		if(lua_pcall(L, 2, 1, 0) == 0){
+			size_t len = 0;
+			const char *str = lua_tolstring(L, -1, &len);
+			if(str && len)
+				out = ss_(str, len);
+		}
+		lua_settop(L, base);
 		return out;
 	}
 
@@ -2835,6 +2902,24 @@ struct Module: public interface::Module, public luanti::Interface
 			os += "EndInventory\n";
 			return os;
 		};
+		// One entity, at one node and two up and three across, and one
+		// timer on the node the metadata is on
+		auto static_objects = [&](ss_ &os){
+			u8s(os, 0);                 // version
+			u16s(os, 1);                // one object
+			u8s(os, 7);                 // a LuaEntity, which is a mod's own
+			u32s(os, 1 * 10 * 1000);    // the position, in BS thousandths
+			u32s(os, 2 * 10 * 1000);
+			u32s(os, 3 * 10 * 1000);
+			string16(os, "an object");
+		};
+		auto node_timers = [&](ss_ &os){
+			u8s(os, 2 + 4 + 4);         // how long one of them is
+			u16s(os, 1);                // one node has one
+			u16s(os, 258);              // the same node the metadata is on
+			u32s(os, 5000);             // five seconds long
+			u32s(os, 2500);             // and half way through
+		};
 		auto check_block = [&](const luanti_mapblock::Block &b,
 				const char *what){
 			for(size_t i = 0; i < N; i++){
@@ -2860,6 +2945,17 @@ struct Module: public interface::Module, public luanti::Interface
 					!m.lists.at("main")[1].empty())
 				throw Exception(ss_("check_mapblock: ")+what+" lost the "
 						"inventory hanging off a node");
+			if(b.objects.size() != 1 || b.objects[0].type != 7 ||
+					b.objects[0].data != "an object" ||
+					b.objects[0].x != 1.0f || b.objects[0].y != 2.0f ||
+					b.objects[0].z != 3.0f)
+				throw Exception(ss_("check_mapblock: ")+what+" lost the "
+						"entity it was holding");
+			if(b.timers.size() != 1 || b.timers.count(258) == 0 ||
+					b.timers.at(258).timeout != 5.0f ||
+					b.timers.at(258).elapsed != 2.5f)
+				throw Exception(ss_("check_mapblock: ")+what+" lost the "
+						"timer on a node");
 		};
 
 		// Version 29: one zstd frame, and what is wanted is in front of it
@@ -2873,7 +2969,8 @@ struct Module: public interface::Module, public luanti::Interface
 			u8s(inside, 2);             // params_width
 			nodes(inside);
 			inside += node_metadata();
-			inside += "and whatever else the frame holds";
+			static_objects(inside);
+			node_timers(inside);
 			ss_ data;
 			u8s(data, 29);
 			std::ostringstream os(std::ios::binary);
@@ -2904,17 +3001,10 @@ struct Module: public interface::Module, public luanti::Interface
 				interface::compress_zlib(node_metadata(), os);
 				data += os.str();
 			}
-			// Static objects: one, to be walked past
-			u8s(data, 0);
-			u16s(data, 1);
-			u8s(data, 7);
-			for(int i = 0; i < 12; i++)
-				u8s(data, 0);
-			string16(data, "an object");
+			static_objects(data);
 			u32s(data, 12345);          // timestamp
 			nimap(data);
-			u8s(data, 0);               // node timers, unread
-			u16s(data, 0);
+			node_timers(data);
 			luanti_mapblock::Block block;
 			luanti_mapblock::deserialize_block(data, block);
 			check_block(block, "the version 25 block");
@@ -5351,6 +5441,73 @@ struct Module: public interface::Module, public luanti::Interface
 		lua_settop(L, base);
 	}
 
+	// The timer on a node that had one, started again where it left off.
+	// Luanti keeps a timer with the block; here they are the module's own
+	// table and a mod reads them through core.get_node_timer().
+	void import_node_timer(int32_t x, int32_t y, int32_t z,
+			const luanti_mapblock::NodeTimer &timer)
+	{
+		char buf[256];
+		snprintf(buf, sizeof buf,
+				"core.get_node_timer({x=%i, y=%i, z=%i}):set(%f, %f)",
+				(int)x, (int)y, (int)z, (double)timer.timeout,
+				(double)timer.elapsed);
+		try {
+			run_chunk_string(buf, "import_node_timer");
+		} catch(Exception &e){
+			log_w(MODULE, "import_node_timer(): %s", e.what());
+		}
+	}
+
+	// One of the entities a block was holding. Luanti's static data is a
+	// version, the entity's name and the state its on_activate is given;
+	// the rest of it -- the hit points, the velocity, which way it faces --
+	// is what the entity itself writes into its state when it is worth
+	// keeping, so the name and the state are what crosses.
+	//
+	// Returns whether it was made: a game that does not register the entity
+	// the world was holding is the usual reason it is not.
+	bool import_static_object(const luanti_mapblock::StaticObject &o,
+			ss_ &name_out)
+	{
+		// 7 is Luanti's LuaEntity. The lower numbers are the engine's own
+		// objects from before mods could make one and no world written this
+		// decade has any.
+		if(o.type != 7)
+			return false;
+		luanti_mapblock::Reader r(o.data);
+		ss_ name, state;
+		try {
+			r.u8(); // version
+			name = r.string16();
+			state = r.string32();
+		} catch(std::exception &e){
+			return false;
+		}
+		if(name.empty())
+			return false;
+		name_out = name;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__import_entity");
+		lua_pushnumber(L, o.x);
+		lua_pushnumber(L, o.y);
+		lua_pushnumber(L, o.z);
+		lua_pushlstring(L, name.c_str(), name.size());
+		lua_pushlstring(L, state.c_str(), state.size());
+		bool made = false;
+		if(lua_pcall(L, 5, 1, 0) != 0){
+			log_w(MODULE, "__import_entity(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+		} else {
+			made = lua_toboolean(L, -1) != 0;
+		}
+		lua_settop(L, base);
+		return made;
+	}
+
 	// Read a Luanti world into this one: the clock, and as much of the map
 	// as this world has room for.
 	//
@@ -5366,40 +5523,12 @@ struct Module: public interface::Module, public luanti::Interface
 	// Metadata wants the save that step 5c of the persistence plan is about,
 	// and objects want a static_save that means something; both are named in
 	// mapblock.h where they are skipped.
-	// map_meta.txt: the seed, and the mapgen parameters a world was made
-	// with. Only the seed is taken -- the parameters are the mapgen's and
-	// there is no mapgen to give them to yet -- and a world without one
-	// keeps the seed this save was made with.
-	void import_map_meta(const ss_ &luanti_world_path)
-	{
-		std::ifstream ifs(luanti_world_path+"/map_meta.txt");
-		if(!ifs.good())
-			return;
-		ss_ line;
-		while(std::getline(ifs, line)){
-			size_t eq = line.find('=');
-			if(eq == ss_::npos)
-				continue;
-			ss_ key = line.substr(0, eq);
-			while(!key.empty() && (key.back() == ' ' || key.back() == '\t'))
-				key.pop_back();
-			if(key != "seed")
-				continue;
-			const ss_ value = line.substr(eq + 1);
-			const int64_t seed = strtoll(value.c_str(), nullptr, 10);
-			set_seed(seed);
-			log_i(MODULE, "The imported world's seed is %s",
-					cs(itos(seed)));
-			return;
-		}
-	}
 
 	void import_world(const ss_ &luanti_world_path)
 	{
 		if(!m_game_running)
 			throw Exception("luanti: import_world() before run_game()");
 		import_clock(luanti_world_path);
-		import_map_meta(luanti_world_path);
 		import_mod_storage(luanti_world_path);
 		import_players(luanti_world_path);
 		ss_ db_path = luanti_world_path+"/map.sqlite";
@@ -5442,8 +5571,14 @@ struct Module: public interface::Module, public luanti::Interface
 				wy1 = (s1.getY() + 1) * sy - 1,
 				wz1 = (s1.getZ() + 1) * sz - 1;
 		size_t blocks_read = 0, blocks_outside = 0, blocks_failed = 0;
-		size_t nodes_written = 0, meta_written = 0;
+		size_t nodes_written = 0, meta_written = 0, timers_written = 0;
+		size_t objects_written = 0, objects_dropped = 0;
 		set_<ss_> unknown_names;
+		set_<ss_> unknown_entities;
+		// What is made once the map is not being held; see the loop
+		sv_<std::pair<pv::Vector3DInt32, luanti_mapblock::NodeTimer>>
+				pending_timers;
+		sv_<luanti_mapblock::StaticObject> pending_objects;
 		sm_<ss_, size_t> counts;
 		ss_ first_error;
 		const interface::VoxelFormat f = interface::VoxelFormat::luanti();
@@ -5536,11 +5671,52 @@ struct Module: public interface::Module, public luanti::Interface
 					import_node_meta(mx, my, mz, pair.second);
 					meta_written++;
 				}
+				// The timers and the entities are kept for afterwards
+				// rather than made here: an entity's own on_activate is a
+				// mod's code and reads the map, and the map is what this
+				// loop is holding. A mod that asks voxelworld for a node
+				// from inside a voxelworld access waits for the access it
+				// is already inside, which is a server that stops.
+				for(const auto &pair : block.timers){
+					int32_t tx = bx + (pair.first & 15);
+					int32_t ty = by + ((pair.first >> 4) & 15);
+					int32_t tz = bz + ((pair.first >> 8) & 15);
+					if(tx < x0 || tx > x1 || ty < y0 || ty > y1 ||
+							tz < z0 || tz > z1)
+						continue;
+					pending_timers.push_back(std::make_pair(
+							pv::Vector3DInt32(tx, ty, tz), pair.second));
+				}
+				for(const luanti_mapblock::StaticObject &o : block.objects){
+					if(o.x < (float)x0 || o.x > (float)x1 + 1.0f ||
+							o.y < (float)y0 || o.y > (float)y1 + 1.0f ||
+							o.z < (float)z0 || o.z > (float)z1 + 1.0f)
+						continue;
+					pending_objects.push_back(o);
+				}
 				blocks_read++;
 			}
 		});
 		sqlite3_finalize(st);
 		sqlite3_close(db);
+		// The timers and the entities, now that the map is free: a timer
+		// starts again where it left off and an entity is placed where it
+		// was, and both of those are a mod's own code
+		for(const auto &pair : pending_timers){
+			import_node_timer(pair.first.getX(), pair.first.getY(),
+					pair.first.getZ(), pair.second);
+			timers_written++;
+		}
+		for(const luanti_mapblock::StaticObject &o : pending_objects){
+			ss_ name;
+			if(import_static_object(o, name)){
+				objects_written++;
+			} else {
+				objects_dropped++;
+				if(!name.empty())
+					unknown_entities.insert(name);
+			}
+		}
 		// What it read metadata for is mostly sections nothing has loaded,
 		// and those are written out rather than waiting for an unload that
 		// will not come
@@ -5551,6 +5727,26 @@ struct Module: public interface::Module, public luanti::Interface
 				"it, %zu it could not read",
 				blocks_read, cs(luanti_world_path), nodes_written,
 				meta_written, blocks_outside, blocks_failed);
+		if(timers_written != 0 || objects_written != 0 || objects_dropped != 0)
+			log_i(MODULE, "import_world(): %zu node timers and %zu entities, "
+					"and %zu it could not make",
+					timers_written, objects_written, objects_dropped);
+		if(!unknown_entities.empty()){
+			ss_ list;
+			size_t n = 0;
+			for(const ss_ &name : unknown_entities){
+				if(n++ >= 10){
+					list += ", and "+itos(unknown_entities.size() - 10)+
+							" more";
+					break;
+				}
+				if(!list.empty())
+					list += ", ";
+				list += name;
+			}
+			log_w(MODULE, "import_world(): the world was holding entities "
+					"this game does not register: %s", cs(list));
+		}
 		if(!first_error.empty())
 			log_w(MODULE, "import_world(): the first block it could not read: "
 					"%s", cs(first_error));
@@ -5584,6 +5780,67 @@ struct Module: public interface::Module, public luanti::Interface
 					"register are drawn as unknown: %s",
 					unknown_names.size(), cs(names));
 		}
+	}
+
+	// map_meta.txt: what a Luanti world is made out of -- its seed, which
+	// mapgen made it and what that mapgen was told. Before run_game(),
+	// because the world is made when the game starts: a mapgen told
+	// afterwards has already generated the ground the player stands on.
+	//
+	// What the save already says is kept, so a world that has been played
+	// here keeps its own terrain whatever it is imported over.
+	void import_world_settings(const ss_ &luanti_world_path,
+			storage::Save *save)
+	{
+		if(m_game_running)
+			throw Exception("luanti: import_world_settings() after "
+					"run_game(); the world is already made out of them");
+		if(!save)
+			throw Exception("luanti: import_world_settings() without a save");
+		storage::Store *store = save->store("luanti");
+		if(!store)
+			return;
+		std::ifstream ifs(luanti_world_path+"/map_meta.txt");
+		if(!ifs.good())
+			return;
+		// The names on this side, for the four of Luanti's that mean
+		// something to this module's mapgen
+		static const sm_<ss_, ss_> WANTED = {
+			{"seed", "seed"},
+			{"mg_name", "mg_name"},
+			{"water_level", "water_level"},
+			{"mg_flags", "mg_flags"},
+		};
+		ss_ taken;
+		ss_ line;
+		while(std::getline(ifs, line)){
+			size_t eq = line.find('=');
+			if(eq == ss_::npos)
+				continue;
+			ss_ key = line.substr(0, eq);
+			while(!key.empty() && (key.back() == ' ' || key.back() == '\t'))
+				key.pop_back();
+			auto it = WANTED.find(key);
+			if(it == WANTED.end())
+				continue;
+			ss_ value = line.substr(eq + 1);
+			size_t begin = value.find_first_not_of(" \t");
+			if(begin == ss_::npos)
+				continue;
+			value = value.substr(begin);
+			while(!value.empty() && (value.back() == ' ' ||
+					value.back() == '\t' || value.back() == '\r'))
+				value.pop_back();
+			ss_ have;
+			if(store->get(it->second, have) && !have.empty())
+				continue; // The save's own, and it was here first
+			store->set(it->second, value);
+			if(!taken.empty())
+				taken += ", ";
+			taken += it->second+"="+value;
+		}
+		if(!taken.empty())
+			log_i(MODULE, "The imported world is made with %s", cs(taken));
 	}
 
 	void run_game(const ss_ &game_path, storage::Save *save)

@@ -30,6 +30,11 @@ namespace luanti_mapgen
 		// Water level, which is a mapgen parameter in Luanti and a number
 		// every generator leans on
 		int water_level = 1;
+		// Which of the things a mapgen makes it is told to make, in
+		// Luanti's own words: "caves,dungeons,light,decorations,biomes,
+		// ores", with a "no" in front of one to turn it off. Empty is all
+		// of them, which is what Luanti's own default comes to.
+		ss_ mg_flags;
 		// The voxel word a singlenode world is filled with: the node id and
 		// the sunlight, packed by whoever asked, because the format is the
 		// caller's business and not this module's

@@ -52,6 +52,19 @@ namespace luanti
 		// would be a different kind of thing entirely.
 		virtual void run_game(const ss_ &game_path, storage::Save *save) = 0;
 
+		// What a Luanti world is made out of: its seed, which mapgen made it
+		// and what that mapgen was told, read out of its map_meta.txt into
+		// the save.
+		//
+		// Before run_game(), because the world is made when the game starts
+		// and a mapgen told afterwards has already generated the ground the
+		// player stands on. What the save already says is kept, so a world
+		// that has been played here keeps its own terrain whatever it is
+		// imported over. The rest of a Luanti world -- its map, its clock,
+		// what its mods remembered -- is import_world(), which is after.
+		virtual void import_world_settings(const ss_ &luanti_world_path,
+				storage::Save *save) = 0;
+
 		// Hand Lua into the Luanti environment. chunkname is what a traceback
 		// calls it. An error after run_game(), for the reason above.
 		virtual void load_lua(const ss_ &chunk, const ss_ &chunkname) = 0;
@@ -65,8 +78,8 @@ namespace luanti
 		// registered before anything can be said about them -- a name this
 		// game does not register becomes "unknown" and is counted. What
 		// comes over is the nodes and their two params, the metadata
-		// hanging off them, the clock and what the mods remembered; a
-		// block's timers and its static objects do not.
+		// hanging off them, the timer on a node that had one, the entities
+		// the blocks were holding, the clock and what the mods remembered.
 		//
 		// The mods have therefore already loaded when the storage arrives,
 		// so a mod that read its storage while loading read the save's own
