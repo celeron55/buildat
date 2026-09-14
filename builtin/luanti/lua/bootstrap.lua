@@ -2384,16 +2384,32 @@ local function name_matcher(nodenames)
 			plain[n] = true
 		end
 	end
+	-- What each name answered, because this is asked once per voxel of a box
+	-- and a box is a handful of distinct nodes however large it is. A
+	-- matcher is made per call, so nothing here outlives the question it is
+	-- about and a mod registering an item cannot be answered stale.
+	--
+	-- VoxeLibre's world generation had 30% of its Lua in this function and
+	-- another 20% in get_item_group() underneath it.
+	local answered = {}
 	return function(name)
-		if plain[name] then
-			return true
+		local was = answered[name]
+		if was ~= nil then
+			return was
 		end
-		for _, g in ipairs(groups) do
-			if core.get_item_group(name, g) ~= 0 then
-				return true
+		local yes = false
+		if plain[name] then
+			yes = true
+		else
+			for _, g in ipairs(groups) do
+				if core.get_item_group(name, g) ~= 0 then
+					yes = true
+					break
+				end
 			end
 		end
-		return false
+		answered[name] = yes
+		return yes
 	end
 end
 

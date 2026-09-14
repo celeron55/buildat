@@ -66,6 +66,19 @@ Fixed, kept here for what the shape of the problem was:
   clears and asks again. Crafting itself still walks every recipe; it is the
   lookup that was the startup. Debug build, -O1, 2026-09-14.
 
+* A name matcher asked the item registry about every voxel of a box.
+  find_nodes_in_area() and its two siblings build a matcher out of the names
+  and groups asked for and call it once per voxel, and for a "group:" spec
+  that was a core.get_item_group() -- two table lookups through the VM -- per
+  group per voxel. A box is a handful of distinct nodes however large it is,
+  so the matcher remembers what each name answered; it is made per call, so
+  nothing it remembers outlives the question.
+
+  devtest, find_nodes_in_area over 33^3 with three group specs, twenty times,
+  three rounds: 1063 ms -> 345 ms. In VoxeLibre's generation profile the
+  matcher was 30% of all the Lua and get_item_group() under it another 20%.
+  Debug build, -O1, 2026-09-14.
+
 Tried and rejected, so that nobody spends the day again:
 
 * Raising voxelworld's chunk buffer limit (m_max_buffers_loaded) from 50 to
