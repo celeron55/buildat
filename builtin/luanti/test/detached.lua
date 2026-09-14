@@ -8,7 +8,10 @@
 --
 -- Connect a client and press I: the form has the player's own slots under a
 -- row of three, which is the detached inventory, holding stone, dirt and
--- sand. Moving a stack in or out logs what the callbacks were told.
+-- sand. Moving a stack in or out logs what the callbacks were told -- and
+-- the left button carries the whole stack, the right button one item of it
+-- and the middle button ten, which is Luanti's own rule and is what the
+-- logged counts say.
 local NAME = "detached_check"
 
 core.register_on_mods_loaded(function()

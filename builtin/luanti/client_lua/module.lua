@@ -824,11 +824,7 @@ local function make_ui()
 end
 
 -- How much of a stack a click picks up: the whole of it with the left
--- button, half with the right, the way Luanti's own inventory does.
---
--- simplified: what is picked up is what is put down. Luanti puts a single
--- item down with the right button and ten with the middle, which is a count
--- on the way down as well as on the way up.
+-- button, half with the right, the way Luanti's own inventory does
 local function take_count(stack, button)
 	if button == "right" then
 		return math.ceil(stack.count / 2)
@@ -836,10 +832,23 @@ local function take_count(stack, button)
 	return stack.count
 end
 
-local function send_action(held, slot)
+-- And how much of what is held a click puts down: all of it with the left
+-- button, one with the right, ten with the middle. What is left stays held,
+-- so a right button held over a row of slots lays one item in each.
+local function put_count(count, button)
+	if button == "right" then
+		return 1
+	end
+	if button == "middle" then
+		return math.min(10, count)
+	end
+	return count
+end
+
+local function send_action(held, slot, count)
 	buildat.send_packet("luanti:inv_action", cereal.binary_output({
 		"move", held.location, held.list, tostring(held.index),
-		slot.location, slot.list, tostring(slot.index), tostring(held.count),
+		slot.location, slot.list, tostring(slot.index), tostring(count),
 	}, {"array", "string"}))
 end
 
@@ -976,8 +985,13 @@ function M.click(x, y, button)
 		if lx >= slot.x and lx < slot.x + slot.size and
 				ly >= slot.y and ly < slot.y + slot.size then
 			if form.state.held then
-				send_action(form.state.held, slot)
-				form.state.held = nil
+				local held = form.state.held
+				local n = put_count(held.count, button)
+				send_action(held, slot, n)
+				held.count = held.count - n
+				if held.count <= 0 then
+					form.state.held = nil
+				end
 			elseif slot.stack then
 				form.state.held = {location = slot.location, list = slot.list,
 						index = slot.index,

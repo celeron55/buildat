@@ -1388,9 +1388,10 @@ magic.SubscribeToEvent("UIMouseClick", function(event_type, event_data)
 	if not luanti.form_open() then
 		return
 	end
+	local button = event_data:GetInt("Button")
 	luanti.click(event_data:GetInt("X"), event_data:GetInt("Y"),
-			event_data:GetInt("Button") == magic.MOUSEB_RIGHT and "right" or
-			"left")
+			button == magic.MOUSEB_RIGHT and "right" or
+			button == magic.MOUSEB_MIDDLE and "middle" or "left")
 end)
 
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
