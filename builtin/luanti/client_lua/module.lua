@@ -474,6 +474,139 @@ buildat.sub_packet("luanti:objects", function(data)
 end)
 
 --
+-- The sounds
+--
+-- One Urho3D SoundSource per sound the server started: at a place in the
+-- world, on an object it follows, or in the player's own head, which is
+-- Luanti's own three. The fades run here, and a source that has finished
+-- takes its node with it. The scene is the game's, the same one the objects
+-- are drawn in; nothing plays until a game has said which.
+--
+-- The drawing half is extensions/luanti_client's world.lua, near enough
+-- verbatim; what is different is the shape of the message, which is this
+-- module's own -- see lua/sound.lua.
+
+-- How far a positioned sound carries. Luanti leaves this to OpenAL's
+-- defaults, which are in its own units; these are nodes.
+local SOUND_NEAR = 2.0
+local handle_sounds = {}
+
+local function stop_sound(handle)
+	local entry = handle_sounds[handle]
+	if entry == nil then
+		return
+	end
+	handle_sounds[handle] = nil
+	entry.source:Stop()
+	entry.node:Remove()
+end
+
+local function play_sound(handle, name, gain, pitch, loop, fade, location,
+		x, y, z, object_id, far)
+	if object_scene == nil then
+		return
+	end
+	local sound = magic.cache:GetResource("Sound", MEDIA_PREFIX .. name)
+	if sound == nil then
+		log:warning("luanti:sound: no sound \"" .. name .. "\"")
+		return
+	end
+	sound.looped = loop
+	local node = object_scene:CreateChild("sound")
+	local source
+	local follows = location == "object" and object_id ~= "0" and
+			object_id or nil
+	if location == "local" then
+		source = node:CreateComponent("SoundSource")
+	else
+		local at = follows and object_nodes[follows]
+		node.position = at and at.node.position or magic.Vector3(x, y, z)
+		source = node:CreateComponent("SoundSource3D")
+		source.nearDistance = SOUND_NEAR
+		source.farDistance = far
+	end
+	source.soundType = magic.SOUND_EFFECT
+	local entry = {node = node, source = source, gain = gain,
+			started = false, object_id = follows}
+	-- A fade on the packet means it starts silent and comes up to the gain
+	-- it asked for
+	if fade > 0 then
+		entry.target = gain
+		entry.step = fade
+		gain = 0
+	end
+	source.gain = gain
+	if pitch > 0 and pitch ~= 1 then
+		source.frequency = sound.frequency * pitch
+	end
+	source:Play(sound)
+	log:debug("luanti:sound: " .. name .. " gain " .. gain .. " " .. location)
+	stop_sound(handle)
+	handle_sounds[handle] = entry
+end
+
+-- One step of a fade: which way it goes is which side of the target the gain
+-- is on, because Luanti's own step sign is not to be trusted
+local function fade_step(gain, target, step, dtime)
+	local by = math.abs(step) * dtime
+	if gain < target then
+		gain = math.min(target, gain + by)
+	else
+		gain = math.max(target, gain - by)
+	end
+	return gain, gain == target
+end
+
+-- The fades, the sounds that follow an object, and the nodes of the ones
+-- that have finished. The game calls this every frame.
+function M.update_sounds(dtime)
+	for handle, entry in pairs(handle_sounds) do
+		local follow = entry.object_id and object_nodes[entry.object_id]
+		if follow then
+			entry.node.position = follow.node.position
+		end
+		if entry.target then
+			local gain, done = fade_step(entry.gain, entry.target, entry.step,
+					dtime)
+			entry.gain = gain
+			entry.source.gain = gain
+			if done then
+				entry.target = nil
+				if gain <= 0 then
+					stop_sound(handle)
+				end
+			end
+		end
+		-- Not on the frame it started: a source has not been mixed yet and
+		-- says it is not playing
+		if handle_sounds[handle] then
+			if entry.started and not entry.source.playing then
+				stop_sound(handle)
+			end
+			entry.started = true
+		end
+	end
+end
+
+buildat.sub_packet("luanti:sound", function(data)
+	local v = cereal.binary_input(data, {"array", "string"})
+	if v[1] == "play" then
+		play_sound(v[2], v[3], tonumber(v[4]) or 1, tonumber(v[5]) or 1,
+				v[6] == "1", tonumber(v[7]) or 0, v[8], tonumber(v[9]) or 0,
+				tonumber(v[10]) or 0, tonumber(v[11]) or 0, v[12],
+				tonumber(v[13]) or 32)
+	elseif v[1] == "stop" then
+		stop_sound(v[2])
+	elseif v[1] == "fade" then
+		local entry = handle_sounds[v[2]]
+		if entry then
+			entry.step = tonumber(v[3]) or 1
+			entry.target = tonumber(v[4]) or 0
+		end
+	end
+end)
+
+--
 -- The formspecs
 --
 -- The window a mod puts on the player's screen. formspec.lua says what the

@@ -193,6 +193,14 @@ do
 	local viewport = magic.Viewport:new(scene, camera)
 	magic.set_preferred_viewports({viewport})
 
+	-- Where the sounds are heard from, which is where the eyes are. How
+	-- loud they are altogether is the user's own preference and not this
+	-- game's to set.
+	local listener = camera_node:CreateComponent("SoundListener")
+	if magic.audio then
+		magic.audio.listener = listener
+	end
+
 	magic.renderer.HDRRendering = true
 	local rp = viewport.renderPath:Clone()
 	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/BloomHDR.xml"))
@@ -1878,6 +1886,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 
 	update_detail(dt)
 	luanti.update_tooltip(dt)
+	luanti.update_sounds(dt)
 
 	-- Until the server has said where the player is there is no player:
 	-- what is on the screen is the overview the camera started at
