@@ -78,7 +78,7 @@ int main(int argc, char *argv[])
 	client::Config &config = g_client_config;
 
 	const char opts[100] = "hs:P:C:D:U:l:L:m:u:w:o:c:";
-	const char usagefmt[1000] =
+	const char usagefmt[1200] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
 			"  -s [address]         Specify server address\n"
@@ -87,7 +87,9 @@ int main(int argc, char *argv[])
 			"  -D [user_path]       Specify user/ path\n"
 			"  -U [urho3d_path]     Specify Urho3D path\n"
 			"  -l [level number]    Set maximum log level (0...5)\n"
-			"  -L [log file path]   Append log to a specified file\n"
+			"  -L [log file path]   Append log to a specified file. A local\n"
+			"                       server this client starts logs beside it,\n"
+			"                       with _server before the extension\n"
 			"  -m [name]            Choose menu extension name\n"
 			"  -u [scale]           UI scale (0 = auto from short side / 1080)\n"
 			"  -w [WxH]             Windowed at this size; not remembered\n"
@@ -136,6 +138,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'L':
 			log_set_file(c55_optarg);
+			// Kept, so that a local server started later can be given a log
+			// file beside this one; see l_start_local_server() in app.cpp
+			config.set("log_file", c55_optarg);
 			break;
 		case 'm':
 			log_i(MODULE, "config.menu_extension_name: %s", c55_optarg);

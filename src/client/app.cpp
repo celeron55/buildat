@@ -1852,8 +1852,31 @@ struct CApp: public App, public magic::Application
 		game_path = interface::fs::get_absolute_path(game_path);
 		g_local_server_port = pick_free_local_port();
 		log_i(MODULE, "Starting local server on port %s", cs(g_local_server_port));
-		g_local_server = interface::process::start(
-				server_path, {"-m", game_path, "-P", g_local_server_port});
+		sv_<ss_> args{"-m", game_path, "-P", g_local_server_port};
+		// The server the client starts writes beside the client's own log
+		// when there is one: half of what a bug report is about happens over
+		// there, and -L asked for a log of the session. Not the same file --
+		// a line here is several fprintf calls and log_no_nl leaves one
+		// unfinished on purpose, so two processes appending to one file
+		// splice each other's halves.
+		const ss_ log_file = g_client_config.get<ss_>("log_file");
+		if(!log_file.empty()){
+			// Before the extension of the file name, which is the last dot
+			// in the name and not in the path: "tmp/v1.2/log" has a dot in a
+			// directory and comes out "tmp/v1.2/log_server"
+			const size_t slash = log_file.find_last_of('/');
+			const size_t dot = log_file.find_last_of('.');
+			const ss_ server_log = (dot != ss_::npos &&
+					(slash == ss_::npos || dot > slash)) ?
+					log_file.substr(0, dot)+"_server"+log_file.substr(dot) :
+					log_file+"_server";
+			args.push_back("-L");
+			args.push_back(server_log);
+			args.push_back("-l");
+			args.push_back(itos(log_get_max_level()));
+			log_i(MODULE, "server log: %s", cs(server_log));
+		}
+		g_local_server = interface::process::start(server_path, args);
 		if(!g_local_server.valid()){
 			lua_pushboolean(L, false);
 			lua_pushstring(L, "Failed to start server");

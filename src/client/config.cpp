@@ -23,6 +23,9 @@ Config::Config()
 	// say they can be launched. See extensions/__menu.
 	set_default("menu_extension_name", "__menu");
 	set_default("ui_scale", 0.0); // 0 = auto from short side / 1080
+	// Where -L put the client's own log, kept so that a local server this
+	// client starts can be given one beside it; see l_start_local_server()
+	set_default("log_file", "");
 	set_default("command_seq", "");
 	set_default("command_seq_enabled", false);
 	set_default("command_seq_stdin", false);
