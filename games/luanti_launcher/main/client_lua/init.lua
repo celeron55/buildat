@@ -186,7 +186,11 @@ do
 			LOOK_AT.z - d.z * CAMERA_DISTANCE)
 	camera_node.rotation = magic.Quaternion(pitch, yaw, 0)
 	camera = camera_node:CreateComponent("Camera")
-	camera.nearClip = 1.0
+	-- Luanti's own near plane, with its scaling undone: it sets
+	-- 0.1 * BS in Camera::updateViewingRange() and BS is ten units to the
+	-- node, so a tenth of a node. A standing player's eye is inside a node
+	-- of any wall it is against, which at 1.0 clipped the wall away.
+	camera.nearClip = 0.1
 	camera.farClip = FAR_CLIP
 	camera.fov = CAMERA_FOV
 
@@ -352,11 +356,18 @@ wield_material:SetTechnique(0, magic.cache:GetResource("Technique",
 		"Techniques/DiffUnlit.xml"))
 wield_model:SetModel(magic.cache:GetResource("Model", "Models/Box.mdl"))
 wield_model.material = wield_material
--- Out past the near clip, which is a whole node away: a cube closer than
--- that is not drawn at all
-wield_node.position = magic.Vector3(0.62, -0.46, 1.5)
+-- Where a hand is: nearer than the player's own collision box is wide, so
+-- that no wall can come between it and the eye -- which is what the near
+-- plane at a tenth of a node allows. It is the same size on the screen as
+-- it was out at 1.5: the distance and the scale came down together.
+--
+-- Luanti never makes this trade: it draws the wielded tool in a scene
+-- manager of its own with the depth buffer cleared. This one is a child of
+-- the camera node in the world's own scene, so what it has to clear is the
+-- world's near plane.
+wield_node.position = magic.Vector3(0.103, -0.077, 0.25)
 wield_node.rotation = magic.Quaternion(-18, 35, 8)
-wield_node.scale = magic.Vector3(0.20, 0.20, 0.20)
+wield_node.scale = magic.Vector3(0.033, 0.033, 0.033)
 wield_node.enabled = false
 
 local function draw_wielded(item_name)
@@ -411,6 +422,12 @@ end
 -- Set once the HUD is built: a HUD element that draws a list of the player's
 -- own has to follow it, and what the game sends is only the element
 local hud_follows_inventory = nil
+
+-- The images arrive after the inventory does -- the server sends one and the
+-- client asks for the other -- so what was drawn without them is drawn again
+luanti.sub_item_images(function()
+	draw_hotbar()
+end)
 
 luanti.sub_inventory(function(lists)
 	hotbar_stacks = lists.main or {}

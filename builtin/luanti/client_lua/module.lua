@@ -1234,6 +1234,20 @@ end
 -- item name -> the expression it is drawn as; see core.__item_images()
 local item_images = {}
 
+local item_image_subs = {}
+
+-- sub_item_images(f) -> f() when the images arrive, and once now if they
+-- already have. Whatever draws an item has to follow them: the inventory
+-- arrives before they do -- it is the server that sends it and the client
+-- that has to ask for these -- so a hotbar drawn once at the start is drawn
+-- without them and never again.
+function M.sub_item_images(f)
+	item_image_subs[#item_image_subs + 1] = f
+	if next(item_images) then
+		f()
+	end
+end
+
 -- What an item is drawn with, as a resource name, or nil when the game
 -- shipped no image for it. A formspec's slots go through the same lookup;
 -- this is here for what is drawn outside one, which is the hotbar.
@@ -1859,6 +1873,12 @@ buildat.sub_packet("luanti:item_images", function(data)
 		n = n + 1
 	end
 	log:info("luanti:item_images: " .. n .. " items")
+	if form then
+		draw_form()
+	end
+	for _, f in ipairs(item_image_subs) do
+		f()
+	end
 end)
 
 -- Asked for rather than sent, because a packet that arrives before the
