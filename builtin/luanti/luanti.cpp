@@ -4960,6 +4960,18 @@ struct Module: public interface::Module, public luanti::Interface
 		}
 		// And which object is the player's own; see tell_the_client()
 		flat.push_back(itos((int64_t)luaL_optnumber(L, 5, 0)));
+		// And which way they were facing, in Luanti's own angles: the
+		// horizontal one counter-clockwise from +Z and the vertical one
+		// positive downwards, both in radians, which is what
+		// get_look_horizontal() and get_look_vertical() answer.
+		// The client turns them into its own convention -- see send_where()
+		// in games/luanti_launcher, which is this in reverse.
+		for(int i = 6; i <= 7; i++){
+			char buf[32];
+			snprintf(buf, sizeof buf, "%.4f",
+					(double)luaL_optnumber(L, i, 0));
+			flat.push_back(buf);
+		}
 		self->send_to_player(name, "luanti:player_pos", flat);
 		return 0;
 	}
@@ -5818,6 +5830,10 @@ struct Module: public interface::Module, public luanti::Interface
 		query("SELECT name, pitch, yaw, posX, posY, posZ, hp, breath"
 				" FROM player", [&](sqlite3_stmt *st){
 			Player &p = players[text(st, 0)];
+			// Both in degrees in the file and both in the same sense the
+			// Lua API uses: the pitch positive downwards, the yaw
+			// counter-clockwise from +Z. They become look.v and look.h as
+			// they are.
 			p.pitch = sqlite3_column_double(st, 1) * DEG_TO_RAD;
 			p.yaw = sqlite3_column_double(st, 2) * DEG_TO_RAD;
 			p.x = sqlite3_column_double(st, 3) / 10.0;

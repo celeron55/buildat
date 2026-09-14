@@ -663,8 +663,11 @@ end
 local function tell_the_client(o)
 	if o and o.player_name and __send_player_pos then
 		-- And which object is theirs, because a client that cannot tell its
-		-- own from the rest points at itself: it is standing inside it
-		__send_player_pos(o.player_name, o.pos.x, o.pos.y, o.pos.z, o.id)
+		-- own from the rest points at itself: it is standing inside it; and
+		-- which way they are facing, which a world they have been in before
+		-- saved along with where they stood
+		__send_player_pos(o.player_name, o.pos.x, o.pos.y, o.pos.z, o.id,
+				o.look.h, o.look.v)
 	end
 end
 
@@ -759,13 +762,19 @@ function PlayerRef:get_hp()
 	return o and o.hp or 0
 end
 
+-- Luanti's two angles, and the directions they mean (lua_api.md,
+-- get_look_vertical and get_look_horizontal): the horizontal one is
+-- counter-clockwise from +Z, so it turns towards -X; the vertical one is
+-- **positive downwards**, -pi/2 being straight up and pi/2 straight down.
+-- This is the same vector Luanti's own l_get_look_dir() builds out of
+-- (rotation.Y + 90) and -pitch.
 function PlayerRef:get_look_dir()
 	local o = state_of(self)
 	if not o then
 		return vector.new(0, 0, 1)
 	end
 	local h, v = o.look.h, o.look.v
-	return vector.new(-math.sin(h) * math.cos(v), math.sin(v),
+	return vector.new(-math.sin(h) * math.cos(v), -math.sin(v),
 			math.cos(h) * math.cos(v))
 end
 
@@ -793,10 +802,25 @@ function PlayerRef:set_look_vertical(v)
 	end
 end
 
-PlayerRef.get_look_yaw = PlayerRef.get_look_horizontal
-PlayerRef.set_look_yaw = PlayerRef.set_look_horizontal
-PlayerRef.get_look_pitch = PlayerRef.get_look_vertical
-PlayerRef.set_look_pitch = PlayerRef.set_look_vertical
+-- And the deprecated pair, which Luanti keeps and calls broken because each
+-- is the other way round from the one above it: its yaw is counter-clockwise
+-- from +X rather than +Z, and its pitch is positive upwards. A mod still
+-- calling them gets what Luanti gives them.
+function PlayerRef:get_look_yaw()
+	return self:get_look_horizontal() + math.pi / 2
+end
+
+function PlayerRef:set_look_yaw(y)
+	self:set_look_horizontal(y - math.pi / 2)
+end
+
+function PlayerRef:get_look_pitch()
+	return -self:get_look_vertical()
+end
+
+function PlayerRef:set_look_pitch(v)
+	self:set_look_vertical(-v)
+end
 
 function PlayerRef:get_wield_index()
 	local o = state_of(self)
@@ -2104,6 +2128,26 @@ function core.__check_players()
 			"check_players: the metadata did not come back")
 	assert(to.inventory:get_stack("main", 1):to_string() == "__check_item 3",
 			"check_players: the inventory did not come back")
+	-- And the two angles mean what Luanti says they mean, which is the one
+	-- thing about them that is easy to get backwards: the horizontal angle
+	-- turns from +Z towards -X, and the vertical one is positive downwards.
+	local looker = made()
+	local check_id = "__check_look"
+	objects[check_id] = looker
+	local ref = setmetatable({__id = check_id}, PlayerRef)
+	looker.look = {h = 0, v = 0}
+	local d = ref:get_look_dir()
+	assert(math.abs(d.z - 1) < 1e-6, "check_players: h=0 is not +Z")
+	looker.look = {h = math.pi / 2, v = 0}
+	d = ref:get_look_dir()
+	assert(math.abs(d.x + 1) < 1e-6, "check_players: h=pi/2 is not -X")
+	looker.look = {h = 0, v = math.pi / 2}
+	d = ref:get_look_dir()
+	assert(math.abs(d.y + 1) < 1e-6,
+			"check_players: a positive vertical angle is not downwards")
+	assert(math.abs(ref:get_look_pitch() + math.pi / 2) < 1e-6,
+			"check_players: the deprecated pitch is not the other way round")
+	objects[check_id] = nil
 	core.log("verbose", "check_players: a player survived being written down")
 end
 
@@ -2300,6 +2344,12 @@ function core.__add_player(name)
 	send_stats(o)
 	send_day_night(o)
 	send_sky(o)
+	-- And what time it is. The module sends this to everyone every few
+	-- seconds of the world's own clock, which under load is a good deal
+	-- longer than a few seconds of anyone else's -- and a client with no
+	-- clock at all draws the sky it started with. So the first one is here,
+	-- where somebody has just arrived and has nothing.
+	core.__send_time()
 	-- Where the last run left them, or the spawn: either way it is the
 	-- server's answer and the client starts there. A player whose spawn the
 	-- map cannot answer for yet is not told anything -- a fallback position

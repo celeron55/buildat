@@ -281,8 +281,12 @@ M.player_pos = nil
 
 local player_pos_subs = {}
 
--- sub_player_pos(f) -> f({x, y, z}) every time the server puts the player
--- somewhere, and once now if it already has
+-- sub_player_pos(f) -> f({x, y, z, look_h, look_v}) every time the server
+-- puts the player somewhere, and once now if it already has. The two angles
+-- are Luanti's: the horizontal one counter-clockwise from +Z and the
+-- vertical one positive downwards, in radians. A game with a camera of its
+-- own converts them; the launcher's yaw is the horizontal one negated in
+-- degrees and its pitch is the vertical one as it is.
 function M.sub_player_pos(f)
 	player_pos_subs[#player_pos_subs + 1] = f
 	if M.player_pos then
@@ -296,6 +300,8 @@ buildat.sub_packet("luanti:player_pos", function(data)
 		x = tonumber(values[1]) or 0,
 		y = tonumber(values[2]) or 0,
 		z = tonumber(values[3]) or 0,
+		look_h = tonumber(values[5]) or 0,
+		look_v = tonumber(values[6]) or 0,
 	}
 	M.player_pos = p
 	-- Which object is the player's own: it is not one to point at, being

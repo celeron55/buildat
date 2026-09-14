@@ -136,7 +136,13 @@ local function angles_from_dir(d)
 	return math.deg(math.atan2(d.x, d.z)), math.deg(math.asin(-d.y))
 end
 
-local yaw, pitch = angles_from_dir(VIEW_DIR)
+-- Level, and facing the way VIEW_DIR does, until the server says which way
+-- the player was facing: a world they have been in before saved that along
+-- with where they stood, and a level view for the moment before it arrives
+-- reads as waiting where a confidently wrong angle reads as a bug. See
+-- luanti.sub_player_pos() below.
+local yaw = angles_from_dir(VIEW_DIR)
+local pitch = 0
 -- Whether the mouse turns the player's head or points at the screen. In the
 -- world while playing, on the screen while a form is open or Tab says so.
 local mouse_in_world = false
@@ -914,12 +920,22 @@ local player_placed = false
 luanti.sub_player_pos(function(p)
 	player:set_position(p.x, p.y, p.z)
 	player.vx, player.vy, player.vz = 0, 0, 0
+	-- And which way they were facing, which is send_where() below in
+	-- reverse: the horizontal angle turns the other way round from Urho's
+	-- yaw, and the vertical one is positive downwards as Urho's pitch is.
+	if p.look_h then
+		-- Wrapped, because a client that has been turning for a while sends
+		-- a yaw of several hundred degrees and gets it back
+		yaw = (-math.deg(p.look_h) + 180) % 360 - 180
+		pitch = math.deg(p.look_v)
+	end
 	if not player_placed then
 		player_placed = true
 		set_mouse_in_world(true)
 	end
 	log:info("the server put the player at " ..
-			string.format("%.1f, %.1f, %.1f", p.x, p.y, p.z))
+			string.format("%.1f, %.1f, %.1f", p.x, p.y, p.z) ..
+			string.format(" looking %.0f, %.0f", yaw, pitch))
 end)
 
 -- What F5 shows: where the player is, what they are standing on and what
@@ -2165,13 +2181,14 @@ local where_timer = 0
 
 local function send_where()
 	local p = {x = player.x, y = player.y, z = player.z}
-	-- Luanti measures the horizontal angle from +Z towards -X and the
-	-- vertical one positive upwards, which is what its get_look_dir()
-	-- unpacks; Urho's yaw goes the other way round
+	-- Luanti measures the horizontal angle counter-clockwise from +Z, so it
+	-- turns towards -X where Urho's yaw turns towards +X; its vertical one
+	-- is positive downwards, which is what Urho's pitch already is. See
+	-- lua_api.md, get_look_horizontal and get_look_vertical.
 	buildat.send_packet("main:where", cereal.binary_output({
 		x = p.x, y = p.y, z = p.z,
 		look_h = math.rad(-yaw),
-		look_v = math.rad(-pitch),
+		look_v = math.rad(pitch),
 	}, {"object",
 		{"x", "double"},
 		{"y", "double"},
