@@ -1757,13 +1757,29 @@ function core.__import_player(name, t)
 	if saved_players[name] or players[name] then
 		return false
 	end
+	local fields = t.fields or {}
+	-- A world whose players are files keeps their metadata as one JSON
+	-- object rather than a row each, and the parser is here rather than in
+	-- the importer. "null" is what Luanti writes for a player who has none.
+	if type(t.extended_attributes) == "string" and
+			t.extended_attributes ~= "" and t.extended_attributes ~= "null" then
+		local decoded = core.parse_json(t.extended_attributes)
+		if type(decoded) == "table" then
+			for key, value in pairs(decoded) do
+				fields[key] = tostring(value)
+			end
+		else
+			core.log("warning", "__import_player(" .. name ..
+					"): the extended attributes are not a JSON object")
+		end
+	end
 	saved_players[name] = {
 		pos = t.pos,
 		look = t.look,
 		hp = t.hp,
 		breath = t.breath,
 		wield_index = 1,
-		fields = t.fields or {},
+		fields = fields,
 		inventory = t.inventory or {},
 	}
 	return true

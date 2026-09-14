@@ -5347,7 +5347,42 @@ struct Module: public interface::Module, public luanti::Interface
 	// simplified: the sqlite database only. Luanti still reads a world whose
 	// players are one text file each under players/, and writing that reader
 	// is worth it when a world that has one turns up.
+	struct Player {
+		double pitch = 0.0, yaw = 0.0;
+		double x = 0.0, y = 0.0, z = 0.0;
+		int hp = 20, breath = 10;
+		sm_<ss_, ss_> fields;
+		// What Luanti's own player file keeps the metadata in: one JSON
+		// object, which the Lua side decodes because that is where the
+		// parser is
+		ss_ extended_attributes;
+		// The list's name, and the item string of each slot in it. The
+		// slots are kept by index because a database row says which one
+		// it is and an empty slot has no row at all.
+		sm_<ss_, sm_<int, ss_>> lists;
+		sm_<ss_, int> list_sizes;
+	};
+
+	// Luanti keeps a player's position in BS units, which is nodes times
+	// ten, and their angles in degrees; a node and a radian is what
+	// everything on this side of the import is in.
+	static constexpr double DEG_TO_RAD = 3.14159265358979323846 / 180.0;
+
 	void import_players(const ss_ &luanti_world_path)
+	{
+		sm_<ss_, Player> players;
+		read_player_database(luanti_world_path, players);
+		// A world written before players.sqlite has a file per player
+		// instead. Both are read, and the database wins where a name is in
+		// both, which is the order Luanti migrates them in.
+		read_player_files(luanti_world_path, players);
+		if(players.empty())
+			return;
+		push_players(players);
+	}
+
+	void read_player_database(const ss_ &luanti_world_path,
+			sm_<ss_, Player> &players)
 	{
 		ss_ db_path = luanti_world_path+"/players.sqlite";
 		if(!interface::fs::path_exists(db_path))
@@ -5360,18 +5395,6 @@ struct Module: public interface::Module, public luanti::Interface
 			sqlite3_close(db);
 			return;
 		}
-		struct Player {
-			double pitch = 0.0, yaw = 0.0;
-			double x = 0.0, y = 0.0, z = 0.0;
-			int hp = 20, breath = 10;
-			sm_<ss_, ss_> fields;
-			// The list's name, and the item string of each slot in it. The
-			// slots are kept by index because a database row says which one
-			// it is and an empty slot has no row at all.
-			sm_<ss_, sm_<int, ss_>> lists;
-			sm_<ss_, int> list_sizes;
-		};
-		sm_<ss_, Player> players;
 		auto query = [&](const char *sql,
 				const std::function<void(sqlite3_stmt*)> &row){
 			sqlite3_stmt *st = nullptr;
@@ -5389,13 +5412,9 @@ struct Module: public interface::Module, public luanti::Interface
 			int n = sqlite3_column_bytes(st, i);
 			return ss_(p ? p : "", (size_t)(n > 0 ? n : 0));
 		};
-		// Luanti keeps a player's position in BS units, which is nodes times
-		// ten, and their angles in degrees; a node and a radian is what
-		// everything on this side of the import is in.
 		query("SELECT name, pitch, yaw, posX, posY, posZ, hp, breath"
 				" FROM player", [&](sqlite3_stmt *st){
 			Player &p = players[text(st, 0)];
-			const double DEG_TO_RAD = 3.14159265358979323846 / 180.0;
 			p.pitch = sqlite3_column_double(st, 1) * DEG_TO_RAD;
 			p.yaw = sqlite3_column_double(st, 2) * DEG_TO_RAD;
 			p.x = sqlite3_column_double(st, 3) / 10.0;
@@ -5447,6 +5466,110 @@ struct Module: public interface::Module, public luanti::Interface
 					text(st, 3);
 		});
 		sqlite3_close(db);
+	}
+
+	// A world written before players.sqlite: one file per player under
+	// players/, holding what the database row holds -- "key = value" lines,
+	// a PlayerArgsEnd, and then the inventory in the same shape a node's
+	// metadata carries one, which is why mapblock.h's reader is what reads
+	// it.
+	//
+	// A name Luanti could not use as a file name is written with the
+	// unusable bytes as _<hex>; the name inside the file is the real one, so
+	// that is what is taken and the file name is only how it was found.
+	void read_player_files(const ss_ &luanti_world_path,
+			sm_<ss_, Player> &players)
+	{
+		const ss_ dir = luanti_world_path+"/players";
+		if(!interface::fs::path_exists(dir))
+			return;
+		size_t read = 0;
+		for(const interface::fs::Node &n : interface::fs::list_directory(dir)){
+			if(n.is_directory || n.name == "." || n.name == "..")
+				continue;
+			std::ifstream ifs(dir+"/"+n.name, std::ios::binary);
+			if(!ifs.good())
+				continue;
+			std::ostringstream os;
+			os<<ifs.rdbuf();
+			const ss_ data = os.str();
+			luanti_mapblock::Reader r(data);
+			Player p;
+			ss_ name;
+			bool ended = false;
+			while(r.p < data.size()){
+				const ss_ line = r.line();
+				if(line == "PlayerArgsEnd"){
+					ended = true;
+					break;
+				}
+				const size_t eq = line.find('=');
+				if(eq == ss_::npos)
+					continue;
+				ss_ key = trimmed(line.substr(0, eq));
+				ss_ value = trimmed(line.substr(eq + 1));
+				if(key == "name")
+					name = value;
+				else if(key == "pitch")
+					p.pitch = atof(value.c_str()) * DEG_TO_RAD;
+				else if(key == "yaw")
+					p.yaw = atof(value.c_str()) * DEG_TO_RAD;
+				else if(key == "hp")
+					p.hp = atoi(value.c_str());
+				else if(key == "breath")
+					p.breath = atoi(value.c_str());
+				else if(key == "extended_attributes")
+					p.extended_attributes = value;
+				else if(key == "position"){
+					// "(x,y,z)" in BS units, which is nodes times ten
+					double v[3] = {0.0, 0.0, 0.0};
+					sscanf(value.c_str(), "(%lf,%lf,%lf)", &v[0], &v[1],
+							&v[2]);
+					p.x = v[0] / 10.0;
+					p.y = v[1] / 10.0;
+					p.z = v[2] / 10.0;
+				}
+			}
+			if(name.empty() || !ended){
+				log_w(MODULE, "import_world(): players/%s is not a player "
+						"file", cs(n.name));
+				continue;
+			}
+			// The inventory, in the shape a node's metadata carries one
+			luanti_mapblock::NodeMeta meta;
+			luanti_mapblock::read_inventory(r, meta);
+			for(const auto &list : meta.lists){
+				p.list_sizes[list.first] = (int)list.second.size();
+				for(size_t i = 0; i < list.second.size(); i++){
+					if(!list.second[i].empty())
+						p.lists[list.first][(int)i + 1] = list.second[i];
+				}
+			}
+			// The database wins: a world that has been migrated has both,
+			// and the file is then the older of the two
+			if(players.count(name) == 0){
+				log_i(MODULE, "import_world(): players/%s: %s at "
+						"(%.1f, %.1f, %.1f), hp %i, %zu lists", cs(n.name),
+						cs(name), p.x, p.y, p.z, p.hp, p.list_sizes.size());
+				players[name] = p;
+				read++;
+			}
+		}
+		if(read > 0)
+			log_i(MODULE, "import_world(): %zu players out of files", read);
+	}
+
+	static ss_ trimmed(const ss_ &s)
+	{
+		size_t a = s.find_first_not_of(" \t\r\n");
+		if(a == ss_::npos)
+			return "";
+		size_t b = s.find_last_not_of(" \t\r\n");
+		return s.substr(a, b - a + 1);
+	}
+
+	void push_players(const sm_<ss_, Player> &players)
+	{
 		size_t imported = 0;
 		for(const auto &pair : players){
 			interface::MutexScope ms(m_lua_mutex);
@@ -5478,6 +5601,13 @@ struct Module: public interface::Module, public luanti::Interface
 				lua_setfield(L, -2, f.first.c_str());
 			}
 			lua_setfield(L, -2, "fields");
+			// A player file keeps the same metadata as one JSON object;
+			// core.__import_player() decodes it, the parser being there
+			if(!p.extended_attributes.empty()){
+				lua_pushlstring(L, p.extended_attributes.c_str(),
+						p.extended_attributes.size());
+				lua_setfield(L, -2, "extended_attributes");
+			}
 			lua_createtable(L, 0, (int)p.list_sizes.size());
 			for(const auto &list : p.list_sizes){
 				int size = list.second;

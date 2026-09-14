@@ -14,6 +14,18 @@
 -- What the importer itself counted -- how many timers and entities it made,
 -- and the kinds it could not -- is in the log above this, and is the number
 -- to read first.
+--
+-- **A world whose players are files** rather than a players.sqlite -- one
+-- written before 5.x, and one whose world.mt says `player_backend = files`
+-- -- is read there too, and says so a player at a time:
+--
+--   import_world(): players/singleplayer: singleplayer at
+--       (-134.7, 11.5, 419.0), hp 16, 4 lists
+--   import_world(): 1 players out of files
+--   import_world(): 1 of 1 players
+--
+-- A directory of nothing but a world.mt and a players/ is enough to run
+-- that half against, which is the quick way to check it.
 local function say()
 	local n, kinds = 0, {}
 	for _, le in pairs(core.luaentities or {}) do
