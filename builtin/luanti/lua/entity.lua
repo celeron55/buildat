@@ -1390,13 +1390,13 @@ end
 -- than when it is picked up, so this is one message and the client's "held"
 -- is only a drawing.
 --
--- simplified: the player's own inventory. A node's and a detached one want
--- the allow_/on_ callbacks around them first, and those are the same message
--- with more done about it; see "what is left of M4" in
--- doc/plan/luanti_module_plan.md.
+-- Three kinds of inventory can be either end of it: the player's own, a
+-- node's, and one that belongs to nobody. The last two carry callbacks that
+-- say how much of a move they allow and are told once it has happened.
 
--- The inventory a formspec location names, and the node position if it is a
--- node's. "current_name" and "context" are the node the open form is about.
+-- The inventory a formspec location names, the node position if it is a
+-- node's and the name if it is a detached one. "current_name" and "context"
+-- are the node the open form is about.
 local function inventory_at(ref, playername, location)
 	if location == "current_player" or
 			string.sub(location, 1, 7) == "player:" then
