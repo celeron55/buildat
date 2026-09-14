@@ -535,9 +535,24 @@ buildat.sub_packet("luanti:sky", function(data)
 		type = e.type or "regular",
 		zenith = rgb(e.zenith),
 		horizon = rgb(e.horizon),
+		-- The same two at the other hours of the day, for whoever draws a
+		-- sky that follows a clock; nil where the game said nothing
+		night_zenith = rgb(e.night_zenith),
+		night_horizon = rgb(e.night_horizon),
+		dawn_zenith = rgb(e.dawn_zenith),
+		dawn_horizon = rgb(e.dawn_horizon),
 		clouds = e.clouds ~= "0",
 		density = tonumber(e.density or ""),
 		cloud_color = rgb(e.cloud_color),
+		-- What else is up there: Luanti's set_sun, set_moon and set_stars
+		sun_visible = e.sun_visible ~= "0",
+		sun_scale = tonumber(e.sun_scale or ""),
+		moon_visible = e.moon_visible ~= "0",
+		moon_scale = tonumber(e.moon_scale or ""),
+		stars_visible = e.stars_visible ~= "0",
+		star_count = tonumber(e.star_count or ""),
+		star_color = rgb(e.star_color),
+		star_scale = tonumber(e.star_scale or ""),
 	}
 	for _, f in ipairs(sky_subs) do
 		f(M.sky)

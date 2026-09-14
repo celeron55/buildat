@@ -727,8 +727,7 @@ end
 -- sets one
 for _, name in ipairs({
 	"hud_set_hotbar_image",
-	"hud_set_hotbar_selected_image", "set_sun", "set_moon",
-	"set_stars", "set_lighting",
+	"hud_set_hotbar_selected_image", "set_lighting",
 	"set_minimap_modes", "send_mapblock", "set_fov", "set_nametag_color",
 	"hud_set_hotbar_image_selected",
 }) do
@@ -774,6 +773,13 @@ local function send_sky(o)
 		end
 	end
 	put("type", sky.type or "regular")
+	-- The hours of the sky, which is what makes a night sky dark: Luanti
+	-- keeps a colour for the day, one for dawn and one for the night, and
+	-- whoever draws it blends between them as the sun goes round
+	put("night_zenith", sky_rgb(sky_color.night_sky))
+	put("night_horizon", sky_rgb(sky_color.night_horizon))
+	put("dawn_zenith", sky_rgb(sky_color.dawn_sky))
+	put("dawn_horizon", sky_rgb(sky_color.dawn_horizon))
 	-- A plain sky is one colour everywhere, which is what base_color means
 	-- when the type says plain; a regular one has the two ends of a gradient
 	if (sky.type or "regular") == "plain" then
@@ -795,6 +801,20 @@ local function send_sky(o)
 	put("clouds", on and "1" or "0")
 	put("density", clouds.density)
 	put("cloud_color", sky_rgb(clouds.color))
+	-- What is up there besides the gradient: Luanti's set_sun, set_moon and
+	-- set_stars. The textures are not sent, because the sun here is drawn
+	-- by the sky's own shader and not out of a picture; see set_sun().
+	local sun = o.sun_params or {}
+	local moon = o.moon_params or {}
+	local stars = o.star_params or {}
+	put("sun_visible", (sun.visible ~= false) and "1" or "0")
+	put("sun_scale", sun.scale)
+	put("moon_visible", (moon.visible ~= false) and "1" or "0")
+	put("moon_scale", moon.scale)
+	put("stars_visible", (stars.visible ~= false) and "1" or "0")
+	put("star_count", stars.count)
+	put("star_color", sky_rgb(stars.star_color))
+	put("star_scale", stars.scale)
 	__luanti_send_sky(o.player_name, flat)
 end
 
@@ -838,6 +858,60 @@ function PlayerRef:set_clouds(params)
 	end
 	o.clouds_params = table.copy(params)
 	send_sky(o)
+end
+
+-- Luanti's set_sun, set_moon and set_stars. What reaches the sky here is
+-- whether each is there and how big it is; the rest is kept so that a mod
+-- reads back what it set.
+--
+-- simplified: a sun or a moon is the sky shader's own square and not a
+-- texture, so texture, tonemap and sunrise are kept and not drawn. What
+-- would draw them is a quad at the sun's direction with the game's picture
+-- on it, which is a thing the skybox does not have.
+local function sky_thing_setter(field)
+	return function(self, params)
+		local o = state_of(self)
+		if not o or type(params) ~= "table" then
+			return
+		end
+		o[field] = table.copy(params)
+		send_sky(o)
+	end
+end
+
+PlayerRef.set_sun = sky_thing_setter("sun_params")
+PlayerRef.set_moon = sky_thing_setter("moon_params")
+PlayerRef.set_stars = sky_thing_setter("star_params")
+
+-- Luanti's own defaults, which is what a mod that never set one reads
+function PlayerRef:get_sun()
+	local o = state_of(self)
+	local t = (o and o.sun_params) or {}
+	return {visible = t.visible ~= false,
+			texture = t.texture or "sun.png",
+			tonemap = t.tonemap or "sun_tonemap.png",
+			sunrise = t.sunrise or "sunrisebg.png",
+			sunrise_visible = t.sunrise_visible ~= false,
+			scale = t.scale or 1}
+end
+
+function PlayerRef:get_moon()
+	local o = state_of(self)
+	local t = (o and o.moon_params) or {}
+	return {visible = t.visible ~= false,
+			texture = t.texture or "moon.png",
+			tonemap = t.tonemap or "moon_tonemap.png",
+			scale = t.scale or 1}
+end
+
+function PlayerRef:get_stars()
+	local o = state_of(self)
+	local t = (o and o.star_params) or {}
+	return {visible = t.visible ~= false,
+			count = t.count or 1000,
+			star_color = t.star_color or "#ebebff69",
+			scale = t.scale or 1,
+			day_opacity = t.day_opacity or 0}
 end
 
 function PlayerRef:get_clouds()
@@ -1027,10 +1101,6 @@ function PlayerRef:hud_get_flags()
 end
 function PlayerRef:hud_get_hotbar_image() return "" end
 function PlayerRef:hud_get_hotbar_selected_image() return "" end
-
-function PlayerRef:get_sun() return {visible = true} end
-function PlayerRef:get_moon() return {visible = true} end
-function PlayerRef:get_stars() return {visible = true} end
 
 function PlayerRef:get_lighting() return {shadows = {intensity = 0}} end
 -- How much of the day's light the player gets whatever the hour: Luanti's

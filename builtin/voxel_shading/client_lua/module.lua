@@ -651,6 +651,19 @@ end
 -- across it; see M.set_sun_direction() below
 local skybox_material = nil
 
+-- What the sky is when nobody has asked for anything else, which is what
+-- create_skybox() sets. A game that blends its own sky from these -- one
+-- that darkens it at night, say -- reads them here rather than writing the
+-- same numbers down again.
+M.sky_defaults = {
+	zenith = {r = 0.13, g = 0.24, b = 0.58},
+	horizon = {r = 0.55, g = 0.66, b = 0.84},
+	cloud_cover = 0.34,
+	cloud_light = 1.0,
+	sun_half = 0.075,
+	sun_color = {r = 1.7, g = 1.66, b = 1.52},
+}
+
 -- The sky the world stands under, drawn by VoxelSkybox.glsl in the same
 -- gradient the cube map is baked in. sun_dir points the way the light travels,
 -- as a Light's direction does, so the sun itself is the other way.
@@ -667,9 +680,22 @@ function M.create_skybox(scene, sun_dir)
 	-- of it is cloud. They have to be set here because a parameter a
 	-- material never sets reads as zero, which is a black sky; these are
 	-- what the sky was before a game could ask for one of its own.
-	material:SetShaderParameter("SkyZenith", magic.Vector3(0.13, 0.24, 0.58))
-	material:SetShaderParameter("SkyHorizon", magic.Vector3(0.55, 0.66, 0.84))
-	material:SetShaderParameter("CloudCover", 0.34)
+	local d = M.sky_defaults
+	material:SetShaderParameter("SkyZenith",
+			magic.Vector3(d.zenith.r, d.zenith.g, d.zenith.b))
+	material:SetShaderParameter("SkyHorizon",
+			magic.Vector3(d.horizon.r, d.horizon.g, d.horizon.b))
+	material:SetShaderParameter("CloudCover", d.cloud_cover)
+	material:SetShaderParameter("CloudLight", d.cloud_light)
+	-- The sun's own square and the stars, for the same reason: what is not
+	-- set reads as zero, and zero here is a sky with no sun in it. A star
+	-- density of zero is what every game had before one could ask for them.
+	material:SetShaderParameter("SunHalf", d.sun_half)
+	material:SetShaderParameter("SunColor", magic.Vector3(d.sun_color.r,
+			d.sun_color.g, d.sun_color.b))
+	material:SetShaderParameter("StarDensity", 0.0)
+	material:SetShaderParameter("StarColor", magic.Vector3(0.9, 0.9, 1.0))
+	material:SetShaderParameter("StarSize", 0.12)
 	skybox.material = material
 	skybox_material = material
 	return node
@@ -705,6 +731,56 @@ function M.set_sky_look(zenith, horizon, cloud_cover)
 	if cloud_cover then
 		skybox_material:SetShaderParameter("CloudCover", cloud_cover)
 	end
+end
+
+-- How big the sun's square is and what colour, or nothing in the sky at all:
+-- Luanti's set_sun and set_moon, and the moon is the same square when the
+-- sun is under the world. half is the half-width on a plane one unit away,
+-- so 0.075 is the sun this sky was drawn with and 0 is no sun.
+function M.set_sun_look(half, color)
+	if not skybox_material then
+		return
+	end
+	if half then
+		skybox_material:SetShaderParameter("SunHalf", math.max(0, half))
+	end
+	if color then
+		skybox_material:SetShaderParameter("SunColor",
+				magic.Vector3(color.r or color[1] or 0,
+				color.g or color[2] or 0, color.b or color[3] or 0))
+	end
+end
+
+-- The stars: how many (as the share of the sky's cells that have one, so 0
+-- is none and 0.1 is a thick night sky), what colour, and how big each is.
+-- Nothing here knows about the hour -- a game fades them in as its night
+-- comes, because only the game knows when that is.
+function M.set_star_look(density, color, size)
+	if not skybox_material then
+		return
+	end
+	if density then
+		skybox_material:SetShaderParameter("StarDensity",
+				math.max(0, math.min(1, density)))
+	end
+	if color then
+		skybox_material:SetShaderParameter("StarColor",
+				magic.Vector3(color.r or color[1] or 0,
+				color.g or color[2] or 0, color.b or color[3] or 0))
+	end
+	if size then
+		skybox_material:SetShaderParameter("StarSize", math.max(0.001, size))
+	end
+end
+
+-- How much light is on the clouds: one is the daylight this sky was drawn
+-- with, and a game that has a night dims them as it comes. Without it a
+-- night sky has white clouds in it.
+function M.set_cloud_light(k)
+	if not skybox_material or not k then
+		return
+	end
+	skybox_material:SetShaderParameter("CloudLight", math.max(0, k))
 end
 
 function M.set_sun_direction(dir)

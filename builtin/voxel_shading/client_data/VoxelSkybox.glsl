@@ -22,6 +22,10 @@ uniform vec3 cSunDirection;
 uniform vec3 cSkyZenith;
 uniform vec3 cSkyHorizon;
 uniform float cCloudCover;
+// How much light is on the clouds: one by day, and what a game's own night
+// is at night. A cloud is white because the sun is on it, and a white cloud
+// over a dark sky is the one thing that gives a night sky away.
+uniform float cCloudLight;
 
 // Kept equal to ZENITH, HORIZON and GROUND in make_client_data.py
 const vec3 ZENITH = vec3(0.13, 0.24, 0.58);
@@ -34,9 +38,22 @@ const float HAZE_DEPTH = 0.25;
 
 // A square rather than a disc, since everything else here is cubic. Half its
 // width, on a plane one unit along the sun direction, so about 4 degrees.
-const float SUN_HALF = 0.075;
+// The size and the colour are parameters because a game says what is in its
+// sky -- Luanti's set_sun and set_moon -- and a size of zero is no sun at
+// all. create_skybox() sets them to what this sky was drawn as.
+uniform float cSunHalf;
+uniform vec3 cSunColor;
 const float SUN_EDGE = 0.004;
-const vec3 SUN_COLOR = vec3(1.7, 1.66, 1.52);
+
+// The stars, which are the other thing a game says its sky has. One to a
+// cell of a grid laid over the sky, in the cells whose own hash falls under
+// the density; a density of zero is a sky with none, which is what a game
+// that says nothing gets. What decides when they are out is whoever sets
+// the density -- here it is simply how many there are.
+uniform float cStarDensity;
+uniform vec3 cStarColor;
+uniform float cStarSize;
+const float STAR_GRID = 40.0;
 
 // A flat layer of cloud, projected onto the sky by direction and snapped to a
 // grid of its own, so that it is drawn in squares like everything else here.
@@ -110,8 +127,8 @@ void PS()
         float density = CloudDensity(floor(p * CLOUD_PIXELS) / CLOUD_PIXELS);
         float threshold = 1.0 - cCloudCover;
         // Two tones: the thicker middle of a cloud and the squares around it
-        vec3 cloud = density > threshold + CLOUD_LIT_STEP ?
-                CLOUD_LIT : CLOUD_SHADED;
+        vec3 cloud = (density > threshold + CLOUD_LIT_STEP ?
+                CLOUD_LIT : CLOUD_SHADED) * cCloudLight;
         float cover = step(threshold, density) *
                 smoothstep(CLOUD_HORIZON, CLOUD_FADE, d.y);
         color = mix(color, cloud, cover);
@@ -120,14 +137,28 @@ void PS()
     // The sun, over the clouds: it is the one thing up there that is not
     // behind them
     float towards = dot(d, sun);
-    if(towards > 0.0){
+    if(towards > 0.0 && cSunHalf > 0.0){
         vec3 su = normalize(cross(sun, vec3(0.0, 1.0, 0.0)));
         vec3 sv = cross(su, sun);
         vec3 onPlane = d / towards;
         vec2 uv = abs(vec2(dot(onPlane, su), dot(onPlane, sv)));
-        float square = 1.0 - smoothstep(SUN_HALF - SUN_EDGE,
-                SUN_HALF + SUN_EDGE, max(uv.x, uv.y));
-        color = mix(color, SUN_COLOR, square);
+        float square = 1.0 - smoothstep(cSunHalf - SUN_EDGE,
+                cSunHalf + SUN_EDGE, max(uv.x, uv.y));
+        color = mix(color, cSunColor, square);
+    }
+
+    // The stars, under the sun and over everything else: one to a cell, at
+    // the place inside it its own hash puts it
+    if(cStarDensity > 0.0 && d.y > 0.0){
+        vec3 sp = d * STAR_GRID;
+        vec3 cell = floor(sp);
+        float h = SkyHash(cell.xy + cell.z * 37.0);
+        if(h < cStarDensity){
+            vec3 at = cell + vec3(fract(h * 13.7), fract(h * 31.3),
+                    fract(h * 71.1));
+            float star = 1.0 - smoothstep(0.0, cStarSize, length(sp - at));
+            color = mix(color, cStarColor, star);
+        }
     }
 
     gl_FragColor = vec4(color, 1.0);

@@ -419,6 +419,83 @@ end
 
 -- What the last sky update worked out, for the line of detail
 local sky_now = {height = 0, day = 0}
+-- What the game said its sky is, as luanti.sub_sky() gives it
+local game_sky = {}
+
+-- The moon is the sky's own square with the light gone out of it: what is up
+-- there at night is not the sun, so it is not the sun's colour either
+local MOON_DISC_COLOR = {r = 0.72, g = 0.76, b = 0.92}
+
+-- The sky at this hour: dark at night, the game's own colour by day, and the
+-- dawn colour in between, with the stars fading as the light comes. Luanti
+-- keeps three colours for exactly this and blends between them as the sun
+-- goes round.
+--
+-- simplified: three colours and one factor, where Luanti's Sky::update()
+-- has a separate brightness for the horizon, a sunrise band and a tonemap.
+-- What this is for is a night that looks like night; the rest is the
+-- difference between this sky and a photograph of Luanti's.
+local function apply_sky_of_hour()
+	local defaults = voxel_shading.sky_defaults
+	local day_zenith = game_sky.zenith or defaults.zenith
+	local day_horizon = game_sky.horizon or defaults.horizon
+	-- A night sky the game did not name is its own day sky with the light
+	-- taken out of it, which keeps a game's own colour rather than putting
+	-- Luanti's blue over it
+	local night_zenith = game_sky.night_zenith or
+			{r = day_zenith.r * 0.10, g = day_zenith.g * 0.10,
+			b = day_zenith.b * 0.14}
+	local night_horizon = game_sky.night_horizon or
+			{r = day_horizon.r * 0.10, g = day_horizon.g * 0.10,
+			b = day_horizon.b * 0.14}
+	local dawn_zenith = game_sky.dawn_zenith or
+			{r = (day_zenith.r + night_zenith.r) * 0.5,
+			g = (day_zenith.g + night_zenith.g) * 0.5,
+			b = (day_zenith.b + night_zenith.b) * 0.5}
+	local dawn_horizon = game_sky.dawn_horizon or
+			{r = day_horizon.r * 0.75, g = day_horizon.g * 0.52,
+			b = day_horizon.b * 0.45}
+	local function three(night, dawn, day, t)
+		local a, b, k
+		if t < 0.5 then
+			a, b, k = night, dawn, t * 2
+		else
+			a, b, k = dawn, day, (t - 0.5) * 2
+		end
+		return {r = a.r + (b.r - a.r) * k, g = a.g + (b.g - a.g) * k,
+				b = a.b + (b.b - a.b) * k}
+	end
+	local t = sky_now.day
+	voxel_shading.set_sky_look(
+			three(night_zenith, dawn_zenith, day_zenith, t),
+			three(night_horizon, dawn_horizon, day_horizon, t), nil)
+
+	-- The sun by day and the moon by night are the same square, so which of
+	-- the two the game turned off is which half of the clock it is gone in
+	local night = sky_now.height < 0
+	local visible = night and (game_sky.moon_visible ~= false) or
+			(not night and game_sky.sun_visible ~= false)
+	local scale = (night and game_sky.moon_scale or game_sky.sun_scale) or 1
+	voxel_shading.set_sun_look(
+			visible and defaults.sun_half * scale or 0,
+			night and MOON_DISC_COLOR or defaults.sun_color)
+
+	-- The stars come out as the light goes: Luanti's day_opacity is zero by
+	-- default, which is a sky with none in it until the sun is down
+	local count = game_sky.star_count or 1000
+	local density = 0
+	if game_sky.stars_visible ~= false then
+		local out = (1 - t) * (1 - t)
+		-- How many cells of the sky's grid have a star in them; the grid is
+		-- about ten thousand of them over the half that can be seen
+		density = math.min(0.5, count / 10000) * out
+	end
+	voxel_shading.set_star_look(density, game_sky.star_color,
+			0.12 * (game_sky.star_scale or 1))
+
+	-- The clouds are white because the sun is on them, so they go with it
+	voxel_shading.set_cloud_light(0.16 + 0.84 * t)
+end
 
 local function update_sky(dt)
 	if time_of_day == nil then
@@ -459,6 +536,7 @@ local function update_sky(dt)
 	zone.fogColor = blend(NIGHT_FOG, DAY_FOG, day)
 	sky_now.height = height
 	sky_now.day = day
+	apply_sky_of_hour()
 	-- What is in the player's hand is drawn unlit, so the daylight is put
 	-- on it by hand; without this it glows at midnight
 	local k = 0.28 + 0.72 * day
@@ -470,18 +548,22 @@ end
 -- of it is cloud. A game that says nothing keeps the sky voxel_shading
 -- draws, which is what create_skybox() set.
 luanti.sub_sky(function(sky)
+	game_sky = sky
 	local cover = nil
 	if sky.clouds == false then
 		cover = 0
 	elseif sky.density then
 		cover = math.max(0, math.min(1, sky.density))
 	end
-	voxel_shading.set_sky_look(sky.zenith, sky.horizon, cover)
+	if cover then
+		voxel_shading.set_sky_look(nil, nil, cover)
+	end
 	-- The fog is the horizon seen through the world's air, so it follows
 	-- the horizon the game asked for
 	if sky.horizon then
 		DAY_FOG = magic.Color(sky.horizon.r, sky.horizon.g, sky.horizon.b)
 	end
+	apply_sky_of_hour()
 end)
 
 luanti.sub_time(function(tod, speed)
