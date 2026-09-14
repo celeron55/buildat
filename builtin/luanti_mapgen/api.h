@@ -177,6 +177,22 @@ namespace luanti_mapgen
 			Schematic schematic;
 		};
 		sv_<Decoration> decorations;
+
+		// Which of the things a mapgen makes the game asked to be told
+		// about, in Luanti's own flag words ("dungeon,decoration"), and the
+		// decoration ids a mod named. A generator records nothing when no
+		// flag is on, which is what every game that never asks costs.
+		ss_ gen_notify_flags;
+		sv_<uint32_t> gen_notify_deco_ids;
+	};
+
+	// One thing a mapgen made and was asked to report: what it is, by
+	// Luanti's name for it -- "dungeon", "cave_begin", or "decoration#<id>"
+	// for a decoration -- and where.
+	struct GennotifyEvent
+	{
+		ss_ name;
+		int32_t x = 0, y = 0, z = 0;
 	};
 
 	struct Interface
@@ -200,6 +216,14 @@ namespace luanti_mapgen
 		// of a few thousand points costs a few thousand noise samples.
 		virtual bool spawn_level(const Params &params, int x, int z,
 				int &level_out) = 0;
+
+		// What the generator made in a section and was asked to report,
+		// taken away: a generator runs in worldgen's thread and cannot
+		// reach a module, so it leaves its gennotify here and whoever runs
+		// the game's on_generated over that section picks it up. Nothing is
+		// kept for a section no flag was on for.
+		virtual void take_gennotify(int section_x, int section_y,
+				int section_z, sv_<GennotifyEvent> &out) = 0;
 	};
 
 	inline bool access(interface::Server *server,

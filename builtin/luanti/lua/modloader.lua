@@ -47,6 +47,11 @@ do
 		end
 	end
 
+	-- Everything a generator is a function of is read after this point, so
+	-- what a mod registers from here on is not in the world it makes; see
+	-- core.set_gen_notify() in bootstrap.lua
+	core.__mods_loaded = true
+
 	local function count(t)
 		local n = 0
 		for _ in pairs(t or {}) do

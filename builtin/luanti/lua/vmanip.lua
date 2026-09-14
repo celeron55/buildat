@@ -238,6 +238,9 @@ end
 -- its mapgen just filled and writes back whatever the mod does to it when
 -- the callback returns; so does this.
 local mapgen_vm = nil
+-- What the mapgen reported for the section being run over; see
+-- core.__run_on_generated()
+local mapgen_gennotify = nil
 
 function core.get_mapgen_object(name)
 	if name == "voxelmanip" then
@@ -250,12 +253,10 @@ function core.get_mapgen_object(name)
 		-- Always a table, which is what Luanti answers: the mapgen reports
 		-- what it made into it, and a mod indexes it without asking whether
 		-- it is there -- VoxeLibre's mcl_mapgen_core does, and an answer of
-		-- nil took its whole generator down every chunk.
-		--
-		-- simplified: it is empty, because the mapgen does not report yet.
-		-- See core.set_gen_notify() in bootstrap.lua for what filling it
-		-- would take.
-		return {}
+		-- nil took its whole generator down every chunk. It is empty unless
+		-- a mod asked with core.set_gen_notify() and this is a section the
+		-- mapgen made something it was asked about in.
+		return mapgen_gennotify or {}
 	end
 	-- heightmap, biomemap, heatmap and humiditymap are the mapgen's own
 	-- workings, and singlenode has none of them. Luanti answers nil for an
@@ -266,11 +267,32 @@ end
 
 -- Called by the module once a section has been filled, with the box it
 -- filled and the seed that box's randomness starts from.
+-- What the mapgen reported for the section being run over, in Luanti's
+-- shape: a name to the list of positions it happened at. Read from the line
+-- per event the module leaves in __luanti_gennotify; see gennotify_of() in
+-- luanti.cpp.
+local function parse_gennotify(text)
+	if text == nil or text == "" then
+		return {}
+	end
+	local out = {}
+	for name, x, y, z in text:gmatch("(%S+) (-?%d+) (-?%d+) (-?%d+)") do
+		local list = out[name]
+		if list == nil then
+			list = {}
+			out[name] = list
+		end
+		list[#list + 1] = vector.new(tonumber(x), tonumber(y), tonumber(z))
+	end
+	return out
+end
+
 function core.__run_on_generated(x0, y0, z0, x1, y1, z1, blockseed)
 	local callbacks = core.registered_on_generateds
 	if callbacks == nil or #callbacks == 0 then
 		return
 	end
+	mapgen_gennotify = parse_gennotify(__luanti_gennotify)
 	-- Vectors and not plain tables: a mod calls vector methods on what it
 	-- is given, which is what Luanti hands it
 	local minp = vector.new(x0, y0, z0)
@@ -322,6 +344,7 @@ function core.__run_on_generated(x0, y0, z0, x1, y1, z1, blockseed)
 		mapgen_vm:write_to_map()
 	end
 	mapgen_vm = nil
+	mapgen_gennotify = nil
 end
 
 --

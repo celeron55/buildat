@@ -1017,15 +1017,14 @@ end
 
 -- What the mapgen is asked to report about what it made. Luanti keeps the
 -- flags and the two id sets on its EmergeManager and the mapgen fills a
--- table with where each thing landed; here the bookkeeping is kept and the
--- reporting is not done, so a mod that asks is answered and a mod that
--- waits to hear where its decorations went waits forever.
+-- table with where each thing landed; the flags here cross to the
+-- generator when the world's is made, and what it reported comes back in
+-- core.get_mapgen_object("gennotify") -- see core.__run_on_generated() in
+-- lua/vmanip.lua.
 --
--- simplified: the mapgen does not report. What it would take is the
--- gennotify list out of the vendored Mapgen after it has run -- it is
--- filled whether or not anyone asked -- and a packet back from
--- luanti_mapgen's thread; see "Mapgen stage 3c" in
--- doc/plan/luanti_module_plan.md.
+-- simplified: "custom" is kept and never reported. A mapgen's custom data
+-- is a mod's own mapgen script writing into the notifier, which is a Lua
+-- environment on the generator's thread and not something this has.
 local GENNOTIFY_FLAGS = {"dungeon", "temple", "cave_begin", "cave_end",
 		"large_cave_begin", "large_cave_end", "decoration", "custom"}
 local gennotify_on = {}
@@ -1068,11 +1067,14 @@ function core.set_gen_notify(flags, deco_ids, custom_ids)
 	if not gennotify_on["custom"] then
 		gennotify_custom_ids = {}
 	end
-	if not gennotify_warned then
+	-- The flags reach the generator when the world's is made, which is
+	-- after every mod has loaded; one set after that is not heard. See
+	-- mapgen_gen_notify() in luanti.cpp.
+	if core.__mods_loaded and not gennotify_warned then
 		gennotify_warned = true
-		core.log("warning", "core.set_gen_notify() is remembered and the "
-				.. "mapgen does not report: nothing arrives in a "
-				.. "register_on_generated's minp/maxp gennotify")
+		core.log("warning", "core.set_gen_notify() after the mods loaded: "
+				.. "the mapgen was told what to report before this and "
+				.. "does not hear it")
 	end
 end
 
@@ -1100,7 +1102,12 @@ end
 -- returned, which here is the order it was registered in -- and the order
 -- it crosses in, so the number means the same thing on both sides.
 function core.get_decoration_id(name)
-	return core.__mapgen_handles.decoration[name]
+	-- Luanti's id is the decoration's own index and counts from zero, and
+	-- what the mapgen reports in gennotify is that number; the handle a
+	-- registration answered with counts from one, as Luanti's opaque handle
+	-- does.
+	local handle = core.__mapgen_handles.decoration[name]
+	return handle and (handle - 1) or nil
 end
 
 -- Every name a mapgen can ask about: the nodes, and the aliases a game

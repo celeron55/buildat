@@ -15,6 +15,7 @@
 #include "interface/event.h"
 #include "interface/voxel.h"
 #include "interface/voxel_volume.h"
+#include "interface/mutex.h"
 #include <cassert>
 #define MODULE "luanti_mapgen"
 
@@ -202,6 +203,53 @@ static Rotation rotation_of(const ss_ &name)
 	return ROTATE_0;
 }
 
+// Where a generator leaves what it was asked to report, because it runs in
+// worldgen's thread and the module that answers for it is elsewhere. One
+// per module, shared with every generator it makes.
+struct GennotifyStore
+{
+	interface::Mutex mutex;
+	// Push back, take from anywhere: a section is generated once and its
+	// events are taken once, so this is short unless nobody is taking them
+	sv_<std::pair<int64_t, sv_<GennotifyEvent>>> sections;
+	// What is kept when nobody takes them, which is what a game that asks
+	// to be told and then never looks does. Luanti drops them the same way
+	// -- the emerge thread's events go with the chunk.
+	static const size_t MAX_SECTIONS = 256;
+
+	static int64_t key_of(int x, int y, int z)
+	{
+		return ((int64_t)(int16_t)x << 32) | ((int64_t)(uint16_t)y << 16) |
+				(int64_t)(uint16_t)z;
+	}
+
+	void put(int64_t key, sv_<GennotifyEvent> &&events)
+	{
+		interface::MutexScope ms(mutex);
+		for(auto &pair : sections){
+			if(pair.first == key){
+				pair.second = std::move(events);
+				return;
+			}
+		}
+		if(sections.size() >= MAX_SECTIONS)
+			sections.erase(sections.begin());
+		sections.push_back(std::make_pair(key, std::move(events)));
+	}
+
+	void take(int64_t key, sv_<GennotifyEvent> &out)
+	{
+		interface::MutexScope ms(mutex);
+		for(size_t i = 0; i < sections.size(); i++){
+			if(sections[i].first != key)
+				continue;
+			out = std::move(sections[i].second);
+			sections.erase(sections.begin() + i);
+			return;
+		}
+	}
+};
+
 // One of Luanti's own mapgens, generating into the volume worldgen hands
 // over. Everything it needs was given to it when the world was made: the
 // node ids by name, the seed and the parameters. Nothing here touches a
@@ -226,7 +274,15 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 	// a mapblock sixteen
 	int m_chunk_blocks = 4;
 
-	VendoredGenerator(const Params &params, int section_size)
+	// Where what this made goes for the module to pick up, and the key it
+	// goes under; null when the game asked to be told about nothing
+	sp_<GennotifyStore> m_gennotify;
+	// The game's own number for each decoration the manager holds; see the
+	// decoration loop
+	sv_<size_t> m_deco_source_of_index;
+
+	VendoredGenerator(const Params &params, int section_size,
+			sp_<GennotifyStore> gennotify = nullptr)
 	{
 		// A mapgen writes air and reads back what it wrote, and it does that
 		// through the constants in mapnode.h rather than through a name. So
@@ -273,6 +329,15 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 		m_emerge->oremgr = new OreManager(&m_server);
 		m_emerge->decomgr = new DecorationManager(&m_server);
 		m_emerge->schemmgr = new SchematicManager(&m_server);
+
+		// What the game asked to be told about. The flag words are Luanti's
+		// own and so is the table they are read against, so nothing here
+		// repeats the enum. A mapgen records nothing when this is zero,
+		// which is what it costs a game that never asks.
+		m_emerge->gen_notify_on = readFlagString(params.gen_notify_flags,
+				flagdesc_gennotify, nullptr);
+		if(m_emerge->gen_notify_on != 0)
+			m_gennotify = gennotify;
 
 		// The biomes the game registered, which is what a world is made of:
 		// without them every mapgen builds out of the default biome the
@@ -412,7 +477,14 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 		// or as the arrays a mod wrote in Lua; either way what it holds are
 		// this game's own ids, so nothing is pended for resolution.
 		size_t decos_added = 0;
+		// Which decoration of the game's the manager's own numbering means.
+		// They are not the same list: one that cannot be built is left out
+		// here and everything after it shifts, while the game still knows
+		// it by the number it registered it in. gennotify reports the
+		// manager's number, so this is what turns it back.
+		size_t source_i = 0;
 		for(const Params::Decoration &src : params.decorations){
+			const size_t this_source = source_i++;
 			DecorationType type;
 			if(!deco_type_of(src.type, type)){
 				log_w(MODULE, "Decoration \"%s\": unknown deco_type \"%s\"",
@@ -486,10 +558,22 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 			}
 			d->reset(true);
 			m_emerge->decomgr->add(d);
+			m_deco_source_of_index.push_back(this_source);
 			decos_added++;
 		}
 		if(!params.decorations.empty())
 			log_v(MODULE, "%zu decorations", decos_added);
+
+		// The decorations a mod asked to hear about, by the manager's
+		// numbering, which is what the notifier compares against
+		for(uint32_t id : params.gen_notify_deco_ids){
+			for(size_t i = 0; i < m_deco_source_of_index.size(); i++){
+				if(m_deco_source_of_index[i] != (size_t)id)
+					continue;
+				m_emerge->m_no_deco_ids.insert((u32)i);
+				break;
+			}
+		}
 
 		// The managers registered their node names while they were built;
 		// now that they are, those can be looked up
@@ -644,6 +728,20 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 		return pv::Vector3DInt32(PADDING, PADDING, PADDING);
 	}
 
+	// "decoration#<n>" as the game knows it: what the notifier writes is
+	// the manager's own numbering, and a decoration it could not build is
+	// not in that. Anything else passes through.
+	ss_ deco_name_of(const ss_ &name)
+	{
+		static const ss_ prefix = "decoration#";
+		if(name.compare(0, prefix.size(), prefix) != 0)
+			return name;
+		const size_t index = (size_t)atoi(name.c_str() + prefix.size());
+		if(index >= m_deco_source_of_index.size())
+			return name;
+		return prefix + itos(m_deco_source_of_index[index]);
+	}
+
 	// Out of the mapgen's noise, touching no map and generating nothing.
 	// Luanti's own spawn search asks this first and only then looks at the
 	// map; MAX_MAP_GENERATION_LIMIT is how a mapgen says "not here".
@@ -690,6 +788,26 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 		data.vmanip->emergeAll();
 
 		m_mapgen->makeChunk(&data);
+
+		// What it made and was asked to report, left where the module can
+		// pick it up when it runs the game's on_generated over this section
+		if(m_gennotify){
+			std::map<std::string, std::vector<v3s16>> events;
+			m_mapgen->gennotify.getEvents(events);
+			m_mapgen->gennotify.clearEvents();
+			sv_<GennotifyEvent> out;
+			for(const auto &pair : events){
+				const ss_ name = deco_name_of(pair.first);
+				for(const v3s16 &p : pair.second){
+					GennotifyEvent e;
+					e.name = name;
+					e.x = p.X; e.y = p.Y; e.z = p.Z;
+					out.push_back(e);
+				}
+			}
+			m_gennotify->put(GennotifyStore::key_of(section_p.getX(),
+					section_p.getY(), section_p.getZ()), std::move(out));
+		}
 
 		// And into the volume, which is the same box in the same order:
 		// what a MapNode holds is what VoxelFormat::luanti() binds
@@ -823,7 +941,20 @@ struct Module: public interface::Module, public luanti_mapgen::Interface
 					"world of one node instead", cs(params.mgname));
 			return new SinglenodeGenerator(params.singlenode_word);
 		}
-		return new VendoredGenerator(params, (int)params.section_size);
+		return new VendoredGenerator(params, (int)params.section_size,
+				m_gennotify);
+	}
+
+	// What the generators have made and were asked to report; see
+	// take_gennotify() in api.h
+	sp_<GennotifyStore> m_gennotify = sp_<GennotifyStore>(
+			new GennotifyStore());
+
+	void take_gennotify(int section_x, int section_y, int section_z,
+			sv_<GennotifyEvent> &out)
+	{
+		m_gennotify->take(GennotifyStore::key_of(section_x, section_y,
+				section_z), out);
 	}
 
 	sv_<ss_> list_mapgens()

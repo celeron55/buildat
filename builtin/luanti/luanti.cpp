@@ -1619,6 +1619,11 @@ struct Module: public interface::Module, public luanti::Interface
 		params.ores = mapgen_ores();
 		params.decorations = mapgen_decorations();
 		params.section_size = m_section_size.getX();
+		mapgen_gen_notify(params.gen_notify_flags, params.gen_notify_deco_ids);
+		if(!params.gen_notify_flags.empty())
+			log_v(MODULE, "gennotify: \"%s\", %zu decoration ids",
+					cs(params.gen_notify_flags),
+					params.gen_notify_deco_ids.size());
 		// Kept, because the spawn search asks the same mapgen where the
 		// ground is without generating anything; see l_spawn_level()
 		m_mapgen_params = params;
@@ -1819,6 +1824,43 @@ struct Module: public interface::Module, public luanti::Interface
 		}
 		lua_pop(L, 1);
 		return np;
+	}
+
+	// What the game asked the mapgen to report, which is what
+	// core.set_gen_notify() has been told. Read once, when the world's
+	// generator is made.
+	//
+	// simplified: a mod that calls core.set_gen_notify() after the world
+	// has started is not heard -- the generator holds a copy and runs in
+	// another thread. Every mod that asks does it while it loads, which is
+	// before this is read. Telling the generator later would be a message
+	// to luanti_mapgen and a lock around the flags in every mapgen.
+	void mapgen_gen_notify(ss_ &flags_out, sv_<uint32_t> &deco_ids_out)
+	{
+		if(!m_lua)
+			return;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "get_gen_notify");
+		if(lua_pcall(L, 0, 2, 0) != 0){
+			log_w(MODULE, "get_gen_notify(): %s",
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+			lua_settop(L, base);
+			return;
+		}
+		if(lua_isstring(L, -2))
+			flags_out = lua_tostring(L, -2);
+		if(lua_istable(L, -1)){
+			const size_t n = lua_objlen(L, -1);
+			for(size_t i = 1; i <= n; i++){
+				lua_rawgeti(L, -1, (int)i);
+				deco_ids_out.push_back((uint32_t)lua_tonumber(L, -1));
+				lua_pop(L, 1);
+			}
+		}
+		lua_settop(L, base);
 	}
 
 	// The ores the game registered, in the shape luanti_mapgen builds its
@@ -2255,6 +2297,12 @@ struct Module: public interface::Module, public luanti::Interface
 		const int32_t x0 = (int32_t)section_p.getX() * sx;
 		const int32_t y0 = (int32_t)section_p.getY() * sy;
 		const int32_t z0 = (int32_t)section_p.getZ() * sz;
+		// Taken before the lock, because it is another module's answer
+		const ss_ gennotify = gennotify_of(section_p);
+		{
+			interface::MutexScope ms(m_lua_mutex);
+			set_global_string("__luanti_gennotify", gennotify);
+		}
 		char buf[256];
 		snprintf(buf, sizeof buf,
 				"core.__run_on_generated(%i, %i, %i, %i, %i, %i, %i)",
@@ -2279,6 +2327,25 @@ struct Module: public interface::Module, public luanti::Interface
 		// is quick again. This is what set_stream_budget() is for, and only
 		// this module can see how long its own mods took.
 		m_stream_budget = (took > (int64_t)(STEP_S * 1000000.0)) ? 1 : 2;
+	}
+
+	// What the mapgen made in this section and was asked to report, as a
+	// line per event: the name, and where it is. A string because that is
+	// the boundary the rest of this crossing uses, and because a section
+	// with three hundred decorations in it is ten kilobytes of it.
+	ss_ gennotify_of(const pv::Vector3DInt16 &section_p)
+	{
+		sv_<luanti_mapgen::GennotifyEvent> events;
+		luanti_mapgen::access(m_server, [&](luanti_mapgen::Interface *im){
+			im->take_gennotify(section_p.getX(), section_p.getY(),
+					section_p.getZ(), events);
+		});
+		ss_ out;
+		for(const luanti_mapgen::GennotifyEvent &e : events){
+			out += e.name;
+			out += " "+itos(e.x)+" "+itos(e.y)+" "+itos(e.z)+"\n";
+		}
+		return out;
 	}
 
 	// Luanti's get_blockseed2, which is what a mapgen's randomness starts
