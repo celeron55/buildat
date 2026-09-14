@@ -2553,6 +2553,27 @@ function core.__object_appearances()
 	return out
 end
 
+-- Where an object is drawn, which is where it is unless it is riding
+-- something: a child is at its parent's place plus the offset it was
+-- attached with. Luanti's attachment offsets are in its own units, ten to
+-- the node, and the chain can be more than one deep -- a player on a seat
+-- on a cart -- so this follows it up, with a bound in case a mod makes a
+-- ring of them.
+local function drawn_pos_of(o, depth)
+	local a = o.attached_to
+	local parent = a and state_of(a.ref) or nil
+	if parent == nil or (depth or 0) > 4 then
+		return o.pos
+	end
+	local at = drawn_pos_of(parent, (depth or 0) + 1)
+	local offset = a.position or {x = 0, y = 0, z = 0}
+	return {
+		x = at.x + (offset.x or offset[1] or 0) / 10,
+		y = at.y + (offset.y or offset[2] or 0) / 10,
+		z = at.z + (offset.z or offset[3] or 0) / 10,
+	}
+end
+
 local function show_objects()
 	local v = {}
 	local props_changed = {}
@@ -2567,10 +2588,11 @@ local function show_objects()
 			local sx = math.max(box[4] - box[1], 0.05)
 			local sy = math.max(box[5] - box[2], 0.05)
 			local sz = math.max(box[6] - box[3], 0.05)
+			local at = drawn_pos_of(o, 0)
 			v[#v + 1] = id
-			v[#v + 1] = o.pos.x + (box[1] + box[4]) / 2
-			v[#v + 1] = o.pos.y + (box[2] + box[5]) / 2
-			v[#v + 1] = o.pos.z + (box[3] + box[6]) / 2
+			v[#v + 1] = at.x + (box[1] + box[4]) / 2
+			v[#v + 1] = at.y + (box[2] + box[5]) / 2
+			v[#v + 1] = at.z + (box[3] + box[6]) / 2
 			v[#v + 1] = sx
 			v[#v + 1] = sy
 			v[#v + 1] = sz
