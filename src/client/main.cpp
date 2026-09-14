@@ -77,8 +77,8 @@ int main(int argc, char *argv[])
 
 	client::Config &config = g_client_config;
 
-	const char opts[100] = "hs:P:C:D:U:l:L:m:u:w:o:c:";
-	const char usagefmt[1200] =
+	const char opts[100] = "hs:P:C:D:U:l:L:m:u:w:o:c:R";
+	const char usagefmt[1400] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
 			"  -s [address]         Specify server address\n"
@@ -100,6 +100,8 @@ int main(int argc, char *argv[])
 			"                       One command per line. @file reads a file,\n"
 			"                       - reads standard input as it arrives.\n"
 			"                       See doc/client_commands.txt\n"
+			"  -R                   A local server this client starts restarts\n"
+			"                       a module when its source changes\n"
 			;
 
 	int forced_w = 0, forced_h = 0;
@@ -219,6 +221,9 @@ int main(int argc, char *argv[])
 			config.set("command_seq_enabled", true);
 			break;
 		}
+		case 'R':
+			config.set("reload_modules", true);
+			break;
 		default:
 			fprintf(stderr, "Invalid command-line argument\n");
 			fprintf(stderr, usagefmt, argv[0]);

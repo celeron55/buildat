@@ -78,7 +78,7 @@ int main(int argc, char *argv[])
 
 	std::string module_path;
 
-	const char opts[100] = "hm:r:i:S:D:U:c:l:L:C:A:P:w";
+	const char opts[100] = "hm:r:i:S:D:U:c:l:L:C:A:P:wR";
 	const char usagefmt[1000] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
@@ -96,6 +96,8 @@ int main(int argc, char *argv[])
 			"  -P [port]            Set network port (default 29500)\n"
 			"  -w                   Watch served files and push changes to\n"
 			"                       connected clients (for development)\n"
+			"  -R                   Restart a module when its source changes\n"
+			"                       (for development; off by default)\n"
 			;
 
 	int c;
@@ -145,6 +147,9 @@ int main(int argc, char *argv[])
 		case 'w':
 			config.set("watch_client_files", true);
 			break;
+		case 'R':
+			config.set("reload_modules", true);
+			break;
 		case 'l':
 			log_set_max_level(atoi(c55_optarg));
 			break;
@@ -168,6 +173,15 @@ int main(int argc, char *argv[])
 	}
 
 	std::cerr<<"Buildat server"<<std::endl;
+
+	// The whole fault this warns about is a restart nobody was told about,
+	// so it says once that it can happen; "reload_module" in the log is
+	// where it did
+	if(config.get<bool>("reload_modules")){
+		log_i(MODULE, "Module hot-reload is on: a module is restarted when "
+				"its source changes, and whatever it was holding goes with "
+				"it");
+	}
 
 	signal_handler_init();
 

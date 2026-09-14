@@ -150,6 +150,12 @@ Edit something and then restart the client (CTRL+C in terminal 2):
     $ vim games/minigame/main/main.cpp
     $ vim builtin/network/network.cpp
 
+The server can do that part for you while you develop: `-R` makes it restart
+a module when its source changes, and `-w` pushes an edited client script to
+the clients that have it. Both are off by default -- a restart throws away
+whatever the module was holding, and neither belongs in a run whose output
+is being measured.
+
 Buildat Windows How-To
 ======================
 

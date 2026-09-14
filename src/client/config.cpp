@@ -26,6 +26,10 @@ Config::Config()
 	// Where -L put the client's own log, kept so that a local server this
 	// client starts can be given one beside it; see l_start_local_server()
 	set_default("log_file", "");
+	// Passed on to a local server this client starts, the way the log path
+	// is: the server restarts a module when its source changes only if it
+	// was asked to. See -R, and "reload_modules" in server/config.cpp.
+	set_default("reload_modules", false);
 	set_default("command_seq", "");
 	set_default("command_seq_enabled", false);
 	set_default("command_seq_stdin", false);

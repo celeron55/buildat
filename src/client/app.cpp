@@ -1876,6 +1876,10 @@ struct CApp: public App, public magic::Application
 			args.push_back(itos(log_get_max_level()));
 			log_i(MODULE, "server log: %s", cs(server_log));
 		}
+		// And whether that server restarts a module when its source
+		// changes, which is off unless this client was asked for it
+		if(g_client_config.get<bool>("reload_modules"))
+			args.push_back("-R");
 		g_local_server = interface::process::start(server_path, args);
 		if(!g_local_server.valid()){
 			lua_pushboolean(L, false);

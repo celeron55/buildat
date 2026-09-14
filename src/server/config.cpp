@@ -30,6 +30,16 @@ Config::Config()
 	// game whose media is a few hundred megabytes, and it is not something a
 	// production server wants at all. On for development, off otherwise.
 	set_default("watch_client_files", false);
+
+	// Whether a module is restarted when its own source changes. It is the
+	// same kind of thing as the line above and off for the same kind of
+	// reason, with one of its own: a reload throws away whatever the module
+	// was holding -- for builtin/luanti the running game, the joined player,
+	// every core.after a probe registered -- and nothing says the run is now
+	// invalid, so a scripted run whose screenshots come a minute in
+	// photographs a world that restarted under it. On for development, off
+	// otherwise; see -R.
+	set_default("reload_modules", false);
 }
 
 bool Config::check_paths()

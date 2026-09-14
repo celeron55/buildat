@@ -700,29 +700,37 @@ struct CState: public State, public interface::Server
 	{
 		ss_ init_cpp_path = info.path+"/"+info.name+".cpp";
 
-		// Set up file watch
-
-		sv_<ss_> files_to_watch = {init_cpp_path};
+		// What this module is built out of. The build cache is keyed on all
+		// of it, so the scan happens whether or not anything is watched.
 		sv_<ss_> include_dirs = m_compiler->include_directories;
 		include_dirs.push_back(m_modules_path);
 		sv_<ss_> includes = list_includes(init_cpp_path, include_dirs);
 		log_d(MODULE, "Includes: %s", cs(dump(includes)));
-		files_to_watch.insert(files_to_watch.end(), includes.begin(),
-				includes.end());
 
-		if(m_module_file_watches.count(info.name) == 0){
-			sp_<interface::FileWatch> w(interface::createFileWatch());
-			for(const ss_ &watch_path : files_to_watch){
-				ss_ dir_path = interface::fs::strip_file_name(watch_path);
-				w->add(dir_path, [this, info, watch_path](const ss_ &modified_path){
-					if(modified_path != watch_path)
-						return;
-					log_i(MODULE, "Module modified: %s: %s",
-							cs(info.name), cs(info.path));
-					m_modified_modules.insert(info.name);
-				});
+		// And the watch that restarts the module when one of them changes,
+		// if this server is one that does that. Off by default: see
+		// "reload_modules" in server/config.cpp for why, and -R for turning
+		// it on. No inotify watch exists at all when it is off.
+		if(g_server_config.get<bool>("reload_modules")){
+			sv_<ss_> files_to_watch = {init_cpp_path};
+			files_to_watch.insert(files_to_watch.end(), includes.begin(),
+					includes.end());
+
+			if(m_module_file_watches.count(info.name) == 0){
+				sp_<interface::FileWatch> w(interface::createFileWatch());
+				for(const ss_ &watch_path : files_to_watch){
+					ss_ dir_path = interface::fs::strip_file_name(watch_path);
+					w->add(dir_path, [this, info, watch_path](
+							const ss_ &modified_path){
+						if(modified_path != watch_path)
+							return;
+						log_i(MODULE, "Module modified: %s: %s",
+								cs(info.name), cs(info.path));
+						m_modified_modules.insert(info.name);
+					});
+				}
+				m_module_file_watches[info.name] = w;
 			}
-			m_module_file_watches[info.name] = w;
 		}
 
 		// Build
