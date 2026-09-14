@@ -5517,12 +5517,14 @@ struct Module: public interface::Module, public luanti::Interface
 	// becomes "unknown", which is a node you can see and dig rather than a
 	// hole.
 	//
-	// simplified: the nodes and nothing else. Node metadata, the timers and
-	// the static objects a block carries are walked past -- an imported
-	// world starts without its chests' contents and without its entities.
-	// Metadata wants the save that step 5c of the persistence plan is about,
-	// and objects want a static_save that means something; both are named in
-	// mapblock.h where they are skipped.
+	// What comes over is the nodes, what hangs off them, the timer on a node
+	// that had one and the entities the blocks were holding.
+	//
+	// simplified: an imported entity is made where it was and is live from
+	// then on. Luanti keeps a block's entities with the block and wakes them
+	// when somebody comes near; here they are all in the world at once,
+	// which is the same shortcut as an object outside the active range
+	// staying in the world and has the same upgrade path.
 
 	void import_world(const ss_ &luanti_world_path)
 	{
