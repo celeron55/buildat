@@ -750,6 +750,8 @@ struct Module: public interface::Module, public luanti::Interface
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_object_props"));
 		m_server->sub_event(this, Event::t(
+				"network:packet_received/luanti:get_dig_props"));
+		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:fields"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:inv_action"));
@@ -774,6 +776,8 @@ struct Module: public interface::Module, public luanti::Interface
 				on_get_item_images, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:get_object_props",
 				on_get_object_props, network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:get_dig_props",
+				on_get_dig_props, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:fields",
 				on_fields, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:inv_action",
@@ -4895,6 +4899,24 @@ struct Module: public interface::Module, public luanti::Interface
 		});
 		log_v(MODULE, "C%zu: %zu object looks", (size_t)packet.sender,
 				flat.size() / 3);
+	}
+
+	// How long a dig takes and how far a tool reaches, which the client
+	// works out for itself rather than asking per dig. See core.__dig_props()
+	// for what a record holds.
+	void on_get_dig_props(const network::Packet &packet)
+	{
+		sv_<ss_> flat = string_list_from_lua("__dig_props");
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(flat);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(packet.sender, "luanti:dig_props", os.str());
+		});
+		log_v(MODULE, "C%zu: %zu dig prop records", (size_t)packet.sender,
+				flat.size());
 	}
 
 	// A core.__<name>() that answers with an array of strings, as a vector

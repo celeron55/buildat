@@ -2569,6 +2569,91 @@ function core.__item_images()
 	return out
 end
 
+-- core.__dig_props() -> {record, record, ...}
+--
+-- What a client needs to work a dig out for itself: how long it takes, how
+-- far it reaches and what the slot under the mouse is called. Luanti's
+-- client does that arithmetic rather than asking, because a round trip in
+-- front of every dig is what a game stuttering looks like; the server
+-- checks again when the dig completes, because it trusts the client with
+-- neither.
+--
+-- Two kinds of record, each one string of tab-separated fields:
+--
+--   i <name> <range> <short description> <full_punch_interval>
+--      <group>:<maxlevel>:<uses>:<rating>=<time>,<rating>=<time> ...
+--   n <name> <group>=<rating>,<group>=<rating>
+--
+-- An item with no tool_capabilities has an empty fourth field and no
+-- groupcap fields after it, which is what says it has none: the hand's are
+-- used in its place, and that is the client's rule to apply.
+--
+-- Only the groups some tool's groupcap rates cross, plus the two the dig
+-- arithmetic reads by name. A game's nodes carry groups for its own mods to
+-- read -- VoxeLibre's 2536 nodes times its full group table is a large
+-- packet of nothing, and none of it is ever looked at here.
+local function dig_field(s)
+	return (tostring(s):gsub("[\t\r\n]", " "))
+end
+
+-- What Luanti's ItemStack::getShortDescription() answers with: the item's
+-- own short_description, or the first line of its description
+local function short_description(def)
+	local s = def.short_description
+	if type(s) ~= "string" or s == "" then
+		s = def.description
+	end
+	if type(s) ~= "string" then
+		return ""
+	end
+	return string.match(s, "^[^\n]*") or ""
+end
+
+function core.__dig_props()
+	local out = {}
+	local rated = {level = true, dig_immediate = true}
+	for name, def in pairs(core.registered_items) do
+		local caps = def.tool_capabilities
+		local fields = {"i", name, tostring(tonumber(def.range) or -1),
+				dig_field(short_description(def)),
+				caps and tostring(tonumber(caps.full_punch_interval) or 1) or ""}
+		local groupcaps = caps and caps.groupcaps or nil
+		if type(groupcaps) == "table" then
+			for group, cap in pairs(groupcaps) do
+				rated[group] = true
+				local times = {}
+				if type(cap.times) == "table" then
+					for rating, time in pairs(cap.times) do
+						times[#times + 1] = tostring(rating) .. "=" ..
+								tostring(time)
+					end
+				end
+				fields[#fields + 1] = group .. ":" ..
+						tostring(tonumber(cap.maxlevel) or 1) .. ":" ..
+						tostring(tonumber(cap.uses) or 0) .. ":" ..
+						table.concat(times, ",")
+			end
+		end
+		out[#out + 1] = table.concat(fields, "\t")
+	end
+	for name, def in pairs(core.registered_nodes) do
+		local groups = def.groups
+		if type(groups) == "table" then
+			local pairs_out = {}
+			for group, rating in pairs(groups) do
+				if rated[group] and type(rating) == "number" then
+					pairs_out[#pairs_out + 1] = group .. "=" .. tostring(rating)
+				end
+			end
+			if #pairs_out > 0 then
+				out[#out + 1] = "n\t" .. name .. "\t" ..
+						table.concat(pairs_out, ",")
+			end
+		end
+	end
+	return out
+end
+
 -- core.get_dig_params(groups, tool_capabilities, [wear])
 --
 -- How long a tool takes on a node and what the use costs it, which is what

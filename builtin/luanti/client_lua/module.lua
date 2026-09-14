@@ -762,6 +762,164 @@ local function parse_stack(str)
 	return {name = name, count = tonumber(count) or 1}
 end
 
+--
+-- What a dig costs, and how far one reaches
+--
+-- The client works both out for itself, which is what Luanti does: the
+-- server answering "this one takes 1.4 seconds" when the button goes down
+-- puts the network in front of every dig. What it takes is the nodes'
+-- groups and the items' tool capabilities, which arrive once as
+-- luanti:dig_props; the arithmetic under that is Luanti's getDigParams()
+-- and getToolRange(), and is the same code extensions/luanti_client has in
+-- itemdef.lua and inventory.lua.
+
+-- item name -> {range =, description =, caps =}; see core.__dig_props()
+local item_props = {}
+-- node name -> {group = rating}, only the groups a tool rates
+local node_groups = {}
+
+local function split_tab(s)
+	local fields = {}
+	for field in string.gmatch(s .. "\t", "([^\t]*)\t") do
+		fields[#fields + 1] = field
+	end
+	return fields
+end
+
+local function parse_item_record(fields)
+	local caps = nil
+	if fields[5] ~= "" then
+		caps = {
+			full_punch_interval = tonumber(fields[5]) or 1,
+			groupcaps = {},
+		}
+		for i = 6, #fields do
+			local group, maxlevel, uses, times =
+					string.match(fields[i], "^([^:]*):([^:]*):([^:]*):(.*)$")
+			if group then
+				local cap = {
+					maxlevel = tonumber(maxlevel) or 1,
+					uses = tonumber(uses) or 0,
+					times = {},
+				}
+				for rating, time in string.gmatch(times, "([^=,]+)=([^,]+)") do
+					cap.times[tonumber(rating)] = tonumber(time)
+				end
+				caps.groupcaps[group] = cap
+			end
+		end
+	end
+	item_props[fields[2]] = {
+		range = tonumber(fields[3]) or -1,
+		description = fields[4],
+		caps = caps,
+	}
+end
+
+local function parse_node_record(fields)
+	local groups = {}
+	for group, rating in string.gmatch(fields[3] or "", "([^=,]+)=([^,]+)") do
+		groups[group] = tonumber(rating)
+	end
+	node_groups[fields[2]] = groups
+end
+
+-- What the tooltip under the mouse says, which is the item's own short
+-- description or the first line of its long one
+function M.item_description(item_name)
+	local props = item_props[item_name]
+	return props and props.description or nil
+end
+
+-- The groups a tool rates this node by, by the name the voxel registry
+-- holds -- VoxelDefinition::name.block_name is the node's name
+function M.node_groups(node_name)
+	return node_groups[node_name]
+end
+
+local function caps_of(stack_str)
+	local stack = parse_stack(stack_str)
+	local props = stack and item_props[stack.name]
+	return props and props.caps or nil
+end
+
+-- Luanti's ItemStack::getToolCapabilities(): what is wielded, then the hand
+-- slot when the wielded item has none, then the empty item's
+function M.dig_capabilities(wield_index)
+	local main = M.inventory.main
+	local caps = caps_of(main and main[wield_index])
+	if caps then
+		return caps
+	end
+	local hand = M.inventory.hand
+	caps = caps_of(hand and hand[1])
+	if caps then
+		return caps
+	end
+	local empty = item_props[""]
+	return empty and empty.caps or nil
+end
+
+-- How long the wielded item takes on this node, or nil for a node it cannot
+-- dig at all. Luanti's getDigParams(): the group that digs it fastest wins,
+-- a tool whose maxlevel is more than one above the node's level is faster
+-- still, and dig_immediate is a fixed time.
+function M.dig_time(node_name, wield_index)
+	local caps = M.dig_capabilities(wield_index)
+	local groups = node_groups[node_name]
+	if caps == nil or groups == nil then
+		return nil
+	end
+	if not caps.groupcaps.dig_immediate then
+		local immediate = groups.dig_immediate
+		if immediate == 2 then
+			return 0.5
+		elseif immediate == 3 then
+			return 0
+		end
+	end
+	local level = groups.level or 0
+	local best = nil
+	for name, cap in pairs(caps.groupcaps) do
+		local leveldiff = cap.maxlevel - level
+		if leveldiff >= 0 then
+			local rating = groups[name]
+			local time = rating and cap.times[rating]
+			if time then
+				if leveldiff > 1 then
+					time = time / leveldiff
+				end
+				if best == nil or time < best then
+					best = time
+				end
+			end
+		end
+	end
+	return best
+end
+
+-- How far the player can reach, in nodes. Luanti's getToolRange(): the
+-- wielded item's own range, the hand's when it has none, and four when
+-- neither says.
+function M.dig_range(wield_index)
+	local main = M.inventory.main
+	local stack = parse_stack(main and main[wield_index])
+	local props = stack and item_props[stack.name]
+	local range = props and props.range or -1
+	if range >= 0 then
+		return range
+	end
+	local hand = M.inventory.hand
+	local hand_stack = parse_stack(hand and hand[1])
+	local hand_props = item_props[hand_stack and hand_stack.name or ""] or
+			item_props[""]
+	local hand_range = hand_props and hand_props.range or -1
+	if hand_range >= 0 then
+		return hand_range
+	end
+	return 4
+end
+
 local ui = nil
 local form = nil          -- {formname =, spec =, at =, state =, drawn =}
 local player_spec = ""    -- what the player's own inventory key opens
@@ -1064,6 +1222,23 @@ buildat.sub_packet("luanti:player_formspec", function(data)
 	player_spec = values[1] or ""
 end)
 
+buildat.sub_packet("luanti:dig_props", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	local items, nodes = 0, 0
+	for i = 1, #values do
+		local fields = split_tab(values[i])
+		if fields[1] == "i" then
+			parse_item_record(fields)
+			items = items + 1
+		elseif fields[1] == "n" then
+			parse_node_record(fields)
+			nodes = nodes + 1
+		end
+	end
+	log:info("luanti:dig_props: " .. items .. " items, " .. nodes ..
+			" nodes with groups")
+end)
+
 buildat.sub_packet("luanti:item_images", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	local n = 0
@@ -1079,6 +1254,7 @@ end)
 buildat.send_packet("luanti:get_texmods", "")
 buildat.send_packet("luanti:get_item_images", "")
 buildat.send_packet("luanti:get_object_props", "")
+buildat.send_packet("luanti:get_dig_props", "")
 
 return M
 -- vim: set noet ts=4 sw=4:
