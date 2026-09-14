@@ -2270,7 +2270,23 @@ local function appearance_of(o)
 		return "cube", textures[1] or ""
 	end
 	if visual == "mesh" then
-		return "cube", textures[1] or ""
+		-- A model: the mesh file, the size it is drawn at and the whole
+		-- texture list -- one per material -- because none of that fits in
+		-- a texture name. The client asks for the mesh itself by name, once,
+		-- on a channel of its own; see core.__model_quads().
+		local mesh = props.mesh or ""
+		if mesh == "" then
+			return "cube", textures[1] or ""
+		end
+		local v = props.visual_size or {}
+		local detail = {mesh,
+				tostring(v.x or v[1] or 1) .. "," ..
+				tostring(v.y or v[2] or 1) .. "," ..
+				tostring(v.z or v[3] or v.x or v[1] or 1)}
+		for _, t in ipairs(textures) do
+			detail[#detail + 1] = t
+		end
+		return "mesh", textures[1] or "", table.concat(detail, "\1")
 	end
 	if visual == "sprite" or visual == "upright_sprite" then
 		return "sprite", textures[1] or ""
@@ -2299,6 +2315,7 @@ function core.__object_appearances()
 		out[#out + 1] = tostring(id)
 		out[#out + 1] = look[1]
 		out[#out + 1] = look[2]
+		out[#out + 1] = look[3] or ""
 	end
 	return out
 end
@@ -2325,13 +2342,16 @@ local function show_objects()
 			v[#v + 1] = sy
 			v[#v + 1] = sz
 			v[#v + 1] = o.rot and o.rot.y or 0
-			local kind, texture = appearance_of(o)
+			local kind, texture, detail = appearance_of(o)
+			detail = detail or ""
 			local was = sent_appearance[id]
-			if not was or was[1] ~= kind or was[2] ~= texture then
-				sent_appearance[id] = {kind, texture}
+			if not was or was[1] ~= kind or was[2] ~= texture or
+					was[3] ~= detail then
+				sent_appearance[id] = {kind, texture, detail}
 				props_changed[#props_changed + 1] = tostring(id)
 				props_changed[#props_changed + 1] = kind
 				props_changed[#props_changed + 1] = texture
+				props_changed[#props_changed + 1] = detail
 			end
 		end
 	end

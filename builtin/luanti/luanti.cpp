@@ -752,6 +752,8 @@ struct Module: public interface::Module, public luanti::Interface
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_dig_props"));
 		m_server->sub_event(this, Event::t(
+				"network:packet_received/luanti:get_model"));
+		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:fields"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:inv_action"));
@@ -778,6 +780,8 @@ struct Module: public interface::Module, public luanti::Interface
 				on_get_object_props, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:get_dig_props",
 				on_get_dig_props, network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:get_model",
+				on_get_model, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:fields",
 				on_fields, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:inv_action",
@@ -4976,7 +4980,68 @@ struct Module: public interface::Module, public luanti::Interface
 			inetwork->send(packet.sender, "luanti:object_props", os.str());
 		});
 		log_v(MODULE, "C%zu: %zu object looks", (size_t)packet.sender,
-				flat.size() / 3);
+				flat.size() / 4);
+	}
+
+	// The quads of one model, asked for by name: an object whose visual is a
+	// mesh is drawn as that mesh, and the client is told which file by the
+	// appearance and asks for the file's contents once. The same reader a
+	// mesh node goes through, so a format nothing reads answers with
+	// nothing and the object keeps the cube it had.
+	//
+	// The numbers cross as text, which is what every other flat channel
+	// here does: a model is asked for once and devtest's frog is thirty
+	// kilobytes of it.
+	void on_get_model(const network::Packet &packet)
+	{
+		sv_<ss_> asked;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(asked);
+		} catch(std::exception &e){
+			log_w(MODULE, "luanti:get_model: %s", e.what());
+			return;
+		}
+		if(asked.empty() || asked[0].empty())
+			return;
+		const ss_ name = asked[0];
+		sv_<ss_> flat{name};
+		{
+			interface::MutexScope ms(m_lua_mutex);
+			// Scale 1: an object's model is scaled by its visual_size,
+			// which is the client's to apply and is not the same number
+			// for two objects of one kind
+			const sv_<interface::VoxelQuad> quads = mesh_quads(name, 1.0f);
+			flat.reserve(1 + quads.size() * 21);
+			char buf[32];
+			for(const interface::VoxelQuad &q : quads){
+				snprintf(buf, sizeof buf, "%d", (int)q.tile);
+				flat.push_back(buf);
+				for(size_t c = 0; c < 4; c++){
+					for(size_t k = 0; k < 3; k++){
+						snprintf(buf, sizeof buf, "%g", q.p[c][k]);
+						flat.push_back(buf);
+					}
+				}
+				for(size_t c = 0; c < 4; c++){
+					for(size_t k = 0; k < 2; k++){
+						snprintf(buf, sizeof buf, "%g", q.uv[c][k]);
+						flat.push_back(buf);
+					}
+				}
+			}
+		}
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(flat);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(packet.sender, "luanti:model", os.str());
+		});
+		log_v(MODULE, "C%zu: model \"%s\": %zu quads", (size_t)packet.sender,
+				cs(name), (flat.size() - 1) / 21);
 	}
 
 	// How long a dig takes and how far a tool reaches, which the client

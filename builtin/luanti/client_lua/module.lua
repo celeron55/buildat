@@ -377,7 +377,101 @@ local function object_texture(expr)
 	return tex
 end
 
+-- mesh name -> {quads = {...}} once the server has answered, or false while
+-- it is being asked for: a model is asked for by name and arrives once.
+local models = {}
+-- mesh name and textures -> the node its geometry was built on, which every
+-- object of that kind is a clone of. Every vertex is a sandbox call, and the
+-- extension measured a VoxeLibre skeleton at 250 ms of them; a clone is
+-- copied inside the engine instead.
+local model_templates = {}
+
+local function want_model(name)
+	if name == nil or name == "" or models[name] ~= nil then
+		return
+	end
+	models[name] = false
+	buildat.send_packet("luanti:get_model",
+			cereal.binary_output({name}, {"array", "string"}))
+end
+
+-- The quads of one model, grouped by the material they wear, on a node of
+-- their own. Both windings, because a model's is not something to rely on.
+local function build_model(node, quads, textures)
+	local by_group = {}
+	local order = {}
+	for _, q in ipairs(quads) do
+		local g = q.tile + 1
+		if by_group[g] == nil then
+			by_group[g] = {}
+			order[#order + 1] = g
+		end
+		local into = by_group[g]
+		into[#into + 1] = q
+	end
+	table.sort(order)
+	local cg = node:CreateComponent("CustomGeometry")
+	cg:SetNumGeometries(#order)
+	for i = 1, #order do
+		cg:BeginGeometry(i - 1, magic.TRIANGLE_LIST)
+		for _, q in ipairs(by_group[order[i]]) do
+			for _, c in ipairs({1, 2, 3, 1, 3, 4, 1, 3, 2, 1, 4, 3}) do
+				local o = (c - 1) * 3
+				cg:DefineVertex(magic.Vector3(q.p[o + 1], q.p[o + 2],
+						q.p[o + 3]))
+				cg:DefineTexCoord(magic.Vector2(q.uv[(c - 1) * 2 + 1],
+						q.uv[(c - 1) * 2 + 2]))
+			end
+		end
+	end
+	cg:Commit()
+	cg.castShadows = false
+	local materials = {}
+	for i = 1, #order do
+		local material = magic.Material.new()
+		material:SetTechnique(0, magic.cache:GetResource("Technique",
+				"Techniques/DiffUnlitAlpha.xml"))
+		local tex = object_texture(textures[order[i]] or textures[1] or "")
+		if tex then
+			material:SetTexture(magic.TU_DIFFUSE, tex)
+		end
+		cg:SetMaterial(i - 1, material)
+		materials[i] = material
+	end
+	return cg, materials
+end
+
+local function model_template(look)
+	local key = look.mesh .. "\1" .. table.concat(look.textures or {}, "\1")
+	local entry = model_templates[key]
+	if entry == nil then
+		local node = object_scene:CreateChild("model_template")
+		node.enabled = false
+		local _, materials = build_model(node, models[look.mesh].quads,
+				look.textures or {})
+		entry = {node = node, materials = materials}
+		model_templates[key] = entry
+	end
+	return entry
+end
+
 local function make_object_node(look)
+	-- A model, if the quads have arrived: a clone of the template, whose
+	-- materials it is given again -- a Material made in Lua has no resource
+	-- name, so it is not an attribute Urho3D copies with the node
+	if look.kind == "mesh" and look.mesh ~= nil then
+		want_model(look.mesh)
+		if models[look.mesh] then
+			local template = model_template(look)
+			local node = template.node:Clone()
+			node.enabled = true
+			local cg = node:GetComponent("CustomGeometry")
+			for i = 1, #template.materials do
+				cg:SetMaterial(i - 1, template.materials[i])
+			end
+			return node
+		end
+	end
 	local node = object_scene:CreateChild("luanti_object")
 	local tex = object_texture(look.texture)
 	if look.kind == "sprite" and tex then
@@ -424,23 +518,91 @@ end
 local function object_node(id)
 	local have = object_nodes[id]
 	local look = object_looks[id] or {kind = "box", texture = ""}
-	if have and have.kind == look.kind and have.texture == look.texture then
+	-- A model whose quads arrived after the object did is built then: what
+	-- was drawn until now is the box it falls back to
+	local drawn_as = look.kind
+	if look.kind == "mesh" and not (look.mesh and models[look.mesh]) then
+		drawn_as = "box"
+	end
+	if have and have.drawn_as == drawn_as and have.texture == look.texture and
+			have.mesh == look.mesh then
 		return have.node
 	end
 	if have then
 		have.node:Remove()
 	end
 	local node = make_object_node(look)
-	object_nodes[id] = {node = node, kind = look.kind,
-			texture = look.texture}
+	object_nodes[id] = {node = node, drawn_as = drawn_as, mesh = look.mesh,
+			texture = look.texture, look = look}
 	return node
+end
+
+-- The detail a model's appearance carries: the mesh file, the size it is
+-- drawn at, and one texture per material. See appearance_of() in
+-- lua/entity.lua.
+local function parse_look(kind, texture, detail)
+	local look = {kind = kind, texture = texture}
+	if kind ~= "mesh" or detail == nil or detail == "" then
+		return look
+	end
+	local parts = {}
+	for part in string.gmatch(detail .. "\1", "([^\1]*)\1") do
+		parts[#parts + 1] = part
+	end
+	look.mesh = parts[1]
+	look.size = {1, 1, 1}
+	local i = 1
+	for n in string.gmatch(parts[2] or "", "[^,]+") do
+		look.size[i] = tonumber(n) or 1
+		i = i + 1
+	end
+	look.textures = {}
+	for j = 3, #parts do
+		look.textures[j - 2] = parts[j]
+	end
+	want_model(look.mesh)
+	return look
 end
 
 buildat.sub_packet("luanti:object_props", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
-	for i = 1, #values - 2, 3 do
-		object_looks[values[i]] = {kind = values[i + 1],
-				texture = values[i + 2]}
+	for i = 1, #values - 3, 4 do
+		object_looks[values[i]] = parse_look(values[i + 1], values[i + 2],
+				values[i + 3])
+	end
+end)
+
+buildat.sub_packet("luanti:model", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	local name = values[1]
+	if name == nil then
+		return
+	end
+	local quads = {}
+	for i = 2, #values - 20, 21 do
+		local q = {tile = tonumber(values[i]) or 0, p = {}, uv = {}}
+		for j = 1, 12 do
+			q.p[j] = tonumber(values[i + j]) or 0
+		end
+		for j = 1, 8 do
+			q.uv[j] = tonumber(values[i + 12 + j]) or 0
+		end
+		quads[#quads + 1] = q
+	end
+	log:info("luanti:model: " .. name .. ", " .. #quads .. " quads")
+	if #quads == 0 then
+		-- Nothing could read it: the objects of this kind keep their box,
+		-- and asking again would only ask again
+		models[name] = false
+		return
+	end
+	models[name] = {quads = quads}
+	-- Whatever was drawn as a box while this was on its way is drawn again
+	for id, have in pairs(object_nodes) do
+		if have.mesh == name and have.drawn_as ~= "mesh" then
+			have.node:Remove()
+			object_nodes[id] = nil
+		end
 	end
 end)
 
@@ -457,7 +619,18 @@ buildat.sub_packet("luanti:objects", function(data)
 		seen[id] = true
 		local node = object_node(id)
 		node.position = magic.Vector3(v[i + 1], v[i + 2], v[i + 3])
-		node.scale = magic.Vector3(v[i + 4], v[i + 5], v[i + 6])
+		local have = object_nodes[id]
+		if have.drawn_as == "mesh" then
+			-- A model is drawn at the size the object asked for rather than
+			-- at what it collides with, and it is authored in Luanti's own
+			-- scene units, where a node is ten across -- which is the tenth
+			local size = have.look.size or {1, 1, 1}
+			node.scale = magic.Vector3(math.max(0.005, size[1] / 10),
+					math.max(0.005, size[2] / 10),
+					math.max(0.005, size[3] / 10))
+		else
+			node.scale = magic.Vector3(v[i + 4], v[i + 5], v[i + 6])
+		end
 		-- Luanti's rotation is radians and Urho's euler is degrees; a
 		-- billboard turns with the camera and does not care
 		node.rotation = magic.Quaternion(0, math.deg(v[i + 7]), 0)
