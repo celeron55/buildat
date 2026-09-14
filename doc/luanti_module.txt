@@ -146,3 +146,42 @@ business. A launcher chooses its world from a menu after boot because it
 extends nothing; a game that does extend a Luanti game already knows which one
 at init, so its load_lua() calls come first. load_lua() after run_game() is an
 error, because Luanti loads its mods once, in order.
+
+Finding out what is slow
+------------------------
+
+Two things answer a porter's first questions on a build they already have.
+
+Which mod costs the startup: every mod is timed as it loads, and the slowest
+of them are one line at the end of it.
+
+    The mods that took longest to load: testnodes 2.9 s
+    Mods loaded in 3.2 s: 390 nodes, 26 craftitems, 81 tools, 499 items in all
+
+Which Lua function costs anything: BUILDAT_LUANTI_LUAPROF=<n> samples the
+module's Lua every n instructions -- 10000 is a sensible n and costs a few
+percent -- and the report comes at shutdown, most expensive first.
+
+    BUILDAT_LUANTI_LUAPROF=10000 BUILDAT_LUANTI_GAME=mineclone2 \
+        bin/buildat_server -m ../games/luanti_launcher -D ../user
+
+    Lua profile: 361580 samples, every 10000 instructions
+    Lua profile:  27.1%  98029  lua/classes.lua:171 parse_itemstring()
+    Lua profile:   9.5%  34233  lua/craft.lua:348 output_matches()
+
+It samples rather than instruments, because an instrumenting hook distorts
+exactly the small hot functions worth finding. A sample is attributed to the
+function it landed in -- file:linedefined -- since a name means little once a
+mod builds its callbacks out of closures. A mod's own file is named the same
+way as the module's, so "which of my mods" and "which of yours" are the same
+question and the same answer.
+
+The C++ side is perf, with no rebuild either:
+
+    perf record -F 199 --call-graph dwarf -o prof.data -- bin/buildat_server ...
+    perf report -i prof.data --stdio --no-children -g none
+
+The two together are how the seventh round was worked: the C++ profile named
+the voxel read path, and the Lua profile named the craft lookup that made
+VoxeLibre's startup two minutes. What each one found is in
+doc/most_important_performance_issues.txt.

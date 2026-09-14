@@ -401,6 +401,67 @@ static bool parse_combine(const ss_ &expr, int &w_out, int &h_out,
 	return true;
 }
 
+// A sampling profiler for the module's Lua, behind BUILDAT_LUANTI_LUAPROF.
+//
+// What it answers is a porter's question -- which of my two hundred mods,
+// and which function in it, is costing the startup or the step -- and it
+// answers it on a build they already have: set the variable and read the
+// report at shutdown. A tool that wants a rebuild is a tool nobody uses.
+//
+// Sampling rather than LUA_MASKCALL: an instrumenting hook distorts exactly
+// the small hot functions this is looking for, and the count hook is one
+// branch per N instructions. The default N is 10000, which is about a
+// percent of the run's time on this machine; BUILDAT_LUANTI_LUAPROF=<n>
+// sets it.
+//
+// One state, one thread, so a plain map and no locking. Attribution is to
+// the function the sample landed in -- short_src:linedefined -- which is
+// what a name means in Lua once a mod has built half its callbacks out of
+// closures.
+struct LuaProfiler
+{
+	bool enabled = false;
+	int interval = 10000;
+	sm_<ss_, size_t> samples;
+	size_t total = 0;
+};
+static LuaProfiler g_lua_prof;
+
+static void lua_prof_hook(lua_State *L, lua_Debug *ar)
+{
+	if(!lua_getinfo(L, "Sn", ar))
+		return;
+	ss_ key = ss_(ar->short_src) + ":" + itos(ar->linedefined);
+	if(ar->name != nullptr)
+		key += ss_(" ") + ar->name + "()";
+	g_lua_prof.samples[key]++;
+	g_lua_prof.total++;
+}
+
+// Every function the samples landed in, most first. Called at shutdown, and
+// cheap enough to call whenever else somebody wants one.
+static void lua_prof_report()
+{
+	if(!g_lua_prof.enabled || g_lua_prof.total == 0)
+		return;
+	sv_<std::pair<ss_, size_t>> sorted(
+			g_lua_prof.samples.begin(), g_lua_prof.samples.end());
+	std::sort(sorted.begin(), sorted.end(),
+			[](const std::pair<ss_, size_t> &a,
+					const std::pair<ss_, size_t> &b){
+		return a.second > b.second;
+	});
+	log_i(MODULE, "Lua profile: %zu samples, every %i instructions",
+			g_lua_prof.total, g_lua_prof.interval);
+	for(size_t i = 0; i < sorted.size() && i < 40; i++){
+		const double share = 100.0 * sorted[i].second / g_lua_prof.total;
+		if(share < 0.1)
+			break;
+		log_i(MODULE, "Lua profile: %5.1f%% %6zu  %s", share,
+				sorted[i].second, cs(sorted[i].first));
+	}
+}
+
 // Which colour a param2 picks out of a palette of this many colours.
 // Luanti stretches a palette over the 256 param2 values -- each pixel fills
 // 256/pixels of them -- so the colour changes only every step, and the bits
@@ -779,6 +840,7 @@ struct Module: public interface::Module, public luanti::Interface
 
 	~Module()
 	{
+		lua_prof_report();
 		if(m_lua)
 			lua_close(m_lua);
 	}
@@ -6403,6 +6465,20 @@ struct Module: public interface::Module, public luanti::Interface
 		if(!m_lua)
 			throw Exception("luanti: cannot create a Lua state");
 		luaL_openlibs(m_lua);
+		{
+			// The Lua sampling profiler, if this run asked for one
+			const char *env = getenv("BUILDAT_LUANTI_LUAPROF");
+			if(env != nullptr && env[0] != '\0'){
+				const int n = atoi(env);
+				g_lua_prof.interval = n > 0 ? n : 10000;
+				g_lua_prof.enabled = true;
+				lua_sethook(m_lua, lua_prof_hook, LUA_MASKCOUNT,
+						g_lua_prof.interval);
+				log_i(MODULE, "Lua profile: sampling every %i instructions; "
+						"the report comes at shutdown",
+						g_lua_prof.interval);
+			}
+		}
 		// bit.band and its family, before any mod can ask for them
 		lua_pushcfunction(m_lua, luaopen_bit);
 		lua_pushstring(m_lua, "bit");

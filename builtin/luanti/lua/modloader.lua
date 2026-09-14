@@ -26,6 +26,10 @@ do
 
 	core.log("action", "Loading " .. #ordered .. " mods from " .. game_path)
 	local t0 = core.get_us_time()
+	-- How long each mod took, because the first thing anybody porting a game
+	-- asks about a two-minute startup is which mod it was. A clock read per
+	-- mod is nothing beside loading one.
+	local took = {}
 	for i, mod in ipairs(ordered) do
 		-- Whoever is waiting for the world hears which mod this is on:
 		-- 220 of them take minutes and a screen that says nothing looks
@@ -39,7 +43,9 @@ do
 		if not chunk then
 			error("Cannot load mod " .. mod.name .. ": " .. tostring(err))
 		end
+		local mod_t0 = core.get_us_time()
 		chunk()
+		took[#took + 1] = {mod.name, core.get_us_time() - mod_t0}
 	end
 	core.__current_modname = nil
 
@@ -66,6 +72,21 @@ do
 		end
 		return n
 	end
+	-- The slowest ten, longest first, and only the ones worth a line
+	table.sort(took, function(a, b) return a[2] > b[2] end)
+	local slowest = {}
+	for i = 1, math.min(10, #took) do
+		if took[i][2] < 100000 then
+			break
+		end
+		slowest[#slowest + 1] = string.format("%s %.1f s", took[i][1],
+				took[i][2] / 1000000)
+	end
+	if #slowest > 0 then
+		core.log("action", "The mods that took longest to load: " ..
+				table.concat(slowest, ", "))
+	end
+
 	core.log("action", string.format(
 			"Mods loaded in %.1f s: %d nodes, %d craftitems, %d tools, " ..
 			"%d items in all, %d aliases",
