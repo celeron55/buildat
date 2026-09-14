@@ -46,39 +46,50 @@ __buildat_sandbox_environment = {
 -- Sandbox require
 --
 
+-- Two namespaces are loadable from inside the sandbox and nothing else is:
+-- an extension's safe interface, and a module's client half.
+--
+-- **package.loaded is not a whitelist and must never be searched by name**,
+-- which is what this used to do before looking at either namespace. It
+-- holds every standard library the host state has -- so require("os")
+-- handed the sandbox os.execute, require("io") handed it io.open,
+-- require("package") handed it loadlib and require("_G") handed it
+-- loadstring, none of which are anywhere near the sandbox environment
+-- itself. A server's client Lua runs in here, so that was the server
+-- running what it liked on the machine of everyone who connected to it.
+-- Each namespace looks in package.loaded under its own full name, which is
+-- what it was written under.
 __buildat_sandbox_environment.require = function(name)
 	log:debug("require(\""..name.."\")")
-	-- Check loaded modules
-	if package.loaded[name] then
-		local loaded = package.loaded[name]
-		if type(loaded) == 'table' and type(loaded.safe) == 'table' then
-			return loaded.safe
-		end
-		return loaded
-	end
 	-- Allow loading extensions
 	local m = string.match(name, '^buildat/extension/([a-zA-Z0-9_]+)$')
 	if m then
-		local unsafe = __buildat_require_extension(m)
+		local unsafe = package.loaded[name]
 		if unsafe == nil then
-			error("require: Cannot load extension: \""..m.."\"")
+			unsafe = __buildat_require_extension(m)
+			if unsafe == nil then
+				error("require: Cannot load extension: \""..m.."\"")
+			end
+			package.loaded[name] = unsafe
+			log:verbose("Loaded extension \""..name.."\"")
 		end
-		package.loaded[name] = unsafe
-		if type(unsafe.safe) ~= 'table' then
+		if type(unsafe) ~= 'table' or type(unsafe.safe) ~= 'table' then
 			error("require: \""..name.."\" didn't return safe interface")
 		end
-		log:verbose("Loaded extension \""..name.."\"")
 		return unsafe.safe
 	end
 	-- Allow loading the client-side parts of modules
 	local m = string.match(name, '^buildat/module/([a-zA-Z0-9_]+)$')
 	if m then
-		local interface = __buildat_require_module(m)
+		local interface = package.loaded[name]
 		if interface == nil then
-			error("require: Cannot load module: \""..m.."\"")
+			interface = __buildat_require_module(m)
+			if interface == nil then
+				error("require: Cannot load module: \""..m.."\"")
+			end
+			package.loaded[name] = interface
+			log:verbose("Loaded module \""..name.."\"")
 		end
-		package.loaded[name] = interface
-		log:verbose("Loaded module \""..name.."\"")
 		return interface
 	end
 	-- Disallow loading anything else

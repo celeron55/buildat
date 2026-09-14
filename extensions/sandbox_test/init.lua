@@ -51,6 +51,13 @@ function M.run()
 	local success = run_in_sandbox(bytecode)
 	assert(success == false)
 
+	-- Check that the standard libraries cannot be required
+	log:info("sandbox_test(): Testing require")
+	local require_content = get_file_content(ext_path.."/tests/require.lua")
+	assert(require_content)
+	local success = run_in_sandbox(require_content, "=require.lua")
+	assert(success)
+
 	-- Run the exploit search
 	log:info("sandbox_test(): Trying to find an exploit")
 	try_exploit.run()
