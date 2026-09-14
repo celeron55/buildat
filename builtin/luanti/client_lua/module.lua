@@ -617,6 +617,9 @@ end)
 -- What has been said, oldest first: a mod talking, a "/" command answering,
 -- or another player. The game draws it; what is here is keeping it.
 M.chat_lines = {}
+-- The same lines with their markup still in them, for whoever draws them in
+-- the colours a game asked for; see M.text_segments()
+M.chat_raw = {}
 
 local chat_subs = {}
 
@@ -631,14 +634,17 @@ buildat.sub_packet("luanti:chat", function(data)
 	-- context, the arguments, the colours -- and what is left once they are
 	-- taken out is the English the game shipped. Translating them properly
 	-- is a job for whoever brings the .tr files across.
-	local line = formspec.strip_escapes(values[1] or "")
+	local raw = values[1] or ""
+	local line = formspec.strip_escapes(raw)
 	M.chat_lines[#M.chat_lines + 1] = line
+	M.chat_raw[#M.chat_raw + 1] = raw
 	-- A log nobody trims grows for as long as the session lasts
 	while #M.chat_lines > 200 do
 		table.remove(M.chat_lines, 1)
+		table.remove(M.chat_raw, 1)
 	end
 	for _, f in ipairs(chat_subs) do
-		f(line, M.chat_lines)
+		f(line, M.chat_lines, raw)
 	end
 end)
 

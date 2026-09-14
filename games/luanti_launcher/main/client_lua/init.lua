@@ -215,6 +215,27 @@ local function hud_text(size)
 	return t
 end
 
+-- One line of a game's text, in as many pieces as it has colours in it: a
+-- mod writes core.colorize() into a line and each piece is drawn in the
+-- colour it asks for. Returns how wide and how tall the line came out.
+local function draw_text_line(parent, line, x0, y0, base, size)
+	local font = magic.cache:GetResource("Font", buildat.font_mono)
+	local x, h = 0, 0
+	for _, piece in ipairs(luanti.text_segments(line)) do
+		local t = parent:CreateChild("Text")
+		t:SetFont(font, size or 15)
+		t:SetTextEffect(magic.TE_SHADOW)
+		t.effectColor = magic.Color(0, 0, 0, 0.85)
+		t:SetText(luanti.strip_escapes(piece.text))
+		t.color = piece.color and magic.Color(piece.color.r, piece.color.g,
+				piece.color.b) or base
+		t:SetPosition(math.floor(x0 + x), math.floor(y0))
+		x = x + t.width
+		h = math.max(h, t.height)
+	end
+	return x, h
+end
+
 local title_text = hud_text(15)
 title_text:SetText("luanti_launcher: WASD = walk, Space = jump, K = fly, " ..
 		"Tab = mouse, F5 = detail, left = dig, right = place")
@@ -362,9 +383,16 @@ local function draw_hotbar()
 	draw_wielded(name)
 end
 
+-- Set once the HUD is built: a HUD element that draws a list of the player's
+-- own has to follow it, and what the game sends is only the element
+local hud_follows_inventory = nil
+
 luanti.sub_inventory(function(lists)
 	hotbar_stacks = lists.main or {}
 	draw_hotbar()
+	if hud_follows_inventory then
+		hud_follows_inventory()
+	end
 end)
 
 local function set_wield(i)
@@ -732,14 +760,18 @@ local CHAT_LINES = 8
 local CHAT_STYLE = magic.cache:GetResource("XMLFile",
 		"__menu/res/main_style.xml")
 
-local chat_text = hud_text(14)
-chat_text:SetText("")
-chat_text.horizontalAlignment = magic.HA_LEFT
-chat_text.verticalAlignment = magic.VA_BOTTOM
+-- A block of lines rather than one Text with newlines in it, because a line
+-- is drawn in as many pieces as it has colours in it
+local CHAT_SIZE = 14
+local CHAT_LINE_H = 17
+local CHAT_COLOR = magic.Color(1.0, 1.0, 0.9)
+local chat_block = magic.ui.root:CreateChild("UIElement")
+chat_block.horizontalAlignment = magic.HA_LEFT
+chat_block.verticalAlignment = magic.VA_BOTTOM
 -- Above the hotbar, the bars and the name of what is in hand, which are
 -- what is at the bottom of the screen
-chat_text:SetPosition(8, -(8 + SLOT + 52))
-chat_text.color = magic.Color(1.0, 1.0, 0.9)
+chat_block:SetPosition(8, -(8 + SLOT + 52))
+chat_block.size = magic.IntVector2(600, CHAT_LINES * CHAT_LINE_H)
 
 local chat_input = nil
 -- The key that opens the line arrives as text as well, and the line edit
@@ -748,12 +780,16 @@ local chat_input = nil
 local chat_wanted = false
 
 luanti.sub_chat(function(line, lines)
-	local first = math.max(1, #lines - CHAT_LINES + 1)
-	local shown = {}
-	for i = first, #lines do
-		shown[#shown + 1] = lines[i]
+	-- The markup is still in these, which is what makes a coloured line
+	-- coloured; luanti.chat_lines has the same lines without it
+	local raw = luanti.chat_raw
+	local first = math.max(1, #raw - CHAT_LINES + 1)
+	chat_block:RemoveAllChildren()
+	local y = 0
+	for i = first, #raw do
+		draw_text_line(chat_block, raw[i], 0, y, CHAT_COLOR, CHAT_SIZE)
+		y = y + CHAT_LINE_H
 	end
-	chat_text:SetText(table.concat(shown, "\n"))
 end)
 
 local function close_chat()
@@ -805,9 +841,10 @@ end
 -- A waypoint and an image_waypoint are the two that are not over a corner of
 -- the screen but over a place in the world; the camera says where that is.
 --
--- simplified: a compass, a minimap, an inventory element and the styles
--- inside a line of text are not drawn; each is named once in the log so that
--- a game asking for one says so rather than silently missing it.
+-- simplified: a compass, a minimap and the styles inside a line of text --
+-- bold, italic, monospace -- are not drawn; each missing kind is named once
+-- in the log so that a game asking for one says so rather than silently
+-- missing it.
 local hud_root = magic.ui.root:CreateChild("UIElement")
 hud_root:SetPosition(0, 0)
 local hud_missing = {}
@@ -887,26 +924,11 @@ end
 local function draw_hud_text(e)
 	local base = hud_colour(e.number)
 	local block = hud_root:CreateChild("UIElement")
-	local font = magic.cache:GetResource("Font", buildat.font_mono)
 	local w, h = 0, 0
-	local line_h = 0
 	for line in (tostring(e.text or "") .. "\n"):gmatch("([^\n]*)\n") do
-		local x = 0
-		for _, piece in ipairs(luanti.text_segments(line)) do
-			local t = block:CreateChild("Text")
-			t:SetFont(font, 15)
-			t:SetTextEffect(magic.TE_SHADOW)
-			t.effectColor = magic.Color(0, 0, 0, 0.85)
-			t:SetText(luanti.strip_escapes(piece.text))
-			t.color = piece.color and
-					magic.Color(piece.color.r, piece.color.g, piece.color.b) or
-					base
-			t:SetPosition(math.floor(x), math.floor(h))
-			x = x + t.width
-			line_h = math.max(line_h, t.height)
-		end
-		w = math.max(w, x)
-		h = h + (line_h > 0 and line_h or 15)
+		local lw, lh = draw_text_line(block, line, 0, h, base, 15)
+		w = math.max(w, lw)
+		h = h + (lh > 0 and lh or 15)
 	end
 	block.size = magic.IntVector2(math.floor(w), math.floor(h))
 	hud_place(block, e, w, h)
@@ -934,6 +956,80 @@ local function draw_hud_image(e)
 	img.texture = tex
 	img.size = magic.IntVector2(math.floor(w), math.floor(h))
 	hud_place(img, e, w, h)
+end
+
+-- A row of the player's own inventory, which is what a game that draws its
+-- own hotbar puts on the HUD: the list is the player's, number is how many
+-- of its slots to draw and item is the one to mark. The slots look like the
+-- client's own hotbar, because they are the same thing.
+local function draw_hud_inventory(e)
+	local list_name = e.text or ""
+	local stacks = luanti.inventory and luanti.inventory[list_name]
+	if stacks == nil then
+		if not hud_missing["inv:" .. list_name] then
+			hud_missing["inv:" .. list_name] = true
+			log:info("the game's HUD wants the inventory list \"" ..
+					list_name .. "\", which this player has not got")
+		end
+		return
+	end
+	local n = math.floor(tonumber(e.number) or #stacks)
+	if n > #stacks then
+		n = #stacks
+	end
+	if n <= 0 then
+		return
+	end
+	local sw, sh = parse_v2(e.size, 0, 0)
+	local slot = math.floor(sw > 0 and sw or SLOT)
+	local step = slot + SLOT_GAP
+	local selected = math.floor(tonumber(e.item) or 0)
+	-- Luanti's dir: 0 right, 1 left, 2 down, 3 up
+	local dir = math.floor(tonumber(e.dir) or 0)
+	local white = game_texture(WHITE)
+	local row = hud_root:CreateChild("UIElement")
+	for i = 1, n do
+		local name, count = parse_stack(stacks[i])
+		local frame = row:CreateChild("BorderImage")
+		if white then
+			frame.texture = white
+		end
+		frame.color = (i == selected) and
+				magic.Color(0.9, 0.9, 0.7, 0.75) or
+				magic.Color(0.1, 0.1, 0.12, 0.55)
+		frame.size = magic.IntVector2(slot, slot)
+		local at = (i - 1) * step
+		if dir == 1 then
+			frame:SetPosition(-at, 0)
+		elseif dir == 2 then
+			frame:SetPosition(0, at)
+		elseif dir == 3 then
+			frame:SetPosition(0, -at)
+		else
+			frame:SetPosition(at, 0)
+		end
+		local tex = name and game_texture(luanti.item_texture(name))
+		if tex then
+			local image = frame:CreateChild("BorderImage")
+			image.texture = tex
+			image:SetPosition(4, 4)
+			image.size = magic.IntVector2(slot - 8, slot - 8)
+		end
+		if count and count > 1 then
+			local t = frame:CreateChild("Text")
+			t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 12)
+			t:SetTextEffect(magic.TE_SHADOW)
+			t.effectColor = magic.Color(0, 0, 0, 0.9)
+			t.horizontalAlignment = magic.HA_RIGHT
+			t.verticalAlignment = magic.VA_BOTTOM
+			t:SetPosition(-3, -2)
+			t:SetText(tostring(count))
+		end
+	end
+	local w = (dir <= 1) and (n * step - SLOT_GAP) or slot
+	local h = (dir <= 1) and slot or (n * step - SLOT_GAP)
+	row.size = magic.IntVector2(w, h)
+	hud_place(row, e, w, h)
 end
 
 -- Where a waypoint's own element goes: the place on the screen its world
@@ -1072,7 +1168,14 @@ local function draw_hud_statbar(e)
 	hud_place(row, e, total_w, total_h)
 end
 
+-- What the game last sent, so that the HUD can be drawn again when
+-- something it is about -- the player's own inventory -- has changed
+local hud_elements = {}
+local hud_has_inventory = false
+
 local function draw_hud(elements, flags)
+	hud_elements = elements
+	hud_has_inventory = false
 	hud_root:RemoveAllChildren()
 	hud_waypoints = {}
 	-- As big as the screen, because an element aligned to the centre or the
@@ -1089,7 +1192,7 @@ local function draw_hud(elements, flags)
 	-- The game can take the client's own away, and what it draws instead is
 	-- these elements; see luanti.hud_flag()
 	crosshair.visible = luanti.hud_flag("crosshair")
-	chat_text.visible = luanti.hud_flag("chat")
+	chat_block.visible = luanti.hud_flag("chat")
 	for _, slot in ipairs(hotbar) do
 		slot.frame.visible = luanti.hud_flag("hotbar")
 	end
@@ -1102,6 +1205,9 @@ local function draw_hud(elements, flags)
 			draw_hud_image(e)
 		elseif kind == "statbar" then
 			draw_hud_statbar(e)
+		elseif kind == "inventory" then
+			hud_has_inventory = true
+			draw_hud_inventory(e)
 		elseif kind == "waypoint" then
 			draw_hud_waypoint(e)
 		elseif kind == "image_waypoint" then
@@ -1115,6 +1221,12 @@ local function draw_hud(elements, flags)
 end
 
 luanti.sub_hud(draw_hud)
+
+hud_follows_inventory = function()
+	if hud_has_inventory then
+		draw_hud(hud_elements)
+	end
+end
 
 --
 -- Pointing at a node, and digging it
