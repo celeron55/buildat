@@ -12,6 +12,10 @@
 -- the left button carries the whole stack, the right button one item of it
 -- and the middle button ten, which is Luanti's own rule and is what the
 -- logged counts say.
+--
+-- It is also where the slot tooltip is seen: rest the mouse on one of the
+-- three and the item's description appears beside the cursor, with the name
+-- it is known by under it.
 local NAME = "detached_check"
 
 core.register_on_mods_loaded(function()

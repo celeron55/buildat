@@ -1659,6 +1659,19 @@ magic.SubscribeToEvent("MouseWheel", function(event_type, event_data)
 	set_wield(wield_index - event_data:GetInt("Wheel"))
 end)
 
+-- Where the mouse is, which a tooltip needs and GetMouseMove does not say:
+-- that is the movement since the last frame. Input reports window pixels and
+-- a form is laid out in the UI's own coordinates, which are those divided by
+-- the UI scale -- the same ones a click arrives in.
+magic.SubscribeToEvent("MouseMove", function(event_type, event_data)
+	local scale = magic.ui:GetScale()
+	if not scale or scale <= 0 then
+		scale = 1
+	end
+	luanti.hover(math.floor(event_data:GetInt("X") / scale),
+			math.floor(event_data:GetInt("Y") / scale))
+end)
+
 -- Where a click landed, which MouseButtonDown does not say. A form is the
 -- only thing here that cares.
 magic.SubscribeToEvent("UIMouseClick", function(event_type, event_data)
@@ -1779,6 +1792,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	end
 
 	update_detail(dt)
+	luanti.update_tooltip(dt)
 
 	-- Until the server has said where the player is there is no player:
 	-- what is on the screen is the overview the camera started at

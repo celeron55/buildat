@@ -1027,6 +1027,96 @@ local function send_fields(fields)
 			{"array", "string"}))
 end
 
+--
+-- The tooltip over what the cursor rests on
+--
+-- Two kinds: the text a form asked for over an area or an element of its
+-- own, and -- over a slot, which wins because it is the more specific thing
+-- -- what the item in it is. The game says where the mouse is, the way it
+-- says where a click landed.
+
+-- How long the cursor has to rest before it appears, which is Luanti's own
+-- pause rather than a tooltip flashing past every slot the mouse crosses
+local TOOLTIP_DELAY = 0.35
+local mouse_at = nil
+local tooltip_over = nil
+local tooltip_wait = 0
+
+-- Where the mouse is, in the UI's own coordinates -- the ones a click
+-- arrives in. Called while a form is open; nil when the mouse is not on the
+-- screen at all.
+function M.hover(x, y)
+	if x == nil then
+		mouse_at = nil
+		return
+	end
+	mouse_at = {x, y}
+end
+
+-- What Luanti's own client shows over an inventory slot: the item's
+-- description, and the name it is known by under it.
+--
+--     Calcite
+--     [mcl_amethyst:calcite]
+local function slot_tooltip(slot)
+	local stack = slot.stack
+	if stack == nil or stack.name == nil or stack.name == "" then
+		return nil
+	end
+	local desc = M.item_description(stack.name)
+	desc = desc and M.strip_escapes(desc) or ""
+	if desc == "" then
+		desc = stack.name
+	end
+	return desc .. "\n[" .. stack.name .. "]"
+end
+
+-- Called every frame while a form is open
+function M.update_tooltip(dtime)
+	local drawn = form and form.drawn
+	if drawn == nil or mouse_at == nil then
+		if tooltip_over then
+			tooltip_over = nil
+			make_ui():tooltip(magic.ui.root, nil)
+		end
+		return
+	end
+	local lx = mouse_at[1] - drawn.origin[1]
+	local ly = mouse_at[2] - drawn.origin[2]
+	-- The last one that covers the cursor: a form's later elements are the
+	-- ones on top. The text is worked out here rather than read off what
+	-- was hit, because a slot's is its item's.
+	local over, over_text = nil, nil
+	for _, t in ipairs(drawn.tooltips or {}) do
+		if lx >= t.x and lx < t.x + t.w and ly >= t.y and ly < t.y + t.h then
+			over, over_text = t, t.text
+		end
+	end
+	for _, slot in ipairs(drawn.slots or {}) do
+		if lx >= slot.x and lx < slot.x + slot.size and
+				ly >= slot.y and ly < slot.y + slot.size then
+			local text = slot_tooltip(slot)
+			if text then
+				over, over_text = slot, text
+			end
+		end
+	end
+	if over ~= tooltip_over then
+		tooltip_over = over
+		tooltip_wait = 0
+		make_ui():tooltip(magic.ui.root, nil)
+		return
+	end
+	if over == nil then
+		return
+	end
+	tooltip_wait = tooltip_wait + dtime
+	if tooltip_wait >= TOOLTIP_DELAY then
+		make_ui():tooltip(magic.ui.root, over_text, mouse_at[1], mouse_at[2],
+				magic.ui.root.width, magic.ui.root.height)
+	end
+end
+
 local function close_form(quit)
 	if not form then
 		return
@@ -1043,6 +1133,8 @@ local function close_form(quit)
 		form.drawn.window:Remove()
 	end
 	form = nil
+	tooltip_over = nil
+	make_ui():tooltip(magic.ui.root, nil)
 end
 
 local function draw_form()
