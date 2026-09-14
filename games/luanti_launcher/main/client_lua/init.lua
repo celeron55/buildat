@@ -1688,9 +1688,38 @@ local function dig_packet(name, p)
 	}, {"object", {"p", VOXEL_PACKET_TYPE}}))
 end
 
+-- An object is hit rather than dug: one hit per press, and no faster than
+-- this while the button is held, which is Luanti's own object_hit_delay
+local OBJECT_HIT_DELAY = 0.2
+local hit_wait = 0
+
 local function update_dig(dt, playing)
 	local holding = playing and
 			magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT)
+	hit_wait = math.max(0, hit_wait - dt)
+	if not holding then
+		hit_wait = 0
+	end
+	-- What the ray runs into first: an object in front of the node is what
+	-- is hit, and the reach is the same one a dig has
+	if holding then
+		local eye = camera_node.worldPosition
+		local dir = camera_node.worldDirection
+		local reach = math.min(POINT_RANGE, luanti.dig_range(wield_index))
+		local id, distance = luanti.pointed_object(eye.x, eye.y, eye.z,
+				dir.x, dir.y, dir.z, reach)
+		if id and (pointed_p == nil or distance <
+				(buildat.Vector3(eye.x, eye.y, eye.z) - pointed_p):length()) then
+			dig = nil
+			update_crack()
+			if hit_wait <= 0 then
+				hit_wait = OBJECT_HIT_DELAY
+				buildat.send_packet("main:punch_object", cereal.binary_output(
+						{tostring(id)}, {"array", "string"}))
+			end
+			return
+		end
+	end
 	if not holding or pointed_p == nil then
 		dig = nil
 		update_crack()

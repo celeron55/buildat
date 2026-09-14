@@ -76,6 +76,8 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:dig_start"));
 		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:punch_object"));
+		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:place"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:get_saves"));
@@ -104,6 +106,8 @@ struct Module: public interface::Module
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:dig_start", on_dig_start,
 				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:punch_object",
+				on_punch_object, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:place", on_place,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:get_saves", on_get_saves,
@@ -276,6 +280,31 @@ struct Module: public interface::Module
 		});
 		log_v(MODULE, "C%i: main:dig_start " PV3I_FORMAT, packet.sender,
 				PV3I_PARAMS(voxel_p));
+	}
+
+	// The same button, when what it was pointing at was an object rather
+	// than a node: one punch per press, and no faster than the client's own
+	// delay while it is held.
+	void on_punch_object(const network::Packet &packet)
+	{
+		sv_<ss_> values;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(values);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:punch_object: %s", e.what());
+			return;
+		}
+		if(values.empty())
+			return;
+		const int32_t id = atoi(values[0].c_str());
+		bool punched = false;
+		luanti::access(m_server, [&](luanti::Interface *i){
+			punched = i->punch_object(id, player_name_of(packet.sender));
+		});
+		log_v(MODULE, "C%i: main:punch_object %i: %s", packet.sender, id,
+				punched ? "punched" : "nothing");
 	}
 
 	// The other button. Luanti calls it place, and what it comes to is the

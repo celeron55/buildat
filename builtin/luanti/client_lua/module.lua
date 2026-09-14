@@ -298,6 +298,9 @@ buildat.sub_packet("luanti:player_pos", function(data)
 		z = tonumber(values[3]) or 0,
 	}
 	M.player_pos = p
+	-- Which object is the player's own: it is not one to point at, being
+	-- the thing the camera is inside of
+	M.self_id = values[4]
 	for _, f in ipairs(player_pos_subs) do
 		f(p)
 	end
@@ -562,6 +565,51 @@ local function parse_look(kind, texture, detail)
 	end
 	want_model(look.mesh)
 	return look
+end
+
+-- pointed_object(x, y, z, dx, dy, dz, max_distance) -> id, distance
+--
+-- Which object a ray runs into first, by the box each one is drawn at: the
+-- game points the ray because it has the camera, and what is in the world is
+-- here. A slab-test against an axis-aligned box, which is what an object is
+-- drawn as whatever it wears.
+function M.pointed_object(x, y, z, dx, dy, dz, max_distance)
+	local best, best_t = nil, max_distance
+	for id, have in pairs(object_nodes) do
+		-- Not the player's own object: the camera is inside it, so a ray
+		-- from the eye hits it before anything else in the world
+		if id ~= M.self_id then
+			local p = have.node.position
+			local s = have.node.scale
+			-- A model is drawn at its own scale rather than at what it
+			-- collides with; a sixth of a node around it is something to
+			-- aim at either way
+			local hx = math.max(0.15, s.x / 2)
+			local hy = math.max(0.15, s.y / 2)
+			local hz = math.max(0.15, s.z / 2)
+			local t0, t1 = 0, best_t
+			local function slab(o, d, lo, hi)
+				if math.abs(d) < 1e-9 then
+					return o >= lo and o <= hi
+				end
+				local a = (lo - o) / d
+				local b = (hi - o) / d
+				if a > b then
+					a, b = b, a
+				end
+				if a > t0 then t0 = a end
+				if b < t1 then t1 = b end
+				return t0 <= t1
+			end
+			if slab(x, dx, p.x - hx, p.x + hx) and
+					slab(y, dy, p.y - hy, p.y + hy) and
+					slab(z, dz, p.z - hz, p.z + hz) and
+					t0 >= 0 and t0 < best_t then
+				best, best_t = id, t0
+			end
+		end
+	end
+	return best, best_t
 end
 
 buildat.sub_packet("luanti:object_props", function(data)

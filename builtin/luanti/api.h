@@ -157,6 +157,12 @@ namespace luanti
 		// them -- the item's own on_drop is what does it.
 		virtual bool drop_wielded(const ss_ &player_name, int count) = 0;
 
+		// A click on an object rather than on a node: the entity's own
+		// on_punch runs, and what the wielded item does to it is
+		// core.get_hit_params(). The id is the one the client was sent with
+		// the object's position.
+		virtual bool punch_object(int32_t id, const ss_ &player_name) = 0;
+
 		// Which hotbar slot the player is holding, one-based. It is the
 		// client's to say -- the keys and the wheel are there -- and the
 		// server reads it whenever a dig or a place asks what is in hand.

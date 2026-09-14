@@ -1512,7 +1512,7 @@ local STUBS_NIL = {
 	-- The players and the objects are in lua/entity.lua
 	-- Inventory, craft, metadata (M4); the recipes are in lua/craft.lua
 	"register_craft_raw",
-	"get_hit_params", "get_tool_wear_after_use",
+	"get_tool_wear_after_use",
 	-- Chat, HUD, sound, particles (M4, M5)
 	"send_join_message",
 	"send_leave_message",
@@ -2747,6 +2747,42 @@ function core.get_dig_params(groups, tool_capabilities, wear)
 		end
 	end
 	return {diggable = diggable, time = best_time, wear = best_wear}
+end
+
+-- core.get_hit_params(armor_groups, tool_capabilities, [time_from_last_punch],
+--         [wear]) -> {hp, wear}
+--
+-- What a punch takes off and what it costs the tool, which is Luanti's own
+-- getHitParams() in src/tool.cpp. Each of the tool's damage groups is
+-- rated by the armour group of the same name -- a hundred is "full damage",
+-- and armour above that hurts more, not less -- and a punch sooner than the
+-- tool's full_punch_interval is worth the fraction of it that has passed.
+function core.get_hit_params(armor_groups, tool_capabilities, time_from_last_punch, wear)
+	local caps = type(tool_capabilities) == "table" and tool_capabilities or {}
+	local interval = tonumber(caps.full_punch_interval) or 1.4
+	local since = tonumber(time_from_last_punch) or 1000000
+	local fraction = 1.0
+	if interval > 0 then
+		fraction = since / interval
+		if fraction > 1.0 then
+			fraction = 1.0
+		elseif fraction < 0.0 then
+			fraction = 0.0
+		end
+	end
+	local damage = 0
+	for name, value in pairs(caps.damage_groups or {}) do
+		local armor = group_rating(armor_groups, name)
+		damage = damage + (tonumber(value) or 0) * fraction * armor / 100.0
+	end
+	-- A tool with no punch_attack_uses is not worn by punching at all,
+	-- which is what Luanti's zero means
+	local uses = tonumber(caps.punch_attack_uses) or 0
+	local result_wear = 0
+	if uses > 0 and damage > 0 then
+		result_wear = core.__result_wear(uses / fraction, wear)
+	end
+	return {hp = math.floor(damage), wear = result_wear}
 end
 
 -- The same dig, by somebody. core.dig_node() is Luanti's own and takes no

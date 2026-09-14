@@ -264,10 +264,27 @@ function ObjectRef:set_hp(hp, reason)
 	end
 end
 
+-- A punch is the entity's own on_punch first, and the damage the tool does
+-- second -- unless the entity says it dealt with it, which is what returning
+-- true from on_punch means in Luanti. What the damage is is
+-- core.get_hit_params(), rated by this object's armour groups.
 function ObjectRef:punch(puncher, time_from_last_punch, tool_capabilities, dir)
 	local o = state_of(self)
-	if o and o.le and o.le.on_punch then
-		o.le:on_punch(puncher, time_from_last_punch, tool_capabilities, dir)
+	if not o then
+		return
+	end
+	local handled = false
+	if o.le and o.le.on_punch then
+		handled = o.le:on_punch(puncher, time_from_last_punch,
+				tool_capabilities, dir) and true or false
+	end
+	if handled or o.hp == nil then
+		return
+	end
+	local hit = core.get_hit_params(o.armor_groups, tool_capabilities,
+			time_from_last_punch)
+	if hit.hp > 0 then
+		self:set_hp(o.hp - hit.hp, {type = "punch", object = puncher})
 	end
 end
 
@@ -456,7 +473,9 @@ end
 -- has to be told, or it walks on from where it thought it was.
 local function tell_the_client(o)
 	if o and o.player_name and __send_player_pos then
-		__send_player_pos(o.player_name, o.pos.x, o.pos.y, o.pos.z)
+		-- And which object is theirs, because a client that cannot tell its
+		-- own from the rest points at itself: it is standing inside it
+		__send_player_pos(o.player_name, o.pos.x, o.pos.y, o.pos.z, o.id)
 	end
 end
 
@@ -1365,6 +1384,39 @@ end
 -- simplified: no sneaking, so a node with an on_rightclick cannot be built
 -- against. Luanti's client sends whether the player was holding sneak, and
 -- this would be that flag.
+-- When each player last punched anything, because what a punch is worth is
+-- the fraction of the tool's full_punch_interval that has passed since
+local last_punch = {}
+
+-- What a click on an object comes to. The wielded item's tool capabilities
+-- are what does the damage, the entity's own on_punch runs first and can say
+-- it dealt with it, and the tool wears by what it did -- which is Luanti's
+-- own order in LuaEntitySAO::punch().
+function core.__punch_object(playername, id)
+	local pid = players[playername]
+	local puncher = pid and core.object_refs[pid] or nil
+	local ref = core.object_refs[tonumber(id) or -1]
+	if ref == nil or puncher == nil then
+		return false
+	end
+	local wielded = puncher:get_wielded_item()
+	local caps = wielded:get_tool_capabilities()
+	local now = core.get_us_time() / 1000000
+	-- A first punch is worth a whole interval, which is what Luanti's own
+	-- "a long time ago" is
+	local since = last_punch[playername] and (now - last_punch[playername]) or
+			1000000
+	last_punch[playername] = now
+	local hit = core.get_hit_params(ref:get_armor_groups() or {}, caps, since,
+			wielded:get_wear())
+	ref:punch(puncher, since, caps, puncher:get_look_dir())
+	if hit.wear > 0 then
+		wielded:add_wear(hit.wear)
+		puncher:set_wielded_item(wielded)
+	end
+	return true
+end
+
 function core.__use_node(playername, under, above, sneak)
 	local id = players[playername]
 	local ref = id and core.object_refs[id]

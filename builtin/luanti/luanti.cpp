@@ -4626,6 +4626,8 @@ struct Module: public interface::Module, public luanti::Interface
 					(double)luaL_checknumber(L, i));
 			flat.push_back(buf);
 		}
+		// And which object is the player's own; see tell_the_client()
+		flat.push_back(itos((int64_t)luaL_optnumber(L, 5, 0)));
 		self->send_to_player(name, "luanti:player_pos", flat);
 		return 0;
 	}
@@ -6385,6 +6387,14 @@ struct Module: public interface::Module, public luanti::Interface
 			return false;
 		return node_action("return core.__drop_wielded(\""+
 				lua_quoted(player_name)+"\", "+itos(count)+")");
+	}
+
+	bool punch_object(int32_t id, const ss_ &player_name)
+	{
+		if(player_name.empty())
+			return false;
+		return node_action("return core.__punch_object(\""+
+				lua_quoted(player_name)+"\", "+itos(id)+")");
 	}
 
 	void set_wield_index(const ss_ &player_name, int index)
