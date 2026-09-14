@@ -210,6 +210,10 @@ local sky_vis_dirty = false
 local spec_emphasis = 1.0
 -- How much light is on the sky the reflections come from; see M.set_sky_light()
 local sky_light = 1.0
+-- And what colour it is now, against the noon sky the cube map holds; see
+-- M.set_sky_tint(). White and none is the cube map as it was baked.
+local sky_tint = magic.Vector3(1, 1, 1)
+local sky_tint_amount = 0.0
 
 local function each_material_of(cg, cb)
 	if not cg then return end
@@ -571,6 +575,8 @@ local function push_sky_vis()
 				command:SetShaderParameter("SkyVis", sky_vis_param)
 				command:SetShaderParameter("SpecEmphasis", spec_emphasis)
 				command:SetShaderParameter("SkyLight", sky_light)
+				command:SetShaderParameter("SkyTint", sky_tint)
+				command:SetShaderParameter("SkyTintAmount", sky_tint_amount)
 			end
 		end
 		return
@@ -578,6 +584,8 @@ local function push_sky_vis()
 	render_path:SetShaderParameter("SkyVis", sky_vis_param)
 	render_path:SetShaderParameter("SpecEmphasis", spec_emphasis)
 	render_path:SetShaderParameter("SkyLight", sky_light)
+	render_path:SetShaderParameter("SkyTint", sky_tint)
+	render_path:SetShaderParameter("SkyTintAmount", sky_tint_amount)
 end
 
 -- How much to multiply the reflected sky by, 1 being what a game renders.
@@ -592,15 +600,37 @@ end
 -- How much light is on the sky a surface reflects: one is the daylight the
 -- cube map was baked in, and a game with a clock turns it down as its night
 -- comes. Without it a pond at midnight mirrors a bright blue sky.
---
--- simplified: the reflection dims but stays the colour it was baked. What
--- the rest of it would take is a second cube map for the night, or one
--- rendered as the day goes; see M.set_sun_direction().
 function M.set_sky_light(k)
 	if k == nil then
 		return
 	end
 	sky_light = math.max(0, k)
+	declare_countdown = 0
+end
+
+-- And what colour that sky is now. The cube map holds one sky -- the noon
+-- one -- so a reflection at night is the day's blue however far it is
+-- dimmed; this moves it towards the colour the game says its sky is at this
+-- hour, keeping the brightness the cube gives it so that the reflection
+-- still has the sky's own shape in it. amount is how far, and 0 is the cube
+-- map as it was baked.
+--
+-- simplified: one colour for the whole sky rather than a second cube map or
+-- one rendered as the day goes. A reflection of a sky that is orange at one
+-- horizon and blue at the other is beyond it.
+function M.set_sky_tint(color, amount)
+	if color then
+		-- Normalised, so that the tint decides the hue and the cube map
+		-- keeps deciding how bright each direction is
+		local r = color.r or color[1] or 1
+		local g = color.g or color[2] or 1
+		local b = color.b or color[3] or 1
+		local luma = math.max(0.001, 0.299 * r + 0.587 * g + 0.114 * b)
+		sky_tint = magic.Vector3(r / luma, g / luma, b / luma)
+	end
+	if amount then
+		sky_tint_amount = math.max(0, math.min(1, amount))
+	end
 	declare_countdown = 0
 end
 

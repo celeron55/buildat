@@ -591,6 +591,11 @@ local function apply_sky_of_hour()
 	-- And so does what a pond mirrors: the cube map it comes from is baked
 	-- at noon, so without this the water is a bright blue sky at midnight
 	voxel_shading.set_sky_light(0.10 + 0.90 * t)
+	-- And what colour that sky is now, which the cube map cannot know: the
+	-- reflection is moved towards the zenith of this hour as the day goes,
+	-- and left alone at noon, where the cube map is already right
+	voxel_shading.set_sky_tint(
+			three(night_zenith, dawn_zenith, day_zenith, t), 1 - t)
 end
 
 local function update_sky(dt)
