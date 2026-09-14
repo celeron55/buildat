@@ -1765,6 +1765,8 @@ local function update_dig(dt, playing)
 		}
 		-- A mod's on_punch runs on the way in, whether or not the node can
 		-- be dug at all
+		log:debug("dig: " .. tostring(dig.name) .. " takes " ..
+				tostring(dig.time) .. " s")
 		dig_packet("main:dig_start", dig.p)
 		update_crack()
 		return
