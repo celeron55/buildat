@@ -1253,6 +1253,18 @@ end
 -- the fields of such a form go to the node rather than to the global
 -- callbacks, and so do its inventory lists.
 local form_nodes = {}
+-- And which detached inventories its lists name, because those belong to
+-- nobody and the client has to be sent them the way a node's are. Read out
+-- of the spec: a list[] naming one is the only way a form can show one.
+local form_detached = {}
+
+local function detached_in_spec(spec)
+	local out = {}
+	for name in string.gmatch(tostring(spec or ""), "detached:([%w_%-%.:]+)") do
+		out[name] = true
+	end
+	return out
+end
 
 local function pos_string(pos)
 	return math.floor(pos.x) .. "," .. math.floor(pos.y) .. "," ..
@@ -1264,6 +1276,7 @@ function core.show_formspec(playername, formname, formspec)
 		return false
 	end
 	form_nodes[playername] = nil
+	form_detached[playername] = detached_in_spec(formspec)
 	__show_formspec(playername, tostring(formname or ""), formspec, "")
 	return true
 end
@@ -1274,6 +1287,7 @@ end
 local function show_node_formspec(playername, pos, formspec)
 	form_nodes[playername] = {x = math.floor(pos.x), y = math.floor(pos.y),
 			z = math.floor(pos.z)}
+	form_detached[playername] = detached_in_spec(formspec)
 	__show_formspec(playername, "", formspec,
 			pos_string(form_nodes[playername]))
 end
@@ -1285,6 +1299,7 @@ function core.close_formspec(playername, formname)
 		return false
 	end
 	form_nodes[playername] = nil
+	form_detached[playername] = nil
 	__show_formspec(playername, tostring(formname or ""), "", "")
 	return true
 end
@@ -1387,6 +1402,11 @@ local function inventory_at(ref, playername, location)
 			string.sub(location, 1, 7) == "player:" then
 		return ref:get_inventory(), nil
 	end
+	local detached = string.match(location, "^detached:(.*)$")
+	if detached then
+		return core.get_inventory({type = "detached", name = detached}),
+				nil, detached
+	end
 	local pos = nil
 	if location == "current_name" or location == "context" then
 		pos = form_nodes[playername]
@@ -1447,6 +1467,75 @@ local function allowed_count(ref, playername, from_pos, from_list, from_i,
 				to_i, stack, ref)
 	end
 	return count
+end
+
+-- The same two questions for a detached inventory, whose callbacks belong to
+-- whoever created it rather than to a node. Luanti asks allow_move when both
+-- ends are the same inventory and allow_take/allow_put otherwise, and a
+-- number below zero is none at all.
+local function detached_allowed(ref, from_name, from_inv, from_list, from_i,
+		to_name, to_inv, to_list, to_i, count, stack)
+	local function ask(name, f, ...)
+		if not f then
+			return count
+		end
+		local ok, n = pcall(f, ...)
+		if not ok then
+			core.log("error", "detached inventory " .. name .. ": " ..
+					tostring(n))
+			return 0
+		end
+		if type(n) ~= "number" then
+			return count
+		end
+		if n < 0 then
+			return count
+		end
+		return math.min(count, n)
+	end
+	if from_name and from_name == to_name then
+		local cb = core.detached_inventories[from_name] or {}
+		return ask(from_name, cb.allow_move, from_inv, from_list, from_i,
+				to_list, to_i, count, ref)
+	end
+	if from_name then
+		local cb = core.detached_inventories[from_name] or {}
+		count = ask(from_name, cb.allow_take, from_inv, from_list, from_i,
+				stack, ref)
+	end
+	if to_name and count > 0 then
+		local cb = core.detached_inventories[to_name] or {}
+		count = ask(to_name, cb.allow_put, to_inv, to_list, to_i, stack, ref)
+	end
+	return count
+end
+
+local function detached_moved(ref, from_name, from_inv, from_list, from_i,
+		to_name, to_inv, to_list, to_i, count, stack)
+	local function tell(name, f, ...)
+		if not f then
+			return
+		end
+		local ok, err = pcall(f, ...)
+		if not ok then
+			core.log("error", "detached inventory " .. name .. ": " ..
+					tostring(err))
+		end
+	end
+	if from_name and from_name == to_name then
+		local cb = core.detached_inventories[from_name] or {}
+		tell(from_name, cb.on_move, from_inv, from_list, from_i, to_list,
+				to_i, count, ref)
+		return
+	end
+	if from_name then
+		local cb = core.detached_inventories[from_name] or {}
+		tell(from_name, cb.on_take, from_inv, from_list, from_i, stack, ref)
+	end
+	if to_name then
+		local cb = core.detached_inventories[to_name] or {}
+		tell(to_name, cb.on_put, to_inv, to_list, to_i, stack, ref)
+	end
 end
 
 -- And what the nodes are told once it has happened
@@ -1552,8 +1641,10 @@ function core.__inventory_action(playername, a)
 	if not ref or type(a) ~= "table" or a[1] ~= "move" then
 		return
 	end
-	local from_inv, from_pos = inventory_at(ref, playername, a[2] or "")
-	local to_inv, to_pos = inventory_at(ref, playername, a[5] or "")
+	local from_inv, from_pos, from_detached =
+			inventory_at(ref, playername, a[2] or "")
+	local to_inv, to_pos, to_detached =
+			inventory_at(ref, playername, a[5] or "")
 	if not from_inv or not to_inv then
 		core.log("verbose", "inventory action: " .. tostring(a[2]) .. " -> " ..
 				tostring(a[5]) .. " is not an inventory this player has")
@@ -1569,11 +1660,17 @@ function core.__inventory_action(playername, a)
 	if count <= 0 or count > stack:get_count() then
 		count = stack:get_count()
 	end
-	if from_pos or to_pos then
+	if from_pos or to_pos or from_detached or to_detached then
 		local moving = ItemStack(stack)
 		moving:set_count(count)
-		count = allowed_count(ref, playername, from_pos, from_list, from_i,
-				to_pos, to_list, to_i, count, moving)
+		if from_pos or to_pos then
+			count = allowed_count(ref, playername, from_pos, from_list,
+					from_i, to_pos, to_list, to_i, count, moving)
+		end
+		if count > 0 and (from_detached or to_detached) then
+			count = detached_allowed(ref, from_detached, from_inv, from_list,
+					from_i, to_detached, to_inv, to_list, to_i, count, moving)
+		end
 		if count <= 0 then
 			return
 		end
@@ -1582,11 +1679,17 @@ function core.__inventory_action(playername, a)
 			count) then
 		return
 	end
-	if from_pos or to_pos then
+	if from_pos or to_pos or from_detached or to_detached then
 		local moved_stack = ItemStack(stack)
 		moved_stack:set_count(count)
-		moved(ref, from_pos, from_list, from_i, to_pos, to_list, to_i, count,
-				moved_stack)
+		if from_pos or to_pos then
+			moved(ref, from_pos, from_list, from_i, to_pos, to_list, to_i,
+					count, moved_stack)
+		end
+		if from_detached or to_detached then
+			detached_moved(ref, from_detached, from_inv, from_list, from_i,
+					to_detached, to_inv, to_list, to_i, count, moved_stack)
+		end
 	end
 end
 
@@ -2233,11 +2336,42 @@ local function send_inventories()
 		elseif o then
 			o.sent_node_at = nil
 		end
+		-- And the detached inventories the open form names, which belong to
+		-- nobody: the same channel with the location for a key, because
+		-- that is what a formspec's list[] says and what the client looks
+		-- them up by.
+		if o then
+			o.sent_detached = o.sent_detached or {}
+			-- The form a game showed, and the player's own inventory form,
+			-- which the client opens by itself whenever it likes
+			local wanted = {}
+			for inv_name, _ in pairs(form_detached[name] or {}) do
+				wanted[inv_name] = true
+			end
+			for inv_name, _ in pairs(o.own_detached or {}) do
+				wanted[inv_name] = true
+			end
+			for inv_name, _ in pairs(wanted) do
+				local inv = core.get_inventory({type = "detached",
+						name = inv_name})
+				if inv and o.sent_detached[inv_name] ~= inv.gen then
+					o.sent_detached[inv_name] = inv.gen
+					__send_node_inventory(name,
+							flatten_lists(inv, {"detached:" .. inv_name}))
+				end
+			end
+			for inv_name, _ in pairs(o.sent_detached) do
+				if not wanted[inv_name] then
+					o.sent_detached[inv_name] = nil
+				end
+			end
+		end
 		-- The form the player's own inventory key opens, when a mod has
 		-- changed it. It is sent when it changes rather than when it is
 		-- asked for, so that opening it costs no round trip.
 		if o and o.inventory_formspec ~= o.sent_inventory_formspec then
 			o.sent_inventory_formspec = o.inventory_formspec
+			o.own_detached = detached_in_spec(o.inventory_formspec)
 			__player_formspec(name, o.inventory_formspec or "")
 		end
 	end

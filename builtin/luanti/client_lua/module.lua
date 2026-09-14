@@ -681,8 +681,12 @@ end
 local ui = nil
 local form = nil          -- {formname =, spec =, at =, state =, drawn =}
 local player_spec = ""    -- what the player's own inventory key opens
--- "x,y,z" -> the lists of the node the open form is about. One node, because
--- one form is about one node; see core.__send_node_inventory.
+-- A location -> the lists that are there, for the inventories a form draws
+-- that are not the player's own: "x,y,z" for the node the form is about,
+-- which is one node because one form is about one node, and
+-- "detached:<name>" for one that belongs to nobody. Cleared when a form
+-- opens, so it holds what the form on the screen is about and nothing else.
+-- See core.__send_node_inventory().
 local node_inventory = {}
 
 local function make_ui()
@@ -699,10 +703,10 @@ local function make_ui()
 			end
 			return resource
 		end,
-		-- The player's own lists, or the node the form is about --
+		-- The player's own lists, the node the form is about --
 		-- "current_name" and "context" are that node, and a nodemeta:
-		-- location names one outright. A detached inventory is nobody's
-		-- here and draws empty.
+		-- location names one outright -- or a detached inventory, which
+		-- belongs to nobody and is sent under its own name.
 		inventory = function(location, list_name)
 			local lists = nil
 			if location == "current_player" or
@@ -710,6 +714,8 @@ local function make_ui()
 				lists = M.inventory
 			elseif location == "current_name" or location == "context" then
 				lists = form and form.at and node_inventory[form.at] or nil
+			elseif string.sub(location, 1, 9) == "detached:" then
+				lists = node_inventory[location]
 			else
 				local at = string.match(location, "^nodemeta:(.*)$")
 				lists = at and node_inventory[at] or nil
@@ -802,6 +808,15 @@ end
 
 local function show_form(formname, spec, at)
 	close_form(false)
+	-- What the last form was about is not what this one is about: the node
+	-- goes, because the server sends this form's own. The detached ones
+	-- stay -- they belong to nobody and the player's own inventory form,
+	-- which the client opens by itself, is drawn out of them.
+	for at, _ in pairs(node_inventory) do
+		if string.sub(at, 1, 9) ~= "detached:" then
+			node_inventory[at] = nil
+		end
+	end
 	if spec == "" then
 		return
 	end
@@ -940,7 +955,7 @@ buildat.sub_packet("luanti:node_inventory", function(data)
 		lists[name] = stacks
 		i = i + 2 + size
 	end
-	node_inventory = {[at] = lists}
+	node_inventory[at] = lists
 	if form then
 		draw_form()
 	end
