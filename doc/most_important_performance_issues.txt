@@ -54,6 +54,18 @@ Fixed, kept here for what the shape of the problem was:
   generation for the module. set_physics_enabled(false) for a world that reads
   its terrain out of the voxel volumes.
 
+* A craft lookup walked every recipe in the game and built two ItemStacks per
+  recipe to compare two names, and VoxeLibre's craft guide asks for the
+  recipes of all four thousand of its items while it loads. The Lua profiler
+  put 27% of the whole startup in parse_itemstring() and another 20% in the
+  craft walk around it. Recipes are indexed by what they make now, built on
+  first use and dropped when a recipe or an alias changes.
+
+  VoxeLibre's mods load in 10.6 s where they took 112-117 s. devtest's own
+  unittests cover the invalidation -- test_clear_craft registers, asks,
+  clears and asks again. Crafting itself still walks every recipe; it is the
+  lookup that was the startup. Debug build, -O1, 2026-09-14.
+
 Tried and rejected, so that nobody spends the day again:
 
 * Raising voxelworld's chunk buffer limit (m_max_buffers_loaded) from 50 to

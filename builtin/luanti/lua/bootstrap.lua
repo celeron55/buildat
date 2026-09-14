@@ -539,10 +539,17 @@ function core.unregister_item_raw(name)
 	-- The id stays taken: a world already written in it does not stop
 	-- meaning what it meant
 	core.__aliases[name] = nil
+	if core.__forget_craft_index then
+		core.__forget_craft_index()
+	end
 end
 
 function core.register_alias_raw(name, convert_to)
 	core.__aliases[name] = convert_to
+	-- What a recipe makes is looked up by its resolved name; see craft.lua
+	if core.__forget_craft_index then
+		core.__forget_craft_index()
+	end
 end
 
 function core.get_content_id(name)
@@ -1524,6 +1531,9 @@ core.__crafts = {}
 
 function core.register_craft(recipe)
 	core.__crafts[#core.__crafts + 1] = recipe
+	if core.__forget_craft_index then
+		core.__forget_craft_index()
+	end
 end
 
 -- Detached inventories: the ones that belong to nobody, which builtin keeps

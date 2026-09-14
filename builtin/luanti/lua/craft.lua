@@ -11,10 +11,13 @@
 -- which are one item each; and toolrepair, which is two of the same worn
 -- tool.
 --
--- simplified: no crafting hash and no cache, so a craft walks every recipe.
--- Luanti groups them by a hash of the first item and by type. devtest has
--- ~200 recipes and nothing crafts in a loop; the upgrade path is a table
--- keyed the way Luanti keys it, built the first time anything crafts.
+-- simplified: no crafting hash, so *crafting* walks every recipe. Luanti
+-- groups them by a hash of the first item and by type; the upgrade path is a
+-- table keyed the way Luanti keys it, built the first time anything crafts.
+-- Nothing crafts in a loop, which is why this is still here.
+--
+-- Looking a recipe up by what it makes is indexed, because something does do
+-- that in a loop: see by_output below.
 
 local function alias_of(name)
 	return core.__aliases[name] or name
@@ -361,13 +364,80 @@ local function output_matches(recipe, wanted)
 	return alias_of(out:get_name()) == alias_of(want:get_name())
 end
 
-function core.get_craft_recipe(output)
-	local found = nil
+-- Which recipes make what, built the first time something asks and dropped
+-- whenever a recipe or an alias changes.
+--
+-- VoxeLibre's craft guide asks get_all_craft_recipes() about every one of
+-- its four thousand items while it loads, and a walk of every recipe for
+-- each of those -- with two ItemStacks built per recipe to compare two
+-- names -- was two thirds of a two-minute startup: 27% of the Lua in
+-- parse_itemstring() alone. This is the lookup half of the "no crafting
+-- hash and no cache" note at the top of this file; crafting itself still
+-- walks.
+local by_output = nil
+
+-- What a recipe makes, as the name a lookup would ask for, or nil for one
+-- that is not looked up by name at all. An alias is resolved twice because
+-- ItemStack resolves one on the way in and the comparison resolved another;
+-- a chain of two is what that came to and this keeps it.
+local function output_key(recipe)
+	local out = recipe.output
+	if out == nil then
+		return nil
+	end
+	local name = string.match(tostring(out), "^[^ ]*") or ""
+	if name == "" then
+		return nil
+	end
+	return alias_of(alias_of(name))
+end
+
+local function output_index()
+	if by_output ~= nil then
+		return by_output
+	end
+	by_output = {}
+	local function add(key, recipe)
+		local list = by_output[key]
+		if list == nil then
+			list = {}
+			by_output[key] = list
+		end
+		list[#list + 1] = recipe
+	end
 	for _, recipe in ipairs(core.__crafts) do
-		if output_matches(recipe, output) then
-			found = recipe
+		-- A fuel recipe makes nothing, so nothing is what it is looked up
+		-- by -- and one that also names an output is found by that as well,
+		-- which is what the walk this replaces did
+		if (recipe.type or "shaped") == "fuel" then
+			add("", recipe)
+		end
+		local key = output_key(recipe)
+		if key ~= nil then
+			add(key, recipe)
 		end
 	end
+	return by_output
+end
+
+-- Called wherever the recipes or the aliases change; see register_craft()
+-- and register_alias_raw() in bootstrap.lua
+function core.__forget_craft_index()
+	by_output = nil
+end
+
+-- The recipes that make one thing, in the order they were registered
+local function recipes_making(output)
+	local want = ItemStack(output)
+	local key = want:is_empty() and "" or alias_of(want:get_name())
+	return output_index()[key] or {}
+end
+
+function core.get_craft_recipe(output)
+	local list = recipes_making(output)
+	-- The last one registered, which is what walking the whole list and
+	-- keeping the last hit came to
+	local found = list[#list]
 	if found == nil then
 		return {method = "normal", width = 0, items = {}}
 	end
@@ -376,10 +446,8 @@ end
 
 function core.get_all_craft_recipes(output)
 	local all = {}
-	for _, recipe in ipairs(core.__crafts) do
-		if output_matches(recipe, output) then
-			all[#all + 1] = recipe_to_table(recipe)
-		end
+	for _, recipe in ipairs(recipes_making(output)) do
+		all[#all + 1] = recipe_to_table(recipe)
 	end
 	if #all == 0 then
 		return nil
@@ -421,6 +489,9 @@ function core.clear_craft(spec)
 			table.remove(core.__crafts, i)
 			removed = true
 		end
+	end
+	if removed then
+		core.__forget_craft_index()
 	end
 	return removed
 end
