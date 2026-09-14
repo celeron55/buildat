@@ -346,8 +346,8 @@ function sub_events()
 				if waited >= 2.0 then
 					modified_warned[node_id] = true
 					log:warning(string.format(
-							"a changed chunk has not been drawn again after" ..
-							" %.1f s, with %d in the queue", waited,
+							"chunk node %d has not been drawn again after" ..
+							" %.1f s, with %d in the queue", node_id, waited,
 							node_update_queue:get_length()))
 				end
 			end
@@ -383,9 +383,9 @@ function sub_events()
 									queued_us) / 1000000
 							if waited >= 1.0 then
 								log:warning(string.format(
-										"a changed chunk waited %.1f s to be" ..
+										"chunk node %d waited %.1f s to be" ..
 										" drawn again, with %d in the queue",
-										waited,
+										node_update.node_id, waited,
 										node_update_queue:get_length()))
 							end
 						end
