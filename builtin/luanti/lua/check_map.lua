@@ -59,6 +59,14 @@ local function check_clock()
 	-- A day is 24*60*60 game seconds, and time_speed is how many of them a
 	-- real second is, so this is a whole day whatever the speed
 	local speed = tonumber(core.settings:get("time_speed")) or 72
+	-- Unless the clock is stopped, which BUILDAT_LUANTI_FORCE_TIME does on
+	-- purpose: there is no length of step that rolls a day at speed zero,
+	-- and the hour such a run is at is the point of it
+	if speed <= 0 then
+		core.__set_clock(t0, g0, d0)
+		core.log("verbose", "check_map: the clock is pinned; not stepped")
+		return
+	end
 	core.__step(24 * 60 * 60 / speed)
 	if math.abs(core.get_timeofday() - 0.25) > 1e-3 then
 		error("check_map: a whole day did not come back to the same hour: " ..

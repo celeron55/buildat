@@ -49,6 +49,9 @@ The environment variables it reads, since none of them are in the client's -h:
     BUILDAT_LUANTI_LUA=<path>        Lua to load into the environment
     BUILDAT_LUANTI_IMPORT=<path>     Import ONE Luanti world directory into
                                      the save at startup
+    BUILDAT_LUANTI_FORCE_TIME=<n>    Pin the clock at a Luanti time of day
+                                     (0..24000) and stop it running
+    BUILDAT_LUANTI_FORCE_DAY=1       The same thing at noon
     BUILDAT_LUANTI_LUAPROF=<n>       Sample the module's Lua; see below
     LUANTI_EXTRA_IMPORT_PATH=<paths> Where the import menu looks for games
                                      and worlds, before ~/.luanti and
@@ -57,7 +60,12 @@ The environment variables it reads, since none of them are in the client's -h:
                                      it -- a Luanti user directory or an
                                      in-tree build
 
-The last two are one word apart in meaning and are the easy mistake:
+The two that force the clock are spelled the way extensions/luanti_client
+spells them, because a comparison between the two takes its pictures at the
+same hour or not at all.
+
+LUANTI_EXTRA_IMPORT_PATH and BUILDAT_LUANTI_IMPORT are one word apart in
+meaning and are the easy mistake:
 BUILDAT_LUANTI_IMPORT takes one world, LUANTI_EXTRA_IMPORT_PATH takes a
 search path of installations. The launcher says which roots it looked at and
 what it found in them, so "0 games and 0 worlds from 2 roots" in the log is

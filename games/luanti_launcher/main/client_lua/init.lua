@@ -40,7 +40,10 @@ voxel_shading.use_sun_gate(true)
 -- Luanti's origin is where its mods build, so that is what the camera frames
 local LOOK_AT = {x = 0, y = 2, z = 0}
 local CAMERA_DISTANCE = 34
-local CAMERA_FOV = 45
+-- Luanti's own default, and what extensions/luanti_client uses
+-- (BASE_FOV = 72): the two are compared frame against frame, and nothing in
+-- a frame lines up while the cameras see different amounts of the world
+local CAMERA_FOV = 72
 local FAR_CLIP = 400
 local VIEW_DIR = {x = -0.7, y = -0.55, z = -0.7}
 

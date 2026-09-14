@@ -978,6 +978,38 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_string("__luanti_world_seed", itos(m_seed));
 	}
 
+	// A scripted run cannot wait for morning, and two pictures taken at
+	// different hours are not comparable -- which is what the reference
+	// comparison in doc/plan/luanti_module_plan.md is. Spelled the way
+	// extensions/luanti_client spells them, because it is the other half of
+	// that comparison: BUILDAT_LUANTI_FORCE_TIME is a Luanti time of day
+	// (0..24000, so 9000 is mid-morning) and BUILDAT_LUANTI_FORCE_DAY is
+	// noon without having to remember 12000.
+	//
+	// The clock stops as well as moves: a screenshot taken a minute into a
+	// run should be the same picture as one taken at the start, and
+	// time_speed is Luanti's own way of saying so.
+	void force_clock()
+	{
+		const char *t = getenv("BUILDAT_LUANTI_FORCE_TIME");
+		const char *d = getenv("BUILDAT_LUANTI_FORCE_DAY");
+		double tod = -1.0;
+		if(t != nullptr && t[0] != '\0')
+			tod = atof(t) / 24000.0;
+		else if(d != nullptr && d[0] != '\0')
+			tod = 0.5;
+		if(tod < 0.0)
+			return;
+		char buf[200];
+		snprintf(buf, sizeof buf,
+				"core.set_timeofday(%f) "
+				"core.settings:set('time_speed', '0') "
+				"core.__send_time()", tod);
+		run_chunk_string(buf, "force_clock");
+		log_i(MODULE, "The clock is pinned at %.0f of Luanti's 24000 and "
+				"does not run", tod * 24000.0);
+	}
+
 	void load_clock()
 	{
 		if(!m_store)
@@ -6714,6 +6746,10 @@ struct Module: public interface::Module, public luanti::Interface
 		}
 
 		start_check_map();
+
+		// Last, so that it is the hour whatever the save or the imported
+		// world said
+		force_clock();
 
 		m_server->emit_event("luanti:game_loaded", new GameLoaded(m_scene));
 	}
