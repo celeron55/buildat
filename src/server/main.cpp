@@ -16,6 +16,7 @@
 #include <climits>
 #include <cstdlib> // srand()
 #include <signal.h>
+#include <malloc.h> // mallopt(), M_PERTURB
 #include <string.h> // strerror()
 #include <time.h> // struct timeval
 #define MODULE "main"
@@ -51,6 +52,27 @@ void signal_handler_init()
 int main(int argc, char *argv[])
 {
 	boot::BasicInitScope basic_init_scope;
+
+	// glibc fills a freed block with 0x5a and a fresh one with 0xa5 when
+	// this is set, which turns a read of a freed object from a value that
+	// looks plausible into one that names itself: 0x5a5a5a5a5a5a5a5a in a
+	// backtrace says "freed" at a glance and 0xa5a5... says "never
+	// written". It costs a memset per allocation and nothing else, so it is
+	// on in every build that has its asserts -- which is every ordinary one,
+	// the default build type being Debug. MALLOC_PERTURB_=90 does the same
+	// for a binary already built.
+	//
+	// Measured here rather than assumed, because two things about it are not
+	// what one would guess: a small free goes to the tcache and is *not*
+	// poisoned while that bin has room -- seven per size class -- and the
+	// first sixteen bytes of a poisoned small chunk hold glibc's own links
+	// rather than the pattern. A large block is poisoned from its first
+	// byte. So this catches a great deal and promises nothing; the
+	// quarantine is a sanitizer's job. See doc/plan/master_plan.md,
+	// "Catching a use-after-free before it is a mystery".
+#ifndef NDEBUG
+	mallopt(M_PERTURB, 0x5a);
+#endif
 
 	server::Config &config = g_server_config;
 

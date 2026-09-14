@@ -52,7 +52,36 @@ if(NOT DEFINED URHO3D_64BIT)
 	endif()
 endif()
 
-set(URHO3D_BUILD_DIR "${URHO3D_HOME}/Build")
+# A sanitizer, for chasing an intermittent crash rather than for every day:
+# -DSANITIZE=address builds with AddressSanitizer, and the option is passed
+# to the bundled Urho3D's own build below, because the engine is where a
+# use-after-free of a scene node would be. Build it in a directory of its
+# own -- Build/asan -- so that the ordinary build is untouched, and run it
+# with ASAN_OPTIONS=detect_leaks=0:abort_on_error=1, a long-lived engine's
+# exit leaks being what would otherwise bury the report. It costs about
+# twice the CPU and three times the memory, which is why it is not the
+# default. See doc/plan/master_plan.md, "Catching a use-after-free before it
+# is a mystery".
+set(SANITIZE "" CACHE STRING "Sanitizer to build with: address, thread or empty")
+if(SANITIZE)
+	set(SANITIZE_FLAGS "-fsanitize=${SANITIZE} -fno-omit-frame-pointer")
+	set(COMMON_CXX_FLAGS "${COMMON_CXX_FLAGS} ${SANITIZE_FLAGS}")
+	set(CMAKE_EXE_LINKER_FLAGS
+			"${CMAKE_EXE_LINKER_FLAGS} ${SANITIZE_FLAGS}")
+	set(CMAKE_SHARED_LINKER_FLAGS
+			"${CMAKE_SHARED_LINKER_FLAGS} ${SANITIZE_FLAGS}")
+	message(STATUS "Building with -fsanitize=${SANITIZE}")
+endif()
+
+# The bundled Urho3D is built in one directory, shared by every buildat
+# build directory there is -- so a sanitizer build needs its own, or
+# configuring one re-flags the engine for the ordinary build as well and the
+# next ordinary link fails. Found the hard way.
+if(SANITIZE)
+	set(URHO3D_BUILD_DIR "${URHO3D_HOME}/Build-${SANITIZE}")
+else()
+	set(URHO3D_BUILD_DIR "${URHO3D_HOME}/Build")
+endif()
 if(WIN32)
 	set(URHO3D_LIBRARY_FILE "${URHO3D_BUILD_DIR}/bin/Urho3D.dll")
 	set(URHO3D_IMPLIB_FILE "${URHO3D_BUILD_DIR}/lib/libUrho3D.dll.a")
@@ -86,6 +115,11 @@ if(URHO3D_HOME_ABS STREQUAL URHO3D_BUNDLED_HOME_ABS)
 	file(MAKE_DIRECTORY "${URHO3D_BUILD_DIR}")
 	set(URHO3D_BUNDLE_CMAKE_ARGS
 		-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+		# The sanitizer as well, when there is one: the engine is where a
+		# use-after-free of a scene node would be, and ASan has to be in the
+		# library that owns the memory as much as in what calls it
+		"-DCMAKE_CXX_FLAGS=${SANITIZE_FLAGS}"
+		"-DCMAKE_C_FLAGS=${SANITIZE_FLAGS}"
 		-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
 		-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
 		-DURHO3D_LIB_TYPE=${URHO3D_LIB_TYPE}
