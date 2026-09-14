@@ -1318,6 +1318,22 @@ struct CInstance: public voxelworld::Instance
 		return section != nullptr && section->loaded && section->generated;
 	}
 
+	// See api.h: what has been written into this section is all of it there
+	// is going to be, so no generator is asked for one
+	void set_section_generated(const pv::Vector3DInt16 &section_p)
+	{
+		Section &section = force_get_section(section_p);
+		if(!section.loaded)
+			load_section(section);
+		if(section.generated)
+			return;
+		section.generated = true;
+		// Marked rather than generated, and the mark belongs in the save
+		// with the voxels: a section that came back without it would be
+		// generated over on the next run
+		section.modified = true;
+	}
+
 	// A section that was marked stale while it was not in memory: take the
 	// light out of it and let it back in from its own sources and from the
 	// neighbours that are here now. Nothing is asked of the neighbours that

@@ -230,6 +230,21 @@ namespace voxelworld
 		virtual bool is_section_generated(
 				const pv::Vector3DInt16 &section_p) = 0;
 
+		// Say a section has been generated without generating it: its
+		// voxels came from somewhere else. What asks is an importer reading
+		// another engine's world, and what it prevents is the generator
+		// running over that section afterwards and writing what was read
+		// away -- inside its own section a generator's volume wins, which
+		// is what merge_volume()'s owned region means.
+		//
+		// The section is created and loaded if it is not there yet. What
+		// the caller does not write stays undefined, the way it is in a
+		// section nobody has asked for: a caller that only covers part of a
+		// section is saying that the rest of it is not there rather than
+		// that it is empty.
+		virtual void set_section_generated(
+				const pv::Vector3DInt16 &section_p) = 0;
+
 		virtual void set_voxel(const pv::Vector3DInt32 &p,
 				const VoxelInstance &v,
 				bool disable_warnings = false) = 0;

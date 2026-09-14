@@ -1226,13 +1226,15 @@ struct Module: public interface::Module
 					inetwork->send(peer, "main:progress", data);
 				});
 			});
-			// What the world is made out of goes in before it is made; the
-			// rest of it is read once the game's nodes are registered
-			if(!import_from.empty())
+			// What the world is made out of goes in before it is made, and
+			// so does the world itself: the map is read from inside
+			// run_game(), between the game's nodes being registered and
+			// the first section being asked for
+			if(!import_from.empty()){
 				i->import_world_settings(import_from, save);
-			i->run_game(game_path, save);
-			if(!import_from.empty())
 				i->import_world(import_from);
+			}
+			i->run_game(game_path, save);
 		});
 	}
 };

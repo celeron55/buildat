@@ -169,6 +169,15 @@ extends nothing; a game that does extend a Luanti game already knows which one
 at init, so its load_lua() calls come first. load_lua() after run_game() is an
 error, because Luanti loads its mods once, in order.
 
+import_world() is registered the same way and for the same kind of reason.
+It only records the path; the map is read from inside run_game(), once the
+mods have registered the nodes the blocks name and before a generator has
+been asked for any section. A section this engine has generated is a section
+whose generated volume wins over anything written into it, so an import that
+ran afterwards would be a fresh world of the same seed standing where the
+read one should be. The sections the map reaches into are not generated at
+all, which also means what the imported world did not hold is not there.
+
 Finding out what is slow
 ------------------------
 

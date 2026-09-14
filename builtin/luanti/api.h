@@ -86,12 +86,19 @@ namespace luanti
 		// One direction: the Luanti world directory is opened read-only and
 		// nothing is written back to it.
 		//
-		// After run_game(), because the nodes the blocks name have to be
-		// registered before anything can be said about them -- a name this
-		// game does not register becomes "unknown" and is counted. What
-		// comes over is the nodes and their two params, the metadata
-		// hanging off them, the timer on a node that had one, the entities
-		// the blocks were holding, the clock and what the mods remembered.
+		// Before run_game(), which is where it happens: the map is read
+		// once the game's nodes are registered and before a generator has
+		// been asked for any section, because a section that has been
+		// generated is one whose generator writes over what is read into
+		// it. A section the map reaches into is not generated at all after
+		// this -- what the imported world did not hold is not there, the
+		// way it was not there in the world it came from.
+		//
+		// A name this game does not register becomes "unknown" and is
+		// counted. What comes over is the nodes and their two params, the
+		// metadata hanging off them, the timer on a node that had one, the
+		// entities the blocks were holding, the clock and what the mods
+		// remembered.
 		//
 		// The mods have therefore already loaded when the storage arrives,
 		// so a mod that read its storage while loading read the save's own
