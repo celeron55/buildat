@@ -42,6 +42,10 @@ local __send_player_pos = __luanti_send_player_pos
 -- sends these as their own packets and draws hearts and bubbles for them;
 -- what a game draws instead is the HUD elements above, and the healthbar
 -- and breathbar flags are how it says so.
+-- Defined where the rest of the HUD is sent, far below; a player's hotbar is
+-- set from up here as well
+local send_hotbar
+
 local function send_stats(o)
 	if o and o.player_name and __luanti_send_hud then
 		__luanti_send_hud(o.player_name, {"stats",
@@ -817,6 +821,7 @@ function PlayerRef:hud_set_hotbar_itemcount(n)
 		return false
 	end
 	o.hotbar = math.min(n, o.inventory:get_size("main"))
+	send_hotbar(o)
 	return true
 end
 
@@ -925,13 +930,45 @@ end
 -- nothing rather than being missing and taking a mod down on the line that
 -- sets one
 for _, name in ipairs({
-	"hud_set_hotbar_image",
-	"hud_set_hotbar_selected_image", "set_lighting",
+	"set_lighting",
 	"set_minimap_modes", "send_mapblock", "set_fov", "set_nametag_color",
-	"hud_set_hotbar_image_selected",
 }) do
 	PlayerRef[name] = function() end
 end
+
+-- What the client draws its hotbar out of: how many slots, the picture
+-- behind them and the one that marks the slot in hand. Luanti's client owns
+-- the hotbar and a game only says these three things about it, which is how
+-- it is here too -- the launcher draws it, and this is what it is told.
+function PlayerRef:hud_set_hotbar_image(name)
+	local o = state_of(self)
+	if o then
+		o.hotbar_image = tostring(name or "")
+		send_hotbar(o)
+	end
+end
+
+function PlayerRef:hud_get_hotbar_image()
+	local o = state_of(self)
+	return o and o.hotbar_image or ""
+end
+
+function PlayerRef:hud_set_hotbar_selected_image(name)
+	local o = state_of(self)
+	if o then
+		o.hotbar_selected_image = tostring(name or "")
+		send_hotbar(o)
+	end
+end
+
+function PlayerRef:hud_get_hotbar_selected_image()
+	local o = state_of(self)
+	return o and o.hotbar_selected_image or ""
+end
+
+-- Luanti's own name for the same thing, which some mods use
+PlayerRef.hud_set_hotbar_image_selected =
+		PlayerRef.hud_set_hotbar_selected_image
 
 --
 -- The sky a game says it has
@@ -1199,6 +1236,14 @@ local function send_hud(o, flat)
 	end
 end
 
+-- The hotbar is the client's own and not one of the elements, so it travels
+-- as one line of its own rather than through hud_add()
+send_hotbar = function(o)
+	send_hud(o, {"hotbar", tostring(o.hotbar or 8),
+			tostring(o.hotbar_image or ""),
+			tostring(o.hotbar_selected_image or "")})
+end
+
 -- What a client that arrives is told: every element the game had already
 -- added for this player, and the flags
 local function send_whole_hud(o)
@@ -1215,6 +1260,7 @@ local function send_whole_hud(o)
 		send_hud(o, flat)
 	end
 	send_hud(o, {"flags", tostring(o.hud_flags or HUD_FLAGS_ALL)})
+	send_hotbar(o)
 end
 
 function PlayerRef:hud_add(def)
@@ -1300,9 +1346,6 @@ function PlayerRef:hud_get_flags()
 	end
 	return out
 end
-function PlayerRef:hud_get_hotbar_image() return "" end
-function PlayerRef:hud_get_hotbar_selected_image() return "" end
-
 function PlayerRef:get_lighting() return {shadows = {intensity = 0}} end
 -- How much of the day's light the player gets whatever the hour: Luanti's
 -- own way for a game to say "this place is always dark" or "always bright",

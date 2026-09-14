@@ -1239,6 +1239,13 @@ local function hud_changed()
 	end
 end
 
+-- What the client's own hotbar is drawn out of, as the game last said it:
+-- how many slots, the picture behind them and the one that marks the slot in
+-- hand. Luanti's client owns the hotbar and a game only says these three
+-- things about it. The images are texture modifier expressions like any
+-- other; luanti.texture() is what turns one into something drawable.
+M.hotbar = {count = 8}
+
 buildat.sub_packet("luanti:hud", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	local op = values[1]
@@ -1266,6 +1273,12 @@ buildat.sub_packet("luanti:hud", function(data)
 		end
 	elseif op == "flags" then
 		M.hud_flags = tonumber(values[2]) or M.hud_flags
+	elseif op == "hotbar" then
+		M.hotbar = {
+			count = math.max(1, math.min(32, tonumber(values[2]) or 8)),
+			image = values[3] ~= "" and values[3] or nil,
+			selected_image = values[4] ~= "" and values[4] or nil,
+		}
 	elseif op == "stats" then
 		M.stats = {
 			hp = tonumber(values[2]) or 0,

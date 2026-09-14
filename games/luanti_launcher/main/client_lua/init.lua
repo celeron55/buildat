@@ -71,8 +71,8 @@ local BINDINGS = {
 	{action = "fly", key = magic.KEY_K, name = "K", what = "Fly on and off"},
 	{action = "noclip", key = magic.KEY_H, name = "H",
 			what = "Through walls on and off"},
-	{action = "hotbar", first = magic.KEY_1, last = magic.KEY_8,
-			name = "1 - 8", what = "Pick a hotbar slot"},
+	{action = "hotbar", first = magic.KEY_1, last = magic.KEY_9,
+			name = "1 - 9", what = "Pick a hotbar slot"},
 	{action = "chat", key = magic.KEY_T, name = "T",
 			what = "Say something - a line starting with / is a command"},
 	{action = "inventory", key = magic.KEY_I, name = "I", what = "Inventory"},
@@ -276,17 +276,23 @@ crosshair:SetPosition(0, 0)
 --
 -- The hotbar
 --
--- The first eight slots of the player's own inventory, along the bottom
--- where Luanti puts them: what is in each, how many, and which one is in
--- hand. The keys 1-8 and the wheel pick one, and the server is told --
--- what is in hand is what a dig or a place asks it about.
-local HOTBAR_SLOTS = 8
+-- The first slots of the player's own inventory, along the bottom where
+-- Luanti puts them: what is in each, how many, and which one is in hand.
+-- The keys 1-8 and the wheel pick one, and the server is told -- what is in
+-- hand is what a dig or a place asks it about.
+-- How many are drawn is the game's to say -- hud_set_hotbar_itemcount() --
+-- and this is Luanti's own ceiling on it. They are all built once and the
+-- ones past the count are hidden, because the number changes when a game
+-- says so and rebuilding them would be the same slots again.
+local HOTBAR_MAX = 32
 local SLOT = 44
 local SLOT_GAP = 4
 local WHITE = luanti.texture("[fill:1x1:#ffffffff")
 
 local hotbar = {}
 local hotbar_stacks = {}
+local hotbar_bg = nil
+local hotbar_shown = true
 local wield_index = 1
 
 -- "basenodes:stone 7" -> the name and the count
@@ -327,9 +333,15 @@ local function sun_picture_of(name)
 end
 
 do
-	local width = HOTBAR_SLOTS * SLOT + (HOTBAR_SLOTS - 1) * SLOT_GAP
 	local white = game_texture(WHITE)
-	for i = 1, HOTBAR_SLOTS do
+	-- Built before the slots so that it is behind them: a UI element's
+	-- children are drawn in the order they were made
+	hotbar_bg = magic.ui.root:CreateChild("BorderImage")
+	hotbar_bg.horizontalAlignment = magic.HA_CENTER
+	hotbar_bg.verticalAlignment = magic.VA_BOTTOM
+	hotbar_bg.blendMode = magic.BLEND_ALPHA
+	hotbar_bg.visible = false
+	for i = 1, HOTBAR_MAX do
 		local frame = magic.ui.root:CreateChild("BorderImage")
 		if white then
 			frame.texture = white
@@ -338,8 +350,13 @@ do
 		frame.size = magic.IntVector2(SLOT, SLOT)
 		frame.horizontalAlignment = magic.HA_CENTER
 		frame.verticalAlignment = magic.VA_BOTTOM
-		frame:SetPosition(math.floor(-width / 2 + (i - 1) *
-				(SLOT + SLOT_GAP)), -8)
+		frame.visible = false
+		-- The game's own mark for the slot in hand, under the item the way
+		-- Luanti draws it; see hud_set_hotbar_selected_image()
+		local marker = frame:CreateChild("BorderImage")
+		marker.size = magic.IntVector2(SLOT, SLOT)
+		marker.blendMode = magic.BLEND_ALPHA
+		marker.visible = false
 		local image = frame:CreateChild("BorderImage")
 		image:SetPosition(4, 4)
 		image.size = magic.IntVector2(SLOT - 8, SLOT - 8)
@@ -351,7 +368,8 @@ do
 		count.horizontalAlignment = magic.HA_RIGHT
 		count.verticalAlignment = magic.VA_BOTTOM
 		count:SetPosition(-3, -2)
-		hotbar[i] = {frame = frame, image = image, count = count}
+		hotbar[i] = {frame = frame, image = image, count = count,
+				marker = marker}
 	end
 end
 
@@ -405,9 +423,45 @@ wielded_text.horizontalAlignment = magic.HA_CENTER
 wielded_text.verticalAlignment = magic.VA_BOTTOM
 wielded_text:SetPosition(0, -(8 + SLOT + 30))
 
+-- The pictures the game named, kept as textures because these are asked for
+-- on every redraw and a name is composed anew each time it is looked up
+local hotbar_pictures = {}
+
+local function hotbar_picture(name)
+	if name == nil then
+		return nil
+	end
+	if hotbar_pictures[name] == nil then
+		-- false rather than nil, so that a game whose picture was never
+		-- shipped is not composed again on every redraw
+		hotbar_pictures[name] = game_texture(luanti.texture(name)) or false
+	end
+	return hotbar_pictures[name] or nil
+end
+
 local function draw_hotbar()
-	for i = 1, HOTBAR_SLOTS do
+	local shown = luanti.hotbar or {}
+	local n = math.max(1, math.min(HOTBAR_MAX, shown.count or 8))
+	local width = n * SLOT + (n - 1) * SLOT_GAP
+	-- The picture the game puts behind the slots, stretched over the whole
+	-- bar, which is where Luanti's client puts its own
+	local bg = hotbar_picture(shown.image)
+	if bg then
+		hotbar_bg.texture = bg
+		hotbar_bg.size = magic.IntVector2(width + SLOT_GAP * 2,
+				SLOT + SLOT_GAP * 2)
+		hotbar_bg:SetPosition(0, -(8 - SLOT_GAP))
+	end
+	hotbar_bg.visible = hotbar_shown and bg ~= nil
+	-- And the one that marks the slot in hand, which is a frame around it
+	local selected = hotbar_picture(shown.selected_image)
+	for i = 1, HOTBAR_MAX do
 		local slot = hotbar[i]
+		slot.frame.visible = hotbar_shown and i <= n
+		if i <= n then
+			slot.frame:SetPosition(math.floor(-width / 2 + (i - 1) *
+					(SLOT + SLOT_GAP)), -8)
+		end
 		local name, count = parse_stack(hotbar_stacks[i])
 		local tex = name and game_texture(luanti.item_texture(name))
 		-- Assigned only when there is one: the sandbox takes a Texture and
@@ -421,9 +475,14 @@ local function draw_hotbar()
 		slot.frame.color = (name and tex == nil) and
 				magic.Color(0.5, 0.3, 0.5, 0.75) or
 				magic.Color(0.1, 0.1, 0.12, 0.55)
-		if i == wield_index then
+		local marked = i == wield_index
+		if marked and selected == nil then
 			slot.frame.color = magic.Color(0.9, 0.9, 0.7, 0.75)
 		end
+		if selected then
+			slot.marker.texture = selected
+		end
+		slot.marker.visible = marked and selected ~= nil
 		slot.count:SetText((count and count > 1) and tostring(count) or "")
 	end
 	local name = parse_stack(hotbar_stacks[wield_index])
@@ -450,9 +509,11 @@ luanti.sub_inventory(function(lists)
 end)
 
 local function set_wield(i)
+	local n = math.max(1, math.min(HOTBAR_MAX,
+			(luanti.hotbar and luanti.hotbar.count) or 8))
 	if i < 1 then
-		i = HOTBAR_SLOTS
-	elseif i > HOTBAR_SLOTS then
+		i = n
+	elseif i > n then
 		i = 1
 	end
 	if i == wield_index then
@@ -1366,10 +1427,9 @@ local function draw_hud(elements, flags)
 	title_text.visible = hud_shown
 	crosshair.visible = hud_shown and luanti.hud_flag("crosshair")
 	chat_block.visible = chat_shown and luanti.hud_flag("chat")
-	for _, slot in ipairs(hotbar) do
-		slot.frame.visible = hud_shown and luanti.hud_flag("hotbar")
-	end
-	wielded_text.visible = hud_shown and luanti.hud_flag("hotbar")
+	hotbar_shown = hud_shown and luanti.hud_flag("hotbar")
+	draw_hotbar()
+	wielded_text.visible = hotbar_shown
 	for id, e in pairs(elements) do
 		local kind = e.type or "text"
 		if kind == "text" then
@@ -1870,8 +1930,12 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		set_mouse_in_world(not luanti.form_open())
 		return
 	end
-	if key >= magic.KEY_1 and key <= magic.KEY_8 then
-		set_wield(key - magic.KEY_1 + 1)
+	if key >= magic.KEY_1 and key <= magic.KEY_9 then
+		-- A game with fewer slots than that has no slot for the key
+		local i = key - magic.KEY_1 + 1
+		if i <= ((luanti.hotbar and luanti.hotbar.count) or 8) then
+			set_wield(i)
+		end
 	elseif key == BIND.chat.key then
 		chat_wanted = true
 	elseif key == BIND.mouse.key then

@@ -1113,6 +1113,10 @@ function M.define(dst, util)
 			imageBorder = util.simple_property(dst.IntRect),
 			imageRect = util.simple_property(dst.IntRect),
 			tiled = util.simple_property("boolean"),
+			-- BLEND_REPLACE is the default and is what an image with
+			-- transparency in it has to be taken off: a fully opaque colour
+			-- keeps it, and then the transparent pixels are drawn black
+			blendMode = util.simple_property("number"),
 		},
 	})
 
