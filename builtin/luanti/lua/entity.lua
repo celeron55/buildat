@@ -2480,6 +2480,43 @@ local function move_axis(o, i, d, box, result)
 	}
 end
 
+-- How often an active object is asked for its static data, which is about
+-- what Luanti's own deactivateFarObjects() comes to while an object stays
+-- where it is.
+local STATICDATA_INTERVAL = 2
+
+-- Luanti asks an active object for its static data every couple of seconds,
+-- because that is what it writes into the block the object is in. Nothing
+-- here keeps an object in a block -- see the note in core.__step_objects()
+-- -- so the string is only held, and this looks like a call made for its
+-- side effects alone. It is not optional for all that: a mod is entitled to
+-- do its own bookkeeping in get_staticdata(), and **VoxeLibre's mobs do
+-- not move without it**. A freshly spawned mcl_mobs mob has no state until
+-- something sets one, and the one thing that does is get_staticdata(); with
+-- it never called, every mob in the game stood still for ever.
+local function ask_for_staticdata(o, dtime)
+	local le = o.le
+	if le == nil or le.get_staticdata == nil then
+		return
+	end
+	-- Spread over the interval rather than all on one step: the objects of
+	-- a game the size of VoxeLibre are serialised here, one table each
+	o.staticdata_in = (o.staticdata_in or
+			math.random() * STATICDATA_INTERVAL) - dtime
+	if o.staticdata_in > 0 then
+		return
+	end
+	o.staticdata_in = STATICDATA_INTERVAL
+	core.set_last_run_mod(le.mod_origin)
+	local ok, data = pcall(le.get_staticdata, le)
+	if ok then
+		o.staticdata = data
+	else
+		core.log("error", "entity " .. tostring(le.name) ..
+				" get_staticdata: " .. tostring(data))
+	end
+end
+
 local function step_object(o, dtime)
 	-- Where a player is is their client's to say, and nothing here has an
 	-- opinion about it
@@ -2518,6 +2555,7 @@ local function step_object(o, dtime)
 					tostring(err))
 		end
 	end
+	ask_for_staticdata(o, dtime)
 end
 
 -- Where every object is and how big it is, once per step: the module puts a

@@ -662,13 +662,13 @@ function M.pointed_object(x, y, z, dx, dy, dz, max_distance)
 		-- from the eye hits it before anything else in the world
 		if id ~= M.self_id then
 			local p = have.node.position
-			local s = have.node.scale
-			-- A model is drawn at its own scale rather than at what it
-			-- collides with; a sixth of a node around it is something to
-			-- aim at either way
-			local hx = math.max(0.15, s.x / 2)
-			local hy = math.max(0.15, s.y / 2)
-			local hz = math.max(0.15, s.z / 2)
+			-- The box the object collides with, which the server sends
+			-- whatever the object is drawn as: a model's own scale is not
+			-- it, and aiming by that missed every mob VoxeLibre has
+			local s = have.box or {1, 1, 1}
+			local hx = math.max(0.15, s[1] / 2)
+			local hy = math.max(0.15, s[2] / 2)
+			local hz = math.max(0.15, s[3] / 2)
 			local t0, t1 = 0, best_t
 			local function slab(o, d, lo, hi)
 				if math.abs(d) < 1e-9 then
@@ -759,6 +759,11 @@ buildat.sub_packet("luanti:objects", function(data)
 		local node = object_node(id)
 		node.position = magic.Vector3(v[i + 1], v[i + 2], v[i + 3])
 		local have = object_nodes[id]
+		-- What the object collides with, which is what is aimed at: a
+		-- model is drawn at its own size and that is not the same box --
+		-- a mob authored small is a mob nobody could hit. See
+		-- M.pointed_object().
+		have.box = {v[i + 4], v[i + 5], v[i + 6]}
 		if have.drawn_as == "mesh" then
 			-- A model is drawn at the size the object asked for rather than
 			-- at what it collides with, and it is authored in Luanti's own
