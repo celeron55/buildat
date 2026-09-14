@@ -2331,13 +2331,22 @@ local function spawn_level_in_column(x, z)
 	return nil
 end
 
-function core.get_spawn_level(x, z)
+-- Where a player can stand above (x, z), or nil.
+--
+-- deep says whether the map's whole column may be walked when the mapgen's
+-- answer does not match it. That walk is six hundred voxels of map read, so
+-- the spawn search asks for it at a handful of points rather than at the
+-- thousands it tries -- see find_spawn_pos() in lua/entity.lua.
+function core.get_spawn_level(x, z, deep)
 	x, z = math.floor(x + 0.5), math.floor(z + 0.5)
 	local from_mapgen = __luanti_spawn_level and __luanti_spawn_level(x, z)
 	if from_mapgen then
 		local level = spawn_level_in_map(x, from_mapgen, z, SPAWN_SEARCH_UP)
 		if level then
 			return level
+		end
+		if not deep then
+			return nil
 		end
 		-- The mapgen said where its own terrain is and the map does not
 		-- agree. A game that builds its world in core.register_on_generated

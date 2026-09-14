@@ -716,6 +716,11 @@ struct Module: public interface::Module, public luanti::Interface
 	// kept only while the check is waiting for its own
 	std::set<uint64_t> m_generated_sections;
 	float m_step_accum = 0.0f;
+	// The longest step a game is told about. Luanti's own dedicated server
+	// caps its dtime the same way: time nobody can make up is time to let
+	// go of, and a mod that is handed ten seconds at once does something
+	// silly with them.
+	static constexpr float MAX_STEP_S = 0.5f;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -1182,6 +1187,12 @@ struct Module: public interface::Module, public luanti::Interface
 				"%.0f seconds played", (int)day_count, time_of_day, game_time);
 	}
 
+	// The server ticks at 30 Hz and Luanti steps at 0.09 s, so a tick's
+	// dtime is accumulated into a step. A tick the server could not deliver
+	// on time arrives with the time it was late by added to it -- see
+	// push_event() in src/server/state.cpp -- so a game whose step costs
+	// more than a tick interval, which VoxeLibre's 220 mods do, runs slow
+	// rather than falling further behind on every tick.
 	void on_tick(const interface::TickEvent &event)
 	{
 		if(!m_game_running)
@@ -1189,14 +1200,17 @@ struct Module: public interface::Module, public luanti::Interface
 		m_step_accum += event.dtime;
 		if(m_step_accum < STEP_S)
 			return;
+		float dtime = m_step_accum;
+		if(dtime > MAX_STEP_S)
+			dtime = MAX_STEP_S;
 		m_step_accum = 0.0f;
 		update_load_points();
-		check_map_when_ready(STEP_S);
-		step_environment();
+		check_map_when_ready(dtime);
+		step_environment(dtime);
 		flush_node_writes();
 		// The clock, now and then: a client carries it on by itself between
 		// these, so this is a correction rather than a tick
-		m_time_accum += STEP_S;
+		m_time_accum += dtime;
 		if(m_time_accum >= TIME_INTERVAL_S){
 			m_time_accum = 0.0f;
 			run_chunk_string("core.__send_time()", "send_time");
@@ -1204,10 +1218,10 @@ struct Module: public interface::Module, public luanti::Interface
 	}
 
 	// One Luanti step: the clock now, the globalsteps and core.after later
-	void step_environment()
+	void step_environment(float dtime)
 	{
 		char buf[64];
-		snprintf(buf, sizeof buf, "core.__step(%f)", (double)STEP_S);
+		snprintf(buf, sizeof buf, "core.__step(%f)", (double)dtime);
 		try {
 			run_chunk_string(buf, "step");
 		} catch(Exception &e){

@@ -790,7 +790,16 @@ struct Module: public interface::Module, public luanti_mapgen::Interface
 				itos(params.water_level);
 		if(m_query == nullptr || key != m_query_key){
 			delete m_query;
-			m_query = new VendoredGenerator(params, params.section_size);
+			// Only the terrain noise answers this question, so the query
+			// generator is built without what a world is decorated with:
+			// VoxeLibre's 443 decorations read that many schematics off the
+			// disk, and doing it twice for a question about noise is a
+			// second of the module's thread for nothing.
+			Params bare = params;
+			bare.biomes.clear();
+			bare.ores.clear();
+			bare.decorations.clear();
+			m_query = new VendoredGenerator(bare, bare.section_size);
 			m_query_key = key;
 		}
 		return m_query->spawn_level(x, z, level_out);

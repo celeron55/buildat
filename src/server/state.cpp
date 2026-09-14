@@ -162,6 +162,30 @@ struct ModuleContainer
 	}
 	void push_event(const Event &event){
 		interface::MutexScope ms(event_queue_mutex);
+		// A tick is a heartbeat and not data: a module that takes longer
+		// than the tick interval to handle one would otherwise collect a
+		// queue of them that only grows, and every other event -- a
+		// packet from a client, a generated section -- waits behind the
+		// whole backlog. So a tick pushed at a module that has one
+		// waiting is added to that one's dtime instead, which keeps the
+		// time right for anything that integrates it.
+		static const Event::Type tick_type =
+				interface::getGlobalEventRegistry()->type("core:tick");
+		if(event.type == tick_type){
+			for(Event &queued : event_queue){
+				if(queued.type != tick_type)
+					continue;
+				const auto *old_p = static_cast<
+						const interface::TickEvent*>(queued.p.get());
+				const auto *new_p = static_cast<
+						const interface::TickEvent*>(event.p.get());
+				if(!old_p || !new_p)
+					break;
+				queued = Event(tick_type, new interface::TickEvent(
+						old_p->dtime + new_p->dtime));
+				return;
+			}
+		}
 		event_queue.push_back(event);
 		event_queue_sem.post();
 	}

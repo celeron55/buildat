@@ -1562,6 +1562,8 @@ end
 -- the mapgen's own.
 local SPAWN_TRIES = 4000
 local SPAWN_RANGE_MAX = 31000
+-- How many of those look at the map's whole column; see get_spawn_level()
+local SPAWN_DEEP_TRIES = 8
 -- The candidate points are the same sequence in every world, so that a
 -- world always spawns a player in the same place: what makes one world's
 -- spawn differ from another's is which candidates its mapgen accepts.
@@ -1599,7 +1601,12 @@ local function find_spawn_pos()
 			x = -range + spawn_rand_to(pr, range * 2)
 			z = -range + spawn_rand_to(pr, range * 2)
 		end
-		local level = core.get_spawn_level(x, z)
+		-- The first few points may have the map's whole column walked when
+		-- the mapgen's answer does not match what is there; the rest are
+		-- the mapgen's answer and a look at the nodes above it. Six hundred
+		-- voxels of map read times four thousand points is half a minute of
+		-- the module's thread, and a client waits for that thread.
+		local level = core.get_spawn_level(x, z, i < SPAWN_DEEP_TRIES)
 		if level ~= nil then
 			return {x = x, y = level, z = z}, true
 		end
