@@ -1657,7 +1657,46 @@ stub("serialize_schematic", nil)
 -- talk to is a write-behind buffer in the module that voxelworld sees once
 -- per Luanti step. See doc/plan/luanti_module_plan.md, "set_node is buffered".
 
-local __set_node = __luanti_set_node
+-- Which mapblocks have changed since the last step, for
+-- core.register_on_mapblocks_changed(). Luanti marks a block modified when a
+-- node in it is written or its metadata is, and tells the callbacks once a
+-- step with the lot of them; the key is the hash of the *block* position,
+-- which is what a mod looks one up by.
+local changed_blocks = {}
+local changed_block_count = 0
+
+function core.__note_block_changed(x, y, z)
+	local h = core.hash_node_position({x = math.floor(x / 16),
+			y = math.floor(y / 16), z = math.floor(z / 16)})
+	if changed_blocks[h] == nil then
+		changed_blocks[h] = true
+		changed_block_count = changed_block_count + 1
+	end
+end
+
+local function run_mapblocks_changed()
+	if changed_block_count == 0 then
+		return
+	end
+	local blocks, count = changed_blocks, changed_block_count
+	changed_blocks, changed_block_count = {}, 0
+	for _, cb in ipairs(core.registered_on_mapblocks_changed or {}) do
+		local ok, err = pcall(cb, blocks, count)
+		if not ok then
+			core.log("error", "on_mapblocks_changed: " .. tostring(err))
+		end
+	end
+end
+
+-- Every node write goes through here, which is where a block is marked as
+-- changed. The write itself is the C function; this is the one place that
+-- sees all of them, so it is the one place that has to remember.
+local __set_node_raw = __luanti_set_node
+
+local function __set_node(x, y, z, id, param1, param2)
+	core.__note_block_changed(x, y, z)
+	return __set_node_raw(x, y, z, id, param1, param2)
+end
 local __get_node = __luanti_get_node
 local __get_region = __luanti_get_region
 -- The loaded sections, as voxel boxes; see the ABMs further down
@@ -3237,6 +3276,7 @@ function core.__step(dtime)
 	core.__step_objects(dtime)
 	step_emerge(dtime)
 	run_node_timers(dtime)
+	run_mapblocks_changed()
 	if not lbms_run then
 		lbms_run = run_lbms()
 	end

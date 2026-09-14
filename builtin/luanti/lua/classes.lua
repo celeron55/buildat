@@ -60,6 +60,12 @@ function MetaData:set_string(key, value)
 	else
 		self.fields[key] = tostring(value)
 	end
+	-- A node's metadata knows where it is, and writing it is a change to the
+	-- block it is in -- which is what Luanti's reportMetadataChange() marks
+	-- and what core.register_on_mapblocks_changed() hears about
+	if self.pos and core.__note_block_changed then
+		core.__note_block_changed(self.pos.x, self.pos.y, self.pos.z)
+	end
 end
 
 function MetaData:get_int(key)
