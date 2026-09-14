@@ -79,6 +79,11 @@ struct ModuleContainer
 	interface::Semaphore direct_cb_executed_sem;
 	// post() when direct_cb becomes free, wait() for that to happen
 	interface::Semaphore direct_cb_free_sem;
+	// Which module is using the one direct_cb slot, for the log when
+	// somebody has been waiting for it too long. Written by whoever holds
+	// the slot and read by whoever is waiting, so a stale read says a name
+	// that was true a moment ago, which is what it is for.
+	ss_ direct_cb_holder;
 
 	// NOTE: thread-ref_backtraces() Holds the backtraces along the way of a
 	// direct callback chain initiated by this module. Cleared when beginning to
@@ -204,7 +209,29 @@ struct ModuleContainer
 			throw Exception("caller_mc == this");
 		log_t(MODULE, "execute_direct_cb[%s]: Waiting for direct_cb to be free",
 				cs(info.name));
-		direct_cb_free_sem.wait(); // Wait for direct_cb to be free
+		// Wait for direct_cb to be free, in slices, so that a wait that
+		// never ends says whose it is: one module can be inside another at
+		// a time, and a caller queueing behind a call that is itself stuck
+		// is how a deadlock here looks from the outside. Said after five
+		// seconds and every ten after that.
+		{
+			// The same twenty as below, for the same reason
+			static const int64_t FIRST_US = 20000000;
+			static const int64_t THEN_US = 10000000;
+			int64_t waited = 0;
+			int64_t slice = FIRST_US;
+			while(!direct_cb_free_sem.wait_us(slice)){
+				waited += slice;
+				slice = THEN_US;
+				const ss_ caller_name = caller_mc ? caller_mc->info.name :
+						ss_("(not a module)");
+				log_w(MODULE, "M[%s] has been waiting %.0f s to get into "
+						"M[%s], which M[%s] is in", cs(caller_name),
+						waited / 1e6, cs(info.name), cs(direct_cb_holder));
+			}
+		}
+		direct_cb_holder = caller_mc ? caller_mc->info.name :
+				ss_("(not a module)");
 		{
 			interface::MutexScope ms(mutex);
 			// This is the last chance to turn around
@@ -213,6 +240,7 @@ struct ModuleContainer
 						cs(info.name));
 
 				// Let the next ones pass too
+				direct_cb_holder = "";
 				direct_cb_free_sem.post();
 
 				// Return an exception to make sure the caller doesn't continue
@@ -241,13 +269,36 @@ struct ModuleContainer
 		//       forcing this semaphore to open, because exiting this function
 		//       while direct_cb is being executed is unsafe. You have to figure
 		//       out what direct_cb has ended up waiting for, and fix that.
-		// Wait for execution to finish
-		direct_cb_executed_sem.wait();
+		// Wait for execution to finish, in slices, so that a wait that never
+		// ends says whose it is: a module calling into another and never
+		// coming back is a server that looks hung with nothing in the log,
+		// and the name of both ends is the whole of what anybody chasing it
+		// needs first. It says so once and then every ten seconds.
+		{
+			// Twenty seconds before the first word, because a module can
+			// legitimately be busy for a long time -- VoxeLibre's mods take
+			// eleven seconds to load and everything else waits for that --
+			// and a warning that fires on every startup is one nobody reads.
+			static const int64_t FIRST_US = 20000000;
+			static const int64_t THEN_US = 10000000;
+			int64_t waited = 0;
+			int64_t slice = FIRST_US;
+			while(!direct_cb_executed_sem.wait_us(slice)){
+				waited += slice;
+				slice = THEN_US;
+				const ss_ caller_name = caller_mc ? caller_mc->info.name :
+						ss_("(not a module)");
+				log_w(MODULE, "M[%s] has been waiting %.0f s for M[%s] to "
+						"run a direct callback", cs(caller_name),
+						waited / 1e6, cs(info.name));
+			}
+		}
 		// Grab execution result
 		std::exception_ptr eptr = direct_cb_exception;
 		direct_cb_exception = nullptr; // Not to be used anymore
 		thread->set_caller_thread(nullptr);
 		// Set direct_cb to be free again
+		direct_cb_holder = "";
 		direct_cb_free_sem.post();
 		// Handle execution result
 		if(eptr){

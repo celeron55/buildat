@@ -3238,11 +3238,19 @@ struct CInstance: public voxelworld::Instance
 		for(const pv::Vector3DInt32 &p : blockers)
 			light_blocker_from_neighbours(p);
 
-		log_v(MODULE, "update_skylight(): %zu seeds, %zu unlit, %zu spread, "
-				"%zu blockers in %i ms", seeds.size(), unlight.size(),
-				spread.size(), n_blockers,
+		const int took_ms =
 				(int)std::chrono::duration_cast<std::chrono::milliseconds>(
-				std::chrono::steady_clock::now() - t0).count());
+				std::chrono::steady_clock::now() - t0).count();
+		// Said out loud when it is slow, because this runs at the end of
+		// every access into voxelworld and everything waiting to get in
+		// waits for it: a game that builds its terrain in on_generated --
+		// VoxeLibre does -- hands it a section's worth of seeds at a time,
+		// and a caller that only wanted to read a node is behind that.
+		static const int SLOW_LIGHT_MS = 500;
+		log_(took_ms >= SLOW_LIGHT_MS ? CORE_WARNING : CORE_VERBOSE, MODULE,
+				"update_skylight(): %zu seeds, %zu unlit, %zu spread, "
+				"%zu blockers in %i ms", seeds.size(), unlight.size(),
+				spread.size(), n_blockers, took_ms);
 	}
 
 	// Commit and unload chunk buffer
@@ -3366,6 +3374,7 @@ struct CInstance: public voxelworld::Instance
 
 	void commit()
 	{
+		const int64_t t0 = interface::os::time_us();
 		// Before anything is meshed, so that the light lands in the same
 		// remesh as the voxels that changed it
 		update_skylight();
@@ -3375,10 +3384,22 @@ struct CInstance: public voxelworld::Instance
 		log_d(MODULE, "Committing %zu dirty buffers in %zu sections",
 				m_total_buffers_dirty,
 				m_sections_with_loaded_buffers.size());
+		const size_t was_dirty = m_total_buffers_dirty;
 		for(Section *section : m_sections_with_loaded_buffers){
 			for(size_t i = 0; i < section->chunk_buffers.size(); i++){
 				commit_chunk_buffer(section, i);
 			}
+		}
+		// This runs at the end of every access into voxelworld -- see
+		// voxelworld::access() in api.h -- so whatever it costs is what
+		// every other module waits for before it can get in. A second of it
+		// is a second of the game not answering.
+		static const int64_t SLOW_COMMIT_US = 500000;
+		const int64_t took = interface::os::time_us() - t0;
+		if(took >= SLOW_COMMIT_US){
+			log_w(MODULE, "commit(): %zu dirty buffers in %zu sections took "
+					"%.1f s", was_dirty, m_sections_with_loaded_buffers.size(),
+					took / 1e6);
 		}
 	}
 
