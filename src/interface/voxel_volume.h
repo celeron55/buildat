@@ -134,6 +134,28 @@ namespace interface
 		void set_sample_at(int32_t x, int32_t y, int32_t z,
 				const VoxelSample &v);
 
+		// One run of voxels along x, copied out of another volume into
+		// this one across every plane the two share by name. What wants it
+		// is a region read, which is rows of a chunk into rows of the
+		// answer: a devtest profile had the per-voxel sampler underneath
+		// one at 12% of the server's whole CPU, and a run is a memcpy.
+		//
+		// False when the run is not wholly inside both volumes, and then
+		// nothing is written and the caller does it whatever way it did
+		// before.
+		bool copy_run_from(const VoxelVolume &src,
+				int32_t sx, int32_t sy, int32_t sz,
+				int32_t dx, int32_t dy, int32_t dz, size_t n);
+
+		// A run of plane 0 along x as words, for a caller handing voxels
+		// to something that wants an array of them -- a region read into
+		// Lua is the one that asked. Zero wherever the volume has nothing.
+		//
+		// False when the run is not wholly inside the volume, and then
+		// nothing is written.
+		bool read_words(int32_t x, int32_t y, int32_t z, size_t n,
+				uint32_t *out) const;
+
 		// A whole plane's bytes, for a caller that sweeps one rather than
 		// asking per voxel. Empty when nothing has written the plane, which
 		// means every value in it is zero.

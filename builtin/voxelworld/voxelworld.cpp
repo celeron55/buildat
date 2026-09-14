@@ -2478,10 +2478,23 @@ struct CInstance: public voxelworld::Instance
 					chunk_p.getY() * m_chunk_size_voxels.getY(),
 					chunk_p.getZ() * m_chunk_size_voxels.getZ());
 
+			// A row at a time rather than a voxel at a time: a run along
+			// x is contiguous in both volumes, so it is a memcpy per plane
+			// -- and the sampler underneath the voxel-at-a-time version was
+			// 12% of the server's whole CPU in a devtest profile. The old
+			// walk is still here for the rows copy_run_from() will not
+			// take, which is any that is not wholly inside both volumes.
+			const size_t run = (size_t)(uc.getX() - lc.getX() + 1);
 			VoxelVolume::Sampler src(buf.volume.get());
 			VoxelVolume::Sampler dst(&out);
 			for(int z = lc.getZ(); z <= uc.getZ(); z++){
 			for(int y = lc.getY(); y <= uc.getY(); y++){
+				if(out.copy_run_from(*buf.volume,
+						lc.getX() - chunk_off.getX(),
+						y - chunk_off.getY(),
+						z - chunk_off.getZ(),
+						lc.getX(), y, z, run))
+					continue;
 				src.setPosition(
 						lc.getX() - chunk_off.getX(),
 						y - chunk_off.getY(),

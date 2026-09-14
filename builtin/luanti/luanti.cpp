@@ -1527,10 +1527,18 @@ struct Module: public interface::Module, public luanti::Interface
 			interface::VoxelVolume vol = world->get_volume(pv::Region(
 					pv::Vector3DInt32(x0, y0, z0),
 					pv::Vector3DInt32(x1, y1, z1)));
+			// A row at a time: the answer is an array of words and a row
+			// of the volume is a run of them, so the only per-voxel work
+			// left is the assembly out of the bytes. A sampler per voxel
+			// was the top of a devtest profile with this underneath it.
 			interface::VoxelVolume::Sampler src(&vol);
 			size_t i = 0;
 			for(int32_t z = z0; z <= z1; z++){
 				for(int32_t y = y0; y <= y1; y++){
+					if(vol.read_words(x0, y, z, w, &out[i])){
+						i += w;
+						continue;
+					}
 					src.setPosition(x0, y, z);
 					for(int32_t x = x0; x <= x1; x++, src.movePositiveX()){
 						out[i++] = src.getVoxel().data;

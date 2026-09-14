@@ -51,6 +51,64 @@ sv_<uint8_t>& VoxelVolume::plane_bytes_for_write(uint8_t plane)
 	return bytes;
 }
 
+bool VoxelVolume::copy_run_from(const VoxelVolume &src,
+		int32_t sx, int32_t sy, int32_t sz,
+		int32_t dx, int32_t dy, int32_t dz, size_t n)
+{
+	if(n == 0)
+		return true;
+	const int32_t last = (int32_t)n - 1;
+	if(!src.contains(sx, sy, sz) || !src.contains(sx + last, sy, sz))
+		return false;
+	if(!contains(dx, dy, dz) || !contains(dx + last, dy, dz))
+		return false;
+	const size_t src_i = src.index_of(sx, sy, sz);
+	const size_t dst_i = index_of(dx, dy, dz);
+	for(size_t sp = 0; sp < src.m_planes.size(); sp++){
+		// The same plane by name, because that is what identifies one; the
+		// two volumes' plane orders need not line up
+		size_t dp = 0;
+		for(; dp < m_planes.size(); dp++){
+			if(m_planes[dp].name == src.m_planes[sp].name)
+				break;
+		}
+		if(dp >= m_planes.size() || m_planes[dp].bits != src.m_planes[sp].bits)
+			continue;
+		const size_t w = m_planes[dp].bits / 8;
+		if(!src.plane_is_materialised((uint8_t)sp)){
+			// Nothing has written the source, so the run reads as zero, and
+			// only a destination that has been written needs telling
+			if(plane_is_materialised((uint8_t)dp))
+				memset(&m_data[dp][dst_i * w], 0, n * w);
+			continue;
+		}
+		sv_<uint8_t> &dst_bytes = plane_bytes_for_write((uint8_t)dp);
+		memcpy(&dst_bytes[dst_i * w], &src.m_data[sp][src_i * w], n * w);
+	}
+	return true;
+}
+
+bool VoxelVolume::read_words(int32_t x, int32_t y, int32_t z, size_t n,
+		uint32_t *out) const
+{
+	if(n == 0)
+		return true;
+	if(!contains(x, y, z) || !contains(x + (int32_t)n - 1, y, z))
+		return false;
+	if(m_planes.empty() || m_planes[0].bits != 32 ||
+			!plane_is_materialised(0)){
+		// Nothing has written the plane, so every voxel of it is zero
+		memset(out, 0, n * sizeof(uint32_t));
+		return true;
+	}
+	const uint8_t *at = &m_data[0][index_of(x, y, z) * 4];
+	for(size_t i = 0; i < n; i++, at += 4){
+		out[i] = (uint32_t)at[0] | ((uint32_t)at[1] << 8) |
+				((uint32_t)at[2] << 16) | ((uint32_t)at[3] << 24);
+	}
+	return true;
+}
+
 uint32_t VoxelVolume::plane_at(uint8_t plane, int32_t x, int32_t y,
 		int32_t z) const
 {

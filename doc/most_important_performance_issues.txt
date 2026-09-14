@@ -9,7 +9,36 @@ flying speed, tap S to climb) with the on-screen profiler up (F9). Debug build,
 -O1, 2026-09-08. Numbers are per frame of the client or, where said, of one
 section on the server.
 
+The server's own numbers from 2026-09-14 are from a different run and say so
+where they appear: a devtest world made from nothing with a client connected
+for 45 seconds, under `perf record -F 199 --call-graph dwarf`, Debug build,
+-O1. Percentages there are of the whole server process, every thread together.
+
 Fixed, kept here for what the shape of the problem was:
+
+* A region read copied the world a voxel at a time. voxelworld's get_volume()
+  walked both volumes with a sampler and copied one voxel per step, and
+  luanti's read_region() then walked the answer the same way to turn it into
+  words. VoxelVolume::Sampler::movePositiveX() alone was 12% of the whole
+  server's CPU. A run along x is contiguous in both volumes, so it is a memcpy
+  per plane per row -- VoxelVolume::copy_run_from() -- and reading a row out as
+  words is one call rather than one per voxel -- VoxelVolume::read_words().
+  The per-voxel walk is still there for any row that is not wholly inside both
+  volumes.
+
+  In the profile: movePositiveX() 12.1% -> 2.8% of the whole server, with
+  read_words() at 2.6% beside it, and get_volume() out of the top twenty
+  altogether. In wall clock, on the same already-generated world with a
+  client connected -- a VoxelManip over 49^3 ten times, six rounds -- the
+  best round went 62.2 ms -> 54.2 ms and the median did not move: what is
+  left in that path is the Lua table the result goes into, the lock, and
+  whatever else the server is doing at the time. Debug build, -O1,
+  2026-09-14.
+
+  **Measure a world that is already made.** A first run of a save generates
+  while it benchmarks and is two to four times slower and far noisier than
+  the second run of the same save; comparing one of each says nothing about
+  the change. Two measurements in this round had to be thrown away for it.
 
 * The client's spatial update queue was a sorted std::list with a sorted
   std::list as its index, so every put walked thousands of items several times.
@@ -25,16 +54,46 @@ Fixed, kept here for what the shape of the problem was:
   generation for the module. set_physics_enabled(false) for a world that reads
   its terrain out of the voxel volumes.
 
+Tried and rejected, so that nobody spends the day again:
+
+* Raising voxelworld's chunk buffer limit (m_max_buffers_loaded) from 50 to
+  500. It does what it says -- deserialize_volume() under Section::get_buffer()
+  goes from 8.8% of the server to under 0.5%, and the zstd decompression with
+  it -- and the server then generates *fewer* sections in the same time: 100
+  against 132 in a 45 second devtest run. The suspects are
+  m_sections_with_loaded_buffers, a sorted vector with an O(n) insert per
+  chunk touched, and the locality of ten times the working set. Whatever it
+  is, the deserialization was not what the wall clock was waiting for.
+  2026-09-14.
+
 Still open, in the order they showed up in a profile after those:
 
 1. update_skylight() and its voxel reads are about 25% of the server's CPU, and
-a freshly generated section costs 35-50 ms of it. The incremental unlight and
+a freshly generated section costs 35-50 ms of it.
+
+**Re-measured 2026-09-14 on devtest: 0.6%, not 25%.** The 25% is a
+bomber_drone number and the difference is the game rather than the engine:
+bomber_drone writes its terrain into the world without light and every
+section is a full unlight-and-spread, while devtest's mapgen hands the light
+over with the volume and the write costs no seeds at all. So this is real
+where a game builds its world in on_generated -- VoxeLibre does -- and is
+nearly free where the generator brings its own light. Measure it on the game
+it is about before optimising it. The incremental unlight and
 spread machinery is right for an edit, but a whole new section hands it 262144
 seeds when nothing above it is loaded yet. A top-down column sweep for that
 case would cost a fraction of it.
 
 Chunk serialization and its zlib compression is another 14% of the server, and
 a section is serialized more than once on its way in.
+
+**Re-measured 2026-09-14 on devtest: 13.6%, and it holds** -- but two thirds
+of it is *deserialization* rather than serialization:
+`Section::get_buffer()` reading a chunk back in was 8.8% against 5.6% for
+writing one out, with zstd underneath both. That is the same shape as the
+note above about serializing more than once: a chunk is written, dropped and
+read again inside one section's lifetime. The buffer limit is not the answer
+to it -- see "Tried and rejected" above -- and what would be is not going in
+a bullet point.
 
 2. The client's software occlusion buffer is about 6.5% of its CPU. Every chunk
 is an occluder, LOD chunks included, and the terrain is not a shape that
