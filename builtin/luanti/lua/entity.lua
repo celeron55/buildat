@@ -101,6 +101,28 @@ local DEFAULT_PROPERTIES = {
 	static_save = true,
 	shaded = true,
 	show_on_minimap = false,
+	-- The rest of Luanti's own defaults, whether or not anything here reads
+	-- them: a mod reads its own object's properties back and does
+	-- arithmetic on what it gets. VoxeLibre's environmental sounds add
+	-- eye_height to the player's position at every join, and with that one
+	-- missing the whole callback died on "arithmetic on a nil value" --
+	-- which is what a default nobody thought was needed looks like from the
+	-- other side. See src/object_properties.h in Luanti.
+	eye_height = 1.625,
+	zoom_fov = 0,
+	glow = 0,
+	backface_culling = true,
+	use_texture_alpha = false,
+	damage_texture_modifier = "^[brighten",
+	nametag = "",
+	nametag_color = "#ffffffff",
+	infotext = "",
+	wield_item = "",
+	mesh = "",
+	automatic_face_movement_dir = false,
+	automatic_face_movement_max_rotation_per_sec = -1,
+	rotate_selectionbox = false,
+	nametag_scale_z = false,
 }
 
 local function vec(v)
@@ -2289,7 +2311,13 @@ function core.__add_player(name)
 	end
 	core.log("action", "Player " .. name .. " joined")
 	for _, cb in ipairs(core.registered_on_joinplayers or {}) do
-		local ok, err = pcall(cb, ref, nil)
+		-- With the traceback, because a game the size of VoxeLibre has
+		-- eighty of these and the message alone says nothing about which
+		-- mod's it was
+		local ok, err = xpcall(function() return cb(ref, nil) end,
+				function(e)
+					return tostring(e) .. "\n" .. debug.traceback("", 2)
+				end)
 		if not ok then
 			core.log("error", "on_joinplayer: " .. tostring(err))
 		end
