@@ -2635,8 +2635,16 @@ local function appearance_of(o)
 	end
 	if visual == "wielditem" or visual == "item" then
 		-- What the item looks like in an inventory is what it looks like
-		-- lying on the ground, which is the same expression
-		local name = props.wield_item or ""
+		-- lying on the ground, which is the same expression.
+		--
+		-- Which item it is, is in the first texture: that is where Luanti's
+		-- own builtin item entity puts it and where VoxeLibre's does too.
+		-- wield_item is the other spelling and is answered after it, since
+		-- an object that sets that and no texture means the same thing.
+		local name = textures[1] or ""
+		if name == "" then
+			name = props.wield_item or ""
+		end
 		if name == "" then
 			return "box", ""
 		end

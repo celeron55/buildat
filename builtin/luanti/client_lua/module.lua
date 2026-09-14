@@ -745,6 +745,47 @@ buildat.sub_packet("luanti:model", function(data)
 	end
 end)
 
+-- Where one object is now, out of the eight numbers the server sends for
+-- each: the id, the middle of its collision box, the box itself, and its
+-- yaw.
+local function place_object(id, v, i)
+	if id == M.self_id then
+		-- The player's own object is not drawn: the camera is inside it, so
+		-- what a game's own player model comes to is a column of itself up
+		-- the middle of the screen. Luanti's client leaves it out of a
+		-- first-person view for the same reason. It may have been drawn
+		-- already -- which object is the player's own arrives after the
+		-- objects themselves do -- so it goes now if it was.
+		local had = object_nodes[id]
+		if had then
+			had.node:Remove()
+			object_nodes[id] = nil
+		end
+		return
+	end
+	local node = object_node(id)
+	node.position = magic.Vector3(v[i + 1], v[i + 2], v[i + 3])
+	local have = object_nodes[id]
+	-- What the object collides with, which is what is aimed at: a model is
+	-- drawn at its own size and that is not the same box -- a mob authored
+	-- small is a mob nobody could hit. See M.pointed_object().
+	have.box = {v[i + 4], v[i + 5], v[i + 6]}
+	if have.drawn_as == "mesh" then
+		-- A model is drawn at the size the object asked for rather than at
+		-- what it collides with, and it is authored in Luanti's own scene
+		-- units, where a node is ten across -- which is the tenth
+		local size = have.look.size or {1, 1, 1}
+		node.scale = magic.Vector3(math.max(0.005, size[1] / 10),
+				math.max(0.005, size[2] / 10),
+				math.max(0.005, size[3] / 10))
+	else
+		node.scale = magic.Vector3(v[i + 4], v[i + 5], v[i + 6])
+	end
+	-- Luanti's rotation is radians and Urho's euler is degrees; a billboard
+	-- turns with the camera and does not care
+	node.rotation = magic.Quaternion(0, math.deg(v[i + 7]), 0)
+end
+
 buildat.sub_packet("luanti:objects", function(data)
 	if not object_scene then
 		return
@@ -756,28 +797,7 @@ buildat.sub_packet("luanti:objects", function(data)
 	while i + STRIDE - 1 <= #v do
 		local id = tostring(math.floor(v[i]))
 		seen[id] = true
-		local node = object_node(id)
-		node.position = magic.Vector3(v[i + 1], v[i + 2], v[i + 3])
-		local have = object_nodes[id]
-		-- What the object collides with, which is what is aimed at: a
-		-- model is drawn at its own size and that is not the same box --
-		-- a mob authored small is a mob nobody could hit. See
-		-- M.pointed_object().
-		have.box = {v[i + 4], v[i + 5], v[i + 6]}
-		if have.drawn_as == "mesh" then
-			-- A model is drawn at the size the object asked for rather than
-			-- at what it collides with, and it is authored in Luanti's own
-			-- scene units, where a node is ten across -- which is the tenth
-			local size = have.look.size or {1, 1, 1}
-			node.scale = magic.Vector3(math.max(0.005, size[1] / 10),
-					math.max(0.005, size[2] / 10),
-					math.max(0.005, size[3] / 10))
-		else
-			node.scale = magic.Vector3(v[i + 4], v[i + 5], v[i + 6])
-		end
-		-- Luanti's rotation is radians and Urho's euler is degrees; a
-		-- billboard turns with the camera and does not care
-		node.rotation = magic.Quaternion(0, math.deg(v[i + 7]), 0)
+		place_object(id, v, i)
 		i = i + STRIDE
 	end
 	-- What is not in the list any more has been removed
