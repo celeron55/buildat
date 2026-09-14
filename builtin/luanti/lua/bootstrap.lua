@@ -763,6 +763,47 @@ function core.__mapgen_node_props()
 	return out
 end
 
+-- Which biome is which, by the number the mapgen's own manager gave it; see
+-- core.__mapgen_biomes() below, which is where the numbering is decided.
+local biome_name_of_index = {[0] = "default"}
+local biome_index_of_name = {}
+
+-- Where the mapgen's noise puts a biome, whether or not anything has been
+-- generated there -- which is what Luanti answers too, its own
+-- get_biome_data() asking the biome generator rather than the map.
+function core.get_biome_data(pos)
+	if __luanti_biome_at == nil then
+		return nil
+	end
+	-- Rounded the way every position here is, and written out rather than
+	-- through to_pos(), which is declared further down this file
+	local index, heat, humidity = __luanti_biome_at(
+			math.floor(pos.x + 0.5), math.floor(pos.y + 0.5),
+			math.floor(pos.z + 0.5))
+	if index == nil then
+		return nil
+	end
+	return {biome = index, heat = heat, humidity = humidity}
+end
+
+function core.get_biome_name(index)
+	return biome_name_of_index[index]
+end
+
+function core.get_biome_id(name)
+	return biome_index_of_name[name]
+end
+
+function core.get_heat(pos)
+	local data = core.get_biome_data(pos)
+	return data and data.heat or nil
+end
+
+function core.get_humidity(pos)
+	local data = core.get_biome_data(pos)
+	return data and data.humidity or nil
+end
+
 -- The biomes a game registered, with every node name already turned into
 -- the id it means: what the mapgen builds its world out of.
 --
@@ -795,7 +836,16 @@ function core.__mapgen_biomes()
 		return last_resort
 	end
 	local out = {}
+	-- The order they cross in is the order the manager numbers them in, and
+	-- the manager's own default biome is index 0 -- so a game's first is 1.
+	-- Nothing else knows that mapping, which is why it is kept here for
+	-- core.get_biome_name() and core.get_biome_id().
+	biome_name_of_index = {[0] = "default"}
+	biome_index_of_name = {}
 	for _, b in pairs(core.registered_biomes or {}) do
+		local index = #out + 1
+		biome_name_of_index[index] = b.name or ""
+		biome_index_of_name[b.name or ""] = index
 		out[#out + 1] = {
 			name = b.name or "",
 			c_top = id_of(b.node_top, "mapgen_stone", air),
@@ -1541,8 +1591,8 @@ local STUBS_NIL = {
 	"find_path", "transforming_liquid_add",
 	"get_node_max_level", "get_node_level", "set_node_level", "add_node_level",
 	"fix_light",
-	"get_heat", "get_humidity", "get_biome_data",
-	"get_biome_id", "get_biome_name",
+	-- get_heat, get_humidity, get_biome_data, get_biome_id and
+	-- get_biome_name are above core.__mapgen_biomes()
 	"get_meta", "get_node_metadata",
 	-- Time and the world (M2)
 	"get_timeofday", "set_timeofday", "get_gametime", "get_day_count",

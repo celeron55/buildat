@@ -4664,6 +4664,33 @@ struct Module: public interface::Module, public luanti::Interface
 		return 1;
 	}
 
+	// __luanti_biome_at(x, y, z) -> index, heat, humidity, out of the
+	// mapgen's own noise: which biome the world would have there, whether or
+	// not anything has been generated. What asks is core.get_biome_data(),
+	// and a game asks it a great deal -- VoxeLibre's weather and its sky
+	// colour are per biome, and both ran into a nil every step without it.
+	static int l_biome_at(lua_State *L)
+	{
+		Module *self = module_of(L);
+		const int x = (int)luaL_checknumber(L, 1);
+		const int y = (int)luaL_checknumber(L, 2);
+		const int z = (int)luaL_checknumber(L, 3);
+		size_t index = 0;
+		float heat = 0.0f, humidity = 0.0f;
+		bool ok = false;
+		luanti_mapgen::access(self->m_server,
+				[&](luanti_mapgen::Interface *im){
+			ok = im->biome_at(self->m_mapgen_params, x, y, z, index, heat,
+					humidity);
+		});
+		if(!ok)
+			return 0;
+		lua_pushinteger(L, (lua_Integer)index);
+		lua_pushnumber(L, heat);
+		lua_pushnumber(L, humidity);
+		return 3;
+	}
+
 	// Where the server says the player is: the spawn, a teleport, a mod
 	// moving them. Where the player walks is the client's own business and
 	// arrives as set_player_pos(); this is the other direction, and without
@@ -6276,6 +6303,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_send_inventory", l_send_inventory);
 		set_global_cfunction("__luanti_send_player_pos", l_send_player_pos);
 		set_global_cfunction("__luanti_spawn_level", l_spawn_level);
+		set_global_cfunction("__luanti_biome_at", l_biome_at);
 		set_global_cfunction("__luanti_relight", l_relight);
 		set_global_cfunction("__luanti_send_chat", l_send_chat);
 		set_global_cfunction("__luanti_send_hud", l_send_hud);

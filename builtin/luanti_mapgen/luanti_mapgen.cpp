@@ -776,6 +776,29 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 		return prefix + itos(m_deco_source_of_index[index]);
 	}
 
+	// Which biome the noise puts at a point, by the manager's own index --
+	// which is the order the biomes were added in, and that is the order
+	// they crossed in. Luanti's own l_get_biome_data asks the biome
+	// generator exactly this way.
+	bool biome_at(int x, int y, int z, size_t &index_out, float &heat_out,
+			float &humidity_out)
+	{
+		if(m_emerge == nullptr || m_emerge->biomegen == nullptr)
+			return false;
+		if(m_emerge->biomegen->getType() != BIOMEGEN_ORIGINAL)
+			return false;
+		const BiomeGenOriginal *bg =
+				(const BiomeGenOriginal*)m_emerge->biomegen;
+		const v3s16 p((s16)x, (s16)y, (s16)z);
+		Biome *b = bg->calcBiomeAtPoint(p);
+		if(b == nullptr)
+			return false;
+		index_out = (size_t)b->index;
+		heat_out = bg->calcHeatAtPoint(p);
+		humidity_out = bg->calcHumidityAtPoint(p);
+		return true;
+	}
+
 	// Out of the mapgen's noise, touching no map and generating nothing.
 	// Luanti's own spawn search asks this first and only then looks at the
 	// map; MAX_MAP_GENERATION_LIMIT is how a mapgen says "not here".
@@ -936,25 +959,39 @@ struct Module: public interface::Module, public luanti_mapgen::Interface
 	VendoredGenerator *m_query = nullptr;
 	ss_ m_query_key;
 
-	bool spawn_level(const Params &params, int x, int z, int &level_out)
+	// The query generator, built on demand and kept: the noise questions --
+	// where a player can spawn, which biome is where -- are asked thousands
+	// of times and a mapgen allocates its noise maps when it is built.
+	VendoredGenerator* query_generator(const Params &params)
 	{
 		const ss_ key = params.mgname+"/"+itos(params.seed)+"/"+
 				itos(params.water_level);
 		if(m_query == nullptr || key != m_query_key){
 			delete m_query;
-			// Only the terrain noise answers this question, so the query
-			// generator is built without what a world is decorated with:
-			// VoxeLibre's 443 decorations read that many schematics off the
-			// disk, and doing it twice for a question about noise is a
-			// second of the module's thread for nothing.
+			// The biomes are kept, because which biome is where is one of
+			// the questions; what is dropped is what a world is *decorated*
+			// with -- VoxeLibre's 443 decorations read that many schematics
+			// off the disk, and doing it twice for a question about noise is
+			// a second of the module's thread for nothing.
 			Params bare = params;
-			bare.biomes.clear();
 			bare.ores.clear();
 			bare.decorations.clear();
 			m_query = new VendoredGenerator(bare, bare.section_size);
 			m_query_key = key;
 		}
-		return m_query->spawn_level(x, z, level_out);
+		return m_query;
+	}
+
+	bool spawn_level(const Params &params, int x, int z, int &level_out)
+	{
+		return query_generator(params)->spawn_level(x, z, level_out);
+	}
+
+	bool biome_at(const Params &params, int x, int y, int z,
+			size_t &index_out, float &heat_out, float &humidity_out)
+	{
+		return query_generator(params)->biome_at(x, y, z, index_out,
+				heat_out, humidity_out);
 	}
 
 	// Interface

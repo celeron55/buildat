@@ -241,6 +241,15 @@ namespace luanti_mapgen
 		virtual bool spawn_level(const Params &params, int x, int z,
 				int &level_out) = 0;
 
+		// Which biome is at a point, and the heat and the humidity the
+		// mapgen's noise says are there: what core.get_biome_data() answers
+		// with. The index is the order the biome was given in -- the same
+		// numbering Params::biomes has -- and false means there are no
+		// biomes to ask about. The generator this asks is the same one
+		// spawn_level() uses.
+		virtual bool biome_at(const Params &params, int x, int y, int z,
+				size_t &index_out, float &heat_out, float &humidity_out) = 0;
+
 		// What the generator made in a section and was asked to report,
 		// taken away: a generator runs in worldgen's thread and cannot
 		// reach a module, so it leaves its gennotify here and whoever runs
