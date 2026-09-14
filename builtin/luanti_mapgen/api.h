@@ -180,6 +180,25 @@ namespace luanti_mapgen
 			// schematic
 			ss_ rotation = "0";
 			Schematic schematic;
+			// lsystem: the tree generator's own definition, with the nodes
+			// as ids the way everything else here crosses
+			struct LTree
+			{
+				bool given = false;
+				ss_ axiom, rules_a, rules_b, rules_c, rules_d;
+				uint32_t c_trunk = 0, c_leaves = 0, c_leaves2 = 0;
+				uint32_t c_fruit = 0;
+				int32_t leaves2_chance = 0;
+				int32_t angle = 0;
+				int32_t iterations = 2;
+				int32_t random_level = 0;
+				ss_ trunk_type = "single";
+				bool thin_branches = true;
+				int32_t fruit_chance = 0;
+				int32_t seed = 0;
+				bool explicit_seed = false;
+			};
+			LTree ltree;
 		};
 		sv_<Decoration> decorations;
 

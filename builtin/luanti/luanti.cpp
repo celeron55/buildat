@@ -2059,6 +2059,31 @@ struct Module: public interface::Module, public luanti::Interface
 			read_id_list(L, "c_spawnby", d.c_spawnby);
 			read_id_list(L, "c_decos", d.c_decos);
 			read_string_list(L, "biomes", d.biomes);
+			lua_getfield(L, -1, "ltree");
+			if(lua_istable(L, -1)){
+				luanti_mapgen::Params::Decoration::LTree &t = d.ltree;
+				t.given = table_boolean(L, "given");
+				t.axiom = table_string(L, "axiom");
+				t.rules_a = table_string(L, "rules_a");
+				t.rules_b = table_string(L, "rules_b");
+				t.rules_c = table_string(L, "rules_c");
+				t.rules_d = table_string(L, "rules_d");
+				t.c_trunk = (uint32_t)table_number(L, "c_trunk", 0);
+				t.c_leaves = (uint32_t)table_number(L, "c_leaves", 0);
+				t.c_leaves2 = (uint32_t)table_number(L, "c_leaves2", 0);
+				t.c_fruit = (uint32_t)table_number(L, "c_fruit", 0);
+				t.leaves2_chance =
+						(int32_t)table_number(L, "leaves2_chance", 0);
+				t.angle = (int32_t)table_number(L, "angle", 0);
+				t.iterations = (int32_t)table_number(L, "iterations", 2);
+				t.random_level = (int32_t)table_number(L, "random_level", 0);
+				t.trunk_type = table_string(L, "trunk_type");
+				t.thin_branches = table_boolean(L, "thin_branches");
+				t.fruit_chance = (int32_t)table_number(L, "fruit_chance", 0);
+				t.seed = (int32_t)table_number(L, "seed", 0);
+				t.explicit_seed = table_boolean(L, "explicit_seed");
+			}
+			lua_pop(L, 1);
 			lua_getfield(L, -1, "schematic");
 			if(lua_istable(L, -1)){
 				luanti_mapgen::Params::Schematic &sch = d.schematic;

@@ -1010,6 +1010,40 @@ function core.__mapgen_decorations()
 		end
 		return out
 	end
+	-- An L-system tree's own definition, with its nodes resolved to ids the
+	-- way everything else here crosses. It is the same definition
+	-- core.spawn_tree() takes; what places it is the vendored generator's
+	-- own treegen, on the generator's thread.
+	local function ltree_of(t)
+		if type(t) ~= "table" then
+			return {given = false}
+		end
+		local id_of = function(name)
+			local id = core.__content_ids[core.__aliases[name] or name or ""]
+			return id or 0
+		end
+		return {
+			given = true,
+			axiom = tostring(t.axiom or ""),
+			rules_a = tostring(t.rules_a or ""),
+			rules_b = tostring(t.rules_b or ""),
+			rules_c = tostring(t.rules_c or ""),
+			rules_d = tostring(t.rules_d or ""),
+			c_trunk = id_of(t.trunk),
+			c_leaves = id_of(t.leaves),
+			c_leaves2 = id_of(t.leaves2 or t.leaves),
+			c_fruit = id_of(t.fruit),
+			leaves2_chance = t.leaves2_chance or 0,
+			angle = t.angle or 0,
+			iterations = t.iterations or 2,
+			random_level = t.random_level or 0,
+			trunk_type = tostring(t.trunk_type or "single"),
+			thin_branches = t.thin_branches and true or false,
+			fruit_chance = t.fruit_chance or 0,
+			seed = t.seed or 0,
+			explicit_seed = t.seed ~= nil,
+		}
+	end
 	local out = {}
 	for _, d in pairs(core.registered_decorations or {}) do
 		out[#out + 1] = {
@@ -1034,6 +1068,7 @@ function core.__mapgen_decorations()
 			deco_param2_max = d.param2_max or 0,
 			rotation = tostring(d.rotation or "0"),
 			schematic = schematic_of(d.schematic, d.replacements),
+			ltree = ltree_of(d.treedef),
 		}
 	end
 	return out
@@ -1495,7 +1530,8 @@ local STUBS_NIL = {
 	"find_node_near", "find_nodes_in_area",
 	"find_nodes_in_area_under_air", "find_nodes_with_meta",
 	"get_node_light", "get_natural_light", "get_artificial_light",
-	"place_node", "dig_node", "punch_node", "spawn_tree", "spawn_tree_on_vmanip",
+	"place_node", "dig_node", "punch_node",
+	-- spawn_tree and spawn_tree_on_vmanip are in lua/treegen.lua
 	"get_mapgen_setting_noiseparams", "set_mapgen_setting_noiseparams",
 	"set_noiseparams", "get_noiseparams", "generate_ores", "generate_decorations",
 	"clear_objects", "delete_area",
@@ -3277,6 +3313,7 @@ dofile(module_path .. "/lua/vmanip.lua")
 dofile(module_path .. "/lua/check_map.lua")
 dofile(module_path .. "/lua/sound.lua")
 dofile(module_path .. "/lua/particles.lua")
+dofile(module_path .. "/lua/treegen.lua")
 
 -- What core.get_dig_params() comes to, checked at every start because it is
 -- the difference between a node that can be dug and one that cannot. Here

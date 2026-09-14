@@ -546,11 +546,37 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 				if(dsch->schematic == nullptr)
 					ok = false;
 			} else {
-				// An L-system tree, which wants the tree generator's own
-				// definition; nothing crosses for it yet
-				log_w(MODULE, "Decoration \"%s\": an lsystem decoration is "
-						"not built by this module", cs(src.name));
-				ok = false;
+				// An L-system tree, out of the tree generator's own
+				// definition: the same one core.spawn_tree() takes, with
+				// its nodes already resolved to ids
+				DecoLSystem *dl = (DecoLSystem *)d;
+				const Params::Decoration::LTree &t = src.ltree;
+				if(!t.given || t.axiom.empty()){
+					log_w(MODULE, "Decoration \"%s\": an lsystem decoration "
+							"with no treedef", cs(src.name));
+					ok = false;
+				} else {
+					auto def = std::make_shared<treegen::TreeDef>();
+					def->initial_axiom = t.axiom;
+					def->rules_a = t.rules_a;
+					def->rules_b = t.rules_b;
+					def->rules_c = t.rules_c;
+					def->rules_d = t.rules_d;
+					def->trunknode = MapNode((content_t)t.c_trunk);
+					def->leavesnode = MapNode((content_t)t.c_leaves);
+					def->leaves2node = MapNode((content_t)t.c_leaves2);
+					def->fruitnode = MapNode((content_t)t.c_fruit);
+					def->leaves2_chance = t.leaves2_chance;
+					def->angle = t.angle;
+					def->iterations = t.iterations;
+					def->iterations_random_level = t.random_level;
+					def->trunk_type = t.trunk_type;
+					def->thin_branches = t.thin_branches;
+					def->fruit_chance = t.fruit_chance;
+					def->seed = t.seed;
+					def->explicit_seed = t.explicit_seed;
+					dl->tree_def = def;
+				}
 			}
 			if(!ok){
 				delete d;
