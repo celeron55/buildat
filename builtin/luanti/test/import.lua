@@ -6,11 +6,14 @@
 --   BUILDAT_LUANTI_LUA=builtin/luanti/test/import.lua \
 --   bin/buildat_server -m ../games/luanti_launcher -D ../user
 --
--- It says what is there every ten seconds, because an import of a large
--- world takes minutes and there is no callback for it being over -- and the
--- module's own clock only moves between imports, since the import holds the
--- thread its steps are on. What the importer counted is in the log above
--- this; this says what is still there once the world is running.
+-- It says what is there every ten seconds of the world's own clock, which
+-- is not ten seconds of yours: an import holds the thread the steps are on,
+-- and a step is capped at half a second, so a world that is still
+-- generating advances its clock slower than the wall. Leave it running.
+--
+-- What the importer itself counted -- how many timers and entities it made,
+-- and the kinds it could not -- is in the log above this, and is the number
+-- to read first.
 local function say()
 	local n, kinds = 0, {}
 	for _, le in pairs(core.luaentities or {}) do
