@@ -2436,6 +2436,38 @@ local function region_names(x0, y0, z0, x1, y1, z1)
 	return names
 end
 
+-- The same question asked of a content id instead of a name, which is what
+-- the region reads have in hand: a box is a handful of distinct ids however
+-- large it is, so the name is looked up once per id and the answer kept.
+-- What a caller gets is two functions over the same two tables -- does this
+-- id match, and what is it called.
+local function id_matcher(nodenames)
+	local matches = name_matcher(nodenames)
+	local name_of = {}
+	local hit = {}
+	local function name_of_id(id)
+		local name = name_of[id]
+		if name == nil then
+			name = core.get_name_from_content_id(id)
+			name_of[id] = name
+		end
+		return name
+	end
+	return function(id)
+		-- Outside the box is nothing rather than an error, which is what a
+		-- name matcher answered when it was handed a nil name
+		if id == nil then
+			return false
+		end
+		local was = hit[id]
+		if was == nil then
+			was = matches(name_of_id(id))
+			hit[id] = was
+		end
+		return was
+	end, name_of_id
+end
+
 -- Where the ground is at a point, which is what a player who has never been
 -- here starts on top of. nil means nobody can stand here.
 --
@@ -2554,13 +2586,13 @@ end
 -- Luanti sorts by distance and returns the nearest; search_center adds pos
 -- itself as the first thing looked at
 function core.find_node_near(pos, radius, nodenames, search_center)
-	local matches = name_matcher(nodenames)
+	local matches = id_matcher(nodenames)
 	local x, y, z = to_pos(pos)
-	local names = region_names(x - radius, y - radius, z - radius,
+	local ids = __get_region(x - radius, y - radius, z - radius,
 			x + radius, y + radius, z + radius)
 	local w = radius * 2 + 1
 	local function at(dx, dy, dz)
-		return names[(dx + radius) + (dy + radius) * w +
+		return ids[(dx + radius) + (dy + radius) * w +
 				(dz + radius) * w * w + 1]
 	end
 	if search_center and matches(at(0, 0, 0)) then
@@ -2985,7 +3017,7 @@ end
 
 -- Returns positions, counts -- or a table of name to positions when grouped
 function core.find_nodes_in_area(minp, maxp, nodenames, grouped)
-	local matches = name_matcher(nodenames)
+	local matches_id, name_of_id = id_matcher(nodenames)
 	local x0, y0, z0 = to_pos(minp)
 	local x1, y1, z1 = to_pos(maxp)
 	if x1 < x0 or y1 < y0 or z1 < z0 then
@@ -2994,14 +3026,17 @@ function core.find_nodes_in_area(minp, maxp, nodenames, grouped)
 	local positions = {}
 	local counts = {}
 	local by_name = {}
-	local names = region_names(x0, y0, z0, x1, y1, z1)
+	-- The ids rather than the names: the names array was one string stored
+	-- per voxel of the box, and a name is wanted only where there is a hit
+	local ids = __get_region(x0, y0, z0, x1, y1, z1)
 	local i = 0
 	for z = z0, z1 do
 		for y = y0, y1 do
 			for x = x0, x1 do
 				i = i + 1
-				local name = names[i]
-				if matches(name) then
+				local id = ids[i]
+				if matches_id(id) then
+					local name = name_of_id(id)
 					local p = {x = x, y = y, z = z}
 					if grouped then
 						local list = by_name[name]
@@ -3034,27 +3069,28 @@ function core.find_nodes_in_area(minp, maxp, nodenames, grouped)
 end
 
 function core.find_nodes_in_area_under_air(minp, maxp, nodenames)
-	local matches = name_matcher(nodenames)
+	local matches_id = id_matcher(nodenames)
 	local x0, y0, z0 = to_pos(minp)
 	local x1, y1, z1 = to_pos(maxp)
 	local positions = {}
 	if x1 < x0 or y1 < y0 or z1 < z0 then
 		return positions
 	end
-	local names = region_names(x0, y0, z0, x1, y1, z1)
+	local ids = __get_region(x0, y0, z0, x1, y1, z1)
+	local air_id = core.get_content_id("air")
 	local w = x1 - x0 + 1
 	local h = y1 - y0 + 1
 	for z = z0, z1 do
 		for x = x0, x1 do
 			-- Downwards, so the node above is the one just looked at
-			local above_name = nil
+			local above_id = nil
 			for y = y1, y0, -1 do
-				local name = names[(x - x0) + (y - y0) * w +
+				local id = ids[(x - x0) + (y - y0) * w +
 						(z - z0) * w * h + 1]
-				if above_name == "air" and matches(name) then
+				if above_id == air_id and matches_id(id) then
 					positions[#positions + 1] = {x = x, y = y, z = z}
 				end
-				above_name = name
+				above_id = id
 			end
 		end
 	end
