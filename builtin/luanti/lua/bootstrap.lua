@@ -604,13 +604,29 @@ local function tile_name_of(t)
 	return nil
 end
 
+-- An overlay tile is drawn over the face's own tile, and all of a node's
+-- grass can be in one: devtest's dirt_with_grass is plain dirt with the
+-- grass in its overlay_tiles, on purpose, so that a client which ignores
+-- them shows it. The two are composed into one expression here --
+-- base^(overlay) -- which is what Luanti itself does when it wants a single
+-- picture of an overlaid node, in src/client/node_visuals.cpp's minimap
+-- colour. Both layers are filled from the same tile context there, so a
+-- node's palette colour applies to base and overlay alike and composing
+-- loses no tint.
+--
+-- simplified: Luanti's own world draws the overlay as a second pass, with
+-- its own material and a polygon offset. That matters for an overlay whose
+-- animation or blending differs from its base's, and for neither of
+-- devtest's; what it would take here is a second quad per face.
 local function tile_names(def)
 	local tiles = def and (def.tiles or def.tile_images)
 	if type(tiles) ~= "table" then
 		return nil
 	end
+	local overlays = def and def.overlay_tiles
 	local out = {}
 	local last = nil
+	local last_overlay = nil
 	for i = 1, 6 do
 		local t = tile_name_of(tiles[i]) or last
 		if t == nil then
@@ -618,6 +634,14 @@ local function tile_names(def)
 		end
 		out[i] = t
 		last = t
+		if type(overlays) == "table" then
+			-- The same last-one-repeats rule the tiles themselves take
+			local o = tile_name_of(overlays[i]) or last_overlay
+			if o ~= nil and o ~= "" then
+				out[i] = t .. "^(" .. o .. ")"
+				last_overlay = o
+			end
+		end
 	end
 	return out
 end
@@ -2491,8 +2515,7 @@ local CUBE_DRAWTYPES = {
 
 -- One of a node's tiles as the expression it is, with Luanti's own rule for
 -- a list shorter than six: the last one stands for the rest
-local function tile_of(def, i)
-	local tiles = def.tiles or def.tile_images
+local function one_tile(tiles, i)
 	if type(tiles) ~= "table" or #tiles == 0 then
 		return nil
 	end
@@ -2502,6 +2525,21 @@ local function tile_of(def, i)
 	end
 	if type(tile) ~= "string" or tile == "" then
 		return nil
+	end
+	return tile
+end
+
+-- The face's own tile with its overlay over it, the way tile_names() builds
+-- the world's: an item that places devtest's dirt_with_grass is a grassy
+-- cube in the inventory and not a dirt one
+local function tile_of(def, i)
+	local tile = one_tile(def.tiles or def.tile_images, i)
+	if tile == nil then
+		return nil
+	end
+	local overlay = one_tile(def.overlay_tiles, i)
+	if overlay ~= nil then
+		return tile .. "^(" .. overlay .. ")"
 	end
 	return tile
 end
