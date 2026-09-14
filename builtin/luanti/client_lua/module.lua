@@ -481,10 +481,9 @@ end)
 -- wiring: what a texture and an item and a list are, what a click on the
 -- result means, and what goes back to the server.
 --
--- simplified: nothing is picked up and put down. A slot is drawn and what is
--- in it is drawn, and moving an item between slots is an inventory action the
--- server has no packet for yet; buttons, fields, checkboxes and tabs are the
--- half that works. See "what is left of M4" in doc/plan/luanti_module_plan.md.
+-- What a click on a slot means is here: a stack is picked up whole or in
+-- half, put down whole, one at a time or ten at a time, and what is held is
+-- a drawing until the server has made the move.
 local ok_fs, err_fs, formspec = buildat.run_script_file("luanti/formspec.lua")
 if not ok_fs or type(formspec) ~= "table" then
 	error("luanti: could not load formspec.lua: " .. tostring(err_fs))
