@@ -92,6 +92,12 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:create"));
 		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:get_imports"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:import_game"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:import_world"));
+		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:where"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:chat"));
@@ -123,6 +129,12 @@ struct Module: public interface::Module
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:create", on_create,
 				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:get_imports", on_get_imports,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:import_game",
+				on_import_game, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:import_world",
+				on_import_world, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:chat", on_chat,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:wield", on_wield,
@@ -469,6 +481,369 @@ struct Module: public interface::Module
 		return out;
 	}
 
+	//
+	// Importing a game and a world from a real Luanti installation
+	//
+	// Nothing here writes to any of those directories: they are read, and a
+	// game is copied out of one into buildat's own. See "The importer" in
+	// doc/plan/master_plan.md.
+	//
+
+	// Where a Luanti installation might be, most deliberate first. Each is a
+	// directory laid out the way a Luanti user directory is -- games/ and
+	// worlds/ inside it -- which is also the shape of an in-tree development
+	// build, so that needs no special case.
+	sv_<ss_> import_roots()
+	{
+		sv_<ss_> out;
+		auto add = [&](const ss_ &path){
+			if(path.empty() || !interface::fs::path_exists(path))
+				return;
+			for(const ss_ &had : out){
+				if(had == path)
+					return;
+			}
+			out.push_back(path);
+		};
+		const char *extra = getenv("LUANTI_EXTRA_IMPORT_PATH");
+		if(extra && extra[0]){
+			// Several, separated the way every other path variable does it
+			ss_ rest = extra;
+			while(!rest.empty()){
+				size_t colon = rest.find(':');
+				ss_ one = colon == ss_::npos ? rest : rest.substr(0, colon);
+				add(one);
+				rest = colon == ss_::npos ? "" : rest.substr(colon + 1);
+			}
+		}
+		const char *home = getenv("HOME");
+		if(home && home[0]){
+			// Luanti's user directory was renamed in 5.10 and a machine can
+			// have either, or both
+			add(ss_(home)+"/.luanti");
+			add(ss_(home)+"/.minetest");
+		}
+		return out;
+	}
+
+	// game.conf's name, which is the title to show; the directory's name is
+	// the gameid and is what the game is installed as
+	static ss_ read_game_title(const ss_ &game_path)
+	{
+		std::ifstream f(game_path+"/game.conf");
+		if(!f.good())
+			return "";
+		ss_ line;
+		while(std::getline(f, line)){
+			size_t eq = line.find('=');
+			if(eq == ss_::npos)
+				continue;
+			ss_ key = line.substr(0, eq);
+			ss_ value = line.substr(eq + 1);
+			auto trim = [](ss_ &s){
+				while(!s.empty() && isspace((unsigned char)s.front()))
+					s.erase(s.begin());
+				while(!s.empty() && isspace((unsigned char)s.back()))
+					s.pop_back();
+			};
+			trim(key);
+			trim(value);
+			if(key == "name" || key == "title")
+				return value;
+		}
+		return "";
+	}
+
+	// A game to import, found by its id. The first root that has one wins,
+	// which is the order import_roots() is in. Empty when there is none --
+	// the client names what it wants and the server finds it again, because
+	// a path that arrives over the network is not a path to copy.
+	ss_ find_importable_game(const ss_ &gameid)
+	{
+		if(gameid.empty() || gameid.find('/') != ss_::npos ||
+				gameid.find("..") != ss_::npos)
+			return "";
+		for(const ss_ &root : import_roots()){
+			ss_ path = root+"/games/"+gameid;
+			if(interface::fs::path_exists(path+"/game.conf"))
+				return path;
+		}
+		return "";
+	}
+
+	// And a world, the same way
+	ss_ find_importable_world(const ss_ &name)
+	{
+		if(name.empty() || name.find('/') != ss_::npos ||
+				name.find("..") != ss_::npos)
+			return "";
+		for(const ss_ &root : import_roots()){
+			ss_ path = root+"/worlds/"+name;
+			if(interface::fs::path_exists(path+"/world.mt"))
+				return path;
+		}
+		return "";
+	}
+
+	// What is out there to import, as one flat array: the games first with a
+	// count, then the worlds. A game is its id, its title, whether it is
+	// installed already and how big it is; a world is its name, the game it
+	// wants, whether that game is installed and how big it is.
+	//
+	// The size is there because buildat's own game menu shows one and
+	// because it is what says whether a copy is a moment or a minute. The
+	// whole search path is walked for it, which was measured at a third of a
+	// second over two hundred and fifty directories.
+	void on_get_imports(const network::Packet &packet)
+	{
+		sv_<ss_> games;
+		sv_<ss_> worlds;
+		sv_<ss_> installed = list_games();
+		auto is_installed = [&](const ss_ &gameid){
+			for(const ss_ &id : installed){
+				if(id == gameid)
+					return true;
+			}
+			return false;
+		};
+		sv_<ss_> seen_games, seen_worlds;
+		auto seen = [](sv_<ss_> &list, const ss_ &name){
+			for(const ss_ &had : list){
+				if(had == name)
+					return true;
+			}
+			list.push_back(name);
+			return false;
+		};
+		for(const ss_ &root : import_roots()){
+			for(const interface::fs::Node &n :
+					interface::fs::list_directory(root+"/games")){
+				if(!n.is_directory || n.name == "." || n.name == "..")
+					continue;
+				ss_ path = root+"/games/"+n.name;
+				if(!interface::fs::path_exists(path+"/game.conf"))
+					continue;
+				// The first root that has a game is the one that would be
+				// copied, so a later one is not offered twice
+				if(seen(seen_games, n.name))
+					continue;
+				games.push_back(n.name);
+				games.push_back(read_game_title(path));
+				games.push_back(is_installed(n.name) ? "installed" : "");
+				games.push_back(itos(
+						interface::fs::directory_tree_size(path)));
+			}
+			for(const interface::fs::Node &n :
+					interface::fs::list_directory(root+"/worlds")){
+				if(!n.is_directory || n.name == "." || n.name == "..")
+					continue;
+				ss_ path = root+"/worlds/"+n.name;
+				ss_ gameid = read_gameid(path);
+				if(gameid.empty())
+					continue;
+				if(seen(seen_worlds, n.name))
+					continue;
+				worlds.push_back(n.name);
+				worlds.push_back(gameid);
+				worlds.push_back(is_installed(gameid) ? "installed" : "");
+				worlds.push_back(itos(
+						interface::fs::directory_tree_size(path)));
+			}
+		}
+		sv_<ss_> flat;
+		flat.push_back(itos(games.size() / 4));
+		for(const ss_ &v : games)
+			flat.push_back(v);
+		for(const ss_ &v : worlds)
+			flat.push_back(v);
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(flat);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(packet.sender, "main:imports", os.str());
+		});
+	}
+
+	// One line to whoever is waiting, which is the same channel the mod
+	// loading uses; see start_world()
+	void send_progress(network::PeerInfo::Id peer, const ss_ &line)
+	{
+		if(peer == 0)
+			return;
+		sv_<ss_> values{line};
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(values);
+		}
+		const ss_ data = os.str();
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "main:progress", data);
+		});
+	}
+
+	// Everything under from into to, saying how far along it is every so
+	// often. Returns false on the first file it cannot write, because half a
+	// game installed is worse than none.
+	bool copy_tree(const ss_ &from, const ss_ &to, size_t &done, size_t total,
+			network::PeerInfo::Id peer, ss_ &error)
+	{
+		if(!interface::fs::create_directories(to)){
+			error = "cannot make "+to;
+			return false;
+		}
+		for(const interface::fs::Node &n :
+				interface::fs::list_directory(from)){
+			if(n.name == "." || n.name == "..")
+				continue;
+			const ss_ src = from+"/"+n.name;
+			const ss_ dst = to+"/"+n.name;
+			if(n.is_directory){
+				if(!copy_tree(src, dst, done, total, peer, error))
+					return false;
+				continue;
+			}
+			if(!interface::fs::copy_file(src, dst)){
+				error = "cannot copy "+src;
+				return false;
+			}
+			done++;
+			// Not every file: a game is thousands of them and a line per
+			// file is more work than the copying
+			if(done % 200 == 0 || done == total){
+				send_progress(peer, "Copying: "+itos(done)+"/"+itos(total)+
+						" files");
+			}
+		}
+		return true;
+	}
+
+	static size_t count_files(const ss_ &path)
+	{
+		size_t n = 0;
+		for(const interface::fs::Node &node :
+				interface::fs::list_directory(path)){
+			if(node.name == "." || node.name == "..")
+				continue;
+			if(node.is_directory)
+				n += count_files(path+"/"+node.name);
+			else
+				n++;
+		}
+		return n;
+	}
+
+	// A game is copied into buildat's own games directory, and **refuses to
+	// overwrite one that is there**: removing an installed game is the
+	// user's own business outside buildat. Copying over the top would leave
+	// a file the game deleted upstream behind forever, and deleting first is
+	// a recursive delete under user/ driven by a menu.
+	void on_import_game(const network::Packet &packet)
+	{
+		sv_<ss_> values;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(values);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:import_game: %s", e.what());
+			return;
+		}
+		if(values.empty())
+			return;
+		const ss_ gameid = values[0];
+		const ss_ from = find_importable_game(gameid);
+		if(from.empty()){
+			menu_error(packet.sender, "There is no game called "+gameid+
+					" to import");
+			return;
+		}
+		const ss_ to = luanti_path()+"/games/"+gameid;
+		if(interface::fs::path_exists(to)){
+			menu_error(packet.sender, gameid+" is already installed. Remove "+
+					to+" yourself if you mean to replace it.");
+			return;
+		}
+		log_i(MODULE, "Importing game %s from %s", cs(gameid), cs(from));
+		send_progress(packet.sender, "Copying "+gameid+"...");
+		const size_t total = count_files(from);
+		size_t done = 0;
+		ss_ error;
+		// Into a directory of its own beside the destination first, so that
+		// a copy that fails half way does not look like an installed game
+		const ss_ partial = to+".importing";
+		if(!copy_tree(from, partial, done, total, packet.sender, error)){
+			menu_error(packet.sender, "Importing "+gameid+" failed: "+error);
+			return;
+		}
+		if(rename(partial.c_str(), to.c_str()) != 0){
+			menu_error(packet.sender, "Importing "+gameid+" failed: cannot "
+					"rename "+partial);
+			return;
+		}
+		log_i(MODULE, "Imported game %s: %zu files", cs(gameid), done);
+		menu_message(packet.sender, gameid+" imported: "+itos(done)+" files");
+	}
+
+	// A world is not copied: it becomes a save, through the importer that
+	// BUILDAT_LUANTI_IMPORT already drives. What the button adds is the
+	// picking and the name.
+	void on_import_world(const network::Packet &packet)
+	{
+		sv_<ss_> values;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(values);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:import_world: %s", e.what());
+			return;
+		}
+		if(values.size() < 2)
+			return;
+		const ss_ world_name = values[0];
+		const ss_ save_name = values[1];
+		const ss_ from = find_importable_world(world_name);
+		if(from.empty()){
+			menu_error(packet.sender, "There is no world called "+world_name+
+					" to import");
+			return;
+		}
+		const ss_ gameid = read_gameid(from);
+		if(find_game(gameid).empty()){
+			menu_error(packet.sender, world_name+" wants the game "+gameid+
+					", which is not installed. Import that first.");
+			return;
+		}
+		bool valid = false;
+		storage::access(m_server, [&](storage::Interface *istorage){
+			valid = istorage->valid_name(save_name);
+		});
+		if(!valid){
+			menu_error(packet.sender, "\""+save_name+"\" is not a name a "
+					"save can have");
+			return;
+		}
+		storage::Save *save = nullptr;
+		storage::access(m_server, [&](storage::Interface *istorage){
+			save = istorage->create(save_name);
+			if(save){
+				save->store("main")->set("gameid", gameid);
+				istorage->close(save);
+			}
+		});
+		if(!save){
+			menu_error(packet.sender, "There is already a save called "+
+					save_name);
+			return;
+		}
+		log_i(MODULE, "Importing world %s from %s into save %s",
+				cs(world_name), cs(from), cs(save_name));
+		start_world(gameid, save_name, packet.sender, from);
+	}
+
 	// Opening one that is there, and making one that is not. Split on
 	// purpose: a typo in a name cannot silently start a new game instead of
 	// opening the old one.
@@ -537,9 +912,22 @@ struct Module: public interface::Module
 		start_world(gameid, name, packet.sender);
 	}
 
+	// The same dialog for something that went right, which is not a warning
+	// in the log and is otherwise the same thing
+	void menu_message(network::PeerInfo::Id peer, const ss_ &message)
+	{
+		log_i(MODULE, "%s", cs(message));
+		send_menu_message(peer, message);
+	}
+
 	void menu_error(network::PeerInfo::Id peer, const ss_ &message)
 	{
 		log_w(MODULE, "%s", cs(message));
+		send_menu_message(peer, message);
+	}
+
+	void send_menu_message(network::PeerInfo::Id peer, const ss_ &message)
+	{
 		if(peer == 0)
 			return;
 		sv_<ss_> values;
@@ -694,7 +1082,7 @@ struct Module: public interface::Module
 	// for the saying; zero is nobody, and then a failure is fatal because
 	// nothing was there to ask.
 	void start_world(const ss_ &gameid, const ss_ &world_name,
-			network::PeerInfo::Id peer)
+			network::PeerInfo::Id peer, const ss_ &import_world_from = "")
 	{
 		if(m_starting){
 			menu_error(peer, "A world is already starting");
@@ -764,7 +1152,12 @@ struct Module: public interface::Module
 		// A Luanti world's own map, read into the save once. The world
 		// directory is opened read-only; what it says about which game it
 		// wants is what chose the game above.
-		const char *import_from = getenv("BUILDAT_LUANTI_IMPORT");
+		// The menu's import names one; BUILDAT_LUANTI_IMPORT is the other
+		// way in and is what every check here uses
+		const char *env_import = getenv("BUILDAT_LUANTI_IMPORT");
+		const ss_ import_from = !import_world_from.empty() ?
+				import_world_from :
+				ss_(env_import && env_import[0] ? env_import : "");
 		luanti::access(m_server, [&](luanti::Interface *i){
 			// What the server is doing, to whoever is waiting for the world:
 			// a game of 220 mods takes minutes, and "Creating <name>..."
@@ -788,10 +1181,10 @@ struct Module: public interface::Module
 			});
 			// What the world is made out of goes in before it is made; the
 			// rest of it is read once the game's nodes are registered
-			if(import_from && import_from[0])
+			if(!import_from.empty())
 				i->import_world_settings(import_from, save);
 			i->run_game(game_path, save);
-			if(import_from && import_from[0])
+			if(!import_from.empty())
 				i->import_world(import_from);
 		});
 	}
