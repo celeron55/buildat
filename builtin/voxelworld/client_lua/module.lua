@@ -25,6 +25,13 @@ M.send_distance = 1000
 local UPDATE_TIME_FRACTION = 0.10
 
 local LOD_THRESHOLD = 0.2
+-- How the update queue orders what it has: it sorts by distance divided by
+-- these, so a bigger one is a chunk that goes first.
+--
+-- Raising the modified ones to a hundred -- which puts a changed chunk in
+-- front of any new one that is not a hundred times closer -- was tried on
+-- 2026-09-14 against a dug voxel that stays drawn, and changed nothing
+-- measurable. Whatever that fault is, it is not the order of this queue.
 local INITIAL_PHYSICS_NEAR_WEIGHT = 1.0
 local MODIFIED_PHYSICS_NEAR_WEIGHT = 1.0
 
@@ -80,6 +87,16 @@ local node_volume_cache = {} -- {node_id: {volume:, last_access_us:}}
 local node_update_queue = nil
 -- Defined further down, next to remesh_all(), and used before that
 local queue_modified_node_update
+
+-- When a chunk that *changed* was queued, so that the wait until it is drawn
+-- again can be said out loud. A dug voxel that is still drawn is the fault
+-- this is about, and the number nobody had was how long the remesh waited;
+-- see section 3 of doc/plan/master_plan.md. Declared up here because the
+-- loop that reads it is written before the function that writes it.
+local modified_queued_us = {}
+-- And which of those have been complained about, so that one that is never
+-- drawn again says so once rather than every frame
+local modified_warned = {}
 
 -- NOTE: node can be nil, meaning that it was cached to be nil
 local static_node_cache = {} -- {z: {y: {x: {node:, fetched:}}}} (chunk_p)
@@ -319,6 +336,23 @@ function sub_events()
 		local max_handling_time_us = last_outer_frame_us * UPDATE_TIME_FRACTION
 		local stop_at_us = current_us + max_handling_time_us
 
+		-- A chunk that changed and has still not been drawn again after two
+		-- seconds: said once each, because "never" and "late" are different
+		-- faults and only this tells them apart. See section 3 of
+		-- doc/plan/master_plan.md.
+		for node_id, queued_us in pairs(modified_queued_us) do
+			if not modified_warned[node_id] then
+				local waited = (current_us - queued_us) / 1000000
+				if waited >= 2.0 then
+					modified_warned[node_id] = true
+					log:warning(string.format(
+							"a changed chunk has not been drawn again after" ..
+							" %.1f s, with %d in the queue", waited,
+							node_update_queue:get_length()))
+				end
+			end
+		end
+
 		node_update_queue:set_p(camera_p)
 		-- Scale queue update operations according to the handling time of the
 		-- rest of the processing
@@ -338,6 +372,23 @@ function sub_events()
 							", fw="..(math.floor(fw*100)/100)..")"..
 							": "..node:GetName())
 					if node_update.type == "geometry" then
+						-- How long a chunk that changed waited to be drawn
+						-- again, when that is long enough to see
+						local queued_us = modified_queued_us[
+								node_update.node_id]
+						if queued_us then
+							modified_queued_us[node_update.node_id] = nil
+							modified_warned[node_update.node_id] = nil
+							local waited = (buildat.get_time_us() -
+									queued_us) / 1000000
+							if waited >= 1.0 then
+								log:warning(string.format(
+										"a changed chunk waited %.1f s to be" ..
+										" drawn again, with %d in the queue",
+										waited,
+										node_update_queue:get_length()))
+							end
+						end
 						update_voxel_geometry(node)
 					end
 					if node_update.type == "physics" then
@@ -440,6 +491,7 @@ function queue_modified_node_update(node)
 	if not node_update_queue then
 		return
 	end
+	modified_queued_us[node:GetID()] = buildat.get_time_us()
 	node_update_queue:put(node:GetWorldPosition(),
 			MODIFIED_GEOMETRY_NEAR_WEIGHT, M.camera_far_clip * 1.2,
 			nil, nil, {
