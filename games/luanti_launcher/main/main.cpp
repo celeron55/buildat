@@ -74,6 +74,8 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:dig"));
 		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:dig_start"));
+		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:place"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:get_saves"));
@@ -97,6 +99,8 @@ struct Module: public interface::Module
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
 				client_file::FilesTransmitted)
 		EVENT_TYPEN("network:packet_received/main:dig", on_dig,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:dig_start", on_dig_start,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:place", on_place,
 				network::Packet)
@@ -222,6 +226,29 @@ struct Module: public interface::Module
 		});
 		log_v(MODULE, "C%i: main:dig " PV3I_FORMAT ": %s", packet.sender,
 				PV3I_PARAMS(voxel_p), dug ? "dug" : "nothing");
+	}
+
+	// The button going down, which is where a held dig starts: the node is
+	// punched, so a mod's on_punch runs on the way in. How long the dig
+	// takes is the client's to time -- see core.__dig_props() in the module
+	// -- and main:dig is what it sends when it is done.
+	void on_dig_start(const network::Packet &packet)
+	{
+		pv::Vector3DInt32 voxel_p;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(voxel_p);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:dig_start: %s", e.what());
+			return;
+		}
+		luanti::access(m_server, [&](luanti::Interface *i){
+			i->punch_node(voxel_p.getX(), voxel_p.getY(), voxel_p.getZ(),
+					player_name_of(packet.sender));
+		});
+		log_v(MODULE, "C%i: main:dig_start " PV3I_FORMAT, packet.sender,
+				PV3I_PARAMS(voxel_p));
 	}
 
 	// The other button. Luanti calls it place, and what it comes to is the

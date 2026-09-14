@@ -1407,12 +1407,16 @@ local function voxel_is_solid(v)
 end
 
 -- The voxel the ray hit, and the last empty one before it -- which is where
--- a node is placed and what Luanti calls the "above" of a pointed thing
+-- a node is placed and what Luanti calls the "above" of a pointed thing.
+-- How far it reaches is what the player is holding reaches: Luanti's
+-- getToolRange(), which luanti.dig_range() answers, bounded by what this
+-- march can afford.
 local function find_pointed_voxel()
 	local p0 = buildat.Vector3(camera_node.worldPosition)
 	local dir = buildat.Vector3(camera_node.worldDirection)
 	local last = nil
-	for i = 1, math.floor(POINT_RANGE / POINT_STEP) do
+	local range = math.min(POINT_RANGE, luanti.dig_range(wield_index))
+	for i = 1, math.floor(range / POINT_STEP) do
 		local p = (p0 + dir * (i * POINT_STEP)):round()
 		if p ~= last then
 			if voxel_is_solid(voxelworld.get_static_voxel(p)) then
@@ -1422,6 +1426,23 @@ local function find_pointed_voxel()
 		end
 	end
 	return nil, nil
+end
+
+-- What the node at a voxel is called, which is what luanti.dig_time() wants:
+-- the voxel definition's own name is the node's name, because that is what
+-- built the registry
+local function node_name_at(p)
+	local v = voxelworld.get_static_voxel(p)
+	if v == nil then
+		return nil
+	end
+	local reg = voxelworld.get_voxel_registry()
+	local id = reg:id_of(v)
+	if id == 0 then
+		return nil
+	end
+	local def = reg:get_by_id(id)
+	return def and def.name.block_name or nil
 end
 
 local function voxel_packet_value(p)
@@ -1438,6 +1459,160 @@ local VOXEL_PACKET_TYPE = {"object",
 	{"z", "int32_t"},
 }
 
+--
+-- The dig, which is held rather than clicked
+--
+-- Luanti times a dig on the client: how long the node takes is worked out
+-- from its groups and what is in hand -- luanti.dig_time(), out of the dig
+-- props -- and the server hears the punch on the way in and the dig when
+-- the time is up. The server digs the node itself and checks again, so a
+-- client that says a dig took no time gets nothing for it.
+
+-- A frame of the crack strip, as a resource name: Luanti's own
+-- crack_anylength.png, cut into frames by the same [verticalframe an
+-- animated tile uses. "anylength" is the promise that how many frames it
+-- holds is the picture's own shape rather than a number written down.
+local CRACK_FRAMES_DEFAULT = 5
+local crack_frames = nil
+local crack_resource = {}
+
+local function crack_frame_count()
+	if crack_frames then
+		return crack_frames
+	end
+	crack_frames = CRACK_FRAMES_DEFAULT
+	local resource = luanti.texture("crack_anylength.png")
+	local tex = resource and
+			magic.cache:GetResource("Texture2D", resource) or nil
+	-- A strip of square frames, so how many there are is its shape
+	if tex and tex.width > 0 and tex.height > tex.width then
+		crack_frames = math.floor(tex.height / tex.width)
+	end
+	return crack_frames
+end
+
+local function crack_texture(index)
+	local resource = crack_resource[index]
+	if resource == nil then
+		resource = luanti.texture("crack_anylength.png^[verticalframe:" ..
+				crack_frame_count() .. ":" .. index) or false
+		crack_resource[index] = resource
+	end
+	return resource or nil
+end
+
+-- The crack itself: a cube just outside the voxel wearing one frame.
+--
+-- One node per frame, enabled one at a time, rather than one node whose
+-- material is swapped: a Material lives only as long as something in the
+-- engine holds it, and a StaticModel that has been handed one is such a
+-- thing -- keeping materials in a Lua table and putting them back later
+-- reads the freed one.
+--
+-- simplified: the crack on a stair or a torch is a cube around it, because
+-- it is a cube and not the node's own shape wearing a second layer. The
+-- faithful way is a voxel type per (definition, frame), which is five more
+-- per definition on top of VoxeLibre's several thousand.
+local crack_nodes = {}
+local crack_worn = nil
+
+local function crack_node_for(resource)
+	local node = crack_nodes[resource]
+	if node then
+		return node
+	end
+	node = scene:CreateChild("crack")
+	local model = node:CreateComponent("StaticModel")
+	model.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+	local material = magic.Material.new()
+	material:SetTechnique(0, magic.cache:GetResource("Technique",
+			"Techniques/DiffUnlitAlpha.xml"))
+	local texture = magic.cache:GetResource("Texture2D", resource)
+	if texture then
+		texture.filterMode = magic.FILTER_NEAREST
+		material:SetTexture(0, texture)
+	end
+	model.material = material
+	-- Just outside the voxel, so the crack does not fight the face it
+	-- covers for the depth buffer
+	node.scale = magic.Vector3(1.004, 1.004, 1.004)
+	node.enabled = false
+	crack_nodes[resource] = node
+	return node
+end
+
+local function set_crack(p, resource)
+	if crack_worn and crack_worn ~= resource then
+		crack_nodes[crack_worn].enabled = false
+		crack_worn = nil
+	end
+	if p == nil or resource == nil then
+		return
+	end
+	local node = crack_node_for(resource)
+	node.position = magic.Vector3.from_buildat(p)
+	node.enabled = true
+	crack_worn = resource
+end
+
+-- What is being dug: {p =, name =, time =, elapsed =, done =}. time is nil
+-- when what is held cannot dig this at all, and then nothing is ever sent.
+local dig = nil
+
+local function update_crack()
+	if dig == nil or dig.time == nil or dig.time <= 0 or dig.done then
+		set_crack(nil, nil)
+		return
+	end
+	local frames = crack_frame_count()
+	local index = math.floor(dig.elapsed / dig.time * frames)
+	if index < 0 then
+		index = 0
+	elseif index > frames - 1 then
+		index = frames - 1
+	end
+	set_crack(dig.p, crack_texture(index))
+end
+
+local function dig_packet(name, p)
+	buildat.send_packet(name, cereal.binary_output({
+		p = voxel_packet_value(p),
+	}, {"object", {"p", VOXEL_PACKET_TYPE}}))
+end
+
+local function update_dig(dt, playing)
+	local holding = playing and
+			magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT)
+	if not holding or pointed_p == nil then
+		dig = nil
+		update_crack()
+		return
+	end
+	if dig == nil or dig.p ~= pointed_p then
+		local name = node_name_at(pointed_p)
+		dig = {
+			p = pointed_p,
+			name = name,
+			time = name and luanti.dig_time(name, wield_index) or nil,
+			elapsed = 0,
+		}
+		-- A mod's on_punch runs on the way in, whether or not the node can
+		-- be dug at all
+		dig_packet("main:dig_start", dig.p)
+		update_crack()
+		return
+	end
+	if dig.done then
+		return
+	end
+	dig.elapsed = dig.elapsed + dt
+	if dig.time and dig.elapsed >= dig.time then
+		dig_packet("main:dig", dig.p)
+		dig.done = true
+	end
+	update_crack()
+end
+
 magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	local button = event_data:GetInt("Button")
 	if button ~= magic.MOUSEB_LEFT and button ~= magic.MOUSEB_RIGHT then
@@ -1452,10 +1627,9 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	if pointed_p == nil then
 		return
 	end
+	-- The left button is the dig, and it is held rather than clicked:
+	-- update_dig() above has it, because how long it takes is a timer
 	if button == magic.MOUSEB_LEFT then
-		buildat.send_packet("main:dig", cereal.binary_output({
-			p = voxel_packet_value(pointed_p),
-		}, {"object", {"p", VOXEL_PACKET_TYPE}}))
 		return
 	end
 	-- The right button is Luanti's place-or-use: what it comes to is the
@@ -1638,6 +1812,8 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		wish.sneak = key_down("sneak")
 		wish.fast = key_down("fast")
 	end
+
+	update_dig(dt, playing)
 
 	player:update(dt, wish)
 

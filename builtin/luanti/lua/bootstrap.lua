@@ -2726,13 +2726,21 @@ function core.dig_node(pos)
 	return core.__dig_node(pos, nil)
 end
 
-function core.punch_node(pos)
+-- The same punch, by somebody: what the button going down comes to, before
+-- the dig it is the start of. A mod's on_punch is what hears it, and a node
+-- that is dug by being punched -- dig_immediate -- is dug by the dig that
+-- follows rather than here.
+function core.__punch_node(pos, puncher)
 	local node = core.get_node(pos)
 	if node.name == "ignore" then
 		return false
 	end
-	core.node_punch(pos, node, nil, pointed_at(pos))
+	core.node_punch(pos, node, puncher, pointed_at(pos))
 	return true
+end
+
+function core.punch_node(pos)
+	return core.__punch_node(pos, nil)
 end
 
 function core.place_node(pos, node, placer)

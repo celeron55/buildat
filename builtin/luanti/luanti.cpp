@@ -6108,6 +6108,14 @@ struct Module: public interface::Module, public luanti::Interface
 				", y = "+itos(y)+", z = "+itos(z)+"}, "+digger+")");
 	}
 
+	bool punch_node(int32_t x, int32_t y, int32_t z, const ss_ &player_name)
+	{
+		ss_ puncher = player_name.empty() ? ss_("nil") :
+				"core.get_player_by_name(\""+lua_quoted(player_name)+"\")";
+		return node_action("return core.__punch_node({x = "+itos(x)+
+				", y = "+itos(y)+", z = "+itos(z)+"}, "+puncher+")");
+	}
+
 	bool place_node(int32_t ux, int32_t uy, int32_t uz,
 			int32_t ax, int32_t ay, int32_t az, const ss_ &player_name,
 			bool sneak)

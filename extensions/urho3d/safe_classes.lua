@@ -1213,6 +1213,10 @@ function M.define(dst, util)
 			GetKeyDown = util.self_function("GetKeyDown", {"boolean"}, {"Input", "number"}),
 			GetKeyPress = util.self_function("GetKeyPress", {"boolean"}, {"Input", "number"}),
 			GetMouseMove = util.self_function("GetMouseMove", {dst.IntVector2}, {"Input"}),
+			-- Whether a mouse button is held, which the click events do not
+			-- say: a dig is held down rather than clicked
+			GetMouseButtonDown = util.self_function("GetMouseButtonDown",
+					{"boolean"}, {"Input", "number"}),
 		},
 	})
 

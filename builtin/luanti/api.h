@@ -118,6 +118,13 @@ namespace luanti
 		virtual bool dig_node(int32_t x, int32_t y, int32_t z,
 				const ss_ &player_name) = 0;
 
+		// The same node, as the button goes down rather than when the dig
+		// completes: what it comes to is core.node_punch(), so a mod's
+		// on_punch runs. The dig itself is timed on the client -- see
+		// core.__dig_props() -- and arrives as its own packet.
+		virtual bool punch_node(int32_t x, int32_t y, int32_t z,
+				const ss_ &player_name) = 0;
+
 		// The other button. under is the node pointed at and above the empty
 		// voxel in front of it; what it comes to is core.item_place(), so the
 		// pointed node's on_rightclick wins if it has one and the player's
