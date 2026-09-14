@@ -6699,6 +6699,11 @@ struct Module: public interface::Module, public luanti::Interface
 		// does, and after the builtin, because that is where the clock is
 		load_clock();
 		load_seed();
+		// Which mapgen this world is, before the mods load, because a mod
+		// reads it while it loads -- VoxeLibre registers no biomes at all
+		// for a singlenode world. The save's own answer, which for an
+		// imported world is its map_meta.txt's and is in no setting here.
+		set_global_string("__luanti_mapgen_name", mapgen_name());
 
 		run_chunk_file(module_path()+"/lua/modloader.lua");
 

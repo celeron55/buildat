@@ -62,6 +62,9 @@ struct Module: public interface::Module
 	// does.
 	luanti::SceneReference m_scene = nullptr;
 	sv_<network::PeerInfo::Id> m_waiting_peers;
+	// Which client took the name BUILDAT_LUANTI_NAME asked for, if any;
+	// see player_name_of()
+	network::PeerInfo::Id m_named_peer = 0;
 	// Where each client last said its player is, applied on the next tick;
 	// see on_where()
 	struct Where { double x = 0, y = 0, z = 0, look_h = 0, look_v = 0; };
@@ -151,9 +154,27 @@ struct Module: public interface::Module
 	// client does not send one, so it is the peer's number: what it is for
 	// is to be the key everything about the player hangs off, and a mod
 	// that prints it gets something it can tell apart.
-	static ss_ player_name_of(network::PeerInfo::Id peer)
+	//
+	// BUILDAT_LUANTI_NAME names the first client that connects instead,
+	// spelled the way extensions/luanti_client spells it. An imported
+	// world's own player is somebody the save already knows -- where they
+	// stood, what they carry, what they are allowed to do -- and nothing
+	// ever logs in as them otherwise. Only the first client gets the name,
+	// because a name is one player and two clients cannot both be them.
+	//
+	// simplified: an environment variable is not how a player picks
+	// themselves. The menu lists the saves and a save knows its players, so
+	// choosing one there is the shape this ends up as.
+	ss_ player_name_of(network::PeerInfo::Id peer)
 	{
-		return "client"+itos(peer);
+		const char *name = getenv("BUILDAT_LUANTI_NAME");
+		if(name == nullptr || name[0] == '\0')
+			return "client"+itos(peer);
+		if(m_named_peer == 0)
+			m_named_peer = peer;
+		if(m_named_peer != peer)
+			return "client"+itos(peer);
+		return name;
 	}
 
 	void on_client_disconnected(const network::OldClient &old_client)
