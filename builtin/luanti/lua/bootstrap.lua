@@ -1537,7 +1537,8 @@ local STUBS_NIL = {
 	"clear_objects", "delete_area",
 	-- get_loaded_blocks, get_active_blocks, get_loadable_blocks and
 	-- compare_block_status are below
-	"line_of_sight", "raycast", "find_path", "transforming_liquid_add",
+	-- line_of_sight and raycast are in lua/raycast.lua
+	"find_path", "transforming_liquid_add",
 	"get_node_max_level", "get_node_level", "set_node_level", "add_node_level",
 	"fix_light",
 	"get_heat", "get_humidity", "get_biome_data",
@@ -3456,6 +3457,7 @@ dofile(module_path .. "/lua/check_map.lua")
 dofile(module_path .. "/lua/sound.lua")
 dofile(module_path .. "/lua/particles.lua")
 dofile(module_path .. "/lua/treegen.lua")
+dofile(module_path .. "/lua/raycast.lua")
 
 -- What core.get_dig_params() comes to, checked at every start because it is
 -- the difference between a node that can be dug and one that cannot. Here

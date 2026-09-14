@@ -257,7 +257,10 @@ function ObjectRef:set_hp(hp, reason)
 	end
 	o.hp = math.max(0, math.min(hp, o.props.hp_max or 1))
 	if o.hp == 0 and o.le and o.le.on_death then
-		o.le:on_death(nil)
+		-- Who did it, which a mod reads to know what killed its mob; the
+		-- hit points are already zero here, which is what Luanti's own
+		-- on_death sees too
+		o.le:on_death(type(reason) == "table" and reason.object or nil)
 	end
 	if o.hp == 0 then
 		self:remove()
@@ -273,16 +276,18 @@ function ObjectRef:punch(puncher, time_from_last_punch, tool_capabilities, dir)
 	if not o then
 		return
 	end
+	-- What it would do is worked out first, because on_punch is told: a mod
+	-- that draws a damage number reads that argument and not the hit points
+	local hit = core.get_hit_params(o.armor_groups, tool_capabilities,
+			time_from_last_punch)
 	local handled = false
 	if o.le and o.le.on_punch then
 		handled = o.le:on_punch(puncher, time_from_last_punch,
-				tool_capabilities, dir) and true or false
+				tool_capabilities, dir, hit.hp) and true or false
 	end
 	if handled or o.hp == nil then
 		return
 	end
-	local hit = core.get_hit_params(o.armor_groups, tool_capabilities,
-			time_from_last_punch)
 	if hit.hp > 0 then
 		self:set_hp(o.hp - hit.hp, {type = "punch", object = puncher})
 	end
@@ -330,11 +335,145 @@ end
 -- because a mod that sets a texture and carries on should carry on.
 for _, name in ipairs({
 	"set_texture_mod", "set_sprite", "set_animation",
-	"set_animation_frame_speed", "set_bone_position", "set_bone_override",
-	"set_attach", "set_detach", "set_nametag_attributes", "set_observers",
-	"set_bone_rotation", "set_local_animation", "set_eye_offset",
+	"set_animation_frame_speed",
+	"set_nametag_attributes", "set_observers",
+	"set_local_animation", "set_eye_offset",
 }) do
 	ObjectRef[name] = function() end
+end
+
+-- Where a bone of a model is put, which a mod sets to aim a gun, open a lid
+-- or sit a rider down. Luanti keeps the newer override form and answers the
+-- older position-and-rotation one out of it, which is what this does.
+--
+-- simplified: like the attachments above, this is what was set and read
+-- back and not what is drawn -- the models are in their rest pose here. What
+-- a mod cares about between one call and the next is that its own numbers
+-- survive, angles included: nothing is normalised, so a rotation of a
+-- thousand degrees comes back as a thousand degrees.
+local function bone_property(v, default)
+	return {vec = vector.new(v and v.vec or default),
+			interpolation = v and v.interpolation or 0,
+			absolute = v and v.absolute or false}
+end
+
+function ObjectRef:set_bone_override(bone, override)
+	local o = state_of(self)
+	if o == nil or bone == nil then
+		return
+	end
+	o.bones = o.bones or {}
+	if override == nil then
+		o.bones[bone] = nil
+		return
+	end
+	o.bones[bone] = {
+		position = bone_property(override.position, vector.zero()),
+		rotation = bone_property(override.rotation, vector.zero()),
+		scale = bone_property(override.scale, vector.new(1, 1, 1)),
+	}
+end
+
+function ObjectRef:get_bone_override(bone)
+	local o = state_of(self)
+	local have = o and o.bones and o.bones[bone] or nil
+	return {
+		position = bone_property(have and have.position, vector.zero()),
+		rotation = bone_property(have and have.rotation, vector.zero()),
+		scale = bone_property(have and have.scale, vector.new(1, 1, 1)),
+	}
+end
+
+function ObjectRef:get_bone_overrides()
+	local o = state_of(self)
+	local out = {}
+	for bone, _ in pairs(o and o.bones or {}) do
+		out[bone] = self:get_bone_override(bone)
+	end
+	return out
+end
+
+-- The older pair, which is the same thing with the rotation in degrees
+function ObjectRef:set_bone_position(bone, position, rotation)
+	self:set_bone_override(bone, {
+		position = {vec = position or vector.zero(), absolute = true},
+		rotation = {vec = (rotation or vector.zero()):apply(math.rad),
+				absolute = true},
+	})
+end
+
+function ObjectRef:get_bone_position(bone)
+	local override = self:get_bone_override(bone)
+	return override.position.vec, override.rotation.vec:apply(math.deg)
+end
+
+-- What is riding what. A mod attaches a player to a boat, a mob to a mob and
+-- an item to a hand, and reads it back; the callbacks it hears are the
+-- parent's on_attach_child and on_detach_child and the child's own
+-- on_detach.
+--
+-- simplified: this is the bookkeeping and not the drawing. Nothing moves a
+-- child with its parent yet, which is M5's "attachments and bones" -- what
+-- it wants is the parent's place and the bone's, and the client half has
+-- neither. A mod that attaches and reads back gets what it set.
+function ObjectRef:set_attach(parent, bone, position, rotation, forced_visible)
+	local o = state_of(self)
+	local p = parent and state_of(parent) or nil
+	if o == nil or p == nil or parent == self then
+		return
+	end
+	if o.attached_to then
+		self:set_detach()
+	end
+	o.attached_to = {ref = parent, bone = bone, position = position,
+			rotation = rotation, forced_visible = forced_visible}
+	p.children = p.children or {}
+	p.children[#p.children + 1] = self
+	if p.le and p.le.on_attach_child then
+		p.le:on_attach_child(self)
+	end
+end
+
+function ObjectRef:get_attach()
+	local o = state_of(self)
+	local a = o and o.attached_to or nil
+	if a == nil then
+		return nil
+	end
+	return a.ref, a.bone, a.position, a.rotation, a.forced_visible
+end
+
+function ObjectRef:set_detach()
+	local o = state_of(self)
+	local a = o and o.attached_to or nil
+	if a == nil then
+		return
+	end
+	o.attached_to = nil
+	local p = state_of(a.ref)
+	if p and p.children then
+		for i, child in ipairs(p.children) do
+			if child == self then
+				table.remove(p.children, i)
+				break
+			end
+		end
+	end
+	if p and p.le and p.le.on_detach_child then
+		p.le:on_detach_child(self)
+	end
+	if o.le and o.le.on_detach then
+		o.le:on_detach(a.ref)
+	end
+end
+
+function ObjectRef:get_children()
+	local o = state_of(self)
+	local out = {}
+	for _, child in ipairs(o and o.children or {}) do
+		out[#out + 1] = child
+	end
+	return out
 end
 
 function ObjectRef:get_guid()
@@ -344,10 +483,10 @@ end
 
 function ObjectRef:get_texture_mod() return "" end
 function ObjectRef:get_animation() return {x = 1, y = 1}, 15, 0, true end
-function ObjectRef:get_attach() return nil end
-function ObjectRef:get_bone_position() return vec({}), vec({}) end
-function ObjectRef:get_bone_override() return nil end
-function ObjectRef:get_children() return {} end
+
+
+
+
 function ObjectRef:get_nametag_attributes() return {text = "", color = nil} end
 function ObjectRef:get_observers() return nil end
 
