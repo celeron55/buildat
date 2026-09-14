@@ -1037,7 +1037,7 @@ struct CApp: public App, public magic::Application
 		lua_bindings::init(L);
 
 #define DEF_BUILDAT_FUNC(name){ \
-		lua_pushcfunction(L, l_##name); \
+		lua_pushcfunction(L, lua_bindings::guarded<l_##name>); \
 		lua_setglobal(L, "__buildat_" #name); \
 }
 

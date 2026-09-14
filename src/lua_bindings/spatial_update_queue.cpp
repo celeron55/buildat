@@ -10,7 +10,7 @@
 #define MODULE "lua_bindings"
 
 #define DEF_METHOD(name){ \
-		lua_pushcfunction(L, l_##name); \
+		lua_pushcfunction(L, guarded<l_##name>); \
 		lua_setfield(L, -2, #name); \
 }
 
@@ -416,7 +416,7 @@ static int l_SpatialUpdateQueue(lua_State *L)
 void init_spatial_update_queue(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
-		lua_pushcfunction(L, l_##name); \
+		lua_pushcfunction(L, guarded<l_##name>); \
 		lua_setglobal(L, "__buildat_" #name); \
 }
 	self_check();

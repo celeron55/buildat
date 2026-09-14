@@ -693,9 +693,9 @@ static int l_read_image(lua_State *L)
 
 void init_image(lua_State *L)
 {
-	lua_pushcfunction(L, l_compose_image);
+	lua_pushcfunction(L, guarded<l_compose_image>);
 	lua_setglobal(L, "__buildat_compose_image");
-	lua_pushcfunction(L, l_read_image);
+	lua_pushcfunction(L, guarded<l_read_image>);
 	lua_setglobal(L, "__buildat_read_image");
 }
 
