@@ -127,11 +127,17 @@ namespace interface
 		// drawable so that they can be drawn after the solid world, and so
 		// that the renderer sorts them against the other chunks' by
 		// distance. Left out, everything goes in one geometry as before.
+		//
+		// masked_result is the same arrangement for the voxels the registry
+		// says are alpha masked -- leaves, a plant, anything whose picture
+		// has holes in it. Those are drawn with the solid world and only
+		// want a material of their own, and a material is per drawable.
 		void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 				VoxelVolume &volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 				bool use_skylight = false,
-				sm_<uint, TemporaryGeometry> *translucent_result = nullptr);
+				sm_<uint, TemporaryGeometry> *translucent_result = nullptr,
+				sm_<uint, TemporaryGeometry> *masked_result = nullptr);
 
 		void set_voxel_geometry(CustomGeometry *cg, Context *context,
 				const sm_<uint, TemporaryGeometry> &temp_geoms,

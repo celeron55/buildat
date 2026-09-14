@@ -215,6 +215,20 @@ namespace interface
 		// mesher puts them in a geometry of their own; what technique that
 		// gets is the game's business, as with the rest of the materials.
 		bool translucent = false;
+		// The voxel's faces are opaque where its texture is and not there at
+		// all where it is not: leaves, a plant, a ladder, anything whose
+		// picture has holes in it. It is drawn with the solid world -- depth
+		// and shadows and no sorting -- with the texture's alpha cutting the
+		// holes out, which is what Luanti's use_texture_alpha = "clip"
+		// means and what an alpha-masked technique does.
+		//
+		// The mesher puts these faces in a geometry of their own as well,
+		// for the same reason the translucent ones get one: a material is
+		// per drawable, so a pass of its own needs a drawable of its own.
+		// Everything else about them is the opaque rules -- a face against
+		// one of these is hidden exactly as it would be against a solid
+		// voxel, which is what Luanti does too.
+		bool alpha_masked = false;
 		// Which family of shapes this voxel's shape belongs to, or 0 for
 		// none. A shape's quad is not drawn when the neighbour it faces has
 		// the same group: that is what keeps the faces inside a body of water
@@ -334,6 +348,8 @@ namespace interface
 		bool shape_double_sided = false;
 		bool shape_lit_from_above = false;
 		bool translucent = false;
+		// Copied from the definition; see VoxelDefinition::alpha_masked
+		bool alpha_masked = false;
 		uint8_t shape_group = 0;
 		bool is_liquid = false;
 		float liquid_top = 0.5f;

@@ -3830,6 +3830,7 @@ struct Module: public interface::Module, public luanti::Interface
 			ss_ name = table_string(L, "name");
 			bool sunlight = table_boolean(L, "sunlight");
 			bool alpha_blend = table_boolean(L, "alpha_blend");
+			bool alpha_clip = table_boolean(L, "alpha_clip");
 			bool empty = table_boolean(L, "empty");
 			bool walkable = table_boolean(L, "walkable");
 			ss_ drawtype = table_string(L, "drawtype");
@@ -4171,6 +4172,11 @@ struct Module: public interface::Module, public luanti::Interface
 			// A liquid always, and anything the game asked to be blended
 			// rather than alpha masked.
 			vdef.translucent = alpha_blend || !liquid_group.empty();
+			// And the cut-out ones, which are drawn with the solid world
+			// with the holes in their pictures left out: a leaf, a plant, a
+			// rail, a ladder. Luanti's default for every drawtype but the
+			// five solid ones, so most of a game's nodes end up here.
+			vdef.alpha_masked = alpha_clip && !vdef.translucent;
 			reg->add_voxel(vdef);
 		}
 		lua_settop(L, base);

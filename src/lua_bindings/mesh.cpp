@@ -177,6 +177,11 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	// own so that Urho3D sorts them against the other chunks' translucent
 	// geometry rather than against the opaque geometry they are mixed with.
 	sm_<uint, interface::mesh::TemporaryGeometry> alpha_geoms;
+	// And the faces of the alpha-masked ones -- leaves, a plant -- which go
+	// on a child of their own for a plainer reason: they are drawn with the
+	// solid world and only need a material whose technique cuts the texture
+	// out, and a material is per drawable.
+	sm_<uint, interface::mesh::TemporaryGeometry> masked_geoms;
 
 	SetVoxelGeometryTask(Node *node, const ss_ &data,
 			sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
@@ -202,7 +207,7 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	{
 		generate_voxel_geometry(
 				temp_geoms, *volume, voxel_reg.get(), atlas_reg.get(),
-				use_skylight, &alpha_geoms);
+				use_skylight, &alpha_geoms, &masked_geoms);
 		return true;
 	}
 	// Called repeatedly from main thread until returns true
@@ -233,6 +238,26 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 			acg->SetOccluder(false);
 			acg->SetCastShadows(false);
 			acg->SetZoneMask(magic::DEFAULT_ZONEMASK);
+		}
+		// The masked faces, the same way. These are solid world: they cast
+		// shadows like anything else, and whether the shadow has the
+		// texture's holes in it is the technique's business.
+		Node *masked_node = node->GetChild("masked");
+		if(masked_geoms.empty()){
+			if(masked_node)
+				masked_node->Remove();
+		} else {
+			if(!masked_node)
+				masked_node = node->CreateChild("masked", LOCAL);
+			CustomGeometry *mcg =
+					masked_node->GetOrCreateComponent<CustomGeometry>(LOCAL);
+			interface::mesh::set_voxel_geometry(
+					mcg, context, masked_geoms, atlas_reg.get());
+			// Not an occluder: an occluder is rasterised as solid, and this
+			// one is full of holes
+			mcg->SetOccluder(false);
+			mcg->SetCastShadows(true);
+			mcg->SetZoneMask(magic::DEFAULT_ZONEMASK);
 		}
 		call_material_cb(material_cb);
 		cg->SetOccluder(true);
@@ -528,6 +553,9 @@ void clear_voxel_geometry(const luabind::object &node_o)
 	Node *alpha_node = node->GetChild("alpha");
 	if(alpha_node)
 		alpha_node->Remove();
+	Node *masked_node = node->GetChild("masked");
+	if(masked_node)
+		masked_node->Remove();
 }
 
 void set_voxel_physics_boxes(const luabind::object &node_o,

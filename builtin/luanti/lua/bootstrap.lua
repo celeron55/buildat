@@ -1284,6 +1284,46 @@ local function node_boxes(def)
 	return out
 end
 
+-- How a node's texture alpha is meant to be used, which Luanti spells three
+-- ways: "opaque" draws every texel, "clip" draws a texel or leaves it out
+-- entirely, and "blend" draws it through. A node that says nothing takes the
+-- default its drawtype has -- opaque for the five below and clip for
+-- everything else, which is what makes a leaf a leaf without any mod saying
+-- so -- and the deprecated boolean form means blend or clip where the
+-- default is opaque and clip or opaque where it is not. See lua_api.md,
+-- "use_texture_alpha".
+local ALPHA_OPAQUE_BY_DEFAULT = {
+	normal = true, liquid = true, flowingliquid = true,
+	mesh = true, nodebox = true,
+}
+
+local function alpha_mode_of(def, drawtype)
+	local default_opaque = ALPHA_OPAQUE_BY_DEFAULT[drawtype] or false
+	local v = def and def.use_texture_alpha
+	if v == nil or v == false then
+		return default_opaque and "opaque" or "clip"
+	end
+	if v == true then
+		return default_opaque and "blend" or "clip"
+	end
+	return v
+end
+
+-- The rule, checked where it is written: stone says nothing and is opaque, a
+-- leaf and a plant say nothing and are cutouts, glass says what it wants,
+-- and the deprecated boolean means blend where the default is opaque and
+-- clip where it is not.
+assert(alpha_mode_of(nil, "normal") == "opaque")
+assert(alpha_mode_of({}, "nodebox") == "opaque")
+assert(alpha_mode_of({}, "plantlike") == "clip")
+assert(alpha_mode_of({}, "allfaces_optional") == "clip")
+assert(alpha_mode_of({use_texture_alpha = "blend"}, "glasslike") == "blend")
+assert(alpha_mode_of({use_texture_alpha = "opaque"}, "plantlike") == "opaque")
+assert(alpha_mode_of({use_texture_alpha = true}, "normal") == "blend")
+assert(alpha_mode_of({use_texture_alpha = true}, "plantlike") == "clip")
+assert(alpha_mode_of({use_texture_alpha = false}, "normal") == "opaque")
+assert(alpha_mode_of({use_texture_alpha = false}, "plantlike") == "clip")
+
 function core.__voxel_defs()
 	local max_id = 0
 	for id in pairs(core.__content_names) do
@@ -1333,7 +1373,12 @@ function core.__voxel_defs()
 			-- Blended rather than alpha masked. Without it framed glass and
 			-- panes are drawn with every texel either solid or gone, where
 			-- the game meant them to be seen through.
-			alpha_blend = (def and def.use_texture_alpha == "blend") or false,
+			alpha_blend = alpha_mode_of(def, drawtype) == "blend",
+			-- Cut out by the texture's own alpha, which is what a leaf, a
+			-- plant, a rail and a ladder are. Without it the holes in the
+			-- picture are drawn in whatever is under the alpha, which is
+			-- black.
+			alpha_clip = alpha_mode_of(def, drawtype) == "clip",
 			-- The model a "mesh" node is made of; the module reads it and
 			-- the quads become the node's shape
 			mesh = (drawtype == "mesh") and def and def.mesh or nil,

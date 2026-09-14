@@ -653,6 +653,7 @@ void init_voxel(lua_State *L)
 			.def_readwrite("shape_lit_from_above",
 					&VoxelDefinition::shape_lit_from_above)
 			.def_readwrite("translucent", &VoxelDefinition::translucent)
+			.def_readwrite("alpha_masked", &VoxelDefinition::alpha_masked)
 			.def_readwrite("shape_group", &VoxelDefinition::shape_group)
 			.def_readwrite("is_liquid", &VoxelDefinition::is_liquid)
 			.def_readwrite("liquid_top", &VoxelDefinition::liquid_top)

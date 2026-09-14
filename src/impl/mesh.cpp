@@ -902,13 +902,32 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
 		AtlasRegistry *atlas_reg,
 		bool use_skylight,
-		sm_<uint, TemporaryGeometry> *translucent_result);
+		sm_<uint, TemporaryGeometry> *translucent_result,
+		sm_<uint, TemporaryGeometry> *masked_result);
+
+// Which of the three geometries a voxel's faces go in: the solid one, the
+// blended one, or the one cut out by its texture. A definition is at most
+// one of the two special kinds; being both is a game's mistake and
+// translucent is what it gets.
+static sm_<uint, TemporaryGeometry>& geometry_for(
+		sm_<uint, TemporaryGeometry> &result,
+		sm_<uint, TemporaryGeometry> *translucent_result,
+		sm_<uint, TemporaryGeometry> *masked_result,
+		const interface::CachedVoxelDefinition *def)
+{
+	if(translucent_result && def->translucent)
+		return *translucent_result;
+	if(masked_result && def->alpha_masked)
+		return *masked_result;
+	return result;
+}
 
 void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 		bool use_skylight,
-		sm_<uint, TemporaryGeometry> *translucent_result)
+		sm_<uint, TemporaryGeometry> *translucent_result,
+		sm_<uint, TemporaryGeometry> *masked_result)
 {
 	const VoxelFmt fmt(voxel_reg);
 	IsQuadNeededByRegistry<VoxelSample> iqn(voxel_reg);
@@ -1052,9 +1071,8 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		}
 #else
 		// Get or create the appropriate temporary geometry for this atlas
-		sm_<uint, TemporaryGeometry> &into =
-				(translucent_result && voxel_def0->translucent) ?
-				*translucent_result : result;
+		sm_<uint, TemporaryGeometry> &into = geometry_for(
+				result, translucent_result, masked_result, voxel_def0);
 		TemporaryGeometry &tg = into[seg_ref.atlas_id];
 		if(tg.vertex_data.Empty()){
 			tg.atlas_id = seg_ref.atlas_id;
@@ -1146,7 +1164,7 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 	}
 
 	generate_voxel_shapes(result, volume, voxel_reg, fmt, atlas_reg,
-			use_skylight, translucent_result);
+			use_skylight, translucent_result, masked_result);
 }
 
 // How high a liquid's surface stands at one corner of a voxel: the average
@@ -1283,7 +1301,8 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
 		AtlasRegistry *atlas_reg,
 		bool use_skylight,
-		sm_<uint, TemporaryGeometry> *translucent_result)
+		sm_<uint, TemporaryGeometry> *translucent_result,
+		sm_<uint, TemporaryGeometry> *masked_result)
 {
 	const pv::Region &region = volume.getEnclosingRegion();
 	const pv::Vector3DInt32 lc = region.getLowerCorner();
@@ -1472,9 +1491,8 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 								interface::EDGEMATERIALID_EMPTY)))
 							continue;
 					}
-					sm_<uint, TemporaryGeometry> &into =
-							(translucent_result && def->translucent) ?
-							*translucent_result : result;
+					sm_<uint, TemporaryGeometry> &into = geometry_for(
+							result, translucent_result, masked_result, def);
 					TemporaryGeometry &tg = into[seg_ref.atlas_id];
 					if(tg.vertex_data.Empty()){
 						tg.atlas_id = seg_ref.atlas_id;

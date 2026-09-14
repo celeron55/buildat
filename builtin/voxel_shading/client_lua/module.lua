@@ -38,6 +38,11 @@ local TECHNIQUE_MODIFIERS = magic.cache:GetResource("Technique",
 -- blended rather than cut out. See PBRVoxelAlpha.xml.
 local TECHNIQUE_ALPHA = magic.cache:GetResource("Technique",
 		"voxel_shading/PBRVoxelAlpha.xml")
+-- And for the faces on its "masked" child: the same shader again, cut out by
+-- the texture's own alpha rather than drawn through it. See
+-- PBRVoxelMasked.xml.
+local TECHNIQUE_MASKED = magic.cache:GetResource("Technique",
+		"voxel_shading/PBRVoxelMasked.xml")
 
 -- The same three with the sun gated by the skylight in the vertex colors: a
 -- surface the sky cannot reach gets no direct sunlight. A world whose light
@@ -48,6 +53,8 @@ local TECHNIQUE_SUN_MODIFIERS = magic.cache:GetResource("Technique",
 		"voxel_shading/PBRVoxelSunModifiers.xml")
 local TECHNIQUE_SUN_ALPHA = magic.cache:GetResource("Technique",
 		"voxel_shading/PBRVoxelSunAlpha.xml")
+local TECHNIQUE_SUN_MASKED = magic.cache:GetResource("Technique",
+		"voxel_shading/PBRVoxelSunMasked.xml")
 
 local sun_gate = false
 local use_modifiers = false
@@ -258,6 +265,17 @@ function M.apply_to_node(node)
 				function(m)
 			m:SetTechnique(0, sun_gate and TECHNIQUE_SUN_ALPHA or
 					TECHNIQUE_ALPHA)
+		end)
+	end
+	-- And the alpha-masked ones, which are solid world with the holes in
+	-- their textures cut out. A game that marks no voxel masked never has
+	-- this child.
+	local masked_node = node:GetChild("masked")
+	if masked_node then
+		each_material_of(masked_node:GetComponent("CustomGeometry"),
+				function(m)
+			m:SetTechnique(0, sun_gate and TECHNIQUE_SUN_MASKED or
+					TECHNIQUE_MASKED)
 		end)
 	end
 end

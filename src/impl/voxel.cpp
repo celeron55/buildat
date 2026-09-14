@@ -265,6 +265,7 @@ struct CVoxelRegistry: public VoxelRegistry
 		cache.shape_double_sided = def.shape_double_sided;
 		cache.shape_lit_from_above = def.shape_lit_from_above;
 		cache.translucent = def.translucent;
+		cache.alpha_masked = def.alpha_masked;
 		cache.shape_group = def.shape_group;
 		cache.is_liquid = def.is_liquid;
 		cache.liquid_top = def.liquid_top;

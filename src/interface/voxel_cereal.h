@@ -47,7 +47,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 13;
+		uint8_t version = 14;
 		archive(
 				version,
 				v.name,
@@ -95,6 +95,11 @@ namespace interface
 		// Version 13 split "light gets past this" out of the edge material
 		if(version >= 13){
 			archive(v.transmits_light);
+		}
+		// Version 14 added the alpha-masked class, which is drawn with the
+		// solid world and cut out by its texture
+		if(version >= 14){
+			archive(v.alpha_masked);
 		}
 	}
 
