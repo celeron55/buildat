@@ -970,6 +970,22 @@ local function binding_lines()
 	return table.concat(parts, "\n")
 end
 
+-- The counted facts, in the words extensions/luanti_client's debug line uses
+-- them in: the two clients reach the same world by entirely different routes,
+-- and a count that differs between them names the fault where a picture that
+-- differs only asks a question. See doc/plan/luanti_module_plan.md, "The
+-- numbers before the pixels".
+local function counted_line()
+	local c = luanti.counts()
+	local w = voxelworld.counts()
+	return string.format(
+			"%d node definitions | %d item images | %d composed\n" ..
+			"%d meshes | %d objects | %d hud | " ..
+			"blocks: %d in scene, %d to mesh",
+			w.voxel_types, c.items, c.composed,
+			c.meshes, c.objects, c.hud, w.chunks, w.to_mesh)
+end
+
 local detail_timer = 0
 local function update_detail(dt)
 	if not detail_text.visible then
@@ -984,20 +1000,11 @@ local function update_detail(dt)
 			(player.on_ground and "on the ground" or "falling"))
 	local chunk_p = voxelworld.get_chunk_position(buildat.Vector3(
 			player.x, player.y, player.z))
-	-- The counted facts, in the words extensions/luanti_client's debug line
-	-- uses them in: the two clients reach the same world by entirely
-	-- different routes, and a count that differs between them names the
-	-- fault where a picture that differs only asks a question. See
-	-- doc/plan/luanti_module_plan.md, "The numbers before the pixels".
-	local c = luanti.counts()
-	local w = voxelworld.counts()
 	detail_text:SetText(string.format(
 			"%.1f, %.1f, %.1f | %s | looking %.0f round, %.0f down\n" ..
 			"speed %.1f, %.1f, %.1f | chunk %d, %d, %d%s\n" ..
 			"%02d:%02d | sun %.2f up, %.0f%% day\n" ..
-			"%d node definitions | %d item images | %d composed\n" ..
-			"%d meshes | %d objects | %d hud | " ..
-			"blocks: %d in scene, %d to mesh\n%s",
+			"%s\n%s",
 			player.x, player.y, player.z, mode, yaw, pitch,
 			player.vx, player.vy, player.vz,
 			chunk_p.x, chunk_p.y, chunk_p.z,
@@ -1005,9 +1012,7 @@ local function update_detail(dt)
 			math.floor((time_of_day or 0) * 24),
 			math.floor(((time_of_day or 0) * 24 % 1) * 60),
 			sky_now.height, sky_now.day * 100,
-			w.voxel_types, c.items, c.composed,
-			c.meshes, c.objects, c.hud,
-			w.chunks, w.to_mesh,
+			counted_line(),
 			binding_lines()))
 end
 
@@ -2196,6 +2201,12 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	elseif key == BIND.detail.key then
 		detail_text.visible = not detail_text.visible
 		detail_timer = 1
+		if detail_text.visible then
+			-- In the log as well as on the screen: these are numbers meant
+			-- to be compared with another client's, and a number read off a
+			-- screenshot is a number misread
+			log:info(counted_line():gsub("\n", " | "))
+		end
 	elseif key == BIND.menu.key then
 		open_pause_menu()
 	end

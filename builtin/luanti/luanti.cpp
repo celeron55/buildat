@@ -4189,6 +4189,18 @@ struct Module: public interface::Module, public luanti::Interface
 				"texture modifier or was not shipped",
 				n, n_shaped, n_liquid, n_facing_nodes, n_palette_nodes,
 				n_palette_variants, n_fallback);
+		// What the registry actually holds, which is what the client is
+		// sent and what its own line of detail counts. A definition that
+		// went in under a name another one already had is one voxel type
+		// rather than two, and the two ends disagreeing about the count is
+		// the first thing a comparison notices; see
+		// doc/plan/luanti_module_plan.md, "The numbers before the pixels".
+		const size_t in_registry = reg->get_count();
+		if(in_registry != n){
+			log_w(MODULE, "%zu of those %zu are in the registry: the rest "
+					"went in under a name one of them already had",
+					in_registry, n);
+		}
 	}
 
 	// The game's own media, named the way Luanti names it: by basename and
