@@ -532,6 +532,12 @@ function core.register_item_raw(def)
 	if def.type == "node" and core.__content_ids[name] == nil then
 		reserve_content_id(name)
 	end
+	-- Which ids a name list matches is kept; a new node may be in one of
+	-- them. Registering after the mods have loaded is not normal, and this
+	-- is what makes it harmless. See ids_and_names().
+	if core.__forget_name_ids then
+		core.__forget_name_ids()
+	end
 	return name
 end
 
@@ -1765,6 +1771,9 @@ local __get_region = __luanti_get_region
 local __active_boxes = __luanti_active_boxes
 -- The voxels of a kind in a box; see the ABMs further down
 local __find_ids = __luanti_find_ids
+-- The same over one set, answering the positions and what was at each; see
+-- core.find_nodes_in_area()
+local __find_nodes = __luanti_find_nodes
 
 local function to_pos(pos)
 	-- Luanti rounds, it does not truncate: -0.4 is 0 and not 0
@@ -2468,6 +2477,38 @@ local function id_matcher(nodenames)
 	end, name_of_id
 end
 
+-- Which content ids a name list is about, and the name of each, kept because
+-- working it out walks every node the game registered -- two and a half
+-- thousand of them in VoxeLibre -- and the answer cannot change: the node
+-- registry is frozen once the mods have loaded.
+local ids_for_names = {}
+
+-- Called when an item is registered; see core.register_item_raw()
+function core.__forget_name_ids()
+	ids_for_names = {}
+end
+
+local function ids_and_names(nodenames)
+	local key = type(nodenames) == "string" and nodenames or
+			table.concat(nodenames, "\1")
+	local have = ids_for_names[key]
+	if have ~= nil then
+		return have[1], have[2]
+	end
+	local matches = name_matcher(nodenames)
+	local ids = {}
+	local name_of = {}
+	for name, _ in pairs(core.registered_nodes) do
+		if matches(name) then
+			local id = core.get_content_id(name)
+			ids[#ids + 1] = id
+			name_of[id] = name
+		end
+	end
+	ids_for_names[key] = {ids, name_of}
+	return ids, name_of
+end
+
 -- Where the ground is at a point, which is what a player who has never been
 -- here starts on top of. nil means nobody can stand here.
 --
@@ -3017,7 +3058,6 @@ end
 
 -- Returns positions, counts -- or a table of name to positions when grouped
 function core.find_nodes_in_area(minp, maxp, nodenames, grouped)
-	local matches_id, name_of_id = id_matcher(nodenames)
 	local x0, y0, z0 = to_pos(minp)
 	local x1, y1, z1 = to_pos(maxp)
 	if x1 < x0 or y1 < y0 or z1 < z0 then
@@ -3026,31 +3066,25 @@ function core.find_nodes_in_area(minp, maxp, nodenames, grouped)
 	local positions = {}
 	local counts = {}
 	local by_name = {}
-	-- The ids rather than the names: the names array was one string stored
-	-- per voxel of the box, and a name is wanted only where there is a hit
-	local ids = __get_region(x0, y0, z0, x1, y1, z1)
-	local i = 0
-	for z = z0, z1 do
-		for y = y0, y1 do
-			for x = x0, x1 do
-				i = i + 1
-				local id = ids[i]
-				if matches_id(id) then
-					local name = name_of_id(id)
-					local p = {x = x, y = y, z = z}
-					if grouped then
-						local list = by_name[name]
-						if not list then
-							list = {}
-							by_name[name] = list
-						end
-						list[#list + 1] = p
-					else
-						positions[#positions + 1] = p
-						counts[name] = (counts[name] or 0) + 1
-					end
-				end
+	-- The box is swept in C: which ids are wanted is worked out once here,
+	-- and what comes back is the hits and nothing else. The Lua that walked
+	-- the box a voxel at a time asking a closure about each was a quarter of
+	-- all the Lua VoxeLibre's world generation ran.
+	local ids, name_of = ids_and_names(nodenames)
+	local flat, hit_ids = __find_nodes(x0, y0, z0, x1, y1, z1, ids)
+	for h = 1, #hit_ids do
+		local name = name_of[hit_ids[h]]
+		local p = {x = flat[h * 3 - 2], y = flat[h * 3 - 1], z = flat[h * 3]}
+		if grouped then
+			local list = by_name[name]
+			if not list then
+				list = {}
+				by_name[name] = list
 			end
+			list[#list + 1] = p
+		else
+			positions[#positions + 1] = p
+			counts[name] = (counts[name] or 0) + 1
 		end
 	end
 	if grouped then

@@ -79,6 +79,14 @@ Fixed, kept here for what the shape of the problem was:
   matcher was 30% of all the Lua and get_item_group() under it another 20%.
   Debug build, -O1, 2026-09-14.
 
+  Then the sweep itself went into C -- __luanti_find_nodes(), which is
+  find_ids() with one set and the id at each hit -- because the Lua loop that
+  was left was another quarter of the same profile. Which ids a name list
+  matches is worked out once and kept, since the node registry is frozen
+  after the mods load. The same benchmark: 345 ms -> 227 ms, and a plain name
+  list over the same box 445 ms -> 250 ms. What is left is one table per hit,
+  which is what the API hands back.
+
 Tried and rejected, so that nobody spends the day again:
 
 * Raising voxelworld's chunk buffer limit (m_max_buffers_loaded) from 50 to

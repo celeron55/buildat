@@ -5499,6 +5499,75 @@ struct Module: public interface::Module, public luanti::Interface
 		return 1;
 	}
 
+	// find_nodes(x0, y0, z0, x1, y1, z1, ids) -> positions, ids_at
+	//
+	// Every voxel of the box whose content id is in the list: the positions
+	// flat -- x, y, z, x, y, z -- and the id found at each, in the order
+	// Luanti's own find_nodes_in_area() answers in, which is x fastest.
+	//
+	// The Lua this replaces walked the box a voxel at a time asking a
+	// closure about each, and was a quarter of all the Lua VoxeLibre's world
+	// generation ran. What is left in Lua is one table per *hit*, which is
+	// what the API hands back and cannot be helped.
+	static int l_find_nodes(lua_State *L)
+	{
+		Module *self = module_of(L);
+		int32_t x0 = luaL_checkinteger(L, 1);
+		int32_t y0 = luaL_checkinteger(L, 2);
+		int32_t z0 = luaL_checkinteger(L, 3);
+		int32_t x1 = luaL_checkinteger(L, 4);
+		int32_t y1 = luaL_checkinteger(L, 5);
+		int32_t z1 = luaL_checkinteger(L, 6);
+		luaL_checktype(L, 7, LUA_TTABLE);
+		lua_newtable(L); // positions
+		lua_newtable(L); // ids at each
+		if(x1 < x0 || y1 < y0 || z1 < z0)
+			return 2;
+		double volume = (double)(x1 - x0 + 1) * (double)(y1 - y0 + 1) *
+				(double)(z1 - z0 + 1);
+		if(volume > (double)MAX_REGION_VOXELS){
+			return luaL_error(L, "find_nodes(): %.0f voxels is more than the "
+					"%d this reads at once", volume, (int)MAX_REGION_VOXELS);
+		}
+		// A Luanti node id is 16 bits, so wanted-or-not is one byte per id
+		// and the test in the loop is one load
+		sv_<uint8_t> wanted(65536, 0);
+		bool any = false;
+		const size_t n_ids = lua_objlen(L, 7);
+		for(size_t i = 1; i <= n_ids; i++){
+			lua_rawgeti(L, 7, (int)i);
+			lua_Integer id = lua_tointeger(L, -1);
+			lua_pop(L, 1);
+			if(id < 0 || id > 65535)
+				continue;
+			wanted[id] = 1;
+			any = true;
+		}
+		if(!any)
+			return 2;
+		sv_<uint32_t> words;
+		self->read_region(x0, y0, z0, x1, y1, z1, words);
+		const interface::VoxelFormat f = interface::VoxelFormat::luanti();
+		int n_pos = 0, n_hit = 0;
+		size_t i = 0;
+		for(int32_t z = z0; z <= z1; z++)
+		for(int32_t y = y0; y <= y1; y++)
+		for(int32_t x = x0; x <= x1; x++, i++){
+			const uint32_t id = f.id.get(words[i]);
+			if(!wanted[id])
+				continue;
+			lua_pushinteger(L, x);
+			lua_rawseti(L, -3, ++n_pos);
+			lua_pushinteger(L, y);
+			lua_rawseti(L, -3, ++n_pos);
+			lua_pushinteger(L, z);
+			lua_rawseti(L, -3, ++n_pos);
+			lua_pushinteger(L, (lua_Integer)id);
+			lua_rawseti(L, -2, ++n_hit);
+		}
+		return 2;
+	}
+
 	static int l_get_region(lua_State *L)
 	{
 		Module *self = module_of(L);
@@ -6504,6 +6573,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_active_boxes", l_active_boxes);
 		set_global_cfunction("__luanti_loaded_boxes", l_loaded_boxes);
 		set_global_cfunction("__luanti_find_ids", l_find_ids);
+		set_global_cfunction("__luanti_find_nodes", l_find_nodes);
 		set_global_cfunction("__luanti_show_objects", l_show_objects);
 		set_global_cfunction("__luanti_show_object_props",
 				l_show_object_props);
