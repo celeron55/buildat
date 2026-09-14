@@ -26,6 +26,8 @@ dofile(dir .. "/misc.lua")
 local modlist = dofile(dir .. "/modlist.lua")
 dofile(dir .. "/objmesh.lua")
 dofile(dir .. "/b3dmesh.lua")
+dofile(dir .. "/json.lua")
+dofile(dir .. "/gltfmesh.lua")
 dofile(dir .. "/mesh.lua")
 
 local function check(name, f)
@@ -233,8 +235,68 @@ f 1 2
 	assert(flat[14] == 0.0 and flat[15] == 1.0,
 			"the texture coordinates follow the corners")
 	-- A format nothing here reads leaves the node its cube
-	assert(core.__mesh_quads("thing.gltf", "{}", 1) == nil)
+	assert(core.__mesh_quads("thing.x", "", 1) == nil)
 	assert(core.__mesh_quads("thing.obj", "", 1) == nil)
+end)
+
+check("gltf mesh", function()
+	-- One triangle at (0,0,0), (1,0,0), (0,1,0) with its texture
+	-- coordinates, in a node scaled by two: the buffer is the indices, the
+	-- three positions and the three pairs, in that order
+	local BUFFER = "AAABAAIAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPw" ..
+			"AAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8="
+	local function document(uri)
+		return '{"asset":{"version":"2.0"},"scene":0,' ..
+			'"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0,"scale":[2,2,2]}],' ..
+			'"meshes":[{"primitives":[{"attributes":{"POSITION":1,' ..
+			'"TEXCOORD_0":2},"indices":0,"material":0}]}],"materials":[{}],' ..
+			'"buffers":[{"byteLength":68' ..
+			(uri and (',"uri":"data:application/octet-stream;base64,' ..
+				BUFFER .. '"') or "") .. '}],' ..
+			'"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":6},' ..
+			'{"buffer":0,"byteOffset":8,"byteLength":36},' ..
+			'{"buffer":0,"byteOffset":44,"byteLength":24}],' ..
+			'"accessors":[{"bufferView":0,"componentType":5123,"count":3,' ..
+			'"type":"SCALAR"},{"bufferView":1,"componentType":5126,' ..
+			'"count":3,"type":"VEC3"},{"bufferView":2,"componentType":5126,' ..
+			'"count":3,"type":"VEC2"}]}'
+	end
+
+	local flat, skipped = core.__mesh_quads("thing.gltf", document(true), 1)
+	assert(flat ~= nil, "the document was not read")
+	assert(#flat == 21, "one triangle is one quad, got " .. #flat)
+	assert(skipped == 0, "nothing was skipped")
+	assert(flat[1] == 0, "the first material is tile zero")
+	-- The corners: the node's scale of two is applied and glTF's handedness
+	-- is undone, which is what negates x
+	assert(flat[2] == 0 and flat[3] == 0 and flat[4] == 0, "the first corner")
+	assert(flat[5] == 0 and flat[6] == 2 and flat[7] == 0,
+			"the winding turns over with the handedness")
+	assert(flat[8] == -2 and flat[9] == 0 and flat[10] == 0,
+			"x is negated and the scale is applied")
+	assert(flat[11] == -2 and flat[12] == 0 and flat[13] == 0,
+			"a triangle is a quad with its last corner twice")
+	assert(flat[14] == 0 and flat[15] == 0, "the first pair")
+	assert(flat[16] == 0 and flat[17] == 1, "the second corner's pair")
+
+	-- The same document as a .glb: the JSON in one chunk and the buffer in
+	-- the next, which is what an exporter writes as a single file
+	local function u32(v)
+		return string.char(v % 256, math.floor(v / 256) % 256,
+				math.floor(v / 65536) % 256, math.floor(v / 16777216) % 256)
+	end
+	local json = document(false)
+	json = json .. string.rep(" ", (4 - #json % 4) % 4)
+	local bin = core.decode_base64(BUFFER)
+	bin = bin .. string.rep("\0", (4 - #bin % 4) % 4)
+	local glb = "glTF" .. u32(2) .. u32(12 + 8 + #json + 8 + #bin) ..
+			u32(#json) .. "JSON" .. json .. u32(#bin) .. "BIN\0" .. bin
+	local flat2 = core.__mesh_quads("thing.glb", glb, 1)
+	assert(flat2 ~= nil, "the glb was not read")
+	assert(#flat2 == #flat, "the same triangle, got " .. #flat2)
+	for i = 1, #flat do
+		assert(flat2[i] == flat[i], "the glb differs at " .. i)
+	end
 end)
 
 print("builtin/luanti/lua/test.lua: ok")

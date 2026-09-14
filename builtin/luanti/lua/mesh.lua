@@ -9,10 +9,10 @@
 -- other: a chunk of lanterns costs what a chunk of cubes costs.
 --
 -- The readers beside this file are objmesh.lua and b3dmesh.lua, copied out
--- of extensions/luanti_client where they were written for this same mesher.
--- Between them they cover twenty of devtest's thirty mesh references; the
--- rest are .x, .gltf and .glb, and a node that names one of those keeps the
--- cube it had.
+-- of extensions/luanti_client where they were written for this same mesher,
+-- and gltfmesh.lua, which was written here. Between them they cover all but
+-- the .x of devtest's thirty mesh references, and a node that names one of
+-- those keeps the cube it had.
 
 -- core.__mesh_quads(name, data, scale) -> a flat array of numbers, and how
 -- many faces were neither triangles nor quads. Each quad is 21 numbers: the
@@ -25,6 +25,8 @@ function core.__mesh_quads(name, data, scale)
 		read = core.__objmesh.parse
 	elseif lower:match("%.b3d$") then
 		read = core.__b3dmesh.parse
+	elseif lower:match("%.gltf$") or lower:match("%.glb$") then
+		read = core.__gltfmesh.parse
 	end
 	if read == nil then
 		return nil, 0
