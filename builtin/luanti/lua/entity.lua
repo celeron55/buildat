@@ -883,15 +883,23 @@ end
 
 -- A mod's element as the names the wire carries; nil is left out
 local function hud_fields(def)
+	local kind = tostring(def.type or def.hud_elem_type or "text")
+	-- A waypoint keeps its precision in the item field, which is what
+	-- Luanti's own read_hud_element does with it: item is precision plus
+	-- one, and an item of zero means ten
+	local item = def.item
+	if kind == "waypoint" and def.precision ~= nil then
+		item = (tonumber(def.precision) or 0) + 1
+	end
 	return {
-		type = tostring(def.type or def.hud_elem_type or "text"),
+		type = kind,
 		pos = v2_string(def.position),
 		name = def.name and tostring(def.name) or nil,
 		scale = v2_string(def.scale),
 		text = def.text and tostring(def.text) or nil,
 		text2 = def.text2 and tostring(def.text2) or nil,
 		number = def.number and tostring(def.number) or nil,
-		item = def.item and tostring(def.item) or nil,
+		item = item and tostring(item) or nil,
 		dir = def.direction and tostring(def.direction) or nil,
 		align = v2_string(def.alignment),
 		offset = v2_string(def.offset),

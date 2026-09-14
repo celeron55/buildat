@@ -494,6 +494,14 @@ function M.define(dst, util)
 
 	util.wc("Camera", {
 		inherited_from_by_wrapper = dst.Component,
+		instance = {
+			-- Where a point in the world lands on the screen, as a
+			-- fraction of it. What wants it is anything a game draws over
+			-- a place rather than over a corner: Luanti's waypoints are
+			-- that, and a marker over another player would be.
+			WorldToScreenPoint = util.self_function("WorldToScreenPoint",
+					{dst.Vector2}, {"Camera", "Vector3"}),
+		},
 		properties = {
 			nearClip = util.simple_property("number"),
 			farClip = util.simple_property("number"),

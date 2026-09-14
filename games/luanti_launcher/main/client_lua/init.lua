@@ -169,6 +169,9 @@ end
 voxel_shading.create_skybox(scene, SUN_DIR)
 
 local camera_node = scene:CreateChild("Camera")
+-- The component, because a waypoint asks it where a place in the world is
+-- on the screen
+local camera = nil
 do
 	local d = normalized(VIEW_DIR)
 	camera_node.position = magic.Vector3(
@@ -176,7 +179,7 @@ do
 			LOOK_AT.y - d.y * CAMERA_DISTANCE,
 			LOOK_AT.z - d.z * CAMERA_DISTANCE)
 	camera_node.rotation = magic.Quaternion(pitch, yaw, 0)
-	local camera = camera_node:CreateComponent("Camera")
+	camera = camera_node:CreateComponent("Camera")
 	camera.nearClip = 1.0
 	camera.farClip = FAR_CLIP
 	camera.fov = CAMERA_FOV
@@ -714,12 +717,19 @@ end
 -- with `align` saying which corner of the element lands there -- which is
 -- Luanti's drawLuaElements, and what a game's hearts and bars are made of.
 --
--- simplified: text, image and statbar. A waypoint, a compass, a minimap and
--- an inventory element are not drawn; each is named once in the log so that
+-- A waypoint and an image_waypoint are the two that are not over a corner of
+-- the screen but over a place in the world; the camera says where that is.
+--
+-- simplified: a compass, a minimap, an inventory element and the styles
+-- inside a line of text are not drawn; each is named once in the log so that
 -- a game asking for one says so rather than silently missing it.
 local hud_root = magic.ui.root:CreateChild("UIElement")
 hud_root:SetPosition(0, 0)
 local hud_missing = {}
+-- The elements that are over a place in the world rather than over a corner
+-- of the screen: where they go changes as the player moves, so they are
+-- placed every frame and not only when the game changes one.
+local hud_waypoints = {}
 
 local function parse_v2(str, dx, dy)
 	if type(str) ~= "string" then
@@ -727,6 +737,37 @@ local function parse_v2(str, dx, dy)
 	end
 	local x, y = string.match(str, "^([^,]*),(.*)$")
 	return tonumber(x) or dx, tonumber(y) or dy
+end
+
+local function parse_v3(str)
+	if type(str) ~= "string" then
+		return nil
+	end
+	local x, y, z = string.match(str, "^([^,]*),([^,]*),(.*)$")
+	x, y, z = tonumber(x), tonumber(y), tonumber(z)
+	if x == nil or y == nil or z == nil then
+		return nil
+	end
+	return x, y, z
+end
+
+-- Where a place in the world is on the screen, in pixels, or nil for one
+-- behind the camera -- which Luanti does not draw a waypoint for either.
+-- The scene's coordinates are the game's node coordinates, so a world_pos
+-- goes in as it came.
+local function screen_of(x, y, z)
+	if camera == nil then
+		return nil
+	end
+	local eye = camera_node.position
+	local dir = camera_node:GetWorldDirection()
+	local ahead = (x - eye.x) * dir.x + (y - eye.y) * dir.y +
+			(z - eye.z) * dir.z
+	if ahead <= 0 then
+		return nil
+	end
+	local p = camera:WorldToScreenPoint(magic.Vector3(x, y, z))
+	return p.x * magic.ui.root.width, p.y * magic.ui.root.height
 end
 
 local function hud_place(element, e, w, h)
@@ -785,6 +826,93 @@ local function draw_hud_image(e)
 	hud_place(img, e, w, h)
 end
 
+-- Where a waypoint's own element goes: the place on the screen its world
+-- position is at, plus the offset, with the alignment saying which corner of
+-- it lands there. The same as hud_place() but for pos, which a waypoint does
+-- not have.
+local function hud_place_at(element, e, w, h, sx, sy)
+	local ox, oy = parse_v2(e.offset, 0, 0)
+	local ax, ay = parse_v2(e.align, 0, 0)
+	element:SetPosition(
+			math.floor(sx + ox - (ax + 1) * 0.5 * w),
+			math.floor(sy + oy - (ay + 1) * 0.5 * h))
+end
+
+-- A label over a place in the world, with how far away it is. Luanti keeps
+-- the precision in the item field -- item is precision + 1, and zero means
+-- ten -- and text is the unit the distance is written in.
+local function waypoint_text(e)
+	local text = luanti.strip_escapes(e.name or "")
+	local item = math.floor(tonumber(e.item) or 0)
+	local precision = (item == 0) and 10 or (item - 1)
+	if precision <= 0 then
+		return text
+	end
+	local wx, wy, wz = parse_v3(e.world_pos)
+	local eye = camera_node.position
+	local dx, dy, dz = wx - eye.x, wy - eye.y, wz - eye.z
+	local distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+	local decimals = math.max(0,
+			math.ceil(math.log(precision) / math.log(10)))
+	return text .. string.format("%." .. decimals .. "f",
+			math.floor(distance * precision) / precision) .. (e.text or "")
+end
+
+local function draw_hud_waypoint(e)
+	if parse_v3(e.world_pos) == nil then
+		return
+	end
+	local t = hud_root:CreateChild("Text")
+	t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 15)
+	t:SetTextEffect(magic.TE_SHADOW)
+	t.effectColor = magic.Color(0, 0, 0, 0.85)
+	t.color = hud_colour(e.number)
+	hud_waypoints[#hud_waypoints + 1] = {element = t, e = e, text = true}
+end
+
+-- The same place in the world, with a picture on it instead of a label
+local function draw_hud_image_waypoint(e)
+	if parse_v3(e.world_pos) == nil then
+		return
+	end
+	local resource = luanti.texture(e.text or "")
+	local tex = resource and game_texture(resource)
+	if not tex then
+		return
+	end
+	local scx, scy = parse_v2(e.scale, 1, 1)
+	local w, h = tex.width * scx, tex.height * scy
+	local img = hud_root:CreateChild("BorderImage")
+	img.texture = tex
+	img.size = magic.IntVector2(math.floor(w), math.floor(h))
+	hud_waypoints[#hud_waypoints + 1] = {element = img, e = e, w = w, h = h}
+end
+
+-- Where every waypoint is now. Once a frame, because what moves is the
+-- player: the game changes the element only when it has something new to
+-- say, and the distance in a waypoint's label changes with every step.
+local function place_waypoints()
+	for _, w in ipairs(hud_waypoints) do
+		local wx, wy, wz = parse_v3(w.e.world_pos)
+		local sx, sy = nil, nil
+		if wx ~= nil then
+			sx, sy = screen_of(wx, wy, wz)
+		end
+		if sx == nil then
+			w.element.visible = false
+		else
+			w.element.visible = true
+			if w.text then
+				w.element:SetText(waypoint_text(w.e))
+				hud_place_at(w.element, w.e, w.element.width,
+						w.element.height, sx, sy)
+			else
+				hud_place_at(w.element, w.e, w.w, w.h, sx, sy)
+			end
+		end
+	end
+end
+
 -- A row of icons, each one either whole or half: hearts, bubbles, a bar of
 -- armour. number is the value in halves and item is how many halves the bar
 -- holds; text2 is the icon a game draws for what is missing.
@@ -836,6 +964,7 @@ end
 
 local function draw_hud(elements, flags)
 	hud_root:RemoveAllChildren()
+	hud_waypoints = {}
 	-- As big as the screen, because an element aligned to the centre or the
 	-- bottom is aligned inside this and an element of no size puts every
 	-- one of them in the top left corner
@@ -863,6 +992,10 @@ local function draw_hud(elements, flags)
 			draw_hud_image(e)
 		elseif kind == "statbar" then
 			draw_hud_statbar(e)
+		elseif kind == "waypoint" then
+			draw_hud_waypoint(e)
+		elseif kind == "image_waypoint" then
+			draw_hud_image_waypoint(e)
 		elseif not hud_missing[kind] then
 			hud_missing[kind] = true
 			log:info("the game asked for a \"" .. kind ..
@@ -1183,6 +1316,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	camera_node.position = magic.Vector3(player.x,
 			player.y + player_physics.EYE_HEIGHT, player.z)
 	camera_node.rotation = magic.Quaternion(pitch, yaw, 0)
+	place_waypoints()
 	update_underwater(buildat.Vector3(player.x,
 			player.y + player_physics.EYE_HEIGHT, player.z))
 end)
