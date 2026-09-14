@@ -62,6 +62,11 @@ struct Module: public interface::Module
 	// does.
 	luanti::SceneReference m_scene = nullptr;
 	sv_<network::PeerInfo::Id> m_waiting_peers;
+	// Where each client last said its player is, applied on the next tick;
+	// see on_where()
+	struct Where { double x = 0, y = 0, z = 0, look_h = 0, look_v = 0; };
+	sm_<network::PeerInfo::Id, Where> m_pending_where;
+	float m_where_timer = 0.0f;
 	// A world runs once: what a second choice would be is a second Luanti
 	// environment in one server, which is not what the module is
 	bool m_starting = false;
@@ -69,6 +74,7 @@ struct Module: public interface::Module
 	void init()
 	{
 		m_server->sub_event(this, Event::t("core:start"));
+		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("luanti:game_loaded"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t(
@@ -99,6 +105,7 @@ struct Module: public interface::Module
 	void event(const Event::Type &type, const Event::Private *p)
 	{
 		EVENT_VOIDN("core:start", on_start)
+		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 		EVENT_TYPEN("luanti:game_loaded", on_game_loaded, luanti::GameLoaded)
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
 				client_file::FilesTransmitted)
@@ -146,23 +153,54 @@ struct Module: public interface::Module
 		});
 	}
 
-	// Where the client's camera is, which is where its player is. It sends
-	// this a few times a second; nothing here moves a player otherwise.
+	// Where a client says its player is, five times a second each. Kept
+	// rather than applied: going into the module for each one costs a wait
+	// on whatever the module is doing -- a fifth of a second in a game the
+	// size of VoxeLibre, and three seconds at its worst -- so five a second
+	// per player is more than a second of waiting per second of play, and
+	// this module's own queue then grows without bound. Everything a player
+	// does afterwards waits behind that backlog: a click took twelve seconds
+	// to arrive when this was measured.
+	//
+	// Only the newest matters anyway, which is what makes keeping it right
+	// rather than merely cheap: a position is a heartbeat, like the tick
+	// src/server/state.cpp coalesces for the same reason.
 	void on_where(const network::Packet &packet)
 	{
-		double x = 0, y = 0, z = 0, look_h = 0, look_v = 0;
+		Where w;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
 			cereal::PortableBinaryInputArchive ar(is);
-			ar(x, y, z, look_h, look_v);
+			ar(w.x, w.y, w.z, w.look_h, w.look_v);
 		} catch(std::exception &e){
 			log_w(MODULE, "main:where: %s", e.what());
 			return;
 		}
+		m_pending_where[packet.sender] = w;
+	}
+
+	// And the tick is where they are handed over: one visit to the module
+	// for every player who has moved since the last one -- and not on every
+	// tick, the server's being thirty a second, but at the rate a client
+	// sends at. One visit per fifth of a second for the lot of them is what
+	// this is for; thirty would be worse than what it replaced.
+	void on_tick(const interface::TickEvent &event)
+	{
+		m_where_timer += event.dtime;
+		if(m_where_timer < 0.2f)
+			return;
+		m_where_timer = 0.0f;
+		if(m_pending_where.empty())
+			return;
+		sm_<network::PeerInfo::Id, Where> pending;
+		pending.swap(m_pending_where);
 		luanti::access(m_server, [&](luanti::Interface *i){
-			i->set_player_pos(player_name_of(packet.sender),
-					(float)x, (float)y, (float)z,
-					(float)look_h, (float)look_v);
+			for(const auto &pair : pending){
+				i->set_player_pos(player_name_of(pair.first),
+						(float)pair.second.x, (float)pair.second.y,
+						(float)pair.second.z, (float)pair.second.look_h,
+						(float)pair.second.look_v);
+			}
 		});
 	}
 

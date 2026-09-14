@@ -3325,6 +3325,25 @@ local function run_abm(abm, hits)
 	end
 end
 
+-- How long a step may spend sweeping before it puts the rest down and picks
+-- it up on the next one. VoxeLibre's rules over ten active sections were
+-- measured at one to ten seconds a sweep, and a step of ten seconds is ten
+-- seconds of everything else waiting -- the player's own click among it,
+-- which is what a playtest of it felt as the game being broken. Luanti
+-- spends a share of its own step on ABMs for the same reason.
+--
+-- simplified: the sweep is put down between one section's batch of rules and
+-- the next, so a single section whose rules are slow still overshoots by
+-- that much. Finer than that means stopping in the middle of a rule's own
+-- hits, which wants the hits kept across steps.
+local ABM_BUDGET_S = 0.2
+
+-- Where a sweep that ran out of budget got to: which rules it is for, the
+-- sections it was going to read, and how far along it is. A rule that comes
+-- due while one is running stays due rather than joining it, so no rule is
+-- swept twice and none is forgotten.
+local abm_sweep = nil
+
 local function run_abms(dtime)
 	local abms = core.registered_abms
 	if abms == nil or #abms == 0 then
@@ -3342,21 +3361,52 @@ local function run_abms(dtime)
 	for i = 1, #abms do
 		abm_timers[i] = abm_timers[i] + dtime
 		if abm_timers[i] >= (abms[i].interval or 1) then
-			abm_timers[i] = 0
-			due = due or {}
-			due[#due + 1] = i
+			if abm_sweep ~= nil then
+				-- Held at the interval, so that it is due again the moment
+				-- the sweep that is running has finished
+				abm_timers[i] = abms[i].interval or 1
+			else
+				abm_timers[i] = 0
+				due = due or {}
+				due[#due + 1] = i
+			end
 		end
 	end
-	if due == nil then
-		return
+	if abm_sweep == nil then
+		if due == nil then
+			return
+		end
+		local sets = {}
+		for k = 1, #due do
+			sets[k] = abm_ids[due[k]]
+		end
+		abm_sweep = {due = due, sets = sets,
+				boxes = core.__active_boxes_now(), box_i = 1, first = 1}
 	end
-	local sets = {}
-	for k = 1, #due do
-		sets[k] = abm_ids[due[k]]
+	local sweep = abm_sweep
+	local until_us = core.get_us_time() + ABM_BUDGET_S * 1000000
+	while sweep.box_i <= #sweep.boxes do
+		local box = sweep.boxes[sweep.box_i]
+		local last = math.min(sweep.first + 31, #sweep.sets)
+		local batch = {}
+		for k = sweep.first, last do
+			batch[#batch + 1] = sweep.sets[k]
+		end
+		local found = __find_ids(box[1], box[2], box[3], box[4], box[5],
+				box[6], batch)
+		for k = sweep.first, last do
+			run_abm(abms[sweep.due[k]], found[k - sweep.first + 1])
+		end
+		sweep.first = last + 1
+		if sweep.first > #sweep.sets then
+			sweep.first = 1
+			sweep.box_i = sweep.box_i + 1
+		end
+		if core.get_us_time() >= until_us then
+			return
+		end
 	end
-	sweep_sections(sets, function(k, hits)
-		run_abm(abms[due[k]], hits)
-	end)
+	abm_sweep = nil
 end
 
 --
@@ -3421,19 +3471,52 @@ local function run_lbms()
 	end) > 0
 end
 
+-- A step that takes this long is worth a line saying where it went: the
+-- module's thread handles one thing at a time, so a step of seconds is
+-- seconds of everything else waiting -- a player's click among it. The
+-- eight clock reads a step costs for this are nothing beside what they
+-- measure.
+local SLOW_STEP_S = 1.0
+
 function core.__step(dtime)
+	local t0 = core.get_us_time()
+	local at = t0
+	local parts = {}
+	local function mark(name)
+		local now = core.get_us_time()
+		parts[#parts + 1] = {name, (now - at) / 1000000}
+		at = now
+	end
 	-- The map moves between steps and not during one
 	active_boxes_cache = nil
 	core.__forget_loaded_boxes()
 	run_globalsteps(dtime)
+	mark("globalsteps")
 	core.__step_objects(dtime)
+	mark("objects")
 	step_emerge(dtime)
+	mark("emerge")
 	run_node_timers(dtime)
+	mark("timers")
 	run_mapblocks_changed()
+	mark("changed")
 	if not lbms_run then
 		lbms_run = run_lbms()
+		mark("lbms")
 	end
 	run_abms(dtime)
+	mark("abms")
+	local total = (core.get_us_time() - t0) / 1000000
+	if total >= SLOW_STEP_S then
+		local said = {}
+		for _, part in ipairs(parts) do
+			if part[2] >= 0.05 then
+				said[#said + 1] = string.format("%s %.2f s", part[1], part[2])
+			end
+		end
+		core.log("warning", string.format("a step took %.2f s: %s", total,
+				table.concat(said, ", ")))
+	end
 	game_time = game_time + dtime
 	local speed = tonumber(core.settings:get("time_speed")) or 72
 	local day_seconds = 24 * 60 * 60

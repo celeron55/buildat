@@ -391,6 +391,14 @@ void ModuleThread::handle_direct_cb(
 	mc->direct_cb_executed_sem.post();
 }
 
+// How long a module may spend on one event before it is worth saying so.
+// A module's thread handles one event at a time and everything else waits --
+// another module's access into it, and every event behind it in its own
+// queue -- so a handler that takes seconds is felt everywhere as lag, and
+// which handler it was is the first thing anybody chasing that wants to
+// know. A second is far past anything a game does per event on purpose.
+static const int64_t SLOW_EVENT_US = 1000000;
+
 void ModuleThread::handle_event(Event &event)
 {
 	if(!mc->module){
@@ -400,7 +408,15 @@ void ModuleThread::handle_event(Event &event)
 		try {
 			log_t(MODULE, "M[%s]->event(): Executing",
 					cs(mc->info.name));
+			const int64_t t0 = interface::os::time_us();
 			mc->module->event(event.type, event.p.get());
+			const int64_t took = interface::os::time_us() - t0;
+			if(took >= SLOW_EVENT_US){
+				log_w(MODULE, "M[%s]->event(\"%s\") took %.1f s",
+						cs(mc->info.name),
+						cs(interface::getGlobalEventRegistry()->name(
+								event.type)), took / 1e6);
+			}
 			log_t(MODULE, "M[%s]->event(): Executed",
 					cs(mc->info.name));
 		} catch(std::exception &e){
