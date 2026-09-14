@@ -4693,6 +4693,29 @@ struct Module: public interface::Module, public luanti::Interface
 		return 0;
 	}
 
+	// __luanti_send_particles(player_name, {...}): one particle record at
+	// one player; see lua/particles.lua for what the fields are
+	static int l_send_particles(lua_State *L)
+	{
+		Module *self = module_of(L);
+		size_t name_len = 0;
+		const char *name_p = luaL_checklstring(L, 1, &name_len);
+		ss_ name(name_p ? name_p : "", name_len);
+		luaL_checktype(L, 2, LUA_TTABLE);
+		sv_<ss_> flat;
+		const size_t n = lua_objlen(L, 2);
+		flat.reserve(n);
+		for(size_t i = 0; i < n; i++){
+			lua_rawgeti(L, 2, (int)i + 1);
+			size_t len = 0;
+			const char *p = lua_tolstring(L, -1, &len);
+			flat.push_back(ss_(p ? p : "", p ? len : 0));
+			lua_pop(L, 1);
+		}
+		self->send_to_player(name, "luanti:particles", flat);
+		return 0;
+	}
+
 	// __luanti_sound_file(group) -> one file of the group, or nil
 	//
 	// A game names a sound group and the media holds the files in it:
@@ -5981,6 +6004,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_send_day_night", l_send_day_night);
 		set_global_cfunction("__luanti_send_sound", l_send_sound);
 		set_global_cfunction("__luanti_sound_file", l_sound_file);
+		set_global_cfunction("__luanti_send_particles", l_send_particles);
 		set_global_cfunction("__luanti_send_sky", l_send_sky);
 		set_global_cfunction("__luanti_send_time", l_send_time);
 		set_global_cfunction("__luanti_show_formspec", l_show_formspec);

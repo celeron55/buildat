@@ -1492,8 +1492,8 @@ local STUBS_NIL = {
 	-- Chat, HUD, sound, particles (M4, M5)
 	"send_join_message",
 	"send_leave_message",
-	-- sound_play, sound_stop and sound_fade are in lua/sound.lua
-	"add_particle", "add_particlespawner", "delete_particlespawner",
+	-- sound_play, sound_stop and sound_fade are in lua/sound.lua, and the
+	-- three particle calls in lua/particles.lua
 	"hud_replace_builtin",
 	-- Auth and privileges (M4)
 	"get_password_hash", "check_password_entry", "notify_authentication_modified",
@@ -3201,6 +3201,7 @@ dofile(module_path .. "/lua/mesh.lua")
 dofile(module_path .. "/lua/vmanip.lua")
 dofile(module_path .. "/lua/check_map.lua")
 dofile(module_path .. "/lua/sound.lua")
+dofile(module_path .. "/lua/particles.lua")
 
 -- What core.get_dig_params() comes to, checked at every start because it is
 -- the difference between a node that can be dug and one that cannot. Here
