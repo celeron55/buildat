@@ -1731,10 +1731,12 @@ function M.counts()
 			meshes = meshes + 1
 		end
 	end
-	-- Texture expressions this client composed itself. The reference says
-	-- zero for VoxeLibre, so anything else here means the two ends disagree
-	-- about what a tile string is, which is a more interesting fault than a
-	-- wrong colour.
+	-- Texture expressions this client composed, the pieces a nested one is
+	-- made of included. A node's own tiles are not among them: the module
+	-- composes those and serves them as files, so what is left here is what
+	-- an item, an object or the HUD asked for.
+	-- extensions/luanti_client's own "composed" counts the world's tiles
+	-- instead, so the two numbers are not the same measurement.
 	for _ in pairs(composed) do
 		texmods = texmods + 1
 	end
