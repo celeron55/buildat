@@ -1154,6 +1154,13 @@ function M.define(dst, util)
 			SetFixedSize = util.self_function(
 					"SetFixedSize", {}, {"Sprite", "number", "number"}),
 		},
+		properties = {
+			-- A Sprite is the one UI element Urho3D turns, which is what a
+			-- compass needs: the rotation is in degrees and the hot spot is
+			-- the point it turns about, in the sprite's own pixels.
+			rotation = util.simple_property("number"),
+			hotSpot = util.simple_property(dst.IntVector2),
+		},
 	})
 
 	util.wc("UI", {

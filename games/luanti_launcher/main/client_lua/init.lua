@@ -845,10 +845,10 @@ end
 -- A waypoint and an image_waypoint are the two that are not over a corner of
 -- the screen but over a place in the world; the camera says where that is.
 --
--- simplified: a compass, a minimap and the styles inside a line of text --
--- bold, italic, monospace -- are not drawn; each missing kind is named once
--- in the log so that a game asking for one says so rather than silently
--- missing it.
+-- simplified: a minimap and the styles inside a line of text -- bold,
+-- italic, monospace -- are not drawn; each missing kind is named once in the
+-- log so that a game asking for one says so rather than silently missing
+-- it.
 local hud_root = magic.ui.root:CreateChild("UIElement")
 hud_root:SetPosition(0, 0)
 local hud_missing = {}
@@ -856,6 +856,17 @@ local hud_missing = {}
 -- of the screen: where they go changes as the player moves, so they are
 -- placed every frame and not only when the game changes one.
 local hud_waypoints = {}
+-- And the compasses, which turn with the player for the same reason
+local hud_compasses = {}
+
+-- How wide a picture is for its height, which is what a compass strip is
+-- scaled by
+local function tex_aspect(tex)
+	if tex == nil or tex.height == nil or tex.height <= 0 then
+		return 1
+	end
+	return tex.width / tex.height
+end
 
 local function parse_v2(str, dx, dy)
 	if type(str) ~= "string" then
@@ -1098,6 +1109,93 @@ local function draw_hud_image_waypoint(e)
 	hud_waypoints[#hud_waypoints + 1] = {element = img, e = e, w = w, h = h}
 end
 
+-- Luanti's compass: a picture that turns with the player, or a strip that
+-- scrolls past. dir says which -- 0 turns, 1 turns the other way, 2 scrolls,
+-- 3 scrolls the other way -- and number is an angle added to the camera's.
+--
+-- The strip is drawn as the copies of itself that fall inside the element,
+-- each cut to what shows: Urho3D's UI clips nothing by itself, and a copy
+-- that hangs out of the element would be drawn over whatever is beside it.
+local function draw_hud_compass(e)
+	local resource = luanti.texture(e.text or "")
+	local tex = resource and game_texture(resource)
+	if not tex then
+		return
+	end
+	local w, h = parse_v2(e.size, 0, 0)
+	-- A negative size is a percentage of the screen, as an image's scale is
+	if w < 0 then
+		w = -w * 0.01 * magic.ui.root.width
+	end
+	if h < 0 then
+		h = -h * 0.01 * magic.ui.root.height
+	end
+	w, h = math.floor(w), math.floor(h)
+	if w <= 0 or h <= 0 then
+		return
+	end
+	local block = hud_root:CreateChild("UIElement")
+	block.size = magic.IntVector2(w, h)
+	local dir = math.floor(tonumber(e.dir) or 0)
+	local turning = (dir == 0 or dir == 1)
+	local piece = nil
+	if turning then
+		-- A Sprite turns about its hot spot and is drawn with that point
+		-- where it sits, so it hangs under an element at the middle of this
+		-- one with its own middle as the hot spot
+		local holder = block:CreateChild("UIElement")
+		holder:SetPosition(math.floor(w / 2), math.floor(h / 2))
+		piece = holder:CreateChild("Sprite")
+		piece:SetTexture(tex)
+		piece:SetFixedSize(w, h)
+		piece.hotSpot = magic.IntVector2(math.floor(w / 2), math.floor(h / 2))
+	end
+	hud_place(block, e, w, h)
+	hud_compasses[#hud_compasses + 1] = {block = block, sprite = piece,
+			e = e, tex = tex, w = w, h = h, dir = dir}
+end
+
+-- Where every compass is pointing now. Once a frame, like a waypoint: what
+-- moves is the player.
+local function turn_compasses()
+	for _, c in ipairs(hud_compasses) do
+		-- Luanti's own: the camera's horizontal angle, the other way round,
+		-- plus what the game asked for
+		local angle = (-yaw + (tonumber(c.e.number) or 0)) % 360
+		if c.dir == 1 or c.dir == 3 then
+			angle = (360 - angle) % 360
+		end
+		if c.sprite then
+			c.sprite.rotation = angle
+		else
+			-- The strip: as wide as the picture is at this height, scrolled
+			-- by the angle and repeated until the element is covered
+			local sw = math.floor(c.h * tex_aspect(c.tex))
+			c.block:RemoveAllChildren()
+			local x = -math.floor(angle * sw / 360)
+			while x > 0 do
+				x = x - sw
+			end
+			while x < c.w do
+				local left = math.max(0, -x)
+				local right = math.min(sw, c.w - x)
+				if right > left then
+					local img = c.block:CreateChild("BorderImage")
+					img.texture = c.tex
+					img.size = magic.IntVector2(right - left, c.h)
+					img:SetPosition(x + left, 0)
+					-- The part of the picture that shows, in its own pixels
+					img.imageRect = magic.IntRect(
+							math.floor(left * c.tex.width / sw), 0,
+							math.floor(right * c.tex.width / sw),
+							c.tex.height)
+				end
+				x = x + sw
+			end
+		end
+	end
+end
+
 -- Where every waypoint is now. Once a frame, because what moves is the
 -- player: the game changes the element only when it has something new to
 -- say, and the distance in a waypoint's label changes with every step.
@@ -1182,6 +1280,7 @@ local function draw_hud(elements, flags)
 	hud_has_inventory = false
 	hud_root:RemoveAllChildren()
 	hud_waypoints = {}
+	hud_compasses = {}
 	-- As big as the screen, because an element aligned to the centre or the
 	-- bottom is aligned inside this and an element of no size puts every
 	-- one of them in the top left corner
@@ -1209,6 +1308,8 @@ local function draw_hud(elements, flags)
 			draw_hud_image(e)
 		elseif kind == "statbar" then
 			draw_hud_statbar(e)
+		elseif kind == "compass" then
+			draw_hud_compass(e)
 		elseif kind == "inventory" then
 			hud_has_inventory = true
 			draw_hud_inventory(e)
@@ -1544,6 +1645,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 			player.y + player_physics.EYE_HEIGHT, player.z)
 	camera_node.rotation = magic.Quaternion(pitch, yaw, 0)
 	place_waypoints()
+	turn_compasses()
 	update_underwater(buildat.Vector3(player.x,
 			player.y + player_physics.EYE_HEIGHT, player.z))
 end)
