@@ -444,6 +444,88 @@ local function build_model(node, quads, textures)
 	return cg, materials
 end
 
+-- How far a camera has to be to have the whole of a model in the picture:
+-- the box its quads are in, as a centre and the radius of the sphere around
+-- that box.
+local function model_bounds(quads)
+	local lo = {math.huge, math.huge, math.huge}
+	local hi = {-math.huge, -math.huge, -math.huge}
+	for _, q in ipairs(quads) do
+		for c = 0, 3 do
+			for a = 1, 3 do
+				local v = q.p[c * 3 + a]
+				lo[a] = math.min(lo[a], v)
+				hi[a] = math.max(hi[a], v)
+			end
+		end
+	end
+	local c = {}
+	local d2 = 0
+	for a = 1, 3 do
+		c[a] = (lo[a] + hi[a]) / 2
+		d2 = d2 + (hi[a] - lo[a]) * (hi[a] - lo[a])
+	end
+	return c, math.max(math.sqrt(d2) / 2, 0.01)
+end
+
+-- A formspec's model[] element: the mesh in a little scene of its own,
+-- which Urho3D's View3D renders into a texture the size of the element. It
+-- is the one way to have something three-dimensional in among the UI rather
+-- than behind all of it -- a viewport over the screen is drawn under every
+-- UI element there is, and the form is one.
+--
+-- The element owns its scene and the form takes the element away when it is
+-- drawn again, so nothing here has to be freed by hand.
+--
+-- simplified: no animation, no mouse control and no continuous turn -- what
+-- is drawn is the mesh at the angles the element names. The upgrade is a
+-- frame of a skeleton, which wants the animation crossing as well as the
+-- quads. Nothing is drawn at all until the model arrives; the form is drawn
+-- again when it does.
+local function model_element(parent, w, h, mesh, textures, rot_x, rot_y)
+	want_model(mesh)
+	local have = models[mesh]
+	if not have or w < 1 or h < 1 then
+		return nil
+	end
+	local view = parent:CreateChild("View3D")
+	view.size = magic.IntVector2(math.floor(w), math.floor(h))
+	local scene = magic.Scene.new()
+	scene:CreateComponent("Octree")
+	-- What the picture is cleared to, which is what shows around the model:
+	-- the render target has no alpha channel for the element to be
+	-- transparent through, so it is the colour a form's own background is
+	-- drawn in. A game that draws a picture of its own behind the model
+	-- sees this square over it.
+	local zone = scene:CreateChild("zone"):CreateComponent("Zone")
+	zone.boundingBox = magic.BoundingBox(-1000, 1000)
+	zone.fogColor = magic.Color(0.12, 0.12, 0.14)
+	zone.fogStart = 10000
+	zone.fogEnd = 10000
+	zone.ambientColor = magic.Color(1, 1, 1)
+	-- The model hangs off a pivot at its own centre, so that the angles the
+	-- element names turn it in place rather than around whatever point the
+	-- game happened to build it about
+	local pivot = scene:CreateChild("pivot")
+	local node = pivot:CreateChild("model")
+	build_model(node, have.quads, textures or {})
+	local centre, radius = model_bounds(have.quads)
+	node.position = magic.Vector3(-centre[1], -centre[2], -centre[3])
+	pivot.rotation = magic.Quaternion(rot_x, rot_y, 0)
+	local cam_node = scene:CreateChild("camera")
+	local cam = cam_node:CreateComponent("Camera")
+	-- The whole sphere in the picture, with a little room around it, and
+	-- the narrow way of a tall element is what has to fit
+	local dist = radius / math.tan(math.rad(cam.fov / 2)) * 1.1
+	if h > w then
+		dist = dist * h / w
+	end
+	cam_node.position = magic.Vector3(0, 0, -dist)
+	cam_node.direction = magic.Vector3(0, 0, 1)
+	view:SetView(scene, cam)
+	return view
+end
+
 local function model_template(look)
 	local key = look.mesh .. "\1" .. table.concat(look.textures or {}, "\1")
 	local entry = model_templates[key]
@@ -620,6 +702,10 @@ buildat.sub_packet("luanti:object_props", function(data)
 	end
 end)
 
+-- Set where the form is drawn, far below: a model that arrives after the
+-- form asking for it was drawn has to make it draw again
+local form_model_arrived
+
 buildat.sub_packet("luanti:model", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	local name = values[1]
@@ -651,6 +737,11 @@ buildat.sub_packet("luanti:model", function(data)
 			have.node:Remove()
 			object_nodes[id] = nil
 		end
+	end
+	-- And so is a form with a model[] in it: the form is on the screen
+	-- before the model it names has been asked for
+	if form_model_arrived then
+		form_model_arrived()
 	end
 end)
 
@@ -1731,6 +1822,7 @@ local function make_ui()
 			end
 			return {size = #stacks, items = items}
 		end,
+		model = model_element,
 		style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml"),
 		-- A plain white pixel, which a box or a tint is drawn with. Composed
 		-- rather than shipped: it is one operation and one file either way.
@@ -1912,6 +2004,15 @@ local function draw_form()
 	local w, h = root.width, root.height
 	local layout = formspec.layout(size, real, w, h)
 	form.drawn = make_ui():show(root, elements, layout, w, h, form.state)
+end
+
+-- Only a form that has a model in it: drawing one again is cheap but it
+-- takes what the player typed in a field with it, and every other form on
+-- the screen when a model arrives is somebody else's
+form_model_arrived = function()
+	if form and string.find(form.spec, "model[", 1, true) then
+		draw_form()
+	end
 end
 
 local function show_form(formname, spec, at, handler)

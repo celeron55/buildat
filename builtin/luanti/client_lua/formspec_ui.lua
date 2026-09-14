@@ -47,6 +47,8 @@ local IGNORED = {
 --   or nil
 -- ctx.inventory(location, list_name) -> the list to draw in a list[] element,
 --   as inventory.lua's {size =, items = {...}}, or nil
+-- ctx.model(parent, w, h, mesh, textures, rotation_x, rotation_y) -> a UI
+--   element drawing that mesh, or nil when the model is not there (yet)
 -- ctx.style is the UI style (an XMLFile) everything under the form inherits;
 --   without it a Text element has no font and draws nothing at all
 -- ctx.white is a plain white image, which is what a box or a tint is drawn
@@ -1016,6 +1018,28 @@ function M.new(magic, buildat, log, ctx)
 					end
 				elseif e.fields[2] then
 					named_tooltips[first] = formspec.strip_escapes(e.fields[2])
+				end
+			elseif name == "model" then
+				-- model[X,Y;W,H;name;mesh;textures;rotation_X,rotation_Y;
+				-- continuous;mouse_control;frame_loop;animation_speed].
+				-- What ctx.model draws is the mesh at those angles; the
+				-- rest of the fields are about animation and dragging,
+				-- which the drawing does not do.
+				local x, y = at(e, 1)
+				local w, h = geometry(e, 2)
+				if x and w and ctx.model then
+					local textures = {}
+					for _, t in ipairs(formspec.split(e.raw[5] or "", ",")) do
+						textures[#textures + 1] = formspec.unescape(t)
+					end
+					local rot = formspec.parse_v2(e.fields[6])
+					local view = ctx.model(window, w, h, e.fields[4],
+							textures, rot and rot[1] or 0,
+							rot and rot[2] or 0)
+					if view then
+						view:SetPosition(math.floor(x), math.floor(y))
+						view.priority = next_priority()
+					end
 				end
 			elseif name == "set_focus" or name == "field_close_on_enter" then
 				-- Read after the pass, where the fields are all known

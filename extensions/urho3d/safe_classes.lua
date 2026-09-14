@@ -1124,6 +1124,24 @@ function M.define(dst, util)
 		inherited_from_by_wrapper = dst.BorderImage,
 	})
 
+	-- A UI element that draws a scene of its own. Urho3D renders the scene
+	-- into a texture of the element's size and shows it, which is the one
+	-- way to get something three-dimensional in among the UI rather than
+	-- behind all of it. What wants it here is a formspec's model[].
+	util.wc("View3D", {
+		inherited_from_by_wrapper = dst.Window,
+		instance = {
+			-- The scene and the camera it is drawn from, both of which the
+			-- element takes ownership of: a scene made for one element dies
+			-- with it, and a caller that keeps no reference cannot leak one.
+			SetView = util.wrap_function({"View3D", "Scene", "Camera"},
+				function(self, scene, camera)
+					self:SetView(scene, camera, true)
+				end
+			),
+		},
+	})
+
 	util.wc("Button", {
 		inherited_from_by_wrapper = dst.BorderImage,
 		properties = {
