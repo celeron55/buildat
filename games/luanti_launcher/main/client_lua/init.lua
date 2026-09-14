@@ -834,44 +834,6 @@ local function draw_hud_statbar(e)
 	hud_place(row, e, total_w, total_h)
 end
 
--- The client's own bars, which a game turns off with the healthbar and
--- breathbar flags when it draws its own.
---
--- simplified: a bar rather than Luanti's hearts and bubbles, because those
--- are the engine's own textures and a game does not ship them; what a game
--- ships is drawn by the statbar elements above.
-local function draw_own_bars()
-	local stats = luanti.stats
-	-- Just above the hotbar, which is where Luanti puts them: what the
-	-- player has on the left, how much breath is left on the right
-	local function bar(left, value, max, colour)
-		if max <= 0 then
-			return
-		end
-		local w, h = 120, 8
-		local back = hud_root:CreateChild("BorderImage")
-		back.texture = game_texture(WHITE)
-		back.color = magic.Color(0, 0, 0, 0.5)
-		back.size = magic.IntVector2(w, h)
-		back.horizontalAlignment = magic.HA_CENTER
-		back.verticalAlignment = magic.VA_BOTTOM
-		back:SetPosition(left and (-w - 6) or 6, -(8 + SLOT + 4))
-		local fill = back:CreateChild("BorderImage")
-		fill.texture = game_texture(WHITE)
-		fill.color = colour
-		fill.size = magic.IntVector2(
-				math.max(0, math.floor(w * value / max)), h)
-	end
-	if luanti.hud_flag("healthbar") then
-		bar(true, stats.hp, stats.hp_max, magic.Color(0.85, 0.15, 0.15))
-	end
-	-- Luanti shows the breath only while the player is short of it
-	if luanti.hud_flag("breathbar") and stats.breath < stats.breath_max then
-		bar(false, stats.breath, stats.breath_max,
-				magic.Color(0.3, 0.6, 1.0))
-	end
-end
-
 local function draw_hud(elements, flags)
 	hud_root:RemoveAllChildren()
 	-- As big as the screen, because an element aligned to the centre or the
@@ -879,7 +841,12 @@ local function draw_hud(elements, flags)
 	-- one of them in the top left corner
 	hud_root.size = magic.IntVector2(magic.ui.root.width,
 			magic.ui.root.height)
-	draw_own_bars()
+	-- The health and the breath are the game's to draw and not the client's:
+	-- Luanti's own builtin puts hearts and bubbles on the screen as statbar
+	-- elements out of the engine's textures, which are served now, and a
+	-- game that wants something else of its own replaces them. A bar drawn
+	-- here as well was a second one under the hearts.
+	--
 	-- The game can take the client's own away, and what it draws instead is
 	-- these elements; see luanti.hud_flag()
 	crosshair.visible = luanti.hud_flag("crosshair")

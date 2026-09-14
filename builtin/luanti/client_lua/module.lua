@@ -424,7 +424,7 @@ M.hud_elements = {}
 M.hud_flags = 511
 -- How much life and breath the player has, which is what the client's own
 -- bars draw; a game that draws its own turns those off with the flags
-M.stats = {hp = 20, hp_max = 20, breath = 11, breath_max = 11}
+M.stats = {hp = 20, hp_max = 20, breath = 10, breath_max = 10}
 
 local hud_subs = {}
 

@@ -47,7 +47,25 @@ local function send_stats(o)
 		__luanti_send_hud(o.player_name, {"stats",
 				tostring(o.hp or 0),
 				tostring((o.props and o.props.hp_max) or 20),
-				tostring(o.breath or 11), "11"})
+				tostring(o.breath or 10),
+				tostring((o.props and o.props.breath_max) or 10)})
+	end
+end
+
+-- What Luanti's server tells a mod when something about a player changed.
+-- The names are its own, and its own builtin listens: the hearts and the
+-- bubbles on the screen are statbar HUD elements that the builtin adds,
+-- changes and takes away as these arrive. Without them a player's health
+-- is drawn once, at whatever it was when they joined.
+local function player_event(o, name)
+	if not o or not o.ref then
+		return
+	end
+	for _, cb in ipairs(core.registered_playerevents or {}) do
+		local ok, err = pcall(cb, o.ref, name)
+		if not ok then
+			core.log("error", "playerevent " .. name .. ": " .. tostring(err))
+		end
 	end
 end
 
@@ -209,6 +227,9 @@ function ObjectRef:set_properties(props)
 	end
 	if props.hp_max and o.hp > props.hp_max then
 		o.hp = props.hp_max
+	end
+	if o.player_name then
+		player_event(o, "properties_changed")
 	end
 end
 
@@ -500,6 +521,7 @@ function PlayerRef:set_hp(hp, reason)
 	local was = o.hp
 	o.hp = math.max(0, math.min(was + change, hp_max))
 	send_stats(o)
+	player_event(o, "health_changed")
 	if o.hp == 0 and was > 0 then
 		for _, cb in ipairs(core.registered_on_dieplayers or {}) do
 			cb(self, t)
@@ -614,6 +636,7 @@ function PlayerRef:set_breath(b)
 	if o then
 		o.breath = math.max(0, math.floor(tonumber(b) or 0))
 		send_stats(o)
+		player_event(o, "breath_changed")
 	end
 end
 
@@ -982,6 +1005,7 @@ function PlayerRef:hud_set_flags(flags)
 	end
 	o.hud_flags = value
 	send_hud(o, {"flags", tostring(value)})
+	player_event(o, "hud_changed")
 end
 
 function PlayerRef:hud_get_flags()
@@ -1699,7 +1723,12 @@ function core.__add_player(name)
 				jump = false, aux1 = false, sneak = false, dig = false,
 				place = false, LMB = false, RMB = false, zoom = false},
 	}
-	o.props.hp_max = 20
+	-- What Luanti gives a player, from its own constants: a mod reads these
+	-- off the properties, and so does the builtin's HUD -- the bubbles are
+	-- drawn only while the breath is under its maximum, which is no maximum
+	-- at all for an entity
+	o.props.hp_max = core.PLAYER_MAX_HP_DEFAULT or 20
+	o.props.breath_max = core.PLAYER_MAX_BREATH_DEFAULT or 10
 	o.props.collisionbox = {-0.3, 0.0, -0.3, 0.3, 1.7, 0.3}
 	objects[id] = o
 	core.object_refs[id] = ref
