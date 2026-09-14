@@ -314,6 +314,18 @@ local function game_texture(resource)
 	return tex
 end
 
+-- What a game's own sun or moon is drawn as, composed once per name: this is
+-- asked for every frame and the answer changes twice a day
+local sun_picture_name, sun_picture = nil, nil
+
+local function sun_picture_of(name)
+	if name ~= sun_picture_name then
+		sun_picture_name = name
+		sun_picture = game_texture(luanti.texture(name))
+	end
+	return sun_picture
+end
+
 do
 	local width = HOTBAR_SLOTS * SLOT + (HOTBAR_SLOTS - 1) * SLOT_GAP
 	local white = game_texture(WHITE)
@@ -495,6 +507,9 @@ local game_sky = {}
 -- The moon is the sky's own square with the light gone out of it: what is up
 -- there at night is not the sun, so it is not the sun's colour either
 local MOON_DISC_COLOR = {r = 0.72, g = 0.76, b = 0.92}
+-- A picture of a sun is drawn as itself: the colour multiplies it, so
+-- anything but white would tint the game's own art
+local WHITE_DISC_COLOR = {r = 1, g = 1, b = 1}
 
 -- The sky at this hour: dark at night, the game's own colour by day, and the
 -- dawn colour in between, with the stars fading as the light comes. Luanti
@@ -546,9 +561,17 @@ local function apply_sky_of_hour()
 	local visible = night and (game_sky.moon_visible ~= false) or
 			(not night and game_sky.sun_visible ~= false)
 	local scale = (night and game_sky.moon_scale or game_sky.sun_scale) or 1
+	-- The game's own picture of it, if it gave one and the client could
+	-- compose it -- Luanti's own sun.png and moon.png when the game said
+	-- nothing, which is what it draws too. Without one it is the sky's
+	-- painted square, and then the colour is what makes it a moon.
+	local picture = sun_picture_of(
+			night and game_sky.moon_texture or game_sky.sun_texture)
+	voxel_shading.set_sun_texture(picture)
 	voxel_shading.set_sun_look(
 			visible and defaults.sun_half * scale or 0,
-			night and MOON_DISC_COLOR or defaults.sun_color)
+			picture and WHITE_DISC_COLOR or
+			(night and MOON_DISC_COLOR or defaults.sun_color))
 
 	-- The stars come out as the light goes: Luanti's day_opacity is zero by
 	-- default, which is a sky with none in it until the sun is down
@@ -592,8 +615,10 @@ local function update_sky(dt)
 		dir = {x = -dir.x, y = -dir.y, z = -dir.z}
 	end
 	sun_node.direction = magic.Vector3(dir.x, dir.y, dir.z)
-	voxel_shading.set_sun_direction(night and
-			{x = -dir.x, y = -dir.y, z = -dir.z} or dir)
+	-- The same direction the light travels in, which is what the sky takes:
+	-- it is the moon's by night because dir is, and negating it again here
+	-- put the moon where the sun was -- under the world
+	voxel_shading.set_sun_direction(dir)
 
 	-- Dawn and dusk are the half hour either side of the horizon rather
 	-- than a switch -- unless the game says what the light is whatever the

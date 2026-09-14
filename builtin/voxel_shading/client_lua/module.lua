@@ -712,6 +712,10 @@ function M.create_skybox(scene, sun_dir)
 	material:SetShaderParameter("SunHalf", d.sun_half)
 	material:SetShaderParameter("SunColor", magic.Vector3(d.sun_color.r,
 			d.sun_color.g, d.sun_color.b))
+	-- The painted square rather than a game's own picture of a sun, until
+	-- one says otherwise: a shader parameter a material never sets reads as
+	-- zero, and this says so rather than leaning on it
+	material:SetShaderParameter("SunTextured", 0.0)
 	material:SetShaderParameter("StarDensity", 0.0)
 	material:SetShaderParameter("StarColor", magic.Vector3(0.9, 0.9, 1.0))
 	material:SetShaderParameter("StarSize", 0.12)
@@ -767,6 +771,23 @@ function M.set_sun_look(half, color)
 		skybox_material:SetShaderParameter("SunColor",
 				magic.Vector3(color.r or color[1] or 0,
 				color.g or color[2] or 0, color.b or color[3] or 0))
+	end
+end
+
+-- A game's own picture of a sun or a moon, drawn over the same square the
+-- painted one fills -- Luanti's set_sun{texture = ...} and set_moon. nil is
+-- the painted square back. The texture is the caller's to compose; what a
+-- Luanti game names is a texture modifier expression, and only the game's
+-- own client half knows how to turn one into a resource.
+function M.set_sun_texture(texture)
+	if not skybox_material then
+		return
+	end
+	if texture then
+		skybox_material:SetTexture(magic.TU_DIFFUSE, texture)
+		skybox_material:SetShaderParameter("SunTextured", 1.0)
+	else
+		skybox_material:SetShaderParameter("SunTextured", 0.0)
 	end
 end
 

@@ -1353,8 +1353,14 @@ buildat.sub_packet("luanti:sky", function(data)
 		-- What else is up there: Luanti's set_sun, set_moon and set_stars
 		sun_visible = e.sun_visible ~= "0",
 		sun_scale = tonumber(e.sun_scale or ""),
+		-- The game's own picture of each, as the expression it named: a
+		-- game that names none gets Luanti's own sun.png and moon.png,
+		-- which fall back to the sky's painted square when the game does
+		-- not ship one -- which is what Luanti does with them too
+		sun_texture = e.sun_texture,
 		moon_visible = e.moon_visible ~= "0",
 		moon_scale = tonumber(e.moon_scale or ""),
+		moon_texture = e.moon_texture,
 		stars_visible = e.stars_visible ~= "0",
 		star_count = tonumber(e.star_count or ""),
 		star_color = rgb(e.star_color),

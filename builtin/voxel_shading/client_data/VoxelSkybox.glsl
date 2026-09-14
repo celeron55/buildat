@@ -8,6 +8,7 @@
 // all, which is the one place the two skies knowingly disagree.
 #include "Uniforms.glsl"
 #include "Transform.glsl"
+#include "Samplers.glsl"
 
 varying vec3 vTexCoord;
 
@@ -44,6 +45,11 @@ const float HAZE_DEPTH = 0.25;
 uniform float cSunHalf;
 uniform vec3 cSunColor;
 const float SUN_EDGE = 0.004;
+// And whether what goes in that square is a game's own picture of a sun or a
+// moon -- Luanti's set_sun{texture = ...} -- which is the diffuse texture
+// when this is on. Zero is the painted square, which is what a material that
+// says nothing gets.
+uniform float cSunTextured;
 
 // The stars, which are the other thing a game says its sky has. One to a
 // cell of a grid laid over the sky, in the cells whose own hash falls under
@@ -141,10 +147,21 @@ void PS()
         vec3 su = normalize(cross(sun, vec3(0.0, 1.0, 0.0)));
         vec3 sv = cross(su, sun);
         vec3 onPlane = d / towards;
-        vec2 uv = abs(vec2(dot(onPlane, su), dot(onPlane, sv)));
-        float square = 1.0 - smoothstep(cSunHalf - SUN_EDGE,
-                cSunHalf + SUN_EDGE, max(uv.x, uv.y));
-        color = mix(color, cSunColor, square);
+        vec2 at = vec2(dot(onPlane, su), dot(onPlane, sv));
+        vec2 uv = abs(at);
+        if(cSunTextured > 0.5){
+            // The game's own picture over the same square, by its alpha:
+            // the sky is behind it where it is clear
+            vec2 t = at / cSunHalf * 0.5 + 0.5;
+            if(t.x >= 0.0 && t.x <= 1.0 && t.y >= 0.0 && t.y <= 1.0){
+                vec4 picture = texture2D(sDiffMap, t);
+                color = mix(color, picture.rgb * cSunColor, picture.a);
+            }
+        } else {
+            float square = 1.0 - smoothstep(cSunHalf - SUN_EDGE,
+                    cSunHalf + SUN_EDGE, max(uv.x, uv.y));
+            color = mix(color, cSunColor, square);
+        }
     }
 
     // The stars, under the sun and over everything else: one to a cell, at

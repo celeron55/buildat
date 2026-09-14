@@ -838,15 +838,17 @@ local function send_sky(o)
 	put("density", clouds.density)
 	put("cloud_color", sky_rgb(clouds.color))
 	-- What is up there besides the gradient: Luanti's set_sun, set_moon and
-	-- set_stars. The textures are not sent, because the sun here is drawn
-	-- by the sky's own shader and not out of a picture; see set_sun().
+	-- set_stars. The pictures a game gives its sun and its moon cross too:
+	-- the sky's own square is what is drawn when it gives none.
 	local sun = o.sun_params or {}
 	local moon = o.moon_params or {}
 	local stars = o.star_params or {}
 	put("sun_visible", (sun.visible ~= false) and "1" or "0")
 	put("sun_scale", sun.scale)
+	put("sun_texture", sun.texture or "sun.png")
 	put("moon_visible", (moon.visible ~= false) and "1" or "0")
 	put("moon_scale", moon.scale)
+	put("moon_texture", moon.texture or "moon.png")
 	put("stars_visible", (stars.visible ~= false) and "1" or "0")
 	put("star_count", stars.count)
 	put("star_color", sky_rgb(stars.star_color))
