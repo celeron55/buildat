@@ -145,6 +145,9 @@ end
 
 local zone = nil
 local sun_light = nil
+-- The render path the world is drawn with, set where the viewport is; a
+-- second view of the same world wants the same one
+local world_render_path = nil
 
 do
 	local zone_node = scene:CreateChild("Zone")
@@ -206,7 +209,8 @@ do
 	end
 
 	magic.renderer.HDRRendering = true
-	local rp = viewport.renderPath:Clone()
+	local base = viewport.renderPath
+	local rp = base:Clone()
 	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/BloomHDR.xml"))
 	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/Tonemap.xml"))
 	rp:Append(magic.cache:GetResource("XMLFile",
@@ -215,6 +219,18 @@ do
 	rp:SetEnabled("TonemapUncharted2", true)
 	rp:SetShaderParameter("TonemapExposureBias", EXPOSURE_BIAS)
 	viewport.renderPath = rp
+	-- What a second view of the same world is drawn with -- the minimap.
+	-- The tonemap is not optional: the world is rendered in HDR and an
+	-- eight-bit picture of it without one is white. The bloom is, and it is
+	-- left out: a picture the size of a stamp has nothing to bloom.
+	world_render_path = base:Clone()
+	world_render_path:Append(magic.cache:GetResource("XMLFile",
+			"PostProcess/Tonemap.xml"))
+	world_render_path:Append(magic.cache:GetResource("XMLFile",
+			"PostProcess/GammaCorrection.xml"))
+	world_render_path:SetEnabled("TonemapReinhardEq3", false)
+	world_render_path:SetEnabled("TonemapUncharted2", true)
+	world_render_path:SetShaderParameter("TonemapExposureBias", EXPOSURE_BIAS)
 end
 
 voxelworld.set_camera(camera_node)
@@ -974,10 +990,9 @@ end
 -- A waypoint and an image_waypoint are the two that are not over a corner of
 -- the screen but over a place in the world; the camera says where that is.
 --
--- simplified: a minimap and the styles inside a line of text -- bold,
--- italic, monospace -- are not drawn; each missing kind is named once in the
--- log so that a game asking for one says so rather than silently missing
--- it.
+-- simplified: the styles inside a line of text -- bold, italic, monospace
+-- -- are not drawn; each missing kind is named once in the log so that a
+-- game asking for one says so rather than silently missing it.
 local hud_root = magic.ui.root:CreateChild("UIElement")
 hud_root:SetPosition(0, 0)
 local hud_missing = {}
@@ -1284,6 +1299,87 @@ local function draw_hud_compass(e)
 			e = e, tex = tex, w = w, h = h, dir = dir}
 end
 
+-- Luanti's minimap element: the world around the player, from above.
+-- Urho3D's View3D is what makes one possible at all -- a UI element that
+-- renders a scene into a texture of its own size -- and what it renders is
+-- the world itself rather than a picture built out of what the client
+-- knows: an orthographic camera over the player, looking down, on the scene
+-- that is already there.
+--
+-- simplified: north is up and the zoom is fixed, which is Luanti's surface
+-- mode without its rotation. Its radar mode is a slice at the player's own
+-- height, which is this camera's near and far clip and nothing else, and
+-- nothing has asked for it.
+local MINIMAP_HZ = 4
+-- How much of the world is in it, top to bottom
+local MINIMAP_NODES = 64
+-- How far over the player the camera sits, which is what it can see down
+-- through: a player under a mountain sees the mountain
+local MINIMAP_HEIGHT = 120
+local minimaps = {}
+local minimap_timer = 0
+
+local function draw_hud_minimap(e)
+	-- A game that has turned the minimap off does not get one from its own
+	-- element either, which is Luanti's rule for this kind
+	if not luanti.hud_flag("minimap") then
+		return
+	end
+	local w, h = parse_v2(e.size, 128, 128)
+	-- A negative size is a percentage of the screen, as a compass's is
+	if w < 0 then
+		w = -w * 0.01 * magic.ui.root.width
+	end
+	if h < 0 then
+		h = -h * 0.01 * magic.ui.root.height
+	end
+	w, h = math.floor(w), math.floor(h)
+	if w <= 0 or h <= 0 then
+		return
+	end
+	local view = hud_root:CreateChild("View3D")
+	view.size = magic.IntVector2(w, h)
+	-- A picture of the world costs a second pass over the world, so it is
+	-- drawn a few times a second rather than every frame
+	view.autoUpdate = false
+	local node = scene:CreateChild("minimap_camera")
+	local cam = node:CreateComponent("Camera")
+	cam.orthographic = true
+	cam.orthoSize = MINIMAP_NODES
+	cam.nearClip = 0.5
+	cam.farClip = MINIMAP_HEIGHT * 4
+	node.direction = magic.Vector3(0, -1, 0)
+	-- Not the element's own scene: this one is the world's and has to
+	-- outlive every form and HUD there is
+	view:SetView(scene, cam, false)
+	-- And drawn the way the world is drawn: the window's own render path
+	-- carries the tonemap, and an HDR scene without it is white
+	if world_render_path then
+		view:GetViewport().renderPath = world_render_path:Clone()
+	end
+	hud_place(view, e, w, h)
+	minimaps[#minimaps + 1] = {view = view, camera = node}
+end
+
+-- Over the player, and drawn again a few times a second
+local function follow_minimaps(dt)
+	if #minimaps == 0 then
+		return
+	end
+	local p = camera_node.worldPosition
+	for _, m in ipairs(minimaps) do
+		m.camera.position = magic.Vector3(p.x, p.y + MINIMAP_HEIGHT, p.z)
+	end
+	minimap_timer = minimap_timer + dt
+	if minimap_timer < 1 / MINIMAP_HZ then
+		return
+	end
+	minimap_timer = 0
+	for _, m in ipairs(minimaps) do
+		m.view:QueueUpdate()
+	end
+end
+
 -- Where every compass is pointing now. Once a frame, like a waypoint: what
 -- moves is the player.
 local function turn_compasses()
@@ -1410,6 +1506,12 @@ local function draw_hud(elements, flags)
 	hud_root:RemoveAllChildren()
 	hud_waypoints = {}
 	hud_compasses = {}
+	-- The elements go with the HUD; the cameras they put in the world are
+	-- this one's to take away
+	for _, m in ipairs(minimaps) do
+		m.camera:Remove()
+	end
+	minimaps = {}
 	-- As big as the screen, because an element aligned to the centre or the
 	-- bottom is aligned inside this and an element of no size puts every
 	-- one of them in the top left corner
@@ -1440,6 +1542,8 @@ local function draw_hud(elements, flags)
 			draw_hud_statbar(e)
 		elseif kind == "compass" then
 			draw_hud_compass(e)
+		elseif kind == "minimap" then
+			draw_hud_minimap(e)
 		elseif kind == "inventory" then
 			hud_has_inventory = true
 			draw_hud_inventory(e)
@@ -2084,6 +2188,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	camera_node.rotation = magic.Quaternion(pitch, yaw, 0)
 	place_waypoints()
 	turn_compasses()
+	follow_minimaps(dt)
 	update_underwater(buildat.Vector3(player.x,
 			player.y + player_physics.EYE_HEIGHT, player.z))
 end)

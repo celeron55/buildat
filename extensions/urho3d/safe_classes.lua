@@ -1131,14 +1131,34 @@ function M.define(dst, util)
 	util.wc("View3D", {
 		inherited_from_by_wrapper = dst.Window,
 		instance = {
-			-- The scene and the camera it is drawn from, both of which the
-			-- element takes ownership of: a scene made for one element dies
-			-- with it, and a caller that keeps no reference cannot leak one.
-			SetView = util.wrap_function({"View3D", "Scene", "Camera"},
-				function(self, scene, camera)
-					self:SetView(scene, camera, true)
+			-- The scene and the camera it is drawn from. own_scene, which
+			-- is what it defaults to, means the element takes ownership of
+			-- both: a scene made for one element dies with it and a caller
+			-- that keeps no reference cannot leak one. False is for a view
+			-- of a scene somebody else owns -- the world seen from above,
+			-- say -- which the element must not take with it when it goes.
+			SetView = util.wrap_function({"View3D", "Scene", "Camera",
+					{"boolean", "__nil"}},
+				function(self, scene, camera, own_scene)
+					self:SetView(scene, camera, own_scene ~= false)
 				end
 			),
+			-- Draw it again once. With autoUpdate off, which is what a view
+			-- of a whole scene wants, this is what refreshes it: a picture
+			-- of the world costs a second pass over the world.
+			QueueUpdate = util.self_function("QueueUpdate", {}, {"View3D"}),
+			-- The viewport it renders through. What a caller wants from it
+			-- is its render path: a scene drawn without the one the window
+			-- itself is drawn with is a different picture of the same world
+			-- -- with HDR on and no tonemap in the way, a white one.
+			GetViewport = util.wrap_function({"View3D"},
+				function(self)
+					return util.wrap_instance("Viewport", self:GetViewport())
+				end
+			),
+		},
+		properties = {
+			autoUpdate = util.simple_property("boolean"),
 		},
 	})
 
