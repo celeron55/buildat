@@ -1018,6 +1018,12 @@ local function form_fields()
 end
 
 local function send_fields(fields)
+	-- A form of the client's own is nobody else's business: its fields go to
+	-- whoever opened it and nothing goes out
+	if form.handler then
+		form.handler(fields)
+		return
+	end
 	local flat = {form.formname}
 	for k, v in pairs(fields) do
 		flat[#flat + 1] = tostring(k)
@@ -1149,7 +1155,7 @@ local function draw_form()
 	form.drawn = make_ui():show(root, elements, layout, w, h, form.state)
 end
 
-local function show_form(formname, spec, at)
+local function show_form(formname, spec, at, handler)
 	close_form(false)
 	-- What the last form was about is not what this one is about: the node
 	-- goes, because the server sends this form's own. The detached ones
@@ -1164,7 +1170,7 @@ local function show_form(formname, spec, at)
 		return
 	end
 	form = {formname = formname, spec = spec, at = at ~= "" and at or nil,
-			state = {}}
+			state = {}, handler = handler}
 	draw_form()
 end
 
@@ -1186,6 +1192,15 @@ function M.open_player_inventory()
 		return
 	end
 	show_form("", player_spec)
+end
+
+-- A form of the client's own: the game describes it the way a server would
+-- and draws it through the same renderer, and the fields a button sends go
+-- to the handler rather than out. What wants one is a menu that is about the
+-- client rather than about the game -- the launcher's pause menu. The
+-- handler is called with quit = "true" when the player closed it.
+function M.show_local_form(spec, handler)
+	show_form("", spec, nil, handler)
 end
 
 -- A click, from whoever is reading the mouse. Returns whether the form took

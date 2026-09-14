@@ -80,10 +80,14 @@ local BINDINGS = {
 			what = "Drop what is held - with Ctrl, one of it"},
 	{action = "mouse", key = magic.KEY_TAB, name = "Tab",
 			what = "The mouse in the world or on the screen"},
+	{action = "hud", key = magic.KEY_F1, name = "F1",
+			what = "The HUD on and off"},
+	{action = "chatlog", key = magic.KEY_F2, name = "F2",
+			what = "The chat log on and off"},
 	{action = "detail", key = magic.KEY_F5, name = "F5",
 			what = "The line of detail on and off"},
 	{action = "menu", key = magic.KEY_ESCAPE, name = "Escape",
-			what = "Close what is open - or leave"},
+			what = "The pause menu, or close what is open"},
 	-- Listed for the player's sake; the code for these is the mouse
 	-- handling rather than a key lookup
 	{action = "dig", name = "Left mouse", what = "Dig"},
@@ -209,6 +213,12 @@ magic.input:SetMouseVisible(true)
 -- Every line of the HUD is drawn over a world that may be snow, sand or a
 -- dark cave, so all of them carry a shadow; without it a white world takes
 -- white text with it.
+-- Whether the HUD and the chat log are drawn at all, which F1 and F2 are.
+-- The game can take either away as well; both have to say yes -- see
+-- draw_hud().
+local hud_shown = true
+local chat_shown = true
+
 local function hud_text(size)
 	local t = magic.ui.root:CreateChild("Text")
 	t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), size or 15)
@@ -239,8 +249,9 @@ local function draw_text_line(parent, line, x0, y0, base, size)
 end
 
 local title_text = hud_text(15)
-title_text:SetText("luanti_launcher: WASD = walk, Space = jump, K = fly, " ..
-		"Tab = mouse, F5 = detail, left = dig, right = place")
+-- Escape is on it because the whole list is behind Escape now
+title_text:SetText("luanti_launcher: WASD = walk, Space = jump, " ..
+		"Tab = mouse, Escape = menu, left = dig, right = place")
 title_text.horizontalAlignment = magic.HA_CENTER
 title_text.verticalAlignment = magic.VA_TOP
 title_text:SetPosition(0, 10)
@@ -1296,12 +1307,14 @@ local function draw_hud(elements, flags)
 	--
 	-- The game can take the client's own away, and what it draws instead is
 	-- these elements; see luanti.hud_flag()
-	crosshair.visible = luanti.hud_flag("crosshair")
-	chat_block.visible = luanti.hud_flag("chat")
+	hud_root.visible = hud_shown
+	title_text.visible = hud_shown
+	crosshair.visible = hud_shown and luanti.hud_flag("crosshair")
+	chat_block.visible = chat_shown and luanti.hud_flag("chat")
 	for _, slot in ipairs(hotbar) do
-		slot.frame.visible = luanti.hud_flag("hotbar")
+		slot.frame.visible = hud_shown and luanti.hud_flag("hotbar")
 	end
-	wielded_text.visible = luanti.hud_flag("hotbar")
+	wielded_text.visible = hud_shown and luanti.hud_flag("hotbar")
 	for id, e in pairs(elements) do
 		local kind = e.type or "text"
 		if kind == "text" then
@@ -1333,6 +1346,74 @@ hud_follows_inventory = function()
 	if hud_has_inventory then
 		draw_hud(hud_elements)
 	end
+end
+
+--
+-- The pause menu, and the keys that hide things
+--
+-- Escape used to disconnect, which is a key nobody was told about doing the
+-- one thing that cannot be undone. What it opens is a form of the client's
+-- own -- the game is told nothing about it -- drawn by the same renderer a
+-- server's forms go through.
+
+local function pause_spec()
+	-- Continuing is the first thing on it and the first thing a player
+	-- wants: escape does the same, but a menu whose only way back is a key
+	-- nobody was told about is a menu that traps people. button_exit closes
+	-- the form by itself, which is what continuing is.
+	--
+	-- simplified: no sound here. The extension's menu mutes the sound, and
+	-- what that would be is the user's own sound preference, which a game's
+	-- client Lua is deliberately not allowed to write -- see "Client
+	-- preferences" in doc/client_api.txt. Nothing here makes a noise yet
+	-- either.
+	return "size[6,4.7]" ..
+			"label[0.2,0.2;Paused]" ..
+			"button_exit[0.4,1.0;5.2,0.8;continue;Continue playing]" ..
+			"button[0.4,2.1;5.2,0.8;keys;Key bindings]" ..
+			"button[0.4,3.2;5.2,0.8;leave;Leave the game]"
+end
+
+-- Every binding, in two columns, out of the same table the code reads, so a
+-- key cannot be in the code and missing from the list. A label's text is
+-- split on commas and semicolons by the formspec grammar, so BINDINGS keeps
+-- them out.
+local function keys_spec()
+	local half = math.ceil(#BINDINGS / 2)
+	local out = {"size[12," .. tostring(1.5 + half * 0.6) .. "]",
+			"label[0.2,0.2;Key bindings]"}
+	for i, b in ipairs(BINDINGS) do
+		local first = i <= half
+		local x = first and 0.3 or 6.2
+		local row = first and (i - 1) or (i - half - 1)
+		local y = 0.9 + row * 0.6
+		out[#out + 1] = "label[" .. x .. "," .. y .. ";" .. b.name .. "]"
+		out[#out + 1] = "label[" .. (x + 1.8) .. "," .. y .. ";" ..
+				b.what .. "]"
+	end
+	out[#out + 1] = "button[4.8," .. tostring(0.7 + half * 0.6) ..
+			";2.4,0.8;back;Back]"
+	return table.concat(out)
+end
+
+local menu_fields
+
+menu_fields = function(fields)
+	if fields.keys then
+		luanti.show_local_form(keys_spec(), menu_fields)
+	elseif fields.back then
+		luanti.show_local_form(pause_spec(), menu_fields)
+	elseif fields.leave then
+		buildat.disconnect()
+	elseif fields.quit then
+		-- Continued, or escaped: the mouse goes back to the world
+		set_mouse_in_world(true)
+	end
+end
+
+local function open_pause_menu()
+	luanti.show_local_form(pause_spec(), menu_fields)
+	set_mouse_in_world(false)
 end
 
 --
@@ -1698,7 +1779,9 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		return
 	end
 	if luanti.key(key) then
-		set_mouse_in_world(false)
+		-- A form that closed hands the mouse back to the world, which is
+		-- where it came from
+		set_mouse_in_world(not luanti.form_open())
 		return
 	end
 	if key >= magic.KEY_1 and key <= magic.KEY_8 then
@@ -1735,15 +1818,17 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	elseif key == BIND.noclip.key then
 		player.noclip = not player.noclip
 		log:info(player.noclip and "through walls" or "solid walls")
+	elseif key == BIND.hud.key then
+		hud_shown = not hud_shown
+		draw_hud(hud_elements)
+	elseif key == BIND.chatlog.key then
+		chat_shown = not chat_shown
+		draw_hud(hud_elements)
 	elseif key == BIND.detail.key then
 		detail_text.visible = not detail_text.visible
 		detail_timer = 1
 	elseif key == BIND.menu.key then
-		if mouse_in_world then
-			set_mouse_in_world(false)
-		else
-			buildat.disconnect()
-		end
+		open_pause_menu()
 	end
 end)
 
