@@ -41,6 +41,28 @@ games/luanti_launcher runs the first world it finds, the one
 BUILDAT_LUANTI_WORLD names, or the game BUILDAT_LUANTI_GAME names. It extends
 nothing; it is what the module is tested against.
 
+The environment variables it reads, since none of them are in the client's -h:
+
+    BUILDAT_LUANTI_GAME=<gameid>     Run this game at startup, no menu
+    BUILDAT_LUANTI_WORLD=<name>      Run this world under user/luanti/worlds
+    BUILDAT_LUANTI_SAVE=<name>       Which save the above two run in
+    BUILDAT_LUANTI_LUA=<path>        Lua to load into the environment
+    BUILDAT_LUANTI_IMPORT=<path>     Import ONE Luanti world directory into
+                                     the save at startup
+    BUILDAT_LUANTI_LUAPROF=<n>       Sample the module's Lua; see below
+    LUANTI_EXTRA_IMPORT_PATH=<paths> Where the import menu looks for games
+                                     and worlds, before ~/.luanti and
+                                     ~/.minetest. Colon separated, each one
+                                     a directory with games/ and worlds/ in
+                                     it -- a Luanti user directory or an
+                                     in-tree build
+
+The last two are one word apart in meaning and are the easy mistake:
+BUILDAT_LUANTI_IMPORT takes one world, LUANTI_EXTRA_IMPORT_PATH takes a
+search path of installations. The launcher says which roots it looked at and
+what it found in them, so "0 games and 0 worlds from 2 roots" in the log is
+the path and not the feature.
+
 What you see is not the Luanti client. There is no player and no digging: the
 camera looks at the world from outside it and every node is a flat colour
 hashed from its name. That is M2 -- the nodes a mod placed are in voxelworld

@@ -496,12 +496,42 @@ struct Module: public interface::Module
 	sv_<ss_> import_roots()
 	{
 		sv_<ss_> out;
-		auto add = [&](const ss_ &path){
-			if(path.empty() || !interface::fs::path_exists(path))
+		// Said out loud, every one of them: a wrong variable name, a typo, a
+		// path that is not there and a directory at the wrong level of a
+		// tree all look the same from the menu -- a short list and no
+		// reason -- and that is what turns a one-word mistake into a bug
+		// report. This is a menu action rather than a loop, so the lines
+		// cost nothing.
+		auto add = [&](const ss_ &path, const ss_ &from){
+			if(path.empty())
 				return;
+			if(!interface::fs::path_exists(path)){
+				log_i(MODULE, "import: %s: no such path (%s)", cs(path),
+						cs(from));
+				return;
+			}
 			for(const ss_ &had : out){
-				if(had == path)
+				if(had == path){
+					log_i(MODULE, "import: %s: already looked at (%s)",
+							cs(path), cs(from));
 					return;
+				}
+			}
+			const bool has_games =
+					interface::fs::path_exists(path+"/games");
+			const bool has_worlds =
+					interface::fs::path_exists(path+"/worlds");
+			if(!has_games && !has_worlds){
+				// Which is what pointing the variable at the wrong level of
+				// a tree looks like, and the likeliest mistake after the
+				// name of the variable itself
+				log_w(MODULE, "import: %s has neither games/ nor worlds/ in "
+						"it; a Luanti user directory has both (%s)",
+						cs(path), cs(from));
+			} else {
+				log_i(MODULE, "import: %s (%s)%s%s", cs(path), cs(from),
+						has_games ? " games/" : "",
+						has_worlds ? " worlds/" : "");
 			}
 			out.push_back(path);
 		};
@@ -512,7 +542,7 @@ struct Module: public interface::Module
 			while(!rest.empty()){
 				size_t colon = rest.find(':');
 				ss_ one = colon == ss_::npos ? rest : rest.substr(0, colon);
-				add(one);
+				add(one, "LUANTI_EXTRA_IMPORT_PATH");
 				rest = colon == ss_::npos ? "" : rest.substr(colon + 1);
 			}
 		}
@@ -520,8 +550,20 @@ struct Module: public interface::Module
 		if(home && home[0]){
 			// Luanti's user directory was renamed in 5.10 and a machine can
 			// have either, or both
-			add(ss_(home)+"/.luanti");
-			add(ss_(home)+"/.minetest");
+			add(ss_(home)+"/.luanti", "$HOME");
+			add(ss_(home)+"/.minetest", "$HOME");
+		}
+		// The two variables are one word apart in meaning and that is the
+		// trap: BUILDAT_LUANTI_IMPORT names one world to import at startup,
+		// and a tree with worlds/ in it is somebody who meant the search
+		// path
+		const char *old_import = getenv("BUILDAT_LUANTI_IMPORT");
+		if(old_import && old_import[0] &&
+				interface::fs::path_exists(ss_(old_import)+"/worlds")){
+			log_w(MODULE, "import: BUILDAT_LUANTI_IMPORT=%s has a worlds/ in "
+					"it, so it names a Luanti installation rather than one "
+					"world. The search path the import menu reads is "
+					"LUANTI_EXTRA_IMPORT_PATH.", old_import);
 		}
 		return out;
 	}
@@ -615,7 +657,8 @@ struct Module: public interface::Module
 			list.push_back(name);
 			return false;
 		};
-		for(const ss_ &root : import_roots()){
+		const sv_<ss_> roots = import_roots();
+		for(const ss_ &root : roots){
 			for(const interface::fs::Node &n :
 					interface::fs::list_directory(root+"/games")){
 				if(!n.is_directory || n.name == "." || n.name == "..")
@@ -650,6 +693,10 @@ struct Module: public interface::Module
 						interface::fs::directory_tree_size(path)));
 			}
 		}
+		// One line a user can read: "0 games and 0 worlds from 2 roots" says
+		// in one go that it is the path and not the feature
+		log_i(MODULE, "import: %zu games and %zu worlds from %zu roots",
+				games.size() / 4, worlds.size() / 4, roots.size());
 		sv_<ss_> flat;
 		flat.push_back(itos(games.size() / 4));
 		for(const ss_ &v : games)
