@@ -317,6 +317,9 @@ function ObjectRef:remove()
 	objects[o.id] = nil
 	core.luaentities[o.id] = nil
 	core.object_refs[o.id] = nil
+	if o.guid then
+		core.objects_by_guid[o.guid] = nil
+	end
 	if o.le and o.le.on_deactivate then
 		o.le:on_deactivate(true)
 	end
@@ -332,6 +335,11 @@ for _, name in ipairs({
 	"set_bone_rotation", "set_local_animation", "set_eye_offset",
 }) do
 	ObjectRef[name] = function() end
+end
+
+function ObjectRef:get_guid()
+	local o = state_of(self)
+	return o and o.guid or nil
 end
 
 function ObjectRef:get_texture_mod() return "" end
@@ -368,6 +376,15 @@ function core.add_entity(pos, name, staticdata)
 		hp = 1,
 	}
 	objects[id] = o
+	-- What a mod holds an object by when a reference will not do: unique
+	-- while the world runs, and in the table Luanti keeps them in.
+	--
+	-- simplified: it is this run's own id and not something the world
+	-- remembers. Luanti's survives a restart, which is what a mod storing
+	-- one in its own storage is relying on; nothing here stores objects
+	-- across a run to begin with.
+	o.guid = "obj" .. id
+	core.objects_by_guid[o.guid] = ref
 	-- The luaentity is a table of its own with the prototype as its
 	-- metatable, which is what Luanti's own luaentity_Add does: what a mod
 	-- sets on self belongs to this entity, and everything else is found
@@ -410,8 +427,15 @@ function core.__import_entity(x, y, z, name, staticdata)
 	return core.add_entity({x = x, y = y, z = z}, name, staticdata) ~= nil
 end
 
+-- An item nobody registered is not dropped at all, which is what Luanti's
+-- own l_add_item answers with nil for: a typo in a mod would otherwise put
+-- an entity in the world holding nothing anybody can name.
 function core.add_item(pos, item)
-	return core.spawn_item(pos, item)
+	local stack = ItemStack(item)
+	if stack:is_empty() or not stack:is_known() then
+		return nil
+	end
+	return core.spawn_item(pos, stack)
 end
 
 local function object_list(match)

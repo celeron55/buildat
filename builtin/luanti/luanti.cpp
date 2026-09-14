@@ -4495,6 +4495,37 @@ struct Module: public interface::Module, public luanti::Interface
 		return 1;
 	}
 
+	// Every loaded section as a voxel box, whether or not anybody is near
+	// it: what core.get_loaded_blocks() answers out of. l_active_boxes()
+	// above is the same list with the active range applied.
+	static int l_loaded_boxes(lua_State *L)
+	{
+		Module *self = module_of(L);
+		lua_newtable(L);
+		if(!self->m_scene)
+			return 1;
+		int n = 0;
+		voxelworld::access(self->m_server, self->m_scene,
+				[&](voxelworld::Instance *world){
+			for(const pv::Vector3DInt16 &section_p :
+					world->get_loaded_sections()){
+				pv::Region r = world->get_section_region_voxels(section_p);
+				const int32_t v[6] = {
+					r.getLowerCorner().getX(), r.getLowerCorner().getY(),
+					r.getLowerCorner().getZ(), r.getUpperCorner().getX(),
+					r.getUpperCorner().getY(), r.getUpperCorner().getZ(),
+				};
+				lua_createtable(L, 6, 0);
+				for(int i = 0; i < 6; i++){
+					lua_pushinteger(L, v[i]);
+					lua_rawseti(L, -2, i + 1);
+				}
+				lua_rawseti(L, -2, ++n);
+			}
+		});
+		return 1;
+	}
+
 	// __luanti_show_objects{id, x, y, z, sx, sy, sz, yaw, ...}: where every
 	// object is and how big it is, once per step, to every client. What one
 	// looks like is the client half's, and __luanti_show_object_props says
@@ -6237,6 +6268,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_noise_map", l_noise_map);
 		set_global_cfunction("__luanti_forceload", l_forceload);
 		set_global_cfunction("__luanti_active_boxes", l_active_boxes);
+		set_global_cfunction("__luanti_loaded_boxes", l_loaded_boxes);
 		set_global_cfunction("__luanti_find_ids", l_find_ids);
 		set_global_cfunction("__luanti_show_objects", l_show_objects);
 		set_global_cfunction("__luanti_show_object_props",

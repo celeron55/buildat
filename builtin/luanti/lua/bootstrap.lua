@@ -1535,12 +1535,13 @@ local STUBS_NIL = {
 	"get_mapgen_setting_noiseparams", "set_mapgen_setting_noiseparams",
 	"set_noiseparams", "get_noiseparams", "generate_ores", "generate_decorations",
 	"clear_objects", "delete_area",
+	-- get_loaded_blocks, get_active_blocks, get_loadable_blocks and
+	-- compare_block_status are below
 	"line_of_sight", "raycast", "find_path", "transforming_liquid_add",
 	"get_node_max_level", "get_node_level", "set_node_level", "add_node_level",
 	"fix_light",
 	"get_heat", "get_humidity", "get_biome_data",
 	"get_biome_id", "get_biome_name",
-	"compare_block_status",
 	"get_meta", "get_node_metadata",
 	-- Time and the world (M2)
 	"get_timeofday", "set_timeofday", "get_gametime", "get_day_count",
@@ -3089,6 +3090,106 @@ function core.__active_boxes_now()
 	return active_boxes_cache
 end
 
+-- The mapblocks a set of voxel boxes covers, as the vectors Luanti hands
+-- back: a section is four blocks across in each direction, so one box is
+-- sixty-four of them.
+local function blocks_in_boxes(boxes)
+	local out = {}
+	local seen = {}
+	for i = 1, #boxes do
+		local b = boxes[i]
+		for bx = math.floor(b[1] / 16), math.floor(b[4] / 16) do
+		for by = math.floor(b[2] / 16), math.floor(b[5] / 16) do
+		for bz = math.floor(b[3] / 16), math.floor(b[6] / 16) do
+			local h = core.hash_node_position({x = bx, y = by, z = bz})
+			if seen[h] == nil then
+				seen[h] = true
+				out[#out + 1] = vector.new(bx, by, bz)
+			end
+		end
+		end
+		end
+	end
+	return out
+end
+
+-- Which blocks are there, which of them are stepping, and which could be
+-- loaded but are not.
+--
+-- simplified: nothing here indexes what the save holds but has not loaded,
+-- so the third is always empty. Luanti's answers what its map database has
+-- on disk, which a mod uses to walk a world without generating it.
+-- The loaded sections, once a step: the world streams between steps and not
+-- during one, so every answer inside a step agrees with every other -- which
+-- is what a mod comparing two of them relies on.
+local loaded_boxes_cache = nil
+
+local function loaded_boxes_now()
+	if loaded_boxes_cache == nil then
+		loaded_boxes_cache = __luanti_loaded_boxes and __luanti_loaded_boxes()
+				or {}
+	end
+	return loaded_boxes_cache
+end
+
+core.__forget_loaded_boxes = function()
+	loaded_boxes_cache = nil
+end
+
+function core.get_loaded_blocks()
+	return blocks_in_boxes(loaded_boxes_now())
+end
+
+-- Out of the loaded ones rather than out of the active boxes themselves, so
+-- that the answer is a subset of get_loaded_blocks() whatever has streamed
+-- in or out between the two calls -- which is what a mod comparing them
+-- expects and what the active box cache, being a step old, cannot promise.
+function core.get_active_blocks()
+	local out = {}
+	for _, b in ipairs(core.get_loaded_blocks()) do
+		if core.__is_active({x = b.x * 16 + 8, y = b.y * 16 + 8,
+				z = b.z * 16 + 8}) then
+			out[#out + 1] = b
+		end
+	end
+	return out
+end
+
+function core.get_loadable_blocks()
+	return {}
+end
+
+-- Whether the block at a position is at least as far along as the status
+-- named: Luanti's own order is unknown, emerging, loaded, active. Nothing
+-- here is ever "emerging" as a status of its own -- a section is loaded or
+-- it is not -- so that rung is empty and a block asked about while its
+-- section streams answers "unknown".
+local BLOCK_STATUS_RANK = {unknown = 0, emerging = 1, loaded = 2, active = 3}
+
+function core.compare_block_status(pos, condition)
+	local want = BLOCK_STATUS_RANK[condition]
+	if want == nil then
+		return nil
+	end
+	local x, y, z = to_pos(pos)
+	local p = {x = x, y = y, z = z}
+	local rank = 0
+	if core.__is_active(p) then
+		rank = 3
+	else
+		local boxes = loaded_boxes_now()
+		for i = 1, #boxes do
+			local b = boxes[i]
+			if x >= b[1] and y >= b[2] and z >= b[3] and
+					x <= b[4] and y <= b[5] and z <= b[6] then
+				rank = 2
+				break
+			end
+		end
+	end
+	return rank >= want
+end
+
 function core.__is_active(pos)
 	local boxes = core.__active_boxes_now()
 	for i = 1, #boxes do
@@ -3272,6 +3373,7 @@ end
 function core.__step(dtime)
 	-- The map moves between steps and not during one
 	active_boxes_cache = nil
+	core.__forget_loaded_boxes()
 	run_globalsteps(dtime)
 	core.__step_objects(dtime)
 	step_emerge(dtime)
