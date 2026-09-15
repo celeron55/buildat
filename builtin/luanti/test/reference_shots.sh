@@ -75,7 +75,8 @@ shoot_states()
 	# is cheaper than a separate warm-up run -- a cycle is only four seconds a
 	# state.
 	#
-	# And the shot is taken late in the hold rather than right after the aim.
+	# And the shot is taken in the middle of the hold rather than right after the
+# aim.
 	# "Within a second of the aim" existed only to dodge the desktop's real
 	# mouse; inside a granted window, settled terrain is worth more.
 	# Exactly two cycles' worth of shots, counted rather than timed: the first
@@ -105,7 +106,7 @@ shoot_states()
 		line=$(grep -o "REFSHOT [0-9]* [0-9a-z_]*_\(none\|rain\)" "$log" | tail -1)
 		name=$(echo "$line" | cut -d' ' -f3)
 		if [ -n "$name" ] && [ "$name" != "$last" ]; then
-			sleep 2.5
+			sleep 4
 			# The name was read before the exposure. If the fixture moved on
 			# during it the picture is of the next state, and saving it under
 			# this name is the one failure the two cheap tests below cannot
@@ -124,8 +125,11 @@ shoot_states()
 			if import -window "$win" "$out/$name.png" 2>/dev/null; then
 				taken=$((taken + 1))
 				echo "$name" >> "$shotlist"
+				# A state is six seconds in the fixture; nine gives a cycle
+				# half again as long as it needs, which is what a server
+				# loading a world around a teleporting player uses up
 				[ "$taken" -eq 1 ] && deadline=$(( $(date +%s) + \
-						total * 6 * ${CYCLES:-2} + 60 ))
+						total * 9 * ${CYCLES:-2} + 60 ))
 				echo "shot $name"
 			else
 				echo "MISSED $name" >&2
@@ -259,7 +263,17 @@ cp "$me/reference_views.lua" \
 printf 'name = refviews\n' > "$work/worldmods/refviews/mod.conf"
 
 log=$(mktemp /tmp/refshots_srv.XXXXXX.log)
-port=$(( 31000 + (RANDOM % 200) ))
+# A port the client's own sandbox has already been told about. The extension
+# goes through extensions/network, which asks the user before a script opens a
+# socket and remembers the answer for a week; a fresh random port every run
+# would put that dialog in front of every run, and the harness is not the
+# thing to answer it. 30030 is one the user has accepted for a local Luanti
+# server. When the week runs out the dialog comes back and wants one click.
+if [ "${CLIENT:-luanti}" = "extension" ]; then
+	port=${PORT:-30030}
+else
+	port=${PORT:-$(( 31000 + (RANDOM % 200) ))}
+fi
 cd "$luanti"
 "$bin" --server --world "$work" --port "$port" --config "$conf" \
 	> "$log" 2>&1 &
@@ -272,9 +286,34 @@ for i in $(seq 1 300); do
 done
 sleep 5
 
-"$bin" --go --address 127.0.0.1 --port "$port" --name ref \
-	--config "$conf" > /tmp/refshots_cli.log 2>&1 &
-cli=$!
+# Which client is in front of the server. The extension is a Luanti client of
+# its own -- it speaks the protocol to an unmodified server -- so it takes its
+# half of the set through this same server and this same worldmod, which is
+# what makes the three sets comparable. See "The other two clients shoot the
+# same set" in doc/plan/rendering_plan.md. The module's half is the odd one
+# out and has a script of its own, because it runs the game itself.
+if [ "${CLIENT:-luanti}" = "extension" ]; then
+	out="${OUT_DIR:-$here/local/reference_shots/extension}"
+	mkdir -p "$out"
+	# Three passes rather than two: this client fetches the server's media and
+	# meshes the world as it goes, so the second is still catching up
+	CYCLES="${CYCLES:-3}"
+	# Nothing to click: BUILDAT_LUANTI_CONNECT skips the extension's connect
+	# dialog, whose focus sits in a LineEdit that swallows Return. The command
+	# file only has to keep the client alive -- the shooter below decides when
+	# the run is over.
+	cmds=$(mktemp /tmp/refshots_ext.XXXXXX.txt)
+	{ echo "delay 1800000"; echo "quit"; } > "$cmds"
+	BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=ref \
+		BUILDAT_LUANTI_CONNECT=1 \
+		"$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 \
+		-c @"$cmds" > /tmp/refshots_ext.log 2>&1 &
+	cli=$!
+else
+	"$bin" --go --address 127.0.0.1 --port "$port" --name ref \
+		--config "$conf" > /tmp/refshots_cli.log 2>&1 &
+	cli=$!
+fi
 
 shoot_states
 

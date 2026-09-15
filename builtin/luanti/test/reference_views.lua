@@ -61,9 +61,13 @@ local HOURS = {
 }
 
 -- How long each state is held, and how often the aim is put back. Short,
--- because the run shares a desktop: twenty states at four seconds is under
--- two minutes of exposure to somebody else's mouse.
-local HOLD = 4
+-- because the run shares a desktop -- but not as short as four seconds was
+-- (2026-09-16): a client that has just been teleported is still being sent
+-- the blocks around it, and four seconds left extensions/luanti_client
+-- photographing an empty sky at three of its twenty states. Six puts the
+-- shot in the middle of the hold with slack either side, and twenty states
+-- is still two minutes a pass.
+local HOLD = 6
 local REAIM = 1
 
 local function seed_now()

@@ -3300,6 +3300,19 @@ end
 function M.boot()
 	cancel_exits = true
 	self_tests()
+	-- A scripted run has nothing to click, and the dialog's focus is in a
+	-- LineEdit that swallows Return. BUILDAT_LUANTI_CONNECT goes straight in
+	-- with the address and the name the environment already supplies -- see
+	-- DEFAULT_ADDRESS above, which says those two are for scripted runs. The
+	-- reference shot harness is what wants it; a person still gets the dialog.
+	if (os.getenv("BUILDAT_LUANTI_CONNECT") or "") ~= "" then
+		local host, port = split_address(DEFAULT_ADDRESS)
+		log:info("connecting to " .. host .. ":" .. port ..
+				" without the dialog, as BUILDAT_LUANTI_CONNECT asks")
+		show_client(host, port, DEFAULT_NAME,
+				os.getenv("BUILDAT_LUANTI_PASSWORD") or "", DEFAULT_PBR)
+		return
+	end
 	show_connect_dialog()
 end
 
