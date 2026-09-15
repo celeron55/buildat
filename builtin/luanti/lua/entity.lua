@@ -368,6 +368,26 @@ for _, name in ipairs({
 	ObjectRef[name] = function() end
 end
 
+-- Luanti's own deprecated names, which it keeps as real methods on ObjectRef
+-- rather than behind a deprecation shim, so a mod written against them works
+-- unchanged. Twelve of them, out of luamethod_aliased() in
+-- src/script/lua_api/l_object.cpp. Wasteland's item_drop calls getpos sixty
+-- times a second, and without these its globalstep dies on every one.
+for name, old in pairs({
+	get_pos = "getpos", set_pos = "setpos", move_to = "moveto",
+	set_velocity = "setvelocity", get_velocity = "getvelocity",
+	add_velocity = "add_player_velocity",
+	set_acceleration = "setacceleration",
+	get_acceleration = "getacceleration",
+	set_yaw = "setyaw", get_yaw = "getyaw",
+	set_texture_mod = "settexturemod", set_sprite = "setsprite",
+}) do
+	-- The check: an alias of a method that was renamed away is a nil call at
+	-- sixty hertz, which is exactly the failure these exist to prevent
+	assert(ObjectRef[name], "no ObjectRef:" .. name .. " to alias as " .. old)
+	ObjectRef[old] = ObjectRef[name]
+end
+
 -- Where a bone of a model is put, which a mod sets to aim a gun, open a lid
 -- or sit a rider down. Luanti keeps the newer override form and answers the
 -- older position-and-rotation one out of it, which is what this does.
