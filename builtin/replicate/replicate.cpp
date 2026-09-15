@@ -7,6 +7,7 @@
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
+#include "interface/os.h"
 #include "interface/tcpsocket.h"
 #include "interface/packet_stream.h"
 #include "interface/magic_event.h"
@@ -190,9 +191,23 @@ struct Module: public interface::Module, public replicate::Interface
 	{
 		// For a reference implementation of this kind of network
 		// synchronization, see Urho3D's Network/Connection.cpp
+		//
+		// What this costs is what every module that asks replicate for
+		// anything waits for, because it runs on replicate's own thread:
+		// voxelworld's commit does a replicate::access() per commit and was
+		// measured waiting seconds for it. So it says how long it took and
+		// over how much when it is slow; see SLOW_SYNC_US below.
+		const int64_t t0 = interface::os::time_us();
+		size_t n_peers = 0, n_nodes = 0;
+		int64_t prepare_us = 0;
+		m_collecting_sends = true;
 
+		int64_t t_inside = 0;
 		main_context::access(m_server, [&](main_context::Interface *imc)
 		{
+			// Where the time actually goes is the question: getting into
+			// main_context, or the walk once inside it
+			t_inside = interface::os::time_us();
 			// Send changes to each peer (each of which has its own replication
 			// state)
 			for(auto &pair: m_peers){
@@ -211,7 +226,9 @@ struct Module: public interface::Module, public replicate::Interface
 				// NOTE: This can be called multiple times per scene; only the
 				//       first call will do anything as it clears the
 				//       marked-for-update lists
+				const int64_t t_prepare = interface::os::time_us();
 				scene->PrepareNetworkUpdate();
+				prepare_us += interface::os::time_us() - t_prepare;
 
 				magic::HashSet<uint> nodes_to_process;
 				uint scene_id = scene->GetID();
@@ -222,13 +239,52 @@ struct Module: public interface::Module, public replicate::Interface
 				nodes_to_process.Insert(ps.scene_state.dirtyNodes_);
 				nodes_to_process.Erase(scene_id);
 
+				n_peers++;
+				// A budget, because this runs on replicate's own thread and
+				// everything that asks replicate for anything waits for it.
+				// A peer joining a VoxeLibre world was measured taking 1672
+				// nodes and 3.6 seconds in one pass -- the whole world's
+				// chunks, each carrying a compressed voxel buffer -- and
+				// voxelworld's commit, the luanti module behind it and the
+				// game behind that all stopped for the length of it.
+				//
+				// What is left over stays in dirtyNodes_ and is taken on the
+				// next tick, which is what the set is for; the world arrives
+				// over a few more ticks and nothing waits seconds.
+				//
+				// simplified: a node that is dirty because it *changed* --
+				// a dug voxel -- waits behind however many are merely new,
+				// the same way the client's own mesh queue does. A priority
+				// class is the fix if that ever shows.
+				static const int64_t SYNC_BUDGET_US = 20000;
 				while(!nodes_to_process.Empty()){
 					uint node_id = nodes_to_process.Front();
 					sync_node(ps.peer_id, node_id, nodes_to_process, scene,
 							ps.scene_state);
+					n_nodes++;
+					if((n_nodes & 15) == 0 &&
+							interface::os::time_us() - t0 > SYNC_BUDGET_US)
+						break;
 				}
 			}
 		});
+
+		m_collecting_sends = false;
+		const size_t n_sends = m_pending_sends.size();
+		const int64_t t_flush = interface::os::time_us();
+		flush_pending_sends();
+		const int64_t flush_us = interface::os::time_us() - t_flush;
+
+		static const int64_t SLOW_SYNC_US = 500000;
+		const int64_t took = interface::os::time_us() - t0;
+		if(took >= SLOW_SYNC_US){
+			log_w(MODULE, "sync_changes(): %zu nodes and %zu packets for %zu "
+					"peers took %.1f s -- %.1f s of it waiting to get into "
+					"main_context, %.1f s comparing every attribute of every "
+					"node, %.1f s handing the packets to network",
+					n_nodes, n_sends, n_peers, took / 1e6,
+					(t_inside - t0) / 1e6, prepare_us / 1e6, flush_us / 1e6);
+		}
 	}
 
 	// Whether this peer gets this node at all; see set_node_filter()
@@ -525,13 +581,45 @@ struct Module: public interface::Module, public replicate::Interface
 		scene_state.dirtyNodes_.Erase(node->GetID());
 	}
 
+	// One packet to one peer. A sync pass sends several of these per node it
+	// walks, and a network::access() is a hop into another module's thread,
+	// so during a pass they are collected and sent in one hop at the end --
+	// see sync_changes(). Outside a pass there is nothing to collect them
+	// for, and the packet goes at once.
+	//
+	// The order is kept, which is what matters: a create before the update
+	// that follows it.
+	struct PendingSend
+	{
+		PeerId peer;
+		ss_ name;
+		ss_ data;
+	};
+	sv_<PendingSend> m_pending_sends;
+	bool m_collecting_sends = false;
+
 	void send_to_peer(PeerId peer, const ss_ &name, const magic::VectorBuffer &buf)
 	{
 		log_d(MODULE, "%s: Update size: %zu", cs(name), buf.GetBuffer().Size());
 		ss_ data = buf_to_string(buf);
+		if(m_collecting_sends){
+			m_pending_sends.push_back(PendingSend{peer, name, data});
+			return;
+		}
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, name, data);
 		});
+	}
+
+	void flush_pending_sends()
+	{
+		if(m_pending_sends.empty())
+			return;
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(const PendingSend &s : m_pending_sends)
+				inetwork->send(s.peer, s.name, s.data);
+		});
+		m_pending_sends.clear();
 	}
 
 	/*void send_to_all(const ss_ &name, const magic::VectorBuffer &buf)
