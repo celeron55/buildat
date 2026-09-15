@@ -49,6 +49,11 @@ local VIEW_DIR = {x = -0.7, y = -0.55, z = -0.7}
 
 local MOUSE_SENSITIVITY = 0.15
 
+-- Below this a landing costs nothing, in nodes a second. Luanti's own
+-- number, BS*14 on its wire; the server has it too and is the one that
+-- decides, this only keeps a packet from going for every step off a kerb.
+local FALL_TOLERANCE = 14
+
 -- The player's own physics, which knows neither the protocol nor Urho3D:
 -- see the header of player.lua
 local ok_player, err_player, player_physics =
@@ -2557,6 +2562,19 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	update_dig(dt, playing)
 
 	player:update(dt, wish)
+
+	-- A landing hard enough to hurt, told to the server, which is the end
+	-- that decides what it costs. Luanti's own client does the same -- it
+	-- computes the damage and sends that -- and this sends the speed
+	-- instead, so that the arithmetic and the bounds are the server's.
+	if player.landed_at then
+		local speed = player.landed_at
+		player.landed_at = nil
+		if speed > FALL_TOLERANCE then
+			buildat.send_packet("main:fell", cereal.binary_output(
+					{speed = speed}, {"object", {"speed", "double"}}))
+		end
+	end
 
 	camera_node.position = magic.Vector3(player.x + eye_offset.x,
 			player.y + player_physics.EYE_HEIGHT + eye_offset.y,

@@ -7325,6 +7325,15 @@ struct Module: public interface::Module, public luanti::Interface
 		node_action(buf);
 	}
 
+	void player_fell(const ss_ &name, float speed)
+	{
+		char buf[256];
+		snprintf(buf, sizeof buf,
+				"core.__player_fell(\"%s\", %f) return true",
+				lua_quoted(name).c_str(), (double)speed);
+		node_action(buf);
+	}
+
 	bool drop_wielded(const ss_ &player_name, int count)
 	{
 		if(player_name.empty())

@@ -130,6 +130,13 @@ namespace luanti
 		virtual void set_player_pos(const ss_ &name, float x, float y,
 				float z, float look_h, float look_v, int32_t controls) = 0;
 
+		// How fast a player was going down when they hit something, in
+		// nodes a second. The physics is the client's, so the landing is
+		// its word; what it costs is worked out here, the way Luanti's
+		// client environment works it out -- one hit point per node a
+		// second over fourteen.
+		virtual void player_fell(const ss_ &name, float speed) = 0;
+
 		// What a click comes to. The node is dug the way core.dig_node()
 		// digs one -- the pointed thing is handed to the vendored builtin,
 		// so can_dig, after_dig_node and the drops are the builtin's own --

@@ -2534,6 +2534,48 @@ function core.__remove_player(name)
 end
 
 -- Where a player is and which way they are looking is their client's to say
+-- What a landing costs, which is Luanti's own arithmetic from its client
+-- environment: one hit point per node a second over fourteen, rounded, and
+-- nothing at or under it. The speed is the client's word and is bounded
+-- before it gets here; see on_fell() in games/luanti_launcher/main/main.cpp.
+--
+-- simplified: no fall_damage_add_percent, from the node landed on or from
+-- the player's own armour groups. Luanti multiplies the speed by both
+-- before the tolerance is taken off; the upgrade path is those two group
+-- lookups, the rest of the sum being this.
+local FALL_TOLERANCE = 14
+
+function core.__player_fell(name, speed)
+	speed = tonumber(speed) or 0
+	if speed <= FALL_TOLERANCE then
+		return
+	end
+	if not core.settings:get_bool("enable_damage", true) then
+		return
+	end
+	local id = players[name]
+	local o = id and objects[id]
+	if not (o and o.ref) or (o.hp or 0) <= 0 then
+		return
+	end
+	local damage = math.floor(speed - FALL_TOLERANCE + 0.5)
+	if damage <= 0 then
+		return
+	end
+	o.ref:set_hp(o.hp - damage, {type = "fall"})
+end
+
+do
+	-- The tolerance is the whole of it: a step off a kerb is free, and
+	-- every node a second over it is a hit point
+	local function cost(speed)
+		return math.floor(speed - FALL_TOLERANCE + 0.5)
+	end
+	assert(cost(14) == 0, "fall: the tolerance itself is free")
+	assert(cost(20) == 6, "fall: a node a second over is a hit point")
+	assert(cost(23.9) == 10, "fall: it rounds rather than truncating")
+end
+
 function core.__set_player_pos(name, x, y, z, look_h, look_v, controls)
 	local id = players[name]
 	local o = id and objects[id]

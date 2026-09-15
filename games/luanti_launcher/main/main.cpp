@@ -109,6 +109,8 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:where"));
 		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:fell"));
+		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:chat"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:wield"));
@@ -149,6 +151,8 @@ struct Module: public interface::Module
 		EVENT_TYPEN("network:packet_received/main:wield", on_wield,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:drop", on_drop,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:fell", on_fell,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:where", on_where,
 				network::Packet)
@@ -240,6 +244,34 @@ struct Module: public interface::Module
 						(float)pair.second.z, (float)pair.second.look_h,
 						(float)pair.second.look_v, pair.second.controls);
 			}
+		});
+	}
+
+	// How hard a player landed, which only their own client knows -- the
+	// physics is the client's. What it costs is the module's, so this hands
+	// over the speed and nothing else.
+	//
+	// The number is a client's word, so it is bounded here: below Luanti's
+	// own tolerance it costs nothing, and nothing beyond terminal velocity
+	// is believed. A client that lies about it can hurt nobody but itself,
+	// which is what Luanti's own TOSERVER_DAMAGE is worth as well.
+	void on_fell(const network::Packet &packet)
+	{
+		double speed = 0;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(speed);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:fell: %s", e.what());
+			return;
+		}
+		if(!(speed > 14.0))
+			return;
+		if(speed > 200.0)
+			speed = 200.0;
+		luanti::access(m_server, [&](luanti::Interface *i){
+			i->player_fell(player_name_of(packet.sender), (float)speed);
 		});
 	}
 

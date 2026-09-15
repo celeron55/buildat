@@ -230,6 +230,9 @@ function M.new(is_solid, is_liquid, is_climbable)
 		-- Whether a ladder or a vine is holding the player up; see
 		-- is_climbable and the vertical part of update()
 		climbing = false,
+		-- How fast the player was going down when they last hit something,
+		-- in nodes a second, or nil. Whoever reads it clears it.
+		landed_at = nil,
 		-- Flying and going through walls are off by default and keys toggle
 		-- them; a server that does not give the player the fly and noclip
 		-- privileges will pull them back with its movement checks
@@ -369,6 +372,13 @@ function M.new(is_solid, is_liquid, is_climbable)
 		-- something is settled before a step up is considered
 		if move_axis(p, 2, self.vy * dtime, stops) then
 			self.on_ground = self.vy < 0
+			-- How hard the landing was, in nodes a second, for whoever
+			-- tells the server about it. Left here to be read and cleared:
+			-- this module knows nothing about damage, and what a fall costs
+			-- is the game's arithmetic and not the physics'.
+			if self.vy < 0 then
+				self.landed_at = -self.vy
+			end
 			self.vy = 0
 		else
 			self.on_ground = false
@@ -422,6 +432,21 @@ do
 	wet:update(0.1, {x = 0, z = 0, jump = true})
 	assert(wet.vy > 0 and not wet.on_ground,
 			"player: jumping in water does not lift the player")
+
+	-- And how hard a landing was, which is what a fall costs somebody:
+	-- dropped onto a floor from high enough to be going fast
+	local ground = function(x, y, z) return y <= 0 end
+	local dropped = M.new(ground)
+	dropped:set_position(0, 30, 0)
+	for _ = 1, 100 do
+		dropped:update(0.05, {x = 0, z = 0})
+		if dropped.landed_at then
+			break
+		end
+	end
+	assert(dropped.landed_at and dropped.landed_at > 14,
+			"player: a long fall does not report how hard it landed")
+	assert(dropped.on_ground, "player: the fall did not end on the ground")
 
 	-- A ladder holds the player where they are, and jump and sneak move
 	-- them along it -- which is the whole of climbing
