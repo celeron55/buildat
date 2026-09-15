@@ -1628,6 +1628,37 @@ function M.define(dst, util)
 	-- refused: HierarchyContainer -- ListView makes its own; a game never does
 	-- refused: MessageBox -- its constructor wants the engine context and it loads a layout resource by name; ui_utils.show_message_dialog is the dialog here
 
+	-- IO, which is the shape this policy exists to refuse: a game's data is
+	-- what the server sends it and what the resource cache serves it, and
+	-- neither of those is a path.
+	--
+	-- refused: File -- opens a path on the user's disk and reads or writes it
+	-- refused: FileSystem -- lists, copies, deletes and renames the user's own files, and runs a program
+	-- refused: NamedPipe -- a pipe is a path, and the other end is another program
+	-- refused: PackageFile -- opens an archive by path, and the resource cache is how a game's media arrives
+	-- refused: Deserializer -- the base a File is one of, so wrapping it hands over every File method
+	-- refused: Serializer -- the same, the writing half
+	-- refused: Log -- writes the engine's own log file and can be pointed at a path; buildat.Logger is the log here
+
+	-- Engine, which is the process rather than the scene.
+	--
+	-- refused: Engine -- exits the process, sets the engine's own parameters and dumps its resources
+	-- refused: Console -- an in-engine command line that runs script, which is what the sandbox exists to stop
+	-- refused: DebugHud -- draws the engine's own profiler over the game, and a game has no say in it
+
+	-- Core, which is the engine itself.
+	--
+	-- refused: Context -- the engine context: every subsystem, whitelisted or not, is one GetSubsystem() away
+	-- refused: Object -- the base every wrapped class already inherits from, and its SendEvent() reaches events safe_events.lua does not list
+
+	-- And the attribute family, which is one bypass in three shapes: an
+	-- attribute is reached by its name as a string, so anything that
+	-- animates or writes one reaches every property this file leaves out.
+	--
+	-- refused: Serializable -- reads and writes any attribute by name, whitelisted or not
+	-- refused: ValueAnimation -- the value an attribute takes over time, set by that attribute's name
+	-- refused: ObjectAnimation -- a table of those, applied to a node by name
+
 	util.wc("Sprite", {
 		inherited_from_by_wrapper = dst.UIElement,
 		instance = {
