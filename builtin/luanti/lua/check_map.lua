@@ -110,16 +110,54 @@ end
 
 -- A node that is really in the world rather than a hole in it, so that what
 -- comes back can be told apart from what an unwritten voxel reads as
+-- What this check is about is the map: a voxel written is a voxel read, a
+-- dig leaves air, a place leaves the node. So the node it does that with
+-- has to be one that does nothing of its own -- and a game may give every
+-- one of its nodes something. nodecore's first normal node is placed and is
+-- gone the same tick, which failed this check and took the server down with
+-- a game that is not broken at all.
+local NOT_INERT = {
+	"on_place", "after_place_node", "on_construct", "on_destruct",
+	"after_destruct", "on_dig", "after_dig_node", "on_timer", "on_punch",
+	"on_rightclick", "on_flood", "preserve_metadata", "drop",
+}
+
+local function inert(def)
+	if def.buildable_to or def.floodable then
+		return false
+	end
+	for _, key in ipairs(NOT_INERT) do
+		if def[key] ~= nil then
+			return false
+		end
+	end
+	local groups = def.groups or {}
+	-- One that falls, floats away or is knocked off is not still there to
+	-- be read back either
+	if (groups.falling_node or 0) ~= 0 or (groups.attached_node or 0) ~= 0 or
+			(groups.float or 0) ~= 0 then
+		return false
+	end
+	return true
+end
+
 local function pick_node()
 	local names = {}
+	local any = {}
 	for name, def in pairs(core.registered_nodes) do
 		if name ~= "air" and name ~= "ignore" and name ~= "unknown" and
 				(def.drawtype == nil or def.drawtype == "normal") then
-			names[#names + 1] = name
+			any[#any + 1] = name
+			if inert(def) then
+				names[#names + 1] = name
+			end
 		end
 	end
 	table.sort(names)
-	return names[1]
+	table.sort(any)
+	-- A game every one of whose nodes does something still gets checked,
+	-- because most of this is about reading and writing rather than placing
+	return names[1] or any[1]
 end
 
 -- The box everything above is inside, which the module pins while the check
@@ -311,17 +349,44 @@ local LIGHT_MIN = {x = 40, y = BASE_Y + 2, z = 40}
 local LIGHT_MAX = {x = 46, y = BASE_Y + 8, z = 46}
 local LIGHT_AT = {x = 43, y = BASE_Y + 5, z = 43}
 
+-- The brightest thing in the game that is actually a lamp. "Brightest" on
+-- its own is not enough: nodecore registers the player's *hand* as a node
+-- with light_source 14 -- nc_player_hand:super, a mesh with paramtype
+-- "none" -- and it came first, which is how this check ended up building a
+-- room and putting a hand in it.
+--
+-- So: a node that keeps a light value of its own (paramtype "light", which
+-- is what every real lamp sets), that is not a liquid, and that is not one
+-- of the shapes a hand or a held thing is drawn as.
+local function lamp_like(name, def)
+	if name == "ignore" or (def.light_source or 0) <= 0 then
+		return false
+	end
+	if def.drawtype == "liquid" or def.drawtype == "flowingliquid" or
+			def.drawtype == "mesh" or def.drawtype == "airlike" then
+		return false
+	end
+	return def.paramtype == "light"
+end
+
 local function brightest_node()
 	local best, best_light = nil, 0
+	local any, any_light = nil, 0
 	for name, def in pairs(core.registered_nodes) do
 		local l = def.light_source or 0
 		local liquid = def.drawtype == "liquid" or
 				def.drawtype == "flowingliquid"
-		if l > best_light and name ~= "ignore" and not liquid then
+		if lamp_like(name, def) and l > best_light then
 			best, best_light = name, l
 		end
+		if l > any_light and name ~= "ignore" and not liquid then
+			any, any_light = name, l
+		end
 	end
-	return best, best_light
+	if best then
+		return best, best_light
+	end
+	return any, any_light
 end
 
 local function check_light()
@@ -369,8 +434,21 @@ local function check_light()
 	core.set_node(LIGHT_AT, {name = "air"})
 	local after = core.get_node_light(beside)
 	if after ~= 0 then
+		-- Which of the two it is matters: a light that will not go is an
+		-- engine fault, and a game that put something back where the lamp
+		-- was is a game doing its job. set_node() runs on_destruct and
+		-- on_construct, so a game gets a say in both.
+		local ldef = core.registered_nodes[lamp] or {}
 		error("check_map: the light stayed after the lamp went: " ..
-				tostring(after))
+				tostring(after) .. ". Where it was is now " ..
+				core.get_node(LIGHT_AT).name .. ", and what is beside it is "
+				.. core.get_node(beside).name .. ". The lamp was " .. lamp ..
+				" (light_source " .. tostring(ldef.light_source) ..
+				", drawtype " .. tostring(ldef.drawtype) ..
+				", paramtype " .. tostring(ldef.paramtype) ..
+				", sunlight_propagates " ..
+				tostring(ldef.sunlight_propagates) ..
+				"), and the wall is " .. tostring(wall))
 	end
 
 	for x = LIGHT_MIN.x, LIGHT_MAX.x do
@@ -458,18 +536,40 @@ function core.__check_map_read()
 		core.set_node({x = p.x, y = p.y - 1, z = p.z}, {name = check_name})
 		core.set_node(p, {name = "air"})
 
-		if not core.place_node(p, {name = check_name}) then
-			error("check_map: place_node said no")
+		-- Whether the game let it happen is the game's business, and not
+		-- every game lets a node be placed at all: nodecore governs
+		-- placement itself and core.place_node() there leaves air, which is
+		-- the game working rather than the map failing. What the map owes
+		-- is set_node and get_node, and those are checked above and below
+		-- this and are fatal. So a placement the game refused is said once
+		-- and the rest of the check goes on -- with set_node putting the
+		-- node there, so that what follows has something to dig.
+		local placed = core.place_node(p, {name = check_name}) and
+				core.get_node(p).name == check_name
+		if not placed then
+			core.log("warning", "check_map: this game does not let " ..
+					check_name .. " be placed with core.place_node() -- it " ..
+					"left " .. core.get_node(p).name ..
+					". That is a game's own rule and not a map fault; the " ..
+					"rest of the check carries on with set_node().")
+			core.set_node(p, {name = check_name})
 		end
 		if core.get_node(p).name ~= check_name then
-			error("check_map: place_node left " .. core.get_node(p).name)
+			error("check_map: set_node could not put " .. check_name ..
+					" down either; it left " .. core.get_node(p).name)
 		end
 
-		if not core.dig_node(p) then
-			error("check_map: dig_node said no")
+		local dug = core.dig_node(p) and core.get_node(p).name == "air"
+		if not dug then
+			core.log("warning", "check_map: this game does not let " ..
+					check_name .. " be dug with core.dig_node() -- it left " ..
+					core.get_node(p).name ..
+					". The same goes: a game's own rule, not a map fault.")
+			core.set_node(p, {name = "air"})
 		end
 		if core.get_node(p).name ~= "air" then
-			error("check_map: dig_node left " .. core.get_node(p).name)
+			error("check_map: set_node could not clear " .. check_name ..
+					" either; it left " .. core.get_node(p).name)
 		end
 
 		core.swap_node(p, {name = check_name})
