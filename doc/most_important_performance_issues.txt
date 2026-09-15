@@ -152,6 +152,16 @@ Tried and rejected, so that nobody spends the day again:
   within a few percent -- 111 sections in 8.7, 9.0 and 8.9 seconds of
   devtest on the machine these numbers are from.
 
+* The light bookkeeping asked the registry about every voxel. Three
+  questions -- fully_empty, transmits_light, light_source -- are asked of
+  every voxel a write or a flood touches, each a virtual call into the voxel
+  registry, and a section is a quarter of a million voxels of a handful of
+  types. The last answer is kept now, so a run of one type asks once.
+
+  util/bench_worldgen.sh, devtest, three runs each: medians 8.9 s -> 8.3 s,
+  with the two ranges not overlapping (8.7-9.0 against 8.2-8.4). Debug build,
+  -O1, 2026-09-15.
+
 Still open, in the order they showed up in a profile after those:
 
 1. update_skylight() and its voxel reads are about 25% of the server's CPU, and
