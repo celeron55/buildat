@@ -141,7 +141,20 @@ end
 -- says why these numbers are what they are. These are what noon looks like;
 -- the sun moves with the world's clock, and night is the same sun dimmed
 -- and turned blue -- see update_sky() below.
-local SKY_AMBIENT = magic.Color(0.26, 0.33, 0.46)
+-- Luanti's own hue, at this game's own level. Its get_sunlight_color() is
+-- all but neutral at noon -- 0.96, 0.96, 1.058, a tenth more blue than red
+-- -- where this was nearly twice as blue as red and a quarter more green.
+-- The mesher bakes the skylight into the vertex colour's alpha and the
+-- shader adds cAmbientColor * alpha + rgb, so the ambient colour multiplies
+-- every sky-lit surface: a blue ambient is a blue world.
+--
+-- **The hue is Luanti's and the level is not.** Luanti's ambient is also
+-- three and a half times brighter, with its sun correspondingly weaker;
+-- raising this without rebalancing the sun would blow the picture out.
+-- That trade is [TOO_BRIGHT] in doc/plan/master_plan.md, and it is a
+-- separate change with its own pictures. So this keeps the luminance it had
+-- -- 0.324 by the usual weights -- and only turns the colour neutral.
+local SKY_AMBIENT = magic.Color(0.320, 0.320, 0.352)
 local NIGHT_AMBIENT = magic.Color(0.05, 0.06, 0.10)
 local SUN_BRIGHTNESS = 50.0
 local MOON_BRIGHTNESS = 4.0
