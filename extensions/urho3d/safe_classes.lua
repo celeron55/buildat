@@ -1188,6 +1188,173 @@ function M.define(dst, util)
 		},
 	})
 
+	-- The scrolling family, added 2026-09-15 by the whitelist policy: a look
+	-- rather than a proof, and a look says a panel that clips its children
+	-- and two bars that say how far down it is draw and compute and do
+	-- nothing else. `ui_utils.add_paged()` exists because none of this was
+	-- here; see [URHO_SWEEP] and [WHITELIST_POLICY] in
+	-- doc/plan/master_plan.md.
+	--
+	-- In dependency order, because a wrapper names the classes its
+	-- properties are of and they have to exist by then.
+
+	util.wc("Slider", {
+		inherited_from_by_wrapper = dst.BorderImage,
+		instance = {
+			ChangeValue = util.self_function("ChangeValue", {},
+					{"Slider", "number"}),
+		},
+		properties = {
+			orientation = util.simple_property("number"),
+			range = util.simple_property("number"),
+			value = util.simple_property("number"),
+			-- Read-only: the part that is dragged
+			knob = util.simple_property(dst.BorderImage),
+			repeatRate = util.simple_property("number"),
+		},
+	})
+
+	util.wc("ScrollBar", {
+		inherited_from_by_wrapper = dst.BorderImage,
+		instance = {
+			ChangeValue = util.self_function("ChangeValue", {},
+					{"ScrollBar", "number"}),
+			StepBack = util.self_function("StepBack", {}, {"ScrollBar"}),
+			StepForward = util.self_function("StepForward", {},
+					{"ScrollBar"}),
+		},
+		properties = {
+			-- O_HORIZONTAL or O_VERTICAL
+			orientation = util.simple_property("number"),
+			-- How much there is to scroll through, and where in it we are
+			range = util.simple_property("number"),
+			value = util.simple_property("number"),
+			scrollStep = util.simple_property("number"),
+			stepFactor = util.simple_property("number"),
+			-- Read-only: the bar's own parts
+			effectiveScrollStep = util.simple_property("number"),
+			backButton = util.simple_property(dst.Button),
+			forwardButton = util.simple_property(dst.Button),
+			slider = util.simple_property(dst.Slider),
+		},
+	})
+
+	util.wc("ProgressBar", {
+		inherited_from_by_wrapper = dst.BorderImage,
+		instance = {
+			ChangeValue = util.self_function("ChangeValue", {},
+					{"ProgressBar", "number"}),
+		},
+		properties = {
+			orientation = util.simple_property("number"),
+			range = util.simple_property("number"),
+			value = util.simple_property("number"),
+			knob = util.simple_property(dst.BorderImage),
+			-- Read-only: the style the percentage text is drawn with
+			loadingPercentStyle = util.simple_property("string"),
+			showPercentText = util.simple_property("boolean"),
+		},
+	})
+
+	-- The content element is the one that scrolls: make it, fill it, and
+	-- give it to the view, which clips it and puts bars beside it.
+	util.wc("ScrollView", {
+		inherited_from_by_wrapper = dst.UIElement,
+		instance = {
+			-- Which bars are drawn at all, whatever auto-visible would do
+			SetScrollBarsVisible = util.self_function("SetScrollBarsVisible",
+					{}, {"ScrollView", "boolean", "boolean"}),
+		},
+		properties = {
+			-- How far into the content the top left corner is, in pixels
+			viewPosition = util.simple_property(dst.IntVector2),
+			contentElement = util.simple_property(dst.UIElement),
+			-- Read-only in Urho3D: the bars the view made for itself. A
+			-- write here is dropped rather than refused, which is the one
+			-- sharp edge of a property list.
+			horizontalScrollBar = util.simple_property(dst.ScrollBar),
+			verticalScrollBar = util.simple_property(dst.ScrollBar),
+			scrollPanel = util.simple_property(dst.BorderImage),
+			scrollBarsAutoVisible = util.simple_property("boolean"),
+			-- A wheel notch, and a page: fractions of the content
+			scrollStep = util.simple_property("number"),
+			pageStep = util.simple_property("number"),
+			-- What a flick does after the finger leaves, and when it stops
+			scrollDeceleration = util.simple_property("number"),
+			scrollSnapEpsilon = util.simple_property("number"),
+		},
+	})
+
+	-- A list of elements with a selection, which is a ScrollView that knows
+	-- what is in it. The items are whatever elements the game makes; the
+	-- list owns them once they are added.
+	util.wc("ListView", {
+		inherited_from_by_wrapper = dst.ScrollView,
+		instance = {
+			AddItem = util.self_function("AddItem", {},
+					{"ListView", "UIElement"}),
+			InsertItem = util.self_function("InsertItem", {},
+					{"ListView", "number", "UIElement"}),
+			-- simplified: the by-index form only. Urho3D also removes by
+			-- element, and the two are one overloaded name, which a type
+			-- check cannot tell apart from here; FindItem() turns an
+			-- element into its index, which is the same thing in two calls.
+			RemoveItem = util.self_function("RemoveItem", {},
+					{"ListView", "number"}),
+			RemoveAllItems = util.self_function("RemoveAllItems", {},
+					{"ListView"}),
+			GetItem = util.wrap_function({"ListView", "number"},
+				function(self, index)
+					return util.wrap_instance("UIElement", self:GetItem(index))
+				end
+			),
+			FindItem = util.self_function("FindItem", {"number"},
+					{"ListView", "UIElement"}),
+			SetSelection = util.self_function("SetSelection", {},
+					{"ListView", "number"}),
+			AddSelection = util.self_function("AddSelection", {},
+					{"ListView", "number"}),
+			RemoveSelection = util.self_function("RemoveSelection", {},
+					{"ListView", "number"}),
+			ToggleSelection = util.self_function("ToggleSelection", {},
+					{"ListView", "number"}),
+			ChangeSelection = util.self_function("ChangeSelection", {},
+					{"ListView", "number", {"boolean", "__nil"}}),
+			ClearSelection = util.self_function("ClearSelection", {},
+					{"ListView"}),
+			IsSelected = util.self_function("IsSelected", {"boolean"},
+					{"ListView", "number"}),
+			-- The hierarchy half, which is what makes a tree out of a list
+			Expand = util.self_function("Expand", {},
+					{"ListView", "number", "boolean",
+					{"boolean", "__nil"}}),
+			ToggleExpand = util.self_function("ToggleExpand", {},
+					{"ListView", "number", {"boolean", "__nil"}}),
+			IsExpanded = util.self_function("IsExpanded", {"boolean"},
+					{"ListView", "number"}),
+		},
+		properties = {
+			-- Read-only: how many items, and which one is selected
+			numItems = util.simple_property("number"),
+			selectedItem = util.simple_property(dst.UIElement),
+			selection = util.simple_property("number"),
+			-- HM_NEVER, HM_FOCUS or HM_ALWAYS
+			highlightMode = util.simple_property("number"),
+			multiselect = util.simple_property("boolean"),
+			clearSelectionOnDefocus = util.simple_property("boolean"),
+			selectOnClickEnd = util.simple_property("boolean"),
+			hierarchyMode = util.simple_property("boolean"),
+			baseIndent = util.simple_property("number"),
+		},
+	})
+
+	-- Looked at and refused, so that the next sweep does not look again.
+	-- util/whitelist_sweep.py reads these lines, so the shape is fixed:
+	-- "-- refused: <Class> -- <why>", one per line.
+	--
+	-- refused: FileSelector -- shows the user's own filesystem, and hands the chosen path back
+	-- refused: HierarchyContainer -- ListView makes its own; a game never does
+
 	util.wc("Sprite", {
 		inherited_from_by_wrapper = dst.UIElement,
 		instance = {

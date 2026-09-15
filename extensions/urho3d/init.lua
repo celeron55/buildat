@@ -450,6 +450,74 @@ Safe.SubscribeToEvent("MouseButtonDown", function()
 end)
 
 --
+-- What the whitelist actually lets through
+--
+-- A property missing from safe_classes.lua makes a feature **silently do
+-- nothing** -- no error, no warning -- which is the whole cost of a
+-- whitelist sweep and the reason one is done in batches. So the classes a
+-- sweep adds get a round trip here, once, at load: made through
+-- CreateChild the way a game makes them, written to and read back. An
+-- element that never arrived in the whitelist errors on CreateChild, and a
+-- property that did not arrive comes back wrong.
+--
+-- util/whitelist_sweep.py is the other half: it says which of Urho3D's
+-- classes are still neither wrapped nor refused.
+
+do
+	local holder = Safe.ui.root:CreateChild("UIElement")
+
+	local view = holder:CreateChild("ScrollView")
+	view.scrollStep = 0.25
+	assert(math.abs(view.scrollStep - 0.25) < 1e-6,
+			"whitelist: ScrollView.scrollStep did not stick")
+	local content = holder:CreateChild("UIElement")
+	view.contentElement = content
+	assert(view.contentElement ~= nil,
+			"whitelist: ScrollView.contentElement did not stick")
+
+	local bar = holder:CreateChild("ScrollBar")
+	bar.orientation = O_VERTICAL
+	bar.range = 10
+	bar.value = 4
+	assert(bar.orientation == O_VERTICAL and math.abs(bar.value - 4) < 1e-6,
+			"whitelist: ScrollBar did not take its orientation and value")
+	bar:ChangeValue(1)
+	assert(math.abs(bar.value - 5) < 1e-6,
+			"whitelist: ScrollBar:ChangeValue() did nothing")
+
+	local slider = holder:CreateChild("Slider")
+	slider.range = 100
+	slider.value = 20
+	assert(math.abs(slider.value - 20) < 1e-6,
+			"whitelist: Slider.value did not stick")
+
+	local progress = holder:CreateChild("ProgressBar")
+	progress.range = 1
+	progress.value = 0.5
+	progress.showPercentText = false
+	assert(math.abs(progress.value - 0.5) < 1e-6 and
+			progress.showPercentText == false,
+			"whitelist: ProgressBar did not take its value")
+
+	local list = holder:CreateChild("ListView")
+	assert(list.numItems == 0, "whitelist: a new ListView is not empty")
+	list:AddItem(holder:CreateChild("Text"))
+	list:AddItem(holder:CreateChild("Text"))
+	assert(list.numItems == 2,
+			"whitelist: ListView:AddItem() did not add")
+	list.selection = 1
+	assert(list.selection == 1 and list:IsSelected(1),
+			"whitelist: ListView.selection did not stick")
+	assert(list:GetItem(0) ~= nil,
+			"whitelist: ListView:GetItem() answered nothing")
+	list:RemoveItem(0)
+	assert(list.numItems == 1,
+			"whitelist: ListView:RemoveItem() did not remove")
+
+	holder:Remove()
+end
+
+--
 -- Create the final interface
 --
 
