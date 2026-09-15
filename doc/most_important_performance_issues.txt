@@ -113,6 +113,17 @@ Fixed, kept here for what the shape of the problem was:
 
 Tried and rejected, so that nobody spends the day again:
 
+* Keeping the last id's answer in l_find_ids() and l_find_nodes(). The
+  annotation puts a third of find_ids in one instruction -- the load from the
+  65536-entry table that says which sets an id is in, a quarter of a megabyte
+  and a cache miss per distinct id -- and a box of voxels is runs of one
+  type, so remembering the last one looked like the same trick that worked
+  for the voxel registry. It is not: 4.65% before and 4.78% after, in the
+  same 45 second devtest profile. Either the ids alternate more than they
+  look like they do, or the loop is bound by something the annotation is
+  attributing to that line. Whatever is costing find_ids, it is not that
+  load. 2026-09-15.
+
 * Raising voxelworld's chunk buffer limit (m_max_buffers_loaded) from 50 to
   500. It does what it says -- deserialize_volume() under Section::get_buffer()
   goes from 8.8% of the server to under 0.5%, and the zstd decompression with
