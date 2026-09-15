@@ -101,60 +101,139 @@ function M.scan_mods(path, out)
 end
 
 -- Dependency order, with game.conf's first_mod and last_mod on either end.
--- A dependency that is not there is an error for depends and nothing for
--- optional_depends, which is what Luanti does.
+--
+-- **This is Luanti's own algorithm and not merely a topological sort**, and
+-- the difference is visible: a game whose mods write each other's globals
+-- without saying they depend on them works or does not work depending on
+-- which valid order it gets. realtest is one -- its `light` assigns a
+-- global called `metals` and its `hatches` reads the `metals` mod's table
+-- of the same name -- and it runs on Luanti because Luanti happens to load
+-- them the other way round. See ModConfiguration::resolveDependencies() in
+-- Luanti's src/content/mod_configuration.cpp.
+--
+-- The shape that matters: the mods that start with nothing to wait for go
+-- on a **stack** in scan order, and each one taken off it is taken from the
+-- **end**; a mod whose last dependency has just arrived goes on the same
+-- stack and so is taken next. That is depth-first from the last dep-free
+-- mod backwards, which is not what visiting each mod's dependencies first
+-- gives.
 function M.order_mods(mods, first_mod, last_mod)
-	local by_name = {}
+	first_mod = (first_mod ~= "" and first_mod) or nil
+	last_mod = (last_mod ~= "" and last_mod) or nil
+
+	local modnames = {}
+	local first_spec, last_spec
 	for _, mod in ipairs(mods) do
-		by_name[mod.name] = mod
-	end
-
-	local function weight(mod)
 		if mod.name == first_mod then
-			return 0
+			first_spec = mod
 		elseif mod.name == last_mod then
-			return 2
+			last_spec = mod
+		else
+			modnames[mod.name] = true
 		end
-		return 1
+	end
+	if first_mod and not first_spec then
+		error("The mod specified as first by the game was not found: " ..
+				first_mod)
+	end
+	if last_mod and not last_spec then
+		error("The mod specified as last by the game was not found: " ..
+				last_mod)
 	end
 
-	local out = {}
-	local state = {}   -- nil, "visiting", "done"
+	local sorted = {}
+	if first_spec then
+		if #first_spec.depends > 0 or #first_spec.optional_depends > 0 then
+			error("Mod specified by first_mod cannot have dependencies")
+		end
+		sorted[#sorted + 1] = first_spec
+	end
 
-	local function visit(mod, w)
-		if state[mod.name] == "done" then
-			return
-		end
-		if state[mod.name] == "visiting" then
-			error("Circular mod dependency at " .. mod.name)
-		end
-		state[mod.name] = "visiting"
+	-- What a mod is still waiting for: everything it depends on, and the
+	-- optional ones that are actually there. first_mod is already loaded.
+	local function unmet_of(mod)
+		local t = {}
 		for _, dep in ipairs(mod.depends) do
-			local d = by_name[dep]
-			if not d then
-				error("Mod " .. mod.name .. " depends on " .. dep ..
-						", which is not there")
+			if dep ~= first_mod then
+				t[dep] = true
 			end
-			visit(d, w)
 		end
 		for _, dep in ipairs(mod.optional_depends) do
-			local d = by_name[dep]
-			if d and weight(d) <= w then
-				visit(d, w)
+			if modnames[dep] then
+				t[dep] = true
 			end
 		end
-		state[mod.name] = "done"
-		out[#out + 1] = mod
+		if last_mod and t[last_mod] and mod ~= last_spec then
+			error("Mod " .. mod.name .. " depends on " .. last_mod ..
+					", which the game says loads last")
+		end
+		return t
 	end
 
-	for w = 0, 2 do
-		for _, mod in ipairs(mods) do
-			if weight(mod) == w then
-				visit(mod, w)
+	local unmet = {}
+	local satisfied = {}     -- a stack: taken from the end
+	local unsatisfied = {}   -- in scan order
+	for _, mod in ipairs(mods) do
+		if mod ~= first_spec and mod ~= last_spec then
+			unmet[mod.name] = unmet_of(mod)
+			if next(unmet[mod.name]) == nil then
+				satisfied[#satisfied + 1] = mod
+			else
+				unsatisfied[#unsatisfied + 1] = mod
 			end
 		end
 	end
-	return out
+	if last_spec then
+		unmet[last_spec.name] = unmet_of(last_spec)
+	end
+
+	while #satisfied > 0 do
+		local mod = table.remove(satisfied)
+		sorted[#sorted + 1] = mod
+		local rest = {}
+		for _, mod2 in ipairs(unsatisfied) do
+			unmet[mod2.name][mod.name] = nil
+			if next(unmet[mod2.name]) == nil then
+				satisfied[#satisfied + 1] = mod2
+			else
+				rest[#rest + 1] = mod2
+			end
+		end
+		unsatisfied = rest
+		if last_spec then
+			unmet[last_spec.name][mod.name] = nil
+		end
+	end
+
+	if last_spec then
+		if next(unmet[last_spec.name]) == nil then
+			sorted[#sorted + 1] = last_spec
+		else
+			unsatisfied[#unsatisfied + 1] = last_spec
+		end
+	end
+
+	-- What is left over never got everything it was waiting for: a
+	-- dependency that is not installed, or a cycle. Which of the two it is
+	-- is worth saying, because they are fixed in different places.
+	if #unsatisfied > 0 then
+		local said = {}
+		for _, mod in ipairs(unsatisfied) do
+			local missing = {}
+			for dep in pairs(unmet[mod.name]) do
+				missing[#missing + 1] = dep ..
+						(modnames[dep] and "" or " (not there)")
+			end
+			table.sort(missing)
+			said[#said + 1] = mod.name .. " waits for " ..
+					table.concat(missing, ", ")
+		end
+		table.sort(said)
+		error("Mods that never got what they depend on -- a dependency " ..
+				"that is not installed, or a cycle: " ..
+				table.concat(said, "; "))
+	end
+	return sorted
 end
 
 return M
