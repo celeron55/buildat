@@ -517,7 +517,7 @@ do
 	local menu = holder:CreateChild("Menu")
 	local popup = holder:CreateChild("Window")
 	menu.popup = popup
-	menu.popupOffset = IntVector2(0, 20)
+	menu.popupOffset = Safe.IntVector2(0, 20)
 	assert(menu.popup ~= nil and menu.popupOffset.y == 20,
 			"whitelist: Menu did not take its popup and offset")
 
@@ -542,25 +542,30 @@ do
 
 	-- Text3D is a Drawable rather than a UI element, so it wants a node of
 	-- its own; the scene is thrown away with it
-	local scene = Scene:new()
+	local scene = Safe.Scene:new()
 	local node = scene:CreateChild("whitelist_check")
 	local label = node:CreateComponent("Text3D")
+	-- **The font first.** Text::SetFontSize() begins "Initial font must be
+	-- set" and returns false without one, so a size set before a font is
+	-- silently the default -- which is the exact shape of failure this whole
+	-- sweep exists to catch, and it was caught here.
+	label:SetFont(Safe.cache:GetResource("Font",
+			"Fonts/OverpassMono-Regular.ttf"), 24)
 	label.text = "over there"
-	label.fontSize = 24
 	label.wordwrap = false
 	label.fixedScreenSize = true
 	assert(label.text == "over there" and label.fontSize == 24 and
 			label.fixedScreenSize == true,
-			"whitelist: Text3D did not take its text and size")
+			"whitelist: Text3D did not take its font, text and size")
 	node:Remove()
 
 	-- Pixels, and the six faces a sky is drawn on. An image made here rather
 	-- than read from anywhere: what the cache hands over is the same class.
-	local img = Image:new()
+	local img = Safe.Image:new()
 	assert(img:SetSize(4, 4, 4), "whitelist: Image:SetSize() refused")
 	assert(img.width == 4 and img.components == 4,
 			"whitelist: Image did not take its size")
-	img:SetPixel(1, 1, Color(1, 0, 0, 1))
+	img:SetPixel(1, 1, Safe.Color(1, 0, 0, 1))
 	local px = img:GetPixel(1, 1)
 	assert(px.r > 0.99 and px.g < 0.01,
 			"whitelist: a pixel written is not the pixel read")
@@ -569,16 +574,23 @@ do
 
 	-- SetData sizes the cube from face 0, so this is the whole of it: one
 	-- square image on every face
-	local cube = TextureCube:new()
-	local face = Image:new()
+	local cube = Safe.TextureCube:new()
+	local face = Safe.Image:new()
 	face:SetSize(4, 4, 4)
-	face:Clear(Color(0, 0, 1, 1))
+	face:Clear(Safe.Color(0, 0, 1, 1))
 	for i = 0, 5 do
 		assert(cube:SetData(i, face),
 				"whitelist: TextureCube:SetData() refused face " .. i)
 	end
 
 	holder:Remove()
+
+	-- Said out loud, because the failure that cost the most here was a check
+	-- that could not be told from one that never ran: an error anywhere in
+	-- this block takes the whole extension down with it, and then nothing
+	-- logs anything at all. A run without this line is a run where the
+	-- sandbox did not load.
+	log:info("whitelist: the wrapped classes round-tripped")
 end
 
 --

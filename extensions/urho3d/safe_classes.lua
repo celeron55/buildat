@@ -1449,6 +1449,10 @@ function M.define(dst, util)
 		},
 		properties = {
 			text = util.simple_property("string"),
+			-- **A font has to be set before this does anything.**
+			-- Text::SetFontSize() begins "Initial font must be set" and
+			-- returns false without one, so a size written first is
+			-- silently the default. SetFont() takes both at once.
 			fontSize = util.simple_property("number"),
 			-- Wrapped at this many pixels of its own space, 0 for not
 			width = util.simple_property("number"),
