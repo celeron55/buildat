@@ -534,6 +534,56 @@ static int l_copy_ints(lua_State *L)
 	return 1;
 }
 
+// The nested tables Luanti's NoiseMap:get_2d_map() and get_3d_map() answer
+// with, built from the flat array in C.
+//
+// Luanti builds them in C too. Built with Lua loops they were 7.7% of the
+// time VoxeLibre's two hundred mods took to load, because a mod that asks
+// for a big map asks for a very big one -- mcl_end_island's is 401 x 30 x
+// 401, which is four and a half million entries and as many table writes.
+//
+// __luanti_nest_2d(flat, sx, sy) -> out[y][x], and
+// __luanti_nest_3d(flat, sx, sy, sz) -> out[x][y][z], which are the two
+// orders Luanti's own API builds them in.
+static int l_nest_2d(lua_State *L)
+{
+	luaL_checktype(L, 1, LUA_TTABLE);
+	const int sx = (int)luaL_checkinteger(L, 2);
+	const int sy = (int)luaL_checkinteger(L, 3);
+	lua_createtable(L, sy, 0);
+	for(int y = 1; y <= sy; y++){
+		lua_createtable(L, sx, 0);
+		for(int x = 1; x <= sx; x++){
+			lua_rawgeti(L, 1, (y - 1) * sx + x);
+			lua_rawseti(L, -2, x);
+		}
+		lua_rawseti(L, -2, y);
+	}
+	return 1;
+}
+
+static int l_nest_3d(lua_State *L)
+{
+	luaL_checktype(L, 1, LUA_TTABLE);
+	const int sx = (int)luaL_checkinteger(L, 2);
+	const int sy = (int)luaL_checkinteger(L, 3);
+	const int sz = (int)luaL_checkinteger(L, 4);
+	lua_createtable(L, sx, 0);
+	for(int x = 1; x <= sx; x++){
+		lua_createtable(L, sy, 0);
+		for(int y = 1; y <= sy; y++){
+			lua_createtable(L, sz, 0);
+			for(int z = 1; z <= sz; z++){
+				lua_rawgeti(L, 1, ((z - 1) * sy + (y - 1)) * sx + x);
+				lua_rawseti(L, -2, z);
+			}
+			lua_rawseti(L, -2, y);
+		}
+		lua_rawseti(L, -2, x);
+	}
+	return 1;
+}
+
 // core.__lua_profile(label): what has been sampled since the last call,
 // under a name, and then the counters start again. A probe calls it at the
 // edges of whatever it wants measured.
@@ -6944,6 +6994,8 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_add_media", l_add_media);
 		set_global_cfunction("__luanti_lua_profile", l_lua_profile);
 		set_global_cfunction("__luanti_copy_ints", l_copy_ints);
+		set_global_cfunction("__luanti_nest_2d", l_nest_2d);
+		set_global_cfunction("__luanti_nest_3d", l_nest_3d);
 		set_global_cfunction("__luanti_send_particles", l_send_particles);
 		set_global_cfunction("__luanti_send_sky", l_send_sky);
 		set_global_cfunction("__luanti_send_time", l_send_time);

@@ -920,40 +920,37 @@ end
 
 -- And the nested ones Luanti also answers: map[z][x] for two dimensions and
 -- map[x][y][z] for three, which is the order its own Lua API builds them in
+-- Nested in C, because a mod that asks for a big map asks for a very big
+-- one: mcl_end_island's is 401 x 30 x 401, and built with Lua loops these
+-- two were 7.7% of the time VoxeLibre's mods took to load. Luanti builds
+-- them in C as well.
 function NoiseMap:get_2d_map(pos)
-	local flat = self:get_2d_map_flat(pos)
-	local out = {}
-	local i = 1
-	for y = 1, self.sy do
-		local row = {}
-		for x = 1, self.sx do
-			row[x] = flat[i]
-			i = i + 1
-		end
-		out[y] = row
-	end
-	return out
+	return __luanti_nest_2d(self:get_2d_map_flat(pos), self.sx, self.sy)
 end
 
 function NoiseMap:get_3d_map(pos)
-	local flat = self:get_3d_map_flat(pos)
-	local out = {}
-	for x = 1, self.sx do
-		out[x] = {}
-		for y = 1, self.sy do
-			out[x][y] = {}
-		end
+	return __luanti_nest_3d(self:get_3d_map_flat(pos),
+			self.sx, self.sy, self.sz)
+end
+
+-- What the two have to come out as, checked at load against the flat array
+-- they nest. The two orders are Luanti's own and are not the same one --
+-- 2D is out[y][x] with y major, 3D is out[x][y][z] with z major -- which is
+-- the whole reason they are two functions.
+do
+	local flat = {}
+	for i = 1, 2 * 3 * 4 do
+		flat[i] = i
 	end
-	local i = 1
-	for z = 1, self.sz do
-		for y = 1, self.sy do
-			for x = 1, self.sx do
-				out[x][y][z] = flat[i]
-				i = i + 1
-			end
-		end
-	end
-	return out
+	local two = __luanti_nest_2d(flat, 2, 3)
+	assert(two[1][1] == 1 and two[1][2] == 2 and two[2][1] == 3 and
+			two[3][2] == 6, "a 2D noise map is out[y][x]")
+	local three = __luanti_nest_3d(flat, 2, 3, 4)
+	assert(three[1][1][1] == 1 and three[2][1][1] == 2 and
+			three[1][2][1] == 3 and three[1][1][2] == 7,
+			"a 3D noise map is out[x][y][z], z major")
+	assert(#three == 2 and #three[1] == 3 and #three[1][1] == 4,
+			"and it is sx by sy by sz")
 end
 
 function NoiseMap:calc_2d_map(pos)
