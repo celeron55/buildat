@@ -58,6 +58,9 @@ local CUBE = {{-0.5, -0.5, -0.5, 0.5, 0.5, 0.5}}
 local OFF_LO = {-M.RADIUS, 0, -M.RADIUS}
 local OFF_HI = {M.RADIUS, M.HEIGHT, M.RADIUS}
 
+-- What a player with nothing done to them moves by; see self.override
+local EMPTY_OVERRIDE = {}
+
 -- Acceleration on the wire is in voxels/s² only after another factor of BS;
 -- see where it is used below.
 local BS_ACCEL = 10
@@ -230,6 +233,12 @@ function M.new(is_solid, is_liquid)
 		fly = false,
 		noclip = false,
 		movement = M.DEFAULT_MOVEMENT,
+		-- What a mod has done to how this player moves: Luanti's
+		-- physics_override, which multiplies rather than replaces. Ones
+		-- until the server says otherwise; see M.sub_physics in the
+		-- module's client half.
+		override = {speed = 1, jump = 1, gravity = 1, sneak = 1,
+				sneak_glitch = 0},
 	}
 
 	-- The server put the player here, so whatever we thought is wrong
@@ -280,13 +289,18 @@ function M.new(is_solid, is_liquid)
 						math.floor(self.y + 0.5),
 						math.floor(self.z + 0.5))
 
+		-- What a mod has multiplied this player's movement by, which is
+		-- ones unless the server has said otherwise
+		local ov = self.override or EMPTY_OVERRIDE
+		local ov_speed = ov.speed or 1
 		-- Horizontal: accelerate towards what the keys ask for
 		local speed = m.speed_walk
 		if wish.fast then
 			speed = m.speed_fast
-		elseif wish.sneak and not self.fly then
+		elseif wish.sneak and not self.fly and (ov.sneak or 1) ~= 0 then
 			speed = m.speed_crouch
 		end
+		speed = speed * ov_speed
 		local len = math.sqrt(wish.x * wish.x + wish.z * wish.z)
 		local target_x, target_z = 0, 0
 		if len > 0 then
@@ -319,17 +333,17 @@ function M.new(is_solid, is_liquid)
 			end
 		elseif self.in_liquid then
 			if wish.jump then
-				self.vy = m.speed_walk
+				self.vy = m.speed_walk * ov_speed
 			else
-				self.vy = self.vy - m.gravity * dtime
+				self.vy = self.vy - m.gravity * (ov.gravity or 1) * dtime
 				if self.vy < -m.liquid_sink then
 					self.vy = -m.liquid_sink
 				end
 			end
 		elseif self.on_ground and wish.jump then
-			self.vy = m.speed_jump
+			self.vy = m.speed_jump * (ov.jump or 1)
 		else
-			self.vy = self.vy - m.gravity * dtime
+			self.vy = self.vy - m.gravity * (ov.gravity or 1) * dtime
 		end
 
 		local p = {self.x, self.y, self.z}
@@ -390,6 +404,24 @@ do
 	wet:update(0.1, {x = 0, z = 0, jump = true})
 	assert(wet.vy > 0 and not wet.on_ground,
 			"player: jumping in water does not lift the player")
+
+	-- And what a mod has multiplied the movement by: no gravity is no
+	-- falling at all, and twice the speed is twice as fast once the
+	-- acceleration has got there
+	local floating = M.new(nothing_stops)
+	floating.override = {gravity = 0}
+	local slow = M.new(nothing_stops)
+	local quick = M.new(nothing_stops)
+	quick.override = {speed = 2}
+	for _ = 1, 50 do
+		floating:update(0.1, {x = 0, z = 0})
+		slow:update(0.1, {x = 1, z = 0})
+		quick:update(0.1, {x = 1, z = 0})
+	end
+	assert(math.abs(floating.vy) < 1e-9,
+			"player: a gravity override of zero still pulls")
+	assert(quick.vx > slow.vx * 1.9,
+			"player: the speed override does nothing")
 end
 
 return M

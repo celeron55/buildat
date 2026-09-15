@@ -890,6 +890,34 @@ function PlayerRef:set_breath(b)
 	end
 end
 
+-- What the client's movement is multiplied by. Luanti's own defaults are
+-- ones, and a game that wants speed boots, low gravity or a jump curse
+-- changes them; the client cannot work any of it out for itself, so what is
+-- sent is the whole table each time rather than the change.
+--
+-- simplified: the three multipliers and the two sneak flags, which is what
+-- a game's play is built on. Luanti's override also carries the movement
+-- constants themselves (speed_walk, acceleration_air and the rest) and
+-- new_move; the upgrade path is more names in this list, because the client
+-- already keeps a whole movement table to apply them to.
+local PHYSICS_FIELDS = {"speed", "jump", "gravity", "sneak", "sneak_glitch"}
+
+local function send_physics(o)
+	if not (o and o.player_name and __luanti_send_physics) then
+		return
+	end
+	local flat = {}
+	for _, k in ipairs(PHYSICS_FIELDS) do
+		local v = o.physics[k]
+		if type(v) == "boolean" then
+			v = v and 1 or 0
+		end
+		flat[#flat + 1] = k
+		flat[#flat + 1] = tostring(tonumber(v) or 1)
+	end
+	__luanti_send_physics(o.player_name, flat)
+end
+
 function PlayerRef:get_physics_override()
 	local o = state_of(self)
 	return o and table.copy(o.physics) or nil
@@ -901,6 +929,7 @@ function PlayerRef:set_physics_override(t)
 		for k, v in pairs(t) do
 			o.physics[k] = v
 		end
+		send_physics(o)
 	end
 end
 
@@ -2321,7 +2350,10 @@ function core.__add_player(name)
 		wield_index = 1,
 		hotbar = 8,
 		breath = 10,
-		physics = {speed = 1, jump = 1, gravity = 1},
+		-- Luanti's own defaults for what the client's movement is
+		-- multiplied by; see send_physics() and PHYSICS_FIELDS
+		physics = {speed = 1, jump = 1, gravity = 1, sneak = true,
+				sneak_glitch = false, new_move = true},
 		inventory_formspec = "",
 		formspec_prepend = "",
 		-- What the client says it is holding down, written by
@@ -2376,6 +2408,9 @@ function core.__add_player(name)
 	-- last time they joined, and what their life and breath are
 	send_whole_hud(o)
 	send_stats(o)
+	-- And whatever a mod had already done to how they move, which for a
+	-- player who was here before is still on them
+	send_physics(o)
 	send_day_night(o)
 	send_sky(o)
 	-- And what time it is. The module sends this to everyone every few

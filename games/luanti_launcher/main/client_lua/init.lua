@@ -934,6 +934,13 @@ local function node_is_liquid(x, y, z)
 end
 
 local player = player_physics.new(node_stops, node_is_liquid)
+
+-- What a mod has done to how this player moves: set_physics_override() on
+-- the server. It multiplies the constants above rather than replacing them,
+-- so speed boots, low gravity and a jump curse are these numbers arriving.
+luanti.sub_physics(function(p)
+	player.override = p
+end)
 -- Nothing moves until the server says where the player is: what it answers
 -- with is the spawn, or where the last run left them, and a client that
 -- started walking from somewhere of its own would tell the server that

@@ -1448,6 +1448,35 @@ M.sky = nil
 
 local sky_subs = {}
 
+-- What the player's movement is multiplied by: set_physics_override() on
+-- the server, arriving as name/value pairs. The client's own constants times
+-- these are what a game's speed boots, low gravity and jump curse are made
+-- of. The whole table comes each time, so what is here is what is in force.
+local physics = {speed = 1, jump = 1, gravity = 1, sneak = 1,
+		sneak_glitch = 0}
+local physics_subs = {}
+
+function M.physics()
+	return physics
+end
+
+function M.sub_physics(f)
+	physics_subs[#physics_subs + 1] = f
+	f(physics)
+end
+
+buildat.sub_packet("luanti:physics", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	local t = {}
+	for i = 1, #values - 1, 2 do
+		t[values[i]] = tonumber(values[i + 1]) or 1
+	end
+	physics = t
+	for _, f in ipairs(physics_subs) do
+		f(physics)
+	end
+end)
+
 function M.sub_sky(f)
 	sky_subs[#sky_subs + 1] = f
 	if M.sky then
