@@ -85,6 +85,11 @@ struct ModuleContainer
 	// that was true a moment ago, which is what it is for.
 	ss_ direct_cb_holder;
 
+	// When the caller currently in execute_direct_cb() started waiting for
+	// the slot; see the warning there. Written and read under the slot's own
+	// serialization, so there is only ever one caller in it.
+	int64_t slot_wait_from = 0;
+
 	// NOTE: thread-ref_backtraces() Holds the backtraces along the way of a
 	// direct callback chain initiated by this module. Cleared when beginning to
 	// execute a direct callback. Read when event() (and maybe something else)
@@ -220,6 +225,7 @@ struct ModuleContainer
 			static const int64_t THEN_US = 10000000;
 			int64_t waited = 0;
 			int64_t slice = FIRST_US;
+			slot_wait_from = interface::os::time_us();
 			while(!direct_cb_free_sem.wait_us(slice)){
 				waited += slice;
 				slice = THEN_US;
@@ -230,8 +236,17 @@ struct ModuleContainer
 						waited / 1e6, cs(info.name), cs(direct_cb_holder));
 			}
 		}
+		const int64_t slot_us = interface::os::time_us() - slot_wait_from;
 		direct_cb_holder = caller_mc ? caller_mc->info.name :
 				ss_("(not a module)");
+		// Whose queue a module is waiting in. A wait of seconds is the shape
+		// of every slow thing between modules here, and which half it is --
+		// waiting for the module to be free, or waiting for the callback to
+		// run -- is the difference between "somebody else is in there" and
+		// "what I asked for is slow". Said at a second, because a startup
+		// legitimately spends longer than that and a line per access would
+		// be the log.
+		const int64_t cb_from = interface::os::time_us();
 		{
 			interface::MutexScope ms(mutex);
 			// This is the last chance to turn around
@@ -291,6 +306,18 @@ struct ModuleContainer
 				log_w(MODULE, "M[%s] has been waiting %.0f s for M[%s] to "
 						"run a direct callback", cs(caller_name),
 						waited / 1e6, cs(info.name));
+			}
+		}
+		{
+			static const int64_t SLOW_ACCESS_US = 1000000;
+			const int64_t cb_us = interface::os::time_us() - cb_from;
+			if(slot_us + cb_us >= SLOW_ACCESS_US){
+				const ss_ caller_name = caller_mc ? caller_mc->info.name :
+						ss_("(not a module)");
+				log_w(MODULE, "M[%s] waited %.1f s for M[%s]: %.1f s for the "
+						"module to be free, %.1f s for the callback to run",
+						cs(caller_name), (slot_us + cb_us) / 1e6,
+						cs(info.name), slot_us / 1e6, cb_us / 1e6);
 			}
 		}
 		// Grab execution result
