@@ -8,6 +8,7 @@
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/vector.hpp>
 #include <mutex>
+#include <atomic>
 #include <cassert>
 #define MODULE "voxel"
 
@@ -66,14 +67,76 @@ struct CVoxelRegistry: public VoxelRegistry
 	bool m_is_dirty = false;
 	std::mutex m_mutex;
 
+	// What get_cached() answers from without taking the mutex.
+	//
+	// It is asked once per voxel -- the light flood and the mesher both walk
+	// a quarter of a million of them per section -- and a lock and unlock
+	// around a table lookup was 6% of the whole server in a devtest profile,
+	// more than the lookup itself. Nearly every one of those calls is about
+	// an id whose cache entry was finished long ago.
+	//
+	// A pointer into m_cached_defs stays good for the life of the registry,
+	// since a deque never moves an element, and every caller of this already
+	// reads the entry after the lock is dropped. So what the fast path needs
+	// is a way to learn that an id is cached without touching the deque's
+	// own bookkeeping, which a concurrent add_voxel() may be writing: a
+	// table of pointers, published entry by entry with a release store and
+	// read with an acquire load.
+	//
+	// simplified: two levels of fixed size, so 65536 voxel types are fast
+	// and anything above that takes the lock. A game with more types than
+	// that has other problems.
+	static const uint32_t FAST_SHIFT = 8;
+	static const uint32_t FAST_IN_BLOCK = 1 << FAST_SHIFT;
+	static const uint32_t FAST_MASK = FAST_IN_BLOCK - 1;
+	static const uint32_t FAST_BLOCKS = 256;
+	static const uint32_t FAST_IDS = FAST_BLOCKS * FAST_IN_BLOCK;
+	typedef std::atomic<CachedVoxelDefinition*> FastSlot;
+	std::atomic<FastSlot*> m_fast[FAST_BLOCKS];
+	// The blocks themselves, kept until the registry goes: a reader may be
+	// in one. There are at most 256 of them.
+	sv_<sp_<FastSlot>> m_fast_blocks;
+
+	// Called with the mutex held, once an entry is finished
+	void publish_fast(VoxelTypeId id, CachedVoxelDefinition *cache)
+	{
+		if(id >= FAST_IDS)
+			return;
+		const uint32_t bi = id >> FAST_SHIFT;
+		FastSlot *block = m_fast[bi].load(std::memory_order_relaxed);
+		if(block == nullptr){
+			m_fast_blocks.push_back(sp_<FastSlot>(
+					new FastSlot[FAST_IN_BLOCK](),
+					std::default_delete<FastSlot[]>()));
+			block = m_fast_blocks.back().get();
+			m_fast[bi].store(block, std::memory_order_release);
+		}
+		block[id & FAST_MASK].store(cache, std::memory_order_release);
+	}
+
+	// Nothing is fast any more: the entries these point at are about to go
+	void forget_fast()
+	{
+		for(uint32_t i = 0; i < FAST_BLOCKS; i++){
+			FastSlot *block = m_fast[i].load(std::memory_order_relaxed);
+			if(block == nullptr)
+				continue;
+			for(uint32_t j = 0; j < FAST_IN_BLOCK; j++)
+				block[j].store(nullptr, std::memory_order_release);
+		}
+	}
+
 	CVoxelRegistry()
 	{
+		for(uint32_t i = 0; i < FAST_BLOCKS; i++)
+			m_fast[i].store(nullptr, std::memory_order_relaxed);
 		m_defs.resize(1); // Id 0 is VOXELTYPEID_UNDEFINEDD
 	}
 
 	void clear()
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
+		forget_fast();
 		m_defs.clear();
 		m_cached_defs.clear();
 		m_name_to_id.clear();
@@ -193,10 +256,35 @@ struct CVoxelRegistry: public VoxelRegistry
 		return get_unlocked(id);
 	}
 
+	// The fast path: an id whose entry is finished, asked about without an
+	// atlas. A caller that wants textures takes the lock, because those are
+	// filled later and only on the thread that has the atlas.
+	const CachedVoxelDefinition* fast_cached(VoxelTypeId id)
+	{
+		if(id >= FAST_IDS)
+			return nullptr;
+		FastSlot *block = m_fast[id >> FAST_SHIFT].load(
+				std::memory_order_acquire);
+		if(block == nullptr)
+			return nullptr;
+		return block[id & FAST_MASK].load(std::memory_order_acquire);
+	}
+
 	const CachedVoxelDefinition* get_cached(const VoxelTypeId &id,
 			AtlasRegistry *atlas_reg, bool with_lod)
 	{
+		if(atlas_reg == nullptr){
+			const CachedVoxelDefinition *fast = fast_cached(id);
+			if(fast != nullptr)
+				return fast;
+		}
 		std::lock_guard<std::mutex> lock(m_mutex);
+		return get_cached_locked(id, atlas_reg, with_lod);
+	}
+
+	const CachedVoxelDefinition* get_cached_locked(const VoxelTypeId &id,
+			AtlasRegistry *atlas_reg, bool with_lod)
+	{
 		if(id >= m_defs.size()){
 			log_w(MODULE, "CVoxelRegistry::get_cached(): id=%i not found", id);
 			return NULL;
@@ -209,6 +297,8 @@ struct CVoxelRegistry: public VoxelRegistry
 		if(!cache.valid){
 			update_cache_basic(cache, def);
 			cache.valid = true;
+			// Finished, so the next caller need not come here at all
+			publish_fast(id, &cache);
 		}
 		if(!cache.textures_valid && atlas_reg){
 			update_cache_textures(cache, def, atlas_reg);
@@ -232,12 +322,21 @@ struct CVoxelRegistry: public VoxelRegistry
 	const CachedVoxelDefinition* get_cached(const VoxelSample &v,
 			AtlasRegistry *atlas_reg, bool with_lod)
 	{
-		VoxelTypeId id;
-		{
-			std::lock_guard<std::mutex> lock(m_mutex);
-			id = m_look.id_of(v, m_format);
+		// Which id a sample is took a lock of its own, so this call -- the
+		// one the light flood and the mesher make per voxel -- locked twice.
+		// The selector and the format are set while the registry is being
+		// built and not after (set_format() refuses once anything is
+		// registered), so the fast path reads them the way it reads the
+		// entry they lead to: without the lock.
+		if(atlas_reg == nullptr){
+			const CachedVoxelDefinition *fast =
+					fast_cached(m_look.id_of(v, m_format));
+			if(fast != nullptr)
+				return fast;
 		}
-		return get_cached(id, atlas_reg, with_lod);
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return get_cached_locked(m_look.id_of(v, m_format), atlas_reg,
+				with_lod);
 	}
 
 	bool is_dirty()
