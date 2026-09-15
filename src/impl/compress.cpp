@@ -193,6 +193,15 @@ void compress_zstd(const ss_ &data_in, std::ostream &os, int level)
 	os.write(buffer.c_str(), size);
 }
 
+size_t decompress_zstd(const ss_ &data_in, uint8_t *out, size_t out_size)
+{
+	const size_t got = ZSTD_decompress(out, out_size,
+			data_in.c_str(), data_in.size());
+	if(ZSTD_isError(got))
+		throw Exception(ss_("decompress_zstd: ") + ZSTD_getErrorName(got));
+	return got;
+}
+
 size_t decompress_zstd(const ss_ &data_in, std::ostream &os)
 {
 	ZSTD_DStream *stream = ZSTD_createDStream();

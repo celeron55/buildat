@@ -20,5 +20,10 @@ namespace interface
 	// calling this again from where the last one ended, which is what a Luanti
 	// mapblock at serialization version 28 needs.
 	size_t decompress_zstd(const ss_ &data_in, std::ostream &os);
+	// The same frame straight into a buffer of a size that is already known,
+	// which is what reading a chunk back in has: no stream object, no
+	// scratch buffer and no copy on the way out. Returns how many bytes came
+	// out, and throws if the frame does not fit in what was given.
+	size_t decompress_zstd(const ss_ &data_in, uint8_t *out, size_t out_size);
 }
 // vim: set noet ts=4 sw=4:

@@ -164,6 +164,12 @@ namespace interface
 		// pv::RawVolume had and what every blob written before planes is in.
 		const sv_<uint8_t>& plane_bytes(uint8_t plane) const;
 		sv_<uint8_t>& plane_bytes_for_write(uint8_t plane);
+		// A plane filled from bytes that cover the whole of it, without the
+		// clearing plane_bytes_for_write() does when it materialises one.
+		// What asks is reading a chunk back in, which overwrote every byte
+		// of a plane it had just cleared -- 157 kB a chunk, and 3.5% of the
+		// whole server in a devtest profile.
+		void set_plane_bytes(uint8_t plane, const uint8_t *data, size_t size);
 		bool plane_is_materialised(uint8_t plane) const
 		{
 			return plane < m_data.size() && !m_data[plane].empty();
