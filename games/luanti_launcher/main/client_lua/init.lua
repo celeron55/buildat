@@ -233,6 +233,27 @@ do
 	sun_light.castShadows = true
 	sun_light.brightness = SUN_BRIGHTNESS
 	sun_light.color = SUN_COLOR
+	-- Voxel faces at a grazing sun angle are the classic shadow acne case: a
+	-- whole flat face falls inside one shadow texel and shadows itself in
+	-- stripes. A slope-scaled bias on top of the automatic one, and a normal
+	-- offset, which is the one that works on a face that is flat and wide.
+	-- extensions/luanti_client's own numbers; see [WOBBLY_SHADOWS].
+	sun_light.shadowBias = magic.BiasParameters(0.00005, 0.8, 0.002)
+	-- Two cascades rather than Urho3D's one spread over the whole shadow
+	-- distance. The near one is confined to where the player is looking, so
+	-- a node gets the texels it needs; without the split the same sparse
+	-- grid slides under static geometry as the shadow camera is refitted
+	-- each frame, which is the wobble.
+	-- 24 nodes and 96, not the far clip: a shadow map stretched over four
+	-- hundred nodes has no density left where the player is. Written here
+	-- rather than as two named constants because this file's main chunk is
+	-- at Lua 5.1's limit of 200 locals.
+	sun_light.shadowCascade = magic.CascadeParameters(24, 96, 0, 0, 0.8)
+	-- Past the far cascade the world is ambient-lit, which at that range
+	-- reads as haze rather than as a missing shadow.
+	magic.renderer.shadowMapSize = 1024
+	magic.renderer.shadowQuality = magic.SHADOWQUALITY_SIMPLE_16BIT
+	magic.renderer.drawShadows = true
 end
 
 -- The sky the world stands under. builtin/voxel_shading's gradient sky is
