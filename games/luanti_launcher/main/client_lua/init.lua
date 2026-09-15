@@ -778,6 +778,10 @@ end
 
 -- What the last sky update worked out, for the line of detail
 local sky_now = {height = 0, day = 0}
+-- Whether the eye is in a liquid, which owns the fog while it is true.
+-- Declared here rather than beside update_underwater() because the sky
+-- handler has to know not to put the surface's fog range back.
+local underwater = false
 -- What the game said its sky is, as luanti.sub_sky() gives it
 local game_sky = {}
 
@@ -933,11 +937,15 @@ local function update_sky(dt)
 	-- little between two of them has crawling edges, so the direction is
 	-- held still a step at a time. How bright, what colour and whether it is
 	-- up stay smooth.
-	local sx, sy = luanti_sky.sun_direction(luanti_sky.stepped_time(daylight))
-	local _, smooth_sy = luanti_sky.sun_direction(daylight)
+	local tilt = game_sky.body_orbit_tilt
+	local sx, sy, sz =
+			luanti_sky.sun_direction(luanti_sky.stepped_time(daylight), tilt)
+	local _, smooth_sy = luanti_sky.sun_direction(daylight, tilt)
 	local height = smooth_sy
 	-- The light travels the other way, which is what a Light's direction is
-	local dir = normalized({x = -sx * 0.9, y = -sy, z = -0.42})
+	-- The tilt turns the orbit out of the vertical plane; this game's own
+	-- 0.42 offset does the same thing for a different reason, so they add
+	local dir = normalized({x = -sx * 0.9, y = -sy, z = -(sz + 0.42)})
 	-- And the sky is given the sun's, always: it draws the moon opposite,
 	-- so there is nothing to flip at nightfall
 	world_sky:set_sun_direction(dir)
@@ -984,8 +992,11 @@ local function update_sky(dt)
 	-- the haze is the indoors colour rather than a sky the player cannot
 	-- see. See [CAVE_SKY].
 	local seen = voxel_shading.sky_visibility_above()
-	zone.fogColor = blend(blend(NIGHT_FOG, DAY_FOG, day),
-			indoors_of(0.10 + 0.90 * day), 1 - seen)
+	-- A game's own fog colour is art direction and wins outright; without
+	-- one the fog is the horizon of this hour, which is what it has always
+	-- been here
+	local base = game_sky.fog_color or blend(NIGHT_FOG, DAY_FOG, day)
+	zone.fogColor = blend(base, indoors_of(0.10 + 0.90 * day), 1 - seen)
 	sky_now.height = height
 	sky_now.day = day
 	sky_now.daylight = daylight
@@ -1028,6 +1039,30 @@ luanti.sub_sky(function(sky)
 	if sky.horizon then
 		DAY_FOG = magic.Color(sky.horizon.r, sky.horizon.g, sky.horizon.b)
 	end
+	-- Luanti's fog_distance is not a fog knob but an upper bound on the
+	-- client's viewing range, and the settled rule is that a game may lower
+	-- it and never raise it -- see [SKY_KNOBS]. Negative gives it back.
+	local far = FAR_CLIP
+	if sky.fog_distance and sky.fog_distance >= 0 then
+		far = math.min(FAR_CLIP, sky.fog_distance)
+	end
+	sky_now.far_clip = far
+	if camera then
+		camera.farClip = far
+	end
+	-- fog_start is a fraction of that range and not a distance; without one
+	-- it is where extensions/luanti_client's starts
+	if zone and not underwater then
+		zone.fogStart = far * (sky.fog_start or 0.7)
+		zone.fogEnd = far
+	end
+	-- A skybox sky has no gradient to take a fog colour from, so Luanti fogs
+	-- it with base_color; a plain sky's base_color is already the sky itself
+	if sky.type == "skybox" and sky.base_color and not sky.fog_color then
+		DAY_FOG = magic.Color(sky.base_color.r, sky.base_color.g,
+				sky.base_color.b)
+	end
+
 	-- Six pictures rather than a gradient, if that is what the game asked
 	-- for and all six of them arrived
 	if sky.type == "skybox" and sky.textures and sky.textures[6] then
@@ -1084,8 +1119,6 @@ local function voxel_liquid_at(p)
 	return def
 end
 
-local underwater = false
-
 local function update_underwater(eye)
 	local def = voxel_liquid_at(eye)
 	local now = def ~= nil
@@ -1101,8 +1134,9 @@ local function update_underwater(eye)
 		zone.fogStart = 2
 		zone.fogEnd = UNDERWATER_FOG
 	else
-		zone.fogStart = FAR_CLIP * 0.7
-		zone.fogEnd = FAR_CLIP
+		local far = sky_now.far_clip or FAR_CLIP
+		zone.fogStart = far * (game_sky.fog_start or 0.7)
+		zone.fogEnd = far
 	end
 end
 

@@ -142,7 +142,12 @@ end
 -- Where the sun is, as a direction to it, with y the sine of its elevation.
 -- Luanti's own: the day is stretched so the night takes less than half of it
 -- (getWickedTimeOfDay), and the sun rises towards +X and sets towards -X.
-function M.sun_direction(t)
+--
+-- tilt is Luanti's body_orbit_tilt in degrees, which turns the orbit about
+-- the axis the sun rises over -- sky.cpp does it as rotateYZBy, so it is the
+-- y and z of the direction that turn and the elevation this answers with is
+-- the tilted one.
+function M.sun_direction(t, tilt)
 	t = ((t or 12000) % 24000) / 24000
 	local wn = 0.415 / 2
 	local w
@@ -154,7 +159,13 @@ function M.sun_direction(t)
 		w = 1 - (1 - t) / wn * 0.25
 	end
 	local a = math.rad(w * 360 - 90)
-	return math.cos(a), math.sin(a), 0
+	local x, y, z = math.cos(a), math.sin(a), 0
+	if tilt and tilt ~= 0 then
+		local r = math.rad(tilt)
+		local c, sn = math.cos(r), math.sin(r)
+		y, z = y * c - z * sn, y * sn + z * c
+	end
+	return x, y, z
 end
 
 -- What the schedule has to hold, which is the extension's own check: the two
@@ -196,6 +207,14 @@ do
 	-- The step is a step and nothing more
 	assert(M.stepped_time(12049) == 12000 and M.stepped_time(12051) == 12100,
 			"the shadow's direction is held still a step at a time")
+
+	-- And a tilted orbit turns the sun out of the vertical plane without
+	-- changing how far round the day it is
+	local tx, ty, tz = M.sun_direction(12000, 30)
+	local ux, uy, uz = M.sun_direction(12000)
+	assert(math.abs(tx - ux) < 1e-9, "a tilt leaves the rising axis alone")
+	assert(tz > 0.4 and ty < uy,
+			"and takes the sun off the vertical plane at noon")
 end
 
 function M.new(scene, sun_dir, defaults)

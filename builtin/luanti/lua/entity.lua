@@ -1158,6 +1158,26 @@ local function send_sky(o)
 	-- [CAVE_SKY] in doc/plan/rendering_plan.md for what reads them.
 	put("indoors", sky_rgb(sky_color.indoors) or sky_rgb("#646464"))
 	put("auto_dim_skybox", (sky.auto_dim_skybox ~= false) and "1" or "0")
+	-- A skybox's base_color is what Luanti fogs with, where a plain sky's is
+	-- the sky itself; it was sent only for the second. Sent as itself now,
+	-- so the client can use it for whichever the type says.
+	put("base_color", sky_rgb(sky.base_color))
+	-- How far the sun and the moon's orbit is tilted, in degrees about the
+	-- axis they rise over. Luanti clamps it to [-60, 60]; a game that tilts
+	-- its sky means it.
+	if tonumber(sky.body_orbit_tilt) then
+		put("body_orbit_tilt", math.max(-60, math.min(60,
+				tonumber(sky.body_orbit_tilt))))
+	end
+	-- Luanti's fog table. fog_start is a fraction of the viewing range and
+	-- not a distance; fog_distance is not a fog knob at all but an upper
+	-- bound on the client's viewing range, and negative gives it back.
+	local fog = sky.fog or {}
+	put("fog_color", sky_rgb(fog.fog_color))
+	if tonumber(fog.fog_start) then
+		put("fog_start", math.max(0, math.min(0.99, tonumber(fog.fog_start))))
+	end
+	put("fog_distance", tonumber(fog.fog_distance))
 	put("sun_tint", sky_rgb(sky_color.fog_sun_tint) or
 			sky_rgb(SKY_DEFAULT_SUN_TINT))
 	put("moon_tint", sky_rgb(sky_color.fog_moon_tint) or
@@ -1236,10 +1256,10 @@ end
 -- whether each is there and how big it is; the rest is kept so that a mod
 -- reads back what it set.
 --
--- simplified: a sun or a moon is the sky shader's own square and not a
--- texture, so texture, tonemap and sunrise are kept and not drawn. What
--- would draw them is a quad at the sun's direction with the game's picture
--- on it, which is a thing the skybox does not have.
+-- simplified: tonemap and sunrise are kept and not drawn. The game's own
+-- picture of a sun or a moon **is** drawn -- see [SKY_LEFTOVERS] -- and this
+-- note used to say it was not; what is still missing is the sunrise band
+-- (sunrisebg.png) and the tonemaps, which this sky has nowhere to put.
 local function sky_thing_setter(field)
 	return function(self, params)
 		local o = state_of(self)

@@ -1563,6 +1563,15 @@ buildat.sub_packet("luanti:sky", function(data)
 		-- game lets a client dim for that
 		indoors = rgb(e.indoors),
 		auto_dim_skybox = e.auto_dim_skybox ~= "0",
+		-- What a skybox sky fogs with, how far the bodies' orbit is tilted,
+		-- and Luanti's fog table. fog_start is a fraction of the viewing
+		-- range; fog_distance is an upper bound on that range and nil for
+		-- "the client decides".
+		base_color = rgb(e.base_color),
+		body_orbit_tilt = tonumber(e.body_orbit_tilt or ""),
+		fog_color = rgb(e.fog_color),
+		fog_start = tonumber(e.fog_start or ""),
+		fog_distance = tonumber(e.fog_distance or ""),
 		clouds = e.clouds ~= "0",
 		density = tonumber(e.density or ""),
 		cloud_color = rgb(e.cloud_color),
