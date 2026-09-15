@@ -300,6 +300,10 @@ struct CInstance: public voxelworld::Instance
 		pv::Vector3DInt32 p;
 		uint8_t old_level;
 		bool was_transparent;
+		// What the voxel that was there made of its own light. A blocker
+		// wears the brightest light beside it rather than real propagated
+		// light, so its stored level does not say whether a lamp went.
+		uint8_t old_emitted;
 	};
 	std::vector<SkylightSeed> m_light_seeds[NUM_LIGHT_FIELDS];
 
@@ -1402,7 +1406,7 @@ struct CInstance: public voxelworld::Instance
 				// "It was a blocker and is not any more" is the shape the
 				// flood reads as "fill this one from what is around it",
 				// which is what every one of these wants
-				m_light_seeds[lf].push_back(SkylightSeed{p, 0, false});
+				m_light_seeds[lf].push_back(SkylightSeed{p, 0, false, 0});
 				seeded++;
 			}
 		}
@@ -2344,7 +2348,8 @@ struct CInstance: public voxelworld::Instance
 						(lf == LIGHT_LAMP &&
 						voxel_light_source(old) != voxel_light_source(nv))){
 					m_light_seeds[lf].push_back(SkylightSeed{
-							p, get_light(old_first, lf), old_transparent});
+							p, get_light(old_first, lf), old_transparent,
+							lf == LIGHT_LAMP ? voxel_light_source(old) : 0});
 				}
 				set_light(first, get_light(old_first, lf), lf);
 			}
@@ -2432,7 +2437,8 @@ struct CInstance: public voxelworld::Instance
 						(lf == LIGHT_LAMP &&
 						voxel_light_source(old) != voxel_light_source(now))){
 					m_light_seeds[lf].push_back(SkylightSeed{
-							p, get_light(old_first, lf), old_transparent});
+							p, get_light(old_first, lf), old_transparent,
+							lf == LIGHT_LAMP ? voxel_light_source(old) : 0});
 				}
 				set_light(nv, get_light(old_first, lf), lf);
 			}
@@ -2731,7 +2737,9 @@ struct CInstance: public voxelworld::Instance
 							voxel_light_source(src_v))){
 						m_light_seeds[lf].push_back(SkylightSeed{
 								pv::Vector3DInt32(x, y, z),
-								get_light(old, lf), old_transparent});
+								get_light(old, lf), old_transparent,
+								lf == LIGHT_LAMP ?
+								voxel_light_source(dst_v) : 0});
 					}
 					set_light(nv, get_light(old, lf), lf);
 				}
@@ -3249,9 +3257,28 @@ struct CInstance: public voxelworld::Instance
 				// makes the sky reach the ground in a world whose region
 				// top is thirty thousand voxels up and never loaded
 				uint8_t l = flood_get(v);
+				const uint8_t emitted = emitted_at(seed.p);
+
+				// Unless what went was a light source of its own: a torch
+				// is solid and lights the room, and taking one away has to
+				// take its light with it. What it holds is that light --
+				// a blocker wears the brightest light beside it so the
+				// mesher has something to read off its faces -- so it is
+				// cleared here rather than spread back out.
+				//
+				// Found through nodecore, whose player hand is a node with
+				// light_source 14 that blocks light: the startup map check
+				// put one in a room, took it out again, and the room stayed
+				// lit at 13. devtest's own lamps are glasslike and let light
+				// through, which is the other branch and has always worked.
+				if(seed.old_emitted > emitted){
+					light_set(seed.p, v, 0);
+					unlight.push_back(LightNode{seed.p, seed.old_emitted});
+					l = 0;
+				}
+
 				if(field == LIGHT_SKY && is_below_open_sky(seed.p))
 					l = flood_max();
-				const uint8_t emitted = emitted_at(seed.p);
 				if(emitted > l)
 					l = emitted;
 				light_set(seed.p, v, l);

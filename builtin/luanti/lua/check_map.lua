@@ -343,8 +343,33 @@ end
 -- nothing in it is dark, a torch in it lights the walls around it and dims
 -- with distance, and taking the torch away makes it dark again.
 --
--- A game with no glowing node at all skips this, which is the same deal
--- check_map gives a game with no node to write.
+-- A game with no glowing node of its own skips that half of it, which is
+-- the same deal check_map gives a game with no node to write; the lamp
+-- below is the check's own and every game gets it.
+
+-- A lamp of the check's own, because the one thing a game's lamp does not
+-- reliably have is a shape: one that makes light and lets none through. A
+-- torch is that, and so is nodecore's player hand; devtest's lamps are
+-- glasslike and transmit. The two go down different paths in voxelworld --
+-- light a voxel does not transmit is not stored in it the way a lit voxel
+-- stores it, the voxel wears the brightest light beside it so the mesher
+-- has something to read off its faces -- and taking the blocking one away
+-- has to know what it was making rather than what it holds.
+--
+-- Called from modloader.lua rather than registered here: this file is read
+-- before the vendored builtin defines core.register_node, and the node has
+-- to be in the registry with the game's own before the world is built.
+function core.__register_check_nodes()
+	core.register_node(":check_map:lamp", {
+		description = "check_map lamp",
+		drawtype = "normal",
+		paramtype = "light",
+		sunlight_propagates = false,
+		light_source = 14,
+		groups = {not_in_creative_inventory = 1},
+	})
+end
+
 local LIGHT_MIN = {x = 40, y = BASE_Y + 2, z = 40}
 local LIGHT_MAX = {x = 46, y = BASE_Y + 8, z = 46}
 local LIGHT_AT = {x = 43, y = BASE_Y + 5, z = 43}
@@ -366,7 +391,9 @@ local function lamp_like(name, def)
 			def.drawtype == "mesh" or def.drawtype == "airlike" then
 		return false
 	end
-	return def.paramtype == "light"
+	-- The check's own lamp is not this game's content; it is tried
+	-- separately
+	return def.paramtype == "light" and name ~= "check_map:lamp"
 end
 
 local function brightest_node()
@@ -389,11 +416,36 @@ local function brightest_node()
 	return any, any_light
 end
 
+-- The room is built and dark already; this puts the check's own lamp in it
+-- and takes it out again. A lamp that blocks light is the case a flood gets
+-- wrong the easy way: the voxel left behind is holding the light the lamp
+-- was making, and filling that hole from what it holds spreads the light
+-- straight back out. Found through nodecore, whose player hand is exactly
+-- this node, and reproduced here so that no particular game is needed.
+local function check_blocking_lamp(beside)
+	core.set_node(LIGHT_AT, {name = "check_map:lamp"})
+	local near = core.get_node_light(beside)
+	if near == nil or near < 13 then
+		error("check_map: the blocking lamp lights 14 and its neighbour " ..
+				"has " .. tostring(near))
+	end
+	core.set_node(LIGHT_AT, {name = "air"})
+	local after = core.get_node_light(beside)
+	if after ~= 0 then
+		error("check_map: the light of the blocking lamp stayed after it " ..
+				"went: " .. tostring(after) .. ". Where it was is now " ..
+				core.get_node(LIGHT_AT).name .. ", and what is beside it " ..
+				"is " .. core.get_node(beside).name)
+	end
+end
+
 local function check_light()
 	local lamp, level = brightest_node()
-	if not lamp or level < 3 then
-		core.log("verbose", "check_map: no node that makes light")
-		return
+	if lamp and level < 3 then
+		lamp = nil
+	end
+	if not lamp then
+		core.log("verbose", "check_map: no node of this game makes light")
 	end
 	local wall = check_name
 	-- A solid box, hollowed out: somewhere the sky does not reach
@@ -417,39 +469,43 @@ local function check_light()
 				tostring(dark))
 	end
 
-	core.set_node(LIGHT_AT, {name = lamp})
-	local near = core.get_node_light(beside)
-	local far = core.get_node_light(further)
-	if near == nil or near < level - 1 then
-		error("check_map: " .. lamp .. " lights " .. level ..
-				" and its neighbour has " .. tostring(near))
-	end
-	if far == nil or far >= near or far == 0 then
-		error("check_map: the light does not dim with distance: " ..
-				tostring(near) .. " then " .. tostring(far))
+	if lamp then
+		core.set_node(LIGHT_AT, {name = lamp})
+		local near = core.get_node_light(beside)
+		local far = core.get_node_light(further)
+		if near == nil or near < level - 1 then
+			error("check_map: " .. lamp .. " lights " .. level ..
+					" and its neighbour has " .. tostring(near))
+		end
+		if far == nil or far >= near or far == 0 then
+			error("check_map: the light does not dim with distance: " ..
+					tostring(near) .. " then " .. tostring(far))
+		end
+
+		-- And taking it away takes the light with it, which is the direction
+		-- that needs the unlighting pass rather than the spreading one
+		core.set_node(LIGHT_AT, {name = "air"})
+		local after = core.get_node_light(beside)
+		if after ~= 0 then
+			-- Which of the two it is matters: a light that will not go is an
+			-- engine fault, and a game that put something back where the lamp
+			-- was is a game doing its job. set_node() runs on_destruct and
+			-- on_construct, so a game gets a say in both.
+			local ldef = core.registered_nodes[lamp] or {}
+			error("check_map: the light stayed after the lamp went: " ..
+					tostring(after) .. ". Where it was is now " ..
+					core.get_node(LIGHT_AT).name .. ", and what is beside it is "
+					.. core.get_node(beside).name .. ". The lamp was " .. lamp ..
+					" (light_source " .. tostring(ldef.light_source) ..
+					", drawtype " .. tostring(ldef.drawtype) ..
+					", paramtype " .. tostring(ldef.paramtype) ..
+					", sunlight_propagates " ..
+					tostring(ldef.sunlight_propagates) ..
+					"), and the wall is " .. tostring(wall))
+		end
 	end
 
-	-- And taking it away takes the light with it, which is the direction
-	-- that needs the unlighting pass rather than the spreading one
-	core.set_node(LIGHT_AT, {name = "air"})
-	local after = core.get_node_light(beside)
-	if after ~= 0 then
-		-- Which of the two it is matters: a light that will not go is an
-		-- engine fault, and a game that put something back where the lamp
-		-- was is a game doing its job. set_node() runs on_destruct and
-		-- on_construct, so a game gets a say in both.
-		local ldef = core.registered_nodes[lamp] or {}
-		error("check_map: the light stayed after the lamp went: " ..
-				tostring(after) .. ". Where it was is now " ..
-				core.get_node(LIGHT_AT).name .. ", and what is beside it is "
-				.. core.get_node(beside).name .. ". The lamp was " .. lamp ..
-				" (light_source " .. tostring(ldef.light_source) ..
-				", drawtype " .. tostring(ldef.drawtype) ..
-				", paramtype " .. tostring(ldef.paramtype) ..
-				", sunlight_propagates " ..
-				tostring(ldef.sunlight_propagates) ..
-				"), and the wall is " .. tostring(wall))
-	end
+	check_blocking_lamp(beside)
 
 	for x = LIGHT_MIN.x, LIGHT_MAX.x do
 		for y = LIGHT_MIN.y, LIGHT_MAX.y do

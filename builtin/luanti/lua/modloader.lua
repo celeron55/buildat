@@ -11,6 +11,10 @@
 local game_path = __luanti_game_path
 local read_file = core.__read_file
 
+-- Before the game's mods, because whatever the check of the map puts in the
+-- world is a node like any other and has to be in the registry with them
+core.__register_check_nodes()
+
 local modlist = dofile(__luanti_module_path .. "/lua/modlist.lua")
 modlist.set_read_file(read_file)
 
