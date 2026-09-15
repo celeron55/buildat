@@ -6748,7 +6748,8 @@ struct Module: public interface::Module, public luanti::Interface
 		// older save's one blob of it becomes.
 		load_players();
 		run_chunk_string("core.__check_players() "
-				"core.__check_inventory_move()", "check_players");
+				"core.__check_inventory_move() "
+				"core.__check_craft_index()", "check_players");
 
 		check_shapes();
 		check_mapblock();

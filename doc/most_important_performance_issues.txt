@@ -63,8 +63,32 @@ Fixed, kept here for what the shape of the problem was:
 
   VoxeLibre's mods load in 10.6 s where they took 112-117 s. devtest's own
   unittests cover the invalidation -- test_clear_craft registers, asks,
-  clears and asks again. Crafting itself still walks every recipe; it is the
-  lookup that was the startup. Debug build, -O1, 2026-09-14.
+  clears and asks again. Debug build, -O1, 2026-09-14.
+
+* And crafting itself walked every recipe, which was the other half of the
+  same note. get_craft_result() asked try_recipe() about every recipe in the
+  game, and VoxeLibre's craft guide crafts while it loads: the two were 24%
+  of what was left of the startup after the lookup above was fixed.
+
+  Recipes are indexed by what goes into them now, the way Luanti's own
+  craftdef.cpp keys them: a recipe made of concrete items by its sorted
+  distinct names, one with a group in it by how many cells it fills, and the
+  two candidate lists merged by registration order so that the first match is
+  the same recipe it was before. It is built on first use and dropped by the
+  same core.__forget_craft_index() the output index uses.
+
+  In the Lua profile of a VoxeLibre startup and world generation:
+  old_get_craft() and try_recipe() were 24% of the startup's Lua and are now
+  0.2% and 0.5% of the whole run, with candidates() and cell_matches() at
+  0.5% each beside them -- nothing in the craft path is in the top four any
+  more, which is the craft guide's own extract_groups() at 3.5%. VoxeLibre's
+  mods load in 11.2-11.8 s where the same machine was giving 12.3 s.
+
+  core.__check_craft_index() runs at startup and asserts that every
+  registered recipe is among the candidates for its own inputs -- 2071 of
+  VoxeLibre's, 5 of devtest's -- because a key built one way here and another
+  way there is a recipe that quietly stops working. Debug build, -O1,
+  2026-09-15.
 
 * A name matcher asked the item registry about every voxel of a box.
   find_nodes_in_area() and its two siblings build a matcher out of the names

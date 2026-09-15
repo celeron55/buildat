@@ -11,13 +11,9 @@
 -- which are one item each; and toolrepair, which is two of the same worn
 -- tool.
 --
--- simplified: no crafting hash, so *crafting* walks every recipe. Luanti
--- groups them by a hash of the first item and by type; the upgrade path is a
--- table keyed the way Luanti keys it, built the first time anything crafts.
--- Nothing crafts in a loop, which is why this is still here.
---
--- Looking a recipe up by what it makes is indexed, because something does do
--- that in a loop: see by_output below.
+-- Both directions are indexed rather than walked: by what a recipe makes
+-- (by_output) and by what goes into it (by_input). A game's craft guide asks
+-- about every item it has, and VoxeLibre has four thousand of them.
 
 local function alias_of(name)
 	return core.__aliases[name] or name
@@ -255,6 +251,185 @@ local function try_recipe(recipe, method, stacks, names, width)
 			replacements = replacements_of(recipe)}
 end
 
+-- Recipes by what goes into them, which is what makes crafting a lookup
+-- rather than a walk over every recipe in the game. Luanti's own
+-- craftdef.cpp keys them three ways and tries the keys in turn; these are
+-- the two that matter here:
+--
+--   by_input[method .. "\1" .. the recipe's distinct item names, sorted]
+--       for a recipe made of concrete items, which is most of them
+--   by_count[method .. "\1" .. how many cells it fills]
+--       for the rest, because a group spec matches names the recipe itself
+--       does not contain, and a count is the most that can be said about it
+--
+-- A lookup asks both and try_recipe() decides exactly as it did before; what
+-- changed is how many recipes it is asked about. The two lists are merged by
+-- the order the recipes were registered in, because the first match wins and
+-- that has to be the same recipe it was before.
+local by_input = nil
+local by_count = nil
+
+-- What a recipe wants, as (method, the distinct names it names or nil if any
+-- of it is a group, how many cells it fills). nil for a kind this does not
+-- know, which is then always tried.
+local function recipe_inputs(recipe)
+	local kind = recipe.type or "shaped"
+	local method = (kind == "cooking" or kind == "fuel") and kind or "normal"
+	local names, count, grouped = {}, 0, false
+	local function cell(spec)
+		if spec == nil or spec == "" then
+			return
+		end
+		count = count + 1
+		if string.match(spec, "^group:") then
+			grouped = true
+		else
+			names[#names + 1] = alias_of(spec)
+		end
+	end
+	if kind == "cooking" or kind == "fuel" then
+		cell(recipe.recipe)
+	elseif kind == "shapeless" then
+		local specs = recipe.recipe or {}
+		for i = 1, #specs do
+			cell(specs[i])
+		end
+	elseif kind == "toolrepair" then
+		-- Two worn tools of a kind the recipe does not name: there is
+		-- nothing to key on but the count
+		count, grouped = 2, true
+	elseif kind == "shaped" then
+		local rows = recipe.recipe or {}
+		for y = 1, #rows do
+			local row = rows[y]
+			if type(row) ~= "table" then
+				return nil
+			end
+			-- Not ipairs: a row written with a hole in it ends one early,
+			-- and a cell is "" rather than nil in every recipe that has one
+			for x = 1, #row do
+				cell(row[x])
+			end
+		end
+	else
+		return nil
+	end
+	return method, (not grouped) and names or nil, count
+end
+
+local function names_key(method, names)
+	table.sort(names)
+	local distinct = {}
+	for i = 1, #names do
+		if names[i] ~= names[i - 1] then
+			distinct[#distinct + 1] = names[i]
+		end
+	end
+	return method .. "\1" .. table.concat(distinct, "\1")
+end
+
+local function input_index()
+	if by_input ~= nil then
+		return by_input, by_count
+	end
+	by_input, by_count = {}, {}
+	local function add(into, key, i, recipe)
+		local list = into[key]
+		if list == nil then
+			list = {}
+			into[key] = list
+		end
+		list[#list + 1] = {i = i, r = recipe}
+	end
+	for i, recipe in ipairs(core.__crafts) do
+		local method, names, count = recipe_inputs(recipe)
+		if method == nil then
+			-- Not a kind this knows: it goes in every count's list rather
+			-- than being lost. There are none in any game here; this is so
+			-- that a new kind is slow rather than silently missing.
+			for n = 0, 9 do
+				add(by_count, "normal\1" .. n, i, recipe)
+			end
+		elseif names ~= nil then
+			add(by_input, names_key(method, names), i, recipe)
+		else
+			add(by_count, method .. "\1" .. count, i, recipe)
+		end
+	end
+	return by_input, by_count
+end
+
+-- The recipes worth trying for what is in the grid, in the order they were
+-- registered: the two lists are each in that order already, so this is one
+-- merge rather than a sort.
+local function candidates(method, names)
+	local index, counts = input_index()
+	local concrete = {}
+	local n = 0
+	for i = 1, #names do
+		if names[i] ~= "" then
+			n = n + 1
+			concrete[n] = alias_of(names[i])
+		end
+	end
+	local a = index[names_key(method, concrete)] or {}
+	local b = counts[method .. "\1" .. n] or {}
+	if #a == 0 then
+		return b
+	end
+	if #b == 0 then
+		return a
+	end
+	local out, ai, bi = {}, 1, 1
+	while ai <= #a or bi <= #b do
+		if bi > #b or (ai <= #a and a[ai].i < b[bi].i) then
+			out[#out + 1] = a[ai]
+			ai = ai + 1
+		else
+			out[#out + 1] = b[bi]
+			bi = bi + 1
+		end
+	end
+	return out
+end
+
+-- The index says what the walk it replaced said: every registered recipe is
+-- among the candidates for its own inputs. Checked at startup, because a key
+-- built one way here and another way there is a recipe that quietly stops
+-- working, and a game has thousands of them.
+function core.__check_craft_index()
+	local checked = 0
+	for i, recipe in ipairs(core.__crafts) do
+		local method, names, count = recipe_inputs(recipe)
+		if method ~= nil then
+			local grid = names
+			if grid == nil then
+				-- One with a group in it is keyed by how many cells it
+				-- fills, so any names of that many will do
+				grid = {}
+				for n = 1, count do
+					grid[n] = "__check_craft"
+				end
+			end
+			if #grid > 0 then
+				local found = false
+				for _, entry in ipairs(candidates(method, grid)) do
+					if entry.r == recipe then
+						found = true
+						break
+					end
+				end
+				assert(found, "check_craft_index: recipe " .. i .. " (" ..
+						tostring(recipe.output) ..
+						") is not among the candidates for its own inputs")
+				checked = checked + 1
+			end
+		end
+	end
+	core.log("verbose", "check_craft_index: " .. checked ..
+			" recipes are found by what goes into them")
+end
+
 local EMPTY = function(method, width, stacks)
 	return {item = ItemStack(""), time = 0, replacements = {}},
 			{method = method, width = width, items = stacks}
@@ -272,8 +447,8 @@ function core.get_craft_result(input)
 		stacks[i] = ItemStack(item)
 	end
 	local names = names_of(stacks)
-	for _, recipe in ipairs(core.__crafts) do
-		local out = try_recipe(recipe, method, stacks, names, width)
+	for _, entry in ipairs(candidates(method, names)) do
+		local out = try_recipe(entry.r, method, stacks, names, width)
 		if out then
 			-- One of each is what a craft takes, whatever the method
 			local left = {}
@@ -424,6 +599,8 @@ end
 -- and register_alias_raw() in bootstrap.lua
 function core.__forget_craft_index()
 	by_output = nil
+	by_input = nil
+	by_count = nil
 end
 
 -- The recipes that make one thing, in the order they were registered
