@@ -1386,7 +1386,9 @@ local function status_lines()
 			"%s",
 			info.game ~= "" and info.game or "?",
 			info.version ~= "" and info.version or "Luanti ?",
-			fps, jitter, FAR_CLIP,
+			-- what the camera is actually drawing to, which a game may have
+			-- lowered through its sky's fog_distance, and not the ceiling
+			fps, jitter, sky_now.far_clip or FAR_CLIP,
 			player.x, player.y, player.z,
 			lyaw, cardinal,
 			-- Luanti's pitch is positive looking up, where the launcher's

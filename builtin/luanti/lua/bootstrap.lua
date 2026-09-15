@@ -3685,6 +3685,14 @@ function core.set_timeofday(new_time)
 		error("set_timeofday(): not a number: " .. tostring(new_time))
 	end
 	time_of_day = new_time % 1.0
+	-- Sent there and then rather than at the next correction, which is what
+	-- Luanti does and says why in l_env.cpp: a change made in the environment
+	-- is not otherwise sent to the clients, so it goes through the server.
+	-- Five seconds of an old sky is what a mod that sets the time and then
+	-- looks at it would photograph.
+	if core.__send_time then
+		core.__send_time()
+	end
 end
 
 core.set_time_of_day = core.set_timeofday

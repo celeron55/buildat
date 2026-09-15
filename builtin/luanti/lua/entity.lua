@@ -340,6 +340,15 @@ function ObjectRef:is_player()
 	return false
 end
 
+-- Luanti has one class for players and everything else, so this answers on
+-- any object: the empty string when it is not a player. Mods lean on that
+-- rather than on is_player -- VoxeLibre's minecarts push away from whatever
+-- is nearby and read the name to decide -- and a missing method is a
+-- globalstep that dies instead of an object that is not a player.
+function ObjectRef:get_player_name()
+	return ""
+end
+
 function ObjectRef:remove()
 	local o = state_of(self)
 	if not o then
@@ -1249,10 +1258,20 @@ function PlayerRef:get_sky(as_table)
 	local o = state_of(self)
 	local sky = (o and o.sky) or {}
 	if as_table then
-		return {base_color = sky.base_color, type = sky.type or "regular",
-				textures = sky.textures or {},
-				clouds = sky.clouds ~= false,
-				sky_color = sky.sky_color}
+		-- The whole of what was set, so that set_sky(get_sky(true)) is a
+		-- round trip. That is how a mod changes one field of a sky somebody
+		-- else set -- read, edit, write back -- and answering five fields
+		-- out of the dozen a sky has is how the other seven get dropped on
+		-- the way through.
+		local t = table.copy(sky)
+		t.type = t.type or "regular"
+		t.textures = t.textures or {}
+		if t.clouds == nil then
+			t.clouds = true
+		end
+		t.sky_color = t.sky_color or {}
+		t.fog = t.fog or {}
+		return t
 	end
 	return sky.base_color, sky.type or "regular", sky.textures or {},
 			sky.clouds ~= false
