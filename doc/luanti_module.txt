@@ -246,4 +246,4 @@ The C++ side is perf, with no rebuild either:
 The two together are how the seventh round was worked: the C++ profile named
 the voxel read path, and the Lua profile named the craft lookup that made
 VoxeLibre's startup two minutes. What each one found is in
-doc/most_important_performance_issues.txt.
+doc/plan/performance_plan.md.
