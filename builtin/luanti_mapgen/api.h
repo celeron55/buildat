@@ -61,6 +61,17 @@ namespace luanti_mapgen
 			bool sunlight_propagates = false;
 			// Luanti's LiquidType: 0 none, 1 flowing, 2 source
 			int liquid_type = 0;
+			// The game's own word for how the node is drawn -- "normal",
+			// "airlike", "plantlike" and the rest. A mapgen does not draw
+			// anything, but it reads this to decide what is open space a
+			// dungeon must not carve into, and what is cubic enough for a
+			// biome's dust to settle on. The shim turns the word into
+			// Luanti's enum, which is where that list belongs.
+			ss_ drawtype = "normal";
+			// Whether the node stores a light value of its own, which is
+			// Luanti's paramtype == "light". v6 finds the surface to grow
+			// grass on by walking down until a node that does not.
+			bool param_type_light = true;
 		};
 		sm_<uint32_t, NodeProps> node_props;
 

@@ -2050,9 +2050,10 @@ struct Module: public interface::Module, public luanti::Interface
 	//
 	// simplified: all of them, because the whole table is a few hundred
 	// short strings and which ones a mapgen wants depends on the mapgen.
-	// What a mapgen asks about a node, seven numbers each: the id, then
+	// What a mapgen asks about a node, nine values each: the id, then
 	// walkable, is_ground_content, floodable, light_propagates,
-	// sunlight_propagates and the liquid type. The same order
+	// sunlight_propagates, the liquid type, the drawtype as the game's own
+	// word for it, and whether the node stores light. The same order
 	// core.__mapgen_node_props() writes them in.
 	sm_<uint32_t, luanti_mapgen::Params::NodeProps> mapgen_node_props()
 	{
@@ -2071,11 +2072,19 @@ struct Module: public interface::Module, public luanti::Interface
 			return out;
 		}
 		const size_t n = lua_istable(L, -1) ? lua_objlen(L, -1) : 0;
-		for(size_t i = 1; i + 6 <= n; i += 7){
-			lua_Integer v[7];
-			for(int k = 0; k < 7; k++){
+		for(size_t i = 1; i + 8 <= n; i += 9){
+			lua_Integer v[9];
+			ss_ drawtype = "normal";
+			for(int k = 0; k < 9; k++){
 				lua_rawgeti(L, -1, (int)(i + k));
-				v[k] = lua_tointeger(L, -1);
+				if(k == 7){
+					const char *word = lua_tostring(L, -1);
+					if(word)
+						drawtype = word;
+					v[k] = 0;
+				} else {
+					v[k] = lua_tointeger(L, -1);
+				}
 				lua_pop(L, 1);
 			}
 			luanti_mapgen::Params::NodeProps p;
@@ -2085,6 +2094,8 @@ struct Module: public interface::Module, public luanti::Interface
 			p.light_propagates = v[4] != 0;
 			p.sunlight_propagates = v[5] != 0;
 			p.liquid_type = (int)v[6];
+			p.drawtype = drawtype;
+			p.param_type_light = v[8] != 0;
 			out[(uint32_t)v[0]] = p;
 		}
 		lua_settop(L, base);
@@ -5851,8 +5862,10 @@ struct Module: public interface::Module, public luanti::Interface
 		double volume = (double)(x1 - x0 + 1) * (double)(y1 - y0 + 1) *
 				(double)(z1 - z0 + 1);
 		if(volume > (double)MAX_REGION_VOXELS){
-			return luaL_error(L, "find_ids(): %.0f voxels is more than the "
-					"%d this reads at once", volume, (int)MAX_REGION_VOXELS);
+			// Lua's own formatting, which has no %.0f in it
+			return luaL_error(L, "find_ids(): %s voxels is more than the "
+					"%d this reads at once", cs(itos((int64_t)volume)),
+					(int)MAX_REGION_VOXELS);
 		}
 		// A Luanti node id is 16 bits, so which sets an id is in is one word
 		// per id and the test in the loop is one load
@@ -5929,8 +5942,10 @@ struct Module: public interface::Module, public luanti::Interface
 		double volume = (double)(x1 - x0 + 1) * (double)(y1 - y0 + 1) *
 				(double)(z1 - z0 + 1);
 		if(volume > (double)MAX_REGION_VOXELS){
-			return luaL_error(L, "find_nodes(): %.0f voxels is more than the "
-					"%d this reads at once", volume, (int)MAX_REGION_VOXELS);
+			// Lua's own formatting, which has no %.0f in it
+			return luaL_error(L, "find_nodes(): %s voxels is more than the "
+					"%d this reads at once", cs(itos((int64_t)volume)),
+					(int)MAX_REGION_VOXELS);
 		}
 		// A Luanti node id is 16 bits, so wanted-or-not is one byte per id
 		// and the test in the loop is one load
@@ -5987,8 +6002,10 @@ struct Module: public interface::Module, public luanti::Interface
 		double volume = (double)(x1 - x0 + 1) * (double)(y1 - y0 + 1) *
 				(double)(z1 - z0 + 1);
 		if(volume > (double)MAX_REGION_VOXELS){
-			return luaL_error(L, "get_region(): %.0f voxels is more than the "
-					"%d this reads at once", volume, (int)MAX_REGION_VOXELS);
+			// Lua's own formatting, which has no %.0f in it
+			return luaL_error(L, "get_region(): %s voxels is more than the "
+					"%d this reads at once", cs(itos((int64_t)volume)),
+					(int)MAX_REGION_VOXELS);
 		}
 		sv_<uint32_t> words;
 		self->read_region(x0, y0, z0, x1, y1, z1, words);

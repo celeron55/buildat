@@ -932,7 +932,8 @@ end
 -- What a mapgen asks about a node, by content id. Without these the shim on
 -- the other side guesses from the name -- everything that is not air is
 -- solid ground -- and a cave carved through a chest is what that guess
--- costs. Flat, seven numbers a node, in the order luanti_mapgen reads them.
+-- costs. Flat, nine values a node -- eight numbers and the drawtype -- in
+-- the order luanti_mapgen reads them.
 function core.__mapgen_node_props()
 	local out = {}
 	for id, name in pairs(core.__content_names) do
@@ -951,6 +952,8 @@ function core.__mapgen_node_props()
 			out[#out + 1] = def.light_propagates and 1 or 0
 			out[#out + 1] = def.sunlight_propagates and 1 or 0
 			out[#out + 1] = liquid
+			out[#out + 1] = def.drawtype or "normal"
+			out[#out + 1] = (def.paramtype == "light") and 1 or 0
 		end
 	end
 	return out

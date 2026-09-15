@@ -77,6 +77,38 @@ struct SinglenodeGenerator: public worldgen::GeneratorInterface
 	}
 };
 
+// The game's word for how a node is drawn, as Luanti's own enum. The mapgen
+// draws nothing; what it reads this for is whether a voxel is open space a
+// dungeon must leave alone (airlike and the liquids) and whether it is cubic
+// enough for a biome's dust to settle on (normal, allfaces, the glasslikes)
+// -- so every other shape has to be some drawtype that is neither, and not
+// the NDT_NORMAL a missing one used to leave behind.
+static NodeDrawType drawtype_of(const ss_ &name)
+{
+	static const sm_<ss_, NodeDrawType> map = {
+		{"normal", NDT_NORMAL},
+		{"airlike", NDT_AIRLIKE},
+		{"liquid", NDT_LIQUID},
+		{"flowingliquid", NDT_FLOWINGLIQUID},
+		{"glasslike", NDT_GLASSLIKE},
+		{"glasslike_framed", NDT_GLASSLIKE_FRAMED},
+		{"glasslike_framed_optional", NDT_GLASSLIKE_FRAMED_OPTIONAL},
+		{"allfaces", NDT_ALLFACES},
+		{"allfaces_optional", NDT_ALLFACES_OPTIONAL},
+		{"torchlike", NDT_TORCHLIKE},
+		{"signlike", NDT_SIGNLIKE},
+		{"plantlike", NDT_PLANTLIKE},
+		{"plantlike_rooted", NDT_PLANTLIKE_ROOTED},
+		{"firelike", NDT_FIRELIKE},
+		{"fencelike", NDT_FENCELIKE},
+		{"raillike", NDT_RAILLIKE},
+		{"nodebox", NDT_NODEBOX},
+		{"mesh", NDT_MESH},
+	};
+	auto it = map.find(name);
+	return it != map.end() ? it->second : NDT_NORMAL;
+}
+
 // The vendored VoxelManipulator through the shim under it, which is the
 // one thing that has to be right before any of Luanti's mapgens can be:
 // every generator writes into one of these, and what comes out of it is
@@ -120,6 +152,17 @@ static void check_voxel_manipulator()
 	assert(ndef.get((content_t)42).is_ground_content);
 	assert(!ndef.get((content_t)43).is_ground_content);
 	assert(ndef.getLightingFlags((content_t)42).has_light);
+
+	// And the game's word for a drawtype is the enum the mapgen tests
+	// against: open space it must not carve a dungeon into, and the cubic
+	// shapes a biome's dust settles on
+	assert(drawtype_of("airlike") == NDT_AIRLIKE);
+	assert(drawtype_of("flowingliquid") == NDT_FLOWINGLIQUID);
+	assert(drawtype_of("glasslike_framed") == NDT_GLASSLIKE_FRAMED);
+	assert(drawtype_of("plantlike") == NDT_PLANTLIKE);
+	assert(drawtype_of("nodebox") == NDT_NODEBOX);
+	// One a game made up, or a newer Luanti's, is drawn as a cube
+	assert(drawtype_of("cakelike") == NDT_NORMAL);
 
 	log_v(MODULE, "check_voxel_manipulator: the vendored one reads back, "
 			"and its order is voxelworld's");
@@ -305,6 +348,8 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 				f.light_propagates = p.light_propagates;
 				f.sunlight_propagates = p.sunlight_propagates;
 				f.liquid_type = (LiquidType)p.liquid_type;
+				f.drawtype = drawtype_of(p.drawtype);
+				f.param_type = p.param_type_light ? CPT_LIGHT : CPT_NONE;
 			} else {
 				// A name with no id of its own -- an alias, or a node the
 				// game never registered -- and then this is what a solid
@@ -313,6 +358,7 @@ struct VendoredGenerator: public worldgen::GeneratorInterface
 				f.is_ground_content = f.walkable;
 				f.light_propagates = !f.walkable;
 				f.sunlight_propagates = !f.walkable;
+				f.drawtype = f.walkable ? NDT_NORMAL : NDT_AIRLIKE;
 			}
 			m_ndef.set_content(pair.first, (content_t)pair.second, f);
 		}
