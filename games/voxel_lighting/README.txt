@@ -70,6 +70,14 @@ bark is not that shiny. Spots ignore spec_strength and reflect at full
 strength, which is the whole point of it: rock can be dull everywhere except at
 its crystalline facets, which is not something a single roughness could say.
 
+Rock and dirt take their facets from static_spots, and the number is 0.25 rather
+than the 0.04 they carried while the shader spotted every material that named
+none: a quarter of the cells, which is a sprinkle rather than a crunch. 1.0 is
+what the old behaviour amounted to and it reads as noise on the dirt; 0.04 is
+not visible at all. The check images move by 465 to 868 RMSE between 0.04 and
+0.25 where two runs of the same code differ by 0 to 29, so this is a change the
+check sees easily.
+
 bumpiness is the other half of how busy a surface looks, and the one that is
 easy to mistake for gloss. It breaks the light up across the texture, diffuse
 as much as specular, so a surface with a high one reads as grainy whether or

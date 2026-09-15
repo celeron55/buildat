@@ -550,9 +550,9 @@ struct Module: public interface::Module
 			// roughness, spec_strength, bumpiness, translucency, spots,
 			// static_spots. The README says why these values.
 			add_voxel(reg, "rock", "main/rock.png", true, false,
-					0.95f, 0.15f, 0.5f, 0.0f, 0.0f, 0.04f); // id 2
+					0.95f, 0.15f, 0.5f, 0.0f, 0.0f, 0.25f); // id 2
 			add_voxel(reg, "dirt", "main/dirt.png", true, false,
-					0.98f, 0.15f, 0.6f, 0.0f, 0.0f, 0.04f); // id 3
+					0.98f, 0.15f, 0.6f, 0.0f, 0.0f, 0.25f); // id 3
 			add_voxel(reg, "grass", "main/grass.png", true, false,
 					0.90f, 1.0f, 0.75f, 0.06f, 0.012f); // id 4
 			add_voxel(reg, "leaves", "main/leaves.png", true, false,
