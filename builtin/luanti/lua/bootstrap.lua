@@ -1211,6 +1211,28 @@ function core.__mapgen_decorations()
 	-- then z, which is the order a mod writes its "data" array in.
 	local function schematic_of(sch, replacements)
 		local out = {given = false}
+		-- A handle, which is what core.register_schematic() answered with:
+		-- Luanti keeps the schematic and hands back an integer, and a mod
+		-- that builds one in Lua uses that wherever a schematic goes. This
+		-- is the shape nodecore's trees arrive in, through its own
+		-- ezschematic() helper.
+		if type(sch) == "number" then
+			local kept = core.__registered_schematics[sch]
+			if kept == nil then
+				return out
+			end
+			-- The registration's own replacements are under whatever the
+			-- caller asks for now, which is the order Luanti reads them in
+			local merged = {}
+			for from, to in pairs(kept.replacements or {}) do
+				merged[from] = to
+			end
+			for from, to in pairs(replacements or {}) do
+				merged[from] = to
+			end
+			sch = kept.schematic
+			replacements = merged
+		end
 		if type(sch) == "string" then
 			out.given = true
 			out.file = sch
@@ -1978,8 +2000,34 @@ end
 recording_registration("biome")
 recording_registration("ore")
 recording_registration("decoration")
-stub("register_schematic", 0)
-stub("clear_registered_schematics", nil)
+-- The schematics a mod built in Lua and handed over, by the handle it was
+-- given. Luanti keeps them in its SchematicManager and answers with an
+-- integer; what uses one is a decoration, which resolves it in
+-- schematic_of() above.
+--
+-- simplified: a handle is an index into this list and means nothing outside
+-- this server, which is what Luanti's own ObjDefHandle is as well. What is
+-- not here is core.place_schematic() and the rest of the family -- a
+-- registered schematic is placed by the mapgen and not by a mod, so far.
+core.__registered_schematics = {}
+
+function core.register_schematic(schematic, replacements)
+	if type(schematic) ~= "table" then
+		-- A file name is already usable as it is, and a handle is one
+		-- already; neither wants keeping
+		return schematic
+	end
+	local n = #core.__registered_schematics + 1
+	core.__registered_schematics[n] = {
+		schematic = schematic,
+		replacements = replacements,
+	}
+	return n
+end
+
+function core.clear_registered_schematics()
+	core.__registered_schematics = {}
+end
 stub("read_schematic", nil)
 stub("create_schematic", nil)
 stub("place_schematic", nil)
