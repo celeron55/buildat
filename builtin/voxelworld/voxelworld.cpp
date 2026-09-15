@@ -750,6 +750,14 @@ struct CInstance: public voxelworld::Instance
 
 	void on_tick(const interface::TickEvent &event)
 	{
+		// What the commits since the last tick wrote, told to replicate and
+		// the clients in one go. It is here rather than at the end of the
+		// commit because a commit runs inside whatever module asked for
+		// voxelworld, and this part of it reaches into replicate and
+		// network -- so a mod writing a node used to wait for both, once
+		// per node. Now it waits for neither, and the tick pays once.
+		announce_committed_nodes();
+
 		if(m_initial_sections_pending){
 			// A world that streams says where it wants sections; the region
 			// is then its bounds and its sky and not a thing to fill
@@ -3604,8 +3612,9 @@ struct CInstance: public voxelworld::Instance
 				}
 			}
 		}
-		announce_committed_nodes();
-
+		// The nodes this wrote are announced on the next tick and not here;
+		// see announce_committed_nodes() and on_tick().
+		//
 		// This runs at the end of every access into voxelworld -- see
 		// voxelworld::access() in api.h -- so whatever it costs is what
 		// every other module waits for before it can get in. A second of it
