@@ -4969,6 +4969,51 @@ struct Module: public interface::Module, public luanti::Interface
 		return 3;
 	}
 
+	// __luanti_ids_at(flat) -> a flat array of content ids, one per position
+	// in flat, which is x, y, z per position.
+	//
+	// The region reads answer "what is in this box"; this answers "what is
+	// at each of these scattered places", which is the other shape a caller
+	// has. One access() for the lot rather than one per position: a read
+	// that crosses the Lua boundary costs a module lock and its hierarchy
+	// validated, and the work inside voxelworld is nearly free beside it.
+	// The emerge queue asks this of every request it is waiting on, once a
+	// step.
+	static int l_ids_at(lua_State *L)
+	{
+		Module *self = module_of(L);
+		luaL_checktype(L, 1, LUA_TTABLE);
+		const size_t n3 = lua_objlen(L, 1);
+		const size_t n = n3 / 3;
+		lua_createtable(L, (int)n, 0);
+		if(n == 0 || !self->m_scene)
+			return 1;
+		// Whatever was written and not flushed is what a reader should see,
+		// the same way read_node() does it
+		self->flush_node_writes();
+		sv_<int32_t> p(n3);
+		for(size_t i = 0; i < n3; i++){
+			lua_rawgeti(L, 1, (int)i + 1);
+			p[i] = (int32_t)lua_tointeger(L, -1);
+			lua_pop(L, 1);
+		}
+		const interface::VoxelFormat f = interface::VoxelFormat::luanti();
+		sv_<lua_Integer> ids(n);
+		voxelworld::access(self->m_server, self->m_scene,
+				[&](voxelworld::Instance *world){
+			for(size_t i = 0; i < n; i++){
+				const uint32_t word = world->get_voxel(pv::Vector3DInt32(
+						p[i * 3], p[i * 3 + 1], p[i * 3 + 2]), true).data;
+				ids[i] = (lua_Integer)f.id.get(word);
+			}
+		});
+		for(size_t i = 0; i < n; i++){
+			lua_pushinteger(L, ids[i]);
+			lua_rawseti(L, -2, (int)i + 1);
+		}
+		return 1;
+	}
+
 	// get_region(x0, y0, z0, x1, y1, z1) -> a flat array of content ids, x
 	// fastest and then y and then z. Only the ids: what asks for a box asks
 	// what is in it, and a table three times the size would be three times
@@ -6978,6 +7023,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_loaded_boxes", l_loaded_boxes);
 		set_global_cfunction("__luanti_find_ids", l_find_ids);
 		set_global_cfunction("__luanti_find_nodes", l_find_nodes);
+		set_global_cfunction("__luanti_ids_at", l_ids_at);
 		set_global_cfunction("__luanti_show_objects", l_show_objects);
 		set_global_cfunction("__luanti_show_object_props",
 				l_show_object_props);

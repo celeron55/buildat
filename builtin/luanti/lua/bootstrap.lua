@@ -2183,6 +2183,28 @@ function core.load_area(pos1, pos2)
 end
 
 local function step_emerge(dtime)
+	-- Which block each waiting request is on, asked all at once. This used
+	-- to be a core.get_node() per request per step, and a read that crosses
+	-- the Lua boundary costs a module lock and its hierarchy validated --
+	-- with a mapgen's worth of requests outstanding that was up to two
+	-- seconds of a step. The work inside voxelworld is nearly free beside
+	-- the crossing, so one crossing for the lot is the whole fix.
+	local ask = {}
+	local ask_of = {}
+	for i = 1, #emerge_requests do
+		local r = emerge_requests[i]
+		local bp = r.blocks[r.next_i]
+		if bp ~= nil and emerge_in_bounds(bp) then
+			ask[#ask + 1] = bp.x * 16
+			ask[#ask + 1] = bp.y * 16
+			ask[#ask + 1] = bp.z * 16
+			-- Keyed by the request and not by its index: the loop below
+			-- removes finished requests and everything after one shifts
+			ask_of[r] = #ask / 3
+		end
+	end
+	local ids = #ask > 0 and __luanti_ids_at(ask) or {}
+
 	local i = 1
 	while i <= #emerge_requests do
 		local r = emerge_requests[i]
@@ -2198,9 +2220,9 @@ local function step_emerge(dtime)
 			r.waited = r.waited + dtime
 			-- A block that is there reads as something; a section that has
 			-- not been generated reads as ignore everywhere
-			local name = core.get_node({x = bp.x * 16, y = bp.y * 16,
-					z = bp.z * 16}).name
-			if name ~= "ignore" then
+			local at = ask_of[r]
+			local id = at ~= nil and ids[at] or core.CONTENT_IGNORE
+			if id ~= core.CONTENT_IGNORE then
 				action = core.EMERGE_GENERATED
 			elseif r.waited > EMERGE_TIMEOUT then
 				action = core.EMERGE_ERRORED
