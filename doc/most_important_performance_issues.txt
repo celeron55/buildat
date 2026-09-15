@@ -173,6 +173,21 @@ Tried and rejected, so that nobody spends the day again:
   with the two ranges not overlapping (8.7-9.0 against 8.2-8.4). Debug build,
   -O1, 2026-09-15.
 
+* And the walk under it. write_volume() went voxel by voxel through a
+  generator's whole section, deciding per voxel what merge_volume()'s
+  priorities and the light bookkeeping say. For a run the writer owns whose
+  light came with it -- or which is dark beside dark and makes no light of
+  its own -- every one of those decisions is "write the source voxel and seed
+  nothing", so the run is a memcpy per plane. The row is read once to decide
+  and the stretches the copy cannot take are walked as before: the faces of
+  the volume, anything the writer does not own, anything undefined, and any
+  voxel whose light the write changes.
+
+  util/bench_worldgen.sh, devtest, three runs: median 8.3 s -> 7.7 s. The
+  check is games/voxel_lighting's own "skylight verify", which reads a whole
+  section's stored light and floods the same section from nothing to compare:
+  ok four times in a run. Debug build, -O1, 2026-09-15.
+
 Still open, in the order they showed up in a profile after those:
 
 1. update_skylight() and its voxel reads are about 25% of the server's CPU, and
