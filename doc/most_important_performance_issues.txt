@@ -123,6 +123,28 @@ Tried and rejected, so that nobody spends the day again:
   is, the deserialization was not what the wall clock was waiting for.
   2026-09-14.
 
+* A voxel definition was looked up under a lock, per voxel. get_cached() is
+  what the light flood and the mesher ask about every voxel they walk -- a
+  quarter of a million per section each -- and it took the registry's mutex
+  every time; for a VoxelSample it took it twice, because working out which
+  id a sample is locked as well. The lock and unlock pair was 6.0% of the
+  whole server (3.06% + 2.98%) against 2.5% for the two get_cached bodies.
+
+  A pointer into the cache stays good for the life of the registry, since a
+  deque never moves an element, and every caller already reads the entry
+  after the lock is dropped -- so the fast path only had to learn that an id
+  is cached without touching the deque's bookkeeping. That is a two-level
+  table of pointers, published entry by entry with a release store and read
+  with an acquire load. The lock stays for filling an entry, for the textures
+  (filled later and only where the atlas is) and for ids above 65536.
+
+  In the same profile: the mutex pair is out of the top twenty, get_cached is
+  1.06% where the two overloads were 2.48%, and devtest generated 112
+  sections in 45 seconds where it generated 104 -- the same run under perf,
+  a save made from nothing with a client connected. games/voxel_lighting's
+  check images keep every static framing pixel-identical. Debug build, -O1,
+  2026-09-15.
+
 Still open, in the order they showed up in a profile after those:
 
 1. update_skylight() and its voxel reads are about 25% of the server's CPU, and
@@ -142,6 +164,13 @@ case would cost a fraction of it.
 
 Chunk serialization and its zlib compression is another 14% of the server, and
 a section is serialized more than once on its way in.
+
+**Re-measured again 2026-09-15 on devtest: 3.4%**, which is
+ZSTD_decompressSequences at 2.46% and ZSTD_copy16 at 0.95%, both in the
+main_context thread. It has come down with everything around it and is no
+longer near the top; what is above it now is write_volume() at 5.4%, the Lua
+VM, and the memsets of fresh volumes. Re-read this section before working on
+it: the shape below is the 2026-09-14 measurement.
 
 **Re-measured 2026-09-14 on devtest: 13.6%, and it holds** -- but two thirds
 of it is *deserialization* rather than serialization:
