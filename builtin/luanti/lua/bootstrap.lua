@@ -2720,7 +2720,28 @@ end
 -- large it is, so the name is looked up once per id and the answer kept.
 -- What a caller gets is two functions over the same two tables -- does this
 -- id match, and what is it called.
+-- One matcher per name list, kept. core.find_node_near() builds one per
+-- call and an ABM asks it about every candidate node it has -- the neighbour
+-- test is a find_node_near -- so this was 15% of all the Lua a VoxeLibre
+-- world spent generating, in name_matcher()'s inner function, building the
+-- same tables over and over. Keeping the matcher keeps its memo too, which
+-- is the point of having one. core.__forget_name_ids() drops them, which is
+-- what a node registered after load needs.
+local matcher_cache = {}
+
+local function matcher_key(nodenames)
+	if type(nodenames) == "string" then
+		return nodenames
+	end
+	return table.concat(nodenames, "\1")
+end
+
 local function id_matcher(nodenames)
+	local key = matcher_key(nodenames)
+	local have = matcher_cache[key]
+	if have ~= nil then
+		return have[1], have[2]
+	end
 	local matches = name_matcher(nodenames)
 	local name_of = {}
 	local hit = {}
@@ -2732,7 +2753,7 @@ local function id_matcher(nodenames)
 		end
 		return name
 	end
-	return function(id)
+	local function matches_id(id)
 		-- Outside the box is nothing rather than an error, which is what a
 		-- name matcher answered when it was handed a nil name
 		if id == nil then
@@ -2744,7 +2765,9 @@ local function id_matcher(nodenames)
 			hit[id] = was
 		end
 		return was
-	end, name_of_id
+	end
+	matcher_cache[key] = {matches_id, name_of_id}
+	return matches_id, name_of_id
 end
 
 -- Which content ids a name list is about, and the name of each, kept because
@@ -2756,6 +2779,7 @@ local ids_for_names = {}
 -- Called when an item is registered; see core.register_item_raw()
 function core.__forget_name_ids()
 	ids_for_names = {}
+	matcher_cache = {}
 	-- The id sets an ABM and an LBM sweep with are the same answer to the
 	-- same question and go stale in the same breath. They live further down
 	-- with the sweep, so this asks rather than reaches.
