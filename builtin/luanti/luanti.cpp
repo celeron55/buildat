@@ -7024,6 +7024,12 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_find_ids", l_find_ids);
 		set_global_cfunction("__luanti_find_nodes", l_find_nodes);
 		set_global_cfunction("__luanti_ids_at", l_ids_at);
+		// The world is not made yet and a mod that asks how big a chunk is
+		// asks while it loads -- minetest_game does -- so this carries the
+		// default until create_world() knows the real one. Without it the
+		// read is of a global that does not exist, which the module's own
+		// strict-global guard warns about, once, for nothing.
+		set_global_string("__luanti_section_size", "64");
 		set_global_cfunction("__luanti_show_objects", l_show_objects);
 		set_global_cfunction("__luanti_show_object_props",
 				l_show_object_props);
