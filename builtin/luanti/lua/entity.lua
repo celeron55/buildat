@@ -3079,6 +3079,70 @@ end
 -- simplified: those two nodes and nothing else. There is no fall damage --
 -- a fall happens in the client's own physics and nothing reports one -- and
 -- no drowning. See "Nothing hurts" in doc/plan/luanti_module_plan.md.
+-- Where a player's nose is, which Luanti approximates with the eyes. The
+-- same number games/luanti_launcher's player.lua puts the camera at.
+local EYE_HEIGHT = 1.625
+
+local function eye_node(o)
+	return {
+		x = math.floor(o.pos.x + 0.5),
+		y = math.floor(o.pos.y + EYE_HEIGHT + 0.5),
+		z = math.floor(o.pos.z + 0.5),
+	}
+end
+
+-- Nothing at all happens to a player a mod has made immortal, which is what
+-- enable_damage being off does to everybody: Luanti gives every player the
+-- immortal armour group when it is off, and then checks that one flag.
+local function immortal(o)
+	return (o.armor_groups and (tonumber(o.armor_groups.immortal) or 0) ~= 0)
+			or not core.settings:get_bool("enable_damage", true)
+end
+
+-- Air, and the want of it. Luanti's own intervals and its own order: the
+-- node at the nose costs a breath every two seconds while it drowns, and
+-- when there is no breath left it costs health instead; anywhere it does
+-- not drown, half a second puts a breath back.
+local drown_timer, breath_timer = 0, 0
+local function breathe_players(dtime)
+	drown_timer = drown_timer + dtime
+	breath_timer = breath_timer + dtime
+	local drown = drown_timer >= 2
+	local breathe = breath_timer >= 0.5
+	if not (drown or breathe) then
+		return
+	end
+	if drown then
+		drown_timer = drown_timer - 2
+	end
+	if breathe then
+		breath_timer = breath_timer - 0.5
+	end
+	for _, id in pairs(players) do
+		local o = objects[id]
+		if o and o.ref and (o.hp or 0) > 0 and o.pos and not immortal(o) then
+			local node = core.get_node(eye_node(o))
+			local def = node and core.registered_nodes[node.name]
+			local costs = def and tonumber(def.drowning) or 0
+			if drown and costs > 0 then
+				if (o.breath or 0) > 0 then
+					o.ref:set_breath(o.breath - 1)
+				end
+				if (o.breath or 0) == 0 then
+					o.ref:set_hp(o.hp - costs,
+							{type = "drown", node = node.name})
+				end
+			end
+			if breathe and costs == 0 then
+				local most = (o.props and o.props.breath_max) or 10
+				if (o.breath or 0) < most then
+					o.ref:set_breath(o.breath + 1)
+				end
+			end
+		end
+	end
+end
+
 local damage_timer = 0
 local function damage_players(dtime)
 	damage_timer = damage_timer + dtime
@@ -3088,12 +3152,9 @@ local function damage_players(dtime)
 	-- Not reset to zero: a step longer than a second still costs one second
 	-- of damage and not two, and the remainder is kept
 	damage_timer = damage_timer - 1
-	if not core.settings:get_bool("enable_damage", true) then
-		return
-	end
 	for _, id in pairs(players) do
 		local o = objects[id]
-		if o and o.ref and (o.hp or 0) > 0 and o.pos then
+		if o and o.ref and (o.hp or 0) > 0 and o.pos and not immortal(o) then
 			local worst, worst_name = 0, nil
 			for dy = 0, 1 do
 				local node = core.get_node({
@@ -3117,6 +3178,7 @@ end
 function core.__step_objects(dtime)
 	place_the_unplaced(dtime)
 	damage_players(dtime)
+	breathe_players(dtime)
 	-- Over the ids taken first, because a step adds and removes objects
 	local ids = {}
 	for id, _ in pairs(objects) do
