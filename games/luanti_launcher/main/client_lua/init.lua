@@ -852,9 +852,17 @@ luanti.sub_sky(function(sky)
 	-- Six pictures rather than a gradient, if that is what the game asked
 	-- for and all six of them arrived
 	if sky.type == "skybox" and sky.textures and sky.textures[6] then
-		game_skybox:set(sky.textures)
-	else
-		game_skybox:clear()
+		local cube = game_skybox:set(sky.textures)
+		-- What the world reflects follows the sky it is under; the zone's
+		-- own is the baked gradient, which is what a game with no skybox
+		-- keeps
+		if cube and zone then
+			zone.zoneTexture = cube
+			log:info("the world reflects the game's own sky now")
+		end
+	elseif game_skybox:clear() and zone then
+		zone.zoneTexture = magic.cache:GetResource("TextureCube",
+				voxel_shading.sky_cubemap)
 	end
 	apply_sky_of_hour()
 end)

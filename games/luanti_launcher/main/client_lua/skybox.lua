@@ -125,15 +125,22 @@ function M.new(scene, gradient, texture_of)
 		gradient.enabled = false
 		log:info("the game's own skybox is up, " .. size .. " a side" ..
 				(same and "" or ", resampled"))
+		-- And what the world reflects, which is the same sky: the cube the
+		-- zone samples is otherwise the gradient sky's, baked, so a world
+		-- under a game's own sky reflected one it was not under.
+		return cube
 	end
 
+	-- true when there was one to take away, so that the caller knows to put
+	-- the reflections back as well
 	function self:clear()
 		if names_now == nil then
-			return
+			return false
 		end
 		names_now = nil
 		node.enabled = false
 		gradient.enabled = true
+		return true
 	end
 
 	return self
