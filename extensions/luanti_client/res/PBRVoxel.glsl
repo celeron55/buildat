@@ -154,6 +154,40 @@ varying vec4 vWorldPos;
     #endif
 #endif
 
+// **What the skylight nibble is allowed to say**, for the client that turns
+// this on. On the PBR path the sun is a real light with a shadow map, and
+// the shadow map is what darkens what is under a tree -- so node lighting is
+// left to answer the one question a shadow map cannot, "am I underground",
+// and nothing else. The curve holds at full until the light has fallen far
+// enough that it can only be rock overhead, and then drops away: a canopy
+// reads 11..14 of 15 and stays fully lit, a cave reads 0..2 and goes dark,
+// and a doorway is the band between.
+//
+// extensions/luanti_client shapes the same nibble in its own block copy,
+// with the same knee -- see PBR_LIGHT_MAP in its world.lua, whose comment
+// says what the knee is for: *raise it and overhangs start being darkened
+// twice, once here and once by the shadow map.* That double is exactly what
+// this is here to stop; see [AMBIENT_LEVEL] in doc/plan/rendering_plan.md.
+//
+// Behind VOXELSKYCURVE because the extension has already applied it before
+// the mesher sees the value and must not apply it again.
+#ifdef VOXELSKYCURVE
+    const float SKY_KNEE_LOW = 2.0 / 15.0;
+    const float SKY_KNEE_HIGH = 11.0 / 15.0;
+
+    float ShapeSkylight(float sky)
+    {
+        float t = clamp((sky - SKY_KNEE_LOW) /
+            (SKY_KNEE_HIGH - SKY_KNEE_LOW), 0.0, 1.0);
+        return t * t * (3.0 - 2.0 * t);
+    }
+#else
+    float ShapeSkylight(float sky)
+    {
+        return sky;
+    }
+#endif
+
 void VS()
 {
     mat4 modelMatrix = iModelMatrix;
@@ -183,7 +217,7 @@ void VS()
         vec4 projWorldPos = vec4(worldPos, 1.0);
 
         #ifdef VOXELSUNGATE
-            vSkyVisibility = iColor.a;
+            vSkyVisibility = ShapeSkylight(iColor.a);
         #endif
 
         #ifdef SHADOW
@@ -208,10 +242,10 @@ void VS()
             vVertexLight = vec3(0.0, 0.0, 0.0);
             vTexCoord2 = iTexCoord1;
         #else
-            vVertexLight = GetAmbient(GetZonePos(worldPos)) * iColor.a +
-                iColor.rgb;
+            vVertexLight = GetAmbient(GetZonePos(worldPos)) *
+                ShapeSkylight(iColor.a) + iColor.rgb;
         #endif
-        vSkyVisibility = iColor.a;
+        vSkyVisibility = ShapeSkylight(iColor.a);
 
         #ifdef NUMVERTEXLIGHTS
             for (int i = 0; i < NUMVERTEXLIGHTS; ++i)

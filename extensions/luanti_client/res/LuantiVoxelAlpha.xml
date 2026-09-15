@@ -10,6 +10,7 @@
      a surface is drawn. VOXELSKYTINT says this client drives cSkyLight,
      cSkyTint and cSkyTintAmount where the extension's drives cSkyColor. -->
 <technique vs="luanti_client/res/PBRVoxel" ps="luanti_client/res/PBRVoxel"
+        vsdefines="VOXELSKYCURVE"
         psdefines="DIFFMAP PBR METALLIC VOXELNORMALMAP VOXELIBL VOXELSPOTS VOXELTRANSLUCENCY VOXELSKYTINT">
     <pass name="alpha" blend="alpha" depthwrite="false" cull="none" />
     <pass name="litalpha" blend="addalpha" depthwrite="false" cull="none" />
