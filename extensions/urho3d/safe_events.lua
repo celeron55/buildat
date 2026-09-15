@@ -87,6 +87,11 @@ return {
 	SelectionChanged = {
 		Element = {variant = "Ptr", safe = "UIElement"},
 	},
+	-- A menu's own item was chosen, which for a DropDownList arrives
+	-- alongside ItemSelected
+	MenuSelected = {
+		Element = {variant = "Ptr", safe = "UIElement"},
+	},
 	ItemClicked = {
 		Element = {variant = "Ptr", safe = "UIElement"},
 		Item = {variant = "Ptr", safe = "UIElement"},

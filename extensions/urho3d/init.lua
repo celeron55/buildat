@@ -514,6 +514,46 @@ do
 	assert(list.numItems == 1,
 			"whitelist: ListView:RemoveItem() did not remove")
 
+	local menu = holder:CreateChild("Menu")
+	local popup = holder:CreateChild("Window")
+	menu.popup = popup
+	menu.popupOffset = IntVector2(0, 20)
+	assert(menu.popup ~= nil and menu.popupOffset.y == 20,
+			"whitelist: Menu did not take its popup and offset")
+
+	local drop = holder:CreateChild("DropDownList")
+	drop.placeholderText = "pick one"
+	drop:AddItem(holder:CreateChild("Text"))
+	drop:AddItem(holder:CreateChild("Text"))
+	assert(drop.numItems == 2 and drop.placeholderText == "pick one",
+			"whitelist: DropDownList did not take its items")
+	assert(drop.listView ~= nil,
+			"whitelist: DropDownList has no list view of its own")
+
+	local tip = holder:CreateChild("ToolTip")
+	tip.delay = 0.5
+	assert(math.abs(tip.delay - 0.5) < 1e-6,
+			"whitelist: ToolTip.delay did not stick")
+
+	local cursor = holder:CreateChild("Cursor")
+	cursor.useSystemShapes = false
+	assert(cursor.useSystemShapes == false,
+			"whitelist: Cursor.useSystemShapes did not stick")
+
+	-- Text3D is a Drawable rather than a UI element, so it wants a node of
+	-- its own; the scene is thrown away with it
+	local scene = Scene:new()
+	local node = scene:CreateChild("whitelist_check")
+	local label = node:CreateComponent("Text3D")
+	label.text = "over there"
+	label.fontSize = 24
+	label.wordwrap = false
+	label.fixedScreenSize = true
+	assert(label.text == "over there" and label.fontSize == 24 and
+			label.fixedScreenSize == true,
+			"whitelist: Text3D did not take its text and size")
+	node:Remove()
+
 	holder:Remove()
 end
 

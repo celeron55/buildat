@@ -1348,12 +1348,132 @@ function M.define(dst, util)
 		},
 	})
 
+	-- A button that opens something when it is pressed, and the list that
+	-- is one. Added 2026-09-15 with the rest of the UI sweep; a menu draws
+	-- and computes and does nothing else. The popup is an element the game
+	-- makes and hands over, so what a menu opens is the game's own.
+	util.wc("Menu", {
+		inherited_from_by_wrapper = dst.Button,
+		instance = {
+			ShowPopup = util.self_function("ShowPopup", {},
+					{"Menu", "boolean"}),
+			-- Which key opens it without the mouse. The qualifiers are
+			-- Urho3D's QUAL_ constants; 0 is none.
+			SetAccelerator = util.self_function("SetAccelerator", {},
+					{"Menu", "number", "number"}),
+		},
+		properties = {
+			popup = util.simple_property(dst.UIElement),
+			-- Where the popup lands relative to the menu
+			popupOffset = util.simple_property(dst.IntVector2),
+			showPopup = util.simple_property("boolean"),
+			-- Read-only: what SetAccelerator was given
+			acceleratorKey = util.simple_property("number"),
+			acceleratorQualifiers = util.simple_property("number"),
+		},
+	})
+
+	-- The one a game reaches for: a menu whose popup is a list, which is
+	-- what a settings screen is made of. The items are elements the game
+	-- makes, as ListView's are.
+	util.wc("DropDownList", {
+		inherited_from_by_wrapper = dst.Menu,
+		instance = {
+			AddItem = util.self_function("AddItem", {},
+					{"DropDownList", "UIElement"}),
+			InsertItem = util.self_function("InsertItem", {},
+					{"DropDownList", "number", "UIElement"}),
+			-- simplified: the by-index form only, as ListView's is, the two
+			-- being one overloaded name that a type check cannot tell apart
+			RemoveItem = util.self_function("RemoveItem", {},
+					{"DropDownList", "number"}),
+			RemoveAllItems = util.self_function("RemoveAllItems", {},
+					{"DropDownList"}),
+			SetSelection = util.self_function("SetSelection", {},
+					{"DropDownList", "number"}),
+			GetItem = util.wrap_function({"DropDownList", "number"},
+				function(self, index)
+					return util.wrap_instance("UIElement", self:GetItem(index))
+				end
+			),
+		},
+		properties = {
+			-- Read-only: how many, which one, and the parts it is made of
+			numItems = util.simple_property("number"),
+			selectedItem = util.simple_property(dst.UIElement),
+			listView = util.simple_property(dst.ListView),
+			placeholder = util.simple_property(dst.UIElement),
+			selection = util.simple_property("number"),
+			-- What it says with nothing chosen
+			placeholderText = util.simple_property("string"),
+			-- Whether the popup takes the list's width or the button's
+			resizePopup = util.simple_property("boolean"),
+		},
+	})
+
+	-- What hangs under the pointer after it has rested a moment. The
+	-- element it shows is a child of it, which the game makes.
+	util.wc("ToolTip", {
+		inherited_from_by_wrapper = dst.UIElement,
+		properties = {
+			-- Seconds of rest before it appears
+			delay = util.simple_property("number"),
+		},
+	})
+
+	-- The pointer itself, as an element the style sheet draws. A game can
+	-- say which named shape it is wearing; **DefineShape is not here**,
+	-- because it takes an Image and images are not on this whitelist yet.
+	util.wc("Cursor", {
+		inherited_from_by_wrapper = dst.BorderImage,
+		properties = {
+			shape = util.simple_property("string"),
+			-- The system's own arrow instead of the style's, which is a
+			-- look rather than a reach: the shape is still Urho3D's list
+			useSystemShapes = util.simple_property("boolean"),
+		},
+	})
+
+	-- Text in the world rather than on the screen: a nameplate over a
+	-- player, a sign a game can read from a distance. A Drawable, so it
+	-- goes on a scene node and not in the UI tree.
+	util.wc("Text3D", {
+		inherited_from_by_wrapper = dst.Drawable,
+		instance = {
+			SetFont = util.self_function("SetFont", {"boolean"},
+					{"Text3D", "Font", {"number", "__nil"}}),
+			SetAlignment = util.self_function("SetAlignment", {},
+					{"Text3D", "number", "number"}),
+			SetColor = util.self_function("SetColor", {},
+					{"Text3D", "Color"}),
+		},
+		properties = {
+			text = util.simple_property("string"),
+			fontSize = util.simple_property("number"),
+			-- Wrapped at this many pixels of its own space, 0 for not
+			width = util.simple_property("number"),
+			wordwrap = util.simple_property("boolean"),
+			-- Whether it is always the same size on the screen however far
+			-- away it is, and which way it turns to face the camera
+			fixedScreenSize = util.simple_property("boolean"),
+			faceCameraMode = util.simple_property("number"),
+			opacity = util.simple_property("number"),
+			-- An outline or a shadow, which is what makes text readable
+			-- over a world it has no control over
+			textEffect = util.simple_property("number"),
+			effectColor = util.simple_property(dst.Color),
+			effectStrokeThickness = util.simple_property("number"),
+			material = util.simple_property(dst.Material),
+		},
+	})
+
 	-- Looked at and refused, so that the next sweep does not look again.
 	-- util/whitelist_sweep.py reads these lines, so the shape is fixed:
 	-- "-- refused: <Class> -- <why>", one per line.
 	--
 	-- refused: FileSelector -- shows the user's own filesystem, and hands the chosen path back
 	-- refused: HierarchyContainer -- ListView makes its own; a game never does
+	-- refused: MessageBox -- its constructor wants the engine context and it loads a layout resource by name; ui_utils.show_message_dialog is the dialog here
 
 	util.wc("Sprite", {
 		inherited_from_by_wrapper = dst.UIElement,
