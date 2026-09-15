@@ -590,6 +590,14 @@ function M.define(dst, util)
 					"SetTechnique", {}, {"Material", "number", "Technique",
 							{"number", "__nil"}, {"number", "__nil"}}),
 		},
+		properties = {
+			-- Which faces are thrown away, as CULL_NONE, CULL_CCW or
+			-- CULL_CW. A technique carries one and a material overrides it,
+			-- which is how Urho3D's own skybox material is drawn: a box
+			-- seen from the inside is entirely back-facing, so a skybox
+			-- with the default culling draws nothing at all.
+			cullMode = util.simple_property("number"),
+		},
 	})
 
 	util.wc("Texture", {

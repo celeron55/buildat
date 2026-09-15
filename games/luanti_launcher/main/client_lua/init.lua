@@ -62,6 +62,13 @@ if not ok_player or type(player_physics) ~= "table" then
 	error("luanti_launcher: could not load player.lua: " .. tostring(err_player))
 end
 
+-- A game's own sky, which is six pictures rather than a gradient; see the
+-- header of skybox.lua
+local ok_sky, err_sky, skybox = buildat.run_script_file("main/skybox.lua")
+if not ok_sky or type(skybox) ~= "table" then
+	error("luanti_launcher: could not load skybox.lua: " .. tostring(err_sky))
+end
+
 -- The keys, in one place, so that what the player is told and what the code
 -- reads cannot drift apart. Luanti's own defaults, and the F5 line below
 -- lists them. `name` is what a player is shown, because a key constant is
@@ -189,7 +196,9 @@ do
 	sun_light.color = SUN_COLOR
 end
 
-voxel_shading.create_skybox(scene, SUN_DIR)
+local game_skybox = skybox.new(scene,
+		voxel_shading.create_skybox(scene, SUN_DIR),
+		function(expr) return luanti.texture(expr) end)
 
 local camera_node = scene:CreateChild("Camera")
 -- The component, because a waypoint asks it where a place in the world is
@@ -839,6 +848,13 @@ luanti.sub_sky(function(sky)
 	-- the horizon the game asked for
 	if sky.horizon then
 		DAY_FOG = magic.Color(sky.horizon.r, sky.horizon.g, sky.horizon.b)
+	end
+	-- Six pictures rather than a gradient, if that is what the game asked
+	-- for and all six of them arrived
+	if sky.type == "skybox" and sky.textures and sky.textures[6] then
+		game_skybox:set(sky.textures)
+	else
+		game_skybox:clear()
 	end
 	apply_sky_of_hour()
 end)
