@@ -166,9 +166,13 @@ end
 local SKY_AMBIENT = magic.Color(0.320, 0.320, 0.352)
 local NIGHT_AMBIENT = magic.Color(0.05, 0.06, 0.10)
 local SUN_BRIGHTNESS = 50.0
-local MOON_BRIGHTNESS = 4.0
+-- A fiftieth of the sun, which is extensions/luanti_client's number and is
+-- not a measurement: real moonlight would render as nothing. It is a night
+-- lit coldly from where the moon is, far enough above the sky's own light
+-- that the moon casts a shadow. See [LIGHT_SHAPE].
+local MOON_BRIGHTNESS = 1.0
 local SUN_COLOR = magic.Color(1.0, 0.96, 0.88)
-local MOON_COLOR = magic.Color(0.55, 0.65, 1.0)
+local MOON_COLOR = magic.Color(0.55, 0.68, 1.0)
 -- Reassigned when a game says what its horizon is; see sub_sky below
 local DAY_FOG = magic.Color(0.60, 0.72, 0.88)
 local NIGHT_FOG = magic.Color(0.05, 0.07, 0.12)
@@ -204,7 +208,10 @@ local function set_mouse_in_world(enable)
 end
 
 local zone = nil
-local sun_light = nil
+-- The sun and the moon, both in the scene: {sun_node, sun, moon_node, moon}.
+-- One table rather than four locals because this file's main chunk is at
+-- Lua 5.1's limit of two hundred of them.
+local sky_lights = {}
 -- The render path the world is drawn with, set where the viewport is; a
 -- second view of the same world wants the same one
 local world_render_path = nil
@@ -215,7 +222,9 @@ do
 	zone.boundingBox = magic.BoundingBox(-1000, 1000)
 	zone.ambientColor = SKY_AMBIENT
 	zone.fogColor = magic.Color(0.60, 0.72, 0.88)
-	zone.fogStart = FAR_CLIP * 0.6
+	-- Seven tenths of the way out, which is where
+	-- extensions/luanti_client's starts; see [LIGHT_SHAPE]
+	zone.fogStart = FAR_CLIP * 0.7
 	zone.fogEnd = FAR_CLIP
 	zone.priority = -1
 	zone.override = true
@@ -225,30 +234,46 @@ do
 			voxel_shading.sky_cubemap)
 end
 
-local sun_node = scene:CreateChild("DirectionalLight")
+-- **Two lights, not one that turns round at midnight.** The moon is the
+-- same light from the other side of the sky, and having it as a light of its
+-- own is what lets each be faded out over the hour it crosses the horizon
+-- instead of the one direction flipping the instant the sun goes down --
+-- which snapped every shadow in the world round at dawn and at dusk. Both
+-- are in the scene for that hour, which is two shadow maps for two hours of
+-- the day and one for the rest of it. extensions/luanti_client's shape; see
+-- [LIGHT_SHAPE] in doc/plan/rendering_plan.md.
 do
-	sun_node.direction = magic.Vector3(SUN_DIR.x, SUN_DIR.y, SUN_DIR.z)
-	sun_light = sun_node:CreateComponent("Light")
-	sun_light.lightType = magic.LIGHT_DIRECTIONAL
-	sun_light.castShadows = true
-	sun_light.brightness = SUN_BRIGHTNESS
-	sun_light.color = SUN_COLOR
-	-- Voxel faces at a grazing sun angle are the classic shadow acne case: a
-	-- whole flat face falls inside one shadow texel and shadows itself in
-	-- stripes. A slope-scaled bias on top of the automatic one, and a normal
-	-- offset, which is the one that works on a face that is flat and wide.
-	-- extensions/luanti_client's own numbers; see [WOBBLY_SHADOWS].
-	sun_light.shadowBias = magic.BiasParameters(0.00005, 0.8, 0.002)
-	-- Two cascades rather than Urho3D's one spread over the whole shadow
-	-- distance. The near one is confined to where the player is looking, so
-	-- a node gets the texels it needs; without the split the same sparse
-	-- grid slides under static geometry as the shadow camera is refitted
-	-- each frame, which is the wobble.
-	-- 24 nodes and 96, not the far clip: a shadow map stretched over four
-	-- hundred nodes has no density left where the player is. Written here
-	-- rather than as two named constants because this file's main chunk is
-	-- at Lua 5.1's limit of 200 locals.
-	sun_light.shadowCascade = magic.CascadeParameters(24, 96, 0, 0, 0.8)
+	local function body_light(name, color, brightness)
+		local node = scene:CreateChild(name)
+		node.direction = magic.Vector3(SUN_DIR.x, SUN_DIR.y, SUN_DIR.z)
+		local light = node:CreateComponent("Light")
+		light.lightType = magic.LIGHT_DIRECTIONAL
+		light.castShadows = true
+		light.brightness = brightness
+		light.color = color
+		light.specularIntensity = 1.0
+		-- Voxel faces at a grazing sun angle are the classic shadow acne
+		-- case: a whole flat face falls inside one shadow texel and shadows
+		-- itself in stripes. A slope-scaled bias on top of the automatic
+		-- one, and a normal offset, which is the one that works on a face
+		-- that is flat and wide. extensions/luanti_client's own numbers;
+		-- see [WOBBLY_SHADOWS].
+		light.shadowBias = magic.BiasParameters(0.00005, 0.8, 0.002)
+		-- Two cascades rather than Urho3D's one spread over the whole
+		-- shadow distance. The near one is confined to where the player is
+		-- looking, so a node gets the texels it needs; without the split
+		-- the same sparse grid slides under static geometry as the shadow
+		-- camera is refitted each frame, which is the wobble.
+		--
+		-- 24 nodes and 96, not the far clip: a shadow map stretched over
+		-- four hundred nodes has no density left where the player is.
+		light.shadowCascade = magic.CascadeParameters(24, 96, 0, 0, 0.8)
+		return node, light
+	end
+	sky_lights.sun_node, sky_lights.sun =
+			body_light("Sun", SUN_COLOR, SUN_BRIGHTNESS)
+	sky_lights.moon_node, sky_lights.moon =
+			body_light("Moon", MOON_COLOR, MOON_BRIGHTNESS)
 	-- Past the far cascade the world is ambient-lit, which at that range
 	-- reads as haze rather than as a missing shadow.
 	magic.renderer.shadowMapSize = 1024
@@ -807,12 +832,12 @@ local function apply_sky_of_hour()
 			horizon_now, nil)
 
 	-- What the sun shines with now: its own colour, going red while it is
-	-- crossing the horizon. Without this the light only ever moves between
-	-- the sun's warm white and a strongly blue moon, and a sunset lights
-	-- the world in neither. The colour and the window are
-	-- luanti_sky.SUN_TINT and horizon_share(), where the check is.
-	sun_light.color = blend(blend(MOON_COLOR, SUN_COLOR, t),
-			luanti_sky.SUN_TINT, luanti_sky.horizon_share(sky_now.height))
+	-- crossing the horizon, which is where that colour belongs. It does not
+	-- blend towards the moon any more -- the moon is a light of its own and
+	-- has its own colour. The window is luanti_sky.sun_tint_share(), where
+	-- the check is.
+	sky_lights.sun.color = blend(SUN_COLOR, luanti_sky.SUN_TINT,
+			luanti_sky.sun_tint_share(sky_now.daylight))
 
 	-- The sun and the moon are two bodies, drawn at once: the shader puts
 	-- the moon opposite the sun, which is where Luanti puts it, so both are
@@ -869,23 +894,25 @@ local function update_sky(dt)
 	-- real second is
 	time_of_day = (time_of_day + dt * time_speed / (24 * 60 * 60)) % 1.0
 
-	-- Where the sun is: up at noon, on the horizon at sunrise and sunset,
-	-- and under the world at night. Tilted out of the vertical plane so
-	-- that noon does not light every face of a cube the same way.
-	local a = (time_of_day - 0.25) * 2 * math.pi
-	local height = math.sin(a)
-	local up = {x = math.cos(a) * 0.9, y = height, z = 0.42}
+	local daylight = time_of_day * 24000
+
+	-- Where the sun is. Luanti's own stretched day, out of luanti_sky, and
+	-- with it the clocks the two lights fade on. The tilt out of the
+	-- vertical plane is this game's own, so that noon does not light every
+	-- face of a cube the same way.
+	--
+	-- **Where the shadow is cast from steps and the light does not**: a
+	-- shadow map rasterized afresh each frame from a light that has turned a
+	-- little between two of them has crawling edges, so the direction is
+	-- held still a step at a time. How bright, what colour and whether it is
+	-- up stay smooth.
+	local sx, sy = luanti_sky.sun_direction(luanti_sky.stepped_time(daylight))
+	local _, smooth_sy = luanti_sky.sun_direction(daylight)
+	local height = smooth_sy
 	-- The light travels the other way, which is what a Light's direction is
-	local dir = normalized({x = -up.x, y = -up.y, z = -up.z})
-	-- At night the moon is where the sun is not
-	local night = height < 0
-	if night then
-		dir = {x = -dir.x, y = -dir.y, z = -dir.z}
-	end
-	sun_node.direction = magic.Vector3(dir.x, dir.y, dir.z)
-	-- The same direction the light travels in, which is what the sky takes:
-	-- it is the moon's by night because dir is, and negating it again here
-	-- put the moon where the sun was -- under the world
+	local dir = normalized({x = -sx * 0.9, y = -sy, z = -0.42})
+	-- And the sky is given the sun's, always: it draws the moon opposite,
+	-- so there is nothing to flip at nightfall
 	world_sky:set_sun_direction(dir)
 
 	-- Dawn and dusk are the half hour either side of the horizon rather
@@ -895,17 +922,53 @@ local function update_sky(dt)
 	if luanti.day_night_override then
 		day = luanti.day_night_override
 	end
-	sun_light.brightness = MOON_BRIGHTNESS +
-			(SUN_BRIGHTNESS - MOON_BRIGHTNESS) * day
-	-- and its colour in apply_sky_of_hour(), which has this hour's horizon
+
+	-- How much of each light there is: its own hour of the day, whether it
+	-- is over the horizon at all, what the cloud leaves of it, and whether
+	-- the game turned it off. A body that is not there casts no light --
+	-- VoxeLibre turns all three off when the weather turns -- so that is a
+	-- gate and not a dimming. 0.8 is what a full overcast takes.
+	local through_cloud = 1 - 0.8 * (game_sky.cloud_cover or 0)
+	local up = luanti_sky.sun_amount(daylight) *
+			luanti_sky.above_horizon(smooth_sy) * through_cloud *
+			((game_sky.sun_visible ~= false) and 1 or 0)
+	local moon_up = luanti_sky.moon_amount(daylight) *
+			luanti_sky.above_horizon(-smooth_sy) * through_cloud *
+			((game_sky.moon_visible ~= false) and 1 or 0)
+	-- A light below the horizon is taken out of the scene rather than
+	-- dimmed: a directional light does not know about the horizon, and one
+	-- under it lights the undersides of everything and puts the night's
+	-- specular on the wrong side of the sky.
+	sky_lights.sun_node.enabled = up > 0
+	if up > 0 then
+		sky_lights.sun_node.direction = magic.Vector3(dir.x, dir.y, dir.z)
+		sky_lights.sun.brightness = SUN_BRIGHTNESS * up
+	end
+	sky_lights.moon_node.enabled = moon_up > 0
+	if moon_up > 0 then
+		sky_lights.moon_node.direction =
+				magic.Vector3(-dir.x, -dir.y, -dir.z)
+		sky_lights.moon.brightness = MOON_BRIGHTNESS * moon_up
+	end
+
 	zone.ambientColor = blend(NIGHT_AMBIENT, SKY_AMBIENT, day)
 	zone.fogColor = blend(NIGHT_FOG, DAY_FOG, day)
 	sky_now.height = height
 	sky_now.day = day
+	sky_now.daylight = daylight
 	apply_sky_of_hour()
 	-- What is in the player's hand is drawn unlit, so the daylight is put
-	-- on it by hand; without this it glows at midnight
-	local k = 0.28 + 0.72 * day
+	-- on it by hand; without this it glows at midnight. What the two bodies
+	-- are worth to something with no normal to take a share of them by is
+	-- the extension's object_sun: the moon counted at what it is worth
+	-- against the sun.
+	--
+	-- simplified: kept as the same floor-and-ramp this always had rather
+	-- than the extension's colour with the amount in its alpha, because the
+	-- one thing here that is drawn unlit is the held item and a night at
+	-- the extension's amount would leave it invisible.
+	local k = 0.28 + 0.72 *
+			math.min(1, up + moon_up * MOON_BRIGHTNESS / SUN_BRIGHTNESS)
 	wield_material:SetShaderParameter("MatDiffColor",
 			magic.Color(k, k, k, 1.0))
 end
@@ -924,6 +987,9 @@ luanti.sub_sky(function(sky)
 	if cover then
 		world_sky:set_look(nil, nil, cover)
 	end
+	-- Kept as well as sent, because cloud dims the sun and the moon; see
+	-- through_cloud in update_sky()
+	game_sky.cloud_cover = cover
 	-- The fog is the horizon seen through the world's air, so it follows
 	-- the horizon the game asked for
 	if sky.horizon then
@@ -1002,7 +1068,7 @@ local function update_underwater(eye)
 		zone.fogStart = 2
 		zone.fogEnd = UNDERWATER_FOG
 	else
-		zone.fogStart = FAR_CLIP * 0.6
+		zone.fogStart = FAR_CLIP * 0.7
 		zone.fogEnd = FAR_CLIP
 	end
 end

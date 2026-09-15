@@ -41,29 +41,159 @@ M.MOON_HALF = 0.048
 -- and lights a sunset grey.
 M.SUN_TINT = {r = 244 / 255, g = 125 / 255, b = 29 / 255}
 
--- How much of the horizon's colour the sun shines with, from how high it is
--- (the sine of its elevation). The sun goes the colour of the horizon over
--- the hour it is crossing it, which is where that colour belongs and is the
--- same handover the sky shader does to the disc; away from the horizon it is
--- its own colour. extensions/luanti_client does this with its own
--- SUN_TINT_SHARE of 0.9, which is the share kept here.
-function M.horizon_share(height)
-	local low = 1 - math.min(1, math.abs(height or 0) / 0.3)
-	return (1 - (1 - low) * (1 - low)) * 0.9
+-- **The schedule, which is extensions/luanti_client's** (see [LIGHT_SHAPE]
+-- in doc/plan/rendering_plan.md: for the sky, the sun, the moon and the
+-- light, the extension is the reference implementation and its shape is
+-- taken whole). Everything below is in Luanti's own units of the day,
+-- 0...24000, so it is a fixed hour however fast a game's clock runs.
+--
+-- Why a fade and not a switch: a directional light below the horizon shines
+-- up through the world, and its specular is then the brightest thing in a
+-- night frame, lit from the wrong side of the sky. So the sun is taken out
+-- of the scene for the night and the moon is put in, each fading over the
+-- hour on either side of the sun being level with the horizon.
+local SUN_RISE = 5000     -- nothing before this
+local SUN_UP = 6000       -- full sun from here
+local SUN_SET = 18000     -- full sun until here
+local SUN_DOWN = 19000    -- nothing after this
+
+-- The moon's day is a little longer than the sun's night: it is going
+-- before the sun arrives and does not come back until the sun is well gone.
+local MOON_FADE_OUT = 4500
+local MOON_OUT = 5500
+local MOON_FADE_IN = 18500
+local MOON_IN = 19500
+
+-- Nothing above the horizon shines from under it. The clocks are where the
+-- fade is shaped; this is the line itself, taken from where the body
+-- actually is. A couple of degrees of softness, because a light that
+-- switches off in one frame is a light that pops.
+local HORIZON_FADE = 0.05
+
+-- Where the sun is for the purpose of casting a shadow, which is not quite
+-- where it is: a shadow map rasterized afresh every frame from a light that
+-- has turned a little between two of them has crawling edges. Holding the
+-- direction still for a step at a time trades the crawl for a small jump.
+-- A hundred of these is a degree and a half.
+local SUN_STEP = 100
+
+-- The half hour either side of the sun crossing the horizon, which is the
+-- window dawn and dusk happen in.
+local RED_HALF_WIDTH = 500
+-- How much of that red the light takes. Not all of it: the tint is the
+-- colour a band of sky is painted, which is deeper than the light painting
+-- it.
+local SUN_TINT_SHARE = 0.9
+
+local function clamp01(v)
+	return v < 0 and 0 or (v > 1 and 1 or v)
 end
 
+-- 0 before the rise, 1 between the rise and the set, 0 after it, and the way
+-- across each ramp in between
+local function up_between(t, rise_from, rise_to, set_from, set_to)
+	t = (t or 12000) % 24000
+	if t <= rise_from or t >= set_to then
+		return 0
+	elseif t < rise_to then
+		return (t - rise_from) / (rise_to - rise_from)
+	elseif t <= set_from then
+		return 1
+	end
+	return (set_to - t) / (set_to - set_from)
+end
+
+function M.sun_amount(t)
+	return up_between(t, SUN_RISE, SUN_UP, SUN_SET, SUN_DOWN)
+end
+
+-- The same shape read the other way round, so the four numbers above say
+-- when the moon is out rather than being the sun's turned inside out
+function M.moon_amount(t)
+	return 1 - up_between(t, MOON_FADE_OUT, MOON_OUT, MOON_FADE_IN, MOON_IN)
+end
+
+function M.above_horizon(sine_of_elevation)
+	return clamp01((sine_of_elevation or 0) / HORIZON_FADE)
+end
+
+function M.stepped_time(t)
+	return math.floor((t or 12000) / SUN_STEP + 0.5) * SUN_STEP
+end
+
+function M.low_sun(t)
+	t = (t or 12000) % 24000
+	local d = math.min(math.abs(t - SUN_RISE), math.abs(t - SUN_DOWN))
+	local u = 1 - d / RED_HALF_WIDTH
+	if u <= 0 then
+		return 0
+	end
+	return u * u * (3 - 2 * u)
+end
+
+-- How much of SUN_TINT the light shines with at this hour
+function M.sun_tint_share(t)
+	local low = M.low_sun(t)
+	return (1 - (1 - low) * (1 - low)) * SUN_TINT_SHARE
+end
+
+-- Where the sun is, as a direction to it, with y the sine of its elevation.
+-- Luanti's own: the day is stretched so the night takes less than half of it
+-- (getWickedTimeOfDay), and the sun rises towards +X and sets towards -X.
+function M.sun_direction(t)
+	t = ((t or 12000) % 24000) / 24000
+	local wn = 0.415 / 2
+	local w
+	if t > wn and t < 1 - wn then
+		w = (t - wn) / (1 - wn * 2) * 0.5 + 0.25
+	elseif t < 0.5 then
+		w = t / wn * 0.25
+	else
+		w = 1 - (1 - t) / wn * 0.25
+	end
+	local a = math.rad(w * 360 - 90)
+	return math.cos(a), math.sin(a), 0
+end
+
+-- What the schedule has to hold, which is the extension's own check: the two
+-- never leave the sky empty between them, the moon is out of the way by the
+-- time the sun is worth anything, and the clock agrees with where the sun
+-- actually is.
 do
-	assert(M.horizon_share(0) > 0.89,
-			"crossing the horizon the light is the horizon's")
-	assert(M.horizon_share(1) == 0 and M.horizon_share(-1) == 0,
-			"overhead, and under the world, it is its own colour")
-	assert(M.horizon_share(0.15) > 0.5 and M.horizon_share(0.15) < 0.9,
-			"and the handover takes the hour either side")
-	assert(M.horizon_share(0.15) == M.horizon_share(-0.15),
-			"setting and rising are the same")
+	assert(M.above_horizon(-1) == 0 and M.above_horizon(0) == 0 and
+			M.above_horizon(1) == 1, "the horizon line")
+	assert(M.sun_amount(12000) == 1 and M.moon_amount(12000) == 0, "noon")
+	assert(M.sun_amount(0) == 0 and M.moon_amount(0) == 1, "midnight")
+	assert(M.moon_amount(SUN_RISE) > 0.4,
+			"the moon is still up at sunrise")
+	assert(M.moon_amount(MOON_OUT) == 0 and M.sun_amount(MOON_OUT) > 0.4,
+			"the sun has the sky to itself once the moon is gone")
+	assert(M.sun_amount(SUN_DOWN) == 0 and M.moon_amount(SUN_DOWN) > 0.4,
+			"the moon is up by the time the sun is gone")
+
+	local function elevation(t)
+		local _, y = M.sun_direction(t)
+		return y
+	end
+	assert(math.abs(elevation(SUN_RISE)) < 0.02, "the sun rises at 05:00")
+	assert(math.abs(elevation(SUN_DOWN)) < 0.02, "the sun sets at 19:00")
+	assert(elevation(12000) > 0.9, "the sun is overhead at noon")
+	assert(elevation(0) < -0.9, "the sun is under the world at midnight")
+
+	assert(M.low_sun(SUN_RISE) == 1 and M.low_sun(SUN_DOWN) == 1,
+			"reddest as the sun crosses")
+	assert(M.low_sun(12000) == 0 and M.low_sun(0) == 0,
+			"nothing of it at noon or at midnight")
+	assert(M.sun_tint_share(SUN_RISE) > 0.89,
+			"crossing the horizon the light is nearly all the tint")
+	assert(M.sun_tint_share(12000) == 0, "and at noon it is its own colour")
 	-- And that what it hands over to is a red rather than a warm white,
 	-- which is the whole of what the window is for
 	assert(M.SUN_TINT.r - M.SUN_TINT.b > 0.5, "the low sun is red")
+
+	-- The step is a step and nothing more
+	assert(M.stepped_time(12049) == 12000 and M.stepped_time(12051) == 12100,
+			"the shadow's direction is held still a step at a time")
 end
 
 function M.new(scene, sun_dir, defaults)
