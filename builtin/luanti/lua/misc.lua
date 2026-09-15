@@ -97,4 +97,91 @@ function core.get_position_from_hash(hash)
 	return {x = x, y = y, z = z}
 end
 
+-- Whether a string means yes. Luanti's own rule, from is_yes() in
+-- util/string.h: trimmed and lowercased, "y", "yes", "true", or a number
+-- that is not zero. Mods read their settings through it constantly.
+function core.is_yes(arg)
+	local s = tostring(arg):lower():match("^%s*(.-)%s*$")
+	return s == "y" or s == "yes" or s == "true" or (tonumber(s) or 0) ~= 0
+end
+
+-- Luanti's translation and colour markup taken out of a string: an escape
+-- character and then either (something) or one letter. The same code is in
+-- the module's client half, client_lua/formspec.lua, where a client that
+-- does not translate uses it -- keep the two together.
+function core.strip_escapes(s)
+	if type(s) ~= "string" then
+		return s
+	end
+	s = s:gsub("\27%b()", "")
+	s = s:gsub("\27.", "")
+	return s
+end
+
+-- Whether a name could be a player's, from is_valid_player_name() in
+-- Luanti's player.cpp: not empty, at most PLAYERNAME_SIZE characters, and
+-- nothing outside PLAYERNAME_ALLOWED_CHARS.
+local PLAYERNAME_SIZE = 20
+
+function core.is_valid_player_name(name)
+	if type(name) ~= "string" or name == "" or #name > PLAYERNAME_SIZE then
+		return false
+	end
+	return name:match("^[a-zA-Z0-9%-_]+$") ~= nil
+end
+
+-- Luanti's day/night ratio at a time of day, for a mod doing its own light
+-- arithmetic. The table and the two ends are time_to_daynight_ratio() in
+-- daynightratio.h, with smooth on, which is what the Lua call uses; the
+-- argument is the 0...1 time core.get_timeofday() returns and what comes
+-- back is the 0...1 ObjectRef:override_day_night_ratio() takes.
+local DAYNIGHT_RAMP = {
+	{4375, 175}, {4625, 175}, {4875, 250}, {5125, 350},
+	{5375, 500}, {5625, 675}, {5875, 875}, {6125, 1000}, {6375, 1000},
+}
+
+function core.time_to_day_night_ratio(time_of_day)
+	local t = (tonumber(time_of_day) or 0) * 24000 % 24000
+	if t > 12000 then
+		t = 24000 - t
+	end
+	if t <= DAYNIGHT_RAMP[2][1] then
+		return DAYNIGHT_RAMP[1][2] / 1000
+	end
+	if t >= DAYNIGHT_RAMP[8][1] then
+		return 1.0
+	end
+	for i = 2, #DAYNIGHT_RAMP do
+		if DAYNIGHT_RAMP[i][1] > t then
+			local a, b = DAYNIGHT_RAMP[i - 1], DAYNIGHT_RAMP[i]
+			local f = (t - a[1]) / (b[1] - a[1])
+			return (a[2] + f * (b[2] - a[2])) / 1000
+		end
+	end
+	return 1.0
+end
+
+-- What these have to come out as, checked at load against Luanti's own
+-- numbers rather than against each other
+do
+	assert(core.is_yes("YES") and core.is_yes(" true ") and core.is_yes(1))
+	assert(not core.is_yes("no") and not core.is_yes(0) and
+			not core.is_yes(nil))
+	assert(core.strip_escapes("a\27(T@x)b\27Fc") == "abc")
+	assert(core.is_valid_player_name("nakki-_1"))
+	assert(not core.is_valid_player_name("") and
+			not core.is_valid_player_name("has space") and
+			not core.is_valid_player_name(("x"):rep(21)))
+	-- Midnight is the floor, noon is full, and the ramp is between
+	assert(core.time_to_day_night_ratio(0) == 0.175)
+	assert(core.time_to_day_night_ratio(0.5) == 1.0)
+	assert(core.time_to_day_night_ratio(6125 / 24000) == 1.0)
+	local dawn = core.time_to_day_night_ratio(5125 / 24000)
+	assert(dawn == 0.350, "the ramp is Luanti's own table: " .. dawn)
+	-- And it is still climbing a hundred and twenty-five units before the
+	-- top, which is what makes it a ramp and not a step
+	local nearly = core.time_to_day_night_ratio(6000 / 24000)
+	assert(nearly == 0.9375, "midway up the last step: " .. nearly)
+end
+
 -- vim: set noet ts=4 sw=4:

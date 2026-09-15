@@ -1849,6 +1849,14 @@ local STUBS_NIL = {
 	-- SSCSM, translations beyond passing strings through
 	"request_http_api", "set_http_api_lua",
 	"mod_channel_join", "register_sscsm", "get_globals_to_transfer",
+	-- Found by the feature sweep of 2026-09-15 rather than by a game asking
+	-- for one: every documented core.* this does not implement is here now,
+	-- so that a mod calling one gets a line naming the feature instead of
+	-- "attempt to call a nil value", and the next sweep finds it by reading
+	-- a log. A directory copied, moved or removed is also a decision about
+	-- what a downloaded game may do to the user's disk, which is why these
+	-- three are a stub and not four lines of implementation.
+	"cpdir", "mvdir", "rmdir", "get_player_ip", "save_gen_notify",
 }
 
 for _, name in ipairs(STUBS_NIL) do
@@ -1864,8 +1872,6 @@ end
 -- A fresh table each call, because a caller may keep or add to what it is
 -- given and the next caller should not see that.
 --
--- Nothing uses it at the moment: the list it was written for,
--- find_nodes_with_meta, is implemented. It is what the next one gets.
 local function stub_list(name)
 	core[name] = function()
 		if not stub_warned[name] then
@@ -1874,6 +1880,16 @@ local function stub_list(name)
 		end
 		return {}
 	end
+end
+
+for _, name in ipairs({
+	-- A node's real shape, which a mod reasoning about collision or
+	-- selection asks for. The boxes exist -- node_boxes() above reads them
+	-- for the mesher -- and what is missing is the rotation a paramtype2
+	-- turns them by, which is the reason this is not four lines either.
+	"get_node_boxes",
+}) do
+	stub_list(name)
 end
 
 -- The two an object is in, which lua/entity.lua fills: tables rather than
