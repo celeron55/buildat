@@ -7253,7 +7253,7 @@ struct Module: public interface::Module, public luanti::Interface
 	}
 
 	void set_player_pos(const ss_ &name, float x, float y, float z,
-			float look_h, float look_v)
+			float look_h, float look_v, int32_t controls)
 	{
 		// What the world streams around and what is active near; the step
 		// reads it, so this only writes it down
@@ -7262,10 +7262,10 @@ struct Module: public interface::Module, public luanti::Interface
 				(int32_t)std::floor(z));
 		char buf[256];
 		snprintf(buf, sizeof buf,
-				"core.__set_player_pos(\"%s\", %f, %f, %f, %f, %f) "
+				"core.__set_player_pos(\"%s\", %f, %f, %f, %f, %f, %d) "
 				"return true",
 				lua_quoted(name).c_str(), (double)x, (double)y, (double)z,
-				(double)look_h, (double)look_v);
+				(double)look_h, (double)look_v, (int)controls);
 		node_action(buf);
 	}
 

@@ -67,7 +67,13 @@ struct Module: public interface::Module
 	network::PeerInfo::Id m_named_peer = 0;
 	// Where each client last said its player is, applied on the next tick;
 	// see on_where()
-	struct Where { double x = 0, y = 0, z = 0, look_h = 0, look_v = 0; };
+	// And what the player is holding down, in Luanti's own bit order; see
+	// control_bits() in client_lua/init.lua and CONTROL_BITS in
+	// builtin/luanti/lua/entity.lua
+	struct Where {
+		double x = 0, y = 0, z = 0, look_h = 0, look_v = 0;
+		int32_t controls = 0;
+	};
 	sm_<network::PeerInfo::Id, Where> m_pending_where;
 	float m_where_timer = 0.0f;
 	// A world runs once: what a second choice would be is a second Luanti
@@ -204,7 +210,7 @@ struct Module: public interface::Module
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
 			cereal::PortableBinaryInputArchive ar(is);
-			ar(w.x, w.y, w.z, w.look_h, w.look_v);
+			ar(w.x, w.y, w.z, w.look_h, w.look_v, w.controls);
 		} catch(std::exception &e){
 			log_w(MODULE, "main:where: %s", e.what());
 			return;
@@ -232,7 +238,7 @@ struct Module: public interface::Module
 				i->set_player_pos(player_name_of(pair.first),
 						(float)pair.second.x, (float)pair.second.y,
 						(float)pair.second.z, (float)pair.second.look_h,
-						(float)pair.second.look_v);
+						(float)pair.second.look_v, pair.second.controls);
 			}
 		});
 	}

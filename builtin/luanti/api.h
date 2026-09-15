@@ -123,8 +123,12 @@ namespace luanti
 		// core.get_look_horizontal() means it.
 		virtual void add_player(const ss_ &name, size_t peer) = 0;
 		virtual void remove_player(const ss_ &name) = 0;
+		// controls is what the player is holding down, in Luanti's own bit
+		// order -- PlayerControl::getKeysPressed(), which is what
+		// get_player_control_bits() answers with and what
+		// get_player_control() is unpacked from.
 		virtual void set_player_pos(const ss_ &name, float x, float y,
-				float z, float look_h, float look_v) = 0;
+				float z, float look_h, float look_v, int32_t controls) = 0;
 
 		// What a click comes to. The node is dug the way core.dig_node()
 		// digs one -- the pointed thing is handed to the vendored builtin,

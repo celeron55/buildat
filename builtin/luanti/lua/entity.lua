@@ -904,6 +904,41 @@ function PlayerRef:set_physics_override(t)
 	end
 end
 
+-- Luanti's own bit order for the same thing; PlayerControl::getKeysPressed
+-- in src/player.cpp
+local CONTROL_BITS = {"up", "down", "left", "right", "jump", "aux1",
+		"sneak", "dig", "place", "zoom"}
+
+-- What the client says it is holding, unpacked into the table a mod reads.
+-- LMB and RMB are Luanti's older names for dig and place and follow them.
+local function set_control_bits(o, bits)
+	bits = math.floor(tonumber(bits) or 0)
+	local c = o.control
+	for i = 1, #CONTROL_BITS do
+		c[CONTROL_BITS[i]] = (bits % 2 ^ i) >= 2 ^ (i - 1)
+	end
+	c.LMB = c.dig
+	c.RMB = c.place
+end
+
+do
+	local o = {control = {}}
+	set_control_bits(o, 0)
+	assert(o.control.up == false and o.control.zoom == false,
+			"control bits: nothing held is nothing set")
+	-- forward and sneak, which is bits 0 and 6
+	set_control_bits(o, 1 + 64)
+	assert(o.control.up and o.control.sneak and not o.control.jump,
+			"control bits: the bits pick the right keys")
+	-- Every one of them, which is what says the top bit is not lost
+	set_control_bits(o, 2 ^ #CONTROL_BITS - 1)
+	for _, name in ipairs(CONTROL_BITS) do
+		assert(o.control[name], "control bits: " .. name .. " went missing")
+	end
+	assert(o.control.LMB and o.control.RMB,
+			"control bits: LMB and RMB follow dig and place")
+end
+
 function PlayerRef:get_player_control()
 	local o = state_of(self)
 	local c = o and o.control
@@ -919,11 +954,6 @@ function PlayerRef:get_player_control()
 	end
 	return out
 end
-
--- Luanti's own bit order for the same thing; PlayerControl::getKeysPressed
--- in src/player.cpp
-local CONTROL_BITS = {"up", "down", "left", "right", "jump", "aux1",
-		"sneak", "dig", "place", "zoom"}
 
 function PlayerRef:get_player_control_bits()
 	local o = state_of(self)
@@ -2294,11 +2324,11 @@ function core.__add_player(name)
 		physics = {speed = 1, jump = 1, gravity = 1},
 		inventory_formspec = "",
 		formspec_prepend = "",
-		-- What the client says it is holding down. Only sneak is ever set:
-		-- it is the one a mod reads, because Luanti's own item_place()
-		-- looks at it to decide between a node's on_rightclick and putting
-		-- something down against it. The rest are here so that the table is
-		-- the shape a mod expects.
+		-- What the client says it is holding down, written by
+		-- core.__set_player_pos() from the bits the client sends with its
+		-- position. A mod reads it through get_player_control(), and
+		-- Luanti's own item_place() reads sneak out of it to decide between
+		-- a node's on_rightclick and putting something down against it.
 		control = {up = false, down = false, left = false, right = false,
 				jump = false, aux1 = false, sneak = false, dig = false,
 				place = false, LMB = false, RMB = false, zoom = false},
@@ -2402,7 +2432,7 @@ function core.__remove_player(name)
 end
 
 -- Where a player is and which way they are looking is their client's to say
-function core.__set_player_pos(name, x, y, z, look_h, look_v)
+function core.__set_player_pos(name, x, y, z, look_h, look_v, controls)
 	local id = players[name]
 	local o = id and objects[id]
 	if not o then
@@ -2412,6 +2442,9 @@ function core.__set_player_pos(name, x, y, z, look_h, look_v)
 	if look_h then
 		o.look.h = look_h
 		o.look.v = look_v or 0
+	end
+	if controls and o.control then
+		set_control_bits(o, controls)
 	end
 end
 

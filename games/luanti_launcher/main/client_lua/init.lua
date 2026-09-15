@@ -2352,8 +2352,53 @@ end)
 local WHERE_INTERVAL = 0.2
 local where_timer = 0
 
+-- What the player is holding down, in Luanti's own bit order --
+-- PlayerControl::getKeysPressed(), and CONTROL_BITS in
+-- builtin/luanti/lua/entity.lua, which reads these back out: up, down, left,
+-- right, jump, aux1, sneak, dig, place, zoom.
+--
+-- Nothing sent this before, so get_player_control() answered twelve falses
+-- forever and every sprint mod, aux1 ability and sneak-dependent behaviour
+-- saw a player standing perfectly still -- without erroring, which is the
+-- worst shape a gap can have.
+--
+-- aux1 is the fast key: in Luanti that is the same key and the same
+-- meaning, and it is what a sprint mod reads. zoom has no binding here and
+-- is never set.
+local CONTROL_KEYS = {"forward", "back", "left", "right", "jump", "fast",
+		"sneak"}
+local CONTROL_DIG = 128
+local CONTROL_PLACE = 256
+
+local function control_bits()
+	-- Nothing is held while the mouse is on the screen: a form is open, a
+	-- line is being typed, or Tab put it there, and the keys are that
+	-- window's rather than the player's
+	if not mouse_in_world or luanti.form_open() or chat_input ~= nil then
+		return 0
+	end
+	local bits = 0
+	for i = 1, #CONTROL_KEYS do
+		if key_down(CONTROL_KEYS[i]) then
+			bits = bits + 2 ^ (i - 1)
+		end
+	end
+	if magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
+		bits = bits + CONTROL_DIG
+	end
+	if magic.input:GetMouseButtonDown(magic.MOUSEB_RIGHT) then
+		bits = bits + CONTROL_PLACE
+	end
+	return bits
+end
+
+-- What went last, so that a key going down or up is sent on the frame it
+-- happens rather than waiting out the heartbeat
+local last_controls = -1
+
 local function send_where()
 	local p = {x = player.x, y = player.y, z = player.z}
+	last_controls = control_bits()
 	-- Luanti measures the horizontal angle counter-clockwise from +Z, so it
 	-- turns towards -X where Urho's yaw turns towards +X; its vertical one
 	-- is positive downwards, which is what Urho's pitch already is. See
@@ -2362,12 +2407,14 @@ local function send_where()
 		x = p.x, y = p.y, z = p.z,
 		look_h = math.rad(-yaw),
 		look_v = math.rad(pitch),
+		controls = last_controls,
 	}, {"object",
 		{"x", "double"},
 		{"y", "double"},
 		{"z", "double"},
 		{"look_h", "double"},
 		{"look_v", "double"},
+		{"controls", "int32_t"},
 	}))
 end
 
@@ -2378,7 +2425,11 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 
 	if player_placed then
 		where_timer = where_timer + dt
-		if where_timer >= WHERE_INTERVAL then
+		-- simplified: the keys are sampled, so a tap that begins and ends
+		-- between two of these is not seen. Sending on change narrows that
+		-- to the server's own 0.2 s coalescing of where packets, which is
+		-- what would have to go next if a tap ever has to count.
+		if where_timer >= WHERE_INTERVAL or control_bits() ~= last_controls then
 			where_timer = 0
 			send_where()
 		end
