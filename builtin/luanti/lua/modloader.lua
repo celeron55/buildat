@@ -41,6 +41,53 @@ do
 			"and answers nil for a setting that is not there")
 end
 
+do
+	-- AreaStore, whose answers are shaped three ways depending on what the
+	-- caller asked for; checked here rather than in classes.lua because the
+	-- corners come back as vectors and vector.lua loads after it.
+	local store = AreaStore()
+	local a = store:insert_area({x = 0, y = 0, z = 0}, {x = 4, y = 4, z = 4},
+			"inner")
+	local b = store:insert_area({x = 10, y = 0, z = 0},
+			{x = -10, y = 8, z = 8}, "outer")
+	assert(a and b and a ~= b, "an area gets an id of its own")
+	assert(store:get_area(a) == true,
+			"and answers true when neither half was asked for")
+	local got = store:get_area(b, true, true)
+	assert(got.min.x == -10 and got.max.x == 10 and got.data == "outer",
+			"the corners come back the right way round")
+
+	local at = store:get_areas_for_pos({x = 2, y = 2, z = 2})
+	assert(at[a] and at[b], "a point inside both is inside both")
+	assert(next(store:get_areas_for_pos({x = 2, y = 20, z = 2})) == nil,
+			"and a point above them is in neither")
+
+	-- The box 0,0,0 - 4,4,4 is held whole by both; 0,0,0 - 9,9,9 by
+	-- neither, though both share nodes with it
+	local whole = store:get_areas_in_area({x = 0, y = 0, z = 0},
+			{x = 4, y = 4, z = 4}, false)
+	assert(whole[a] and whole[b], "an area that holds the whole box is in")
+	local big = store:get_areas_in_area({x = 0, y = 0, z = 0},
+			{x = 9, y = 9, z = 9}, false)
+	assert(next(big) == nil, "one that only reaches into it is not")
+	local touching = store:get_areas_in_area({x = 0, y = 0, z = 0},
+			{x = 9, y = 9, z = 9}, true)
+	assert(touching[a] and touching[b], "unless overlapping is accepted")
+
+	assert(store:insert_area({x = 0, y = 0, z = 0}, {x = 1, y = 1, z = 1},
+			"", a) == nil, "an id already in use is refused")
+	assert(store:remove_area(a) == true and store:get_area(a) == nil,
+			"and a removed area is gone")
+	assert(store:remove_area(a) == false, "removing it twice says so")
+
+	-- And that it survives being written down and read back
+	local text = store:to_string()
+	local other = AreaStore()
+	assert(other:from_string(text), "an area store reads its own writing")
+	assert(other:get_area(b, false, true).data == "outer",
+			"with the data that was in it")
+end
+
 local modlist = dofile(__luanti_module_path .. "/lua/modlist.lua")
 modlist.set_read_file(read_file)
 

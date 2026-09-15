@@ -49,6 +49,10 @@ end
 
 core.mkdir = __luanti_create_directories
 
+-- Whether anything is at a path. A game asks before reading its own data:
+-- capturetheflag has a directory of maps and asks about each.
+core.path_exists = __luanti_path_exists
+
 -- What the Lua sampling profiler has seen since the last call, under a
 -- name, and then it starts again. Does nothing unless the run was started
 -- with BUILDAT_LUANTI_LUAPROF. A probe calls it at the edges of whatever it

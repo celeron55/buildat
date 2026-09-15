@@ -197,6 +197,25 @@ check("mod ordering", function()
 	assert(not pcall(modlist.order_mods, {mod("a", "b"), mod("b", "a")}))
 end)
 
+check("mod scan order", function()
+	local function m(name, from_modpack)
+		return {name = name, from_modpack = from_modpack or false}
+	end
+	-- Luanti sorts by name case-insensitively and puts every mod that came
+	-- from a modpack before every one that did not
+	local mods = {m("Zebra"), m("apple"), m("more_ore", true),
+			m("mtg_default", true), m("banana")}
+	modlist.sort_mods(mods)
+	local names = {}
+	for i, mod in ipairs(mods) do
+		names[i] = mod.name
+	end
+	assert(table.concat(names, ",") ==
+			"more_ore,mtg_default,apple,banana,Zebra",
+			"the modpack's mods first, each half by name: " ..
+			table.concat(names, ","))
+end)
+
 check("depends.txt parsing", function()
 	local d, o = modlist.parse_depends_txt(
 			"default\nbones\nwatershed?\n\n  highlandpools?  \n")

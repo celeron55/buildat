@@ -63,10 +63,44 @@ function M.parse_depends_txt(text)
 	return depends, optional
 end
 
--- Every mod directory under path, one modpack deep, as {name, path, depends,
--- optional_depends}
-function M.scan_mods(path, out)
+-- Luanti's own order for the mods a path holds, which is not the order the
+-- filesystem lists them in: `flattenMods()` sorts by name, case-insensitively
+-- (`strcasecmp`), and `addMods()` adds every mod that came from a modpack
+-- before every one that did not. See src/content/mods.cpp and
+-- mod_configuration.cpp.
+--
+-- **This decides real things**, because order_mods() walks this order
+-- backwards: of two mods that declare no dependency on each other, the one
+-- later in it loads first. capturetheflag's `more_ore` uses the `default`
+-- table and says nothing about it, and it works on Luanti only because
+-- `mtg_default` sorts after it and is therefore taken first.
+function M.sort_mods(mods)
+	-- Where each was found, so that two mods of the same name in the same
+	-- place keep the order they were found in rather than swapping about
+	local at = {}
+	for i, mod in ipairs(mods) do
+		at[mod] = i
+	end
+	table.sort(mods, function(a, b)
+		if a.from_modpack ~= b.from_modpack then
+			return a.from_modpack == true
+		end
+		local la, lb = a.name:lower(), b.name:lower()
+		if la ~= lb then
+			return la < lb
+		end
+		return at[a] < at[b]
+	end)
+	return mods
+end
+
+-- Every mod directory under path, as {name, path, depends, optional_depends,
+-- from_modpack}, in Luanti's order -- see sort_mods(). A recursive call
+-- passes `out` and does not sort; the outermost one does.
+function M.scan_mods(path, out, depth)
+	local top = (out == nil)
 	out = out or {}
+	depth = depth or 0
 	for _, node in ipairs(__luanti_list_dir(path)) do
 		if node.is_directory and node.name:sub(1, 1) ~= "." then
 			local dir = path .. "/" .. node.name
@@ -87,15 +121,19 @@ function M.scan_mods(path, out)
 					path = dir,
 					depends = depends,
 					optional_depends = optional,
+					from_modpack = (depth > 0),
 				}
 			elseif read_file(dir .. "/modpack.conf") or
 					read_file(dir .. "/modpack.txt") then
-				M.scan_mods(dir, out)
+				M.scan_mods(dir, out, depth + 1)
 			else
 				-- A directory that is neither is not ours to guess about
-				M.scan_mods(dir, out)
+				M.scan_mods(dir, out, depth + 1)
 			end
 		end
+	end
+	if top then
+		M.sort_mods(out)
 	end
 	return out
 end

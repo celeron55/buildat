@@ -678,6 +678,22 @@ static int l_list_dir(lua_State *L)
 	return 1;
 }
 
+// Whether anything is at a path, file or directory. Luanti has
+// core.path_exists() and a game uses it to decide whether its own data is
+// there -- capturetheflag asks before reading each of its maps.
+static int l_path_exists(lua_State *L)
+{
+	const char *path = luaL_checkstring(L, 1);
+	bool exists = false;
+	try {
+		exists = interface::fs::path_exists(path);
+	} catch(...){
+		exists = false;
+	}
+	lua_pushboolean(L, exists);
+	return 1;
+}
+
 static int l_create_directories(lua_State *L)
 {
 	const char *path = luaL_checkstring(L, 1);
@@ -7123,6 +7139,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_log", l_log);
 		set_global_cfunction("__luanti_get_us_time", l_get_us_time);
 		set_global_cfunction("__luanti_list_dir", l_list_dir);
+		set_global_cfunction("__luanti_path_exists", l_path_exists);
 		set_global_cfunction("__luanti_create_directories", l_create_directories);
 		set_global_cfunction("__luanti_encode_png", l_encode_png);
 		set_global_cfunction("__luanti_sha1", l_sha1);

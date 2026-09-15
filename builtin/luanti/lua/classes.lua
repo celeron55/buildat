@@ -1040,4 +1040,183 @@ core.get_value_noise_map = core.get_perlin_map
 -- was a second one here; this file loads after bootstrap.lua, so it was the
 -- one a mod got, and it had neither the defaults nor get_pos().
 
+-- Luanti's AreaStore: cuboids, each with a string of the mod's own, asked
+-- which of them a position is in or which of them hold a box. A protection
+-- mod keeps its claims in one; capturetheflag keeps its landmines in one and
+-- does not load without it.
+--
+-- simplified: a flat list walked in order, which is exactly what Luanti's
+-- own store does when SpatialIndex is not built in -- and `type_name` is
+-- taken and ignored for the same reason, which its own documentation allows.
+-- The upgrade path is an index by block, and `set_cache_params()` is where
+-- Luanti says that would go.
+local AreaStoreClass = {}
+AreaStoreClass.__index = AreaStoreClass
+
+function AreaStore(type_name)
+	return setmetatable({areas = {}, next_id = 0}, AreaStoreClass)
+end
+
+-- What get_area() and its two plural forms answer with: `true` when the
+-- caller asked for neither half, and otherwise the halves it asked for
+local function area_answer(a, include_corners, include_data)
+	if not include_corners and not include_data then
+		return true
+	end
+	local out = {}
+	if include_corners then
+		out.min = vector.new(a.min.x, a.min.y, a.min.z)
+		out.max = vector.new(a.max.x, a.max.y, a.max.z)
+	end
+	if include_data then
+		out.data = a.data
+	end
+	return out
+end
+
+local function corner_pair(c1, c2)
+	local function n(v)
+		return math.floor(tonumber(v) or 0)
+	end
+	local ax, ay, az = n(c1.x), n(c1.y), n(c1.z)
+	local bx, by, bz = n(c2.x), n(c2.y), n(c2.z)
+	return {x = math.min(ax, bx), y = math.min(ay, by), z = math.min(az, bz)},
+			{x = math.max(ax, bx), y = math.max(ay, by), z = math.max(az, bz)}
+end
+
+-- The ids Luanti allows: a whole number a mod can hold in a u32, with the
+-- last one left out the way Luanti leaves it out
+local MAX_AREA_ID = 4294967294
+
+function AreaStoreClass:insert_area(c1, c2, data, id)
+	if type(c1) ~= "table" or type(c2) ~= "table" then
+		return nil
+	end
+	if id ~= nil then
+		id = tonumber(id)
+		if id == nil or id ~= math.floor(id) or id < 0 or id > MAX_AREA_ID or
+				self.areas[id] ~= nil then
+			return nil
+		end
+	else
+		while self.areas[self.next_id] ~= nil do
+			self.next_id = self.next_id + 1
+		end
+		id = self.next_id
+		if id > MAX_AREA_ID then
+			return nil
+		end
+	end
+	local min, max = corner_pair(c1, c2)
+	self.areas[id] = {min = min, max = max, data = tostring(data or "")}
+	return id
+end
+
+function AreaStoreClass:get_area(id, include_corners, include_data)
+	local a = self.areas[tonumber(id) or -1]
+	if a == nil then
+		return nil
+	end
+	return area_answer(a, include_corners, include_data)
+end
+
+function AreaStoreClass:remove_area(id)
+	id = tonumber(id)
+	if id == nil or self.areas[id] == nil then
+		return false
+	end
+	self.areas[id] = nil
+	if id < self.next_id then
+		self.next_id = id
+	end
+	return true
+end
+
+function AreaStoreClass:get_areas_for_pos(pos, include_corners, include_data)
+	local out = {}
+	if type(pos) ~= "table" then
+		return out
+	end
+	local x, y, z = pos.x, pos.y, pos.z
+	for id, a in pairs(self.areas) do
+		if x >= a.min.x and x <= a.max.x and y >= a.min.y and y <= a.max.y and
+				z >= a.min.z and z <= a.max.z then
+			out[id] = area_answer(a, include_corners, include_data)
+		end
+	end
+	return out
+end
+
+-- Without accept_overlap an area has to hold the whole box, which is what
+-- "contain all nodes inside the area specified" means; with it, sharing one
+-- node is enough.
+function AreaStoreClass:get_areas_in_area(c1, c2, accept_overlap,
+		include_corners, include_data)
+	local out = {}
+	if type(c1) ~= "table" or type(c2) ~= "table" then
+		return out
+	end
+	local min, max = corner_pair(c1, c2)
+	for id, a in pairs(self.areas) do
+		local hit
+		if accept_overlap then
+			hit = a.min.x <= max.x and a.max.x >= min.x and
+					a.min.y <= max.y and a.max.y >= min.y and
+					a.min.z <= max.z and a.max.z >= min.z
+		else
+			hit = a.min.x <= min.x and a.max.x >= max.x and
+					a.min.y <= min.y and a.max.y >= max.y and
+					a.min.z <= min.z and a.max.z >= max.z
+		end
+		if hit then
+			out[id] = area_answer(a, include_corners, include_data)
+		end
+	end
+	return out
+end
+
+-- Luanti's own says "Requires SpatialIndex, no-op function otherwise", and
+-- the cache is the store's own business either way
+function AreaStoreClass:reserve(count) end
+function AreaStoreClass:set_cache_params(params) end
+
+-- simplified: Luanti's own serialization is binary and its documentation
+-- calls it experimental; this is core.serialize, which round-trips through
+-- this engine and not through Luanti's. A mod that writes a file and reads
+-- it back -- which is what they are for -- does not notice.
+function AreaStoreClass:to_string()
+	return core.serialize(self.areas)
+end
+
+function AreaStoreClass:from_string(str)
+	local t = core.deserialize(str)
+	if type(t) ~= "table" then
+		return false, "not an area store"
+	end
+	self.areas = {}
+	self.next_id = 0
+	for id, a in pairs(t) do
+		if type(a) == "table" and type(a.min) == "table" and
+				type(a.max) == "table" then
+			self.areas[tonumber(id) or 0] = {min = a.min, max = a.max,
+					data = tostring(a.data or "")}
+		end
+	end
+	return true
+end
+
+function AreaStoreClass:to_file(filename)
+	return core.safe_file_write(filename, self:to_string())
+end
+
+function AreaStoreClass:from_file(filename)
+	local f = io.open(filename, "rb")
+	if not f then
+		return false, "cannot read " .. tostring(filename)
+	end
+	local text = f:read("*a")
+	f:close()
+	return self:from_string(text)
+end
+
 -- vim: set noet ts=4 sw=4:
