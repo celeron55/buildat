@@ -2962,8 +2962,52 @@ local function send_inventories()
 	end
 end
 
+-- What the world does to somebody standing in it: a node with
+-- damage_per_second hurts whoever is in it, once a second, which is what
+-- makes lava, fire and a cactus dangerous. The worst of the node the feet
+-- are in and the node the head is in, which is Luanti's own rule.
+--
+-- simplified: those two nodes and nothing else. There is no fall damage --
+-- a fall happens in the client's own physics and nothing reports one -- and
+-- no drowning. See "Nothing hurts" in doc/plan/luanti_module_plan.md.
+local damage_timer = 0
+local function damage_players(dtime)
+	damage_timer = damage_timer + dtime
+	if damage_timer < 1 then
+		return
+	end
+	-- Not reset to zero: a step longer than a second still costs one second
+	-- of damage and not two, and the remainder is kept
+	damage_timer = damage_timer - 1
+	if not core.settings:get_bool("enable_damage", true) then
+		return
+	end
+	for _, id in pairs(players) do
+		local o = objects[id]
+		if o and o.ref and (o.hp or 0) > 0 and o.pos then
+			local worst, worst_name = 0, nil
+			for dy = 0, 1 do
+				local node = core.get_node({
+					x = math.floor(o.pos.x + 0.5),
+					y = math.floor(o.pos.y + 0.5) + dy,
+					z = math.floor(o.pos.z + 0.5)})
+				local def = node and core.registered_nodes[node.name]
+				local dps = def and tonumber(def.damage_per_second) or 0
+				if dps > worst then
+					worst, worst_name = dps, node.name
+				end
+			end
+			if worst > 0 then
+				o.ref:set_hp(o.hp - worst,
+						{type = "node_damage", node = worst_name})
+			end
+		end
+	end
+end
+
 function core.__step_objects(dtime)
 	place_the_unplaced(dtime)
+	damage_players(dtime)
 	-- Over the ids taken first, because a step adds and removes objects
 	local ids = {}
 	for id, _ in pairs(objects) do
