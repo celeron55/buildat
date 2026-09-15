@@ -119,6 +119,25 @@ local function hold_weather(kind)
 	end
 end
 
+-- The three clients are compared at one viewing range and one fog, and it is
+-- the official client's: `viewing_range = 200` out of reference_shots.conf,
+-- and Luanti's own `fog_start` default of 0.4. For that client this call says
+-- what it was already doing and changes nothing; for the two buildat clients
+-- it is the only way in, the launcher's own far clip being 400 and its fog
+-- starting at 0.7 of it. A ratio between pictures whose fog starts in
+-- different places is a ratio about the fog.
+--
+-- Read, edit, write, rather than a bare set_sky: the sky belongs to the game
+-- and only the fog is ours to say. And after the weather rather than before,
+-- because changing the weather sets a sky of its own.
+local function pin_view(player)
+	local sky = player:get_sky(true)
+	sky.fog = sky.fog or {}
+	sky.fog.fog_distance = 200
+	sky.fog.fog_start = 0.4
+	player:set_sky(sky)
+end
+
 core.register_on_joinplayer(function(player)
 	local seed = seed_now()
 	local states = states_of(seed)
@@ -141,6 +160,7 @@ core.register_on_joinplayer(function(player)
 		player:set_pos(v.pos)
 		core.set_timeofday(HOURS[st.hour])
 		hold_weather(st.weather)
+		pin_view(player)
 		if left > 0 then
 			core.after(REAIM, function() aim(i, left - REAIM) end)
 		else

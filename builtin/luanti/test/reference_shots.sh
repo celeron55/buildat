@@ -32,6 +32,116 @@ luanti=~/projects/luanti
 # `git checkout buildat-refshots && make -j` and keep bin/luanti as it was.
 bin=${LUANTI_BIN:-./bin/luanti-refshots}
 
+# The shooting half, which is the same whichever client is on screen: find its
+# window, learn how many states the fixture has, and photograph each one late
+# in its hold. builtin/luanti/test/reference_shots_module.sh calls it through
+#
+#   builtin/luanti/test/reference_shots.sh shoot <server log> <client pid> [dir]
+#
+# rather than carrying a second copy of it. Reads $log, $cli and $out.
+shoot_states()
+{
+	# The window, by the client's own pid rather than by its title. `xdotool
+	# search` walks the whole window tree and hangs on this desktop; wmctrl -lp
+	# is one EWMH query. By pid also cannot photograph the wrong renderer, which
+	# a title match can when a buildat client is on screen at the same time.
+	win=""
+	for i in $(seq 1 40); do
+		sleep 1
+		win=$(wmctrl -lp 2>/dev/null | awk -v p="$cli" '$3 == p {print $1; exit}')
+		[ -n "$win" ] && break
+	done
+	if [ -z "$win" ]; then
+		echo "no window for pid $cli after 40s" >&2
+		kill "$cli" "${srv:-}" 2>/dev/null; exit 1
+	fi
+	echo "window=$win  log=$log  out=$out"
+
+	# Wait for the fixture to say how many states this world has rather than
+	# guessing: a wrong count makes the deadline wrong, and an over-long deadline
+	# is what let a third cycle overwrite a good set with a spoiled one.
+	total=""
+	for i in $(seq 1 60); do
+		total=$(grep -o "REFSHOT world seed .*, [0-9]* states" "$log" | \
+				grep -o "[0-9]* states" | grep -o "[0-9]*" | tail -1)
+		[ -n "$total" ] && break
+		sleep 1
+	done
+	total=${total:-16}
+	echo "states=$total"
+	# Two full cycles, overwriting: the world generates lazily as the player is
+	# teleported, so the first pass through a viewpoint can photograph terrain
+	# that has not arrived. The second cycle overwrites it with a warm one, which
+	# is cheaper than a separate warm-up run -- a cycle is only four seconds a
+	# state.
+	#
+	# And the shot is taken late in the hold rather than right after the aim.
+	# "Within a second of the aim" existed only to dodge the desktop's real
+	# mouse; inside a granted window, settled terrain is worth more.
+	# Exactly two cycles' worth of shots, counted rather than timed: the first
+	# pass through a viewpoint can photograph terrain that has not arrived, the
+	# second overwrites it warm, and a third is only a chance to overwrite a good
+	# picture with a spoiled one.
+	# Cycles, overwriting: the first pass through a viewpoint can photograph
+	# terrain that has not arrived and the next overwrites it warm. Two is
+	# enough for a client that was handed a cached world; a client that has
+	# just imported one is still meshing it through the second, which is why
+	# reference_shots_module.sh asks for three.
+	want=$(( total * ${CYCLES:-2} ))
+	taken=0
+	# Which states were actually photographed, so one that was dropped in both
+	# cycles is reported rather than left as whatever an older run put there
+	# under that name. A stale picture of the right place is the other thing
+	# the two cheap tests cannot see.
+	shotlist=$(mktemp /tmp/refshots_taken.XXXXXX)
+	# Counted from the first shot rather than from here. What comes before it
+	# is the client loading the world, which is ten seconds for official Luanti
+	# on a cached world and a minute and a half for the module importing one --
+	# charge that to the deadline and the second cycle is what gets cut short.
+	# The outer cap is for a client that never gets there at all.
+	deadline=$(( $(date +%s) + 900 ))
+	last=""
+	while [ "$taken" -lt "$want" ] && [ "$(date +%s)" -lt "$deadline" ]; do
+		line=$(grep -o "REFSHOT [0-9]* [0-9a-z_]*_\(none\|rain\)" "$log" | tail -1)
+		name=$(echo "$line" | cut -d' ' -f3)
+		if [ -n "$name" ] && [ "$name" != "$last" ]; then
+			sleep 2.5
+			# The name was read before the exposure. If the fixture moved on
+			# during it the picture is of the next state, and saving it under
+			# this name is the one failure the two cheap tests below cannot
+			# see -- it is a good picture of the wrong thing. A state is four
+			# seconds when the server is warm and fifteen while it loads a
+			# world around a teleporting player, so this is checked rather
+			# than assumed; the state comes round again next cycle.
+			now=$(grep -o "REFSHOT [0-9]* [0-9a-z_]*_\(none\|rain\)" "$log" | tail -1 | \
+					cut -d' ' -f3)
+			if [ "$now" != "$name" ]; then
+				echo "moved during $name, dropped" >&2
+				last="$name"
+				sleep 0.5
+				continue
+			fi
+			if import -window "$win" "$out/$name.png" 2>/dev/null; then
+				taken=$((taken + 1))
+				echo "$name" >> "$shotlist"
+				[ "$taken" -eq 1 ] && deadline=$(( $(date +%s) + \
+						total * 6 * ${CYCLES:-2} + 60 ))
+				echo "shot $name"
+			else
+				echo "MISSED $name" >&2
+			fi
+			last="$name"
+		fi
+		sleep 0.5
+		kill -0 "$cli" 2>/dev/null || break
+	done
+	got=$(sort -u "$shotlist" 2>/dev/null | wc -l)
+	rm -f "$shotlist"
+	if [ "$got" -lt "$total" ]; then
+		echo "only $got of $total states were shot; the rest are stale" >&2
+	fi
+}
+
 # Two cheap tests, which catch every failure this run has actually had: the
 # "You died" dialog fills the screen centre with one flat grey, and a player
 # who fell through unloaded ground photographs flat sky. Neither catches the
@@ -65,6 +175,9 @@ check_shots()
 case "$fixture" in
 check)
 	check_shots; exit $? ;;
+shoot)
+	log="$2"; cli="$3"; out="${4:-$out}"
+	mkdir -p "$out"; shoot_states; check_shots; exit $? ;;
 reference)
 	meta="$me/reference_world_map_meta.txt"
 	;;
@@ -98,6 +211,19 @@ if [ -n "$want_vl" ] && [ "$want_vl" != "$have_vl" ]; then
 fi
 
 [ -f "$conf" ] || { echo "no config at $conf" >&2; exit 2; }
+
+# The non-PBR set, which is the same twenty with Luanti's dynamic shadows off
+# -- [NON_PBR]'s half of this session. A copy of the config with one line
+# added rather than a second config file: two files that must agree about
+# fifteen settings and differ about one drift apart, and the last value of a
+# key is the one Luanti keeps. Shaders themselves have no switch left to
+# throw; 5.18 dropped enable_shaders.
+if [ -n "${NO_SHADOWS:-}" ]; then
+	out="${OUT_DIR:-$here/local/reference_shots/official_noshadow}"
+	base="$conf"
+	conf=$(mktemp /tmp/refshots_noshadow.XXXXXX.conf)
+	{ cat "$base"; echo "enable_dynamic_shadows = false"; } > "$conf"
+fi
 
 # The cache. Kept, not deleted: a bulk session generates the terrain once.
 work="$here/local/reference_worlds/$seed"
@@ -150,67 +276,7 @@ sleep 5
 	--config "$conf" > /tmp/refshots_cli.log 2>&1 &
 cli=$!
 
-# The window, by the client's own pid rather than by its title. `xdotool
-# search` walks the whole window tree and hangs on this desktop; wmctrl -lp
-# is one EWMH query. By pid also cannot photograph the wrong renderer, which
-# a title match can when a buildat client is on screen at the same time.
-win=""
-for i in $(seq 1 40); do
-	sleep 1
-	win=$(wmctrl -lp 2>/dev/null | awk -v p="$cli" '$3 == p {print $1; exit}')
-	[ -n "$win" ] && break
-done
-if [ -z "$win" ]; then
-	echo "no window for pid $cli after 40s" >&2
-	kill "$cli" "$srv" 2>/dev/null; exit 1
-fi
-echo "window=$win  log=$log  out=$out"
-
-# Wait for the fixture to say how many states this world has rather than
-# guessing: a wrong count makes the deadline wrong, and an over-long deadline
-# is what let a third cycle overwrite a good set with a spoiled one.
-total=""
-for i in $(seq 1 60); do
-	total=$(grep -o "REFSHOT world seed .*, [0-9]* states" "$log" | \
-			grep -o "[0-9]* states" | grep -o "[0-9]*" | tail -1)
-	[ -n "$total" ] && break
-	sleep 1
-done
-total=${total:-16}
-echo "states=$total"
-# Two full cycles, overwriting: the world generates lazily as the player is
-# teleported, so the first pass through a viewpoint can photograph terrain
-# that has not arrived. The second cycle overwrites it with a warm one, which
-# is cheaper than a separate warm-up run -- a cycle is only four seconds a
-# state.
-#
-# And the shot is taken late in the hold rather than right after the aim.
-# "Within a second of the aim" existed only to dodge the desktop's real
-# mouse; inside a granted window, settled terrain is worth more.
-# Exactly two cycles' worth of shots, counted rather than timed: the first
-# pass through a viewpoint can photograph terrain that has not arrived, the
-# second overwrites it warm, and a third is only a chance to overwrite a good
-# picture with a spoiled one.
-want=$(( total * 2 ))
-taken=0
-deadline=$(( $(date +%s) + total * 6 * 2 + 60 ))
-last=""
-while [ "$taken" -lt "$want" ] && [ "$(date +%s)" -lt "$deadline" ]; do
-	line=$(grep -o "REFSHOT [0-9]* [0-9a-z_]*" "$log" | tail -1)
-	name=$(echo "$line" | cut -d' ' -f3)
-	if [ -n "$name" ] && [ "$name" != "$last" ]; then
-		sleep 2.5
-		if import -window "$win" "$out/$name.png" 2>/dev/null; then
-			taken=$((taken + 1))
-			echo "shot $name"
-		else
-			echo "MISSED $name" >&2
-		fi
-		last="$name"
-	fi
-	sleep 0.5
-	kill -0 "$cli" 2>/dev/null || break
-done
+shoot_states
 
 kill "$cli" 2>/dev/null
 sleep 1
