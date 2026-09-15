@@ -845,8 +845,21 @@ local function apply_sky_of_hour()
 				b = a.b + (b.b - a.b) * k}
 	end
 	local t = sky_now.day
-	local horizon_now = three(night_horizon, dawn_horizon, day_horizon, t)
-	world_sky:set_look(three(night_zenith, dawn_zenith, day_zenith, t),
+	-- How light it is, which is not the same as which colours the hour uses.
+	-- **Luanti multiplies the sky it drew by the hour's own brightness** --
+	-- sky.cpp, m_bgcolor and m_skycolor both -- so a game's night_horizon is
+	-- a base to be dimmed and not the colour of the night sky. Without this
+	-- the launcher drew VoxeLibre's #4A6790 as it stands and the night sky
+	-- came out sixteen times official Luanti's. The ramp is the extension's:
+	-- Luanti's day/night ratio bottoms out at 0.175 rather than nothing, and
+	-- goes through its light curve, which a gamma of 2.2 is the shape of.
+	local lit = (0.175 + 0.825 * t) ^ 2.2
+	local function dim(c)
+		return {r = c.r * lit, g = c.g * lit, b = c.b * lit}
+	end
+	local horizon_now = dim(three(night_horizon, dawn_horizon, day_horizon, t))
+	world_sky:set_look(
+			dim(three(night_zenith, dawn_zenith, day_zenith, t)),
 			horizon_now, nil)
 
 	-- What the sun shines with now: its own colour, going red while it is
