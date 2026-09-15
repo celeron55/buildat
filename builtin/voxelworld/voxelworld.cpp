@@ -2641,14 +2641,21 @@ struct CInstance: public voxelworld::Instance
 			VoxelVolume::Sampler dst(buf.volume.get());
 
 			bool chunk_written = false;
+			// The rows the copy below reads to see whether it can take them
+			sv_<uint32_t> src_words, dst_words;
 			for(int z = lc.getZ(); z <= uc.getZ(); z++){
 			for(int y = lc.getY(); y <= uc.getY(); y++){
-				src.setPosition(lc.getX(), y, z);
+			// One stretch of a row, a voxel at a time: the general case, and
+			// what the run copy after it falls back to.
+			auto walk = [&](int x_from, int x_to){
+				if(x_from > x_to)
+					return;
+				src.setPosition(x_from, y, z);
 				dst.setPosition(
-						lc.getX() - chunk_off.getX(),
+						x_from - chunk_off.getX(),
 						y - chunk_off.getY(),
 						z - chunk_off.getZ());
-			for(int x = lc.getX(); x <= uc.getX(); x++,
+			for(int x = x_from; x <= x_to; x++,
 					src.movePositiveX(), dst.movePositiveX()){
 				VoxelInstance nv = src.getVoxel();
 				if(is_undefined(nv))
@@ -2735,6 +2742,89 @@ struct CInstance: public voxelworld::Instance
 				chunk_written = true;
 				num_written++;
 			}
+			};
+
+			// And the stretch that can be copied instead of walked.
+			//
+			// Every voxel the writer owns whose light came with it -- or
+			// which is dark beside dark and makes none of its own -- ends
+			// the walk above as "write the source voxel and seed nothing",
+			// which for a run of them is a memcpy per plane. That is the
+			// generator's own case over nearly the whole of its section.
+			//
+			// What it may not take: a voxel on a face of the volume, where
+			// light crosses into what was already in the world; a voxel the
+			// writer does not own, where what is already there may win; and
+			// a run with anything undefined in it, which the walk skips.
+			int copy_from = uc.getX() + 1, copy_to = uc.getX();
+			int fx0 = lc.getX(), fx1 = uc.getX();
+			bool row_owned = overwrite;
+			if(!row_owned && owned != nullptr &&
+					y >= owned->getLowerCorner().getY() &&
+					y <= owned->getUpperCorner().getY() &&
+					z >= owned->getLowerCorner().getZ() &&
+					z <= owned->getUpperCorner().getZ()){
+				if(fx0 < owned->getLowerCorner().getX())
+					fx0 = owned->getLowerCorner().getX();
+				if(fx1 > owned->getUpperCorner().getX())
+					fx1 = owned->getUpperCorner().getX();
+				row_owned = fx0 <= fx1;
+			}
+			if(y == rlc.getY() || y == ruc.getY() ||
+					z == rlc.getZ() || z == ruc.getZ()){
+				row_owned = false;
+			} else {
+				if(fx0 == rlc.getX())
+					fx0++;
+				if(fx1 == ruc.getX())
+					fx1--;
+				if(fx0 > fx1)
+					row_owned = false;
+			}
+			if(row_owned){
+				const size_t n = (size_t)(fx1 - fx0 + 1);
+				src_words.resize(n);
+				dst_words.resize(n);
+				const int dx0 = fx0 - chunk_off.getX();
+				const int dy0 = y - chunk_off.getY();
+				const int dz0 = z - chunk_off.getZ();
+				bool can_copy =
+						volume.read_words(fx0, y, z, n, &src_words[0]) &&
+						buf.volume->read_words(dx0, dy0, dz0, n,
+								&dst_words[0]);
+				for(size_t k = 0; k < n && can_copy; k++){
+					const VoxelInstance sv(src_words[k]);
+					if(is_undefined(sv)){
+						can_copy = false;
+						break;
+					}
+					for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
+						const LightField lf = (LightField)f;
+						if(!m_light_maintained[lf])
+							continue;
+						// It brought its own light, so nothing is decided
+						// here; see the walk above
+						if(get_light(sv, lf) != 0)
+							continue;
+						// Dark arriving where there was light, or a light of
+						// its own arriving: both are the walk's business
+						if(get_light(VoxelInstance(dst_words[k]), lf) != 0 ||
+								voxel_light_source(sample_of(sv)) != 0){
+							can_copy = false;
+							break;
+						}
+					}
+				}
+				if(can_copy && buf.volume->copy_run_from(volume,
+						fx0, y, z, dx0, dy0, dz0, n)){
+					copy_from = fx0;
+					copy_to = fx1;
+					chunk_written = true;
+					num_written += n;
+				}
+			}
+			walk(lc.getX(), copy_from - 1);
+			walk(copy_to + 1, uc.getX());
 			}
 			}
 
