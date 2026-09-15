@@ -516,8 +516,19 @@ function SettingsClass:get_float(key, default)
 	return tonumber(self:get(key)) or default
 end
 
+-- A position, which is what a game's static_spawnpoint is. The parser is the
+-- vendored builtin's and loads after this file, which is fine: nothing asks
+-- until a game does.
+--
+-- Answering nil for everything refused every game that sets a spawn point:
+-- vendor/builtin/game/static_spawn.lua reads it as "the setting is invalid"
+-- and errors before the game has registered a node. tutorial is one.
 function SettingsClass:get_pos(key)
-	return nil
+	local v = self:get(key)
+	if v == nil then
+		return nil
+	end
+	return core.string_to_pos(v)
 end
 
 function SettingsClass:get_np_group(key)
@@ -582,8 +593,10 @@ end
 core.settings = Settings(world_path .. "/world.mt")
 core.settings.defaults = DEFAULTS
 
+-- The same thing the vendored builtin's misc_s.lua defines over the top of
+-- this once it loads; kept so that the name answers whatever loaded.
 function core.setting_get_pos(key)
-	return nil
+	return core.settings:get_pos(key)
 end
 
 --

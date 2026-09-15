@@ -1035,48 +1035,9 @@ end
 core.get_value_noise = core.get_perlin
 core.get_value_noise_map = core.get_perlin_map
 
--- A settings file of a mod's own
-function Settings(path)
-	local values = {}
-	local f = io.open(path, "rb")
-	if f then
-		for line in f:read("*a"):gmatch("[^\r\n]+") do
-			local key, value = line:match("^%s*([^#=][^=]-)%s*=%s*(.-)%s*$")
-			if key then
-				values[key] = value
-			end
-		end
-		f:close()
-	end
-	local self = {}
-	function self:get(key) return values[key] end
-	function self:get_bool(key, default)
-		local v = values[key]
-		if v == nil then return default end
-		return v == "true"
-	end
-	function self:get_np_group(key) return nil end
-	function self:get_flags(key) return {} end
-	function self:set(key, value) values[key] = tostring(value) end
-	function self:set_bool(key, value) values[key] = tostring(value) end
-	function self:remove(key) values[key] = nil return true end
-	function self:get_names()
-		local out = {}
-		for k, _ in pairs(values) do out[#out + 1] = k end
-		return out
-	end
-	function self:has(key) return values[key] ~= nil end
-	function self:to_table()
-		local out = {}
-		for k, v in pairs(values) do out[k] = v end
-		return out
-	end
-	function self:write()
-		local lines = {}
-		for k, v in pairs(values) do lines[#lines + 1] = k .. " = " .. v end
-		return core.safe_file_write(path, table.concat(lines, "\n") .. "\n")
-	end
-	return self
-end
+-- Settings is bootstrap.lua's, which is the same object core.settings is and
+-- carries the defaults a game's minetest.conf puts behind a world's. There
+-- was a second one here; this file loads after bootstrap.lua, so it was the
+-- one a mod got, and it had neither the defaults nor get_pos().
 
 -- vim: set noet ts=4 sw=4:

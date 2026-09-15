@@ -15,6 +15,32 @@ local read_file = core.__read_file
 -- world is a node like any other and has to be in the registry with them
 core.__register_check_nodes()
 
+do
+	-- The two shapes a game writes a position setting in, which is what
+	-- core.setting_get_pos() reads a static_spawnpoint out of. tutorial's
+	-- minetest.conf has the second, spaces and all, and a game whose
+	-- spawn point does not parse is refused by the vendored builtin's
+	-- static_spawn.lua before it registers a node.
+	--
+	-- Checked here rather than beside setting_get_pos() because the parser
+	-- is the vendored builtin's and bootstrap.lua runs before that.
+	local a = core.string_to_pos("(93,4.6,24)")
+	local b = core.string_to_pos("93, 4.6, 24")
+	assert(a and b and a.x == b.x and a.y == b.y and a.z == b.z,
+			"a position setting reads the same with and without brackets")
+	assert(b.y == 4.6, "and keeps the fraction")
+	assert(core.string_to_pos("93, 4.6") == nil,
+			"while two numbers are not a position")
+	-- And the method the builtin actually calls, which is the Settings
+	-- one rather than core.setting_get_pos()
+	core.settings:set("__check_pos", "93, 4.6, 24")
+	local c = core.settings:get_pos("__check_pos")
+	assert(c and c.y == 4.6, "core.settings:get_pos() reads one as well")
+	core.settings:remove("__check_pos")
+	assert(core.settings:get_pos("__check_pos") == nil,
+			"and answers nil for a setting that is not there")
+end
+
 local modlist = dofile(__luanti_module_path .. "/lua/modlist.lua")
 modlist.set_read_file(read_file)
 
