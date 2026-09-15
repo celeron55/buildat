@@ -59,10 +59,12 @@ end
 -- calls set_data() still gets what it meant.
 function VoxelManipRef:get_data(buffer)
 	if buffer ~= nil and buffer ~= self.ids then
-		for i = 1, #self.ids do
-			buffer[i] = self.ids[i]
-		end
-		return buffer
+		-- In C, because a mapgen chunk is half a million entries and a mod
+		-- reusing one buffer is doing what Luanti's documentation tells it
+		-- to. Written as a Lua loop it was a third of all the Lua time a
+		-- VoxeLibre world spent in its first fifteen seconds with a player
+		-- in it.
+		return __luanti_copy_ints(buffer, self.ids)
 	end
 	return self.ids
 end

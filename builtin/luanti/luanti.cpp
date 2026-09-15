@@ -512,6 +512,28 @@ static void lua_prof_report(const ss_ &label = "")
 	}
 }
 
+// __luanti_copy_ints(dst, src) -> dst: src's array part into dst's, in C.
+//
+// A mod that hands VoxelManip:get_data() a buffer to fill is doing the
+// thing Luanti's own documentation tells it to -- reusing one table
+// instead of making half a million entries a chunk -- and Luanti fills it
+// in C. Filled in Lua it was **a third of all the Lua time** a VoxeLibre
+// world spent in its first fifteen seconds with a player in it, because a
+// mapgen chunk is 512000 elements and the loop pays the interpreter for
+// every one of them.
+static int l_copy_ints(lua_State *L)
+{
+	luaL_checktype(L, 1, LUA_TTABLE);
+	luaL_checktype(L, 2, LUA_TTABLE);
+	const size_t n = lua_objlen(L, 2);
+	for(size_t i = 1; i <= n; i++){
+		lua_rawgeti(L, 2, (int)i);
+		lua_rawseti(L, 1, (int)i);
+	}
+	lua_pushvalue(L, 1);
+	return 1;
+}
+
 // core.__lua_profile(label): what has been sampled since the last call,
 // under a name, and then the counters start again. A probe calls it at the
 // edges of whatever it wants measured.
@@ -6921,6 +6943,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_sound_file", l_sound_file);
 		set_global_cfunction("__luanti_add_media", l_add_media);
 		set_global_cfunction("__luanti_lua_profile", l_lua_profile);
+		set_global_cfunction("__luanti_copy_ints", l_copy_ints);
 		set_global_cfunction("__luanti_send_particles", l_send_particles);
 		set_global_cfunction("__luanti_send_sky", l_send_sky);
 		set_global_cfunction("__luanti_send_time", l_send_time);
