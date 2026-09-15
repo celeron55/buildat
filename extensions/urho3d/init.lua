@@ -583,6 +583,24 @@ do
 				"whitelist: TextureCube:SetData() refused face " .. i)
 	end
 
+	-- Arithmetic, which is the whole of the Math batch, so it is checked by
+	-- doing some rather than by writing a number and reading it back.
+	local iv = Safe.IntVector3(1, 2, 3) + Safe.IntVector3(4, 5, 6)
+	assert(iv.x == 5 and iv.y == 7 and iv.z == 9,
+			"whitelist: IntVector3 does not add")
+	assert(math.abs(Safe.Vector4(1, 2, 3, 4):DotProduct(
+			Safe.Vector4(1, 0, 0, 0)) - 1) < 1e-6,
+			"whitelist: Vector4 does not dot")
+	-- Five out along -Z, pointing back at a box two across around the
+	-- origin: the near face is four away
+	local ray = Safe.Ray(Safe.Vector3(0, 0, -5), Safe.Vector3(0, 0, 1))
+	assert(math.abs(ray:HitDistanceBox(Safe.BoundingBox(-1, 1)) - 4) < 1e-3,
+			"whitelist: a ray does not hit a box where it should")
+	-- And a sphere of radius two: a point five out is three from its surface
+	assert(math.abs(Safe.Sphere(Safe.Vector3(0, 0, 0), 2):Distance(
+			Safe.Vector3(0, 0, 5)) - 3) < 1e-3,
+			"whitelist: a sphere does not measure to a point")
+
 	holder:Remove()
 
 	-- Said out loud, because the failure that cost the most here was a check

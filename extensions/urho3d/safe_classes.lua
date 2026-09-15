@@ -267,6 +267,147 @@ function M.define(dst, util)
 		},
 	})
 
+	-- Whole-number coordinates, which is what a voxel world counts in.
+	-- Added 2026-09-15 with the Math batch of [URHO_SWEEP]; arithmetic draws
+	-- nothing and reaches nothing, which is the policy's clearest yes.
+	util.wc("IntVector3", {
+		unsafe_constructor = util.wrap_function({"number", "number", "number"},
+		function(x, y, z)
+			return util.wrap_instance("IntVector3", IntVector3(x, y, z))
+		end),
+		class = {
+			from_buildat = function(v)
+				return util.wrap_instance("IntVector3",
+						IntVector3(v.x, v.y, v.z))
+			end,
+		},
+		instance = {
+			Length = util.self_function("Length", {"number"},
+					{"IntVector3"}),
+		},
+		instance_meta = {
+			__add = util.wrap_function({"IntVector3", "IntVector3"},
+			function(self, other)
+				return util.wrap_instance("IntVector3", self + other)
+			end),
+			__sub = util.wrap_function({"IntVector3", "IntVector3"},
+			function(self, other)
+				return util.wrap_instance("IntVector3", self - other)
+			end),
+			__mul = util.wrap_function({"IntVector3", "number"},
+			function(self, n)
+				return util.wrap_instance("IntVector3", self * n)
+			end),
+			__eq = util.wrap_function({"IntVector3", "IntVector3"},
+			function(self, other)
+				return (self == other)
+			end),
+		},
+		properties = {
+			x = util.simple_property("number"),
+			y = util.simple_property("number"),
+			z = util.simple_property("number"),
+		},
+	})
+
+	-- The fourth component is what a shader parameter and a homogeneous
+	-- coordinate want; Material:SetShaderParameter() already takes the
+	-- others.
+	util.wc("Vector4", {
+		unsafe_constructor = util.wrap_function(
+				{"number", "number", "number", "number"},
+		function(x, y, z, w)
+			return util.wrap_instance("Vector4", Vector4(x, y, z, w))
+		end),
+		instance = {
+			DotProduct = util.self_function("DotProduct", {"number"},
+					{"Vector4", "Vector4"}),
+			Length = util.self_function("Length", {"number"}, {"Vector4"}),
+		},
+		instance_meta = {
+			__add = util.wrap_function({"Vector4", "Vector4"},
+			function(self, other)
+				return util.wrap_instance("Vector4", self + other)
+			end),
+			__sub = util.wrap_function({"Vector4", "Vector4"},
+			function(self, other)
+				return util.wrap_instance("Vector4", self - other)
+			end),
+			__mul = util.wrap_function({"Vector4", "number"},
+			function(self, n)
+				return util.wrap_instance("Vector4", self * n)
+			end),
+			__eq = util.wrap_function({"Vector4", "Vector4"},
+			function(self, other)
+				return (self == other)
+			end),
+		},
+		properties = {
+			x = util.simple_property("number"),
+			y = util.simple_property("number"),
+			z = util.simple_property("number"),
+			w = util.simple_property("number"),
+		},
+	})
+
+	-- A point and a direction, and what it runs into. This is what a game
+	-- does its own picking with -- Camera:WorldToScreenPoint() is the other
+	-- direction of the same question -- and the HitDistance family answers
+	-- in distance along the ray, with a huge number for a miss rather than
+	-- a nil.
+	--
+	-- simplified: the box and the sphere, which are the shapes this sandbox
+	-- has. Urho3D also tests a frustum, a plane and a triangle; the first
+	-- two are not whitelisted classes and the third wants three vectors and
+	-- has no consumer.
+	util.wc("Ray", {
+		unsafe_constructor = util.wrap_function({"Vector3", "Vector3"},
+		function(origin, direction)
+			return util.wrap_instance("Ray", Ray(origin, direction))
+		end),
+		instance = {
+			Define = util.self_function("Define", {},
+					{"Ray", "Vector3", "Vector3"}),
+			-- How far along the ray the point is, and how far off it
+			Project = util.wrap_function({"Ray", "Vector3"},
+				function(self, point)
+					return util.wrap_instance("Vector3", self:Project(point))
+				end
+			),
+			Distance = util.self_function("Distance", {"number"},
+					{"Ray", "Vector3"}),
+			HitDistanceBox = util.self_function("HitDistance", {"number"},
+					{"Ray", "BoundingBox"}),
+			HitDistanceSphere = util.self_function("HitDistance", {"number"},
+					{"Ray", "Sphere"}),
+		},
+		properties = {
+			origin = util.simple_property(dst.Vector3),
+			direction = util.simple_property(dst.Vector3),
+		},
+	})
+
+	-- A centre and a radius: what a thing occupies, for anything deciding
+	-- whether to bother with it.
+	util.wc("Sphere", {
+		unsafe_constructor = util.wrap_function({"Vector3", "number"},
+		function(center, radius)
+			return util.wrap_instance("Sphere", Sphere(center, radius))
+		end),
+		instance = {
+			Define = util.self_function("Define", {},
+					{"Sphere", "Vector3", "number"}),
+			Merge = util.self_function("Merge", {}, {"Sphere", "Vector3"}),
+			Clear = util.self_function("Clear", {}, {"Sphere"}),
+			Distance = util.self_function("Distance", {"number"},
+					{"Sphere", "Vector3"}),
+		},
+		properties = {
+			center = util.simple_property(dst.Vector3),
+			radius = util.simple_property("number"),
+		},
+	})
+
 	-- A rectangle of two corners. What wants it is a particle's texture
 	-- frames, which are the parts of an image an animation runs through.
 	util.wc("Rect", {
