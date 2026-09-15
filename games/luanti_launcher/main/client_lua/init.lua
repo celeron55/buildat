@@ -444,14 +444,16 @@ end
 
 -- What a game's own sun or moon is drawn as, composed once per name: this is
 -- asked for every frame and the answer changes twice a day
-local sun_picture_name, sun_picture = nil, nil
+-- One cache per body, because both are up at once now and a single one
+-- would recompose on every frame the two names differed
+local body_picture_name, body_picture = {}, {}
 
-local function sun_picture_of(name)
-	if name ~= sun_picture_name then
-		sun_picture_name = name
-		sun_picture = game_texture(luanti.texture(name))
+local function body_picture_of(slot, name)
+	if name ~= body_picture_name[slot] then
+		body_picture_name[slot] = name
+		body_picture[slot] = game_texture(luanti.texture(name))
 	end
-	return sun_picture
+	return body_picture[slot]
 end
 
 do
@@ -733,9 +735,8 @@ local sky_now = {height = 0, day = 0}
 -- What the game said its sky is, as luanti.sub_sky() gives it
 local game_sky = {}
 
--- The moon is the sky's own square with the light gone out of it: what is up
--- there at night is not the sun, so it is not the sun's colour either
-local MOON_DISC_COLOR = {r = 0.72, g = 0.76, b = 0.92}
+-- The moon has a colour of its own in the sky shader now, so nothing here
+-- needs one; see set_moon_look() in luanti_sky.lua
 -- A picture of a sun is drawn as itself: the colour multiplies it, so
 -- anything but white would tint the game's own art
 local WHITE_DISC_COLOR = {r = 1, g = 1, b = 1}
@@ -784,23 +785,27 @@ local function apply_sky_of_hour()
 			three(night_zenith, dawn_zenith, day_zenith, t),
 			three(night_horizon, dawn_horizon, day_horizon, t), nil)
 
-	-- The sun by day and the moon by night are the same square, so which of
-	-- the two the game turned off is which half of the clock it is gone in
-	local night = sky_now.height < 0
-	local visible = night and (game_sky.moon_visible ~= false) or
-			(not night and game_sky.sun_visible ~= false)
-	local scale = (night and game_sky.moon_scale or game_sky.sun_scale) or 1
-	-- The game's own picture of it, if it gave one and the client could
+	-- The sun and the moon are two bodies, drawn at once: the shader puts
+	-- the moon opposite the sun, which is where Luanti puts it, so both are
+	-- in the sky together and which one can be seen is which way the player
+	-- is facing. It used to be one square that changed colour at nightfall,
+	-- and a game that shows its moon in the day could not say so.
+	--
+	-- The game's own picture of each, if it gave one and the client could
 	-- compose it -- Luanti's own sun.png and moon.png when the game said
-	-- nothing, which is what it draws too. Without one it is the sky's
-	-- painted square, and then the colour is what makes it a moon.
-	local picture = sun_picture_of(
-			night and game_sky.moon_texture or game_sky.sun_texture)
-	world_sky:set_sun_texture(picture)
+	-- nothing, which is what it draws too. Without one each is the shader's
+	-- own painted square, and the moon has its own colour there.
+	local sun_picture = body_picture_of("sun", game_sky.sun_texture)
+	world_sky:set_sun_texture(sun_picture)
 	world_sky:set_sun_look(
-			visible and defaults.sun_half * scale or 0,
-			picture and WHITE_DISC_COLOR or
-			(night and MOON_DISC_COLOR or defaults.sun_color))
+			(game_sky.sun_visible ~= false) and
+					defaults.sun_half * (game_sky.sun_scale or 1) or 0,
+			sun_picture and WHITE_DISC_COLOR or defaults.sun_color)
+
+	local moon_picture = body_picture_of("moon", game_sky.moon_texture)
+	world_sky:set_moon_texture(moon_picture)
+	world_sky:set_moon_look((game_sky.moon_visible ~= false) and
+			luanti_sky.MOON_HALF * (game_sky.moon_scale or 1) or 0)
 
 	-- The stars come out as the light goes: Luanti's day_opacity is zero by
 	-- default, which is a sky with none in it until the sun is down

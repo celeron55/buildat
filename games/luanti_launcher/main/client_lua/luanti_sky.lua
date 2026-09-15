@@ -30,6 +30,10 @@ local CLOUD_WIND = {x = 0.004, y = 0.0}
 -- How far past white the sun's disc is drawn, which is what makes it read as
 -- a light rather than a white circle. The extension's own value.
 local SUN_OVEREXPOSURE = 2.5
+-- Half the width of the moon's square at a game scale of one, on a plane one
+-- unit along its direction: Luanti's own ratio, which the extension carries
+-- as MOON_HALF beside SUN_HALF = 0.075.
+M.MOON_HALF = 0.048
 
 function M.new(scene, sun_dir, defaults)
 	local node = scene:CreateChild("LuantiSky")
@@ -70,11 +74,10 @@ function M.new(scene, sun_dir, defaults)
 			defaults.sun_color.b))
 	material:SetShaderParameter("SunSize", defaults.sun_half)
 	material:SetShaderParameter("SunOverexposure", SUN_OVEREXPOSURE)
-	-- The moon is not drawn as a body of its own: the launcher has always
-	-- had one square that is the sun by day and the moon by night, and this
-	-- keeps that. What LuantiSky can do that the old sky could not is draw
-	-- both at once, which is what a game with a moon in the day wants.
-	material:SetShaderParameter("MoonSize", 0.0)
+	-- The moon is a body of its own here, drawn opposite the sun. Half its
+	-- width is Luanti's own ratio to the sun's, which the extension carries
+	-- as MOON_HALF.
+	material:SetShaderParameter("MoonSize", M.MOON_HALF)
 	material:SetShaderParameter("MoonTextured", 0.0)
 	material:SetShaderParameter("SunTextured", 0.0)
 	material:SetShaderParameter("StarDensity", 0.0)
@@ -132,14 +135,31 @@ function M.new(scene, sun_dir, defaults)
 
 	-- The game's own picture of it, or nil for the shader's painted square.
 	-- LuantiSky reads the sun's from sDiffMap and the moon's from
-	-- sNormalMap; only the sun's is used here, the moon being the same
-	-- square.
+	-- sNormalMap -- two units because a material has no third one this
+	-- needs.
 	function self:set_sun_texture(texture)
 		if texture then
 			material:SetTexture(magic.TU_DIFFUSE, texture)
 			material:SetShaderParameter("SunTextured", 1.0)
 		else
 			material:SetShaderParameter("SunTextured", 0.0)
+		end
+	end
+
+	-- The moon is drawn opposite the sun, which is where Luanti puts it, so
+	-- it needs no direction of its own: half its width is the whole of what
+	-- says it is there. Its colour is the shader's, a moon having no tint to
+	-- take from the horizon.
+	function self:set_moon_look(half)
+		material:SetShaderParameter("MoonSize", math.max(0, half or 0))
+	end
+
+	function self:set_moon_texture(texture)
+		if texture then
+			material:SetTexture(magic.TU_NORMAL, texture)
+			material:SetShaderParameter("MoonTextured", 1.0)
+		else
+			material:SetShaderParameter("MoonTextured", 0.0)
 		end
 	end
 
