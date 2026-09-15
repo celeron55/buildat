@@ -4246,10 +4246,14 @@ struct Module: public interface::Module, public luanti::Interface
 				vdef.is_liquid = true;
 				vdef.shape_group = liquid_shape_group(liquid_group);
 				vdef.liquid_top = 0.5f;
-				vdef.variants = liquid_variants;
 				// param2's low three bits are the level; the rest of it is
-				// flags this does not draw
+				// flags this does not draw. Only a flowing liquid has them:
+				// a source's param2 is whatever its own paramtype2 says,
+				// which for VoxeLibre's water is the palette index its
+				// colour comes from -- so assigning the levels over the
+				// variants unconditionally took the sea's blue away.
 				if(!liquid_variants.empty()){
+					vdef.variants = liquid_variants;
 					for(size_t p = 0; p < 256; p++)
 						vdef.variant_of_param[p] = (uint8_t)(p % LIQUID_LEVELS);
 				}
