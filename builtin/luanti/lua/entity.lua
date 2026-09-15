@@ -2179,7 +2179,11 @@ end
 
 local function find_spawn_pos()
 	local static = core.settings:get("static_spawnpoint")
-	if static then
+	-- A string setting with nothing after its type in settingtypes.txt has
+	-- "" for a default, not nothing, so an unset one is the empty string
+	-- and not nil -- which is what Luanti's own findSpawnPos() tests with
+	-- .empty(). minetest_game trips this.
+	if static and static ~= "" then
 		local x, y, z = string.match(static,
 				"^%s*([%d.-]+)%s*,%s*([%d.-]+)%s*,%s*([%d.-]+)%s*$")
 		if x then
