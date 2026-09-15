@@ -36,6 +36,14 @@ local import_games, import_worlds = {}, {}
 local want_imports = nil
 local import_page = 1
 
+-- What is typed into each list's filter box, kept across the redraws a page
+-- turn or a filter change costs. See add_filter().
+local save_filter = ""
+local import_filter = ""
+local game_filter = ""
+-- Which page of the game list the new-save flow is on
+local game_page = 1
+
 local function close()
 	if root then
 		uistack.main:pop(root)
@@ -55,13 +63,94 @@ local function waiting(message)
 	waiting_text = text
 end
 
--- A save is a button; a new one is a name typed in and one button per game,
--- which is the whole of "which game it needs" without a second screen.
+-- A save is a button, and a new one is a game chosen and then named --
+-- two screens, the way importing a world already is, because one button per
+-- installed game is twenty-five buttons on this machine and a menu stops
+-- being a menu somewhere around ten.
 -- Declared first because a page button draws it again.
 local draw
--- And the import screens, which go back to it
+local draw_new_game
+-- And the import screens, which go back to the save list
 local draw_import_games
 local draw_import_worlds
+
+-- Does this line answer what was typed? Case-insensitive, and every word has
+-- to be in it somewhere, so "vox cave" finds a VoxeLibre world called caves.
+-- A plain find rather than a pattern: a world named "world (2)" is a name
+-- here and not a pattern, and so is anything else somebody types.
+local function matches(label, filter)
+	label = label:lower()
+	for word in filter:lower():gmatch("%S+") do
+		if not label:find(word, 1, true) then
+			return false
+		end
+	end
+	return true
+end
+
+-- A filter box over a long list, and the line that says what it did.
+--
+-- **The sandbox has no scrolling container** -- ui_utils.add_paged() exists
+-- because of that -- and two hundred and thirty-four worlds twelve to a page
+-- is twenty pages, which is not a list anybody reads. Three characters typed
+-- here take it down to the few worth looking at, which beats scrolling even
+-- where scrolling exists.
+--
+-- simplified: it applies when Enter is pressed rather than as the letters
+-- arrive, because TextChanged is not in extensions/urho3d/safe_events.lua
+-- and a redraw per letter would take the field out from under the typing
+-- anyway. The upgrade path is whitelisting that event and rebuilding only
+-- the list of buttons instead of the screen.
+local function add_filter(menu, filter, total, shown, on_change)
+	local text = menu.window:CreateChild("Text")
+	text:SetStyleAuto()
+	if filter ~= "" then
+		text:SetText("filter (enter to apply): " .. shown .. " of " ..
+				total .. " shown")
+	else
+		text:SetText("filter (enter to apply), " .. total .. " in the list:")
+	end
+	local edit = menu.window:CreateChild("LineEdit")
+	edit:SetStyleAuto()
+	edit.minHeight = 26
+	edit.enabled = true
+	edit:SetText(filter)
+	magic.SubscribeToEvent(edit, "TextFinished",
+	function(self, event_type, event_data)
+		on_change(edit:GetText())
+	end)
+	return edit
+end
+
+-- What is left of a list once the filter has had it, in the same order
+local function filtered(items, filter)
+	if filter == "" then
+		return items
+	end
+	local out = {}
+	for _, item in ipairs(items) do
+		if matches(item.label, filter) then
+			out[#out + 1] = item
+		end
+	end
+	return out
+end
+
+do
+	local items = {
+		{label = "world   (minetest_game)"},
+		{label = "caves   (voxelibre)  -- no such game"},
+		{label = "world (2)   (nodecore)"},
+	}
+	assert(#filtered(items, "") == 3, "filter: an empty one takes nothing out")
+	assert(#filtered(items, "WORLD") == 2, "filter: case")
+	assert(filtered(items, "vox cave")[1] == items[2],
+			"filter: every word, in any order")
+	-- A name is a name and not a pattern, which is what a save called
+	-- "world (2)" would be if this used one
+	assert(#filtered(items, "world (2)") == 1, "filter: not a pattern")
+	assert(#filtered(items, "nothing") == 0, "filter: no match is no rows")
+end
 
 function draw(saves, save_games)
 	last_saves, last_save_games = saves, save_games
@@ -98,7 +187,13 @@ function draw(saves, save_games)
 					cereal.binary_output({name}, {"array", "string"}))
 		end}
 	end
-	ui_utils.add_paged(menu, items, {
+	local shown = filtered(items, save_filter)
+	add_filter(menu, save_filter, #items, #shown, function(text)
+		save_filter = text
+		page = 1
+		draw(saves, save_games)
+	end)
+	ui_utils.add_paged(menu, shown, {
 		page = page,
 		per_page = 12,
 		redraw = function(new_page)
@@ -107,30 +202,20 @@ function draw(saves, save_games)
 		end,
 	})
 
-	local new_text = menu.window:CreateChild("Text")
-	new_text:SetStyleAuto()
-	new_text:SetText("or a new save, named:")
-
-	local edit = menu.window:CreateChild("LineEdit")
-	edit:SetStyleAuto()
-	edit.minHeight = 26
-	edit.enabled = true
-	edit:SetText("world")
-
-	for _, gameid in ipairs(games) do
-		menu:add("new, playing " .. gameid, function()
-			local name = edit:GetText()
-			waiting("Creating " .. name .. "...")
-			buildat.send_packet("main:create",
-					cereal.binary_output({name, gameid}, {"array", "string"}))
-		end)
-	end
+	-- One button rather than one per game: which game is a choice, and it
+	-- goes on the same screen as the name it is being given
+	menu:add("New save...", function()
+		game_filter = ""
+		game_page = 1
+		draw_new_game()
+	end)
 
 	-- What a real Luanti installation has, which is where a game and a world
 	-- come from until somebody has put one here by hand
 	local function ask_for_imports(which)
 		want_imports = which
 		import_page = 1
+		import_filter = ""
 		waiting("Looking in your Luanti installation...")
 		buildat.send_packet("main:get_imports", "")
 	end
@@ -194,6 +279,61 @@ local function back_to_saves(menu)
 	magic.input:SetMouseVisible(true)
 end
 
+-- A new save, in the two steps importing a world already takes: which game,
+-- and then what to call it. The name field is on the second screen with the
+-- game it is for, rather than above a column of one button per game.
+local function draw_new_save_name(gameid)
+	local menu = import_menu("New save, playing " .. gameid)
+	local text = menu.window:CreateChild("Text")
+	text:SetStyleAuto()
+	text:SetText("named:")
+	local edit = menu.window:CreateChild("LineEdit")
+	edit:SetStyleAuto()
+	edit.minHeight = 26
+	edit.enabled = true
+	edit:SetText("world")
+	menu:add("Create and play", function()
+		local name = edit:GetText()
+		waiting("Creating " .. name .. "...")
+		buildat.send_packet("main:create",
+				cereal.binary_output({name, gameid}, {"array", "string"}))
+	end)
+	menu:add("< back", function()
+		draw_new_game()
+	end)
+	magic.input:SetMouseVisible(true)
+end
+
+function draw_new_game()
+	local menu = import_menu("New save: which game?")
+	local items = {}
+	for _, gameid in ipairs(games) do
+		items[#items + 1] = {label = gameid, action = function()
+			draw_new_save_name(gameid)
+		end}
+	end
+	if #items == 0 then
+		local none = menu.window:CreateChild("Text")
+		none:SetStyleAuto()
+		none:SetText("No games installed. Import one from Luanti first.")
+	end
+	local shown = filtered(items, game_filter)
+	add_filter(menu, game_filter, #items, #shown, function(text)
+		game_filter = text
+		game_page = 1
+		draw_new_game()
+	end)
+	ui_utils.add_paged(menu, shown, {
+		page = game_page,
+		per_page = 12,
+		redraw = function(new_page)
+			game_page = new_page
+			draw_new_game()
+		end,
+	})
+	back_to_saves(menu)
+end
+
 function draw_import_games()
 	local menu = import_menu("Which game? (copied into buildat's own games)")
 	local items = {}
@@ -225,7 +365,13 @@ function draw_import_games()
 		none:SetText("Nothing found. Looked in $LUANTI_EXTRA_IMPORT_PATH," ..
 				" ~/.luanti and ~/.minetest.")
 	end
-	ui_utils.add_paged(menu, items, {
+	local shown = filtered(items, import_filter)
+	add_filter(menu, import_filter, #items, #shown, function(text)
+		import_filter = text
+		import_page = 1
+		draw_import_games()
+	end)
+	ui_utils.add_paged(menu, shown, {
 		page = import_page,
 		per_page = 12,
 		redraw = function(new_page)
@@ -286,7 +432,13 @@ function draw_import_worlds()
 		none:SetText("Nothing found. Looked in $LUANTI_EXTRA_IMPORT_PATH," ..
 				" ~/.luanti and ~/.minetest.")
 	end
-	ui_utils.add_paged(menu, items, {
+	local shown = filtered(items, import_filter)
+	add_filter(menu, import_filter, #items, #shown, function(text)
+		import_filter = text
+		import_page = 1
+		draw_import_worlds()
+	end)
+	ui_utils.add_paged(menu, shown, {
 		page = import_page,
 		per_page = 12,
 		redraw = function(new_page)

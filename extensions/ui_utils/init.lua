@@ -83,6 +83,17 @@ local function button_menu_nav(root)
 
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 		local key = event_data:GetInt("Key")
+		-- A text field on the same screen owns the keys that are text: Enter
+		-- finishes the line being typed and left and right move the caret.
+		-- Without this a filter box beside a list cannot be used at all --
+		-- Enter in it also presses whichever button is selected under it,
+		-- which opens something instead of filtering.
+		if magic.ui.focusElement ~= nil then
+			if on_other_key then
+				on_other_key(key)
+			end
+			return
+		end
 		-- Left and right as well as up and down, because a menu can be a row
 		-- as well as a column and a player should not have to know which
 		if key == KEY_UP or key == KEY_LEFT then
