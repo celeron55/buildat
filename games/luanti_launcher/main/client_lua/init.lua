@@ -933,7 +933,24 @@ local function node_is_liquid(x, y, z)
 	return voxel_liquid_at(buildat.Vector3(x, y, z)) ~= nil
 end
 
-local player = player_physics.new(node_stops, node_is_liquid)
+-- And what holds the player up instead of letting them fall: a ladder, a
+-- vine, a rope. Luanti's own climbable, which the registry carries now.
+local function node_is_climbable(x, y, z)
+	local v = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
+	if v == nil then
+		return false
+	end
+	local reg = voxelworld.get_voxel_registry()
+	local id = reg:id_of(v)
+	if id == 0 then
+		return false
+	end
+	local def = reg:get_by_id(id)
+	return def ~= nil and def.climbable
+end
+
+local player = player_physics.new(node_stops, node_is_liquid,
+		node_is_climbable)
 
 -- What a mod has done to how this player moves: set_physics_override() on
 -- the server. It multiplies the constants above rather than replacing them,

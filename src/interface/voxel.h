@@ -250,6 +250,11 @@ namespace interface
 		// per voxel instead of per definition.
 		bool is_liquid = false;
 		float liquid_top = 0.5f;
+		// A ladder, a vine, a rope: something a player holds on to instead
+		// of falling past. Luanti's own climbable, and the client's physics
+		// is what does anything with it -- nothing here draws differently
+		// for it.
+		bool climbable = false;
 		// Which family of connecting voxels this one belongs to, 1...32, or
 		// 0 for one nothing reaches out to; and which families this one
 		// reaches out to, as a bit per family. A fence and its gates are one
@@ -353,6 +358,8 @@ namespace interface
 		uint8_t shape_group = 0;
 		bool is_liquid = false;
 		float liquid_top = 0.5f;
+		// Copied from the definition; see VoxelDefinition::climbable
+		bool climbable = false;
 		uint8_t connect_group = 0;
 		uint32_t connect_mask = 0;
 		bool connect_to_solid = false;

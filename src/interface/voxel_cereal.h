@@ -47,7 +47,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 14;
+		uint8_t version = 15;
 		archive(
 				version,
 				v.name,
@@ -100,6 +100,11 @@ namespace interface
 		// solid world and cut out by its texture
 		if(version >= 14){
 			archive(v.alpha_masked);
+		}
+		// Version 15 added the ladder flag, which only the client's own
+		// physics reads
+		if(version >= 15){
+			archive(v.climbable);
 		}
 	}
 

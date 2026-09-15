@@ -1536,6 +1536,9 @@ function core.__voxel_defs()
 			-- that light passes through is still something
 			empty = (drawtype == "airlike"),
 			walkable = (def == nil) or (def.walkable ~= false),
+			-- A ladder, a vine, a rope: what the client's physics holds on
+			-- to instead of falling past it
+			climbable = (def and def.climbable) and true or false,
 			light_source = (def and def.light_source) or 0,
 			tiles = is_liquid and (liquid_tiles(def) or tile_names(def)) or
 					tile_names(def),

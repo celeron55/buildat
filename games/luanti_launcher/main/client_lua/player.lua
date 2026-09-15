@@ -221,12 +221,15 @@ end
 -- through it.
 --
 -- is_liquid(x, y, z) says whether it is something to swim in. Optional.
-function M.new(is_solid, is_liquid)
+function M.new(is_solid, is_liquid, is_climbable)
 	local self = {
 		x = 0, y = 0, z = 0,
 		vx = 0, vy = 0, vz = 0,
 		on_ground = false,
 		in_liquid = false,
+		-- Whether a ladder or a vine is holding the player up; see
+		-- is_climbable and the vertical part of update()
+		climbing = false,
 		-- Flying and going through walls are off by default and keys toggle
 		-- them; a server that does not give the player the fly and noclip
 		-- privileges will pull them back with its movement checks
@@ -284,10 +287,15 @@ function M.new(is_solid, is_liquid)
 		-- something gets out
 		local stops = self.noclip and never_solid or is_solid
 
-		self.in_liquid = is_liquid ~= nil and
-				is_liquid(math.floor(self.x + 0.5),
-						math.floor(self.y + 0.5),
-						math.floor(self.z + 0.5))
+		local nx = math.floor(self.x + 0.5)
+		local ny = math.floor(self.y + 0.5)
+		local nz = math.floor(self.z + 0.5)
+		self.in_liquid = is_liquid ~= nil and is_liquid(nx, ny, nz)
+		-- A ladder is climbed from inside it or from the node the head is
+		-- in, which is how a player on the bottom rung holds on
+		self.climbing = is_climbable ~= nil and not self.fly and
+				not self.noclip and
+				(is_climbable(nx, ny, nz) or is_climbable(nx, ny + 1, nz))
 
 		-- What a mod has multiplied this player's movement by, which is
 		-- ones unless the server has said otherwise
@@ -330,6 +338,16 @@ function M.new(is_solid, is_liquid)
 			end
 			if wish.sneak then
 				self.vy = self.vy - speed
+			end
+		elseif self.climbing then
+			-- Held on to rather than fallen past: up with jump, down with
+			-- sneak, and still otherwise. Luanti's own climb has no gravity
+			-- in it either.
+			self.vy = 0
+			if wish.jump then
+				self.vy = m.speed_climb * ov_speed
+			elseif wish.sneak then
+				self.vy = -m.speed_climb * ov_speed
 			end
 		elseif self.in_liquid then
 			if wish.jump then
@@ -404,6 +422,19 @@ do
 	wet:update(0.1, {x = 0, z = 0, jump = true})
 	assert(wet.vy > 0 and not wet.on_ground,
 			"player: jumping in water does not lift the player")
+
+	-- A ladder holds the player where they are, and jump and sneak move
+	-- them along it -- which is the whole of climbing
+	local ladder = M.new(nothing_stops, nil, all_water)
+	for _ = 1, 20 do
+		ladder:update(0.1, {x = 0, z = 0})
+	end
+	assert(ladder.climbing and math.abs(ladder.vy) < 1e-9,
+			"player: a ladder does not hold the player up")
+	ladder:update(0.1, {x = 0, z = 0, jump = true})
+	assert(ladder.vy > 0, "player: jump does not climb")
+	ladder:update(0.1, {x = 0, z = 0, sneak = true})
+	assert(ladder.vy < 0, "player: sneak does not climb down")
 
 	-- And what a mod has multiplied the movement by: no gravity is no
 	-- falling at all, and twice the speed is twice as fast once the

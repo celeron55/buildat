@@ -4051,6 +4051,7 @@ struct Module: public interface::Module, public luanti::Interface
 			bool alpha_clip = table_boolean(L, "alpha_clip");
 			bool empty = table_boolean(L, "empty");
 			bool walkable = table_boolean(L, "walkable");
+			bool climbable = table_boolean(L, "climbable");
 			ss_ drawtype = table_string(L, "drawtype");
 			float visual_scale = (float)table_number(L, "visual_scale", 1.0);
 			ss_ tiles[6];
@@ -4305,6 +4306,9 @@ struct Module: public interface::Module, public luanti::Interface
 			vdef.transmits_light = sunlight && !empty;
 			vdef.light_source = light_source;
 			vdef.physically_solid = walkable && !empty;
+			// Nothing here draws differently for it; the client's own
+			// physics is what reads it. See "the interaction gaps".
+			vdef.climbable = climbable;
 			vdef.fully_empty = empty;
 			if(!masked_shape.empty()){
 				vdef.shape_masked = masked_shape;
