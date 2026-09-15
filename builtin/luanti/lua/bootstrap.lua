@@ -3502,30 +3502,30 @@ local abm_ids = nil
 -- The same for the LBMs; see run_lbms()
 local lbm_ids = nil
 -- Which cells have had their LBMs, by the cell's own corner; see
--- lbm_cells()
+-- active_cells()
 local lbm_done = {}
 
--- An LBM's unit of work. Luanti runs one on a map block, which is 16
--- voxels; an active box here is a section, which is 64, and running a
--- section's worth in one go was five seconds of a server that answers
--- nothing. The boxes are cut into cells of this and one cell is what a
--- sweep does before it looks at the clock again.
-local LBM_CELL = 32
+-- What a sweep does before it looks at the clock again. Luanti runs an LBM
+-- on a map block, which is 16 voxels; an active box here is a section,
+-- which is 64, and a section's worth in one go was five seconds for the
+-- LBMs and two and a half for the ABMs -- and a budget cannot stop work
+-- that has already started. 32 is what the map is in chunks of.
+local SWEEP_CELL = 32
 
--- Every active box, in pieces no bigger than LBM_CELL on a side. A box that
--- is already that small or smaller comes through as itself.
-local function lbm_cells()
+-- Every active box, in pieces no bigger than SWEEP_CELL on a side. A box
+-- that is already that small or smaller comes through as itself.
+local function active_cells()
 	local out = {}
 	for _, box in ipairs(core.__active_boxes_now()) do
 		local z = box[3]
 		while z <= box[6] do
-			local ez = math.min(z + LBM_CELL - 1, box[6])
+			local ez = math.min(z + SWEEP_CELL - 1, box[6])
 			local y = box[2]
 			while y <= box[5] do
-				local ey = math.min(y + LBM_CELL - 1, box[5])
+				local ey = math.min(y + SWEEP_CELL - 1, box[5])
 				local x = box[1]
 				while x <= box[4] do
-					local ex = math.min(x + LBM_CELL - 1, box[4])
+					local ex = math.min(x + SWEEP_CELL - 1, box[4])
 					out[#out + 1] = {x, y, z, ex, ey, ez}
 					x = ex + 1
 				end
@@ -3804,8 +3804,11 @@ local function run_abms(dtime)
 		for k = 1, #due do
 			sets[k] = abm_ids[due[k]]
 		end
+		-- Cells and not whole sections, for the same reason the LBM sweep
+		-- takes them: the budget below is looked at between boxes, so one
+		-- box is the smallest thing it can stop after.
 		abm_sweep = {due = due, sets = sets,
-				boxes = core.__active_boxes_now(), box_i = 1, first = 1}
+				boxes = active_cells(), box_i = 1, first = 1}
 	end
 	local sweep = abm_sweep
 	local until_us = core.get_us_time() + ABM_BUDGET_S * 1000000
@@ -3913,7 +3916,7 @@ local function run_lbms()
 	local budget_us = 20000
 	local t0 = core.get_us_time()
 	local swept = 0
-	for _, cell in ipairs(lbm_cells()) do
+	for _, cell in ipairs(active_cells()) do
 		local key = cell[1] .. "," .. cell[2] .. "," .. cell[3]
 		if not lbm_done[key] then
 			if swept > 0 and core.get_us_time() - t0 > budget_us then
