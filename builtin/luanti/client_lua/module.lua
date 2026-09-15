@@ -1559,6 +1559,10 @@ buildat.sub_packet("luanti:sky", function(data)
 		sun_tint = rgb(e.sun_tint),
 		moon_tint = rgb(e.moon_tint),
 		fog_tint_type = e.fog_tint_type or "default",
+		-- The sky a player who cannot see the sky is under, and whether the
+		-- game lets a client dim for that
+		indoors = rgb(e.indoors),
+		auto_dim_skybox = e.auto_dim_skybox ~= "0",
 		clouds = e.clouds ~= "0",
 		density = tonumber(e.density or ""),
 		cloud_color = rgb(e.cloud_color),

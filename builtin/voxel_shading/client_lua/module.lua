@@ -657,6 +657,28 @@ local function push_sky_vis()
 	render_path:SetShaderParameter("SkyTintAmount", sky_tint_amount)
 end
 
+-- How much of the sky is visible overhead: 1 out in the open, towards 0
+-- underground. What wants it is whatever is not per direction -- a zone's
+-- fog colour is the one -- and it costs nothing, the cells being kept here
+-- anyway. See [CAVE_SKY] in doc/plan/rendering_plan.md.
+--
+-- **The +Y face rather than the whole cube**, which that section proposed
+-- and which measuring rejected: half the cube looks at the ground wherever
+-- the player is standing, so a whole-cube mean is about a half in broad
+-- daylight and the fog would be part indoors on an open beach. The face is
+-- the cone of directions whose largest component is up, which is where the
+-- daylight comes from, and is the same face the shader indexes as 2.
+local ABOVE_FIRST = 2 * CELLS * CELLS + 1
+local ABOVE_LAST = 3 * CELLS * CELLS
+
+function M.sky_visibility_above()
+	local sum = 0
+	for i = ABOVE_FIRST, ABOVE_LAST do
+		sum = sum + sky_vis[i]
+	end
+	return sum / (ABOVE_LAST - ABOVE_FIRST + 1)
+end
+
 -- How much to multiply the reflected sky by, 1 being what a game renders.
 --
 -- For looking at what this module does rather than at the scene. Most of a

@@ -3915,6 +3915,20 @@ function M.new(magic, buildat, log, options)
 			-- rather than the sky's: it is what dawn and dusk are
 			sky_material:SetShaderParameter("SunTint",
 					sky_color("sun_tint", 0.35 + brightness * 0.65))
+			-- What a direction that cannot see the sky is drawn as: Luanti's
+			-- indoors colour, dimmed with the day, mixed by the sky
+			-- visibility cube skyvis.lua already keeps. A seam is a place
+			-- where the rasteriser shows sky where the voxel data says rock,
+			-- so the cube is near zero there by construction and the hole
+			-- goes dark without anything having to detect it. See [CAVE_SKY]
+			-- in doc/plan/rendering_plan.md.
+			--
+			-- simplified: auto_dim_skybox is left on. Luanti carries it in
+			-- the SET_SKY packet past the fields this client reads, and the
+			-- only thing it turns off is this.
+			sky_material:SetShaderParameter("SkyIndoors",
+					sky_color("indoors", brightness))
+			sky_material:SetShaderParameter("SkyAutoDim", 1.0)
 			-- Luanti's clouds are the daylight's own colour, unless the
 			-- game gave them one; either way they go dark with the day. And
 			-- over the hour the sun spends crossing the horizon they take its

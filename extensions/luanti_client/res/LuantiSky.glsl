@@ -15,6 +15,13 @@
 #include "Uniforms.glsl"
 #include "Samplers.glsl"
 #include "Transform.glsl"
+// The sky visibility cube and its lookup, beside this file. At column zero
+// because Urho3D's Shader::ProcessSource() only consumes an #include that
+// starts its line, and behind COMPILEPS because it uses M_EPSILON, which
+// Uniforms.glsl only defines for the pixel half.
+#ifdef COMPILEPS
+#include "SkyVis.glsl"
+#endif
 
 varying vec3 vTexCoord;
 
@@ -45,6 +52,23 @@ uniform float cMoonTextured;
 // game says nodes a second and the client fudges it, because these clouds
 // are not a layer at a height; see CLOUD_WIND below for what a node comes to.
 uniform vec2 cCloudWind;
+
+// **What a player who cannot see the sky is under.** Luanti's `indoors`
+// colour, already multiplied by how light it is, and whether the game let
+// this happen at all -- its `auto_dim_skybox`, 1 for yes and 0 for no.
+//
+// The value it is mixed by is the sky visibility cube the client already
+// keeps, per direction: a seam is a place where the rasteriser shows sky
+// where the voxel data says rock, so the cube is near zero there **by
+// construction** and the hole goes dark without anything having to detect
+// it. At a tunnel mouth the mouth stays bright and the rock beside it does
+// not. See [CAVE_SKY] in doc/plan/rendering_plan.md.
+//
+// Both read as zero for a material that sets neither, which is a sky that
+// is never dimmed -- the right answer for a client that knows nothing about
+// this.
+uniform vec3 cSkyIndoors;
+uniform float cSkyAutoDim;
 
 // How far below the horizon the sky darkens into the ground haze
 const float HAZE_DEPTH = 0.25;
@@ -257,6 +281,14 @@ void PS()
         }
         color = mix(color, moon_color, cover);
     }
+
+    // And what of the sky this direction can see at all. Mixed once, at the
+    // end, rather than the gradient and the cloud layer separately: it comes
+    // to the same thing for those two and it also takes the sun, the moon
+    // and the stars with it, which is what stops a body blazing through a
+    // seam in a cave roof.
+    if(cSkyAutoDim > 0.0)
+        color = mix(cSkyIndoors, color, GetSkyVisibility(d));
 
     gl_FragColor = vec4(color, 1.0);
 }

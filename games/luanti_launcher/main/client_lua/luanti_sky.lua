@@ -250,6 +250,11 @@ function M.new(scene, sun_dir, defaults)
 	material:SetShaderParameter("CloudAlpha", 1.0)
 	material:SetShaderParameter("CloudWind", magic.Vector2(
 			CLOUD_WIND.x, CLOUD_WIND.y))
+	-- What a player who cannot see the sky is under, and whether the game
+	-- allows the dimming at all. Luanti's own indoors default is #646464
+	-- and auto_dim_skybox is on; see set_indoors() below and [CAVE_SKY].
+	material:SetShaderParameter("SkyIndoors", magic.Vector3(0.39, 0.39, 0.39))
+	material:SetShaderParameter("SkyAutoDim", 1.0)
 	put_cloud()
 
 	-- The gradient's two ends, and how much of the sky is cloud. Anything
@@ -349,6 +354,26 @@ function M.new(scene, sun_dir, defaults)
 			material:SetShaderParameter("SunDirection", magic.Vector3(
 					-dir.x, -dir.y, -dir.z))
 		end
+	end
+
+	-- The colour a direction that cannot see the sky is drawn as, already
+	-- multiplied by how light it is, and whether the game lets this happen.
+	-- What the mix is by is the sky visibility cube, per direction, which
+	-- the client keeps for the reflections already -- so a cave goes dark
+	-- and a tunnel mouth does not, without anything having to work out
+	-- which is which. See [CAVE_SKY] in doc/plan/rendering_plan.md.
+	function self:set_indoors(color, brightness)
+		if color == nil then
+			return
+		end
+		local k = math.max(0, brightness or 1)
+		material:SetShaderParameter("SkyIndoors", magic.Vector3(
+				(color.r or 0.39) * k, (color.g or 0.39) * k,
+				(color.b or 0.39) * k))
+	end
+
+	function self:set_auto_dim(on)
+		material:SetShaderParameter("SkyAutoDim", on and 1.0 or 0.0)
 	end
 
 	function self:enabled(on)

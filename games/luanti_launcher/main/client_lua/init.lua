@@ -781,6 +781,14 @@ local sky_now = {height = 0, day = 0}
 -- What the game said its sky is, as luanti.sub_sky() gives it
 local game_sky = {}
 
+-- Luanti's indoors colour, the game's own or its default #646464, at a
+-- brightness: what a direction that cannot see the sky is drawn as, and
+-- what the fog underground is. See [CAVE_SKY].
+local function indoors_of(k)
+	local c = game_sky.indoors or {r = 0.39, g = 0.39, b = 0.39}
+	return {r = c.r * k, g = c.g * k, b = c.b * k}
+end
+
 -- The moon has a colour of its own in the sky shader now, so nothing here
 -- needs one; see set_moon_look() in luanti_sky.lua
 -- A picture of a sun is drawn as itself: the colour multiplies it, so
@@ -887,6 +895,12 @@ local function apply_sky_of_hour()
 	-- set_star_look() in luanti_sky.lua
 	world_sky:set_star_look(density, game_sky.star_color, (1 - t) * (1 - t))
 
+	-- What a direction that cannot see the sky is drawn as: Luanti's
+	-- indoors colour, dimmed with the hour the way the reflections are, and
+	-- the game's own say over whether it happens at all
+	world_sky:set_indoors(indoors_of(1), 0.10 + 0.90 * t)
+	world_sky:set_auto_dim(game_sky.auto_dim_skybox ~= false)
+
 	-- The clouds are white because the sun is on them, so they go with it
 	world_sky:set_cloud_light(0.16 + 0.84 * t)
 	-- And so does what a pond mirrors: the cube map it comes from is baked
@@ -965,7 +979,13 @@ local function update_sky(dt)
 	end
 
 	zone.ambientColor = blend(NIGHT_AMBIENT, SKY_AMBIENT, day)
-	zone.fogColor = blend(NIGHT_FOG, DAY_FOG, day)
+	-- And the fog with it. This is the one thing the cave sky needs that is
+	-- not per direction, so it takes the mean of the same cube: underground
+	-- the haze is the indoors colour rather than a sky the player cannot
+	-- see. See [CAVE_SKY].
+	local seen = voxel_shading.sky_visibility_above()
+	zone.fogColor = blend(blend(NIGHT_FOG, DAY_FOG, day),
+			indoors_of(0.10 + 0.90 * day), 1 - seen)
 	sky_now.height = height
 	sky_now.day = day
 	sky_now.daylight = daylight

@@ -1153,6 +1153,11 @@ local function send_sky(o)
 	-- values are sent either way so that a client that does not do the
 	-- classic tinting has something right to draw.
 	put("fog_tint_type", sky_color.fog_tint_type or "default")
+	-- What a player who cannot see the sky is under, and whether the game
+	-- lets a client dim its sky for that at all. Luanti's own defaults; see
+	-- [CAVE_SKY] in doc/plan/rendering_plan.md for what reads them.
+	put("indoors", sky_rgb(sky_color.indoors) or sky_rgb("#646464"))
+	put("auto_dim_skybox", (sky.auto_dim_skybox ~= false) and "1" or "0")
 	put("sun_tint", sky_rgb(sky_color.fog_sun_tint) or
 			sky_rgb(SKY_DEFAULT_SUN_TINT))
 	put("moon_tint", sky_rgb(sky_color.fog_moon_tint) or
