@@ -2000,6 +2000,21 @@ local function dig_packet(name, p)
 	buildat.send_packet(name, cereal.binary_output({
 		p = voxel_packet_value(p),
 	}, {"object", {"p", VOXEL_PACKET_TYPE}}))
+	-- Which chunk the dug voxel is in, and which node draws it. The client
+	-- says when a chunk that changed waits to be drawn again and names it by
+	-- node id (see builtin/voxelworld's client half), and this is the line
+	-- that matches a dig against those: a dug voxel whose chunk is among
+	-- them waited its turn, and one that is not is a chunk nobody asked to
+	-- redraw. See section 3 of doc/plan/master_plan.md.
+	if name == "main:dig" then
+		local chunk_p = voxelworld.get_chunk_position(
+				buildat.Vector3(p.x, p.y, p.z))
+		local node = voxelworld.get_static_node(chunk_p)
+		log:info(string.format(
+				"dug (%d, %d, %d) in chunk (%d, %d, %d), chunk node %s",
+				p.x, p.y, p.z, chunk_p.x, chunk_p.y, chunk_p.z,
+				node and tostring(node:GetID()) or "none"))
+	end
 end
 
 -- An object is hit rather than dug: one hit per press, and no faster than

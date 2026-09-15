@@ -85,6 +85,14 @@ static const float LOOK_FIRST_GUESS_DEG_PER_PX = 0.15f;
 static const int LOOK_FLIP_FRAMES = 4;
 static const int LOOK_STILL_FRAMES = 30;
 static const int LOOK_MAX_FRAMES = 300;
+// And how an axis that is never going to arrive is told from one that is
+// still on its way: how much closer it has to get to count as getting
+// closer, and how many frames it may fail to. A pitch clamp answers every
+// push away from it and none towards it, so the sign flipping above
+// oscillates against one forever -- what settles it is that the error stops
+// shrinking.
+static const float LOOK_PROGRESS_DEG = 0.05f;
+static const int LOOK_NO_PROGRESS_FRAMES = 30;
 
 // One axis of the aiming loop: what it has learned about how a pixel of mouse
 // movement turns this game's camera, and whether the camera has stopped
@@ -97,6 +105,12 @@ struct LookAxis
 	int pushed = 0;
 	int stall = 0;
 	int flips = 0;
+	// How close this axis has been to where it is wanted, and for how many
+	// frames it has not got closer: that is what says a clamped axis has
+	// arrived as far as it ever will. The flips alone cannot -- a push away
+	// from a limit moves, which clears them.
+	float best_err = 1e9f;
+	int no_progress = 0;
 	bool stuck = false;
 	bool moved_ever = false;
 
@@ -109,7 +123,22 @@ struct LookAxis
 		pushed = 0;
 		stall = 0;
 		flips = 0;
+		best_err = 1e9f;
+		no_progress = 0;
 		stuck = false;
+	}
+
+	// Called once a frame with how far this axis still has to go
+	void progress(float err)
+	{
+		const float e = fabsf(err);
+		if(e < best_err - LOOK_PROGRESS_DEG){
+			best_err = e;
+			no_progress = 0;
+			return;
+		}
+		if(++no_progress >= LOOK_NO_PROGRESS_FRAMES)
+			stuck = true;
 	}
 
 	void observe(float delta)
@@ -120,7 +149,6 @@ struct LookAxis
 			deg_per_px = delta / (float)pushed;
 			stall = 0;
 			flips = 0;
-			stuck = false;
 			moved_ever = true;
 			return;
 		}
@@ -1295,6 +1323,11 @@ struct CApp: public App, public magic::Application
 				0.75f * fabsf(m_look_y.deg_per_px));
 		float err_yaw = wrap_degrees((float)c.yaw - yaw);
 		float err_pitch = (float)c.pitch - pitch;
+		// Is each axis still getting closer? An axis against a limit is not,
+		// however it is pushed, and that is what ends the command instead of
+		// its frame budget.
+		m_look_x.progress(err_yaw);
+		m_look_y.progress(err_pitch);
 		// An axis that has moved and then stopped answering in either
 		// direction is against a limit the game keeps -- a pitch clamp, most
 		// of the time -- and is as arrived as it is going to get

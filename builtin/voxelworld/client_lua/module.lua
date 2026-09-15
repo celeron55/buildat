@@ -387,6 +387,20 @@ function sub_events()
 										" drawn again, with %d in the queue",
 										node_update.node_id, waited,
 										node_update_queue:get_length()))
+							else
+								-- The prompt case says so as well. The
+								-- question section 3 of
+								-- doc/plan/master_plan.md is about is
+								-- whether a chunk that changed was drawn
+								-- again at all, and a line that only
+								-- appears when it was late cannot answer
+								-- it: no line then means either "at once"
+								-- or "never".
+								log:info(string.format(
+										"chunk node %d drawn again after" ..
+										" %.2f s, with %d in the queue",
+										node_update.node_id, waited,
+										node_update_queue:get_length()))
 							end
 						end
 						update_voxel_geometry(node)
