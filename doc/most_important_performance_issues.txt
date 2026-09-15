@@ -138,12 +138,16 @@ Tried and rejected, so that nobody spends the day again:
   with an acquire load. The lock stays for filling an entry, for the textures
   (filled later and only where the atlas is) and for ids above 65536.
 
-  In the same profile: the mutex pair is out of the top twenty, get_cached is
-  1.06% where the two overloads were 2.48%, and devtest generated 112
-  sections in 45 seconds where it generated 104 -- the same run under perf,
-  a save made from nothing with a client connected. games/voxel_lighting's
-  check images keep every static framing pixel-identical. Debug build, -O1,
+  In the same profile: the mutex pair is out of the top twenty and get_cached
+  is 1.06% where the two overloads were 2.48%. games/voxel_lighting's check
+  images keep every static framing pixel-identical. Debug build, -O1,
   2026-09-15.
+
+  **How many sections a 45 second run generates is not a measurement on this
+  machine**: the same code gave 95 and 145 on two runs an hour apart. What
+  the profile says about where the time goes is stable and is what these
+  entries quote; a throughput number wants a fixed workload and several runs,
+  which is a harness nobody has written yet.
 
 Still open, in the order they showed up in a profile after those:
 
@@ -165,12 +169,21 @@ case would cost a fraction of it.
 Chunk serialization and its zlib compression is another 14% of the server, and
 a section is serialized more than once on its way in.
 
-**Re-measured again 2026-09-15 on devtest: 3.4%**, which is
-ZSTD_decompressSequences at 2.46% and ZSTD_copy16 at 0.95%, both in the
-main_context thread. It has come down with everything around it and is no
-longer near the top; what is above it now is write_volume() at 5.4%, the Lua
-VM, and the memsets of fresh volumes. Re-read this section before working on
-it: the shape below is the 2026-09-14 measurement.
+**Re-measured again 2026-09-15 on devtest, and then half of it was not the
+compression at all.** Reading a chunk back in was a stream decompress into a
+128 kB scratch, a copy of the whole result out of the stream, a plane cleared
+to zero and then the same bytes written over it: in the thread that reads
+chunks the clearing was 3.55% of the whole server and the copy 1.46%, against
+2.5% for zstd itself. The sizes are all known before any of it is read, so
+the frame goes straight into a buffer of exactly that size and the planes are
+filled rather than cleared and then filled -- decompress_zstd() into a
+caller's buffer and VoxelVolume::set_plane_bytes(). The clearing is 0.87% now
+and the copy is gone.
+
+What is left of reading a chunk is zstd's own work, about 3.5% with
+ZSTD_copy16 beside it, and that is the compression's real price rather than
+the round trip's. Re-read this section before working on it: the shape below
+is the 2026-09-14 measurement.
 
 **Re-measured 2026-09-14 on devtest: 13.6%, and it holds** -- but two thirds
 of it is *deserialization* rather than serialization:
