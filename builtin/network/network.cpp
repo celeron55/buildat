@@ -9,6 +9,7 @@
 #include "interface/tcpsocket.h"
 #include "interface/packet_stream.h"
 #include "interface/thread.h"
+#include "interface/os.h"
 #include "interface/select_handler.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/vector.hpp>
@@ -51,6 +52,19 @@ struct Peer
 	std::deque<char> socket_buffer;
 	interface::PacketStream packet_stream;
 
+	// What has been handed to this peer and has not gone down the socket
+	// yet, because the socket does not block any more: a peer that is not
+	// reading used to stop the whole server inside send(2). `out_sent` is
+	// how much of the front of it has already gone.
+	ss_ out_buf;
+	size_t out_sent = 0;
+	// When the queue first went over the policy's limit, for Disconnect
+	int64_t over_since_us = 0;
+	// Said once per peer rather than per packet
+	bool warned_full = false;
+
+	size_t out_pending() const { return out_buf.size() - out_sent; }
+
 	Peer(){}
 	Peer(Id id, sp_<interface::TCPSocket> socket):
 		id(id), socket(socket){}
@@ -63,6 +77,12 @@ struct Module: public interface::Module, public network::Interface
 	sm_<Peer::Id, Peer> m_peers;
 	sm_<int, Peer*> m_peers_by_socket;
 	size_t m_next_peer_id = 1;
+	// The game's answer to a peer that will not read; see SendPolicy in
+	// api.h. Buffer is what a game that never says anything gets, because
+	// it is the one that neither loses data nor makes anybody wait.
+	SendPolicy m_send_policy = SendPolicy::Buffer;
+	size_t m_max_queue_bytes = 4 * 1024 * 1024;
+	int64_t m_grace_us = 10000000;
 	bool m_will_restore_after_unload = false;
 	up_<interface::Thread> m_thread;
 
@@ -190,6 +210,14 @@ struct Module: public interface::Module, public network::Interface
 		sp_<interface::TCPSocket> socket(interface::createTCPSocket());
 		// Accept connection
 		socket->accept_fd(*m_listening_socket.get());
+		// A peer's socket must not block: a send that waits for a client to
+		// read holds this module, and everything that wants to send
+		// anything waits behind it. What does not fit waits in the peer's
+		// own queue instead; see flush_peer().
+		if(!socket->set_nonblocking(true)){
+			log_w(MODULE, "Could not make peer socket non-blocking; a client "
+					"that stops reading will stall the server");
+		}
 		// Store socket
 		Peer::Id peer_id = m_next_peer_id++;
 		m_peers[peer_id] = Peer(peer_id, socket);
@@ -257,11 +285,108 @@ struct Module: public interface::Module, public network::Interface
 		}
 	}
 
+	// What has not gone yet, as far as the socket will take it now. Not an
+	// error for nothing to go: the peer is not reading and the rest waits.
+	void flush_peer(Peer &peer)
+	{
+		while(peer.out_pending() > 0){
+			size_t sent = 0;
+			if(!peer.socket->send_some(peer.out_buf, peer.out_sent, &sent)){
+				// The socket is gone; the read side notices and cleans up
+				peer.out_buf.clear();
+				peer.out_sent = 0;
+				return;
+			}
+			if(sent == 0)
+				break;
+			peer.out_sent += sent;
+		}
+		if(peer.out_sent >= peer.out_buf.size()){
+			peer.out_buf.clear();
+			peer.out_sent = 0;
+		} else if(peer.out_sent > 64 * 1024){
+			// Keep the front from growing without bound: what has gone is
+			// dropped off once there is enough of it to be worth the copy
+			peer.out_buf = peer.out_buf.substr(peer.out_sent);
+			peer.out_sent = 0;
+		}
+		if(peer.out_pending() <= m_max_queue_bytes){
+			peer.over_since_us = 0;
+			peer.warned_full = false;
+		}
+	}
+
+	bool any_peer_pending()
+	{
+		for(auto &pair : m_peers){
+			if(pair.second.out_pending() > 0)
+				return true;
+		}
+		return false;
+	}
+
+	void flush_peers()
+	{
+		sv_<Peer::Id> to_drop;
+		for(auto &pair : m_peers){
+			Peer &peer = pair.second;
+			flush_peer(peer);
+			if(m_send_policy != SendPolicy::Disconnect)
+				continue;
+			if(peer.out_pending() <= m_max_queue_bytes)
+				continue;
+			const int64_t now = interface::os::time_us();
+			if(peer.over_since_us == 0){
+				peer.over_since_us = now;
+			} else if(now - peer.over_since_us >= m_grace_us){
+				log_w(MODULE, "Peer %zu has not read %zu queued bytes in "
+						"%.0f s; disconnecting it", peer.id,
+						peer.out_pending(), (now - peer.over_since_us) / 1e6);
+				to_drop.push_back(peer.id);
+			}
+		}
+		for(Peer::Id id : to_drop)
+			drop_peer(id);
+	}
+
+	void drop_peer(Peer::Id id)
+	{
+		auto it = m_peers.find(id);
+		if(it == m_peers.end())
+			return;
+		Peer &peer = it->second;
+		PeerInfo pinfo;
+		pinfo.id = peer.id;
+		pinfo.address = peer.socket->get_remote_address();
+		m_server->emit_event("network:client_disconnected",
+				new OldClient(pinfo));
+		m_peers_by_socket.erase(peer.socket->fd());
+		peer.socket->close_fd();
+		m_peers.erase(it);
+	}
+
 	void send_u(Peer &peer, const ss_ &name, const ss_ &data)
 	{
 		peer.packet_stream.output(name, data, [&](const ss_ &packet_data){
-			peer.socket->send_fd(packet_data);
+			// Over the limit, a Drop game throws the new packet away rather
+			// than queueing it. Buffer and Disconnect both queue; what
+			// Disconnect does about it is in flush_peers(), on the thread
+			// that drains, because a peer is not to be closed from inside
+			// somebody else's send.
+			if(m_send_policy == SendPolicy::Drop &&
+					peer.out_pending() > m_max_queue_bytes){
+				if(!peer.warned_full){
+					peer.warned_full = true;
+					log_w(MODULE, "Peer %zu is %zu bytes behind; dropping "
+							"what does not fit", peer.id, peer.out_pending());
+				}
+				return;
+			}
+			peer.out_buf += packet_data;
 		});
+		// The common case is a peer that is keeping up, and then this writes
+		// the packet and leaves nothing behind
+		flush_peer(peer);
 	}
 
 	void send_u(PeerInfo::Id recipient, const ss_ &name, const ss_ &data)
@@ -308,6 +433,21 @@ struct Module: public interface::Module, public network::Interface
 		send_u(recipient, name, data);
 	}
 
+	void set_send_policy(SendPolicy policy, size_t max_queue_bytes,
+			int64_t grace_us)
+	{
+		m_send_policy = policy;
+		if(max_queue_bytes > 0)
+			m_max_queue_bytes = max_queue_bytes;
+		if(grace_us > 0)
+			m_grace_us = grace_us;
+		log_i(MODULE, "Send policy: %s, %zu bytes a peer, %.0f s of grace",
+				policy == SendPolicy::Buffer ? "buffer whatever it takes" :
+				policy == SendPolicy::Drop ? "drop what does not fit" :
+				"disconnect a peer that stays behind",
+				m_max_queue_bytes, m_grace_us / 1e6);
+	}
+
 	sv_<PeerInfo::Id> list_peers()
 	{
 		sv_<PeerInfo::Id> result;
@@ -336,9 +476,30 @@ void NetworkThread::run(interface::Thread *thread)
 			sockets = m_module->get_sockets();
 		});
 
+		// A peer that is behind has bytes waiting for room in its socket,
+		// and nothing wakes this loop when that room appears -- the select
+		// is on readability only. So while anything is waiting it comes
+		// round often and pushes what fits.
+		//
+		// simplified: a poll rather than a select on writability, which is
+		// what SelectHandler would have to grow. It costs a wakeup every
+		// five milliseconds and only while a peer is actually behind.
+		bool pending = false;
+		network::access(m_module->m_server, [&](network::Interface *inetwork){
+			pending = m_module->any_peer_pending();
+		});
+
 		sv_<int> active_sockets;
-		bool ok = handler.check(500000, sockets, active_sockets);
+		bool ok = handler.check(pending ? 5000 : 500000, sockets,
+				active_sockets);
 		(void)ok; // Unused
+
+		if(pending){
+			network::access(m_module->m_server,
+					[&](network::Interface *inetwork){
+				m_module->flush_peers();
+			});
+		}
 
 		if(active_sockets.empty())
 			continue;
