@@ -20,6 +20,7 @@
 #include "interface/polyvox_cereal.h"
 #include "interface/polyvox_std.h"
 #include "interface/os.h"
+#include <cstring>
 #include <PolyVoxCore/RawVolume.h>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
@@ -2017,6 +2018,10 @@ struct CInstance: public voxelworld::Instance
 	// Both loops normally do nothing at all.
 	void update_id_maps()
 	{
+		// What cached_of() remembers is about a registry that may be about
+		// to gain a type. Nothing that is already in it changes, but this is
+		// the cheap place to be sure.
+		m_def_memo = nullptr;
 		// Every type the game has registered goes into the table first, so
 		// that writing a chunk cannot come across a name the save has no id
 		// for. Appending in id order is what keeps the identity case the
@@ -2822,6 +2827,34 @@ struct CInstance: public voxelworld::Instance
 	// brightest light next to them instead, which is what the mesher reads
 	// when the air voxel in front of a face is in a chunk it is not meshing.
 
+	// What the three questions below ask the registry, with the last answer
+	// kept. They are asked of every voxel a write or a light flood touches
+	// -- a section is a quarter of a million of them -- and those are nearly
+	// all the same handful of types, stone under air. Asking is a virtual
+	// call and a couple of loads; comparing the sample is neither.
+	//
+	// An entry never moves and a new voxel type does not change an old one's,
+	// so what would invalidate this is the registry being cleared, which
+	// does not happen to a server's. update_id_maps() drops it anyway, being
+	// the one place here that adds a type.
+	interface::VoxelSample m_def_memo_key;
+	const interface::CachedVoxelDefinition *m_def_memo = nullptr;
+
+	const interface::CachedVoxelDefinition* cached_of(
+			const interface::VoxelSample &v)
+	{
+		if(m_def_memo != nullptr &&
+				memcmp(&v, &m_def_memo_key, sizeof(v)) == 0)
+			return m_def_memo;
+		const interface::CachedVoxelDefinition *def =
+				m_voxel_reg->get_cached(v);
+		if(def != nullptr){
+			m_def_memo_key = v;
+			m_def_memo = def;
+		}
+		return def;
+	}
+
 	// Whether nothing at all occupies the voxel. Not the same as
 	// voxel_transmits_light(): a voxel can leave the faces against it
 	// undrawn and still hold a mesh of its own inside itself, and such a
@@ -2830,8 +2863,7 @@ struct CInstance: public voxelworld::Instance
 	{
 		if(is_undefined(VoxelInstance(v.planes[0])))
 			return false;
-		const interface::CachedVoxelDefinition *def =
-				m_voxel_reg->get_cached(v);
+		const interface::CachedVoxelDefinition *def = cached_of(v);
 		if(def == nullptr)
 			return false;
 		return def->fully_empty;
@@ -2843,8 +2875,7 @@ struct CInstance: public voxelworld::Instance
 	{
 		if(is_undefined(VoxelInstance(v.planes[0])))
 			return 0;
-		const interface::CachedVoxelDefinition *def =
-				m_voxel_reg->get_cached(v);
+		const interface::CachedVoxelDefinition *def = cached_of(v);
 		return def ? def->light_source : 0;
 	}
 
@@ -2852,8 +2883,7 @@ struct CInstance: public voxelworld::Instance
 	{
 		if(is_undefined(VoxelInstance(v.planes[0])))
 			return false;
-		const interface::CachedVoxelDefinition *def =
-				m_voxel_reg->get_cached(v);
+		const interface::CachedVoxelDefinition *def = cached_of(v);
 		if(def == nullptr)
 			return false;
 		// Two ways light gets past a voxel: nothing is there, or something
@@ -2990,8 +3020,7 @@ struct CInstance: public voxelworld::Instance
 		if(m_light_running != LIGHT_LAMP)
 			return 0;
 		VoxelInstance v = light_get(p);
-		const interface::CachedVoxelDefinition *def =
-				m_voxel_reg->get_cached(v, nullptr, false);
+		const interface::CachedVoxelDefinition *def = cached_of(sample_of(v));
 		return def ? def->light_source : 0;
 	}
 
