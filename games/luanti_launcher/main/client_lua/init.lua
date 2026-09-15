@@ -86,6 +86,15 @@ if not ok_sky or type(skybox) ~= "table" then
 	error("luanti_launcher: could not load skybox.lua: " .. tostring(err_sky))
 end
 
+-- And the sky itself, which is Luanti's own shader rather than buildat's;
+-- see the header of luanti_sky.lua
+local ok_lsky, err_lsky, luanti_sky =
+		buildat.run_script_file("main/luanti_sky.lua")
+if not ok_lsky or type(luanti_sky) ~= "table" then
+	error("luanti_launcher: could not load luanti_sky.lua: " ..
+			tostring(err_lsky))
+end
+
 -- The keys, in one place, so that what the player is told and what the code
 -- reads cannot drift apart. Luanti's own defaults, and the F5 line below
 -- lists them. `name` is what a player is shown, because a key constant is
@@ -226,8 +235,15 @@ do
 	sun_light.color = SUN_COLOR
 end
 
-local game_skybox = skybox.new(scene,
-		voxel_shading.create_skybox(scene, SUN_DIR),
+-- The sky the world stands under. builtin/voxel_shading's gradient sky is
+-- not made at all: its sky setters all begin "if not skybox_material then
+-- return", so the ones this file used to call become no-ops of their own
+-- accord, and what it still owns -- the voxel materials, the reflections'
+-- own cube map, set_sky_light() and set_sky_tint() -- is untouched.
+local world_sky = luanti_sky.new(scene, SUN_DIR,
+		voxel_shading.sky_defaults)
+
+local game_skybox = skybox.new(scene, world_sky.node,
 		function(expr) return luanti.texture(expr) end)
 
 local camera_node = scene:CreateChild("Camera")
@@ -764,7 +780,7 @@ local function apply_sky_of_hour()
 				b = a.b + (b.b - a.b) * k}
 	end
 	local t = sky_now.day
-	voxel_shading.set_sky_look(
+	world_sky:set_look(
 			three(night_zenith, dawn_zenith, day_zenith, t),
 			three(night_horizon, dawn_horizon, day_horizon, t), nil)
 
@@ -780,8 +796,8 @@ local function apply_sky_of_hour()
 	-- painted square, and then the colour is what makes it a moon.
 	local picture = sun_picture_of(
 			night and game_sky.moon_texture or game_sky.sun_texture)
-	voxel_shading.set_sun_texture(picture)
-	voxel_shading.set_sun_look(
+	world_sky:set_sun_texture(picture)
+	world_sky:set_sun_look(
 			visible and defaults.sun_half * scale or 0,
 			picture and WHITE_DISC_COLOR or
 			(night and MOON_DISC_COLOR or defaults.sun_color))
@@ -796,11 +812,14 @@ local function apply_sky_of_hour()
 		-- about ten thousand of them over the half that can be seen
 		density = math.min(0.5, count / 10000) * out
 	end
-	voxel_shading.set_star_look(density, game_sky.star_color,
-			0.12 * (game_sky.star_scale or 1))
+	-- The count and the night ramp go to different parameters here, which
+	-- is what LuantiSky keeps apart and buildat's sky folded together; see
+	-- set_star_look() in luanti_sky.lua
+	world_sky:set_star_look(math.min(0.5, count / 10000), game_sky.star_color,
+			(1 - t) * (1 - t))
 
 	-- The clouds are white because the sun is on them, so they go with it
-	voxel_shading.set_cloud_light(0.16 + 0.84 * t)
+	world_sky:set_cloud_light(0.16 + 0.84 * t)
 	-- And so does what a pond mirrors: the cube map it comes from is baked
 	-- at noon, so without this the water is a bright blue sky at midnight
 	voxel_shading.set_sky_light(0.10 + 0.90 * t)
@@ -836,7 +855,7 @@ local function update_sky(dt)
 	-- The same direction the light travels in, which is what the sky takes:
 	-- it is the moon's by night because dir is, and negating it again here
 	-- put the moon where the sun was -- under the world
-	voxel_shading.set_sun_direction(dir)
+	world_sky:set_sun_direction(dir)
 
 	-- Dawn and dusk are the half hour either side of the horizon rather
 	-- than a switch -- unless the game says what the light is whatever the
@@ -872,7 +891,7 @@ luanti.sub_sky(function(sky)
 		cover = math.max(0, math.min(1, sky.density))
 	end
 	if cover then
-		voxel_shading.set_sky_look(nil, nil, cover)
+		world_sky:set_look(nil, nil, cover)
 	end
 	-- The fog is the horizon seen through the world's air, so it follows
 	-- the horizon the game asked for
