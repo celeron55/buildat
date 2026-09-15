@@ -35,6 +35,37 @@ local SUN_OVEREXPOSURE = 2.5
 -- as MOON_HALF beside SUN_HALF = 0.075.
 M.MOON_HALF = 0.048
 
+-- The colour the sun goes as it crosses the horizon: Luanti's own default
+-- fog_sun_tint, #f47d1d, which extensions/luanti_client carries as the same
+-- three numbers. Not the horizon of this hour, which is a washed-out blue
+-- and lights a sunset grey.
+M.SUN_TINT = {r = 244 / 255, g = 125 / 255, b = 29 / 255}
+
+-- How much of the horizon's colour the sun shines with, from how high it is
+-- (the sine of its elevation). The sun goes the colour of the horizon over
+-- the hour it is crossing it, which is where that colour belongs and is the
+-- same handover the sky shader does to the disc; away from the horizon it is
+-- its own colour. extensions/luanti_client does this with its own
+-- SUN_TINT_SHARE of 0.9, which is the share kept here.
+function M.horizon_share(height)
+	local low = 1 - math.min(1, math.abs(height or 0) / 0.3)
+	return (1 - (1 - low) * (1 - low)) * 0.9
+end
+
+do
+	assert(M.horizon_share(0) > 0.89,
+			"crossing the horizon the light is the horizon's")
+	assert(M.horizon_share(1) == 0 and M.horizon_share(-1) == 0,
+			"overhead, and under the world, it is its own colour")
+	assert(M.horizon_share(0.15) > 0.5 and M.horizon_share(0.15) < 0.9,
+			"and the handover takes the hour either side")
+	assert(M.horizon_share(0.15) == M.horizon_share(-0.15),
+			"setting and rising are the same")
+	-- And that what it hands over to is a red rather than a warm white,
+	-- which is the whole of what the window is for
+	assert(M.SUN_TINT.r - M.SUN_TINT.b > 0.5, "the low sun is red")
+end
+
 function M.new(scene, sun_dir, defaults)
 	local node = scene:CreateChild("LuantiSky")
 	local box = node:CreateComponent("Skybox")

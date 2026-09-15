@@ -802,9 +802,17 @@ local function apply_sky_of_hour()
 				b = a.b + (b.b - a.b) * k}
 	end
 	local t = sky_now.day
-	world_sky:set_look(
-			three(night_zenith, dawn_zenith, day_zenith, t),
-			three(night_horizon, dawn_horizon, day_horizon, t), nil)
+	local horizon_now = three(night_horizon, dawn_horizon, day_horizon, t)
+	world_sky:set_look(three(night_zenith, dawn_zenith, day_zenith, t),
+			horizon_now, nil)
+
+	-- What the sun shines with now: its own colour, going red while it is
+	-- crossing the horizon. Without this the light only ever moves between
+	-- the sun's warm white and a strongly blue moon, and a sunset lights
+	-- the world in neither. The colour and the window are
+	-- luanti_sky.SUN_TINT and horizon_share(), where the check is.
+	sun_light.color = blend(blend(MOON_COLOR, SUN_COLOR, t),
+			luanti_sky.SUN_TINT, luanti_sky.horizon_share(sky_now.height))
 
 	-- The sun and the moon are two bodies, drawn at once: the shader puts
 	-- the moon opposite the sun, which is where Luanti puts it, so both are
@@ -831,18 +839,15 @@ local function apply_sky_of_hour()
 	-- The stars come out as the light goes: Luanti's day_opacity is zero by
 	-- default, which is a sky with none in it until the sun is down
 	local count = game_sky.star_count or 1000
-	local density = 0
-	if game_sky.stars_visible ~= false then
-		local out = (1 - t) * (1 - t)
-		-- How many cells of the sky's grid have a star in them; the grid is
-		-- about ten thousand of them over the half that can be seen
-		density = math.min(0.5, count / 10000) * out
-	end
+	-- How many cells of the sky's grid have a star in them; the grid is
+	-- about ten thousand of them over the half that can be seen. A game
+	-- that hides its stars has none.
+	local density = (game_sky.stars_visible ~= false) and
+			math.min(0.5, count / 10000) or 0
 	-- The count and the night ramp go to different parameters here, which
 	-- is what LuantiSky keeps apart and buildat's sky folded together; see
 	-- set_star_look() in luanti_sky.lua
-	world_sky:set_star_look(math.min(0.5, count / 10000), game_sky.star_color,
-			(1 - t) * (1 - t))
+	world_sky:set_star_look(density, game_sky.star_color, (1 - t) * (1 - t))
 
 	-- The clouds are white because the sun is on them, so they go with it
 	world_sky:set_cloud_light(0.16 + 0.84 * t)
@@ -892,7 +897,7 @@ local function update_sky(dt)
 	end
 	sun_light.brightness = MOON_BRIGHTNESS +
 			(SUN_BRIGHTNESS - MOON_BRIGHTNESS) * day
-	sun_light.color = blend(MOON_COLOR, SUN_COLOR, day)
+	-- and its colour in apply_sky_of_hour(), which has this hour's horizon
 	zone.ambientColor = blend(NIGHT_AMBIENT, SKY_AMBIENT, day)
 	zone.fogColor = blend(NIGHT_FOG, DAY_FOG, day)
 	sky_now.height = height
