@@ -1552,6 +1552,13 @@ buildat.sub_packet("luanti:sky", function(data)
 		night_horizon = rgb(e.night_horizon),
 		dawn_zenith = rgb(e.dawn_zenith),
 		dawn_horizon = rgb(e.dawn_horizon),
+		-- What the sun and the moon paint the horizon with as they cross
+		-- it, and whether the game meant them: "custom" is the game's own
+		-- two, "default" is Luanti's classic tinting. Both are always
+		-- filled, at Luanti's own defaults where the game said nothing.
+		sun_tint = rgb(e.sun_tint),
+		moon_tint = rgb(e.moon_tint),
+		fog_tint_type = e.fog_tint_type or "default",
 		clouds = e.clouds ~= "0",
 		density = tonumber(e.density or ""),
 		cloud_color = rgb(e.cloud_color),
@@ -1571,9 +1578,13 @@ buildat.sub_packet("luanti:sky", function(data)
 		star_color = rgb(e.star_color),
 		star_scale = tonumber(e.star_scale or ""),
 	}
+	local tint = M.sky.sun_tint
 	log:info("luanti:sky: a " .. M.sky.type .. " sky" ..
 			(M.sky.textures[1] and (", six pictures starting " ..
-			M.sky.textures[1]) or ""))
+			M.sky.textures[1]) or "") ..
+			", " .. M.sky.fog_tint_type .. " tint" ..
+			(tint and string.format(" %.2f,%.2f,%.2f",
+			tint.r, tint.g, tint.b) or ""))
 	for _, f in ipairs(sky_subs) do
 		f(M.sky)
 	end

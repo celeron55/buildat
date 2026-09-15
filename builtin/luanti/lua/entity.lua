@@ -1085,6 +1085,12 @@ PlayerRef.hud_set_hotbar_image_selected =
 -- drawn.
 local SKY_DEFAULT_DAY = "#8cb2e0"
 local SKY_DEFAULT_ZENITH = "#215edb"
+-- The colour the sun and the moon paint the band of sky around them at
+-- dawn and dusk. Luanti's own defaults, and both of this project's clients
+-- hardcoded the sun's because the module never sent it; see [SKY_KNOBS] in
+-- doc/plan/rendering_plan.md.
+local SKY_DEFAULT_SUN_TINT = "#f47d1d"
+local SKY_DEFAULT_MOON_TINT = "#7f99cc"
 
 -- "#rrggbb", a table or a name, as three numbers between zero and one
 local function sky_rgb(spec)
@@ -1141,6 +1147,16 @@ local function send_sky(o)
 		put("horizon", sky_rgb(sky_color.day_horizon) or
 				sky_rgb(SKY_DEFAULT_DAY))
 	end
+	-- What the sun and the moon paint the horizon with as they cross it.
+	-- Luanti's fog_tint_type says whether the game means the two values or
+	-- wants Luanti's classic tinting; it is sent as it stands, and the
+	-- values are sent either way so that a client that does not do the
+	-- classic tinting has something right to draw.
+	put("fog_tint_type", sky_color.fog_tint_type or "default")
+	put("sun_tint", sky_rgb(sky_color.fog_sun_tint) or
+			sky_rgb(SKY_DEFAULT_SUN_TINT))
+	put("moon_tint", sky_rgb(sky_color.fog_moon_tint) or
+			sky_rgb(SKY_DEFAULT_MOON_TINT))
 	-- Luanti's clouds are on unless a sky says otherwise, and how much of
 	-- the sky they cover is their density
 	local on = sky.clouds

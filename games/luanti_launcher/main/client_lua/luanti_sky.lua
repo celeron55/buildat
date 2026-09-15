@@ -35,11 +35,13 @@ local SUN_OVEREXPOSURE = 2.5
 -- as MOON_HALF beside SUN_HALF = 0.075.
 M.MOON_HALF = 0.048
 
--- The colour the sun goes as it crosses the horizon: Luanti's own default
--- fog_sun_tint, #f47d1d, which extensions/luanti_client carries as the same
--- three numbers. Not the horizon of this hour, which is a washed-out blue
--- and lights a sunset grey.
+-- What the sun and the moon go as they cross the horizon, when the game has
+-- not said: Luanti's own default fog_sun_tint #f47d1d and fog_moon_tint
+-- #7f99cc. Not the horizon of this hour, which is a washed-out blue and
+-- lights a sunset grey. A game's own arrive as game_sky.sun_tint and
+-- moon_tint now -- see [SKY_KNOBS] -- and these are the fallback.
 M.SUN_TINT = {r = 244 / 255, g = 125 / 255, b = 29 / 255}
+M.MOON_TINT = {r = 127 / 255, g = 153 / 255, b = 204 / 255}
 
 -- **The schedule, which is extensions/luanti_client's** (see [LIGHT_SHAPE]
 -- in doc/plan/rendering_plan.md: for the sky, the sun, the moon and the

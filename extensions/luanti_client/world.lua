@@ -3526,6 +3526,7 @@ function M.new(magic, buildat, log, options)
 		night_horizon = {64, 144, 255},
 		indoors = {100, 100, 100},
 		sun_tint = {244, 125, 29},
+		moon_tint = {127, 153, 204},
 	}
 
 	-- Where the sun is, as a direction to it. Luanti's own: the day is
@@ -3882,6 +3883,19 @@ function M.new(magic, buildat, log, options)
 			if moon_up > 0 then
 				moon_node.direction = magic.Vector3(sx, sy, sz)
 				moon_light.brightness = MOON_BRIGHTNESS * moon_up
+				-- And the moon takes the horizon's colour the way the sun
+				-- does, on the other side of the sky and at the same hours:
+				-- it is crossing the horizon whenever the sun is. Luanti's
+				-- fog_moon_tint, which a game sets beside fog_sun_tint and
+				-- which this read off the wire and never used; see
+				-- [SKY_KNOBS] in doc/plan/rendering_plan.md.
+				local tint = sky_color("moon_tint", 1)
+				local low = low_sun(daylight_time)
+				low = (1 - (1 - low) * (1 - low)) * SUN_TINT_SHARE
+				moon_light.color = magic.Color(
+						MOON_COLOR[1] * (1 - low) + tint.r * low,
+						MOON_COLOR[2] * (1 - low) + tint.g * low,
+						MOON_COLOR[3] * (1 - low) + tint.b * low)
 			end
 			-- What the two are worth to something drawn unlit, which has no
 			-- normal to take a share of them by: the colour of whichever is

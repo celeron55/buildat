@@ -35,6 +35,44 @@ end
 
 core.get_us_time = __luanti_get_us_time
 
+-- **Luanti runs LuaJIT and this runs plain Lua 5.1**, and `math.random`'s
+-- bounds are where a real game meets the difference first: 5.1 passes them
+-- through a C int, so `math.random(1, 999999999999999)` -- which is how
+-- extra_ordinance picks a seed -- answers "interval is empty" rather than a
+-- number. A double holds fifteen digits exactly, so the range itself is not
+-- the problem and only the argument check is.
+--
+-- What cannot be papered over this way is `goto`, which pmb_core uses and
+-- 5.1 has no syntax for at all. See section 10, [LUAJIT].
+do
+	local random = math.random
+	-- What luaL_checkint takes
+	local INT_MAX = 2147483647
+	function math.random(m, n)
+		if m == nil then
+			return random()
+		end
+		if n == nil then
+			m, n = 1, m
+		end
+		if m >= -INT_MAX and n <= INT_MAX then
+			return random(m, n)
+		end
+		if n < m then
+			error("bad argument #2 to 'random' (interval is empty)", 2)
+		end
+		return m + math.floor(random() * (n - m + 1))
+	end
+
+	local wide = math.random(1, 999999999999999)
+	assert(wide >= 1 and wide <= 999999999999999 and
+			wide == math.floor(wide),
+			"a range wider than a C int answers a whole number in it")
+	local narrow = math.random(3, 3)
+	assert(narrow == 3, "and a range of one still answers its one value")
+	assert(math.random() < 1, "and no arguments is still a fraction")
+end
+
 -- {name, is_directory} for everything in a directory; an empty list for one
 -- that is not there
 core.get_dir_list = function(path, list_dirs)

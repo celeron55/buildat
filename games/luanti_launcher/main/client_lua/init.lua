@@ -836,8 +836,21 @@ local function apply_sky_of_hour()
 	-- blend towards the moon any more -- the moon is a light of its own and
 	-- has its own colour. The window is luanti_sky.sun_tint_share(), where
 	-- the check is.
-	sky_lights.sun.color = blend(SUN_COLOR, luanti_sky.SUN_TINT,
-			luanti_sky.sun_tint_share(sky_now.daylight))
+	--
+	-- The colour is the game's own where it gave one, which is Luanti's
+	-- fog_sun_tint and fog_moon_tint; the defaults behind them are Luanti's
+	-- too. The moon takes the same handover on the other side of the sky,
+	-- where it is crossing the horizon at the same hours.
+	--
+	-- simplified: fog_tint_type is carried but not read. "default" is
+	-- Luanti's classic tinting, which goes through the tonemaps this sky
+	-- has nowhere to put -- the drawing half of [SKY_LEFTOVERS] -- so both
+	-- modes use the two colours, which is what was hardcoded before.
+	local share = luanti_sky.sun_tint_share(sky_now.daylight)
+	sky_lights.sun.color = blend(SUN_COLOR,
+			game_sky.sun_tint or luanti_sky.SUN_TINT, share)
+	sky_lights.moon.color = blend(MOON_COLOR,
+			game_sky.moon_tint or luanti_sky.MOON_TINT, share)
 
 	-- The sun and the moon are two bodies, drawn at once: the shader puts
 	-- the moon opposite the sun, which is where Luanti puts it, so both are
