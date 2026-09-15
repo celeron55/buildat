@@ -1109,6 +1109,22 @@ struct Module: public interface::Module
 	// runs what the environment says, which is what every check here does.
 	void on_start()
 	{
+		// What this game does about a client that stops reading. Luanti's
+		// own answer: a window of what may be in flight, and a timeout that
+		// disconnects rather than a queue that grows without bound -- a
+		// client that has been given eight megabytes and has read none of
+		// it for half a minute is gone, not waited for. See SendPolicy in
+		// builtin/network/api.h, and the master plan's "And the bottom of
+		// it is a blocking socket write" for why this is a choice at all.
+		//
+		// Eight megabytes because one client taking a VoxeLibre world moves
+		// about that much in its first seconds, so the window is "a world's
+		// worth behind" rather than a number that a healthy client trips.
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->set_send_policy(network::SendPolicy::Disconnect,
+					8 * 1024 * 1024, 30000000);
+		});
+
 		ss_ gameid;
 		ss_ world_name;
 
