@@ -56,6 +56,56 @@ local TECHNIQUE_SUN_ALPHA = magic.cache:GetResource("Technique",
 local TECHNIQUE_SUN_MASKED = magic.cache:GetResource("Technique",
 		"voxel_shading/PBRVoxelSunMasked.xml")
 
+-- The eight above, in one table, so that a game can hand over eight of its
+-- own instead. **Nothing about the look changes for a game that does not**:
+-- these are the same resources, under the same names, and apply_to_node()
+-- reads them from here.
+--
+-- What wants that is builtin/luanti, which is hosting Luanti and wants
+-- Luanti's look where the other nine games using this module want buildat's.
+-- One shader set for both Luanti clients lives in
+-- extensions/luanti_client/res/; see [SHADER_HOME] in
+-- doc/plan/master_plan.md for why there and not here.
+local techniques = {
+	plain = TECHNIQUE,
+	modifiers = TECHNIQUE_MODIFIERS,
+	alpha = TECHNIQUE_ALPHA,
+	masked = TECHNIQUE_MASKED,
+	sun = TECHNIQUE_SUN,
+	sun_modifiers = TECHNIQUE_SUN_MODIFIERS,
+	sun_alpha = TECHNIQUE_SUN_ALPHA,
+	sun_masked = TECHNIQUE_SUN_MASKED,
+}
+
+-- Draw with somebody else's techniques: a table of resource names under the
+-- keys above, any of which may be left out to keep this module's own. Set it
+-- before the first chunk arrives; what is already drawn keeps the technique
+-- it was given, which is what use_sun_gate() says too.
+--
+-- The shader behind them is theirs as well, so what this module still owns
+-- for such a game is the *choosing* -- which of the eight a chunk, its
+-- translucent child and its masked child get -- and the parameters
+-- update() pushes.
+function M.use_technique_set(names)
+	if type(names) ~= "table" then
+		return
+	end
+	for key, name in pairs(names) do
+		if techniques[key] == nil then
+			log:warning("use_technique_set: no technique called " ..
+					tostring(key))
+		else
+			local res = magic.cache:GetResource("Technique", name)
+			if res == nil then
+				log:warning("use_technique_set: no resource " ..
+						tostring(name))
+			else
+				techniques[key] = res
+			end
+		end
+	end
+end
+
 local sun_gate = false
 local use_modifiers = false
 
@@ -246,9 +296,10 @@ end
 function M.apply_to_node(node)
 	local technique
 	if sun_gate then
-		technique = use_modifiers and TECHNIQUE_SUN_MODIFIERS or TECHNIQUE_SUN
+		technique = use_modifiers and techniques.sun_modifiers or
+				techniques.sun
 	else
-		technique = use_modifiers and TECHNIQUE_MODIFIERS or TECHNIQUE
+		technique = use_modifiers and techniques.modifiers or techniques.plain
 	end
 	each_material(node, function(m)
 		m:SetTechnique(0, technique)
@@ -263,8 +314,8 @@ function M.apply_to_node(node)
 	if alpha_node then
 		each_material_of(alpha_node:GetComponent("CustomGeometry"),
 				function(m)
-			m:SetTechnique(0, sun_gate and TECHNIQUE_SUN_ALPHA or
-					TECHNIQUE_ALPHA)
+			m:SetTechnique(0, sun_gate and techniques.sun_alpha or
+					techniques.alpha)
 		end)
 	end
 	-- And the alpha-masked ones, which are solid world with the holes in
@@ -274,8 +325,8 @@ function M.apply_to_node(node)
 	if masked_node then
 		each_material_of(masked_node:GetComponent("CustomGeometry"),
 				function(m)
-			m:SetTechnique(0, sun_gate and TECHNIQUE_SUN_MASKED or
-					TECHNIQUE_MASKED)
+			m:SetTechnique(0, sun_gate and techniques.sun_masked or
+					techniques.masked)
 		end)
 	end
 end

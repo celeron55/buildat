@@ -13,6 +13,12 @@
 // across by hand; a number that decides how something looks is not. What
 // differs today, and why:
 //
+//   cSkyLight, cSkyTint, cSkyTintAmount
+//                       VOXELSKYTINT only, which is builtin/luanti's own
+//                       client: the brightness of the sky's contribution and
+//                       a hue to move the cube map towards, in place of
+//                       cSkyColor. See the uniforms below for why they are
+//                       two knobs rather than one.
 //   cSkyColor           Only here. The colour the sky is at this moment, which
 //                       the client pushes so that reflections follow the sky
 //                       it paints without a cube map being rebaked.
@@ -265,6 +271,25 @@ void VS()
     // sky without a cube map being rebaked. Zero when nothing sets it, which
     // is why the client pushes it with the sky.
     uniform vec3 cSkyColor;
+
+    #ifdef VOXELSKYTINT
+        // What builtin/luanti's own client drives instead of cSkyColor: the
+        // brightness of the sky's contribution, and a hue to move the cube
+        // map towards without changing how bright it answers. Behind a
+        // define because **a shader parameter a material never sets reads as
+        // zero**: the techniques in this directory that do not declare it
+        // never see these, so their materials never have to set them.
+        //
+        // The two are not the same knob. cSkyColor multiplies, so a dim sky
+        // dims the reflection and a coloured one colours it together;
+        // cSkyTint keeps the luminance the cube gives and moves only the
+        // hue, with cSkyLight scaling separately. A client that wants a
+        // night that is dark and blue rather than dark and grey wants the
+        // second.
+        uniform float cSkyLight;
+        uniform vec3 cSkyTint;
+        uniform float cSkyTintAmount;
+    #endif
 
     const float TRANSMISSION_CELLS = 16.0;   // Cells per voxel, per axis
     // A material whose own roughness is already below this cannot glint, so
@@ -725,13 +750,26 @@ void PS()
             // reflects nothing rather than the dark rock that is actually
             // there. Bounced light is in the vertex color if a floor for it is
             // ever wanted.
-            vec3 cube = textureLod(sZoneCubeMap, lookup, mip).rgb *
-                GetSkyVisibility(reflectDir) * cSkyColor;
+            #ifdef VOXELSKYTINT
+                vec3 cube = textureLod(sZoneCubeMap, lookup, mip).rgb *
+                    GetSkyVisibility(reflectDir);
+                if(cSkyTintAmount > 0.0){
+                    float sky_luma = dot(cube, vec3(0.299, 0.587, 0.114));
+                    cube = mix(cube, cSkyTint * sky_luma, cSkyTintAmount);
+                }
+            #else
+                vec3 cube = textureLod(sZoneCubeMap, lookup, mip).rgb *
+                    GetSkyVisibility(reflectDir) * cSkyColor;
+            #endif
             // Scaled by how much sky the surface itself sees as well as by
             // how much is visible along the reflection: the cube map answers
             // for the direction, the vertex color for the place.
             finalColor.rgb += cube * EnvBRDFApprox(specColor, roughness, ndv) *
-                vSkyVisibility * cSpecEmphasis;
+                vSkyVisibility * cSpecEmphasis
+            #ifdef VOXELSKYTINT
+                * cSkyLight
+            #endif
+                ;
         #endif
 
         #ifdef ENVCUBEMAP

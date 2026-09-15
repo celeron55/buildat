@@ -1,0 +1,19 @@
+<!-- a world whose voxel format binds surface modifiers, for builtin/luanti's client half.
+
+     One of the eight techniques it selects between, over the PBRVoxel.glsl
+     beside this file -- the same shader the extension's own client uses,
+     which is the whole point of them living here rather than in the module.
+     See [SHADER_HOME] in doc/plan/master_plan.md.
+
+     The passes are builtin/voxel_shading's own, copied rather than invented:
+     what differs between the two sets is the .glsl and VOXELSKYTINT, not how
+     a surface is drawn. VOXELSKYTINT says this client drives cSkyLight,
+     cSkyTint and cSkyTintAmount where the extension's drives cSkyColor. -->
+<technique vs="luanti_client/res/PBRVoxel" ps="luanti_client/res/PBRVoxel"
+        psdefines="DIFFMAP PBR METALLIC VOXELNORMALMAP VOXELIBL VOXELSPOTS VOXELTRANSLUCENCY VOXELMODIFIERS VOXELSKYTINT"
+        vsdefines="VOXELMODIFIERS">
+    <pass name="base" />
+    <pass name="light" depthtest="equal" depthwrite="false" blend="add" />
+    <pass name="depth" vs="Depth" ps="Depth" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" />
+</technique>

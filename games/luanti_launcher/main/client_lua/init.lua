@@ -37,6 +37,23 @@ voxelworld.use_skylight = true
 -- a cave from a canopy. See use_sun_gate() in builtin/voxel_shading.
 voxel_shading.use_sun_gate(true)
 
+-- And Luanti's own shaders rather than buildat's. One set, in
+-- extensions/luanti_client/res/, used by both Luanti clients: this launcher
+-- and the extension. builtin/voxel_shading is nine other games' look and
+-- stays theirs -- it is still what chooses between these eight and what
+-- pushes their parameters, and the .glsl behind them is the extension's.
+-- See [SHADER_HOME] in doc/plan/master_plan.md.
+voxel_shading.use_technique_set({
+	plain = "luanti_client/res/LuantiVoxel.xml",
+	modifiers = "luanti_client/res/LuantiVoxelModifiers.xml",
+	alpha = "luanti_client/res/LuantiVoxelAlpha.xml",
+	masked = "luanti_client/res/LuantiVoxelMasked.xml",
+	sun = "luanti_client/res/LuantiVoxelSun.xml",
+	sun_modifiers = "luanti_client/res/LuantiVoxelSunModifiers.xml",
+	sun_alpha = "luanti_client/res/LuantiVoxelSunAlpha.xml",
+	sun_masked = "luanti_client/res/LuantiVoxelSunMasked.xml",
+})
+
 -- Luanti's origin is where its mods build, so that is what the camera frames
 local LOOK_AT = {x = 0, y = 2, z = 0}
 local CAMERA_DISTANCE = 34
