@@ -1553,8 +1553,65 @@ function M.define(dst, util)
 		inherited_from_by_wrapper = dst.Component,
 	})
 
+	-- Pixels in memory. Added 2026-09-15 for the cube map a game's own six
+	-- sky textures make; see [SKY_LEFTOVERS] in doc/plan/master_plan.md.
+	--
+	-- **What is deliberately not here is every method that names a file.**
+	-- Image has SaveBMP, SavePNG, SaveTGA, SaveJPG, SaveDDS, SaveWEBP and
+	-- LoadColorLUT, and all of them take a path from their caller: a server's
+	-- Lua writing where it likes is the first disqualifier in
+	-- [WHITELIST_POLICY]. What is here reads and writes pixels and nothing
+	-- else. An image comes from the resource cache, which only looks in the
+	-- directories the client registered, or is made empty and filled.
+	util.wc("Image", {
+		inherited_from_by_wrapper = dst.Resource,
+		class = {
+			new = function()
+				return util.wrap_instance("Image", Image:new())
+			end,
+		},
+		instance = {
+			-- components is 1 to 4: luminance, luminance and alpha, rgb, rgba
+			SetSize = util.self_function("SetSize", {"boolean"},
+					{"Image", "number", "number", "number"}),
+			SetPixel = util.self_function("SetPixel", {},
+					{"Image", "number", "number", "Color"}),
+			GetPixel = util.self_function("GetPixel", {dst.Color},
+					{"Image", "number", "number"}),
+			-- Scaled rather than cropped, which is what a cube map face
+			-- wants when a game's textures are not all one size
+			Resize = util.self_function("Resize", {"boolean"},
+					{"Image", "number", "number"}),
+			Clear = util.self_function("Clear", {}, {"Image", "Color"}),
+			FlipVertical = util.self_function("FlipVertical", {"boolean"},
+					{"Image"}),
+			FlipHorizontal = util.self_function("FlipHorizontal",
+					{"boolean"}, {"Image"}),
+		},
+		properties = {
+			-- All read-only in Urho3D: what the image turned out to be
+			width = util.simple_property("number"),
+			height = util.simple_property("number"),
+			components = util.simple_property("number"),
+			compressed = util.simple_property("boolean"),
+		},
+	})
+
+	-- Six square faces around a point, which is what a sky is drawn on.
+	-- SetData sizes the cube from face 0 and refuses a face that does not
+	-- match it, so the order is FACE_POSITIVE_X first and every face the
+	-- same square.
 	util.wc("TextureCube", {
 		inherited_from_by_wrapper = dst.Texture,
+		class = {
+			new = function()
+				return util.wrap_instance("TextureCube", TextureCube:new())
+			end,
+		},
+		instance = {
+			SetData = util.self_function("SetData", {"boolean"},
+					{"TextureCube", "number", "Image"}),
+		},
 	})
 
 	-- What a ParticleEmitter emits, and the only way to say it: an effect

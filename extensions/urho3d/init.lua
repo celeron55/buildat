@@ -554,6 +554,30 @@ do
 			"whitelist: Text3D did not take its text and size")
 	node:Remove()
 
+	-- Pixels, and the six faces a sky is drawn on. An image made here rather
+	-- than read from anywhere: what the cache hands over is the same class.
+	local img = Image:new()
+	assert(img:SetSize(4, 4, 4), "whitelist: Image:SetSize() refused")
+	assert(img.width == 4 and img.components == 4,
+			"whitelist: Image did not take its size")
+	img:SetPixel(1, 1, Color(1, 0, 0, 1))
+	local px = img:GetPixel(1, 1)
+	assert(px.r > 0.99 and px.g < 0.01,
+			"whitelist: a pixel written is not the pixel read")
+	assert(img:Resize(2, 2) and img.width == 2,
+			"whitelist: Image:Resize() did nothing")
+
+	-- SetData sizes the cube from face 0, so this is the whole of it: one
+	-- square image on every face
+	local cube = TextureCube:new()
+	local face = Image:new()
+	face:SetSize(4, 4, 4)
+	face:Clear(Color(0, 0, 1, 1))
+	for i = 0, 5 do
+		assert(cube:SetData(i, face),
+				"whitelist: TextureCube:SetData() refused face " .. i)
+	end
+
 	holder:Remove()
 end
 
