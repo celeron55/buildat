@@ -952,22 +952,72 @@ luanti.sub_player_pos(function(p)
 			string.format(" looking %.0f, %.0f", yaw, pitch))
 end)
 
--- What F5 shows: where the player is, what they are standing on and what
--- the keys are. A player who wants to know why something is not happening
--- looks here first.
+-- What F5 shows: the two lines official Luanti's own status row shows, in
+-- its units and its order, and buildat's own facts under them. The shape is
+-- not a preference: every reference shot's numbers are read off Luanti's
+-- row and typed back in here, and a line that prints the same facts
+-- differently makes each of those a conversion done by hand. The keys are
+-- not here -- they are in the pause menu, which lists the same BINDINGS.
+--
+-- The top left corner, at the very top, which is where official Luanti and
+-- extensions/luanti_client both put it.
 local detail_text = hud_text(13)
 detail_text:SetText("")
 detail_text.horizontalAlignment = magic.HA_LEFT
 detail_text.verticalAlignment = magic.VA_TOP
-detail_text:SetPosition(8, 30)
+detail_text:SetPosition(8, 8)
 detail_text.visible = false
 
-local function binding_lines()
-	local parts = {}
-	for _, b in ipairs(BINDINGS) do
-		parts[#parts + 1] = b.name .. ": " .. b.what
+-- Luanti's yaw, from the launcher's. The launcher measures from +Z towards
+-- +X, the way Urho does; Luanti measures from +Z towards -X, so the number
+-- turns the other way round. The cardinal label is Luanti's own, in its own
+-- quadrants -- and it is not decoration: it is what says the sign came out
+-- right, because a picture labelled "South -Z" cannot be a picture of north.
+local function luanti_yaw(internal)
+	local y = (360 - internal) % 360
+	local label
+	if y >= 45 and y < 135 then
+		label = "West -X"
+	elseif y >= 135 and y < 225 then
+		label = "South -Z"
+	elseif y >= 225 and y < 315 then
+		label = "East +X"
+	else
+		label = "North +Z"
 	end
-	return table.concat(parts, "\n")
+	return y, label
+end
+
+do
+	-- The four directions, in the launcher's angles: 0 looks towards +Z and
+	-- 90 towards +X, which Luanti calls 0 North and 270 East.
+	local cases = {[0] = {0, "North +Z"}, [90] = {270, "East +X"},
+			[180] = {180, "South -Z"}, [-90] = {90, "West -X"}}
+	for internal, want in pairs(cases) do
+		local y, label = luanti_yaw(internal)
+		assert(y == want[1] and label == want[2],
+				"luanti_yaw(" .. internal .. ") = " .. y .. " " .. label)
+	end
+end
+
+-- How fast frames are coming, over the same quarter second the block is
+-- rebuilt in. Luanti's row prints the jitter beside the rate because an
+-- average hides a stutter: it is how far the worst frame of the window ran
+-- over the average one, which is what a hitch looks like as a number.
+local frames, frame_sum, frame_max = 0, 0, 0
+local function frame_sample(dt)
+	frames = frames + 1
+	frame_sum = frame_sum + dt
+	if dt > frame_max then
+		frame_max = dt
+	end
+end
+local function frame_stats()
+	local avg = frames > 0 and frame_sum / frames or 0
+	local fps = avg > 0 and 1 / avg or 0
+	local jitter = avg > 0 and (frame_max / avg - 1) * 100 or 0
+	frames, frame_sum, frame_max = 0, 0, 0
+	return fps, jitter
 end
 
 -- The counted facts, in the words extensions/luanti_client's debug line uses
@@ -986,9 +1036,68 @@ local function counted_line()
 			c.meshes, c.objects, c.hud, w.chunks, w.to_mesh)
 end
 
+-- Put under the lines of detail, which is where a Luanti client's chat goes;
+-- assigned with the chat itself further down, because that is where the
+-- block it moves is made.
+local place_chat
+
+-- The whole block, as one string, and the only place its shape is decided:
+-- what is logged and what is drawn have to be the same text or the two
+-- disagree eventually, and the disagreement turns up in the middle of a
+-- comparison.
+--
+-- The first two lines are official Luanti's, field for field, so a number
+-- here and a number in a reference shot are compared down the column
+-- without arithmetic. Two of its fields are not here: drawtime, which needs
+-- the renderer's own frame timing, and RTT, which needs the buildat link to
+-- measure one. Everything buildat has and Luanti has not is on the lines
+-- under them, out of the way of that comparison.
+local function status_lines()
+	local info = luanti.world_info()
+	local fps, jitter = frame_stats()
+	local mode = player.noclip and "noclip" or (player.fly and "flying" or
+			(player.on_ground and "on the ground" or "falling"))
+	local chunk_p = voxelworld.get_chunk_position(buildat.Vector3(
+			player.x, player.y, player.z))
+	local lyaw, cardinal = luanti_yaw(yaw)
+	return string.format(
+			"buildat | game: %s | %s | FPS: %.0f | dtime jitter: %.1f%%" ..
+			" | view range: %d\n" ..
+			"pos: (%.1f, %.1f, %.1f) | yaw: %.1f\194\176 %s" ..
+			" | pitch: %.1f\194\176 | seed: %s\n" ..
+			"%s | speed %.1f, %.1f, %.1f | chunk %d, %d, %d%s\n" ..
+			"%02d:%02d | sun %.2f up, %.0f%% day\n" ..
+			"%s",
+			info.game ~= "" and info.game or "?",
+			info.version ~= "" and info.version or "Luanti ?",
+			fps, jitter, FAR_CLIP,
+			player.x, player.y, player.z,
+			lyaw, cardinal,
+			-- Luanti's pitch is positive looking up, where the launcher's
+			-- own is positive looking down as Urho's euler angle is
+			-pitch,
+			info.seed ~= "" and info.seed or "?",
+			mode, player.vx, player.vy, player.vz,
+			chunk_p.x, chunk_p.y, chunk_p.z,
+			voxelworld.chunk_has_physics(chunk_p) and "" or " (no physics)",
+			math.floor((time_of_day or 0) * 24),
+			math.floor(((time_of_day or 0) * 24 % 1) * 60),
+			sky_now.height, sky_now.day * 100,
+			counted_line())
+end
+
 local detail_timer = 0
 local function update_detail(dt)
+	-- Every frame, whether the block is up or not: the rate and the jitter
+	-- are of the frames, and a window that only counts while somebody is
+	-- looking starts empty every time F5 is pressed
+	frame_sample(dt)
 	if not detail_text.visible then
+		-- Rolled anyway, or the first line after F5 reports the jitter of
+		-- every frame since the world came up, which is a loading hitch
+		if frame_sum >= 0.25 then
+			frame_stats()
+		end
 		return
 	end
 	detail_timer = detail_timer + dt
@@ -996,24 +1105,10 @@ local function update_detail(dt)
 		return
 	end
 	detail_timer = 0
-	local mode = player.noclip and "noclip" or (player.fly and "flying" or
-			(player.on_ground and "on the ground" or "falling"))
-	local chunk_p = voxelworld.get_chunk_position(buildat.Vector3(
-			player.x, player.y, player.z))
-	detail_text:SetText(string.format(
-			"%.1f, %.1f, %.1f | %s | looking %.0f round, %.0f down\n" ..
-			"speed %.1f, %.1f, %.1f | chunk %d, %d, %d%s\n" ..
-			"%02d:%02d | sun %.2f up, %.0f%% day\n" ..
-			"%s\n%s",
-			player.x, player.y, player.z, mode, yaw, pitch,
-			player.vx, player.vy, player.vz,
-			chunk_p.x, chunk_p.y, chunk_p.z,
-			voxelworld.chunk_has_physics(chunk_p) and "" or " (no physics)",
-			math.floor((time_of_day or 0) * 24),
-			math.floor(((time_of_day or 0) * 24 % 1) * 60),
-			sky_now.height, sky_now.day * 100,
-			counted_line(),
-			binding_lines()))
+	detail_text:SetText(status_lines())
+	if place_chat then
+		place_chat()
+	end
 end
 
 
@@ -1036,11 +1131,29 @@ local CHAT_LINE_H = 17
 local CHAT_COLOR = magic.Color(1.0, 1.0, 0.9)
 local chat_block = magic.ui.root:CreateChild("UIElement")
 chat_block.horizontalAlignment = magic.HA_LEFT
-chat_block.verticalAlignment = magic.VA_BOTTOM
--- Above the hotbar, the bars and the name of what is in hand, which are
--- what is at the bottom of the screen
-chat_block:SetPosition(8, -(8 + SLOT + 52))
+-- The top left corner, under the lines of detail, which is where
+-- extensions/luanti_client already decided a Luanti client's chat goes and
+-- why: what a game puts on the screen of its own is along the bottom, and
+-- chat down there lands on top of it. This was at the bottom, above the
+-- hotbar, and that is exactly the collision.
+chat_block.verticalAlignment = magic.VA_TOP
 chat_block.size = magic.IntVector2(600, CHAT_LINES * CHAT_LINE_H)
+
+-- And it moves: down as the lines of detail grow, back up when F5 takes them
+-- away. Copying the position without copying this gives a block that is
+-- right at one size and wrong at every other.
+local chat_at_y = nil
+place_chat = function()
+	local y = 8
+	if detail_text.visible then
+		y = 8 + detail_text.height + 8
+	end
+	if y ~= chat_at_y then
+		chat_at_y = y
+		chat_block:SetPosition(8, y)
+	end
+end
+place_chat()
 
 local chat_input = nil
 -- The key that opens the line arrives as text as well, and the line edit
@@ -1646,7 +1759,11 @@ local function draw_hud(elements, flags)
 	-- The game can take the client's own away, and what it draws instead is
 	-- these elements; see luanti.hud_flag()
 	hud_root.visible = hud_shown
-	title_text.visible = hud_shown
+	-- The line of keys is a beginner's, and the lines of detail are a
+	-- comparison's: at the top of the screen they land on top of each other,
+	-- and a reference shot is taken with the detail up. The keys are in the
+	-- pause menu whichever is showing.
+	title_text.visible = hud_shown and not detail_text.visible
 	crosshair.visible = hud_shown and luanti.hud_flag("crosshair")
 	chat_block.visible = chat_shown and luanti.hud_flag("chat")
 	hotbar_shown = hud_shown and luanti.hud_flag("hotbar")
@@ -2217,11 +2334,14 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		detail_text.visible = not detail_text.visible
 		detail_timer = 1
 		if detail_text.visible then
-			-- In the log as well as on the screen: these are numbers meant
-			-- to be compared with another client's, and a number read off a
-			-- screenshot is a number misread
-			log:info(counted_line():gsub("\n", " | "))
+			-- In the log as well as on the screen, and the same string: a
+			-- scripted comparison then reads text instead of reading a
+			-- screenshot, which is the difference between a check that runs
+			-- and a check somebody looks at
+			log:info(status_lines():gsub("\n", " | "))
 		end
+		place_chat()
+		title_text.visible = hud_shown and not detail_text.visible
 	elseif key == BIND.menu.key then
 		open_pause_menu()
 	end

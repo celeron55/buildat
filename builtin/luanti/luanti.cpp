@@ -1006,6 +1006,8 @@ struct Module: public interface::Module, public luanti::Interface
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_dig_props"));
 		m_server->sub_event(this, Event::t(
+				"network:packet_received/luanti:get_world_info"));
+		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_model"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:fields"));
@@ -1034,6 +1036,8 @@ struct Module: public interface::Module, public luanti::Interface
 				on_get_object_props, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:get_dig_props",
 				on_get_dig_props, network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:get_world_info",
+				on_get_world_info, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:get_model",
 				on_get_model, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:fields",
@@ -5754,6 +5758,22 @@ struct Module: public interface::Module, public luanti::Interface
 		});
 		log_v(MODULE, "C%zu: %zu dig prop records", (size_t)packet.sender,
 				flat.size());
+	}
+
+	// The game's name, the world's seed and which Luanti this is: what the
+	// client's status line shows and cannot know. Constants for a session,
+	// so they are asked for once instead of riding along with the position.
+	void on_get_world_info(const network::Packet &packet)
+	{
+		sv_<ss_> flat = string_list_from_lua("__world_info");
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(flat);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(packet.sender, "luanti:world_info", os.str());
+		});
 	}
 
 	// A core.__<name>() that answers with an array of strings, as a vector

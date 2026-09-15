@@ -2290,12 +2290,31 @@ buildat.sub_packet("luanti:item_images", function(data)
 	end
 end)
 
+-- What the server says about the world: the game's name, the seed and which
+-- Luanti this is. The status line shows them beside the numbers it works out
+-- for itself, so that a shot of this can be compared with a shot of official
+-- Luanti without anything being looked up.
+local world_info = {game = "", seed = "", version = ""}
+
+function M.world_info()
+	return world_info
+end
+
+buildat.sub_packet("luanti:world_info", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	world_info = {game = values[1] or "", seed = values[2] or "",
+			version = values[3] or ""}
+	log:info("luanti:world_info: " .. world_info.version .. ", game " ..
+			world_info.game .. ", seed " .. world_info.seed)
+end)
+
 -- Asked for rather than sent, because a packet that arrives before the
 -- script that subscribes to it has nowhere to go
 buildat.send_packet("luanti:get_texmods", "")
 buildat.send_packet("luanti:get_item_images", "")
 buildat.send_packet("luanti:get_object_props", "")
 buildat.send_packet("luanti:get_dig_props", "")
+buildat.send_packet("luanti:get_world_info", "")
 
 return M
 -- vim: set noet ts=4 sw=4:

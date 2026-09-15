@@ -1623,6 +1623,22 @@ function core.get_game_info()
 	}
 end
 
+-- core.__world_info() -> {gameid, seed, version}
+--
+-- The three things a client's status line needs and cannot work out for
+-- itself. They are constants for a session, so they go over once when the
+-- client asks rather than with the numbers that change every frame. The
+-- seed is text because it is a u64: half of them do not survive a double,
+-- and it is compared against another client's character by character.
+function core.__world_info()
+	local v = core.get_version()
+	return {
+		core.get_game_info().id,
+		tostring(core.get_mapgen_setting("seed") or ""),
+		v.project .. " " .. v.string,
+	}
+end
+
 -- Whose world this is. Luanti means by it "the client started this server
 -- itself", and what turns on it is which privileges a player arrives with:
 -- the singleplayer gets everything a game marked give_to_singleplayer --
