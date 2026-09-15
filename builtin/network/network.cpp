@@ -367,13 +367,19 @@ struct Module: public interface::Module, public network::Interface
 
 	void send_u(Peer &peer, const ss_ &name, const ss_ &data)
 	{
-		peer.packet_stream.output(name, data, [&](const ss_ &packet_data){
+		peer.packet_stream.output(name, data,
+				[&](const ss_ &packet_data, bool droppable){
 			// Over the limit, a Drop game throws the new packet away rather
 			// than queueing it. Buffer and Disconnect both queue; what
 			// Disconnect does about it is in flush_peers(), on the thread
 			// that drains, because a peer is not to be closed from inside
 			// somebody else's send.
-			if(m_send_policy == SendPolicy::Drop &&
+			//
+			// A packet the stream marks undroppable is queued whatever the
+			// policy says: that is core:define_packet_type, and a peer that
+			// misses one can never read that type again. A dropped payload
+			// costs one packet; a dropped definition costs the session.
+			if(droppable && m_send_policy == SendPolicy::Drop &&
 					peer.out_pending() > m_max_queue_bytes){
 				if(!peer.warned_full){
 					peer.warned_full = true;

@@ -184,7 +184,10 @@ struct CState: public State
 	void send_packet(const ss_ &name, const ss_ &data)
 	{
 		log_v(MODULE, "send_packet(): name=%s", cs(name));
-		m_packet_stream.output(name, data, [&](const ss_ &packet_data){
+		m_packet_stream.output(name, data,
+				[&](const ss_ &packet_data, bool droppable){
+			// Nothing is dropped here: the client's socket write blocks and
+			// the server is the end that has a queue policy
 			m_socket->send_fd(packet_data);
 		});
 	}
@@ -243,14 +246,27 @@ struct CState: public State
 
 	void handle_socket_buffer()
 	{
-		m_packet_stream.input(m_socket_buffer,
-		[&](const ss_ &name, const ss_ &data){
-			try {
-				handle_packet(name, data);
-			} catch(std::exception &e){
-				log_w(MODULE, "Exception on handling packet: %s", e.what());
-			}
-		});
+		// A packet whose type this end cannot name used to come out of
+		// input() uncaught and abort the client, where the server logs a
+		// warning for the same event: one side's oddity was the other side's
+		// SIGABRT. It cannot be read past -- the type numbers are defined on
+		// the wire before first use, so an unknown one means the stream is
+		// no longer being read where packets start -- so the session ends
+		// and says why, and the client itself lives.
+		try {
+			m_packet_stream.input(m_socket_buffer,
+			[&](const ss_ &name, const ss_ &data){
+				try {
+					handle_packet(name, data);
+				} catch(std::exception &e){
+					log_w(MODULE, "Exception on handling packet: %s", e.what());
+				}
+			});
+		} catch(interface::UnknownPacketReceived &e){
+			m_socket_buffer.clear();
+			lost_connection(ss_()+"the server sent something this cannot "
+					"read: "+e.what());
+		}
 	}
 
 	void setup_packet_handlers();
