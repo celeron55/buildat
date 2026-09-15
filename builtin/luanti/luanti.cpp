@@ -5195,6 +5195,31 @@ struct Module: public interface::Module, public luanti::Interface
 	// "default_dig_cracky" is default_dig_cracky.1.ogg and .2.ogg, and which
 	// one plays is a choice per play. The module is what knows which files
 	// it serves, which is why the pick is here rather than in the Lua.
+	// __luanti_add_media(name, path) -> whether it was added: one more file
+	// into what this game serves, while it runs. A mod that draws a picture
+	// and hands it to core.dynamic_add_media() is what wants it --
+	// VoxeLibre's maps are drawn per map item and per player.
+	//
+	// client_file announces a file to every connected client as it is added,
+	// so nothing else has to be sent; the name is the game's own, the way
+	// every other media file's is.
+	static int l_add_media(lua_State *L)
+	{
+		Module *self = module_of(L);
+		const ss_ name = luaL_checkstring(L, 1);
+		const ss_ path = luaL_checkstring(L, 2);
+		if(name.empty() || path.empty() || !interface::fs::path_exists(path)){
+			lua_pushboolean(L, false);
+			return 1;
+		}
+		client_file::access(self->m_server, [&](client_file::Interface *i){
+			i->add_file_path(media_resource_name(name), path);
+		});
+		self->m_served_media[name] = path;
+		lua_pushboolean(L, true);
+		return 1;
+	}
+
 	static int l_sound_file(lua_State *L)
 	{
 		Module *self = module_of(L);
@@ -6816,6 +6841,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_send_day_night", l_send_day_night);
 		set_global_cfunction("__luanti_send_sound", l_send_sound);
 		set_global_cfunction("__luanti_sound_file", l_sound_file);
+		set_global_cfunction("__luanti_add_media", l_add_media);
 		set_global_cfunction("__luanti_send_particles", l_send_particles);
 		set_global_cfunction("__luanti_send_sky", l_send_sky);
 		set_global_cfunction("__luanti_send_time", l_send_time);

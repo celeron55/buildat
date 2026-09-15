@@ -289,6 +289,93 @@ function core.get_cache_path()
 	return cache_path
 end
 
+-- core.dynamic_add_media(options, callback): one more media file while the
+-- game runs. VoxeLibre draws a map of where a player has been into a PNG per
+-- map item and hands it to this; without it a map in a player's hand is
+-- blank. `options` is a table, or a path, which is what Luanti's own older
+-- signature was and what mods written against it still pass.
+--
+-- What is served is a file on disk, so `filedata` is written to one under
+-- the cache first. `ephemeral` and `client_cache` are about Luanti's own
+-- media protocol -- whether the server keeps the file and whether the client
+-- writes it to its cache -- and buildat's client_file decides both for
+-- itself, so they are read and ignored rather than refused.
+--
+-- simplified: **the callback fires when the file has been handed to
+-- client_file and not when the client says it has it**, so a mod that draws
+-- the texture in its callback draws it a moment before it can arrive; the
+-- picture then appears when it does. `to_player` picks who the callback is
+-- fired for and not who the file goes to -- client_file announces a file to
+-- everyone. Both want the same thing: ask the peer for a fresh
+-- core:tell_after_all_files_transferred and wait for client_file's
+-- files_transmitted event. **The trap in doing that** is that
+-- games/luanti_launcher listens to the same event and shows the world to
+-- whoever it names, so a second one for a player already in the world
+-- re-runs their init.lua; that has to be settled first.
+local dynamic_media_n = 0
+
+function core.dynamic_add_media(options, callback)
+	local filename, filepath, filedata, to_player
+	if type(options) == "string" then
+		filepath = options
+	elseif type(options) == "table" then
+		filename = options.filename
+		filepath = options.filepath
+		filedata = options.filedata
+		to_player = options.to_player
+	else
+		error("dynamic_add_media: a table or a path")
+	end
+	if filepath and filedata then
+		error("dynamic_add_media: cannot provide both filepath and filedata")
+	end
+	if not filepath and not filedata then
+		error("dynamic_add_media: either filepath or filedata must be provided")
+	end
+	if filepath then
+		if filepath == "" then
+			error("dynamic_add_media: filepath must be non-empty")
+		end
+		filename = filename or filepath:match("([^/\\]+)$")
+	elseif not filename or filename == "" then
+		error("dynamic_add_media: filename required")
+	end
+	if filedata then
+		local dir = cache_path .. "/dynamic_media"
+		core.mkdir(dir)
+		filepath = dir .. "/" .. filename
+		if not core.safe_file_write(filepath, filedata) then
+			return false
+		end
+	end
+	if not __luanti_add_media(filename, filepath) then
+		core.log("warning", "dynamic_add_media: could not serve \"" ..
+				tostring(filepath) .. "\"")
+		return false
+	end
+	dynamic_media_n = dynamic_media_n + 1
+	if callback then
+		-- Not this tick: a mod calling it from inside a callback of its own
+		-- should not be called back before it has returned
+		core.after(0, function()
+			if to_player then
+				callback(to_player)
+			else
+				for _, player in ipairs(core.get_connected_players()) do
+					callback(player:get_player_name())
+				end
+			end
+		end)
+	end
+	return true
+end
+
+-- How many files this game has added while running, for the F5 line and for
+-- a check that wants to know whether anything was added at all
+function core.__dynamic_media_count()
+	return dynamic_media_n
+end
+
 function core.get_temp_path(dir)
 	local path = cache_path .. "/tmp"
 	core.mkdir(path)
@@ -1757,7 +1844,7 @@ local STUBS_NIL = {
 	-- The server itself
 	"request_shutdown", "cancel_shutdown_requests", "get_server_status",
 	"get_server_uptime", "get_server_max_lag", "get_worldpath_nocreate",
-	"dynamic_add_media", "get_mod_data", "set_mod_data", "get_mod_data_path",
+	"get_mod_data", "set_mod_data", "get_mod_data_path",
 	-- Not in this at all: HTTP, IPC, the async environment, mod channels,
 	-- SSCSM, translations beyond passing strings through
 	"request_http_api", "set_http_api_lua",
