@@ -70,16 +70,173 @@ function M.layout(size, real_coordinates, screen_w, screen_h)
 	}
 end
 
+-- What a game's locale/*.tr files said, as translations[domain][key]. The
+-- server reads them and sends them; see lua/translations.lua and
+-- M.set_translations() below. Empty until they arrive, and empty forever for
+-- a game that ships none, in which case all of this is one string find that
+-- comes to nothing.
+local translations = {}
+
+function M.set_translations(t)
+	translations = t or {}
+end
+
+-- Luanti's translation markup: the escape character and then either
+-- (T@domain) or a bare T, up to a matching (E) or bare E. What lies between
+-- is the string as the game wrote it, with (F) ... (E) around each argument
+-- -- so the template to look up is that text with the arguments replaced by
+-- @1, @2, and the translation is filled back in.
+--
+-- This is translate_string() in Luanti's src/util/string.cpp.
+--
+-- simplified: no plural forms. Luanti's marker can carry a number for a
+-- language with several, and a .tr file an entry per form; this takes the
+-- one entry a file has.
+local translate_all
+
+-- One marked string, starting just after its T: the translated text, and
+-- where it ended.
+local function translate_one(s, at, domain)
+	local template = {}
+	local args = {}
+	while at <= #s do
+		local e = string.find(s, "\27", at, true)
+		if e == nil then
+			template[#template + 1] = string.sub(s, at)
+			at = #s + 1
+			break
+		end
+		if e > at then
+			-- A literal @ in the text is written twice, so that it is not
+			-- taken for an argument when the template is filled back in
+			template[#template + 1] =
+					string.gsub(string.sub(s, at, e - 1), "@", "@@")
+		end
+		local rest = string.sub(s, e + 1)
+		local body = string.match(rest, "^(%b())")
+		local word, after
+		if body then
+			word = string.match(body, "^%(([^@)]*)") or ""
+			after = e + 1 + #body
+		else
+			word = string.sub(rest, 1, 1)
+			after = e + 2
+		end
+		if word == "E" then
+			at = after
+			break
+		elseif word == "F" then
+			local text
+			text, at = translate_all(s, after, true)
+			args[#args + 1] = text
+			template[#template + 1] = "@" .. #args
+		else
+			-- Somebody else's markup -- a colour -- which belongs to the
+			-- text and travels with it
+			template[#template + 1] = string.sub(s, e, after - 1)
+			at = after
+		end
+	end
+	local key = table.concat(template)
+	local out = (translations[domain] and translations[domain][key]) or key
+	-- And the arguments back in: "@@" is a literal @ and "@1" is an
+	-- argument, which is Luanti's own rule for a translated template
+	out = string.gsub(out, "@(.)", function(c)
+		if c == "@" then
+			return "@"
+		end
+		local n = tonumber(c)
+		if n and args[n] then
+			return args[n]
+		end
+		return "@" .. c
+	end)
+	return out, at
+end
+
+-- Everything from `at` on, stopping at an (E) while reading an argument
+translate_all = function(s, at, stop_at_end)
+	local out = {}
+	while at <= #s do
+		local e = string.find(s, "\27", at, true)
+		if e == nil then
+			out[#out + 1] = string.sub(s, at)
+			at = #s + 1
+			break
+		end
+		if e > at then
+			out[#out + 1] = string.sub(s, at, e - 1)
+		end
+		local rest = string.sub(s, e + 1)
+		local body = string.match(rest, "^(%b())")
+		local word, arg, after
+		if body then
+			word, arg = string.match(body, "^%(([^@)]*)@?(.-)%)$")
+			word = word or ""
+			after = e + 1 + #body
+		else
+			word = string.sub(rest, 1, 1)
+			arg = ""
+			after = e + 2
+		end
+		if word == "T" then
+			local text
+			text, at = translate_one(s, after,
+					(arg ~= "" and arg) or nil)
+			out[#out + 1] = text
+		elseif word == "E" and stop_at_end then
+			at = after
+			break
+		else
+			-- Not ours: kept, because the colour markup is read after this
+			out[#out + 1] = string.sub(s, e, after - 1)
+			at = after
+		end
+	end
+	return table.concat(out), at
+end
+
+-- A string with its translation markers resolved and everything else left
+-- alone. Cheap for the common case: no escape character, nothing to do.
+function M.translate(s)
+	s = s or ""
+	if string.find(s, "\27", 1, true) == nil then
+		return s
+	end
+	local out = translate_all(s, 1, false)
+	return out
+end
+
 -- Luanti's translation and colour markup: an escape character, then either
--- (something) or a single letter. A client that does not translate has
--- nothing to do with it but take it out.
+-- (something) or a single letter. The translation markers are resolved
+-- first and whatever markup is left is taken out, which for a game with no
+-- .tr files is exactly what this always did.
 local function strip_escapes(s)
+	s = M.translate(s)
 	s = s:gsub("\27%b()", "")
 	s = s:gsub("\27.", "")
 	return s
 end
 
 M.strip_escapes = strip_escapes
+
+do
+	-- Plain text is untouched; a marked string comes out translated with
+	-- its argument where the translation puts it, and untranslated as the
+	-- template the game wrote. The example is Luanti's own, out of the
+	-- comment on translate_string().
+	assert(M.translate("just text") == "just text",
+			"translate: plain text is untouched")
+	local marked = "\27(T@mymod)\27(F)White\27(E) Wool\27(E)"
+	M.set_translations({mymod = {["@1 Wool"] = "villaa @1"}})
+	assert(M.translate(marked) == "villaa White",
+			"translate: the argument goes where the translation puts it")
+	M.set_translations({})
+	assert(M.translate(marked) == "White Wool",
+			"translate: with no translation the template is the answer")
+	assert(strip_escapes("\27(c@red)hi") == "hi",
+			"translate: other markup still comes out")
+end
 
 -- The colours Luanti's own markup names by word rather than by number.
 --
@@ -130,6 +287,12 @@ M.color_of = color_of
 -- draws. What is not markup at all is text.
 function M.split_colors(s)
 	s = s or ""
+	if string.find(s, "\27", 1, true) == nil then
+		return {{text = s}}
+	end
+	-- The translation markers first, so that what is looked up is the
+	-- string the game wrote and what is coloured is the answer
+	s = M.translate(s)
 	if string.find(s, "\27", 1, true) == nil then
 		return {{text = s}}
 	end

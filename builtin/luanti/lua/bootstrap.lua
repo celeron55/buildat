@@ -4135,6 +4135,7 @@ dofile(module_path .. "/lua/sound.lua")
 dofile(module_path .. "/lua/particles.lua")
 dofile(module_path .. "/lua/treegen.lua")
 dofile(module_path .. "/lua/raycast.lua")
+dofile(module_path .. "/lua/translations.lua")
 
 -- What core.get_dig_params() comes to, checked at every start because it is
 -- the difference between a node that can be dug and one that cannot. Here

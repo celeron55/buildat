@@ -2363,6 +2363,24 @@ function M.world_info()
 	return world_info
 end
 
+-- What the game's locale/*.tr files say, for the language the server chose:
+-- domain, key, value repeating. Everything a game writes carries a marker
+-- where a translatable string went in, and this end is where they are
+-- looked up -- see formspec.lua's M.translate().
+buildat.sub_packet("luanti:translations", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	local by_domain = {}
+	local n = 0
+	for i = 1, #values - 2, 3 do
+		local domain = values[i]
+		by_domain[domain] = by_domain[domain] or {}
+		by_domain[domain][values[i + 1]] = values[i + 2]
+		n = n + 1
+	end
+	formspec.set_translations(by_domain)
+	log:info("luanti:translations: " .. n .. " strings")
+end)
+
 buildat.sub_packet("luanti:world_info", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	world_info = {game = values[1] or "", seed = values[2] or "",
@@ -2378,6 +2396,7 @@ buildat.send_packet("luanti:get_item_images", "")
 buildat.send_packet("luanti:get_object_props", "")
 buildat.send_packet("luanti:get_dig_props", "")
 buildat.send_packet("luanti:get_world_info", "")
+buildat.send_packet("luanti:get_translations", "")
 
 return M
 -- vim: set noet ts=4 sw=4:

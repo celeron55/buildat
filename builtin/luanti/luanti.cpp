@@ -1008,6 +1008,8 @@ struct Module: public interface::Module, public luanti::Interface
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_world_info"));
 		m_server->sub_event(this, Event::t(
+				"network:packet_received/luanti:get_translations"));
+		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_model"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:fields"));
@@ -1038,6 +1040,8 @@ struct Module: public interface::Module, public luanti::Interface
 				on_get_dig_props, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:get_world_info",
 				on_get_world_info, network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:get_translations",
+				on_get_translations, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:get_model",
 				on_get_model, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:fields",
@@ -5831,6 +5835,26 @@ struct Module: public interface::Module, public luanti::Interface
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(packet.sender, "luanti:world_info", os.str());
 		});
+	}
+
+	// What the game's locale/*.tr files say, for the one language in force,
+	// as domain, key, value repeating. The lookup is the client's because
+	// the markers are in every string that reaches it; see lua/
+	// translations.lua for which language and why it is the server that
+	// picks it.
+	void on_get_translations(const network::Packet &packet)
+	{
+		sv_<ss_> flat = string_list_from_lua("__translations");
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(flat);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(packet.sender, "luanti:translations", os.str());
+		});
+		log_v(MODULE, "C%zu: %zu translated strings", (size_t)packet.sender,
+				flat.size() / 3);
 	}
 
 	// A core.__<name>() that answers with an array of strings, as a vector
