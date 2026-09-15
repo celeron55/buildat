@@ -659,6 +659,82 @@ local function tile_names(def)
 	return out
 end
 
+-- The six tiles as the definition gives them, entries rather than names, so
+-- that something other than the name can be read off one. Same order and
+-- the same last-one-repeats rule as tile_names(), and the same swap to
+-- special_tiles for a liquid.
+local function six_tile_defs(def, is_liquid)
+	local st = def and def.special_tiles
+	if is_liquid and type(st) == "table" and tile_name_of(st[1]) ~= nil then
+		local side = st[2] ~= nil and st[2] or st[1]
+		return {st[1], st[1], side, side, side, side}
+	end
+	local tiles = def and (def.tiles or def.tile_images)
+	if type(tiles) ~= "table" then
+		return nil
+	end
+	local out = {}
+	local last = nil
+	for i = 1, 6 do
+		if tiles[i] ~= nil then
+			last = tiles[i]
+		end
+		out[i] = last
+	end
+	return out
+end
+
+-- A tile that is a strip of animation frames, as the aspect the definition
+-- gives its frames -- 0 for a tile that is not one. Luanti works the frame
+-- count out of the image's own proportions and this aspect, so the aspect is
+-- what travels and the module, which has the file, reads the image.
+--
+-- simplified: only vertical_frames, which is what water, lava, fire and
+-- furnaces use; a 2D sheet comes through as a still.
+local function tile_frame_aspects(list)
+	if type(list) ~= "table" then
+		return nil
+	end
+	local out = {}
+	local any = false
+	for i = 1, 6 do
+		local a = type(list[i]) == "table" and list[i].animation or nil
+		local v = 0
+		if type(a) == "table" and a.type == "vertical_frames" then
+			local w = tonumber(a.aspect_w) or 1
+			local h = tonumber(a.aspect_h) or 1
+			v = (w > 0 and h > 0) and (w / h) or 1
+			any = true
+		end
+		out[i] = v
+	end
+	if not any then
+		return nil
+	end
+	return out
+end
+
+-- What the two have to come out as, checked at load against the shapes
+-- VoxeLibre's own water and the devtest's own furnace give them
+do
+	local water = {name = "w.png", animation = {type = "vertical_frames",
+			aspect_w = 16, aspect_h = 16, length = 3.0}}
+	local six = six_tile_defs({special_tiles = {water}, tiles = {"t.png"}},
+			true)
+	assert(six[1] == water and six[6] == water,
+			"a liquid's six are its special tiles")
+	assert(six_tile_defs({tiles = {"t.png"}}, false)[6] == "t.png",
+			"a node's own tiles repeat the last one")
+	local a = tile_frame_aspects(six)
+	assert(a and a[1] == 1 and a[6] == 1, "an animated tile is one of these")
+	assert(tile_frame_aspects(six_tile_defs({tiles = {"plain.png"}},
+			false)) == nil, "a node of still tiles carries nothing")
+	local mixed = tile_frame_aspects(six_tile_defs(
+			{tiles = {"plain.png", water}}, false))
+	assert(mixed and mixed[1] == 0 and mixed[2] == 1 and mixed[6] == 1,
+			"and the last tile is what the faces after it wear")
+end
+
 -- A liquid wears its special_tiles and not its tiles: the first is the
 -- surface and the second the sides, and `tiles` is what the item looks like
 -- in a hand. Same six faces in the same order as everything else.
@@ -1356,6 +1432,11 @@ function core.__voxel_defs()
 			light_source = (def and def.light_source) or 0,
 			tiles = is_liquid and (liquid_tiles(def) or tile_names(def)) or
 					tile_names(def),
+			-- Which of those six are a strip of animation frames; the module
+			-- cuts the first frame out of one before it goes in an atlas,
+			-- because a whole strip stretched over a face is water's
+			-- sixteen frames at once
+			tile_frames = tile_frame_aspects(six_tile_defs(def, is_liquid)),
 			node_box = (drawtype == "nodebox") and node_boxes(def) or nil,
 			visual_scale = (def and def.visual_scale) or 1.0,
 			-- What says two liquid nodes are the same liquid: a water source

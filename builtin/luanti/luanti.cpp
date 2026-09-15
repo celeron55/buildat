@@ -36,6 +36,7 @@
 #include <sqlite3.h>
 #include <fstream>
 #include <cstdlib>
+#include <cstring>
 #include <sstream>
 #include <unordered_map>
 #include <algorithm>
@@ -795,6 +796,8 @@ struct Module: public interface::Module, public luanti::Interface
 	sm_<ss_, ss_> m_served_media;
 	// The colours of each palette that has been read, by file name
 	sm_<ss_, sv_<uint32_t>> m_palettes;
+	// How many frames each animated tile's strip holds, by tile name
+	sm_<ss_, size_t> m_frame_counts;
 	// See glass_edge_material()
 	sm_<ss_, interface::EdgeMaterialId> m_glass_edge_materials;
 	uint32_t m_next_glass_edge_material = 10;
@@ -3592,12 +3595,17 @@ struct Module: public interface::Module, public luanti::Interface
 	// client is what composes it, which is the rest of M3.
 	// One texture of a definition, with the surface numbers every node of a
 	// Luanti game gets until the nodedef carries its own
-	static interface::AtlasSegmentDefinition make_segment(const ss_ &texture)
+	// `frames` is how many animation frames the texture is a vertical strip
+	// of: the segment is then the first of them, which is what the atlas's
+	// own total_segments is for. One is a still texture.
+	static interface::AtlasSegmentDefinition make_segment(const ss_ &texture,
+			size_t frames = 1)
 	{
 		interface::AtlasSegmentDefinition seg;
 		seg.resource_name = texture;
 		seg.total_segments = magic::IntVector2(
-				texture.empty() ? 0 : 1, texture.empty() ? 0 : 1);
+				texture.empty() ? 0 : 1,
+				texture.empty() ? 0 : (int)(frames < 1 ? 1 : frames));
 		seg.select_segment = magic::IntVector2(0, 0);
 		seg.roughness = 0.95f;
 		seg.spec_strength = 0.15f;
@@ -3649,6 +3657,45 @@ struct Module: public interface::Module, public luanti::Interface
 	// be a file rather than a modifier of its own. Anything further warns
 	// and the node goes without its palette; the upgrade is the client's own
 	// texmod.lua evaluated over an Image rather than over a texture.
+	// How many frames a strip of animation frames holds. Luanti works it out
+	// of the image's own proportions and the aspect the definition gives --
+	// TileDef::animation against the texture's width and height -- so this
+	// reads the size out of the file's PNG header rather than decoding it.
+	// A tile whose name is not a plain file, or is not a PNG, answers one
+	// and is left as it is.
+	size_t tile_frame_count(const ss_ &name, float aspect)
+	{
+		auto cached = m_frame_counts.find(name);
+		if(cached != m_frame_counts.end())
+			return cached->second;
+		size_t frames = 1;
+		auto media = m_served_media.find(name);
+		if(media != m_served_media.end()){
+			std::ifstream ifs(media->second, std::ios::binary);
+			uint8_t hdr[24] = {};
+			ifs.read((char*)hdr, sizeof hdr);
+			static const uint8_t SIG[8] = {
+				0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
+			if(ifs.gcount() == (std::streamsize)sizeof hdr &&
+					memcmp(hdr, SIG, 8) == 0 &&
+					memcmp(hdr + 12, "IHDR", 4) == 0){
+				const uint32_t w = ((uint32_t)hdr[16] << 24) |
+						((uint32_t)hdr[17] << 16) |
+						((uint32_t)hdr[18] << 8) | (uint32_t)hdr[19];
+				const uint32_t h = ((uint32_t)hdr[20] << 24) |
+						((uint32_t)hdr[21] << 16) |
+						((uint32_t)hdr[22] << 8) | (uint32_t)hdr[23];
+				if(w > 0 && h > 0 && aspect > 0.0f){
+					const float n = (float)h / (float)w * aspect;
+					if(n >= 1.5f && n < 1024.0f)
+						frames = (size_t)(n + 0.5f);
+				}
+			}
+		}
+		m_frame_counts[name] = frames;
+		return frames;
+	}
+
 	bool palette_image(const ss_ &name, magic::Image &img)
 	{
 		if(name.empty() || name[0] != '[')
@@ -3849,6 +3896,10 @@ struct Module: public interface::Module, public luanti::Interface
 			float visual_scale = (float)table_number(L, "visual_scale", 1.0);
 			ss_ tiles[6];
 			bool has_tiles = table_six_strings(L, "tiles", tiles);
+			// Which of them are a strip of animation frames, as the aspect
+			// the frame count is worked out with; 0 is a still tile
+			float tile_aspect[6] = {};
+			table_six_numbers(L, "tile_frames", tile_aspect);
 			sv_<float> boxes;
 			table_numbers(L, "node_box", boxes);
 			ss_ facing = table_string(L, "facing");
@@ -4019,6 +4070,10 @@ struct Module: public interface::Module, public luanti::Interface
 			// resolves modifiers itself.
 			ss_ fallback = empty ? "" : node_texture_name(name);
 			ss_ face_textures[6];
+			// How many animation frames each face's texture is a strip of;
+			// the segment takes the first of them, so water is water and
+			// not sixteen waters squeezed onto one face
+			size_t face_frames[6] = {1, 1, 1, 1, 1, 1};
 			bool any_fallback = false;
 			for(size_t f = 0; f < 6; f++){
 				if(empty)
@@ -4026,6 +4081,9 @@ struct Module: public interface::Module, public luanti::Interface
 				ss_ texture = has_tiles ? texture_of_tile(tiles[f]) : "";
 				if(!texture.empty()){
 					face_textures[f] = texture;
+					if(tile_aspect[f] > 0.0f)
+						face_frames[f] = tile_frame_count(tiles[f],
+								tile_aspect[f]);
 				} else {
 					face_textures[f] = fallback;
 					any_fallback = true;
@@ -4055,7 +4113,8 @@ struct Module: public interface::Module, public luanti::Interface
 			vdef.name.rotation_secondary = 0;
 			vdef.handler_module = "";
 			for(size_t f = 0; f < 6; f++)
-				vdef.textures[f] = make_segment(face_textures[f]);
+				vdef.textures[f] = make_segment(face_textures[f],
+						face_frames[f]);
 			// The textures a shape's quads can wear beyond the six faces: a
 			// rooted plant's plant, which is nothing the cube it stands in
 			// has. Quad tile 6 is the first of these.
@@ -4161,7 +4220,8 @@ struct Module: public interface::Module, public luanti::Interface
 							for(size_t f = 0; f < 6; f++){
 								var.textures.push_back(tinted[f].empty() ?
 										interface::AtlasSegmentDefinition() :
-										make_segment(tinted[f]));
+										make_segment(tinted[f],
+										face_frames[f]));
 							}
 							if(!tinted[6].empty()){
 								var.textures.push_back(
@@ -4469,6 +4529,21 @@ struct Module: public interface::Module, public luanti::Interface
 		}
 		lua_pop(L, 1);
 		return ok;
+	}
+
+	void table_six_numbers(lua_State *L, const char *key, float out[6])
+	{
+		lua_getfield(L, -1, key);
+		if(!lua_istable(L, -1)){
+			lua_pop(L, 1);
+			return;
+		}
+		for(size_t i = 0; i < 6; i++){
+			lua_rawgeti(L, -1, (int)i + 1);
+			out[i] = (float)lua_tonumber(L, -1);
+			lua_pop(L, 1);
+		}
+		lua_pop(L, 1);
 	}
 
 	// The two C functions the map goes through
