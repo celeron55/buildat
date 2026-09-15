@@ -3417,8 +3417,17 @@ struct CInstance: public voxelworld::Instance
 
 		run_commit_hooks_in_thread(chunk_p, *chunk_buffer.volume);
 
+		const int64_t t_before_pack = interface::os::time_us();
 		ss_ new_data = interface::serialize_volume_compressed(
 				*chunk_buffer.volume);
+
+		// What a commit is made of, because a commit that takes seconds for
+		// one buffer is not taking them in zstd: this runs in voxelworld's
+		// own thread and the scene belongs to the main one, so every buffer
+		// written is a wait for whatever the main thread is doing. The two
+		// are counted apart and commit() says which it was.
+		const int64_t t_before_scene = interface::os::time_us();
+		m_commit_pack_us += t_before_scene - t_before_pack;
 
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			Scene *scene = imc->check_scene(m_scene_ref);
@@ -3444,30 +3453,7 @@ struct CInstance: public voxelworld::Instance
 
 			run_commit_hooks_in_scene(chunk_p, n);
 		});
-
-		// First send updated voxel registry to clients so that they are ready
-		// to generate stuff from the voxels
-		send_voxel_registry_if_dirty();
-
-		// Then synchronize node and notify clients about it
-		sv_<replicate::PeerId> peers;
-		replicate::access(m_server, [&](replicate::Interface *ireplicate){
-			ireplicate->sync_node_immediate(m_scene_ref, node_id);
-			peers = ireplicate->find_peers_that_know_node(m_scene_ref, node_id);
-		});
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar((int32_t)node_id);
-		}
-		network::access(m_server, [&](network::Interface *inetwork){
-			for(auto &peer_id: peers){
-				if(!m_clients_initialized.count(peer_id))
-					continue;
-				inetwork->send(peer_id, "voxelworld:node_volume_updated",
-						os.str());
-			}
-		});
+		m_commit_scene_us += interface::os::time_us() - t_before_scene;
 
 		// Mark node for collision box update
 		mark_node_for_physics_update(node_id);
@@ -3476,8 +3462,72 @@ struct CInstance: public voxelworld::Instance
 		chunk_buffer.dirty = false;
 		m_total_buffers_dirty--;
 
-		m_server->emit_event("voxelworld:node_volume_updated",
-				new NodeVolumeUpdated(m_scene_ref, node_id, true, chunk_p));
+		// Telling replicate and the clients about it is the same work for
+		// one node as for a hundred, and it is a hop into another module's
+		// thread which itself hops into main_context's -- so it is done once
+		// for the whole commit rather than once per buffer. See
+		// announce_committed_nodes().
+		m_committed_nodes.push_back(
+				std::pair<uint, pv::Vector3DInt32>(node_id, chunk_p));
+	}
+
+	// What commit() tells the rest of the server about the buffers it wrote:
+	// the voxel registry first, so that a client has the types before it is
+	// given voxels of them, then one pass through replicate for every node,
+	// then the packets and the events.
+	//
+	// Measured on a VoxeLibre world being generated (2026-09-15): one hop
+	// per buffer cost between two and a half and five and a half seconds for
+	// a single dirty buffer, all of it inside replicate::access(), because
+	// replicate's own sync_node_immediate() waits for main_context in turn.
+	// Everything that wants voxelworld waits behind that, which is what the
+	// shutdown hang looks like from the outside.
+	void announce_committed_nodes()
+	{
+		if(m_committed_nodes.empty())
+			return;
+		// First send updated voxel registry to clients so that they are ready
+		// to generate stuff from the voxels
+		const int64_t t_before_reg = interface::os::time_us();
+		send_voxel_registry_if_dirty();
+
+		// Then synchronize the nodes and notify clients about them
+		const int64_t t_before_rep = interface::os::time_us();
+		m_commit_registry_us += t_before_rep - t_before_reg;
+		sv_<sv_<replicate::PeerId>> peers(m_committed_nodes.size());
+		replicate::access(m_server, [&](replicate::Interface *ireplicate){
+			for(size_t i = 0; i < m_committed_nodes.size(); i++){
+				const uint node_id = m_committed_nodes[i].first;
+				ireplicate->sync_node_immediate(m_scene_ref, node_id);
+				peers[i] = ireplicate->find_peers_that_know_node(
+						m_scene_ref, node_id);
+			}
+		});
+		m_commit_replicate_us += interface::os::time_us() - t_before_rep;
+
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(size_t i = 0; i < m_committed_nodes.size(); i++){
+				const uint node_id = m_committed_nodes[i].first;
+				std::ostringstream os(std::ios::binary);
+				{
+					cereal::PortableBinaryOutputArchive ar(os);
+					ar((int32_t)node_id);
+				}
+				for(auto &peer_id: peers[i]){
+					if(!m_clients_initialized.count(peer_id))
+						continue;
+					inetwork->send(peer_id, "voxelworld:node_volume_updated",
+							os.str());
+				}
+			}
+		});
+
+		for(const auto &pair : m_committed_nodes){
+			m_server->emit_event("voxelworld:node_volume_updated",
+					new NodeVolumeUpdated(m_scene_ref, pair.first, true,
+					pair.second));
+		}
+		m_committed_nodes.clear();
 	}
 
 	size_t num_buffers_loaded()
@@ -3507,12 +3557,25 @@ struct CInstance: public voxelworld::Instance
 		m_light_maintained[LIGHT_SKY] = enabled;
 	}
 
+	// What the last commit() spent where; see commit_chunk_buffer()
+	int64_t m_commit_pack_us = 0;
+	int64_t m_commit_scene_us = 0;
+	int64_t m_commit_registry_us = 0;
+	int64_t m_commit_replicate_us = 0;
+	// The nodes this commit wrote, for announce_committed_nodes()
+	sv_<std::pair<uint, pv::Vector3DInt32>> m_committed_nodes;
+
 	void commit()
 	{
 		const int64_t t0 = interface::os::time_us();
+		m_commit_pack_us = 0;
+		m_commit_scene_us = 0;
+		m_commit_registry_us = 0;
+		m_commit_replicate_us = 0;
 		// Before anything is meshed, so that the light lands in the same
 		// remesh as the voxels that changed it
 		update_skylight();
+		const int64_t t_light = interface::os::time_us();
 
 		if(m_sections_with_loaded_buffers.empty())
 			return;
@@ -3541,6 +3604,8 @@ struct CInstance: public voxelworld::Instance
 				}
 			}
 		}
+		announce_committed_nodes();
+
 		// This runs at the end of every access into voxelworld -- see
 		// voxelworld::access() in api.h -- so whatever it costs is what
 		// every other module waits for before it can get in. A second of it
@@ -3549,8 +3614,12 @@ struct CInstance: public voxelworld::Instance
 		const int64_t took = interface::os::time_us() - t0;
 		if(took >= SLOW_COMMIT_US){
 			log_w(MODULE, "commit(): %zu dirty buffers in %zu sections took "
-					"%.1f s", was_dirty, m_sections_with_loaded_buffers.size(),
-					took / 1e6);
+					"%.1f s -- light %.1f, packing %.1f, the main thread "
+					"%.1f, the voxel registry %.1f, replicate %.1f",
+					was_dirty, m_sections_with_loaded_buffers.size(),
+					took / 1e6, (t_light - t0) / 1e6,
+					m_commit_pack_us / 1e6, m_commit_scene_us / 1e6,
+					m_commit_registry_us / 1e6, m_commit_replicate_us / 1e6);
 		}
 	}
 
