@@ -924,7 +924,16 @@ local function node_stops(x, y, z)
 	return def == nil or def.physically_solid
 end
 
-local player = player_physics.new(node_stops)
+-- And what the player is standing in, which is the same registry flag the
+-- screen tint above reads. It was not passed, so in_liquid was false forever
+-- -- no sinking, no swimming, no way out by jumping -- twenty lines from the
+-- code that paints the water over the screen: the camera knew it was
+-- underwater and the body did not.
+local function node_is_liquid(x, y, z)
+	return voxel_liquid_at(buildat.Vector3(x, y, z)) ~= nil
+end
+
+local player = player_physics.new(node_stops, node_is_liquid)
 -- Nothing moves until the server says where the player is: what it answers
 -- with is the spawn, or where the last run left them, and a client that
 -- started walking from somewhere of its own would tell the server that

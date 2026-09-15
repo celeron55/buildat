@@ -364,5 +364,33 @@ function M.new(is_solid, is_liquid)
 	return self
 end
 
+-- What a liquid does, which is the part of this that had no caller until
+-- 2026-09-15: the launcher built a player with no is_liquid at all, so a
+-- swim was a walk through air. Empty space, so nothing to stand on, and one
+-- of the two worlds is water.
+do
+	local nothing_stops = function() return false end
+	local all_water = function() return true end
+
+	local dry = M.new(nothing_stops)
+	local wet = M.new(nothing_stops, all_water)
+	for _ = 1, 100 do
+		dry:update(0.1, {x = 0, z = 0})
+		wet:update(0.1, {x = 0, z = 0})
+	end
+	assert(dry.in_liquid == false and wet.in_liquid == true,
+			"player: a world of water is not being noticed")
+	-- Ten seconds of falling: in air that is a speed no game survives, in
+	-- water it is the sinking speed and no more
+	assert(dry.vy < -50, "player: nothing slows a fall through air")
+	assert(wet.vy >= -M.DEFAULT_MOVEMENT.liquid_sink - 0.001,
+			"player: sinking is not clamped to liquid_sink")
+	-- And jumping is how you get out of it, from anywhere rather than only
+	-- off the ground
+	wet:update(0.1, {x = 0, z = 0, jump = true})
+	assert(wet.vy > 0 and not wet.on_ground,
+			"player: jumping in water does not lift the player")
+end
+
 return M
 -- vim: set noet ts=4 sw=4:
