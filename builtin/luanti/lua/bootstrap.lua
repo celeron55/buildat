@@ -3501,8 +3501,41 @@ local abm_timers = nil
 local abm_ids = nil
 -- The same for the LBMs; see run_lbms()
 local lbm_ids = nil
--- Which sections have had their LBMs, by the section's own corner
+-- Which cells have had their LBMs, by the cell's own corner; see
+-- lbm_cells()
 local lbm_done = {}
+
+-- An LBM's unit of work. Luanti runs one on a map block, which is 16
+-- voxels; an active box here is a section, which is 64, and running a
+-- section's worth in one go was five seconds of a server that answers
+-- nothing. The boxes are cut into cells of this and one cell is what a
+-- sweep does before it looks at the clock again.
+local LBM_CELL = 32
+
+-- Every active box, in pieces no bigger than LBM_CELL on a side. A box that
+-- is already that small or smaller comes through as itself.
+local function lbm_cells()
+	local out = {}
+	for _, box in ipairs(core.__active_boxes_now()) do
+		local z = box[3]
+		while z <= box[6] do
+			local ez = math.min(z + LBM_CELL - 1, box[6])
+			local y = box[2]
+			while y <= box[5] do
+				local ey = math.min(y + LBM_CELL - 1, box[5])
+				local x = box[1]
+				while x <= box[4] do
+					local ex = math.min(x + LBM_CELL - 1, box[4])
+					out[#out + 1] = {x, y, z, ex, ey, ez}
+					x = ex + 1
+				end
+				y = ey + 1
+			end
+			z = ez + 1
+		end
+	end
+	return out
+end
 
 -- What a node registered after load invalidates: which ids a name list is
 -- about. Called by core.__forget_name_ids() above.
@@ -3865,7 +3898,7 @@ local function run_lbms()
 			lbm_ids[i] = ids_matching(lbms[i].nodenames)
 		end
 	end
-	-- A section at a time, and only the ones that have not had them, with a
+	-- A cell at a time, and only the ones that have not had them, with a
 	-- budget on how long one step may spend. Luanti runs an LBM on a block
 	-- when that block loads; this used to sweep every active section in one
 	-- go, and on a VoxeLibre world that was **46 seconds in one step** --
@@ -3873,23 +3906,22 @@ local function run_lbms()
 	-- of a server that answers nothing, a player's click and a shutdown
 	-- among it. Measured with the step watchdog in builtin/luanti.
 	--
-	-- Sections that appear later get their LBMs too now, which they did not
+	-- Cells that appear later get their LBMs too now, which they did not
 	-- when this latched after one pass. What is not kept is which LBM ran
-	-- where across a restart, the way Luanti's own lbm_meta is: a section
+	-- where across a restart, the way Luanti's own lbm_meta is: a cell
 	-- that unloads and comes back is swept again.
 	local budget_us = 20000
 	local t0 = core.get_us_time()
-	local boxes = core.__active_boxes_now()
 	local swept = 0
-	for _, box in ipairs(boxes) do
-		local key = box[1] .. "," .. box[2] .. "," .. box[3]
+	for _, cell in ipairs(lbm_cells()) do
+		local key = cell[1] .. "," .. cell[2] .. "," .. cell[3]
 		if not lbm_done[key] then
 			if swept > 0 and core.get_us_time() - t0 > budget_us then
 				break
 			end
 			lbm_done[key] = true
 			swept = swept + 1
-			sweep_one_box(box, lbm_ids, function(k, hits)
+			sweep_one_box(cell, lbm_ids, function(k, hits)
 				run_lbm(lbms[k], hits)
 			end)
 		end
