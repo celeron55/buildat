@@ -145,7 +145,10 @@ local function pick_node()
 	local names = {}
 	local any = {}
 	for name, def in pairs(core.registered_nodes) do
+		-- The check's own nodes sort early and are not this game's
+		-- content; what is written and read back has to be the game's
 		if name ~= "air" and name ~= "ignore" and name ~= "unknown" and
+				not name:match("^check_map:") and
 				(def.drawtype == nil or def.drawtype == "normal") then
 			any[#any + 1] = name
 			if inert(def) then
@@ -360,6 +363,18 @@ end
 -- before the vendored builtin defines core.register_node, and the node has
 -- to be in the registry with the game's own before the world is built.
 function core.__register_check_nodes()
+	-- The room the light check builds. It used to be built out of the
+	-- game's own node, which is what the rest of the check writes -- and
+	-- repixture's is a normal node with sunlight_propagates, so the sky
+	-- came through the walls and the room was never dark. What a wall has
+	-- to be is opaque, and that is the check's own business.
+	core.register_node(":check_map:wall", {
+		description = "check_map wall",
+		drawtype = "normal",
+		paramtype = "none",
+		sunlight_propagates = false,
+		groups = {not_in_creative_inventory = 1},
+	})
 	core.register_node(":check_map:lamp", {
 		description = "check_map lamp",
 		drawtype = "normal",
@@ -447,7 +462,7 @@ local function check_light()
 	if not lamp then
 		core.log("verbose", "check_map: no node of this game makes light")
 	end
-	local wall = check_name
+	local wall = "check_map:wall"
 	-- A solid box, hollowed out: somewhere the sky does not reach
 	for x = LIGHT_MIN.x, LIGHT_MAX.x do
 		for y = LIGHT_MIN.y, LIGHT_MAX.y do

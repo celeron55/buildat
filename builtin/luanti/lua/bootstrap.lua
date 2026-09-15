@@ -570,6 +570,15 @@ function SettingsClass:to_table()
 	return out
 end
 
+-- The game's own settings file, which Luanti reads as a layer under the
+-- user's and over the engine's defaults. Exile ships ten of them and reads
+-- one of them while it loads -- tonumber(settings:get("exile_hud_update"))
+-- compared with a number -- so a game whose defaults are missing does not
+-- get as far as its first node.
+for k, v in pairs(parse_conf(read_file(game_path .. "/minetest.conf"))) do
+	DEFAULTS[k] = v
+end
+
 core.settings = Settings(world_path .. "/world.mt")
 core.settings.defaults = DEFAULTS
 
