@@ -4052,6 +4052,7 @@ struct Module: public interface::Module, public luanti::Interface
 			bool empty = table_boolean(L, "empty");
 			bool walkable = table_boolean(L, "walkable");
 			bool climbable = table_boolean(L, "climbable");
+			double move_resistance = table_number(L, "move_resistance", 0);
 			ss_ drawtype = table_string(L, "drawtype");
 			float visual_scale = (float)table_number(L, "visual_scale", 1.0);
 			ss_ tiles[6];
@@ -4309,6 +4310,8 @@ struct Module: public interface::Module, public luanti::Interface
 			// Nothing here draws differently for it; the client's own
 			// physics is what reads it. See "the interaction gaps".
 			vdef.climbable = climbable;
+			vdef.move_resistance = (uint8_t)(move_resistance < 0 ? 0 :
+					(move_resistance > 255 ? 255 : move_resistance));
 			vdef.fully_empty = empty;
 			if(!masked_shape.empty()){
 				vdef.shape_masked = masked_shape;

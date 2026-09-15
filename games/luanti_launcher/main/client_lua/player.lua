@@ -61,6 +61,11 @@ local OFF_HI = {M.RADIUS, M.HEIGHT, M.RADIUS}
 -- What a player with nothing done to them moves by; see self.override
 local EMPTY_OVERRIDE = {}
 
+-- How much of a node's move_resistance counts, which is Luanti's own
+-- constant: resistance 0 still leaves seven tenths of the drag, and each
+-- point adds three tenths more. See ClientEnvironment::step().
+local RESISTANCE_FACTOR = 0.3
+
 -- Acceleration on the wire is in voxels/s² only after another factor of BS;
 -- see where it is used below.
 local BS_ACCEL = 10
@@ -221,7 +226,7 @@ end
 -- through it.
 --
 -- is_liquid(x, y, z) says whether it is something to swim in. Optional.
-function M.new(is_solid, is_liquid, is_climbable)
+function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 	local self = {
 		x = 0, y = 0, z = 0,
 		vx = 0, vy = 0, vz = 0,
@@ -299,6 +304,9 @@ function M.new(is_solid, is_liquid, is_climbable)
 		self.climbing = is_climbable ~= nil and not self.fly and
 				not self.noclip and
 				(is_climbable(nx, ny, nz) or is_climbable(nx, ny + 1, nz))
+		-- How much what they are standing in holds them back
+		local resistance = (resistance_at ~= nil and not self.noclip) and
+				resistance_at(nx, ny, nz) or 0
 
 		-- What a mod has multiplied this player's movement by, which is
 		-- ones unless the server has said otherwise
@@ -365,6 +373,38 @@ function M.new(is_solid, is_liquid, is_climbable)
 			self.vy = m.speed_jump * (ov.jump or 1)
 		else
 			self.vy = self.vy - m.gravity * (ov.gravity or 1) * dtime
+		end
+
+		-- What being in something thick does, which is Luanti's own
+		-- arithmetic out of ClientEnvironment::step(): a drag along the
+		-- direction of travel, scaled by the node's resistance. In a liquid
+		-- it is capped at the smooth fluidity, so water pulls a walk down to
+		-- its own pace instead of stopping it; out of one -- a game can put
+		-- resistance on anything -- it is proportional to the speed, which
+		-- is what makes a cobweb a cobweb.
+		--
+		-- simplified: the two fluidity constants are the defaults and the
+		-- physics_override's own fluidity multipliers are not applied, this
+		-- module not having them. The shape of the sum is Luanti's.
+		if resistance > 0 then
+			local len = math.sqrt(self.vx * self.vx + self.vy * self.vy +
+					self.vz * self.vz)
+			if len > 1e-6 then
+				local dl
+				if self.in_liquid then
+					dl = math.min(len * 10 / m.liquid_fluidity,
+							m.liquid_fluidity_smooth)
+				else
+					dl = len
+				end
+				dl = dl * (resistance * RESISTANCE_FACTOR +
+						(1 - RESISTANCE_FACTOR))
+				local take = math.min(dl * dtime * 10, len)
+				local k = take / len
+				self.vx = self.vx - self.vx * k
+				self.vy = self.vy - self.vy * k
+				self.vz = self.vz - self.vz * k
+			end
 		end
 
 		local p = {self.x, self.y, self.z}
@@ -447,6 +487,23 @@ do
 	assert(dropped.landed_at and dropped.landed_at > 14,
 			"player: a long fall does not report how hard it landed")
 	assert(dropped.on_ground, "player: the fall did not end on the ground")
+
+	-- And what something thick does to a walk: the same push into the same
+	-- empty space, through air, through water's own resistance, and through
+	-- a node seven times as thick -- which is what makes a cobweb a cobweb,
+	-- and out of a liquid Luanti's sum takes the whole speed at that point.
+	local thin = M.new(nothing_stops)
+	local wettish = M.new(nothing_stops, nil, nil, function() return 1 end)
+	local web = M.new(nothing_stops, nil, nil, function() return 7 end)
+	for _ = 1, 40 do
+		thin:update(0.05, {x = 1, z = 0})
+		wettish:update(0.05, {x = 1, z = 0})
+		web:update(0.05, {x = 1, z = 0})
+	end
+	assert(wettish.vx > 0 and wettish.vx < thin.vx * 0.9,
+			"player: a node that holds a body back does not slow it")
+	assert(web.vx < wettish.vx,
+			"player: a thicker node is not thicker")
 
 	-- A ladder holds the player where they are, and jump and sneak move
 	-- them along it -- which is the whole of climbing

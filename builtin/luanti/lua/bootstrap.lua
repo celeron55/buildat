@@ -1539,6 +1539,11 @@ function core.__voxel_defs()
 			-- A ladder, a vine, a rope: what the client's physics holds on
 			-- to instead of falling past it
 			climbable = (def and def.climbable) and true or false,
+			-- How much it holds a body back. Luanti's own rule: a node
+			-- that says nothing takes liquid_viscosity, which is why water
+			-- is thick without any game saying so.
+			move_resistance = (def and (def.move_resistance or
+					def.liquid_viscosity)) or 0,
 			light_source = (def and def.light_source) or 0,
 			tiles = is_liquid and (liquid_tiles(def) or tile_names(def)) or
 					tile_names(def),

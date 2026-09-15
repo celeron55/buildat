@@ -47,7 +47,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 15;
+		uint8_t version = 16;
 		archive(
 				version,
 				v.name,
@@ -105,6 +105,11 @@ namespace interface
 		// physics reads
 		if(version >= 15){
 			archive(v.climbable);
+		}
+		// Version 16 added how much a voxel holds a body back, which the
+		// same physics reads
+		if(version >= 16){
+			archive(v.move_resistance);
 		}
 	}
 

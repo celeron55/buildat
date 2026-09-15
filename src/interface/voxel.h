@@ -255,6 +255,11 @@ namespace interface
 		// is what does anything with it -- nothing here draws differently
 		// for it.
 		bool climbable = false;
+		// How much this voxel holds a body back, 0 for not at all. Luanti's
+		// own move_resistance, which defaults to liquid_viscosity: water is
+		// 1 and lava is 7, and a game can put it on anything. The client's
+		// physics is the only thing that reads it.
+		uint8_t move_resistance = 0;
 		// Which family of connecting voxels this one belongs to, 1...32, or
 		// 0 for one nothing reaches out to; and which families this one
 		// reaches out to, as a bit per family. A fence and its gates are one
@@ -360,6 +365,8 @@ namespace interface
 		float liquid_top = 0.5f;
 		// Copied from the definition; see VoxelDefinition::climbable
 		bool climbable = false;
+		// Copied from the definition; see VoxelDefinition::move_resistance
+		uint8_t move_resistance = 0;
 		uint8_t connect_group = 0;
 		uint32_t connect_mask = 0;
 		bool connect_to_solid = false;

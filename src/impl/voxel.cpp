@@ -376,6 +376,7 @@ struct CVoxelRegistry: public VoxelRegistry
 		cache.shape_group = def.shape_group;
 		cache.is_liquid = def.is_liquid;
 		cache.climbable = def.climbable;
+		cache.move_resistance = def.move_resistance;
 		cache.liquid_top = def.liquid_top;
 		cache.connect_group = def.connect_group;
 		cache.connect_mask = def.connect_mask;

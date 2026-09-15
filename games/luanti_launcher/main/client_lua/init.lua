@@ -954,8 +954,25 @@ local function node_is_climbable(x, y, z)
 	return def ~= nil and def.climbable
 end
 
+-- And how much it holds them back: Luanti's move_resistance, which water
+-- and lava have without a game saying anything and which a game can put on
+-- anything else
+local function node_resistance(x, y, z)
+	local v = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
+	if v == nil then
+		return 0
+	end
+	local reg = voxelworld.get_voxel_registry()
+	local id = reg:id_of(v)
+	if id == 0 then
+		return 0
+	end
+	local def = reg:get_by_id(id)
+	return (def and def.move_resistance) or 0
+end
+
 local player = player_physics.new(node_stops, node_is_liquid,
-		node_is_climbable)
+		node_is_climbable, node_resistance)
 
 -- What a mod has done to how this player moves: set_physics_override() on
 -- the server. It multiplies the constants above rather than replacing them,
