@@ -164,7 +164,13 @@ end
 -- separate change with its own pictures. So this keeps the luminance it had
 -- -- 0.324 by the usual weights -- and only turns the colour neutral.
 local SKY_AMBIENT = magic.Color(0.320, 0.320, 0.352)
-local NIGHT_AMBIENT = magic.Color(0.05, 0.06, 0.10)
+-- What is left when the sun is down. **Set against pictures** (2026-09-16):
+-- at 20:30 the old value put the ground four times brighter than official
+-- Luanti's, where extensions/luanti_client -- which derives its night ambient
+-- from the sky with a floor of 0.015 of the moon's own colour -- lands within
+-- a percent of it. The same hue, at the level the reference shots ask for;
+-- see [TOO_BRIGHT] in doc/plan/rendering_plan.md.
+local NIGHT_AMBIENT = magic.Color(0.012, 0.0144, 0.024)
 local SUN_BRIGHTNESS = 50.0
 -- A fiftieth of the sun, which is extensions/luanti_client's number and is
 -- not a measurement: real moonlight would render as nothing. It is a night
@@ -888,12 +894,16 @@ local function apply_sky_of_hour()
 
 	-- The stars come out as the light goes: Luanti's day_opacity is zero by
 	-- default, which is a sky with none in it until the sun is down
-	local count = game_sky.star_count or 1000
-	-- How many cells of the sky's grid have a star in them; the grid is
-	-- about ten thousand of them over the half that can be seen. A game
-	-- that hides its stars has none.
+	local count = game_sky.star_count or luanti_sky.STARS_DEFAULT
+	-- How many cells of the sky's grid have a star in them. The grid is a
+	-- quarter of a million cells, not the ten thousand this used to divide
+	-- by, so a game's thousand stars was putting **twenty-five times** that
+	-- many in the sky -- which is most of why the module's night sky read
+	-- three times brighter than official Luanti's. A game that hides its
+	-- stars has none.
 	local density = (game_sky.stars_visible ~= false) and
-			math.min(0.5, count / 10000) or 0
+			math.min(0.5, luanti_sky.STAR_DENSITY_DEFAULT * count /
+					luanti_sky.STARS_DEFAULT) or 0
 	-- The count and the night ramp go to different parameters here, which
 	-- is what LuantiSky keeps apart and buildat's sky folded together; see
 	-- set_star_look() in luanti_sky.lua

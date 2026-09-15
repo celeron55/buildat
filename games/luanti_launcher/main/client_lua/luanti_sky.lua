@@ -35,6 +35,15 @@ local SUN_OVEREXPOSURE = 2.5
 -- as MOON_HALF beside SUN_HALF = 0.075.
 M.MOON_HALF = 0.048
 
+-- How many stars a game asks for when it says nothing, and how many of the
+-- star grid's cells hold one at that count. **The grid is LuantiSky.glsl's
+-- own**, two faces of STAR_GRID squared cells, which is about a quarter of a
+-- million -- so a thousand stars is four thousandths of them, and a game
+-- asking for more gets more in proportion. extensions/luanti_client carries
+-- the same two numbers; they belong to the shader both of them drive.
+M.STARS_DEFAULT = 1000
+M.STAR_DENSITY_DEFAULT = 0.004
+
 -- What the sun and the moon go as they cross the horizon, when the game has
 -- not said: Luanti's own default fog_sun_tint #f47d1d and fog_moon_tint
 -- #7f99cc. Not the horizon of this hour, which is a washed-out blue and
