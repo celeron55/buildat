@@ -49,6 +49,14 @@ end
 
 core.mkdir = __luanti_create_directories
 
+-- What the Lua sampling profiler has seen since the last call, under a
+-- name, and then it starts again. Does nothing unless the run was started
+-- with BUILDAT_LUANTI_LUAPROF. A probe calls it at the edges of whatever it
+-- wants measured -- the mods loading, the world generating, the first
+-- minute with a player in it -- because one report over all of them answers
+-- none of them.
+core.__lua_profile = __luanti_lua_profile
+
 --
 -- The environments Luanti has more than one of
 --

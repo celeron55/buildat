@@ -428,8 +428,52 @@ struct LuaProfiler
 };
 static LuaProfiler g_lua_prof;
 
+// A step that has not come back. The module's thread does one thing at a
+// time, so a step that runs for minutes is a server that answers nothing --
+// and the step's own timing line cannot say so, because it prints when the
+// step ends. This says it while it is still going, once, with the Lua stack
+// it is standing on.
+//
+// It rides the same count hook as the profiler and costs a comparison per N
+// instructions. The interval is coarse when nothing is being profiled,
+// because all this needs is to notice within a second or two of a deadline
+// that is tens of seconds long.
+struct StepWatchdog
+{
+	int64_t deadline_us = 0;
+	bool warned = false;
+	int64_t started_us = 0;
+};
+static StepWatchdog g_step_watch;
+
+static void lua_step_watchdog(lua_State *L)
+{
+	if(g_step_watch.deadline_us == 0 || g_step_watch.warned)
+		return;
+	const int64_t now = interface::os::time_us();
+	if(now < g_step_watch.deadline_us)
+		return;
+	g_step_watch.warned = true;
+	log_w(MODULE, "a step has been running for %.0f s and has not come "
+			"back; where its Lua is standing now:",
+			(now - g_step_watch.started_us) / 1e6);
+	lua_Debug d;
+	for(int level = 0; level < 24; level++){
+		if(!lua_getstack(L, level, &d))
+			break;
+		if(!lua_getinfo(L, "Sln", &d))
+			break;
+		log_w(MODULE, "  #%d %s:%d %s%s", level, d.short_src, d.currentline,
+				d.name != nullptr ? d.name : "?",
+				d.name != nullptr ? "()" : "");
+	}
+}
+
 static void lua_prof_hook(lua_State *L, lua_Debug *ar)
 {
+	lua_step_watchdog(L);
+	if(!g_lua_prof.enabled)
+		return;
 	if(!lua_getinfo(L, "Sn", ar))
 		return;
 	ss_ key = ss_(ar->short_src) + ":" + itos(ar->linedefined);
@@ -440,11 +484,16 @@ static void lua_prof_hook(lua_State *L, lua_Debug *ar)
 }
 
 // Every function the samples landed in, most first. Called at shutdown, and
-// cheap enough to call whenever else somebody wants one.
-static void lua_prof_report()
+// cheap enough to call whenever else somebody wants one -- which is what
+// core.__lua_profile() is for: a run's startup, its world generation and
+// its first minute with a player in it are three different questions, and
+// one report over all of them answers none of them.
+static void lua_prof_report(const ss_ &label = "")
 {
 	if(!g_lua_prof.enabled || g_lua_prof.total == 0)
 		return;
+	const ss_ tag = label.empty() ? ss_("Lua profile") :
+			ss_("Lua profile [")+label+"]";
 	sv_<std::pair<ss_, size_t>> sorted(
 			g_lua_prof.samples.begin(), g_lua_prof.samples.end());
 	std::sort(sorted.begin(), sorted.end(),
@@ -452,15 +501,27 @@ static void lua_prof_report()
 					const std::pair<ss_, size_t> &b){
 		return a.second > b.second;
 	});
-	log_i(MODULE, "Lua profile: %zu samples, every %i instructions",
+	log_i(MODULE, "%s: %zu samples, every %i instructions", cs(tag),
 			g_lua_prof.total, g_lua_prof.interval);
 	for(size_t i = 0; i < sorted.size() && i < 40; i++){
 		const double share = 100.0 * sorted[i].second / g_lua_prof.total;
 		if(share < 0.1)
 			break;
-		log_i(MODULE, "Lua profile: %5.1f%% %6zu  %s", share,
+		log_i(MODULE, "%s: %5.1f%% %6zu  %s", cs(tag), share,
 				sorted[i].second, cs(sorted[i].first));
 	}
+}
+
+// core.__lua_profile(label): what has been sampled since the last call,
+// under a name, and then the counters start again. A probe calls it at the
+// edges of whatever it wants measured.
+static int l_lua_profile(lua_State *L)
+{
+	const char *label = lua_tostring(L, 1);
+	lua_prof_report(label ? label : "");
+	g_lua_prof.samples.clear();
+	g_lua_prof.total = 0;
+	return 0;
 }
 
 // Which colour a param2 picks out of a palette of this many colours.
@@ -1395,15 +1456,26 @@ struct Module: public interface::Module, public luanti::Interface
 	}
 
 	// One Luanti step: the clock now, the globalsteps and core.after later
+	// How long a step may run before the watchdog says where it is. Long
+	// enough that a world generating around a player -- which is seconds of
+	// honest work -- says nothing, and short enough that a step that will
+	// never come back is caught while somebody is still watching.
+	static const int64_t STEP_WATCHDOG_US = 30000000;
+
 	void step_environment(float dtime)
 	{
 		char buf[64];
 		snprintf(buf, sizeof buf, "core.__step(%f)", (double)dtime);
+		g_step_watch.started_us = interface::os::time_us();
+		g_step_watch.deadline_us =
+				g_step_watch.started_us + STEP_WATCHDOG_US;
+		g_step_watch.warned = false;
 		try {
 			run_chunk_string(buf, "step");
 		} catch(Exception &e){
 			log_w(MODULE, "step: %s", e.what());
 		}
+		g_step_watch.deadline_us = 0;
 	}
 
 	// The map
@@ -6791,6 +6863,12 @@ struct Module: public interface::Module, public luanti::Interface
 		{
 			// The Lua sampling profiler, if this run asked for one
 			const char *env = getenv("BUILDAT_LUANTI_LUAPROF");
+			// The hook is on either way: without the profiler it is only
+			// the step watchdog, at an interval coarse enough to cost
+			// nothing measurable.
+			if(env == nullptr || env[0] == '\0'){
+				lua_sethook(m_lua, lua_prof_hook, LUA_MASKCOUNT, 1000000);
+			}
 			if(env != nullptr && env[0] != '\0'){
 				const int n = atoi(env);
 				g_lua_prof.interval = n > 0 ? n : 10000;
@@ -6842,6 +6920,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_send_sound", l_send_sound);
 		set_global_cfunction("__luanti_sound_file", l_sound_file);
 		set_global_cfunction("__luanti_add_media", l_add_media);
+		set_global_cfunction("__luanti_lua_profile", l_lua_profile);
 		set_global_cfunction("__luanti_send_particles", l_send_particles);
 		set_global_cfunction("__luanti_send_sky", l_send_sky);
 		set_global_cfunction("__luanti_send_time", l_send_time);
