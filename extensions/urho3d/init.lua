@@ -543,6 +543,10 @@ do
 	-- Text3D is a Drawable rather than a UI element, so it wants a node of
 	-- its own; the scene is thrown away with it
 	local scene = Safe.Scene:new()
+	-- With no Octree a drawable says so, once per frame, into everybody
+	-- else's log: this scene exists for two property writes and is thrown
+	-- away, but it is still a scene
+	scene:CreateComponent("Octree")
 	local node = scene:CreateChild("whitelist_check")
 	local label = node:CreateComponent("Text3D")
 	-- **The font first.** Text::SetFontSize() begins "Initial font must be
