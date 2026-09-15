@@ -953,14 +953,37 @@ function M.new(magic, buildat, log, ctx)
 			elseif name == "label" or name == "textarea" then
 				local x, y = at(e, 1)
 				local text = name == "label" and e.fields[2] or e.fields[5]
+				-- label[X,Y;W,H;label] as well as label[X,Y;label]. The
+				-- sized form is the one style_type[label;halign=...] has a
+				-- box to align inside, and it is what the builtin's death
+				-- screen is written with: without it "You died" came out as
+				-- "3.5,0.8", the box drawn where the words should be. A
+				-- second field that parses as a pair is what says which form
+				-- this is, because a semicolon inside a label is escaped.
+				local w, h
+				if name == "label" and e.fields[3] then
+					w, h = geometry(e, 2)
+					if w then
+						text = e.fields[3]
+					end
+				end
 				if x and text then
 					local st = style_of(name, nil)
-					-- A label's y is the middle of its line
-					label(window, x, y - 8, nil,
+					-- A label's y is the middle of its line; a sized one is
+					-- aligned inside its box instead
+					local ty = w and (y + h / 2 - 8) or (y - 8)
+					local t = label(window, x, ty, nil,
 							formspec.strip_escapes(text), 13,
 							markup_color(text) or
 									(st.textcolor and
 									markup_color("\27(c@"..st.textcolor..")")))
+					if w and st.halign == "center" then
+						t:SetPosition(math.floor(x + (w - t.width) / 2),
+								math.floor(ty))
+					elseif w and st.halign == "right" then
+						t:SetPosition(math.floor(x + w - t.width),
+								math.floor(ty))
+					end
 				end
 			elseif name == "field" or name == "pwdfield" then
 				local x, y = at(e, 1)
