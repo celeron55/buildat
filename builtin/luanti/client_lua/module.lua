@@ -1535,8 +1535,15 @@ buildat.sub_packet("luanti:sky", function(data)
 		return {r = tonumber(r) or 0, g = tonumber(g) or 0,
 				b = tonumber(b) or 0}
 	end
+	-- A skybox's six pictures, in Luanti's order: Y+, Y-, X+, X-, Z-, Z+.
+	-- Empty unless the game said type = "skybox".
+	local textures = {}
+	for i = 1, 6 do
+		textures[i] = e["texture" .. i]
+	end
 	M.sky = {
 		type = e.type or "regular",
+		textures = textures,
 		zenith = rgb(e.zenith),
 		horizon = rgb(e.horizon),
 		-- The same two at the other hours of the day, for whoever draws a
@@ -1564,6 +1571,9 @@ buildat.sub_packet("luanti:sky", function(data)
 		star_color = rgb(e.star_color),
 		star_scale = tonumber(e.star_scale or ""),
 	}
+	log:info("luanti:sky: a " .. M.sky.type .. " sky" ..
+			(M.sky.textures[1] and (", six pictures starting " ..
+			M.sky.textures[1]) or ""))
 	for _, f in ipairs(sky_subs) do
 		f(M.sky)
 	end

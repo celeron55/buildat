@@ -1114,6 +1114,14 @@ local function send_sky(o)
 		end
 	end
 	put("type", sky.type or "regular")
+	-- A skybox's own six pictures, in Luanti's order: Y+, Y-, X+, X-, Z-,
+	-- Z+. Numbered rather than joined, because a texture name is a modifier
+	-- expression and can hold anything a separator would.
+	if (sky.type or "regular") == "skybox" then
+		for i = 1, 6 do
+			put("texture" .. i, (sky.textures or {})[i])
+		end
+	end
 	-- The hours of the sky, which is what makes a night sky dark: Luanti
 	-- keeps a colour for the day, one for dawn and one for the night, and
 	-- whoever draws it blends between them as the sun goes round
