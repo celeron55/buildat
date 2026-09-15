@@ -44,6 +44,25 @@ function M.split_list(s)
 	return out
 end
 
+-- Luanti's older depends.txt, which mod.conf replaced and which plenty of
+-- games still ship: one mod a line, a trailing "?" making it optional.
+-- Returns the two lists.
+function M.parse_depends_txt(text)
+	local depends, optional = {}, {}
+	for line in tostring(text or ""):gmatch("[^\r\n]+") do
+		local name = line:match("^%s*(.-)%s*$")
+		if name ~= "" then
+			local opt = name:match("^(.-)%s*%?$")
+			if opt then
+				optional[#optional + 1] = opt
+			else
+				depends[#depends + 1] = name
+			end
+		end
+	end
+	return depends, optional
+end
+
 -- Every mod directory under path, one modpack deep, as {name, path, depends,
 -- optional_depends}
 function M.scan_mods(path, out)
@@ -53,11 +72,21 @@ function M.scan_mods(path, out)
 			local dir = path .. "/" .. node.name
 			local conf = M.parse_conf(read_file(dir .. "/mod.conf"))
 			if read_file(dir .. "/init.lua") then
+				local depends = M.split_list(conf.depends)
+				local optional = M.split_list(conf.optional_depends)
+				-- depends.txt is read only when mod.conf says nothing about
+				-- dependencies at all, which is Luanti's own rule: a mod
+				-- carrying both is a mod being ported, and its mod.conf is
+				-- the one it means.
+				if conf.depends == nil and conf.optional_depends == nil then
+					depends, optional = M.parse_depends_txt(
+							read_file(dir .. "/depends.txt"))
+				end
 				out[#out + 1] = {
 					name = conf.name or node.name,
 					path = dir,
-					depends = M.split_list(conf.depends),
-					optional_depends = M.split_list(conf.optional_depends),
+					depends = depends,
+					optional_depends = optional,
 				}
 			elseif read_file(dir .. "/modpack.conf") or
 					read_file(dir .. "/modpack.txt") then

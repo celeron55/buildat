@@ -197,6 +197,18 @@ check("mod ordering", function()
 	assert(not pcall(modlist.order_mods, {mod("a", "b"), mod("b", "a")}))
 end)
 
+check("depends.txt parsing", function()
+	local d, o = modlist.parse_depends_txt(
+			"default\nbones\nwatershed?\n\n  highlandpools?  \n")
+	assert(#d == 2 and d[1] == "default" and d[2] == "bones",
+			"one mod a line")
+	assert(#o == 2 and o[1] == "watershed" and o[2] == "highlandpools",
+			"a trailing ? is optional, and the name keeps none of it")
+	-- A game that ships neither file depends on nothing
+	local e1, e2 = modlist.parse_depends_txt(nil)
+	assert(#e1 == 0 and #e2 == 0)
+end)
+
 check("conf parsing", function()
 	local t = modlist.parse_conf(
 			"# a comment\nname = foo\ndepends = a, b ,c\n\nempty =\n")

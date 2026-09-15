@@ -968,7 +968,11 @@ end
 -- they nest. The two orders are Luanti's own and are not the same one --
 -- 2D is out[y][x] with y major, 3D is out[x][y][z] with z major -- which is
 -- the whole reason they are two functions.
-do
+--
+-- Both are luanti.cpp's, so this runs only where they are: lua/test.lua
+-- loads this file with nothing under it, and a check of a function that is
+-- not there would take the whole standalone harness down instead.
+if __luanti_nest_2d then
 	local flat = {}
 	for i = 1, 2 * 3 * 4 do
 		flat[i] = i

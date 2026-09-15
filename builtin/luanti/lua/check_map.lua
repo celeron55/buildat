@@ -615,12 +615,18 @@ function core.__check_map_read()
 		-- this and are fatal. So a placement the game refused is said once
 		-- and the rest of the check goes on -- with set_node putting the
 		-- node there, so that what follows has something to dig.
-		local placed = core.place_node(p, {name = check_name}) and
-				core.get_node(p).name == check_name
+		--
+		-- And a game can throw rather than refuse, which is the same thing
+		-- said less politely: nothing is digging here, so a mod that takes
+		-- the digger for granted -- voxelgarden's physics indexes it on the
+		-- first line -- errors where a player would have satisfied it.
+		local ok, placed = pcall(core.place_node, p, {name = check_name})
+		placed = ok and placed and core.get_node(p).name == check_name
 		if not placed then
 			core.log("warning", "check_map: this game does not let " ..
 					check_name .. " be placed with core.place_node() -- it " ..
-					"left " .. core.get_node(p).name ..
+					(ok and ("left " .. core.get_node(p).name) or
+					("threw " .. tostring(placed))) ..
 					". That is a game's own rule and not a map fault; the " ..
 					"rest of the check carries on with set_node().")
 			core.set_node(p, {name = check_name})
@@ -630,11 +636,13 @@ function core.__check_map_read()
 					" down either; it left " .. core.get_node(p).name)
 		end
 
-		local dug = core.dig_node(p) and core.get_node(p).name == "air"
+		local ok_dig, dug = pcall(core.dig_node, p)
+		dug = ok_dig and dug and core.get_node(p).name == "air"
 		if not dug then
 			core.log("warning", "check_map: this game does not let " ..
-					check_name .. " be dug with core.dig_node() -- it left " ..
-					core.get_node(p).name ..
+					check_name .. " be dug with core.dig_node() -- it " ..
+					(ok_dig and ("left " .. core.get_node(p).name) or
+					("threw " .. tostring(dug))) ..
 					". The same goes: a game's own rule, not a map fault.")
 			core.set_node(p, {name = "air"})
 		end
