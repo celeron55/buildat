@@ -3887,10 +3887,28 @@ struct Module: public interface::Module, public luanti::Interface
 			// instead of them
 			bool shape_over_cube = false;
 			if(drawtype == "mesh" && !mesh.empty()){
-				// The model's own quads, in the node's own cube. A format
-				// nothing here reads leaves the node the cube it had.
+				// The model's own quads, in the node's own cube -- and the
+				// parts of it that reach outside, which is how a model two
+				// nodes tall is one node with an airlike one over it. A
+				// format nothing here reads leaves the node the cube it had.
 				shape = mesh_quads(mesh,
 						visual_scale > 0.0f ? visual_scale : 1.0f);
+				// A mesh node's tiles are two-sided unless one says
+				// otherwise: Luanti's read_tiledef() sets default_culling
+				// false for NDT_MESH the way it does for plantlike. Models
+				// are authored for that -- VoxeLibre's sunflower gives the
+				// front and the back of its flower head as two quads with
+				// the same winding, so culling loses both of them and the
+				// stem is left standing on its own.
+				//
+				// The extension has drawn them this way from the start --
+				// see shapes.lua, NDT_MESH -- which is why its picture of
+				// the same world has flowers on its sunflowers.
+				//
+				// simplified: a tile that sets backface_culling itself is
+				// not heard, here or anywhere else; what that would take is
+				// a flag per quad rather than per shape.
+				double_sided = true;
 			} else if(drawtype == "nodebox" && boxes.size() >= 6){
 				for(size_t b = 0; b + 5 < boxes.size(); b += 6){
 					add_box_quads(shape, boxes[b], boxes[b + 1], boxes[b + 2],
