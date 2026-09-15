@@ -2453,8 +2453,26 @@ function core.get_player_by_name(name)
 end
 
 -- What the client on the other end is. Nothing here speaks Luanti's
--- protocol, so the version is zero and a mod that asks decides what to do
--- about that -- devtest's own media test reads it and skips itself.
+-- protocol, so there is no true number to give -- but zero is not a
+-- neutral answer, it is the answer "older than anything", and a game that
+-- asks acts on it: **nodecore kicks every player who joins**, because
+-- `pinfo.protocol_version < 39` is how it keeps clients that cannot draw
+-- its world out. A game nobody can play is a worse wrong answer than a
+-- number.
+--
+-- So what is reported is what the module's client half can actually do,
+-- expressed in the only units a game asks in: Luanti 5.4's protocol 39 and
+-- formspec version 4. Those are a claim about features -- meshes, the HUD
+-- elements, particles, the formspec elements that version had -- and the
+-- claim is why the number is not higher.
+--
+-- simplified: it is one number for every client, and the client half's own
+-- capabilities are not asked. The upgrade path is for the client to say
+-- what it supports when it joins, which is also what would let this rise
+-- as the client half grows.
+local PROTOCOL_VERSION = 39
+local FORMSPEC_VERSION = 4
+
 function core.get_player_information(name)
 	if players[name] == nil then
 		return nil
@@ -2463,8 +2481,8 @@ function core.get_player_information(name)
 		address = "",
 		ip_version = 4,
 		connection_uptime = 0,
-		protocol_version = 0,
-		formspec_version = 0,
+		protocol_version = PROTOCOL_VERSION,
+		formspec_version = FORMSPEC_VERSION,
 		lang_code = "",
 		version_string = "buildat",
 		min_rtt = 0, max_rtt = 0, avg_rtt = 0,
