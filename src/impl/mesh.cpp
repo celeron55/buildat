@@ -1354,8 +1354,35 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 				// above it -- a rooted plant -- in which case its own voxel
 				// is solid ground and carries no light worth having; see
 				// VoxelDefinition::shape_lit_from_above.
-				const VoxelSample lv = def->shape_lit_from_above ?
+				//
+				// And unless the shape *blocks* light, which a slab, a stair
+				// and a snow layer do: light does not enter a voxel it
+				// cannot pass through, so such a voxel's own light is zero
+				// and the shape would be drawn black. A cube in the same
+				// place is lit face by face from the voxel each face points
+				// into; the nearest thing a shape has to that is the
+				// brightest of the six around it, which is what a face of it
+				// would have found. Measured in minetest_game: a snow slab
+				// over lit ground under an open sky, own light 0 against the
+				// 15 of the air on top of it.
+				VoxelSample lv = def->shape_lit_from_above ?
 						volume.sample_at(x, y + 1, z) : v;
+				if(!def->shape_lit_from_above && !def->transmits_light){
+					static const int NB[6][3] = {
+						{0, 1, 0}, {0, -1, 0}, {1, 0, 0},
+						{-1, 0, 0}, {0, 0, 1}, {0, 0, -1},
+					};
+					float best = fmt.sky_f(lv) + fmt.lamp_f(lv);
+					for(size_t k = 0; k < 6; k++){
+						const VoxelSample nv = volume.sample_at(
+								x + NB[k][0], y + NB[k][1], z + NB[k][2]);
+						const float nb = fmt.sky_f(nv) + fmt.lamp_f(nv);
+						if(nb > best){
+							best = nb;
+							lv = nv;
+						}
+					}
+				}
 				float sky_f = fmt.sky_f(lv);
 				float lamp_f = fmt.lamp_f(lv);
 				// Which directions this voxel connects in, once per voxel
