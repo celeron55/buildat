@@ -88,7 +88,10 @@ do
 			"with the data that was in it")
 end
 
-local modlist = dofile(__luanti_module_path .. "/lua/modlist.lua")
+-- Already loaded by bootstrap.lua, which needs its conf parser before this
+-- file runs; loading it again would be a second copy of its state
+local modlist = core.__modlist or
+		dofile(__luanti_module_path .. "/lua/modlist.lua")
 modlist.set_read_file(read_file)
 
 do

@@ -228,6 +228,30 @@ check("depends.txt parsing", function()
 	assert(#e1 == 0 and #e2 == 0)
 end)
 
+check("multi-line conf values", function()
+	-- What scifi_nodes writes, and what a parser that reads only the first
+	-- line sees instead: no dependencies at all
+	local t = modlist.parse_conf(
+			'name = scifi_nodes\n' ..
+			'optional_depends = """\n' ..
+			'default,\n' ..
+			'xpanes,\n' ..
+			'dye\n' ..
+			'"""\n' ..
+			'description = after the value\n')
+	assert(t.name == "scifi_nodes", "a plain value beside a long one")
+	assert(t.description == "after the value",
+			"and the file carries on after the marker")
+	local list = modlist.split_list(t.optional_depends)
+	assert(#list == 3 and list[1] == "default" and list[2] == "xpanes" and
+			list[3] == "dye",
+			"the whole list is the value: " .. tostring(t.optional_depends))
+	-- An indented marker is not the marker, which is Luanti's own rule
+	local u = modlist.parse_conf('k = """\n  """\na\n"""\nafter = 1\n')
+	assert(u.k == '  """\na', "only a bare marker ends the value")
+	assert(u.after == "1")
+end)
+
 check("conf parsing", function()
 	local t = modlist.parse_conf(
 			"# a comment\nname = foo\ndepends = a, b ,c\n\nempty =\n")

@@ -506,19 +506,12 @@ for k, v in pairs(OWN_DEFAULTS) do
 	DEFAULTS[k] = v
 end
 
-local function parse_conf(text)
-	local out = {}
-	if not text then
-		return out
-	end
-	for line in text:gmatch("[^\r\n]+") do
-		local key, value = line:match("^%s*([^#=][^=]-)%s*=%s*(.-)%s*$")
-		if key then
-			out[key] = value
-		end
-	end
-	return out
-end
+-- The conf parser is lua/modlist.lua's, loaded here rather than copied:
+-- there were two of these and only one of them learned Luanti's multi-line
+-- values. modloader.lua takes the same table off core rather than loading it
+-- a second time.
+core.__modlist = dofile(module_path .. "/lua/modlist.lua")
+local parse_conf = core.__modlist.parse_conf
 
 local SettingsClass = {}
 SettingsClass.__index = SettingsClass

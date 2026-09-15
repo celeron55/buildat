@@ -18,15 +18,47 @@ function M.set_read_file(f)
 	read_file = f
 end
 
+-- A conf file, the way Luanti's Settings reads one: `key = value` a line,
+-- `#` a comment, and **`key = """` opening a value that runs until a line
+-- that is exactly `"""`**, joined with newlines and with the last one
+-- dropped. See Settings::getMultiline() in Luanti's src/settings.cpp.
+--
+-- The multi-line form is not exotic: `scifi_nodes` in nonsensical_skyblock
+-- writes its whole optional_depends list that way, and a parser that reads
+-- only the first line sees no dependencies at all and loads it before the
+-- mods it names.
 function M.parse_conf(text)
 	local out = {}
 	if not text then
 		return out
 	end
-	for line in text:gmatch("[^\r\n]+") do
-		local key, value = line:match("^%s*([^#=][^=]-)%s*=%s*(.-)%s*$")
+	-- Kept as a list so a multi-line value can take the lines after its own.
+	-- gmatch over "[^\r\n]+" would swallow the empty lines a value may
+	-- contain, so the split keeps them.
+	local lines = {}
+	for line in (text .. "\n"):gmatch("(.-)\r?\n") do
+		lines[#lines + 1] = line
+	end
+	local i = 1
+	while i <= #lines do
+		local key, value = lines[i]:match("^%s*([^#=][^=]-)%s*=%s*(.-)%s*$")
+		i = i + 1
 		if key then
-			out[key] = value
+			if value == '"""' then
+				local got = {}
+				-- Luanti compares the whole line, untrimmed, so an indented
+				-- marker does not end the value
+				while i <= #lines and lines[i] ~= '"""' do
+					got[#got + 1] = lines[i]
+					i = i + 1
+				end
+				-- A value the file ended in the middle of is what it has so
+				-- far, which is what Luanti keeps too after saying so
+				i = i + 1
+				out[key] = table.concat(got, "\n")
+			else
+				out[key] = value
+			end
 		end
 	end
 	return out
