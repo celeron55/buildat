@@ -363,7 +363,7 @@ for _, name in ipairs({
 	"set_texture_mod", "set_sprite", "set_animation",
 	"set_animation_frame_speed",
 	"set_nametag_attributes", "set_observers",
-	"set_local_animation", "set_eye_offset",
+	"set_local_animation",
 }) do
 	ObjectRef[name] = function() end
 end
@@ -1036,7 +1036,7 @@ end
 -- sets one
 for _, name in ipairs({
 	"set_lighting",
-	"set_minimap_modes", "send_mapblock", "set_fov", "set_nametag_color",
+	"set_minimap_modes", "send_mapblock", "set_nametag_color",
 }) do
 	PlayerRef[name] = function() end
 end
@@ -1473,9 +1473,75 @@ function PlayerRef:get_day_night_ratio()
 	local o = state_of(self)
 	return o and o.day_night_ratio or nil
 end
-function PlayerRef:get_fov() return 0, false, 0 end
+-- How wide the view is and where the eyes are, which are the client's to
+-- draw and the game's to decide: a scope narrows the field of view, a
+-- vehicle moves the eyes. Both go over as luanti:camera, the whole of it
+-- each time, the way the physics override does.
+--
+-- simplified: the transition time is carried and not used -- the client
+-- changes the field of view at once. Luanti eases it over that many
+-- seconds; the upgrade path is the client easing it, since the number is
+-- already there.
+local function send_camera(o)
+	if not (o and o.player_name and __luanti_send_camera) then
+		return
+	end
+	local eye = o.eye_offset or {x = 0, y = 0, z = 0}
+	__luanti_send_camera(o.player_name, {
+		tostring(tonumber(o.fov) or 0),
+		o.fov_is_multiplier and "1" or "0",
+		tostring(tonumber(o.fov_transition) or 0),
+		tostring(tonumber(eye.x) or 0),
+		tostring(tonumber(eye.y) or 0),
+		tostring(tonumber(eye.z) or 0),
+	})
+end
+
+-- fov 0 is "the client's own"; is_multiplier makes it a factor of that
+-- rather than degrees, which is how a game writes a zoom that does not have
+-- to know what the player set.
+function PlayerRef:set_fov(fov, is_multiplier, transition_time)
+	local o = state_of(self)
+	if not o then
+		return
+	end
+	o.fov = tonumber(fov) or 0
+	o.fov_is_multiplier = is_multiplier and true or false
+	o.fov_transition = tonumber(transition_time) or 0
+	send_camera(o)
+end
+
+function PlayerRef:get_fov()
+	local o = state_of(self)
+	if not o then
+		return 0, false, 0
+	end
+	return o.fov or 0, o.fov_is_multiplier or false, o.fov_transition or 0
+end
+
+-- simplified: the first-person offset is the one that is used, because the
+-- launcher draws a first-person view and nothing else. The other two are
+-- kept so that a mod reads back what it set.
+function PlayerRef:set_eye_offset(firstperson, thirdperson, thirdperson_front)
+	local o = state_of(self)
+	if not o then
+		return
+	end
+	o.eye_offset = vec(firstperson or {x = 0, y = 0, z = 0})
+	o.eye_offset_third = vec(thirdperson or {x = 0, y = 0, z = 0})
+	o.eye_offset_third_front = vec(thirdperson_front or
+			{x = 0, y = 0, z = 0})
+	send_camera(o)
+end
+
 function PlayerRef:get_eye_offset()
-	return {x = 0, y = 0, z = 0}, {x = 0, y = 0, z = 0}
+	local o = state_of(self)
+	if not o then
+		return {x = 0, y = 0, z = 0}, {x = 0, y = 0, z = 0}
+	end
+	return out_vec(o.eye_offset or {x = 0, y = 0, z = 0}),
+			out_vec(o.eye_offset_third or {x = 0, y = 0, z = 0}),
+			out_vec(o.eye_offset_third_front or {x = 0, y = 0, z = 0})
 end
 
 --
@@ -2411,6 +2477,7 @@ function core.__add_player(name)
 	-- And whatever a mod had already done to how they move, which for a
 	-- player who was here before is still on them
 	send_physics(o)
+	send_camera(o)
 	send_day_night(o)
 	send_sky(o)
 	-- And what time it is. The module sends this to everyone every few

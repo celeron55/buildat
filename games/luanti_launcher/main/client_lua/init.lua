@@ -958,6 +958,29 @@ local player = player_physics.new(node_stops, node_is_liquid,
 luanti.sub_physics(function(p)
 	player.override = p
 end)
+
+-- And what it has done to the view: set_fov() and set_eye_offset(). The
+-- field of view is degrees, or a multiplier of this client's own when the
+-- game says so, and 0 hands it back; the eye offset is in tenths of a node,
+-- which is what BS is on Luanti's wire.
+--
+-- simplified: the transition time arrives and is not used -- the change is
+-- at once. Luanti eases it over that many seconds, and the number is here
+-- when somebody wants that.
+local eye_offset = {x = 0, y = 0, z = 0}
+
+luanti.sub_camera(function(c)
+	if camera then
+		if c.fov and c.fov > 0 then
+			camera.fov = c.is_multiplier and (CAMERA_FOV * c.fov) or c.fov
+		else
+			camera.fov = CAMERA_FOV
+		end
+	end
+	-- Luanti's own unit here is BS, which is ten units to the node
+	eye_offset = {x = (c.eye.x or 0) / 10, y = (c.eye.y or 0) / 10,
+			z = (c.eye.z or 0) / 10}
+end)
 -- Nothing moves until the server says where the player is: what it answers
 -- with is the spawn, or where the last run left them, and a client that
 -- started walking from somewhere of its own would tell the server that
@@ -1098,7 +1121,8 @@ local function status_lines()
 			" | view range: %d\n" ..
 			"pos: (%.1f, %.1f, %.1f) | yaw: %.1f\194\176 %s" ..
 			" | pitch: %.1f\194\176 | seed: %s\n" ..
-			"%s | speed %.1f, %.1f, %.1f | chunk %d, %d, %d%s\n" ..
+			"%s | fov %.0f | speed %.1f, %.1f, %.1f" ..
+			" | chunk %d, %d, %d%s\n" ..
 			"%02d:%02d | sun %.2f up, %.0f%% day\n" ..
 			"%s",
 			info.game ~= "" and info.game or "?",
@@ -1110,7 +1134,12 @@ local function status_lines()
 			-- own is positive looking down as Urho's euler angle is
 			-pitch,
 			info.seed ~= "" and info.seed or "?",
-			mode, player.vx, player.vy, player.vz,
+			-- What the camera is actually at, not what this game asked
+			-- for: a game's set_fov() changes it, and an FOV that does
+			-- not match the shot it is compared against is one of the
+			-- three most expensive findings this programme has had
+			mode, (camera and camera.fov) or CAMERA_FOV,
+			player.vx, player.vy, player.vz,
 			chunk_p.x, chunk_p.y, chunk_p.z,
 			voxelworld.chunk_has_physics(chunk_p) and "" or " (no physics)",
 			math.floor((time_of_day or 0) * 24),
@@ -2529,8 +2558,9 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 
 	player:update(dt, wish)
 
-	camera_node.position = magic.Vector3(player.x,
-			player.y + player_physics.EYE_HEIGHT, player.z)
+	camera_node.position = magic.Vector3(player.x + eye_offset.x,
+			player.y + player_physics.EYE_HEIGHT + eye_offset.y,
+			player.z + eye_offset.z)
 	camera_node.rotation = magic.Quaternion(pitch, yaw, 0)
 	place_waypoints()
 	turn_compasses()

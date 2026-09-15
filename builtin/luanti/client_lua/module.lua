@@ -1477,6 +1477,40 @@ buildat.sub_packet("luanti:physics", function(data)
 	end
 end)
 
+-- How wide the view is and where the eyes are: set_fov() and
+-- set_eye_offset() on the server. fov is in degrees, or a multiplier of the
+-- client's own when is_multiplier is set, and 0 means "the client decides".
+local camera = {fov = 0, is_multiplier = false, transition = 0,
+		eye = {x = 0, y = 0, z = 0}}
+local camera_subs = {}
+
+function M.camera()
+	return camera
+end
+
+function M.sub_camera(f)
+	camera_subs[#camera_subs + 1] = f
+	f(camera)
+end
+
+buildat.sub_packet("luanti:camera", function(data)
+	local v = cereal.binary_input(data, {"array", "string"})
+	camera = {
+		fov = tonumber(v[1]) or 0,
+		is_multiplier = (tonumber(v[2]) or 0) ~= 0,
+		transition = tonumber(v[3]) or 0,
+		eye = {x = tonumber(v[4]) or 0, y = tonumber(v[5]) or 0,
+				z = tonumber(v[6]) or 0},
+	}
+	log:info("luanti:camera: fov " .. camera.fov ..
+			(camera.is_multiplier and " (multiplier)" or "") ..
+			", eyes " .. camera.eye.x .. "," .. camera.eye.y .. "," ..
+			camera.eye.z)
+	for _, f in ipairs(camera_subs) do
+		f(camera)
+	end
+end)
+
 function M.sub_sky(f)
 	sky_subs[#sky_subs + 1] = f
 	if M.sky then
