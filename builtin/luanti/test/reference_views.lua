@@ -1,27 +1,36 @@
--- The second reference world's four viewpoints, for comparing this module
--- against official Luanti.
+-- The reference shot set's viewpoints, hours and weather, for comparing this
+-- module against official Luanti and against extensions/luanti_client.
 --
---   rm -rf ../user/games/luanti_launcher/saves/refviews
+-- **The same file serves all three clients**, because both buildat clients
+-- run the game's code through this module and official Luanti runs it as a
+-- worldmod. See [OFFICIAL_SHOTS] in doc/plan/rendering_plan.md, which
+-- settles the set: mineclone2 only, two worlds, five viewpoints, twenty
+-- pictures a client.
+--
+-- As this module's fixture:
+--
 --   BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE=refviews \
 --   BUILDAT_LUANTI_IMPORT=~/projects/luanti/worlds/mc2_2026-09-15_0033 \
 --   BUILDAT_LUANTI_LUA=../builtin/luanti/test/reference_views.lua \
 --   bin/buildat_server -m ../games/luanti_launcher -D ../user
 --
--- Then a client with F5 on, shooting every twenty-five seconds or so: each
--- viewpoint is held for thirty, so a shot lands inside one of them whatever
--- the client's own clock says, and **the status row in the picture says
--- which one it is** -- and that the world was imported rather than
--- generated, the seed being 2845188330406634615.
+-- As official Luanti's, copied to <world>/worldmods/refviews/init.lua.
 --
--- The four are in doc/plan/luanti_module_plan.md, "The second reference
--- world"; see [REFERENCE_WORLD] and [TOO_BRIGHT] in
--- doc/plan/master_plan.md for what they are compared for.
+-- **Which viewpoints run is decided by the world's seed**, so the file needs
+-- no argument: the second reference world gets 1-4 and the snow fixture gets
+-- 5. A world that is neither gets all of them, which is what a hand run
+-- wants.
+--
+-- **Each state is announced in the log** as `REFSHOT <n> <name>`, and the
+-- name is the file stem the shot is saved under. A script that drives the
+-- shots waits for that line rather than counting seconds, so the two cannot
+-- drift apart.
+--
+-- **The aim is re-asserted every second.** The official client's input is
+-- not disabled and the machine is in use, so a stray mouse movement turns
+-- the camera; the aim is server-side and authoritative, so it comes back.
+-- See [OFFICIAL_SHOTS], "It runs on the user's own desktop".
 
--- The second reference world's four viewpoints, held thirty seconds each and
--- cycled, so that a client shooting on its own clock lands inside one of
--- them. Each picture says which it is: the status row carries the position
--- and the yaw, which is what the row is for.
---
 -- The numbers are the status row's own, out of
 -- doc/plan/luanti_module_plan.md. Luanti's look_h is measured the way
 -- get_look_horizontal() means it, so it is the row's yaw in radians; its
@@ -33,20 +42,108 @@ local VIEWS = {
 	{pos = {x = 321.6, y = 17.5, z = -314.3}, yaw = 330.9, pitch = -1.9},
 	{pos = {x = 375.1, y = 1.5, z = -351.6}, yaw = 91.1, pitch = -1.4},
 	{pos = {x = 432.3, y = 54.5, z = -213.9}, yaw = 223.9, pitch = -5.8},
+	-- The snow fixture, [SNOW_FIXTURE] in doc/plan/luanti_module_plan.md.
+	-- Its own world, so it is only in the set when that seed is loaded.
+	{pos = {x = 75.6, y = 66.5, z = -307.3}, yaw = 86.8, pitch = -5.3},
 }
 
+-- Which world is which, and which viewpoints belong to it
+local SEED_REFERENCE = "2845188330406634615"
+local SEED_SNOW = "10565787282150443432"
+
+-- Luanti's day as one whole unit. The fractions are the plan's own.
+local HOURS = {
+	["0545"] = 0.2396, ["1000"] = 0.4167, ["1300"] = 0.5417,
+	["1500"] = 0.6250, ["1830"] = 0.7708, ["2030"] = 0.8542,
+	["0300"] = 0.1250,
+}
+
+-- How long each state is held, and how often the aim is put back. Short,
+-- because the run shares a desktop: twenty states at four seconds is under
+-- two minutes of exposure to somebody else's mouse.
+local HOLD = 4
+local REAIM = 1
+
+local function seed_now()
+	local s = core.get_mapgen_setting and core.get_mapgen_setting("seed")
+	return tostring(s or "")
+end
+
+-- The states, in order: every viewpoint this world has, at each of its
+-- hours, clear; then every one of them again at 15:00 in rain.
+local function states_of(seed)
+	local views, hours
+	if seed == SEED_SNOW then
+		views, hours = {5}, {"1000", "1830", "0300"}
+	elseif seed == SEED_REFERENCE then
+		views, hours = {1, 2, 3, 4}, {"0545", "1300", "2030"}
+	else
+		views, hours = {1, 2, 3, 4, 5}, {"1300"}
+	end
+	local out = {}
+	for _, v in ipairs(views) do
+		for _, h in ipairs(hours) do
+			out[#out + 1] = {view = v, hour = h, weather = "none"}
+		end
+	end
+	for _, v in ipairs(views) do
+		out[#out + 1] = {view = v, hour = "1500", weather = "rain"}
+	end
+	return out
+end
+
+-- mineclone2 changes the weather on a timer, which would otherwise be a
+-- variable nobody recorded. Re-asserted at every state rather than once at
+-- load, because the cycle's timer is not the only thing that can change it.
+-- Not "thunder": it darkens the sky and is a second variable.
+local function hold_weather(kind)
+	core.settings:set("mcl_doWeatherCycle", "false")
+	-- rawget because this file also runs in games that are not VoxeLibre,
+	-- and the vendored builtin's strict.lua warns about reading a global
+	-- that nobody declared
+	local w = rawget(_G, "mcl_weather")
+	if w and w.change_weather then
+		w.change_weather(kind, 1000000)
+	end
+end
+
 core.register_on_joinplayer(function(player)
-	local function show(i)
+	local seed = seed_now()
+	local states = states_of(seed)
+	core.settings:set("time_speed", "0")
+	core.log("action", "REFSHOT world seed " .. seed .. ", " ..
+			#states .. " states")
+
+	-- The two call each other, so the name exists before either body does;
+	-- a plain `function show()` here would be a global, which the vendored
+	-- builtin's strict.lua warns about and which would leak into the game
+	local show
+	local function aim(i, left)
 		if not (player and player:is_player()) then
 			return
 		end
-		local v = VIEWS[(i - 1) % #VIEWS + 1]
+		local st = states[(i - 1) % #states + 1]
+		local v = VIEWS[st.view]
 		player:set_look_horizontal(math.rad(v.yaw))
 		player:set_look_vertical(math.rad(-v.pitch))
 		player:set_pos(v.pos)
-		core.log("action", "PROBE viewpoint " .. ((i - 1) % #VIEWS + 1) ..
-				" at " .. v.pos.x .. "," .. v.pos.y .. "," .. v.pos.z)
-		core.after(30, function() show(i + 1) end)
+		core.set_timeofday(HOURS[st.hour])
+		hold_weather(st.weather)
+		if left > 0 then
+			core.after(REAIM, function() aim(i, left - REAIM) end)
+		else
+			core.after(REAIM, function() show(i + 1) end)
+		end
 	end
-	core.after(10, function() show(1) end)
+
+	function show(i)
+		local st = states[(i - 1) % #states + 1]
+		local name = seed .. "_vp" .. st.view .. "_" .. st.hour .. "_" ..
+				st.weather
+		core.log("action", "REFSHOT " .. ((i - 1) % #states + 1) .. " " ..
+				name)
+		aim(i, HOLD - REAIM)
+	end
+
+	core.after(8, function() show(1) end)
 end)
