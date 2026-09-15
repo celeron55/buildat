@@ -2756,6 +2756,12 @@ local ids_for_names = {}
 -- Called when an item is registered; see core.register_item_raw()
 function core.__forget_name_ids()
 	ids_for_names = {}
+	-- The id sets an ABM and an LBM sweep with are the same answer to the
+	-- same question and go stale in the same breath. They live further down
+	-- with the sweep, so this asks rather than reaches.
+	if core.__forget_sweep_ids then
+		core.__forget_sweep_ids()
+	end
 end
 
 local function ids_and_names(nodenames)
@@ -3493,6 +3499,21 @@ end
 
 local abm_timers = nil
 local abm_ids = nil
+-- The same for the LBMs; see run_lbms()
+local lbm_ids = nil
+-- Which sections have had their LBMs, by the section's own corner
+local lbm_done = {}
+
+-- What a node registered after load invalidates: which ids a name list is
+-- about. Called by core.__forget_name_ids() above.
+function core.__forget_sweep_ids()
+	abm_timers = nil
+	abm_ids = nil
+	lbm_ids = nil
+	-- A node registered late can match an LBM that a section was already
+	-- swept for, so those sections are owed another pass
+	lbm_done = {}
+end
 
 -- The active range, asked for once a step: the loaded sections within a
 -- section of a player. Everything that runs where the map is -- an ABM, a
@@ -3644,24 +3665,28 @@ end
 -- hits) gets the flat x,y,z list of what the section held of set k. One read
 -- per section however many rules there are, because the read is what a sweep
 -- costs and the module matches 32 sets of ids at a time.
+local function sweep_one_box(box, id_sets, on_hits)
+	for first = 1, #id_sets, 32 do
+		local last = math.min(first + 31, #id_sets)
+		local batch = {}
+		for k = first, last do
+			batch[#batch + 1] = id_sets[k]
+		end
+		local found = __find_ids(box[1], box[2], box[3],
+				box[4], box[5], box[6], batch)
+		for k = first, last do
+			on_hits(k, found[k - first + 1])
+		end
+	end
+end
+
 local function sweep_sections(id_sets, on_hits)
 	if #id_sets == 0 then
 		return 0
 	end
 	local boxes = core.__active_boxes_now()
 	for _, box in ipairs(boxes) do
-		for first = 1, #id_sets, 32 do
-			local last = math.min(first + 31, #id_sets)
-			local batch = {}
-			for k = first, last do
-				batch[#batch + 1] = id_sets[k]
-			end
-			local found = __find_ids(box[1], box[2], box[3],
-					box[4], box[5], box[6], batch)
-			for k = first, last do
-				on_hits(k, found[k - first + 1])
-			end
-		end
+		sweep_one_box(box, id_sets, on_hits)
 	end
 	return #boxes
 end
@@ -3782,13 +3807,12 @@ end
 -- the nodes of a kind when the part of the map they are in is loaded, which
 -- is how a game fixes up what it saved before it changed its mind about it.
 --
--- simplified: the whole world is loaded before anything steps and nothing
--- unloads it, so "on load" is once, at the first step, over every section --
--- and run_at_every_load and Luanti's record of which blocks are older than
--- which rule have nothing to be different about yet. Both belong with M6's
--- map, which is where a section stops being loaded for the whole run.
+-- simplified: a section is swept the first time it is seen active and not
+-- again, so run_at_every_load and Luanti's own record of which blocks are
+-- older than which rule still have nothing to be different about. What is
+-- kept is only which sections have been swept this run; a section that
+-- unloads and comes back is swept again.
 
-local lbms_run = false
 
 local function run_lbm(lbm, hits)
 	local positions = {}
@@ -3828,13 +3852,49 @@ local function run_lbms()
 	if lbms == nil or #lbms == 0 then
 		return true
 	end
-	local sets = {}
-	for i = 1, #lbms do
-		sets[i] = ids_matching(lbms[i].nodenames)
+	-- Worked out once and kept, the way run_abms() keeps its own: turning a
+	-- name list into ids walks every node the game registered -- two and a
+	-- half thousand in VoxeLibre -- and this runs on every step that has
+	-- sections to sweep. It was a quarter of all the Lua a VoxeLibre world
+	-- spent generating, in name_matcher()'s inner function, and the whole of
+	-- it was this rebuilding the same answer. core.__forget_name_ids()
+	-- drops it, which is what a mod registering a node after load needs.
+	if lbm_ids == nil then
+		lbm_ids = {}
+		for i = 1, #lbms do
+			lbm_ids[i] = ids_matching(lbms[i].nodenames)
+		end
 	end
-	return sweep_sections(sets, function(k, hits)
-		run_lbm(lbms[k], hits)
-	end) > 0
+	-- A section at a time, and only the ones that have not had them, with a
+	-- budget on how long one step may spend. Luanti runs an LBM on a block
+	-- when that block loads; this used to sweep every active section in one
+	-- go, and on a VoxeLibre world that was **46 seconds in one step** --
+	-- the module's thread does one thing at a time, so that is 46 seconds
+	-- of a server that answers nothing, a player's click and a shutdown
+	-- among it. Measured with the step watchdog in builtin/luanti.
+	--
+	-- Sections that appear later get their LBMs too now, which they did not
+	-- when this latched after one pass. What is not kept is which LBM ran
+	-- where across a restart, the way Luanti's own lbm_meta is: a section
+	-- that unloads and comes back is swept again.
+	local budget_us = 20000
+	local t0 = core.get_us_time()
+	local boxes = core.__active_boxes_now()
+	local swept = 0
+	for _, box in ipairs(boxes) do
+		local key = box[1] .. "," .. box[2] .. "," .. box[3]
+		if not lbm_done[key] then
+			if swept > 0 and core.get_us_time() - t0 > budget_us then
+				break
+			end
+			lbm_done[key] = true
+			swept = swept + 1
+			sweep_one_box(box, lbm_ids, function(k, hits)
+				run_lbm(lbms[k], hits)
+			end)
+		end
+	end
+	return swept > 0
 end
 
 -- A step that takes this long is worth a line saying where it went: the
@@ -3866,10 +3926,11 @@ function core.__step(dtime)
 	mark("timers")
 	run_mapblocks_changed()
 	mark("changed")
-	if not lbms_run then
-		lbms_run = run_lbms()
-		mark("lbms")
-	end
+	-- Every step, not once: a section that appears later has had no LBMs,
+	-- and run_lbms() is a table lookup per active section when there is
+	-- nothing new
+	run_lbms()
+	mark("lbms")
 	run_abms(dtime)
 	mark("abms")
 	local total = (core.get_us_time() - t0) / 1000000
