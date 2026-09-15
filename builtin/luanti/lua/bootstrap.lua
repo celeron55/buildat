@@ -1720,7 +1720,7 @@ local STUBS_NIL = {
 	"get_node", "get_node_or_nil", "get_node_raw", "set_node", "add_node",
 	"bulk_set_node", "bulk_swap_node", "swap_node", "remove_node",
 	"find_node_near", "find_nodes_in_area",
-	"find_nodes_in_area_under_air", "find_nodes_with_meta",
+	"find_nodes_in_area_under_air",
 	"get_node_light", "get_natural_light", "get_artificial_light",
 	"place_node", "dig_node", "punch_node",
 	-- spawn_tree and spawn_tree_on_vmanip are in lua/treegen.lua
@@ -1776,6 +1776,9 @@ end
 --
 -- A fresh table each call, because a caller may keep or add to what it is
 -- given and the next caller should not see that.
+--
+-- Nothing uses it at the moment: the list it was written for,
+-- find_nodes_with_meta, is implemented. It is what the next one gets.
 local function stub_list(name)
 	core[name] = function()
 		if not stub_warned[name] then
@@ -1784,12 +1787,6 @@ local function stub_list(name)
 		end
 		return {}
 	end
-end
-
-for _, name in ipairs({
-	"find_nodes_with_meta",
-}) do
-	stub_list(name)
 end
 
 -- The two an object is in, which lua/entity.lua fills: tables rather than
@@ -2214,6 +2211,42 @@ local function save_one_meta(meta)
 		return nil
 	end
 	return {fields = fields, inventory = lists}
+end
+
+-- Whether a node's metadata is anything at all. Luanti's own rule, from
+-- NodeMetadata::empty(): no fields and no inventory lists. core.get_meta()
+-- makes one for any position it is asked about, so a node nothing ever
+-- wrote to has an empty one sitting in the table.
+local function meta_is_empty(meta)
+	if next(meta.fields) ~= nil then
+		return false
+	end
+	return next(meta.inventory:get_lists()) == nil
+end
+
+-- Every node in a box that has metadata of its own: the chests in a room,
+-- which is what a mod asks this for. The corners come in either order,
+-- which is Luanti's rule for every find_nodes_* call.
+--
+-- simplified: a walk of the whole table, the same one core.__take_node_meta()
+-- does and with the same note -- a world with more metadata than a few
+-- thousand nodes wants an index per section, and this is the second caller
+-- that would use one.
+function core.find_nodes_with_meta(pos1, pos2)
+	local x1, y1, z1 = to_pos(pos1)
+	local x2, y2, z2 = to_pos(pos2)
+	if x1 > x2 then x1, x2 = x2, x1 end
+	if y1 > y2 then y1, y2 = y2, y1 end
+	if z1 > z2 then z1, z2 = z2, z1 end
+	local out = {}
+	for _, meta in pairs(node_meta) do
+		local p = meta.pos
+		if p and p.x >= x1 and p.x <= x2 and p.y >= y1 and p.y <= y2 and
+				p.z >= z1 and p.z <= z2 and not meta_is_empty(meta) then
+			out[#out + 1] = {x = p.x, y = p.y, z = p.z}
+		end
+	end
+	return out
 end
 
 -- Everything in a box, and gone from memory: what a section that is leaving
