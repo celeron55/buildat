@@ -959,10 +959,22 @@ struct Module: public interface::Module, public luanti::Interface
 			// with none is a save nobody has played yet. What that decides
 			// is what mapgen it gets; see mapgen_name().
 			m_world_is_new = true;
-			// Somewhere nobody has been before: the clock is what there is
-			// to be random with here, and a world is seeded once
-			m_seed = (int64_t)interface::os::time_us();
-			m_seed ^= (int64_t)(size_t)this;
+			// Luanti's own fixed_map_seed, which is what makes one world the
+			// same world twice: a benchmark that generates terrain has to
+			// generate the same terrain, and a bug report about a place has
+			// to be able to name it. Read the way Luanti reads it -- only
+			// when a world is being made, never over one that has a seed.
+			const ss_ fixed = setting_string("fixed_map_seed");
+			if(!fixed.empty()){
+				m_seed = (int64_t)strtoull(fixed.c_str(), nullptr, 10);
+				log_i(MODULE, "The world's seed is fixed_map_seed, %s",
+						cs(itos(m_seed)));
+			} else {
+				// Somewhere nobody has been before: the clock is what there
+				// is to be random with here, and a world is seeded once
+				m_seed = (int64_t)interface::os::time_us();
+				m_seed ^= (int64_t)(size_t)this;
+			}
 			if(m_store)
 				m_store->set("seed", itos(m_seed));
 		}

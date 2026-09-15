@@ -146,8 +146,11 @@ Tried and rejected, so that nobody spends the day again:
   **How many sections a 45 second run generates is not a measurement on this
   machine**: the same code gave 95 and 145 on two runs an hour apart. What
   the profile says about where the time goes is stable and is what these
-  entries quote; a throughput number wants a fixed workload and several runs,
-  which is a harness nobody has written yet.
+  entries quote. A throughput number wants a fixed workload instead, which
+  is what util/bench_worldgen.sh is: the server alone making a new world out
+  of a fixed seed and a pinned box of sections, three runs of which land
+  within a few percent -- 111 sections in 8.7, 9.0 and 8.9 seconds of
+  devtest on the machine these numbers are from.
 
 Still open, in the order they showed up in a profile after those:
 

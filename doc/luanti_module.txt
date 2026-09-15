@@ -205,6 +205,25 @@ Which Lua function costs anything: BUILDAT_LUANTI_LUAPROF=<n> samples the
 module's Lua every n instructions -- 10000 is a sensible n and costs a few
 percent -- and the report comes at shutdown, most expensive first.
 
+Whether a change made the engine faster: util/bench_worldgen.sh. The server
+alone, no client, making a new world out of a fixed seed and a pinned box of
+sections, so that every run does the same work:
+
+    $ util/bench_worldgen.sh devtest 3
+    run 1: 111 sections in 9.0 s
+    run 2: 111 sections in 8.7 s
+    run 3: 111 sections in 8.9 s
+    median: 8.9 s of 3 runs
+
+Three runs of it land within a few percent of each other, which is what makes
+a difference between two versions worth believing. Counting what a server got
+through in a fixed *time* does not: the same code gave 95 and 145 sections in
+45 seconds an hour apart on the machine this was written on.
+
+The seed is Luanti's own fixed_map_seed, which the module honours when a
+world is made; the harness writes it into the save's world.mt. A world that
+already has a seed keeps it, as in Luanti.
+
     BUILDAT_LUANTI_LUAPROF=10000 BUILDAT_LUANTI_GAME=mineclone2 \
         bin/buildat_server -m ../games/luanti_launcher -D ../user
 
