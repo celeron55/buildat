@@ -138,6 +138,26 @@ function MetaData:equals(other)
 	return true
 end
 
+-- Luanti sends a node's metadata to the clients that can see the node and
+-- keeps back the fields a mod marked private. Nothing here sends node
+-- metadata at all -- a client gets the formspec and the inventory the module
+-- hands it and nothing else -- so a field is private already and this is the
+-- list of the ones that were meant to be. Found through nodecore, which
+-- wraps every set_* to mark what it writes.
+--
+-- simplified: the names are remembered and nothing reads them. If node
+-- metadata is ever sent to a client, this list is what to leave out of it.
+function MetaData:mark_as_private(name)
+	self.private = self.private or {}
+	if type(name) == "table" then
+		for _, n in ipairs(name) do
+			self.private[n] = true
+		end
+	else
+		self.private[name] = true
+	end
+end
+
 function MetaData:set_tool_capabilities(caps)
 	if caps == nil then
 		self.fields.tool_capabilities = nil
@@ -150,6 +170,17 @@ end
 -- Used by mod storage and by anything else that wants Luanti's metadata
 -- interface over a table of strings
 core.__new_metadata = new_metadata
+
+do
+	local m = new_metadata({})
+	m:mark_as_private("secret")
+	m:mark_as_private({"a", "b"})
+	assert(m.private.secret and m.private.a and m.private.b)
+	-- And a field marked private is still a field
+	m:set_string("secret", "x")
+	assert(m:get_string("secret") == "x")
+	assert(m:to_table().fields.secret == "x")
+end
 
 --
 -- ItemStack
