@@ -366,73 +366,6 @@ do
 end
 
 
--- Or one of the two parity modes, if this session asked for one. **A startup
--- choice and not a toggle** -- the atlas's surface maps have to be on from the
--- first texture it builds -- so it arrives with luanti:world_info, which the
--- module asks for as its client half loads, well before the first chunk has
--- been meshed. What is already drawn keeps the technique it was drawn with,
--- which is what use_technique_set() says of itself.
---
--- | mode | what it draws | what it matches |
--- | unlit | the baked light and nothing else | official Luanti, shadows off |
--- | shadows | the same, with the sun's shadow map multiplying it | official Luanti as the reference runs it |
--- | pbr | this launcher's own look, and the default | nothing but the sunlit anchor |
---
--- See [RENDER_MODES] in doc/plan/rendering_plan.md.
---
--- **Four names for two files, and nothing new was written for unlit.**
--- VoxelUnlit discards below half alpha already, which is the whole of what
--- masked means; no Luanti game binds surface modifiers, so that name is the
--- plain one; and the sun-gated four go the same way, an unlit surface having
--- no sun to gate. The cube map, set_sky_light() and set_sky_tint() are left
--- alone: neither unlit shader reads any of them.
-luanti.sub_world_info(function(info)
-	local mode = info.mode or "pbr"
-	if mode == "pbr" then
-		return
-	end
-	log:info("BUILDAT_LUANTI_PBR=" .. mode .. ": drawing the world " .. mode)
-	-- On sky_now rather than locals of their own: init.lua's main chunk is at
-	-- Lua 5.1's two hundred locals and has been for a while
-	sky_now.unlit = true
-	sky_now.shadows = mode == "shadows"
-	-- **And no tonemap, which is half of what either parity mode means.** The
-	-- unlit shader writes the light the mesher baked, which is already the
-	-- number that belongs on the screen; put that through an HDR buffer, an
-	-- exposure bias of 1.6 and Uncharted2 and the world comes out white.
-	-- Official Luanti has no tonemap either, and being comparable to it is
-	-- what these modes are for. The commands are disabled rather than removed
-	-- because that is what a RenderPath offers.
-	local vp = magic.renderer:GetViewport(0)
-	local rp = vp and vp.renderPath
-	if rp then
-		rp:SetEnabled("BloomHDR", false)
-		rp:SetEnabled("TonemapUncharted2", false)
-		rp:SetEnabled("GammaCorrection", false)
-	end
-	-- The minimap draws the same world through its own path
-	if world_render_path then
-		world_render_path:SetEnabled("TonemapUncharted2", false)
-		world_render_path:SetEnabled("GammaCorrection", false)
-	end
-	magic.renderer.HDRRendering = false
-	-- The difference between the two modes is one technique: LuantiVoxelUnlit
-	-- adds a light pass that multiplies by the shadow factor, VoxelUnlit does
-	-- not. Water is VoxelUnlitAlpha either way, being unshadowed in both.
-	local opaque = sky_now.shadows and
-			"luanti_client/res/LuantiVoxelUnlit.xml" or
-			"luanti_client/res/VoxelUnlit.xml"
-	voxel_shading.use_technique_set({
-		plain = opaque,
-		modifiers = opaque,
-		masked = opaque,
-		alpha = "luanti_client/res/VoxelUnlitAlpha.xml",
-		sun = opaque,
-		sun_modifiers = opaque,
-		sun_masked = opaque,
-		sun_alpha = "luanti_client/res/VoxelUnlitAlpha.xml",
-	})
-end)
 
 voxelworld.set_camera(camera_node)
 voxel_shading.set_camera(camera_node)
@@ -864,6 +797,79 @@ end
 
 -- What the last sky update worked out, for the line of detail
 local sky_now = {height = 0, day = 0}
+
+-- **Registered after sky_now**, which it writes to: a closure made before
+-- that local exists closes over a global of the same name instead, and the
+-- handler then dies on its first line with nothing switched -- which is
+-- exactly what happened, and what made three sets of reference shots that
+-- were all pbr look like three modes that draw the same.
+-- Or one of the two parity modes, if this session asked for one. **A startup
+-- choice and not a toggle** -- the atlas's surface maps have to be on from the
+-- first texture it builds -- so it arrives with luanti:world_info, which the
+-- module asks for as its client half loads, well before the first chunk has
+-- been meshed. What is already drawn keeps the technique it was drawn with,
+-- which is what use_technique_set() says of itself.
+--
+-- | mode | what it draws | what it matches |
+-- | unlit | the baked light and nothing else | official Luanti, shadows off |
+-- | shadows | the same, with the sun's shadow map multiplying it | official Luanti as the reference runs it |
+-- | pbr | this launcher's own look, and the default | nothing but the sunlit anchor |
+--
+-- See [RENDER_MODES] in doc/plan/rendering_plan.md.
+--
+-- **Four names for two files, and nothing new was written for unlit.**
+-- VoxelUnlit discards below half alpha already, which is the whole of what
+-- masked means; no Luanti game binds surface modifiers, so that name is the
+-- plain one; and the sun-gated four go the same way, an unlit surface having
+-- no sun to gate. The cube map, set_sky_light() and set_sky_tint() are left
+-- alone: neither unlit shader reads any of them.
+luanti.sub_world_info(function(info)
+	local mode = info.mode or "pbr"
+	if mode == "pbr" then
+		return
+	end
+	log:info("BUILDAT_LUANTI_PBR=" .. mode .. ": drawing the world " .. mode)
+	-- On sky_now rather than locals of their own: init.lua's main chunk is at
+	-- Lua 5.1's two hundred locals and has been for a while
+	sky_now.unlit = true
+	sky_now.shadows = mode == "shadows"
+	-- **And no tonemap, which is half of what either parity mode means.** The
+	-- unlit shader writes the light the mesher baked, which is already the
+	-- number that belongs on the screen; put that through an HDR buffer, an
+	-- exposure bias of 1.6 and Uncharted2 and the world comes out white.
+	-- Official Luanti has no tonemap either, and being comparable to it is
+	-- what these modes are for. The commands are disabled rather than removed
+	-- because that is what a RenderPath offers.
+	local vp = magic.renderer:GetViewport(0)
+	local rp = vp and vp.renderPath
+	if rp then
+		rp:SetEnabled("BloomHDR", false)
+		rp:SetEnabled("TonemapUncharted2", false)
+		rp:SetEnabled("GammaCorrection", false)
+	end
+	-- The minimap draws the same world through its own path
+	if world_render_path then
+		world_render_path:SetEnabled("TonemapUncharted2", false)
+		world_render_path:SetEnabled("GammaCorrection", false)
+	end
+	magic.renderer.HDRRendering = false
+	-- The difference between the two modes is one technique: LuantiVoxelUnlit
+	-- adds a light pass that multiplies by the shadow factor, VoxelUnlit does
+	-- not. Water is VoxelUnlitAlpha either way, being unshadowed in both.
+	local opaque = sky_now.shadows and
+			"luanti_client/res/LuantiVoxelUnlit.xml" or
+			"luanti_client/res/VoxelUnlit.xml"
+	voxel_shading.use_technique_set({
+		plain = opaque,
+		modifiers = opaque,
+		masked = opaque,
+		alpha = "luanti_client/res/VoxelUnlitAlpha.xml",
+		sun = opaque,
+		sun_modifiers = opaque,
+		sun_masked = opaque,
+		sun_alpha = "luanti_client/res/VoxelUnlitAlpha.xml",
+	})
+end)
 -- Whether the eye is in a liquid, which owns the fog while it is true.
 -- Declared here rather than beside update_underwater() because the sky
 -- handler has to know not to put the surface's fog range back.
