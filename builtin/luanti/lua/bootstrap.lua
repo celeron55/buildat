@@ -759,14 +759,40 @@ end
 -- What comes out is the tile *string*, texture modifiers and all: the server
 -- decides which voxel types exist and the client decides what their pixels
 -- are. See doc/plan/luanti_module_plan.md, "Who resolves textures".
+-- Where a paletted node's colour goes in a tile's expression, if it goes in
+-- at all. **Luanti applies it per layer and only to a layer that has no
+-- colour of its own** -- VoxeLibre's grass block is the case that matters:
+-- its side is dirt with `color = "white"` under a grass overlay with none, so
+-- Luanti tints the overlay and leaves the dirt alone. The module builds one
+-- expression per face in Lua and resolves the palette per slot in C++, so the
+-- place is marked here and filled in there. A byte that cannot occur in a
+-- texture name, the way "\1cube\1" already marks a cube in an item image.
+local PALETTE_MARK = "\1pal\1"
+
+-- A tile as the expression it is: its own colour multiplied in if it has one,
+-- and otherwise a mark where the node's palette colour belongs.
 local function tile_name_of(t)
+	local colour = nil
 	if type(t) == "table" then
+		colour = t.color
 		t = t.name or t.image
 	end
-	if type(t) == "string" then
+	if type(t) ~= "string" then
+		return nil
+	end
+	if t == "" then
 		return t
 	end
-	return nil
+	if colour ~= nil then
+		local c = core.colorspec_to_colorstring(colour)
+		-- A tile whose own colour is white is Luanti's way of saying "not
+		-- this layer" and needs no expression of its own
+		if c == nil or c:sub(1, 7):upper() == "#FFFFFF" then
+			return t
+		end
+		return t .. "^[multiply:" .. c:sub(1, 7)
+	end
+	return t .. PALETTE_MARK
 end
 
 -- An overlay tile is drawn over the face's own tile, and all of a node's

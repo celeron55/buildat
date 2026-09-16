@@ -4027,6 +4027,31 @@ struct Module: public interface::Module, public luanti::Interface
 	// The resource name a tile is drawn under, and what the client has to
 	// compose to have it. Empty for a tile that is neither a file the game
 	// shipped nor an expression.
+	// Where a paletted node's colour goes in a tile's expression. The Lua
+	// side marks the place per layer -- see PALETTE_MARK in
+	// lua/bootstrap.lua -- because **Luanti applies the node's colour to a
+	// layer only when that layer has no colour of its own**, and the layers
+	// are composed there while the palette is resolved here. A node with no
+	// palette passes an empty mul and the marks come out.
+	static ss_ with_palette(const ss_ &expr, const ss_ &mul)
+	{
+		static const ss_ mark = ss_("\1pal\1");
+		ss_ out;
+		out.reserve(expr.size());
+		size_t at = 0;
+		for(;;){
+			const size_t found = expr.find(mark, at);
+			if(found == ss_::npos){
+				out += expr.substr(at);
+				break;
+			}
+			out += expr.substr(at, found - at);
+			out += mul;
+			at = found + mark.size();
+		}
+		return out;
+	}
+
 	ss_ texture_of_tile(const ss_ &tile)
 	{
 		if(plain_media_name(tile))
@@ -4259,12 +4284,13 @@ struct Module: public interface::Module, public luanti::Interface
 			for(size_t f = 0; f < 6; f++){
 				if(empty)
 					continue;
-				ss_ texture = has_tiles ? texture_of_tile(tiles[f]) : "";
+				ss_ texture = has_tiles ?
+						texture_of_tile(with_palette(tiles[f], "")) : "";
 				if(!texture.empty()){
 					face_textures[f] = texture;
 					if(tile_aspect[f] > 0.0f)
-						face_frames[f] = tile_frame_count(tiles[f],
-								tile_aspect[f]);
+						face_frames[f] = tile_frame_count(
+								with_palette(tiles[f], ""), tile_aspect[f]);
 				} else {
 					face_textures[f] = fallback;
 					any_fallback = true;
@@ -4274,7 +4300,8 @@ struct Module: public interface::Module, public luanti::Interface
 			// does not have, and the first of the definition's extra ones
 			ss_ overlay_texture;
 			if(!overlay_tile.empty() && !fallback.empty()){
-				overlay_texture = texture_of_tile(overlay_tile);
+				overlay_texture = texture_of_tile(
+						with_palette(overlay_tile, ""));
 				if(overlay_texture.empty()){
 					overlay_texture = fallback;
 					any_fallback = true;
@@ -4397,10 +4424,12 @@ struct Module: public interface::Module, public luanti::Interface
 						ss_ tinted[7];
 						for(size_t f = 0; f < 6; f++){
 							if(has_tiles && !tiles[f].empty())
-								tinted[f] = texture_of_tile(tiles[f] + mul);
+								tinted[f] = texture_of_tile(
+										with_palette(tiles[f], mul));
 						}
 						if(!overlay_tile.empty())
-							tinted[6] = texture_of_tile(overlay_tile + mul);
+							tinted[6] = texture_of_tile(
+									with_palette(overlay_tile, mul));
 						for(size_t i = 0; i < n_dirs; i++){
 							interface::VoxelVariant var = base[i];
 							for(size_t f = 0; f < 6; f++){
