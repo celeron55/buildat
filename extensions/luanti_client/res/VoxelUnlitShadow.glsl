@@ -63,6 +63,16 @@ void PS()
     #if defined(PERPIXEL) && defined(SHADOW)
         shadow = GetShadow(vShadowPos, vWorldPos.w);
     #endif
+    // A face the light cannot see is in its own shadow whatever the map says,
+    // and the map cannot say it: a wall facing away from the sun is lit
+    // exactly as its neighbour facing into it. Luanti folds the same term in
+    // beside its shadow map. The terminator is softened over a fifth of a
+    // unit so that a curved surface -- a mob, a leaf quad -- does not get a
+    // hard line across it.
+    #if defined(PERPIXEL) && defined(DIRLIGHT)
+        shadow = min(shadow,
+                smoothstep(0.0, 0.2, dot(normalize(vNormal), cLightDirPS)));
+    #endif
     float k = mix(SHADOW_LEFT, 1.0, shadow);
     gl_FragColor = vec4(k, k, k, 1.0);
 }
