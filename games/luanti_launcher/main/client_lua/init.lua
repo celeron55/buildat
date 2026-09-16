@@ -173,7 +173,17 @@ local SKY_AMBIENT = magic.Color(0.144, 0.144, 0.158)
 -- a percent of it. The same hue, at the level the reference shots ask for;
 -- see [TOO_BRIGHT] in doc/plan/rendering_plan.md.
 local NIGHT_AMBIENT = magic.Color(0.012, 0.0144, 0.024)
-local SUN_BRIGHTNESS = 50.0
+-- **Set against pictures** (2026-09-16). At 13:00 a patch of sunlit grass
+-- measured twice official Luanti's -- 0.396, 0.483, 0.349 against 0.186,
+-- 0.234, 0.153, and the same ratio at a second patch -- while a shaded cliff
+-- face measured 1.09 times its and the sky 1.04 times its. So the sun was the
+-- whole of what was left, and twice is not the "slightly brighter than
+-- non-PBR official Luanti, crisper, not excessive" the brief asks for. It
+-- also blew the brightest surfaces out: foreground sand came back 1.00, 1.00,
+-- 0.91 where its own texture is 0.87, 0.67, 0.50 and official Luanti draws it
+-- at 0.85, 0.64, 0.48 -- white, and with the colour of the sand gone. See
+-- [TOO_BRIGHT] in doc/plan/rendering_plan.md.
+local SUN_BRIGHTNESS = 28.0
 -- A fiftieth of the sun, which is extensions/luanti_client's number and is
 -- not a measurement: real moonlight would render as nothing. It is a night
 -- lit coldly from where the moon is, far enough above the sky's own light
