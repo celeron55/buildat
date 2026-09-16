@@ -2391,10 +2391,21 @@ end)
 -- Luanti this is. The status line shows them beside the numbers it works out
 -- for itself, so that a shot of this can be compared with a shot of official
 -- Luanti without anything being looked up.
-local world_info = {game = "", seed = "", version = ""}
+local world_info = {game = "", seed = "", version = "", pbr = true}
+local world_info_subs = {}
 
 function M.world_info()
 	return world_info
+end
+
+-- sub_world_info(f) -> f(info) once it has arrived, and now if it already
+-- has. A game's client half needs the pbr flag before it draws its first
+-- chunk and cannot ask the environment for it itself, being in the sandbox.
+function M.sub_world_info(f)
+	world_info_subs[#world_info_subs + 1] = f
+	if world_info.version ~= "" then
+		f(world_info)
+	end
 end
 
 -- What the game's locale/*.tr files say, for the language the server chose:
@@ -2418,9 +2429,13 @@ end)
 buildat.sub_packet("luanti:world_info", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	world_info = {game = values[1] or "", seed = values[2] or "",
-			version = values[3] or ""}
+			version = values[3] or "", pbr = values[4] ~= "0"}
 	log:info("luanti:world_info: " .. world_info.version .. ", game " ..
-			world_info.game .. ", seed " .. world_info.seed)
+			world_info.game .. ", seed " .. world_info.seed .. ", " ..
+			(world_info.pbr and "PBR" or "unlit"))
+	for _, f in ipairs(world_info_subs) do
+		f(world_info)
+	end
 end)
 
 -- Asked for rather than sent, because a packet that arrives before the

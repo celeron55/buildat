@@ -42,7 +42,11 @@ local DEFAULT_NAME = os.getenv("BUILDAT_LUANTI_NAME") or "buildat"
 -- The PBR checkbox's starting state. A scripted run has to hit the box by
 -- pixel coordinates otherwise, and a miss looks like the shader not working
 -- rather than like a missed click.
-local DEFAULT_PBR = (os.getenv("BUILDAT_LUANTI_PBR") or "") ~= ""
+-- Unset means this client's own default, which is unlit; an explicit "0"
+-- means unlit and anything else means PBR. builtin/luanti reads the same
+-- variable with the same three answers, its own default being the other way
+-- round -- see [NON_PBR] in doc/plan/rendering_plan.md.
+local DEFAULT_PBR = (os.getenv("BUILDAT_LUANTI_PBR") or "0") ~= "0"
 
 -- How far the camera sees, and how far out blocks are kept, in nodes. The
 -- client asks the server for blocks by the same distance; see

@@ -355,6 +355,61 @@ do
 	world_render_path:SetShaderParameter("TonemapExposureBias", EXPOSURE_BIAS)
 end
 
+
+-- Or the unlit set, if this session asked for it. **A startup choice and not
+-- a toggle** -- the atlas's surface maps have to be on from the first texture
+-- it builds -- so it arrives with luanti:world_info, which the module asks
+-- for as its client half loads, well before the first chunk has been meshed.
+-- What is already drawn keeps the technique it was drawn with, which is what
+-- use_technique_set() says of itself.
+--
+-- **Four names for two files, and nothing new was written.** VoxelUnlit
+-- discards below half alpha already, which is the whole of what masked
+-- means; no Luanti game binds surface modifiers, so that name is the plain
+-- one; and the sun-gated four go the same way, an unlit surface having no
+-- sun to gate. The cube map, set_sky_light() and set_sky_tint() are left
+-- alone: the unlit shader does not read any of them. See [NON_PBR] in
+-- doc/plan/rendering_plan.md.
+luanti.sub_world_info(function(info)
+	if info.pbr then
+		return
+	end
+	log:info("BUILDAT_LUANTI_PBR=0: drawing the world unlit")
+	-- On sky_now rather than a local of its own: init.lua's main chunk is at
+	-- Lua 5.1's two hundred locals and has been for a while
+	sky_now.unlit = true
+	-- **And no tonemap, which is half of what non-PBR means here.** The
+	-- unlit shader writes the light the mesher baked, which is already the
+	-- number that belongs on the screen; put that through an HDR buffer, an
+	-- exposure bias of 1.6 and Uncharted2 and the world comes out white.
+	-- Official Luanti has no tonemap either, and being comparable to it is
+	-- what [NON_PBR] is for. The commands are disabled rather than removed
+	-- because that is what a RenderPath offers.
+	local vp = magic.renderer:GetViewport(0)
+	local rp = vp and vp.renderPath
+	if rp then
+		rp:SetEnabled("BloomHDR", false)
+		rp:SetEnabled("TonemapUncharted2", false)
+		rp:SetEnabled("GammaCorrection", false)
+	end
+	-- The minimap draws the same world through its own path
+	if world_render_path then
+		world_render_path:SetEnabled("TonemapUncharted2", false)
+		world_render_path:SetEnabled("GammaCorrection", false)
+	end
+	magic.renderer.HDRRendering = false
+	voxel_shading.use_technique_set({
+		plain = "luanti_client/res/VoxelUnlit.xml",
+		modifiers = "luanti_client/res/VoxelUnlit.xml",
+		masked = "luanti_client/res/VoxelUnlit.xml",
+		alpha = "luanti_client/res/VoxelUnlitAlpha.xml",
+		sun = "luanti_client/res/VoxelUnlit.xml",
+		sun_modifiers = "luanti_client/res/VoxelUnlit.xml",
+		sun_masked = "luanti_client/res/VoxelUnlit.xml",
+		sun_alpha = "luanti_client/res/VoxelUnlitAlpha.xml",
+	})
+end)
+
 voxelworld.set_camera(camera_node)
 voxel_shading.set_camera(camera_node)
 
@@ -1005,19 +1060,36 @@ local function update_sky(dt)
 	-- dimmed: a directional light does not know about the horizon, and one
 	-- under it lights the undersides of everything and puts the night's
 	-- specular on the wrong side of the sky.
-	sky_lights.sun_node.enabled = up > 0
+	-- **No sun and no moon in an unlit scene.** The unlit technique's second
+	-- pass is Urho3D's own LitSolid, added so a torch reaches the geometry,
+	-- and a directional light at SUN_BRIGHTNESS = 50 goes through it too: it
+	-- blows every face it reaches to white and leaves every face it does not
+	-- at the ambient, which draws as a black and white chequerboard. Luanti's
+	-- own non-PBR client has no directional light either -- the light is what
+	-- the mesher baked. Point lights still work, which is what the pass is
+	-- there for.
+	sky_lights.sun_node.enabled = up > 0 and not sky_now.unlit
 	if up > 0 then
 		sky_lights.sun_node.direction = magic.Vector3(dir.x, dir.y, dir.z)
 		sky_lights.sun.brightness = SUN_BRIGHTNESS * up
 	end
-	sky_lights.moon_node.enabled = moon_up > 0
+	sky_lights.moon_node.enabled = moon_up > 0 and not sky_now.unlit
 	if moon_up > 0 then
 		sky_lights.moon_node.direction =
 				magic.Vector3(-dir.x, -dir.y, -dir.z)
 		sky_lights.moon.brightness = MOON_BRIGHTNESS * moon_up
 	end
 
-	zone.ambientColor = blend(NIGHT_AMBIENT, SKY_AMBIENT, day)
+	if sky_now.unlit then
+		-- Unlit reads cAmbientColor.rgb * vColor.a + vColor.rgb, where the
+		-- alpha is how much sky the surface sees, so the ambient is the whole
+		-- of the daylight rather than a share of it beside a sun. Luanti's
+		-- own model exactly: the baked light times the hour's ratio. Neutral,
+		-- the colour of the hour being in the sky and the fog already.
+		zone.ambientColor = magic.Color(sky_now.lit, sky_now.lit, sky_now.lit)
+	else
+		zone.ambientColor = blend(NIGHT_AMBIENT, SKY_AMBIENT, day)
+	end
 	-- And the fog with it. This is the one thing the cave sky needs that is
 	-- not per direction, so it takes the mean of the same cube: underground
 	-- the haze is the indoors colour rather than a sky the player cannot

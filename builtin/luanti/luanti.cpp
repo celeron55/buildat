@@ -5843,6 +5843,19 @@ struct Module: public interface::Module, public luanti::Interface
 	void on_get_world_info(const network::Packet &packet)
 	{
 		sv_<ss_> flat = string_list_from_lua("__world_info");
+		// Whether this session draws with the PBR shaders or the unlit ones,
+		// which is a startup choice and not a toggle: the atlas's surface
+		// maps have to be on from the first texture it builds. So it goes
+		// with the rest of what is constant for a session rather than getting
+		// a packet of its own. See [NON_PBR] in doc/plan/rendering_plan.md.
+		//
+		// It is read here and not in the client's Lua because that half runs
+		// in the sandbox, where there is no getenv;
+		// extensions/luanti_client reads the same variable for itself, being
+		// outside it. An unset variable means each client's own default --
+		// PBR here, unlit there -- and an explicit "0" means unlit to both.
+		const char *pbr = getenv("BUILDAT_LUANTI_PBR");
+		flat.push_back((pbr != nullptr && ss_(pbr) == "0") ? "0" : "1");
 		std::ostringstream os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(os);
