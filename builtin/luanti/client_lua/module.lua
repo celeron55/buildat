@@ -2398,7 +2398,8 @@ end)
 -- Luanti this is. The status line shows them beside the numbers it works out
 -- for itself, so that a shot of this can be compared with a shot of official
 -- Luanti without anything being looked up.
-local world_info = {game = "", seed = "", version = "", mode = "pbr"}
+local world_info = {game = "", seed = "", version = "", mode = "pbr",
+		orbit_tilt = nil}
 local world_info_subs = {}
 
 function M.world_info()
@@ -2437,7 +2438,10 @@ end)
 buildat.sub_packet("luanti:world_info", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	world_info = {game = values[1] or "", seed = values[2] or "",
-			version = values[3] or "", mode = values[4] or "pbr"}
+			version = values[3] or "", mode = values[4] or "pbr",
+			-- Empty means the client's own default; see the sky handler in
+			-- games/luanti_launcher
+			orbit_tilt = tonumber(values[5] or "")}
 	log:info("luanti:world_info: " .. world_info.version .. ", game " ..
 			world_info.game .. ", seed " .. world_info.seed .. ", " ..
 			world_info.mode)

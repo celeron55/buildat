@@ -5989,6 +5989,16 @@ struct Module: public interface::Module, public luanti::Interface
 			m = "pbr";
 		}
 		flat.push_back(m);
+		// How far this client tilts the sun and the moon's orbit when the
+		// game has no opinion, in degrees. A game that sets body_orbit_tilt
+		// is obeyed instead, whatever this says; see the sky handler in
+		// games/luanti_launcher. **Zero is what a comparison against
+		// official Luanti wants**, because that is what Luanti does with a
+		// game that never asks. Read here rather than in the client's Lua
+		// for the same reason the mode is: that half runs in the sandbox,
+		// where there is no getenv.
+		const char *tilt = getenv("BUILDAT_LUANTI_ORBIT_TILT");
+		flat.push_back(tilt != nullptr ? ss_(tilt) : ss_(""));
 		std::ostringstream os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(os);

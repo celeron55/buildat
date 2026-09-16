@@ -78,6 +78,12 @@ for i in $(seq 1 600); do
 done
 rm -rf "../user/games/luanti_launcher/saves/$save"
 port=$(( 29600 + (RANDOM % 90) ))
+# **The orbit is not tilted for a comparison set.** This client tilts the
+# sun and the moon when the game has no opinion, because an axis-aligned sun
+# is a poor light; official Luanti does not, so a set taken with the tilt on
+# has its sun eighteen to twenty-one degrees from where the reference draws
+# it. Zero here, overridable for a run that wants to see the other thing.
+BUILDAT_LUANTI_ORBIT_TILT="${BUILDAT_LUANTI_ORBIT_TILT:-0}" \
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_IMPORT="$world" BUILDAT_LUANTI_PBR="$mode" \
 	BUILDAT_VOXELWORLD_KEEP_LOADED=1 \

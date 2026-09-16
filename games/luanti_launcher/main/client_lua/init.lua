@@ -1060,15 +1060,20 @@ local function update_sky(dt)
 	-- little between two of them has crawling edges, so the direction is
 	-- held still a step at a time. How bright, what colour and whether it is
 	-- up stay smooth.
-	local tilt = game_sky.body_orbit_tilt
+	-- How far the orbit is tilted, and who decided; see
+	-- luanti_sky.orbit_tilt(). The one vector it produces is the light's and
+	-- the drawn sun's both.
+	local tilt = luanti_sky.orbit_tilt(game_sky.body_orbit_tilt,
+			(luanti.world_info() or {}).orbit_tilt)
 	local sx, sy, sz =
 			luanti_sky.sun_direction(luanti_sky.stepped_time(daylight), tilt)
 	local _, smooth_sy = luanti_sky.sun_direction(daylight, tilt)
 	local height = smooth_sy
-	-- The light travels the other way, which is what a Light's direction is
-	-- The tilt turns the orbit out of the vertical plane; this game's own
-	-- 0.42 offset does the same thing for a different reason, so they add
-	local dir = normalized({x = -sx * 0.9, y = -sy, z = -(sz + 0.42)})
+	-- The light travels the other way, which is what a Light's direction is.
+	-- **Nothing else is done to it**: the sun is drawn from this same vector
+	-- below, so anything added here would move the sun away from its own
+	-- light. The tilt above is the only thing that turns the orbit.
+	local dir = normalized({x = -sx, y = -sy, z = -sz})
 	-- And the sky is given the sun's, always: it draws the moon opposite,
 	-- so there is nothing to flip at nightfall
 	world_sky:set_sun_direction(dir)

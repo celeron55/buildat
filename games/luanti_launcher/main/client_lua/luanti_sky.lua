@@ -128,6 +128,41 @@ function M.above_horizon(sine_of_elevation)
 	return clamp01((sine_of_elevation or 0) / HORIZON_FADE)
 end
 
+-- **How far the sun and the moon's orbit is tilted out of the vertical
+-- plane**, and who decides it.
+--
+-- Luanti's default orbit is axis-aligned: the sun rises due east, passes
+-- through the zenith and sets due west, and `body_orbit_tilt` is how a game
+-- says otherwise. That is a poor light to draw a world by -- every hour
+-- lights the same two faces of a cube, and noon drops its shadows straight
+-- down -- so this client tilts it when the game has no opinion.
+--
+-- **A game that has an opinion is obeyed exactly, and keeps being obeyed**,
+-- including when it asks for zero: a game that tilts one dimension and not
+-- another means the second one, and guessing over the top of it would be
+-- worse than the default it replaces.
+--
+-- `own` is BUILDAT_LUANTI_ORBIT_TILT where it is set, arriving through
+-- luanti.world_info(). **Zero is what a comparison against official Luanti
+-- wants**, because zero is what Luanti does with a game that never asks.
+M.OWN_ORBIT_TILT = 22.8
+local game_asked_tilt = false
+
+function M.orbit_tilt(game_tilt, own)
+	if game_tilt ~= nil then
+		game_asked_tilt = true
+		return game_tilt
+	end
+	if game_asked_tilt then
+		-- It had one and has stopped sending it; that is still its sky
+		return 0
+	end
+	if own == nil then
+		return M.OWN_ORBIT_TILT
+	end
+	return own
+end
+
 function M.stepped_time(t)
 	return math.floor((t or 12000) / SUN_STEP + 0.5) * SUN_STEP
 end
@@ -184,6 +219,17 @@ end
 do
 	assert(M.above_horizon(-1) == 0 and M.above_horizon(0) == 0 and
 			M.above_horizon(1) == 1, "the horizon line")
+
+	-- Who decides the orbit's tilt, in the order it has to be decided in.
+	-- The stickiness is the point: a game that has spoken once is obeyed
+	-- from then on, zero included.
+	assert(M.orbit_tilt(nil, nil) == M.OWN_ORBIT_TILT,
+			"nobody asked, so it is ours")
+	assert(M.orbit_tilt(nil, 0) == 0, "the client was told to use zero")
+	assert(M.orbit_tilt(30, nil) == 30, "the game asked for thirty")
+	assert(M.orbit_tilt(nil, 45) == 0,
+			"the game has had an opinion, so ours stays out of it")
+	assert(M.orbit_tilt(0, nil) == 0, "and it may ask for zero")
 	assert(M.sun_amount(12000) == 1 and M.moon_amount(12000) == 0, "noon")
 	assert(M.sun_amount(0) == 0 and M.moon_amount(0) == 1, "midnight")
 	assert(M.moon_amount(SUN_RISE) > 0.4,
