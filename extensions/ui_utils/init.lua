@@ -88,7 +88,16 @@ local function button_menu_nav(root)
 		-- Without this a filter box beside a list cannot be used at all --
 		-- Enter in it also presses whichever button is selected under it,
 		-- which opens something instead of filtering.
-		if magic.ui.focusElement ~= nil then
+		--
+		-- **Whether anything has the focus is not the question.** The stack
+		-- gives its own root the focus as it pushes it -- see
+		-- UIStack:push() -- and a Button takes it when it is clicked, so
+		-- something always has it and asking that turned the arrows and
+		-- Enter off on every menu in the tree, this client's own first
+		-- screen included. What stands the menu down is the focus being in
+		-- a field that is being typed into.
+		local focus = magic.ui.focusElement
+		if focus ~= nil and focus:GetTypeName() == "LineEdit" then
 			if on_other_key then
 				on_other_key(key)
 			end

@@ -1189,6 +1189,11 @@ function M.define(dst, util)
 			HasFocus = util.self_function(
 					"HasFocus", {"boolean"}, {"UIElement"}),
 			GetName = util.self_function("GetName", {"string"}, {"UIElement"}),
+			-- Which kind of element this is -- "Button", "LineEdit" --
+			-- which is how the one with the focus is told apart from the
+			-- rest; see button_menu_nav() in extensions/ui_utils
+			GetTypeName = util.self_function(
+					"GetTypeName", {"string"}, {"UIElement"}),
 			GetText = util.self_function("GetText", {"string"}, {"UIElement"}),
 		},
 		properties = {
