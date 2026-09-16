@@ -174,12 +174,136 @@ local function pin_view(player)
 	player:set_sky(sky)
 end
 
+-- **What the run photographs is kept loaded while it runs.** Moving between
+-- viewpoints that are hundreds of nodes apart drops what the camera left, and
+-- a section that has to be loaded, sent and meshed again is a hole in the
+-- next picture of it -- which does not look like a missing chunk, it looks
+-- like a rendering fault. So the fixture pins its own viewpoints. See
+-- [KEEP_LOADED] in doc/plan/rendering_plan.md.
+--
+-- **Retention only**: what is ready changes, never what is drawn. The far
+-- clip and the fog bound the picture exactly as before, so a shot taken this
+-- way is comparable with one taken without it.
+--
+-- builtin/voxelworld loads by section -- 2x2x2 chunks of 32, so 64 voxels --
+-- and one forceload anywhere in a section pins the whole of it, so the grid
+-- steps by that. Horizontally further than vertically because that is the
+-- shape of what a camera at eye level sees.
+local SECTION = 64
+local KEEP_XZ = 128
+local KEEP_Y = 64
+
+-- Which blocks were pinned, so they can be let go again: a session that
+-- inherits a fixture's pins is a session that never unloads anything.
+local pinned = {}
+
+-- And which positions say whether the run can start. **Pinned wide, checked
+-- narrow**: the box around a viewpoint reaches above the sky and below the
+-- world at the viewpoints near either, and a block that cannot exist never
+-- loads -- 60 of 375 of them, which made "all loaded" unreachable. What has
+-- to be there is the ground the camera stands on and what is next to it.
+local probes = {}
+
+local function keep_loaded(pos)
+	-- The camera's own section and its eight horizontal neighbours: these
+	-- exist wherever a viewpoint does, because a viewpoint is somewhere a
+	-- camera stands
+	for dx = -SECTION, SECTION, SECTION do
+		for dz = -SECTION, SECTION, SECTION do
+			probes[#probes + 1] = {x = pos.x + dx, y = pos.y,
+					z = pos.z + dz}
+		end
+	end
+	for dx = -KEEP_XZ, KEEP_XZ, SECTION do
+		for dy = -KEEP_Y, KEEP_Y, SECTION do
+			for dz = -KEEP_XZ, KEEP_XZ, SECTION do
+				-- **The raw door, deliberately.** core.forceload_block() goes
+				-- through the vendored builtin's own bookkeeping, which caps
+				-- a mod at max_forceloaded_blocks -- sixteen -- and five
+				-- viewpoints want more than that. The cap would show up as a
+				-- missing mesh rather than as an error.
+				local bp = {x = math.floor((pos.x + dx) / 16),
+						y = math.floor((pos.y + dy) / 16),
+						z = math.floor((pos.z + dz) / 16)}
+				core.__forceload_block_raw(bp)
+				pinned[#pinned + 1] = bp
+			end
+		end
+	end
+end
+
+-- How many of the pinned blocks are actually there. A section that has not
+-- arrived answers "ignore", which is Luanti's own word for "not loaded".
+local function loaded_count()
+	local n = 0
+	for _, p in ipairs(probes) do
+		if core.get_node(p).name ~= "ignore" then
+			n = n + 1
+		end
+	end
+	return n
+end
+
+-- **What the run is doing, on the HUD**, top right, a line at a time. It
+-- costs nothing and it goes into every screenshot, so a picture says what the
+-- fixture believed it was photographing and anybody watching the client can
+-- see the run rather than guess at it. Updated about once a second; the
+-- states themselves change far more slowly than that.
+local hud_id, hud_player, hud_said = nil, nil, nil
+
+local function say(text)
+	if text == hud_said then
+		return
+	end
+	hud_said = text
+	if not (hud_player and hud_player:is_player()) then
+		return
+	end
+	if hud_id then
+		hud_player:hud_change(hud_id, "text", text)
+		return
+	end
+	hud_id = hud_player:hud_add({
+		hud_elem_type = "text",
+		-- Top right, and anchored by its own right edge so a longer line
+		-- grows leftwards into the sky rather than off the screen
+		position = {x = 1, y = 0},
+		alignment = {x = -1, y = 1},
+		offset = {x = -8, y = 8},
+		text = text,
+		number = 0xFFFF80,
+	})
+end
+
+core.register_on_shutdown(function()
+	for _, bp in ipairs(pinned) do
+		core.__forceload_free_block_raw(bp)
+	end
+end)
+
 core.register_on_joinplayer(function(player)
 	local seed = seed_now()
 	local states = states_of(seed)
 	core.settings:set("time_speed", "0")
 	core.log("action", "REFSHOT world seed " .. seed .. ", " ..
 			#states .. " states")
+
+	-- Pin what this run will photograph, and say when it is all there. **The
+	-- readiness line is what the harness waits for**, in place of the timing
+	-- guesswork a calibration ladder was trying to bound: a signal rather
+	-- than a guess. Only the viewpoints this world's states use, so a probe
+	-- cycle pins two and not five.
+	local wanted = {}
+	for _, st in ipairs(states) do
+		wanted[st.view] = true
+	end
+	for v, _ in pairs(wanted) do
+		keep_loaded(VIEWS[v].pos)
+	end
+	core.log("action", "REFSHOT pinned " .. #pinned .. " blocks around " ..
+			"the viewpoints")
+	hud_player = player
+	say("refshot: pinned " .. #pinned .. " blocks, loading")
 
 	-- The two call each other, so the name exists before either body does;
 	-- a plain `function show()` here would be a global, which the vendored
@@ -210,8 +334,55 @@ core.register_on_joinplayer(function(player)
 				st.weather
 		core.log("action", "REFSHOT " .. ((i - 1) % #states + 1) .. " " ..
 				name)
+		say("refshot: " .. ((i - 1) % #states + 1) .. "/" .. #states ..
+				" vp" .. st.view .. " " .. st.hour .. " " .. st.weather ..
+				"  (pass " .. math.floor((i - 1) / #states) + 1 .. ")")
 		aim(i, HOLD - REAIM)
 	end
 
-	core.after(8, function() show(1) end)
+	-- The pinned sections are waited for before the first viewpoint, and
+	-- **the camera parking at the spawn point while that happens is fine**
+	-- (user, 2026-09-16) -- what is not fine is waiting forever. **So it
+	-- bails**: if the count of loaded blocks stops rising, nothing more is
+	-- coming and the run gets on with it. Two minutes is the outside, and a
+	-- stall of twenty seconds ends it sooner.
+	local waited, best, stuck = 0, -1, 0
+	local function when_ready()
+		local n = loaded_count()
+		if n >= #probes then
+			core.log("action", "REFSHOT ready after " .. waited .. "s, " ..
+					n .. " of " .. #probes .. " places")
+			say("refshot: loaded, starting")
+			show(1)
+			return
+		end
+		say("refshot: loading " .. n .. "/" .. #probes ..
+				", " .. waited .. "s")
+		-- **A run whose world did not load exits rather than shooting.**
+		-- Pictures of a world with holes in it are worse than no pictures:
+		-- they are not obviously wrong, they look like a rendering fault, and
+		-- this project has already spent days reading numbers off them.
+		local why = nil
+		if stuck >= 20 then
+			why = "it stopped loading"
+		elseif waited >= 120 then
+			why = "it is taking too long"
+		end
+		if why then
+			core.log("action", "REFSHOT failed: " .. n .. " of " ..
+					#probes .. " places loaded after " .. waited ..
+					"s and " .. why)
+			say("refshot: FAILED, " .. n .. "/" .. #probes .. " loaded")
+			core.request_shutdown("REFSHOT: the world did not load")
+			return
+		end
+		if n > best then
+			best, stuck = n, 0
+		else
+			stuck = stuck + 2
+		end
+		waited = waited + 2
+		core.after(2, when_ready)
+	end
+	core.after(8, when_ready)
 end)

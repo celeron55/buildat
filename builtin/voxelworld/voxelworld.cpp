@@ -220,6 +220,15 @@ ChunkBuffer& Section::get_buffer(const pv::Vector3DInt32 &chunk_p,
 	return buf;
 }
 
+// See m_keep_loaded in CInstance: a run that never unloads anything, for the
+// reference shots. A free function because the instance and the module both
+// ask, and because it is read once per object rather than per step.
+static bool keep_loaded_wanted()
+{
+	const char *v = getenv("BUILDAT_VOXELWORLD_KEEP_LOADED");
+	return v != nullptr && v[0] != '\0' && ss_(v) != "0";
+}
+
 struct QueuedNodePhysicsUpdate
 {
 	uint node_id = 0;
@@ -267,6 +276,25 @@ struct CInstance: public voxelworld::Instance
 
 	int64_t m_buffer_unload_timeout = 5000000;
 	size_t m_max_buffers_loaded = 50;
+
+	// **A run that never unloads anything**, for the reference shots:
+	// BUILDAT_VOXELWORLD_KEEP_LOADED=1. The fixture forceloads the sections
+	// it will photograph, which stops those being dropped as distant -- but
+	// the buffers go anyway, on a five second timeout that does not ask
+	// whether anything wants them, so a camera coming back to a viewpoint
+	// still waits for them to be read and sent again. That wait is a hole in
+	// the picture, and a hole does not look like a missing chunk: it looks
+	// like a rendering fault.
+	//
+	// **It changes retention and nothing else.** What is ready changes; what
+	// is drawn is still bounded by the client's far clip and its fog exactly
+	// as before, so a picture taken with this on is comparable with one taken
+	// without. A mode that quietly drew more would be worse than the missing
+	// meshes. Memory is why it is not the default: a run of five viewpoints
+	// is bounded, and a session that wandered would grow without limit, which
+	// is what the timeout is for.
+	// See [KEEP_LOADED] in doc/plan/rendering_plan.md.
+	const bool m_keep_loaded = keep_loaded_wanted();
 
 	// Sections (this(y,z)=sector, sector(x)=section)
 	sm_<pv::Vector<2, int16_t>, sm_<int16_t, Section>> m_sections;
@@ -717,6 +745,8 @@ struct CInstance: public voxelworld::Instance
 
 	void unload_distant_sections(size_t &budget)
 	{
+		if(m_keep_loaded)
+			return;
 		sv_<pv::Vector3DInt16> drop;
 		for(auto &sector : m_sections){
 			for(auto &pair : sector.second){
@@ -1484,6 +1514,8 @@ struct CInstance: public voxelworld::Instance
 
 	void unload_old_buffers(int64_t unload_timeout, size_t max_buffers)
 	{
+		if(m_keep_loaded)
+			return;
 		// Swap out the current set
 		std::vector<Section*> sections_with_loaded_buffers;
 		sections_with_loaded_buffers.swap(m_sections_with_loaded_buffers);
@@ -3726,6 +3758,9 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 	void init()
 	{
+		if(keep_loaded_wanted())
+			log_i(MODULE, "BUILDAT_VOXELWORLD_KEEP_LOADED: nothing is "
+					"unloaded this run");
 		// NOTE: These also apply to CInstances
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:unload"));

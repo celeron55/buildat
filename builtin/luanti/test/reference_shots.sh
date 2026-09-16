@@ -69,6 +69,24 @@ shoot_states()
 	done
 	total=${total:-16}
 	echo "states=$total"
+	# **And for the fixture to say its viewpoints are loaded**, which is a
+	# signal where this used to guess: it forceloads what it will photograph
+	# and logs when the sections are there. A fixture that does not say so --
+	# an older one, or official Luanti's copy of it -- just does not hold this
+	# up. See [KEEP_LOADED] in doc/plan/rendering_plan.md.
+	for i in $(seq 1 150); do
+		grep -q "REFSHOT ready\|REFSHOT failed" "$log" 2>/dev/null && break
+		grep -q "REFSHOT pinned" "$log" 2>/dev/null || break
+		sleep 2
+	done
+	grep -a "REFSHOT ready\|REFSHOT failed\|REFSHOT pinned" "$log" \
+			2>/dev/null | tail -2
+	# The fixture exits rather than photographing a world with holes in it, so
+	# there is nothing here to wait for either
+	if grep -q "REFSHOT failed" "$log" 2>/dev/null; then
+		echo "the fixture gave up on loading the world; nothing was shot" >&2
+		return 1
+	fi
 	# Two full cycles, overwriting: the world generates lazily as the player is
 	# teleported, so the first pass through a viewpoint can photograph terrain
 	# that has not arrived. The second cycle overwrites it with a warm one, which

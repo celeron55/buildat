@@ -80,6 +80,7 @@ rm -rf "../user/games/luanti_launcher/saves/$save"
 port=$(( 29600 + (RANDOM % 90) ))
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_IMPORT="$world" BUILDAT_LUANTI_PBR="$mode" \
+	BUILDAT_VOXELWORLD_KEEP_LOADED=1 \
 	BUILDAT_LUANTI_LUA="$fixture" \
 	bin/buildat_server -m ../games/luanti_launcher -D ../user -P "$port" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/srv.log" &
@@ -101,8 +102,12 @@ srv=$(pgrep -x buildat_server | head -1)
 # which a comparison shot is required to carry, the same way official Luanti's
 # half carries show_debug. It is off by default, and the delay before it is
 # for the client to have a world to draw it over.
+# An hour, not half of one: the shooter decides when the run is over and this
+# is only the client's outside lifetime. Half an hour used to be plenty and
+# stopped being so once the fixture waited for its viewpoints to load -- the
+# client quit mid-run with eleven states still to shoot.
 { echo "delay 45000"; echo "keypress F5"
-	echo "delay 1800000"; echo "quit"; } > "$tmp/cmds.txt"
+	echo "delay 3600000"; echo "quit"; } > "$tmp/cmds.txt"
 bin/buildat -s "localhost:$port" -w 1280x720 -l 3 -c @"$tmp/cmds.txt" \
 	> "$tmp/cli.log" 2>&1 &
 cli=$!
