@@ -125,11 +125,12 @@ shoot_states()
 			if import -window "$win" "$out/$name.png" 2>/dev/null; then
 				taken=$((taken + 1))
 				echo "$name" >> "$shotlist"
-				# A state is six seconds in the fixture; nine gives a cycle
-				# half again as long as it needs, which is what a server
-				# loading a world around a teleporting player uses up
+				# A state is six seconds in the fixture, and fourteen is what
+				# a server loading a world around a teleporting player
+				# actually takes: nine cut the third cycle short and left
+				# eight cold pictures standing in a twenty-picture set
 				[ "$taken" -eq 1 ] && deadline=$(( $(date +%s) + \
-						total * 9 * ${CYCLES:-2} + 60 ))
+						total * 14 * ${CYCLES:-2} + 60 ))
 				echo "shot $name"
 			else
 				echo "MISSED $name" >&2
@@ -172,6 +173,31 @@ check_shots()
 			bad=$((bad + 1))
 		fi
 	done
+	# And against the reference set for this mode, which is the test that
+	# catches what the two above cannot: a picture that is dark but not flat,
+	# where the sky arrived and the terrain did not. The same state in the
+	# reference is the same world at the same hour, so a frame three times
+	# brighter or darker than it is not a rendering difference.
+	local ref=""
+	case "$out" in
+	*_unlit) ref="$(dirname "$out")/official_noshadow" ;;
+	*official*) ref="" ;;
+	*) ref="$(dirname "$out")/official" ;;
+	esac
+	if [ -n "$ref" ] && [ -d "$ref" ]; then
+		for f in "$out"/*.png; do
+			local r="$ref/$(basename "$f")"
+			[ -f "$r" ] || continue
+			read -r a b < <(magick "$f" -colorspace Gray \
+					-format "%[fx:mean] " info: && magick "$r" \
+					-colorspace Gray -format "%[fx:mean]" info:)
+			if awk "BEGIN{exit !($a > $b * 3 || $a < $b / 3)}"; then
+				echo "OFF BY A LOT  $(basename "$f")  $a against the" \
+						"reference's $b" >&2
+				bad=$((bad + 1))
+			fi
+		done
+	fi
 	echo "$(ls "$out" | wc -l) pictures in $out, $bad suspect"
 	[ "$bad" -eq 0 ]
 }

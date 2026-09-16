@@ -1133,10 +1133,21 @@ local function update_sky(dt)
 	if sky_now.unlit then
 		-- Unlit reads cAmbientColor.rgb * vColor.a + vColor.rgb, where the
 		-- alpha is how much sky the surface sees, so the ambient is the whole
-		-- of the daylight rather than a share of it beside a sun. Luanti's
-		-- own model exactly: the baked light times the hour's ratio. Neutral,
-		-- the colour of the hour being in the sky and the fog already.
-		zone.ambientColor = magic.Color(sky_now.lit, sky_now.lit, sky_now.lit)
+		-- of the daylight rather than a share of it beside a sun.
+		--
+		-- **And Luanti's daylight is not white.** get_sunlight_color() gives
+		-- `ratio - 0.04` for red and green and `0.98 * ratio + 0.078` for
+		-- blue, which at noon is 0.96, 0.96, 1.058 -- a tenth more blue than
+		-- red. A neutral ambient, which this was, drew official Luanti's own
+		-- stone at B/R 0.90 against its 1.00 and its snow at 1.03 against
+		-- 1.12; extensions/luanti_client has carried the colour all along and
+		-- reads 0.99 and 1.16 on the same probes. The brightness stays
+		-- `lit` -- what is taken here is the hue, normalised at green.
+		local ratio = 0.175 + 0.825 * day
+		local rg = math.max(ratio - 0.04, 1e-4)
+		local blue = (0.98 * ratio + 0.078) / rg
+		zone.ambientColor = magic.Color(sky_now.lit, sky_now.lit,
+				sky_now.lit * blue)
 	else
 		zone.ambientColor = blend(NIGHT_AMBIENT, SKY_AMBIENT, day)
 	end
