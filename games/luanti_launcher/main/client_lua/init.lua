@@ -181,7 +181,6 @@ local SUN_COLOR = magic.Color(1.0, 0.96, 0.88)
 local MOON_COLOR = magic.Color(0.55, 0.68, 1.0)
 -- Reassigned when a game says what its horizon is; see sub_sky below
 local DAY_FOG = magic.Color(0.60, 0.72, 0.88)
-local NIGHT_FOG = magic.Color(0.05, 0.07, 0.12)
 local SUN_DIR = {x = -0.6, y = -1.0, z = 0.8}
 local EXPOSURE_BIAS = 1.6
 
@@ -845,15 +844,10 @@ local function apply_sky_of_hour()
 				b = a.b + (b.b - a.b) * k}
 	end
 	local t = sky_now.day
-	-- How light it is, which is not the same as which colours the hour uses.
-	-- **Luanti multiplies the sky it drew by the hour's own brightness** --
-	-- sky.cpp, m_bgcolor and m_skycolor both -- so a game's night_horizon is
-	-- a base to be dimmed and not the colour of the night sky. Without this
-	-- the launcher drew VoxeLibre's #4A6790 as it stands and the night sky
-	-- came out sixteen times official Luanti's. The ramp is the extension's:
-	-- Luanti's day/night ratio bottoms out at 0.175 rather than nothing, and
-	-- goes through its light curve, which a gamma of 2.2 is the shape of.
-	local lit = (0.175 + 0.825 * t) ^ 2.2
+	-- The hour's own brightness, out of update_sky. Without it the launcher
+	-- drew VoxeLibre's night_horizon #4A6790 as it stands and the night sky
+	-- came out sixteen times official Luanti's.
+	local lit = sky_now.lit or 1
 	local function dim(c)
 		return {r = c.r * lit, g = c.g * lit, b = c.b * lit}
 	end
@@ -922,10 +916,15 @@ local function apply_sky_of_hour()
 	-- set_star_look() in luanti_sky.lua
 	world_sky:set_star_look(density, game_sky.star_color, (1 - t) * (1 - t))
 
-	-- What a direction that cannot see the sky is drawn as: Luanti's
-	-- indoors colour, dimmed with the hour the way the reflections are, and
-	-- the game's own say over whether it happens at all
-	world_sky:set_indoors(indoors_of(1), 0.10 + 0.90 * t)
+	-- What a direction that cannot see the sky is drawn as: Luanti's indoors
+	-- colour, dimmed by the hour, and the game's own say over whether it
+	-- happens at all. **By the same brightness the gradient is dimmed by**:
+	-- Luanti keeps its indoors colour in the same bright-colour it keeps the
+	-- sky's two ends in and multiplies all three by m_brightness at once. A
+	-- linear tenth at midnight is five times that, which is enough to be the
+	-- night sky -- it is mixed in wherever the sky-visibility cube says a
+	-- direction is less than open, which outdoors is most of the low sky.
+	world_sky:set_indoors(indoors_of(1), sky_now.lit or 1)
 	world_sky:set_auto_dim(game_sky.auto_dim_skybox ~= false)
 
 	-- The clouds are white because the sun is on them, so they go with it
@@ -980,6 +979,13 @@ local function update_sky(dt)
 	if luanti.day_night_override then
 		day = luanti.day_night_override
 	end
+	-- How light it is, which is not the same as which colours the hour uses.
+	-- **Luanti multiplies what it drew by this** -- the sky's two ends and
+	-- the fog with them -- so a game's night colours are a base to be dimmed
+	-- and not the colour of the sky at midnight. The ramp is the extension's:
+	-- Luanti's day/night ratio bottoms out at 0.175 rather than nothing, and
+	-- goes through its light curve, which a gamma of 2.2 is the shape of.
+	sky_now.lit = (0.175 + 0.825 * day) ^ 2.2
 
 	-- How much of each light there is: its own hour of the day, whether it
 	-- is over the horizon at all, what the cloud leaves of it, and whether
@@ -1015,10 +1021,14 @@ local function update_sky(dt)
 	-- the haze is the indoors colour rather than a sky the player cannot
 	-- see. See [CAVE_SKY].
 	local seen = voxel_shading.sky_visibility_above()
-	-- A game's own fog colour is art direction and wins outright; without
-	-- one the fog is the horizon of this hour, which is what it has always
-	-- been here
-	local base = game_sky.fog_color or blend(NIGHT_FOG, DAY_FOG, day)
+	-- A game's own fog colour is art direction and wins outright; without one
+	-- the fog is the horizon, dimmed by the hour the way the sky it meets is.
+	-- **One colour scaled, not two blended**: a hardcoded night fog is a
+	-- second thing to keep in step with the gradient, and it was not in step
+	-- -- the sky went dark and the fog stayed at 0.05, 0.07, 0.12, which is
+	-- what the night sky then measured.
+	local base = game_sky.fog_color or
+			blend(magic.Color(0, 0, 0), DAY_FOG, sky_now.lit)
 	zone.fogColor = blend(base, indoors_of(0.10 + 0.90 * day), 1 - seen)
 	sky_now.height = height
 	sky_now.day = day
