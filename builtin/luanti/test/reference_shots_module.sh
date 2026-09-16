@@ -37,6 +37,14 @@ tmp=$(mktemp -d)
 	echo "run: $me/reference_shots.sh reference" >&2; exit 2; }
 
 cd "$here/Build"
+# Another session on this machine may be running a server of its own, and two
+# of them fight over the save directory's sqlite: a run that starts into one
+# dies with "database is locked" before the fixture's first state. Waited for
+# rather than raced, the way the sweep's own runner does.
+for i in $(seq 1 600); do
+	pgrep -x buildat_server >/dev/null || break
+	sleep 2
+done
 rm -rf "../user/games/luanti_launcher/saves/$save"
 port=$(( 29600 + (RANDOM % 90) ))
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
