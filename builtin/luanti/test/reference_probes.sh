@@ -27,7 +27,9 @@ fi
 
 # name | picture | crop | what it is for
 PROBES="
-grass|vp4_1300|40x30+280+545|colourised: the one GREEN_BIAS owns
+grass|vp4_1300|40x30+280+545|colourised, top face: the one GREEN_BIAS owns
+grasstop|vp4_1300|200x30+500+560|the same, over the whole field
+grassside|vp4_1300|60x40+1100+500|the same node's SIDE: says whether the fault is the face or the palette
 stone|vp4_1300|30x20+625+320|CONTROL, no palette: must not move
 dirt|vp4_1300|30x20+45+420|colourised, weaker
 cave|vp4_1300|60x40+610+360|the floor, TOO_BRIGHT's black caves
