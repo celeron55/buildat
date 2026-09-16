@@ -112,40 +112,53 @@ bin/buildat -s "localhost:$port" -w 1280x720 -l 3 -c @"$tmp/cmds.txt" \
 	> "$tmp/cli.log" 2>&1 &
 cli=$!
 
-# Three cycles rather than the default two: this client imported the world
-# rather than being handed a cached one, and it is still meshing it through
-# the second pass -- a picture of viewpoint 1 with nineteen thousand blocks
-# left to mesh is a picture of fog.
+# **The client takes its own pictures and the fixture says when the set is
+# done** -- see [ONE_CYCLE] in doc/plan/rendering_plan.md. Nothing here waits
+# on a clock, grabs a window or counts cycles: the server marks a state once
+# the world around the viewpoint is loaded, the client answers once it has
+# drawn it, and one pass is enough because there is no longer such a thing as
+# a picture taken too early.
 #
-# **A probe cycle is only sound against a client that is already warm.** Two
-# states go round in seconds where twenty take two minutes, and this client
-# meshes an imported world for longer than either: eleven thousand blocks were
-# still queued when a three-cycle probe run took its last picture, and eight
-# cycles and then five minutes of waiting for the mesh queue to go quiet both
-# ended the same way. The numbers such a run produces look like a rendering
-# bug rather than an empty world. **What makes PROBE=1 worth its name is
-# [PROBE_CYCLE]'s other half** -- one server and one client kept up across
-# iterations -- and until that exists, a full twenty-state run is the one to
-# believe.
-CYCLES=${CYCLES:-3} \
-	SHOT_AT=$(awk -v h="${HOLD:-6}" 'BEGIN{printf "%.2f", h * 2 / 3}') \
-	"$me/reference_shots.sh" shoot "$tmp/srv.log" "$cli" "$out"
-status=$?
-# A run that shot nothing did not happen: two sessions on one machine fight
-# over the save's sqlite and the loser dies before the fixture's first state,
-# which the wait above can only narrow and not close. Retried rather than
-# reported, a probe cycle being a minute.
-if [ "$status" -ne 0 ] && [ "${REFSHOT_TRY:-1}" -lt 3 ]; then
-	echo "nothing was shot; trying again" >&2
-	kill "$cli" 2>/dev/null; sleep 2
-	kill -INT "$srv" 2>/dev/null
-	for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
-	kill -9 "$srv" 2>/dev/null
-	sleep 20
-	# By its own absolute path: this has cd'd into Build by now, and a
-	# relative $0 does not survive that -- the exec failed silently and the
-	# retry never happened
-	REFSHOT_TRY=$(( ${REFSHOT_TRY:-1} + 1 )) exec "$me/$(basename "$0")" "$@"
+# What this script does is wait, and then put the pictures where the set
+# lives. The client cannot name them -- buildat.take_screenshot() names by
+# the date and the time on purpose -- so the fixture logs the pairing and
+# this reads it.
+shots_dir="$here/user/screenshots"
+for i in $(seq 1 1800); do
+	grep -q "REFSHOT done\|REFSHOT failed" "$tmp/srv.log" 2>/dev/null && break
+	kill -0 "$cli" 2>/dev/null || break
+	sleep 2
+done
+sleep 2
+status=0
+grep -q "REFSHOT done" "$tmp/srv.log" 2>/dev/null || status=1
+if [ "$status" -ne 0 ]; then
+	echo "the run did not finish:" >&2
+	grep -a "REFSHOT failed" "$tmp/srv.log" | tail -1 >&2
+fi
+
+mkdir -p "$out"
+taken=0
+missing=0
+while read -r stem file; do
+	[ -n "$stem" ] || continue
+	if [ -f "$shots_dir/$file" ]; then
+		cp "$shots_dir/$file" "$out/$stem.png"
+		taken=$((taken + 1))
+	else
+		echo "missing $file for $stem" >&2
+		missing=$((missing + 1))
+	fi
+done <<EOF
+$(grep -a "REFSHOT shot " "$tmp/srv.log" | sed 's/^.*REFSHOT shot //' | sort -u)
+EOF
+echo "$taken pictures into $out"
+[ "$missing" -eq 0 ] || status=1
+
+# The two cheap tests over what this run shot, which is what they were always
+# for; see check_shots() in reference_shots.sh
+if [ "$taken" -gt 0 ]; then
+	OUT_DIR="$out" "$me/reference_shots.sh" check || status=1
 fi
 
 kill "$cli" 2>/dev/null

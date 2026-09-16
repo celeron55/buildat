@@ -268,14 +268,21 @@ local pinned = {}
 -- to be there is the ground the camera stands on and what is next to it.
 local probes = {}
 
-local function keep_loaded(pos)
+-- The same probes, grouped by the viewpoint they belong to: the readiness of
+-- a state is about the place that state looks at, not about the whole set.
+local probes_of_view = {}
+
+local function keep_loaded(pos, view)
+	local mine = {}
+	probes_of_view[view] = mine
 	-- The camera's own section and its eight horizontal neighbours: these
 	-- exist wherever a viewpoint does, because a viewpoint is somewhere a
 	-- camera stands
 	for dx = -SECTION, SECTION, SECTION do
 		for dz = -SECTION, SECTION, SECTION do
-			probes[#probes + 1] = {x = pos.x + dx, y = pos.y,
-					z = pos.z + dz}
+			local p = {x = pos.x + dx, y = pos.y, z = pos.z + dz}
+			probes[#probes + 1] = p
+			mine[#mine + 1] = p
 		end
 	end
 	for dx = -KEEP_XZ, KEEP_XZ, SECTION do
@@ -298,14 +305,26 @@ end
 
 -- How many of the pinned blocks are actually there. A section that has not
 -- arrived answers "ignore", which is Luanti's own word for "not loaded".
-local function loaded_count()
+local function loaded_count(list)
 	local n = 0
-	for _, p in ipairs(probes) do
+	for _, p in ipairs(list or probes) do
 		if core.get_node(p).name ~= "ignore" then
 			n = n + 1
 		end
 	end
 	return n
+end
+
+-- **Is this viewpoint complete as far as this server is concerned?** The
+-- server half of [ONE_CYCLE]'s readiness rule: nothing around the viewpoint
+-- is still missing, so there is nothing left for the server to send and the
+-- marker that follows means what it says.
+local function view_is_loaded(view)
+	local list = probes_of_view[view]
+	if list == nil then
+		return true
+	end
+	return loaded_count(list) >= #list
 end
 
 -- **What the run is doing, on the HUD**, top right, a line at a time. It
@@ -362,17 +381,54 @@ core.register_on_joinplayer(function(player)
 		wanted[st.view] = true
 	end
 	for v, _ in pairs(wanted) do
-		keep_loaded(VIEWS[v].pos)
+		keep_loaded(VIEWS[v].pos, v)
 	end
 	core.log("action", "REFSHOT pinned " .. #pinned .. " blocks around " ..
 			"the viewpoints")
 	hud_player = player
 	say("refshot: pinned " .. #pinned .. " blocks, loading")
 
+	-- **A state ends when the client says it has drawn it**, not when a
+	-- timer says so -- see [ONE_CYCLE] in doc/plan/rendering_plan.md. The
+	-- server marks the state once nothing around the viewpoint is missing,
+	-- the client answers with the name of the picture it took, and this
+	-- advances on that answer. One pass is then enough: the two extra passes
+	-- existed because nothing could tell a cold picture from a warm one.
+	--
+	-- **Without the channel it is the old timed pass**, which is how this
+	-- same file behaves as official Luanti's worldmod: that client is
+	-- unmodified and cannot answer.
+	local channel = rawget(_G, "__luanti_refshot_mark") ~= nil
+	local passes = tonumber(rawget(_G, "REFSHOT_CYCLES")) or
+			(channel and 1 or 2)
+	-- What a state is allowed to take before the run is called failed. Under
+	-- the channel the only ways to hang are real faults -- a section that
+	-- will not load, a mesh that will not build -- so this is tens of
+	-- seconds rather than the minutes a guessed hold needed.
+	local cap = tonumber(rawget(_G, "REFSHOT_CAP")) or 90
+
+	local token, marked, waited_shot = 0, false, 0
+	local shots = {}
+
 	-- The two call each other, so the name exists before either body does;
 	-- a plain `function show()` here would be a global, which the vendored
 	-- builtin's strict.lua warns about and which would leak into the game
 	local show
+	local function name_of(i)
+		local st = states[(i - 1) % #states + 1]
+		return seed .. "_vp" .. st.view .. "_" .. st.hour .. "_" .. st.weather
+	end
+
+	local function finish(why)
+		core.log("action", "REFSHOT done: " .. #shots .. " of " ..
+				(#states * passes) .. " pictures" .. (why and (", " .. why) or ""))
+		for _, pair in ipairs(shots) do
+			core.log("action", "REFSHOT shot " .. pair[1] .. " " .. pair[2])
+		end
+		say("refshot: done, " .. #shots .. " pictures")
+		core.request_shutdown("REFSHOT: the set is taken")
+	end
+
 	local function aim(i, left)
 		if not (player and player:is_player()) then
 			return
@@ -386,19 +442,70 @@ core.register_on_joinplayer(function(player)
 		hold_weather(st.weather)
 		still_objects(v.pos)
 		pin_view(player)
-		if left > 0 then
-			core.after(REAIM, function() aim(i, left - REAIM) end)
-		else
-			core.after(REAIM, function() show(i + 1) end)
+		if not channel then
+			if left > 0 then
+				core.after(REAIM, function() aim(i, left - REAIM) end)
+			else
+				core.after(REAIM, function() show(i + 1) end)
+			end
+			return
 		end
+		-- A timer left over from a state that has already been answered
+		if token ~= i then
+			return
+		end
+		-- The server's half of the rule: nothing around this viewpoint is
+		-- still missing, so there is nothing left to send and the marker
+		-- that follows means what it says.
+		--
+		-- **Never in the step that set the state.** The marker's whole
+		-- meaning is that it arrives after everything sent before it, and a
+		-- state sets more than chunks: the hour goes out as the call is
+		-- made, but the sky a weather change hangs on the player does not.
+		-- Marking in the same step photographed three states with the
+		-- previous one's sky -- a night viewpoint in daylight -- while the
+		-- world in front of the camera was perfectly correct.
+		if not marked and waited_shot > 0 and view_is_loaded(st.view) then
+			marked = true
+			__luanti_refshot_mark(i, v.pos.x, v.pos.y, v.pos.z)
+		end
+		waited_shot = waited_shot + REAIM
+		if waited_shot >= cap then
+			local half = marked and "the client never drew it" or
+					"the world never finished loading around it"
+			core.log("action", "REFSHOT failed: " .. name_of(i) ..
+					" after " .. math.floor(waited_shot) .. "s, " .. half)
+			say("refshot: FAILED at " .. name_of(i))
+			core.request_shutdown("REFSHOT: a state never became ready")
+			return
+		end
+		core.after(REAIM, function() aim(i, 0) end)
+	end
+
+	-- What the client answers with, and the only thing it has to say: the
+	-- name of the file it wrote. This set the state, so it pairs them.
+	function core.__refshot_shot(t, name)
+		if t ~= token then
+			return
+		end
+		shots[#shots + 1] = {name_of(t), name}
+		core.log("action", "REFSHOT shot " .. name_of(t) .. " " .. name)
+		if t >= #states * passes then
+			finish()
+			return
+		end
+		show(t + 1)
 	end
 
 	function show(i)
+		if i > #states * passes then
+			finish()
+			return
+		end
+		token, marked, waited_shot = i, false, 0
 		local st = states[(i - 1) % #states + 1]
-		local name = seed .. "_vp" .. st.view .. "_" .. st.hour .. "_" ..
-				st.weather
 		core.log("action", "REFSHOT " .. ((i - 1) % #states + 1) .. " " ..
-				name)
+				name_of(i))
 		say("refshot: " .. ((i - 1) % #states + 1) .. "/" .. #states ..
 				" vp" .. st.view .. " " .. st.hour .. " " .. st.weather ..
 				"  (pass " .. math.floor((i - 1) / #states) + 1 .. ")")

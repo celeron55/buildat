@@ -233,6 +233,12 @@ end
 
 M.texture = texture_of
 
+-- Whether this client has composed the texture modifiers the server named.
+-- A chunk meshed before they arrive is drawn with whatever the atlas could
+-- find; see [TEXMOD_RACE] in doc/plan/luanti_module_plan.md. The reference
+-- set will not photograph a state until this is true.
+local texmods_done = false
+
 buildat.sub_packet("luanti:texmods", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	local n = 0
@@ -255,6 +261,7 @@ buildat.sub_packet("luanti:texmods", function(data)
 			end
 		end
 	end
+	texmods_done = true
 	log:info("luanti:texmods: " .. n .. " textures composed, " .. failed ..
 			" could not be")
 	for name, _ in pairs(texmod.unimplemented) do
@@ -2445,6 +2452,80 @@ buildat.send_packet("luanti:get_texmods", "")
 buildat.send_packet("luanti:get_item_images", "")
 buildat.send_packet("luanti:get_object_props", "")
 buildat.send_packet("luanti:get_dig_props", "")
+--
+-- The reference set's readiness channel; see [ONE_CYCLE] in
+-- doc/plan/rendering_plan.md.
+--
+-- The server marks a state once it has nothing left to send for it. **The
+-- ordering is the mechanism**: the channel is reliable and ordered, so every
+-- chunk packet sent before the marker has already been handled by the time
+-- this handler runs. From here on "my mesh queue is empty" is a fact about
+-- the whole state rather than about whatever has arrived so far -- which is
+-- the ambiguity that three cycles of shooting were hedging against.
+--
+-- The reply carries the picture's name and nothing else. The fixture set the
+-- state, so it is the one that knows which state this is, and because it
+-- advances on the reply rather than on a clock there is never more than one
+-- state in flight.
+local refshot_token = nil
+local refshot_still = 0
+
+local refshot_at = nil
+
+buildat.sub_packet("luanti:refshot_mark", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	refshot_token = tonumber(values[1] or "")
+	-- Where the state is looking from, so that the readiness test can be
+	-- about that place rather than about the queue as a whole
+	refshot_at = {x = tonumber(values[2] or "") or 0,
+			y = tonumber(values[3] or "") or 0,
+			z = tonumber(values[4] or "") or 0}
+	refshot_still = 0
+end)
+
+magic.SubscribeToEvent("Update", function(event_type, event_data)
+	if refshot_token == nil or not texmods_done then
+		return
+	end
+	-- **The test is positive: is the world around the viewpoint drawn.**
+	-- Two weaker tests were tried and both photograph an empty sky. "The
+	-- mesh queue is empty" is never true of a run that forceloads its
+	-- viewpoints -- thousands of chunks stay queued for places the camera is
+	-- nowhere near. "Nothing in the queue is due" is true of a place whose
+	-- chunks have not been asked for yet, which is exactly the moment after
+	-- a teleport. Only "every chunk around there has a scene node" says the
+	-- picture will have a world in it.
+	if voxelworld.undrawn_around(refshot_at, 2) > 0 then
+		refshot_still = 0
+		return
+	end
+	-- And nothing still due, so that what is drawn is also up to date:
+	-- next_mesh_f is distance over trigger distance at the head of the
+	-- spatial queue, and voxelworld meshes while that is at most 1.
+	local f = voxelworld.counts().next_mesh_f
+	if f ~= nil and f <= 1.0 then
+		refshot_still = 0
+		return
+	end
+	-- Three frames, because the head of the queue is momentarily out of
+	-- range between the chunk that finished and the one behind it
+	refshot_still = refshot_still + 1
+	if refshot_still < 3 then
+		return
+	end
+	local name, err = buildat.take_screenshot()
+	if name == nil then
+		-- One already pending is not a failure: the next frame will do
+		if tostring(err):find("pending") then
+			return
+		end
+		name = "ERROR " .. tostring(err)
+	end
+	buildat.send_packet("luanti:refshot_shot", cereal.binary_output(
+			{tostring(refshot_token), name}, {"array", "string"}))
+	refshot_token = nil
+end)
+
 buildat.send_packet("luanti:get_world_info", "")
 buildat.send_packet("luanti:get_translations", "")
 

@@ -100,6 +100,9 @@ local modified_warned = {}
 
 -- NOTE: node can be nil, meaning that it was cached to be nil
 local static_node_cache = {} -- {z: {y: {x: {node:, fetched:}}}} (chunk_p)
+-- Chunk node id -> its geometry has been built at least once; see
+-- M.is_chunk_drawn()
+local geometry_done = {}
 
 function on_ready()
 	if is_ready then
@@ -404,6 +407,13 @@ function sub_events()
 							end
 						end
 						update_voxel_geometry(node)
+						-- **That this ran is the only honest "it is
+						-- drawn".** A chunk's scene node exists from the
+						-- moment it is replicated, so its presence says
+						-- nothing about whether there is anything to see;
+						-- an empty chunk runs this too and is then as
+						-- drawn as it will ever be. See M.is_chunk_drawn().
+						geometry_done[node_update.node_id] = true
 					end
 					if node_update.type == "physics" then
 						update_voxel_physics(node)
@@ -554,6 +564,16 @@ function M.counts()
 	return {
 		chunks = chunks,
 		to_mesh = node_update_queue and node_update_queue:get_length() or 0,
+		-- How near the front of the queue is to being due. The queue is
+		-- spatial and this is distance over trigger distance, so the loop
+		-- above meshes while it is at most 1 and leaves the rest for when
+		-- the camera is closer: **nil or above 1 means the client will draw
+		-- nothing more where it is standing**, which is a far more useful
+		-- question than how long the queue is. A world pinned by a
+		-- forceloading fixture keeps thousands of chunks queued that are
+		-- nowhere near the camera.
+		next_mesh_f = node_update_queue and
+				node_update_queue:peek_next_f() or nil,
 		voxel_types = voxel_reg and voxel_reg:get_count() or 0,
 	}
 end
@@ -591,6 +611,41 @@ function M.chunk_has_physics(chunk_p)
 		return false
 	end
 	return node:GetVar("buildat_physics_ready"):GetBool()
+end
+
+-- **How much of the world around a place is actually drawn.** Returns how
+-- many chunks within `chunk_radius` of `p` have no scene node, which is the
+-- positive question: "nothing is queued" is also true of a place whose
+-- chunks have not been asked for yet, and a picture taken then is of an
+-- empty sky. See [ONE_CYCLE] in doc/plan/rendering_plan.md, where exactly
+-- that was photographed.
+-- Whether this chunk has had its geometry built, rather than merely having
+-- arrived. See the note where the flag is set.
+function M.is_chunk_drawn(chunk_p)
+	local node = M.get_static_node(chunk_p)
+	if not node then
+		return false
+	end
+	return geometry_done[node:GetID()] == true
+end
+
+function M.undrawn_around(p, chunk_radius)
+	local c0 = M.get_chunk_position(p)
+	if c0 == nil then
+		return 0
+	end
+	local missing = 0
+	for dz = -chunk_radius, chunk_radius do
+		for dy = -chunk_radius, chunk_radius do
+			for dx = -chunk_radius, chunk_radius do
+				if not M.is_chunk_drawn(buildat.Vector3(
+						c0.x + dx, c0.y + dy, c0.z + dz)) then
+					missing = missing + 1
+				end
+			end
+		end
+	end
+	return missing
 end
 
 function M.get_static_node_cache(chunk_p)

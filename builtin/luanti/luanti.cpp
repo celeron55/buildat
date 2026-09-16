@@ -1024,6 +1024,8 @@ struct Module: public interface::Module, public luanti::Interface
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_world_info"));
 		m_server->sub_event(this, Event::t(
+				"network:packet_received/luanti:refshot_shot"));
+		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_translations"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_model"));
@@ -1060,6 +1062,8 @@ struct Module: public interface::Module, public luanti::Interface
 				on_get_translations, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:get_model",
 				on_get_model, network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:refshot_shot",
+				on_refshot_shot, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:fields",
 				on_fields, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:inv_action",
@@ -5019,6 +5023,36 @@ struct Module: public interface::Module, public luanti::Interface
 		return 0;
 	}
 
+	// __luanti_refshot_mark(token): tell every client that the state it is
+	// looking at is complete as far as this server is concerned, and that it
+	// should photograph it once it has drawn what it has been sent.
+	//
+	// **The ordering is the whole mechanism.** The channel is reliable and
+	// ordered, so by the time the client's handler for this runs, every
+	// chunk packet sent before it has already been handled -- which is what
+	// turns "my mesh queue is empty" from a guess into a fact. See
+	// [ONE_CYCLE] in doc/plan/rendering_plan.md.
+	static int l_refshot_mark(lua_State *L)
+	{
+		Module *self = module_of(L);
+		const int token = (int)luaL_checkinteger(L, 1);
+		// And where the state looks from, so that the client's half of the
+		// rule can be about that place rather than about its queue as a
+		// whole -- see the comment on the client's handler
+		sv_<ss_> flat;
+		flat.push_back(itos(token));
+		flat.push_back(ftos((float)luaL_optnumber(L, 2, 0.0)));
+		flat.push_back(ftos((float)luaL_optnumber(L, 3, 0.0)));
+		flat.push_back(ftos((float)luaL_optnumber(L, 4, 0.0)));
+		sv_<ss_> names;
+		for(const auto &pair : self->m_player_peers)
+			names.push_back(pair.first);
+		for(const ss_ &n : names)
+			self->send_to_player(n, "luanti:refshot_mark", flat);
+		lua_pushinteger(L, (lua_Integer)names.size());
+		return 1;
+	}
+
 	static int l_set_node(lua_State *L)
 	{
 		Module *self = module_of(L);
@@ -5717,6 +5751,46 @@ struct Module: public interface::Module, public luanti::Interface
 
 	// What the client sends back when a form's button is pressed: the form's
 	// name and then the fields, a name and a value each.
+	// The reference fixture's readiness reply: the client has drawn the state
+	// it was marked for and has taken the picture. Carries the token and the
+	// name the picture was saved under, and nothing else -- the fixture set
+	// the state, so it is the one that knows which state this is. See
+	// [ONE_CYCLE] in doc/plan/rendering_plan.md.
+	void on_refshot_shot(const network::Packet &packet)
+	{
+		sv_<ss_> flat;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(flat);
+		} catch(std::exception &e){
+			log_w(MODULE, "luanti:refshot_shot: %s", e.what());
+			return;
+		}
+		if(flat.size() < 2){
+			log_w(MODULE, "luanti:refshot_shot: %zu values", flat.size());
+			return;
+		}
+		if(!m_lua)
+			return;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__refshot_shot");
+		if(!lua_isfunction(L, -1)){
+			// Nobody is listening, which is every run that is not taking a
+			// reference set
+			lua_settop(L, base);
+			return;
+		}
+		lua_pushinteger(L, atoi(flat[0].c_str()));
+		lua_pushlstring(L, flat[1].c_str(), flat[1].size());
+		if(lua_pcall(L, 2, 0, 0) != 0)
+			log_w(MODULE, "__refshot_shot(): %s", lua_tostring(L, -1));
+		lua_settop(L, base);
+	}
+
 	void on_fields(const network::Packet &packet)
 	{
 		auto who = m_peer_players.find(packet.sender);
@@ -7259,6 +7333,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_sha256", l_sha256);
 		set_global_cfunction("__luanti_compress", l_compress);
 		set_global_cfunction("__luanti_decompress", l_decompress);
+		set_global_cfunction("__luanti_refshot_mark", l_refshot_mark);
 		set_global_cfunction("__luanti_set_node", l_set_node);
 		set_global_cfunction("__luanti_get_node", l_get_node);
 		set_global_cfunction("__luanti_get_region", l_get_region);
