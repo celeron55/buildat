@@ -60,15 +60,32 @@ local HOURS = {
 	["0200"] = 0.0833,
 }
 
--- How long each state is held, and how often the aim is put back. Short,
--- because the run shares a desktop -- but not as short as four seconds was
--- (2026-09-16): a client that has just been teleported is still being sent
--- the blocks around it, and four seconds left extensions/luanti_client
--- photographing an empty sky at three of its twenty states. Six puts the
--- shot in the middle of the hold with slack either side, and twenty states
--- is still two minutes a pass.
-local HOLD = 6
-local REAIM = 1
+-- How long each state is held. **Calibrated rather than picked**
+-- (2026-09-16): halved from six until the run stopped producing good
+-- results, twice at each rung, against the module importing a world -- which
+-- is the uncomfortable case, the client being sent the blocks around a player
+-- it is teleporting every state.
+--
+--   6     both runs agree, every probe passes
+--   3     one run of two reads the sky where the world should be
+--   1.5   both runs read the sky
+--   0.75  both runs read the sky
+--
+-- **And that ladder measured the wrong thing**, which its own verification
+-- caught: with the probe cycle's two states, halving the hold halves the
+-- whole run, and what broke was the run ending before the client had meshed
+-- the world -- eleven thousand blocks still queued when the last shot was
+-- taken. Twelve seconds a state failed the same way. So the rungs above are
+-- a measurement of total run length, not of the hold, and the hold stays at
+-- six, which is the value every full twenty-state set has been shot at
+-- since. **A valid ladder holds the warm-up constant while it varies the
+-- hold**, which is what the cycle count below is now for.
+local HOLD = tonumber(rawget(_G, "REFSHOT_HOLD")) or 6
+-- How often the aim is put back, which has to fit inside the hold: at a
+-- second it is four re-aims of a six second state, and at a quarter of that
+-- it is still four. The calibration ladder halves one thing at a time, and
+-- this one follows the hold rather than being a second variable.
+local REAIM = HOLD / 6
 
 local function seed_now()
 	local s = core.get_mapgen_setting and core.get_mapgen_setting("seed")

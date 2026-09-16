@@ -106,7 +106,10 @@ shoot_states()
 		line=$(grep -o "REFSHOT [0-9]* [0-9a-z_]*_\(none\|rain\)" "$log" | tail -1)
 		name=$(echo "$line" | cut -d' ' -f3)
 		if [ -n "$name" ] && [ "$name" != "$last" ]; then
-			sleep 4
+			# Two thirds of the way into the hold, which is where the aim has
+			# settled and the state has not moved on. SHOT_AT follows the
+			# fixture's HOLD when a calibration run halves it.
+			sleep "${SHOT_AT:-4}"
 			# The name was read before the exposure. If the fixture moved on
 			# during it the picture is of the next state, and saving it under
 			# this name is the one failure the two cheap tests below cannot
@@ -125,12 +128,16 @@ shoot_states()
 			if import -window "$win" "$out/$name.png" 2>/dev/null; then
 				taken=$((taken + 1))
 				echo "$name" >> "$shotlist"
-				# A state is six seconds in the fixture, and fourteen is what
-				# a server loading a world around a teleporting player
-				# actually takes: nine cut the third cycle short and left
-				# eight cold pictures standing in a twenty-picture set
+				# From the hold, which SHOT_AT is two thirds of: a state costs
+				# that much again while the server loads a world around a
+				# player it teleports, so three times the shot instant is what
+				# a cycle actually takes. A deadline that was too tight cut the
+				# third cycle short and left eight cold pictures standing in a
+				# twenty-picture set.
 				[ "$taken" -eq 1 ] && deadline=$(( $(date +%s) + \
-						total * 14 * ${CYCLES:-2} + 60 ))
+						total * $(awk -v a="${SHOT_AT:-4}" \
+						'BEGIN{printf "%d", a * 3 + 6}') * \
+						${CYCLES:-2} + 60 ))
 				echo "shot $name"
 			else
 				echo "MISSED $name" >&2
