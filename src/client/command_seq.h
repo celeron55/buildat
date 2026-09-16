@@ -79,6 +79,11 @@ namespace command_seq
 	bool inject_text(Urho3D::Input *input, const ss_ &text, ss_ *error);
 	bool save_screenshot(Urho3D::Graphics *graphics, const ss_ &path,
 			ss_ *error);
+	// What to call the next screenshot in a directory: the date and the
+	// time, screenshot_20250713_130617.png, with a numbered suffix when one
+	// second holds two of them. The caller is given the name back and has
+	// to be able to tell one shot from the next.
+	ss_ screenshot_name(const ss_ &dir);
 }
 }
 // vim: set noet ts=4 sw=4:

@@ -3,6 +3,7 @@
 #include "client/command_seq.h"
 #include "core/log.h"
 #include "interface/fs.h"
+#include <ctime>
 #include <c55/string_util.h>
 #include <Graphics.h>
 #include <Image.h>
@@ -349,6 +350,18 @@ static void self_check()
 		throw Exception("command_seq self_check mouse_move");
 	if(cs[6].x != SDL_BUTTON_LEFT || cs[8].x != SDL_BUTTON_RIGHT)
 		throw Exception("command_seq self_check buttons");
+
+	// The name is the date and the time, it carries no directory, and it
+	// does not change between two calls in one second unless the file is
+	// already there
+	const ss_ name = screenshot_name("/nonexistent");
+	if(name.size() != ss_("screenshot_20250713_130617.png").size() ||
+			name.compare(0, 11, "screenshot_") != 0 ||
+			name.compare(name.size() - 4, 4, ".png") != 0 ||
+			name.find('/') != ss_::npos)
+		throw Exception("command_seq self_check screenshot_name "+name);
+	if(screenshot_name("/nonexistent") != name)
+		throw Exception("command_seq self_check screenshot_name twice");
 	if(cs[12].type != Type::Look || cs[12].yaw != 10.0 || cs[12].pitch != -20.0)
 		throw Exception("command_seq self_check look");
 	// Straight along +X is a quarter turn from +Z, and level
@@ -718,6 +731,28 @@ bool inject_text(magic::Input *input, const ss_ &text, ss_ *error)
 		i += n;
 	}
 	return true;
+}
+
+ss_ screenshot_name(const ss_ &dir)
+{
+	char stamp[32] = {};
+	const time_t t = time(nullptr);
+	struct tm tmv;
+#ifdef _WIN32
+	localtime_s(&tmv, &t);
+#else
+	localtime_r(&t, &tmv);
+#endif
+	strftime(stamp, sizeof stamp, "%Y%m%d_%H%M%S", &tmv);
+	const ss_ base = ss_("screenshot_")+stamp;
+	ss_ name = base+".png";
+	// A second is plenty of resolution for somebody pressing a key and not
+	// enough for a script taking a set, and the collision would be silent:
+	// the second shot overwrites the first, and the caller is handed a name
+	// that no longer means what it did when it was given out.
+	for(int i = 2; i < 1000 && interface::fs::path_exists(dir+"/"+name); i++)
+		name = base+"_"+itos(i)+".png";
+	return name;
 }
 
 bool save_screenshot(magic::Graphics *graphics, const ss_ &path, ss_ *error)

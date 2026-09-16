@@ -1080,6 +1080,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(local_server_running)
 		DEF_BUILDAT_FUNC(local_server_port)
 		DEF_BUILDAT_FUNC(send_packet);
+		DEF_BUILDAT_FUNC(take_screenshot)
 		DEF_BUILDAT_FUNC(get_file_path)
 		DEF_BUILDAT_FUNC(get_file_content)
 		DEF_BUILDAT_FUNC(get_path)
@@ -2230,6 +2231,43 @@ struct CApp: public App, public magic::Application
 		}
 		log_w(MODULE, "Unknown named path: \"%s\"", cs(name));
 		return 0;
+	}
+
+	// take_screenshot() -> the file name it was saved under, or nil and why
+	// not.
+	//
+	// **Safe, and this is the argument for it.** The caller says when, and
+	// nothing else: the client picks the directory -- <user>/screenshots --
+	// and the name, the date and the time it was taken. Sandboxed
+	// code cannot choose a path, cannot read what it wrote, and cannot
+	// overwrite an existing shot. What it can do is fill a directory with
+	// pictures of the screen, which is what the screenshot key already does
+	// and what a game the user is running can reasonably ask for -- a
+	// comparison harness photographing itself is the case this was added
+	// for; see [ONE_CYCLE] in doc/plan/rendering_plan.md.
+	//
+	// The file lands at the end of the frame, not inside this call: the
+	// buffer is only whole once the frame is drawn, which is why the command
+	// sequence's screenshot goes through the same pending slot. The name is
+	// reserved by then, so it is the right one to report.
+	static int l_take_screenshot(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+
+		// One pending shot at a time: the command sequence uses the same
+		// slot, and overwriting it would drop somebody else's picture
+		if(!self->m_pending_screenshot.empty()){
+			lua_pushnil(L);
+			lua_pushstring(L, "a screenshot is already pending");
+			return 2;
+		}
+		const ss_ dir = g_client_config.get<ss_>("user_path")+"/screenshots";
+		const ss_ name = client::command_seq::screenshot_name(dir);
+		self->m_pending_screenshot = dir+"/"+name;
+		lua_pushlstring(L, name.c_str(), name.size());
+		return 1;
 	}
 
 	// extension_path(name: string)

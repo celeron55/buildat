@@ -55,6 +55,10 @@ buildat.pack_voxel_volume = __buildat_pack_voxel_volume
 -- add_resource_dir(path) -> bool. Only under the cache path; Urho3D's own Lua
 -- bindings do not have this.
 buildat.add_resource_dir  = __buildat_add_resource_dir
+-- take_screenshot() -> the file name it was saved under, or nil and why not.
+-- Into <user>/screenshots, named by the date and the time; see
+-- l_take_screenshot() in src/client/app.cpp for why this is in the sandbox.
+buildat.take_screenshot   = __buildat_take_screenshot
 -- compose_image(args) -> w, h. Raster operations over an RGBA canvas, saved as
 -- a PNG under the cache path. See doc/client_api.txt.
 buildat.compose_image     = __buildat_compose_image
@@ -117,6 +121,14 @@ buildat.safe.write_floats             = __buildat_write_floats
 -- module's client half is allowed to do".
 buildat.safe.add_resource_dir         = __buildat_add_resource_dir
 buildat.safe.compose_image            = __buildat_compose_image
+-- take_screenshot() -> the name of the file it went into, or nil and why
+-- not. **The caller says when and nothing else**: the client picks the
+-- directory and the name, so sandboxed code cannot choose a path, cannot
+-- read what it wrote and cannot overwrite an existing shot. What it can do
+-- is fill <user>/screenshots, which is what the screenshot key already does.
+-- The file lands at the end of the frame; the name is reserved before this
+-- returns. See l_take_screenshot() in src/client/app.cpp.
+buildat.safe.take_screenshot          = __buildat_take_screenshot
 -- get_cache_path() -> the directory those two work in. The share and user
 -- paths stay out of the sandbox; this is here because writing a file under
 -- the cache means knowing where the cache is.
