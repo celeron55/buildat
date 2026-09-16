@@ -409,13 +409,13 @@ luanti.sub_world_info(function(info)
 	end
 	magic.renderer.HDRRendering = false
 	voxel_shading.use_technique_set({
-		plain = "luanti_client/res/VoxelUnlit.xml",
-		modifiers = "luanti_client/res/VoxelUnlit.xml",
-		masked = "luanti_client/res/VoxelUnlit.xml",
+		plain = "luanti_client/res/LuantiVoxelUnlit.xml",
+		modifiers = "luanti_client/res/LuantiVoxelUnlit.xml",
+		masked = "luanti_client/res/LuantiVoxelUnlit.xml",
 		alpha = "luanti_client/res/VoxelUnlitAlpha.xml",
-		sun = "luanti_client/res/VoxelUnlit.xml",
-		sun_modifiers = "luanti_client/res/VoxelUnlit.xml",
-		sun_masked = "luanti_client/res/VoxelUnlit.xml",
+		sun = "luanti_client/res/LuantiVoxelUnlit.xml",
+		sun_modifiers = "luanti_client/res/LuantiVoxelUnlit.xml",
+		sun_masked = "luanti_client/res/LuantiVoxelUnlit.xml",
 		sun_alpha = "luanti_client/res/VoxelUnlitAlpha.xml",
 	})
 end)
@@ -1091,20 +1091,19 @@ local function update_sky(dt)
 	-- dimmed: a directional light does not know about the horizon, and one
 	-- under it lights the undersides of everything and puts the night's
 	-- specular on the wrong side of the sky.
-	-- **No sun and no moon in an unlit scene.** The unlit technique's second
-	-- pass is Urho3D's own LitSolid, added so a torch reaches the geometry,
-	-- and a directional light at SUN_BRIGHTNESS = 50 goes through it too: it
-	-- blows every face it reaches to white and leaves every face it does not
-	-- at the ambient, which draws as a black and white chequerboard. Luanti's
-	-- own non-PBR client has no directional light either -- the light is what
-	-- the mesher baked. Point lights still work, which is what the pass is
-	-- there for.
-	sky_lights.sun_node.enabled = up > 0 and not sky_now.unlit
+	-- **The sun stays in the scene on the unlit path, for its shadow alone.**
+	-- LuantiVoxelUnlit's light pass multiplies rather than adds -- it writes
+	-- the shadow factor and nothing else -- so the light's own colour and
+	-- brightness do not reach the picture; what it is there for is the shadow
+	-- map. Removing it outright, which this did at first, gives a world with
+	-- no shadows at all, and the parity target is official Luanti **with** its
+	-- dynamic shadows on. See [NON_PBR], "Which path owes parity".
+	sky_lights.sun_node.enabled = up > 0
 	if up > 0 then
 		sky_lights.sun_node.direction = magic.Vector3(dir.x, dir.y, dir.z)
 		sky_lights.sun.brightness = SUN_BRIGHTNESS * up
 	end
-	sky_lights.moon_node.enabled = moon_up > 0 and not sky_now.unlit
+	sky_lights.moon_node.enabled = moon_up > 0
 	if moon_up > 0 then
 		sky_lights.moon_node.direction =
 				magic.Vector3(-dir.x, -dir.y, -dir.z)
