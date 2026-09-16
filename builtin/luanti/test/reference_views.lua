@@ -87,6 +87,70 @@ local HOLD = tonumber(rawget(_G, "REFSHOT_HOLD")) or 6
 -- this one follows the hold rather than being a second variable.
 local REAIM = HOLD / 6
 
+-- **The world is frozen while a set is taken** -- see [FROZEN_WORLD] in
+-- doc/plan/rendering_plan.md. A set is meant to be of the world the file
+-- holds, and a running game does not leave it that way: VoxeLibre's
+-- `fix_grass_palette_indexes` repaints grass from the biome *this* version
+-- of the game computes, which on a world five minor versions older is a
+-- different green, and that was read as a rendering fault for two days. Snow
+-- melts, grass spreads, mobs walk out of frame. And it is most of a run's
+-- cost: 229 seconds of LBMs and 83 of ABMs out of 960.
+--
+-- **The hook is early enough in both engines, which is the point.** Luanti
+-- reads `core.registered_abms` and `core.registered_lbms` into C++ in
+-- `initializeEnvironment()` (`server.cpp:585`), after `loadMods()` (`:534`)
+-- has fired this callback; the module reads the same two tables live in
+-- `run_abms()` and `run_lbms()`. So one function freezes both, and a fixture
+-- that froze only one of them would make the halves less comparable rather
+-- than more.
+--
+-- Not the globalsteps: the weather states need mcl_weather alive, and the
+-- fixture drives it deliberately.
+local LIVE = rawget(_G, "REFSHOT_LIVE")
+
+local function freeze_world()
+	if LIVE then
+		core.log("action", "REFSHOT the world is left running (REFSHOT_LIVE)")
+		return
+	end
+	local abms, lbms = core.registered_abms, core.registered_lbms
+	local n_abm, n_lbm, n_ent = #abms, #lbms, 0
+	-- Emptied rather than replaced: anything already holding the table keeps
+	-- holding the one that is now empty
+	for i = #abms, 1, -1 do
+		abms[i] = nil
+	end
+	for i = #lbms, 1, -1 do
+		lbms[i] = nil
+	end
+	for _, def in pairs(core.registered_entities) do
+		if def.on_step then
+			def.on_step = nil
+			n_ent = n_ent + 1
+		end
+	end
+	core.log("action", "REFSHOT froze the world: " .. n_abm .. " ABMs, " ..
+			n_lbm .. " LBMs, " .. n_ent .. " entity steps")
+end
+
+core.register_on_mods_loaded(freeze_world)
+
+-- The scripted half of an entity's movement is gone with its on_step; the
+-- engine's half is not, so an object that was already falling keeps falling.
+-- Stilled where the camera is about to look, because that is where it
+-- matters and there is no reason to walk the whole world.
+local function still_objects(pos)
+	if LIVE then
+		return
+	end
+	for _, obj in ipairs(core.get_objects_inside_radius(pos, 80)) do
+		if not obj:is_player() then
+			obj:set_velocity({x = 0, y = 0, z = 0})
+			obj:set_acceleration({x = 0, y = 0, z = 0})
+		end
+	end
+end
+
 local function seed_now()
 	local s = core.get_mapgen_setting and core.get_mapgen_setting("seed")
 	return tostring(s or "")
@@ -320,6 +384,7 @@ core.register_on_joinplayer(function(player)
 		player:set_pos(v.pos)
 		core.set_timeofday(HOURS[st.hour])
 		hold_weather(st.weather)
+		still_objects(v.pos)
 		pin_view(player)
 		if left > 0 then
 			core.after(REAIM, function() aim(i, left - REAIM) end)
