@@ -29,5 +29,27 @@ core.register_on_joinplayer(function(player)
 			text = text,
 		})
 		core.log("action", "hud text check: four lines added")
+
+		-- Where align puts an element, which is the half of this that is
+		-- easy to get backwards: all three are anchored on the middle of
+		-- the screen, and align is what slides each one off it. Luanti's
+		-- hud.cpp is `(align - 1) * size / 2`, so **-1 ends at the anchor,
+		-- 0 straddles it and +1 starts at it** -- read down the column and
+		-- the three arrows have to meet in one vertical line.
+		local aligns = {
+			{x = -1, text = "align -1 ends here >"},
+			{x = 0, text = "< align 0 straddles >"},
+			{x = 1, text = "< align +1 starts here"},
+		}
+		for i, a in ipairs(aligns) do
+			player:hud_add({
+				hud_elem_type = "text",
+				position = {x = 0.5, y = 0.6 + i * 0.05},
+				alignment = {x = a.x, y = 0},
+				number = 0x80FFFF,
+				text = a.text,
+			})
+		end
+		core.log("action", "hud text check: three alignments added")
 	end)
 end)

@@ -39,6 +39,30 @@ bin=${LUANTI_BIN:-./bin/luanti-refshots}
 #   builtin/luanti/test/reference_shots.sh shoot <server log> <client pid> [dir]
 #
 # rather than carrying a second copy of it. Reads $log, $cli and $out.
+
+# One picture of the client's window. Three tries, because `import` fails on
+# a window that is being resized or restacked and the state is still there a
+# moment later, and the window is looked up again between them in case the
+# client made a new one -- a stale id fails forever and reads as a client
+# that has stopped drawing. What it could not do is reported rather than
+# swallowed: a run of MISSED lines with no reason behind them cost two runs
+# to tell apart from a client that had died.
+take_picture()
+{
+	local try
+	for try in 1 2 3; do
+		import -window "$win" "$1" 2>"$imperr" && return 0
+		sleep 0.4
+		local again
+		again=$(wmctrl -lp 2>/dev/null | awk -v p="$cli" '$3 == p {print $1; exit}')
+		if [ -n "$again" ] && [ "$again" != "$win" ]; then
+			echo "the client's window is now $again, was $win" >&2
+			win="$again"
+		fi
+	done
+	return 1
+}
+
 shoot_states()
 {
 	# The window, by the client's own pid rather than by its title. `xdotool
@@ -56,6 +80,7 @@ shoot_states()
 		kill "$cli" "${srv:-}" 2>/dev/null; exit 1
 	fi
 	echo "window=$win  log=$log  out=$out"
+	imperr=$(mktemp /tmp/refshots_import.XXXXXX)
 
 	# Wait for the fixture to say how many states this world has rather than
 	# guessing: a wrong count makes the deadline wrong, and an over-long deadline
@@ -150,13 +175,13 @@ shoot_states()
 				sleep 0.5
 				continue
 			fi
-			if import -window "$win" "$out/$name.png" 2>/dev/null; then
+			if take_picture "$out/$name.png"; then
 				taken=$((taken + 1))
 				echo "$name" >> "$shotlist"
 				stall=$(( $(date +%s) + ${REFSHOT_STALL:-150} ))
 				echo "shot $name"
 			else
-				echo "MISSED $name" >&2
+				echo "MISSED $name: $(tail -1 "$imperr")" >&2
 			fi
 			last="$name"
 		fi
@@ -168,7 +193,7 @@ shoot_states()
 	# directory: a probe cycle re-takes two of twenty and the other eighteen
 	# are last round's, which are not this change's to answer for
 	shot_names=$(sort -u "$shotlist" 2>/dev/null)
-	rm -f "$shotlist"
+	rm -f "$shotlist" "$imperr"
 	if [ "$got" -lt "$total" ]; then
 		echo "only $got of $total states were shot; the rest are stale" >&2
 		# By name, because which ones matters: four rain states missing is a

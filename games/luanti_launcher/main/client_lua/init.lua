@@ -1814,15 +1814,23 @@ local function screen_of(x, y, z)
 	return p.x * magic.ui.root.width, p.y * magic.ui.root.height
 end
 
+-- Where an element sits: the anchor is position times the screen plus the
+-- offset, and align slides it by its own size from there. Luanti's hud.cpp
+-- does that as `(align - 1) * size / 2` everywhere it places anything -- so
+-- align -1 puts the element's right edge on the anchor, 0 centres it and +1
+-- puts its left edge there. **The sign was the other way round here**, which
+-- is invisible at align 0, the default and what every element that was
+-- looked at used; a status line asking for the top right corner was drawn
+-- eight pixels off the right edge of the screen instead.
 local function hud_place(element, e, w, h)
 	local px, py = parse_v2(e.pos, 0, 0)
 	local ox, oy = parse_v2(e.offset, 0, 0)
 	local ax, ay = parse_v2(e.align, 0, 0)
 	element:SetPosition(
-			math.floor(px * magic.ui.root.width + ox -
-					(ax + 1) * 0.5 * w),
-			math.floor(py * magic.ui.root.height + oy -
-					(ay + 1) * 0.5 * h))
+			math.floor(px * magic.ui.root.width + ox +
+					(ax - 1) * 0.5 * w),
+			math.floor(py * magic.ui.root.height + oy +
+					(ay - 1) * 0.5 * h))
 end
 
 local function hud_colour(number)
@@ -1958,12 +1966,14 @@ end
 -- position is at, plus the offset, with the alignment saying which corner of
 -- it lands there. The same as hud_place() but for pos, which a waypoint does
 -- not have.
+-- The same placement over a point in the world rather than a point on the
+-- screen; see hud_place() for what align does.
 local function hud_place_at(element, e, w, h, sx, sy)
 	local ox, oy = parse_v2(e.offset, 0, 0)
 	local ax, ay = parse_v2(e.align, 0, 0)
 	element:SetPosition(
-			math.floor(sx + ox - (ax + 1) * 0.5 * w),
-			math.floor(sy + oy - (ay + 1) * 0.5 * h))
+			math.floor(sx + ox + (ax - 1) * 0.5 * w),
+			math.floor(sy + oy + (ay - 1) * 0.5 * h))
 end
 
 -- A label over a place in the world, with how far away it is. Luanti keeps
