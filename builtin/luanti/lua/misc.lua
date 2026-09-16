@@ -161,6 +161,18 @@ function core.time_to_day_night_ratio(time_of_day)
 	return 1.0
 end
 
+-- The two light nibbles blended by a day-night ratio, which is what a node's
+-- light *is* at an hour: blend_light() in Luanti's light.h, over
+-- getLightBlend(). The ratio is carried 0...1000 the way the C++ carries it,
+-- so this is Luanti's arithmetic rather than a rounding of it.
+function core.blend_light(dnr, day, night)
+	local l = math.floor((dnr * day + (1000 - dnr) * night) / 1000)
+	if l > 15 then
+		return 15
+	end
+	return l
+end
+
 -- What these have to come out as, checked at load against Luanti's own
 -- numbers rather than against each other
 do
@@ -172,6 +184,16 @@ do
 	assert(not core.is_valid_player_name("") and
 			not core.is_valid_player_name("has space") and
 			not core.is_valid_player_name(("x"):rep(21)))
+	-- Noon takes the day nibble whole and midnight takes 175 thousandths of
+	-- it, which is why a sunlit node reads 2 at night and not 15: that is
+	-- what makes get_node_light(pos, 0) mean "light other than the sun"
+	assert(core.blend_light(1000, 15, 0) == 15)
+	assert(core.blend_light(175, 15, 0) == 2)
+	assert(core.blend_light(0, 15, 0) == 0)
+	assert(core.blend_light(1000, 0, 10) == 0)
+	assert(core.blend_light(500, 15, 5) == 10)
+	-- A lamp is in the night nibble, so it survives the hour
+	assert(core.blend_light(175, 0, 14) == 11)
 	-- Midnight is the floor, noon is full, and the ramp is between
 	assert(core.time_to_day_night_ratio(0) == 0.175)
 	assert(core.time_to_day_night_ratio(0.5) == 1.0)

@@ -2811,15 +2811,39 @@ function core.get_artificial_light(param1)
 	return math.floor(param1 / 16) % 16
 end
 
+-- **The hour is read, not ignored.** Luanti turns the argument into a
+-- day-night ratio and blends the two nibbles by it -- blend_light() in
+-- light.h, over getLightBlend() -- so get_node_light(pos, 0) asks *what light
+-- reaches here from something other than the sun*, and the answer outdoors is
+-- zero. Answering max(day, night) instead said 15 there, and VoxeLibre's
+-- melting ABM takes that as sunlight and deletes every snow slab it can see:
+-- the snow field thinned as a run went on. Water freezing and mob spawning
+-- ask the same question. See [NODE_LIGHT_HOUR] in
+-- doc/plan/luanti_module_plan.md.
+--
+-- No hour means the world's own, which is what Luanti does with it.
 function core.get_node_light(pos, timeofday)
 	local x, y, z = to_pos(pos)
 	local id, param1 = __get_node(x, y, z)
 	if id == core.CONTENT_IGNORE then
 		return nil
 	end
-	local day = math.floor(param1 % 16)
-	local night = math.floor(param1 / 16) % 16
-	return day > night and day or night
+	local sky = math.floor(param1 % 16)
+	local lamp = math.floor(param1 / 16) % 16
+	local t = tonumber(timeofday)
+	if t == nil then
+		t = core.get_timeofday()
+	end
+	-- voxelworld's two fields are not Luanti's two banks: the sky field is
+	-- sunlight alone, where Luanti's day bank is whichever of sunlight and
+	-- lamplight is stronger -- light sources seed the lamp field only, see
+	-- set_voxel() in voxelworld.cpp. So the day bank is built here. Blending
+	-- the fields as they are would put a lit room in the dark at noon.
+	local day = sky > lamp and sky or lamp
+	-- 0...1000, the way the C++ carries it, so the arithmetic below is
+	-- Luanti's own rather than a rounding of it
+	local dnr = math.floor(core.time_to_day_night_ratio(t) * 1000 + 0.5)
+	return core.blend_light(dnr, day, lamp)
 end
 
 -- The region reads: the same seam over a box instead of a voxel.

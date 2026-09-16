@@ -454,6 +454,48 @@ local function check_blocking_lamp(beside)
 	end
 end
 
+-- The hour the reading is asked for. Luanti blends the two light banks by
+-- the day-night ratio, so what the sky puts on a node comes and goes with
+-- the day and what a lamp puts on it does not -- which is what makes
+-- get_node_light(pos, 0) mean "light from something other than the sun",
+-- the question VoxeLibre's melting, freezing and spawning ABMs ask. See
+-- [NODE_LIGHT_HOUR] in doc/plan/luanti_module_plan.md.
+--
+-- The check's own lamp goes back in the room for this, so `beside` is lit
+-- by a lamp and nothing else, and the open air outside the box at BASE_Y is
+-- lit by the sky and nothing else.
+local function check_light_hour(beside)
+	core.set_node(LIGHT_AT, {name = "check_map:lamp"})
+	local noon = core.get_node_light(beside, 0.5)
+	local midnight = core.get_node_light(beside, 0)
+	core.set_node(LIGHT_AT, {name = "air"})
+	if noon == nil or noon < 13 or midnight ~= noon then
+		error("check_map: lamplight follows the hour -- " ..
+				tostring(noon) .. " at noon and " .. tostring(midnight) ..
+				" at midnight, where a lamp shines the same at both")
+	end
+
+	local outside = {x = LIGHT_MAX.x + 2, y = LIGHT_AT.y, z = LIGHT_AT.z}
+	local sky = core.get_natural_light(outside)
+	if sky ~= 15 then
+		-- Not the hour's fault: something is standing in the open air above
+		-- the box, and there is nothing here to ask about the sky
+		core.log("verbose", "check_map: no open sky beside the light room")
+		return
+	end
+	if core.get_node_light(outside, 0.5) ~= 15 then
+		error("check_map: a node under open sky reads " ..
+				tostring(core.get_node_light(outside, 0.5)) .. " at noon")
+	end
+	-- 175 thousandths of 15, Luanti's own floor; the point is that it is
+	-- nowhere near the 12 the melting ABM wants
+	if core.get_node_light(outside, 0) ~= 2 then
+		error("check_map: a node under open sky reads " ..
+				tostring(core.get_node_light(outside, 0)) .. " at midnight, " ..
+				"where the sun is not shining on it")
+	end
+end
+
 local function check_light()
 	local lamp, level = brightest_node()
 	if lamp and level < 3 then
@@ -521,6 +563,7 @@ local function check_light()
 	end
 
 	check_blocking_lamp(beside)
+	check_light_hour(beside)
 
 	for x = LIGHT_MIN.x, LIGHT_MAX.x do
 		for y = LIGHT_MIN.y, LIGHT_MAX.y do
