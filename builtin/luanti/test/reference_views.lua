@@ -77,7 +77,22 @@ end
 
 -- The states, in order: every viewpoint this world has, at each of its
 -- hours, clear; then every one of them again at 15:00 in rain.
+-- The two pictures builtin/luanti/test/reference_probes.sh reads, and nothing
+-- else. A tuning cycle wants "did that work" in seconds rather than the two
+-- minutes twenty states cost; the full set is for a round somebody intends to
+-- look at. Set by the harness, which writes a one-line prelude in front of
+-- this file rather than passing a setting, because the three clients that run
+-- it have three different ways of being configured and none of a file.
+-- See [PROBE_CYCLE] in doc/plan/rendering_plan.md.
+local function probe_states()
+	return {{view = 4, hour = "1300", weather = "none"},
+			{view = 5, hour = "1000", weather = "none"}}
+end
+
 local function states_of(seed)
+	if rawget(_G, "REFSHOT_PROBE") then
+		return probe_states()
+	end
 	-- Viewpoint 5 is the snow one and keeps its own hours: it is a white
 	-- field, so what it is for is the top of the range and the night, not
 	-- the same three hours the other four carry.

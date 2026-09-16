@@ -141,10 +141,17 @@ shoot_states()
 		kill -0 "$cli" 2>/dev/null || break
 	done
 	got=$(sort -u "$shotlist" 2>/dev/null | wc -l)
+	# What this run shot, so the check reads those rather than the whole
+	# directory: a probe cycle re-takes two of twenty and the other eighteen
+	# are last round's, which are not this change's to answer for
+	shot_names=$(sort -u "$shotlist" 2>/dev/null)
 	rm -f "$shotlist"
 	if [ "$got" -lt "$total" ]; then
 		echo "only $got of $total states were shot; the rest are stale" >&2
 	fi
+	# Nothing at all is a run that did not happen -- the server lost a race for
+	# the save's sqlite, or the client never drew. The caller retries on it.
+	[ "$got" -gt 0 ]
 }
 
 # Two cheap tests, which catch every failure this run has actually had: the
@@ -160,7 +167,14 @@ shoot_states()
 check_shots()
 {
 	local bad=0 f mean sd
-	for f in "$out"/*.png; do
+	local files=""
+	if [ -n "${shot_names:-}" ]; then
+		for f in $shot_names; do files="$files $out/$f.png"; done
+	else
+		files="$out"/*.png
+	fi
+	for f in $files; do
+		[ -f "$f" ] || continue
 		read -r mean sd < <(magick "$f" -gravity center \
 				-crop 200x200+0+0 +repage -colorspace Gray \
 				-format "%[fx:mean] %[fx:standard_deviation]" info:)
@@ -185,7 +199,8 @@ check_shots()
 	*) ref="$(dirname "$out")/official" ;;
 	esac
 	if [ -n "$ref" ] && [ -d "$ref" ]; then
-		for f in "$out"/*.png; do
+		for f in $files; do
+			[ -f "$f" ] || continue
 			local r="$ref/$(basename "$f")"
 			[ -f "$r" ] || continue
 			read -r a b < <(magick "$f" -colorspace Gray \
@@ -198,7 +213,11 @@ check_shots()
 			fi
 		done
 	fi
-	echo "$(ls "$out" | wc -l) pictures in $out, $bad suspect"
+	if [ -n "${shot_names:-}" ]; then
+		echo "$(echo "$shot_names" | wc -w) pictures checked in $out, $bad suspect"
+	else
+		echo "$(ls "$out" | wc -l) pictures in $out, $bad suspect"
+	fi
 	[ "$bad" -eq 0 ]
 }
 
@@ -284,8 +303,18 @@ else
 fi
 
 mkdir -p "$out" "$work/worldmods/refviews"
-cp "$me/reference_views.lua" \
-	"$work/worldmods/refviews/init.lua"
+# PROBE=1 shoots only the two states the probe script reads -- fifteen seconds
+# against two minutes, which is what a tuning cycle wants. The prelude goes in
+# front of the fixture rather than into a setting because the three clients
+# that run it have three ways of being configured and none of a file. See
+# [PROBE_CYCLE] in doc/plan/rendering_plan.md.
+if [ -n "${PROBE:-}" ]; then
+	echo 'rawset(_G, "REFSHOT_PROBE", true)' \
+			> "$work/worldmods/refviews/init.lua"
+	cat "$me/reference_views.lua" >> "$work/worldmods/refviews/init.lua"
+else
+	cp "$me/reference_views.lua" "$work/worldmods/refviews/init.lua"
+fi
 printf 'name = refviews\n' > "$work/worldmods/refviews/mod.conf"
 
 log=$(mktemp /tmp/refshots_srv.XXXXXX.log)

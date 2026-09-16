@@ -34,6 +34,17 @@ set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 seed=$(sed -n 's/^seed = //p' "$me/reference_world_map_meta.txt")
+# PROBE=1 shoots only the two states the probe script reads, which is about
+# fifteen seconds against two minutes and is what a tuning cycle wants. The
+# warm-up cycles stay: what they prevent does not stop being possible because
+# the run is short. See [PROBE_CYCLE] in doc/plan/rendering_plan.md.
+fixture="$me/reference_views.lua"
+if [ -n "${PROBE:-}" ]; then
+	fixture=$(mktemp /tmp/refviews_probe.XXXXXX.lua)
+	{ echo 'rawset(_G, "REFSHOT_PROBE", true)'; cat "$me/reference_views.lua"; \
+			} > "$fixture"
+fi
+
 mode="${1:-pbr}"
 case "$mode" in
 unlit|shadows|pbr) ;;
@@ -60,7 +71,7 @@ rm -rf "../user/games/luanti_launcher/saves/$save"
 port=$(( 29600 + (RANDOM % 90) ))
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_IMPORT="$world" BUILDAT_LUANTI_PBR="$mode" \
-	BUILDAT_LUANTI_LUA="$me/reference_views.lua" \
+	BUILDAT_LUANTI_LUA="$fixture" \
 	bin/buildat_server -m ../games/luanti_launcher -D ../user -P "$port" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/srv.log" &
 for i in $(seq 1 400); do
@@ -93,6 +104,19 @@ cli=$!
 # left to mesh is a picture of fog.
 CYCLES=${CYCLES:-3} "$me/reference_shots.sh" shoot "$tmp/srv.log" "$cli" "$out"
 status=$?
+# A run that shot nothing did not happen: two sessions on one machine fight
+# over the save's sqlite and the loser dies before the fixture's first state,
+# which the wait above can only narrow and not close. Retried rather than
+# reported, a probe cycle being a minute.
+if [ "$status" -ne 0 ] && [ "${REFSHOT_TRY:-1}" -lt 3 ]; then
+	echo "nothing was shot; trying again" >&2
+	kill "$cli" 2>/dev/null; sleep 2
+	kill -INT "$srv" 2>/dev/null
+	for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+	kill -9 "$srv" 2>/dev/null
+	sleep 20
+	REFSHOT_TRY=$(( ${REFSHOT_TRY:-1} + 1 )) exec "$0" "$@"
+fi
 
 kill "$cli" 2>/dev/null
 sleep 2
