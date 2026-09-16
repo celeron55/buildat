@@ -4156,10 +4156,34 @@ end
 -- is how a game fixes up what it saved before it changed its mind about it.
 --
 -- simplified: a section is swept the first time it is seen active and not
--- again, so run_at_every_load and Luanti's own record of which blocks are
--- older than which rule still have nothing to be different about. What is
--- kept is only which sections have been swept this run; a section that
--- unloads and comes back is swept again.
+-- again, so run_at_every_load has nothing to be different about for a world
+-- this module generated itself. What is kept is only which sections have
+-- been swept this run; a section that unloads and comes back is swept again.
+--
+-- **An imported world is the case where that is not good enough**, and it is
+-- handled. Luanti records the game time each LBM was introduced at and runs
+-- one only on mapblocks older than that, so an LBM a world already knows
+-- about never runs on it again. Sweeping regardless meant running every
+-- fix-up a game has ever written against a world that has already had it:
+-- VoxeLibre's fix_grass_palette_indexes re-derives every grass block's
+-- palette index from the *current* version's biome code, and the reference
+-- world was generated five minor versions earlier, so it repainted the
+-- world's grass a different green. That read as a rendering fault for two
+-- days. See [GREEN_BIAS] in doc/plan/rendering_plan.md.
+--
+-- The list comes from the imported world's env_meta.txt and is kept in the
+-- save; see lbm_names_of() in luanti.cpp.
+local function lbms_the_world_has_had()
+	local out = {}
+	local field = __luanti_lbm_introduced
+	if type(field) ~= "string" then
+		return out
+	end
+	for name in field:gmatch("([^;]+)") do
+		out[name] = true
+	end
+	return out
+end
 
 
 local function run_lbm(lbm, hits)
@@ -4208,9 +4232,19 @@ local function run_lbms()
 	-- it was this rebuilding the same answer. core.__forget_name_ids()
 	-- drops it, which is what a mod registering a node after load needs.
 	if lbm_ids == nil then
+		local had = lbms_the_world_has_had()
 		lbm_ids = {}
 		for i = 1, #lbms do
-			lbm_ids[i] = ids_matching(lbms[i].nodenames)
+			-- No ids is no matches, which is how an LBM this world has
+			-- already had costs nothing per section rather than being
+			-- checked again in the sweep
+			if had[lbms[i].name] and not lbms[i].run_at_every_load then
+				lbm_ids[i] = {}
+				core.log("info", "lbm " .. tostring(lbms[i].name) ..
+						": this world has had it; not run again")
+			else
+				lbm_ids[i] = ids_matching(lbms[i].nodenames)
+			end
 		end
 	end
 	-- A cell at a time, and only the ones that have not had them, with a
