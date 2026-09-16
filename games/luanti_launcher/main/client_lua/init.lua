@@ -915,8 +915,21 @@ local function apply_sky_of_hour()
 	-- drew VoxeLibre's night_horizon #4A6790 as it stands and the night sky
 	-- came out sixteen times official Luanti's.
 	local lit = sky_now.lit or 1
+	-- **The game's sky colours are sRGB and this pipeline is linear.** Luanti
+	-- multiplies its colours by the hour and writes the product to an 8-bit
+	-- buffer, so what it draws at midnight is that product as it stands;
+	-- here the product goes into an HDR buffer and comes back out through
+	-- GammaCorrection at the end of the render path, which lifts a dark value
+	-- enormously -- a night sky Luanti draws at 0.008 was reaching the screen
+	-- at 0.052, six times it. Converting once, here, is what makes the two
+	-- ends meet: the day sky survives the round trip unchanged and the night
+	-- lands where Luanti puts it.
 	local function dim(c)
-		return {r = c.r * lit, g = c.g * lit, b = c.b * lit}
+		local function one(v)
+			local x = v * lit
+			return x > 0 and x ^ 2.2 or 0
+		end
+		return {r = one(c.r), g = one(c.g), b = one(c.b)}
 	end
 	local horizon_now = dim(three(night_horizon, dawn_horizon, day_horizon, t))
 	world_sky:set_look(
@@ -994,8 +1007,16 @@ local function apply_sky_of_hour()
 	world_sky:set_indoors(indoors_of(1), sky_now.lit or 1)
 	world_sky:set_auto_dim(game_sky.auto_dim_skybox ~= false)
 
-	-- The clouds are white because the sun is on them, so they go with it
-	world_sky:set_cloud_light(0.16 + 0.84 * t)
+	-- The clouds are white because the sun is on them, so they go with it --
+	-- by the same brightness everything else up there goes by, which is what
+	-- Luanti does: its Sky keeps a bright cloud colour and hands the Clouds
+	-- what is left of it at this hour. The tenth-and-a-bit this used to floor
+	-- at is eight times `lit` at midnight, and at viewpoint 1 at 20:30 the
+	-- clouds were most of what was left of the night sky's brightness: the
+	-- band measured 0.070, 0.080, 0.087 against official Luanti's 0.016,
+	-- 0.022, 0.032, where the gradient behind them computes to less than
+	-- official's on its own.
+	world_sky:set_cloud_light(sky_now.lit or 1)
 	-- And so does what a pond mirrors: the cube map it comes from is baked
 	-- at noon, so without this the water is a bright blue sky at midnight
 	voxel_shading.set_sky_light(0.10 + 0.90 * t)
@@ -1111,8 +1132,14 @@ local function update_sky(dt)
 	-- second thing to keep in step with the gradient, and it was not in step
 	-- -- the sky went dark and the fog stayed at 0.05, 0.07, 0.12, which is
 	-- what the night sky then measured.
+	-- Into the same space as the gradient it meets at the horizon: a fog that
+	-- is still sRGB where the sky behind it has been converted is a bright
+	-- band along the horizon of a dark sky. See dim() in apply_sky_of_hour().
 	local base = game_sky.fog_color or
 			blend(magic.Color(0, 0, 0), DAY_FOG, sky_now.lit)
+	base = magic.Color(base.r > 0 and base.r ^ 2.2 or 0,
+			base.g > 0 and base.g ^ 2.2 or 0,
+			base.b > 0 and base.b ^ 2.2 or 0)
 	zone.fogColor = blend(base, indoors_of(0.10 + 0.90 * day), 1 - seen)
 	sky_now.height = height
 	sky_now.day = day
