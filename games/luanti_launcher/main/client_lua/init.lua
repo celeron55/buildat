@@ -410,13 +410,6 @@ local function draw_text_line(parent, line, x0, y0, base, size)
 	return x, h
 end
 
-local title_text = hud_text(15)
--- Escape is on it because the whole list is behind Escape now
-title_text:SetText("luanti_launcher: WASD = walk, Space = jump, " ..
-		"Tab = mouse, Escape = menu, left = dig, right = place")
-title_text.horizontalAlignment = magic.HA_CENTER
-title_text.verticalAlignment = magic.VA_TOP
-title_text:SetPosition(0, 10)
 local crosshair = hud_text(20)
 crosshair:SetText("+")
 crosshair.horizontalAlignment = magic.HA_CENTER
@@ -1469,6 +1462,9 @@ detail_text.horizontalAlignment = magic.HA_LEFT
 detail_text.verticalAlignment = magic.VA_TOP
 detail_text:SetPosition(8, 8)
 detail_text.visible = false
+-- 0 nothing, 1 the two blocks official Luanti's own first debug level shows,
+-- 2 everything. F5 cycles it; see [STATUS_LEVELS].
+local detail_level = 0
 
 -- Luanti's yaw, from the launcher's. The launcher measures from +Z towards
 -- +X, the way Urho does; Luanti measures from +Z towards -X, so the number
@@ -1554,7 +1550,7 @@ local place_chat
 -- the renderer's own frame timing, and RTT, which needs the buildat link to
 -- measure one. Everything buildat has and Luanti has not is on the lines
 -- under them, out of the way of that comparison.
-local function status_lines()
+local function status_lines(level)
 	local info = luanti.world_info()
 	local fps, jitter = frame_stats()
 	local mode = player.noclip and "noclip" or (player.fly and "flying" or
@@ -1562,26 +1558,47 @@ local function status_lines()
 	local chunk_p = voxelworld.get_chunk_position(buildat.Vector3(
 			player.x, player.y, player.z))
 	local lyaw, cardinal = luanti_yaw(yaw)
-	return string.format(
-			"buildat | game: %s | %s | FPS: %.0f | dtime jitter: %.1f%%" ..
-			" | view range: %d\n" ..
+	-- **One composer, and the short level is a subset of it.** Nothing else
+	-- may know how to print a status field: the keybind banner this replaced
+	-- was a second string written by hand somewhere else, and it ended up
+	-- contradicting the row. See [STATUS_LEVELS] in
+	-- doc/plan/luanti_module_plan.md.
+	local game = info.game ~= "" and info.game or "?"
+	-- Which of the three the picture was drawn in. **Three of the six
+	-- reference sets differ from each other only by this**, so a shot that
+	-- does not name it is the failure the position and the seed are there to
+	-- prevent: one that cannot be told from a shot of something else.
+	local rmode = info.mode or "pbr"
+	local place = string.format(
 			"pos: (%.1f, %.1f, %.1f) | yaw: %.1f\194\176 %s" ..
-			" | pitch: %.1f\194\176 | seed: %s\n" ..
-			"%s | fov %.0f | speed %.1f, %.1f, %.1f" ..
-			" | chunk %d, %d, %d%s\n" ..
-			"%02d:%02d | sun %.2f up, %.0f%% day\n" ..
-			"%s",
-			info.game ~= "" and info.game or "?",
-			info.version ~= "" and info.version or "Luanti ?",
-			-- what the camera is actually drawing to, which a game may have
-			-- lowered through its sky's fog_distance, and not the ceiling
-			fps, jitter, sky_now.far_clip or FAR_CLIP,
+			" | pitch: %.1f\194\176 | seed: %s",
 			player.x, player.y, player.z,
 			lyaw, cardinal,
 			-- Luanti's pitch is positive looking up, where the launcher's
 			-- own is positive looking down as Urho's euler angle is
 			-pitch,
-			info.seed ~= "" and info.seed or "?",
+			info.seed ~= "" and info.seed or "?")
+	-- **Level 1 is one line and stays one line.** It exists so a reference
+	-- run can carry a row without burying the thing being photographed, and
+	-- that is a standing constraint rather than a detail: it carries what
+	-- makes a picture a picture of what it claims to be, and nothing else.
+	-- The frame rate is level 2's -- somebody watching frame times is
+	-- debugging, which is what that level is for.
+	if level == 1 then
+		return "buildat | " .. game .. " | " .. rmode .. " | " .. place
+	end
+	local blocks = {
+		string.format(
+			"buildat | game: %s | %s | %s | FPS: %.0f" ..
+			" | dtime jitter: %.1f%% | view range: %d",
+			game, rmode,
+			info.version ~= "" and info.version or "Luanti ?",
+			-- what the camera is actually drawing to, which a game may have
+			-- lowered through its sky's fog_distance, and not the ceiling
+			fps, jitter, sky_now.far_clip or FAR_CLIP),
+		place,
+		string.format(
+			"%s | fov %.0f | speed %.1f, %.1f, %.1f | chunk %d, %d, %d%s",
 			-- What the camera is actually at, not what this game asked
 			-- for: a game's set_fov() changes it, and an FOV that does
 			-- not match the shot it is compared against is one of the
@@ -1589,11 +1606,14 @@ local function status_lines()
 			mode, (camera and camera.fov) or CAMERA_FOV,
 			player.vx, player.vy, player.vz,
 			chunk_p.x, chunk_p.y, chunk_p.z,
-			voxelworld.chunk_has_physics(chunk_p) and "" or " (no physics)",
+			voxelworld.chunk_has_physics(chunk_p) and "" or " (no physics)"),
+		string.format("%02d:%02d | sun %.2f up, %.0f%% day",
 			math.floor((time_of_day or 0) * 24),
 			math.floor(((time_of_day or 0) * 24 % 1) * 60),
-			sky_now.height, sky_now.day * 100,
-			counted_line())
+			sky_now.height, sky_now.day * 100),
+		counted_line(),
+	}
+	return table.concat(blocks, "\n")
 end
 
 local detail_timer = 0
@@ -1615,7 +1635,7 @@ local function update_detail(dt)
 		return
 	end
 	detail_timer = 0
-	detail_text:SetText(status_lines())
+	detail_text:SetText(status_lines(detail_level))
 	if place_chat then
 		place_chat()
 	end
@@ -2269,11 +2289,6 @@ local function draw_hud(elements, flags)
 	-- The game can take the client's own away, and what it draws instead is
 	-- these elements; see luanti.hud_flag()
 	hud_root.visible = hud_shown
-	-- The line of keys is a beginner's, and the lines of detail are a
-	-- comparison's: at the top of the screen they land on top of each other,
-	-- and a reference shot is taken with the detail up. The keys are in the
-	-- pause menu whichever is showing.
-	title_text.visible = hud_shown and not detail_text.visible
 	crosshair.visible = hud_shown and luanti.hud_flag("crosshair")
 	chat_block.visible = chat_shown and luanti.hud_flag("chat")
 	hotbar_shown = hud_shown and luanti.hud_flag("hotbar")
@@ -2841,17 +2856,22 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		chat_shown = not chat_shown
 		draw_hud(hud_elements)
 	elseif key == BIND.detail.key then
-		detail_text.visible = not detail_text.visible
+		-- Cycled rather than toggled, the way Luanti's own F5 is, and what a
+		-- player coming from it expects: nothing, short, everything. See
+		-- [STATUS_LEVELS].
+		detail_level = (detail_level + 1) % 3
+		detail_text.visible = detail_level > 0
 		detail_timer = 1
 		if detail_text.visible then
 			-- In the log as well as on the screen, and the same string: a
 			-- scripted comparison then reads text instead of reading a
 			-- screenshot, which is the difference between a check that runs
 			-- and a check somebody looks at
-			log:info(status_lines():gsub("\n", " | "))
+			-- Whole whatever the level is: this line exists for a scripted
+			-- comparison rather than for the screen
+			log:info(status_lines(2):gsub("\n", " | "))
 		end
 		place_chat()
-		title_text.visible = hud_shown and not detail_text.visible
 	elseif key == BIND.menu.key then
 		open_pause_menu()
 	end
