@@ -157,13 +157,15 @@ end
 -- shader adds cAmbientColor * alpha + rgb, so the ambient colour multiplies
 -- every sky-lit surface: a blue ambient is a blue world.
 --
--- **The hue is Luanti's and the level is not.** Luanti's ambient is also
--- three and a half times brighter, with its sun correspondingly weaker;
--- raising this without rebalancing the sun would blow the picture out.
--- That trade is [TOO_BRIGHT] in doc/plan/master_plan.md, and it is a
--- separate change with its own pictures. So this keeps the luminance it had
--- -- 0.324 by the usual weights -- and only turns the colour neutral.
-local SKY_AMBIENT = magic.Color(0.320, 0.320, 0.352)
+-- **Set against pictures** (2026-09-16), which is what the note here used to
+-- say this was waiting for. At 13:00 the reference shots put the module's
+-- sunlit surfaces where official Luanti's are -- the 90th percentile of the
+-- frame was 0.757 against 0.769 -- and its shade at nearly twice Luanti's:
+-- 0.365 against 0.200. A sunlit surface is mostly sun and a shaded one is
+-- almost all ambient, so the ambient is the term that separates them, and it
+-- is [TOO_BRIGHT]'s "the top slightly above Luanti's, the bottom far below
+-- it" in one number. The hue stays Luanti's, neutral.
+local SKY_AMBIENT = magic.Color(0.144, 0.144, 0.158)
 -- What is left when the sun is down. **Set against pictures** (2026-09-16):
 -- at 20:30 the old value put the ground four times brighter than official
 -- Luanti's, where extensions/luanti_client -- which derives its night ambient
