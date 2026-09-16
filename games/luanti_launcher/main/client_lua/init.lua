@@ -224,6 +224,29 @@ local function set_mouse_in_world(enable)
 	magic.input:SetMouseVisible(not enable)
 end
 
+-- A form is clicked with the pointer, so while one is open the mouse is on
+-- the screen and not in the world, and it goes back where it was when the
+-- form goes. **Which form it is does not matter**: the server opens one by
+-- itself -- a sign, a chest, /help -- and the keys here are not in it, so
+-- the state is followed rather than set at the places that open one.
+do
+	local was_open = false
+	local before = false
+	magic.SubscribeToEvent("Update", function()
+		local open = luanti.form_open()
+		if open == was_open then
+			return
+		end
+		was_open = open
+		if open then
+			before = mouse_in_world
+			set_mouse_in_world(false)
+		else
+			set_mouse_in_world(before)
+		end
+	end)
+end
+
 local zone = nil
 -- The sun and the moon, both in the scene: {sun_node, sun, moon_node, moon}.
 -- One table rather than four locals because this file's main chunk is at
@@ -448,10 +471,19 @@ local HOTBAR_IMAGE_SIZE = 48
 local HOTBAR_MAX_WIDTH = 1.0
 local WHITE = luanti.texture("[fill:1x1:#ffffffff")
 
+-- Luanti's own m_scale_factor, which every size and offset a HUD element
+-- carries is multiplied by before it is drawn: Luanti's is the user's
+-- hud_scaling times the display density, and its numbers are screen pixels.
+-- This UI is not in screen pixels -- magic.ui.root is 1920 wide on a 1280
+-- window -- so this is the conversion, and it is what keeps a HUD the same
+-- number of screen pixels Luanti would have drawn it.
+local function hud_scale()
+	return magic.ui.root.width / math.max(1, magic.graphics.width)
+end
+
 -- The three numbers everything below is drawn from, in this UI's units
 local function hotbar_metrics()
-	local per_pixel = magic.ui.root.width /
-			math.max(1, magic.graphics.width)
+	local per_pixel = hud_scale()
 	local imagesize = math.floor(HOTBAR_IMAGE_SIZE * per_pixel + 0.5)
 	local padding = math.floor(imagesize / 12)
 	-- And how far above the bottom of the screen it sits: Luanti's default
@@ -460,13 +492,12 @@ local function hotbar_metrics()
 	return imagesize, padding, imagesize + padding * 2, margin
 end
 
--- The same two, for what is drawn beside the hotbar rather than in it: the
--- line of text above it and the HUD's own inventory element, whose slots
--- should look like the hotbar's
-local SLOT, SLOT_GAP
+-- A slot's size, for what is drawn beside the hotbar rather than in it:
+-- the line of text above it sits a slot and a bit higher
+local SLOT
 do
-	local _, padding, slot_size = hotbar_metrics()
-	SLOT, SLOT_GAP = slot_size, padding
+	local _, _, slot_size = hotbar_metrics()
+	SLOT = slot_size
 end
 
 local hotbar = {}
@@ -675,8 +706,11 @@ local function draw_hotbar()
 		element.visible = hotbar_shown and bg ~= nil and count > 0
 		for i = row.first, row.last do
 			at_row[i] = row
+			-- A centred element's position is where its own centre goes,
+			-- so the half slot is what puts the row's left edge on the
+			-- left edge of the picture behind it
 			at_x[i] = math.floor(-row_width / 2 +
-					(i - row.first) * slot_size)
+					(i - row.first) * slot_size + slot_size / 2)
 		end
 	end
 	for i = 1, HOTBAR_MAX do
@@ -685,7 +719,12 @@ local function draw_hotbar()
 		if i <= n then
 			slot.frame.size = magic.IntVector2(slot_size, slot_size)
 			slot.frame:SetPosition(at_x[i], -(margin + at_row[i].y))
-			slot.marker.size = magic.IntVector2(slot_size, slot_size)
+			-- The game's mark is the item's own square grown by two
+			-- paddings on every side, which is bigger than the slot: see
+			-- drawItem() in Luanti's hud.cpp
+			slot.marker:SetPosition(-padding, -padding)
+			slot.marker.size = magic.IntVector2(
+					imagesize + padding * 4, imagesize + padding * 4)
 			slot.image:SetPosition(padding, padding)
 			slot.image.size = magic.IntVector2(imagesize, imagesize)
 		end
@@ -1831,10 +1870,14 @@ local function hud_place(element, e, w, h)
 	local px, py = parse_v2(e.pos, 0, 0)
 	local ox, oy = parse_v2(e.offset, 0, 0)
 	local ax, ay = parse_v2(e.align, 0, 0)
+	-- The offset a game gives is in Luanti's screen pixels and is scaled
+	-- the way every other number it gives is; the size it slides by is
+	-- already in this UI's units, having been scaled where it was read
+	local scale = hud_scale()
 	element:SetPosition(
-			math.floor(px * magic.ui.root.width + ox +
+			math.floor(px * magic.ui.root.width + ox * scale +
 					(ax - 1) * 0.5 * w),
-			math.floor(py * magic.ui.root.height + oy +
+			math.floor(py * magic.ui.root.height + oy * scale +
 					(ay - 1) * 0.5 * h))
 end
 
@@ -1881,12 +1924,14 @@ local function draw_hud_image(e)
 		return
 	end
 	local sx, sy = parse_v2(e.scale, 1, 1)
+	local scale = hud_scale()
 	-- A negative scale is a fraction of the screen rather than of the image,
-	-- which is how Luanti's own scale works
+	-- which is how Luanti's own scale works; a positive one is the picture
+	-- at so many of Luanti's screen pixels per pixel of its own
 	local w = sx < 0 and (-sx * 0.01 * magic.ui.root.width) or
-			(tex.width * sx)
+			(tex.width * sx * scale)
 	local h = sy < 0 and (-sy * 0.01 * magic.ui.root.height) or
-			(tex.height * sy)
+			(tex.height * sy * scale)
 	local img = hud_root:CreateChild("BorderImage")
 	img.texture = tex
 	img.size = magic.IntVector2(math.floor(w), math.floor(h))
@@ -1915,9 +1960,10 @@ local function draw_hud_inventory(e)
 	if n <= 0 then
 		return
 	end
-	local sw, sh = parse_v2(e.size, 0, 0)
-	local slot = math.floor(sw > 0 and sw or SLOT)
-	local step = slot + SLOT_GAP
+	-- Luanti's drawItems() draws this with the hotbar's own numbers and
+	-- does not read the element's size, so the slots are the same squares
+	-- the client's own hotbar is made of
+	local imagesize, padding, slot = hotbar_metrics()
 	local selected = math.floor(tonumber(e.item) or 0)
 	-- Luanti's dir: 0 right, 1 left, 2 down, 3 up
 	local dir = math.floor(tonumber(e.dir) or 0)
@@ -1933,13 +1979,12 @@ local function draw_hud_inventory(e)
 				magic.Color(0.9, 0.9, 0.7, 0.75) or
 				magic.Color(0.1, 0.1, 0.12, 0.55)
 		frame.size = magic.IntVector2(slot, slot)
-		local at = (i - 1) * step
-		if dir == 1 then
-			frame:SetPosition(-at, 0)
-		elseif dir == 2 then
+		-- A row that runs the other way is the same row of squares with
+		-- the slots in the other order, which is what drawItems() does:
+		-- the element is where it is and the direction is inside it
+		local at = ((dir == 1 or dir == 3) and (n - i) or (i - 1)) * slot
+		if dir == 2 or dir == 3 then
 			frame:SetPosition(0, at)
-		elseif dir == 3 then
-			frame:SetPosition(0, -at)
 		else
 			frame:SetPosition(at, 0)
 		end
@@ -1947,8 +1992,8 @@ local function draw_hud_inventory(e)
 		if tex then
 			local image = frame:CreateChild("BorderImage")
 			image.texture = tex
-			image:SetPosition(4, 4)
-			image.size = magic.IntVector2(slot - 8, slot - 8)
+			image:SetPosition(padding, padding)
+			image.size = magic.IntVector2(imagesize, imagesize)
 		end
 		if count and count > 1 then
 			local t = frame:CreateChild("Text")
@@ -1961,8 +2006,8 @@ local function draw_hud_inventory(e)
 			t:SetText(tostring(count))
 		end
 	end
-	local w = (dir <= 1) and (n * step - SLOT_GAP) or slot
-	local h = (dir <= 1) and slot or (n * step - SLOT_GAP)
+	local w = (dir <= 1) and (n * slot) or slot
+	local h = (dir <= 1) and slot or (n * slot)
 	row.size = magic.IntVector2(w, h)
 	hud_place(row, e, w, h)
 end
@@ -2104,12 +2149,17 @@ local function draw_hud_minimap(e)
 		return
 	end
 	local w, h = parse_v2(e.size, 128, 128)
-	-- A negative size is a percentage of the screen, as a compass's is
+	-- A negative size is a percentage of the screen, as a compass's is;
+	-- a positive one is in Luanti's screen pixels
 	if w < 0 then
 		w = -w * 0.01 * magic.ui.root.width
+	else
+		w = w * hud_scale()
 	end
 	if h < 0 then
 		h = -h * 0.01 * magic.ui.root.height
+	else
+		h = h * hud_scale()
 	end
 	w, h = math.floor(w), math.floor(h)
 	if w <= 0 or h <= 0 then
@@ -2236,41 +2286,93 @@ local function draw_hud_statbar(e)
 	local value = math.floor(tonumber(e.number) or 0)
 	local total = math.floor(tonumber(e.item) or value)
 	local sw, sh = parse_v2(e.size, 0, 0)
-	local w = sw > 0 and sw or tex.width
-	local h = sh > 0 and sh or tex.height
+	local scale = hud_scale()
+	local w = (sw > 0 and sw or tex.width) * scale
+	local h = (sh > 0 and sh or tex.height) * scale
 	-- Luanti's dir: 0 right, 1 left, 2 down, 3 up
 	local dir = math.floor(tonumber(e.dir) or 0)
-	local bg = e.text2 and game_texture(luanti.texture(e.text2))
+	-- What a square that has been lost wears, if the game gave one
+	local bg = nil
+	if e.text2 ~= nil and e.text2 ~= "" then
+		bg = game_texture(luanti.texture(e.text2))
+		if bg == nil and not hud_missing[e.text2] then
+			hud_missing[e.text2] = true
+			log:info("the game's HUD wants a picture called \"" ..
+					tostring(e.text2) .. "\" for what a bar has lost, " ..
+					"which is not there")
+		end
+	end
 	local whole = math.floor(total / 2)
 	local row = hud_root:CreateChild("UIElement")
-	local count = 0
-	for i = 1, whole do
-		local filled = value >= i * 2
-		local half = (not filled) and value == i * 2 - 1
-		local tex_i = filled and tex or (half and tex or bg)
-		if tex_i then
-			local icon = row:CreateChild("BorderImage")
-			icon.texture = tex_i
-			icon.size = magic.IntVector2(math.floor(half and w / 2 or w),
-					math.floor(h))
-			if half then
-				-- The left half of the icon, which is Luanti's own half
-				icon.imageRect = magic.IntRect(0, 0,
-						math.floor(tex_i.width / 2), tex_i.height)
+	-- Where the i'th square of the row sits, which is where drawStatbar()
+	-- has stepped to by then
+	local function square(i)
+		local step = i - 1
+		if dir == 1 then return -step * w, 0 end
+		if dir == 2 then return 0, step * h end
+		if dir == 3 then return 0, -step * h end
+		return step * w, 0
+	end
+	-- A square of the row: the whole picture, or the half of it the bar
+	-- runs out of (near) or into (far). Luanti cuts both the picture and
+	-- the square across the way the bar runs, so the half that is left
+	-- keeps its own side and what is gone is drawn in the other half.
+	local function piece(tex_i, i, near)
+		if tex_i == nil then
+			return
+		end
+		local x, y = square(i)
+		local iw, ih = w, h
+		local rx, ry = 0, 0
+		local rw, rh = tex_i.width, tex_i.height
+		if near ~= nil then
+			-- Whether this half is the one at the lower coordinate: the
+			-- near half of a row running right is its left half, and of
+			-- one running left its right half
+			local low = (near == (dir == 0 or dir == 2))
+			if dir <= 1 then
+				iw, rw = w / 2, math.floor(tex_i.width / 2)
+				if not low then
+					x, rx = x + w / 2, math.floor(tex_i.width / 2)
+				end
+			else
+				ih, rh = h / 2, math.floor(tex_i.height / 2)
+				if not low then
+					y, ry = y + h / 2, math.floor(tex_i.height / 2)
+				end
 			end
-			local step = (i - 1)
-			local x, y = step * w, 0
-			if dir == 1 then x = -step * w
-			elseif dir == 2 then x, y = 0, step * h
-			elseif dir == 3 then x, y = 0, -step * h end
-			icon:SetPosition(math.floor(x), math.floor(y))
-			count = count + 1
+		end
+		local icon = row:CreateChild("BorderImage")
+		icon.texture = tex_i
+		icon.size = magic.IntVector2(math.floor(iw), math.floor(ih))
+		if near ~= nil then
+			icon.imageRect = magic.IntRect(rx, ry, rx + rw, ry + rh)
+		end
+		icon:SetPosition(math.floor(x), math.floor(y))
+	end
+	-- simplified: a bar whose whole length is an odd number of halves ends
+	-- in a half square, which is not drawn here. Luanti draws it; every bar
+	-- there is asks for an even length.
+	for i = 1, whole do
+		if value >= i * 2 then
+			piece(tex, i, nil)
+		elseif value == i * 2 - 1 then
+			piece(tex, i, true)
+			piece(bg, i, false)
+		else
+			piece(bg, i, nil)
 		end
 	end
 	local total_w = (dir <= 1) and whole * w or w
 	local total_h = (dir <= 1) and h or whole * h
 	row.size = magic.IntVector2(math.floor(total_w), math.floor(total_h))
-	hud_place(row, e, total_w, total_h)
+	-- **A statbar is the one kind align is not read for**: Luanti's
+	-- drawStatbar() is given the element's pos and offset and nothing else,
+	-- and a game that asks for one alignment or another gets the row in the
+	-- same place either way. A size of zero here is what takes align out of
+	-- hud_place()'s arithmetic. VoxeLibre asks for -1 on the row left of
+	-- the middle, which slid its hearts a whole row further left.
+	hud_place(row, e, 0, 0)
 end
 
 -- What the game last sent, so that the HUD can be drawn again when
@@ -2401,15 +2503,11 @@ menu_fields = function(fields)
 		luanti.show_local_form(pause_spec(), menu_fields)
 	elseif fields.leave then
 		buildat.disconnect()
-	elseif fields.quit then
-		-- Continued, or escaped: the mouse goes back to the world
-		set_mouse_in_world(true)
 	end
 end
 
 local function open_pause_menu()
 	luanti.show_local_form(pause_spec(), menu_fields)
-	set_mouse_in_world(false)
 end
 
 --
@@ -2821,9 +2919,6 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		return
 	end
 	if luanti.key(key) then
-		-- A form that closed hands the mouse back to the world, which is
-		-- where it came from
-		set_mouse_in_world(not luanti.form_open())
 		return
 	end
 	if key >= magic.KEY_1 and key <= magic.KEY_9 then
@@ -2846,18 +2941,10 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 				{one and "1" or "0"}, {"array", "string"}))
 		elseif key == BIND.inventory.key then
 		-- Luanti's own inventory key, and what a game's inventory formspec
-		-- is for. The mouse has to be on the screen to click a form -- but
-		-- only if one opened: a game that sets no inventory formspec draws
-		-- nothing, and taking the mouse away then leaves the player unable
-		-- to move with nothing to click on. The same key closes it again
-		-- and hands the mouse back.
-		local was_open = luanti.form_open()
+		-- is for. The same key closes it again. A game that sets no
+		-- inventory formspec opens nothing, and the mouse stays in the
+		-- world: nothing opened for it to point at.
 		luanti.open_player_inventory()
-		if luanti.form_open() then
-			set_mouse_in_world(false)
-		elseif was_open then
-			set_mouse_in_world(true)
-		end
 	elseif key == BIND.fly.key then
 		player.fly = not player.fly
 		log:info(player.fly and "flying" or "walking")
