@@ -353,14 +353,25 @@ function M.new(magic, buildat, log, options)
 	-- moon are the ones here that want it, and their names can be texture
 	-- expressions like any other.
 	local media_texture = options.media_texture
-	-- Whether the world is drawn with res/PBRVoxel -- normal and surface
-	-- maps, reflections of the sky, the sun as a real light -- instead of
-	-- the Luanti-native VoxelUnlit. Chosen in the connect dialog and fixed
-	-- for the session: the atlas's surface maps have to be on from the first
-	-- texture it builds, and they are two thirds of what adding one costs.
-	local pbr = options.pbr and true or false
+	-- Which of the three rendering modes the world is drawn in, fixed for the
+	-- session: the atlas's surface maps have to be on from the first texture
+	-- it builds, and they are two thirds of what adding one costs.
+	--
+	--   unlit    the baked light and nothing else, which is official Luanti
+	--            with its dynamic shadows off
+	--   shadows  the same with the sun's shadow map multiplying it, which is
+	--            official Luanti as it is usually played
+	--   pbr      res/PBRVoxel: normal and surface maps, reflections of the
+	--            sky, the sun as a real light. A deliberate deviation.
+	--
+	-- See [RENDER_MODES] in doc/plan/rendering_plan.md. `pbr` stays a boolean
+	-- beside it because everything below that asks about surface maps, sky
+	-- visibility or the light curve is asking about that mode alone.
+	local mode = options.mode or "unlit"
+	local pbr = mode == "pbr"
 
 	local self = {}
+	self.mode = mode
 	self.pbr = pbr
 
 	-- One of the game's own textures, drawn without smoothing. A Luanti
@@ -496,9 +507,16 @@ function M.new(magic, buildat, log, options)
 	-- directional light to reach. The PBR path reads the same vertex colours
 	-- as its ambient, so that is true of it as well -- what it adds on top is
 	-- the sky it reflects.
-	local technique = magic.cache:GetResource("Technique", pbr and
-			"luanti_client/res/PBRVoxel.xml" or
-			"luanti_client/res/VoxelUnlit.xml")
+	-- shadows differs from unlit in one file: LuantiVoxelUnlit adds a light
+	-- pass that multiplies by the shadow factor and writes nothing else.
+	-- Water is unshadowed in both, VoxelUnlitAlpha having no light pass.
+	local opaque_name = "luanti_client/res/VoxelUnlit.xml"
+	if pbr then
+		opaque_name = "luanti_client/res/PBRVoxel.xml"
+	elseif mode == "shadows" then
+		opaque_name = "luanti_client/res/LuantiVoxelUnlit.xml"
+	end
+	local technique = magic.cache:GetResource("Technique", opaque_name)
 	local alpha_technique = magic.cache:GetResource("Technique", pbr and
 			"luanti_client/res/PBRVoxelAlpha.xml" or
 			"luanti_client/res/VoxelUnlitAlpha.xml")
@@ -714,7 +732,10 @@ function M.new(magic, buildat, log, options)
 	local sun_light = nil
 	local moon_node = nil
 	local moon_light = nil
-	if pbr then
+	-- In shadows they are here for the shadow map alone: the technique's
+	-- light pass multiplies by the shadow factor and never reads the light's
+	-- colour or brightness. In unlit there is nothing to cast one from.
+	if mode ~= "unlit" then
 		sun_node = scene:CreateChild("Sun")
 		sun_light = sun_node:CreateComponent("Light")
 		sun_light.lightType = magic.LIGHT_DIRECTIONAL
@@ -762,7 +783,7 @@ function M.new(magic, buildat, log, options)
 		-- Urho3D's drawables cast no shadow unless told to, one by one. On
 		-- the vanilla path there is no light to cast one from; on the PBR
 		-- path this is what puts the world in the sun's shadow map.
-		cg.castShadows = pbr
+		cg.castShadows = mode ~= "unlit"
 		local i = 0
 		while true do
 			local m = cg:GetMaterial(i)

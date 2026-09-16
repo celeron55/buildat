@@ -5843,19 +5843,31 @@ struct Module: public interface::Module, public luanti::Interface
 	void on_get_world_info(const network::Packet &packet)
 	{
 		sv_<ss_> flat = string_list_from_lua("__world_info");
-		// Whether this session draws with the PBR shaders or the unlit ones,
-		// which is a startup choice and not a toggle: the atlas's surface
-		// maps have to be on from the first texture it builds. So it goes
-		// with the rest of what is constant for a session rather than getting
-		// a packet of its own. See [NON_PBR] in doc/plan/rendering_plan.md.
+		// Which of the three rendering modes this session draws in --
+		// "unlit", "shadows" or "pbr" -- which is a startup choice and not a
+		// toggle: the atlas's surface maps have to be on from the first
+		// texture the client builds. So it goes with the rest of what is
+		// constant for a session rather than getting a packet of its own.
+		// See [RENDER_MODES] in doc/plan/rendering_plan.md.
 		//
 		// It is read here and not in the client's Lua because that half runs
 		// in the sandbox, where there is no getenv;
 		// extensions/luanti_client reads the same variable for itself, being
-		// outside it. An unset variable means each client's own default --
-		// PBR here, unlit there -- and an explicit "0" means unlit to both.
-		const char *pbr = getenv("BUILDAT_LUANTI_PBR");
-		flat.push_back((pbr != nullptr && ss_(pbr) == "0") ? "0" : "1");
+		// outside it. An unset variable means this client's own default,
+		// which is pbr. The numbers keep working for whatever already passes
+		// them: 0 was the unlit path before either had a name.
+		const char *mode = getenv("BUILDAT_LUANTI_PBR");
+		ss_ m = (mode != nullptr) ? ss_(mode) : ss_("");
+		if(m == "0")
+			m = "unlit";
+		else if(m == "" || m == "1")
+			m = "pbr";
+		else if(m != "unlit" && m != "shadows" && m != "pbr"){
+			log_w(MODULE, "BUILDAT_LUANTI_PBR=\"%s\" is not a mode; "
+					"drawing pbr. Wanted unlit, shadows or pbr", cs(m));
+			m = "pbr";
+		}
+		flat.push_back(m);
 		std::ostringstream os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(os);

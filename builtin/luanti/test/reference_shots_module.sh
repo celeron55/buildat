@@ -3,7 +3,13 @@
 # same world and the same fixture official Luanti's half used. See
 # doc/plan/rendering_plan.md.
 #
-#   builtin/luanti/test/reference_shots_module.sh [world]
+#   builtin/luanti/test/reference_shots_module.sh [mode] [world]
+#
+# The mode is unlit, shadows or pbr and defaults to pbr, which is what the
+# launcher draws when nothing asks otherwise. Each one has its own reference:
+# unlit against official_noshadow/, shadows against official/, pbr against
+# nothing but the sunlit anchor. See [RENDER_MODES] in
+# doc/plan/rendering_plan.md.
 #
 # The world is the cache reference_shots.sh generated -- one engine makes the
 # terrain and all three clients are pointed at it, so a difference between the
@@ -28,8 +34,13 @@ set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 seed=$(sed -n 's/^seed = //p' "$me/reference_world_map_meta.txt")
-world="${1:-$here/local/reference_worlds/$seed}"
-out="${OUT_DIR:-$here/local/reference_shots/module}"
+mode="${1:-pbr}"
+case "$mode" in
+unlit|shadows|pbr) ;;
+*) echo "unknown mode: $mode (wanted unlit, shadows or pbr)" >&2; exit 2 ;;
+esac
+world="${2:-$here/local/reference_worlds/$seed}"
+out="${OUT_DIR:-$here/local/reference_shots/module_$mode}"
 save=buildat_test_refviews
 tmp=$(mktemp -d)
 
@@ -48,7 +59,7 @@ done
 rm -rf "../user/games/luanti_launcher/saves/$save"
 port=$(( 29600 + (RANDOM % 90) ))
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
-	BUILDAT_LUANTI_IMPORT="$world" \
+	BUILDAT_LUANTI_IMPORT="$world" BUILDAT_LUANTI_PBR="$mode" \
 	BUILDAT_LUANTI_LUA="$me/reference_views.lua" \
 	bin/buildat_server -m ../games/luanti_launcher -D ../user -P "$port" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/srv.log" &

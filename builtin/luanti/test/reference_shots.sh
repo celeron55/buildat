@@ -293,7 +293,7 @@ sleep 5
 # same set" in doc/plan/rendering_plan.md. The module's half is the odd one
 # out and has a script of its own, because it runs the game itself.
 if [ "${CLIENT:-luanti}" = "extension" ]; then
-	out="${OUT_DIR:-$here/local/reference_shots/extension}"
+	out="${OUT_DIR:-$here/local/reference_shots/extension_${MODE:-unlit}}"
 	mkdir -p "$out"
 	# Three passes rather than two: this client fetches the server's media and
 	# meshes the world as it goes, so the second is still catching up
@@ -305,7 +305,7 @@ if [ "${CLIENT:-luanti}" = "extension" ]; then
 	cmds=$(mktemp /tmp/refshots_ext.XXXXXX.txt)
 	{ echo "delay 1800000"; echo "quit"; } > "$cmds"
 	BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=ref \
-		BUILDAT_LUANTI_CONNECT=1 \
+		BUILDAT_LUANTI_CONNECT=1 BUILDAT_LUANTI_PBR="${MODE:-unlit}" \
 		"$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 \
 		-c @"$cmds" > /tmp/refshots_ext.log 2>&1 &
 	cli=$!

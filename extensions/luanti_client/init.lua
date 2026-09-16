@@ -42,11 +42,25 @@ local DEFAULT_NAME = os.getenv("BUILDAT_LUANTI_NAME") or "buildat"
 -- The PBR checkbox's starting state. A scripted run has to hit the box by
 -- pixel coordinates otherwise, and a miss looks like the shader not working
 -- rather than like a missed click.
--- Unset means this client's own default, which is unlit; an explicit "0"
--- means unlit and anything else means PBR. builtin/luanti reads the same
--- variable with the same three answers, its own default being the other way
--- round -- see [NON_PBR] in doc/plan/rendering_plan.md.
-local DEFAULT_PBR = (os.getenv("BUILDAT_LUANTI_PBR") or "0") ~= "0"
+-- Which of the three rendering modes to draw in: "unlit", "shadows" or "pbr".
+-- Unset means this client's own default, which is unlit; the numbers keep
+-- working for whatever already passes them, 0 having been the unlit path and
+-- 1 the PBR one before either had a name. builtin/luanti reads the same
+-- variable with the same answers, its own default being pbr -- see
+-- [RENDER_MODES] in doc/plan/rendering_plan.md.
+local DEFAULT_MODE = (function()
+	local v = os.getenv("BUILDAT_LUANTI_PBR") or ""
+	if v == "" or v == "0" then
+		return "unlit"
+	elseif v == "1" then
+		return "pbr"
+	elseif v == "unlit" or v == "shadows" or v == "pbr" then
+		return v
+	end
+	log:warning("BUILDAT_LUANTI_PBR=\"" .. v .. "\" is not a mode; " ..
+			"drawing unlit. Wanted unlit, shadows or pbr")
+	return "unlit"
+end)()
 
 -- How far the camera sees, and how far out blocks are kept, in nodes. The
 -- client asks the server for blocks by the same distance; see
@@ -235,9 +249,9 @@ end
 local show_connect_dialog
 
 -- The screen that shows what the client is doing, and drives it every frame
--- pbr: whether to draw the world with the PBR shader; see the connect
+-- mode: which of unlit, shadows and pbr to draw the world in; see the connect
 -- dialog, where it is chosen, and world.lua for what it changes
-local function show_client(host, port, name, password, pbr)
+local function show_client(host, port, name, password, mode)
 	local root = uistack.main:push({desc="luanti_client"})
 	-- Held rather than read back off the element: the sandbox hands out no
 	-- resource it did not just wrap
@@ -385,7 +399,7 @@ local function show_client(host, port, name, password, pbr)
 
 		local view = world.new(magic, buildat.safe, log, {
 				far_clip = FAR_CLIP,
-				pbr = pbr,
+				mode = mode,
 				read_image = buildat.read_image,
 				read_mesh = function(def)
 					return read_mesh and read_mesh(def) or nil
@@ -3232,7 +3246,11 @@ show_connect_dialog = function(address, name)
 	local pbr_label = pbr_row:CreateChild("Text")
 	pbr_label:SetStyleAuto()
 	pbr_label.text = "Enable PBR (slower to load)"
-	pbr_check.checked = DEFAULT_PBR
+	-- A checkbox says two things and there are three modes, so it says the
+	-- one it always said: pbr or not. The other two are named by the
+	-- environment variable, which is what a scripted run uses anyway; a mode
+	-- picker in this dialog waits until somebody wants one by hand.
+	pbr_check.checked = DEFAULT_MODE == "pbr"
 	-- The password is the field a second try is most likely about, and it is
 	-- the one that is not filled in
 	if address then
@@ -3258,7 +3276,8 @@ show_connect_dialog = function(address, name)
 		end
 		uistack.main:pop(root)
 		show_client(host, port, name, password_edit:GetText(),
-				pbr_check.checked)
+				pbr_check.checked and "pbr" or
+				(DEFAULT_MODE == "pbr" and "unlit" or DEFAULT_MODE))
 	end
 
 	local function cancel()
@@ -3314,7 +3333,7 @@ function M.boot()
 		log:info("connecting to " .. host .. ":" .. port ..
 				" without the dialog, as BUILDAT_LUANTI_CONNECT asks")
 		show_client(host, port, DEFAULT_NAME,
-				os.getenv("BUILDAT_LUANTI_PASSWORD") or "", DEFAULT_PBR)
+				os.getenv("BUILDAT_LUANTI_PASSWORD") or "", DEFAULT_MODE)
 		return
 	end
 	show_connect_dialog()

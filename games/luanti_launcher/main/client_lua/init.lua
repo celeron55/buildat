@@ -366,34 +366,42 @@ do
 end
 
 
--- Or the unlit set, if this session asked for it. **A startup choice and not
--- a toggle** -- the atlas's surface maps have to be on from the first texture
--- it builds -- so it arrives with luanti:world_info, which the module asks
--- for as its client half loads, well before the first chunk has been meshed.
--- What is already drawn keeps the technique it was drawn with, which is what
--- use_technique_set() says of itself.
+-- Or one of the two parity modes, if this session asked for one. **A startup
+-- choice and not a toggle** -- the atlas's surface maps have to be on from the
+-- first texture it builds -- so it arrives with luanti:world_info, which the
+-- module asks for as its client half loads, well before the first chunk has
+-- been meshed. What is already drawn keeps the technique it was drawn with,
+-- which is what use_technique_set() says of itself.
 --
--- **Four names for two files, and nothing new was written.** VoxelUnlit
--- discards below half alpha already, which is the whole of what masked
--- means; no Luanti game binds surface modifiers, so that name is the plain
--- one; and the sun-gated four go the same way, an unlit surface having no
--- sun to gate. The cube map, set_sky_light() and set_sky_tint() are left
--- alone: the unlit shader does not read any of them. See [NON_PBR] in
--- doc/plan/rendering_plan.md.
+-- | mode | what it draws | what it matches |
+-- | unlit | the baked light and nothing else | official Luanti, shadows off |
+-- | shadows | the same, with the sun's shadow map multiplying it | official Luanti as the reference runs it |
+-- | pbr | this launcher's own look, and the default | nothing but the sunlit anchor |
+--
+-- See [RENDER_MODES] in doc/plan/rendering_plan.md.
+--
+-- **Four names for two files, and nothing new was written for unlit.**
+-- VoxelUnlit discards below half alpha already, which is the whole of what
+-- masked means; no Luanti game binds surface modifiers, so that name is the
+-- plain one; and the sun-gated four go the same way, an unlit surface having
+-- no sun to gate. The cube map, set_sky_light() and set_sky_tint() are left
+-- alone: neither unlit shader reads any of them.
 luanti.sub_world_info(function(info)
-	if info.pbr then
+	local mode = info.mode or "pbr"
+	if mode == "pbr" then
 		return
 	end
-	log:info("BUILDAT_LUANTI_PBR=0: drawing the world unlit")
-	-- On sky_now rather than a local of its own: init.lua's main chunk is at
+	log:info("BUILDAT_LUANTI_PBR=" .. mode .. ": drawing the world " .. mode)
+	-- On sky_now rather than locals of their own: init.lua's main chunk is at
 	-- Lua 5.1's two hundred locals and has been for a while
 	sky_now.unlit = true
-	-- **And no tonemap, which is half of what non-PBR means here.** The
+	sky_now.shadows = mode == "shadows"
+	-- **And no tonemap, which is half of what either parity mode means.** The
 	-- unlit shader writes the light the mesher baked, which is already the
 	-- number that belongs on the screen; put that through an HDR buffer, an
 	-- exposure bias of 1.6 and Uncharted2 and the world comes out white.
 	-- Official Luanti has no tonemap either, and being comparable to it is
-	-- what [NON_PBR] is for. The commands are disabled rather than removed
+	-- what these modes are for. The commands are disabled rather than removed
 	-- because that is what a RenderPath offers.
 	local vp = magic.renderer:GetViewport(0)
 	local rp = vp and vp.renderPath
@@ -408,14 +416,20 @@ luanti.sub_world_info(function(info)
 		world_render_path:SetEnabled("GammaCorrection", false)
 	end
 	magic.renderer.HDRRendering = false
+	-- The difference between the two modes is one technique: LuantiVoxelUnlit
+	-- adds a light pass that multiplies by the shadow factor, VoxelUnlit does
+	-- not. Water is VoxelUnlitAlpha either way, being unshadowed in both.
+	local opaque = sky_now.shadows and
+			"luanti_client/res/LuantiVoxelUnlit.xml" or
+			"luanti_client/res/VoxelUnlit.xml"
 	voxel_shading.use_technique_set({
-		plain = "luanti_client/res/LuantiVoxelUnlit.xml",
-		modifiers = "luanti_client/res/LuantiVoxelUnlit.xml",
-		masked = "luanti_client/res/LuantiVoxelUnlit.xml",
+		plain = opaque,
+		modifiers = opaque,
+		masked = opaque,
 		alpha = "luanti_client/res/VoxelUnlitAlpha.xml",
-		sun = "luanti_client/res/LuantiVoxelUnlit.xml",
-		sun_modifiers = "luanti_client/res/LuantiVoxelUnlit.xml",
-		sun_masked = "luanti_client/res/LuantiVoxelUnlit.xml",
+		sun = opaque,
+		sun_modifiers = opaque,
+		sun_masked = opaque,
 		sun_alpha = "luanti_client/res/VoxelUnlitAlpha.xml",
 	})
 end)
@@ -1091,19 +1105,19 @@ local function update_sky(dt)
 	-- dimmed: a directional light does not know about the horizon, and one
 	-- under it lights the undersides of everything and puts the night's
 	-- specular on the wrong side of the sky.
-	-- **The sun stays in the scene on the unlit path, for its shadow alone.**
-	-- LuantiVoxelUnlit's light pass multiplies rather than adds -- it writes
-	-- the shadow factor and nothing else -- so the light's own colour and
-	-- brightness do not reach the picture; what it is there for is the shadow
-	-- map. Removing it outright, which this did at first, gives a world with
-	-- no shadows at all, and the parity target is official Luanti **with** its
-	-- dynamic shadows on. See [NON_PBR], "Which path owes parity".
-	sky_lights.sun_node.enabled = up > 0
+	-- **In shadows the sun is in the scene for its shadow map alone** --
+	-- LuantiVoxelUnlit's light pass multiplies rather than adds, so the
+	-- light's colour and brightness never reach the picture -- and **in unlit
+	-- it is not there at all**, which is what matches official Luanti with
+	-- its dynamic shadows off. In pbr it lights the world the usual way.
+	sky_lights.sun_node.enabled = up > 0 and
+			not (sky_now.unlit and not sky_now.shadows)
 	if up > 0 then
 		sky_lights.sun_node.direction = magic.Vector3(dir.x, dir.y, dir.z)
 		sky_lights.sun.brightness = SUN_BRIGHTNESS * up
 	end
-	sky_lights.moon_node.enabled = moon_up > 0
+	sky_lights.moon_node.enabled = moon_up > 0 and
+			not (sky_now.unlit and not sky_now.shadows)
 	if moon_up > 0 then
 		sky_lights.moon_node.direction =
 				magic.Vector3(-dir.x, -dir.y, -dir.z)
