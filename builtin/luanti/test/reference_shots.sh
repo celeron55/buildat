@@ -113,14 +113,21 @@ shoot_states()
 	# under that name. A stale picture of the right place is the other thing
 	# the two cheap tests cannot see.
 	shotlist=$(mktemp /tmp/refshots_taken.XXXXXX)
-	# Counted from the first shot rather than from here. What comes before it
-	# is the client loading the world, which is ten seconds for official Luanti
-	# on a cached world and a minute and a half for the module importing one --
-	# charge that to the deadline and the second cycle is what gets cut short.
-	# The outer cap is for a client that never gets there at all.
-	deadline=$(( $(date +%s) + 900 ))
+	# Two bounds, neither of them a guess at how long a state takes. That
+	# guess was wrong twice: a formula of SHOT_AT times three cut a run off
+	# at nineteen minutes with four of its twenty states never photographed,
+	# and the client's SIGTERM at the end of it read as an outside killer.
+	# What a state costs here is anything from nine seconds to thirty-three,
+	# because the server loads a world around a player it teleports.
+	#
+	# So: the run ends when it stops making progress, or at the outer cap.
+	# STALL is reset by every picture taken; before the first one it is
+	# longer, because the client is importing a world and that is minutes.
+	cap=$(( $(date +%s) + ${REFSHOT_CAP:-2700} ))
+	stall=$(( $(date +%s) + ${REFSHOT_FIRST:-420} ))
 	last=""
-	while [ "$taken" -lt "$want" ] && [ "$(date +%s)" -lt "$deadline" ]; do
+	while [ "$taken" -lt "$want" ] && [ "$(date +%s)" -lt "$stall" ] &&
+			[ "$(date +%s)" -lt "$cap" ]; do
 		line=$(grep -o "REFSHOT [0-9]* [0-9a-z_]*_\(none\|rain\)" "$log" | tail -1)
 		name=$(echo "$line" | cut -d' ' -f3)
 		if [ -n "$name" ] && [ "$name" != "$last" ]; then
@@ -146,16 +153,7 @@ shoot_states()
 			if import -window "$win" "$out/$name.png" 2>/dev/null; then
 				taken=$((taken + 1))
 				echo "$name" >> "$shotlist"
-				# From the hold, which SHOT_AT is two thirds of: a state costs
-				# that much again while the server loads a world around a
-				# player it teleports, so three times the shot instant is what
-				# a cycle actually takes. A deadline that was too tight cut the
-				# third cycle short and left eight cold pictures standing in a
-				# twenty-picture set.
-				[ "$taken" -eq 1 ] && deadline=$(( $(date +%s) + \
-						total * $(awk -v a="${SHOT_AT:-4}" \
-						'BEGIN{printf "%d", a * 3 + 6}') * \
-						${CYCLES:-2} + 60 ))
+				stall=$(( $(date +%s) + ${REFSHOT_STALL:-150} ))
 				echo "shot $name"
 			else
 				echo "MISSED $name" >&2
@@ -173,6 +171,13 @@ shoot_states()
 	rm -f "$shotlist"
 	if [ "$got" -lt "$total" ]; then
 		echo "only $got of $total states were shot; the rest are stale" >&2
+		# By name, because which ones matters: four rain states missing is a
+		# fixture that never reached them, and four scattered ones is a
+		# shooter dropping pictures. The count alone says neither.
+		for n in $(grep -o "REFSHOT [0-9]* [0-9a-z_]*_\(none\|rain\)" "$log" | \
+				cut -d' ' -f3 | sort -u); do
+			echo "$shot_names" | grep -qx "$n" || echo "  never shot: $n" >&2
+		done
 	fi
 	# Nothing at all is a run that did not happen -- the server lost a race for
 	# the save's sqlite, or the client never drew. The caller retries on it.
