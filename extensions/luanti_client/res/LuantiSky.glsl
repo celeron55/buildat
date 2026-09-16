@@ -15,13 +15,9 @@
 #include "Uniforms.glsl"
 #include "Samplers.glsl"
 #include "Transform.glsl"
-// The sky visibility cube and its lookup, beside this file. At column zero
-// because Urho3D's Shader::ProcessSource() only consumes an #include that
-// starts its line, and behind COMPILEPS because it uses M_EPSILON, which
-// Uniforms.glsl only defines for the pixel half.
-#ifdef COMPILEPS
-#include "SkyVis.glsl"
-#endif
+// SkyVis.glsl is not included any more: this shader dims by a scalar and has
+// no use for a direction. See the note beside cSkyOutside below, and
+// [CAVE_SKY]'s correction in doc/plan/rendering_plan.md.
 
 varying vec3 vTexCoord;
 
@@ -69,6 +65,9 @@ uniform vec2 cCloudWind;
 // this.
 uniform vec3 cSkyIndoors;
 uniform float cSkyAutoDim;
+// How much sky the camera can see, as one number: 0 in a cave, 1 anywhere
+// that is not one. See [CAVE_SKY]'s correction in doc/plan/rendering_plan.md.
+uniform float cSkyOutside;
 
 // How far below the horizon the sky darkens into the ground haze
 const float HAZE_DEPTH = 0.25;
@@ -282,13 +281,23 @@ void PS()
         color = mix(color, moon_color, cover);
     }
 
-    // And what of the sky this direction can see at all. Mixed once, at the
-    // end, rather than the gradient and the cloud layer separately: it comes
-    // to the same thing for those two and it also takes the sun, the moon
-    // and the stars with it, which is what stops a body blazing through a
-    // seam in a cave roof.
+    // And whether the camera can see the sky at all. **A scalar, not a
+    // direction.** Mixing per direction -- which this did -- draws a halo
+    // around every occluder: the visibility cube is camera-local and thirty
+    // degrees to a cell while the sky is at infinity, so a cell whose ray
+    // hits a tree darkens the real sky just past that tree's silhouette, in
+    // a blob the size of a cell. The cube is right for reflections and for
+    // the ambient a surface receives, which are properties of a point on a
+    // surface; the sky is not a surface.
+    //
+    // cSkyOutside is one for anything less than fully enclosed, so the sky
+    // is drawn as it is unless the camera is in a cave -- which is Luanti's
+    // own shape, Sky::update() taking a scalar and a sunlight_seen bool.
+    // Mixed once at the end rather than per layer: it takes the sun, the
+    // moon and the stars with it, which is what stops a body blazing through
+    // a seam in a cave roof.
     if(cSkyAutoDim > 0.0)
-        color = mix(cSkyIndoors, color, GetSkyVisibility(d));
+        color = mix(cSkyIndoors, color, cSkyOutside);
 
     gl_FragColor = vec4(color, 1.0);
 }

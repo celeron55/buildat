@@ -3950,6 +3950,13 @@ function M.new(magic, buildat, log, options)
 			sky_material:SetShaderParameter("SkyIndoors",
 					sky_color("indoors", brightness))
 			sky_material:SetShaderParameter("SkyAutoDim", 1.0)
+			-- **A parameter a material never sets reads as zero**, and zero
+			-- here means "in a cave", which would draw this client's sky as
+			-- the indoors colour everywhere. Set to one until this client
+			-- computes the scalar for itself; it has the cube that would
+			-- give it -- see skyvis.lua -- and the sky is then edited only
+			-- once there is no sky to see. [CAVE_SKY].
+			sky_material:SetShaderParameter("SkyOutside", 1.0)
 			-- Luanti's clouds are the daylight's own colour, unless the
 			-- game gave them one; either way they go dark with the day. And
 			-- over the hour the sun spends crossing the horizon they take its

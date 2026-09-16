@@ -404,6 +404,17 @@ function M.new(scene, sun_dir, defaults)
 		material:SetShaderParameter("SkyAutoDim", on and 1.0 or 0.0)
 	end
 
+	-- How much sky the camera can see, as one number rather than a
+	-- direction: 0 in a cave and 1 anywhere that is not one. **The sky is
+	-- edited only once there is no sky to see**, which is the rule the halos
+	-- cost -- mixing per direction darkened the real sky in a blob around
+	-- every occluder, the visibility cube being camera-local and thirty
+	-- degrees to a cell while the sky is at infinity. See [CAVE_SKY].
+	function self:set_outside(k)
+		material:SetShaderParameter("SkyOutside",
+				math.max(0, math.min(1, k or 1)))
+	end
+
 	function self:enabled(on)
 		node.enabled = on and true or false
 	end

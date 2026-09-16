@@ -1163,6 +1163,12 @@ local function update_sky(dt)
 	-- the haze is the indoors colour rather than a sky the player cannot
 	-- see. See [CAVE_SKY].
 	local seen = voxel_shading.sky_visibility_above()
+	-- And whether the sky is drawn at all, which is a late and conservative
+	-- gate rather than a fade: anything less than fully enclosed draws the
+	-- sky as it is, and only a cave with essentially no sky over it dims it.
+	-- The short ramp is so that walking into one is not a step. See
+	-- [CAVE_SKY]'s correction in doc/plan/rendering_plan.md.
+	world_sky:set_outside(math.max(0, math.min(1, (seen - 0.02) / 0.08)))
 	-- A game's own fog colour is art direction and wins outright; without one
 	-- the fog is the horizon, dimmed by the hour the way the sky it meets is.
 	-- **One colour scaled, not two blended**: a hardcoded night fog is a
