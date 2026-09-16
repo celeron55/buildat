@@ -1143,11 +1143,18 @@ local function update_sky(dt)
 		-- 1.12; extensions/luanti_client has carried the colour all along and
 		-- reads 0.99 and 1.16 on the same probes. The brightness stays
 		-- `lit` -- what is taken here is the hue, normalised at green.
+		-- **Linear in the day/night ratio, not through the light curve.**
+		-- Luanti applies its curve to the light *level*, which is what the
+		-- mesher baked into the vertex colour's alpha and what this ambient
+		-- multiplies; the hour enters as get_sunlight_color(), which is
+		-- `ratio - 0.04` and linear. Taking the curved value for both
+		-- squared the night: the parity modes drew every 20:30 and 02:00 at
+		-- a quarter of official Luanti's, which is what the check against
+		-- the reference set flagged.
 		local ratio = 0.175 + 0.825 * day
 		local rg = math.max(ratio - 0.04, 1e-4)
 		local blue = (0.98 * ratio + 0.078) / rg
-		zone.ambientColor = magic.Color(sky_now.lit, sky_now.lit,
-				sky_now.lit * blue)
+		zone.ambientColor = magic.Color(ratio, ratio, ratio * blue)
 	else
 		zone.ambientColor = blend(NIGHT_AMBIENT, SKY_AMBIENT, day)
 	end

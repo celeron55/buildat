@@ -139,6 +139,26 @@ struct CSave: public Save
 			m_db = nullptr;
 			throw SqliteError("Could not open "+db_path+": "+msg);
 		}
+		// **A second connection to the same save waits rather than failing.**
+		// One is opened whenever anything asks for a save by name -- the
+		// launcher reads a gameid out of every save to build its menu, and
+		// one of those is the save the world is being written to -- and the
+		// schema and pragmas a new connection runs take the write lock for a
+		// moment. Without a timeout sqlite answers SQLITE_BUSY there and
+		// then: voxelworld's BEGIN IMMEDIATE came back "database is locked"
+		// and the server shut down mid-run, which cost this project four
+		// reference-shot runs before it was traced. Five seconds is far more
+		// than the milliseconds a schema check takes and far less than a
+		// human notices.
+		//
+		// **There is no unit check for this**, and one was written and thrown
+		// away: two connections in one thread cannot demonstrate it, because
+		// the one holding the write lock cannot commit while the thread is
+		// blocked in the other. The real case is two threads -- voxelworld
+		// has its own -- and the evidence is the log it came from, where a
+		// BEGIN IMMEDIATE failed 3 milliseconds after another connection to
+		// the same save was opened.
+		sqlite3_busy_timeout(m_db, 5000);
 		// A save that a crash interrupted is worth more than the milliseconds
 		// a rollback journal would save, and WAL is what lets a reader and a
 		// writer overlap at all
