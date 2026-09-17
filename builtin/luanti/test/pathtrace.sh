@@ -3,11 +3,12 @@
 set -eu
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me="$here/builtin/luanti/test"
-out="${BUILDAT_PATHTRACE_OUT:-$here/local/reference_shots/pathtrace}"
+RANGE="${RANGE:-150}"
+out="${BUILDAT_PATHTRACE_OUT:-$here/local/reference_shots/pathtrace_r$RANGE}"
 mkdir -p "$out"
 
-# 200 is the set: viewpoint 5 draws nothing at 50. RANGE=50 for iterating.
-PATHTRACE=1 RANGE="${RANGE:-200}" MESH_DIR="$out" OUT_DIR="$out/module_shots" \
+# 150 is the set: viewpoint 5 draws nothing at 50. RANGE=50 for iterating.
+PATHTRACE=1 RANGE="$RANGE" MESH_DIR="$out" OUT_DIR="$out/module_shots" \
 	bash "$me/reference_shots_module.sh" shadows
 
 export BUILDAT_PATHTRACE_OUT="$out"

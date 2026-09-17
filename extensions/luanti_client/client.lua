@@ -888,6 +888,18 @@ function M.new(socket, options, log)
 			sky.night_horizon = read_color(r)
 			sky.indoors = read_color(r)
 		end
+		-- The tail Luanti 5.9+ appends; an older server's packet ends here.
+		-- fog_start is what the reference fixture turns the fog off with
+		-- (0.99: see reference_views.lua), so it is read as of 2026-09-17.
+		if r:remaining() >= 4 + 2 + 4 + 4 then
+			sky.body_orbit_tilt = r:f32()
+			sky.fog_distance = r:s16()
+			sky.fog_start = r:f32()
+			sky.fog_color = read_color(r)
+		end
+		if r:remaining() >= 1 then
+			sky.auto_dim_skybox = r:u8() ~= 0
+		end
 		if self.on_sky then
 			self.on_sky(sky)
 		end

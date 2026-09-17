@@ -41,14 +41,17 @@ snow|vp5_1000|60x40+420+540|no colour of its own to hide a cast
 leaf|vp5_1000|50x30+700+560|colourised, against snow
 "
 
-# mode -> the set it must match; pbr's is the path-traced set, textured
-# since 2026-09-17 ([PATH_TRACE_TEX]), and read as ratios like the rest
+# mode -> the set it must match, at the same range: a set's _r<RANGE>
+# postfix carries over, so module_shadows_r150 is read against
+# official_r150 and never against a set of another range. pbr's is the
+# path-traced set, textured since 2026-09-17 ([PATH_TRACE_TEX]).
 target_of() {
+	local r=${1##*_r}
 	case "$1" in
-		*_shadows) echo official ;;
-		*_unlit)   echo official_noshadow ;;
-		*_pbr)     echo pathtrace ;;
-		*)         echo "" ;;
+		*_shadows_r*) echo "official_r$r" ;;
+		*_unlit_r*)   echo "official_noshadow_r$r" ;;
+		*_pbr_r*)     echo "pathtrace_r$r" ;;
+		*)            echo "" ;;
 	esac
 }
 
@@ -83,7 +86,7 @@ for s in $sets; do
 		if [ "$t" -lt "${newest_src:-0}" ]; then note="** STALE: older than the source **"
 		else note="current" ; fi ;;
 	esac
-	printf "  %-18s %s  %s\n" "$s" "$(date -d @"$t" +%H:%M)" "$note"
+	printf "  %-24s %s  %s\n" "$s" "$(date -d @"$t" +%H:%M)" "$note"
 done
 
 echo "$PROBES" | while IFS='|' read -r name pic crop why; do
@@ -96,7 +99,7 @@ echo "$PROBES" | while IFS='|' read -r name pic crop why; do
 		rgb=$(read_probe "$f" "$crop")
 		[ -n "$rgb" ] || continue
 		tgt=$(target_of "$s")
-		line=$(echo "$rgb" | awk -v s="$s" '{printf "  %-18s %3d,%3d,%3d  B/R %.2f  mean %.3f",
+		line=$(echo "$rgb" | awk -v s="$s" '{printf "  %-24s %3d,%3d,%3d  B/R %.2f  mean %.3f",
 				s, $1*255, $2*255, $3*255, $3/($1+1e-9), ($1+$2+$3)/3}')
 		if [ -n "$tgt" ] && [ -f "$(file_of "$tgt" "$pic")" ]; then
 			t_rgb=$(read_probe "$(file_of "$tgt" "$pic")" "$crop")

@@ -63,17 +63,17 @@ if [ -n "${HOLD:-}" ]; then
 	fixture=$(mktemp /tmp/refviews_hold.XXXXXX.lua)
 	{ echo "rawset(_G, \"REFSHOT_HOLD\", $HOLD)"; cat "$prev"; } > "$fixture"
 fi
-# RANGE=<nodes> is the viewing range (and fog_distance) for the run.
-# Default 200, matching reference_shots.conf. 50 is what a path-trace
-# dump wants while the camera is still being diagnosed.
-if [ -n "${RANGE:-}" ]; then
-	case "$RANGE" in
-	''|*[!0-9.]*) echo "RANGE must be a number, got: $RANGE" >&2; exit 2 ;;
-	esac
-	prev="$fixture"
-	fixture=$(mktemp /tmp/refviews_range.XXXXXX.lua)
-	{ echo "rawset(_G, \"REFSHOT_RANGE\", $RANGE)"; cat "$prev"; } > "$fixture"
-fi
+# RANGE=<nodes> is the viewing range for the run. Default 150, matching
+# reference_shots.conf and the fixture. 50 is what a path-trace dump wants
+# while the camera is still being diagnosed. Every set directory carries it
+# as _r<RANGE>, so a set of one range is never read against one of another.
+RANGE="${RANGE:-150}"
+case "$RANGE" in
+''|*[!0-9.]*) echo "RANGE must be a number, got: $RANGE" >&2; exit 2 ;;
+esac
+prev="$fixture"
+fixture=$(mktemp /tmp/refviews_range.XXXXXX.lua)
+{ echo "rawset(_G, \"REFSHOT_RANGE\", $RANGE)"; cat "$prev"; } > "$fixture"
 
 modes=""
 world="$here/local/reference_worlds/$seed"
@@ -160,7 +160,7 @@ shots_dir="$here/user/screenshots"
 # every join, so the log is sliced from where this client came in.
 # OUT_DIR names one set's directory, so it is for a single-mode run
 for mode in $modes; do
-out="${OUT_DIR:-$here/local/reference_shots/module_$mode}"
+out="${OUT_DIR:-$here/local/reference_shots/module_${mode}_r$RANGE}"
 from=$(wc -l < "$tmp/srv.log")
 BUILDAT_LUANTI_PBR="$mode" \
 bin/buildat -s "localhost:$port" -w 1280x720 -l 3 -c @"$tmp/cmds.txt" \
@@ -210,7 +210,7 @@ echo "$taken pictures into $out"
 [ "$missing" -eq 0 ] || status=1
 
 if [ -n "${PATHTRACE:-}" ]; then
-	mesh_out="${MESH_DIR:-$here/local/reference_shots/pathtrace}"
+	mesh_out="${MESH_DIR:-$here/local/reference_shots/pathtrace_r$RANGE}"
 	mkdir -p "$mesh_out"
 	dumps=$here/user/meshdumps
 	mesh_n=0

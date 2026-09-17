@@ -24,7 +24,13 @@ here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 fixture="${1:?reference | check}"
 conf="${2:-$me/reference_shots.conf}"
-out="${OUT_DIR:-$here/local/reference_shots/official}"
+# Default 150, the fixture's and the conf's; every set directory carries
+# the range as _r<RANGE>
+RANGE="${RANGE:-150}"
+case "$RANGE" in
+''|*[!0-9.]*) echo "RANGE must be a number, got: $RANGE" >&2; exit 2 ;;
+esac
+out="${OUT_DIR:-$here/local/reference_shots/official_r$RANGE}"
 luanti=~/projects/luanti
 # The patched client, branch buildat-refshots: no mouse look, no pointer grab,
 # no pausing when unfocused, no damage. A run shares the desktop, and every
@@ -323,20 +329,15 @@ fi
 # key is the one Luanti keeps. Shaders themselves have no switch left to
 # throw; 5.18 dropped enable_shaders.
 if [ -n "${NO_SHADOWS:-}" ]; then
-	out="${OUT_DIR:-$here/local/reference_shots/official_noshadow}"
+	out="${OUT_DIR:-$here/local/reference_shots/official_noshadow_r$RANGE}"
 	base="$conf"
 	conf=$(mktemp /tmp/refshots_noshadow.XXXXXX.conf)
 	{ cat "$base"; echo "enable_dynamic_shadows = false"; } > "$conf"
 fi
-if [ -n "${RANGE:-}" ]; then
-	case "$RANGE" in
-	''|*[!0-9.]*) echo "RANGE must be a number, got: $RANGE" >&2; exit 2 ;;
-	esac
-	base="$conf"
-	conf=$(mktemp /tmp/refshots_range.XXXXXX.conf)
-	grep -v '^viewing_range' "$base" > "$conf"
-	echo "viewing_range = $RANGE" >> "$conf"
-fi
+base="$conf"
+conf=$(mktemp /tmp/refshots_range.XXXXXX.conf)
+grep -v '^viewing_range' "$base" > "$conf"
+echo "viewing_range = $RANGE" >> "$conf"
 
 # The cache. Kept, not deleted: a bulk session generates the terrain once.
 work="$here/local/reference_worlds/$seed"
@@ -424,7 +425,7 @@ sleep 5
 # same set" in doc/plan/rendering_plan.md. The module's half is the odd one
 # out and has a script of its own, because it runs the game itself.
 if [ "${CLIENT:-luanti}" = "extension" ]; then
-	out="${OUT_DIR:-$here/local/reference_shots/extension_${MODE:-unlit}}"
+	out="${OUT_DIR:-$here/local/reference_shots/extension_${MODE:-unlit}_r$RANGE}"
 	mkdir -p "$out"
 	# Three passes rather than two: this client fetches the server's media and
 	# meshes the world as it goes, so the second is still catching up

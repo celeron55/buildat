@@ -4083,6 +4083,12 @@ function M.new(magic, buildat, log, options)
 
 	function self:set_sky(new_sky)
 		sky = new_sky
+		-- Where the fog starts is the game's to say, as a fraction of the
+		-- range; 0.7 is this client's own when it says nothing. The
+		-- reference fixture says 0.99, which is the fog off. [SKY_KNOBS].
+		if zone and type(sky.fog_start) == "number" and sky.fog_start >= 0 then
+			zone.fogStart = far_clip * math.min(sky.fog_start, 0.99)
+		end
 	end
 
 	-- What the game says is in the sky, each out of its own packet. The
