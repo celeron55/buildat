@@ -195,6 +195,20 @@ local MOON_COLOR = magic.Color(0.55, 0.68, 1.0)
 local DAY_FOG = magic.Color(0.60, 0.72, 0.88)
 local SUN_DIR = {x = -0.6, y = -1.0, z = 0.8}
 local EXPOSURE_BIAS = 1.6
+-- [PT_EXPOSURE]: the pbr path meters its exposure by Urho3D's
+-- AutoExposure.xml -- log-average luminance as the key, clamped to the
+-- range, the frame scaled by middle grey over it -- which is the rule the
+-- path-traced reference applies to its own frame (pathtrace_render.py,
+-- LUM_RANGE and MIDDLE_GREY). The reference's constants are in radiance;
+-- this frame is in the shader's own light scale until [PBR_TARGET]'s
+-- Luanti-isms are out, so these are that scale's, and become the
+-- reference's numbers the day the two scales meet. The adaptation rate is
+-- this client's alone: a still has no time axis.
+local AUTO_EXPOSURE = {
+	adapt_rate = 0.6,
+	lum_range = {0.05, 100.0},
+	middle_grey = 0.18,
+}
 
 local function normalized(v)
 	local l = math.sqrt(v.x*v.x + v.y*v.y + v.z*v.z)
@@ -367,12 +381,19 @@ do
 	local base = viewport.renderPath
 	local rp = base:Clone()
 	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/BloomHDR.xml"))
+	rp:Append(magic.cache:GetResource("XMLFile",
+			"PostProcess/AutoExposure.xml"))
 	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/Tonemap.xml"))
 	rp:Append(magic.cache:GetResource("XMLFile",
 			"PostProcess/GammaCorrection.xml"))
 	rp:SetEnabled("TonemapReinhardEq3", false)
 	rp:SetEnabled("TonemapUncharted2", true)
 	rp:SetShaderParameter("TonemapExposureBias", EXPOSURE_BIAS)
+	rp:SetShaderParameter("AutoExposureAdaptRate", AUTO_EXPOSURE.adapt_rate)
+	rp:SetShaderParameter("AutoExposureLumRange",
+			magic.Vector2(AUTO_EXPOSURE.lum_range[1],
+			AUTO_EXPOSURE.lum_range[2]))
+	rp:SetShaderParameter("AutoExposureMiddleGrey", AUTO_EXPOSURE.middle_grey)
 	viewport.renderPath = rp
 	-- What a second view of the same world is drawn with -- the minimap.
 	-- The tonemap is not optional: the world is rendered in HDR and an
@@ -876,6 +897,7 @@ luanti.sub_world_info(function(info)
 	local rp = vp and vp.renderPath
 	if rp then
 		rp:SetEnabled("BloomHDR", false)
+		rp:SetEnabled("AutoExposure", false)
 		rp:SetEnabled("TonemapUncharted2", false)
 		rp:SetEnabled("GammaCorrection", false)
 	end
