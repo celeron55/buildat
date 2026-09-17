@@ -40,6 +40,8 @@
 #include <Audio.h>
 #include <RenderSurface.h>
 #include <Texture2D.h>
+#include <VertexBuffer.h>
+#include <Geometry.h>
 #include <BorderImage.h>
 #include <Octree.h>
 #include <FileSystem.h>
@@ -2423,6 +2425,10 @@ struct CApp: public App, public magic::Application
 				if(vs.Size() < 3)
 					continue;
 				ngeom++;
+				magic::Geometry *geom = cg->GetLodGeometry(b, 0);
+				magic::VertexBuffer *vb = geom ? geom->GetVertexBuffer(0) : nullptr;
+				const bool has_tangent = vb &&
+						(vb->GetElementMask() & magic::MASK_TANGENT);
 				fprintf(f, "o geom_%u_%u\nusemtl %s\n", gi, b,
 						material_of(cg->GetMaterial(b)).c_str());
 				for(unsigned i = 0; i < vs.Size(); i++){
@@ -2431,22 +2437,23 @@ struct CApp: public App, public magic::Application
 					wn.Normalize();
 					// The tint, as the OBJ vertex colour after the position:
 					// an albedo multiplier, which is what the shader does
-					// with it. A palette colour -- leaves, grass -- is folded
-					// into the vertex colour with the light (modulate_color
-					// in impl/mesh.cpp), so it is taken back out by dividing
-					// by the brightest channel: the light is grey, the tint
-					// is the hue that is left. The light itself stays out;
-					// Cycles makes its own.
-					// simplified: a palette entry whose brightest channel is
-					// under 255 comes out that much brighter than it is.
-					const unsigned c = vs[i].color_;
-					const float cr = (c & 0xff) / 255.f,
-							cg = ((c >> 8) & 0xff) / 255.f,
-							cb = ((c >> 16) & 0xff) / 255.f;
-					const float cm = std::max(cr, std::max(cg, cb));
-					const float tr = cm > 0 ? cr / cm : 1.f,
-							tg = cm > 0 ? cg / cm : 1.f,
-							tb = cm > 0 ? cb / cm : 1.f;
+					// with it. It is the 5-6-5 in the tangent's x
+					// (pack_tint565 in impl/mesh.cpp) and only when the
+					// buffer declares a tangent -- the mesher writes one
+					// only for a format with a surface modifier, and for a
+					// Luanti world the field is unwritten memory. White
+					// otherwise. The vertex colour is the light and stays
+					// out: Cycles makes its own; VoxeLibre's palette
+					// colours are baked into atlas tiles and never a tint.
+					float tr = 1.f, tg = 1.f, tb = 1.f;
+					if(has_tangent){
+						const unsigned t = (unsigned)(vs[i].tangent_.x_ + 0.5f);
+						if(t > 0 && t < 65536){
+							tr = (t >> 11) / 31.f;
+							tg = ((t >> 5) & 63) / 63.f;
+							tb = (t & 31) / 31.f;
+						}
+					}
 					fprintf(f, "v %g %g %g %g %g %g\nvn %g %g %g\nvt %g %g\n",
 							wp.x_, wp.y_, wp.z_, tr, tg, tb,
 							wn.x_, wn.y_, wn.z_,
