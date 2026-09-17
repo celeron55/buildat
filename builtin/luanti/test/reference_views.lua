@@ -258,21 +258,23 @@ local function hold_weather(kind)
 	end
 end
 
--- The three clients are compared at one viewing range and one fog, and it is
--- the official client's: `viewing_range = 200` out of reference_shots.conf,
--- and Luanti's own `fog_start` default of 0.4. For that client this call says
--- what it was already doing and changes nothing; for the two buildat clients
--- it is the only way in, the launcher's own far clip being 400 and its fog
--- starting at 0.7 of it. A ratio between pictures whose fog starts in
--- different places is a ratio about the fog.
+-- The three clients are compared at one viewing range and one fog. Default
+-- 200 is official Luanti's `viewing_range` out of reference_shots.conf.
+-- REFSHOT_RANGE (RANGE= on the shooters) lowers it: a path-trace dump at 50
+-- is a minute instead of ten million verts, and the same knob is what a
+-- future screenshot run uses when 200 is more world than the question.
+-- fog_start stays 0.4 of that range.
 --
 -- Read, edit, write, rather than a bare set_sky: the sky belongs to the game
 -- and only the fog is ours to say. And after the weather rather than before,
 -- because changing the weather sets a sky of its own.
+local RANGE = tonumber(rawget(_G, "REFSHOT_RANGE")) or 200
+
 local function pin_view(player)
+	core.settings:set("viewing_range", tostring(RANGE))
 	local sky = player:get_sky(true)
 	sky.fog = sky.fog or {}
-	sky.fog.fog_distance = 200
+	sky.fog.fog_distance = RANGE
 	sky.fog.fog_start = 0.4
 	player:set_sky(sky)
 end

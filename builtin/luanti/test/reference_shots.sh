@@ -328,6 +328,15 @@ if [ -n "${NO_SHADOWS:-}" ]; then
 	conf=$(mktemp /tmp/refshots_noshadow.XXXXXX.conf)
 	{ cat "$base"; echo "enable_dynamic_shadows = false"; } > "$conf"
 fi
+if [ -n "${RANGE:-}" ]; then
+	case "$RANGE" in
+	''|*[!0-9.]*) echo "RANGE must be a number, got: $RANGE" >&2; exit 2 ;;
+	esac
+	base="$conf"
+	conf=$(mktemp /tmp/refshots_range.XXXXXX.conf)
+	grep -v '^viewing_range' "$base" > "$conf"
+	echo "viewing_range = $RANGE" >> "$conf"
+fi
 
 # The cache. Kept, not deleted: a bulk session generates the terrain once.
 work="$here/local/reference_worlds/$seed"

@@ -59,6 +59,17 @@ if [ -n "${HOLD:-}" ]; then
 	fixture=$(mktemp /tmp/refviews_hold.XXXXXX.lua)
 	{ echo "rawset(_G, \"REFSHOT_HOLD\", $HOLD)"; cat "$prev"; } > "$fixture"
 fi
+# RANGE=<nodes> is the viewing range (and fog_distance) for the run.
+# Default 200, matching reference_shots.conf. 50 is what a path-trace
+# dump wants while the camera is still being diagnosed.
+if [ -n "${RANGE:-}" ]; then
+	case "$RANGE" in
+	''|*[!0-9.]*) echo "RANGE must be a number, got: $RANGE" >&2; exit 2 ;;
+	esac
+	prev="$fixture"
+	fixture=$(mktemp /tmp/refviews_range.XXXXXX.lua)
+	{ echo "rawset(_G, \"REFSHOT_RANGE\", $RANGE)"; cat "$prev"; } > "$fixture"
+fi
 
 mode="${1:-pbr}"
 case "$mode" in

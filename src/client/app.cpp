@@ -2334,10 +2334,20 @@ struct CApp: public App, public magic::Application
 		self->m_scene->GetComponents<magic::CustomGeometry>(geoms, true);
 		unsigned vbase = 1;
 		unsigned ngeom = 0, nvert = 0, ntri = 0;
+		magic::Vector3 eye(0, 0, 0);
+		float far = 1e9f;
+		if(!cams.Empty() && cams[0]->GetNode()){
+			eye = cams[0]->GetNode()->GetWorldPosition();
+			far = cams[0]->GetFarClip();
+		}
 		for(unsigned gi = 0; gi < geoms.Size(); gi++){
 			magic::CustomGeometry *cg = geoms[gi];
 			magic::Node *node = cg->GetNode();
 			if(!node)
+				continue;
+			// The dump is what the picture shows: skip chunks outside the
+			// viewing range. +64 is one voxelworld section.
+			if((node->GetWorldPosition() - eye).Length() > far + 64.f)
 				continue;
 			const magic::Matrix3x4 &wt = node->GetWorldTransform();
 			const magic::Matrix3 rot = wt.RotationMatrix();
