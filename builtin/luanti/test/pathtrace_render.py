@@ -210,6 +210,10 @@ def main():
 	scene.render.engine = "CYCLES"
 	scene.cycles.samples = SAMPLES
 	scene.cycles.device = "CPU"
+	# A shaded face at noon is lit by bounce alone, and at 32 samples its
+	# colour is Monte Carlo noise (stone in shade read B/R 0.69); the
+	# denoiser is what makes a ratio out of it.
+	scene.cycles.use_denoising = True
 	scene.render.resolution_x, scene.render.resolution_y = RES
 	scene.view_settings.exposure = EXPOSURE
 	# Standard, not Blender 5's AgX: a tone curve moves every ratio the
