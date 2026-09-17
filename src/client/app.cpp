@@ -709,6 +709,12 @@ public:
 struct CApp: public App, public magic::Application
 {
 	sp_<client::State> m_state;
+	// dump_meshes(): the textures written so far this session, by the
+	// Texture2D they were read back from, so that eight viewpoints of one
+	// world read the atlas back once and not eight times -- the read-back
+	// and the PNG encode were 96% of a dump, and a dump longer than 30 s
+	// has the server drop the client as stalled
+	sm_<magic::Texture2D*, ss_> m_dumped_textures;
 	BuildatResourceRouter *m_router;
 	magic::LuaScript *m_script;
 	lua_State *L;
@@ -2377,6 +2383,20 @@ struct CApp: public App, public magic::Application
 			lua_pushstring(L, "cannot write dump");
 			return 2;
 		}
+		// A gzprintf a line is what took a minute on ten million verts,
+		// which is past the server's stall limit; a megabyte at a time
+		// through gzwrite is seconds
+		ss_ buf;
+		buf.reserve(1 << 20);
+		char line[256];
+		auto put = [&](int n){
+			if(n > 0)
+				buf.append(line, (size_t)n);
+			if(buf.size() >= (1 << 20) - 256){
+				gzwrite(f, buf.data(), (unsigned)buf.size());
+				buf.clear();
+			}
+		};
 
 		magic::PODVector<magic::Camera*> cams;
 		self->m_scene->GetComponents<magic::Camera>(cams, true);
@@ -2384,17 +2404,16 @@ struct CApp: public App, public magic::Application
 			magic::Node *cn = cams[0]->GetNode();
 			const magic::Vector3 p = cn->GetWorldPosition();
 			const magic::Vector3 d = cn->GetWorldDirection();
-			gzprintf(f, "# camera_pos %g %g %g\n# camera_dir %g %g %g\n",
-					p.x_, p.y_, p.z_, d.x_, d.y_, d.z_);
+			put(snprintf(line, sizeof line, "# camera_pos %g %g %g\n# camera_dir %g %g %g\n",
+					p.x_, p.y_, p.z_, d.x_, d.y_, d.z_));
 		}
 
-		// The albedo: each batch's diffuse texture, read back once and saved
-		// beside the dump as <name>_texN.png, named by usemtl so the render
-		// can put it on. The atlas is a handful of textures for a whole
-		// world, which is why the read-back is keyed by texture and not by
-		// batch.
-		const ss_ base = name.substr(0, name.size() - 7);
-		sm_<magic::Texture2D*, ss_> tex_names;
+		// The albedo: each batch's diffuse texture, read back once a session
+		// and saved beside the dump as meshdump_texN.png, named by usemtl
+		// so the render can put it on. The atlas is a handful of textures
+		// for a whole world, which is why the read-back is keyed by texture
+		// and not by batch or by dump.
+		sm_<magic::Texture2D*, ss_> &tex_names = self->m_dumped_textures;
 		auto material_of = [&](magic::Material *mat) -> ss_ {
 			if(!mat)
 				return "";
@@ -2405,7 +2424,9 @@ struct CApp: public App, public magic::Application
 			auto it = tex_names.find(tex);
 			if(it != tex_names.end())
 				return it->second;
-			const ss_ stem = base+"_tex"+itos(tex_names.size());
+			// Named by the session's count, not the dump's, so a texture
+			// written for an earlier dump is the same file for this one
+			const ss_ stem = "meshdump_tex"+itos(tex_names.size());
 			const ss_ png = stem+".png";
 			magic::SharedPtr<magic::Image> img = tex->GetImage();
 			if(img)
@@ -2433,6 +2454,8 @@ struct CApp: public App, public magic::Application
 
 		magic::PODVector<magic::CustomGeometry*> geoms;
 		self->m_scene->GetComponents<magic::CustomGeometry>(geoms, true);
+		const int64_t t_start = interface::os::time_us();
+		int64_t t_tex = 0;
 		unsigned vbase = 1;
 		unsigned ngeom = 0, nvert = 0, ntri = 0;
 		magic::Vector3 eye(0, 0, 0);
@@ -2463,8 +2486,11 @@ struct CApp: public App, public magic::Application
 				magic::VertexBuffer *vb = geom ? geom->GetVertexBuffer(0) : nullptr;
 				const bool has_tangent = vb &&
 						(vb->GetElementMask() & magic::MASK_TANGENT);
-				gzprintf(f, "o geom_%u_%u\nusemtl %s\n", gi, b,
-						material_of(cg->GetMaterial(b)).c_str());
+				const int64_t t0 = interface::os::time_us();
+				const ss_ mname = material_of(cg->GetMaterial(b));
+				t_tex += interface::os::time_us() - t0;
+				put(snprintf(line, sizeof line, "o geom_%u_%u\nusemtl %s\n", gi, b,
+						mname.c_str()));
 				for(unsigned i = 0; i < vs.Size(); i++){
 					const magic::Vector3 wp = wt * vs[i].position_;
 					// The tint, as the OBJ vertex colour after the position:
@@ -2487,23 +2513,27 @@ struct CApp: public App, public magic::Application
 						}
 					}
 					// No vn: the render takes the normal from the winding
-					gzprintf(f, "v %g %g %g %g %g %g\nvt %g %g\n",
+					put(snprintf(line, sizeof line, "v %g %g %g %g %g %g\nvt %g %g\n",
 							wp.x_, wp.y_, wp.z_, tr, tg, tb,
-							vs[i].texCoord_.x_, vs[i].texCoord_.y_);
+							vs[i].texCoord_.x_, vs[i].texCoord_.y_));
 				}
 				for(unsigned i = 0; i + 2 < vs.Size(); i += 3){
 					const unsigned a = vbase + i;
-					gzprintf(f, "f %u/%u %u/%u %u/%u\n",
-							a, a, a+1, a+1, a+2, a+2);
+					put(snprintf(line, sizeof line, "f %u/%u %u/%u %u/%u\n",
+							a, a, a+1, a+1, a+2, a+2));
 					ntri++;
 				}
 				vbase += vs.Size();
 				nvert += vs.Size();
 			}
 		}
+		if(!buf.empty())
+			gzwrite(f, buf.data(), (unsigned)buf.size());
 		gzclose(f);
-		log_i(MODULE, "dump_meshes %s: %u geoms, %u verts, %u tris",
-				cs(name), ngeom, nvert, ntri);
+		log_i(MODULE, "dump_meshes %s: %u geoms, %u verts, %u tris in %.1f s, "
+				"%.1f s of it reading textures back",
+				cs(name), ngeom, nvert, ntri,
+				(interface::os::time_us() - t_start) / 1e6, t_tex / 1e6);
 		lua_pushlstring(L, name.c_str(), name.size());
 		return 1;
 	}

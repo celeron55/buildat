@@ -219,12 +219,6 @@ if [ -n "${PATHTRACE:-}" ]; then
 		if [ -f "$dumps/$file" ]; then
 			# The client writes the dump gzipped
 			mv "$dumps/$file" "$mesh_out/$stem.obj.gz"
-			# The textures and the atlas table the dump names, beside it
-			for tex in "$dumps/${file%.obj.gz}"_tex*.png; do
-				[ -f "$tex" ] || continue
-				suffix=${tex##*_tex}
-				mv "$tex" "$mesh_out/${stem}_tex$suffix"
-			done
 			[ -f "$dumps/${file%.obj.gz}_atlas.json" ] &&
 				mv "$dumps/${file%.obj.gz}_atlas.json" "$mesh_out/${stem}_atlas.json"
 			echo "mesh $stem"
@@ -236,6 +230,11 @@ if [ -n "${PATHTRACE:-}" ]; then
 	done <<EOF
 $(since | grep -a "REFSHOT mesh " | sed 's/^.*REFSHOT mesh //' | sort -u)
 EOF
+	# The textures are one set for the session, named meshdump_texN*.png
+	# by the client and shared by every dump's usemtl lines
+	for tex in "$dumps"/meshdump_tex*.png; do
+		[ -f "$tex" ] && mv "$tex" "$mesh_out/"
+	done
 	echo "$mesh_n meshes into $mesh_out"
 fi
 

@@ -443,10 +443,7 @@ def main():
 		clear_scene()
 		stem = name[:-7] if name.endswith(".obj.gz") else name[:-4]
 		setup_world(stem.split("_")[2])
-		# The shooter renamed the textures after the dump's stem
-		# (<stem>_texN.png); the usemtl lines still carry the dump's own name
-		blocks = [(stem + m[m.rfind("_tex"):] if m else "", a, n)
-				for m, a, n in blocks]
+		# The usemtl names are meshdump_texN.png, one set beside the dumps
 		build_world(scene, co, tint, uv, blocks, OUT)
 		del co, tint, uv
 		scene.camera = add_camera(pos, dire)
