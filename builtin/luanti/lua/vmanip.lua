@@ -74,7 +74,13 @@ function VoxelManipRef:set_data(data)
 	self.modified = true
 end
 
+-- The buffer is filled the same way: vl_wieldlight hands one in and reads
+-- it, never the return value, and an unfilled buffer was a nil at every
+-- index once the player carried a torch
 function VoxelManipRef:get_light_data(buffer)
+	if buffer ~= nil and buffer ~= self.param1 then
+		return __luanti_copy_ints(buffer, self.param1)
+	end
 	return self.param1
 end
 
@@ -84,6 +90,9 @@ function VoxelManipRef:set_light_data(data)
 end
 
 function VoxelManipRef:get_param2_data(buffer)
+	if buffer ~= nil and buffer ~= self.param2 then
+		return __luanti_copy_ints(buffer, self.param2)
+	end
 	return self.param2
 end
 

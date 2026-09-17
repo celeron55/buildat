@@ -89,15 +89,18 @@ core.register_on_joinplayer(function(player)
 		last = pos
 		local trees = 0
 		if t % 10 == 0 then
+			-- [NO_TREES]: a VoxeLibre world with grass and no trees. A
+			-- mushroom island has huge mushrooms where a forest has trees
+			-- (seed 3 spawns on one), and both are schematic decorations,
+			-- which is the mechanism the fault was in.
 			local _, counts = core.find_nodes_in_area(
 					vector.subtract(start, 40), vector.add(start, 40),
-					{"group:tree"})
+					{"group:tree", "group:huge_mushroom"})
 			for _, n in pairs(counts) do
 				trees = trees + n
 			end
-			-- [NO_TREES]: a VoxeLibre world with grass and no trees
 			if trees == 0 and core.get_modpath("mcl_core") then
-				fail("no group:tree within 40 nodes of spawn")
+				fail("no group:tree or huge mushroom within 40 nodes of spawn")
 			end
 		end
 		local hp = player:get_hp()
