@@ -16,31 +16,28 @@ here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 EPISODE="${EPISODE:-dig}"
 GAME="${GAME:-mineclone2}"
-# The client has no way to hear that the state is ready, so the timing is
-# by delays: the client acts 40 seconds after launch, and the census is
-# taken 50 seconds after the state, which is later than that on every
-# machine this has run on. A client that missed its window shows as a
-# census with nothing done on both sides -- the same, and wrong.
-SECONDS_GIVEN="${SECONDS_GIVEN:-50}"
+# The client is driven over its stdin (`-c -`): the runner waits for the
+# fixture's `episode: ready` in the server log and only then writes the
+# action, and the fixture takes the census this many seconds after ready.
+# Timed by delays instead, the module under VoxeLibre missed every window
+# -- its steps are seconds long while the world emerges around a player
+# put in the sky.
+SECONDS_GIVEN="${SECONDS_GIVEN:-20}"
 out="$here/local/episode/$EPISODE"
 mkdir -p "$out"
 luanti=~/projects/luanti
 bin=${LUANTI_BIN:-$luanti/bin/luanti-refshots}
 
-# The client's part: what the episode is. Every command file starts by
-# waiting for the fixture's state, which is three seconds after the join
-# plus a world's loading.
+# The client's part: what the episode is, written to its stdin at ready
 case "$EPISODE" in
 dig)
 	# Straight down for three seconds: the dirt underfoot, by hand
-	{ echo "delay 40000"; echo "look 0 -89"; echo "mouse_down left"
-		echo "delay 3000"; echo "mouse_up left"; echo "delay 600000"
-		echo "quit"; } > "$out/cmds.txt" ;;
+	{ echo "look 0 -89"; echo "mouse_down left"
+		echo "delay 3000"; echo "mouse_up left"; } > "$out/cmds.txt" ;;
 place)
 	# The hotbar's first slot is empty, so a place does nothing; what is
 	# asserted is that nothing happened on either side
-	{ echo "delay 40000"; echo "look 0 -89"; echo "mouse_click right"
-		echo "delay 600000"; echo "quit"; } > "$out/cmds.txt" ;;
+	{ echo "look 0 -89"; echo "mouse_click right"; } > "$out/cmds.txt" ;;
 *) echo "unknown episode $EPISODE (dig, place)" >&2; exit 2 ;;
 esac
 
@@ -55,14 +52,27 @@ fi
 srv=""; cli=""
 trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
 
-wait_census() {   # log -> the census line, or nothing
-	local i
-	for i in $(seq 1 150); do
-		grep -aq "episode: census" "$1" && break
+# Wait for ready, write the action into the client, wait for the census.
+# The client's stdin is a fifo the runner holds open; closing it is what
+# ends the client. Both waits are bounded by the emerge time seen so far.
+drive() {   # log fifo -> the census line, or nothing
+	local log="$1" fifo="$2" i
+	for i in $(seq 1 240); do
+		grep -aq "episode: ready\|episode: FAILED" "$log" && break
 		kill -0 "$cli" 2>/dev/null || break
-		sleep 2
+		sleep 1
 	done
-	grep -a "episode: census" "$1" | sed 's/^.*episode: census //' | head -1
+	if grep -aq "episode: ready" "$log"; then
+		cat "$out/cmds.txt" > "$fifo"
+	else
+		echo "the fixture never said ready" >&2
+	fi
+	for i in $(seq 1 120); do
+		grep -aq "episode: census\|episode: FAILED" "$log" && break
+		kill -0 "$cli" 2>/dev/null || break
+		sleep 1
+	done
+	grep -a "episode: census" "$log" | sed 's/^.*episode: census //' | head -1
 }
 
 # --- the Luanti server, with the extension in front of it
@@ -93,12 +103,15 @@ done
 sleep 3
 srv=$(pgrep -x luanti-refshots | head -1)
 [ -n "$srv" ] || { echo "the Luanti server did not come up" >&2; exit 1; }
+fifo="$out/extension_stdin"; rm -f "$fifo"; mkfifo "$fifo"
 BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=ep \
 	BUILDAT_LUANTI_CONNECT=1 \
 	"$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 \
-	-c @"$out/cmds.txt" > "$out/extension_cli.log" 2>&1 &
+	-c - < "$fifo" > "$out/extension_cli.log" 2>&1 &
 cli=$!
-luanti_census=$(wait_census "$out/luanti_srv.log")
+exec 3>"$fifo"
+luanti_census=$(drive "$out/luanti_srv.log" "$fifo")
+exec 3>&-
 kill "$cli" 2>/dev/null; sleep 1
 kill "$srv" 2>/dev/null
 for i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
@@ -121,10 +134,13 @@ done
 sleep 5
 srv=$(pgrep -x buildat_server | head -1)
 [ -n "$srv" ] || { echo "the module's server did not come up" >&2; exit 1; }
-bin/buildat -s "localhost:$port" -w 1280x720 -l 3 -c @"$out/cmds.txt" \
+fifo="$out/module_stdin"; rm -f "$fifo"; mkfifo "$fifo"
+bin/buildat -s "localhost:$port" -w 1280x720 -l 3 -c - < "$fifo" \
 	> "$out/module_cli.log" 2>&1 &
 cli=$!
-module_census=$(wait_census "$out/module_srv.log")
+exec 3>"$fifo"
+module_census=$(drive "$out/module_srv.log" "$fifo")
+exec 3>&-
 kill "$cli" 2>/dev/null; sleep 1
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done

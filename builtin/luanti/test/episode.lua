@@ -15,10 +15,11 @@
 -- file; what is asserted is the census, never a coordinate.
 --
 -- EPISODE_NAME picks the episode; "dig" is the first. EPISODE_SECONDS is
--- how long the client is given before the census.
+-- how long after `ready` the census is taken; episode.sh writes the
+-- client's action at `ready`.
 
 local NAME = rawget(_G, "EPISODE_NAME") or "dig"
-local SECONDS = tonumber(rawget(_G, "EPISODE_SECONDS")) or 50
+local SECONDS = tonumber(rawget(_G, "EPISODE_SECONDS")) or 20
 local ORIGIN = {x = 0, y = 120, z = 0}
 
 -- The first registered node whose name says what it is: a game's dirt
