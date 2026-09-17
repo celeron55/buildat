@@ -3,15 +3,15 @@
 #   # camera_pos x y z
 #   # camera_dir x y z
 # at the top (camera already at the eyes). FOV 72 vertical, Nishita at 13:00.
-# .obj.gz is accepted: Blender's importer does not read gzip, so this
-# decompressed to a temp file. simplified: untextured, 32 samples.
+# Blender's OBJ importer is not used: it places verts by forward_axis/up_axis
+# while the camera is placed here, and two transforms that disagree put the
+# camera outside the world. Parsed here instead, so there is one conversion.
+# simplified: untextured, 32 samples, sun elevation fixed at 13:00's.
 
 import gzip
 import math
 import os
-import shutil
 import sys
-import tempfile
 
 import bpy
 
@@ -22,22 +22,38 @@ SAMPLES = 32
 RES = (1280, 720)
 
 
-def parse_camera(path):
+def open_dump(path):
+	if path.endswith(".gz"):
+		return gzip.open(path, "rt")
+	return open(path)
+
+
+def load_dump(path):
+	"""One conversion: file Y-up → Blender (x, -z, y). Camera uses the same."""
 	pos, dire = None, None
-	with open(path) as f:
-		for i, line in enumerate(f):
-			if i > 20:
-				break
+	verts = []
+	faces = []
+	with open_dump(path) as f:
+		for line in f:
 			if line.startswith("# camera_pos "):
 				pos = tuple(float(x) for x in line.split()[2:5])
 			elif line.startswith("# camera_dir "):
 				dire = tuple(float(x) for x in line.split()[2:5])
-	return pos, dire
+			elif line.startswith("v "):
+				x, y, z = (float(x) for x in line.split()[1:4])
+				verts.append(y_up_to_blender(x, y, z))
+			elif line.startswith("f "):
+				idx = []
+				for tok in line.split()[1:]:
+					idx.append(int(tok.split("/", 1)[0]) - 1)
+				if len(idx) >= 3:
+					faces.append(idx[:3])
+	return pos, dire, verts, faces
 
 
 def y_up_to_blender(x, y, z):
-	# obj_import(forward_axis="Z", up_axis="Y"): file Y → Blender Z (up),
-	# file Z → Blender -Y (forward is -Y).
+	# File Y → Blender Z (up), file Z → Blender -Y (forward is -Y).
+	# The only place either verts or the camera change hands.
 	return (x, -z, y)
 
 
@@ -69,8 +85,8 @@ def setup_world():
 def add_camera(pos, dire):
 	from mathutils import Vector, Matrix
 	loc = Vector(y_up_to_blender(*pos))
-	# GetWorldDirection is the look; if the picture is behind the world,
-	# flip this sign. Tried +dir first.
+	# GetWorldDirection is the look, unflipped: checked against viewpoint 1
+	# and the cave trio, which match the module's own screenshots.
 	forward = Vector(y_up_to_blender(*dire))
 	if forward.length < 1e-8:
 		forward = Vector((0, 1, 0))
@@ -105,6 +121,7 @@ def gray_material():
 	if bsdf:
 		bsdf.inputs["Base Color"].default_value = (0.55, 0.55, 0.55, 1)
 		bsdf.inputs["Roughness"].default_value = 0.7
+	mat.use_backface_culling = False
 	return mat
 
 
@@ -135,38 +152,27 @@ def main():
 	if not picked:
 		print("no dumps in", OUT, file=sys.stderr)
 		sys.exit(1)
-	mat = None
 	for name in picked:
 		obj_path = os.path.join(OUT, name)
-		work = obj_path
-		tmp = None
-		if name.endswith(".gz"):
-			tmp = tempfile.NamedTemporaryFile(suffix=".obj", delete=False)
-			tmp.close()
-			with gzip.open(obj_path, "rb") as src, open(tmp.name, "wb") as dst:
-				shutil.copyfileobj(src, dst)
-			work = tmp.name
-		pos, dire = parse_camera(work)
+		print("load", name)
+		pos, dire, verts, faces = load_dump(obj_path)
 		if not pos or not dire:
 			print("no camera header in", name, file=sys.stderr)
 			sys.exit(1)
 		clear_scene()
 		setup_world()
-		bpy.ops.wm.obj_import(filepath=work, forward_axis="Z", up_axis="Y",
-				clamp_size=0, use_split_objects=False,
-				use_split_groups=False)
-		if tmp:
-			os.unlink(tmp.name)
+		mesh = bpy.data.meshes.new("world")
+		mesh.from_pydata(verts, [], faces)
+		mesh.update()
+		ob = bpy.data.objects.new("world", mesh)
+		scene.collection.objects.link(ob)
 		mat = gray_material()
-		for ob in bpy.context.scene.objects:
-			if ob.type == "MESH":
-				if ob.data.materials:
-					ob.data.materials[0] = mat
-				else:
-					ob.data.materials.append(mat)
+		ob.data.materials.append(mat)
 		scene.camera = add_camera(pos, dire)
 		stem = name[:-7] if name.endswith(".obj.gz") else name[:-4]
-		png = stem + ".png"
+		# cycles_vp6_1300_none.png: the dump's stem without the seed, so the
+		# render sits beside its .obj.gz without sharing a name with it.
+		png = "cycles_" + stem.split("_", 1)[1] + ".png"
 		scene.render.filepath = os.path.join(OUT, png)
 		print("render", png)
 		bpy.ops.render.render(write_still=True)

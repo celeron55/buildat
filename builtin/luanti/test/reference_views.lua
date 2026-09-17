@@ -190,13 +190,14 @@ end
 -- One dump per viewpoint at its primary hour, for [PATH_TRACE_REF].
 local function pathtrace_states()
 	local out = {}
+	-- Caves first: a later state that never draws must not drop them.
+	for v = 6, 8 do
+		out[#out + 1] = {view = v, hour = "1300", weather = "none"}
+	end
 	for v = 1, 4 do
 		out[#out + 1] = {view = v, hour = "1300", weather = "none"}
 	end
 	out[#out + 1] = {view = 5, hour = "1000", weather = "none"}
-	for v = 6, 8 do
-		out[#out + 1] = {view = v, hour = "1300", weather = "none"}
-	end
 	return out
 end
 
@@ -292,11 +293,15 @@ end
 --
 -- builtin/voxelworld loads by section -- 2x2x2 chunks of 32, so 64 voxels --
 -- and one forceload anywhere in a section pins the whole of it, so the grid
--- steps by that. Horizontally further than vertically because that is the
--- shape of what a camera at eye level sees.
+-- steps by that. The radius follows RANGE: a dump at 50 should not generate
+-- 128 nodes of world the camera cannot see. Capped at 128 so RANGE=200 is
+-- the same pin as before.
 local SECTION = 64
-local KEEP_XZ = 128
-local KEEP_Y = 64
+local KEEP_XZ = math.max(SECTION, math.ceil(RANGE / SECTION) * SECTION)
+if KEEP_XZ > 128 then
+	KEEP_XZ = 128
+end
+local KEEP_Y = math.min(64, KEEP_XZ)
 
 -- Which blocks were pinned, so they can be let go again: a session that
 -- inherits a fixture's pins is a session that never unloads anything.
