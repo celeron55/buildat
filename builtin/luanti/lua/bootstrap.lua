@@ -2677,6 +2677,21 @@ function core.load_area(pos1, pos2)
 	core.emerge_area(pos1, pos2 or pos1, nil, nil)
 end
 
+-- Where the emerge phase's time went this step, for the slow-step line:
+-- the one read for every request (a flush and a commit) against the
+-- callbacks, which are the mapgen mods' structure placers
+local emerge_detail = {ids = 0, asked = 0, callbacks = 0, n_callbacks = 0}
+core.__emerge_detail = emerge_detail
+
+-- How much of a step the callbacks may take. They are the emerge phase:
+-- a section arriving turns every request waiting on a block of it
+-- generated at once, and eighteen hundred callbacks of a structure
+-- placer each were 7 to 11 s of one step with a player walking a fresh
+-- VoxeLibre world (the fuzz run, 2026-09-17). Luanti spreads them over
+-- the steps its emerge thread delivers blocks in; this cuts the slice
+-- and leaves the rest for the next step. See [STEP_PEAK].
+local EMERGE_BUDGET_US = 50000
+
 local function step_emerge(dtime)
 	-- Which block each waiting request is on, asked all at once. This used
 	-- to be a core.get_node() per request per step, and a read that crosses
@@ -2698,10 +2713,17 @@ local function step_emerge(dtime)
 			ask_of[r] = #ask / 3
 		end
 	end
+	local t_ids = core.get_us_time()
 	local ids = #ask > 0 and __luanti_ids_at(ask) or {}
+	emerge_detail.ids = emerge_detail.ids + (core.get_us_time() - t_ids)
+	emerge_detail.asked = emerge_detail.asked + #ask / 3
 
+	local t_start = core.get_us_time()
 	local i = 1
 	while i <= #emerge_requests do
+		if core.get_us_time() - t_start > EMERGE_BUDGET_US then
+			break
+		end
 		local r = emerge_requests[i]
 		local bp = r.blocks[r.next_i]
 		local action = nil
@@ -2731,7 +2753,11 @@ local function step_emerge(dtime)
 			r.waited = 0
 			r.next_i = r.next_i + 1
 			local left = #r.blocks - r.next_i + 1
+			local t_cb = core.get_us_time()
 			local ok, err = pcall(r.callback, bp, action, left, r.param)
+			emerge_detail.callbacks = emerge_detail.callbacks +
+					(core.get_us_time() - t_cb)
+			emerge_detail.n_callbacks = emerge_detail.n_callbacks + 1
 			if not ok then
 				core.log("error", "emerge_area callback: " .. tostring(err))
 			end
@@ -3138,8 +3164,13 @@ end
 -- The light voxelworld propagates, which the voxel word carries in the same
 -- bits Luanti's param1 does. Time of day is M2's clock; until it is there,
 -- the sky is at full strength.
+-- The light readers land the write buffer first: a get_node() answers
+-- out of the buffer without it, and the light a placed lamp floods
+-- into its neighbours is only in the world once the buffer has
+-- landed. See read_node() in luanti.cpp.
 function core.get_natural_light(pos, timeofday)
 	local x, y, z = to_pos(pos)
+	__luanti_flush_node_writes()
 	local _, param1 = __get_node(x, y, z)
 	return math.floor(param1 % 16)
 end
@@ -3161,6 +3192,7 @@ end
 -- No hour means the world's own, which is what Luanti does with it.
 function core.get_node_light(pos, timeofday)
 	local x, y, z = to_pos(pos)
+	__luanti_flush_node_writes()
 	local id, param1 = __get_node(x, y, z)
 	if id == core.CONTENT_IGNORE then
 		return nil
@@ -4666,6 +4698,22 @@ local peak_told = -1
 function core.get_server_step_peak()
 	return step_peak, step_peak_phase
 end
+
+-- Work that runs on the server's thread outside core.__step() -- a
+-- section's on_generated callbacks -- counts against the peak the same
+-- way, since a client waits on it the same way
+function core.__note_phase(phase, seconds)
+	if seconds > step_peak then
+		step_peak, step_peak_phase = seconds, phase
+	end
+	if seconds >= SLOW_STEP_S then
+		core.log("trace", string.format("%s took %.2f s between steps",
+				phase, seconds))
+		if seconds > slow_worst then
+			slow_worst, slow_worst_phase = seconds, phase
+		end
+	end
+end
 function core.get_server_max_lag()
 	return step_peak
 end
@@ -4728,8 +4776,12 @@ function core.__step(dtime)
 				said[#said + 1] = string.format("%s %.2f s", part[1], part[2])
 			end
 		end
-		core.log("trace", string.format("a step took %.2f s: %s", total,
-				table.concat(said, ", ")))
+		local d = emerge_detail
+		core.log("trace", string.format(
+				"a step took %.2f s: %s (emerge: %d asked in %.2f s, " ..
+				"%d callbacks in %.2f s)", total, table.concat(said, ", "),
+				d.asked, d.ids / 1000000, d.n_callbacks,
+				d.callbacks / 1000000))
 		if total > slow_worst then
 			slow_worst, slow_worst_phase = total, longest_phase
 		end
@@ -4742,6 +4794,8 @@ function core.__step(dtime)
 			slow_worst, slow_worst_phase = 0, ""
 		end
 	end
+	emerge_detail.ids, emerge_detail.asked = 0, 0
+	emerge_detail.callbacks, emerge_detail.n_callbacks = 0, 0
 	game_time = game_time + dtime
 	local speed = tonumber(core.settings:get("time_speed")) or 72
 	local day_seconds = 24 * 60 * 60

@@ -323,6 +323,8 @@ function core.__run_on_generated(x0, y0, z0, x1, y1, z1, blockseed)
 		end
 		return real_get(name)
 	end
+	local t_all = core.get_us_time()
+	local worst, worst_mod = 0, "?"
 	for i = 1, #callbacks do
 		local callback = callbacks[i]
 		local origin = core.callback_origins and
@@ -330,6 +332,7 @@ function core.__run_on_generated(x0, y0, z0, x1, y1, z1, blockseed)
 		if origin then
 			core.set_last_run_mod(origin.mod)
 		end
+		local t_cb = core.get_us_time()
 		local ok, err
 		if core.__mapgen_env_callbacks[callback] then
 			-- Registered by a core.register_mapgen_script(), whose
@@ -347,8 +350,17 @@ function core.__run_on_generated(x0, y0, z0, x1, y1, z1, blockseed)
 		if not ok then
 			core.log("error", "on_generated: " .. tostring(err))
 		end
+		local took = core.get_us_time() - t_cb
+		if took > worst then
+			worst, worst_mod = took, origin and origin.mod or "?"
+		end
 	end
 	core.get_mapgen_object = real_get
+	-- Into the step peak with the phase named by the mod: this runs on
+	-- the server's thread between steps and starves everything the same
+	-- way a long step does. See [STEP_PEAK].
+	core.__note_phase("on_generated " .. worst_mod,
+			(core.get_us_time() - t_all) / 1000000)
 	-- What a mod did to the mapgen's own VoxelManip is written back when
 	-- the callback returns, which is Luanti's rule for that one
 	if read and mapgen_vm:was_modified() then

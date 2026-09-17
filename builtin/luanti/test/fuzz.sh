@@ -10,6 +10,8 @@
 # the command file, both logs, and a screenshot every thirty seconds for a
 # person to look through when the run fails.
 #
+# LOG_LEVEL=6 has every slow step at trace with the emerge phase broken
+# down ([STEP_PEAK]); the default 4 is verbose.
 # Never beside another buildat_server: the save's sqlite and the desktop
 # are one each.
 set -u
@@ -108,10 +110,11 @@ rm -rf "../user/games/luanti_launcher/saves/$save"
 port=$(( 29800 + (SEED % 90) ))
 srv=""; cli=""
 trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
-{ echo "rawset(_G, \"FUZZ_SEED\", $SEED)"; cat "$me/fuzz.lua"; } > "$out/fixture.lua"
+{ echo "rawset(_G, \"FUZZ_SEED\", $SEED)"; cat "${FUZZ_LUA:-$me/fuzz.lua}"; } > "$out/fixture.lua"
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	bin/buildat_server -m ../games/luanti_launcher -D ../user -P "$port" 2>&1 \
+	bin/buildat_server -m ../games/luanti_launcher -D ../user -P "$port" \
+	-l "${LOG_LEVEL:-4}" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
 for i in $(seq 1 400); do
 	grep -q "Mods loaded" "$out/srv.log" 2>/dev/null && break

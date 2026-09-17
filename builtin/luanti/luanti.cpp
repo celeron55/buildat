@@ -1544,6 +1544,8 @@ struct Module: public interface::Module, public luanti::Interface
 		if(dtime > MAX_STEP_S)
 			dtime = MAX_STEP_S;
 		m_step_accum = 0.0f;
+		// Other players' digs and the loader's unloads land between steps
+		drop_read_cache();
 		update_load_points();
 		check_map_when_ready(dtime);
 		step_environment(dtime);
@@ -1723,6 +1725,7 @@ struct Module: public interface::Module, public luanti::Interface
 	{
 		if(m_node_writes.empty() || !m_scene)
 			return;
+		drop_read_cache();
 		size_t n = m_node_writes.size();
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
 			// set_voxel() into a section that is not there does nothing and
@@ -1767,18 +1770,49 @@ struct Module: public interface::Module, public luanti::Interface
 	{
 		if(!m_scene)
 			return 0;
-		// A buffered write answers with the word that went in, and the light
-		// in that word is the light the writer happened to carry -- not the
-		// light voxelworld's flood gives it once the write lands. A mod that
-		// places a lamp and asks what the room is lit by has to see the
-		// flood, so the buffer goes in first. It costs one flush per burst
-		// of writes rather than one per read.
-		flush_node_writes();
-		uint32_t word = 0;
-		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
-			word = world->get_voxel(pv::Vector3DInt32(x, y, z), true).data;
-		});
-		return word;
+		// A buffered write answers with the word that went in. The read
+		// used to flush the buffer first so that a mod placing a lamp and
+		// asking what the room is lit by saw the flood -- but every flush
+		// is a voxelworld commit with the skylight, and a mod that reads
+		// and writes node by node (VoxeLibre's fix_foliage_missed over a
+		// forest, its structure placers, any set_node, which reads first)
+		// paid one per node: 31 s for one section's on_generated, 1.9
+		// million skylight updates for a bench. So a read answers out of
+		// the buffer for what is buffered and out of the world for the
+		// rest, and the buffer lands at the end of the step or before a
+		// region read.
+		// simplified: the light of a voxel *next to* a buffered write is
+		// the light before it, until the flush. A mod that needs the flood
+		// in the same step reads a region (VoxelManip), which flushes.
+		auto it = m_node_writes.find(pos_key(x, y, z));
+		if(it != m_node_writes.end())
+			return it->second.word;
+		// And out of a cache of 16^3 blocks for the rest: an access() is
+		// a handoff to voxelworld's thread and back, a quarter of a
+		// millisecond whatever it reads, and what reads node by node is a
+		// mod sweeping a box -- fix_foliage_missed read 171 thousand of
+		// them in two minutes. One region read per block instead. The
+		// cache is dropped whenever the world can have moved under it:
+		// a flush, a region write, a step, a section generated.
+		const int32_t bx = floordiv(x, 16), by = floordiv(y, 16),
+				bz = floordiv(z, 16);
+		const int64_t key = pos_key(bx, by, bz);
+		auto c = m_read_cache.find(key);
+		if(c == m_read_cache.end()){
+			sv_<uint32_t> words;
+			read_region_uncached(bx * 16, by * 16, bz * 16,
+					bx * 16 + 15, by * 16 + 15, bz * 16 + 15, words);
+			c = m_read_cache.emplace(key, std::move(words)).first;
+		}
+		return c->second[(size_t)((z - bz * 16) * 256 + (y - by * 16) * 16 +
+				(x - bx * 16))];
+	}
+
+	// See read_node()
+	std::unordered_map<int64_t, sv_<uint32_t>> m_read_cache;
+	void drop_read_cache()
+	{
+		m_read_cache.clear();
 	}
 
 	// Luanti's own cap on how much map a call may look at in one go
@@ -1797,17 +1831,23 @@ struct Module: public interface::Module, public luanti::Interface
 	void read_region(int32_t x0, int32_t y0, int32_t z0,
 			int32_t x1, int32_t y1, int32_t z1, sv_<uint32_t> &out)
 	{
+		// What core.set_node has written and not yet flushed is part of the
+		// map as far as a mod is concerned -- Luanti's semantics are that a
+		// write is visible immediately -- and a region read goes to
+		// voxelworld, which has not been told yet
+		flush_node_writes();
+		read_region_uncached(x0, y0, z0, x1, y1, z1, out);
+	}
+
+	void read_region_uncached(int32_t x0, int32_t y0, int32_t z0,
+			int32_t x1, int32_t y1, int32_t z1, sv_<uint32_t> &out)
+	{
 		size_t w = (size_t)(x1 - x0 + 1);
 		size_t h = (size_t)(y1 - y0 + 1);
 		size_t d = (size_t)(z1 - z0 + 1);
 		out.assign(w * h * d, 0);
 		if(!m_scene)
 			return;
-		// What core.set_node has written and not yet flushed is part of the
-		// map as far as a mod is concerned -- Luanti's semantics are that a
-		// write is visible immediately -- and a region read goes to
-		// voxelworld, which has not been told yet
-		flush_node_writes();
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
 			// One read for the box rather than one per voxel: what asks for
 			// this is a sweep -- an ABM, a find_nodes_in_area -- and the
@@ -2679,6 +2719,7 @@ struct Module: public interface::Module, public luanti::Interface
 	// them: its mapgen has written the chunk by the time they see it.
 	void on_section_generated(const worldgen::SectionGenerated &event)
 	{
+		drop_read_cache();
 		if(m_check_map_pending)
 			m_generated_sections.insert(section_key(event.section_p));
 		if(!m_game_running || event.scene != m_scene)
@@ -4994,6 +5035,7 @@ struct Module: public interface::Module, public luanti::Interface
 	static int l_set_region_data(lua_State *L)
 	{
 		Module *self = module_of(L);
+		self->drop_read_cache();
 		int32_t p[6];
 		for(int i = 0; i < 6; i++)
 			p[i] = luaL_checkinteger(L, i + 1);
@@ -5112,6 +5154,15 @@ struct Module: public interface::Module, public luanti::Interface
 		f.light_lamp.set(word, (param1 >> 4) & 0x0f);
 		f.param.set(word, param2 & 0xff);
 		self->buffer_node_write(x, y, z, word);
+		return 0;
+	}
+
+	// flush_node_writes(): what a light query calls before it reads,
+	// since the flood a buffered lamp makes is only in the world once the
+	// buffer has landed; see read_node()
+	static int l_flush_node_writes(lua_State *L)
+	{
+		module_of(L)->flush_node_writes();
 		return 0;
 	}
 
@@ -5345,6 +5396,7 @@ struct Module: public interface::Module, public luanti::Interface
 	static int l_relight(lua_State *L)
 	{
 		Module *self = module_of(L);
+		self->drop_read_cache();
 		int32_t p[6];
 		for(int i = 0; i < 6; i++)
 			p[i] = (int32_t)luaL_checknumber(L, i + 1);
@@ -7465,6 +7517,8 @@ struct Module: public interface::Module, public luanti::Interface
 				l_send_node_inventory);
 		set_global_cfunction("__luanti_progress", l_progress);
 		set_global_cfunction("__luanti_step_peak", l_step_peak);
+		set_global_cfunction("__luanti_flush_node_writes",
+				l_flush_node_writes);
 		lua_pushlightuserdata(m_lua, (void*)this);
 		lua_setfield(m_lua, LUA_REGISTRYINDEX, "__luanti_module");
 		set_global_string("__luanti_module_path", module_path());
