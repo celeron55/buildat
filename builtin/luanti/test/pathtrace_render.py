@@ -6,7 +6,7 @@
 # Blender's OBJ importer is not used: it places verts by forward_axis/up_axis
 # while the camera is placed here, and two transforms that disagree put the
 # camera outside the world. Parsed here instead, so there is one conversion.
-# simplified: 32 samples, sun elevation fixed at 13:00's; the metering is
+# simplified: 32 samples; the metering is
 # a plain log-average, which a sun disc in frame drags (see [PT_EXPOSURE]).
 
 import gzip
@@ -116,7 +116,37 @@ def clear_scene():
 			do_recursive=True)
 
 
-def setup_world():
+# Luanti's own sun path, out of luanti_sky.sun_direction() in the launcher
+# (untilted, which is what a reference set is taken with): the sun rises
+# at -X, crosses the zenith and sets at +X, in the world's XY... plane of
+# file-space X and Y, which is Blender's XZ. The hour is the fixture's
+# HOURS table -- "1300" is time_of_day 0.5417 -- so the reference's sun is
+# where the client's is at the same picture.
+HOURS = {"0545": 0.2396, "1000": 0.4167, "1300": 0.5417, "1500": 0.6250,
+		"1830": 0.7708, "2030": 0.8542, "0200": 0.0833}
+
+
+def sun_from_hour(hour):
+	"""(elevation, rotation) for the Nishita sky, radians."""
+	t = HOURS.get(hour, 0.5417)
+	wn = 0.415 / 2
+	if wn < t < 1 - wn:
+		w = (t - wn) / (1 - wn * 2) * 0.5 + 0.25
+	elif t < 0.5:
+		w = t / wn * 0.25
+	else:
+		w = 1 - (1 - t) / wn * 0.25
+	a = math.radians(w * 360 - 90)
+	# File space: x = cos a, y = sin a (up), z = 0. Blender: (x, 0, y).
+	x, up = math.cos(a), math.sin(a)
+	el = math.asin(max(-1.0, min(1.0, up)))
+	# Cycles: sun = (sin rot * cos el, cos rot * cos el, sin el), so a sun
+	# along +X is rotation +90 degrees and along -X is -90
+	rot = math.atan2(x, 0.0)
+	return el, rot
+
+
+def setup_world(hour):
 	world = bpy.data.worlds["World"]
 	world.use_nodes = True
 	nt = world.node_tree
@@ -125,8 +155,9 @@ def setup_world():
 	bg = nt.nodes.new("ShaderNodeBackground")
 	sky = nt.nodes.new("ShaderNodeTexSky")
 	sky.sky_type = "MULTIPLE_SCATTERING"
-	sky.sun_elevation = math.radians(75)
-	sky.sun_rotation = math.radians(15)
+	el, rot = sun_from_hour(hour)
+	sky.sun_elevation = el
+	sky.sun_rotation = rot
 	nt.links.new(sky.outputs["Color"], bg.inputs["Color"])
 	nt.links.new(bg.outputs["Background"], out.inputs["Surface"])
 	bg.inputs["Strength"].default_value = 1.0
@@ -330,8 +361,8 @@ def main():
 			print("no camera header in", name, file=sys.stderr)
 			sys.exit(1)
 		clear_scene()
-		setup_world()
 		stem = name[:-7] if name.endswith(".obj.gz") else name[:-4]
+		setup_world(stem.split("_")[2])
 		# The shooter renamed the textures after the dump's stem
 		# (<stem>_texN.png); the usemtl lines still carry the dump's own name
 		blocks = [(stem + m[m.rfind("_tex"):] if m else "", a, n)
