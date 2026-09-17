@@ -2915,7 +2915,17 @@ struct Module: public interface::Module, public luanti::Interface
 				"    core.__check_map_read = function() end\n"
 				"end\n", "check_map_write");
 		flush_node_writes();
-		run_chunk_string("core.__check_map_read()", "check_map_read");
+		// A self-check that fails is a warning, not the end of a running
+		// game: it has read `ignore` back once under a 6.8 s emerge step
+		// with a player in the world, and took the server with it. What
+		// it found is logged and stays open -- [CHECK_MAP_FLAKE] in
+		// doc/plan/luanti_module_plan.md.
+		try {
+			run_chunk_string("core.__check_map_read()", "check_map_read");
+		} catch(std::exception &e){
+			log_w(MODULE, "check_map: the round trip failed and the game "
+					"goes on: %s", e.what());
+		}
 		// The check puts air back where it wrote; that has to land too, or
 		// the world starts with a block of cobble nobody asked for
 		flush_node_writes();
