@@ -1717,17 +1717,33 @@ function M.define(dst, util)
 		},
 	})
 
+	-- A scripted client (bin/buildat -c) never hides or captures the
+	-- cursor. Its mouse_move is injected and relative, so a game loses
+	-- nothing; the person whose desktop the run shares keeps their cursor,
+	-- which the re-show after a hide used to warp to the window's corner.
+	-- See [SCRIPTED_CURSOR] in doc/plan/miscellaneous_plan.md.
+	local scripted = __buildat_is_scripted()
 	util.wc("Input", {
 		instance = {
 			SetMouseVisible = util.wrap_function({"Input", "boolean"},
 				function(self, enable)
+					if scripted and not enable then
+						return
+					end
+					-- Left false in a scripted run, so init.lua's
+					-- click-to-recapture stays inert too
 					if util.mouse then
 						util.mouse.hide_wanted = not enable
 					end
 					self:SetMouseVisible(enable)
 				end),
-			SetMouseMode = util.self_function("SetMouseMode", {},
-					{"Input", "number"}),
+			SetMouseMode = util.wrap_function({"Input", "number"},
+				function(self, mode)
+					if scripted and (mode == MM_RELATIVE or mode == MM_WRAP) then
+						return
+					end
+					self:SetMouseMode(mode)
+				end),
 			GetKeyDown = util.self_function("GetKeyDown", {"boolean"}, {"Input", "number"}),
 			GetKeyPress = util.self_function("GetKeyPress", {"boolean"}, {"Input", "number"}),
 			GetMouseMove = util.self_function("GetMouseMove", {dst.IntVector2}, {"Input"}),

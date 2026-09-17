@@ -1111,6 +1111,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(set_preference)
 		DEF_BUILDAT_FUNC(list_preferences)
 		DEF_BUILDAT_FUNC(get_env)
+		DEF_BUILDAT_FUNC(is_scripted)
 
 		// Create a scene that will be synchronized from the server
 		m_scene = new magic::Scene(context_);
@@ -1207,33 +1208,12 @@ struct CApp: public App, public magic::Application
 		shutdown();
 	}
 
-	// Game code may SetMouseVisible(false) / grab. Do not actually capture
-	// the OS mouse; injected mouse_move is relative (GetMouseMove) and does
-	// not need a cursor position.
-	void command_seq_keep_mouse_free()
-	{
-		if(!m_command_seq_active)
-			return;
-		magic::Input *input = GetSubsystem<magic::Input>();
-		if(!input)
-			return;
-		bool changed = false;
-		if(input->GetMouseMode() == magic::MM_RELATIVE ||
-				input->GetMouseMode() == magic::MM_WRAP){
-			input->SetMouseMode(magic::MM_ABSOLUTE);
-			changed = true;
-		}
-		if(!input->IsMouseVisible()){
-			input->SetMouseVisible(true);
-			changed = true;
-		}
-		if(input->IsMouseGrabbed()){
-			input->SetMouseGrabbed(false);
-			changed = true;
-		}
-		if(changed)
-			client::command_seq::absorb_mouse_move_suppression(input);
-	}
+	// A scripted client never hides or captures the cursor: the Input
+	// wrapper in extensions/urho3d/safe_classes.lua refuses those calls
+	// while is_scripted(). Undoing a hide after the fact was what warped
+	// the desktop cursor to the window's corner -- Urho's re-show restores
+	// a position sampled while the cursor was hidden. See [SCRIPTED_CURSOR]
+	// in doc/plan/miscellaneous_plan.md.
 
 	// Where the camera of the first viewport points: yaw from +Z towards +X
 	// and pitch upwards, both in degrees. False when there is no camera --
@@ -1564,7 +1544,6 @@ struct CApp: public App, public magic::Application
 
 	void on_begin_frame(magic::StringHash event_type, magic::VariantMap &event_data)
 	{
-		command_seq_keep_mouse_free();
 		command_seq_tick();
 	}
 
@@ -2087,6 +2066,16 @@ struct CApp: public App, public magic::Application
 			lua_pushstring(L, v);
 		else
 			lua_pushnil(L);
+		return 1;
+	}
+
+	// is_scripted() -> true when a command sequence drives this client
+	static int l_is_scripted(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		lua_pushboolean(L, self->m_command_seq_active);
 		return 1;
 	}
 
