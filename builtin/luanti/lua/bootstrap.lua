@@ -3565,9 +3565,35 @@ function core.swap_node(pos, node)
 	return true
 end
 
+-- Every read first, every write after. set_node() reads the old node
+-- before it writes, and a read flushes the write buffer -- one
+-- voxelworld commit, skylight and all, per node when they alternate,
+-- which was 1.9 million skylight updates for devtest's
+-- /bench_bulk_set_node. Read together the flush happens once for the
+-- batch, and the writes stay in the buffer until something reads.
+-- The callbacks run in the same order set_node() runs them, per node.
 function core.bulk_set_node(positions, node)
-	for _, pos in ipairs(positions) do
-		core.set_node(pos, node)
+	local id, param1, param2 = to_node(node)
+	local newdef = core.registered_nodes[core.get_name_from_content_id(id)]
+	local old = {}
+	for i, pos in ipairs(positions) do
+		old[i] = core.get_node(pos)
+	end
+	for i, pos in ipairs(positions) do
+		local olddef = core.registered_nodes[old[i].name]
+		if olddef and olddef.on_destruct then
+			olddef.on_destruct(pos)
+		end
+		local x, y, z = to_pos(pos)
+		__set_node(x, y, z, id, param1, param2)
+		node_meta[pos_key(x, y, z)] = nil
+		node_timers[pos_key(x, y, z)] = nil
+		if newdef and newdef.on_construct then
+			newdef.on_construct(pos)
+		end
+		if olddef and olddef.after_destruct then
+			olddef.after_destruct(pos, old[i])
+		end
 	end
 	return true
 end
