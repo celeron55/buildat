@@ -2316,7 +2316,10 @@ struct CApp: public App, public magic::Application
 		return 1;
 	}
 
-	// dump_meshes() -> the file name it was saved under, or nil and why not.
+	// dump_meshes([atlas_json]) -> the file name it was saved under, or nil
+	// and why not. The optional string is written as <stem>_atlas.json
+	// beside the dump: the atlas registry's own account of which resource
+	// owns which tile, which the caller has and this does not.
 	//
 	// Same sandbox rule as take_screenshot(): the caller says when, the
 	// client picks <user>/meshdumps and a dated name. Writes the scene's
@@ -2353,6 +2356,16 @@ struct CApp: public App, public magic::Application
 				interface::fs::path_exists(dir+"/"+name); i++)
 			name = ss_("meshdump_")+stamp+"_"+itos(i)+".obj";
 		const ss_ path = dir+"/"+name;
+		if(lua_isstring(L, 1)){
+			size_t alen = 0;
+			const char *a = lua_tolstring(L, 1, &alen);
+			FILE *af = fopen((dir+"/"+name.substr(0, name.size() - 4)+
+					"_atlas.json").c_str(), "w");
+			if(af){
+				fwrite(a, 1, alen, af);
+				fclose(af);
+			}
+		}
 
 		FILE *f = fopen(path.c_str(), "w");
 		if(!f){

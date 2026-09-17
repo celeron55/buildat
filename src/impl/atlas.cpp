@@ -1,5 +1,6 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
+#include <sstream>
 #include "interface/atlas.h"
 #include "core/log.h"
 #include <Context.h>
@@ -524,6 +525,48 @@ struct CAtlasRegistry: public AtlasRegistry
 		}
 		const AtlasSegmentCache &seg_cache = cache->segments[ref.segment_id];
 		return &seg_cache;
+	}
+
+	static ss_ json_escaped(const ss_ &in)
+	{
+		ss_ out;
+		for(char c : in){
+			if(c == '"' || c == '\\')
+				out += '\\';
+			out += c;
+		}
+		return out;
+	}
+
+	ss_ describe_segments()
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		std::ostringstream os;
+		os<<"[";
+		bool first = true;
+		for(size_t a = 1; a < m_defs.size(); a++){
+			const AtlasDefinition &def = m_defs[a];
+			const magic::IntVector2 seg_size = def.segment_resolution;
+			for(size_t i = 0; i < def.segments.size(); i++){
+				const AtlasSegmentDefinition &sd = def.segments[i];
+				// The same placement upload_box() uses: a segment's cell is
+				// twice its size and the image sits in the middle of it
+				const int ix = i % def.total_segments.x_;
+				const int iy = i / def.total_segments.x_;
+				const int x0 = ix * seg_size.x_ * 2 + seg_size.x_ / 2;
+				const int y0 = iy * seg_size.y_ * 2 + seg_size.y_ / 2;
+				os<<(first ? "\n" : ",\n")<<"{\"atlas\":"<<a<<",\"segment\":"<<i
+						<<",\"x\":"<<x0<<",\"y\":"<<y0<<",\"w\":"<<seg_size.x_
+						<<",\"h\":"<<seg_size.y_<<",\"resource\":\""
+						<<json_escaped(sd.resource_name)<<"\",\"select\":["
+						<<sd.select_segment.x_<<","<<sd.select_segment.y_
+						<<"],\"of\":["<<sd.total_segments.x_<<","
+						<<sd.total_segments.y_<<"]}";
+				first = false;
+			}
+		}
+		os<<"\n]\n";
+		return os.str();
 	}
 
 	void set_surface_maps(bool enabled)

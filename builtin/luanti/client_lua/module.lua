@@ -2530,7 +2530,29 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	end
 	local mesh = ""
 	if refshot_dump and buildat.dump_meshes then
-		mesh = buildat.dump_meshes() or ""
+		-- With the atlas registry's account of which resource owns which
+		-- tile, written beside the dump as <stem>_atlas.json
+		local reg = voxelworld.get_atlas_registry()
+		local atlas = reg and reg.describe_segments and
+				reg:describe_segments() or nil
+		if atlas then
+			-- And which expression each composed texture came from: a
+			-- luanti_texmod/<hash>.png says nothing by itself
+			local function q(str)
+				return '"' .. str:gsub('[%c"\\]', function(c)
+					return string.format("\\u%04x", c:byte())
+				end) .. '"'
+			end
+			local lines = {}
+			for expr, resource in pairs(composed) do
+				if type(resource) == "string" then
+					lines[#lines + 1] = q(resource) .. ": " .. q(expr)
+				end
+			end
+			atlas = '{"segments": ' .. atlas .. ', "composed": {\n' ..
+					table.concat(lines, ",\n") .. '\n}}\n'
+		end
+		mesh = buildat.dump_meshes(atlas) or ""
 	end
 	buildat.send_packet("luanti:refshot_shot", cereal.binary_output(
 			{tostring(refshot_token), name, mesh}, {"array", "string"}))

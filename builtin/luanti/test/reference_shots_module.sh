@@ -227,6 +227,8 @@ if [ -n "${PATHTRACE:-}" ]; then
 				suffix=${tex##*_tex}
 				mv "$tex" "$mesh_out/${stem}_tex$suffix"
 			done
+			[ -f "$dumps/${file%.obj}_atlas.json" ] &&
+				mv "$dumps/${file%.obj}_atlas.json" "$mesh_out/${stem}_atlas.json"
 			echo "mesh $stem"
 			mesh_n=$((mesh_n + 1))
 		else
