@@ -11,6 +11,7 @@
 
 import gzip
 import math
+from array import array
 import os
 import sys
 
@@ -38,43 +39,57 @@ def open_dump(path):
 
 
 def load_dump(path):
-	"""One conversion: file Y-up → Blender (x, -z, y). Camera uses the same.
-	Verts carry the tint as an OBJ vertex colour, faces carry a usemtl that
-	names the albedo PNG beside the dump; both come back per face."""
+	"""One conversion: file Y-up -> Blender (x, -z, y). Camera uses the same.
+	Flat array buffers rather than a Python object per vertex, which is
+	what took ten gigabytes at RANGE=200 ([PATH_TRACE_RAM]). Nothing is
+	culled: what is behind the camera casts the shadows and bounces the
+	light in front of it (user). Every `o` block is one chunk batch whose
+	faces are consecutive triples of its own verts (see l_dump_meshes), so
+	no face list is kept either. Verts carry the tint as an OBJ vertex
+	colour and a usemtl names the albedo PNG; both come back per block."""
 	pos, dire = None, None
-	verts = []
-	tints = []
-	uvs = []
-	faces = []
-	mats = []
+	co = array("f")      # x y z per vert, Blender space
+	tint = array("f")    # r g b a per vert
+	uv = array("f")      # u v per vert
+	blocks = []          # (material, first vert, vert count)
+	first = 0
 	mat = ""
+
+	def flush():
+		nonlocal first
+		n = len(co) // 3 - first
+		if n > 0:
+			blocks.append((mat, first, n))
+		first = len(co) // 3
+
 	with open_dump(path) as f:
 		for line in f:
-			if line.startswith("v "):
+			c = line[0]
+			if c == "v":
 				t = line.split()
-				verts.append(y_up_to_blender(float(t[1]), float(t[2]),
-						float(t[3])))
-				tints.append((float(t[4]), float(t[5]), float(t[6]), 1.0)
-						if len(t) >= 7 else (1.0, 1.0, 1.0, 1.0))
-			elif line.startswith("vt "):
-				t = line.split()
-				# Urho's v runs down from the top; Blender's up from the bottom
-				uvs.append((float(t[1]), 1.0 - float(t[2])))
-			elif line.startswith("f "):
-				idx = []
-				for tok in line.split()[1:]:
-					idx.append(int(tok.split("/", 1)[0]) - 1)
-				if len(idx) >= 3:
-					faces.append(idx[:3])
-					mats.append(mat)
-			elif line.startswith("usemtl "):
+				if t[0] == "v":
+					x, y, z = float(t[1]), float(t[2]), float(t[3])
+					co.extend(y_up_to_blender(x, y, z))
+					if len(t) >= 7:
+						tint.extend((float(t[4]), float(t[5]), float(t[6]), 1.0))
+					else:
+						tint.extend((1.0, 1.0, 1.0, 1.0))
+				elif t[0] == "vt":
+					# Urho's v runs down from the top; Blender's up
+					uv.extend((float(t[1]), 1.0 - float(t[2])))
+			elif c == "o":
+				flush()
+			elif c == "u":
 				t = line.split(None, 1)
 				mat = t[1].strip() if len(t) > 1 else ""
-			elif line.startswith("# camera_pos "):
-				pos = tuple(float(x) for x in line.split()[2:5])
-			elif line.startswith("# camera_dir "):
-				dire = tuple(float(x) for x in line.split()[2:5])
-	return pos, dire, verts, tints, uvs, faces, mats
+			elif c == "#":
+				if line.startswith("# camera_pos "):
+					pos = tuple(float(x) for x in line.split()[2:5])
+				elif line.startswith("# camera_dir "):
+					dire = tuple(float(x) for x in line.split()[2:5])
+			# "f" lines are implied: consecutive triples of a block's verts
+	flush()
+	return pos, dire, co, tint, uv, blocks
 
 
 def y_up_to_blender(x, y, z):
@@ -171,27 +186,38 @@ def textured_material(name, png):
 	return mat
 
 
-def build_world(scene, verts, tints, uvs, faces, mats, tex_dir):
+def build_world(scene, co, tint, uv, blocks, tex_dir):
+	"""The mesh out of the flat buffers, through foreach_set: no Python
+	object per vertex or per loop."""
+	nvert = len(co) // 3
+	ntri = nvert // 3
 	mesh = bpy.data.meshes.new("world")
-	mesh.from_pydata(verts, [], faces)
-	uv = mesh.uv_layers.new(name="atlas")
+	mesh.vertices.add(nvert)
+	mesh.vertices.foreach_set("co", co)
+	mesh.loops.add(nvert)
+	mesh.loops.foreach_set("vertex_index", array("i", range(nvert)))
+	mesh.polygons.add(ntri)
+	mesh.polygons.foreach_set("loop_start", array("i", range(0, nvert, 3)))
+	mesh.polygons.foreach_set("loop_total", array("i", [3]) * ntri)
+	uvl = mesh.uv_layers.new(name="atlas")
+	uvl.data.foreach_set("uv", uv)   # loop i is vert i
 	col = mesh.color_attributes.new(name="tint", type="FLOAT_COLOR",
 			domain="POINT")
+	col.data.foreach_set("color", tint)
 	# One material slot per texture the dump named, in the order met
 	slot_of = {}
-	for i, poly in enumerate(mesh.polygons):
-		m = mats[i]
+	midx = array("i", [0]) * ntri
+	for m, first, n in blocks:
 		if m not in slot_of:
 			slot_of[m] = len(mesh.materials)
 			mesh.materials.append(textured_material(m or "untextured",
 					os.path.join(tex_dir, m) if m else None))
-		poly.material_index = slot_of[m]
-		for li in poly.loop_indices:
-			vi = mesh.loops[li].vertex_index
-			uv.data[li].uv = uvs[vi] if vi < len(uvs) else (0.0, 0.0)
-	for vi in range(len(verts)):
-		col.data[vi].color = tints[vi]
+		s = slot_of[m]
+		for i in range(first // 3, (first + n) // 3):
+			midx[i] = s
+	mesh.polygons.foreach_set("material_index", midx)
 	mesh.update()
+	mesh.validate()
 	ob = bpy.data.objects.new("world", mesh)
 	scene.collection.objects.link(ob)
 	return ob
@@ -250,7 +276,7 @@ def main():
 			continue
 		obj_path = os.path.join(OUT, name)
 		print("load", name)
-		pos, dire, verts, tints, uvs, faces, mats = load_dump(obj_path)
+		pos, dire, co, tint, uv, blocks = load_dump(obj_path)
 		if not pos or not dire:
 			print("no camera header in", name, file=sys.stderr)
 			sys.exit(1)
@@ -259,8 +285,10 @@ def main():
 		stem = name[:-7] if name.endswith(".obj.gz") else name[:-4]
 		# The shooter renamed the textures after the dump's stem
 		# (<stem>_texN.png); the usemtl lines still carry the dump's own name
-		mats = [stem + m[m.rfind("_tex"):] if m else "" for m in mats]
-		build_world(scene, verts, tints, uvs, faces, mats, OUT)
+		blocks = [(stem + m[m.rfind("_tex"):] if m else "", a, n)
+				for m, a, n in blocks]
+		build_world(scene, co, tint, uv, blocks, OUT)
+		del co, tint, uv
 		scene.camera = add_camera(pos, dire)
 		# cycles_vp6_1300_none.png: the dump's stem without the seed, so the
 		# render sits beside its .obj.gz without sharing a name with it.
