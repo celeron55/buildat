@@ -6,7 +6,8 @@
 # Blender's OBJ importer is not used: it places verts by forward_axis/up_axis
 # while the camera is placed here, and two transforms that disagree put the
 # camera outside the world. Parsed here instead, so there is one conversion.
-# simplified: untextured, 32 samples, sun elevation fixed at 13:00's.
+# simplified: untextured, 32 samples, sun elevation fixed at 13:00's,
+# exposure a constant rather than metered.
 
 import gzip
 import math
@@ -18,8 +19,16 @@ import bpy
 OUT = os.environ.get("BUILDAT_PATHTRACE_OUT",
 		os.path.abspath("local/reference_shots/pathtrace"))
 FOV = 72.0
-SAMPLES = 32
+SAMPLES = int(os.environ.get("SAMPLES", "32"))
 RES = (1280, 720)
+# The Nishita sky is in physical units and a noon sun blows an 8-bit frame
+# to white at exposure 0; -7 puts a sunlit grey top face near 0.8 and its
+# shadow near 0.15. BUILDAT_PATHTRACE_EXPOSURE moves it; the set is
+# read as ratios, so the number only has to keep both ends of a picture
+# off the clip.
+EXPOSURE = float(os.environ.get("BUILDAT_PATHTRACE_EXPOSURE", "-7"))
+# ONLY=vp1 renders the one dump whose stem contains it
+ONLY = os.environ.get("ONLY", "")
 
 
 def open_dump(path):
@@ -131,6 +140,7 @@ def main():
 	scene.cycles.samples = SAMPLES
 	scene.cycles.device = "CPU"
 	scene.render.resolution_x, scene.render.resolution_y = RES
+	scene.view_settings.exposure = EXPOSURE
 	scene.render.image_settings.file_format = "PNG"
 
 	objs = sorted(n for n in os.listdir(OUT)
@@ -153,6 +163,8 @@ def main():
 		print("no dumps in", OUT, file=sys.stderr)
 		sys.exit(1)
 	for name in picked:
+		if ONLY and ONLY not in name:
+			continue
 		obj_path = os.path.join(OUT, name)
 		print("load", name)
 		pos, dire, verts, faces = load_dump(obj_path)
