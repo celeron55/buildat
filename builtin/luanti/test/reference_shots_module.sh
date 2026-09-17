@@ -219,7 +219,9 @@ if [ -n "${PATHTRACE:-}" ]; then
 				rm -f "$dumps/$file"
 			# The albedo textures the dump's usemtl lines name, beside it
 			for tex in "$dumps/${file%.obj}"_tex*.png; do
-				[ -f "$tex" ] && mv "$tex" "$mesh_out/$stem$(basename "$tex" | sed "s/^${file%.obj}//")"
+				[ -f "$tex" ] || continue
+				suffix=${tex##*_tex}
+				mv "$tex" "$mesh_out/${stem}_tex$suffix"
 			done
 			echo "mesh $stem"
 			mesh_n=$((mesh_n + 1))
