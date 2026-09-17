@@ -4,6 +4,14 @@
 --
 -- What a node's surface is made of, guessed from its definition.
 --
+-- **Both Luanti clients read this one file** ([VOXEL_MATERIALS] in
+-- doc/plan/rendering_plan.md): the extension with the definition its
+-- nodedef.lua parsed off the wire, builtin/luanti with the definition the
+-- game registered, through core.__voxel_defs() in its bootstrap.lua. The
+-- two spell a drawtype differently -- a number on the wire, a name in a
+-- mod -- and both spellings are taken below; what else is read (name,
+-- groups, waving, light_source) is spelled the same on both sides.
+--
 -- The atlas derives a normal map and a spec map from six numbers per texture
 -- segment (see src/interface/atlas.h), and the PBR voxel shader reads them.
 -- Luanti says nothing about any of them: a node definition knows its drawtype,
@@ -45,6 +53,15 @@ local DRAWTYPE_GLASSLIKE_FRAMED_OPTIONAL = 15
 local DRAWTYPE_PLANTLIKE_ROOTED = 17
 
 local NODEDEF_ALPHAMODE_BLEND = 0
+
+-- The same drawtypes by the name a mod registers them under
+local DRAWTYPE_BY_NAME = {
+	normal = 0, airlike = 1, liquid = 2, flowingliquid = 3, glasslike = 4,
+	allfaces = 5, allfaces_optional = 6, torchlike = 7, signlike = 8,
+	plantlike = 9, fencelike = 10, raillike = 11, nodebox = 12,
+	glasslike_framed = 13, firelike = 14, glasslike_framed_optional = 15,
+	mesh = 16, plantlike_rooted = 17,
+}
 
 -- What everything is before anything is known about it: a painted texture with
 -- a wide, weak highlight, which is what these textures are painted as
@@ -107,7 +124,13 @@ function M.for_node(def)
 		return copy(nil)
 	end
 	local drawtype = def.drawtype or 0
-	local blend = def.alpha_mode == NODEDEF_ALPHAMODE_BLEND
+	if type(drawtype) == "string" then
+		drawtype = DRAWTYPE_BY_NAME[drawtype] or 0
+	end
+	-- alpha_mode is the wire's; blend is what bootstrap.lua worked out
+	-- from use_texture_alpha, the rule being its own
+	local blend = def.alpha_mode == NODEDEF_ALPHAMODE_BLEND or
+			def.blend == true
 	local out
 
 	if drawtype == DRAWTYPE_LIQUID or drawtype == DRAWTYPE_FLOWINGLIQUID then
@@ -205,6 +228,14 @@ do
 			"surface: glass")
 	local plain = M.for_node(nil)
 	assert(plain.roughness == 0.95 and plain.spots == 0, "surface: default")
+	-- The module's spelling comes out the same as the wire's
+	local named = M.for_node({name = "default:water_source",
+			drawtype = "liquid"})
+	assert(named.spots == water.spots and named.roughness == water.roughness,
+			"surface: drawtype by name")
+	local pane = M.for_node({name = "xpanes:pane", drawtype = "nodebox",
+			blend = true})
+	assert(pane.roughness < 0.2, "surface: blend by flag")
 end
 
 return M

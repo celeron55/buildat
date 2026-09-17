@@ -3794,24 +3794,46 @@ struct Module: public interface::Module, public luanti::Interface
 	// shipped. Anything with a texture modifier in it -- ^ for an overlay,
 	// [ for a generator, ( for a grouping -- has to be composed, and the
 	// client is what composes it, which is the rest of M3.
-	// One texture of a definition, with the surface numbers every node of a
-	// Luanti game gets until the nodedef carries its own
+	// One texture of a definition, with the surface numbers the shared
+	// guess gave the node (extensions/luanti_client/surface.lua, through
+	// bootstrap.lua's __voxel_defs(); see [VOXEL_MATERIALS]).
 	// `frames` is how many animation frames the texture is a vertical strip
 	// of: the segment is then the first of them, which is what the atlas's
 	// own total_segments is for. One is a still texture.
 	static interface::AtlasSegmentDefinition make_segment(const ss_ &texture,
+			const interface::AtlasSegmentDefinition &surface,
 			size_t frames = 1)
 	{
-		interface::AtlasSegmentDefinition seg;
+		interface::AtlasSegmentDefinition seg = surface;
 		seg.resource_name = texture;
 		seg.total_segments = magic::IntVector2(
 				texture.empty() ? 0 : 1,
 				texture.empty() ? 0 : (int)(frames < 1 ? 1 : frames));
 		seg.select_segment = magic::IntVector2(0, 0);
-		seg.roughness = 0.95f;
-		seg.spec_strength = 0.15f;
-		seg.bumpiness = 0.0f;
 		return seg;
+	}
+
+	// The six surface numbers of the definition on top of the stack, as a
+	// segment with no texture; what the guess did not say keeps the
+	// numbers the module used to give every tile
+	interface::AtlasSegmentDefinition table_surface(lua_State *L)
+	{
+		interface::AtlasSegmentDefinition s;
+		s.roughness = 0.95f;
+		s.spec_strength = 0.15f;
+		s.bumpiness = 0.0f;
+		lua_getfield(L, -1, "surface");
+		if(lua_istable(L, -1)){
+			s.roughness = (float)table_number(L, "roughness", s.roughness);
+			s.spec_strength = (float)table_number(L, "spec_strength",
+					s.spec_strength);
+			s.bumpiness = (float)table_number(L, "bumpiness", s.bumpiness);
+			s.translucency = (float)table_number(L, "translucency", 0);
+			s.spots = (float)table_number(L, "spots", 0);
+			s.static_spots = (float)table_number(L, "static_spots", 0);
+		}
+		lua_pop(L, 1);
+		return s;
 	}
 
 	// The colours in a palette image, row by row and at most 256 of them,
@@ -4121,6 +4143,7 @@ struct Module: public interface::Module, public luanti::Interface
 			bool climbable = table_boolean(L, "climbable");
 			double move_resistance = table_number(L, "move_resistance", 0);
 			ss_ drawtype = table_string(L, "drawtype");
+			const interface::AtlasSegmentDefinition surface = table_surface(L);
 			float visual_scale = (float)table_number(L, "visual_scale", 1.0);
 			ss_ tiles[6];
 			bool has_tiles = table_six_strings(L, "tiles", tiles);
@@ -4343,13 +4366,14 @@ struct Module: public interface::Module, public luanti::Interface
 			vdef.name.rotation_secondary = 0;
 			vdef.handler_module = "";
 			for(size_t f = 0; f < 6; f++)
-				vdef.textures[f] = make_segment(face_textures[f],
+				vdef.textures[f] = make_segment(face_textures[f], surface,
 						face_frames[f]);
 			// The textures a shape's quads can wear beyond the six faces: a
 			// rooted plant's plant, which is nothing the cube it stands in
 			// has. Quad tile 6 is the first of these.
 			if(!overlay_texture.empty())
-				vdef.extra_textures.push_back(make_segment(overlay_texture));
+				vdef.extra_textures.push_back(make_segment(overlay_texture,
+						surface));
 			// Which faces are drawn, as far as the edge material carries
 			// Luanti's rules:
 			//  - airlike is nothing at all, and nothing draws a face
@@ -4457,12 +4481,12 @@ struct Module: public interface::Module, public luanti::Interface
 							for(size_t f = 0; f < 6; f++){
 								var.textures.push_back(tinted[f].empty() ?
 										interface::AtlasSegmentDefinition() :
-										make_segment(tinted[f],
+										make_segment(tinted[f], surface,
 										face_frames[f]));
 							}
 							if(!tinted[6].empty()){
 								var.textures.push_back(
-										make_segment(tinted[6]));
+										make_segment(tinted[6], surface));
 							}
 							coloured.push_back(var);
 						}

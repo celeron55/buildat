@@ -1632,6 +1632,14 @@ assert(alpha_mode_of({use_texture_alpha = true}, "plantlike") == "clip")
 assert(alpha_mode_of({use_texture_alpha = false}, "normal") == "opaque")
 assert(alpha_mode_of({use_texture_alpha = false}, "plantlike") == "clip")
 
+-- What a node's surface is made of -- roughness, spec_strength,
+-- bumpiness, translucency, spots, static_spots -- guessed the way
+-- extensions/luanti_client guesses it, out of the same file, so the two
+-- clients' atlases derive the same normal and spec maps. The extension
+-- is at a fixed place beside this module. See [VOXEL_MATERIALS].
+local surface = dofile(module_path ..
+		"/../../extensions/luanti_client/surface.lua")
+
 function core.__voxel_defs()
 	local max_id = 0
 	for id in pairs(core.__content_names) do
@@ -1695,6 +1703,11 @@ function core.__voxel_defs()
 			-- panes are drawn with every texel either solid or gone, where
 			-- the game meant them to be seen through.
 			alpha_blend = alpha_mode_of(def, drawtype) == "blend",
+			surface = surface.for_node(def and {
+				name = name, drawtype = drawtype, groups = def.groups,
+				waving = def.waving, light_source = def.light_source,
+				blend = alpha_mode_of(def, drawtype) == "blend",
+			} or nil),
 			-- Cut out by the texture's own alpha, which is what a leaf, a
 			-- plant, a rail and a ladder are. Without it the holes in the
 			-- picture are drawn in whatever is under the alpha, which is
