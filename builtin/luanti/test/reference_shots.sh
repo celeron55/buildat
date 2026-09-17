@@ -239,7 +239,9 @@ check_shots()
 		read -r mean sd < <(magick "$f" -gravity center \
 				-crop 200x200+0+0 +repage -colorspace Gray \
 				-format "%[fx:mean] %[fx:standard_deviation]" info:)
-		if awk "BEGIN{exit !($sd < 0.01)}"; then
+		# A flat frame is a falling player's sky -- unless it is dark, which
+		# is what a cave viewpoint is supposed to answer (vp8 reads 3, 3, 2)
+		if awk "BEGIN{exit !($sd < 0.01 && $mean > 0.05)}"; then
 			echo "FLAT SKY  $(basename "$f")  sd=$sd" >&2
 			bad=$((bad + 1))
 		elif awk "BEGIN{exit !($mean > 0.75 && $mean < 0.86 && $sd < 0.10)}"
