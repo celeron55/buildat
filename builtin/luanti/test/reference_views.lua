@@ -272,6 +272,9 @@ end
 -- because changing the weather sets a sky of its own.
 local RANGE = tonumber(rawget(_G, "REFSHOT_RANGE")) or 150
 
+-- The fixture's own status line; declared here because pin_view() spares it
+local hud_id, hud_player, hud_said = nil, nil, nil
+
 local function pin_view(player)
 	core.settings:set("viewing_range", tostring(RANGE))
 	local sky = player:get_sky(true)
@@ -284,6 +287,14 @@ local function pin_view(player)
 	player:hud_set_flags({hotbar = false, wielditem = false,
 			healthbar = false, breathbar = false, crosshair = false,
 			minimap = false})
+	-- And every element the game put up -- VoxeLibre's hearts and hunger
+	-- are statbars of its own, which no flag hides -- except this file's
+	-- text. On every re-aim, since a game may add one back.
+	for id, _ in pairs(player:hud_get_all()) do
+		if id ~= hud_id then
+			player:hud_remove(id)
+		end
+	end
 end
 
 -- **What the run photographs is kept loaded while it runs.** Moving between
@@ -389,7 +400,6 @@ end
 -- fixture believed it was photographing and anybody watching the client can
 -- see the run rather than guess at it. Updated about once a second; the
 -- states themselves change far more slowly than that.
-local hud_id, hud_player, hud_said = nil, nil, nil
 
 local function say(text)
 	if text == hud_said then

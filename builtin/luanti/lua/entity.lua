@@ -1494,6 +1494,16 @@ function PlayerRef:hud_remove(id)
 	send_hud(o, {"remove", tostring(id)})
 end
 
+-- Luanti's own: every element by id, as the definitions a mod gave
+function PlayerRef:hud_get_all()
+	local o = state_of(self)
+	local out = {}
+	for id, def in pairs((o and o.hud) or {}) do
+		out[id] = table.copy(def)
+	end
+	return out
+end
+
 function PlayerRef:hud_change(id, stat, value)
 	local o = state_of(self)
 	local def = o and o.hud and o.hud[id]
@@ -1537,6 +1547,7 @@ function PlayerRef:hud_set_flags(flags)
 		end
 	end
 	o.hud_flags = value
+	core.log("action", "hud_set_flags " .. o.player_name .. " -> " .. value)
 	send_hud(o, {"flags", tostring(value)})
 	player_event(o, "hud_changed")
 end

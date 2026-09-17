@@ -1402,6 +1402,7 @@ buildat.sub_packet("luanti:hud", function(data)
 		end
 	elseif op == "flags" then
 		M.hud_flags = tonumber(values[2]) or M.hud_flags
+		log:info("luanti:hud flags " .. M.hud_flags)
 	elseif op == "hotbar" then
 		M.hotbar = {
 			count = math.max(1, math.min(32, tonumber(values[2]) or 8)),
