@@ -70,8 +70,11 @@ awk -v seed="$SEED" -v secs="$((MINUTES * 60))" -v out="$out" 'BEGIN {
 		} else if (r < 0.72) {
 			# dig what is in front: a hold on the left button, looking a
 			# little down so the ground is within reach
+			# 2-5 s (user, 2026-09-17): dirt by hand is under a second in
+			# VoxeLibre and wood three; stone by hand is not the walk
+			# business
 			print "look " yaw " " (-35 + int(rand() * 30))
-			d = 1 + rand() * 2.5
+			d = 2 + rand() * 3
 			print "mouse_down left"; print "delay " int(d * 1000); print "mouse_up left"
 		} else if (r < 0.80) {
 			print "look " yaw " " (-50 + int(rand() * 20))
