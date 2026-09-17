@@ -50,6 +50,17 @@ target_of() {
 	esac
 }
 
+# The picture a set has of a probe. The path-traced set names its renders
+# without the seed -- cycles_vp6_1300_none.png beside the dump -- and is a
+# reference like official: grey albedo, so it is read as ratios between
+# surfaces ([PATH_TRACE_REF]) and is no hue target for anything.
+file_of() {   # set pic -> path
+	case "$1" in
+		pathtrace*) echo "$shots/$1/cycles_$2_none.png" ;;
+		*) echo "$shots/$1/${seed}_$2_none.png" ;;
+	esac
+}
+
 read_probe() {   # file crop -> "r g b"
 	magick "$1" -crop "$2" +repage -format '%[fx:mean.r] %[fx:mean.g] %[fx:mean.b]' info: 2>/dev/null
 }
@@ -67,7 +78,7 @@ for s in $sets; do
 	newest=$(ls -t "$shots/$s" 2>/dev/null | head -1)
 	[ -n "$newest" ] || continue
 	t=$(stat -c %Y "$shots/$s/$newest")
-	case "$s" in official*) note="(reference, no need to re-take)" ;; *)
+	case "$s" in official*|pathtrace*) note="(reference, no need to re-take)" ;; *)
 		if [ "$t" -lt "${newest_src:-0}" ]; then note="** STALE: older than the source **"
 		else note="current" ; fi ;;
 	esac
@@ -79,15 +90,15 @@ echo "$PROBES" | while IFS='|' read -r name pic crop why; do
 	echo
 	echo "=== $name -- $why"
 	for s in $sets; do
-		f="$shots/$s/${seed}_${pic}_none.png"
+		f=$(file_of "$s" "$pic")
 		[ -f "$f" ] || continue
 		rgb=$(read_probe "$f" "$crop")
 		[ -n "$rgb" ] || continue
 		tgt=$(target_of "$s")
 		line=$(echo "$rgb" | awk -v s="$s" '{printf "  %-18s %3d,%3d,%3d  B/R %.2f  mean %.3f",
 				s, $1*255, $2*255, $3*255, $3/($1+1e-9), ($1+$2+$3)/3}')
-		if [ -n "$tgt" ] && [ -f "$shots/$tgt/${seed}_${pic}_none.png" ]; then
-			t_rgb=$(read_probe "$shots/$tgt/${seed}_${pic}_none.png" "$crop")
+		if [ -n "$tgt" ] && [ -f "$(file_of "$tgt" "$pic")" ]; then
+			t_rgb=$(read_probe "$(file_of "$tgt" "$pic")" "$crop")
 			flag=$(echo "$rgb $t_rgb" | awk -v n="$name" '{
 				br=$3/($1+1e-9); tbr=$6/($4+1e-9); d=br-tbr; if(d<0)d=-d;
 				lim=(n=="stone")?0.03:0.05;
