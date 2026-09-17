@@ -278,6 +278,11 @@ local function pin_view(player)
 	sky.fog.fog_distance = RANGE
 	sky.fog.fog_start = 0.4
 	player:set_sky(sky)
+	-- Not a HUD test: the F5 line and the fixture's own text are what a
+	-- reference picture carries, and nothing else. See [REFVIEWS_HUD].
+	player:hud_set_flags({hotbar = false, wielditem = false,
+			healthbar = false, breathbar = false, crosshair = false,
+			minimap = false})
 end
 
 -- **What the run photographs is kept loaded while it runs.** Moving between

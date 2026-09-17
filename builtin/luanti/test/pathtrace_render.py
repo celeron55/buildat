@@ -153,6 +153,7 @@ def textured_material(name, png):
 	if png and os.path.isfile(png):
 		tex = nt.nodes.new("ShaderNodeTexImage")
 		tex.image = bpy.data.images.load(png)
+		tex.image.colorspace_settings.name = "sRGB"
 		tex.interpolation = "Closest"
 		tint = nt.nodes.new("ShaderNodeVertexColor")
 		tint.layer_name = "tint"
@@ -203,6 +204,10 @@ def main():
 	scene.cycles.device = "CPU"
 	scene.render.resolution_x, scene.render.resolution_y = RES
 	scene.view_settings.exposure = EXPOSURE
+	# Standard, not Blender 5's AgX: a tone curve moves every ratio the
+	# probes read, and under Standard two albedos in the same light come
+	# out in the ratio of the albedos. See [PATH_TRACE_TEX].
+	scene.view_settings.view_transform = "Standard"
 	scene.render.image_settings.file_format = "PNG"
 
 	objs = sorted(n for n in os.listdir(OUT)
