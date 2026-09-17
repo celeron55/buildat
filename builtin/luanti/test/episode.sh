@@ -67,7 +67,10 @@ drive() {   # log fifo -> the census line, or nothing
 	else
 		echo "the fixture never said ready" >&2
 	fi
-	for i in $(seq 1 120); do
+	# Ten minutes: the module under VoxeLibre has had steps of 47 seconds
+	# while it emerged the world around a player put in the sky, and the
+	# fixture's timer only fires between them
+	for i in $(seq 1 600); do
 		grep -aq "episode: census\|episode: FAILED" "$log" && break
 		kill -0 "$cli" 2>/dev/null || break
 		sleep 1
