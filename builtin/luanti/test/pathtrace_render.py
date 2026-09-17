@@ -217,6 +217,10 @@ def main():
 	# out in the ratio of the albedos. See [PATH_TRACE_TEX].
 	scene.view_settings.view_transform = "Standard"
 	scene.render.image_settings.file_format = "PNG"
+	# 16-bit: under Standard a shaded face at noon is a few counts of 255,
+	# and a hue ratio out of those is noise. The probes read it as a
+	# fraction either way.
+	scene.render.image_settings.color_depth = "16"
 
 	objs = sorted(n for n in os.listdir(OUT)
 			if "_vp" in n and (n.endswith(".obj") or n.endswith(".obj.gz")))
