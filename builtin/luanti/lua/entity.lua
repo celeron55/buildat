@@ -314,6 +314,14 @@ function ObjectRef:punch(puncher, time_from_last_punch, tool_capabilities, dir)
 	if handled or o.hp == nil then
 		return
 	end
+	-- An immortal object is not hit at all: Luanti's getPunchDamage()
+	-- answers did_punch = false for it. VoxeLibre's mobs are all immortal
+	-- and keep their own health; without this the engine's hp went down a
+	-- point a punch beside it, and a mob vanished at zero with its own
+	-- health nearly full.
+	if (tonumber(o.armor_groups and o.armor_groups.immortal) or 0) > 0 then
+		return
+	end
 	if hit.hp > 0 then
 		self:set_hp(o.hp - hit.hp, {type = "punch", object = puncher})
 	end
