@@ -283,6 +283,15 @@ def main():
 	# colour is Monte Carlo noise (stone in shade read B/R 0.69); the
 	# denoiser is what makes a ratio out of it.
 	scene.cycles.use_denoising = True
+	# A VoxeLibre canopy is drawn allfaces, six leaf cards a node with
+	# interior faces, and a ray through the alpha-0 texels spends a
+	# transparent bounce per card: at Cycles' default of eight it is
+	# terminated black two nodes in, shadow rays the same, which was the
+	# black inside every tree. Transparent hits are cheap. Diffuse bounces
+	# up too, for a canopy lit from within. See [PATH_TRACE_TEX].
+	scene.cycles.transparent_max_bounces = 128
+	scene.cycles.max_bounces = 16
+	scene.cycles.diffuse_bounces = 8
 	scene.render.resolution_x, scene.render.resolution_y = RES
 	scene.view_settings.exposure = 0.0
 	# Standard, not Blender 5's AgX: a tone curve moves every ratio the
