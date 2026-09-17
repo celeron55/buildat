@@ -2400,15 +2400,32 @@ local function blit_schematic(sch, pos, rotation, replacements,
 	return true
 end
 
+-- No callbacks and no per-node reads, the way Luanti's own is: what is
+-- there is read once as a VoxelManip of the box, and the writes go
+-- through the buffer as one batch. Through set_node() each node read
+-- first, and a read flushes the buffer -- a commit with the skylight
+-- per node of every village.
 function core.place_schematic(pos, schematic, rotation, replacements,
 		force_placement, flags)
+	local t = schematic_table(schematic)
+	if not t then
+		return false
+	end
+	local span = math.max(t.size.x, t.size.z)
+	local p1 = {x = math.floor(pos.x) - span, y = math.floor(pos.y) - t.size.y,
+			z = math.floor(pos.z) - span}
+	local p2 = {x = math.floor(pos.x) + span, y = math.floor(pos.y) + t.size.y,
+			z = math.floor(pos.z) + span}
+	local vm = VoxelManip(p1, p2)
 	return blit_schematic(schematic, pos, rotation, replacements,
 			force_placement, flags,
 			function(at, node)
-				core.set_node(at, node)
+				-- swap_node: the buffered write with no callbacks and no
+				-- read; it is defined below this, so it is looked up here
+				core.swap_node(at, node)
 			end,
 			function(at)
-				local name = core.get_node(at).name
+				local name = vm:get_node_at(at).name
 				return name ~= "air" and name ~= "ignore"
 			end)
 end
