@@ -389,15 +389,18 @@ struct CAtlasRegistry: public AtlasRegistry
 				}
 			}
 		}
-		// TODO: Skip the derivation for a segment that names authored normal
-		// and surface maps, and blit those instead. See interface/atlas.h.
 		// Derive the normal and roughness/metalness maps from the same source
-		// pixels. Nothing authors these; the segment's image is read as a
-		// height field for the normals and as a per-texel deviation from the
-		// segment's mean roughness, which is enough to tell water from rock
-		// and to give leaves the mix of waxy and matte parts they have.
+		// pixels. The segment's image is read as a height field for the
+		// normals and as a per-texel deviation from the segment's mean
+		// roughness, which is enough to tell water from rock and to give
+		// leaves the mix of waxy and matte parts they have -- unless a
+		// texture pack authored them: <texture>_n.png and <texture>_s.png
+		// beside the diffuse, in the LabPBR layout, override the derivation
+		// texel by texel. See [VOXEL_MATERIALS] in doc/plan/rendering_plan.md.
 		if(atlas.normal_image)
-			draw_surface_maps(seg_img, def, atlas, src_off, dst_p00, seg_size);
+			draw_surface_maps(seg_img, def, atlas, src_off, dst_p00, seg_size,
+					sidecar(def.resource_name, "_n"),
+					sidecar(def.resource_name, "_s"));
 
 		// Update the atlas textures from the atlas images, over the box this
 		// segment wrote and no more; see upload_box()
@@ -429,11 +432,95 @@ struct CAtlasRegistry: public AtlasRegistry
 		return 0.299f * c.r_ + 0.587f * c.g_ + 0.114f * c.b_;
 	}
 
+	// The authored map beside a texture, or nullptr: "foo.png" with "_n"
+	// is "foo_n.png". Asked of the cache without an error line, since most
+	// textures have none, and only for a texture with an extension -- a
+	// composed texmod names no file a pack could put a sidecar beside.
+	magic::Image* sidecar(const ss_ &resource_name, const char *suffix)
+	{
+		size_t dot = resource_name.rfind('.');
+		if(dot == ss_::npos || resource_name.find('/', dot) != ss_::npos)
+			return nullptr;
+		ss_ name = resource_name.substr(0, dot) + suffix +
+				resource_name.substr(dot);
+		magic::ResourceCache *magic_cache =
+				m_context->GetSubsystem<magic::ResourceCache>();
+		if(!magic_cache->Exists(name.c_str()))
+			return nullptr;
+		magic::Image *img = magic_cache->GetResource<magic::Image>(name.c_str());
+		if(img && (img->GetWidth() < 1 || img->GetHeight() < 1))
+			return nullptr;
+		return img;
+	}
+
+	// LabPBR's specular texel into the numbers the spec map carries:
+	// r is perceptual smoothness, so roughness is (1 - r)^2; g is F0 up to
+	// 229 and a metal from 230, folded into spec_strength as a fraction of
+	// a dielectric's 0.04 until the base goes physical ([PBR_TARGET]);
+	// b is porosity below 65 and subsurface from 65, which is the
+	// translucency. The alpha is emission and is not carried.
+	static void labpbr_specular(const magic::Color &s, float &roughness,
+			float &spec_strength, float &translucency)
+	{
+		roughness = (1.0f - s.r_) * (1.0f - s.r_);
+		if(roughness < 0.03f)
+			roughness = 0.03f;
+		const float g255 = s.g_ * 255.0f;
+		if(g255 >= 229.5f)
+			spec_strength = 1.0f;
+		else
+			spec_strength = std::min(1.0f, (g255 / 255.0f) / 0.04f);
+		const float b255 = s.b_ * 255.0f;
+		translucency = b255 >= 65.0f ? (b255 - 65.0f) / 190.0f : 0.0f;
+	}
+
+	static void check_labpbr()
+	{
+		float r, sp, t;
+		// Smoothness 1 is a mirror at the floor, no F0 no highlight, no
+		// subsurface no translucency
+		labpbr_specular(magic::Color(1.0f, 0.0f, 0.0f, 0.0f), r, sp, t);
+		assert(r < 0.031f && sp == 0.0f && t == 0.0f);
+		// Smoothness 0 is chalk; a dielectric's 0.04 (10/255) is the full
+		// strength; subsurface 255 is fully translucent
+		labpbr_specular(magic::Color(0.0f, 10.0f / 255.0f, 1.0f, 0.0f),
+				r, sp, t);
+		assert(r == 1.0f && sp > 0.98f && sp <= 1.0f && t == 1.0f);
+		// A metal is at full strength
+		labpbr_specular(magic::Color(0.5f, 240.0f / 255.0f, 0.0f, 0.0f),
+				r, sp, t);
+		assert(sp == 1.0f && t == 0.0f);
+	}
+
 	void draw_surface_maps(magic::Image *seg_img,
 			const AtlasSegmentDefinition &def, const AtlasCache &atlas,
 			const magic::IntVector2 &src_off, const magic::IntVector2 &dst_p00,
-			const magic::IntVector2 &seg_size)
+			const magic::IntVector2 &seg_size, magic::Image *normal_img,
+			magic::Image *spec_img)
 	{
+		static bool checked = false;
+		if(!checked){
+			checked = true;
+			check_labpbr();
+		}
+		// A sidecar has to be laid out like the diffuse to be read at the
+		// same offsets; one that is not is ignored with a line
+		if(normal_img && (normal_img->GetWidth() != seg_img->GetWidth() ||
+				normal_img->GetHeight() != seg_img->GetHeight())){
+			log_w(MODULE, "%s: the normal sidecar is %ix%i against %ix%i; "
+					"deriving instead", cs(def.resource_name),
+					normal_img->GetWidth(), normal_img->GetHeight(),
+					seg_img->GetWidth(), seg_img->GetHeight());
+			normal_img = nullptr;
+		}
+		if(spec_img && (spec_img->GetWidth() != seg_img->GetWidth() ||
+				spec_img->GetHeight() != seg_img->GetHeight())){
+			log_w(MODULE, "%s: the specular sidecar is %ix%i against %ix%i; "
+					"deriving instead", cs(def.resource_name),
+					spec_img->GetWidth(), spec_img->GetHeight(),
+					seg_img->GetWidth(), seg_img->GetHeight());
+			spec_img = nullptr;
+		}
 		// LOD segments sample the source at a stride; the same stride has to
 		// be used here or the maps would not line up with the diffuse texture
 		int step = def.lod_simulation;
@@ -478,6 +565,17 @@ struct CAtlasRegistry: public AtlasRegistry
 						seg_img, src_off, seg_size, lx, ly - step);
 				magic::Vector3 n(-dhdx * def.bumpiness, -dhdy * def.bumpiness,
 						1.0f);
+				if(normal_img){
+					// LabPBR: the normal's x and y in r and g, z rebuilt;
+					// b is ambient occlusion and a is height, both read and
+					// unused until something wants them
+					magic::Color a = normal_img->GetPixel(
+							src_off.x_ + lx, src_off.y_ + ly);
+					n.x_ = a.r_ * 2.0f - 1.0f;
+					n.y_ = a.g_ * 2.0f - 1.0f;
+					n.z_ = std::sqrt(std::max(0.0f,
+							1.0f - n.x_ * n.x_ - n.y_ * n.y_));
+				}
 				n.Normalize();
 				atlas.normal_image->SetPixel(dst_p.x_, dst_p.y_, magic::Color(
 						n.x_ * 0.5f + 0.5f,
@@ -485,13 +583,20 @@ struct CAtlasRegistry: public AtlasRegistry
 						n.z_ * 0.5f + 0.5f, static_spots));
 				float roughness = def.roughness + (lum - mean_lum) *
 						ROUGHNESS_PER_LUM;
+				float spec_strength = def.spec_strength;
+				float translucency = def.translucency;
+				if(spec_img){
+					labpbr_specular(spec_img->GetPixel(
+							src_off.x_ + lx, src_off.y_ + ly),
+							roughness, spec_strength, translucency);
+				}
 				if(roughness < 0.03f)
 					roughness = 0.03f;
 				if(roughness > 1.0f)
 					roughness = 1.0f;
 				atlas.spec_image->SetPixel(dst_p.x_, dst_p.y_,
-						magic::Color(roughness, def.spec_strength,
-						def.translucency, spots));
+						magic::Color(roughness, spec_strength,
+						translucency, spots));
 			}
 		}
 	}
