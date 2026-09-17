@@ -4491,7 +4491,9 @@ end
 -- whose rules are slow overshoots by 64 hits of one rule and not by the
 -- section. Before that one box's batch was 3.5 s of a step in VoxeLibre
 -- (the fuzz run, 2026-09-17), with the budget looked at only after it.
-local ABM_BUDGET_S = 0.2
+-- 0.1 (2026-09-18), down from 0.2: the step's ceiling is 0.25 s and the
+-- ABMs are not the only thing in it
+local ABM_BUDGET_S = 0.1
 
 -- Where a sweep that ran out of budget got to: which rules it is for, the
 -- sections it was going to read, and how far along it is. A rule that comes
@@ -4625,14 +4627,18 @@ local function lbms_the_world_has_had()
 end
 
 
-local function run_lbm(lbm, hits)
+-- Runs the rule over its hits from `from` and returns where it stopped:
+-- nil for the end, or the position index to carry on from when the
+-- deadline passed -- looked at every 64 positions, the way run_abm()
+-- does. A bulk_action is one call and runs whole.
+local function run_lbm(lbm, hits, from, until_us)
 	local positions = {}
 	for i = 1, #hits, 3 do
 		positions[#positions + 1] =
 				{x = hits[i], y = hits[i + 1], z = hits[i + 2]}
 	end
 	if #positions == 0 then
-		return
+		return nil
 	end
 	core.set_last_run_mod(lbm.mod_origin)
 	-- dtime_s is how long the block was away, and nothing here has been
@@ -4641,7 +4647,11 @@ local function run_lbm(lbm, hits)
 		ok, err = pcall(lbm.bulk_action, positions, 0)
 	else
 		ok = true
-		for _, pos in ipairs(positions) do
+		for i = from or 1, #positions do
+			if i % 64 == 0 and until_us and core.get_us_time() >= until_us then
+				return i
+			end
+			local pos = positions[i]
 			local ok1, err1 = pcall(lbm.action, pos, core.get_node(pos), 0)
 			if not ok1 then
 				ok, err = false, err1
@@ -4653,7 +4663,14 @@ local function run_lbm(lbm, hits)
 		core.log("error", "lbm " .. tostring(lbm.name or "?") .. ": " ..
 				tostring(err))
 	end
+	return nil
 end
+
+-- A cell's rules put down when the step's budget ran out, picked up
+-- next step: the rule index, its hits and the position it got to. One
+-- cell's LBMs were 0.18 s of a step in VoxeLibre with the budget looked
+-- at only between cells ([STEP_PEAK]).
+local lbm_pending = nil
 
 -- Returns whether this was the load: the first steps happen before the world
 -- has a section in it -- lua/check_map.lua steps the clock a whole day
@@ -4700,18 +4717,48 @@ local function run_lbms()
 	-- that unloads and comes back is swept again.
 	local budget_us = 20000
 	local t0 = core.get_us_time()
+	local until_us = t0 + budget_us
 	local swept = 0
+	-- What was put down last step first, and within the budget
+	if lbm_pending then
+		while #lbm_pending > 0 do
+			local job = lbm_pending[1]
+			local stopped = run_lbm(lbms[job.k], job.hits, job.at, until_us)
+			if stopped then
+				job.at = stopped
+				return true
+			end
+			table.remove(lbm_pending, 1)
+		end
+		lbm_pending = nil
+		swept = 1
+	end
 	for _, cell in ipairs(active_cells()) do
 		local key = cell[1] .. "," .. cell[2] .. "," .. cell[3]
 		if not lbm_done[key] then
-			if swept > 0 and core.get_us_time() - t0 > budget_us then
+			if swept > 0 and core.get_us_time() > until_us then
 				break
 			end
 			lbm_done[key] = true
 			swept = swept + 1
+			-- The cell's hits are read whole and its rules run until the
+			-- deadline; what is left is kept for the next step
+			local jobs = {}
 			sweep_one_box(cell, lbm_ids, function(k, hits)
-				run_lbm(lbms[k], hits)
+				if #hits > 0 then
+					jobs[#jobs + 1] = {k = k, hits = hits, at = nil}
+				end
 			end)
+			while #jobs > 0 do
+				local job = jobs[1]
+				local stopped = run_lbm(lbms[job.k], job.hits, job.at, until_us)
+				if stopped then
+					job.at = stopped
+					lbm_pending = jobs
+					return true
+				end
+				table.remove(jobs, 1)
+			end
 		end
 	end
 	return swept > 0
