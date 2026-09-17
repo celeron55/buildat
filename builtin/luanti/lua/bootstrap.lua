@@ -33,6 +33,15 @@ function core.log(level, text)
 	__luanti_log(tostring(level), tostring(text))
 end
 
+-- Which Lua this is, once, so a log says what a number was measured
+-- under ([LUAJIT] in doc/plan/performance_plan.md)
+do
+	local j = rawget(_G, "jit")
+	core.log("action", "Lua runtime: " ..
+			(j and j.version or _VERSION) ..
+			(j and (j.status() and ", JIT on" or ", JIT off") or ""))
+end
+
 core.get_us_time = __luanti_get_us_time
 
 -- **Luanti runs LuaJIT and this runs plain Lua 5.1**, and `math.random`'s
