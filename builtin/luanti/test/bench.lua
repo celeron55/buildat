@@ -8,10 +8,14 @@
 -- and a client connected, since the bulk ones read the player's position.
 -- Each line the commands would have said in chat is logged as
 -- `bench: <command>: <line>`, and `bench: done` ends the set.
+-- Not bench_bulk_set_node and bench_bulk_swap_node: their set_node and
+-- swap_node loop halves commit voxelworld once per node -- a read
+-- flushes the write buffer, and set_node reads first -- and a million
+-- of those is minutes. The bulk halves are what bulk_set_node is for.
 local names = {"bench_table_copy_vecs", "bench_name2content",
-		"bench_content2name", "bench_bulk_set_node", "bench_bulk_get_node",
+		"bench_content2name", "bench_bulk_get_node",
 		"bench_bulk_get_node_raw", "bench_bulk_get_node_raw2",
-		"bench_bulk_get_node_vm", "bench_bulk_swap_node"}
+		"bench_bulk_get_node_vm"}
 
 core.register_on_joinplayer(function(player)
 	local pname = player:get_player_name()

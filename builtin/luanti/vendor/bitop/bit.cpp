@@ -29,7 +29,8 @@
 // Vendored from Luanti's lib/bitop (Lua BitOp 1.0.2, Mike Pall, MIT), which
 // is what Luanti itself loads when it is not running on LuaJIT. Modified
 // here in one way: the Lua headers are included the way this build finds
-// them, <Lua/lauxlib.h> rather than "lauxlib.h".
+// them, <lauxlib.h> off the include path the server sets -- Urho3D's Lua
+// or its LuaJIT, whichever the engine was built with.
 extern "C" {
 #include "bit.h"
 }
@@ -38,7 +39,7 @@ extern "C" {
 
 #define LUA_LIB
 extern "C" {
-#include <Lua/lauxlib.h>
+#include <lauxlib.h>
 }
 
 #if defined(_MSC_VER) && (_MSC_VER < 1700)

@@ -631,6 +631,13 @@ struct CState: public State, public interface::Server
 				urho3d_path+"/Build/include/Urho3D/ThirdParty");
 		m_compiler->include_directories.push_back(
 				urho3d_path+"/Build/include/Urho3D/ThirdParty/Bullet");
+		// The Lua the engine was built with, for a module's <lua.h>: the
+		// bundled Lua's headers land under ThirdParty/Lua and LuaJIT's
+		// under ThirdParty/LuaJIT, and the server links whichever it is
+		// ([LUAJIT] in doc/plan/performance_plan.md)
+		m_compiler->include_directories.push_back(
+				urho3d_path+"/Build/include/Urho3D/ThirdParty/"+
+				ss_(BUILDAT_LUA_DIR));
 		m_compiler->include_directories.push_back(
 				urho3d_path+"/Source/ThirdParty/SDL/include");
 		m_compiler->library_directories.push_back(

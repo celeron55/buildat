@@ -46,9 +46,9 @@
 #include <cereal/types/vector.hpp>
 #include <cereal/types/string.hpp>
 extern "C" {
-#include <Lua/lua.h>
-#include <Lua/lualib.h>
-#include <Lua/lauxlib.h>
+#include <lua.h>
+#include <lualib.h>
+#include <lauxlib.h>
 }
 // LuaJIT's bit library, which Luanti's mods use as if it were part of the
 // language. Luanti loads this same file -- Mike Pall's Lua BitOp -- when it

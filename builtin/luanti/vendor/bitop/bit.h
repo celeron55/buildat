@@ -28,7 +28,7 @@
 
 #pragma once
 
-#include <Lua/lua.h>
+#include <lua.h>
 
 #define LUA_BITLIBNAME "bit"
 LUALIB_API int luaopen_bit(lua_State *L);
