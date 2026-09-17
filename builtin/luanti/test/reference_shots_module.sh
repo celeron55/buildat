@@ -154,6 +154,7 @@ shots_dir="$here/user/screenshots"
 # One client per mode against the one server. Each client's set is the
 # part of the server log written while it ran: the fixture starts a set on
 # every join, so the log is sliced from where this client came in.
+# OUT_DIR names one set's directory, so it is for a single-mode run
 for mode in $modes; do
 out="${OUT_DIR:-$here/local/reference_shots/module_$mode}"
 from=$(wc -l < "$tmp/srv.log")
