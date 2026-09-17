@@ -88,8 +88,7 @@ struct alignas(u32) MapNode
 			Rotation rot);
 
 	// Luanti serializes a whole block of these at once; what needs it here
-	// is a schematic file, which this build does not read yet. See
-	// serialization.h.
+	// is a schematic file. See serialization.h.
 	static void deSerializeBulk(std::istream &is, int version,
 			MapNode *nodes, u32 nodecount, u8 content_width,
 			u8 params_width);

@@ -3,13 +3,8 @@
 // Luanti's map serialization versions, and the compression a schematic
 // file's node data is behind. What reads a .mts here is mg_schematic, and
 // the numbers below are Luanti's own so that a file written by Luanti is
-// read the way Luanti reads it.
-//
-// simplified: compress() and decompress() are not implemented, so a .mts
-// file is not read yet -- a schematic in a mod's own Lua table is, which is
-// how most of them are written. buildat has zlib (interface/compress.h) and
-// zstd; what is missing beside them is MapNode::serializeBulk, which lives
-// in Luanti's mapnode.cpp and is a shim here. See README.txt.
+// read the way Luanti reads it. compress() and decompress() go through
+// buildat's interface/compress.h.
 #pragma once
 #include "irrlichttypes_bloated.h"
 #include "exceptions.h"
