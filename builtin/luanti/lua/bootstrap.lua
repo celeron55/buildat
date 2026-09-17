@@ -1785,6 +1785,13 @@ function core.__world_info()
 	}
 end
 
+-- The step peak as world_info's tail: seconds and phase, re-sent when the
+-- row would show a different number. See [STEP_PEAK].
+function core.__step_peak_info()
+	local peak, phase = core.get_server_step_peak()
+	return {string.format("%.2f", peak), phase}
+end
+
 -- Whose world this is. Luanti means by it "the client started this server
 -- itself", and what turns on it is which privileges a player arrives with:
 -- the singleplayer gets everything a game marked give_to_singleplayer --
@@ -4582,12 +4589,34 @@ local function run_lbms()
 	return swept > 0
 end
 
--- A step that takes this long is worth a line saying where it went: the
--- module's thread handles one thing at a time, so a step of seconds is
--- seconds of everything else waiting -- a player's click among it. The
--- eight clock reads a step costs for this are nothing beside what they
--- measure.
-local SLOW_STEP_S = 1.0
+-- A step over this is logged with where it went: the module's thread
+-- handles one thing at a time, so a step of seconds is seconds of
+-- everything else waiting -- a player's click among it. The eight clock
+-- reads a step costs for this are nothing beside what they measure. See
+-- [STEP_PEAK] in doc/plan/performance_plan.md: every instance at trace,
+-- the worst since the last line at info at most every LOG_EVERY_S.
+local SLOW_STEP_S = 0.25
+local LOG_EVERY_S = 5.0
+local slow_said_at = nil
+local slow_worst, slow_worst_phase = 0, ""
+
+-- The longest step's wall time, held and decayed the way Luanti's own
+-- max_lag is: the peak is what the last minute was like, not what the
+-- last step was. Multiplied by DECAY every DECAY_EVERY_S, which halves it
+-- per minute; with the phase that set it.
+local DECAY, DECAY_EVERY_S = 0.99425, 0.5
+local step_peak, step_peak_phase = 0, ""
+local decay_due = 0
+local peak_told = -1
+
+-- get_server_step_peak() -> seconds, phase. Luanti's get_server_max_lag()
+-- is the same number under its own name.
+function core.get_server_step_peak()
+	return step_peak, step_peak_phase
+end
+function core.get_server_max_lag()
+	return step_peak
+end
 
 function core.__step(dtime)
 	local t0 = core.get_us_time()
@@ -4619,6 +4648,27 @@ function core.__step(dtime)
 	run_abms(dtime)
 	mark("abms")
 	local total = (core.get_us_time() - t0) / 1000000
+	local longest, longest_phase = 0, ""
+	for _, part in ipairs(parts) do
+		if part[2] > longest then
+			longest, longest_phase = part[2], part[1]
+		end
+	end
+	-- The peak: decayed on its clock, raised by this step if it is worse
+	decay_due = decay_due - dtime
+	if decay_due <= 0 then
+		step_peak = step_peak * DECAY
+		decay_due = DECAY_EVERY_S
+	end
+	if total > step_peak then
+		step_peak, step_peak_phase = total, longest_phase
+	end
+	-- Told to the clients when the row would show a different number
+	local shown = math.floor(step_peak * 100)
+	if shown ~= peak_told then
+		peak_told = shown
+		__luanti_step_peak(step_peak, step_peak_phase)
+	end
 	if total >= SLOW_STEP_S then
 		local said = {}
 		for _, part in ipairs(parts) do
@@ -4626,8 +4676,19 @@ function core.__step(dtime)
 				said[#said + 1] = string.format("%s %.2f s", part[1], part[2])
 			end
 		end
-		core.log("warning", string.format("a step took %.2f s: %s", total,
+		core.log("trace", string.format("a step took %.2f s: %s", total,
 				table.concat(said, ", ")))
+		if total > slow_worst then
+			slow_worst, slow_worst_phase = total, longest_phase
+		end
+		local now = t0 / 1000000
+		if slow_said_at == nil or now - slow_said_at >= LOG_EVERY_S then
+			core.log("info", string.format(
+					"a step took %.2f s, %s; the worst since the last line",
+					slow_worst, slow_worst_phase))
+			slow_said_at = now
+			slow_worst, slow_worst_phase = 0, ""
+		end
 	end
 	game_time = game_time + dtime
 	local speed = tonumber(core.settings:get("time_speed")) or 72

@@ -628,6 +628,8 @@ static void log_from_lua(const ss_ &level, const ss_ &text)
 		log_w(MODULE, "%s", cs(text));
 	else if(level == "verbose" || level == "debug" || level == "deprecated")
 		log_v(MODULE, "%s", cs(text));
+	else if(level == "trace")
+		log_t(MODULE, "%s", cs(text));
 	else
 		log_i(MODULE, "%s", cs(text));
 }
@@ -6005,6 +6007,30 @@ struct Module: public interface::Module, public luanti::Interface
 	// so they are asked for once instead of riding along with the position.
 	void on_get_world_info(const network::Packet &packet)
 	{
+		// Remembered per peer, so the packet can be sent again unasked
+		// when the step peak moves ([STEP_PEAK])
+		m_peer_mode[packet.sender] = packet.data;
+		send_world_info(packet.sender, packet.data);
+	}
+
+	// The step peak's number changed by what the status row would show:
+	// world_info goes out again to every client that has asked for it
+	static int l_step_peak(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__luanti_module");
+		Module *self = (Module*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		if(!self || !self->m_game_running)
+			return 0;
+		for(const auto &pair : self->m_peer_mode)
+			self->send_world_info(pair.first, pair.second);
+		return 0;
+	}
+
+	sm_<network::PeerInfo::Id, ss_> m_peer_mode;
+
+	void send_world_info(network::PeerInfo::Id peer, const ss_ &asked_mode)
+	{
 		sv_<ss_> flat = string_list_from_lua("__world_info");
 		// Which of the three rendering modes this session draws in --
 		// "unlit", "shadows" or "pbr" -- which is a startup choice and not a
@@ -6021,7 +6047,7 @@ struct Module: public interface::Module, public luanti::Interface
 		// is pbr. The numbers keep working for whatever already passes
 		// them: 0 was the unlit path before either had a name.
 		const char *mode = getenv("BUILDAT_LUANTI_PBR");
-		ss_ m = !packet.data.empty() ? packet.data :
+		ss_ m = !asked_mode.empty() ? asked_mode :
 				(mode != nullptr) ? ss_(mode) : ss_("");
 		if(m == "0")
 			m = "unlit";
@@ -6043,13 +6069,16 @@ struct Module: public interface::Module, public luanti::Interface
 		// where there is no getenv.
 		const char *tilt = getenv("BUILDAT_LUANTI_ORBIT_TILT");
 		flat.push_back(tilt != nullptr ? ss_(tilt) : ss_(""));
+		// The server's step peak and the phase that set it, [STEP_PEAK]
+		for(const ss_ &v : string_list_from_lua("__step_peak_info"))
+			flat.push_back(v);
 		std::ostringstream os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(os);
 			ar(flat);
 		}
 		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(packet.sender, "luanti:world_info", os.str());
+			inetwork->send(peer, "luanti:world_info", os.str());
 		});
 	}
 
@@ -7435,6 +7464,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_send_node_inventory",
 				l_send_node_inventory);
 		set_global_cfunction("__luanti_progress", l_progress);
+		set_global_cfunction("__luanti_step_peak", l_step_peak);
 		lua_pushlightuserdata(m_lua, (void*)this);
 		lua_setfield(m_lua, LUA_REGISTRYINDEX, "__luanti_module");
 		set_global_string("__luanti_module_path", module_path());
@@ -7590,6 +7620,7 @@ struct Module: public interface::Module, public luanti::Interface
 		auto it = m_player_peers.find(name);
 		if(it != m_player_peers.end()){
 			m_peer_players.erase(it->second);
+			m_peer_mode.erase(it->second);
 			m_player_peers.erase(it);
 		}
 		// The world stops being kept loaded around where they were

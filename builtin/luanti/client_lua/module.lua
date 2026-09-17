@@ -2436,16 +2436,25 @@ buildat.sub_packet("luanti:translations", function(data)
 	log:info("luanti:translations: " .. n .. " strings")
 end)
 
+local world_info_logged = false
 buildat.sub_packet("luanti:world_info", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	world_info = {game = values[1] or "", seed = values[2] or "",
 			version = values[3] or "", mode = values[4] or "pbr",
 			-- Empty means the client's own default; see the sky handler in
 			-- games/luanti_launcher
-			orbit_tilt = tonumber(values[5] or "")}
-	log:info("luanti:world_info: " .. world_info.version .. ", game " ..
-			world_info.game .. ", seed " .. world_info.seed .. ", " ..
-			world_info.mode)
+			orbit_tilt = tonumber(values[5] or ""),
+			-- The server's longest step, held and decayed, and the phase
+			-- that set it; re-sent when it moves. See [STEP_PEAK].
+			step_peak = tonumber(values[6] or "") or 0,
+			step_peak_phase = values[7] or ""}
+	-- Once: the packet comes again whenever the step peak moves
+	if not world_info_logged then
+		world_info_logged = true
+		log:info("luanti:world_info: " .. world_info.version .. ", game " ..
+				world_info.game .. ", seed " .. world_info.seed .. ", " ..
+				world_info.mode)
+	end
 	for _, f in ipairs(world_info_subs) do
 		f(world_info)
 	end

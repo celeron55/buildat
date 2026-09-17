@@ -3,7 +3,7 @@
 -- what must hold whatever it does, once a second, and logs one line per
 -- second for the runner to read afterwards:
 --
---   fuzz: t=12 pos=(1,8,-3) moved=14.2 hp=20 dug=3 placed=1 picked=2 trees=17 objs=4
+--   fuzz: t=12 pos=(1,8,-3) moved=14.2 hp=20 dug=3 placed=1 picked=2 trees=17 objs=4 step=0.08 over=0
 --
 -- and `fuzz: FAILED <why>` on the first invariant that breaks. No oracle:
 -- the two engines diverge within seconds under physics at the frame rate,
@@ -25,6 +25,10 @@ if seed then
 end
 
 local dug, placed, picked = 0, 0, 0
+-- The step ceiling ([STEP_PEAK]): warned over the first, failed over the
+-- second. `over` counts the seconds the peak was over the ceiling.
+local STEP_CEILING_S, STEP_FAIL_S = 0.25, 1.0
+local over = 0
 
 core.register_on_dignode(function(pos, node, digger)
 	dug = dug + 1
@@ -130,12 +134,27 @@ core.register_on_joinplayer(function(player)
 		if why then
 			fail(why)
 		end
+		-- The server answers inside a second, and normally well inside
+		-- it: the step peak since the last check is under STEP_CEILING_S
+		-- while the walk interacts, and no step at all is over
+		-- STEP_FAIL_S. First cut, argued with in doc/plan/performance_plan.md
+		-- under [STEP_PEAK]. The peak is read fresh each tick -- decay
+		-- barely moves it in a second -- and a stall is named with its
+		-- phase.
+		local peak, phase = core.get_server_step_peak()
+		if peak > STEP_FAIL_S then
+			fail(string.format("a step took %.2f s in %s", peak, phase))
+		elseif peak > STEP_CEILING_S and t > 20 then
+			core.log("warning", string.format(
+					"fuzz: step peak %.2f s in %s at t=%d", peak, phase, t))
+			over = over + 1
+		end
 		local objs = #core.get_objects_inside_radius(pos, 16)
 		core.log("action", string.format(
 				"fuzz: t=%d pos=%s moved=%.1f hp=%d dug=%d placed=%d " ..
-				"picked=%d trees=%d objs=%d", t,
+				"picked=%d trees=%d objs=%d step=%.2f over=%d", t,
 				core.pos_to_string(vector.round(pos)), moved, hp, dug, placed,
-				picked, trees, objs))
+				picked, trees, objs, peak, over))
 		core.after(1, tick)
 	end
 	core.after(5, tick)

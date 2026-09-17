@@ -1651,18 +1651,24 @@ local function status_lines(level)
 	-- makes a picture a picture of what it claims to be, and nothing else.
 	-- The frame rate is level 2's -- somebody watching frame times is
 	-- debugging, which is what that level is for.
+	-- The server's longest step, held and decayed: what a click has been
+	-- waiting on lately. See [STEP_PEAK] in doc/plan/performance_plan.md.
+	local step = string.format("step: %.2f s", info.step_peak or 0)
 	if level == 1 then
-		return "buildat | " .. game .. " | " .. rmode .. " | " .. place
+		return "buildat | " .. game .. " | " .. rmode .. " | " .. step ..
+				" | " .. place
 	end
 	local blocks = {
 		string.format(
 			"buildat | game: %s | %s | %s | FPS: %.0f" ..
-			" | dtime jitter: %.1f%% | view range: %d",
+			" | dtime jitter: %.1f%% | view range: %d | %s%s",
 			game, rmode,
 			info.version ~= "" and info.version or "Luanti ?",
 			-- what the camera is actually drawing to, which a game may have
 			-- lowered through its sky's fog_distance, and not the ceiling
-			fps, jitter, sky_now.far_clip or FAR_CLIP),
+			fps, jitter, sky_now.far_clip or FAR_CLIP, step,
+			(info.step_peak_phase or "") ~= "" and
+					(" (" .. info.step_peak_phase .. ")") or ""),
 		place,
 		string.format(
 			"%s | fov %.0f | speed %.1f, %.1f, %.1f | chunk %d, %d, %d%s",
