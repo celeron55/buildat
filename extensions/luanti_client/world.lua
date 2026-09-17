@@ -29,6 +29,9 @@ local skyvis = dofile(__buildat_extension_path("luanti_client")..
 		"/skyvis.lua")
 local surface = dofile(__buildat_extension_path("luanti_client")..
 		"/surface.lua")
+-- The sky rendered into a cube for the world to reflect, shared with
+-- games/luanti_launcher; see [SKY_REFLECTIONS]
+local skycube = require("buildat/extension/skycube").safe
 
 local M = {}
 
@@ -520,13 +523,16 @@ function M.new(magic, buildat, log, options)
 	local alpha_technique = magic.cache:GetResource("Technique", pbr and
 			"luanti_client/res/PBRVoxelAlpha.xml" or
 			"luanti_client/res/VoxelUnlitAlpha.xml")
+	local sky_cube = nil
 	if pbr then
-		-- What the reflections are of: one static noon gradient, multiplied
-		-- in the shader by the colour the sky is now, so a sunset and being
-		-- under water follow without anything being rebaked. See set_sky_tint
-		-- below and the note on cSkyColor in res/PBRVoxel.glsl.
-		zone.zoneTexture = magic.cache:GetResource("TextureCube",
-				"luanti_client/res/VoxelSky.xml")
+		-- What the reflections are of: the sky as it is drawn, rendered
+		-- into a cube of its own from the same material, and re-rendered
+		-- when the hour moves it -- the sun, the moon and dawn where they
+		-- are. The shader still multiplies it by the colour the sky is now
+		-- (set_sky_tint below, cSkyColor in res/PBRVoxel.glsl), which is
+		-- what being under water follows.
+		sky_cube = skycube.new(magic, sky_material)
+		zone.zoneTexture = sky_cube.texture
 	end
 
 	-- The sun, on the PBR path only. The vanilla path has no light in the
@@ -4070,6 +4076,12 @@ function M.new(magic, buildat, log, options)
 			sky_material:SetShaderParameter("CloudCoverage",
 					(sky and sky.clouds == false) and 0 or
 					(sky_bodies.clouds.density or CLOUD_DENSITY_DEFAULT))
+			-- And the reflections follow, once a second at most: the sun
+			-- moves every frame and the cube is six renders
+			if sky_cube and scene.elapsedTime >= (self.sky_cube_due or 0) then
+				self.sky_cube_due = scene.elapsedTime + 1
+				sky_cube:update()
+			end
 		end
 	end
 

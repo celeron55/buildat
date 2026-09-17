@@ -1117,9 +1117,37 @@ function M.define(dst, util)
 
 	-- Window size in backbuffer pixels, which is what a Viewport rect is in
 	util.wc("Graphics", {
+		class = {
+			-- The texture format a render target is made in, static in
+			-- Urho3D; see TextureCube:SetSize()
+			GetRGBAFormat = function()
+				return Graphics:GetRGBAFormat()
+			end,
+		},
 		properties = {
 			width = util.simple_property("number"),
 			height = util.simple_property("number"),
+		},
+	})
+
+	-- A texture's face as something a viewport draws into. What wants it
+	-- is the sky rendered into a cube for the world to reflect, six
+	-- viewports of one skybox scene -- [SKY_REFLECTIONS] in
+	-- doc/plan/rendering_plan.md. Manual update, queued when the sky has
+	-- moved, is the mode; a surface that redraws every frame is six extra
+	-- renders a frame for a reflection nobody watches change.
+	util.wc("RenderSurface", {
+		instance = {
+			SetViewport = util.wrap_function({"RenderSurface", "number",
+					"Viewport"},
+				function(self, index, viewport)
+					self:SetViewport(index, viewport)
+				end),
+			QueueUpdate = util.self_function("QueueUpdate", {},
+					{"RenderSurface"}),
+		},
+		properties = {
+			updateMode = util.simple_property("number"),
 		},
 	})
 
@@ -1816,6 +1844,15 @@ function M.define(dst, util)
 		instance = {
 			SetData = util.self_function("SetData", {"boolean"},
 					{"TextureCube", "number", "Image"}),
+			-- SetSize(size, format, usage): TEXTURE_RENDERTARGET makes the
+			-- six faces drawable, each through GetRenderSurface(face)
+			SetSize = util.self_function("SetSize", {"boolean"},
+					{"TextureCube", "number", "number", "number"}),
+			GetRenderSurface = util.wrap_function({"TextureCube", "number"},
+				function(self, face)
+					return util.wrap_instance("RenderSurface",
+							self:GetRenderSurface(face))
+				end),
 		},
 	})
 

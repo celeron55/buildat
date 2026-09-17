@@ -343,6 +343,24 @@ end
 local world_sky = luanti_sky.new(scene, SUN_DIR,
 		voxel_shading.sky_defaults)
 
+-- What the world reflects on the pbr path: the sky as it is drawn, into
+-- a cube of its own, re-rendered when the hour or the sun moves. The
+-- parity modes read no cube map, and a game's own skybox replaces it
+-- below. See [SKY_REFLECTIONS] in doc/plan/rendering_plan.md.
+-- One table, since this chunk is at Lua 5.1's two hundred locals: the
+-- cube, and when it is next due -- the sun's direction moves every frame
+-- and the cube is six renders, so once a second, which nobody sees jump
+local sky_cube = {cube = require("buildat/extension/skycube").new(
+		magic, world_sky.material), due = 0}
+zone.zoneTexture = sky_cube.cube.texture
+function sky_cube.refresh(force)
+	local now = scene.elapsedTime
+	if force or now >= sky_cube.due then
+		sky_cube.due = now + 1
+		sky_cube.cube:update()
+	end
+end
+
 local game_skybox = skybox.new(scene, world_sky.node,
 		function(expr) return luanti.texture(expr) end)
 
@@ -1099,6 +1117,7 @@ local function apply_sky_of_hour()
 	-- and left alone at noon, where the cube map is already right
 	voxel_shading.set_sky_tint(
 			three(night_zenith, dawn_zenith, day_zenith, t), 1 - t)
+	sky_cube.refresh(true)
 end
 
 local function update_sky(dt)
@@ -1138,6 +1157,7 @@ local function update_sky(dt)
 	-- And the sky is given the sun's, always: it draws the moon opposite,
 	-- so there is nothing to flip at nightfall
 	world_sky:set_sun_direction(dir)
+	sky_cube.refresh(false)
 
 	-- Dawn and dusk are the half hour either side of the horizon rather
 	-- than a switch -- unless the game says what the light is whatever the
@@ -1321,8 +1341,7 @@ luanti.sub_sky(function(sky)
 			log:info("the world reflects the game's own sky now")
 		end
 	elseif game_skybox:clear() and zone then
-		zone.zoneTexture = magic.cache:GetResource("TextureCube",
-				voxel_shading.sky_cubemap)
+		zone.zoneTexture = sky_cube.cube.texture
 	end
 	apply_sky_of_hour()
 end)
