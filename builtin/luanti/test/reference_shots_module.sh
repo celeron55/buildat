@@ -142,16 +142,14 @@ srv=$(pgrep -x buildat_server | head -1)
 # between pictures of different sizes is a ratio about the size. The viewing
 # range and the fog are the fixture's doing, not this file's -- see pin_view()
 # in reference_views.lua.
-# F5 is the launcher's status row -- the position, the yaw and the pitch --
-# which a comparison shot is required to carry, the same way official Luanti's
-# half carries show_debug. It is off by default, and the delay before it is
-# for the client to have a world to draw it over.
+# The launcher's status row -- the position, the yaw and the pitch -- which a
+# comparison shot is required to carry, the same way official Luanti's half
+# carries show_debug, is on by default ([STATUS_DEFAULT]); nothing is pressed.
 # An hour, not half of one: the shooter decides when the run is over and this
 # is only the client's outside lifetime. Half an hour used to be plenty and
 # stopped being so once the fixture waited for its viewpoints to load -- the
 # client quit mid-run with eleven states still to shoot.
-{ echo "delay 45000"; echo "keypress F5"
-	echo "delay 3600000"; echo "quit"; } > "$tmp/cmds.txt"
+{ echo "delay 3600000"; echo "quit"; } > "$tmp/cmds.txt"
 
 status=0
 shots_dir="$here/user/screenshots"

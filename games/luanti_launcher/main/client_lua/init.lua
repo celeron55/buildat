@@ -1527,10 +1527,11 @@ detail_text:SetText("")
 detail_text.horizontalAlignment = magic.HA_LEFT
 detail_text.verticalAlignment = magic.VA_TOP
 detail_text:SetPosition(8, 8)
-detail_text.visible = false
 -- 0 nothing, 1 the two blocks official Luanti's own first debug level shows,
--- 2 everything. F5 cycles it; see [STATUS_LEVELS].
-local detail_level = 0
+-- 2 everything. F5 cycles it; see [STATUS_LEVELS]. Starts at 1, so the row
+-- is up without a key press -- [STATUS_DEFAULT].
+local detail_level = 1
+detail_text.visible = detail_level > 0
 
 -- Luanti's yaw, from the launcher's. The launcher measures from +Z towards
 -- +X, the way Urho does; Luanti measures from +Z towards -X, so the number
