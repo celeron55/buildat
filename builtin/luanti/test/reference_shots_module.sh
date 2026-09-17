@@ -216,6 +216,10 @@ if [ -n "${PATHTRACE:-}" ]; then
 			# and the gz is the copy that is kept, so the raw one goes.
 			gzip -c -1 "$dumps/$file" > "$mesh_out/$stem.obj.gz" &&
 				rm -f "$dumps/$file"
+			# The albedo textures the dump's usemtl lines name, beside it
+			for tex in "$dumps/${file%.obj}"_tex*.png; do
+				[ -f "$tex" ] && mv "$tex" "$mesh_out/$stem$(basename "$tex" | sed "s/^${file%.obj}//")"
+			done
 			echo "mesh $stem"
 			mesh_n=$((mesh_n + 1))
 		else

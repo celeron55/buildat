@@ -831,6 +831,10 @@ struct CApp: public App, public magic::Application
 
 		// Useful for saving stuff for inspection when debugging
 		magic_fs->RegisterPath("/tmp");
+		// Where dump_meshes() writes its albedo textures through Urho's
+		// own Image::SavePNG; the .obj beside them goes through fopen
+		magic_fs->RegisterPath(interface::fs::get_absolute_path(
+				g_client_config.get<ss_>("user_path")+"/meshdumps").c_str());
 
 		// Set Urho3D engine parameters
 		engineParameters_["WindowTitle"] = "Buildat Client";
@@ -2365,6 +2369,31 @@ struct CApp: public App, public magic::Application
 					p.x_, p.y_, p.z_, d.x_, d.y_, d.z_);
 		}
 
+		// The albedo: each batch's diffuse texture, read back once and saved
+		// beside the dump as <name>_texN.png, named by usemtl so the render
+		// can put it on. The atlas is a handful of textures for a whole
+		// world, which is why the read-back is keyed by texture and not by
+		// batch.
+		const ss_ base = name.substr(0, name.size() - 4);
+		sm_<magic::Texture2D*, ss_> tex_names;
+		auto material_of = [&](magic::Material *mat) -> ss_ {
+			if(!mat)
+				return "";
+			magic::Texture2D *tex = dynamic_cast<magic::Texture2D*>(
+					mat->GetTexture(magic::TU_DIFFUSE));
+			if(!tex)
+				return "";
+			auto it = tex_names.find(tex);
+			if(it != tex_names.end())
+				return it->second;
+			const ss_ png = base+"_tex"+itos(tex_names.size())+".png";
+			magic::SharedPtr<magic::Image> img = tex->GetImage();
+			if(img)
+				img->SavePNG(magic::String((dir+"/"+png).c_str()));
+			tex_names[tex] = png;
+			return png;
+		};
+
 		magic::PODVector<magic::CustomGeometry*> geoms;
 		self->m_scene->GetComponents<magic::CustomGeometry>(geoms, true);
 		unsigned vbase = 1;
@@ -2394,13 +2423,25 @@ struct CApp: public App, public magic::Application
 				if(vs.Size() < 3)
 					continue;
 				ngeom++;
-				fprintf(f, "o geom_%u_%u\n", gi, b);
+				fprintf(f, "o geom_%u_%u\nusemtl %s\n", gi, b,
+						material_of(cg->GetMaterial(b)).c_str());
 				for(unsigned i = 0; i < vs.Size(); i++){
 					const magic::Vector3 wp = wt * vs[i].position_;
 					magic::Vector3 wn = rot * vs[i].normal_;
 					wn.Normalize();
-					fprintf(f, "v %g %g %g\nvn %g %g %g\nvt %g %g\n",
-							wp.x_, wp.y_, wp.z_,
+					// The tint the mesher packed 5-6-5 into the tangent's x
+					// (pack_tint565 in impl/mesh.cpp), as the vertex colour
+					// OBJ allows after the position: an albedo multiplier,
+					// which is what the shader does with it. The vertex
+					// colour proper is light and stays out: Cycles makes
+					// its own. Zero is a mode with no surface maps, which
+					// carries no tint: white.
+					const unsigned t = (unsigned)(vs[i].tangent_.x_ + 0.5f);
+					const float tr = t ? (t >> 11) / 31.f : 1.f,
+							tg = t ? ((t >> 5) & 63) / 63.f : 1.f,
+							tb = t ? (t & 31) / 31.f : 1.f;
+					fprintf(f, "v %g %g %g %g %g %g\nvn %g %g %g\nvt %g %g\n",
+							wp.x_, wp.y_, wp.z_, tr, tg, tb,
 							wn.x_, wn.y_, wn.z_,
 							vs[i].texCoord_.x_, vs[i].texCoord_.y_);
 				}

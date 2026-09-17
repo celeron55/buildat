@@ -6,8 +6,8 @@
 # Blender's OBJ importer is not used: it places verts by forward_axis/up_axis
 # while the camera is placed here, and two transforms that disagree put the
 # camera outside the world. Parsed here instead, so there is one conversion.
-# simplified: untextured, 32 samples, sun elevation fixed at 13:00's,
-# exposure a constant rather than metered.
+# simplified: 32 samples, sun elevation fixed at 13:00's, exposure a
+# constant rather than metered.
 
 import gzip
 import math
@@ -38,26 +38,43 @@ def open_dump(path):
 
 
 def load_dump(path):
-	"""One conversion: file Y-up → Blender (x, -z, y). Camera uses the same."""
+	"""One conversion: file Y-up → Blender (x, -z, y). Camera uses the same.
+	Verts carry the tint as an OBJ vertex colour, faces carry a usemtl that
+	names the albedo PNG beside the dump; both come back per face."""
 	pos, dire = None, None
 	verts = []
+	tints = []
+	uvs = []
 	faces = []
+	mats = []
+	mat = ""
 	with open_dump(path) as f:
 		for line in f:
-			if line.startswith("# camera_pos "):
-				pos = tuple(float(x) for x in line.split()[2:5])
-			elif line.startswith("# camera_dir "):
-				dire = tuple(float(x) for x in line.split()[2:5])
-			elif line.startswith("v "):
-				x, y, z = (float(x) for x in line.split()[1:4])
-				verts.append(y_up_to_blender(x, y, z))
+			if line.startswith("v "):
+				t = line.split()
+				verts.append(y_up_to_blender(float(t[1]), float(t[2]),
+						float(t[3])))
+				tints.append((float(t[4]), float(t[5]), float(t[6]), 1.0)
+						if len(t) >= 7 else (1.0, 1.0, 1.0, 1.0))
+			elif line.startswith("vt "):
+				t = line.split()
+				# Urho's v runs down from the top; Blender's up from the bottom
+				uvs.append((float(t[1]), 1.0 - float(t[2])))
 			elif line.startswith("f "):
 				idx = []
 				for tok in line.split()[1:]:
 					idx.append(int(tok.split("/", 1)[0]) - 1)
 				if len(idx) >= 3:
 					faces.append(idx[:3])
-	return pos, dire, verts, faces
+					mats.append(mat)
+			elif line.startswith("usemtl "):
+				t = line.split(None, 1)
+				mat = t[1].strip() if len(t) > 1 else ""
+			elif line.startswith("# camera_pos "):
+				pos = tuple(float(x) for x in line.split()[2:5])
+			elif line.startswith("# camera_dir "):
+				dire = tuple(float(x) for x in line.split()[2:5])
+	return pos, dire, verts, tints, uvs, faces, mats
 
 
 def y_up_to_blender(x, y, z):
@@ -123,15 +140,60 @@ def add_camera(pos, dire):
 	return ob
 
 
-def gray_material():
-	mat = bpy.data.materials.new("voxel")
+def textured_material(name, png):
+	"""The atlas on a Principled BSDF, nearest-filtered as the client draws
+	it, multiplied by the tint the mesher packed; the atlas's alpha cuts the
+	leaf and plant cards out."""
+	mat = bpy.data.materials.new(name)
 	mat.use_nodes = True
-	bsdf = mat.node_tree.nodes.get("Principled BSDF")
-	if bsdf:
+	nt = mat.node_tree
+	bsdf = nt.nodes.get("Principled BSDF")
+	bsdf.inputs["Roughness"].default_value = 0.9
+	bsdf.inputs["Specular IOR Level"].default_value = 0.0
+	if png and os.path.isfile(png):
+		tex = nt.nodes.new("ShaderNodeTexImage")
+		tex.image = bpy.data.images.load(png)
+		tex.interpolation = "Closest"
+		tint = nt.nodes.new("ShaderNodeVertexColor")
+		tint.layer_name = "tint"
+		mul = nt.nodes.new("ShaderNodeMix")
+		mul.data_type = "RGBA"
+		mul.blend_type = "MULTIPLY"
+		mul.inputs["Factor"].default_value = 1.0
+		nt.links.new(tex.outputs["Color"], mul.inputs[6])
+		nt.links.new(tint.outputs["Color"], mul.inputs[7])
+		nt.links.new(mul.outputs[2], bsdf.inputs["Base Color"])
+		nt.links.new(tex.outputs["Alpha"], bsdf.inputs["Alpha"])
+	else:
 		bsdf.inputs["Base Color"].default_value = (0.55, 0.55, 0.55, 1)
-		bsdf.inputs["Roughness"].default_value = 0.7
 	mat.use_backface_culling = False
 	return mat
+
+
+def build_world(scene, verts, tints, uvs, faces, mats, tex_dir):
+	mesh = bpy.data.meshes.new("world")
+	mesh.from_pydata(verts, [], faces)
+	uv = mesh.uv_layers.new(name="atlas")
+	col = mesh.color_attributes.new(name="tint", type="FLOAT_COLOR",
+			domain="POINT")
+	# One material slot per texture the dump named, in the order met
+	slot_of = {}
+	for i, poly in enumerate(mesh.polygons):
+		m = mats[i]
+		if m not in slot_of:
+			slot_of[m] = len(mesh.materials)
+			mesh.materials.append(textured_material(m or "untextured",
+					os.path.join(tex_dir, m) if m else None))
+		poly.material_index = slot_of[m]
+		for li in poly.loop_indices:
+			vi = mesh.loops[li].vertex_index
+			uv.data[li].uv = uvs[vi] if vi < len(uvs) else (0.0, 0.0)
+	for vi in range(len(verts)):
+		col.data[vi].color = tints[vi]
+	mesh.update()
+	ob = bpy.data.objects.new("world", mesh)
+	scene.collection.objects.link(ob)
+	return ob
 
 
 def main():
@@ -167,21 +229,18 @@ def main():
 			continue
 		obj_path = os.path.join(OUT, name)
 		print("load", name)
-		pos, dire, verts, faces = load_dump(obj_path)
+		pos, dire, verts, tints, uvs, faces, mats = load_dump(obj_path)
 		if not pos or not dire:
 			print("no camera header in", name, file=sys.stderr)
 			sys.exit(1)
 		clear_scene()
 		setup_world()
-		mesh = bpy.data.meshes.new("world")
-		mesh.from_pydata(verts, [], faces)
-		mesh.update()
-		ob = bpy.data.objects.new("world", mesh)
-		scene.collection.objects.link(ob)
-		mat = gray_material()
-		ob.data.materials.append(mat)
-		scene.camera = add_camera(pos, dire)
 		stem = name[:-7] if name.endswith(".obj.gz") else name[:-4]
+		# The shooter renamed the textures after the dump's stem
+		# (<stem>_texN.png); the usemtl lines still carry the dump's own name
+		mats = [stem + m[m.rfind("_tex"):] if m else "" for m in mats]
+		build_world(scene, verts, tints, uvs, faces, mats, OUT)
+		scene.camera = add_camera(pos, dire)
 		# cycles_vp6_1300_none.png: the dump's stem without the seed, so the
 		# render sits beside its .obj.gz without sharing a name with it.
 		png = "cycles_" + stem.split("_", 1)[1] + ".png"
