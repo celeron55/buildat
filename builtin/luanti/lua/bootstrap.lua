@@ -1196,9 +1196,16 @@ function core.__mapgen_ores()
 				names = {names}
 			end
 			for _, name in ipairs(names or {}) do
-				local id = id_of(name)
-				if id then
-					wherein[#wherein + 1] = id
+				local group = string.match(name, "^group:(.*)$")
+				if group then
+					for _, id in ipairs(core.__group_ids(group)) do
+						wherein[#wherein + 1] = id
+					end
+				else
+					local id = id_of(name)
+					if id then
+						wherein[#wherein + 1] = id
+					end
 				end
 			end
 			local biomes = {}
@@ -1248,15 +1255,24 @@ function core.__mapgen_decorations()
 		end
 		return ids[name]
 	end
+	-- "group:grass_block" is every node in the group, which is how
+	-- VoxeLibre names what its trees stand on
 	local function id_list(names)
 		if type(names) == "string" then
 			names = {names}
 		end
 		local out = {}
 		for _, name in ipairs(names or {}) do
-			local id = id_of(name)
-			if id then
-				out[#out + 1] = id
+			local group = string.match(name, "^group:(.*)$")
+			if group then
+				for _, id in ipairs(core.__group_ids(group)) do
+					out[#out + 1] = id
+				end
+			else
+				local id = id_of(name)
+				if id then
+					out[#out + 1] = id
+				end
 			end
 		end
 		return out
@@ -1523,6 +1539,19 @@ function core.__content_ids_by_name()
 		local id = out[target]
 		if id then
 			out[alias] = id
+		end
+	end
+	return out
+end
+
+-- The ids of every node in a group, for a "group:name" where a mapgen
+-- definition takes node names
+function core.__group_ids(group)
+	local out = {}
+	for id, name in pairs(core.__content_names) do
+		local def = core.registered_nodes[name]
+		if def and def.groups and (def.groups[group] or 0) > 0 then
+			out[#out + 1] = id
 		end
 	end
 	return out
