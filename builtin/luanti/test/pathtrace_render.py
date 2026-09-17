@@ -28,9 +28,15 @@ RES = (1280, 720)
 # log-average luminance, clamped to LUM_RANGE, and the frame is scaled by
 # MIDDLE_GREY / key. The three constants are the same on both sides; the
 # client's adaptation rate is its own, a still having no time axis.
+# The constants are in radiance, Nishita's units (a noon grass top is ~5,
+# a cave floor ~0.02), and are the ones the client's AutoExposure.xml is
+# given -- not Urho's defaults (0.01..1.0, 0.6), which are for a
+# display-referred frame. Middle grey 0.18 is the photographic one; the
+# lower bound of the range is what keeps a cave dark: a frame whose key
+# meters below it is exposed as if it were at it.
 LUM_WEIGHTS = (0.2126, 0.7152, 0.0722)
-LUM_RANGE = (0.01, 1.0)
-MIDDLE_GREY = 0.6
+LUM_RANGE = (0.05, 100.0)
+MIDDLE_GREY = 0.18
 # ONLY=vp1 renders the one dump whose stem contains it
 ONLY = os.environ.get("ONLY", "")
 
@@ -243,6 +249,9 @@ def expose(exr, png):
 	scale = MIDDLE_GREY / key
 	print("expose %s: key %.4f scale %.3f" % (os.path.basename(png), key, scale))
 	px.reshape(-1, 4)[:, :3] *= scale
+	# The alpha the leaf cards' cutout left behind composites the PNG over
+	# black; the picture is opaque
+	px.reshape(-1, 4)[:, 3] = 1.0
 	img.pixels.foreach_set(px)
 	img.filepath_raw = png
 	img.file_format = "PNG"

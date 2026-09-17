@@ -2429,17 +2429,24 @@ struct CApp: public App, public magic::Application
 					const magic::Vector3 wp = wt * vs[i].position_;
 					magic::Vector3 wn = rot * vs[i].normal_;
 					wn.Normalize();
-					// The tint the mesher packed 5-6-5 into the tangent's x
-					// (pack_tint565 in impl/mesh.cpp), as the vertex colour
-					// OBJ allows after the position: an albedo multiplier,
-					// which is what the shader does with it. The vertex
-					// colour proper is light and stays out: Cycles makes
-					// its own. Zero is a mode with no surface maps, which
-					// carries no tint: white.
-					const unsigned t = (unsigned)(vs[i].tangent_.x_ + 0.5f);
-					const float tr = t ? (t >> 11) / 31.f : 1.f,
-							tg = t ? ((t >> 5) & 63) / 63.f : 1.f,
-							tb = t ? (t & 31) / 31.f : 1.f;
+					// The tint, as the OBJ vertex colour after the position:
+					// an albedo multiplier, which is what the shader does
+					// with it. A palette colour -- leaves, grass -- is folded
+					// into the vertex colour with the light (modulate_color
+					// in impl/mesh.cpp), so it is taken back out by dividing
+					// by the brightest channel: the light is grey, the tint
+					// is the hue that is left. The light itself stays out;
+					// Cycles makes its own.
+					// simplified: a palette entry whose brightest channel is
+					// under 255 comes out that much brighter than it is.
+					const unsigned c = vs[i].color_;
+					const float cr = (c & 0xff) / 255.f,
+							cg = ((c >> 8) & 0xff) / 255.f,
+							cb = ((c >> 16) & 0xff) / 255.f;
+					const float cm = std::max(cr, std::max(cg, cb));
+					const float tr = cm > 0 ? cr / cm : 1.f,
+							tg = cm > 0 ? cg / cm : 1.f,
+							tb = cm > 0 ? cb / cm : 1.f;
 					fprintf(f, "v %g %g %g %g %g %g\nvn %g %g %g\nvt %g %g\n",
 							wp.x_, wp.y_, wp.z_, tr, tg, tb,
 							wn.x_, wn.y_, wn.z_,
