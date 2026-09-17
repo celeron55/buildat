@@ -1055,7 +1055,11 @@ local function particle_effect(resource, amount, ttl_min, ttl_max, size_min,
 	local material = magic.Material.new()
 	local tex = magic.cache:GetResource("Texture2D", resource)
 	if tex then
-		tex.filterMode = magic.FILTER_NEAREST
+		-- Nearest magnification and mipmapped minification, the way
+		-- extensions/luanti_client's particles are: crisp up close, and a
+		-- particle far away is not a sparkle of whichever texel won
+		-- ([RENDER_SURVEY], texture filtering)
+		tex.filterMode = magic.FILTER_NEAREST_ANISOTROPIC
 		material:SetTexture(0, tex)
 	end
 	-- Particles are blended rather than cut out -- smoke and a spark are
