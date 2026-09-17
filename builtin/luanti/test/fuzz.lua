@@ -29,6 +29,8 @@ local dug, placed, picked = 0, 0, 0
 -- second. `over` counts the seconds the peak was over the ceiling.
 local STEP_CEILING_S, STEP_FAIL_S = 0.25, 1.0
 local over = 0
+-- How many seconds each nearby section has been loaded and ungenerated
+local ungenerated_for = {}
 
 core.register_on_dignode(function(pos, node, digger)
 	dug = dug + 1
@@ -133,6 +135,30 @@ core.register_on_joinplayer(function(player)
 		local why = punch_watch(player)
 		if why then
 			fail(why)
+		end
+		-- No loaded section near the player stays ungenerated: one that
+		-- does is a hole in the world ([UNGENERATED_SAVED]). Thirty
+		-- seconds is longer than any emerge seen; the sections within
+		-- two of the player's are read once a second.
+		local ps = vector.round(pos)
+		for dx = -128, 128, 64 do
+			for dy = -64, 64, 64 do
+				for dz = -128, 128, 64 do
+					local x, y, z = ps.x + dx, ps.y + dy, ps.z + dz
+					local key = math.floor(x / 64) .. "," ..
+							math.floor(y / 64) .. "," .. math.floor(z / 64)
+					if __luanti_section_state(x, y, z) == "ungenerated" then
+						ungenerated_for[key] = (ungenerated_for[key] or 0) + 1
+						if ungenerated_for[key] > 30 then
+							fail("section " .. key .. " has been loaded and " ..
+									"ungenerated for " .. ungenerated_for[key] ..
+									" s")
+						end
+					else
+						ungenerated_for[key] = nil
+					end
+				end
+			end
 		end
 		-- The server answers inside a second, and normally well inside
 		-- it: the step peak since the last check is under STEP_CEILING_S

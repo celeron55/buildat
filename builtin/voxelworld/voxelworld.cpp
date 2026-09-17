@@ -1111,6 +1111,19 @@ struct CInstance: public voxelworld::Instance
 				itos(chunk_p.getY())+","+itos(chunk_p.getZ());
 	}
 
+	// The generated mark, beside the section's chunks: "1" once a
+	// generator has been over the section. A section a neighbour's
+	// generator spilled into is saved before it is generated, and without
+	// the mark it came back as generated and never was -- a hole in the
+	// world ([UNGENERATED_SAVED] in doc/plan/world_persistence_plan.md).
+	// A save from before the key has chunks and no mark, and those were
+	// all generated for real.
+	ss_ generated_key(const pv::Vector3DInt16 &section_p)
+	{
+		return m_world_name+"/s"+itos(section_p.getX())+","+
+				itos(section_p.getY())+","+itos(section_p.getZ())+"/generated";
+	}
+
 	// A chunk's row in the save: a header naming the format the chunk was
 	// written in, and then the blob replication already produces. The tag is
 	// Luanti's MapBlock property and it buys what it buys there -- chunks
@@ -1276,10 +1289,18 @@ struct CInstance: public voxelworld::Instance
 				}
 			}
 		});
-		// It came out of the save the way the generator left it, and running
-		// the generator over it again would undo whatever has been built
-		// there since
-		section.generated = true;
+		// Generated if the save says so, or if it predates the mark. A
+		// section that is loaded and not generated goes to the generator
+		// from load_or_generate_section(), whose merge writes by priority:
+		// the terrain fills in around what was spilled rather than over it.
+		ss_ mark;
+		if(m_store->get(generated_key(section.section_p), mark))
+			section.generated = (mark == "1");
+		else
+			section.generated = true;
+		if(!section.generated)
+			log_v(MODULE, "Section " PV3I_FORMAT " came out of the save "
+					"ungenerated", PV3I_PARAMS(section.section_p));
 		section.modified = converted;
 		return true;
 	}
@@ -1347,6 +1368,8 @@ struct CInstance: public voxelworld::Instance
 		m_store->batch([&](){
 			for(size_t i = 0; i < keys.size(); i++)
 				m_store->set(keys[i], values[i]);
+			m_store->set(generated_key(section.section_p),
+					section.generated ? "1" : "0");
 			save_name_table();
 			save_registry();
 		});

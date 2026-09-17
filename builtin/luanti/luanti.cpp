@@ -5278,6 +5278,32 @@ struct Module: public interface::Module, public luanti::Interface
 		return 1;
 	}
 
+	// __luanti_section_state(x, y, z) -> "unloaded", "ungenerated" or
+	// "generated", of the section a position is in: what the fuzz run's
+	// hole check reads ([UNGENERATED_SAVED]).
+	static int l_section_state(lua_State *L)
+	{
+		Module *self = module_of(L);
+		if(!self->m_scene || self->m_section_size.getX() <= 0){
+			lua_pushstring(L, "unloaded");
+			return 1;
+		}
+		const pv::Vector3DInt16 sp = self->section_of(pv::Vector3DInt32(
+				(int32_t)luaL_checknumber(L, 1),
+				(int32_t)luaL_checknumber(L, 2),
+				(int32_t)luaL_checknumber(L, 3)));
+		const char *state = "unloaded";
+		voxelworld::access(self->m_server, self->m_scene,
+				[&](voxelworld::Instance *world){
+			if(world->is_section_generated(sp))
+				state = "generated";
+			else if(world->is_section_loaded(sp))
+				state = "ungenerated";
+		});
+		lua_pushstring(L, state);
+		return 1;
+	}
+
 	// __luanti_loaded_at(flat) -> a flat array of booleans, one per
 	// position in flat: whether the section it is in is loaded. What the
 	// emerge queue actually asks of its two thousand positions a step --
@@ -7628,6 +7654,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_flush_node_writes",
 				l_flush_node_writes);
 		set_global_cfunction("__luanti_loaded_at", l_loaded_at);
+		set_global_cfunction("__luanti_section_state", l_section_state);
 		lua_pushlightuserdata(m_lua, (void*)this);
 		lua_setfield(m_lua, LUA_REGISTRYINDEX, "__luanti_module");
 		set_global_string("__luanti_module_path", module_path());
