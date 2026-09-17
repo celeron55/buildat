@@ -54,14 +54,19 @@ awk -v seed="$SEED" -v secs="$((MINUTES * 60))" -v out="$out" 'BEGIN {
 				if (gap > left) gap = left
 				print "delay " int(gap * 1000)
 				left -= gap
-				if (left > 0) print "keypress Space"
+				# Held, not pressed: keypress is down and up in one
+				# frame, and the launcher polls GetKeyDown once a frame
+				if (left > 0) {
+					print "keydown Space"; print "delay 150"; print "keyup Space"
+					left -= 0.15
+				}
 			}
 			print "keyup W"
 			waited = 1
 		} else if (r < 0.58) {
 			d = 1 + rand() * 2
-			print "keydown W"; print "keypress Space"; print "delay " int(d * 1000)
-			print "keyup W"
+			print "keydown W"; print "keydown Space"; print "delay 150"
+			print "keyup Space"; print "delay " int(d * 1000); print "keyup W"
 		} else if (r < 0.72) {
 			# dig what is in front: a hold on the left button, looking a
 			# little down so the ground is within reach
