@@ -42,8 +42,22 @@ awk -v seed="$SEED" -v secs="$((MINUTES * 60))" -v out="$out" 'BEGIN {
 			print "look " yaw " " pitch
 			d = 0.2
 		} else if (r < 0.50) {
-			d = 0.5 + rand() * 3
-			print "keydown W"; print "delay " int(d * 1000); print "keyup W"
+			# A walk of 2-8 s that jumps every 1-5 s while W is held: a
+			# voxel world is nothing but one-node steps, and a walk that
+			# does not jump stands at the first rise for the rest of the
+			# run with the invariants happy (user, 2026-09-17)
+			d = 2 + rand() * 6
+			print "keydown W"
+			left = d
+			while (left > 0) {
+				gap = 1 + rand() * 4
+				if (gap > left) gap = left
+				print "delay " int(gap * 1000)
+				left -= gap
+				if (left > 0) print "keypress Space"
+			}
+			print "keyup W"
+			waited = 1
 		} else if (r < 0.58) {
 			d = 1 + rand() * 2
 			print "keydown W"; print "keypress Space"; print "delay " int(d * 1000)
@@ -66,7 +80,9 @@ awk -v seed="$SEED" -v secs="$((MINUTES * 60))" -v out="$out" 'BEGIN {
 		} else {
 			print "keypress I"; print "delay 800"; print "keypress Escape"; d = 1
 		}
-		print "delay " int(d * 1000)
+		# The walk has spent its time already; everything else waits here
+		if (!waited) print "delay " int(d * 1000)
+		waited = 0
 		t += d
 		if (t - shot >= 30) {
 			shot = t
