@@ -3,43 +3,31 @@
 # ends with, so that "did that work" is a command rather than a memory.
 # See [RENDER_MODES] and [GREEN_BIAS] in doc/plan/rendering_plan.md.
 #
-#   builtin/luanti/test/reference_probes.sh          read what is on disk
-#   builtin/luanti/test/reference_probes.sh --shoot  re-take all three module
-#                                                    modes first, then read
+#   builtin/luanti/test/reference_shots/probes.sh          read what is on disk
+#   builtin/luanti/test/reference_shots/probes.sh --shoot  re-take all three
+#                                                          module modes, then read
 #
 # Each mode is compared against its own reference -- shadows against
-# official, unlit against official_noshadow, pbr against the path-traced
-# set. **Hue is what this judges**: the ratio
+# official_shadows, unlit against official_unlit, pbr against the
+# path-traced set. The crops are set.lua's, read through build.sh. **Hue is what this judges**: the ratio
 # between channels on a surface, which is [GREEN_BIAS]'s subject. How much
 # brighter than Luanti a mode is belongs to [TOO_BRIGHT] and is printed
 # without an opinion.
 set -u
-here=$(cd "$(dirname "$0")/../../.." && pwd)
+here=$(cd "$(dirname "$0")/../../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
-shots="${SHOTS_DIR:-$here/local/reference_shots}"
-seed=2845188330406634615
+shots="${REFSHOT_SHOTS_DIR:-$here/local/reference_shots}"
+built=$(mktemp -d /tmp/refshots_build.XXXXXX)
+"$me/build.sh" "$built" || exit 2
+. "$built/env.sh"
+seed=$REFSHOT_SEED
 
 if [ "${1:-}" = "--shoot" ]; then
-	for m in unlit shadows pbr; do
-		bash "$me/reference_shots_module.sh" "$m" || exit 1
-	done
+	bash "$me/shoot_buildat_server.sh" unlit shadows pbr || exit 1
 fi
 
 # name | picture | crop | what it is for
-PROBES="
-grass|vp4_1300|40x30+280+545|colourised, top face: the one GREEN_BIAS owns
-grasstop|vp4_1300|200x30+500+560|the same, over the whole field
-grassside|vp4_1300|60x40+1100+500|the same node's SIDE: says whether the fault is the face or the palette
-stone|vp4_1300|30x20+625+320|CONTROL, no palette: must not move
-dirt|vp4_1300|30x20+45+420|colourised, weaker
-cave|vp4_1300|60x40+610+360|the floor, TOO_BRIGHT's black caves
-cavedark|vp6_1300|80x80+600+320|HDR in, looking into the dark
-caveout|vp7_1300|80x80+600+280|HDR out, the bright opening
-cavedeep|vp8_1300|80x80+600+320|into the dark from inside
-wall|vp4_1300|30x40+880+300|shaded: what tells the modes apart
-snow|vp5_1000|60x40+420+540|no colour of its own to hide a cast
-leaf|vp5_1000|50x30+700+560|colourised, against snow
-"
+PROBES=$REFSHOT_PROBES
 
 # mode -> the set it must match, at the same range: a set's _r<RANGE>
 # postfix carries over, so module_shadows_r150 is read against
@@ -48,8 +36,8 @@ leaf|vp5_1000|50x30+700+560|colourised, against snow
 target_of() {
 	local r=${1##*_r}
 	case "$1" in
-		*_shadows_r*) echo "official_r$r" ;;
-		*_unlit_r*)   echo "official_noshadow_r$r" ;;
+		*_shadows_r*) echo "official_shadows_r$r" ;;
+		*_unlit_r*)   echo "official_unlit_r$r" ;;
 		*_pbr_r*)     echo "pathtrace_r$r" ;;
 		*)            echo "" ;;
 	esac

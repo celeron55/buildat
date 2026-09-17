@@ -1,17 +1,23 @@
 #!/bin/bash
-# [OFFICIAL_SHOTS]: official Luanti's half of the reference shot set, taken
-# by a script rather than by hand. See doc/plan/rendering_plan.md.
+# [OFFICIAL_SHOTS]: the reference shot set's Luanti-server half, taken by a
+# script rather than by hand. See doc/plan/rendering_plan.md, [REFVIEWS_MOD].
 #
-#   builtin/luanti/test/reference_shots.sh <fixture> [config]
+#   CLIENT=luanti|extension MODE=shadows|unlit \
+#   builtin/luanti/test/reference_shots/shoot_luanti_server.sh reference
+#
+# Stands up `luanti --server` on the reference world and puts one client in
+# front of it: official Luanti (the default) or extensions/luanti_client,
+# both being Luanti clients of the same server and the same worldmod. The
+# module's client has no Luanti server and shoot_buildat_server.sh beside
+# this is its runner. The set lands in $REFSHOT_SHOTS_DIR/<client>_<mode>_r<RANGE>.
 #
 # A fixture is a seed and its mapgen settings, never a world directory -- see
 # "A fixture is a seed, never a copy" -- and the settings are the whole of
-# reference_world_map_meta.txt beside this file rather than a few keys out of
-# it. The world is generated into a cache under local/reference_worlds/ and
-# reused if it is already there, so a bulk session pays for the terrain once. The worldmod in it is
-# builtin/luanti/test/reference_views.lua, the same file this module runs as
-# its own fixture, so the two sides line up by construction rather than by
-# aim.
+# map_meta.txt beside this file rather than a few keys out of it. The world
+# is generated into a cache under $REFSHOT_WORLDS_DIR and reused if it is
+# already there, so a bulk session pays for the terrain once. The worldmod in
+# it is build.sh's, the same fixture the module runs, so the two sides line
+# up by construction rather than by aim.
 #
 # It waits for the fixture's own "REFSHOT <n> <name>" line in the server log
 # and shoots within a second of it, rather than counting seconds: the aim is
@@ -19,18 +25,28 @@
 # likely to have been spoiled by the desktop's real mouse.
 set -u
 
-# The repository root, from builtin/luanti/test/
-here=$(cd "$(dirname "$0")/../../.." && pwd)
+# The repository root, from builtin/luanti/test/reference_shots/
+here=$(cd "$(dirname "$0")/../../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
-fixture="${1:?reference | check}"
-conf="${2:-$me/reference_shots.conf}"
-# Default 150, the fixture's and the conf's; every set directory carries
-# the range as _r<RANGE>
-RANGE="${RANGE:-150}"
-case "$RANGE" in
-''|*[!0-9.]*) echo "RANGE must be a number, got: $RANGE" >&2; exit 2 ;;
+fixture="${1:?reference | check <dir> | shoot <log> <pid> <dir>}"
+# Every copy of every fact comes out of build.sh; see [REFVIEWS_MOD]
+built=$(mktemp -d /tmp/refshots_build.XXXXXX)
+"$me/build.sh" "$built" || exit 2
+. "$built/env.sh"
+RANGE=$REFSHOT_RANGE
+conf="$built/luanti.conf"
+# Roots, not leaves: the set's name is always derived, so a redirected run
+# keeps the structure and probes.sh reads what the runners wrote
+shots_root="${REFSHOT_SHOTS_DIR:-$here/local/reference_shots}"
+worlds_root="${REFSHOT_WORLDS_DIR:-$here/local/reference_worlds}"
+CLIENT="${CLIENT:-luanti}"
+MODE="${MODE:-shadows}"
+case "$CLIENT" in
+luanti) set_name="official_${MODE}_r$RANGE" ;;
+extension) set_name="extension_${MODE}_r$RANGE" ;;
+*) echo "CLIENT must be luanti or extension, got: $CLIENT" >&2; exit 2 ;;
 esac
-out="${OUT_DIR:-$here/local/reference_shots/official_r$RANGE}"
+out="$shots_root/$set_name"
 luanti=~/projects/luanti
 # The patched client, branch buildat-refshots: no mouse look, no pointer grab,
 # no pausing when unfocused, no damage. A run shares the desktop, and every
@@ -40,9 +56,9 @@ bin=${LUANTI_BIN:-./bin/luanti-refshots}
 
 # The shooting half, which is the same whichever client is on screen: find its
 # window, learn how many states the fixture has, and photograph each one late
-# in its hold. builtin/luanti/test/reference_shots_module.sh calls it through
+# in its hold. shoot_buildat_server.sh calls it through
 #
-#   builtin/luanti/test/reference_shots.sh shoot <server log> <client pid> [dir]
+#   shoot_luanti_server.sh shoot <server log> <client pid> <dir>
 #
 # rather than carrying a second copy of it. Reads $log, $cli and $out.
 
@@ -136,7 +152,7 @@ shoot_states()
 	# terrain that has not arrived and the next overwrites it warm. Two is
 	# enough for a client that was handed a cached world; a client that has
 	# just imported one is still meshing it through the second, which is why
-	# reference_shots_module.sh asks for three.
+	# shoot_buildat_server.sh asks for three.
 	want=$(( total * ${CYCLES:-2} ))
 	taken=0
 	# Which states were actually photographed, so one that was dropped in both
@@ -221,10 +237,10 @@ shoot_states()
 # failure that cost the most -- a world that generated fine and is simply not
 # the right world -- so one look per viewpoint stays part of the recipe.
 #
-#   builtin/luanti/test/reference_shots.sh check
+#   shoot_luanti_server.sh check <dir>
 #
-# is the whole check over whatever is on disk, without taking the pictures
-# again.
+# is the whole check over whatever is in a set's directory, without taking
+# the pictures again.
 check_shots()
 {
 	local bad=0 f mean sd
@@ -254,12 +270,13 @@ check_shots()
 	# catches what the two above cannot: a picture that is dark but not flat,
 	# where the sky arrived and the terrain did not. The same state in the
 	# reference is the same world at the same hour, so a frame three times
-	# brighter or darker than it is not a rendering difference.
+	# brighter or darker than it is not a rendering difference. Every set
+	# is <client>_<mode>_r<RANGE>, so the reference is official_<mode> at
+	# the same range; pbr has no official set and official is its own.
 	local ref=""
-	case "$out" in
-	*_unlit) ref="$(dirname "$out")/official_noshadow" ;;
-	*official*) ref="" ;;
-	*) ref="$(dirname "$out")/official" ;;
+	case "$(basename "$out")" in
+	official_*|*_pbr_r*) ref="" ;;
+	*) ref="$(dirname "$out")/official_$(basename "$out" | sed 's/^[a-z]*_//')" ;;
 	esac
 	if [ -n "$ref" ] && [ -d "$ref" ]; then
 		for f in $files; do
@@ -286,12 +303,12 @@ check_shots()
 
 case "$fixture" in
 check)
-	check_shots; exit $? ;;
+	out="${2:?set directory}"; check_shots; exit $? ;;
 shoot)
-	log="$2"; cli="$3"; out="${4:-$out}"
+	log="$2"; cli="$3"; out="${4:?set directory}"
 	mkdir -p "$out"; shoot_states; check_shots; exit $? ;;
 reference)
-	meta="$me/reference_world_map_meta.txt"
+	meta="$me/map_meta.txt"
 	;;
 snow)
 	echo "the snow viewpoint is viewpoint 5 of the reference world now;" >&2
@@ -305,16 +322,15 @@ esac
 # The fixture is the whole parameter file, not a seed and a few keys. The
 # mgvalleys_* scalars in it decide where snow sits, and a world generated
 # without them is not a nearby world, it is an unrelated one -- which is what
-# the sixteen superseded pictures were of. So the seed is read out of the file
-# rather than written twice.
-seed=$(sed -n 's/^seed = //p' "$meta")
-[ -n "$seed" ] || { echo "no seed in $meta" >&2; exit 2; }
+# the sixteen superseded pictures were of. The seed is build.sh's reading of
+# that file, and the fixture refuses any other world's.
+seed=$REFSHOT_SEED
 
 # And a seed reproduces a world only under the game that made it: five minor
 # versions of biome changes put a flower meadow where the reference has snow.
 # Checked rather than trusted, because generating a different world silently is
 # the worst failure available here -- the pictures look fine.
-want_vl=$(sed -n 's/^vl_world_initial_version = //p' "$meta")
+want_vl=$REFSHOT_VL_VERSION
 have_vl=$(sed -n 's/^version *= *//p' "$luanti/games/mineclone2/game.conf")
 if [ -n "$want_vl" ] && [ "$want_vl" != "$have_vl" ]; then
 	echo "the fixture was generated by VoxeLibre $want_vl, the game here is" >&2
@@ -322,27 +338,13 @@ if [ -n "$want_vl" ] && [ "$want_vl" != "$have_vl" ]; then
 	exit 2
 fi
 
-[ -f "$conf" ] || { echo "no config at $conf" >&2; exit 2; }
-
-# The non-PBR set, which is the same twenty with Luanti's dynamic shadows off
-# -- [NON_PBR]'s half of this session. A copy of the config with one line
-# added rather than a second config file: two files that must agree about
-# fifteen settings and differ about one drift apart, and the last value of a
-# key is the one Luanti keeps. Shaders themselves have no switch left to
-# throw; 5.18 dropped enable_shaders.
-if [ -n "${NO_SHADOWS:-}" ]; then
-	out="${OUT_DIR:-$here/local/reference_shots/official_noshadow_r$RANGE}"
-	base="$conf"
-	conf=$(mktemp /tmp/refshots_noshadow.XXXXXX.conf)
-	{ cat "$base"; echo "enable_dynamic_shadows = false"; } > "$conf"
-fi
-base="$conf"
-conf=$(mktemp /tmp/refshots_range.XXXXXX.conf)
-grep -v '^viewing_range' "$base" > "$conf"
-echo "viewing_range = $RANGE" >> "$conf"
+# MODE=unlit is the same twenty with Luanti's dynamic shadows off --
+# [NON_PBR]'s half of this session -- and build.sh's conf carries that line.
+# Shaders themselves have no switch left to throw; 5.18 dropped
+# enable_shaders.
 
 # The cache. Kept, not deleted: a bulk session generates the terrain once.
-work="$here/local/reference_worlds/$seed"
+work="$worlds_root/$seed"
 if [ ! -d "$work" ] && [ -n "${src_world:-}" ]; then
 	echo "copying $(eval echo "$src_world") into $work  (cannot be regenerated; see the snow case)"
 	mkdir -p "$(dirname "$work")"
@@ -369,23 +371,15 @@ else
 	echo "reusing cached world $work"
 fi
 
-mkdir -p "$out" "$work/worldmods/refviews"
+mkdir -p "$out" "$work/worldmods"
 # A leftover worldmod in the cache (a probe that shuts the server down)
 # is otherwise loaded next to this one.
 find "$work/worldmods" -mindepth 1 -maxdepth 1 ! -name refviews -exec rm -rf {} +
-# PROBE=1 shoots only the two states the probe script reads -- fifteen seconds
-# against two minutes, which is what a tuning cycle wants. The prelude goes in
-# front of the fixture rather than into a setting because the three clients
-# that run it have three ways of being configured and none of a file. See
-# [PROBE_CYCLE] in doc/plan/rendering_plan.md.
-if [ -n "${PROBE:-}" ]; then
-	echo 'rawset(_G, "REFSHOT_PROBE", true)' \
-			> "$work/worldmods/refviews/init.lua"
-	cat "$me/reference_views.lua" >> "$work/worldmods/refviews/init.lua"
-else
-	cp "$me/reference_views.lua" "$work/worldmods/refviews/init.lua"
-fi
-printf 'name = refviews\n' > "$work/worldmods/refviews/mod.conf"
+# The mod form of the fixture. PROBE=1 shoots only the states probes.sh
+# reads -- fifteen seconds against two minutes, which is what a tuning
+# cycle wants -- and build.sh wrote that into it; see [PROBE_CYCLE].
+rm -rf "$work/worldmods/refviews"
+cp -r "$built/refviews" "$work/worldmods/refviews"
 
 log=$(mktemp /tmp/refshots_srv.XXXXXX.log)
 # A leftover official run still holds the world sqlite. Kill it rather
@@ -403,7 +397,7 @@ fi
 # would put that dialog in front of every run, and the harness is not the
 # thing to answer it. 30030 is one the user has accepted for a local Luanti
 # server. When the week runs out the dialog comes back and wants one click.
-if [ "${CLIENT:-luanti}" = "extension" ]; then
+if [ "$CLIENT" = "extension" ]; then
 	port=${PORT:-30030}
 else
 	port=${PORT:-$(( 31000 + (RANDOM % 200) ))}
@@ -426,9 +420,7 @@ sleep 5
 # what makes the three sets comparable. See "The other two clients shoot the
 # same set" in doc/plan/rendering_plan.md. The module's half is the odd one
 # out and has a script of its own, because it runs the game itself.
-if [ "${CLIENT:-luanti}" = "extension" ]; then
-	out="${OUT_DIR:-$here/local/reference_shots/extension_${MODE:-unlit}_r$RANGE}"
-	mkdir -p "$out"
+if [ "$CLIENT" = "extension" ]; then
 	# Three passes rather than two: this client fetches the server's media and
 	# meshes the world as it goes, so the second is still catching up
 	CYCLES="${CYCLES:-3}"
@@ -439,8 +431,8 @@ if [ "${CLIENT:-luanti}" = "extension" ]; then
 	cmds=$(mktemp /tmp/refshots_ext.XXXXXX.txt)
 	{ echo "delay 1800000"; echo "quit"; } > "$cmds"
 	BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=ref \
-		BUILDAT_LUANTI_CONNECT=1 BUILDAT_LUANTI_PBR="${MODE:-unlit}" \
-		"$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 \
+		BUILDAT_LUANTI_CONNECT=1 BUILDAT_LUANTI_PBR="$MODE" \
+		"$here/Build/bin/buildat" -m luanti_client -w "${REFSHOT_W}x$REFSHOT_H" -l 3 \
 		-c @"$cmds" > /tmp/refshots_ext.log 2>&1 &
 	cli=$!
 else

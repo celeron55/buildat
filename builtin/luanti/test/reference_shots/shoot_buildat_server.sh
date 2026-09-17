@@ -1,33 +1,30 @@
 #!/bin/bash
-# [OFFICIAL_SHOTS]: this module's half of the reference shot set, against the
-# same world and the same fixture official Luanti's half used. See
-# doc/plan/rendering_plan.md.
+# [OFFICIAL_SHOTS]: the reference shot set's buildat-server half -- the
+# module running the game inside buildat_server, with the launcher in front
+# of it -- against the same world and the same fixture the Luanti-server
+# half used. See doc/plan/rendering_plan.md, [REFVIEWS_MOD].
 #
-#   builtin/luanti/test/reference_shots_module.sh [mode ...] [world]
+#   builtin/luanti/test/reference_shots/shoot_buildat_server.sh [mode ...]
 #
 # The mode is unlit, shadows or pbr and defaults to pbr, which is what the
 # launcher draws when nothing asks otherwise. Each one has its own reference:
-# unlit against official_noshadow/, shadows against official/, pbr against
-# nothing but the sunlit anchor. See [RENDER_MODES] in
+# unlit against official_unlit, shadows against official_shadows, pbr
+# against the path-traced set. See [RENDER_MODES] in
 # doc/plan/rendering_plan.md. **Several modes share one server**: the mode
 # is the client's to ask for (BUILDAT_LUANTI_PBR on the client's process),
 # so `unlit shadows pbr` boots VoxeLibre once and runs three clients against
 # it, which is the ten-minute round of [PROBE_CYCLE] rather than the
-# thirty-minute one. A `world` argument is told from a mode by being a path.
+# thirty-minute one. The sets land in $REFSHOT_SHOTS_DIR/module_<mode>_r<RANGE>.
 #
-# The world is the cache reference_shots.sh generated -- one engine makes the
-# terrain and all three clients are pointed at it, so a difference between the
-# sets is a difference in light and not in what was drawn. Run that script
-# first if the cache is not there.
+# The world is the cache shoot_luanti_server.sh generated -- one engine makes
+# the terrain and all three clients are pointed at it, so a difference
+# between the sets is a difference in light and not in what was drawn. Run
+# that script first if the cache is not there.
 #
 # sed -u, and it is not a detail: sed block-buffers when its output is a file,
 # so the fixture's REFSHOT lines arrive in the log in chunks and the shooter
 # names each picture after a state the world left several states ago. It is
 # the one failure that produces a good picture of the wrong thing.
-#
-# The shooting half is reference_shots.sh's, called rather than copied: the
-# window is found by the client's own pid, the states are counted out of the
-# fixture's log and each shot is taken late in its hold.
 #
 # What the client is driven by is a command file that does nothing but wait,
 # because the fixture's clock starts when the player joins and this client's
@@ -35,52 +32,30 @@
 # loading, which is a minute and a half on this machine and is not a constant.
 set -u
 
-here=$(cd "$(dirname "$0")/../../.." && pwd)
+# The repository root, from builtin/luanti/test/reference_shots/
+here=$(cd "$(dirname "$0")/../../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
-seed=$(sed -n 's/^seed = //p' "$me/reference_world_map_meta.txt")
-# PROBE=1 shoots only the two states the probe script reads, which is about
-# fifteen seconds against two minutes and is what a tuning cycle wants. The
-# warm-up cycles stay: what they prevent does not stop being possible because
-# the run is short. See [PROBE_CYCLE] in doc/plan/rendering_plan.md.
-fixture="$me/reference_views.lua"
-if [ -n "${PROBE:-}" ]; then
-	fixture=$(mktemp /tmp/refviews_probe.XXXXXX.lua)
-	{ echo 'rawset(_G, "REFSHOT_PROBE", true)'; cat "$me/reference_views.lua"; \
-			} > "$fixture"
-fi
-# PATHTRACE=1: one dump per viewpoint at its primary hour, for [PATH_TRACE_REF].
-if [ -n "${PATHTRACE:-}" ]; then
-	fixture=$(mktemp /tmp/refviews_pathtrace.XXXXXX.lua)
-	{ echo 'rawset(_G, "REFSHOT_PATHTRACE", true)'; cat "$me/reference_views.lua"; \
-			} > "$fixture"
-fi
-# HOLD=<seconds> for the calibration ladder: halve it until the run stops
-# producing good results and then operate at four times what broke. See
-# "Calibrate the timings rather than guessing them" in
-# doc/plan/rendering_plan.md.
-if [ -n "${HOLD:-}" ]; then
-	prev="$fixture"
-	fixture=$(mktemp /tmp/refviews_hold.XXXXXX.lua)
-	{ echo "rawset(_G, \"REFSHOT_HOLD\", $HOLD)"; cat "$prev"; } > "$fixture"
-fi
-# RANGE=<nodes> is the viewing range for the run. Default 150, matching
-# reference_shots.conf and the fixture. 50 is what a path-trace dump wants
-# while the camera is still being diagnosed. Every set directory carries it
-# as _r<RANGE>, so a set of one range is never read against one of another.
-RANGE="${RANGE:-150}"
-case "$RANGE" in
-''|*[!0-9.]*) echo "RANGE must be a number, got: $RANGE" >&2; exit 2 ;;
-esac
-prev="$fixture"
-fixture=$(mktemp /tmp/refviews_range.XXXXXX.lua)
-{ echo "rawset(_G, \"REFSHOT_RANGE\", $RANGE)"; cat "$prev"; } > "$fixture"
+# Every copy of every fact comes out of build.sh; see [REFVIEWS_MOD]. What
+# a run passes: PROBE=1 shoots only the states probes.sh reads, which is
+# fifteen seconds against two minutes and what a tuning cycle wants;
+# PATHTRACE=1 one dump per viewpoint for [PATH_TRACE_REF]; HOLD=<seconds>
+# the calibration ladder's; RANGE=<nodes> the viewing range, 50 being what
+# a path-trace dump wants while the camera is still being diagnosed. Every
+# set directory carries the range as _r<RANGE>. KEEP: the server stays up
+# between the clients.
+built=$(mktemp -d /tmp/refshots_build.XXXXXX)
+KEEP=1 "$me/build.sh" "$built" || exit 2
+. "$built/env.sh"
+RANGE=$REFSHOT_RANGE
+fixture="$built/fixture.lua"
+shots_root="${REFSHOT_SHOTS_DIR:-$here/local/reference_shots}"
+worlds_root="${REFSHOT_WORLDS_DIR:-$here/local/reference_worlds}"
 
 modes=""
-world="$here/local/reference_worlds/$seed"
+world="$worlds_root/$REFSHOT_SEED"
 for arg in "$@"; do
 	case "$arg" in
 	unlit|shadows|pbr) modes="$modes $arg" ;;
-	*/*) world="$arg" ;;
 	*) echo "unknown mode: $arg (wanted unlit, shadows or pbr)" >&2; exit 2 ;;
 	esac
 done
@@ -91,13 +66,9 @@ first_mode=${modes# }
 first_mode=${first_mode%% *}
 save=buildat_test_refviews
 tmp=$(mktemp -d)
-# The server stays up between clients
-prev="$fixture"
-fixture=$(mktemp /tmp/refviews_keep.XXXXXX.lua)
-{ echo 'rawset(_G, "REFSHOT_KEEP", true)'; cat "$prev"; } > "$fixture"
 
 [ -d "$world" ] || { echo "no cached world at $world" >&2
-	echo "run: $me/reference_shots.sh reference" >&2; exit 2; }
+	echo "run: $me/shoot_luanti_server.sh reference" >&2; exit 2; }
 
 cd "$here/Build"
 # Whatever way this script ends, the server and the client go with it: a
@@ -138,10 +109,10 @@ srv=$(pgrep -x buildat_server | head -1)
 [ -z "$srv" ] && { echo "the server did not come up" >&2
 	tail -3 "$tmp/srv.log" >&2; exit 1; }
 
-# 1280x720, which is reference_shots.conf's screen_w and screen_h: a ratio
+# The frame is set.lua's, the same one official Luanti's conf gets: a ratio
 # between pictures of different sizes is a ratio about the size. The viewing
-# range and the fog are the fixture's doing, not this file's -- see pin_view()
-# in reference_views.lua.
+# range and the fog are the fixture's doing, not this file's -- see
+# pin_view() in runner.lua.
 # The launcher's status row -- the position, the yaw and the pitch -- which a
 # comparison shot is required to carry, the same way official Luanti's half
 # carries show_debug, is on by default ([STATUS_DEFAULT]); nothing is pressed.
@@ -156,12 +127,11 @@ shots_dir="$here/user/screenshots"
 # One client per mode against the one server. Each client's set is the
 # part of the server log written while it ran: the fixture starts a set on
 # every join, so the log is sliced from where this client came in.
-# OUT_DIR names one set's directory, so it is for a single-mode run
 for mode in $modes; do
-out="${OUT_DIR:-$here/local/reference_shots/module_${mode}_r$RANGE}"
+out="$shots_root/module_${mode}_r$RANGE"
 from=$(wc -l < "$tmp/srv.log")
 BUILDAT_LUANTI_PBR="$mode" \
-bin/buildat -s "localhost:$port" -w 1280x720 -l 3 -c @"$tmp/cmds.txt" \
+bin/buildat -s "localhost:$port" -w "${REFSHOT_W}x$REFSHOT_H" -l 3 -c @"$tmp/cmds.txt" \
 	> "$tmp/cli_$mode.log" 2>&1 &
 cli=$!
 since() { tail -n +"$((from + 1))" "$tmp/srv.log"; }
@@ -208,7 +178,7 @@ echo "$taken pictures into $out"
 [ "$missing" -eq 0 ] || status=1
 
 if [ -n "${PATHTRACE:-}" ]; then
-	mesh_out="${MESH_DIR:-$here/local/reference_shots/pathtrace_r$RANGE}"
+	mesh_out="$shots_root/pathtrace_r$RANGE"
 	mkdir -p "$mesh_out"
 	dumps=$here/user/meshdumps
 	mesh_n=0
@@ -237,9 +207,9 @@ EOF
 fi
 
 # The two cheap tests over what this run shot, which is what they were always
-# for; see check_shots() in reference_shots.sh
+# for; see check_shots() in shoot_luanti_server.sh
 if [ "$taken" -gt 0 ]; then
-	OUT_DIR="$out" "$me/reference_shots.sh" check || status=1
+	"$me/shoot_luanti_server.sh" check "$out" || status=1
 fi
 
 kill "$cli" 2>/dev/null

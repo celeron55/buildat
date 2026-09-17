@@ -890,7 +890,7 @@ function M.new(socket, options, log)
 		end
 		-- The tail Luanti 5.9+ appends; an older server's packet ends here.
 		-- fog_start is what the reference fixture turns the fog off with
-		-- (0.99: see reference_views.lua), so it is read as of 2026-09-17.
+		-- (0.99: see builtin/luanti/test/reference_shots/runner.lua), so it is read as of 2026-09-17.
 		if r:remaining() >= 4 + 2 + 4 + 4 then
 			sky.body_orbit_tilt = r:f32()
 			sky.fog_distance = r:s16()
