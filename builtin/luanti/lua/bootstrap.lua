@@ -2718,7 +2718,9 @@ local function step_emerge(dtime)
 		end
 	end
 	local t_ids = core.get_us_time()
-	local ids = #ask > 0 and __luanti_ids_at(ask) or {}
+	-- Whether the section is loaded, per section: what "generated" means
+	-- here, since an ungenerated section reads as ignore everywhere
+	local ids = #ask > 0 and __luanti_loaded_at(ask) or {}
 	emerge_detail.ids = emerge_detail.ids + (core.get_us_time() - t_ids)
 	emerge_detail.asked = emerge_detail.asked + #ask / 3
 
@@ -2742,8 +2744,7 @@ local function step_emerge(dtime)
 			-- A block that is there reads as something; a section that has
 			-- not been generated reads as ignore everywhere
 			local at = ask_of[r]
-			local id = at ~= nil and ids[at] or core.CONTENT_IGNORE
-			if id ~= core.CONTENT_IGNORE then
+			if at ~= nil and ids[at] then
 				action = core.EMERGE_GENERATED
 			elseif r.waited > EMERGE_TIMEOUT then
 				action = core.EMERGE_ERRORED

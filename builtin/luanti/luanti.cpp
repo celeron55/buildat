@@ -1730,6 +1730,8 @@ struct Module: public interface::Module, public luanti::Interface
 			return;
 		drop_read_cache();
 		size_t n = m_node_writes.size();
+		const int64_t t0 = interface::os::time_us();
+		int64_t t_set = 0;
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
 			// set_voxel() into a section that is not there does nothing and
 			// says so in a warning. Luanti's set_node emerges the block it
@@ -1751,9 +1753,19 @@ struct Module: public interface::Module, public luanti::Interface
 				world->set_voxel(pv::Vector3DInt32(node.x, node.y, node.z),
 						interface::VoxelInstance(node.word), true);
 			}
+			t_set = interface::os::time_us();
 		});
 		m_node_writes.clear();
-		log_d(MODULE, "Flushed %zu node writes", n);
+		// Split into the writes and the commit that follows them on the
+		// way out of access(), since a step's flush is what is left of
+		// its stall once the reads stopped flushing ([STEP_PEAK])
+		const int64_t took = interface::os::time_us() - t0;
+		if(took > 50000)
+			log_v(MODULE, "Flushed %zu node writes in %.2f s: the writes "
+					"%.2f, the commit %.2f", n, took / 1e6, (t_set - t0) / 1e6,
+					(interface::os::time_us() - t_set) / 1e6);
+		else
+			log_d(MODULE, "Flushed %zu node writes", n);
 	}
 
 	void buffer_node_write(int32_t x, int32_t y, int32_t z, uint32_t word)
@@ -5257,6 +5269,47 @@ struct Module: public interface::Module, public luanti::Interface
 		return 1;
 	}
 
+	// __luanti_loaded_at(flat) -> a flat array of booleans, one per
+	// position in flat: whether the section it is in is loaded. What the
+	// emerge queue actually asks of its two thousand positions a step --
+	// an ungenerated section reads as ignore everywhere -- answered per
+	// section in one access(), where a get_voxel() per position was 0.4 s
+	// of a step and a region read per block was worse.
+	static int l_loaded_at(lua_State *L)
+	{
+		Module *self = module_of(L);
+		luaL_checktype(L, 1, LUA_TTABLE);
+		const size_t n3 = lua_objlen(L, 1);
+		const size_t n = n3 / 3;
+		lua_createtable(L, (int)n, 0);
+		if(n == 0 || !self->m_scene || self->m_section_size.getX() <= 0)
+			return 1;
+		sv_<int32_t> p(n3);
+		for(size_t i = 0; i < n3; i++){
+			lua_rawgeti(L, 1, (int)i + 1);
+			p[i] = (int32_t)lua_tointeger(L, -1);
+			lua_pop(L, 1);
+		}
+		sv_<uint64_t> keys(n);
+		sm_<uint64_t, bool> loaded;
+		for(size_t i = 0; i < n; i++){
+			keys[i] = section_key(self->section_of(pv::Vector3DInt32(
+					p[i * 3], p[i * 3 + 1], p[i * 3 + 2])));
+			loaded[keys[i]] = false;
+		}
+		voxelworld::access(self->m_server, self->m_scene,
+				[&](voxelworld::Instance *world){
+			for(auto &pair : loaded)
+				pair.second = world->is_section_loaded(
+						section_from_key(pair.first));
+		});
+		for(size_t i = 0; i < n; i++){
+			lua_pushboolean(L, loaded[keys[i]] ? 1 : 0);
+			lua_rawseti(L, -2, (int)i + 1);
+		}
+		return 1;
+	}
+
 	// get_region(x0, y0, z0, x1, y1, z1) -> a flat array of content ids, x
 	// fastest and then y and then z. Only the ids: what asks for a box asks
 	// what is in it, and a table three times the size would be three times
@@ -7565,6 +7618,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_step_peak", l_step_peak);
 		set_global_cfunction("__luanti_flush_node_writes",
 				l_flush_node_writes);
+		set_global_cfunction("__luanti_loaded_at", l_loaded_at);
 		lua_pushlightuserdata(m_lua, (void*)this);
 		lua_setfield(m_lua, LUA_REGISTRYINDEX, "__luanti_module");
 		set_global_string("__luanti_module_path", module_path());
