@@ -1814,6 +1814,20 @@ struct Module: public interface::Module, public luanti::Interface
 		const int64_t key = pos_key(bx, by, bz);
 		auto c = m_read_cache.find(key);
 		if(c == m_read_cache.end()){
+			// The first read of a block is a single voxel; the block is
+			// read whole on the second. A world generating drops the
+			// cache every section, and a mod reading one node here and
+			// one there paid a 4096-voxel region per read for nothing --
+			// a second on devtest's world generation.
+			if(m_read_seen.insert(key).second){
+				uint32_t word = 0;
+				voxelworld::access(m_server, m_scene,
+						[&](voxelworld::Instance *world){
+					word = world->get_voxel(pv::Vector3DInt32(x, y, z),
+							true).data;
+				});
+				return word;
+			}
 			sv_<uint32_t> words;
 			read_region_uncached(bx * 16, by * 16, bz * 16,
 					bx * 16 + 15, by * 16 + 15, bz * 16 + 15, words);
@@ -1825,9 +1839,11 @@ struct Module: public interface::Module, public luanti::Interface
 
 	// See read_node()
 	std::unordered_map<int64_t, sv_<uint32_t>> m_read_cache;
+	set_<int64_t> m_read_seen;
 	void drop_read_cache()
 	{
 		m_read_cache.clear();
+		m_read_seen.clear();
 	}
 
 	// Luanti's own cap on how much map a call may look at in one go
@@ -1846,37 +1862,30 @@ struct Module: public interface::Module, public luanti::Interface
 	void read_region(int32_t x0, int32_t y0, int32_t z0,
 			int32_t x1, int32_t y1, int32_t z1, sv_<uint32_t> &out)
 	{
-		read_region_uncached(x0, y0, z0, x1, y1, z1, out);
 		// What core.set_node has written and not yet flushed is part of the
 		// map as far as a mod is concerned -- Luanti's semantics are that a
-		// write is visible immediately -- so the buffer is laid over the
-		// read. It used to be flushed first, and a mod that alternates a
-		// find_nodes_in_area with set_nodes (VoxeLibre's geodes, per
-		// calcite node) paid a commit with the skylight per read. Whichever
-		// is smaller is walked: the box against the buffer, or the buffer
-		// against the box.
+		// write is visible immediately. A small box has the buffer laid
+		// over it, a lookup per voxel: a mod that alternates a
+		// find_nodes_in_area of a few voxels with set_nodes (VoxeLibre's
+		// geodes, per calcite node) paid a commit with the skylight per
+		// read when every read flushed. A big box -- a section's
+		// VoxelManip, a find over a chunk -- flushes first as before:
+		// walking a buffer of tens of thousands per read, a hundred reads
+		// a section, cost VoxeLibre's world generation a third.
+		const size_t volume = (size_t)(x1 - x0 + 1) * (size_t)(y1 - y0 + 1) *
+				(size_t)(z1 - z0 + 1);
+		if(volume > 4096)
+			flush_node_writes();
+		read_region_uncached(x0, y0, z0, x1, y1, z1, out);
 		if(m_node_writes.empty())
 			return;
-		const size_t w = (size_t)(x1 - x0 + 1);
-		const size_t h = (size_t)(y1 - y0 + 1);
-		if(out.size() < m_node_writes.size()){
-			size_t i = 0;
-			for(int32_t z = z0; z <= z1; z++)
-			for(int32_t y = y0; y <= y1; y++)
-			for(int32_t x = x0; x <= x1; x++, i++){
-				auto it = m_node_writes.find(pos_key(x, y, z));
-				if(it != m_node_writes.end())
-					out[i] = it->second.word;
-			}
-		} else {
-			for(const auto &pair : m_node_writes){
-				const PendingNode &n = pair.second;
-				if(n.x < x0 || n.x > x1 || n.y < y0 || n.y > y1 ||
-						n.z < z0 || n.z > z1)
-					continue;
-				out[(size_t)(n.z - z0) * w * h + (size_t)(n.y - y0) * w +
-						(size_t)(n.x - x0)] = n.word;
-			}
+		size_t i = 0;
+		for(int32_t z = z0; z <= z1; z++)
+		for(int32_t y = y0; y <= y1; y++)
+		for(int32_t x = x0; x <= x1; x++, i++){
+			auto it = m_node_writes.find(pos_key(x, y, z));
+			if(it != m_node_writes.end())
+				out[i] = it->second.word;
 		}
 	}
 
