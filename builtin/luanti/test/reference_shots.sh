@@ -358,6 +358,9 @@ else
 fi
 
 mkdir -p "$out" "$work/worldmods/refviews"
+# A leftover worldmod in the cache (a probe that shuts the server down)
+# is otherwise loaded next to this one.
+find "$work/worldmods" -mindepth 1 -maxdepth 1 ! -name refviews -exec rm -rf {} +
 # PROBE=1 shoots only the two states the probe script reads -- fifteen seconds
 # against two minutes, which is what a tuning cycle wants. The prelude goes in
 # front of the fixture rather than into a setting because the three clients
@@ -373,6 +376,15 @@ fi
 printf 'name = refviews\n' > "$work/worldmods/refviews/mod.conf"
 
 log=$(mktemp /tmp/refshots_srv.XXXXXX.log)
+# A leftover official run still holds the world sqlite. Kill it rather
+# than start a second one on a different port into the same files.
+if pgrep -x luanti-refshots >/dev/null || pgrep -x luanti >/dev/null; then
+	echo "killing leftover luanti" >&2
+	killall -TERM luanti-refshots luanti 2>/dev/null || true
+	sleep 1
+	killall -KILL luanti-refshots luanti 2>/dev/null || true
+	sleep 1
+fi
 # A port the client's own sandbox has already been told about. The extension
 # goes through extensions/network, which asks the user before a script opens a
 # socket and remembers the answer for a week; a fresh random port every run

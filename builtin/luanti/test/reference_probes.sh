@@ -33,6 +33,9 @@ grassside|vp4_1300|60x40+1100+500|the same node's SIDE: says whether the fault i
 stone|vp4_1300|30x20+625+320|CONTROL, no palette: must not move
 dirt|vp4_1300|30x20+45+420|colourised, weaker
 cave|vp4_1300|60x40+610+360|the floor, TOO_BRIGHT's black caves
+cavedark|vp6_1300|80x80+600+320|HDR in, looking into the dark
+caveout|vp7_1300|80x80+600+280|HDR out, the bright opening
+cavedeep|vp8_1300|80x80+600+320|into the dark from inside
 wall|vp4_1300|30x40+880+300|shaded: what tells the modes apart
 snow|vp5_1000|60x40+420+540|no colour of its own to hide a cast
 leaf|vp5_1000|50x30+700+560|colourised, against snow
