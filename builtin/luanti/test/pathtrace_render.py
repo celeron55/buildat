@@ -226,9 +226,37 @@ def textured_material(name, png):
 	return mat
 
 
+def drop_twin_faces(co, tint, uv, blocks):
+	"""A plant card and an allfaces leaf are emitted twice by the mesher,
+	once per winding, so the client draws both sides. In Cycles the two
+	coincident faces shadow each other and the card comes out black. Keep
+	the first of any two triangles on the same three points."""
+	seen = set()
+	nco, ntint, nuv, nblocks = array("f"), array("f"), array("f"), []
+	dropped = 0
+	for mat, first, n in blocks:
+		start = len(nco) // 3
+		for t in range(first, first + n, 3):
+			key = tuple(sorted((tuple(co[3 * v:3 * v + 3])
+					for v in (t, t + 1, t + 2))))
+			if key in seen:
+				dropped += 1
+				continue
+			seen.add(key)
+			nco.extend(co[3 * t:3 * t + 9])
+			ntint.extend(tint[4 * t:4 * t + 12])
+			nuv.extend(uv[2 * t:2 * t + 6])
+		kept = len(nco) // 3 - start
+		if kept:
+			nblocks.append((mat, start, kept))
+	print("dropped %d twin faces of %d" % (dropped, len(co) // 9))
+	return nco, ntint, nuv, nblocks
+
+
 def build_world(scene, co, tint, uv, blocks, tex_dir):
 	"""The mesh out of the flat buffers, through foreach_set: no Python
 	object per vertex or per loop."""
+	co, tint, uv, blocks = drop_twin_faces(co, tint, uv, blocks)
 	nvert = len(co) // 3
 	ntri = nvert // 3
 	mesh = bpy.data.meshes.new("world")
