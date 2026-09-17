@@ -1008,6 +1008,7 @@ struct Module: public interface::Module, public luanti::Interface
 	void init()
 	{
 		m_server->sub_event(this, Event::t("core:start"));
+		m_server->sub_event(this, Event::t("core:module_unloaded"));
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:shutdown"));
 		m_server->sub_event(this, Event::t("core:continue"));
@@ -1040,6 +1041,8 @@ struct Module: public interface::Module, public luanti::Interface
 	void event(const Event::Type &type, const Event::Private *p)
 	{
 		EVENT_VOIDN("core:start", on_start)
+		EVENT_TYPEN("core:module_unloaded", on_module_unloaded,
+				interface::ModuleUnloadedEvent)
 		EVENT_VOIDN("core:unload", on_unload)
 		EVENT_VOIDN("core:shutdown", on_shutdown)
 		EVENT_VOIDN("core:continue", on_continue)
@@ -2036,6 +2039,7 @@ struct Module: public interface::Module, public luanti::Interface
 		// Kept, because the spawn search asks the same mapgen where the
 		// ground is without generating anything; see l_spawn_level()
 		m_mapgen_params = params;
+		m_biome_query = nullptr;
 		worldgen::GeneratorInterface *generator = nullptr;
 		luanti_mapgen::access(m_server, [&](luanti_mapgen::Interface *im){
 			generator = im->create_generator(params);
@@ -5442,6 +5446,19 @@ struct Module: public interface::Module, public luanti::Interface
 	// not anything has been generated. What asks is core.get_biome_data(),
 	// and a game asks it a great deal -- VoxeLibre's weather and its sky
 	// colour are per biome, and both ran into a nil every step without it.
+	// The lookup object, taken once through access() and asked directly
+	// after: an access() is a handoff to the mapgen module's thread and
+	// back, a quarter of a millisecond, and VoxeLibre asks this for every
+	// leaf it recolours. Dropped when luanti_mapgen unloads, and with a
+	// new world's params.
+	luanti_mapgen::BiomeQuery *m_biome_query = nullptr;
+
+	void on_module_unloaded(const interface::ModuleUnloadedEvent &event)
+	{
+		if(event.name == "luanti_mapgen")
+			m_biome_query = nullptr;
+	}
+
 	static int l_biome_at(lua_State *L)
 	{
 		Module *self = module_of(L);
@@ -5451,11 +5468,14 @@ struct Module: public interface::Module, public luanti::Interface
 		size_t index = 0;
 		float heat = 0.0f, humidity = 0.0f;
 		bool ok = false;
-		luanti_mapgen::access(self->m_server,
-				[&](luanti_mapgen::Interface *im){
-			ok = im->biome_at(self->m_mapgen_params, x, y, z, index, heat,
-					humidity);
-		});
+		if(self->m_biome_query == nullptr){
+			luanti_mapgen::access(self->m_server,
+					[&](luanti_mapgen::Interface *im){
+				self->m_biome_query = im->biome_query(self->m_mapgen_params);
+			});
+		}
+		if(self->m_biome_query != nullptr)
+			ok = self->m_biome_query->biome_at(x, y, z, index, heat, humidity);
 		if(!ok)
 			return 0;
 		lua_pushinteger(L, (lua_Integer)index);

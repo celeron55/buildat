@@ -230,6 +230,19 @@ namespace luanti_mapgen
 		int32_t x = 0, y = 0, z = 0;
 	};
 
+	// A biome lookup that can be held and asked outside access(): the
+	// query generator behind biome_at() is the asker's own -- nothing in
+	// this module's thread touches it -- and its noise functions are
+	// const, so a caller that asks two hundred thousand times a step
+	// (VoxeLibre's fix_foliage_missed) need not pay a thread handoff per
+	// point. Valid until this module is unloaded; see biome_query().
+	struct BiomeQuery
+	{
+		virtual ~BiomeQuery() {}
+		virtual bool biome_at(int x, int y, int z, size_t &index_out,
+				float &heat_out, float &humidity_out) = 0;
+	};
+
 	struct Interface
 	{
 		// A generator for these parameters. It belongs to whoever is given
@@ -260,6 +273,11 @@ namespace luanti_mapgen
 		// spawn_level() uses.
 		virtual bool biome_at(const Params &params, int x, int y, int z,
 				size_t &index_out, float &heat_out, float &humidity_out) = 0;
+
+		// The same lookup as an object the caller keeps; nullptr with no
+		// biomes to ask about. Dropped by the caller on core:module_unloaded
+		// of this module.
+		virtual BiomeQuery* biome_query(const Params &params) = 0;
 
 		// What the generator made in a section and was asked to report,
 		// taken away: a generator runs in worldgen's thread and cannot

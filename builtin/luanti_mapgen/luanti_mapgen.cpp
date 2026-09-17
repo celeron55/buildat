@@ -297,7 +297,8 @@ struct GennotifyStore
 // over. Everything it needs was given to it when the world was made: the
 // node ids by name, the seed and the parameters. Nothing here touches a
 // module -- this runs in worldgen's thread.
-struct VendoredGenerator: public worldgen::GeneratorInterface
+struct VendoredGenerator: public worldgen::GeneratorInterface,
+		public luanti_mapgen::BiomeQuery
 {
 	// Luanti's mapgens write a chunk plus one mapblock of padding around
 	// it, which is where a tree at the edge or a cave's mouth lands
@@ -1038,6 +1039,11 @@ struct Module: public interface::Module, public luanti_mapgen::Interface
 	{
 		return query_generator(params)->biome_at(x, y, z, index_out,
 				heat_out, humidity_out);
+	}
+
+	BiomeQuery* biome_query(const Params &params)
+	{
+		return query_generator(params);
 	}
 
 	// Interface
