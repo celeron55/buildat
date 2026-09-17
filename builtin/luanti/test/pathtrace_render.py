@@ -6,8 +6,8 @@
 # Blender's OBJ importer is not used: it places verts by forward_axis/up_axis
 # while the camera is placed here, and two transforms that disagree put the
 # camera outside the world. Parsed here instead, so there is one conversion.
-# simplified: 32 samples, sun elevation fixed at 13:00's, exposure a
-# constant rather than metered.
+# simplified: 32 samples, sun elevation fixed at 13:00's; the metering is
+# a plain log-average, which a sun disc in frame drags (see [PT_EXPOSURE]).
 
 import gzip
 import math
@@ -22,12 +22,15 @@ OUT = os.environ.get("BUILDAT_PATHTRACE_OUT",
 FOV = 72.0
 SAMPLES = int(os.environ.get("SAMPLES", "32"))
 RES = (1280, 720)
-# The Nishita sky is in physical units and a noon sun blows an 8-bit frame
-# to white at exposure 0; -7 puts a sunlit grey top face near 0.8 and its
-# shadow near 0.15. BUILDAT_PATHTRACE_EXPOSURE moves it; the set is
-# read as ratios, so the number only has to keep both ends of a picture
-# off the clip.
-EXPOSURE = float(os.environ.get("BUILDAT_PATHTRACE_EXPOSURE", "-7"))
+# [PT_EXPOSURE]: Blender writes linear radiance (EXR, exposure 0, no view
+# transform) and the frame is metered here by the rule the client's
+# AutoExposure.xml runs -- Urho3D's, out of Reinhard 2002: the key is the
+# log-average luminance, clamped to LUM_RANGE, and the frame is scaled by
+# MIDDLE_GREY / key. The three constants are the same on both sides; the
+# client's adaptation rate is its own, a still having no time axis.
+LUM_WEIGHTS = (0.2126, 0.7152, 0.0722)
+LUM_RANGE = (0.01, 1.0)
+MIDDLE_GREY = 0.6
 # ONLY=vp1 renders the one dump whose stem contains it
 ONLY = os.environ.get("ONLY", "")
 
@@ -223,6 +226,37 @@ def build_world(scene, co, tint, uv, blocks, tex_dir):
 	return ob
 
 
+def expose(exr, png):
+	"""The metered 16-bit PNG out of the linear EXR: log-average luminance
+	as the key, clamped, MIDDLE_GREY / key as the scale. Written through
+	Blender's own image writer, sRGB, so the PNG is display-referred the
+	way the client's frame is after its exposure pass."""
+	import numpy as np
+	img = bpy.data.images.load(exr)
+	w, h = img.size
+	px = np.empty(w * h * 4, dtype=np.float32)
+	img.pixels.foreach_get(px)
+	rgb = px.reshape(-1, 4)[:, :3]
+	lum = rgb @ np.array(LUM_WEIGHTS, dtype=np.float32)
+	key = float(np.exp(np.mean(np.log(lum + 1e-5))))
+	key = min(max(key, LUM_RANGE[0]), LUM_RANGE[1])
+	scale = MIDDLE_GREY / key
+	print("expose %s: key %.4f scale %.3f" % (os.path.basename(png), key, scale))
+	px.reshape(-1, 4)[:, :3] *= scale
+	img.pixels.foreach_set(px)
+	img.filepath_raw = png
+	img.file_format = "PNG"
+	# 16-bit: a shaded face is a few counts of 255 and a hue ratio out of
+	# those is noise
+	scene = bpy.context.scene
+	scene.render.image_settings.file_format = "PNG"
+	scene.render.image_settings.color_depth = "16"
+	img.save_render(png, scene=scene)
+	scene.render.image_settings.file_format = "OPEN_EXR"
+	scene.render.image_settings.color_depth = "32"
+	bpy.data.images.remove(img)
+
+
 def main():
 	# Cycles and a buildat server do not fit in memory together; a render
 	# waits for a shooter rather than running beside one.
@@ -241,16 +275,13 @@ def main():
 	# denoiser is what makes a ratio out of it.
 	scene.cycles.use_denoising = True
 	scene.render.resolution_x, scene.render.resolution_y = RES
-	scene.view_settings.exposure = EXPOSURE
+	scene.view_settings.exposure = 0.0
 	# Standard, not Blender 5's AgX: a tone curve moves every ratio the
-	# probes read, and under Standard two albedos in the same light come
-	# out in the ratio of the albedos. See [PATH_TRACE_TEX].
+	# probes read; the EXR is written before either applies anyway.
 	scene.view_settings.view_transform = "Standard"
-	scene.render.image_settings.file_format = "PNG"
-	# 16-bit: under Standard a shaded face at noon is a few counts of 255,
-	# and a hue ratio out of those is noise. The probes read it as a
-	# fraction either way.
-	scene.render.image_settings.color_depth = "16"
+	scene.render.image_settings.file_format = "OPEN_EXR"
+	scene.render.image_settings.color_depth = "32"
+	scene.render.image_settings.exr_codec = "ZIP"
 
 	objs = sorted(n for n in os.listdir(OUT)
 			if "_vp" in n and (n.endswith(".obj") or n.endswith(".obj.gz")))
@@ -292,10 +323,12 @@ def main():
 		scene.camera = add_camera(pos, dire)
 		# cycles_vp6_1300_none.png: the dump's stem without the seed, so the
 		# render sits beside its .obj.gz without sharing a name with it.
-		png = "cycles_" + stem.split("_", 1)[1] + ".png"
-		scene.render.filepath = os.path.join(OUT, png)
-		print("render", png)
+		base = "cycles_" + stem.split("_", 1)[1]
+		exr = os.path.join(OUT, base + ".exr")
+		scene.render.filepath = exr
+		print("render", base)
 		bpy.ops.render.render(write_still=True)
+		expose(exr, os.path.join(OUT, base + ".png"))
 
 
 if __name__ == "__main__":
