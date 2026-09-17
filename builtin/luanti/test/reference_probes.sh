@@ -8,8 +8,8 @@
 #                                                    modes first, then read
 #
 # Each mode is compared against its own reference -- shadows against
-# official, unlit against official_noshadow, pbr against neither, being the
-# mode that is allowed to differ. **Hue is what this judges**: the ratio
+# official, unlit against official_noshadow, pbr against the path-traced
+# set. **Hue is what this judges**: the ratio
 # between channels on a surface, which is [GREEN_BIAS]'s subject. How much
 # brighter than Luanti a mode is belongs to [TOO_BRIGHT] and is printed
 # without an opinion.
@@ -41,19 +41,20 @@ snow|vp5_1000|60x40+420+540|no colour of its own to hide a cast
 leaf|vp5_1000|50x30+700+560|colourised, against snow
 "
 
-# mode -> the set it must match; pbr matches nothing on purpose
+# mode -> the set it must match; pbr's is the path-traced set, textured
+# since 2026-09-17 ([PATH_TRACE_TEX]), and read as ratios like the rest
 target_of() {
 	case "$1" in
 		*_shadows) echo official ;;
 		*_unlit)   echo official_noshadow ;;
+		*_pbr)     echo pathtrace ;;
 		*)         echo "" ;;
 	esac
 }
 
 # The picture a set has of a probe. The path-traced set names its renders
 # without the seed -- cycles_vp6_1300_none.png beside the dump -- and is a
-# reference like official: grey albedo, so it is read as ratios between
-# surfaces ([PATH_TRACE_REF]) and is no hue target for anything.
+# reference like official ([PATH_TRACE_REF]).
 file_of() {   # set pic -> path
 	case "$1" in
 		pathtrace*) echo "$shots/$1/cycles_$2_none.png" ;;
