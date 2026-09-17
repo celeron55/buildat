@@ -43,7 +43,9 @@ set(URHO3D_LIB_TYPE SHARED CACHE STRING "Urho3D library type (SHARED required by
 set(URHO3D_LUA TRUE CACHE BOOL "Enable Urho3D Lua")
 set(URHO3D_SAFE_LUA TRUE CACHE BOOL "Enable Urho3D Lua safety checks")
 set(URHO3D_ANGELSCRIPT FALSE CACHE BOOL "Enable Urho3D AngelScript")
-set(URHO3D_LUAJIT FALSE CACHE BOOL "Enable Urho3D LuaJIT")
+# LuaJIT is the runtime ([LUAJIT] in doc/plan/performance_plan.md); the
+# server's Luanti state and the client's sandbox are one Lua build
+set(URHO3D_LUAJIT TRUE CACHE BOOL "Enable Urho3D LuaJIT")
 if(NOT DEFINED URHO3D_64BIT)
 	if(CMAKE_SIZEOF_VOID_P EQUAL 8)
 		set(URHO3D_64BIT TRUE)
