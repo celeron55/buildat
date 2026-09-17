@@ -2401,10 +2401,28 @@ struct CApp: public App, public magic::Application
 			auto it = tex_names.find(tex);
 			if(it != tex_names.end())
 				return it->second;
-			const ss_ png = base+"_tex"+itos(tex_names.size())+".png";
+			const ss_ stem = base+"_tex"+itos(tex_names.size());
+			const ss_ png = stem+".png";
 			magic::SharedPtr<magic::Image> img = tex->GetImage();
 			if(img)
 				img->SavePNG(magic::String((dir+"/"+png).c_str()));
+			// The material maps the pbr shader reads beside the albedo --
+			// the atlas's derived normal (spots in alpha) and surface
+			// (roughness, spec strength, translucency, spots) -- as
+			// <stem>_normal.png and <stem>_spec.png when the material has
+			// them. [PT_MATERIALS]
+			const struct { magic::TextureUnit unit; const char *suffix; }
+					maps[] = {{magic::TU_NORMAL, "_normal"},
+					{magic::TU_SPECULAR, "_spec"}};
+			for(const auto &m : maps){
+				magic::Texture2D *t2 = dynamic_cast<magic::Texture2D*>(
+						mat->GetTexture(m.unit));
+				magic::SharedPtr<magic::Image> mi = t2 ? t2->GetImage() :
+						magic::SharedPtr<magic::Image>();
+				if(mi)
+					mi->SavePNG(magic::String(
+							(dir+"/"+stem+m.suffix+".png").c_str()));
+			}
 			tex_names[tex] = png;
 			return png;
 		};

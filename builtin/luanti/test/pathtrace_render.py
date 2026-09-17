@@ -203,6 +203,8 @@ def textured_material(name, png):
 	mat.use_nodes = True
 	nt = mat.node_tree
 	bsdf = nt.nodes.get("Principled BSDF")
+	# The values a material with no maps gets; one with maps overrides
+	# them below
 	bsdf.inputs["Roughness"].default_value = 0.9
 	bsdf.inputs["Specular IOR Level"].default_value = 0.0
 	if png and os.path.isfile(png):
@@ -220,6 +222,56 @@ def textured_material(name, png):
 		nt.links.new(tint.outputs["Color"], mul.inputs[7])
 		nt.links.new(mul.outputs[2], bsdf.inputs["Base Color"])
 		nt.links.new(tex.outputs["Alpha"], bsdf.inputs["Alpha"])
+		# [PT_MATERIALS]: the maps the pbr shader reads beside the albedo,
+		# derived per segment in impl/atlas.cpp. spec: roughness in r, spec
+		# strength in g, translucency in b, spots in a; normal: tangent
+		# space, spots in a. The reference takes the definitions and Cycles
+		# does the physics -- none of the shader's own arithmetic crosses.
+		# simplified: the spots (spec.a, normal.a) are a buildat gloss and
+		# light-through effect with no Principled input; left out.
+		spec_png = png[:-4] + "_spec.png"
+		if os.path.isfile(spec_png):
+			spec = nt.nodes.new("ShaderNodeTexImage")
+			spec.image = bpy.data.images.load(spec_png)
+			spec.image.colorspace_settings.name = "Non-Color"
+			spec.interpolation = "Closest"
+			sep = nt.nodes.new("ShaderNodeSeparateColor")
+			nt.links.new(spec.outputs["Color"], sep.inputs["Color"])
+			nt.links.new(sep.outputs["Red"], bsdf.inputs["Roughness"])
+			nt.links.new(sep.outputs["Green"],
+					bsdf.inputs["Specular IOR Level"])
+			# Translucency as the factor of a Translucent BSDF mixed in,
+			# tinted by the surface's own colour, which is what the shader's
+			# term is: what a leaf passes from behind
+			trans = nt.nodes.new("ShaderNodeBsdfTranslucent")
+			nt.links.new(mul.outputs[2], trans.inputs["Color"])
+			mix = nt.nodes.new("ShaderNodeMixShader")
+			nt.links.new(sep.outputs["Blue"], mix.inputs["Fac"])
+			nt.links.new(bsdf.outputs["BSDF"], mix.inputs[1])
+			nt.links.new(trans.outputs["BSDF"], mix.inputs[2])
+			# The cutout stays outside the mix: a transparent texel is air
+			# whichever BSDF is under it
+			transp = nt.nodes.new("ShaderNodeBsdfTransparent")
+			cut = nt.nodes.new("ShaderNodeMixShader")
+			nt.links.new(tex.outputs["Alpha"], cut.inputs["Fac"])
+			nt.links.new(transp.outputs["BSDF"], cut.inputs[1])
+			nt.links.new(mix.outputs["Shader"], cut.inputs[2])
+			out = nt.nodes.get("Material Output")
+			nt.links.new(cut.outputs["Shader"], out.inputs["Surface"])
+			bsdf.inputs["Alpha"].default_value = 1.0
+			for l in list(bsdf.inputs["Alpha"].links):
+				nt.links.remove(l)
+		normal_png = png[:-4] + "_normal.png"
+		if os.path.isfile(normal_png):
+			nrm = nt.nodes.new("ShaderNodeTexImage")
+			nrm.image = bpy.data.images.load(normal_png)
+			nrm.image.colorspace_settings.name = "Non-Color"
+			nrm.interpolation = "Closest"
+			nmap = nt.nodes.new("ShaderNodeNormalMap")
+			nmap.space = "TANGENT"
+			nmap.uv_map = "atlas"
+			nt.links.new(nrm.outputs["Color"], nmap.inputs["Color"])
+			nt.links.new(nmap.outputs["Normal"], bsdf.inputs["Normal"])
 	else:
 		bsdf.inputs["Base Color"].default_value = (0.55, 0.55, 0.55, 1)
 	mat.use_backface_culling = False
