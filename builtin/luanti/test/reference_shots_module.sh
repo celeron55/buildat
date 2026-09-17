@@ -3,13 +3,17 @@
 # same world and the same fixture official Luanti's half used. See
 # doc/plan/rendering_plan.md.
 #
-#   builtin/luanti/test/reference_shots_module.sh [mode] [world]
+#   builtin/luanti/test/reference_shots_module.sh [mode ...] [world]
 #
 # The mode is unlit, shadows or pbr and defaults to pbr, which is what the
 # launcher draws when nothing asks otherwise. Each one has its own reference:
 # unlit against official_noshadow/, shadows against official/, pbr against
 # nothing but the sunlit anchor. See [RENDER_MODES] in
-# doc/plan/rendering_plan.md.
+# doc/plan/rendering_plan.md. **Several modes share one server**: the mode
+# is the client's to ask for (BUILDAT_LUANTI_PBR on the client's process),
+# so `unlit shadows pbr` boots VoxeLibre once and runs three clients against
+# it, which is the ten-minute round of [PROBE_CYCLE] rather than the
+# thirty-minute one. A `world` argument is told from a mode by being a path.
 #
 # The world is the cache reference_shots.sh generated -- one engine makes the
 # terrain and all three clients are pointed at it, so a difference between the
@@ -71,15 +75,26 @@ if [ -n "${RANGE:-}" ]; then
 	{ echo "rawset(_G, \"REFSHOT_RANGE\", $RANGE)"; cat "$prev"; } > "$fixture"
 fi
 
-mode="${1:-pbr}"
-case "$mode" in
-unlit|shadows|pbr) ;;
-*) echo "unknown mode: $mode (wanted unlit, shadows or pbr)" >&2; exit 2 ;;
-esac
-world="${2:-$here/local/reference_worlds/$seed}"
-out="${OUT_DIR:-$here/local/reference_shots/module_$mode}"
+modes=""
+world="$here/local/reference_worlds/$seed"
+for arg in "$@"; do
+	case "$arg" in
+	unlit|shadows|pbr) modes="$modes $arg" ;;
+	*/*) world="$arg" ;;
+	*) echo "unknown mode: $arg (wanted unlit, shadows or pbr)" >&2; exit 2 ;;
+	esac
+done
+modes="${modes:- pbr}"
+# The server's own mode is the first one asked for; every client asks for
+# its own, so this only matters for a client that says nothing
+first_mode=${modes# }
+first_mode=${first_mode%% *}
 save=buildat_test_refviews
 tmp=$(mktemp -d)
+# The server stays up between clients
+prev="$fixture"
+fixture=$(mktemp /tmp/refviews_keep.XXXXXX.lua)
+{ echo 'rawset(_G, "REFSHOT_KEEP", true)'; cat "$prev"; } > "$fixture"
 
 [ -d "$world" ] || { echo "no cached world at $world" >&2
 	echo "run: $me/reference_shots.sh reference" >&2; exit 2; }
@@ -104,7 +119,7 @@ port=$(( 29600 + (RANDOM % 90) ))
 # it. Zero here, overridable for a run that wants to see the other thing.
 BUILDAT_LUANTI_ORBIT_TILT="${BUILDAT_LUANTI_ORBIT_TILT:-0}" \
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
-	BUILDAT_LUANTI_IMPORT="$world" BUILDAT_LUANTI_PBR="$mode" \
+	BUILDAT_LUANTI_IMPORT="$world" BUILDAT_LUANTI_PBR="$first_mode" \
 	BUILDAT_VOXELWORLD_KEEP_LOADED=1 \
 	BUILDAT_LUANTI_LUA="$fixture" \
 	bin/buildat_server -m ../games/luanti_launcher -D ../user -P "$port" 2>&1 \
@@ -133,9 +148,20 @@ srv=$(pgrep -x buildat_server | head -1)
 # client quit mid-run with eleven states still to shoot.
 { echo "delay 45000"; echo "keypress F5"
 	echo "delay 3600000"; echo "quit"; } > "$tmp/cmds.txt"
+
+status=0
+shots_dir="$here/user/screenshots"
+# One client per mode against the one server. Each client's set is the
+# part of the server log written while it ran: the fixture starts a set on
+# every join, so the log is sliced from where this client came in.
+for mode in $modes; do
+out="${OUT_DIR:-$here/local/reference_shots/module_$mode}"
+from=$(wc -l < "$tmp/srv.log")
+BUILDAT_LUANTI_PBR="$mode" \
 bin/buildat -s "localhost:$port" -w 1280x720 -l 3 -c @"$tmp/cmds.txt" \
-	> "$tmp/cli.log" 2>&1 &
+	> "$tmp/cli_$mode.log" 2>&1 &
 cli=$!
+since() { tail -n +"$((from + 1))" "$tmp/srv.log"; }
 
 # **The client takes its own pictures and the fixture says when the set is
 # done** -- see [ONE_CYCLE] in doc/plan/rendering_plan.md. Nothing here waits
@@ -148,18 +174,16 @@ cli=$!
 # lives. The client cannot name them -- buildat.take_screenshot() names by
 # the date and the time on purpose -- so the fixture logs the pairing and
 # this reads it.
-shots_dir="$here/user/screenshots"
 for i in $(seq 1 1800); do
-	grep -q "REFSHOT done\|REFSHOT failed" "$tmp/srv.log" 2>/dev/null && break
+	since | grep -q "REFSHOT done\|REFSHOT failed" 2>/dev/null && break
 	kill -0 "$cli" 2>/dev/null || break
 	sleep 2
 done
 sleep 2
-status=0
-grep -q "REFSHOT done" "$tmp/srv.log" 2>/dev/null || status=1
-if [ "$status" -ne 0 ]; then
-	echo "the run did not finish:" >&2
-	grep -a "REFSHOT failed" "$tmp/srv.log" | tail -1 >&2
+if ! since | grep -q "REFSHOT done" 2>/dev/null; then
+	status=1
+	echo "the $mode run did not finish:" >&2
+	since | grep -a "REFSHOT failed" | tail -1 >&2
 fi
 
 mkdir -p "$out"
@@ -175,7 +199,7 @@ while read -r stem file; do
 		missing=$((missing + 1))
 	fi
 done <<EOF
-$(grep -a "REFSHOT shot " "$tmp/srv.log" | sed 's/^.*REFSHOT shot //' | sort -u)
+$(since | grep -a "REFSHOT shot " | sed 's/^.*REFSHOT shot //' | sort -u)
 EOF
 echo "$taken pictures into $out"
 [ "$missing" -eq 0 ] || status=1
@@ -199,7 +223,7 @@ if [ -n "${PATHTRACE:-}" ]; then
 			status=1
 		fi
 	done <<EOF
-$(grep -a "REFSHOT mesh " "$tmp/srv.log" | sed 's/^.*REFSHOT mesh //' | sort -u)
+$(since | grep -a "REFSHOT mesh " | sed 's/^.*REFSHOT mesh //' | sort -u)
 EOF
 	echo "$mesh_n meshes into $mesh_out"
 fi
@@ -212,6 +236,8 @@ fi
 
 kill "$cli" 2>/dev/null
 sleep 2
+done
+
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 120); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 kill -9 "$srv" 2>/dev/null

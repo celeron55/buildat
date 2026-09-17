@@ -90,6 +90,7 @@ buildat.bignum
 
 buildat.list_preferences() -> {name, ...}
 buildat.get_preference(name) -> number or boolean, nil for an unknown name
+buildat.get_env(name) -> string, or nil when unset or not BUILDAT_-prefixed
 buildat.set_preference(name, value) -> true, or false and why
 - The preferences under "Client preferences" below. The C++ side is the
   authority: set_preference() parses and range checks a value through the same

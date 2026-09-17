@@ -5979,14 +5979,16 @@ struct Module: public interface::Module, public luanti::Interface
 		// constant for a session rather than getting a packet of its own.
 		// See [RENDER_MODES] in doc/plan/rendering_plan.md.
 		//
-		// It is read here and not in the client's Lua because that half runs
-		// in the sandbox, where there is no getenv;
-		// extensions/luanti_client reads the same variable for itself, being
-		// outside it. An unset variable means this client's own default,
-		// which is pbr. The numbers keep working for whatever already passes
+		// The client asks for its own -- the packet carries what its
+		// BUILDAT_LUANTI_PBR says, through buildat.get_env() -- and the
+		// server's environment is the default for one that says nothing,
+		// so one server can serve a client in each mode ([PROBE_CYCLE]).
+		// An unset variable on both means this client's own default, which
+		// is pbr. The numbers keep working for whatever already passes
 		// them: 0 was the unlit path before either had a name.
 		const char *mode = getenv("BUILDAT_LUANTI_PBR");
-		ss_ m = (mode != nullptr) ? ss_(mode) : ss_("");
+		ss_ m = !packet.data.empty() ? packet.data :
+				(mode != nullptr) ? ss_(mode) : ss_("");
 		if(m == "0")
 			m = "unlit";
 		else if(m == "" || m == "1")

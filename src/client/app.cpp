@@ -1097,6 +1097,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(get_preference)
 		DEF_BUILDAT_FUNC(set_preference)
 		DEF_BUILDAT_FUNC(list_preferences)
+		DEF_BUILDAT_FUNC(get_env)
 
 		// Create a scene that will be synchronized from the server
 		m_scene = new magic::Scene(context_);
@@ -2053,6 +2054,26 @@ struct CApp: public App, public magic::Application
 		self->apply_changed_preferences(before);
 		save_preferences(self->m_options);
 		lua_pushboolean(L, 1);
+		return 1;
+	}
+
+	// get_env(name) -> the environment variable, or nil when unset or when
+	// the name does not start with BUILDAT_. A knob a harness sets on the
+	// client's process, the way extensions/luanti_client reads its own
+	// outside the sandbox; the prefix is the fence, so a game cannot read
+	// the user's environment through this.
+	static int l_get_env(lua_State *L)
+	{
+		const ss_ name = luaL_checkstring(L, 1);
+		if(name.compare(0, 8, "BUILDAT_") != 0){
+			lua_pushnil(L);
+			return 1;
+		}
+		const char *v = getenv(name.c_str());
+		if(v)
+			lua_pushstring(L, v);
+		else
+			lua_pushnil(L);
 		return 1;
 	}
 

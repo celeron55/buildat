@@ -2408,8 +2408,8 @@ end
 
 -- sub_world_info(f) -> f(info) once it has arrived, and now if it already
 -- has. A game's client half needs info.mode -- "unlit", "shadows" or "pbr",
--- see [RENDER_MODES] -- before it draws its first chunk, and cannot ask the
--- environment for it itself, being in the sandbox.
+-- see [RENDER_MODES] -- before it draws its first chunk; the answer is to
+-- what this client asked for below, or the server's default.
 function M.sub_world_info(f)
 	world_info_subs[#world_info_subs + 1] = f
 	if world_info.version ~= "" then
@@ -2536,7 +2536,12 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	refshot_token = nil
 end)
 
-buildat.send_packet("luanti:get_world_info", "")
+-- The mode is this client's to ask for -- BUILDAT_LUANTI_PBR on its own
+-- process, the same variable extensions/luanti_client reads -- and the
+-- server's environment is the default for a client that says nothing. That
+-- is what lets one server serve a client in each mode; see [PROBE_CYCLE].
+buildat.send_packet("luanti:get_world_info",
+		buildat.get_env("BUILDAT_LUANTI_PBR") or "")
 buildat.send_packet("luanti:get_translations", "")
 
 return M

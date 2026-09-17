@@ -690,8 +690,11 @@ PlayerRef.__index = PlayerRef
 -- name, which is what Luanti uses and what a mod stores
 core.objects_by_guid = {}
 
+-- False once the player has left: Luanti's answers on the RemotePlayer
+-- behind the ref, which is gone by then, and a mod's timer that outlives
+-- the player asks this first
 function PlayerRef:is_player()
-	return true
+	return state_of(self) ~= nil
 end
 
 -- A player's client moves the player and says so; when the server moves one

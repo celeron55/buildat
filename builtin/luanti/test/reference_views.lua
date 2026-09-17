@@ -434,7 +434,12 @@ core.register_on_joinplayer(function(player)
 	for _, st in ipairs(states) do
 		wanted[st.view] = true
 	end
-	if core.__forceload_block_raw then
+	-- A second client on the same server finds the world pinned already
+	-- (REFSHOT_KEEP below); the HUD line is the new player's
+	hud_id = nil
+	if #pinned > 0 then
+		core.log("action", "REFSHOT already pinned " .. #pinned .. " blocks")
+	elseif core.__forceload_block_raw then
 		for v, _ in pairs(wanted) do
 			keep_loaded(VIEWS[v].pos, v)
 		end
@@ -488,7 +493,11 @@ core.register_on_joinplayer(function(player)
 			core.log("action", "REFSHOT shot " .. pair[1] .. " " .. pair[2])
 		end
 		say("refshot: done, " .. #shots .. " pictures")
-		core.request_shutdown("REFSHOT: the set is taken")
+		-- REFSHOT_KEEP: the server stays for the next client, which is how
+		-- one server serves a client in each mode -- see [PROBE_CYCLE]
+		if not rawget(_G, "REFSHOT_KEEP") then
+			core.request_shutdown("REFSHOT: the set is taken")
+		end
 	end
 
 	local function aim(i, left)

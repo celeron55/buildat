@@ -70,6 +70,7 @@ buildat.compose_image     = __buildat_compose_image
 -- read_image(resource_name) -> w, h, rgba. The pixels of an image, for
 -- whoever has to look at them rather than draw them.
 buildat.read_image        = __buildat_read_image
+buildat.get_env           = __buildat_get_env
 
 buildat.safe.disconnect    = __buildat_disconnect
 buildat.safe.set_ui_scale  = __buildat_set_ui_scale
@@ -135,6 +136,11 @@ buildat.safe.compose_image            = __buildat_compose_image
 -- returns. See l_take_screenshot() in src/client/app.cpp.
 buildat.safe.take_screenshot          = __buildat_take_screenshot
 buildat.safe.dump_meshes              = __buildat_dump_meshes
+-- get_env(name) -> the variable, or nil. Only BUILDAT_-prefixed names, so a
+-- server's Lua cannot read the user's environment; what it is for is a knob
+-- a harness sets on the client's process, such as the rendering mode. See
+-- l_get_env() in src/client/app.cpp.
+buildat.safe.get_env                  = __buildat_get_env
 -- get_cache_path() -> the directory those two work in. The share and user
 -- paths stay out of the sandbox; this is here because writing a file under
 -- the cache means knowing where the cache is.
