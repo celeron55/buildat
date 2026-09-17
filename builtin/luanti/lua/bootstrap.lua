@@ -4432,11 +4432,19 @@ local function sweep_sections(id_sets, on_hits)
 end
 
 -- One rule over the voxels of its kind that one section turned out to hold
-local function run_abm(abm, hits)
+-- Runs the rule over its hits from `from` and returns where it stopped:
+-- nil for the end, or the index to carry on from when the deadline
+-- passed. Looked at every 64 hits, since a hit is a get_node and a
+-- mod's action, microseconds to milliseconds.
+local function run_abm(abm, hits, from, until_us)
 	local chance = abm.chance or 1
 	local min_y = abm.min_y or -32768
 	local max_y = abm.max_y or 32767
-	for i = 1, #hits, 3 do
+	for i = from or 1, #hits, 3 do
+		if i % 192 == 1 and i > 1 and until_us and
+				core.get_us_time() >= until_us then
+			return i
+		end
 		local y = hits[i + 1]
 		if y >= min_y and y <= max_y and
 				(chance <= 1 or math.random(chance) == 1) then
@@ -4463,10 +4471,11 @@ end
 -- which is what a playtest of it felt as the game being broken. Luanti
 -- spends a share of its own step on ABMs for the same reason.
 --
--- simplified: the sweep is put down between one section's batch of rules and
--- the next, so a single section whose rules are slow still overshoots by
--- that much. Finer than that means stopping in the middle of a rule's own
--- hits, which wants the hits kept across steps.
+-- The sweep is put down inside a batch as well: the hits of the batch are
+-- kept on the sweep with the rule and the hit it got to, so a section
+-- whose rules are slow overshoots by 64 hits of one rule and not by the
+-- section. Before that one box's batch was 3.5 s of a step in VoxeLibre
+-- (the fuzz run, 2026-09-17), with the budget looked at only after it.
 local ABM_BUDGET_S = 0.2
 
 -- Where a sweep that ran out of budget got to: which rules it is for, the
@@ -4526,11 +4535,31 @@ local function run_abms(dtime)
 		for k = sweep.first, last do
 			batch[#batch + 1] = sweep.sets[k]
 		end
-		local found = __find_ids(box[1], box[2], box[3], box[4], box[5],
-				box[6], batch)
-		for k = sweep.first, last do
-			run_abm(abms[sweep.due[k]], found[k - sweep.first + 1])
+		-- The batch's hits, read once and kept while the deadline
+		-- interrupts the rules over them
+		if sweep.found == nil then
+			sweep.found = __find_ids(box[1], box[2], box[3], box[4], box[5],
+					box[6], batch)
+			sweep.k = sweep.first
+			sweep.at = nil
 		end
+		while sweep.k <= last do
+			local stopped = run_abm(abms[sweep.due[sweep.k]],
+					sweep.found[sweep.k - sweep.first + 1], sweep.at, until_us)
+			if stopped then
+				sweep.at = stopped
+				return
+			end
+			sweep.at = nil
+			sweep.k = sweep.k + 1
+			if core.get_us_time() >= until_us then
+				if sweep.k > last then
+					break
+				end
+				return
+			end
+		end
+		sweep.found = nil
 		sweep.first = last + 1
 		if sweep.first > #sweep.sets then
 			sweep.first = 1
