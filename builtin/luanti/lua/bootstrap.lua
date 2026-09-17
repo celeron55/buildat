@@ -2144,11 +2144,273 @@ end
 function core.clear_registered_schematics()
 	core.__registered_schematics = {}
 end
-stub("read_schematic", nil)
+-- A schematic read into the table form, which is what read_schematic()
+-- answers with and what a mod builds by hand: {size, yslice_prob, data},
+-- data x fastest then y then z, one {name, prob, param2, force_place}
+-- per node. A .mts file is 'MTSM', u16 version, u16 x y z, a u8 per y
+-- slice (version 3 up), u16 names each as u16 length and bytes, then a
+-- zlib stream of u16 ids, u8 param1 and u8 param2 for every node --
+-- builtin/luanti_mapgen/vendor/mg_schematic.cpp reads the same bytes.
+local PROB_ALWAYS = 0x7F
+local FORCE_PLACE = 0x80
+
+local function be16(str, i)
+	local a, b = str:byte(i, i + 1)
+	return a * 256 + b
+end
+
+local function read_mts(path)
+	local f = io.open(path, "rb")
+	if not f then
+		return nil
+	end
+	local str = f:read("*a")
+	f:close()
+	if str:sub(1, 4) ~= "MTSM" then
+		return nil
+	end
+	local version = be16(str, 5)
+	local sx, sy, sz = be16(str, 7), be16(str, 9), be16(str, 11)
+	local i = 13
+	local yslice_prob = {}
+	for y = 0, sy - 1 do
+		local prob = PROB_ALWAYS
+		if version >= 3 then
+			prob = str:byte(i)
+			i = i + 1
+		end
+		yslice_prob[#yslice_prob + 1] = {ypos = y, prob = prob}
+	end
+	local n_names = be16(str, i)
+	i = i + 2
+	local names = {}
+	for k = 1, n_names do
+		local len = be16(str, i)
+		local name = str:sub(i + 2, i + 1 + len)
+		-- A v1 "ignore" is air that is never placed
+		names[k] = name == "ignore" and "air" or name
+		i = i + 2 + len
+	end
+	local n = sx * sy * sz
+	local raw = core.decompress(str:sub(i), "deflate")
+	if not raw or #raw < n * 4 then
+		return nil
+	end
+	local data = {}
+	for k = 1, n do
+		local id = be16(raw, k * 2 - 1)
+		local p1 = raw:byte(n * 2 + k)
+		local p2 = raw:byte(n * 3 + k)
+		data[k] = {name = names[id + 1] or "air", param2 = p2,
+				prob = p1 % 128 == PROB_ALWAYS and 255 or (p1 % 128) * 2,
+				force_place = p1 >= FORCE_PLACE}
+	end
+	return {size = {x = sx, y = sy, z = sz}, yslice_prob = yslice_prob,
+			data = data}
+end
+
+-- A cache by path: a village places the same house many times over
+local mts_cache = {}
+local function schematic_table(sch)
+	if type(sch) == "number" then
+		local kept = core.__registered_schematics[sch]
+		sch = kept and kept.schematic
+	end
+	if type(sch) == "table" then
+		return sch
+	end
+	if type(sch) ~= "string" then
+		return nil
+	end
+	local have = mts_cache[sch]
+	if have == nil then
+		have = read_mts(sch) or false
+		mts_cache[sch] = have
+	end
+	return have or nil
+end
+
+function core.read_schematic(schematic, options)
+	local t = schematic_table(schematic)
+	if not t then
+		return nil
+	end
+	-- Handed out as a copy, since a mod edits what it is given
+	local out = {size = {x = t.size.x, y = t.size.y, z = t.size.z},
+			yslice_prob = {}, data = {}}
+	for k, v in ipairs(t.yslice_prob) do
+		out.yslice_prob[k] = {ypos = v.ypos, prob = v.prob}
+	end
+	for k, v in ipairs(t.data) do
+		out.data[k] = {name = v.name, param2 = v.param2, prob = v.prob,
+				force_place = v.force_place}
+	end
+	return out
+end
+
+-- Only the "lua" format, which is the one a mod parses back; the .mts
+-- writer is not here
+function core.serialize_schematic(schematic, format, options)
+	if format ~= "lua" then
+		return nil
+	end
+	local t = core.read_schematic(schematic)
+	if not t then
+		return nil
+	end
+	-- Written out plainly, since a mod does `loadstring(s .. " return
+	-- schematic")()` and core.serialize() starts with a local
+	local out = {"schematic = {size = {x=" .. t.size.x .. ", y=" ..
+			t.size.y .. ", z=" .. t.size.z .. "}, yslice_prob = {"}
+	for _, v in ipairs(t.yslice_prob) do
+		out[#out + 1] = "{ypos=" .. v.ypos .. ", prob=" .. v.prob .. "},"
+	end
+	out[#out + 1] = "}, data = {"
+	for _, v in ipairs(t.data) do
+		out[#out + 1] = string.format("{name=%q, prob=%d, param2=%d%s},",
+				v.name, v.prob or 255, v.param2 or 0,
+				v.force_place and ", force_place=true" or "")
+	end
+	out[#out + 1] = "}}"
+	return table.concat(out, "\n")
+end
+
+-- simplified: a rotated node keeps its param2 unless it is an upright
+-- facedir, whose facing turns with the schematic; wallmounted and the
+-- other facedir axes would need nodedef.cpp's rotateAlongYAxis tables.
+local function rotate_param2(name, param2, rot)
+	if rot == 0 then
+		return param2
+	end
+	local def = core.registered_nodes[name]
+	local pt2 = def and def.paramtype2
+	if (pt2 == "facedir" or pt2 == "colorfacedir" or pt2 == "4dir" or
+			pt2 == "color4dir") and math.floor(param2 % 32 / 4) == 0 then
+		local high = param2 - param2 % 4
+		return high + (param2 % 4 + rot) % 4
+	end
+	return param2
+end
+
+-- What place_schematic() and place_schematic_on_vmanip() share: every node
+-- of the schematic through `put(pos, node)`, with the rotation, the
+-- replacements, the probabilities and the centering flags applied the
+-- way mg_schematic.cpp's blitToVManip and placeOnVManip apply them.
+-- `occupied(pos)` says whether a node is already there for the
+-- force_placement rule.
+local function blit_schematic(sch, pos, rotation, replacements,
+		force_placement, flags, put, occupied)
+	local t = schematic_table(sch)
+	if not t then
+		return false
+	end
+	if type(sch) == "number" then
+		local kept = core.__registered_schematics[sch]
+		local merged = {}
+		for from, to in pairs(kept and kept.replacements or {}) do
+			merged[from] = to
+		end
+		for from, to in pairs(replacements or {}) do
+			merged[from] = to
+		end
+		replacements = merged
+	end
+	replacements = replacements or {}
+	local rot = ({["0"] = 0, ["90"] = 1, ["180"] = 2, ["270"] = 3})[
+			tostring(rotation or "0")]
+	if rotation == "random" or rot == nil then
+		rot = math.random(0, 3)
+	end
+	local sx, sy, sz = t.size.x, t.size.y, t.size.z
+	local ex, ez = sx, sz
+	if rot == 1 or rot == 3 then
+		ex, ez = sz, sx
+	end
+	local p = {x = math.floor(pos.x), y = math.floor(pos.y),
+			z = math.floor(pos.z)}
+	flags = flags or ""
+	if flags:find("place_center_x") then
+		p.x = p.x - math.floor((ex - 1) / 2)
+	end
+	if flags:find("place_center_y") then
+		p.y = p.y - math.floor((sy - 1) / 2)
+	end
+	if flags:find("place_center_z") then
+		p.z = p.z - math.floor((ez - 1) / 2)
+	end
+	local ystride, zstride = sx, sx * sy
+	-- Where the schematic's own x and z go when it is turned, as a
+	-- start index and a step per axis
+	local i_start, step_x, step_z
+	if rot == 1 then
+		i_start, step_x, step_z = sx - 1, zstride, -1
+	elseif rot == 2 then
+		i_start, step_x, step_z = zstride * (sz - 1) + sx - 1, -1, -zstride
+	elseif rot == 3 then
+		i_start, step_x, step_z = zstride * (sz - 1), -zstride, 1
+	else
+		i_start, step_x, step_z = 0, 1, zstride
+	end
+	for y = 0, sy - 1 do
+		local slice = t.yslice_prob[y + 1]
+		local sprob = slice and slice.prob or 255
+		if sprob == PROB_ALWAYS then
+			sprob = 255
+		end
+		if sprob >= 255 or sprob > math.random(1, 255) then
+			for z = 0, ez - 1 do
+				local i = z * step_z + y * ystride + i_start
+				for x = 0, ex - 1 do
+					local node = t.data[i + 1]
+					local prob = node and (node.prob or 255) or 0
+					if prob == PROB_ALWAYS then
+						prob = 255
+					end
+					if node and prob > 0 and node.name ~= "ignore" and
+							(prob >= 255 or prob > math.random(1, 255)) then
+						local at = {x = p.x + x, y = p.y + y, z = p.z + z}
+						if force_placement or node.force_place or
+								not occupied(at) then
+							local name = replacements[node.name] or node.name
+							put(at, {name = name, param2 = rotate_param2(
+									name, node.param2 or 0, rot)})
+						end
+					end
+					i = i + step_x
+				end
+			end
+		end
+	end
+	return true
+end
+
+function core.place_schematic(pos, schematic, rotation, replacements,
+		force_placement, flags)
+	return blit_schematic(schematic, pos, rotation, replacements,
+			force_placement, flags,
+			function(at, node)
+				core.set_node(at, node)
+			end,
+			function(at)
+				local name = core.get_node(at).name
+				return name ~= "air" and name ~= "ignore"
+			end)
+end
+
+function core.place_schematic_on_vmanip(vmanip, pos, schematic, rotation,
+		replacements, force_placement, flags)
+	return blit_schematic(schematic, pos, rotation, replacements,
+			force_placement, flags,
+			function(at, node)
+				vmanip:set_node_at(at, node)
+			end,
+			function(at)
+				local name = vmanip:get_node_at(at).name
+				return name ~= "air" and name ~= "ignore"
+			end)
+end
+
 stub("create_schematic", nil)
-stub("place_schematic", nil)
-stub("place_schematic_on_vmanip", nil)
-stub("serialize_schematic", nil)
 
 --
 -- The map

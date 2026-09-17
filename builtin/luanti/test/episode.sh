@@ -34,13 +34,13 @@ case "$EPISODE" in
 dig)
 	# Straight down for three seconds: the dirt underfoot, by hand
 	{ echo "delay 40000"; echo "look 0 -89"; echo "mouse_down left"
-		echo "delay 3000"; echo "mouse_up left"; echo "delay 30000"
+		echo "delay 3000"; echo "mouse_up left"; echo "delay 600000"
 		echo "quit"; } > "$out/cmds.txt" ;;
 place)
 	# The hotbar's first slot is empty, so a place does nothing; what is
 	# asserted is that nothing happened on either side
 	{ echo "delay 40000"; echo "look 0 -89"; echo "mouse_click right"
-		echo "delay 30000"; echo "quit"; } > "$out/cmds.txt" ;;
+		echo "delay 600000"; echo "quit"; } > "$out/cmds.txt" ;;
 *) echo "unknown episode $EPISODE (dig, place)" >&2; exit 2 ;;
 esac
 

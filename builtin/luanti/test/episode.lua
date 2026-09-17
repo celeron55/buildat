@@ -114,14 +114,23 @@ local function census(player)
 		end
 	end
 	table.sort(inv)
-	local objs = 0
+	-- Objects by name, so a difference says which one: a dropped item
+	-- and a mob are not the same "2"
+	local objs = {}
 	for _, obj in ipairs(core.get_objects_inside_radius(ORIGIN, 10)) do
 		if not obj:is_player() then
-			objs = objs + 1
+			local le = obj:get_luaentity()
+			local n = le and le.name or "?"
+			objs[n] = (objs[n] or 0) + 1
 		end
 	end
+	local olist = {}
+	for n, c in pairs(objs) do
+		olist[#olist + 1] = n .. ":" .. c
+	end
+	table.sort(olist)
 	return "nodes=" .. table.concat(parts, ",") .. " inv=" ..
-			table.concat(inv, ",") .. " objs=" .. objs
+			table.concat(inv, ",") .. " objs=" .. table.concat(olist, ",")
 end
 
 core.register_on_joinplayer(function(player)
@@ -151,6 +160,11 @@ core.register_on_joinplayer(function(player)
 			player:set_look_vertical(math.pi / 2)
 			core.log("action", "episode: ready " .. NAME)
 			core.after(SECONDS, function()
+				if not player:is_player() then
+					core.log("action", "episode: FAILED the player left " ..
+							"before the census")
+					return
+				end
 				core.log("action", "episode: census " .. NAME .. " " ..
 						census(player))
 			end)
