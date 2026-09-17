@@ -4,8 +4,8 @@
 -- **The same file serves all three clients**, because both buildat clients
 -- run the game's code through this module and official Luanti runs it as a
 -- worldmod. See [OFFICIAL_SHOTS] in doc/plan/rendering_plan.md, which
--- settles the set: mineclone2 only, two worlds, five viewpoints, twenty
--- pictures a client.
+-- settles the set: mineclone2 only, one world, eight viewpoints,
+-- twenty-three pictures a client.
 --
 -- As this module's fixture:
 --
@@ -17,9 +17,8 @@
 -- As official Luanti's, copied to <world>/worldmods/refviews/init.lua.
 --
 -- **Which viewpoints run is decided by the world's seed**, so the file needs
--- no argument: the second reference world gets 1-4 and the snow fixture gets
--- 5. A world that is neither gets all of them, which is what a hand run
--- wants.
+-- no argument: the reference world gets all eight. A world that is not that
+-- seed gets all of them at 13:00, which is what a hand run wants.
 --
 -- **Each state is announced in the log** as `REFSHOT <n> <name>`, and the
 -- name is the file stem the shot is saved under. A script that drives the
@@ -188,9 +187,25 @@ local function probe_states()
 			{view = 7, hour = "1300", weather = "none"}}
 end
 
+-- One dump per viewpoint at its primary hour, for [PATH_TRACE_REF].
+local function pathtrace_states()
+	local out = {}
+	for v = 1, 4 do
+		out[#out + 1] = {view = v, hour = "1300", weather = "none"}
+	end
+	out[#out + 1] = {view = 5, hour = "1000", weather = "none"}
+	for v = 6, 8 do
+		out[#out + 1] = {view = v, hour = "1300", weather = "none"}
+	end
+	return out
+end
+
 local function states_of(seed)
 	if rawget(_G, "REFSHOT_PROBE") then
 		return probe_states()
+	end
+	if rawget(_G, "REFSHOT_PATHTRACE") then
+		return pathtrace_states()
 	end
 	-- Viewpoint 5 is the snow one and keeps its own hours: it is a white
 	-- field, so what it is for is the top of the range and the night, not
@@ -511,7 +526,8 @@ core.register_on_joinplayer(function(player)
 		-- Three seconds: one was photographing the previous state's camera.
 		if not marked and waited_shot >= 3 and view_is_loaded(st.view) then
 			marked = true
-			__luanti_refshot_mark(i, v.pos.x, v.pos.y, v.pos.z)
+			__luanti_refshot_mark(i, v.pos.x, v.pos.y, v.pos.z,
+					rawget(_G, "REFSHOT_PATHTRACE") and true or false)
 		end
 		waited_shot = waited_shot + REAIM
 		if waited_shot >= cap then
@@ -528,12 +544,15 @@ core.register_on_joinplayer(function(player)
 
 	-- What the client answers with, and the only thing it has to say: the
 	-- name of the file it wrote. This set the state, so it pairs them.
-	function core.__refshot_shot(t, name)
+	function core.__refshot_shot(t, name, mesh)
 		if t ~= token then
 			return
 		end
 		shots[#shots + 1] = {name_of(t), name}
 		core.log("action", "REFSHOT shot " .. name_of(t) .. " " .. name)
+		if mesh and mesh ~= "" then
+			core.log("action", "REFSHOT mesh " .. name_of(t) .. " " .. mesh)
+		end
 		if t >= #states * passes then
 			finish()
 			return

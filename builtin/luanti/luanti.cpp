@@ -5044,6 +5044,9 @@ struct Module: public interface::Module, public luanti::Interface
 		flat.push_back(ftos((float)luaL_optnumber(L, 2, 0.0)));
 		flat.push_back(ftos((float)luaL_optnumber(L, 3, 0.0)));
 		flat.push_back(ftos((float)luaL_optnumber(L, 4, 0.0)));
+		// Optional fifth: "1" means dump the client's meshes too
+		if(lua_gettop(L) >= 5 && lua_toboolean(L, 5))
+			flat.push_back("1");
 		sv_<ss_> names;
 		for(const auto &pair : self->m_player_peers)
 			names.push_back(pair.first);
@@ -5786,7 +5789,12 @@ struct Module: public interface::Module, public luanti::Interface
 		}
 		lua_pushinteger(L, atoi(flat[0].c_str()));
 		lua_pushlstring(L, flat[1].c_str(), flat[1].size());
-		if(lua_pcall(L, 2, 0, 0) != 0)
+		int nargs = 2;
+		if(flat.size() >= 3){
+			lua_pushlstring(L, flat[2].c_str(), flat[2].size());
+			nargs = 3;
+		}
+		if(lua_pcall(L, nargs, 0, 0) != 0)
 			log_w(MODULE, "__refshot_shot(): %s", lua_tostring(L, -1));
 		lua_settop(L, base);
 	}

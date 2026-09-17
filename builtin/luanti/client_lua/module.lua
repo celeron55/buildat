@@ -2473,6 +2473,7 @@ buildat.send_packet("luanti:get_dig_props", "")
 -- state in flight.
 local refshot_token = nil
 local refshot_still = 0
+local refshot_dump = false
 
 local refshot_at = nil
 
@@ -2484,6 +2485,7 @@ buildat.sub_packet("luanti:refshot_mark", function(data)
 	refshot_at = {x = tonumber(values[2] or "") or 0,
 			y = tonumber(values[3] or "") or 0,
 			z = tonumber(values[4] or "") or 0}
+	refshot_dump = values[5] == "1"
 	refshot_still = 0
 end)
 
@@ -2525,8 +2527,12 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		end
 		name = "ERROR " .. tostring(err)
 	end
+	local mesh = ""
+	if refshot_dump and buildat.dump_meshes then
+		mesh = buildat.dump_meshes() or ""
+	end
 	buildat.send_packet("luanti:refshot_shot", cereal.binary_output(
-			{tostring(refshot_token), name}, {"array", "string"}))
+			{tostring(refshot_token), name, mesh}, {"array", "string"}))
 	refshot_token = nil
 end)
 

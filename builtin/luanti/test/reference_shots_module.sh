@@ -44,6 +44,12 @@ if [ -n "${PROBE:-}" ]; then
 	{ echo 'rawset(_G, "REFSHOT_PROBE", true)'; cat "$me/reference_views.lua"; \
 			} > "$fixture"
 fi
+# PATHTRACE=1: one dump per viewpoint at its primary hour, for [PATH_TRACE_REF].
+if [ -n "${PATHTRACE:-}" ]; then
+	fixture=$(mktemp /tmp/refviews_pathtrace.XXXXXX.lua)
+	{ echo 'rawset(_G, "REFSHOT_PATHTRACE", true)'; cat "$me/reference_views.lua"; \
+			} > "$fixture"
+fi
 # HOLD=<seconds> for the calibration ladder: halve it until the run stops
 # producing good results and then operate at four times what broke. See
 # "Calibrate the timings rather than guessing them" in
@@ -162,6 +168,28 @@ $(grep -a "REFSHOT shot " "$tmp/srv.log" | sed 's/^.*REFSHOT shot //' | sort -u)
 EOF
 echo "$taken pictures into $out"
 [ "$missing" -eq 0 ] || status=1
+
+if [ -n "${PATHTRACE:-}" ]; then
+	mesh_out="${MESH_DIR:-$here/local/reference_shots/pathtrace}"
+	mkdir -p "$mesh_out"
+	dumps=$here/user/meshdumps
+	mesh_n=0
+	while read -r stem file; do
+		[ -n "$stem" ] || continue
+		if [ -f "$dumps/$file" ]; then
+			# Blender will not read .obj.gz; the render script decompresses.
+			gzip -c -1 "$dumps/$file" > "$mesh_out/$stem.obj.gz"
+			echo "mesh $stem"
+			mesh_n=$((mesh_n + 1))
+		else
+			echo "missing mesh $file for $stem" >&2
+			status=1
+		fi
+	done <<EOF
+$(grep -a "REFSHOT mesh " "$tmp/srv.log" | sed 's/^.*REFSHOT mesh //' | sort -u)
+EOF
+	echo "$mesh_n meshes into $mesh_out"
+fi
 
 # The two cheap tests over what this run shot, which is what they were always
 # for; see check_shots() in reference_shots.sh

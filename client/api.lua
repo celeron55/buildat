@@ -59,6 +59,11 @@ buildat.add_resource_dir  = __buildat_add_resource_dir
 -- Into <user>/screenshots, named by the date and the time; see
 -- l_take_screenshot() in src/client/app.cpp for why this is in the sandbox.
 buildat.take_screenshot   = __buildat_take_screenshot
+-- dump_meshes() -> the file name, or nil and why not. Same sandbox rule
+-- as take_screenshot: into <user>/meshdumps, named by the date. The
+-- scene's CustomGeometry in world space, which is what the client already
+-- drew. See l_dump_meshes() in src/client/app.cpp.
+buildat.dump_meshes       = __buildat_dump_meshes
 -- compose_image(args) -> w, h. Raster operations over an RGBA canvas, saved as
 -- a PNG under the cache path. See doc/client_api.txt.
 buildat.compose_image     = __buildat_compose_image
@@ -129,6 +134,7 @@ buildat.safe.compose_image            = __buildat_compose_image
 -- The file lands at the end of the frame; the name is reserved before this
 -- returns. See l_take_screenshot() in src/client/app.cpp.
 buildat.safe.take_screenshot          = __buildat_take_screenshot
+buildat.safe.dump_meshes              = __buildat_dump_meshes
 -- get_cache_path() -> the directory those two work in. The share and user
 -- paths stay out of the sandbox; this is here because writing a file under
 -- the cache means knowing where the cache is.

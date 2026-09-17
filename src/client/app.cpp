@@ -47,7 +47,11 @@
 #include <DebugRenderer.h>
 #include <Profiler.h>
 #include <UI.h>
+#include <CustomGeometry.h>
+#include <Node.h>
+#include <Camera.h>
 #include <SDL/SDL.h>
+#include <ctime>
 extern "C" {
 #include <lua.h>
 #include <lauxlib.h>
@@ -1081,6 +1085,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(local_server_port)
 		DEF_BUILDAT_FUNC(send_packet);
 		DEF_BUILDAT_FUNC(take_screenshot)
+		DEF_BUILDAT_FUNC(dump_meshes)
 		DEF_BUILDAT_FUNC(get_file_path)
 		DEF_BUILDAT_FUNC(get_file_content)
 		DEF_BUILDAT_FUNC(get_path)
@@ -2266,6 +2271,107 @@ struct CApp: public App, public magic::Application
 		const ss_ dir = g_client_config.get<ss_>("user_path")+"/screenshots";
 		const ss_ name = client::command_seq::screenshot_name(dir);
 		self->m_pending_screenshot = dir+"/"+name;
+		lua_pushlstring(L, name.c_str(), name.size());
+		return 1;
+	}
+
+	// dump_meshes() -> the file name it was saved under, or nil and why not.
+	//
+	// Same sandbox rule as take_screenshot(): the caller says when, the
+	// client picks <user>/meshdumps and a dated name. Writes the scene's
+	// CustomGeometry as one .obj in world space -- the meshes the client
+	// already built, not a second voxel dump. For [PATH_TRACE_REF].
+	static int l_dump_meshes(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		if(!self->m_scene){
+			lua_pushnil(L);
+			lua_pushstring(L, "no scene");
+			return 2;
+		}
+
+		const ss_ dir = g_client_config.get<ss_>("user_path")+"/meshdumps";
+		if(!interface::fs::create_directories(dir)){
+			lua_pushnil(L);
+			lua_pushstring(L, "cannot create meshdumps");
+			return 2;
+		}
+		char stamp[32] = {};
+		const time_t t = time(nullptr);
+		struct tm tmv;
+#ifdef _WIN32
+		localtime_s(&tmv, &t);
+#else
+		localtime_r(&t, &tmv);
+#endif
+		strftime(stamp, sizeof stamp, "%Y%m%d_%H%M%S", &tmv);
+		ss_ name = ss_("meshdump_")+stamp+".obj";
+		for(int i = 2; i < 1000 &&
+				interface::fs::path_exists(dir+"/"+name); i++)
+			name = ss_("meshdump_")+stamp+"_"+itos(i)+".obj";
+		const ss_ path = dir+"/"+name;
+
+		FILE *f = fopen(path.c_str(), "w");
+		if(!f){
+			lua_pushnil(L);
+			lua_pushstring(L, "cannot write dump");
+			return 2;
+		}
+
+		magic::PODVector<magic::Camera*> cams;
+		self->m_scene->GetComponents<magic::Camera>(cams, true);
+		if(!cams.Empty() && cams[0]->GetNode()){
+			magic::Node *cn = cams[0]->GetNode();
+			const magic::Vector3 p = cn->GetWorldPosition();
+			const magic::Vector3 d = cn->GetWorldDirection();
+			fprintf(f, "# camera_pos %g %g %g\n# camera_dir %g %g %g\n",
+					p.x_, p.y_, p.z_, d.x_, d.y_, d.z_);
+		}
+
+		magic::PODVector<magic::CustomGeometry*> geoms;
+		self->m_scene->GetComponents<magic::CustomGeometry>(geoms, true);
+		unsigned vbase = 1;
+		unsigned ngeom = 0, nvert = 0, ntri = 0;
+		for(unsigned gi = 0; gi < geoms.Size(); gi++){
+			magic::CustomGeometry *cg = geoms[gi];
+			magic::Node *node = cg->GetNode();
+			if(!node)
+				continue;
+			const magic::Matrix3x4 &wt = node->GetWorldTransform();
+			const magic::Matrix3 rot = wt.RotationMatrix();
+			magic::Vector<magic::PODVector<magic::CustomGeometryVertex>>
+					&batches = cg->GetVertices();
+			for(unsigned b = 0; b < batches.Size(); b++){
+				const magic::PODVector<magic::CustomGeometryVertex> &vs =
+						batches[b];
+				if(vs.Size() < 3)
+					continue;
+				ngeom++;
+				fprintf(f, "o geom_%u_%u\n", gi, b);
+				for(unsigned i = 0; i < vs.Size(); i++){
+					const magic::Vector3 wp = wt * vs[i].position_;
+					magic::Vector3 wn = rot * vs[i].normal_;
+					wn.Normalize();
+					fprintf(f, "v %g %g %g\nvn %g %g %g\nvt %g %g\n",
+							wp.x_, wp.y_, wp.z_,
+							wn.x_, wn.y_, wn.z_,
+							vs[i].texCoord_.x_, vs[i].texCoord_.y_);
+				}
+				for(unsigned i = 0; i + 2 < vs.Size(); i += 3){
+					const unsigned a = vbase + i;
+					fprintf(f, "f %u/%u/%u %u/%u/%u %u/%u/%u\n",
+							a, a, a, a+1, a+1, a+1, a+2, a+2, a+2);
+					ntri++;
+				}
+				vbase += vs.Size();
+				nvert += vs.Size();
+			}
+		}
+		fclose(f);
+		log_i(MODULE, "dump_meshes %s: %u geoms, %u verts, %u tris",
+				cs(name), ngeom, nvert, ntri);
 		lua_pushlstring(L, name.c_str(), name.size());
 		return 1;
 	}
