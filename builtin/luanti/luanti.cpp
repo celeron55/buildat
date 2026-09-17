@@ -1834,12 +1834,38 @@ struct Module: public interface::Module, public luanti::Interface
 	void read_region(int32_t x0, int32_t y0, int32_t z0,
 			int32_t x1, int32_t y1, int32_t z1, sv_<uint32_t> &out)
 	{
+		read_region_uncached(x0, y0, z0, x1, y1, z1, out);
 		// What core.set_node has written and not yet flushed is part of the
 		// map as far as a mod is concerned -- Luanti's semantics are that a
-		// write is visible immediately -- and a region read goes to
-		// voxelworld, which has not been told yet
-		flush_node_writes();
-		read_region_uncached(x0, y0, z0, x1, y1, z1, out);
+		// write is visible immediately -- so the buffer is laid over the
+		// read. It used to be flushed first, and a mod that alternates a
+		// find_nodes_in_area with set_nodes (VoxeLibre's geodes, per
+		// calcite node) paid a commit with the skylight per read. Whichever
+		// is smaller is walked: the box against the buffer, or the buffer
+		// against the box.
+		if(m_node_writes.empty())
+			return;
+		const size_t w = (size_t)(x1 - x0 + 1);
+		const size_t h = (size_t)(y1 - y0 + 1);
+		if(out.size() < m_node_writes.size()){
+			size_t i = 0;
+			for(int32_t z = z0; z <= z1; z++)
+			for(int32_t y = y0; y <= y1; y++)
+			for(int32_t x = x0; x <= x1; x++, i++){
+				auto it = m_node_writes.find(pos_key(x, y, z));
+				if(it != m_node_writes.end())
+					out[i] = it->second.word;
+			}
+		} else {
+			for(const auto &pair : m_node_writes){
+				const PendingNode &n = pair.second;
+				if(n.x < x0 || n.x > x1 || n.y < y0 || n.y > y1 ||
+						n.z < z0 || n.z > z1)
+					continue;
+				out[(size_t)(n.z - z0) * w * h + (size_t)(n.y - y0) * w +
+						(size_t)(n.x - x0)] = n.word;
+			}
+		}
 	}
 
 	void read_region_uncached(int32_t x0, int32_t y0, int32_t z0,

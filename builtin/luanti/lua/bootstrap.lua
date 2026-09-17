@@ -2667,6 +2667,9 @@ function core.emerge_area(pos1, pos2, callback, param)
 		waited = 0,
 		callback = callback,
 		param = param,
+		-- Who asked, for the slow-step line: the mod loading, or the one
+		-- that last ran
+		mod = core.get_current_modname() or core.get_last_run_mod() or "?",
 	}
 end
 
@@ -2680,7 +2683,8 @@ end
 -- Where the emerge phase's time went this step, for the slow-step line:
 -- the one read for every request (a flush and a commit) against the
 -- callbacks, which are the mapgen mods' structure placers
-local emerge_detail = {ids = 0, asked = 0, callbacks = 0, n_callbacks = 0}
+local emerge_detail = {ids = 0, asked = 0, callbacks = 0, n_callbacks = 0,
+		worst = 0, worst_mod = ""}
 core.__emerge_detail = emerge_detail
 
 -- How much of a step the callbacks may take. They are the emerge phase:
@@ -2754,10 +2758,20 @@ local function step_emerge(dtime)
 			r.next_i = r.next_i + 1
 			local left = #r.blocks - r.next_i + 1
 			local t_cb = core.get_us_time()
+			core.set_last_run_mod(r.mod)
 			local ok, err = pcall(r.callback, bp, action, left, r.param)
-			emerge_detail.callbacks = emerge_detail.callbacks +
-					(core.get_us_time() - t_cb)
+			local took = core.get_us_time() - t_cb
+			emerge_detail.callbacks = emerge_detail.callbacks + took
 			emerge_detail.n_callbacks = emerge_detail.n_callbacks + 1
+			if took > emerge_detail.worst then
+				-- Named by where the callback was written, since the mod
+				-- that asked is often mcl_mapgen_core on behalf of another
+				local info = debug.getinfo(r.callback, "S")
+				emerge_detail.worst = took
+				emerge_detail.worst_mod = r.mod .. " (" ..
+						(info and (info.short_src .. ":" ..
+						tostring(info.linedefined)) or "?") .. ")"
+			end
 			if not ok then
 				core.log("error", "emerge_area callback: " .. tostring(err))
 			end
@@ -4808,9 +4822,10 @@ function core.__step(dtime)
 		local d = emerge_detail
 		core.log("trace", string.format(
 				"a step took %.2f s: %s (emerge: %d asked in %.2f s, " ..
-				"%d callbacks in %.2f s)", total, table.concat(said, ", "),
-				d.asked, d.ids / 1000000, d.n_callbacks,
-				d.callbacks / 1000000))
+				"%d callbacks in %.2f s, worst %.2f s by %s)", total,
+				table.concat(said, ", "), d.asked, d.ids / 1000000,
+				d.n_callbacks, d.callbacks / 1000000, d.worst / 1000000,
+				d.worst_mod))
 		if total > slow_worst then
 			slow_worst, slow_worst_phase = total, longest_phase
 		end
@@ -4825,6 +4840,7 @@ function core.__step(dtime)
 	end
 	emerge_detail.ids, emerge_detail.asked = 0, 0
 	emerge_detail.callbacks, emerge_detail.n_callbacks = 0, 0
+	emerge_detail.worst, emerge_detail.worst_mod = 0, ""
 	game_time = game_time + dtime
 	local speed = tonumber(core.settings:get("time_speed")) or 72
 	local day_seconds = 24 * 60 * 60
