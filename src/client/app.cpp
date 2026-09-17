@@ -867,6 +867,7 @@ struct CApp: public App, public magic::Application
 				URHO3D_HANDLER(CApp, on_end_rendering));
 		SubscribeToEvent(magic::E_KEYDOWN, URHO3D_HANDLER(CApp, on_keydown));
 		SubscribeToEvent(magic::E_SCREENMODE, URHO3D_HANDLER(CApp, on_screenmode));
+		SubscribeToEvent(magic::E_INPUTFOCUS, URHO3D_HANDLER(CApp, on_inputfocus));
 		SubscribeToEvent(magic::E_LOGMESSAGE, URHO3D_HANDLER(CApp, on_logmessage));
 
 		// Default to not grabbing the mouse
@@ -1755,6 +1756,19 @@ struct CApp: public App, public magic::Application
 			return;
 		audio->SetMasterGain("Master",
 				m_options.sound_mute ? 0.0f : m_options.sound_volume);
+	}
+
+	// With the cursor hidden, Urho3D on Linux hands the focus back only on
+	// a click inside the window, and drops it again the same frame if the
+	// WM has not given the window SDL's input focus. A client that stops
+	// taking the mouse looks like that; this is the line that says so
+	// (doc/plan/luanti_module_history.md, [MOUSE_FOCUS_LOST]).
+	void on_inputfocus(magic::StringHash event_type, magic::VariantMap &event_data)
+	{
+		magic::Input *input = GetSubsystem<magic::Input>();
+		log_i(MODULE, "input focus %s (mouse %s)",
+				event_data["Focus"].GetBool() ? "gained" : "lost",
+				input->IsMouseVisible() ? "visible" : "hidden");
 	}
 
 	void on_screenmode(magic::StringHash event_type, magic::VariantMap &event_data)
