@@ -6,8 +6,8 @@ me="$here/builtin/luanti/test"
 out="${BUILDAT_PATHTRACE_OUT:-$here/local/reference_shots/pathtrace}"
 mkdir -p "$out"
 
-# RANGE=50 until the Cycles camera is right, then 200 for the set.
-PATHTRACE=1 RANGE="${RANGE:-50}" MESH_DIR="$out" OUT_DIR="$out/module_shots" \
+# 200 is the set: viewpoint 5 draws nothing at 50. RANGE=50 for iterating.
+PATHTRACE=1 RANGE="${RANGE:-200}" MESH_DIR="$out" OUT_DIR="$out/module_shots" \
 	bash "$me/reference_shots_module.sh" shadows
 
 export BUILDAT_PATHTRACE_OUT="$out"

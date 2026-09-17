@@ -188,8 +188,10 @@ if [ -n "${PATHTRACE:-}" ]; then
 	while read -r stem file; do
 		[ -n "$stem" ] || continue
 		if [ -f "$dumps/$file" ]; then
-			# Blender will not read .obj.gz; the render script decompresses.
-			gzip -c -1 "$dumps/$file" > "$mesh_out/$stem.obj.gz"
+			# The render script reads gzip directly. The raw dump is ~800 MB
+			# and the gz is the copy that is kept, so the raw one goes.
+			gzip -c -1 "$dumps/$file" > "$mesh_out/$stem.obj.gz" &&
+				rm -f "$dumps/$file"
 			echo "mesh $stem"
 			mesh_n=$((mesh_n + 1))
 		else
