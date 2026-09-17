@@ -100,6 +100,10 @@ fixture=$(mktemp /tmp/refviews_keep.XXXXXX.lua)
 	echo "run: $me/reference_shots.sh reference" >&2; exit 2; }
 
 cd "$here/Build"
+# Whatever way this script ends, the server and the client go with it: a
+# server that outlives its script sits beside the next thing that runs.
+srv=""; cli=""
+trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
 # A leftover server from a picker or a killed run still holds the save
 # sqlite. A random port does not help: two of them fight over the same
 # database. Kill ours rather than wait twenty minutes for someone else's.

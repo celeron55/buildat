@@ -198,6 +198,14 @@ def build_world(scene, verts, tints, uvs, faces, mats, tex_dir):
 
 
 def main():
+	# Cycles and a buildat server do not fit in memory together; a render
+	# waits for a shooter rather than running beside one.
+	import subprocess
+	if subprocess.run(["pgrep", "-x", "buildat_server"],
+			capture_output=True).returncode == 0:
+		print("a buildat_server is running; not rendering beside it",
+				file=sys.stderr)
+		sys.exit(1)
 	scene = bpy.context.scene
 	scene.render.engine = "CYCLES"
 	scene.cycles.samples = SAMPLES
