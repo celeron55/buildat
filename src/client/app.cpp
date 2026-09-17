@@ -40,6 +40,7 @@
 #include <Audio.h>
 #include <RenderSurface.h>
 #include <Texture2D.h>
+#include <zlib.h>
 #include <VertexBuffer.h>
 #include <Geometry.h>
 #include <BorderImage.h>
@@ -2351,15 +2352,18 @@ struct CApp: public App, public magic::Application
 		localtime_r(&t, &tmv);
 #endif
 		strftime(stamp, sizeof stamp, "%Y%m%d_%H%M%S", &tmv);
-		ss_ name = ss_("meshdump_")+stamp+".obj";
+		// Gzipped as it is written: the raw text of a RANGE=150 dump is
+		// ~800 MB and writing it held this thread past the server's
+		// 30 s stall limit; through zlib at level 1 it is a sixth of that.
+		ss_ name = ss_("meshdump_")+stamp+".obj.gz";
 		for(int i = 2; i < 1000 &&
 				interface::fs::path_exists(dir+"/"+name); i++)
-			name = ss_("meshdump_")+stamp+"_"+itos(i)+".obj";
+			name = ss_("meshdump_")+stamp+"_"+itos(i)+".obj.gz";
 		const ss_ path = dir+"/"+name;
 		if(lua_isstring(L, 1)){
 			size_t alen = 0;
 			const char *a = lua_tolstring(L, 1, &alen);
-			FILE *af = fopen((dir+"/"+name.substr(0, name.size() - 4)+
+			FILE *af = fopen((dir+"/"+name.substr(0, name.size() - 7)+
 					"_atlas.json").c_str(), "w");
 			if(af){
 				fwrite(a, 1, alen, af);
@@ -2367,7 +2371,7 @@ struct CApp: public App, public magic::Application
 			}
 		}
 
-		FILE *f = fopen(path.c_str(), "w");
+		gzFile f = gzopen(path.c_str(), "wb1");
 		if(!f){
 			lua_pushnil(L);
 			lua_pushstring(L, "cannot write dump");
@@ -2380,7 +2384,7 @@ struct CApp: public App, public magic::Application
 			magic::Node *cn = cams[0]->GetNode();
 			const magic::Vector3 p = cn->GetWorldPosition();
 			const magic::Vector3 d = cn->GetWorldDirection();
-			fprintf(f, "# camera_pos %g %g %g\n# camera_dir %g %g %g\n",
+			gzprintf(f, "# camera_pos %g %g %g\n# camera_dir %g %g %g\n",
 					p.x_, p.y_, p.z_, d.x_, d.y_, d.z_);
 		}
 
@@ -2389,7 +2393,7 @@ struct CApp: public App, public magic::Application
 		// can put it on. The atlas is a handful of textures for a whole
 		// world, which is why the read-back is keyed by texture and not by
 		// batch.
-		const ss_ base = name.substr(0, name.size() - 4);
+		const ss_ base = name.substr(0, name.size() - 7);
 		sm_<magic::Texture2D*, ss_> tex_names;
 		auto material_of = [&](magic::Material *mat) -> ss_ {
 			if(!mat)
@@ -2447,7 +2451,6 @@ struct CApp: public App, public magic::Application
 			if((node->GetWorldPosition() - eye).Length() > far + 64.f)
 				continue;
 			const magic::Matrix3x4 &wt = node->GetWorldTransform();
-			const magic::Matrix3 rot = wt.RotationMatrix();
 			magic::Vector<magic::PODVector<magic::CustomGeometryVertex>>
 					&batches = cg->GetVertices();
 			for(unsigned b = 0; b < batches.Size(); b++){
@@ -2460,12 +2463,10 @@ struct CApp: public App, public magic::Application
 				magic::VertexBuffer *vb = geom ? geom->GetVertexBuffer(0) : nullptr;
 				const bool has_tangent = vb &&
 						(vb->GetElementMask() & magic::MASK_TANGENT);
-				fprintf(f, "o geom_%u_%u\nusemtl %s\n", gi, b,
+				gzprintf(f, "o geom_%u_%u\nusemtl %s\n", gi, b,
 						material_of(cg->GetMaterial(b)).c_str());
 				for(unsigned i = 0; i < vs.Size(); i++){
 					const magic::Vector3 wp = wt * vs[i].position_;
-					magic::Vector3 wn = rot * vs[i].normal_;
-					wn.Normalize();
 					// The tint, as the OBJ vertex colour after the position:
 					// an albedo multiplier, which is what the shader does
 					// with it. It is the 5-6-5 in the tangent's x
@@ -2485,22 +2486,22 @@ struct CApp: public App, public magic::Application
 							tb = (t & 31) / 31.f;
 						}
 					}
-					fprintf(f, "v %g %g %g %g %g %g\nvn %g %g %g\nvt %g %g\n",
+					// No vn: the render takes the normal from the winding
+					gzprintf(f, "v %g %g %g %g %g %g\nvt %g %g\n",
 							wp.x_, wp.y_, wp.z_, tr, tg, tb,
-							wn.x_, wn.y_, wn.z_,
 							vs[i].texCoord_.x_, vs[i].texCoord_.y_);
 				}
 				for(unsigned i = 0; i + 2 < vs.Size(); i += 3){
 					const unsigned a = vbase + i;
-					fprintf(f, "f %u/%u/%u %u/%u/%u %u/%u/%u\n",
-							a, a, a, a+1, a+1, a+1, a+2, a+2, a+2);
+					gzprintf(f, "f %u/%u %u/%u %u/%u\n",
+							a, a, a+1, a+1, a+2, a+2);
 					ntri++;
 				}
 				vbase += vs.Size();
 				nvert += vs.Size();
 			}
 		}
-		fclose(f);
+		gzclose(f);
 		log_i(MODULE, "dump_meshes %s: %u geoms, %u verts, %u tris",
 				cs(name), ngeom, nvert, ntri);
 		lua_pushlstring(L, name.c_str(), name.size());

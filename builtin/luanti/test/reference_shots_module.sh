@@ -217,18 +217,16 @@ if [ -n "${PATHTRACE:-}" ]; then
 	while read -r stem file; do
 		[ -n "$stem" ] || continue
 		if [ -f "$dumps/$file" ]; then
-			# The render script reads gzip directly. The raw dump is ~800 MB
-			# and the gz is the copy that is kept, so the raw one goes.
-			gzip -c -1 "$dumps/$file" > "$mesh_out/$stem.obj.gz" &&
-				rm -f "$dumps/$file"
-			# The albedo textures the dump's usemtl lines name, beside it
-			for tex in "$dumps/${file%.obj}"_tex*.png; do
+			# The client writes the dump gzipped
+			mv "$dumps/$file" "$mesh_out/$stem.obj.gz"
+			# The textures and the atlas table the dump names, beside it
+			for tex in "$dumps/${file%.obj.gz}"_tex*.png; do
 				[ -f "$tex" ] || continue
 				suffix=${tex##*_tex}
 				mv "$tex" "$mesh_out/${stem}_tex$suffix"
 			done
-			[ -f "$dumps/${file%.obj}_atlas.json" ] &&
-				mv "$dumps/${file%.obj}_atlas.json" "$mesh_out/${stem}_atlas.json"
+			[ -f "$dumps/${file%.obj.gz}_atlas.json" ] &&
+				mv "$dumps/${file%.obj.gz}_atlas.json" "$mesh_out/${stem}_atlas.json"
 			echo "mesh $stem"
 			mesh_n=$((mesh_n + 1))
 		else
