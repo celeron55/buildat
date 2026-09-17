@@ -144,10 +144,36 @@ end
 local ObjectRef = {}
 ObjectRef.__index = ObjectRef
 
+-- **A ref is userdata, as Luanti's is**, made with Lua 5.1's newproxy():
+-- a zero-size userdata whose metatable is the class, so `type(ref)` is
+-- "userdata" and a game that branches on that -- capturetheflag's
+-- PlayerName(), VoxeLibre's mob line of sight -- takes the branch it
+-- takes on Luanti. See [REF_IS_TABLE] in doc/plan/luanti_module_plan.md.
+-- A userdata holds no fields, so the id is kept beside it, weakly: a ref
+-- nobody holds any more takes its entry with it. Every ref of a class
+-- shares one metatable through newproxy(prototype).
+local ref_ids = setmetatable({}, {__mode = "k"})
+local ObjectRef_proto = newproxy(true)
+getmetatable(ObjectRef_proto).__index = ObjectRef
+getmetatable(ObjectRef_proto).__metatable = ObjectRef
+
+-- new_ref(class_proto, id) -> a ref of that class for object id
+local function new_ref(proto, id)
+	local ref = newproxy(proto)
+	ref_ids[ref] = id
+	return ref
+end
+
+-- The object id behind a ref, for the few places that send one over the
+-- wire; nil for anything that is not a ref
+function core.__ref_id(ref)
+	return ref_ids[ref]
+end
+
 -- A removed object's handle stays valid to hold and answers with nothing,
 -- because a mod keeps one across a step as a matter of course
 local function state_of(ref)
-	return objects[ref.__id]
+	return objects[ref_ids[ref]]
 end
 
 function ObjectRef:is_valid()
@@ -565,7 +591,7 @@ function core.add_entity(pos, name, staticdata)
 	end
 	local id = next_id
 	next_id = id + 1
-	local ref = setmetatable({__id = id}, ObjectRef)
+	local ref = new_ref(ObjectRef_proto, id)
 	local o = {
 		id = id,
 		ref = ref,
@@ -685,6 +711,9 @@ local players = {}      -- name -> the object's id
 -- Everything an object has, and the rest below
 local PlayerRef = setmetatable({}, {__index = ObjectRef})
 PlayerRef.__index = PlayerRef
+local PlayerRef_proto = newproxy(true)
+getmetatable(PlayerRef_proto).__index = PlayerRef
+getmetatable(PlayerRef_proto).__metatable = PlayerRef
 
 -- Every object by the name that outlives a restart; a player's is their
 -- name, which is what Luanti uses and what a mod stores
@@ -2369,7 +2398,7 @@ function core.__check_players()
 	local looker = made()
 	local check_id = "__check_look"
 	objects[check_id] = looker
-	local ref = setmetatable({__id = check_id}, PlayerRef)
+	local ref = new_ref(PlayerRef_proto, check_id)
 	looker.look = {h = 0, v = 0}
 	local d = ref:get_look_dir()
 	assert(math.abs(d.z - 1) < 1e-6, "check_players: h=0 is not +Z")
@@ -2508,7 +2537,7 @@ function core.__add_player(name)
 	end
 	local id = next_id
 	next_id = id + 1
-	local ref = setmetatable({__id = id}, PlayerRef)
+	local ref = new_ref(PlayerRef_proto, id)
 	local o = {
 		id = id,
 		ref = ref,

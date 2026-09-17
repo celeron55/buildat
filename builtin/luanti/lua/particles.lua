@@ -167,7 +167,7 @@ local function spawner_record(kind, id, def, pos_min, pos_max, vel_min,
 		vel_max, acc_min, acc_max, exp_min, exp_max, size_min, size_max)
 	local attached = 0
 	if type(def.attached) == "table" then
-		attached = tonumber(def.attached.__id) or 0
+		attached = tonumber(core.__ref_id(def.attached)) or 0
 	end
 	local flat = {kind, tostring(id), texture_name(def),
 			tostring(math.floor(number_or(def.amount, 1))),

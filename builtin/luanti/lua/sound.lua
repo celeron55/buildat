@@ -85,7 +85,7 @@ function core.sound_play(spec, parameters, ephemeral)
 	local location, x, y, z, object_id = "local", 0, 0, 0, 0
 	if parameters.object ~= nil then
 		location = "object"
-		object_id = tonumber(parameters.object.__id) or 0
+		object_id = tonumber(core.__ref_id(parameters.object)) or 0
 		local p = parameters.object.get_pos and parameters.object:get_pos()
 		if p then
 			x, y, z = p.x, p.y, p.z
