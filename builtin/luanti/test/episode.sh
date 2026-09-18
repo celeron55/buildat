@@ -35,8 +35,9 @@ dig)
 	{ echo "look 0 -89"; echo "mouse_down left"
 		echo "delay 3000"; echo "mouse_up left"; } > "$out/cmds.txt" ;;
 place)
-	# The hotbar's first slot is empty, so a place does nothing; what is
-	# asserted is that nothing happened on either side
+	# Ten of the game's dirt in the first slot (the fixture puts them
+	# there for this episode), one placed on the platform by a right
+	# click straight down: the census gains a dirt and the stack loses one
 	{ echo "look 0 -89"; echo "mouse_click right"; } > "$out/cmds.txt" ;;
 *) echo "unknown episode $EPISODE (dig, place)" >&2; exit 2 ;;
 esac

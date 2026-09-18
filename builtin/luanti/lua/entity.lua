@@ -3022,6 +3022,36 @@ local function step_object(o, dtime)
 	if o.player_name then
 		return
 	end
+	-- An attached object is where its parent is, plus the attachment's
+	-- offset turned by the parent's yaw -- Luanti's own rule, less the
+	-- bone, which nothing here has a skeleton for. So a wielded-item
+	-- entity rides with its player and a census near the player counts
+	-- it, the way one does on Luanti. simplified: the bone's own
+	-- transform is not applied; the offset is from the parent's origin.
+	local a = o.attached_to
+	if a then
+		local p = a.ref and state_of(a.ref)
+		if p then
+			local off = a.position or {x = 0, y = 0, z = 0}
+			local yaw = p.rot and p.rot.y or 0
+			local c, sn = math.cos(yaw), math.sin(yaw)
+			local ox, oz = off.x or 0, off.z or 0
+			o.pos = {x = p.pos.x + ox * c - oz * sn,
+					y = p.pos.y + (off.y or 0),
+					z = p.pos.z + ox * sn + oz * c}
+			o.vel = {x = 0, y = 0, z = 0}
+		end
+		if o.le and o.le.on_step then
+			core.set_last_run_mod(o.le.mod_origin)
+			local ok, err = pcall(o.le.on_step, o.le, dtime, nil)
+			if not ok then
+				core.log("error", "entity " .. tostring(o.le.name) .. ": " ..
+						tostring(err))
+			end
+		end
+		ask_for_staticdata(o, dtime)
+		return
+	end
 	local props = o.props
 	o.vel = {
 		x = o.vel.x + o.acc.x * dtime,

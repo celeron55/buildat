@@ -138,6 +138,12 @@ core.register_on_joinplayer(function(player)
 	core.after(3, function()
 		stamp()
 		player:get_inventory():set_list("main", {})
+		if NAME == "place" then
+			-- Ten of the dirt in the first slot, which is what the
+			-- launcher's and the extension's hotbar select on join
+			player:get_inventory():set_stack("main", 1,
+					ItemStack(dirt .. " 10"))
+		end
 		player:set_physics_override({gravity = 0})
 		for id, _ in pairs(player:hud_get_all()) do
 			player:hud_remove(id)
