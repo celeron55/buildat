@@ -1496,7 +1496,7 @@ local function update_sky(dt)
 		-- block and left the open shadow on the cliff top 1.75 times too
 		-- dark ([PBR_FIT], contrast_dirt against contrast_dirt_pit).
 		-- simplified: one albedo for every ground.
-		local sun = PHYS.sun(height) * math.max(height, 0) * 0.5 / math.pi
+		local sun = PHYS.sun(height) * math.max(height, 0) * 1.0 / math.pi
 		local sc = sky_lights.sun.color
 		voxel_shading.set_ground_light(
 				PHYS.ground.r * (sun * sc.r + c.r * k),
