@@ -86,6 +86,11 @@ end
 -- Which language, most specific first: "fi_FI" before "fi". Luanti asks the
 -- client; this asks the settings and then the environment the server was
 -- started in, which on a launcher's own world is the same person.
+-- Languages whose scripts the shipped fonts have no glyphs for
+local UNDRAWABLE = {zh = true, ja = true, ko = true, ar = true, he = true,
+		th = true, el = true, hi = true, ka = true, hy = true, fa = true,
+		ur = true, bn = true, ta = true, my = true, km = true, lo = true}
+
 local function languages()
 	local want = core.settings:get("language")
 	if want == nil or want == "" then
@@ -94,6 +99,18 @@ local function languages()
 	-- "fi_FI.UTF-8" is a locale name and "fi_FI" is what a file is called
 	want = tostring(want):gsub("[.@].*$", "")
 	if want == "" or want == "C" or want == "POSIX" then
+		return {}
+	end
+	-- Prefer English over a language the client's fonts cannot draw: a
+	-- mod translated into missing glyphs is worse off than one left
+	-- alone. The fonts shipped cover Latin-1, Latin Extended and
+	-- Cyrillic and nothing else, so these scripts render as nothing;
+	-- see [TRANSLATION_FONT] in doc/plan/master_plan.md, which is where
+	-- widening the font would lift this.
+	local short0 = want:match("^(%a+)") or want
+	if UNDRAWABLE[short0:lower()] then
+		core.log("action", "translations: " .. want .. " is asked for and " ..
+				"the client's fonts have no glyphs for it; English instead")
 		return {}
 	end
 	local out = {want}
