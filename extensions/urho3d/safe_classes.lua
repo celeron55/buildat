@@ -1972,6 +1972,22 @@ function M.define(dst, util)
 		inherited_from_by_wrapper = dst.Component,
 	})
 
+	-- The engine's clock: how long it has run, this frame's step and its
+	-- number. Reads nothing but time, which is the policy's clearest yes
+	-- ([URHO_SWEEP]); what wants it is anything paced by wall time rather
+	-- than by a scene's own clock -- a reflection cube re-rendered once a
+	-- second. Not the static system-time getters: a game has os.time().
+	util.wc("Time", {
+		instance = {
+			GetElapsedTime = util.self_function("GetElapsedTime", {"number"},
+					{"Time"}),
+		},
+		properties = {
+			frameNumber = util.simple_property("number"),
+			timeStep = util.simple_property("number"),
+		},
+	})
+
 	util.wc("Audio", {
 		instance = {
 			-- Urho3D multiplies a type's gain by the "Master" one, so the
@@ -2103,6 +2119,7 @@ function M.define(dst, util)
 	dst.graphics = util.wrap_instance("Graphics", graphics)
 	dst.ui = util.wrap_instance("UI", ui)
 	dst.input = util.wrap_instance("Input", input)
+	dst.time = util.wrap_instance("Time", time)
 	if audio ~= nil then
 		dst.audio = util.wrap_instance("Audio", audio)
 	end
