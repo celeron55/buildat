@@ -4,6 +4,9 @@
 # See [RENDER_MODES] and [GREEN_BIAS] in doc/plan/rendering_plan.md.
 #
 #   builtin/luanti/test/reference_shots/probes.sh          read what is on disk
+#   builtin/luanti/test/reference_shots/probes.sh --show   every crop with its
+#                                                          context and box, both
+#                                                          pictures, in tmp/probe_check
 #   builtin/luanti/test/reference_shots/probes.sh --shoot  re-take all three
 #                                                          module modes, then read
 #
@@ -116,13 +119,13 @@ echo "Hue is the verdict; mean is for TOO_BRIGHT and carries no pass mark."
 #   sky_to_sun  a sky patch over a sunlit white
 # name | picture | crop A | crop B (empty for a single crop) | what
 FIT="
-contrast_dirt|vp1_1300|40x20+560+525|40x20+250+440|vp1 dirt: a sunlit terrace face over the north cliff
+contrast_dirt|vp1_1300|40x12+957+690|40x12+666+564|vp1 dirt: a sunlit dirt side over a dirt side facing the camera, sky and ground lit
 contrast_snow|vp5_1000|60x40+420+540|60x30+400+660|vp5 snow: the sunlit field over the tree's shadow
 contrast_cave|vp7_1300|60x40+560+560|60x40+200+300|vp7 the cave mouth's floor over its wall
-saturation_grass|vp1_1300|60x20+640+465||vp1 grass top
+saturation_grass|vp1_1300|40x12+666+534||vp1 grass top, lit
 saturation_leaves|vp1_1300|30x20+390+160||vp1 canopy
 saturation_water|vp1_1300|80x40+1120+430||vp1 the sea
-saturation_flowers|vp5_1000|30x30+620+440||vp5 the red flowers
+saturation_flowers|vp5_1000|10x10+646+482||vp5 a rose's petals
 sky_to_sun|vp5_1000|60x40+20+20|60x40+420+540|vp5 a sky patch over the sunlit snow
 "
 
@@ -188,7 +191,7 @@ sky_night_0200|vp5_0200|60x40+20+20|vp5 away from the moon, 02:00
 # number, which is the water's roughness and spec and the cube it reflects.
 WATER="
 water_far|vp3_0545|120x15+40+355|vp3 the water near the horizon, 05:45
-water_near|vp3_0545|120x30+80+490|vp3 the near water, 05:45
+water_near|vp3_0545|120x20+40+550|vp3 the near water, 05:45
 "
 echo
 echo "=== the sky, in linear light: render | pbr (ratio to the render)"
@@ -226,6 +229,40 @@ for s in pathtrace_r150 module_pbr_r150; do
 	far=$(linear_rgb "$f" "120x15+40+355"); near=$(linear_rgb "$f" "120x30+80+490")
 	echo "$far $near" | awk -v s="$s" '{printf "  %-18s far %.3f %.3f %.3f  near %.3f %.3f %.3f  far/near %.2f %.2f %.2f\n", s, $1,$2,$3, $4,$5,$6, $1/($4+1e-9), $2/($5+1e-9), $3/($6+1e-9)}'
 done
+
+# --show: every crop cut with three times its context and its box drawn,
+# both pictures, one cell per probe and side, and a contact sheet -- the
+# rule (user, 2026-09-18) being that a crop enters a table only after
+# someone has looked at its cell: typed coordinates are a guess until seen.
+show_dir="${REFSHOT_SHOW_DIR:-$here/tmp/probe_check}"
+show_cell() {   # name side file crop -> a cell png
+	local geom="$4"
+	local w=${geom%%x*}; local rest=${geom#*x}; local h=${rest%%+*}
+	rest=${rest#*+}; local x=${rest%%+*}; local y=${rest#*+}
+	local cx=$((x - w)); local cy=$((y - h)); [ $cx -lt 0 ] && cx=0; [ $cy -lt 0 ] && cy=0
+	magick "$3" -crop "$((w * 3))x$((h * 3))+$cx+$cy" +repage \
+		-fill none -stroke red -strokewidth 1 \
+		-draw "rectangle $((x - cx)),$((y - cy)) $((x - cx + w - 1)),$((y - cy + h - 1))" \
+		-scale 300% -gravity north -background black -fill white -pointsize 12 \
+		-splice 0x14 -annotate +0+1 "$1 $2" "$show_dir/$1_$2.png" 2>/dev/null
+}
+if [ "${1:-}" = "--show" ]; then
+	mkdir -p "$show_dir"; rm -f "$show_dir"/*.png
+	{ echo "$FIT"; echo "$SKY"; echo "$WATER"; echo "$DAWN"; } |
+	while IFS='|' read -r name pic a b why; do
+		[ -n "$name" ] || continue
+		case "$name" in dawn_*) pic="${pic}_0545" ;; esac
+		for s in pathtrace_r150 module_pbr_r150; do
+			f=$(file_of "$s" "$pic"); [ -f "$f" ] || continue
+			show_cell "$name" "${s%%_*}_A" "$f" "$a"
+			case "$b" in *x*) show_cell "$name" "${s%%_*}_B" "$f" "$b" ;; esac
+		done
+	done
+	magick montage "$show_dir"/*_*.png -tile 4x -geometry +4+4 -background gray20 \
+		"$show_dir/sheet.png"
+	echo "cells and sheet in $show_dir"
+	exit 0
+fi
 
 echo
 echo "=== the low sun: R/B at 05:45 over R/B at 13:00, render | pbr (ratio to the render)"
