@@ -314,8 +314,18 @@ void VS()
             vec2 sky = SkyOfAlpha(iColor.a);
             vSkyAmbient = GetAmbient(GetZonePos(worldPos)) * sky.y *
                     (0.35 + 0.65 * max(vNormal.y, 0.0));
+            // The bounce falls off into a cave with the daylight Luanti
+            // propagates, a level a node from the mouth, over a floor of
+            // half: the render's cave is lit near the mouth and dark deep
+            // in, and (1 - shaped) alone lit the whole interior one
+            // uniform grey ([PBR_FIT], contrast_cave). The floor is what
+            // the daylight cannot carry -- fifteen nodes and it is gone,
+            // the render's second bounce is not -- and is [PBRI]'s to
+            // replace. Zero in the open, where the ground term is the
+            // bounce.
             vVertexLight = iColor.rgb +
-                cBounceLight * (1.0 - ShapeSkylight(sky.x)) +
+                cBounceLight * (0.5 + 2.0 * sky.x) *
+                    (1.0 - ShapeSkylight(sky.x)) +
                 cGroundLight * (0.5 - 0.5 * vNormal.y) *
                     ShapeSkylight(sky.x);
         #endif
