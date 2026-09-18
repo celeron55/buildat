@@ -146,6 +146,9 @@ core.register_on_joinplayer(function(player)
 		if hp <= 0 and not dead_since then
 			dead_since = t
 			deaths = deaths + 1
+			-- The inventory went with the death (VoxeLibre drops it), so
+			-- what was dug before it says nothing about pickup now
+			dropping = 0
 			core.log("action", "fuzz: died at t=" .. t .. " (" .. deaths ..
 					" so far)")
 		elseif hp <= 0 and t - dead_since >= 2 then
