@@ -1353,6 +1353,9 @@ local function update_sky(dt)
 				magic.Vector3(-dir.x, -dir.y, -dir.z)
 		sky_lights.moon.brightness = sky_now.unlit and MOON_BRIGHTNESS * moon_up
 				or PHYS.moon_e * moon_up
+		if (buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""):find("moon") then
+			sky_lights.moon.brightness = 0
+		end
 	end
 
 	if sky_now.unlit then

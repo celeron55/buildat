@@ -129,6 +129,7 @@ saturation_flowers|vp5_1000|10x10+646+482||vp5 a rose's petals
 sky_to_sun|vp5_1000|60x40+20+20|60x40+420+540|vp5 a sky patch over the sunlit snow
 terrain_occlusion|vp1_0545|33x11+271+498|56x40+871+562|vp1 05:45: a grass top under the mountain over one with an open horizon, per channel
 sun_glint_grass|vp1_0545|34x25+653+409|40x15+600+440|vp1 05:45: the sun's glint on a grass top over the same grass beside it, per channel
+translucency_canopy|vp2_0545|38x18+955+352|19x21+887+317|vp2 05:45: a back-lit canopy face over a front-lit one
 "
 
 linear_rgb() {   # file crop -> "r g b" in linear light

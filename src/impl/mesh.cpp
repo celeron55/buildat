@@ -901,6 +901,12 @@ static void face_vertex_colors(VoxelVolume &volume,
 		float bounce_shade = (1.0f - BOUNCE_AO + BOUNCE_AO * ao) *
 				FACE_SHADE[face_id] * (1.0f - sky_f);
 		float lamp_shade = lamp_f * sky_shade;
+		// A client with a horizon map lights the enclosed by its own bounce
+		// term, in the sky's units of the hour; the constant here is in
+		// display units and at night, when the sky is a fifty-thousandth of
+		// it, it lit every canopy like a lamp ([NO_SPOTS_REF]'s check).
+		if(horizon)
+			bounce_shade = 0;
 		out[i] = Color(
 				BOUNCE_COLOR.r_ * bounce_shade + LAMP_COLOR.r_ * lamp_shade,
 				BOUNCE_COLOR.g_ * bounce_shade + LAMP_COLOR.g_ * lamp_shade,
@@ -1719,12 +1725,15 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 					unsigned color = 0xffffffff;
 					if(use_skylight){
 						float shade = FACE_SHADE[face_id];
+						// No constant bounce for a packed client; see
+						// face_vertex_colors()
+						float bshade = packed_alpha ? 0.0f : shade * (1.0f - sky_f);
 						color = Color(
-								BOUNCE_COLOR.r_ * shade * (1.0f - sky_f) +
+								BOUNCE_COLOR.r_ * bshade +
 										LAMP_COLOR.r_ * lamp_f * shade,
-								BOUNCE_COLOR.g_ * shade * (1.0f - sky_f) +
+								BOUNCE_COLOR.g_ * bshade +
 										LAMP_COLOR.g_ * lamp_f * shade,
-								BOUNCE_COLOR.b_ * shade * (1.0f - sky_f) +
+								BOUNCE_COLOR.b_ * bshade +
 										LAMP_COLOR.b_ * lamp_f * shade,
 								sky_alpha(sky_f, shade, packed_alpha)).ToUInt();
 					}

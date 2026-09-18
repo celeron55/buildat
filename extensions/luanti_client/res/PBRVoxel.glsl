@@ -28,10 +28,6 @@
 //                       around the light or it reads as glitter over a field.
 //                       voxel_lighting's few surfaces are sparsely spotted and
 //                       a wide turn is what makes them catch anything at all.
-//   TRANSMISSION_FOCUS  A thirty-second power here against a sixth there, for
-//                       the same reason: a canopy of Luanti leaves glowing
-//                       over a quarter of the sky stops reading as the sun
-//                       behind it.
 //   spotGloss           Ramped on sharply here, linear there. With plants this
 //                       dense, the half open cells -- most of them at any
 //                       moment -- are a sheen that follows the light.
@@ -418,12 +414,6 @@ void VS()
     // light for a moment, and narrowing it takes the speckle off sand and
     // gravel rather than gathering it anywhere.
     const float STATIC_SPOT_TILT = 0.35;
-    // How narrowly the light through a surface is aimed at the camera. Light
-    // coming through a leaf is light going the way it was already going, so it
-    // is seen looking back along it and not from the side: at the width a
-    // sixth power gives, a canopy glows over a quarter of the sky and the glow
-    // stops reading as the sun behind it.
-    const float TRANSMISSION_FOCUS = 32.0;
     const float TRANSMISSION_RATE = 0.03;    // Cycles per second, mean
     const vec3 TRANSMISSION_WIND = vec3(0.35, 0.0, -0.2);
 
@@ -748,39 +738,33 @@ void PS()
         finalColor.rgb = BRDF * lightColor * (atten * shadow);
 
         #if defined(VOXELTRANSLUCENCY) && defined(METALLIC)
-            // Light through the surface from the far side. It needs the light
-            // on the back (atten is zero there, which is why this cannot ride
-            // on it) and the camera roughly opposite the light, which is the
-            // one geometry where a thin surface glows.
+            // Light through the surface from the far side, as a mix that
+            // takes from the reflected light what it passes: a surface of
+            // translucency t reflects (1 - t) of its diffuse and passes t of
+            // the light on its back, Lambert from that side, tinted by the
+            // leaf's colour. Refitted ([PBR_FIT], translucency_canopy;
+            // [NO_SPOTS_REF]) from a term that was added on top of the
+            // lighting, conserved nothing, carried a forward-scatter power
+            // and, for a surface with no spots, passed the light all over
+            // at full strength -- which is what a reference run's NO_SPOTS
+            // switch made of every canopy, so the moon lit the trees at
+            // 02:00 a few hundred times over. The focus is gone: a canopy
+            // seen against the sun is brighter than seen with it by the
+            // back Lambert alone, which is what the render's pair reads.
             //
-            // simplified: not multiplied by shadow. A surface lit from behind
-            // is its own shadow caster, so the shadow map says it is shadowed
-            // and the term would never appear. That also means a leaf in
-            // somebody else's shadow glows; with voxel geometry, where only
-            // the outside of a canopy is meshed at all, that is rare enough to
-            // leave. Sampling the shadow map along the transmission direction
-            // would be the fix.
-            //
-            // The light keeps only part of the surface's color on the way
-            // through. A spot where light comes through a canopy is partly a
-            // gap, which passes the sun unchanged, and partly thin leaf, which
-            // tints it; what a surface transmits is not what it reflects. Using
-            // the albedo raw applies the leaf's green a second time and the
-            // spots come out as saturated as the texture.
-            const float TRANSMISSION_TINT = 0.55;
-            vec3 transmitted = mix(vec3(1.0), diffColor.rgb,
-                TRANSMISSION_TINT);
+            // simplified: not multiplied by shadow -- a surface lit from
+            // behind is its own shadow caster, so the shadow map would say
+            // it is shadowed and the term never appear; a leaf in another's
+            // shadow glows. Sampling the map along the transmission
+            // direction would be the fix.
+            // Tinted by the albedo in full, as the reference's Translucent
+            // BSDF is; mixed toward white the back-lit face read six times
+            // the render's over the front-lit one, since the leaf's green is
+            // a twentieth and white is not.
             float backNdl = max(0.0, -dot(normal, lightVec));
-            float forward = pow(max(0.0, dot(-lightVec, toCamera)),
-                TRANSMISSION_FOCUS);
-            // A material with no spots at all is translucent all over
-            #ifdef VOXELSPOTS
-                float through = surfaceSrc.a > 0.0 ? surfaceSpots : 1.0;
-            #else
-                float through = 1.0;
-            #endif
-            finalColor.rgb += surfaceSrc.b * through * transmitted *
-                lightColor * (backNdl * forward) / M_PI;
+            float t = surfaceSrc.b;
+            finalColor.rgb = finalColor.rgb * (1.0 - t) +
+                t * diffColor.rgb * lightColor * backNdl / M_PI;
         #endif
 
         #ifdef AMBIENT
