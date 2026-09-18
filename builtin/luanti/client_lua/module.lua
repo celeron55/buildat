@@ -2515,6 +2515,10 @@ local refshot_dump = false
 
 local refshot_at = nil
 
+-- The game's client half sets this to snap its exposure adaptation to the
+-- current frame; see the readiness rule below. nil means no exposure.
+M.exposure_reset = nil
+
 buildat.sub_packet("luanti:refshot_mark", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	refshot_token = tonumber(values[1] or "")
@@ -2555,6 +2559,22 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	-- range between the chunk that finished and the one behind it
 	refshot_still = refshot_still + 1
 	if refshot_still < 3 then
+		return
+	end
+	-- **And the exposure settled before the picture** ([PT_SETTLE]): a
+	-- reference is the converged value by definition, and the client's
+	-- adaptation takes seconds over the fifteen stops between a night
+	-- state and the dawn after it. The game's client half snaps its
+	-- adaptation to the frame's metered key on this call -- one frame
+	-- with the rate forced to infinity -- and the picture is taken four
+	-- frames on, which is the snap and the frame after it.
+	if refshot_still == 3 then
+		if M.exposure_reset then
+			M.exposure_reset()
+		end
+		return
+	end
+	if refshot_still < 7 then
 		return
 	end
 	local name, err = buildat.take_screenshot()

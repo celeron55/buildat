@@ -204,10 +204,19 @@ local EXPOSURE_BIAS = 1.6
 -- Luanti-isms are out, so these are that scale's, and become the
 -- reference's numbers the day the two scales meet. The adaptation rate is
 -- this client's alone: a still has no time axis.
+-- The floor is how far the eye may adapt into the dark: 0.05 was a
+-- daylight-adapted eye looking at the night, and the moonlit snow field
+-- rendered pitch black under it. 0.003 puts that field's probe at a
+-- median of 39 of 255 in the render with the sky still at 0, which is
+-- [PT_NIGHT]'s target; the same number is LUM_RANGE in
+-- pathtrace_render.py.
 local AUTO_EXPOSURE = {
 	adapt_rate = 0.6,
-	lum_range = {0.05, 100.0},
+	lum_range = {0.003, 100.0},
 	middle_grey = 0.18,
+	-- Frames left before the rate goes back after a reset; in this
+	-- table since the chunk is at Lua 5.1's two hundred locals
+	reset_frames = 0,
 }
 
 local function normalized(v)
@@ -413,6 +422,16 @@ do
 			AUTO_EXPOSURE.lum_range[2]))
 	rp:SetShaderParameter("AutoExposureMiddleGrey", AUTO_EXPOSURE.middle_grey)
 	viewport.renderPath = rp
+	-- A reference picture is taken at a settled exposure ([PT_SETTLE]):
+	-- the reference fixture asks for this before the shot, and the
+	-- adaptation -- adapted + (lum - adapted) * (1 - exp(-dt * rate)) in
+	-- AutoExposure.glsl, kept in a persistent 1x1 target -- lands on the
+	-- frame's own key in one frame at a rate of a million, and the rate
+	-- goes back the frame after. Deterministic, and no wait.
+	luanti.exposure_reset = function()
+		rp:SetShaderParameter("AutoExposureAdaptRate", 1000000)
+		AUTO_EXPOSURE.reset_frames = 2
+	end
 	-- What a second view of the same world is drawn with -- the minimap.
 	-- The tonemap is not optional: the world is rendered in HDR and an
 	-- eight-bit picture of it without one is white. The bloom is, and it is
@@ -3141,6 +3160,17 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	local dt = event_data:GetFloat("TimeStep")
 	voxel_shading.update(dt)
 	update_sky(dt)
+	-- The exposure reset's rate goes back once its frame has rendered
+	if AUTO_EXPOSURE.reset_frames > 0 then
+		AUTO_EXPOSURE.reset_frames = AUTO_EXPOSURE.reset_frames - 1
+		if AUTO_EXPOSURE.reset_frames == 0 then
+			local vp = magic.renderer:GetViewport(0)
+			if vp and vp.renderPath then
+				vp.renderPath:SetShaderParameter("AutoExposureAdaptRate",
+						AUTO_EXPOSURE.adapt_rate)
+			end
+		end
+	end
 
 	if player_placed then
 		where_timer = where_timer + dt

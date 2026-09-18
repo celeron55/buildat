@@ -35,7 +35,13 @@ RES = (1280, 720)
 # lower bound of the range is what keeps a cave dark: a frame whose key
 # meters below it is exposed as if it were at it.
 LUM_WEIGHTS = (0.2126, 0.7152, 0.0722)
-LUM_RANGE = (0.05, 100.0)
+# The floor is how far the eye may adapt into the dark ([PT_NIGHT]):
+# 0.003 puts the 02:00 snow field's probe at a median of 39 of 255 with
+# the sky at 0; 0.05, the old value, was a daylight-adapted eye looking
+# at the night and rendered it pitch black. LUM_FLOOR= is for arguing
+# with it over EXPOSE_ONLY=1; the launcher's AUTO_EXPOSURE has the same
+# number.
+LUM_RANGE = (float(os.environ.get("LUM_FLOOR", "0.003")), 100.0)
 MIDDLE_GREY = 0.18
 # ONLY=vp1 renders the one dump whose stem contains it
 ONLY = os.environ.get("ONLY", "")
@@ -421,6 +427,13 @@ def expose(exr, png):
 
 
 def main():
+	# EXPOSE_ONLY=1: the metering alone, over the EXRs already rendered --
+	# a floor is argued with in seconds this way, not in renders
+	if os.environ.get("EXPOSE_ONLY"):
+		for n in sorted(os.listdir(OUT)):
+			if n.endswith(".exr"):
+				expose(os.path.join(OUT, n), os.path.join(OUT, n[:-4] + ".png"))
+		return
 	# Cycles and a buildat server do not fit in memory together; a render
 	# waits for a shooter rather than running beside one.
 	import subprocess
