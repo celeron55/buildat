@@ -106,35 +106,74 @@ done
 echo
 echo "Hue is the verdict; mean is for TOO_BRIGHT and carries no pass mark."
 
-# [PBR_FIT] part 1: what the fit is run against, in linear light -- the
-# 16-bit sRGB PNG undone to linear (magick's RGB colourspace) on both sides.
-# simplified: the client's frame is read after its tonemap, not before it,
-# and the tonemap is not inverted; the render's PNG has the same metering
-# and no tonemap, so the ratios below carry the tonemap's own compression
-# on the pbr side until part 2's last term replaces it. Each row is a
-# ratio, render and pbr side by side, per crop pair:
-#   contrast    sunlit face over shadowed face of one material
-#   saturation  max over min channel of a coloured surface
-#   sky_to_sun  a sky patch over a sunlit white
-# name | picture | crop A | crop B (empty for a single crop) | what
-FIT="
-contrast_dirt|vp1_1300|64x10+280+530|20x20+0+310|vp1 dirt: the lit row over a shaded dirt face under open sky, the cliff top at the left edge
-contrast_dirt_pit|vp1_1300|64x10+280+530|48x10+216+530|vp1 dirt: the lit row over the shaded row in the pit beside the stone block, hemmed in on three sides
-incidence_dirt|vp1_1300|40x12+957+690|40x12+666+564|vp1 dirt: a sunlit side over a side facing the camera -- the face-shade table and the sun's direction
-contrast_snow|vp5_1000|60x40+420+540|60x30+400+660|vp5 snow: the sunlit field over the tree's shadow
-contrast_cave|vp7_1300|60x8+560+650|128x36+320+252|vp7 the sunlit floor step over the deep wall: the sun reaching in
-cave_wall_near|vp7_1300|60x40+560+560|128x36+320+252|vp7 the near wall over the deep wall: the interior's falloff
-cave_opening|vp7_1300|128x36+704+252|128x36+320+252|vp7 the sky through the mouth over the deep wall: the range the meter spans
-cave_rim|vp7_1300|64x36+768+324|128x36+320+252|vp7 the sunlit rim over the deep wall; the sky must read above the rim
-cave_outside|vp7_1300|64x36+512+432|128x36+320+252|vp7 the half-lit terrain through the mouth over the deep wall
-saturation_grass|vp1_1300|40x12+666+534||vp1 grass top, lit
-saturation_leaves|vp1_1300|30x20+390+160||vp1 canopy
-saturation_water|vp1_1300|80x40+1120+430||vp1 the sea
-saturation_flowers|vp5_1000|10x10+646+482||vp5 a rose's petals
-sky_to_sun|vp5_1000|60x40+20+20|60x40+420+540|vp5 a sky patch over the sunlit snow
-terrain_occlusion|vp1_0545|33x11+271+498|56x40+871+562|vp1 05:45: a grass top under the mountain over one with an open horizon, per channel
-sun_glint_grass|vp1_0545|34x25+653+409|40x15+600+440|vp1 05:45: the sun's glint on a grass top over the same grass beside it, per channel
-translucency_canopy|vp2_0545|38x18+955+352|19x21+887+317|vp2 05:45: a back-lit canopy face over a front-lit one
+# [PBR_FIT]: what the fit is run against, in linear light -- the render's
+# EXR, the client's 16-bit sRGB PNG undone to linear (magick's RGB
+# colourspace). **One crop per probe, read absolute and per channel**: since
+# [PT_EXPOSURE] both sides are metered by one rule and a crop's linear value
+# is comparable on its own (the stone control 0.179 against 0.180), and the
+# target is the absolute -- a ratio can be right with both ends wrong. The
+# ratios below are derived from the names and printed as a reading aid.
+# name | picture | crop | what it is
+CROPS="
+lit_dirt|vp1_1300|64x10+280+530|vp1 the dirt row in the sun
+open_shade_dirt|vp1_1300|20x20+0+310|vp1 a shaded dirt face under open sky, the cliff top at the left edge
+pit_dirt|vp1_1300|48x10+216+530|vp1 the shaded dirt row in the pit beside the stone block
+dirt_side_lit|vp1_1300|40x12+957+690|vp1 a sunlit dirt side
+dirt_side_camera|vp1_1300|40x12+666+564|vp1 a dirt side facing the camera
+snow_sun|vp5_1000|60x40+420+540|vp5 the sunlit snow field
+snow_shade|vp5_1000|60x30+400+660|vp5 snow in the tree's shadow
+sun_step|vp7_1300|60x8+560+650|vp7 the sunlit floor step in the cave mouth
+near_wall|vp7_1300|60x40+560+560|vp7 the cave wall near the mouth
+deep_wall|vp7_1300|128x36+256+252|vp7 the deep wall, on the fold where it turns back
+sky_mouth|vp7_1300|128x36+704+252|vp7 the sky through the mouth
+lit_rim|vp7_1300|64x36+768+324|vp7 the sunlit rim of the mouth
+outside_terrain|vp7_1300|64x36+512+432|vp7 the half-lit terrain seen through the mouth
+grass_lit|vp1_1300|40x12+666+534|vp1 a grass top in the sun
+leaves|vp1_1300|30x20+390+160|vp1 a canopy
+water_sea|vp1_1300|80x40+1120+430|vp1 the sea, looking down into it
+flowers|vp5_1000|10x10+646+482|vp5 a rose's petals
+sky_patch|vp5_1000|60x40+20+20|vp5 a sky patch
+grass_occluded|vp1_0545|33x11+271+498|vp1 05:45 a grass top under the mountain
+grass_open|vp1_0545|56x40+871+562|vp1 05:45 a grass top with an open horizon
+glint|vp1_0545|34x25+653+409|vp1 05:45 the sun's glint on a grass top
+grass_beside|vp1_0545|40x15+600+440|vp1 05:45 the grass beside the glint
+canopy_backlit|vp2_0545|38x18+955+352|vp2 05:45 a back-lit canopy face
+canopy_frontlit|vp2_0545|19x21+887+317|vp2 05:45 a front-lit canopy face
+water_far|vp3_0545|120x15+40+355|vp3 05:45 the water near the horizon
+water_near|vp3_0545|120x30+80+490|vp3 05:45 the near water
+dirt_face_0545|vp1_0545|40x10+2+608|vp1 05:45 the foreground block's lit dirt face
+dirt_face_1300|vp1_1300|40x10+2+608|vp1 13:00 the same face
+sky_zenith_1300|vp1_1300|60x40+900+30|vp1 near the top of the sky, 13:00
+sky_horizon_1300|vp1_1300|60x20+1100+225|vp1 just over the sea, away from the sun
+sky_glow_0545|vp2_0545|60x40+600+30|vp2 the dawn glow, 05:45, mid-gradient toward the disc
+sky_horizon_0545|vp1_0545|60x20+1100+225|vp1 the horizon opposite the dawn
+sky_night_0200|vp5_0200|60x40+20+20|vp5 away from the moon, 02:00
+"
+# The ratios, from the crops' names. kind: lum -- luminance over luminance;
+# rgb -- per channel; sat -- max over min channel of one crop; hue -- R/B
+# of the first over R/B of the second (the sun's colour with the material
+# controlled for). No pass mark: two crops off by the same factor is the
+# level, a metering or gate finding, not a term.
+RATIOS="
+contrast_dirt|lum|lit_dirt|open_shade_dirt|sun over sky-only, the open case the ambient is fitted to
+contrast_dirt_pit|lum|lit_dirt|pit_dirt|a deep shadow hemmed in on three sides: occlusion and bounce
+incidence_dirt|lum|dirt_side_lit|dirt_side_camera|the face-shade table and the sun's direction
+contrast_snow|lum|snow_sun|snow_shade|at the top of the range
+contrast_cave|lum|sun_step|deep_wall|the sun reaching into the cave
+cave_wall_near|lum|near_wall|deep_wall|the interior's falloff
+cave_opening|lum|sky_mouth|deep_wall|the range across the mouth the meter spans
+cave_rim|lum|lit_rim|deep_wall|the sky must read above the lit rim
+cave_outside|lum|outside_terrain|deep_wall|the meter keys on the interior without blowing the outside
+saturation_grass|sat|grass_lit||chroma
+saturation_leaves|sat|leaves||chroma
+saturation_water|sat|water_sea||chroma
+saturation_flowers|sat|flowers||chroma
+sky_to_sun|lum|sky_patch|snow_sun|the ratio the base hangs on
+terrain_occlusion|rgb|grass_occluded|grass_open|sky fraction at the hills' scale
+sun_glint|rgb|glint|grass_beside|the grazing specular on a rough dielectric
+water_reflection|rgb|water_far|water_near|Fresnel and the reflected sky on a mirror
+translucency_canopy|lum|canopy_backlit|canopy_frontlit|a back-lit face over a front-lit one
+dawn_sun_dirt|hue|dirt_face_0545|dirt_face_1300|the low sun's colour on a lit dirt side
 "
 
 linear_rgb() {   # file crop -> "r g b" in linear light
@@ -157,92 +196,73 @@ fit_file_of() {   # set pic -> path
 	file_of "$1" "$2"
 }
 
-echo
-echo "=== the fit, in linear light: render | pbr (ratio to the render)"
-echo "$FIT" | while IFS='|' read -r name pic a b why; do
-	[ -n "$name" ] || continue
-	line=$(printf "  %-18s" "$name")
-	for s in pathtrace_r150 module_pbr_r150; do
-		f=$(fit_file_of "$s" "$pic")
-		[ -f "$f" ] || { line="$line  (no $s)"; continue; }
-		ra=$(linear_rgb "$f" "$a")
-		if [ -n "$b" ] && { [ "$name" = terrain_occlusion ] || [ "$name" = sun_glint_grass ]; }; then
-			rb=$(linear_rgb "$f" "$b")
-			v=$(echo "$ra $rb" | awk '{printf "%.2f/%.2f/%.2f", $1/($4+1e-9), $2/($5+1e-9), $3/($6+1e-9)}')
-		elif [ -n "$b" ]; then
-			rb=$(linear_rgb "$f" "$b")
-			v=$(echo "$ra $rb" | awk '{la=0.2126*$1+0.7152*$2+0.0722*$3; lb=0.2126*$4+0.7152*$5+0.0722*$6; printf "%.3f", la/(lb+1e-9)}')
-		else
-			v=$(echo "$ra" | awk '{mx=$1; mn=$1; for(i=2;i<=3;i++){if($i>mx)mx=$i; if($i<mn)mn=$i}; printf "%.3f", mx/(mn+1e-9)}')
-		fi
-		line="$line  $v"
-	done
-	echo "$line" | awk '{ if (NF >= 3 && $2+0 > 0) printf "%s  (%.2f)  ", $0, $3/$2; else printf "%s  ", $0; }'
-	echo "-- $why"
-done
 
-# And the sky as a surface of its own (user, 2026-09-18): the render's
-# Nishita sky is the reference for it, and the fixture has taken the
-# clouds, the moon disc and the stars out of every client's. Absolute
-# linear values, render against pbr, per patch:
-#   zenith  the top of the frame, straight up as the view allows
-#   horizon a patch near the horizon away from the sun
-#   glow    a patch in the sun's own glow
-#   night   a patch away from where the moon would be
-SKY="
-sky_zenith_1300|vp1_1300|60x40+900+30|vp1 near the top, 13:00
-sky_horizon_1300|vp1_1300|60x20+1100+225|vp1 just over the sea, away from the sun
-sky_glow_0545|vp2_0545|60x40+600+30|vp2 the dawn glow, 05:45, mid-gradient toward the disc
-sky_horizon_0545|vp1_0545|60x20+1100+225|vp1 the horizon opposite the dawn
-sky_night_0200|vp5_0200|60x40+20+20|vp5 away from the moon, 02:00
-"
-# Water's reflection at a grazing angle (user, 2026-09-18): vp3 at 05:45,
-# the sun behind the camera, the far water near the horizon over the near
-# water below it, per channel -- the Fresnel and the reflected sky in one
-# number, which is the water's roughness and spec and the cube it reflects.
-WATER="
-water_far|vp3_0545|120x15+40+355|vp3 the water near the horizon, 05:45
-water_near|vp3_0545|120x20+40+550|vp3 the near water, 05:45
-"
-echo
-echo "=== the sky, in linear light: render | pbr (ratio to the render)"
-echo "$SKY" | while IFS='|' read -r name pic crop why; do
-	[ -n "$name" ] || continue
-	line=$(printf "  %-18s" "$name")
-	for s in pathtrace_r150 module_pbr_r150; do
-		f=$(file_of "$s" "$pic")
-		[ -f "$f" ] || { line="$line  (no $s)"; continue; }
-		# Per channel, since term 1's hue is the Luanti-ism ([PBR_FIT])
-		v=$(linear_rgb "$f" "$crop" | awk '{printf "%.3f/%.3f/%.3f", $1, $2, $3}')
-		line="$line  $v"
-	done
-	echo "$line" | awk '{ if (NF >= 3) { n=split($2,a,"/"); split($3,b,"/"); r="";
-		for(i=1;i<=3;i++) r=r (i>1?"/":"") (a[i]+0>0 ? sprintf("%.2f",b[i]/a[i]) : "-");
-		printf "%s  (%s)  ", $0, r } else printf "%s  ", $0; }'
-	echo "-- $why"
-done
+# The render's EXR is radiance before the meter; its PNG is metered but
+# clips at one. So the EXR is read and scaled by the meter's own rule --
+# pathtrace_render.py's expose(): log-average luminance as the key,
+# clamped to LUM_RANGE, MIDDLE_GREY over it -- which puts it in the pbr
+# frame's units without the clip. One scale per picture, cached.
+declare -A SCALE
+exr_scale() {   # exr -> the meter's scale for that frame
+	local f="$1"
+	if [ -z "${SCALE[$f]:-}" ]; then
+		SCALE[$f]=$(magick "$f" -depth 32 -define quantum:format=floating-point rgb:- 2>/dev/null |
+			python3 -c '
+import sys, numpy as np
+a = np.frombuffer(sys.stdin.buffer.read(), dtype="<f4").reshape(-1, 3)
+lum = a @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+key = float(np.exp(np.mean(np.log(lum + 1e-5))))
+key = min(max(key, 0.003), 100.0)
+print("%.6f" % (0.18 / key))')
+	fi
+	echo "${SCALE[$f]}"
+}
 
-
-
-# The low sun's colour (user, 2026-09-18): a dirt face lit at 05:45 and at
-# 13:00, its R/B at dawn over its R/B at noon -- the sun's colour with the
-# material controlled for, which is the number [PBR_FIT] term 3 is fitted
-# to. The face is vp1's foreground block, the one dirt lit at both hours
-# under the tilted sun (vp2's terrace sides and vp3's mountain are in
-# shadow at noon). Read off the PNGs on both sides: a hue ratio survives
-# the exposure.
-DAWN="
-dawn_sun_dirt|vp1|40x10+2+608|vp1 the foreground block's lit face, 05:45 over 13:00
-"
-echo
-echo "=== water's reflection, per channel: far over near, render | pbr"
-r=""; p=""
+# Every crop read once per set: VAL[set/name] = "r g b", linear, in the
+# metered frame's units on both sides
+declare -A VAL
 for s in pathtrace_r150 module_pbr_r150; do
-	f=$(file_of "$s" "vp3_0545")
-	[ -f "$f" ] || { echo "  (no $s)"; continue; }
-	far=$(linear_rgb "$f" "120x15+40+355"); near=$(linear_rgb "$f" "120x30+80+490")
-	echo "$far $near" | awk -v s="$s" '{printf "  %-18s far %.3f %.3f %.3f  near %.3f %.3f %.3f  far/near %.2f %.2f %.2f\n", s, $1,$2,$3, $4,$5,$6, $1/($4+1e-9), $2/($5+1e-9), $3/($6+1e-9)}'
+	while IFS='|' read -r name pic crop why; do
+		[ -n "$name" ] || continue
+		f=$(fit_file_of "$s" "$pic"); [ -f "$f" ] || continue
+		v=$(linear_rgb "$f" "$crop")
+		case "$f" in *.exr) k=$(exr_scale "$f"); v=$(awk -v k="$k" '{printf "%.5f %.5f %.5f", $1*k, $2*k, $3*k}' <<< "$v") ;; esac
+		VAL["$s/$name"]=$v
+	done <<< "$CROPS"
 done
+lum() { awk '{printf "%.4f", 0.2126*$1+0.7152*$2+0.0722*$3}' <<< "$1"; }
+
+echo
+echo "=== the crops, absolute, in the metered frame's linear units: render r/g/b | pbr r/g/b (pbr over render)"
+echo "    the render off its EXR times the meter's scale, so it does not clip; pbr's PNG clips at 1.000"
+while IFS='|' read -r name pic crop why; do
+	[ -n "$name" ] || continue
+	r=${VAL[pathtrace_r150/$name]:-}; p=${VAL[module_pbr_r150/$name]:-}
+	printf "  %-18s" "$name"
+	awk -v r="$r" -v p="$p" 'BEGIN{ nr=split(r,a," "); np=split(p,b," ");
+		if(nr==3) printf "%.3f/%.3f/%.3f", a[1],a[2],a[3]; else printf "(no render)";
+		printf "  ";
+		if(np==3) printf "%.3f/%.3f/%.3f", b[1],b[2],b[3]; else printf "(no pbr)";
+		if(nr==3 && np==3){ printf "  ("; for(i=1;i<=3;i++) printf "%s%s", (i>1?"/":""), (a[i]>0.0005 ? sprintf("%.2f", b[i]/a[i]) : "-"); printf ")" }
+		printf "  -- %s\n", ARGV[1] }' "$why"
+done <<< "$CROPS"
+
+echo
+echo "=== derived ratios, render | pbr (pbr over render); a reading aid, no pass mark"
+while IFS='|' read -r name kind a b why; do
+	[ -n "$name" ] || continue
+	printf "  %-20s" "$name"
+	for s in pathtrace_r150 module_pbr_r150; do
+		va=${VAL[$s/$a]:-}; vb=${VAL[$s/$b]:-}
+		awk -v k="$kind" -v A="$va" -v B="$vb" 'BEGIN{ na=split(A,a," "); nb=split(B,b," ");
+			if(na!=3 || (k!="sat" && nb!=3)){ printf "  (missing)"; exit }
+			if(k=="lum"){ la=0.2126*a[1]+0.7152*a[2]+0.0722*a[3]; lb=0.2126*b[1]+0.7152*b[2]+0.0722*b[3]; printf "  %.3f", la/(lb+1e-9) }
+			else if(k=="sat"){ mx=a[1]; mn=a[1]; for(i=2;i<=3;i++){if(a[i]>mx)mx=a[i]; if(a[i]<mn)mn=a[i]}; printf "  %.3f", mx/(mn+1e-9) }
+			else if(k=="rgb"){ printf "  %.2f/%.2f/%.2f", a[1]/(b[1]+1e-9), a[2]/(b[2]+1e-9), a[3]/(b[3]+1e-9) }
+			else if(k=="hue"){ printf "  %.3f", (a[1]/(a[3]+1e-9)) / (b[1]/(b[3]+1e-9)) } }'
+	done | awk '{ if(NF>=2 && $1+0>0 && $2+0>0) printf "%s  (%.2f)", $0, $2/$1; else printf "%s", $0 }'
+	echo "  -- $why"
+done <<< "$RATIOS"
 
 # The crop sheet, on every run: every crop cut with three times its context
 # and its box drawn, one sheet per set as probes.png inside the set's own
@@ -259,36 +279,23 @@ show_cell() {   # out name file crop -> a cell png
 		-fill none -stroke red -strokewidth 1 \
 		-draw "rectangle $((x - cx)),$((y - cy)) $((x - cx + w - 1)),$((y - cy + h - 1))" \
 		-scale 300% -gravity north -background black -fill white -pointsize 12 \
-		-splice 0x14 -annotate +0+1 "$2" "$1/$2.png" 2>/dev/null
+		-splice 0x14 -annotate +0+1 "$2 $5" "$1/$2.png" 2>/dev/null
 }
 for s in pathtrace_r150 module_pbr_r150; do
 	[ -d "$shots/$s" ] || continue
 	cells=$(mktemp -d)
-	{ echo "$FIT"; echo "$SKY"; echo "$WATER"; echo "$DAWN"; } |
-	while IFS='|' read -r name pic a b why; do
+	# One cell per crop, its label carrying this set's reading after its
+	# name, so the picture and the number are read together
+	n=0
+	while IFS='|' read -r name pic crop why; do
 		[ -n "$name" ] || continue
-		case "$name" in dawn_*) pic="${pic}_0545" ;; esac
 		f=$(file_of "$s" "$pic"); [ -f "$f" ] || continue
-		show_cell "$cells" "${name}_A" "$f" "$a"
-		case "$b" in *x*) show_cell "$cells" "${name}_B" "$f" "$b" ;; esac
-	done
+		n=$((n + 1))
+		label=$(awk '{printf "%.3f %.3f %.3f", $1, $2, $3}' <<< "${VAL[$s/$name]:-}")
+		show_cell "$cells" "$(printf '%02d_%s' $n "$name")" "$f" "$crop" "$label"
+	done <<< "$CROPS"
 	magick montage "$cells"/*.png -tile 4x -geometry +4+4 -background gray20 \
 		"$shots/$s/probes.png" 2>/dev/null && echo "crop sheet: $shots/$s/probes.png"
 	rm -rf "$cells"
 done
 
-echo
-echo "=== the low sun: R/B at 05:45 over R/B at 13:00, render | pbr (ratio to the render)"
-echo "$DAWN" | while IFS='|' read -r name vp crop why; do
-	[ -n "$name" ] || continue
-	line=$(printf "  %-18s" "$name")
-	for s in pathtrace_r150 module_pbr_r150; do
-		d=$(file_of "$s" "${vp}_0545"); n=$(file_of "$s" "${vp}_1300")
-		[ -f "$d" ] && [ -f "$n" ] || { line="$line  (no $s)"; continue; }
-		v=$(echo "$(linear_rgb "$d" "$crop") $(linear_rgb "$n" "$crop")" |
-			awk '{printf "%.3f", ($1/($3+1e-9)) / ($4/($6+1e-9))}')
-		line="$line  $v"
-	done
-	echo "$line" | awk '{ if (NF >= 3 && $2+0 > 0) printf "%s  (%.2f)  ", $0, $3/$2; else printf "%s  ", $0; }'
-	echo "-- $why"
-done
