@@ -220,7 +220,7 @@ local MOON_BRIGHTNESS = 1.0
 -- its colour below; the colours are the terms after this one.
 local PHYS = {sun_e0 = 195, sun_tau = 0.127, sky_zenith = 4.5,
 		sky_horizon = 12.0, moon_e = 0.0025, night_sky = 0.00005,
-		bounce = 0.13, ground = {r = 0.25, g = 0.22, b = 0.15},
+		bounce = 0.13, dome = 0.7, ground = {r = 0.25, g = 0.22, b = 0.15},
 		day_zenith = {r = 0.57, g = 0.76, b = 1.0},
 		day_horizon = {r = 0.74, g = 0.89, b = 1.0}}
 -- The sky's radiance factor at a sun height (sin elevation): full by
@@ -1382,7 +1382,12 @@ local function update_sky(dt)
 		-- shade at 05:45, which leaves the dome at about the zenith's
 		-- radiance -- the horizon's band is bright but at a grazing
 		-- weight. So the zenith's, not a mean that counts the horizon.
-		local mean = PHYS.night_sky + (PHYS.sky_zenith - PHYS.night_sky) * f
+		-- 0.7 of it: the render's snow in an open shadow at 10:00 reads
+		-- (1.6, 3.0, 5.3), which off snow's albedo is a dome of 3.2
+		-- against a drawn zenith patch of 4.5 -- Nishita's dome is
+		-- bright toward the sun and dark away, and a face sees the mean
+		local mean = PHYS.night_sky +
+				(PHYS.sky_zenith * PHYS.dome - PHYS.night_sky) * f
 		-- In the drawn sky's own hue, which is what a shadow on snow is
 		-- lit by: the render's reads (1.6, 3.0, 5.3), the sky's blue,
 		-- where a grey ambient gave a grey shadow.
