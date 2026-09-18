@@ -83,8 +83,15 @@ function M.boot(launch_action)
 	title:SetTextAlignment(HA_CENTER)
 	title.color = magic.Color(0.867, 0.867, 0.867)
 
+	-- The grid, inside a viewport that is as tall as the window allows
+	-- and clips the rest: a grid of more lines than fit scrolls by the
+	-- selection, below
+	local viewport = layout:CreateChild("UIElement")
+	viewport:SetAlignment(HA_LEFT, VA_TOP)
+	viewport.clipChildren = true
+	viewport.enabled = true
 	-- The entries side by side, because there are several of them
-	local row = layout:CreateChild("UIElement")
+	local row = viewport:CreateChild("UIElement")
 	-- HA_LEFT rather than HA_CENTER: inside a layout the alignment only says
 	-- which border to apply, and the row is made exactly as wide as its
 	-- entries below, so the left border is what lines it up with the rest
@@ -161,10 +168,32 @@ function M.boot(launch_action)
 				line * (ENTRY_HEIGHT + ENTRY_SPACING))
 	end
 	local lines = math.ceil(#items / columns)
-	row:SetFixedWidth(columns * ENTRY_WIDTH +
-			math.max(0, columns - 1) * ENTRY_SPACING)
-	row:SetFixedHeight(lines * ENTRY_HEIGHT +
-			math.max(0, lines - 1) * ENTRY_SPACING)
+	local grid_w = columns * ENTRY_WIDTH +
+			math.max(0, columns - 1) * ENTRY_SPACING
+	local grid_h = lines * ENTRY_HEIGHT +
+			math.max(0, lines - 1) * ENTRY_SPACING
+	row:SetFixedWidth(grid_w)
+	row:SetFixedHeight(grid_h)
+	-- What the window leaves for the grid under the logo and the title,
+	-- in whole lines; the viewport is that tall and the row moves inside
+	-- it so the selected line is always in view
+	local line_step = ENTRY_HEIGHT + ENTRY_SPACING
+	local room = magic.ui.root.height - 2 * 20 - 160 - 16 - 40 - 16
+	local visible_lines = math.max(1, math.min(lines,
+			math.floor((room + ENTRY_SPACING) / line_step)))
+	viewport:SetFixedWidth(grid_w)
+	viewport:SetFixedHeight(visible_lines * ENTRY_HEIGHT +
+			math.max(0, visible_lines - 1) * ENTRY_SPACING)
+	local first_line = 0
+	local function scroll_to(i)
+		local line = math.floor((i - 1) / columns)
+		if line < first_line then
+			first_line = line
+		elseif line >= first_line + visible_lines then
+			first_line = line - visible_lines + 1
+		end
+		row:SetPosition(0, -first_line * line_step)
+	end
 
 	-- launch_menu's keyboard selection, which is worth having here: up and
 	-- down, left and right, enter, and the mouse moving the same selection
@@ -175,10 +204,13 @@ function M.boot(launch_action)
 		end
 	end)
 	nav:set_columns(columns)
-	nav:on_change(function(button, selected)
+	nav:on_change(function(button, selected, index)
 		local c = selected and 1 or DIM
 		button:GetChild("ButtonImage").color = magic.Color(c, c, c)
 		button:GetChild("ButtonText").color = magic.Color(c, c, c)
+		if selected and index then
+			scroll_to(index)
+		end
 	end)
 
 	if launch_action then

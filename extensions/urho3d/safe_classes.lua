@@ -1241,6 +1241,9 @@ function M.define(dst, util)
 			width = util.simple_property("number"),
 			size = util.simple_property(dst.IntVector2),
 			color = util.simple_property(dst.Color),
+			-- Whether children outside the element are drawn: a viewport
+			-- over a grid taller than the window ([LAUNCH_GRID])
+			clipChildren = util.simple_property("boolean"),
 			minHeight = util.simple_property("number"),
 			minWidth = util.simple_property("number"),
 			minSize = util.simple_property(dst.IntVector2),
