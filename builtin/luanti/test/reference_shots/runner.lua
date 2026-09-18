@@ -195,6 +195,15 @@ local function pin_view(player)
 	sky.fog.fog_distance = RANGE
 	sky.fog.fog_start = 0.99
 	player:set_sky(sky)
+	-- No clouds, no moon disc and no stars, on every client (user,
+	-- 2026-09-18): the reference's Nishita sky has none, and rather than
+	-- model them there or read around them the fixture turns them off.
+	-- A fixture fact, not a rendering one; the moonlit ground stays,
+	-- the disc goes. Re-asserted with the rest, since a game's weather
+	-- puts clouds back.
+	player:set_clouds({density = 0})
+	player:set_moon({visible = false})
+	player:set_stars({visible = false})
 	-- Not a HUD test: the F5 line and the fixture's own text are what a
 	-- reference picture carries, and nothing else. See [REFVIEWS_HUD].
 	player:hud_set_flags({hotbar = false, wielditem = false,

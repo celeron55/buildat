@@ -151,3 +151,35 @@ echo "$FIT" | while IFS='|' read -r name pic a b why; do
 	echo "$line" | awk '{ if (NF >= 3 && $2+0 > 0) printf "%s  (%.2f)  ", $0, $3/$2; else printf "%s  ", $0; }'
 	echo "-- $why"
 done
+
+# And the sky as a surface of its own (user, 2026-09-18): the render's
+# Nishita sky is the reference for it, and the fixture has taken the
+# clouds, the moon disc and the stars out of every client's. Absolute
+# linear values, render against pbr, per patch:
+#   zenith  the top of the frame, straight up as the view allows
+#   horizon a patch near the horizon away from the sun
+#   glow    a patch in the sun's own glow
+#   night   a patch away from where the moon would be
+SKY="
+sky_zenith_1300|vp1_1300|60x40+900+30|vp1 near the top, 13:00
+sky_horizon_1300|vp1_1300|60x20+1100+225|vp1 just over the sea, away from the sun
+sky_glow_0545|vp1_0545|60x40+200+30|vp1 the dawn glow, 05:45
+sky_horizon_0545|vp1_0545|60x20+1100+225|vp1 the horizon opposite the dawn
+sky_night_0200|vp5_0200|60x40+20+20|vp5 away from the moon, 02:00
+"
+echo
+echo "=== the sky, in linear light: render | pbr (ratio to the render)"
+echo "$SKY" | while IFS='|' read -r name pic crop why; do
+	[ -n "$name" ] || continue
+	line=$(printf "  %-18s" "$name")
+	for s in pathtrace_r150 module_pbr_r150; do
+		f=$(file_of "$s" "$pic")
+		[ -f "$f" ] || { line="$line  (no $s)"; continue; }
+		v=$(linear_rgb "$f" "$crop" | awk '{printf "%.4f", 0.2126*$1+0.7152*$2+0.0722*$3}')
+		line="$line  $v"
+	done
+	echo "$line" | awk '{ if (NF >= 3 && $2+0 > 0) printf "%s  (%.2f)  ", $0, $3/$2; else printf "%s  ", $0; }'
+	echo "-- $why"
+done
+
+
