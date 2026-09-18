@@ -42,7 +42,9 @@ local ENTRY_SPACING = 24
 -- enough for; a row with nothing laying it out does not work it out itself
 local ENTRY_HEIGHT = 160
 
-function M.boot()
+-- launch_action is -a's kind/name/id: the grid is drawn and that one
+-- action is run on top of it, the way picking its tile would
+function M.boot(launch_action)
 	local root = uistack.main:push("boot")
 
 	local style = magic.cache:GetResource("XMLFile", "__menu/res/boot_style.xml")
@@ -141,7 +143,8 @@ function M.boot()
 	-- the menu's own rather than a tile from the tree
 	add("__menu/res/icon_preferences.png", "Preferences", preferences.show)
 	-- And every launch action the tree offers, in the grid's order
-	for _, action in ipairs(launch_grid.actions(log)) do
+	local actions = launch_grid.actions(log)
+	for _, action in ipairs(actions) do
 		add(action.icon, action.label, action.run)
 	end
 
@@ -177,6 +180,22 @@ function M.boot()
 		button:GetChild("ButtonImage").color = magic.Color(c, c, c)
 		button:GetChild("ButtonText").color = magic.Color(c, c, c)
 	end)
+
+	if launch_action then
+		local found = nil
+		for _, action in ipairs(actions) do
+			if action.from.."/"..tostring(action.id) == launch_action then
+				found = action
+			end
+		end
+		if found then
+			log:info("Launch action: "..launch_action)
+			found.run()
+		else
+			log:warning("Launch action "..dump(launch_action)..
+					" is not on the grid")
+		end
+	end
 end
 
 return M

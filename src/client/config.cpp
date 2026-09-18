@@ -22,6 +22,8 @@ Config::Config()
 	// The launch menu: local games, remote servers, and the extensions that
 	// say they can be launched. See extensions/__menu.
 	set_default("menu_extension_name", "__menu");
+	// -a kind/name/id: one launch-grid action run on boot ([LAUNCH_GRID])
+	set_default("launch_action", "");
 	set_default("ui_scale", 0.0); // 0 = auto from short side / 1080
 	// Where -L put the client's own log, kept so that a local server this
 	// client starts can be given one beside it; see l_start_local_server()

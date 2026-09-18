@@ -77,7 +77,7 @@ int main(int argc, char *argv[])
 
 	client::Config &config = g_client_config;
 
-	const char opts[100] = "hs:P:C:D:U:l:L:m:u:w:o:c:R";
+	const char opts[100] = "hs:P:C:D:U:l:L:m:u:w:o:c:Ra:";
 	const char usagefmt[1400] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
@@ -102,6 +102,8 @@ int main(int argc, char *argv[])
 			"                       See doc/client_commands.txt\n"
 			"  -R                   A local server this client starts restarts\n"
 			"                       a module when its source changes\n"
+			"  -a [kind/name/id]    Run one launch-grid action on boot, e.g.\n"
+			"                       builtin/luanti/devtest, game/digger/play\n"
 			;
 
 	int forced_w = 0, forced_h = 0;
@@ -147,6 +149,10 @@ int main(int argc, char *argv[])
 		case 'm':
 			log_i(MODULE, "config.menu_extension_name: %s", c55_optarg);
 			config.set("menu_extension_name", c55_optarg);
+			break;
+		case 'a':
+			log_i(MODULE, "config.launch_action: %s", c55_optarg);
+			config.set("launch_action", c55_optarg);
 			break;
 		case 'u':
 			log_i(MODULE, "config.ui_scale: %s", c55_optarg);

@@ -147,7 +147,8 @@ level as key=value lines through the server's -u, kept as
 `untrusted_launch` in its config for a module to read as it would a
 packet -- never the environment. A builtin module is not a target yet.
 
-The grid's order: explicit order first, then by kind -- the menu's own,
+`buildat -a kind/name/id` runs one action on boot, with the grid
+underneath it. The grid's order: explicit order first, then by kind -- the menu's own,
 games, builtins, extensions -- then label. The check is
 extensions/sandbox_test/launcher/init.lua, whose tiles each try something
 the sandbox must refuse and say so on their label.

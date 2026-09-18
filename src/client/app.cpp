@@ -1241,12 +1241,19 @@ struct CApp: public App, public magic::Application
 		// Launch menu if requested
 		if(g_client_config.get<bool>("boot_to_menu")){
 			ss_ extname = g_client_config.get<ss_>("menu_extension_name");
+			// -a kind/name/id: the menu boots and runs that one action of
+			// its grid ([LAUNCH_GRID]); the string goes in quoted, and it
+			// is a path's shape or nothing
+			ss_ action = g_client_config.get<ss_>("launch_action");
+			for(char c : action)
+				if(!(isalnum((unsigned char)c) || c == '_' || c == '-' || c == '/'))
+					action = "";
 			ss_ script = ss_() +
 					"local m = require('buildat/extension/"+extname+"')\n"
 					"if type(m) ~= 'table' then\n"
 					"    error('Failed to load extension "+extname+"')\n"
 					"end\n"
-					"m.boot()\n";
+					"m.boot("+(action.empty() ? ss_("") : "'"+action+"'")+")\n";
 			if(!run_script_no_sandbox(script)){
 				throw AppStartupError(ss_()+
 						"Failed to load and run extension "+extname);
