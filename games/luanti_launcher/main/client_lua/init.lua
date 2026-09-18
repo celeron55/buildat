@@ -1330,11 +1330,13 @@ local function update_sky(dt)
 		sky_lights.sun_node.direction = magic.Vector3(dir.x, dir.y, dir.z)
 		sky_lights.sun.brightness = sky_now.unlit and SUN_BRIGHTNESS * up or
 				PHYS.sun(height)
-		-- BUILDAT_LUANTI_ABLATE=sun,amb,bounce,ground,ibl: a term turned
+		-- BUILDAT_LUANTI_ABLATE=sun,shadow,amb,bounce,ground,ibl: a term turned
 		-- off for a fit's ablation run ([PBR_FIT]); the sun goes with any
-		if buildat.get_env("BUILDAT_LUANTI_ABLATE") then
+		local abl0 = buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""
+		if abl0:find("sun") then
 			sky_lights.sun.brightness = 0
 		end
+		sky_lights.sun.castShadows = not abl0:find("shadow")
 	end
 	sky_lights.moon_node.enabled = moon_up > 0 and
 			not (sky_now.unlit and not sky_now.shadows)

@@ -127,7 +127,7 @@ saturation_leaves|vp1_1300|30x20+390+160||vp1 canopy
 saturation_water|vp1_1300|80x40+1120+430||vp1 the sea
 saturation_flowers|vp5_1000|10x10+646+482||vp5 a rose's petals
 sky_to_sun|vp5_1000|60x40+20+20|60x40+420+540|vp5 a sky patch over the sunlit snow
-terrain_occlusion|vp1_0545|33x11+271+498|80x44+960+472|vp1 05:45: a grass top under the mountain over one with an open horizon, per channel
+terrain_occlusion|vp1_0545|33x11+271+498|56x40+871+562|vp1 05:45: a grass top under the mountain over one with an open horizon, per channel
 "
 
 linear_rgb() {   # file crop -> "r g b" in linear light
