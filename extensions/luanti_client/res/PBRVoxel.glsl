@@ -162,6 +162,11 @@ varying vec4 vWorldPos;
     #endif
 #else
     varying vec3 vVertexLight;
+    // The sky's part of the ambient, kept apart from the rest so the pixel
+    // shader can scale it by the sky-visibility cube over the normal's
+    // hemisphere -- the terrain's own occlusion, which the skylight nibble
+    // (column light) does not carry. See [PBR_FIT] 2c, the terrain scale.
+    varying vec3 vSkyAmbient;
     // How much of the sky this vertex sees, ambient occlusion included; the
     // alpha the mesher packed into the vertex color
     varying float vSkyVisibility;
@@ -267,6 +272,7 @@ void VS()
             // If using lightmap, disregard zone ambient light
             // If using AO, calculate ambient in the PS
             vVertexLight = vec3(0.0, 0.0, 0.0);
+            vSkyAmbient = vec3(0.0, 0.0, 0.0);
             vTexCoord2 = iTexCoord1;
         #else
             // The sky's share is the nibble as it is, not the shaped one:
@@ -281,9 +287,9 @@ void VS()
             // the other half is the ground's, below. The nibble alone gave
             // a wall the whole dome, and a dirt side in a block's shadow
             // read 2.7 times the render's ([PBR_FIT], contrast_dirt).
-            vVertexLight = GetAmbient(GetZonePos(worldPos)) * iColor.a *
-                    (0.5 + 0.5 * vNormal.y) +
-                iColor.rgb +
+            vSkyAmbient = GetAmbient(GetZonePos(worldPos)) * iColor.a *
+                    (0.5 + 0.5 * vNormal.y);
+            vVertexLight = iColor.rgb +
                 cBounceLight * (1.0 - ShapeSkylight(iColor.a)) +
                 cGroundLight * (0.5 - 0.5 * vNormal.y) *
                     ShapeSkylight(iColor.a);
@@ -752,7 +758,27 @@ void PS()
         gl_FragData[3] = vec4(EncodeDepth(vWorldPos.w), 0.0);
     #else
         // Ambient & per-vertex lighting
-        vec3 finalColor = vVertexLight * diffColor.rgb;
+        // The sky's ambient by how much sky there is over this surface's
+        // hemisphere, out of the camera's visibility cube: the normal and
+        // four directions leaning off it. Tried as [PBR_FIT] 2c's step 1
+        // and left behind a define no technique sets: the cube is the
+        // camera's, and a snow field's shadow beside the tree the camera
+        // stood under went three times too dark while the terrace under
+        // the mountain, far off, did not move. Step 2 is a horizon map.
+        #if defined(VOXELIBL) && defined(VOXELSKYCUBEAMBIENT)
+            vec3 skyN = normalize(normal);
+            vec3 skyT = abs(skyN.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+            vec3 skyU = normalize(cross(skyN, skyT));
+            vec3 skyV = cross(skyN, skyU);
+            float skyVis = (GetSkyVisibility(skyN) * 2.0 +
+                GetSkyVisibility(normalize(skyN + skyU)) +
+                GetSkyVisibility(normalize(skyN - skyU)) +
+                GetSkyVisibility(normalize(skyN + skyV)) +
+                GetSkyVisibility(normalize(skyN - skyV))) / 6.0;
+        #else
+            float skyVis = 1.0;
+        #endif
+        vec3 finalColor = (vVertexLight + vSkyAmbient * skyVis) * diffColor.rgb;
         #ifdef AO
             // If using AO, the vertex light ambient is black, calculate occluded ambient here
             finalColor += texture2D(sEmissiveMap, vTexCoord2).rgb * cAmbientColor.rgb * diffColor.rgb;

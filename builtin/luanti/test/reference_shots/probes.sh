@@ -127,6 +127,7 @@ saturation_leaves|vp1_1300|30x20+390+160||vp1 canopy
 saturation_water|vp1_1300|80x40+1120+430||vp1 the sea
 saturation_flowers|vp5_1000|10x10+646+482||vp5 a rose's petals
 sky_to_sun|vp5_1000|60x40+20+20|60x40+420+540|vp5 a sky patch over the sunlit snow
+terrain_occlusion|vp1_0545|33x11+271+498|80x44+960+472|vp1 05:45: a grass top under the mountain over one with an open horizon, per channel
 "
 
 linear_rgb() {   # file crop -> "r g b" in linear light
@@ -158,7 +159,10 @@ echo "$FIT" | while IFS='|' read -r name pic a b why; do
 		f=$(fit_file_of "$s" "$pic")
 		[ -f "$f" ] || { line="$line  (no $s)"; continue; }
 		ra=$(linear_rgb "$f" "$a")
-		if [ -n "$b" ]; then
+		if [ -n "$b" ] && [ "$name" = terrain_occlusion ]; then
+			rb=$(linear_rgb "$f" "$b")
+			v=$(echo "$ra $rb" | awk '{printf "%.2f/%.2f/%.2f", $1/($4+1e-9), $2/($5+1e-9), $3/($6+1e-9)}')
+		elif [ -n "$b" ]; then
 			rb=$(linear_rgb "$f" "$b")
 			v=$(echo "$ra $rb" | awk '{la=0.2126*$1+0.7152*$2+0.0722*$3; lb=0.2126*$4+0.7152*$5+0.0722*$6; printf "%.3f", la/(lb+1e-9)}')
 		else
