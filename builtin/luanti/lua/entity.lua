@@ -45,6 +45,7 @@ local __send_player_pos = __luanti_send_player_pos
 -- Defined where the rest of the HUD is sent, far below; a player's hotbar is
 -- set from up here as well
 local send_hotbar
+local send_hud
 
 local function send_stats(o)
 	if o and o.player_name and __luanti_send_hud then
@@ -1104,10 +1105,56 @@ end
 -- nothing rather than being missing and taking a mod down on the line that
 -- sets one
 for _, name in ipairs({
-	"set_lighting",
 	"set_minimap_modes", "send_mapblock", "set_nametag_color",
 }) do
 	PlayerRef[name] = function() end
+end
+
+-- What the game says about how this player's world is drawn: kept and
+-- merged the way Luanti merges it (a call sets the fields it names and
+-- leaves the rest), answered back by get_lighting(), and sent down the
+-- HUD line as `lighting <shadows.intensity> <saturation>` -- the two the
+-- launcher draws today; the exposure block is [PBR_LEVEL]'s and the
+-- volumetric light nobody's yet. See [DRAW_SETTERS].
+local LIGHTING_DEFAULT = {shadows = {intensity = 0}, saturation = 1,
+		exposure = {luminance_min = -3, luminance_max = -3,
+		exposure_correction = 0, speed_dark_bright = 1000,
+		speed_bright_dark = 1000, center_weight_power = 1},
+		volumetric_light = {strength = 0}}
+
+local function merge_into(dst, src)
+	for k, v in pairs(src) do
+		if type(v) == "table" and type(dst[k]) == "table" then
+			merge_into(dst[k], v)
+		else
+			dst[k] = v
+		end
+	end
+end
+
+function PlayerRef:set_lighting(t)
+	local o = state_of(self)
+	if not o or type(t) ~= "table" then
+		return
+	end
+	if not o.lighting then
+		o.lighting = {}
+		merge_into(o.lighting, LIGHTING_DEFAULT)
+	end
+	merge_into(o.lighting, t)
+	send_hud(o, {"lighting",
+			tostring(tonumber(o.lighting.shadows.intensity) or 0),
+			tostring(tonumber(o.lighting.saturation) or 1)})
+end
+
+function PlayerRef:get_lighting()
+	local o = state_of(self)
+	local out = {}
+	merge_into(out, LIGHTING_DEFAULT)
+	if o and o.lighting then
+		merge_into(out, o.lighting)
+	end
+	return out
 end
 
 -- What the client draws its hotbar out of: how many slots, the picture
@@ -1463,7 +1510,7 @@ local function send_day_night(o)
 	end
 end
 
-local function send_hud(o, flat)
+send_hud = function(o, flat)
 	if o and o.player_name and __luanti_send_hud then
 		__luanti_send_hud(o.player_name, flat)
 	end

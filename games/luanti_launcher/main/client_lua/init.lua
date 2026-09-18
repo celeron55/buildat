@@ -2505,6 +2505,28 @@ end
 
 luanti.sub_hud(draw_hud)
 
+-- The game's set_lighting(): shadows.intensity is how dark a shadow is,
+-- 1 being black, and Urho's shadowIntensity is the other way round -- how
+-- much light a shadow keeps. Luanti's own default is 0 and VoxeLibre asks
+-- for 0.33. The saturation is carried and not drawn: it wants a colour
+-- grade on the render path, which is [PBR_LEVEL]'s tonemap to settle.
+luanti.sub_hud(function()
+	local l = luanti.lighting
+	if not l or not sky_lights.sun then
+		return
+	end
+	local keep = 1 - math.max(0, math.min(1, l.shadow_intensity))
+	if sky_lights.shadow_keep ~= keep then
+		sky_lights.shadow_keep = keep
+		sky_lights.sun.shadowIntensity = keep
+		if sky_lights.moon then
+			sky_lights.moon.shadowIntensity = keep
+		end
+		log:info(string.format("set_lighting: shadows keep %.2f, " ..
+				"saturation %.2f (not drawn)", keep, l.saturation))
+	end
+end)
+
 hud_follows_inventory = function()
 	if hud_has_inventory then
 		draw_hud(hud_elements)

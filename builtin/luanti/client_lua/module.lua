@@ -1413,6 +1413,13 @@ buildat.sub_packet("luanti:hud", function(data)
 			image = values[3] ~= "" and values[3] or nil,
 			selected_image = values[4] ~= "" and values[4] or nil,
 		}
+	elseif op == "lighting" then
+		-- The game's set_lighting() for this player: how dark a shadow is
+		-- (0 none, 1 black) and the colour saturation (1 as is)
+		M.lighting = {
+			shadow_intensity = tonumber(values[2]) or 0,
+			saturation = tonumber(values[3]) or 1,
+		}
 	elseif op == "stats" then
 		M.stats = {
 			hp = tonumber(values[2]) or 0,
