@@ -128,6 +128,7 @@ saturation_water|vp1_1300|80x40+1120+430||vp1 the sea
 saturation_flowers|vp5_1000|10x10+646+482||vp5 a rose's petals
 sky_to_sun|vp5_1000|60x40+20+20|60x40+420+540|vp5 a sky patch over the sunlit snow
 terrain_occlusion|vp1_0545|33x11+271+498|56x40+871+562|vp1 05:45: a grass top under the mountain over one with an open horizon, per channel
+sun_glint_grass|vp1_0545|34x25+653+409|40x15+600+440|vp1 05:45: the sun's glint on a grass top over the same grass beside it, per channel
 "
 
 linear_rgb() {   # file crop -> "r g b" in linear light
@@ -159,7 +160,7 @@ echo "$FIT" | while IFS='|' read -r name pic a b why; do
 		f=$(fit_file_of "$s" "$pic")
 		[ -f "$f" ] || { line="$line  (no $s)"; continue; }
 		ra=$(linear_rgb "$f" "$a")
-		if [ -n "$b" ] && [ "$name" = terrain_occlusion ]; then
+		if [ -n "$b" ] && { [ "$name" = terrain_occlusion ] || [ "$name" = sun_glint_grass ]; }; then
 			rb=$(linear_rgb "$f" "$b")
 			v=$(echo "$ra $rb" | awk '{printf "%.2f/%.2f/%.2f", $1/($4+1e-9), $2/($5+1e-9), $3/($6+1e-9)}')
 		elif [ -n "$b" ]; then

@@ -566,8 +566,13 @@ void PS()
     roughness = clamp(roughness, ROUGHNESS_FLOOR, 1.0);
     metalness = clamp(metalness, METALNESS_FLOOR, 1.0);
 
-    vec3 specColor = mix(0.08 * specStrength * cMatSpecColor.rgb,
-        diffColor.rgb, metalness);
+    // The spec map's strength alone, 0.08 at full as Principled's specular
+    // level has it: not times cMatSpecColor, which no voxel material sets
+    // and which Urho3D defaults to black -- so every dielectric had a
+    // Fresnel of zero and the sun no highlight at all ([PBR_FIT],
+    // sun_glint_grass read a tenth of the render's, and bluish: what was
+    // left was the sky through EnvBRDFApprox's grazing term).
+    vec3 specColor = mix(vec3(0.08 * specStrength), diffColor.rgb, metalness);
     diffColor.rgb = diffColor.rgb - diffColor.rgb * metalness;
 
     // Get normal
@@ -696,14 +701,15 @@ void PS()
         // trace ([PBR_FIT]) the sun came out at a fifth of what it was
         // set to. What a face lit by an irradiance E reflects is albedo
         // * E * n.l / pi and nothing else: the view-dependent diffuse is
-        // swapped for that and the extra pi goes -- from the diffuse
-        // alone. The specular keeps Urho3D's normalization, which
-        // counts on the pass's pi: without it a rose's white highlight
-        // came to the size of its red ([PBR_FIT], the saturation rows).
+        // swapped for that and the extra pi goes, from the specular as
+        // well: Urho3D's GGX carries no pi of its own, and with the pass's
+        // pi over it the low sun's glint on a grass top read a tenth of
+        // the render's ([PBR_FIT], sun_glint_grass). (The rose's
+        // desaturation once blamed on this was the atlas read as linear.)
         float ndvDiffuse = abs(dot(normal, toCamera)) + 1e-5;
         vec3 specularPart = BRDF -
             Diffuse(diffColor.rgb, roughness, ndvDiffuse, ndl, 1.0);
-        BRDF = specularPart / M_PI + diffColor.rgb * (1.0 / M_PI);
+        BRDF = specularPart + diffColor.rgb * (1.0 / M_PI);
         finalColor.rgb = BRDF * lightColor * (atten * shadow);
 
         #if defined(VOXELTRANSLUCENCY) && defined(METALLIC)
