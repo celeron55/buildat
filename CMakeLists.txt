@@ -413,54 +413,69 @@ endif()
 #
 # Installation
 #
+# The archive's layout, one for every platform ([PACKAGING]): bin/ with the
+# programs (and lib/ with the shared libraries on Linux, found through
+# RPATH), buildat's own trees at the root as the share path, src/ and the
+# headers that run-time compilation reads, Urho3D's sources and data, and
+# on Windows the MinGW-w64 tree under compiler/ -- Linux uses the system
+# compiler. util/package.sh runs this into a staging directory and makes
+# the archive.
 
 if(WIN32)
 	set(DST_BIN "bin")
-	set(DST_SHARE ".")
-	set(DST_COMPILER "${DST_SHARE}/compiler")
+	set(DST_LIB "bin")
+else()
+	set(DST_BIN "bin")
+	set(DST_LIB "lib")
+endif()
+set(DST_SHARE ".")
+set(DST_COMPILER "${DST_SHARE}/compiler")
 
-	install(DIRECTORY "${CMAKE_SOURCE_DIR}/doc" DESTINATION ".")
-	install(FILES "${CMAKE_SOURCE_DIR}/NOTICE" DESTINATION ".")
-	install(FILES "${CMAKE_SOURCE_DIR}/README.md" DESTINATION ".")
+install(DIRECTORY "${CMAKE_SOURCE_DIR}/doc" DESTINATION "."
+	PATTERN "plan" EXCLUDE)
+install(FILES "${CMAKE_SOURCE_DIR}/NOTICE" DESTINATION ".")
+install(FILES "${CMAKE_SOURCE_DIR}/README.md" DESTINATION ".")
 
+install(TARGETS ${BUILDAT_CORE_NAME} DESTINATION "${DST_LIB}")
+if(WIN32)
+	install(FILES "${URHO3D_LIBRARY_FILE}" DESTINATION "${DST_LIB}")
+else()
+	# libUrho3D.so is a symlink chain to libUrho3D.so.0.1.x: the real
+	# file and the links with it, or the archive links to nothing
+	get_filename_component(URHO3D_LIBRARY_DIR "${URHO3D_LIBRARY_FILE}" DIRECTORY)
+	install(DIRECTORY "${URHO3D_LIBRARY_DIR}/" DESTINATION "${DST_LIB}"
+		FILES_MATCHING PATTERN "libUrho3D.so*")
+endif()
+if(WIN32)
 	message(STATUS "CMAKE_CXX_COMPILER: ${CMAKE_CXX_COMPILER}")
 	get_filename_component(COMPILER_BIN_PATH "${CMAKE_CXX_COMPILER}" DIRECTORY)
 	message(STATUS "COMPILER_BIN_PATH: ${COMPILER_BIN_PATH}")
 	get_filename_component(COMPILER_USR_PATH "${COMPILER_BIN_PATH}" DIRECTORY)
 	message(STATUS "COMPILER_USR_PATH: ${COMPILER_USR_PATH}")
-
-	install(TARGETS ${BUILDAT_CORE_NAME} DESTINATION "${DST_BIN}")
-
-	# Always copy these DLLs to the same directory as the executables. On the
-	# server, they also exist in the compiler's path, but there really is no
-	# reasonable way of accessing them from there.
-	# Even Rust does it this way: https://github.com/rust-lang/rust/issues/1011
 	install(FILES "${COMPILER_USR_PATH}/bin/libwinpthread-1.dll" DESTINATION "${DST_BIN}")
 	install(FILES "${COMPILER_USR_PATH}/bin/libgcc_s_dw2-1.dll" DESTINATION "${DST_BIN}")
 	install(FILES "${COMPILER_USR_PATH}/bin/libstdc++-6.dll" DESTINATION "${DST_BIN}")
-
-	if(BUILD_CLIENT)
-		install(TARGETS ${CLIENT_EXE_NAME} buildat DESTINATION "${DST_BIN}")
-		install(DIRECTORY "${CMAKE_SOURCE_DIR}/client" DESTINATION "${DST_SHARE}")
-		install(DIRECTORY "${CMAKE_SOURCE_DIR}/extensions" DESTINATION "${DST_SHARE}")
-	endif()
-
-	if(BUILD_SERVER)
-		install(TARGETS ${SERVER_EXE_NAME} DESTINATION "${DST_BIN}")
-		install(DIRECTORY "${CMAKE_SOURCE_DIR}/builtin" DESTINATION "${DST_SHARE}")
-		install(DIRECTORY "${CMAKE_SOURCE_DIR}/games" DESTINATION "${DST_SHARE}")
-		install(DIRECTORY "${CMAKE_SOURCE_DIR}/src" DESTINATION "${DST_SHARE}")
-
-		install(DIRECTORY "${CMAKE_SOURCE_DIR}/3rdparty/cereal/include" DESTINATION "${DST_SHARE}/3rdparty/cereal")
-		install(DIRECTORY "${CMAKE_SOURCE_DIR}/3rdparty/polyvox/library/PolyvoxCore/include" DESTINATION "${DST_SHARE}/3rdparty/polyvox/library/PolyvoxCore")
-		# The header only: builtin/storage is compiled at run time and
-		# includes it, but the code is already in buildat_core
-		install(FILES "${CMAKE_SOURCE_DIR}/3rdparty/sqlite/src/sqlite3.h"
-				"${CMAKE_SOURCE_DIR}/3rdparty/sqlite/src/sqlite3ext.h"
-				DESTINATION "${DST_SHARE}/3rdparty/sqlite/src")
-		install(DIRECTORY "${URHO3D_HOME}/Source" DESTINATION "${DST_SHARE}/Urho3D")
-		install(FILES "${URHO3D_BUILD_DIR}/include/Urho3D/Urho3D.h" DESTINATION "${DST_SHARE}/Urho3D/Build/include/Urho3D")
-
+endif()
+if(BUILD_CLIENT)
+	install(TARGETS ${CLIENT_EXE_NAME} buildat DESTINATION "${DST_BIN}")
+	install(DIRECTORY "${CMAKE_SOURCE_DIR}/client" DESTINATION "${DST_SHARE}")
+	install(DIRECTORY "${CMAKE_SOURCE_DIR}/extensions" DESTINATION "${DST_SHARE}")
+endif()
+if(BUILD_SERVER)
+	install(TARGETS ${SERVER_EXE_NAME} DESTINATION "${DST_BIN}")
+	install(DIRECTORY "${CMAKE_SOURCE_DIR}/builtin" DESTINATION "${DST_SHARE}")
+	install(DIRECTORY "${CMAKE_SOURCE_DIR}/games" DESTINATION "${DST_SHARE}")
+	install(DIRECTORY "${CMAKE_SOURCE_DIR}/src" DESTINATION "${DST_SHARE}")
+	install(DIRECTORY "${CMAKE_SOURCE_DIR}/3rdparty/cereal/include" DESTINATION "${DST_SHARE}/3rdparty/cereal")
+	install(DIRECTORY "${CMAKE_SOURCE_DIR}/3rdparty/polyvox/library/PolyVoxCore/include" DESTINATION "${DST_SHARE}/3rdparty/polyvox/library/PolyVoxCore")
+	install(FILES "${CMAKE_SOURCE_DIR}/3rdparty/sqlite/src/sqlite3.h"
+		DESTINATION "${DST_SHARE}/3rdparty/sqlite/src")
+	install(DIRECTORY "${URHO3D_HOME}/Source" DESTINATION "${DST_SHARE}/Urho3D")
+	# The whole generated include tree, not Urho3D.h alone: a module's
+	# <lua.h> comes from Build/include/Urho3D/ThirdParty/<Lua>, which the
+	# server adds to the module compiler's paths
+	install(DIRECTORY "${URHO3D_BUILD_DIR}/include" DESTINATION "${DST_SHARE}/Urho3D/Build")
+	if(WIN32)
 		install(DIRECTORY "${COMPILER_USR_PATH}/bin" DESTINATION "${DST_COMPILER}")
 		install(DIRECTORY "${COMPILER_USR_PATH}/i686-w64-mingw32" DESTINATION "${DST_COMPILER}")
 		install(DIRECTORY "${COMPILER_USR_PATH}/include" DESTINATION "${DST_COMPILER}")
@@ -476,35 +491,37 @@ if(WIN32)
 		set(BIG_EXECUTABLES_SUBDIR "libexec/gcc/i686-w64-mingw32/4.9.1/")
 		foreach(BIG_EXE ${BIG_EXECUTABLES})
 			install(FILES "${COMPILER_USR_PATH}/${BIG_EXECUTABLES_SUBDIR}/${BIG_EXE}"
-					DESTINATION "${DST_COMPILER}/${BIG_EXECUTABLES_SUBDIR}")
+				DESTINATION "${DST_COMPILER}/${BIG_EXECUTABLES_SUBDIR}")
 		endforeach()
 	endif()
+endif()
+install(DIRECTORY "${URHO3D_HOME}/bin/CoreData" DESTINATION "${DST_SHARE}/Urho3D/bin")
+install(DIRECTORY "${URHO3D_HOME}/bin/Data" DESTINATION "${DST_SHARE}/Urho3D/bin")
 
-	install(DIRECTORY "${URHO3D_HOME}/bin/CoreData" DESTINATION "${DST_SHARE}/Urho3D/bin")
-	install(DIRECTORY "${URHO3D_HOME}/bin/Data" DESTINATION "${DST_SHARE}/Urho3D/bin")
-	install(FILES "${URHO3D_LIBRARY_FILE}" DESTINATION "${DST_BIN}")
-
-	set(PACKAGE_NAME "${PROJECT_NAME}")
-	if(BUILD_CLIENT AND BUILD_SERVER)
-		set(PACKAGE_NAME "${PACKAGE_NAME}-full")
-	elseif(BUILD_CLIENT)
-		set(PACKAGE_NAME "${PACKAGE_NAME}-client")
-	elseif(BUILD_SERVER)
-		set(PACKAGE_NAME "${PACKAGE_NAME}-server")
-	endif()
+set(PACKAGE_NAME "${PROJECT_NAME}")
+if(BUILD_CLIENT AND BUILD_SERVER)
+	set(PACKAGE_NAME "${PACKAGE_NAME}-full")
+elseif(BUILD_CLIENT)
+	set(PACKAGE_NAME "${PACKAGE_NAME}-client")
+elseif(BUILD_SERVER)
+	set(PACKAGE_NAME "${PACKAGE_NAME}-server")
+endif()
+if(WIN32)
 	if(CMAKE_SIZEOF_VOID_P EQUAL 8)
 		set(PACKAGE_NAME "${PACKAGE_NAME}-w64")
 	else()
 		set(PACKAGE_NAME "${PACKAGE_NAME}-w32")
 	endif()
-	message(STATUS "PACKAGE_NAME: ${PACKAGE_NAME}")
-
-	set(CPACK_PACKAGE_FILE_NAME "${PACKAGE_NAME}")
 	set(CPACK_GENERATOR ZIP)
-	include(CPACK)
-
-	message(STATUS "CMAKE_INSTALL_PREFIX: ${CMAKE_INSTALL_PREFIX}")
-	message(STATUS "Run 'make install' to install, or 'make package' to create a package.")
+else()
+	set(PACKAGE_NAME "${PACKAGE_NAME}-linux-${CMAKE_SYSTEM_PROCESSOR}")
+	set(CPACK_GENERATOR TGZ)
 endif()
+message(STATUS "PACKAGE_NAME: ${PACKAGE_NAME}")
+set(CPACK_PACKAGE_FILE_NAME "${PACKAGE_NAME}")
+include(CPack)
+
+message(STATUS "CMAKE_INSTALL_PREFIX: ${CMAKE_INSTALL_PREFIX}")
+message(STATUS "Run 'make install' to install, or util/package.sh to make the archives.")
 
 # vim: set noet ts=4 sw=4:

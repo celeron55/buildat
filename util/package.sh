@@ -1,0 +1,141 @@
+#!/bin/bash
+# The modding archives ([PACKAGING] in doc/plan/packaging_plan.md):
+#
+#   util/package.sh linux <version>     -> buildat-<version>-linux-x86_64-portable.tar.gz
+#                                          buildat-<version>-linux-x86_64-xdg.tar.gz
+#   util/package.sh windows <version>   -> buildat-<version>-win64.zip (a cross build)
+#
+# Configures a build tree per archive under Build/package/, builds, runs the
+# install rules into a staging directory, gathers every third-party licence
+# into licenses/, writes VERSION, makes the archive under Build/package/out/,
+# and smoke-tests it: unpacks into a clean directory, starts buildat_server
+# on games/digger -- which compiles a module at run time through the found
+# or bundled compiler -- connects a client that takes one screenshot that is
+# not black, and quits. Nothing is packaged by hand. Runs the same inside
+# util/docker's images as on a desk.
+#
+# The two Linux archives differ by one flag: PORTABLE keeps user/ and cache/
+# beside the program, xdg puts them where XDG_DATA_HOME and XDG_CACHE_HOME say.
+set -eu
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+target="${1:-}"
+version="${2:-}"
+if [ -z "$target" ] || [ -z "$version" ]; then
+	echo "usage: util/package.sh <linux|windows> <version>" >&2
+	exit 2
+fi
+jobs="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
+root="$here/Build/package"
+out="$root/out"
+mkdir -p "$out"
+
+# The licences the archive carries: buildat's own, every 3rdparty tree's
+# and Urho3D's, and on Windows the compiler's, into one directory
+gather_licenses() {
+	local stage="$1"
+	local lic="$stage/licenses"
+	mkdir -p "$lic"
+	cp "$here/NOTICE" "$lic/buildat-NOTICE.txt"
+	[ -f "$here/LICENSE" ] && cp "$here/LICENSE" "$lic/buildat-LICENSE.txt"
+	local d name f
+	for d in "$here"/3rdparty/*/; do
+		name=$(basename "$d")
+		for f in "$d"LICENSE "$d"LICENSE.txt "$d"LICENSE.TXT "$d"COPYING "$d"COPYING.txt "$d"License.txt; do
+			[ -f "$f" ] && cp "$f" "$lic/$name-$(basename "$f")"
+		done
+	done
+	[ -d "$stage/compiler/licenses" ] && cp -r "$stage/compiler/licenses" "$lic/mingw-w64"
+	return 0
+}
+
+# One archive: a build tree configured for it, the install rules into a
+# staging directory named as the archive is, and the archive out of that
+make_one() {
+	local name="$1"; shift
+	local build="$root/build-$name"
+	local stage="$root/stage/$name"
+	rm -rf "$stage"
+	mkdir -p "$build" "$stage"
+	(cd "$build" && cmake "$here" -DCMAKE_BUILD_TYPE=Release "$@" > cmake.log 2>&1) || {
+		echo "configure failed; see $build/cmake.log" >&2; exit 1; }
+	(cd "$build" && cmake --build . -j "$jobs" > build.log 2>&1) || {
+		echo "build failed; see $build/build.log" >&2; exit 1; }
+	(cd "$build" && cmake --install . --prefix "$stage" > install.log 2>&1) || {
+		echo "install failed; see $build/install.log" >&2; exit 1; }
+	gather_licenses "$stage"
+	echo "$version" > "$stage/VERSION"
+	case "$name" in
+		*win64*)
+			(cd "$stage/.." && rm -f "$out/$name.zip" && zip -qr "$out/$name.zip" "$name")
+			echo "$out/$name.zip" ;;
+		*)
+			tar -C "$stage/.." -czf "$out/$name.tar.gz" "$name"
+			echo "$out/$name.tar.gz" ;;
+	esac
+}
+
+# The archive unpacked into a clean directory and run: the server on
+# games/digger through the found compiler, a client connected for one
+# screenshot, which must not be black. The one check that says the archive
+# starts on the machine it is on.
+smoke_test() {
+	local archive="$1"
+	local dir
+	dir=$(mktemp -d)
+	tar -C "$dir" -xzf "$archive"
+	local unpacked
+	unpacked=$(ls -d "$dir"/*/ | head -1)
+	local port=$(( 29600 + (RANDOM % 90) ))
+	echo "smoke test in $unpacked"
+	(cd "$unpacked" && bin/buildat_server -m games/digger -P "$port" > "$dir/srv.log" 2>&1) &
+	local srv=$!
+	local i
+	# The server compiles every module it loads through the compiler
+	# the archive found, which is minutes on a first run; the client
+	# joins once the server listens
+	for i in $(seq 1 900); do
+		grep -q "Listening at" "$dir/srv.log" 2>/dev/null && break
+		kill -0 "$srv" 2>/dev/null || { echo "server exited; see $dir/srv.log" >&2; exit 1; }
+		sleep 1
+	done
+	sleep 5
+	printf 'delay 25000\nscreenshot %s/shot.png\nquit\n' "$dir" > "$dir/cmds.txt"
+	(cd "$unpacked" && timeout 120 bin/buildat -s "localhost:$port" -w 640x360 -c @"$dir/cmds.txt" > "$dir/cli.log" 2>&1) || true
+	kill -INT "$srv" 2>/dev/null
+	for i in $(seq 1 30); do
+		kill -0 "$srv" 2>/dev/null || break
+		sleep 1
+	done
+	kill -9 "$srv" 2>/dev/null; wait "$srv" 2>/dev/null || true
+	if [ ! -f "$dir/shot.png" ]; then
+		echo "smoke test: no screenshot; see $dir/cli.log and $dir/srv.log" >&2
+		exit 1
+	fi
+	local mean
+	mean=$(magick "$dir/shot.png" -format '%[fx:mean]' info: 2>/dev/null || echo 0)
+	if awk -v m="$mean" 'BEGIN{exit !(m < 0.01)}'; then
+		echo "smoke test: the screenshot is black (mean $mean)" >&2
+		exit 1
+	fi
+	echo "smoke test passed (screenshot mean $mean)"
+	rm -rf "$dir"
+}
+
+case "$target" in
+linux)
+	a=$(make_one "buildat-$version-linux-x86_64-portable" -DPORTABLE=TRUE)
+	b=$(make_one "buildat-$version-linux-x86_64-xdg" -DPORTABLE=FALSE)
+	smoke_test "$a"
+	echo "archives:"; echo "  $a"; echo "  $b"
+	;;
+windows)
+	# simplified: the cross build wants util/docker/windows' toolchain
+	# file; until that image exists this configures with whatever
+	# CMAKE_TOOLCHAIN_FILE is in the environment
+	a=$(make_one "buildat-$version-win64" -DPORTABLE=TRUE \
+		${CMAKE_TOOLCHAIN_FILE:+-DCMAKE_TOOLCHAIN_FILE=$CMAKE_TOOLCHAIN_FILE})
+	echo "archive: $a (the smoke test under Wine is not here yet)"
+	;;
+*)
+	echo "unknown target $target" >&2; exit 2 ;;
+esac

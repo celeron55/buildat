@@ -642,6 +642,11 @@ struct CState: public State, public interface::Server
 				urho3d_path+"/Source/ThirdParty/SDL/include");
 		m_compiler->library_directories.push_back(
 				urho3d_path+"/Build/lib");
+		// And an archive's lib/ beside the share path, where the install
+		// rules put libUrho3D and buildat_core ([PACKAGING]); a source
+		// tree has no such directory and the line is harmless there
+		m_compiler->library_directories.push_back(
+				g_server_config.get<ss_>("share_path")+"/lib");
 		m_compiler->libraries.push_back("-lUrho3D");
 		m_compiler->include_directories.push_back(
 				urho3d_path+"/Source/ThirdParty/Bullet/src");
