@@ -36,8 +36,10 @@ docker run --rm -i \
 	"$image" bash -c "
 		set -eu
 		mkdir -p /work/buildat && cd /work/buildat && tar -xf - &&
-		xvfb-run -a util/package.sh $target $version &&
-		cp Build/package/out/* /out/
+		xvfb-run -a -s '-screen 0 1280x720x24' util/package.sh $target $version;
+		status=\$?
+		cp Build/package/out/* /out/ 2>/dev/null || true
+		exit \$status
 	" < "$tarball"
 rm -f "$tarball"
 echo "archives in $out:"

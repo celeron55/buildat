@@ -100,7 +100,8 @@ smoke_test() {
 	done
 	sleep 5
 	printf 'delay 25000\nscreenshot %s/shot.png\nquit\n' "$dir" > "$dir/cmds.txt"
-	(cd "$unpacked" && timeout 120 bin/buildat -s "localhost:$port" -w 640x360 -c @"$dir/cmds.txt" > "$dir/cli.log" 2>&1) || true
+	# Software GL where there is no GPU (the container); harmless with one
+	(cd "$unpacked" && LIBGL_ALWAYS_SOFTWARE=1 timeout 120 bin/buildat -s "localhost:$port" -w 640x360 -l 3 -c @"$dir/cmds.txt" > "$dir/cli.log" 2>&1) || true
 	kill -INT "$srv" 2>/dev/null
 	for i in $(seq 1 30); do
 		kill -0 "$srv" 2>/dev/null || break
@@ -115,6 +116,8 @@ smoke_test() {
 	mean=$(magick "$dir/shot.png" -format '%[fx:mean]' info: 2>/dev/null || echo 0)
 	if awk -v m="$mean" 'BEGIN{exit !(m < 0.01)}'; then
 		echo "smoke test: the screenshot is black (mean $mean)" >&2
+		echo "--- client log, GL and errors:" >&2
+		grep -i "opengl\|GL\b\|glx\|error\|fail\|renderer\|resolution" "$dir/cli.log" | head -30 >&2
 		exit 1
 	fi
 	echo "smoke test passed (screenshot mean $mean)"
