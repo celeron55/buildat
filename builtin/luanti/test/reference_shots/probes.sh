@@ -198,3 +198,29 @@ echo "$SKY" | while IFS='|' read -r name pic crop why; do
 done
 
 
+
+# The low sun's colour (user, 2026-09-18): a dirt face lit at 05:45 and at
+# 13:00, its R/B at dawn over its R/B at noon -- the sun's colour with the
+# material controlled for, which is the number [PBR_FIT] term 3 is fitted
+# to. The face is vp1's foreground block, the one dirt lit at both hours
+# under the tilted sun (vp2's terrace sides and vp3's mountain are in
+# shadow at noon). Read off the PNGs on both sides: a hue ratio survives
+# the exposure.
+DAWN="
+dawn_sun_dirt|vp1|40x10+2+608|vp1 the foreground block's lit face, 05:45 over 13:00
+"
+echo
+echo "=== the low sun: R/B at 05:45 over R/B at 13:00, render | pbr (ratio to the render)"
+echo "$DAWN" | while IFS='|' read -r name vp crop why; do
+	[ -n "$name" ] || continue
+	line=$(printf "  %-18s" "$name")
+	for s in pathtrace_r150 module_pbr_r150; do
+		d=$(file_of "$s" "${vp}_0545"); n=$(file_of "$s" "${vp}_1300")
+		[ -f "$d" ] && [ -f "$n" ] || { line="$line  (no $s)"; continue; }
+		v=$(echo "$(linear_rgb "$d" "$crop") $(linear_rgb "$n" "$crop")" |
+			awk '{printf "%.3f", ($1/($3+1e-9)) / ($4/($6+1e-9))}')
+		line="$line  $v"
+	done
+	echo "$line" | awk '{ if (NF >= 3 && $2+0 > 0) printf "%s  (%.2f)  ", $0, $3/$2; else printf "%s  ", $0; }'
+	echo "-- $why"
+done
