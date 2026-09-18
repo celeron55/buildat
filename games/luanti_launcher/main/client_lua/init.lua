@@ -2534,7 +2534,15 @@ luanti.sub_hud(function()
 	if not l or not sky_lights.sun then
 		return
 	end
+	-- On the parity modes only. On pbr a shadow is what the sun does not
+	-- reach, lit by the sky alone, which is what the path trace draws;
+	-- VoxeLibre's 0.33 kept two thirds of the sun in every shadow and
+	-- was the whole of the snow contrast's shortfall (1.2 against the
+	-- render's 5.2) -- a Luanti-ism, [PBR_FIT] and [PBR_TARGET].
 	local keep = 1 - math.max(0, math.min(1, l.shadow_intensity))
+	if not sky_now.unlit then
+		keep = 0
+	end
 	if sky_lights.shadow_keep ~= keep then
 		sky_lights.shadow_keep = keep
 		sky_lights.sun.shadowIntensity = keep
