@@ -190,6 +190,9 @@ buildat.safe.SpatialUpdateQueue = function()
 		get_length = function(self, ...)
 			return internal:get_length(...)
 		end,
+		is_sorting = function(self)
+			return internal:is_sorting()
+		end,
 		set_p = function(self, safe_p)
 			if not getmetatable(safe_p) or
 					getmetatable(safe_p).type_name ~= "Vector3" then

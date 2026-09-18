@@ -265,13 +265,11 @@ local function horizon_map_for(chunk_p)
 				math.floor(v / 65536) % 256, math.floor(v / 16777216) % 256)
 	end
 	parts[1] = int32_char(ox) .. int32_char(oy) .. int32_char(oz)
-	local any = false
 	for dz = -1, 1 do
 		local cols = {}
 		for dx = -1, 1 do
 			local col = horizon_cols[horizon_key(chunk_p.x + dx, chunk_p.z + dz)]
 			cols[dx + 2] = col and col.merged or nil
-			if cols[dx + 2] then any = true end
 		end
 		for zz = 0, HORIZON_CHUNK - 1 do
 			for dx = 1, 3 do
@@ -285,9 +283,10 @@ local function horizon_map_for(chunk_p)
 			end
 		end
 	end
-	if not any then
-		return nil
-	end
+	-- A map with nothing known is still a map: the mesher packs the alpha
+	-- for any map, and a chunk meshed without one -- the far ones, before
+	-- their columns arrive -- came out in the plain layout with the
+	-- constant bounce, lit like lamps at night
 	return table.concat(parts)
 end
 
@@ -767,9 +766,12 @@ function M.counts()
 		-- nothing more where it is standing**, which is a far more useful
 		-- question than how long the queue is. A world pinned by a
 		-- forceloading fixture keeps thousands of chunks queued that are
-		-- nowhere near the camera.
+		-- nowhere near the camera. **After a jump the queue re-sorts over
+		-- frames**, and until it has, its head says nothing: a picture taken
+		-- on those frames had the far chunks of the new place still waiting.
 		next_mesh_f = node_update_queue and
-				node_update_queue:peek_next_f() or nil,
+				(node_update_queue:is_sorting() and 0 or
+				node_update_queue:peek_next_f()) or nil,
 		voxel_types = voxel_reg and voxel_reg:get_count() or 0,
 	}
 end
