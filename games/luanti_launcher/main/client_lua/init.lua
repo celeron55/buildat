@@ -189,8 +189,40 @@ local SUN_BRIGHTNESS = 28.0
 -- lit coldly from where the moon is, far enough above the sky's own light
 -- that the moon casts a shadow. See [LIGHT_SHAPE].
 local MOON_BRIGHTNESS = 1.0
-local SUN_COLOR = magic.Color(1.0, 0.96, 0.88)
-local MOON_COLOR = magic.Color(0.55, 0.68, 1.0)
+-- [PBR_FIT] term 1: on the pbr path the sun and the sky are in the
+-- path-traced reference's units, read off its EXRs (doc/plan/
+-- rendering_plan.md, the fit's first term), and SUN_BRIGHTNESS, MOON_-
+-- BRIGHTNESS, SKY_AMBIENT and NIGHT_AMBIENT above are the parity modes'
+-- alone. The metering takes the absolute scale; what these set is the
+-- ratio of sun to sky to moon, which is what contrast is made of.
+--   sun_e0, sun_tau  the sun's irradiance normal to it, E0 * exp(-tau /
+--                    sin(elevation)): about 100 at 64 degrees (the
+--                    snow at 10:00), half that at ten degrees
+--   sky_zenith,      the sky's radiance at the zenith and the horizon
+--   sky_horizon      by day -- (3.1, 5.9, 10.5) and about 1.6 times
+--                    that at 13:00 -- fading over the last twelve
+--                    degrees of the sun's elevation
+--   moon_e           the moon lamp's irradiance, the render's own
+--   night_sky        what the sky is with the sun down: a floor for
+--                    airglow, since Nishita gives none and the night's
+--                    target is a sky under a fortieth of moonlit snow
+-- simplified: the sky keeps Luanti's hue at this radiance, and the sun
+-- its colour below; the colours are the terms after this one.
+local PHYS = {sun_e0 = 120, sun_tau = 0.15, sky_zenith = 5.5,
+		sky_horizon = 9.0, moon_e = 0.0025, night_sky = 0.00005}
+-- The sky's radiance factor at a sun height (sin elevation): full by
+-- day, gone over the last twelve degrees, the floor below
+function PHYS.sky(height)
+	return math.max(0, math.min(1, (height + 0.05) / 0.21))
+end
+function PHYS.sun(height)
+	if height <= 0 then
+		return 0
+	end
+	return PHYS.sun_e0 * math.exp(-PHYS.sun_tau / math.max(height, 0.05))
+end
+PHYS.SUN_COLOR = magic.Color(1.0, 0.96, 0.88)
+PHYS.MOON_COLOR = magic.Color(0.55, 0.68, 1.0)
 -- Reassigned when a game says what its horizon is; see sub_sky below
 local DAY_FOG = magic.Color(0.60, 0.72, 0.88)
 local SUN_DIR = {x = -0.6, y = -1.0, z = 0.8}
@@ -334,9 +366,9 @@ do
 		return node, light
 	end
 	sky_lights.sun_node, sky_lights.sun =
-			body_light("Sun", SUN_COLOR, SUN_BRIGHTNESS)
+			body_light("Sun", PHYS.SUN_COLOR, SUN_BRIGHTNESS)
 	sky_lights.moon_node, sky_lights.moon =
-			body_light("Moon", MOON_COLOR, MOON_BRIGHTNESS)
+			body_light("Moon", PHYS.MOON_COLOR, MOON_BRIGHTNESS)
 	-- Past the far cascade the world is ambient-lit, which at that range
 	-- reads as haze rather than as a missing shadow.
 	magic.renderer.shadowMapSize = 1024
@@ -407,14 +439,23 @@ do
 	magic.renderer.HDRRendering = true
 	local base = viewport.renderPath
 	local rp = base:Clone()
-	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/BloomHDR.xml"))
+	-- The exposure first and the bloom after it: the bloom's threshold
+	-- (0.8) is a screen value, and taken before the exposure on a world at
+	-- the reference's radiances ([PBR_FIT], a sky of 5 and snow of 30) it
+	-- passed every pixel, and the 40% blur it mixed back in was a haze
+	-- that took the shadows with it.
 	rp:Append(magic.cache:GetResource("XMLFile",
-			"PostProcess/AutoExposure.xml"))
+			"luanti_client/res/LuantiAutoExposure.xml"))
+	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/BloomHDR.xml"))
 	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/Tonemap.xml"))
 	rp:Append(magic.cache:GetResource("XMLFile",
 			"PostProcess/GammaCorrection.xml"))
 	rp:SetEnabled("TonemapReinhardEq3", false)
-	rp:SetEnabled("TonemapUncharted2", true)
+	-- BUILDAT_LUANTI_LINEAR=1: the metered frame clipped, no curve, which
+	-- is what the path-traced reference's PNGs are; the reference runners
+	-- set it so the fit's probes read linear against linear ([PBR_FIT])
+	rp:SetEnabled("TonemapUncharted2",
+			buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
 	rp:SetShaderParameter("TonemapExposureBias", EXPOSURE_BIAS)
 	rp:SetShaderParameter("AutoExposureAdaptRate", AUTO_EXPOSURE.adapt_rate)
 	rp:SetShaderParameter("AutoExposureLumRange",
@@ -1041,9 +1082,24 @@ local function apply_sky_of_hour()
 		return {r = one(c.r), g = one(c.g), b = one(c.b)}
 	end
 	local horizon_now = dim(three(night_horizon, dawn_horizon, day_horizon, t))
-	world_sky:set_look(
-			dim(three(night_zenith, dawn_zenith, day_zenith, t)),
-			horizon_now, nil)
+	local zenith_now = dim(three(night_zenith, dawn_zenith, day_zenith, t))
+	if not sky_now.unlit then
+		-- pbr: Luanti's hue at the reference's radiance ([PBR_FIT] term 1)
+		local function at(c, radiance)
+			local lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+			if lum <= 1e-6 then
+				return {r = radiance, g = radiance, b = radiance}
+			end
+			local k = radiance / lum
+			return {r = c.r * k, g = c.g * k, b = c.b * k}
+		end
+		local f = PHYS.sky(sky_now.height or 0)
+		zenith_now = at(zenith_now,
+				PHYS.night_sky + (PHYS.sky_zenith - PHYS.night_sky) * f)
+		horizon_now = at(horizon_now,
+				PHYS.night_sky + (PHYS.sky_horizon - PHYS.night_sky) * f)
+	end
+	world_sky:set_look(zenith_now, horizon_now, nil)
 
 	-- What the sun shines with now: its own colour, going red while it is
 	-- crossing the horizon, which is where that colour belongs. It does not
@@ -1061,9 +1117,9 @@ local function apply_sky_of_hour()
 	-- has nowhere to put -- the drawing half of [SKY_LEFTOVERS] -- so both
 	-- modes use the two colours, which is what was hardcoded before.
 	local share = luanti_sky.sun_tint_share(sky_now.daylight)
-	sky_lights.sun.color = blend(SUN_COLOR,
+	sky_lights.sun.color = blend(PHYS.SUN_COLOR,
 			game_sky.sun_tint or luanti_sky.SUN_TINT, share)
-	sky_lights.moon.color = blend(MOON_COLOR,
+	sky_lights.moon.color = blend(PHYS.MOON_COLOR,
 			game_sky.moon_tint or luanti_sky.MOON_TINT, share)
 
 	-- The sun and the moon are two bodies, drawn at once: the shader puts
@@ -1128,7 +1184,9 @@ local function apply_sky_of_hour()
 	world_sky:set_cloud_light(sky_now.lit or 1)
 	-- And so does what a pond mirrors: the cube map it comes from is baked
 	-- at noon, so without this the water is a bright blue sky at midnight
-	voxel_shading.set_sky_light(0.10 + 0.90 * t)
+	-- On pbr the cube is rendered from this same sky at this hour and
+	-- carries the night itself, so it is not dimmed a second time
+	voxel_shading.set_sky_light(sky_now.unlit and (0.10 + 0.90 * t) or 1.0)
 	-- And what colour that sky is now, which the cube map cannot know: the
 	-- reflection is moved towards the zenith of this hour as the day goes,
 	-- and left alone at noon, where the cube map is already right
@@ -1216,14 +1274,16 @@ local function update_sky(dt)
 			not (sky_now.unlit and not sky_now.shadows)
 	if up > 0 then
 		sky_lights.sun_node.direction = magic.Vector3(dir.x, dir.y, dir.z)
-		sky_lights.sun.brightness = SUN_BRIGHTNESS * up
+		sky_lights.sun.brightness = sky_now.unlit and SUN_BRIGHTNESS * up or
+				PHYS.sun(height)
 	end
 	sky_lights.moon_node.enabled = moon_up > 0 and
 			not (sky_now.unlit and not sky_now.shadows)
 	if moon_up > 0 then
 		sky_lights.moon_node.direction =
 				magic.Vector3(-dir.x, -dir.y, -dir.z)
-		sky_lights.moon.brightness = MOON_BRIGHTNESS * moon_up
+		sky_lights.moon.brightness = sky_now.unlit and MOON_BRIGHTNESS * moon_up
+				or PHYS.moon_e * moon_up
 	end
 
 	if sky_now.unlit then
@@ -1252,7 +1312,18 @@ local function update_sky(dt)
 		local blue = (0.98 * ratio + 0.078) / rg
 		zone.ambientColor = magic.Color(ratio, ratio, ratio * blue)
 	else
-		zone.ambientColor = blend(NIGHT_AMBIENT, SKY_AMBIENT, day)
+		-- pbr: the ambient is the sky's mean radiance, in the sky's hue
+		-- -- what a face lit by the sky alone receives, which the shader
+		-- multiplies by how much sky the face sees. First cut of the
+		-- two-term ambient ([PBR_FIT] term 2): one colour for the whole
+		-- hemisphere, no ground bounce yet.
+		local f = PHYS.sky(height)
+		local mean = PHYS.night_sky +
+				((PHYS.sky_zenith + PHYS.sky_horizon) / 2 - PHYS.night_sky) * f
+		local c = blend(NIGHT_AMBIENT, SKY_AMBIENT, day)
+		local lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+		local k = lum > 1e-6 and mean / lum or 0
+		zone.ambientColor = magic.Color(c.r * k, c.g * k, c.b * k)
 	end
 	-- And the fog with it. This is the one thing the cave sky needs that is
 	-- not per direction, so it takes the mean of the same cube: underground

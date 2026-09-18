@@ -1123,6 +1123,10 @@ function M.define(dst, util)
 			GetRGBAFormat = function()
 				return Graphics:GetRGBAFormat()
 			end,
+			-- Half floats: a target that holds an HDR sky's radiance
+			GetRGBAFloat16Format = function()
+				return Graphics:GetRGBAFloat16Format()
+			end,
 		},
 		properties = {
 			width = util.simple_property("number"),

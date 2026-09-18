@@ -51,8 +51,10 @@ function M.safe.new(magic, material)
 	box:SetModel(magic.cache:GetResource("Model", "Models/Box.mdl"))
 	box.material = material
 
+	-- Half floats: the sky is drawn in HDR at the reference's radiances
+	-- (several times white, see [PBR_FIT]) and eight bits would clip it
 	self.texture = magic.TextureCube:new()
-	if not self.texture:SetSize(SIZE, magic.Graphics.GetRGBAFormat(),
+	if not self.texture:SetSize(SIZE, magic.Graphics.GetRGBAFloat16Format(),
 			magic.TEXTURE_RENDERTARGET) then
 		error("skycube: could not make a " .. SIZE .. " render target cube")
 	end

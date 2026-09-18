@@ -631,7 +631,20 @@ void PS()
 
         vec3 BRDF = GetBRDF(vWorldPos.xyz, lightDir, lightVec, toCamera, normal, roughness, diffColor.rgb, specColor);
 
-        finalColor.rgb = BRDF * lightColor * (atten * shadow) / M_PI;
+        // Lambert, once. Urho3D's PBR.glsl hands back a diffuse of
+        // albedo / pi times a power of the view angle, and this pass
+        // divided by pi again over an atten that is already n.l -- so a
+        // light of E lit a face to albedo * E * n.l / pi^2 times a factor
+        // that fell to 0.4 seen at a grazing angle. Against the path
+        // trace ([PBR_FIT]) the sun came out at a fifth of what it was
+        // set to. What a face lit by an irradiance E reflects is albedo
+        // * E * n.l / pi and nothing else: the view-dependent diffuse is
+        // swapped for that and the extra pi goes. The specular keeps
+        // Urho3D's normalization.
+        float ndvDiffuse = abs(dot(normal, toCamera)) + 1e-5;
+        BRDF += diffColor.rgb * (1.0 / M_PI) -
+            Diffuse(diffColor.rgb, roughness, ndvDiffuse, ndl, 1.0);
+        finalColor.rgb = BRDF * lightColor * (atten * shadow);
 
         #if defined(VOXELTRANSLUCENCY) && defined(METALLIC)
             // Light through the surface from the far side. It needs the light

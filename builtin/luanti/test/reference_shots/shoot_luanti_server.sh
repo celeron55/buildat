@@ -34,6 +34,10 @@ fixture="${1:?reference | check <dir> | shoot <log> <pid> <dir>}"
 # reference does not render the spots, so both clients leave them off
 # under this variable and the comparison is of what both can draw
 export BUILDAT_LUANTI_NO_SPOTS=1
+# And no tonemap curve on pbr: the render's PNG is the metered frame
+# clipped, and the probes compare linear to linear until the fit's last
+# term ([PBR_FIT]) has a curve to compare. The parity modes have none.
+export BUILDAT_LUANTI_LINEAR=1
 built=$(mktemp -d /tmp/refshots_build.XXXXXX)
 "$me/build.sh" "$built" || exit 2
 . "$built/env.sh"

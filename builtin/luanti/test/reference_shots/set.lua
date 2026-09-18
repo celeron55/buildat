@@ -83,6 +83,10 @@ rawset(_G, "REFSET", {
 		{view = 4, hour = "1300", weather = "none"},
 		{view = 5, hour = "1000", weather = "none"},
 		{view = 7, hour = "1300", weather = "none"},
+		-- and the fit's and the sky's ([PBR_FIT])
+		{view = 1, hour = "1300", weather = "none"},
+		{view = 1, hour = "0545", weather = "none"},
+		{view = 5, hour = "0200", weather = "none"},
 	},
 	-- One dump per viewpoint at its primary hour, for [PATH_TRACE_REF].
 	-- Caves first: a later state that never draws must not drop them.

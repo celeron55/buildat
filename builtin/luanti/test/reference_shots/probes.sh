@@ -127,8 +127,23 @@ sky_to_sun|vp5_1000|60x40+20+20|60x40+420+540|vp5 a sky patch over the sunlit sn
 "
 
 linear_rgb() {   # file crop -> "r g b" in linear light
-	magick "$1" -crop "$2" +repage -colorspace RGB \
-			-format '%[fx:mean.r] %[fx:mean.g] %[fx:mean.b]' info: 2>/dev/null
+	case "$1" in
+		*.exr) magick "$1" -crop "$2" +repage \
+			-format '%[fx:mean.r] %[fx:mean.g] %[fx:mean.b]' info: 2>/dev/null ;;
+		*) magick "$1" -crop "$2" +repage -colorspace RGB \
+			-format '%[fx:mean.r] %[fx:mean.g] %[fx:mean.b]' info: 2>/dev/null ;;
+	esac
+}
+# The fit's ratios are read off the render's EXR where it is there: its
+# metered PNG clips the sunlit snow (34 in the sky's units, exposed past
+# 1), and a ratio against a clipped top is a floor. The pbr side is its
+# PNG; its own clipping is what BUILDAT_LUANTI_LINEAR's frame shows.
+fit_file_of() {   # set pic -> path
+	local f="$shots/$1/cycles_$2_none.exr"
+	case "$1" in
+		pathtrace*) [ -f "$f" ] && { echo "$f"; return; } ;;
+	esac
+	file_of "$1" "$2"
 }
 
 echo
@@ -137,7 +152,7 @@ echo "$FIT" | while IFS='|' read -r name pic a b why; do
 	[ -n "$name" ] || continue
 	line=$(printf "  %-18s" "$name")
 	for s in pathtrace_r150 module_pbr_r150; do
-		f=$(file_of "$s" "$pic")
+		f=$(fit_file_of "$s" "$pic")
 		[ -f "$f" ] || { line="$line  (no $s)"; continue; }
 		ra=$(linear_rgb "$f" "$a")
 		if [ -n "$b" ]; then
