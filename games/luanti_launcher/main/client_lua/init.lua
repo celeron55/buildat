@@ -226,7 +226,9 @@ local PHYS = {sun_e0 = 195, sun_tau = 0.127, sky_zenith = 4.5,
 		sky_horizon = 12.0, moon_e = 0.0025, night_sky = 0.00005,
 		bounce = 0.15, dome = 0.7, ground = {r = 0.25, g = 0.22, b = 0.15},
 		day_zenith = {r = 0.57, g = 0.76, b = 1.0},
-		day_horizon = {r = 0.74, g = 0.89, b = 1.0}}
+		-- the horizon just over the sea at 13:00 reads (14.7, 14.9, 15.0)
+		-- in the render: white, not Luanti's pale blue
+		day_horizon = {r = 0.99, g = 0.995, b = 1.0}}
 -- The sky's radiance factor at a sun height (sin elevation): full by
 -- day, gone over the last twelve degrees, the floor below
 -- The zenith and the dome go first: at ten degrees the render's block
@@ -1243,6 +1245,7 @@ local function apply_sky_of_hour()
 	-- ([PBR_FIT], cave_opening). The parity modes keep it.
 	world_sky:set_auto_dim(sky_now.unlit and
 			game_sky.auto_dim_skybox ~= false or false)
+	world_sky:set_physical(not sky_now.unlit)
 
 	-- The clouds are white because the sun is on them, so they go with it --
 	-- by the same brightness everything else up there goes by, which is what

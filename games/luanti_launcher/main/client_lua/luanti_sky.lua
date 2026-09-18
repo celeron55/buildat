@@ -455,6 +455,12 @@ function M.new(scene, sun_dir, defaults)
 		material:SetShaderParameter("SkyAutoDim", on and 1.0 or 0.0)
 	end
 
+	-- The gradient shaped as the path trace's rather than as Luanti's; see
+	-- cSkyPhysical in the shader
+	function self:set_physical(on)
+		material:SetShaderParameter("SkyPhysical", on and 1.0 or 0.0)
+	end
+
 	-- How much sky the camera can see, as one number rather than a
 	-- direction: 0 in a cave and 1 anywhere that is not one. **The sky is
 	-- edited only once there is no sky to see**, which is the rule the halos

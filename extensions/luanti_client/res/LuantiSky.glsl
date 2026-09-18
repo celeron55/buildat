@@ -65,6 +65,14 @@ uniform vec2 cCloudWind;
 // this.
 uniform vec3 cSkyIndoors;
 uniform float cSkyAutoDim;
+// The gradient's shape: 0 is Luanti's, the horizon colour spread up the dome
+// by the square root; 1 is the path trace's at 13:00, the horizon's band
+// kept to the lowest part of the dome and the top colour holding above it
+// (render over the sea, elevation 17 to 2 degrees: the top's share 0.90,
+// 0.71, 0.36, 0.09, 0.01 -- a smoothstep of sin elevation over 0 to
+// 0.38). Set on the pbr path, whose sky is the lighting's number
+// ([PBR_FIT] term 1); the parity modes keep Luanti's. Unset reads as 0.
+uniform float cSkyPhysical;
 // How much sky the camera can see, as one number: 0 in a cave, 1 anywhere
 // that is not one. See [CAVE_SKY]'s correction in doc/plan/rendering_plan.md.
 uniform float cSkyOutside;
@@ -198,6 +206,20 @@ void PS()
     vec3 color = d.y < 0.0 ?
             mix(cSkyHorizon, cSkyHorizon * 0.55, min(1.0, -d.y / HAZE_DEPTH)) :
             mix(cSkyHorizon, cSkyTop, sqrt(d.y));
+    if(cSkyPhysical > 0.5 && d.y >= 0.0){
+        // Brightness and hue on their own curves: the render's horizon
+        // band brightens over the lowest 20 degrees but stays blue until
+        // the last few -- the top's share of the hue is 0.05 at the
+        // horizon, 0.7 at 3 degrees, 0.9 at 9 (B/R 1.0, 1.2, 2.3 against
+        // a top of 3.4); one weight for both went white too early.
+        const vec3 LUM = vec3(0.2126, 0.7152, 0.0722);
+        float lum_h = max(dot(cSkyHorizon, LUM), 1e-6);
+        float lum_t = max(dot(cSkyTop, LUM), 1e-6);
+        float lum = mix(lum_h, lum_t, smoothstep(0.0, 0.38, d.y));
+        vec3 hue = mix(cSkyHorizon / lum_h, cSkyTop / lum_t,
+                1.0 - exp(-d.y / 0.09));
+        color = hue * lum;
+    }
 
     // The band the sun paints around itself along the horizon, which is what
     // makes dawn and dusk read as dawn and dusk. Strongest when the sun is

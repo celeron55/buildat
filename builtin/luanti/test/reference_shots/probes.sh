@@ -212,10 +212,13 @@ echo "$SKY" | while IFS='|' read -r name pic crop why; do
 	for s in pathtrace_r150 module_pbr_r150; do
 		f=$(file_of "$s" "$pic")
 		[ -f "$f" ] || { line="$line  (no $s)"; continue; }
-		v=$(linear_rgb "$f" "$crop" | awk '{printf "%.4f", 0.2126*$1+0.7152*$2+0.0722*$3}')
+		# Per channel, since term 1's hue is the Luanti-ism ([PBR_FIT])
+		v=$(linear_rgb "$f" "$crop" | awk '{printf "%.3f/%.3f/%.3f", $1, $2, $3}')
 		line="$line  $v"
 	done
-	echo "$line" | awk '{ if (NF >= 3 && $2+0 > 0) printf "%s  (%.2f)  ", $0, $3/$2; else printf "%s  ", $0; }'
+	echo "$line" | awk '{ if (NF >= 3) { n=split($2,a,"/"); split($3,b,"/"); r="";
+		for(i=1;i<=3;i++) r=r (i>1?"/":"") (a[i]+0>0 ? sprintf("%.2f",b[i]/a[i]) : "-");
+		printf "%s  (%s)  ", $0, r } else printf "%s  ", $0; }'
 	echo "-- $why"
 done
 
