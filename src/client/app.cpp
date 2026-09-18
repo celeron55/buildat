@@ -755,7 +755,7 @@ struct CApp: public App, public magic::Application
 						m_texture_queue.pop_front();
 					}
 					const int64_t t0 = interface::os::time_us();
-					item.second->SavePNG(magic::String(item.first.c_str()));
+					write_dump_texture(item.first, item.second);
 					log_v(MODULE, "dump_meshes: wrote %s in %.1f s",
 							cs(item.first),
 							(interface::os::time_us() - t0) / 1e6);
@@ -764,6 +764,44 @@ struct CApp: public App, public magic::Application
 		}
 		m_texture_cv.notify_one();
 	}
+	// A map's PNG, and for the two whose alpha is a channel of its own --
+	// the spec map's spots, the normal map's static spots -- the alpha
+	// forced opaque and the channel written beside it as <stem>_spots.png
+	// or <stem>_static_spots.png: a viewer composited the used tiles
+	// transparent over black and the map looked empty when it was not.
+	// [SPEC_DUMP_ALPHA]
+	static void write_dump_texture(const ss_ &path,
+			magic::SharedPtr<magic::Image> img)
+	{
+		const bool spec = path.size() > 9 &&
+				path.compare(path.size() - 9, 9, "_spec.png") == 0;
+		const bool normal = path.size() > 11 &&
+				path.compare(path.size() - 11, 11, "_normal.png") == 0;
+		if((!spec && !normal) || img->GetComponents() != 4){
+			img->SavePNG(magic::String(path.c_str()));
+			return;
+		}
+		const int w = img->GetWidth(), h = img->GetHeight();
+		const unsigned char *src = img->GetData();
+		magic::SharedPtr<magic::Image> opaque(new magic::Image(img->GetContext()));
+		magic::SharedPtr<magic::Image> chan(new magic::Image(img->GetContext()));
+		opaque->SetSize(w, h, 4);
+		chan->SetSize(w, h, 4);
+		unsigned char *o = opaque->GetData(), *c = chan->GetData();
+		for(int i = 0; i < w * h; i++){
+			o[i * 4] = src[i * 4];
+			o[i * 4 + 1] = src[i * 4 + 1];
+			o[i * 4 + 2] = src[i * 4 + 2];
+			o[i * 4 + 3] = 255;
+			c[i * 4] = c[i * 4 + 1] = c[i * 4 + 2] = src[i * 4 + 3];
+			c[i * 4 + 3] = 255;
+		}
+		opaque->SavePNG(magic::String(path.c_str()));
+		const ss_ stem = path.substr(0, path.size() - (spec ? 9 : 11));
+		chan->SavePNG(magic::String((stem + (spec ? "_spots.png" :
+				"_static_spots.png")).c_str()));
+	}
+
 	void join_texture_writer()
 	{
 		{
