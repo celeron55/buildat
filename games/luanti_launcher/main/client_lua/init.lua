@@ -483,7 +483,11 @@ do
 	-- and no bloom either: the render has none, and a bright pass blurred
 	-- over a probe crop is a white the crop did not earn
 	rp:SetEnabled("BloomHDR", buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
-	rp:SetShaderParameter("TonemapExposureBias", EXPOSURE_BIAS)
+	-- No bias on top of the meter: the meter owns the level and a bias is
+	-- a second exposure that pushes the lit parts up the curve's shoulder
+	-- ([PBR_FIT] term 4). EXPOSURE_BIAS stays the minimap's, which is not
+	-- metered.
+	rp:SetShaderParameter("TonemapExposureBias", 1.0)
 	rp:SetShaderParameter("AutoExposureAdaptRate", AUTO_EXPOSURE.adapt_rate)
 	-- BUILDAT_LUANTI_KEY=<lum> pins the metered key by closing the range on
 	-- it, so an ablation's frames are comparable in absolute terms: with
