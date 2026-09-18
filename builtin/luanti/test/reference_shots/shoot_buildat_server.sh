@@ -150,6 +150,15 @@ shots_dir="$here/user/screenshots"
 # every join, so the log is sliced from where this client came in.
 for mode in $modes; do
 out="$shots_root/module_${mode}_r$RANGE"
+mkdir -p "$out"
+# What this set was taken with, beside its pictures: a set taken under an
+# experiment's environment -- a flipped tilt, an ablated term -- reads as
+# the client's word otherwise, and one did ([PBR_FIT], 2026-09-18)
+{
+	echo "taken $(date '+%Y-%m-%d %H:%M')"
+	echo "orbit_tilt ${BUILDAT_LUANTI_ORBIT_TILT:-$tilt}"
+	env | grep '^BUILDAT_LUANTI_' | sort
+} > "$out/taken.txt"
 from=$(wc -l < "$tmp/srv.log")
 BUILDAT_LUANTI_PBR="$mode" \
 bin/buildat -s "localhost:$port" -w "${REFSHOT_W}x$REFSHOT_H" -l 3 -c @"$tmp/cmds.txt" \
