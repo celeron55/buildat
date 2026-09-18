@@ -254,8 +254,15 @@ void VS()
             vVertexLight = vec3(0.0, 0.0, 0.0);
             vTexCoord2 = iTexCoord1;
         #else
-            vVertexLight = GetAmbient(GetZonePos(worldPos)) *
-                ShapeSkylight(iColor.a) + iColor.rgb +
+            // The sky's share is the nibble as it is, not the shaped one:
+            // the knee is for the sun, whose shadow map already darkens a
+            // canopy's floor; the sky is not in the shadow map, and a face
+            // under leaves does see less of it -- 11..14 of 15 is what
+            // Luanti says it sees. The render's canopy-shaded snow reads
+            // 0.6 of open shade ([PBR_FIT] term 2). The bounce keeps the
+            // shaped value: a canopy is not a cave.
+            vVertexLight = GetAmbient(GetZonePos(worldPos)) * iColor.a +
+                iColor.rgb +
                 cBounceLight * (1.0 - ShapeSkylight(iColor.a));
         #endif
         vSkyVisibility = ShapeSkylight(iColor.a);
