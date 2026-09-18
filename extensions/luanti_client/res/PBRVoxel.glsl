@@ -691,25 +691,31 @@ void PS()
         vec3 lightVec = normalize(lightDir);
         float ndl = clamp((dot(normal, lightVec)), M_EPSILON, 1.0);
 
-        vec3 BRDF = GetBRDF(vWorldPos.xyz, lightDir, lightVec, toCamera, normal, roughness, diffColor.rgb, specColor);
-
-        // Lambert, once. Urho3D's PBR.glsl hands back a diffuse of
-        // albedo / pi times a power of the view angle, and this pass
-        // divided by pi again over an atten that is already n.l -- so a
-        // light of E lit a face to albedo * E * n.l / pi^2 times a factor
-        // that fell to 0.4 seen at a grazing angle. Against the path
-        // trace ([PBR_FIT]) the sun came out at a fifth of what it was
-        // set to. What a face lit by an irradiance E reflects is albedo
-        // * E * n.l / pi and nothing else: the view-dependent diffuse is
-        // swapped for that and the extra pi goes, from the specular as
-        // well: Urho3D's GGX carries no pi of its own, and with the pass's
-        // pi over it the low sun's glint on a grass top read a tenth of
-        // the render's ([PBR_FIT], sun_glint_grass). (The rose's
-        // desaturation once blamed on this was the atlas read as linear.)
-        float ndvDiffuse = abs(dot(normal, toCamera)) + 1e-5;
-        vec3 specularPart = BRDF -
-            Diffuse(diffColor.rgb, roughness, ndvDiffuse, ndl, 1.0);
-        BRDF = specularPart + diffColor.rgb * (1.0 / M_PI);
+        // The BRDF, written out rather than Urho3D's GetBRDF(): a face lit
+        // by an irradiance E reflects albedo * E * n.l / pi and, on top,
+        // the Cook-Torrance lobe D * F * V * E * n.l -- GGX with its pi,
+        // Schlick's Fresnel on the half vector, Smith's height-correlated
+        // visibility, which carries the 1 / (4 n.l n.v). Urho3D's chain
+        // had a diffuse that fell with the view angle and a second pi over
+        // everything, a Fresnel scaled by an IOR of its own and a
+        // visibility without the 1 / (4 n.l n.v), and it was never compiled
+        // for these materials anyway (SPECULAR needs MatSpecColor set).
+        // What is here is Principled's lobe, which the reference is lit
+        // with ([PBR_FIT], sun_glint_grass). `roughness` is already alpha
+        // (r squared, above).
+        vec3 halfVec = normalize(toCamera + lightVec);
+        float ndh = clamp(dot(normal, halfVec), M_EPSILON, 1.0);
+        float vdh = clamp(dot(toCamera, halfVec), M_EPSILON, 1.0);
+        float ndv = abs(dot(normal, toCamera)) + 1e-5;
+        float alpha = max(roughness, 0.02);
+        float a2 = alpha * alpha;
+        float dd = ndh * ndh * (a2 - 1.0) + 1.0;
+        float D = a2 / (M_PI * dd * dd);
+        vec3 F = specColor + (vec3(1.0) - specColor) * pow(1.0 - vdh, 5.0);
+        float gv = ndl * sqrt(ndv * ndv * (1.0 - a2) + a2);
+        float gl = ndv * sqrt(ndl * ndl * (1.0 - a2) + a2);
+        float V = 0.5 / max(gv + gl, 1e-5);
+        vec3 BRDF = diffColor.rgb * (1.0 / M_PI) + D * F * V;
         finalColor.rgb = BRDF * lightColor * (atten * shadow);
 
         #if defined(VOXELTRANSLUCENCY) && defined(METALLIC)
