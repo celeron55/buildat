@@ -269,7 +269,13 @@ void VS()
             // Luanti says it sees. The render's canopy-shaded snow reads
             // 0.6 of open shade ([PBR_FIT] term 2). The bounce keeps the
             // shaped value: a canopy is not a cave.
-            vVertexLight = GetAmbient(GetZonePos(worldPos)) * iColor.a +
+            // The sky's share by how much of the hemisphere is sky: all
+            // of it for a floor, half for a wall, none for a ceiling --
+            // the other half is the ground's, below. The nibble alone gave
+            // a wall the whole dome, and a dirt side in a block's shadow
+            // read 2.7 times the render's ([PBR_FIT], contrast_dirt).
+            vVertexLight = GetAmbient(GetZonePos(worldPos)) * iColor.a *
+                    (0.5 + 0.5 * vNormal.y) +
                 iColor.rgb +
                 cBounceLight * (1.0 - ShapeSkylight(iColor.a)) +
                 cGroundLight * (0.5 - 0.5 * vNormal.y) *

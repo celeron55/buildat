@@ -118,7 +118,8 @@ echo "Hue is the verdict; mean is for TOO_BRIGHT and carries no pass mark."
 #   sky_to_sun  a sky patch over a sunlit white
 # name | picture | crop A | crop B (empty for a single crop) | what
 FIT="
-contrast_dirt|vp1_1300|40x12+957+690|40x12+666+564|vp1 dirt: a sunlit dirt side over a dirt side facing the camera, sky and ground lit
+contrast_dirt|vp1_1300|64x10+280+530|48x10+216+530|vp1 dirt: one dirt row in the sun over the same row in the stone block's shadow
+incidence_dirt|vp1_1300|40x12+957+690|40x12+666+564|vp1 dirt: a sunlit side over a side facing the camera -- the face-shade table and the sun's direction
 contrast_snow|vp5_1000|60x40+420+540|60x30+400+660|vp5 snow: the sunlit field over the tree's shadow
 contrast_cave|vp7_1300|60x40+560+560|60x40+200+300|vp7 the cave mouth's floor over its wall
 saturation_grass|vp1_1300|40x12+666+534||vp1 grass top, lit
