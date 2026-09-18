@@ -5,6 +5,9 @@ local log = buildat.Logger("__client/api")
 
 buildat.connect_server    = __buildat_connect_server
 buildat.list_games        = __buildat_list_games
+-- list_launchers() -> {{kind, name, path, launcher = bool}, ...}: every
+-- game, builtin and extension in the tree, for the launch grid
+buildat.list_launchers    = __buildat_list_launchers
 buildat.start_local_server = __buildat_start_local_server
 buildat.stop_local_server = __buildat_stop_local_server
 buildat.request_stop_local_server = __buildat_request_stop_local_server

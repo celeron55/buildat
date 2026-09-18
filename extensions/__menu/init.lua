@@ -19,17 +19,16 @@ local launch_menu = require("buildat/extension/launch_menu")
 local preferences = dofile(buildat.extension_path("__menu").."/preferences.lua")
 local M = {safe = nil}
 
--- The extensions this menu offers as things to launch, in the order they are
--- shown. An extension named here says for itself what it is called, what it
--- looks like and what launching it does, in an M.launch table; see
--- doc/design.txt, "Launchable extensions".
---
--- The list is written here rather than found by looking: requiring every
--- extension in the tree to ask whether it is launchable would run all of
--- their loading code to build a menu.
-local LAUNCHABLE = {
-	"luanti_client",
-}
+-- The launch grid ([LAUNCH_GRID]): the tiles come from the tree, any number
+-- from every games/*, builtin/* and extensions/* that ships
+-- launcher/init.lua, found by buildat.list_launchers() and run in the
+-- sandbox -- module client-Lua trust, since the file is on the way into a
+-- game and a whole-server sandbox is only as good as the least-trusted code
+-- on that path. A file that errors, returns a non-table or an action with
+-- no label or run is one warning naming it, and the rest of the grid draws.
+-- The one way out of a file is ctx.launch, below, whose params cross as
+-- plain data and whose target is entered through on_untrusted_launch().
+local launch_grid = dofile(buildat.extension_path("__menu").."/launch_grid.lua")
 
 local DIM = 0.55
 
@@ -138,37 +137,31 @@ function M.boot()
 				end}
 	end
 
-	add("__menu/res/icon_local.png", "Local game",
-			launch_menu.show_local_game)
-	add("__menu/res/icon_network.png", "Connect to server",
-			launch_menu.show_connect_to_server)
-	-- What the user sets once and every game honours
+	-- What the user sets once and every game honours; not a launch, so
+	-- the menu's own rather than a tile from the tree
 	add("__menu/res/icon_preferences.png", "Preferences", preferences.show)
-
-	-- And an entry for every extension that says it can be launched
-	for _, name in ipairs(LAUNCHABLE) do
-		local ok, ext = pcall(require, "buildat/extension/"..name)
-		local launch = ok and type(ext) == 'table' and ext.launch or nil
-		if not launch or type(launch.run) ~= 'function' then
-			-- A menu that cannot be drawn because one extension is missing
-			-- or broken is worse than a menu with one entry fewer
-			log:warning("Launchable extension "..dump(name)..
-					" has no M.launch: "..
-					(ok and "loaded" or dump(ext)))
-		else
-			add(launch.icon, launch.title or name, launch.run)
-		end
+	-- And every launch action the tree offers, in the grid's order
+	for _, action in ipairs(launch_grid.actions(log)) do
+		add(action.icon, action.label, action.run)
 	end
 
-	-- Now that the entries are known: each in its place, and the row exactly
-	-- as wide as they are, so that the layout's own border lines it up with
-	-- the title above
+	-- Now that the entries are known: a grid wrapping by the window's
+	-- width and the row exactly as wide as its columns, so that the
+	-- layout's own border lines it up with the title above
+	local columns = math.max(1, math.min(#items, math.floor(
+			(magic.ui.root.width - 2 * 20 + ENTRY_SPACING) /
+			(ENTRY_WIDTH + ENTRY_SPACING))))
 	for i, item in ipairs(items) do
-		item.button:SetPosition((i - 1) * (ENTRY_WIDTH + ENTRY_SPACING), 0)
+		local col = (i - 1) % columns
+		local line = math.floor((i - 1) / columns)
+		item.button:SetPosition(col * (ENTRY_WIDTH + ENTRY_SPACING),
+				line * (ENTRY_HEIGHT + ENTRY_SPACING))
 	end
-	row:SetFixedWidth(#items * ENTRY_WIDTH +
-			math.max(0, #items - 1) * ENTRY_SPACING)
-	row:SetFixedHeight(ENTRY_HEIGHT)
+	local lines = math.ceil(#items / columns)
+	row:SetFixedWidth(columns * ENTRY_WIDTH +
+			math.max(0, columns - 1) * ENTRY_SPACING)
+	row:SetFixedHeight(lines * ENTRY_HEIGHT +
+			math.max(0, lines - 1) * ENTRY_SPACING)
 
 	-- launch_menu's keyboard selection, which is worth having here: up and
 	-- down, left and right, enter, and the mouse moving the same selection
@@ -178,6 +171,7 @@ function M.boot()
 			engine:Exit()
 		end
 	end)
+	nav:set_columns(columns)
 	nav:on_change(function(button, selected)
 		local c = selected and 1 or DIM
 		button:GetChild("ButtonImage").color = magic.Color(c, c, c)

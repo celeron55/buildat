@@ -917,6 +917,11 @@ struct CApp: public App, public magic::Application
 			g_client_config.get<ss_>("share_path")+"/client/data",
 			g_client_config.get<ss_>("cache_path")+"/tmp",
 			g_client_config.get<ss_>("share_path")+"/extensions", // Could be unsafe
+			// The launch grid's icons: <name>/launcher/<icon>.png and a
+			// game's icon.png, resolved by the menu on the trusted side
+			// ([LAUNCH_GRID]). The same exposure as extensions above.
+			g_client_config.get<ss_>("share_path")+"/games",
+			g_client_config.get<ss_>("share_path")+"/builtin",
 			g_client_config.get<ss_>("urho3d_path")+"/bin/CoreData",
 			g_client_config.get<ss_>("urho3d_path")+"/bin/Data",
 		};
@@ -1189,6 +1194,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(disconnect)
 		DEF_BUILDAT_FUNC(list_games)
 		DEF_BUILDAT_FUNC(start_local_server)
+		DEF_BUILDAT_FUNC(list_launchers)
 		DEF_BUILDAT_FUNC(stop_local_server)
 		DEF_BUILDAT_FUNC(request_stop_local_server)
 		DEF_BUILDAT_FUNC(force_kill_local_server)
@@ -1931,6 +1937,46 @@ struct CApp: public App, public magic::Application
 		else
 			lua_pushstring(L, error.c_str());
 		return 2;
+	}
+
+	// list_launchers() -> {{kind = "game"|"builtin"|"extension", name, path},
+	// ...}: every games/<name>, builtin/<name> and extensions/<name> in the
+	// tree, with whether it ships launcher/init.lua as `launcher = true`.
+	// Nothing else is scanned -- not a save, not a Luanti game's mods. The
+	// menu draws the launch grid from this and runs the launcher files in
+	// the sandbox ([LAUNCH_GRID]).
+	static int l_list_launchers(lua_State *L)
+	{
+		const ss_ share = g_client_config.get<ss_>("share_path");
+		const struct { const char *kind; const char *dir; } kinds[] = {
+			{"game", "games"}, {"builtin", "builtin"},
+			{"extension", "extensions"}};
+		lua_newtable(L);
+		int i = 1;
+		for(const auto &k : kinds){
+			const ss_ dir = share+"/"+k.dir;
+			auto nodes = interface::fs::list_directory(dir);
+			sv_<ss_> names;
+			for(const auto &n : nodes)
+				if(n.is_directory && valid_game_name(n.name))
+					names.push_back(n.name);
+			std::sort(names.begin(), names.end());
+			for(const ss_ &name : names){
+				const ss_ path = interface::fs::get_absolute_path(dir+"/"+name);
+				lua_newtable(L);
+				lua_pushstring(L, k.kind);
+				lua_setfield(L, -2, "kind");
+				lua_pushstring(L, name.c_str());
+				lua_setfield(L, -2, "name");
+				lua_pushstring(L, path.c_str());
+				lua_setfield(L, -2, "path");
+				lua_pushboolean(L, interface::fs::path_exists(
+						path+"/launcher/init.lua"));
+				lua_setfield(L, -2, "launcher");
+				lua_rawseti(L, -2, i++);
+			}
+		}
+		return 1;
 	}
 
 	// list_games() -> {{name=, size=}, ...}

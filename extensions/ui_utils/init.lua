@@ -81,6 +81,14 @@ local function button_menu_nav(root)
 		return self
 	end
 
+	-- A grid rather than a row or a column: up and down move by this many
+	-- items, left and right by one ([LAUNCH_GRID])
+	local columns = 1
+	function nav:set_columns(n)
+		columns = math.max(1, math.floor(n or 1))
+		return self
+	end
+
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 		local key = event_data:GetInt("Key")
 		-- A text field on the same screen owns the keys that are text: Enter
@@ -105,10 +113,14 @@ local function button_menu_nav(root)
 		end
 		-- Left and right as well as up and down, because a menu can be a row
 		-- as well as a column and a player should not have to know which
-		if key == KEY_UP or key == KEY_LEFT then
+		if key == KEY_LEFT then
 			select_i(selected - 1)
-		elseif key == KEY_DOWN or key == KEY_RIGHT then
+		elseif key == KEY_RIGHT then
 			select_i(selected + 1)
+		elseif key == KEY_UP then
+			select_i(selected - columns)
+		elseif key == KEY_DOWN then
+			select_i(selected + columns)
 		elseif key == KEY_RETURN or key == KEY_RETURN2 or key == KEY_KP_ENTER then
 			if magic.input:GetKeyPress(key) and items[selected] then
 				items[selected].action()

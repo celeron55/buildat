@@ -318,6 +318,15 @@ end
 -- server. Both push a screen of their own and come back on their own.
 M.show_local_game = show_local_game
 M.show_connect_to_server = show_connect_to_server
+-- And starting a game by name, which is what a tile on the launch grid
+-- ends in ([LAUNCH_GRID]); the same screens as picking it from the list
+M.start_local_game = start_local_game
+-- And the same two for the sandboxed launcher file ([LAUNCH_GRID]): each
+-- pushes a trusted screen and comes back, and takes nothing from the caller
+M.safe = {
+	show_local_game = function() show_local_game() end,
+	show_connect_to_server = function() show_connect_to_server() end,
+}
 
 -- Kept so that `-m launch_menu` still starts something: the launch menu
 -- itself is extensions/__menu, which is what the client boots by default.

@@ -3343,15 +3343,22 @@ end
 -- name to show, an icon, and what to do when it is picked. The menu keeps
 -- the list of extensions it offers; an extension says how to launch itself.
 -- See doc/design.txt, "Launchable extensions".
-M.launch = {
-	title = "Play on a Luanti server",
-	icon = "luanti_client/res/icon.png",
-	run = function()
-		cancel_exits = false
-		self_tests()
-		show_connect_dialog()
-	end,
-}
+-- Entered from the launch grid ([LAUNCH_GRID]): the tile is
+-- launcher/init.lua, sandboxed, and this is the one door it has. The name
+-- says what the request is: treat request.params as a packet from a
+-- server -- validate, default, ignore the rest. The menu is underneath,
+-- so cancelling the dialog goes back to it rather than exiting.
+function M.on_untrusted_launch(request)
+	local params = type(request) == "table" and
+			type(request.params) == "table" and request.params or {}
+	local address = type(params.address) == "string" and
+			#params.address <= 256 and params.address or nil
+	local name = type(params.name) == "string" and #params.name <= 64 and
+			params.name or nil
+	cancel_exits = false
+	self_tests()
+	show_connect_dialog(address, name)
+end
 
 return M
 -- vim: set noet ts=4 sw=4:
