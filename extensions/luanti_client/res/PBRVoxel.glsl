@@ -454,6 +454,14 @@ void PS()
             if (diffInput.a < 0.5)
                 discard;
         #endif
+        // The atlas is a game's textures as they come, display-encoded, and
+        // this path lights in linear and encodes once at the end: read as
+        // linear, an sRGB texel is an albedo a third too bright and half
+        // as saturated -- grass read max/min 1.7 against the render's 3.9
+        // off the same PNG, which Cycles decodes ([PBR_FIT]). Decoded here.
+        // simplified: 2.2, not the sRGB curve; the difference is under the
+        // texel's own quantisation.
+        diffInput.rgb = pow(diffInput.rgb, vec3(2.2));
         vec4 diffColor = cMatDiffColor * diffInput;
     #else
         vec4 diffColor = cMatDiffColor;
@@ -669,11 +677,14 @@ void PS()
         // trace ([PBR_FIT]) the sun came out at a fifth of what it was
         // set to. What a face lit by an irradiance E reflects is albedo
         // * E * n.l / pi and nothing else: the view-dependent diffuse is
-        // swapped for that and the extra pi goes. The specular keeps
-        // Urho3D's normalization.
+        // swapped for that and the extra pi goes -- from the diffuse
+        // alone. The specular keeps Urho3D's normalization, which
+        // counts on the pass's pi: without it a rose's white highlight
+        // came to the size of its red ([PBR_FIT], the saturation rows).
         float ndvDiffuse = abs(dot(normal, toCamera)) + 1e-5;
-        BRDF += diffColor.rgb * (1.0 / M_PI) -
+        vec3 specularPart = BRDF -
             Diffuse(diffColor.rgb, roughness, ndvDiffuse, ndl, 1.0);
+        BRDF = specularPart / M_PI + diffColor.rgb * (1.0 / M_PI);
         finalColor.rgb = BRDF * lightColor * (atten * shadow);
 
         #if defined(VOXELTRANSLUCENCY) && defined(METALLIC)

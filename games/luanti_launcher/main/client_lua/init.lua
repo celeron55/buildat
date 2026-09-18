@@ -196,9 +196,10 @@ local MOON_BRIGHTNESS = 1.0
 -- alone. The metering takes the absolute scale; what these set is the
 -- ratio of sun to sky to moon, which is what contrast is made of.
 --   sun_e0, sun_tau  the sun's irradiance normal to it, E0 * exp(-tau /
---                    sin(elevation)): 135 at 64 degrees, which is what
---                    the render's snow at 10:00 reads (35 off an
---                    albedo of 0.9), and 74 at ten degrees, which is
+--                    sin(elevation)): 170 at 64 degrees, which puts the
+--                    render's sky patch over its sunlit snow at 10:00
+--                    (sky_to_sun 0.25) once the snow's albedo is read
+--                    decoded, and 93 at ten degrees, which is
 --                    what its block top at 05:45 reads (1.9, 1.4, 1.0)
 --                    off an albedo of 0.3 with the Rayleigh sun and a
 --                    dome of 1.5 solved together (dawn_sun_dirt)
@@ -217,9 +218,11 @@ local MOON_BRIGHTNESS = 1.0
 --                    target is a sky under a fortieth of moonlit snow
 -- simplified: the sky keeps Luanti's hue at this radiance, and the sun
 -- its colour below; the colours are the terms after this one.
-local PHYS = {sun_e0 = 155, sun_tau = 0.127, sky_zenith = 4.5,
+local PHYS = {sun_e0 = 195, sun_tau = 0.127, sky_zenith = 4.5,
 		sky_horizon = 12.0, moon_e = 0.0025, night_sky = 0.00005,
-		bounce = 0.13, ground = {r = 0.25, g = 0.22, b = 0.15}}
+		bounce = 0.13, ground = {r = 0.25, g = 0.22, b = 0.15},
+		day_zenith = {r = 0.57, g = 0.76, b = 1.0},
+		day_horizon = {r = 0.74, g = 0.89, b = 1.0}}
 -- The sky's radiance factor at a sun height (sin elevation): full by
 -- day, gone over the last twelve degrees, the floor below
 -- The zenith and the dome go first: at ten degrees the render's block
@@ -473,6 +476,9 @@ do
 	-- set it so the fit's probes read linear against linear ([PBR_FIT])
 	rp:SetEnabled("TonemapUncharted2",
 			buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
+	-- and no bloom either: the render has none, and a bright pass blurred
+	-- over a probe crop is a white the crop did not earn
+	rp:SetEnabled("BloomHDR", buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
 	rp:SetShaderParameter("TonemapExposureBias", EXPOSURE_BIAS)
 	rp:SetShaderParameter("AutoExposureAdaptRate", AUTO_EXPOSURE.adapt_rate)
 	rp:SetShaderParameter("AutoExposureLumRange",
@@ -1051,6 +1057,17 @@ local function apply_sky_of_hour()
 	local defaults = voxel_shading.sky_defaults
 	local day_zenith = game_sky.zenith or defaults.zenith
 	local day_horizon = game_sky.horizon or defaults.horizon
+	if not sky_now.unlit then
+		-- pbr: the day's hue is the render's, the game's own being
+		-- display colours for Luanti's sky, not a radiance -- Nishita's (Nishita at 13:00, zenith (2.6, 5.1, 9.4), horizon
+		-- (8.5, 12.6, 16.4)), given here display-encoded since dim()
+		-- decodes. Luanti's (97, 146, 255) decodes to a zenith three
+		-- times as blue as green, and a shadow lit by it read (0.95,
+		-- 0.63, 1.8) against the render's (0.35, 0.39, 0.6) -- the
+		-- desaturation of every shaded face ([PBR_FIT]).
+		day_zenith = PHYS.day_zenith
+		day_horizon = PHYS.day_horizon
+	end
 	-- A night sky the game did not name is its own day sky with the light
 	-- taken out of it, which keeps a game's own colour rather than putting
 	-- Luanti's blue over it
@@ -1313,6 +1330,11 @@ local function update_sky(dt)
 		sky_lights.sun_node.direction = magic.Vector3(dir.x, dir.y, dir.z)
 		sky_lights.sun.brightness = sky_now.unlit and SUN_BRIGHTNESS * up or
 				PHYS.sun(height)
+		-- BUILDAT_LUANTI_ABLATE=sun,amb,bounce,ground,ibl: a term turned
+		-- off for a fit's ablation run ([PBR_FIT]); the sun goes with any
+		if buildat.get_env("BUILDAT_LUANTI_ABLATE") then
+			sky_lights.sun.brightness = 0
+		end
 	end
 	sky_lights.moon_node.enabled = moon_up > 0 and
 			not (sky_now.unlit and not sky_now.shadows)
@@ -1386,6 +1408,11 @@ local function update_sky(dt)
 				PHYS.ground.r * (sun * sc.r + c.r * k),
 				PHYS.ground.g * (sun * sc.g + c.g * k),
 				PHYS.ground.b * (sun * sc.b + c.b * k))
+		local abl = buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""
+		if abl:find("amb") then zone.ambientColor = magic.Color(0, 0, 0) end
+		if abl:find("bounce") then voxel_shading.set_bounce_light(0, 0, 0) end
+		if abl:find("ground") then voxel_shading.set_ground_light(0, 0, 0) end
+		if abl:find("ibl") then voxel_shading.set_specular_emphasis(0) end
 	end
 	-- And the fog with it. This is the one thing the cave sky needs that is
 	-- not per direction, so it takes the mean of the same cube: underground
