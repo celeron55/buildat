@@ -536,6 +536,20 @@ static const float FACE_SHADE[6] = {
 // corner that are solid. Applied to ambient only, which is where it is
 // visible: a face in direct sun is shaped by the sun, not by this.
 static const float AO_LEVELS[4] = {1.0f, 0.72f, 0.52f, 0.38f};
+// The pbr path's own table ([SHADE_NIBBLE]): fitted per factor against
+// the path trace's crease, which darkens harder than every game's table
+// -- vp1's pit face read 1.4 to 1.6 times the render's with the table
+// above ([PBR_FIT] 2c, contrast_dirt_pit). Chosen by the mode the client
+// asked for, read here since the mesher runs in the client. simplified:
+// only a mode asked for by name selects it -- unset, which the launcher
+// takes as pbr, keeps every game's table, since the other games set
+// nothing and their look must not move; the upgrade is the launcher
+// telling the mesher through set_voxel_geometry().
+static const float AO_LEVELS_PBR[4] = {1.0f, 0.55f, 0.35f, 0.22f};
+static const bool PBR_MODE = getenv("BUILDAT_LUANTI_PBR") != nullptr && (
+		ss_(getenv("BUILDAT_LUANTI_PBR")) == "pbr" ||
+		ss_(getenv("BUILDAT_LUANTI_PBR")) == "1" ||
+		ss_(getenv("BUILDAT_LUANTI_PBR")) == "pbr_debug_shadows");
 
 // How much of that occlusion the bounce term takes. Occlusion is a statement
 // about how much of the sky a corner can see, which is the wrong question to
@@ -918,7 +932,7 @@ static void face_vertex_colors(VoxelVolume &volume,
 		// Two solid sides bury the corner whatever is diagonally behind it
 		int occluders = (s1 && s2) ? 3 : (s1 ? 1 : 0) + (s2 ? 1 : 0) +
 				(occludes(volume, voxel_reg, fmt, front_p + du + dv) ? 1 : 0);
-		float ao = AO_LEVELS[occluders];
+		float ao = (PBR_MODE ? AO_LEVELS_PBR : AO_LEVELS)[occluders];
 		float sky_shade = ao * hemi * terrain * FACE_SHADE[face_id];
 		float bounce_shade = (1.0f - BOUNCE_AO + BOUNCE_AO * ao) *
 				FACE_SHADE[face_id] * (1.0f - sky_f);

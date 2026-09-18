@@ -356,7 +356,18 @@ void VS()
             // zero still bounces. Unpacked the rgb is the light itself and
             // the shade is one.
             bool isPacked = cPackedSky > 0.5;
-            vec3 baked = isPacked ? cLampLight * iColor.r : iColor.rgb;
+            // The lamp's falloff computed from the nibble, not stepped
+            // with it: Luanti's lamp light drops one level a node, and
+            // fourteen levels at full lit vp7's deep wall ten times the
+            // render's from a glowstone five nodes off; the nibble says
+            // where the lamp is and how strong, the inverse square says
+            // the rest ([LAMP_REF], [SHADE_NIBBLE]'s list). The level is
+            // the vertex r over its local shade, the distance fifteen less
+            // the level, one node at the lamp's own face.
+            float lampLevel = isPacked ? iColor.r / max(iColor.b, 0.05) : 0.0;
+            float lampDist = max(15.0 - 15.0 * lampLevel, 1.0);
+            vec3 baked = isPacked ?
+                cLampLight * iColor.b / (lampDist * lampDist) : iColor.rgb;
             float shade = isPacked ? iColor.b : 1.0;
             // The ground a wall faces is lit or it is not, and the base
             // pass has no shadow map to say which; what it has is how
