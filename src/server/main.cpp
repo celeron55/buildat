@@ -78,8 +78,8 @@ int main(int argc, char *argv[])
 
 	std::string module_path;
 
-	const char opts[100] = "hm:r:i:S:D:U:c:l:L:C:A:P:wR";
-	const char usagefmt[1000] =
+	const char opts[100] = "hm:r:i:S:D:U:c:l:L:C:A:P:wRu:";
+	const char usagefmt[1400] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
 			"  -m [module_path]     Specify module path\n"
@@ -98,6 +98,9 @@ int main(int argc, char *argv[])
 			"                       connected clients (for development)\n"
 			"  -R                   Restart a module when its source changes\n"
 			"                       (for development; off by default)\n"
+			"  -u [key=value lines] What an untrusted launcher asked for\n"
+			"                       (the launch grid; a module reads it as it\n"
+			"                       would a packet)\n"
 			;
 
 	int c;
@@ -111,6 +114,15 @@ int main(int argc, char *argv[])
 		case 'm':
 			log_i(MODULE, "module_path: %s", c55_optarg);
 			module_path = c55_optarg;
+			break;
+		case 'u':
+			// The launch grid's params, one key=value a line, from a
+			// sandboxed launcher file through the client: a module reads
+			// it under this name, which says what it is, and treats it as
+			// a packet from a server ([LAUNCH_GRID])
+			log_i(MODULE, "config.untrusted_launch: %zu bytes",
+					strlen(c55_optarg));
+			config.set("untrusted_launch", c55_optarg);
 			break;
 		case 'r':
 			log_i(MODULE, "config.rccpp_build_path: %s", c55_optarg);

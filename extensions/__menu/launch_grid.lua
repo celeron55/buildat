@@ -58,11 +58,21 @@ local function do_launch(log, from, request)
 		end
 		ext.on_untrusted_launch({from = from, params = params})
 	elseif request.game then
-		if next(params) ~= nil then
-			log:warning("launch from "..from..": a game takes no params yet")
-			return
+		-- To a game the params go as key=value lines through the server's
+		-- -u, which a module reads as it would a packet; the top level
+		-- only, strings, numbers and booleans, a key of a name's shape
+		local lines = {}
+		for k, v in pairs(params) do
+			if type(k) ~= "string" or not k:match("^[%w_]+$") or
+					type(v) == "table" or tostring(v):find("\n") then
+				log:warning("launch from "..from..": param "..tostring(k)..
+						" cannot reach a game; dropped")
+			else
+				lines[#lines + 1] = k.."="..tostring(v)
+			end
 		end
-		launch_menu.start_local_game(tostring(request.game))
+		launch_menu.start_local_game(tostring(request.game),
+				table.concat(lines, "\n"))
 	elseif request.module then
 		log:warning("launch from "..from..": a builtin module is not a "..
 				"target yet ([LAUNCH_GRID])")

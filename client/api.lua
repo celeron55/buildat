@@ -8,6 +8,10 @@ buildat.list_games        = __buildat_list_games
 -- list_launchers() -> {{kind, name, path, launcher = bool}, ...}: every
 -- game, builtin and extension in the tree, for the launch grid
 buildat.list_launchers    = __buildat_list_launchers
+-- list_installed_games(family) -> {name, ...} under <user>/<family>/games;
+-- names only, and in the sandbox too, for a launcher file's tiles
+buildat.list_installed_games = __buildat_list_installed_games
+buildat.safe.list_installed_games = __buildat_list_installed_games
 buildat.start_local_server = __buildat_start_local_server
 buildat.stop_local_server = __buildat_stop_local_server
 buildat.request_stop_local_server = __buildat_request_stop_local_server

@@ -1170,6 +1170,30 @@ struct Module: public interface::Module
 		// the bundled game wants.
 		const char *wanted_game = getenv("BUILDAT_LUANTI_GAME");
 		const char *wanted_world = getenv("BUILDAT_LUANTI_WORLD");
+		// Or what an untrusted launcher asked for, through the server's
+		// -u ([LAUNCH_GRID]): read as a packet would be -- the one key this
+		// takes, a game name of the shape a directory name has, and the
+		// rest ignored. The environment, the shell's and the runners', wins.
+		ss_ launched_game;
+		{
+			const ss_ u = m_server->get_config().get<ss_>("untrusted_launch");
+			const ss_ key = "luanti_game=";
+			size_t at = u.find(key);
+			if(at != ss_::npos && (at == 0 || u[at - 1] == '\n')){
+				ss_ v = u.substr(at + key.size());
+				v = v.substr(0, v.find('\n'));
+				bool ok = !v.empty() && v.size() <= 64;
+				for(char c : v)
+					if(!(isalnum((unsigned char)c) || c == '_' || c == '-'))
+						ok = false;
+				if(ok)
+					launched_game = v;
+				else
+					log_w(MODULE, "untrusted_launch: luanti_game refused");
+			}
+		}
+		if(!(wanted_game && wanted_game[0]) && !launched_game.empty())
+			wanted_game = launched_game.c_str();
 		if(wanted_game && wanted_game[0]){
 			gameid = wanted_game;
 			// The save is named after the game unless something says

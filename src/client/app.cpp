@@ -1195,6 +1195,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(list_games)
 		DEF_BUILDAT_FUNC(start_local_server)
 		DEF_BUILDAT_FUNC(list_launchers)
+		DEF_BUILDAT_FUNC(list_installed_games)
 		DEF_BUILDAT_FUNC(stop_local_server)
 		DEF_BUILDAT_FUNC(request_stop_local_server)
 		DEF_BUILDAT_FUNC(force_kill_local_server)
@@ -1979,6 +1980,31 @@ struct CApp: public App, public magic::Application
 		return 1;
 	}
 
+	// list_installed_games(family) -> {name, ...}: the directory names
+	// under <user>/<family>/games, for a launcher file that offers a tile
+	// per installed game of another engine's family -- "luanti" is
+	// user/luanti/games. In the sandbox: read-only, names only, and only
+	// that one directory shape ([LAUNCH_GRID]).
+	static int l_list_installed_games(lua_State *L)
+	{
+		const ss_ family = lua_bindings::lua_tocppstring(L, 1);
+		if(!valid_game_name(family))
+			return luaL_error(L, "list_installed_games(): bad family");
+		const ss_ dir = g_client_config.get<ss_>("user_path")+"/"+family+"/games";
+		sv_<ss_> names;
+		for(const auto &n : interface::fs::list_directory(dir))
+			if(n.is_directory && valid_game_name(n.name))
+				names.push_back(n.name);
+		std::sort(names.begin(), names.end());
+		lua_newtable(L);
+		int i = 1;
+		for(const ss_ &name : names){
+			lua_pushstring(L, name.c_str());
+			lua_rawseti(L, -2, i++);
+		}
+		return 1;
+	}
+
 	// list_games() -> {{name=, size=}, ...}
 	static int l_list_games(lua_State *L)
 	{
@@ -2006,10 +2032,15 @@ struct CApp: public App, public magic::Application
 		return 1;
 	}
 
-	// start_local_server(game: string) -> status: bool, error: string or nil
+	// start_local_server(game: string [, launch: string]) -> status: bool,
+	// error: string or nil. launch is what an untrusted launcher asked for,
+	// key=value a line, handed to the server as -u ([LAUNCH_GRID]); never
+	// the environment, since a sandboxed script choosing a child's
+	// environment is a breach.
 	static int l_start_local_server(lua_State *L)
 	{
 		ss_ game = lua_bindings::lua_tocppstring(L, 1);
+		ss_ launch = lua_isstring(L, 2) ? lua_bindings::lua_tocppstring(L, 2) : "";
 		if(!valid_game_name(game)){
 			lua_pushboolean(L, false);
 			lua_pushstring(L, "Invalid game name");
@@ -2070,6 +2101,10 @@ struct CApp: public App, public magic::Application
 		// changes, which is off unless this client was asked for it
 		if(g_client_config.get<bool>("reload_modules"))
 			args.push_back("-R");
+		if(!launch.empty()){
+			args.push_back("-u");
+			args.push_back(launch);
+		}
 		g_local_server = interface::process::start(server_path, args);
 		if(!g_local_server.valid()){
 			lua_pushboolean(L, false);

@@ -207,8 +207,8 @@ local function show_starting(game)
 	end)
 end
 
-local function do_start_local_game(game)
-	local ok, err = buildat.start_local_server(game)
+local function do_start_local_game(game, launch)
+	local ok, err = buildat.start_local_server(game, launch)
 	if not ok then
 		show_error(err)
 		return
@@ -216,7 +216,7 @@ local function do_start_local_game(game)
 	show_starting(game)
 end
 
-local function show_waiting_for_old_server(game)
+local function show_waiting_for_old_server(game, launch)
 	local root = uistack.main:push({desc="stopping_old_server"})
 
 	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
@@ -240,7 +240,7 @@ local function show_waiting_for_old_server(game)
 		if not buildat.local_server_running() then
 			done = true
 			uistack.main:pop(root)
-			do_start_local_game(game)
+			do_start_local_game(game, launch)
 			return
 		end
 		if buildat.get_time_us() - t0 > 10 * 1000000 then
@@ -251,7 +251,7 @@ local function show_waiting_for_old_server(game)
 				"It may be saving. Force kill it?",
 				function()
 					buildat.force_kill_local_server()
-					do_start_local_game(game)
+					do_start_local_game(game, launch)
 				end,
 				function()
 				end)
@@ -267,13 +267,13 @@ local function show_waiting_for_old_server(game)
 	end)
 end
 
-local function start_local_game(game)
+local function start_local_game(game, launch)
 	buildat.request_stop_local_server()
 	if not buildat.local_server_running() then
-		do_start_local_game(game)
+		do_start_local_game(game, launch)
 		return
 	end
-	show_waiting_for_old_server(game)
+	show_waiting_for_old_server(game, launch)
 end
 
 local function show_local_game()

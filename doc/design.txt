@@ -142,8 +142,10 @@ validate, default, ignore the rest. An extension without that function is
 not a target. An extension that can also be the client's whole reason for
 running -- `buildat -m <name>` -- keeps M.boot() for that case; the two
 differ in what leaving means, back to the menu or quitting. A game starts
-a local server the way the local-game screen does; params do not reach a
-game or a builtin module yet.
+a local server the way the local-game screen does, with the params' top
+level as key=value lines through the server's -u, kept as
+`untrusted_launch` in its config for a module to read as it would a
+packet -- never the environment. A builtin module is not a target yet.
 
 The grid's order: explicit order first, then by kind -- the menu's own,
 games, builtins, extensions -- then label. The check is
