@@ -6239,9 +6239,11 @@ struct Module: public interface::Module, public luanti::Interface
 			m = "unlit";
 		else if(m == "" || m == "1")
 			m = "pbr";
-		else if(m != "unlit" && m != "shadows" && m != "pbr"){
+		else if(m != "unlit" && m != "shadows" && m != "pbr" &&
+				m != "pbr_debug_shadows"){
 			log_w(MODULE, "BUILDAT_LUANTI_PBR=\"%s\" is not a mode; "
-					"drawing pbr. Wanted unlit, shadows or pbr", cs(m));
+					"drawing pbr. Wanted unlit, shadows, pbr or "
+					"pbr_debug_shadows", cs(m));
 			m = "pbr";
 		}
 		flat.push_back(m);

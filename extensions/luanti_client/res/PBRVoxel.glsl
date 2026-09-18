@@ -133,6 +133,11 @@ uniform vec3 cGroundLight;
 // as it always was. Set per material by voxel_shading.set_packed_sky() --
 // a render path parameter did not reach this vertex stage. See [PBR_FIT] 2c.
 uniform float cPackedSky;
+// The shadow-kind diagnostic: the vertex colour drawn as it is, no albedo,
+// no ambient -- the mesher has put one occlusion term in each channel
+// (BUILDAT_LUANTI_SHADOW_KINDS). Set per material by
+// voxel_shading.set_shadow_kinds(). Unset reads as 0.
+uniform float cShadowKinds;
 
 // (gate, share): the nibble the sun is gated by and the sky share the
 // ambient is scaled by, out of the vertex alpha in either layout
@@ -326,11 +331,28 @@ void VS()
             // the render's second bounce is not -- and is [PBRI]'s to
             // replace. Zero in the open, where the ground term is the
             // bounce.
-            vVertexLight = iColor.rgb +
+            // The mesher's shade -- corner table, hemisphere rays, terrain
+            // -- on the bounce and the ground as well as on the sky: with
+            // it on the ambient alone, the pit beside vp1's stone block
+            // read 2.2 times the render's off the ground term, and the
+            // shadow-kind run showed the corners computed and lost here
+            // ([PBR_FIT] 2c). With the alpha packed the shade is the low
+            // nibble, which is sky.y over sky.x; unpacked the two are one.
+            // Packed, the rgb is the lamp in r, the terrain cap in g and
+            // the local shade in b (the mesher's face_vertex_colors()):
+            // the bounce and the ground take the local shade alone, since
+            // the mountain behind the ridge does not block the lit ground
+            // in front of a face, and a cave wall under a terrain cap of
+            // zero still bounces. Unpacked the rgb is the light itself and
+            // the shade is one.
+            bool isPacked = cPackedSky > 0.5;
+            vec3 baked = isPacked ? vec3(iColor.r) : iColor.rgb;
+            float shade = isPacked ? iColor.b : 1.0;
+            vVertexLight = cShadowKinds > 0.5 ? iColor.rgb : baked +
                 cBounceLight * (0.15 + 1.0 * sky.x) *
-                    (1.0 - ShapeSkylight(sky.x)) +
+                    (1.0 - ShapeSkylight(sky.x)) * shade +
                 cGroundLight * (0.5 - 0.5 * vNormal.y) *
-                    ShapeSkylight(sky.x);
+                    ShapeSkylight(sky.x) * shade;
         #endif
         vSkyVisibility = ShapeSkylight(SkyOfAlpha(iColor.a).x);
 
@@ -816,6 +838,10 @@ void PS()
         #else
             float skyVis = 1.0;
         #endif
+        if(cShadowKinds > 0.5){
+            gl_FragColor = vec4(vVertexLight, 1.0);
+            return;
+        }
         vec3 finalColor = (vVertexLight + vSkyAmbient * skyVis) * diffColor.rgb;
         #ifdef AO
             // If using AO, the vertex light ambient is black, calculate occluded ambient here

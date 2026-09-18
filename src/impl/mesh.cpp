@@ -4,6 +4,7 @@
 #include "interface/voxel.h"
 #include "interface/voxel_selector.h"
 #include "core/log.h"
+#include <cstdlib>
 #include <PolyVoxCore/SimpleVolume.h>
 #include <PolyVoxCore/SurfaceMesh.h>
 #include <PolyVoxCore/CubicSurfaceExtractorWithNormals.h>
@@ -800,6 +801,19 @@ static float terrain_sky(const HorizonMap *horizon,
 	return weight > 0 ? sum / weight : 1.0f;
 }
 
+// The pbr_debug_shadows render mode -- BUILDAT_LUANTI_PBR on this client's
+// process, the same variable the mode is asked with ([RENDER_MODES]) -- is
+// the shadow-kind diagnostic ([PBR_FIT] 2c). Each occlusion term goes into
+// its own channel of the vertex colour instead of into the shade -- the
+// terrain cap in red, the corner table in green, the hemisphere rays in
+// blue -- and the shader draws that colour as it is, with the albedo and
+// the lights out (cShadowKinds). What the picture says is where a term is
+// lost between here and the frame. Read here because the mesher runs in
+// the client and the sandbox has no getenv.
+// simplified: the custom-shape path (plants, stairs) is not coloured.
+static const bool SHADOW_KINDS = getenv("BUILDAT_LUANTI_PBR") != nullptr &&
+		ss_(getenv("BUILDAT_LUANTI_PBR")) == "pbr_debug_shadows";
+
 static void face_vertex_colors(VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
 		const pv::Vector3DFloat *quad,
@@ -907,6 +921,26 @@ static void face_vertex_colors(VoxelVolume &volume,
 		// it, it lit every canopy like a lamp ([NO_SPOTS_REF]'s check).
 		if(horizon)
 			bounce_shade = 0;
+		if(SHADOW_KINDS){
+			out[i] = Color(terrain, ao, hemi,
+					sky_alpha(sky_f, sky_shade, horizon != nullptr)).ToUInt();
+			continue;
+		}
+		// The packed layout's rgb: the lamp in r (LAMP_COLOR is white, so
+		// one channel is the three), the terrain cap in g and the local
+		// shade -- corner table, rays, face -- in b, so the shader can put
+		// the local shade alone on the bounce and the ground: light from
+		// the surroundings is blocked by the corner it sits in, not by the
+		// mountain behind the ridge, and a cave wall under a terrain cap
+		// of zero still bounces ([PBR_FIT] 2c, the shadow-kind run). The
+		// alpha's low nibble keeps the product for the sky's share.
+		if(horizon){
+			float local = ao * hemi * FACE_SHADE[face_id] / 1.15f;
+			out[i] = Color(lamp_shade, terrain,
+					local > 1.0f ? 1.0f : local,
+					sky_alpha(sky_f, sky_shade, true)).ToUInt();
+			continue;
+		}
 		out[i] = Color(
 				BOUNCE_COLOR.r_ * bounce_shade + LAMP_COLOR.r_ * lamp_shade,
 				BOUNCE_COLOR.g_ * bounce_shade + LAMP_COLOR.g_ * lamp_shade,
@@ -1728,7 +1762,11 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 						// No constant bounce for a packed client; see
 						// face_vertex_colors()
 						float bshade = packed_alpha ? 0.0f : shade * (1.0f - sky_f);
-						color = Color(
+						// The packed layout as face_vertex_colors() writes
+						// it: lamp, terrain (none here), local shade
+						color = packed_alpha ? Color(lamp_f * shade, 1.0f,
+								shade / 1.15f > 1.0f ? 1.0f : shade / 1.15f,
+								sky_alpha(sky_f, shade, true)).ToUInt() : Color(
 								BOUNCE_COLOR.r_ * bshade +
 										LAMP_COLOR.r_ * lamp_f * shade,
 								BOUNCE_COLOR.g_ * bshade +

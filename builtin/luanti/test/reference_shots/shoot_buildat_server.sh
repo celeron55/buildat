@@ -6,7 +6,8 @@
 #
 #   builtin/luanti/test/reference_shots/shoot_buildat_server.sh [mode ...]
 #
-# The mode is unlit, shadows or pbr and defaults to pbr, which is what the
+# The mode is unlit, shadows, pbr or pbr_debug_shadows (the shadow-kind
+# diagnostic, [PBR_FIT] 2c) and defaults to pbr, which is what the
 # launcher draws when nothing asks otherwise. Each one has its own reference:
 # unlit against official_unlit, shadows against official_shadows, pbr
 # against the path-traced set. See [RENDER_MODES] in
@@ -63,8 +64,8 @@ modes=""
 world="$worlds_root/$REFSHOT_SEED"
 for arg in "$@"; do
 	case "$arg" in
-	unlit|shadows|pbr) modes="$modes $arg" ;;
-	*) echo "unknown mode: $arg (wanted unlit, shadows or pbr)" >&2; exit 2 ;;
+	unlit|shadows|pbr|pbr_debug_shadows) modes="$modes $arg" ;;
+	*) echo "unknown mode: $arg (wanted unlit, shadows, pbr or pbr_debug_shadows)" >&2; exit 2 ;;
 	esac
 done
 modes="${modes:- pbr}"
@@ -105,9 +106,9 @@ port=$(( 29600 + (RANDOM % 90) ))
 # mode takes zero and says so. Overridable for a run that wants the other
 # thing.
 case " $modes " in
-*" pbr "*)
-	case "$modes" in
-	*unlit*|*shadows*) tilt=0
+*" pbr "*|*" pbr_debug_shadows "*)
+	case " $modes " in
+	*" unlit "*|*" shadows "*) tilt=0
 		echo "pbr shot with the parity modes: orbit tilt 0, not $REFSHOT_ORBIT_TILT" >&2 ;;
 	*) tilt=$REFSHOT_ORBIT_TILT ;;
 	esac ;;

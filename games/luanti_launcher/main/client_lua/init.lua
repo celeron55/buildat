@@ -511,6 +511,11 @@ do
 		rp:SetShaderParameter("AutoExposureAdaptRate", 1000000)
 		AUTO_EXPOSURE.reset_frames = 2
 	end
+	-- The key pinned at one value, as BUILDAT_LUANTI_KEY does at start
+	luanti.exposure_pin = function(k)
+		AUTO_EXPOSURE.lum_range = {k, k}
+		rp:SetShaderParameter("AutoExposureLumRange", magic.Vector2(k, k))
+	end
 	-- What a second view of the same world is drawn with -- the minimap.
 	-- The tonemap is not optional: the world is rendered in HDR and an
 	-- eight-bit picture of it without one is white. The bloom is, and it is
@@ -998,6 +1003,19 @@ luanti.sub_world_info(function(info)
 		return
 	end
 	log:info("BUILDAT_LUANTI_PBR=" .. mode .. ": drawing the world " .. mode)
+	-- pbr_debug_shadows: pbr's path with the shadow-kind diagnostic on
+	-- ([PBR_FIT] 2c). The mesher, which runs in this client and reads the
+	-- same variable, colours each occlusion term into its own channel --
+	-- terrain red, corners green, rays blue -- and the shader draws the
+	-- vertex colour as it is; the sun and the moon go out (see the
+	-- ablation) and the key is pinned at middle grey so a full term reads
+	-- as one. BUILDAT_LUANTI_LINEAR=1 beside it, or the curve is on it.
+	if mode == "pbr_debug_shadows" then
+		sky_now.debug_shadows = true
+		voxel_shading.set_shadow_kinds(true)
+		if luanti.exposure_pin then luanti.exposure_pin(0.18) end
+		return
+	end
 	-- On sky_now rather than locals of their own: init.lua's main chunk is at
 	-- Lua 5.1's two hundred locals and has been for a while
 	sky_now.unlit = true
@@ -1362,6 +1380,7 @@ local function update_sky(dt)
 		-- BUILDAT_LUANTI_ABLATE=sun,shadow,amb,bounce,ground,ibl: a term turned
 		-- off for a fit's ablation run ([PBR_FIT]); the sun goes with any
 		local abl0 = buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""
+		if sky_now.debug_shadows then abl0 = abl0 .. ",sun,moon" end
 		if abl0:find("sun") then
 			sky_lights.sun.brightness = 0
 		end
@@ -1374,7 +1393,8 @@ local function update_sky(dt)
 				magic.Vector3(-dir.x, -dir.y, -dir.z)
 		sky_lights.moon.brightness = sky_now.unlit and MOON_BRIGHTNESS * moon_up
 				or PHYS.moon_e * moon_up
-		if (buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""):find("moon") then
+		if sky_now.debug_shadows or
+				(buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""):find("moon") then
 			sky_lights.moon.brightness = 0
 		end
 	end
