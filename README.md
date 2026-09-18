@@ -80,7 +80,7 @@ Debug keys, in any game:
 
 * F8: draw debug geometry
 * F9: on-screen profiler, render and resource stats
-* F10: sandbox test extension
+* Ctrl+F12: sandbox test extension
 
 Preferences
 -----------

@@ -66,7 +66,7 @@ function M.run()
 end
 
 -- Enabled when this module is loaded.
--- Normally that happens when KEY_F10 is pressed on the client.
+-- Normally that happens when Ctrl+F12 is pressed on the client.
 local value_checker_enabled = true
 function M.check_value(value)
 	if not value_checker_enabled then return end

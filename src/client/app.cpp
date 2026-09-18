@@ -1683,7 +1683,7 @@ struct CApp: public App, public magic::Application
 				m_options.graphics.apply(magic_graphics);
 			}
 		}
-		if(key == Urho3D::KEY_F10){
+		if(key == Urho3D::KEY_F12 && (event_data["Qualifiers"].GetInt() & Urho3D::QUAL_CTRL)){
 			ss_ extname = "sandbox_test";
 			ss_ script = ss_() +
 					"local m = require('buildat/extension/"+extname+"')\n"
