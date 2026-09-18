@@ -198,9 +198,10 @@ local MOON_BRIGHTNESS = 1.0
 --   sun_e0, sun_tau  the sun's irradiance normal to it, E0 * exp(-tau /
 --                    sin(elevation)): 135 at 64 degrees, which is what
 --                    the render's snow at 10:00 reads (35 off an
---                    albedo of 0.9), and 25 at ten degrees, which is
---                    what its grass top at 05:45 leaves for the sun
---                    once the sky's share is taken out
+--                    albedo of 0.9), and 74 at ten degrees, which is
+--                    what its block top at 05:45 reads (1.9, 1.4, 1.0)
+--                    off an albedo of 0.3 with the Rayleigh sun and a
+--                    dome of 1.5 solved together (dawn_sun_dirt)
 --   sky_zenith,      the sky's radiance at the zenith and the horizon
 --   sky_horizon      by day: the render's 13:00 reads 4.9 near the
 --                    zenith, 7.7 thirty degrees up, 12 at the horizon;
@@ -216,12 +217,19 @@ local MOON_BRIGHTNESS = 1.0
 --                    target is a sky under a fortieth of moonlit snow
 -- simplified: the sky keeps Luanti's hue at this radiance, and the sun
 -- its colour below; the colours are the terms after this one.
-local PHYS = {sun_e0 = 200, sun_tau = 0.35, sky_zenith = 4.5,
+local PHYS = {sun_e0 = 155, sun_tau = 0.127, sky_zenith = 4.5,
 		sky_horizon = 12.0, moon_e = 0.0025, night_sky = 0.00005,
 		bounce = 0.13, ground = {r = 0.25, g = 0.22, b = 0.15}}
 -- The sky's radiance factor at a sun height (sin elevation): full by
 -- day, gone over the last twelve degrees, the floor below
+-- The zenith and the dome go first: at ten degrees the render's block
+-- top is lit by a sun of about 74 over a dome of about 1.5, a third of
+-- noon's, while its horizon band is still 9. The horizon keeps the old
+-- short fade.
 function PHYS.sky(height)
+	return math.max(0, math.min(1, (height + 0.02) / 0.55))
+end
+function PHYS.horizon(height)
 	return math.max(0, math.min(1, (height + 0.05) / 0.21))
 end
 function PHYS.sun(height)
@@ -1105,8 +1113,8 @@ local function apply_sky_of_hour()
 		local f = PHYS.sky(sky_now.height or 0)
 		zenith_now = at(zenith_now,
 				PHYS.night_sky + (PHYS.sky_zenith - PHYS.night_sky) * f)
-		horizon_now = at(horizon_now,
-				PHYS.night_sky + (PHYS.sky_horizon - PHYS.night_sky) * f)
+		horizon_now = at(horizon_now, PHYS.night_sky +
+				(PHYS.sky_horizon - PHYS.night_sky) * PHYS.horizon(sky_now.height or 0))
 	end
 	world_sky:set_look(zenith_now, horizon_now, nil)
 	-- The dome's hue for the ambient: two parts zenith, one horizon, the
