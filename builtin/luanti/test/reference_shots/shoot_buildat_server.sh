@@ -95,12 +95,25 @@ if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 fi
 rm -rf "../user/games/luanti_launcher/saves/$save"
 port=$(( 29600 + (RANDOM % 90) ))
-# **The orbit is not tilted for a comparison set.** This client tilts the
-# sun and the moon when the game has no opinion, because an axis-aligned sun
-# is a poor light; official Luanti does not, so a set taken with the tilt on
-# has its sun eighteen to twenty-one degrees from where the reference draws
-# it. Zero here, overridable for a run that wants to see the other thing.
-BUILDAT_LUANTI_ORBIT_TILT="${BUILDAT_LUANTI_ORBIT_TILT:-0}" \
+# **The orbit's tilt is the set's for pbr and zero for the parity modes.**
+# This client tilts the sun and the moon when the game has no opinion,
+# because an axis-aligned sun is a poor light. Official Luanti does not, so
+# a parity set takes zero or its sun is twenty degrees from where official
+# draws it; the render places its sun by set.lua's tilt, so the pbr set
+# takes the same number ([PBR_FIT] 2c). One server serves every client in
+# a run and the tilt is the server's, so a run that mixes pbr with a parity
+# mode takes zero and says so. Overridable for a run that wants the other
+# thing.
+case " $modes " in
+*" pbr "*)
+	case "$modes" in
+	*unlit*|*shadows*) tilt=0
+		echo "pbr shot with the parity modes: orbit tilt 0, not $REFSHOT_ORBIT_TILT" >&2 ;;
+	*) tilt=$REFSHOT_ORBIT_TILT ;;
+	esac ;;
+*) tilt=0 ;;
+esac
+BUILDAT_LUANTI_ORBIT_TILT="${BUILDAT_LUANTI_ORBIT_TILT:-$tilt}" \
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_IMPORT="$world" BUILDAT_LUANTI_PBR="$first_mode" \
 	BUILDAT_VOXELWORLD_KEEP_LOADED=1 \

@@ -21,8 +21,8 @@ mkdir -p "$dir/refviews"
 seed=$(sed -n 's/^seed = //p' "$me/map_meta.txt")
 [ -n "$seed" ] || { echo "no seed in $me/map_meta.txt" >&2; exit 2; }
 # The numbers set.lua owns, read with plain lua rather than sed
-read -r w h range < <(lua -e "dofile('$me/set.lua')" \
-	-e 'print(REFSET.frame.w, REFSET.frame.h, REFSET.range)')
+read -r w h range tilt < <(lua -e "dofile('$me/set.lua')" \
+	-e 'print(REFSET.frame.w, REFSET.frame.h, REFSET.range, REFSET.orbit_tilt)')
 RANGE="${RANGE:-$range}"
 case "$RANGE" in
 ''|*[!0-9.]*) echo "RANGE must be a number, got: $RANGE" >&2; exit 2 ;;
@@ -58,6 +58,7 @@ cp "$me/mod.conf" "$dir/refviews/"
 	echo "REFSHOT_W=$w"
 	echo "REFSHOT_H=$h"
 	echo "REFSHOT_RANGE=$RANGE"
+	echo "REFSHOT_ORBIT_TILT=$tilt"
 	echo "REFSHOT_VL_VERSION=$(sed -n 's/^vl_world_initial_version = //p' "$me/map_meta.txt")"
 	# A quoted heredoc, because the descriptions have apostrophes in them
 	echo "REFSHOT_PROBES=\$(cat <<'REFSHOT_EOF'"

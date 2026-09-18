@@ -13,6 +13,7 @@ import gzip
 import math
 from array import array
 import os
+import re
 import sys
 
 import bpy
@@ -122,12 +123,13 @@ def clear_scene():
 			do_recursive=True)
 
 
-# Luanti's own sun path, out of luanti_sky.sun_direction() in the launcher
-# (untilted, which is what a reference set is taken with): the sun rises
-# at -X, crosses the zenith and sets at +X, in the world's XY... plane of
-# file-space X and Y, which is Blender's XZ. The hour is the fixture's
-# HOURS table -- "1300" is time_of_day 0.5417 -- so the reference's sun is
-# where the client's is at the same picture.
+# Luanti's own sun path, out of luanti_sky.sun_direction() in the launcher:
+# the sun rises at -X, crosses the zenith and sets at +X in the plane of
+# file-space X and Y, which is Blender's XZ -- then tilted out of it about
+# X by set.lua's orbit_tilt, the same rotation the launcher applies, so
+# the render's sun is where the pbr client's is ([PBR_FIT] 2c). The hour
+# is the fixture's HOURS table -- "1300" is time_of_day 0.5417 -- so the
+# reference's sun is where the client's is at the same picture.
 HOURS = {"0545": 0.2396, "1000": 0.4167, "1300": 0.5417, "1500": 0.6250,
 		"1830": 0.7708, "2030": 0.8542, "0200": 0.0833}
 
@@ -171,13 +173,25 @@ def sun_from_hour(hour):
 	else:
 		w = 1 - (1 - t) / wn * 0.25
 	a = math.radians(w * 360 - 90)
-	# File space: x = cos a, y = sin a (up), z = 0. Blender: (x, 0, y).
-	x, up = math.cos(a), math.sin(a)
+	# File space: x = cos a, y = sin a (up), z = 0, then the tilt about X
+	x, up, z = math.cos(a), math.sin(a), 0.0
+	r = math.radians(orbit_tilt())
+	up, z = up * math.cos(r) - z * math.sin(r), up * math.sin(r) + z * math.cos(r)
+	# Blender: (x, -z, up), by y_up_to_blender()
+	bx, by = x, -z
 	el = math.asin(max(-1.0, min(1.0, up)))
 	# Cycles: sun = (sin rot * cos el, cos rot * cos el, sin el), so a sun
 	# along +X is rotation +90 degrees and along -X is -90
-	rot = math.atan2(x, 0.0)
+	rot = math.atan2(bx, by)
 	return el, rot
+
+
+def orbit_tilt():
+	"""set.lua's orbit_tilt, degrees; read rather than copied."""
+	here = os.path.dirname(os.path.abspath(__file__))
+	text = open(os.path.join(here, "set.lua")).read()
+	m = re.search(r"orbit_tilt = ([0-9.]+)", text)
+	return float(m.group(1)) if m else 0.0
 
 
 def setup_world(hour):
