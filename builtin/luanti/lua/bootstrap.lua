@@ -3905,6 +3905,17 @@ function core.__dig_props()
 						table.concat(pairs_out, ",")
 			end
 		end
+		-- And the colour painted over the screen while the camera is in
+		-- the node -- Luanti's post_effect_color, {a, r, g, b} in 0..255
+		-- -- for a node that has one; and whether it is solid, which is
+		-- black in the same place. The client half's post_effect_of().
+		local pe = def.post_effect_color
+		if type(pe) == "table" and (tonumber(pe.a) or 0) > 0 then
+			out[#out + 1] = "p\t" .. name .. "\t" ..
+					table.concat({tostring(tonumber(pe.a) or 0),
+					tostring(tonumber(pe.r) or 0), tostring(tonumber(pe.g) or 0),
+					tostring(tonumber(pe.b) or 0)}, ",")
+		end
 	end
 	return out
 end

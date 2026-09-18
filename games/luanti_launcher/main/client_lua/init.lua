@@ -942,9 +942,7 @@ luanti.sub_world_info(function(info)
 		sun_alpha = "luanti_client/res/VoxelUnlitAlpha.xml",
 	})
 end)
--- Whether the eye is in a liquid, which owns the fog while it is true.
--- Declared here rather than beside update_underwater() because the sky
--- handler has to know not to put the surface's fog range back.
+-- Whether the eye is in a node that tints the screen
 local underwater = false
 -- What the game said its sky is, as luanti.sub_sky() gives it
 local game_sky = {}
@@ -1318,7 +1316,7 @@ luanti.sub_sky(function(sky)
 	end
 	-- fog_start is a fraction of that range and not a distance; without one
 	-- it is where extensions/luanti_client's starts
-	if zone and not underwater then
+	if zone then
 		zone.fogStart = far * (sky.fog_start or 0.7)
 		zone.fogEnd = far
 	end
@@ -1355,19 +1353,21 @@ end)
 --
 -- Under water
 --
--- Luanti tints the screen and closes the fog in when the camera is in a
--- liquid, which is the only thing that says you are swimming rather than
--- walking. What counts as a liquid is the registry's own is_liquid, so a
--- game's lava does this as much as its water does -- in that game's own
--- colour, which is the liquid's own texture averaged out.
+-- Luanti paints the node's own post_effect_color over the screen while the
+-- camera is in it -- renderPostFx() in clientmap.cpp: the colour the game
+-- gave the node, any node and not only a liquid, and black in a solid one
+-- unless noclip is on; the fog is left alone. That is what
+-- extensions/luanti_client does too, and what this did before
+-- ([RENDER_SURVEY], the underwater tint) was a fixed blue over any liquid
+-- with the fog closed to forty nodes, which was neither.
+-- simplified: post_effect_color_shaded, which dims the tint by the light
+-- where the camera is, is read as the colour given.
 local water_tint = magic.ui.root:CreateChild("BorderImage")
-water_tint.color = magic.Color(0.15, 0.35, 0.65, 0.35)
 water_tint.visible = false
 water_tint.priority = -500
 
-local UNDERWATER_FOG = 40
-
-local function voxel_liquid_at(p)
+-- The registry's definition of the voxel at p, or nil for nothing there
+local function voxel_def_at(p)
 	local v = voxelworld.get_static_voxel(p)
 	if v == nil then
 		return nil
@@ -1377,7 +1377,13 @@ local function voxel_liquid_at(p)
 	if id == 0 then
 		return nil
 	end
-	local def = reg:get_by_id(id)
+	return reg:get_by_id(id)
+end
+
+-- The liquid at p, or nil: the registry's own is_liquid, so a game's lava
+-- counts as much as its water. What the player swims in.
+local function voxel_liquid_at(p)
+	local def = voxel_def_at(p)
 	if def == nil or not def.is_liquid then
 		return nil
 	end
@@ -1385,23 +1391,26 @@ local function voxel_liquid_at(p)
 end
 
 local function update_underwater(eye)
-	local def = voxel_liquid_at(eye)
-	local now = def ~= nil
-	if now == underwater then
-		return
+	-- The tint of the node the eye is in: the game's colour for it, or
+	-- black for a solid node in first person, or nothing
+	local color = nil
+	local def = voxel_def_at(eye)
+	if def then
+		local pe = luanti.post_effect_of(def.name.block_name)
+		if pe and pe.a > 0 then
+			color = magic.Color(pe.r / 255, pe.g / 255, pe.b / 255, pe.a / 255)
+		elseif def.physically_solid and not player.noclip then
+			color = magic.Color(0, 0, 0, 1)
+		end
 	end
+	local now = color ~= nil
 	underwater = now
 	water_tint.visible = now
 	if now then
 		water_tint.texture = game_texture(WHITE)
+		water_tint.color = color
 		water_tint.size = magic.IntVector2(magic.ui.root.width,
 				magic.ui.root.height)
-		zone.fogStart = 2
-		zone.fogEnd = UNDERWATER_FOG
-	else
-		local far = sky_now.far_clip or FAR_CLIP
-		zone.fogStart = far * (game_sky.fog_start or 0.7)
-		zone.fogEnd = far
 	end
 end
 

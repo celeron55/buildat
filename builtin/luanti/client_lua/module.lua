@@ -1767,6 +1767,9 @@ end
 local item_props = {}
 -- node name -> {group = rating}, only the groups a tool rates
 local node_groups = {}
+-- The colour a node paints over the screen while the camera is in it,
+-- {a, r, g, b} in 0..255, by node name; a "p" record of luanti:dig_props
+local node_post_effect = {}
 
 local function split_tab(s)
 	local fields = {}
@@ -1862,6 +1865,13 @@ end
 -- holds -- VoxelDefinition::name.block_name is the node's name
 function M.node_groups(node_name)
 	return node_groups[node_name]
+end
+
+-- post_effect_of(node_name) -> {a, r, g, b} in 0..255, or nil: what
+-- Luanti's renderPostFx() paints over the screen with the camera in the
+-- node. Water and lava in every game; nothing in most nodes.
+function M.post_effect_of(node_name)
+	return node_post_effect[node_name]
 end
 
 local function caps_of(stack_str)
@@ -2377,6 +2387,13 @@ buildat.sub_packet("luanti:dig_props", function(data)
 		elseif fields[1] == "n" then
 			parse_node_record(fields)
 			nodes = nodes + 1
+		elseif fields[1] == "p" then
+			local c = {}
+			for v in string.gmatch(fields[3] or "", "[^,]+") do
+				c[#c + 1] = tonumber(v) or 0
+			end
+			node_post_effect[fields[2]] = {a = c[1] or 0, r = c[2] or 0,
+					g = c[3] or 0, b = c[4] or 0}
 		end
 	end
 	log:info("luanti:dig_props: " .. items .. " items, " .. nodes ..
