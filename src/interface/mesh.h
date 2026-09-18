@@ -190,7 +190,8 @@ namespace interface
 				sm_<uint, TemporaryGeometry> &result,
 				VoxelVolume &lod_volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
-				bool use_skylight = false);
+				bool use_skylight = false,
+				const HorizonMap *horizon = nullptr);
 
 		void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 				const sm_<uint, TemporaryGeometry> &temp_geoms,

@@ -1167,6 +1167,9 @@ local function apply_sky_of_hour()
 				(PHYS.sky_horizon - PHYS.night_sky) * PHYS.horizon(sky_now.height or 0))
 	end
 	world_sky:set_look(zenith_now, horizon_now, nil)
+	-- For the fog below, which on the pbr path is this horizon: the same
+	-- radiance the sky meets the ground with, not a display colour
+	sky_now.horizon_radiance = (not sky_now.unlit) and horizon_now or nil
 	-- The dome's hue for the ambient: two parts zenith, one horizon, the
 	-- cosine weighting a face sees -- a dawn's warm horizon reaches a
 	-- wall, which is what the render's dawn dirt face is lit by
@@ -1509,6 +1512,16 @@ local function update_sky(dt)
 	base = magic.Color(base.r > 0 and base.r ^ 2.2 or 0,
 			base.g > 0 and base.g ^ 2.2 or 0,
 			base.b > 0 and base.b ^ 2.2 or 0)
+	-- On the pbr path the fog is the drawn horizon's radiance of the hour
+	-- (apply_sky_of_hour(), a frame behind): a display colour dimmed by
+	-- the hour sat at 0.004 under a night sky of 0.00005, and the meter
+	-- lifted everything at the far edge of the range -- the snow-topped
+	-- trees on vp5's ridge at 02:00 -- to white ([LOD_LIGHT]'s finding:
+	-- it was the fog, not the far chunks' mesh path).
+	if sky_now.horizon_radiance then
+		local h = sky_now.horizon_radiance
+		base = magic.Color(h.r, h.g, h.b)
+	end
 	zone.fogColor = blend(base, indoors_of(0.10 + 0.90 * day), 1 - seen)
 	sky_now.height = height
 	sky_now.day = day

@@ -372,7 +372,10 @@ function sub_events()
 			-- clip out -> 4
 			near_trigger_d = 1.2 * M.camera_far_clip
 			near_weight = 0.4
-		elseif lod == 1 then
+		else
+			-- The same map for every LOD: a far chunk meshed without one
+			-- kept the constant bounce and the plain alpha layout under a
+			-- shader reading the packed one ([LOD_LIGHT])
 			local horizon = nil
 			if M.horizon and M.use_skylight and M.chunk_size_voxels and
 					M.chunk_size_voxels.x == HORIZON_CHUNK then
@@ -380,40 +383,42 @@ function sub_events()
 						M.chunk_size_voxels):floor())
 			end
 			horizon_meshed_us[node:GetID()] = buildat.get_time_us()
-			buildat.set_voxel_geometry(
-					node, data, voxel_reg, atlas_reg, M.use_skylight,
-					set_up_materials, horizon)
-
-			-- 1 -> 2
-			far_trigger_d = M.lod_distance * (1.0 + LOD_THRESHOLD)
-			far_weight = 0.5
-		else
-			buildat.set_voxel_lod_geometry(lod, node, data, voxel_reg,
-					atlas_reg, M.use_skylight, set_up_materials)
-
 			if lod == 1 then
-				-- Shouldn't go here
-			elseif lod == 2 then
-				-- 2 -> 1
-				near_trigger_d = M.lod_distance * (1.0 - LOD_THRESHOLD)
-				near_weight = 0.75
-				-- 2 -> 3
-				far_trigger_d = 2 * M.lod_distance * (1.0 + LOD_THRESHOLD)
-				far_weight = 0.4
-			elseif lod == 3 then
-				-- 3 -> 2
-				near_trigger_d = 2 * M.lod_distance * (1.0 - LOD_THRESHOLD)
-				near_weight = 0.6
-				-- 3 -> 4
-				far_trigger_d = 3 * M.lod_distance * (1.0 + LOD_THRESHOLD)
-				far_weight = 0.4
-			elseif lod == 4 then
-				-- 4 -> 3
-				near_trigger_d = 3 * M.lod_distance * (1.0 - LOD_THRESHOLD)
-				near_weight = 0.5
-				-- 4 -> clip out
-				far_trigger_d = M.camera_far_clip * 1.4
-				far_weight = 0.4
+				buildat.set_voxel_geometry(
+						node, data, voxel_reg, atlas_reg, M.use_skylight,
+						set_up_materials, horizon)
+
+				-- 1 -> 2
+				far_trigger_d = M.lod_distance * (1.0 + LOD_THRESHOLD)
+				far_weight = 0.5
+			else
+				buildat.set_voxel_lod_geometry(lod, node, data, voxel_reg,
+						atlas_reg, M.use_skylight, set_up_materials, horizon)
+
+				if lod == 1 then
+					-- Shouldn't go here
+				elseif lod == 2 then
+					-- 2 -> 1
+					near_trigger_d = M.lod_distance * (1.0 - LOD_THRESHOLD)
+					near_weight = 0.75
+					-- 2 -> 3
+					far_trigger_d = 2 * M.lod_distance * (1.0 + LOD_THRESHOLD)
+					far_weight = 0.4
+				elseif lod == 3 then
+					-- 3 -> 2
+					near_trigger_d = 2 * M.lod_distance * (1.0 - LOD_THRESHOLD)
+					near_weight = 0.6
+					-- 3 -> 4
+					far_trigger_d = 3 * M.lod_distance * (1.0 + LOD_THRESHOLD)
+					far_weight = 0.4
+				elseif lod == 4 then
+					-- 4 -> 3
+					near_trigger_d = 3 * M.lod_distance * (1.0 - LOD_THRESHOLD)
+					near_weight = 0.5
+					-- 4 -> clip out
+					far_trigger_d = M.camera_far_clip * 1.4
+					far_weight = 0.4
+				end
 			end
 		end
 		node_update_queue:put(node_p,

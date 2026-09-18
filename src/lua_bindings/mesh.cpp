@@ -162,6 +162,31 @@ static void call_material_cb(const luabind::object &cb)
 // chunk while the task for it is still in the queue, which is what happens
 // every time a chunk goes out of view or a world is closed. A raw pointer
 // there is a use-after-free in post().
+// The horizon map out of the string a caller hands over: three int32 (the
+// map's origin) and HORIZON_SIZE^2 int16 heights, as interface/mesh.h lays
+// them out. See [PBR_FIT] 2c. Nothing for an empty string.
+static up_<interface::mesh::HorizonMap> parse_horizon(const ss_ &horizon_data,
+		const char *who)
+{
+	using interface::mesh::HorizonMap;
+	using interface::mesh::HORIZON_SIZE;
+	up_<HorizonMap> horizon;
+	const size_t want = 3 * sizeof(int32_t) +
+			(size_t)HORIZON_SIZE * HORIZON_SIZE * sizeof(int16_t);
+	if(horizon_data.size() == want){
+		horizon.reset(new HorizonMap());
+		const char *p = horizon_data.data();
+		memcpy(&horizon->origin_x, p, 4);
+		memcpy(&horizon->origin_y, p + 4, 4);
+		memcpy(&horizon->origin_z, p + 8, 4);
+		memcpy(horizon->heights, p + 12, want - 12);
+	} else if(!horizon_data.empty()){
+		log_w(MODULE, "%s: horizon of %zu bytes, wanted %zu; ignored",
+				who, horizon_data.size(), want);
+	}
+	return horizon;
+}
+
 struct SetVoxelGeometryTask: public interface::thread_pool::Task
 {
 	WeakPtr<Node> node;
@@ -193,23 +218,9 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 			bool use_skylight, const luabind::object &material_cb,
 			const ss_ &horizon_data):
 		node(node), data(data), voxel_reg(voxel_reg), atlas_reg(atlas_reg),
-		use_skylight(use_skylight), material_cb(material_cb)
+		use_skylight(use_skylight), material_cb(material_cb),
+		horizon(parse_horizon(horizon_data, "set_voxel_geometry()"))
 	{
-		using interface::mesh::HorizonMap;
-		using interface::mesh::HORIZON_SIZE;
-		const size_t want = 3 * sizeof(int32_t) +
-				(size_t)HORIZON_SIZE * HORIZON_SIZE * sizeof(int16_t);
-		if(horizon_data.size() == want){
-			horizon.reset(new HorizonMap());
-			const char *p = horizon_data.data();
-			memcpy(&horizon->origin_x, p, 4);
-			memcpy(&horizon->origin_y, p + 4, 4);
-			memcpy(&horizon->origin_z, p + 8, 4);
-			memcpy(horizon->heights, p + 12, want - 12);
-		} else if(!horizon_data.empty()){
-			log_w(MODULE, "set_voxel_geometry(): horizon of %zu bytes, "
-					"wanted %zu; ignored", horizon_data.size(), want);
-		}
 		ScopeTimer timer("pre geometry");
 		// NOTE: Do the pre-processing here so that the calling code can
 		//       meaasure how long its execution takes
@@ -298,16 +309,20 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 	sp_<AtlasRegistry> atlas_reg;
 	bool use_skylight;
 	luabind::object material_cb;
+	// The same map the near path takes ([LOD_LIGHT])
+	up_<interface::mesh::HorizonMap> horizon;
 
 	up_<VoxelVolume> lod_volume;
 	sm_<uint, interface::mesh::TemporaryGeometry> temp_geoms;
 
 	SetVoxelLodGeometryTask(int lod, Node *node, const ss_ &data,
 			sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
-			bool use_skylight, const luabind::object &material_cb):
+			bool use_skylight, const luabind::object &material_cb,
+			const ss_ &horizon_data):
 		lod(lod), node(node), data(data),
 		voxel_reg(voxel_reg), atlas_reg(atlas_reg), use_skylight(use_skylight),
-		material_cb(material_cb)
+		material_cb(material_cb),
+		horizon(parse_horizon(horizon_data, "set_voxel_lod_geometry()"))
 	{
 		ScopeTimer timer("pre lod geometry");
 		// NOTE: Do the pre-processing here so that the calling code can
@@ -330,7 +345,7 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 	{
 		generate_voxel_lod_geometry(
 				lod, temp_geoms, *lod_volume, voxel_reg.get(), atlas_reg.get(),
-				use_skylight);
+				use_skylight, horizon.get());
 		return true;
 	}
 	// Called repeatedly from main thread until returns true
@@ -534,9 +549,13 @@ void set_voxel_geometry(const luabind::object &node_o,
 void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
 		const luabind::object &buffer_o,
 		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
-		bool use_skylight, const luabind::object &material_cb)
+		bool use_skylight, const luabind::object &material_cb,
+		const luabind::object &horizon_o)
 {
 	lua_State *L = node_o.interpreter();
+	ss_ horizon_data;
+	if(horizon_o.is_valid() && luabind::type(horizon_o) == LUA_TSTRING)
+		horizon_data = luabind::object_cast<ss_>(horizon_o);
 
 	GET_TOLUA_STUFF(node, 2, Node);
 	TRY_GET_TOLUA_STUFF(buf, 3, const VectorBuffer);
@@ -556,8 +575,8 @@ void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
 	lua_pop(L, 1);
 
 	up_<SetVoxelLodGeometryTask> task(new SetVoxelLodGeometryTask(
-			lod, node, data, voxel_reg, atlas_reg, use_skylight, material_cb
-			));
+			lod, node, data, voxel_reg, atlas_reg, use_skylight, material_cb,
+			horizon_data));
 
 	auto *thread_pool = buildat_app->get_thread_pool();
 

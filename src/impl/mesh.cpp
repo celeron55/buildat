@@ -818,7 +818,7 @@ static void face_vertex_colors(VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
 		const pv::Vector3DFloat *quad,
 		const pv::Vector3DFloat &n, uint face_id, unsigned out[4],
-		const HorizonMap *horizon)
+		const HorizonMap *horizon, int lod = 1)
 {
 	pv::Vector3DFloat centre(0, 0, 0);
 	for(size_t i = 0; i < 4; i++)
@@ -890,14 +890,15 @@ static void face_vertex_colors(VoxelVolume &volume,
 	// And the terrain beyond the chunk, out of the horizon map: the voxel
 	// in front, in world coordinates. The volume's lower corner is the
 	// chunk's origin less its padding, and the map's origin says where
-	// the chunk is (its x and z less HORIZON_PAD).
+	// the chunk is (its x and z less HORIZON_PAD). A LOD volume is the
+	// chunk at one voxel per lod^3, so its offsets are times lod.
 	float terrain = 1.0f;
 	if(horizon){
 		const pv::Vector3DInt32 lc = volume.getEnclosingRegion().getLowerCorner();
 		terrain = terrain_sky(horizon,
-				horizon->origin_x + HORIZON_PAD + front_p.getX() - lc.getX() - 1,
-				horizon->origin_y + front_p.getY() - lc.getY() - 1,
-				horizon->origin_z + HORIZON_PAD + front_p.getZ() - lc.getZ() - 1,
+				horizon->origin_x + HORIZON_PAD + (front_p.getX() - lc.getX() - 1) * lod,
+				horizon->origin_y + (front_p.getY() - lc.getY() - 1) * lod,
+				horizon->origin_z + HORIZON_PAD + (front_p.getZ() - lc.getZ() - 1) * lod,
 				n);
 	}
 
@@ -1606,6 +1607,12 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 					for(size_t k = 0; k < 6; k++){
 						const VoxelSample nv = volume.sample_at(
 								x + NB[k][0], y + NB[k][1], z + NB[k][2]);
+						// Nothing generated there yet reads as full light
+						// in both banks, and a snow layer at the edge of
+						// the loaded world took it: the far tree tops of
+						// vp5 at 02:00 drawn white ([LOD_LIGHT]'s finding)
+						if(fmt.undefined(nv))
+							continue;
 						const float nb = fmt.sky_f(nv) + fmt.lamp_f(nv);
 						if(nb > best){
 							best = nb;
@@ -1967,7 +1974,7 @@ void generate_voxel_lod_geometry(int lod,
 		sm_<uint, TemporaryGeometry> &result,
 		VoxelVolume &lod_volume,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
-		bool use_skylight)
+		bool use_skylight, const HorizonMap *horizon)
 {
 	const VoxelFmt fmt(voxel_reg);
 	IsQuadNeededByRegistry<VoxelSample> iqn(voxel_reg);
@@ -2063,7 +2070,7 @@ void generate_voxel_lod_geometry(int lod,
 		};
 		if(use_skylight){
 			face_vertex_colors(lod_volume, voxel_reg, fmt, quad, n, face_id,
-					corner_colors, nullptr);
+					corner_colors, horizon, lod);
 		}
 		// Go through indices of the face and mangle vertices according to them
 		// into the temporary vertex buffer
