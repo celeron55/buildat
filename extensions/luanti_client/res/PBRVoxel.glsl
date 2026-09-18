@@ -154,12 +154,12 @@ vec2 SkyOfAlpha(float a)
         float bits = floor(a * 255.0 + 0.5);
         float hi = floor(bits / 16.0);
         float lo = bits - hi * 16.0;
-        // The shade steepened for the sky's share: the mesher's corner
-        // table (0.72 for one occluder, 0.52 for two) is every game's and
-        // stays; the render's crease at the bottom of vp1's pit face is
-        // darker than that, and the pit read 1.6 times the render's
-        // with the open wall at half ([PBR_FIT] term 2c).
-        return vec2(hi / 15.0, hi / 15.0 * pow(lo / 15.0, 1.6));
+        // The low nibble is a product -- corner table, hemisphere rays,
+        // terrain cap, face shade, in sixteen levels -- and nothing shapes
+        // it here: a power on it deepened all four at once, the deep ones
+        // most, and banded the dark end ([SHADE_NIBBLE]). Occlusion is
+        // fitted per factor in the mesher, on the pbr path.
+        return vec2(hi / 15.0, hi / 15.0 * lo / 15.0);
     }
     return vec2(a, a);
 }
