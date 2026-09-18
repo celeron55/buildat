@@ -2076,6 +2076,19 @@ struct CApp: public App, public magic::Application
 			lua_pushstring(L, "buildat_server not found");
 			return 2;
 		}
+#ifndef _WIN32
+		// The server compiles a game's modules as it loads them, and on
+		// Linux the compiler is the system's ([PACKAGING]): said here, in
+		// the dialog, rather than as a server that exits at once
+		if(interface::process::shell_exec("c++ --version >/dev/null 2>&1") != 0){
+			lua_pushboolean(L, false);
+			lua_pushstring(L, "No C++ compiler (c++) found in PATH.\n"
+					"buildat compiles a game's modules as it loads them.\n"
+					"Debian, Ubuntu:  sudo apt install build-essential\n"
+					"Fedora:  sudo dnf install gcc-c++");
+			return 2;
+		}
+#endif
 
 		game_path = interface::fs::get_absolute_path(game_path);
 		g_local_server_port = pick_free_local_port();

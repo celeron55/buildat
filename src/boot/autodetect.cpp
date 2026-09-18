@@ -424,8 +424,23 @@ static bool detect_compiler_bin_paths(core::Config &config)
 	sv_<ss_> roots;
 	generate_compiler_binary_dir_alternatives(roots);
 	if(!detect_paths(config, roots, compiler_bin_paths,
-			"Compiler binary directory"))
+			"Compiler binary directory")){
+		// The one line a player of an archive needs: the server compiles a
+		// game's modules as it loads them, and on Linux the compiler is the
+		// system's ([PACKAGING]); the Windows archive carries its own under
+		// compiler/, so there this is a broken archive
+#ifdef _WIN32
+		log_e(MODULE, "No C++ compiler found: the archive's compiler/ "
+				"directory is missing or damaged");
+#else
+		log_e(MODULE, "No C++ compiler (c++) found in PATH. buildat compiles "
+				"a game's modules as it loads them; install one first:\n"
+				"  Debian, Ubuntu:  sudo apt install build-essential\n"
+				"  Fedora:          sudo dnf install gcc-c++\n"
+				"  Arch:            sudo pacman -S gcc");
+#endif
 		return false;
+	}
 	// Said out loud because the probe is silent now, and which compiler is
 	// going to build the runtime-compiled modules is worth knowing
 	log_i(MODULE, "Compiler command: [%s]",
