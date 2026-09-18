@@ -100,6 +100,24 @@ local BY_NAME = {
 	{"sand", {roughness = 1.0, spec_strength = 0.15, bumpiness = 0.6,
 			static_spots = 0.04}},
 	{"ore", {static_spots = 0.05, spec_strength = 0.5, roughness = 0.6}},
+	-- Curated for VoxeLibre, whose names the patterns above miss
+	-- ([VOXEL_MATERIALS] layer 3): what it is made of, by name, kept here
+	-- and never in the game. Argued with from pictures, not from a
+	-- table; the numbers are first cuts in the same scale as the rest.
+	{"stone_with_", {static_spots = 0.05, spec_strength = 0.5,
+			roughness = 0.6}},           -- its ores: coal, iron, redstone...
+	{"obsidian", {roughness = 0.2, spec_strength = 0.8, bumpiness = 0.15}},
+	{"quartz", {roughness = 0.35, spec_strength = 0.6, bumpiness = 0.1}},
+	{"prismarine", {roughness = 0.4, spec_strength = 0.5, bumpiness = 0.2,
+			static_spots = 0.04}},
+	{"slime", {roughness = 0.3, spec_strength = 0.7, bumpiness = 0}},
+	{"honey", {roughness = 0.3, spec_strength = 0.7, bumpiness = 0}},
+	{"emerald", {roughness = 0.15, spec_strength = 0.9, static_spots = 0.06}},
+	{"lapis", {roughness = 0.5, spec_strength = 0.4, bumpiness = 0.2}},
+	{"wool", {roughness = 1.0, spec_strength = 0.05, bumpiness = 0.3}},
+	{"carpet", {roughness = 1.0, spec_strength = 0.05, bumpiness = 0.3}},
+	{"clay", {roughness = 0.95, spec_strength = 0.1, bumpiness = 0.2}},
+	{"mud", {roughness = 0.6, spec_strength = 0.3, bumpiness = 0.4}},
 }
 
 local function copy(t)
@@ -228,6 +246,13 @@ do
 			"surface: glass")
 	local plain = M.for_node(nil)
 	assert(plain.roughness == 0.95 and plain.spots == 0, "surface: default")
+	-- The curated VoxeLibre names land: an ore by its stone_with_ name,
+	-- wool matte
+	local ore = M.for_node({name = "mcl_core:stone_with_iron", drawtype = 0,
+			groups = {cracky = 3}})
+	assert(ore.static_spots > 0, "surface: VoxeLibre ore")
+	local wool = M.for_node({name = "mcl_wool:red", drawtype = 0})
+	assert(wool.spec_strength < 0.1, "surface: wool")
 	-- The module's spelling comes out the same as the wire's
 	local named = M.for_node({name = "default:water_source",
 			drawtype = "liquid"})
