@@ -192,8 +192,15 @@ varying vec4 vWorldPos;
 // Behind VOXELSKYCURVE because the extension has already applied it before
 // the mesher sees the value and must not apply it again.
 #ifdef VOXELSKYCURVE
-    const float SKY_KNEE_LOW = 2.0 / 15.0;
-    const float SKY_KNEE_HIGH = 11.0 / 15.0;
+    // The knee sits low now: the mesher folds the face's hemisphere
+    // visibility into the alpha beside the nibble ([PBR_FIT] 2c), so a lit
+    // wall in a trench reads a third and must keep its sun; rock still
+    // reads nothing and a cave wall under a nibble of two reads under a
+    // tenth. What is lost is the dapple under a canopy, whose floor now
+    // reads under the knee and is dark twice, once here and once by the
+    // shadow map, which was shadowing it anyway.
+    const float SKY_KNEE_LOW = 0.04;
+    const float SKY_KNEE_HIGH = 0.18;
 
     float ShapeSkylight(float sky)
     {

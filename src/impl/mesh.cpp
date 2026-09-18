@@ -749,6 +749,40 @@ static void face_vertex_colors(VoxelVolume &volume,
 		return c < 0 ? -1 : 1;
 	};
 
+	// How much of its hemisphere the face can see past the next few voxels:
+	// the normal and the eight directions a step out from it along the face's
+	// axes and diagonals, each walked HEMI_REACH voxels from the voxel in
+	// front and stopped by the first solid one. A wall between a block and two
+	// terraces sees a fifth of the sky, and the corner table below, which
+	// looks one voxel along the face, said it saw all of it; the path-traced
+	// reference is exact and read that wall at a third of what the corner
+	// table lit it to ([PBR_FIT] 2c). Multiplied into the sky share, so the
+	// corner table keeps the crease and this keeps the surroundings.
+	// simplified: nine rays, four voxels, a solid voxel is any voxel with an
+	// edge material; a leaf block blocks as much as rock.
+	static const int HEMI_REACH = 4;
+	float hemi = 1.0f;
+	{
+		const pv::Vector3DInt32 ni((int)std::round(n.getX()),
+				(int)std::round(n.getY()), (int)std::round(n.getZ()));
+		const pv::Vector3DInt32 dirs[9] = {
+			ni, ni + u, ni - u, ni + v, ni - v,
+			ni + u + v, ni + u - v, ni - u + v, ni - u - v,
+		};
+		int open = 0;
+		for(const pv::Vector3DInt32 &d : dirs){
+			bool blocked = false;
+			pv::Vector3DInt32 p = front_p;
+			for(int k = 0; k < HEMI_REACH && !blocked; k++){
+				p += d;
+				blocked = occludes(volume, voxel_reg, fmt, p);
+			}
+			if(!blocked)
+				open++;
+		}
+		hemi = (float)open / 9.0f;
+	}
+
 	for(size_t i = 0; i < 4; i++){
 		pv::Vector3DFloat d = quad[i] - centre;
 		pv::Vector3DInt32 du = u * along(d, u);
@@ -759,7 +793,7 @@ static void face_vertex_colors(VoxelVolume &volume,
 		int occluders = (s1 && s2) ? 3 : (s1 ? 1 : 0) + (s2 ? 1 : 0) +
 				(occludes(volume, voxel_reg, fmt, front_p + du + dv) ? 1 : 0);
 		float ao = AO_LEVELS[occluders];
-		float sky_shade = ao * FACE_SHADE[face_id];
+		float sky_shade = ao * hemi * FACE_SHADE[face_id];
 		float bounce_shade = (1.0f - BOUNCE_AO + BOUNCE_AO * ao) *
 				FACE_SHADE[face_id] * (1.0f - sky_f);
 		float lamp_shade = lamp_f * sky_shade;
