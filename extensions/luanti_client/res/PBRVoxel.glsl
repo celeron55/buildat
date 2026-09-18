@@ -326,7 +326,7 @@ void VS()
             // the pit is occlusion's ([PBR_FIT], user 2026-09-18).
             vec2 sky = SkyOfAlpha(iColor.a);
             vSkyAmbient = GetAmbient(GetZonePos(worldPos)) * sky.y *
-                    (0.8 + 0.2 * max(vNormal.y, 0.0));
+                    (1.0 - 0.15 * max(vNormal.y, 0.0));
             // The bounce falls off into a cave with the daylight Luanti
             // propagates, a level a node from the mouth, over a floor of
             // half: the render's cave is lit near the mouth and dark deep
@@ -353,11 +353,21 @@ void VS()
             bool isPacked = cPackedSky > 0.5;
             vec3 baked = isPacked ? cLampLight * iColor.r : iColor.rgb;
             float shade = isPacked ? iColor.b : 1.0;
+            // The ground a wall faces is lit or it is not, and the base
+            // pass has no shadow map to say which; what it has is how
+            // enclosed the place is -- the local shade and the terrain cap
+            // -- and an enclosed place's ground is in the same shadow. So
+            // the ground term takes their product squared: vp1's pit face
+            // (0.55 local, 0.63 terrain) keeps 0.12 of it and the open
+            // shaded wall on the cliff top (0.65, 0.90) 0.34, which is the
+            // render's 0.27 between them ([PBR_FIT], contrast_dirt_pit).
+            float groundSeen = isPacked ? shade * iColor.g : 1.0;
+            groundSeen *= groundSeen;
             vVertexLight = cShadowKinds > 0.5 ? iColor.rgb : baked +
                 cBounceLight * (0.15 + 1.0 * sky.x) *
                     (1.0 - ShapeSkylight(sky.x)) * shade +
                 cGroundLight * (0.5 - 0.5 * vNormal.y) *
-                    ShapeSkylight(sky.x) * shade;
+                    ShapeSkylight(sky.x) * groundSeen;
         #endif
         vSkyVisibility = ShapeSkylight(SkyOfAlpha(iColor.a).x);
 

@@ -224,7 +224,7 @@ local MOON_BRIGHTNESS = 1.0
 -- its colour below; the colours are the terms after this one.
 local PHYS = {sun_e0 = 195, sun_tau = 0.127, sky_zenith = 4.5,
 		sky_horizon = 12.0, moon_e = 0.0025, night_sky = 0.00005,
-		bounce = 0.15, lamp = 0.5, dome = 0.7, ground = {r = 0.25, g = 0.22, b = 0.15},
+		bounce = 0.15, lamp = 0.5, dome = 0.9, ground = {r = 0.25, g = 0.22, b = 0.15},
 		day_zenith = {r = 0.57, g = 0.76, b = 1.0},
 		-- the horizon just over the sea at 13:00 reads (14.7, 14.9, 15.0)
 		-- in the render: white, not Luanti's pale blue
@@ -1178,9 +1178,13 @@ local function apply_sky_of_hour()
 	-- The dome's hue for the ambient: two parts zenith, one horizon, the
 	-- cosine weighting a face sees -- a dawn's warm horizon reaches a
 	-- wall, which is what the render's dawn dirt face is lit by
-	sky_now.dome = {r = (2 * zenith_now.r + horizon_now.r) / 3,
-			g = (2 * zenith_now.g + horizon_now.g) / 3,
-			b = (2 * zenith_now.b + horizon_now.b) / 3}
+	-- With the horizon white on the pbr path the third of it made every
+	-- shade too warm: the render's open shaded wall reads B/R 0.92 and
+	-- pbr's 0.68 ([PBR_FIT], open_shade_dirt). Five parts zenith, one
+	-- horizon: the band is bright but narrow under the cosine.
+	sky_now.dome = {r = (5 * zenith_now.r + horizon_now.r) / 6,
+			g = (5 * zenith_now.g + horizon_now.g) / 6,
+			b = (5 * zenith_now.b + horizon_now.b) / 6}
 
 	-- What the sun shines with now: its own colour, going red while it is
 	-- crossing the horizon, which is where that colour belongs. It does not
@@ -1492,7 +1496,7 @@ local function update_sky(dt)
 		-- block and left the open shadow on the cliff top 1.75 times too
 		-- dark ([PBR_FIT], contrast_dirt against contrast_dirt_pit).
 		-- simplified: one albedo for every ground.
-		local sun = PHYS.sun(height) * math.max(height, 0) * 0.3 / math.pi
+		local sun = PHYS.sun(height) * math.max(height, 0) * 0.5 / math.pi
 		local sc = sky_lights.sun.color
 		voxel_shading.set_ground_light(
 				PHYS.ground.r * (sun * sc.r + c.r * k),
