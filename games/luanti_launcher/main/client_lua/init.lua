@@ -485,6 +485,11 @@ do
 	rp:SetEnabled("BloomHDR", buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
 	rp:SetShaderParameter("TonemapExposureBias", EXPOSURE_BIAS)
 	rp:SetShaderParameter("AutoExposureAdaptRate", AUTO_EXPOSURE.adapt_rate)
+	-- BUILDAT_LUANTI_KEY=<lum> pins the metered key by closing the range on
+	-- it, so an ablation's frames are comparable in absolute terms: with
+	-- the key free, a term turned off re-exposes everything else
+	local key = tonumber(buildat.get_env("BUILDAT_LUANTI_KEY") or "")
+	if key then AUTO_EXPOSURE.lum_range = {key, key} end
 	rp:SetShaderParameter("AutoExposureLumRange",
 			magic.Vector2(AUTO_EXPOSURE.lum_range[1],
 			AUTO_EXPOSURE.lum_range[2]))
@@ -1248,7 +1253,11 @@ local function apply_sky_of_hour()
 	-- The cube's reflection at 0.7 on pbr ([PBR_FIT] tuning): at 1 the
 	-- glint on a grass top carried a blue the render's has not, and the
 	-- water's far reflection read 3.4 over its near against 2.5
-	voxel_shading.set_specular_emphasis(sky_now.unlit and 1.0 or 0.7)
+	-- The ablation is here, where the value is set each frame: set from
+	-- the ambient's pass it was overwritten before a frame was drawn
+	voxel_shading.set_specular_emphasis(
+			(buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""):find("ibl")
+			and 0 or (sky_now.unlit and 1.0 or 0.7))
 	-- And what colour that sky is now, which the cube map cannot know: the
 	-- reflection is moved towards the zenith of this hour as the day goes,
 	-- and left alone at noon, where the cube map is already right
@@ -1433,7 +1442,6 @@ local function update_sky(dt)
 		if abl:find("amb") then zone.ambientColor = magic.Color(0, 0, 0) end
 		if abl:find("bounce") then voxel_shading.set_bounce_light(0, 0, 0) end
 		if abl:find("ground") then voxel_shading.set_ground_light(0, 0, 0) end
-		if abl:find("ibl") then voxel_shading.set_specular_emphasis(0) end
 	end
 	-- And the fog with it. This is the one thing the cave sky needs that is
 	-- not per direction, so it takes the mean of the same cube: underground

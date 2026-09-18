@@ -857,9 +857,27 @@ void PS()
             #endif
             // Scaled by how much sky the surface itself sees as well as by
             // how much is visible along the reflection: the cube map answers
-            // for the direction, the vertex color for the place.
-            finalColor.rgb += cube * EnvBRDFApprox(specColor, roughness, ndv) *
-                vSkyVisibility * cSpecEmphasis
+            // for the direction, the vertex color for the place. That is
+            // the smooth end. A rough lobe integrates the hemisphere, and
+            // what the hemisphere's sky comes to at this place is what the
+            // diffuse ambient already carries -- the drawn sky's hue at the
+            // hour's level, times the sky share and the normal's slice of
+            // the dome -- so the rough end reflects that. The cube's lowest
+            // mip is not it: it is the drawn sky at full, which at dawn is
+            // forty times the ambient, and it gated nothing by place -- the
+            // visibility cube is the camera's. It put a blue sheen on a
+            // grass top under a mountain five times the render's and was
+            // four fifths of that top's light ([PBR_FIT], terrain_occlusion
+            // by ablation with the key pinned).
+            // Over by 0.35 (a perceptual 0.6): the atlas makes a bright
+            // texel of grass smoother than its node by up to 0.8, so a
+            // matte node has texels at 0.45 here, and a quarter of the
+            // drawn sky's horizon band at dawn is still more than the
+            // ambient. Water at 0.12 and the metals keep the cube.
+            vec3 env = mix(cube * vSkyVisibility, vSkyAmbient,
+                smoothstep(0.05, 0.35, roughness));
+            finalColor.rgb += env * EnvBRDFApprox(specColor, roughness, ndv) *
+                cSpecEmphasis
             #ifdef VOXELSKYTINT
                 * cSkyLight
             #endif
