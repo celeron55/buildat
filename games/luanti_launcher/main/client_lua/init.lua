@@ -1538,11 +1538,21 @@ local function update_sky(dt)
 	-- lifted everything at the far edge of the range -- the snow-topped
 	-- trees on vp5's ridge at 02:00 -- to white ([LOD_LIGHT]'s finding:
 	-- it was the fog, not the far chunks' mesh path).
+	-- And the indoors half of the blend in radiance too: Luanti's indoors
+	-- colour (0.39 grey, dimmed by the hour) is display units, and under
+	-- a forest's canopy `seen` is well under one, so at 02:00 the fog was
+	-- 0.016 against a sky of 0.00005 -- and everything at the far edge of
+	-- the range, where the fog is all there is, came out white after the
+	-- meter: the snow-topped tree tops on vp5's ridge, at last. What a
+	-- cave's haze is on the pbr path is the ambient of the hour, which is
+	-- the light a cave gets.
+	local indoors = indoors_of(0.10 + 0.90 * day)
 	if sky_now.horizon_radiance then
 		local h = sky_now.horizon_radiance
 		base = magic.Color(h.r, h.g, h.b)
+		indoors = zone.ambientColor
 	end
-	zone.fogColor = blend(base, indoors_of(0.10 + 0.90 * day), 1 - seen)
+	zone.fogColor = blend(base, indoors, 1 - seen)
 	sky_now.height = height
 	sky_now.day = day
 	sky_now.daylight = daylight
