@@ -2774,7 +2774,11 @@ local function step_emerge(dtime)
 			local left = #r.blocks - r.next_i + 1
 			local t_cb = core.get_us_time()
 			core.set_last_run_mod(r.mod)
-			local ok, err = pcall(r.callback, bp, action, left, r.param)
+			-- With a traceback: a mapgen mod's callback that fails names
+			-- a line in vector.lua otherwise, and which mod is the question
+			local ok, err = xpcall(function()
+				return r.callback(bp, action, left, r.param)
+			end, debug.traceback)
 			local took = core.get_us_time() - t_cb
 			emerge_detail.callbacks = emerge_detail.callbacks + took
 			emerge_detail.n_callbacks = emerge_detail.n_callbacks + 1
@@ -4125,14 +4129,19 @@ function core.find_nodes_in_area_under_air(minp, maxp, nodenames)
 	if x1 < x0 or y1 < y0 or z1 < z0 then
 		return positions
 	end
-	local ids = __get_region(x0, y0, z0, x1, y1, z1)
+	-- One row above the box as well: "under air" is about the node above
+	-- each candidate, and for the box's top row that node is outside it.
+	-- A one-row box -- the floor of VoxeLibre's witch hut, asked for at
+	-- the cauldron's level minus one -- found nothing before this.
+	local ids = __get_region(x0, y0, z0, x1, y1 + 1, z1)
 	local air_id = core.get_content_id("air")
 	local w = x1 - x0 + 1
-	local h = y1 - y0 + 1
+	local h = y1 + 1 - y0 + 1
 	for z = z0, z1 do
 		for x = x0, x1 do
 			-- Downwards, so the node above is the one just looked at
-			local above_id = nil
+			local above_id = ids[(x - x0) + (y1 + 1 - y0) * w +
+					(z - z0) * w * h + 1]
 			for y = y1, y0, -1 do
 				local id = ids[(x - x0) + (y - y0) * w +
 						(z - z0) * w * h + 1]

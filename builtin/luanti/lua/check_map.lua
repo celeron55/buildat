@@ -718,6 +718,14 @@ function core.__check_map_read()
 		error("check_map: find_nodes_in_area_under_air found " .. #under ..
 				" of a patch of 4")
 	end
+	-- And a box whose top row is the patch itself: the air above it is
+	-- outside the box, and the read has to look one row past it
+	local top = core.find_nodes_in_area_under_air(AREA_MIN,
+			{x = AREA_MAX.x, y = AREA_MIN.y + 1, z = AREA_MAX.z}, {check_name})
+	if #top ~= 4 then
+		error("check_map: find_nodes_in_area_under_air found " .. #top ..
+				" of a patch of 4 on the box's top row")
+	end
 	for _, p in ipairs(under) do
 		if p.y ~= AREA_MIN.y + 1 then
 			error("check_map: under_air came back at y=" .. p.y)
