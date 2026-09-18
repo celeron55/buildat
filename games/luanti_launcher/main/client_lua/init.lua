@@ -198,11 +198,14 @@ local MOON_BRIGHTNESS = 1.0
 --   sun_e0, sun_tau  the sun's irradiance normal to it, E0 * exp(-tau /
 --                    sin(elevation)): 135 at 64 degrees, which is what
 --                    the render's snow at 10:00 reads (35 off an
---                    albedo of 0.9), half that at ten degrees
+--                    albedo of 0.9), and 25 at ten degrees, which is
+--                    what its grass top at 05:45 leaves for the sun
+--                    once the sky's share is taken out
 --   sky_zenith,      the sky's radiance at the zenith and the horizon
---   sky_horizon      by day: a patch thirty degrees up reads 7.7 in
---                    the render, fading over the last twelve degrees
---                    of the sun's elevation
+--   sky_horizon      by day: the render's 13:00 reads 4.9 near the
+--                    zenith, 7.7 thirty degrees up, 12 at the horizon;
+--                    fading over the last twelve degrees of the sun's
+--                    elevation
 --   bounce           light off the surroundings where the sky does not
 --                    reach, as a share of the sky's mean (term 2)
 --   moon_e           the moon lamp's irradiance, the render's own
@@ -211,8 +214,8 @@ local MOON_BRIGHTNESS = 1.0
 --                    target is a sky under a fortieth of moonlit snow
 -- simplified: the sky keeps Luanti's hue at this radiance, and the sun
 -- its colour below; the colours are the terms after this one.
-local PHYS = {sun_e0 = 160, sun_tau = 0.15, sky_zenith = 6.5,
-		sky_horizon = 10.5, moon_e = 0.0025, night_sky = 0.00005,
+local PHYS = {sun_e0 = 200, sun_tau = 0.35, sky_zenith = 4.5,
+		sky_horizon = 12.0, moon_e = 0.0025, night_sky = 0.00005,
 		bounce = 0.13}
 -- The sky's radiance factor at a sun height (sin elevation): full by
 -- day, gone over the last twelve degrees, the floor below
@@ -1123,6 +1126,20 @@ local function apply_sky_of_hour()
 	local share = luanti_sky.sun_tint_share(sky_now.daylight)
 	sky_lights.sun.color = blend(PHYS.SUN_COLOR,
 			game_sky.sun_tint or luanti_sky.SUN_TINT, share)
+	if not sky_now.unlit then
+		-- pbr: the sun's colour from its elevation, not a tint at a
+		-- clock ([PBR_FIT] term 3): Rayleigh transmittance through an
+		-- air mass of 1 / sin(elevation), normalised to a luminance of
+		-- one so PHYS.sun() keeps the level. The optical depths are sea
+		-- level's at 680, 550 and 440 nm; white overhead, red across the
+		-- horizon. simplified: no ozone, no aerosol; the dawn's target
+		-- is the render's 05:45 (see the plan).
+		local m = 1 / math.max(sky_now.height or 0, 0.05)
+		local r, g, b = math.exp(-0.05 * m), math.exp(-0.10 * m),
+				math.exp(-0.24 * m)
+		local lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+		sky_lights.sun.color = magic.Color(r / lum, g / lum, b / lum)
+	end
 	sky_lights.moon.color = blend(PHYS.MOON_COLOR,
 			game_sky.moon_tint or luanti_sky.MOON_TINT, share)
 
@@ -1322,10 +1339,12 @@ local function update_sky(dt)
 		-- two-term ambient ([PBR_FIT] term 2): one colour for the whole
 		-- hemisphere, no ground bounce yet.
 		local f = PHYS.sky(height)
-		-- Cosine-weighted over the dome, as a horizontal face sees it:
-		-- two thirds the zenith's, a third the horizon's
-		local mean = PHYS.night_sky +
-				((2 * PHYS.sky_zenith + PHYS.sky_horizon) / 3 - PHYS.night_sky) * f
+		-- What a horizontal face receives over pi: the render's grass
+		-- (albedo 0.036) reads 1.50 sunlit at 13:00 and 0.15 in the
+		-- shade at 05:45, which leaves the dome at about the zenith's
+		-- radiance -- the horizon's band is bright but at a grazing
+		-- weight. So the zenith's, not a mean that counts the horizon.
+		local mean = PHYS.night_sky + (PHYS.sky_zenith - PHYS.night_sky) * f
 		local c = blend(NIGHT_AMBIENT, SKY_AMBIENT, day)
 		local lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
 		local k = lum > 1e-6 and mean / lum or 0
