@@ -3950,12 +3950,14 @@ function M.new(magic, buildat, log, options)
 			-- goes dark without anything having to detect it. See [CAVE_SKY]
 			-- in doc/plan/rendering_plan.md.
 			--
-			-- simplified: auto_dim_skybox is left on. Luanti carries it in
-			-- the SET_SKY packet past the fields this client reads, and the
-			-- only thing it turns off is this.
+			-- auto_dim_skybox is the game's switch for this and nothing
+			-- else; client.lua reads it off SET_SKY, and a game that says
+			-- false keeps its sky undimmed -- the same knob the launcher
+			-- turns through set_auto_dim() ([SKY_KNOBS])
 			sky_material:SetShaderParameter("SkyIndoors",
 					sky_color("indoors", brightness))
-			sky_material:SetShaderParameter("SkyAutoDim", 1.0)
+			sky_material:SetShaderParameter("SkyAutoDim",
+					(sky and sky.auto_dim_skybox == false) and 0.0 or 1.0)
 			-- **A parameter a material never sets reads as zero**, and zero
 			-- here means "in a cave", which would draw this client's sky as
 			-- the indoors colour everywhere. Set to one until this client
