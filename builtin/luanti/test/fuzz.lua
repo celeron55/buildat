@@ -35,8 +35,18 @@ local said_no_trees = false
 -- How many seconds each nearby section has been loaded and ungenerated
 local ungenerated_for = {}
 
+-- Only the player's own digs, and only of nodes that drop something by
+-- hand: mapgen mods dig with no digger (the count was 119 with the
+-- player's share 7 on seed 8), and a fern dug by hand drops nothing
+local dropping = 0
 core.register_on_dignode(function(pos, node, digger)
+	if not (digger and digger:is_player()) then
+		return
+	end
 	dug = dug + 1
+	if #core.get_node_drops(node.name, "") > 0 then
+		dropping = dropping + 1
+	end
 end)
 core.register_on_placenode(function(pos, node, placer)
 	placed = placed + 1
@@ -157,10 +167,11 @@ core.register_on_joinplayer(function(player)
 		-- pickup hook is for what was dropped and the inventory is the
 		-- check: two dug and an empty inventory a minute later is the
 		-- drop path
-		if dug >= 2 and t % 60 == 0 then
+		if dropping >= 3 and t % 60 == 0 then
 			local inv = player:get_inventory()
 			if inv and inv:is_empty("main") then
-				fail("dug " .. dug .. " nodes and holds nothing")
+				fail("dug " .. dropping .. " nodes that drop something and " ..
+						"holds nothing")
 			end
 		end
 		local why = punch_watch(player)
