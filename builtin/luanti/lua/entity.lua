@@ -1407,7 +1407,11 @@ function PlayerRef:set_clouds(params)
 	if not o or type(params) ~= "table" then
 		return
 	end
-	o.clouds_params = table.copy(params)
+	-- Merged, as Luanti does: what is passed is set, the rest kept
+	o.clouds_params = o.clouds_params or {}
+	for k, v in pairs(params) do
+		o.clouds_params[k] = v
+	end
 	send_sky(o)
 end
 
@@ -1425,7 +1429,16 @@ local function sky_thing_setter(field)
 		if not o or type(params) ~= "table" then
 			return
 		end
-		o[field] = table.copy(params)
+		-- Luanti's own rule: what is passed is set and what is not keeps
+		-- its value. Replacing the table let a mod's set_moon({texture =
+		-- ...}) -- mcl_moon, every phase -- bring back a moon the fixture
+		-- had set invisible, which then hung in the reference pictures as
+		-- a grey square by day and a white one at 02:00 ([LOD_LIGHT]'s
+		-- finding: not the far chunks, the moon behind the far trees).
+		o[field] = o[field] or {}
+		for k, v in pairs(params) do
+			o[field][k] = v
+		end
 		send_sky(o)
 	end
 end

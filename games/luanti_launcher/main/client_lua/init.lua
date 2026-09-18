@@ -224,7 +224,7 @@ local MOON_BRIGHTNESS = 1.0
 -- its colour below; the colours are the terms after this one.
 local PHYS = {sun_e0 = 195, sun_tau = 0.127, sky_zenith = 4.5,
 		sky_horizon = 12.0, moon_e = 0.0025, night_sky = 0.00005,
-		bounce = 0.15, dome = 0.7, ground = {r = 0.25, g = 0.22, b = 0.15},
+		bounce = 0.15, lamp = 0.5, dome = 0.7, ground = {r = 0.25, g = 0.22, b = 0.15},
 		day_zenith = {r = 0.57, g = 0.76, b = 1.0},
 		-- the horizon just over the sea at 13:00 reads (14.7, 14.9, 15.0)
 		-- in the render: white, not Luanti's pale blue
@@ -1473,6 +1473,11 @@ local function update_sky(dt)
 		-- cave at other hours is what would fit it further.
 		voxel_shading.set_bounce_light(c.r * k * PHYS.bounce,
 				c.g * k * PHYS.bounce, c.b * k * PHYS.bounce)
+		-- A lamp at full in the sky's units: PHYS.lamp, a warm torch.
+		-- simplified: one level and one colour for every light source;
+		-- the render has no lamps to fit it to.
+		voxel_shading.set_lamp_light(PHYS.lamp * 1.0, PHYS.lamp * 0.85,
+				PHYS.lamp * 0.6)
 		-- And the ground as the lower hemisphere sees it: its albedo
 		-- times what falls on it, the sky on all of it and a third of
 		-- the sun, over pi. A third, not the half that is lit on
@@ -1492,6 +1497,7 @@ local function update_sky(dt)
 		if abl:find("amb") then zone.ambientColor = magic.Color(0, 0, 0) end
 		if abl:find("bounce") then voxel_shading.set_bounce_light(0, 0, 0) end
 		if abl:find("ground") then voxel_shading.set_ground_light(0, 0, 0) end
+		if abl:find("lamp") then voxel_shading.set_lamp_light(0, 0, 0) end
 	end
 	-- And the fog with it. This is the one thing the cave sky needs that is
 	-- not per direction, so it takes the mean of the same cube: underground

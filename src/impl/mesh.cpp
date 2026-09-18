@@ -776,7 +776,14 @@ static float terrain_sky(const HorizonMap *horizon,
 		// closely. Meshing with a look per column took long enough that
 		// the far chunks were not in the frame by the time a reference
 		// shot was taken.
-		for(int k = 1; k <= HORIZON_PAD; k *= 2){
+		// From four columns out: nearer is the hemisphere rays' (reach
+		// 4), and a tree crown one column away -- five wide, so the 3x3
+		// erosion keeps it -- read as a wall at 83 degrees and left vp5's
+		// snow field at a sixtieth of the open sky while the tree tops
+		// beyond the forest read full: the field went black at 02:00,
+		// the meter keyed on it and the far tops came out white
+		// ([LOD_LIGHT]'s finding, at last).
+		for(int k = 4; k <= HORIZON_PAD; k *= 2){
 			int cx = wx + DX[d] * k - horizon->origin_x;
 			int cz = wz + DZ[d] * k - horizon->origin_z;
 			if(cx < 0 || cz < 0 || cx >= HORIZON_SIZE || cz >= HORIZON_SIZE)
@@ -1083,7 +1090,7 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 		bool use_skylight,
 		sm_<uint, TemporaryGeometry> *translucent_result,
 		sm_<uint, TemporaryGeometry> *masked_result,
-		bool packed_alpha);
+		const HorizonMap *horizon);
 
 // Which of the three geometries a voxel's faces go in: the solid one, the
 // blended one, or the one cut out by its texture. A definition is at most
@@ -1393,8 +1400,7 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 	}
 
 	generate_voxel_shapes(result, volume, voxel_reg, fmt, atlas_reg,
-			use_skylight, translucent_result, masked_result,
-			horizon != nullptr);
+			use_skylight, translucent_result, masked_result, horizon);
 }
 
 // How high a liquid's surface stands at one corner of a voxel: the average
@@ -1533,8 +1539,9 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 		bool use_skylight,
 		sm_<uint, TemporaryGeometry> *translucent_result,
 		sm_<uint, TemporaryGeometry> *masked_result,
-		bool packed_alpha)
+		const HorizonMap *horizon)
 {
+	const bool packed_alpha = horizon != nullptr;
 	const pv::Region &region = volume.getEnclosingRegion();
 	const pv::Vector3DInt32 lc = region.getLowerCorner();
 	const pv::Vector3DInt32 uc = region.getUpperCorner();
@@ -1622,6 +1629,22 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 				}
 				float sky_f = fmt.sky_f(lv);
 				float lamp_f = fmt.lamp_f(lv);
+				// The terrain beyond the chunk for a shape, as for a cube
+				// face (face_vertex_colors()): the sea, a plant, a snow
+				// layer under a mountain see the same horizon. Looked up
+				// as a floor does, the whole ring, since a shape's quads
+				// point every way. Without it the sea read as the most
+				// occluded thing in the diagnostic's frame -- it was the
+				// packed layout's terrain of one drawn cyan, not a reading
+				// -- and had no cap at all in the light.
+				float terrain = 1.0f;
+				if(horizon){
+					terrain = terrain_sky(horizon,
+							horizon->origin_x + HORIZON_PAD + x - lc.getX() - 1,
+							horizon->origin_y + y - lc.getY() - 1,
+							horizon->origin_z + HORIZON_PAD + z - lc.getZ() - 1,
+							pv::Vector3DFloat(0, 1, 0));
+				}
 				// Which directions this voxel connects in, once per voxel
 				// rather than once per quad that asks. Only a voxel that
 				// reaches out at all pays for it.
@@ -1770,10 +1793,13 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 						// face_vertex_colors()
 						float bshade = packed_alpha ? 0.0f : shade * (1.0f - sky_f);
 						// The packed layout as face_vertex_colors() writes
-						// it: lamp, terrain (none here), local shade
-						color = packed_alpha ? Color(lamp_f * shade, 1.0f,
+						// it: lamp, terrain, local shade; the sky's share
+						// takes the terrain, the local shade does not
+						color = SHADOW_KINDS ? Color(terrain, 1.0f, 1.0f,
+								sky_alpha(sky_f, shade * terrain, true)).ToUInt() :
+							packed_alpha ? Color(lamp_f * shade, terrain,
 								shade / 1.15f > 1.0f ? 1.0f : shade / 1.15f,
-								sky_alpha(sky_f, shade, true)).ToUInt() : Color(
+								sky_alpha(sky_f, shade * terrain, true)).ToUInt() : Color(
 								BOUNCE_COLOR.r_ * bshade +
 										LAMP_COLOR.r_ * lamp_f * shade,
 								BOUNCE_COLOR.g_ * bshade +

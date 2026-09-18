@@ -204,6 +204,30 @@ local function pin_view(player)
 	player:set_clouds({density = 0})
 	player:set_moon({visible = false})
 	player:set_stars({visible = false})
+	-- **And kept off against the game**: mcl_weather's sky update puts
+	-- `moon = {visible = true}` on every player a few times a minute, and
+	-- the moon's square -- 20 degrees wide at mcl_moon's scale of 3.75 --
+	-- hung behind vp5's far trees at 02:00 as a white shape that was read
+	-- as snow-topped canopies, and over vp1's hill by day as a grey one.
+	-- Once is not enough, so the setters filter what the game asks for,
+	-- for the fixture's life: on the player's class (the userdata's
+	-- metatable index), once. Only this server runs the fixture, so
+	-- every player here is the fixture's.
+	local class = getmetatable(player) and getmetatable(player).__index
+	if type(class) == "table" and not class.__refshot_keeps_off then
+		class.__refshot_keeps_off = true
+		local function keep_off(name, field, value)
+			local orig = class[name]
+			class[name] = function(self, params)
+				params = type(params) == "table" and table.copy(params) or {}
+				params[field] = value
+				return orig(self, params)
+			end
+		end
+		keep_off("set_moon", "visible", false)
+		keep_off("set_stars", "visible", false)
+		keep_off("set_clouds", "density", 0)
+	end
 	-- Not a HUD test: the F5 line and the fixture's own text are what a
 	-- reference picture carries, and nothing else. See [REFVIEWS_HUD].
 	player:hud_set_flags({hotbar = false, wielditem = false,

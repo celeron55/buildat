@@ -117,6 +117,11 @@
 // no ground bounce, since its sky visibility is one. The upgrade is a
 // ground radiance times (1 - n.y) / 2 on top, once the render says how much.
 uniform vec3 cBounceLight;
+// What a lamp at full is on the packed path, in the ambient's units: the
+// mesher's lamp nibble is display white at full (LAMP_COLOR), which is no
+// radiance. Set by voxel_shading.set_lamp_light(); the plain path's vertex
+// rgb is already the light and does not read this.
+uniform vec3 cLampLight;
 // And the ground: what the lower hemisphere of a face outdoors sees, the
 // radiance of sunlit and sky-lit ground, which a vertical face gets half
 // of and a ceiling all of. In the ambient's units, set by the client from
@@ -346,7 +351,7 @@ void VS()
             // zero still bounces. Unpacked the rgb is the light itself and
             // the shade is one.
             bool isPacked = cPackedSky > 0.5;
-            vec3 baked = isPacked ? vec3(iColor.r) : iColor.rgb;
+            vec3 baked = isPacked ? cLampLight * iColor.r : iColor.rgb;
             float shade = isPacked ? iColor.b : 1.0;
             vVertexLight = cShadowKinds > 0.5 ? iColor.rgb : baked +
                 cBounceLight * (0.15 + 1.0 * sky.x) *

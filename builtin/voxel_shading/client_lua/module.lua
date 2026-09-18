@@ -274,6 +274,9 @@ local sky_tint_amount = 0.0
 -- Light bounced off the surroundings, reaching a surface where the sky does
 -- not; see M.set_bounce_light()
 local bounce_light = magic.Vector3(0, 0, 0)
+-- What a lamp at full reads as on the packed path, in the ambient's units;
+-- see M.set_lamp_light(). Unset (nil) is the plain path's white.
+local lamp_light = magic.Vector3(1, 1, 1)
 -- And the ground's radiance, for the lower hemisphere; see M.set_ground_light()
 local ground_light = magic.Vector3(0, 0, 0)
 -- Whether the mesher packs the vertex alpha; see M.set_packed_sky()
@@ -663,6 +666,7 @@ local function push_sky_vis()
 				command:SetShaderParameter("SkyTintAmount", sky_tint_amount)
 				command:SetShaderParameter("BounceLight", bounce_light)
 				command:SetShaderParameter("GroundLight", ground_light)
+				command:SetShaderParameter("LampLight", lamp_light)
 			end
 		end
 		return
@@ -674,6 +678,7 @@ local function push_sky_vis()
 	render_path:SetShaderParameter("SkyTintAmount", sky_tint_amount)
 	render_path:SetShaderParameter("BounceLight", bounce_light)
 	render_path:SetShaderParameter("GroundLight", ground_light)
+	render_path:SetShaderParameter("LampLight", lamp_light)
 end
 
 -- How much of the sky is visible overhead: 1 out in the open, towards 0
@@ -713,6 +718,15 @@ end
 -- Light bounced off the surroundings, in the zone ambient's units, which a
 -- surface receives in proportion to how much sky it does not see: what
 -- lights a cave by day. Nothing until a client sets it.
+-- A lamp at full, in the ambient's units, for the packed path: the
+-- mesher's lamp nibble is display white at full, which under a night
+-- sky of 0.00005 and the meter drew a far ridge's lamp-lit snow white
+-- ([PBR_FIT], [LOD_LIGHT]'s finding). The plain path keeps white.
+function M.set_lamp_light(r, g, b)
+	lamp_light = magic.Vector3(math.max(0, r), math.max(0, g), math.max(0, b))
+	declare_countdown = 0
+end
+
 function M.set_bounce_light(r, g, b)
 	bounce_light = magic.Vector3(math.max(0, r), math.max(0, g), math.max(0, b))
 	declare_countdown = 0
