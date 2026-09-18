@@ -271,6 +271,9 @@ local sky_light = 1.0
 -- M.set_sky_tint(). White and none is the cube map as it was baked.
 local sky_tint = magic.Vector3(1, 1, 1)
 local sky_tint_amount = 0.0
+-- Light bounced off the surroundings, reaching a surface where the sky does
+-- not; see M.set_bounce_light()
+local bounce_light = magic.Vector3(0, 0, 0)
 
 local function each_material_of(cg, cb)
 	if not cg then return end
@@ -646,6 +649,7 @@ local function push_sky_vis()
 				command:SetShaderParameter("SkyLight", sky_light)
 				command:SetShaderParameter("SkyTint", sky_tint)
 				command:SetShaderParameter("SkyTintAmount", sky_tint_amount)
+				command:SetShaderParameter("BounceLight", bounce_light)
 			end
 		end
 		return
@@ -655,6 +659,7 @@ local function push_sky_vis()
 	render_path:SetShaderParameter("SkyLight", sky_light)
 	render_path:SetShaderParameter("SkyTint", sky_tint)
 	render_path:SetShaderParameter("SkyTintAmount", sky_tint_amount)
+	render_path:SetShaderParameter("BounceLight", bounce_light)
 end
 
 -- How much of the sky is visible overhead: 1 out in the open, towards 0
@@ -691,6 +696,14 @@ end
 -- How much light is on the sky a surface reflects: one is the daylight the
 -- cube map was baked in, and a game with a clock turns it down as its night
 -- comes. Without it a pond at midnight mirrors a bright blue sky.
+-- Light bounced off the surroundings, in the zone ambient's units, which a
+-- surface receives in proportion to how much sky it does not see: what
+-- lights a cave by day. Nothing until a client sets it.
+function M.set_bounce_light(r, g, b)
+	bounce_light = magic.Vector3(math.max(0, r), math.max(0, g), math.max(0, b))
+	declare_countdown = 0
+end
+
 function M.set_sky_light(k)
 	if k == nil then
 		return

@@ -196,20 +196,24 @@ local MOON_BRIGHTNESS = 1.0
 -- alone. The metering takes the absolute scale; what these set is the
 -- ratio of sun to sky to moon, which is what contrast is made of.
 --   sun_e0, sun_tau  the sun's irradiance normal to it, E0 * exp(-tau /
---                    sin(elevation)): about 100 at 64 degrees (the
---                    snow at 10:00), half that at ten degrees
+--                    sin(elevation)): 135 at 64 degrees, which is what
+--                    the render's snow at 10:00 reads (35 off an
+--                    albedo of 0.9), half that at ten degrees
 --   sky_zenith,      the sky's radiance at the zenith and the horizon
---   sky_horizon      by day -- (3.1, 5.9, 10.5) and about 1.6 times
---                    that at 13:00 -- fading over the last twelve
---                    degrees of the sun's elevation
+--   sky_horizon      by day: a patch thirty degrees up reads 7.7 in
+--                    the render, fading over the last twelve degrees
+--                    of the sun's elevation
+--   bounce           light off the surroundings where the sky does not
+--                    reach, as a share of the sky's mean (term 2)
 --   moon_e           the moon lamp's irradiance, the render's own
 --   night_sky        what the sky is with the sun down: a floor for
 --                    airglow, since Nishita gives none and the night's
 --                    target is a sky under a fortieth of moonlit snow
 -- simplified: the sky keeps Luanti's hue at this radiance, and the sun
 -- its colour below; the colours are the terms after this one.
-local PHYS = {sun_e0 = 120, sun_tau = 0.15, sky_zenith = 5.5,
-		sky_horizon = 9.0, moon_e = 0.0025, night_sky = 0.00005}
+local PHYS = {sun_e0 = 160, sun_tau = 0.15, sky_zenith = 6.5,
+		sky_horizon = 10.5, moon_e = 0.0025, night_sky = 0.00005,
+		bounce = 0.13}
 -- The sky's radiance factor at a sun height (sin elevation): full by
 -- day, gone over the last twelve degrees, the floor below
 function PHYS.sky(height)
@@ -1318,12 +1322,21 @@ local function update_sky(dt)
 		-- two-term ambient ([PBR_FIT] term 2): one colour for the whole
 		-- hemisphere, no ground bounce yet.
 		local f = PHYS.sky(height)
+		-- Cosine-weighted over the dome, as a horizontal face sees it:
+		-- two thirds the zenith's, a third the horizon's
 		local mean = PHYS.night_sky +
-				((PHYS.sky_zenith + PHYS.sky_horizon) / 2 - PHYS.night_sky) * f
+				((2 * PHYS.sky_zenith + PHYS.sky_horizon) / 3 - PHYS.night_sky) * f
 		local c = blend(NIGHT_AMBIENT, SKY_AMBIENT, day)
 		local lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
 		local k = lum > 1e-6 and mean / lum or 0
 		zone.ambientColor = magic.Color(c.r * k, c.g * k, c.b * k)
+		-- And what a face the sky does not reach gets instead: light off
+		-- the surroundings, a share of the sky's mean in its hue -- the
+		-- second term ([PBR_FIT] term 2), fitted to the render's cave
+		-- mouth. simplified: one share for the whole day; the render's
+		-- cave at other hours is what would fit it further.
+		voxel_shading.set_bounce_light(c.r * k * PHYS.bounce,
+				c.g * k * PHYS.bounce, c.b * k * PHYS.bounce)
 	end
 	-- And the fog with it. This is the one thing the cave sky needs that is
 	-- not per direction, so it takes the mean of the same cube: underground

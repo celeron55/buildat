@@ -110,6 +110,18 @@
 #include "IBL.glsl"
 #line 30010
 
+// Light bounced off the surroundings, in the same units as the zone's
+// ambient, reaching a surface in proportion to how much sky it does not
+// see: the second term of the ambient ([PBR_FIT] term 2), so that a cave
+// is lit by the day outside it rather than black, and by nothing at
+// night. The client sets it with the hour; unset it reads as zero and the
+// shader is what it was. The mesher's own bounce (0.055, the lamps' unit)
+// stays in the vertex colour beside it and is small in these units.
+// simplified: no hemisphere weighting -- a vertical face in the open gets
+// no ground bounce, since its sky visibility is one. The upgrade is a
+// ground radiance times (1 - n.y) / 2 on top, once the render says how much.
+uniform vec3 cBounceLight;
+
 #if defined(NORMALMAP)
     varying vec4 vTexCoord;
     varying vec4 vTangent;
@@ -243,7 +255,8 @@ void VS()
             vTexCoord2 = iTexCoord1;
         #else
             vVertexLight = GetAmbient(GetZonePos(worldPos)) *
-                ShapeSkylight(iColor.a) + iColor.rgb;
+                ShapeSkylight(iColor.a) + iColor.rgb +
+                cBounceLight * (1.0 - ShapeSkylight(iColor.a));
         #endif
         vSkyVisibility = ShapeSkylight(iColor.a);
 
