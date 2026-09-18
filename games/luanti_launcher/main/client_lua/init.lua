@@ -1233,7 +1233,12 @@ local function apply_sky_of_hour()
 	-- night sky -- it is mixed in wherever the sky-visibility cube says a
 	-- direction is less than open, which outdoors is most of the low sky.
 	world_sky:set_indoors(indoors_of(1), sky_now.lit or 1)
-	world_sky:set_auto_dim(game_sky.auto_dim_skybox ~= false)
+	-- The dim is Luanti's stand-in for the eye adapting to a cave, and
+	-- pbr has the real thing in the meter: dimmed by the gate and keyed by
+	-- the meter, the sky through a cave mouth read under its lit rim
+	-- ([PBR_FIT], cave_opening). The parity modes keep it.
+	world_sky:set_auto_dim(sky_now.unlit and
+			game_sky.auto_dim_skybox ~= false or false)
 
 	-- The clouds are white because the sun is on them, so they go with it --
 	-- by the same brightness everything else up there goes by, which is what
@@ -1425,14 +1430,15 @@ local function update_sky(dt)
 		voxel_shading.set_bounce_light(c.r * k * PHYS.bounce,
 				c.g * k * PHYS.bounce, c.b * k * PHYS.bounce)
 		-- And the ground as the lower hemisphere sees it: its albedo
-		-- times what falls on it, the sky on all of it and a tenth of
-		-- the sun, over pi. A tenth, not the half that is lit on
-		-- average: the ground a shaded wall faces is in the same shadow
-		-- it is, and the base pass has no shadow map to say which --
-		-- half the sun made a shaded dirt row 2.7 times the render's
-		-- ([PBR_FIT], contrast_dirt). The lit wall's warm bounce is the
-		-- price. simplified: one albedo for every ground.
-		local sun = PHYS.sun(height) * math.max(height, 0) * 0.1 / math.pi
+		-- times what falls on it, the sky on all of it and a third of
+		-- the sun, over pi. A third, not the half that is lit on
+		-- average: the ground a shaded wall faces is partly in the same
+		-- shadow, and the base pass has no shadow map to say which. The
+		-- tenth that stood here was fitted to the pit beside vp1's stone
+		-- block and left the open shadow on the cliff top 1.75 times too
+		-- dark ([PBR_FIT], contrast_dirt against contrast_dirt_pit).
+		-- simplified: one albedo for every ground.
+		local sun = PHYS.sun(height) * math.max(height, 0) * 0.3 / math.pi
 		local sc = sky_lights.sun.color
 		voxel_shading.set_ground_light(
 				PHYS.ground.r * (sun * sc.r + c.r * k),

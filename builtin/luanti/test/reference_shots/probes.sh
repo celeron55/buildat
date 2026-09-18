@@ -118,10 +118,15 @@ echo "Hue is the verdict; mean is for TOO_BRIGHT and carries no pass mark."
 #   sky_to_sun  a sky patch over a sunlit white
 # name | picture | crop A | crop B (empty for a single crop) | what
 FIT="
-contrast_dirt|vp1_1300|64x10+280+530|48x10+216+530|vp1 dirt: one dirt row in the sun over the same row in the stone block's shadow
+contrast_dirt|vp1_1300|64x10+280+530|20x20+0+310|vp1 dirt: the lit row over a shaded dirt face under open sky, the cliff top at the left edge
+contrast_dirt_pit|vp1_1300|64x10+280+530|48x10+216+530|vp1 dirt: the lit row over the shaded row in the pit beside the stone block, hemmed in on three sides
 incidence_dirt|vp1_1300|40x12+957+690|40x12+666+564|vp1 dirt: a sunlit side over a side facing the camera -- the face-shade table and the sun's direction
 contrast_snow|vp5_1000|60x40+420+540|60x30+400+660|vp5 snow: the sunlit field over the tree's shadow
-contrast_cave|vp7_1300|60x40+560+560|60x40+200+300|vp7 the cave mouth's floor over its wall
+contrast_cave|vp7_1300|60x8+560+650|128x36+320+252|vp7 the sunlit floor step over the deep wall: the sun reaching in
+cave_wall_near|vp7_1300|60x40+560+560|128x36+320+252|vp7 the near wall over the deep wall: the interior's falloff
+cave_opening|vp7_1300|128x36+704+252|128x36+320+252|vp7 the sky through the mouth over the deep wall: the range the meter spans
+cave_rim|vp7_1300|64x36+768+324|128x36+320+252|vp7 the sunlit rim over the deep wall; the sky must read above the rim
+cave_outside|vp7_1300|64x36+512+432|128x36+320+252|vp7 the half-lit terrain through the mouth over the deep wall
 saturation_grass|vp1_1300|40x12+666+534||vp1 grass top, lit
 saturation_leaves|vp1_1300|30x20+390+160||vp1 canopy
 saturation_water|vp1_1300|80x40+1120+430||vp1 the sea

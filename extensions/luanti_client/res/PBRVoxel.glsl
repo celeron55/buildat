@@ -308,12 +308,15 @@ void VS()
             // the other half is the ground's, below. The nibble alone gave
             // a wall the whole dome, and a dirt side in a block's shadow
             // read 2.7 times the render's ([PBR_FIT], contrast_dirt).
-            // 0.35 for a wall rather than the hemisphere's half: the sky a
-            // wall faces is the horizon's band and the dome's dark side
-            // more than its zenith ([PBR_FIT] tuning, contrast_dirt)
+            // 0.8 for a wall, over the hemisphere's half: the 0.35 that
+            // stood here was fitted to the pit beside vp1's stone block, a
+            // shadow hemmed in on three sides, and left every open shadow
+            // 2.3 times too dark (contrast_dirt on the cliff top: render
+            // 2.76, pbr 6.26). The open shadow is the ambient's target and
+            // the pit is occlusion's ([PBR_FIT], user 2026-09-18).
             vec2 sky = SkyOfAlpha(iColor.a);
             vSkyAmbient = GetAmbient(GetZonePos(worldPos)) * sky.y *
-                    (0.35 + 0.65 * max(vNormal.y, 0.0));
+                    (0.8 + 0.2 * max(vNormal.y, 0.0));
             // The bounce falls off into a cave with the daylight Luanti
             // propagates, a level a node from the mouth, over a floor of
             // half: the render's cave is lit near the mouth and dark deep
@@ -324,7 +327,7 @@ void VS()
             // replace. Zero in the open, where the ground term is the
             // bounce.
             vVertexLight = iColor.rgb +
-                cBounceLight * (0.5 + 2.0 * sky.x) *
+                cBounceLight * (0.15 + 1.0 * sky.x) *
                     (1.0 - ShapeSkylight(sky.x)) +
                 cGroundLight * (0.5 - 0.5 * vNormal.y) *
                     ShapeSkylight(sky.x);
