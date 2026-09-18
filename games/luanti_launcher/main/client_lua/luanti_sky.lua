@@ -230,6 +230,11 @@ do
 	assert(M.orbit_tilt(nil, 45) == 0,
 			"the game has had an opinion, so ours stays out of it")
 	assert(M.orbit_tilt(0, nil) == 0, "and it may ask for zero")
+	-- The check itself was the game that had spoken: the stickiness it
+	-- proves outlived it, and every real client ran at zero. Forgotten
+	-- here so the first real call is the first.
+	game_asked_tilt = false
+	assert(M.orbit_tilt(nil, 22) == 22, "and the check leaves no opinion")
 	assert(M.sun_amount(12000) == 1 and M.moon_amount(12000) == 0, "noon")
 	assert(M.sun_amount(0) == 0 and M.moon_amount(0) == 1, "midnight")
 	assert(M.moon_amount(SUN_RISE) > 0.4,
