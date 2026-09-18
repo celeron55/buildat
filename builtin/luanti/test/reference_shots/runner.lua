@@ -188,6 +188,46 @@ local RANGE = tonumber(rawget(_G, "REFSHOT_RANGE")) or REFSET.range
 -- The fixture's own status line; declared here because pin_view() spares it
 local hud_id, hud_player, hud_said = nil, nil, nil
 
+-- The set's lamps ([LAMP_REF]), placed once the world around the views
+-- is in: from the view's eye along its look turned by the offsets, to
+-- the first solid node, and the lamp goes in the air before it. Placed
+-- before any state is shown, so every picture of that cave has it.
+local lamps_placed = false
+local function place_lamps()
+	if lamps_placed or not REFSET.lamps then
+		return
+	end
+	lamps_placed = true
+	for _, lamp in ipairs(REFSET.lamps) do
+		local v = VIEWS[lamp.view]
+		local h = math.rad(v.yaw + (lamp.yaw or 0))
+		local p = math.rad(-v.pitch - (lamp.pitch or 0))
+		local dir = {x = -math.sin(h) * math.cos(p), y = -math.sin(p),
+				z = math.cos(h) * math.cos(p)}
+		local last = nil
+		for t = 1, 64 do
+			local q = {x = math.floor(v.pos.x + dir.x * t + 0.5),
+					y = math.floor(v.pos.y + dir.y * t + 0.5),
+					z = math.floor(v.pos.z + dir.z * t + 0.5)}
+			local n = core.get_node_or_nil(q)
+			if not n then
+				break
+			end
+			local def = core.registered_nodes[n.name]
+			if def and def.walkable then
+				if last then
+					core.set_node(last, {name = lamp.node})
+					core.log("action", string.format(
+							"REFSHOT lamp %s at %d,%d,%d (vp%d, %d nodes out)",
+							lamp.node, last.x, last.y, last.z, lamp.view, t - 1))
+				end
+				break
+			end
+			last = q
+		end
+	end
+end
+
 local function pin_view(player)
 	core.settings:set("viewing_range", tostring(RANGE))
 	local sky = player:get_sky(true)
@@ -577,6 +617,7 @@ core.register_on_joinplayer(function(player)
 			core.log("action", "REFSHOT ready after " .. waited .. "s, " ..
 					n .. " of " .. #probes .. " places")
 			say("refshot: loaded, starting")
+			place_lamps()
 			show(1)
 			return
 		end

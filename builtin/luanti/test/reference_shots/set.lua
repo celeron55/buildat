@@ -57,6 +57,18 @@ rawset(_G, "REFSET", {
 		{pos = {x = 324.3, y = 1.0, z = -288.7}, yaw = 56.3, pitch = -20.0},
 	},
 
+	-- One lamp in the reference ([LAMP_REF]): a light source placed by
+	-- the fixture at the far end of the vp8 cave, so that the client's
+	-- lamp term has a number to be fitted to -- the render emits from
+	-- the node's tile at LAMP_RADIANCE in pathtrace_render.py. Placed
+	-- by marching from the view's eye along its look turned by the yaw
+	-- and pitch offsets (degrees, left and up) to the first solid node,
+	-- and set in the air before it: the top-left of the frame, far
+	-- enough that the bottom of the view stays dark.
+	lamps = {
+		{view = 8, node = "mcl_nether:glowstone", yaw = 22, pitch = 14},
+	},
+
 	-- Luanti's day as one whole unit. The fractions are the plan's own.
 	hours = {
 		["0545"] = 0.2396, ["1000"] = 0.4167, ["1300"] = 0.5417,
@@ -97,6 +109,8 @@ rawset(_G, "REFSET", {
 		{view = 5, hour = "0200", weather = "none"},
 		{view = 3, hour = "0545", weather = "none"},
 		{view = 2, hour = "0545", weather = "none"},
+		-- and the lamp's ([LAMP_REF])
+		{view = 8, hour = "1300", weather = "none"},
 	},
 	-- One dump per viewpoint at its primary hour, for [PATH_TRACE_REF].
 	-- Caves first: a later state that never draws must not drop them.
