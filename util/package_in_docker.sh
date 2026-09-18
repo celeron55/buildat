@@ -31,7 +31,7 @@ docker build -t "$image" "$here/util/docker/$target"
 tarball=$(mktemp)
 git -C "$here" archive --format=tar HEAD > "$tarball"
 docker run --rm -i \
-	-v "$out:/out" \
+	-v "$out:/out:z" \
 	-e "JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}" \
 	"$image" bash -c "
 		set -eu
@@ -39,6 +39,8 @@ docker run --rm -i \
 		xvfb-run -a -s '-screen 0 1280x720x24' util/package.sh $target $version;
 		status=\$?
 		cp Build/package/out/* /out/ 2>/dev/null || true
+		# And the smoke test's leavings, for reading a failure from outside
+		mkdir -p /out/smoke && cp /tmp/tmp.*/shot.png /tmp/tmp.*/*.log /out/smoke/ 2>/dev/null || true
 		exit \$status
 	" < "$tarball"
 rm -f "$tarball"

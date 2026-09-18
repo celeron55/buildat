@@ -118,10 +118,11 @@ smoke_test() {
 		echo "smoke test: the screenshot is black (mean $mean)" >&2
 		echo "--- client log, GL and errors:" >&2
 		grep -i "opengl\|GL\b\|glx\|error\|fail\|renderer\|resolution" "$dir/cli.log" | head -30 >&2
+		echo "--- client log, tail:" >&2
+		tail -40 "$dir/cli.log" >&2
 		exit 1
 	fi
 	echo "smoke test passed (screenshot mean $mean)"
-	rm -rf "$dir"
 }
 
 case "$target" in
