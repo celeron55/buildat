@@ -1398,11 +1398,14 @@ local function update_sky(dt)
 		voxel_shading.set_bounce_light(c.r * k * PHYS.bounce,
 				c.g * k * PHYS.bounce, c.b * k * PHYS.bounce)
 		-- And the ground as the lower hemisphere sees it: its albedo
-		-- times what falls on it, the sun on the half of it that is not
-		-- in shadow and the sky on all of it, over pi. The warm bounce
-		-- a terrace's side gets in the render. simplified: one albedo
-		-- for every ground, half the sun.
-		local sun = PHYS.sun(height) * math.max(height, 0) * 0.5 / math.pi
+		-- times what falls on it, the sky on all of it and a tenth of
+		-- the sun, over pi. A tenth, not the half that is lit on
+		-- average: the ground a shaded wall faces is in the same shadow
+		-- it is, and the base pass has no shadow map to say which --
+		-- half the sun made a shaded dirt row 2.7 times the render's
+		-- ([PBR_FIT], contrast_dirt). The lit wall's warm bounce is the
+		-- price. simplified: one albedo for every ground.
+		local sun = PHYS.sun(height) * math.max(height, 0) * 0.1 / math.pi
 		local sc = sky_lights.sun.color
 		voxel_shading.set_ground_light(
 				PHYS.ground.r * (sun * sc.r + c.r * k),
