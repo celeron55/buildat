@@ -154,10 +154,22 @@ static uint8_t clamp_byte(int v)
 static void copy_image(magic::Image *img, Canvas &dst)
 {
 	dst.reset(img->GetWidth(), img->GetHeight());
+	// Urho3D's GetPixel() reads a two-component image -- grey and alpha,
+	// which VoxeLibre's water is -- as r and g with the alpha left at one,
+	// so every liquid composed through here came out opaque
+	// ([LIQUID_SURFACE]). Read the bytes for that layout.
+	const unsigned comps = img->GetComponents();
+	const unsigned char *data = img->GetData();
 	for(int y = 0; y < dst.h; y++){
 		for(int x = 0; x < dst.w; x++){
-			magic::Color c = img->GetPixel(x, y);
 			uint8_t *p = dst.at(x, y);
+			if(comps == 2 && data){
+				const unsigned char *src = data + (y * dst.w + x) * 2;
+				p[0] = p[1] = p[2] = src[0];
+				p[3] = src[1];
+				continue;
+			}
+			magic::Color c = img->GetPixel(x, y);
 			p[0] = clamp_byte((int)(c.r_ * 255.0f + 0.5f));
 			p[1] = clamp_byte((int)(c.g_ * 255.0f + 0.5f));
 			p[2] = clamp_byte((int)(c.b_ * 255.0f + 0.5f));

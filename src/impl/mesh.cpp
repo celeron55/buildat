@@ -1457,19 +1457,27 @@ static float liquid_corner_top(VoxelVolume &volume,
 		if(cdef->is_liquid && cdef->shape_group == def->shape_group){
 			// How high this column stands is its own param's business, the
 			// same as the voxel being meshed: Luanti puts a flowing liquid's
-			// level in param2
+			// level in param2. A column with no level -- a source -- is
+			// full height and says so for the whole corner, Luanti's
+			// getCornerLevel() rule ([LIQUID_SURFACE]); the mean is of the
+			// flowing columns alone.
 			const interface::VoxelVariant *cvar = fmt.param.bound() ?
 					cdef->variant(fmt.param.get(cv)) : nullptr;
-			sum += cvar ? cvar->liquid_top : cdef->liquid_top;
+			if(!cvar)
+				return 0.5f;
+			sum += cvar->liquid_top;
 			count++;
 		} else if(cdef->fully_empty){
 			empty++;
-			if(empty >= 2)
-				return -0.5f;
 		}
 	}
+	// Luanti's numbers: two air columns and the corner is at the bottom,
+	// a fiftieth up (0.2 / BS); no flowing column at all and it is at the
+	// middle
+	if(empty >= 2)
+		return -0.5f + 0.02f;
 	if(count == 0)
-		return def_top;
+		return 0.0f;
 	return sum / count;
 }
 

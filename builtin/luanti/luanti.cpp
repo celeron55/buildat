@@ -3134,10 +3134,14 @@ struct Module: public interface::Module, public luanti::Interface
 	// is_liquid -- so a slope is a slope and not a flight of steps.
 	static const int LIQUID_LEVELS = 8;
 
+	// Luanti's own: -0.5 + (level - (8 - range) + 0.5) / range, so a level-7
+	// node at VoxeLibre's range of 7 sits at 0.43, a fourteenth down --
+	// the dip beside every source that is the shoreline and the river.
+	// The early return to 0.5 for level 7 that stood here flattened it
+	// ([LIQUID_SURFACE]); the corner rule in the mesher is where a
+	// source's full height wins, not here.
 	static float liquid_level_top(int level, int range)
 	{
-		if(level >= LIQUID_LEVELS - 1)
-			return 0.5f;
 		if(range < 1)
 			range = 1;
 		if(range > LIQUID_LEVELS)
