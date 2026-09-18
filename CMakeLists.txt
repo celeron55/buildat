@@ -474,7 +474,20 @@ if(BUILD_SERVER)
 	# The whole generated include tree, not Urho3D.h alone: a module's
 	# <lua.h> comes from Build/include/Urho3D/ThirdParty/<Lua>, which the
 	# server adds to the module compiler's paths
-	install(DIRECTORY "${URHO3D_BUILD_DIR}/include" DESTINATION "${DST_SHARE}/Urho3D/Build")
+	# Dereferenced: Urho3D's build makes that tree of symlinks into its
+	# source and build directories, absolute, which in an archive point
+	# at the machine that built it ([PACKAGING], the xdg tarball on a
+	# second machine: every module failed on <Urho3D/Urho3D.h>)
+	install(CODE "
+		file(REMOVE_RECURSE \"\${CMAKE_INSTALL_PREFIX}/${DST_SHARE}/Urho3D/Build/include\")
+		file(MAKE_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}/${DST_SHARE}/Urho3D/Build\")
+		execute_process(COMMAND cp -rL \"${URHO3D_BUILD_DIR}/include\"
+			\"\${CMAKE_INSTALL_PREFIX}/${DST_SHARE}/Urho3D/Build/include\"
+			RESULT_VARIABLE r)
+		if(NOT r EQUAL 0)
+			message(FATAL_ERROR \"copying Urho3D's include tree dereferenced failed\")
+		endif()
+	")
 	if(WIN32)
 		install(DIRECTORY "${COMPILER_USR_PATH}/bin" DESTINATION "${DST_COMPILER}")
 		install(DIRECTORY "${COMPILER_USR_PATH}/i686-w64-mingw32" DESTINATION "${DST_COMPILER}")
