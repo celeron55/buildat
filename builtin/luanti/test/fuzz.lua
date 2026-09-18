@@ -3,7 +3,7 @@
 -- what must hold whatever it does, once a second, and logs one line per
 -- second for the runner to read afterwards:
 --
---   fuzz: t=12 pos=(1,8,-3) moved=14.2 hp=20 dug=3 placed=1 picked=2 trees=17 objs=4 step=0.08 over=0
+--   fuzz: t=12 pos=(1,8,-3) moved=14.2 hp=20 dug=3 placed=1 picked=2 trees=17 objs=4 step=0.08 over=0 deaths=0
 --
 -- and `fuzz: FAILED <why>` on the first invariant that breaks. No oracle:
 -- the two engines diverge within seconds under physics at the frame rate,
@@ -29,6 +29,9 @@ local dug, placed, picked = 0, 0, 0
 -- second. `over` counts the seconds the peak was over the ceiling.
 local STEP_CEILING_S, STEP_FAIL_S = 0.25, 1.0
 local over = 0
+-- Deaths, and when the current one began
+local deaths, dead_since = 0, nil
+local said_no_trees = false
 -- How many seconds each nearby section has been loaded and ungenerated
 local ungenerated_for = {}
 
@@ -99,19 +102,47 @@ core.register_on_joinplayer(function(player)
 			-- mushroom island has huge mushrooms where a forest has trees
 			-- (seed 3 spawns on one), and both are schematic decorations,
 			-- which is the mechanism the fault was in.
+			-- And only where there is grass: a desert or an ocean spawn
+			-- has no trees and is not the fault (seed 6 had neither).
 			local _, counts = core.find_nodes_in_area(
 					vector.subtract(start, 40), vector.add(start, 40),
-					{"group:tree", "group:huge_mushroom"})
-			for _, n in pairs(counts) do
-				trees = trees + n
+					{"group:tree", "group:huge_mushroom", "group:grass_block"})
+			local grass = 0
+			for name, n in pairs(counts) do
+				if core.get_item_group(name, "grass_block") > 0 then
+					grass = grass + n
+				else
+					trees = trees + n
+				end
 			end
-			if trees == 0 and core.get_modpath("mcl_core") then
-				fail("no group:tree or huge mushroom within 40 nodes of spawn")
+			-- A warning and not a failure: seed 6 spawns on a plain with
+			-- 1039 grass nodes and no tree in the box, and VoxeLibre's
+			-- plains oaks are sparse enough that a box of that size has
+			-- none once in a dozen worlds. The failure [NO_TREES] was is
+			-- caught by test/vltree.lua on the chunks it generates.
+			if trees == 0 and grass > 20 and core.get_modpath("mcl_core") and
+					not said_no_trees then
+				said_no_trees = true
+				core.log("warning", "fuzz: grass and no group:tree or huge " ..
+						"mushroom within 40 nodes of spawn")
 			end
 		end
+		-- A death is the game working -- a fall, lava, a mob -- and the
+		-- run goes on: the fixture presses the button the death screen
+		-- would, two seconds later, and counts. What would be a fault is
+		-- a death nothing explains, which is what the count and the
+		-- pictures are for.
 		local hp = player:get_hp()
-		if hp <= 0 then
-			fail("the player died at t=" .. t)
+		if hp <= 0 and not dead_since then
+			dead_since = t
+			deaths = deaths + 1
+			core.log("action", "fuzz: died at t=" .. t .. " (" .. deaths ..
+					" so far)")
+		elseif hp <= 0 and t - dead_since >= 2 then
+			player:respawn()
+			dead_since = nil
+		elseif hp > 0 then
+			dead_since = nil
 		end
 		-- After a minute a random walk has gone somewhere; a player who
 		-- has not is a client whose keys never arrived ([HELD_KEY_FLAKE])
@@ -178,9 +209,9 @@ core.register_on_joinplayer(function(player)
 		local objs = #core.get_objects_inside_radius(pos, 16)
 		core.log("action", string.format(
 				"fuzz: t=%d pos=%s moved=%.1f hp=%d dug=%d placed=%d " ..
-				"picked=%d trees=%d objs=%d step=%.2f over=%d", t,
+				"picked=%d trees=%d objs=%d step=%.2f over=%d deaths=%d", t,
 				core.pos_to_string(vector.round(pos)), moved, hp, dug, placed,
-				picked, trees, objs, peak, over))
+				picked, trees, objs, peak, over, deaths))
 		core.after(1, tick)
 	end
 	core.after(5, tick)
