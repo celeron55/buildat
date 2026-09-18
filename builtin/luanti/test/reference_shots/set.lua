@@ -95,6 +95,7 @@ rawset(_G, "REFSET", {
 		{view = 1, hour = "1300", weather = "none"},
 		{view = 1, hour = "0545", weather = "none"},
 		{view = 5, hour = "0200", weather = "none"},
+		{view = 3, hour = "0545", weather = "none"},
 	},
 	-- One dump per viewpoint at its primary hour, for [PATH_TRACE_REF].
 	-- Caves first: a later state that never draws must not drop them.

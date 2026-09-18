@@ -1109,6 +1109,12 @@ local function apply_sky_of_hour()
 				PHYS.night_sky + (PHYS.sky_horizon - PHYS.night_sky) * f)
 	end
 	world_sky:set_look(zenith_now, horizon_now, nil)
+	-- The dome's hue for the ambient: two parts zenith, one horizon, the
+	-- cosine weighting a face sees -- a dawn's warm horizon reaches a
+	-- wall, which is what the render's dawn dirt face is lit by
+	sky_now.dome = {r = (2 * zenith_now.r + horizon_now.r) / 3,
+			g = (2 * zenith_now.g + horizon_now.g) / 3,
+			b = (2 * zenith_now.b + horizon_now.b) / 3}
 
 	-- What the sun shines with now: its own colour, going red while it is
 	-- crossing the horizon, which is where that colour belongs. It does not
@@ -1347,7 +1353,10 @@ local function update_sky(dt)
 		-- radiance -- the horizon's band is bright but at a grazing
 		-- weight. So the zenith's, not a mean that counts the horizon.
 		local mean = PHYS.night_sky + (PHYS.sky_zenith - PHYS.night_sky) * f
-		local c = blend(NIGHT_AMBIENT, SKY_AMBIENT, day)
+		-- In the drawn sky's own hue, which is what a shadow on snow is
+		-- lit by: the render's reads (1.6, 3.0, 5.3), the sky's blue,
+		-- where a grey ambient gave a grey shadow.
+		local c = sky_now.dome or blend(NIGHT_AMBIENT, SKY_AMBIENT, day)
 		local lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
 		local k = lum > 1e-6 and mean / lum or 0
 		zone.ambientColor = magic.Color(c.r * k, c.g * k, c.b * k)

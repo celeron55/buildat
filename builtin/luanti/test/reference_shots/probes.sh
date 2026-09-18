@@ -117,11 +117,11 @@ echo "Hue is the verdict; mean is for TOO_BRIGHT and carries no pass mark."
 # name | picture | crop A | crop B (empty for a single crop) | what
 FIT="
 contrast_dirt|vp1_1300|40x20+560+525|40x20+250+440|vp1 dirt: a sunlit terrace face over the north cliff
-contrast_snow|vp5_1000|60x40+420+540|60x30+640+670|vp5 snow: the sunlit field over the tree's shadow
+contrast_snow|vp5_1000|60x40+420+540|60x30+400+660|vp5 snow: the sunlit field over the tree's shadow
 contrast_cave|vp7_1300|60x40+560+560|60x40+200+300|vp7 the cave mouth's floor over its wall
 saturation_grass|vp1_1300|60x20+640+465||vp1 grass top
 saturation_leaves|vp1_1300|30x20+390+160||vp1 canopy
-saturation_water|vp1_1300|60x30+1150+620||vp1 the sea
+saturation_water|vp1_1300|80x40+1120+430||vp1 the sea
 saturation_flowers|vp5_1000|30x30+620+440||vp5 the red flowers
 sky_to_sun|vp5_1000|60x40+20+20|60x40+420+540|vp5 a sky patch over the sunlit snow
 "
@@ -182,6 +182,14 @@ sky_glow_0545|vp1_0545|60x40+200+30|vp1 the dawn glow, 05:45
 sky_horizon_0545|vp1_0545|60x20+1100+225|vp1 the horizon opposite the dawn
 sky_night_0200|vp5_0200|60x40+20+20|vp5 away from the moon, 02:00
 "
+# Water's reflection at a grazing angle (user, 2026-09-18): vp3 at 05:45,
+# the sun behind the camera, the far water near the horizon over the near
+# water below it, per channel -- the Fresnel and the reflected sky in one
+# number, which is the water's roughness and spec and the cube it reflects.
+WATER="
+water_far|vp3_0545|120x15+40+355|vp3 the water near the horizon, 05:45
+water_near|vp3_0545|120x30+80+490|vp3 the near water, 05:45
+"
 echo
 echo "=== the sky, in linear light: render | pbr (ratio to the render)"
 echo "$SKY" | while IFS='|' read -r name pic crop why; do
@@ -209,6 +217,16 @@ done
 DAWN="
 dawn_sun_dirt|vp1|40x10+2+608|vp1 the foreground block's lit face, 05:45 over 13:00
 "
+echo
+echo "=== water's reflection, per channel: far over near, render | pbr"
+r=""; p=""
+for s in pathtrace_r150 module_pbr_r150; do
+	f=$(file_of "$s" "vp3_0545")
+	[ -f "$f" ] || { echo "  (no $s)"; continue; }
+	far=$(linear_rgb "$f" "120x15+40+355"); near=$(linear_rgb "$f" "120x30+80+490")
+	echo "$far $near" | awk -v s="$s" '{printf "  %-18s far %.3f %.3f %.3f  near %.3f %.3f %.3f  far/near %.2f %.2f %.2f\n", s, $1,$2,$3, $4,$5,$6, $1/($4+1e-9), $2/($5+1e-9), $3/($6+1e-9)}'
+done
+
 echo
 echo "=== the low sun: R/B at 05:45 over R/B at 13:00, render | pbr (ratio to the render)"
 echo "$DAWN" | while IFS='|' read -r name vp crop why; do
