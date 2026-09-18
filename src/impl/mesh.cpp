@@ -922,7 +922,11 @@ static void face_vertex_colors(VoxelVolume &volume,
 		float sky_shade = ao * hemi * terrain * FACE_SHADE[face_id];
 		float bounce_shade = (1.0f - BOUNCE_AO + BOUNCE_AO * ao) *
 				FACE_SHADE[face_id] * (1.0f - sky_f);
-		float lamp_shade = lamp_f * sky_shade;
+		// A lamp is shaded by the corner it sits in and the face, not by
+		// the terrain cap: the cap is the hill on the sky, and under a
+		// cave's roof it is zero, which put out every lamp in a cave
+		// ([LAMP_REF]: the glowstone lit nothing).
+		float lamp_shade = lamp_f * ao * hemi * FACE_SHADE[face_id];
 		// A client with a horizon map lights the enclosed by its own bounce
 		// term, in the sky's units of the hour; the constant here is in
 		// display units and at night, when the sky is a fifty-thousandth of
