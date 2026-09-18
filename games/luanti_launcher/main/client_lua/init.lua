@@ -496,6 +496,11 @@ do
 	-- the key free, a term turned off re-exposes everything else
 	local key = tonumber(buildat.get_env("BUILDAT_LUANTI_KEY") or "")
 	if key then AUTO_EXPOSURE.lum_range = {key, key} end
+	-- BUILDAT_LUANTI_ADAPT=<rate>: the adaptation rate, for a run that
+	-- asks whether the meter had settled
+	AUTO_EXPOSURE.adapt_rate = tonumber(
+			buildat.get_env("BUILDAT_LUANTI_ADAPT") or "") or
+			AUTO_EXPOSURE.adapt_rate
 	rp:SetShaderParameter("AutoExposureLumRange",
 			magic.Vector2(AUTO_EXPOSURE.lum_range[1],
 			AUTO_EXPOSURE.lum_range[2]))

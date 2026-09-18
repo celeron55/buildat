@@ -19,10 +19,17 @@ uniform vec2 cLum64InvSize;
 uniform vec2 cLum16InvSize;
 uniform vec2 cLum4InvSize;
 
+// The four corners, one each. Urho3D's copy takes (1, -1) twice and
+// (-1, -1) never, and the skew compounds down the chain: at the last
+// step the four taps of one texel weigh the frame's top-right quarter
+// twice, its bottom-left not at all, and the key leans on the sky. At
+// vp1 13:00 that keyed 3.7 where the frame's geometric mean is 2.4, and
+// every lit crop read 0.6 of the render's while the radiances matched
+// with the key pinned ([PBR_FIT], the level).
 float GatherAvgLum(sampler2D texSampler, vec2 texCoord, vec2 texelSize)
 {
     float lumAvg = 0.0;
-    lumAvg += texture2D(texSampler, texCoord + vec2(1.0, -1.0) * texelSize).r;
+    lumAvg += texture2D(texSampler, texCoord + vec2(-1.0, -1.0) * texelSize).r;
     lumAvg += texture2D(texSampler, texCoord + vec2(-1.0, 1.0) * texelSize).r;
     lumAvg += texture2D(texSampler, texCoord + vec2(1.0, 1.0) * texelSize).r;
     lumAvg += texture2D(texSampler, texCoord + vec2(1.0, -1.0) * texelSize).r;
