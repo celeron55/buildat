@@ -103,3 +103,51 @@ echo "$PROBES" | while IFS='|' read -r name pic crop why; do
 done
 echo
 echo "Hue is the verdict; mean is for TOO_BRIGHT and carries no pass mark."
+
+# [PBR_FIT] part 1: what the fit is run against, in linear light -- the
+# 16-bit sRGB PNG undone to linear (magick's RGB colourspace) on both sides.
+# simplified: the client's frame is read after its tonemap, not before it,
+# and the tonemap is not inverted; the render's PNG has the same metering
+# and no tonemap, so the ratios below carry the tonemap's own compression
+# on the pbr side until part 2's last term replaces it. Each row is a
+# ratio, render and pbr side by side, per crop pair:
+#   contrast    sunlit face over shadowed face of one material
+#   saturation  max over min channel of a coloured surface
+#   sky_to_sun  a sky patch over a sunlit white
+# name | picture | crop A | crop B (empty for a single crop) | what
+FIT="
+contrast_dirt|vp1_1300|40x20+560+525|40x20+250+440|vp1 dirt: a sunlit terrace face over the north cliff
+contrast_snow|vp5_1000|60x40+420+540|60x30+640+670|vp5 snow: the sunlit field over the tree's shadow
+contrast_cave|vp7_1300|60x40+560+560|60x40+200+300|vp7 the cave mouth's floor over its wall
+saturation_grass|vp1_1300|60x20+640+465||vp1 grass top
+saturation_leaves|vp1_1300|30x20+390+160||vp1 canopy
+saturation_water|vp1_1300|60x30+1150+620||vp1 the sea
+saturation_flowers|vp5_1000|30x30+620+440||vp5 the red flowers
+sky_to_sun|vp5_1000|60x40+20+20|60x40+420+540|vp5 a sky patch over the sunlit snow
+"
+
+linear_rgb() {   # file crop -> "r g b" in linear light
+	magick "$1" -crop "$2" +repage -colorspace RGB \
+			-format '%[fx:mean.r] %[fx:mean.g] %[fx:mean.b]' info: 2>/dev/null
+}
+
+echo
+echo "=== the fit, in linear light: render | pbr (ratio to the render)"
+echo "$FIT" | while IFS='|' read -r name pic a b why; do
+	[ -n "$name" ] || continue
+	line=$(printf "  %-18s" "$name")
+	for s in pathtrace_r150 module_pbr_r150; do
+		f=$(file_of "$s" "$pic")
+		[ -f "$f" ] || { line="$line  (no $s)"; continue; }
+		ra=$(linear_rgb "$f" "$a")
+		if [ -n "$b" ]; then
+			rb=$(linear_rgb "$f" "$b")
+			v=$(echo "$ra $rb" | awk '{la=0.2126*$1+0.7152*$2+0.0722*$3; lb=0.2126*$4+0.7152*$5+0.0722*$6; printf "%.3f", la/(lb+1e-9)}')
+		else
+			v=$(echo "$ra" | awk '{mx=$1; mn=$1; for(i=2;i<=3;i++){if($i>mx)mx=$i; if($i<mn)mn=$i}; printf "%.3f", mx/(mn+1e-9)}')
+		fi
+		line="$line  $v"
+	done
+	echo "$line" | awk '{ if (NF >= 3 && $2+0 > 0) printf "%s  (%.2f)  ", $0, $3/$2; else printf "%s  ", $0; }'
+	echo "-- $why"
+done
