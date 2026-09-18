@@ -2453,16 +2453,10 @@ struct CApp: public App, public magic::Application
 				interface::fs::path_exists(dir+"/"+name); i++)
 			name = ss_("meshdump_")+stamp+"_"+itos(i)+".obj.gz";
 		const ss_ path = dir+"/"+name;
-		if(lua_isstring(L, 1)){
-			size_t alen = 0;
-			const char *a = lua_tolstring(L, 1, &alen);
-			FILE *af = fopen((dir+"/"+name.substr(0, name.size() - 7)+
-					"_atlas.json").c_str(), "w");
-			if(af){
-				fwrite(a, 1, alen, af);
-				fclose(af);
-			}
-		}
+		// The atlas account the caller hands over, written beside the dump
+		// once the textures below are named: its last object is
+		// "textures", the read-back file of each atlas texture by address
+		const ss_ atlas_json = lua_isstring(L, 1) ? ss_(lua_tostring(L, 1)) : "";
 
 		gzFile f = gzopen(path.c_str(), "wb1");
 		if(!f){
@@ -2541,6 +2535,31 @@ struct CApp: public App, public magic::Application
 			}
 			tex_names[tex] = png;
 			return png;
+		};
+		auto write_atlas_json = [&](){
+			if(atlas_json.empty())
+				return;
+			ss_ j = atlas_json;
+			// Into the top-level object: replace its closing brace
+			size_t end = j.rfind('}');
+			if(end == ss_::npos)
+				return;
+			std::ostringstream os;
+			os<<", \"textures\": {";
+			bool first = true;
+			for(const auto &p : tex_names){
+				os<<(first ? "\n" : ",\n")<<"\""<<(uintptr_t)p.first<<"\": \""
+						<<p.second<<"\"";
+				first = false;
+			}
+			os<<"\n}}\n";
+			j = j.substr(0, end) + os.str();
+			FILE *af = fopen((dir+"/"+name.substr(0, name.size() - 7)+
+					"_atlas.json").c_str(), "w");
+			if(af){
+				fwrite(j.data(), 1, j.size(), af);
+				fclose(af);
+			}
 		};
 
 		magic::PODVector<magic::CustomGeometry*> geoms;
@@ -2621,6 +2640,7 @@ struct CApp: public App, public magic::Application
 		if(!buf.empty())
 			gzwrite(f, buf.data(), (unsigned)buf.size());
 		gzclose(f);
+		write_atlas_json();
 		if(!to_write.empty())
 			self->queue_textures(to_write);
 		log_i(MODULE, "dump_meshes %s: %u geoms, %u verts, %u tris in %.1f s, "

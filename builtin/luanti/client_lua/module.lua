@@ -2606,8 +2606,14 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 					lines[#lines + 1] = q(resource) .. ": " .. q(expr)
 				end
 			end
-			atlas = '{"segments": ' .. atlas .. ', "composed": {\n' ..
-					table.concat(lines, ",\n") .. '\n}}\n'
+			-- And which segments a light-emitting node draws, with its
+			-- light_source, so the render can emit from them ([LAMP_REF])
+			local vreg = voxelworld.get_voxel_registry()
+			local lights = vreg and vreg.describe_lights and
+					vreg:describe_lights(reg) or "[]"
+			atlas = '{"segments": ' .. atlas .. ', "lights": ' .. lights ..
+					', "composed": {\n' .. table.concat(lines, ",\n") ..
+					'\n}}\n'
 		end
 		mesh = buildat.dump_meshes(atlas) or ""
 	end

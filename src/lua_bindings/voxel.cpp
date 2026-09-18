@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "core/log.h"
 #include "interface/voxel.h"
+#include "interface/atlas.h"
 #include "interface/voxel_selector.h"
 #include "lua_bindings/util.h"
 #include "lua_bindings/luabind_util.h"
@@ -10,6 +11,7 @@
 #include <luabind/adopt_policy.hpp>
 #include <luabind/object.hpp>
 #include <tolua++.h>
+#include <sstream>
 #include <Vector2.h>
 #define MODULE "lua_bindings"
 
@@ -462,6 +464,40 @@ static const interface::VoxelDefinition* vreg_get_by_id(VoxelRegistry &reg,
 	return reg.get((interface::VoxelTypeId)id);
 }
 
+// describe_lights(atlas_reg) -> JSON: every atlas segment a light-emitting
+// voxel's faces draw, with the voxel's light_source (1..15), for a mesh
+// dump's reader -- the path trace gives those tiles an emission
+// ([LAMP_REF]). Main thread only, since the cache is built with the atlas.
+static ss_ vreg_describe_lights(VoxelRegistry &reg, sp_<AtlasRegistry> atlas_reg)
+{
+	std::ostringstream os;
+	os<<"[";
+	bool first = true;
+	const size_t n = reg.get_count();
+	for(size_t id = 1; id <= n; id++){
+		const interface::VoxelDefinition *def =
+				reg.get((interface::VoxelTypeId)id);
+		if(!def || def->light_source == 0)
+			continue;
+		const interface::CachedVoxelDefinition *c = reg.get_cached(
+				(interface::VoxelTypeId)id, atlas_reg.get());
+		if(!c)
+			continue;
+		for(size_t face = 0; face < 6; face++){
+			const interface::AtlasSegmentReference &ref = c->textures[face];
+			if(ref.atlas_id == interface::ATLAS_UNDEFINED)
+				continue;
+			os<<(first ? "\n" : ",\n")<<"{\"atlas\":"<<ref.atlas_id
+					<<",\"segment\":"<<ref.segment_id<<",\"light\":"
+					<<(int)def->light_source<<",\"node\":\""
+					<<def->name.block_name<<"\"}";
+			first = false;
+		}
+	}
+	os<<"\n]\n";
+	return os.str();
+}
+
 // vdef.variants: what the voxel's param does to how it is drawn, as an array
 // of variants. One is
 //
@@ -678,6 +714,7 @@ void init_voxel(lua_State *L)
 			.def("add_voxel", &VoxelRegistry::add_voxel)
 			.def("get_count", &VoxelRegistry::get_count)
 			.def("get_by_id", &vreg_get_by_id)
+			.def("describe_lights", &vreg_describe_lights)
 			.def("get_by_name", (const VoxelDefinition*(VoxelRegistry::*)
 					(const VoxelName&)) &VoxelRegistry::get)
 			.def("serialize", (ss_(VoxelRegistry::*) ())

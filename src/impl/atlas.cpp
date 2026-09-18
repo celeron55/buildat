@@ -652,6 +652,13 @@ struct CAtlasRegistry: public AtlasRegistry
 		for(size_t a = 1; a < m_defs.size(); a++){
 			const AtlasDefinition &def = m_defs[a];
 			const magic::IntVector2 seg_size = def.segment_resolution;
+			// The atlas's texture, by address: a mesh dump names the
+			// textures it reads back by that same address (dump_meshes'
+			// "textures"), which is how a reader joins a segment to its
+			// meshdump_texN.png ([LAMP_REF])
+			const AtlasCache *cache = a < m_cache.size() ? &m_cache[a] : nullptr;
+			const uintptr_t tex = (cache && cache->texture) ?
+					(uintptr_t)cache->texture.Get() : 0;
 			for(size_t i = 0; i < def.segments.size(); i++){
 				const AtlasSegmentDefinition &sd = def.segments[i];
 				// The same placement upload_box() uses: a segment's cell is
@@ -660,8 +667,8 @@ struct CAtlasRegistry: public AtlasRegistry
 				const int iy = i / def.total_segments.x_;
 				const int x0 = ix * seg_size.x_ * 2 + seg_size.x_ / 2;
 				const int y0 = iy * seg_size.y_ * 2 + seg_size.y_ / 2;
-				os<<(first ? "\n" : ",\n")<<"{\"atlas\":"<<a<<",\"segment\":"<<i
-						<<",\"x\":"<<x0<<",\"y\":"<<y0<<",\"w\":"<<seg_size.x_
+				os<<(first ? "\n" : ",\n")<<"{\"atlas\":"<<a<<",\"texture\":"
+						<<tex<<",\"segment\":"<<i<<",\"x\":"<<x0<<",\"y\":"<<y0<<",\"w\":"<<seg_size.x_
 						<<",\"h\":"<<seg_size.y_<<",\"resource\":\""
 						<<json_escaped(sd.resource_name)<<"\",\"select\":["
 						<<sd.select_segment.x_<<","<<sd.select_segment.y_

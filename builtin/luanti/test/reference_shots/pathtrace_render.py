@@ -46,6 +46,11 @@ LUM_RANGE = (float(os.environ.get("LUM_FLOOR", "0.003")), 100.0)
 MIDDLE_GREY = 0.18
 # ONLY=vp1 renders the one dump whose stem contains it
 ONLY = os.environ.get("ONLY", "")
+# [LAMP_REF]: what a light-emitting node's tile radiates, in the sky's
+# units (the noon zenith is 4.5, sunlit snow about 30), for a node at
+# light_source 15; a dimmer node in proportion. The reference's choice,
+# 2026-09-18, and the client's PHYS.lamp is fitted to it.
+LAMP_RADIANCE = 8.0
 
 
 def open_dump(path):
@@ -258,6 +263,56 @@ def add_camera(pos, dire):
 	return ob
 
 
+def lit_segments(atlas_json_path):
+	"""[LAMP_REF]: per read-back texture file, the rectangles of the atlas
+	segments a light-emitting node draws, with its light_source: out of the
+	dump's atlas account -- segments by atlas with the atlas texture's
+	address, lights by atlas and segment, textures by address."""
+	import json
+	try:
+		with open(atlas_json_path) as f:
+			acc = json.load(f)
+	except (OSError, ValueError):
+		return {}
+	textures = acc.get("textures") or {}
+	rects = {}
+	for seg in acc.get("segments") or []:
+		rects[(seg["atlas"], seg["segment"])] = (
+				str(seg.get("texture", 0)), seg["x"], seg["y"], seg["w"], seg["h"])
+	out = {}
+	for lamp in acc.get("lights") or []:
+		r = rects.get((lamp["atlas"], lamp["segment"]))
+		if not r:
+			continue
+		png = textures.get(r[0])
+		if png:
+			out.setdefault(png, []).append((r[1], r[2], r[3], r[4],
+					lamp["light"] / 15.0))
+	return out
+
+
+def emission_mask(name, size, rects):
+	"""A one-channel image, black with each lit segment's rectangle at its
+	light_source share, to drive the Principled emission strength. The
+	atlas's y runs down the image; Blender's pixels run up."""
+	w, h = size
+	img = bpy.data.images.new(name, w, h, alpha=False, float_buffer=True)
+	img.colorspace_settings.name = "Non-Color"
+	px = [0.0] * (w * h * 4)
+	for x, y, rw, rh, share in rects:
+		for yy in range(y, min(y + rh, h)):
+			row = (h - 1 - yy) * w
+			for xx in range(x, min(x + rw, w)):
+				i = (row + xx) * 4
+				px[i] = px[i + 1] = px[i + 2] = share
+				px[i + 3] = 1.0
+	img.pixels.foreach_set(px)
+	return img
+
+
+LAMPS = {}   # read-back png -> lit rectangles, set per dump in main()
+
+
 def textured_material(name, png):
 	"""The atlas on a Principled BSDF, nearest-filtered as the client draws
 	it, multiplied by the tint the mesher packed; the atlas's alpha cuts the
@@ -285,6 +340,21 @@ def textured_material(name, png):
 		nt.links.new(tint.outputs["Color"], mul.inputs[7])
 		nt.links.new(mul.outputs[2], bsdf.inputs["Base Color"])
 		nt.links.new(tex.outputs["Alpha"], bsdf.inputs["Alpha"])
+		# [LAMP_REF]: a light-emitting node's tiles radiate their own
+		# colour at LAMP_RADIANCE times the node's light_source share,
+		# through a mask of the atlas's lit segments
+		rects = LAMPS.get(os.path.basename(png))
+		if rects:
+			mask = nt.nodes.new("ShaderNodeTexImage")
+			mask.image = emission_mask(name + "_lamps", tex.image.size, rects)
+			mask.interpolation = "Closest"
+			strength = nt.nodes.new("ShaderNodeMath")
+			strength.operation = "MULTIPLY"
+			strength.inputs[1].default_value = LAMP_RADIANCE
+			nt.links.new(mask.outputs["Color"], strength.inputs[0])
+			nt.links.new(tex.outputs["Color"], bsdf.inputs["Emission Color"])
+			nt.links.new(strength.outputs["Value"],
+					bsdf.inputs["Emission Strength"])
 		# [PT_MATERIALS]: the maps the pbr shader reads beside the albedo,
 		# derived per segment in impl/atlas.cpp. spec: roughness in r, spec
 		# strength in g, translucency in b, spots in a; normal: tangent
@@ -512,6 +582,10 @@ def main():
 			sys.exit(1)
 		clear_scene()
 		stem = name[:-7] if name.endswith(".obj.gz") else name[:-4]
+		LAMPS.clear()
+		LAMPS.update(lit_segments(os.path.join(OUT, stem + "_atlas.json")))
+		if LAMPS:
+			print("lamps:", {k: len(v) for k, v in LAMPS.items()})
 		# <seed>_vp<N>_<hhmm>_<weather>: the viewpoint picks the hours,
 		# the dump's own hour being only the one it was taken at
 		parts = stem.split("_")
