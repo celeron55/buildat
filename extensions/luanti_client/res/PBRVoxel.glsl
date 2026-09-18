@@ -287,8 +287,11 @@ void VS()
             // the other half is the ground's, below. The nibble alone gave
             // a wall the whole dome, and a dirt side in a block's shadow
             // read 2.7 times the render's ([PBR_FIT], contrast_dirt).
+            // 0.35 for a wall rather than the hemisphere's half: the sky a
+            // wall faces is the horizon's band and the dome's dark side
+            // more than its zenith ([PBR_FIT] tuning, contrast_dirt)
             vSkyAmbient = GetAmbient(GetZonePos(worldPos)) * iColor.a *
-                    (0.5 + 0.5 * vNormal.y);
+                    (0.35 + 0.65 * max(vNormal.y, 0.0));
             vVertexLight = iColor.rgb +
                 cBounceLight * (1.0 - ShapeSkylight(iColor.a)) +
                 cGroundLight * (0.5 - 0.5 * vNormal.y) *

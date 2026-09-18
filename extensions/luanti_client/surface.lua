@@ -78,7 +78,7 @@ local DEFAULT = {
 -- nodes carry no groups worth reading are common enough that this is worth the
 -- dozen patterns; the groups win where there are any.
 local BY_NAME = {
-	{"water", {roughness = 0.25, spec_strength = 0.9, bumpiness = 0,
+	{"water", {roughness = 0.35, spec_strength = 0.9, bumpiness = 0,
 			spots = 0.05}},
 	{"lava", {roughness = 0.6, spec_strength = 0.3, bumpiness = 0.2}},
 	{"ice", {roughness = 0.10, spec_strength = 1.0, bumpiness = 0.1,
@@ -162,7 +162,10 @@ function M.for_node(def)
 			drawtype == DRAWTYPE_ALLFACES_OPTIONAL then
 		-- Leaves and plants: lit from behind as much as from in front, which
 		-- is the whole of what makes a canopy read as a canopy
-		out = copy({roughness = 0.8, spec_strength = 0.25, bumpiness = 0.2,
+		-- Rough and barely specular ([PBR_FIT] tuning, 2026-09-18): with
+		-- a Cook-Torrance lobe in the light pass the canopy's cards at
+		-- 0.8 / 0.25 read 0.72 of the render's saturation
+		out = copy({roughness = 0.95, spec_strength = 0.12, bumpiness = 0.2,
 				translucency = 0.12, spots = 0.03})
 	elseif drawtype == DRAWTYPE_GLASSLIKE or
 			drawtype == DRAWTYPE_GLASSLIKE_FRAMED or

@@ -220,7 +220,7 @@ local MOON_BRIGHTNESS = 1.0
 -- its colour below; the colours are the terms after this one.
 local PHYS = {sun_e0 = 195, sun_tau = 0.127, sky_zenith = 4.5,
 		sky_horizon = 12.0, moon_e = 0.0025, night_sky = 0.00005,
-		bounce = 0.13, dome = 0.7, ground = {r = 0.25, g = 0.22, b = 0.15},
+		bounce = 0.15, dome = 0.7, ground = {r = 0.25, g = 0.22, b = 0.15},
 		day_zenith = {r = 0.57, g = 0.76, b = 1.0},
 		day_horizon = {r = 0.74, g = 0.89, b = 1.0}}
 -- The sky's radiance factor at a sun height (sin elevation): full by
@@ -1241,6 +1241,10 @@ local function apply_sky_of_hour()
 	-- On pbr the cube is rendered from this same sky at this hour and
 	-- carries the night itself, so it is not dimmed a second time
 	voxel_shading.set_sky_light(sky_now.unlit and (0.10 + 0.90 * t) or 1.0)
+	-- The cube's reflection at 0.7 on pbr ([PBR_FIT] tuning): at 1 the
+	-- glint on a grass top carried a blue the render's has not, and the
+	-- water's far reflection read 3.4 over its near against 2.5
+	voxel_shading.set_specular_emphasis(sky_now.unlit and 1.0 or 0.7)
 	-- And what colour that sky is now, which the cube map cannot know: the
 	-- reflection is moved towards the zenith of this hour as the day goes,
 	-- and left alone at noon, where the cube map is already right
