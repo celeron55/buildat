@@ -142,7 +142,7 @@ water_far|vp3_0545|120x15+40+355|vp3 05:45 the water near the horizon
 water_near|vp3_0545|120x30+80+490|vp3 05:45 the near water
 dirt_face_0545|vp1_0545|40x10+2+608|vp1 05:45 the foreground block's lit dirt face
 dirt_face_1300|vp1_1300|40x10+2+608|vp1 13:00 the same face
-lamp_wall|vp8_1300|40x30+520+330|vp8 the cave wall beside the glowstone, not on it
+lamp_wall|vp8_1300|30x30+430+165|vp8 the cave wall beside the glowstone, not on it
 cave_bottom_dark|vp8_1300|120x60+560+620|vp8 the bottom of the view, which the lamp must not reach
 sky_zenith_1300|vp1_1300|60x40+900+30|vp1 near the top of the sky, 13:00
 sky_horizon_1300|vp1_1300|60x20+1100+225|vp1 just over the sea, away from the sun

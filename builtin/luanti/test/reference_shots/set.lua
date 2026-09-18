@@ -60,13 +60,14 @@ rawset(_G, "REFSET", {
 	-- One lamp in the reference ([LAMP_REF]): a light source placed by
 	-- the fixture at the far end of the vp8 cave, so that the client's
 	-- lamp term has a number to be fitted to -- the render emits from
-	-- the node's tile at LAMP_RADIANCE in pathtrace_render.py. Placed
-	-- by marching from the view's eye along its look turned by the yaw
-	-- and pitch offsets (degrees, left and up) to the first solid node,
-	-- and set in the air before it: the top-left of the frame, far
-	-- enough that the bottom of the view stays dark.
+	-- the node's tile at LAMP_RADIANCE in pathtrace_render.py. A world
+	-- position, set as it is: a march along the look put it on the ledge
+	-- twelve nodes out at 313,0,-286, and the user moved it seven further
+	-- along -x and three up (2026-09-18) -- the far end, top-left of the
+	-- frame, so the bottom of the view stays dark.
 	lamps = {
-		{view = 8, node = "mcl_nether:glowstone", yaw = 22, pitch = 14},
+		{view = 8, node = "mcl_nether:glowstone",
+			pos = {x = 306, y = 3, z = -286}},
 	},
 
 	-- Luanti's day as one whole unit. The fractions are the plan's own.
