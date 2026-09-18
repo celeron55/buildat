@@ -1245,7 +1245,15 @@ local function update_sky(dt)
 	-- sky as it is, and only a cave with essentially no sky over it dims it.
 	-- The short ramp is so that walking into one is not a step. See
 	-- [CAVE_SKY]'s correction in doc/plan/rendering_plan.md.
-	world_sky:set_outside(math.max(0, math.min(1, (seen - 0.02) / 0.08)))
+	local outside = math.max(0, math.min(1, (seen - 0.02) / 0.08))
+	world_sky:set_outside(outside)
+	-- Logged when it moves, so a reference run's log carries the gate at
+	-- each viewpoint -- the reading [CAVE_SKY] was owed from inside a cave
+	if math.abs(seen - (sky_now.seen_said or -1)) >= 0.01 then
+		sky_now.seen_said = seen
+		log:info(string.format("cave gate: sky seen %.3f, outside %.2f",
+				seen, outside))
+	end
 	-- A game's own fog colour is art direction and wins outright; without one
 	-- the fog is the horizon, dimmed by the hour the way the sky it meets is.
 	-- **One colour scaled, not two blended**: a hardcoded night fog is a
