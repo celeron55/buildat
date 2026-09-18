@@ -4,9 +4,8 @@
 # See [RENDER_MODES] and [GREEN_BIAS] in doc/plan/rendering_plan.md.
 #
 #   builtin/luanti/test/reference_shots/probes.sh          read what is on disk
-#   builtin/luanti/test/reference_shots/probes.sh --show   every crop with its
-#                                                          context and box, both
-#                                                          pictures, in tmp/probe_check
+# Every run also writes <set>/probes.png: every crop with its context and
+# its box, one sheet per set, beside the pictures it was read from.
 #   builtin/luanti/test/reference_shots/probes.sh --shoot  re-take all three
 #                                                          module modes, then read
 #
@@ -181,7 +180,7 @@ done
 SKY="
 sky_zenith_1300|vp1_1300|60x40+900+30|vp1 near the top, 13:00
 sky_horizon_1300|vp1_1300|60x20+1100+225|vp1 just over the sea, away from the sun
-sky_glow_0545|vp1_0545|60x40+200+30|vp1 the dawn glow, 05:45
+sky_glow_0545|vp2_0545|60x40+600+30|vp2 the dawn glow, 05:45, mid-gradient toward the disc
 sky_horizon_0545|vp1_0545|60x20+1100+225|vp1 the horizon opposite the dawn
 sky_night_0200|vp5_0200|60x40+20+20|vp5 away from the moon, 02:00
 "
@@ -230,12 +229,13 @@ for s in pathtrace_r150 module_pbr_r150; do
 	echo "$far $near" | awk -v s="$s" '{printf "  %-18s far %.3f %.3f %.3f  near %.3f %.3f %.3f  far/near %.2f %.2f %.2f\n", s, $1,$2,$3, $4,$5,$6, $1/($4+1e-9), $2/($5+1e-9), $3/($6+1e-9)}'
 done
 
-# --show: every crop cut with three times its context and its box drawn,
-# both pictures, one cell per probe and side, and a contact sheet -- the
-# rule (user, 2026-09-18) being that a crop enters a table only after
-# someone has looked at its cell: typed coordinates are a guess until seen.
-show_dir="${REFSHOT_SHOW_DIR:-$here/tmp/probe_check}"
-show_cell() {   # name side file crop -> a cell png
+# The crop sheet, on every run: every crop cut with three times its context
+# and its box drawn, one sheet per set as probes.png inside the set's own
+# directory, so it is dated with the pictures it was read from and an old
+# set can be re-seen with its crops (user, 2026-09-18). A crop enters a
+# table only after someone has looked at its cell: typed coordinates are a
+# guess until seen.
+show_cell() {   # out name file crop -> a cell png
 	local geom="$4"
 	local w=${geom%%x*}; local rest=${geom#*x}; local h=${rest%%+*}
 	rest=${rest#*+}; local x=${rest%%+*}; local y=${rest#*+}
@@ -244,25 +244,23 @@ show_cell() {   # name side file crop -> a cell png
 		-fill none -stroke red -strokewidth 1 \
 		-draw "rectangle $((x - cx)),$((y - cy)) $((x - cx + w - 1)),$((y - cy + h - 1))" \
 		-scale 300% -gravity north -background black -fill white -pointsize 12 \
-		-splice 0x14 -annotate +0+1 "$1 $2" "$show_dir/$1_$2.png" 2>/dev/null
+		-splice 0x14 -annotate +0+1 "$2" "$1/$2.png" 2>/dev/null
 }
-if [ "${1:-}" = "--show" ]; then
-	mkdir -p "$show_dir"; rm -f "$show_dir"/*.png
+for s in pathtrace_r150 module_pbr_r150; do
+	[ -d "$shots/$s" ] || continue
+	cells=$(mktemp -d)
 	{ echo "$FIT"; echo "$SKY"; echo "$WATER"; echo "$DAWN"; } |
 	while IFS='|' read -r name pic a b why; do
 		[ -n "$name" ] || continue
 		case "$name" in dawn_*) pic="${pic}_0545" ;; esac
-		for s in pathtrace_r150 module_pbr_r150; do
-			f=$(file_of "$s" "$pic"); [ -f "$f" ] || continue
-			show_cell "$name" "${s%%_*}_A" "$f" "$a"
-			case "$b" in *x*) show_cell "$name" "${s%%_*}_B" "$f" "$b" ;; esac
-		done
+		f=$(file_of "$s" "$pic"); [ -f "$f" ] || continue
+		show_cell "$cells" "${name}_A" "$f" "$a"
+		case "$b" in *x*) show_cell "$cells" "${name}_B" "$f" "$b" ;; esac
 	done
-	magick montage "$show_dir"/*_*.png -tile 4x -geometry +4+4 -background gray20 \
-		"$show_dir/sheet.png"
-	echo "cells and sheet in $show_dir"
-	exit 0
-fi
+	magick montage "$cells"/*.png -tile 4x -geometry +4+4 -background gray20 \
+		"$shots/$s/probes.png" 2>/dev/null && echo "crop sheet: $shots/$s/probes.png"
+	rm -rf "$cells"
+done
 
 echo
 echo "=== the low sun: R/B at 05:45 over R/B at 13:00, render | pbr (ratio to the render)"
