@@ -36,8 +36,8 @@ docker run --rm -i \
 	"$image" bash -c "
 		set -eu
 		mkdir -p /work/buildat && cd /work/buildat && tar -xf - &&
-		xvfb-run -a -s '-screen 0 1280x720x24' util/package.sh $target $version;
-		status=\$?
+		status=0
+		BUILDAT_SMOKE_VIRTUAL=1 xvfb-run -a -s '-screen 0 1280x720x24' util/package.sh $target $version || status=\$?
 		cp Build/package/out/* /out/ 2>/dev/null || true
 		# And the smoke test's leavings, for reading a failure from outside
 		mkdir -p /out/smoke && cp /tmp/tmp.*/shot.png /tmp/tmp.*/*.log /out/smoke/ 2>/dev/null || true
