@@ -384,6 +384,11 @@ function M.new(scene, sun_dir, defaults)
 	-- LuantiSky reads the sun's from sDiffMap and the moon's from
 	-- sNormalMap -- two units because a material has no third one this
 	-- needs.
+	-- The disc at a radiance, for the pbr path; zero is Luanti's square
+	function self:set_sun_radiance(r, g, b)
+		material:SetShaderParameter("SunRadiance", magic.Vector3(r, g, b))
+	end
+
 	function self:set_sun_texture(texture)
 		if texture then
 			material:SetTexture(magic.TU_DIFFUSE, texture)

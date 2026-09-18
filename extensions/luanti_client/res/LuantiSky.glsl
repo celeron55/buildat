@@ -32,6 +32,12 @@ uniform float cStarFade;
 // hold a star, and what colour; and how much of the sky the clouds cover.
 uniform float cSunSize;
 uniform float cSunOverexposure;
+// The sun as a disc at its radiance, for the pbr path: E0 of the hour over
+// the disc's solid angle, in the sun's colour for the elevation, which is
+// what the path trace draws (Nishita's disc, clipped white at every hour)
+// and what the sky cube then carries into the water. Zero (unset) keeps
+// Luanti's square at texture brightness, which the parity modes want.
+uniform vec3 cSunRadiance;
 uniform float cMoonSize;
 uniform float cStarDensity;
 uniform vec3 cStarColor;
@@ -277,7 +283,14 @@ void PS()
     // that are not behind them. The sun goes the colour of the tint as it
     // comes down to the horizon, which is where that colour belongs; higher
     // up it is its own.
-    if(cSunSize > 0.0){
+    if(cSunSize > 0.0 && dot(cSunRadiance, vec3(1.0)) > 0.0){
+        // A disc, not the square, at the radiance the client says
+        vec3 body = Body(d, sun, cSunSize);
+        vec2 at = (body.yz - 0.5) * cSunSize * 2.0;
+        float cover = body.x * (1.0 - smoothstep(cSunSize - BODY_EDGE,
+                cSunSize + BODY_EDGE, length(at)));
+        color = mix(color, cSunRadiance, cover);
+    } else if(cSunSize > 0.0){
         vec3 body = Body(d, sun, cSunSize);
         vec3 sun_color = mix(SUN_COLOR, cSunTint * 1.6, low);
         float cover = body.x;

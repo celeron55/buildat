@@ -1208,6 +1208,20 @@ local function apply_sky_of_hour()
 				math.exp(-0.24 * m)
 		local lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
 		sky_lights.sun.color = magic.Color(r / lum, g / lum, b / lum)
+		-- And the disc drawn at that: E0 of the hour over the disc's
+		-- solid angle, pi times the half-width squared (0.075 is the
+		-- tangent of the half-angle, near enough), in the same colour.
+		-- The path trace's disc is this and clips white at every hour;
+		-- Luanti's square at texture brightness sat under the snow after
+		-- metering ([PBR_FIT] step 2). rgba16f holds 65 504, which the
+		-- noon sun's eleven thousand is inside.
+		local half = (game_sky.sun_scale or 1) *
+				voxel_shading.sky_defaults.sun_half
+		local disc = PHYS.sun(sky_now.height or 0) /
+				(math.pi * half * half)
+		disc = math.min(disc, 65504)
+		local sc = sky_lights.sun.color
+		world_sky:set_sun_radiance(disc * sc.r, disc * sc.g, disc * sc.b)
 	end
 	sky_lights.moon.color = blend(PHYS.MOON_COLOR,
 			game_sky.moon_tint or luanti_sky.MOON_TINT, share)

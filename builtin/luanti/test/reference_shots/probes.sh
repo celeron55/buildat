@@ -137,8 +137,7 @@ grass_occluded|vp1_0545|33x11+271+498|vp1 05:45 a grass top under the mountain
 grass_open|vp1_0545|56x40+871+562|vp1 05:45 a grass top with an open horizon
 glint|vp1_0545|34x25+653+409|vp1 05:45 the sun's glint on a grass top
 grass_beside|vp1_0545|40x15+600+440|vp1 05:45 the grass beside the glint
-canopy_backlit|vp2_0545|38x18+955+352|vp2 05:45 a back-lit canopy face
-canopy_frontlit|vp2_0545|19x21+887+317|vp2 05:45 a front-lit canopy face
+canopy_dawn|vp4_0545|40x40+160+100|vp4 05:45 a canopy with the low sun behind it: sunlight through the leaves
 water_far|vp3_0545|120x15+40+355|vp3 05:45 the water near the horizon
 water_near|vp3_0545|120x30+80+490|vp3 05:45 the near water
 dirt_face_0545|vp1_0545|40x10+2+608|vp1 05:45 the foreground block's lit dirt face
@@ -172,7 +171,6 @@ sky_to_sun|lum|sky_patch|snow_sun|the ratio the base hangs on
 terrain_occlusion|rgb|grass_occluded|grass_open|sky fraction at the hills' scale
 sun_glint|rgb|glint|grass_beside|the grazing specular on a rough dielectric
 water_reflection|rgb|water_far|water_near|Fresnel and the reflected sky on a mirror
-translucency_canopy|lum|canopy_backlit|canopy_frontlit|a back-lit face over a front-lit one
 dawn_sun_dirt|hue|dirt_face_0545|dirt_face_1300|the low sun's colour on a lit dirt side
 "
 
