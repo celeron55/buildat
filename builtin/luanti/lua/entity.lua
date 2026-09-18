@@ -46,6 +46,9 @@ local __send_player_pos = __luanti_send_player_pos
 -- set from up here as well
 local send_hotbar
 local send_hud
+-- Where a new player starts, defined with the join below; respawn() up
+-- here asks it too
+local find_spawn_pos
 
 local function send_stats(o)
 	if o and o.player_name and __luanti_send_hud then
@@ -825,6 +828,36 @@ function PlayerRef:set_hp(hp, reason)
 			cb(self, t)
 		end
 	end
+end
+
+-- Luanti's respawn: the on_respawnplayer callbacks first, and the first
+-- that answers true has put the player somewhere itself (a bed); otherwise
+-- the spawn point. Then full health and breath. The death screen's button
+-- is what calls it, and a mod's /respawn.
+function PlayerRef:respawn()
+	local o = state_of(self)
+	if not o or not o.player_name then
+		return
+	end
+	local placed = false
+	for _, cb in ipairs(core.registered_on_respawnplayers or {}) do
+		local ok, moved = pcall(cb, self)
+		if not ok then
+			core.log("error", "on_respawnplayer: " .. tostring(moved))
+		elseif moved then
+			placed = true
+			break
+		end
+	end
+	if not placed then
+		local spawn = find_spawn_pos()
+		o.pos = {x = spawn.x, y = spawn.y, z = spawn.z}
+		o.vel = {x = 0, y = 0, z = 0}
+		tell_the_client(o)
+	end
+	o.hp = o.props.hp_max or 20
+	o.breath = o.props.breath_max or 10
+	send_stats(o)
 end
 
 function PlayerRef:get_hp()
@@ -2488,7 +2521,7 @@ local function spawn_rand_to(pr, span)
 	return (pr:next() * 32768 + pr:next()) % (span + 1)
 end
 
-local function find_spawn_pos()
+find_spawn_pos = function()
 	local static = core.settings:get("static_spawnpoint")
 	-- A string setting with nothing after its type in settingtypes.txt has
 	-- "" for a default, not nothing, so an unset one is the empty string
