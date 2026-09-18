@@ -47,7 +47,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 16;
+		uint8_t version = 17;
 		archive(
 				version,
 				v.name,
@@ -110,6 +110,13 @@ namespace interface
 		// same physics reads
 		if(version >= 16){
 			archive(v.move_resistance);
+		}
+		// Version 17 added the light a voxel makes of its own, which a
+		// client's mesh dump names for the path trace to emit from
+		// ([LAMP_REF]); the server's flood had it, the client's registry
+		// read it as zero
+		if(version >= 17){
+			archive(v.light_source);
 		}
 	}
 
