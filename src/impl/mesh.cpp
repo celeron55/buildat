@@ -557,6 +557,23 @@ static bool occludes(VoxelVolume &volume,
 	return def->edge_material_id != interface::EDGEMATERIALID_EMPTY;
 }
 
+// The same, for the hemisphere rays: a cutout -- leaves, a plant -- lets
+// most of the sky through and does not block like rock. The corner table
+// keeps occludes(): a leaf block against a face is a crease either way.
+static bool occludes_sky(VoxelVolume &volume,
+		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
+		const pv::Vector3DInt32 &p)
+{
+	VoxelSample v = volume.sample_at(p);
+	if(fmt.undefined(v))
+		return false;
+	const interface::CachedVoxelDefinition *def = voxel_reg->get_cached(v);
+	if(def == nullptr)
+		return false;
+	return def->edge_material_id != interface::EDGEMATERIALID_EMPTY &&
+			!def->alpha_masked;
+}
+
 // The voxel a face belongs to: half a voxel behind the face's centre, against
 // the normal. The same arithmetic as face_owned_by_padding(), and what wants
 // it is the face's own param, which PolyVox does not carry through.
@@ -758,8 +775,8 @@ static void face_vertex_colors(VoxelVolume &volume,
 	// reference is exact and read that wall at a third of what the corner
 	// table lit it to ([PBR_FIT] 2c). Multiplied into the sky share, so the
 	// corner table keeps the crease and this keeps the surroundings.
-	// simplified: nine rays, four voxels, a solid voxel is any voxel with an
-	// edge material; a leaf block blocks as much as rock.
+	// simplified: nine rays, four voxels; a cutout block (leaves, plants)
+	// does not block, rock and anything else with an edge material does.
 	static const int HEMI_REACH = 4;
 	float hemi = 1.0f;
 	{
@@ -775,7 +792,7 @@ static void face_vertex_colors(VoxelVolume &volume,
 			pv::Vector3DInt32 p = front_p;
 			for(int k = 0; k < HEMI_REACH && !blocked; k++){
 				p += d;
-				blocked = occludes(volume, voxel_reg, fmt, p);
+				blocked = occludes_sky(volume, voxel_reg, fmt, p);
 			}
 			if(!blocked)
 				open++;
