@@ -386,12 +386,12 @@ function core.get_mapgen_setting(name)
 		-- singlenode world. An imported world's mapgen is its
 		-- map_meta.txt's and is in no setting here, so the module's answer
 		-- comes first and the settings are the fallback.
-		return __luanti_mapgen_name or core.__mapgen_name()
+		return rawget(_G, "__luanti_mapgen_name") or core.__mapgen_name()
 	end
 	if name == "chunksize" then
 		return tostring(core.get_mapgen_chunksize().x)
 	end
-	if name == "water_level" and __luanti_water_level then
+	if name == "water_level" and rawget(_G, "__luanti_water_level") then
 		-- The world's own, which is what it was made with: a save keeps it
 		-- the way Luanti's map_meta.txt does, and the settings are only
 		-- where it comes from the first time
@@ -408,7 +408,7 @@ function core.get_mapgen_params()
 	-- Deprecated in Luanti and still called; the fields are the ones it
 	-- answers with
 	return {
-		mgname = __luanti_mapgen_name or core.__mapgen_name(),
+		mgname = rawget(_G, "__luanti_mapgen_name") or core.__mapgen_name(),
 		seed = tonumber(__luanti_world_seed) or 0,
 		water_level = tonumber(__luanti_water_level) or
 				tonumber(core.settings:get("water_level")) or 1,

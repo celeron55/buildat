@@ -2046,7 +2046,7 @@ local STUBS_NIL = {
 	-- Not in this at all: HTTP, IPC, the async environment, mod channels,
 	-- SSCSM, translations beyond passing strings through
 	"request_http_api", "set_http_api_lua",
-	"mod_channel_join", "register_sscsm", "get_globals_to_transfer",
+	"register_sscsm", "get_globals_to_transfer",
 	-- Found by the feature sweep of 2026-09-15 rather than by a game asking
 	-- for one: every documented core.* this does not implement is here now,
 	-- so that a mod calling one gets a line naming the feature instead of
@@ -2059,6 +2059,20 @@ local STUBS_NIL = {
 
 for _, name in ipairs(STUBS_NIL) do
 	stub(name, nil)
+end
+
+-- A mod channel with nobody on the other end: no client here speaks the
+-- channel protocol, so what is sent is dropped, and what a mod keeps is
+-- the object -- mcl_sprint calls channel:send_all() on the one it
+-- joined at login, and a nil there ended a respawn. Luanti's is_writeable
+-- answers whether the channel is joined, which this always is.
+local ModChannel = {}
+ModChannel.__index = ModChannel
+function ModChannel:leave() self.joined = false end
+function ModChannel:is_writeable() return self.joined end
+function ModChannel:send_all(message) return self.joined end
+function core.mod_channel_join(name)
+	return setmetatable({name = tostring(name), joined = true}, ModChannel)
 end
 
 -- The ones Luanti always answers with a list, whether or not there is

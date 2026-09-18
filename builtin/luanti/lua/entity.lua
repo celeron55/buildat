@@ -2666,6 +2666,9 @@ function core.__add_player(name)
 	o.inventory:set_size("main", 32)
 	o.inventory:set_size("craft", 9)
 	o.inventory:set_size("craftpreview", 1)
+	-- And craftresult, which player.cpp adds beside them and which
+	-- VoxeLibre's death drop reads without asking
+	o.inventory:set_size("craftresult", 1)
 	-- What the last run left, before on_joinplayer runs: a mod's join
 	-- callback reads the player it is given, and in Luanti that player has
 	-- come out of the database by then
