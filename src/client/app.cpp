@@ -17,6 +17,10 @@
 #include "interface/thread_pool.h"
 #include <cctype>
 #include <algorithm>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <deque>
 #include <c55/getopt.h>
 #include <c55/os.h>
 #include <Application.h>
@@ -715,6 +719,61 @@ struct CApp: public App, public magic::Application
 	// and the PNG encode were 96% of a dump, and a dump longer than 30 s
 	// has the server drop the client as stalled
 	sm_<magic::Texture2D*, ss_> m_dumped_textures;
+	// The PNG encoding of a dump's textures, off the main thread: sixty
+	// atlas pages of 2048^2 took a minute to encode on it, which is
+	// longer than the server waits for a client that answers nothing, and
+	// the frames the client owes are the main thread's. One worker for
+	// the session with a queue, never joined between dumps -- a join
+	// before the second dump was the same minute on the main thread --
+	// only at shutdown. A texture is queued once a session (see
+	// m_dumped_textures), so a later dump never rewrites a file the
+	// worker is still on.
+	std::thread m_texture_writer;
+	std::mutex m_texture_mutex;
+	std::condition_variable m_texture_cv;
+	std::deque<std::pair<ss_, magic::SharedPtr<magic::Image>>> m_texture_queue;
+	bool m_texture_stop = false;
+	void queue_textures(sv_<std::pair<ss_, magic::SharedPtr<magic::Image>>> &items)
+	{
+		{
+			std::lock_guard<std::mutex> lock(m_texture_mutex);
+			for(auto &item : items)
+				m_texture_queue.push_back(item);
+		}
+		if(!m_texture_writer.joinable()){
+			m_texture_writer = std::thread([this](){
+				for(;;){
+					std::pair<ss_, magic::SharedPtr<magic::Image>> item;
+					{
+						std::unique_lock<std::mutex> lock(m_texture_mutex);
+						m_texture_cv.wait(lock, [this](){
+							return m_texture_stop || !m_texture_queue.empty();
+						});
+						if(m_texture_queue.empty())
+							return;
+						item = m_texture_queue.front();
+						m_texture_queue.pop_front();
+					}
+					const int64_t t0 = interface::os::time_us();
+					item.second->SavePNG(magic::String(item.first.c_str()));
+					log_v(MODULE, "dump_meshes: wrote %s in %.1f s",
+							cs(item.first),
+							(interface::os::time_us() - t0) / 1e6);
+				}
+			});
+		}
+		m_texture_cv.notify_one();
+	}
+	void join_texture_writer()
+	{
+		{
+			std::lock_guard<std::mutex> lock(m_texture_mutex);
+			m_texture_stop = true;
+		}
+		m_texture_cv.notify_one();
+		if(m_texture_writer.joinable())
+			m_texture_writer.join();
+	}
 	BuildatResourceRouter *m_router;
 	magic::LuaScript *m_script;
 	lua_State *L;
@@ -918,6 +977,7 @@ struct CApp: public App, public magic::Application
 	void shutdown()
 	{
 		log_v(MODULE, "shutdown()");
+		join_texture_writer();
 		// Whatever is running has one last chance to close what it opened.
 		// A network client that vanishes without saying goodbye is left on
 		// the server until it times out, and the next client to connect
@@ -2403,6 +2463,10 @@ struct CApp: public App, public magic::Application
 		// for a whole world, which is why the read-back is keyed by texture
 		// and not by batch or by dump.
 		sm_<magic::Texture2D*, ss_> &tex_names = self->m_dumped_textures;
+		// What this dump reads back, encoded and written on a thread of its
+		// own once the .obj is out: the read-back is the GPU's and quick,
+		// the encoding is what took a minute
+		sv_<std::pair<ss_, magic::SharedPtr<magic::Image>>> to_write;
 		auto material_of = [&](magic::Material *mat) -> ss_ {
 			if(!mat)
 				return "";
@@ -2419,7 +2483,7 @@ struct CApp: public App, public magic::Application
 			const ss_ png = stem+".png";
 			magic::SharedPtr<magic::Image> img = tex->GetImage();
 			if(img)
-				img->SavePNG(magic::String((dir+"/"+png).c_str()));
+				to_write.push_back(std::make_pair(dir+"/"+png, img));
 			// The material maps the pbr shader reads beside the albedo --
 			// the atlas's derived normal (spots in alpha) and surface
 			// (roughness, spec strength, translucency, spots) -- as
@@ -2434,8 +2498,8 @@ struct CApp: public App, public magic::Application
 				magic::SharedPtr<magic::Image> mi = t2 ? t2->GetImage() :
 						magic::SharedPtr<magic::Image>();
 				if(mi)
-					mi->SavePNG(magic::String(
-							(dir+"/"+stem+m.suffix+".png").c_str()));
+					to_write.push_back(std::make_pair(
+							dir+"/"+stem+m.suffix+".png", mi));
 			}
 			tex_names[tex] = png;
 			return png;
@@ -2519,10 +2583,14 @@ struct CApp: public App, public magic::Application
 		if(!buf.empty())
 			gzwrite(f, buf.data(), (unsigned)buf.size());
 		gzclose(f);
+		if(!to_write.empty())
+			self->queue_textures(to_write);
 		log_i(MODULE, "dump_meshes %s: %u geoms, %u verts, %u tris in %.1f s, "
-				"%.1f s of it reading textures back",
+				"%.1f s of it reading textures back; %zu textures being "
+				"written behind it",
 				cs(name), ngeom, nvert, ntri,
-				(interface::os::time_us() - t_start) / 1e6, t_tex / 1e6);
+				(interface::os::time_us() - t_start) / 1e6, t_tex / 1e6,
+				to_write.size());
 		lua_pushlstring(L, name.c_str(), name.size());
 		return 1;
 	}

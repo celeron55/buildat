@@ -125,6 +125,34 @@ def clear_scene():
 HOURS = {"0545": 0.2396, "1000": 0.4167, "1300": 0.5417, "1500": 0.6250,
 		"1830": 0.7708, "2030": 0.8542, "0200": 0.0833}
 
+# [PT_HOURS]: the clear hours each viewpoint is rendered at, out of one
+# dump -- the fixture freezes the world, so the geometry at 5:45 is the
+# geometry at 20:30 -- which is set.lua's hours_of_view; the rain states
+# are left out (user, 2026-09-17), nothing defining what a path trace of
+# rain is. Read out of set.lua rather than copied: build.sh's env.sh is
+# for the shell, and this reads the Lua table with a regexp on its text.
+def hours_of_view():
+	import re
+	here = os.path.dirname(os.path.abspath(__file__))
+	text = open(os.path.join(here, "set.lua")).read()
+	m = re.search(r"hours_of_view = \{(.*?)\n\t\}", text, re.S)
+	out = {}
+	for v, hours in re.findall(r"\[(\d+)\] = \{([^}]*)\}", m.group(1)):
+		out[int(v)] = re.findall(r'"(\d{4})"', hours)
+	return out
+
+# Night needs a moon, stated as a model choice: Nishita is a sun-and-
+# atmosphere model and goes black below the horizon, with no moon and
+# no stars, and the 02:00 snow state is the moonlight regression check
+# ([PBR_LEVEL]). So a sun that is down gets a sun lamp at the moon's
+# elevation -- the moon opposite the sun, the way the client draws it --
+# with lunar irradiance, about 0.0025 W/m^2, a factor of 400 000 under the
+# sun's, and a colour near 4100 K; the Nishita sky keeps the faint
+# twilight it still gives. Stars are not modelled: they light nothing
+# measurable.
+MOON_IRRADIANCE = 0.0025
+MOON_COLOR = (1.0, 0.86, 0.70)
+
 
 def sun_from_hour(hour):
 	"""(elevation, rotation) for the Nishita sky, radians."""
@@ -161,6 +189,21 @@ def setup_world(hour):
 	nt.links.new(sky.outputs["Color"], bg.inputs["Color"])
 	nt.links.new(bg.outputs["Background"], out.inputs["Surface"])
 	bg.inputs["Strength"].default_value = 1.0
+	# The moon, when the sun is down: opposite the sun, as a lamp
+	if el < 0:
+		lamp = bpy.data.lights.new("moon", "SUN")
+		lamp.energy = MOON_IRRADIANCE
+		lamp.color = MOON_COLOR
+		lamp.angle = math.radians(0.5)
+		ob = bpy.data.objects.new("moon", lamp)
+		# A sun lamp shines along its local -Z; point it from the moon's
+		# place in the sky, which is the sun's mirrored through the origin
+		from mathutils import Vector
+		mel, mrot = -el, rot + math.pi
+		d = Vector((math.sin(mrot) * math.cos(mel),
+				math.cos(mrot) * math.cos(mel), math.sin(mel)))
+		ob.rotation_euler = (-d).to_track_quat("-Z", "Y").to_euler()
+		bpy.context.scene.collection.objects.link(ob)
 
 
 def add_camera(pos, dire):
@@ -442,19 +485,28 @@ def main():
 			sys.exit(1)
 		clear_scene()
 		stem = name[:-7] if name.endswith(".obj.gz") else name[:-4]
-		setup_world(stem.split("_")[2])
+		# <seed>_vp<N>_<hhmm>_<weather>: the viewpoint picks the hours,
+		# the dump's own hour being only the one it was taken at
+		parts = stem.split("_")
+		view = int(parts[1][2:])
+		hours = hours_of_view().get(view) or [parts[2]]
 		# The usemtl names are meshdump_texN.png, one set beside the dumps
 		build_world(scene, co, tint, uv, blocks, OUT)
 		del co, tint, uv
 		scene.camera = add_camera(pos, dire)
-		# cycles_vp6_1300_none.png: the dump's stem without the seed, so the
-		# render sits beside its .obj.gz without sharing a name with it.
-		base = "cycles_" + stem.split("_", 1)[1]
-		exr = os.path.join(OUT, base + ".exr")
-		scene.render.filepath = exr
-		print("render", base)
-		bpy.ops.render.render(write_still=True)
-		expose(exr, os.path.join(OUT, base + ".png"))
+		for hour in hours:
+			setup_world(hour)
+			# cycles_vp6_1300_none.png: the dump's stem without the seed,
+			# so the render sits beside its .obj.gz without sharing a name
+			# with it, and one per hour
+			base = "cycles_vp%d_%s_%s" % (view, hour, parts[3])
+			exr = os.path.join(OUT, base + ".exr")
+			scene.render.filepath = exr
+			print("render", base)
+			bpy.ops.render.render(write_still=True)
+			expose(exr, os.path.join(OUT, base + ".png"))
+			for ob in [o for o in scene.collection.objects if o.name == "moon"]:
+				bpy.data.objects.remove(ob)
 
 
 if __name__ == "__main__":
