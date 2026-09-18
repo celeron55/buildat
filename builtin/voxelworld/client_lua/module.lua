@@ -66,6 +66,10 @@ local atlas_reg = buildat.createAtlasRegistry()
 M.use_skylight = false
 
 M.chunk_size_voxels = nil
+-- Whether the mesher is handed a horizon map with each chunk, which also
+-- packs the vertex alpha (see interface/mesh.h and voxel_shading's
+-- set_packed_sky()); a game turns it on when its shader reads it
+M.horizon = false
 M.section_size_chunks = nil
 M.section_size_voxels = nil
 -- Start higher than any conceivable value because otherwise things will never
@@ -152,8 +156,157 @@ buildat.sub_packet("voxelworld:ready", function(data)
 	on_ready()
 end)
 
+-- The terrain's horizon around each chunk, for the mesher's sky share
+-- ([PBR_FIT] 2c, the terrain scale). Per chunk column (x, z in chunks):
+-- the heights of each chunk in it, out of buildat.column_heights(), and
+-- their merged world-y maximum as a string of 32x32 int16 the map is cut
+-- from. A column whose maximum moves -- a chunk arriving, a dig or a place
+-- that moves a top -- dirties the 3x3 chunk columns around it, and a
+-- flush a second later re-meshes the chunks in them that have geometry.
+-- Only for chunks of 32: the map is three chunks a side.
+local HORIZON_CHUNK = 32
+local HORIZON_SIZE = 96
+local HORIZON_NONE = -32768
+local HORIZON_FLUSH_US = 5000000
+local horizon_cols = {}   -- "x,z" -> {chunks = {cy = local string}, merged = string or nil, changed_us}
+local horizon_dirty = {}  -- "x,z" -> time_us the column last moved
+local horizon_meshed_us = {}  -- node id -> time_us its geometry was last made
+local horizon_none_row = nil
+
+local function horizon_key(cx, cz)
+	return cx .. "," .. cz
+end
+
+local function int16_char(v)
+	if v < 0 then v = v + 65536 end
+	return string.char(v % 256, math.floor(v / 256) % 256)
+end
+
+local function int16_at(str, i)   -- 0-based entry
+	local lo, hi = string.byte(str, i * 2 + 1, i * 2 + 2)
+	local v = lo + hi * 256
+	if v >= 32768 then v = v - 65536 end
+	return v
+end
+
+local function horizon_merge(col)
+	local out = {}
+	local n = HORIZON_CHUNK * HORIZON_CHUNK
+	for i = 0, n - 1 do
+		local best = HORIZON_NONE
+		for cy, str in pairs(col.chunks) do
+			local h = int16_at(str, i)
+			if h ~= HORIZON_NONE then
+				local w = cy * HORIZON_CHUNK + h
+				if w > best then best = w end
+			end
+		end
+		out[i + 1] = int16_char(best)
+	end
+	return table.concat(out)
+end
+
+-- A chunk's heights have arrived or changed
+local function horizon_note_chunk(chunk_p, heights, moved)
+	local key = horizon_key(chunk_p.x, chunk_p.z)
+	local col = horizon_cols[key]
+	if not col then
+		col = {chunks = {}}
+		horizon_cols[key] = col
+	end
+	if col.chunks[chunk_p.y] == heights then
+		return
+	end
+	col.chunks[chunk_p.y] = heights
+	local merged = horizon_merge(col)
+	if merged == col.merged then
+		return
+	end
+	col.merged = merged
+	-- The columns this one is in the map of, marked with when it moved;
+	-- the flush re-meshes only what was meshed before that, once. Only
+	-- for a change to a chunk that was here already -- a dig or a place
+	-- that moves a top -- and not for a chunk arriving: a world loading
+	-- arrives faster than it meshes, so a chunk is meshed with its
+	-- neighbours already in its map, and re-meshing every chunk for
+	-- each arriving neighbour starved the far ones out of the frame.
+	if not moved then
+		return
+	end
+	local now = buildat.get_time_us()
+	for dz = -1, 1 do
+		for dx = -1, 1 do
+			horizon_dirty[horizon_key(chunk_p.x + dx, chunk_p.z + dz)] = now
+		end
+	end
+end
+
+local function horizon_forget_chunk(chunk_p)
+	local col = horizon_cols[horizon_key(chunk_p.x, chunk_p.z)]
+	if col and col.chunks[chunk_p.y] then
+		col.chunks[chunk_p.y] = nil
+		col.merged = horizon_merge(col)
+	end
+end
+
+-- The map for a chunk: origin, then 96 rows of 96 int16 out of the 3x3
+-- chunk columns' merged heights, HORIZON_NONE where a column is unknown
+local function horizon_map_for(chunk_p)
+	if not horizon_none_row then
+		horizon_none_row = string.rep(int16_char(HORIZON_NONE), HORIZON_CHUNK)
+	end
+	local parts = {}
+	local ox = (chunk_p.x - 1) * HORIZON_CHUNK
+	local oy = chunk_p.y * HORIZON_CHUNK
+	local oz = (chunk_p.z - 1) * HORIZON_CHUNK
+	local function int32_char(v)
+		if v < 0 then v = v + 4294967296 end
+		return string.char(v % 256, math.floor(v / 256) % 256,
+				math.floor(v / 65536) % 256, math.floor(v / 16777216) % 256)
+	end
+	parts[1] = int32_char(ox) .. int32_char(oy) .. int32_char(oz)
+	local any = false
+	for dz = -1, 1 do
+		local cols = {}
+		for dx = -1, 1 do
+			local col = horizon_cols[horizon_key(chunk_p.x + dx, chunk_p.z + dz)]
+			cols[dx + 2] = col and col.merged or nil
+			if cols[dx + 2] then any = true end
+		end
+		for zz = 0, HORIZON_CHUNK - 1 do
+			for dx = 1, 3 do
+				local m = cols[dx]
+				if m then
+					local from = zz * HORIZON_CHUNK * 2 + 1
+					parts[#parts + 1] = string.sub(m, from, from + HORIZON_CHUNK * 2 - 1)
+				else
+					parts[#parts + 1] = horizon_none_row
+				end
+			end
+		end
+	end
+	if not any then
+		return nil
+	end
+	return table.concat(parts)
+end
+
 function sub_events()
 	node_update_queue = buildat.SpatialUpdateQueue()
+
+	local function note_horizon(node, moved)
+		if not M.horizon or not M.chunk_size_voxels or
+				M.chunk_size_voxels.x ~= HORIZON_CHUNK or
+				M.chunk_size_voxels.z ~= HORIZON_CHUNK then
+			return
+		end
+		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
+		local chunk_p = buildat.Vector3(node:GetWorldPosition()):div_components(
+				M.chunk_size_voxels):floor()
+		horizon_note_chunk(chunk_p, buildat.column_heights(data, voxel_reg),
+				moved)
+	end
+
 
 	local function queue_initial_node_update(node)
 		node_update_queue:put(node:GetWorldPosition(),
@@ -178,6 +331,9 @@ function sub_events()
 		log:info("voxelworld:node_volume_updated: "..dump(values))
 		node_volume_cache[values.node_id] = nil -- Clear cache
 		local node = replicate.main_scene:GetNode(values.node_id)
+		if node and not node:GetVar("buildat_voxel_data"):IsEmpty() then
+			note_horizon(node, true)
+		end
 		queue_modified_node_update(node)
 	end)
 
@@ -218,9 +374,16 @@ function sub_events()
 			near_trigger_d = 1.2 * M.camera_far_clip
 			near_weight = 0.4
 		elseif lod == 1 then
+			local horizon = nil
+			if M.horizon and M.use_skylight and M.chunk_size_voxels and
+					M.chunk_size_voxels.x == HORIZON_CHUNK then
+				horizon = horizon_map_for(buildat.Vector3(node_p):div_components(
+						M.chunk_size_voxels):floor())
+			end
+			horizon_meshed_us[node:GetID()] = buildat.get_time_us()
 			buildat.set_voxel_geometry(
 					node, data, voxel_reg, atlas_reg, M.use_skylight,
-					set_up_materials)
+					set_up_materials, horizon)
 
 			-- 1 -> 2
 			far_trigger_d = M.lod_distance * (1.0 + LOD_THRESHOLD)
@@ -312,6 +475,36 @@ function sub_events()
 			camera_dir = camera_node.direction
 			camera_p = camera_node:GetWorldPosition()
 			M.camera_far_clip = camera_node:GetComponent("Camera").farClip
+		end
+
+		-- Chunk columns whose horizon moved a while ago: re-mesh the chunks
+		-- in them that were meshed before the move, once. A world loading
+		-- moves every column as its chunks arrive, and a chunk meshed after
+		-- its neighbours arrived already has them in its map; the wait is
+		-- what keeps the load from re-meshing each chunk nine times over.
+		if next(horizon_dirty) and update_counter % 60 == 0 then
+			local now = buildat.get_time_us()
+			for key, t in pairs(horizon_dirty) do
+				if now - t >= HORIZON_FLUSH_US then
+					horizon_dirty[key] = nil
+					local cx, cz = key:match("^(-?%d+),(-?%d+)$")
+					cx, cz = tonumber(cx), tonumber(cz)
+					local ztable = static_node_cache[cz]
+					if ztable then
+						for _, ytable in pairs(ztable) do
+							local c = ytable[cx]
+							if c and c.node then
+								local id = c.node:GetID()
+								local meshed = horizon_meshed_us[id]
+								if meshed and meshed < t then
+									horizon_meshed_us[id] = now
+									queue_modified_node_update(c.node)
+								end
+							end
+						end
+					end
+				end
+			end
 		end
 
 		if camera_node and M.section_size_voxels then
@@ -445,6 +638,7 @@ function sub_events()
 
 	replicate.sub_sync_node_added({}, function(node)
 		if not node:GetVar("buildat_voxel_data"):IsEmpty() then
+			note_horizon(node, false)
 			queue_initial_node_update(node)
 		end
 		if node:GetVar("buildat_static"):GetBool() == true and
@@ -460,6 +654,7 @@ function sub_events()
 
 	replicate.sub_sync_node_removed(function(node, node_id)
 		node_volume_cache[node_id] = nil
+		horizon_meshed_us[node_id] = nil
 		if node and M.chunk_size_voxels then
 			local p = node:GetWorldPosition()
 			local chunk_p = buildat.Vector3(p):div_components(
@@ -467,6 +662,7 @@ function sub_events()
 			local cache = M.get_static_node_cache(chunk_p)
 			cache.node = nil
 			cache.fetched = false
+			horizon_forget_chunk(chunk_p)
 		end
 	end)
 end

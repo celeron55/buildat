@@ -276,6 +276,8 @@ local sky_tint_amount = 0.0
 local bounce_light = magic.Vector3(0, 0, 0)
 -- And the ground's radiance, for the lower hemisphere; see M.set_ground_light()
 local ground_light = magic.Vector3(0, 0, 0)
+-- Whether the mesher packs the vertex alpha; see M.set_packed_sky()
+local packed_sky = 0.0
 
 local function each_material_of(cg, cb)
 	if not cg then return end
@@ -308,6 +310,7 @@ function M.apply_to_node(node)
 	end
 	each_material(node, function(m)
 		m:SetTechnique(0, technique)
+		m:SetShaderParameter("PackedSky", packed_sky)
 	end)
 	-- The faces of the world's translucent voxels, which the mesher puts on a
 	-- child node of their own so that Urho3D sorts them against the other
@@ -321,6 +324,7 @@ function M.apply_to_node(node)
 				function(m)
 			m:SetTechnique(0, sun_gate and techniques.sun_alpha or
 					techniques.alpha)
+			m:SetShaderParameter("PackedSky", packed_sky)
 		end)
 	end
 	-- And the alpha-masked ones, which are solid world with the holes in
@@ -332,6 +336,7 @@ function M.apply_to_node(node)
 				function(m)
 			m:SetTechnique(0, sun_gate and techniques.sun_masked or
 					techniques.masked)
+			m:SetShaderParameter("PackedSky", packed_sky)
 		end)
 	end
 end
@@ -714,6 +719,14 @@ end
 function M.set_ground_light(r, g, b)
 	ground_light = magic.Vector3(math.max(0, r), math.max(0, g), math.max(0, b))
 	declare_countdown = 0
+end
+
+-- Whether the mesher packs the skylight nibble and the shade into the
+-- vertex alpha's two nibbles, which it does for a client that hands it a
+-- horizon map (voxelworld's M.horizon); the shader has to read it the same
+-- way. See [PBR_FIT] 2c.
+function M.set_packed_sky(on)
+	packed_sky = on and 1.0 or 0.0
 end
 
 function M.set_sky_light(k)

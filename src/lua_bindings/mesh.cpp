@@ -183,12 +183,33 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	// out, and a material is per drawable.
 	sm_<uint, interface::mesh::TemporaryGeometry> masked_geoms;
 
+	// The terrain's horizon around the chunk, when the caller has one:
+	// three int32 (the map's origin) and HORIZON_SIZE^2 int16 heights, as
+	// interface/mesh.h lays them out. See [PBR_FIT] 2c.
+	up_<interface::mesh::HorizonMap> horizon;
+
 	SetVoxelGeometryTask(Node *node, const ss_ &data,
 			sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
-			bool use_skylight, const luabind::object &material_cb):
+			bool use_skylight, const luabind::object &material_cb,
+			const ss_ &horizon_data):
 		node(node), data(data), voxel_reg(voxel_reg), atlas_reg(atlas_reg),
 		use_skylight(use_skylight), material_cb(material_cb)
 	{
+		using interface::mesh::HorizonMap;
+		using interface::mesh::HORIZON_SIZE;
+		const size_t want = 3 * sizeof(int32_t) +
+				(size_t)HORIZON_SIZE * HORIZON_SIZE * sizeof(int16_t);
+		if(horizon_data.size() == want){
+			horizon.reset(new HorizonMap());
+			const char *p = horizon_data.data();
+			memcpy(&horizon->origin_x, p, 4);
+			memcpy(&horizon->origin_y, p + 4, 4);
+			memcpy(&horizon->origin_z, p + 8, 4);
+			memcpy(horizon->heights, p + 12, want - 12);
+		} else if(!horizon_data.empty()){
+			log_w(MODULE, "set_voxel_geometry(): horizon of %zu bytes, "
+					"wanted %zu; ignored", horizon_data.size(), want);
+		}
 		ScopeTimer timer("pre geometry");
 		// NOTE: Do the pre-processing here so that the calling code can
 		//       meaasure how long its execution takes
@@ -207,7 +228,7 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	{
 		generate_voxel_geometry(
 				temp_geoms, *volume, voxel_reg.get(), atlas_reg.get(),
-				use_skylight, &alpha_geoms, &masked_geoms);
+				use_skylight, &alpha_geoms, &masked_geoms, horizon.get());
 		return true;
 	}
 	// Called repeatedly from main thread until returns true
@@ -476,9 +497,14 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 void set_voxel_geometry(const luabind::object &node_o,
 		const luabind::object &buffer_o,
 		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
-		bool use_skylight, const luabind::object &material_cb)
+		bool use_skylight, const luabind::object &material_cb,
+		const luabind::object &horizon_o)
 {
 	lua_State *L = node_o.interpreter();
+	// The horizon map, a string, or nothing
+	ss_ horizon_data;
+	if(horizon_o.is_valid() && luabind::type(horizon_o) == LUA_TSTRING)
+		horizon_data = luabind::object_cast<ss_>(horizon_o);
 
 	GET_TOLUA_STUFF(node, 1, Node);
 	log_d(MODULE, "set_voxel_geometry(): node=%p", node);
@@ -497,8 +523,8 @@ void set_voxel_geometry(const luabind::object &node_o,
 	lua_pop(L, 1);
 
 	up_<SetVoxelGeometryTask> task(new SetVoxelGeometryTask(
-			node, data, voxel_reg, atlas_reg, use_skylight, material_cb
-			));
+			node, data, voxel_reg, atlas_reg, use_skylight, material_cb,
+			horizon_data));
 
 	auto *thread_pool = buildat_app->get_thread_pool();
 
@@ -609,10 +635,30 @@ void clear_voxel_physics_boxes(const luabind::object &node_o)
 
 #define LUABIND_FUNC(name) def("__buildat_" #name, name)
 
+// column_heights(buffer, voxel_reg) -> a string of w*d int16, the local y
+// of each column's highest solid non-cutout voxel, HORIZON_NONE for none;
+// [z][x] over the chunk's inside. What a horizon map is built from; see
+// interface/mesh.h and [PBR_FIT] 2c.
+ss_ column_heights(const luabind::object &buffer_o,
+		sp_<VoxelRegistry> voxel_reg)
+{
+	lua_State *L = buffer_o.interpreter();
+	TRY_GET_TOLUA_STUFF(buf, 1, const VectorBuffer);
+	ss_ data;
+	if(buf == nullptr)
+		data = lua_checkcppstring(L, 1);
+	else
+		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+	up_<VoxelVolume> volume = interface::deserialize_volume(data);
+	sv_<int16_t> h = interface::mesh::column_heights(*volume, voxel_reg.get());
+	return ss_((const char*)h.data(), h.size() * sizeof(int16_t));
+}
+
 void init_mesh(lua_State *L)
 {
 	using namespace luabind;
 	module(L)[
+			LUABIND_FUNC(column_heights),
 			LUABIND_FUNC(set_simple_voxel_model),
 			LUABIND_FUNC(set_8bit_voxel_geometry),
 			LUABIND_FUNC(set_voxel_geometry),

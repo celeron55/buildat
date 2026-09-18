@@ -129,6 +129,29 @@ uniform vec3 cBounceLight;
 // Scaled by the shaped skylight so a cave's ceiling does not see a sunlit
 // field through the rock.
 uniform vec3 cGroundLight;
+// Whether the vertex alpha is packed: the skylight nibble in its high four
+// bits, the shade (occlusion, rays, terrain, face) in its low four -- what
+// the mesher writes for a client that hands it a horizon map. Then the sun's
+// gate reads the nibble alone and the sky's share the product, and a lit
+// wall in a trench keeps its sun. Unset (0), the alpha is nibble times shade
+// as it always was. Set per material by voxel_shading.set_packed_sky() --
+// a render path parameter did not reach this vertex stage. See [PBR_FIT] 2c.
+uniform float cPackedSky;
+
+// (gate, share): the nibble the sun is gated by and the sky share the
+// ambient is scaled by, out of the vertex alpha in either layout
+vec2 SkyOfAlpha(float a)
+{
+    if (cPackedSky > 0.5)
+    {
+        // "packed" is a reserved word in GLSL, hence the name
+        float bits = floor(a * 255.0 + 0.5);
+        float hi = floor(bits / 16.0);
+        float lo = bits - hi * 16.0;
+        return vec2(hi / 15.0, hi / 15.0 * lo / 15.0);
+    }
+    return vec2(a, a);
+}
 
 #if defined(NORMALMAP)
     varying vec4 vTexCoord;
@@ -204,8 +227,10 @@ varying vec4 vWorldPos;
     // tenth. What is lost is the dapple under a canopy, whose floor now
     // reads under the knee and is dark twice, once here and once by the
     // shadow map, which was shadowing it anyway.
-    const float SKY_KNEE_LOW = 0.04;
-    const float SKY_KNEE_HIGH = 0.18;
+    // Back at the nibble's own knee: with the alpha packed the gate reads
+    // the nibble alone, and the shade cannot pull a lit wall under it.
+    const float SKY_KNEE_LOW = 2.0 / 15.0;
+    const float SKY_KNEE_HIGH = 11.0 / 15.0;
 
     float ShapeSkylight(float sky)
     {
@@ -249,7 +274,7 @@ void VS()
         vec4 projWorldPos = vec4(worldPos, 1.0);
 
         #ifdef VOXELSUNGATE
-            vSkyVisibility = ShapeSkylight(iColor.a);
+            vSkyVisibility = ShapeSkylight(SkyOfAlpha(iColor.a).x);
         #endif
 
         #ifdef SHADOW
@@ -290,14 +315,15 @@ void VS()
             // 0.35 for a wall rather than the hemisphere's half: the sky a
             // wall faces is the horizon's band and the dome's dark side
             // more than its zenith ([PBR_FIT] tuning, contrast_dirt)
-            vSkyAmbient = GetAmbient(GetZonePos(worldPos)) * iColor.a *
+            vec2 sky = SkyOfAlpha(iColor.a);
+            vSkyAmbient = GetAmbient(GetZonePos(worldPos)) * sky.y *
                     (0.35 + 0.65 * max(vNormal.y, 0.0));
             vVertexLight = iColor.rgb +
-                cBounceLight * (1.0 - ShapeSkylight(iColor.a)) +
+                cBounceLight * (1.0 - ShapeSkylight(sky.x)) +
                 cGroundLight * (0.5 - 0.5 * vNormal.y) *
-                    ShapeSkylight(iColor.a);
+                    ShapeSkylight(sky.x);
         #endif
-        vSkyVisibility = ShapeSkylight(iColor.a);
+        vSkyVisibility = ShapeSkylight(SkyOfAlpha(iColor.a).x);
 
         #ifdef NUMVERTEXLIGHTS
             for (int i = 0; i < NUMVERTEXLIGHTS; ++i)

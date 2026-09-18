@@ -28,6 +28,10 @@ luanti.set_scene(scene)
 -- Seen from outside itself, so nothing drops to a reduced LOD, and nothing
 -- here walks on anything
 voxelworld.lod_distance = 1000
+-- The terrain's horizon into every chunk's mesh, and the vertex alpha
+-- packed with it; the shader reads it so ([PBR_FIT] 2c)
+voxelworld.horizon = true
+voxel_shading.set_packed_sky(true)
 voxelworld.physics_distance = 1
 voxelworld.use_skylight = true
 
