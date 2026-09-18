@@ -274,6 +274,8 @@ local sky_tint_amount = 0.0
 -- Light bounced off the surroundings, reaching a surface where the sky does
 -- not; see M.set_bounce_light()
 local bounce_light = magic.Vector3(0, 0, 0)
+-- And the ground's radiance, for the lower hemisphere; see M.set_ground_light()
+local ground_light = magic.Vector3(0, 0, 0)
 
 local function each_material_of(cg, cb)
 	if not cg then return end
@@ -650,6 +652,7 @@ local function push_sky_vis()
 				command:SetShaderParameter("SkyTint", sky_tint)
 				command:SetShaderParameter("SkyTintAmount", sky_tint_amount)
 				command:SetShaderParameter("BounceLight", bounce_light)
+				command:SetShaderParameter("GroundLight", ground_light)
 			end
 		end
 		return
@@ -660,6 +663,7 @@ local function push_sky_vis()
 	render_path:SetShaderParameter("SkyTint", sky_tint)
 	render_path:SetShaderParameter("SkyTintAmount", sky_tint_amount)
 	render_path:SetShaderParameter("BounceLight", bounce_light)
+	render_path:SetShaderParameter("GroundLight", ground_light)
 end
 
 -- How much of the sky is visible overhead: 1 out in the open, towards 0
@@ -701,6 +705,14 @@ end
 -- lights a cave by day. Nothing until a client sets it.
 function M.set_bounce_light(r, g, b)
 	bounce_light = magic.Vector3(math.max(0, r), math.max(0, g), math.max(0, b))
+	declare_countdown = 0
+end
+
+-- The ground's radiance, in the zone ambient's units, which a surface
+-- receives by how much of its hemisphere looks down: half for a wall, all
+-- for a ceiling. Nothing until a client sets it.
+function M.set_ground_light(r, g, b)
+	ground_light = magic.Vector3(math.max(0, r), math.max(0, g), math.max(0, b))
 	declare_countdown = 0
 end
 

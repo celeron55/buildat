@@ -121,6 +121,14 @@
 // no ground bounce, since its sky visibility is one. The upgrade is a
 // ground radiance times (1 - n.y) / 2 on top, once the render says how much.
 uniform vec3 cBounceLight;
+// And the ground: what the lower hemisphere of a face outdoors sees, the
+// radiance of sunlit and sky-lit ground, which a vertical face gets half
+// of and a ceiling all of. In the ambient's units, set by the client from
+// the sun and the sky of the hour times the ground's albedo; the warm
+// bounce that the path trace's second bounce puts on a terrace's side.
+// Scaled by the shaped skylight so a cave's ceiling does not see a sunlit
+// field through the rock.
+uniform vec3 cGroundLight;
 
 #if defined(NORMALMAP)
     varying vec4 vTexCoord;
@@ -263,7 +271,9 @@ void VS()
             // shaped value: a canopy is not a cave.
             vVertexLight = GetAmbient(GetZonePos(worldPos)) * iColor.a +
                 iColor.rgb +
-                cBounceLight * (1.0 - ShapeSkylight(iColor.a));
+                cBounceLight * (1.0 - ShapeSkylight(iColor.a)) +
+                cGroundLight * (0.5 - 0.5 * vNormal.y) *
+                    ShapeSkylight(iColor.a);
         #endif
         vSkyVisibility = ShapeSkylight(iColor.a);
 

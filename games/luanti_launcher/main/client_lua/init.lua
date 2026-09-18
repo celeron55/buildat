@@ -208,6 +208,8 @@ local MOON_BRIGHTNESS = 1.0
 --                    elevation
 --   bounce           light off the surroundings where the sky does not
 --                    reach, as a share of the sky's mean (term 2)
+--   ground           the ground's albedo, for what the lower hemisphere
+--                    of a face outdoors sees: dirt and grass, warm
 --   moon_e           the moon lamp's irradiance, the render's own
 --   night_sky        what the sky is with the sun down: a floor for
 --                    airglow, since Nishita gives none and the night's
@@ -216,7 +218,7 @@ local MOON_BRIGHTNESS = 1.0
 -- its colour below; the colours are the terms after this one.
 local PHYS = {sun_e0 = 200, sun_tau = 0.35, sky_zenith = 4.5,
 		sky_horizon = 12.0, moon_e = 0.0025, night_sky = 0.00005,
-		bounce = 0.13}
+		bounce = 0.13, ground = {r = 0.25, g = 0.22, b = 0.15}}
 -- The sky's radiance factor at a sun height (sin elevation): full by
 -- day, gone over the last twelve degrees, the floor below
 function PHYS.sky(height)
@@ -1356,6 +1358,17 @@ local function update_sky(dt)
 		-- cave at other hours is what would fit it further.
 		voxel_shading.set_bounce_light(c.r * k * PHYS.bounce,
 				c.g * k * PHYS.bounce, c.b * k * PHYS.bounce)
+		-- And the ground as the lower hemisphere sees it: its albedo
+		-- times what falls on it, the sun on the half of it that is not
+		-- in shadow and the sky on all of it, over pi. The warm bounce
+		-- a terrace's side gets in the render. simplified: one albedo
+		-- for every ground, half the sun.
+		local sun = PHYS.sun(height) * math.max(height, 0) * 0.5 / math.pi
+		local sc = sky_lights.sun.color
+		voxel_shading.set_ground_light(
+				PHYS.ground.r * (sun * sc.r + c.r * k),
+				PHYS.ground.g * (sun * sc.g + c.g * k),
+				PHYS.ground.b * (sun * sc.b + c.b * k))
 	end
 	-- And the fog with it. This is the one thing the cave sky needs that is
 	-- not per direction, so it takes the mean of the same cube: underground
