@@ -30,6 +30,10 @@ here=$(cd "$(dirname "$0")/../../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 fixture="${1:?reference | check <dir> | shoot <log> <pid> <dir>}"
 # Every copy of every fact comes out of build.sh; see [REFVIEWS_MOD]
+# No sparkle in a reference set (user, 2026-09-18): the path-traced
+# reference does not render the spots, so both clients leave them off
+# under this variable and the comparison is of what both can draw
+export BUILDAT_LUANTI_NO_SPOTS=1
 built=$(mktemp -d /tmp/refshots_build.XXXXXX)
 "$me/build.sh" "$built" || exit 2
 . "$built/env.sh"

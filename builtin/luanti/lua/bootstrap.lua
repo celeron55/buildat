@@ -1648,6 +1648,19 @@ assert(alpha_mode_of({use_texture_alpha = false}, "plantlike") == "clip")
 -- is at a fixed place beside this module. See [VOXEL_MATERIALS].
 local surface = dofile(module_path ..
 		"/../../extensions/luanti_client/surface.lua")
+-- BUILDAT_LUANTI_NO_SPOTS=1 (the reference runs set it): no sparkle,
+-- moving or standing, on any surface. The path-traced reference does
+-- not render spots, so a comparison against it is cleaner without them
+-- on the client either; the game's look is untouched otherwise.
+local NO_SPOTS = (os.getenv and os.getenv("BUILDAT_LUANTI_NO_SPOTS") or "") ~= ""
+local function surface_for(def)
+	local out = surface.for_node(def)
+	if NO_SPOTS then
+		out.spots = 0
+		out.static_spots = 0
+	end
+	return out
+end
 
 function core.__voxel_defs()
 	local max_id = 0
@@ -1712,7 +1725,7 @@ function core.__voxel_defs()
 			-- panes are drawn with every texel either solid or gone, where
 			-- the game meant them to be seen through.
 			alpha_blend = alpha_mode_of(def, drawtype) == "blend",
-			surface = surface.for_node(def and {
+			surface = surface_for(def and {
 				name = name, drawtype = drawtype, groups = def.groups,
 				waving = def.waving, light_source = def.light_source,
 				blend = alpha_mode_of(def, drawtype) == "blend",

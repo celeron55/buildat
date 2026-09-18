@@ -43,6 +43,10 @@ me=$(cd "$(dirname "$0")" && pwd)
 # a path-trace dump wants while the camera is still being diagnosed. Every
 # set directory carries the range as _r<RANGE>. KEEP: the server stays up
 # between the clients.
+# No sparkle in a reference set (user, 2026-09-18): the path-traced
+# reference does not render the spots, so both clients leave them off
+# under this variable and the comparison is of what both can draw
+export BUILDAT_LUANTI_NO_SPOTS=1
 built=$(mktemp -d /tmp/refshots_build.XXXXXX)
 KEEP=1 "$me/build.sh" "$built" || exit 2
 . "$built/env.sh"

@@ -27,6 +27,11 @@ local light_flood = dofile(__buildat_extension_path("luanti_client")..
 		"/light.lua")
 local skyvis = dofile(__buildat_extension_path("luanti_client")..
 		"/skyvis.lua")
+-- BUILDAT_LUANTI_NO_SPOTS=1, the reference runs' switch: no sparkle on
+-- any surface, since the path-traced reference draws none. The module's
+-- bootstrap.lua honours the same variable.
+local NO_SPOTS = (os.getenv("BUILDAT_LUANTI_NO_SPOTS") or "") ~= ""
+
 local surface = dofile(__buildat_extension_path("luanti_client")..
 		"/surface.lua")
 -- The sky rendered into a cube for the world to reflect, shared with
@@ -1174,6 +1179,10 @@ function M.new(magic, buildat, log, options)
 			double_sided, turns, liquid_group, connect, masked, variants,
 			blend, solid_base, surf)
 		surf = surf or surface.for_node(nil)
+		if NO_SPOTS then
+			surf.spots = 0
+			surf.static_spots = 0
+		end
 		local vdef = buildat.VoxelDefinition()
 		vdef.name.block_name = name
 		vdef.handler_module = ""
