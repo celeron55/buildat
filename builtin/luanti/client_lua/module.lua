@@ -2354,6 +2354,27 @@ end
 
 -- The open form's name and drawn window, for whoever reports what is on
 -- the screen ([SCAN_EVENT]); nil when none is open
+-- The open form's slots for the scan ([SCAN_DRIVE]): where each is on
+-- the screen, which list and index, and what is in it -- what a driver
+-- drags between. Nil when no form is open.
+function M.form_slots()
+	if form == nil or form.drawn == nil then
+		return nil
+	end
+	local ox, oy = form.drawn.origin[1], form.drawn.origin[2]
+	local out = {}
+	for _, slot in ipairs(form.drawn.slots or {}) do
+		out[#out + 1] = {
+			location = slot.location, list = slot.list, index = slot.index,
+			x = ox + slot.x, y = oy + slot.y, size = slot.size,
+			stack = slot.stack and slot.stack.name and
+					(slot.stack.name .. " " .. tostring(slot.stack.count or 1))
+					or "",
+		}
+	end
+	return out
+end
+
 function M.form_window()
 	if form == nil or form.drawn == nil then
 		return nil, nil

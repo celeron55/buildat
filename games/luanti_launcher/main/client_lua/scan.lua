@@ -20,6 +20,24 @@ local STEP = 0.25
 return function(ctx)
 	local log = ctx.log
 
+	-- Every rectangle here is in window pixels, the coordinates mouse_pos
+	-- takes: Urho's UI is laid out in its own units, the window's pixels
+	-- over ui:GetScale(), and one conversion here beats every reader
+	-- knowing which space a line is in. Clipped to the window, so that
+	-- the centre of what is left is a valid mouse position.
+	local function pixels(x, y, w, h)
+		local k = magic.ui:GetScale()
+		if not k or k <= 0 then
+			k = 1
+		end
+		local ww, wh = magic.ui.root.width * k, magic.ui.root.height * k
+		local x0 = math.max(0, math.floor(x * k))
+		local y0 = math.max(0, math.floor(y * k))
+		local x1 = math.min(ww, math.floor((x + w) * k))
+		local y1 = math.min(wh, math.floor((y + h) * k))
+		return x0, y0, math.max(0, x1 - x0), math.max(0, y1 - y0)
+	end
+
 	local function ray(p0, dir)
 		local last = nil
 		local through = {}
@@ -54,9 +72,9 @@ return function(ctx)
 			if child then
 				local kind = child:GetTypeName()
 				local at = child.screenPosition
+				local x, y, w, h = pixels(at.x, at.y, child.width, child.height)
 				local line = string.format("scan %s: ui %s%s at %d,%d size %dx%d",
-						label, string.rep("  ", depth), kind, at.x, at.y,
-						child.width, child.height)
+						label, string.rep("  ", depth), kind, x, y, w, h)
 				if kind == "Text" or kind == "LineEdit" then
 					local okt, text = pcall(function()
 						return child.GetText and child:GetText() or child.text
@@ -107,9 +125,15 @@ return function(ctx)
 		-- The HUD's bars: health, hunger, breath, armour, by their picture
 		for _, e in pairs(luanti.hud_elements) do
 			if e.type == "statbar" then
-				lines[#lines + 1] = string.format("scan %s: hud statbar %s %s/%s",
+				local rect = ""
+				local rx, ry, rw, rh = ctx.hud_rect(e)
+				if rx then
+					rx, ry, rw, rh = pixels(rx, ry, rw, rh)
+					rect = string.format(" at %d,%d size %dx%d", rx, ry, rw, rh)
+				end
+				lines[#lines + 1] = string.format("scan %s: hud statbar %s %s/%s%s",
 						label, buildat.dump(e.text or ""), tostring(e.number or 0),
-						tostring(e.item or e.number or 0))
+						tostring(e.item or e.number or 0), rect)
 			end
 		end
 		-- The crosshair, by the same march the dig uses
@@ -168,6 +192,15 @@ return function(ctx)
 		if window then
 			lines[#lines + 1] = string.format("scan %s: form %s open", label,
 					buildat.dump(formname))
+			-- The slots by list and index, with what is in them: the
+			-- elements below are the pictures and do not say
+			for _, s in ipairs(luanti.form_slots() or {}) do
+				local x, y, w, h = pixels(s.x, s.y, s.size, s.size)
+				lines[#lines + 1] = string.format(
+						"scan %s: slot %s:%s:%d at %d,%d size %dx%d item %s", label,
+						s.location, s.list, s.index, x, y, w, h,
+						buildat.dump(s.stack))
+			end
 			ui(label, window, 1, lines)
 		elseif chat then
 			lines[#lines + 1] = string.format("scan %s: chat line open, text %s",

@@ -2412,6 +2412,10 @@ end
 -- looked at used; a status line asking for the top right corner was drawn
 -- eight pixels off the right edge of the screen instead.
 local function hud_place(element, e, w, h)
+	-- Which UI element it was placed as, for the scan's rectangles
+	-- ([SCAN_EVENT]); on the game's own table, this file being at Lua's
+	-- 200 locals
+	e.__placed = element
 	local px, py = parse_v2(e.pos, 0, 0)
 	local ox, oy = parse_v2(e.offset, 0, 0)
 	local ax, ay = parse_v2(e.align, 0, 0)
@@ -3213,6 +3217,14 @@ end)(buildat.run_script_file("main/scan.lua"))({
 	voxel_is_solid = voxel_is_solid,
 	dig_range = function() return math.min(POINT_RANGE, luanti.dig_range(wield_index)) end,
 	chat_text = function() return chat_input and chat_input:GetText() end,
+	hud_rect = function(e)
+		local el = e.__placed
+		if not el then
+			return nil
+		end
+		local at = el.screenPosition
+		return at.x, at.y, el.width, el.height
+	end,
 	player_pos = function() return player.x, player.y, player.z end,
 	wield = function() return hotbar_stacks[wield_index] end,
 	hotbar = function() return hotbar_stacks end,

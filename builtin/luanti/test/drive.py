@@ -88,6 +88,7 @@ class State:
         self.ui = []         # (kind, x, y, w, h, text, image)
         self.bars = {}       # texture -> (number, total)
         self.chat = None
+        self.slots = []      # (list, index, x, y, size, item string), pixels
 
 
 BIN_RE = re.compile(
@@ -133,6 +134,11 @@ def parse(lines):
         m = re.match(r"form \"(.*)\" open", line)
         if m:
             s.form = m.group(1)
+            continue
+        m = re.match(r"slot \S+?:(\w+):(\d+) at (-?\d+),(-?\d+) size (\d+)x\d+ item \"(.*)\"", line)
+        if m:
+            s.slots.append((m.group(1), int(m.group(2)), int(m.group(3)),
+                            int(m.group(4)), int(m.group(5)), m.group(6)))
             continue
         m = UI_RE.match(line)
         if m:
@@ -197,6 +203,80 @@ def is_tree(name):
     return "tree" in name or "log" in name
 
 
+# Rung 2's crafts in the player's own 2x2 grid ([DRIVE_STORY]): what
+# goes in which cell (craft:1 craft:2 / craft:3 craft:4), matched by a
+# word in the item's name, and what should come out. VoxeLibre's
+# mcl_core recipes: a log makes four planks, two planks over each other
+# four sticks, four planks a crafting table.
+RECIPES_2X2 = [
+    ("planks", {1: "tree"}, "wood"),
+    ("sticks", {1: "wood", 3: "wood"}, "stick"),
+    ("table", {1: "wood", 2: "wood", 3: "wood", 4: "wood"}, "crafting_table"),
+]
+
+
+def item_is(stack, word):
+    name = stack.split(" ")[0]
+    return word in name and not name.endswith("sapling")
+
+
+def have(s, word):
+    """Whether the hotbar or the open form's main list holds such an item."""
+    return any(item_is(st, word) for _, st in s.hotbar) or \
+        any(item_is(sl[5], word) for sl in s.slots if sl[0] == "main")
+
+
+def click_at(x, y, w, h=None, button="left"):
+    """A click at the middle of a rectangle the scan gave, in pixels."""
+    h = w if h is None else h
+    return ["mouse_pos %d %d" % (x + w // 2, y + h // 2), "delay 120",
+            "mouse_click %s" % button, "delay 250"]
+
+
+def craft_2x2(s, recipe):
+    """The clicks for one craft: for each cell, pick up a stack that has
+    the item, put one in the cell, put the rest back; then take the
+    result and put it in an empty main slot. None when a source is
+    missing."""
+    name, cells, _ = recipe
+    by = {(sl[0], sl[1]): sl for sl in s.slots}
+    cmds = []
+    used = {}
+    for cell, word in sorted(cells.items()):
+        src = None
+        for sl in s.slots:
+            if sl[0] == "main" and item_is(sl[5], word):
+                count = int(sl[5].split(" ")[1]) if " " in sl[5] else 1
+                if count - used.get((sl[0], sl[1]), 0) >= 1:
+                    src = sl
+                    break
+        target = by.get(("craft", cell))
+        if src is None or target is None:
+            return None
+        used[(src[0], src[1])] = used.get((src[0], src[1]), 0) + 1
+        cmds += click_at(src[2], src[3], src[4])
+        cmds += click_at(target[2], target[3], target[4], button="right")
+        cmds += click_at(src[2], src[3], src[4])
+    out = by.get(("craftpreview", 1))
+    empty = [sl for sl in s.slots if sl[0] == "main" and sl[5] == ""]
+    if out is None or not empty:
+        return None
+    cmds += click_at(out[2], out[3], out[4])
+    cmds += click_at(empty[0][2], empty[0][3], empty[0][4])
+    return cmds
+
+
+def wanted_craft(s):
+    """The lowest recipe whose product is missing and whose sources are
+    at hand, or None."""
+    for r in RECIPES_2X2:
+        if have(s, r[2]):
+            continue
+        if all(have(s, w) for w in set(r[1].values())):
+            return r
+    return None
+
+
 # The rules, in priority order. Each is (name, condition, act) where act
 # returns the commands and an expectation: a function of the next state
 # that says whether what the rule wanted happened, or None.
@@ -208,13 +288,21 @@ def rules(s, mem):
         # text's own rectangle is what is clicked
         btn = [u for u in s.ui if u[5] and u[5].lower().startswith("respawn")]
         mem["form_turns"] = mem.get("form_turns", 0) + 1
-        if mem["form_turns"] > 2:
+        if mem["form_turns"] > 6:
             return "stuck_form", None, None
         if btn:
             _, x, y, w, h, _, _ = btn[0]
-            cmds = ["mouse_pos %d %d" % (x + w // 2, y + h // 2),
-                    "delay 100", "mouse_click left", ms(TURN_S)]
-            return "respawn", cmds, lambda n: n.form is None
+            return "respawn", click_at(x, y, w, h) + [ms(TURN_S)], \
+                lambda n: n.form is None
+        # The player's own inventory: a craft while there is one to do,
+        # its expectation the product in a main slot on the next scan
+        if s.form == "" and any(sl[0] == "craft" for sl in s.slots):
+            r = wanted_craft(s)
+            if r is not None:
+                cmds = craft_2x2(s, r)
+                if cmds is not None:
+                    return "craft_" + r[0], cmds + ["delay 300"], \
+                        lambda n, w=r[2]: have(n, w)
         return "close_form", ["keypress Escape", ms(TURN_S)], \
             lambda n: n.form is None
     mem["form_turns"] = 0
@@ -264,6 +352,12 @@ def rules(s, mem):
                         "delay 2500", "mouse_up right", "delay 300"]
                 return "eat", cmds, lambda nx, tex=tex, n=n: \
                     tex in nx.bars and nx.bars[tex][0] > n
+
+    # something to craft from what is held: open the inventory, and the
+    # form rule above does the craft
+    if wanted_craft(s) is not None:
+        return "open_inventory", ["keypress I", ms(1.0)], \
+            lambda n: n.form is not None
 
     # a tree in view
     trees = [(x, y) for (x, y), b in s.bins.items()
@@ -426,6 +520,20 @@ done, 8 lines""".splitlines()
                   "ui   Button at 500,300 size 100x40 text \"Respawn\""])
     name, cmds, exp = rules(form, {})
     assert name == "respawn" and cmds[0] == "mouse_pos 550 320", cmds
+    # A craft: a log in the hotbar wants planks; the form's slots give the
+    # clicks, source, cell, source, result, empty slot
+    inv = parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:jungletree 4",
+                 "form \"\" open",
+                 "slot current_player:main:1 at 564,832 size 72x72 item \"mcl_core:jungletree 4\"",
+                 "slot current_player:main:2 at 654,832 size 72x72 item \"\"",
+                 "slot current_player:craft:1 at 1014,210 size 72x72 item \"\"",
+                 "slot current_player:craftpreview:1 at 1284,255 size 72x72 item \"\""])
+    assert wanted_craft(inv)[0] == "planks"
+    name, cmds, exp = rules(inv, {})
+    assert name == "craft_planks" and cmds[0] == "mouse_pos 600 868" and \
+        "mouse_click right" in cmds, cmds
+    assert not exp(inv) and exp(parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 4"]))
+    assert rules(parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:jungletree 4"]), {})[0] == "open_inventory"
     # The centre bin's ray is near the view direction (half a bin off it)
     d = bin_dir(s, RES // 2, RES // 2)
     assert abs(d[0] - 1) < 0.15 and abs(d[2]) < 0.25, d

@@ -105,6 +105,10 @@ awk -v seed="$SEED" -v secs="$((MINUTES * 60))" -v out="$out" 'BEGIN {
 	}
 	print "quit"
 }' > "$out/cmds.txt"
+# CMDS=<file> plays that command file instead of the walk: the same
+# server, fixture and verdict around one scripted thing, for reading a
+# scan of a form or a place by hand
+[ -n "${CMDS:-}" ] && cp "$CMDS" "$out/cmds.txt"
 
 cd "$here/Build"
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
