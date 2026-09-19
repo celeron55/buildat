@@ -4867,6 +4867,10 @@ local slow_worst, slow_worst_phase = 0, ""
 -- per minute; with the phase that set it.
 local DECAY, DECAY_EVERY_S = 0.99425, 0.5
 local step_peak, step_peak_phase = 0, ""
+-- The worst step since somebody last asked, undecayed: the fixture's
+-- count of seconds over the ceiling read the decaying peak and counted
+-- one 0.45 s step eighty times ([STEP_SLICE], seed 5's rerun)
+local step_worst, step_worst_phase = 0, ""
 local decay_due = 0
 local peak_told = -1
 
@@ -4876,12 +4880,23 @@ function core.get_server_step_peak()
 	return step_peak, step_peak_phase
 end
 
+-- get_server_step_worst() -> seconds, phase: the worst step since the
+-- last call, and the call starts the next window
+function core.get_server_step_worst()
+	local s, p = step_worst, step_worst_phase
+	step_worst, step_worst_phase = 0, ""
+	return s, p
+end
+
 -- Work that runs on the server's thread outside core.__step() -- a
 -- section's on_generated callbacks -- counts against the peak the same
 -- way, since a client waits on it the same way
 function core.__note_phase(phase, seconds)
 	if seconds > step_peak then
 		step_peak, step_peak_phase = seconds, phase
+	end
+	if seconds > step_worst then
+		step_worst, step_worst_phase = seconds, phase
 	end
 	if seconds >= SLOW_STEP_S then
 		core.log("trace", string.format("%s took %.2f s between steps",
@@ -4939,6 +4954,9 @@ function core.__step(dtime)
 	end
 	if total > step_peak then
 		step_peak, step_peak_phase = total, longest_phase
+	end
+	if total > step_worst then
+		step_worst, step_worst_phase = total, longest_phase
 	end
 	-- Told to the clients when the row would show a different number
 	local shown = math.floor(step_peak * 100)

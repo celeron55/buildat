@@ -25,6 +25,7 @@ if seed then
 end
 
 local dug, placed, picked = 0, 0, 0
+local pickup_test_at, dropped_name = nil, nil
 -- The step ceiling ([STEP_PEAK]): warned over the first, failed over the
 -- second. `over` counts the seconds the peak was over the ceiling, from
 -- STEP_COUNT_FROM_T on: the ceiling is about play, not the start-up
@@ -69,12 +70,18 @@ core.register_on_dignode(function(pos, node, digger)
 		local le = obj:get_luaentity()
 		if le and le.name == "__builtin:item" then
 			dropping = dropping + 1
+			-- and what it was, for the pickup check below
+			dropped_name = le.itemstring or dropped_name
 			break
 		end
 	end
 end)
 core.register_on_placenode(function(pos, node, placer)
-	placed = placed + 1
+	-- The player's own: a structure's placements came through here as
+	-- eighteen in a second (seed 7's rerun)
+	if placer and placer:is_player() then
+		placed = placed + 1
+	end
 end)
 core.register_on_item_pickup(function(itemstack, picker)
 	picked = picked + 1
@@ -205,12 +212,30 @@ core.register_on_joinplayer(function(player)
 		-- pickup hook is for what was dropped and the inventory is the
 		-- check: two dug and an empty inventory a minute later is the
 		-- drop path
-		if dropping >= 3 and t % 60 == 0 then
+		-- An empty inventory is not the verdict by itself: the walk digs
+		-- looking down and moves on, and what dropped lies where it was
+		-- dug, out of reach (seed 7's rerun, seven dug, none held). The
+		-- verdict is the pickup path itself: an item put at the feet
+		-- is in the inventory three seconds later, or is not.
+		if dropping >= 3 and t % 60 == 0 and pickup_test_at == nil then
+			local inv = player:get_inventory()
+			if inv and inv:is_empty("main") then
+				core.add_item(pos, dropped_name)
+				pickup_test_at = t
+				core.log("action", string.format(
+						"fuzz: dug %d that drop and holds nothing at t=%d; " ..
+						"a %s put at the feet", dropping, t, dropped_name))
+			end
+		elseif pickup_test_at and t >= pickup_test_at + 3 then
 			local inv = player:get_inventory()
 			if inv and inv:is_empty("main") then
 				fail("dug " .. dropping .. " nodes that drop something and " ..
-						"holds nothing")
+						"holds nothing, and an item put at the feet was not " ..
+						"picked up in 3 s")
+			else
+				core.log("action", "fuzz: the item at the feet was picked up")
 			end
+			pickup_test_at = nil
 		end
 		local why = punch_watch(player)
 		if why then
@@ -247,7 +272,9 @@ core.register_on_joinplayer(function(player)
 		-- under [STEP_PEAK]. The peak is read fresh each tick -- decay
 		-- barely moves it in a second -- and a stall is named with its
 		-- phase.
-		local peak, phase = core.get_server_step_peak()
+		-- The worst step of the last second, not the decaying peak: the
+		-- peak counted one step eighty times as it came down
+		local peak, phase = core.get_server_step_worst()
 		if peak > STEP_FAIL_S then
 			fail(string.format("a step took %.2f s in %s", peak, phase))
 		elseif peak > STEP_CEILING_S and t >= STEP_COUNT_FROM_T then

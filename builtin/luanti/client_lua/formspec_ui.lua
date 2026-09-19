@@ -793,8 +793,14 @@ function M.new(magic, buildat, log, ctx)
 			end
 		end
 
+		-- What each kind of element cost, for the slow-draw line
+		-- ([FORMSPEC_FRAME]): the inventory drew in 251 ms with 82
+		-- elements and 8 ms of pictures, and this says where the rest went
+		self.kind_us = {}
+		local kind_us = self.kind_us
 		for _, e in ipairs(elements) do
 			local name = e.name
+			local te = buildat.get_time_us()
 			if IGNORED[name] then
 				-- Nothing to draw
 			elseif name == "background" or name == "background9" then
@@ -1070,6 +1076,7 @@ function M.new(magic, buildat, log, ctx)
 				unknown[name] = true
 				log:info("formspec: nothing drawn for \""..name.."\"")
 			end
+			kind_us[name] = (kind_us[name] or 0) + buildat.get_time_us() - te
 		end
 		-- field_close_on_enter[name;bool] says whether pressing enter in a
 		-- field closes the form; a field nobody said anything about does.

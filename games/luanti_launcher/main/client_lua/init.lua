@@ -3210,6 +3210,9 @@ end)(buildat.run_script_file("main/scan.lua"))({
 	voxel_is_solid = voxel_is_solid,
 	dig_range = function() return math.min(POINT_RANGE, luanti.dig_range(wield_index)) end,
 	chat_text = function() return chat_input and chat_input:GetText() end,
+	player_pos = function() return player.x, player.y, player.z end,
+	wield = function() return hotbar_stacks[wield_index] end,
+	hotbar = function() return hotbar_stacks end,
 	log = log,
 })
 

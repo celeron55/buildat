@@ -20,12 +20,15 @@ table="$sweep/table.md"
 [ -f "$table" ] || echo "| seed | game | min | verdict | worst step | worst frame | finding |
 | --- | --- | --- | --- | --- | --- | --- |" > "$table"
 
+# The campaign, cut to a third on 2026-09-19 (user: "excessive"): seven
+# VoxeLibre seeds at five minutes, one at twenty, one seed a game --
+# eighty minutes of walk
 if [ -z "${RUNS:-}" ]; then
 	RUNS=""
-	for s in $(seq 1 20); do RUNS="$RUNS mineclone2:$s:5"; done
-	for s in 1 2 3; do RUNS="$RUNS mineclone2:$s:20"; done
+	for s in $(seq 1 7); do RUNS="$RUNS mineclone2:$s:5"; done
+	RUNS="$RUNS mineclone2:1:20"
 	for g in devtest minetest_game nodecore repixture exile; do
-		RUNS="$RUNS $g:1:5 $g:2:5"
+		RUNS="$RUNS $g:1:5"
 	done
 fi
 

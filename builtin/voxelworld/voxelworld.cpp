@@ -1413,24 +1413,42 @@ struct CInstance: public voxelworld::Instance
 	// The blockers of a deferred relight whose flood stopped at its
 	// deadline, for the pass that finishes it; see relight_if_stale()
 	sv_<pv::Vector3DInt32> m_relight_blockers;
+	// Where the blockers' pass got to when a deadline stopped it
+	size_t m_relight_finish_f = 0;
+	size_t m_relight_finish_i = 0;
 	bool m_relight_pending = false;
 
 	// The pass that ends a relight: what light does not pass through
 	// wears the brightest light beside it, the way the flood leaves the
 	// blockers it touched
-	void relight_finish()
+	// The blockers' faces read off their lit neighbours, under the same
+	// deadline as the flood: a section's blockers are its solid voxels,
+	// tens of thousands, and this pass unsliced was the 110-170 ms every
+	// relight call cost against a 20 ms budget ([STEP_SLICE], seed 7's
+	// rerun: the pass 23 ms, the flood 11 ms, the rest unnamed). True
+	// when done; false leaves m_relight_pending set for the next call.
+	bool relight_finish(int64_t deadline_us = 0)
 	{
-		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
+		for(; m_relight_finish_f < NUM_LIGHT_FIELDS;
+				m_relight_finish_f++, m_relight_finish_i = 0){
+			const size_t f = m_relight_finish_f;
 			if(!m_light_maintained[f])
 				continue;
 			m_light_running = (LightField)f;
 			m_light_buf = nullptr;
 			m_light_section = nullptr;
-			for(const pv::Vector3DInt32 &p : m_relight_blockers)
-				light_blocker_from_neighbours(p);
+			for(size_t &i = m_relight_finish_i; i < m_relight_blockers.size(); i++){
+				if(deadline_us != 0 && (i & 255) == 255 &&
+						interface::os::time_us() >= deadline_us)
+					return false;
+				light_blocker_from_neighbours(m_relight_blockers[i]);
+			}
 		}
 		m_relight_blockers.clear();
+		m_relight_finish_f = 0;
+		m_relight_finish_i = 0;
 		m_relight_pending = false;
+		return true;
 	}
 
 	// Continues a relight whose flood a deadline stopped; true when done
@@ -1440,8 +1458,7 @@ struct CInstance: public voxelworld::Instance
 			return true;
 		if(!update_skylight_until(deadline_us))
 			return false;
-		relight_finish();
-		return true;
+		return relight_finish(deadline_us);
 	}
 
 	void relight_if_stale(Section &section, int64_t deadline_us = 0)
@@ -1502,16 +1519,21 @@ struct CInstance: public voxelworld::Instance
 			return;
 		const int64_t t_flood = interface::os::time_us();
 		m_relight_blockers = blockers;
+		m_relight_finish_f = 0;
+		m_relight_finish_i = 0;
 		m_relight_pending = true;
-		const bool done = update_skylight_until(deadline_us);
-		log_v(MODULE, "Section " PV3I_FORMAT ": light was stale, %zu seeds; "
-				"the pass %i ms, the flood %i ms%s",
-				PV3I_PARAMS(section.section_p), seeded,
-				(int)((t_flood - t_seed) / 1000),
-				(int)((interface::os::time_us() - t_flood) / 1000),
-				done ? "" : " so far, the rest next tick");
+		bool done = update_skylight_until(deadline_us);
+		const int64_t t_finish = interface::os::time_us();
 		if(done)
-			relight_finish();
+			done = relight_finish(deadline_us);
+		log_v(MODULE, "Section " PV3I_FORMAT ": light was stale, %zu seeds, "
+				"%zu blockers; the pass %i ms, the flood %i ms, the faces "
+				"%i ms%s",
+				PV3I_PARAMS(section.section_p), seeded, blockers.size(),
+				(int)((t_flood - t_seed) / 1000),
+				(int)((t_finish - t_flood) / 1000),
+				(int)((interface::os::time_us() - t_finish) / 1000),
+				done ? "" : " so far, the rest next tick");
 	}
 
 	// Generate the section; requires static nodes to already exist

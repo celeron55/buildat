@@ -91,6 +91,27 @@ return function(ctx)
 			label = "scan"
 		end
 		local lines = {}
+		-- The player: where, which way, what is held ([SCAN_DRIVE] reads
+		-- this line first). hp is the health bar's below.
+		local px, py, pz = ctx.player_pos()
+		local yaw0, pitch0, fov0 = ctx.view()
+		local stacks = ctx.hotbar()
+		local hot = {}
+		for i = 1, math.min(#stacks, luanti.hotbar.count or 9) do
+			hot[#hot + 1] = i .. ":" .. tostring(stacks[i] or "")
+		end
+		lines[#lines + 1] = string.format(
+				"scan %s: self at %.1f,%.1f,%.1f yaw %.1f pitch %.1f fov %.1f hp ? wield %s hotbar %s",
+				label, px, py, pz, yaw0, pitch0, fov0,
+				buildat.dump(ctx.wield() or ""), table.concat(hot, " | "))
+		-- The HUD's bars: health, hunger, breath, armour, by their picture
+		for _, e in pairs(luanti.hud_elements) do
+			if e.type == "statbar" then
+				lines[#lines + 1] = string.format("scan %s: hud statbar %s %s/%s",
+						label, buildat.dump(e.text or ""), tostring(e.number or 0),
+						tostring(e.item or e.number or 0))
+			end
+		end
 		-- The crosshair, by the same march the dig uses
 		local hit = ctx.pointed()
 		if hit then
@@ -121,7 +142,16 @@ return function(ctx)
 				local name, p, d, through = ray(p0, dir)
 				local via = #through > 0 and
 						(" via " .. table.concat(through, ",")) or ""
-				if name then
+				-- An object before the voxel, named by what it is drawn
+				-- with: the client has no name for a mob
+				local dn = dir / dir:length()
+				local oid, od = luanti.pointed_object(p0.x, p0.y, p0.z,
+						dn.x, dn.y, dn.z, d or RANGE)
+				if oid then
+					lines[#lines + 1] = string.format(
+							"scan %s: bin %d,%d: object %s %s d=%.1f", label,
+							bx, by, tostring(oid), luanti.object_label(oid), od)
+				elseif name then
 					lines[#lines + 1] = string.format(
 							"scan %s: bin %d,%d: %s at %d,%d,%d d=%.1f%s",
 							label, bx, by, name, p.x, p.y, p.z, d, via)

@@ -731,6 +731,20 @@ function M.pointed_object(x, y, z, dx, dy, dz, max_distance)
 	return best, best_t
 end
 
+-- What an object is drawn with, for the scan's bins ([SCAN_DRIVE]): its
+-- texture's or its mesh's name, or its kind
+function M.object_label(id)
+	local have = object_nodes[id]
+	if have == nil then
+		return "?"
+	end
+	local t = have.texture or have.mesh
+	if type(t) == "table" then
+		t = t[1]
+	end
+	return (tostring(t or have.drawn_as or "?"):gsub("[%s|]", "_"))
+end
+
 buildat.sub_packet("luanti:object_props", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	for i = 1, #values - 3, 4 do
@@ -2269,10 +2283,20 @@ local function draw_form()
 	-- ([FORMSPEC_FRAME]), and this is what tells the pictures from the
 	-- rest
 	if t2 - t0 >= 100000 then
+		local kinds = {}
+		for name, us in pairs(ui.kind_us or {}) do
+			kinds[#kinds + 1] = {name, us}
+		end
+		table.sort(kinds, function(a, b) return a[2] > b[2] end)
+		local by_kind = {}
+		for i = 1, math.min(4, #kinds) do
+			by_kind[i] = string.format("%s %.0f ms", kinds[i][1], kinds[i][2] / 1000)
+		end
 		log:info(string.format("form %s drawn in %.0f ms: parse %.0f ms, " ..
-				"%d elements, %d pictures composed in %.0f ms",
+				"%d elements, %d pictures composed in %.0f ms; %s",
 				form.formname, (t2 - t0) / 1000, (t1 - t0) / 1000,
-				#elements, compose_stats.n, compose_stats.us / 1000))
+				#elements, compose_stats.n, compose_stats.us / 1000,
+				table.concat(by_kind, ", ")))
 	end
 end
 
