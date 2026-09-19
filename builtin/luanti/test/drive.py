@@ -236,9 +236,33 @@ def tight(s):
 # hits (user, 2026-09-20: a grid of the voxels around the player, from
 # which the ones to dig and the ones to keep are picked). Positions are
 # node centres.
-NOT_SOLID = ("air", "water", "lava", "grass", "fern", "flower", "sapling",
-             "vine", "bamboo", "clover", "dandelion", "mushroom", "torch",
-             "snow", "seagrass", "kelp", "bush", "sugar")
+# Solid is what blocks walking; pointable is what a ray meets, which a
+# plant is though it is walked through (user, 2026-09-20: the two kept
+# apart -- a plant gets in the way of digging or using what is behind
+# it, and only a solid one blocks the walk). By the node's base name:
+# "dirt_with_grass" is solid, "tallgrass" is not.
+PLANT_STARTS = ("tallgrass", "fern", "double_fern", "flower", "sapling", "vine",
+                "bamboo", "clover", "dandelion", "seagrass", "kelp", "snow",
+                "torch", "sugar", "mushroom", "bush", "deadbush", "wheat",
+                "cocoa", "lily", "reeds", "grass_", "tall_")
+LIQUID_STARTS = ("water", "lava", "river_water")
+
+
+def base_of(name):
+    return (name or "").split(":")[-1]
+
+
+def is_plant(name):
+    b = base_of(name)
+    return b.startswith(PLANT_STARTS) or "flower" in b or b.endswith("_grass") and not b.startswith("dirt")
+
+
+def is_liquid(name):
+    return base_of(name).startswith(LIQUID_STARTS)
+
+
+def pointable_name(name):
+    return name is not None and name not in ("air", "nothing", "sky") and not is_liquid(name)
 
 
 def update_world(mem, s):
@@ -253,7 +277,9 @@ def update_world(mem, s):
 def solid_name(name):
     if name is None:
         return True    # unknown is kept as a wall until seen
-    return not any(w in name for w in NOT_SOLID)
+    if name in ("air", "nothing", "sky"):
+        return False
+    return not is_liquid(name) and not is_plant(name)
 
 
 def solid_at(world, p):
@@ -322,7 +348,7 @@ def dig_one(s, mem, targets, pick, name):
     # is walked through), so nothing behind it can be pointed until it is
     # gone: dug, a short hold, the aim kept (the player stood in tall
     # grass a whole run without walking through or digging it)
-    if s.crosshair is not None and not solid_name(s.crosshair[0]) and \
+    if s.crosshair is not None and is_plant(s.crosshair[0]) and \
             (aimed is None or tuple(s.crosshair[1:4]) != aimed):
         mem["aimed"] = aimed
         return name + "_clear", ["mouse_down left", "delay 700", "mouse_up left",
@@ -1193,6 +1219,11 @@ done, 8 lines""".splitlines()
     cs.world[(10, 21, 11)] = "air"; cs.world[(10, 20, 11)] = "air"
     assert stair_step(cs, m, 1, down=True)[0] == "stair_walk"
     assert cs.world[(10, 19, 11)] == "mcl_core:stone"
+    # Solid against pointable
+    assert solid_name("mcl_core:dirt_with_grass") and not is_plant("mcl_core:dirt_with_grass")
+    assert not solid_name("mcl_flowers:tallgrass") and is_plant("mcl_flowers:double_fern_top")
+    assert not solid_name("mcl_core:water_source") and not pointable_name("mcl_core:water_source")
+    assert solid_name("mcl_core:leaves") and pointable_name("mcl_flowers:fern")
     # A table in the crosshair with nothing more to craft at it is dug back
     done = parse(["self at 0,0,0 yaw 90 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_wood 1 | 2:mcl_core:stick 6",
                   "crosshair mcl_crafting_table:crafting_table at 1,0,0"])
