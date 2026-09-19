@@ -156,6 +156,12 @@ core.register_on_joinplayer(function(player)
 			core.log("action", "fuzz: died at t=" .. t .. " (" .. deaths ..
 					" so far)")
 		elseif hp <= 0 and t - dead_since >= 2 then
+			-- What the Respawn button does, both halves: the client's
+			-- form closes and the server respawns. respawn() alone left
+			-- the death form open on the client, and a client with a form
+			-- open reads no keys -- every walk with a death in it stood
+			-- still from the respawn on ([RESPAWN_STUCK], seeds 1, 4, 11)
+			core.close_formspec(player:get_player_name(), "__builtin:death")
 			player:respawn()
 			dead_since = nil
 		elseif hp > 0 then
