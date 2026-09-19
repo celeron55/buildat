@@ -79,6 +79,8 @@ local draw_new_game
 -- And the import screens, which go back to the save list
 local draw_import_games
 local draw_import_worlds
+-- And the settings screen, drawn from the server's main:settings
+local draw_settings
 
 -- Does this line answer what was typed? Case-insensitive, and every word has
 -- to be in it somewhere, so "vox cave" finds a VoxeLibre world called caves.
@@ -242,6 +244,10 @@ function draw(saves, save_games)
 	elseif menu_wanted == "import_world" then
 		menu_wanted = nil
 		ask_for_imports("worlds")
+	elseif menu_wanted == "settings" then
+		menu_wanted = nil
+		waiting("Reading the settings...")
+		buildat.send_packet("main:get_settings", "")
 	end
 end
 
@@ -293,6 +299,52 @@ local function back_to_saves(menu)
 		draw(last_saves, last_save_games)
 	end)
 	magic.input:SetMouseVisible(true)
+end
+
+-- The launcher's settings ([LAUNCH_GRID]): the import search paths, a list
+-- to add to and remove from, kept by the server in user/luanti/launcher.json
+-- and sent whole each way. The defaults (~/.luanti, ~/.minetest and the
+-- variable) are the server's and not in the list.
+function draw_settings(paths)
+	local menu = import_menu("Luanti settings")
+	local text = menu.window:CreateChild("Text")
+	text:SetStyleAuto()
+	text:SetText("Import search paths, besides ~/.luanti and ~/.minetest:")
+	local function send(list)
+		waiting("Saving...")
+		buildat.send_packet("main:set_settings",
+				cereal.binary_output(list, {"array", "string"}))
+	end
+	for i, path in ipairs(paths) do
+		menu:add("remove  " .. path, function()
+			local list = {}
+			for j, p in ipairs(paths) do
+				if j ~= i then
+					list[#list + 1] = p
+				end
+			end
+			send(list)
+		end)
+	end
+	local edit = menu.window:CreateChild("LineEdit")
+	edit:SetStyleAuto()
+	edit.minHeight = 26
+	edit.enabled = true
+	edit:SetText("")
+	menu:add("Add the path above", function()
+		local path = edit:GetText()
+		path = path:gsub("^%s+", ""):gsub("%s+$", "")
+		if path == "" then
+			return
+		end
+		local list = {}
+		for _, p in ipairs(paths) do
+			list[#list + 1] = p
+		end
+		list[#list + 1] = path
+		send(list)
+	end)
+	back_to_saves(menu)
 end
 
 -- A new save, in the two steps importing a world already takes: which game,
@@ -517,6 +569,13 @@ buildat.sub_packet("main:imports", function(data)
 	else
 		draw_import_games()
 	end
+end)
+
+buildat.sub_packet("main:settings", function(data)
+	if done then
+		return
+	end
+	draw_settings(cereal.binary_input(data, {"array", "string"}))
 end)
 
 -- What the server is doing while the game loads: 220 mods take minutes and

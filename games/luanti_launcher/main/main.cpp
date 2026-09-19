@@ -29,6 +29,7 @@
 #include <cereal/types/vector.hpp>
 #include <cereal/types/string.hpp>
 #include "interface/polyvox_cereal.h"
+#include "core/sajson.h"
 #include <PolyVoxCore/Vector.h>
 #define MODULE "main"
 
@@ -103,6 +104,10 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:get_imports"));
 		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:get_settings"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:set_settings"));
+		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:import_game"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:import_world"));
@@ -142,6 +147,10 @@ struct Module: public interface::Module
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:get_imports", on_get_imports,
 				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:get_settings",
+				on_get_settings, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:set_settings",
+				on_set_settings, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:import_game",
 				on_import_game, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:import_world",
@@ -586,6 +595,107 @@ struct Module: public interface::Module
 	// directory laid out the way a Luanti user directory is -- games/ and
 	// worlds/ inside it -- which is also the shape of an in-tree development
 	// build, so that needs no special case.
+	// The launcher's settings, in the user path beside luanti/games and
+	// luanti/worlds ([LAUNCH_GRID]): {"import_paths": ["..."]}, the search
+	// paths the import screens add to the defaults. Written by hand and
+	// read with sajson, which is all a list of strings needs.
+	ss_ settings_path()
+	{
+		return luanti_path()+"/launcher.json";
+	}
+	sv_<ss_> read_import_paths()
+	{
+		sv_<ss_> out;
+		std::ifstream f(settings_path());
+		if(!f.good())
+			return out;
+		std::stringstream ss;
+		ss << f.rdbuf();
+		const ss_ text = ss.str();
+		const sajson::document doc =
+				sajson::parse(sajson::string(text.c_str(), text.size()));
+		if(!doc.is_valid()){
+			log_w(MODULE, "%s: %s", cs(settings_path()),
+					cs(doc.get_error_message()));
+			return out;
+		}
+		sajson::value root = doc.get_root();
+		if(root.get_type() != sajson::TYPE_OBJECT)
+			return out;
+		for(size_t i = 0; i < root.get_length(); i++){
+			if(root.get_object_key(i).as_string() != "import_paths")
+				continue;
+			sajson::value list = root.get_object_value(i);
+			if(list.get_type() != sajson::TYPE_ARRAY)
+				continue;
+			for(size_t j = 0; j < list.get_length(); j++){
+				sajson::value v = list.get_array_element(j);
+				if(v.get_type() == sajson::TYPE_STRING && !v.as_string().empty())
+					out.push_back(v.as_string());
+			}
+		}
+		return out;
+	}
+	void write_import_paths(const sv_<ss_> &paths)
+	{
+		interface::fs::create_directories(luanti_path());
+		std::ofstream f(settings_path(), std::ios::trunc);
+		f << "{\"import_paths\": [";
+		for(size_t i = 0; i < paths.size(); i++){
+			f << (i ? ", \"" : "\"");
+			for(char c : paths[i]){
+				if(c == '"' || c == '\\')
+					f << '\\' << c;
+				else if((unsigned char)c < 0x20)
+					f << ' ';
+				else
+					f << c;
+			}
+			f << "\"";
+		}
+		f << "]}\n";
+		if(!f.good())
+			log_w(MODULE, "could not write %s", cs(settings_path()));
+	}
+	void send_settings(network::PeerInfo::Id peer)
+	{
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(read_import_paths());
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "main:settings", os.str());
+		});
+	}
+	void on_get_settings(const network::Packet &packet)
+	{
+		send_settings(packet.sender);
+	}
+	// The whole list, replacing what was there: the screen adds and
+	// removes, and sends the result
+	void on_set_settings(const network::Packet &packet)
+	{
+		sv_<ss_> values;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(values);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:set_settings: %s", e.what());
+			return;
+		}
+		sv_<ss_> paths;
+		for(const ss_ &v : values){
+			if(!v.empty() && v.size() <= 4096)
+				paths.push_back(v);
+		}
+		write_import_paths(paths);
+		log_i(MODULE, "settings: %zu import paths written to %s",
+				paths.size(), cs(settings_path()));
+		send_settings(packet.sender);
+	}
+
 	sv_<ss_> import_roots()
 	{
 		sv_<ss_> out;
@@ -628,6 +738,10 @@ struct Module: public interface::Module
 			}
 			out.push_back(path);
 		};
+		// The settings' paths first, the variable as an additional source
+		// for the shell and the runners
+		for(const ss_ &path : read_import_paths())
+			add(path, "launcher.json");
 		const char *extra = getenv("LUANTI_EXTRA_IMPORT_PATH");
 		if(extra && extra[0]){
 			// Several, separated the way every other path variable does it
