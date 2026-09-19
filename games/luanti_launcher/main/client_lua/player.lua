@@ -39,6 +39,10 @@ M.AIR_STEP_HEIGHT = 0.2
 M.STEP_MAX_S = 0.01
 M.STEP_MAX_MOVE = 0.1
 M.DTIME_LIMIT = 2.5
+-- How far past the edge of the node last stood on a sneaking player's
+-- centre may go: the box's half width times 0.49, "to keep the center just
+-- barely on the node" (LocalPlayer::move)
+M.SNEAK_MAX = M.RADIUS * 0.49
 -- Where the eyes are above the feet, which is what the camera follows
 M.EYE_HEIGHT = 1.625
 -- Luanti's movement defaults, which is what TOCLIENT_MOVEMENT carries and
@@ -247,6 +251,9 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 		-- How fast the player was going down when they last hit something,
 		-- in nodes a second, or nil. Whoever reads it clears it.
 		landed_at = nil,
+		-- The node a sneaking player last stood on, which they do not
+		-- walk off; see the end of step()
+		sneak_node = nil,
 		-- Flying and going through walls are off by default and keys toggle
 		-- them; a server that does not give the player the fly and noclip
 		-- privileges will pull them back with its movement checks
@@ -290,9 +297,9 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 	-- table of what matches and what does not is [PLAYER_PHYSICS] in
 	-- doc/plan/luanti_module_plan.md.
 	--
-	-- simplified: the sneak ledge (not walking off an edge while sneaking),
-	-- sneak_glitch, the bouncy, slippery, disable_jump and disable_descend
-	-- groups, autojump, pitch move and object collisions are not here.
+	-- simplified: sneak_glitch (the sneak ladder), the bouncy, slippery,
+	-- disable_jump and disable_descend groups, autojump, pitch move and
+	-- object collisions are not here.
 	local function step(dtime, wish)
 		local m = self.movement
 		-- Going through walls is the collision test answering no to
@@ -413,6 +420,12 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 			-- also from a fall slower than half a node a second
 			self.vy = m.speed_jump * (ov.jump or 1)
 		end
+		-- Sneaking on the ground keeps the player on the node last stood
+		-- on (LocalPlayer::move, "keep on top of last walked node"): the
+		-- centre may go SNEAK_MAX past its edge and no further
+		local could_sneak = wish.sneak and not free_move and
+				not self.in_liquid and not self.climbing and
+				(ov.sneak or 1) ~= 0
 		-- What pulls: Luanti's gravity has a factor two in it ("HACK the
 		-- factor 2 for gravity is arbitrary" in ClientEnvironment::step,
 		-- there since 2011), and in a liquid the pull is twice the
@@ -500,7 +513,34 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 		if hit_z then
 			self.vz = 0
 		end
+		-- The ledge: back onto the sneak node's reach, and the speed that
+		-- took the player past it is gone
+		local sn = self.sneak_node
+		if could_sneak and sn then
+			local lo, hi = sn.x - 0.5 - M.SNEAK_MAX, sn.x + 0.5 + M.SNEAK_MAX
+			local cx = math.max(lo, math.min(hi, p[1]))
+			if cx ~= p[1] then
+				p[1], self.vx = cx, 0
+			end
+			lo, hi = sn.z - 0.5 - M.SNEAK_MAX, sn.z + 0.5 + M.SNEAK_MAX
+			local cz = math.max(lo, math.min(hi, p[3]))
+			if cz ~= p[3] then
+				p[3], self.vz = cz, 0
+			end
+		end
 		self.x, self.y, self.z = p[1], p[2], p[3]
+		-- The next sneak node: the solid node under the feet, while there
+		-- is one. Kept while sneaking off its edge, since that is the
+		-- point; dropped when not sneaking or nothing is under the feet.
+		if could_sneak and self.on_ground then
+			local fx, fz = math.floor(self.x + 0.5), math.floor(self.z + 0.5)
+			local fy = math.floor(self.y - 0.001 + 0.5)
+			if is_solid(fx, fy, fz) then
+				self.sneak_node = {x = fx, y = fy, z = fz}
+			end
+		elseif not could_sneak then
+			self.sneak_node = nil
+		end
 	end
 
 	function self:update(dtime, wish)
@@ -612,6 +652,22 @@ do
 	assert(ladder.vy > 0, "player: jump does not climb")
 	ladder:update(0.1, {x = 0, z = 0, sneak = true})
 	assert(ladder.vy < 0, "player: sneak does not climb down")
+
+	-- Sneaking stops at the edge of the ground; walking does not
+	local cliff = function(x, y, z) return y <= 0 and x <= 2 end
+	local sneaker = M.new(cliff)
+	local walker = M.new(cliff)
+	sneaker:set_position(1, 0.5, 0)
+	walker:set_position(1, 0.5, 0)
+	for _ = 1, 100 do
+		sneaker:update(0.05, {x = 1, z = 0, sneak = true})
+		walker:update(0.05, {x = 1, z = 0})
+	end
+	assert(sneaker.on_ground and sneaker.x <= 2.5 + M.SNEAK_MAX + 1e-6 and
+			sneaker.x > 2.4,
+			"player: sneaking walked off the edge, x = " .. sneaker.x ..
+			" y = " .. sneaker.y)
+	assert(walker.y < 0, "player: walking did not fall off the edge")
 
 	-- And what a mod has multiplied the movement by: no gravity is no
 	-- falling at all, and twice the speed is twice as fast once the
