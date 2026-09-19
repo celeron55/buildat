@@ -23,6 +23,7 @@ M.physics_distance = 100
 M.send_distance = 1000
 
 local UPDATE_TIME_FRACTION = 0.10
+local MESH_BUDGET_CAP_US = 15000
 
 local LOD_THRESHOLD = 0.2
 -- How the update queue orders what it has: it sorts by distance divided by
@@ -546,7 +547,12 @@ function sub_events()
 		local current_us = buildat.get_time_us()
 		-- Spend time doing this proportionate to the rest of the update cycle
 		local last_outer_frame_us = (current_us - end_of_update_processing_us)
-		local max_handling_time_us = last_outer_frame_us * UPDATE_TIME_FRACTION
+		-- Capped: a fraction of the last frame with no ceiling let a long
+		-- frame buy a long budget, and the join's first frames meshed ten
+		-- dense chunks in one frame -- 1.3 s ([FRAME_PEAK]'s mesh row).
+		-- The worst frame is now one chunk's mesh over the cap.
+		local max_handling_time_us = math.min(
+				last_outer_frame_us * UPDATE_TIME_FRACTION, MESH_BUDGET_CAP_US)
 		local stop_at_us = current_us + max_handling_time_us
 
 		-- A chunk that changed and has still not been drawn again after two
