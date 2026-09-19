@@ -51,6 +51,9 @@ end
 -- Expression -> the resource name it was composed under, for this run. The
 -- files outlive it, but composing one twice costs only the work.
 local composed = {}
+-- How many were composed and how long it took since the count was last
+-- read: what a form's first draw spends on its pictures ([FORMSPEC_FRAME])
+local compose_stats = {n = 0, us = 0}
 
 local function hex_hash(s)
 	return buildat.hex(buildat.sha1(s))
@@ -123,11 +126,14 @@ local function compose(top_expr, top_resource)
 			if composed[expr] then
 				return composed[expr]
 			end
+			local t0 = buildat.get_time_us()
 			local okc, errc = pcall(buildat.compose_image, {
 				size = size,
 				ops = ops,
 				write = path_of(resource),
 			})
+			compose_stats.n = compose_stats.n + 1
+			compose_stats.us = compose_stats.us + buildat.get_time_us() - t0
 			if not okc then
 				log:warning("compose_image failed for \"" ..
 						string.sub(expr, 1, 60) .. "\": " .. tostring(errc))
@@ -1366,11 +1372,27 @@ function M.sub_hud(f)
 	f(M.hud_elements, M.hud_flags)
 end
 
+-- Once a frame, not once a packet: the subscribers redraw the whole HUD,
+-- and a game joins with a few hundred hud packets in a row and changes a
+-- statbar several times a second after that. The 245 packets of a
+-- VoxeLibre join were 2.3 s in one frame ([FORMSPEC_FRAME], the
+-- `luanti:hud` row of the fuzz campaign's frame column).
+local hud_dirty = false
 local function hud_changed()
+	hud_dirty = true
+end
+local function flush_hud()
+	if not hud_dirty then
+		return
+	end
+	hud_dirty = false
 	for _, f in ipairs(hud_subs) do
 		f(M.hud_elements, M.hud_flags)
 	end
 end
+magic.SubscribeToEvent("Update", function()
+	flush_hud()
+end)
 
 -- What the client's own hotbar is drawn out of, as the game last said it:
 -- how many slots, the picture behind them and the one that marks the slot in
@@ -2193,11 +2215,25 @@ local function draw_form()
 		form.drawn.window:Remove()
 		form.drawn = nil
 	end
+	local t0 = buildat.get_time_us()
+	compose_stats.n, compose_stats.us = 0, 0
 	local elements, size, real = formspec.parse(form.spec)
+	local t1 = buildat.get_time_us()
 	local root = magic.ui.root
 	local w, h = root.width, root.height
 	local layout = formspec.layout(size, real, w, h)
 	form.drawn = make_ui():show(root, elements, layout, w, h, form.state)
+	local t2 = buildat.get_time_us()
+	-- A slow draw says where it went: the first open of a game's
+	-- inventory was 3.5 s in one frame in the fuzz campaign
+	-- ([FORMSPEC_FRAME]), and this is what tells the pictures from the
+	-- rest
+	if t2 - t0 >= 100000 then
+		log:info(string.format("form %s drawn in %.0f ms: parse %.0f ms, " ..
+				"%d elements, %d pictures composed in %.0f ms",
+				form.formname, (t2 - t0) / 1000, (t1 - t0) / 1000,
+				#elements, compose_stats.n, compose_stats.us / 1000))
+	end
 end
 
 -- Only a form that has a model in it: drawing one again is cheap but it
