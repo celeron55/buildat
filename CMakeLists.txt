@@ -488,14 +488,23 @@ else()
 		FILES_MATCHING PATTERN "libUrho3D.so*")
 endif()
 if(WIN32)
-	message(STATUS "CMAKE_CXX_COMPILER: ${CMAKE_CXX_COMPILER}")
-	get_filename_component(COMPILER_BIN_PATH "${CMAKE_CXX_COMPILER}" DIRECTORY)
-	message(STATUS "COMPILER_BIN_PATH: ${COMPILER_BIN_PATH}")
-	get_filename_component(COMPILER_USR_PATH "${COMPILER_BIN_PATH}" DIRECTORY)
-	message(STATUS "COMPILER_USR_PATH: ${COMPILER_USR_PATH}")
-	install(FILES "${COMPILER_USR_PATH}/bin/libwinpthread-1.dll" DESTINATION "${DST_BIN}")
-	install(FILES "${COMPILER_USR_PATH}/bin/libgcc_s_dw2-1.dll" DESTINATION "${DST_BIN}")
-	install(FILES "${COMPILER_USR_PATH}/bin/libstdc++-6.dll" DESTINATION "${DST_BIN}")
+	# The compiler the Windows archive ships under compiler/ is a native
+	# MinGW-w64 distribution, not the cross toolchain that built the
+	# binaries (a Linux program): BUILDAT_SHIP_COMPILER names its mingw64
+	# root, which util/docker/windows unpacks from a pinned winlibs release
+	# ([PACKAGING] step 3). The runtime DLLs beside the executables come
+	# from the same tree, so the modules it compiles and the binaries it
+	# is shipped with run on one libstdc++.
+	set(BUILDAT_SHIP_COMPILER "" CACHE PATH
+		"A native MinGW-w64 tree (mingw64/) to ship under compiler/ on Windows")
+	if(NOT BUILDAT_SHIP_COMPILER)
+		message(WARNING "BUILDAT_SHIP_COMPILER is not set: the archive will "
+			"carry no compiler and its server cannot build a module")
+	else()
+		foreach(DLL libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll)
+			install(FILES "${BUILDAT_SHIP_COMPILER}/bin/${DLL}" DESTINATION "${DST_BIN}")
+		endforeach()
+	endif()
 endif()
 if(BUILD_CLIENT)
 	install(TARGETS ${CLIENT_EXE_NAME} buildat DESTINATION "${DST_BIN}")
@@ -529,24 +538,33 @@ if(BUILD_SERVER)
 			message(FATAL_ERROR \"copying Urho3D's include tree dereferenced failed\")
 		endif()
 	")
-	if(WIN32)
-		install(DIRECTORY "${COMPILER_USR_PATH}/bin" DESTINATION "${DST_COMPILER}")
-		install(DIRECTORY "${COMPILER_USR_PATH}/i686-w64-mingw32" DESTINATION "${DST_COMPILER}")
-		install(DIRECTORY "${COMPILER_USR_PATH}/include" DESTINATION "${DST_COMPILER}")
-		install(DIRECTORY "${COMPILER_USR_PATH}/lib" DESTINATION "${DST_COMPILER}")
-		install(DIRECTORY "${COMPILER_USR_PATH}/licenses" DESTINATION "${DST_COMPILER}")
-		install(FILES "${COMPILER_USR_PATH}/build-info.txt" DESTINATION "${DST_COMPILER}")
-		set(BIG_EXECUTABLES
-			cc1.exe
-			cc1plus.exe
-			liblto_plugin-0.dll
-			liblto_plugin.dll.a
-		)
-		set(BIG_EXECUTABLES_SUBDIR "libexec/gcc/i686-w64-mingw32/4.9.1/")
-		foreach(BIG_EXE ${BIG_EXECUTABLES})
-			install(FILES "${COMPILER_USR_PATH}/${BIG_EXECUTABLES_SUBDIR}/${BIG_EXE}"
-				DESTINATION "${DST_COMPILER}/${BIG_EXECUTABLES_SUBDIR}")
-		endforeach()
+	if(WIN32 AND BUILDAT_SHIP_COMPILER)
+		# What a C++ compile and link of a module needs and nothing else:
+		# the whole distribution is 760 MB with clang, gdb and doxygen in
+		# it. The driver finds cc1plus and the crt objects relative to
+		# itself, so the layout under compiler/ is the distribution's.
+		set(SC "${BUILDAT_SHIP_COMPILER}")
+		install(DIRECTORY "${SC}/bin/" DESTINATION "${DST_COMPILER}/bin"
+			FILES_MATCHING
+			PATTERN "c++.exe" PATTERN "g++.exe" PATTERN "gcc.exe"
+			PATTERN "as.exe" PATTERN "ld.exe" PATTERN "ld.bfd.exe" PATTERN "ar.exe"
+			PATTERN "libgcc_s_seh-1.dll" PATTERN "libstdc++-6.dll"
+			PATTERN "libwinpthread-1.dll" PATTERN "libgmp-10.dll"
+			PATTERN "libmpfr-6.dll" PATTERN "libmpc-3.dll" PATTERN "libisl-23.dll"
+			PATTERN "libzstd.dll" PATTERN "zlib1.dll" PATTERN "libiconv-2.dll"
+			PATTERN "libintl-8.dll")
+		file(GLOB SC_LIBEXEC "${SC}/libexec/gcc/x86_64-w64-mingw32/*")
+		list(GET SC_LIBEXEC 0 SC_LIBEXEC_VER)
+		get_filename_component(SC_GCC_VER "${SC_LIBEXEC_VER}" NAME)
+		install(DIRECTORY "${SC_LIBEXEC_VER}/"
+			DESTINATION "${DST_COMPILER}/libexec/gcc/x86_64-w64-mingw32/${SC_GCC_VER}"
+			FILES_MATCHING PATTERN "cc1plus.exe" PATTERN "collect2.exe"
+			PATTERN "*.dll" PATTERN "install-tools" EXCLUDE PATTERN "plugin" EXCLUDE)
+		install(DIRECTORY "${SC}/lib/gcc" DESTINATION "${DST_COMPILER}/lib")
+		install(DIRECTORY "${SC}/include/c++" DESTINATION "${DST_COMPILER}/include")
+		install(DIRECTORY "${SC}/x86_64-w64-mingw32" DESTINATION "${DST_COMPILER}"
+			PATTERN "bin" EXCLUDE)
+		install(FILES "${SC}/version_info.txt" DESTINATION "${DST_COMPILER}" OPTIONAL)
 	endif()
 endif()
 install(DIRECTORY "${URHO3D_HOME}/bin/CoreData" DESTINATION "${DST_SHARE}/Urho3D/bin")

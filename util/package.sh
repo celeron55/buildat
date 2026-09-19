@@ -163,9 +163,12 @@ windows)
 	# and MINGW_PREFIX (a path prefix, /usr/bin/x86_64-w64-mingw32) in the
 	# environment override for another toolchain
 	tc="${CMAKE_TOOLCHAIN_FILE:-$here/3rdparty/Urho3D/CMake/Toolchains/MinGW.cmake}"
+	# and the native tree the archive ships under compiler/, which the
+	# image unpacks to /opt/winlibs/mingw64
 	a=$(make_one "buildat-$version-win64" -DPORTABLE=TRUE \
 		-DCMAKE_TOOLCHAIN_FILE="$tc" \
-		-DMINGW_PREFIX="${MINGW_PREFIX:-/usr/bin/x86_64-w64-mingw32}")
+		-DMINGW_PREFIX="${MINGW_PREFIX:-/usr/bin/x86_64-w64-mingw32}" \
+		-DBUILDAT_SHIP_COMPILER="${BUILDAT_SHIP_COMPILER:-/opt/winlibs/mingw64}")
 	echo "archive: $a (the smoke test under Wine is not here yet)"
 	;;
 *)
