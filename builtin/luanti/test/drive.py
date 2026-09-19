@@ -370,8 +370,9 @@ def rules(s, mem):
         # The button is drawn as a BorderImage with a Text in it, so the
         # text's own rectangle is what is clicked
         btn = [u for u in s.ui if u[5] and u[5].lower().startswith("respawn")]
-        mem["form_turns"] = mem.get("form_turns", 0) + 1
-        if mem["form_turns"] > 6:
+        # Stuck is a form that three Escapes did not close, not one that
+        # is being worked in (seven crafts in a row are seven turns)
+        if mem.get("closes_in_row", 0) >= 3:
             return "stuck_form", None, None
         if btn:
             _, x, y, w, h, _, _ = btn[0]
@@ -434,9 +435,10 @@ def rules(s, mem):
                 if cmds is not None:
                     return "craft_" + r[0], cmds + ["delay 300"], \
                         lambda n, w=r[2]: have(n, w, 1, mem)
+        mem["closes_in_row"] = mem.get("closes_in_row", 0) + 1
         return "close_form", ["keypress Escape", ms(TURN_S)], \
             lambda n: n.form is None
-    mem["form_turns"] = 0
+    mem["closes_in_row"] = 0
     if s.chat is not None:
         return "close_chat", ["keypress Escape", ms(TURN_S)], \
             lambda n: n.chat is None
