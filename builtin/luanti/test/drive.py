@@ -763,13 +763,18 @@ def rules(s, mem):
     pick = hotbar_slot_of(s, "pick_stone") or hotbar_slot_of(s, "pick_wood")
     kit = have(s, "crafting_table", 1, mem) and have(s, "stick", 2, mem)
     if pick is not None and kit and not have(s, "cobble", COBBLE_WANTED, mem):
-        if s.crosshair and s.crosshair[0].endswith(":stone"):
+        # Stone at the feet's height or above only: stone under the feet is
+        # the floor, and digging it made a pit the player walked into
+        # (2026-09-20); the stair's own digging yields cobble underground
+        fy = feet_node(s)[1]
+        if s.crosshair and s.crosshair[0].endswith(":stone") and s.crosshair[2] >= fy:
             was = s.crosshair
             cmds = ["keypress %d" % pick, "delay 150", "mouse_down left",
                     "delay 2500", "mouse_up left", "delay 300"]
             return "dig_stone", cmds, lambda n: n.crosshair != was
         stones = [(x, y) for (x, y), b in s.bins.items()
-                  if b["name"].endswith(":stone") and b["d"] <= 4]
+                  if b["name"].endswith(":stone") and b["d"] <= 4 and
+                  "at" in b and b["at"][1] >= fy]
         if stones:
             bx, by = min(stones, key=lambda k: s.bins[k]["d"])
             return "to_stone", [look_at_bin(s, bx, by, level=False), ms(0.3)], None
@@ -1266,7 +1271,7 @@ done, 8 lines""".splitlines()
     assert name == "craft_pick_wood" and cmds.count("mouse_click right") == 5, (name, cmds)
     # With a pickaxe and stone under the crosshair, the stone is dug
     st = parse(["self at 0,0,0 yaw 0 pitch 30 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_wood 1 | 2:mcl_crafting_table:crafting_table 1 | 3:mcl_core:stick 2",
-                "crosshair mcl_core:stone at 0,-1,1"])
+                "crosshair mcl_core:stone at 0,0,1"])
     name, cmds, exp = rules(st, {})
     assert name == "dig_stone" and cmds[0] == "keypress 1", (name, cmds)
     # and with none in sight, down through the ground
