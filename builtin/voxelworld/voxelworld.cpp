@@ -1410,7 +1410,41 @@ struct CInstance: public voxelworld::Instance
 	// that section was away. Only its faces and the voxels that make their
 	// own light are seeded, because the flood spreads inwards from them --
 	// that is what a flood is for.
-	void relight_if_stale(Section &section)
+	// The blockers of a deferred relight whose flood stopped at its
+	// deadline, for the pass that finishes it; see relight_if_stale()
+	sv_<pv::Vector3DInt32> m_relight_blockers;
+	bool m_relight_pending = false;
+
+	// The pass that ends a relight: what light does not pass through
+	// wears the brightest light beside it, the way the flood leaves the
+	// blockers it touched
+	void relight_finish()
+	{
+		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
+			if(!m_light_maintained[f])
+				continue;
+			m_light_running = (LightField)f;
+			m_light_buf = nullptr;
+			m_light_section = nullptr;
+			for(const pv::Vector3DInt32 &p : m_relight_blockers)
+				light_blocker_from_neighbours(p);
+		}
+		m_relight_blockers.clear();
+		m_relight_pending = false;
+	}
+
+	// Continues a relight whose flood a deadline stopped; true when done
+	bool relight_continue(int64_t deadline_us)
+	{
+		if(!m_relight_pending)
+			return true;
+		if(!update_skylight_until(deadline_us))
+			return false;
+		relight_finish();
+		return true;
+	}
+
+	void relight_if_stale(Section &section, int64_t deadline_us = 0)
 	{
 		const uint64_t key = section_key(section.section_p);
 		if(m_stale_sections.count(key) == 0)
@@ -1428,6 +1462,7 @@ struct CInstance: public voxelworld::Instance
 		const pv::Vector3DInt32 uc = region.getUpperCorner();
 		sv_<pv::Vector3DInt32> blockers;
 		size_t seeded = 0;
+		const int64_t t_seed = interface::os::time_us();
 		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
 			const LightField lf = (LightField)f;
 			if(!m_light_maintained[lf])
@@ -1465,20 +1500,18 @@ struct CInstance: public voxelworld::Instance
 		}
 		if(seeded == 0)
 			return;
-		log_v(MODULE, "Section " PV3I_FORMAT ": light was stale, %zu seeds",
-				PV3I_PARAMS(section.section_p), seeded);
-		update_skylight();
-		// And what light does not pass through wears the brightest light
-		// beside it, the way the flood leaves the blockers it touched
-		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
-			if(!m_light_maintained[f])
-				continue;
-			m_light_running = (LightField)f;
-			m_light_buf = nullptr;
-			m_light_section = nullptr;
-			for(const pv::Vector3DInt32 &p : blockers)
-				light_blocker_from_neighbours(p);
-		}
+		const int64_t t_flood = interface::os::time_us();
+		m_relight_blockers = blockers;
+		m_relight_pending = true;
+		const bool done = update_skylight_until(deadline_us);
+		log_v(MODULE, "Section " PV3I_FORMAT ": light was stale, %zu seeds; "
+				"the pass %i ms, the flood %i ms%s",
+				PV3I_PARAMS(section.section_p), seeded,
+				(int)((t_flood - t_seed) / 1000),
+				(int)((interface::os::time_us() - t_flood) / 1000),
+				done ? "" : " so far, the rest next tick");
+		if(done)
+			relight_finish();
 	}
 
 	// Generate the section; requires static nodes to already exist
@@ -1905,18 +1938,23 @@ struct CInstance: public voxelworld::Instance
 	size_t relight_stale(int64_t budget_us)
 	{
 		const int64_t t0 = interface::os::time_us();
+		const int64_t deadline = t0 + budget_us;
+		// A flood a previous tick left unfinished comes first
+		if(!relight_continue(deadline))
+			return m_relight_queue.size() + 1;
 		size_t done = 0;
 		while(!m_relight_queue.empty()){
+			if(interface::os::time_us() >= deadline)
+				break;
 			const pv::Vector3DInt16 section_p = m_relight_queue.front();
 			m_relight_queue.pop_front();
 			Section *section = get_section(section_p);
 			if(section != nullptr){
-				relight_if_stale(*section);
+				relight_if_stale(*section, deadline);
 				done++;
+				if(m_relight_pending)
+					return m_relight_queue.size() + 1;
 			}
-			// At least one a call, so a queue always drains
-			if(interface::os::time_us() - t0 >= budget_us)
-				break;
 		}
 		if(done > 0)
 			log_d(MODULE, "relight_stale(): %zu sections, %zu queued", done,
@@ -3318,29 +3356,70 @@ struct CInstance: public voxelworld::Instance
 	// memory reads as undefined and stops the light, which keeps an edit next
 	// to the edge of the loaded world from running away.
 	// Every light the world maintains, each in turn
+	// A flood in progress, kept between ticks ([STEP_SLICE]): the deferred
+	// relight of a section is a breadth-first flood over its air, 100-200
+	// ms for a VoxeLibre section, and one tick may not hold it. The
+	// queues and the indices into them are the whole state; a flood that
+	// stops at its deadline goes on where it was on the next call, and
+	// what it has written so far is committed like any other write, so a
+	// section may be seen half-lit for a tick or two.
+	struct FloodState
+	{
+		bool active = false;
+		std::vector<LightNode> unlight, spread;
+		// Voxels that block light next to light that went away. Only
+		// these have to be worked out the slow way; everywhere else the
+		// light is pushed into them as it is written.
+		std::vector<pv::Vector3DInt32> blockers;
+		size_t ui = 0, si = 0, seeds_n = 0;
+		std::chrono::steady_clock::time_point t0;
+	};
+	FloodState m_flood[NUM_LIGHT_FIELDS];
+
 	void update_skylight()
 	{
 		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++)
-			update_light((LightField)f);
+			update_light((LightField)f, 0);
 	}
 
-	void update_light(LightField field)
+	// Every field's flood until the deadline (microseconds of time_us(),
+	// 0 for none); false when one is still unfinished
+	bool update_skylight_until(int64_t deadline_us)
 	{
+		bool done = true;
+		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++)
+			done = update_light((LightField)f, deadline_us) && done;
+		return done;
+	}
+
+	// Returns false when the deadline stopped it before the end
+	bool update_light(LightField field, int64_t deadline_us)
+	{
+		FloodState &st = m_flood[field];
+		auto over = [&](){
+			return deadline_us != 0 && interface::os::time_us() >= deadline_us;
+		};
 		std::vector<SkylightSeed> seeds;
-		seeds.swap(m_light_seeds[field]);
-		if(!m_light_maintained[field] || seeds.empty())
-			return;
+		if(!st.active){
+			seeds.swap(m_light_seeds[field]);
+			if(!m_light_maintained[field] || seeds.empty())
+				return true;
+			st = FloodState();
+			st.active = true;
+			st.t0 = std::chrono::steady_clock::now();
+			st.seeds_n = seeds.size();
+		} else if(!m_light_seeds[field].empty()){
+			// New seeds while a flood runs go on the end of it
+			seeds.swap(m_light_seeds[field]);
+			st.seeds_n += seeds.size();
+		}
 		m_light_running = field;
-		auto t0 = std::chrono::steady_clock::now();
 		m_light_buf = nullptr;
 		m_light_section = nullptr;
 
-		std::vector<LightNode> unlight;
-		std::vector<LightNode> spread;
-		// Voxels that block light next to light that went away. Only these
-		// have to be worked out the slow way; everywhere else the light is
-		// pushed into them as it is written.
-		std::vector<pv::Vector3DInt32> blockers;
+		std::vector<LightNode> &unlight = st.unlight;
+		std::vector<LightNode> &spread = st.spread;
+		std::vector<pv::Vector3DInt32> &blockers = st.blockers;
 
 		for(const SkylightSeed &seed : seeds){
 			VoxelInstance v = light_get(seed.p);
@@ -3429,7 +3508,9 @@ struct CInstance: public voxelworld::Instance
 		// back from. Straight down is the exception: light does not dim on the
 		// way down, so a full strength voxel below a full strength one was
 		// still lit by it.
-		for(size_t i = 0; i < unlight.size(); i++){
+		for(size_t &i = st.ui; i < unlight.size(); i++){
+			if((i & 255) == 255 && over())
+				return false;
 			LightNode node = unlight[i];
 			for(size_t k = 0; k < 6; k++){
 				pv::Vector3DInt32 n(
@@ -3458,7 +3539,9 @@ struct CInstance: public voxelworld::Instance
 		}
 
 		// Spread it back in
-		for(size_t i = 0; i < spread.size(); i++){
+		for(size_t &i = st.si; i < spread.size(); i++){
+			if((i & 255) == 255 && over())
+				return false;
 			LightNode node = spread[i];
 			if(node.level == 0)
 				continue;
@@ -3518,7 +3601,7 @@ struct CInstance: public voxelworld::Instance
 
 		const int took_ms =
 				(int)std::chrono::duration_cast<std::chrono::milliseconds>(
-				std::chrono::steady_clock::now() - t0).count();
+				std::chrono::steady_clock::now() - st.t0).count();
 		// Said out loud when it is slow, because this runs at the end of
 		// every access into voxelworld and everything waiting to get in
 		// waits for it: a game that builds its terrain in on_generated --
@@ -3527,8 +3610,10 @@ struct CInstance: public voxelworld::Instance
 		static const int SLOW_LIGHT_MS = 500;
 		log_(took_ms >= SLOW_LIGHT_MS ? CORE_WARNING : CORE_VERBOSE, MODULE,
 				"update_skylight(): %zu seeds, %zu unlit, %zu spread, "
-				"%zu blockers in %i ms", seeds.size(), unlight.size(),
+				"%zu blockers in %i ms", st.seeds_n, unlight.size(),
 				spread.size(), n_blockers, took_ms);
+		st = FloodState();
+		return true;
 	}
 
 	// Commit and unload chunk buffer
@@ -3716,8 +3801,13 @@ struct CInstance: public voxelworld::Instance
 		m_commit_registry_us = 0;
 		m_commit_replicate_us = 0;
 		// Before anything is meshed, so that the light lands in the same
-		// remesh as the voxels that changed it
-		update_skylight();
+		// remesh as the voxels that changed it -- unless a deferred
+		// relight's flood is under way, which relight_stale() carries on
+		// under its own budget: finishing it here made the slicing moot,
+		// since every access ends here ([STEP_SLICE]). Seeds from writes
+		// made meanwhile wait on the end of that flood, a few ticks.
+		if(!m_relight_pending)
+			update_skylight();
 		const int64_t t_light = interface::os::time_us();
 
 		if(m_sections_with_loaded_buffers.empty())
