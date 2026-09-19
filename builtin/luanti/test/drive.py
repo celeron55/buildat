@@ -634,7 +634,13 @@ def stair_step(s, mem, pick, down):
     under = (floor[0], floor[1] - 1, floor[2])
     drop = world.get(floor) is not None and not solid_at(world, floor) and \
         world.get(under) is not None and not solid_at(world, under)
-    if any(is_liquid(world.get(q)) for q in near) or \
+    # Lava, not water: a stair in a lake is a wet stair, not a dead
+    # player (824 quarter-turns in a lake at y 0, 2026-09-20). Standing
+    # in water the stair yields to the water rules further down.
+    f = feet_node(s)
+    if is_liquid(world.get(f)) and "lava" not in (world.get(f) or ""):
+        return "stair_wet", [look_away(s)] + walk(TURN_S, jump=True), None
+    if any("lava" in (world.get(q) or "") for q in near) or \
             (drop and mem.get("level_until", 0) <= turn):
         mem["stair_yaw"] = (mem["stair_yaw"] + 90) % 360
         mem["aimed"] = None
@@ -1291,7 +1297,9 @@ done, 8 lines""".splitlines()
     cs.crosshair = ("mcl_core:dirt", 10, 20, 11)
     name, cmds, exp = stair_step(cs, m, 1, down=True)
     assert (10, 21, 11) in m["aside"] and name in ("stair_aim", "stair_approach"), name
-    # lava beside the step: the heading turns instead
+    # water beside the step is no reason to turn; lava is
+    cs.world[(11, 20, 11)] = "mcl_core:water_source"
+    assert stair_step(cs, m, 1, down=True)[0] != "stair_turn"
     cs.world[(11, 20, 11)] = "mcl_core:lava_source"
     assert stair_step(cs, m, 1, down=True)[0] == "stair_turn" and m["stair_yaw"] == 90
     m["stair_yaw"] = 0.0
