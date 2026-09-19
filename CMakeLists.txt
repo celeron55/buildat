@@ -564,6 +564,13 @@ if(BUILD_SERVER)
 			FILES_MATCHING PATTERN "cc1plus.exe" PATTERN "collect2.exe"
 			PATTERN "*.dll" PATTERN "install-tools" EXCLUDE PATTERN "plugin" EXCLUDE)
 		install(DIRECTORY "${SC}/lib/gcc" DESTINATION "${DST_COMPILER}/lib")
+		# The C++ and libgcc import libraries beside lib/gcc: what -lstdc++
+		# and -lgcc_s resolve to when a module links
+		install(DIRECTORY "${SC}/lib/" DESTINATION "${DST_COMPILER}/lib"
+			FILES_MATCHING PATTERN "libstdc++*.a" PATTERN "libgcc_s.a"
+			PATTERN "libwinpthread*.a" PATTERN "libssp*.a"
+			PATTERN "gcc" EXCLUDE PATTERN "clang" EXCLUDE PATTERN "python3.9" EXCLUDE
+			PATTERN "bfd-plugins" EXCLUDE PATTERN "pkgconfig" EXCLUDE)
 		install(DIRECTORY "${SC}/include/c++" DESTINATION "${DST_COMPILER}/include")
 		install(DIRECTORY "${SC}/x86_64-w64-mingw32" DESTINATION "${DST_COMPILER}"
 			PATTERN "bin" EXCLUDE)
