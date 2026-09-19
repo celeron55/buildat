@@ -1712,6 +1712,13 @@ struct CInstance: public voxelworld::Instance
 			generate_section(section);
 	}
 
+	void load_section_no_generate(const pv::Vector3DInt16 &section_p)
+	{
+		Section &section = force_get_section(section_p);
+		if(!section.loaded)
+			load_section(section);
+	}
+
 	void set_load_points(const sv_<voxelworld::LoadPoint> &points)
 	{
 		m_load_points = points;
@@ -1842,6 +1849,15 @@ struct CInstance: public voxelworld::Instance
 	set_<uint64_t> m_stale_sections;
 	bool m_stale_dirty = false;
 
+	// Sections relight_region_later() has marked, in order; a section
+	// loaded or unloaded meanwhile is simply not there when its turn comes
+	std::deque<pv::Vector3DInt16> m_relight_queue;
+	bool m_light_deferred = false;
+	void set_light_deferred(bool on)
+	{
+		m_light_deferred = on;
+	}
+
 	void mark_section_stale(const pv::Vector3DInt16 &section_p)
 	{
 		if(m_stale_sections.insert(section_key(section_p)).second)
@@ -1869,6 +1885,43 @@ struct CInstance: public voxelworld::Instance
 		}
 		if(n > 0)
 			log_d(MODULE, "relight_region(): %zu sections", n);
+	}
+
+	void relight_region_later(const pv::Region &region)
+	{
+		const pv::Vector3DInt16 lc = section_of_voxel(region.getLowerCorner());
+		const pv::Vector3DInt16 uc = section_of_voxel(region.getUpperCorner());
+		for(int16_t z = lc.getZ(); z <= uc.getZ(); z++)
+		for(int16_t y = lc.getY(); y <= uc.getY(); y++)
+		for(int16_t x = lc.getX(); x <= uc.getX(); x++){
+			const pv::Vector3DInt16 section_p(x, y, z);
+			if(get_section(section_p) == nullptr)
+				continue;
+			mark_section_stale(section_p);
+			m_relight_queue.push_back(section_p);
+		}
+	}
+
+	size_t relight_stale(int64_t budget_us)
+	{
+		const int64_t t0 = interface::os::time_us();
+		size_t done = 0;
+		while(!m_relight_queue.empty()){
+			const pv::Vector3DInt16 section_p = m_relight_queue.front();
+			m_relight_queue.pop_front();
+			Section *section = get_section(section_p);
+			if(section != nullptr){
+				relight_if_stale(*section);
+				done++;
+			}
+			// At least one a call, so a queue always drains
+			if(interface::os::time_us() - t0 >= budget_us)
+				break;
+		}
+		if(done > 0)
+			log_d(MODULE, "relight_stale(): %zu sections, %zu queued", done,
+					m_relight_queue.size());
+		return m_relight_queue.size();
 	}
 
 	void load_stale_sections()
@@ -2402,7 +2455,7 @@ struct CInstance: public voxelworld::Instance
 				if(old_transparent != now_transparent ||
 						(lf == LIGHT_LAMP &&
 						voxel_light_source(old) != voxel_light_source(nv))){
-					m_light_seeds[lf].push_back(SkylightSeed{
+					if(!m_light_deferred) m_light_seeds[lf].push_back(SkylightSeed{
 							p, get_light(old_first, lf), old_transparent,
 							lf == LIGHT_LAMP ? voxel_light_source(old) : 0});
 				}
@@ -2491,7 +2544,7 @@ struct CInstance: public voxelworld::Instance
 				if(old_transparent != now_transparent ||
 						(lf == LIGHT_LAMP &&
 						voxel_light_source(old) != voxel_light_source(now))){
-					m_light_seeds[lf].push_back(SkylightSeed{
+					if(!m_light_deferred) m_light_seeds[lf].push_back(SkylightSeed{
 							p, get_light(old_first, lf), old_transparent,
 							lf == LIGHT_LAMP ? voxel_light_source(old) : 0});
 				}
@@ -2790,7 +2843,7 @@ struct CInstance: public voxelworld::Instance
 							(lf == LIGHT_LAMP &&
 							voxel_light_source(dst_v) !=
 							voxel_light_source(src_v))){
-						m_light_seeds[lf].push_back(SkylightSeed{
+						if(!m_light_deferred) m_light_seeds[lf].push_back(SkylightSeed{
 								pv::Vector3DInt32(x, y, z),
 								get_light(old, lf), old_transparent,
 								lf == LIGHT_LAMP ?

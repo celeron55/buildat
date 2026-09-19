@@ -190,6 +190,14 @@ namespace voxelworld
 
 		virtual void load_or_generate_section(
 				const pv::Vector3DInt16 &section_p) = 0;
+		// Loaded from the save or created empty, not generated: what a
+		// write lands in when it reaches past the generated world -- a
+		// mapgen mod's structure spilling into the next section -- and the
+		// generator fills in the rest around it when that section's turn
+		// comes, as write_volume() has always had it. Generating it on the
+		// spot was 500 ms inside the mod's own step ([STEP_SLICE]).
+		virtual void load_section_no_generate(
+				const pv::Vector3DInt16 &section_p) = 0;
 
 		// The points the world stays loaded around, replacing the previous
 		// set; call it whenever they move, it only remembers them. A few
@@ -357,6 +365,20 @@ namespace voxelworld
 		// than doing on every write -- a section is a quarter of a million
 		// voxels.
 		virtual void relight_region(const pv::Region &region) = 0;
+
+		// The same, later: the sections are marked stale now and
+		// relight_stale() brings them up to date under a budget, one section
+		// at a time, so the recompute is not inside the step that wrote them
+		// ([STEP_SLICE]: a mapgen mod's write_to_map was a 160 ms relight
+		// in the same step as its own 200 ms). Until then the section wears
+		// the light the write's own flood left, which is nearly right.
+		virtual void relight_region_later(const pv::Region &region) = 0;
+		// Returns how many sections are still stale
+		virtual size_t relight_stale(int64_t budget_us) = 0;
+		// While on, a write does not flood light from what it changed: for
+		// a writer that will ask for a relight of everything it touched
+		// anyway, whose flood was the same work twice ([STEP_SLICE])
+		virtual void set_light_deferred(bool on) = 0;
 
 		virtual size_t num_buffers_loaded() = 0;
 

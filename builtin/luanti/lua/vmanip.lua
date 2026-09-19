@@ -298,6 +298,46 @@ local function parse_gennotify(text)
 	return out
 end
 
+-- BUILDAT_LUANTI_BINDPROF=1: every __luanti_* binding wrapped with a
+-- timer, so a slow section's line below says which of the module's C
+-- calls the mod's code spent its time in -- the instruction sampler
+-- (BUILDAT_LUANTI_LUAPROF) cannot see inside a C function ([STEP_SLICE])
+local bind_us = nil
+if os.getenv("BUILDAT_LUANTI_BINDPROF") == "1" then
+	bind_us = {}
+	local names = {}
+	for name, f in pairs(_G) do
+		if type(f) == "function" and type(name) == "string" and
+				name:sub(1, 9) == "__luanti_" and name ~= "__luanti_log" then
+			names[#names + 1] = name
+		end
+	end
+	for _, name in ipairs(names) do
+		local f = _G[name]
+		_G[name] = function(...)
+			local t = core.get_us_time()
+			local a, b, c, d = f(...)
+			bind_us[name] = (bind_us[name] or 0) + core.get_us_time() - t
+			return a, b, c, d
+		end
+	end
+end
+local function bind_top(n)
+	if not bind_us then
+		return ""
+	end
+	local list = {}
+	for name, us in pairs(bind_us) do
+		list[#list + 1] = {name, us}
+	end
+	table.sort(list, function(a, b) return a[2] > b[2] end)
+	local parts = {}
+	for i = 1, math.min(n, #list) do
+		parts[i] = string.format("%s %.0f", list[i][1]:sub(10), list[i][2] / 1000)
+	end
+	return "; bindings ms: " .. table.concat(parts, ", ")
+end
+
 function core.__run_on_generated(x0, y0, z0, x1, y1, z1, blockseed)
 	local callbacks = core.registered_on_generateds
 	if callbacks == nil or #callbacks == 0 then
@@ -315,16 +355,25 @@ function core.__run_on_generated(x0, y0, z0, x1, y1, z1, blockseed)
 	mapgen_vm = setmetatable({ids = {}, param1 = {}, param2 = {},
 			modified = false}, VoxelManipRef)
 	local read = false
+	-- Where a slow section's time went, for the line below: the read of
+	-- the section into Lua tables, the mods' code, the write back and
+	-- the relight ([STEP_SLICE])
+	local read_us, write_us = 0, 0
 	local real_get = core.get_mapgen_object
 	core.get_mapgen_object = function(name)
 		if name == "voxelmanip" and not read then
 			read = true
+			local t = core.get_us_time()
 			mapgen_vm:read_from_map(minp, maxp)
+			read_us = read_us + core.get_us_time() - t
 		end
 		return real_get(name)
 	end
 	local t_all = core.get_us_time()
 	local worst, worst_mod = 0, "?"
+	if bind_us then
+		bind_us = {}
+	end
 	for i = 1, #callbacks do
 		local callback = callbacks[i]
 		local origin = core.callback_origins and
@@ -341,7 +390,9 @@ function core.__run_on_generated(x0, y0, z0, x1, y1, z1, blockseed)
 			-- is remembered rather than enforced.
 			if not read then
 				read = true
+				local t = core.get_us_time()
 				mapgen_vm:read_from_map(minp, maxp)
+				read_us = read_us + core.get_us_time() - t
 			end
 			ok, err = pcall(callback, mapgen_vm, minp, maxp, blockseed)
 		else
@@ -359,12 +410,21 @@ function core.__run_on_generated(x0, y0, z0, x1, y1, z1, blockseed)
 	-- Into the step peak with the phase named by the mod: this runs on
 	-- the server's thread between steps and starves everything the same
 	-- way a long step does. See [STEP_PEAK].
-	core.__note_phase("on_generated " .. worst_mod,
-			(core.get_us_time() - t_all) / 1000000)
+	local callbacks_us = core.get_us_time() - t_all
+	core.__note_phase("on_generated " .. worst_mod, callbacks_us / 1000000)
 	-- What a mod did to the mapgen's own VoxelManip is written back when
 	-- the callback returns, which is Luanti's rule for that one
 	if read and mapgen_vm:was_modified() then
+		local t = core.get_us_time()
 		mapgen_vm:write_to_map()
+		write_us = core.get_us_time() - t
+	end
+	if callbacks_us + write_us >= 200000 then
+		core.log("verbose", string.format(
+				"on_generated at %d,%d,%d: read %.0f ms, mods %.0f ms " ..
+				"(worst %s %.0f ms), write and relight %.0f ms%s", x0, y0, z0,
+				read_us / 1000, (callbacks_us - read_us) / 1000, worst_mod,
+				worst / 1000, write_us / 1000, bind_top(8)))
 	end
 	mapgen_vm = nil
 	mapgen_gennotify = nil

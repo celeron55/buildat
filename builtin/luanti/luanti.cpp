@@ -942,6 +942,29 @@ struct Module: public interface::Module, public luanti::Interface
 	// around, and what says which sections are active.
 	sm_<ss_, pv::Vector3DInt32> m_player_pos;
 	pv::Vector3DInt16 m_section_size{0, 0, 0};
+	// While a mapgen mod's on_generated runs: what it wrote, as a box, so
+	// that the one relight it gets afterwards covers it ([STEP_SLICE])
+	bool m_gen_writing = false;
+	bool m_gen_wrote = false;
+	pv::Region m_gen_bbox;
+	void note_gen_write(const pv::Region &r)
+	{
+		if(!m_gen_writing)
+			return;
+		if(!m_gen_wrote){
+			m_gen_bbox = r;
+			m_gen_wrote = true;
+			return;
+		}
+		const pv::Vector3DInt32 a = m_gen_bbox.getLowerCorner(),
+				b = m_gen_bbox.getUpperCorner(),
+				c = r.getLowerCorner(), d = r.getUpperCorner();
+		m_gen_bbox = pv::Region(
+				pv::Vector3DInt32(std::min(a.getX(), c.getX()),
+					std::min(a.getY(), c.getY()), std::min(a.getZ(), c.getZ())),
+				pv::Vector3DInt32(std::max(b.getX(), d.getX()),
+					std::max(b.getY(), d.getY()), std::max(b.getZ(), d.getZ())));
+	}
 	// The media the game shipped, name -> path: a tile naming one can be
 	// handed to the client as it is, and a palette has to be read here
 	sm_<ss_, ss_> m_served_media;
@@ -1549,6 +1572,28 @@ struct Module: public interface::Module, public luanti::Interface
 		m_step_accum = 0.0f;
 		// Other players' digs and the loader's unloads land between steps
 		drop_read_cache();
+		// The relights the mapgen mods' writes asked for, one or two a tick
+		// rather than in the step that wrote them ([STEP_SLICE])
+		if(m_scene){
+			const int64_t t0 = interface::os::time_us();
+			size_t left = 0;
+			voxelworld::access(m_server, m_scene,
+					[&](voxelworld::Instance *world){
+				left = world->relight_stale(RELIGHT_BUDGET_US);
+			});
+			const int64_t took = interface::os::time_us() - t0;
+			if(took > 1000){
+				drop_read_cache();
+				char buf[96];
+				snprintf(buf, sizeof buf,
+						"core.__note_phase(\"relight\", %f)",
+						(double)took / 1000000.0);
+				run_chunk_string(buf, "relight");
+				if(left > 0)
+					log_v(MODULE, "relight: %i ms, %zu sections still stale",
+							(int)(took / 1000), left);
+			}
+		}
 		update_load_points();
 		check_map_when_ready(dtime);
 		step_environment(dtime);
@@ -1568,6 +1613,9 @@ struct Module: public interface::Module, public luanti::Interface
 	// honest work -- says nothing, and short enough that a step that will
 	// never come back is caught while somebody is still watching.
 	static const int64_t STEP_WATCHDOG_US = 30000000;
+	// How much of a tick the deferred relights may take; a section is
+	// about 160 ms on VoxeLibre, so this is one a tick
+	static const int64_t RELIGHT_BUDGET_US = 20000;
 
 	void step_environment(float dtime)
 	{
@@ -1745,8 +1793,11 @@ struct Module: public interface::Module, public luanti::Interface
 						floordiv(node.x, size.getX()),
 						floordiv(node.y, size.getY()),
 						floordiv(node.z, size.getZ()));
+				// Loaded, not generated: a set_node past the generated
+				// world -- a mapgen mod's structure into the next section
+				// -- waits there for the generator, which keeps what stands
 				if(!world->is_section_loaded(section_p))
-					world->load_or_generate_section(section_p);
+					world->load_section_no_generate(section_p);
 			}
 			for(const auto &pair : m_node_writes){
 				const PendingNode &node = pair.second;
@@ -1776,6 +1827,8 @@ struct Module: public interface::Module, public luanti::Interface
 		node.z = z;
 		node.word = word;
 		m_node_writes[pos_key(x, y, z)] = node;
+		note_gen_write(pv::Region(pv::Vector3DInt32(x, y, z),
+				pv::Vector3DInt32(x, y, z)));
 	}
 
 	// A read takes one voxelworld access(), which commits on the way out.
@@ -2885,7 +2938,23 @@ struct Module: public interface::Module, public luanti::Interface
 		// thread to put it on. A mapgen that takes longer than a step is
 		// what makes that a problem rather than a note.
 		const int64_t t0 = interface::os::time_us();
+		// No light flood for what the mods write here: the box they
+		// touched is relit once, later, under the tick's budget, and the
+		// flood from a cave-carving section was 550 ms of the same work
+		// ([STEP_SLICE])
+		m_gen_writing = true;
+		m_gen_wrote = false;
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
+			world->set_light_deferred(true);
+		});
 		node_action(buf);
+		flush_node_writes();
+		m_gen_writing = false;
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
+			world->set_light_deferred(false);
+			if(m_gen_wrote)
+				world->relight_region_later(m_gen_bbox);
+		});
 		const int64_t took = interface::os::time_us() - t0;
 		if(took > 1000){
 			log_v(MODULE, "on_generated (%i, %i, %i): %i ms",
@@ -5144,6 +5213,7 @@ struct Module: public interface::Module, public luanti::Interface
 		interface::VoxelVolume vol(pv::Region(
 				pv::Vector3DInt32(p[0], p[1], p[2]),
 				pv::Vector3DInt32(p[3], p[4], p[5])));
+		self->note_gen_write(vol.getEnclosingRegion());
 		i = 0;
 		for(int32_t z = p[2]; z <= p[5]; z++)
 		for(int32_t y = p[1]; y <= p[4]; y++)
@@ -5529,9 +5599,16 @@ struct Module: public interface::Module, public luanti::Interface
 		self->flush_node_writes();
 		const pv::Region region(pv::Vector3DInt32(p[0], p[1], p[2]),
 				pv::Vector3DInt32(p[3], p[4], p[5]));
+		// Later, under the tick's budget, not inside the mod's own step
+		// ([STEP_SLICE]); a relight asked for by a fixture that reads the
+		// light back at once wants BUILDAT_LUANTI_RELIGHT_NOW=1
+		static const bool now = getenv("BUILDAT_LUANTI_RELIGHT_NOW") != nullptr;
 		voxelworld::access(self->m_server, self->m_scene,
 				[&](voxelworld::Instance *world){
-			world->relight_region(region);
+			if(now)
+				world->relight_region(region);
+			else
+				world->relight_region_later(region);
 		});
 		return 0;
 	}
