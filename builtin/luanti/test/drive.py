@@ -401,6 +401,31 @@ def rules(s, mem):
                         click_at(dst[0][2], dst[0][3], dst[0][4]) + ["delay 300"]
                     return "to_hotbar_" + word, cmds, \
                         lambda n, w=word: hotbar_slot_of(n, w) is not None
+        # The furnace's form: coal into fuel, ore into src, the ingot out
+        # of dst; the expectation is what was put showing in the slots
+        lists = {sl[0] for sl in s.slots}
+        if "fuel" in lists and "src" in lists and "dst" in lists:
+            by = {sl[0]: sl for sl in s.slots if sl[0] in ("fuel", "src", "dst")}
+            dst = by["dst"]
+            if dst[5]:
+                empty = [sl for sl in s.slots if sl[0] == "main" and sl[5] == ""]
+                if empty:
+                    cmds = click_at(dst[2], dst[3], dst[4]) + \
+                        click_at(empty[0][2], empty[0][3], empty[0][4]) + ["delay 300"]
+                    return "take_ingot", cmds, lambda n: have(n, "ingot", 1, mem)
+            cmds = []
+            for lst, word in (("fuel", "coal"), ("src", "stone_with_iron")):
+                if by[lst][5]:
+                    continue
+                src = [sl for sl in s.slots if sl[0] == "main" and item_is(sl[5], word)]
+                if src:
+                    cmds += click_at(src[0][2], src[0][3], src[0][4]) + \
+                        click_at(by[lst][2], by[lst][3], by[lst][4])
+            if cmds:
+                return "feed_furnace", cmds + ["delay 300"], \
+                    lambda n: any(sl[0] in ("fuel", "src") and sl[5] for sl in n.slots)
+            # Fed: closed, and back in a while for the ingot
+            mem["furnace_fed_turn"] = turn
         # The table's form: the 3x3 crafts
         if craft_cells == 9:
             r = wanted_craft_3x3(s, mem)
@@ -507,15 +532,71 @@ def rules(s, mem):
         if stones:
             bx, by = min(stones, key=lambda k: s.bins[k]["d"])
             return "to_stone", [look_at_bin(s, bx, by, level=False), ms(0.3)], None
-        # No stone in sight on the surface: down through the ground with
-        # the pickaxe, stone being a few nodes under the grass; the
-        # expectation is the feet lower
+        # No stone in sight on the surface: a staircase down with the
+        # pickaxe, one step a turn -- the node ahead at head height, at
+        # the feet and the one below that, then a step forward -- on one
+        # heading, so that the way back up is a walk and a jump, not a
+        # shaft (user, 2026-09-19: straight down makes a vertical shaft
+        # the player then has to make its way up). The expectation is
+        # the feet lower.
         if not any(b["name"].endswith(":stone") for b in s.bins.values()) and \
                 mem.get("no_dig_down_until", 0) <= turn:
             y0 = s.pos[1]
-            cmds = ["keypress %d" % pick, "delay 150", "look 0 -89", "delay 300",
-                    "mouse_down left", "delay 2500", "mouse_up left", "delay 600"]
-            return "dig_down", cmds, lambda n: n.pos[1] < y0 - 0.5
+            if "stair_yaw" not in mem:
+                mem["stair_yaw"] = s.yaw
+            yr = math.radians(mem["stair_yaw"])
+            fx, fz = math.sin(yr), math.cos(yr)
+            cmds = ["keypress %d" % pick, "delay 150"]
+            # From the eye, a node and a half over the feet, to the three
+            # nodes ahead: head height, the feet's, one below
+            for dy in (-0.5, -1.5, -2.5):
+                cmds += ["look_dir %.3f %.3f %.3f" % (fx, dy, fz), "delay 250",
+                         "mouse_down left", "delay 1800", "mouse_up left", "delay 200"]
+            cmds += ["look_dir %.3f -0.3 %.3f" % (fx, fz)] + walk(0.5) + ["delay 400"]
+            return "dig_stair", cmds, lambda n: n.pos[1] < y0 - 0.5
+
+    # Rung 4: ore in view -- coal with any pickaxe, iron with the stone
+    # one -- dug until there is a few of each; then the furnace placed and
+    # fed through its form (below, among the form rules)
+    if pick is not None:
+        want = []
+        if not have(s, "coal", 4, mem):
+            want.append("stone_with_coal")
+        if hotbar_slot_of(s, "pick_stone") is not None and not have(s, "iron", 3, mem):
+            want.append("stone_with_iron")
+        ores = [(x, y) for (x, y), b in s.bins.items()
+                if any(w in b["name"] for w in want) and b["d"] <= 4]
+        if s.crosshair and any(w in s.crosshair[0] for w in want):
+            was = s.crosshair
+            cmds = ["keypress %d" % pick, "delay 150", "mouse_down left",
+                    "delay 3500", "mouse_up left", "delay 300"]
+            return "dig_ore", cmds, lambda n: n.crosshair != was
+        if ores:
+            bx, by = min(ores, key=lambda k: s.bins[k]["d"])
+            return "to_ore", [look_at_bin(s, bx, by, level=False), ms(0.3)], None
+        # Iron and coal to smelt, a furnace held: place it as the table is,
+        # use it; the form rule feeds it
+        if have(s, "iron", 1, mem) and have(s, "coal", 1, mem) and \
+                not have(s, "iron_ingot", 1, mem):
+            if s.crosshair and "furnace" in s.crosshair[0]:
+                return "use_furnace", ["mouse_click right", ms(1.0)], \
+                    lambda n: n.form is not None
+            furnaces = [(x, y) for (x, y), b in s.bins.items()
+                        if "furnace" in b["name"] and b["d"] <= 6]
+            fslot = hotbar_slot_of(s, "furnace")
+            if furnaces:
+                bx, by = min(furnaces, key=lambda k: s.bins[k]["d"])
+                d = s.bins[(bx, by)]["d"]
+                cmds = [look_at_bin(s, bx, by, level=False)]
+                cmds += walk((d - 2.5) / 4) if d > 3.5 else [ms(0.3)]
+                return "to_furnace", cmds, None
+            if fslot is not None and mem.get("no_place_until", 0) <= turn:
+                yr = math.radians(s.yaw + rng.uniform(-60, 60))
+                cmds = ["keypress %d" % fslot, "delay 150",
+                        "look_dir %.3f -1.2 %.3f" % (math.sin(yr), math.cos(yr)),
+                        "delay 300", "mouse_click right", ms(0.8)]
+                return "place_furnace", cmds, lambda n: any(
+                    "furnace" in b["name"] for b in n.bins.values())
 
     # A 3x3 craft wanted: at a table, its form; with a table in hand,
     # place it on the ground ahead; with one past the hotbar, fetch it
@@ -532,7 +613,7 @@ def rules(s, mem):
             cmds = [look_at_bin(s, bx, by, level=False)]
             cmds += walk((d - 2.5) / 4) if d > 3.5 else [ms(0.3)]
             return "to_table", cmds, None
-        if slot is not None:
+        if slot is not None and mem.get("no_place_until", 0) <= turn:
             # A little off the last heading each try: the ground ahead
             # may be a slope or the player's own space, which the client
             # refuses
@@ -662,7 +743,12 @@ def main():
             held = expect(s)
             if held:
                 failed_in_row = 0
-            elif expect_name == "dig_down":
+            elif expect_name in ("place_table", "place_furnace"):
+                # Nor this: no room where it was tried; elsewhere for
+                # five turns, then again
+                say("turn %d: %s found no room; elsewhere for five turns" % (turn, expect_name))
+                mem["no_place_until"] = turn + 5
+            elif expect_name == "dig_stair":
                 # Not a finding either: hanging in vines the dig goes
                 # through and the feet stay; somewhere else in ten turns
                 say("turn %d: the ground did not give; elsewhere for ten turns" % turn)
@@ -747,6 +833,19 @@ done, 8 lines""".splitlines()
     assert name == "to_item" and cmds[0].startswith("look_dir 2.000 0.000 3.000"), cmds
     assert exp(parse(["self at 10,4,10 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:jungletree 3"]))
     assert not exp(it)
+    # Ore in the crosshair with a pickaxe is dug
+    ore = parse(["self at 0,0,0 yaw 0 pitch 30 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_stone 1 | 2:mcl_core:cobble 20 | 3:mcl_crafting_table:crafting_table 1 | 4:mcl_core:stick 2",
+                 "crosshair mcl_core:stone_with_iron at 0,-1,1"])
+    assert rules(ore, {})[0] == "dig_ore"
+    # The furnace's form is fed coal and ore
+    fur = ["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:", "form \"x\" open",
+           "slot current_player:main:1 at 0,500 size 48x48 item \"mcl_core:coal_lump 3\"",
+           "slot current_player:main:2 at 60,500 size 48x48 item \"mcl_core:stone_with_iron 2\"",
+           "slot nodemeta:1,2,3:src:1 at 200,50 size 48x48 item \"\"",
+           "slot nodemeta:1,2,3:fuel:1 at 200,150 size 48x48 item \"\"",
+           "slot nodemeta:1,2,3:dst:1 at 400,100 size 48x48 item \"\""]
+    name, cmds, exp = rules(parse(fur), {})
+    assert name == "feed_furnace" and cmds.count("mouse_click left") == 4, (name, cmds)
     # With planks, sticks and a table in the hotbar a pickaxe is wanted:
     # the table is placed, then used, then its 3x3 form crafts
     tab = parse(["self at 0,0,0 yaw 90 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 16 | 2:mcl_core:stick 6 | 3:mcl_crafting_table:crafting_table 2"])
@@ -772,7 +871,7 @@ done, 8 lines""".splitlines()
     assert name == "dig_stone" and cmds[0] == "keypress 1", (name, cmds)
     # and with none in sight, down through the ground
     name, cmds, exp = rules(parse(["self at 0,5,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_wood 1 | 2:mcl_crafting_table:crafting_table 1 | 3:mcl_core:stick 2"]), {})
-    assert name == "dig_down" and exp(parse(["self at 0,3,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:"])), name
+    assert name == "dig_stair" and exp(parse(["self at 0,3,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:"])), name
     # A craft: a log in the hotbar wants planks; the form's slots give the
     # clicks, source, cell, source, result, empty slot
     inv = parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:jungletree 4",
