@@ -834,6 +834,28 @@ struct CApp: public App, public magic::Application
 	int64_t m_command_wait_until_us = 0;
 	ss_ m_pending_screenshot;
 	bool m_command_seq_active = false;
+	// The logical size a scripted client keeps whatever the window does
+	// ([SEQ_FIXED_SIZE]): the -w size. The world renders into a texture of
+	// it, the UI lays out at it, and both are shown scaled and letterboxed
+	// in the window; the scan, the mouse and the screenshots are in it.
+	int m_logical_w = 0;
+	int m_logical_h = 0;
+	// How the logical frame sits in the window: scale and offset, in pixels
+	float m_logical_scale = 1.f;
+	int m_logical_ox = 0;
+	int m_logical_oy = 0;
+	bool logical_mode() const { return m_command_seq_active && m_logical_w > 0; }
+	void update_logical_placement()
+	{
+		magic::Graphics *g = GetSubsystem<magic::Graphics>();
+		if(!g || !logical_mode())
+			return;
+		float sx = (float)g->GetWidth() / (float)m_logical_w;
+		float sy = (float)g->GetHeight() / (float)m_logical_h;
+		m_logical_scale = sx < sy ? sx : sy;
+		m_logical_ox = (int)((g->GetWidth() - m_logical_w * m_logical_scale) / 2);
+		m_logical_oy = (int)((g->GetHeight() - m_logical_h * m_logical_scale) / 2);
+	}
 	// -c - : commands arrive from standard input while the client runs, and
 	// the run ends at end of input rather than when the list is used up
 	bool m_command_seq_stdin = false;
@@ -1141,9 +1163,12 @@ struct CApp: public App, public magic::Application
 			if(cfg > 0)
 				s = (float)cfg;
 			else {
-				int short_side = g->GetWidth();
-				if(g->GetHeight() < short_side)
-					short_side = g->GetHeight();
+				// From the logical size in a scripted client, so that the
+				// layout does not move with the window ([SEQ_FIXED_SIZE])
+				int short_side = logical_mode() ? m_logical_w : g->GetWidth();
+				int other = logical_mode() ? m_logical_h : g->GetHeight();
+				if(other < short_side)
+					short_side = other;
 				s = (float)short_side / UI_REF_SHORT;
 				if(s < 0.01f)
 					s = 0.01f;
@@ -1155,6 +1180,25 @@ struct CApp: public App, public magic::Application
 						s = (float)n;
 				}
 			}
+		}
+		if(logical_mode()){
+			// The root stays the logical size over the game's own UI scale,
+			// drawn at that scale times the window's, and sits in the
+			// letterbox
+			update_logical_placement();
+			// Urho divides the custom size by the scale for the root, so
+			// the custom size is the letterboxed frame in pixels and the
+			// root comes out at the logical size over the game's scale
+			ui->SetCustomSize((int)(m_logical_w * m_logical_scale + 0.5f),
+					(int)(m_logical_h * m_logical_scale + 0.5f));
+			ui->SetScale(s * m_logical_scale);
+			ui->GetRoot()->SetPosition(
+					(int)(m_logical_ox / (s * m_logical_scale)),
+					(int)(m_logical_oy / (s * m_logical_scale)));
+			log_i(MODULE, "UI scale %g at logical %ix%i in %ix%i (x%g at %i,%i)",
+					s, m_logical_w, m_logical_h, g->GetWidth(), g->GetHeight(),
+					m_logical_scale, m_logical_ox, m_logical_oy);
+			return;
 		}
 		ui->SetScale(s);
 		log_i(MODULE, "UI scale %g (%ix%i)", s, g->GetWidth(), g->GetHeight());
@@ -1219,6 +1263,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(extension_path)
 		DEF_BUILDAT_FUNC(set_ui_scale)
 		DEF_BUILDAT_FUNC(get_ui_scale)
+		DEF_BUILDAT_FUNC(logical_size)
 		DEF_BUILDAT_FUNC(get_preferred_render_scale)
 		DEF_BUILDAT_FUNC(get_preference)
 		DEF_BUILDAT_FUNC(set_preference)
@@ -1282,6 +1327,10 @@ struct CApp: public App, public magic::Application
 			m_command_seq_stdin =
 					g_client_config.get<bool>("command_seq_stdin");
 			m_command_seq_active = true;
+			m_logical_w = m_options.graphics.window_w;
+			m_logical_h = m_options.graphics.window_h;
+			apply_ui_scale();
+			apply_preferred_viewports();
 			// Urho3D toggles fullscreen on alt+enter. A driven run injects
 			// plenty of enters, and SDL's modifier state can have alt in it
 			// from an alt+tab the window never saw the release of, which
@@ -1341,9 +1390,13 @@ struct CApp: public App, public magic::Application
 	bool camera_angles(float *yaw, float *pitch)
 	{
 		auto *renderer = GetSubsystem<magic::Renderer>();
-		if(!renderer || renderer->GetNumViewports() < 1)
-			return false;
-		magic::Viewport *viewport = renderer->GetViewport(0);
+		magic::Viewport *viewport = nullptr;
+		// The game's viewports are on the offscreen texture under a render
+		// scale or in logical mode, and the renderer then has none
+		if(!m_preferred_viewports.empty())
+			viewport = m_preferred_viewports[0];
+		else if(renderer && renderer->GetNumViewports() >= 1)
+			viewport = renderer->GetViewport(0);
 		if(!viewport)
 			return false;
 		magic::Camera *camera = viewport->GetCamera();
@@ -1518,7 +1571,10 @@ struct CApp: public App, public magic::Application
 			ok = client::command_seq::inject_key(input, c.s, true, true, &err);
 			break;
 		case Type::MousePos:
-			ok = client::command_seq::inject_mouse_pos(input, c.x, c.y, &err);
+			ok = client::command_seq::inject_mouse_pos(input,
+					logical_mode() ? (int)(m_logical_ox + c.x * m_logical_scale) : c.x,
+					logical_mode() ? (int)(m_logical_oy + c.y * m_logical_scale) : c.y,
+					&err);
 			break;
 		case Type::MouseMove:
 			ok = client::command_seq::inject_mouse_move(input, c.x, c.y, &err);
@@ -1698,8 +1754,11 @@ struct CApp: public App, public magic::Application
 		ss_ path = m_pending_screenshot;
 		m_pending_screenshot.clear();
 		ss_ err;
+		update_logical_placement();
 		if(!client::command_seq::save_screenshot(
-				GetSubsystem<magic::Graphics>(), path, &err))
+				GetSubsystem<magic::Graphics>(), path, &err,
+				logical_mode() ? m_logical_w : 0, logical_mode() ? m_logical_h : 0,
+				m_logical_ox, m_logical_oy, m_logical_scale))
 			command_seq_fail(err);
 	}
 
@@ -1771,8 +1830,10 @@ struct CApp: public App, public magic::Application
 		unsigned n = m_preferred_viewports.size();
 		float scale = m_options.graphics.render_scale;
 		// 1.0 is a bypass and not a scale of one: no texture, no blit, the
-		// frame the client draws when nothing asked for anything
-		if(scale > 0.999f && scale < 1.001f){
+		// frame the client draws when nothing asked for anything -- except
+		// in the scripted client, whose world always goes onto a texture of
+		// the logical size ([SEQ_FIXED_SIZE])
+		if(scale > 0.999f && scale < 1.001f && !logical_mode()){
 			drop_preferred_texture();
 			renderer->SetNumViewports(n);
 			for(unsigned i = 0; i < n; i++){
@@ -1791,6 +1852,16 @@ struct CApp: public App, public magic::Application
 
 		int tw = scaled_length(graphics->GetWidth(), scale);
 		int th = scaled_length(graphics->GetHeight(), scale);
+		// The rects the game gave are in the window it saw; in logical
+		// mode they are taken as fractions of it onto the logical frame
+		float rx = 1.f, ry = 1.f;
+		if(logical_mode()){
+			tw = m_logical_w;
+			th = m_logical_h;
+			scale = 1.f;
+			rx = (float)m_logical_w / (float)graphics->GetWidth();
+			ry = (float)m_logical_h / (float)graphics->GetHeight();
+		}
 		if(!m_preferred_texture || m_preferred_texture->GetWidth() != tw ||
 				m_preferred_texture->GetHeight() != th){
 			m_preferred_texture = new magic::Texture2D(context_);
@@ -1810,8 +1881,15 @@ struct CApp: public App, public magic::Application
 		}
 		surface->SetNumViewports(n);
 		for(unsigned i = 0; i < n; i++){
-			m_preferred_viewports[i]->SetRect(
-					scaled_rect(m_preferred_rects[i], scale));
+			magic::IntRect r = scaled_rect(m_preferred_rects[i], scale);
+			if(logical_mode()){
+				const magic::IntRect &p = m_preferred_rects[i];
+				r = magic::IntRect((int)(p.left_ * rx), (int)(p.top_ * ry),
+						(int)(p.right_ * rx), (int)(p.bottom_ * ry));
+				if(n == 1)
+					r = magic::IntRect(0, 0, tw, th);
+			}
+			m_preferred_viewports[i]->SetRect(r);
 			surface->SetViewport(i, m_preferred_viewports[i]);
 		}
 		surface->SetUpdateMode(magic::SURFACE_UPDATEALWAYS);
@@ -2178,6 +2256,25 @@ struct CApp: public App, public magic::Application
 		self->m_ui_scale_lua = (s > 0) ? (float)s : 0.f;
 		self->apply_ui_scale();
 		return 0;
+	}
+
+	// logical_size() -> w, h: the frame a scan's and a sequence's pixels
+	// are in -- the -w size in a scripted client ([SEQ_FIXED_SIZE]), the
+	// window otherwise
+	static int l_logical_size(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		magic::Graphics *g = self->GetSubsystem<magic::Graphics>();
+		if(self->logical_mode()){
+			lua_pushinteger(L, self->m_logical_w);
+			lua_pushinteger(L, self->m_logical_h);
+		} else {
+			lua_pushinteger(L, g ? g->GetWidth() : 0);
+			lua_pushinteger(L, g ? g->GetHeight() : 0);
+		}
+		return 2;
 	}
 
 	// get_ui_scale() -> number

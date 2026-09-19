@@ -26,11 +26,10 @@ return function(ctx)
 	-- knowing which space a line is in. Clipped to the window, so that
 	-- the centre of what is left is a valid mouse position.
 	local function pixels(x, y, w, h)
-		local k = magic.ui:GetScale()
-		if not k or k <= 0 then
-			k = 1
-		end
-		local ww, wh = magic.ui.root.width * k, magic.ui.root.height * k
+		-- The frame's pixels over the root's units: the logical frame in
+		-- a scripted client, whatever the window is ([SEQ_FIXED_SIZE])
+		local ww, wh = buildat.logical_size()
+		local k = ww / math.max(1, magic.ui.root.width)
 		local x0 = math.max(0, math.floor(x * k))
 		local y0 = math.max(0, math.floor(y * k))
 		local x1 = math.min(ww, math.floor((x + w) * k))
@@ -122,6 +121,11 @@ return function(ctx)
 				"scan %s: self at %.1f,%.1f,%.1f yaw %.1f pitch %.1f fov %.1f hp ? wield %s hotbar %s",
 				label, px, py, pz, yaw0, pitch0, fov0,
 				buildat.dump(ctx.wield() or ""), table.concat(hot, " | "))
+		-- The frame the rectangles are in, and the UI root it is read off
+		local lw, lh = buildat.logical_size()
+		lines[#lines + 1] = string.format("scan %s: frame %dx%d root %dx%d ui_scale %.3f",
+				label, lw, lh, magic.ui.root.width, magic.ui.root.height,
+				magic.ui:GetScale() or 0)
 		-- The HUD's bars: health, hunger, breath, armour, by their picture
 		for _, e in pairs(luanti.hud_elements) do
 			if e.type == "statbar" then
@@ -183,11 +187,7 @@ return function(ctx)
 		-- wide, an item four at four nodes), and this does not. The
 		-- screen position is in window pixels, the bin the one its
 		-- centre falls in.
-		local k = magic.ui:GetScale()
-		if not k or k <= 0 then
-			k = 1
-		end
-		local ww, wh = magic.ui.root.width * k, magic.ui.root.height * k
+		local ww, wh = buildat.logical_size()
 		local function dot(a, b)
 			return a.x * b.x + a.y * b.y + a.z * b.z
 		end

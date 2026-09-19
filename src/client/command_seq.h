@@ -87,8 +87,12 @@ namespace command_seq
 	// ends, so a run's last picture is whole
 	void finish_screenshots();
 
+	// With a logical size, the picture is that size: the letterboxed
+	// frame at (ox, oy) scaled by s in the window, resampled back
+	// ([SEQ_FIXED_SIZE])
 	bool save_screenshot(Urho3D::Graphics *graphics, const ss_ &path,
-			ss_ *error);
+			ss_ *error, int logical_w = 0, int logical_h = 0,
+			int ox = 0, int oy = 0, float s = 1.f);
 	// What to call the next screenshot in a directory: the date and the
 	// time, screenshot_20250713_130617.png, with a numbered suffix when one
 	// second holds two of them. The caller is given the name back and has

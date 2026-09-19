@@ -642,7 +642,12 @@ local WHITE = luanti.texture("[fill:1x1:#ffffffff")
 -- window -- so this is the conversion, and it is what keeps a HUD the same
 -- number of screen pixels Luanti would have drawn it.
 local function hud_scale()
-	return magic.ui.root.width / math.max(1, magic.graphics.width)
+	-- Over the frame's width, which is the window's -- or the logical
+	-- size a scripted client keeps whatever the window does
+	-- ([SEQ_FIXED_SIZE]); over the window there, the hotbar shrank as
+	-- the window grew
+	local fw = buildat.logical_size()
+	return magic.ui.root.width / math.max(1, fw or magic.graphics.width)
 end
 
 -- The three numbers everything below is drawn from, in this UI's units
@@ -3526,8 +3531,9 @@ magic.SubscribeToEvent("MouseMove", function(event_type, event_data)
 	if not scale or scale <= 0 then
 		scale = 1
 	end
-	luanti.hover(math.floor(event_data:GetInt("X") / scale),
-			math.floor(event_data:GetInt("Y") / scale))
+	local rp = magic.ui.root.position
+	luanti.hover(math.floor(event_data:GetInt("X") / scale) - rp.x,
+			math.floor(event_data:GetInt("Y") / scale) - rp.y)
 end)
 
 -- Where a click landed, which MouseButtonDown does not say. A form is the
@@ -3537,7 +3543,10 @@ magic.SubscribeToEvent("UIMouseClick", function(event_type, event_data)
 		return
 	end
 	local button = event_data:GetInt("Button")
-	luanti.click(event_data:GetInt("X"), event_data:GetInt("Y"),
+	-- Less the root's own position: a scripted client's root sits in a
+	-- letterbox ([SEQ_FIXED_SIZE]) and a form's rectangles are the root's
+	local rp = magic.ui.root.position
+	luanti.click(event_data:GetInt("X") - rp.x, event_data:GetInt("Y") - rp.y,
 			button == magic.MOUSEB_RIGHT and "right" or
 			button == magic.MOUSEB_MIDDLE and "middle" or "left")
 end)

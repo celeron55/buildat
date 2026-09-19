@@ -811,7 +811,8 @@ void finish_screenshots()
 	g_screenshot_threads.v.clear();
 }
 
-bool save_screenshot(magic::Graphics *graphics, const ss_ &path, ss_ *error)
+bool save_screenshot(magic::Graphics *graphics, const ss_ &path, ss_ *error,
+		int logical_w, int logical_h, int ox, int oy, float s)
 {
 	if(!graphics){
 		*error = "Graphics not available";
@@ -821,6 +822,39 @@ bool save_screenshot(magic::Graphics *graphics, const ss_ &path, ss_ *error)
 	if(!graphics->TakeScreenShot(img)){
 		*error = "TakeScreenShot failed";
 		return false;
+	}
+	// The logical frame out of the window: cropped to the letterbox and
+	// resampled to the logical size (bilinear), so a picture is the scan's
+	// pixels whatever the window is
+	if(logical_w > 0 && logical_h > 0 &&
+			(img.GetWidth() != logical_w || img.GetHeight() != logical_h ||
+			ox != 0 || oy != 0)){
+		const int c = (int)img.GetComponents();
+		const int sw = img.GetWidth(), sh = img.GetHeight();
+		const unsigned char *src = img.GetData();
+		sv_<unsigned char> out((size_t)logical_w * logical_h * c);
+		for(int y = 0; y < logical_h; y++){
+			float fy = oy + (y + 0.5f) * s - 0.5f;
+			int y0 = (int)fy; if(y0 < 0) y0 = 0; if(y0 > sh - 1) y0 = sh - 1;
+			int y1 = y0 + 1 < sh ? y0 + 1 : y0;
+			float ty = fy - y0; if(ty < 0) ty = 0; if(ty > 1) ty = 1;
+			for(int x = 0; x < logical_w; x++){
+				float fx = ox + (x + 0.5f) * s - 0.5f;
+				int x0 = (int)fx; if(x0 < 0) x0 = 0; if(x0 > sw - 1) x0 = sw - 1;
+				int x1 = x0 + 1 < sw ? x0 + 1 : x0;
+				float tx = fx - x0; if(tx < 0) tx = 0; if(tx > 1) tx = 1;
+				for(int k = 0; k < c; k++){
+					float a = src[((size_t)y0 * sw + x0) * c + k] * (1 - tx) +
+							src[((size_t)y0 * sw + x1) * c + k] * tx;
+					float b = src[((size_t)y1 * sw + x0) * c + k] * (1 - tx) +
+							src[((size_t)y1 * sw + x1) * c + k] * tx;
+					out[((size_t)y * logical_w + x) * c + k] =
+							(unsigned char)(a * (1 - ty) + b * ty + 0.5f);
+				}
+			}
+		}
+		img.SetSize(logical_w, logical_h, c);
+		img.SetData(out.data());
 	}
 	ss_ abs = interface::fs::get_absolute_path(path);
 	ss_ parent = interface::fs::strip_file_name(abs);
