@@ -294,6 +294,15 @@ void read_stdin_lines(sv_<ss_> *out_lines, bool *eof)
 		*eof = true;
 		return;
 	}
+#ifdef _WIN32
+	// simplified: no non-blocking stdin on Windows -- a pipe there cannot
+	// be polled the way a Unix fd can; the stdin-driven run is a Linux
+	// tool for now, and here stdin is simply never read
+	(void)buf; (void)nonblock_set;
+	done = true;
+	*eof = true;
+	return;
+#else
 	if(!nonblock_set){
 		nonblock_set = true;
 		int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
@@ -333,6 +342,7 @@ void read_stdin_lines(sv_<ss_> *out_lines, bool *eof)
 		buf.clear();
 	}
 	*eof = done;
+#endif
 }
 
 static void self_check()

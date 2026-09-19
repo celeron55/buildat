@@ -71,6 +71,11 @@ extern "C" {
 #include <unistd.h>
 #include <limits.h>
 #endif
+// windows.h, which SDL and Urho3D pull in above, does #define interface
+// struct, and interface is this tree's namespace
+#ifdef interface
+	#undef interface
+#endif
 #define MODULE "__app"
 namespace magic = Urho3D;
 
@@ -2689,10 +2694,10 @@ struct CApp: public App, public magic::Application
 		unsigned vbase = 1;
 		unsigned ngeom = 0, nvert = 0, ntri = 0;
 		magic::Vector3 eye(0, 0, 0);
-		float far = 1e9f;
+		float far_clip = 1e9f; // not "far": a Windows macro
 		if(!cams.Empty() && cams[0]->GetNode()){
 			eye = cams[0]->GetNode()->GetWorldPosition();
-			far = cams[0]->GetFarClip();
+			far_clip = cams[0]->GetFarClip();
 		}
 		for(unsigned gi = 0; gi < geoms.Size(); gi++){
 			magic::CustomGeometry *cg = geoms[gi];
@@ -2701,7 +2706,7 @@ struct CApp: public App, public magic::Application
 				continue;
 			// The dump is what the picture shows: skip chunks outside the
 			// viewing range. +64 is one voxelworld section.
-			if((node->GetWorldPosition() - eye).Length() > far + 64.f)
+			if((node->GetWorldPosition() - eye).Length() > far_clip + 64.f)
 				continue;
 			const magic::Matrix3x4 &wt = node->GetWorldTransform();
 			magic::Vector<magic::PODVector<magic::CustomGeometryVertex>>
