@@ -51,7 +51,10 @@ export BUILDAT_LUANTI_NO_SPOTS=1
 # And no tonemap curve on pbr: the render's PNG is the metered frame
 # clipped, and the probes compare linear to linear until the fit's last
 # term ([PBR_FIT]) has a curve to compare. The parity modes have none.
-export BUILDAT_LUANTI_LINEAR=1
+# BUILDAT_LUANTI_LINEAR=0 on the command line shoots the graded frame
+# instead (curve and bloom on), which is what a grade check looks at
+# ([BLOOM_PLACE]); such a set goes under REFSHOT_SHOTS_DIR, not the fit's.
+export BUILDAT_LUANTI_LINEAR="${BUILDAT_LUANTI_LINEAR:-1}"
 built=$(mktemp -d /tmp/refshots_build.XXXXXX)
 KEEP=1 "$me/build.sh" "$built" || exit 2
 . "$built/env.sh"
