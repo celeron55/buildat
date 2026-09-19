@@ -353,6 +353,16 @@ function M.new(scene, sun_dir, defaults)
 		end
 	end
 
+	-- The pbr path's cloud: lit rather than coloured ([CLOUD_LIGHT]);
+	-- the two vectors the shader adds, computed by the caller from the
+	-- sun and the sky of the hour
+	function self:set_cloud_lit(sun, sky)
+		material:SetShaderParameter("CloudSun",
+				magic.Vector3(sun.r, sun.g, sun.b))
+		material:SetShaderParameter("CloudSky",
+				magic.Vector3(sky.r, sky.g, sky.b))
+	end
+
 	function self:set_cloud_light(k)
 		if k == nil then
 			return

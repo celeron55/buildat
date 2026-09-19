@@ -1311,6 +1311,38 @@ local function apply_sky_of_hour()
 	-- 0.022, 0.032, where the gradient behind them computes to less than
 	-- official's on its own.
 	world_sky:set_cloud_light(sky_now.lit or 1)
+	if not sky_now.unlit then
+		-- pbr: the cloud is a reflectance lit by the sun and the sky
+		-- ([CLOUD_LIGHT]), not a display colour in a radiance sky. The
+		-- game's cloud colour is the albedo (a cloud top's is near 0.9);
+		-- the sky's share is the dome's mean, five parts zenith to one
+		-- horizon; the sun's share is E_sun of the hour times how high
+		-- it is, times k_sun. k_sun is set so that at noon a thin cloud
+		-- is CLOUD_N times the zenith patch -- there being no reference
+		-- for it, CLOUD_N is rated by the user (BUILDAT_LUANTI_CLOUD_N,
+		-- default 2; the options are rendered under it).
+		local albedo = game_sky.cloud_color or {r = 0.9, g = 0.92, b = 0.95}
+		local function lum(c)
+			return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+		end
+		local sky_mean = {r = (5 * zenith_now.r + horizon_now.r) / 6,
+				g = (5 * zenith_now.g + horizon_now.g) / 6,
+				b = (5 * zenith_now.b + horizon_now.b) / 6}
+		local n = tonumber(buildat.get_env("BUILDAT_LUANTI_CLOUD_N") or "")
+				or 2
+		local noon_mean = (5 * PHYS.sky_zenith + PHYS.sky_horizon) / 6
+		local k_sun = math.max(0, (n * PHYS.sky_zenith * math.pi /
+				math.max(lum(albedo), 1e-6) - noon_mean) / PHYS.sun(1))
+		local e = PHYS.sun(sky_now.height or 0) *
+				math.max(sky_now.height or 0, 0) * k_sun / math.pi
+		local sc = sky_lights.sun.color
+		world_sky:set_cloud_lit(
+				{r = albedo.r * e * sc.r, g = albedo.g * e * sc.g,
+					b = albedo.b * e * sc.b},
+				{r = albedo.r * sky_mean.r / math.pi,
+					g = albedo.g * sky_mean.g / math.pi,
+					b = albedo.b * sky_mean.b / math.pi})
+	end
 	-- And so does what a pond mirrors: the cube map it comes from is baked
 	-- at noon, so without this the water is a bright blue sky at midnight
 	-- On pbr the cube is rendered from this same sky at this hour and

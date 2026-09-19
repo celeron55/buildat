@@ -79,6 +79,13 @@ uniform float cSkyAutoDim;
 // 0.38). Set on the pbr path, whose sky is the lighting's number
 // ([PBR_FIT] term 1); the parity modes keep Luanti's. Unset reads as 0.
 uniform float cSkyPhysical;
+// On the physical path the game's cloud colour is a reflectance and these
+// are what lights it ([CLOUD_LIGHT]): the sun's share, albedo * E_sun *
+// k_sun * facing / pi, and the sky's, albedo * sky_mean / pi, both in the
+// sky's radiance units. The thin edge of a cloud lets the sun through and
+// the thick middle does not, so the sun's share thins with the density.
+uniform vec3 cCloudSun;
+uniform vec3 cCloudSky;
 // How much sky the camera can see, as one number: 0 in a cave, 1 anywhere
 // that is not one. See [CAVE_SKY]'s correction in doc/plan/rendering_plan.md.
 uniform float cSkyOutside;
@@ -276,7 +283,9 @@ void PS()
         float into = clamp((density - threshold) / CLOUD_EDGE, 0.0, 1.0);
         float cover = into * cCloudAlpha *
                 smoothstep(CLOUD_HORIZON, CLOUD_FADE, d.y);
-        color = mix(color, cCloudColor, cover);
+        vec3 cloud = cSkyPhysical > 0.5 ?
+                cCloudSky + cCloudSun * (1.0 - 0.5 * into) : cCloudColor;
+        color = mix(color, cloud, cover);
     }
 
     // The sun and the moon, over the clouds: they are the two things up there
