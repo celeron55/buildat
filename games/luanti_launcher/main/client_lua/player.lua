@@ -28,8 +28,17 @@ local M = {}
 M.RADIUS = 0.3
 M.HEIGHT = 1.75
 -- Luanti's own step height: a player walks onto anything this much higher
--- without jumping, which is what makes a stair or a slab walkable
+-- without jumping, which is what makes a stair or a slab walkable. In the
+-- air it is 0.2 (LocalPlayer::move: touching_ground ? stepheight : 0.2*BS)
 M.STEP_HEIGHT = 0.6
+M.AIR_STEP_HEIGHT = 0.2
+-- ClientEnvironment::step() cuts a frame into steps of at most this long,
+-- and of at most STEP_MAX_MOVE nodes of travel, so that what a jump does
+-- is the same at any frame rate ([PLAYER_PHYSICS]); a frame over
+-- DTIME_LIMIT loses the rest, as Luanti's does
+M.STEP_MAX_S = 0.01
+M.STEP_MAX_MOVE = 0.1
+M.DTIME_LIMIT = 2.5
 -- Where the eyes are above the feet, which is what the camera follows
 M.EYE_HEIGHT = 1.625
 -- Luanti's movement defaults, which is what TOCLIENT_MOVEMENT carries and
@@ -178,19 +187,19 @@ M.move_axis = move_axis
 -- move is tried again from a step up, and what the player then stands on is
 -- found by settling back down. Only from the ground, so a jump does not
 -- climb a wall.
-local function move_horizontal(p, axis, d, solid, on_ground)
+local function move_horizontal(p, axis, d, solid, step_height)
 	local direct = {p[1], p[2], p[3]}
 	local hit = move_axis(direct, axis, d, solid)
 	local function take(q)
 		p[1], p[2], p[3] = q[1], q[2], q[3]
 	end
-	if not hit or not on_ground then
+	if not hit or not step_height or step_height <= 0 then
 		take(direct)
 		return hit
 	end
 	-- No room to rise, or still blocked up there: the plain move it is
 	local up = {p[1], p[2], p[3]}
-	if move_axis(up, 2, M.STEP_HEIGHT, solid) then
+	if move_axis(up, 2, step_height, solid) then
 		take(direct)
 		return true
 	end
@@ -198,7 +207,7 @@ local function move_horizontal(p, axis, d, solid, on_ground)
 		take(direct)
 		return true
 	end
-	move_axis(up, 2, -M.STEP_HEIGHT, solid)
+	move_axis(up, 2, -step_height, solid)
 	take(up)
 	return false
 end
@@ -276,19 +285,15 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 	--   fast    the fast speed and the fast acceleration
 	-- Returns the position after the step.
 	--
-	-- simplified: a liquid is something with a sinking speed and a way out of
-	-- it, and that is all. Viscosity, the two fluidity constants, being partly
-	-- submerged and the difference between a source and a flowing node are
-	-- not used; LocalPlayer::move() in Luanti is what does all of that.
-	function self:update(dtime, wish)
-		if dtime <= 0 then
-			return self.x, self.y, self.z
-		end
-		-- A frame long enough to fall several nodes in is a frame the server
-		-- would not believe anyway
-		if dtime > 0.2 then
-			dtime = 0.2
-		end
+	-- The shape is LocalPlayer::applyControl() and move() with
+	-- ClientEnvironment::step() around them, one feature at a time; the
+	-- table of what matches and what does not is [PLAYER_PHYSICS] in
+	-- doc/plan/luanti_module_plan.md.
+	--
+	-- simplified: the sneak ledge (not walking off an edge while sneaking),
+	-- sneak_glitch, the bouncy, slippery, disable_jump and disable_descend
+	-- groups, autojump, pitch move and object collisions are not here.
+	local function step(dtime, wish)
 		local m = self.movement
 		-- Going through walls is the collision test answering no to
 		-- everything, which is also how a player who ended up inside
@@ -296,27 +301,36 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 		local stops = self.noclip and never_solid or is_solid
 
 		local nx = math.floor(self.x + 0.5)
-		local ny = math.floor(self.y + 0.5)
 		local nz = math.floor(self.z + 0.5)
-		self.in_liquid = is_liquid ~= nil and is_liquid(nx, ny, nz)
-		-- A ladder is climbed from inside it or from the node the head is
-		-- in, which is how a player on the bottom rung holds on
+		-- In a liquid: read half a node up when out of it and a tenth of a
+		-- node up when in it, so that the surface does not flicker the
+		-- state (LocalPlayer::move, "the oscillating value")
+		local ly = self.y + (self.in_liquid and 0.1 or 0.5)
+		local lny = math.floor(ly + 0.5)
+		self.in_liquid = is_liquid ~= nil and is_liquid(nx, lny, nz) or false
+		-- A ladder is climbed from the node half a node above the feet or
+		-- the one a fifth below them, which is how a player on the bottom
+		-- rung holds on and how the top of one is left
 		self.climbing = is_climbable ~= nil and not self.fly and
 				not self.noclip and
-				(is_climbable(nx, ny, nz) or is_climbable(nx, ny + 1, nz))
-		-- How much what they are standing in holds them back
+				(is_climbable(nx, math.floor(self.y + 0.5 + 0.5), nz) or
+				is_climbable(nx, math.floor(self.y - 0.2 + 0.5), nz))
+		-- How much what they are standing in holds them back, read from
+		-- the same node the liquid is
 		local resistance = (resistance_at ~= nil and not self.noclip) and
-				resistance_at(nx, ny, nz) or 0
+				resistance_at(nx, lny, nz) or 0
 
 		-- What a mod has multiplied this player's movement by, which is
 		-- ones unless the server has said otherwise
 		local ov = self.override or EMPTY_OVERRIDE
 		local ov_speed = ov.speed or 1
+		local free_move = self.fly or self.noclip
 		-- Horizontal: accelerate towards what the keys ask for
 		local speed = m.speed_walk
 		if wish.fast then
 			speed = m.speed_fast
-		elseif wish.sneak and not self.fly and (ov.sneak or 1) ~= 0 then
+		elseif wish.sneak and not free_move and not self.in_liquid and
+				(ov.sneak or 1) ~= 0 then
 			speed = m.speed_crouch
 		end
 		speed = speed * ov_speed
@@ -326,53 +340,90 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 			target_x = wish.x / len * speed
 			target_z = wish.z / len * speed
 		end
-		local accel = m.acceleration_air
-		if self.fly then
-			accel = m.acceleration_fast
-		elseif self.on_ground then
-			accel = wish.fast and m.acceleration_fast or
-					m.acceleration_default
+		-- Which acceleration, as applyControl() picks it: the air's when
+		-- off the ground with nothing holding the player (or at the
+		-- moment of a jump), the fast one under the fast key, the default
+		-- otherwise -- on the ground, in a liquid, on a ladder, flying
+		local in_air = not self.on_ground and not free_move and
+				not self.climbing and not self.in_liquid
+		local can_jump = self.on_ground and not self.climbing and
+				not free_move
+		local accel_h, accel_v
+		if in_air or (can_jump and wish.jump) then
+			accel_h = wish.fast and m.acceleration_fast or m.acceleration_air
+			accel_v = 0
+		elseif wish.fast then
+			accel_h, accel_v = m.acceleration_fast, m.acceleration_fast
+		else
+			accel_h, accel_v = m.acceleration_default, m.acceleration_default
 		end
 		-- Luanti multiplies the acceleration it sent by BS (10) when it
-		-- receives TOCLIENT_MOVEMENT and then again in LocalPlayer::move,
+		-- receives TOCLIENT_MOVEMENT and then again in applyControl(),
 		-- while speeds get BS only once. In voxel units that leaves the
 		-- effective acceleration ten times the wire value.
-		local max = accel * BS_ACCEL * dtime
-		self.vx = approach(self.vx, target_x, max)
-		self.vz = approach(self.vz, target_z, max)
+		local max_h = accel_h * BS_ACCEL * dtime * ov_speed
+		local max_v = accel_v * BS_ACCEL * dtime * ov_speed
+		-- The horizontal increment is one vector, not one per axis
+		local dx, dz = target_x - self.vx, target_z - self.vz
+		local dlen = math.sqrt(dx * dx + dz * dz)
+		if dlen > max_h and dlen > 0 then
+			dx, dz = dx / dlen * max_h, dz / dlen * max_h
+		end
+		self.vx = self.vx + dx
+		self.vz = self.vz + dz
 
-		-- Vertical
-		if self.fly or self.noclip then
-			self.vy = 0
-			if wish.jump then
-				self.vy = speed
-			end
-			if wish.sneak then
-				self.vy = self.vy - speed
+		-- Vertical: what the keys want, reached at the vertical
+		-- acceleration, and then what pulls
+		local target_v = nil
+		local swimming = false
+		if free_move then
+			target_v = 0
+			if wish.jump and not wish.sneak then
+				target_v = speed
+			elseif wish.sneak and not wish.jump then
+				target_v = -speed
 			end
 		elseif self.climbing then
-			-- Held on to rather than fallen past: up with jump, down with
-			-- sneak, and still otherwise. Luanti's own climb has no gravity
-			-- in it either.
-			self.vy = 0
-			if wish.jump then
-				self.vy = m.speed_climb * ov_speed
-			elseif wish.sneak then
-				self.vy = -m.speed_climb * ov_speed
+			target_v = 0
+			if wish.jump and not wish.sneak then
+				target_v = m.speed_climb * ov_speed
+			elseif wish.sneak and not wish.jump then
+				target_v = -m.speed_climb * ov_speed
+			end
+			if wish.fast then
+				target_v = target_v > 0 and speed or
+						(target_v < 0 and -speed or 0)
 			end
 		elseif self.in_liquid then
-			if wish.jump then
-				self.vy = m.speed_walk * ov_speed
-			else
-				self.vy = self.vy - m.gravity * (ov.gravity or 1) * dtime
-				if self.vy < -m.liquid_sink then
-					self.vy = -m.liquid_sink
-				end
+			-- No key is a target of nought at the default acceleration,
+			-- against the pull below; that tug of war is what makes an
+			-- idle player in water sink slowly rather than fall
+			target_v = 0
+			if wish.jump and not wish.sneak then
+				target_v, swimming = speed, true
+			elseif wish.sneak and not wish.jump then
+				target_v, swimming = -speed, true
 			end
-		elseif self.on_ground and wish.jump then
+		end
+		if target_v ~= nil then
+			self.vy = approach(self.vy, target_v, max_v)
+		end
+		if can_jump and wish.jump and self.vy >= -0.5 then
+			-- The jump is the speed set outright, from the ground and
+			-- also from a fall slower than half a node a second
 			self.vy = m.speed_jump * (ov.jump or 1)
+		end
+		-- What pulls: Luanti's gravity has a factor two in it ("HACK the
+		-- factor 2 for gravity is arbitrary" in ClientEnvironment::step,
+		-- there since 2011), and in a liquid the pull is twice the
+		-- sinking value instead, unless swimming with a key
+		local pull = 0
+		if free_move or self.climbing then
+			pull = 0
+		elseif self.in_liquid then
+			pull = swimming and 0 or 2 * m.liquid_sink * (ov.liquid_sink or 1)
 		else
-			self.vy = self.vy - m.gravity * (ov.gravity or 1) * dtime
+			pull = 2 * m.gravity * (ov.gravity or 1)
 		end
 
 		-- What being in something thick does, which is Luanti's own
@@ -382,18 +433,17 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 		-- its own pace instead of stopping it; out of one -- a game can put
 		-- resistance on anything -- it is proportional to the speed, which
 		-- is what makes a cobweb a cobweb.
-		--
-		-- simplified: the two fluidity constants are the defaults and the
-		-- physics_override's own fluidity multipliers are not applied, this
-		-- module not having them. The shape of the sum is Luanti's.
 		if resistance > 0 then
 			local len = math.sqrt(self.vx * self.vx + self.vy * self.vy +
 					self.vz * self.vz)
 			if len > 1e-6 then
 				local dl
 				if self.in_liquid then
-					dl = math.min(len * 10 / m.liquid_fluidity,
-							m.liquid_fluidity_smooth)
+					local fluidity = math.max(0.001, m.liquid_fluidity *
+							math.max(1, ov.liquid_fluidity or 1))
+					local smooth = math.max(0, m.liquid_fluidity_smooth *
+							(ov.liquid_fluidity_smooth or 1))
+					dl = math.min(len * 10 / fluidity, smooth)
 				else
 					dl = len
 				end
@@ -407,17 +457,25 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 			end
 		end
 
+		-- The move, at the average speed over the step, which is what
+		-- collisionMoveSimple() moves by
+		local vy0 = self.vy
+		self.vy = self.vy - pull * dtime
+		local avg_vy = (vy0 + self.vy) / 2
+
 		local p = {self.x, self.y, self.z}
 		-- Vertically first, so that whether the player is standing on
 		-- something is settled before a step up is considered
-		if move_axis(p, 2, self.vy * dtime, stops) then
-			self.on_ground = self.vy < 0
+		if move_axis(p, 2, avg_vy * dtime, stops) then
+			self.on_ground = avg_vy < 0
 			-- How hard the landing was, in nodes a second, for whoever
 			-- tells the server about it. Left here to be read and cleared:
 			-- this module knows nothing about damage, and what a fall costs
 			-- is the game's arithmetic and not the physics'.
-			if self.vy < 0 then
-				self.landed_at = -self.vy
+			-- The hardest since it was last read: the substeps that
+			-- follow a landing in the same frame land again at nought
+			if avg_vy < 0 and -vy0 > (self.landed_at or 0) then
+				self.landed_at = -vy0
 			end
 			self.vy = 0
 		else
@@ -428,11 +486,14 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 		-- walk into a wall at an angle slide along it. Anything up to a step
 		-- height is walked onto rather than into, so a stair or a slab does
 		-- not need a jump; a whole voxel does, which is what Luanti asks for
-		-- as well.
+		-- as well. A fifth of a node in the air, which is what lets a jump
+		-- that just misses the top of a node land on it.
+		local step_height = self.on_ground and M.STEP_HEIGHT or
+				M.AIR_STEP_HEIGHT
 		local hit_x = move_horizontal(p, 1, self.vx * dtime, stops,
-				self.on_ground)
+				step_height)
 		local hit_z = move_horizontal(p, 3, self.vz * dtime, stops,
-				self.on_ground)
+				step_height)
 		if hit_x then
 			self.vx = 0
 		end
@@ -440,6 +501,30 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 			self.vz = 0
 		end
 		self.x, self.y, self.z = p[1], p[2], p[3]
+	end
+
+	function self:update(dtime, wish)
+		if dtime <= 0 then
+			return self.x, self.y, self.z
+		end
+		if dtime > M.DTIME_LIMIT then
+			dtime = M.DTIME_LIMIT
+		end
+		-- Cut the way ClientEnvironment::step() cuts: ten milliseconds or
+		-- a tenth of a node of travel, whichever is shorter, so a long
+		-- frame is several short ones and a jump goes the same height
+		-- however choppy the client is
+		local speed = math.sqrt(self.vx * self.vx + self.vy * self.vy +
+				self.vz * self.vz)
+		local max_step = M.STEP_MAX_S
+		if speed > 0.001 then
+			max_step = math.min(max_step, M.STEP_MAX_MOVE / speed)
+		end
+		local steps = math.ceil(dtime / max_step)
+		local part = dtime / steps
+		for _ = 1, steps do
+			step(part, wish)
+		end
 		return self.x, self.y, self.z
 	end
 
@@ -463,10 +548,20 @@ do
 	assert(dry.in_liquid == false and wet.in_liquid == true,
 			"player: a world of water is not being noticed")
 	-- Ten seconds of falling: in air that is a speed no game survives, in
-	-- water it is the sinking speed and no more
+	-- water it is the slow idle sink Luanti's tug of war between the pull
+	-- and the acceleration towards nought comes to (well under a node a
+	-- second, and no faster at a long frame than at a short one)
 	assert(dry.vy < -50, "player: nothing slows a fall through air")
-	assert(wet.vy >= -M.DEFAULT_MOVEMENT.liquid_sink - 0.001,
-			"player: sinking is not clamped to liquid_sink")
+	assert(wet.vy < 0 and wet.vy > -1,
+			"player: an idle player in water does not sink slowly, vy = " ..
+			wet.vy)
+	local wet2 = M.new(nothing_stops, all_water)
+	for _ = 1, 1000 do
+		wet2:update(0.01, {x = 0, z = 0})
+	end
+	assert(math.abs(wet2.y - wet.y) < 0.05,
+			"player: the sink depends on the frame length: " ..
+			wet.y .. " vs " .. wet2.y)
 	-- And jumping is how you get out of it, from anywhere rather than only
 	-- off the ground
 	wet:update(0.1, {x = 0, z = 0, jump = true})

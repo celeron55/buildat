@@ -748,14 +748,16 @@ for _ = 1, 200 do
 	p:update(1 / 60, NO_WISH)
 	if p.y > top then top = p.y end
 end
-assert(top > 1.5 and top < 3, "player: jumped to "..top)
+-- Luanti's apex: 6.5^2 / (2 * 2 * 9.81) = 1.08 nodes over the feet, the
+-- gravity being doubled there ([PLAYER_PHYSICS])
+assert(top > 1.55 and top < 1.65, "player: jumped to "..top)
 assert(math.abs(p.y - 0.5) < 1e-6, "player: landed at "..p.y)
 
--- Falling into the hole lands in the water and stops sinking at its bottom,
--- and the jump key swims back out of it
+-- Falling into the hole lands in the water and sinks -- slowly, as an idle
+-- player in Luanti does -- to its bottom, and the jump key swims back out
 local w = player.new(is_solid, is_liquid)
 w:set_position(0, 0.5, 6)
-settle(w, 300)
+settle(w, 1500)
 assert(w.in_liquid, "player: not in the water")
 assert(math.abs(w.y - (-2.5)) < 1e-6, "player: sank to "..w.y)
 settle(w, 300, {x = 0, z = 0, jump = true})
