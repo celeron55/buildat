@@ -317,6 +317,14 @@ def dig_one(s, mem, targets, pick, name):
     aside = mem.setdefault("aside", {})
     aimed = mem.get("aimed")
     mem["aimed"] = None
+    # A plant in the player's own node -- a fern the player stands in --
+    # is what every ray meets first, so nothing else can be pointed
+    # until it is gone: dug, a short hold
+    f = feet_node(s)
+    if s.crosshair is not None and tuple(s.crosshair[1:4]) in (f, (f[0], f[1] + 1, f[2])):
+        mem["aimed"] = aimed
+        return name + "_clear", ["mouse_down left", "delay 700", "mouse_up left",
+                                 "delay 250"], None
     if aimed is not None and solid_at(world, aimed):
         if s.crosshair is not None and tuple(s.crosshair[1:4]) == aimed:
             # Pointed at what was meant: dug, by its material
@@ -1042,6 +1050,7 @@ def main():
             elif expect_name == "make_room":
                 say("turn %d: the room did not open" % turn)
             elif expect_name in ("mine", "stair_walk", "stair_aim", "tunnel_aim",
+                                 "stair_clear", "tunnel_clear", "room_clear",
                                  "room_aim", "stair_dig", "tunnel_dig", "room_dig"):
                 say("turn %d: the tunnel did not advance; elsewhere for five turns" % turn)
                 mem["no_dig_stair_until"] = turn + 5
