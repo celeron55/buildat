@@ -226,8 +226,12 @@ local PHYS = {sun_e0 = 195, sun_tau = 0.127, sky_zenith = 4.5,
 		sky_horizon = 12.0, moon_e = 0.0025, night_sky = 0.00005,
 		bounce = 0.15, lamp = 8, dome = 0.9, ground = {r = 0.25, g = 0.22, b = 0.15},
 		-- the transmitted light through a leaf, over Lambert through its
-		-- colour squared ([PBR_FIT] 3b, canopy_dawn)
+		-- colour ([PBR_FIT] 3b, canopy_dawn)
 		translucency = 1.0,
+		-- how bright a thin noon cloud is against the sky's zenith patch:
+		-- picked by the user off a ladder of 1.5 to 20 ([CLOUD_LIGHT],
+		-- 2026-09-19); BUILDAT_LUANTI_CLOUD_N overrides
+		cloud_n = 8,
 		day_zenith = {r = 0.57, g = 0.76, b = 1.0},
 		-- the horizon just over the sea at 13:00 reads (14.7, 14.9, 15.0)
 		-- in the render: white, not Luanti's pale blue
@@ -1322,7 +1326,7 @@ local function apply_sky_of_hour()
 		-- horizon; the sun's share is E_sun of the hour times how high
 		-- it is, times k_sun. k_sun is set so that at noon a thin cloud
 		-- is CLOUD_N times the zenith patch -- there being no reference
-		-- for it, CLOUD_N is rated by the user (BUILDAT_LUANTI_CLOUD_N,
+		-- for it, CLOUD_N was rated by the user (PHYS.cloud_n,
 		-- default 2; the options are rendered under it).
 		local albedo = game_sky.cloud_color or {r = 0.9, g = 0.92, b = 0.95}
 		local function lum(c)
@@ -1332,7 +1336,7 @@ local function apply_sky_of_hour()
 				g = (5 * zenith_now.g + horizon_now.g) / 6,
 				b = (5 * zenith_now.b + horizon_now.b) / 6}
 		local n = tonumber(buildat.get_env("BUILDAT_LUANTI_CLOUD_N") or "")
-				or 2
+				or PHYS.cloud_n
 		local noon_mean = (5 * PHYS.sky_zenith + PHYS.sky_horizon) / 6
 		local k_sun = math.max(0, (n * PHYS.sky_zenith * math.pi /
 				math.max(lum(albedo), 1e-6) - noon_mean) / PHYS.sun(1))
