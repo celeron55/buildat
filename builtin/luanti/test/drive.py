@@ -608,8 +608,12 @@ def stair_step(s, mem, pick, down):
     floor = (a[0], a[1] - (2 if down else 1), a[2])
     near = [(x, y, z) for x in range(a[0] - 1, a[0] + 2) for y in range(a[1] - 2, a[1] + 2)
             for z in range(a[2] - 1, a[2] + 2)]
-    if any(is_liquid(world.get(q)) for q in near) or \
-            (world.get(floor) is not None and not solid_at(world, floor)):
+    # A drop is a floor and the node under it both open (a fern on the
+    # ground ahead is a one-node step, not a cliff)
+    under = (floor[0], floor[1] - 1, floor[2])
+    drop = world.get(floor) is not None and not solid_at(world, floor) and \
+        world.get(under) is not None and not solid_at(world, under)
+    if any(is_liquid(world.get(q)) for q in near) or drop:
         mem["stair_yaw"] = (mem["stair_yaw"] + 90) % 360
         mem["aimed"] = None
         return "stair_turn", ["delay 200"], None
