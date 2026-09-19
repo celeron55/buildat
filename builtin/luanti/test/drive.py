@@ -208,10 +208,13 @@ def is_tree(name):
 # word in the item's name, and what should come out. VoxeLibre's
 # mcl_core recipes: a log makes four planks, two planks over each other
 # four sticks, four planks a crafting table.
+# The last number is how many of the product the ladder wants before
+# the recipe is left alone: enough planks for the sticks and the table
+# and a pickaxe's handle later.
 RECIPES_2X2 = [
-    ("planks", {1: "tree"}, "wood"),
-    ("sticks", {1: "wood", 3: "wood"}, "stick"),
-    ("table", {1: "wood", 2: "wood", 3: "wood", 4: "wood"}, "crafting_table"),
+    ("planks", {1: "tree"}, "wood", 8),
+    ("sticks", {1: "wood", 3: "wood"}, "stick", 4),
+    ("table", {1: "wood", 2: "wood", 3: "wood", 4: "wood"}, "crafting_table", 1),
 ]
 
 
@@ -220,10 +223,22 @@ def item_is(stack, word):
     return word in name and not name.endswith("sapling")
 
 
-def have(s, word):
-    """Whether the hotbar or the open form's main list holds such an item."""
-    return any(item_is(st, word) for _, st in s.hotbar) or \
-        any(item_is(sl[5], word) for sl in s.slots if sl[0] == "main")
+def count_of(stack):
+    return int(stack.split(" ")[1]) if " " in stack else (1 if stack else 0)
+
+
+def have(s, word, n=1, mem=None):
+    """Whether at least n such items are held: in the open form's main
+    list, or, out of a form, in the hotbar plus what the last form
+    showed of the rest of the main list (mem["main"]), since the hotbar
+    is nine of thirty-six slots and a craft's result lands anywhere."""
+    if any(sl[0] == "main" for sl in s.slots):
+        stacks = [sl[5] for sl in s.slots if sl[0] == "main"]
+    else:
+        stacks = [st for _, st in s.hotbar]
+        if mem is not None:
+            stacks += [st for i, st in mem.get("main", []) if i > len(s.hotbar)]
+    return sum(count_of(st) for st in stacks if item_is(st, word)) >= n
 
 
 def click_at(x, y, w, h=None, button="left"):
@@ -238,7 +253,7 @@ def craft_2x2(s, recipe):
     the item, put one in the cell, put the rest back; then take the
     result and put it in an empty main slot. None when a source is
     missing."""
-    name, cells, _ = recipe
+    name, cells, _, _ = recipe
     by = {(sl[0], sl[1]): sl for sl in s.slots}
     cmds = []
     used = {}
@@ -266,13 +281,16 @@ def craft_2x2(s, recipe):
     return cmds
 
 
-def wanted_craft(s):
+def wanted_craft(s, mem=None):
     """The lowest recipe whose product is missing and whose sources are
-    at hand, or None."""
+    at hand in the numbers it takes, or None."""
     for r in RECIPES_2X2:
-        if have(s, r[2]):
+        if have(s, r[2], r[3], mem):
             continue
-        if all(have(s, w) for w in set(r[1].values())):
+        need = {}
+        for w in r[1].values():
+            need[w] = need.get(w, 0) + 1
+        if all(have(s, w, n, mem) for w, n in need.items()):
             return r
     return None
 
@@ -281,6 +299,8 @@ def wanted_craft(s):
 # returns the commands and an expectation: a function of the next state
 # that says whether what the rule wanted happened, or None.
 def rules(s, mem):
+    if any(sl[0] == "main" for sl in s.slots):
+        mem["main"] = [(sl[1], sl[5]) for sl in s.slots if sl[0] == "main"]
     # form open: the death screen's Respawn, the pause menu's Escape, any
     # other form's Escape
     if s.form is not None:
@@ -297,12 +317,12 @@ def rules(s, mem):
         # The player's own inventory: a craft while there is one to do,
         # its expectation the product in a main slot on the next scan
         if s.form == "" and any(sl[0] == "craft" for sl in s.slots):
-            r = wanted_craft(s)
+            r = wanted_craft(s, mem)
             if r is not None:
                 cmds = craft_2x2(s, r)
                 if cmds is not None:
                     return "craft_" + r[0], cmds + ["delay 300"], \
-                        lambda n, w=r[2]: have(n, w)
+                        lambda n, w=r[2]: have(n, w, 1, mem)
         return "close_form", ["keypress Escape", ms(TURN_S)], \
             lambda n: n.form is None
     mem["form_turns"] = 0
@@ -355,7 +375,7 @@ def rules(s, mem):
 
     # something to craft from what is held: open the inventory, and the
     # form rule above does the craft
-    if wanted_craft(s) is not None:
+    if wanted_craft(s, mem) is not None:
         return "open_inventory", ["keypress I", ms(1.0)], \
             lambda n: n.form is not None
 
@@ -529,6 +549,19 @@ done, 8 lines""".splitlines()
                  "slot current_player:craft:1 at 1014,210 size 72x72 item \"\"",
                  "slot current_player:craftpreview:1 at 1284,255 size 72x72 item \"\""])
     assert wanted_craft(inv)[0] == "planks"
+    # Two planks make sticks but not a table, which takes four
+    two = parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 2"])
+    assert wanted_craft(two)[0] == "sticks"
+    assert wanted_craft(parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 2 | 2:mcl_core:stick 4"])) is None
+    # and with eight planks and sticks the table is what is wanted
+    assert wanted_craft(parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 8 | 2:mcl_core:stick 4"]))[0] == "table"
+    # What a form showed of the main list past the hotbar counts after it closed
+    m = {}
+    rules(parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:",
+                 "form \"\" open",
+                 "slot current_player:main:10 at 0,0 size 48x48 item \"mcl_core:junglewood 4\"",
+                 "slot current_player:craft:1 at 0,0 size 48x48 item \"\""]), m)
+    assert have(parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:"]), "wood", 4, m)
     name, cmds, exp = rules(inv, {})
     assert name == "craft_planks" and cmds[0] == "mouse_pos 600 868" and \
         "mouse_click right" in cmds, cmds

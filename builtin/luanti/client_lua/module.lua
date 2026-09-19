@@ -2458,6 +2458,16 @@ function M.click(x, y, button)
 				if held.count <= 0 then
 					form.state.held = nil
 				end
+			elseif slot.stack and slot.list == "craftpreview" then
+				-- The grid's answer: a craft action makes it, into
+				-- craftresult, and that is what the hand then holds and
+				-- puts down as a move (Luanti's GUIFormSpecMenu does the
+				-- same two steps)
+				buildat.send_packet("luanti:inv_action", cereal.binary_output(
+						{"craft", "1"}, {"array", "string"}))
+				form.state.held = {location = slot.location,
+						list = "craftresult", index = 1,
+						count = slot.stack.count or 1}
 			elseif slot.stack then
 				form.state.held = {location = slot.location, list = slot.list,
 						index = slot.index,

@@ -2356,10 +2356,64 @@ function core.__check_inventory_move()
 end
 
 -- What the client sends when a stack is put down: the move, as strings.
+-- The craft grid's answer, Luanti's own way (Server::... craftpreview):
+-- after anything moves in or out of the player's craft list, the
+-- craftpreview slot is what the grid would make, through the mods'
+-- craft_predict; and a craft action takes it -- the grid's items one
+-- each, the result into craftresult for the client to move from, the
+-- on_craft callbacks run -- count times or until nothing fits. The
+-- preview was never computed before 2026-09-19: the first driven run's
+-- craft put a log in the grid and the preview stayed empty.
+local function craft_input(inv)
+	return {method = "normal", width = inv:get_width("craft"),
+			items = inv:get_list("craft")}
+end
+
+local function update_craft_preview(ref)
+	local inv = ref:get_inventory()
+	if inv:get_size("craft") == 0 or inv:get_size("craftpreview") == 0 then
+		return
+	end
+	local old = inv:get_list("craft")
+	local out = core.get_craft_result(craft_input(inv))
+	local item = core.craft_predict(out.item, ref, old, inv)
+	inv:set_stack("craftpreview", 1, item)
+end
+
+local function do_craft(ref, count)
+	local inv = ref:get_inventory()
+	if inv:get_size("craft") == 0 or inv:get_size("craftresult") == 0 then
+		return
+	end
+	for _ = 1, math.max(1, count) do
+		local old = inv:get_list("craft")
+		local out, left = core.get_craft_result(craft_input(inv))
+		if out.item:is_empty() or not inv:room_for_item("craftresult", out.item) then
+			break
+		end
+		local item = core.on_craft(out.item, ref, old, inv)
+		inv:set_list("craft", left.items)
+		inv:add_item("craftresult", item)
+		-- simplified: a recipe's replacements (a bucket back from the
+		-- milk) go to the main list rather than the grid's own slot
+		for _, r in ipairs(out.replacements or {}) do
+			inv:add_item("main", r)
+		end
+	end
+	update_craft_preview(ref)
+end
+
 function core.__inventory_action(playername, a)
 	local id = players[playername]
 	local ref = id and core.object_refs[id]
-	if not ref or type(a) ~= "table" or a[1] ~= "move" then
+	if not ref or type(a) ~= "table" then
+		return
+	end
+	if a[1] == "craft" then
+		do_craft(ref, tonumber(a[2]) or 1)
+		return
+	end
+	if a[1] ~= "move" then
 		return
 	end
 	local from_inv, from_pos, from_detached =
@@ -2399,6 +2453,10 @@ function core.__inventory_action(playername, a)
 	if not move_stack(from_inv, from_list, from_i, to_inv, to_list, to_i,
 			count) then
 		return
+	end
+	if (from_inv == ref:get_inventory() and from_list == "craft") or
+			(to_inv == ref:get_inventory() and to_list == "craft") then
+		update_craft_preview(ref)
 	end
 	if from_pos or to_pos or from_detached or to_detached then
 		local moved_stack = ItemStack(stack)
