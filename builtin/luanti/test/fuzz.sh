@@ -148,6 +148,10 @@ grep -aq " E " "$out/srv.log" && status=1
 grep -aq "not held" "$out/srv.log" "$out/cli.log" && say "a held key read as not held ([HELD_KEY_FLAKE])"
 grep -aq "input focus lost" "$out/cli.log" && say "the client lost input focus ([MOUSE_FOCUS_LOST])"
 grep -aq "Lua runtime error\|Crash:" "$out/cli.log" && say "the client crashed or hit a Lua error"
+# A command that failed ends the client early with its exit at 0, so the
+# reason is taken from the log (seed 1's look after a respawn, 2026-09-19)
+grep -aq "Command sequence failed" "$out/cli.log" &&
+	say "$(grep -a "Command sequence failed" "$out/cli.log" | head -1 | sed 's/^.*Command sequence failed: //')"
 [ "$cli_status" -eq 0 ] || say "the client exited $cli_status"
 # The client's frame, from the launcher's rate-limited lines ([FRAME_PEAK]):
 # the worst frame of every five seconds and the phase that set it, with the
