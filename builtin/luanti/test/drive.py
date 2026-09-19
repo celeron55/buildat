@@ -601,6 +601,18 @@ def stair_step(s, mem, pick, down):
         side = (a[0], a[1], a[2] + (1 if oz > 0 else -1))
     if side is not None:
         targets += [(side[0], side[1] + 1, side[2]), side]
+    # Lava beside the step, or under it, or no floor under it at all (a
+    # cave): not this way. The tunnel broke into a lava lake at y -54 and
+    # the player died with the whole kit (2026-09-20). The heading turns
+    # a quarter and the next turn takes it from there.
+    floor = (a[0], a[1] - (2 if down else 1), a[2])
+    near = [(x, y, z) for x in range(a[0] - 1, a[0] + 2) for y in range(a[1] - 2, a[1] + 2)
+            for z in range(a[2] - 1, a[2] + 2)]
+    if any(is_liquid(world.get(q)) for q in near) or \
+            (world.get(floor) is not None and not solid_at(world, floor)):
+        mem["stair_yaw"] = (mem["stair_yaw"] + 90) % 360
+        mem["aimed"] = None
+        return "stair_turn", ["delay 200"], None
     to_dig = [t for t in targets if solid_at(world, t)]
     if not to_dig:
         p0 = s.pos
@@ -1251,6 +1263,11 @@ done, 8 lines""".splitlines()
     cs.crosshair = ("mcl_core:dirt", 10, 20, 11)
     name, cmds, exp = stair_step(cs, m, 1, down=True)
     assert (10, 21, 11) in m["aside"] and name in ("stair_aim", "stair_approach"), name
+    # lava beside the step: the heading turns instead
+    cs.world[(11, 20, 11)] = "mcl_core:lava_source"
+    assert stair_step(cs, m, 1, down=True)[0] == "stair_turn" and m["stair_yaw"] == 90
+    m["stair_yaw"] = 0.0
+    del cs.world[(11, 20, 11)]
     # dug, the step is walked; the floor under it (y 19) was never a target
     m["aside"].clear()
     cs.world[(10, 21, 11)] = "air"; cs.world[(10, 20, 11)] = "air"
