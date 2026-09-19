@@ -29,7 +29,13 @@ fi
 # the worst frame of every five seconds and the phase that set it, with the
 # first such line skipped as the load's. Warn over 50 ms, fail over 250 ms,
 # first-cut numbers argued with in doc/plan/performance_plan.md.
+# Counted from t=90 like the step ([STEP_SLICE]): the load's mesh
+# backlog (seed 3's rerun, 0.84 s in mesh with 3951 chunks queued at
+# t=20) is the load's, and the ceiling is about play. By the wall clock
+# of the fixture's t=90 line, the two logs sharing a clock.
+from=$(grep -a -m1 "fuzz: t=90 " "$out/srv.log" | awk '{print $3}')
 frames=$(grep -a "frame peak" "$out/cli.log" | tail -n +2 |
+	awk -v from="${from:-00:00:00}" '$3 >= from' |
 	sed 's/^.*frame peak \([0-9.]*\) s in \(.*\), held.*$/\1 \2/')
 worst=$(echo "$frames" | sort -rn | head -1)
 if [ -n "$worst" ]; then
