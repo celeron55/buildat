@@ -130,6 +130,18 @@ local function button_menu_nav(root)
 		end
 	end)
 
+	-- The wheel moves the selection a row at a time, and the menu's
+	-- on_change scrolls it into view; clamped rather than wrapped, so a
+	-- wheel past the end stops on the last item, which is how a partial
+	-- last row is reached ([LAUNCH_GRID])
+	root:SubscribeToStackEvent("MouseWheel", function(event_type, event_data)
+		if #items == 0 then
+			return
+		end
+		local i = selected - event_data:GetInt("Wheel") * columns
+		select_i(math.max(1, math.min(#items, i)))
+	end)
+
 	return nav
 end
 

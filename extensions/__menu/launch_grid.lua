@@ -131,19 +131,11 @@ function M.actions(log)
 	local out = {}
 	for _, source in ipairs(buildat.list_launchers()) do
 		local actions, from = nil, source.kind.."/"..source.name
+		-- One rule: a directory is on the grid if it has launcher/init.lua.
+		-- The default tile for a game without one put the test scenes on
+		-- the grid; the real games carry a two-line file each.
 		if source.launcher then
 			actions = run_launcher(log, source)
-		elseif source.kind == "game" then
-			-- A game without a launcher gets one tile: its name, its own
-			-- icon.png beside its init.lua if it has one, and a launch
-			local icon = io.open(source.path.."/icon.png", "rb")
-			if icon then icon:close() end
-			actions = {{id = "play", label = source.name,
-				icon = icon and (source.name.."/icon.png") or ICON_FALLBACK,
-				resolved_icon = true,
-				run = function()
-					launch_menu.start_local_game(source.name)
-				end}}
 		end
 		local seen = {}
 		for i, a in ipairs(actions or {}) do
