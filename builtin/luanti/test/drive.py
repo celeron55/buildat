@@ -354,7 +354,11 @@ def feet_node(s):
 
 
 def ahead(s, mem, n=1):
-    """The node column n steps along the stair's heading."""
+    """The node column n steps along the stair's heading. The heading is
+    a cardinal one (set to the nearest multiple of ninety degrees): a
+    diagonal step's node sits behind the corner of two solid neighbours
+    and the player, 0.6 wide, never gets through (82 walks at one spot,
+    2026-09-20)."""
     yr = math.radians(mem["stair_yaw"])
     fx, fz = math.sin(yr), math.cos(yr)
     f = feet_node(s)
@@ -752,7 +756,7 @@ def rules(s, mem):
         if not any(b["name"].endswith(":stone") for b in s.bins.values()) and \
                 mem.get("no_dig_down_until", 0) <= turn:
             if "stair_yaw" not in mem:
-                mem["stair_yaw"] = s.yaw
+                mem["stair_yaw"] = round(s.yaw / 90) * 90
             name, cmds, exp = stair_step(s, mem, pick, down=True)
             return name, cmds, exp
 
@@ -820,7 +824,7 @@ def rules(s, mem):
         if want and mem.get("no_dig_stair_until", 0) <= turn and \
                 wanted_craft_3x3(s, mem) is None:
             if "stair_yaw" not in mem:
-                mem["stair_yaw"] = s.yaw
+                mem["stair_yaw"] = round(s.yaw / 90) * 90
             name, cmds, exp = stair_step(s, mem, pick, down=s.pos[1] > -30)
             return name, cmds, exp
         # Iron and coal to smelt, a furnace held: place it as the table is,
