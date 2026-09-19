@@ -204,8 +204,9 @@ def rules(s, mem):
     # form open: the death screen's Respawn, the pause menu's Escape, any
     # other form's Escape
     if s.form is not None:
-        btn = [u for u in s.ui if u[0] == "Button" and u[5] and
-               u[5].lower().startswith("respawn")]
+        # The button is drawn as a BorderImage with a Text in it, so the
+        # text's own rectangle is what is clicked
+        btn = [u for u in s.ui if u[5] and u[5].lower().startswith("respawn")]
         mem["form_turns"] = mem.get("form_turns", 0) + 1
         if mem["form_turns"] > 2:
             return "stuck_form", None, None
@@ -296,11 +297,24 @@ def rules(s, mem):
         if placeable:
             return "place", ["mouse_click right", ms(0.5)], None
 
-    # otherwise explore: toward the longest ray, away from a cliff or water
-    horizon = [(x, y) for (x, y) in s.bins if y in (RES // 2, RES // 2 - 1)]
+    # In water (the feet's bin row is water and the eye is low): out the
+    # way the nearest dry ground is, jumping -- the first run spun at a
+    # lake's shore for four hundred turns, every look seeing water below
     floor = [b for (x, y), b in s.bins.items() if y == RES - 1]
-    cliff = all(b["kind"] != "node" or "water" in b["name"] for b in floor) \
-        if floor else False
+    wet = sum(1 for b in floor if b["kind"] == "node" and "water" in b["name"])
+    if floor and wet >= len(floor) // 2:
+        dry = [(x, y) for (x, y), b in s.bins.items()
+               if b["kind"] == "node" and "water" not in b["name"] and
+               b["d"] < 10 and y >= RES // 2]
+        if dry:
+            bx, by = min(dry, key=lambda k: s.bins[k]["d"])
+            return "out_of_water", [look_at_bin(s, bx, by)] + \
+                walk(TURN_S, jump=True), None
+        mem["walking"] = 0
+        return "turn_in_water", [look_away(s)] + walk(TURN_S, jump=True), None
+    # otherwise explore: toward the longest ray, away from a cliff
+    horizon = [(x, y) for (x, y) in s.bins if y in (RES // 2, RES // 2 - 1)]
+    cliff = all(b["kind"] != "node" for b in floor) if floor else False
     if cliff:
         mem["walking"] = 0
         return "turn_at_edge", [look_away(s), ms(0.3)], None

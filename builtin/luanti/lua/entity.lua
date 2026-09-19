@@ -830,15 +830,21 @@ function PlayerRef:set_hp(hp, reason)
 	end
 end
 
--- Luanti's respawn: the on_respawnplayer callbacks first, and the first
--- that answers true has put the player somewhere itself (a bed); otherwise
--- the spawn point. Then full health and breath. The death screen's button
+-- Luanti's respawn (Server::RespawnPlayer): full health and breath first,
+-- the health through set_hp so the hpchange callbacks see it, then the
+-- on_respawnplayer callbacks, and the first that answers true has put the
+-- player somewhere itself (a bed); otherwise the spawn point. The order
+-- matters: VoxeLibre's health bar reads get_hp() in its respawn callback,
+-- and with the health set after it the bar stayed at nought until the
+-- next hit (the first driven run, 2026-09-19). The death screen's button
 -- is what calls it, and a mod's /respawn.
 function PlayerRef:respawn()
 	local o = state_of(self)
 	if not o or not o.player_name then
 		return
 	end
+	self:set_hp(o.props.hp_max or 20, {type = "respawn"})
+	o.breath = o.props.breath_max or 10
 	local placed = false
 	for _, cb in ipairs(core.registered_on_respawnplayers or {}) do
 		local ok, moved = pcall(cb, self)
@@ -855,8 +861,6 @@ function PlayerRef:respawn()
 		o.vel = {x = 0, y = 0, z = 0}
 		tell_the_client(o)
 	end
-	o.hp = o.props.hp_max or 20
-	o.breath = o.props.breath_max or 10
 	send_stats(o)
 end
 
