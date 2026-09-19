@@ -91,11 +91,10 @@ endif ()
 if (NOT MSVC)
     add_compile_options (-O2)
 endif ()
-# buildat: rolling v2.1 turns GC64 on by default for x64; measured on
-# VoxeLibre's worldgen it is the slower mode, so it is off unless asked for
-if (NOT LUAJIT_ENABLE_GC64)
-    add_definitions (-DLUAJIT_DISABLE_GC64)
-endif ()
+# buildat: rolling v2.1 turns GC64 on by default for x64, and it stays on:
+# measured on VoxeLibre's worldgen the two modes are the same, and the
+# non-GC64 VM wants its memory in the low 2 GB, which the Windows client
+# under Wine could not give it (a fault on the first Lua call, 2026-09-19).
 
 # Permanently disable the FFI extension to reduce the size of the LuaJIT
 # executable. But please consider that the FFI library is compiled-in,
