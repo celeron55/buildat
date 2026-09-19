@@ -292,6 +292,10 @@ def hold_for(name):
     """How long a hold digs it: stone and ore with a pickaxe, dirt, the
     soft rest."""
     base = (name or "").split(":")[-1]
+    # A log or a plank is three seconds and more by hand or a pickaxe
+    # (a jungle log at 600 ms was aimed at, held, and never went)
+    if any(w in base for w in ("tree", "log", "wood", "planks", "table", "chest")):
+        return 3800
     if "stone" in base or "ore" in base or "cobble" in base or "deepslate" in base:
         return 1800
     if any(w in base for w in ("dirt", "gravel", "sand", "clay", "podzol", "mycelium")):
