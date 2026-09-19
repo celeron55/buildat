@@ -37,6 +37,11 @@ end
 -- under ([LUAJIT] in doc/plan/performance_plan.md)
 do
 	local j = rawget(_G, "jit")
+	-- BUILDAT_LUANTI_JIT=off runs LuaJIT's interpreter alone, which is
+	-- what tells a trace compiler's cost from the VM's ([LUAJIT])
+	if j and os.getenv("BUILDAT_LUANTI_JIT") == "off" then
+		j.off()
+	end
 	core.log("action", "Lua runtime: " ..
 			(j and j.version or _VERSION) ..
 			(j and (j.status() and ", JIT on" or ", JIT off") or ""))

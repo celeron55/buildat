@@ -69,7 +69,11 @@ end
 local function punch_watch(player)
 	local near = {}
 	for _, obj in ipairs(core.get_objects_inside_radius(player:get_pos(), 4)) do
-		if not obj:is_player() then
+		-- Not item entities: a death drops the inventory as those and
+		-- they merge and get picked up, which is a removal at full
+		-- health by this test's letter ([FUZZ_DEATH_WATCH], seed 11)
+		local le = obj:get_luaentity()
+		if not obj:is_player() and not (le and le.name == "__builtin:item") then
 			near[obj] = health_of(obj)
 		end
 	end
