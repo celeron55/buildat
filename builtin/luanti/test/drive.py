@@ -700,9 +700,24 @@ def rules(s, mem):
             hist.clear()
             if mem["stuck"] >= 3:
                 return "stuck_thrice", None, None
-            return "unstick", [look_away(s)] + walk(TURN_S, jump=True), None
+            # Hemmed in -- leaves on every side at a jungle spawn -- a
+            # passage is dug one way (user, 2026-09-20): the tunnel step
+            # on a cardinal heading, with what is in hand, for the next
+            # turns; a walk that gets nowhere twice picks the heading
+            if tight(s) >= 6:
+                mem["dig_out_yaw"] = round(s.yaw / 90) * 90
+                mem["dig_out_until"] = turn + 12
+            else:
+                return "unstick", [look_away(s)] + walk(TURN_S, jump=True), None
     else:
         mem["stuck"] = 0
+    if mem.get("dig_out_until", 0) > turn:
+        yaw0 = mem.get("stair_yaw")
+        mem["stair_yaw"] = mem["dig_out_yaw"]
+        pick = hotbar_slot_of(s, "pick_stone") or hotbar_slot_of(s, "pick_wood")
+        name, cmds, exp = stair_step(s, mem, pick, down=False)
+        mem["stair_yaw"] = yaw0 if yaw0 is not None else mem["stair_yaw"]
+        return "dig_out_" + name, cmds, exp
 
     # falling or drowning: hp down and liquid below
     below = [b for (x, y), b in s.bins.items() if y >= RES - 2]
@@ -1073,7 +1088,8 @@ def main():
                 mem["no_place_until"] = turn + 1
             elif expect_name == "make_room":
                 say("turn %d: the room did not open" % turn)
-            elif expect_name in ("mine", "stair_walk", "stair_aim", "tunnel_aim",
+            elif expect_name.startswith("dig_out_") or \
+                    expect_name in ("mine", "stair_walk", "stair_aim", "tunnel_aim",
                                  "stair_clear", "tunnel_clear", "room_clear",
                                  "room_aim", "stair_dig", "tunnel_dig", "room_dig"):
                 say("turn %d: the tunnel did not advance; elsewhere for five turns" % turn)
