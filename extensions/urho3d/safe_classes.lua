@@ -555,6 +555,12 @@ function M.define(dst, util)
 	})
 
 	util.wc("Resource", {
+		properties = {
+			-- The resource's name, which is its path under a resource dir:
+			-- read-only here (writing one raises), for what reports which
+			-- picture an element shows ([SCAN_EVENT])
+			name = {get = util.simple_property("string").get},
+		},
 	})
 
 	util.wc("Component", {
@@ -1170,8 +1176,20 @@ function M.define(dst, util)
 			),
 			GetChild = util.wrap_function({"UIElement", {"string", "number"}},
 				function(self, name_or_index)
-					return util.wrap_instance("UIElement",
-							self:GetChild(name_or_index))
+					-- Wrapped as what it is when that class is whitelisted
+					-- -- a BorderImage's texture, a Text's text -- and as a
+					-- plain UIElement otherwise ([SCAN_EVENT] reads a form's
+					-- elements this way)
+					local child = self:GetChild(name_or_index)
+					if child == nil then
+						return nil
+					end
+					local tn = child:GetTypeName()
+					local class = dst[tn]
+					if class and getmetatable(class) and getmetatable(class).wrap then
+						return util.wrap_instance(tn, child)
+					end
+					return util.wrap_instance("UIElement", child)
 				end
 			),
 			GetNumChildren = util.self_function(
@@ -1294,7 +1312,9 @@ function M.define(dst, util)
 	util.wc("BorderImage", {
 		inherited_from_by_wrapper = dst.UIElement,
 		properties = {
-			texture = util.simple_property("Texture"),
+			-- Texture2D, the tolua type a BorderImage's texture reads back as;
+			-- a setter given one passes the same check
+			texture = util.simple_property(dst.Texture2D),
 			hoverOffset = util.simple_property(dst.IntVector2),
 			-- The border widths, which is what makes an image nine-sliced:
 			-- the corners keep their size and only the middle stretches

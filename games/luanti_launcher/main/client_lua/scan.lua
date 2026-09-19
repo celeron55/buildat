@@ -67,9 +67,14 @@ return function(ctx)
 				end
 				if kind == "BorderImage" or kind == "Sprite" or
 						kind == "Button" then
-					local okt, tex = pcall(function() return child.texture end)
-					if okt and tex and tex.name then
-						line = line .. " image " .. buildat.dump(tex.name)
+					local okt, name = pcall(function()
+						local tex = child.texture
+						return tex and tex.name or nil
+					end)
+					if okt and name and name ~= "" then
+						line = line .. " image " .. buildat.dump(name)
+					elseif not okt then
+						line = line .. " image ? (" .. tostring(name) .. ")"
 					end
 				end
 				out[#out + 1] = line
