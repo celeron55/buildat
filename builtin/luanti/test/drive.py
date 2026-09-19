@@ -215,13 +215,18 @@ def make_room(s, pick):
     """Plan B when there is no room to place anything (user, 2026-09-19):
     the eight nodes around the player at feet and head height dug, four
     headings, with the pickaxe if there is one. Plan A is not getting
-    into such a space."""
+    into such a space. Aimed at the nodes' centres -- from the eye, a
+    node and a half up, the head-height neighbour is level and the
+    feet-height one a node down -- so a ray through an empty or grassy
+    neighbour goes on to the next node at the same height and never to
+    the floor: the floor stays flat and the space traversable (user).
+    A short hold, one node's worth."""
     cmds = ["keypress %d" % pick, "delay 150"] if pick else []
     for yaw in (0, 90, 180, 270):
         yr = math.radians(yaw)
-        for dy in (-0.5, -1.5):
+        for dy in (0.0, -1.0):
             cmds += ["look_dir %.3f %.3f %.3f" % (math.sin(yr), dy, math.cos(yr)),
-                     "delay 200", "mouse_down left", "delay 1800", "mouse_up left",
+                     "delay 200", "mouse_down left", "delay 1200", "mouse_up left",
                      "delay 150"]
     return cmds
 
@@ -576,13 +581,29 @@ def rules(s, mem):
             yr = math.radians(mem["stair_yaw"])
             fx, fz = math.sin(yr), math.cos(yr)
             cmds = ["keypress %d" % pick, "delay 150"]
-            # From the eye, a node and a half over the feet, to the three
-            # nodes ahead: head height, the feet's, one below
-            for dy in (-0.5, -1.5, -2.5):
+            # From the eye, a node and a half over the feet, to the centres
+            # of the three nodes ahead: head height, the feet's, one below
+            for dy in (0.0, -1.0, -2.0):
                 cmds += ["look_dir %.3f %.3f %.3f" % (fx, dy, fz), "delay 250",
-                         "mouse_down left", "delay 1800", "mouse_up left", "delay 200"]
+                         "mouse_down left", "delay 1500", "mouse_up left", "delay 200"]
             cmds += ["look_dir %.3f -0.3 %.3f" % (fx, fz)] + walk(0.5) + ["delay 400"]
             return "dig_stair", cmds, lambda n: n.pos[1] < y0 - 0.5
+
+    # Moving on with nothing more to craft at a table in view and none
+    # held: dug back into the inventory, which saves the planks of the
+    # next one (a player's tip, 2026-09-19); the pickup is the walk over
+    # it, by the item rule
+    if wanted_craft_3x3(s, mem) is None and not have(s, "crafting_table", 1, mem):
+        if s.crosshair and "crafting_table" in s.crosshair[0]:
+            was = s.crosshair
+            # A table is hardness 2.5, near four seconds by hand
+            cmds = ["mouse_down left", "delay 5000", "mouse_up left", "delay 300"]
+            return "take_table", cmds, lambda n: n.crosshair != was
+        tables = [(x, y) for (x, y), b in s.bins.items()
+                  if "crafting_table" in b["name"] and b["d"] <= 4]
+        if tables:
+            bx, by = min(tables, key=lambda k: s.bins[k]["d"])
+            return "to_table", [look_at_bin(s, bx, by, level=False), ms(0.3)], None
 
     # Rung 4: ore in view -- coal with any pickaxe, iron with the stone
     # one -- dug until there is a few of each; then the furnace placed and
@@ -603,6 +624,25 @@ def rules(s, mem):
         if ores:
             bx, by = min(ores, key=lambda k: s.bins[k]["d"])
             return "to_ore", [look_at_bin(s, bx, by, level=False), ms(0.3)], None
+        # No ore in view and some wanted: mined for. The staircase down to
+        # where coal and iron are common, then a tunnel on the same
+        # heading at that depth, two nodes high, the floor flat, so the
+        # walls show ore and the way back is a walk (user: a traversable
+        # space). The expectation is the feet moved.
+        if want and mem.get("no_dig_stair_until", 0) <= turn and \
+                wanted_craft_3x3(s, mem) is None:
+            if "stair_yaw" not in mem:
+                mem["stair_yaw"] = s.yaw
+            yr = math.radians(mem["stair_yaw"])
+            fx, fz = math.sin(yr), math.cos(yr)
+            deep = s.pos[1] <= -12
+            p0 = s.pos
+            cmds = ["keypress %d" % pick, "delay 150"]
+            for dy in ((0.0, -1.0) if deep else (0.0, -1.0, -2.0)):
+                cmds += ["look_dir %.3f %.3f %.3f" % (fx, dy, fz), "delay 250",
+                         "mouse_down left", "delay 1500", "mouse_up left", "delay 200"]
+            cmds += ["look_dir %.3f -0.3 %.3f" % (fx, fz)] + walk(0.5) + ["delay 400"]
+            return "mine", cmds, lambda n, p=p0: math.dist(n.pos, p) > 0.5
         # Iron and coal to smelt, a furnace held: place it as the table is,
         # use it; the form rule feeds it
         if have(s, "iron", 1, mem) and have(s, "coal", 1, mem) and \
@@ -619,7 +659,7 @@ def rules(s, mem):
                 cmds = [look_at_bin(s, bx, by, level=False)]
                 cmds += walk((d - 2.5) / 4) if d > 3.5 else [ms(0.3)]
                 return "to_furnace", cmds, None
-            if fslot is not None and mem.get("no_place_until", 0) > turn:
+            if fslot is not None and mem.get("no_place_until", 0) > turn and tight(s) >= 4:
                 was = tight(s)
                 mem["no_place_until"] = 0
                 return "make_room", make_room(s, pick) + ["delay 300"], \
@@ -631,22 +671,6 @@ def rules(s, mem):
                         "delay 300", "mouse_click right", ms(0.8)]
                 return "place_furnace", cmds, lambda n: any(
                     "furnace" in b["name"] for b in n.bins.values())
-
-    # Moving on with nothing more to craft at a table in view and none
-    # held: dug back into the inventory, which saves the planks of the
-    # next one (a player's tip, 2026-09-19); the pickup is the walk over
-    # it, by the item rule
-    if wanted_craft_3x3(s, mem) is None and not have(s, "crafting_table", 1, mem):
-        if s.crosshair and "crafting_table" in s.crosshair[0]:
-            was = s.crosshair
-            # A table is hardness 2.5, near four seconds by hand
-            cmds = ["mouse_down left", "delay 5000", "mouse_up left", "delay 300"]
-            return "take_table", cmds, lambda n: n.crosshair != was
-        tables = [(x, y) for (x, y), b in s.bins.items()
-                  if "crafting_table" in b["name"] and b["d"] <= 4]
-        if tables:
-            bx, by = min(tables, key=lambda k: s.bins[k]["d"])
-            return "to_table", [look_at_bin(s, bx, by, level=False), ms(0.3)], None
 
     # A 3x3 craft wanted: at a table, its form; with a table in hand,
     # place it on the ground ahead; with one past the hotbar, fetch it
@@ -663,8 +687,10 @@ def rules(s, mem):
             cmds = [look_at_bin(s, bx, by, level=False)]
             cmds += walk((d - 2.5) / 4) if d > 3.5 else [ms(0.3)]
             return "to_table", cmds, None
-        if slot is not None and mem.get("no_place_until", 0) > turn:
-            # No room where it was tried: dug around the player (plan B)
+        if slot is not None and mem.get("no_place_until", 0) > turn and tight(s) >= 4:
+            # No room where it was tried and walls close on every side:
+            # dug around the player (plan B). In the open -- tall grass at
+            # the feet took the placement -- another heading is enough.
             pick = hotbar_slot_of(s, "pick_stone") or hotbar_slot_of(s, "pick_wood")
             was = tight(s)
             mem["no_place_until"] = 0
@@ -813,11 +839,15 @@ def main():
             if held:
                 failed_in_row = 0
             elif expect_name in ("place_table", "place_furnace"):
-                # Nor this: no room where it was tried; room is made
-                say("turn %d: %s found no room; room is made" % (turn, expect_name))
+                # Nor this: no room where it was tried; room is made when
+                # hemmed in, another heading otherwise
+                say("turn %d: %s found no room" % (turn, expect_name))
                 mem["no_place_until"] = turn + 1
             elif expect_name == "make_room":
                 say("turn %d: the room did not open" % turn)
+            elif expect_name == "mine":
+                say("turn %d: the tunnel did not advance; elsewhere for five turns" % turn)
+                mem["no_dig_stair_until"] = turn + 5
             elif expect_name == "dig_stair":
                 # Not a finding either: hanging in vines the dig goes
                 # through and the feet stay; somewhere else in ten turns
@@ -921,6 +951,10 @@ done, 8 lines""".splitlines()
     done = parse(["self at 0,0,0 yaw 90 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_wood 1 | 2:mcl_core:stick 6",
                   "crosshair mcl_crafting_table:crafting_table at 1,0,0"])
     assert rules(done, {})[0] == "take_table"
+    # With a stone pickaxe and no ore in view the driver mines for it
+    mine = parse(["self at 0,-20,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_stone 1 | 2:mcl_core:cobble 20 | 3:mcl_crafting_table:crafting_table 1 | 4:mcl_core:stick 2 | 5:mcl_furnaces:furnace 1"])
+    name, cmds, exp = rules(mine, {})
+    assert name == "mine" and cmds.count("mouse_down left") == 2, (name, cmds)
     # Ore in the crosshair with a pickaxe is dug
     ore = parse(["self at 0,0,0 yaw 0 pitch 30 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_stone 1 | 2:mcl_core:cobble 20 | 3:mcl_crafting_table:crafting_table 1 | 4:mcl_core:stick 2",
                  "crosshair mcl_core:stone_with_iron at 0,-1,1"])
