@@ -220,7 +220,12 @@ local function pin_view(player)
 	-- A fixture fact, not a rendering one; the moonlit ground stays,
 	-- the disc goes. Re-asserted with the rest, since a game's weather
 	-- puts clouds back.
-	player:set_clouds({density = 0})
+	-- CLOUDS=1 leaves the game's clouds on: a set for looking at the
+	-- clouds themselves ([CLOUD_LIGHT]), not for the probes
+	local clouds_wanted = rawget(_G, "REFSHOT_CLOUDS") == true
+	if not clouds_wanted then
+		player:set_clouds({density = 0})
+	end
 	player:set_moon({visible = false})
 	player:set_stars({visible = false})
 	-- **And kept off against the game**: mcl_weather's sky update puts
@@ -245,7 +250,9 @@ local function pin_view(player)
 		end
 		keep_off("set_moon", "visible", false)
 		keep_off("set_stars", "visible", false)
-		keep_off("set_clouds", "density", 0)
+		if not clouds_wanted then
+			keep_off("set_clouds", "density", 0)
+		end
 	end
 	-- Not a HUD test: the F5 line and the fixture's own text are what a
 	-- reference picture carries, and nothing else. See [REFVIEWS_HUD].

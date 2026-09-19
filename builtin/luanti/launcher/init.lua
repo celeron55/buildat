@@ -18,8 +18,10 @@ return function(ctx)
 				id = name, label = PRETTY[name] or name, icon = "luanti.png",
 				description = "Luanti game " .. name, order = 100 + i,
 				run = function()
+					-- The game's world selection: its saves, and a new one
+					-- by name, on the launcher game's own save screen
 					ctx.launch{game = "luanti_launcher",
-							params = {luanti_game = name}}
+							params = {luanti_game = name, menu = "worlds"}}
 				end,
 			}
 		end

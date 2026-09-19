@@ -37,6 +37,7 @@ esac
 	[ -n "${PROBE:-}" ] && echo 'rawset(_G, "REFSHOT_PROBE", true)'
 	[ -n "${PATHTRACE:-}" ] && echo 'rawset(_G, "REFSHOT_PATHTRACE", true)'
 	[ -n "${KEEP:-}" ] && echo 'rawset(_G, "REFSHOT_KEEP", true)'
+	[ -n "${CLOUDS:-}" ] && echo 'rawset(_G, "REFSHOT_CLOUDS", true)'
 	[ -n "${CYCLES:-}" ] && echo "rawset(_G, \"REFSHOT_CYCLES\", $CYCLES)"
 	cat "$me/set.lua" "$me/runner.lua"
 } > "$dir/fixture.lua"

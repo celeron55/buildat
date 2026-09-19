@@ -37,8 +37,18 @@ local want_imports = nil
 -- The screen a launch asked for, from the server's main:menu, until the
 -- save list has opened it
 local menu_wanted = nil
+-- And the game the save list is for, when a tile asked for one game's
+-- worlds ("worlds:<gameid>"): the list shows that game's saves and New
+-- save is that game's ([LAUNCH_GRID])
+local menu_game = nil
 buildat.sub_packet("main:menu", function(data)
-	menu_wanted = data
+	local game = data:match("^worlds:(.+)$")
+	if game then
+		menu_game = game
+		menu_wanted = nil
+	else
+		menu_wanted = data
+	end
 end)
 local import_page = 1
 
@@ -81,6 +91,8 @@ local draw_import_games
 local draw_import_worlds
 -- And the settings screen, drawn from the server's main:settings
 local draw_settings
+-- And the name field of a new save, which the one-game list goes to
+local draw_new_save_name
 
 -- Does this line answer what was typed? Case-insensitive, and every word has
 -- to be in it somewhere, so "vox cave" finds a VoxeLibre world called caves.
@@ -169,13 +181,17 @@ function draw(saves, save_games)
 
 	local title = menu.window:CreateChild("Text")
 	title:SetStyleAuto()
-	title:SetText("luanti_launcher: which save?")
+	title:SetText(menu_game and (menu_game .. ": which world?") or
+			"luanti_launcher: which save?")
 
 	-- Every save, twelve at a time, newest first: the server sorts them by
 	-- when each was last played
 	local items = {}
 	for i, name in ipairs(saves) do
 		local gameid = save_games[i]
+		if menu_game and gameid ~= menu_game then
+			goto next_save
+		end
 		local known = false
 		for _, g in ipairs(games) do
 			if g == gameid then
@@ -194,6 +210,7 @@ function draw(saves, save_games)
 			buildat.send_packet("main:open",
 					cereal.binary_output({name}, {"array", "string"}))
 		end}
+		::next_save::
 	end
 	local shown = filtered(items, save_filter)
 	add_filter(menu, save_filter, #items, #shown, function(text)
@@ -212,7 +229,11 @@ function draw(saves, save_games)
 
 	-- One button rather than one per game: which game is a choice, and it
 	-- goes on the same screen as the name it is being given
-	menu:add("New save...", function()
+	menu:add(menu_game and "New world..." or "New save...", function()
+		if menu_game then
+			draw_new_save_name(menu_game)
+			return
+		end
 		game_filter = ""
 		game_page = 1
 		draw_new_game()
@@ -350,7 +371,7 @@ end
 -- A new save, in the two steps importing a world already takes: which game,
 -- and then what to call it. The name field is on the second screen with the
 -- game it is for, rather than above a column of one button per game.
-local function draw_new_save_name(gameid)
+function draw_new_save_name(gameid)
 	local menu = import_menu("New save, playing " .. gameid)
 	local text = menu.window:CreateChild("Text")
 	text:SetStyleAuto()

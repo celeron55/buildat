@@ -514,6 +514,11 @@ struct Module: public interface::Module
 		// that screen over them ([LAUNCH_GRID])
 		{
 			ss_ menu = launch_param("menu");
+			if(menu == "worlds"){
+				ss_ game = launch_param("luanti_game");
+				if(game != "")
+					menu += ":"+game;
+			}
 			if(menu != ""){
 				network::access(m_server, [&](network::Interface *inetwork){
 					inetwork->send(packet.sender, "main:menu", menu);
@@ -1323,6 +1328,11 @@ struct Module: public interface::Module
 		// takes, a game name of the shape a directory name has, and the
 		// rest ignored. The environment, the shell's and the runners', wins.
 		ss_ launched_game = launch_param("luanti_game");
+		// menu=worlds with a game: the save list of that game rather than
+		// its one implicit world -- the Luanti tile's world selection
+		// ([LAUNCH_GRID]). The game goes to the client with the menu.
+		if(launch_param("menu") == "worlds")
+			launched_game = "";
 		if(!(wanted_game && wanted_game[0]) && !launched_game.empty())
 			wanted_game = launched_game.c_str();
 		if(wanted_game && wanted_game[0]){
