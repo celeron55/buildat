@@ -198,8 +198,8 @@ function draw(saves, save_games)
 				known = true
 			end
 		end
-		local label = name .. "   (" ..
-				(gameid ~= "" and gameid or "game not recorded") .. ")"
+		local label = menu_game and name or (name .. "   (" ..
+				(gameid ~= "" and gameid or "game not recorded") .. ")")
 		if gameid ~= "" and not known then
 			-- Still listed: a save whose game is not installed is a save,
 			-- and saying so is more use than hiding it
