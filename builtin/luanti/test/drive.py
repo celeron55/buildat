@@ -236,11 +236,12 @@ def tight(s):
 # hits (user, 2026-09-20: a grid of the voxels around the player, from
 # which the ones to dig and the ones to keep are picked). Positions are
 # node centres.
-# Solid is what blocks walking; pointable is what a ray meets, which a
-# plant is though it is walked through (user, 2026-09-20: the two kept
-# apart -- a plant gets in the way of digging or using what is behind
-# it, and only a solid one blocks the walk). By the node's base name:
-# "dirt_with_grass" is solid, "tallgrass" is not.
+# Walkable (Luanti's term: a node that blocks walking) against
+# pointable, what a ray meets, which a plant is though it is walked
+# through (user, 2026-09-20: the two kept apart -- a plant gets in the
+# way of digging or using what is behind it, and only a walkable one
+# blocks the walk). By the node's base name: "dirt_with_grass" is
+# walkable, "tallgrass" is not.
 PLANT_STARTS = ("tallgrass", "fern", "double_fern", "flower", "sapling", "vine",
                 "bamboo", "clover", "dandelion", "seagrass", "kelp", "snow",
                 "torch", "sugar", "mushroom", "bush", "deadbush", "wheat",
@@ -274,7 +275,7 @@ def update_world(mem, s):
     return world
 
 
-def solid_name(name):
+def walkable_name(name):
     if name is None:
         return True    # unknown is kept as a wall until seen
     if name in ("air", "nothing", "sky"):
@@ -282,8 +283,8 @@ def solid_name(name):
     return not is_liquid(name) and not is_plant(name)
 
 
-def solid_at(world, p):
-    return solid_name(world.get(p))
+def walkable_at(world, p):
+    return walkable_name(world.get(p))
 
 
 def eye_of(s):
@@ -309,7 +310,7 @@ def visible(world, eye, target):
         if p in seen:
             continue
         seen.add(p)
-        if solid_at(world, p) and world.get(p) is not None:
+        if walkable_at(world, p) and world.get(p) is not None:
             return False
     return True
 
@@ -353,17 +354,17 @@ def dig_one(s, mem, targets, pick, name):
         mem["aimed"] = aimed
         return name + "_clear", ["mouse_down left", "delay 700", "mouse_up left",
                                  "delay 250"], None
-    if aimed is not None and solid_at(world, aimed):
+    if aimed is not None and walkable_at(world, aimed):
         if s.crosshair is not None and tuple(s.crosshair[1:4]) == aimed:
             # Pointed at what was meant: dug, by its material
             cmds = ["keypress %d" % pick, "delay 100"] if pick else []
             cmds += ["mouse_down left", "delay %d" % hold_for(world.get(aimed)),
                      "mouse_up left", "delay 250"]
             mem["dug_since_volume"] = True
-            return name + "_dig", cmds, lambda n, t=aimed: not solid_at(n.world, t)
+            return name + "_dig", cmds, lambda n, t=aimed: not walkable_at(n.world, t)
         aside[aimed] = turn
     for t in targets:
-        if not solid_at(world, t) or aside.get(t, -99) > turn - 8:
+        if not walkable_at(world, t) or aside.get(t, -99) > turn - 8:
             continue
         if not visible(world, eye, t):
             continue
@@ -582,7 +583,7 @@ def stair_step(s, mem, pick, down):
         targets.append((a[0], a[1] - 1, a[2]))
     yr = math.radians(mem["stair_yaw"])
     fx, fz = math.sin(yr), math.cos(yr)
-    to_dig = [t for t in targets if solid_at(world, t)]
+    to_dig = [t for t in targets if walkable_at(world, t)]
     if not to_dig:
         p0 = s.pos
         cmds = ["look_dir %.3f -0.3 %.3f" % (fx, fz)] + walk(0.6) + ["delay 400"]
@@ -1219,11 +1220,11 @@ done, 8 lines""".splitlines()
     cs.world[(10, 21, 11)] = "air"; cs.world[(10, 20, 11)] = "air"
     assert stair_step(cs, m, 1, down=True)[0] == "stair_walk"
     assert cs.world[(10, 19, 11)] == "mcl_core:stone"
-    # Solid against pointable
-    assert solid_name("mcl_core:dirt_with_grass") and not is_plant("mcl_core:dirt_with_grass")
-    assert not solid_name("mcl_flowers:tallgrass") and is_plant("mcl_flowers:double_fern_top")
-    assert not solid_name("mcl_core:water_source") and not pointable_name("mcl_core:water_source")
-    assert solid_name("mcl_core:leaves") and pointable_name("mcl_flowers:fern")
+    # Walkable against pointable
+    assert walkable_name("mcl_core:dirt_with_grass") and not is_plant("mcl_core:dirt_with_grass")
+    assert not walkable_name("mcl_flowers:tallgrass") and is_plant("mcl_flowers:double_fern_top")
+    assert not walkable_name("mcl_core:water_source") and not pointable_name("mcl_core:water_source")
+    assert walkable_name("mcl_core:leaves") and pointable_name("mcl_flowers:fern")
     # A table in the crosshair with nothing more to craft at it is dug back
     done = parse(["self at 0,0,0 yaw 90 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_wood 1 | 2:mcl_core:stick 6",
                   "crosshair mcl_crafting_table:crafting_table at 1,0,0"])
