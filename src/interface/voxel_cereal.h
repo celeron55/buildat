@@ -47,7 +47,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 17;
+		uint8_t version = 18;
 		archive(
 				version,
 				v.name,
@@ -117,6 +117,11 @@ namespace interface
 		// read it as zero
 		if(version >= 17){
 			archive(v.light_source);
+		}
+		// Version 18 added the standing node's physics groups, which the
+		// client's physics reads ([PLAYER_PHYSICS])
+		if(version >= 18){
+			archive(v.bouncy, v.slippery, v.disable_jump, v.disable_descend);
 		}
 	}
 

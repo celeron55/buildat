@@ -4319,6 +4319,10 @@ struct Module: public interface::Module, public luanti::Interface
 			bool walkable = table_boolean(L, "walkable");
 			bool climbable = table_boolean(L, "climbable");
 			double move_resistance = table_number(L, "move_resistance", 0);
+			double bouncy = table_number(L, "bouncy", 0);
+			double slippery = table_number(L, "slippery", 0);
+			bool disable_jump = table_boolean(L, "disable_jump");
+			bool disable_descend = table_boolean(L, "disable_descend");
 			ss_ drawtype = table_string(L, "drawtype");
 			const interface::AtlasSegmentDefinition surface = table_surface(L);
 			float visual_scale = (float)table_number(L, "visual_scale", 1.0);
@@ -4582,6 +4586,11 @@ struct Module: public interface::Module, public luanti::Interface
 			vdef.climbable = climbable;
 			vdef.move_resistance = (uint8_t)(move_resistance < 0 ? 0 :
 					(move_resistance > 255 ? 255 : move_resistance));
+			vdef.bouncy = (uint8_t)(bouncy < 0 ? 0 : (bouncy > 255 ? 255 : bouncy));
+			vdef.slippery = (uint8_t)(slippery < 0 ? 0 :
+					(slippery > 255 ? 255 : slippery));
+			vdef.disable_jump = disable_jump;
+			vdef.disable_descend = disable_descend;
 			vdef.fully_empty = empty;
 			if(!masked_shape.empty()){
 				vdef.shape_masked = masked_shape;

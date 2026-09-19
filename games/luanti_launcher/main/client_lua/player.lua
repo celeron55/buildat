@@ -8,12 +8,6 @@
 -- letting the two drift. Nothing in it knows Luanti's protocol or Urho3D,
 -- which is what makes it the same file in both places.
 --
--- The player's box in the world: what the keys do to it, what stops it, and
--- what gravity does to it.
---
--- Luanti's player is an axis-aligned box 0.6 nodes across and 1.75 tall whose
--- bottom face is the position the server talks about. This knows nothing of
--- the protocol or of Urho3D: it asks whether the node at an integer
 -- coordinate stops the player, which is what makes it checkable without
 -- either of them (see test.lua).
 --
@@ -239,7 +233,11 @@ end
 -- through it.
 --
 -- is_liquid(x, y, z) says whether it is something to swim in. Optional.
-function M.new(is_solid, is_liquid, is_climbable, resistance_at)
+--
+-- groups_at(x, y, z) says what standing on the node does: a table (or
+-- anything indexable) with bouncy, slippery, disable_jump and
+-- disable_descend, Luanti's groups of those names, or nil. Optional.
+function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 	local self = {
 		x = 0, y = 0, z = 0,
 		vx = 0, vy = 0, vz = 0,
@@ -297,9 +295,8 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 	-- table of what matches and what does not is [PLAYER_PHYSICS] in
 	-- doc/plan/luanti_module_plan.md.
 	--
-	-- simplified: sneak_glitch (the sneak ladder), the bouncy, slippery,
-	-- disable_jump and disable_descend groups, autojump, pitch move and
-	-- object collisions are not here.
+	-- simplified: sneak_glitch (the sneak ladder), autojump, pitch move
+	-- and object collisions are not here.
 	local function step(dtime, wish)
 		local m = self.movement
 		-- Going through walls is the collision test answering no to
@@ -326,6 +323,19 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 		-- the same node the liquid is
 		local resistance = (resistance_at ~= nil and not self.noclip) and
 				resistance_at(nx, lny, nz) or 0
+		-- What the node stood on and the one the feet are in do to the
+		-- player (LocalPlayer::move, "the standing node"): either can
+		-- refuse a jump or a descent, the one stood on can be slippery
+		-- or bouncy
+		local stand_y = math.floor(self.y + 0.4)
+		local stood = groups_at ~= nil and groups_at(nx, stand_y, nz) or nil
+		local feet = groups_at ~= nil and groups_at(nx, stand_y + 1, nz) or nil
+		local no_jump = (stood ~= nil and stood.disable_jump) or
+				(feet ~= nil and feet.disable_jump) or false
+		local no_descend = (stood ~= nil and stood.disable_descend) or
+				(feet ~= nil and feet.disable_descend) or false
+		local bouncy = stood ~= nil and (stood.bouncy or 0) or 0
+		local slippery = stood ~= nil and (stood.slippery or 0) or 0
 
 		-- What a mod has multiplied this player's movement by, which is
 		-- ones unless the server has said otherwise
@@ -355,8 +365,9 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 		-- otherwise -- on the ground, in a liquid, on a ladder, flying
 		local in_air = not self.on_ground and not free_move and
 				not self.climbing and not self.in_liquid
-		local can_jump = self.on_ground and not self.climbing and
-				not free_move
+		-- A bouncy node is jumped from between bounces too
+		local can_jump = (self.on_ground or bouncy > 0) and not self.climbing and
+				not free_move and not no_jump
 		local accel_h, accel_v
 		local a_fast = m.acceleration_fast * (ov.acceleration_fast or 1)
 		local a_air = m.acceleration_air * (ov.acceleration_air or 1)
@@ -375,6 +386,15 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 		-- while speeds get BS only once. In voxel units that leaves the
 		-- effective acceleration ten times the wire value.
 		local max_h = accel_h * BS_ACCEL * dtime * ov_speed
+		-- Ice: the horizontal acceleration, towards a key and towards a
+		-- stop alike, is a fraction 1/(slippery+1), twice as slippery
+		-- with no key held (LocalPlayer::getSlipFactor)
+		if slippery >= 1 and not free_move and not self.in_liquid then
+			if len == 0 then
+				slippery = slippery * 2
+			end
+			max_h = max_h * math.max(0.001, 1 / (slippery + 1))
+		end
 		local max_v = accel_v * BS_ACCEL * dtime * ov_speed
 		-- The horizontal increment is one vector, not one per axis
 		local dx, dz = target_x - self.vx, target_z - self.vz
@@ -393,15 +413,15 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 			target_v = 0
 			if wish.jump and not wish.sneak then
 				target_v = speed
-			elseif wish.sneak and not wish.jump then
+			elseif wish.sneak and not wish.jump and not no_descend then
 				target_v = -speed
 			end
 		elseif self.climbing then
 			target_v = 0
 			local climb = m.speed_climb * (ov.speed_climb or 1) * ov_speed
-			if wish.jump and not wish.sneak then
+			if wish.jump and not wish.sneak and not no_jump then
 				target_v = climb
-			elseif wish.sneak and not wish.jump then
+			elseif wish.sneak and not wish.jump and not no_descend then
 				target_v = -climb
 			end
 			if wish.fast then
@@ -413,9 +433,9 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 			-- against the pull below; that tug of war is what makes an
 			-- idle player in water sink slowly rather than fall
 			target_v = 0
-			if wish.jump and not wish.sneak then
+			if wish.jump and not wish.sneak and not no_jump then
 				target_v, swimming = speed, true
-			elseif wish.sneak and not wish.jump then
+			elseif wish.sneak and not wish.jump and not no_descend then
 				target_v, swimming = -speed, true
 			end
 		end
@@ -488,6 +508,14 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 		-- something is settled before a step up is considered
 		if move_axis(p, 2, avg_vy * dtime, stops) then
 			self.on_ground = avg_vy < 0
+			-- A bouncy node throws a fall back up at bouncy/100 of it
+			-- (collisionMoveSimple); a bounce too slow to clear the
+			-- feet settles instead of buzzing
+			-- simplified: the node hit is taken to be the one stood on
+			-- before the move, which a fall onto a bouncy node from a
+			-- neighbouring one gets wrong for one step
+			local bounce = (avg_vy < 0 and bouncy > 0) and
+					-vy0 * bouncy / 100 or 0
 			-- How hard the landing was, in nodes a second, for whoever
 			-- tells the server about it. Left here to be read and cleared:
 			-- this module knows nothing about damage, and what a fall costs
@@ -498,6 +526,10 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 				self.landed_at = -vy0
 			end
 			self.vy = 0
+			if bounce > 1 then
+				self.vy = bounce
+				self.on_ground = false
+			end
 		else
 			self.on_ground = false
 		end

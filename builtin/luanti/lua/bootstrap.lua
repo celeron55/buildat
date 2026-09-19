@@ -1730,6 +1730,14 @@ function core.__voxel_defs()
 			-- is thick without any game saying so.
 			move_resistance = (def and (def.move_resistance or
 					def.liquid_viscosity)) or 0,
+			-- What standing on it does to the player: the groups of the
+			-- same names, read by the client's physics ([PLAYER_PHYSICS])
+			bouncy = (def and def.groups and def.groups.bouncy) or 0,
+			slippery = (def and def.groups and def.groups.slippery) or 0,
+			disable_jump = (def and def.groups and
+					(def.groups.disable_jump or 0) > 0) or false,
+			disable_descend = (def and def.groups and
+					(def.groups.disable_descend or 0) > 0) or false,
 			light_source = (def and def.light_source) or 0,
 			tiles = is_liquid and (liquid_tiles(def) or tile_names(def)) or
 					tile_names(def),

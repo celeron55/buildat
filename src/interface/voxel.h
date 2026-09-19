@@ -260,6 +260,14 @@ namespace interface
 		// 1 and lava is 7, and a game can put it on anything. The client's
 		// physics is the only thing that reads it.
 		uint8_t move_resistance = 0;
+		// What the node stood on does to a player, Luanti's node groups of
+		// the same names ([PLAYER_PHYSICS]): the bouncy rating, the
+		// slippery rating, and whether jumping or descending is refused.
+		// The client's physics is the only reader.
+		uint8_t bouncy = 0;
+		uint8_t slippery = 0;
+		bool disable_jump = false;
+		bool disable_descend = false;
 		// Which family of connecting voxels this one belongs to, 1...32, or
 		// 0 for one nothing reaches out to; and which families this one
 		// reaches out to, as a bit per family. A fence and its gates are one

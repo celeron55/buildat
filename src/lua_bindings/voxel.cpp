@@ -695,6 +695,11 @@ void init_voxel(lua_State *L)
 			.def_readwrite("climbable", &VoxelDefinition::climbable)
 			.def_readwrite("move_resistance",
 					&VoxelDefinition::move_resistance)
+			.def_readwrite("bouncy", &VoxelDefinition::bouncy)
+			.def_readwrite("slippery", &VoxelDefinition::slippery)
+			.def_readwrite("disable_jump", &VoxelDefinition::disable_jump)
+			.def_readwrite("disable_descend",
+					&VoxelDefinition::disable_descend)
 			.def_readwrite("liquid_top", &VoxelDefinition::liquid_top)
 			.def_readwrite("connect_group", &VoxelDefinition::connect_group)
 			.def_readwrite("connect_mask", &VoxelDefinition::connect_mask)
