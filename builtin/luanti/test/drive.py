@@ -235,7 +235,7 @@ def is_tree(name):
 RECIPES_2X2 = [
     ("planks", {1: "tree"}, "wood", 16),
     ("sticks", {1: "wood", 3: "wood"}, "stick", 6),
-    ("table", {1: "wood", 2: "wood", 3: "wood", 4: "wood"}, "crafting_table", 2),
+    ("table", {1: "wood", 2: "wood", 3: "wood", 4: "wood"}, "crafting_table", 1),
 ]
 
 
@@ -348,7 +348,7 @@ def wanted_craft(s, mem=None):
     for r in RECIPES_2X2:
         if have(s, r[2], r[3], mem):
             continue
-        if r[2] == "crafting_table" and table_near(s) and have(s, r[2], 1, mem):
+        if r[2] == "crafting_table" and table_near(s):
             continue
         need = {}
         for w in r[1].values():
@@ -600,6 +600,21 @@ def rules(s, mem):
                 return "place_furnace", cmds, lambda n: any(
                     "furnace" in b["name"] for b in n.bins.values())
 
+    # Moving on with nothing more to craft at a table in view and none
+    # held: dug back into the inventory, which saves the planks of the
+    # next one (a player's tip, 2026-09-19); the pickup is the walk over
+    # it, by the item rule
+    if wanted_craft_3x3(s, mem) is None and not have(s, "crafting_table", 1, mem):
+        if s.crosshair and "crafting_table" in s.crosshair[0]:
+            was = s.crosshair
+            cmds = ["mouse_down left", "delay 2500", "mouse_up left", "delay 300"]
+            return "take_table", cmds, lambda n: n.crosshair != was
+        tables = [(x, y) for (x, y), b in s.bins.items()
+                  if "crafting_table" in b["name"] and b["d"] <= 4]
+        if tables:
+            bx, by = min(tables, key=lambda k: s.bins[k]["d"])
+            return "to_table", [look_at_bin(s, bx, by, level=False), ms(0.3)], None
+
     # A 3x3 craft wanted: at a table, its form; with a table in hand,
     # place it on the ground ahead; with one past the hotbar, fetch it
     if wanted_craft_3x3(s, mem) is not None:
@@ -835,6 +850,10 @@ done, 8 lines""".splitlines()
     assert name == "to_item" and cmds[0].startswith("look_dir 2.000 0.000 3.000"), cmds
     assert exp(parse(["self at 10,4,10 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:jungletree 3"]))
     assert not exp(it)
+    # A table in the crosshair with nothing more to craft at it is dug back
+    done = parse(["self at 0,0,0 yaw 90 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_wood 1 | 2:mcl_core:stick 6",
+                  "crosshair mcl_crafting_table:crafting_table at 1,0,0"])
+    assert rules(done, {})[0] == "take_table"
     # Ore in the crosshair with a pickaxe is dug
     ore = parse(["self at 0,0,0 yaw 0 pitch 30 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_stone 1 | 2:mcl_core:cobble 20 | 3:mcl_crafting_table:crafting_table 1 | 4:mcl_core:stick 2",
                  "crosshair mcl_core:stone_with_iron at 0,-1,1"])
@@ -850,7 +869,7 @@ done, 8 lines""".splitlines()
     assert name == "feed_furnace" and cmds.count("mouse_click left") == 4, (name, cmds)
     # With planks, sticks and a table in the hotbar a pickaxe is wanted:
     # the table is placed, then used, then its 3x3 form crafts
-    tab = parse(["self at 0,0,0 yaw 90 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 16 | 2:mcl_core:stick 6 | 3:mcl_crafting_table:crafting_table 2"])
+    tab = parse(["self at 0,0,0 yaw 90 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 16 | 2:mcl_core:stick 6 | 3:mcl_crafting_table:crafting_table 1"])
     assert wanted_craft_3x3(tab)[0] == "pick_wood"
     name, cmds, exp = rules(tab, {})
     assert name == "place_table" and cmds[0] == "keypress 3", (name, cmds)
