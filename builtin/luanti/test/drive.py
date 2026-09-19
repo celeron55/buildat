@@ -300,11 +300,53 @@ def craft_2x2(s, recipe):
     return cmds
 
 
+# Rung 2's other half, at the placed table's 3x3 grid (craft:1..9, three
+# a row): the wooden pickaxe. Then rung 3's stone pickaxe, the same shape
+# in cobble.
+RECIPES_3X3 = [
+    ("pick_wood", {1: "wood", 2: "wood", 3: "wood", 5: "stick", 8: "stick"},
+     "pick_wood", 1),
+    ("pick_stone", {1: "cobble", 2: "cobble", 3: "cobble", 5: "stick", 8: "stick"},
+     "pick_stone", 1),
+    ("furnace", {1: "cobble", 2: "cobble", 3: "cobble", 4: "cobble", 6: "cobble",
+                 7: "cobble", 8: "cobble", 9: "cobble"}, "furnace", 1),
+]
+# Rung 3's stone: enough cobble for the stone pickaxe and the furnace
+COBBLE_WANTED = 11
+
+
+def wanted_craft_3x3(s, mem=None):
+    for r in RECIPES_3X3:
+        if have(s, r[2], r[3], mem):
+            continue
+        need = {}
+        for w in r[1].values():
+            need[w] = need.get(w, 0) + 1
+        if all(have(s, w, n, mem) for w, n in need.items()):
+            return r
+    return None
+
+
+def hotbar_slot_of(s, word):
+    for i, st in s.hotbar:
+        if item_is(st, word):
+            return i
+    return None
+
+
+def table_near(s):
+    return (s.crosshair is not None and "crafting_table" in s.crosshair[0]) or \
+        any("crafting_table" in b["name"] and b["d"] <= 6 for b in s.bins.values())
+
+
 def wanted_craft(s, mem=None):
     """The lowest recipe whose product is missing and whose sources are
-    at hand in the numbers it takes, or None."""
+    at hand in the numbers it takes, or None. A placed table in view is
+    as good as one held."""
     for r in RECIPES_2X2:
         if have(s, r[2], r[3], mem):
+            continue
+        if r[2] == "crafting_table" and table_near(s):
             continue
         need = {}
         for w in r[1].values():
@@ -335,8 +377,31 @@ def rules(s, mem):
                 lambda n: n.form is None
         # The player's own inventory: a craft while there is one to do,
         # its expectation the product in a main slot on the next scan
-        if s.form == "" and any(sl[0] == "craft" for sl in s.slots):
+        craft_cells = sum(1 for sl in s.slots if sl[0] == "craft")
+        if s.form == "" and craft_cells == 4:
             r = wanted_craft(s, mem)
+            if r is not None:
+                cmds = craft_2x2(s, r)
+                if cmds is not None:
+                    return "craft_" + r[0], cmds + ["delay 300"], \
+                        lambda n, w=r[2]: have(n, w, 1, mem)
+            # A thing wanted in the hand lies past the hotbar: moved to
+            # an empty hotbar slot (a pick up and a put down)
+            for word in ("crafting_table", "pick_stone", "pick_wood"):
+                if hotbar_slot_of(s, word) is not None:
+                    continue
+                src = [sl for sl in s.slots if sl[0] == "main" and sl[1] > 9 and
+                       item_is(sl[5], word)]
+                dst = [sl for sl in s.slots if sl[0] == "main" and sl[1] <= 9 and
+                       sl[5] == ""]
+                if src and dst:
+                    cmds = click_at(src[0][2], src[0][3], src[0][4]) + \
+                        click_at(dst[0][2], dst[0][3], dst[0][4]) + ["delay 300"]
+                    return "to_hotbar_" + word, cmds, \
+                        lambda n, w=word: hotbar_slot_of(n, w) is not None
+        # The table's form: the 3x3 crafts
+        if craft_cells == 9:
+            r = wanted_craft_3x3(s, mem)
             if r is not None:
                 cmds = craft_2x2(s, r)
                 if cmds is not None:
@@ -410,6 +475,7 @@ def rules(s, mem):
         else:
             look = look_at_object(s, o)
             if look:
+                mem["last_item"] = o["id"]
                 before = sum(count_of(st) for _, st in s.hotbar)
                 walk_s = min(TURN_S, max(0.3, (o["d"] - 0.5) / 4))
                 return "to_item", [look] + walk(walk_s, jump=True), \
@@ -423,6 +489,47 @@ def rules(s, mem):
     if wanted_craft(s, mem) is not None:
         return "open_inventory", ["keypress I", ms(1.0)], \
             lambda n: n.form is not None
+    # Rung 3: stone dug with the pickaxe until there is cobble enough for
+    # the stone pickaxe and the furnace; the expectation is the crosshair
+    # off that stone
+    pick = hotbar_slot_of(s, "pick_stone") or hotbar_slot_of(s, "pick_wood")
+    if pick is not None and not have(s, "cobble", COBBLE_WANTED, mem):
+        if s.crosshair and s.crosshair[0].endswith(":stone"):
+            was = s.crosshair
+            cmds = ["keypress %d" % pick, "delay 150", "mouse_down left",
+                    "delay 2500", "mouse_up left", "delay 300"]
+            return "dig_stone", cmds, lambda n: n.crosshair != was
+        stones = [(x, y) for (x, y), b in s.bins.items()
+                  if b["name"].endswith(":stone") and b["d"] <= 4]
+        if stones:
+            bx, by = min(stones, key=lambda k: s.bins[k]["d"])
+            return "to_stone", [look_at_bin(s, bx, by, level=False), ms(0.3)], None
+
+    # A 3x3 craft wanted: at a table, its form; with a table in hand,
+    # place it on the ground ahead; with one past the hotbar, fetch it
+    if wanted_craft_3x3(s, mem) is not None:
+        if s.crosshair and "crafting_table" in s.crosshair[0]:
+            return "use_table", ["mouse_click right", ms(1.0)], \
+                lambda n: n.form is not None
+        tables = [(x, y) for (x, y), b in s.bins.items()
+                  if "crafting_table" in b["name"] and b["d"] <= 6]
+        slot = hotbar_slot_of(s, "crafting_table")
+        if tables:
+            bx, by = min(tables, key=lambda k: s.bins[k]["d"])
+            d = s.bins[(bx, by)]["d"]
+            cmds = [look_at_bin(s, bx, by, level=False)]
+            cmds += walk((d - 2.5) / 4) if d > 3.5 else [ms(0.3)]
+            return "to_table", cmds, None
+        if slot is not None:
+            yr = math.radians(s.yaw)
+            cmds = ["keypress %d" % slot, "delay 150",
+                    "look_dir %.3f -1.2 %.3f" % (math.sin(yr), math.cos(yr)),
+                    "delay 300", "mouse_click right", ms(0.8)]
+            return "place_table", cmds, lambda n: any(
+                "crafting_table" in b["name"] for b in n.bins.values())
+        if have(s, "crafting_table", 1, mem):
+            return "open_inventory", ["keypress I", ms(1.0)], \
+                lambda n: n.form is not None
 
     # a tree in view
     trees = [(x, y) for (x, y), b in s.bins.items()
@@ -431,9 +538,21 @@ def rules(s, mem):
         cmds = ["mouse_down left", "delay 4000", "mouse_up left", "delay 300"]
         was = s.crosshair
         return "dig_tree", cmds, lambda n: n.crosshair != was
+    # A trunk walked at and never reached (473 turns of it in one run: a
+    # canopy's logs overhead, a trunk across a stream) is left alone for
+    # thirty turns after six tries
+    given_up = mem.setdefault("given_up", {})
+    trees = [k for k in trees if given_up.get(s.bins[k].get("at"), -99) < turn - 30]
     if trees:
         bx, by = min(trees, key=lambda k: s.bins[k]["d"])
         d = s.bins[(bx, by)]["d"]
+        at = s.bins[(bx, by)].get("at")
+        tries = mem.setdefault("tree_tries", {})
+        tries[at] = tries.get(at, 0) + 1
+        if tries[at] > 6:
+            given_up[at] = turn
+            tries[at] = 0
+            return "leave_tree", [look_away(s)] + walk(TURN_S, jump=True), None
         cmds = [look_at_bin(s, bx, by, level=False)]
         if d > 3.5:
             cmds += walk(min(TURN_S, (d - 3) / 4))
@@ -526,6 +645,10 @@ def main():
             held = expect(s)
             if held:
                 failed_in_row = 0
+            elif expect_name == "to_item":
+                # Not a finding: an item out of reach is given up on
+                say("turn %d: the item was not reached; given up" % turn)
+                mem.setdefault("given_up", {})[mem.get("last_item")] = turn
             else:
                 failed_in_row += 1
                 say("turn %d: %s's expectation did not hold (%d in a row)" %
@@ -602,6 +725,28 @@ done, 8 lines""".splitlines()
     assert name == "to_item" and cmds[0].startswith("look_dir 2.000 0.000 3.000"), cmds
     assert exp(parse(["self at 10,4,10 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:jungletree 3"]))
     assert not exp(it)
+    # With planks, sticks and a table in the hotbar a pickaxe is wanted:
+    # the table is placed, then used, then its 3x3 form crafts
+    tab = parse(["self at 0,0,0 yaw 90 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 8 | 2:mcl_core:stick 4 | 3:mcl_crafting_table:crafting_table 1"])
+    assert wanted_craft_3x3(tab)[0] == "pick_wood"
+    name, cmds, exp = rules(tab, {})
+    assert name == "place_table" and cmds[0] == "keypress 3", (name, cmds)
+    at_table = parse(["self at 0,0,0 yaw 90 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 8 | 2:mcl_core:stick 4",
+                      "crosshair mcl_crafting_table:crafting_table at 1,0,0"])
+    assert rules(at_table, {})[0] == "use_table"
+    grid = ["self at 0,0,0 yaw 90 pitch 0 fov 72 hp ? wield \"\" hotbar 1:", "form \"main\" open",
+            "slot current_player:main:1 at 0,500 size 48x48 item \"mcl_core:junglewood 8\"",
+            "slot current_player:main:2 at 60,500 size 48x48 item \"mcl_core:stick 4\"",
+            "slot current_player:main:3 at 120,500 size 48x48 item \"\"",
+            "slot current_player:craftpreview:1 at 600,100 size 48x48 item \"\""]
+    grid += ["slot current_player:craft:%d at %d,%d size 48x48 item \"\"" % (i, 200 + (i - 1) % 3 * 60, 50 + (i - 1) // 3 * 60) for i in range(1, 10)]
+    name, cmds, exp = rules(parse(grid), {})
+    assert name == "craft_pick_wood" and cmds.count("mouse_click right") == 5, (name, cmds)
+    # With a pickaxe and stone under the crosshair, the stone is dug
+    st = parse(["self at 0,0,0 yaw 0 pitch 30 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_wood 1",
+                "crosshair mcl_core:stone at 0,-1,1"])
+    name, cmds, exp = rules(st, {})
+    assert name == "dig_stone" and cmds[0] == "keypress 1", (name, cmds)
     # A craft: a log in the hotbar wants planks; the form's slots give the
     # clicks, source, cell, source, result, empty slot
     inv = parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:jungletree 4",
@@ -609,6 +754,9 @@ done, 8 lines""".splitlines()
                  "slot current_player:main:1 at 564,832 size 72x72 item \"mcl_core:jungletree 4\"",
                  "slot current_player:main:2 at 654,832 size 72x72 item \"\"",
                  "slot current_player:craft:1 at 1014,210 size 72x72 item \"\"",
+                 "slot current_player:craft:2 at 1104,210 size 72x72 item \"\"",
+                 "slot current_player:craft:3 at 1014,300 size 72x72 item \"\"",
+                 "slot current_player:craft:4 at 1104,300 size 72x72 item \"\"",
                  "slot current_player:craftpreview:1 at 1284,255 size 72x72 item \"\""])
     assert wanted_craft(inv)[0] == "planks"
     # Two planks make sticks but not a table, which takes four

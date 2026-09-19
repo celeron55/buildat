@@ -2035,12 +2035,7 @@ end
 -- dig at all. Luanti's getDigParams(): the group that digs it fastest wins,
 -- a tool whose maxlevel is more than one above the node's level is faster
 -- still, and dig_immediate is a fixed time.
-function M.dig_time(node_name, wield_index)
-	local caps = M.dig_capabilities(wield_index)
-	local groups = node_groups[node_name]
-	if caps == nil or groups == nil then
-		return nil
-	end
+local function dig_time_with(caps, groups)
 	if not caps.groupcaps.dig_immediate then
 		local immediate = groups.dig_immediate
 		if immediate == 2 then
@@ -2067,6 +2062,33 @@ function M.dig_time(node_name, wield_index)
 		end
 	end
 	return best
+end
+
+function M.dig_time(node_name, wield_index)
+	local caps = M.dig_capabilities(wield_index)
+	local groups = node_groups[node_name]
+	if caps == nil or groups == nil then
+		return nil
+	end
+	local best = dig_time_with(caps, groups)
+	if best ~= nil then
+		return best
+	end
+	-- A tool that cannot dig this node digs it as the hand would
+	-- (Game::handleDigging: "If not diggable, try hand digging (in case
+	-- the tool is not useful)"): a wooden pickaxe on a log, which the
+	-- driver stood holding for eight seconds with nothing happening
+	local main = M.inventory.main
+	if caps_of(main and main[wield_index]) == nil then
+		return nil
+	end
+	local hand = M.inventory.hand
+	local hand_caps = caps_of(hand and hand[1]) or
+			(item_props[""] and item_props[""].caps) or nil
+	if hand_caps == nil then
+		return nil
+	end
+	return dig_time_with(hand_caps, groups)
 end
 
 -- How far the player can reach, in nodes. Luanti's getToolRange(): the
