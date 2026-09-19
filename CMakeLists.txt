@@ -118,6 +118,10 @@ if(URHO3D_HOME_ABS STREQUAL URHO3D_BUNDLED_HOME_ABS)
 	set(URHO3D_CROSS_ARGS "")
 	if(CMAKE_TOOLCHAIN_FILE)
 		list(APPEND URHO3D_CROSS_ARGS "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}")
+	else()
+		list(APPEND URHO3D_CROSS_ARGS
+			"-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
+			"-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}")
 	endif()
 	if(MINGW_PREFIX)
 		list(APPEND URHO3D_CROSS_ARGS "-DMINGW_PREFIX=${MINGW_PREFIX}")
@@ -129,10 +133,10 @@ if(URHO3D_HOME_ABS STREQUAL URHO3D_BUNDLED_HOME_ABS)
 		# library that owns the memory as much as in what calls it
 		"-DCMAKE_CXX_FLAGS=${SANITIZE_FLAGS}"
 		"-DCMAKE_C_FLAGS=${SANITIZE_FLAGS}"
-		-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
-		-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
 		# A cross build hands the engine the same toolchain file and, for
-		# Urho3D's MinGW.cmake, the tool prefix ([PACKAGING] step 3)
+		# Urho3D's MinGW.cmake, the tool prefix ([PACKAGING] step 3) --
+		# and not the compilers, which the toolchain sets and Urho3D's
+		# native-tool checks must not inherit
 		${URHO3D_CROSS_ARGS}
 		-DURHO3D_LIB_TYPE=${URHO3D_LIB_TYPE}
 		-DURHO3D_LUA=${URHO3D_LUA}
@@ -147,8 +151,19 @@ if(URHO3D_HOME_ABS STREQUAL URHO3D_BUNDLED_HOME_ABS)
 		-DURHO3D_PCH=FALSE
 		-DURHO3D_64BIT=${URHO3D_64BIT}
 	)
+	# Under Urho3D's MinGW toolchain the outer configure has exported the
+	# cross compilers into this process's environment (the toolchain's
+	# try_compile workaround), and Urho3D's own configure probes for a
+	# *native* compiler with the same environment -- and finds the cross
+	# one, which cannot link -rdynamic. Unset them for the child.
+	set(URHO3D_CONFIGURE_ENV "")
+	if(CMAKE_CROSSCOMPILING AND NOT CMAKE_HOST_WIN32)
+		set(URHO3D_CONFIGURE_ENV /usr/bin/env -i "PATH=$ENV{PATH}"
+			"HOME=$ENV{HOME}")
+	endif()
 	execute_process(
-		COMMAND ${CMAKE_COMMAND} ${URHO3D_BUNDLE_CMAKE_ARGS} "${URHO3D_HOME}"
+		COMMAND ${URHO3D_CONFIGURE_ENV}
+			${CMAKE_COMMAND} ${URHO3D_BUNDLE_CMAKE_ARGS} "${URHO3D_HOME}"
 		WORKING_DIRECTORY "${URHO3D_BUILD_DIR}"
 		RESULT_VARIABLE URHO3D_CONFIGURE_RESULT
 	)

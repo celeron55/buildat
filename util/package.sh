@@ -160,11 +160,12 @@ linux)
 windows)
 	# The cross build: Urho3D's own MinGW toolchain file, with Debian's
 	# x86_64-w64-mingw32 tools (util/docker/windows); CMAKE_TOOLCHAIN_FILE
-	# and MINGW_PREFIX in the environment override for another toolchain
+	# and MINGW_PREFIX (a path prefix, /usr/bin/x86_64-w64-mingw32) in the
+	# environment override for another toolchain
 	tc="${CMAKE_TOOLCHAIN_FILE:-$here/3rdparty/Urho3D/CMake/Toolchains/MinGW.cmake}"
 	a=$(make_one "buildat-$version-win64" -DPORTABLE=TRUE \
 		-DCMAKE_TOOLCHAIN_FILE="$tc" \
-		-DMINGW_PREFIX="${MINGW_PREFIX:-x86_64-w64-mingw32}")
+		-DMINGW_PREFIX="${MINGW_PREFIX:-/usr/bin/x86_64-w64-mingw32}")
 	echo "archive: $a (the smoke test under Wine is not here yet)"
 	;;
 *)
