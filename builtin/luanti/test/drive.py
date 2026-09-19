@@ -658,7 +658,8 @@ def rules(s, mem):
                         click_at(empty[0][2], empty[0][3], empty[0][4]) + ["delay 300"]
                     return "take_ingot", cmds, lambda n: have(n, "ingot", 1, mem)
             cmds = []
-            for lst, word in (("fuel", "coal"), ("src", "stone_with_iron")):
+            # VoxeLibre's iron ore drops raw iron, which is what smelts
+            for lst, word in (("fuel", "coal"), ("src", "raw_iron")):
                 if by[lst][5]:
                     continue
                 src = [sl for sl in s.slots if sl[0] == "main" and item_is(sl[5], word)]
@@ -800,7 +801,7 @@ def rules(s, mem):
         want = []
         if not have(s, "coal", 4, mem):
             want.append("stone_with_coal")
-        if hotbar_slot_of(s, "pick_stone") is not None and not have(s, "iron", 3, mem):
+        if hotbar_slot_of(s, "pick_stone") is not None and not have(s, "raw_iron", 3, mem):
             want.append("stone_with_iron")
         ores = [(x, y) for (x, y), b in s.bins.items()
                 if any(w in b["name"] for w in want) and b["d"] <= 10]
@@ -846,7 +847,7 @@ def rules(s, mem):
             return name, cmds, exp
         # Iron and coal to smelt, a furnace held: place it as the table is,
         # use it; the form rule feeds it
-        if have(s, "iron", 1, mem) and have(s, "coal", 1, mem) and \
+        if have(s, "raw_iron", 1, mem) and have(s, "coal", 1, mem) and \
                 not have(s, "iron_ingot", 1, mem):
             if s.crosshair and "furnace" in s.crosshair[0]:
                 return "use_furnace", ["mouse_click right", ms(1.0)], \
@@ -1230,7 +1231,7 @@ done, 8 lines""".splitlines()
     # The furnace's form is fed coal and ore
     fur = ["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:", "form \"x\" open",
            "slot current_player:main:1 at 0,500 size 48x48 item \"mcl_core:coal_lump 3\"",
-           "slot current_player:main:2 at 60,500 size 48x48 item \"mcl_core:stone_with_iron 2\"",
+           "slot current_player:main:2 at 60,500 size 48x48 item \"mcl_raw_ores:raw_iron 2\"",
            "slot nodemeta:1,2,3:src:1 at 200,50 size 48x48 item \"\"",
            "slot nodemeta:1,2,3:fuel:1 at 200,150 size 48x48 item \"\"",
            "slot nodemeta:1,2,3:dst:1 at 400,100 size 48x48 item \"\""]
