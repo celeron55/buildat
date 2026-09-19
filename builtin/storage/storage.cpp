@@ -49,22 +49,47 @@ static void check(sqlite3 *db, int rc, const char *what)
 	throw SqliteError(msg);
 }
 
-// A prepared statement that finalizes itself. Prepared once per use rather
-// than cached: these run once per key and sqlite's prepare is not the
-// expensive part of a batch.
+// A prepared statement out of the connection's cache, by the SQL's own
+// address (they are string literals): prepared once per connection and
+// reset when let go. It used to be prepared per use on the reasoning that
+// sqlite's prepare is not the expensive part of a batch, and a perf of
+// VoxeLibre's world generation put 8% of the server in sqlite's parser
+// under set() ([WORLDGEN_DRIFT], 2026-09-19). Held under the save's mutex
+// like every use of the connection, so one statement is in use at a time.
+struct StmtCache
+{
+	std::map<const char*, sqlite3_stmt*> by_sql;
+	// Before the connection closes: a statement finalized after that is
+	// an error, and one not finalized before it keeps the close from
+	// closing
+	void finalize_all()
+	{
+		for(auto &p : by_sql)
+			sqlite3_finalize(p.second);
+		by_sql.clear();
+	}
+};
 struct Stmt
 {
 	sqlite3 *db = nullptr;
 	sqlite3_stmt *stmt = nullptr;
 
-	Stmt(sqlite3 *db, const char *sql): db(db)
+	Stmt(sqlite3 *db, StmtCache &cache, const char *sql): db(db)
 	{
+		auto it = cache.by_sql.find(sql);
+		if(it != cache.by_sql.end()){
+			stmt = it->second;
+			return;
+		}
 		check(db, sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr), sql);
+		cache.by_sql[sql] = stmt;
 	}
 	~Stmt()
 	{
-		if(stmt)
-			sqlite3_finalize(stmt);
+		if(stmt){
+			sqlite3_reset(stmt);
+			sqlite3_clear_bindings(stmt);
+		}
 	}
 	void bind(int i, const ss_ &v)
 	{
@@ -124,6 +149,8 @@ struct CSave: public Save
 	// batch()'s callback calls set() on the same store.
 	interface::Mutex m_mutex;
 	std::map<ss_, up_<CStore>> m_stores;
+	// The prepared statements, finalized before the connection closes
+	StmtCache m_stmts;
 
 	// in_memory is for the self-check: everything above the sqlite calls is
 	// the same, and nothing is left on anyone's disk.
@@ -170,6 +197,7 @@ struct CSave: public Save
 	~CSave()
 	{
 		m_stores.clear();
+		m_stmts.finalize_all();
 		if(m_db){
 			// Leaves one file instead of three, and is a no-op if anything
 			// else still has the database open
@@ -207,7 +235,7 @@ struct CSave: public Save
 bool CStore::get(const ss_ &key, ss_ &value_out)
 {
 	interface::MutexScope ms(m_save->m_mutex);
-	Stmt st(m_save->m_db,
+	Stmt st(m_save->m_db, m_save->m_stmts,
 			"SELECT value FROM store WHERE store=? AND key=?");
 	st.bind_text(1, m_name);
 	st.bind_text(2, key);
@@ -220,7 +248,7 @@ bool CStore::get(const ss_ &key, ss_ &value_out)
 void CStore::set(const ss_ &key, const ss_ &value)
 {
 	interface::MutexScope ms(m_save->m_mutex);
-	Stmt st(m_save->m_db,
+	Stmt st(m_save->m_db, m_save->m_stmts,
 			"INSERT INTO store (store, key, value) VALUES (?, ?, ?)"
 			" ON CONFLICT(store, key) DO UPDATE SET value=excluded.value");
 	st.bind_text(1, m_name);
@@ -232,7 +260,7 @@ void CStore::set(const ss_ &key, const ss_ &value)
 void CStore::remove(const ss_ &key)
 {
 	interface::MutexScope ms(m_save->m_mutex);
-	Stmt st(m_save->m_db, "DELETE FROM store WHERE store=? AND key=?");
+	Stmt st(m_save->m_db, m_save->m_stmts, "DELETE FROM store WHERE store=? AND key=?");
 	st.bind_text(1, m_name);
 	st.bind_text(2, key);
 	st.step();
@@ -245,7 +273,7 @@ sv_<ss_> CStore::list(const ss_ &prefix)
 	// can seek to, and it does not have to care what LIKE thinks % means
 	sv_<ss_> result;
 	if(prefix.empty()){
-		Stmt st(m_save->m_db,
+		Stmt st(m_save->m_db, m_save->m_stmts,
 				"SELECT key FROM store WHERE store=? ORDER BY key");
 		st.bind_text(1, m_name);
 		while(st.step())
@@ -259,7 +287,7 @@ sv_<ss_> CStore::list(const ss_ &prefix)
 	if(i == 0){
 		// Every byte is 0xff, so there is no next string; fall back to a
 		// scan of the store
-		Stmt st(m_save->m_db,
+		Stmt st(m_save->m_db, m_save->m_stmts,
 				"SELECT key FROM store WHERE store=? ORDER BY key");
 		st.bind_text(1, m_name);
 		while(st.step()){
@@ -271,7 +299,7 @@ sv_<ss_> CStore::list(const ss_ &prefix)
 	}
 	upper.resize(i);
 	upper[i-1] = (char)((unsigned char)upper[i-1] + 1);
-	Stmt st(m_save->m_db,
+	Stmt st(m_save->m_db, m_save->m_stmts,
 			"SELECT key FROM store WHERE store=? AND key>=? AND key<?"
 			" ORDER BY key");
 	st.bind_text(1, m_name);
