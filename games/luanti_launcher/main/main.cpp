@@ -471,12 +471,46 @@ struct Module: public interface::Module
 		show_world_to(event.recipient);
 	}
 
+	// One key of what an untrusted launcher asked for, through the server's
+	// -u ([LAUNCH_GRID]): read as a packet would be -- a value of the shape
+	// a directory name has, or "" with a warning. The lines are key=value.
+	ss_ launch_param(const ss_ &key_name)
+	{
+		const ss_ u = m_server->get_config().get<ss_>("untrusted_launch");
+		const ss_ key = key_name + "=";
+		size_t at = u.find(key);
+		if(at == ss_::npos || !(at == 0 || u[at - 1] == '\n'))
+			return "";
+		ss_ v = u.substr(at + key.size());
+		v = v.substr(0, v.find('\n'));
+		bool ok = !v.empty() && v.size() <= 64;
+		for(char c : v)
+			if(!(isalnum((unsigned char)c) || c == '_' || c == '-'))
+				ok = false;
+		if(!ok){
+			log_w(MODULE, "untrusted_launch: %s refused", cs(key_name));
+			return "";
+		}
+		return v;
+	}
+
 	// The two lists the menu is: every save this game has, with the Luanti
 	// game each one says it needs, and every Luanti game there is to choose
 	// from. Flat, with the number of saves leading, because that is what one
 	// array of strings can carry.
 	void on_get_saves(const network::Packet &packet)
 	{
+		// A launch that asked for one of the menu's screens -- import_game,
+		// import_world -- says so before the lists, and the client opens
+		// that screen over them ([LAUNCH_GRID])
+		{
+			ss_ menu = launch_param("menu");
+			if(menu != ""){
+				network::access(m_server, [&](network::Interface *inetwork){
+					inetwork->send(packet.sender, "main:menu", menu);
+				});
+			}
+		}
 		sv_<ss_> flat;
 		sv_<ss_> saves;
 		storage::access(m_server, [&](storage::Interface *istorage){
@@ -1174,24 +1208,7 @@ struct Module: public interface::Module
 		// -u ([LAUNCH_GRID]): read as a packet would be -- the one key this
 		// takes, a game name of the shape a directory name has, and the
 		// rest ignored. The environment, the shell's and the runners', wins.
-		ss_ launched_game;
-		{
-			const ss_ u = m_server->get_config().get<ss_>("untrusted_launch");
-			const ss_ key = "luanti_game=";
-			size_t at = u.find(key);
-			if(at != ss_::npos && (at == 0 || u[at - 1] == '\n')){
-				ss_ v = u.substr(at + key.size());
-				v = v.substr(0, v.find('\n'));
-				bool ok = !v.empty() && v.size() <= 64;
-				for(char c : v)
-					if(!(isalnum((unsigned char)c) || c == '_' || c == '-'))
-						ok = false;
-				if(ok)
-					launched_game = v;
-				else
-					log_w(MODULE, "untrusted_launch: luanti_game refused");
-			}
-		}
+		ss_ launched_game = launch_param("luanti_game");
 		if(!(wanted_game && wanted_game[0]) && !launched_game.empty())
 			wanted_game = launched_game.c_str();
 		if(wanted_game && wanted_game[0]){

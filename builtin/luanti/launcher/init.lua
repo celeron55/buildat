@@ -24,5 +24,19 @@ return function(ctx)
 			}
 		end
 	end
+	-- And the two ways in: the launcher game's own import screens, whose
+	-- lists are the server's, so the game opens them on a menu= param
+	out[#out + 1] = {id = "import_game", label = "Import a game",
+		icon = "luanti.png", order = 190,
+		description = "Copy a game from a Luanti installation",
+		run = function()
+			ctx.launch{game = "luanti_launcher", params = {menu = "import_game"}}
+		end}
+	out[#out + 1] = {id = "import_world", label = "Import a world",
+		icon = "luanti.png", order = 191,
+		description = "Copy a world from a Luanti installation",
+		run = function()
+			ctx.launch{game = "luanti_launcher", params = {menu = "import_world"}}
+		end}
 	return out
 end

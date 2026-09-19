@@ -34,6 +34,12 @@ local import_games, import_worlds = {}, {}
 -- Which of the two import lists the next main:imports is for, and which page
 -- of it is on the screen
 local want_imports = nil
+-- The screen a launch asked for, from the server's main:menu, until the
+-- save list has opened it
+local menu_wanted = nil
+buildat.sub_packet("main:menu", function(data)
+	menu_wanted = data
+end)
 local import_page = 1
 
 -- What is typed into each list's filter box, kept across the redraws a page
@@ -227,6 +233,16 @@ function draw(saves, save_games)
 	end)
 
 	magic.input:SetMouseVisible(true)
+
+	-- A launch that asked for an import screen goes straight to it, once
+	-- the save list it comes back to is drawn ([LAUNCH_GRID])
+	if menu_wanted == "import_game" then
+		menu_wanted = nil
+		ask_for_imports("games")
+	elseif menu_wanted == "import_world" then
+		menu_wanted = nil
+		ask_for_imports("worlds")
+	end
 end
 
 -- How big it is, the way buildat's own game menu says it: see
