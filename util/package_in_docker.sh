@@ -45,6 +45,10 @@ docker run --rm -i \
 			util/package.sh $target || status=\$?
 		fi
 		cp Build/package/out/* /out/ 2>/dev/null || true
+		# And the build trees' logs, for reading a failure from outside
+		mkdir -p /out/logs && for d in Build/package/build-*; do
+			b=\$(basename \$d); cp \$d/cmake.log /out/logs/\$b.cmake.log 2>/dev/null
+			cp \$d/build.log /out/logs/\$b.build.log 2>/dev/null; done; true
 		# And the smoke test's leavings, for reading a failure from outside
 		mkdir -p /out/smoke && cp /tmp/tmp.*/shot.png /tmp/tmp.*/*.log /out/smoke/ 2>/dev/null || true
 		exit \$status
