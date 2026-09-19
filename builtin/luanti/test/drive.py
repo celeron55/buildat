@@ -640,17 +640,19 @@ def rules(s, mem):
             cmds += ["look_dir %.3f -0.3 %.3f" % (fx, fz)] + walk(0.5) + ["delay 400"]
             return "toward_ore", cmds, None
         # No ore in view and some wanted: mined for. The staircase down to
-        # where coal and iron are common, then a tunnel on the same
-        # heading at that depth, two nodes high, the floor flat, so the
-        # walls show ore and the way back is a walk (user: a traversable
-        # space). The expectation is the feet moved.
+        # where the ore is -- VoxeLibre's iron is dense at y -62..-23 and
+        # none above y 1, coal up to -12 (mcl_mapgen_core/ores.lua) -- so
+        # to y -30 or so, then a tunnel on the same heading at that depth,
+        # two nodes high, the floor flat, so the walls show ore and the
+        # way back is a walk (user: a traversable space). The expectation
+        # is the feet moved.
         if want and mem.get("no_dig_stair_until", 0) <= turn and \
                 wanted_craft_3x3(s, mem) is None:
             if "stair_yaw" not in mem:
                 mem["stair_yaw"] = s.yaw
             yr = math.radians(mem["stair_yaw"])
             fx, fz = math.sin(yr), math.cos(yr)
-            deep = s.pos[1] <= -12
+            deep = s.pos[1] <= -30
             p0 = s.pos
             cmds = ["keypress %d" % pick, "delay 150"]
             for dy in ((0.0, -1.0) if deep else (0.0, -1.0, -2.0)):
@@ -967,7 +969,7 @@ done, 8 lines""".splitlines()
                   "crosshair mcl_crafting_table:crafting_table at 1,0,0"])
     assert rules(done, {})[0] == "take_table"
     # With a stone pickaxe and no ore in view the driver mines for it
-    mine = parse(["self at 0,-20,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_stone 1 | 2:mcl_core:cobble 20 | 3:mcl_crafting_table:crafting_table 1 | 4:mcl_core:stick 2 | 5:mcl_furnaces:furnace 1"])
+    mine = parse(["self at 0,-35,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_stone 1 | 2:mcl_core:cobble 20 | 3:mcl_crafting_table:crafting_table 1 | 4:mcl_core:stick 2 | 5:mcl_furnaces:furnace 1"])
     name, cmds, exp = rules(mine, {})
     assert name == "mine" and cmds.count("mouse_down left") == 2, (name, cmds)
     # Ore in the crosshair with a pickaxe is dug
