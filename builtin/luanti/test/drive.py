@@ -586,7 +586,11 @@ def rules(s, mem):
             for dy in (0.0, -1.0, -2.0):
                 cmds += ["look_dir %.3f %.3f %.3f" % (fx, dy, fz), "delay 250",
                          "mouse_down left", "delay 1500", "mouse_up left", "delay 200"]
-            cmds += ["look_dir %.3f -0.3 %.3f" % (fx, fz)] + walk(0.5) + ["delay 400"]
+            # Then walked up to the dug step, a whole second: a shorter walk
+            # left the player a node behind it, and the next turn's rays
+            # went past the step to the floor beyond, so the tunnel ran
+            # level at y 8 for good (2026-09-20)
+            cmds += ["look_dir %.3f -0.3 %.3f" % (fx, fz)] + walk(1.0) + ["delay 400"]
             return "dig_stair", cmds, lambda n: n.pos[1] < y0 - 0.5
 
     # Moving on with nothing more to craft at a table in view and none
@@ -637,7 +641,11 @@ def rules(s, mem):
             for ddy in (0.0, -1.0):
                 cmds += ["look_dir %.3f %.3f %.3f" % (fx, ddy, fz), "delay 250",
                          "mouse_down left", "delay 1500", "mouse_up left", "delay 200"]
-            cmds += ["look_dir %.3f -0.3 %.3f" % (fx, fz)] + walk(0.5) + ["delay 400"]
+            # Then walked up to the dug step, a whole second: a shorter walk
+            # left the player a node behind it, and the next turn's rays
+            # went past the step to the floor beyond, so the tunnel ran
+            # level at y 8 for good (2026-09-20)
+            cmds += ["look_dir %.3f -0.3 %.3f" % (fx, fz)] + walk(1.0) + ["delay 400"]
             return "toward_ore", cmds, None
         # No ore in view and some wanted: mined for. The staircase down to
         # where the ore is -- VoxeLibre's iron is dense at y -62..-23 and
@@ -658,7 +666,11 @@ def rules(s, mem):
             for dy in ((0.0, -1.0) if deep else (0.0, -1.0, -2.0)):
                 cmds += ["look_dir %.3f %.3f %.3f" % (fx, dy, fz), "delay 250",
                          "mouse_down left", "delay 1500", "mouse_up left", "delay 200"]
-            cmds += ["look_dir %.3f -0.3 %.3f" % (fx, fz)] + walk(0.5) + ["delay 400"]
+            # Then walked up to the dug step, a whole second: a shorter walk
+            # left the player a node behind it, and the next turn's rays
+            # went past the step to the floor beyond, so the tunnel ran
+            # level at y 8 for good (2026-09-20)
+            cmds += ["look_dir %.3f -0.3 %.3f" % (fx, fz)] + walk(1.0) + ["delay 400"]
             return "mine", cmds, lambda n, p=p0: math.dist(n.pos, p) > 0.5
         # Iron and coal to smelt, a furnace held: place it as the table is,
         # use it; the form rule feeds it
