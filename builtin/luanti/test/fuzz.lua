@@ -38,6 +38,18 @@ local said_no_trees = false
 -- How many seconds each nearby section has been loaded and ungenerated
 local ungenerated_for = {}
 
+-- Every hit point lost, with its reason: seed 1's rerun drowned twelve
+-- times, 20 to 2 inside a second, which no interval in the module adds
+-- up to; the line says what did it (2026-09-19)
+core.register_on_player_hpchange(function(player, change, reason)
+	if change < 0 then
+		core.log("action", string.format("fuzz: hp %d %+d %s%s%s",
+				player:get_hp(), change, tostring(reason.type),
+				reason.node and (" " .. reason.node) or "",
+				reason.from and (" from " .. tostring(reason.from)) or ""))
+	end
+end, false)
+
 -- Only the player's own digs, and only of nodes that drop something by
 -- hand: mapgen mods dig with no digger (the count was 119 with the
 -- player's share 7 on seed 8), and a fern dug by hand drops nothing
