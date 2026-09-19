@@ -12,7 +12,11 @@
 # invariants are the fixture's (fuzz.lua), which runs on the server the
 # same as under fuzz.sh.
 #
-#   drive.py <cli.log> <fifo> <minutes> <out dir> [seed]
+#   drive.py <cli.log> <fifo> <minutes> <out dir> [seed] [goal rung]
+#
+# A run has a goal ([DRIVE_GOAL]): the rung whose product ends it, the
+# minutes a ceiling. Met, it writes "drive: GOAL <rung> met at turn N,
+# t=S" and quits; the minutes running out first is "GOAL <rung> not met".
 #
 # Python 3, nothing else. Every turn's rule and every failed expectation
 # is a `drive:` line on stdout, which drive.sh keeps beside the logs.
@@ -635,7 +639,8 @@ def rules(s, mem):
     if wanted_craft_3x3(s, mem) is None and not have(s, "crafting_table", 1, mem):
         if s.crosshair and "crafting_table" in s.crosshair[0]:
             was = s.crosshair
-            cmds = ["mouse_down left", "delay 2500", "mouse_up left", "delay 300"]
+            # A table is hardness 2.5, near four seconds by hand
+            cmds = ["mouse_down left", "delay 5000", "mouse_up left", "delay 300"]
             return "take_table", cmds, lambda n: n.crosshair != was
         tables = [(x, y) for (x, y), b in s.bins.items()
                   if "crafting_table" in b["name"] and b["d"] <= 4]
@@ -758,11 +763,23 @@ def rules(s, mem):
     return "explore", [look_at_bin(s, bx, by)] + walk(TURN_S, jump=rng.random() < 0.3), None
 
 
+# What each rung's product is, the ladder's own predicate ([DRIVE_STORY])
+GOALS = {
+    1: lambda s, mem: have(s, "tree", 1, mem),
+    2: lambda s, mem: have(s, "pick_wood", 1, mem),
+    3: lambda s, mem: have(s, "pick_stone", 1, mem) and have(s, "furnace", 1, mem),
+    4: lambda s, mem: have(s, "ingot", 1, mem),
+}
+
+
 def main():
     global log, fifo, out, turn
     log, fifo_path, minutes, out = sys.argv[1], sys.argv[2], float(sys.argv[3]), sys.argv[4]
     if len(sys.argv) > 5:
         rng.seed(int(sys.argv[5]))
+    goal = int(sys.argv[6]) if len(sys.argv) > 6 else max(GOALS)
+    goal = max(1, min(goal, max(GOALS)))
+    t0 = time.time()
     fifo = open(fifo_path, "w")
     mem = {}
     expect = None
@@ -822,6 +839,11 @@ def main():
             say("turn %d: no self line; waiting" % turn)
             time.sleep(1)
             continue
+        if any(sl[0] == "main" for sl in s.slots):
+            mem["main"] = [(sl[1], sl[5]) for sl in s.slots if sl[0] == "main"]
+        if GOALS[goal](s, mem):
+            say("GOAL %d met at turn %d, t=%d" % (goal, turn, time.time() - t0))
+            break
         name, cmds, expect = rules(s, mem)
         expect_name = name
         if cmds is None:
@@ -840,6 +862,8 @@ def main():
         # the next scan sees their result
         total = sum(int(c.split()[1]) for c in cmds if c.startswith("delay")) / 1000
         time.sleep(total + 0.2)
+    else:
+        say("GOAL %d not met in %d turns" % (goal, turn))
     write("delay 500", "quit")
     fifo.close()
 

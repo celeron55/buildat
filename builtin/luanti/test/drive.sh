@@ -5,7 +5,11 @@
 # plus drive.py's own FAILED lines (a rule's expectation failed twice, a
 # form that would not close, three unstickings in a row).
 #
-#   SEED=3 MINUTES=5 GAME=mineclone2 builtin/luanti/test/drive.sh
+#   SEED=3 MINUTES=10 GOAL=3 GAME=mineclone2 builtin/luanti/test/drive.sh
+#
+# GOAL=<rung> is what the run is for and ends it ([DRIVE_GOAL]); MINUTES
+# is the ceiling. The goal line is the pass; the minutes running out
+# first is the stop to sort.
 #
 # Lands under local/drive/<seed>/: both logs, drive.log (a line per turn
 # naming the rule that fired), a screenshot every tenth turn beside the
@@ -15,8 +19,9 @@ set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 SEED="${SEED:-1}"
-MINUTES="${MINUTES:-3}"
+MINUTES="${MINUTES:-10}"
 GAME="${GAME:-mineclone2}"
+GOAL="${GOAL:-}"
 out="$here/local/drive/$SEED"
 mkdir -p "$out"
 save="buildat_test_drive_$SEED"
@@ -59,7 +64,7 @@ exec 3> "$fifo"
 # the fuzz walk
 echo "delay 40000" >&3
 sleep 40
-python3 "$me/drive.py" "$out/cli.log" "$fifo" "$MINUTES" "$out" "$SEED" \
+python3 "$me/drive.py" "$out/cli.log" "$fifo" "$MINUTES" "$out" "$SEED" $GOAL \
 	> "$out/drive.log" 2>&1 &
 drv=$!
 
@@ -84,6 +89,8 @@ for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 . "$me/verdict.sh"
 grep "^drive: FAILED" "$out/drive.log" | sed 's/^drive: /FAIL: drive: /' >&2
 grep -q "^drive: FAILED" "$out/drive.log" && status=1
+grep "^drive: GOAL" "$out/drive.log" | sed 's/^drive: //'
+grep -q "^drive: GOAL .* not met" "$out/drive.log" && status=1
 echo "turns: $(grep -c "^drive: turn .* rule" "$out/drive.log"), rules: $(
 	grep -o "rule [a-z_]*" "$out/drive.log" | sort | uniq -c | sort -rn |
 	awk '{printf "%s %s, ", $3, $1}' | sed 's/, $//')"

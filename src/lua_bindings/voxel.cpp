@@ -455,6 +455,19 @@ static uint32_t vreg_id_of(VoxelRegistry &reg, const interface::VoxelInstance &v
 	return reg.get_format().id_of(v.data);
 }
 
+// The two light nibbles of a voxel, 0..15 each, under the format: what the
+// held item is lit by is the light where the player stands ([WIELD_MESH])
+static uint32_t vreg_light_sky_of(VoxelRegistry &reg, const interface::VoxelInstance &v)
+{
+	const interface::VoxelFormat &f = reg.get_format();
+	return f.light_sky.bound() ? f.light_sky.get(v.data) : 15;
+}
+static uint32_t vreg_light_lamp_of(VoxelRegistry &reg, const interface::VoxelInstance &v)
+{
+	const interface::VoxelFormat &f = reg.get_format();
+	return f.light_lamp.bound() ? f.light_lamp.get(v.data) : 0;
+}
+
 // By value rather than through VoxelRegistry::get()'s const reference, which
 // luabind will not bind a Lua number to: a number is a temporary and there
 // is nothing for the reference to point at
@@ -730,6 +743,8 @@ void init_voxel(lua_State *L)
 			.def("set_look_rules", &vreg_set_look_rules)
 			.def("dump_format", &vreg_dump_format)
 			.def("id_of", &vreg_id_of)
+			.def("light_sky_of", &vreg_light_sky_of)
+			.def("light_lamp_of", &vreg_light_lamp_of)
 		,
 		def("__buildat_createVoxelRegistry", &createVoxelRegistry)
 	];

@@ -1644,6 +1644,21 @@ local function update_sky(dt)
 	-- the extension's amount would leave it invisible.
 	local k = 0.28 + 0.72 *
 			math.min(1, up + moon_up * MOON_BRIGHTNESS / SUN_BRIGHTNESS)
+	-- By the light where the player stands ([WIELD_MESH] 3, Luanti's
+	-- light_color): the eye voxel's skylight nibble takes the day's
+	-- amount, the lamp nibble stands on its own, and the brighter wins --
+	-- so a cave darkens the hand and a torch lights it. The nibbles are
+	-- the flood's, 0..15; the floor is the same as before so the item is
+	-- never gone.
+	local cp = camera_node.worldPosition
+	local eye = voxelworld.get_static_voxel(buildat.Vector3(
+			math.floor(cp.x + 0.5), math.floor(cp.y + 0.5), math.floor(cp.z + 0.5)))
+	if eye ~= nil then
+		local reg = voxelworld.get_voxel_registry()
+		local sky = reg:light_sky_of(eye) / 15
+		local lamp = reg:light_lamp_of(eye) / 15
+		k = 0.28 + 0.72 * math.max(sky * (k - 0.28) / 0.72, lamp)
+	end
 	wield_material:SetShaderParameter("MatDiffColor",
 			magic.Color(k, k, k, 1.0))
 end
