@@ -20,6 +20,9 @@ import bpy
 
 OUT = os.environ.get("BUILDAT_PATHTRACE_OUT",
 		os.path.abspath("local/reference_shots/pathtrace"))
+# The dumps are read from IN, which is OUT unless a ladder of options is
+# being rendered out of one set of dumps into directories of its own
+IN = os.environ.get("BUILDAT_PATHTRACE_IN", OUT)
 FOV = 72.0
 SAMPLES = int(os.environ.get("SAMPLES", "32"))
 RES = (1280, 720)
@@ -165,6 +168,15 @@ def hours_of_view():
 # measurable.
 MOON_IRRADIANCE = 0.0025
 MOON_COLOR = (1.0, 0.86, 0.70)
+# [NIGHT_LIGHT]'s two knobs, as environment for a ladder and as the
+# defaults once the user has picked: the moon's factor over the physical
+# value above, and a uniform night sky of that radiance (sRGB-linear,
+# blue-ish) added to the Nishita sky, which gives none with the sun down.
+MOON_FACTOR = float(os.environ.get("MOON_FACTOR", "1"))
+NIGHT_SKY = float(os.environ.get("NIGHT_SKY", "0"))
+NIGHT_SKY_COLOR = (0.6, 0.75, 1.0)
+# HOURS_ONLY=0200,2030 renders only those hours of each viewpoint
+HOURS_ONLY = [h for h in os.environ.get("HOURS_ONLY", "").split(",") if h]
 
 
 def sun_from_hour(hour):
@@ -211,13 +223,24 @@ def setup_world(hour):
 	el, rot = sun_from_hour(hour)
 	sky.sun_elevation = el
 	sky.sun_rotation = rot
-	nt.links.new(sky.outputs["Color"], bg.inputs["Color"])
+	if el < 0 and NIGHT_SKY > 0:
+		# The night sky's diffuse light on top of Nishita's nothing
+		add = nt.nodes.new("ShaderNodeMixRGB")
+		add.blend_type = "ADD"
+		add.inputs["Fac"].default_value = 1.0
+		add.inputs["Color2"].default_value = (
+				NIGHT_SKY_COLOR[0] * NIGHT_SKY, NIGHT_SKY_COLOR[1] * NIGHT_SKY,
+				NIGHT_SKY_COLOR[2] * NIGHT_SKY, 1.0)
+		nt.links.new(sky.outputs["Color"], add.inputs["Color1"])
+		nt.links.new(add.outputs["Color"], bg.inputs["Color"])
+	else:
+		nt.links.new(sky.outputs["Color"], bg.inputs["Color"])
 	nt.links.new(bg.outputs["Background"], out.inputs["Surface"])
 	bg.inputs["Strength"].default_value = 1.0
 	# The moon, when the sun is down: opposite the sun, as a lamp
 	if el < 0:
 		lamp = bpy.data.lights.new("moon", "SUN")
-		lamp.energy = MOON_IRRADIANCE
+		lamp.energy = MOON_IRRADIANCE * MOON_FACTOR
 		lamp.color = MOON_COLOR
 		lamp.angle = math.radians(0.5)
 		ob = bpy.data.objects.new("moon", lamp)
@@ -552,7 +575,7 @@ def main():
 	scene.render.image_settings.color_depth = "32"
 	scene.render.image_settings.exr_codec = "ZIP"
 
-	objs = sorted(n for n in os.listdir(OUT)
+	objs = sorted(n for n in os.listdir(IN)
 			if "_vp" in n and (n.endswith(".obj") or n.endswith(".obj.gz")))
 	# Prefer .gz when both exist
 	seen = set()
@@ -569,12 +592,12 @@ def main():
 			picked.append(raw)
 		seen.add(stem)
 	if not picked:
-		print("no dumps in", OUT, file=sys.stderr)
+		print("no dumps in", IN, file=sys.stderr)
 		sys.exit(1)
 	for name in picked:
 		if ONLY and ONLY not in name:
 			continue
-		obj_path = os.path.join(OUT, name)
+		obj_path = os.path.join(IN, name)
 		print("load", name)
 		pos, dire, co, tint, uv, blocks = load_dump(obj_path)
 		if not pos or not dire:
@@ -583,7 +606,7 @@ def main():
 		clear_scene()
 		stem = name[:-7] if name.endswith(".obj.gz") else name[:-4]
 		LAMPS.clear()
-		LAMPS.update(lit_segments(os.path.join(OUT, stem + "_atlas.json")))
+		LAMPS.update(lit_segments(os.path.join(IN, stem + "_atlas.json")))
 		if LAMPS:
 			print("lamps:", {k: len(v) for k, v in LAMPS.items()})
 		# <seed>_vp<N>_<hhmm>_<weather>: the viewpoint picks the hours,
@@ -591,8 +614,10 @@ def main():
 		parts = stem.split("_")
 		view = int(parts[1][2:])
 		hours = hours_of_view().get(view) or [parts[2]]
+		if HOURS_ONLY:
+			hours = [h for h in hours if h in HOURS_ONLY]
 		# The usemtl names are meshdump_texN.png, one set beside the dumps
-		build_world(scene, co, tint, uv, blocks, OUT)
+		build_world(scene, co, tint, uv, blocks, IN)
 		del co, tint, uv
 		scene.camera = add_camera(pos, dire)
 		for hour in hours:
