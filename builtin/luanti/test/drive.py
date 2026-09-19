@@ -317,11 +317,13 @@ def dig_one(s, mem, targets, pick, name):
     aside = mem.setdefault("aside", {})
     aimed = mem.get("aimed")
     mem["aimed"] = None
-    # A plant in the player's own node -- a fern the player stands in --
-    # is what every ray meets first, so nothing else can be pointed
-    # until it is gone: dug, a short hold
-    f = feet_node(s)
-    if s.crosshair is not None and tuple(s.crosshair[1:4]) in (f, (f[0], f[1] + 1, f[2])):
+    # A plant in the way -- tall grass or a fern the player stands in or
+    # beside -- is what the ray meets first (a plant is pointed though it
+    # is walked through), so nothing behind it can be pointed until it is
+    # gone: dug, a short hold, the aim kept (the player stood in tall
+    # grass a whole run without walking through or digging it)
+    if s.crosshair is not None and not solid_name(s.crosshair[0]) and \
+            (aimed is None or tuple(s.crosshair[1:4]) != aimed):
         mem["aimed"] = aimed
         return name + "_clear", ["mouse_down left", "delay 700", "mouse_up left",
                                  "delay 250"], None
