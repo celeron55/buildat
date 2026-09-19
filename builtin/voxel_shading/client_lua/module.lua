@@ -276,6 +276,7 @@ local sky_tint_amount = 0.0
 local bounce_light = magic.Vector3(0, 0, 0)
 -- What a lamp at full reads as on the packed path, in the ambient's units;
 -- see M.set_lamp_light(). Unset (nil) is the plain path's white.
+local translucency_gain = 1.0
 local lamp_light = magic.Vector3(1, 1, 1)
 -- And the ground's radiance, for the lower hemisphere; see M.set_ground_light()
 local ground_light = magic.Vector3(0, 0, 0)
@@ -667,6 +668,7 @@ local function push_sky_vis()
 				command:SetShaderParameter("BounceLight", bounce_light)
 				command:SetShaderParameter("GroundLight", ground_light)
 				command:SetShaderParameter("LampLight", lamp_light)
+				command:SetShaderParameter("TranslucencyGain", translucency_gain)
 			end
 		end
 		return
@@ -679,6 +681,7 @@ local function push_sky_vis()
 	render_path:SetShaderParameter("BounceLight", bounce_light)
 	render_path:SetShaderParameter("GroundLight", ground_light)
 	render_path:SetShaderParameter("LampLight", lamp_light)
+	render_path:SetShaderParameter("TranslucencyGain", translucency_gain)
 end
 
 -- How much of the sky is visible overhead: 1 out in the open, towards 0
@@ -722,6 +725,14 @@ end
 -- mesher's lamp nibble is display white at full, which under a night
 -- sky of 0.00005 and the meter drew a far ridge's lamp-lit snow white
 -- ([PBR_FIT], [LOD_LIGHT]'s finding). The plain path keeps white.
+-- The transmitted light's level through a translucent surface, over
+-- Lambert through the leaf's colour squared ([PBR_FIT] 3b); the launcher
+-- sets it from the fit, BUILDAT_LUANTI_TRANSLUCENCY overrides
+function M.set_translucency_gain(k)
+	translucency_gain = math.max(0, k)
+	declare_countdown = 0
+end
+
 function M.set_lamp_light(r, g, b)
 	lamp_light = magic.Vector3(math.max(0, r), math.max(0, g), math.max(0, b))
 	declare_countdown = 0

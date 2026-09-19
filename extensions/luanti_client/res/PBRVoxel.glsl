@@ -122,6 +122,9 @@ uniform vec3 cBounceLight;
 // radiance. Set by voxel_shading.set_lamp_light(); the plain path's vertex
 // rgb is already the light and does not read this.
 uniform vec3 cLampLight;
+// The transmitted light's level ([PBR_FIT] 3b); 1.0 is Lambert through
+// the leaf's colour squared
+uniform float cTranslucencyGain;
 // And the ground: what the lower hemisphere of a face outdoors sees, the
 // radiance of sunlit and sky-lit ground, which a vertical face gets half
 // of and a ceiling all of. In the ambient's units, set by the client from
@@ -827,10 +830,14 @@ void PS()
             // BSDF is; mixed toward white the back-lit face read six times
             // the render's over the front-lit one, since the leaf's green is
             // a twentieth and white is not.
+            // Tinted by the albedo once, as the render's Translucent BSDF
+            // is: its back-lit canopy's g/r of 3 is the leaf's own, which a
+            // squared tint would make 9 ([PBR_FIT] 3b, 2026-09-19).
+            // cTranslucencyGain is what the fit sets the level with.
             float backNdl = max(0.0, -dot(normal, lightVec));
             float t = surfaceSrc.b;
             finalColor.rgb = finalColor.rgb * (1.0 - t) +
-                t * diffColor.rgb * lightColor * backNdl / M_PI;
+                t * cTranslucencyGain * diffColor.rgb * lightColor * backNdl / M_PI;
         #endif
 
         #ifdef AMBIENT

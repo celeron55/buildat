@@ -110,6 +110,9 @@ rawset(_G, "REFSET", {
 		{view = 5, hour = "0200", weather = "none"},
 		{view = 3, hour = "0545", weather = "none"},
 		{view = 2, hour = "0545", weather = "none"},
+		-- and the translucency's: canopy_dawn is vp4 05:45 ([PBR_FIT] 3b;
+		-- it read a stale picture for a day without this)
+		{view = 4, hour = "0545", weather = "none"},
 		-- and the lamp's ([LAMP_REF])
 		{view = 8, hour = "1300", weather = "none"},
 	},
