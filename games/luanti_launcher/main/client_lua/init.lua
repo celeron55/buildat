@@ -1802,6 +1802,12 @@ local player = player_physics.new(node_stops, node_is_liquid,
 -- so speed boots, low gravity and a jump curse are these numbers arriving.
 luanti.sub_physics(function(p)
 	player.override = p
+	-- Old move is not supported (decided 2026-09-19, [PLAYER_PHYSICS]):
+	-- a game that asks for it gets new move and this line
+	if p.new_move == 0 then
+		log:warning("physics_override new_move = false asked; " ..
+				"this client only has new move")
+	end
 end)
 
 -- And what it has done to the view: set_fov() and set_eye_offset(). The

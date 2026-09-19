@@ -332,13 +332,15 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 		local ov = self.override or EMPTY_OVERRIDE
 		local ov_speed = ov.speed or 1
 		local free_move = self.fly or self.noclip
-		-- Horizontal: accelerate towards what the keys ask for
-		local speed = m.speed_walk
+		-- Horizontal: accelerate towards what the keys ask for. Each
+		-- constant has a multiplier of its own in the override besides
+		-- the one over all of them.
+		local speed = m.speed_walk * (ov.speed_walk or 1)
 		if wish.fast then
-			speed = m.speed_fast
+			speed = m.speed_fast * (ov.speed_fast or 1)
 		elseif wish.sneak and not free_move and not self.in_liquid and
 				(ov.sneak or 1) ~= 0 then
-			speed = m.speed_crouch
+			speed = m.speed_crouch * (ov.speed_crouch or 1)
 		end
 		speed = speed * ov_speed
 		local len = math.sqrt(wish.x * wish.x + wish.z * wish.z)
@@ -356,13 +358,17 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 		local can_jump = self.on_ground and not self.climbing and
 				not free_move
 		local accel_h, accel_v
+		local a_fast = m.acceleration_fast * (ov.acceleration_fast or 1)
+		local a_air = m.acceleration_air * (ov.acceleration_air or 1)
+		local a_default = m.acceleration_default *
+				(ov.acceleration_default or 1)
 		if in_air or (can_jump and wish.jump) then
-			accel_h = wish.fast and m.acceleration_fast or m.acceleration_air
+			accel_h = wish.fast and a_fast or a_air
 			accel_v = 0
 		elseif wish.fast then
-			accel_h, accel_v = m.acceleration_fast, m.acceleration_fast
+			accel_h, accel_v = a_fast, a_fast
 		else
-			accel_h, accel_v = m.acceleration_default, m.acceleration_default
+			accel_h, accel_v = a_default, a_default
 		end
 		-- Luanti multiplies the acceleration it sent by BS (10) when it
 		-- receives TOCLIENT_MOVEMENT and then again in applyControl(),
@@ -392,10 +398,11 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at)
 			end
 		elseif self.climbing then
 			target_v = 0
+			local climb = m.speed_climb * (ov.speed_climb or 1) * ov_speed
 			if wish.jump and not wish.sneak then
-				target_v = m.speed_climb * ov_speed
+				target_v = climb
 			elseif wish.sneak and not wish.jump then
-				target_v = -m.speed_climb * ov_speed
+				target_v = -climb
 			end
 			if wish.fast then
 				target_v = target_v > 0 and speed or

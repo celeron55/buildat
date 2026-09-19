@@ -998,12 +998,13 @@ end
 -- changes them; the client cannot work any of it out for itself, so what is
 -- sent is the whole table each time rather than the change.
 --
--- simplified: the three multipliers and the two sneak flags, which is what
--- a game's play is built on. Luanti's override also carries the movement
--- constants themselves (speed_walk, acceleration_air and the rest) and
--- new_move; the upgrade path is more names in this list, because the client
--- already keeps a whole movement table to apply them to.
-local PHYSICS_FIELDS = {"speed", "jump", "gravity", "sneak", "sneak_glitch"}
+-- Every field Luanti's own override has (lua_api.md, set_physics_override):
+-- the three multipliers, the two sneak flags, new_move, and a multiplier
+-- per movement constant. A field the game never set goes as 1.
+local PHYSICS_FIELDS = {"speed", "jump", "gravity", "sneak", "sneak_glitch",
+		"new_move", "speed_climb", "speed_crouch", "speed_fast", "speed_walk",
+		"liquid_fluidity", "liquid_fluidity_smooth", "liquid_sink",
+		"acceleration_default", "acceleration_air", "acceleration_fast"}
 
 local function send_physics(o)
 	if not (o and o.player_name and __luanti_send_physics) then
