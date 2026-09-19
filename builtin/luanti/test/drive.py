@@ -577,6 +577,10 @@ def stair_step(s, mem, pick, down):
     a step forward. The expectation: fewer of them solid, or the feet
     moved onto the step."""
     world = s.world
+    # Not the explore's stuck count: a stair's walks go one way along a
+    # tunnel and the unstick turned them round, so the player paced its
+    # own tunnel at y -31 (2026-09-20)
+    mem["walking"] = 0
     a = ahead(s, mem)
     targets = [(a[0], a[1] + 1, a[2]), a]
     if down:
