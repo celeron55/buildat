@@ -615,15 +615,30 @@ def rules(s, mem):
         if hotbar_slot_of(s, "pick_stone") is not None and not have(s, "iron", 3, mem):
             want.append("stone_with_iron")
         ores = [(x, y) for (x, y), b in s.bins.items()
-                if any(w in b["name"] for w in want) and b["d"] <= 4]
+                if any(w in b["name"] for w in want) and b["d"] <= 10]
         if s.crosshair and any(w in s.crosshair[0] for w in want):
             was = s.crosshair
             cmds = ["keypress %d" % pick, "delay 150", "mouse_down left",
                     "delay 3500", "mouse_up left", "delay 300"]
             return "dig_ore", cmds, lambda n: n.crosshair != was
         if ores:
+            # Ore is one stone in three hundred (415 coal and 231 iron
+            # among 224k stone within forty nodes of seed 5's spawn), so
+            # one seen ten nodes off is walked to, digging the way there
+            # with the same three-node step the tunnel uses
             bx, by = min(ores, key=lambda k: s.bins[k]["d"])
-            return "to_ore", [look_at_bin(s, bx, by, level=False), ms(0.3)], None
+            d = s.bins[(bx, by)]["d"]
+            if d <= 4:
+                return "to_ore", [look_at_bin(s, bx, by, level=False), ms(0.3)], None
+            dx, dy, dz = bin_dir(s, bx, by)
+            h = math.hypot(dx, dz) or 1e-6
+            fx, fz = dx / h, dz / h
+            cmds = ["keypress %d" % pick, "delay 150"]
+            for ddy in (0.0, -1.0):
+                cmds += ["look_dir %.3f %.3f %.3f" % (fx, ddy, fz), "delay 250",
+                         "mouse_down left", "delay 1500", "mouse_up left", "delay 200"]
+            cmds += ["look_dir %.3f -0.3 %.3f" % (fx, fz)] + walk(0.5) + ["delay 400"]
+            return "toward_ore", cmds, None
         # No ore in view and some wanted: mined for. The staircase down to
         # where coal and iron are common, then a tunnel on the same
         # heading at that depth, two nodes high, the floor flat, so the

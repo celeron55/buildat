@@ -736,6 +736,13 @@ function M.define(dst, util)
 			SetTechnique = util.self_function(
 					"SetTechnique", {}, {"Material", "number", "Technique",
 							{"number", "__nil"}, {"number", "__nil"}}),
+			-- A copy of its own, for a shader parameter per object
+			-- ([OBJECT_LIGHT]); the name stays empty, as a Lua-made one's
+			Clone = util.wrap_function({"Material"},
+				function(self)
+					return util.wrap_instance("Material", self:Clone(""))
+				end
+			),
 		},
 		properties = {
 			-- Which faces are thrown away, as CULL_NONE, CULL_CCW or

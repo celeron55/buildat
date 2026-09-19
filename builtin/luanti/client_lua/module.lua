@@ -613,10 +613,14 @@ local function make_object_node(look)
 			local node = template.node:Clone()
 			node.enabled = true
 			local cg = node:GetComponent("CustomGeometry")
+			-- Cloned per object, so that each is lit by where it stands
+			-- ([OBJECT_LIGHT]); the template's stay as made
+			local mats = {}
 			for i = 1, #template.materials do
-				cg:SetMaterial(i - 1, template.materials[i])
+				mats[i] = template.materials[i]:Clone()
+				cg:SetMaterial(i - 1, mats[i])
 			end
-			return node
+			return node, mats
 		end
 	end
 	local node = object_scene:CreateChild("luanti_object")
@@ -640,7 +644,7 @@ local function make_object_node(look)
 			b.enabled = true
 		end
 		set:Commit()
-		return node
+		return node, {material}
 	end
 	local model = node:CreateComponent("StaticModel")
 	model.model = magic.cache:GetResource("Model", "Models/Box.mdl")
@@ -650,13 +654,54 @@ local function make_object_node(look)
 				"Techniques/DiffUnlitAlpha.xml"))
 		material:SetTexture(magic.TU_DIFFUSE, tex)
 		model.material = material
-	else
-		-- Nothing to wear: the box it was before anything said otherwise
-		model.material = magic.cache:GetResource("Material",
-				"Materials/Stone.xml")
+		model.castShadows = true
+		return node, {material}
 	end
+	-- Nothing to wear: the box it was before anything said otherwise
+	model.material = magic.cache:GetResource("Material",
+			"Materials/Stone.xml")
 	model.castShadows = true
-	return node
+	return node, {}
+end
+
+-- The light where an object stands ([OBJECT_LIGHT], official's
+-- GenericCAO::updateLight): the voxel's skylight nibble at the day's
+-- amount or its lamp nibble, the brighter, on the same floor and ramp the
+-- launcher lights the hand with -- flat, as the objects are drawn unlit.
+-- The day's amount is the launcher's, told through M.set_daylight().
+M.daylight = 1.0
+function M.set_daylight(amount)
+	M.daylight = math.max(0, math.min(1, amount or 1))
+end
+
+local function light_at(x, y, z)
+	local v = voxelworld.get_static_voxel(buildat.Vector3(
+			math.floor(x + 0.5), math.floor(y + 0.5), math.floor(z + 0.5)))
+	if v == nil then
+		return 1.0
+	end
+	local reg = voxelworld.get_voxel_registry()
+	local sky = reg:light_sky_of(v) / 15
+	local lamp = reg:light_lamp_of(v) / 15
+	return 0.28 + 0.72 * math.max(sky * M.daylight, lamp)
+end
+
+-- Set on an object's materials when it moves (and when the day turns; the
+-- launcher's set_daylight is every frame, the objects are placed by
+-- packet), at the middle of its box; skipped when it has not changed
+local function light_object(have, x, y, z)
+	if #have.materials == 0 then
+		return
+	end
+	local box = have.box or {1, 1, 1}
+	local k = light_at(x, y + box[2] / 2, z)
+	if math.abs(k - have.lit) < 1 / 255 then
+		return
+	end
+	have.lit = k
+	for _, m in ipairs(have.materials) do
+		m:SetShaderParameter("MatDiffColor", magic.Color(k, k, k, 1.0))
+	end
 end
 
 -- A look that changed is a node made again: a billboard and a model are
@@ -694,11 +739,12 @@ local function object_node(id)
 		have.node:Remove()
 	end
 	local t0 = buildat.get_time_us()
-	local node = make_object_node(look)
+	local node, materials = make_object_node(look)
 	object_build_left_us = object_build_left_us -
 			(buildat.get_time_us() - t0)
 	object_nodes[id] = {node = node, drawn_as = drawn_as, mesh = look.mesh,
-			texture = look.texture, look = look}
+			texture = look.texture, look = look, materials = materials or {},
+			lit = -1}
 	return node
 end
 
@@ -877,6 +923,7 @@ local function place_object(id, v, i)
 	-- drawn at its own size and that is not the same box -- a mob authored
 	-- small is a mob nobody could hit. See M.pointed_object().
 	have.box = {v[i + 4], v[i + 5], v[i + 6]}
+	light_object(have, v[i + 1], v[i + 2], v[i + 3])
 	if have.drawn_as == "mesh" then
 		-- A model is drawn at the size the object asked for rather than at
 		-- what it collides with, and it is authored in Luanti's own scene

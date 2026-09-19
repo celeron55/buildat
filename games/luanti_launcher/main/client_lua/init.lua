@@ -1644,6 +1644,9 @@ local function update_sky(dt)
 	-- the extension's amount would leave it invisible.
 	local k = 0.28 + 0.72 *
 			math.min(1, up + moon_up * MOON_BRIGHTNESS / SUN_BRIGHTNESS)
+	-- The objects take the same day's amount, by where each stands
+	-- ([OBJECT_LIGHT])
+	luanti.set_daylight(math.min(1, up + moon_up * MOON_BRIGHTNESS / SUN_BRIGHTNESS))
 	-- By the light where the player stands ([WIELD_MESH] 3, Luanti's
 	-- light_color): the eye voxel's skylight nibble takes the day's
 	-- amount, the lamp nibble stands on its own, and the brighter wins --
