@@ -310,6 +310,10 @@ def visible(world, eye, target):
         if p in seen:
             continue
         seen.add(p)
+        # The eye's own node is where the ray starts; it never blocks
+        if p == (int(math.floor(eye[0] + 0.5)), int(math.floor(eye[1] + 0.5)),
+                 int(math.floor(eye[2] + 0.5))):
+            continue
         if solid_at(world, p) and world.get(p) is not None:
             return False
     return True
@@ -349,10 +353,18 @@ def dig_one(s, mem, targets, pick, name):
     # is walked through), so nothing behind it can be pointed until it is
     # gone: dug, a short hold, the aim kept (the player stood in tall
     # grass a whole run without walking through or digging it)
-    if s.crosshair is not None and is_plant(s.crosshair[0]) and \
+    f = feet_node(s)
+    own = (f, (f[0], f[1] + 1, f[2]))
+    in_own = s.crosshair is not None and tuple(s.crosshair[1:4]) in own
+    if s.crosshair is not None and (is_plant(s.crosshair[0]) or in_own) and \
             (aimed is None or tuple(s.crosshair[1:4]) != aimed):
+        # Or anything at all in the player's own two nodes -- stone the
+        # player ended up inside at y -30, which every ray met first
+        # and the map called a wall between the eye and everything
+        hold = hold_for(s.crosshair[0]) if in_own else 700
         mem["aimed"] = aimed
-        return name + "_clear", ["mouse_down left", "delay 700", "mouse_up left",
+        mem["dug_since_volume"] = True
+        return name + "_clear", ["mouse_down left", "delay %d" % hold, "mouse_up left",
                                  "delay 250"], None
     if aimed is not None and solid_at(world, aimed):
         if s.crosshair is not None and tuple(s.crosshair[1:4]) == aimed:
