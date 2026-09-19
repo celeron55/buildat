@@ -89,15 +89,34 @@ smoke_test_wine() {
 		kill -0 "$srv" 2>/dev/null || break
 		sleep 1
 	done
-	kill -INT "$srv" 2>/dev/null; sleep 3; kill -9 "$srv" 2>/dev/null
-	wait "$srv" 2>/dev/null || true
-	"$wine"server -k 2>/dev/null || true
 	if ! grep -q "Listening at" "$dir/srv.log"; then
+		kill -9 "$srv" 2>/dev/null; wait "$srv" 2>/dev/null || true
 		echo "smoke test under Wine: the server did not come up; its log:" >&2
 		tail -40 "$dir/srv.log" >&2
 		exit 1
 	fi
-	echo "smoke test under Wine passed: the server compiled its modules and listened"
+	echo "smoke test under Wine: the server compiled its modules and listened"
+	# And the client, on the virtual display through Wine's GL, which is
+	# software rendering; what it has to have done is what the Linux smoke
+	# asks: joined, drawn a chunk, run its commands to the end
+	sleep 5
+	printf 'delay 25000\nscreenshot %s/shot.png\nquit\n' "Z:$dir" > "$dir/cmds.txt"
+	if [ -z "${DISPLAY:-}" ] && command -v xvfb-run >/dev/null 2>&1; then
+		(cd "$unpacked" && xvfb-run -a -s "-screen 0 1280x720x24" "$wine" bin/buildat.exe -s "localhost:$port" -w 640x360 -l 3 -c "@Z:$dir/cmds.txt" > "$dir/cli.log" 2>&1) || true
+	else
+		(cd "$unpacked" && "$wine" bin/buildat.exe -s "localhost:$port" -w 640x360 -l 3 -c "@Z:$dir/cmds.txt" > "$dir/cli.log" 2>&1) || true
+	fi
+	kill -INT "$srv" 2>/dev/null; sleep 3; kill -9 "$srv" 2>/dev/null
+	wait "$srv" 2>/dev/null || true
+	"$wine"server -k 2>/dev/null || true
+	if ! grep -q "Connect succeeded" "$dir/cli.log" ||
+			! grep -q "Command sequence complete" "$dir/cli.log" ||
+			! grep -q "drawn again\|Node update\|player physics enabled" "$dir/cli.log"; then
+		echo "smoke test under Wine: the client did not join, draw and finish; its log:" >&2
+		tail -40 "$dir/cli.log" >&2
+		exit 1
+	fi
+	echo "smoke test under Wine passed: the server compiled its modules, the client joined and drew"
 }
 
 # One archive: a build tree configured for it, the install rules into a
