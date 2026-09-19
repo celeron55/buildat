@@ -587,10 +587,25 @@ def stair_step(s, mem, pick, down):
         targets.append((a[0], a[1] - 1, a[2]))
     yr = math.radians(mem["stair_yaw"])
     fx, fz = math.sin(yr), math.cos(yr)
+    # The player is 0.6 wide: standing off the column's centre it
+    # straddles the next column, and that column's head and feet nodes
+    # ahead block the walk too (leaves beside the open step held the
+    # player for 180 turns, 2026-09-20). They are targets as well, and
+    # the walk aims at the step's centre so the box lines up.
+    f = feet_node(s)
+    ox, oz = s.pos[0] - f[0], s.pos[2] - f[2]
+    side = None
+    if abs(fz) > 0.5 and abs(ox) > 0.2:
+        side = (a[0] + (1 if ox > 0 else -1), a[1], a[2])
+    elif abs(fx) > 0.5 and abs(oz) > 0.2:
+        side = (a[0], a[1], a[2] + (1 if oz > 0 else -1))
+    if side is not None:
+        targets += [(side[0], side[1] + 1, side[2]), side]
     to_dig = [t for t in targets if solid_at(world, t)]
     if not to_dig:
         p0 = s.pos
-        cmds = ["look_dir %.3f -0.3 %.3f" % (fx, fz)] + walk(0.6) + ["delay 400"]
+        d = (a[0] - s.pos[0], -0.3, a[2] - s.pos[2])
+        cmds = ["look_dir %.3f %.3f %.3f" % d] + walk(0.6) + ["delay 400"]
         return "stair_walk", cmds, lambda n, p=p0: math.dist(n.pos, p) > 0.6
     r = dig_one(s, mem, targets, pick, "stair" if down else "tunnel")
     if r is not None:
@@ -1092,8 +1107,13 @@ def main():
                     expect_name in ("mine", "stair_walk", "stair_aim", "tunnel_aim",
                                  "stair_clear", "tunnel_clear", "room_clear",
                                  "room_aim", "stair_dig", "tunnel_dig", "room_dig"):
-                say("turn %d: the tunnel did not advance; elsewhere for five turns" % turn)
-                mem["no_dig_stair_until"] = turn + 5
+                say("turn %d: the tunnel did not advance; the map read again" % turn)
+                # The world is not as mapped: the cube again next turn
+                mem["dug_since_volume"] = True
+                mem["stalls"] = mem.get("stalls", 0) + 1
+                if mem["stalls"] >= 4:
+                    mem["stalls"] = 0
+                    mem["no_dig_stair_until"] = turn + 5
             elif expect_name in ("dig_stair", "stair_approach"):
                 # Not a finding either: hanging in vines the dig goes
                 # through and the feet stay; somewhere else in ten turns
