@@ -443,6 +443,9 @@ if(BUILD_SERVER)
 endif(BUILD_SERVER)
 
 if(TARGET urho3d_build)
+	# The core links against the engine too, and under -j it reached the
+	# import library before the engine's build had made it
+	add_dependencies(${BUILDAT_CORE_NAME} urho3d_build)
 	if(BUILD_CLIENT)
 		add_dependencies(${CLIENT_EXE_NAME} urho3d_build)
 	endif()
