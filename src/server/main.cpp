@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "core/types.h"
 #include "core/log.h"
+#include "core/version.h"
 #include "core/config.h"
 #include "boot/basic_init.h"
 #include "boot/autodetect.h"
@@ -104,6 +105,8 @@ int main(int argc, char *argv[])
 			;
 
 	int c;
+	// What this is, before anything else, so every log begins with it
+	log_i(MODULE, "%s %s (%s)", "buildat_server", BUILDAT_VERSION, BUILDAT_GIT_HASH);
 	while((c = c55_getopt(argc, argv, opts)) != -1)
 	{
 		switch(c)

@@ -297,10 +297,26 @@ endif()
 if(PORTABLE)
 	add_definitions(-DBUILDAT_PORTABLE)
 endif()
+# The version and the git hash, generated into a source of the core library
+# at configure and again on every build ([VERSION]); see util/version.cmake
+set(BUILDAT_VERSION_CPP ${CMAKE_BINARY_DIR}/buildat_version.cpp)
+execute_process(COMMAND ${CMAKE_COMMAND}
+	-DSRC=${CMAKE_SOURCE_DIR} -DOUT=${BUILDAT_VERSION_CPP}
+	-P ${CMAKE_SOURCE_DIR}/util/version.cmake)
+add_custom_target(buildat_version ALL
+	COMMAND ${CMAKE_COMMAND}
+		-DSRC=${CMAKE_SOURCE_DIR} -DOUT=${BUILDAT_VERSION_CPP}
+		-P ${CMAKE_SOURCE_DIR}/util/version.cmake
+	BYPRODUCTS ${BUILDAT_VERSION_CPP}
+	COMMENT "Reading the version and the git hash")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+	${CMAKE_SOURCE_DIR}/VERSION)
+set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} ${BUILDAT_VERSION_CPP})
 # sqlite's objects rather than a library: builtin/storage is a runtime-compiled
 # module and cannot link one, so buildat_core is what exports sqlite3_* to it.
 add_library(${BUILDAT_CORE_NAME} SHARED ${BUILDAT_CORE_SRCS}
 	$<TARGET_OBJECTS:sqlite>)
+add_dependencies(${BUILDAT_CORE_NAME} buildat_version)
 target_link_libraries(${BUILDAT_CORE_NAME}
 	c55lib
 	smallsha1

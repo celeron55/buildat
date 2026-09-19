@@ -1,4 +1,6 @@
 .*
+# but the workflows, which are the CI ([SQUASHED_BRANCH])
+!.github/
 !.gitignore
 *~
 

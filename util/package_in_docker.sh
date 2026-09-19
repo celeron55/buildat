@@ -1,8 +1,8 @@
 #!/bin/bash
 # The archives, made in a container and nowhere else ([PACKAGING]):
 #
-#   util/package_in_docker.sh linux <version>
-#   util/package_in_docker.sh windows <version>
+#   util/package_in_docker.sh linux
+#   util/package_in_docker.sh windows
 #
 # Builds util/docker/<target>'s image, hands it a git archive of HEAD --
 # not a mount of the working tree, so the host's Build/ and 3rdparty/Urho3D/
@@ -13,9 +13,8 @@
 set -eu
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 target="${1:-}"
-version="${2:-}"
-if [ -z "$target" ] || [ -z "$version" ]; then
-	echo "usage: util/package_in_docker.sh <linux|windows> <version>" >&2
+if [ -z "$target" ]; then
+	echo "usage: util/package_in_docker.sh <linux|windows>" >&2
 	exit 2
 fi
 if [ ! -f "$here/util/docker/$target/Dockerfile" ]; then
@@ -30,14 +29,17 @@ docker build -t "$image" "$here/util/docker/$target"
 # 3rdparty sources; anything uncommitted is not in a release
 tarball=$(mktemp)
 git -C "$here" archive --format=tar HEAD > "$tarball"
+# The archive has no .git, so the hash of what it holds goes in by name
+hash=$(git -C "$here" rev-parse --short HEAD)
 docker run --rm -i \
 	-v "$out:/out:z" \
+	-e "BUILDAT_GIT_HASH=$hash" \
 	-e "JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}" \
 	"$image" bash -c "
 		set -eu
 		mkdir -p /work/buildat && cd /work/buildat && tar -xf - &&
 		status=0
-		BUILDAT_SMOKE_VIRTUAL=1 xvfb-run -a -s '-screen 0 1280x720x24' util/package.sh $target $version || status=\$?
+		BUILDAT_SMOKE_VIRTUAL=1 xvfb-run -a -s '-screen 0 1280x720x24' util/package.sh $target || status=\$?
 		cp Build/package/out/* /out/ 2>/dev/null || true
 		# And the smoke test's leavings, for reading a failure from outside
 		mkdir -p /out/smoke && cp /tmp/tmp.*/shot.png /tmp/tmp.*/*.log /out/smoke/ 2>/dev/null || true

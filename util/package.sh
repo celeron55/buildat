@@ -1,9 +1,13 @@
 #!/bin/bash
 # The modding archives ([PACKAGING] in doc/plan/packaging_plan.md):
 #
-#   util/package.sh linux <version>     -> buildat-<version>-linux-x86_64-portable.tar.gz
-#                                          buildat-<version>-linux-x86_64-xdg.tar.gz
-#   util/package.sh windows <version>   -> buildat-<version>-win64.zip (a cross build)
+#   util/package.sh linux     -> buildat-<version>-<hash>-linux-x86_64-portable.tar.gz
+#                                buildat-<version>-<hash>-linux-x86_64-xdg.tar.gz
+#   util/package.sh windows   -> buildat-<version>-<hash>-win64.zip (a cross build)
+#
+# The version is the VERSION file's and the hash the tree's short git hash
+# ([VERSION]); a dirty tree is refused, since its archive would be nobody's
+# commit. Outside a checkout (a tarball of the tree) the hash is "unknown".
 #
 # Configures a build tree per archive under Build/package/, builds, runs the
 # install rules into a staging directory, gathers every third-party licence
@@ -19,11 +23,20 @@
 set -eu
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 target="${1:-}"
-version="${2:-}"
-if [ -z "$target" ] || [ -z "$version" ]; then
-	echo "usage: util/package.sh <linux|windows> <version>" >&2
+if [ -z "$target" ]; then
+	echo "usage: util/package.sh <linux|windows>" >&2
 	exit 2
 fi
+version=$(tr -d '[:space:]' < "$here/VERSION")
+# BUILDAT_GIT_HASH is what package_in_docker.sh hands in: the container
+# has a git archive, which has no .git
+hash="${BUILDAT_GIT_HASH:-$(git -C "$here" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
+if [ -z "${BUILDAT_GIT_HASH:-}" ] && [ "$hash" != unknown ] &&
+		! git -C "$here" diff --quiet HEAD 2>/dev/null; then
+	echo "the tree has uncommitted changes; an archive is made from a commit" >&2
+	exit 2
+fi
+version="$version-$hash"
 jobs="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
 root="$here/Build/package"
 out="$root/out"

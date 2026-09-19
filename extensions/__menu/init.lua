@@ -76,6 +76,18 @@ function M.boot(launch_action)
 	logo:SetFixedSize(160, 160)
 	logo:SetAlignment(HA_CENTER, VA_TOP)
 
+	-- What this is, top left, small ([VERSION]): the version and the hash
+	-- of the tree it was built from, "-dirty" when that was nobody's commit
+	-- The first child of the menu's own layout: the stack's root is a
+	-- horizontal layout that argues with anything placed by hand
+	local version, hash = buildat.version()
+	local label = layout:CreateChild("Text")
+	label:SetStyleAuto()
+	label.text = version .. " " .. hash
+	label:SetFontSize(11)
+	label.color = magic.Color(0.6, 0.6, 0.6)
+	label:SetTextAlignment(HA_LEFT)
+
 	local title = layout:CreateChild("Text")
 	title:SetStyleAuto()
 	title.text = "Buildat"

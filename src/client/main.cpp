@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "core/types.h"
 #include "core/log.h"
+#include "core/version.h"
 #include "boot/basic_init.h"
 #include "boot/autodetect.h"
 #include "client/config.h"
@@ -110,6 +111,8 @@ int main(int argc, char *argv[])
 	ss_ preference_overrides;
 
 	int c;
+	// What this is, before anything else, so every log begins with it
+	log_i(MODULE, "%s %s (%s)", "buildat", BUILDAT_VERSION, BUILDAT_GIT_HASH);
 	while((c = c55_getopt(argc, argv, opts)) != -1)
 	{
 		switch(c)

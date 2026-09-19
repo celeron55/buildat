@@ -1,0 +1,35 @@
+# [SQUASHED_BRANCH] / [PACKAGING_CI]: the release archives, made the one way
+# they are made -- util/package_in_docker.sh, the same image as on a desk --
+# on every push to a squashed prerelease branch and on tags. The archives
+# are workflow artifacts; a tag also gets a release with them attached.
+name: package
+on:
+  push:
+    branches: ['luanti-module-squashed-*']
+    tags: ['v*']
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # package_in_docker.sh names the archives by the short hash
+          fetch-depth: 1
+      - name: Package in the Linux image
+        run: JOBS=$(nproc) util/package_in_docker.sh linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-archives
+          path: Build/package/out/*.tar.gz
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-smoke
+          path: Build/package/out/smoke/
+          if-no-files-found: ignore
+      - name: Release on a tag
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Build/package/out/*.tar.gz
