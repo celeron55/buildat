@@ -420,11 +420,15 @@ local world_sky = luanti_sky.new(scene, SUN_DIR,
 local sky_cube = {cube = require("buildat/extension/skycube").new(
 		magic, world_sky.material), due = 0}
 zone.zoneTexture = sky_cube.cube.texture
+-- Microseconds the cube's render took since the frame peak last read it
+sky_cube.us = 0
 function sky_cube.refresh(force)
 	local now = scene.elapsedTime
 	if force or now >= sky_cube.due then
 		sky_cube.due = now + 1
+		local t0 = buildat.get_time_us()
 		sky_cube.cube:update()
+		sky_cube.us = sky_cube.us + buildat.get_time_us() - t0
 	end
 end
 
@@ -485,6 +489,12 @@ do
 	-- and no bloom either: the render has none, and a bright pass blurred
 	-- over a probe crop is a white the crop did not earn
 	rp:SetEnabled("BloomHDR", buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
+	-- The bloom's threshold is against the exposed frame, so it sits where
+	-- that frame clips (the tonemap's shoulder starts above 1.0), and the
+	-- stock 40% mix is a haze over a whole daylight picture; 15% is a glow
+	-- on what clips ([BLOOM_PLACE]). How much is grade ([PBR_FIT] step 5).
+	rp:SetShaderParameter("BloomHDRThreshold", 1.2)
+	rp:SetShaderParameter("BloomHDRMix", magic.Vector2(1.0, 0.15))
 	-- No bias on top of the meter: the meter owns the level and a bias is
 	-- a second exposure that pushes the lit parts up the curve's shoulder
 	-- ([PBR_FIT] term 4). EXPOSURE_BIAS stays the minimap's, which is not
@@ -1895,6 +1905,82 @@ do
 	end
 end
 
+-- The frame's wall time, held and decayed the way the server's step is
+-- ([STEP_PEAK]): halved per minute, with the phase that set it. The
+-- phases are what the client's frame does on the main thread that a
+-- profiler block would sit around -- the mesh commit and the horizon
+-- map (voxelworld's), the sky cube's render, the sky-visibility sweep,
+-- and this script's own update -- and "rest" is the frame's time none of
+-- them account for: the renderer, the network, the UI. The wall time is
+-- Urho's TimeStep, which is the previous frame's, so the phases are
+-- read one frame late to match it. See [FRAME_PEAK] in
+-- doc/plan/performance_plan.md.
+-- One table, this file being near Lua's 200 locals. A frame over
+-- CEILING_S is a line at trace, and the worst since the last info line
+-- is said at info every LINE_S; the fuzz run reads the info lines.
+local frame_peak = {DECAY = 0.99425, DECAY_EVERY_S = 0.5,
+		CEILING_S = 0.05, LINE_S = 5,
+		s = 0, phase = "", decay_due = 0,
+		worst = 0, worst_phase = "", line_due = 5,
+		-- this frame's own phases, in microseconds, set by the handler
+		skyvis_us = 0, script_us = 0}
+function frame_peak.note(dt)
+	local vw = voxelworld.frame_us
+	local phases = {
+		{"mesh", vw.mesh}, {"horizon", vw.horizon},
+		{"sky cube", sky_cube.us}, {"sky vis", frame_peak.skyvis_us},
+		{"script", frame_peak.script_us},
+	}
+	vw.mesh, vw.horizon, sky_cube.us = 0, 0, 0
+	local accounted = 0
+	local longest, longest_phase = 0, "rest"
+	for _, ph in ipairs(phases) do
+		accounted = accounted + ph[2]
+		if ph[2] > longest then
+			longest, longest_phase = ph[2], ph[1]
+		end
+	end
+	local rest = dt * 1000000 - accounted
+	if rest > longest then
+		longest_phase = "rest"
+	end
+	frame_peak.decay_due = frame_peak.decay_due - dt
+	if frame_peak.decay_due <= 0 then
+		frame_peak.s = frame_peak.s * frame_peak.DECAY
+		frame_peak.decay_due = frame_peak.DECAY_EVERY_S
+	end
+	if dt > frame_peak.s then
+		frame_peak.s, frame_peak.phase = dt, longest_phase
+	end
+	if dt > frame_peak.worst then
+		frame_peak.worst, frame_peak.worst_phase = dt, longest_phase
+	end
+	if dt >= frame_peak.CEILING_S then
+		local said = {}
+		for _, ph in ipairs(phases) do
+			if ph[2] >= 5000 then
+				said[#said + 1] = string.format("%s %.0f ms", ph[1],
+						ph[2] / 1000)
+			end
+		end
+		log:trace(string.format("frame %.0f ms: %s", dt * 1000,
+				#said > 0 and table.concat(said, ", ") or "rest"))
+	end
+	frame_peak.line_due = frame_peak.line_due - dt
+	if frame_peak.line_due <= 0 then
+		frame_peak.line_due = frame_peak.LINE_S
+		-- Only once there is a player: the world loading around the
+		-- overview camera is not a frame anyone waits on, and the fuzz
+		-- run reads these lines as the walk's
+		if player_placed and frame_peak.worst > 0 then
+			log:info(string.format("frame peak %.3f s in %s, held %.3f s",
+					frame_peak.worst, frame_peak.worst_phase,
+					frame_peak.s))
+		end
+		frame_peak.worst, frame_peak.worst_phase = 0, ""
+	end
+end
+
 -- How fast frames are coming, over the same quarter second the block is
 -- rebuilt in. Luanti's row prints the jitter beside the rate because an
 -- average hides a stutter: it is how far the worst frame of the window ran
@@ -1984,21 +2070,25 @@ local function status_lines(level)
 	-- The server's longest step, held and decayed: what a click has been
 	-- waiting on lately. See [STEP_PEAK] in doc/plan/performance_plan.md.
 	local step = string.format("step: %.2f s", info.step_peak or 0)
+	-- And the client's longest frame beside it ([FRAME_PEAK])
+	local frame = string.format("frame: %.2f s", frame_peak.s)
 	if level == 1 then
 		return "buildat | " .. game .. " | " .. rmode .. " | " .. step ..
-				" | " .. place
+				" | " .. frame .. " | " .. place
 	end
 	local blocks = {
 		string.format(
 			"buildat | game: %s | %s | %s | FPS: %.0f" ..
-			" | dtime jitter: %.1f%% | view range: %d | %s%s",
+			" | dtime jitter: %.1f%% | view range: %d | %s%s | %s%s",
 			game, rmode,
 			info.version ~= "" and info.version or "Luanti ?",
 			-- what the camera is actually drawing to, which a game may have
 			-- lowered through its sky's fog_distance, and not the ceiling
 			fps, jitter, sky_now.far_clip or FAR_CLIP, step,
 			(info.step_peak_phase or "") ~= "" and
-					(" (" .. info.step_peak_phase .. ")") or ""),
+					(" (" .. info.step_peak_phase .. ")") or "",
+			frame, frame_peak.phase ~= "" and
+					(" (" .. frame_peak.phase .. ")") or ""),
 		place,
 		string.format(
 			"%s | fov %.0f | speed %.1f, %.1f, %.1f | chunk %d, %d, %d%s",
@@ -3439,9 +3529,12 @@ local function send_where()
 	}))
 end
 
-magic.SubscribeToEvent("Update", function(event_type, event_data)
-	local dt = event_data:GetFloat("TimeStep")
+-- The frame, as a function of its own so the handler under it can time
+-- it whichever of the returns it leaves by
+function frame_peak.update(dt)
+	local t0 = buildat.get_time_us()
 	voxel_shading.update(dt)
+	frame_peak.skyvis_us = buildat.get_time_us() - t0
 	update_sky(dt)
 	-- The exposure reset's rate goes back once its frame has rendered
 	if AUTO_EXPOSURE.reset_frames > 0 then
@@ -3550,6 +3643,15 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	follow_minimaps(dt)
 	update_underwater(buildat.Vector3(player.x,
 			player.y + player_physics.EYE_HEIGHT, player.z))
+end
+magic.SubscribeToEvent("Update", function(event_type, event_data)
+	local dt = event_data:GetFloat("TimeStep")
+	frame_peak.note(dt)
+	local t0 = buildat.get_time_us()
+	frame_peak.update(dt)
+	-- The script's own share: the handler less the two phases timed inside
+	frame_peak.script_us = buildat.get_time_us() - t0 -
+			frame_peak.skyvis_us - sky_cube.us
 end)
 
 log:info("luanti_launcher client ready")

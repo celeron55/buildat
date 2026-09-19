@@ -70,6 +70,12 @@ M.chunk_size_voxels = nil
 -- packs the vertex alpha (see interface/mesh.h and voxel_shading's
 -- set_packed_sky()); a game turns it on when its shader reads it
 M.horizon = false
+-- Microseconds this module spent since the caller last zeroed these: the
+-- mesh commit (buildat.set_voxel_geometry and the LOD one) and the
+-- horizon map's build and merge. The frame peak reads and zeroes them once
+-- a frame ([FRAME_PEAK]); accumulated rather than reset here, since the
+-- horizon work also runs from replicate's events outside the update.
+M.frame_us = {mesh = 0, horizon = 0}
 M.section_size_chunks = nil
 M.section_size_voxels = nil
 -- Start higher than any conceivable value because otherwise things will never
@@ -302,8 +308,10 @@ function sub_events()
 		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
 		local chunk_p = buildat.Vector3(node:GetWorldPosition()):div_components(
 				M.chunk_size_voxels):floor()
+		local t0 = buildat.get_time_us()
 		horizon_note_chunk(chunk_p, buildat.column_heights(data, voxel_reg),
 				moved)
+		M.frame_us.horizon = M.frame_us.horizon + buildat.get_time_us() - t0
 	end
 
 
@@ -377,16 +385,20 @@ function sub_events()
 			-- kept the constant bounce and the plain alpha layout under a
 			-- shader reading the packed one ([LOD_LIGHT])
 			local horizon = nil
+			local t0 = buildat.get_time_us()
 			if M.horizon and M.use_skylight and M.chunk_size_voxels and
 					M.chunk_size_voxels.x == HORIZON_CHUNK then
 				horizon = horizon_map_for(buildat.Vector3(node_p):div_components(
 						M.chunk_size_voxels):floor())
 			end
-			horizon_meshed_us[node:GetID()] = buildat.get_time_us()
+			local t1 = buildat.get_time_us()
+			M.frame_us.horizon = M.frame_us.horizon + t1 - t0
+			horizon_meshed_us[node:GetID()] = t1
 			if lod == 1 then
 				buildat.set_voxel_geometry(
 						node, data, voxel_reg, atlas_reg, M.use_skylight,
 						set_up_materials, horizon)
+				M.frame_us.mesh = M.frame_us.mesh + buildat.get_time_us() - t1
 
 				-- 1 -> 2
 				far_trigger_d = M.lod_distance * (1.0 + LOD_THRESHOLD)
@@ -394,6 +406,7 @@ function sub_events()
 			else
 				buildat.set_voxel_lod_geometry(lod, node, data, voxel_reg,
 						atlas_reg, M.use_skylight, set_up_materials, horizon)
+				M.frame_us.mesh = M.frame_us.mesh + buildat.get_time_us() - t1
 
 				if lod == 1 then
 					-- Shouldn't go here

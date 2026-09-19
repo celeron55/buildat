@@ -146,8 +146,22 @@ grep -aq "not held" "$out/srv.log" "$out/cli.log" && say "a held key read as not
 grep -aq "input focus lost" "$out/cli.log" && say "the client lost input focus ([MOUSE_FOCUS_LOST])"
 grep -aq "Lua runtime error\|Crash:" "$out/cli.log" && say "the client crashed or hit a Lua error"
 [ "$cli_status" -eq 0 ] || say "the client exited $cli_status"
+# The client's frame, from the launcher's rate-limited lines ([FRAME_PEAK]):
+# the worst frame of every five seconds and the phase that set it, with the
+# first such line skipped as the load's. Warn over 50 ms, fail over 250 ms,
+# first-cut numbers argued with in doc/plan/performance_plan.md.
+frames=$(grep -a "frame peak" "$out/cli.log" | tail -n +2 |
+	sed 's/^.*frame peak \([0-9.]*\) s in \([a-z ]*\), held.*$/\1 \2/')
+worst=$(echo "$frames" | sort -rn | head -1)
+if [ -n "$worst" ]; then
+	echo "$frames" | awk '$1 > 0.05 {n++} END {
+		if (n) printf "warning: %d frame peaks over 50 ms\n", n}' >&2
+	awk -v w="${worst%% *}" 'BEGIN {exit !(w > 0.25)}' &&
+		say "a frame took $worst ([FRAME_PEAK])"
+fi
 last=$(grep -a "fuzz: t=" "$out/srv.log" | tail -1 | sed 's/^.*fuzz: //')
 [ -n "$last" ] || say "the fixture never ticked"
 echo "seed $SEED, $MINUTES min: ${last:-no ticks}"
+echo "client frame: ${worst:-no frame peak lines}"
 echo "logs and pictures in $out"
 exit $status
