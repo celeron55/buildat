@@ -81,6 +81,16 @@ smoke_test_wine() {
 	local port=$(( 29600 + (RANDOM % 90) ))
 	echo "smoke test under Wine in $unpacked"
 	export WINEDEBUG=-all WINEPREFIX="$dir/wine"
+	# One virtual display for the whole of it: the wineserver the server's
+	# run starts is the one the client's run finds, and it keeps the
+	# display it was started without
+	local xvfb_pid=""
+	if [ -z "${DISPLAY:-}" ] && command -v Xvfb >/dev/null 2>&1; then
+		Xvfb :97 -screen 0 1280x720x24 > /dev/null 2>&1 &
+		xvfb_pid=$!
+		export DISPLAY=:97
+		sleep 2
+	fi
 	(cd "$unpacked" && "$wine" bin/buildat_server.exe -m games/digger -P "$port" > "$dir/srv.log" 2>&1) &
 	local srv=$!
 	local i
@@ -101,14 +111,11 @@ smoke_test_wine() {
 	# asks: joined, drawn a chunk, run its commands to the end
 	sleep 5
 	printf 'delay 25000\nscreenshot %s/shot.png\nquit\n' "Z:$dir" > "$dir/cmds.txt"
-	if [ -z "${DISPLAY:-}" ] && command -v xvfb-run >/dev/null 2>&1; then
-		(cd "$unpacked" && xvfb-run -a -s "-screen 0 1280x720x24" "$wine" bin/buildat.exe -s "localhost:$port" -w 640x360 -l 3 -c "@Z:$dir/cmds.txt" > "$dir/cli.log" 2>&1) || true
-	else
-		(cd "$unpacked" && "$wine" bin/buildat.exe -s "localhost:$port" -w 640x360 -l 3 -c "@Z:$dir/cmds.txt" > "$dir/cli.log" 2>&1) || true
-	fi
+	(cd "$unpacked" && timeout 180 "$wine" bin/buildat.exe -s "localhost:$port" -w 640x360 -l 3 -c "@Z:$dir/cmds.txt" > "$dir/cli.log" 2>&1) || true
 	kill -INT "$srv" 2>/dev/null; sleep 3; kill -9 "$srv" 2>/dev/null
 	wait "$srv" 2>/dev/null || true
 	"$wine"server -k 2>/dev/null || true
+	[ -n "$xvfb_pid" ] && kill "$xvfb_pid" 2>/dev/null
 	if ! grep -q "Connect succeeded" "$dir/cli.log" ||
 			! grep -q "Command sequence complete" "$dir/cli.log" ||
 			! grep -q "drawn again\|Node update\|player physics enabled" "$dir/cli.log"; then
