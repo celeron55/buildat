@@ -687,7 +687,12 @@ bool inject_mouse_button(magic::Input *input, int sdl_button, bool down,
 bool inject_mouse_pos(magic::Input *input, int x, int y, ss_ *error)
 {
 	magic::IntVector2 old = input->GetMousePosition();
-	input->SetMousePosition(magic::IntVector2(x, y));
+	// The scripted client's mouse is not the desk's ([SEQ_MOUSE_FREE]):
+	// a virtual position the UI reads for its clicks and hover, so the
+	// real cursor stays wherever the user left it. Set from the first
+	// mouse_pos on; the real mouse's own events are dropped by the
+	// filter below either way.
+	input->SetVirtualMousePosition(magic::IntVector2(x, y));
 	SDL_Event e;
 	memset(&e, 0, sizeof(e));
 	e.type = SDL_MOUSEMOTION;
