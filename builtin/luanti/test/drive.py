@@ -28,6 +28,8 @@ import sys
 import time
 
 RES = 8
+# The radius of the voxel cube each turn's scan_volume carries
+VOLUME_R = 4
 SCAN_TIMEOUT_S = 10.0
 # What a turn spends acting, in seconds, before the next scan
 TURN_S = 1.5
@@ -293,23 +295,38 @@ def hold_for(name):
     return 600
 
 
-def dig_targets(s, world, targets, pick):
-    """The commands that dig the given voxels -- those that are solid and
-    visible from the eye -- each aimed at its centre and held by its
-    material; and the ones left, solid but not visible."""
+def dig_one(s, mem, targets, pick, name):
+    """Digging by target, one voxel a turn, in a loop that makes sure
+    the right one is pointed (user, 2026-09-20): a turn aims at a
+    target's centre and the next scan's crosshair says whether that is
+    what is pointed; if it is, the hold digs it, and if it is not -- the
+    voxel is behind another, or the aim is off -- the target is set
+    aside for a while and another picked. Returns (rule name, commands,
+    expectation) or None when no target is solid and reachable. The
+    map's own visibility is the first cut of the pick."""
+    world = s.world
     eye = eye_of(s)
-    cmds = ["keypress %d" % pick, "delay 150"] if pick else []
-    left = []
+    aside = mem.setdefault("aside", {})
+    aimed = mem.get("aimed")
+    mem["aimed"] = None
+    if aimed is not None and solid_at(world, aimed):
+        if s.crosshair is not None and tuple(s.crosshair[1:4]) == aimed:
+            # Pointed at what was meant: dug, by its material
+            cmds = ["keypress %d" % pick, "delay 100"] if pick else []
+            cmds += ["mouse_down left", "delay %d" % hold_for(world.get(aimed)),
+                     "mouse_up left", "delay 250"]
+            return name + "_dig", cmds, lambda n, t=aimed: not solid_at(n.world, t)
+        aside[aimed] = turn
     for t in targets:
-        if not solid_at(world, t):
+        if not solid_at(world, t) or aside.get(t, -99) > turn - 8:
             continue
         if not visible(world, eye, t):
-            left.append(t)
             continue
         d = (t[0] - eye[0], t[1] - eye[1], t[2] - eye[2])
-        cmds += ["look_dir %.3f %.3f %.3f" % d, "delay 250", "mouse_down left",
-                 "delay %d" % hold_for(world.get(t)), "mouse_up left", "delay 200"]
-    return cmds, left
+        mem["aimed"] = t
+        return name + "_aim", ["look_dir %.3f %.3f %.3f" % d, "delay 250"], \
+            lambda n, t=t: n.crosshair is not None and tuple(n.crosshair[1:4]) == t
+    return None
 
 
 def feet_node(s):
@@ -325,7 +342,7 @@ def ahead(s, mem, n=1):
     return (f[0] + int(round(fx * n)), f[1], f[2] + int(round(fz * n)))
 
 
-def make_room(s, pick):
+def room_targets(s):
     """Plan B when there is no room to place anything (user, 2026-09-19):
     the eight nodes around the player at feet and head height dug, four
     headings, with the pickaxe if there is one. Plan A is not getting
@@ -335,14 +352,12 @@ def make_room(s, pick):
     neighbour goes on to the next node at the same height and never to
     the floor: the floor stays flat and the space traversable (user).
     A short hold, one node's worth."""
-    world = s.world
     f = feet_node(s)
     targets = []
     for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)):
         for dy in (0, 1):
             targets.append((f[0] + dx, f[1] + dy, f[2] + dz))
-    cmds, _ = dig_targets(s, world, targets, pick)
-    return cmds
+    return targets
 
 
 def look_away(s):
@@ -523,15 +538,12 @@ def stair_step(s, mem, pick, down):
         p0 = s.pos
         cmds = ["look_dir %.3f -0.3 %.3f" % (fx, fz)] + walk(0.6) + ["delay 400"]
         return "stair_walk", cmds, lambda n, p=p0: math.dist(n.pos, p) > 0.6
-    cmds, left = dig_targets(s, world, targets, pick)
-    if len(cmds) <= 2:
-        # Solid but nothing visible from here: closer, and turn to it
-        cmds = ["look_dir %.3f -0.5 %.3f" % (fx, fz)] + walk(0.3) + ["delay 300"]
-        return "stair_approach", cmds, None
-    was = len(to_dig)
-    name = "stair_step" if down else "tunnel_step"
-    return name, cmds + ["delay 300"], lambda n, w=was, ts=targets: \
-        sum(1 for t in ts if solid_at(n.world, t)) < w
+    r = dig_one(s, mem, targets, pick, "stair" if down else "tunnel")
+    if r is not None:
+        return r
+    # Solid but none reachable from here: closer, and turn to it
+    cmds = ["look_dir %.3f -0.5 %.3f" % (fx, fz)] + walk(0.3) + ["delay 300"]
+    return "stair_approach", cmds, None
 
 
 # The rules, in priority order. Each is (name, condition, act) where act
@@ -791,7 +803,7 @@ def rules(s, mem):
             if "stair_yaw" not in mem:
                 mem["stair_yaw"] = s.yaw
             name, cmds, exp = stair_step(s, mem, pick, down=s.pos[1] > -30)
-            return "mine" if name == "tunnel_step" else name, cmds, exp
+            return name, cmds, exp
         # Iron and coal to smelt, a furnace held: place it as the table is,
         # use it; the form rule feeds it
         if have(s, "iron", 1, mem) and have(s, "coal", 1, mem) and \
@@ -811,8 +823,11 @@ def rules(s, mem):
             if fslot is not None and mem.get("no_place_until", 0) > turn and tight(s) >= 4:
                 was = tight(s)
                 mem["no_place_until"] = 0
-                return "make_room", make_room(s, pick) + ["delay 300"], \
-                    lambda n, w=was: tight(n) < w or w == 0
+                r = dig_one(s, mem, room_targets(s), pick, "room")
+                if r is not None:
+                    return r
+                mem["no_place_until"] = 0
+                return "room_done", [look_away(s), ms(0.3)], None
             if fslot is not None:
                 yr = math.radians(s.yaw + rng.uniform(-60, 60))
                 cmds = ["keypress %d" % fslot, "delay 150",
@@ -843,8 +858,11 @@ def rules(s, mem):
             pick = hotbar_slot_of(s, "pick_stone") or hotbar_slot_of(s, "pick_wood")
             was = tight(s)
             mem["no_place_until"] = 0
-            return "make_room", make_room(s, pick) + ["delay 300"], \
-                lambda n, w=was: tight(n) < w or w == 0
+            r = dig_one(s, mem, room_targets(s), pick, "room")
+            if r is not None:
+                return r
+            mem["no_place_until"] = 0
+            return "room_done", [look_away(s), ms(0.3)], None
         if slot is not None:
             # A little off the last heading each try: the ground ahead
             # may be a slope or the player's own space, which the client
@@ -969,8 +987,14 @@ def main():
         label = "d%d" % turn
         if turn % SHOT_EVERY == 1:
             write("screenshot %s/%s.png" % (out, label))
+        # The cube of voxels about the feet under its own event, before the
+        # scan, both blocks read: the map is what the digging goes by
+        write("event scan_volume %d %s" % (VOLUME_R, label + "v"))
         write("event scan %d %s" % (RES, label))
+        vlines, _ = read_block(label + "v")
         lines, took = read_block(label)
+        if lines is not None and vlines is not None:
+            lines = vlines + lines
         if lines is None:
             say("turn %d: no scan block in %.1f s" % (turn, took))
             slow += 1
@@ -995,7 +1019,8 @@ def main():
                 mem["no_place_until"] = turn + 1
             elif expect_name == "make_room":
                 say("turn %d: the room did not open" % turn)
-            elif expect_name in ("mine", "stair_step", "tunnel_step", "stair_walk"):
+            elif expect_name in ("mine", "stair_walk", "stair_aim", "tunnel_aim",
+                                 "room_aim", "stair_dig", "tunnel_dig", "room_dig"):
                 say("turn %d: the tunnel did not advance; elsewhere for five turns" % turn)
                 mem["no_dig_stair_until"] = turn + 5
             elif expect_name in ("dig_stair", "stair_approach"):
@@ -1096,9 +1121,9 @@ done, 8 lines""".splitlines()
     hm = parse(hemmed)
     assert tight(hm) == 16
     name, cmds, exp = rules(hm, {"no_place_until": 99})
-    # sixteen: the ring at the feet and at the head, every voxel unknown
-    # and so kept solid until seen
-    assert name == "make_room" and cmds.count("mouse_down left") == 16, (name, len(cmds))
+    # one aim at a time: the ring at the feet and head, every voxel
+    # unknown and so kept solid until seen; the first is aimed at
+    assert name == "room_aim" and cmds[0].startswith("look_dir"), (name, cmds)
     # The scan's cube into the map, and a stair step by it: ahead on the
     # heading (yaw 0: +z) the head node is air, the feet node stone, the one
     # below dirt; only those two are dug, the head one not
@@ -1113,14 +1138,20 @@ done, 8 lines""".splitlines()
     cs.world = update_world(m, cs)
     assert cs.world[(10, 21, 11)] == "mcl_core:stone" and cs.world[(10, 22, 11)] == "air"
     name, cmds, exp = stair_step(cs, m, 1, down=True)
-    # one this turn: the node below is behind the feet node from the eye
-    assert name == "stair_step" and cmds.count("mouse_down left") == 1, (name, cmds)
-    cs.world[(10, 21, 11)] = "air"
+    # aimed at the feet node ahead (the one below is behind it from the eye)
+    assert name == "stair_aim" and m["aimed"] == (10, 21, 11), (name, cmds)
+    # the next scan's crosshair says it is pointed: dug, by the stone's hold
+    cs.crosshair = ("mcl_core:stone", 10, 21, 11)
     name, cmds, exp = stair_step(cs, m, 1, down=True)
-    assert name == "stair_step" and cmds.count("mouse_down left") == 1 and \
-        "delay 1100" in cmds, (name, cmds)   # the dirt's hold
+    assert name == "stair_dig" and "delay 1800" in cmds, (name, cmds)
+    # pointed elsewhere instead: set aside, the next target aimed at
+    m["aimed"] = (10, 21, 11)
+    cs.crosshair = ("mcl_core:dirt", 10, 20, 11)
+    name, cmds, exp = stair_step(cs, m, 1, down=True)
+    assert (10, 21, 11) in m["aside"] and name in ("stair_aim", "stair_approach"), name
     # dug, the step is walked; the floor under it (y 19) was never a target
-    cs.world[(10, 20, 11)] = "air"
+    m["aside"].clear()
+    cs.world[(10, 21, 11)] = "air"; cs.world[(10, 20, 11)] = "air"
     assert stair_step(cs, m, 1, down=True)[0] == "stair_walk"
     assert cs.world[(10, 19, 11)] == "mcl_core:stone"
     # A table in the crosshair with nothing more to craft at it is dug back
@@ -1130,7 +1161,7 @@ done, 8 lines""".splitlines()
     # With a stone pickaxe and no ore in view the driver mines for it
     mine = parse(["self at 0,-35,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_stone 1 | 2:mcl_core:cobble 20 | 3:mcl_crafting_table:crafting_table 1 | 4:mcl_core:stick 2 | 5:mcl_furnaces:furnace 1"])
     name, cmds, exp = rules(mine, {})
-    assert name == "mine" and cmds.count("mouse_down left") == 2, (name, cmds)
+    assert name == "tunnel_aim", (name, cmds)
     # Ore in the crosshair with a pickaxe is dug
     ore = parse(["self at 0,0,0 yaw 0 pitch 30 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_stone 1 | 2:mcl_core:cobble 20 | 3:mcl_crafting_table:crafting_table 1 | 4:mcl_core:stick 2",
                  "crosshair mcl_core:stone_with_iron at 0,-1,1"])
@@ -1169,7 +1200,7 @@ done, 8 lines""".splitlines()
     assert name == "dig_stone" and cmds[0] == "keypress 1", (name, cmds)
     # and with none in sight, down through the ground
     name, cmds, exp = rules(parse(["self at 0,5,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_wood 1 | 2:mcl_crafting_table:crafting_table 1 | 3:mcl_core:stick 2"]), {})
-    assert name == "stair_step" and cmds.count("mouse_down left") == 3, name
+    assert name == "stair_aim", name
     # A craft: a log in the hotbar wants planks; the form's slots give the
     # clicks, source, cell, source, result, empty slot
     inv = parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:jungletree 4",

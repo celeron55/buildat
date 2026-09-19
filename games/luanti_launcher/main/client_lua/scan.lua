@@ -100,6 +100,56 @@ return function(ctx)
 		end
 	end
 
+	-- `event scan_volume <radius> <label>`: the voxels around the player,
+	-- a cube of that radius about the feet, as a name table and one line
+	-- per (y, z) row of x. A driver keeps a map of them and picks which
+	-- to dig and which to keep (user, 2026-09-20), which the rays of
+	-- `scan` cannot give it; its own event, since a scan every turn does
+	-- not need the cube every turn. 0 is air or anything not there.
+	magic.SubscribeToEvent("command_seq:scan_volume", function(event_type, event_data)
+		local param = event_data:GetString("Param") or ""
+		local r, label = param:match("^(%d+)%s*(%S*)")
+		r = math.max(1, math.min(8, tonumber(r) or 4))
+		if label == nil or label == "" then
+			label = "volume"
+		end
+		local px, py, pz = ctx.player_pos()
+		local fx0 = math.floor(px + 0.5)
+		local fy0 = math.floor(py + 0.5)
+		local fz0 = math.floor(pz + 0.5)
+		local names, index = {}, {}
+		local lines = {}
+		for y = fy0 - r, fy0 + r do
+			for z = fz0 - r, fz0 + r do
+				local row = {}
+				for x = fx0 - r, fx0 + r do
+					local v = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
+					local name = v ~= nil and ctx.node_name_at(buildat.Vector3(x, y, z)) or nil
+					local i = 0
+					if name ~= nil and name ~= "air" then
+						i = index[name]
+						if i == nil then
+							names[#names + 1] = name
+							i = #names
+							index[name] = i
+						end
+					end
+					row[#row + 1] = tostring(i)
+				end
+				lines[#lines + 1] = string.format("scan %s: voxels y=%d z=%d x=%d: %s",
+						label, y, z, fx0 - r, table.concat(row, " "))
+			end
+		end
+		local legend = {}
+		for i, name in ipairs(names) do
+			legend[i] = i .. "=" .. name
+		end
+		table.insert(lines, 1, string.format("scan %s: voxel names %s", label,
+				table.concat(legend, " ")))
+		lines[#lines + 1] = string.format("scan %s: done, %d lines", label, #lines)
+		log:info(table.concat(lines, "\n"))
+	end)
+
 	magic.SubscribeToEvent("command_seq:scan", function(event_type, event_data)
 		local param = event_data:GetString("Param") or ""
 		local res, label = param:match("^(%d+)%s*(%S*)")
@@ -207,47 +257,6 @@ return function(ctx)
 							math.min(res - 1, math.floor((1 - sy) / 2 * res)))
 				end
 			end
-		end
-		-- The voxels around the player, a cube of radius VOX_R about the
-		-- feet, as a name table and one line per (y, z) row of x: a
-		-- driver keeps a grid of them and picks which to dig and which to
-		-- keep (user, 2026-09-20), which the rays above cannot give it.
-		-- 0 is air or anything not there.
-		local VOX_R = 4
-		local fx0 = math.floor(px + 0.5)
-		local fy0 = math.floor(py + 0.5)
-		local fz0 = math.floor(pz + 0.5)
-		local names, index = {}, {}
-		local rows = {}
-		for y = fy0 - VOX_R, fy0 + VOX_R do
-			for z = fz0 - VOX_R, fz0 + VOX_R do
-				local row = {}
-				for x = fx0 - VOX_R, fx0 + VOX_R do
-					local v = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
-					local name = v ~= nil and ctx.node_name_at(buildat.Vector3(x, y, z)) or nil
-					local i = 0
-					if name ~= nil and name ~= "air" then
-						i = index[name]
-						if i == nil then
-							names[#names + 1] = name
-							i = #names
-							index[name] = i
-						end
-					end
-					row[#row + 1] = tostring(i)
-				end
-				rows[#rows + 1] = string.format("scan %s: voxels y=%d z=%d x=%d: %s",
-						label, y, z, fx0 - VOX_R, table.concat(row, " "))
-			end
-		end
-		local legend = {}
-		for i, name in ipairs(names) do
-			legend[i] = i .. "=" .. name
-		end
-		lines[#lines + 1] = string.format("scan %s: voxel names %s", label,
-				table.concat(legend, " "))
-		for _, r in ipairs(rows) do
-			lines[#lines + 1] = r
 		end
 		-- What takes input, if anything: the form (the inventory, the
 		-- pause menu and the death screen are forms too) or the chat line
