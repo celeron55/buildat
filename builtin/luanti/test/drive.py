@@ -648,7 +648,7 @@ def rules(s, mem):
                         lambda n, w=r[2]: have(n, w, 1, mem)
             # A thing wanted in the hand lies past the hotbar: moved to
             # an empty hotbar slot (a pick up and a put down)
-            for word in ("crafting_table", "pick_stone", "pick_wood"):
+            for word in ("crafting_table", "pick_stone", "pick_wood", "furnace"):
                 if hotbar_slot_of(s, word) is not None:
                     continue
                 src = [sl for sl in s.slots if sl[0] == "main" and sl[1] > 9 and
@@ -792,6 +792,15 @@ def rules(s, mem):
     if wanted_craft(s, mem) is not None:
         return "open_inventory", ["keypress I", ms(1.0)], \
             lambda n: n.form is not None
+    # A thing wanted in the hand lying past the hotbar -- a stone pickaxe
+    # crafted and left in main:20 while the wooden one dug on -- and a
+    # hotbar slot free: the inventory, whose rule moves it
+    for word in ("crafting_table", "pick_stone", "pick_wood", "furnace"):
+        if hotbar_slot_of(s, word) is None and \
+                any(item_is(st, word) for i, st in mem.get("main", []) if i > 9) and \
+                any(st == "" for _, st in s.hotbar):
+            return "open_inventory", ["keypress I", ms(1.0)], \
+                lambda n: n.form is not None
     # Rung 3: the cobble for the stone pickaxe and the furnace comes from
     # the staircase down (user, 2026-09-20: not from looking around for
     # stone) -- one step a turn on one cardinal heading, the node ahead
@@ -831,7 +840,7 @@ def rules(s, mem):
         want = []
         if not have(s, "coal", 4, mem):
             want.append("stone_with_coal")
-        if hotbar_slot_of(s, "pick_stone") is not None and not have(s, "raw_iron", 3, mem):
+        if have(s, "pick_stone", 1, mem) and not have(s, "raw_iron", 3, mem):
             want.append("stone_with_iron")
         ores = [(x, y) for (x, y), b in s.bins.items()
                 if any(w in b["name"] for w in want) and b["d"] <= 10]
