@@ -1982,13 +1982,16 @@ function frame_peak.note(dt)
 	local vw = voxelworld.frame_us
 	local pk = buildat.packet_us
 	local phases = {
-		{"mesh", vw.mesh}, {"horizon", vw.horizon},
+		{"mesh", vw.mesh}, {"horizon", vw.horizon}, {"physics", vw.physics},
 		{"sky cube", sky_cube.us}, {"sky vis", frame_peak.skyvis_us},
 		{"script", frame_peak.script_us},
 		-- The packets' Lua, named by the packet that took longest
 		{"packets " .. pk.worst_name, pk.total},
+		-- The module's own frame: the HUD's redraw
+		{"hud", luanti.frame_us or 0},
 	}
-	vw.mesh, vw.horizon, sky_cube.us = 0, 0, 0
+	vw.mesh, vw.horizon, vw.physics, sky_cube.us = 0, 0, 0, 0
+	luanti.frame_us = 0
 	pk.total, pk.worst, pk.worst_name = 0, 0, ""
 	local accounted = 0
 	local longest, longest_phase = 0, "rest"
@@ -2023,6 +2026,17 @@ function frame_peak.note(dt)
 		end
 		log:debug(string.format("frame %.0f ms: %s", wall * 1000,
 				#said > 0 and table.concat(said, ", ") or "rest"))
+		-- And Urho's own table at once for a frame mostly outside the
+		-- marks: its interval is reset every second by the debug HUD,
+		-- so a table five seconds later has lost the frame. Its Max
+		-- column is the slow frame's.
+		if wall >= 0.2 and accounted < wall * 1000000 * 0.5 and
+				buildat.profiler_data and
+				(frame_peak.table_at or 0) + 5 < buildat.get_time_us() / 1e6 then
+			frame_peak.table_at = buildat.get_time_us() / 1e6
+			log:debug("profiler at that frame:\n" ..
+					(buildat.profiler_data(4) or ""))
+		end
 	end
 	frame_peak.line_due = frame_peak.line_due - dt
 	if frame_peak.line_due <= 0 then

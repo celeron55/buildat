@@ -10,6 +10,15 @@
 #include <Input.h>
 #include <FileSystem.h>
 #include <SDL/SDL.h>
+// The PNG encoder, ours in this file: Urho3D's Image::SavePNG is 180-210 ms
+// of the frame for a 1280x720 shot, on the main thread, and every
+// scripted run's screenshot was a "rest" peak in the frame column
+// ([FRAME_PEAK]); the pixels are copied out and written on a thread.
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#define STBIW_ASSERT(x)
+#include <STB/stb_image_write.h>
+#include <thread>
+#include <mutex>
 #include <cctype>
 #include <cerrno>
 #include <cstdlib>
@@ -764,6 +773,18 @@ ss_ screenshot_name(const ss_ &dir)
 	return name;
 }
 
+static std::mutex g_screenshot_mutex;
+static sv_<std::thread> g_screenshot_threads;
+
+void finish_screenshots()
+{
+	std::lock_guard<std::mutex> lock(g_screenshot_mutex);
+	for(std::thread &t : g_screenshot_threads)
+		if(t.joinable())
+			t.join();
+	g_screenshot_threads.clear();
+}
+
 bool save_screenshot(magic::Graphics *graphics, const ss_ &path, ss_ *error)
 {
 	if(!graphics){
@@ -784,11 +805,19 @@ bool save_screenshot(magic::Graphics *graphics, const ss_ &path, ss_ *error)
 	magic::FileSystem *fs = graphics->GetSubsystem<magic::FileSystem>();
 	if(fs && !parent.empty())
 		fs->RegisterPath(parent.c_str());
-	if(!img.SavePNG(abs.c_str())){
-		*error = "Failed to write \""+abs+"\"";
-		return false;
+	const int w = img.GetWidth(), h = img.GetHeight(),
+			c = (int)img.GetComponents();
+	sv_<unsigned char> pixels(img.GetData(),
+			img.GetData() + (size_t)w * h * c);
+	{
+		std::lock_guard<std::mutex> lock(g_screenshot_mutex);
+		g_screenshot_threads.emplace_back([abs, w, h, c, pixels](){
+			if(stbi_write_png(abs.c_str(), w, h, c, pixels.data(), w * c))
+				log_i(MODULE, "Wrote screenshot %s", cs(abs));
+			else
+				log_w(MODULE, "Failed to write \"%s\"", cs(abs));
+		});
 	}
-	log_i(MODULE, "Wrote screenshot %s", cs(abs));
 	return true;
 }
 

@@ -998,6 +998,7 @@ struct CApp: public App, public magic::Application
 
 	~CApp()
 	{
+		client::command_seq::finish_screenshots();
 		stop_local_server();
 	}
 

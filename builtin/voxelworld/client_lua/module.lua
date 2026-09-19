@@ -76,7 +76,7 @@ M.horizon = false
 -- horizon map's build and merge. The frame peak reads and zeroes them once
 -- a frame ([FRAME_PEAK]); accumulated rather than reset here, since the
 -- horizon work also runs from replicate's events outside the update.
-M.frame_us = {mesh = 0, horizon = 0}
+M.frame_us = {mesh = 0, horizon = 0, physics = 0}
 M.section_size_chunks = nil
 M.section_size_voxels = nil
 -- Start higher than any conceivable value because otherwise things will never
@@ -632,7 +632,10 @@ function sub_events()
 						geometry_done[node_update.node_id] = true
 					end
 					if node_update.type == "physics" then
+						local t0 = buildat.get_time_us()
 						update_voxel_physics(node)
+						M.frame_us.physics = M.frame_us.physics +
+								buildat.get_time_us() - t0
 					end
 				end
 				did_update = true

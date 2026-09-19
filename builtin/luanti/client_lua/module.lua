@@ -1425,8 +1425,13 @@ local function flush_hud()
 		f(M.hud_elements, M.hud_flags)
 	end
 end
+-- Microseconds this module's own frame work took since the frame peak
+-- last read it ([FRAME_PEAK]): the HUD redraw, which is most of it
+M.frame_us = 0
 magic.SubscribeToEvent("Update", function()
+	local t0 = buildat.get_time_us()
 	flush_hud()
+	M.frame_us = M.frame_us + buildat.get_time_us() - t0
 end)
 
 -- What the client's own hotbar is drawn out of, as the game last said it:
