@@ -230,10 +230,12 @@ def is_tree(name):
 # The last number is how many of the product the ladder wants before
 # the recipe is left alone: enough planks for the sticks and the table
 # and a pickaxe's handle later.
+# Enough for the table, the wooden pickaxe, a spare table to carry
+# underground for the stone one, and the sticks of both.
 RECIPES_2X2 = [
-    ("planks", {1: "tree"}, "wood", 8),
-    ("sticks", {1: "wood", 3: "wood"}, "stick", 4),
-    ("table", {1: "wood", 2: "wood", 3: "wood", 4: "wood"}, "crafting_table", 1),
+    ("planks", {1: "tree"}, "wood", 16),
+    ("sticks", {1: "wood", 3: "wood"}, "stick", 6),
+    ("table", {1: "wood", 2: "wood", 3: "wood", 4: "wood"}, "crafting_table", 2),
 ]
 
 
@@ -346,7 +348,7 @@ def wanted_craft(s, mem=None):
     for r in RECIPES_2X2:
         if have(s, r[2], r[3], mem):
             continue
-        if r[2] == "crafting_table" and table_near(s):
+        if r[2] == "crafting_table" and table_near(s) and have(s, r[2], 1, mem):
             continue
         need = {}
         for w in r[1].values():
@@ -493,7 +495,8 @@ def rules(s, mem):
     # the stone pickaxe and the furnace; the expectation is the crosshair
     # off that stone
     pick = hotbar_slot_of(s, "pick_stone") or hotbar_slot_of(s, "pick_wood")
-    if pick is not None and not have(s, "cobble", COBBLE_WANTED, mem):
+    kit = have(s, "crafting_table", 1, mem) and have(s, "stick", 2, mem)
+    if pick is not None and kit and not have(s, "cobble", COBBLE_WANTED, mem):
         if s.crosshair and s.crosshair[0].endswith(":stone"):
             was = s.crosshair
             cmds = ["keypress %d" % pick, "delay 150", "mouse_down left",
@@ -546,9 +549,9 @@ def rules(s, mem):
     # a tree in view, while logs are wanted (six cover the ladder's wood)
     trees = [(x, y) for (x, y), b in s.bins.items()
              if b["kind"] == "node" and is_tree(b["name"]) and b["d"] <= 10]
-    if have(s, "tree", 6, mem):
+    if have(s, "tree", 8, mem):
         trees = []
-    if s.crosshair and is_tree(s.crosshair[0]) and not have(s, "tree", 6, mem):
+    if s.crosshair and is_tree(s.crosshair[0]) and not have(s, "tree", 8, mem):
         cmds = ["mouse_down left", "delay 4000", "mouse_up left", "delay 300"]
         was = s.crosshair
         return "dig_tree", cmds, lambda n: n.crosshair != was
@@ -746,28 +749,29 @@ done, 8 lines""".splitlines()
     assert not exp(it)
     # With planks, sticks and a table in the hotbar a pickaxe is wanted:
     # the table is placed, then used, then its 3x3 form crafts
-    tab = parse(["self at 0,0,0 yaw 90 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 8 | 2:mcl_core:stick 4 | 3:mcl_crafting_table:crafting_table 1"])
+    tab = parse(["self at 0,0,0 yaw 90 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 16 | 2:mcl_core:stick 6 | 3:mcl_crafting_table:crafting_table 2"])
     assert wanted_craft_3x3(tab)[0] == "pick_wood"
     name, cmds, exp = rules(tab, {})
     assert name == "place_table" and cmds[0] == "keypress 3", (name, cmds)
-    at_table = parse(["self at 0,0,0 yaw 90 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 8 | 2:mcl_core:stick 4",
+    at_table = parse(["self at 0,0,0 yaw 90 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 16 | 2:mcl_core:stick 6 | 3:mcl_crafting_table:crafting_table 1",
                       "crosshair mcl_crafting_table:crafting_table at 1,0,0"])
     assert rules(at_table, {})[0] == "use_table"
     grid = ["self at 0,0,0 yaw 90 pitch 0 fov 72 hp ? wield \"\" hotbar 1:", "form \"main\" open",
-            "slot current_player:main:1 at 0,500 size 48x48 item \"mcl_core:junglewood 8\"",
-            "slot current_player:main:2 at 60,500 size 48x48 item \"mcl_core:stick 4\"",
+            "slot current_player:main:1 at 0,500 size 48x48 item \"mcl_core:junglewood 16\"",
+            "slot current_player:main:2 at 60,500 size 48x48 item \"mcl_core:stick 6\"",
+            "slot current_player:main:4 at 180,500 size 48x48 item \"mcl_crafting_table:crafting_table 1\"",
             "slot current_player:main:3 at 120,500 size 48x48 item \"\"",
             "slot current_player:craftpreview:1 at 600,100 size 48x48 item \"\""]
     grid += ["slot current_player:craft:%d at %d,%d size 48x48 item \"\"" % (i, 200 + (i - 1) % 3 * 60, 50 + (i - 1) // 3 * 60) for i in range(1, 10)]
     name, cmds, exp = rules(parse(grid), {})
     assert name == "craft_pick_wood" and cmds.count("mouse_click right") == 5, (name, cmds)
     # With a pickaxe and stone under the crosshair, the stone is dug
-    st = parse(["self at 0,0,0 yaw 0 pitch 30 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_wood 1",
+    st = parse(["self at 0,0,0 yaw 0 pitch 30 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_wood 1 | 2:mcl_crafting_table:crafting_table 1 | 3:mcl_core:stick 2",
                 "crosshair mcl_core:stone at 0,-1,1"])
     name, cmds, exp = rules(st, {})
     assert name == "dig_stone" and cmds[0] == "keypress 1", (name, cmds)
     # and with none in sight, down through the ground
-    name, cmds, exp = rules(parse(["self at 0,5,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_wood 1"]), {})
+    name, cmds, exp = rules(parse(["self at 0,5,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_wood 1 | 2:mcl_crafting_table:crafting_table 1 | 3:mcl_core:stick 2"]), {})
     assert name == "dig_down" and exp(parse(["self at 0,3,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:"])), name
     # A craft: a log in the hotbar wants planks; the form's slots give the
     # clicks, source, cell, source, result, empty slot
@@ -784,9 +788,9 @@ done, 8 lines""".splitlines()
     # Two planks make sticks but not a table, which takes four
     two = parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 2"])
     assert wanted_craft(two)[0] == "sticks"
-    assert wanted_craft(parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 2 | 2:mcl_core:stick 4"])) is None
-    # and with eight planks and sticks the table is what is wanted
-    assert wanted_craft(parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 8 | 2:mcl_core:stick 4"]))[0] == "table"
+    assert wanted_craft(parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 2 | 2:mcl_core:stick 6"])) is None
+    # and with planks and sticks enough the table is what is wanted
+    assert wanted_craft(parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 16 | 2:mcl_core:stick 6"]))[0] == "table"
     # What a form showed of the main list past the hotbar counts after it closed
     m = {}
     rules(parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:",
