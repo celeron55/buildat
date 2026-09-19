@@ -61,6 +61,45 @@ gather_licenses() {
 	return 0
 }
 
+# The Windows archive under Wine: the half that says the archive works
+# where it is going -- buildat_server.exe compiling every module of a game
+# with the compiler the archive ships -- and not yet the client, which
+# wants GL under Wine on top. Skipped with a word where there is no wine.
+smoke_test_wine() {
+	local archive="$1"
+	if ! command -v wine64 >/dev/null 2>&1 && ! command -v wine >/dev/null 2>&1; then
+		echo "smoke test under Wine: no wine here; not run"
+		return 0
+	fi
+	local wine
+	wine=$(command -v wine64 || command -v wine)
+	local dir
+	dir=$(mktemp -d)
+	(cd "$dir" && unzip -q "$archive")
+	local unpacked
+	unpacked=$(ls -d "$dir"/*/ | head -1)
+	local port=$(( 29600 + (RANDOM % 90) ))
+	echo "smoke test under Wine in $unpacked"
+	export WINEDEBUG=-all WINEPREFIX="$dir/wine"
+	(cd "$unpacked" && "$wine" bin/buildat_server.exe -m games/digger -P "$port" > "$dir/srv.log" 2>&1) &
+	local srv=$!
+	local i
+	for i in $(seq 1 900); do
+		grep -q "Listening at" "$dir/srv.log" 2>/dev/null && break
+		kill -0 "$srv" 2>/dev/null || break
+		sleep 1
+	done
+	kill -INT "$srv" 2>/dev/null; sleep 3; kill -9 "$srv" 2>/dev/null
+	wait "$srv" 2>/dev/null || true
+	"$wine"server -k 2>/dev/null || true
+	if ! grep -q "Listening at" "$dir/srv.log"; then
+		echo "smoke test under Wine: the server did not come up; its log:" >&2
+		tail -40 "$dir/srv.log" >&2
+		exit 1
+	fi
+	echo "smoke test under Wine passed: the server compiled its modules and listened"
+}
+
 # One archive: a build tree configured for it, the install rules into a
 # staging directory named as the archive is, and the archive out of that
 make_one() {
@@ -169,7 +208,8 @@ windows)
 		-DCMAKE_TOOLCHAIN_FILE="$tc" \
 		-DMINGW_PREFIX="${MINGW_PREFIX:-/usr/bin/x86_64-w64-mingw32}" \
 		-DBUILDAT_SHIP_COMPILER="${BUILDAT_SHIP_COMPILER:-/opt/winlibs/mingw64}")
-	echo "archive: $a (the smoke test under Wine is not here yet)"
+	echo "archive: $a"
+	smoke_test_wine "$a"
 	;;
 *)
 	echo "unknown target $target" >&2; exit 2 ;;
