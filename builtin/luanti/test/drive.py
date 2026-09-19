@@ -238,7 +238,7 @@ def tight(s):
 # node centres.
 NOT_SOLID = ("air", "water", "lava", "grass", "fern", "flower", "sapling",
              "vine", "bamboo", "clover", "dandelion", "mushroom", "torch",
-             "snow", "seagrass", "kelp", "bush", "leaves_", "sugar")
+             "snow", "seagrass", "kelp", "bush", "sugar")
 
 
 def update_world(mem, s):
