@@ -3225,7 +3225,9 @@ local function appearance_of(o)
 		if name == "" then
 			return "box", ""
 		end
-		return "sprite", core.__item_image_of(name) or ""
+		-- The item's name rides along, so a client can say "an item"
+		-- rather than "a sprite" of it ([SCAN_EVENT])
+		return "sprite", core.__item_image_of(name) or "", name
 	end
 	return "box", ""
 end

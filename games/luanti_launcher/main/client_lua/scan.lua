@@ -166,22 +166,45 @@ return function(ctx)
 				local name, p, d, through = ray(p0, dir)
 				local via = #through > 0 and
 						(" via " .. table.concat(through, ",")) or ""
-				-- An object before the voxel, named by what it is drawn
-				-- with: the client has no name for a mob
-				local dn = dir / dir:length()
-				local oid, od = luanti.pointed_object(p0.x, p0.y, p0.z,
-						dn.x, dn.y, dn.z, d or RANGE)
-				if oid then
-					lines[#lines + 1] = string.format(
-							"scan %s: bin %d,%d: object %s %s d=%.1f", label,
-							bx, by, tostring(oid), luanti.object_label(oid), od)
-				elseif name then
+				-- The bins are voxels only; the objects are the listing
+				-- below, every one on the screen
+				if name then
 					lines[#lines + 1] = string.format(
 							"scan %s: bin %d,%d: %s at %d,%d,%d d=%.1f%s",
 							label, bx, by, name, p.x, p.y, p.z, d, via)
 				else
 					lines[#lines + 1] = string.format("scan %s: bin %d,%d: %s%s",
 							label, bx, by, dir.y > 0.2 and "sky" or "nothing", via)
+				end
+			end
+		end
+		-- Every object on the screen, by projection: a bin's ray misses
+		-- an item lying about most of the time (a bin is ten degrees
+		-- wide, an item four at four nodes), and this does not. The
+		-- screen position is in window pixels, the bin the one its
+		-- centre falls in.
+		local k = magic.ui:GetScale()
+		if not k or k <= 0 then
+			k = 1
+		end
+		local ww, wh = magic.ui.root.width * k, magic.ui.root.height * k
+		local function dot(a, b)
+			return a.x * b.x + a.y * b.y + a.z * b.z
+		end
+		for _, o in ipairs(luanti.objects()) do
+			local d = buildat.Vector3(o.x, o.y, o.z) - p0
+			local depth = dot(d, fwd)
+			if depth > 0.1 and depth <= RANGE then
+				local sx = dot(d, right) / depth / (tan_v * aspect)
+				local sy = dot(d, up) / depth / tan_v
+				if sx >= -1 and sx <= 1 and sy >= -1 and sy <= 1 then
+					lines[#lines + 1] = string.format(
+							"scan %s: object %s %s at %.1f,%.1f,%.1f d=%.1f screen %d,%d bin %d,%d",
+							label, tostring(o.id), o.label, o.x, o.y, o.z,
+							d:length(), math.floor((sx + 1) / 2 * ww),
+							math.floor((1 - sy) / 2 * wh),
+							math.min(res - 1, math.floor((sx + 1) / 2 * res)),
+							math.min(res - 1, math.floor((1 - sy) / 2 * res)))
 				end
 			end
 		end

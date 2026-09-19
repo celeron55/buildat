@@ -89,10 +89,11 @@ class State:
         self.bars = {}       # texture -> (number, total)
         self.chat = None
         self.slots = []      # (list, index, x, y, size, item string), pixels
+        self.objects = []    # dict(id, label, at, d, screen, bin): every one on the screen
 
 
 BIN_RE = re.compile(
-    r"bin (\d+),(\d+): (object \S+ |)(\S+)(?: at (-?\d+),(-?\d+),(-?\d+))?"
+    r"bin (\d+),(\d+): (\S+)(?: at (-?\d+),(-?\d+),(-?\d+))?"
     r"(?: d=([\d.]+))?(?: via (\S+))?$")
 UI_RE = re.compile(
     r"ui\s+(\w+) at (-?\d+),(-?\d+) size (\d+)x(\d+)(?: text \"(.*?)\")?"
@@ -120,15 +121,21 @@ def parse(lines):
         if m:
             s.crosshair = (m.group(1),) + tuple(int(m.group(i)) for i in (2, 3, 4))
             continue
+        m = re.match(r"object (\S+) (\S+) at (-?[\d.]+),(-?[\d.]+),(-?[\d.]+) d=([\d.]+) "
+                     r"screen (-?\d+),(-?\d+) bin (\d+),(\d+)", line)
+        if m:
+            s.objects.append({"id": m.group(1), "label": m.group(2),
+                              "at": tuple(float(m.group(i)) for i in (3, 4, 5)),
+                              "d": float(m.group(6)),
+                              "screen": (int(m.group(7)), int(m.group(8))),
+                              "bin": (int(m.group(9)), int(m.group(10)))})
+            continue
         m = BIN_RE.match(line)
         if m:
-            b = {"kind": "object" if m.group(3) else "node",
-                 "name": m.group(4), "d": float(m.group(8) or 0),
-                 "via": (m.group(9) or "").split(",") if m.group(9) else []}
-            if m.group(3):
-                b["id"] = m.group(3).split()[1]
-            if m.group(5):
-                b["at"] = tuple(int(m.group(i)) for i in (5, 6, 7))
+            b = {"kind": "node", "name": m.group(3), "d": float(m.group(7) or 0),
+                 "via": (m.group(8) or "").split(",") if m.group(8) else []}
+            if m.group(4):
+                b["at"] = tuple(int(m.group(i)) for i in (4, 5, 6))
             s.bins[(int(m.group(1)), int(m.group(2)))] = b
             continue
         m = re.match(r"form \"(.*)\" open", line)
@@ -177,6 +184,18 @@ def look_at_bin(s, bx, by, level=True):
     d = bin_dir(s, bx, by)
     if level:
         d = (d[0], 0.0, d[2])
+    return "look_dir %.3f %.3f %.3f" % d
+
+
+def look_at_object(s, o, level=True):
+    """A look_dir at an object's position from the eye (a node and a half
+    over the feet)."""
+    ex, ey, ez = s.pos[0], s.pos[1] + 1.5, s.pos[2]
+    d = (o["at"][0] - ex, o["at"][1] - ey, o["at"][2] - ez)
+    if level:
+        d = (d[0], 0.0, d[2])
+    if math.hypot(d[0], d[2]) < 0.05:
+        return None
     return "look_dir %.3f %.3f %.3f" % d
 
 
@@ -373,6 +392,32 @@ def rules(s, mem):
                 return "eat", cmds, lambda nx, tex=tex, n=n: \
                     tex in nx.bars and nx.bars[tex][0] > n
 
+    # an item in view: walk to it, and the hotbar should gain within two
+    # turns (the pickup is the game's, at about a node)
+    # turns; the expectation is the hotbar up, the item gone, or a node
+    # nearer to it. An item not reached in four turns is left alone for
+    # a while (a bamboo drop across a thicket, seed 5).
+    given_up = mem.setdefault("given_up", {})
+    items = [o for o in s.objects if o["label"].startswith("item:") and
+             o["d"] <= 10 and given_up.get(o["id"], -99) < turn - 30]
+    if items:
+        o = min(items, key=lambda o: o["d"])
+        tries = mem.setdefault("item_tries", {})
+        tries[o["id"]] = tries.get(o["id"], 0) + 1
+        if tries[o["id"]] > 4:
+            given_up[o["id"]] = turn
+            tries[o["id"]] = 0
+        else:
+            look = look_at_object(s, o)
+            if look:
+                before = sum(count_of(st) for _, st in s.hotbar)
+                walk_s = min(TURN_S, max(0.3, (o["d"] - 0.5) / 4))
+                return "to_item", [look] + walk(walk_s, jump=True), \
+                    lambda n, b=before, oid=o["id"], d0=o["d"]: \
+                        sum(count_of(st) for _, st in n.hotbar) > b or \
+                        all(x["id"] != oid for x in n.objects) or \
+                        any(x["id"] == oid and x["d"] < d0 - 1 for x in n.objects)
+
     # something to craft from what is held: open the inventory, and the
     # form rule above does the craft
     if wanted_craft(s, mem) is not None:
@@ -397,13 +442,16 @@ def rules(s, mem):
         return "to_tree", cmds, None
 
     # a mob in view: punch it once and back off
-    mobs = [(x, y) for (x, y), b in s.bins.items() if b["kind"] == "object"]
+    mobs = [o for o in s.objects if not o["label"].startswith("item:") and
+            o["d"] <= 4]
     if mobs and mem.get("punched_turn", -99) < turn - 5:
-        bx, by = min(mobs, key=lambda k: s.bins[k]["d"])
-        mem["punched_turn"] = turn
-        cmds = [look_at_bin(s, bx, by, level=False), "delay 200",
-                "mouse_click left", "delay 200", "keydown S", ms(0.8), "keyup S"]
-        return "punch", cmds, None
+        o = min(mobs, key=lambda o: o["d"])
+        look = look_at_object(s, o, level=False)
+        if look:
+            mem["punched_turn"] = turn
+            cmds = [look, "delay 200", "mouse_click left", "delay 200",
+                    "keydown S", ms(0.8), "keyup S"]
+            return "punch", cmds, None
 
     # something to place: a placeable wielded and the crosshair on ground
     if s.crosshair and s.wield and ":" in s.wield and rng.random() < 0.1:
@@ -513,7 +561,7 @@ def check():
 crosshair mcl_core:tree at 3,8,-3
 bin 0,0: sky
 bin 3,3: mcl_core:tree at 3,8,-3 d=2.5 via mcl_core:leaves
-bin 4,7: object 12 mobs_mc_zombie.png d=4.2
+object 12 mobs_mc_zombie.png at 3.0,8.0,-1.0 d=4.2 screen 700,600 bin 4,7
 bin 7,7: nothing
 hud statbar "hunger.png" 6/20
 no form open
@@ -524,7 +572,7 @@ done, 8 lines""".splitlines()
     assert s.hotbar == [(1, "mcl_core:apple 3"), (2, "")], s.hotbar
     assert s.crosshair == ("mcl_core:tree", 3, 8, -3)
     assert s.bins[(3, 3)]["via"] == ["mcl_core:leaves"] and s.bins[(3, 3)]["d"] == 2.5
-    assert s.bins[(4, 7)]["kind"] == "object" and s.bins[(4, 7)]["id"] == "12"
+    assert s.objects[0]["id"] == "12" and s.objects[0]["bin"] == (4, 7)
     assert s.bins[(0, 0)]["name"] == "sky" and s.bins[(7, 7)]["name"] == "nothing"
     assert s.bars["hunger.png"] == (6, 20) and s.form is None
     # Hungry with food on the hotbar eats before it digs
@@ -540,6 +588,15 @@ done, 8 lines""".splitlines()
                   "ui   Button at 500,300 size 100x40 text \"Respawn\""])
     name, cmds, exp = rules(form, {})
     assert name == "respawn" and cmds[0] == "mouse_pos 550 320", cmds
+    # An item on the screen is walked to, and the expectation is the
+    # hotbar's count up or the item gone
+    it = parse(["self at 10,4,10 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:jungletree 2",
+                "object 41 item:mcl_core:jungletree at 12.0,4.2,13.0 d=3.6 screen 700,400 bin 4,4"])
+    assert it.objects[0]["label"] == "item:mcl_core:jungletree"
+    name, cmds, exp = rules(it, {})
+    assert name == "to_item" and cmds[0].startswith("look_dir 2.000 0.000 3.000"), cmds
+    assert exp(parse(["self at 10,4,10 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:jungletree 3"]))
+    assert not exp(it)
     # A craft: a log in the hotbar wants planks; the form's slots give the
     # clicks, source, cell, source, result, empty slot
     inv = parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:jungletree 4",

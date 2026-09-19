@@ -682,6 +682,11 @@ end
 -- lua/entity.lua.
 local function parse_look(kind, texture, detail)
 	local look = {kind = kind, texture = texture}
+	if kind == "sprite" and detail ~= nil and detail ~= "" then
+		-- A sprite of an item lying about: the detail is the item's name
+		look.item = detail
+		return look
+	end
 	if kind ~= "mesh" or detail == nil or detail == "" then
 		return look
 	end
@@ -755,6 +760,9 @@ function M.object_label(id)
 	local have = object_nodes[id]
 	if have == nil then
 		return "?"
+	end
+	if have.look and have.look.item then
+		return "item:" .. have.look.item:gsub("[%s|]", "_")
 	end
 	local t = have.texture or have.mesh
 	if type(t) == "table" then
@@ -2371,6 +2379,21 @@ function M.form_slots()
 					(slot.stack.name .. " " .. tostring(slot.stack.count or 1))
 					or "",
 		}
+	end
+	return out
+end
+
+-- Every object the client has a node for, but the player's own, with
+-- where it is: the scan projects them into the frame and lists the ones
+-- on the screen ([SCAN_EVENT]); a bin's ray misses most items
+function M.objects()
+	local out = {}
+	for id, have in pairs(object_nodes) do
+		if id ~= M.self_id then
+			local p = have.node.position
+			out[#out + 1] = {id = id, x = p.x, y = p.y, z = p.z,
+					label = M.object_label(id)}
+		end
 	end
 	return out
 end
