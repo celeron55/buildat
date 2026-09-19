@@ -44,8 +44,18 @@ core.register_on_dignode(function(pos, node, digger)
 		return
 	end
 	dug = dug + 1
-	if #core.get_node_drops(node.name, "") > 0 then
-		dropping = dropping + 1
+	-- What actually dropped, not what get_node_drops() says would: a game
+	-- with harvest rules (VoxeLibre's can_harvest -- stone by hand drops
+	-- nothing) or a creative inventory hands the drops over differently,
+	-- and the drops are made before this callback runs, so an item entity
+	-- beside the node is the fact ([DUG_NOT_HELD], seed 13: nine digs of
+	-- nodes the engine's table says drop, nothing in hand, nothing wrong)
+	for _, obj in ipairs(core.get_objects_inside_radius(pos, 1.5)) do
+		local le = obj:get_luaentity()
+		if le and le.name == "__builtin:item" then
+			dropping = dropping + 1
+			break
+		end
 	end
 end)
 core.register_on_placenode(function(pos, node, placer)
