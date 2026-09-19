@@ -1747,6 +1747,16 @@ struct CInstance: public voxelworld::Instance
 
 	void load_section_no_generate(const pv::Vector3DInt16 &section_p)
 	{
+		// Not one the streamer will unload on its next pass: a mapgen
+		// mod's write below the world's bottom section made two sections
+		// of scene nodes for the streamer to take down at once, 500 ms in
+		// the step ([STEP_SLICE]). What is written there is dropped, as
+		// Luanti drops a vmanip's writes outside its emerged area.
+		if(!m_load_points.empty() && !is_wanted_loaded(section_p)){
+			log_v(MODULE, "A write into section " PV3I_FORMAT " outside the "
+					"load range is dropped", PV3I_PARAMS(section_p));
+			return;
+		}
 		Section &section = force_get_section(section_p);
 		if(!section.loaded)
 			load_section(section);
@@ -2750,6 +2760,10 @@ struct CInstance: public voxelworld::Instance
 			Section *section = get_section(section_p);
 			if(section == nullptr || !section->loaded){
 				if(!create_missing_sections)
+					continue;
+				// And not outside the load range either, once there is
+				// one; see load_section_no_generate()
+				if(!m_load_points.empty() && !is_wanted_loaded(section_p))
 					continue;
 				// Created but not generated: the voxels are undefined apart
 				// from what this volume writes, and generate_section() will
