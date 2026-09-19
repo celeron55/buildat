@@ -784,15 +784,26 @@ ss_ screenshot_name(const ss_ &dir)
 }
 
 static std::mutex g_screenshot_mutex;
-static sv_<std::thread> g_screenshot_threads;
+// Joined at exit as well as by finish_screenshots(): a std::thread still
+// joinable when its vector is destroyed calls terminate, which is what
+// the client did on quit three seconds after its last shot (the campaign
+// rerun's seed 1, 2026-09-19)
+static struct ScreenshotThreads {
+	sv_<std::thread> v;
+	~ScreenshotThreads(){
+		for(std::thread &t : v)
+			if(t.joinable())
+				t.join();
+	}
+} g_screenshot_threads;
 
 void finish_screenshots()
 {
 	std::lock_guard<std::mutex> lock(g_screenshot_mutex);
-	for(std::thread &t : g_screenshot_threads)
+	for(std::thread &t : g_screenshot_threads.v)
 		if(t.joinable())
 			t.join();
-	g_screenshot_threads.clear();
+	g_screenshot_threads.v.clear();
 }
 
 bool save_screenshot(magic::Graphics *graphics, const ss_ &path, ss_ *error)
@@ -821,7 +832,7 @@ bool save_screenshot(magic::Graphics *graphics, const ss_ &path, ss_ *error)
 			img.GetData() + (size_t)w * h * c);
 	{
 		std::lock_guard<std::mutex> lock(g_screenshot_mutex);
-		g_screenshot_threads.emplace_back([abs, w, h, c, pixels](){
+		g_screenshot_threads.v.emplace_back([abs, w, h, c, pixels](){
 			if(stbi_write_png(abs.c_str(), w, h, c, pixels.data(), w * c))
 				log_i(MODULE, "Wrote screenshot %s", cs(abs));
 			else
