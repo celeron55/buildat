@@ -60,24 +60,28 @@ def read_block(label):
     the label prefix, or None on timeout."""
     global seen
     t0 = time.time()
-    buf = ""
+    buf = b""
+    start = seen
     while time.time() - t0 < SCAN_TIMEOUT_S:
         with open(log, "rb") as f:
-            f.seek(seen)
+            f.seek(start + len(buf))
             data = f.read()
         if data:
-            seen += len(data)
-            buf += data.decode("utf-8", "replace")
-            m = re.search(r"scan %s: done, \d+ lines" % re.escape(label), buf)
+            buf += data
+            m = re.search(br"scan %s: done, \d+ lines" % re.escape(label).encode(), buf)
             if m:
+                # Only up to this block's end is consumed: the next block
+                # (a scan after a scan_volume) may be in the same read
+                seen = start + m.end()
                 lines = []
                 pre = "scan %s: " % label
-                for line in buf[:m.end()].splitlines():
+                for line in buf[:m.end()].decode("utf-8", "replace").splitlines():
                     i = line.find(pre)
                     if i >= 0:
                         lines.append(line[i + len(pre):])
                 return lines, time.time() - t0
         time.sleep(0.05)
+    seen = start + len(buf)
     return None, time.time() - t0
 
 
