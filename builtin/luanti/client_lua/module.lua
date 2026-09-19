@@ -619,6 +619,17 @@ end
 -- A look that changed is a node made again: a billboard and a model are
 -- different components, and one object is not redrawn often enough for the
 -- difference to be worth keeping.
+-- Building a node -- a model cloned, a material and a texture made -- is
+-- the cost of the objects packet, and a packet is every object in view: a
+-- spawn wave or a look change across a herd was 0.1-0.4 s in one frame
+-- ([FRAME_PEAK], the fuzz campaign's frame column). So a packet builds
+-- under a budget and the rest wait for the next; an object not built yet
+-- is not drawn for a frame or two, and the packet a fifth of a second
+-- later places it. Reset by the packet, spent by object_node().
+local OBJECT_BUILD_BUDGET_US = 4000
+local object_build_left_us = OBJECT_BUILD_BUDGET_US
+local objects_deferred = 0
+
 local function object_node(id)
 	local have = object_nodes[id]
 	local look = object_looks[id] or {kind = "box", texture = ""}
@@ -632,10 +643,17 @@ local function object_node(id)
 			have.mesh == look.mesh then
 		return have.node
 	end
+	if object_build_left_us <= 0 then
+		objects_deferred = objects_deferred + 1
+		return nil
+	end
 	if have then
 		have.node:Remove()
 	end
+	local t0 = buildat.get_time_us()
 	local node = make_object_node(look)
+	object_build_left_us = object_build_left_us -
+			(buildat.get_time_us() - t0)
 	object_nodes[id] = {node = node, drawn_as = drawn_as, mesh = look.mesh,
 			texture = look.texture, look = look}
 	return node
@@ -783,6 +801,10 @@ local function place_object(id, v, i)
 		return
 	end
 	local node = object_node(id)
+	if node == nil then
+		-- Out of this packet's budget; the next one places it
+		return
+	end
 	node.position = magic.Vector3(v[i + 1], v[i + 2], v[i + 3])
 	local have = object_nodes[id]
 	-- What the object collides with, which is what is aimed at: a model is
@@ -809,15 +831,28 @@ buildat.sub_packet("luanti:objects", function(data)
 	if not object_scene then
 		return
 	end
+	local t0 = buildat.get_time_us()
 	local v = cereal.binary_input(data, {"array", "double"})
+	local t1 = buildat.get_time_us()
 	local seen = {}
 	local STRIDE = 8
 	local i = 1
+	object_build_left_us = OBJECT_BUILD_BUDGET_US
+	objects_deferred = 0
 	while i + STRIDE - 1 <= #v do
 		local id = tostring(math.floor(v[i]))
 		seen[id] = true
 		place_object(id, v, i)
 		i = i + STRIDE
+	end
+	local t2 = buildat.get_time_us()
+	-- A slow packet says where it went: decoding the doubles, or placing
+	if t2 - t0 >= 30000 or objects_deferred > 0 then
+		log:debug(string.format("objects: %d in %.0f ms: decode %.0f ms, " ..
+				"place %.0f ms (built %.0f ms, %d deferred)", #v / STRIDE,
+				(t2 - t0) / 1000, (t1 - t0) / 1000, (t2 - t1) / 1000,
+				(OBJECT_BUILD_BUDGET_US - object_build_left_us) / 1000,
+				objects_deferred))
 	end
 	-- What is not in the list any more has been removed
 	for id, have in pairs(object_nodes) do
