@@ -56,6 +56,28 @@ static int l_profiler_block_begin(lua_State *L)
 	return 0;
 }
 
+// profiler_data(max_depth) -> string: Urho3D's profiler table for the
+// interval since the last call (a block's average and max per frame), which
+// is what says where a frame went when the script's own marks do not
+// ([FRAME_PEAK]). Each call starts the next interval.
+static int l_profiler_data(lua_State *L)
+{
+	int max_depth = luaL_optinteger(L, 1, 3);
+
+	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
+	lua_pop(L, 1);
+	Context *context = buildat_app->get_scene()->GetContext();
+
+	Profiler *profiler = context->GetSubsystem<magic::Profiler>();
+	if(!profiler)
+		return 0;
+	magic::String data = profiler->PrintData(false, false, max_depth);
+	profiler->BeginInterval();
+	lua_pushstring(L, data.CString());
+	return 1;
+}
+
 static int l_profiler_block_end(lua_State *L)
 {
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
@@ -189,6 +211,7 @@ void init_misc_urho3d(lua_State *L)
 }
 	DEF_BUILDAT_FUNC(profiler_block_begin);
 	DEF_BUILDAT_FUNC(profiler_block_end);
+	DEF_BUILDAT_FUNC(profiler_data);
 	DEF_BUILDAT_FUNC(add_resource_dir);
 	DEF_BUILDAT_FUNC(render_scene_to_texture);
 	DEF_BUILDAT_FUNC(set_preferred_viewports);

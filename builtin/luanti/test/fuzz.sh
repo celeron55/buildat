@@ -11,7 +11,9 @@
 # person to look through when the run fails.
 #
 # LOG_LEVEL=6 has every slow step at trace with the emerge phase broken
-# down ([STEP_PEAK]); the default 4 is verbose.
+# down ([STEP_PEAK]); the default 4 is verbose. CLIENT_LOG_LEVEL=5 has the
+# client's frames over 50 ms with their phases and Urho's profiler table
+# beside every frame peak line over the ceiling ([FRAME_PEAK]).
 # Never beside another buildat_server: the save's sqlite and the desktop
 # are one each.
 set -u
@@ -125,7 +127,8 @@ sleep 5
 srv=$(pgrep -x buildat_server | head -1)
 [ -n "$srv" ] || { echo "the server did not come up" >&2; tail -3 "$out/srv.log" >&2; exit 1; }
 
-bin/buildat -s "localhost:$port" -w 1280x720 -l 3 -c @"$out/cmds.txt" 2>&1 \
+bin/buildat -s "localhost:$port" -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
+	-c @"$out/cmds.txt" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log" &
 cli=$!
 wait "$cli"
@@ -151,7 +154,7 @@ grep -aq "Lua runtime error\|Crash:" "$out/cli.log" && say "the client crashed o
 # first such line skipped as the load's. Warn over 50 ms, fail over 250 ms,
 # first-cut numbers argued with in doc/plan/performance_plan.md.
 frames=$(grep -a "frame peak" "$out/cli.log" | tail -n +2 |
-	sed 's/^.*frame peak \([0-9.]*\) s in \([a-z ]*\), held.*$/\1 \2/')
+	sed 's/^.*frame peak \([0-9.]*\) s in \(.*\), held.*$/\1 \2/')
 worst=$(echo "$frames" | sort -rn | head -1)
 if [ -n "$worst" ]; then
 	echo "$frames" | awk '$1 > 0.05 {n++} END {

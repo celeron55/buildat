@@ -1910,28 +1910,38 @@ end
 -- phases are what the client's frame does on the main thread that a
 -- profiler block would sit around -- the mesh commit and the horizon
 -- map (voxelworld's), the sky cube's render, the sky-visibility sweep,
--- and this script's own update -- and "rest" is the frame's time none of
--- them account for: the renderer, the network, the UI. The wall time is
--- Urho's TimeStep, which is the previous frame's, so the phases are
--- read one frame late to match it. See [FRAME_PEAK] in
+-- this script's own update and the packets' Lua (client/packet.lua) --
+-- and "rest" is the frame's time none of them account for: the
+-- renderer, the network, the UI. The wall time is
+-- the clock between this update and the last -- not Urho's TimeStep,
+-- which its minFps clamps to 0.1 s -- so it is the previous frame's and
+-- the phases are read one frame late to match it. See [FRAME_PEAK] in
 -- doc/plan/performance_plan.md.
 -- One table, this file being near Lua's 200 locals. A frame over
--- CEILING_S is a line at trace, and the worst since the last info line
+-- CEILING_S is a line at debug (trace is voxelworld's per-voxel spam), and the worst since the last info line
 -- is said at info every LINE_S; the fuzz run reads the info lines.
 local frame_peak = {DECAY = 0.99425, DECAY_EVERY_S = 0.5,
 		CEILING_S = 0.05, LINE_S = 5,
 		s = 0, phase = "", decay_due = 0,
 		worst = 0, worst_phase = "", line_due = 5,
 		-- this frame's own phases, in microseconds, set by the handler
-		skyvis_us = 0, script_us = 0}
+		skyvis_us = 0, script_us = 0, last_us = nil}
 function frame_peak.note(dt)
+	local now = buildat.get_time_us()
+	local wall = frame_peak.last_us and (now - frame_peak.last_us) / 1000000
+			or dt
+	frame_peak.last_us = now
 	local vw = voxelworld.frame_us
+	local pk = buildat.packet_us
 	local phases = {
 		{"mesh", vw.mesh}, {"horizon", vw.horizon},
 		{"sky cube", sky_cube.us}, {"sky vis", frame_peak.skyvis_us},
 		{"script", frame_peak.script_us},
+		-- The packets' Lua, named by the packet that took longest
+		{"packets " .. pk.worst_name, pk.total},
 	}
 	vw.mesh, vw.horizon, sky_cube.us = 0, 0, 0
+	pk.total, pk.worst, pk.worst_name = 0, 0, ""
 	local accounted = 0
 	local longest, longest_phase = 0, "rest"
 	for _, ph in ipairs(phases) do
@@ -1940,7 +1950,7 @@ function frame_peak.note(dt)
 			longest, longest_phase = ph[2], ph[1]
 		end
 	end
-	local rest = dt * 1000000 - accounted
+	local rest = wall * 1000000 - accounted
 	if rest > longest then
 		longest_phase = "rest"
 	end
@@ -1949,13 +1959,13 @@ function frame_peak.note(dt)
 		frame_peak.s = frame_peak.s * frame_peak.DECAY
 		frame_peak.decay_due = frame_peak.DECAY_EVERY_S
 	end
-	if dt > frame_peak.s then
-		frame_peak.s, frame_peak.phase = dt, longest_phase
+	if wall > frame_peak.s then
+		frame_peak.s, frame_peak.phase = wall, longest_phase
 	end
-	if dt > frame_peak.worst then
-		frame_peak.worst, frame_peak.worst_phase = dt, longest_phase
+	if wall > frame_peak.worst then
+		frame_peak.worst, frame_peak.worst_phase = wall, longest_phase
 	end
-	if dt >= frame_peak.CEILING_S then
+	if wall >= frame_peak.CEILING_S then
 		local said = {}
 		for _, ph in ipairs(phases) do
 			if ph[2] >= 5000 then
@@ -1963,7 +1973,7 @@ function frame_peak.note(dt)
 						ph[2] / 1000)
 			end
 		end
-		log:trace(string.format("frame %.0f ms: %s", dt * 1000,
+		log:debug(string.format("frame %.0f ms: %s", wall * 1000,
 				#said > 0 and table.concat(said, ", ") or "rest"))
 	end
 	frame_peak.line_due = frame_peak.line_due - dt
@@ -1976,6 +1986,13 @@ function frame_peak.note(dt)
 			log:info(string.format("frame peak %.3f s in %s, held %.3f s",
 					frame_peak.worst, frame_peak.worst_phase,
 					frame_peak.s))
+			-- Urho's own table of the same five seconds when the worst
+			-- was over the ceiling: what "rest" was made of
+			if frame_peak.worst >= frame_peak.CEILING_S and
+					buildat.profiler_data then
+				log:debug("profiler over those seconds:\n" ..
+						(buildat.profiler_data(4) or ""))
+			end
 		end
 		frame_peak.worst, frame_peak.worst_phase = 0, ""
 	end

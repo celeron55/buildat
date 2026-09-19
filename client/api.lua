@@ -93,6 +93,7 @@ buildat.safe.compress      = __buildat_compress
 buildat.safe.decompress    = __buildat_decompress
 buildat.safe.profiler_block_begin = __buildat_profiler_block_begin
 buildat.safe.profiler_block_end   = __buildat_profiler_block_end
+buildat.safe.profiler_data        = __buildat_profiler_data
 buildat.safe.VoxelName            = __buildat_VoxelName
 buildat.safe.AtlasSegmentDefinition = __buildat_AtlasSegmentDefinition
 buildat.safe.VoxelDefinition      = __buildat_VoxelDefinition

@@ -1076,6 +1076,8 @@ struct CApp: public App, public magic::Application
 	void handle_packet(const ss_ &name, const ss_ &data)
 	{
 		log_v(MODULE, "handle_packet(): %s", cs(name));
+		magic::AutoProfileBlock profiler_block(
+				GetSubsystem<magic::Profiler>(), "Buildat|handle_packet");
 
 		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_handle_packet");
 		lua_pushlstring(L, name.c_str(), name.size());
@@ -1636,8 +1638,14 @@ struct CApp: public App, public magic::Application
 					g_shutdown_signal == SIGINT ? "SIGINT" : "SIGTERM");
 			shutdown();
 		}
-		if(m_state)
+		if(m_state){
+			// Under a block of its own: the network's packets and the Lua
+			// they run land here, and a frame that goes into them showed
+			// as an Update with nothing in it ([FRAME_PEAK])
+			magic::AutoProfileBlock profiler_block(
+					GetSubsystem<magic::Profiler>(), "Buildat|State::update");
 			m_state->update();
+		}
 
 		{
 			magic::AutoProfileBlock profiler_block(
