@@ -581,6 +581,15 @@ def stair_step(s, mem, pick, down):
     # tunnel and the unstick turned them round, so the player paced its
     # own tunnel at y -31 (2026-09-20)
     mem["walking"] = 0
+    # Refused on every heading -- a cave under the player at y -30, four
+    # turns of the quarter-turn in a row -- the stair goes level for a
+    # while and the drop rule stands down, so it tunnels off the ledge's
+    # edge instead of spinning (670 turns of it)
+    if mem.get("turns_in_row", 0) >= 4:
+        mem["turns_in_row"] = 0
+        mem["level_until"] = turn + 15
+    if mem.get("level_until", 0) > turn:
+        down = False
     a = ahead(s, mem)
     targets = [(a[0], a[1] + 1, a[2]), a]
     if down:
@@ -613,10 +622,13 @@ def stair_step(s, mem, pick, down):
     under = (floor[0], floor[1] - 1, floor[2])
     drop = world.get(floor) is not None and not solid_at(world, floor) and \
         world.get(under) is not None and not solid_at(world, under)
-    if any(is_liquid(world.get(q)) for q in near) or drop:
+    if any(is_liquid(world.get(q)) for q in near) or \
+            (drop and mem.get("level_until", 0) <= turn):
         mem["stair_yaw"] = (mem["stair_yaw"] + 90) % 360
         mem["aimed"] = None
+        mem["turns_in_row"] = mem.get("turns_in_row", 0) + 1
         return "stair_turn", ["delay 200"], None
+    mem["turns_in_row"] = 0
     to_dig = [t for t in targets if solid_at(world, t)]
     if not to_dig:
         p0 = s.pos
