@@ -896,10 +896,20 @@ local function draw_hotbar()
 		local tex = name and game_texture(luanti.item_texture(name))
 		-- Assigned only when there is one: the sandbox takes a Texture and
 		-- not a nil, and an empty slot is an image that is not drawn
+		-- The rect said outright ([ITEM_TILED]): while it is zero Urho
+		-- spans the element's width in texels, and a texture that had no
+		-- size at assignment tiled sixteen pickaxes to a slot
 		if tex then
 			slot.image.texture = tex
+			if tex.width > 0 then
+				slot.image.imageRect = magic.IntRect(0, 0, tex.width, tex.height)
+			elseif not hotbar_pictures["size:" .. tostring(tex.name)] then
+				hotbar_pictures["size:" .. tostring(tex.name)] = true
+				log:info("picture " .. tostring(tex.name) ..
+						" has no size yet at assignment ([ITEM_TILED])")
+			end
 		end
-		slot.image.visible = tex ~= nil
+		slot.image.visible = tex ~= nil and tex.width > 0
 		-- Luanti's own per-slot background, which is what a game that names
 		-- no hotbar image gets; a game that names one has it behind the
 		-- whole row instead, so the slots themselves are not drawn

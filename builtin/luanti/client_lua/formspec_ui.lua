@@ -132,7 +132,7 @@ function M.new(magic, buildat, log, ctx)
 		local e = parent:CreateChild("BorderImage")
 		e:SetPosition(math.floor(x), math.floor(y))
 		e.size = magic.IntVector2(math.floor(w), math.floor(h))
-		e.texture = tex
+		set_picture(e, tex)
 		e.priority = next_priority()
 		return e
 	end
@@ -195,6 +195,27 @@ function M.new(magic, buildat, log, ctx)
 	end
 
 	-- An item stack in a slot: what it looks like, and how many
+	-- A picture on a BorderImage, with its rect said outright: Urho's
+	-- AddQuad spans the element's width in texels while imageRect is still
+	-- zero, and SetTexture fills the rect only if the texture has a size
+	-- at that moment -- a media texture that arrives at zero tiles at one
+	-- texel per pixel, sixteen pickaxes to a slot ([ITEM_TILED]). Logged
+	-- once per picture while the why is read; not drawn that frame.
+	local said_zero = {}
+	local function set_picture(el, tex)
+		el.texture = tex
+		if tex.width > 0 and tex.height > 0 then
+			el.imageRect = magic.IntRect(0, 0, tex.width, tex.height)
+			return true
+		end
+		if not said_zero[tex.name] then
+			said_zero[tex.name] = true
+			log:info("picture " .. tostring(tex.name) .. " has no size yet at assignment ([ITEM_TILED])")
+		end
+		el.visible = false
+		return false
+	end
+
 	local function draw_stack(parent, x, y, size, stack)
 		local resource = stack and ctx.item_image(stack.name)
 		if resource then
@@ -203,7 +224,10 @@ function M.new(magic, buildat, log, ctx)
 					math.floor(y + size * 0.1))
 			e.size = magic.IntVector2(math.floor(size * 0.8),
 					math.floor(size * 0.8))
-			e.texture = game_texture(resource)
+			local tex = game_texture(resource)
+			if tex then
+				set_picture(e, tex)
+			end
 			e.priority = next_priority()
 		elseif stack then
 			-- Something is there but there is no image for it; a marked
@@ -354,7 +378,7 @@ function M.new(magic, buildat, log, ctx)
 						local el = holder:CreateChild("BorderImage")
 						el:SetPosition(math.floor(x), math.floor(y))
 						el.size = magic.IntVector2(w, h)
-						el.texture = tex
+						set_picture(el, tex)
 						el.priority = next_priority()
 					end
 				end

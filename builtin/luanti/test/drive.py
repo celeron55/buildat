@@ -199,6 +199,29 @@ def look_at_object(s, o, level=True):
     return "look_dir %.3f %.3f %.3f" % d
 
 
+def tight(s):
+    """How many of the near horizon bins hit a node within a node and a
+    half: a player hemmed in on every side reads eight of eight."""
+    near = [b for (x, y), b in s.bins.items()
+            if y in (RES // 2 - 1, RES // 2) and b["kind"] == "node" and b["d"] <= 1.5]
+    return len(near)
+
+
+def make_room(s, pick):
+    """Plan B when there is no room to place anything (user, 2026-09-19):
+    the eight nodes around the player at feet and head height dug, four
+    headings, with the pickaxe if there is one. Plan A is not getting
+    into such a space."""
+    cmds = ["keypress %d" % pick, "delay 150"] if pick else []
+    for yaw in (0, 90, 180, 270):
+        yr = math.radians(yaw)
+        for dy in (-0.5, -1.5):
+            cmds += ["look_dir %.3f %.3f %.3f" % (math.sin(yr), dy, math.cos(yr)),
+                     "delay 200", "mouse_down left", "delay 1800", "mouse_up left",
+                     "delay 150"]
+    return cmds
+
+
 def look_away(s):
     yaw = s.yaw + rng.uniform(90, 180) * rng.choice((-1, 1))
     yr = math.radians(yaw)
@@ -592,7 +615,12 @@ def rules(s, mem):
                 cmds = [look_at_bin(s, bx, by, level=False)]
                 cmds += walk((d - 2.5) / 4) if d > 3.5 else [ms(0.3)]
                 return "to_furnace", cmds, None
-            if fslot is not None and mem.get("no_place_until", 0) <= turn:
+            if fslot is not None and mem.get("no_place_until", 0) > turn:
+                was = tight(s)
+                mem["no_place_until"] = 0
+                return "make_room", make_room(s, pick) + ["delay 300"], \
+                    lambda n, w=was: tight(n) < w or w == 0
+            if fslot is not None:
                 yr = math.radians(s.yaw + rng.uniform(-60, 60))
                 cmds = ["keypress %d" % fslot, "delay 150",
                         "look_dir %.3f -1.2 %.3f" % (math.sin(yr), math.cos(yr)),
@@ -630,7 +658,14 @@ def rules(s, mem):
             cmds = [look_at_bin(s, bx, by, level=False)]
             cmds += walk((d - 2.5) / 4) if d > 3.5 else [ms(0.3)]
             return "to_table", cmds, None
-        if slot is not None and mem.get("no_place_until", 0) <= turn:
+        if slot is not None and mem.get("no_place_until", 0) > turn:
+            # No room where it was tried: dug around the player (plan B)
+            pick = hotbar_slot_of(s, "pick_stone") or hotbar_slot_of(s, "pick_wood")
+            was = tight(s)
+            mem["no_place_until"] = 0
+            return "make_room", make_room(s, pick) + ["delay 300"], \
+                lambda n, w=was: tight(n) < w or w == 0
+        if slot is not None:
             # A little off the last heading each try: the ground ahead
             # may be a slope or the player's own space, which the client
             # refuses
@@ -761,10 +796,11 @@ def main():
             if held:
                 failed_in_row = 0
             elif expect_name in ("place_table", "place_furnace"):
-                # Nor this: no room where it was tried; elsewhere for
-                # five turns, then again
-                say("turn %d: %s found no room; elsewhere for five turns" % (turn, expect_name))
-                mem["no_place_until"] = turn + 5
+                # Nor this: no room where it was tried; room is made
+                say("turn %d: %s found no room; room is made" % (turn, expect_name))
+                mem["no_place_until"] = turn + 1
+            elif expect_name == "make_room":
+                say("turn %d: the room did not open" % turn)
             elif expect_name == "dig_stair":
                 # Not a finding either: hanging in vines the dig goes
                 # through and the feet stay; somewhere else in ten turns
@@ -850,6 +886,13 @@ done, 8 lines""".splitlines()
     assert name == "to_item" and cmds[0].startswith("look_dir 2.000 0.000 3.000"), cmds
     assert exp(parse(["self at 10,4,10 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:jungletree 3"]))
     assert not exp(it)
+    # Hemmed in with a table to place: room is made
+    hemmed = ["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 16 | 2:mcl_core:stick 6 | 3:mcl_crafting_table:crafting_table 1 | 4:mcl_tools:pick_wood 1 | 5:mcl_core:cobble 20"]
+    hemmed += ["bin %d,%d: mcl_core:stone at 1,0,0 d=0.8" % (x, y) for x in range(8) for y in (3, 4)]
+    hm = parse(hemmed)
+    assert tight(hm) == 16
+    name, cmds, exp = rules(hm, {"no_place_until": 99})
+    assert name == "make_room" and cmds.count("mouse_down left") == 8, (name, len(cmds))
     # A table in the crosshair with nothing more to craft at it is dug back
     done = parse(["self at 0,0,0 yaw 90 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_wood 1 | 2:mcl_core:stick 6",
                   "crosshair mcl_crafting_table:crafting_table at 1,0,0"])
