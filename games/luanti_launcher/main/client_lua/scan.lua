@@ -1,0 +1,147 @@
+-- Buildat: luanti_launcher/client_lua/scan.lua
+-- http://www.apache.org/licenses/LICENSE-2.0
+-- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+--
+-- `event scan <resolution> <label>` in a command sequence ([SCAN_EVENT]):
+-- what is on the screen, in the log under the label -- the crosshair's
+-- hit, a grid of rays to ten voxels with what each hit and passed
+-- through, and every element of an open form or the chat line. A run
+-- reads it beside the screenshot it took in the same line. Here rather
+-- than in the module's client half because the camera, the crosshair
+-- march and the node names are the launcher's until the fold; init.lua
+-- hands them in as ctx, as functions where the value moves.
+local magic = require("buildat/extension/urho3d")
+local voxelworld = require("buildat/module/voxelworld")
+local luanti = require("buildat/module/luanti")
+
+local RANGE = 10
+local STEP = 0.25
+
+return function(ctx)
+	local log = ctx.log
+
+	local function ray(p0, dir)
+		local last = nil
+		local through = {}
+		for i = 1, math.floor(RANGE / STEP) do
+			local p = (p0 + dir * (i * STEP)):round()
+			if p ~= last then
+				local v = voxelworld.get_static_voxel(p)
+				if ctx.voxel_is_solid(v) then
+					return ctx.node_name_at(p) or "?", p, i * STEP, through
+				end
+				-- Not solid but not air either: a plant, a liquid, a
+				-- cutout, which the ray went through
+				if v ~= nil then
+					local name = ctx.node_name_at(p)
+					if name and name ~= "air" then
+						through[#through + 1] = name
+					end
+				end
+				last = p
+			end
+		end
+		return nil, nil, nil, through
+	end
+
+	local function ui(label, element, depth, out)
+		local ok, n = pcall(function() return element:GetNumChildren() end)
+		if not ok then
+			return
+		end
+		for i = 0, n - 1 do
+			local child = element:GetChild(i)
+			if child then
+				local kind = child:GetTypeName()
+				local at = child.screenPosition
+				local line = string.format("scan %s: ui %s%s at %d,%d size %dx%d",
+						label, string.rep("  ", depth), kind, at.x, at.y,
+						child.width, child.height)
+				if kind == "Text" or kind == "LineEdit" then
+					local okt, text = pcall(function()
+						return child.GetText and child:GetText() or child.text
+					end)
+					if okt and text then
+						line = line .. " text " .. buildat.dump(text)
+					end
+				end
+				if kind == "BorderImage" or kind == "Sprite" or
+						kind == "Button" then
+					local okt, tex = pcall(function() return child.texture end)
+					if okt and tex and tex.name then
+						line = line .. " image " .. buildat.dump(tex.name)
+					end
+				end
+				out[#out + 1] = line
+				ui(label, child, depth + 1, out)
+			end
+		end
+	end
+
+	magic.SubscribeToEvent("command_seq:scan", function(event_type, event_data)
+		local param = event_data:GetString("Param") or ""
+		local res, label = param:match("^(%d+)%s*(%S*)")
+		res = math.max(1, math.min(32, tonumber(res) or 8))
+		if label == nil or label == "" then
+			label = "scan"
+		end
+		local lines = {}
+		-- The crosshair, by the same march the dig uses
+		local hit = ctx.pointed()
+		if hit then
+			lines[#lines + 1] = string.format("scan %s: crosshair %s at %d,%d,%d",
+					label, ctx.node_name_at(hit) or "?", hit.x, hit.y, hit.z)
+		else
+			lines[#lines + 1] = string.format(
+					"scan %s: crosshair nothing within %d", label, ctx.dig_range())
+		end
+		-- The grid: a ray from the centre of each bin, built from the
+		-- camera's yaw and pitch (Urho's, pitch positive down) and its
+		-- field of view
+		local p0 = buildat.Vector3(ctx.camera_node().worldPosition)
+		local yaw, pitch, fov = ctx.view()
+		local yr, pr = math.rad(yaw), math.rad(pitch)
+		local fwd = buildat.Vector3(math.sin(yr) * math.cos(pr), -math.sin(pr),
+				math.cos(yr) * math.cos(pr))
+		local right = buildat.Vector3(math.cos(yr), 0, -math.sin(yr))
+		local up = buildat.Vector3(math.sin(yr) * math.sin(pr), math.cos(pr),
+				math.cos(yr) * math.sin(pr))
+		local tan_v = math.tan(math.rad(fov) / 2)
+		local aspect = magic.ui.root.width / math.max(1, magic.ui.root.height)
+		for by = 0, res - 1 do
+			for bx = 0, res - 1 do
+				local sx = ((bx + 0.5) / res * 2 - 1) * tan_v * aspect
+				local sy = (1 - (by + 0.5) / res * 2) * tan_v
+				local dir = fwd + right * sx + up * sy
+				local name, p, d, through = ray(p0, dir)
+				local via = #through > 0 and
+						(" via " .. table.concat(through, ",")) or ""
+				if name then
+					lines[#lines + 1] = string.format(
+							"scan %s: bin %d,%d: %s at %d,%d,%d d=%.1f%s",
+							label, bx, by, name, p.x, p.y, p.z, d, via)
+				else
+					lines[#lines + 1] = string.format("scan %s: bin %d,%d: %s%s",
+							label, bx, by, dir.y > 0.2 and "sky" or "nothing", via)
+				end
+			end
+		end
+		-- What takes input, if anything: the form (the inventory, the
+		-- pause menu and the death screen are forms too) or the chat line
+		local formname, window = luanti.form_window()
+		local chat = ctx.chat_text()
+		if window then
+			lines[#lines + 1] = string.format("scan %s: form %s open", label,
+					buildat.dump(formname))
+			ui(label, window, 1, lines)
+		elseif chat then
+			lines[#lines + 1] = string.format("scan %s: chat line open, text %s",
+					label, buildat.dump(chat))
+		else
+			lines[#lines + 1] = string.format("scan %s: no form open", label)
+		end
+		lines[#lines + 1] = string.format("scan %s: done, %d lines", label, #lines)
+		log:info(table.concat(lines, "\n"))
+	end)
+end
+-- vim: set noet ts=4 sw=4:

@@ -119,6 +119,20 @@ look_dir <x> <y> <z>
 text <string>
     SDL text input (UI text fields). Rest of the line is the string.
 
+event <name> [param]
+    Send the Urho3D event command_seq:<name> on the client, with the rest of
+    the line as its string field Param, at this point in the sequence. Any
+    client Lua may subscribe to it (the command_seq: prefix is whitelisted in
+    the sandbox); the runner knows nothing of the names. A receiver answers
+    in the log, which is what a test reads.
+
+    The first receiver, in the Luanti launcher game's client: `event scan
+    <resolution> <label>` logs, under `scan <label>:` lines, what the
+    crosshair points at, a <resolution>x<resolution> grid of what a ray from
+    each bin hits within ten voxels (and what it passed through), and every
+    element of an open form or the chat line with its position and size.
+    A screenshot in the same sequence line pairs with it.
+
 quit
     Stop the sequence early. The client always exits at the end of -c anyway.
 

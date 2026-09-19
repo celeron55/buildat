@@ -99,6 +99,8 @@ awk -v seed="$SEED" -v secs="$((MINUTES * 60))" -v out="$out" 'BEGIN {
 		if (t - shot >= 30) {
 			shot = t
 			printf "screenshot %s/t%04d.png\n", out, int(t)
+			# and what the client sees, under the same stem ([SCAN_EVENT])
+			printf "event scan 8 t%04d\n", int(t)
 		}
 	}
 	print "quit"

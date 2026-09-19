@@ -28,6 +28,10 @@ namespace command_seq
 		Text,
 		Quit,
 		Look,
+		// event <name> <param>: the Urho3D event command_seq:<name> sent
+		// on the client with the rest of the line as its Param, for any
+		// client Lua to handle ([CMD_EVENT])
+		Event,
 	};
 
 	struct Command
@@ -42,6 +46,8 @@ namespace command_seq
 		// is what a direction vector (x, y, z) comes out as.
 		double yaw = 0.0;
 		double pitch = 0.0;
+		// Event only: the rest of the line after the name
+		ss_ param;
 	};
 
 	// One command per line. Empty lines and '#' comments are ignored.

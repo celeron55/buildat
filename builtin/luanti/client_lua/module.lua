@@ -2305,6 +2305,15 @@ function M.form_open()
 	return form ~= nil
 end
 
+-- The open form's name and drawn window, for whoever reports what is on
+-- the screen ([SCAN_EVENT]); nil when none is open
+function M.form_window()
+	if form == nil or form.drawn == nil then
+		return nil, nil
+	end
+	return form.formname, form.drawn.window
+end
+
 -- What the player's own inventory key opens. Nothing here binds a key: which
 -- key that is belongs to the game, and this is what it calls.
 function M.open_player_inventory()

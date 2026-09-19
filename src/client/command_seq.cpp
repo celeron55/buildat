@@ -203,6 +203,13 @@ static bool parse_body(const ss_ &text, sv_<Command> *out, ss_ *error)
 			c.s = rest;
 			if(c.s.empty())
 				return fail("screenshot <path>");
+		} else if(cmd == "event"){
+			c.type = Type::Event;
+			size_t sp = rest.find(' ');
+			c.s = rest.substr(0, sp);
+			c.param = sp == ss_::npos ? "" : rest.substr(sp + 1);
+			if(c.s.empty())
+				return fail("event <name> [param]");
 		} else if(cmd == "keydown"){
 			c.type = Type::KeyDown;
 			c.s = rest;
@@ -401,6 +408,8 @@ ss_ dump_command(const Command &c)
 		return "delay "+itos(c.n);
 	case Type::Screenshot:
 		return "screenshot "+c.s;
+	case Type::Event:
+		return "event "+c.s+(c.param.empty() ? "" : " "+c.param);
 	case Type::KeyDown:
 		return "keydown "+c.s;
 	case Type::KeyUp:

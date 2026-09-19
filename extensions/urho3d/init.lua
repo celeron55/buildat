@@ -6,6 +6,19 @@ local dump = buildat.dump
 local magic_sandbox = require("buildat/extension/magic_sandbox")
 local safe_globals = dofile(buildat.extension_path("urho3d").."/safe_globals.lua")
 local safe_events = dofile(buildat.extension_path("urho3d").."/safe_events.lua")
+-- command_seq:<name> is any name a command sequence's `event` line gives,
+-- with the rest of the line as Param ([CMD_EVENT]); the prefix is the
+-- whitelist entry
+local COMMAND_SEQ_EVENT = {Param = {variant = "String", safe = "string"}}
+local function safe_event_def(name)
+	if safe_events[name] then
+		return safe_events[name]
+	end
+	if type(name) == "string" and name:sub(1, 12) == "command_seq:" then
+		return COMMAND_SEQ_EVENT
+	end
+	return nil
+end
 local safe_classes = dofile(buildat.extension_path("urho3d").."/safe_classes.lua")
 
 local Safe = {}
@@ -164,7 +177,10 @@ local global_event_mux_installed = {}
 local function add_global_event_handler(event_type, cb_name, fn)
 	if not global_event_mux_installed[event_type] then
 		global_event_mux[event_type] = {}
-		local mux_name = "__buildat_mux_"..event_type
+		-- A global's name, so only letters and digits: an event named
+		-- with a colon (command_seq:scan, [CMD_EVENT]) is a function
+		-- Urho3D cannot look up otherwise
+		local mux_name = "__buildat_mux_"..event_type:gsub("[^%w_]", "_")
 		_G[mux_name] = function(event_type_thing, unsafe_event_data)
 			-- A copy, because a handler is allowed to unsubscribe from
 			-- inside the event -- leaving a session on Escape does -- and
@@ -223,7 +239,7 @@ function Safe.SubscribeToEvent(x, y, z)
 			error("SubscribeToEvent(): Object must be sandboxed")
 		end
 	end
-	if not safe_events[sub_event_type] then
+	if not safe_event_def(sub_event_type) then
 		error("Event type is not whitelisted: "..dump(sub_event_type))
 	end
 	if type(callback) == 'string' then
@@ -250,7 +266,7 @@ function Safe.SubscribeToEvent(x, y, z)
 			-- Let's just assume it's the correct one...
 			local got_event_type = sub_event_type
 			-- Filter event_data (Urho3D::VariantMap)
-			local safe_fields = safe_events[got_event_type]
+			local safe_fields = safe_event_def(got_event_type)
 			if not safe_fields then
 				log:warning("Received unsafe event: "..dump(got_event_type))
 				return

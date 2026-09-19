@@ -1535,6 +1535,16 @@ struct CApp: public App, public magic::Application
 		case Type::Text:
 			ok = client::command_seq::inject_text(input, c.s, &err);
 			break;
+		case Type::Event:
+			{
+				// Sent now, in the sequence's own frame; the receiver
+				// answers in the log, which is what a test reads
+				magic::VariantMap data;
+				data["Param"] = magic::String(c.param.c_str());
+				SendEvent(magic::StringHash(
+						magic::String(("command_seq:"+c.s).c_str())), data);
+			}
+			break;
 		case Type::Quit:
 		case Type::Delay:
 		case Type::Screenshot:
