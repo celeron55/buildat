@@ -545,6 +545,11 @@ def main():
             break
         say("turn %d rule %s at %.0f,%.0f,%.0f hp %s wield %s" %
             (turn, name, s.pos[0], s.pos[1], s.pos[2], s.hp, s.wield or "-"))
+        # On the screen too, for whoever is watching the window
+        # ([DRIVE_STATUS]): the rule and the first command that says
+        # what it is about
+        about = next((c for c in cmds if c.startswith(("look", "mouse_pos", "keypress"))), "")
+        write("event status_text turn %d %s %s" % (turn, name, about))
         write(*cmds)
         mem["hp"] = s.hp
         # The commands are timed by their delays; wait about that long so

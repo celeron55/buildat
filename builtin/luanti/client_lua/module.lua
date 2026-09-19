@@ -390,6 +390,31 @@ end
 -- 260 ms and failed a fuzz row on its frame ([FORMSPEC_FRAME]). Made
 -- once here, under the loading line, where the hitch has something to
 -- hide behind. The launcher calls it when the world is up.
+-- `event status_text <text>` in a command sequence ([DRIVE_STATUS]): one
+-- line at the top right, for watching a driven client live -- what the
+-- driver is attempting, as it happens, without the log beside it. The
+-- launcher's status row's font and inset; the pale yellow of the
+-- fixture's own status line, so it reads as the harness's, not the
+-- game's. Replaced on each event, cleared by an empty one. The second
+-- command_seq:* receiver; any sequence can use it.
+local status_text = nil
+magic.SubscribeToEvent("command_seq:status_text", function(event_type, event_data)
+	local text = event_data:GetString("Param") or ""
+	if status_text == nil then
+		status_text = magic.ui.root:CreateChild("Text")
+		status_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 13)
+		status_text:SetTextEffect(magic.TE_SHADOW)
+		status_text.effectColor = magic.Color(0, 0, 0, 0.85)
+		status_text.color = magic.Color(1, 1, 0.5)
+		status_text.horizontalAlignment = magic.HA_RIGHT
+		status_text.verticalAlignment = magic.VA_TOP
+		status_text:SetPosition(-8, 8)
+		status_text.priority = 1000
+	end
+	status_text:SetText(text)
+	status_text.visible = text ~= ""
+end)
+
 function M.warm_fonts()
 	local holder = magic.ui.root:CreateChild("UIElement")
 	holder.defaultStyle = magic.cache:GetResource("XMLFile",
