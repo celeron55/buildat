@@ -545,7 +545,7 @@ static const float AO_LEVELS[4] = {1.0f, 0.72f, 0.52f, 0.38f};
 // takes as pbr, keeps every game's table, since the other games set
 // nothing and their look must not move; the upgrade is the launcher
 // telling the mesher through set_voxel_geometry().
-static const float AO_LEVELS_PBR[4] = {1.0f, 0.55f, 0.35f, 0.22f};
+static const float AO_LEVELS_PBR[4] = {1.0f, 0.55f, 0.26f, 0.16f};
 static const bool PBR_MODE = getenv("BUILDAT_LUANTI_PBR") != nullptr && (
 		ss_(getenv("BUILDAT_LUANTI_PBR")) == "pbr" ||
 		ss_(getenv("BUILDAT_LUANTI_PBR")) == "1" ||
