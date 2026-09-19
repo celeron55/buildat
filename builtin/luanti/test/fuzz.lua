@@ -26,8 +26,11 @@ end
 
 local dug, placed, picked = 0, 0, 0
 -- The step ceiling ([STEP_PEAK]): warned over the first, failed over the
--- second. `over` counts the seconds the peak was over the ceiling.
+-- second. `over` counts the seconds the peak was over the ceiling, from
+-- STEP_COUNT_FROM_T on: the ceiling is about play, not the start-up
+-- load, whose one emerge spike is accepted (user, 2026-09-19).
 local STEP_CEILING_S, STEP_FAIL_S = 0.25, 1.0
+local STEP_COUNT_FROM_T = 90
 local over = 0
 -- Deaths, and when the current one began
 local deaths, dead_since = 0, nil
@@ -235,7 +238,7 @@ core.register_on_joinplayer(function(player)
 		local peak, phase = core.get_server_step_peak()
 		if peak > STEP_FAIL_S then
 			fail(string.format("a step took %.2f s in %s", peak, phase))
-		elseif peak > STEP_CEILING_S and t > 20 then
+		elseif peak > STEP_CEILING_S and t >= STEP_COUNT_FROM_T then
 			core.log("warning", string.format(
 					"fuzz: step peak %.2f s in %s at t=%d", peak, phase, t))
 			over = over + 1

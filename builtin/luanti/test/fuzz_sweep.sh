@@ -14,7 +14,7 @@
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
-sweep="$here/local/fuzz_sweep"
+sweep="${SWEEP:-$here/local/fuzz_sweep}"
 mkdir -p "$sweep"
 table="$sweep/table.md"
 [ -f "$table" ] || echo "| seed | game | min | verdict | worst step | worst frame | finding |
@@ -49,8 +49,12 @@ for run in $RUNS; do
 		verdict=FAIL
 	fi
 	{ echo "$verdict"; grep "^FAIL:\|^warning:" "$out/fuzz.log"; } > "$out/verdict.txt"
-	# The worst step: the server's rate-limited lines carry the phase
+	# The worst step: the server's rate-limited lines carry the phase.
+	# Counted from t=90 like fuzz.lua's `over` (the start-up load's spike
+	# is accepted), by the wall clock of the t=90 line
+	from=$(grep -a -m1 "fuzz: t=90 " "$out/srv.log" | awk '{print $3}')
 	step=$(grep -a "a step took" "$out/srv.log" |
+		awk -v from="${from:-00:00:00}" '$3 >= from' |
 		sed 's/^.*a step took \([0-9.]*\) s, \([^;]*\);.*$/\1 \2/' |
 		sort -rn | head -1)
 	frame=$(grep "^client frame:" "$out/fuzz.log" | sed 's/^client frame: //')
