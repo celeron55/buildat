@@ -315,6 +315,7 @@ def dig_one(s, mem, targets, pick, name):
             cmds = ["keypress %d" % pick, "delay 100"] if pick else []
             cmds += ["mouse_down left", "delay %d" % hold_for(world.get(aimed)),
                      "mouse_up left", "delay 250"]
+            mem["dug_since_volume"] = True
             return name + "_dig", cmds, lambda n, t=aimed: not solid_at(n.world, t)
         aside[aimed] = turn
     for t in targets:
@@ -980,6 +981,7 @@ def main():
     failed_in_row = 0
     end = time.time() + minutes * 60
     slow = 0
+    s = None
     # The client is up when its log names the window; the first scan can
     # then wait for the world
     while time.time() < end:
@@ -988,10 +990,19 @@ def main():
         if turn % SHOT_EVERY == 1:
             write("screenshot %s/%s.png" % (out, label))
         # The cube of voxels about the feet under its own event, before the
-        # scan, both blocks read: the map is what the digging goes by
-        write("event scan_volume %d %s" % (VOLUME_R, label + "v"))
+        # scan, both blocks read: the map is what the digging goes by. Not
+        # every turn (user): a turn that only turned the head sees the same
+        # cube, so it is asked for when the feet have moved a node since
+        # the last one, or something was dug
+        want_volume = mem.get("volume_at") is None or mem.get("dug_since_volume") or \
+            (s is not None and s.pos is not None and
+             max(abs(a - b) for a, b in zip(feet_node(s), mem["volume_at"])) >= 1)
+        if want_volume:
+            write("event scan_volume %d %s" % (VOLUME_R, label + "v"))
         write("event scan %d %s" % (RES, label))
-        vlines, _ = read_block(label + "v")
+        vlines = None
+        if want_volume:
+            vlines, _ = read_block(label + "v")
         lines, took = read_block(label)
         if lines is not None and vlines is not None:
             lines = vlines + lines
@@ -1008,6 +1019,9 @@ def main():
         slow = 0
         s = parse(lines)
         s.world = update_world(mem, s)
+        if vlines is not None:
+            mem["volume_at"] = feet_node(s)
+            mem["dug_since_volume"] = False
         if expect is not None:
             held = expect(s)
             if held:
@@ -1062,6 +1076,8 @@ def main():
         about = next((c for c in cmds if c.startswith(("look", "mouse_pos", "keypress"))), "")
         write("event status_text turn %d %s %s" % (turn, name, about))
         write(*cmds)
+        if "mouse_down left" in cmds:
+            mem["dug_since_volume"] = True
         mem["hp"] = s.hp
         # The commands are timed by their delays; wait about that long so
         # the next scan sees their result
