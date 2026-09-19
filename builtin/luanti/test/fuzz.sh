@@ -131,6 +131,20 @@ bin/buildat -s "localhost:$port" -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
 	-c @"$out/cmds.txt" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log" &
 cli=$!
+# The walk plus the load, and then some: a client that has not exited by
+# then is hung, which is a finding of its own ([QUIT_HANG], seed 15 sat
+# twelve minutes in Urho3D's FileWatcher at exit) and not a reason for
+# the campaign to stop
+limit=$((MINUTES * 60 + 300))
+for i in $(seq 1 "$limit"); do
+	kill -0 "$cli" 2>/dev/null || break
+	sleep 1
+done
+hung=0
+if kill -0 "$cli" 2>/dev/null; then
+	hung=1
+	kill -KILL "$cli" 2>/dev/null
+fi
 wait "$cli"
 cli_status=$?
 sleep 2
@@ -152,7 +166,11 @@ grep -aq "Lua runtime error\|Crash:" "$out/cli.log" && say "the client crashed o
 # reason is taken from the log (seed 1's look after a respawn, 2026-09-19)
 grep -aq "Command sequence failed" "$out/cli.log" &&
 	say "$(grep -a "Command sequence failed" "$out/cli.log" | head -1 | sed 's/^.*Command sequence failed: //')"
-[ "$cli_status" -eq 0 ] || say "the client exited $cli_status"
+if [ "$hung" -eq 1 ]; then
+	say "the client did not exit $((limit - MINUTES * 60)) s after its walk ([QUIT_HANG])"
+else
+	[ "$cli_status" -eq 0 ] || say "the client exited $cli_status"
+fi
 # The client's frame, from the launcher's rate-limited lines ([FRAME_PEAK]):
 # the worst frame of every five seconds and the phase that set it, with the
 # first such line skipped as the load's. Warn over 50 ms, fail over 250 ms,
