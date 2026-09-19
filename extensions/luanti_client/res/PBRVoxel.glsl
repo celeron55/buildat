@@ -381,7 +381,12 @@ void VS()
             // shaded wall on the cliff top (0.65, 0.90) 0.34, which is the
             // render's 0.27 between them ([PBR_FIT], contrast_dirt_pit).
             float groundSeen = isPacked ? shade * iColor.g : 1.0;
-            groundSeen *= groundSeen;
+            // Cubed, with the ground's albedo doubled beside it ([PBR_FIT]
+            // 3.3, 2026-09-19): the open shaded wall wanted more of the
+            // lit ground and the pit less, and the enclosure's power is
+            // what tells them apart (contrast_dirt 5.0 to 4.1 of the
+            // render's 2.8, contrast_dirt_pit 6.4 to 6.7 of 12)
+            groundSeen *= groundSeen * groundSeen;
             vVertexLight = cShadowKinds > 0.5 ? iColor.rgb : baked +
                 cBounceLight * (0.15 + 1.0 * sky.x) *
                     (1.0 - ShapeSkylight(sky.x)) * shade +
