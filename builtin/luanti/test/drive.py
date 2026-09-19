@@ -761,40 +761,21 @@ def rules(s, mem):
     if wanted_craft(s, mem) is not None:
         return "open_inventory", ["keypress I", ms(1.0)], \
             lambda n: n.form is not None
-    # Rung 3: stone dug with the pickaxe until there is cobble enough for
-    # the stone pickaxe and the furnace; the expectation is the crosshair
-    # off that stone
+    # Rung 3: the cobble for the stone pickaxe and the furnace comes from
+    # the staircase down (user, 2026-09-20: not from looking around for
+    # stone) -- one step a turn on one cardinal heading, the node ahead
+    # at head height, at the feet and the one below that, then a step
+    # forward, so that the way back up is a walk and a jump, not a shaft
+    # (user, 2026-09-19). The staircase reaches stone a few nodes under
+    # the grass and every step below that is cobble.
     pick = hotbar_slot_of(s, "pick_stone") or hotbar_slot_of(s, "pick_wood")
     kit = have(s, "crafting_table", 1, mem) and have(s, "stick", 2, mem)
-    if pick is not None and kit and not have(s, "cobble", COBBLE_WANTED, mem):
-        # Stone at the feet's height or above only: stone under the feet is
-        # the floor, and digging it made a pit the player walked into
-        # (2026-09-20); the stair's own digging yields cobble underground
-        fy = feet_node(s)[1]
-        if s.crosshair and s.crosshair[0].endswith(":stone") and s.crosshair[2] >= fy:
-            was = s.crosshair
-            cmds = ["keypress %d" % pick, "delay 150", "mouse_down left",
-                    "delay 2500", "mouse_up left", "delay 300"]
-            return "dig_stone", cmds, lambda n: n.crosshair != was
-        stones = [(x, y) for (x, y), b in s.bins.items()
-                  if b["name"].endswith(":stone") and b["d"] <= 4 and
-                  "at" in b and b["at"][1] >= fy]
-        if stones:
-            bx, by = min(stones, key=lambda k: s.bins[k]["d"])
-            return "to_stone", [look_at_bin(s, bx, by, level=False), ms(0.3)], None
-        # No stone in sight on the surface: a staircase down with the
-        # pickaxe, one step a turn -- the node ahead at head height, at
-        # the feet and the one below that, then a step forward -- on one
-        # heading, so that the way back up is a walk and a jump, not a
-        # shaft (user, 2026-09-19: straight down makes a vertical shaft
-        # the player then has to make its way up). The expectation is
-        # the feet lower.
-        if not any(b["name"].endswith(":stone") for b in s.bins.values()) and \
-                mem.get("no_dig_down_until", 0) <= turn:
-            if "stair_yaw" not in mem:
-                mem["stair_yaw"] = round(s.yaw / 90) * 90
-            name, cmds, exp = stair_step(s, mem, pick, down=True)
-            return name, cmds, exp
+    if pick is not None and kit and not have(s, "cobble", COBBLE_WANTED, mem) and \
+            mem.get("no_dig_down_until", 0) <= turn:
+        if "stair_yaw" not in mem:
+            mem["stair_yaw"] = round(s.yaw / 90) * 90
+        name, cmds, exp = stair_step(s, mem, pick, down=True)
+        return name, cmds, exp
 
     # Moving on with nothing more to craft at a table in view and none
     # held: dug back into the inventory, which saves the planks of the
@@ -1277,7 +1258,7 @@ done, 8 lines""".splitlines()
     st = parse(["self at 0,0,0 yaw 0 pitch 30 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_wood 1 | 2:mcl_crafting_table:crafting_table 1 | 3:mcl_core:stick 2",
                 "crosshair mcl_core:stone at 0,0,1"])
     name, cmds, exp = rules(st, {})
-    assert name == "dig_stone" and cmds[0] == "keypress 1", (name, cmds)
+    assert name == "stair_aim", (name, cmds)
     # and with none in sight, down through the ground
     name, cmds, exp = rules(parse(["self at 0,5,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_wood 1 | 2:mcl_crafting_table:crafting_table 1 | 3:mcl_core:stick 2"]), {})
     assert name == "stair_aim", name
