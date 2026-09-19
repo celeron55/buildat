@@ -33,3 +33,27 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: Build/package/out/*.tar.gz
+  windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Package in the Windows cross image
+        run: JOBS=$(nproc) util/package_in_docker.sh windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-archive
+          path: Build/package/out/*.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-smoke
+          path: Build/package/out/smoke/
+          if-no-files-found: ignore
+      - name: Release on a tag
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Build/package/out/*.zip
