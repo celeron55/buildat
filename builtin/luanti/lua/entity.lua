@@ -2057,6 +2057,26 @@ function core.__use_node(playername, under, above, sneak)
 	end
 	local pointed = {type = "node", under = under, above = above}
 	local wielded = ref:get_wielded_item()
+	-- Not into the player's own space: Luanti's client refuses a placement
+	-- whose walkable node would collide with the player (Game::nodePlacement)
+	-- and the server trusts it; this client sends every click and the
+	-- refusal is here. The driver put a crafting table where its head was
+	-- and stood inside it (2026-09-19). A node with an on_rightclick is
+	-- used, not placed, unless sneaking, so those go through.
+	local def = core.registered_nodes[wielded:get_name()]
+	local under_node = core.get_node(under)
+	local under_def = under_node and core.registered_nodes[under_node.name]
+	if def and def.walkable ~= false and
+			not (under_def and under_def.on_rightclick and not sneak) then
+		local p = ref:get_pos()
+		local box = ref:get_properties().collisionbox or
+				{-0.3, 0, -0.3, 0.3, 1.75, 0.3}
+		if above.x + 0.5 > p.x + box[1] and above.x - 0.5 < p.x + box[4] and
+				above.y + 0.5 > p.y + box[2] and above.y - 0.5 < p.y + box[5] and
+				above.z + 0.5 > p.z + box[3] and above.z - 0.5 < p.z + box[6] then
+			return false
+		end
+	end
 	local before = wielded:to_string()
 	local left = core.item_place(wielded, ref, pointed)
 	if left ~= nil then
@@ -3245,6 +3265,7 @@ function core.__object_appearances()
 		out[#out + 1] = look[1]
 		out[#out + 1] = look[2]
 		out[#out + 1] = look[3] or ""
+		out[#out + 1] = look[4] or "1"
 	end
 	return out
 end
@@ -3295,14 +3316,20 @@ local function show_objects()
 			v[#v + 1] = o.rot and o.rot.y or 0
 			local kind, texture, detail = appearance_of(o)
 			detail = detail or ""
+			-- Whether a ray may hit it: Luanti's pointable. VoxeLibre's
+			-- wieldview rides at its player's feet with pointable false,
+			-- and a client that did not know stood punching it instead of
+			-- digging the ground (2026-09-19)
+			local pointable = (o.props.pointable ~= false) and "1" or "0"
 			local was = sent_appearance[id]
 			if not was or was[1] ~= kind or was[2] ~= texture or
-					was[3] ~= detail then
-				sent_appearance[id] = {kind, texture, detail}
+					was[3] ~= detail or was[4] ~= pointable then
+				sent_appearance[id] = {kind, texture, detail, pointable}
 				props_changed[#props_changed + 1] = tostring(id)
 				props_changed[#props_changed + 1] = kind
 				props_changed[#props_changed + 1] = texture
 				props_changed[#props_changed + 1] = detail
+				props_changed[#props_changed + 1] = pointable
 			end
 		end
 	end

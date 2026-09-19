@@ -504,6 +504,15 @@ def rules(s, mem):
         if stones:
             bx, by = min(stones, key=lambda k: s.bins[k]["d"])
             return "to_stone", [look_at_bin(s, bx, by, level=False), ms(0.3)], None
+        # No stone in sight on the surface: down through the ground with
+        # the pickaxe, stone being a few nodes under the grass; the
+        # expectation is the feet lower
+        if not any(b["name"].endswith(":stone") for b in s.bins.values()) and \
+                mem.get("no_dig_down_until", 0) <= turn:
+            y0 = s.pos[1]
+            cmds = ["keypress %d" % pick, "delay 150", "look 0 -89", "delay 300",
+                    "mouse_down left", "delay 2500", "mouse_up left", "delay 600"]
+            return "dig_down", cmds, lambda n: n.pos[1] < y0 - 0.5
 
     # A 3x3 craft wanted: at a table, its form; with a table in hand,
     # place it on the ground ahead; with one past the hotbar, fetch it
@@ -521,7 +530,10 @@ def rules(s, mem):
             cmds += walk((d - 2.5) / 4) if d > 3.5 else [ms(0.3)]
             return "to_table", cmds, None
         if slot is not None:
-            yr = math.radians(s.yaw)
+            # A little off the last heading each try: the ground ahead
+            # may be a slope or the player's own space, which the client
+            # refuses
+            yr = math.radians(s.yaw + rng.uniform(-60, 60))
             cmds = ["keypress %d" % slot, "delay 150",
                     "look_dir %.3f -1.2 %.3f" % (math.sin(yr), math.cos(yr)),
                     "delay 300", "mouse_click right", ms(0.8)]
@@ -531,10 +543,12 @@ def rules(s, mem):
             return "open_inventory", ["keypress I", ms(1.0)], \
                 lambda n: n.form is not None
 
-    # a tree in view
+    # a tree in view, while logs are wanted (six cover the ladder's wood)
     trees = [(x, y) for (x, y), b in s.bins.items()
              if b["kind"] == "node" and is_tree(b["name"]) and b["d"] <= 10]
-    if s.crosshair and is_tree(s.crosshair[0]):
+    if have(s, "tree", 6, mem):
+        trees = []
+    if s.crosshair and is_tree(s.crosshair[0]) and not have(s, "tree", 6, mem):
         cmds = ["mouse_down left", "delay 4000", "mouse_up left", "delay 300"]
         was = s.crosshair
         return "dig_tree", cmds, lambda n: n.crosshair != was
@@ -645,6 +659,11 @@ def main():
             held = expect(s)
             if held:
                 failed_in_row = 0
+            elif expect_name == "dig_down":
+                # Not a finding either: hanging in vines the dig goes
+                # through and the feet stay; somewhere else in ten turns
+                say("turn %d: the ground did not give; elsewhere for ten turns" % turn)
+                mem["no_dig_down_until"] = turn + 10
             elif expect_name == "to_item":
                 # Not a finding: an item out of reach is given up on
                 say("turn %d: the item was not reached; given up" % turn)
@@ -747,6 +766,9 @@ done, 8 lines""".splitlines()
                 "crosshair mcl_core:stone at 0,-1,1"])
     name, cmds, exp = rules(st, {})
     assert name == "dig_stone" and cmds[0] == "keypress 1", (name, cmds)
+    # and with none in sight, down through the ground
+    name, cmds, exp = rules(parse(["self at 0,5,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_wood 1"]), {})
+    assert name == "dig_down" and exp(parse(["self at 0,3,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:"])), name
     # A craft: a log in the hotbar wants planks; the form's slots give the
     # clicks, source, cell, source, result, empty slot
     inv = parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:jungletree 4",

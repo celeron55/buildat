@@ -745,7 +745,7 @@ function M.pointed_object(x, y, z, dx, dy, dz, max_distance)
 	for id, have in pairs(object_nodes) do
 		-- Not the player's own object: the camera is inside it, so a ray
 		-- from the eye hits it before anything else in the world
-		if id ~= M.self_id then
+		if id ~= M.self_id and (have.look == nil or have.look.pointable ~= false) then
 			local p = have.node.position
 			-- The box the object collides with, which the server sends
 			-- whatever the object is drawn as: a model's own scale is not
@@ -798,9 +798,10 @@ end
 
 buildat.sub_packet("luanti:object_props", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
-	for i = 1, #values - 3, 4 do
+	for i = 1, #values - 4, 5 do
 		object_looks[values[i]] = parse_look(values[i + 1], values[i + 2],
 				values[i + 3])
+		object_looks[values[i]].pointable = values[i + 4] ~= "0"
 	end
 end)
 
@@ -2436,7 +2437,7 @@ end
 function M.objects()
 	local out = {}
 	for id, have in pairs(object_nodes) do
-		if id ~= M.self_id then
+		if id ~= M.self_id and (have.look == nil or have.look.pointable ~= false) then
 			local p = have.node.position
 			out[#out + 1] = {id = id, x = p.x, y = p.y, z = p.z,
 					label = M.object_label(id)}
