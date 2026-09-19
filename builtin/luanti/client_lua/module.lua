@@ -385,6 +385,24 @@ function M.set_scene(scene)
 	object_scene = scene
 end
 
+-- The first Text at a font size is FreeType rasterizing the face, 35-140
+-- ms each, and the forms use four sizes: the first inventory drew in
+-- 260 ms and failed a fuzz row on its frame ([FORMSPEC_FRAME]). Made
+-- once here, under the loading line, where the hitch has something to
+-- hide behind. The launcher calls it when the world is up.
+function M.warm_fonts()
+	local holder = magic.ui.root:CreateChild("UIElement")
+	holder.defaultStyle = magic.cache:GetResource("XMLFile",
+			"__menu/res/main_style.xml")
+	for _, size in ipairs({12, 13, 14, 15, 16}) do
+		local t = holder:CreateChild("Text")
+		t:SetStyleAuto()
+		t.text = "0"
+		t:SetFontSize(size)
+	end
+	holder:Remove()
+end
+
 local function object_texture(expr)
 	local resource = texture_of(expr)
 	if not resource then

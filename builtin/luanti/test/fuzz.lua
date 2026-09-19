@@ -35,6 +35,7 @@ local STEP_COUNT_FROM_T = 90
 local over = 0
 -- Deaths, and when the current one began
 local deaths, dead_since = 0, nil
+local moved_at_minute = 0
 local said_no_trees = false
 -- How many seconds each nearby section has been loaded and ungenerated
 local ungenerated_for = {}
@@ -203,6 +204,21 @@ core.register_on_joinplayer(function(player)
 		-- has not is a client whose keys never arrived ([HELD_KEY_FLAKE])
 		if t == 60 and moved < 5 then
 			fail("the player did not move in a minute")
+		end
+		-- And a still minute later on, alive, is a walk that something
+		-- holds: a pause menu the scripted Escape opened when there was
+		-- no form to close, a hole ([FUZZ_STUCK]). Warned with the
+		-- position; the scan block beside the next screenshot says which
+		-- form is up. Freed by a lift of three nodes: a hole is left, a
+		-- menu is not, and the next minute says which it was.
+		if t % 60 == 0 and t > 60 and hp > 0 and moved - moved_at_minute < 2 then
+			core.log("warning", string.format(
+					"fuzz: still for a minute at %s, lifted ([FUZZ_STUCK])",
+					core.pos_to_string(vector.round(pos))))
+			player:set_pos(vector.add(pos, {x = 0, y = 3, z = 0}))
+		end
+		if t % 60 == 0 then
+			moved_at_minute = moved
 		end
 		if t >= 20 and dug == 0 and t % 60 == 0 then
 			core.log("warning", "fuzz: nothing dug yet at t=" .. t)

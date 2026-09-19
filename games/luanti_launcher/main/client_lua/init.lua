@@ -970,6 +970,9 @@ wait_text:SetPosition(0, 0)
 voxelworld.sub_geometry_update(function(node)
 	wait_text:SetText("")
 end)
+-- The forms' font sizes rasterized now, under the loading line
+-- ([FORMSPEC_FRAME]); the first inventory then draws in a frame
+luanti.warm_fonts()
 
 --
 -- The sky, and what time it is
