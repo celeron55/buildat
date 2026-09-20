@@ -58,11 +58,13 @@ rawset(_G, "REFSET", {
 		-- 9 down the bore ([STAIR_VIEW], user 2026-09-20): vp1 turned to
 		-- look exactly along the bore's trace (yaw +X, pitch -30) and
 		-- moved 80 % of the way from its eye to the first column's voxel
-		-- (326, 14, -302): 8.675 nodes along (cos 30, -sin 30, 0), the
-		-- eye at 325.0, 15.66, the feet 1.625 under it. 13:00 only,
-		-- frozen; the mouth fills the lower half, and the meter's common
-		-- case -- a dark hole in a sunlit meadow -- gets its picture.
-		{pos = {x = 325.0, y = 14.03, z = -302.0}, yaw = 270.0, pitch = -30.0},
+		-- (326, 14, -302) and one node closer still (user, on the first
+		-- picture: not close enough): 0.8 * 10.84 + 1 along
+		-- (cos 30, -sin 30, 0), the eye at 325.87, 15.16, the feet 1.625
+		-- under it. 13:00 only, frozen; the mouth fills the lower half,
+		-- and the meter's common case -- a dark hole in a sunlit meadow
+		-- -- gets its picture.
+		{pos = {x = 325.87, y = 13.535, z = -302.0}, yaw = 270.0, pitch = -30.0},
 	},
 
 	-- One lamp in the reference ([LAMP_REF]): a light source placed by
