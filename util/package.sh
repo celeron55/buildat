@@ -226,11 +226,11 @@ wait_for_vanilla() {
 		return 1
 	fi
 	for i in $(seq 1 300); do
-		grep -q "on_generated" "$log" 2>/dev/null && break
+		grep -q "Generating section\|on_generated" "$log" 2>/dev/null && break
 		kill -0 "$srv" 2>/dev/null || break
 		sleep 1
 	done
-	if ! grep -q "on_generated" "$log"; then
+	if ! grep -q "Generating section\|on_generated" "$log"; then
 		echo "$what: the game loaded no world; its log:" >&2
 		tail -40 "$log" >&2
 		return 1
