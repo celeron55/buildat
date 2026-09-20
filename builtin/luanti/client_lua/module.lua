@@ -677,16 +677,57 @@ function M.set_daylight(amount)
 	M.daylight = math.max(0, math.min(1, amount or 1))
 end
 
-local function light_at(x, y, z)
+-- Under pbr the frame is in radiance and the display floor would sit a
+-- hundred times over a cave: the launcher tells what PBRVoxel.glsl gives
+-- a face with no sun -- the hour's ambient (the sky share of it), the
+-- bounce (the rest), a lamp at full -- and the flat colour is that at the
+-- voxel's nibbles, no floor. Unset, the parity modes' floor and ramp.
+M.light_units = nil
+function M.set_light_units(ambient, bounce, lamp)
+	M.light_units = ambient and {ambient = ambient, bounce = bounce,
+			lamp = lamp} or nil
+end
+
+-- The flat colour at a position, or nil where no voxel is loaded (the
+-- caller keeps what it had: a full-bright guess lit caves)
+function M.light_color(x, y, z)
 	local v = voxelworld.get_static_voxel(buildat.Vector3(
 			math.floor(x + 0.5), math.floor(y + 0.5), math.floor(z + 0.5)))
 	if v == nil then
-		return 1.0
+		return nil
 	end
 	local reg = voxelworld.get_voxel_registry()
 	local sky = reg:light_sky_of(v) / 15
 	local lamp = reg:light_lamp_of(v) / 15
-	return 0.28 + 0.72 * math.max(sky * M.daylight, lamp)
+	local u = M.light_units
+	if u == nil then
+		local k = 0.28 + 0.72 * math.max(sky * M.daylight, lamp)
+		return magic.Color(k, k, k, 1.0)
+	end
+	-- PBRVoxel.glsl's vertex terms for a face with no sun: the ambient by
+	-- the sky share (the nibble times the face's local shade, which the
+	-- mesher packs beside it and an object has no reading of: taken as
+	-- the nibble again, an open place's), the bounce where the shaped
+	-- nibble (the knee at 2..11) says the sky does not reach, a lamp by
+	-- its inverse square of the nibble's distance. simplified: no ground
+	-- term and no normal (a side sees half the sky); level 2 is where a
+	-- normal takes its share.
+	local t = math.max(0, math.min(1, (sky - 2 / 15) / (9 / 15)))
+	local shaped = t * t * (3 - 2 * t)
+	local share = sky * sky
+	local bounce = (0.15 + sky) * (1 - shaped) * sky
+	local d = math.max(15 - 15 * lamp, 1)
+	local lit = lamp > 0 and 1 / (d * d) or 0
+	-- The pbr path decodes its texel (pow 2.2) and an unlit object does
+	-- not: a mid texel (0.5) is 0.44 of itself decoded, and the object is
+	-- scaled by that so a mid tone sits level with the world's.
+	-- simplified: one factor for every texel; the upgrade is an unlit
+	-- technique that decodes, which level 2's material does anyway.
+	local k = 0.44
+	local a, b, l = u.ambient, u.bounce, u.lamp
+	return magic.Color(k * (a.r * share + b.r * bounce + l.r * lit),
+			k * (a.g * share + b.g * bounce + l.g * lit),
+			k * (a.b * share + b.b * bounce + l.b * lit), 1.0)
 end
 
 -- Set on an object's materials when it moves (and when the day turns; the
@@ -697,13 +738,18 @@ local function light_object(have, x, y, z)
 		return
 	end
 	local box = have.box or {1, 1, 1}
-	local k = light_at(x, y + box[2] / 2, z)
-	if math.abs(k - have.lit) < 1 / 255 then
+	local c = M.light_color(x, y + box[2] / 2, z)
+	if c == nil then
 		return
 	end
-	have.lit = k
+	local o = have.lit
+	if o and math.abs(c.r - o.r) < 1 / 255 and math.abs(c.g - o.g) < 1 / 255
+			and math.abs(c.b - o.b) < 1 / 255 then
+		return
+	end
+	have.lit = c
 	for _, m in ipairs(have.materials) do
-		m:SetShaderParameter("MatDiffColor", magic.Color(k, k, k, 1.0))
+		m:SetShaderParameter("MatDiffColor", c)
 	end
 end
 
@@ -747,7 +793,7 @@ local function object_node(id)
 			(buildat.get_time_us() - t0)
 	object_nodes[id] = {node = node, drawn_as = drawn_as, mesh = look.mesh,
 			texture = look.texture, look = look, materials = materials or {},
-			lit = -1}
+			lit = nil}
 	return node
 end
 

@@ -498,8 +498,8 @@ do
 	-- is what the path-traced reference's PNGs are; the reference runners
 	-- set it so the fit's probes read linear against linear ([PBR_FIT])
 	local curve = buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1"
-	rp:SetEnabled("TonemapUncharted2", curve and tonemap == "uncharted2")
-	rp:SetEnabled("TonemapACES", curve and tonemap ~= "uncharted2")
+	rp:SetEnabled("TonemapUncharted2", curve and tonemap ~= "aces")
+	rp:SetEnabled("TonemapACES", curve and tonemap == "aces")
 	-- and no bloom either: the render has none, and a bright pass blurred
 	-- over a probe crop is a white the crop did not earn
 	rp:SetEnabled("BloomHDR", buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
@@ -772,7 +772,7 @@ end
 -- picture in Luanti and a node is drawn as the node it places, with the
 -- light where the player stands; here it is one shape and always visible.
 local wield_node = camera_node:CreateChild("wielded")
-local wield_model = wield_node:CreateComponent("StaticModel")
+local wield_model = wield_node:CreateChild("box"):CreateComponent("StaticModel")
 local wield_material = magic.Material.new()
 -- Cut out by the picture's own alpha rather than opaque, because an item's
 -- picture is a cutout: a plant, a tool, a sapling. Drawn opaque the holes in
@@ -782,28 +782,43 @@ wield_material:SetTechnique(0, magic.cache:GetResource("Technique",
 		"luanti/UnlitAlphaMask.xml"))
 wield_model:SetModel(magic.cache:GetResource("Model", "Models/Box.mdl"))
 wield_model.material = wield_material
--- Where a hand is: nearer than the player's own collision box is wide, so
--- that no wall can come between it and the eye -- which is what the near
--- plane at a tenth of a node allows. It is the same size on the screen as
--- it was out at 1.5: the distance and the scale came down together.
+-- Where a hand is: official's numbers ([WIELD_MESH] 4, camera.cpp
+-- drawWieldedTool and wieldmesh.cpp), read off the code: the wield scene's
+-- camera is at the origin looking down +Z at FOV 72, the mesh rests at
+-- (55, -35, 65) Irrlicht units (BS 10 to the node; the tool-change
+-- timer sits at 0.125 at rest, so its `|timer| * 320 - 40` is nought
+-- and not -40), turned by the Euler
+-- (-100, 120, -100) taken X then Y then Z about the fixed axes (Irrlicht's
+-- setRotationDegrees), an extruded item scaled by wield_scale * 40, a node
+-- by wield_scale * 30 / BS.
 --
--- Luanti never makes this trade: it draws the wielded tool in a scene
--- manager of its own with the depth buffer cleared. This one is a child of
--- the camera node in the world's own scene, so what it has to clear is the
--- world's near plane.
---
--- The three numbers below were measured at a 45 degree field of view and
--- mean a place on the screen rather than a place in the world, so they
--- follow the camera: a wider view maps the same offset to a smaller part of
--- the frame, and the hand would walk towards the middle of the screen and
--- shrink. CAMERA_FOV is 72 now, which is Luanti's own.
-local WIELD_TUNED_FOV = 45
-local wield_k = math.tan(math.rad(CAMERA_FOV / 2)) /
-		math.tan(math.rad(WIELD_TUNED_FOV / 2))
-wield_node.position = magic.Vector3(0.103 * wield_k, -0.077 * wield_k, 0.25)
-wield_node.rotation = magic.Quaternion(-18, 35, 8)
-wield_node.scale = magic.Vector3(0.033 * wield_k, 0.033 * wield_k,
-		0.033 * wield_k)
+-- Luanti draws it in a scene of its own with the depth cleared. Ours is a
+-- child of the camera node in the world's scene, so it has to sit inside
+-- the world's near plane (a tenth of a node) and nearer than the player's
+-- own box is wide, so that no wall comes between it and the eye: the whole
+-- thing is divided by WIELD_SHRINK, position and size together, which is
+-- the same picture from a camera at the origin.
+-- simplified: wield_scale is the item definition's and not on the wire,
+-- so every item is at (1, 1, 1); the arm inertia, the swings and the bob
+-- are not here. The world's FOV is official's 72; a camera packet that
+-- changes it is followed by wield_k so the hand keeps its place on the
+-- screen where official's would not move.
+-- (one table: this file is at Lua's 200 locals)
+local WIELD = {shrink = 26}
+WIELD.extruded_scale = 40 / 10 / WIELD.shrink
+WIELD.node_scale = 30 / 10 / WIELD.shrink
+function WIELD.place(fov)
+	local wield_k = math.tan(math.rad(fov / 2)) / math.tan(math.rad(36))
+	wield_node.position = magic.Vector3(5.5 / WIELD.shrink * wield_k,
+			-3.5 / WIELD.shrink * wield_k, 6.5 / WIELD.shrink)
+	wield_node.rotation = magic.Quaternion(-100, magic.Vector3(0, 0, 1)) *
+			magic.Quaternion(120, magic.Vector3(0, 1, 0)) *
+			magic.Quaternion(-100, magic.Vector3(1, 0, 0))
+	wield_node.scale = magic.Vector3(wield_k, wield_k, wield_k)
+end
+WIELD.place(CAMERA_FOV)
+wield_node:GetChild("box").scale = magic.Vector3(WIELD.node_scale, WIELD.node_scale,
+		WIELD.node_scale)
 wield_node.enabled = false
 
 -- The name of what is in hand, above the slots: Luanti shows it when the
@@ -854,6 +869,10 @@ local function draw_wielded(item_name)
 			end
 			cg.castShadows = false
 			holder.enabled = false
+			-- a node's cube and a picture's slab are official's sizes
+			local sc = #resources == 3 and WIELD.node_scale or
+					WIELD.extruded_scale
+			holder.scale = magic.Vector3(sc, sc, sc)
 			shape = {node = holder, materials = materials}
 		end
 		wield_shapes[item_name] = shape
@@ -1571,6 +1590,7 @@ local function update_sky(dt)
 		local rg = math.max(ratio - 0.04, 1e-4)
 		local blue = (0.98 * ratio + 0.078) / rg
 		zone.ambientColor = magic.Color(ratio, ratio, ratio * blue)
+		luanti.set_light_units(nil)
 	else
 		-- pbr: the ambient is the sky's mean radiance, in the sky's hue
 		-- -- what a face lit by the sky alone receives, which the shader
@@ -1609,6 +1629,12 @@ local function update_sky(dt)
 		-- colour for every light source; a torch is not a glowstone.
 		voxel_shading.set_lamp_light(PHYS.lamp * 1.0, PHYS.lamp * 0.6,
 				PHYS.lamp * 0.3)
+		-- The same three for the objects and the hand, drawn unlit in
+		-- the frame's units ([OBJECT_LIGHT], the unit gap)
+		luanti.set_light_units(zone.ambientColor,
+				magic.Color(c.r * k * PHYS.bounce, c.g * k * PHYS.bounce,
+						c.b * k * PHYS.bounce),
+				magic.Color(PHYS.lamp * 1.0, PHYS.lamp * 0.6, PHYS.lamp * 0.3))
 		voxel_shading.set_translucency_gain(tonumber(
 				buildat.get_env("BUILDAT_LUANTI_TRANSLUCENCY") or "") or
 				PHYS.translucency)
@@ -1707,27 +1733,18 @@ local function update_sky(dt)
 	-- ([OBJECT_LIGHT])
 	luanti.set_daylight(math.min(1, up + moon_up * MOON_BRIGHTNESS / SUN_BRIGHTNESS))
 	-- By the light where the player stands ([WIELD_MESH] 3, Luanti's
-	-- light_color): the eye voxel's skylight nibble takes the day's
-	-- amount, the lamp nibble stands on its own, and the brighter wins --
-	-- so a cave darkens the hand and a torch lights it. The nibbles are
-	-- the flood's, 0..15; the floor is the same as before so the item is
-	-- never gone.
+	-- light_color): the eye voxel's light as an object there gets it --
+	-- the parity floor and ramp, or under pbr the frame's units
+	-- ([OBJECT_LIGHT]) -- so a cave darkens the hand and a torch lights
+	-- it. No voxel loaded yet: the day's amount alone, as before.
 	local cp = camera_node.worldPosition
-	local eye = voxelworld.get_static_voxel(buildat.Vector3(
-			math.floor(cp.x + 0.5), math.floor(cp.y + 0.5), math.floor(cp.z + 0.5)))
-	if eye ~= nil then
-		local reg = voxelworld.get_voxel_registry()
-		local sky = reg:light_sky_of(eye) / 15
-		local lamp = reg:light_lamp_of(eye) / 15
-		k = 0.28 + 0.72 * math.max(sky * (k - 0.28) / 0.72, lamp)
-	end
-	wield_material:SetShaderParameter("MatDiffColor",
-			magic.Color(k, k, k, 1.0))
+	local col = luanti.light_color(cp.x, cp.y, cp.z) or magic.Color(k, k, k, 1.0)
+	wield_material:SetShaderParameter("MatDiffColor", col)
 	-- and the shapes' own materials, clones of it ([WIELD_MESH])
 	for _, sh in pairs(hotbar_pictures["\1shapes"] or {}) do
 		if sh then
 			for _, m in ipairs(sh.materials) do
-				m:SetShaderParameter("MatDiffColor", magic.Color(k, k, k, 1.0))
+				m:SetShaderParameter("MatDiffColor", col)
 			end
 		end
 	end
@@ -1981,6 +1998,7 @@ luanti.sub_camera(function(c)
 		else
 			camera.fov = CAMERA_FOV
 		end
+		WIELD.place(camera.fov)
 	end
 	-- Luanti's own unit here is BS, which is ten units to the node
 	eye_offset = {x = (c.eye.x or 0) / 10, y = (c.eye.y or 0) / 10,

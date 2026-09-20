@@ -198,7 +198,8 @@ function M.define(dst, util)
 			),
 		},
 		instance_meta = {
-			__mul = util.wrap_function({"Quaternion", "number"}, function(self, n)
+			__mul = util.wrap_function({"Quaternion", {"number", "Quaternion"}},
+			function(self, n)
 				return util.wrap_instance("Quaternion", self * n)
 			end),
 			__add = util.wrap_function({"Quaternion", "Quaternion"}, function(self, other)
