@@ -91,7 +91,10 @@ smoke_test_wine() {
 		export DISPLAY=:97
 		sleep 2
 	fi
-	(cd "$unpacked" && "$wine" bin/buildat_server.exe -m games/digger -P "$port" > "$dir/srv.log" 2>&1) &
+	# With TEMP and TMP unset, as a desktop with nothing set ([WIN_TMP]);
+	# Wine gives its own from the registry, so this proves less than a
+	# desktop does, and the desktop is the done-when
+	(cd "$unpacked" && env -u TEMP -u TMP -u TMPDIR "$wine" bin/buildat_server.exe -m games/digger -P "$port" > "$dir/srv.log" 2>&1) &
 	local srv=$!
 	local i
 	for i in $(seq 1 900); do
