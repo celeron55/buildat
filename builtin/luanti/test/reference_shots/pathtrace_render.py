@@ -369,7 +369,10 @@ def textured_material(name, png):
 		# colour at LAMP_RADIANCE times the node's light_source share,
 		# through a mask of the atlas's lit segments
 		rects = LAMPS.get(os.path.basename(png))
-		if rects:
+		# A texture the dump names but the directory no longer holds (a
+		# later dump wrote fewer meshdump_texN.png) loads at size 0; the
+		# mask cannot be built over it and the material stays unlit
+		if rects and tex.image.size[0] > 0:
 			mask = nt.nodes.new("ShaderNodeTexImage")
 			mask.image = emission_mask(name + "_lamps", tex.image.size, rects)
 			mask.interpolation = "Closest"
@@ -599,6 +602,17 @@ def main():
 	for name in picked:
 		if ONLY and ONLY not in name:
 			continue
+		# With HOURS_ONLY, a dump taken at another hour is skipped when a
+		# dump of the same view at a wanted hour is there: the wanted
+		# picture then comes from the dump nearest it, not from an older
+		# one whose textures may be gone (the 05:45 dumps named a
+		# meshdump_tex42 the 13:00 re-dump had not written, 2026-09-20)
+		if HOURS_ONLY:
+			p = name.split("_")
+			if p[2] not in HOURS_ONLY and any(
+					n.split("_")[1] == p[1] and n.split("_")[2] in HOURS_ONLY
+					for n in objs):
+				continue
 		obj_path = os.path.join(IN, name)
 		print("load", name)
 		pos, dire, co, tint, uv, blocks = load_dump(obj_path)
