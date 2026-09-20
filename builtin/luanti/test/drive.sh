@@ -24,6 +24,9 @@ GAME="${GAME:-mineclone2}"
 GOAL="${GOAL:-}"
 out="$here/local/drive/$SEED"
 mkdir -p "$out"
+# The logs are overwritten per run; so are the pictures, or an earlier
+# run's higher-numbered ones sit beside this run's and read as its
+rm -f "$out"/d[0-9]*.png
 save="buildat_test_drive_$SEED"
 
 cd "$here/Build"
