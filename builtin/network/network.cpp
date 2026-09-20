@@ -69,6 +69,12 @@ struct Peer
 	size_t out_queued_bytes = 0;
 	// When the queue first went over the policy's limit, for Disconnect
 	int64_t over_since_us = 0;
+	// When the socket last took anything: a peer over the limit that is
+	// reading, however slowly, is a slow link and not a dead one
+	// ([NET_CHANNELS]; over a lossy link VoxeLibre's join was
+	// disconnected at 24 MB unread in 30 s while the peer was reading
+	// the whole time)
+	int64_t last_progress_us = 0;
 	// Said once per peer rather than per packet
 	bool warned_full = false;
 
@@ -93,18 +99,25 @@ struct Peer
 		}
 		out_queued_bytes -= out_buf.size();
 	}
-	void enqueue(const ss_ &name, const ss_ &packet, bool latest_only)
+	// coalesce: replace an unsent packet of the same name in the latest
+	// lane; a definition goes into that lane too, ahead of its payload
+	// and never replaced, so a payload that overtakes the queue never
+	// overtakes what names its type
+	void enqueue(const ss_ &name, const ss_ &packet, bool latest_lane,
+			bool coalesce)
 	{
-		if(latest_only){
-			for(auto &pair : out_latest){
-				if(pair.first == name){
-					out_queued_bytes -= pair.second.size();
-					out_queued_bytes += packet.size();
-					pair.second = packet;
-					return;
+		if(latest_lane){
+			if(coalesce){
+				for(auto &pair : out_latest){
+					if(pair.first == name){
+						out_queued_bytes -= pair.second.size();
+						out_queued_bytes += packet.size();
+						pair.second = packet;
+						return;
+					}
 				}
 			}
-			out_latest.push_back(std::make_pair(name, packet));
+			out_latest.push_back(std::make_pair(coalesce ? name : "", packet));
 		} else {
 			out_queue.push_back(packet);
 		}
@@ -353,6 +366,7 @@ struct Module: public interface::Module, public network::Interface
 			if(sent == 0)
 				break;
 			peer.out_sent += sent;
+			peer.last_progress_us = interface::os::time_us();
 		}
 		if(peer.out_pending() <= m_max_queue_bytes){
 			peer.over_since_us = 0;
@@ -382,10 +396,15 @@ struct Module: public interface::Module, public network::Interface
 			const int64_t now = interface::os::time_us();
 			if(peer.over_since_us == 0){
 				peer.over_since_us = now;
-			} else if(now - peer.over_since_us >= m_grace_us){
-				log_w(MODULE, "Peer %zu has not read %zu queued bytes in "
-						"%.0f s; disconnecting it", peer.id,
-						peer.out_pending(), (now - peer.over_since_us) / 1e6);
+				if(peer.last_progress_us == 0)
+					peer.last_progress_us = now;
+			} else if(now - peer.over_since_us >= m_grace_us &&
+					now - peer.last_progress_us >= m_grace_us){
+				// Over the limit for the grace and nothing read in it:
+				// the grace measures the peer's reading, not the queue
+				log_w(MODULE, "Peer %zu has read nothing of %zu queued "
+						"bytes in %.0f s; disconnecting it", peer.id,
+						peer.out_pending(), (now - peer.last_progress_us) / 1e6);
 				to_drop.push_back(peer.id);
 			}
 		}
@@ -415,14 +434,8 @@ struct Module: public interface::Module, public network::Interface
 		// A drop policy drops the whole of a fragmented packet or none of
 		// it: the fragments of one call are one packet to the reader
 		bool dropping = false;
-		// A LatestOnly payload may not overtake its own definition, which
-		// the stream writes ahead of the first payload of a name: that
-		// first one goes ordered, behind it
-		bool defined_now = false;
 		peer.packet_stream.output(name, data,
 				[&](const ss_ &packet_data, bool droppable){
-			if(!droppable)
-				defined_now = true;
 			if(dropping && droppable)
 				return;
 			// Over the limit, a Drop game throws the new packet away rather
@@ -445,10 +458,10 @@ struct Module: public interface::Module, public network::Interface
 				dropping = true;
 				return;
 			}
-			// A definition is ordered whatever the payload is: it has to be
-			// read before the payload, and the queue keeps that
-			peer.enqueue(name, packet_data,
-					latest_only && droppable && !defined_now);
+			// A LatestOnly name's definition (the undroppable packet the
+			// stream writes ahead of its first payload) goes in the
+			// latest lane with it, so the payload never overtakes it
+			peer.enqueue(name, packet_data, latest_only, droppable);
 		});
 		// The common case is a peer that is keeping up, and then this writes
 		// the packet and leaves nothing behind
