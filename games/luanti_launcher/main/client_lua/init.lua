@@ -484,15 +484,22 @@ do
 	rp:Append(magic.cache:GetResource("XMLFile",
 			"luanti_client/res/LuantiAutoExposure.xml"))
 	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/BloomHDR.xml"))
+	-- The curve: ACES ([PBR_FIT] term 4, luanti_client/res/LuantiTonemap),
+	-- with Urho's per-channel Uncharted2 kept behind
+	-- BUILDAT_LUANTI_TONEMAP=uncharted2 for the pair
+	local tonemap = buildat.get_env("BUILDAT_LUANTI_TONEMAP") or "aces"
 	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/Tonemap.xml"))
+	rp:Append(magic.cache:GetResource("XMLFile",
+			"luanti_client/res/LuantiTonemap.xml"))
 	rp:Append(magic.cache:GetResource("XMLFile",
 			"PostProcess/GammaCorrection.xml"))
 	rp:SetEnabled("TonemapReinhardEq3", false)
 	-- BUILDAT_LUANTI_LINEAR=1: the metered frame clipped, no curve, which
 	-- is what the path-traced reference's PNGs are; the reference runners
 	-- set it so the fit's probes read linear against linear ([PBR_FIT])
-	rp:SetEnabled("TonemapUncharted2",
-			buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
+	local curve = buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1"
+	rp:SetEnabled("TonemapUncharted2", curve and tonemap == "uncharted2")
+	rp:SetEnabled("TonemapACES", curve and tonemap ~= "uncharted2")
 	-- and no bloom either: the render has none, and a bright pass blurred
 	-- over a probe crop is a white the crop did not earn
 	rp:SetEnabled("BloomHDR", buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
