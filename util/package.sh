@@ -296,17 +296,21 @@ windows)
 	# desktop's 0xc0000142 and becomes the packaging ([WIN_DLL_INIT]):
 	# the three runtime DLLs from the cross toolchain that built the
 	# binaries rather than from the shipped winlibs tree, and the
-	# runtimes linked static with no runtime DLL at all. WIN_VARIANTS=0
-	# skips them.
-	if [ "${WIN_VARIANTS:-1}" != 0 ]; then
+	# libstdc++ and winpthread linked static (libgcc_s stays a DLL: a
+	# static one in two exporting DLLs links twice). WIN_VARIANTS=0
+	# skips them, =toolchain or =static builds one.
+	v="${WIN_VARIANTS:-1}"
+	if [ "$v" = 1 ] || [ "$v" = toolchain ]; then
 		b=$(make_one "buildat-$version-win64-runtimes-toolchain" \
 			"${win_args[@]}" -DBUILDAT_RUNTIME_DLLS=toolchain)
 		echo "archive: $b"
 		check_imports "$b"
+	fi
+	if [ "$v" = 1 ] || [ "$v" = static ]; then
 		c=$(make_one "buildat-$version-win64-runtimes-static" \
 			"${win_args[@]}" -DBUILDAT_RUNTIME_DLLS=static \
-			-DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++ -Wl,-Bstatic,-lstdc++,-lpthread,-Bdynamic" \
-			-DCMAKE_SHARED_LINKER_FLAGS="-static-libgcc -static-libstdc++ -Wl,-Bstatic,-lstdc++,-lpthread,-Bdynamic")
+			-DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -Wl,-Bstatic,-lstdc++,-lpthread,-Bdynamic" \
+			-DCMAKE_SHARED_LINKER_FLAGS="-static-libstdc++ -Wl,-Bstatic,-lstdc++,-lpthread,-Bdynamic")
 		echo "archive: $c"
 		check_imports "$c"
 	fi

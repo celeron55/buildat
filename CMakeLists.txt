@@ -528,18 +528,24 @@ if(WIN32)
 	# Where the three runtime DLLs beside the executables come from
 	# ([WIN_DLL_INIT]): "winlibs", the shipped compiler's (one libstdc++
 	# for the binaries and the modules it compiles); "toolchain", the
-	# cross toolchain's own that built the binaries; "static", none --
-	# the runtimes linked into each binary (util/package.sh sets the
-	# link flags with it).
+	# cross toolchain's own that built the binaries; "static", libstdc++
+	# and winpthread linked into each binary (util/package.sh sets the
+	# link flags with it) and the toolchain's libgcc_s alone shipped --
+	# a static libgcc in two DLLs that export everything defines
+	# _Unwind_Resume twice.
 	set(BUILDAT_RUNTIME_DLLS "winlibs" CACHE STRING
 		"Source of the runtime DLLs: winlibs, toolchain or static")
 	if(BUILDAT_RUNTIME_DLLS STREQUAL "winlibs" AND BUILDAT_SHIP_COMPILER)
 		foreach(DLL libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll)
 			install(FILES "${BUILDAT_SHIP_COMPILER}/bin/${DLL}" DESTINATION "${DST_BIN}")
 		endforeach()
-	elseif(BUILDAT_RUNTIME_DLLS STREQUAL "toolchain")
-		get_filename_component(TC_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)
-		foreach(DLL libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll)
+	elseif(BUILDAT_RUNTIME_DLLS STREQUAL "toolchain" OR BUILDAT_RUNTIME_DLLS STREQUAL "static")
+		if(BUILDAT_RUNTIME_DLLS STREQUAL "static")
+			set(RUNTIME_DLLS libgcc_s_seh-1.dll)
+		else()
+			set(RUNTIME_DLLS libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll)
+		endif()
+		foreach(DLL ${RUNTIME_DLLS})
 			# The compiler's own copy: what -print-file-name resolves
 			execute_process(COMMAND "${CMAKE_CXX_COMPILER}" -print-file-name=${DLL}
 				OUTPUT_VARIABLE DLL_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)

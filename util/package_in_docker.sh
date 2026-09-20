@@ -35,6 +35,7 @@ docker run --rm -i \
 	-v "$out:/out:z" \
 	-e "BUILDAT_GIT_HASH=$hash" \
 	-e "JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}" \
+	-e "WIN_VARIANTS=${WIN_VARIANTS:-1}" \
 	"$image" bash -c "
 		set -eu
 		mkdir -p /work/buildat && cd /work/buildat && tar -xf - &&
