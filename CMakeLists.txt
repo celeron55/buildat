@@ -302,6 +302,7 @@ set(BUILDAT_CORE_SRCS
 	src/impl/noise.cpp
 	src/impl/voxel_volume.cpp
 	src/impl/compress.cpp
+	src/impl/zip.cpp
 	src/impl/thread_pool.cpp
 	src/impl/thread.cpp
 	src/impl/magic_event_handler.cpp

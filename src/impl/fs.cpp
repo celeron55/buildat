@@ -197,6 +197,11 @@ bool copy_file(const ss_ &from, const ss_ &to)
 	return (bool)out;
 }
 
+bool remove_all(const ss_ &path)
+{
+	return c55fs::RecursiveDelete(path);
+}
+
 uint64_t directory_tree_size(const ss_ &path)
 {
 	uint64_t total = 0;

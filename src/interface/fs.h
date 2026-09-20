@@ -35,6 +35,9 @@ namespace interface
 
 		bool copy_file(const ss_ &from, const ss_ &to);
 
+		// A file or a directory tree, gone; false when something stayed
+		bool remove_all(const ss_ &path);
+
 		// Bytes in a regular file; 0 if missing or not a regular file.
 		uint64_t file_size(const ss_ &path);
 		// Sum of file_size for every regular file under path, recursively.
