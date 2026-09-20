@@ -69,6 +69,13 @@ namespace interface
 		OutgoingPacketTypeRegistry m_outgoing_types;
 		IncomingPacketTypeRegistry m_incoming_types;
 		PacketType m_highest_known_type = 99;
+		// How much of this stream has been read. Only the error message
+		// wants it, and it is what tells a lost type definition from a
+		// stream read at the wrong offset: a definition arrives before the
+		// first payload that uses it, so an unknown type early is a
+		// definition that went missing and one after megabytes of traffic
+		// is framing.
+		uint64_t m_input_offset = 0;
 
 		PacketStream(){
 			m_outgoing_types.set(0, "core:define_packet_type");
@@ -78,8 +85,15 @@ namespace interface
 		void input(std::deque<char> &socket_buffer,
 				std::function<void(const ss_&name, const ss_&data)> cb);
 
+		// The callback is told whether what it is given may be thrown away
+		// when a peer is behind: a payload may, and the
+		// core:define_packet_type that names a type may never. The type is
+		// counted as known as soon as it is written, so a definition
+		// dropped is a definition never sent again, and that peer cannot
+		// read anything of that type for the rest of the session.
 		void output(const ss_ &name, const ss_ &data,
-				std::function<void(const ss_&packet_data)> cb);
+				std::function<void(const ss_&packet_data, bool droppable)> cb,
+				bool droppable = true);
 	};
 }
 // vim: set noet ts=4 sw=4:
