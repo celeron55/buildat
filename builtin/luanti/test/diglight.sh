@@ -1,6 +1,6 @@
 #!/bin/bash
 # [DIG_LIGHT]: diglight.lua's server beside a client that reads its own
-# light at t=15 (the pit), t=70 (the stair) and t=115 (its bottom, the player put there) -- the scan's eye light
+# light at t=15 (the pit), t=70 (the stair) and t=115 (its third step, the player put there) -- the scan's eye light
 # line and a scan_volume with light rows. Prints the two readings side
 # by side; the log is under local/diglight/.
 #
@@ -51,10 +51,19 @@ event scan
 event scan_volume 4 t135 light
 look_dir -1 0.3 0
 delay 1500
-screenshot $out/stair_${MODE}_bottom.png
+screenshot $out/stair_${MODE}_step3_up.png
 look_dir 1 -0.3 0
 delay 1500
-screenshot $out/stair_${MODE}_down.png
+screenshot $out/stair_${MODE}_step3_down.png
+delay 20000
+event scan
+event scan_volume 4 t155 light
+look_dir 1 -0.5 0
+delay 1500
+screenshot $out/stair_${MODE}_t155.png
+look_dir 1 -1.5 0
+delay 1500
+screenshot $out/stair_${MODE}_t155_pit.png
 delay 2000
 quit
 CMDS

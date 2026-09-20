@@ -819,6 +819,18 @@ end
 WIELD.place(CAMERA_FOV)
 wield_node:GetChild("box").scale = magic.Vector3(WIELD.node_scale, WIELD.node_scale,
 		WIELD.node_scale)
+-- A node's enabled does not reach its children (Urho's SetEnabled is
+-- not deep): the box's child node and the shapes are switched with it,
+-- or an empty hand drew the box black in every picture (2026-09-20)
+function WIELD.show(on)
+	wield_node.enabled = on
+	if not on then
+		for i = 0, wield_node:GetNumChildren() - 1 do
+			wield_node:GetChild(i).enabled = false
+		end
+	end
+end
+wield_node:GetChild("box").enabled = false
 wield_node.enabled = false
 
 -- The name of what is in hand, above the slots: Luanti shows it when the
@@ -845,7 +857,7 @@ local function draw_wielded(item_name)
 	hotbar_pictures["\1shapes"] = hotbar_pictures["\1shapes"] or {}
 	local wield_shapes = hotbar_pictures["\1shapes"]
 	if item_name == nil or not luanti.hud_flag("wielditem") then
-		wield_node.enabled = false
+		WIELD.show(false)
 		return
 	end
 	local shape = wield_shapes[item_name]
@@ -883,18 +895,18 @@ local function draw_wielded(item_name)
 		end
 	end
 	if shape then
-		wield_model.enabled = false
+		wield_node:GetChild("box").enabled = false
 		wield_node.enabled = true
 		return
 	end
 	-- No shape: the box wearing one face of the picture, as before
 	local tex = game_texture(luanti.item_face_texture(item_name))
 	if tex == nil then
-		wield_node.enabled = false
+		WIELD.show(false)
 		return
 	end
 	wield_material:SetTexture(magic.TU_DIFFUSE, tex)
-	wield_model.enabled = true
+	wield_node:GetChild("box").enabled = true
 	wield_node.enabled = true
 end
 
@@ -1863,6 +1875,10 @@ local function voxel_liquid_at(p)
 	return def
 end
 
+-- The player's physics, made below; named here so update_underwater()
+-- reaches it (it read a global before, and errored every frame the eye
+-- was in a solid node -- 16472 frames of a run, 2026-09-20)
+local player
 local function update_underwater(eye)
 	-- The tint of the node the eye is in: the game's colour for it, or
 	-- black for a solid node in first person, or nothing
@@ -1958,7 +1974,7 @@ end
 -- And what standing on it does: the bouncy, slippery, disable_jump and
 -- disable_descend groups, which the registry carries as fields. Inline:
 -- this file is at Lua's 200-local limit.
-local player = player_physics.new(node_stops, node_is_liquid,
+player = player_physics.new(node_stops, node_is_liquid,
 		node_is_climbable, node_resistance, function(x, y, z)
 	local v = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
 	if v == nil then

@@ -79,11 +79,19 @@ core.register_on_joinplayer(function(player)
 					t, tostring(core.get_node_light(pit, 0.5)),
 					bottom and tostring(core.get_node_light(bottom, 0.5)) or "-"))
 			-- Then the player is put at the bottom for the client's read
+			-- Not the bottom: step three, where the flood says 5-9 and a
+			-- wall must read lit ([STAIR_DARK]); the bottom is 0 and black
 			if t == 105 and bottom then
-				player:set_pos({x = bottom.x, y = bottom.y + 0.5, z = bottom.z})
-				core.log("action", "diglight: player moved to the bottom")
+				player:set_pos({x = x + 3, y = gy - 3 + 0.5, z = z})
+				core.log("action", "diglight: player moved to step 3")
 			end
-			if t < 125 then
+			-- And back to the lip at t=125, for the same shot as t=70 with
+			-- the client's remesh queue long drained ([STAIR_DARK])
+			if t == 125 then
+				player:set_pos({x = p.x, y = p.y + 0.5, z = p.z})
+				core.log("action", "diglight: player moved back to the start")
+			end
+			if t < 145 then
 				core.after(1, tick)
 			end
 		end
