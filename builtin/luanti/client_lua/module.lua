@@ -626,8 +626,9 @@ local function make_object_node(look)
 			return node, mats
 		end
 	end
-	local node = object_scene:CreateChild("luanti_object")
+	-- The texture first: a compose that raises leaves no node in the scene
 	local tex = object_texture(look.texture)
+	local node = object_scene:CreateChild("luanti_object")
 	if look.kind == "sprite" and tex then
 		local set = node:CreateComponent("BillboardSet")
 		set.numBillboards = 1
