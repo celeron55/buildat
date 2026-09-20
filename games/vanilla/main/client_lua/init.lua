@@ -529,6 +529,11 @@ do
 	-- ([PBR_FIT] term 4). EXPOSURE_BIAS stays the minimap's, which is not
 	-- metered.
 	rp:SetShaderParameter("TonemapExposureBias", 1.0)
+	-- BUILDAT_LUANTI_WHITE=<n>: Uncharted2's white point (Urho's 4.0),
+	-- for the grade's ladder ([PBR_FIT] step 5); the shoulder is the
+	-- curve's own
+	rp:SetShaderParameter("TonemapMaxWhite",
+			tonumber(buildat.get_env("BUILDAT_LUANTI_WHITE") or "") or 4.0)
 	rp:SetShaderParameter("AutoExposureAdaptRate", AUTO_EXPOSURE.adapt_rate)
 	-- BUILDAT_LUANTI_KEY=<lum> pins the metered key by closing the range on
 	-- it, so an ablation's frames are comparable in absolute terms: with
