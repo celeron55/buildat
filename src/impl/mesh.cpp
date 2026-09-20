@@ -977,7 +977,15 @@ static void face_vertex_colors(VoxelVolume &volume,
 		// of zero still bounces ([PBR_FIT] 2c, the shadow-kind run). The
 		// alpha's low nibble keeps the product for the sky's share.
 		if(horizon){
-			float local = ao * hemi * FACE_SHADE[face_id] / 1.15f;
+			// Floored like the enclosure above: a wall in a cave's fold has
+			// all nine rays blocked, and at nought it took the bounce and
+			// the ground with it and drew black where the render has the
+			// mouth's bounce (vp7's right wall, 2026-09-20; [PBRI] owns the
+			// level, the floor owns the black)
+			float local_ao = ao * hemi;
+			if(local_ao < SHADE_FLOOR)
+				local_ao = SHADE_FLOOR;
+			float local = local_ao * FACE_SHADE[face_id] / 1.15f;
 			out[i] = Color(lamp_shade, terrain,
 					local > 1.0f ? 1.0f : local,
 					sky_alpha(sky_f, sky_shade, true)).ToUInt();
