@@ -33,7 +33,6 @@ class Link:
         self.filled_at = clock()
         self.ready_at = 0.0  # when the direction is free after a stall
         self.rto = RTO_MS / 1000.0
-        self.window_until = 0.0
         self.stalls = 0
 
     def wait_for(self, n):
@@ -54,15 +53,16 @@ class Link:
                 events += 1
         if events:
             self.stalls += events
-            # Inside the last stall's window the timer doubles, else it
-            # starts over at the base RTO
-            if now < self.window_until:
+            # A loss while the last stall still holds doubles the timer,
+            # as a retransmission lost again would; one after it clears
+            # starts over at the base RTO. (A window past the stall made
+            # every loss on a busy link the next doubling, and the link
+            # died in a minute, 2026-09-20.)
+            if now < self.ready_at:
                 self.rto = min(self.rto * 2, 60.0)
             else:
                 self.rto = RTO_MS / 1000.0
-            until = max(now, self.ready_at) + self.rto * events
-            self.window_until = until + self.rto
-            self.ready_at = until
+            self.ready_at = max(now, self.ready_at) + self.rto * events
         if self.ready_at > now:
             hold += self.ready_at - now
         return hold
@@ -129,13 +129,13 @@ def check():
     l = Link(0, 2000, 0, random.Random(1), clock)
     assert abs(l.wait_for(500 * 1000) - 1.0) < 1e-6, l.wait_for(0)
     # Loss at a hundred percent: one stall of an RTO per kilobyte, and
-    # a second chunk inside the window doubles it
+    # a second chunk while the first stall holds doubles it
     l = Link(0, 0, 100, random.Random(1), clock)
     assert abs(l.wait_for(1024) - 0.2) < 1e-9
     t[0] = 0.1
     h = l.wait_for(1024)
     assert abs(h - (0.2 - 0.1 + 0.4)) < 1e-9, h
-    # And past the window it starts over
+    # And once it has cleared it starts over
     t[0] = 10.0
     assert abs(l.wait_for(1024) - 0.2) < 1e-9
     # A seed replays

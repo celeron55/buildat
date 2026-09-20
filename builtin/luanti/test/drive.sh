@@ -80,9 +80,12 @@ bin/buildat -s "localhost:$cport" -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
 cli=$!
 exec 3> "$fifo"
 # The first forty seconds are the world loading around the player, as in
-# the fuzz walk
-echo "delay 40000" >&3
-sleep 40
+# the fuzz walk; four minutes over a capped link, where VoxeLibre's
+# media and first chunks take that long ([NET_SIM]; simplified: a wait,
+# where the driver could read the world's arrival off its first scans)
+START_WAIT="${START_WAIT:-$([ -n "${NETSIM:-}" ] && echo 240 || echo 40)}"
+echo "delay $((START_WAIT * 1000))" >&3
+sleep "$START_WAIT"
 python3 "$me/drive.py" "$out/cli.log" "$fifo" "$MINUTES" "$out" "$SEED" $GOAL \
 	> "$out/drive.log" 2>&1 &
 drv=$!

@@ -3830,11 +3830,16 @@ local function send_where()
 	-- turns towards -X where Urho's yaw turns towards +X; its vertical one
 	-- is positive downwards, which is what Urho's pitch already is. See
 	-- lua_api.md, get_look_horizontal and get_look_vertical.
+	-- Stamped with the client's clock ([NET_SIM]): the server reads how
+	-- long the update waited behind whatever was on the wire, as the
+	-- excess over the fastest one it saw, and logs the worst per five
+	-- seconds -- the number the channels attack
 	buildat.send_packet("main:where", cereal.binary_output({
 		x = p.x, y = p.y, z = p.z,
 		look_h = math.rad(-yaw),
 		look_v = math.rad(pitch),
 		controls = last_controls,
+		sent_us = buildat.get_time_us(),
 	}, {"object",
 		{"x", "double"},
 		{"y", "double"},
@@ -3842,6 +3847,7 @@ local function send_where()
 		{"look_h", "double"},
 		{"look_v", "double"},
 		{"controls", "int32_t"},
+		{"sent_us", "double"},
 	}))
 end
 

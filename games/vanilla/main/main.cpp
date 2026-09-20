@@ -33,6 +33,7 @@
 #include "interface/http.h"
 #include "interface/zip.h"
 #include "interface/thread.h"
+#include "interface/os.h"
 #include <atomic>
 #include <PolyVoxCore/Vector.h>
 #define MODULE "main"
@@ -78,8 +79,21 @@ struct Module: public interface::Module
 	struct Where {
 		double x = 0, y = 0, z = 0, look_h = 0, look_v = 0;
 		int32_t controls = 0;
+		double sent_us = 0; // the client's clock, microseconds (cereal's
+		                    // Lua side has doubles, not int64)
 	};
 	sm_<network::PeerInfo::Id, Where> m_pending_where;
+	// How long a position update waited on the wire ([NET_SIM]): the
+	// client's clock is not the server's, so the age is the excess over
+	// the smallest (received - sent) seen from that peer -- the fastest
+	// update sets the baseline, a lossy link shows as the rest lagging
+	// it. The worst per five seconds is logged.
+	struct WhereAge {
+		int64_t base_us = 0; // the smallest received - sent, or 0
+		int64_t worst_us = 0;
+		int64_t window_from_us = 0;
+	};
+	sm_<network::PeerInfo::Id, WhereAge> m_where_age;
 	float m_where_timer = 0.0f;
 	// A world runs once: what a second choice would be is a second Luanti
 	// environment in one server, which is not what the module is
@@ -235,12 +249,31 @@ struct Module: public interface::Module
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
 			cereal::PortableBinaryInputArchive ar(is);
-			ar(w.x, w.y, w.z, w.look_h, w.look_v, w.controls);
+			ar(w.x, w.y, w.z, w.look_h, w.look_v, w.controls, w.sent_us);
 		} catch(std::exception &e){
 			log_w(MODULE, "main:where: %s", e.what());
 			return;
 		}
 		m_pending_where[packet.sender] = w;
+		if(w.sent_us > 0){
+			const int64_t now = interface::os::time_us();
+			WhereAge &a = m_where_age[packet.sender];
+			const int64_t d = now - (int64_t)w.sent_us;
+			if(a.base_us == 0 || d < a.base_us)
+				a.base_us = d;
+			const int64_t age = d - a.base_us;
+			if(age > a.worst_us)
+				a.worst_us = age;
+			if(a.window_from_us == 0)
+				a.window_from_us = now;
+			if(now - a.window_from_us >= 5000000){
+				log_i(MODULE, "where: the worst wait behind the wire in "
+						"five seconds %d ms (client %u)",
+						(int)(a.worst_us / 1000), (unsigned)packet.sender);
+				a.worst_us = 0;
+				a.window_from_us = now;
+			}
+		}
 	}
 
 	// And the tick is where they are handed over: one visit to the module
