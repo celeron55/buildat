@@ -283,14 +283,33 @@ windows)
 	# and libcurl's static build (util/docker/windows builds it into
 	# /opt/curlwin/curl); CURLWIN in the environment overrides
 	cw="${CURLWIN:-/opt/curlwin/curl}"
-	a=$(make_one "buildat-$version-win64" -DPORTABLE=TRUE \
+	win_args=(-DPORTABLE=TRUE \
 		-DCMAKE_TOOLCHAIN_FILE="$tc" \
 		-DMINGW_PREFIX="${MINGW_PREFIX:-/usr/bin/x86_64-w64-mingw32}" \
 		-DBUILDAT_SHIP_COMPILER="${BUILDAT_SHIP_COMPILER:-/opt/winlibs/mingw64}" \
 		-DCURL_INCLUDE_DIR="$cw/include" -DCURL_LIBRARY="$cw/lib/libcurl.a")
+	a=$(make_one "buildat-$version-win64" "${win_args[@]}")
 	echo "archive: $a"
 	check_imports "$a"
 	smoke_test_wine "$a"
+	# The runtime variants beside it, until one of them answers the
+	# desktop's 0xc0000142 and becomes the packaging ([WIN_DLL_INIT]):
+	# the three runtime DLLs from the cross toolchain that built the
+	# binaries rather than from the shipped winlibs tree, and the
+	# runtimes linked static with no runtime DLL at all. WIN_VARIANTS=0
+	# skips them.
+	if [ "${WIN_VARIANTS:-1}" != 0 ]; then
+		b=$(make_one "buildat-$version-win64-runtimes-toolchain" \
+			"${win_args[@]}" -DBUILDAT_RUNTIME_DLLS=toolchain)
+		echo "archive: $b"
+		check_imports "$b"
+		c=$(make_one "buildat-$version-win64-runtimes-static" \
+			"${win_args[@]}" -DBUILDAT_RUNTIME_DLLS=static \
+			-DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++ -Wl,-Bstatic,-lstdc++,-lpthread,-Bdynamic" \
+			-DCMAKE_SHARED_LINKER_FLAGS="-static-libgcc -static-libstdc++ -Wl,-Bstatic,-lstdc++,-lpthread,-Bdynamic")
+		echo "archive: $c"
+		check_imports "$c"
+	fi
 	;;
 *)
 	echo "unknown target $target" >&2; exit 2 ;;

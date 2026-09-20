@@ -133,6 +133,10 @@ if(URHO3D_HOME_ABS STREQUAL URHO3D_BUNDLED_HOME_ABS)
 		# library that owns the memory as much as in what calls it
 		"-DCMAKE_CXX_FLAGS=${SANITIZE_FLAGS}"
 		"-DCMAKE_C_FLAGS=${SANITIZE_FLAGS}"
+		# And the link flags, which is how a static-runtime variant
+		# reaches Urho3D.dll ([WIN_DLL_INIT]); empty otherwise
+		"-DCMAKE_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+		"-DCMAKE_SHARED_LINKER_FLAGS=${CMAKE_SHARED_LINKER_FLAGS}"
 		# A cross build hands the engine the same toolchain file and, for
 		# Urho3D's MinGW.cmake, the tool prefix ([PACKAGING] step 3) --
 		# and not the compilers, which the toolchain sets and Urho3D's
@@ -520,11 +524,38 @@ if(WIN32)
 	if(NOT BUILDAT_SHIP_COMPILER)
 		message(WARNING "BUILDAT_SHIP_COMPILER is not set: the archive will "
 			"carry no compiler and its server cannot build a module")
-	else()
+	endif()
+	# Where the three runtime DLLs beside the executables come from
+	# ([WIN_DLL_INIT]): "winlibs", the shipped compiler's (one libstdc++
+	# for the binaries and the modules it compiles); "toolchain", the
+	# cross toolchain's own that built the binaries; "static", none --
+	# the runtimes linked into each binary (util/package.sh sets the
+	# link flags with it).
+	set(BUILDAT_RUNTIME_DLLS "winlibs" CACHE STRING
+		"Source of the runtime DLLs: winlibs, toolchain or static")
+	if(BUILDAT_RUNTIME_DLLS STREQUAL "winlibs" AND BUILDAT_SHIP_COMPILER)
 		foreach(DLL libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll)
 			install(FILES "${BUILDAT_SHIP_COMPILER}/bin/${DLL}" DESTINATION "${DST_BIN}")
 		endforeach()
+	elseif(BUILDAT_RUNTIME_DLLS STREQUAL "toolchain")
+		get_filename_component(TC_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)
+		foreach(DLL libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll)
+			# The compiler's own copy: what -print-file-name resolves
+			execute_process(COMMAND "${CMAKE_CXX_COMPILER}" -print-file-name=${DLL}
+				OUTPUT_VARIABLE DLL_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
+			if(NOT IS_ABSOLUTE "${DLL_PATH}")
+				message(FATAL_ERROR "runtime DLL ${DLL} not found by ${CMAKE_CXX_COMPILER}")
+			endif()
+			install(FILES "${DLL_PATH}" DESTINATION "${DST_BIN}")
+		endforeach()
 	endif()
+endif()
+if(WIN32)
+	# The DLL load probe, shipped beside the DLLs ([WIN_DLL_INIT]): plain
+	# C, its runtime static, so it imports nothing the archive ships
+	add_executable(loadprobe util/loadprobe.c)
+	target_link_options(loadprobe PRIVATE -static)
+	install(TARGETS loadprobe DESTINATION "${DST_BIN}")
 endif()
 if(BUILD_CLIENT)
 	install(TARGETS ${CLIENT_EXE_NAME} buildat DESTINATION "${DST_BIN}")
