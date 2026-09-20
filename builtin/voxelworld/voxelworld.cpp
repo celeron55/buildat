@@ -1978,8 +1978,33 @@ struct CInstance: public voxelworld::Instance
 		while(!m_relight_queue.empty()){
 			if(interface::os::time_us() >= deadline)
 				break;
-			const pv::Vector3DInt16 section_p = m_relight_queue.front();
-			m_relight_queue.pop_front();
+			// The section nearest a load point first, not the first queued:
+			// a jungle spawn's own canopy sat black for a minute while the
+			// relight worked through 185 sections in the order the mapgen
+			// wrote them ([SEED5_SETTLE], 2026-09-20)
+			size_t best = 0;
+			if(!m_load_points.empty()){
+				int64_t best_d = INT64_MAX;
+				for(size_t i = 0; i < m_relight_queue.size(); i++){
+					const pv::Vector3DInt16 &sp = m_relight_queue[i];
+					int64_t d = INT64_MAX;
+					for(const voxelworld::LoadPoint &lp : m_load_points){
+						const pv::Vector3DInt16 lps = section_of_voxel(lp.p);
+						int64_t dx = (int64_t)sp.getX() - lps.getX();
+						int64_t dy = (int64_t)sp.getY() - lps.getY();
+						int64_t dz = (int64_t)sp.getZ() - lps.getZ();
+						int64_t dd = dx * dx + dy * dy + dz * dz;
+						if(dd < d)
+							d = dd;
+					}
+					if(d < best_d){
+						best_d = d;
+						best = i;
+					}
+				}
+			}
+			const pv::Vector3DInt16 section_p = m_relight_queue[best];
+			m_relight_queue.erase(m_relight_queue.begin() + best);
 			Section *section = get_section(section_p);
 			if(section != nullptr){
 				relight_if_stale(*section, deadline);

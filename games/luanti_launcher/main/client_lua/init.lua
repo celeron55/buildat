@@ -2095,6 +2095,22 @@ function frame_peak.note(dt)
 					(buildat.profiler_data(4) or ""))
 		end
 	end
+	-- How the world settles around a placed player, once a second while
+	-- there is anything left to mesh: the queue, the chunks in scene and
+	-- those still undrawn within two chunks -- what says whether a seed
+	-- that takes minutes to show anything is the mesher's ([SEED5_SETTLE])
+	frame_peak.settle_due = (frame_peak.settle_due or 0) - dt
+	if frame_peak.settle_due <= 0 and player_placed then
+		frame_peak.settle_due = 1
+		local w = voxelworld.counts()
+		local undrawn = voxelworld.undrawn_around(
+				buildat.Vector3(player.x, player.y, player.z), 2)
+		if w.to_mesh > 0 or undrawn > 0 or (frame_peak.settled_said or 0) == 0 then
+			frame_peak.settled_said = (w.to_mesh > 0 or undrawn > 0) and 0 or 1
+			log:info(string.format("settle: %d to mesh, %d chunks in scene, %d undrawn within 2",
+					w.to_mesh, w.chunks, undrawn))
+		end
+	end
 	frame_peak.line_due = frame_peak.line_due - dt
 	if frame_peak.line_due <= 0 then
 		frame_peak.line_due = frame_peak.LINE_S
