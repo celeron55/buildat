@@ -639,8 +639,23 @@ def stair_step(s, mem, pick, down):
     # in water the stair yields to the water rules further down.
     f = feet_node(s)
     if is_liquid(world.get(f)) and "lava" not in (world.get(f) or ""):
-        return "stair_wet", [look_away(s)] + walk(TURN_S, jump=True), None
-    if any("lava" in (world.get(q) or "") for q in near) or \
+        # Out toward the nearest dry ground in view, and on one heading
+        # when none is: a random turn each time swam an ocean for 433
+        # turns (2026-09-20)
+        dry = [(x, y) for (x, y), b in s.bins.items()
+               if b["kind"] == "node" and not is_liquid(b["name"]) and
+               b["d"] < 10 and y >= RES // 2 - 1]
+        if dry:
+            bx, by = min(dry, key=lambda k: s.bins[k]["d"])
+            return "stair_wet", [look_at_bin(s, bx, by)] + walk(TURN_S, jump=True), None
+        yr = math.radians(mem.get("wet_yaw", mem["stair_yaw"]))
+        mem["wet_yaw"] = math.degrees(yr)
+        return "stair_wet", ["look_dir %.3f 0 %.3f" % (math.sin(yr), math.cos(yr))] + \
+            walk(TURN_S, jump=True), None
+    # Water in the step itself: not that way either -- the stair does
+    # not walk into a lake
+    if any(is_liquid(world.get(t)) for t in targets) or \
+            any("lava" in (world.get(q) or "") for q in near) or \
             (drop and mem.get("level_until", 0) <= turn):
         mem["stair_yaw"] = (mem["stair_yaw"] + 90) % 360
         mem["aimed"] = None
