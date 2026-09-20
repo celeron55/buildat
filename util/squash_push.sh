@@ -11,8 +11,11 @@ set -eu
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$here"
 src=luanti-module
-if [ "$(git rev-parse --abbrev-ref HEAD)" != "$src" ]; then
-	echo "run this on $src" >&2; exit 2
+# On the branch, or detached at its tip -- util/release.sh runs this in a
+# throwaway worktree so the main tree's session is not disturbed
+if [ "$(git rev-parse --abbrev-ref HEAD)" != "$src" ] &&
+		[ "$(git rev-parse HEAD)" != "$(git rev-parse "$src")" ]; then
+	echo "run this on $src, or detached at its tip" >&2; exit 2
 fi
 if ! git diff --quiet HEAD; then
 	echo "the tree has uncommitted changes; a squash is of a commit" >&2; exit 2
