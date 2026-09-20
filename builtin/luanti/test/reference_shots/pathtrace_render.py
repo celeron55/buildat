@@ -172,7 +172,9 @@ MOON_COLOR = (1.0, 0.86, 0.70)
 # defaults once the user has picked: the moon's factor over the physical
 # value above, and a uniform night sky of that radiance (sRGB-linear,
 # blue-ish) added to the Nishita sky, which gives none with the sun down.
-MOON_FACTOR = float(os.environ.get("MOON_FACTOR", "1"))
+# Picked 2026-09-20 off the x1 | x3 | x5 sheet: x3, night_snow_lit at 77
+# of 255 (the plan's 78); see [NIGHT_LIGHT] in the master plan
+MOON_FACTOR = float(os.environ.get("MOON_FACTOR", "3"))
 NIGHT_SKY = float(os.environ.get("NIGHT_SKY", "0"))
 NIGHT_SKY_COLOR = (0.6, 0.75, 1.0)
 # HOURS_ONLY=0200,2030 renders only those hours of each viewpoint

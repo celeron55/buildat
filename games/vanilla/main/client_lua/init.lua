@@ -223,7 +223,10 @@ local MOON_BRIGHTNESS = 1.0
 -- simplified: the sky keeps Luanti's hue at this radiance, and the sun
 -- its colour below; the colours are the terms after this one.
 local PHYS = {sun_e0 = 195, sun_tau = 0.127, sky_zenith = 4.5,
-		sky_horizon = 12.0, moon_e = 0.0025, night_sky = 0.00005,
+		-- the moon at three times lunar irradiance, the user's pick off
+		-- the x1 | x3 | x5 sheet (2026-09-20, [NIGHT_LIGHT]); the render's
+		-- MOON_FACTOR is the same 3
+		sky_horizon = 12.0, moon_e = 0.0025 * 3, night_sky = 0.00005,
 		bounce = 0.15, lamp = 8, dome = 0.9, ground = {r = 0.50, g = 0.44, b = 0.30}, -- doubled 2026-09-19 with groundSeen cubed,
 		-- the transmitted light through a leaf, over Lambert through its
 		-- colour ([PBR_FIT] 3b, canopy_dawn)
