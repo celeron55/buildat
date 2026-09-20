@@ -10,6 +10,9 @@ here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 SEED="${SEED:-5}"
 GAME="${GAME:-mineclone2}"
+# The client's render mode: pbr, shadows or unlit ([STAIR_DARK]'s
+# discriminator is the same stair in shadows against pbr)
+MODE="${MODE:-pbr}"
 out="$here/local/diglight"
 mkdir -p "$out"
 save="buildat_test_diglight"
@@ -37,16 +40,25 @@ event scan_volume 4 t15 light
 delay 55000
 event scan
 event scan_volume 4 t70 light
-delay 45000
+look_dir 1 -0.5 0
+delay 1500
+screenshot $out/stair_${MODE}_t70.png
+delay 43000
 event scan
 event scan_volume 4 t115 light
 delay 20000
 event scan
 event scan_volume 4 t135 light
+look_dir -1 0.3 0
+delay 1500
+screenshot $out/stair_${MODE}_bottom.png
+look_dir 1 -0.3 0
+delay 1500
+screenshot $out/stair_${MODE}_down.png
 delay 2000
 quit
 CMDS
-bin/buildat -s localhost:29777 -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
+BUILDAT_LUANTI_PBR="$MODE" bin/buildat -s localhost:29777 -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
 	-c @"$out/cmds.txt" 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
 sleep 2
 kill -INT "$srv" 2>/dev/null

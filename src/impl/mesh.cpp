@@ -597,6 +597,8 @@ static bool occludes_sky(VoxelVolume &volume,
 // gate the sun by the nibble (a cave) without the shade taking the sun off
 // a lit wall in a trench, which one number cannot help doing. See
 // [PBR_FIT] 2c.
+static const float SHADE_FLOOR = 0.3f;
+
 static float sky_alpha(float sky_f, float shade, bool packed)
 {
 	if(!packed)
@@ -933,7 +935,21 @@ static void face_vertex_colors(VoxelVolume &volume,
 		int occluders = (s1 && s2) ? 3 : (s1 ? 1 : 0) + (s2 ? 1 : 0) +
 				(occludes(volume, voxel_reg, fmt, front_p + du + dv) ? 1 : 0);
 		float ao = (PBR_MODE ? AO_LEVELS_PBR : AO_LEVELS)[occluders];
-		float sky_shade = ao * hemi * terrain * FACE_SHADE[face_id];
+		// The shade -- corners, rays, terrain cap -- multiplies the flood's
+		// nibble, and in a one-wide shaft the rays and the cap are nought:
+		// a wall the flood says sees 11 of 15 drew black, in both paths
+		// ([STAIR_DARK], drive/5 2026-09-20). The nibble already carries an
+		// interior's enclosure (one level a node), so the shade is floored
+		// under it: a shaft's walls read nibble x 0.3, lit at the lip,
+		// dimming with the flood, black at 0; the fitted probes stand
+		// (pit_dirt's 0.55 x 0.63 = 0.35 is above the floor). simplified:
+		// a constant, so a three-deep pit and a thirty-deep shaft get the
+		// same floor and the double count stays; the principled version
+		// takes the rays and the cap only at or above the column's surface.
+		float enclosure = ao * hemi * terrain;
+		if(enclosure < SHADE_FLOOR)
+			enclosure = SHADE_FLOOR;
+		float sky_shade = enclosure * FACE_SHADE[face_id];
 		float bounce_shade = (1.0f - BOUNCE_AO + BOUNCE_AO * ao) *
 				FACE_SHADE[face_id] * (1.0f - sky_f);
 		// A lamp is shaded by the corner it sits in and the face, not by
