@@ -165,8 +165,8 @@ smoke_test_wine() {
 	local cli=$!
 	wait_for_line "$dir/cli.log" "$cli" "Command sequence complete" 180 || true
 	sleep 5
-	kill -9 "$cli" 2>/dev/null; wait "$cli" 2>/dev/null || true
-	kill -INT "$srv" 2>/dev/null; sleep 3; kill -9 "$srv" 2>/dev/null
+	kill -9 "$cli" 2>/dev/null || true; wait "$cli" 2>/dev/null || true
+	kill -INT "$srv" 2>/dev/null || true; sleep 3; kill -9 "$srv" 2>/dev/null || true
 	wait "$srv" 2>/dev/null || true
 	"$wine"server -k 2>/dev/null || true
 	[ -n "$xvfb_pid" ] && kill "$xvfb_pid" 2>/dev/null
@@ -295,7 +295,7 @@ read_crash() {
 	local log="$1" frame
 	if grep -q "Unhandled page fault\|Unhandled exception" "$log"; then
 		echo "the client crashed; the report:" >&2
-		grep -A12 "Unhandled page fault\|Unhandled exception" "$log" | head -40 >&2
+		grep -B8 -A20 "Unhandled page fault\|Unhandled exception" "$log" | head -60 >&2
 		frame=$(grep -m1 "^=>0 " "$log" || true)
 		if [ -z "$frame" ]; then
 			echo "the client crashed and left no backtrace" >&2
@@ -361,12 +361,12 @@ smoke_test() {
 	printf 'delay 25000\nscreenshot %s/shot.png\nquit\n' "$dir" > "$dir/cmds.txt"
 	# Software GL where there is no GPU (the container); harmless with one
 	(cd "$unpacked" && LIBGL_ALWAYS_SOFTWARE=1 timeout 120 bin/buildat -s "localhost:$port" -w 640x360 -l 3 -c @"$dir/cmds.txt" > "$dir/cli.log" 2>&1) || true
-	kill -INT "$srv" 2>/dev/null
+	kill -INT "$srv" 2>/dev/null || true
 	for i in $(seq 1 30); do
 		kill -0 "$srv" 2>/dev/null || break
 		sleep 1
 	done
-	kill -9 "$srv" 2>/dev/null; wait "$srv" 2>/dev/null || true
+	kill -9 "$srv" 2>/dev/null || true; wait "$srv" 2>/dev/null || true
 	if [ ! -f "$dir/shot.png" ]; then
 		echo "smoke test: no screenshot; see $dir/cli.log and $dir/srv.log" >&2
 		exit 1
