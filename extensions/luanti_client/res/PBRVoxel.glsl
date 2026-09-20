@@ -383,8 +383,14 @@ void VS()
             // the level, one node at the lamp's own face.
             float lampLevel = isPacked ? iColor.r / max(iColor.b, 0.05) : 0.0;
             float lampDist = max(15.0 - 15.0 * lampLevel, 1.0);
+            // And nothing at a level of nought: the inverse square alone
+            // left a lamp's 1/225 on every face in the world, a floor
+            // five times the moonlight that lit the 02:00 snow field like
+            // an afternoon once the lamp term reached the shader
+            // ([PBR_FIT], 2026-09-20)
             vec3 baked = isPacked ?
-                cLampLight * iColor.b / (lampDist * lampDist) : iColor.rgb;
+                cLampLight * iColor.b * step(0.03, lampLevel) /
+                    (lampDist * lampDist) : iColor.rgb;
             float shade = isPacked ? iColor.b : 1.0;
             // The ground a wall faces is lit or it is not, and the base
             // pass has no shadow map to say which; what it has is how
