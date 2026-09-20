@@ -149,6 +149,8 @@ sky_horizon_1300|vp1_1300|60x20+1100+225|vp1 just over the sea, away from the su
 sky_glow_0545|vp2_0545|60x40+600+30|vp2 the dawn glow, 05:45, mid-gradient toward the disc
 sky_horizon_0545|vp1_0545|60x20+1100+225|vp1 the horizon opposite the dawn
 sky_night_0200|vp5_0200|60x40+20+20|vp5 away from the moon, 02:00
+night_snow_lit|vp5_0200|160x40+320+600|vp5 02:00 the moonlit snow field ([NIGHT_LIGHT]'s ladder crop; 77 of 255 at moon x3)
+night_cave_wall|vp4_2030|50x50+811+460|vp4 20:30 the cave wall the moon does not reach
 "
 # The ratios, from the crops' names. kind: lum -- luminance over luminance;
 # rgb -- per channel; sat -- max over min channel of one crop; hue -- R/B
@@ -160,6 +162,7 @@ contrast_dirt|lum|lit_dirt|open_shade_dirt|sun over sky-only, the open case the 
 contrast_dirt_pit|lum|lit_dirt|pit_dirt|a deep shadow hemmed in on three sides: occlusion and bounce
 incidence_dirt|lum|dirt_side_lit|dirt_side_camera|the face-shade table and the sun's direction
 contrast_snow|lum|snow_sun|snow_shade|at the top of the range
+night_range|lum|night_snow_lit|night_cave_wall|moonlit snow over a dark wall: the night's range
 contrast_cave|lum|sun_step|deep_wall|the sun reaching into the cave
 cave_wall_near|lum|near_wall|deep_wall|the interior's falloff
 cave_opening|lum|sky_mouth|deep_wall|the range across the mouth the meter spans
