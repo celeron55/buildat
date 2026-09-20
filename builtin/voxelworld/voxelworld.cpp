@@ -3490,10 +3490,16 @@ struct CInstance: public voxelworld::Instance
 	// relight goes on where it was; the two write the same voxels and the
 	// relight's pass, which takes light out and lets it back in, settles
 	// whatever they disagree on.
+	// Only a handful of seeds -- a player's dig or placement; a relight's
+	// pass seeds a section by the ten thousand into the same queue, and
+	// those are the sliced flood's to take under its budget, not this
+	// one's to run at once (a probe cycle stalled on it, 2026-09-20).
+	static const size_t NOW_SEEDS_MAX = 256;
 	void update_skylight_now()
 	{
 		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
-			if(m_light_seeds[f].empty())
+			if(m_light_seeds[f].empty() ||
+					m_light_seeds[f].size() > NOW_SEEDS_MAX)
 				continue;
 			FloodState paused;
 			paused.active = m_flood[f].active;
