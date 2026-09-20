@@ -81,14 +81,46 @@ local function button_menu_nav(root)
 		return self
 	end
 
+	-- A grid rather than a row or a column: up and down move by this many
+	-- items, left and right by one ([LAUNCH_GRID])
+	local columns = 1
+	function nav:set_columns(n)
+		columns = math.max(1, math.floor(n or 1))
+		return self
+	end
+
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 		local key = event_data:GetInt("Key")
+		-- A text field on the same screen owns the keys that are text: Enter
+		-- finishes the line being typed and left and right move the caret.
+		-- Without this a filter box beside a list cannot be used at all --
+		-- Enter in it also presses whichever button is selected under it,
+		-- which opens something instead of filtering.
+		--
+		-- **Whether anything has the focus is not the question.** The stack
+		-- gives its own root the focus as it pushes it -- see
+		-- UIStack:push() -- and a Button takes it when it is clicked, so
+		-- something always has it and asking that turned the arrows and
+		-- Enter off on every menu in the tree, this client's own first
+		-- screen included. What stands the menu down is the focus being in
+		-- a field that is being typed into.
+		local focus = magic.ui.focusElement
+		if focus ~= nil and focus:GetTypeName() == "LineEdit" then
+			if on_other_key then
+				on_other_key(key)
+			end
+			return
+		end
 		-- Left and right as well as up and down, because a menu can be a row
 		-- as well as a column and a player should not have to know which
-		if key == KEY_UP or key == KEY_LEFT then
+		if key == KEY_LEFT then
 			select_i(selected - 1)
-		elseif key == KEY_DOWN or key == KEY_RIGHT then
+		elseif key == KEY_RIGHT then
 			select_i(selected + 1)
+		elseif key == KEY_UP then
+			select_i(selected - columns)
+		elseif key == KEY_DOWN then
+			select_i(selected + columns)
 		elseif key == KEY_RETURN or key == KEY_RETURN2 or key == KEY_KP_ENTER then
 			if magic.input:GetKeyPress(key) and items[selected] then
 				items[selected].action()
@@ -96,6 +128,18 @@ local function button_menu_nav(root)
 		elseif on_other_key then
 			on_other_key(key)
 		end
+	end)
+
+	-- The wheel moves the selection a row at a time, and the menu's
+	-- on_change scrolls it into view; clamped rather than wrapped, so a
+	-- wheel past the end stops on the last item, which is how a partial
+	-- last row is reached ([LAUNCH_GRID])
+	root:SubscribeToStackEvent("MouseWheel", function(event_type, event_data)
+		if #items == 0 then
+			return
+		end
+		local i = selected - event_data:GetInt("Wheel") * columns
+		select_i(math.max(1, math.min(#items, i)))
 	end)
 
 	return nav
@@ -178,6 +222,48 @@ function M.safe.vertical_menu(root, options)
 	end
 
 	return menu
+end
+
+-- A list too long for the screen, a page at a time.
+--
+-- The items are the menu's own buttons, so the keyboard walks them like any
+-- others, and the page buttons ask the caller to draw the menu again --
+-- because what else is on the menu is the caller's business, and rebuilding
+-- it is what every menu in this tree already does when its contents change.
+--
+--   ui_utils.add_paged(menu, items, {
+--       page = page, per_page = 12,
+--       redraw = function(new_page) ... end,
+--   })
+--
+-- items are {label = , action = } or {label, action}. Returns how many
+-- pages there are and which one was drawn.
+function M.safe.add_paged(menu, items, options)
+	options = options or {}
+	local per_page = math.max(1, options.per_page or 12)
+	local pages = math.max(1, math.ceil(#items / per_page))
+	local page = math.max(1, math.min(options.page or 1, pages))
+	local first = (page - 1) * per_page + 1
+	local last = math.min(#items, first + per_page - 1)
+	for i = first, last do
+		local item = items[i]
+		menu:add(item.label or item[1], item.action or item[2])
+	end
+	if pages > 1 and options.redraw then
+		-- Which way round: the list is newest first everywhere this is
+		-- used, so the next page is older
+		if page > 1 then
+			menu:add((options.prev_label or "^ newer") ..
+					"   (page " .. (page - 1) .. " of " .. pages .. ")",
+					function() options.redraw(page - 1) end)
+		end
+		if page < pages then
+			menu:add((options.next_label or "v older") ..
+					"   (page " .. (page + 1) .. " of " .. pages .. ")",
+					function() options.redraw(page + 1) end)
+		end
+	end
+	return pages, page
 end
 
 local message_handle = nil

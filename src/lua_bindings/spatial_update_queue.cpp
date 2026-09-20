@@ -10,7 +10,7 @@
 #define MODULE "lua_bindings"
 
 #define DEF_METHOD(name){ \
-		lua_pushcfunction(L, l_##name); \
+		lua_pushcfunction(L, guarded<l_##name>); \
 		lua_setfield(L, -2, #name); \
 }
 
@@ -206,6 +206,14 @@ struct SpatialUpdateQueue
 	{
 		return m_queue.size();
 	}
+
+	// True while a move of the reference point has the items waiting to be
+	// re-put, spread over frames by update(): the head of m_queue says
+	// nothing about what is due until this is false
+	bool is_sorting()
+	{
+		return !m_old_queue.empty();
+	}
 };
 
 // The queue decides the order chunks are meshed in, and a silent ordering or
@@ -353,6 +361,11 @@ struct LuaSUQ
 		lua_pushnumber(L, v);
 		return 1;
 	}
+	static int l_is_sorting(lua_State *L){
+		LuaSUQ *o = internal_checkobject(L, 1);
+		lua_pushboolean(L, o->internal.is_sorting());
+		return 1;
+	}
 	static int l_get_length(lua_State *L){
 		LuaSUQ *o = internal_checkobject(L, 1);
 		int l = o->internal.get_length();
@@ -402,6 +415,7 @@ struct LuaSUQ
 		DEF_METHOD(peek_next_f);
 		DEF_METHOD(peek_next_fw);
 		DEF_METHOD(get_length);
+		DEF_METHOD(is_sorting);
 
 		// drop method_table_L
 		lua_pop(L, 1);
@@ -416,7 +430,7 @@ static int l_SpatialUpdateQueue(lua_State *L)
 void init_spatial_update_queue(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
-		lua_pushcfunction(L, l_##name); \
+		lua_pushcfunction(L, guarded<l_##name>); \
 		lua_setglobal(L, "__buildat_" #name); \
 }
 	self_check();

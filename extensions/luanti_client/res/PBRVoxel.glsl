@@ -13,6 +13,12 @@
 // across by hand; a number that decides how something looks is not. What
 // differs today, and why:
 //
+//   cSkyLight, cSkyTint, cSkyTintAmount
+//                       VOXELSKYTINT only, which is builtin/luanti's own
+//                       client: the brightness of the sky's contribution and
+//                       a hue to move the cube map towards, in place of
+//                       cSkyColor. See the uniforms below for why they are
+//                       two knobs rather than one.
 //   cSkyColor           Only here. The colour the sky is at this moment, which
 //                       the client pushes so that reflections follow the sky
 //                       it paints without a cube map being rebaked.
@@ -22,10 +28,6 @@
 //                       around the light or it reads as glitter over a field.
 //                       voxel_lighting's few surfaces are sparsely spotted and
 //                       a wide turn is what makes them catch anything at all.
-//   TRANSMISSION_FOCUS  A thirty-second power here against a sixth there, for
-//                       the same reason: a canopy of Luanti leaves glowing
-//                       over a quarter of the sky stops reading as the sun
-//                       behind it.
 //   spotGloss           Ramped on sharply here, linear there. With plants this
 //                       dense, the half open cells -- most of them at any
 //                       moment -- are a sheen that follows the light.
@@ -104,6 +106,81 @@
 #include "IBL.glsl"
 #line 30010
 
+// Light bounced off the surroundings, in the same units as the zone's
+// ambient, reaching a surface in proportion to how much sky it does not
+// see: the second term of the ambient ([PBR_FIT] term 2), so that a cave
+// is lit by the day outside it rather than black, and by nothing at
+// night. The client sets it with the hour; unset it reads as zero and the
+// shader is what it was. The mesher's own bounce (0.055, the lamps' unit)
+// stays in the vertex colour beside it and is small in these units.
+// simplified: no hemisphere weighting -- a vertical face in the open gets
+// no ground bounce, since its sky visibility is one. The upgrade is a
+// ground radiance times (1 - n.y) / 2 on top, once the render says how much.
+uniform vec3 cBounceLight;
+// What a lamp at full is on the packed path, in the ambient's units: the
+// mesher's lamp nibble is display white at full (LAMP_COLOR), which is no
+// radiance. Set by voxel_shading.set_lamp_light(); the plain path's vertex
+// rgb is already the light and does not read this.
+uniform vec3 cLampLight;
+// The transmitted light's level ([PBR_FIT] 3b); 1.0 is Lambert through
+// the leaf's colour squared
+uniform float cTranslucencyGain;
+// And the ground: what the lower hemisphere of a face outdoors sees, the
+// radiance of sunlit and sky-lit ground, which a vertical face gets half
+// of and a ceiling all of. In the ambient's units, set by the client from
+// the sun and the sky of the hour times the ground's albedo; the warm
+// bounce that the path trace's second bounce puts on a terrace's side.
+// Scaled by the shaped skylight so a cave's ceiling does not see a sunlit
+// field through the rock.
+uniform vec3 cGroundLight;
+// Whether the vertex alpha is packed: the skylight nibble in its high four
+// bits, the shade (occlusion, rays, terrain, face) in its low four -- what
+// the mesher writes for a client that hands it a horizon map. Then the sun's
+// gate reads the nibble alone and the sky's share the product, and a lit
+// wall in a trench keeps its sun. Unset (0), the alpha is nibble times shade
+// as it always was. Set per material by voxel_shading.set_packed_sky() --
+// a render path parameter did not reach this vertex stage. See [PBR_FIT] 2c.
+uniform float cPackedSky;
+// The shadow-kind diagnostic: the vertex colour drawn as it is, no albedo,
+// no ambient -- the mesher has put one occlusion term in each channel
+// (BUILDAT_LUANTI_SHADOW_KINDS). Set per material by
+// voxel_shading.set_shadow_kinds(). Unset reads as 0.
+uniform float cShadowKinds;
+
+// (gate, share): the nibble the sun is gated by and the sky share the
+// ambient is scaled by, out of the vertex alpha in either layout
+vec2 SkyOfAlpha(float a)
+{
+    if (cPackedSky > 0.5)
+    {
+        // "packed" is a reserved word in GLSL, hence the name
+        float bits = floor(a * 255.0 + 0.5);
+        float hi = floor(bits / 16.0);
+        float lo = bits - hi * 16.0;
+        // The low nibble is a product -- corner table, hemisphere rays,
+        // terrain cap, face shade, in sixteen levels -- and nothing shapes
+        // it here: a power on it deepened all four at once, the deep ones
+        // most, and banded the dark end ([SHADE_NIBBLE]). Occlusion is
+        // fitted per factor in the mesher, on the pbr path.
+        // The share: the geometric terms (the low nibble -- corners,
+        // rays, cap) times the flood's nibble squared. The nibble is the
+        // one term that carries depth into a cave or a bore -- a level a
+        // node from the opening -- and the geometric terms do not: with
+        // the nibble out, a bore's walls read one level the whole way
+        // down where the render ramps them 13-18 times to the back
+        // ([INTERIOR_FALLOFF]'s six crops, 2026-09-20: cave_falloff
+        // render 0.056 against 0.85, bore_falloff 0.075 against 1.25).
+        // Cubed, fitted to the ramps: linear read the back of the bore
+        // at 62 times the render, squared at 10, the cubed one is the
+        // reading in the plan; at the surface the nibble is 15 and the
+        // geometric terms stand alone, which is the underground rule
+        // without a test for the surface.
+        float sky = hi / 15.0;
+        return vec2(sky, lo / 15.0 * sky * sky * sky);
+    }
+    return vec2(a, a);
+}
+
 #if defined(NORMALMAP)
     varying vec4 vTexCoord;
     varying vec4 vTangent;
@@ -136,6 +213,11 @@ varying vec4 vWorldPos;
     #endif
 #else
     varying vec3 vVertexLight;
+    // The sky's part of the ambient, kept apart from the rest so the pixel
+    // shader can scale it by the sky-visibility cube over the normal's
+    // hemisphere -- the terrain's own occlusion, which the skylight nibble
+    // (column light) does not carry. See [PBR_FIT] 2c, the terrain scale.
+    varying vec3 vSkyAmbient;
     // How much of the sky this vertex sees, ambient occlusion included; the
     // alpha the mesher packed into the vertex color
     varying float vSkyVisibility;
@@ -146,6 +228,49 @@ varying vec4 vWorldPos;
     #if defined(LIGHTMAP) || defined(AO)
         varying vec2 vTexCoord2;
     #endif
+#endif
+
+// **What the skylight nibble is allowed to say**, for the client that turns
+// this on. On the PBR path the sun is a real light with a shadow map, and
+// the shadow map is what darkens what is under a tree -- so node lighting is
+// left to answer the one question a shadow map cannot, "am I underground",
+// and nothing else. The curve holds at full until the light has fallen far
+// enough that it can only be rock overhead, and then drops away: a canopy
+// reads 11..14 of 15 and stays fully lit, a cave reads 0..2 and goes dark,
+// and a doorway is the band between.
+//
+// extensions/luanti_client shapes the same nibble in its own block copy,
+// with the same knee -- see PBR_LIGHT_MAP in its world.lua, whose comment
+// says what the knee is for: *raise it and overhangs start being darkened
+// twice, once here and once by the shadow map.* That double is exactly what
+// this is here to stop; see [AMBIENT_LEVEL] in doc/plan/rendering_plan.md.
+//
+// Behind VOXELSKYCURVE because the extension has already applied it before
+// the mesher sees the value and must not apply it again.
+#ifdef VOXELSKYCURVE
+    // The knee sits low now: the mesher folds the face's hemisphere
+    // visibility into the alpha beside the nibble ([PBR_FIT] 2c), so a lit
+    // wall in a trench reads a third and must keep its sun; rock still
+    // reads nothing and a cave wall under a nibble of two reads under a
+    // tenth. What is lost is the dapple under a canopy, whose floor now
+    // reads under the knee and is dark twice, once here and once by the
+    // shadow map, which was shadowing it anyway.
+    // Back at the nibble's own knee: with the alpha packed the gate reads
+    // the nibble alone, and the shade cannot pull a lit wall under it.
+    const float SKY_KNEE_LOW = 2.0 / 15.0;
+    const float SKY_KNEE_HIGH = 11.0 / 15.0;
+
+    float ShapeSkylight(float sky)
+    {
+        float t = clamp((sky - SKY_KNEE_LOW) /
+            (SKY_KNEE_HIGH - SKY_KNEE_LOW), 0.0, 1.0);
+        return t * t * (3.0 - 2.0 * t);
+    }
+#else
+    float ShapeSkylight(float sky)
+    {
+        return sky;
+    }
 #endif
 
 void VS()
@@ -177,7 +302,7 @@ void VS()
         vec4 projWorldPos = vec4(worldPos, 1.0);
 
         #ifdef VOXELSUNGATE
-            vSkyVisibility = iColor.a;
+            vSkyVisibility = ShapeSkylight(SkyOfAlpha(iColor.a).x);
         #endif
 
         #ifdef SHADOW
@@ -200,12 +325,95 @@ void VS()
             // If using lightmap, disregard zone ambient light
             // If using AO, calculate ambient in the PS
             vVertexLight = vec3(0.0, 0.0, 0.0);
+            vSkyAmbient = vec3(0.0, 0.0, 0.0);
             vTexCoord2 = iTexCoord1;
         #else
-            vVertexLight = GetAmbient(GetZonePos(worldPos)) * iColor.a +
-                iColor.rgb;
+            // The sky's share is the nibble as it is, not the shaped one:
+            // the knee is for the sun, whose shadow map already darkens a
+            // canopy's floor; the sky is not in the shadow map, and a face
+            // under leaves does see less of it -- 11..14 of 15 is what
+            // Luanti says it sees. The render's canopy-shaded snow reads
+            // 0.6 of open shade ([PBR_FIT] term 2). The bounce keeps the
+            // shaped value: a canopy is not a cave.
+            // The sky's share by how much of the hemisphere is sky: all
+            // of it for a floor, half for a wall, none for a ceiling --
+            // the other half is the ground's, below. The nibble alone gave
+            // a wall the whole dome, and a dirt side in a block's shadow
+            // read 2.7 times the render's ([PBR_FIT], contrast_dirt).
+            // 0.8 for a wall, over the hemisphere's half: the 0.35 that
+            // stood here was fitted to the pit beside vp1's stone block, a
+            // shadow hemmed in on three sides, and left every open shadow
+            // 2.3 times too dark (contrast_dirt on the cliff top: render
+            // 2.76, pbr 6.26). The open shadow is the ambient's target and
+            // the pit is occlusion's ([PBR_FIT], user 2026-09-18).
+            vec2 sky = SkyOfAlpha(iColor.a);
+            vSkyAmbient = GetAmbient(GetZonePos(worldPos)) * sky.y *
+                    (1.0 - 0.15 * max(vNormal.y, 0.0));
+            // The bounce falls off into a cave with the daylight Luanti
+            // propagates, a level a node from the mouth, over a floor of
+            // half: the render's cave is lit near the mouth and dark deep
+            // in, and (1 - shaped) alone lit the whole interior one
+            // uniform grey ([PBR_FIT], contrast_cave). The floor is what
+            // the daylight cannot carry -- fifteen nodes and it is gone,
+            // the render's second bounce is not -- and is [PBRI]'s to
+            // replace. Zero in the open, where the ground term is the
+            // bounce.
+            // The mesher's shade -- corner table, hemisphere rays, terrain
+            // -- on the bounce and the ground as well as on the sky: with
+            // it on the ambient alone, the pit beside vp1's stone block
+            // read 2.2 times the render's off the ground term, and the
+            // shadow-kind run showed the corners computed and lost here
+            // ([PBR_FIT] 2c). With the alpha packed the shade is the low
+            // nibble, which is sky.y over sky.x; unpacked the two are one.
+            // Packed, the rgb is the lamp in r, the terrain cap in g and
+            // the local shade in b (the mesher's face_vertex_colors()):
+            // the bounce and the ground take the local shade alone, since
+            // the mountain behind the ridge does not block the lit ground
+            // in front of a face, and a cave wall under a terrain cap of
+            // zero still bounces. Unpacked the rgb is the light itself and
+            // the shade is one.
+            bool isPacked = cPackedSky > 0.5;
+            // The lamp's falloff computed from the nibble, not stepped
+            // with it: Luanti's lamp light drops one level a node, and
+            // fourteen levels at full lit vp7's deep wall ten times the
+            // render's from a glowstone five nodes off; the nibble says
+            // where the lamp is and how strong, the inverse square says
+            // the rest ([LAMP_REF], [SHADE_NIBBLE]'s list). The level is
+            // the vertex r over its local shade, the distance fifteen less
+            // the level, one node at the lamp's own face.
+            float lampLevel = isPacked ? iColor.r / max(iColor.b, 0.05) : 0.0;
+            float lampDist = max(15.0 - 15.0 * lampLevel, 1.0);
+            // And nothing at a level of nought: the inverse square alone
+            // left a lamp's 1/225 on every face in the world, a floor
+            // five times the moonlight that lit the 02:00 snow field like
+            // an afternoon once the lamp term reached the shader
+            // ([PBR_FIT], 2026-09-20)
+            vec3 baked = isPacked ?
+                cLampLight * iColor.b * step(0.03, lampLevel) /
+                    (lampDist * lampDist) : iColor.rgb;
+            float shade = isPacked ? iColor.b : 1.0;
+            // The ground a wall faces is lit or it is not, and the base
+            // pass has no shadow map to say which; what it has is how
+            // enclosed the place is -- the local shade and the terrain cap
+            // -- and an enclosed place's ground is in the same shadow. So
+            // the ground term takes their product squared: vp1's pit face
+            // (0.55 local, 0.63 terrain) keeps 0.12 of it and the open
+            // shaded wall on the cliff top (0.65, 0.90) 0.34, which is the
+            // render's 0.27 between them ([PBR_FIT], contrast_dirt_pit).
+            float groundSeen = isPacked ? shade * iColor.g : 1.0;
+            // Cubed, with the ground's albedo doubled beside it ([PBR_FIT]
+            // 3.3, 2026-09-19): the open shaded wall wanted more of the
+            // lit ground and the pit less, and the enclosure's power is
+            // what tells them apart (contrast_dirt 5.0 to 4.1 of the
+            // render's 2.8, contrast_dirt_pit 6.4 to 6.7 of 12)
+            groundSeen *= groundSeen * groundSeen;
+            vVertexLight = cShadowKinds > 0.5 ? iColor.rgb : baked +
+                cBounceLight * (0.15 + 1.0 * sky.x) *
+                    (1.0 - ShapeSkylight(sky.x)) * shade +
+                cGroundLight * (0.5 - 0.5 * vNormal.y) *
+                    ShapeSkylight(sky.x) * groundSeen;
         #endif
-        vSkyVisibility = iColor.a;
+        vSkyVisibility = ShapeSkylight(SkyOfAlpha(iColor.a).x);
 
         #ifdef NUMVERTEXLIGHTS
             for (int i = 0; i < NUMVERTEXLIGHTS; ++i)
@@ -234,21 +442,11 @@ void VS()
     // once. A slow term along the wind direction is added to the phase, which
     // turns what would be an even twinkle into gusts crossing the surface.
 
-    // How much of the sky the camera can see, per direction: a cube of
-    // SKYVIS_CELLS squared values per face, 1 for full sky and 0 for none,
-    // packed four to a vec4 in face, row, column order. The client writes them as one
-    // buffer parameter, which Urho hands to a float array uniform; a cube map
-    // texture would have to be built and uploaded per update instead.
-    //
-    // vec4 rather than a float array so the packing is the same whether or not
-    // the driver lays uniforms out as std140, where an array of float or vec3
-    // pads every element out to four.
-    // Cells per cube face, per axis. Six faces of SKYVIS_CELLS squared values,
-    // packed four to a vec4, so the array is 6*C*C/4 long -- keep the two in
-    // step, and in step with CELLS in the client's module.lua, which fills
-    // them.
-    const int SKYVIS_CELLS = 6;
-    uniform vec4 cSkyVis[54];
+    // The sky visibility cube and its lookup, beside this file. At column
+    // zero because Urho3D's Shader::ProcessSource() only consumes an
+    // #include that starts its line; indented, it reaches the GLSL
+    // compiler as "include not found".
+#include "SkyVis.glsl"
 
     // Multiplies the reflected sky, for looking at the reflections rather
     // than at the scene. 1 is what a game renders; the benchmarks turn it up
@@ -265,6 +463,25 @@ void VS()
     // sky without a cube map being rebaked. Zero when nothing sets it, which
     // is why the client pushes it with the sky.
     uniform vec3 cSkyColor;
+
+    #ifdef VOXELSKYTINT
+        // What builtin/luanti's own client drives instead of cSkyColor: the
+        // brightness of the sky's contribution, and a hue to move the cube
+        // map towards without changing how bright it answers. Behind a
+        // define because **a shader parameter a material never sets reads as
+        // zero**: the techniques in this directory that do not declare it
+        // never see these, so their materials never have to set them.
+        //
+        // The two are not the same knob. cSkyColor multiplies, so a dim sky
+        // dims the reflection and a coloured one colours it together;
+        // cSkyTint keeps the luminance the cube gives and moves only the
+        // hue, with cSkyLight scaling separately. A client that wants a
+        // night that is dark and blue rather than dark and grey wants the
+        // second.
+        uniform float cSkyLight;
+        uniform vec3 cSkyTint;
+        uniform float cSkyTintAmount;
+    #endif
 
     const float TRANSMISSION_CELLS = 16.0;   // Cells per voxel, per axis
     // A material whose own roughness is already below this cannot glint, so
@@ -291,12 +508,6 @@ void VS()
     // light for a moment, and narrowing it takes the speckle off sand and
     // gravel rather than gathering it anywhere.
     const float STATIC_SPOT_TILT = 0.35;
-    // How narrowly the light through a surface is aimed at the camera. Light
-    // coming through a leaf is light going the way it was already going, so it
-    // is seen looking back along it and not from the side: at the width a
-    // sixth power gives, a canopy glows over a quarter of the sky and the glow
-    // stops reading as the sun behind it.
-    const float TRANSMISSION_FOCUS = 32.0;
     const float TRANSMISSION_RATE = 0.03;    // Cycles per second, mean
     const vec3 TRANSMISSION_WIND = vec3(0.35, 0.0, -0.2);
 
@@ -339,64 +550,6 @@ void VS()
         return TransmissionHash(cell + 7.0) < fraction ? 1.0 : 0.0;
     }
 
-    float SkyVisCell(int face, int row, int col)
-    {
-        // "flat" is a reserved word in GLSL, hence the name
-        int cell = (face * SKYVIS_CELLS + row) * SKYVIS_CELLS + col;
-        return cSkyVis[cell / 4][cell - (cell / 4) * 4];
-    }
-
-    // How much sky is visible along dir. The largest component of the
-    // direction picks the cube face and the other two, divided by it, are the
-    // position on that face in -1..1; the client builds a cell's direction the
-    // same way round, so the two agree without either of them following a cube
-    // map face convention. Bilinear between cell centers, clamped at the face
-    // edges the way a cube map with clamped wrapping would be: neighbouring
-    // faces' edge cells look nearly the same way, so the seam does not show.
-    float GetSkyVisibility(vec3 dir)
-    {
-        vec3 a = abs(dir);
-        float m, u, v;
-        int face;
-        if (a.x >= a.y && a.x >= a.z)
-        {
-            m = a.x;
-            face = dir.x >= 0.0 ? 0 : 1;
-            u = dir.y;
-            v = dir.z;
-        }
-        else if (a.y >= a.z)
-        {
-            m = a.y;
-            face = dir.y >= 0.0 ? 2 : 3;
-            u = dir.x;
-            v = dir.z;
-        }
-        else
-        {
-            m = a.z;
-            face = dir.z >= 0.0 ? 4 : 5;
-            u = dir.x;
-            v = dir.y;
-        }
-        m = max(m, M_EPSILON);
-        // Cell centers sit half a cell in from each edge, so the position in
-        // cells is the position across the face times the cell count, less a
-        // half
-        float half_cells = float(SKYVIS_CELLS) * 0.5;
-        float last = float(SKYVIS_CELLS - 1);
-        float fu = clamp((u / m + 1.0) * half_cells - 0.5, 0.0, last);
-        float fv = clamp((v / m + 1.0) * half_cells - 0.5, 0.0, last);
-        int c0 = int(fu);
-        int c1 = min(c0 + 1, SKYVIS_CELLS - 1);
-        int r0 = int(fv);
-        int r1 = min(r0 + 1, SKYVIS_CELLS - 1);
-        float tu = fu - float(c0);
-        return mix(
-            mix(SkyVisCell(face, r0, c0), SkyVisCell(face, r0, c1), tu),
-            mix(SkyVisCell(face, r1, c0), SkyVisCell(face, r1, c1), tu),
-            fv - float(r0));
-    }
 
     float GetSurfaceSpots(vec3 worldPos, float openFraction)
     {
@@ -433,6 +586,14 @@ void PS()
             if (diffInput.a < 0.5)
                 discard;
         #endif
+        // The atlas is a game's textures as they come, display-encoded, and
+        // this path lights in linear and encodes once at the end: read as
+        // linear, an sRGB texel is an albedo a third too bright and half
+        // as saturated -- grass read max/min 1.7 against the render's 3.9
+        // off the same PNG, which Cycles decodes ([PBR_FIT]). Decoded here.
+        // simplified: 2.2, not the sRGB curve; the difference is under the
+        // texel's own quantisation.
+        diffInput.rgb = pow(diffInput.rgb, vec3(2.2));
         vec4 diffColor = cMatDiffColor * diffInput;
     #else
         vec4 diffColor = cMatDiffColor;
@@ -518,8 +679,13 @@ void PS()
     roughness = clamp(roughness, ROUGHNESS_FLOOR, 1.0);
     metalness = clamp(metalness, METALNESS_FLOOR, 1.0);
 
-    vec3 specColor = mix(0.08 * specStrength * cMatSpecColor.rgb,
-        diffColor.rgb, metalness);
+    // The spec map's strength alone, 0.08 at full as Principled's specular
+    // level has it: not times cMatSpecColor, which no voxel material sets
+    // and which Urho3D defaults to black -- so every dielectric had a
+    // Fresnel of zero and the sun no highlight at all ([PBR_FIT],
+    // sun_glint_grass read a tenth of the render's, and bluish: what was
+    // left was the sky through EnvBRDFApprox's grazing term).
+    vec3 specColor = mix(vec3(0.08 * specStrength), diffColor.rgb, metalness);
     diffColor.rgb = diffColor.rgb - diffColor.rgb * metalness;
 
     // Get normal
@@ -631,51 +797,85 @@ void PS()
             // nothing in rock. Under a tree the sun is at full here and the
             // shadow map does the darkening; in a cave there is no sun to
             // shadow.
-            lightColor *= vSkyVisibility;
+            // ... where the shadow map does not reach. Within its range
+            // the map knows what the flood's nibble cannot: the sun
+            // through a cave's sideways mouth lights the floor at the
+            // player's feet where the nibble has decayed to nothing (vp7's
+            // sun_step, 0.93 in the render against 0 here, [PBR_FIT]
+            // 2026-09-20). Urho's own fade says how far past the range a
+            // fragment is; the gate takes over exactly there.
+            #ifdef SHADOW
+                float beyond = clamp((vWorldPos.w - cShadowDepthFade.z) *
+                        cShadowDepthFade.w, 0.0, 1.0);
+                lightColor *= mix(1.0, vSkyVisibility, beyond);
+            #else
+                lightColor *= vSkyVisibility;
+            #endif
         #endif
 
         vec3 toCamera = normalize(cCameraPosPS - vWorldPos.xyz);
         vec3 lightVec = normalize(lightDir);
         float ndl = clamp((dot(normal, lightVec)), M_EPSILON, 1.0);
 
-        vec3 BRDF = GetBRDF(vWorldPos.xyz, lightDir, lightVec, toCamera, normal, roughness, diffColor.rgb, specColor);
-
-        finalColor.rgb = BRDF * lightColor * (atten * shadow) / M_PI;
+        // The BRDF, written out rather than Urho3D's GetBRDF(): a face lit
+        // by an irradiance E reflects albedo * E * n.l / pi and, on top,
+        // the Cook-Torrance lobe D * F * V * E * n.l -- GGX with its pi,
+        // Schlick's Fresnel on the half vector, Smith's height-correlated
+        // visibility, which carries the 1 / (4 n.l n.v). Urho3D's chain
+        // had a diffuse that fell with the view angle and a second pi over
+        // everything, a Fresnel scaled by an IOR of its own and a
+        // visibility without the 1 / (4 n.l n.v), and it was never compiled
+        // for these materials anyway (SPECULAR needs MatSpecColor set).
+        // What is here is Principled's lobe, which the reference is lit
+        // with ([PBR_FIT], sun_glint_grass). `roughness` is already alpha
+        // (r squared, above).
+        vec3 halfVec = normalize(toCamera + lightVec);
+        float ndh = clamp(dot(normal, halfVec), M_EPSILON, 1.0);
+        float vdh = clamp(dot(toCamera, halfVec), M_EPSILON, 1.0);
+        float ndv = abs(dot(normal, toCamera)) + 1e-5;
+        float alpha = max(roughness, 0.02);
+        float a2 = alpha * alpha;
+        float dd = ndh * ndh * (a2 - 1.0) + 1.0;
+        float D = a2 / (M_PI * dd * dd);
+        vec3 F = specColor + (vec3(1.0) - specColor) * pow(1.0 - vdh, 5.0);
+        float gv = ndl * sqrt(ndv * ndv * (1.0 - a2) + a2);
+        float gl = ndv * sqrt(ndl * ndl * (1.0 - a2) + a2);
+        float V = 0.5 / max(gv + gl, 1e-5);
+        vec3 BRDF = diffColor.rgb * (1.0 / M_PI) + D * F * V;
+        finalColor.rgb = BRDF * lightColor * (atten * shadow);
 
         #if defined(VOXELTRANSLUCENCY) && defined(METALLIC)
-            // Light through the surface from the far side. It needs the light
-            // on the back (atten is zero there, which is why this cannot ride
-            // on it) and the camera roughly opposite the light, which is the
-            // one geometry where a thin surface glows.
+            // Light through the surface from the far side, as a mix that
+            // takes from the reflected light what it passes: a surface of
+            // translucency t reflects (1 - t) of its diffuse and passes t of
+            // the light on its back, Lambert from that side, tinted by the
+            // leaf's colour. Refitted ([PBR_FIT], translucency_canopy;
+            // [NO_SPOTS_REF]) from a term that was added on top of the
+            // lighting, conserved nothing, carried a forward-scatter power
+            // and, for a surface with no spots, passed the light all over
+            // at full strength -- which is what a reference run's NO_SPOTS
+            // switch made of every canopy, so the moon lit the trees at
+            // 02:00 a few hundred times over. The focus is gone: a canopy
+            // seen against the sun is brighter than seen with it by the
+            // back Lambert alone, which is what the render's pair reads.
             //
-            // simplified: not multiplied by shadow. A surface lit from behind
-            // is its own shadow caster, so the shadow map says it is shadowed
-            // and the term would never appear. That also means a leaf in
-            // somebody else's shadow glows; with voxel geometry, where only
-            // the outside of a canopy is meshed at all, that is rare enough to
-            // leave. Sampling the shadow map along the transmission direction
-            // would be the fix.
-            //
-            // The light keeps only part of the surface's color on the way
-            // through. A spot where light comes through a canopy is partly a
-            // gap, which passes the sun unchanged, and partly thin leaf, which
-            // tints it; what a surface transmits is not what it reflects. Using
-            // the albedo raw applies the leaf's green a second time and the
-            // spots come out as saturated as the texture.
-            const float TRANSMISSION_TINT = 0.55;
-            vec3 transmitted = mix(vec3(1.0), diffColor.rgb,
-                TRANSMISSION_TINT);
+            // simplified: not multiplied by shadow -- a surface lit from
+            // behind is its own shadow caster, so the shadow map would say
+            // it is shadowed and the term never appear; a leaf in another's
+            // shadow glows. Sampling the map along the transmission
+            // direction would be the fix.
+            // Tinted by the albedo in full, as the reference's Translucent
+            // BSDF is; mixed toward white the back-lit face read six times
+            // the render's over the front-lit one, since the leaf's green is
+            // a twentieth and white is not.
+            // Tinted by the albedo once, as the render's Translucent BSDF
+            // is: its back-lit canopy's g/r of 3 is the leaf's own, which a
+            // squared tint would make 9 ([PBR_FIT] 3b, 2026-09-19).
+            // cTranslucencyGain is what the fit sets the level with.
             float backNdl = max(0.0, -dot(normal, lightVec));
-            float forward = pow(max(0.0, dot(-lightVec, toCamera)),
-                TRANSMISSION_FOCUS);
-            // A material with no spots at all is translucent all over
-            #ifdef VOXELSPOTS
-                float through = surfaceSrc.a > 0.0 ? surfaceSpots : 1.0;
-            #else
-                float through = 1.0;
-            #endif
-            finalColor.rgb += surfaceSrc.b * through * transmitted *
-                lightColor * (backNdl * forward) / M_PI;
+            float t = surfaceSrc.b;
+            finalColor.rgb = finalColor.rgb * (1.0 - t) +
+                t * cTranslucencyGain * diffColor.rgb * lightColor * backNdl / M_PI;
         #endif
 
         #ifdef AMBIENT
@@ -694,7 +894,31 @@ void PS()
         gl_FragData[3] = vec4(EncodeDepth(vWorldPos.w), 0.0);
     #else
         // Ambient & per-vertex lighting
-        vec3 finalColor = vVertexLight * diffColor.rgb;
+        // The sky's ambient by how much sky there is over this surface's
+        // hemisphere, out of the camera's visibility cube: the normal and
+        // four directions leaning off it. Tried as [PBR_FIT] 2c's step 1
+        // and left behind a define no technique sets: the cube is the
+        // camera's, and a snow field's shadow beside the tree the camera
+        // stood under went three times too dark while the terrace under
+        // the mountain, far off, did not move. Step 2 is a horizon map.
+        #if defined(VOXELIBL) && defined(VOXELSKYCUBEAMBIENT)
+            vec3 skyN = normalize(normal);
+            vec3 skyT = abs(skyN.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+            vec3 skyU = normalize(cross(skyN, skyT));
+            vec3 skyV = cross(skyN, skyU);
+            float skyVis = (GetSkyVisibility(skyN) * 2.0 +
+                GetSkyVisibility(normalize(skyN + skyU)) +
+                GetSkyVisibility(normalize(skyN - skyU)) +
+                GetSkyVisibility(normalize(skyN + skyV)) +
+                GetSkyVisibility(normalize(skyN - skyV))) / 6.0;
+        #else
+            float skyVis = 1.0;
+        #endif
+        if(cShadowKinds > 0.5){
+            gl_FragColor = vec4(vVertexLight, 1.0);
+            return;
+        }
+        vec3 finalColor = (vVertexLight + vSkyAmbient * skyVis) * diffColor.rgb;
         #ifdef AO
             // If using AO, the vertex light ambient is black, calculate occluded ambient here
             finalColor += texture2D(sEmissiveMap, vTexCoord2).rgb * cAmbientColor.rgb * diffColor.rgb;
@@ -725,13 +949,44 @@ void PS()
             // reflects nothing rather than the dark rock that is actually
             // there. Bounced light is in the vertex color if a floor for it is
             // ever wanted.
-            vec3 cube = textureLod(sZoneCubeMap, lookup, mip).rgb *
-                GetSkyVisibility(reflectDir) * cSkyColor;
+            #ifdef VOXELSKYTINT
+                vec3 cube = textureLod(sZoneCubeMap, lookup, mip).rgb *
+                    GetSkyVisibility(reflectDir);
+                if(cSkyTintAmount > 0.0){
+                    float sky_luma = dot(cube, vec3(0.299, 0.587, 0.114));
+                    cube = mix(cube, cSkyTint * sky_luma, cSkyTintAmount);
+                }
+            #else
+                vec3 cube = textureLod(sZoneCubeMap, lookup, mip).rgb *
+                    GetSkyVisibility(reflectDir) * cSkyColor;
+            #endif
             // Scaled by how much sky the surface itself sees as well as by
             // how much is visible along the reflection: the cube map answers
-            // for the direction, the vertex color for the place.
-            finalColor.rgb += cube * EnvBRDFApprox(specColor, roughness, ndv) *
-                vSkyVisibility * cSpecEmphasis;
+            // for the direction, the vertex color for the place. That is
+            // the smooth end. A rough lobe integrates the hemisphere, and
+            // what the hemisphere's sky comes to at this place is what the
+            // diffuse ambient already carries -- the drawn sky's hue at the
+            // hour's level, times the sky share and the normal's slice of
+            // the dome -- so the rough end reflects that. The cube's lowest
+            // mip is not it: it is the drawn sky at full, which at dawn is
+            // forty times the ambient, and it gated nothing by place -- the
+            // visibility cube is the camera's. It put a blue sheen on a
+            // grass top under a mountain five times the render's and was
+            // four fifths of that top's light ([PBR_FIT], terrain_occlusion
+            // by ablation with the key pinned).
+            // Over by 0.35 (a perceptual 0.6): the atlas makes a bright
+            // texel of grass smoother than its node by up to 0.8, so a
+            // matte node has texels at 0.45 here, and a quarter of the
+            // drawn sky's horizon band at dawn is still more than the
+            // ambient. Water at 0.12 and the metals keep the cube.
+            vec3 env = mix(cube * vSkyVisibility, vSkyAmbient,
+                smoothstep(0.05, 0.35, roughness));
+            finalColor.rgb += env * EnvBRDFApprox(specColor, roughness, ndv) *
+                cSpecEmphasis
+            #ifdef VOXELSKYTINT
+                * cSkyLight
+            #endif
+                ;
         #endif
 
         #ifdef ENVCUBEMAP
