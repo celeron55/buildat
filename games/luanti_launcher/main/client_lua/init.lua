@@ -484,10 +484,10 @@ do
 	rp:Append(magic.cache:GetResource("XMLFile",
 			"luanti_client/res/LuantiAutoExposure.xml"))
 	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/BloomHDR.xml"))
-	-- The curve: ACES ([PBR_FIT] term 4, luanti_client/res/LuantiTonemap),
-	-- with Urho's per-channel Uncharted2 kept behind
-	-- BUILDAT_LUANTI_TONEMAP=uncharted2 for the pair
-	local tonemap = buildat.get_env("BUILDAT_LUANTI_TONEMAP") or "aces"
+	-- The curve: Urho's per-channel Uncharted2, picked by the user off the
+	-- pair for its range in caves ([PBR_FIT] term 4, 2026-09-20); ACES
+	-- (luanti_client/res/LuantiTonemap) behind BUILDAT_LUANTI_TONEMAP=aces
+	local tonemap = buildat.get_env("BUILDAT_LUANTI_TONEMAP") or "uncharted2"
 	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/Tonemap.xml"))
 	rp:Append(magic.cache:GetResource("XMLFile",
 			"luanti_client/res/LuantiTonemap.xml"))
