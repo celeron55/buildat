@@ -558,6 +558,7 @@ struct CState: public State, public interface::Server
 	// TODO: Handle properly in reloads (unload by popping from top, then reload
 	//       everything until top)
 	sv_<ss_> m_module_load_order;
+	size_t m_module_count = 0;
 	sv_<sv_<wp_<ModuleContainer>>> m_event_subs;
 	// NOTE: You can make a copy of an sp_<ModuleContainer> and unlock this
 	//       mutex for processing the module asynchronously (just lock mc->mutex)
@@ -841,6 +842,19 @@ struct CState: public State, public interface::Server
 			}
 		}
 
+		// The status line a start is read by ([START_PROGRESS]): the
+		// client's waiting screen tails the log for "STATUS ", and a
+		// shell start reads the same. A cache hit is a "Loading", a
+		// compile a "Compiling", so a first start reads differently.
+		if(m_module_count)
+			log_i(MODULE, "STATUS %s %s (%zu of %zu)",
+					skip_compile ? "Loading" : "Compiling", cs(info.name),
+					m_module_load_order.size() + 1, m_module_count);
+		else
+			log_i(MODULE, "STATUS %s %s (%zu of ?)",
+					skip_compile ? "Loading" : "Compiling", cs(info.name),
+					m_module_load_order.size() + 1);
+
 		m_compiler->include_directories.push_back(m_modules_path);
 		bool build_ok = m_compiler->build(info.name, init_cpp_path, build_dst,
 				extra_cxxflags, extra_ldflags, skip_compile);
@@ -1072,6 +1086,12 @@ struct CState: public State, public interface::Server
 			emit_event(Event("core:module_unloaded",
 					new interface::ModuleUnloadedEvent(module_name)));
 		}
+	}
+
+	void set_module_count(size_t count)
+	{
+		// The loader's list plus what is loaded already (__loader, loader)
+		m_module_count = m_module_load_order.size() + count;
 	}
 
 	ss_ get_modules_path()

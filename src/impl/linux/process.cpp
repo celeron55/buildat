@@ -119,13 +119,14 @@ bool is_running(const Handle &h)
 	if(!h.valid())
 		return false;
 	pid_t pid = (pid_t)h.impl;
+	// Reaped here, or a child that has exited stays a zombie that
+	// kill(pid, 0) still finds: a crashed local server read as running
+	// for as long as the client lived ([START_PROGRESS])
+	if(waitpid(pid, nullptr, WNOHANG) == pid)
+		return false;
 	if(kill(pid, 0) == 0)
 		return true;
-	if(errno == ESRCH){
-		waitpid(pid, nullptr, WNOHANG);
-		return false;
-	}
-	return true;
+	return errno != ESRCH;
 }
 
 void terminate(Handle &h)

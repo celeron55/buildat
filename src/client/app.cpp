@@ -21,6 +21,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <deque>
+#include <fstream>
 #include <c55/getopt.h>
 #include <c55/os.h>
 #include <Application.h>
@@ -520,6 +521,10 @@ static bool valid_game_name(const ss_ &name)
 static interface::process::Handle g_local_server;
 // Port the local server was told to listen on ("" if none was started)
 static ss_ g_local_server_port;
+// The local server's log, tailed for its STATUS lines ([START_PROGRESS])
+static ss_ g_local_server_log;
+static size_t g_local_server_log_offset = 0;
+static ss_ g_local_server_status;
 
 // simplified: A free port is picked by probing; a race with another process
 // grabbing it in between is possible but harmless for a local game (the server
@@ -1086,6 +1091,42 @@ struct CApp: public App, public magic::Application
 		}
 	}
 
+	// When the connection went, if a local server this client started
+	// might be what went with it; see lost_connection() and on_update()
+	int64_t m_lost_connection_us = 0;
+
+	void lost_connection()
+	{
+		if(g_local_server.valid() && !g_local_server_log.empty()){
+			// The socket closes before the process is gone -- a crash
+			// writes its backtrace first -- so the verdict waits a moment
+			m_lost_connection_us = get_timeofday_us();
+			return;
+		}
+		shutdown();
+	}
+
+	void check_lost_connection()
+	{
+		if(m_lost_connection_us == 0)
+			return;
+		if(!interface::process::is_running(g_local_server)){
+			m_lost_connection_us = 0;
+			// The dialog closes the client; the frozen view stays behind
+			// it, and a client with no menu extension loaded gets the
+			// plain shutdown
+			if(run_script_no_sandbox(
+					"local m = require('buildat/extension/launch_menu')\n"
+					"m.show_dead_server('The server exited', "
+					"function() __buildat_disconnect() end)\n"))
+				return;
+			shutdown();
+		} else if(get_timeofday_us() - m_lost_connection_us > 2000000){
+			m_lost_connection_us = 0;
+			shutdown();
+		}
+	}
+
 	bool run_script_no_sandbox(const ss_ &script)
 	{
 		log_v(MODULE, "run_script_no_sandbox():\n%s", cs(script));
@@ -1254,6 +1295,8 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(local_server_ready)
 		DEF_BUILDAT_FUNC(local_server_running)
 		DEF_BUILDAT_FUNC(local_server_port)
+		DEF_BUILDAT_FUNC(local_server_status)
+		DEF_BUILDAT_FUNC(local_server_log_tail)
 		DEF_BUILDAT_FUNC(send_packet);
 		DEF_BUILDAT_FUNC(take_screenshot)
 		DEF_BUILDAT_FUNC(dump_meshes)
@@ -1701,6 +1744,7 @@ struct CApp: public App, public magic::Application
 		/*magic::AutoProfileBlock profiler_block(
 				GetSubsystem<magic::Profiler>(), "App::on_update");*/
 
+		check_lost_connection();
 		if(g_shutdown_signal != 0 && !m_shutdown_signal_handled){
 			m_shutdown_signal_handled = true;
 			// SIGINT leaves a "^C" on the terminal to write past
@@ -2202,6 +2246,11 @@ struct CApp: public App, public magic::Application
 		// a line here is several fprintf calls and log_no_nl leaves one
 		// unfinished on purpose, so two processes appending to one file
 		// splice each other's halves.
+		// And always one ([START_PROGRESS]): a player's client has no
+		// -L, and its server then logged nowhere -- nothing to read after
+		// a failed start, and nothing for the waiting screen to tail.
+		// cache/local_server_<port>.log at info, truncated per start;
+		// the port tells several clients' servers from one tree apart.
 		const ss_ log_file = g_client_config.get<ss_>("log_file");
 		if(!log_file.empty()){
 			// Before the extension of the file name, which is the last dot
@@ -2209,16 +2258,26 @@ struct CApp: public App, public magic::Application
 			// directory and comes out "tmp/v1.2/log_server"
 			const size_t slash = log_file.find_last_of('/');
 			const size_t dot = log_file.find_last_of('.');
-			const ss_ server_log = (dot != ss_::npos &&
+			g_local_server_log = (dot != ss_::npos &&
 					(slash == ss_::npos || dot > slash)) ?
 					log_file.substr(0, dot)+"_server"+log_file.substr(dot) :
 					log_file+"_server";
 			args.push_back("-L");
-			args.push_back(server_log);
+			args.push_back(g_local_server_log);
 			args.push_back("-l");
 			args.push_back(itos(log_get_max_level()));
-			log_i(MODULE, "server log: %s", cs(server_log));
+		} else {
+			g_local_server_log = g_client_config.get<ss_>("cache_path")+
+					"/local_server_"+g_local_server_port+".log";
+			std::ofstream(g_local_server_log, std::ios::trunc);
+			args.push_back("-L");
+			args.push_back(g_local_server_log);
+			args.push_back("-l");
+			args.push_back("3");
 		}
+		g_local_server_log_offset = 0;
+		g_local_server_status.clear();
+		log_i(MODULE, "server log: %s", cs(g_local_server_log));
 		// And whether that server restarts a module when its source
 		// changes, which is off unless this client was asked for it
 		if(g_client_config.get<bool>("reload_modules"))
@@ -2436,6 +2495,58 @@ struct CApp: public App, public magic::Application
 		lua_pushboolean(L, interface::probe_connect("127.0.0.1",
 				g_local_server_port));
 		return 1;
+	}
+
+	// local_server_status() -> string or nil: the last "STATUS ..." line
+	// the local server logged, read from where the last call left off
+	static int l_local_server_status(lua_State *L)
+	{
+		if(g_local_server_log.empty()){
+			lua_pushnil(L);
+			return 1;
+		}
+		std::ifstream f(g_local_server_log, std::ios::binary);
+		if(f.good()){
+			f.seekg(g_local_server_log_offset);
+			ss_ line;
+			while(std::getline(f, line)){
+				g_local_server_log_offset += line.size() + 1;
+				const size_t at = line.find("STATUS ");
+				if(at != ss_::npos)
+					g_local_server_status = line.substr(at + 7);
+			}
+		}
+		if(g_local_server_status.empty())
+			lua_pushnil(L);
+		else
+			lua_pushstring(L, g_local_server_status.c_str());
+		return 1;
+	}
+
+	// local_server_log_tail(lines) -> path, text: the local server's log
+	// file and its last lines, for a dialog about a server that died
+	static int l_local_server_log_tail(lua_State *L)
+	{
+		const int want = luaL_optinteger(L, 1, 20);
+		lua_pushstring(L, g_local_server_log.c_str());
+		std::ifstream f(g_local_server_log, std::ios::binary);
+		std::deque<ss_> lines;
+		ss_ line;
+		while(f.good() && std::getline(f, line)){
+			// The dialog does not wrap, and a file list can be a
+			// thousand characters: the line's start is the part that
+			// says what it was
+			if(line.size() > 160)
+				line = line.substr(0, 157) + "...";
+			lines.push_back(line);
+			if((int)lines.size() > want)
+				lines.pop_front();
+		}
+		ss_ text;
+		for(const ss_ &l : lines)
+			text += l + "\n";
+		lua_pushstring(L, text.c_str());
+		return 2;
 	}
 
 	// local_server_port() -> string

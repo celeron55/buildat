@@ -124,7 +124,7 @@ struct CState: public State
 		m_disconnected = true;
 		log_w(MODULE, "Disconnected from server: %s", cs(reason));
 		if(m_app)
-			m_app->shutdown();
+			m_app->lost_connection();
 	}
 
 	bool connect_host_port(const ss_ &address, const ss_ &port, ss_ *error)

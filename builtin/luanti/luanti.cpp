@@ -7653,6 +7653,9 @@ struct Module: public interface::Module, public luanti::Interface
 
 	void progress(const ss_ &line)
 	{
+		// And the log's status line, which the client's waiting screen
+		// and a shell start read ([START_PROGRESS])
+		log_i(MODULE, "STATUS %s", cs(line));
 		if(m_progress)
 			m_progress(line);
 	}

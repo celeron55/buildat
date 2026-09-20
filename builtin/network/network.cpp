@@ -152,6 +152,7 @@ struct Module: public interface::Module, public network::Interface
 		} else {
 			log_i(MODULE, "Listening at %s:%s, fd=%i", cs(address), cs(port),
 					m_listening_socket->fd());
+			log_i(MODULE, "STATUS Listening");
 		}
 	}
 

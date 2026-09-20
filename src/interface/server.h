@@ -57,6 +57,9 @@ namespace interface
 		virtual void shutdown(int exit_status = 0, const ss_ &reason = "") = 0;
 
 		virtual bool load_module(const interface::ModuleInfo &info) = 0;
+		// How many modules the loader is about to load, for the STATUS
+		// lines a start is followed by ([START_PROGRESS])
+		virtual void set_module_count(size_t count) = 0;
 		virtual void unload_module(const ss_ &module_name) = 0;
 		virtual void reload_module(const interface::ModuleInfo &info) = 0;
 		virtual void reload_module(const ss_ &module_name) = 0;

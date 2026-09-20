@@ -19,6 +19,10 @@ buildat.force_kill_local_server = __buildat_force_kill_local_server
 buildat.local_server_ready = __buildat_local_server_ready
 buildat.local_server_port = __buildat_local_server_port
 buildat.local_server_running = __buildat_local_server_running
+-- The last STATUS line of the local server's log, and its tail for a
+-- dialog about one that died ([START_PROGRESS])
+buildat.local_server_status = __buildat_local_server_status
+buildat.local_server_log_tail = __buildat_local_server_log_tail
 buildat.extension_path    = __buildat_extension_path
 buildat.get_time_us       = __buildat_get_time_us
 buildat.version           = __buildat_version
