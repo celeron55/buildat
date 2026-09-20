@@ -175,7 +175,8 @@ MOON_COLOR = (1.0, 0.86, 0.70)
 # Picked 2026-09-20 off the x1 | x3 | x5 sheet: x3, night_snow_lit at 77
 # of 255 (the plan's 78); see [NIGHT_LIGHT] in the master plan
 MOON_FACTOR = float(os.environ.get("MOON_FACTOR", "3"))
-NIGHT_SKY = float(os.environ.get("NIGHT_SKY", "0"))
+# Picked 2026-09-20 off the 0.00002 | 0.00005 | 0.0002 sheet: 0.0001
+NIGHT_SKY = float(os.environ.get("NIGHT_SKY", "0.0001"))
 NIGHT_SKY_COLOR = (0.6, 0.75, 1.0)
 # HOURS_ONLY=0200,2030 renders only those hours of each viewpoint
 HOURS_ONLY = [h for h in os.environ.get("HOURS_ONLY", "").split(",") if h]
