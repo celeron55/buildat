@@ -3,6 +3,11 @@
 #include "interface/http.h"
 #include "core/log.h"
 #include <curl/curl.h>
+#ifdef _WIN32
+	// curl.h brings windows.h in, and windows.h #defines interface, which
+	// is the namespace below
+	#undef interface
+#endif
 #include <fstream>
 #include <mutex>
 #define MODULE "http"
